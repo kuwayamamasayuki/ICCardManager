@@ -2,6 +2,7 @@
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using ICCardManager.Common;
+using ICCardManager.Data;
 using ICCardManager.Data.Repositories;
 using ICCardManager.Models;
 using ICCardManager.Services;
@@ -22,6 +23,13 @@ public partial class BusStopInputViewModel : ViewModelBase
     private readonly ILedgerRepository _ledgerRepository;
     private readonly ISettingsRepository _settingsRepository;
     private readonly IDialogService _dialogService;
+
+    /// <summary>
+    /// Issue #1945: バス停名（<c>ledger_detail.bus_stops</c>）と摘要（<c>ledger.summary</c>）の
+    /// 書き込みを 1 つのトランザクションに束ねるために保持する（Issue #1806）。
+    /// 分けると、明細だけが確定して摘要が「バス（★）」のまま残る鏡像の不整合を作る。
+    /// </summary>
+    private readonly DbContext _dbContext;
 
     /// <summary>
     /// Issue #1811: 保存前の確認ダイアログに列挙する類似警告の上限件数。
@@ -63,11 +71,13 @@ public partial class BusStopInputViewModel : ViewModelBase
     public BusStopInputViewModel(
         ILedgerRepository ledgerRepository,
         ISettingsRepository settingsRepository,
-        IDialogService dialogService)
+        IDialogService dialogService,
+        DbContext dbContext)
     {
         _ledgerRepository = ledgerRepository;
         _settingsRepository = settingsRepository;
         _dialogService = dialogService;
+        _dbContext = dbContext;
     }
 
     /// <summary>
@@ -490,7 +500,17 @@ public partial class BusStopInputViewModel : ViewModelBase
 
         var itemsByLedgerId = BusUsages.GroupBy(i => i.Detail.LedgerId).ToDictionary(g => g.Key, g => g.ToList());
 
-        var allSuccess = true;
+        // Issue #1945 / #1806: バス停名（ledger_detail.bus_stops）と摘要（ledger.summary）は
+        // 同じ事実を 2 か所に持つため、片方だけ確定すると 6 年保存の台帳が自己矛盾する
+        // （摘要は「バス（天神～博多）」なのに明細は★／その鏡像で明細だけが新しい）。
+        // 摘要の再生成はこの明細から行われるので、次の統合で摘要が古い値へ巻き戻る。
+        // 複数 Ledger をまとめて 1 つのトランザクションで書き、1 件でも失敗したら全部巻き戻す。
+        //
+        // 設定の読み取り（GetAppSettingsAsync）はスコープを開く前に済ませてある。
+        // スコープ内で別のリポジトリが LeaseConnectionAsync を呼ぶと、DbContext のセマフォを
+        // 二重に取って自己デッドロックするため（Issue #1575）。
+        using var scope = await _dbContext.BeginTransactionAsync();
+
         foreach (var ledger in targetLedgers)
         {
             if (itemsByLedgerId.TryGetValue(ledger.Id, out var items))
@@ -500,24 +520,26 @@ public partial class BusStopInputViewModel : ViewModelBase
                     .ToList();
 
                 // Issue #1945: 戻り値を握りつぶさない。履歴詳細の全置換（ReplaceDetailsAsync の
-                // DELETE + INSERT）で rowid が振り直されていると 0 行になるため、ここで止めないと
-                // 摘要だけがバス停名入りで確定し、明細は★のまま残って台帳が自己矛盾する。
-                // 明細 → 摘要の順に書くことで、競合時は摘要へ到達せずに戻れる。
-                var detailsOk = await _ledgerRepository.UpdateDetailBusStopsAsync(ledger.Id, updates);
+                // DELETE + INSERT）で rowid が振り直されていると 0 行になる。
+                var detailsOk = await _ledgerRepository.UpdateDetailBusStopsAsync(
+                    ledger.Id, updates, scope.Transaction);
                 if (!detailsOk)
                 {
+                    // commit せずに抜ける（scope の Dispose で巻き戻る）
                     HasBusStopUpdateConflict = true;
-                    allSuccess = false;
-                    continue;
+                    return false;
                 }
             }
 
             ledger.Summary = summaryGenerator.Generate(ledger.Details);
-            var ok = await _ledgerRepository.UpdateAsync(ledger);
-            if (!ok) allSuccess = false;
+            if (!await _ledgerRepository.UpdateAsync(ledger, scope.Transaction))
+            {
+                return false;
+            }
         }
 
-        return allSuccess;
+        scope.Commit();
+        return true;
     }
 
     /// <summary>

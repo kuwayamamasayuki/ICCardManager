@@ -107,7 +107,16 @@ namespace ICCardManager.Data.Repositories
         /// <returns>
         /// 指定した明細をすべて更新できた場合 true。
         /// 1 件でも影響行数 0（他のパソコンや履歴詳細の全置換で rowid が振り直された等の競合、Issue #1753 / #1806）
-        /// があった場合 false。このとき書き込みはロールバックされ、1 件も反映されない。
+        /// があった場合 false。
+        /// <para>
+        /// false のときに「1 件も反映されない」ことを保証できるのは、本メソッドが自前で
+        /// トランザクションを開いた場合だけである。外側のトランザクションスコープが活性なとき
+        /// （<c>DbContext.HasActiveTransactionScope</c>。これはプロセス全体のカウンタであり、
+        /// 無関係な別フローのスコープでも立つ。Issue #1737）は、そのスコープへ暗黙参加するため
+        /// 先行して適用済みの UPDATE は外側の commit/rollback に従う。
+        /// 巻き戻しを確実にしたい呼び出し元は、<c>SQLiteTransaction</c> を受け取るオーバーロードで
+        /// 自分のトランザクションを明示的に引き渡すこと（Issue #1737 の①）。
+        /// </para>
         /// </returns>
         /// <remarks>
         /// 呼び出し元は戻り値を必ず確認し、false のときは <c>ledger.summary</c> の更新を行わないこと。
@@ -122,6 +131,11 @@ namespace ICCardManager.Data.Repositories
         /// 摘要（<c>ledger.summary</c>）の更新と同一トランザクションで束ねるために使う（Issue #1806）。
         /// commit / rollback は呼び出し元の責務。
         /// </remarks>
+        /// <returns>
+        /// 指定した明細をすべて更新できた場合 true、1 件でも影響行数 0 なら false。
+        /// false を返した時点で先行する明細の UPDATE は渡されたトランザクション上に適用済みのため、
+        /// 呼び出し元は commit せずに巻き戻すこと（commit すると部分更新が確定する）。
+        /// </returns>
         Task<bool> UpdateDetailBusStopsAsync(
             int ledgerId, IEnumerable<(int SequenceNumber, string BusStops)> updates, SQLiteTransaction transaction);
 
