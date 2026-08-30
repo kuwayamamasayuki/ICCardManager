@@ -99,17 +99,57 @@ namespace ICCardManager.Infrastructure.Caching
             };
 
             // キー追跡のためのコールバックを設定
-            options.RegisterPostEvictionCallback((evictedKey, _, _, _) =>
-            {
-                _keys.TryRemove(evictedKey.ToString()!, out _);
-                _logger.LogTrace("キャッシュ期限切れ: {Key}", evictedKey);
-            });
+            options.RegisterPostEvictionCallback(OnPostEviction);
 
             _cache.Set(key, value, options);
             _keys.TryAdd(key, 0);
 
             _logger.LogTrace("キャッシュ設定: {Key} (有効期限: {Seconds}秒)", key, absoluteExpiration.TotalSeconds);
         }
+
+        /// <summary>
+        /// キャッシュエントリが退避されたときに呼ばれ、キー追跡表（<see cref="_keys"/>）を更新する。
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// Issue #1943: <see cref="IMemoryCache"/> はこのコールバックを<b>スレッドプールで実行する</b>ため、
+        /// 呼び出しは退避の契機となった操作より後に着地し得る。したがって理由を見ずに追跡表から削除すると、
+        /// 同じキーへの再 <see cref="Set{T}"/>（<see cref="EvictionReason.Replaced"/>）や
+        /// <see cref="Invalidate"/> 直後の再 <see cref="Set{T}"/>（<see cref="EvictionReason.Removed"/>）で、
+        /// <b>キャッシュには生きているのに追跡表から落ちたキー</b>が生まれる。
+        /// <see cref="InvalidateByPrefix"/> はこの表しか走査しないため、
+        /// 削除済みのカード・職員が TTL いっぱい一覧に残り続ける
+        /// （Issue #1759 が「影響行数 0 のときこそキャッシュを無効化する」で防ごうとした状態）。
+        /// </para>
+        /// <para>
+        /// 判定は「削除する理由」を列挙する側（ホワイトリスト）で書く。未知の理由が増えたとき、
+        /// 削除側の列挙なら「追跡表に残る」＝<see cref="InvalidateByPrefix"/> が空振りの
+        /// <see cref="IMemoryCache.Remove"/> を 1 回多く呼ぶだけで済むが、
+        /// 除外側の列挙（<see cref="EvictionReason.Replaced"/> だけを弾く形）では本欠陥が再発する。
+        /// </para>
+        /// </remarks>
+        internal void OnPostEviction(object evictedKey, object? value, EvictionReason reason, object? state)
+        {
+            // キャッシュ都合で実際にエントリが失われた退避だけを追跡表へ反映する。
+            // Replaced / Removed / None は「同じキーの新しいエントリが生きている」または
+            // 「Invalidate・Clear が同期で追跡表を更新済み」であり、ここで消してはならない。
+            if (reason is not (EvictionReason.Expired or EvictionReason.Capacity or EvictionReason.TokenExpired))
+            {
+                return;
+            }
+
+            _keys.TryRemove(evictedKey.ToString()!, out _);
+            _logger.LogTrace("キャッシュ退避: {Key} (理由: {Reason})", evictedKey, reason);
+        }
+
+        /// <summary>
+        /// 追跡中のキー一覧。
+        /// </summary>
+        /// <remarks>
+        /// <see cref="InvalidateByPrefix"/> はこの表だけを走査するため、
+        /// 「キャッシュには生きているのに表から落ちたキー」を回帰テストで直接表明できるようにしている。
+        /// </remarks>
+        internal IReadOnlyCollection<string> TrackedKeys => _keys.Keys.ToArray();
 
         /// <inheritdoc/>
         public void Invalidate(string key)

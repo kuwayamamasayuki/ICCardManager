@@ -1,5 +1,6 @@
 using FluentAssertions;
 using ICCardManager.Infrastructure.Caching;
+using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Logging.Abstractions;
 using Xunit;
 
@@ -636,6 +637,106 @@ public class CacheServiceTests : IDisposable
         var finalValue = await _sut.GetOrCreateAsync(key, Factory, TimeSpan.FromMinutes(1));
         finalValue.Should().BeGreaterThan(0, "最終的に factory が実行され有効な値が得られる");
         factoryCallCount.Should().BeGreaterThan(0, "少なくとも1回は factory が実行された");
+    }
+
+    #endregion
+
+    #region Issue #1943: PostEvictionCallback の EvictionReason 判別
+
+    // MemoryCache は退避コールバックをスレッドプールで実行するため、同じキーへの再 Set で発火した
+    // 旧エントリの後始末（EvictionReason.Replaced）が、Set 直後のキー追加より後に着地し得る。
+    // 理由を見ずに追跡表から削除すると「キャッシュには生きているのに InvalidateByPrefix が消せないキー」
+    // が生まれる（Issue #1759 が防ごうとした「削除済みの行が一覧に残る」状態）。
+    // 着地の遅れは内部コールバック OnPostEviction を直接呼ぶことで確定的に再現する（スレッドを競争させない）。
+
+    [Fact]
+    public void Issue1943_再Setの遅延コールバックが着地してもキーは追跡表に残ること()
+    {
+        // Arrange: 同じキーへ再 Set（実キャッシュには新しい値が生きている）
+        const string key = "card:all";
+        _sut.Set(key, "v1", TimeSpan.FromMinutes(1));
+        _sut.Set(key, "v2", TimeSpan.FromMinutes(1));
+
+        // Act: 旧エントリの Replaced コールバックが遅れて着地した形
+        _sut.OnPostEviction(key, "v1", EvictionReason.Replaced, null);
+
+        // Assert
+        _sut.TrackedKeys.Should().Contain(key, "再 Set 後のキーはキャッシュに生きている");
+    }
+
+    [Fact]
+    public void Issue1943_再Setの遅延コールバック着地後もInvalidateByPrefixが消せること()
+    {
+        // Arrange
+        const string key = "card:all";
+        _sut.Set(key, "v1", TimeSpan.FromMinutes(1));
+        _sut.Set(key, "v2", TimeSpan.FromMinutes(1));
+        _sut.OnPostEviction(key, "v1", EvictionReason.Replaced, null);
+
+        // Act: CardRepository.InvalidateCardCache と同じ経路
+        _sut.InvalidateByPrefix("card:");
+
+        // Assert
+        _sut.Get<string>(key).Should().BeNull("無効化したキーがキャッシュに残ってはならない");
+    }
+
+    [Fact]
+    public void Issue1943_明示削除の遅延コールバックが後続のSetを取りこぼさないこと()
+    {
+        // Arrange: Invalidate は同期で追跡表からも消すため、Removed のコールバックは後始末済みの重複。
+        // その着地が後続の Set より遅れると、生きているキーを追跡表から落とす。
+        const string key = "staff:all";
+        _sut.Set(key, "v1", TimeSpan.FromMinutes(1));
+        _sut.Invalidate(key);
+        _sut.Set(key, "v2", TimeSpan.FromMinutes(1));
+
+        // Act
+        _sut.OnPostEviction(key, "v1", EvictionReason.Removed, null);
+
+        // Assert
+        _sut.TrackedKeys.Should().Contain(key);
+        _sut.InvalidateByPrefix("staff:");
+        _sut.Get<string>(key).Should().BeNull();
+    }
+
+    // 対の表明: 本当に追い出されたキーは追跡表からも消える（Replaced を除外しただけで
+    // 追跡表が永久に増え続ける形にしない）
+    [Theory]
+    [InlineData(EvictionReason.Expired)]
+    [InlineData(EvictionReason.Capacity)]
+    [InlineData(EvictionReason.TokenExpired)]
+    public void Issue1943_キャッシュ都合の退避では追跡表からも消えること(EvictionReason reason)
+    {
+        // Arrange
+        const string key = "card:all";
+        _sut.Set(key, "v1", TimeSpan.FromMinutes(1));
+
+        // Act
+        _sut.OnPostEviction(key, "v1", reason, null);
+
+        // Assert
+        _sut.TrackedKeys.Should().NotContain(key, "エントリが実際に失われた退避では追跡表も畳む");
+    }
+
+    [Fact]
+    public async Task Issue1943_実際の有効期限切れでも追跡表から消えること()
+    {
+        // 継ぎ目の検証: 登録されたコールバックが OnPostEviction を通っていることを、
+        // 実際の MemoryCache の期限切れ退避で確かめる（内部メソッドの直接呼び出しだけでは
+        // 本番の登録経路が別物へ差し替わっても緑になるため）。
+        const string key = "card:expiring";
+        _sut.Set(key, "v1", TimeSpan.FromMilliseconds(50));
+
+        // Act: 期限切れの検出はアクセス契機で行われるため、ポーリングして着地を待つ
+        var deadline = DateTime.UtcNow.AddSeconds(5);
+        while (DateTime.UtcNow < deadline && _sut.TrackedKeys.Contains(key))
+        {
+            _sut.Get<string>(key);
+            await Task.Delay(20);
+        }
+
+        // Assert
+        _sut.TrackedKeys.Should().NotContain(key);
     }
 
     #endregion
