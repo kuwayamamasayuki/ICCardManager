@@ -35,11 +35,23 @@ public class CardOperationPopulationConventionTests
     /// <summary>正しい形（母集団判定の唯一の手段）。</summary>
     private const string CanonicalMember = "IsInOperation";
 
+    /// <summary>否定された <c>IsDeleted</c> / <c>IsRefunded</c>（<c>!x.IsDeleted</c> / <c>x.IsDeleted == false</c>）。</summary>
+    private const string NegatedFlag =
+        @"(?:!\s*\w+\??\.Is(?:Deleted|Refunded)|\w+\??\.Is(?:Deleted|Refunded)\s*==\s*false)";
+
+    /// <summary>素の <c>IsDeleted</c> / <c>IsRefunded</c>。</summary>
+    private const string PlainFlag = @"\w+\??\.Is(?:Deleted|Refunded)";
+
     /// <summary>
-    /// 禁止された形。<c>!x.IsDeleted &amp;&amp; !x.IsRefunded</c>（順序・空白・レシーバ名は問わない）。
+    /// 禁止された形。<c>!x.IsDeleted &amp;&amp; !x.IsRefunded</c>（順序・空白・レシーバ名は問わない）と、
+    /// その同値な綴り（<c>== false</c> 形・ド・モルガンの <c>!(x.IsDeleted || x.IsRefunded)</c> 形）。
     /// </summary>
+    /// <remarks>
+    /// 綴りを 1 つだけ見張ると、3 つ目の母集団が別の書き方で追加されたときガードを素通りする
+    /// （<c>.claude/rules/development-conventions.md</c> #1786「その性質を破れる全経路を列挙する」）。
+    /// </remarks>
     private static readonly Regex InlinePredicatePattern = new Regex(
-        @"!\s*\w+(\?)?\.Is(Deleted|Refunded)\s*&&\s*!\s*\w+(\?)?\.Is(Deleted|Refunded)",
+        $@"(?:{NegatedFlag}\s*&&\s*{NegatedFlag})|(?:!\s*\(\s*{PlainFlag}\s*\|\|\s*{PlainFlag}\s*\))",
         RegexOptions.Compiled);
 
     /// <summary>
@@ -53,7 +65,10 @@ public class CardOperationPopulationConventionTests
     [InlineData("cards.Where(c => !c.IsDeleted && !c.IsRefunded)", true)]
     [InlineData("cards.Where(card => !card.IsRefunded && !card.IsDeleted)", true)]
     [InlineData("cards.Where(c => !c.IsDeleted  &&  !c.IsRefunded)", true)]
+    [InlineData("cards.Where(c => !(c.IsDeleted || c.IsRefunded))", true)]
+    [InlineData("cards.Where(c => c.IsDeleted == false && c.IsRefunded == false)", true)]
     [InlineData("cards.Where(c => c.IsInOperation)", false)]
+    [InlineData("if (card.IsDeleted || card.IsLent) { }", false)]
     [InlineData("if (!card.IsDeleted) { }", false)]
     [InlineData("if (card.IsLent || card.IsRefunded) { }", false)]
     public void 直書き判定の検出パターンが既知の入力を正しく分類すること(string code, bool expected)

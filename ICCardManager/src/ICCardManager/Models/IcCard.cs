@@ -113,7 +113,7 @@ namespace ICCardManager.Models
         /// <summary>
         /// 貸出可能な状態かどうか（未削除 かつ 未払戻 かつ 未貸出）
         /// </summary>
-        public bool IsAvailableForLending => !IsDeleted && !IsRefunded && !IsLent;
+        public bool IsAvailableForLending => IsInOperation && !IsLent;
 
         /// <summary>
         /// 運用中のカードかどうか（未削除 かつ 未払戻）
