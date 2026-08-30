@@ -1850,6 +1850,22 @@ public partial class MainViewModel : ViewModelBase
     {
         if (card == null) return;
 
+        // Issue #1946: 呼び出し元（HandleCardInStaffWaitingStateAsync）の再判定と本メソッドの抑制取得の間に
+        // await は無いが、抑制中に本メソッドへ到達する経路が将来増えても再入しないための backstop として
+        // ここでも判定する（HandleUnregisteredCardAsync と同じ形）。特定のソースを列挙せず
+        // 「何かが抑制中なら判定しない」で書く（新しいソースの追随漏れを防ぐ）。
+        if (IsCardReadingSuppressed)
+        {
+            return;
+        }
+
+        // Issue #1946: 本メソッドは AppState.WaitingForStaffCard のまま ReadBalanceAsync（実機で数百ミリ秒）を
+        // 待つため、抑制も Processing 状態も無いままでは 2 枚目のタッチが入口ゲートを通過して再入する。
+        // 再入すると下の -= が no-op になり finally の += が 2 回走って Error が二重購読になり、
+        // 以後リーダーエラー 1 件ごとに WarningItem.OccurrenceCount が 2 ずつ増える（Issue #1807 と同型）。
+        // 解放は Dispose（finally 相当）で保証する（Issue #1725 の「解除は finally で保証する」と同じ判断）。
+        using var suppression = BeginCardReadingSuppression(CardReadingSource.BalanceMismatchCheck);
+
         int? actualBalance = null;
 
         // Issue #656 と同じ理由でエラーイベントを一時的に抑制する
