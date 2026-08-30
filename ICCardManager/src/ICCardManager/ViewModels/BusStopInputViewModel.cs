@@ -1,7 +1,8 @@
-using System.Collections.ObjectModel;
+﻿using System.Collections.ObjectModel;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using ICCardManager.Common;
+using ICCardManager.Data;
 using ICCardManager.Data.Repositories;
 using ICCardManager.Models;
 using ICCardManager.Services;
@@ -22,6 +23,13 @@ public partial class BusStopInputViewModel : ViewModelBase
     private readonly ILedgerRepository _ledgerRepository;
     private readonly ISettingsRepository _settingsRepository;
     private readonly IDialogService _dialogService;
+
+    /// <summary>
+    /// Issue #1945: バス停名（<c>ledger_detail.bus_stops</c>）と摘要（<c>ledger.summary</c>）の
+    /// 書き込みを 1 つのトランザクションに束ねるために保持する（Issue #1806）。
+    /// 分けると、明細だけが確定して摘要が「バス（★）」のまま残る鏡像の不整合を作る。
+    /// </summary>
+    private readonly DbContext _dbContext;
 
     /// <summary>
     /// Issue #1811: 保存前の確認ダイアログに列挙する類似警告の上限件数。
@@ -63,11 +71,13 @@ public partial class BusStopInputViewModel : ViewModelBase
     public BusStopInputViewModel(
         ILedgerRepository ledgerRepository,
         ISettingsRepository settingsRepository,
-        IDialogService dialogService)
+        IDialogService dialogService,
+        DbContext dbContext)
     {
         _ledgerRepository = ledgerRepository;
         _settingsRepository = settingsRepository;
         _dialogService = dialogService;
+        _dbContext = dbContext;
     }
 
     /// <summary>
@@ -467,7 +477,7 @@ public partial class BusStopInputViewModel : ViewModelBase
             }
             else
             {
-                StatusMessage = "保存に失敗しました";
+                StatusMessage = HasBusStopUpdateConflict ? BusStopConflictMessage : "保存に失敗しました";
             }
         }
     }
@@ -478,6 +488,7 @@ public partial class BusStopInputViewModel : ViewModelBase
     /// </summary>
     private async Task<bool> PersistBusStopsAsync()
     {
+        HasBusStopUpdateConflict = false;
         var settings = await _settingsRepository.GetAppSettingsAsync();
         var summaryGenerator = new SummaryGenerator(settings.DepartmentType);
 
@@ -489,7 +500,17 @@ public partial class BusStopInputViewModel : ViewModelBase
 
         var itemsByLedgerId = BusUsages.GroupBy(i => i.Detail.LedgerId).ToDictionary(g => g.Key, g => g.ToList());
 
-        var allSuccess = true;
+        // Issue #1945 / #1806: バス停名（ledger_detail.bus_stops）と摘要（ledger.summary）は
+        // 同じ事実を 2 か所に持つため、片方だけ確定すると 6 年保存の台帳が自己矛盾する
+        // （摘要は「バス（天神～博多）」なのに明細は★／その鏡像で明細だけが新しい）。
+        // 摘要の再生成はこの明細から行われるので、次の統合で摘要が古い値へ巻き戻る。
+        // 複数 Ledger をまとめて 1 つのトランザクションで書き、1 件でも失敗したら全部巻き戻す。
+        //
+        // 設定の読み取り（GetAppSettingsAsync）はスコープを開く前に済ませてある。
+        // スコープ内で別のリポジトリが LeaseConnectionAsync を呼ぶと、DbContext のセマフォを
+        // 二重に取って自己デッドロックするため（Issue #1575）。
+        using var scope = await _dbContext.BeginTransactionAsync();
+
         foreach (var ledger in targetLedgers)
         {
             if (itemsByLedgerId.TryGetValue(ledger.Id, out var items))
@@ -497,16 +518,43 @@ public partial class BusStopInputViewModel : ViewModelBase
                 var updates = items
                     .Select(item => (item.Detail.SequenceNumber, item.Detail.BusStops))
                     .ToList();
-                await _ledgerRepository.UpdateDetailBusStopsAsync(ledger.Id, updates);
+
+                // Issue #1945: 戻り値を握りつぶさない。履歴詳細の全置換（ReplaceDetailsAsync の
+                // DELETE + INSERT）で rowid が振り直されていると 0 行になる。
+                var detailsOk = await _ledgerRepository.UpdateDetailBusStopsAsync(
+                    ledger.Id, updates, scope.Transaction);
+                if (!detailsOk)
+                {
+                    // commit せずに抜ける（scope の Dispose で巻き戻る）
+                    HasBusStopUpdateConflict = true;
+                    return false;
+                }
             }
 
             ledger.Summary = summaryGenerator.Generate(ledger.Details);
-            var ok = await _ledgerRepository.UpdateAsync(ledger);
-            if (!ok) allSuccess = false;
+            if (!await _ledgerRepository.UpdateAsync(ledger, scope.Transaction))
+            {
+                return false;
+            }
         }
 
-        return allSuccess;
+        scope.Commit();
+        return true;
     }
+
+    /// <summary>
+    /// Issue #1945: 直近の保存でバス停名の更新が競合（影響行数 0）したかどうか。
+    /// 失敗の理由が「行が見つからない」ことに特定できるため、汎用の失敗文言と区別して案内する。
+    /// </summary>
+    private bool HasBusStopUpdateConflict { get; set; }
+
+    /// <summary>
+    /// Issue #1945: 保存失敗時の案内文言（「何が」「なぜ」「どうすれば」の 3 要素）。
+    /// </summary>
+    internal const string BusStopConflictMessage =
+        "バス停名を保存できませんでした。この履歴の明細が、他のパソコンや履歴の編集操作で" +
+        "変更された可能性があります。画面を閉じて履歴一覧を再読み込みし、" +
+        "最新の内容を確認してから入力し直してください。";
 
     /// <summary>
     /// スキップ（★マークを付けて保存）
@@ -534,7 +582,7 @@ public partial class BusStopInputViewModel : ViewModelBase
             }
             else
             {
-                StatusMessage = "保存に失敗しました";
+                StatusMessage = HasBusStopUpdateConflict ? BusStopConflictMessage : "保存に失敗しました";
             }
         }
     }

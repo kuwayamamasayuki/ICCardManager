@@ -1,13 +1,16 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
+using System.Data.SQLite;
 using System.Linq;
 using System.Threading.Tasks;
 using FluentAssertions;
 using ICCardManager.Common;
+using ICCardManager.Data;
 using ICCardManager.Data.Repositories;
 using ICCardManager.Dtos;
 using ICCardManager.Models;
 using ICCardManager.Services;
+using ICCardManager.Tests.Data;
 using ICCardManager.ViewModels;
 using Moq;
 using Xunit;
@@ -42,10 +45,27 @@ public class BusTextConfigurationConsumerTests : IDisposable
         SummaryGenerator.Configure(options);
     }
 
+    /// <summary>
+    /// Issue #1945: バス停入力の保存は明細と摘要を 1 つのトランザクションで書くため実体の DbContext が要る。
+    /// テストごとに作られる本クラスで一括して破棄する。
+    /// </summary>
+    private readonly List<DbContext> _dbContexts = new();
+
     public void Dispose()
     {
         SummaryGenerator.ResetToDefaults();
+        foreach (var dbContext in _dbContexts)
+        {
+            dbContext.Dispose();
+        }
         GC.SuppressFinalize(this);
+    }
+
+    private DbContext CreateDbContext()
+    {
+        var dbContext = TestDbContextFactory.Create();
+        _dbContexts.Add(dbContext);
+        return dbContext;
     }
 
     #region 生成側（SummaryGenerator.Generate）
@@ -246,7 +266,7 @@ public class BusTextConfigurationConsumerTests : IDisposable
         dialogService.Setup(d => d.ShowWarningConfirmation(It.IsAny<string>(), It.IsAny<string>()))
             .Returns(true);
         var viewModel = new BusStopInputViewModel(
-            ledgerRepo.Object, new Mock<ISettingsRepository>().Object, dialogService.Object);
+            ledgerRepo.Object, new Mock<ISettingsRepository>().Object, dialogService.Object, CreateDbContext());
 
         await viewModel.InitializeWithDetailsAsync(
             new Ledger { Id = 1 },
@@ -256,16 +276,17 @@ public class BusTextConfigurationConsumerTests : IDisposable
         ledgerRepo.Verify(r => r.GetBusStopSuggestionsAsync(CustomPlaceholder), Times.Once);
     }
 
-    private static (BusStopInputViewModel ViewModel, LedgerDetail Detail) ArrangeBusStopInput(
+    private (BusStopInputViewModel ViewModel, LedgerDetail Detail) ArrangeBusStopInput(
         string initialBusStops)
     {
         var ledgerRepo = new Mock<ILedgerRepository>();
         ledgerRepo.Setup(r => r.GetBusStopSuggestionsAsync(It.IsAny<string>()))
             .ReturnsAsync(Enumerable.Empty<(string BusStops, int UsageCount, DateTime? LastUsedDate)>());
         ledgerRepo.Setup(r => r.UpdateDetailBusStopsAsync(
-                It.IsAny<int>(), It.IsAny<IEnumerable<(int SequenceNumber, string BusStops)>>()))
-            .Returns(Task.CompletedTask);
-        ledgerRepo.Setup(r => r.UpdateAsync(It.IsAny<Ledger>())).ReturnsAsync(true);
+                It.IsAny<int>(), It.IsAny<IEnumerable<(int SequenceNumber, string BusStops)>>(),
+                It.IsAny<SQLiteTransaction>()))
+            .ReturnsAsync(true);
+        ledgerRepo.Setup(r => r.UpdateAsync(It.IsAny<Ledger>(), It.IsAny<SQLiteTransaction>())).ReturnsAsync(true);
         ledgerRepo.Setup(r => r.GetByIdAsync(It.IsAny<int>()))
             .ReturnsAsync((Ledger)null);
 
@@ -277,7 +298,7 @@ public class BusTextConfigurationConsumerTests : IDisposable
         settingsRepo.Setup(r => r.GetAppSettingsAsync()).ReturnsAsync(new AppSettings());
 
         var viewModel = new BusStopInputViewModel(
-            ledgerRepo.Object, settingsRepo.Object, dialogService.Object);
+            ledgerRepo.Object, settingsRepo.Object, dialogService.Object, CreateDbContext());
 
         var detail = new LedgerDetail
         {

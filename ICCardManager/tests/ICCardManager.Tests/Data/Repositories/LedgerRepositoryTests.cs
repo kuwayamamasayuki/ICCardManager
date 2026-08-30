@@ -1,4 +1,4 @@
-using FluentAssertions;
+﻿using FluentAssertions;
 using ICCardManager.Data;
 using ICCardManager.Data.Repositories;
 using ICCardManager.Infrastructure.Caching;
@@ -1513,7 +1513,8 @@ public class LedgerRepositoryTests : IDisposable
 
         // Act - バス停名を更新
         var updates = new[] { (insertedDetail.SequenceNumber, "天神～博多駅") };
-        await _repository.UpdateDetailBusStopsAsync(ledgerId, updates);
+        // Issue #1945: 正当な更新は true を返すこと（欠陥を突く側だけだと「常に false」でも緑になる）
+        (await _repository.UpdateDetailBusStopsAsync(ledgerId, updates)).Should().BeTrue();
 
         // Assert - 再取得して更新を確認
         var updatedLedger = await _repository.GetByIdAsync(ledgerId);
@@ -1565,7 +1566,7 @@ public class LedgerRepositoryTests : IDisposable
 
         // Act - バス詳細のみ更新
         var updates = new[] { (busDetailInserted.SequenceNumber, "天神～博多駅") };
-        await _repository.UpdateDetailBusStopsAsync(ledgerId, updates);
+        (await _repository.UpdateDetailBusStopsAsync(ledgerId, updates)).Should().BeTrue();
 
         // Assert - バスは更新、鉄道は変更なし
         var updatedLedger = await _repository.GetByIdAsync(ledgerId);
@@ -1579,6 +1580,224 @@ public class LedgerRepositoryTests : IDisposable
         updatedTrain.ExitStation.Should().Be("天神");
         updatedTrain.BusStops.Should().BeNull(); // 変更されていない
     }
+
+    #region Issue #1945: 影響行数の検証とトランザクション
+
+    /// <summary>
+    /// Issue #1945（欠陥を突く側）: 履歴詳細の全置換（ReplaceDetailsAsync の DELETE + INSERT）で
+    /// rowid が振り直されたあと、手元の古い SequenceNumber で更新すると 0 行になる。
+    /// 旧実装は影響行数を捨てて「成功」を返していたため、呼び出し元が ledger.summary だけを
+    /// 書き換え、6 年保存の台帳が「摘要はバス停名入り・明細は★のまま」と自己矛盾した。
+    /// </summary>
+    /// <remarks>
+    /// rowid の再採番は DELETE + INSERT を実 SQLite に通して初めて起きるため、モックでは再現できない
+    /// （Issue #1913 と同じ理由）。別の台帳の明細を残しておくのは、対象台帳の明細を全消ししたときに
+    /// テーブルが空になって rowid が 1 から振り直され、偶然元の値と一致するのを避けるため。
+    /// </remarks>
+    [Fact]
+    public async Task UpdateDetailBusStopsAsync_明細を全置換してrowidが振り直されたあとは競合として検出されること_Issue1945()
+    {
+        // Arrange: 対象台帳（明細 2 件）と、そのあとに別台帳の明細 1 件。
+        // SQLite の暗黙 rowid は max(rowid)+1 で採番されるため、対象台帳より大きい rowid の行を
+        // 残しておかないと、全置換で削除した rowid がそのまま再利用され再採番が起きない。
+        var ledgerId = await _repository.InsertAsync(
+            CreateTestLedger(TestCardIdm, DateTime.Today, "バス（★）", expense: 200));
+        await _repository.InsertDetailAsync(CreateBusDetail(ledgerId, 100, 9800));
+        await _repository.InsertDetailAsync(CreateBusDetail(ledgerId, 100, 9700));
+
+        var otherLedgerId = await _repository.InsertAsync(
+            CreateTestLedger(TestCardIdm, DateTime.Today.AddDays(-1), "バス（★）", expense: 100));
+        await _repository.InsertDetailAsync(CreateBusDetail(otherLedgerId, 100, 9900));
+
+        var beforeReplace = await _repository.GetByIdAsync(ledgerId);
+        var staleSequenceNumbers = beforeReplace!.Details.Select(d => d.SequenceNumber).ToList();
+
+        // 別の操作（履歴詳細ダイアログの保存など）が明細を全置換し、rowid が振り直される
+        var replaced = await _repository.ReplaceDetailsAsync(ledgerId, new[]
+        {
+            CreateBusDetail(ledgerId, 100, 9800),
+            CreateBusDetail(ledgerId, 100, 9700)
+        });
+        replaced.Should().BeTrue();
+
+        var afterReplace = await _repository.GetByIdAsync(ledgerId);
+        afterReplace!.Details.Select(d => d.SequenceNumber).Should().NotIntersectWith(staleSequenceNumbers,
+            "この回帰テストは rowid が実際に振り直されることを前提にしている");
+
+        // Act: 全置換前に読み取った SequenceNumber で更新を試みる
+        var result = await _repository.UpdateDetailBusStopsAsync(
+            ledgerId, staleSequenceNumbers.Select(seq => (seq, "天神～博多")).ToList());
+
+        // Assert: 競合として false。バス停名は★のまま（摘要だけが進む状態を作らない）
+        result.Should().BeFalse();
+        var reloaded = await _repository.GetByIdAsync(ledgerId);
+        reloaded!.Details.Should().OnlyContain(d => d.BusStops == "★");
+    }
+
+    /// <summary>
+    /// Issue #1945（欠陥を突く側）: 旧実装は command.Transaction を設定せず N 回 autocommit していたため、
+    /// 途中の 1 件が競合しても先行する明細の更新だけが確定して残った（Issue #1724 と同じ形）。
+    /// </summary>
+    [Fact]
+    public async Task UpdateDetailBusStopsAsync_競合時は先行する明細の更新も巻き戻ること_Issue1945()
+    {
+        // Arrange
+        var ledgerId = await _repository.InsertAsync(
+            CreateTestLedger(TestCardIdm, DateTime.Today, "バス（★）、バス（★）", expense: 200));
+        await _repository.InsertDetailAsync(CreateBusDetail(ledgerId, 100, 9900));
+        await _repository.InsertDetailAsync(CreateBusDetail(ledgerId, 100, 9800));
+
+        var inserted = await _repository.GetByIdAsync(ledgerId);
+        var validSequenceNumber = inserted!.Details[0].SequenceNumber;
+        var missingSequenceNumber = inserted.Details.Max(d => d.SequenceNumber) + 1000;
+
+        // Act: 1 件目は一致するが 2 件目は存在しない
+        var result = await _repository.UpdateDetailBusStopsAsync(ledgerId, new[]
+        {
+            (validSequenceNumber, "天神～博多"),
+            (missingSequenceNumber, "博多～天神")
+        });
+
+        // Assert: false かつ 1 件目も反映されていない
+        result.Should().BeFalse();
+        var reloaded = await _repository.GetByIdAsync(ledgerId);
+        reloaded!.Details.Should().OnlyContain(d => d.BusStops == "★");
+    }
+
+    /// <summary>
+    /// Issue #1945 / #1806（欠陥を突く側）: 暗黙 rowid は再利用されるため、rowid だけで行を特定すると
+    /// 無関係な台帳の明細を書き換え得る。WHERE に ledger_id を含めていることを表明する。
+    /// </summary>
+    [Fact]
+    public async Task UpdateDetailBusStopsAsync_他の台帳の明細は書き換えないこと_Issue1945()
+    {
+        // Arrange
+        var ledgerA = await _repository.InsertAsync(
+            CreateTestLedger(TestCardIdm, DateTime.Today.AddDays(-1), "バス（★）", expense: 100));
+        await _repository.InsertDetailAsync(CreateBusDetail(ledgerA, 100, 9900));
+
+        var ledgerB = await _repository.InsertAsync(
+            CreateTestLedger(TestCardIdm, DateTime.Today, "バス（★）", expense: 100));
+        await _repository.InsertDetailAsync(CreateBusDetail(ledgerB, 100, 9800));
+
+        var detailOfB = (await _repository.GetByIdAsync(ledgerB))!.Details[0];
+
+        // Act: 台帳 A の更新として、台帳 B の明細の rowid を渡す
+        var result = await _repository.UpdateDetailBusStopsAsync(
+            ledgerA, new[] { (detailOfB.SequenceNumber, "天神～博多") });
+
+        // Assert
+        result.Should().BeFalse();
+        var reloadedB = await _repository.GetByIdAsync(ledgerB);
+        reloadedB!.Details[0].BusStops.Should().Be("★");
+    }
+
+    /// <summary>
+    /// Issue #1945（対の表明）: SQLite の changes() は値が変わらなくても WHERE に一致した行を数えるため、
+    /// 「同じバス停名を書き直した」ケースを競合と誤判定しない。
+    /// この表明が無いと、影響行数ではなく「値が変化したか」で判定する実装でも緑になる。
+    /// </summary>
+    [Fact]
+    public async Task UpdateDetailBusStopsAsync_同じバス停名を書き直しても競合にならないこと_Issue1945()
+    {
+        // Arrange
+        var ledgerId = await _repository.InsertAsync(
+            CreateTestLedger(TestCardIdm, DateTime.Today, "バス（天神～博多）", expense: 200));
+        await _repository.InsertDetailAsync(CreateBusDetail(ledgerId, 200, 9800, busStops: "天神～博多"));
+
+        var detail = (await _repository.GetByIdAsync(ledgerId))!.Details[0];
+
+        // Act
+        var result = await _repository.UpdateDetailBusStopsAsync(
+            ledgerId, new[] { (detail.SequenceNumber, "天神～博多") });
+
+        // Assert
+        result.Should().BeTrue();
+    }
+
+    /// <summary>
+    /// Issue #1945（対の表明）: 更新対象が空なら DB へ触れずに成功とする。
+    /// </summary>
+    [Fact]
+    public async Task UpdateDetailBusStopsAsync_更新対象が空なら成功を返すこと_Issue1945()
+    {
+        var ledgerId = await _repository.InsertAsync(
+            CreateTestLedger(TestCardIdm, DateTime.Today, "鉄道（天神～博多）", expense: 210));
+
+        var result = await _repository.UpdateDetailBusStopsAsync(
+            ledgerId, new List<(int SequenceNumber, string BusStops)>());
+
+        result.Should().BeTrue();
+    }
+
+    /// <summary>
+    /// Issue #1945 / #1806: 呼び出し元のトランザクションへ参加し、
+    /// 呼び出し元が巻き戻せばバス停名の更新も一緒に巻き戻ること
+    /// （摘要の UPDATE と 1 つの論理操作として束ねられることの表明）。
+    /// </summary>
+    [Fact]
+    public async Task UpdateDetailBusStopsAsync_呼び出し元トランザクションのロールバックで巻き戻ること_Issue1945()
+    {
+        // Arrange
+        var ledgerId = await _repository.InsertAsync(
+            CreateTestLedger(TestCardIdm, DateTime.Today, "バス（★）", expense: 200));
+        await _repository.InsertDetailAsync(CreateBusDetail(ledgerId, 200, 9800));
+        var detail = (await _repository.GetByIdAsync(ledgerId))!.Details[0];
+
+        // Act
+        using (var scope = await _dbContext.BeginTransactionAsync())
+        {
+            var ok = await _repository.UpdateDetailBusStopsAsync(
+                ledgerId, new[] { (detail.SequenceNumber, "天神～博多") }, scope.Transaction);
+            ok.Should().BeTrue();
+            // Commit せずに Dispose → 巻き戻る
+        }
+
+        // Assert
+        var reloaded = await _repository.GetByIdAsync(ledgerId);
+        reloaded!.Details[0].BusStops.Should().Be("★");
+    }
+
+    /// <summary>
+    /// Issue #1945（対の表明）: 呼び出し元がコミットすれば反映されること。
+    /// ロールバック側だけだと「tx 経路では何も書かない」実装でも緑になる。
+    /// </summary>
+    [Fact]
+    public async Task UpdateDetailBusStopsAsync_呼び出し元トランザクションのコミットで反映されること_Issue1945()
+    {
+        var ledgerId = await _repository.InsertAsync(
+            CreateTestLedger(TestCardIdm, DateTime.Today, "バス（★）", expense: 200));
+        await _repository.InsertDetailAsync(CreateBusDetail(ledgerId, 200, 9800));
+        var detail = (await _repository.GetByIdAsync(ledgerId))!.Details[0];
+
+        using (var scope = await _dbContext.BeginTransactionAsync())
+        {
+            var ok = await _repository.UpdateDetailBusStopsAsync(
+                ledgerId, new[] { (detail.SequenceNumber, "天神～博多") }, scope.Transaction);
+            ok.Should().BeTrue();
+            scope.Commit();
+        }
+
+        var reloaded = await _repository.GetByIdAsync(ledgerId);
+        reloaded!.Details[0].BusStops.Should().Be("天神～博多");
+    }
+
+    /// <summary>
+    /// Issue #1945 のテスト用: バス利用明細を組み立てる。
+    /// </summary>
+    private static LedgerDetail CreateBusDetail(int ledgerId, int amount, int balance, string busStops = "★")
+        => new LedgerDetail
+        {
+            LedgerId = ledgerId,
+            UseDate = DateTime.Today,
+            BusStops = busStops,
+            Amount = amount,
+            Balance = balance,
+            IsCharge = false,
+            IsBus = true
+        };
+
+    #endregion
 
     #endregion
 
