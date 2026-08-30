@@ -107,9 +107,21 @@ WHERE staff_idm = @staffIdm AND is_deleted = 0";
         }
 
         /// <inheritdoc/>
+        /// <remarks>
+        /// Issue #1951: トランザクションを持たない登録は、共有モードの一過性のロック競合
+        /// （SQLITE_BUSY / SQLITE_LOCKED）に備えて <c>ExecuteWithRetryAsync</c> で包む。
+        /// 外側スコープが開いているとき（暗黙参加）は、他フローのトランザクションの内側で
+        /// 同じ文を再実行することになるため包まない（Issue #1724 の②と同じ判断）。
+        /// </remarks>
         public async Task<bool> InsertAsync(Staff staff)
         {
-            return await InsertAsyncInternal(staff, null).ConfigureAwait(false);
+            if (_dbContext.HasActiveTransactionScope)
+            {
+                return await InsertAsyncInternal(staff, null).ConfigureAwait(false);
+            }
+
+            return await _dbContext.ExecuteWithRetryAsync(
+                () => InsertAsyncInternal(staff, null)).ConfigureAwait(false);
         }
 
         /// <inheritdoc/>
@@ -146,8 +158,14 @@ VALUES (@staffIdm, @name, @number, @note, 0, NULL)";
                 }
                 return result > 0;
             }
-            catch (SQLiteException)
+            catch (SQLiteException ex) when (!DbContext.IsTransientLockError(ex))
             {
+                // Issue #1951: false へ畳んでよいのは「同じ条件で何度やっても失敗する」ものだけ。
+                // SQLITE_BUSY / SQLITE_LOCKED まで畳むと、ResultCode で判定している
+                // DbContext.ExecuteWithRetryAsync のリトライが丸ごと効かなくなり、
+                // 他 PC が書き込みロックを持っている一瞬に当たっただけの登録が
+                // 恒久的な失敗として職員に報告される（兄弟メソッドの UpdateAsyncInternal /
+                // RestoreAsyncInternal はこの catch を持たず、非対称になっていた）。
                 return false;
             }
         }

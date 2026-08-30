@@ -1298,8 +1298,7 @@ ON CONFLICT(key) DO UPDATE SET value = excluded.value";
                     return CleanupOldDataInternal();
                 }
                 catch (SQLiteException ex) when (
-                    attempt < delays.Length &&
-                    (ex.ResultCode == SQLiteErrorCode.Busy || ex.ResultCode == SQLiteErrorCode.Locked))
+                    attempt < delays.Length && IsTransientLockError(ex))
                 {
                     var baseDelay = delays[attempt];
                     var jitter = IsSharedMode ? RetryJitter.GetJitter(baseDelay) : 0;
@@ -1470,6 +1469,27 @@ ON CONFLICT(key) DO UPDATE SET value = excluded.value";
         internal static readonly int[] SharedRetryDelays = { 200, 500, 1000, 2000, 5000 };
 
         /// <summary>
+        /// 一過性のロック競合（SQLITE_BUSY / SQLITE_LOCKED）かどうかを判定する（Issue #1951）
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// 「同じ操作をもう一度実行すれば成功し得る失敗」の唯一の定義。
+        /// <see cref="ExecuteWithRetryAsync{T}"/> / <see cref="CleanupOldData"/> のリトライ判定と、
+        /// リポジトリ側の「この例外を <c>false</c> へ畳んでよいか」の判定が
+        /// <b>同じ述語を見ている</b>ことが正しさの前提になる。
+        /// </para>
+        /// <para>
+        /// 判定を各所へ書き写すと、片方だけが新しい ResultCode を知っている状態が生まれる
+        /// （<c>.claude/rules/development-conventions.md</c> #1763「同じ論理的な処理に手段が 2 通りあるか」）。
+        /// </para>
+        /// </remarks>
+        internal static bool IsTransientLockError(SQLiteException ex)
+        {
+            return ex != null &&
+                   (ex.ResultCode == SQLiteErrorCode.Busy || ex.ResultCode == SQLiteErrorCode.Locked);
+        }
+
+        /// <summary>
         /// SQLITE_BUSY/SQLITE_LOCKED時にリトライ付きで非同期操作を実行
         /// </summary>
         /// <remarks>
@@ -1490,8 +1510,7 @@ ON CONFLICT(key) DO UPDATE SET value = excluded.value";
                     return await operation().ConfigureAwait(false);
                 }
                 catch (SQLiteException ex) when (
-                    attempt < delays.Length &&
-                    (ex.ResultCode == SQLiteErrorCode.Busy || ex.ResultCode == SQLiteErrorCode.Locked))
+                    attempt < delays.Length && IsTransientLockError(ex))
                 {
                     // 基本待機時間 + ジッター（0〜50%の追加遅延）で thundering herd を緩和
                     var baseDelay = delays[attempt];
