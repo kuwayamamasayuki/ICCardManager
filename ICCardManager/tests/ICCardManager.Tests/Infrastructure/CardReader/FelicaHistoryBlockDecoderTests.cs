@@ -443,17 +443,33 @@ public class FelicaHistoryBlockDecoderTests
     }
 
     /// <summary>
-    /// Issue #1253: Issue #942 フォールバック発動時の IsBus の動作を明文化
-    /// 駅コード両方0 + 残高増加（通常利用扱いだが金額が負）の場合、
-    /// 最初に isBus=true（非チャージ・非還元＋駅コード0）と判定されたあとで、
-    /// フォールバックにより isPointRedemption が true に変わる。
-    /// IsBus 自体は再計算されないため IsBus=true のまま残り、
-    /// 「IsBus=true かつ IsPointRedemption=true」の複合状態となる。
-    /// 後段の SummaryGenerator では `!IsPointRedemption` フィルタで分類されるため実害はないが、
-    /// データベース上は複合状態として保存されることを明示的にテストする。
+    /// Issue #1948: Issue #942 フォールバック発動時は IsBus を取り下げる（バスとポイント還元は排他）
     /// </summary>
+    /// <remarks>
+    /// <para>
+    /// 駅コード両方0 + 残高増加（利用種別は 0x0D 以外）の場合、isBus は
+    /// 「非チャージ・非還元＋駅コード0」として一度 true と判定されたあとで、
+    /// フォールバックにより isPointRedemption が true に変わる。
+    /// </para>
+    /// <para>
+    /// Issue #1253 の時点では IsBus を再計算せず「IsBus=true かつ IsPointRedemption=true」の
+    /// 複合状態を許し、「後段の SummaryGenerator が !IsPointRedemption で分類するため実害なし」と
+    /// 記録していた。しかしその根拠は摘要生成しか見ていない。
+    /// <c>BusStopInputViewModel</c> は 4 箇所すべてが <c>d =&gt; d.IsBus</c> だけで対象を絞るため、
+    /// 履歴統合（<c>LedgerMergeService</c>）でバス利用行とポイント還元行が 1 行になると、
+    /// 摘要に「バス」が含まれる台帳の明細としてこの複合状態がバス停名入力へ並ぶ。
+    /// 入力しても摘要には現れず（摘要生成はポイント還元を除外する）、
+    /// 6 年保存の <c>ledger_detail.bus_stops</c> にだけ値が残る。
+    /// </para>
+    /// <para>
+    /// <c>.claude/rules/business-logic.md</c> のバス判別ロジックは
+    /// <c>is_point_redemption = false</c> を条件に含んでおり、業務ルール上あり得ない組み合わせである。
+    /// 消費側それぞれが「ポイント還元を先に見る」規約に依存させるのではなく、
+    /// 複合状態を作らない形にする（#1883「食い違った状態を表現できなくする」）。
+    /// </para>
+    /// </remarks>
     [Fact]
-    public void Decode_Issue942Fallback_ZeroStations_IsBusStaysTrueWithFallback()
+    public void Decode_Issue942Fallback_ZeroStations_IsBusCleared()
     {
         // 0x16（通常利用）だが残高が増加 → フォールバックで isPointRedemption=true になる
         var previous = BuildBlock(balance: 500);
@@ -463,9 +479,114 @@ public class FelicaHistoryBlockDecoderTests
 
         fallback.Should().BeTrue("残高増加でフォールバックが発動する");
         result.IsPointRedemption.Should().BeTrue();
-        result.IsBus.Should().BeTrue(
-            "Issue #942 フォールバックは IsBus を再計算しないため、駅コード0での初期判定 IsBus=true が維持される（後段処理では IsPointRedemption が優先されるため実害なし）");
+        result.IsBus.Should().BeFalse(
+            "バス利用とポイント還元は業務ルール上排他であり、フォールバックで還元と確定した明細をバスとして残さない");
         result.Amount.Should().Be(200);
+    }
+
+    /// <summary>
+    /// Issue #1948: 駅コードはあるが駅名が解決できない経路（西鉄バス等）でも、
+    /// フォールバックが発動したら IsBus を取り下げる。
+    /// </summary>
+    /// <remarks>
+    /// バス判定には「駅コード両方0」と「駅名が両方とも未解決」の 2 経路がある。
+    /// 片方だけを直すと、もう一方の経路から同じ複合状態が生まれる。
+    /// </remarks>
+    [Fact]
+    public void Decode_Issue942Fallback_UnresolvedStations_IsBusCleared()
+    {
+        var previous = BuildBlock(balance: 500);
+        var current = BuildBlock(usageType: 0x16, entryStationCode: 0x1234, exitStationCode: 0x5678, balance: 700);
+
+        var result = FelicaHistoryBlockDecoder.Decode(current, previous, NullResolver, out var fallback);
+
+        fallback.Should().BeTrue();
+        result.IsPointRedemption.Should().BeTrue();
+        result.IsBus.Should().BeFalse();
+        result.Amount.Should().Be(200);
+    }
+
+    /// <summary>
+    /// Issue #1948 の対の表明: フォールバックが発動しない通常のバス利用（残高減少）は
+    /// IsBus=true のまま維持される。
+    /// </summary>
+    /// <remarks>
+    /// この表明が無いと、IsBus を無条件に false にした実装でも上記 2 件が緑になる。
+    /// </remarks>
+    [Fact]
+    public void Decode_NormalBusUsage_IsBusStaysTrue()
+    {
+        var previous = BuildBlock(balance: 1000);
+        var current = BuildBlock(usageType: 0x16, entryStationCode: 0, exitStationCode: 0, balance: 790);
+
+        var result = FelicaHistoryBlockDecoder.Decode(current, previous, NullResolver, out var fallback);
+
+        fallback.Should().BeFalse();
+        result.IsBus.Should().BeTrue("残高が減少している通常のバス利用は従来どおりバスとして扱う");
+        result.IsPointRedemption.Should().BeFalse();
+        result.Amount.Should().Be(210);
+    }
+
+    /// <summary>
+    /// Issue #1948 の対の表明: 前回レコードが無く金額を計算できない場合はフォールバックが
+    /// 発動しないため、駅コード0のレコードは従来どおりバスと判定される。
+    /// </summary>
+    [Fact]
+    public void Decode_NoPreviousData_ZeroStations_IsBusStaysTrue()
+    {
+        var current = BuildBlock(usageType: 0x16, entryStationCode: 0, exitStationCode: 0, balance: 700);
+
+        var result = FelicaHistoryBlockDecoder.Decode(current, null, NullResolver, out var fallback);
+
+        fallback.Should().BeFalse();
+        result.IsBus.Should().BeTrue();
+        result.Amount.Should().BeNull();
+    }
+
+    /// <summary>
+    /// Issue #1948: IsBus と IsPointRedemption / IsCharge が同時に立たないことを、
+    /// 利用種別・駅コード・残高増減の組み合わせを総当たりして表明する不変条件テスト。
+    /// </summary>
+    /// <remarks>
+    /// 個別ケースの列挙では、次に判定式を触った人が別の入力で複合状態を復活させても気付けない
+    /// （<c>.claude/rules/development-conventions.md</c> #1812「入力の全域を走査する不変条件テストを 1 件置く」）。
+    /// </remarks>
+    [Fact]
+    public void Decode_AllCombinations_IsBusIsExclusiveWithChargeAndPointRedemption()
+    {
+        byte[] usageTypes = { 0x02, 0x0D, 0x14, 0x16, 0x01, 0xC7 };
+        int[] stationCodes = { 0, 0x1234 };
+        int[] balances = { 300, 500, 700 };  // 前回残高 500 に対して 減少 / 同額 / 増加
+        var resolvers = new[]
+        {
+            (Name: "未解決", Resolver: NullResolver),
+            (Name: "解決可", Resolver: FakeResolver)
+        };
+
+        var previous = BuildBlock(balance: 500);
+
+        foreach (var usageType in usageTypes)
+        foreach (var entryCode in stationCodes)
+        foreach (var exitCode in stationCodes)
+        foreach (var balance in balances)
+        foreach (var (resolverName, resolver) in resolvers)
+        {
+            var current = BuildBlock(
+                usageType: usageType,
+                entryStationCode: entryCode,
+                exitStationCode: exitCode,
+                balance: balance);
+
+            var result = FelicaHistoryBlockDecoder.Decode(current, previous, resolver, out _);
+
+            var because =
+                $"利用種別=0x{usageType:X2}, 入場={entryCode}, 出場={exitCode}, 残額={balance}, リゾルバ={resolverName}";
+
+            (result.IsBus && result.IsPointRedemption).Should().BeFalse(
+                "バスとポイント還元は排他でなければならない（" + because + "）");
+            (result.IsBus && result.IsCharge).Should().BeFalse(
+                "バスとチャージは排他でなければならない（" + because + "）");
+        }
     }
 
     /// <summary>
