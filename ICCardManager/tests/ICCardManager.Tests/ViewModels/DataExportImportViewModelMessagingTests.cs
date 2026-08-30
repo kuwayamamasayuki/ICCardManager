@@ -330,4 +330,217 @@ public class DataExportImportViewModelMessagingTests : IDisposable
     }
 
     #endregion
+
+    #region Issue #1952: 抑制の解放をモーダル表示の範囲と一致させること
+
+    /// <summary>
+    /// 未登録カードの警告モーダルを表示している間も、カード読み取り抑制が維持されること
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Issue #1952: 解放（<c>IsWaitingForCardTouch = false</c>）が <c>await</c> と
+    /// <c>ShowWarning</c> モーダルより前にあったため、<c>OnIsWaitingForCardTouchChanged</c> が
+    /// 送る <c>CardReadingSuppressedMessage(false, DataImport)</c> によって
+    /// <c>GetByIdmAsync</c> の待機中とモーダル表示中は抑制が外れていた。
+    /// モーダルダイアログは「止まる」のではなく入れ子のメッセージポンプで「回り続ける」ため、
+    /// その間のタッチは <c>MainViewModel</c> へ届き、ダイアログの背後で貸出・返却が進む。
+    /// </para>
+    /// <para>
+    /// 規約 <c>.claude/rules/development-conventions.md</c> Issue #1807
+    /// 「抑制の取得と解放は、ダイアログの表示範囲と一致させる」。
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public async Task HandleCardReadAsync_未登録カードの警告モーダル表示中_抑制を解放しないこと()
+    {
+        // Arrange
+        var idm = "0102030405060708";
+        bool? suppressedDuringLookup = null;
+        bool? suppressedDuringDialog = null;
+
+        _cardRepositoryMock.Setup(r => r.GetByIdmAsync(idm, false))
+            .Callback(() => suppressedDuringLookup = _viewModel.IsWaitingForCardTouch)
+            .ReturnsAsync((ICCardManager.Models.IcCard?)null);
+        _dialogServiceMock.Setup(d => d.ShowWarning(It.IsAny<string>(), It.IsAny<string>()))
+            .Callback(() => suppressedDuringDialog = _viewModel.IsWaitingForCardTouch);
+
+        await _viewModel.StartCardTouchAsync();
+        _receivedMessages.Clear();
+
+        // Act
+        await _viewModel.HandleCardReadAsync(idm);
+
+        // Assert
+        suppressedDuringLookup.Should().BeTrue(
+            "カード照合の待機中もカード読み取り抑制を維持すること（Issue #1952）");
+        suppressedDuringDialog.Should().BeTrue(
+            "未登録カード警告モーダルの表示中もカード読み取り抑制を維持すること（Issue #1952）");
+        _viewModel.IsWaitingForCardTouch.Should().BeFalse(
+            "登録モードの終わり（モーダルを閉じたあと）に解放すること");
+        _receivedMessages.Should().ContainSingle(m =>
+            m.Value == false && m.Source == CardReadingSource.DataImport);
+    }
+
+    /// <summary>
+    /// 未登録カードの警告モーダル表示中に別のカードがタッチされても、二重に処理しないこと
+    /// </summary>
+    /// <remarks>
+    /// Issue #1952: 再入は専用フラグ（<c>finally</c> で解除）で塞ぐ。入口ゲート
+    /// （<c>IsWaitingForCardTouch</c>）はモーダル表示中も true のままになるため、
+    /// ゲートだけでは 2 件目を止められない。
+    /// </remarks>
+    [Fact]
+    public async Task HandleCardReadAsync_警告モーダル表示中の再タッチ_二重に処理しないこと()
+    {
+        // Arrange
+        var firstIdm = "0102030405060708";
+        var secondIdm = "0807060504030201";
+        _cardRepositoryMock.Setup(r => r.GetByIdmAsync(It.IsAny<string>(), false))
+            .ReturnsAsync((ICCardManager.Models.IcCard?)null);
+
+        var raised = false;
+        _dialogServiceMock.Setup(d => d.ShowWarning(It.IsAny<string>(), It.IsAny<string>()))
+            .Callback(() =>
+            {
+                // モーダルは入れ子のメッセージポンプで回り続けるため、
+                // 表示中もカードリーダーのイベント購読は生きている（#1807）
+                if (raised) return;
+                raised = true;
+                _cardReaderMock.Raise(r => r.CardRead += null, new CardReadEventArgs { Idm = secondIdm });
+            });
+
+        await _viewModel.StartCardTouchAsync();
+
+        // Act
+        await _viewModel.HandleCardReadAsync(firstIdm);
+
+        // Assert
+        raised.Should().BeTrue("前提: モーダル表示中に 2 件目のタッチを発火していること");
+        _cardRepositoryMock.Verify(r => r.GetByIdmAsync(secondIdm, false), Times.Never,
+            "モーダル表示中の再タッチは再入フラグで塞ぐこと（Issue #1952）");
+        _dialogServiceMock.Verify(d => d.ShowWarning(It.IsAny<string>(), It.IsAny<string>()), Times.Once,
+            "未登録カード警告が多重に開かないこと");
+        _dispatcher.ObservedExceptions.Should().BeEmpty();
+    }
+
+    /// <summary>
+    /// 対のテスト: 登録済みカードでも、照合の待機中は抑制を維持し、完了後に解放すること
+    /// </summary>
+    /// <remarks>
+    /// 上 2 件だけでは「未登録カード経路だけを直した」実装でも緑になる。
+    /// また、モーダルを出さない経路で解放が失われていないことも併せて固定する。
+    /// </remarks>
+    [Fact]
+    public async Task HandleCardReadAsync_登録済みカード_照合中は抑制を維持し完了後に解放すること()
+    {
+        // Arrange
+        var idm = "0102030405060708";
+        bool? suppressedDuringLookup = null;
+        _cardRepositoryMock.Setup(r => r.GetByIdmAsync(idm, false))
+            .Callback(() => suppressedDuringLookup = _viewModel.IsWaitingForCardTouch)
+            .ReturnsAsync(new ICCardManager.Models.IcCard
+            {
+                CardIdm = idm,
+                CardType = "はやかけん",
+                CardNumber = "H-001"
+            });
+
+        await _viewModel.StartCardTouchAsync();
+        _receivedMessages.Clear();
+
+        // Act
+        await _viewModel.HandleCardReadAsync(idm);
+
+        // Assert
+        suppressedDuringLookup.Should().BeTrue(
+            "カード照合の待機中もカード読み取り抑制を維持すること（Issue #1952）");
+        _viewModel.IsWaitingForCardTouch.Should().BeFalse("読み取り完了後は解放すること");
+        _viewModel.TouchedCardIdm.Should().Be(idm);
+        _receivedMessages.Should().ContainSingle(m =>
+            m.Value == false && m.Source == CardReadingSource.DataImport);
+    }
+
+    /// <summary>
+    /// 対のテスト: 再入フラグは <c>finally</c> で解除され、失敗後の再タッチを塞がないこと
+    /// </summary>
+    /// <remarks>
+    /// 再入ガードだけを追加して解除を忘れると、1 度の失敗でカード指定が
+    /// アプリ再起動まで不能になる（#1725 の「復帰手段が 1 つしかない状態」）。
+    /// </remarks>
+    [Fact]
+    public async Task HandleCardReadAsync_読み取り失敗後の再タッチ_再入フラグに塞がれないこと()
+    {
+        // Arrange
+        var idm = "0102030405060708";
+        var card = new ICCardManager.Models.IcCard
+        {
+            CardIdm = idm,
+            CardType = "はやかけん",
+            CardNumber = "H-001"
+        };
+        var attempt = 0;
+        _cardRepositoryMock.Setup(r => r.GetByIdmAsync(idm, false))
+            .Returns(() =>
+            {
+                attempt++;
+                return attempt == 1
+                    ? Task.FromException<ICCardManager.Models.IcCard>(
+                        new InvalidOperationException("database is locked"))
+                    : Task.FromResult(card);
+            });
+
+        await _viewModel.StartCardTouchAsync();
+        await _viewModel.HandleCardReadAsync(idm);
+        _viewModel.IsWaitingForCardTouch.Should().BeTrue("前提: 失敗時はタッチ待ちへ戻ること（#1816）");
+
+        // Act
+        await _viewModel.HandleCardReadAsync(idm);
+
+        // Assert
+        attempt.Should().Be(2, "再入フラグは finally で解除され、次のタッチを塞がないこと");
+        _viewModel.TouchedCardIdm.Should().Be(idm);
+        _viewModel.IsWaitingForCardTouch.Should().BeFalse();
+    }
+
+    /// <summary>
+    /// 照合の待機中にタッチ待ちが解除されたら、副作用を起こさずに中止すること
+    /// </summary>
+    /// <remarks>
+    /// Issue #1952 のコードレビュー指摘: 解放を <c>await</c> より後ろへ移したことで、
+    /// 照合中も「キャンセル」ボタン（Visibility は <c>IsWaitingForCardTouch</c> に束縛）が
+    /// 押せる状態で残る。共有モードの照合は秒単位かかり得るため、この窓でキャンセル／
+    /// 指定のクリア／データ種別の切替／<c>Cleanup</c> が起きて抑制が解放され得る。
+    /// 再判定しないと、未登録カード警告モーダルを**抑制 OFF のまま**開くことになり、
+    /// 本 Issue が塞いだ欠陥（背後で貸出・返却が進む）がこの経路から再現する。
+    /// </remarks>
+    [Fact]
+    public async Task HandleCardReadAsync_照合中にキャンセルされた_警告を開かず中止すること()
+    {
+        // Arrange
+        var idm = "0102030405060708";
+        _cardRepositoryMock.Setup(r => r.GetByIdmAsync(idm, false))
+            .Returns(() =>
+            {
+                // 照合の待機中に「キャンセル」が押された状況（抑制はここで解放される）
+                _viewModel.CancelCardTouch();
+                return Task.FromResult<ICCardManager.Models.IcCard?>(null);
+            });
+
+        await _viewModel.StartCardTouchAsync();
+        _receivedMessages.Clear();
+
+        // Act
+        await _viewModel.HandleCardReadAsync(idm);
+
+        // Assert
+        _dialogServiceMock.Verify(d => d.ShowWarning(It.IsAny<string>(), It.IsAny<string>()), Times.Never,
+            "抑制が解放されたあとに未登録カード警告モーダルを開かないこと（Issue #1952）");
+        _viewModel.TouchedCardInfo.Should().NotBe("未登録のカードです",
+            "中止したタッチは副作用を残さない（#1842）");
+        _receivedMessages.Should().OnlyContain(m => m.Value == false,
+            "中止後に抑制を取り直さないこと");
+        _dispatcher.ObservedExceptions.Should().BeEmpty();
+    }
+
+    #endregion
 }

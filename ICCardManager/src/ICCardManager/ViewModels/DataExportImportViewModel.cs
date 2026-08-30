@@ -1241,30 +1241,60 @@ public partial class DataExportImportViewModel : ViewModelBase
         // 通過済みで queue されているため、取得地点で再判定する（#1807 と同じ形）
         if (!IsWaitingForCardTouch) return;
 
-        IsWaitingForCardTouch = false;
+        // Issue #1952: 再入は専用フラグで塞ぐ。抑制の解放（IsWaitingForCardTouch = false）を
+        // モーダルの表示範囲の外へ移した結果、入口ゲートは処理中も true のままになるため、
+        // ゲートだけでは待機中・モーダル表示中の 2 件目を止められない。
+        if (_isHandlingCardRead) return;
 
-        // 読み取ったIDmで登録済みカードを検索
-        var card = await _cardRepository.GetByIdmAsync(idm);
-
-        if (card != null)
+        _isHandlingCardRead = true;
+        try
         {
-            // 登録済みカードが見つかった
-            TouchedCardIdm = card.CardIdm;
-            var shortIdm = card.CardIdm.Length > 8
-                ? card.CardIdm.Substring(0, 8) + "..."
-                : card.CardIdm;
-            TouchedCardInfo = $"{card.CardType} {card.CardNumber} ({shortIdm})";
-            SetStatus($"カードを読み取りました: {card.CardType} {card.CardNumber}", false);
+            // 読み取ったIDmで登録済みカードを検索
+            var card = await _cardRepository.GetByIdmAsync(idm);
+
+            // Issue #1952: 解放を await より後ろへ移した結果、この待機中もタッチ待ちは true のままで、
+            // 「キャンセル」ボタン（Visibility は IsWaitingForCardTouch に束縛）が押せる状態で残る。
+            // 共有モードの照合は秒単位かかり得るため、この窓でキャンセル／指定のクリア／
+            // データ種別の切替／ダイアログ終了（Cleanup）が起き、抑制が解放され得る。
+            // そのまま続けると未登録カード警告モーダルを**抑制 OFF のまま**開くことになり、
+            // 本 Issue が塞いだ欠陥（背後で貸出・返却が進む）がこの経路から再現する。
+            // 副作用（TouchedCardIdm / TouchedCardInfo / モーダル）より前に再判定し、
+            // 中止したタッチは通知せず捨てる（#1842「副作用を起こす前に判定を終える」）。
+            if (!IsWaitingForCardTouch) return;
+
+            if (card != null)
+            {
+                // 登録済みカードが見つかった
+                TouchedCardIdm = card.CardIdm;
+                var shortIdm = card.CardIdm.Length > 8
+                    ? card.CardIdm.Substring(0, 8) + "..."
+                    : card.CardIdm;
+                TouchedCardInfo = $"{card.CardType} {card.CardNumber} ({shortIdm})";
+                SetStatus($"カードを読み取りました: {card.CardType} {card.CardNumber}", false);
+            }
+            else
+            {
+                // 未登録カード
+                TouchedCardIdm = string.Empty;
+                TouchedCardInfo = "未登録のカードです";
+                SetStatus("このカードはシステムに登録されていません。先にカード管理で登録してください。", true);
+                _dialogService.ShowWarning(
+                    "タッチされたカードはシステムに登録されていません。\n\n利用履歴をインポートするには、先にカード管理で対象の交通系ICカードを登録してください。",
+                    "未登録カード");
+            }
+
+            // Issue #1952: 抑制の解放は「登録モードの終わり」＝モーダルを閉じたあとに行う（#1807）。
+            // OnIsWaitingForCardTouchChanged が CardReadingSuppressedMessage(false, DataImport) を
+            // 送るため、ここより前に置くと GetByIdmAsync の待機中と未登録カード警告モーダルの
+            // 表示中は抑制が外れる。モーダルは入れ子のメッセージポンプで「回り続ける」ので、
+            // その間のタッチは MainViewModel へ届き、ダイアログの背後で貸出・返却が進む。
+            // 例外時はここへ到達しない＝タッチ待ち（＝抑制 ON）のまま
+            // HandleCardReadAsync の catch が再試行を案内する（#1816）。
+            IsWaitingForCardTouch = false;
         }
-        else
+        finally
         {
-            // 未登録カード
-            TouchedCardIdm = string.Empty;
-            TouchedCardInfo = "未登録のカードです";
-            SetStatus("このカードはシステムに登録されていません。先にカード管理で登録してください。", true);
-            _dialogService.ShowWarning(
-                "タッチされたカードはシステムに登録されていません。\n\n利用履歴をインポートするには、先にカード管理で対象の交通系ICカードを登録してください。",
-                "未登録カード");
+            _isHandlingCardRead = false;
         }
     }
 
@@ -1295,6 +1325,16 @@ public partial class DataExportImportViewModel : ViewModelBase
         }
         IsWaitingForCardTouch = false;
     }
+
+    /// <summary>
+    /// カード読み取りの処理中か（Issue #1952）。
+    /// 抑制の解放をモーダルの表示範囲の外へ移したため、入口ゲート
+    /// （<see cref="IsWaitingForCardTouch"/>）は処理中も true のままになる。
+    /// 再入（待機中・モーダル表示中の 2 件目のタッチ）はこのフラグで塞ぎ、
+    /// <c>finally</c> で必ず解除する（解除を忘れると 1 度の失敗で
+    /// カード指定がアプリ再起動まで不能になる。#1725）
+    /// </summary>
+    private bool _isHandlingCardRead;
 
     /// <summary>
     /// ダイアログが閉じられ <see cref="Cleanup"/> が済んだか（Issue #1816）。
