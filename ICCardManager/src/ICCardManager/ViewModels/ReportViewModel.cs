@@ -621,23 +621,30 @@ public partial class ReportViewModel : ViewModelBase
             return;
         }
 
-        if (string.IsNullOrWhiteSpace(OutputFolder))
+        // Issue #1949: 以降 SelectedCards / OutputFolder / SelectedYear / SelectedMonth は参照しない。
+        // この先はプリフライト・上書き確認ダイアログ・帳票生成の await が挟まり、その間に
+        // 入力が変わり得る（処理中オーバーレイが塞ぐのはマウスのヒットテストだけで、
+        // キーボードによる選択操作・タブ移動は通る。#1761）。
+        // 対象・件数・出力先・対象年月はすべてこのスナップショットから導く。
+        // 出力先は「検証した値」と「実際に使う値」を一致させるため検証より前に確定させる。
+        // 年月を引き直すと、旧年月で決めた年度ファイル名（fiscalYear）と上書き確認で職員が
+        // 同意した「N月のシートを更新する」に対し、別の月・別の年度のシートを書き込むことになる。
+        var targetCards = SelectedCards.ToList();
+        var outputFolder = OutputFolder;
+        var targetYear = SelectedYear;
+        var targetMonth = SelectedMonth;
+
+        if (string.IsNullOrWhiteSpace(outputFolder))
         {
             SetStatus("出力先フォルダを選択してください", true);
             return;
         }
 
-        if (!Directory.Exists(OutputFolder))
+        if (!Directory.Exists(outputFolder))
         {
             SetStatus("出力先フォルダが存在しません", true);
             return;
         }
-
-        // Issue #1949: 以降 SelectedCards は参照しない。この先はプリフライト・上書き確認ダイアログ・
-        // 帳票生成の await が挟まり、その間に選択が変わり得る（処理中オーバーレイが塞ぐのは
-        // マウスのヒットテストだけで、キーボードによる選択操作は通る。#1761）。
-        // 対象・件数・出力先はすべてこのスナップショットから導く。
-        var targetCards = SelectedCards.ToList();
 
         // Issue #1688: 出力前プリフライトチェック
         // 中止する場合に不要な上書き確認ダイアログを見せないよう、上書き確認より前に実施する
@@ -650,12 +657,12 @@ public partial class ReportViewModel : ViewModelBase
         // Issue #477: 年度ファイル名に変更
         var existingFiles = new List<string>();
         var outputPaths = new Dictionary<string, string>(); // cardIdm -> outputPath
-        var fiscalYear = ReportService.GetFiscalYear(SelectedYear, SelectedMonth);
+        var fiscalYear = ReportService.GetFiscalYear(targetYear, targetMonth);
 
         foreach (var card in targetCards)
         {
             var fileName = _reportService.GetFiscalYearFileName(card.CardType, card.CardNumber, fiscalYear);
-            var outputPath = Path.Combine(OutputFolder, fileName);
+            var outputPath = Path.Combine(outputFolder, fileName);
             outputPaths[card.CardIdm] = outputPath;
 
             if (File.Exists(outputPath))
@@ -675,7 +682,7 @@ public partial class ReportViewModel : ViewModelBase
 
             var result = _navigationService.ShowThreeWayConfirmation(
                 $"以下のファイルが既に存在します:\n\n{fileList}\n\n" +
-                $"{SelectedMonth}月のシートを更新しますか？\n" +
+                $"{targetMonth}月のシートを更新しますか？\n" +
                 $"（他の月のシートは変更されません）\n\n" +
                 "「はい」: 更新する\n" +
                 "「いいえ」: 別名で保存する（日時を付加）\n" +
@@ -729,7 +736,7 @@ public partial class ReportViewModel : ViewModelBase
                 var capturedCardIdm = cardIdm;
                 var capturedOutputPath = outputPath;
                 var result = await Task.Run(() =>
-                    _reportService.CreateMonthlyReportAsync(capturedCardIdm, SelectedYear, SelectedMonth, capturedOutputPath));
+                    _reportService.CreateMonthlyReportAsync(capturedCardIdm, targetYear, targetMonth, capturedOutputPath));
 
                 if (result.Success)
                 {
@@ -934,17 +941,22 @@ public partial class ReportViewModel : ViewModelBase
             return;
         }
 
+        // Issue #1949: 対象年月は最初の await より前に確定させる。データ取得の待機中に
+        // コンボボックスの選択がキーボード操作で変わると、取得した月とタイトルの月が食い違う。
+        var targetYear = SelectedYear;
+        var targetMonth = SelectedMonth;
+
         using (BeginBusy("プレビューを準備中..."))
         {
             // 帳票データを取得
-            var reportData = await _printService.GetReportDataAsync(card.CardIdm, SelectedYear, SelectedMonth);
+            var reportData = await _printService.GetReportDataAsync(card.CardIdm, targetYear, targetMonth);
             if (reportData == null)
             {
                 SetStatus("帳票データを取得できませんでした", true);
                 return;
             }
 
-            var documentTitle = $"物品出納簿_{card.CardType}_{card.CardNumber}_{SelectedYear}年{SelectedMonth}月";
+            var documentTitle = $"物品出納簿_{card.CardType}_{card.CardNumber}_{targetYear}年{targetMonth}月";
 
             // プレビューダイアログを表示（ReportPrintDataを渡して用紙方向変更時に再生成可能に）
             // Issue #1793: ShowDialog は同期モーダル。囲まないと職員がプレビューを見ている間ずっと
@@ -981,17 +993,24 @@ public partial class ReportViewModel : ViewModelBase
             return;
         }
 
+        // Issue #1949: 対象カードと年月は最初の await より前に確定させる。カードごとの
+        // データ取得は await をまたぐため、その間に選択・年月が変わると 1 つの結合ドキュメントに
+        // 別々の月のデータが混在する（印刷すれば月をまたいだ物品出納簿が出力される）。
+        var previewCards = Cards.Where(c => c.IsSelected).ToList();
+        var previewYear = SelectedYear;
+        var previewMonth = SelectedMonth;
+
         // 複数カードの場合は結合ドキュメントを生成
-        using (BeginBusy($"プレビューを準備中... ({SelectedCards.Count}件)"))
+        using (BeginBusy($"プレビューを準備中... ({previewCards.Count}件)"))
         {
             // 表示順（Cardsの順序）でカードを取得（選択順ではなく一覧の並び順）
-            var orderedSelectedCards = Cards.Where(c => c.IsSelected).ToList();
+            var orderedSelectedCards = previewCards;
 
             // 各カードの帳票データを取得
             var reportDataList = new List<Services.ReportPrintData>();
             foreach (var cardVm in orderedSelectedCards)
             {
-                var data = await _printService.GetReportDataAsync(cardVm.CardIdm, SelectedYear, SelectedMonth);
+                var data = await _printService.GetReportDataAsync(cardVm.CardIdm, previewYear, previewMonth);
                 if (data != null)
                 {
                     reportDataList.Add(data);
@@ -1006,8 +1025,8 @@ public partial class ReportViewModel : ViewModelBase
 
             // ドキュメントタイトルを生成（表示順で）
             var documentTitle = orderedSelectedCards.Count == 2
-                ? $"物品出納簿_{orderedSelectedCards[0].DisplayName}_{orderedSelectedCards[1].DisplayName}_{SelectedYear}年{SelectedMonth}月"
-                : $"物品出納簿_{orderedSelectedCards.Count}件_{SelectedYear}年{SelectedMonth}月";
+                ? $"物品出納簿_{orderedSelectedCards[0].DisplayName}_{orderedSelectedCards[1].DisplayName}_{previewYear}年{previewMonth}月"
+                : $"物品出納簿_{orderedSelectedCards.Count}件_{previewYear}年{previewMonth}月";
 
             // プレビューダイアログを表示（List<ReportPrintData>を渡して用紙方向変更時に再生成可能に）
             // Issue #1793: 単票プレビューと同じ理由で SuspendBusy で囲む。

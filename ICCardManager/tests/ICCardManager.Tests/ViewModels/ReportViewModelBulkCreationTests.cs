@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -44,11 +44,18 @@ public class ReportViewModelBulkCreationTests : IDisposable
     private readonly Mock<IReportDataBuilder> _preflightDataBuilderMock = new();
     private readonly Mock<IReportExportStatusService> _exportStatusServiceMock = new();
     private readonly Mock<ReportService> _reportServiceMock;
+    private readonly Mock<PrintService> _printServiceMock;
     private readonly ReportViewModel _viewModel;
     private readonly string _outputFolder;
 
     /// <summary>実際に帳票作成が要求されたカードIDm（要求順）</summary>
     private readonly List<string> _createdForCardIdms = new();
+
+    /// <summary>実際に帳票作成が要求された対象年月と出力先（要求順。Issue #1949）</summary>
+    private readonly List<(int Year, int Month, string OutputPath)> _createdRequests = new();
+
+    /// <summary>プレビュー用データが要求されたカードIDmと対象年月（要求順。Issue #1949）</summary>
+    private readonly List<(string CardIdm, int Year, int Month)> _previewRequests = new();
 
     public ReportViewModelBulkCreationTests()
     {
@@ -85,6 +92,10 @@ public class ReportViewModelBulkCreationTests : IDisposable
                 It.IsAny<int>()))
             .Returns(new List<ReportExportStatus>());
 
+        // Issue #1949: 複数カードのプレビュー生成ループが全カードを同じ年月で取得することを表明する
+        _printServiceMock = new Mock<PrintService>(reportDataBuilder, (IOptions<OrganizationOptions>)null) { CallBase = true };
+        SetupPreviewData();
+
         _safeFileLauncherMock.Setup(l => l.LaunchFolder(It.IsAny<string>()))
             .Returns(SafeFileLaunchResult.Ok());
         _safeFileLauncherMock.Setup(l => l.LaunchFile(It.IsAny<string>()))
@@ -92,7 +103,7 @@ public class ReportViewModelBulkCreationTests : IDisposable
 
         _viewModel = new ReportViewModel(
             _reportServiceMock.Object,
-            new PrintService(reportDataBuilder),
+            _printServiceMock.Object,
             _cardRepositoryMock.Object,
             _navigationServiceMock.Object,
             _settingsRepositoryMock.Object,
@@ -132,6 +143,7 @@ public class ReportViewModelBulkCreationTests : IDisposable
             .Returns((string cardIdm, int year, int month, string outputPath) =>
             {
                 _createdForCardIdms.Add(cardIdm);
+                _createdRequests.Add((year, month, outputPath));
                 return Task.FromResult(resultSelector(cardIdm));
             });
     }
@@ -181,9 +193,9 @@ public class ReportViewModelBulkCreationTests : IDisposable
         await _viewModel.CreateReportAsync();
 
         // Assert - 3 枚とも作成され、件数表示も開始時点の 3 件で数える
-        _createdForCardIdms.Should().BeEquivalentTo(
+        _createdForCardIdms.Should().Equal(
             new[] { "0000000000000001", "0000000000000002", "0000000000000003" },
-            "開始時点の選択をスナップショットして処理するため");
+            "開始時点の選択をスナップショットして、その並び順のまま処理するため");
         _viewModel.CreatedFiles.Should().HaveCount(3);
         _viewModel.StatusMessage.Should().Be("3件の帳票を作成しました");
         _viewModel.IsStatusError.Should().BeFalse();
@@ -226,7 +238,7 @@ public class ReportViewModelBulkCreationTests : IDisposable
         await _viewModel.CreateReportAsync();
 
         // Assert
-        _createdForCardIdms.Should().BeEquivalentTo(
+        _createdForCardIdms.Should().Equal(
             new[] { "0000000000000001", "0000000000000002" });
         _viewModel.StatusMessage.Should().Be("2件の帳票を作成しました");
         _viewModel.IsStatusError.Should().BeFalse();
@@ -246,7 +258,7 @@ public class ReportViewModelBulkCreationTests : IDisposable
 
         await _viewModel.CreateReportAsync();
 
-        _createdForCardIdms.Should().BeEquivalentTo(
+        _createdForCardIdms.Should().Equal(
             new[] { "0000000000000001", "0000000000000002" });
         _viewModel.CreatedFiles.Should().HaveCount(2);
         _viewModel.StatusMessage.Should().Be("2件の帳票を作成しました");
@@ -277,5 +289,149 @@ public class ReportViewModelBulkCreationTests : IDisposable
         _navigationServiceMock.Verify(
             n => n.ShowWarning(It.Is<string>(m => m.Contains("はやかけん 002")), It.IsAny<string>()),
             Times.Once);
+    }
+
+    /// <summary>
+    /// 欠陥を突く側: 作成中に対象年月が変えられても、開始時点の年月で全件作成すること
+    /// </summary>
+    /// <remarks>
+    /// 年月コンボボックスはキーボードで操作でき、処理中オーバーレイはマウスしか塞がない（#1761）。
+    /// ループの中で <c>SelectedYear</c> / <c>SelectedMonth</c> を引き直すと、旧年月で決めた
+    /// 年度ファイル名（<c>fiscalYear</c>）と上書き確認で職員が同意した「N月のシートを更新する」に対し、
+    /// 別の月・別の年度のシートを書き込むことになる（6 年保存の帳票が誤ったファイルへ入る）。
+    /// </remarks>
+    [Fact]
+    public async Task CreateReportAsync_作成中に対象年月が変えられても開始時点の年月で作成すること()
+    {
+        // Arrange
+        _viewModel.SelectedYear = 2026;
+        _viewModel.SelectedMonth = 5;
+
+        SelectCard("0000000000000001", "001");
+        SelectCard("0000000000000002", "002");
+
+        // 1 枚目の作成中に対象年月が変わる（キーボード操作を模す）
+        SetupReportCreation(cardIdm =>
+        {
+            if (cardIdm == "0000000000000001")
+            {
+                _viewModel.SelectedYear = 2025;
+                _viewModel.SelectedMonth = 11;
+            }
+
+            return ReportGenerationResult.SuccessResult(cardIdm);
+        });
+
+        // Act
+        await _viewModel.CreateReportAsync();
+
+        // Assert - 2 枚とも開始時点の年月で作成される
+        _createdRequests.Select(r => (r.Year, r.Month)).Should().Equal(
+            new[] { (2026, 5), (2026, 5) },
+            "対象年月は作成開始時点のスナップショットから採るため");
+
+        // 出力先も開始時点の年月から決めた年度ファイル（FY2026）のまま
+        _createdRequests.Select(r => Path.GetFileName(r.OutputPath)).Should().OnlyContain(
+            f => f.Contains("2026"),
+            "年度ファイル名は開始時点の年月から決めるため");
+    }
+
+    /// <summary>
+    /// 対の表明: 年月を変えなければ、その年月で作成すること
+    /// </summary>
+    /// <remarks>
+    /// これが無いと、年月を定数へ決め打ちにした実装でも上のテストが緑になる。
+    /// </remarks>
+    [Fact]
+    public async Task CreateReportAsync_年月が変わらなければ選択中の年月で作成すること()
+    {
+        _viewModel.SelectedYear = 2025;
+        _viewModel.SelectedMonth = 11;
+
+        SelectCard("0000000000000001", "001");
+
+        await _viewModel.CreateReportAsync();
+
+        _createdRequests.Select(r => (r.Year, r.Month)).Should().Equal(new[] { (2025, 11) });
+    }
+
+    /// <summary>
+    /// プレビュー用データの応答を設定する（Issue #1949）
+    /// </summary>
+    /// <param name="onFirstRequest">1 件目の取得時に実行する副作用（選択変更の再現用）</param>
+    private void SetupPreviewData(Action? onFirstRequest = null)
+    {
+        _printServiceMock
+            .Setup(s => s.GetReportDataAsync(It.IsAny<string>(), It.IsAny<int>(), It.IsAny<int>()))
+            .Returns((string cardIdm, int year, int month) =>
+            {
+                _previewRequests.Add((cardIdm, year, month));
+                if (_previewRequests.Count == 1)
+                {
+                    onFirstRequest?.Invoke();
+                }
+
+                return Task.FromResult<ReportPrintData?>(new ReportPrintData
+                {
+                    CardType = "はやかけん",
+                    CardNumber = cardIdm,
+                    Year = year,
+                    Month = month
+                });
+            });
+    }
+
+    /// <summary>
+    /// 欠陥を突く側: プレビュー生成中に対象年月が変わっても、開始時点の年月で全カードを取得すること
+    /// </summary>
+    /// <remarks>
+    /// カードごとのデータ取得は await をまたぐため、毎周 <c>SelectedYear</c> / <c>SelectedMonth</c> を
+    /// 読むと **1 つの結合ドキュメントに別々の月のデータが混在**する。印刷すれば月をまたいだ
+    /// 物品出納簿がそのまま出力される。
+    /// </remarks>
+    [Fact]
+    public async Task PreviewSelectedAsync_生成中に対象年月が変わっても開始時点の年月で全カードを取得すること()
+    {
+        // Arrange
+        _viewModel.SelectedYear = 2026;
+        _viewModel.SelectedMonth = 7;
+        SelectCard("0000000000000001", "001");
+        SelectCard("0000000000000002", "002");
+        SelectCard("0000000000000003", "003");
+
+        // 1 枚目の取得中に対象年月が変わる（キーボード操作を模す）
+        SetupPreviewData(onFirstRequest: () =>
+        {
+            _viewModel.SelectedYear = 2025;
+            _viewModel.SelectedMonth = 3;
+        });
+
+        // Act
+        await _viewModel.PreviewSelectedAsync();
+
+        // Assert - 3 枚とも開始時点の 2026 年 7 月で取得される
+        _previewRequests.Select(r => (r.Year, r.Month)).Should().Equal(
+            new[] { (2026, 7), (2026, 7), (2026, 7) });
+        _previewRequests.Select(r => r.CardIdm).Should().Equal(
+            new[] { "0000000000000001", "0000000000000002", "0000000000000003" });
+    }
+
+    /// <summary>
+    /// 対の表明: 対象年月が変わらなければ、現在の選択どおりの年月で取得すること
+    /// </summary>
+    /// <remarks>
+    /// これが無いと、年月を固定値へ決め打ちにした実装でも上のテストが緑になる。
+    /// </remarks>
+    [Fact]
+    public async Task PreviewSelectedAsync_対象年月が変わらなければ現在の選択どおりに取得すること()
+    {
+        _viewModel.SelectedYear = 2026;
+        _viewModel.SelectedMonth = 7;
+        SelectCard("0000000000000001", "001");
+        SelectCard("0000000000000002", "002");
+
+        await _viewModel.PreviewSelectedAsync();
+
+        _previewRequests.Select(r => (r.Year, r.Month)).Should().Equal(new[] { (2026, 7), (2026, 7) });
     }
 }
