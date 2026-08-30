@@ -374,6 +374,80 @@ public class CardManageViewModelTests
     }
 
     /// <summary>
+    /// Issue #1951: 登録時のロック競合でリトライを使い切っても、致命的エラーダイアログにせず
+    /// ステータス欄で案内すること
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// #1951 で <c>CardRepository.InsertAsync</c> は SQLITE_BUSY / SQLITE_LOCKED を <c>false</c> へ
+    /// 畳まず再スローするようになった。リトライを使い切ってもロックが解けない場合、例外はここまで来る。
+    /// 捕捉しないと <c>App.OnDispatcherUnhandledException</c> に拾われ、
+    /// 「予期しないエラーが発生しました。／エラーコード: SYS999」＋スタックトレースのモーダルになる
+    /// （Issue #1757 が管理番号の重複で避けたのと同じ状態）。職員から見れば「あとでやり直せば通る失敗」
+    /// であり、致命エラーの表示に転用してはならない（<c>.claude/rules/error-messages.md</c> の役割分担）。
+    /// </para>
+    /// <para>
+    /// 職員登録側（<c>StaffManageViewModel.SaveAsync</c>）は包括的な <c>catch (Exception)</c> を
+    /// 元から持っており、カード登録側だけが受け皿を欠いていた。
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public async Task SaveAsync_NewCard_WhenLockConflictExhaustsRetries_ShouldShowActionableError()
+    {
+        // Arrange
+        _viewModel.StartNewCard();
+        _viewModel.EditCardIdm = "0102030405060708";
+        _viewModel.EditCardType = "はやかけん";
+        _viewModel.EditCardNumber = "H-001";
+
+        _cardRepositoryMock.Setup(r => r.GetByIdmAsync("0102030405060708", true)).ReturnsAsync((IcCard?)null);
+        _cardRepositoryMock.Setup(r => r.InsertAsync(It.IsAny<IcCard>()))
+            .ThrowsAsync(new System.Data.SQLite.SQLiteException(
+                System.Data.SQLite.SQLiteErrorCode.Busy, "database is locked"));
+
+        // Act
+        var act = async () => await _viewModel.SaveAsync();
+
+        // Assert: 例外が ViewModel の外へ漏れない（漏れると致命的エラーダイアログになる）
+        await act.Should().NotThrowAsync();
+
+        _viewModel.IsStatusError.Should().BeTrue();
+        _viewModel.StatusMessage.Should().Contain("使用中");
+        _viewModel.StatusMessage.Should().EndWith("もう一度登録してください。");
+        _viewModel.StatusMessage.Should().NotContain("database is locked",
+            "生の例外メッセージ（英語）をユーザーへ出さないこと（Issue #1614）");
+    }
+
+    /// <summary>
+    /// 対の表明: ロック競合ではない例外まで飲み込んで「使用中」と案内しないこと（Issue #1951）
+    /// </summary>
+    /// <remarks>
+    /// 上のテストだけだと、メソッド全体を <c>catch (Exception)</c> で包んで一律に
+    /// 「データベースが使用中」と案内する実装でも緑になる。原因が違えば「なぜ」も「どうすれば」も
+    /// 違うため（<c>.claude/rules/error-messages.md</c>）、一過性ロック以外はこの分岐で扱わない。
+    /// </remarks>
+    [Fact]
+    public async Task SaveAsync_NewCard_WhenNonTransientSQLiteError_ShouldNotClaimDatabaseBusy()
+    {
+        // Arrange
+        _viewModel.StartNewCard();
+        _viewModel.EditCardIdm = "0102030405060708";
+        _viewModel.EditCardType = "はやかけん";
+        _viewModel.EditCardNumber = "H-001";
+
+        _cardRepositoryMock.Setup(r => r.GetByIdmAsync("0102030405060708", true)).ReturnsAsync((IcCard?)null);
+        _cardRepositoryMock.Setup(r => r.InsertAsync(It.IsAny<IcCard>()))
+            .ThrowsAsync(new System.Data.SQLite.SQLiteException(
+                System.Data.SQLite.SQLiteErrorCode.ReadOnly, "attempt to write a readonly database"));
+
+        // Act
+        var act = async () => await _viewModel.SaveAsync();
+
+        // Assert: 一過性ロック用の案内は出さない（原因が違えば取れる行動も違う）
+        await act.Should().ThrowAsync<System.Data.SQLite.SQLiteException>();
+        _viewModel.StatusMessage.Should().NotContain("使用中");
+    }
+    /// <summary>
     /// 重複するカードは登録できないこと
     /// </summary>
     [Fact]

@@ -604,26 +604,45 @@ namespace ICCardManager.ViewModels
                     bool success;
                     try
                     {
-                        success = await _cardRepository.InsertAsync(card);
-                    }
-                    catch (DuplicateCardNumberException duplicate)
-                    {
-                        if (isAutoNumbered)
+                        try
                         {
-                            // Issue #1106: 自動採番で番号が競合した場合、再採番してリトライ
-                            sanitizedCardNumber = await _cardRepository.GetNextCardNumberAsync(EditCardType);
-                            card.CardNumber = sanitizedCardNumber;
                             success = await _cardRepository.InsertAsync(card);
                         }
-                        else
+                        catch (DuplicateCardNumberException duplicate)
                         {
-                            // 手動指定の番号が重複。文言は例外側（Issue #1757 で集約）を使い、
-                            // 登録・編集・CSVインポートで同じ案内になるようにする
-                            StatusMessage = duplicate.UserFriendlyMessage;
-                            IsStatusError = true;
-                            _registrationModeResult = null;
-                            return;
+                            if (isAutoNumbered)
+                            {
+                                // Issue #1106: 自動採番で番号が競合した場合、再採番してリトライ
+                                sanitizedCardNumber = await _cardRepository.GetNextCardNumberAsync(EditCardType);
+                                card.CardNumber = sanitizedCardNumber;
+                                success = await _cardRepository.InsertAsync(card);
+                            }
+                            else
+                            {
+                                // 手動指定の番号が重複。文言は例外側（Issue #1757 で集約）を使い、
+                                // 登録・編集・CSVインポートで同じ案内になるようにする
+                                StatusMessage = duplicate.UserFriendlyMessage;
+                                IsStatusError = true;
+                                _registrationModeResult = null;
+                                return;
+                            }
                         }
+                    }
+                    catch (System.Data.SQLite.SQLiteException ex) when (ICCardManager.Data.DbContext.IsTransientLockError(ex))
+                    {
+                        // Issue #1951: InsertAsync はロック競合を false へ畳まずリトライへ回すようになった。
+                        // リトライを使い切ってもロックが解けない場合は SQLiteException がここまで来る。
+                        // 捕捉しないと未処理例外ハンドラー任せになり、「予期しないエラーが発生しました」＋
+                        // スタックトレースのモーダルが出る（Issue #1757 が重複番号で避けたのと同じ状態）。
+                        // 職員から見れば「あとでやり直せば通る失敗」なので、その場のステータス欄で案内する。
+                        // 職員登録側（StaffManageViewModel.SaveAsync）は同型の catch を元から持っている。
+                        _logger?.LogWarning(ex,
+                            "カード登録がロック競合で確定しませんでした: {ResultCode}", ex.ResultCode);
+                        StatusMessage = "データベースが使用中のため、カードを登録できませんでした。" +
+                            "しばらく待ってから、もう一度登録してください。";
+                        IsStatusError = true;
+                        _registrationModeResult = null;
+                        return;
                     }
 
                     if (success)
