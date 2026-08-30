@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
@@ -70,7 +70,12 @@ namespace ICCardManager.Services
         /// <summary>
         /// 帳票データを取得
         /// </summary>
-        public async Task<ReportPrintData?> GetReportDataAsync(string cardIdm, int year, int month)
+        /// <remarks>
+        /// Issue #1949: 複数カードのプレビュー生成ループ（<c>ReportViewModel.PreviewSelectedAsync</c>）が
+        /// 全カードを同じ年月で取得することを回帰テストで表明するための継ぎ目として virtual にしている。
+        /// 本番では派生クラスを作らない。
+        /// </remarks>
+        public virtual async Task<ReportPrintData?> GetReportDataAsync(string cardIdm, int year, int month)
         {
             // Issue #841: データ準備を共通化されたReportDataBuilderに委譲
             var data = await _reportDataBuilder.BuildAsync(cardIdm, year, month).ConfigureAwait(false);
