@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
@@ -195,7 +195,7 @@ namespace ICCardManager.Services
         /// </remarks>
         private static List<IcCard> FilterActiveCards(IEnumerable<IcCard> cards)
             => (cards ?? Enumerable.Empty<IcCard>())
-                .Where(c => !c.IsDeleted && !c.IsRefunded)
+                .Where(c => c.IsInOperation)
                 .OrderByCardDefault(c => c.CardType, c => c.CardNumber)
                 .ToList();
 

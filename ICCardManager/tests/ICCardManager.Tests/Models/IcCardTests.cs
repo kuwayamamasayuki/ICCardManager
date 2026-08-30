@@ -1,4 +1,4 @@
-using FluentAssertions;
+﻿using FluentAssertions;
 using ICCardManager.Models;
 using Xunit;
 
@@ -34,6 +34,43 @@ public class IcCardTests
     {
         var card = new IcCard { IsDeleted = false, IsRefunded = false, IsLent = true };
         card.IsAvailableForLending.Should().BeFalse();
+    }
+
+    #endregion
+
+    #region IsInOperation（Issue #1947）
+
+    [Fact]
+    public void IsInOperation_NotDeletedNotRefunded_ReturnsTrue()
+    {
+        var card = new IcCard { IsDeleted = false, IsRefunded = false };
+        card.IsInOperation.Should().BeTrue();
+    }
+
+    [Fact]
+    public void IsInOperation_Refunded_ReturnsFalse()
+    {
+        var card = new IcCard { IsDeleted = false, IsRefunded = true };
+        card.IsInOperation.Should().BeFalse();
+    }
+
+    [Fact]
+    public void IsInOperation_Deleted_ReturnsFalse()
+    {
+        var card = new IcCard { IsDeleted = true, IsRefunded = false };
+        card.IsInOperation.Should().BeFalse();
+    }
+
+    /// <summary>
+    /// 貸出中は「運用中」の否定要因にならない（貸出中のカードも窓口で残額を確かめる対象）。
+    /// この対の表明が無いと、IsAvailableForLending と同義（!IsLent を含む）にした実装でも
+    /// 上の 3 件は緑のまま通る。
+    /// </summary>
+    [Fact]
+    public void IsInOperation_Lent_ReturnsTrue()
+    {
+        var card = new IcCard { IsDeleted = false, IsRefunded = false, IsLent = true };
+        card.IsInOperation.Should().BeTrue();
     }
 
     #endregion

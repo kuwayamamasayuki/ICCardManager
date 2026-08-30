@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
@@ -114,6 +114,25 @@ namespace ICCardManager.Models
         /// 貸出可能な状態かどうか（未削除 かつ 未払戻 かつ 未貸出）
         /// </summary>
         public bool IsAvailableForLending => !IsDeleted && !IsRefunded && !IsLent;
+
+        /// <summary>
+        /// 運用中のカードかどうか（未削除 かつ 未払戻）
+        /// </summary>
+        /// <remarks>
+        /// 「いま業務で使われているカードの母集団」を表す。貸出中かどうかは含めない
+        /// （貸出中のカードも運用中である）。
+        /// 残額ダッシュボード（<c>DashboardService</c>）と管理者ダッシュボードの集計
+        /// （<c>AdminDashboardService</c>）はどちらもこの母集団を使う。
+        /// <para>
+        /// Issue #1947: 払戻済みカードは <c>is_deleted = 0</c> のまま残るため
+        /// <c>CardRepository.GetAllAsync</c> が返し続ける。残額ダッシュボードが
+        /// これを除いていなかったため、払い戻しで残額 0 円になったカードが毎回
+        /// 「残額 0円」の警告を出し、除去手段が無いまま本当に補充が必要なカードの
+        /// 警告をスクロール外へ押し出していた。同じ判断が 2 か所に分かれていたことが
+        /// 原因なので、判定はこのプロパティ 1 つに寄せる。
+        /// </para>
+        /// </remarks>
+        public bool IsInOperation => !IsDeleted && !IsRefunded;
 
         /// <summary>
         /// 帳票作成可能な状態かどうか（未削除であれば払戻済でも作成可能）
