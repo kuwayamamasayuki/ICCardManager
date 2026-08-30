@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -79,9 +79,15 @@ public class RepositoryDeleteResultConventionTests
             "DeleteAsync が false を返すのは影響行数 0（＝競合）のときだけであり、" +
             "捨てると削除していないのに監査ログへ「削除した」と記録される（Issue #1944 / #1753 / #1808）");
 
-        // 空振り検出: 検査対象が消えた／パターンが合わなくなった状態で緑にしない
+        // 空振り検出: 検査対象が消えた／パターンが合わなくなった状態で緑にしない。
+        //
+        // しきい値を「現在の実数」（本 Issue 時点では 3）に合わせない（Issue #1786）。
+        // 削除の呼び出しを 1 つ集約するといった**規約が推奨する方向の変更**で赤になると、
+        // 修正者を「対象から外す」方向へ誘導し、外された対象は他の検査からも静かに落ちる。
+        // 検査ロジック自体は下の Theory がサンプル入力で固定しているので、ここは
+        // 「対象が丸ごと消えていないこと」だけを見れば足りる。
         consumedHits.Should().BeGreaterOrEqualTo(
-            3, "正しい形（戻り値を受ける削除の呼び出し）が実在すること");
+            1, "正しい形（戻り値を受ける削除の呼び出し）が実在すること");
     }
 
     /// <summary>
@@ -92,9 +98,12 @@ public class RepositoryDeleteResultConventionTests
     {
         var files = EnumerateInvocations().Select(x => x.RelativePath).ToList();
 
-        files.Should().HaveCountGreaterOrEqualTo(
-            3, "削除を呼ぶ経路は複数のレイヤーに存在する（ViewModels / Data）");
+        // 件数ではなく「導出されていること」を見る（しきい値を実数に合わせない理由は上と同じ）。
+        files.Should().NotBeEmpty("削除を呼ぶ経路が本番ソースに実在すること");
         files.Should().OnlyHaveUniqueItems();
+        files.Should().AllSatisfy(
+            f => f.Should().EndWith(".cs"),
+            "走査は src/ 配下の .cs から導出する（ファイル名の列挙ではない）");
     }
 
     /// <summary>
@@ -110,6 +119,8 @@ public class RepositoryDeleteResultConventionTests
     [InlineData("return await _repo.DeleteAsync(id);", true)]
     [InlineData("if (await _repo.DeleteAsync(id)) { Log(); }", true)]
     [InlineData("var r = await this._cardRepository.DeleteAsync(idm);", true)]
+    // 正しい形（改行を挟むフルエント記法）
+    [InlineData("var ok = await _repo\n    .DeleteAsync(id);", true)]
     public void 検査は戻り値の受け取りを区別すること(string code, bool expectedConsumed)
     {
         var source = TestSourceInspection.ToCodeOnly(code);
@@ -156,8 +167,10 @@ public class RepositoryDeleteResultConventionTests
     /// <param name="index"><c>.DeleteAsync</c> のドットの位置</param>
     private static CallSiteVerdict ClassifyCallSite(string source, int index)
     {
-        // レシーバ式（`_ledgerRepository` / `this._cardRepository` など）を越える
-        var i = index - 1;
+        // レシーバ式（`_ledgerRepository` / `this._cardRepository` など）を越える。
+        // 改行を挟むフルエント記法（`_repo` 改行 `.DeleteAsync(...)`）でもレシーバへ到達できるよう、
+        // ドットの直前の空白を先に読み飛ばす（読み飛ばさないと正しい形が Unrecognized ＝違反になる）。
+        var i = SkipWhitespaceBackward(source, index - 1);
         while (i >= 0 && (char.IsLetterOrDigit(source[i]) || source[i] == '_' ||
                           source[i] == '.' || source[i] == '?'))
         {

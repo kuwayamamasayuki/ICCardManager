@@ -2483,6 +2483,21 @@ public partial class MainViewModel : ViewModelBase
     /// （<c>.claude/rules/development-conventions.md</c>「同じ論理的な書き込みに手段が 2 通りあるか」）。
     /// 後者はモーダルダイアログを実体化するため ViewModel 単体テストから到達できず、
     /// 寄せることでしか回帰を担保できない（静的検査は <c>RepositoryDeleteResultConventionTests</c>）。
+    /// なお <see cref="DeleteLedgerRow"/> は Issue #635 で一覧の削除ボタン用に作られたが、
+    /// Issue #750 でそのボタンが変更ダイアログ内へ移ったため <c>DeleteLedgerRowCommand</c> に
+    /// XAML のバインドは無く、<b>現在 UI から到達するのは後者だけ</b>である。
+    /// 前者は認証・確認の手順を保持したまま残っており、結果として
+    /// <b>本メソッドを挙動テストから踏める唯一の入口</b>になっている。
+    /// </para>
+    /// <para>
+    /// Issue #1727「エラー通知を、失敗したサブシステムに依存させない」を本メソッドには適用していない。
+    /// 競合の案内は再読込 4 連の<b>後ろ</b>にあるため、その途中で例外が出ると案内は失われる。
+    /// ただし #1727 が対象とするのは「通知したい失敗と後処理の失敗が<b>同じ原因</b>で起き、
+    /// 修正が対象とするまさにその状況でだけ通知が消える」形であり、ここは違う —
+    /// <c>deleted == false</c> は「接続はできていて行だけが無い」ことを意味し（接続断なら
+    /// <c>DeleteAsync</c> 自身が例外になる）、その直後の再読込の失敗は独立した事象である。
+    /// 加えて案内文が「一覧を再読み込みしました」と述べる以上、再読込より前へ出すこともできない。
+    /// 何も書き込んでいないため再試行は安全で、害は「汎用のエラー表示になる」ことに留まる。
     /// </para>
     /// </remarks>
     private async Task DeleteLedgerRowCoreAsync(LedgerDto ledger)
