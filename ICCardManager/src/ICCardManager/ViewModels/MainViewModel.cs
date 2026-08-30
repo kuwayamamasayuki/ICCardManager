@@ -2949,11 +2949,42 @@ public partial class MainViewModel : ViewModelBase
         var ledgerIds = sortedDtos.Select(dto => dto.Id).ToList();
         var mergeResult = await _ledgerMergeService.MergeAsync(ledgerIds, authResult.Idm);
 
-        if (mergeResult.Success)
+        if (mergeResult.Success && mergeResult.HasPostCommitFailure)
+        {
+            // Issue #1954: 統合は確定済み。再実行を促すと「統合対象の履歴が見つかりません」に
+            // 行き着くだけなので、再実行を促さず「取り消せない」ことと代替手段を案内する（Issue #1725）。
+            // Issue #1727: 通知は再読込より「前」に出す。取り消し情報の保存が失敗する原因
+            // （共有フォルダーの切断・DB ロック・他 PC との競合）は一覧再読込・ダッシュボード更新も
+            // 同じように失敗させるため、後ろに置くと「統合は完了済み・やり直し不要」という
+            // 肝心の案内が、まさにこの分岐が対象とする状況でだけ失われる（例外は非同期コマンドの
+            // 外へ抜けて誰にも観測されない）。
+            _navigationService.ShowWarning(
+                "履歴の統合は完了しましたが、「元に戻す」ための取り消し情報を記録できませんでした。\n" +
+                "他のパソコンとの競合や、データベースの保存先への一時的な接続不良が原因の可能性があります。\n\n" +
+                "統合そのものはやり直す必要はありません。この統合は「統合を元に戻す」では取り消せないため、" +
+                "内容を戻したい場合は履歴一覧の分割・編集で修正してください。",
+                "統合完了（取り消し情報なし）");
+
+            // 再読込自体の失敗は上の案内と同じ原因なので、ここで握って二重のダイアログにしない
+            // （ExecuteUnmergeAsync の失敗分岐と同じ作法）。
+            try
+            {
+                await LoadHistoryLedgersAsync();
+                await RefreshDashboardAsync();
+            }
+            catch (Exception ex)
+            {
+                _logger?.LogWarning(ex, "Failed to reload history after merge undo-save failure");
+            }
+
+            UndoMergeHistoryLedgersCommand.NotifyCanExecuteChanged();
+        }
+        else if (mergeResult.Success)
         {
             await LoadHistoryLedgersAsync();
             await RefreshDashboardAsync();
             UndoMergeHistoryLedgersCommand.NotifyCanExecuteChanged();
+
             _navigationService.ShowInformation(
                 "履歴を統合しました。\n「統合を元に戻す」ボタンで取り消せます。",
                 "統合完了");
@@ -2963,9 +2994,18 @@ public partial class MainViewModel : ViewModelBase
             // Issue #1753: 失敗時も一覧を再読込する。共有モードでは他 PC が同じ履歴を統合・削除した
             // ことが失敗要因になり得るため、古い一覧のままだと再試行しても同じエラーで止まる。
             // エラー文言（「画面を最新の状態に更新してから再度お試しください」）とも整合させる。
-            await LoadHistoryLedgersAsync();
-
+            // 通知を先に出すのは、再読込が同じ原因（共有フォルダーの切断・DB ロック）で失敗しても
+            // 案内を届けるため（#1727。ExecuteUnmergeAsync の失敗分岐と同じ順序・同じ握り方）。
             _navigationService.ShowError(mergeResult.ErrorMessage, "統合エラー");
+
+            try
+            {
+                await LoadHistoryLedgersAsync();
+            }
+            catch (Exception ex)
+            {
+                _logger?.LogWarning(ex, "Failed to reload history after merge failure");
+            }
         }
     }
 

@@ -2361,6 +2361,184 @@ public class MainViewModelTests : IDisposable
             s => s.RequestAuthenticationAsync("履歴の統合"), Times.Once);
     }
 
+    /// <summary>
+    /// Issue #1954: 統合は確定したが取り消し情報を保存できなかったとき、
+    /// 「取り消せない」ことを警告として案内し、<b>再実行を促さない</b>こと（Issue #1725）。
+    /// </summary>
+    [Fact]
+    public async Task MergeHistoryLedgers_取り消し情報の保存に失敗_統合完了として案内し再実行を促さないこと()
+    {
+        ArrangeMergeableCheckedLedgers();
+        // コミット後の後処理（Undo 情報の保存）だけを失敗させる
+        _ledgerRepositoryMock
+            .Setup(r => r.SaveMergeHistoryAsync(It.IsAny<int>(), It.IsAny<string>(), It.IsAny<string>()))
+            .ThrowsAsync(new InvalidOperationException("simulated undo-save failure"));
+
+        await _viewModel.MergeHistoryLedgersCommand.ExecuteAsync(null);
+
+        // 統合は確定しているのでエラーとしては案内しない
+        _navigationServiceMock.Verify(
+            n => n.ShowError(It.IsAny<string>(), It.IsAny<string>()), Times.Never);
+        // 「元に戻せる」と誤って案内しない
+        _navigationServiceMock.Verify(
+            n => n.ShowInformation(It.IsAny<string>(), It.IsAny<string>()), Times.Never);
+
+        _navigationServiceMock.Verify(
+            n => n.ShowWarning(
+                It.Is<string>(m =>
+                    m.Contains("統合は完了") &&
+                    m.Contains("取り消し情報") &&
+                    !m.Contains("再度お試しください")),
+                It.IsAny<string>()),
+            Times.Once,
+            "統合は記録済み・取り消しはできない、と案内する（再実行を促さない）");
+    }
+
+    /// <summary>
+    /// 対の表明: 後処理まで成功した通常の統合では、従来どおり「元に戻せる」案内を出すこと。
+    /// これが無いと、統合を常に警告として案内する実装でも上のテストが緑になる。
+    /// </summary>
+    [Fact]
+    public async Task MergeHistoryLedgers_後処理まで成功_元に戻せる案内を出すこと()
+    {
+        ArrangeMergeableCheckedLedgers();
+
+        await _viewModel.MergeHistoryLedgersCommand.ExecuteAsync(null);
+
+        _navigationServiceMock.Verify(
+            n => n.ShowInformation(It.Is<string>(m => m.Contains("統合を元に戻す")), "統合完了"),
+            Times.Once);
+        _navigationServiceMock.Verify(
+            n => n.ShowWarning(It.IsAny<string>(), It.IsAny<string>()), Times.Never);
+    }
+
+    /// <summary>
+    /// Issue #1954 / #1727: 取り消し情報の保存が失敗する原因（共有フォルダーの切断・DB ロック）は
+    /// 一覧再読込・ダッシュボード更新も同じように失敗させる。**その状況でこそ**「統合は完了・
+    /// やり直し不要」の案内が届かなければ意味がないので、再読込を失敗させた状態で表明する。
+    /// </summary>
+    /// <remarks>
+    /// この 2 件が無いと、通知を再読込の後ろへ戻した実装（＝#1954 の初版）でも
+    /// 上の 2 件は緑になる（再読込を成功させるモックが欠陥を覆い隠すため）。
+    /// </remarks>
+    [Fact]
+    public async Task MergeHistoryLedgers_取り消し情報の保存に失敗し再読込も失敗_それでも案内が届くこと()
+    {
+        ArrangeMergeableCheckedLedgers(reloadFails: true);
+        _ledgerRepositoryMock
+            .Setup(r => r.SaveMergeHistoryAsync(It.IsAny<int>(), It.IsAny<string>(), It.IsAny<string>()))
+            .ThrowsAsync(new InvalidOperationException("simulated undo-save failure"));
+
+        Func<Task> act = () => _viewModel.MergeHistoryLedgersCommand.ExecuteAsync(null);
+
+        await act.Should().NotThrowAsync("再読込の失敗が非同期コマンドの外へ抜けると誰も観測しない");
+        _navigationServiceMock.Verify(
+            n => n.ShowWarning(
+                It.Is<string>(m => m.Contains("統合は完了") && !m.Contains("再度お試しください")),
+                It.IsAny<string>()),
+            Times.Once,
+            "再読込が同じ原因で失敗しても、統合が確定した事実は必ず伝える（#1727）");
+        _navigationServiceMock.Verify(
+            n => n.ShowError(It.IsAny<string>(), It.IsAny<string>()), Times.Never,
+            "再読込の失敗で二重のダイアログを出さない");
+    }
+
+    /// <summary>
+    /// 対の表明: 統合そのものが失敗したときも、再読込の失敗で案内を落とさないこと（#1727）。
+    /// </summary>
+    [Fact]
+    public async Task MergeHistoryLedgers_統合に失敗し再読込も失敗_それでもエラー案内が届くこと()
+    {
+        ArrangeMergeableCheckedLedgers(reloadFails: true);
+        // 統合対象の 1 件が他 PC に削除された状態（MergeAsync は Success=false を返す）
+        _ledgerRepositoryMock.Setup(r => r.GetByIdAsync(2)).ReturnsAsync((Ledger)null);
+
+        Func<Task> act = () => _viewModel.MergeHistoryLedgersCommand.ExecuteAsync(null);
+
+        await act.Should().NotThrowAsync();
+        _navigationServiceMock.Verify(
+            n => n.ShowError(It.IsAny<string>(), "統合エラー"), Times.Once,
+            "再読込が同じ原因で失敗しても、統合が失敗した事実は必ず伝える（#1727）");
+        _navigationServiceMock.Verify(
+            n => n.ShowWarning(It.IsAny<string>(), It.IsAny<string>()), Times.Never);
+    }
+
+    /// <summary>
+    /// Issue #1954 の 4 件で共通の前提: 隣接する 2 件をチェックし、認証と確認を通過させ、
+    /// リポジトリの統合本体を成功させる。
+    /// </summary>
+    /// <param name="reloadFails">
+    /// true なら統合後の画面更新（`RefreshDashboardAsync` が使うカード一覧の取得）を失敗させる。
+    /// 取り消し情報の保存が失敗する原因と同じ原因で画面更新も失敗する状況の再現（#1727）。
+    /// </param>
+    private void ArrangeMergeableCheckedLedgers(bool reloadFails = false)
+    {
+        const string cardIdm = "0102030405060708";
+        _viewModel.HistoryLedgers.Add(new LedgerDto { Id = 1, CardIdm = cardIdm, IsChecked = true });
+        _viewModel.HistoryLedgers.Add(new LedgerDto { Id = 2, CardIdm = cardIdm, IsChecked = true });
+
+        _staffAuthServiceMock
+            .Setup(a => a.RequestAuthenticationAsync(It.IsAny<string>()))
+            .ReturnsAsync(new StaffAuthResult { Idm = "AABBCCDDEEFF0011", StaffName = "田中太郎" });
+        _navigationServiceMock
+            .Setup(n => n.ShowConfirmation(It.IsAny<string>(), "履歴の統合"))
+            .Returns(true);
+
+        foreach (var id in new[] { 1, 2 })
+        {
+            var ledgerId = id;
+            _ledgerRepositoryMock
+                .Setup(r => r.GetByIdAsync(ledgerId))
+                .ReturnsAsync(new Ledger
+                {
+                    Id = ledgerId,
+                    CardIdm = cardIdm,
+                    Date = new DateTime(2026, 4, 1),
+                    Summary = $"鉄道（A駅～B駅{ledgerId}）",
+                    Expense = 210,
+                    Balance = 2000 - (ledgerId * 210),
+                    Details = new List<LedgerDetail>()
+                });
+        }
+
+        _ledgerRepositoryMock
+            .Setup(r => r.MergeLedgersAsync(
+                It.IsAny<int>(), It.IsAny<IEnumerable<int>>(), It.IsAny<Ledger>(), It.IsAny<SQLiteTransaction>()))
+            .ReturnsAsync(true);
+
+        // 統合後の一覧再読込・ダッシュボード更新が最後まで走るようモックを補う
+        // （ここで例外が出ると、検証したい案内の分岐へ到達しない）
+        _cardRepositoryMock.Setup(r => r.GetLentAsync(It.IsAny<bool>()))
+            .ReturnsAsync(new List<IcCard>());
+        _staffRepositoryMock.Setup(r => r.GetAllAsync())
+            .ReturnsAsync(new List<Staff>());
+        _ledgerRepositoryMock.Setup(r => r.GetAllLatestBalancesAsync())
+            .ReturnsAsync(new Dictionary<string, (int Balance, DateTime? LastUsageDate)>());
+        _settingsRepositoryMock.Setup(r => r.GetAppSettingsAsync())
+            .ReturnsAsync(new AppSettings());
+
+        if (reloadFails)
+        {
+            // 共有フォルダーの切断・DB ロックは、Undo 情報の保存と画面更新を同じように失敗させる。
+            // 一覧の再読込（GetPagedAsync）とダッシュボード更新（GetAllAsync）の**両方**を落とす
+            // ― 成功分岐と失敗分岐で走る後処理が違うため、片方だけだと一方の経路で故障が起きない。
+            // 一覧の再読込を実際に走らせるには HistoryCard が要る（null なら早期 return する）。
+            _viewModel.HistoryCard = new CardDto { CardIdm = cardIdm, CardNumber = "A-1" };
+            _ledgerRepositoryMock
+                .Setup(r => r.GetPagedAsync(
+                    It.IsAny<string>(), It.IsAny<DateTime>(), It.IsAny<DateTime>(),
+                    It.IsAny<int>(), It.IsAny<int>()))
+                .ThrowsAsync(new InvalidOperationException("simulated reload failure"));
+            _cardRepositoryMock.Setup(r => r.GetAllAsync())
+                .ThrowsAsync(new InvalidOperationException("simulated reload failure"));
+        }
+        else
+        {
+            _cardRepositoryMock.Setup(r => r.GetAllAsync())
+                .ReturnsAsync(new List<IcCard>());
+        }
+    }
+
     [Fact]
     public void ApplyBalanceInconsistencyMarkers_複数の不整合がある場合にすべてマーキングされること()
     {
