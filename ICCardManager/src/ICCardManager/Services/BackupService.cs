@@ -566,12 +566,16 @@ namespace ICCardManager.Services
                 return Enumerable.Empty<BackupFileInfo>();
             }
 
+            // Issue #1950: 表示日時も列挙順と同じ根拠（ファイル名のタイムスタンプ）で解決する。
+            // CreationTime は共有フォルダーへコピー／移動された時点で書き換わるため、
+            // 退避しておいた世代を戻すと「作成日時: 今日」と案内しながら
+            // 6 年保存の台帳 DB を 1 年前のコピーで上書きすることになる。
             return EnumerateBackupFiles(backupPath)
                 .Select(f => new BackupFileInfo
                 {
                     FilePath = f.FullName,
                     FileName = f.Name,
-                    CreatedAt = f.CreationTime,
+                    CreatedAt = ResolveBackupTimestamp(f),
                     FileSize = f.Length
                 });
         }
@@ -589,6 +593,15 @@ namespace ICCardManager.Services
         /// 8.3 短縮名にも一致し、拡張子がちょうど 3 文字のときは前方一致で拾う仕様があるため、
         /// 「一時ファイルは列挙されない」という本 Issue の前提を検索パターンの実装依存に委ねない。
         /// </para>
+        /// <para>
+        /// Issue #1950: 並べ替えの根拠は <c>CreationTime</c> ではなく
+        /// <see cref="ResolveBackupTimestamp"/>（ファイル名のタイムスタンプ、解析できない名前のみ
+        /// <c>CreationTime</c> へフォールバック）に寄せる。世代削除（Issue #1813）が既に
+        /// ファイル名を根拠にしているのに列挙・表示だけが <c>CreationTime</c> のままだと、
+        /// 退避しておいたバックアップを共有フォルダーへコピーで戻したときに
+        /// <b>削除されないファイルが一覧の先頭に「最新」として並ぶ</b>。
+        /// 同じ資源に対する判定手段を 2 つ持たないこと（規約 #1763）。
+        /// </para>
         /// </remarks>
         /// <param name="backupPath">バックアップ保存先フォルダー</param>
         internal static List<FileInfo> EnumerateBackupFiles(string backupPath)
@@ -596,7 +609,7 @@ namespace ICCardManager.Services
             return Directory.GetFiles(backupPath, $"{BackupFilePrefix}*{BackupFileExtension}")
                 .Where(f => f.EndsWith(BackupFileExtension, StringComparison.OrdinalIgnoreCase))
                 .Select(f => new FileInfo(f))
-                .OrderByDescending(f => f.CreationTime)
+                .OrderByDescending(ResolveBackupTimestamp)
                 .ToList();
         }
 
@@ -1229,8 +1242,17 @@ namespace ICCardManager.Services
         public string FileName { get; set; } = string.Empty;
 
         /// <summary>
-        /// 作成日時
+        /// バックアップを作成した日時
         /// </summary>
+        /// <remarks>
+        /// Issue #1950: ファイルシステムの <c>CreationTime</c> ではなく
+        /// <see cref="BackupService.ResolveBackupTimestamp"/> が解決した値
+        /// （ファイル名のタイムスタンプ。解析できない名前のときだけ <c>CreationTime</c>）。
+        /// 共有フォルダーへのコピー／移動で <c>CreationTime</c> は書き換わるため、
+        /// 「バックアップを書いた側が意図した日時」はファイル名にしか残らない。
+        /// 世代削除（Issue #1813）と同じ根拠を使うことで、
+        /// 一覧の並び・表示日時と保持判定が食い違わないようにしている。
+        /// </remarks>
         public DateTime CreatedAt { get; set; }
 
         /// <summary>
