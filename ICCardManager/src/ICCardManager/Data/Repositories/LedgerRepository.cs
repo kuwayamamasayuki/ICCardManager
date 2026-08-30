@@ -1710,15 +1710,21 @@ WHERE card_idm IN ({string.Join(", ", parameters)})";
             using (var updateCommand = connection.CreateCommand())
             {
                 updateCommand.Transaction = transaction;
+                // Issue #1942: companion_count（外N名）も統合が再計算する列。SET し忘れると
+                // LedgerMergeService が Max で決めた同行者数が in-memory の統合先にしか残らず、
+                // UI と operation_log は「外2名」を示すのに 6 年保存の台帳と物品出納簿からは消える。
+                // SET 句は「この経路で本当に編集する列」に限る（Issue #1726）ため、
+                // 統合が再計算しない列（date / staff_name / lender_idm 等）はここに足さないこと。
                 updateCommand.CommandText = @"UPDATE ledger
 SET summary = @summary, income = @income, expense = @expense,
-    balance = @balance, note = @note
+    balance = @balance, note = @note, companion_count = @companionCount
 WHERE id = @id";
                 updateCommand.Parameters.AddWithValue("@summary", updatedTarget.Summary);
                 updateCommand.Parameters.AddWithValue("@income", updatedTarget.Income);
                 updateCommand.Parameters.AddWithValue("@expense", updatedTarget.Expense);
                 updateCommand.Parameters.AddWithValue("@balance", updatedTarget.Balance);
                 updateCommand.Parameters.AddWithValue("@note", (object)updatedTarget.Note ?? DBNull.Value);
+                updateCommand.Parameters.AddWithValue("@companionCount", updatedTarget.CompanionCount);
                 updateCommand.Parameters.AddWithValue("@id", targetLedgerId);
 
                 // SQLite の changes() は WHERE に一致した行を（値が変わらなくても）数えるため、
@@ -1887,15 +1893,20 @@ SELECT last_insert_rowid();";
             var original = undoData.OriginalTarget;
             using var updateCommand = connection.CreateCommand();
             updateCommand.Transaction = transaction;
+            // Issue #1942: 統合が companion_count を書き換える以上、取り消しも同じ列を復元する。
+            // 復元しないと、統合で引き上げた「外N名」が取り消し後も残り、
+            // 同行者のいなかった行が物品出納簿に「外2名」で載り続ける（統合側と同じ SET 句の欠落）。
+            // 列の並びは MergeLedgersAsync の UPDATE と対にすること。
             updateCommand.CommandText = @"UPDATE ledger
 SET summary = @summary, income = @income, expense = @expense,
-    balance = @balance, note = @note
+    balance = @balance, note = @note, companion_count = @companionCount
 WHERE id = @id";
             updateCommand.Parameters.AddWithValue("@summary", original.Summary);
             updateCommand.Parameters.AddWithValue("@income", original.Income);
             updateCommand.Parameters.AddWithValue("@expense", original.Expense);
             updateCommand.Parameters.AddWithValue("@balance", original.Balance);
             updateCommand.Parameters.AddWithValue("@note", (object)original.Note ?? DBNull.Value);
+            updateCommand.Parameters.AddWithValue("@companionCount", original.CompanionCount);
             updateCommand.Parameters.AddWithValue("@id", original.Id);
 
             // 0 行は「統合先が統合後に削除された」＝競合。統合元だけを復活させると
