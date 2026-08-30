@@ -3931,6 +3931,97 @@ public class MainViewModelTests : IDisposable
         _viewModel.WarningMessages.Should().ContainSingle(w => w.Type == WarningType.CardBalanceMismatch);
     }
 
+    /// <summary>
+    /// 食い違い判定の対象カードと、その判定中にタッチされる 2 枚目のカードを整える。
+    /// <c>ReadBalanceAsync</c>（実機で数百ミリ秒）の最中に 2 枚目が届く交錯を、
+    /// モックの Callback から <c>CardRead</c> を 1 回だけ発火して再現する。
+    /// </summary>
+    /// <param name="raiseSecondTouchDuringRead">
+    /// false のときは 2 枚目を発火しない（再入を起こさない対の表明で使う）。
+    /// </param>
+    private void ArrangeCardTouchDuringBalanceMismatchCheck(
+        string secondIdm, bool raiseSecondTouchDuringRead = true)
+    {
+        SetupWarningCheckDefaults();
+        ArrangeHistoryPaging(_ => 0, pageSize: 30);
+        _staffRepositoryMock.Setup(r => r.GetByIdmAsync(It.IsAny<string>(), It.IsAny<bool>()))
+            .ReturnsAsync((Staff)null);
+        _cardRepositoryMock.Setup(r => r.GetByIdmAsync(It.IsAny<string>(), It.IsAny<bool>()))
+            .ReturnsAsync(MismatchTargetCard());
+        _ledgerRepositoryMock.Setup(r => r.GetLatestLedgerAsync(MismatchCardIdm))
+            .ReturnsAsync(new Ledger { CardIdm = MismatchCardIdm, Balance = 2500 });
+
+        var raised = false;
+        _cardReaderMock.Setup(r => r.ReadBalanceAsync(MismatchCardIdm))
+            .Callback(() =>
+            {
+                if (!raiseSecondTouchDuringRead || raised) return;
+                raised = true;
+                _cardReaderMock.Raise(r => r.CardRead += null,
+                    _cardReaderMock.Object, new CardReadEventArgs { Idm = secondIdm });
+            })
+            .ReturnsAsync((int?)1250);
+    }
+
+    /// <summary>
+    /// Issue #1946: 残額の食い違い判定中（<c>ReadBalanceAsync</c> の待機中）に別カードがタッチされても
+    /// 判定へ再入しないこと。再入すると <c>_cardReader.Error</c> の <c>-=</c> が no-op になり
+    /// <c>finally</c> の <c>+=</c> が 2 回走って二重購読になる（リーダーエラー 1 回が 2 回として数えられる）。
+    /// Issue #1807 が <c>HandleUnregisteredCardAsync</c> で是正したのと同型で、
+    /// Issue #1908 で後から追加されたこの経路には適用されていなかった。
+    /// </summary>
+    [Fact]
+    public async Task 残額の食い違い判定中の別カードタッチでErrorハンドラが二重購読されないこと()
+    {
+        // Arrange
+        var secondIdm = "1112131415161718";
+        ArrangeCardTouchDuringBalanceMismatchCheck(secondIdm);
+
+        // Act - 1 枚目のタッチ（判定の最中に 2 枚目が届く）
+        _cardReaderMock.Raise(r => r.CardRead += null,
+            _cardReaderMock.Object, new CardReadEventArgs { Idm = MismatchCardIdm });
+        await _dispatcherService.WaitForPendingAsync();
+
+        // 判定が終わった後にリーダーエラーを 1 回だけ発生させる
+        _cardReaderMock.Raise(r => r.Error += null,
+            _cardReaderMock.Object, new InvalidOperationException("reader error"));
+        await _dispatcherService.WaitForPendingAsync();
+
+        // Assert
+        // Issue #1811: 同種の警告は 1 件に集約されるため、購読の多重度は件数ではなく
+        // OccurrenceCount（1 回の Error が何回として数えられたか）で見る
+        _viewModel.WarningMessages.Should().ContainSingle(w => w.Type == WarningType.CardReaderError)
+            .Which.OccurrenceCount.Should().Be(1, "Error ハンドラは 1 回だけ購読されている");
+        _staffRepositoryMock.Verify(r => r.GetByIdmAsync(secondIdm, It.IsAny<bool>()), Times.Never,
+            "判定中のタッチは入口ゲートで捨てられ、カード判定へ進まない");
+    }
+
+    /// <summary>
+    /// 上の対の表明。抑制は判定の区間だけで、終われば必ず解放されること。
+    /// これが無いと「抑制を取りっぱなしにする」実装（以後すべてのタッチが無視される。Issue #1725 の固着）でも
+    /// 上のテストは緑になる。
+    /// </summary>
+    [Fact]
+    public async Task 残額の食い違い判定が終われば抑制を解放して次のタッチを処理すること()
+    {
+        // Arrange - 再入は起こさない（欠陥の有無にかかわらず成立すべき挙動の表明）
+        var secondIdm = "1112131415161718";
+        ArrangeCardTouchDuringBalanceMismatchCheck(secondIdm, raiseSecondTouchDuringRead: false);
+
+        _cardReaderMock.Raise(r => r.CardRead += null,
+            _cardReaderMock.Object, new CardReadEventArgs { Idm = MismatchCardIdm });
+        await _dispatcherService.WaitForPendingAsync();
+        _viewModel.IsCardReadingSuppressed.Should().BeFalse("判定が終われば抑制は解放される");
+
+        // Act - 判定の終了後に届いたタッチは通常どおり処理される
+        _cardReaderMock.Raise(r => r.CardRead += null,
+            _cardReaderMock.Object, new CardReadEventArgs { Idm = secondIdm });
+        await _dispatcherService.WaitForPendingAsync();
+
+        // Assert
+        _staffRepositoryMock.Verify(r => r.GetByIdmAsync(secondIdm, It.IsAny<bool>()), Times.Once);
+    }
+
     [Fact]
     public async Task HandleWarningClick_食い違い警告のクリックで該当カードの履歴を開くこと()
     {
