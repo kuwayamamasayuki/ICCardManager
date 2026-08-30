@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
@@ -603,6 +603,94 @@ public class DashboardServiceTests
         maxConcurrentCalls.Should().Be(1,
             "BuildDashboardAsync は同一 SQLiteConnection 上の SQLITE_MISUSE を防ぐため、" +
             "リポジトリ呼び出しを直列化する（Issue #1452）");
+    }
+
+    #endregion
+
+    #region Issue #1947: 払戻済みカードを残額ダッシュボードの母集団から除く
+
+    [Fact]
+    public async Task BuildDashboardAsync_払戻済みカードを母集団から除くこと()
+    {
+        // Arrange: 払い戻しは Balance = 0 の台帳行を書き、is_deleted は 0 のまま残す。
+        // GetAllAsync（WHERE is_deleted = 0）はこのカードを返し続ける。
+        var cards = new[]
+        {
+            new IcCard { CardIdm = "1111111111111111", CardType = "はやかけん", CardNumber = "H-001", IsRefunded = true },
+            new IcCard { CardIdm = "2222222222222222", CardType = "nimoca", CardNumber = "N-001" }
+        };
+        var balances = new Dictionary<string, (int, DateTime?)>
+        {
+            ["1111111111111111"] = (0, new DateTime(2026, 3, 1)),
+            ["2222222222222222"] = (5000, new DateTime(2026, 3, 2))
+        };
+
+        SetupRepositories(cards, balances, warningBalance: 1000);
+
+        // Act
+        var result = await _service.BuildDashboardAsync(DashboardSortOrder.CardName);
+
+        // Assert
+        result.Items.Select(i => i.CardIdm).Should().NotContain("1111111111111111",
+            "払戻済みカードは既に運用から外れており、残額 0 円の警告を出し続ける母集団に含めてはならない（Issue #1947）");
+        result.Items.Should().ContainSingle().Which.CardIdm.Should().Be("2222222222222222");
+    }
+
+    [Fact]
+    public async Task BuildDashboardAsync_払戻していない残額不足カードは従来どおり警告対象になること()
+    {
+        // Arrange: 対の表明。払戻の除外が広すぎて正当な警告まで消していないことを固定する。
+        var cards = new[]
+        {
+            new IcCard { CardIdm = "3333333333333333", CardType = "SUGOCA", CardNumber = "S-001" }
+        };
+        var balances = new Dictionary<string, (int, DateTime?)>
+        {
+            ["3333333333333333"] = (500, new DateTime(2026, 3, 3))
+        };
+
+        SetupRepositories(cards, balances, warningBalance: 1000);
+
+        // Act
+        var result = await _service.BuildDashboardAsync(DashboardSortOrder.CardName);
+
+        // Assert
+        var item = result.Items.Should().ContainSingle().Subject;
+        item.CardIdm.Should().Be("3333333333333333");
+        item.IsBalanceWarning.Should().BeTrue(
+            "払い戻していない残額不足カードは、従来どおり残額警告の対象であること");
+    }
+
+    [Fact]
+    public async Task BuildDashboardAsync_払戻済みカードの残額0円は残額警告一覧に出ないこと()
+    {
+        // Arrange: 実際の故障（除去手段の無い「残額 0円」警告が居座る）を、
+        // 本番と同じ WarningService へダッシュボード結果を流して表明する。
+        var cards = new[]
+        {
+            new IcCard { CardIdm = "1111111111111111", CardType = "はやかけん", CardNumber = "H-001", IsRefunded = true },
+            new IcCard { CardIdm = "3333333333333333", CardType = "SUGOCA", CardNumber = "S-001" }
+        };
+        var balances = new Dictionary<string, (int, DateTime?)>
+        {
+            ["1111111111111111"] = (0, new DateTime(2026, 3, 1)),
+            ["3333333333333333"] = (500, new DateTime(2026, 3, 3))
+        };
+
+        SetupRepositories(cards, balances, warningBalance: 1000);
+
+        var warningService = new WarningService(
+            _ledgerRepositoryMock.Object,
+            new Mock<IDatabaseInfo>().Object);
+
+        // Act
+        var result = await _service.BuildDashboardAsync(DashboardSortOrder.CardName);
+        var warnings = warningService.CheckLowBalanceWarnings(result.Items, result.WarningBalance);
+
+        // Assert
+        warnings.Select(w => w.CardIdm).Should().NotContain("1111111111111111",
+            "払戻済みカードの残額警告は除去手段が無く、本当に補充が必要なカードの警告を押し出す（Issue #1947）");
+        warnings.Should().ContainSingle().Which.CardIdm.Should().Be("3333333333333333");
     }
 
     #endregion

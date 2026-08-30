@@ -2526,6 +2526,59 @@ public class MainViewModelTests : IDisposable
     }
 
     [Fact]
+    public async Task CheckAllCardsConsistencyAsync_払戻済みカードはスキップされること()
+    {
+        // Issue #1947: 除去側（RefreshDashboardAsync）は残額ダッシュボードの母集団に
+        // 居ないカードの BalanceInconsistency 警告を取り除くため、生成側が払戻済みカードで
+        // 警告を立てると「出してすぐ黙って消える」状態になる（6 年保存台帳の不整合が
+        // 誰の操作にも紐づかず消える）。生成側と除去側の判定条件を揃える。
+        var refundedCard = new IcCard
+        {
+            CardIdm = "0101020304050607",
+            CardType = "はやかけん",
+            CardNumber = "5042",
+            IsRefunded = true
+        };
+        _cardRepositoryMock.Setup(r => r.GetAllAsync())
+            .ReturnsAsync(new List<IcCard> { refundedCard });
+
+        // Act
+        await _viewModel.CheckAllCardsConsistencyAsync();
+
+        // Assert
+        _ledgerRepositoryMock.Verify(
+            r => r.GetByDateRangeAsync(It.IsAny<string>(), It.IsAny<DateTime>(), It.IsAny<DateTime>()),
+            Times.Never);
+        _viewModel.WarningMessages.Should().NotContain(w =>
+            w.Type == WarningType.BalanceInconsistency);
+    }
+
+    [Fact]
+    public async Task CheckAllCardsConsistencyAsync_貸出中のカードはスキップされないこと()
+    {
+        // 対の表明。母集団を IsAvailableForLending（!IsLent を含む）にした実装でも
+        // 上の 2 件（削除済み・払戻済み）は緑になるため、これが無いと絞りすぎを検出できない。
+        var lentCard = new IcCard
+        {
+            CardIdm = "0101020304050607",
+            CardType = "はやかけん",
+            CardNumber = "5042",
+            IsLent = true
+        };
+        _cardRepositoryMock.Setup(r => r.GetAllAsync())
+            .ReturnsAsync(new List<IcCard> { lentCard });
+
+        // Act
+        await _viewModel.CheckAllCardsConsistencyAsync();
+
+        // Assert: 貸出中でも整合性チェックは実行される
+        // （実 LedgerConsistencyChecker が _ledgerRepositoryMock を読むので、その呼び出しで観測する）
+        _ledgerRepositoryMock.Verify(
+            r => r.GetByDateRangeAsync(lentCard.CardIdm, It.IsAny<DateTime>(), It.IsAny<DateTime>()),
+            Times.Once);
+    }
+
+    [Fact]
     public async Task CheckAllCardsConsistencyAsync_既存の不整合警告が更新されること()
     {
         // Arrange: 既存の警告がある状態
@@ -3773,12 +3826,13 @@ public class MainViewModelTests : IDisposable
 
     private const string MismatchCardIdm = "AAAABBBBCCCCDDDD";
 
-    private static IcCard MismatchTargetCard(bool isLent = false) => new IcCard
+    private static IcCard MismatchTargetCard(bool isLent = false, bool isRefunded = false) => new IcCard
     {
         CardIdm = MismatchCardIdm,
         CardType = "はやかけん",
         CardNumber = "No.3",
-        IsLent = isLent
+        IsLent = isLent,
+        IsRefunded = isRefunded
     };
 
     /// <summary>
@@ -3909,6 +3963,31 @@ public class MainViewModelTests : IDisposable
         _viewModel.WarningMessages
             .Should().ContainSingle(w => w.Type == WarningType.CardBalanceMismatch)
             .Which.DisplayText.Should().Contain("返却処理");
+    }
+
+    [Fact]
+    public async Task CheckCardBalanceMismatchAsync_払戻済みカードは判定しないこと()
+    {
+        // Issue #1947: 生成側と除去側の母集団を揃える。払戻済みカードは残額ダッシュボードの
+        // 母集団（IcCard.IsInOperation）に居ないため、警告を立てても RefreshDashboardAsync が
+        // 次の更新で取り除く＝立てた直後に誰の操作にも紐づかず黙って消える。
+        ArrangeCardBalance(actualBalance: 1250, recordedBalance: 2500);
+
+        await _viewModel.CheckCardBalanceMismatchAsync(MismatchTargetCard(isRefunded: true));
+
+        _viewModel.WarningMessages.Should().NotContain(w => w.Type == WarningType.CardBalanceMismatch);
+    }
+
+    [Fact]
+    public async Task CheckCardBalanceMismatchAsync_払戻済みカードでは残額を読み取りにいかないこと()
+    {
+        // 対の表明の一種。警告が出ないことだけを見ると「読み取ってから捨てる」実装でも緑になる。
+        // 母集団から外れたカードは、リーダーへの読み取り自体を行わない。
+        ArrangeCardBalance(actualBalance: 1250, recordedBalance: 2500);
+
+        await _viewModel.CheckCardBalanceMismatchAsync(MismatchTargetCard(isRefunded: true));
+
+        _cardReaderMock.Verify(r => r.ReadBalanceAsync(It.IsAny<string>()), Times.Never);
     }
 
     [Fact]

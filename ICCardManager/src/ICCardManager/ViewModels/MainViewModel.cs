@@ -1198,6 +1198,7 @@ public partial class MainViewModel : ViewModelBase
 
             // Issue #1908: 履歴を開く前に、カードの実残額とピッすいの記録の食い違いを判定する。
             // 実残額はカードがリーダーに載っている「いま」しか読めないため、履歴の読み込み（DB I/O）より前に行う。
+            // Issue #1947: 母集団の判定は CheckCardBalanceMismatchAsync の内側で行う（呼び出し元へ配らない）。
             await CheckCardBalanceMismatchAsync(card);
 
             // 履歴表示画面を開く
@@ -1849,6 +1850,18 @@ public partial class MainViewModel : ViewModelBase
     internal async Task CheckCardBalanceMismatchAsync(IcCard card)
     {
         if (card == null) return;
+
+        // Issue #1947: 母集団は「運用中のカード」（IcCard.IsInOperation）。除去側の
+        // RefreshDashboardAsync は残額ダッシュボードに居ないカードの警告を取り除くため、
+        // 運用から外れたカード（払戻済み・削除済み）で警告を立てると、次のダッシュボード更新
+        // （貸出・返却／共有モードの定期更新）で誰の操作にも紐づかず黙って消える。
+        // 生成側と除去側の判定条件を揃える（.claude/rules/business-logic.md #1739 / #1947）。
+        // 判定は呼び出し元へ配らず本メソッドの内側に置く — 分岐先に配ると、経路が増えるたびに
+        // 配り忘れる形が残る（#1842）。上の抑制判定（#1946）を内側に置いたのと同じ理由。
+        if (!card.IsInOperation)
+        {
+            return;
+        }
 
         // Issue #1946: 呼び出し元（HandleCardInStaffWaitingStateAsync）の再判定と本メソッドの抑制取得の間に
         // await は無いが、抑制中に本メソッドへ到達する経路が将来増えても再入しないための backstop として
@@ -2833,7 +2846,12 @@ public partial class MainViewModel : ViewModelBase
 
         foreach (var card in cards)
         {
-            if (card.IsDeleted) continue;
+            // Issue #1947: 母集団は「運用中のカード」（IcCard.IsInOperation）。
+            // 除去側（RefreshDashboardAsync）は残額ダッシュボードの母集団に居ないカードの
+            // BalanceInconsistency 警告を取り除くため、ここで払戻済みカードの警告を立てると
+            // 次のダッシュボード更新（貸出・返却／共有モードの定期更新）で黙って消える。
+            // 生成側と除去側の判定条件を揃える（.claude/rules/business-logic.md #1739）。
+            if (!card.IsInOperation) continue;
 
             var checkResult = await _ledgerConsistencyChecker.CheckBalanceConsistencyAsync(
                 card.CardIdm, FullPeriodStart, FullPeriodEnd);
