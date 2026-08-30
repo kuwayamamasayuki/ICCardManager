@@ -838,8 +838,19 @@ namespace ICCardManager.Infrastructure.CardReader
                 // Issue #942: フォールバック判定が発生した場合は診断ログを出力
                 if (pointRedemptionFallbackTriggered && detail != null)
                 {
+                    // 既存の Debug ログは置き換えず併設する（#1730。既存テストの期待値も維持される）
                     _logger.LogDebug(
                         "FelicaCardReader: 利用種別0x{UsageType:X2}で残高増加を検出、ポイント還元として処理（金額: {Amount}円）",
+                        currentData[1], detail.Amount);
+
+                    // Issue #1948: このフォールバックは isPointRedemption を立てるだけでなく isBus も取り下げる
+                    // （バスとポイント還元は排他）。誤発動すると、本来バス利用だった明細のバス停名入力が
+                    // 画面から消え、摘要も「ポイント還元」になる。原因調査には「どの利用種別・金額で
+                    // 発動したか」が要るが、LogDebug は本番の LogLevel:Default = Information で
+                    // ファイルへ出力されない（#1716）ため、Information でも 1 行残す。
+                    // フォールバック発動時のみの出力なので、正常運用中のログ肥大化は起きない。
+                    _logger.LogInformation(
+                        "FelicaCardReader: 利用種別0x{UsageType:X2}で残高増加を検出したため、ポイント還元として処理しバス判定を取り下げました（金額: {Amount}円）",
                         currentData[1], detail.Amount);
                 }
 
