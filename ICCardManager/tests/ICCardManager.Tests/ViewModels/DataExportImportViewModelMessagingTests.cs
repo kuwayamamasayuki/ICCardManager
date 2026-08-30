@@ -502,5 +502,45 @@ public class DataExportImportViewModelMessagingTests : IDisposable
         _viewModel.IsWaitingForCardTouch.Should().BeFalse();
     }
 
+    /// <summary>
+    /// 照合の待機中にタッチ待ちが解除されたら、副作用を起こさずに中止すること
+    /// </summary>
+    /// <remarks>
+    /// Issue #1952 のコードレビュー指摘: 解放を <c>await</c> より後ろへ移したことで、
+    /// 照合中も「キャンセル」ボタン（Visibility は <c>IsWaitingForCardTouch</c> に束縛）が
+    /// 押せる状態で残る。共有モードの照合は秒単位かかり得るため、この窓でキャンセル／
+    /// 指定のクリア／データ種別の切替／<c>Cleanup</c> が起きて抑制が解放され得る。
+    /// 再判定しないと、未登録カード警告モーダルを**抑制 OFF のまま**開くことになり、
+    /// 本 Issue が塞いだ欠陥（背後で貸出・返却が進む）がこの経路から再現する。
+    /// </remarks>
+    [Fact]
+    public async Task HandleCardReadAsync_照合中にキャンセルされた_警告を開かず中止すること()
+    {
+        // Arrange
+        var idm = "0102030405060708";
+        _cardRepositoryMock.Setup(r => r.GetByIdmAsync(idm, false))
+            .Returns(() =>
+            {
+                // 照合の待機中に「キャンセル」が押された状況（抑制はここで解放される）
+                _viewModel.CancelCardTouch();
+                return Task.FromResult<ICCardManager.Models.IcCard?>(null);
+            });
+
+        await _viewModel.StartCardTouchAsync();
+        _receivedMessages.Clear();
+
+        // Act
+        await _viewModel.HandleCardReadAsync(idm);
+
+        // Assert
+        _dialogServiceMock.Verify(d => d.ShowWarning(It.IsAny<string>(), It.IsAny<string>()), Times.Never,
+            "抑制が解放されたあとに未登録カード警告モーダルを開かないこと（Issue #1952）");
+        _viewModel.TouchedCardInfo.Should().NotBe("未登録のカードです",
+            "中止したタッチは副作用を残さない（#1842）");
+        _receivedMessages.Should().OnlyContain(m => m.Value == false,
+            "中止後に抑制を取り直さないこと");
+        _dispatcher.ObservedExceptions.Should().BeEmpty();
+    }
+
     #endregion
 }

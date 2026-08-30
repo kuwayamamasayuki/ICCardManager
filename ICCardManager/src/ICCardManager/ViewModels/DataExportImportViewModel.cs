@@ -1252,6 +1252,16 @@ public partial class DataExportImportViewModel : ViewModelBase
             // 読み取ったIDmで登録済みカードを検索
             var card = await _cardRepository.GetByIdmAsync(idm);
 
+            // Issue #1952: 解放を await より後ろへ移した結果、この待機中もタッチ待ちは true のままで、
+            // 「キャンセル」ボタン（Visibility は IsWaitingForCardTouch に束縛）が押せる状態で残る。
+            // 共有モードの照合は秒単位かかり得るため、この窓でキャンセル／指定のクリア／
+            // データ種別の切替／ダイアログ終了（Cleanup）が起き、抑制が解放され得る。
+            // そのまま続けると未登録カード警告モーダルを**抑制 OFF のまま**開くことになり、
+            // 本 Issue が塞いだ欠陥（背後で貸出・返却が進む）がこの経路から再現する。
+            // 副作用（TouchedCardIdm / TouchedCardInfo / モーダル）より前に再判定し、
+            // 中止したタッチは通知せず捨てる（#1842「副作用を起こす前に判定を終える」）。
+            if (!IsWaitingForCardTouch) return;
+
             if (card != null)
             {
                 // 登録済みカードが見つかった
