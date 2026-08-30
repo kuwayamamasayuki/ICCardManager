@@ -705,17 +705,41 @@ public class CacheServiceTests : IDisposable
     [InlineData(EvictionReason.Expired)]
     [InlineData(EvictionReason.Capacity)]
     [InlineData(EvictionReason.TokenExpired)]
-    public void Issue1943_キャッシュ都合の退避では追跡表からも消えること(EvictionReason reason)
+    public async Task Issue1943_キャッシュ都合の退避では追跡表からも消えること(EvictionReason reason)
     {
-        // Arrange
+        // Arrange: 「キャッシュには無く、追跡表にだけ残っている」＝実際に失われた状態を作る。
+        // 追跡表は Set で追加され、期限切れの反映（本物のコールバック）はアクセス契機で起きるため、
+        // アクセスせずに期限だけ切らせるとこの状態になる。
         const string key = "card:all";
-        _sut.Set(key, "v1", TimeSpan.FromMinutes(1));
+        _sut.Set(key, "v1", TimeSpan.FromMilliseconds(1));
+        await Task.Delay(30);
+        _sut.TrackedKeys.Should().Contain(key, "前提: 追跡表にはまだ残っている");
 
         // Act
         _sut.OnPostEviction(key, "v1", reason, null);
 
         // Assert
         _sut.TrackedKeys.Should().NotContain(key, "エントリが実際に失われた退避では追跡表も畳む");
+    }
+
+    // 理由の判別だけでは Expired 自身の遅延着地を塞げない。期限切れの検出は GetOrCreateAsync 冒頭の
+    // TryGetValue で起きてコールバックを投げたあと、factory() の DB 往復を挟んでから Set へ進むため、
+    // スレッドプールが詰まると旧世代の Expired が新しいエントリより後に着地する。
+    // 理由だけを見て消すと、本 Issue が消したはずの「生きているのに追跡表から落ちたキー」がここに残る。
+    [Fact]
+    public void Issue1943_旧世代のExpiredが遅れて着地しても生きているキーは追跡表に残ること()
+    {
+        // Arrange: 期限切れの後に再取得され、新しいエントリが生きている状態
+        const string key = "card:all";
+        _sut.Set(key, "v1", TimeSpan.FromMinutes(1));
+
+        // Act: 旧エントリの Expired コールバックが遅れて着地した形
+        _sut.OnPostEviction(key, "v1", EvictionReason.Expired, null);
+
+        // Assert
+        _sut.TrackedKeys.Should().Contain(key, "新しいエントリがキャッシュに生きている");
+        _sut.InvalidateByPrefix("card:");
+        _sut.Get<string>(key).Should().BeNull("無効化したキーがキャッシュに残ってはならない");
     }
 
     [Fact]

@@ -18,7 +18,8 @@ namespace ICCardManager.Infrastructure.Caching
         private readonly ConcurrentDictionary<string, byte> _keys;
         private readonly ILogger<CacheService> _logger;
         private readonly object _lock = new();
-        private bool _disposed;
+        // Issue #1943: OnPostEviction はスレッドプールで着地するため、Dispose したスレッドとは別スレッドから読まれる。
+        private volatile bool _disposed;
 
         /// <summary>
         /// Issue #1167: GetOrCreateAsyncのキーごとの排他制御用セマフォ。
@@ -127,6 +128,22 @@ namespace ICCardManager.Infrastructure.Caching
         /// <see cref="IMemoryCache.Remove"/> を 1 回多く呼ぶだけで済むが、
         /// 除外側の列挙（<see cref="EvictionReason.Replaced"/> だけを弾く形）では本欠陥が再発する。
         /// </para>
+        /// <para>
+        /// ただし<b>理由の判別だけでは足りない</b>。<see cref="EvictionReason.Expired"/> 自身も遅延着地し得るためで、
+        /// 期限切れの検出は <see cref="GetOrCreateAsync{T}"/> 冒頭の <see cref="IMemoryCache.TryGetValue"/> で起きて
+        /// コールバックを投げたあと、<c>factory()</c> の DB 往復を挟んでから <see cref="Set{T}"/> へ進む。
+        /// その間スレッドプールが詰まると「新しいエントリが生きているのに旧世代の
+        /// <see cref="EvictionReason.Expired"/> が着地する」形になり、本 Issue と同じ
+        /// 「キャッシュには生きているのに追跡表から落ちたキー」がそのまま生まれる
+        /// （修正の中に修正対象と同じ欠陥への経路を残さない。#1814）。
+        /// そこで追跡表から落とすのは、<b>そのキーがいまキャッシュに無いことを確かめてから</b>にする。
+        /// </para>
+        /// <para>
+        /// この確認と削除は不可分ではないため、両者の<b>間</b>に <see cref="Set{T}"/> が着地する窓は残る。
+        /// ただし窓は数命令ぶんで、是正前の「<c>factory()</c> の DB 往復ぶん」から桁違いに狭い。
+        /// <see cref="Set{T}"/> は <see cref="_lock"/> を取らないため、ここで施錠しても閉じない
+        /// （閉じるにはキーごとの世代番号が要るが、残る窓の大きさに見合わないため採らない）。
+        /// </para>
         /// </remarks>
         internal void OnPostEviction(object evictedKey, object? value, EvictionReason reason, object? state)
         {
@@ -138,7 +155,31 @@ namespace ICCardManager.Infrastructure.Caching
                 return;
             }
 
-            _keys.TryRemove(evictedKey.ToString()!, out _);
+            // Dispose 済みなら追跡表はもう参照されない。_cache への問い合わせは
+            // ObjectDisposedException になるため触らずに戻る（着地は Dispose 後にも起こり得る）。
+            if (_disposed)
+            {
+                return;
+            }
+
+            var key = evictedKey.ToString()!;
+
+            try
+            {
+                // 上記のとおり、この退避理由でも着地が遅れて「新しいエントリが生きている」ことがある。
+                // 生きているキーを追跡表から落とすと InvalidateByPrefix が二度と消せなくなる。
+                if (_cache.TryGetValue(key, out object? _))
+                {
+                    return;
+                }
+            }
+            catch (ObjectDisposedException)
+            {
+                // Dispose と競合した着地。追跡表はもう参照されないため何もしない。
+                return;
+            }
+
+            _keys.TryRemove(key, out _);
             _logger.LogTrace("キャッシュ退避: {Key} (理由: {Reason})", evictedKey, reason);
         }
 
