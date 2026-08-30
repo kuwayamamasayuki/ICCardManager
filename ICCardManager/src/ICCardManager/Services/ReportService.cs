@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
@@ -223,7 +223,12 @@ namespace ICCardManager.Services
         /// Issue #477対応: 年度ごとに1つのExcelファイルを作成し、月ごとにワークシートを分ける。
         /// 上書き時は当該月のワークシートのみ修正する。
         /// </remarks>
-        public async Task<ReportGenerationResult> CreateMonthlyReportAsync(string cardIdm, int year, int month, string outputPath)
+        /// <remarks>
+        /// Issue #1949: 一括作成ループ（<c>ReportViewModel.CreateReportAsync</c>）の回帰テストで
+        /// 差し替えるための継ぎ目として virtual にしている。実ファイル生成（テンプレート解決・Excel 出力）
+        /// を伴うため、ここを差し替えられないとループそのものを 1 件も検査できない。
+        /// </remarks>
+        public virtual async Task<ReportGenerationResult> CreateMonthlyReportAsync(string cardIdm, int year, int month, string outputPath)
         {
             string templatePath = null;
 

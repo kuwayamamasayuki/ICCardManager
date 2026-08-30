@@ -914,6 +914,11 @@ namespace ICCardManager.ViewModels
         /// </summary>
         private async Task SaveEditAsync()
         {
+            // Issue #1949: 操作者は最初の await より前に確定させる。
+            // モーダルダイアログの表示中もメッセージポンプは回るため（#1807）、
+            // DB 読み取りの待機中にコンボボックスの選択がキーボード操作で変わり得る。
+            var selectedStaff = SelectedStaff;
+
             var ledger = await _ledgerRepository.GetByIdAsync(_editLedgerId);
             if (ledger == null)
             {
@@ -951,10 +956,10 @@ namespace ICCardManager.ViewModels
             ledger.Note = Note;
             ledger.CompanionCount = CompanionCount;
 
-            if (SelectedStaff != null)
+            if (selectedStaff != null)
             {
-                ledger.LenderIdm = SelectedStaff.StaffIdm;
-                ledger.StaffName = SelectedStaff.Name;
+                ledger.LenderIdm = selectedStaff.StaffIdm;
+                ledger.StaffName = selectedStaff.Name;
             }
             else
             {

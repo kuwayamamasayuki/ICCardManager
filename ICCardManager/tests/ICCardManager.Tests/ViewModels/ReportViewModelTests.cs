@@ -417,6 +417,10 @@ public class ReportViewModelTests
     //
     // 帳票作成機能の完全なテストには、IReportServiceインターフェースの導入か
     // 統合テストの実装が必要です。
+    //
+    // Issue #1949: 上記のうち一括作成ループ（対象カードのスナップショット・件数表示）は
+    // ReportService.CreateMonthlyReportAsync を virtual にして差し替える形で検査できるように
+    // なりました。ReportViewModelBulkCreationTests を参照してください。
 
     #endregion
 
@@ -1034,7 +1038,7 @@ public class ReportViewModelTests
     {
         SelectOneCard();
 
-        var canProceed = await _viewModel.RunPreflightBeforeCreateAsync();
+        var canProceed = await _viewModel.RunPreflightBeforeCreateAsync(_viewModel.SelectedCards.ToList());
 
         canProceed.Should().BeTrue();
         _navigationServiceMock.Verify(
@@ -1056,7 +1060,7 @@ public class ReportViewModelTests
                 It.IsAny<Action<ICCardManager.Views.Dialogs.ReportPreflightDialog>>()))
             .Returns(false);
 
-        var canProceed = await _viewModel.RunPreflightBeforeCreateAsync();
+        var canProceed = await _viewModel.RunPreflightBeforeCreateAsync(_viewModel.SelectedCards.ToList());
 
         canProceed.Should().BeFalse();
         _viewModel.StatusMessage.Should().Contain("中止");
@@ -1077,7 +1081,7 @@ public class ReportViewModelTests
                 It.IsAny<Action<ICCardManager.Views.Dialogs.ReportPreflightDialog>>()))
             .Returns(true);
 
-        var canProceed = await _viewModel.RunPreflightBeforeCreateAsync();
+        var canProceed = await _viewModel.RunPreflightBeforeCreateAsync(_viewModel.SelectedCards.ToList());
 
         canProceed.Should().BeTrue();
         _viewModel.StatusMessage.Should().NotContain("中止");
@@ -1096,7 +1100,7 @@ public class ReportViewModelTests
                 It.IsAny<Action<ICCardManager.Views.Dialogs.ReportPreflightDialog>>()))
             .Returns((bool?)null);
 
-        var canProceed = await _viewModel.RunPreflightBeforeCreateAsync();
+        var canProceed = await _viewModel.RunPreflightBeforeCreateAsync(_viewModel.SelectedCards.ToList());
 
         canProceed.Should().BeFalse();
     }

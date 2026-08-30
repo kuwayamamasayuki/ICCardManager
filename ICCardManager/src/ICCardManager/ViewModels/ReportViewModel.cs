@@ -1,4 +1,4 @@
-using System.Collections.ObjectModel;
+﻿using System.Collections.ObjectModel;
 using System.Collections.Specialized;
 using System.Diagnostics;
 using System.IO;
@@ -633,9 +633,15 @@ public partial class ReportViewModel : ViewModelBase
             return;
         }
 
+        // Issue #1949: 以降 SelectedCards は参照しない。この先はプリフライト・上書き確認ダイアログ・
+        // 帳票生成の await が挟まり、その間に選択が変わり得る（処理中オーバーレイが塞ぐのは
+        // マウスのヒットテストだけで、キーボードによる選択操作は通る。#1761）。
+        // 対象・件数・出力先はすべてこのスナップショットから導く。
+        var targetCards = SelectedCards.ToList();
+
         // Issue #1688: 出力前プリフライトチェック
         // 中止する場合に不要な上書き確認ダイアログを見せないよう、上書き確認より前に実施する
-        if (!await RunPreflightBeforeCreateAsync())
+        if (!await RunPreflightBeforeCreateAsync(targetCards))
         {
             return;
         }
@@ -646,7 +652,7 @@ public partial class ReportViewModel : ViewModelBase
         var outputPaths = new Dictionary<string, string>(); // cardIdm -> outputPath
         var fiscalYear = ReportService.GetFiscalYear(SelectedYear, SelectedMonth);
 
-        foreach (var card in SelectedCards)
+        foreach (var card in targetCards)
         {
             var fileName = _reportService.GetFiscalYearFileName(card.CardType, card.CardNumber, fiscalYear);
             var outputPath = Path.Combine(OutputFolder, fileName);
@@ -688,22 +694,25 @@ public partial class ReportViewModel : ViewModelBase
         CreatedFiles.Clear();
 
         // キャンセル可能な処理として開始
-        using var busyScope = BeginCancellableBusy($"帳票を作成中... (0/{SelectedCards.Count})");
+        using var busyScope = BeginCancellableBusy($"帳票を作成中... (0/{targetCards.Count})");
 
         try
         {
-            var cardIdms = SelectedCards.Select(c => c.CardIdm).ToList();
             var successCount = 0;
             var failedCards = new List<(string CardName, string ErrorMessage)>();
-            var totalCount = cardIdms.Count;
+            var totalCount = targetCards.Count;
 
-            for (var i = 0; i < cardIdms.Count; i++)
+            for (var i = 0; i < targetCards.Count; i++)
             {
                 // キャンセルチェック
                 busyScope.ThrowIfCancellationRequested();
 
-                var cardIdm = cardIdms[i];
-                var card = SelectedCards.First(c => c.CardIdm == cardIdm);
+                // Issue #1949: カードはスナップショットから取り出す。ここを SelectedCards から
+                // 引き直すと、直前の await 中にチェックが外れた場合に First() が一致せず
+                // InvalidOperationException になり、下の catch (OperationCanceledException) では
+                // 拾えないため一括作成全体が未処理例外で終わる。
+                var card = targetCards[i];
+                var cardIdm = card.CardIdm;
                 var outputPath = outputPaths[cardIdm];
 
                 // 別名保存の場合は日時を付加
@@ -753,13 +762,13 @@ public partial class ReportViewModel : ViewModelBase
             // 完了時の進捗を100%に
             busyScope.ReportProgress(totalCount, totalCount, "完了");
 
-            if (successCount == SelectedCards.Count)
+            if (successCount == totalCount)
             {
                 SetStatus($"{successCount}件の帳票を作成しました", false);
             }
             else
             {
-                SetStatus($"{successCount}/{SelectedCards.Count}件の帳票を作成しました（一部失敗）", true);
+                SetStatus($"{successCount}/{totalCount}件の帳票を作成しました（一部失敗）", true);
 
                 // 失敗したカードの詳細を表示
                 if (failedCards.Count > 0)
@@ -797,10 +806,11 @@ public partial class ReportViewModel : ViewModelBase
     /// 続行時は実ファイル生成（テンプレート解決・Excel出力）へ進むため単体テストから
     /// <see cref="CreateReportAsync"/> 経由では検証できない。判断部分だけを internal で公開する。
     /// </remarks>
+    /// <param name="targetCards">対象カード（作成開始時点のスナップショット。Issue #1949）</param>
     /// <returns>続行する場合true、ユーザーが中止を選んだ場合false</returns>
-    internal async Task<bool> RunPreflightBeforeCreateAsync()
+    internal async Task<bool> RunPreflightBeforeCreateAsync(IReadOnlyList<CardDto> targetCards)
     {
-        var result = await RunPreflightAsync();
+        var result = await RunPreflightAsync(targetCards);
 
         // 警告がなければ確認を挟まずそのまま作成に進む
         if (!result.HasWarnings)
@@ -837,7 +847,7 @@ public partial class ReportViewModel : ViewModelBase
             return;
         }
 
-        var result = await RunPreflightAsync();
+        var result = await RunPreflightAsync(SelectedCards.ToList());
         ShowPreflightDialog(result, isConfirmationMode: false);
 
         SetStatus(
@@ -848,11 +858,15 @@ public partial class ReportViewModel : ViewModelBase
     }
 
     /// <summary>
-    /// 選択中のカードについてプリフライトチェックを実行する
+    /// 指定されたカードについてプリフライトチェックを実行する
     /// </summary>
-    private async Task<ReportPreflightResult> RunPreflightAsync()
+    /// <param name="targetCards">
+    /// 対象カード。呼び出し元が <c>SelectedCards</c> をスナップショットして渡す
+    /// （await をまたいで選択を引き直さないため。Issue #1949）
+    /// </param>
+    private async Task<ReportPreflightResult> RunPreflightAsync(IReadOnlyList<CardDto> targetCards)
     {
-        var cardIdms = SelectedCards.Select(c => c.CardIdm).ToList();
+        var cardIdms = targetCards.Select(c => c.CardIdm).ToList();
         using (BeginBusy($"帳票データを確認中... ({cardIdms.Count}件)"))
         {
             var result = await _preflightChecker.CheckAsync(cardIdms, SelectedYear, SelectedMonth);
