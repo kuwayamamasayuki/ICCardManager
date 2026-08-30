@@ -165,6 +165,11 @@ THEN
 | チャージ／ポイント還元／払戻し | 実際の取引 | 摘要文字列（`SummaryGenerator` の各 `Get*Summary`） |
 
 - **同じレコードでも集計の目的によって除外要否が逆になる**。繰越レコードは「利用実績」ではないが「その時点の残高」としては正しい情報源。稼働率・利用回数・利用額からは除外し、残高推移からは除外しない。片方だけ直すと残高の折れ線が移行直後の月から欠落する（Issue #1692）
+- **カードの母集団も同じ罠を踏む — 「レコードの除外」と別に「カードの除外」を数える**（Issue #1947）。`CardRepository.GetAllAsync` は `WHERE is_deleted = 0` しか見ないため、**払戻済みカードを返し続ける**（払い戻しは `Balance = 0` の台帳行を書いて `is_deleted` は 0 のまま残す。#530）。残額ダッシュボード（`DashboardService`）がこれを除いていなかったため、`WarningService.CheckLowBalanceWarnings` が毎回「残額 0円」の警告を作り直し、**クリックで取り除く経路が無い**まま本当に補充が必要なカードの警告をスクロール外へ押し出していた。
+  - **同じ判断が 2 か所にあるなら、片方を直す形にしない**。管理者ダッシュボード（`AdminDashboardService.FilterActiveCards`）は #1692 で `!IsDeleted && !IsRefunded` を書いており、**#1692 で直した側と直していない側が残っていた**。対処は両方へ同じ条件を書くことではなく、`IcCard.IsInOperation`（未削除 かつ 未払戻）へ寄せること（`development-conventions.md` #1763）。3 つ目の母集団が増えたときの追随漏れは静的検査（`CardOperationPopulationConventionTests`）で止める
+  - **既存の似た述語へ安易に寄せない**。`IsAvailableForLending` は `!IsLent` を含むため、流用すると**貸出中カードが窓口の残額一覧から消える**。貸出中のカードも運用中であり、残額を確かめる対象である。対の表明（「貸出中は否定要因にしない」）を書かないと、同義にした実装でも緑になる
+  - **母集団を絞ると、その母集団に依存した副作用も動く**。`MainViewModel.RefreshDashboardAsync` は「ダッシュボードに居ないカード」の `BalanceInconsistency` / `CardBalanceMismatch` 警告を除去する（#1739 / #1908）ため、絞った分だけ除去対象が増える（本件では望ましい方向だが、**絞り込みの変更は必ず両方向の効果を数える**）
+  - **除去手段を持たない警告ほど、母集団の誤りが恒久的な害になる**（`development-conventions.md` #1811）。`LowBalance` は毎回作り直される種別なので、母集団が誤っていると「消しても消せない」ではなく「消す操作自体が無い」形で残り続ける
 - **除外を忘れると「使っていないカードが使われているように見える」**。登録しただけのカードが「利用1回・稼働率 > 0%」になり、遊休カードの発見という目的が成立しなくなる
 - SQL で除外する場合の表現は `summary = '新規購入' OR summary LIKE @midYearCarryoverPattern`（`LedgerRepository.GetByDateRangeAsync` の ORDER BY と `Ledger.IsCarryover` に同じ判定がある）。繰越側の LIKE パターンは `'%月から繰越'` をハードコードせず、`SummaryGenerator.GetMidYearCarryoverLikePattern`（組織設定 `MidYearCarryoverFormat` 由来）をパラメータバインドする（Issue #1749。`LedgerRepository.AddMidYearCarryoverParameter` を併用）。テストでは摘要文字列をハードコードせず `SummaryGenerator.GetMidYearCarryoverSummary` の生成結果を使い、生成側と検査側が揃って壊れないようにする
 - **貸出期間は DB に残らない**。返却時に `LendingService` が貸出中レコードを物理削除し、`ic_card.last_lent_at` も null に戻す。`operation_log` にも記録がないため、「何日間貸し出されていたか」を後から集計することはできない（Issue #1692 で稼働率を「利用実績のあった日数」で定義した理由）
