@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Threading.Tasks;
 using FluentAssertions;
@@ -134,6 +134,14 @@ public sealed class LendingServiceLentStatusConflictTests : IDisposable
         result.ErrorMessage.Should().Contain("カード管理", "「どうすれば」＝状態を確認できる画面へ誘導すること");
         result.ErrorMessage.Should().NotContain("もう一度タッチ",
             "再タッチしても同じ競合が続くため、既定分岐の汎用文言へ落ちていないこと");
+
+        // トーストは幅上限（520px 固定）で折り返しつつ高さ上限で切られるため、長文は末尾＝
+        // 「どうすれば」が失われる。LendingService.GetUserFriendlyErrorMessage は同じ理由で
+        // ExceptionMessageFormatter.ToUserMessage の 58 文字の文言を退けている。
+        // 上限は本番の定数から読まずリテラルで書く（定数から読むと期待値が実装と一緒に動き、
+        // 表明が自己充足して常に緑になる。Issue #1884）。
+        result.ErrorMessage.Length.Should().BeLessOrEqualTo(48,
+            "トースト通知に収まる長さに保つこと（error-messages.md のトースト節）");
     }
 
     #endregion

@@ -190,7 +190,18 @@ namespace ICCardManager.Common.Exceptions
         /// <para>
         /// 文言に「もう一度タッチしてください」と書かないのは、再タッチしても同じ競合が続くため
         /// （<c>.claude/rules/error-messages.md</c>「取れる行動が違う経路には専用の文言を置く」）。
-        /// 戻り先はトースト通知で文字数制約があるため、3 要素を保ちつつ簡潔にまとめている。
+        /// </para>
+        /// <para>
+        /// <b>長さは 44 文字に抑えている。</b>戻り先は
+        /// <c>LendingResult.ErrorMessage</c> → <c>MainViewModel</c> の
+        /// <c>IToastNotificationService.ShowError</c> で、トーストは幅上限
+        /// （<c>ToastLayoutCalculator.MaxWidth</c>＝520px、文字サイズによらず固定）で折り返しつつ
+        /// 高さ上限（<c>ComputeMaxHeight</c>）で切られるため、文字サイズ「大」以上では長文の末尾
+        /// ＝「どうすれば」が失われる。<c>LendingService.GetUserFriendlyErrorMessage</c> は同じ理由で
+        /// <c>ExceptionMessageFormatter.ToUserMessage</c> の <b>58 文字</b>の文言を退けており、
+        /// ここで 58 文字の文言を新設すると同じ判断と矛盾する（コードレビューで検出）。
+        /// 「なぜ」は独立した文にせず「削除されていないか確認してください」という形で
+        /// 「どうすれば」と一体にまとめた。同ファイルの Busy 分岐（38 文字）と同水準。
         /// </para>
         /// </remarks>
         public static BusinessException LentStatusUpdateConflict(string cardIdm, string operationName)
@@ -198,8 +209,7 @@ namespace ICCardManager.Common.Exceptions
             var message = $"Lent status update affected 0 rows: {cardIdm} ({operationName})";
             var userMessage =
                 $"{operationName}を記録できませんでした。" +
-                "このカードが削除された可能性があります。" +
-                "カード管理画面（F2）で状態を確認してください。";
+                "カード管理画面（F2）で削除されていないか確認してください。";
             const string errorCode = "BIZ015";
 
             return new BusinessException(message, userMessage, errorCode);
