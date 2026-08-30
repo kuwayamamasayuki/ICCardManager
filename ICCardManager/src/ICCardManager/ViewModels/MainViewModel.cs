@@ -2954,9 +2954,24 @@ public partial class MainViewModel : ViewModelBase
             await LoadHistoryLedgersAsync();
             await RefreshDashboardAsync();
             UndoMergeHistoryLedgersCommand.NotifyCanExecuteChanged();
-            _navigationService.ShowInformation(
-                "履歴を統合しました。\n「統合を元に戻す」ボタンで取り消せます。",
-                "統合完了");
+
+            if (mergeResult.HasPostCommitFailure)
+            {
+                // Issue #1954: 統合は確定済み。再実行を促すと「統合対象の履歴が見つかりません」に
+                // 行き着くだけなので、再実行を促さず「取り消せない」ことと代替手段を案内する（Issue #1725）。
+                _navigationService.ShowWarning(
+                    "履歴の統合は完了しましたが、「元に戻す」ための取り消し情報を記録できませんでした。\n" +
+                    "他のパソコンとの競合や、データベースの保存先への一時的な接続不良が原因の可能性があります。\n\n" +
+                    "統合そのものはやり直す必要はありません。この統合は「統合を元に戻す」では取り消せないため、" +
+                    "内容を戻したい場合は履歴一覧の分割・編集で修正してください。",
+                    "統合完了（取り消し情報なし）");
+            }
+            else
+            {
+                _navigationService.ShowInformation(
+                    "履歴を統合しました。\n「統合を元に戻す」ボタンで取り消せます。",
+                    "統合完了");
+            }
         }
         else
         {

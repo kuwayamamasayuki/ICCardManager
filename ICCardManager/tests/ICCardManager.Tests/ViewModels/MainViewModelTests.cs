@@ -2361,6 +2361,110 @@ public class MainViewModelTests : IDisposable
             s => s.RequestAuthenticationAsync("履歴の統合"), Times.Once);
     }
 
+    /// <summary>
+    /// Issue #1954: 統合は確定したが取り消し情報を保存できなかったとき、
+    /// 「取り消せない」ことを警告として案内し、<b>再実行を促さない</b>こと（Issue #1725）。
+    /// </summary>
+    [Fact]
+    public async Task MergeHistoryLedgers_取り消し情報の保存に失敗_統合完了として案内し再実行を促さないこと()
+    {
+        ArrangeMergeableCheckedLedgers();
+        // コミット後の後処理（Undo 情報の保存）だけを失敗させる
+        _ledgerRepositoryMock
+            .Setup(r => r.SaveMergeHistoryAsync(It.IsAny<int>(), It.IsAny<string>(), It.IsAny<string>()))
+            .ThrowsAsync(new InvalidOperationException("simulated undo-save failure"));
+
+        await _viewModel.MergeHistoryLedgersCommand.ExecuteAsync(null);
+
+        // 統合は確定しているのでエラーとしては案内しない
+        _navigationServiceMock.Verify(
+            n => n.ShowError(It.IsAny<string>(), It.IsAny<string>()), Times.Never);
+        // 「元に戻せる」と誤って案内しない
+        _navigationServiceMock.Verify(
+            n => n.ShowInformation(It.IsAny<string>(), It.IsAny<string>()), Times.Never);
+
+        _navigationServiceMock.Verify(
+            n => n.ShowWarning(
+                It.Is<string>(m =>
+                    m.Contains("統合は完了") &&
+                    m.Contains("取り消し情報") &&
+                    !m.Contains("再度お試しください")),
+                It.IsAny<string>()),
+            Times.Once,
+            "統合は記録済み・取り消しはできない、と案内する（再実行を促さない）");
+    }
+
+    /// <summary>
+    /// 対の表明: 後処理まで成功した通常の統合では、従来どおり「元に戻せる」案内を出すこと。
+    /// これが無いと、統合を常に警告として案内する実装でも上のテストが緑になる。
+    /// </summary>
+    [Fact]
+    public async Task MergeHistoryLedgers_後処理まで成功_元に戻せる案内を出すこと()
+    {
+        ArrangeMergeableCheckedLedgers();
+
+        await _viewModel.MergeHistoryLedgersCommand.ExecuteAsync(null);
+
+        _navigationServiceMock.Verify(
+            n => n.ShowInformation(It.Is<string>(m => m.Contains("統合を元に戻す")), "統合完了"),
+            Times.Once);
+        _navigationServiceMock.Verify(
+            n => n.ShowWarning(It.IsAny<string>(), It.IsAny<string>()), Times.Never);
+    }
+
+    /// <summary>
+    /// Issue #1954 の 2 件で共通の前提: 隣接する 2 件をチェックし、認証と確認を通過させ、
+    /// リポジトリの統合本体を成功させる。
+    /// </summary>
+    private void ArrangeMergeableCheckedLedgers()
+    {
+        const string cardIdm = "0102030405060708";
+        _viewModel.HistoryLedgers.Add(new LedgerDto { Id = 1, CardIdm = cardIdm, IsChecked = true });
+        _viewModel.HistoryLedgers.Add(new LedgerDto { Id = 2, CardIdm = cardIdm, IsChecked = true });
+
+        _staffAuthServiceMock
+            .Setup(a => a.RequestAuthenticationAsync(It.IsAny<string>()))
+            .ReturnsAsync(new StaffAuthResult { Idm = "AABBCCDDEEFF0011", StaffName = "田中太郎" });
+        _navigationServiceMock
+            .Setup(n => n.ShowConfirmation(It.IsAny<string>(), "履歴の統合"))
+            .Returns(true);
+
+        foreach (var id in new[] { 1, 2 })
+        {
+            var ledgerId = id;
+            _ledgerRepositoryMock
+                .Setup(r => r.GetByIdAsync(ledgerId))
+                .ReturnsAsync(new Ledger
+                {
+                    Id = ledgerId,
+                    CardIdm = cardIdm,
+                    Date = new DateTime(2026, 4, 1),
+                    Summary = $"鉄道（A駅～B駅{ledgerId}）",
+                    Expense = 210,
+                    Balance = 2000 - (ledgerId * 210),
+                    Details = new List<LedgerDetail>()
+                });
+        }
+
+        _ledgerRepositoryMock
+            .Setup(r => r.MergeLedgersAsync(
+                It.IsAny<int>(), It.IsAny<IEnumerable<int>>(), It.IsAny<Ledger>(), It.IsAny<SQLiteTransaction>()))
+            .ReturnsAsync(true);
+
+        // 統合後の一覧再読込・ダッシュボード更新が最後まで走るようモックを補う
+        // （ここで例外が出ると、検証したい案内の分岐へ到達しない）
+        _cardRepositoryMock.Setup(r => r.GetLentAsync(It.IsAny<bool>()))
+            .ReturnsAsync(new List<IcCard>());
+        _cardRepositoryMock.Setup(r => r.GetAllAsync())
+            .ReturnsAsync(new List<IcCard>());
+        _staffRepositoryMock.Setup(r => r.GetAllAsync())
+            .ReturnsAsync(new List<Staff>());
+        _ledgerRepositoryMock.Setup(r => r.GetAllLatestBalancesAsync())
+            .ReturnsAsync(new Dictionary<string, (int Balance, DateTime? LastUsageDate)>());
+        _settingsRepositoryMock.Setup(r => r.GetAppSettingsAsync())
+            .ReturnsAsync(new AppSettings());
+    }
+
     [Fact]
     public void ApplyBalanceInconsistencyMarkers_複数の不整合がある場合にすべてマーキングされること()
     {

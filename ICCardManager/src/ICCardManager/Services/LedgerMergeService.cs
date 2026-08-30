@@ -17,9 +17,21 @@ namespace ICCardManager.Services
     /// </summary>
     public class LedgerMergeResult
     {
+        /// <summary>
+        /// 統合（または取り消し）が<b>確定した</b>かどうか。
+        /// コミット後の後処理の失敗ではこの値は落ちない（Issue #1954）。
+        /// </summary>
         public bool Success { get; set; }
+
         public string ErrorMessage { get; set; } = string.Empty;
         public Ledger? MergedLedger { get; set; }
+
+        /// <summary>
+        /// Issue #1954: 統合は確定したが、コミット後の付帯処理（取り消し用の Undo 情報の保存）に
+        /// 失敗したことを表す。<see cref="Success"/> は true のままで、呼び出し元は
+        /// <b>再実行を促さず</b>「統合は完了・取り消しはできない」と案内する（Issue #1725）。
+        /// </summary>
+        public bool HasPostCommitFailure { get; set; }
     }
 
     /// <summary>
@@ -308,6 +320,14 @@ namespace ICCardManager.Services
             // 説明テキスト（UI表示用）
             var description = $"{DisplayFormatters.FormatDate(beforeLedgers[0].Date)} {string.Join(" + ", originalSummaryTexts)}";
 
+            // Issue #1954: 「成功」の意味を「統合が確定した」ことだけに定め、その確定位置を
+            // scope.Commit() の直後へ置く。コミット後の後処理（Undo データの保存）の失敗を
+            // Success に巻き込むと、統合済みなのに「再度お試しください」と案内され、案内どおりの
+            // 再実行は「統合対象の履歴が見つかりません」に行き着く（統合元は既に DELETE 済み）。
+            // 付帯情報の欠落は HasPostCommitFailure で別途伝える
+            // （.claude/rules/development-conventions.md「コミット確定後の後処理を、成否の判定に巻き込まない」）。
+            var result = new LedgerMergeResult();
+
             try
             {
                 // Issue #1458: 統合と監査ログ INSERT を同一トランザクションで実行
@@ -328,6 +348,11 @@ namespace ICCardManager.Services
                     scope.Commit();
                 }
 
+                // ここから先は統合が確定している（統合元は DELETE 済み）。以降で例外が出ても
+                // 下の catch (when result.Success) が付帯情報の欠落として扱い、Success は落とさない。
+                result.Success = true;
+                result.MergedLedger = target;
+
                 // UndoデータをDBに保存（独立した tx。Undo データは別系統のため tx に含めない）
                 var undoJson = JsonSerializer.Serialize(undoData, JsonOptions);
                 await _ledgerRepository.SaveMergeHistoryAsync(target.Id, description, undoJson).ConfigureAwait(false);
@@ -336,11 +361,18 @@ namespace ICCardManager.Services
                     "Merged {Count} ledgers into ledger {TargetId}: {Summary}",
                     ledgers.Count, target.Id, target.Summary);
 
-                return new LedgerMergeResult
-                {
-                    Success = true,
-                    MergedLedger = target
-                };
+                return result;
+            }
+            catch (Exception ex) when (result.Success)
+            {
+                // Issue #1954: 統合は確定済み。取り消し（Undo）情報を記録できなかっただけとして扱い、
+                // Success と ErrorMessage は変えない（呼び出し元は HasPostCommitFailure で案内を切り替える）。
+                // 統合自体は成功しているため Error ではなく Warning。本番の Logging:LogLevel=Information でも出力される。
+                _logger.LogWarning(ex,
+                    "履歴の統合は確定済みですが、コミット後の取り消し情報の保存に失敗しました（TargetLedgerId={TargetId}）",
+                    target.Id);
+                result.HasPostCommitFailure = true;
+                return result;
             }
             catch (Exception ex)
             {
