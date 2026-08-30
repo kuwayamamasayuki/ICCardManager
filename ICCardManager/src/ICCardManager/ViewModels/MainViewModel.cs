@@ -2599,7 +2599,20 @@ public partial class MainViewModel : ViewModelBase
         var hasOther = await _ledgerRepository.HasOtherLentRecordsAsync(deletedLedger.CardIdm, deletedLedger.Id);
         if (!hasOther)
         {
-            await _cardRepository.UpdateLentStatusAsync(deletedLedger.CardIdm, isLent: false, lentAt: null, staffIdm: null);
+            // Issue #1953: 影響行数 0 は競合（他 PC がこのカードを論理削除した）。
+            // ここは履歴削除のコミット確定後に走る後処理であり、成否の判定には巻き込まない
+            // （#1805）。削除済みカードは論理削除の条件が is_lent = 0 のため
+            // is_lent は既に 0 であり、放置しても運用に影響しない。ただし
+            // 「無言で握りつぶさない」ため本番ログ（Information 以上）へ痕跡を残す。
+            var updated = await _cardRepository.UpdateLentStatusAsync(
+                deletedLedger.CardIdm, isLent: false, lentAt: null, staffIdm: null);
+            if (!updated)
+            {
+                _logger?.LogWarning(
+                    "Issue #1953: 履歴削除後の貸出状態リセットが競合しました。" +
+                    "他のパソコンでこのカードが削除された可能性があります: CardIdm={CardIdm}",
+                    IdmMasker.Mask(deletedLedger.CardIdm));
+            }
         }
     }
 

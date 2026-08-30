@@ -128,7 +128,8 @@ public class MainViewModelTests : IDisposable
     private MainViewModel CreateViewModel(
         int timeoutSeconds = 60,
         IDispatcherService dispatcherService = null,
-        ICardReader cardReader = null)
+        ICardReader cardReader = null,
+        ILogger<MainViewModel> logger = null)
     {
         var databaseInfoMock = new Mock<IDatabaseInfo>();
         return new MainViewModel(
@@ -156,7 +157,8 @@ public class MainViewModelTests : IDisposable
             new DashboardService(_cardRepositoryMock.Object, _ledgerRepositoryMock.Object,
                 _staffRepositoryMock.Object, _settingsRepositoryMock.Object),
             new Mock<ICCardManager.Services.ISafeFileLauncher>().Object,
-            _dbContext);
+            _dbContext,
+            logger);
     }
 
     /// <summary>
@@ -3857,6 +3859,92 @@ public class MainViewModelTests : IDisposable
         Summary = "鉄道（天神～博多）",
         Balance = 2300,
     };
+
+    /// <summary>
+    /// Issue #1953: 貸出中レコードを削除したあとの <c>is_lent</c> リセットが 0 行（＝競合）でも、
+    /// <b>履歴削除そのものは成功として扱う</b>こと。
+    /// </summary>
+    /// <remarks>
+    /// このリセットは履歴削除のコミットが確定した<b>あと</b>に走る後処理であり、失敗を成否へ
+    /// 巻き込むと「削除は済んでいるのに削除できなかったと案内する」（
+    /// <c>.claude/rules/development-conventions.md</c>「コミット確定後の後処理を、成否の判定に
+    /// 巻き込まない」Issue #1805 / #1727）。0 行になる原因は「他 PC がこのカードを論理削除した」
+    /// ことだが、論理削除の条件が <c>is_lent = 0</c>（<c>CardRepository.DeleteAsync</c> の WHERE 句）
+    /// である以上、そのカードの <c>is_lent</c> は既に 0 で運用に影響しない。
+    /// 無言にはせず Warning ログ（本番のログファイルに出るレベル。Issue #1716）で痕跡を残す。
+    /// </remarks>
+    [Fact]
+    public async Task DeleteLedgerRow_貸出状態リセットが0行でも削除を失敗として案内しないこと()
+    {
+        var loggerMock = new Mock<ILogger<MainViewModel>>();
+        var viewModel = CreateViewModel(logger: loggerMock.Object);
+        ArrangeLedgerDelete(
+            new Ledger { Id = 42, CardIdm = DeleteConflictCardIdm, IsLentRecord = true },
+            deleted: true);
+        _ledgerRepositoryMock
+            .Setup(r => r.HasOtherLentRecordsAsync(It.IsAny<string>(), It.IsAny<int>()))
+            .ReturnsAsync(false);
+        _cardRepositoryMock
+            .Setup(c => c.UpdateLentStatusAsync(
+                It.IsAny<string>(), It.IsAny<bool>(), It.IsAny<DateTime?>(), It.IsAny<string>()))
+            .ReturnsAsync(false);
+
+        await viewModel.DeleteLedgerRow(DeleteTargetDto());
+
+        _navigationServiceMock.Verify(
+            d => d.ShowError(It.IsAny<string>(), It.IsAny<string>()),
+            Times.Never,
+            "履歴削除は確定済み。後処理の失敗で「削除できませんでした」と案内すると、" +
+            "職員は削除されていないと誤解する（Issue #1953 / #1805）");
+        loggerMock.Verify(
+            x => x.Log(
+                LogLevel.Warning,
+                It.IsAny<EventId>(),
+                It.Is<It.IsAnyType>((v, t) => v.ToString().Contains("貸出状態")),
+                It.IsAny<Exception>(),
+                It.IsAny<Func<It.IsAnyType, Exception, string>>()),
+            Times.Once,
+            "無言で握りつぶさず本番ログへ痕跡を残すこと（Issue #1716）");
+    }
+
+    /// <summary>
+    /// 対の表明: リセットが成功する通常の削除では Warning ログを出さないこと。
+    /// </summary>
+    /// <remarks>
+    /// これが無いと「常に Warning を出す」実装でも上のテストが緑になり、
+    /// 起動のたびにログが肥大化する退行に気付けない（Issue #1730 の方針）。
+    /// </remarks>
+    [Fact]
+    public async Task DeleteLedgerRow_貸出状態リセットが成功したらWarningを出さないこと()
+    {
+        var loggerMock = new Mock<ILogger<MainViewModel>>();
+        var viewModel = CreateViewModel(logger: loggerMock.Object);
+        ArrangeLedgerDelete(
+            new Ledger { Id = 42, CardIdm = DeleteConflictCardIdm, IsLentRecord = true },
+            deleted: true);
+        _ledgerRepositoryMock
+            .Setup(r => r.HasOtherLentRecordsAsync(It.IsAny<string>(), It.IsAny<int>()))
+            .ReturnsAsync(false);
+        _cardRepositoryMock
+            .Setup(c => c.UpdateLentStatusAsync(
+                It.IsAny<string>(), It.IsAny<bool>(), It.IsAny<DateTime?>(), It.IsAny<string>()))
+            .ReturnsAsync(true);
+
+        await viewModel.DeleteLedgerRow(DeleteTargetDto());
+
+        _cardRepositoryMock.Verify(
+            c => c.UpdateLentStatusAsync(DeleteConflictCardIdm, false, null, null),
+            Times.Once,
+            "貸出中レコードを消したらリセット自体は行うこと（Issue #1574）");
+        loggerMock.Verify(
+            x => x.Log(
+                LogLevel.Warning,
+                It.IsAny<EventId>(),
+                It.Is<It.IsAnyType>((v, t) => v.ToString().Contains("貸出状態")),
+                It.IsAny<Exception>(),
+                It.IsAny<Func<It.IsAnyType, Exception, string>>()),
+            Times.Never);
+    }
 
     /// <summary>
     /// Issue #1944 の中核。<c>DeleteAsync</c> が 0 行（＝競合）を返したら、

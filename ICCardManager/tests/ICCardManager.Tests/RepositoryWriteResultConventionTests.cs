@@ -9,8 +9,8 @@ using Xunit;
 namespace ICCardManager.Tests;
 
 /// <summary>
-/// Issue #1944: リポジトリの <c>DeleteAsync</c> の戻り値を呼び出し元が握りつぶしていないことを
-/// 静的検査で固定する。
+/// Issue #1944 / #1953: リポジトリの書き込み API（<c>DeleteAsync</c> /
+/// <c>UpdateLentStatusAsync</c>）の戻り値を呼び出し元が握りつぶしていないことを静的検査で固定する。
 /// </summary>
 /// <remarks>
 /// <para>
@@ -38,24 +38,36 @@ namespace ICCardManager.Tests;
 /// 削除の呼び出しごと消して別経路で書き込む実装でも緑になる。
 /// </para>
 /// </remarks>
-public class RepositoryDeleteResultConventionTests
+public class RepositoryWriteResultConventionTests
 {
     /// <summary>
-    /// 検査対象の受け手。名前ではなく「削除を行うリポジトリ API という資源」で照合する。
+    /// 検査対象の受け手。名前ではなく「<b>影響行数 0 が競合を意味する書き込み API</b>という資源」で
+    /// 照合する（<c>.claude/rules/development-conventions.md</c> #1843「ガードは綴りではなく資源で書く」）。
     /// </summary>
     /// <remarks>
+    /// <para>
     /// <c>\.DeleteAsync</c> は <c>LogLedgerDeleteAsync</c> / <c>DeleteAllLentRecordsAsync</c> の
     /// ような別 API を拾わない（ドットの直後が <c>DeleteAsync</c> であることを要求するため）。
     /// 定義側（<c>public async Task&lt;bool&gt; DeleteAsync(</c>）もドットが前に無いので対象外。
+    /// </para>
+    /// <para>
+    /// Issue #1953 で <c>UpdateLentStatusAsync</c> を追加した。こちらは WHERE 句が
+    /// <c>card_idm = @cardIdm AND is_deleted = 0</c> なので、0 行になるのは「他 PC が
+    /// このカードを論理削除した」場合だけである。捨てると <c>ledger</c> の貸出中レコードと
+    /// <c>ic_card.is_lent</c> が恒久的に食い違う（貸出では手元に無いカードが次のタッチで
+    /// 新規貸出として再記録され、返却では返却済みカードが長期未返却として督促され続ける）。
+    /// <b>検査を複製せず同じクラスへ資源を足す</b>のは、判定ロジック（<c>ClassifyCallSite</c>）が
+    /// 2 か所に分かれると片方だけが直る日が来るため（#1763）。
+    /// </para>
     /// </remarks>
     private static readonly Regex InvocationPattern =
-        new Regex(@"\.DeleteAsync\b", RegexOptions.Compiled);
+        new Regex(@"\.(DeleteAsync|UpdateLentStatusAsync)\b", RegexOptions.Compiled);
 
     /// <summary>
     /// 削除の呼び出しがすべて戻り値を受けていること。
     /// </summary>
     [Fact]
-    public void 削除の戻り値を捨てる呼び出しが無いこと()
+    public void 書き込みの戻り値を捨てる呼び出しが無いこと()
     {
         var violations = new List<string>();
         var consumedHits = 0;
@@ -76,8 +88,9 @@ public class RepositoryDeleteResultConventionTests
         }
 
         violations.Should().BeEmpty(
-            "DeleteAsync が false を返すのは影響行数 0（＝競合）のときだけであり、" +
-            "捨てると削除していないのに監査ログへ「削除した」と記録される（Issue #1944 / #1753 / #1808）");
+            "DeleteAsync / UpdateLentStatusAsync が false を返すのは影響行数 0（＝競合）のときだけであり、" +
+            "捨てると削除していないのに監査ログへ「削除した」と記録され（Issue #1944 / #1753 / #1808）、" +
+            "貸出中レコードと ic_card.is_lent が恒久的に食い違う（Issue #1953）");
 
         // 空振り検出: 検査対象が消えた／パターンが合わなくなった状態で緑にしない。
         //
@@ -87,7 +100,7 @@ public class RepositoryDeleteResultConventionTests
         // 検査ロジック自体は下の Theory がサンプル入力で固定しているので、ここは
         // 「対象が丸ごと消えていないこと」だけを見れば足りる。
         consumedHits.Should().BeGreaterOrEqualTo(
-            1, "正しい形（戻り値を受ける削除の呼び出し）が実在すること");
+            1, "正しい形（戻り値を受ける書き込みの呼び出し）が実在すること");
     }
 
     /// <summary>
@@ -99,7 +112,7 @@ public class RepositoryDeleteResultConventionTests
         var files = EnumerateInvocations().Select(x => x.RelativePath).ToList();
 
         // 件数ではなく「導出されていること」を見る（しきい値を実数に合わせない理由は上と同じ）。
-        files.Should().NotBeEmpty("削除を呼ぶ経路が本番ソースに実在すること");
+        files.Should().NotBeEmpty("対象の書き込み API を呼ぶ経路が本番ソースに実在すること");
         files.Should().OnlyHaveUniqueItems();
         files.Should().AllSatisfy(
             f => f.Should().EndWith(".cs"),
@@ -121,12 +134,16 @@ public class RepositoryDeleteResultConventionTests
     [InlineData("var r = await this._cardRepository.DeleteAsync(idm);", true)]
     // 正しい形（改行を挟むフルエント記法）
     [InlineData("var ok = await _repo\n    .DeleteAsync(id);", true)]
+    // Issue #1953: UpdateLentStatusAsync も同じ資源として検査する
+    [InlineData("{ await _cardRepository.UpdateLentStatusAsync(idm, true, now, staffIdm); }", false)]
+    [InlineData("var ok = await _cardRepository.UpdateLentStatusAsync(idm, false, null, null);", true)]
+    [InlineData("var ok = await _cardRepository\n    .UpdateLentStatusAsync(idm, true, now, staffIdm);", true)]
     public void 検査は戻り値の受け取りを区別すること(string code, bool expectedConsumed)
     {
         var source = TestSourceInspection.ToCodeOnly(code);
         var indexes = InvocationPattern.Matches(source).Cast<Match>().Select(m => m.Index).ToList();
 
-        indexes.Should().HaveCount(1, "サンプルは削除の呼び出しを 1 つだけ含む");
+        indexes.Should().HaveCount(1, "サンプルは対象の呼び出しを 1 つだけ含む");
 
         var isConsumed = ClassifyCallSite(source, indexes[0]) == CallSiteVerdict.Consumed;
         isConsumed.Should().Be(expectedConsumed);
@@ -140,6 +157,7 @@ public class RepositoryDeleteResultConventionTests
     [InlineData("await _operationLogger.LogLedgerDeleteAsync(ledger, tx);")]
     [InlineData("await _ledgerRepository.DeleteAllLentRecordsAsync(cardIdm);")]
     [InlineData("await _repo.DeleteOldDataAsync();")]
+    [InlineData("await _cardRepository.UpdateLentStatusForAllAsync();")]
     public void 検査は別のAPIを巻き込まないこと(string code)
     {
         var source = TestSourceInspection.ToCodeOnly(code);

@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
@@ -391,11 +391,14 @@ WHERE card_idm = @cardIdm AND is_deleted = 0";
             command.Parameters.AddWithValue("@staffIdm", (object)staffIdm ?? DBNull.Value);
 
             var result = await command.ExecuteNonQueryAsync().ConfigureAwait(false);
-            if (result > 0)
-            {
-                // 貸出状態変更時は即座にキャッシュを無効化
-                InvalidateCardCache();
-            }
+
+            // 貸出状態変更時は即座にキャッシュを無効化。
+            // Issue #1759 / #1953: 影響行数 0（＝WHERE is_deleted = 0 に一致しない）のときも
+            // 無効化する。0 行は「他 PC がこのカードを削除した」ことの証明であり、
+            // 手元のカード一覧が古いと確定した瞬間である（書き込みが成功したときより
+            // 無効化の根拠が強い）。捨てないと、競合を検出した呼び出し元が一覧を再読込しても
+            // 削除済みのカードを含む古い一覧が返る（既定 TTL 60 秒／共有モード 15 秒）。
+            InvalidateCardCache();
             return result > 0;
         }
 
