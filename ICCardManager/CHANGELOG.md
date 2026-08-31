@@ -3,6 +3,15 @@
 ### Unreleased
 
 **修正**
+- Issue #1979 **操作ログ画面・Excel エクスポートに履歴の利用明細（`Ledger.Details`）が表示されない**欠陥を是正した。`OperationLogExcelExportService.GetFieldNameMap` の `"ledger"` に `Details` のエントリが無く、`FormatJsonToReadable` / `FormatJsonArrayToReadable` / `GetChangeSummary` はいずれも**マップに無いプロパティを読み飛ばす**ため、`operation_log` の `BeforeData` / `AfterData` に 6 年間記録されている明細が、生の DB を直接読まない限り追跡できなかった。
+  - **何が見えなかったか**: 履歴統合（MERGE）・分割（SPLIT）の監査で、**どの明細がどう動いたか**（バス停名の書き戻し、明細の振り分け）。Issue #1959 で統合の `BeforeData` が明細まで含めて正しくなった一方、その明細を読む経路が対応していなかった（#1959 による退行ではなく、可視性は以前から無かった）。`.claude/rules/development-conventions.md` #1726 が「モデルにプロパティを足したら `GetFieldNameMap` にも足す」と記録していた状態そのもの。
+  - **マップに 1 行足すだけでは描画できない**。`FormatPropertyValue` は単一のスカラー値を前提にしており、明細は配列 of オブジェクトである。整形は `Common/OperationLogDetailFormatter` を新設して**ただ 1 つの手段**に寄せた（操作ログ画面 `OperationLogSearchViewModel` と Excel の双方が使う。手段が 2 通りあるとモデルへ列を足したとき片方だけが更新される ＝ #1763）。区間表記はさらに `RouteDisplayFormatter` へ委譲する（バスのラベル・プレースホルダは組織設定由来のため直書きしない ＝ #1818）。
+  - **表示先ごとに担うものを決めてから書式を決めた**（04_機能設計書 §10.4a）。Excel の「変更前 / 変更後」列は内容の展開（`利用明細: 2件` ＋ 番号付きで 1 明細 1 行、字下げは入れ子に合わせる）、「変更内容」列は変化した明細だけの差分（`利用明細[2]: … → …`）、画面の「詳細」列は要約（統合・分割は `明細 2件・1件 → 3件`、更新は変化した明細を最大 3 件）。展開ブロックどうしを `→` でつなぐと読めないため、差分は索引で突き合わせて 1 行ずつ並べる。画面が展開しないのは DataGrid の行高が際限なく伸びて一覧性が失われるためで、内容の確認は同画面から出力できる Excel が担う。
+  - **1 明細の行には順序（`SequenceNumber`）とグループ（`GroupId`）を併記する**。統合は摘要再生成のため `SequenceNumber` を一時再採番し（#1959）、`GroupId` は摘要のグループ分けを決める（#484 / #1858）ので、この 2 つが「どの明細がどう動いたか」そのものである。`GroupId` は未設定（自動判定）のとき出さない。
+  - **既定値が空コレクションのプロパティは「常に出る行」を作る**。`Ledger.Details` の既定は空リストのため、素直に足すとすべての台帳ログへ「利用明細: 0件」という情報量ゼロの行が付く。`FormatDetailsBlock` は 0 件・`null`・配列でない場合に `null` を返し、呼び出し側がその行を飛ばす。展開は 1 台帳あたり 20 明細までとし、超過分は件数で示す（Excel のセルは 32,767 文字が上限）。
+  - 検証: **+38 件**（`Common/OperationLogDetailFormatterTests` 25 件・`OperationLogExcelExportServiceTests` 8 件・`OperationLogSearchViewModelTests` 5 件）。**「内容が出ること」と「明細を持たない台帳で余計な行が出ないこと」を対で固定**した（後者が無いと常に「0件」を出す実装でも緑になる）。単体 6,146→6,184 件・合計 6,172→6,210 件。
+  - **検出力は実測した**。マップの `Details` を外すと 5 件が赤・対の表明 2 件は緑のまま、`FormatDetailsBlock` が 0 件でも行を出す形へ戻すと対の表明 2 件が赤になることを確認した。
+  - 04_機能設計書 §10.4a を新設し、05_クラス設計書・07_テスト設計書に残っていた「明細は画面・Excel から読めない（#1979 で追跡）」という記述を実態へ更新した。
 - Issue #1975 **摘要生成の DI シングルトンが起動時の部署種別を保持し、設定画面（F5）での変更が再起動まで反映されない**欠陥を是正した。`SummaryGenerator` は起動時の `settings.DepartmentType` を捕捉したまま固定で、これを注入で受ける摘要再生成の 6 経路（履歴統合 `LedgerMergeService` / 履歴分割 `LedgerSplitService` 2 か所 / 返却時の台帳生成 `LendingService` 3 か所 / 明細編集 `LedgerDetailViewModel`）が旧設定でチャージ摘要を作っていた。
   - **設定画面は部署種別の変更時に再起動を案内しない**（案内するのはデータベース保存先の変更時のみ）。企業会計部局へ変更した組織で、再起動せずに返却・履歴統合を行うと「旅費によりチャージ」ではなく**「役務費によりチャージ」が 6 年保存の台帳へ書き込まれ**、物品出納簿にそのまま印字されていた。Issue #1955（明細 CSV 取込）とまったく同じ症状で、原因だけが違う（あちらは `new SummaryGenerator()` で既定値のインスタンスを作る形）。
   - **保存に成功したときだけ DI シングルトンへ反映する**（`SummaryGenerator.ApplyDepartmentType` を新設し `SettingsViewModel.SaveAsync` から呼ぶ）。`ApplyTransferStationGroups` と同じ判断（#1905）で、順序を逆にすると「保存できませんでした」と案内しながら摘要生成だけ新しい部署種別で動く。呼び出しは成功パスの先頭付近（UI 装飾の反映 ＝ 文字サイズ・トースト位置 より**前**）に置いた — それらは `Application.Current` に依存して失敗し得るため、台帳へ効く反映だけは先に確定させる。

@@ -164,7 +164,10 @@ public class OperationLogExcelExportService
                 if (!fieldNameMap.TryGetValue(property.Name, out var displayName))
                     continue;
 
-                var value = FormatPropertyValue(property.Value);
+                var value = FormatFieldValue(property.Name, property.Value, "  ");
+                if (value == null)
+                    continue;
+
                 var isChanged = changedFields != null && changedFields.Contains(property.Name);
 
                 // 改行（先頭以外）— ラベルに含めることで独立した改行ランを避ける
@@ -235,9 +238,9 @@ public class OperationLogExcelExportService
                 string? afterValue = null;
 
                 if (beforeDoc.RootElement.TryGetProperty(propertyName, out var beforeProp))
-                    beforeValue = FormatPropertyValue(beforeProp);
+                    beforeValue = FormatFieldValue(propertyName, beforeProp, "  ");
                 if (afterDoc.RootElement.TryGetProperty(propertyName, out var afterProp))
-                    afterValue = FormatPropertyValue(afterProp);
+                    afterValue = FormatFieldValue(propertyName, afterProp, "  ");
 
                 if (beforeValue != afterValue)
                     result.Add(propertyName);
@@ -344,7 +347,10 @@ public class OperationLogExcelExportService
                 if (!fieldNameMap.TryGetValue(property.Name, out var displayName))
                     continue;
 
-                var value = FormatPropertyValue(property.Value);
+                var value = FormatFieldValue(property.Name, property.Value, "  ");
+                if (value == null)
+                    continue;
+
                 lines.Add($"{displayName}: {value}");
             }
 
@@ -384,7 +390,11 @@ public class OperationLogExcelExportService
                     if (!fieldNameMap.TryGetValue(property.Name, out var displayName))
                         continue;
 
-                    var value = FormatPropertyValue(property.Value);
+                    // 配列の各要素は既に 2 文字字下げされているため、明細行はさらに 2 文字下げる
+                    var value = FormatFieldValue(property.Name, property.Value, "    ");
+                    if (value == null)
+                        continue;
+
                     lines.Add($"  {displayName}: {value}");
                 }
 
@@ -431,9 +441,24 @@ public class OperationLogExcelExportService
                 string? beforeValue = null;
                 string? afterValue = null;
 
-                if (beforeDoc.RootElement.TryGetProperty(propertyName, out var beforeProp))
+                var hasBefore = beforeDoc.RootElement.TryGetProperty(propertyName, out var beforeProp);
+                var hasAfter = afterDoc.RootElement.TryGetProperty(propertyName, out var afterProp);
+
+                // Issue #1979: 明細は「利用明細: [展開ブロック] → [展開ブロック]」だと変更内容列が
+                // 読めなくなるため、索引で突き合わせて変化した明細だけを 1 行ずつ並べる。
+                if (propertyName == OperationLogDetailFormatter.DetailsPropertyName)
+                {
+                    var detailChanges = OperationLogDetailFormatter.SummarizeDetailChangesForExport(
+                        hasBefore ? beforeProp : (JsonElement?)null,
+                        hasAfter ? afterProp : (JsonElement?)null);
+                    if (!string.IsNullOrEmpty(detailChanges))
+                        changes.Add(detailChanges);
+                    continue;
+                }
+
+                if (hasBefore)
                     beforeValue = FormatPropertyValue(beforeProp);
-                if (afterDoc.RootElement.TryGetProperty(propertyName, out var afterProp))
+                if (hasAfter)
                     afterValue = FormatPropertyValue(afterProp);
 
                 if (beforeValue != afterValue)
@@ -518,6 +543,10 @@ public class OperationLogExcelExportService
                 { "StaffName", "利用者" },
                 { "Note", "備考" },
                 { "CompanionCount", "同行者数" },
+                // Issue #1979: 明細（配列 of オブジェクト）。FormatPropertyValue はスカラー値しか
+                // 扱えないため、値の整形は OperationLogDetailFormatter が担う（FormatFieldValue で分岐）。
+                // 載せないと統合・分割の監査で「どの明細がどう動いたか」を追跡できない。
+                { OperationLogDetailFormatter.DetailsPropertyName, OperationLogDetailFormatter.DetailsDisplayName },
             },
             _ => new Dictionary<string, string>()
         };
@@ -530,6 +559,28 @@ public class OperationLogExcelExportService
         }
 
         return map;
+    }
+
+    /// <summary>
+    /// フィールド 1 件の表示用文字列を返す。<c>null</c> を返した場合はその行を出力しない。
+    /// </summary>
+    /// <remarks>
+    /// Issue #1979: 利用明細（<c>Details</c>）は配列 of オブジェクトで
+    /// <see cref="FormatPropertyValue"/> では描画できないため、専用の整形へ振り分ける。
+    /// 明細を持たない台帳（<c>Details</c> が空配列 / null / 欠落）では <c>null</c> が返り、
+    /// 「利用明細: 0件」という情報量ゼロの行がすべての台帳ログへ付くのを避ける。
+    /// </remarks>
+    /// <param name="propertyName">JSON のプロパティ名（PascalCase）。</param>
+    /// <param name="element">値。</param>
+    /// <param name="indent">明細行の字下げ（呼び出し側の入れ子に合わせる）。</param>
+    private static string? FormatFieldValue(string propertyName, JsonElement element, string indent)
+    {
+        if (propertyName == OperationLogDetailFormatter.DetailsPropertyName)
+        {
+            return OperationLogDetailFormatter.FormatDetailsBlock(element, indent);
+        }
+
+        return FormatPropertyValue(element);
     }
 
     /// <summary>
