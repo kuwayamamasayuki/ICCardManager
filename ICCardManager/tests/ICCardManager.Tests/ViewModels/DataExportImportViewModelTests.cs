@@ -1,4 +1,4 @@
-using System.Collections.Generic;
+﻿using System.Collections.Generic;
 using System.Data.SQLite;
 using CommunityToolkit.Mvvm.Messaging;
 using FluentAssertions;
@@ -83,7 +83,9 @@ public class DataExportImportViewModelTests : IDisposable
             _ledgerRepositoryMock.Object,
             _validationServiceMock.Object,
             _dbContextMock.Object,
-            _cacheServiceMock.Object);
+            _cacheServiceMock.Object,
+            // Issue #1955: 摘要の再生成が参照する部署種別の供給元
+            new Mock<ISettingsRepository>().Object);
 
         // OperationLogger (Issue #1302): 実DB + 実Contextを使う。
         // Issue #1741: 書き込まれた operation_log 行そのものを検証対象にするため、

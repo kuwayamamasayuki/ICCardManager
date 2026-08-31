@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
@@ -434,7 +434,10 @@ namespace ICCardManager.Services
             // Issue #918: カードIDm＋日付ごとにグループ化して個別の Ledger を作成
             // Issue #1053: チャージ/ポイント還元境界で分割し、セグメントごとに Ledger を作成
             // Issue #1284: NewLedgerFromSegmentsBuilder に責務分離
-            var newLedgerBuilder = new NewLedgerFromSegmentsBuilder(_ledgerRepository);
+            // Issue #1955: 摘要の再生成は DB に保存された部署種別に従う（新規作成・既存更新で同じ
+            // インスタンスを使い、「経路によって設定が効いたり効かなかったり」する形を残さない）
+            var summaryGenerator = await CreateSummaryGeneratorAsync().ConfigureAwait(false);
+            var newLedgerBuilder = new NewLedgerFromSegmentsBuilder(_ledgerRepository, summaryGenerator);
             foreach (var kvp in newDetailsByCardIdmAndDate)
             {
                 importedCount += await newLedgerBuilder.BuildAndInsertAsync(
@@ -446,7 +449,6 @@ namespace ICCardManager.Services
 
             // 既存ledger_idごとにReplaceDetailsAsyncで全置換（変更がある場合のみ）
             var skippedCount = 0;
-            var summaryGenerator = new SummaryGenerator();
             foreach (var kvp in detailsByLedgerId)
             {
                 var ledgerId = kvp.Key;

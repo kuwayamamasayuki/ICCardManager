@@ -434,6 +434,10 @@
 - **設定値を使う処理を `static` にしない**。`static` は「引数だけで決まる純関数」の宣言であり、設定値はその引数に含まれない。純関数として書きたいなら**設定値を引数で受け取る**（`ReportFileNameFactory.Build(fileNameFormat, …)`）。呼び出し元から設定を取る形にすると、#1818 と同じ「消費側ごとの再実装」が始まる
 - **依存を「省略可能」にしてよいのは、省略時の値が本来の値と一致すると構造的に言えるときだけ**。`ReportService` の `IReportFileNameFactory` は同じ `IOptions<OrganizationOptions>` から導出するため省略可能でよいが、設定を持たない `ReportExportStatusService` で省略可能にすると、**DI の配線漏れが「設定した書式が静かに無視される」形で潜在化**する。後者は必須引数にして落とす
 - **書式が設定値になったら、その書式が破り得る保証を数え上げる**。#1703 は「生成名は単一のファイル名であり出力フォルダを脱出しない」を構成要素のサニタイズで保証していたが、**書式そのものがパス構造を持てば同じ保証が書式側から破られる**。sink 側で組み立て結果を検査し、破れていれば既定書式へ倒す。不正な書式（`{3}` / 閉じ括弧の欠落）で `FormatException` にせず既定へ倒すのも同じ判断（管理者の設定ミスで帳票作成を止めない）
+- **既定値付きコンストラクタは、`static` と同じ「設定の注入を静かに無効化する」形を作る**（Issue #1955）。`SummaryGenerator(DepartmentType departmentType = DepartmentType.MayorOffice)` は `new SummaryGenerator()` と書けてしまうため、明細 CSV 取込の 2 経路（`CsvImportService.Detail.cs` / `NewLedgerFromSegmentsBuilder`）が既定値のインスタンスで `ledger.summary` を作り直し、企業会計部局の組織でもチャージ行が「役務費によりチャージ」で 6 年保存の台帳へ入っていた。他の経路は設定を注入していたので、**設定が効く経路と効かない経路が混在する**という最も紛らわしい状態だった。
+  - **DI シングルトンを注入して済ませない**。起動時に設定を捕捉するシングルトンは、その設定が実行時に変更できるなら**変更後・再起動前の窓**で古い値を配る。「注入したから設定が効く」は、注入元がいつ設定を読んだかまで見て初めて言える（#1955 の時点で `LedgerMergeService` / `LedgerSplitService` / `LendingService` / `LedgerDetailViewModel` の 6 経路がこの窓を持ち、Issue #1975 で追跡）。読み直す形にするなら、その読み取りがキャッシュ経由かどうかも数える（共有モードでは他 PC の変更が TTL 分だけ遅れる）
+  - **回帰は「引数の有無」ではなく「引数が設定由来か」で見る**。有無だけを見ると `new SummaryGenerator(DepartmentType.MayorOffice)`（既定値のハードコード ＝ 同じ帰結）が適合として通る（#1786「極性の反転」）
+  - **同じ資源へ別の綴りで到達できる形を数える**（#1843）。対象型推論の `SummaryGenerator g = new(…);` は `new\s+SummaryGenerator` に一致しない。また `TestSourceInspection.ExtractInvocationArguments` は照合位置の直後が `(` でないとき**黙って読み飛ばす**ため、オブジェクト初期化子 `new SummaryGenerator { }` は引数ゼロですら数えられない。**照合数と抽出数の差を違反として数える**（#1944「判定できない前方の形は fail-open にしない」）
 
 ### 設定項目は「読まれている」ことをリフレクションで固定する（同 Issue）
 
