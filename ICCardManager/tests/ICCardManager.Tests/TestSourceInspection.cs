@@ -679,8 +679,18 @@ internal static class TestSourceInspection
     /// <c>{string.Join(", ", paramNames)}</c>、正規表現の <c>\{</c> 等）が対応のカウンタを狂わせ、
     /// <b>抽出範囲が黙って別の場所へ移る</b>。結果は「意味不明なメッセージで落ちる」か
     /// 「見当違いの箇所を検査して緑のまま通る」のどちらかで、後者は検出漏れになる（#1786）。
-    /// 本メソッドはリテラル（<c>"…"</c> / <c>@"…"</c> / <c>$"…"</c> / <c>$@"…"</c> / <c>'…'</c>）を
-    /// 読み飛ばしながら波括弧を数えるため、この状態が起きない。
+    /// 本メソッドはリテラル（<c>"…"</c> / <c>@"…"</c> / <c>$"…"</c> / <c>$@"…"</c> / <c>'…'</c>）と
+    /// 補間式の穴（入れ子のリテラルを含む）を読み飛ばしながら波括弧を数える。
+    /// </para>
+    /// <para>
+    /// <b>対象はブロック本体（<c>{ }</c>）を持つメソッドに限る。</b>式形式（<c>=&gt; …;</c>）や
+    /// 宣言のみのメソッドをマーカーに指定すると例外にする — 探索を続けると次のメソッドの
+    /// <c>{</c> を掴んで<b>隣の本体を黙って返す</b>ため（判定できない前方の形は fail-open にしない、#1944）。
+    /// </para>
+    /// <para>
+    /// <b>限界</b>: 逐語的補間文字列（<c>$@"…"</c>）の穴の中は <c>""</c> をエスケープとして読むため、
+    /// C# 11 の生文字列リテラル（<c>"""…"""</c>）は扱わない。本リポジトリには存在しない
+    /// （.NET Framework 4.8 / C# 10）が、使うようになったら本メソッドを見直すこと。
     /// </para>
     /// <para>
     /// コメントは本メソッドが <see cref="RemoveCommentsPreservingLines"/> で自ら剥がす
@@ -734,6 +744,16 @@ internal static class TestSourceInspection
                 break;
             }
 
+            // 式形式（=> …;）はブロック本体を持たない。ここで止めないと探索が次のメソッドの
+            // '{' まで走り、隣の本体を黙って返す（＝本ヘルパーが消そうとしている状態そのもの）。
+            // 判定できない前方の形は fail-open にしない（#1944）。
+            if (code[i] == ';' || (code[i] == '=' && i + 1 < code.Length && code[i + 1] == '>'))
+            {
+                throw new InvalidOperationException(
+                    $"「{signatureMarker}」はブロック本体（{{ }}）を持たない（式形式、または宣言のみ）。" +
+                    "抽出対象はブロック本体のメソッドに限る。");
+            }
+
             i++;
         }
 
@@ -777,15 +797,24 @@ internal static class TestSourceInspection
     {
         var compact = new StringBuilder();
         var originalIndexOf = new List<int>();
-        for (var i = 0; i < source.Length; i++)
+        var i = 0;
+        while (i < source.Length)
         {
-            if (char.IsWhiteSpace(source[i]))
+            // リテラルの中身は照合対象から外す。マーカーと同じ綴りがリテラルに現れると
+            // 偽の「2 箇所に一致」（誤検出＝赤）になり、綴りを誤ればリテラル内の 1 件に
+            // 一致して静かに誤った位置から抽出する。
+            if (TrySkipLiteral(source, ref i))
             {
                 continue;
             }
 
-            compact.Append(source[i]);
-            originalIndexOf.Add(i);
+            if (!char.IsWhiteSpace(source[i]))
+            {
+                compact.Append(source[i]);
+                originalIndexOf.Add(i);
+            }
+
+            i++;
         }
 
         var compactMarker = new string(signatureMarker.Where(ch => !char.IsWhiteSpace(ch)).ToArray());
@@ -861,10 +890,33 @@ internal static class TestSourceInspection
         if (c == '"' || (c == '$' && index + 1 < source.Length && source[index + 1] == '"'))
         {
             // 通常の文字列・補間文字列: \ がエスケープ。行はまたげないので改行で打ち切る。
-            var i = c == '$' ? index + 2 : index + 1;
+            var isInterpolated = c == '$';
+            var i = isInterpolated ? index + 2 : index + 1;
             while (i < source.Length && source[i] != '"' && source[i] != '\n')
             {
-                i += source[i] == '\\' ? 2 : 1;
+                if (source[i] == '\\')
+                {
+                    i += 2;
+                    continue;
+                }
+
+                // 補間式の穴（{ … }）の中は「コードそのもの」で、入れ子の文字列リテラルを
+                // 書ける（$"x{Fmt("}")}"）。穴を飛ばさずに読むと、その " でリテラルが
+                // 打ち切られてトークン化がずれ、抽出が黙って短縮する（＝空振りしたまま緑）。
+                if (isInterpolated && source[i] == '{')
+                {
+                    if (i + 1 < source.Length && source[i + 1] == '{')
+                    {
+                        // {{ は '{' のエスケープ（補間式ではない）
+                        i += 2;
+                        continue;
+                    }
+
+                    i = SkipInterpolationHole(source, i);
+                    continue;
+                }
+
+                i++;
             }
 
             index = i < source.Length && source[i] == '"' ? i + 1 : i;
@@ -884,6 +936,41 @@ internal static class TestSourceInspection
         }
 
         return false;
+    }
+
+    /// <summary>
+    /// 補間文字列の穴（<c>{ … }</c>）を、入れ子の波括弧とリテラルを数えながら読み飛ばし、
+    /// 対応する <c>}</c> の次の位置を返す（閉じていないなら末尾）。
+    /// </summary>
+    private static int SkipInterpolationHole(string source, int openBraceIndex)
+    {
+        var i = openBraceIndex + 1;
+        var depth = 1;
+
+        while (i < source.Length)
+        {
+            if (TrySkipLiteral(source, ref i))
+            {
+                continue;
+            }
+
+            if (source[i] == '{')
+            {
+                depth++;
+            }
+            else if (source[i] == '}')
+            {
+                depth--;
+                if (depth == 0)
+                {
+                    return i + 1;
+                }
+            }
+
+            i++;
+        }
+
+        return i;
     }
 
     /// <summary>

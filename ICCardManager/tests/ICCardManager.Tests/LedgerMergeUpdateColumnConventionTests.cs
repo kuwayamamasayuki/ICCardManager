@@ -191,6 +191,80 @@ WHERE id = @id"";
             "列を落とせば検査が赤になること（＝検出力が残っていること）を、サンプル入力でも固定する");
     }
 
+    /// <summary>
+    /// 式形式（<c>=&gt; …;</c>）のメソッドをマーカーに指定したときは例外にすること
+    /// （Issue #1960 のコードレビューで検出）。
+    /// </summary>
+    /// <remarks>
+    /// 開始波括弧の探索を <c>;</c> / <c>=&gt;</c> で止めないと、探索が次のメソッドの <c>{</c> まで走り
+    /// <b>隣の本体を黙って返す</b>。本 Issue が消そうとしている状態そのものが、修正の中に残る形
+    /// （#1814「修正の中に、修正対象と同じ欠陥への経路を残さない」）。
+    /// マーカーが式形式の 1 件だけに一致すると曖昧さの検査にも掛からないため、ここで落とす。
+    /// </remarks>
+    [Fact]
+    public void ブロック本体を持たないメソッドをマーカーにしたときは例外にすること()
+    {
+        var withExpressionBodied = SampleWithBracesInLiterals.Replace(
+            "        private static void Neighbor()",
+            "        public Task<bool> ShorthandAsync(int id) => TargetAsync(id, null);\n\n" +
+            "        private static void Neighbor()");
+
+        Action act = () => TestSourceInspection.ExtractMethodBodyPreservingLiterals(
+            withExpressionBodied, "Task<bool> ShorthandAsync(int id)");
+
+        act.Should().Throw<InvalidOperationException>()
+            .WithMessage("*ブロック本体*", "隣のメソッドの本体を黙って返さないこと");
+    }
+
+    /// <summary>
+    /// 補間式の穴に入れ子の文字列があっても抽出範囲が短縮しないこと
+    /// （Issue #1960 のコードレビューで検出）。
+    /// </summary>
+    /// <remarks>
+    /// 非逐語の補間文字列 <c>$"…{Fmt("}")}…"</c> は、穴の中の <c>"</c> でリテラルが打ち切られると
+    /// トークン化がずれ、抽出が<b>例外も出さずに短縮する</b>（禁止トークンの不在を見る検査なら
+    /// 空振りしたまま緑＝fail-open）。
+    /// </remarks>
+    [Fact]
+    public void 補間式の穴に入れ子の文字列があっても抽出が短縮しないこと()
+    {
+        const string sample = @"
+    public class Sample
+    {
+        public async Task<bool> TargetAsync(int id, SQLiteTransaction transaction)
+        {
+            var label = $""件数 {Format(count, ""}"")} / 上限 {Limit()}"";
+            command.CommandText = @""UPDATE ledger SET summary = @summary WHERE id = @id"";
+            return await command.ExecuteNonQueryAsync() == 1;
+        }
+    }
+";
+
+        var body = TestSourceInspection.ExtractMethodBodyPreservingLiterals(
+            sample, SampleTargetSignature);
+
+        ExtractLedgerUpdateColumns(body).Should().BeEquivalentTo(
+            new[] { "summary" },
+            "穴の中の \" でリテラルが打ち切られると、UPDATE へ到達する前に本体が切れる");
+    }
+
+    /// <summary>
+    /// シグネチャの照合は文字列リテラルの中身を数えないこと（Issue #1960 のコードレビューで検出）。
+    /// リテラル中の同じ綴りを数えると、偽の「2 箇所に一致」で<b>規約を守っているコードが赤になる</b>。
+    /// </summary>
+    [Fact]
+    public void シグネチャの照合はリテラル内の一致を数えないこと()
+    {
+        var withMarkerInLiteral = SampleWithBracesInLiterals.Replace(
+            "            return await command.ExecuteNonQueryAsync() == 1;",
+            "            Log(\"Task<bool> TargetAsync(int id, SQLiteTransaction transaction) を実行\");\n" +
+            "            return await command.ExecuteNonQueryAsync() == 1;");
+
+        TestSourceInspection.ExtractMethodBodyPreservingLiterals(
+                withMarkerInLiteral, SampleTargetSignature)
+            .Should().Contain("companion_count = @companionCount");
+    }
+
     private const string SampleTargetSignature =
         "Task<bool> TargetAsync(int id, SQLiteTransaction transaction)";
 
