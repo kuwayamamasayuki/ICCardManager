@@ -12,7 +12,7 @@
   - 検証: **+12 件**（`LedgerClonerCoverageTests` 7 件・`LedgerMergeAuditLogBeforeDataTests` 5 件）。**回帰は `OperationLogger` のモックではなく、書き込み先 `IOperationLogRepository` のモックが捕捉した実 `OperationLog` の中身で表明する**（#1760）。**対の表明**として `AfterData` が統合**後**であることを固定した（before だけを直して after まで巻き戻す退行を検出する）。
   - **コピー漏れは静的な列挙ではなくリフレクションで検出する**。`LedgerClonerCoverageTests` はモデルの書き込み可能プロパティを走査するため、列を足してコピーへ書き足し忘れると自動的に赤になる（個別の挙動テストは列の増減に追随できない。#1764）。未対応の型が現れたら例外にして fail-open を避ける（#1944）。
   - **検出力は実測した**。`beforeLedgers` を浅いコピーへ戻す変異で 4 件が赤・`AfterData` の対の表明は緑になることを確認した。
-  - 05_クラス設計書 §5.15・§5.20、07_テスト設計書 §1.1a・§UT-111 を同期更新（Issue #1959）
+  - 05_クラス設計書 §5.15・§5.20、07_テスト設計書 §1.1a・§UT-111、`.claude/rules/development-conventions.md`（#1726 節に「監査ログへ渡す『変更前』は、変更対象と別のインスタンスにする」を追記）を同期更新（Issue #1959）
 - Issue #1956 **帳票のページ番号列（`TemplateMapping.PageNumberColumn`）が一部のメソッドでしか読まれず、既定（12=L 列）以外に設定すると毎月ページ番号が振り出しに戻る**欠陥を是正した。`ReportService` は 1 ページ目のヘッダーを書く `SetHeaderInfo` だけが設定を読み、継続ページを書く `SetPageNumber` と前月の最終ページを読む `GetLastPageNumberFromWorksheet` は**列 12 を直書き**していた。
   - `PageNumberColumn = 11` に設定すると、1 ページ目の頁は K2、継続ページは L2 へ書かれる。翌月の開始ページ算出は空の L2 を読んで 0 を返し `IcCard.StartingPageNumber` へフォールバックするため、**年度を通した通し頁で綴じる物品出納簿の頁が毎月リセットされる**。
   - **「読まれている」と「効いている」は別**（`.claude/rules/development-conventions.md` #1820）。`OrganizationOptionsUsageConventionTests` は設定項目が本番コードから参照されていることをリフレクションで固定するが、**読む箇所と読まない箇所が同居する**この形は素通りする。#1820 が「一部だけ設定化しない」と定めたのと同じ状態が、同じクラスに残っていた。
