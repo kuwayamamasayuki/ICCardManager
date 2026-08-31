@@ -229,8 +229,12 @@ public class BackupServiceUiThreadGuardTests : IDisposable
     /// </para>
     /// <para>
     /// 完了済み Task にすると <c>await</c> の継続が同期的に進み、呼び出し元＝UI スレッドに留まる。
-    /// これは Issue #1361 が対象としていた「設定のキャッシュヒットで UI スレッドに留まる」経路そのもので、
+    /// これは<b>バックアップ先が未設定の本番経路</b>（<c>ResolveBackupFolderDetailAsync</c> は
+    /// <c>BackupPath</c> が空なら <c>ValidateBackupPathAsync</c> を通らず、直前の
+    /// <c>GetAppSettingsAsync</c> がキャッシュヒットすれば全体が同期完了する）と同じ形であり、
     /// 差し替えは検出力の回復であって本番と乖離した状況の捏造ではない。
+    /// なお <c>BackupPath</c> が設定済みの場合は #1746 の <c>Task.Run</c> を必ず通るため、
+    /// この経路では継続がスレッドプールへ移り、後続の <c>Task.Run</c> は結果的に冗長になる。
     /// </para>
     /// </remarks>
     [Fact]

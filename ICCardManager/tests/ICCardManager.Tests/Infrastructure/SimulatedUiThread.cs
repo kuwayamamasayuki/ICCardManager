@@ -29,6 +29,20 @@ namespace ICCardManager.Tests.Infrastructure;
 /// SUT とその <c>Task.Run</c> の子孫へ流れる一方、<b>テスト本体のコンテキストへは戻らない</b>。
 /// 他テストへの漏れが構造的に起こらない点でも、テスト本体で設定する従来の形より安全。
 /// </para>
+/// <para>
+/// この性質のため、本ヘルパー<b>だけ</b>を使うテストクラスには
+/// <c>DbContext.IsOnUiThread =</c> というリテラルが現れず、Issue #1372 の
+/// <c>DbContextUiThreadHookCollectionConfigurationTests</c>（同フックを書き換えるクラスへ
+/// <c>[Collection]</c> 属性が付いているかを静的に検査する）の <c>InlineData</c> へ
+/// 追加する人的トリガーが消える。漏れが専用スレッドの ExecutionContext に閉じるため実害は無いが、
+/// 「属性が要らなくなった」ことを次に読む人が調べ直さずに済むよう明記しておく。
+/// </para>
+/// <para>
+/// 「UI 役はスレッドプール外である」という本ヘルパーの前提そのものは
+/// <c>SimulatedUiThreadTests</c> が回帰として固定する。ここを簡略化して
+/// テスト本体のスレッドを UI と見なす形へ戻しても、利用側のテストは全件緑のまま
+/// 間欠失敗だけが復活するため（Issue #1961 の欠陥そのもの）、土台の側に表明を置く。
+/// </para>
 /// </remarks>
 public static class SimulatedUiThread
 {
@@ -67,6 +81,16 @@ public static class SimulatedUiThread
                     ?? (() => Thread.CurrentThread.ManagedThreadId == uiThreadId);
 
                 pending = invokeAsync();
+                if (pending == null)
+                {
+                    // null のまま進むと下の Wait() が NullReferenceException になり、
+                    // 裸の catch が握って呼び出し元にはキャンセル済み Task だけが届く
+                    // （原因が分からない TaskCanceledException になる）。ここで名指しして弾く。
+                    throw new ArgumentException(
+                        $"{nameof(invokeAsync)} が null を返しました。UI スレッド上で開始する Task を返してください。",
+                        nameof(invokeAsync));
+                }
+
                 started.SetResult(pending);
             }
             catch (Exception ex)
