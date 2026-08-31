@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
@@ -87,7 +87,9 @@ namespace ICCardManager.Services
             }
 
             // 操作ログ用に元のデータを保存
-            var beforeLedger = CloneLedger(originalLedger);
+            // Issue #1959: コピーの生成手段は Common/LedgerCloner ただ 1 つに寄せる。
+            // 私的なクローンを各サービスに置くと、モデルへ列を足したとき片方だけが更新される。
+            var beforeLedger = LedgerCloner.Clone(originalLedger);
 
             try
             {
@@ -258,31 +260,6 @@ namespace ICCardManager.Services
             {
                 detail.GroupId = null;
             }
-        }
-
-        /// <summary>
-        /// Ledgerのクローン（操作ログ用）
-        /// </summary>
-        private static Ledger CloneLedger(Ledger source)
-        {
-            return new Ledger
-            {
-                Id = source.Id,
-                CardIdm = source.CardIdm,
-                LenderIdm = source.LenderIdm,
-                Date = source.Date,
-                Summary = source.Summary,
-                Income = source.Income,
-                Expense = source.Expense,
-                Balance = source.Balance,
-                StaffName = source.StaffName,
-                CompanionCount = source.CompanionCount,
-                Note = source.Note,
-                ReturnerIdm = source.ReturnerIdm,
-                LentAt = source.LentAt,
-                ReturnedAt = source.ReturnedAt,
-                IsLentRecord = source.IsLentRecord
-            };
         }
     }
 }
