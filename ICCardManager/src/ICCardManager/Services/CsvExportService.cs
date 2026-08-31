@@ -193,7 +193,7 @@ namespace ICCardManager.Services
 
                     lines.Add(string.Join(",",
                         ledger.Id.ToString(),
-                        ledger.Date.ToString("yyyy-MM-dd HH:mm:ss"),
+                        SqliteDateTimeFormat.ToText(ledger.Date),
                         EscapeCsvField(ledger.CardIdm),
                         EscapeCsvField(cardNumber),
                         EscapeCsvField(ledger.Summary),
@@ -308,7 +308,7 @@ namespace ICCardManager.Services
 
                     lines.Add(string.Join(",",
                         detail.LedgerId.ToString(),
-                        detail.UseDate.HasValue ? detail.UseDate.Value.ToString("yyyy-MM-dd HH:mm:ss") : "",
+                        detail.UseDate.HasValue ? SqliteDateTimeFormat.ToText(detail.UseDate.Value) : "",
                         EscapeCsvField(cardIdm),
                         EscapeCsvField(cardNumber),
                         EscapeCsvField(detail.EntryStation ?? ""),

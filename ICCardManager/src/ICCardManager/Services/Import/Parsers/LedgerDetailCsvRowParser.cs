@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using ICCardManager.Models;
+using ICCardManager.Common;
 
 namespace ICCardManager.Services.Import.Parsers
 {
@@ -63,7 +64,7 @@ namespace ICCardManager.Services.Import.Parsers
             DateTime? useDate = null;
             if (!string.IsNullOrWhiteSpace(useDateStr))
             {
-                if (!DateTime.TryParse(useDateStr, out var parsedDate))
+                if (!SqliteDateTimeFormat.TryParse(useDateStr, out var parsedDate))
                 {
                     errors.Add(new CsvImportError
                     {

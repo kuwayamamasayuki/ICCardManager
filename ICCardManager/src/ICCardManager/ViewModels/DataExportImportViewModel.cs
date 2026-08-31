@@ -1084,7 +1084,7 @@ public partial class DataExportImportViewModel : ViewModelBase
     /// </summary>
     private string GetDefaultExportFileName()
     {
-        var timestamp = DateTime.Now.ToString("yyyyMMdd_HHmmss");
+        var timestamp = DateTime.Now.ToString("yyyyMMdd_HHmmss", CultureInfo.InvariantCulture);
 
         return SelectedExportType switch
         {

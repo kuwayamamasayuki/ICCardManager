@@ -134,7 +134,7 @@ namespace ICCardManager.Data.Migrations
                 {
                     Version = reader.GetInt32(0),
                     Description = reader.GetString(1),
-                    AppliedAt = DateTime.Parse(reader.GetString(2))
+                    AppliedAt = SqliteDateTimeFormat.Parse(reader.GetString(2))
                 });
             }
 
@@ -404,7 +404,7 @@ namespace ICCardManager.Data.Migrations
                 // Issue #1014: CURRENT_TIMESTAMPはUTCのため、ローカル時刻を明示的に保存する
                 command.CommandText = @"INSERT INTO operation_log (timestamp, operator_idm, operator_name, target_table, target_id, action, after_data)
 VALUES (@timestamp, @operator_idm, @operator_name, @target_table, @target_id, @action, @after_data)";
-                command.Parameters.AddWithValue("@timestamp", DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss"));
+                command.Parameters.AddWithValue("@timestamp", SqliteDateTimeFormat.ToText(DateTime.Now));
                 command.Parameters.AddWithValue("@operator_idm", "SYSTEM");
                 command.Parameters.AddWithValue("@operator_name", "MigrationRunner");
                 command.Parameters.AddWithValue("@target_table", "schema_migrations");

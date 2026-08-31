@@ -7,6 +7,7 @@ using ICCardManager.Dtos;
 using ICCardManager.Infrastructure.CardReader;
 using ICCardManager.Infrastructure.Timing;
 using Microsoft.Extensions.Logging;
+using System.Globalization;
 
 namespace ICCardManager.Services
 {
@@ -492,7 +493,7 @@ namespace ICCardManager.Services
             }
 
             var days = health.GetDaysSinceLastSuccess(_clock.Now) ?? 0;
-            var lastSuccessText = lastSuccess.Value.ToString("yyyy年M月d日 HH:mm");
+            var lastSuccessText = lastSuccess.Value.ToString("yyyy年M月d日 HH:mm", CultureInfo.InvariantCulture);
 
             if (days > AppConstants.BackupStaleWarningDays)
             {

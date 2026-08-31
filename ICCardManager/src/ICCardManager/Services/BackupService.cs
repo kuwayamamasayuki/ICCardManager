@@ -302,7 +302,7 @@ namespace ICCardManager.Services
             {
                 await _settingsRepository.SetAsync(
                     SettingsRepository.KeyLastBackupSuccessAt,
-                    DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss")).ConfigureAwait(false);
+                    SqliteDateTimeFormat.ToText(DateTime.Now)).ConfigureAwait(false);
                 await _settingsRepository.SetAsync(
                     SettingsRepository.KeyLastBackupMachine,
                     Environment.MachineName).ConfigureAwait(false);

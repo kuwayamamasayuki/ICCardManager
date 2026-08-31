@@ -632,7 +632,7 @@ public partial class OperationLogSearchViewModel : ViewModelBase
         var parts = new List<string>();
 
         // 日付を和暦に変換
-        if (!string.IsNullOrEmpty(dateStr) && DateTime.TryParse(dateStr, out var date))
+        if (!string.IsNullOrEmpty(dateStr) && SqliteDateTimeFormat.TryParse(dateStr, out var date))
         {
             parts.Add(WarekiConverter.ToWareki(date));
         }

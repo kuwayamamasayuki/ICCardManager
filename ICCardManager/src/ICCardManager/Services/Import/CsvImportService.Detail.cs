@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Linq;
 using System.Threading.Tasks;
 using System.IO;
@@ -15,6 +16,7 @@ using ICCardManager.Services.Import.Builders;
 using ICCardManager.Services.Import.Parsers;
 using System.Data.SQLite;
 using Microsoft.Extensions.Logging;
+using ICCardManager.Common;
 
 namespace ICCardManager.Services
 {
@@ -632,8 +634,8 @@ namespace ICCardManager.Services
                     changes.Add(new FieldChange
                     {
                         FieldName = $"{rowLabel} 利用日時",
-                        OldValue = existing.UseDate?.ToString("yyyy-MM-dd HH:mm:ss") ?? "(なし)",
-                        NewValue = imported.UseDate?.ToString("yyyy-MM-dd HH:mm:ss") ?? "(なし)"
+                        OldValue = SqliteDateTimeFormat.ToText(existing.UseDate) ?? "(なし)",
+                        NewValue = SqliteDateTimeFormat.ToText(imported.UseDate) ?? "(なし)"
                     });
                 }
 
@@ -765,7 +767,7 @@ namespace ICCardManager.Services
         {
             var changes = new List<FieldChange>
             {
-                new FieldChange { FieldName = "日付", NewValue = date.ToString("yyyy-MM-dd HH:mm:ss"), IsDisplayOnly = true },
+                new FieldChange { FieldName = "日付", NewValue = SqliteDateTimeFormat.ToText(date), IsDisplayOnly = true },
                 new FieldChange { FieldName = "摘要", NewValue = summary, IsDisplayOnly = true }
             };
             if (income > 0)
@@ -813,7 +815,7 @@ namespace ICCardManager.Services
             // 利用日時
             if (detail.UseDate.HasValue)
             {
-                parts.Add(detail.UseDate.Value.ToString("yyyy-MM-dd HH:mm"));
+                parts.Add(detail.UseDate.Value.ToString("yyyy-MM-dd HH:mm", CultureInfo.InvariantCulture));
             }
 
             // 区間情報

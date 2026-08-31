@@ -7,6 +7,7 @@ using ICCardManager.Models;
 using Microsoft.Extensions.Options;
 using System.Data.Common;
 using System.Data.SQLite;
+using ICCardManager.Common;
 
 namespace ICCardManager.Data.Repositories
 {
@@ -387,7 +388,7 @@ WHERE card_idm = @cardIdm AND is_deleted = 0";
 
             command.Parameters.AddWithValue("@cardIdm", cardIdm);
             command.Parameters.AddWithValue("@isLent", isLent ? 1 : 0);
-            command.Parameters.AddWithValue("@lentAt", lentAt.HasValue ? lentAt.Value.ToString("yyyy-MM-dd HH:mm:ss") : DBNull.Value);
+            command.Parameters.AddWithValue("@lentAt", SqliteDateTimeFormat.ToTextOrDbNull(lentAt));
             command.Parameters.AddWithValue("@staffIdm", (object)staffIdm ?? DBNull.Value);
 
             var result = await command.ExecuteNonQueryAsync().ConfigureAwait(false);
@@ -604,13 +605,13 @@ WHERE card_type = @cardType";
                 CardNumber = reader.GetString(2),
                 Note = reader.IsDBNull(3) ? null : reader.GetString(3),
                 IsDeleted = reader.GetInt32(4) == 1,
-                DeletedAt = reader.IsDBNull(5) ? null : DateTime.Parse(reader.GetString(5)),
+                DeletedAt = reader.IsDBNull(5) ? null : SqliteDateTimeFormat.Parse(reader.GetString(5)),
                 IsLent = reader.GetInt32(6) == 1,
-                LastLentAt = reader.IsDBNull(7) ? null : DateTime.Parse(reader.GetString(7)),
+                LastLentAt = reader.IsDBNull(7) ? null : SqliteDateTimeFormat.Parse(reader.GetString(7)),
                 LastLentStaff = reader.IsDBNull(8) ? null : reader.GetString(8),
                 StartingPageNumber = reader.IsDBNull(9) ? 1 : reader.GetInt32(9),
                 IsRefunded = reader.IsDBNull(10) ? false : reader.GetInt32(10) == 1,
-                RefundedAt = reader.IsDBNull(11) ? null : DateTime.Parse(reader.GetString(11)),
+                RefundedAt = reader.IsDBNull(11) ? null : SqliteDateTimeFormat.Parse(reader.GetString(11)),
                 CarryoverIncomeTotal = reader.IsDBNull(12) ? 0 : reader.GetInt32(12),
                 CarryoverExpenseTotal = reader.IsDBNull(13) ? 0 : reader.GetInt32(13),
                 CarryoverFiscalYear = reader.IsDBNull(14) ? (int?)null : reader.GetInt32(14)

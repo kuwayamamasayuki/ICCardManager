@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using ICCardManager.Models;
+using ICCardManager.Common;
 
 namespace ICCardManager.Services.Import.Parsers
 {
@@ -83,7 +84,7 @@ namespace ICCardManager.Services.Import.Parsers
                 ledgerId = parsedId;
             }
 
-            if (!DateTime.TryParse(dateStr, out var date))
+            if (!SqliteDateTimeFormat.TryParse(dateStr, out var date))
             {
                 errors.Add(new CsvImportError
                 {

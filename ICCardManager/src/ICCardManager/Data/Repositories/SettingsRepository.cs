@@ -139,8 +139,8 @@ ON CONFLICT(key) DO UPDATE SET value = excluded.value
 WHERE settings.value IS NULL OR substr(settings.value, 1, 7) <> @currentMonth";
 
                 command.Parameters.AddWithValue("@key", KeyLastVacuumDate);
-                command.Parameters.AddWithValue("@today", today.ToString("yyyy-MM-dd"));
-                command.Parameters.AddWithValue("@currentMonth", today.ToString("yyyy-MM"));
+                command.Parameters.AddWithValue("@today", SqliteDateTimeFormat.ToDateText(today));
+                command.Parameters.AddWithValue("@currentMonth", SqliteDateTimeFormat.ToMonthKey(today));
             }, scope: null).ConfigureAwait(false);
 
             if (acquired)
@@ -293,7 +293,7 @@ WHERE settings.value IS NULL OR substr(settings.value, 1, 7) <> @currentMonth";
 
             // 最終VACUUM実行日
             var lastVacuumDate = Get(KeyLastVacuumDate);
-            if (DateTime.TryParse(lastVacuumDate, out var date))
+            if (SqliteDateTimeFormat.TryParse(lastVacuumDate, out var date))
             {
                 settings.LastVacuumDate = date;
             }
@@ -404,7 +404,7 @@ WHERE settings.value IS NULL OR substr(settings.value, 1, 7) <> @currentMonth";
 
             // 最終VACUUM実行日
             var lastVacuumDate = await GetAsync(KeyLastVacuumDate);
-            if (DateTime.TryParse(lastVacuumDate, out var date))
+            if (SqliteDateTimeFormat.TryParse(lastVacuumDate, out var date))
             {
                 settings.LastVacuumDate = date;
             }
@@ -499,7 +499,7 @@ WHERE settings.value IS NULL OR substr(settings.value, 1, 7) <> @currentMonth";
 
                     if (settings.LastVacuumDate.HasValue)
                     {
-                        success &= await SetAsync(KeyLastVacuumDate, settings.LastVacuumDate.Value.ToString("yyyy-MM-dd"), scope);
+                        success &= await SetAsync(KeyLastVacuumDate, SqliteDateTimeFormat.ToDateText(settings.LastVacuumDate.Value), scope);
                     }
 
                     // ウィンドウ設定を保存

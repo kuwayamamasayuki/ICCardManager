@@ -95,7 +95,7 @@ namespace ICCardManager.Services
                 Id = ledger.Id,
                 CardIdm = ledger.CardIdm,
                 LenderIdm = ledger.LenderIdm,
-                DateText = ledger.Date.ToString("yyyy-MM-dd HH:mm:ss"),
+                DateText = SqliteDateTimeFormat.ToText(ledger.Date),
                 Summary = ledger.Summary,
                 Income = ledger.Income,
                 Expense = ledger.Expense,
@@ -103,8 +103,8 @@ namespace ICCardManager.Services
                 StaffName = ledger.StaffName,
                 Note = ledger.Note,
                 ReturnerIdm = ledger.ReturnerIdm,
-                LentAtText = ledger.LentAt?.ToString("yyyy-MM-dd HH:mm:ss"),
-                ReturnedAtText = ledger.ReturnedAt?.ToString("yyyy-MM-dd HH:mm:ss"),
+                LentAtText = SqliteDateTimeFormat.ToText(ledger.LentAt),
+                ReturnedAtText = SqliteDateTimeFormat.ToText(ledger.ReturnedAt),
                 IsLentRecord = ledger.IsLentRecord,
                 CompanionCount = ledger.CompanionCount
             };
@@ -117,7 +117,7 @@ namespace ICCardManager.Services
                 Id = Id,
                 CardIdm = CardIdm,
                 LenderIdm = LenderIdm,
-                Date = DateTime.Parse(DateText),
+                Date = SqliteDateTimeFormat.Parse(DateText),
                 Summary = Summary,
                 Income = Income,
                 Expense = Expense,
@@ -125,8 +125,8 @@ namespace ICCardManager.Services
                 StaffName = StaffName,
                 Note = Note,
                 ReturnerIdm = ReturnerIdm,
-                LentAt = string.IsNullOrEmpty(LentAtText) ? null : DateTime.Parse(LentAtText),
-                ReturnedAt = string.IsNullOrEmpty(ReturnedAtText) ? null : DateTime.Parse(ReturnedAtText),
+                LentAt = string.IsNullOrEmpty(LentAtText) ? null : SqliteDateTimeFormat.Parse(LentAtText),
+                ReturnedAt = string.IsNullOrEmpty(ReturnedAtText) ? null : SqliteDateTimeFormat.Parse(ReturnedAtText),
                 IsLentRecord = IsLentRecord,
                 CompanionCount = CompanionCount
             };

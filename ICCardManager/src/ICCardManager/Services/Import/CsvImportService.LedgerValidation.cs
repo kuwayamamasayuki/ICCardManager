@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
 using ICCardManager.Models;
+using ICCardManager.Common;
 
 namespace ICCardManager.Services
 {
@@ -48,8 +49,8 @@ namespace ICCardManager.Services
                 changes.Add(new FieldChange
                 {
                     FieldName = "日時",
-                    OldValue = existingLedger.Date.ToString("yyyy-MM-dd HH:mm:ss"),
-                    NewValue = newDate.ToString("yyyy-MM-dd HH:mm:ss")
+                    OldValue = SqliteDateTimeFormat.ToText(existingLedger.Date),
+                    NewValue = SqliteDateTimeFormat.ToText(newDate)
                 });
             }
 

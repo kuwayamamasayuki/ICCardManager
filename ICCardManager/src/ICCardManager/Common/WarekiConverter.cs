@@ -47,7 +47,7 @@ namespace ICCardManager.Common
             catch
             {
                 // 変換できない場合は西暦形式で返す
-                return date.ToString("yyyy.M.d");
+                return date.ToString("yyyy.M.d", CultureInfo.InvariantCulture);
             }
         }
 
@@ -70,7 +70,7 @@ namespace ICCardManager.Common
             }
             catch
             {
-                return date.ToString("yyyy年M月");
+                return date.ToString("yyyy年M月", CultureInfo.InvariantCulture);
             }
         }
 

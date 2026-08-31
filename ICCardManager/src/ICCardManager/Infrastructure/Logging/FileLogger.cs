@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
 using Microsoft.Extensions.Logging;
+using System.Globalization;
 
 namespace ICCardManager.Infrastructure.Logging
 {
@@ -54,7 +55,7 @@ namespace ICCardManager.Infrastructure.Logging
 
         private string FormatLogEntry(LogLevel logLevel, string message, Exception exception)
         {
-            var timestamp = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss.fff");
+            var timestamp = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss.fff", CultureInfo.InvariantCulture);
             var level = GetLogLevelString(logLevel);
             var category = GetShortCategoryName(_categoryName);
 

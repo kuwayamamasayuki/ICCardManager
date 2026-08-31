@@ -14,6 +14,7 @@ using ICCardManager.Models;
 using ICCardManager.Services.Import.Parsers;
 using Microsoft.Extensions.Logging;
 using System.Data.SQLite;
+using ICCardManager.Common;
 
 namespace ICCardManager.Services
 {
@@ -486,7 +487,7 @@ namespace ICCardManager.Services
                         LineNumber = lineNumber,
                         Idm = cardDisplayIdm,
                         Name = summary,
-                        AdditionalInfo = date.ToString("yyyy-MM-dd HH:mm:ss"),
+                        AdditionalInfo = SqliteDateTimeFormat.ToText(date),
                         Action = action,
                         Changes = changes
                     });
