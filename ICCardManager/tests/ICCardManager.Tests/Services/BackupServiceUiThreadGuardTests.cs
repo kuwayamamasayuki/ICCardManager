@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
@@ -9,7 +9,7 @@ using ICCardManager.Data.Repositories;
 using ICCardManager.Models;
 using ICCardManager.Services;
 using ICCardManager.Tests.Data;
-using Microsoft.Extensions.Logging.Abstractions;
+using ICCardManager.Tests.Infrastructure;
 using Moq;
 using Xunit;
 
@@ -21,9 +21,21 @@ namespace ICCardManager.Tests.Services;
 /// </summary>
 /// <remarks>
 /// <para>
-/// 実際の WPF Dispatcher を立ち上げず、<c>DbContext.IsOnUiThread</c> 内部フックを
-/// ManagedThreadId 判定に差し替え、「現スレッド = UI、Task.Run 先 = 非 UI」を模擬する。
-/// これにより BackupService の async 版が確実に Task.Run でオフロードしていることを検証できる。
+/// 実際の WPF Dispatcher を立ち上げず、<c>DbContext.IsOnUiThread</c> 内部フックを差し替えて
+/// 「呼び出し元 = UI、Task.Run 先 = 非 UI」を模擬する。これにより BackupService の async 版が
+/// 確実に Task.Run でオフロードしていることを検証できる。
+/// </para>
+/// <para>
+/// Issue #1961: 模擬は <see cref="SimulatedUiThread"/>（スレッドプール外の専用スレッド）で行う。
+/// テスト本体のスレッドを UI と見なす従来の書き方は、<c>await</c> で解放されたそのスレッドを
+/// プールが SUT の <c>Task.Run</c> に再利用したときに ID が一致し、オフロード先が UI と判定されて
+/// 間欠的に赤くなった。専用スレッドは <c>Task.Run</c> の実行先になり得ないため一致が起こり得ない。
+/// </para>
+/// <para>
+/// Issue #1961: ロガーは <c>NullLogger</c> ではなく <see cref="RecordingLogger{T}"/> を渡す。
+/// <see cref="BackupService.ExecuteAutoBackupAsync"/> は失敗を例外ではなく <c>null</c> 戻り値で
+/// 表す（Issue #1737）ため、UI スレッドガードの発火・I/O 失敗・権限失敗がすべて <c>null</c> に
+/// 畳まれる。サービスが記録した理由をアサーションメッセージへ載せ、CI のログだけで切り分けられるようにする。
 /// </para>
 /// <para>
 /// 自動バックアップ (<see cref="BackupService.ExecuteAutoBackupAsync"/>) は
@@ -95,23 +107,22 @@ public class BackupServiceUiThreadGuardTests : IDisposable
         using var dbContext = new DbContext(_dbPath);
         dbContext.InitializeDatabase(); // 初期化はガード設定の前に実行する（セットアップ自体が UI ガードに抵触しないように）
 
-        // 初期化完了後に UI スレッド模擬を有効化: 現スレッド = UI、Task.Run 先 = 非 UI
-        var uiThreadId = Thread.CurrentThread.ManagedThreadId;
-        DbContext.IsOnUiThread = () => Thread.CurrentThread.ManagedThreadId == uiThreadId;
-
+        var logger = new RecordingLogger<BackupService>();
         var service = new BackupService(
             dbContext,
             CreateSettingsRepositoryMock().Object,
-            NullLogger<BackupService>.Instance);
+            logger);
 
         var backupPath = Path.Combine(_backupDirectory, "ui_thread_sync.db");
 
-        var result = service.CreateBackup(backupPath);
+        // 初期化完了後に UI スレッド模擬を有効化（セットアップ自体がガードに抵触しないように）
+        var result = SimulatedUiThread.Invoke(() => service.CreateBackup(backupPath));
 
         result.Should().BeFalse(
             "sync 版 CreateBackup は UI スレッドから呼ぶと DbContext.LeaseConnection の "
             + "UI スレッドガード (Issue #1281) で InvalidOperationException が発生し、"
-            + "BackupService はこれを catch して false を返すべき");
+            + "BackupService はこれを catch して false を返すべき。実際のログ:"
+            + Environment.NewLine + logger.FormatEntries());
         File.Exists(backupPath).Should().BeFalse(
             "ガード発火時はバックアップファイルが生成されるべきでない");
     }
@@ -126,21 +137,20 @@ public class BackupServiceUiThreadGuardTests : IDisposable
         using var dbContext = new DbContext(_dbPath);
         dbContext.InitializeDatabase();
 
-        var uiThreadId = Thread.CurrentThread.ManagedThreadId;
-        DbContext.IsOnUiThread = () => Thread.CurrentThread.ManagedThreadId == uiThreadId;
-
+        var logger = new RecordingLogger<BackupService>();
         var service = new BackupService(
             dbContext,
             CreateSettingsRepositoryMock().Object,
-            NullLogger<BackupService>.Instance);
+            logger);
 
         var backupPath = Path.Combine(_backupDirectory, "ui_thread_async.db");
 
-        var result = await service.CreateBackupAsync(backupPath);
+        var result = await SimulatedUiThread.InvokeAsync(() => service.CreateBackupAsync(backupPath));
 
         result.Should().BeTrue(
             "CreateBackupAsync は Task.Run 経由でバックグラウンドに DB 接続リースをオフロードし、"
-            + "UI スレッドガードに抵触しないべき (Issue #1361)");
+            + "UI スレッドガードに抵触しないべき (Issue #1361)。実際のログ:"
+            + Environment.NewLine + logger.FormatEntries());
         File.Exists(backupPath).Should().BeTrue(
             "成功時はバックアップファイルが実際に生成されるべき");
     }
@@ -159,20 +169,19 @@ public class BackupServiceUiThreadGuardTests : IDisposable
         var backupPath = Path.Combine(_backupDirectory, "restore_source_sync.db");
         File.Copy(_dbPath, backupPath);
 
-        var uiThreadId = Thread.CurrentThread.ManagedThreadId;
-        DbContext.IsOnUiThread = () => Thread.CurrentThread.ManagedThreadId == uiThreadId;
-
+        var logger = new RecordingLogger<BackupService>();
         var service = new BackupService(
             dbContext,
             CreateSettingsRepositoryMock().Object,
-            NullLogger<BackupService>.Instance);
+            logger);
 
-        var result = service.RestoreFromBackup(backupPath);
+        var result = SimulatedUiThread.Invoke(() => service.RestoreFromBackup(backupPath));
 
         result.Should().BeFalse(
             "sync 版 RestoreFromBackup は UI スレッドから呼ぶと DbContext.SuspendConnections の "
             + "UI スレッドガード (Issue #1281 / #1809) で InvalidOperationException が発生し、"
-            + "BackupService はこれを catch して false を返すべき");
+            + "BackupService はこれを catch して false を返すべき。実際のログ:"
+            + Environment.NewLine + logger.FormatEntries());
         dbContext.IsConnectionSuspended.Should().BeFalse("ガード発火時は一時停止状態を残さない");
     }
 
@@ -190,19 +199,18 @@ public class BackupServiceUiThreadGuardTests : IDisposable
         var backupPath = Path.Combine(_backupDirectory, "restore_source_async.db");
         File.Copy(_dbPath, backupPath);
 
-        var uiThreadId = Thread.CurrentThread.ManagedThreadId;
-        DbContext.IsOnUiThread = () => Thread.CurrentThread.ManagedThreadId == uiThreadId;
-
+        var logger = new RecordingLogger<BackupService>();
         var service = new BackupService(
             dbContext,
             CreateSettingsRepositoryMock().Object,
-            NullLogger<BackupService>.Instance);
+            logger);
 
-        var result = await service.RestoreFromBackupAsync(backupPath);
+        var result = await SimulatedUiThread.InvokeAsync(() => service.RestoreFromBackupAsync(backupPath));
 
         result.Should().BeTrue(
             "RestoreFromBackupAsync は Task.Run 経由で SuspendConnections（セマフォ同期取得）を "
-            + "バックグラウンドへオフロードし、UI スレッドガードに抵触しないべき (Issue #1809)");
+            + "バックグラウンドへオフロードし、UI スレッドガードに抵触しないべき (Issue #1809)。実際のログ:"
+            + Environment.NewLine + logger.FormatEntries());
         dbContext.IsConnectionSuspended.Should().BeFalse("リストア完了後は一時停止が解除されているべき");
     }
 
@@ -211,28 +219,99 @@ public class BackupServiceUiThreadGuardTests : IDisposable
     /// 内部で Task.Run を使用して UI スレッドガードに抵触せず完了する。
     /// 本番では <c>StartupTaskRunner</c> から UI スレッド上で起動される経路を模擬。
     /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Issue #1961: <see cref="BackupService.ResolveBackupFolderAsync"/> は完了済み Task を返すよう
+    /// 差し替える。実物は内部で <c>PathValidator.ValidateBackupPathAsync</c> の <c>Task.Run</c> を
+    /// <c>await ... ConfigureAwait(false)</c> する（Issue #1746）ため、<b>継続が必ずスレッドプールへ移り、
+    /// 後続の <c>Task.Run</c> を外しても UI スレッド上を通らない</b>。差し替え前は
+    /// <c>BackupDatabaseTo</c> のオフロードを丸ごと削除しても本テストが緑になることを実測した。
+    /// </para>
+    /// <para>
+    /// 完了済み Task にすると <c>await</c> の継続が同期的に進み、呼び出し元＝UI スレッドに留まる。
+    /// これは<b>バックアップ先が未設定の本番経路</b>（<c>ResolveBackupFolderDetailAsync</c> は
+    /// <c>BackupPath</c> が空なら <c>ValidateBackupPathAsync</c> を通らず、直前の
+    /// <c>GetAppSettingsAsync</c> がキャッシュヒットすれば全体が同期完了する）と同じ形であり、
+    /// 差し替えは検出力の回復であって本番と乖離した状況の捏造ではない。
+    /// なお <c>BackupPath</c> が設定済みの場合は #1746 の <c>Task.Run</c> を必ず通るため、
+    /// この経路では継続がスレッドプールへ移り、後続の <c>Task.Run</c> は結果的に冗長になる。
+    /// </para>
+    /// </remarks>
     [Fact]
     public async Task ExecuteAutoBackupAsync_UIスレッド模擬時でもバックアップファイルが生成されること()
     {
         using var dbContext = new DbContext(_dbPath);
         dbContext.InitializeDatabase(); // 初期化はガード設定の前に実行する（セットアップ自体が UI ガードに抵触しないように）
 
-        // 初期化完了後に UI スレッド模擬を有効化: 現スレッド = UI、Task.Run 先 = 非 UI
-        var uiThreadId = Thread.CurrentThread.ManagedThreadId;
-        DbContext.IsOnUiThread = () => Thread.CurrentThread.ManagedThreadId == uiThreadId;
+        var logger = new RecordingLogger<BackupService>();
+        var service = CreateServiceWithSynchronousFolderResolution(dbContext, logger);
 
-        var service = new BackupService(
-            dbContext,
-            CreateSettingsRepositoryMock().Object,
-            NullLogger<BackupService>.Instance);
-
-        var backupFilePath = await service.ExecuteAutoBackupAsync();
+        var backupFilePath = await SimulatedUiThread.InvokeAsync(() => service.ExecuteAutoBackupAsync());
 
         backupFilePath.Should().NotBeNull(
             "ExecuteAutoBackupAsync は Task.Run で DB 接続リースをオフロードし、"
-            + "UI スレッドガードに抵触せず完了すべき (Issue #1361)");
+            + "UI スレッドガードに抵触せず完了すべき (Issue #1361)。実際のログ:"
+            + Environment.NewLine + logger.FormatEntries());
         File.Exists(backupFilePath).Should().BeTrue(
             "成功時はバックアップファイルが実際に生成されるべき");
+    }
+
+    /// <summary>
+    /// Issue #1961: UI スレッド模擬そのものが生きていることの対の表明。
+    /// オフロード先まで UI と判定させると <see cref="BackupService.ExecuteAutoBackupAsync"/> は
+    /// UI スレッドガードに抵触し、<c>null</c> を返す。
+    /// </summary>
+    /// <remarks>
+    /// この表明が無いと、模擬を丸ごと外した（＝何も検査していない）実装でも
+    /// 上のテストが緑になる。あわせて「null の理由が UI スレッドガードであること」を
+    /// 記録ロガーの内容で表明し、I/O 失敗・権限失敗と取り違えていないことを固定する。
+    /// </remarks>
+    [Fact]
+    public async Task ExecuteAutoBackupAsync_オフロード先までUIと判定するとnullを返しガードの例外が記録されること()
+    {
+        using var dbContext = new DbContext(_dbPath);
+        dbContext.InitializeDatabase();
+
+        var logger = new RecordingLogger<BackupService>();
+        var service = CreateServiceWithSynchronousFolderResolution(dbContext, logger);
+
+        var backupFilePath = await SimulatedUiThread.InvokeAsync(
+            () => service.ExecuteAutoBackupAsync(),
+            isOnUiThread: () => true);
+
+        backupFilePath.Should().BeNull(
+            "どのスレッドも UI と判定させれば DbContext.LeaseConnection の UI スレッドガード "
+            + "(Issue #1281) が発火し、ExecuteAutoBackupAsync は catch して null を返すべき。"
+            + "ここが緑にならない場合、UI スレッド模擬が SUT へ届いていない。実際のログ:"
+            + Environment.NewLine + logger.FormatEntries());
+
+        logger.Entries.Should().Contain(
+            e => e.Exception is InvalidOperationException
+                 && e.Exception.Message.Contains("UI スレッドから呼び出せません"),
+            "null の理由が UI スレッドガードであることをログから切り分けられるべき (Issue #1961)。実際のログ:"
+            + Environment.NewLine + logger.FormatEntries());
+    }
+
+    /// <summary>
+    /// <see cref="BackupService.ResolveBackupFolderAsync"/> だけを完了済み Task へ差し替えた
+    /// 部分モックを作る（Issue #1961）。
+    /// </summary>
+    private BackupService CreateServiceWithSynchronousFolderResolution(
+        DbContext dbContext,
+        RecordingLogger<BackupService> logger)
+    {
+        var serviceMock = new Mock<BackupService>(
+            dbContext,
+            CreateSettingsRepositoryMock().Object,
+            logger)
+        {
+            CallBase = true,
+        };
+
+        serviceMock.Setup(x => x.ResolveBackupFolderAsync())
+            .Returns(Task.FromResult(_backupDirectory));
+
+        return serviceMock.Object;
     }
 
     /// <summary>
@@ -323,7 +402,7 @@ public class BackupServiceUiThreadGuardTests : IDisposable
             var service = new BackupService(
                 dbContext,
                 settingsMock.Object,
-                NullLogger<BackupService>.Instance);
+                new RecordingLogger<BackupService>());
 
             task = invokeAsync(service);
 
