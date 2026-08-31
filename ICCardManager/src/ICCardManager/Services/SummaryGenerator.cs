@@ -103,7 +103,18 @@ namespace ICCardManager.Services
         /// </remarks>
         internal const string UnknownStationPlaceholder = "?";
 
-        private readonly DepartmentType _departmentType;
+        /// <summary>
+        /// 部署種別（チャージ摘要の切替に使用）
+        /// </summary>
+        /// <remarks>
+        /// Issue #1975: 設定画面（F5）から運用中に変更できるため <c>readonly</c> ではない。
+        /// 差し替えは <see cref="ApplyDepartmentType"/> の代入 1 回（enum は .NET でアトミック）。
+        /// <b>このフィールドを直接読んでよいのは <see cref="CaptureContext"/> だけ</b> —
+        /// 摘要生成の各段階が個別に読むと、1 回の生成の途中で部署種別が入れ替わり、
+        /// 同じ生成の中で「役務費によりチャージ」と「旅費によりチャージ」が混ざる。
+        /// この規約は <c>SummaryGenerationSnapshotConventionTests</c> が静的検査で固定する。
+        /// </remarks>
+        private DepartmentType _departmentType;
 
         /// <summary>
         /// 現在有効な設定の世代（組織固有設定 Issue #974 ＋ 同一視グループ Issue #1905）
@@ -204,7 +215,36 @@ namespace ICCardManager.Services
         /// <c>virtual</c> なのは、回帰テストが「捕捉の直後にグループが差し替わる」瞬間を
         /// 固定時間の待機なしに再現するため（<c>SummaryGeneratorGenerationSnapshotTests</c>）。
         /// </remarks>
-        internal virtual SummaryGenerationContext CaptureContext() => _context;
+        internal virtual SummaryGenerationContext CaptureContext()
+            => _context.WithDepartmentType(_departmentType);
+
+        /// <summary>
+        /// 部署種別だけを差し替える（Issue #1975）
+        /// </summary>
+        /// <param name="departmentType">新しい部署種別</param>
+        /// <remarks>
+        /// <para>
+        /// DI シングルトンの <see cref="SummaryGenerator"/> は<b>起動時</b>の
+        /// <c>settings.DepartmentType</c> を保持するため、設定画面（F5）で部署種別を変更しても
+        /// 本メソッドで反映しないとアプリを再起動するまで旧設定でチャージ摘要を作る。
+        /// これを注入で受ける摘要再生成の 6 経路（履歴統合・履歴分割 2 か所・
+        /// 返却時の台帳生成 3 か所・明細編集）が影響を受け、企業会計部局の組織でも
+        /// 「役務費によりチャージ」が 6 年保存の台帳へ書き込まれていた。
+        /// </para>
+        /// <para>
+        /// <b>保存に成功したときだけ呼ぶこと</b>（<see cref="ApplyTransferStationGroups"/> と
+        /// 同じ判断。順序を逆にすると「保存できませんでした」と案内しながら
+        /// 摘要生成だけ新しい部署種別で動く）。
+        /// </para>
+        /// <para>
+        /// 差し替えは<b>フィールドへの代入 1 回</b>で行い、生成中の呼び出しは
+        /// <see cref="CaptureContext"/> で捕捉済みの世代を最後まで一貫して見る（Issue #1919）。
+        /// </para>
+        /// </remarks>
+        public void ApplyDepartmentType(DepartmentType departmentType)
+        {
+            _departmentType = departmentType;
+        }
 
         /// <summary>
         /// バス利用のラベル（組織設定 <c>SummaryText.BusLabel</c> 由来、Issue #1818）
@@ -637,7 +677,7 @@ namespace ICCardManager.Services
                         summariesToAdd.Add((item.Index, new DailySummary
                         {
                             Date = date,
-                            Summary = GetChargeSummary(_departmentType),
+                            Summary = GetChargeSummary(context.DepartmentType),
                             IsCharge = true,
                             IsPointRedemption = false
                         }));
@@ -826,14 +866,15 @@ namespace ICCardManager.Services
                 return string.Empty;
             }
 
+            // Issue #1919: 設定の世代を入口で 1 回だけ捕捉し、以降の段階へ持ち回る
+            // Issue #1975: 部署種別も世代に含まれるため、チャージのみの分岐より前で捕捉する
+            var context = CaptureContext();
+
             // チャージのみの場合
             if (detailList.All(d => d.IsCharge))
             {
-                return GetChargeSummary(_departmentType);
+                return GetChargeSummary(context.DepartmentType);
             }
-
-            // Issue #1919: 設定の世代を入口で 1 回だけ捕捉し、以降の段階へ持ち回る
-            var context = CaptureContext();
 
             // ポイント還元のみの場合
             // Issue #942: 暗黙のポイント還元（金額が負でチャージでもない）も含めて判定
@@ -2166,14 +2207,6 @@ namespace ICCardManager.Services
         public static string GetLendingSummary()
         {
             return CurrentOptions.SummaryText.LendingSummary;
-        }
-
-        /// <summary>
-        /// チャージの摘要を生成（市長事務部局用デフォルト）
-        /// </summary>
-        public static string GetChargeSummary()
-        {
-            return GetChargeSummary(DepartmentType.MayorOffice);
         }
 
         /// <summary>

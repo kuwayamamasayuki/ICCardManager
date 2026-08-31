@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -40,6 +40,9 @@ public class SummaryGenerationSnapshotConventionTests
         @"(?<![A-Za-z0-9_])CurrentOptions(?![A-Za-z0-9_])",
         @"(?<![A-Za-z0-9_])BusLabel(?![A-Za-z0-9_])",
         @"(?<![A-Za-z0-9_])BusPlaceholder(?![A-Za-z0-9_])",
+        // Issue #1975: 部署種別も運用中に差し替わる（設定画面 F5）。段階が直接読むと
+        // 同じ生成の中で「役務費によりチャージ」と「旅費によりチャージ」が混ざる
+        @"(?<![A-Za-z0-9_])_departmentType(?![A-Za-z0-9_])",
     };
 
     /// <summary>

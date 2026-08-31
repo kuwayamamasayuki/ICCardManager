@@ -845,7 +845,7 @@ public class SummaryGeneratorComprehensiveTests : IDisposable
     [Fact]
     public void TC024_GetChargeSummary()
     {
-        var result = SummaryGenerator.GetChargeSummary();
+        var result = SummaryGenerator.GetChargeSummary(DepartmentType.MayorOffice);
         result.Should().Be("役務費によりチャージ");
         _output.WriteLine($"GetChargeSummary() = \"{result}\"");
     }

@@ -1,6 +1,7 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
+using ICCardManager.Models;
 
 namespace ICCardManager.Services
 {
@@ -32,24 +33,65 @@ namespace ICCardManager.Services
         private readonly List<HashSet<string>> _transferStationGroups;
 
         private SummaryGenerationContext(
-            OrganizationOptions options, List<HashSet<string>> transferStationGroups)
+            OrganizationOptions options,
+            List<HashSet<string>> transferStationGroups,
+            DepartmentType departmentType)
         {
             Options = options;
             _transferStationGroups = transferStationGroups;
+            DepartmentType = departmentType;
         }
 
         /// <summary>この世代の組織固有設定</summary>
         public OrganizationOptions Options { get; }
 
         /// <summary>
+        /// この世代の部署種別（チャージ摘要の切替に使用、Issue #1975）
+        /// </summary>
+        /// <remarks>
+        /// 部署種別は設定画面（F5）から運用中に変更でき、保存成功時に
+        /// <see cref="SummaryGenerator.ApplyDepartmentType"/> が DI シングルトンへ反映する。
+        /// 値が意味を持つのは <see cref="WithDepartmentType"/> を通した世代だけで、
+        /// <see cref="Create"/> が置く既定値は生成の入口で必ず上書きされる（<see cref="Create"/> の remarks 参照）。
+        /// 1 回の摘要生成は複数の地点でチャージ摘要を作る（<c>GenerateByDate</c> は
+        /// 日付ごと・チャージ境界ごとに作る）ため、途中で差し替わると<b>同じ生成の中で
+        /// 「役務費によりチャージ」と「旅費によりチャージ」が混ざる</b>。
+        /// 世代へ畳み込んで入口で 1 回だけ捕捉することで、この中間状態を構造的に無くす
+        /// （Issue #1919 の同一視グループと同じ扱い）。
+        /// </remarks>
+        public DepartmentType DepartmentType { get; }
+
+        /// <summary>
         /// 設定から世代を組み立てる
         /// </summary>
+        /// <remarks>
+        /// <see cref="DepartmentType"/> は<b>置き場所だけを確保した既定値</b>で、意味を持つのは
+        /// <see cref="WithDepartmentType"/> を通した後だけ。部署種別は
+        /// <see cref="SummaryGenerator"/> の<b>インスタンス</b>が持ち（明細 CSV 取込・
+        /// バス停名入力は設定を読み直して別インスタンスを組み立てるため、Issue #1955）、
+        /// 生成の入口（<c>CaptureContext</c>）が世代へ畳み込む。ここで受け取る形にすると
+        /// 「静的な世代が持つ部署種別」という第 2 の情報源ができ、どちらが正かが失われる。
+        /// </remarks>
         public static SummaryGenerationContext Create(OrganizationOptions options)
         {
             var effective = options ?? new OrganizationOptions();
             return new SummaryGenerationContext(
-                effective, BuildTransferStationGroups(effective));
+                effective, BuildTransferStationGroups(effective), DepartmentType.MayorOffice);
         }
+
+        /// <summary>
+        /// 部署種別だけを差し替えた新しい世代を返す（Issue #1975）
+        /// </summary>
+        /// <remarks>
+        /// 同一視グループの再構築（<see cref="BuildTransferStationGroups"/>）を伴わないため、
+        /// 生成の入口（<see cref="SummaryGenerator.CaptureContext"/>）から毎回呼んでも
+        /// 走査コストは掛からない。<see cref="Options"/> はそのまま共有する
+        /// （不変オブジェクトとして扱うため、共有しても中間状態は生じない）。
+        /// </remarks>
+        public SummaryGenerationContext WithDepartmentType(DepartmentType departmentType)
+            => departmentType == DepartmentType
+                ? this
+                : new SummaryGenerationContext(Options, _transferStationGroups, departmentType);
 
         /// <summary>
         /// 同一視グループだけを差し替えた新しい世代を返す（Issue #1905 / #1919）
@@ -82,6 +124,8 @@ namespace ICCardManager.Services
                 }
             };
 
+            // Issue #1975: 部署種別は同一視グループの編集で変わらない。引き継がないと
+            // グループを保存しただけでチャージ摘要が既定（市長事務部局）へ戻る
             return Create(newOptions);
         }
 

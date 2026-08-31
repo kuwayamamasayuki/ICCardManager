@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -43,10 +43,12 @@ namespace ICCardManager.Tests;
 /// （#1843「ガードは綴りではなく資源で書く」）。
 /// </para>
 /// <para>
-/// <b>本検査の対象外</b>: 静的な <c>SummaryGenerator.GetChargeSummary()</c>（引数なしの
-/// オーバーロード）は <c>DepartmentType.MayorOffice</c> をハードコードするが、現在の呼び出し元は
-/// <c>DebugDataService</c>（ファイル全体が <c>#if DEBUG</c>）のみで本番の台帳へは届かない。
-/// 本番から呼ぶ経路を新設するなら、<c>LendingService</c> と同じく部署種別を渡すオーバーロードを使うこと。
+/// <b>静的な文言 API について</b>: 引数なしの <c>SummaryGenerator.GetChargeSummary()</c>
+/// （<c>DepartmentType.MayorOffice</c> をハードコードするオーバーロード）は Issue #1975 で
+/// <b>削除した</b>。本検査は <c>new SummaryGenerator(</c> の形しか見ないため、その API を
+/// 本番から呼ぶ経路が新設されても止められなかった（呼び出し元は <c>DebugDataService</c> のみで
+/// 本番の台帳へは届いていなかったが、同じ欠陥への経路を残さない ＝ #1814）。
+/// 部署種別を渡すオーバーロード <c>GetChargeSummary(DepartmentType)</c> は残っている。
 /// </para>
 /// </remarks>
 public class SummaryGeneratorDepartmentTypeConventionTests

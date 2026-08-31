@@ -1,4 +1,4 @@
-using System.IO;
+﻿using System.IO;
 using FluentAssertions;
 using ICCardManager.Common;
 using ICCardManager.Data.Repositories;
@@ -34,7 +34,8 @@ public class SettingsViewModelDatabasePathTests
             validatorMock.Object,
             soundMock.Object,
             options,
-            dialogMock.Object);
+            dialogMock.Object,
+            new SummaryGenerator(DepartmentType.MayorOffice));
     }
 
     [Fact]
