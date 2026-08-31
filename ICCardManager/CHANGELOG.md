@@ -12,6 +12,10 @@
   - 検証: **+12 件**（`LedgerClonerCoverageTests` 7 件・`LedgerMergeAuditLogBeforeDataTests` 5 件）。**回帰は `OperationLogger` のモックではなく、書き込み先 `IOperationLogRepository` のモックが捕捉した実 `OperationLog` の中身で表明する**（#1760）。**対の表明**として `AfterData` が統合**後**であることを固定した（before だけを直して after まで巻き戻す退行を検出する）。
   - **コピー漏れは静的な列挙ではなくリフレクションで検出する**。`LedgerClonerCoverageTests` はモデルの書き込み可能プロパティを走査するため、列を足してコピーへ書き足し忘れると自動的に赤になる（個別の挙動テストは列の増減に追随できない。#1764）。未対応の型が現れたら例外にして fail-open を避ける（#1944）。
   - **検出力は実測した**。`beforeLedgers` を浅いコピーへ戻す変異で 4 件が赤・`AfterData` の対の表明は緑になることを確認した。
+  - **コードレビュー指摘 1: 分割側の `AfterData` が実際とは逆の記録になっていた**。`originalLedger.Details` は分割前の全明細を保持したまま（`ReplaceDetailsAsync` は DB を書き換えるだけ）、新しい台帳の `Details` は既定の空リストだった。`BeforeData` に明細が載るようになったことで、監査ログを読むと「グループ1が全明細を保持し、新しい台帳は明細ゼロ」に見える。分割後の実際の明細を代入し、回帰（`LedgerSplitAuditLogTests` 3 件）を追加した。
+  - **コードレビュー指摘 2: リフレクション検査に fail-open が残っていた**。除外を**型**（`List<LedgerDetail>` / `Ledger`）で書いていたため、同じ型のプロパティを将来足すと走査が静かに素通りし、`null == null` の比較で緑になる（このファイル自身が引用する #1944 を破る形）。除外を**プロパティ名**へ絞り、自己検査（既定値のままのプロパティを残さないこと）を `Ledger` 側にも掛けた。
+  - **コードレビュー指摘 3: 明細未取得（`null`）を空リストへ丸めていた**。「明細を持たない」と「明細を読んでいない」は6 年保存の記録の中で別の事実であり、丸めると後者が前者に見える。`null` を保つようにした。
+  - **記録された明細は操作ログ画面・Excel からは読めない**（`OperationLogExcelExportService.GetFieldNameMap` の `"ledger"` に `Details` のエントリが無く、マップに無いプロパティは読み飛ばされる）。**本 Issue による退行ではない**（統合の `BeforeData` / `AfterData` には以前から `Details` が含まれていた）。配列 of オブジェクトの表示書式は別の設計判断を要するため Issue #1979 で追跡する（#1730「対象外とした箇所はなぜ対象外かを書く」）。
   - 05_クラス設計書 §5.15・§5.20、07_テスト設計書 §1.1a・§UT-111、`.claude/rules/development-conventions.md`（#1726 節に「監査ログへ渡す『変更前』は、変更対象と別のインスタンスにする」を追記）を同期更新（Issue #1959）
 - Issue #1956 **帳票のページ番号列（`TemplateMapping.PageNumberColumn`）が一部のメソッドでしか読まれず、既定（12=L 列）以外に設定すると毎月ページ番号が振り出しに戻る**欠陥を是正した。`ReportService` は 1 ページ目のヘッダーを書く `SetHeaderInfo` だけが設定を読み、継続ページを書く `SetPageNumber` と前月の最終ページを読む `GetLastPageNumberFromWorksheet` は**列 12 を直書き**していた。
   - `PageNumberColumn = 11` に設定すると、1 ページ目の頁は K2、継続ページは L2 へ書かれる。翌月の開始ページ算出は空の L2 を読んで 0 を返し `IcCard.StartingPageNumber` へフォールバックするため、**年度を通した通し頁で綴じる物品出納簿の頁が毎月リセットされる**。

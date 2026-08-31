@@ -28,14 +28,33 @@ namespace ICCardManager.Tests.Common;
 public class LedgerClonerCoverageTests
 {
     /// <summary>
-    /// 複製しないプロパティと、その理由。
+    /// リフレクションによる一括走査の対象外にするプロパティと、その理由。
     /// </summary>
     /// <remarks>
-    /// <see cref="LedgerDetail.Ledger"/> は親への逆参照で、複製すると
-    /// 親 → 明細 → 親 の循環参照になり <see cref="JsonSerializer"/> がシリアライズできない。
-    /// 親の情報は <see cref="LedgerDetail.LedgerId"/> で足りる。
+    /// <para>
+    /// <see cref="Ledger.Details"/>: 明細は下の専用テストが中身まで比較する（本表は走査で埋める対象から外すだけ）。
+    /// </para>
+    /// <para>
+    /// <see cref="LedgerDetail.Ledger"/>: 親への逆参照で、複製すると親 → 明細 → 親 の循環参照になり
+    /// <see cref="JsonSerializer"/> がシリアライズできない。親の情報は <see cref="LedgerDetail.LedgerId"/> で足りる。
+    /// </para>
+    /// <para>
+    /// <b>除外は「型」ではなく「プロパティ名」で書く</b>。型（例: <c>List&lt;LedgerDetail&gt;</c>）で書くと、
+    /// 同じ型の別プロパティを足した日に走査が静かに素通りする（fail-open にしない、Issue #1944）。
+    /// </para>
     /// </remarks>
-    private static readonly string[] IntentionallyNotCloned = { nameof(LedgerDetail.Ledger) };
+    private static readonly IReadOnlyDictionary<Type, string[]> NotScannedByReflection =
+        new Dictionary<Type, string[]>
+        {
+            [typeof(Ledger)] = new[] { nameof(Ledger.Details) },
+            [typeof(LedgerDetail)] = new[] { nameof(LedgerDetail.Ledger) }
+        };
+
+    public static IEnumerable<object[]> ModelTypes() => new[]
+    {
+        new object[] { typeof(Ledger) },
+        new object[] { typeof(LedgerDetail) }
+    };
 
     [Fact]
     public void Clone_はLedgerの書き込み可能な全プロパティを複製すること()
@@ -47,13 +66,8 @@ public class LedgerClonerCoverageTests
 
         var clone = LedgerCloner.Clone(source);
 
-        foreach (var property in WritableProperties<Ledger>())
+        foreach (var property in ScannedProperties(typeof(Ledger)))
         {
-            if (property.Name == nameof(Ledger.Details))
-            {
-                continue; // 明細は下の専用テストで中身まで比較する
-            }
-
             property.GetValue(clone).Should().Be(
                 property.GetValue(source),
                 $"Ledger.{property.Name} が複製されていない。監査ログの BeforeData に古い値が残る（Issue #1959）");
@@ -67,8 +81,7 @@ public class LedgerClonerCoverageTests
 
         var clone = LedgerCloner.CloneDetail(source);
 
-        foreach (var property in WritableProperties<LedgerDetail>()
-                     .Where(p => !IntentionallyNotCloned.Contains(p.Name)))
+        foreach (var property in ScannedProperties(typeof(LedgerDetail)))
         {
             if (property.PropertyType == typeof(byte[]))
             {
@@ -117,6 +130,26 @@ public class LedgerClonerCoverageTests
     }
 
     /// <summary>
+    /// 明細の値そのものも複製されること（別インスタンスであることの対）。
+    /// </summary>
+    [Fact]
+    public void Clone_は明細の値を複製すること()
+    {
+        var source = new Ledger { Details = new List<LedgerDetail> { CreateFilledDetail(seed: 8) } };
+
+        var clone = LedgerCloner.Clone(source);
+
+        clone.Details.Should().HaveCount(1);
+        foreach (var property in ScannedProperties(typeof(LedgerDetail))
+                     .Where(p => p.PropertyType != typeof(byte[])))
+        {
+            property.GetValue(clone.Details[0]).Should().Be(
+                property.GetValue(source.Details[0]),
+                $"Ledger.Details[0].{property.Name} が複製されていない");
+        }
+    }
+
+    /// <summary>
     /// 対の表明: 明細の <c>RawBytes</c> も配列ごと複製されること（参照共有だと書き換えが漏れる）。
     /// </summary>
     [Fact]
@@ -148,6 +181,21 @@ public class LedgerClonerCoverageTests
     }
 
     /// <summary>
+    /// 明細が未取得（<c>null</c>）なら <c>null</c> のまま複製すること。
+    /// </summary>
+    /// <remarks>
+    /// 空リストへ丸めると「明細を持たない」と「明細を読んでいない」が 6 年保存の監査記録の中で
+    /// 区別できなくなる（後者が前者に見える）。
+    /// </remarks>
+    [Fact]
+    public void Clone_明細が未取得なら空リストへ丸めないこと()
+    {
+        var clone = LedgerCloner.Clone(new Ledger { Details = null });
+
+        clone.Details.Should().BeNull();
+    }
+
+    /// <summary>
     /// <c>null</c> は <c>null</c> のまま返すこと（呼び出し元の null チェックを二重にしない）。
     /// </summary>
     [Fact]
@@ -160,22 +208,47 @@ public class LedgerClonerCoverageTests
     /// <summary>
     /// 検査ロジック自体をサンプル入力で固定する（実データが変わっても空振りしないようにする、Issue #1786）。
     /// </summary>
-    [Fact]
-    public void 検査は既定値のままのプロパティを残さないこと()
+    /// <remarks>
+    /// 走査対象のプロパティがすべて既定値と異なる値で埋まっていないと、複製漏れがあっても
+    /// クローン側と値が一致して検査が素通りする。<b>両モデルについて</b>表明する
+    /// （片方だけだと、もう一方に埋め漏れる型のプロパティを足した日に静かに緑になる）。
+    /// </remarks>
+    [Theory]
+    [MemberData(nameof(ModelTypes))]
+    public void 検査は既定値のままのプロパティを残さないこと(Type modelType)
     {
-        var detail = CreateFilledDetail(seed: 7);
+        var instance = Activator.CreateInstance(modelType);
+        FillWithDistinctValues(instance, seed: 7);
 
-        foreach (var property in WritableProperties<LedgerDetail>()
-                     .Where(p => !IntentionallyNotCloned.Contains(p.Name)))
+        foreach (var property in ScannedProperties(modelType))
         {
-            property.GetValue(detail).Should().NotBe(
+            property.GetValue(instance).Should().NotBe(
                 GetDefault(property.PropertyType),
-                $"LedgerDetail.{property.Name} が既定値のままだと、複製漏れがあっても値が一致してしまう");
+                $"{modelType.Name}.{property.Name} が既定値のままだと、複製漏れがあっても値が一致してしまう");
         }
     }
 
-    private static IEnumerable<PropertyInfo> WritableProperties<T>() =>
-        typeof(T).GetProperties(BindingFlags.Public | BindingFlags.Instance)
+    /// <summary>
+    /// 除外表そのものを固定する。除外が静かに増えると、その分だけ検査が縮む。
+    /// </summary>
+    [Fact]
+    public void 走査の除外はDetailsと親への逆参照だけであること()
+    {
+        NotScannedByReflection[typeof(Ledger)].Should().Equal(new[] { "Details" });
+        NotScannedByReflection[typeof(LedgerDetail)].Should().Equal(new[] { "Ledger" });
+    }
+
+    /// <summary>
+    /// リフレクションで一括走査する対象（書き込み可能プロパティから除外表を引いたもの）。
+    /// </summary>
+    private static IEnumerable<PropertyInfo> ScannedProperties(Type modelType) =>
+        WritableProperties(modelType).Where(p => !IsExcluded(modelType, p.Name));
+
+    private static bool IsExcluded(Type modelType, string propertyName) =>
+        NotScannedByReflection.TryGetValue(modelType, out var names) && names.Contains(propertyName);
+
+    private static IEnumerable<PropertyInfo> WritableProperties(Type modelType) =>
+        modelType.GetProperties(BindingFlags.Public | BindingFlags.Instance)
             .Where(p => p.CanWrite && p.GetIndexParameters().Length == 0);
 
     private static LedgerDetail CreateFilledDetail(int seed)
@@ -186,7 +259,7 @@ public class LedgerClonerCoverageTests
     }
 
     /// <summary>
-    /// 書き込み可能な各プロパティへ、既定値と異なる値を入れる。
+    /// 走査対象の各プロパティへ、既定値と異なる値を入れる。
     /// </summary>
     /// <remarks>
     /// 未対応の型が現れたら例外にする。黙って飛ばすと、その型のプロパティを足した日に
@@ -196,9 +269,7 @@ public class LedgerClonerCoverageTests
     {
         var index = seed;
 
-        foreach (var property in target.GetType()
-                     .GetProperties(BindingFlags.Public | BindingFlags.Instance)
-                     .Where(p => p.CanWrite && p.GetIndexParameters().Length == 0))
+        foreach (var property in ScannedProperties(target.GetType()))
         {
             index++;
             var type = property.PropertyType;
@@ -230,10 +301,6 @@ public class LedgerClonerCoverageTests
             else if (type == typeof(byte[]))
             {
                 property.SetValue(target, new byte[] { (byte)index, 0x0A, 0x0B });
-            }
-            else if (type == typeof(List<LedgerDetail>) || type == typeof(Ledger))
-            {
-                // Details は呼び出し側で組み立て、親への逆参照は複製対象外
             }
             else
             {

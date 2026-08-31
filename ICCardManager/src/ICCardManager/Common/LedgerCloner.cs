@@ -60,7 +60,9 @@ namespace ICCardManager.Common
                 ReturnedAt = source.ReturnedAt,
                 IsLentRecord = source.IsLentRecord,
                 DetailCount = source.DetailCount,
-                Details = source.Details?.Select(CloneDetail).ToList() ?? new System.Collections.Generic.List<LedgerDetail>()
+                // 未取得（null）を空リストへ丸めない。「明細を持たない」と「明細を読んでいない」は
+                // 6 年保存の監査記録の中で別の事実であり、丸めると後者が前者に見える。
+                Details = source.Details?.Select(CloneDetail).ToList()
             };
         }
 
