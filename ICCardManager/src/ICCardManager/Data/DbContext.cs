@@ -220,6 +220,13 @@ namespace ICCardManager.Data
         /// <see cref="HasActiveTransactionScope"/> とは別の計数であることが重要（理由は
         /// <see cref="_maintenanceTransactionGate"/> の remarks）。
         /// </summary>
+        /// <remarks>
+        /// <b>本番の消費者は無く、<see cref="OnMaintenanceTransactionOpened"/> と対になるテスト用の継ぎ目である。</b>
+        /// 「保守トランザクション中も <see cref="HasActiveTransactionScope"/> は false のまま」という設計判断は、
+        /// その状態が観測できて初めてテストで表明できる（false だけを見ると、保守トランザクションが
+        /// そもそも開いていない実装でも緑になる）。診断・ログへ載せる要件が出たらそのとき公開面を見直すこと
+        /// （使われないメソッドを先に増やさない ＝ #1726）。
+        /// </remarks>
         internal bool HasActiveMaintenanceTransaction => Volatile.Read(ref _activeMaintenanceTransactionCount) > 0;
 
         private int _activeMaintenanceTransactionCount;
@@ -532,6 +539,14 @@ namespace ICCardManager.Data
         /// 同一接続上で開いたトランザクションへ暗黙参加し得る。これを防ぐため、本メソッドは
         /// <see cref="_maintenanceTransactionGate"/> を通過してからリースを払い出す
         /// （保守トランザクションが開いている間は待機する）。
+        /// </para>
+        /// <para>
+        /// <b>この待機には上限が無く、読み取りのリースも同じく待たされる。</b> リースが書き込みに使われるか
+        /// 読み取りに使われるかを本メソッドは知り得ないため、区別せずに止めている。
+        /// 現在この代償が問題にならないのは、<see cref="CleanupOldData"/> の呼び出し元が
+        /// <c>StartupTaskRunner</c> だけで、メイン画面の表示前（＝カードリーダー稼働前）に完了するためである。
+        /// <b>保守トランザクションを開く経路を増やすときは、この前提が成り立つかを確かめること</b>
+        /// （カードタッチと並走する位置に置くと、職員証・カードの照合がこの待機の後ろに並ぶ）。
         /// </para>
         /// <para>
         /// <b>重要（Issue #1452）— 並列起動禁止:</b>
@@ -1405,9 +1420,15 @@ ON CONFLICT(key) DO UPDATE SET value = excluded.value";
                 {
                     // Issue #1716 / #1730: 「なぜ古いデータが削除されなかったか」を障害調査で追えるよう
                     // 本番のログファイルへ出力されるレベルで記録する（LogDebug は Release で出ない）。
+                    // 呼び出し元（StartupTaskRunner）は削除件数 0 を「対象なし」と区別できないため、
+                    // 「なぜ削除されなかったか」はこの 1 行だけが伝える。原因の候補まで載せる（#1730）。
+                    // なお本経路は次回起動で再試行されるが、リースの解放漏れ（Dispose 漏れ）があると
+                    // 恒久的に削除できなくなる。その状態は SuspendConnections（リストア）も同じく
+                    // 上限に達するため、この Warning が毎回出るなら解放漏れを疑うこと。
                     _logger?.LogWarning(
                         "Issue #1984: 進行中の非同期リース {RemainingLeases} 件が {Timeout} 以内に解放されなかったため、" +
-                        "6年経過データの削除を今回はスキップしました（次回起動時に再試行します）。{DatabasePath}",
+                        "6年経過データの削除を今回はスキップしました（次回起動時に再試行します）。" +
+                        "毎回スキップされる場合は接続リースの解放漏れを疑ってください。{DatabasePath}",
                         Volatile.Read(ref _activeAsyncLeaseCount),
                         AsyncLeaseDrainTimeout,
                         DatabasePath);
@@ -1692,6 +1713,12 @@ ON CONFLICT(key) DO UPDATE SET value = excluded.value";
         // 呼び出し元は 1 つも無く、セマフォも _activeTransactionCount も通らないため、
         // 復活すると本 Issue が塞いだ「計数に載らないトランザクション」がそのまま再生する。
         // トランザクションは BeginTransactionAsync() から取ること。
+        //
+        // ただし GetConnection()（同じく非推奨・本番の呼び出し元ゼロ・テストのみ 10 か所）は残っており、
+        // GetConnection().BeginTransaction() と書けば同じ抜け道が再現する。つまり
+        // 「計数に載らない取得口」は本 Issue で 1 つ減っただけで、ゼロにはなっていない。
+        // 撤去にはテスト 5 ファイルの移行（LeaseConnection() はセマフォを取るため、
+        // 生の接続を長く保持するテストは書き換えが要る）が伴い、本 Issue の範囲を超えるため見送った。
 
         /// <summary>
         /// DB接続の疎通確認（IDatabaseInfo実装）

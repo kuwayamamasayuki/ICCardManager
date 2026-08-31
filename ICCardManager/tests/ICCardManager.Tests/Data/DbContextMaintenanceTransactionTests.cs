@@ -38,8 +38,16 @@ public class DbContextMaintenanceTransactionTests : IDisposable
     private const string TestStaffName = "テスト職員";
     private const string TestCardIdm = "CARD000000000001";
 
-    /// <summary>ゲートで待たされていることを観測するための猶予。書き込み自体はインメモリで数 ms。</summary>
-    private static readonly TimeSpan ObservationWindow = TimeSpan.FromMilliseconds(300);
+    /// <summary>
+    /// ゲートが無ければ並走書き込みが実行されてしまう猶予。書き込み自体はインメモリで数 ms なので
+    /// これで十分（ゲートを外すと 2 件が赤になることを実測済み）。
+    /// </summary>
+    /// <remarks>
+    /// この待機は保守トランザクションを保持したままスレッドをブロックするため、長くすると
+    /// テスト全体を同時実行する xUnit のスレッドプールを圧迫し、時間依存の他テストを間欠的に
+    /// 失敗させ得る。検出力が保てる範囲で最小にすること。
+    /// </remarks>
+    private static readonly TimeSpan ObservationWindow = TimeSpan.FromMilliseconds(150);
 
     /// <summary>デッドロック検出用のタイムアウト。実処理はミリ秒単位で終わる。</summary>
     private static readonly TimeSpan DeadlockTimeout = TimeSpan.FromSeconds(10);
@@ -97,17 +105,16 @@ public class DbContextMaintenanceTransactionTests : IDisposable
         Task<int> concurrentInsert = null;
 
         // 保守トランザクションを開いた直後に、返却処理と同じ経路（LeaseConnectionAsync）で
-        // 台帳へ書き込み、その後 cleanup を失敗させてロールバックさせる
+        // 台帳へ書き込み、その後 cleanup を失敗させてロールバックさせる。
+        // 割り込み点は CleanupOldDataInternal の try の内側で走るため、ここでアサートすると
+        // 失敗が SafeRollback を経て InvalidOperationException の期待と衝突し、
+        // 本当の失敗理由が失われる。観測値はローカルへ退避し、判定は Act の後で行う。
         _dbContext.MaintenanceTransactionOpenedHook = () =>
         {
             concurrentInsert = Task.Run(() =>
                 _ledgerRepository.InsertAsync(CreateLedger(DateTime.Now, "並走した返却の記録")));
 
-            // ゲートが機能していれば、この時点では書き込みは開始できていない
             Thread.Sleep(ObservationWindow);
-            concurrentInsert.IsCompleted.Should().BeFalse(
-                "保守トランザクションが開いている間、LeaseConnectionAsync 経由の書き込みは待機すること");
-
             throw new InvalidOperationException("テスト: cleanup を失敗させてロールバックさせる");
         };
 
