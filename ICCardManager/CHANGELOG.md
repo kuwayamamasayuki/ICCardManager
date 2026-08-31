@@ -3,6 +3,20 @@
 ### Unreleased
 
 **修正**
+- Issue #1959 **履歴統合の監査ログ `BeforeData` が統合後の値を記録する**欠陥を是正した。`LedgerMergeService.MergeAsync` は統合前の状態を `var beforeLedgers = ledgers.ToList();`（**リストの**浅いコピー）で採っていたため、`beforeLedgers[0]` は統合先（`ledgers[0]`）と同一インスタンスで、以降の in-place な書き換えをそのまま受けていた。
+  - `OperationLogger.LogLedgerMergeAsync` は書き換えが**すべて終わったあと**にシリアライズするため、6 年保存の `operation_log` は統合先について **`BeforeData` と `AfterData` が同一**になっていた。同行者数「外0名」と「外2名」の行を統合すると、`BeforeData[0]` も `CompanionCount = 2`・統合後の摘要・合算済みの受入／払出／残額になり、**統合先が何から何へ変わったのかを後から追えない**。Issue #1942（統合の SET 句に `companion_count` を追加）のコードレビューで検出した。
+  - **明細まで含めて複製する**。`SyncBusStopsFromSummary` による `BusStops` の同期と、摘要再生成のための `SequenceNumber` の一時再採番は**全エントリで共有される `LedgerDetail` インスタンス**を書き換えるため、スカラー列だけを複製すると「半分だけ正しい監査記録」になり、次に読む人が `BeforeData` を信用してよいか判断できない。統合元（`beforeLedgers[1..]`）もスカラーは無事だが明細は同じ書き換えを受けていた。
+  - **コピーの生成手段は `Common/LedgerCloner` ただ 1 つに寄せた**（#1763）。`LedgerSplitService` は同じ用途で private な `CloneLedger` を持っており「片方だけが正しい」状態だった（#1808 の裏返し）。手段が 2 通りあると、モデルへ列を足したとき片方だけが更新される。分割側の `BeforeData` にも明細が載るようになった（従来はスカラーのみ）。
+  - **親への逆参照（`LedgerDetail.Ledger`）は複製しない**。監査ログは `JsonSerializer` で JSON 化するため、複製すると親 → 明細 → 親 の循環参照になる。親の情報は `LedgerDetail.LedgerId` で足りる。
+  - **取り消し（Undo）の動作には影響しない**。`LedgerSnapshot.FromLedger(target)` は書き換え**前**に採られており、壊れていたのは監査ログの `BeforeData` だけだった。
+  - 検証: **+12 件**（`LedgerClonerCoverageTests` 7 件・`LedgerMergeAuditLogBeforeDataTests` 5 件）。**回帰は `OperationLogger` のモックではなく、書き込み先 `IOperationLogRepository` のモックが捕捉した実 `OperationLog` の中身で表明する**（#1760）。**対の表明**として `AfterData` が統合**後**であることを固定した（before だけを直して after まで巻き戻す退行を検出する）。
+  - **コピー漏れは静的な列挙ではなくリフレクションで検出する**。`LedgerClonerCoverageTests` はモデルの書き込み可能プロパティを走査するため、列を足してコピーへ書き足し忘れると自動的に赤になる（個別の挙動テストは列の増減に追随できない。#1764）。未対応の型が現れたら例外にして fail-open を避ける（#1944）。
+  - **検出力は実測した**。`beforeLedgers` を浅いコピーへ戻す変異で 4 件が赤・`AfterData` の対の表明は緑になることを確認した。
+  - **コードレビュー指摘 1: 分割側の `AfterData` が実際とは逆の記録になっていた**。`originalLedger.Details` は分割前の全明細を保持したまま（`ReplaceDetailsAsync` は DB を書き換えるだけ）、新しい台帳の `Details` は既定の空リストだった。`BeforeData` に明細が載るようになったことで、監査ログを読むと「グループ1が全明細を保持し、新しい台帳は明細ゼロ」に見える。分割後の実際の明細を代入し、回帰（`LedgerSplitAuditLogTests` 3 件）を追加した。
+  - **コードレビュー指摘 2: リフレクション検査に fail-open が残っていた**。除外を**型**（`List<LedgerDetail>` / `Ledger`）で書いていたため、同じ型のプロパティを将来足すと走査が静かに素通りし、`null == null` の比較で緑になる（このファイル自身が引用する #1944 を破る形）。除外を**プロパティ名**へ絞り、自己検査（既定値のままのプロパティを残さないこと）を `Ledger` 側にも掛けた。
+  - **コードレビュー指摘 3: 明細未取得（`null`）を空リストへ丸めていた**。「明細を持たない」と「明細を読んでいない」は6 年保存の記録の中で別の事実であり、丸めると後者が前者に見える。`null` を保つようにした。
+  - **記録された明細は操作ログ画面・Excel からは読めない**（`OperationLogExcelExportService.GetFieldNameMap` の `"ledger"` に `Details` のエントリが無く、マップに無いプロパティは読み飛ばされる）。**本 Issue による退行ではない**（統合の `BeforeData` / `AfterData` には以前から `Details` が含まれていた）。配列 of オブジェクトの表示書式は別の設計判断を要するため Issue #1979 で追跡する（#1730「対象外とした箇所はなぜ対象外かを書く」）。
+  - 05_クラス設計書 §5.15・§5.20、07_テスト設計書 §1.1a・§UT-111、`.claude/rules/development-conventions.md`（#1726 節に「監査ログへ渡す『変更前』は、変更対象と別のインスタンスにする」と、コードレビューで得た「『変更前』を充実させたら対になる『変更後』の粒度を確かめる」「記録の充実は読む経路が対応して初めて監査に届く」を追記）を同期更新（Issue #1959）
 - Issue #1956 **帳票のページ番号列（`TemplateMapping.PageNumberColumn`）が一部のメソッドでしか読まれず、既定（12=L 列）以外に設定すると毎月ページ番号が振り出しに戻る**欠陥を是正した。`ReportService` は 1 ページ目のヘッダーを書く `SetHeaderInfo` だけが設定を読み、継続ページを書く `SetPageNumber` と前月の最終ページを読む `GetLastPageNumberFromWorksheet` は**列 12 を直書き**していた。
   - `PageNumberColumn = 11` に設定すると、1 ページ目の頁は K2、継続ページは L2 へ書かれる。翌月の開始ページ算出は空の L2 を読んで 0 を返し `IcCard.StartingPageNumber` へフォールバックするため、**年度を通した通し頁で綴じる物品出納簿の頁が毎月リセットされる**。
   - **「読まれている」と「効いている」は別**（`.claude/rules/development-conventions.md` #1820）。`OrganizationOptionsUsageConventionTests` は設定項目が本番コードから参照されていることをリフレクションで固定するが、**読む箇所と読まない箇所が同居する**この形は素通りする。#1820 が「一部だけ設定化しない」と定めたのと同じ状態が、同じクラスに残っていた。

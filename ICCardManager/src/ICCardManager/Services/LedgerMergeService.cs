@@ -238,7 +238,12 @@ namespace ICCardManager.Services
             var sources = ledgers.Skip(1).ToList();
 
             // 統合前の状態を保存（ログ用＋Undo用）
-            var beforeLedgers = ledgers.ToList();
+            // Issue #1959: リストの浅いコピー（ledgers.ToList()）では beforeLedgers[0] が target と
+            // 同一インスタンスになり、以降の in-place 書き換え（Income / Expense / Balance / Summary /
+            // Note / CompanionCount と、共有 LedgerDetail の BusStops・SequenceNumber）が
+            // そのまま監査ログの BeforeData に載る。統合先だけ「変更前」と「変更後」が同一になり、
+            // 6 年保存の operation_log から「何から何へ変わったのか」が失われるため、明細まで複製する。
+            var beforeLedgers = ledgers.Select(LedgerCloner.Clone).ToList();
             // 説明テキスト用に元の摘要を保存（targetの変更前に取得）
             var originalSummaryTexts = ledgers.Select(l => l.Summary).ToList();
 

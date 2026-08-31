@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
@@ -87,7 +87,9 @@ namespace ICCardManager.Services
             }
 
             // 操作ログ用に元のデータを保存
-            var beforeLedger = CloneLedger(originalLedger);
+            // Issue #1959: コピーの生成手段は Common/LedgerCloner ただ 1 つに寄せる。
+            // 私的なクローンを各サービスに置くと、モデルへ列を足したとき片方だけが更新される。
+            var beforeLedger = LedgerCloner.Clone(originalLedger);
 
             try
             {
@@ -134,6 +136,13 @@ namespace ICCardManager.Services
                     };
                 }
 
+                // Issue #1959: 監査ログの AfterData は allSplitLedgers をそのまま JSON 化する。
+                // originalLedger.Details は分割前の全明細を保持したままなので、更新しないと
+                // 「グループ1が全明細を保持し、新しい台帳は明細ゼロ」という実際とは逆の記録になる
+                //（BeforeData が明細を持つようになったことで、この非対称が監査ログから読めてしまう）。
+                // 並びは時系列昇順のまま（反転は DB 呼び出しにだけ適用する。Issue #1913）。
+                originalLedger.Details = firstGroup;
+
                 allSplitLedgers.Add(originalLedger);
 
                 // グループ2以降: 新しいLedgerを作成
@@ -168,6 +177,9 @@ namespace ICCardManager.Services
                     newLedger.Id = newId;
                     // Issue #880: 挿入順を逆にしてFeliCa互換のrowid順序を維持（上記コメント参照）
                     await _ledgerRepository.InsertDetailsAsync(newId, groupDetails.AsEnumerable().Reverse(), scope.Transaction).ConfigureAwait(false);
+
+                    // Issue #1959: 監査ログの AfterData に実際の明細を載せる（既定の空リストのままにしない）
+                    newLedger.Details = groupDetails;
 
                     createdIds.Add(newId);
                     allSplitLedgers.Add(newLedger);
@@ -258,31 +270,6 @@ namespace ICCardManager.Services
             {
                 detail.GroupId = null;
             }
-        }
-
-        /// <summary>
-        /// Ledgerのクローン（操作ログ用）
-        /// </summary>
-        private static Ledger CloneLedger(Ledger source)
-        {
-            return new Ledger
-            {
-                Id = source.Id,
-                CardIdm = source.CardIdm,
-                LenderIdm = source.LenderIdm,
-                Date = source.Date,
-                Summary = source.Summary,
-                Income = source.Income,
-                Expense = source.Expense,
-                Balance = source.Balance,
-                StaffName = source.StaffName,
-                CompanionCount = source.CompanionCount,
-                Note = source.Note,
-                ReturnerIdm = source.ReturnerIdm,
-                LentAt = source.LentAt,
-                ReturnedAt = source.ReturnedAt,
-                IsLentRecord = source.IsLentRecord
-            };
         }
     }
 }
