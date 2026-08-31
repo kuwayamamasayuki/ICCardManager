@@ -41,10 +41,25 @@ public class LedgerMergeUpdateColumnConventionTests
     /// <summary>
     /// 検査対象のメソッドと、その本体に現れる <c>UPDATE ledger SET</c> の対応。
     /// </summary>
+    /// <remarks>
+    /// マーカーは<b>引数リストの末尾まで</b>含める（Issue #1960）。照合は空白を無視するため、
+    /// <c>MergeLedgersAsync(int targetLedgerId</c> までだと 3 引数のオーバーロード
+    /// （tx を開いて委譲するだけの薄いラッパー）にも一致し、
+    /// <see cref="TestSourceInspection.ExtractMethodBodyPreservingLiterals"/> が例外で止める。
+    /// 引数リストの改行・字下げを変えてもマーカーは壊れない。
+    /// </remarks>
     public static IEnumerable<object[]> TargetMethods() => new[]
     {
-        new object[] { "Task<bool> MergeLedgersAsync(\n            int targetLedgerId" },
-        new object[] { "Task<bool> UnmergeLedgersCore(" }
+        new object[]
+        {
+            "Task<bool> MergeLedgersAsync(int targetLedgerId, IEnumerable<int> sourceLedgerIds, " +
+            "Ledger updatedTarget, SQLiteTransaction transaction)"
+        },
+        new object[]
+        {
+            "Task<bool> UnmergeLedgersCore(Services.LedgerMergeUndoData undoData, " +
+            "SQLiteConnection connection, SQLiteTransaction transaction)"
+        }
     };
 
     [Theory]
@@ -95,19 +110,195 @@ WHERE id = @id"";
             "WHERE 句以降と C# のパラメータ設定は列として拾わないこと");
     }
 
-    private static string ExtractMethodBody(string signatureMarker)
+    /// <summary>
+    /// 検査対象が波括弧を含む文字列リテラル（補間 SQL・正規表現）を持っていても、
+    /// 抽出範囲が対象メソッドの中に収まること（Issue #1960）。
+    /// </summary>
+    /// <remarks>
+    /// 対の表明として、リテラルを飛ばさない <see cref="TestSourceInspection.ExtractMethodBody"/> では
+    /// 範囲が隣のメソッドまで伸びることを固定する。これが無いと、抽出を元へ戻しても
+    /// 「SET 句が 1 つ見つかる」ため<b>緑のまま</b>になり、ガードが別の場所を見ていることに気付けない。
+    /// </remarks>
+    [Fact]
+    public void 抽出は波括弧を含むリテラルを持つメソッドでも隣のメソッドまで伸びないこと()
     {
-        var source = File.ReadAllText(RepositoryPath);
+        var body = TestSourceInspection.ExtractMethodBodyPreservingLiterals(
+            SampleWithBracesInLiterals, SampleTargetSignature);
 
-        // SQL は文字列リテラルの中にあるためリテラルは残し、コメントだけを剥がす
-        // （コメント内の SQL 例が検査対象になる極性の反転を避ける）。
-        var codeOnly = TestSourceInspection.RemoveCommentsPreservingLines(source);
+        body.Should().Contain("companion_count = @companionCount");
+        body.Should().NotContain(
+            "date = @date",
+            "隣のメソッドの UPDATE を掴むと、守りたいメソッドを一度も検査しないまま緑になる");
 
-        // 改行コードは CRLF / LF が混在し得るため、シグネチャ照合の前に正規化する。
-        codeOnly = codeOnly.Replace("\r\n", "\n");
+        var naive = TestSourceInspection.ExtractMethodBody(
+            TestSourceInspection.RemoveCommentsPreservingLines(SampleWithBracesInLiterals),
+            SampleTargetSignature);
 
-        return TestSourceInspection.ExtractMethodBody(codeOnly, signatureMarker);
+        naive.Should().Contain(
+            "date = @date",
+            "リテラル内の波括弧を数える実装では範囲が伸びる。この差が本ヘルパーを使う理由");
     }
+
+    /// <summary>
+    /// 引数リストの改行・字下げを変えてもガードが赤くならないこと（Issue #1960）。
+    /// 規約が推奨する方向の変更（整形）でガードが落ちると、修正者を「対象から外す」方向へ誘導する（#1786）。
+    /// </summary>
+    [Fact]
+    public void 抽出はシグネチャの改行と字下げが変わっても同じ本体を返すこと()
+    {
+        var reformatted = SampleWithBracesInLiterals.Replace(
+            "public async Task<bool> TargetAsync(int id, SQLiteTransaction transaction)",
+            "public async Task<bool> TargetAsync(\n            int id,\n            SQLiteTransaction transaction)");
+
+        TestSourceInspection.ExtractMethodBodyPreservingLiterals(reformatted, SampleTargetSignature)
+            .Should().Be(
+                TestSourceInspection.ExtractMethodBodyPreservingLiterals(
+                    SampleWithBracesInLiterals, SampleTargetSignature));
+    }
+
+    /// <summary>
+    /// マーカーが複数のオーバーロードに一致するときは例外にすること（Issue #1960）。
+    /// 空白を無視して照合する以上、引数リストの途中までのマーカーは薄いラッパーにも一致する。
+    /// 黙って先頭を掴むと、検査は緑のまま守りたいメソッドを一度も見ない。
+    /// </summary>
+    [Fact]
+    public void 複数のオーバーロードに一致するマーカーは例外にすること()
+    {
+        var withOverload = SampleWithBracesInLiterals +
+            "\n        public Task<bool> TargetAsync(int id) => TargetAsync(id, null);\n";
+
+        Action act = () => TestSourceInspection.ExtractMethodBodyPreservingLiterals(
+            withOverload, "Task<bool> TargetAsync(int id");
+
+        act.Should().Throw<InvalidOperationException>().WithMessage("*2 箇所*");
+    }
+
+    /// <summary>
+    /// 対の表明: 抽出を緩めた結果、ガードが何も見ていない状態になっていないこと（Issue #1960）。
+    /// SET 句から列が落ちれば、抽出した本体からその列は検出されない。
+    /// </summary>
+    [Fact]
+    public void SET句から落ちた列は抽出結果に現れないこと()
+    {
+        var withoutCompanionCount = SampleWithBracesInLiterals.Replace(
+            ", companion_count = @companionCount", string.Empty);
+
+        var body = TestSourceInspection.ExtractMethodBodyPreservingLiterals(
+            withoutCompanionCount, SampleTargetSignature);
+
+        ExtractLedgerUpdateColumns(body).Should().BeEquivalentTo(
+            new[] { "summary", "income", "expense", "balance", "note" },
+            "列を落とせば検査が赤になること（＝検出力が残っていること）を、サンプル入力でも固定する");
+    }
+
+    /// <summary>
+    /// 式形式（<c>=&gt; …;</c>）のメソッドをマーカーに指定したときは例外にすること
+    /// （Issue #1960 のコードレビューで検出）。
+    /// </summary>
+    /// <remarks>
+    /// 開始波括弧の探索を <c>;</c> / <c>=&gt;</c> で止めないと、探索が次のメソッドの <c>{</c> まで走り
+    /// <b>隣の本体を黙って返す</b>。本 Issue が消そうとしている状態そのものが、修正の中に残る形
+    /// （#1814「修正の中に、修正対象と同じ欠陥への経路を残さない」）。
+    /// マーカーが式形式の 1 件だけに一致すると曖昧さの検査にも掛からないため、ここで落とす。
+    /// </remarks>
+    [Fact]
+    public void ブロック本体を持たないメソッドをマーカーにしたときは例外にすること()
+    {
+        var withExpressionBodied = SampleWithBracesInLiterals.Replace(
+            "        private static void Neighbor()",
+            "        public Task<bool> ShorthandAsync(int id) => TargetAsync(id, null);\n\n" +
+            "        private static void Neighbor()");
+
+        Action act = () => TestSourceInspection.ExtractMethodBodyPreservingLiterals(
+            withExpressionBodied, "Task<bool> ShorthandAsync(int id)");
+
+        act.Should().Throw<InvalidOperationException>()
+            .WithMessage("*ブロック本体*", "隣のメソッドの本体を黙って返さないこと");
+    }
+
+    /// <summary>
+    /// 補間式の穴に入れ子の文字列があっても抽出範囲が短縮しないこと
+    /// （Issue #1960 のコードレビューで検出）。
+    /// </summary>
+    /// <remarks>
+    /// 非逐語の補間文字列 <c>$"…{Fmt("}")}…"</c> は、穴の中の <c>"</c> でリテラルが打ち切られると
+    /// トークン化がずれ、抽出が<b>例外も出さずに短縮する</b>（禁止トークンの不在を見る検査なら
+    /// 空振りしたまま緑＝fail-open）。
+    /// </remarks>
+    [Fact]
+    public void 補間式の穴に入れ子の文字列があっても抽出が短縮しないこと()
+    {
+        const string sample = @"
+    public class Sample
+    {
+        public async Task<bool> TargetAsync(int id, SQLiteTransaction transaction)
+        {
+            var label = $""件数 {Format(count, ""}"")} / 上限 {Limit()}"";
+            command.CommandText = @""UPDATE ledger SET summary = @summary WHERE id = @id"";
+            return await command.ExecuteNonQueryAsync() == 1;
+        }
+    }
+";
+
+        var body = TestSourceInspection.ExtractMethodBodyPreservingLiterals(
+            sample, SampleTargetSignature);
+
+        ExtractLedgerUpdateColumns(body).Should().BeEquivalentTo(
+            new[] { "summary" },
+            "穴の中の \" でリテラルが打ち切られると、UPDATE へ到達する前に本体が切れる");
+    }
+
+    /// <summary>
+    /// シグネチャの照合は文字列リテラルの中身を数えないこと（Issue #1960 のコードレビューで検出）。
+    /// リテラル中の同じ綴りを数えると、偽の「2 箇所に一致」で<b>規約を守っているコードが赤になる</b>。
+    /// </summary>
+    [Fact]
+    public void シグネチャの照合はリテラル内の一致を数えないこと()
+    {
+        var withMarkerInLiteral = SampleWithBracesInLiterals.Replace(
+            "            return await command.ExecuteNonQueryAsync() == 1;",
+            "            Log(\"Task<bool> TargetAsync(int id, SQLiteTransaction transaction) を実行\");\n" +
+            "            return await command.ExecuteNonQueryAsync() == 1;");
+
+        TestSourceInspection.ExtractMethodBodyPreservingLiterals(
+                withMarkerInLiteral, SampleTargetSignature)
+            .Should().Contain("companion_count = @companionCount");
+    }
+
+    private const string SampleTargetSignature =
+        "Task<bool> TargetAsync(int id, SQLiteTransaction transaction)";
+
+    /// <summary>
+    /// 検査ロジック固定用のサンプル。波括弧を含むリテラル（対応の取れない正規表現・補間 SQL）と、
+    /// 別の列を SET する隣のメソッドを併せ持つ。
+    /// </summary>
+    private const string SampleWithBracesInLiterals = @"
+    public class Sample
+    {
+        public async Task<bool> TargetAsync(int id, SQLiteTransaction transaction)
+        {
+            var placeholder = new Regex(@""^\{[0-9]+$"");
+            using var command = connection.CreateCommand();
+            command.CommandText = $@""UPDATE ledger
+SET summary = @summary, income = @income, expense = @expense,
+    balance = @balance, note = @note, companion_count = @companionCount
+WHERE id IN ({string.Join("", "", paramNames)})"";
+            return await command.ExecuteNonQueryAsync() == 1;
+        }
+
+        private static void Neighbor()
+        {
+            command.CommandText = @""UPDATE ledger SET date = @date WHERE id = @id"";
+        }
+    }
+";
+
+    private static string ExtractMethodBody(string signatureMarker) =>
+        // SQL は文字列リテラルの中にあるためリテラルを残したまま切り出す。素の ExtractMethodBody は
+        // ToCodeOnly 済みの入力が前提で、リテラル内の波括弧（補間 SQL 等）で抽出範囲が
+        // 黙って別の場所へ移る（Issue #1960）。コメント除去・改行の正規化はヘルパーが行う。
+        TestSourceInspection.ExtractMethodBodyPreservingLiterals(
+            File.ReadAllText(RepositoryPath), signatureMarker);
 
     /// <summary>
     /// <c>UPDATE ledger SET … WHERE</c> の SET 句から列名を抽出する。

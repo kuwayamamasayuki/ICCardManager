@@ -18,6 +18,12 @@ namespace ICCardManager.Tests;
 /// 空振りする（Issue #1742 のコードレビュー指摘）。
 /// </para>
 /// <para>
+/// <b>リテラルの中身そのものを検査する</b>場合（SQL の SET 句等）は
+/// <see cref="ExtractMethodBodyPreservingLiterals"/> を使う（Issue #1960）。
+/// <see cref="ToCodeOnly"/> は検査対象の SQL ごと消してしまい、かといってリテラルを残したまま
+/// <see cref="ExtractMethodBody"/> へ渡すと上記の「黙って短縮／伸長する」状態になる。
+/// </para>
+/// <para>
 /// 行番号を報告する検査（<c>CompletionMessageOrderConventionTests</c> 等）は
 /// <see cref="ToCodeOnlyPreservingLines"/> を使う。<see cref="ToCodeOnly"/> は
 /// 複数行のブロックコメントを空白 1 文字へ畳むため行番号がずれる。
@@ -659,6 +665,312 @@ internal static class TestSourceInspection
         }
 
         throw new InvalidOperationException($"「{signatureMarker}」の本体の波括弧が閉じていない。");
+    }
+
+    /// <summary>
+    /// シグネチャ文字列から始まるメソッドの本体（<c>{ }</c> 含む）を、
+    /// <b>文字列リテラルの中身を残したまま</b>波括弧の対応で取り出す（Issue #1960）。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// SQL のように<b>リテラルの中身そのものが検査対象</b>の規約テスト用。
+    /// <see cref="ExtractMethodBody"/> は <see cref="ToCodeOnly"/> 済みの入力を前提とするため、
+    /// リテラルを残したテキストを渡すと、リテラル内の波括弧（補間 SQL の
+    /// <c>{string.Join(", ", paramNames)}</c>、正規表現の <c>\{</c> 等）が対応のカウンタを狂わせ、
+    /// <b>抽出範囲が黙って別の場所へ移る</b>。結果は「意味不明なメッセージで落ちる」か
+    /// 「見当違いの箇所を検査して緑のまま通る」のどちらかで、後者は検出漏れになる（#1786）。
+    /// 本メソッドはリテラル（<c>"…"</c> / <c>@"…"</c> / <c>$"…"</c> / <c>$@"…"</c> / <c>'…'</c>）と
+    /// 補間式の穴（入れ子のリテラルを含む）を読み飛ばしながら波括弧を数える。
+    /// </para>
+    /// <para>
+    /// <b>対象はブロック本体（<c>{ }</c>）を持つメソッドに限る。</b>式形式（<c>=&gt; …;</c>）や
+    /// 宣言のみのメソッドをマーカーに指定すると例外にする — 探索を続けると次のメソッドの
+    /// <c>{</c> を掴んで<b>隣の本体を黙って返す</b>ため（判定できない前方の形は fail-open にしない、#1944）。
+    /// </para>
+    /// <para>
+    /// <b>限界</b>: 逐語的補間文字列（<c>$@"…"</c>）の穴の中は <c>""</c> をエスケープとして読むため、
+    /// C# 11 の生文字列リテラル（<c>"""…"""</c>）は扱わない。本リポジトリには存在しない
+    /// （.NET Framework 4.8 / C# 10）が、使うようになったら本メソッドを見直すこと。
+    /// </para>
+    /// <para>
+    /// コメントは本メソッドが <see cref="RemoveCommentsPreservingLines"/> で自ら剥がす
+    /// （コメント中の SQL 例が検査対象になる極性の反転を避けるため）。
+    /// 「呼び出し側がサニタイズしてから渡す」契約にしないのは、
+    /// <b>前提が崩れていることが呼び出し側から見えない</b>形を作らないため（#1960 で実際に起きた形）。
+    /// </para>
+    /// <para>
+    /// シグネチャの照合は<b>空白をすべて無視して</b>行う。引数リストの改行・字下げを変えただけで
+    /// ガードが赤くなると、修正者を「対象から外す」方向へ誘導する（#1786）。
+    /// 一方で空白を無視するとオーバーロードが同じマーカーに一致し得るため、
+    /// <b>一致が 2 か所以上あるときは例外にする</b> — 黙って先頭（別のオーバーロードや薄い委譲）を
+    /// 掴むと、検査は緑のまま守りたいメソッドを一度も見ない。
+    /// </para>
+    /// </remarks>
+    /// <param name="source">生のソーステキスト（コメント除去は不要）。</param>
+    /// <param name="signatureMarker">
+    /// メソッドシグネチャ（例: <c>"Task&lt;bool&gt; Foo(int a, string b)"</c>）。
+    /// オーバーロードがある場合は引数リストの末尾まで含めること。
+    /// </param>
+    /// <exception cref="InvalidOperationException">
+    /// シグネチャが見つからない、複数に一致する、または波括弧が閉じないとき。
+    /// </exception>
+    public static string ExtractMethodBodyPreservingLiterals(string source, string signatureMarker)
+    {
+        if (source == null)
+        {
+            throw new ArgumentNullException(nameof(source));
+        }
+
+        if (string.IsNullOrWhiteSpace(signatureMarker))
+        {
+            throw new ArgumentException("メソッドシグネチャを指定すること。", nameof(signatureMarker));
+        }
+
+        var code = RemoveCommentsPreservingLines(source).Replace("\r\n", "\n");
+        var start = FindUniqueSignatureStart(code, signatureMarker);
+
+        var braceStart = -1;
+        var i = start;
+        while (i < code.Length)
+        {
+            if (TrySkipLiteral(code, ref i))
+            {
+                continue;
+            }
+
+            if (code[i] == '{')
+            {
+                braceStart = i;
+                break;
+            }
+
+            // 式形式（=> …;）はブロック本体を持たない。ここで止めないと探索が次のメソッドの
+            // '{' まで走り、隣の本体を黙って返す（＝本ヘルパーが消そうとしている状態そのもの）。
+            // 判定できない前方の形は fail-open にしない（#1944）。
+            if (code[i] == ';' || (code[i] == '=' && i + 1 < code.Length && code[i + 1] == '>'))
+            {
+                throw new InvalidOperationException(
+                    $"「{signatureMarker}」はブロック本体（{{ }}）を持たない（式形式、または宣言のみ）。" +
+                    "抽出対象はブロック本体のメソッドに限る。");
+            }
+
+            i++;
+        }
+
+        if (braceStart < 0)
+        {
+            throw new InvalidOperationException($"「{signatureMarker}」の本体の開始波括弧が見つからない。");
+        }
+
+        var depth = 0;
+        i = braceStart;
+        while (i < code.Length)
+        {
+            if (TrySkipLiteral(code, ref i))
+            {
+                continue;
+            }
+
+            if (code[i] == '{')
+            {
+                depth++;
+            }
+            else if (code[i] == '}')
+            {
+                depth--;
+                if (depth == 0)
+                {
+                    return code.Substring(braceStart, i - braceStart + 1);
+                }
+            }
+
+            i++;
+        }
+
+        throw new InvalidOperationException($"「{signatureMarker}」の本体の波括弧が閉じていない。");
+    }
+
+    /// <summary>
+    /// 空白を無視してシグネチャを照合し、一意に定まったときだけその開始位置を返す。
+    /// </summary>
+    private static int FindUniqueSignatureStart(string source, string signatureMarker)
+    {
+        var compact = new StringBuilder();
+        var originalIndexOf = new List<int>();
+        var i = 0;
+        while (i < source.Length)
+        {
+            // リテラルの中身は照合対象から外す。マーカーと同じ綴りがリテラルに現れると
+            // 偽の「2 箇所に一致」（誤検出＝赤）になり、綴りを誤ればリテラル内の 1 件に
+            // 一致して静かに誤った位置から抽出する。
+            if (TrySkipLiteral(source, ref i))
+            {
+                continue;
+            }
+
+            if (!char.IsWhiteSpace(source[i]))
+            {
+                compact.Append(source[i]);
+                originalIndexOf.Add(i);
+            }
+
+            i++;
+        }
+
+        var compactMarker = new string(signatureMarker.Where(ch => !char.IsWhiteSpace(ch)).ToArray());
+        if (compactMarker.Length == 0)
+        {
+            throw new ArgumentException("メソッドシグネチャが空白のみ。", nameof(signatureMarker));
+        }
+
+        var haystack = compact.ToString();
+        var matches = new List<int>();
+        var from = 0;
+        while (from <= haystack.Length - compactMarker.Length)
+        {
+            var hit = haystack.IndexOf(compactMarker, from, StringComparison.Ordinal);
+            if (hit < 0)
+            {
+                break;
+            }
+
+            matches.Add(hit);
+            from = hit + 1;
+        }
+
+        if (matches.Count == 0)
+        {
+            throw new InvalidOperationException(
+                $"「{signatureMarker}」が見つからない。対象をリネームした場合は呼び出し側のマーカーも更新すること。");
+        }
+
+        if (matches.Count > 1)
+        {
+            throw new InvalidOperationException(
+                $"「{signatureMarker}」が {matches.Count} 箇所に一致する。" +
+                "オーバーロードや呼び出し箇所と区別できるよう、引数リストの末尾まで含めたマーカーを指定すること。");
+        }
+
+        return originalIndexOf[matches[0]];
+    }
+
+    /// <summary>
+    /// <paramref name="index"/> から文字列・文字リテラルが始まるなら、その終端の次まで
+    /// <paramref name="index"/> を進めて <c>true</c> を返す。中身は読み飛ばすだけで捨てない。
+    /// </summary>
+    private static bool TrySkipLiteral(string source, ref int index)
+    {
+        var verbatimContentStart = GetVerbatimStringContentStart(source, index);
+        if (verbatimContentStart.HasValue)
+        {
+            // 逐語的文字列（@"…" / $@"…"）: "" が " のエスケープ。行をまたぐ。
+            var i = verbatimContentStart.Value;
+            while (i < source.Length)
+            {
+                if (source[i] == '"')
+                {
+                    if (i + 1 < source.Length && source[i + 1] == '"')
+                    {
+                        i += 2;
+                        continue;
+                    }
+
+                    i++;
+                    break;
+                }
+
+                i++;
+            }
+
+            index = i;
+            return true;
+        }
+
+        var c = source[index];
+        if (c == '"' || (c == '$' && index + 1 < source.Length && source[index + 1] == '"'))
+        {
+            // 通常の文字列・補間文字列: \ がエスケープ。行はまたげないので改行で打ち切る。
+            var isInterpolated = c == '$';
+            var i = isInterpolated ? index + 2 : index + 1;
+            while (i < source.Length && source[i] != '"' && source[i] != '\n')
+            {
+                if (source[i] == '\\')
+                {
+                    i += 2;
+                    continue;
+                }
+
+                // 補間式の穴（{ … }）の中は「コードそのもの」で、入れ子の文字列リテラルを
+                // 書ける（$"x{Fmt("}")}"）。穴を飛ばさずに読むと、その " でリテラルが
+                // 打ち切られてトークン化がずれ、抽出が黙って短縮する（＝空振りしたまま緑）。
+                if (isInterpolated && source[i] == '{')
+                {
+                    if (i + 1 < source.Length && source[i + 1] == '{')
+                    {
+                        // {{ は '{' のエスケープ（補間式ではない）
+                        i += 2;
+                        continue;
+                    }
+
+                    i = SkipInterpolationHole(source, i);
+                    continue;
+                }
+
+                i++;
+            }
+
+            index = i < source.Length && source[i] == '"' ? i + 1 : i;
+            return true;
+        }
+
+        if (c == '\'')
+        {
+            var i = index + 1;
+            while (i < source.Length && source[i] != '\'' && source[i] != '\n')
+            {
+                i += source[i] == '\\' ? 2 : 1;
+            }
+
+            index = i < source.Length && source[i] == '\'' ? i + 1 : i;
+            return true;
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// 補間文字列の穴（<c>{ … }</c>）を、入れ子の波括弧とリテラルを数えながら読み飛ばし、
+    /// 対応する <c>}</c> の次の位置を返す（閉じていないなら末尾）。
+    /// </summary>
+    private static int SkipInterpolationHole(string source, int openBraceIndex)
+    {
+        var i = openBraceIndex + 1;
+        var depth = 1;
+
+        while (i < source.Length)
+        {
+            if (TrySkipLiteral(source, ref i))
+            {
+                continue;
+            }
+
+            if (source[i] == '{')
+            {
+                depth++;
+            }
+            else if (source[i] == '}')
+            {
+                depth--;
+                if (depth == 0)
+                {
+                    return i + 1;
+                }
+            }
+
+            i++;
+        }
+
+        return i;
     }
 
     /// <summary>
