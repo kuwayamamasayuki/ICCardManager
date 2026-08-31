@@ -88,6 +88,43 @@ public class SummaryGenerationSnapshotConventionTests
     }
 
     /// <summary>
+    /// 運用中に差し替わる部署種別（Issue #1975）を読んでよい場所を列挙して固定する。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// 上の「生成の各段階が静的状態を直接読まないこと」は<b>世代を引数に取るメソッドだけ</b>を
+    /// 走査するため、世代を捕捉する側である <c>Generate</c> / <c>GenerateByDate</c> は対象外になる。
+    /// ところが #1975 の欠陥が実際に住んでいたのはその 2 つで、
+    /// <c>Generate</c> の「チャージのみ」分岐が <c>_departmentType</c> を直接読んでいた。
+    /// <b>ガードが見ていない場所に欠陥がある</b>状態だったので、フィールドの参照箇所そのものを数える。
+    /// </para>
+    /// <para>
+    /// 読んでよいのは「値を受け取る」コンストラクタ、「差し替える」<c>ApplyDepartmentType</c>、
+    /// 「世代へ畳み込む」<c>CaptureContext</c> の 3 か所（宣言を含めて 4 回）だけ。
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public void 部署種別を読む箇所が捕捉の入口に限られていること()
+    {
+        var source = TestSourceInspection.ToCodeOnly(ReadSummaryGeneratorSource());
+
+        var references = Regex.Matches(
+            source, @"(?<![A-Za-z0-9_])_departmentType(?![A-Za-z0-9_])").Count;
+
+        // 宣言 1 ＋ コンストラクタでの代入 1 ＋ ApplyDepartmentType での代入 1 ＋ CaptureContext での読み取り 1
+        references.Should().Be(4,
+            "部署種別は生成の入口（CaptureContext）で世代へ畳み込み、以降は捕捉済みの値だけを見ること。" +
+            "生成の途中で読むと、1 回の生成の中で「役務費によりチャージ」と「旅費によりチャージ」が" +
+            "混ざる（Issue #1975 / #1919）");
+
+        // 対の表明: 差し替えの手段が実在すること（フィールドごと消した実装で緑にしない）
+        source.Should().Contain("ApplyDepartmentType",
+            "運用中に差し替える手段（Issue #1975）が残っていること");
+        source.Should().Contain("WithDepartmentType",
+            "捕捉時に世代へ畳み込む手段（Issue #1975）が残っていること");
+    }
+
+    /// <summary>
     /// 生成の入口が世代を 1 回だけ捕捉していること。
     /// </summary>
     /// <remarks>

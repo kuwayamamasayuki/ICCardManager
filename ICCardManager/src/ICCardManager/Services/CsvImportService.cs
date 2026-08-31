@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
@@ -230,10 +230,13 @@ namespace ICCardManager.Services
         /// <c>.claude/rules/development-conventions.md</c> #1820 と同 family）。
         /// </para>
         /// <para>
-        /// DI に登録済みの <see cref="SummaryGenerator"/> シングルトンを注入しないのは、
-        /// あれが<b>起動時</b>の部署種別を捕捉したまま固定されるため。部署種別は設定画面（F5）から
-        /// 実行時に変更でき、注入すると「変更後の最初の取込だけ旧設定で摘要が作られる」窓が残る。
+        /// DI に登録済みの <see cref="SummaryGenerator"/> シングルトンを注入せず、毎回 DB の設定から
+        /// 組み立てるのは、<b>共有モードで他 PC が変更した部署種別まで拾うため</b>。
+        /// シングルトンは Issue #1975 で自 PC の保存に追従するようになった（<c>ApplyDepartmentType</c>）が、
+        /// それは<b>自 PC の設定画面（F5）を経た変更に限られる</b>。
         /// <c>BusStopInputViewModel.PersistBusStopsAsync</c> が毎回設定を読み直しているのと同じ判断。
+        /// なお <c>GetAppSettingsAsync</c> はキャッシュ経由（既定 TTL 3 分）なので、他 PC の変更は
+        /// 最長で TTL 分だけ古い値を見る（自 PC の保存はキャッシュを無効化する）。
         /// </para>
         /// <para>
         /// 組織文言（<c>ChargeSummaryEnterprise</c> 等）は静的な <c>CurrentOptions</c> から引かれるため、

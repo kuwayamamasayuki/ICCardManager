@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
@@ -22,7 +22,8 @@ namespace ICCardManager.Services.Import.Builders
         /// 摘要生成器。Issue #1955: 以前は <c>new SummaryGenerator()</c> を自前で生成しており、
         /// 部署種別が既定（市長事務部局）に固定されていたため、企業会計部局の組織でも
         /// チャージ行が「役務費によりチャージ」で台帳に書き込まれていた。
-        /// 呼び出し元（<c>CsvImportService.CreateSummaryGeneratorAsync</c>）が DB の設定から組み立てる。
+        /// 呼び出し元（<c>CsvImportService.CreateSummaryGeneratorAsync</c>）が DB の設定から組み立てる
+        /// （DI シングルトンを注入しない理由はそちらの remarks を参照。Issue #1975 で更新）。
         /// <b>省略可能にしない</b> — 省略時の既定値は本来の値と一致しないため、配線漏れが
         /// 「設定した部署種別が静かに無視される」形で潜在化する
         /// （<c>.claude/rules/development-conventions.md</c> #1820）。

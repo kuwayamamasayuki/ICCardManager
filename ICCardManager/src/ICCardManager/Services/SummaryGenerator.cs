@@ -112,7 +112,12 @@ namespace ICCardManager.Services
         /// <b>このフィールドを直接読んでよいのは <see cref="CaptureContext"/> だけ</b> —
         /// 摘要生成の各段階が個別に読むと、1 回の生成の途中で部署種別が入れ替わり、
         /// 同じ生成の中で「役務費によりチャージ」と「旅費によりチャージ」が混ざる。
-        /// この規約は <c>SummaryGenerationSnapshotConventionTests</c> が静的検査で固定する。
+        /// この規約は <c>SummaryGenerationSnapshotConventionTests</c> が
+        /// <b>本フィールドの参照箇所そのものを列挙して</b>固定する（コンストラクタ・
+        /// <see cref="CaptureContext"/>・<see cref="ApplyDepartmentType"/> の 3 か所のみ）。
+        /// 世代を引数に取るメソッドだけを走査する検査では、世代を捕捉する
+        /// <see cref="Generate"/> / <see cref="GenerateByDate"/> 自身が対象外になり、
+        /// この欠陥が実際に住んでいた場所を見られない。
         /// </remarks>
         private DepartmentType _departmentType;
 
@@ -677,7 +682,7 @@ namespace ICCardManager.Services
                         summariesToAdd.Add((item.Index, new DailySummary
                         {
                             Date = date,
-                            Summary = GetChargeSummary(context.DepartmentType),
+                            Summary = ResolveChargeSummary(context),
                             IsCharge = true,
                             IsPointRedemption = false
                         }));
@@ -873,7 +878,7 @@ namespace ICCardManager.Services
             // チャージのみの場合
             if (detailList.All(d => d.IsCharge))
             {
-                return GetChargeSummary(context.DepartmentType);
+                return ResolveChargeSummary(context);
             }
 
             // ポイント還元のみの場合
@@ -2216,9 +2221,30 @@ namespace ICCardManager.Services
         /// <returns>市長事務部局:「役務費によりチャージ」、企業会計部局:「旅費によりチャージ」</returns>
         public static string GetChargeSummary(DepartmentType departmentType)
         {
+            return SelectChargeSummary(CurrentOptions, departmentType);
+        }
+
+        /// <summary>
+        /// 捕捉済みの世代からチャージ摘要を生成する（生成パイプライン用、Issue #1975）
+        /// </summary>
+        /// <remarks>
+        /// 部署種別だけを世代へ畳み込んでも、文言そのもの（<c>ChargeSummaryEnterprise</c> 等）を
+        /// 静的な <see cref="CurrentOptions"/> から引いていては「1 回の生成が単一の世代を見る」
+        /// という #1919 の性質が enum の側にしか成立しない。組織設定の差し替え
+        /// （<see cref="Configure"/>）は現状 起動時のみだが、性質は経路ごとに欠けさせない。
+        /// </remarks>
+        private static string ResolveChargeSummary(SummaryGenerationContext context)
+            => SelectChargeSummary(context.Options, context.DepartmentType);
+
+        /// <summary>
+        /// 部署種別に応じたチャージ摘要の文言を選ぶ（唯一の定義。#1763）
+        /// </summary>
+        private static string SelectChargeSummary(
+            OrganizationOptions options, DepartmentType departmentType)
+        {
             return departmentType == DepartmentType.EnterpriseAccount
-                ? CurrentOptions.SummaryText.ChargeSummaryEnterprise
-                : CurrentOptions.SummaryText.ChargeSummaryMayorOffice;
+                ? options.SummaryText.ChargeSummaryEnterprise
+                : options.SummaryText.ChargeSummaryMayorOffice;
         }
 
         /// <summary>

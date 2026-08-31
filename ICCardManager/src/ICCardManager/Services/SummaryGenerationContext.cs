@@ -124,8 +124,6 @@ namespace ICCardManager.Services
                 }
             };
 
-            // Issue #1975: 部署種別は同一視グループの編集で変わらない。引き継がないと
-            // グループを保存しただけでチャージ摘要が既定（市長事務部局）へ戻る
             return Create(newOptions);
         }
 
