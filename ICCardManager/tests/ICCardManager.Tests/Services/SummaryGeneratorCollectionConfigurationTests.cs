@@ -73,6 +73,8 @@ public class SummaryGeneratorCollectionConfigurationTests
     [InlineData(typeof(TransferStationGroupServiceTests))]
     // Issue #1919: 生成中の世代差し替えを再現するため ApplyTransferStationGroups を呼ぶ
     [InlineData(typeof(SummaryGeneratorGenerationSnapshotTests))]
+    // Issue #1975: 部署種別の運用中差し替えの検証で Configure / ApplyTransferStationGroups を呼ぶ
+    [InlineData(typeof(SummaryGeneratorDepartmentTypeHotSwapTests))]
     public void SummaryGenerator関連テストクラスがCollectionに属していること(Type testClass)
     {
         // Act
@@ -110,6 +112,8 @@ public class SummaryGeneratorCollectionConfigurationTests
     [InlineData(typeof(TransferStationGroupServiceTests))]
     // Issue #1919: 生成中の世代差し替えを再現するため ApplyTransferStationGroups を呼ぶ
     [InlineData(typeof(SummaryGeneratorGenerationSnapshotTests))]
+    // Issue #1975: 部署種別の運用中差し替えの検証で Configure / ApplyTransferStationGroups を呼ぶ
+    [InlineData(typeof(SummaryGeneratorDepartmentTypeHotSwapTests))]
     public void Collection対象テストクラスはIDisposableを実装していること(Type testClass)
     {
         // Act

@@ -28,6 +28,18 @@ public partial class SettingsViewModel : ViewModelBase
     private readonly ISoundPlayer _soundPlayer;
     private readonly IDialogService _dialogService;
 
+    /// <summary>
+    /// 摘要生成器（DI シングルトン、Issue #1975）
+    /// </summary>
+    /// <remarks>
+    /// 部署種別は起動時に捕捉されたまま固定されるため、保存成功時に
+    /// <see cref="SummaryGenerator.ApplyDepartmentType"/> で差し替えないと、
+    /// 履歴統合・分割・返却・明細編集の摘要再生成が再起動まで旧設定で動く。
+    /// 省略可能にすると DI の配線漏れが「設定した部署種別が静かに無視される」形で
+    /// 潜在化するため必須引数にする（development-conventions.md #1820）。
+    /// </remarks>
+    private readonly SummaryGenerator _summaryGenerator;
+
     [ObservableProperty]
     private int _warningBalance;
 
@@ -145,12 +157,14 @@ public partial class SettingsViewModel : ViewModelBase
         IValidationService validationService,
         ISoundPlayer soundPlayer,
         IOptions<DatabaseOptions> databaseOptions, // DI互換のため引数を維持（本体では未使用）
-        IDialogService dialogService)
+        IDialogService dialogService,
+        SummaryGenerator summaryGenerator)
     {
         _settingsRepository = settingsRepository;
         _validationService = validationService;
         _soundPlayer = soundPlayer;
         _dialogService = dialogService;
+        _summaryGenerator = summaryGenerator;
         // database_config.txtから直接読む（設定ファイルが正。DI経由のDatabaseOptionsは
         // アプリ起動時に固定されるため、同一セッション中に設定変更しても反映されない）
         var fullPath = LoadDatabasePathFromConfigFile();
@@ -280,6 +294,17 @@ public partial class SettingsViewModel : ViewModelBase
             {
                 SetStatus("設定を保存しました", false);
                 HasChanges = false;
+
+                // 部署種別の変更を摘要生成器へ反映（Issue #1975）
+                // 保存成功時だけ反映する（順序を逆にすると「保存できませんでした」と
+                // 案内しながら摘要生成だけ新しい部署種別で動く。#1905 と同じ判断）。
+                // これを省くと、履歴統合・履歴分割・返却時の台帳生成・明細編集の
+                // 摘要再生成がアプリ再起動まで旧設定でチャージ摘要を作り、
+                // 「役務費によりチャージ」が 6 年保存の台帳へ入る。
+                // UI 装飾の反映（文字サイズ・トースト位置）より前に置くのは、
+                // それらが失敗しても台帳へ効く反映だけは確定させるため
+                // （development-conventions.md「コミット確定後の後処理を、成否の判定に巻き込まない」）
+                _summaryGenerator.ApplyDepartmentType(settings.DepartmentType);
 
                 // 正規化されたパスをUIに反映
                 if (BackupPath != validatedBackupPath)

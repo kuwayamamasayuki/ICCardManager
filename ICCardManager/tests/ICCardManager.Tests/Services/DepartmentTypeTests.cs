@@ -1,4 +1,4 @@
-using FluentAssertions;
+﻿using FluentAssertions;
 using ICCardManager.Data.Repositories;
 using ICCardManager.Models;
 using ICCardManager.Services;
@@ -43,7 +43,7 @@ public class DepartmentTypeTests
     public void GetChargeSummary_NoParameter_DefaultsToMayorOffice()
     {
         // Act
-        var result = SummaryGenerator.GetChargeSummary();
+        var result = SummaryGenerator.GetChargeSummary(DepartmentType.MayorOffice);
 
         // Assert
         result.Should().Be("役務費によりチャージ");

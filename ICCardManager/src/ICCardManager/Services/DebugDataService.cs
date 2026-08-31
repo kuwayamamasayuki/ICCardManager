@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Data.SQLite;
 using System.Linq;
@@ -278,7 +278,7 @@ namespace ICCardManager.Services
                         {
                             CardIdm = card.CardIdm,
                             Date = date,
-                            Summary = SummaryGenerator.GetChargeSummary(),
+                            Summary = SummaryGenerator.GetChargeSummary(DepartmentType.MayorOffice),
                             Income = chargeAmount,
                             Expense = 0,
                             Balance = balance,
@@ -691,7 +691,7 @@ namespace ICCardManager.Services
             {
                 CardIdm = cardIdm,
                 Date = weekendDates[5],
-                Summary = SummaryGenerator.GetChargeSummary(),
+                Summary = SummaryGenerator.GetChargeSummary(DepartmentType.MayorOffice),
                 Income = chargeAmount,
                 Expense = 0,
                 Balance = balance,
@@ -809,7 +809,7 @@ namespace ICCardManager.Services
                     {
                         CardIdm = cardIdm,
                         Date = date,
-                        Summary = SummaryGenerator.GetChargeSummary(),
+                        Summary = SummaryGenerator.GetChargeSummary(DepartmentType.MayorOffice),
                         Income = chargeAmount,
                         Expense = 0,
                         Balance = balance,

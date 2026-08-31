@@ -26,6 +26,7 @@ public class SettingsViewModelTests
     private readonly Mock<IValidationService> _validationServiceMock;
     private readonly Mock<ISoundPlayer> _soundPlayerMock;
     private readonly Mock<IDialogService> _dialogServiceMock;
+    private readonly SummaryGenerator _summaryGenerator;
     private readonly SettingsViewModel _viewModel;
 
     public SettingsViewModelTests()
@@ -38,12 +39,16 @@ public class SettingsViewModelTests
         // バリデーションはデフォルトで成功を返す
         _validationServiceMock.Setup(v => v.ValidateWarningBalance(It.IsAny<int>())).Returns(ValidationResult.Success());
 
+        // Issue #1975: 既定（市長事務部局）から始め、保存で企業会計部局へ切り替わることを表明できるようにする
+        _summaryGenerator = new SummaryGenerator(DepartmentType.MayorOffice);
+
         _viewModel = new SettingsViewModel(
             _settingsRepositoryMock.Object,
             _validationServiceMock.Object,
             _soundPlayerMock.Object,
             Options.Create(new DatabaseOptions()),
-            _dialogServiceMock.Object);
+            _dialogServiceMock.Object,
+            _summaryGenerator);
     }
 
     #region 設定読み込みテスト
@@ -171,6 +176,98 @@ public class SettingsViewModelTests
         // Assert - リポジトリが正しいパラメータで呼ばれたことを検証
         _settingsRepositoryMock.Verify(r => r.SaveAppSettingsAsync(It.Is<AppSettings>(s => s.WarningBalance == 0)), Times.Once);
     }
+
+    /// <summary>
+    /// 保存に成功したら、部署種別が摘要生成器へ反映されること（Issue #1975）
+    /// </summary>
+    /// <remarks>
+    /// DI シングルトンの <c>SummaryGenerator</c> は起動時の部署種別を保持するため、
+    /// ここで反映しないと履歴統合・履歴分割・返却時の台帳生成・明細編集の摘要再生成が
+    /// アプリ再起動まで旧設定でチャージ摘要を作る。既定（市長事務部局）と<b>異なる</b>
+    /// 値へ変更してから表明する（既定のままだと修正前のコードでも緑になる。#1818）。
+    /// </remarks>
+    [Fact]
+    public async Task SaveAsync_保存成功時は部署種別が摘要生成器へ反映されること()
+    {
+        // Arrange
+        _viewModel.WarningBalance = 1000;
+        _viewModel.BackupPath = string.Empty;
+        _viewModel.SelectedDepartmentTypeItem = _viewModel.DepartmentTypeOptions
+            .First(x => x.Value == DepartmentType.EnterpriseAccount);
+        _settingsRepositoryMock
+            .Setup(r => r.SaveAppSettingsAsync(It.IsAny<AppSettings>()))
+            .ReturnsAsync(true);
+
+        // Act
+        await SaveIgnoringWpfOnlyReflectionAsync();
+
+        // Assert: 摘要生成器そのものの出力で表明する（呼び出しの Verify では
+        // 「呼んだが効いていない」実装を検出できない）
+        _summaryGenerator.Generate(CreateChargeOnlyDetails())
+            .Should().Be("旅費によりチャージ");
+    }
+
+    /// <summary>
+    /// 対のテスト: 保存に失敗したら部署種別を反映しないこと（Issue #1975）
+    /// </summary>
+    /// <remarks>
+    /// これが無いと、保存の成否によらず常に反映する実装でも上のテストが緑になる。
+    /// 反映を先に行うと「保存できませんでした」と案内しながら摘要生成だけ
+    /// 新しい部署種別で動く（#1905 と同じ判断）。
+    /// </remarks>
+    [Fact]
+    public async Task SaveAsync_保存失敗時は部署種別を反映しないこと()
+    {
+        // Arrange
+        _viewModel.WarningBalance = 1000;
+        _viewModel.BackupPath = string.Empty;
+        _viewModel.SelectedDepartmentTypeItem = _viewModel.DepartmentTypeOptions
+            .First(x => x.Value == DepartmentType.EnterpriseAccount);
+        _settingsRepositoryMock
+            .Setup(r => r.SaveAppSettingsAsync(It.IsAny<AppSettings>()))
+            .ReturnsAsync(false);
+
+        // Act
+        await _viewModel.SaveAsync();
+
+        // Assert
+        _summaryGenerator.Generate(CreateChargeOnlyDetails())
+            .Should().Be("役務費によりチャージ");
+    }
+
+    /// <summary>
+    /// 保存成功パスを実行する。WPF 依存の反映（<c>App.ApplyFontSize</c>）だけを読み飛ばす。
+    /// </summary>
+    /// <remarks>
+    /// <c>App.ApplyFontSize</c> は <c>Application.Current</c> のリソースを書き換えるため、
+    /// WPF アプリケーションを持たない xUnit では <see cref="NullReferenceException"/> になる。
+    /// 部署種別の反映（Issue #1975）はこれより<b>前</b>に置いてあるので、
+    /// ここで読み飛ばしても検証対象には到達している
+    /// （逆に言えば、後ろへ移した実装では本テストが赤くなる ＝ 順序も固定されている）。
+    /// </remarks>
+    private async Task SaveIgnoringWpfOnlyReflectionAsync()
+    {
+        try
+        {
+            await _viewModel.SaveAsync();
+        }
+        catch (NullReferenceException)
+        {
+            // WPF アプリケーション未起動によるもの。上記 remarks 参照
+        }
+    }
+
+    /// <summary>チャージのみの明細（ICカード履歴は新しい順）</summary>
+    private static List<LedgerDetail> CreateChargeOnlyDetails() => new()
+    {
+        new LedgerDetail
+        {
+            UseDate = new DateTime(2026, 4, 1),
+            Amount = -3000,
+            Balance = 5000,
+            IsCharge = true
+        }
+    };
 
     /// <summary>
     /// 残額警告閾値が範囲内（20,000円）の場合、リポジトリに保存が試みられること

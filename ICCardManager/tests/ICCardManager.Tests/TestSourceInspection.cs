@@ -38,6 +38,92 @@ namespace ICCardManager.Tests;
 internal static class TestSourceInspection
 {
     /// <summary>
+    /// <c>#if DEBUG</c> ～ 対応する <c>#endif</c>（<c>#else</c> があればその手前まで）を
+    /// 取り除いたテキストを返す。Release ビルドに含まれるコードだけを検査したいときに使う。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// 用途は「本番の台帳へ届く経路か」を判定するガード（Issue #1975）。
+    /// <c>DebugDataService</c> のようにファイル全体が <c>#if DEBUG</c> のクラスは、
+    /// 本番ビルドに存在しないため規約の対象外にできる。
+    /// </para>
+    /// <para>
+    /// <c>#if</c> の入れ子は数える。<c>#if DEBUG</c> の内側の <c>#else</c> 節は
+    /// Release 側のコードなので<b>残す</b>（除去すると本番経路を見落とす）。
+    /// <c>#if !DEBUG</c> は Release 側なので対象にしない。
+    /// 行数は保存しない（行番号を報告する検査には使わないこと）。
+    /// </para>
+    /// </remarks>
+    public static string RemoveDebugOnlyRegions(string source)
+    {
+        if (source == null)
+        {
+            return string.Empty;
+        }
+
+        var result = new StringBuilder();
+        var depth = 0;              // #if DEBUG の内側にいる深さ（0 なら出力する）
+        var nestedIfDepth = 0;      // #if DEBUG の内側で開いた別の #if の深さ
+
+        foreach (var line in source.Replace("\r\n", "\n").Split('\n'))
+        {
+            var trimmed = line.TrimStart();
+
+            if (depth == 0)
+            {
+                if (IsDebugOnlyDirective(trimmed))
+                {
+                    depth = 1;
+                    nestedIfDepth = 0;
+                    continue;
+                }
+
+                result.Append(line).Append('\n');
+                continue;
+            }
+
+            if (trimmed.StartsWith("#if", StringComparison.Ordinal))
+            {
+                nestedIfDepth++;
+                continue;
+            }
+
+            if (trimmed.StartsWith("#endif", StringComparison.Ordinal))
+            {
+                if (nestedIfDepth > 0)
+                {
+                    nestedIfDepth--;
+                }
+                else
+                {
+                    depth = 0;
+                }
+
+                continue;
+            }
+
+            // #if DEBUG 直下の #else 以降は Release 側のコード。出力を再開する
+            if (nestedIfDepth == 0 && trimmed.StartsWith("#else", StringComparison.Ordinal))
+            {
+                depth = 0;
+                continue;
+            }
+        }
+
+        return result.ToString();
+    }
+
+    /// <summary>
+    /// <c>#if DEBUG</c>（および <c>#if (DEBUG)</c>）の開始ディレクティブか。
+    /// </summary>
+    /// <remarks>
+    /// <c>#if !DEBUG</c> / <c>#if DEBUG_FOO</c> のような別の記号は対象にしない
+    /// （語境界で照合する。前方一致だと Release 側のコードを消してしまう）。
+    /// </remarks>
+    private static bool IsDebugOnlyDirective(string trimmedLine)
+        => Regex.IsMatch(trimmedLine, @"^#if\s+\(?\s*DEBUG\s*\)?\s*$");
+
+    /// <summary>
     /// コメント（<c>//</c>・<c>/* */</c>）を除去し、文字列・文字リテラルの中身を
     /// 空にした「コードのみ」のテキストを返す。リテラルの引用符自体は残す。
     /// </summary>

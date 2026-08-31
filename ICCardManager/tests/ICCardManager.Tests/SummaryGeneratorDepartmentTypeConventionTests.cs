@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -43,10 +43,19 @@ namespace ICCardManager.Tests;
 /// （#1843「ガードは綴りではなく資源で書く」）。
 /// </para>
 /// <para>
-/// <b>本検査の対象外</b>: 静的な <c>SummaryGenerator.GetChargeSummary()</c>（引数なしの
-/// オーバーロード）は <c>DepartmentType.MayorOffice</c> をハードコードするが、現在の呼び出し元は
-/// <c>DebugDataService</c>（ファイル全体が <c>#if DEBUG</c>）のみで本番の台帳へは届かない。
-/// 本番から呼ぶ経路を新設するなら、<c>LendingService</c> と同じく部署種別を渡すオーバーロードを使うこと。
+/// <b>ガードは綴りではなく資源で書く</b>（Issue #1975 / #1843）。部署種別が台帳の摘要へ
+/// 届く経路は <c>new SummaryGenerator(…)</c> だけではない — 静的な
+/// <c>SummaryGenerator.GetChargeSummary(DepartmentType)</c> も同じ資源へ到達する。
+/// #1975 は引数なしのオーバーロード（<c>MayorOffice</c> をハードコード）を削除したが、
+/// <c>GetChargeSummary(DepartmentType.MayorOffice)</c> と書けば帰結は同じであり、
+/// <b>削除だけでは同じ欠陥への経路が残る</b>（#1814）。本検査は両方の受け手を走査し、
+/// いずれも「設定オブジェクト由来の部署種別か」で判定する。
+/// </para>
+/// <para>
+/// <b>走査は Release ビルドに含まれるコードに限る</b>。<c>DebugDataService</c> は
+/// ファイル全体が <c>#if DEBUG</c> で、本番の台帳へは届かない
+/// （<c>TestSourceInspection.RemoveDebugOnlyRegions</c> で除去してから照合する）。
+/// テストコードも対象外（走査対象は <c>src/</c> 配下のみ）。
 /// </para>
 /// </remarks>
 public class SummaryGeneratorDepartmentTypeConventionTests
@@ -64,10 +73,39 @@ public class SummaryGeneratorDepartmentTypeConventionTests
             RegexOptions.Compiled);
 
     /// <summary>
+    /// もう 1 つの受け手。静的な <c>GetChargeSummary(DepartmentType)</c> も
+    /// 同じ資源（チャージ摘要の部署種別）へ到達する（Issue #1975 / #1843）。
+    /// </summary>
+    private static readonly Regex ChargeSummaryPattern =
+        new Regex(@"(?<![A-Za-z0-9_])GetChargeSummary(?![A-Za-z0-9_])", RegexOptions.Compiled);
+
+    /// <summary>検査する受け手（名前は違反メッセージに載せる）</summary>
+    private static readonly (string Name, Regex Pattern)[] Receivers =
+    {
+        ("SummaryGenerator の生成", ConstructionPattern),
+        ("GetChargeSummary の呼び出し", ChargeSummaryPattern),
+    };
+
+    /// <summary>
     /// 設定オブジェクトから読んだ部署種別（<c>settings.DepartmentType</c> 等）であること。
     /// </summary>
     private static bool IsSettingsDerivedDepartmentType(string argument)
         => Regex.IsMatch(argument, @"\.DepartmentType$");
+
+    /// <summary>
+    /// 照合した箇所が「呼び出し」ではなく<b>メソッドの定義</b>か。
+    /// </summary>
+    /// <remarks>
+    /// <c>GetChargeSummary(DepartmentType departmentType)</c> のような定義は、仮引数が
+    /// 「型 名前」の 2 トークンになる。定義を違反に数えると、API を定義しているファイル
+    /// （<c>SummaryGenerator.cs</c>）自身が常に赤になり、ガードを黙らせる圧力が生まれる
+    /// （#1786「規約が推奨する方向の変更で赤くなると、修正者を対象から外す方向へ誘導する」）。
+    /// 定義かどうかは<b>形</b>で判定し、ファイル名で除外しない。
+    /// </remarks>
+    private static bool LooksLikeDeclaration(IReadOnlyList<string> arguments)
+        => arguments.Count > 0
+           && arguments.All(a =>
+               Regex.IsMatch(a.Trim(), @"^[\w<>\[\],\.\?]+\s+\w+(\s*=\s*.+)?$"));
 
     /// <summary>
     /// 1 ファイル分のソース（サニタイズ済み）を検査する。リポジトリ走査とサンプル固定が
@@ -78,40 +116,52 @@ public class SummaryGeneratorDepartmentTypeConventionTests
         var violations = new List<string>();
         var compliant = 0;
 
-        var constructions = TestSourceInspection
-            .ExtractInvocationArguments(codeOnlySource, ConstructionPattern)
-            .ToList();
+        // #if DEBUG のコードは Release ビルドに含まれず本番の台帳へ届かない
+        var releaseOnly = TestSourceInspection.RemoveDebugOnlyRegions(codeOnlySource);
 
-        // 抽出できなかった照合（`(` が続かない形＝オブジェクト初期化子など）は
-        // 「判定できない形」として違反に数える。読み飛ばすとガードが緑のまま無力化する
-        var matchCount = ConstructionPattern.Matches(codeOnlySource).Count;
-        for (var i = constructions.Count; i < matchCount; i++)
+        foreach (var (name, pattern) in Receivers)
         {
-            violations.Add("引数リストを解釈できない生成（オブジェクト初期化子など）");
-        }
+            var invocations = TestSourceInspection
+                .ExtractInvocationArguments(releaseOnly, pattern)
+                .ToList();
 
-        foreach (var (_, arguments) in constructions)
-        {
-            if (arguments.Count == 0)
+            // 抽出できなかった照合（`(` が続かない形＝オブジェクト初期化子・メソッド定義など）は
+            // 「判定できない形」として違反に数える。読み飛ばすとガードが緑のまま無力化する
+            var matchCount = pattern.Matches(releaseOnly).Count;
+            for (var i = invocations.Count; i < matchCount; i++)
             {
-                violations.Add("引数なしの生成（部署種別が既定値へ固定される）");
-                continue;
+                violations.Add($"{name}: 引数リストを解釈できない形（オブジェクト初期化子など）");
             }
 
-            if (!IsSettingsDerivedDepartmentType(arguments[0]))
+            foreach (var (_, arguments) in invocations)
             {
-                violations.Add($"第1引数 `{arguments[0]}` が設定から読んだ部署種別ではない");
-                continue;
-            }
+                if (LooksLikeDeclaration(arguments))
+                {
+                    // メソッド／コンストラクタの定義。呼び出しではないので対象外
+                    continue;
+                }
 
-            compliant++;
+                if (arguments.Count == 0)
+                {
+                    violations.Add($"{name}: 引数なし（部署種別が既定値へ固定される）");
+                    continue;
+                }
+
+                if (!IsSettingsDerivedDepartmentType(arguments[0]))
+                {
+                    violations.Add($"{name}: 第1引数 `{arguments[0]}` が設定から読んだ部署種別ではない");
+                    continue;
+                }
+
+                compliant++;
+            }
         }
 
         return (violations, compliant);
     }
 
     [Fact]
-    public void 摘要生成器の生成は設定から読んだ部署種別を渡すこと()
+    public void チャージ摘要の部署種別は設定から読んだ値を渡すこと()
     {
         var violations = new List<string>();
         var compliantHits = 0;
@@ -129,7 +179,7 @@ public class SummaryGeneratorDepartmentTypeConventionTests
 
         // 空振り検出: 検査対象が消えた／パターンが合わなくなった状態で緑にしない
         compliantHits.Should().BeGreaterOrEqualTo(
-            3, "正しい形（設定から読んだ部署種別を渡す生成）が実在すること" +
+            3, "正しい形（設定から読んだ部署種別を渡す生成・呼び出し）が実在すること" +
                "（App.xaml.cs の DI ファクトリ / CsvImportService / BusStopInputViewModel）");
     }
 
@@ -148,12 +198,26 @@ public class SummaryGeneratorDepartmentTypeConventionTests
     [InlineData("var g = new SummaryGenerator(DepartmentType.MayorOffice);", true)]
     // 違反: 引数リストを解釈できない形（fail-open にしない）
     [InlineData("var g = new SummaryGenerator { };", true)]
-    public void 検査は設定由来かどうかを区別すること(string code, bool expectedViolation)
+    // もう 1 つの受け手: 静的な GetChargeSummary も同じ資源へ到達する（Issue #1975 / #1843）
+    [InlineData("var s = SummaryGenerator.GetChargeSummary(settings.DepartmentType);", false)]
+    [InlineData("var s = SummaryGenerator.GetChargeSummary(DepartmentType.MayorOffice);", true)]
+    // 定義は呼び出しではない（API を定義するファイル自身が常に赤にならないこと）
+    [InlineData("public static string GetChargeSummary(DepartmentType departmentType) { return null; }", null)]
+    [InlineData("public SummaryGenerator(DepartmentType departmentType, OrganizationOptions options) { }", null)]
+    public void 検査は設定由来かどうかを区別すること(string code, bool? expectedViolation)
     {
         var (violations, compliant) = Analyze(TestSourceInspection.ToCodeOnly(code));
 
-        (violations.Count > 0).Should().Be(expectedViolation);
-        compliant.Should().Be(expectedViolation ? 0 : 1);
+        if (expectedViolation == null)
+        {
+            // 定義（呼び出しではない）: 違反にも適合にも数えない
+            violations.Should().BeEmpty();
+            compliant.Should().Be(0);
+            return;
+        }
+
+        (violations.Count > 0).Should().Be(expectedViolation.Value);
+        compliant.Should().Be(expectedViolation.Value ? 0 : 1);
     }
 
     /// <summary>
@@ -195,7 +259,7 @@ public class SummaryGeneratorDepartmentTypeConventionTests
             // 除去してから照合する（極性の反転を避ける。#1692）
             var source = TestSourceInspection.ToCodeOnly(File.ReadAllText(path));
 
-            if (!ConstructionPattern.IsMatch(source))
+            if (!Receivers.Any(r => r.Pattern.IsMatch(source)))
             {
                 continue;
             }
