@@ -2847,7 +2847,7 @@ public class ReportServiceTests : IDisposable
         aprilSheet.Cell(2, 12).GetValue<int>().Should().Be(5, "4月1ページ目はStartingPageNumber=5");
         aprilSheet.PageSetup.RowBreaks.Count.Should().BeGreaterThan(0, "4月は複数ページのため改ページあり");
 
-        var aprilLastPage = ReportService.GetLastPageNumberFromWorksheet(aprilSheet);
+        var aprilLastPage = ReportService.GetLastPageNumberFromWorksheet(aprilSheet, 12);
         aprilLastPage.Should().Be(6, "4月は2ページ: 5, 6");
 
         // 5月: 4月の最終ページ(6)+1=7 から開始
@@ -3002,7 +3002,7 @@ public class ReportServiceTests : IDisposable
             "行数が減る再生成では旧改ページをクリアして作り直す");
 
         // 最終ページ番号 = L2(5) + 改ページ0 = 5（修正前は残留改ページで 6 に膨らんだ）
-        ReportService.GetLastPageNumberFromWorksheet(aprilSheet).Should().Be(5,
+        ReportService.GetLastPageNumberFromWorksheet(aprilSheet, 12).Should().Be(5,
             "再生成後の実ページ数（1ページ）を反映する");
 
         // 5月の開始ページ番号 = 4月の最終ページ(5) + 1 = 6（修正前は 7 に飛んだ）

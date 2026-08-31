@@ -286,8 +286,10 @@ namespace ICCardManager.Services
             }
 
             // 印刷範囲を設定（A1からL列の最終行まで）
+            // Issue #1956: 帳票幅の定義は ReportService.TemplateLastColumn ただ 1 つに寄せる。
+            // 同じ幅を別々のリテラルで持つと、片方だけが変わる日が来る（#1763）。
             worksheet.PageSetup.PrintAreas.Clear();
-            worksheet.PageSetup.PrintAreas.Add(1, 1, lastRow, 12);
+            worksheet.PageSetup.PrintAreas.Add(1, 1, lastRow, ReportService.TemplateLastColumn);
         }
     }
 }
