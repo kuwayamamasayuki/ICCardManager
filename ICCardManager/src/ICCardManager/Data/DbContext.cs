@@ -186,6 +186,45 @@ namespace ICCardManager.Data
         public bool HasActiveTransactionScope => _activeTransactionCount > 0;
 
         /// <summary>
+        /// Issue #1984: 保守処理（<see cref="CleanupOldData"/>）が共有接続上でトランザクションを
+        /// 開いている間、セマフォを取らない <see cref="LeaseConnectionAsync"/> 経由の書き込みが
+        /// そのトランザクションへ暗黙参加しないよう新規リースを止めるゲート。
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// SQLite のトランザクションは接続単位で、<see cref="DbContext"/> はプロセス全体で
+        /// <see cref="SQLiteConnection"/> を 1 本しか持たない。したがって保守トランザクションが
+        /// 開いている間に <see cref="LeaseConnectionAsync"/> 経由の単文書き込み（
+        /// <c>LedgerRepository.InsertAsync</c> / <c>OperationLogRepository.InsertAsync</c> 等）が
+        /// 実行されると、その書き込みは保守トランザクションの内側に潜り込み、保守側が
+        /// SQLITE_BUSY 等でロールバックすると一緒に消える（Issue #1737 と同型）。
+        /// </para>
+        /// <para>
+        /// <b><see cref="_activeTransactionCount"/> へ載せない理由:</b> Issue #1984 の受け入れ条件は
+        /// 「保守トランザクションを <see cref="HasActiveTransactionScope"/> に反映すること」を挙げるが、
+        /// これは<b>害になる</b>。Repository の 3 分岐（Issue #1724）は
+        /// <see cref="HasActiveTransactionScope"/> が true のとき分岐②（<c>transaction: null</c> で
+        /// 接続だけ借りて外側スコープに commit/rollback を委ねる）を選ぶ。保守トランザクションは
+        /// その「外側スコープ」ではないため、②を選んだ複数文の書き込み（<c>ReplaceDetailsAsync</c> の
+        /// DELETE + INSERT 等）は commit の主体を失って autocommit で 1 文ずつ確定し、
+        /// 原子性が失われる。現在③（自前の <see cref="BeginTransactionAsync"/>）を通っている経路は
+        /// セマフォ待ちで既に安全なので、②へ倒す変更は保護を外す方向にしかならない。
+        /// よって計数は分けたうえで、危険な経路（セマフォを取らない <see cref="LeaseConnectionAsync"/>）
+        /// そのものを止める。
+        /// </para>
+        /// </remarks>
+        private readonly SemaphoreSlim _maintenanceTransactionGate = new SemaphoreSlim(1, 1);
+
+        /// <summary>
+        /// Issue #1984: 保守トランザクション（<see cref="CleanupOldData"/>）が開かれている間 true。
+        /// <see cref="HasActiveTransactionScope"/> とは別の計数であることが重要（理由は
+        /// <see cref="_maintenanceTransactionGate"/> の remarks）。
+        /// </summary>
+        internal bool HasActiveMaintenanceTransaction => Volatile.Read(ref _activeMaintenanceTransactionCount) > 0;
+
+        private int _activeMaintenanceTransactionCount;
+
+        /// <summary>
         /// Issue #1166: 接続一時停止フラグ。
         /// リストア中にバックグラウンドタスクが接続を再オープンすることを防止する。
         /// </summary>
@@ -489,6 +528,12 @@ namespace ICCardManager.Data
         /// バックグラウンドスレッドからの同期 DB アクセスには <see cref="LeaseConnection"/>（同期版）を使用すること。
         /// </para>
         /// <para>
+        /// <b>Issue #1984:</b> セマフォを取らないため、保守処理（<see cref="CleanupOldData"/>）が
+        /// 同一接続上で開いたトランザクションへ暗黙参加し得る。これを防ぐため、本メソッドは
+        /// <see cref="_maintenanceTransactionGate"/> を通過してからリースを払い出す
+        /// （保守トランザクションが開いている間は待機する）。
+        /// </para>
+        /// <para>
         /// <b>重要（Issue #1452）— 並列起動禁止:</b>
         /// 本メソッドはセマフォを取得しないため、複数のリポジトリ呼び出しを <c>Task.WhenAll</c> 等で
         /// 並列起動すると、同一の <see cref="SQLiteConnection"/> 上で <see cref="SQLiteCommand"/> が
@@ -505,13 +550,26 @@ namespace ICCardManager.Data
         ///     よって ViewModel 経路でも <c>Task.WhenAll</c> での並列起動は同様にリスクがある。
         /// </para>
         /// </remarks>
-        public virtual Task<ConnectionLease> LeaseConnectionAsync(CancellationToken ct = default)
+        public virtual async Task<ConnectionLease> LeaseConnectionAsync(CancellationToken ct = default)
         {
             ct.ThrowIfCancellationRequested();
 
-            // Issue #1809: 接続を取る前に計数する。取った後に増やすと、その隙間に SuspendConnections が
-            // 「進行中リース 0 件」と判定して接続を閉じ得る（_isSuspended の設定順と合わせて閉塞のない順序）。
-            Interlocked.Increment(ref _activeAsyncLeaseCount);
+            // Issue #1984: 保守トランザクション（CleanupOldData）が開いている間は新規リースを通さない。
+            // ゲートを保持したまま計数を増やすことで、保守側が「ゲートを閉じてから進行中リースの
+            // ドレインを待つ」だけで「もう誰も同一接続へ文を発行しない」ことを保証できる
+            // （ゲート通過後に計数するとその隙間が残る）。
+            await _maintenanceTransactionGate.WaitAsync(ct).ConfigureAwait(false);
+            try
+            {
+                // Issue #1809: 接続を取る前に計数する。取った後に増やすと、その隙間に SuspendConnections が
+                // 「進行中リース 0 件」と判定して接続を閉じ得る（_isSuspended の設定順と合わせて閉塞のない順序）。
+                Interlocked.Increment(ref _activeAsyncLeaseCount);
+            }
+            finally
+            {
+                _maintenanceTransactionGate.Release();
+            }
+
             SQLiteConnection connection;
             try
             {
@@ -523,8 +581,7 @@ namespace ICCardManager.Data
                 throw;
             }
 
-            var lease = new ConnectionLease(connection, () => Interlocked.Decrement(ref _activeAsyncLeaseCount));
-            return Task.FromResult(lease);
+            return new ConnectionLease(connection, () => Interlocked.Decrement(ref _activeAsyncLeaseCount));
         }
 
         /// <summary>
@@ -876,7 +933,17 @@ namespace ICCardManager.Data
                 // （volatile 書き込みの後ろへ後続の読み取りが追い越すと、双方が「相手はまだ」と判断して
                 // 接続の取得と Close が同時に成立し得る）。
                 Interlocked.MemoryBarrier();
-                WaitForAsyncLeasesToDrain();
+                if (!TryWaitForAsyncLeasesToDrain())
+                {
+                    // Issue #1716 と同じ判断: 障害調査で「進行中の読み取りを巻き込んだかもしれない」と
+                    // 分かる痕跡が要るため Warning（LogDebug は本番のログファイルに残らない）
+                    _logger?.LogWarning(
+                        "Issue #1809: 進行中の非同期リース {RemainingLeases} 件が {Timeout} 以内に解放されなかったため、" +
+                        "接続を閉じて一時停止を続行します。進行中の読み取りが失敗する可能性があります。{DatabasePath}",
+                        Volatile.Read(ref _activeAsyncLeaseCount),
+                        AsyncLeaseDrainTimeout,
+                        DatabasePath);
+                }
 
                 lock (_connectionLock)
                 {
@@ -899,25 +966,14 @@ namespace ICCardManager.Data
 
         /// <summary>
         /// Issue #1809: 進行中の <see cref="LeaseConnectionAsync"/> リースが解放されるまで待つ（上限付き）。
-        /// 上限に達した場合は警告ログを残して戻る（呼び出し元は従来どおり接続を閉じる）。
         /// </summary>
-        private void WaitForAsyncLeasesToDrain()
-        {
-            var timeout = AsyncLeaseDrainTimeout;
-            if (SpinWait.SpinUntil(() => Volatile.Read(ref _activeAsyncLeaseCount) == 0, timeout))
-            {
-                return;
-            }
-
-            // Issue #1716 と同じ判断: 障害調査で「進行中の読み取りを巻き込んだかもしれない」と
-            // 分かる痕跡が要るため Warning（LogDebug は本番のログファイルに残らない）
-            _logger?.LogWarning(
-                "Issue #1809: 進行中の非同期リース {RemainingLeases} 件が {Timeout} 以内に解放されなかったため、" +
-                "接続を閉じて一時停止を続行します。進行中の読み取りが失敗する可能性があります。{DatabasePath}",
-                Volatile.Read(ref _activeAsyncLeaseCount),
-                timeout,
-                DatabasePath);
-        }
+        /// <remarks>
+        /// Issue #1984: 呼び出し元によって「上限に達したとき何をすべきか」が異なるため、
+        /// ログはここで出さず結果だけを返す（一時停止は従来どおり続行、保守処理は当回をスキップ）。
+        /// </remarks>
+        /// <returns>進行中リースが 0 件になった場合 true、上限に達した場合 false</returns>
+        private bool TryWaitForAsyncLeasesToDrain()
+            => SpinWait.SpinUntil(() => Volatile.Read(ref _activeAsyncLeaseCount) == 0, AsyncLeaseDrainTimeout);
 
         /// <summary>
         /// Issue #1166: 接続の一時停止を解除する（ConnectionSuspensionScope.Disposeから呼び出される）
@@ -1329,6 +1385,82 @@ ON CONFLICT(key) DO UPDATE SET value = excluded.value";
             => Task.Run(CleanupOldData, cancellationToken);
 
         /// <summary>
+        /// Issue #1984: 保守トランザクションを開始できる状態にする。
+        /// ゲートを閉じて新規の <see cref="LeaseConnectionAsync"/> を止め、進行中のリースが
+        /// 解放されるまで待つ。
+        /// </summary>
+        /// <returns>
+        /// 保守トランザクションを開いてよい場合はガード（Dispose でゲートを開く）。
+        /// 進行中リースが <see cref="AsyncLeaseDrainTimeout"/> 以内に空にならなかった場合は null。
+        /// </returns>
+        private MaintenanceTransactionGuard TryBeginMaintenanceTransaction()
+        {
+            _maintenanceTransactionGate.Wait();
+            try
+            {
+                // ゲートの閉鎖（セマフォ取得）と進行中件数の読み取りが交差しないよう全順序バリアを置く
+                // （SuspendConnections と同じ理由）。
+                Interlocked.MemoryBarrier();
+                if (!TryWaitForAsyncLeasesToDrain())
+                {
+                    // Issue #1716 / #1730: 「なぜ古いデータが削除されなかったか」を障害調査で追えるよう
+                    // 本番のログファイルへ出力されるレベルで記録する（LogDebug は Release で出ない）。
+                    _logger?.LogWarning(
+                        "Issue #1984: 進行中の非同期リース {RemainingLeases} 件が {Timeout} 以内に解放されなかったため、" +
+                        "6年経過データの削除を今回はスキップしました（次回起動時に再試行します）。{DatabasePath}",
+                        Volatile.Read(ref _activeAsyncLeaseCount),
+                        AsyncLeaseDrainTimeout,
+                        DatabasePath);
+                    _maintenanceTransactionGate.Release();
+                    return null;
+                }
+
+                Interlocked.Increment(ref _activeMaintenanceTransactionCount);
+                return new MaintenanceTransactionGuard(this);
+            }
+            catch
+            {
+                _maintenanceTransactionGate.Release();
+                throw;
+            }
+        }
+
+        /// <summary>
+        /// Issue #1984: 保守トランザクションを開いた直後に呼ばれる割り込み点（既定は何もしない）。
+        /// </summary>
+        /// <remarks>
+        /// 巻き添えロールバックの回帰テストはスレッドを競争させず、この割り込み点を派生クラスで
+        /// 上書きして確定的に再現する（Issue #1919 と同じ作法）。
+        /// </remarks>
+        internal virtual void OnMaintenanceTransactionOpened()
+        {
+        }
+
+        /// <summary>
+        /// Issue #1984: 保守トランザクションの保持を表すガード。Dispose でゲートを開く。
+        /// </summary>
+        private sealed class MaintenanceTransactionGuard : IDisposable
+        {
+            private readonly DbContext _owner;
+            private bool _disposed;
+
+            internal MaintenanceTransactionGuard(DbContext owner) => _owner = owner;
+
+            public void Dispose()
+            {
+                if (_disposed)
+                {
+                    return;
+                }
+                _disposed = true;
+
+                Interlocked.Decrement(ref _owner._activeMaintenanceTransactionCount);
+                try { _owner._maintenanceTransactionGate.Release(); }
+                catch (ObjectDisposedException) { /* DbContext.Dispose() 後の解放 */ }
+            }
+        }
+
+        /// <summary>
         /// Issue #1170: CleanupOldDataの実体。両テーブルの削除を単一トランザクションで実行する。
         /// </summary>
         private (int LedgerCount, int OperationLogCount) CleanupOldDataInternal()
@@ -1336,9 +1468,24 @@ ON CONFLICT(key) DO UPDATE SET value = excluded.value";
             using var lease = LeaseConnection();
             var connection = lease.Connection;
 
+            // Issue #1984: 保守トランザクションを開く前に、セマフォを取らない LeaseConnectionAsync 経由の
+            // 書き込みを止めて進行中のリースを空にする。これをしないと、貸出・返却の台帳 INSERT や
+            // 操作ログの INSERT が同一接続上でこのトランザクションへ暗黙参加し、下の Rollback で
+            // 一緒に消える（UI は返却成功を表示済み。Issue #1737 と同型）。
+            using var maintenanceGuard = TryBeginMaintenanceTransaction();
+            if (maintenanceGuard == null)
+            {
+                // 進行中のリースが上限時間内に空にならなかった。ここで従来どおり続行すると
+                // 本 Issue が消そうとしている巻き添えロールバックの窓がそのまま残るため、
+                // 当回は削除せずに戻る（6 年経過データの削除は次回起動で改めて試行される）。
+                return (0, 0);
+            }
+
             using var transaction = connection.BeginTransaction();
             try
             {
+                OnMaintenanceTransactionOpened();
+
                 using var ledgerCommand = connection.CreateCommand();
                 ledgerCommand.Transaction = transaction;
                 ledgerCommand.CommandText = "DELETE FROM ledger WHERE date(date) < date('now', '-6 years', 'localtime')";
@@ -1541,16 +1688,10 @@ ON CONFLICT(key) DO UPDATE SET value = excluded.value";
             }, cancellationToken).ConfigureAwait(false);
         }
 
-        /// <summary>
-        /// トランザクションを開始（非推奨）
-        /// </summary>
-        [Obsolete("スレッドセーフな BeginTransactionAsync() を使用してください")]
-        public virtual SQLiteTransaction BeginTransaction()
-        {
-#pragma warning disable CS0618 // Obsolete
-            return GetConnection().BeginTransaction();
-#pragma warning restore CS0618
-        }
+        // Issue #1984: 非推奨の BeginTransaction()（GetConnection() から直接トランザクションを開く）を削除した。
+        // 呼び出し元は 1 つも無く、セマフォも _activeTransactionCount も通らないため、
+        // 復活すると本 Issue が塞いだ「計数に載らないトランザクション」がそのまま再生する。
+        // トランザクションは BeginTransactionAsync() から取ること。
 
         /// <summary>
         /// DB接続の疎通確認（IDatabaseInfo実装）
@@ -1890,6 +2031,7 @@ ON CONFLICT(key) DO UPDATE SET value = excluded.value";
                 {
                     _connection?.Dispose();
                     _semaphore?.Dispose();
+                    _maintenanceTransactionGate?.Dispose();
                 }
                 _disposed = true;
             }
