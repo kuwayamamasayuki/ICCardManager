@@ -1,6 +1,7 @@
 using System;
 using System.Data.SQLite;
 using System.Globalization;
+using ICCardManager.Common.Exceptions;
 
 namespace ICCardManager.Common
 {
@@ -87,8 +88,75 @@ namespace ICCardManager.Common
             => ToText(value.Date.AddDays(1).AddSeconds(-1));
 
         /// <summary>
-        /// TEXT 列の値を <see cref="DateTime"/> へ復元する。解析できない場合は例外。
+        /// DB の TEXT 列に入り得る書式（<see cref="ParseStored"/> / <see cref="TryParseStored"/> が受け付ける形）。
         /// </summary>
+        /// <remarks>
+        /// 本システムが書く <c>yyyy-MM-dd HH:mm:ss</c> のほか、SQLite の <c>date()</c> の戻り値
+        /// （<c>yyyy-MM-dd</c>）と、ISO 8601 の <c>T</c> 区切りを許容する。
+        /// </remarks>
+        private static readonly string[] StoredPatterns =
+        {
+            DateTimePattern,
+            "yyyy-MM-ddTHH:mm:ss",
+            "yyyy-MM-dd HH:mm",
+            DatePattern,
+        };
+
+        /// <summary>
+        /// DB の TEXT 列の値を <see cref="DateTime"/> へ復元する（<b>書式を限定した厳格版</b>）。
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// <b>DB から読んだ値は必ずこちらを使う。</b> 柔軟な <see cref="Parse(string)"/> は
+        /// <c>InvariantCulture</c> の一般規則で解釈するため、Issue #1985 の欠陥を実際に踏んだ環境が
+        /// 書き込んだ和暦テキスト <c>"08-09-01 13:05:07"</c> を <b>例外にせず 2001-08-09 として読む</b>
+        /// （invariant は <c>MM-dd-yy</c> と解釈する）。その値を再保存すると、6 年保存の台帳が
+        /// 「表示が狂っていただけの状態」から「実際に書き換わった状態」へ悪化する。
+        /// </para>
+        /// <para>
+        /// 厳格版は <c>yyyy</c> に 4 桁を要求する（実測）ため、同じテキストを<b>受け付けず</b>
+        /// <see cref="DatabaseException.InvalidStoredDate"/> を投げる。**壊れていることが分かる形で
+        /// 失敗させる**のが狙いで、黙って別の日付として読み替えるより望ましい
+        /// （development-conventions.md #1744「フォールバックが働いたことを呼び出し元が知れるか」）。
+        /// </para>
+        /// <para>
+        /// この選択は「壊れた台帳を持つ環境で履歴が開けなくなる」という代償を伴う。それでも読み替えを
+        /// 選ばないのは、読み替えた値を再保存すると<b>6 年保存の監査台帳が実際に書き換わる</b>ためで、
+        /// 復旧手段（バックアップからの復元）は文言で案内する。
+        /// </para>
+        /// <para>
+        /// CSV の利用者入力（<c>2026/09/01</c> 等）や <c>operation_log</c> の JSON
+        /// （<c>2026-09-01T13:05:07.1234567</c>）は書式が異なるため、それらは
+        /// <see cref="Parse(string)"/> / <see cref="TryParse(string, out DateTime)"/> を使う。
+        /// </para>
+        /// </remarks>
+        /// <exception cref="DatabaseException">
+        /// <paramref name="text"/> が <see cref="StoredPatterns"/> のいずれにも一致しない場合。
+        /// <see cref="AppException"/> 派生なので、捕捉漏れがあっても
+        /// 「予期しないエラー（SYS999）」ではなく整備済みの案内へ倒れる（#1757）。
+        /// </exception>
+        public static DateTime ParseStored(string text)
+            => TryParseStored(text, out var value)
+                ? value
+                : throw DatabaseException.InvalidStoredDate(text);
+
+        /// <summary>
+        /// DB の TEXT 列の値を <see cref="DateTime"/> へ復元する（厳格版）。
+        /// 解析できない場合は <c>false</c>。
+        /// </summary>
+        public static bool TryParseStored(string text, out DateTime value)
+            => DateTime.TryParseExact(
+                text, StoredPatterns, CultureInfo.InvariantCulture, DateTimeStyles.None, out value);
+
+        /// <summary>
+        /// ISO 8601 のテキストを <see cref="DateTime"/> へ復元する（書式を限定しない柔軟版）。
+        /// 解析できない場合は例外。
+        /// </summary>
+        /// <remarks>
+        /// 利用者が編集し得る CSV や、<c>JsonSerializer</c> が書いたラウンドトリップ書式のように
+        /// <see cref="StoredPatterns"/> に収まらない入力向け。
+        /// <b>DB の TEXT 列を読むときは <see cref="ParseStored"/> を使うこと</b>（理由はそちらの XML doc）。
+        /// </remarks>
         /// <exception cref="FormatException">
         /// <paramref name="text"/> が日時として解析できない場合。
         /// </exception>
@@ -96,7 +164,8 @@ namespace ICCardManager.Common
             => DateTime.Parse(text, CultureInfo.InvariantCulture, DateTimeStyles.None);
 
         /// <summary>
-        /// TEXT 列の値を <see cref="DateTime"/> へ復元する。解析できない場合は <c>false</c>。
+        /// ISO 8601 のテキストを <see cref="DateTime"/> へ復元する（柔軟版）。
+        /// 解析できない場合は <c>false</c>。
         /// </summary>
         public static bool TryParse(string text, out DateTime value)
             => DateTime.TryParse(text, CultureInfo.InvariantCulture, DateTimeStyles.None, out value);

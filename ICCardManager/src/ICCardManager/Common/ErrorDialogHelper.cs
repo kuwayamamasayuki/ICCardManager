@@ -7,6 +7,7 @@ using System.Security.AccessControl;
 using System.Security.Principal;
 using System.Windows;
 using ICCardManager.Common.Exceptions;
+using System.Globalization;
 
 namespace ICCardManager.Common
 {
@@ -205,11 +206,11 @@ namespace ICCardManager.Common
             {
                 EnsureLogDirectoryWithPermissions();
 
-                var logFileName = $"error_{DateTime.Now:yyyyMMdd}.log";
+                var logFileName = $"error_{DateTime.Now.ToString("yyyyMMdd", CultureInfo.InvariantCulture)}.log";
                 var logFilePath = Path.Combine(LogDirectory, logFileName);
 
                 var contextPart = string.IsNullOrWhiteSpace(context) ? string.Empty : $"({context}) ";
-                var logEntry = $"[{DateTime.Now:yyyy-MM-dd HH:mm:ss}] " +
+                var logEntry = $"[{DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture)}] " +
                               $"{(isFatal ? "FATAL" : "ERROR")} [{errorCode}] " +
                               contextPart +
                               $"{exception.GetType().Name}: {exception.Message}\n" +

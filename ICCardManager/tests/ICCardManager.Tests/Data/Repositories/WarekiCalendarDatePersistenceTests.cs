@@ -6,6 +6,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using FluentAssertions;
 using ICCardManager.Common;
+using ICCardManager.Common.Exceptions;
 using ICCardManager.Data;
 using ICCardManager.Data.Repositories;
 using ICCardManager.Infrastructure.Caching;
@@ -38,6 +39,7 @@ namespace ICCardManager.Tests.Data.Repositories;
 /// <c>0008-09-01 00:00:00</c> が保存されるため RED になる。
 /// </para>
 /// </remarks>
+[Collection(CurrentCultureCollection.Name)]
 public class WarekiCalendarDatePersistenceTests : IDisposable
 {
     private readonly DbContext _dbContext;
@@ -82,12 +84,8 @@ public class WarekiCalendarDatePersistenceTests : IDisposable
     {
         using (new JapaneseCalendarCultureScope())
         {
-            // 和暦カレンダーが実際に効いていること（前提そのものを表明する。
-            // 効いていなければこのテストは修正前のコードでも緑になる）
-            UseDate.ToString("yyyy-MM-dd").Should().Be("08-09-01",
-                "このテストの故障の起点は「既定カレンダーが和暦である」ことそのもの");
-
             await SeedMastersAsync();
+            AssertWarekiActive();
             await _ledgerRepository.InsertAsync(NewLedger());
 
             var stored = await ReadScalarAsync("SELECT date FROM ledger LIMIT 1");
@@ -110,6 +108,7 @@ public class WarekiCalendarDatePersistenceTests : IDisposable
         using (new JapaneseCalendarCultureScope())
         {
             await SeedMastersAsync();
+            AssertWarekiActive();
             await _cardRepository.UpdateLentStatusAsync(CardIdm, true, UseDate, StaffIdm);
 
             var stored = await ReadScalarAsync("SELECT last_lent_at FROM ic_card LIMIT 1");
@@ -131,8 +130,10 @@ public class WarekiCalendarDatePersistenceTests : IDisposable
         using (new JapaneseCalendarCultureScope())
         {
             await SeedMastersAsync();
+            AssertWarekiActive();
             await _ledgerRepository.InsertAsync(NewLedger());
 
+            AssertWarekiActive();
             var found = await _ledgerRepository.GetByDateRangeAsync(
                 CardIdm, new DateTime(2026, 9, 1), new DateTime(2026, 9, 30));
 
@@ -151,6 +152,7 @@ public class WarekiCalendarDatePersistenceTests : IDisposable
     {
         using (new JapaneseCalendarCultureScope())
         {
+            AssertWarekiActive();
             SqliteDateTimeFormat.ToText(UseDate).Should().Be("2026-09-01 13:05:07");
             SqliteDateTimeFormat.ToDateText(UseDate).Should().Be("2026-09-01");
             SqliteDateTimeFormat.ToMonthKey(UseDate).Should().Be("2026-09");
@@ -168,7 +170,127 @@ public class WarekiCalendarDatePersistenceTests : IDisposable
         }
     }
 
+    /// <summary>
+    /// 既に和暦で保存されてしまった値を、DB 読み取りが**別の日付へ静かに書き換えない**こと
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Issue #1985 のコードレビュー指摘。この修正は「これから書く値」を西暦に固定するが、
+    /// **修正前のビルドが既に書いた和暦テキスト**は DB に残る。柔軟な
+    /// <see cref="SqliteDateTimeFormat.Parse"/> は <c>InvariantCulture</c> の一般規則で
+    /// <c>"08-09-01 13:05:07"</c> を <c>MM-dd-yy</c> と解釈し、**例外にせず 2001-08-09 を返す**。
+    /// その値を再保存すると、6 年保存の台帳が「表示が狂っていただけ」から
+    /// 「実際に書き換わった」へ悪化する（#1814「修正の中に、修正対象と同じ欠陥への経路を残さない」）。
+    /// </para>
+    /// <para>
+    /// 対の表明として、柔軟版が実際に 2001 年を返すこと（＝厳格版が必要な理由）も固定する。
+    /// これが無いと、将来 <c>ParseStored</c> を <c>Parse</c> へ戻す変更が「同じことだ」と見なされる。
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public void 和暦で保存済みの値をDB読み取りが別の日付へ書き換えないこと()
+    {
+        const string CorruptedText = "08-09-01 13:05:07";
+
+        // 柔軟版は MM-dd-yy と解釈して 2001-08-09 を返す（厳格版が必要な理由）
+        SqliteDateTimeFormat.Parse(CorruptedText).Should().Be(new DateTime(2001, 8, 9, 13, 5, 7),
+            "InvariantCulture の一般規則ではこう読める。だから DB 読み取りに使ってはいけない");
+
+        // 厳格版は受け付けない（yyyy は 4 桁を要求する）
+        SqliteDateTimeFormat.TryParseStored(CorruptedText, out _).Should().BeFalse(
+            "和暦で壊れた値を別の日付へ静かに読み替えない");
+
+        // 失敗は AppException 派生で伝える。捕捉漏れがあっても
+        // 「予期しないエラー（SYS999）」ではなく整備済みの案内へ倒れる（#1757）
+        var act = () => SqliteDateTimeFormat.ParseStored(CorruptedText);
+        var thrown = act.Should().Throw<DatabaseException>().Which;
+        thrown.Should().BeAssignableTo<AppException>();
+        thrown.UserFriendlyMessage.Should().Contain(CorruptedText, "何が問題かを値で名指しする")
+            .And.Contain("2026-09-01", "正しい形式を例で示す（なぜ）")
+            .And.EndWith("してください。", "行動指示で終わる（どうすれば）");
+    }
+
+    /// <summary>
+    /// DB の TEXT 列に入り得ない書式を厳格版が受け付けないこと（対の表明）
+    /// </summary>
+    /// <remarks>
+    /// 厳格版が「何でも読める」なら、上のテストは <c>Parse</c> へ戻しても緑になる。
+    /// 逆に厳格すぎて正当な保存値（<c>date()</c> の戻り値である <c>yyyy-MM-dd</c>）を
+    /// 拒むと履歴が開けなくなるため、両側を固定する。
+    /// </remarks>
+    [Theory]
+    [InlineData("2026-09-01 13:05:07", true)]
+    [InlineData("2026-09-01", true)]
+    [InlineData("2026-09-01T13:05:07", true)]
+    [InlineData("09/01/2026", false)]
+    [InlineData("2026/09/01", false)]
+    [InlineData("令和8年9月1日", false)]
+    public void 厳格版が受け付ける書式をDBの保存形式に限ること(string text, bool expected)
+    {
+        SqliteDateTimeFormat.TryParseStored(text, out _).Should().Be(expected);
+    }
+
+    /// <summary>
+    /// カルチャの差し替えが <c>await</c> の継続へ引き継がれないこと（この環境の性質の固定）と、
+    /// スコープを抜けたら元へ戻ること
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Issue #1985 のコードレビュー指摘を実測した結果の記録。.NET Framework 4.6 以降は
+    /// <c>CultureInfo.CurrentCulture</c> が <c>ExecutionContext</c> で流れるとされるが、
+    /// <b>この環境では <c>await Task.Yield()</c> の継続でグレゴリオ暦へ戻る</b>。
+    /// <c>CultureInfo.DefaultThreadCurrentCulture</c> を併用しても、それは
+    /// <b>新しく作られるスレッドの既定</b>にしか効かず、既にプールにあるスレッドには効かない。
+    /// </para>
+    /// <para>
+    /// つまり「継続でも和暦である」ことは保証できない。だから本クラスは
+    /// <see cref="AssertWarekiActive"/> を <b>SUT を呼ぶ直前</b>に置き、前提が崩れたら
+    /// <b>緑のまま無力化するのではなく赤くなる</b>ようにしている
+    /// （testing.md #1961「模擬が SUT へ届いていることを対で表明する」）。
+    /// </para>
+    /// <para>
+    /// この事実をテストで固定しておくのは、将来ランタイムやターゲットが変わって
+    /// 継続にも引き継がれるようになったとき、<see cref="AssertWarekiActive"/> という
+    /// 予防措置の必要性を再検討できるようにするため。
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public async Task カルチャの差し替えがawaitの継続へ引き継がれないことと抜けたら戻ること()
+    {
+        Calendar calendarAfterAwait;
+
+        using (new JapaneseCalendarCultureScope())
+        {
+            AssertWarekiActive();
+
+            await Task.Yield();
+            calendarAfterAwait = CultureInfo.CurrentCulture.Calendar;
+        }
+
+        calendarAfterAwait.Should().NotBeOfType<JapaneseCalendar>(
+            "この環境では await の継続へ引き継がれない。だから SUT の直前で AssertWarekiActive する");
+
+        // 対の表明: スコープを抜けたら戻ること。戻らないと後続の約 6,200 件へ漏れる
+        CultureInfo.CurrentCulture.Calendar.Should().NotBeOfType<JapaneseCalendar>();
+        CultureInfo.DefaultThreadCurrentCulture?.Calendar.Should().NotBeOfType<JapaneseCalendar>();
+    }
+
     #region ヘルパー
+
+    /// <summary>
+    /// 和暦カレンダーが実際に効いていることを表明する（<b>SUT を呼ぶ直前</b>に置く）
+    /// </summary>
+    /// <remarks>
+    /// このテストの故障の起点は「既定カレンダーが和暦である」ことそのもの。効いていなければ
+    /// 修正前のコードでも緑になる＝検出力ゼロのテストになる。差し替えが <c>await</c> の継続へ
+    /// 引き継がれないこの環境では、スコープの入口で 1 回確かめるだけでは足りない。
+    /// </remarks>
+    private static void AssertWarekiActive()
+    {
+        UseDate.ToString("yyyy-MM-dd").Should().Be("08-09-01",
+            "既定カレンダーが和暦であることがこのテストの故障の起点。" +
+            "効いていなければ修正前のコードでも緑になる");
+    }
 
     private async Task SeedMastersAsync()
     {
@@ -211,24 +333,29 @@ public class WarekiCalendarDatePersistenceTests : IDisposable
     private sealed class JapaneseCalendarCultureScope : IDisposable
     {
         private readonly CultureInfo _previousCulture;
-        private readonly CultureInfo _previousUiCulture;
+        private readonly CultureInfo _previousDefaultCulture;
 
         public JapaneseCalendarCultureScope()
         {
-            _previousCulture = Thread.CurrentThread.CurrentCulture;
-            _previousUiCulture = Thread.CurrentThread.CurrentUICulture;
+            _previousCulture = CultureInfo.CurrentCulture;
+            _previousDefaultCulture = CultureInfo.DefaultThreadCurrentCulture;
 
             var culture = (CultureInfo)CultureInfo.GetCultureInfo("ja-JP").Clone();
             culture.DateTimeFormat.Calendar = new JapaneseCalendar();
 
-            Thread.CurrentThread.CurrentCulture = culture;
-            Thread.CurrentThread.CurrentUICulture = culture;
+            // スレッド既定も差し替える。実測すると、この環境では CurrentCulture の
+            // 差し替えが await の継続へ引き継がれない（await Task.Yield() の後に
+            // グレゴリオ暦へ戻る）ため、リポジトリ内部の await をまたいだ整形が
+            // 和暦にならず、修正前のコードでも緑になってしまう。
+            // プロセス全体へ漏れるので、本クラスは CurrentCultureCollection で直列化する。
+            CultureInfo.DefaultThreadCurrentCulture = culture;
+            CultureInfo.CurrentCulture = culture;
         }
 
         public void Dispose()
         {
-            Thread.CurrentThread.CurrentCulture = _previousCulture;
-            Thread.CurrentThread.CurrentUICulture = _previousUiCulture;
+            CultureInfo.DefaultThreadCurrentCulture = _previousDefaultCulture;
+            CultureInfo.CurrentCulture = _previousCulture;
         }
     }
 

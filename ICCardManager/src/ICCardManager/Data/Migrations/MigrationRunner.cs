@@ -134,7 +134,7 @@ namespace ICCardManager.Data.Migrations
                 {
                     Version = reader.GetInt32(0),
                     Description = reader.GetString(1),
-                    AppliedAt = SqliteDateTimeFormat.Parse(reader.GetString(2))
+                    AppliedAt = SqliteDateTimeFormat.ParseStored(reader.GetString(2))
                 });
             }
 

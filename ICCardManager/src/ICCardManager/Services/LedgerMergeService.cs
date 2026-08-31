@@ -117,7 +117,7 @@ namespace ICCardManager.Services
                 Id = Id,
                 CardIdm = CardIdm,
                 LenderIdm = LenderIdm,
-                Date = SqliteDateTimeFormat.Parse(DateText),
+                Date = SqliteDateTimeFormat.ParseStored(DateText),
                 Summary = Summary,
                 Income = Income,
                 Expense = Expense,
@@ -125,8 +125,8 @@ namespace ICCardManager.Services
                 StaffName = StaffName,
                 Note = Note,
                 ReturnerIdm = ReturnerIdm,
-                LentAt = string.IsNullOrEmpty(LentAtText) ? null : SqliteDateTimeFormat.Parse(LentAtText),
-                ReturnedAt = string.IsNullOrEmpty(ReturnedAtText) ? null : SqliteDateTimeFormat.Parse(ReturnedAtText),
+                LentAt = string.IsNullOrEmpty(LentAtText) ? null : SqliteDateTimeFormat.ParseStored(LentAtText),
+                ReturnedAt = string.IsNullOrEmpty(ReturnedAtText) ? null : SqliteDateTimeFormat.ParseStored(ReturnedAtText),
                 IsLentRecord = IsLentRecord,
                 CompanionCount = CompanionCount
             };

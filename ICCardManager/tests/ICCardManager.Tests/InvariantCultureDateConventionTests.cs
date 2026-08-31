@@ -144,6 +144,24 @@ public class InvariantCultureDateConventionTests
     [InlineData("var s = SqliteDateTimeFormat.ToText(d);", 0)]
     // 極性の反転: 「InvariantCulture を付け忘れないこと」と書いただけの文字列は適合にしない
     [InlineData("Log(\"CultureInfo.InvariantCulture を必ず指定すること\"); var s = d.ToString(\"yyyy-MM-dd\");", 1)]
+    // 違反: 補間文字列の書式ホール（string.Format 経由で CurrentCulture により整形される）
+    [InlineData("var s = $\"backup_{DateTime.Now:yyyyMMdd_HHmmss}.db\";", 1)]
+    [InlineData("var s = $\"{HistoryFromDate:yyyy年M月}\";", 1)]
+    // 違反: ILogger のメッセージテンプレートも同じ（補間ではないが string.Format 経由）
+    [InlineData("_logger.LogWarning(\"期間={From:yyyy-MM-dd}\", from);", 1)]
+    // 正常: 整形済みの文字列を渡す形
+    [InlineData("_logger.LogWarning(\"期間={From}\", SqliteDateTimeFormat.ToDateText(from));", 0)]
+    // 正常: 日付書式ではないホール（桁揃え・数値書式）
+    [InlineData("var s = $\"{count,5:N0}件\";", 0)]
+    // 正常: 三項演算子を含むブロックを補間ホールと誤検出しない
+    [InlineData("var f = new Func<int>(() => { return a?b:c; });", 0)]
+    // 違反: 取りこぼしていた書式（コードレビュー指摘）
+    [InlineData("var s = d.ToString(\"M月d日\");", 1)]
+    [InlineData("var s = d.ToString(\"MM/dd\");", 1)]
+    // 正常: 数値・金額・百分率の書式は現在カルチャで整形するのが正しい
+    [InlineData("var s = x.ToString(\"C\"); var t = y.ToString(\"P1\"); var u = z.ToString(\"#,##0.0\");", 0)]
+    // 違反: 引数リストの丸括弧が書式文字列の内側にある形でも取りこぼさない（fail-open の封じ）
+    [InlineData("var s = d.ToString(\"HH:mm (JST)\");", 1)]
     public void 検出ロジックがサンプル入力で期待どおり働くこと(string source, int expectedCount)
     {
         FindCultureSensitiveDateOperations(source).Should().HaveCount(expectedCount);
@@ -179,8 +197,35 @@ public class InvariantCultureDateConventionTests
             violations.Add((LineOf(commentStrippedSource, index), $"ToString({arguments[0]})"));
         }
 
-        foreach (var (index, arguments) in TestSourceInspection.ExtractInvocationArguments(
-                     commentStrippedSource, ParseInvocation))
+        // 単一引数の `.ToString("<日付書式>")` は丸括弧の対応を使わずに直接照合する。
+        // 引数リストの切り出しは、書式文字列そのものが丸括弧を含む形（`"HH:mm (JST)"`）で
+        // 深さの数え方が狂い、**閉じられなかった呼び出しは黙って読み飛ばされる**（fail-open）。
+        // この正規表現は `"` の内側を `[^"]*` で読むため、その形でも取りこぼさない。
+        foreach (Match match in SingleArgumentDateToString.Matches(commentStrippedSource))
+        {
+            var line = LineOf(commentStrippedSource, match.Index);
+            var detail = $"ToString({match.Groups["literal"].Value})";
+            if (!violations.Contains((line, detail)))
+            {
+                violations.Add((line, detail));
+            }
+        }
+
+        // 補間文字列の書式ホール（`$"{d:yyyyMMdd}"`）と、ILogger のメッセージテンプレート
+        // （`"期間={From:yyyy-MM-dd}"`）は `string.Format` 経由で **CurrentCulture** により
+        // 整形されるため、`.ToString` と同じ欠陥になる。呼び出しの形を取らないので
+        // 引数リストの走査では見えない（Issue #1985 のコードレビューで検出）。
+        foreach (Match match in DateFormatHole.Matches(commentStrippedSource))
+        {
+            violations.Add((LineOf(commentStrippedSource, match.Index),
+                $"補間書式 {{…:{match.Groups["fmt"].Value}}}"));
+        }
+
+        var parseMatches = ParseInvocation.Matches(commentStrippedSource).Count;
+        var parseInvocations = TestSourceInspection.ExtractInvocationArguments(
+            commentStrippedSource, ParseInvocation);
+
+        foreach (var (index, arguments) in parseInvocations)
         {
             if (arguments.Any(a => a.Contains("CultureInfo") || a.Contains("FormatProvider")))
             {
@@ -188,6 +233,15 @@ public class InvariantCultureDateConventionTests
             }
 
             violations.Add((LineOf(commentStrippedSource, index), "CultureInfo 非指定の日付解析"));
+        }
+
+        // 引数リストを切り出せなかった照合は **違反として報告する**。
+        // `ExtractInvocationArguments` は丸括弧が閉じない呼び出しを `continue` で読み飛ばすため、
+        // 絞り込みを fail-open のままにするとガードは緑のまま無力化する（#1944 / #1975）。
+        if (parseInvocations.Count < parseMatches)
+        {
+            violations.Add((0,
+                $"日付解析の引数リストを切り出せなかった照合が {parseMatches - parseInvocations.Count} 件ある"));
         }
 
         return violations.OrderBy(v => v.Item1).ToList();
@@ -217,8 +271,30 @@ public class InvariantCultureDateConventionTests
         return DateFormatIdentifier.IsMatch(argument);
     }
 
+    /// <summary>日付・時刻の書式と判定する部分文字列</summary>
+    /// <remarks>
+    /// <c>yyyy</c> だけでは <c>"MM/dd"</c> / <c>"M月d日"</c> / <c>"yy"</c> / <c>"ddd"</c> を取りこぼす
+    /// （Issue #1985 のコードレビューで検出）。数値・金額の書式（<c>"N0"</c> / <c>"C"</c> / <c>"P1"</c>）に
+    /// 一致しないことは <c>検出ロジックがサンプル入力で期待どおり働くこと</c> が固定する。
+    /// </remarks>
     private static readonly Regex DateFormatLiteral = new(
-        @"yyyy|HH:mm|HHmmss|MMMM|dddd", RegexOptions.Compiled);
+        @"yy|MMM|ddd|MMMM|dddd|HH|mm:ss|M月|d日|MM[/-]dd|dd[/-]MM", RegexOptions.Compiled);
+
+    /// <summary>単一引数の <c>.ToString("&lt;日付書式&gt;")</c>（丸括弧の対応に依存しない照合）</summary>
+    private static readonly Regex SingleArgumentDateToString = new(
+        @"\.ToString\(\s*(?<literal>""[^""]*(?:yy|MMM|ddd|HH|mm:ss|M月|d日|MM[/-]dd|dd[/-]MM)[^""]*"")\s*\)",
+        RegexOptions.Compiled);
+
+    /// <summary>
+    /// 補間文字列・<c>ILogger</c> テンプレートの日付書式ホール（<c>{d:yyyyMMdd}</c>）
+    /// </summary>
+    /// <remarks>
+    /// 識別子と <c>:</c> の間に空白を許さないことで、三項演算子を含むブロック
+    /// （<c>{ a ? b : c }</c>）を誤検出しない。
+    /// </remarks>
+    private static readonly Regex DateFormatHole = new(
+        @"\{[A-Za-z_][\w.?\[\]()]*(?:,\s*-?\d+)?:(?<fmt>[^}""]*(?:yyyy|yy|MMM|ddd|HH|mm:ss|M月|d日|MM[/-]dd|dd[/-]MM)[^}""]*)\}",
+        RegexOptions.Compiled);
 
     private static readonly Regex DateFormatIdentifier = new(
         @"^[\w.]*(DateTimePattern|DatePattern|MonthPattern|TimestampFormat|DateFormat)$",

@@ -12,6 +12,7 @@ using ICCardManager.Infrastructure.Timing;
 using ICCardManager.Models;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using System.Globalization;
 
 namespace ICCardManager.Services
 {
@@ -617,17 +618,17 @@ namespace ICCardManager.Services
         {
             if (lentAt > now)
             {
-                return $"貸出日時に未来の日時（{lentAt:yyyy/MM/dd HH:mm}）が指定されています。" +
-                       $"カードを持ち出した日時が現在時刻（{now:yyyy/MM/dd HH:mm}）より後になることはありません。" +
+                return $"貸出日時に未来の日時（{lentAt.ToString("yyyy/MM/dd HH:mm", CultureInfo.InvariantCulture)}）が指定されています。" +
+                       $"カードを持ち出した日時が現在時刻（{now.ToString("yyyy/MM/dd HH:mm", CultureInfo.InvariantCulture)}）より後になることはありません。" +
                        "現在時刻以前の日時を入力してください。";
             }
 
             if (latestLedgerDate.HasValue && lentAt < latestLedgerDate.Value)
             {
-                return $"貸出日時（{lentAt:yyyy/MM/dd HH:mm}）が、このカードの直近の履歴の日付" +
-                       $"（{latestLedgerDate.Value:yyyy/MM/dd HH:mm}）より前です。" +
+                return $"貸出日時（{lentAt.ToString("yyyy/MM/dd HH:mm", CultureInfo.InvariantCulture)}）が、このカードの直近の履歴の日付" +
+                       $"（{latestLedgerDate.Value.ToString("yyyy/MM/dd HH:mm", CultureInfo.InvariantCulture)}）より前です。" +
                        "貸出中の記録が履歴の途中に入ると、残額の並びが実際と食い違って表示されます。" +
-                       $"{latestLedgerDate.Value:yyyy/MM/dd HH:mm} 以降の日時を入力してください。";
+                       $"{latestLedgerDate.Value.ToString("yyyy/MM/dd HH:mm", CultureInfo.InvariantCulture)} 以降の日時を入力してください。";
             }
 
             return null;

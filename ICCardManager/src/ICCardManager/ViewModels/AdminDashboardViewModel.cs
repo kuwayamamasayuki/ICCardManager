@@ -13,6 +13,7 @@ using ICCardManager.Common.Charting;
 using ICCardManager.Dtos;
 using ICCardManager.Services;
 using Microsoft.Win32;
+using System.Globalization;
 
 namespace ICCardManager.ViewModels
 {
@@ -512,7 +513,7 @@ namespace ICCardManager.ViewModels
                     RenderUsageChart(Analytics);
                     RenderBalanceChart(Analytics);
 
-                    SetStatus($"{AnalysisMonths}か月分（{fromDate:yyyy/MM}〜{toDate:yyyy/MM}）を集計しました", false);
+                    SetStatus($"{AnalysisMonths}か月分（{fromDate.ToString("yyyy/MM", CultureInfo.InvariantCulture)}〜{toDate.ToString("yyyy/MM", CultureInfo.InvariantCulture)}）を集計しました", false);
                 }
                 catch (Exception ex)
                 {
@@ -955,7 +956,7 @@ namespace ICCardManager.ViewModels
             {
                 Filter = "Excel ファイル (*.xlsx)|*.xlsx",
                 DefaultExt = ".xlsx",
-                FileName = $"管理者ダッシュボード_{DateTime.Now:yyyyMMdd_HHmmss}.xlsx"
+                FileName = $"管理者ダッシュボード_{DateTime.Now.ToString("yyyyMMdd_HHmmss", CultureInfo.InvariantCulture)}.xlsx"
             };
 
             if (dialog.ShowDialog() != true)

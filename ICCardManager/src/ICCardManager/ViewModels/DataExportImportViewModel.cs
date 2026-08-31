@@ -1090,8 +1090,8 @@ public partial class DataExportImportViewModel : ViewModelBase
         {
             DataType.Cards => $"cards_{timestamp}.csv",
             DataType.Staff => $"staff_{timestamp}.csv",
-            DataType.Ledgers => $"ledgers_{ExportStartDate:yyyyMMdd}_{ExportEndDate:yyyyMMdd}.csv",
-            DataType.LedgerDetails => $"ledger_details_{ExportStartDate:yyyyMMdd}_{ExportEndDate:yyyyMMdd}.csv",
+            DataType.Ledgers => $"ledgers_{ExportStartDate.ToString("yyyyMMdd", CultureInfo.InvariantCulture)}_{ExportEndDate.ToString("yyyyMMdd", CultureInfo.InvariantCulture)}.csv",
+            DataType.LedgerDetails => $"ledger_details_{ExportStartDate.ToString("yyyyMMdd", CultureInfo.InvariantCulture)}_{ExportEndDate.ToString("yyyyMMdd", CultureInfo.InvariantCulture)}.csv",
             _ => $"export_{timestamp}.csv"
         };
     }

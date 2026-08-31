@@ -8,6 +8,7 @@ using System.IO;
 using System.Text;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using System.Globalization;
 
 namespace ICCardManager.Infrastructure.Logging
 {
@@ -168,7 +169,7 @@ namespace ICCardManager.Infrastructure.Logging
             _lastDropReportTime = now;
 
             // 自己レポートを書き込む（このメッセージはキューを通さず直接ファイルへ）
-            var report = $"{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff} [WARN] [FileLogger] " +
+            var report = $"{DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss.fff", CultureInfo.InvariantCulture)} [WARN] [FileLogger] " +
                          $"Issue #1173: ログキュー溢れにより直近 {increment} 件のログメッセージが破棄されました " +
                          $"(累計: {currentDropped} 件、キャパシティ: {LogQueueCapacity})";
             WriteToFile(report);
@@ -205,7 +206,7 @@ namespace ICCardManager.Infrastructure.Logging
                 _currentLogDate = today;
                 _currentLogFilePath = Path.Combine(
                     _logDirectory,
-                    $"ICCardManager_{today:yyyyMMdd}.log");
+                    $"ICCardManager_{today.ToString("yyyyMMdd", CultureInfo.InvariantCulture)}.log");
 
                 // ファイルサイズチェック（既存ファイルの場合）
                 CheckFileSize();
@@ -337,7 +338,7 @@ namespace ICCardManager.Infrastructure.Logging
                 var unreported = totalDropped - _lastReportedDroppedCount;
                 if (unreported > 0 && Options.Enabled)
                 {
-                    var report = $"{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff} [WARN] [FileLogger] " +
+                    var report = $"{DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss.fff", CultureInfo.InvariantCulture)} [WARN] [FileLogger] " +
                                  $"Issue #1173: シャットダウン時、未レポートだった {unreported} 件のログドロップがありました " +
                                  $"(累計: {totalDropped} 件)";
                     WriteToFile(report);

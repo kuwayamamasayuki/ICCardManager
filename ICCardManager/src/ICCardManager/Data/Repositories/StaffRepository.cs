@@ -315,7 +315,7 @@ WHERE staff_idm = @staffIdm AND is_deleted = 1";
                 Number = reader.IsDBNull(2) ? null : reader.GetString(2),
                 Note = reader.IsDBNull(3) ? null : reader.GetString(3),
                 IsDeleted = reader.GetInt32(4) == 1,
-                DeletedAt = reader.IsDBNull(5) ? null : SqliteDateTimeFormat.Parse(reader.GetString(5))
+                DeletedAt = reader.IsDBNull(5) ? null : SqliteDateTimeFormat.ParseStored(reader.GetString(5))
             };
         }
     }

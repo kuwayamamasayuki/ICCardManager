@@ -55,8 +55,8 @@ ORDER BY DATE(date) ASC,
             }
             // 日付範囲フィルタリング: 時刻を含むデータに対応
             // fromDate: その日の00:00:00から、toDate: その日の23:59:59まで
-            command.Parameters.AddWithValue("@fromDate", SqliteDateTimeFormat.ToText(fromDate.Date));
-            command.Parameters.AddWithValue("@toDate", SqliteDateTimeFormat.ToText(toDate.Date.AddDays(1).AddSeconds(-1)));
+            command.Parameters.AddWithValue("@fromDate", SqliteDateTimeFormat.ToDayStartText(fromDate));
+            command.Parameters.AddWithValue("@toDate", SqliteDateTimeFormat.ToDayEndText(toDate));
 
             using var reader = await command.ExecuteReaderAsync();
             while (await reader.ReadAsync())
@@ -893,7 +893,7 @@ GROUP BY card_idm";
             using var reader = await command.ExecuteReaderAsync().ConfigureAwait(false);
             while (await reader.ReadAsync().ConfigureAwait(false))
             {
-                result[reader.GetString(0)] = SqliteDateTimeFormat.Parse(reader.GetString(1));
+                result[reader.GetString(0)] = SqliteDateTimeFormat.ParseStored(reader.GetString(1));
             }
 
             return result;
@@ -934,7 +934,7 @@ GROUP BY card_idm";
                     UsageCount = reader.GetInt32(2),
                     TotalExpense = reader.GetInt32(3),
                     TotalIncome = reader.GetInt32(4),
-                    LastUsageDate = reader.IsDBNull(5) ? (DateTime?)null : SqliteDateTimeFormat.Parse(reader.GetString(5))
+                    LastUsageDate = reader.IsDBNull(5) ? (DateTime?)null : SqliteDateTimeFormat.ParseStored(reader.GetString(5))
                 });
             }
 
@@ -1078,7 +1078,7 @@ WHERE l.date < @beforeDate
   )
 ORDER BY l.card_idm, l.date, l.id";
 
-                command.Parameters.AddWithValue("@beforeDate", SqliteDateTimeFormat.ToText(beforeDate.Date));
+                command.Parameters.AddWithValue("@beforeDate", SqliteDateTimeFormat.ToDayStartText(beforeDate));
 
                 using var reader = await command.ExecuteReaderAsync().ConfigureAwait(false);
                 while (await reader.ReadAsync().ConfigureAwait(false))
@@ -1121,8 +1121,8 @@ ORDER BY l.card_idm, l.date, l.id";
         /// </remarks>
         private static void AddDateRangeParameters(SQLiteCommand command, DateTime fromDate, DateTime toDate)
         {
-            command.Parameters.AddWithValue("@fromDate", SqliteDateTimeFormat.ToText(fromDate.Date));
-            command.Parameters.AddWithValue("@toDate", SqliteDateTimeFormat.ToText(toDate.Date.AddDays(1).AddSeconds(-1)));
+            command.Parameters.AddWithValue("@fromDate", SqliteDateTimeFormat.ToDayStartText(fromDate));
+            command.Parameters.AddWithValue("@toDate", SqliteDateTimeFormat.ToDayEndText(toDate));
         }
 
         /// <inheritdoc/>
@@ -1174,7 +1174,7 @@ LIMIT 100";
                 DateTime? lastUsedDate = null;
                 if (!reader.IsDBNull(2))
                 {
-                    if (SqliteDateTimeFormat.TryParse(reader.GetString(2), out var parsed))
+                    if (SqliteDateTimeFormat.TryParseStored(reader.GetString(2), out var parsed))
                     {
                         lastUsedDate = parsed;
                     }
@@ -1330,8 +1330,8 @@ FROM ledger
                 countCommand.Parameters.AddWithValue("@cardIdm", cardIdm);
             }
             // 日付範囲フィルタリング: 時刻を含むデータに対応
-            countCommand.Parameters.AddWithValue("@fromDate", SqliteDateTimeFormat.ToText(fromDate.Date));
-            countCommand.Parameters.AddWithValue("@toDate", SqliteDateTimeFormat.ToText(toDate.Date.AddDays(1).AddSeconds(-1)));
+            countCommand.Parameters.AddWithValue("@fromDate", SqliteDateTimeFormat.ToDayStartText(fromDate));
+            countCommand.Parameters.AddWithValue("@toDate", SqliteDateTimeFormat.ToDayEndText(toDate));
 
             var totalCount = Convert.ToInt32(await countCommand.ExecuteScalarAsync());
 
@@ -1374,8 +1374,8 @@ ORDER BY DATE(l.date) ASC,
                 command.Parameters.AddWithValue("@cardIdm", cardIdm);
             }
             // 日付範囲フィルタリング: 時刻を含むデータに対応
-            command.Parameters.AddWithValue("@fromDate", SqliteDateTimeFormat.ToText(fromDate.Date));
-            command.Parameters.AddWithValue("@toDate", SqliteDateTimeFormat.ToText(toDate.Date.AddDays(1).AddSeconds(-1)));
+            command.Parameters.AddWithValue("@fromDate", SqliteDateTimeFormat.ToDayStartText(fromDate));
+            command.Parameters.AddWithValue("@toDate", SqliteDateTimeFormat.ToDayEndText(toDate));
             command.Parameters.AddWithValue("@pageSize", pageSize);
             command.Parameters.AddWithValue("@offset", offset);
 
@@ -1499,7 +1499,7 @@ ORDER BY ledger_id, use_date ASC, is_charge DESC, is_point_redemption DESC, rowi
                 Id = reader.GetInt32(0),
                 CardIdm = reader.GetString(1),
                 LenderIdm = reader.IsDBNull(2) ? null : reader.GetString(2),
-                Date = SqliteDateTimeFormat.Parse(reader.GetString(3)),
+                Date = SqliteDateTimeFormat.ParseStored(reader.GetString(3)),
                 Summary = reader.GetString(4),
                 Income = reader.GetInt32(5),
                 Expense = reader.GetInt32(6),
@@ -1507,8 +1507,8 @@ ORDER BY ledger_id, use_date ASC, is_charge DESC, is_point_redemption DESC, rowi
                 StaffName = reader.IsDBNull(8) ? null : reader.GetString(8),
                 Note = reader.IsDBNull(9) ? null : reader.GetString(9),
                 ReturnerIdm = reader.IsDBNull(10) ? null : reader.GetString(10),
-                LentAt = reader.IsDBNull(11) ? null : SqliteDateTimeFormat.Parse(reader.GetString(11)),
-                ReturnedAt = reader.IsDBNull(12) ? null : SqliteDateTimeFormat.Parse(reader.GetString(12)),
+                LentAt = reader.IsDBNull(11) ? null : SqliteDateTimeFormat.ParseStored(reader.GetString(11)),
+                ReturnedAt = reader.IsDBNull(12) ? null : SqliteDateTimeFormat.ParseStored(reader.GetString(12)),
                 IsLentRecord = reader.GetInt32(13) == 1,
                 CompanionCount = reader.GetInt32(14)
             };
@@ -1524,7 +1524,7 @@ ORDER BY ledger_id, use_date ASC, is_charge DESC, is_point_redemption DESC, rowi
                 Id = reader.GetInt32(0),
                 CardIdm = reader.GetString(1),
                 LenderIdm = reader.IsDBNull(2) ? null : reader.GetString(2),
-                Date = SqliteDateTimeFormat.Parse(reader.GetString(3)),
+                Date = SqliteDateTimeFormat.ParseStored(reader.GetString(3)),
                 Summary = reader.GetString(4),
                 Income = reader.GetInt32(5),
                 Expense = reader.GetInt32(6),
@@ -1532,8 +1532,8 @@ ORDER BY ledger_id, use_date ASC, is_charge DESC, is_point_redemption DESC, rowi
                 StaffName = reader.IsDBNull(8) ? null : reader.GetString(8),
                 Note = reader.IsDBNull(9) ? null : reader.GetString(9),
                 ReturnerIdm = reader.IsDBNull(10) ? null : reader.GetString(10),
-                LentAt = reader.IsDBNull(11) ? null : SqliteDateTimeFormat.Parse(reader.GetString(11)),
-                ReturnedAt = reader.IsDBNull(12) ? null : SqliteDateTimeFormat.Parse(reader.GetString(12)),
+                LentAt = reader.IsDBNull(11) ? null : SqliteDateTimeFormat.ParseStored(reader.GetString(11)),
+                ReturnedAt = reader.IsDBNull(12) ? null : SqliteDateTimeFormat.ParseStored(reader.GetString(12)),
                 IsLentRecord = reader.GetInt32(13) == 1,
                 CompanionCount = reader.GetInt32(14),
                 DetailCount = reader.GetInt32(15)
@@ -1552,7 +1552,7 @@ ORDER BY ledger_id, use_date ASC, is_charge DESC, is_point_redemption DESC, rowi
             return new LedgerDetail
             {
                 LedgerId = reader.GetInt32(0),
-                UseDate = reader.IsDBNull(1) ? null : SqliteDateTimeFormat.Parse(reader.GetString(1)),
+                UseDate = reader.IsDBNull(1) ? null : SqliteDateTimeFormat.ParseStored(reader.GetString(1)),
                 EntryStation = reader.IsDBNull(2) ? null : reader.GetString(2),
                 ExitStation = reader.IsDBNull(3) ? null : reader.GetString(3),
                 BusStops = reader.IsDBNull(4) ? null : reader.GetString(4),
@@ -1584,12 +1584,12 @@ INNER JOIN ledger l ON d.ledger_id = l.id
 WHERE l.card_idm = @cardIdm AND l.date >= @fromDate";
 
             command.Parameters.AddWithValue("@cardIdm", cardIdm);
-            command.Parameters.AddWithValue("@fromDate", SqliteDateTimeFormat.ToText(fromDate.Date));
+            command.Parameters.AddWithValue("@fromDate", SqliteDateTimeFormat.ToDayStartText(fromDate));
 
             using var reader = await command.ExecuteReaderAsync();
             while (await reader.ReadAsync())
             {
-                var useDate = reader.IsDBNull(0) ? (DateTime?)null : SqliteDateTimeFormat.Parse(reader.GetString(0));
+                var useDate = reader.IsDBNull(0) ? (DateTime?)null : SqliteDateTimeFormat.ParseStored(reader.GetString(0));
                 var balance = reader.IsDBNull(1) ? (int?)null : reader.GetInt32(1);
                 var isCharge = reader.GetInt32(2) == 1;
                 result.Add((useDate, balance, isCharge));
@@ -1633,7 +1633,7 @@ WHERE card_idm IN ({string.Join(", ", parameters)})";
             while (await reader.ReadAsync())
             {
                 var cardIdm = reader.GetString(0);
-                var date = SqliteDateTimeFormat.Parse(reader.GetString(1));
+                var date = SqliteDateTimeFormat.ParseStored(reader.GetString(1));
                 var summary = reader.GetString(2);
                 var income = reader.GetInt32(3);
                 var expense = reader.GetInt32(4);
@@ -2028,7 +2028,7 @@ VALUES (@mergedAt, @targetLedgerId, @description, @undoData)";
             {
                 result.Add((
                     reader.GetInt32(0),
-                    SqliteDateTimeFormat.Parse(reader.GetString(1)),
+                    SqliteDateTimeFormat.ParseStored(reader.GetString(1)),
                     reader.GetInt32(2),
                     reader.GetString(3),
                     reader.GetString(4),
@@ -2096,8 +2096,8 @@ WHERE l.date BETWEEN @fromDate AND @toDate
 ORDER BY l.card_idm, l.date, l.id,
          d.use_date ASC, d.is_charge DESC, d.is_point_redemption DESC, d.rowid DESC";
 
-            command.Parameters.AddWithValue("@fromDate", SqliteDateTimeFormat.ToText(fromDate.Date));
-            command.Parameters.AddWithValue("@toDate", SqliteDateTimeFormat.ToText(toDate.Date.AddDays(1).AddSeconds(-1)));
+            command.Parameters.AddWithValue("@fromDate", SqliteDateTimeFormat.ToDayStartText(fromDate));
+            command.Parameters.AddWithValue("@toDate", SqliteDateTimeFormat.ToDayEndText(toDate));
 
             using var reader = await command.ExecuteReaderAsync();
             while (await reader.ReadAsync())
@@ -2127,7 +2127,7 @@ WHERE card_idm = @cardIdm
             var result = await command.ExecuteScalarAsync();
             if (result != null && result != DBNull.Value)
             {
-                return SqliteDateTimeFormat.Parse((string)result);
+                return SqliteDateTimeFormat.ParseStored((string)result);
             }
 
             return null;

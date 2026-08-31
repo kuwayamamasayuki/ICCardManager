@@ -23,6 +23,7 @@ using ICCardManager.Services;
 using ICCardManager.Views.Helpers;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using System.Globalization;
 
 
 namespace ICCardManager.ViewModels;
@@ -2082,9 +2083,13 @@ public partial class MainViewModel : ViewModelBase
                     // 障害調査で必要なのはカードの特定であり、管理番号があれば足りる。
                     _logger?.LogWarning(
                         "履歴ページのクランプが {ClampCount} 回連続で発生したため、1 ページ目へ戻して取得を確定します。" +
-                        "カード={CardIdm}（管理番号={CardNumber}） 期間={From:yyyy-MM-dd}～{To:yyyy-MM-dd} 総件数={TotalCount}",
+                        // 日付は ILogger の書式指定子（CurrentCulture で整形される）ではなく
+                        // 整形済みの文字列を渡す。和暦カレンダーが既定の環境で年が和暦になり、
+                        // DB に入っている値と突き合わせられなくなるため（Issue #1985）。
+                        "カード={CardIdm}（管理番号={CardNumber}） 期間={From}～{To} 総件数={TotalCount}",
                         clampCount, IdmMasker.Mask(HistoryCard.CardIdm), HistoryCard.CardNumber,
-                        HistoryFromDate, HistoryToDate, totalCount);
+                        SqliteDateTimeFormat.ToDateText(HistoryFromDate),
+                        SqliteDateTimeFormat.ToDateText(HistoryToDate), totalCount);
 
                     HistoryCurrentPage = 1;
                     (rawLedgers, totalCount) = await _ledgerRepository.GetPagedAsync(
@@ -2268,7 +2273,7 @@ public partial class MainViewModel : ViewModelBase
     /// </summary>
     private void UpdateHistoryPeriodDisplay()
     {
-        HistoryPeriodDisplay = $"{HistoryFromDate:yyyy年M月}";
+        HistoryPeriodDisplay = $"{HistoryFromDate.ToString("yyyy年M月", CultureInfo.InvariantCulture)}";
     }
 
     #region 履歴期間選択コマンド
@@ -3291,8 +3296,8 @@ public partial class MainViewModel : ViewModelBase
     {
         // 初回は「1回」を省き、繰り返してから回数と最終発生時刻を出す（コードレビュー指摘）
         var occurrence = count <= 1
-            ? $"{lastOccurredAt:HH:mm}"
-            : $"{count}回、最終 {lastOccurredAt:HH:mm}";
+            ? $"{lastOccurredAt.ToString("HH:mm", CultureInfo.InvariantCulture)}"
+            : $"{count}回、最終 {lastOccurredAt.ToString("HH:mm", CultureInfo.InvariantCulture)}";
         return $"⚠️ カードリーダーエラー（{occurrence}）: {reason} " +
                "続く場合はカードリーダーを抜き差しし、それでも直らなければアプリを再起動してください。";
     }

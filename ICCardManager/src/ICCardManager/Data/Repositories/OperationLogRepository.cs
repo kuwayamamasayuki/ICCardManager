@@ -407,7 +407,7 @@ ORDER BY timestamp ASC, id ASC";
             return new OperationLog
             {
                 Id = reader.GetInt32(0),
-                Timestamp = SqliteDateTimeFormat.Parse(reader.GetString(1)),
+                Timestamp = SqliteDateTimeFormat.ParseStored(reader.GetString(1)),
                 OperatorIdm = reader.GetString(2),
                 OperatorName = reader.GetString(3),
                 TargetTable = reader.IsDBNull(4) ? null : reader.GetString(4),

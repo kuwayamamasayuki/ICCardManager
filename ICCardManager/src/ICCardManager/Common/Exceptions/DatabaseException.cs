@@ -108,6 +108,37 @@ namespace ICCardManager.Common.Exceptions
         }
 
         /// <summary>
+        /// TEXT 列の日付が保存形式（西暦の ISO 8601）ではない（Issue #1985）
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// 既定カレンダーが和暦のロケールで動いた過去のビルドが書いた値
+        /// （<c>08-09-01 13:05:07</c> のような和暦年）を検出したときに投げる。
+        /// </para>
+        /// <para>
+        /// <b>黙って読み替えない理由</b>: 柔軟な解析（<c>DateTime.Parse</c> ＋ <c>InvariantCulture</c>）は
+        /// この値を <c>MM-dd-yy</c> と解釈して <b>2001-08-09 を返し、例外にならない</b>。
+        /// その値を再保存すると、6 年保存の台帳が「表示が狂っていただけの状態」から
+        /// 「実際に書き換わった状態」へ悪化する。壊れていることが分かる形で失敗させる
+        /// （development-conventions.md #1744「フォールバックが働いたことを呼び出し元が知れるか」）。
+        /// </para>
+        /// </remarks>
+        public static DatabaseException InvalidStoredDate(string storedText, Exception innerException = null)
+        {
+            var message = $"Stored date is not in ISO 8601 Gregorian form: {storedText}";
+            var userMessage =
+                $"保存されている日付「{storedText}」を読み取れませんでした。" +
+                "西暦4桁のISO 8601形式（例: 2026-09-01 13:05:07）で保存されているべき値が、" +
+                "別の形式（和暦年など）になっています。" +
+                "システム管理画面（F6）からバックアップの復元を検討し、管理者に連絡してください。";
+            const string errorCode = "DB008";
+
+            return innerException != null
+                ? new DatabaseException(message, userMessage, errorCode, innerException)
+                : new DatabaseException(message, userMessage, errorCode);
+        }
+
+        /// <summary>
         /// エンティティ種別を日本語表示名に変換
         /// </summary>
         private static string GetEntityDisplayName(string entityType)

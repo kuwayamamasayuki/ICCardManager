@@ -168,7 +168,7 @@ namespace ICCardManager.Services
                 var cardIdm = kvp.Key.CardIdm;
                 var date = kvp.Key.Date;
                 var detailRows = kvp.Value;
-                var dateStr = date == DateTime.MinValue ? "" : $" ({date:yyyy-MM-dd})";
+                var dateStr = date == DateTime.MinValue ? "" : $" ({date.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)})";
 
                 // Issue #937: カード名も表示する
                 var cardDisplayName = cardNameMap.TryGetValue(cardIdm, out var newDetailCardName) && !string.IsNullOrEmpty(newDetailCardName)

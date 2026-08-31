@@ -293,7 +293,7 @@ WHERE settings.value IS NULL OR substr(settings.value, 1, 7) <> @currentMonth";
 
             // 最終VACUUM実行日
             var lastVacuumDate = Get(KeyLastVacuumDate);
-            if (SqliteDateTimeFormat.TryParse(lastVacuumDate, out var date))
+            if (SqliteDateTimeFormat.TryParseStored(lastVacuumDate, out var date))
             {
                 settings.LastVacuumDate = date;
             }
@@ -404,7 +404,7 @@ WHERE settings.value IS NULL OR substr(settings.value, 1, 7) <> @currentMonth";
 
             // 最終VACUUM実行日
             var lastVacuumDate = await GetAsync(KeyLastVacuumDate);
-            if (SqliteDateTimeFormat.TryParse(lastVacuumDate, out var date))
+            if (SqliteDateTimeFormat.TryParseStored(lastVacuumDate, out var date))
             {
                 settings.LastVacuumDate = date;
             }
