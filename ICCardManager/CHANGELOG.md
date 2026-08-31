@@ -3,6 +3,14 @@
 ### Unreleased
 
 **修正**
+- Issue #1961 **`BackupServiceUiThreadGuardTests` の自動バックアップテストが CI で間欠的に失敗する**問題を是正した。UI スレッドの模擬を「テスト本体のスレッドの `ManagedThreadId` と一致するか」で行っていたため、`await` で解放されたそのスレッドをスレッドプールが SUT の `Task.Run` に再利用すると**オフロード先が UI と判定され**、`DbContext.LeaseConnection` の UI スレッドガード（#1281）が発火して `ExecuteAutoBackupAsync` が `null` を返していた。
+  - **調査で逆向きの欠陥が判明した — このテストは本物の退行を一度も検出できていなかった**。`ExecuteAutoBackupAsync` は `ResolveBackupFolderAsync`（内部で `PathValidator.ValidateBackupPathAsync` の `Task.Run` を `ConfigureAwait(false)` で await。#1746）を通るため**継続が必ずスレッドプールへ移り**、後続の `Task.Run(BackupDatabaseTo)` を丸ごと削除しても既存 7 件が緑になることを実測した。「たまたま赤い」の裏に「常に緑で何も守っていない」が同居していた形。
+  - **模擬をスレッドプール外の専用スレッドへ移した**（`Tests/Infrastructure/SimulatedUiThread`）。`Task.Run` は専用スレッドを実行先に選べないため、`ManagedThreadId` の一致は原理的に起こり得ない。専用スレッドは SUT の Task が完了するまで生かす（終了すると ID が別スレッドへ再利用され得るため）。フックは `AsyncLocal` なので、専用スレッド上で設定した値は SUT とその `Task.Run` の子孫へ流れる一方、**テスト本体のコンテキストへは戻らない**（他テストへの漏れが構造的に起きない）。
+  - **検出力を回復させた**。`ResolveBackupFolderAsync` を完了済み Task へ差し替えると `await` の継続が同期的に進み、呼び出し元＝UI スレッドに留まる。これは Issue #1361 が対象としていた「設定のキャッシュヒットで UI スレッドに留まる」経路そのもので、差し替えは本番と乖離した状況の捏造ではない。
+  - **`null` の理由を CI のログから切り分けられるようにした**。`ExecuteAutoBackupAsync` は失敗を例外ではなく `null` 戻り値で表す（#1737）ため、UI スレッドガードの発火・I/O 失敗・権限失敗がすべて `null` に畳まれる。`NullLogger` は**サービスが記録した理由まで一緒に捨てていた**。記録用の `Tests/Infrastructure/RecordingLogger` へ置き換え、アサーションメッセージへ載せる。
+  - 検証: **+1 件**（`ExecuteAutoBackupAsync_オフロード先までUIと判定するとnullを返しガードの例外が記録されること`）。**模擬そのものが生きていることの対の表明**で、これが無いと模擬を丸ごと外した（＝何も検査していない）実装でも上のテストが緑になる。`null` の理由が UI スレッドガードであることまでログで固定し、I/O 失敗との取り違えを防ぐ。単体 6,122→6,123 件・合計 6,148→6,149 件。
+  - **検出力は実測した**。`ExecuteAutoBackupAsync` のオフロード除去で 1 件・`CreateBackupAsync` / `RestoreFromBackupAsync` のオフロード除去で 2 件・模擬を届けない変異で対の表明 1 件が、それぞれ赤になることを確認した。
+  - 本番コードの変更はない（テストと設計書のみ。#1961）
 - Issue #1960 **統合 SET 句の規約テストが、波括弧を含む SQL リテラルで抽出範囲を静かに誤る**欠陥を是正した（テストのみの変更。製品挙動に影響しない）。`LedgerMergeUpdateColumnConventionTests` は SQL そのものを検査するためリテラルを残したまま `TestSourceInspection.ExtractMethodBody` へ渡していたが、このメソッドは `ToCodeOnly` 済みの入力を前提に**波括弧の対応**で本体を切り出す実装で、その前提が呼び出し側から見えない状態だった。
   - **1 つのリテラルでガードが別の場所を見る**。`LedgerRepository.cs` に既にある補間 SQL（`WHERE ledger_id IN ({string.Join(", ", paramNames)})`）や正規表現リテラルが検査対象メソッドへ入るだけで、抽出範囲が隣のメソッドまで伸びる。実測では**「列の集合」を見るテストは緑のまま**で対の表明だけが落ちるため、見当違いの箇所を検査していることに気付けない（#1786）。
   - **共有ヘルパーへ `ExtractMethodBodyPreservingLiterals` を新設した**。リテラル（`"…"` / `@"…"` / `$"…"` / `$@"…"` / `'…'`）を読み飛ばしながら波括弧を数える。私的コピーは増やさない（#1764）。コメント除去と改行の正規化はヘルパーが自ら行う — 「呼び出し側がサニタイズしてから渡す」契約は、前提が崩れていることが見えない形を再生産する。
