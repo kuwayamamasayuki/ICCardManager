@@ -1714,11 +1714,12 @@ ON CONFLICT(key) DO UPDATE SET value = excluded.value";
         // 復活すると本 Issue が塞いだ「計数に載らないトランザクション」がそのまま再生する。
         // トランザクションは BeginTransactionAsync() から取ること。
         //
-        // ただし GetConnection()（同じく非推奨・本番の呼び出し元ゼロ・テストのみ 10 か所）は残っており、
+        // ただし GetConnection()（同じく非推奨・本番の呼び出し元ゼロ・テストのみ 9 か所 / 4 ファイル）は残っており、
         // GetConnection().BeginTransaction() と書けば同じ抜け道が再現する。つまり
         // 「計数に載らない取得口」は本 Issue で 1 つ減っただけで、ゼロにはなっていない。
-        // 撤去にはテスト 5 ファイルの移行（LeaseConnection() はセマフォを取るため、
-        // 生の接続を長く保持するテストは書き換えが要る）が伴い、本 Issue の範囲を超えるため見送った。
+        // 撤去にはテスト 4 ファイルの移行（LeaseConnection() はセマフォを取るため、
+        // 生の接続を長く保持するテストは書き換えが要る）が伴い、本 Issue の範囲を超えるため
+        // Issue #1988 で追跡する。
 
         /// <summary>
         /// DB接続の疎通確認（IDatabaseInfo実装）
