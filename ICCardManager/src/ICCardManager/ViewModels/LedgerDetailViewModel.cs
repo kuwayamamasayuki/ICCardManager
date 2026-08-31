@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Linq;
@@ -584,6 +584,12 @@ namespace ICCardManager.ViewModels
 
             try
             {
+                // Issue #1979: 監査ログ用の「変更前」は、明細の書き換えより前に別インスタンスとして
+                // 採る（#1959）。下の Select は item.Detail（＝ _ledger.Details と同一インスタンス）を
+                // そのまま返して GroupId を書き換えるため、あとから採ると「変更前」が変更後の値を写す。
+                // 同じ理由で _ledger.Details は差し替え不要（同一インスタンスが編集結果を持つ）。
+                var beforeLedger = LedgerCloner.Clone(_ledger);
+
                 // 詳細のGroupIdを更新
                 var updatedDetails = Items.Select(item =>
                 {
@@ -614,16 +620,6 @@ namespace ICCardManager.ViewModels
                 var newSummary = _summaryGenerator.Generate(updatedDetails);
                 if (!string.IsNullOrEmpty(newSummary) && newSummary != _ledger.Summary)
                 {
-                    // 更新前の状態を保存
-                    var beforeLedger = new Ledger
-                    {
-                        Id = _ledger.Id,
-                        CardIdm = _ledger.CardIdm,
-                        Summary = _ledger.Summary,
-                        Date = _ledger.Date,
-                        Balance = _ledger.Balance
-                    };
-
                     _ledger.Summary = newSummary;
 
                     // Issue #1458: 操作ログを記録する場合は Ledger UPDATE と監査ログ INSERT を同一トランザクションで実行

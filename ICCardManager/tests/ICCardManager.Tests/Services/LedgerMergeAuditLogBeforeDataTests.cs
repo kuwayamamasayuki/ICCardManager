@@ -1,4 +1,4 @@
-using FluentAssertions;
+﻿using FluentAssertions;
 using ICCardManager.Data;
 using ICCardManager.Data.Repositories;
 using ICCardManager.Infrastructure.Caching;
@@ -299,4 +299,79 @@ public class LedgerMergeAuditLogBeforeDataTests : IDisposable
         source.GetProperty("Details")[0].GetProperty("BusStops").ValueKind
             .Should().Be(JsonValueKind.Null, "統合元のバス停名も統合前は未入力であるべき");
     }
+    /// <summary>
+    /// Issue #1979: <c>AfterData</c> の明細が統合対象の<b>全件</b>であること。
+    /// </summary>
+    /// <remarks>
+    /// 統合先（<c>ledgers[0]</c>）の in-memory の <c>Details</c> は自分の分しか持たず、
+    /// <c>MergeLedgersAsync</c> は DB 側で <c>ledger_detail.ledger_id</c> を付け替えるだけなので、
+    /// <c>target.Details</c> を差し替えないと監査ログだけが「1 件のまま」になる。
+    /// #1959 は BeforeData を正確にしたが、対側（AfterData）の粗さは残っていた。
+    /// </remarks>
+    [Fact]
+    public async Task MergeAsync_AfterDataの明細が統合対象の全件を記録すること()
+    {
+        var (targetId, _, log) = await ArrangeMergeAsync();
+
+        var merged = await _ledgerRepository.GetByIdAsync(targetId);
+        merged.Details.Should().HaveCount(2, "前提: DB では明細が統合先へ集約されている");
+
+        After(log).GetProperty("Details").GetArrayLength().Should().Be(
+            merged.Details.Count,
+            "監査ログの明細件数が DB と食い違うと、操作ログ画面・Excel が実際には起きていない" +
+            "件数の推移（2件・1件 → 1件）を主張する");
+    }
+
+    /// <summary>
+    /// Issue #1979: <c>AfterData</c> の明細に、摘要再生成のための一時再採番が残らないこと。
+    /// </summary>
+    /// <remarks>
+    /// <c>MergeAsync</c> は <c>SummaryGenerator.Generate</c> へ渡すために <c>SequenceNumber</c> を
+    /// 1..N へ振り直す。この変更は DB へ永続化されない（rowid 由来）ため、戻さずに JSON 化すると
+    /// 「順序3 → 順序1」という DB に存在しない変更が 6 年保存の監査記録へ入る。
+    /// </remarks>
+    [Fact]
+    public async Task MergeAsync_AfterDataの明細のSequenceNumberがDBと一致すること()
+    {
+        var (targetId, _, log) = await ArrangeMergeAsync();
+
+        var merged = await _ledgerRepository.GetByIdAsync(targetId);
+
+        // 件数や値の集合ではなく「どの明細がどの順序番号を持つか」の対応で表明する。
+        // 集合で比べると、2 件の明細が 1..N へ振り直されて順序番号を入れ替えただけの
+        // 状態が「一致」と判定され、検出力がゼロになる（実測で確認）。
+        var expected = merged.Details.ToDictionary(d => d.Amount!.Value, d => d.SequenceNumber);
+
+        var actual = After(log).GetProperty("Details")
+            .EnumerateArray()
+            .ToDictionary(
+                d => d.GetProperty("Amount").GetInt32(),
+                d => d.GetProperty("SequenceNumber").GetInt32());
+
+        actual.Should().Equal(expected,
+            "一時再採番（1..N）が残ると、監査ログが DB に存在しない順序の変更を主張する");
+    }
+
+    /// <summary>
+    /// 対の表明: <c>AfterData</c> の明細にはバス停名の同期結果が反映されていること。
+    /// </summary>
+    /// <remarks>
+    /// 件数と順序だけを揃えた実装（明細の内容を統合前のまま記録する形）はここで赤になる。
+    /// </remarks>
+    [Fact]
+    public async Task MergeAsync_AfterDataの明細に同期後のバス停名が入ること()
+    {
+        var (_, _, log) = await ArrangeMergeAsync();
+
+        var busStops = After(log).GetProperty("Details")
+            .EnumerateArray()
+            .Select(d => d.GetProperty("BusStops").GetString())
+            .ToList();
+
+        busStops.Should().NotContainNulls(
+            "統合は各 Ledger の摘要からバス停名を Detail へ書き戻す（#983）。" +
+            "その結果が AfterData に無いと、監査から書き戻しを確認できない");
+        busStops.Should().Contain("天神").And.Contain("博多駅前");
+    }
 }
+

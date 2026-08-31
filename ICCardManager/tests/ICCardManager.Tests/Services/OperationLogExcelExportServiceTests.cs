@@ -1,6 +1,7 @@
-using System.IO;
+﻿using System.IO;
 using ClosedXML.Excel;
 using FluentAssertions;
+using ICCardManager.Common;
 using ICCardManager.Models;
 using ICCardManager.Services;
 using Xunit;
@@ -684,6 +685,153 @@ public class OperationLogExcelExportServiceTests : IDisposable
         // INSERT行の変更後データは通常テキストであること
         var afterCell = worksheet.Cell(2, 8);
         afterCell.Value.ToString().Should().Contain("田中太郎");
+    }
+
+    #endregion
+
+    #region 利用明細（Issue #1979）
+
+    // Issue #1979: GetFieldNameMap の "ledger" に Details が無く、6 年保存の BeforeData /
+    // AfterData に値があるのに操作ログ画面・Excel からは明細が一切見えなかった。
+    // 表明は「実際に出力された文字列」で行い、あわせて明細を持たない台帳で余計な行が
+    // 出ないことを対で固定する（後者が無いと、常に「利用明細: 0件」を出す実装でも緑になる）。
+
+    private const string RailDetailJson =
+        @"{""UseDate"":""2026-02-06T00:00:00"",""EntryStation"":""博多"",""ExitStation"":""天神"","
+        + @"""BusStops"":null,""Amount"":210,""Balance"":790,""IsCharge"":false,"
+        + @"""IsPointRedemption"":false,""IsBus"":false,""GroupId"":null,""SequenceNumber"":3}";
+
+    private const string BusDetailJson =
+        @"{""UseDate"":""2026-02-06T00:00:00"",""EntryStation"":null,""ExitStation"":null,"
+        + @"""BusStops"":""天神日銀前"",""Amount"":190,""Balance"":600,""IsCharge"":false,"
+        + @"""IsPointRedemption"":false,""IsBus"":true,""GroupId"":null,""SequenceNumber"":2}";
+
+    private const string BusDetailWithoutStopsJson =
+        @"{""UseDate"":""2026-02-06T00:00:00"",""EntryStation"":null,""ExitStation"":null,"
+        + @"""BusStops"":null,""Amount"":190,""Balance"":600,""IsCharge"":false,"
+        + @"""IsPointRedemption"":false,""IsBus"":true,""GroupId"":null,""SequenceNumber"":2}";
+
+    private static string LedgerJson(string detailsJson) =>
+        @"{""Id"":42,""CardIdm"":""AAAA"",""Date"":""2026-02-06"",""Summary"":""鉄道（博多～天神）"","
+        + @"""Income"":0,""Expense"":400,""Balance"":600,""StaffName"":""田中太郎"",""Note"":"""","
+        + $@"""CompanionCount"":0,""Details"":{detailsJson}}}";
+
+    [Fact]
+    public void FormatJsonToReadable_Ledger_利用明細が件数と番号付きで展開されること()
+    {
+        var json = LedgerJson($"[{RailDetailJson},{BusDetailJson}]");
+
+        var result = OperationLogExcelExportService.FormatJsonToReadable("ledger", json);
+
+        result.Should().Contain("利用明細: 2件\n"
+            + "  1. 2026/02/06 博多～天神 210円 残790円（順序3）\n"
+            + $"  2. 2026/02/06 {SummaryGenerator.FormatBusSummary("天神日銀前")} 190円 残600円（順序2）");
+    }
+
+    [Theory]
+    [InlineData("[]")]
+    [InlineData("null")]
+    public void FormatJsonToReadable_Ledger_明細を持たない台帳では利用明細の行が出ないこと(string detailsJson)
+    {
+        var json = LedgerJson(detailsJson);
+
+        var result = OperationLogExcelExportService.FormatJsonToReadable("ledger", json);
+
+        result.Should().NotContain("利用明細");
+        result.Should().Contain("摘要: 鉄道（博多～天神）", "他の項目は従来どおり出力されること");
+    }
+
+    [Fact]
+    public void FormatJsonArrayToReadable_Ledger_統合元ごとに利用明細が展開されること()
+    {
+        var jsonArray = $"[{LedgerJson($"[{RailDetailJson}]")},{LedgerJson($"[{BusDetailJson}]")}]";
+
+        var result = OperationLogExcelExportService.FormatJsonArrayToReadable("ledger", jsonArray);
+
+        // 配列の各要素は 2 文字字下げされるため、明細行はさらに 2 文字下げる
+        result.Should().Contain("  利用明細: 1件\n    1. 2026/02/06 博多～天神 210円 残790円（順序3）");
+        result.Should().Contain($"    1. 2026/02/06 {SummaryGenerator.FormatBusSummary("天神日銀前")} 190円 残600円（順序2）");
+    }
+
+    [Fact]
+    public void GetChangeSummary_Ledger_バス停名の書き戻しが明細の差分として出ること()
+    {
+        var before = LedgerJson($"[{RailDetailJson},{BusDetailWithoutStopsJson}]");
+        var after = LedgerJson($"[{RailDetailJson},{BusDetailJson}]");
+
+        var result = OperationLogExcelExportService.GetChangeSummary("ledger", before, after);
+
+        result.Should().Contain("利用明細[2]: ");
+        result.Should().Contain("天神日銀前");
+        result.Should().NotContain("利用明細[1]", "変化していない明細は並べないこと");
+    }
+
+    [Fact]
+    public void GetChangeSummary_Ledger_明細が変わらなければ利用明細の行が出ないこと()
+    {
+        var json = LedgerJson($"[{RailDetailJson},{BusDetailJson}]");
+
+        var result = OperationLogExcelExportService.GetChangeSummary("ledger", json, json);
+
+        result.Should().NotContain("利用明細");
+    }
+
+    [Fact]
+    public void GetChangedFields_Ledger_明細の変化がハイライト対象になること()
+    {
+        var before = LedgerJson($"[{RailDetailJson},{BusDetailWithoutStopsJson}]");
+        var after = LedgerJson($"[{RailDetailJson},{BusDetailJson}]");
+
+        OperationLogExcelExportService.GetChangedFields("ledger", before, after)
+            .Should().Contain("Details");
+
+        // 対の表明: 明細が同じならハイライトしない
+        OperationLogExcelExportService.GetChangedFields("ledger", after, after)
+            .Should().NotContain("Details");
+    }
+
+    [Fact]
+    public void GetChangedFields_Ledger_展開の上限を超えた明細の変化も検出すること()
+    {
+        // Issue #1979: 判定を展開ブロック（20 件で打ち切る）の文字列比較で書くと、
+        // 21 件目以降だけが変わった台帳は「変更内容」列（全件を突き合わせる）には出るのに
+        // ハイライトが付かない、という食い違いが生まれる（#1763）。
+        var many = string.Join(",", Enumerable.Repeat(RailDetailJson,
+            OperationLogDetailFormatter.MaxExpandedDetailLines));
+        var before = LedgerJson($"[{many},{BusDetailWithoutStopsJson}]");
+        var after = LedgerJson($"[{many},{BusDetailJson}]");
+
+        OperationLogExcelExportService.GetChangedFields("ledger", before, after)
+            .Should().Contain("Details");
+
+        OperationLogExcelExportService.GetChangeSummary("ledger", before, after)
+            .Should().Contain($"利用明細[{OperationLogDetailFormatter.MaxExpandedDetailLines + 1}]: ",
+                "「変更内容」列とハイライトは同じ判定に載るべき");
+    }
+
+    [Fact]
+    public async Task ExportAsync_統合ログのセルに利用明細が出力されること()
+    {
+        var filePath = Path.Combine(_testDirectory, "merge.xlsx");
+        var log = new OperationLog
+        {
+            Id = 1,
+            Timestamp = new DateTime(2026, 2, 6, 10, 0, 0),
+            Action = "MERGE",
+            TargetTable = "ledger",
+            TargetId = "42",
+            OperatorName = "テスト管理者",
+            BeforeData = $"[{LedgerJson($"[{RailDetailJson}]")},{LedgerJson($"[{BusDetailWithoutStopsJson}]")}]",
+            AfterData = LedgerJson($"[{RailDetailJson},{BusDetailJson}]")
+        };
+
+        await _service.ExportAsync(new[] { log }, filePath);
+
+        using var workbook = new XLWorkbook(filePath);
+        var worksheet = workbook.Worksheet(1);
+        worksheet.Cell(2, 7).Value.ToString().Should().Contain("利用明細: 1件");
+        worksheet.Cell(2, 8).Value.ToString().Should().Contain("利用明細: 2件");
+        worksheet.Cell(2, 8).Value.ToString().Should().Contain("天神日銀前");
     }
 
     #endregion

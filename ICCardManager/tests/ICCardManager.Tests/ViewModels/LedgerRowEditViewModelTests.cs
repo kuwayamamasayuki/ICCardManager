@@ -12,6 +12,7 @@ using Xunit;
 using System;
 using System.Collections.Generic;
 using System.Data.SQLite;
+using System.Text.Json;
 using System.Linq;
 using System.Threading.Tasks;
 
@@ -1732,4 +1733,111 @@ public class LedgerRowEditViewModelTests : IDisposable
     }
 
     #endregion
+    #region 監査ログの利用明細（Issue #1979）
+
+    /// <summary>
+    /// 実際に挿入された <see cref="OperationLog"/> を捕捉する（#1760: ログの中身は
+    /// ログ記録クラスのモックでは表明できないため、書き込み先のモックで見る）。
+    /// </summary>
+    private List<OperationLog> CaptureOperationLogs()
+    {
+        var logs = new List<OperationLog>();
+        _operationLogRepoMock
+            .Setup(r => r.InsertAsync(It.IsAny<OperationLog>(), It.IsAny<SQLiteTransaction>()))
+            .ReturnsAsync(1)
+            .Callback((OperationLog log, SQLiteTransaction _) => logs.Add(log));
+        return logs;
+    }
+
+    private static JsonElement DetailsOf(string json)
+    {
+        using var document = JsonDocument.Parse(json);
+        return document.RootElement.GetProperty("Details").Clone();
+    }
+
+    /// <summary>
+    /// Issue #1979（欠陥を突く側）: <c>BeforeData</c> に編集前の明細が載ること。
+    /// </summary>
+    /// <remarks>
+    /// 旧実装の「変更前」は手組みのコピーで <c>Details</c> を引き継がなかったため、
+    /// 明細を表示できるようにした途端、全明細が「（なし）→ …」という
+    /// <b>起きていない変更</b>として操作ログ画面・Excel に並ぶ（#1726）。
+    /// </remarks>
+    [Fact]
+    public async Task SaveEdit_BeforeDataに編集前の明細が載ること_Issue1979()
+    {
+        var ledger = CreateBusLedger("バス（★）");
+        var dto = ArrangeBusLedgerForEdit(ledger);
+        _ledgerRepoMock.Setup(r => r.UpdateDetailBusStopsAsync(
+                It.IsAny<int>(), It.IsAny<IEnumerable<(int, string)>>(), It.IsAny<SQLiteTransaction>()))
+            .ReturnsAsync(true);
+        var logs = CaptureOperationLogs();
+
+        await _viewModel.InitializeForEditAsync(dto, TestOperatorIdm);
+        _viewModel.Summary = "バス（天神）";
+
+        await _viewModel.SaveCommand.ExecuteAsync(null);
+
+        var log = logs.Should().ContainSingle(l => l.Action == "UPDATE").Subject;
+        var before = DetailsOf(log.BeforeData);
+        before.GetArrayLength().Should().Be(1, "編集前の明細が「変更前」に無いと、全明細が新規追加として描画される");
+        before[0].GetProperty("BusStops").GetString().Should().Be(
+            "★", "書き戻し前のプレースホルダが記録されるべき");
+    }
+
+    /// <summary>
+    /// Issue #1979（欠陥を突く側）: <c>AfterData</c> に書き戻し後のバス停名が載ること。
+    /// </summary>
+    /// <remarks>
+    /// <c>OperationLogger</c> は <c>SerializeToJson</c> が呼ばれた時点の状態を写す（#1959）。
+    /// バス停名の同期より先に記録すると、この Issue が可視化しようとした「書き戻し」が
+    /// まさに監査から抜け落ちる。同期は DB だけでなく in-memory の明細にも反映する。
+    /// </remarks>
+    [Fact]
+    public async Task SaveEdit_AfterDataに書き戻し後のバス停名が載ること_Issue1979()
+    {
+        var ledger = CreateBusLedger("バス（★）");
+        var dto = ArrangeBusLedgerForEdit(ledger);
+        _ledgerRepoMock.Setup(r => r.UpdateDetailBusStopsAsync(
+                It.IsAny<int>(), It.IsAny<IEnumerable<(int, string)>>(), It.IsAny<SQLiteTransaction>()))
+            .ReturnsAsync(true);
+        var logs = CaptureOperationLogs();
+
+        await _viewModel.InitializeForEditAsync(dto, TestOperatorIdm);
+        _viewModel.Summary = "バス（天神）";
+
+        await _viewModel.SaveCommand.ExecuteAsync(null);
+
+        var after = DetailsOf(logs.Should().ContainSingle(l => l.Action == "UPDATE").Subject.AfterData);
+        after[0].GetProperty("BusStops").GetString().Should().Be(
+            "天神", "同期後の値でないと、監査から書き戻しを確認できない");
+    }
+
+    /// <summary>
+    /// Issue #1979（対の表明）: 明細を変えない保存では、変更前と変更後の明細が同一であること。
+    /// </summary>
+    /// <remarks>
+    /// この表明が無いと「変更前の明細を常に空にする」実装でも上の 2 件は緑になり得る
+    /// （欠陥そのものが「片側だけが明細を持つ」形だったため）。
+    /// </remarks>
+    [Fact]
+    public async Task SaveEdit_明細を変えない保存では明細の差分が生まれないこと_Issue1979()
+    {
+        var ledger = CreateBusLedger("バス（★）");
+        var dto = ArrangeBusLedgerForEdit(ledger);
+        var logs = CaptureOperationLogs();
+
+        await _viewModel.InitializeForEditAsync(dto, TestOperatorIdm);
+        _viewModel.Note = "備考だけ変更";
+
+        await _viewModel.SaveCommand.ExecuteAsync(null);
+
+        var log = logs.Should().ContainSingle(l => l.Action == "UPDATE").Subject;
+        DetailsOf(log.AfterData).GetRawText().Should().Be(
+            DetailsOf(log.BeforeData).GetRawText(),
+            "備考だけの編集で明細が変わったように見えてはいけない");
+    }
+
+    #endregion
 }
+

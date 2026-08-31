@@ -1,4 +1,4 @@
-using FluentAssertions;
+﻿using FluentAssertions;
 using ICCardManager.Data.Repositories;
 using ICCardManager.Models;
 using ICCardManager.Services;
@@ -1075,6 +1075,104 @@ public class OperationLogSearchViewModelTests
 
         _viewModel.StatusMessage.Should().Contain("拡張子NG");
         _viewModel.IsStatusError.Should().BeTrue();
+    }
+
+    #endregion
+
+    #region 利用明細の変化（Issue #1979）
+
+    // Issue #1979: 監査ログに記録された利用明細（Ledger.Details）が操作ログ画面から読めなかった。
+    // 画面は列幅が限られるため「件数の推移（統合・分割）」と「変化した明細（更新）」を担い、
+    // 明細の内容そのものの展開は Excel エクスポートが担う（04_機能設計書 §10.4a）。
+
+    private const string RailDetailJson =
+        @"{""UseDate"":""2026-02-06T00:00:00"",""EntryStation"":""博多"",""ExitStation"":""天神"","
+        + @"""BusStops"":null,""Amount"":210,""Balance"":790,""IsCharge"":false,"
+        + @"""IsPointRedemption"":false,""IsBus"":false,""GroupId"":null,""SequenceNumber"":3}";
+
+    private const string BusDetailJson =
+        @"{""UseDate"":""2026-02-06T00:00:00"",""EntryStation"":null,""ExitStation"":null,"
+        + @"""BusStops"":""天神日銀前"",""Amount"":190,""Balance"":600,""IsCharge"":false,"
+        + @"""IsPointRedemption"":false,""IsBus"":true,""GroupId"":null,""SequenceNumber"":2}";
+
+    private const string BusDetailWithoutStopsJson =
+        @"{""UseDate"":""2026-02-06T00:00:00"",""EntryStation"":null,""ExitStation"":null,"
+        + @"""BusStops"":null,""Amount"":190,""Balance"":600,""IsCharge"":false,"
+        + @"""IsPointRedemption"":false,""IsBus"":true,""GroupId"":null,""SequenceNumber"":2}";
+
+    private static string LedgerJson(string detailsJson) =>
+        @"{""Id"":42,""Date"":""2026-02-06"",""Summary"":""鉄道（博多～天神）"",""StaffName"":""田中太郎"","
+        + $@"""Note"":"""",""Details"":{detailsJson}}}";
+
+    [Fact]
+    public async Task MERGE_明細件数の推移が詳細に出ること()
+    {
+        var testLog = MakeLog(1, action: "MERGE", targetTable: "ledger", targetId: "42",
+            beforeData: $"[{LedgerJson($"[{RailDetailJson},{BusDetailJson}]")},{LedgerJson($"[{RailDetailJson}]")}]",
+            afterData: LedgerJson($"[{RailDetailJson},{BusDetailJson},{RailDetailJson}]"));
+        SetupKeysetReturning(new[] { testLog });
+
+        await _viewModel.SearchAsync();
+
+        _viewModel.Logs[0].DetailSummary.Should().Be("利用履歴（42）を統合: 明細 2件・1件 → 3件");
+    }
+
+    [Fact]
+    public async Task SPLIT_明細件数の推移が詳細に出ること()
+    {
+        var testLog = MakeLog(1, action: "SPLIT", targetTable: "ledger", targetId: "42",
+            beforeData: LedgerJson($"[{RailDetailJson},{BusDetailJson},{RailDetailJson}]"),
+            afterData: $"[{LedgerJson($"[{RailDetailJson},{BusDetailJson}]")},{LedgerJson($"[{RailDetailJson}]")}]");
+        SetupKeysetReturning(new[] { testLog });
+
+        await _viewModel.SearchAsync();
+
+        _viewModel.Logs[0].DetailSummary.Should().Be("利用履歴（42）を分割: 明細 3件 → 2件・1件");
+    }
+
+    [Fact]
+    public async Task MERGE_明細を持たない台帳では従来どおりの詳細になること()
+    {
+        // 対の表明。これが無いと「明細 0件 → 0件」を常に付ける実装でも上の 2 件は緑になる
+        var testLog = MakeLog(1, action: "MERGE", targetTable: "ledger", targetId: "42",
+            beforeData: $"[{LedgerJson("[]")},{LedgerJson("[]")}]",
+            afterData: LedgerJson("[]"));
+        SetupKeysetReturning(new[] { testLog });
+
+        await _viewModel.SearchAsync();
+
+        _viewModel.Logs[0].DetailSummary.Should().Be("利用履歴（42）を統合");
+    }
+
+    [Fact]
+    public async Task UPDATE_バス停名の書き戻しが詳細に出ること()
+    {
+        var testLog = MakeLog(1, action: "UPDATE", targetTable: "ledger", targetId: "42",
+            beforeData: LedgerJson($"[{RailDetailJson},{BusDetailWithoutStopsJson}]"),
+            afterData: LedgerJson($"[{RailDetailJson},{BusDetailJson}]"));
+        SetupKeysetReturning(new[] { testLog });
+
+        await _viewModel.SearchAsync();
+
+        var summary = _viewModel.Logs[0].DetailSummary;
+        summary.Should().StartWith("利用履歴を更新: 利用明細[2]: ");
+        summary.Should().Contain("天神日銀前");
+    }
+
+    [Fact]
+    public async Task UPDATE_明細が変わらなければ利用明細の節が出ないこと()
+    {
+        // 対の表明
+        var testLog = MakeLog(1, action: "UPDATE", targetTable: "ledger", targetId: "42",
+            beforeData: LedgerJson($"[{RailDetailJson},{BusDetailJson}]"),
+            afterData: LedgerJson($"[{RailDetailJson},{BusDetailJson}]").Replace(@"""Note"":""""", @"""Note"":""補記"""));
+        SetupKeysetReturning(new[] { testLog });
+
+        await _viewModel.SearchAsync();
+
+        var summary = _viewModel.Logs[0].DetailSummary;
+        summary.Should().Contain("備考");
+        summary.Should().NotContain("利用明細");
     }
 
     #endregion

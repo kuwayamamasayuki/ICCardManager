@@ -659,9 +659,29 @@ public partial class OperationLogSearchViewModel : ViewModelBase
         if (log.Action == "UPDATE" && !string.IsNullOrEmpty(log.BeforeData) && !string.IsNullOrEmpty(log.AfterData))
         {
             var changes = GetChangedFieldsDescription(log.TargetTable, log.BeforeData, log.AfterData);
-            if (!string.IsNullOrEmpty(changes))
+            // Issue #1979: 利用明細の変化（バス停名の書き戻し等）も詳細列へ載せる。
+            // 生成手段は OperationLogDetailFormatter ただ 1 つに寄せる（Excel と共通）。
+            var detailChanges = OperationLogDetailFormatter.SummarizeDetailChangesForScreen(
+                log.BeforeData, log.AfterData);
+            var combined = string.Join("、", new[] { changes, detailChanges }
+                .Where(s => !string.IsNullOrEmpty(s)));
+            if (!string.IsNullOrEmpty(combined))
             {
-                return $"{target}を{action}: {changes}";
+                return $"{target}を{action}: {combined}";
+            }
+        }
+
+        // Issue #1979: 統合・分割は明細の振り分けが操作の本体なので件数の推移を示す。
+        // 明細の内容そのものは列幅が足りないため Excel エクスポートが担う（04_機能設計書 §10.4a）。
+        if (log.Action == "MERGE" || log.Action == "SPLIT")
+        {
+            var counts = OperationLogDetailFormatter.SummarizeDetailCountTransition(
+                log.BeforeData, log.AfterData);
+            if (!string.IsNullOrEmpty(counts))
+            {
+                return string.IsNullOrEmpty(log.TargetId)
+                    ? $"{target}を{action}: {counts}"
+                    : $"{target}（{log.TargetId}）を{action}: {counts}";
             }
         }
 

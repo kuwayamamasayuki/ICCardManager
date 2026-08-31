@@ -1,4 +1,4 @@
-using FluentAssertions;
+﻿using FluentAssertions;
 using ICCardManager.Data;
 using ICCardManager.Data.Repositories;
 using ICCardManager.Tests.Data;
@@ -9,6 +9,7 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using Xunit;
+using System.Text.Json;
 
 using System;
 using System.Collections.Generic;
@@ -28,6 +29,7 @@ public class LedgerDetailViewModelTests : IDisposable
     private readonly Mock<ILedgerRepository> _ledgerRepoMock;
     private readonly DbContext _dbContext;
     private readonly Mock<IStaffAuthService> _staffAuthServiceMock;
+    private readonly List<OperationLog> _operationLogs = new();
 
     public void Dispose()
     {
@@ -40,7 +42,12 @@ public class LedgerDetailViewModelTests : IDisposable
         _ledgerRepoMock = new Mock<ILedgerRepository>();
         _dbContext = TestDbContextFactory.Create();
         var summaryGenerator = new SummaryGenerator();
-        var operationLogRepoMock = new Mock<IOperationLogRepository>();
+var operationLogRepoMock = new Mock<IOperationLogRepository>();
+        // Issue #1760: ログの中身はログ記録クラスのモックでは表明できないため、書き込み先で捕捉する
+        operationLogRepoMock
+            .Setup(r => r.InsertAsync(It.IsAny<OperationLog>(), It.IsAny<System.Data.SQLite.SQLiteTransaction>()))
+            .ReturnsAsync(1)
+            .Callback((OperationLog log, System.Data.SQLite.SQLiteTransaction _) => _operationLogs.Add(log));
         var staffRepoMock = new Mock<IStaffRepository>();
         var operationLogger = new OperationLogger(
             operationLogRepoMock.Object,
@@ -733,4 +740,78 @@ public class LedgerDetailViewModelTests : IDisposable
     }
 
     #endregion
+    #region 監査ログの利用明細（Issue #1979）
+
+    /// <summary>
+    /// Issue #1979: 明細を編集した保存で、監査ログの変更前・変更後がそれぞれ
+    /// 編集<b>前</b>・編集<b>後</b>の明細を記録すること。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// 旧実装の「変更前」は 5 フィールドの手組みで <c>Details</c> を持たず、
+    /// <c>_ledger.Details</c>（＝「変更後」）は編集後の明細へ差し替えられていなかった。
+    /// 明細を表示できるようにした途端、操作ログ画面・Excel に
+    /// 「全明細が（なし）から編集<b>前</b>の値へ変わった」という、二重に誤った差分が並ぶ。
+    /// </para>
+    /// <para>
+    /// 「変更前」は下の <c>Items.Select</c> が <c>item.Detail</c>（＝ <c>_ledger.Details</c> と
+    /// 同一インスタンス）の <c>GroupId</c> を書き換えるより前に採る必要がある（#1959）。
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public async Task Save_監査ログの変更前と変更後がそれぞれ編集前と編集後の明細を記録すること_Issue1979()
+    {
+        // Arrange: グループ未設定（自動判定）の 2 明細
+        var ledger = new Ledger
+        {
+            Id = 21,
+            CardIdm = "0102030405060708",
+            Date = new DateTime(2026, 2, 10),
+            Summary = "鉄道（博多～天神、薬院～大橋）",
+            Expense = 470,
+            Balance = 530,
+            Details = new List<LedgerDetail>
+            {
+                new() { LedgerId = 21, SequenceNumber = 1, EntryStation = "薬院", ExitStation = "大橋", Amount = 210, UseDate = new DateTime(2026, 2, 10), Balance = 530 },
+                new() { LedgerId = 21, SequenceNumber = 2, EntryStation = "博多", ExitStation = "天神", Amount = 260, UseDate = new DateTime(2026, 2, 10), Balance = 740 }
+            }
+        };
+        _ledgerRepoMock.Setup(r => r.GetByIdAsync(21)).ReturnsAsync(ledger);
+        _ledgerRepoMock
+            .Setup(r => r.ReplaceDetailsAsync(21, It.IsAny<IEnumerable<LedgerDetail>>()))
+            .ReturnsAsync(true);
+        _ledgerRepoMock
+            .Setup(r => r.UpdateAsync(It.IsAny<Ledger>(), It.IsAny<System.Data.SQLite.SQLiteTransaction>()))
+            .ReturnsAsync(true);
+
+        await _viewModel.InitializeAsync(21, operatorIdm: "FFFF000000000001");
+
+        // Act: 全明細を 1 グループへまとめて保存する（摘要が変わるので監査ログが記録される）
+        _viewModel.MergeAllCommand.Execute(null);
+        await _viewModel.SaveCommand.ExecuteAsync(null);
+
+        // Assert
+        var log = _operationLogs.Should().ContainSingle(l => l.Action == "UPDATE").Subject;
+
+        var before = ParseDetails(log.BeforeData);
+        before.GetArrayLength().Should().Be(2, "編集前の明細が変更前に無いと、全明細が新規追加として描画される");
+        before.EnumerateArray().Should().OnlyContain(
+            d => d.GetProperty("GroupId").ValueKind == JsonValueKind.Null,
+            "編集前はグループ未設定（自動判定）であるべき");
+
+        var after = ParseDetails(log.AfterData);
+        after.GetArrayLength().Should().Be(2);
+        after.EnumerateArray().Should().OnlyContain(
+            d => d.GetProperty("GroupId").GetInt32() == LedgerDetailViewModel.MergedGroupId,
+            "変更後は画面で指定した明示グループであるべき（編集前の明細を写していないこと）");
+    }
+
+    private static JsonElement ParseDetails(string json)
+    {
+        using var document = JsonDocument.Parse(json);
+        return document.RootElement.GetProperty("Details").Clone();
+    }
+
+    #endregion
 }
+
