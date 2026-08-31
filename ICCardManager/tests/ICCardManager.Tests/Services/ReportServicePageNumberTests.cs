@@ -17,6 +17,16 @@ namespace ICCardManager.Tests.Services;
 /// </remarks>
 public class ReportServicePageNumberTests
 {
+    /// <summary>
+    /// 既定のページ番号列（L 列 = 12）。Issue #1956 で列が引数になったため、
+    /// シート作成側と呼び出し側で同じ値を使う。
+    /// </summary>
+    /// <remarks>
+    /// 本クラスは既定レイアウトでのページ番号計算を検査する。設定を変えた場合の挙動は
+    /// <c>ReportServicePageNumberColumnTests</c> が担当する。
+    /// </remarks>
+    private const int PageNumberColumn = 12;
+
     /// <summary>テスト用にL2セルにページ番号を設定し、必要数の改ページを追加したワークシートを作る</summary>
     private static IXLWorksheet CreateSheetWithPageInfo(
         XLWorkbook workbook,
@@ -27,7 +37,7 @@ public class ReportServicePageNumberTests
         var sheet = workbook.AddWorksheet(sheetName);
         if (firstPageNumber.HasValue)
         {
-            sheet.Cell(2, 12).Value = firstPageNumber.Value;
+            sheet.Cell(2, PageNumberColumn).Value = firstPageNumber.Value;
         }
         for (int i = 0; i < pageBreakCount; i++)
         {
@@ -57,7 +67,7 @@ public class ReportServicePageNumberTests
         using var workbook = new XLWorkbook();
         var sheet = workbook.AddWorksheet("4月");
 
-        var result = ReportService.GetLastPageNumberFromWorksheet(sheet);
+        var result = ReportService.GetLastPageNumberFromWorksheet(sheet, PageNumberColumn);
 
         result.Should().Be(0);
     }
@@ -72,7 +82,7 @@ public class ReportServicePageNumberTests
         var sheet = workbook.AddWorksheet("4月");
         sheet.Cell(2, 12).Value = "abc";
 
-        var result = ReportService.GetLastPageNumberFromWorksheet(sheet);
+        var result = ReportService.GetLastPageNumberFromWorksheet(sheet, PageNumberColumn);
 
         result.Should().Be(0);
     }
@@ -86,7 +96,7 @@ public class ReportServicePageNumberTests
         using var workbook = new XLWorkbook();
         var sheet = CreateSheetWithPageInfo(workbook, "4月", firstPageNumber: 5, pageBreakCount: 0);
 
-        var result = ReportService.GetLastPageNumberFromWorksheet(sheet);
+        var result = ReportService.GetLastPageNumberFromWorksheet(sheet, PageNumberColumn);
 
         result.Should().Be(5);
     }
@@ -100,7 +110,7 @@ public class ReportServicePageNumberTests
         using var workbook = new XLWorkbook();
         var sheet = CreateSheetWithPageInfo(workbook, "4月", firstPageNumber: 5, pageBreakCount: 1);
 
-        var result = ReportService.GetLastPageNumberFromWorksheet(sheet);
+        var result = ReportService.GetLastPageNumberFromWorksheet(sheet, PageNumberColumn);
 
         result.Should().Be(6);
     }
@@ -114,7 +124,7 @@ public class ReportServicePageNumberTests
         using var workbook = new XLWorkbook();
         var sheet = CreateSheetWithPageInfo(workbook, "4月", firstPageNumber: 10, pageBreakCount: 3);
 
-        var result = ReportService.GetLastPageNumberFromWorksheet(sheet);
+        var result = ReportService.GetLastPageNumberFromWorksheet(sheet, PageNumberColumn);
 
         result.Should().Be(13);
     }
@@ -128,7 +138,7 @@ public class ReportServicePageNumberTests
         using var workbook = new XLWorkbook();
         var sheet = CreateSheetWithPageInfo(workbook, "4月", firstPageNumber: 1);
 
-        var result = ReportService.GetLastPageNumberFromWorksheet(sheet);
+        var result = ReportService.GetLastPageNumberFromWorksheet(sheet, PageNumberColumn);
 
         result.Should().Be(1);
     }
@@ -146,7 +156,7 @@ public class ReportServicePageNumberTests
         using var workbook = new XLWorkbook();
         var card = CreateCard(startingPageNumber: 5);
 
-        var result = ReportService.GetStartingPageNumberForMonth(workbook, card, 4);
+        var result = ReportService.GetStartingPageNumberForMonth(workbook, card, 4, PageNumberColumn);
 
         result.Should().Be(5);
     }
@@ -161,7 +171,7 @@ public class ReportServicePageNumberTests
         CreateSheetWithPageInfo(workbook, "4月", firstPageNumber: 5);
         var card = CreateCard(startingPageNumber: 5);
 
-        var result = ReportService.GetStartingPageNumberForMonth(workbook, card, 5);
+        var result = ReportService.GetStartingPageNumberForMonth(workbook, card, 5, PageNumberColumn);
 
         result.Should().Be(6);
     }
@@ -176,7 +186,7 @@ public class ReportServicePageNumberTests
         CreateSheetWithPageInfo(workbook, "4月", firstPageNumber: 5, pageBreakCount: 1);
         var card = CreateCard(startingPageNumber: 5);
 
-        var result = ReportService.GetStartingPageNumberForMonth(workbook, card, 5);
+        var result = ReportService.GetStartingPageNumberForMonth(workbook, card, 5, PageNumberColumn);
 
         result.Should().Be(7);
     }
@@ -192,7 +202,7 @@ public class ReportServicePageNumberTests
         CreateSheetWithPageInfo(workbook, "4月", firstPageNumber: 5);
         var card = CreateCard(startingPageNumber: 5);
 
-        var result = ReportService.GetStartingPageNumberForMonth(workbook, card, 6);
+        var result = ReportService.GetStartingPageNumberForMonth(workbook, card, 6, PageNumberColumn);
 
         result.Should().Be(6);
     }
@@ -206,7 +216,7 @@ public class ReportServicePageNumberTests
         using var workbook = new XLWorkbook();
         var card = CreateCard(startingPageNumber: 7);
 
-        var result = ReportService.GetStartingPageNumberForMonth(workbook, card, 5);
+        var result = ReportService.GetStartingPageNumberForMonth(workbook, card, 5, PageNumberColumn);
 
         result.Should().Be(7);
     }
@@ -223,7 +233,7 @@ public class ReportServicePageNumberTests
         var card = CreateCard(startingPageNumber: 1);
 
         // 1月の前月候補（年度月順序の逆）: 12月→11月→10月→9月... と探索
-        var result = ReportService.GetStartingPageNumberForMonth(workbook, card, 1);
+        var result = ReportService.GetStartingPageNumberForMonth(workbook, card, 1, PageNumberColumn);
 
         // 9月の最終ページ = 20+1 = 21、よって1月開始は 22
         result.Should().Be(22);
@@ -239,7 +249,7 @@ public class ReportServicePageNumberTests
         CreateSheetWithPageInfo(workbook, "2月", firstPageNumber: 30, pageBreakCount: 2);
         var card = CreateCard(startingPageNumber: 1);
 
-        var result = ReportService.GetStartingPageNumberForMonth(workbook, card, 3);
+        var result = ReportService.GetStartingPageNumberForMonth(workbook, card, 3, PageNumberColumn);
 
         // 2月最終ページ = 30+2 = 32、3月開始 = 33
         result.Should().Be(33);
@@ -255,7 +265,7 @@ public class ReportServicePageNumberTests
         CreateSheetWithPageInfo(workbook, "4月", firstPageNumber: 99);
         var card = CreateCard(startingPageNumber: 3);
 
-        var result = ReportService.GetStartingPageNumberForMonth(workbook, card, 13);
+        var result = ReportService.GetStartingPageNumberForMonth(workbook, card, 13, PageNumberColumn);
 
         result.Should().Be(3);
     }
@@ -272,7 +282,7 @@ public class ReportServicePageNumberTests
         workbook.AddWorksheet("4月");
         var card = CreateCard(startingPageNumber: 9);
 
-        var result = ReportService.GetStartingPageNumberForMonth(workbook, card, 5);
+        var result = ReportService.GetStartingPageNumberForMonth(workbook, card, 5, PageNumberColumn);
 
         // 4月の lastPage=0 → ループ継続 → これ以上前月なし → StartingPageNumber=9
         result.Should().Be(9);
@@ -291,7 +301,7 @@ public class ReportServicePageNumberTests
         workbook.AddWorksheet("5月");
         var card = CreateCard(startingPageNumber: 1);
 
-        var result = ReportService.GetStartingPageNumberForMonth(workbook, card, 6);
+        var result = ReportService.GetStartingPageNumberForMonth(workbook, card, 6, PageNumberColumn);
 
         // 6月→5月(空,スキップ)→4月(=10) → 6月開始は 11
         result.Should().Be(11);
@@ -313,7 +323,7 @@ public class ReportServicePageNumberTests
         CreateSheetWithPageInfo(workbook, "4月", firstPageNumber: 5, pageBreakCount: 2);
         var fiscalMonthOrder = new[] { 4, 5, 6, 7, 8, 9, 10, 11, 12, 1, 2, 3 };
         // 5月（インデックス1）から直前を探す
-        var result = ReportService.FindNearestPreviousMonthLastPage(workbook, fiscalMonthOrder, currentIndex: 1);
+        var result = ReportService.FindNearestPreviousMonthLastPage(workbook, fiscalMonthOrder, currentIndex: 1, pageNumberColumn: PageNumberColumn);
 
         // 4月の最終ページ = 5+2 = 7
         result.Should().Be(7);
@@ -333,7 +343,7 @@ public class ReportServicePageNumberTests
         workbook.AddWorksheet("5月");
         var fiscalMonthOrder = new[] { 4, 5, 6, 7, 8, 9, 10, 11, 12, 1, 2, 3 };
         // 6月（インデックス2）から探索 → 5月スキップ → 4月に到達
-        var result = ReportService.FindNearestPreviousMonthLastPage(workbook, fiscalMonthOrder, currentIndex: 2);
+        var result = ReportService.FindNearestPreviousMonthLastPage(workbook, fiscalMonthOrder, currentIndex: 2, pageNumberColumn: PageNumberColumn);
 
         result.Should().Be(10);
     }
@@ -346,7 +356,7 @@ public class ReportServicePageNumberTests
     {
         using var workbook = new XLWorkbook();
         var fiscalMonthOrder = new[] { 4, 5, 6, 7, 8, 9, 10, 11, 12, 1, 2, 3 };
-        var result = ReportService.FindNearestPreviousMonthLastPage(workbook, fiscalMonthOrder, currentIndex: 5);
+        var result = ReportService.FindNearestPreviousMonthLastPage(workbook, fiscalMonthOrder, currentIndex: 5, pageNumberColumn: PageNumberColumn);
 
         result.Should().Be(0);
     }
@@ -362,7 +372,7 @@ public class ReportServicePageNumberTests
         workbook.AddWorksheet("4月");
         workbook.AddWorksheet("5月");
         var fiscalMonthOrder = new[] { 4, 5, 6, 7, 8, 9, 10, 11, 12, 1, 2, 3 };
-        var result = ReportService.FindNearestPreviousMonthLastPage(workbook, fiscalMonthOrder, currentIndex: 2);
+        var result = ReportService.FindNearestPreviousMonthLastPage(workbook, fiscalMonthOrder, currentIndex: 2, pageNumberColumn: PageNumberColumn);
 
         result.Should().Be(0);
     }
