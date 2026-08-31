@@ -1,6 +1,7 @@
 ﻿using System.IO;
 using ClosedXML.Excel;
 using FluentAssertions;
+using ICCardManager.Common;
 using ICCardManager.Models;
 using ICCardManager.Services;
 using Xunit;
@@ -787,6 +788,25 @@ public class OperationLogExcelExportServiceTests : IDisposable
         // 対の表明: 明細が同じならハイライトしない
         OperationLogExcelExportService.GetChangedFields("ledger", after, after)
             .Should().NotContain("Details");
+    }
+
+    [Fact]
+    public void GetChangedFields_Ledger_展開の上限を超えた明細の変化も検出すること()
+    {
+        // Issue #1979: 判定を展開ブロック（20 件で打ち切る）の文字列比較で書くと、
+        // 21 件目以降だけが変わった台帳は「変更内容」列（全件を突き合わせる）には出るのに
+        // ハイライトが付かない、という食い違いが生まれる（#1763）。
+        var many = string.Join(",", Enumerable.Repeat(RailDetailJson,
+            OperationLogDetailFormatter.MaxExpandedDetailLines));
+        var before = LedgerJson($"[{many},{BusDetailWithoutStopsJson}]");
+        var after = LedgerJson($"[{many},{BusDetailJson}]");
+
+        OperationLogExcelExportService.GetChangedFields("ledger", before, after)
+            .Should().Contain("Details");
+
+        OperationLogExcelExportService.GetChangeSummary("ledger", before, after)
+            .Should().Contain($"利用明細[{OperationLogDetailFormatter.MaxExpandedDetailLines + 1}]: ",
+                "「変更内容」列とハイライトは同じ判定に載るべき");
     }
 
     [Fact]

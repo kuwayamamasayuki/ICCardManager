@@ -237,10 +237,27 @@ public class OperationLogExcelExportService
                 string? beforeValue = null;
                 string? afterValue = null;
 
-                if (beforeDoc.RootElement.TryGetProperty(propertyName, out var beforeProp))
-                    beforeValue = FormatFieldValue(propertyName, beforeProp, "  ");
-                if (afterDoc.RootElement.TryGetProperty(propertyName, out var afterProp))
-                    afterValue = FormatFieldValue(propertyName, afterProp, "  ");
+                var hasBeforeProp = beforeDoc.RootElement.TryGetProperty(propertyName, out var beforeProp);
+                var hasAfterProp = afterDoc.RootElement.TryGetProperty(propertyName, out var afterProp);
+
+                // Issue #1979: 明細は展開ブロック（20 件で打ち切る）ではなく全件の差分で判定する。
+                // ブロック文字列を比べると、打ち切られた 21 件目以降だけが変わった台帳で
+                // 「変更内容」列（GetChangeSummary は全件を突き合わせる）には出るのに
+                // ハイライトは付かない、という食い違いが生まれる（#1763）。
+                if (propertyName == OperationLogDetailFormatter.DetailsPropertyName)
+                {
+                    var detailDiffs = OperationLogDetailFormatter.DiffDetailLines(
+                        hasBeforeProp ? beforeProp : (JsonElement?)null,
+                        hasAfterProp ? afterProp : (JsonElement?)null);
+                    if (detailDiffs.Count > 0)
+                        result.Add(propertyName);
+                    continue;
+                }
+
+                if (hasBeforeProp)
+                    beforeValue = FormatPropertyValue(beforeProp);
+                if (hasAfterProp)
+                    afterValue = FormatPropertyValue(afterProp);
 
                 if (beforeValue != afterValue)
                     result.Add(propertyName);

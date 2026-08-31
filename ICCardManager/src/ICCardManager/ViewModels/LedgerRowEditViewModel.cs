@@ -926,26 +926,12 @@ namespace ICCardManager.ViewModels
                 return;
             }
 
-            // 変更前のスナップショット
-            var beforeLedger = new Ledger
-            {
-                Id = ledger.Id,
-                CardIdm = ledger.CardIdm,
-                LenderIdm = ledger.LenderIdm,
-                Date = ledger.Date,
-                Summary = ledger.Summary,
-                Income = ledger.Income,
-                Expense = ledger.Expense,
-                Balance = ledger.Balance,
-                StaffName = ledger.StaffName,
-                Note = ledger.Note,
-                ReturnerIdm = ledger.ReturnerIdm,
-                LentAt = ledger.LentAt,
-                ReturnedAt = ledger.ReturnedAt,
-                IsLentRecord = ledger.IsLentRecord,
-                // Issue #1906: 載せ忘れると「同行者数 0 → N」という実際には起きていない変更が監査ログに残る（#1726）
-                CompanionCount = ledger.CompanionCount
-            };
+            // 変更前のスナップショット。
+            // Issue #1979: 手組みのコピーは明細（Details）を引き継がないため、監査ログの
+            // BeforeData が常に「明細ゼロ」になり、明細を表示できるようにした途端
+            // 全明細が「（なし）→ …」という起きていない変更として並ぶ。複製の手段は
+            // LedgerCloner ただ 1 つに寄せる（列を足したとき片方だけ更新される形を残さない。#1763 / #1959）。
+            var beforeLedger = LedgerCloner.Clone(ledger);
 
             // 値を更新
             ledger.Date = EditDate;
@@ -975,8 +961,6 @@ namespace ICCardManager.ViewModels
                 result = await _ledgerRepository.UpdateAsync(ledger, scope.Transaction);
                 if (result)
                 {
-                    await _operationLogger.LogLedgerUpdateAsync(beforeLedger, ledger, scope.Transaction);
-
                     // Issue #983: 摘要編集時にバス停名をDetailに同期
                     // 摘要を直接編集するとLedger.Summaryは更新されるがDetail.BusStopsは更新されない。
                     // この不整合を放置すると、統合時にSummaryGenerator.Generate()が
@@ -998,8 +982,13 @@ namespace ICCardManager.ViewModels
                         }
                     }
 
+                    // Issue #1979: 監査ログは同期のあとに記録する。OperationLogger は
+                    // SerializeToJson が呼ばれた時点の状態を写すため（#1959）、先に記録すると
+                    // AfterData のバス停名が同期前のまま残り、この Issue が可視化しようとした
+                    // 「バス停名の書き戻し」がまさに監査から抜け落ちる。
                     if (result)
                     {
+                        await _operationLogger.LogLedgerUpdateAsync(beforeLedger, ledger, scope.Transaction);
                         scope.Commit();
                     }
                 }
@@ -1073,7 +1062,22 @@ namespace ICCardManager.ViewModels
                 return true;
             }
 
-            return await _ledgerRepository.UpdateDetailBusStopsAsync(ledger.Id, busStopUpdates, transaction);
+            var updated = await _ledgerRepository.UpdateDetailBusStopsAsync(ledger.Id, busStopUpdates, transaction);
+            if (updated)
+            {
+                // Issue #1979: DB だけを書き換えると、直後に JSON 化される監査ログの AfterData が
+                // 同期前のバス停名（★）を「変更後」として記録する。in-memory も揃える。
+                foreach (var (sequenceNumber, busStops) in busStopUpdates)
+                {
+                    var detail = ledger.Details.FirstOrDefault(d => d.SequenceNumber == sequenceNumber);
+                    if (detail != null)
+                    {
+                        detail.BusStops = busStops;
+                    }
+                }
+            }
+
+            return updated;
         }
 
         /// <summary>

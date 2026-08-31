@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text.Json;
@@ -301,6 +301,10 @@ namespace ICCardManager.Services
             // ここで正しい順序に対応するSequenceNumberを一時的に再採番する。
             // FeliCa互換: 小さい値=新しい → sortedDetailsForSummary[0]=最新にSeq=1を割り当て
             // ※この変更はインメモリのみでDB永続化されない
+            // Issue #1979: 監査ログ（AfterData）は統合後の in-memory の状態を JSON 化するため、
+            // 一時再採番の値をそのまま記録すると「順序3 → 順序1」という DB には存在しない
+            // 変更が 6 年保存の記録に残る。生成のあとで必ず元へ戻せるよう退避する。
+            var originalSequenceNumbers = sortedDetailsForSummary.Select(d => d.SequenceNumber).ToList();
             for (int i = 0; i < sortedDetailsForSummary.Count; i++)
             {
                 sortedDetailsForSummary[i].SequenceNumber = i + 1;
@@ -311,6 +315,13 @@ namespace ICCardManager.Services
             // 摘要が空欄の行は物品出納簿でどの取引か判別できなくなるため、空欄のまま保存しない。
             var regeneratedSummary = _summaryGenerator.Generate(sortedDetailsForSummary);
             target.Summary = !string.IsNullOrEmpty(regeneratedSummary) ? regeneratedSummary : target.Summary;
+
+            // 一時再採番を戻す（Issue #1979）。DB の SequenceNumber は rowid 由来で
+            // MergeLedgersAsync は ledger_detail を再親付けするだけなので変化しない。
+            for (int i = 0; i < sortedDetailsForSummary.Count; i++)
+            {
+                sortedDetailsForSummary[i].SequenceNumber = originalSequenceNumbers[i];
+            }
 
             // Noteの統合（非空のものを連結）
             var notes = ledgers
@@ -324,6 +335,12 @@ namespace ICCardManager.Services
             // 同行者のいた行を統合しただけで「外N名」が 6 年保存の台帳から消える
             // （Note を連結しているのと同じ判断: 統合で情報を落とさない）。
             target.CompanionCount = ledgers.Max(l => l.CompanionCount);
+
+            // Issue #1979: 統合先（ledgers[0]）の in-memory の明細は自分の分しか持たないため、
+            // 監査ログの AfterData に「2件・1件 → 2件」という起きていない件数が記録されていた
+            // （DB 側は MergeLedgersAsync が ledger_detail の ledger_id を付け替えて全件を移す）。
+            // 明細まで含めて記録する #1959 の是正は BeforeData 側だけで、対側が粗いままだった。
+            target.Details = chronologicalDetails.ToList();
 
             // 説明テキスト（UI表示用）
             var description = $"{DisplayFormatters.FormatDate(beforeLedgers[0].Date)} {string.Join(" + ", originalSummaryTexts)}";

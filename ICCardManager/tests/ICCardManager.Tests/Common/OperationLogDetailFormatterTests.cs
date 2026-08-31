@@ -1,3 +1,4 @@
+﻿using System;
 using System.Linq;
 using System.Text.Json;
 using FluentAssertions;
@@ -196,6 +197,39 @@ public class OperationLogDetailFormatterTests
 
         text.Should().EndWith("、ほか2件");
         text.Should().NotContain($"利用明細[{OperationLogDetailFormatter.MaxSummarizedDetailChanges + 1}]");
+    }
+
+    [Fact]
+    public void SummarizeDetailChangesForScreen_1明細が長すぎるときは切り詰めること()
+    {
+        // 1 行の長さは DataGrid のセル幅に効くため、上限そのものを表明する。
+        // 「…」の付与も含めて固定しないと、上限を撤去した実装でも他のテストは緑になる。
+        var longStop = new string('あ', 60);
+        var before = $@"{{""Details"":[{BusDetailWithoutStops}]}}";
+        var after = $@"{{""Details"":[{BusDetailWithStops.Replace("天神日銀前", longStop)}]}}";
+
+        var text = OperationLogDetailFormatter.SummarizeDetailChangesForScreen(before, after);
+
+        var afterSide = text.Substring(text.IndexOf("→", StringComparison.Ordinal) + 1);
+        afterSide.Should().EndWith("...");
+        afterSide.Should().HaveLength(
+            OperationLogDetailFormatter.MaxSummarizedValueLength + 3,
+            "切り詰めは 30 文字 + 省略記号（既存の GetChangedFieldsDescription と同じ基準）");
+    }
+
+    [Fact]
+    public void SummarizeDetailChangesForScreen_上限以下の明細は切り詰めないこと()
+    {
+        // 対の表明。これが無いと「常に切り詰める」実装でも上のテストは緑になる。
+        // 上限（30 文字）以下に収まる短い明細を使う（RailDetail は日付と順序を含み 33 文字）。
+        const string shortDetail =
+            @"{""EntryStation"":""博多"",""ExitStation"":""天神"",""Amount"":210,"
+            + @"""IsCharge"":false,""IsPointRedemption"":false,""IsBus"":false}";
+        var before = $@"{{""Details"":[{shortDetail}]}}";
+        var after = $@"{{""Details"":[{shortDetail.Replace(@"""Amount"":210", @"""Amount"":220")}]}}";
+
+        OperationLogDetailFormatter.SummarizeDetailChangesForScreen(before, after)
+            .Should().NotContain("...");
     }
 
     [Theory]
