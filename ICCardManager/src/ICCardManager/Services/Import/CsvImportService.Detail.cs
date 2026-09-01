@@ -11,6 +11,7 @@ using ICCardManager.Common.Exceptions;
 using ICCardManager.Data;
 using ICCardManager.Data.Repositories;
 using ICCardManager.Infrastructure.Caching;
+using ICCardManager.Infrastructure.Security;
 using ICCardManager.Models;
 using ICCardManager.Services.Import.Builders;
 using ICCardManager.Services.Import.Parsers;
@@ -118,7 +119,12 @@ namespace ICCardManager.Services
                         errors.Add(new CsvImportError
                         {
                             LineNumber = lineNumber,
-                            Message = $"カードIDm {cardIdm} が登録されていません",
+                            // Issue #1986: IDm は本システム唯一の認証要素であり、エラー文言は
+                            // 画面に出て職員の目に触れるためマスクを通す（#1852）。
+                            // Data は突き合わせ用の内部キーで画面にもログにも出ないため生のまま。
+                            Message = $"カードIDm {IdmMasker.Mask(cardIdm)} が登録されていません。"
+                                + "この IDm のカードはカード管理に存在しません。"
+                                + "カード管理画面（F2）でカードを登録してから、もう一度取り込んでください。",
                             Data = cardIdm
                         });
                         continue;
@@ -369,7 +375,12 @@ namespace ICCardManager.Services
                         errors.Add(new CsvImportError
                         {
                             LineNumber = lineNumber,
-                            Message = $"カードIDm {cardIdm} が登録されていません",
+                            // Issue #1986: IDm は本システム唯一の認証要素であり、エラー文言は
+                            // 画面に出て職員の目に触れるためマスクを通す（#1852）。
+                            // Data は突き合わせ用の内部キーで画面にもログにも出ないため生のまま。
+                            Message = $"カードIDm {IdmMasker.Mask(cardIdm)} が登録されていません。"
+                                + "この IDm のカードはカード管理に存在しません。"
+                                + "カード管理画面（F2）でカードを登録してから、もう一度取り込んでください。",
                             Data = cardIdm
                         });
                         continue;
@@ -439,7 +450,7 @@ namespace ICCardManager.Services
             // Issue #1955: 摘要の再生成は DB に保存された部署種別に従う（新規作成・既存更新で同じ
             // インスタンスを使い、「経路によって設定が効いたり効かなかったり」する形を残さない）
             var summaryGenerator = await CreateSummaryGeneratorAsync().ConfigureAwait(false);
-            var newLedgerBuilder = new NewLedgerFromSegmentsBuilder(_ledgerRepository, summaryGenerator);
+            var newLedgerBuilder = new NewLedgerFromSegmentsBuilder(_ledgerRepository, summaryGenerator, _logger);
             foreach (var kvp in newDetailsByCardIdmAndDate)
             {
                 importedCount += await newLedgerBuilder.BuildAndInsertAsync(

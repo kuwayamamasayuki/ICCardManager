@@ -3728,7 +3728,8 @@ public partial class MainViewModel : ViewModelBase
                 if (card == null)
                 {
                     _navigationService.ShowError(
-                        $"カードがデータベースに登録されていません。\nIDm: {cardIdm}", "仮想タッチ");
+                        // Issue #1986: IDm はマスクを通す（#1852）。末尾 4 文字が残るためカードの識別はできる。
+                        $"カードがデータベースに登録されていません。\nIDm: {IdmMasker.Mask(cardIdm)}", "仮想タッチ");
                     return;
                 }
 

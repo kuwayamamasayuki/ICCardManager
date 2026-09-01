@@ -5,6 +5,7 @@ using ICCardManager.Common.Exceptions;
 using ICCardManager.Data;
 using ICCardManager.Data.Repositories;
 using ICCardManager.Infrastructure.Caching;
+using ICCardManager.Infrastructure.Security;
 using ICCardManager.Models;
 using ICCardManager.Services;
 using Microsoft.Extensions.Logging;
@@ -3070,6 +3071,17 @@ FEDCBA9876543210,鈴木花子,002,テスト2";
         // Assert
         result.IsValid.Should().BeFalse();
         result.Errors.Should().Contain(e => e.Message.Contains("登録されていません"));
+
+        // Issue #1986: エラー文言の IDm はマスクを通す。「マスク済みを含む」と
+        // 「生を含まない」を対で表明する（前者だけだと IDm を丸ごと落とした実装でも緑になる）。
+        var unregisteredError = result.Errors.First(e => e.Message.Contains("登録されていません"));
+        unregisteredError.Message.Should().Contain(IdmMasker.Mask("FFFF456789ABCDEF"));
+        unregisteredError.Message.Should().NotContain(
+            "FFFF456789ABCDEF", "生の IDm を画面へ出さないこと（#1852）");
+        unregisteredError.Message.Should().EndWith(
+            "取り込んでください。", "3 要素（何が／なぜ／どうすれば）を満たし行動指示で終わること");
+        // Data は突き合わせ用の内部キーであり、画面にもログにも出ないため生のまま保持する。
+        unregisteredError.Data.Should().Be("FFFF456789ABCDEF");
     }
 
     /// <summary>

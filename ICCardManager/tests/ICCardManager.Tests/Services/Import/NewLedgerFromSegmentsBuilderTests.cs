@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
@@ -6,7 +6,11 @@ using FluentAssertions;
 using ICCardManager.Data.Repositories;
 using ICCardManager.Models;
 using ICCardManager.Services;
+using ICCardManager.Infrastructure.Security;
 using ICCardManager.Services.Import.Builders;
+using ICCardManager.Tests.Infrastructure;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using Xunit;
 
@@ -38,7 +42,7 @@ public class NewLedgerFromSegmentsBuilderTests
     {
         // Arrange - 空リスト
         var repoMock = new Mock<ILedgerRepository>();
-        var builder = new NewLedgerFromSegmentsBuilder(repoMock.Object, new SummaryGenerator());
+        var builder = new NewLedgerFromSegmentsBuilder(repoMock.Object, new SummaryGenerator(), NullLogger.Instance);
         var errors = new List<CsvImportError>();
 
         // Act
@@ -66,7 +70,7 @@ public class NewLedgerFromSegmentsBuilderTests
         repoMock.Setup(r => r.InsertDetailsAsync(It.IsAny<int>(), It.IsAny<IEnumerable<LedgerDetail>>()))
             .ReturnsAsync(true);
 
-        var builder = new NewLedgerFromSegmentsBuilder(repoMock.Object, new SummaryGenerator());
+        var builder = new NewLedgerFromSegmentsBuilder(repoMock.Object, new SummaryGenerator(), NullLogger.Instance);
         var errors = new List<CsvImportError>();
         var detail = Usage(new DateTime(2024, 3, 1, 8, 0, 0), amount: 260, balance: 9740);
 
@@ -126,7 +130,7 @@ public class NewLedgerFromSegmentsBuilderTests
         third.EntryStation = "姪浜";
         third.ExitStation = "西新";
 
-        var builder = new NewLedgerFromSegmentsBuilder(repoMock.Object, new SummaryGenerator());
+        var builder = new NewLedgerFromSegmentsBuilder(repoMock.Object, new SummaryGenerator(), NullLogger.Instance);
         var errors = new List<CsvImportError>();
 
         // Act
@@ -162,7 +166,7 @@ public class NewLedgerFromSegmentsBuilderTests
         repoMock.Setup(r => r.InsertDetailsAsync(It.IsAny<int>(), It.IsAny<IEnumerable<LedgerDetail>>()))
             .ReturnsAsync(true);
 
-        var builder = new NewLedgerFromSegmentsBuilder(repoMock.Object, new SummaryGenerator());
+        var builder = new NewLedgerFromSegmentsBuilder(repoMock.Object, new SummaryGenerator(), NullLogger.Instance);
         var errors = new List<CsvImportError>();
 
         var earlier = Usage(new DateTime(2024, 5, 10, 8, 0, 0), amount: 260, balance: 9740);
@@ -195,7 +199,7 @@ public class NewLedgerFromSegmentsBuilderTests
         repoMock.Setup(r => r.InsertDetailsAsync(It.IsAny<int>(), It.IsAny<IEnumerable<LedgerDetail>>()))
             .ReturnsAsync(false);
 
-        var builder = new NewLedgerFromSegmentsBuilder(repoMock.Object, new SummaryGenerator());
+        var builder = new NewLedgerFromSegmentsBuilder(repoMock.Object, new SummaryGenerator(), NullLogger.Instance);
         var errors = new List<CsvImportError>();
         var detail = Usage(new DateTime(2024, 6, 1, 8, 0, 0), amount: 260, balance: 9740);
 
@@ -210,7 +214,15 @@ public class NewLedgerFromSegmentsBuilderTests
         count.Should().Be(0);
         errors.Should().ContainSingle();
         errors[0].LineNumber.Should().Be(20);
-        errors[0].Message.Should().Contain(CardIdm).And.Contain("挿入に失敗");
+        // Issue #1986: IDm はマスクを通す。「マスク済みを含む」と「生を含まない」を対で表明する
+        // （前者だけだと IDm を丸ごと落とした実装でも緑になる）。
+        errors[0].Message.Should().Contain(IdmMasker.Mask(CardIdm));
+        errors[0].Message.Should().NotContain(CardIdm, "生の IDm を画面へ出さないこと（#1852）");
+        // 3 要素（何が／なぜ／どうすれば）を満たし、行動指示で終わること。
+        errors[0].Message.Should().Contain("登録できませんでした");
+        errors[0].Message.Should().EndWith("取り込んでください。");
+        // Data は突き合わせ用の内部キーであり、画面にもログにも出ないため生のまま保持する。
+        errors[0].Data.Should().Be(CardIdm);
     }
 
     [Fact]
@@ -222,7 +234,7 @@ public class NewLedgerFromSegmentsBuilderTests
         repoMock.Setup(r => r.InsertAsync(It.IsAny<Ledger>()))
             .ThrowsAsync(new InvalidOperationException(boomMessage));
 
-        var builder = new NewLedgerFromSegmentsBuilder(repoMock.Object, new SummaryGenerator());
+        var builder = new NewLedgerFromSegmentsBuilder(repoMock.Object, new SummaryGenerator(), NullLogger.Instance);
         var errors = new List<CsvImportError>();
         var detail = Usage(new DateTime(2024, 7, 1, 8, 0, 0), amount: 260, balance: 9740);
 
@@ -237,6 +249,112 @@ public class NewLedgerFromSegmentsBuilderTests
         count.Should().Be(0);
         errors.Should().ContainSingle();
         errors[0].LineNumber.Should().Be(30);
-        errors[0].Message.Should().Contain(CardIdm).And.Contain("自動作成中にエラー").And.Contain(boomMessage);
+        errors[0].Message.Should().Contain(IdmMasker.Mask(CardIdm));
+        errors[0].Message.Should().NotContain(CardIdm, "生の IDm を画面へ出さないこと（#1852）");
+        errors[0].Message.Should().NotContain(
+            boomMessage, "生の ex.Message を画面へ出さないこと（#1614）");
+        // ExceptionMessageFormatter.ToUserMessage が組み立てる 3 要素の文言であること。
+        errors[0].Message.Should().Contain("利用履歴の自動作成に失敗しました。");
+        errors[0].Message.Should().EndWith("してください。");
+        errors[0].Data.Should().Be(CardIdm);
+    }
+
+    /// <summary>
+    /// Issue #1986: 文言から生の <c>ex.Message</c> を外したため、技術的詳細の出口はログだけになる。
+    /// 「UI 文言」と「ログ」を対で数える（<c>error-messages.md</c> #1817）— 文言を差し替えただけで
+    /// 出口がゼロになっていないことを表明する。
+    /// </summary>
+    [Fact]
+    public async Task BuildAndInsertAsync_RepositoryThrows_LogsExceptionWithMaskedIdm()
+    {
+        // Arrange
+        var repoMock = new Mock<ILedgerRepository>();
+        var boomMessage = "DB connection lost";
+        var boom = new InvalidOperationException(boomMessage);
+        repoMock.Setup(r => r.InsertAsync(It.IsAny<Ledger>())).ThrowsAsync(boom);
+
+        var logger = new RecordingLogger<NewLedgerFromSegmentsBuilderTests>();
+        var builder = new NewLedgerFromSegmentsBuilder(repoMock.Object, new SummaryGenerator(), logger);
+        var errors = new List<CsvImportError>();
+        var detail = Usage(new DateTime(2024, 7, 1, 8, 0, 0), amount: 260, balance: 9740);
+
+        // Act
+        await builder.BuildAndInsertAsync(
+            CardIdm,
+            new DateTime(2024, 7, 1),
+            new List<(int LineNumber, LedgerDetail Detail)> { (LineNumber: 30, Detail: detail) },
+            errors);
+
+        // Assert - 例外オブジェクトごと記録され、調査に使える値（行番号）が載っていること
+        var entry = logger.Entries.Should().ContainSingle(
+            e => e.Level == LogLevel.Error, logger.FormatEntries()).Subject;
+        entry.Exception.Should().BeSameAs(boom, "スタックトレースが残ること");
+        entry.Message.Should().Contain("30", "行番号が載っていること");
+
+        // ログにも生の IDm を出さない（#1852）
+        entry.Message.Should().Contain(IdmMasker.Mask(CardIdm));
+        entry.Message.Should().NotContain(CardIdm);
+    }
+
+    /// <summary>
+    /// 明細挿入の失敗（影響行数 0）も、痕跡がログに残ること。
+    /// </summary>
+    [Fact]
+    public async Task BuildAndInsertAsync_InsertDetailsFails_LogsWithMaskedIdm()
+    {
+        // Arrange
+        var repoMock = new Mock<ILedgerRepository>();
+        repoMock.Setup(r => r.InsertAsync(It.IsAny<Ledger>())).ReturnsAsync(300);
+        repoMock.Setup(r => r.InsertDetailsAsync(It.IsAny<int>(), It.IsAny<IEnumerable<LedgerDetail>>()))
+            .ReturnsAsync(false);
+
+        var logger = new RecordingLogger<NewLedgerFromSegmentsBuilderTests>();
+        var builder = new NewLedgerFromSegmentsBuilder(repoMock.Object, new SummaryGenerator(), logger);
+        var errors = new List<CsvImportError>();
+        var detail = Usage(new DateTime(2024, 6, 1, 8, 0, 0), amount: 260, balance: 9740);
+
+        // Act
+        await builder.BuildAndInsertAsync(
+            CardIdm,
+            new DateTime(2024, 6, 1),
+            new List<(int LineNumber, LedgerDetail Detail)> { (LineNumber: 20, Detail: detail) },
+            errors);
+
+        // Assert
+        var entry = logger.Entries.Should().ContainSingle(
+            e => e.Level == LogLevel.Error, logger.FormatEntries()).Subject;
+        entry.Message.Should().Contain(IdmMasker.Mask(CardIdm));
+        entry.Message.Should().NotContain(CardIdm);
+        entry.Message.Should().Contain("20", "行番号が載っていること");
+    }
+
+    /// <summary>
+    /// 正常系ではエラーログを出さないこと（「常に出す」実装へ緩めても通ってしまうのを防ぐ）。
+    /// </summary>
+    [Fact]
+    public async Task BuildAndInsertAsync_Success_DoesNotLogError()
+    {
+        // Arrange
+        var repoMock = new Mock<ILedgerRepository>();
+        repoMock.Setup(r => r.InsertAsync(It.IsAny<Ledger>())).ReturnsAsync(400);
+        repoMock.Setup(r => r.InsertDetailsAsync(It.IsAny<int>(), It.IsAny<IEnumerable<LedgerDetail>>()))
+            .ReturnsAsync(true);
+
+        var logger = new RecordingLogger<NewLedgerFromSegmentsBuilderTests>();
+        var builder = new NewLedgerFromSegmentsBuilder(repoMock.Object, new SummaryGenerator(), logger);
+        var errors = new List<CsvImportError>();
+        var detail = Usage(new DateTime(2024, 8, 1, 8, 0, 0), amount: 260, balance: 9740);
+
+        // Act
+        var count = await builder.BuildAndInsertAsync(
+            CardIdm,
+            new DateTime(2024, 8, 1),
+            new List<(int LineNumber, LedgerDetail Detail)> { (LineNumber: 40, Detail: detail) },
+            errors);
+
+        // Assert
+        count.Should().Be(1);
+        errors.Should().BeEmpty();
+        logger.Entries.Should().NotContain(e => e.Level == LogLevel.Error, logger.FormatEntries());
     }
 }

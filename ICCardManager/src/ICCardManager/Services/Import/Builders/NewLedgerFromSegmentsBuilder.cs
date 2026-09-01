@@ -2,8 +2,11 @@
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
+using ICCardManager.Common;
 using ICCardManager.Data.Repositories;
+using ICCardManager.Infrastructure.Security;
 using ICCardManager.Models;
+using Microsoft.Extensions.Logging;
 
 namespace ICCardManager.Services.Import.Builders
 {
@@ -16,6 +19,7 @@ namespace ICCardManager.Services.Import.Builders
     {
         private readonly ILedgerRepository _ledgerRepository;
         private readonly SummaryGenerator _summaryGenerator;
+        private readonly ILogger _logger;
 
         /// <param name="ledgerRepository">台帳リポジトリ</param>
         /// <param name="summaryGenerator">
@@ -28,12 +32,21 @@ namespace ICCardManager.Services.Import.Builders
         /// 「設定した部署種別が静かに無視される」形で潜在化する
         /// （<c>.claude/rules/development-conventions.md</c> #1820）。
         /// </param>
+        /// <param name="logger">
+        /// ロガー（<c>null</c> 可）。Issue #1986: 失敗の文言から生の <c>ex.Message</c> を外したため、
+        /// 技術的詳細の出口はここだけになる。<b>省略可能にしない</b> — 既定値を付けると
+        /// 配線漏れが「障害の痕跡がどこにも残らない」形で潜在化する
+        /// （<c>.claude/rules/error-messages.md</c> #1817「UI 文言とログを対で数える」／
+        /// <c>development-conventions.md</c> #1820）。
+        /// </param>
         public NewLedgerFromSegmentsBuilder(
             ILedgerRepository ledgerRepository,
-            SummaryGenerator summaryGenerator)
+            SummaryGenerator summaryGenerator,
+            ILogger logger)
         {
             _ledgerRepository = ledgerRepository;
             _summaryGenerator = summaryGenerator ?? throw new ArgumentNullException(nameof(summaryGenerator));
+            _logger = logger;
         }
 
         /// <summary>
@@ -128,10 +141,20 @@ namespace ICCardManager.Services.Import.Builders
                     if (!success)
                     {
                         segmentFailed = true;
+                        _logger?.LogError(
+                            "Issue #906: 新規台帳の利用明細を登録できませんでした（影響行数 0）: "
+                            + "CardIdm={CardIdm}, LedgerId={LedgerId}, 行番号={LineNumber}, 明細件数={DetailCount}",
+                            IdmMasker.Mask(cardIdm), newLedgerId, firstLineNumber, segmentDetails.Count);
                         errors.Add(new CsvImportError
                         {
                             LineNumber = firstLineNumber,
-                            Message = $"カード {cardIdm} の新規詳細の挿入に失敗しました",
+                            Message = $"カード {IdmMasker.Mask(cardIdm)} の利用明細をデータベースへ登録できませんでした。"
+                                + "他のパソコンや別の操作で対象の台帳が変更された可能性があります。"
+                                + "画面を更新してから、この行をもう一度取り込んでください。",
+                            // Data は突き合わせ用の内部キーであり、画面にもログにも出ない
+                            // （表示されるのは Message だけ。DataExportImportViewModel を参照）。
+                            // マスクすると呼び出し元がカードを一意に特定できなくなるため生のまま保持する
+                            // （Issue #1986 で消費側を数え上げて確認した）。
                             Data = cardIdm
                         });
                     }
@@ -141,10 +164,19 @@ namespace ICCardManager.Services.Import.Builders
             }
             catch (Exception ex)
             {
+                // 技術的詳細（ex.Message・スタックトレース）はログへ逃がし、
+                // ユーザー向けには 3 要素の文言だけを出す（#1614）。
+                _logger?.LogError(
+                    ex,
+                    "Issue #906: 利用履歴の自動作成に失敗しました: "
+                    + "CardIdm={CardIdm}, 行番号={LineNumber}, 明細件数={DetailCount}",
+                    IdmMasker.Mask(cardIdm), firstLineNumber, detailRows.Count);
                 errors.Add(new CsvImportError
                 {
                     LineNumber = firstLineNumber,
-                    Message = $"カード {cardIdm} の利用履歴自動作成中にエラーが発生しました: {ex.Message}",
+                    Message = $"カード {IdmMasker.Mask(cardIdm)} の"
+                        + ExceptionMessageFormatter.ToUserMessage(ex, "利用履歴の自動作成"),
+                    // Data の扱いは上の分岐のコメントを参照（Issue #1986）。
                     Data = cardIdm
                 });
                 return 0;
