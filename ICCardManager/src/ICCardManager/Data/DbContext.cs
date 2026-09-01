@@ -737,14 +737,16 @@ namespace ICCardManager.Data
             }
         }
 
-        /// <summary>
-        /// データベース接続を取得（非推奨）
-        /// </summary>
-        [Obsolete("スレッドセーフな LeaseConnectionAsync() または LeaseConnection() を使用してください")]
-        public virtual SQLiteConnection GetConnection()
-        {
-            return GetConnectionInternal();
-        }
+        // Issue #1988: 非推奨の GetConnection()（生の共有 SQLiteConnection をそのまま返す）を削除した。
+        // 本番の呼び出し元は 1 つも無く、セマフォ（_semaphore）・トランザクション計数
+        // （_activeTransactionCount）・保守トランザクションのゲート（_maintenanceTransactionGate、
+        // Issue #1984）・進行中リースの計数（_activeAsyncLeaseCount、Issue #1809）のいずれも通らない。
+        // GetConnection().BeginTransaction() は Issue #1984 で削除した BeginTransaction() の本体そのもので、
+        // 残しておくと「計数に載らない取得口」が別の綴りで再生する。
+        // 接続は LeaseConnectionAsync() / LeaseConnection() から、トランザクションは
+        // BeginTransactionAsync() から取ること。
+        // 回帰は DbContextConnectionAccessConventionTests がリフレクションで固定する
+        // （メソッド名ではなく「SQLiteConnection を外へ出す公開面が無いこと」を資源で数える）。
 
         /// <summary>
         /// 接続の初期化・再接続ロジック（内部用）
@@ -885,7 +887,9 @@ namespace ICCardManager.Data
         /// <remarks>
         /// リストア処理でDBファイルを置き換える前に呼び出す。
         /// 接続を閉じることでファイルロックを解放する。
-        /// その後GetConnection()を呼ぶと自動的に再接続される。
+        /// その後 <see cref="LeaseConnectionAsync"/> / <see cref="LeaseConnection"/> /
+        /// <see cref="BeginTransactionAsync"/> を呼ぶと、いずれも内部の GetConnectionInternal が
+        /// 閉じられた接続を検出して自動的に再接続する。
         /// </remarks>
         public void CloseConnection()
         {
@@ -903,8 +907,9 @@ namespace ICCardManager.Data
         /// <para>
         /// 戻り値のConnectionSuspensionScopeをDisposeすると停止が解除される。
         /// using文で使用することで、例外発生時も確実に解除される。
-        /// 停止中に <see cref="GetConnection"/> / <see cref="LeaseConnectionAsync"/> を呼ぶと
-        /// InvalidOperationExceptionがスローされる。
+        /// 停止中に <see cref="LeaseConnectionAsync"/> を呼ぶと InvalidOperationException が
+        /// スローされる（<see cref="LeaseConnection"/> / <see cref="BeginTransactionAsync"/> は
+        /// 接続を取る前にセマフォを待つため、失敗せず解除後に成功する。下の Issue #1809 の項を参照）。
         /// </para>
         /// <para>
         /// <b>Issue #1809 — 使用中の接続を閉じない:</b> 本メソッドは接続を閉じる前に
@@ -1713,12 +1718,7 @@ ON CONFLICT(key) DO UPDATE SET value = excluded.value";
         // 呼び出し元は 1 つも無く、セマフォも _activeTransactionCount も通らないため、
         // 復活すると本 Issue が塞いだ「計数に載らないトランザクション」がそのまま再生する。
         // トランザクションは BeginTransactionAsync() から取ること。
-        //
-        // ただし GetConnection()（同じく非推奨・本番の呼び出し元ゼロ・テストのみ 10 か所）は残っており、
-        // GetConnection().BeginTransaction() と書けば同じ抜け道が再現する。つまり
-        // 「計数に載らない取得口」は本 Issue で 1 つ減っただけで、ゼロにはなっていない。
-        // 撤去にはテスト 5 ファイルの移行（LeaseConnection() はセマフォを取るため、
-        // 生の接続を長く保持するテストは書き換えが要る）が伴い、本 Issue の範囲を超えるため見送った。
+        // Issue #1988: 同じ抜け道を再現できた GetConnection() も削除済み（上記の注記を参照）。
 
         /// <summary>
         /// DB接続の疎通確認（IDatabaseInfo実装）

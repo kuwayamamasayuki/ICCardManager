@@ -635,7 +635,10 @@ public class DbContextCleanupTests : IDisposable
         logCount.Should().BeGreaterOrEqualTo(3, "7年前のoperation_logは3件以上削除されるべき");
 
         // DBの状態を直接確認 - 新しいデータが残っていることを確認
-        var connection = _dbContext.GetConnection();
+        // Issue #1988: 生の接続を返す GetConnection() は削除済み。CleanupOldData は既に完了して
+        // セマフォを解放しているため、ここでリースを取っても SUT と保持区間が重ならない。
+        using var lease = _dbContext.LeaseConnection();
+        var connection = lease.Connection;
         using var ledgerCheck = connection.CreateCommand();
         ledgerCheck.CommandText = "SELECT COUNT(*) FROM ledger WHERE summary = '新しい履歴'";
         var ledgerRemaining = Convert.ToInt32(ledgerCheck.ExecuteScalar());
@@ -663,8 +666,9 @@ public class DbContextCleanupTests : IDisposable
 
         // Assert: コミット後、SELECTでデータが消えていること
         ledgerCount.Should().Be(1);
-        var connection = _dbContext.GetConnection();
-        using var cmd = connection.CreateCommand();
+        // Issue #1988: 生の接続を返す GetConnection() は削除済み（保持区間は SUT の外）。
+        using var lease = _dbContext.LeaseConnection();
+        using var cmd = lease.Connection.CreateCommand();
         cmd.CommandText = "SELECT COUNT(*) FROM ledger WHERE summary = '古い履歴'";
         var remaining = Convert.ToInt32(cmd.ExecuteScalar());
         remaining.Should().Be(0, "コミット済みなので削除が反映されているべき");

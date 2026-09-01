@@ -1,5 +1,6 @@
-using System;
+﻿using System;
 using System.IO;
+using System.Threading.Tasks;
 using FluentAssertions;
 using ICCardManager.Data;
 using ICCardManager.Data.Repositories;
@@ -265,11 +266,22 @@ public class BackupServiceRestoreSafetyTests : IDisposable
     #region Issue #1166: 接続一時停止テスト
 
     /// <summary>
-    /// SuspendConnections中にGetConnectionがInvalidOperationExceptionをスローすること
+    /// SuspendConnections中に新規の接続リース取得がInvalidOperationExceptionをスローすること
     /// </summary>
+    /// <remarks>
+    /// Issue #1988: 生の接続を返す <c>GetConnection()</c> は削除したため <c>LeaseConnectionAsync()</c> で
+    /// 表明する。検査している性質は変わらない（停止の判定は <c>GetConnectionInternal</c> にあり、
+    /// <c>GetConnection</c> 固有ではなかった）。
+    /// <para>
+    /// <b>同期版の <c>LeaseConnection()</c> では表明できない</b>: <c>SuspendConnections</c> は
+    /// スコープの Dispose まで接続セマフォを保持し続けるため（Issue #1809）、同期リースは
+    /// 例外にならず<b>ブロックして解除後に成功する</b>のが仕様。セマフォを取らない
+    /// <c>LeaseConnectionAsync()</c> だけが停止中に <c>GetConnectionInternal</c> へ到達して拒否される。
+    /// </para>
+    /// </remarks>
     [Fact]
     [Trait("Category", "Unit")]
-    public void SuspendConnections_GetConnectionが例外をスローすること()
+    public async Task SuspendConnections_接続リース取得が例外をスローすること()
     {
         var dbPath = Path.Combine(_testDirectory, "suspend_test.db");
         using var dbContext = new DbContext(dbPath);
@@ -278,18 +290,21 @@ public class BackupServiceRestoreSafetyTests : IDisposable
         // Act: 接続を一時停止
         using (dbContext.SuspendConnections())
         {
-            // Assert: GetConnectionが例外をスロー
+            // Assert: 新規リースの取得が例外をスロー
             dbContext.IsConnectionSuspended.Should().BeTrue();
-            var act = () => dbContext.GetConnection();
-            act.Should().Throw<InvalidOperationException>()
+            var act = async () =>
+            {
+                using var suspendedLease = await dbContext.LeaseConnectionAsync();
+            };
+            await act.Should().ThrowAsync<InvalidOperationException>()
                 .WithMessage("*一時停止中*");
         }
 
         // スコープ終了後は接続可能に復帰
         dbContext.IsConnectionSuspended.Should().BeFalse();
-        var connection = dbContext.GetConnection();
-        connection.Should().NotBeNull();
-        connection.State.Should().Be(System.Data.ConnectionState.Open);
+        using var lease = dbContext.LeaseConnection();
+        lease.Connection.Should().NotBeNull();
+        lease.Connection.State.Should().Be(System.Data.ConnectionState.Open);
     }
 
     /// <summary>
@@ -297,7 +312,7 @@ public class BackupServiceRestoreSafetyTests : IDisposable
     /// </summary>
     [Fact]
     [Trait("Category", "Unit")]
-    public void SuspendConnections_Dispose後にGetConnectionが成功すること()
+    public void SuspendConnections_Dispose後に接続リース取得が成功すること()
     {
         var dbPath = Path.Combine(_testDirectory, "suspend_resume.db");
         using var dbContext = new DbContext(dbPath);
@@ -309,9 +324,9 @@ public class BackupServiceRestoreSafetyTests : IDisposable
         scope.Dispose();
         dbContext.IsConnectionSuspended.Should().BeFalse();
 
-        // 再接続が正常に動作すること
-        var connection = dbContext.GetConnection();
-        connection.State.Should().Be(System.Data.ConnectionState.Open);
+        // 再接続が正常に動作すること（Issue #1988: GetConnection() は削除済み）
+        using var lease = dbContext.LeaseConnection();
+        lease.Connection.State.Should().Be(System.Data.ConnectionState.Open);
     }
 
     /// <summary>
@@ -319,7 +334,7 @@ public class BackupServiceRestoreSafetyTests : IDisposable
     /// </summary>
     [Fact]
     [Trait("Category", "Unit")]
-    public void RestoreFromBackup_リストア中はGetConnectionが拒否されること()
+    public void RestoreFromBackup_リストア中は接続リース取得が拒否されること()
     {
         var dbPath = Path.Combine(_testDirectory, "restore_guard.db");
         using var dbContext = new DbContext(dbPath);
@@ -341,8 +356,8 @@ public class BackupServiceRestoreSafetyTests : IDisposable
         result.Should().BeTrue();
         // リストア完了後は接続が可能に復帰していること
         dbContext.IsConnectionSuspended.Should().BeFalse();
-        var connection = dbContext.GetConnection();
-        connection.State.Should().Be(System.Data.ConnectionState.Open);
+        using var lease = dbContext.LeaseConnection();
+        lease.Connection.State.Should().Be(System.Data.ConnectionState.Open);
     }
 
     /// <summary>
