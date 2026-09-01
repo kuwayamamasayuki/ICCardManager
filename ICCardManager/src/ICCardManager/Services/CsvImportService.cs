@@ -353,7 +353,14 @@ namespace ICCardManager.Services
         /// <remarks>
         /// **中断こそログが要る**。成功時（Shift_JIS 判別）だけ Information を出して失敗時が無言だと、
         /// 「インポートできない」という問い合わせに対してログから何も分からない
-        /// （呼び出し元の catch は結果オブジェクトへ文言を写すだけで、ログは書かない。Issue #1744 コードレビュー指摘）。
+        /// （Issue #1744 コードレビュー指摘）。
+        /// <para>
+        /// Issue #1991 以降、呼び出し元の共通ハンドラー（<see cref="LogImportFailure"/>）も
+        /// 同じ失敗を Warning で 1 行残す。ここでは<b>判別に用いた文字コードとファイル</b>を、
+        /// 向こうでは<b>どの取り込みだったか</b>を記録しており、片方だけでは切り分けられないため
+        /// <see cref="MarkLogged{TException}"/> で抑止せず両方残す
+        /// （「二重に記録しない」規約の例外。ここに理由を書く）。
+        /// </para>
         /// </remarks>
         private static FileOperationException CreateEncodingFailureException(
             TextDecodeResult decoded, string filePath, ILogger logger)
@@ -466,11 +473,15 @@ namespace ICCardManager.Services
 
             switch (ex)
             {
+                // 「何が」は経路ごとの操作名で述べる（#1956 / #1820）。
+                // ここを付け忘れると、最も起きやすい失敗（ファイルの選び間違い）でこそ
+                // カード／職員／利用履歴／明細のどれが失敗したのか分からない
+                // ― 操作名を必須引数にした意味が無くなる（コードレビューで検出）。
                 case FileNotFoundException _:
-                    return "指定されたファイルが見つかりません。"
+                    return $"{ExceptionMessageFormatter.DescribeOperation(operation)}に失敗しました。指定されたファイルが見つかりません。"
                            + "ファイルが移動・削除されていないか確認し、もう一度選び直してください。";
                 case UnauthorizedAccessException _:
-                    return "ファイルへのアクセス権限がありません。"
+                    return $"{ExceptionMessageFormatter.DescribeOperation(operation)}に失敗しました。ファイルへのアクセス権限がありません。"
                            + "ファイルの読み取り権限を確認するか、管理者に連絡してください。";
                 case AppException appException:
                     return appException.UserFriendlyMessage;
@@ -488,17 +499,24 @@ namespace ICCardManager.Services
         /// 取込・プレビューの失敗の技術的詳細をログへ残す（Issue #1991）。
         /// </summary>
         /// <remarks>
+        /// <para>
         /// <c>ILogger</c> は省略可能な注入（Issue #1282）のため、未注入時は
         /// <see cref="ErrorDialogHelper.LogException"/> の既存ファイルログ機構へ委譲する
         /// （ロガーが無いことを「ログを出さない理由」にしない。<c>development-conventions.md</c> #1819）。
-        /// </remarks>
-        /// <remarks>
+        /// </para>
         /// <para>
         /// <b>レベルは「システムの不具合か、利用者の入力の問題か」で分ける</b>
         /// （<c>development-conventions.md</c> #1716「障害調査でこの行が無いと困るか」）。
-        /// ファイルが見つからない・権限が無い・文字コードが読めない（<see cref="AppException"/>）は
+        /// ファイルが見つからない・権限が無い・文字コードが読めない
+        /// （<see cref="FileOperationException"/>）・入力値が不正（<see cref="ValidationException"/>）は
         /// 職員が選び直せば解決する<b>想定内の失敗</b>で、その都度 <c>Error</c> を積むと
         /// 本当の不具合が埋もれる。痕跡は残しつつ <c>Warning</c> にする（本番のログには出力される）。
+        /// </para>
+        /// <para>
+        /// <b>「<see cref="AppException"/> なら想定内」とは数えない</b>（コードレビューで検出）。
+        /// <see cref="DatabaseException"/> / <see cref="DatabaseVersionMismatchException"/> も
+        /// <see cref="AppException"/> の派生であり、共有モードのロック競合や保存値の破損といった
+        /// <b>システムの不具合</b>である。想定内の側は「職員が入力を選び直せば解決するか」で列挙する。
         /// </para>
         /// </remarks>
         private void LogImportFailure(Exception ex, string operation)
@@ -512,22 +530,61 @@ namespace ICCardManager.Services
                 return;
             }
 
+            // 「想定内」は例外の基底型ではなく「職員が選び直せば解決するか」で列挙する。
             var isExpectedInputProblem =
-                ex is AppException || ex is FileNotFoundException || ex is UnauthorizedAccessException;
+                ex is FileOperationException
+                || ex is ValidationException
+                || ex is FileNotFoundException
+                || ex is UnauthorizedAccessException;
 
+            WriteImportFailureLog(
+                ex,
+                operation,
+                isExpectedInputProblem ? LogLevel.Warning : LogLevel.Error);
+        }
+
+        /// <summary>
+        /// 取込の失敗をログへ書く唯一の手段（Issue #1991）。
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// <b><c>MarkLogged</c> を付けてよいのは、実際に書けたときだけ</b>（コードレビューで検出）。
+        /// トランザクション内の <c>catch</c> は <c>_logger?.LogError(...)</c> で書いていたため、
+        /// ロガー未注入のオーバーロード（<see cref="CsvImportService"/> の 7 引数版）では
+        /// <b>1 行も書かないまま「記録済み」の印だけが付き</b>、
+        /// <see cref="LogImportFailure"/> が <see cref="ErrorDialogHelper.LogException"/> への
+        /// フォールバック（#1819）ごと飛ばしていた ― 是正前（生の <c>ex.Message</c> が
+        /// 少なくとも UI へ出ていた）より痕跡が減る。書き込みをこのメソッドへ寄せ、
+        /// ロガーの有無にかかわらず必ずどちらかの出口へ届くようにする（#1763）。
+        /// </para>
+        /// </remarks>
+        private void WriteImportFailureLog(Exception ex, string operation, LogLevel level)
+        {
             if (_logger != null)
             {
-                _logger.Log(
-                    isExpectedInputProblem ? LogLevel.Warning : LogLevel.Error,
-                    ex,
-                    "CSV import failed: {Operation}",
-                    operation);
+                _logger.Log(level, ex, "CSV import failed: {Operation}", operation);
             }
             else
             {
+                // フォールバックは水準を保持できない（ErrorDialogHelper は常に ERROR で書く）。
+                // 本番の DI は 8 引数のコンストラクタを選ぶため、ここを通るのは
+                // ロガーを渡さない 7 引数版（Moq プロキシ互換のために残している）だけ。
                 ErrorDialogHelper.LogException(ex, operation);
             }
         }
+
+        /// <summary>
+        /// トランザクション内の失敗を、ロールバックより先にログへ残す（Issue #1745 / #1991）。
+        /// </summary>
+        /// <remarks>
+        /// 呼び出し側は直後に <see cref="MarkLogged{TException}"/> で「記録済み」の印を付けて再スローする。
+        /// その印が嘘にならないよう、書き込みは必ず <see cref="WriteImportFailureLog"/> を通す
+        /// （ロガー未注入でも <see cref="ErrorDialogHelper.LogException"/> へ落ちる）。
+        /// </remarks>
+        /// <param name="ex">捕捉した例外</param>
+        /// <param name="operation">どのインポートのどの局面で落ちたか（ログの識別子）</param>
+        private void LogImportTransactionFailure(Exception ex, string operation) =>
+            WriteImportFailureLog(ex, operation, LogLevel.Error);
 
         /// <summary>
         /// 「この例外は既にログへ記録済み」という印を付ける（Issue #1991）。
@@ -554,12 +611,25 @@ namespace ICCardManager.Services
         private static TException MarkLogged<TException>(TException exception)
             where TException : Exception
         {
-            // Exception.Data は一部の例外で null になり得る（リモーティング等）。
+            // Exception.Data は一部の例外で null／読み取り専用になり得る（リモーティング等）。
             // 印を付けられないときは「未記録」として扱う（多く出るほうへ倒す ―
             // 痕跡が残らないより二重に残るほうが障害調査では害が小さい）。
-            if (exception?.Data != null)
+            //
+            // 本メソッドは `catch` の中から呼ばれる（`throw MarkLogged(...)` / `MarkLogged(ex); throw;`）。
+            // ここで二次例外が出ると**本来の失敗要因を置き換えて抜け**、
+            // DatabaseException へのラップも、`DbContext.ExecuteWithRetryAsync` の
+            // `when (ex.ResultCode == Busy || Locked)` によるリトライも丸ごと外れる
+            // （development-conventions.md #1745「catch の中の後始末は、それ自体が失敗し得ることを前提に書く」）。
+            try
             {
-                exception.Data[LoggedMarkerKey] = true;
+                if (exception?.Data != null && !exception.Data.IsReadOnly)
+                {
+                    exception.Data[LoggedMarkerKey] = true;
+                }
+            }
+            catch (Exception)
+            {
+                // 印が付かないだけ（＝二重に記録される）で、データにも制御フローにも影響しない。
             }
 
             return exception;

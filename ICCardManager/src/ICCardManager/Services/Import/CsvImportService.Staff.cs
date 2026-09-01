@@ -207,7 +207,7 @@ namespace ICCardManager.Services
             {
                 // ログはロールバックより先に書く（TryRollbackImportTransaction の remarks 参照）
                 // Issue #1282: SQLiteException は DatabaseException へラップして詳細を保持
-                _logger?.LogError(ex,
+                LogImportTransactionFailure(ex,
                     "職員CSVインポートのトランザクション中に SQLite エラーが発生しロールバック");
                 TryRollbackImportTransaction(scope);
                 throw MarkLogged(DatabaseException.QueryFailed("CSV import transaction", ex));
@@ -217,7 +217,7 @@ namespace ICCardManager.Services
                 // Issue #1282: 想定外の例外（IO例外・DB接続断・仮想テーブル解決失敗等）も
                 // 握りつぶさずログに痕跡を残してから再スローする。throw; で
                 // スタックトレースを保持したまま呼び出し元に伝搬する。
-                _logger?.LogError(ex,
+                LogImportTransactionFailure(ex,
                     "職員CSVインポートのトランザクション中に想定外の例外が発生しロールバック");
                 TryRollbackImportTransaction(scope);
                 MarkLogged(ex);

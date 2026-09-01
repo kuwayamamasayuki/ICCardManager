@@ -264,6 +264,13 @@ public class RawExceptionMessageExposureTests : IDisposable
         validationService
             .Setup(x => x.ValidateCardIdm(It.IsAny<string>()))
             .Returns(ValidationResult.Success());
+        // 職員経路は ValidateStaffIdm を通る。stub しないと loose モックの既定値（null）が返り、
+        // CsvImportService.ValidateIdm の `validation.IsValid` が NullReferenceException になって
+        // **arrange したリポジトリの失敗へ到達しないまま**テストだけ緑になる
+        // （testing.md「モックの既定値で通っていないか」。コードレビューで検出）。
+        validationService
+            .Setup(x => x.ValidateStaffIdm(It.IsAny<string>()))
+            .Returns(ValidationResult.Success());
 
         var settingsRepository = new Mock<ISettingsRepository>();
         settingsRepository.Setup(x => x.GetAppSettingsAsync()).ReturnsAsync(new AppSettings());
@@ -381,21 +388,58 @@ public class RawExceptionMessageExposureTests : IDisposable
     }
 
     /// <summary>
+    /// 対の表明。<b>システムの不具合</b>は <c>Error</c> のまま残すこと（#1716）。
+    /// </summary>
+    /// <remarks>
+    /// 「想定内＝<see cref="ICCardManager.Common.Exceptions.AppException"/>」と数えると、
+    /// その派生である <c>DatabaseException</c>（共有モードのロック競合・保存値の破損）まで
+    /// <c>Warning</c> へ落ちる。この表明が無いと、想定内の側だけを見るテストは
+    /// 「全部 Warning」の実装でも緑になる（コードレビューで検出）。
+    /// </remarks>
+    [Fact]
+    public async Task 取込失敗時_システムの不具合はErrorで記録すること()
+    {
+        var (service, cardRepository, importLogger) = CreateImportService();
+        var thrown = ICCardManager.Common.Exceptions.DatabaseException.QueryFailed(
+            "card lookup",
+            new SQLiteException(SQLiteErrorCode.Busy, RawSqliteMessage));
+        cardRepository
+            .Setup(x => x.GetByIdmAsync(It.IsAny<string>(), It.IsAny<bool>()))
+            .ThrowsAsync(thrown);
+
+        var path = WriteCardCsv();
+        try
+        {
+            await service.ImportCardsAsync(path);
+
+            importLogger.Entries.Should().Contain(
+                e => e.Level == LogLevel.Error && ReferenceEquals(e.Exception, thrown),
+                "DatabaseException は AppException の派生だが、職員が入力を選び直しても解決しない"
+                + "システムの不具合であり Warning へ落とさないこと。実際: "
+                + importLogger.FormatEntries());
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
+    /// <summary>
     /// 操作名は経路ごとに具体的であること（#1956 / #1820）。
     /// 既定値付きの引数にすると全経路が同じ汎用名になり、「何が」失敗したのか区別できない。
     /// </summary>
     [Fact]
     public async Task 取込失敗時_経路ごとに異なる操作名を名乗ること()
     {
-        var boom = new InvalidOperationException("boom");
-
+        // 例外インスタンスは経路ごとに分ける。MarkLogged は Exception.Data へ印を書くため、
+        // 同じインスタンスを 2 経路で使い回すと 1 件目の印を 2 件目が見てしまう。
         var (cardService, cardRepository, _) = CreateImportService();
         cardRepository
             .Setup(x => x.GetByIdmAsync(It.IsAny<string>(), It.IsAny<bool>()))
-            .ThrowsAsync(boom);
+            .ThrowsAsync(new InvalidOperationException("boom"));
         _staffRepositoryMock
             .Setup(x => x.GetByIdmAsync(It.IsAny<string>(), It.IsAny<bool>()))
-            .ThrowsAsync(boom);
+            .ThrowsAsync(new InvalidOperationException("boom"));
 
         var cardPath = WriteCardCsv();
         var staffPath = WriteStaffCsv();
@@ -433,7 +477,15 @@ public class RawExceptionMessageExposureTests : IDisposable
         // SQLiteTransaction の Dispose が ObjectDisposedException になる。
         for (var i = _disposables.Count - 1; i >= 0; i--)
         {
-            _disposables[i].Dispose();
+            try
+            {
+                _disposables[i].Dispose();
+            }
+            catch (Exception)
+            {
+                // 1 件の破棄失敗で残りを取りこぼすと SQLiteConnection が漏れ、
+                // さらに xUnit はアサーション結果ではなく破棄の失敗を報告する。
+            }
         }
     }
 }
