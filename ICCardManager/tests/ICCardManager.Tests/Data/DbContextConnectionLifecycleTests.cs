@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Data.SQLite;
 using System.IO;
 using System.Threading;
@@ -223,7 +223,7 @@ public class DbContextConnectionLifecycleTests : IDisposable
     /// 再利用され続ける。
     /// </summary>
     [Fact]
-    public void GetConnection_PRAGMA適用に失敗した接続を保持せず次回に再構成すること()
+    public void 接続リース_PRAGMA適用に失敗した接続を保持せず次回に再構成すること()
     {
         // Arrange: 初回の PRAGMA 適用だけ失敗させる
         using var dbContext = new PragmaFailingOnceDbContext(_dbPath);

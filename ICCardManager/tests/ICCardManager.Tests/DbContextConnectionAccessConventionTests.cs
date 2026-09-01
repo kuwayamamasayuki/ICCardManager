@@ -104,10 +104,16 @@ public class DbContextConnectionAccessConventionTests
             .ToList();
 
         detected.Should().BeEquivalentTo(
-            new[] { "PublicMethod", "InternalProperty", "ProtectedField" },
-            "メソッド・プロパティ・フィールドのいずれの綴りでも接続の公開を検出すること");
+            new[]
+            {
+                "PublicMethod", "InternalProperty", "ProtectedField",
+                "ReturnsBaseType", "ReturnsInterface", "ReturnsArray", "OutParameter",
+            },
+            "接続を外へ出す綴りは、戻り値・プロパティ・フィールドに限らない。" +
+            "基底型（DbConnection）・インターフェース（IDbConnection）・配列・out 引数のいずれも" +
+            "同じ共有接続を公開する（#1786「その性質を破れる全経路を列挙する」／#1843）");
 
-        // 正当な形（private の内部取得・接続を受け取る引数・別型の戻り値）は検出しないこと
+        // 正当な形（private の内部取得・接続を受け取る値渡しの引数・別型の戻り値）は検出しないこと
         detected.Should().NotContain("PrivateInternalAccessor");
         detected.Should().NotContain("AcceptsConnection");
         detected.Should().NotContain("LeaseLike");
@@ -128,6 +134,17 @@ public class DbContextConnectionAccessConventionTests
             if (ExposesConnection(method.ReturnType))
             {
                 yield return $"{method.Name} (メソッドの戻り値)";
+            }
+
+            // out / ref は戻り値と同じく資源を外へ出す（戻り値が void でも成立する）。
+            // 値渡しの引数（接続を受け取る ConfigureJournalMode など）は正当なので対象外。
+            foreach (var parameter in method.GetParameters())
+            {
+                if (!parameter.ParameterType.IsByRef) continue;
+                if (ExposesConnection(parameter.ParameterType.GetElementType()!))
+                {
+                    yield return $"{method.Name} (out/ref 引数 {parameter.Name})";
+                }
             }
         }
 
@@ -159,7 +176,18 @@ public class DbContextConnectionAccessConventionTests
     /// </remarks>
     private static bool ExposesConnection(Type type)
     {
-        if (typeof(SQLiteConnection).IsAssignableFrom(type)) return true;
+        // 接続の型（SQLiteConnection とその派生、および DbConnection / IDbConnection のような
+        // 接続を表す基底・インターフェース）で返せば、外へ出るのは同じ共有接続である。
+        // IDbConnection を基準にすることで基底型・インターフェース経由の公開も数えつつ、
+        // object / IDisposable のような「接続とは限らない」型は対象外に保つ
+        // （リースを IDisposable で返す正当な形を誤検出しない。#1786「誤検出はガードの寿命を縮める」）。
+        if (typeof(System.Data.IDbConnection).IsAssignableFrom(type)) return true;
+
+        // 配列・ジェネリック（Task<> / IReadOnlyList<> 等）に包んだ形も同じ資源の公開。
+        if (type.IsArray)
+        {
+            return ExposesConnection(type.GetElementType()!);
+        }
 
         if (type.IsGenericType)
         {
@@ -174,10 +202,14 @@ public class DbContextConnectionAccessConventionTests
     /// </summary>
     private class SampleLeakyContext
     {
-        // 検出されるべき 3 つの綴り
+        // 検出されるべき綴り
         public SQLiteConnection PublicMethod() => null!;
         internal SQLiteConnection? InternalProperty => null;
         protected SQLiteConnection? ProtectedField = null;
+        public System.Data.Common.DbConnection ReturnsBaseType() => null!;
+        public System.Data.IDbConnection ReturnsInterface() => null!;
+        public SQLiteConnection[] ReturnsArray() => null!;
+        public void OutParameter(out SQLiteConnection connection) => connection = null!;
 
         // 検出されるべきでない形
         private SQLiteConnection PrivateInternalAccessor() => null!;

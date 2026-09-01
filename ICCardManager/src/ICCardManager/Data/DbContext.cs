@@ -910,6 +910,8 @@ namespace ICCardManager.Data
         /// 停止中に <see cref="LeaseConnectionAsync"/> を呼ぶと InvalidOperationException が
         /// スローされる（<see cref="LeaseConnection"/> / <see cref="BeginTransactionAsync"/> は
         /// 接続を取る前にセマフォを待つため、失敗せず解除後に成功する。下の Issue #1809 の項を参照）。
+        /// <b>ただし同一フローが既にリースを保持している場合は別</b>: <see cref="LeaseConnection"/> の
+        /// リエントラント経路はセマフォを取らずに接続を取りに行くため、停止中は同じく例外になる。
         /// </para>
         /// <para>
         /// <b>Issue #1809 — 使用中の接続を閉じない:</b> 本メソッドは接続を閉じる前に

@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Data;
 using System.IO;
 using System.Linq;
@@ -86,7 +86,7 @@ public class DbContextSharedModeTests : IDisposable
     #region PRAGMA設定テスト（他のテストファイルでカバーされないPRAGMAのみ）
 
     [Fact]
-    public void GetConnection_foreign_keysが有効であること()
+    public void 接続リース_foreign_keysが有効であること()
     {
         var dbPath = Path.Combine(_testDirectory, "fk_test.db");
         using var dbContext = new DbContext(dbPath);
@@ -183,7 +183,7 @@ public class DbContextSharedModeTests : IDisposable
     }
 
     [Fact]
-    public void GetConnection_スレッドセーフであること()
+    public void 接続リース_スレッドセーフであること()
     {
         var dbPath = Path.Combine(_testDirectory, "threadsafe_test.db");
         using var dbContext = new DbContext(dbPath);

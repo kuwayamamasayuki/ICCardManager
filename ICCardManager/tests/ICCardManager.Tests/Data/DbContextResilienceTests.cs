@@ -70,7 +70,7 @@ public class DbContextResilienceTests : IDisposable
     /// </summary>
     [Fact]
     [Trait("Category", "Unit")]
-    public void GetConnection_共有モードでbusy_timeoutが15000msに設定されること()
+    public void 接続リース_共有モードでbusy_timeoutが15000msに設定されること()
     {
         // Issue #1559: 実際の SQLite 接続を開く必要があるためローカル一時ファイル + forceSharedMode で
         // 共有モード挙動を再現する
