@@ -40,7 +40,7 @@ namespace ICCardManager.Common
         /// </returns>
         public static string ToUserMessage(Exception exception, string operation)
         {
-            var op = string.IsNullOrWhiteSpace(operation) ? "処理" : operation.Trim();
+            var op = DescribeOperation(operation);
 
             // AppException は整備済みのユーザー向け文言を持つため、それをそのまま尊重する。
             if (exception is AppException appException &&
@@ -66,14 +66,24 @@ namespace ICCardManager.Common
         /// （「再度実行してください」と「履歴画面で修正してください」）、という害がある。
         /// </para>
         /// <para>
-        /// <see cref="AppException"/> は整備済みの <see cref="AppException.UserFriendlyMessage"/> を
-        /// そのまま返す（3 要素が 1 文に畳まれているため理由だけを取り出せない）。
+        /// <b>例外が 1 つある。</b><see cref="AppException"/> は整備済みの
+        /// <see cref="AppException.UserFriendlyMessage"/> を<b>そのまま</b>返す
+        /// （3 要素が 1 文に畳まれているため理由だけを取り出せない）。
         /// これは是正前から <c>DatabaseException.QueryFailed(...).UserFriendlyMessage</c> を
-        /// 埋め込んでいた箇所と同じ挙動である。
+        /// 埋め込んでいた箇所と同じ挙動だが、<b>その文言は行動指示を含み得る</b>
+        /// （例: <c>DatabaseException.InvalidStoredDate</c> の「…管理者に連絡してください。」）。
+        /// つまり <see cref="AppException"/> が渡る経路では、埋め込み先の行動指示と
+        /// <b>2 つ並ぶことがある</b>。ドキュメントの主張はコードで検算してから書く
+        /// （<c>development-conventions.md</c> #1924）ため、ここに正直に書く。
+        /// この制約を無くすには <see cref="AppException"/> が「なぜ」と「どうすれば」を
+        /// 別々に持つ必要があり、本 Issue のスコープ外として別途追跡する。
         /// </para>
         /// </remarks>
         /// <param name="exception">発生した例外</param>
-        /// <returns>「なぜ」だけの文（行動指示を含まない）</returns>
+        /// <returns>
+        /// 「なぜ」だけの文。<see cref="AppException"/> 以外は行動指示を含まない
+        /// （<see cref="AppException"/> の扱いは remarks を参照）。
+        /// </returns>
         public static string ToReason(Exception exception)
         {
             if (exception is AppException appException &&
@@ -84,6 +94,17 @@ namespace ICCardManager.Common
 
             return GetReasonAndAction(exception).Reason;
         }
+
+        /// <summary>
+        /// 文言の「何が」に使う操作名を整える（<c>null</c>／空白なら「処理」）。
+        /// </summary>
+        /// <remarks>
+        /// 自前の対応表を持つ呼び出し元（<c>CsvImportService.ToUserFacingErrorMessage</c> の
+        /// ファイル系 2 分岐）が <c>"〇〇に失敗しました。"</c> を組み立てるときにも使う。
+        /// 書式の既定値を書き写すと、片方だけが変わる日が来る（#1763）。
+        /// </remarks>
+        internal static string DescribeOperation(string operation) =>
+            string.IsNullOrWhiteSpace(operation) ? "処理" : operation.Trim();
 
         /// <summary>
         /// 例外種別に応じた「なぜ（理由）」と「どうすれば（対処）」の組を返す。

@@ -686,10 +686,15 @@ namespace ICCardManager.Services
             // ToReason は「なぜ」だけを返し、SQLite の失敗も原因を名指しする（#1986 の分岐）。
             var reason = ExceptionMessageFormatter.ToReason(ex);
 
+            // 「どうすれば」は経路ごとに違う（error-messages.md の 3 要素）。
+            // 置換が確定している場合は再実行が二重置換を招くため履歴画面での確認を、
+            // 置換前に落ちた場合は何も書かれていないため取り込みのやり直しを案内する
+            // （置換前の分岐は是正時に行動指示が丸ごと落ちていた。コードレビューで検出）。
             return detailsReplaced
                 ? $"利用履歴ID {ledgerId} の明細は置き換えましたが、親の履歴の摘要・金額を更新できませんでした。{reason}" +
                   "履歴画面でこの履歴の摘要・金額を確認し、必要な場合は修正してください。"
-                : $"利用履歴ID {ledgerId} の明細を置き換えられませんでした。{reason}";
+                : $"利用履歴ID {ledgerId} の明細を置き換えられませんでした。{reason}" +
+                  "この履歴の明細は変更されていません。しばらく待ってから、もう一度取り込んでください。";
         }
 
         private static void DetectLedgerDetailChanges(

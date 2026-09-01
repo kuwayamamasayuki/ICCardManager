@@ -490,7 +490,12 @@ public partial class DataExportImportViewModel : ViewModelBase
         }
         else
         {
-            _dialogService.ShowError($"エクスポートに失敗しました。\n\n{result.ErrorMessage}", "エクスポートエラー");
+            // Issue #1991: CsvExportService の失敗結果は ToFailureResult に集約され、
+            // ErrorMessage が必ず「〇〇のエクスポートに失敗しました。…」と「何が」を述べる。
+            // ここで「エクスポートに失敗しました。」を前置すると同じことを 2 度述べることになる
+            // （「何が」の二重化。#1991 が Detail.cs で ToReason へ寄せたのと同じ理由）。
+            // 「何が」の総称はダイアログのタイトルが担う。
+            _dialogService.ShowError(result.ErrorMessage, "エクスポートエラー");
         }
     }
 

@@ -86,7 +86,12 @@ public class CsvImportServiceTests : IDisposable
             _validationServiceMock.Object,
             _dbContextMock.Object,
             _cacheServiceMock.Object,
-            _settingsRepositoryMock.Object);
+            _settingsRepositoryMock.Object,
+            // Issue #1991: ロガーを渡さない 7 引数版だと、取込失敗のたびに
+            // ErrorDialogHelper.LogException が**本番のログディレクトリ**（ACL 設定つき）へ
+            // 追記する。意図的に例外を投げるテストが数百件あるため、実運用の障害ログが
+            // テスト実行のたびに汚染される。no-op のロガーを明示的に渡す。
+            NullLogger<CsvImportService>.Instance);
     }
 
     public void Dispose()

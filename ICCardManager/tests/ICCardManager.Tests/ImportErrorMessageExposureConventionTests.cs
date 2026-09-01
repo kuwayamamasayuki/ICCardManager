@@ -40,14 +40,28 @@ namespace ICCardManager.Tests;
 /// </para>
 /// <para>
 /// <b>この検査が見られない形（未是正の系統を正直に書く）。</b> 判定するのは
-/// <c>Message =</c> / <c>ErrorMessage =</c> への<b>代入式</b>だけで、
-/// <b>メソッドやコンストラクタの引数として渡す形は原理的に対象外</b>。
-/// 起票時点で <c>ReportService</c>（7 箇所。<c>FailureResult(…, $"…\n\n詳細: {ex.Message}")</c>）、
+/// <c>Message =</c> / <c>ErrorMessage =</c> への<b>代入式</b>だけで、次の 2 つは原理的に対象外。
+/// <list type="number">
+/// <item><description>
+/// <b>メソッドやコンストラクタの引数として渡す形</b>。起票時点で <c>ReportService</c>
+/// （7 箇所。<c>FailureResult(…, $"…\n\n詳細: {ex.Message}")</c>）、
 /// <c>Infrastructure/Security/DllIntegrityVerifier</c>（2 箇所）、
-/// <c>Services/SafeFileLauncher</c>（2 箇所）が同じ #1614 の family として残っている
+/// <c>Services/SafeFileLauncher</c>（2 箇所）、
+/// <c>ViewModels/SettingsViewModel</c>（2 箇所。<c>SetStatus($"…: {ex.Message}", true)</c>）が
+/// 同じ #1614 の family として残っている
 /// （<c>App.xaml.cs</c> の起動致命エラーは <c>ShowFatalError</c> 相当でスタックトレースごと出す
 /// 意図的な設計。<c>error-messages.md</c> の役割分担を参照）。
-/// <b>ここでその形を「適合」としてサンプル入力に固定しない</b> — 検査が嘘の安心感を与える
+/// </description></item>
+/// <item><description>
+/// <b>ドット付きの代入</b>（<c>result.ErrorMessage = …;</c>）。否定後読み
+/// <c>(?&lt;![A-Za-z0-9_.])</c> は直前の <c>.</c> でも一致しないため、
+/// オブジェクト初期化子と裸のプロパティ代入しか見えない。起票時点で
+/// <c>Services/LendingService</c> に 8 箇所（<c>result.ErrorMessage = …</c>）ある。
+/// <c>.</c> を外すと <c>ex.Message ==</c> のような<b>比較</b>まで拾って誤検出になるため
+/// 外していない（誤検出はガード自体の寿命を縮める。#1786）。
+/// </description></item>
+/// </list>
+/// <b>これらを「適合」としてサンプル入力に固定しない</b> — 検査が嘘の安心感を与える
 /// （#1726）。走査単位を「代入式」から広げるかどうかは、誤検出（#1786）と併せて別途判断する。
 /// </para>
 /// <para>
@@ -96,23 +110,31 @@ public class ImportErrorMessageExposureConventionTests
         @"^(?:masked|Masked)",
         RegexOptions.Compiled);
 
+    /// <summary>
+    /// 本番ソースから抽出した <c>Message</c> / <c>ErrorMessage</c> 代入式（走査は 1 回だけ）。
+    /// </summary>
+    /// <remarks>
+    /// 4 つの <c>[Fact]</c> が同じ抽出を繰り返しており、270 ファイル・約 3MB の読み込みと
+    /// 正規表現走査が 4 周していた。xUnit はテストごとにクラスを作り直すため
+    /// インスタンスフィールドでは効かない（<c>static</c> にする必要がある）。
+    /// </remarks>
+    private static readonly Lazy<IReadOnlyList<(string File, int LineNumber, string Expression)>>
+        MessageAssignments = new(() => GetProductionSourceFiles()
+            .SelectMany(file => ExtractMessageAssignments(File.ReadAllText(file))
+                .Select(a => (File: ToRelativePath(file), a.LineNumber, a.Expression)))
+            .ToList());
+
     [Fact]
     public void 取込エラー文言に生のIDmを埋め込んでいないこと()
     {
         var violations = new List<string>();
 
-        foreach (var file in GetProductionSourceFiles())
+        foreach (var (relative, lineNumber, expression) in MessageAssignments.Value)
         {
-            var source = File.ReadAllText(file);
-            var relative = ToRelativePath(file);
-
-            foreach (var (lineNumber, expression) in ExtractMessageAssignments(source))
+            if (FindRawIdmTokens(expression).Count > 0)
             {
-                if (FindRawIdmTokens(expression).Count > 0)
-                {
-                    violations.Add(
-                        $"{relative}:{lineNumber} → {string.Join(", ", FindRawIdmTokens(expression))}");
-                }
+                violations.Add(
+                    $"{relative}:{lineNumber} → {string.Join(", ", FindRawIdmTokens(expression))}");
             }
         }
 
@@ -127,17 +149,11 @@ public class ImportErrorMessageExposureConventionTests
     {
         var violations = new List<string>();
 
-        foreach (var file in GetProductionSourceFiles())
+        foreach (var (relative, lineNumber, expression) in MessageAssignments.Value)
         {
-            var source = File.ReadAllText(file);
-            var relative = ToRelativePath(file);
-
-            foreach (var (lineNumber, expression) in ExtractMessageAssignments(source))
+            if (ExceptionMessagePattern.IsMatch(expression))
             {
-                if (ExceptionMessagePattern.IsMatch(expression))
-                {
-                    violations.Add($"{relative}:{lineNumber}");
-                }
+                violations.Add($"{relative}:{lineNumber}");
             }
         }
 
@@ -156,23 +172,17 @@ public class ImportErrorMessageExposureConventionTests
     {
         var maskedAssignments = new List<string>();
 
-        foreach (var file in GetProductionSourceFiles())
+        foreach (var (relative, lineNumber, expression) in MessageAssignments.Value)
         {
-            var source = File.ReadAllText(file);
-            var relative = ToRelativePath(file);
+            // 直接 Mask を呼ぶ形と、上流でマスク済みの値を受けた変数（`masked…`）を経由する形の
+            // 両方を数える。後者を数えないと、変数へ切り出すだけで対の表明が空振りする。
+            var carriesMaskedIdm = expression.Contains("IdmMasker.Mask(")
+                || IdmTokenPattern.Matches(expression).Cast<Match>()
+                    .Any(m => MaskedVariablePattern.IsMatch(m.Value.Split('.').Last()));
 
-            foreach (var (lineNumber, expression) in ExtractMessageAssignments(source))
+            if (carriesMaskedIdm)
             {
-                // 直接 Mask を呼ぶ形と、上流でマスク済みの値を受けた変数（`masked…`）を経由する形の
-                // 両方を数える。後者を数えないと、変数へ切り出すだけで対の表明が空振りする。
-                var carriesMaskedIdm = expression.Contains("IdmMasker.Mask(")
-                    || IdmTokenPattern.Matches(expression).Cast<Match>()
-                        .Any(m => MaskedVariablePattern.IsMatch(m.Value.Split('.').Last()));
-
-                if (carriesMaskedIdm)
-                {
-                    maskedAssignments.Add($"{relative}:{lineNumber}");
-                }
+                maskedAssignments.Add($"{relative}:{lineNumber}");
             }
         }
 
@@ -193,30 +203,34 @@ public class ImportErrorMessageExposureConventionTests
     {
         var routed = new List<string>();
 
-        foreach (var file in GetProductionSourceFiles())
+        foreach (var (relative, lineNumber, expression) in MessageAssignments.Value)
         {
-            var source = File.ReadAllText(file);
-            var relative = ToRelativePath(file);
-
-            foreach (var (lineNumber, expression) in ExtractMessageAssignments(source))
+            // 直接 ToUserMessage を呼ぶ形と、集約したヘルパー（ToUserFacingErrorMessage）を
+            // 経由する形の両方を数える。後者を数えないと、対応表を 1 か所へ寄せた実装
+            // （#1744 が推奨する形）で対の表明が空振りする。
+            if (expression.Contains("ExceptionMessageFormatter.ToUserMessage(")
+                || expression.Contains("ToUserFacingErrorMessage"))
             {
-                // 直接 ToUserMessage を呼ぶ形と、集約したヘルパー（ToUserFacingErrorMessage /
-                // ToUserFacingErrorMessageCore）を経由する形の両方を数える。後者を数えないと、
-                // 対応表を 1 か所へ寄せた実装（#1744 が推奨する形）で対の表明が空振りする。
-                if (expression.Contains("ExceptionMessageFormatter.ToUserMessage(")
-                    || expression.Contains("ToUserFacingErrorMessage"))
-                {
-                    routed.Add($"{relative}:{lineNumber}");
-                }
+                routed.Add($"{relative}:{lineNumber}");
             }
         }
 
-        // Issue #1991 で是正した箇所のうち、代入式から直接観測できるもの:
-        // CsvExportService 1（5 経路を ToFailureResult へ集約）・LedgerSplitService 1・
-        // CsvImportService の共通ハンドラー 2・利用履歴の Import / Preview 2 の計 6。
+        // しきい値は**実測値**で固定する（コードレビューで検出）。
+        // 是正前は 6 だったが実際は 9 件一致しており、うち 3 件（LedgerMergeService 2 /
+        // NewLedgerFromSegmentsBuilder 1）は #1991 以前からある。つまり #1991 の是正を
+        // 3 件まで戻しても緑のままで、対の表明が守っていたのは半分だった
+        // （#1884「期待値は実測して固定する。緩いしきい値は自己充足する」）。
+        //
+        // 内訳（9 件）:
+        //   Services/CsvExportService.cs           1（5 経路を ToFailureResult へ集約。#1991）
+        //   Services/CsvImportService.cs           2（Import / Preview の共通ハンドラー。#1991）
+        //   Services/Import/CsvImportService.Ledger.cs 2（利用履歴の Import / Preview。#1991）
+        //   Services/LedgerSplitService.cs         1（#1991）
+        //   Services/LedgerMergeService.cs         2（#1991 以前から）
+        //   Services/Import/Builders/NewLedgerFromSegmentsBuilder.cs 1（#1986）
         routed.Should().HaveCountGreaterOrEqualTo(
-            6,
-            "Issue #1991 で ExceptionMessageFormatter へ寄せた ErrorMessage 代入が失われていないこと。実際: "
+            9,
+            "ExceptionMessageFormatter へ寄せた ErrorMessage 代入が失われていないこと。実際: "
             + string.Join(" / ", routed));
     }
 
@@ -245,10 +259,17 @@ public class ImportErrorMessageExposureConventionTests
     [InlineData("var r2 = new CsvImportResult { ErrorMessage = $\"読み込みエラー: {ex.Message}\" };", false, true)]
     [InlineData("var r3 = new LedgerSplitResult { ErrorMessage = $\"カード {cardIdm} で失敗\" };", true, false)]
     [InlineData("var o5 = new CsvExportResult { ErrorMessage = ExceptionMessageFormatter.ToUserMessage(ex, \"エクスポート\") };", false, false)]
-    // 他の接尾辞（UserFriendlyMessage 等）まで巻き込まないこと（誤検出はガードの寿命を縮める。#1786）
-    // `=` を伴う代入の形で書く — `=` が無い参照は元から走査対象外なので、除外の性質を何も検査できない
-    [InlineData("ex2.UserFriendlyMessage = ex.Message;", false, false)]
-    [InlineData("dto.ImportErrorMessage = ex.Message;", false, false)]
+    // 他の接尾辞（UserFriendlyMessage / ImportErrorMessage 等）まで巻き込まないこと
+    // （誤検出はガードの寿命を縮める。#1786）。
+    // **ドットを付けずに書く** — ドット付きは後述の盲点で弾かれてしまい、
+    // 接尾辞を絞っている性質（`(?:Error)?` に限定していること）を何も検査できない
+    // （是正前の 2 件はドット付きで、どちらも空振りしていた。コードレビューで検出）
+    [InlineData("var o6 = new X { UserFriendlyMessage = ex.Message };", false, false)]
+    [InlineData("var o7 = new X { ImportErrorMessage = ex.Message };", false, false)]
+    // 既知の盲点をサンプルで固定する（XML doc の「この検査が見られない形」2 番）。
+    // ドット付きの代入は否定後読みに阻まれて 1 件も抽出されない。挙動が変わったら気付けるよう
+    // 「見えないこと」自体を表明しておく（#1988「主張は実装で検算してから書く」）
+    [InlineData("result.ErrorMessage = ex.Message;", false, false)]
     public void 検出ロジックがサンプル入力に対して期待どおり判定すること(
         string snippet, bool expectRawIdm, bool expectExceptionMessage)
     {

@@ -9,6 +9,7 @@ using ICCardManager.Data.Repositories;
 using ICCardManager.Infrastructure.Caching;
 using ICCardManager.Models;
 using ICCardManager.Services;
+using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using Xunit;
 
@@ -165,6 +166,9 @@ public class CsvImportServiceDepartmentTypeTests : IDisposable
             new Mock<IValidationService>().Object,
             new Mock<DbContext>().Object,
             new Mock<ICacheService>().Object,
-            settingsRepositoryMock.Object);
+            settingsRepositoryMock.Object,
+            // Issue #1991: ロガー未注入だと取込失敗が ErrorDialogHelper 経由で
+            // 本番のログディレクトリへ追記される。no-op のロガーを明示的に渡す。
+            NullLogger<CsvImportService>.Instance);
     }
 }
