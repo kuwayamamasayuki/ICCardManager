@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Data;
 using System.Data.SQLite;
@@ -350,11 +350,11 @@ public class DbContextConcurrentAccessTests : IDisposable
     #region ヘルスチェック（接続切断・復旧）テスト
 
     /// <summary>
-    /// ST-SHARED-001相当: 接続が閉じられた後でもGetConnectionで自動再接続されること
+    /// ST-SHARED-001相当: 接続が閉じられた後でもリース取得で自動再接続されること
     /// </summary>
     [Fact]
     [Trait("Category", "Integration")]
-    public void 接続切断後にGetConnectionで自動再接続されること()
+    public void 接続切断後にリース取得で自動再接続されること()
     {
         using var dbContext = new DbContext(_dbPath);
         dbContext.InitializeDatabase();

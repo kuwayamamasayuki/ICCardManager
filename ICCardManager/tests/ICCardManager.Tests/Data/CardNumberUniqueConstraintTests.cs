@@ -290,8 +290,10 @@ public class CardNumberUniqueConstraintTests : IDisposable
     public void Migration008_CreatesUniqueIndex()
     {
         // Assert: インデックスの存在を確認
-        var connection = _dbContext.GetConnection();
-        IndexShouldExist(connection, "idx_card_type_number_active");
+        // Issue #1988: 生の接続を返す GetConnection() は削除済み。リースで受けて using で解放する
+        // （解放しないと _activeAsyncLeaseCount / セマフォが残り、以後の SuspendConnections が止まる）。
+        using var lease = _dbContext.LeaseConnection();
+        IndexShouldExist(lease.Connection, "idx_card_type_number_active");
     }
 
     /// <summary>

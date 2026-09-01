@@ -1,4 +1,4 @@
-using FluentAssertions;
+﻿using FluentAssertions;
 using ICCardManager.Data;
 using System;
 using System.Data;
@@ -70,7 +70,7 @@ public class DbContextResilienceTests : IDisposable
     /// </summary>
     [Fact]
     [Trait("Category", "Unit")]
-    public void GetConnection_共有モードでbusy_timeoutが15000msに設定されること()
+    public void 接続リース_共有モードでbusy_timeoutが15000msに設定されること()
     {
         // Issue #1559: 実際の SQLite 接続を開く必要があるためローカル一時ファイル + forceSharedMode で
         // 共有モード挙動を再現する
@@ -330,8 +330,9 @@ public class DbContextResilienceTests : IDisposable
     {
         var dbPath = Path.Combine(_testDirectory, "jm_props.db");
         using var dbContext = new DbContext(dbPath);
-        // GetConnection内でConfigurePragmas→ConfigureJournalModeが呼ばれる
-        var _ = dbContext.GetConnection();
+        // Issue #1988: 接続の確立（ConfigurePragmas→ConfigureJournalMode）はリース取得時に走る。
+        // 観測したいのは「接続が確立したこと」だけなので、リースは即座に解放する。
+        using (dbContext.LeaseConnection()) { }
 
         dbContext.CurrentJournalMode.Should().Be("delete");
         dbContext.IsJournalModeDegraded.Should().BeFalse("DELETEが設定されている場合はdegradedではない");
@@ -347,7 +348,8 @@ public class DbContextResilienceTests : IDisposable
         // インメモリDBではDELETE/TRUNCATE/PERSISTいずれも設定できないため
         // CurrentJournalModeは"memory"となり、degraded判定がtrueになる
         using var dbContext = new DbContext(":memory:");
-        var _ = dbContext.GetConnection();
+        // Issue #1988: 接続の確立だけを観測する（リースは即座に解放する）。
+        using (dbContext.LeaseConnection()) { }
 
         dbContext.CurrentJournalMode.Should().Be("memory");
         dbContext.IsJournalModeDegraded.Should().BeTrue("DELETE以外のモードはdegraded扱い");
@@ -362,7 +364,7 @@ public class DbContextResilienceTests : IDisposable
     {
         var dbPath = Path.Combine(_testDirectory, "jm_init.db");
         using var dbContext = new DbContext(dbPath);
-        // GetConnectionを呼ばない
+        // 接続リースを一度も取らない（接続が確立していない状態）
 
         dbContext.CurrentJournalMode.Should().BeNull();
         dbContext.IsJournalModeDegraded.Should().BeFalse("初期化前はdegradedとして扱わないこと");

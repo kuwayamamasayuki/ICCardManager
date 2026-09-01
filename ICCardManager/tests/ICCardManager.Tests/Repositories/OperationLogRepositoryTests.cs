@@ -1,4 +1,4 @@
-using FluentAssertions;
+﻿using FluentAssertions;
 using ICCardManager.Data;
 using ICCardManager.Data.Repositories;
 using ICCardManager.Models;
@@ -36,7 +36,7 @@ public class OperationLogRepositoryTests : IDisposable
     /// <remarks>
     /// インメモリSQLiteデータベースでは、同一接続を使用しないと
     /// 別のデータベースインスタンスに対して操作してしまうため、
-    /// DbContext.GetConnection()を使用して同じ接続を取得する。
+    /// DbContext のリース（LeaseConnection / LeaseConnectionAsync）経由で同じ接続を取得する。
     /// </remarks>
     private void ClearTestData()
     {
