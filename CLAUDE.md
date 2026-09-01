@@ -38,7 +38,12 @@ WSL2では "/mnt/c/Program Files/dotnet/dotnet.exe" を使用すること。
 
 | ファイル | 読込 | 内容 |
 |---------|------|------|
-| `development-conventions.md` | 常時 | 環境制約、DB設計原則、UI/UX原則、ICカード関連、論理削除の方針 |
+| `development-conventions.md` | 常時 | 環境制約、論理削除の方針、ビルド警告ゼロ、ICカード関連、**分割した節の索引**（Issue 由来の詳細規約はどのファイルへ移ったか） |
+| `db-write-conventions.md` | 条件付き（`Data/**`、`Services/**`、`Infrastructure/**`、`Common/**`、`Models/**`、02_DB設計書、05_クラス設計書） | DB 書き込み規約（トランザクションの 3 分岐、影響行数による競合検出、SET 句の範囲、監査ログの「変更前」、日付整形の InvariantCulture） |
+| `service-conventions.md` | 条件付き（同上） | サービス層規約（明細の保存順、残額の選び方、SQLite 接続文字列、バックアップ先の到達性・一時ファイル、巡回する値、設定値で生成したものの判定） |
+| `viewmodel-conventions.md` | 条件付き（`ViewModels/**`、`Views/**`、`Resources/**`、03_画面設計書、04_機能設計書） | ViewModel 規約（Dispatcher の受け皿、処理中フラグとカード読み取り抑制、丸め込み後の取り直し、警告エリアの生成・除去） |
+| `ui-conventions.md` | 条件付き（同上） | UI/UX 原則（選択状態のスナップショット、完了メッセージの順序と所在、Busy スコープとモーダル、MessageBox のオーナー、色・折り返し・系列色） |
+| `logging.md` | 条件付き（`src/**`） | ロギング規約（LogDebug は本番で出ない、AggregateException の平坦化、IDm のマスク、Information 併設） |
 | `business-logic.md` | 常時 | 状態遷移、貸出/返却フロー、バス判別、摘要生成、共有モード、残高不足処理、月次帳票 |
 | `git-workflow.md` | 常時 | ブランチルール、ステージング規約 |
 | `error-messages.md` | 常時 | エラーメッセージ品質（「何が/なぜ/どうすれば」3要素、禁止パターン、Issue #1275） |

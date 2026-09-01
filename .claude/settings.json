@@ -15,7 +15,7 @@
           {
             "type": "command",
             "command": "bash .claude/hooks/check-doc-sync.sh",
-            "timeout": 15
+            "timeout": 60
           }
         ]
       }
