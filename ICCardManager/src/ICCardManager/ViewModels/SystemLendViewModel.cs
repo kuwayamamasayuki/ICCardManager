@@ -192,7 +192,7 @@ public partial class SystemLendViewModel : ViewModelBase
             // Issue #1727 / #1805: ここから先はコミット確定後の後処理。失敗しても作成は取り消さない。
             ResultMessage =
                 $"{CardDisplayName} を {borrower.Name} への貸出中として記録しました" +
-                $"（貸出日時: {lentAt:yyyy/MM/dd HH:mm}）。";
+                $"（貸出日時: {lentAt.ToString("yyyy/MM/dd HH:mm", CultureInfo.InvariantCulture)}）。";
 
             try
             {

@@ -5,6 +5,7 @@ using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 using ICCardManager.Common;
 using ICCardManager.Models;
+using System.Globalization;
 
 namespace ICCardManager.Services
 {
@@ -2388,7 +2389,7 @@ namespace ICCardManager.Services
         {
             var recordDate = GetMidYearCarryoverDate(carryoverMonth, registrationDate);
             var description =
-                $"繰越レコードの日付: {recordDate:yyyy年M月d日}（{WarekiConverter.ToWareki(recordDate)}）";
+                $"繰越レコードの日付: {recordDate.ToString("yyyy年M月d日", CultureInfo.InvariantCulture)}（{WarekiConverter.ToWareki(recordDate)}）";
 
             if (carryoverMonth > registrationDate.Month)
             {
@@ -2397,7 +2398,7 @@ namespace ICCardManager.Services
                 var carryoverYear = registrationDate.Year - 1;
                 description +=
                     Environment.NewLine +
-                    $"※ 選択した{carryoverMonth}月は登録日（{registrationDate:yyyy年M月d日}）より後の月のため、" +
+                    $"※ 選択した{carryoverMonth}月は登録日（{registrationDate.ToString("yyyy年M月d日", CultureInfo.InvariantCulture)}）より後の月のため、" +
                     $"前年（{carryoverYear}年）の{carryoverMonth}月として扱われます。" +
                     $"当年の月を指定する場合は、{registrationDate.Month}月以前の月を選択してください。";
             }

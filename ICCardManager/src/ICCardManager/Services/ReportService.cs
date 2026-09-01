@@ -9,6 +9,7 @@ using ICCardManager.Data.Repositories;
 using ICCardManager.Infrastructure.Security;
 using ICCardManager.Models;
 using Microsoft.Extensions.Options;
+using System.Globalization;
 
 namespace ICCardManager.Services
 {
@@ -267,7 +268,7 @@ namespace ICCardManager.Services
                     if (requestedMonth < purchaseMonth)
                     {
                         return ReportGenerationResult.SkippedResult(
-                            $"新規購入（{purchaseDate.Value:yyyy/MM}）より前の月です");
+                            $"新規購入（{purchaseDate.Value.ToString("yyyy/MM", CultureInfo.InvariantCulture)}）より前の月です");
                     }
                 }
 

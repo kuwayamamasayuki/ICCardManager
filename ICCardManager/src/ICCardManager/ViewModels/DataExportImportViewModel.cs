@@ -1084,14 +1084,14 @@ public partial class DataExportImportViewModel : ViewModelBase
     /// </summary>
     private string GetDefaultExportFileName()
     {
-        var timestamp = DateTime.Now.ToString("yyyyMMdd_HHmmss");
+        var timestamp = DateTime.Now.ToString("yyyyMMdd_HHmmss", CultureInfo.InvariantCulture);
 
         return SelectedExportType switch
         {
             DataType.Cards => $"cards_{timestamp}.csv",
             DataType.Staff => $"staff_{timestamp}.csv",
-            DataType.Ledgers => $"ledgers_{ExportStartDate:yyyyMMdd}_{ExportEndDate:yyyyMMdd}.csv",
-            DataType.LedgerDetails => $"ledger_details_{ExportStartDate:yyyyMMdd}_{ExportEndDate:yyyyMMdd}.csv",
+            DataType.Ledgers => $"ledgers_{ExportStartDate.ToString("yyyyMMdd", CultureInfo.InvariantCulture)}_{ExportEndDate.ToString("yyyyMMdd", CultureInfo.InvariantCulture)}.csv",
+            DataType.LedgerDetails => $"ledger_details_{ExportStartDate.ToString("yyyyMMdd", CultureInfo.InvariantCulture)}_{ExportEndDate.ToString("yyyyMMdd", CultureInfo.InvariantCulture)}.csv",
             _ => $"export_{timestamp}.csv"
         };
     }

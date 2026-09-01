@@ -568,7 +568,7 @@ namespace ICCardManager.Services
 
             while (cursor <= last)
             {
-                months.Add(cursor.ToString("yyyy-MM", CultureInfo.InvariantCulture));
+                months.Add(SqliteDateTimeFormat.ToMonthKey(cursor));
                 cursor = cursor.AddMonths(1);
             }
 

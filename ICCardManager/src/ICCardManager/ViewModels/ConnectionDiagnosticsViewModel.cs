@@ -6,6 +6,7 @@ using CommunityToolkit.Mvvm.Input;
 using ICCardManager.Common;
 using ICCardManager.Dtos;
 using ICCardManager.Services;
+using System.Globalization;
 
 namespace ICCardManager.ViewModels
 {
@@ -53,7 +54,7 @@ namespace ICCardManager.ViewModels
         /// 診断日時の表示文字列
         /// </summary>
         public string DiagnosedAtText =>
-            Report == null ? "未実行" : Report.DiagnosedAt.ToString("yyyy年M月d日 HH:mm:ss");
+            Report == null ? "未実行" : Report.DiagnosedAt.ToString("yyyy年M月d日 HH:mm:ss", CultureInfo.InvariantCulture);
 
         /// <summary>
         /// 総合判定の見出し文言

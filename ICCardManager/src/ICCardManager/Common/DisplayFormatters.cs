@@ -1,4 +1,5 @@
 using System;
+using System.Globalization;
 
 namespace ICCardManager.Common
 {
@@ -80,7 +81,7 @@ namespace ICCardManager.Common
         /// <returns>フォーマット済み日付文字列</returns>
         public static string FormatDate(DateTime date)
         {
-            return date.ToString("yyyy/MM/dd");
+            return date.ToString("yyyy/MM/dd", CultureInfo.InvariantCulture);
         }
 
         /// <summary>
@@ -91,7 +92,7 @@ namespace ICCardManager.Common
         /// <returns>フォーマット済み日付文字列</returns>
         public static string FormatDate(DateTime? date, string fallback = "-")
         {
-            return date?.ToString("yyyy/MM/dd") ?? fallback;
+            return date?.ToString("yyyy/MM/dd", CultureInfo.InvariantCulture) ?? fallback;
         }
 
         /// <summary>
@@ -101,7 +102,7 @@ namespace ICCardManager.Common
         /// <returns>フォーマット済み日時文字列</returns>
         public static string FormatDateTime(DateTime date)
         {
-            return date.ToString("yyyy/MM/dd HH:mm");
+            return date.ToString("yyyy/MM/dd HH:mm", CultureInfo.InvariantCulture);
         }
 
         /// <summary>
@@ -112,7 +113,7 @@ namespace ICCardManager.Common
         /// <returns>フォーマット済み日時文字列</returns>
         public static string FormatDateTime(DateTime? date, string fallback = "-")
         {
-            return date?.ToString("yyyy/MM/dd HH:mm") ?? fallback;
+            return date?.ToString("yyyy/MM/dd HH:mm", CultureInfo.InvariantCulture) ?? fallback;
         }
 
         /// <summary>
@@ -122,7 +123,7 @@ namespace ICCardManager.Common
         /// <returns>フォーマット済み日時文字列（秒まで）</returns>
         public static string FormatTimestamp(DateTime date)
         {
-            return date.ToString("yyyy/MM/dd HH:mm:ss");
+            return date.ToString("yyyy/MM/dd HH:mm:ss", CultureInfo.InvariantCulture);
         }
     }
 }

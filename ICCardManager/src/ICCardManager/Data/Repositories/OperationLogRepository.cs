@@ -5,6 +5,7 @@ using System.Threading.Tasks;
 using ICCardManager.Models;
 using System.Data.Common;
 using System.Data.SQLite;
+using ICCardManager.Common;
 
 namespace ICCardManager.Data.Repositories
 {
@@ -48,7 +49,7 @@ VALUES (@timestamp, @operatorIdm, @operatorName, @targetTable,
        @targetId, @action, @beforeData, @afterData);
 SELECT last_insert_rowid();";
 
-                command.Parameters.AddWithValue("@timestamp", log.Timestamp.ToString("yyyy-MM-dd HH:mm:ss"));
+                command.Parameters.AddWithValue("@timestamp", SqliteDateTimeFormat.ToText(log.Timestamp));
                 command.Parameters.AddWithValue("@operatorIdm", log.OperatorIdm);
                 command.Parameters.AddWithValue("@operatorName", log.OperatorName);
                 command.Parameters.AddWithValue("@targetTable", (object)log.TargetTable ?? DBNull.Value);
@@ -80,8 +81,8 @@ FROM operation_log
 WHERE date(timestamp) BETWEEN @fromDate AND @toDate
 ORDER BY timestamp ASC";
 
-            command.Parameters.AddWithValue("@fromDate", fromDate.ToString("yyyy-MM-dd"));
-            command.Parameters.AddWithValue("@toDate", toDate.ToString("yyyy-MM-dd"));
+            command.Parameters.AddWithValue("@fromDate", SqliteDateTimeFormat.ToDateText(fromDate));
+            command.Parameters.AddWithValue("@toDate", SqliteDateTimeFormat.ToDateText(toDate));
 
             using var reader = await command.ExecuteReaderAsync();
             while (await reader.ReadAsync())
@@ -240,7 +241,7 @@ LIMIT @limit";
             }
             if (cursor != null)
             {
-                command.Parameters.AddWithValue("@cursorTs", cursor.Timestamp.ToString("yyyy-MM-dd HH:mm:ss"));
+                command.Parameters.AddWithValue("@cursorTs", SqliteDateTimeFormat.ToText(cursor.Timestamp));
                 command.Parameters.AddWithValue("@cursorId", cursor.Id);
             }
             command.Parameters.AddWithValue("@limit", requestedPageSize + 1);
@@ -343,13 +344,13 @@ ORDER BY timestamp ASC, id ASC";
             if (criteria.FromDate.HasValue)
             {
                 conditions.Add("date(timestamp) >= @fromDate");
-                parameters["@fromDate"] = criteria.FromDate.Value.ToString("yyyy-MM-dd");
+                parameters["@fromDate"] = SqliteDateTimeFormat.ToDateText(criteria.FromDate.Value);
             }
 
             if (criteria.ToDate.HasValue)
             {
                 conditions.Add("date(timestamp) <= @toDate");
-                parameters["@toDate"] = criteria.ToDate.Value.ToString("yyyy-MM-dd");
+                parameters["@toDate"] = SqliteDateTimeFormat.ToDateText(criteria.ToDate.Value);
             }
 
             if (!string.IsNullOrEmpty(criteria.Action))
@@ -406,7 +407,7 @@ ORDER BY timestamp ASC, id ASC";
             return new OperationLog
             {
                 Id = reader.GetInt32(0),
-                Timestamp = DateTime.Parse(reader.GetString(1)),
+                Timestamp = SqliteDateTimeFormat.ParseStored(reader.GetString(1)),
                 OperatorIdm = reader.GetString(2),
                 OperatorName = reader.GetString(3),
                 TargetTable = reader.IsDBNull(4) ? null : reader.GetString(4),

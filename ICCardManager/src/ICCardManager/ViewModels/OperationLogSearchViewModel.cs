@@ -13,6 +13,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
+using System.Globalization;
 
 
 namespace ICCardManager.ViewModels;
@@ -370,7 +371,7 @@ public partial class OperationLogSearchViewModel : ViewModelBase
         {
             Filter = "Excel ファイル (*.xlsx)|*.xlsx",
             DefaultExt = ".xlsx",
-            FileName = $"操作ログ_{DateTime.Now:yyyyMMdd_HHmmss}.xlsx"
+            FileName = $"操作ログ_{DateTime.Now.ToString("yyyyMMdd_HHmmss", CultureInfo.InvariantCulture)}.xlsx"
         };
 
         if (dialog.ShowDialog() != true)
@@ -632,7 +633,7 @@ public partial class OperationLogSearchViewModel : ViewModelBase
         var parts = new List<string>();
 
         // 日付を和暦に変換
-        if (!string.IsNullOrEmpty(dateStr) && DateTime.TryParse(dateStr, out var date))
+        if (!string.IsNullOrEmpty(dateStr) && SqliteDateTimeFormat.TryParse(dateStr, out var date))
         {
             parts.Add(WarekiConverter.ToWareki(date));
         }

@@ -12,6 +12,7 @@ using ICCardManager.Infrastructure.Timing;
 using ICCardManager.Models;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using System.Globalization;
 
 namespace ICCardManager.Services
 {
@@ -617,17 +618,17 @@ namespace ICCardManager.Services
         {
             if (lentAt > now)
             {
-                return $"貸出日時に未来の日時（{lentAt:yyyy/MM/dd HH:mm}）が指定されています。" +
-                       $"カードを持ち出した日時が現在時刻（{now:yyyy/MM/dd HH:mm}）より後になることはありません。" +
+                return $"貸出日時に未来の日時（{lentAt.ToString("yyyy/MM/dd HH:mm", CultureInfo.InvariantCulture)}）が指定されています。" +
+                       $"カードを持ち出した日時が現在時刻（{now.ToString("yyyy/MM/dd HH:mm", CultureInfo.InvariantCulture)}）より後になることはありません。" +
                        "現在時刻以前の日時を入力してください。";
             }
 
             if (latestLedgerDate.HasValue && lentAt < latestLedgerDate.Value)
             {
-                return $"貸出日時（{lentAt:yyyy/MM/dd HH:mm}）が、このカードの直近の履歴の日付" +
-                       $"（{latestLedgerDate.Value:yyyy/MM/dd HH:mm}）より前です。" +
+                return $"貸出日時（{lentAt.ToString("yyyy/MM/dd HH:mm", CultureInfo.InvariantCulture)}）が、このカードの直近の履歴の日付" +
+                       $"（{latestLedgerDate.Value.ToString("yyyy/MM/dd HH:mm", CultureInfo.InvariantCulture)}）より前です。" +
                        "貸出中の記録が履歴の途中に入ると、残額の並びが実際と食い違って表示されます。" +
-                       $"{latestLedgerDate.Value:yyyy/MM/dd HH:mm} 以降の日時を入力してください。";
+                       $"{latestLedgerDate.Value.ToString("yyyy/MM/dd HH:mm", CultureInfo.InvariantCulture)} 以降の日時を入力してください。";
             }
 
             return null;
@@ -865,13 +866,13 @@ namespace ICCardManager.Services
 
                 var lentAt = lentRecord.LentAt ?? now.AddDays(-1);
                 _logger.LogDebug("LendingService: 貸出時刻={LentAt}, フィルタ開始日={FilterStart}, 抽出後の履歴件数={Count}",
-                    lentAt.ToString("yyyy-MM-dd HH:mm:ss"), lentAt.Date.AddDays(-7).ToString("yyyy-MM-dd"), usageSinceLent.Count);
+                    SqliteDateTimeFormat.ToText(lentAt), SqliteDateTimeFormat.ToDateText(lentAt.Date.AddDays(-7)), usageSinceLent.Count);
 
                 // 履歴データの詳細をログ出力
                 foreach (var detail in usageSinceLent.Take(5))
                 {
                     _logger.LogDebug("LendingService: 履歴詳細 - 日付={Date}, 残高={Balance}, 金額={Amount}, チャージ={IsCharge}",
-                        detail.UseDate?.ToString("yyyy-MM-dd"), detail.Balance, detail.Amount, detail.IsCharge);
+                        SqliteDateTimeFormat.ToDateText(detail.UseDate), detail.Balance, detail.Amount, detail.IsCharge);
                 }
 
                 // Issue #596: 今月の履歴完全性チェック（トランザクション前に既存レコードを確認）
@@ -1048,7 +1049,7 @@ namespace ICCardManager.Services
 
             var dateGroups = groupedByDate.ToList();
             _logger.LogDebug("LendingService: 日付グループ数={Count}, 日付一覧={Dates}",
-                dateGroups.Count, string.Join(", ", dateGroups.Select(g => g.Key.ToString("yyyy-MM-dd"))));
+                dateGroups.Count, string.Join(", ", dateGroups.Select(g => SqliteDateTimeFormat.ToDateText(g.Key))));
 
             // カードから読み取った残高を優先的に使用
             // 履歴データには各取引後の残高が含まれているため、これを直接使用する

@@ -4,6 +4,7 @@ using System.Linq;
 using System.Threading.Tasks;
 using ICCardManager.Data.Repositories;
 using ICCardManager.Models;
+using System.Globalization;
 
 namespace ICCardManager.Services
 {
@@ -116,7 +117,7 @@ namespace ICCardManager.Services
                     LedgerId = lentRecord.Id,
                     RowSummary = lentRecord.Summary,
                     DisplayText =
-                        $"⚠️ {data.Card.DisplayName}: {lentDate:yyyy-MM-dd} から未返却のまま{data.Month}月をまたいでいます",
+                        $"⚠️ {data.Card.DisplayName}: {lentDate.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)} から未返却のまま{data.Month}月をまたいでいます",
                     DetailText =
                         $"未返却のカードは払出が帳票に計上されないため、{data.Month}月の残額が実際のカード残高と一致しません。" +
                         "カードを返却してから帳票を作成してください。"
@@ -133,7 +134,7 @@ namespace ICCardManager.Services
                     LedgerId = lentRecord.Id,
                     RowSummary = lentRecord.Summary,
                     DisplayText =
-                        $"⚠️ {data.Card.DisplayName}: {lentDate:yyyy-MM-dd} の貸出が未返却です",
+                        $"⚠️ {data.Card.DisplayName}: {lentDate.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)} の貸出が未返却です",
                     DetailText =
                         $"「{SummaryGenerator.GetLendingSummary()}」の履歴は帳票に出力されないため、" +
                         $"この利用分が{data.Month}月の帳票から欠落します。カードを返却してから帳票を作成してください。"
@@ -162,7 +163,7 @@ namespace ICCardManager.Services
                     LedgerId = ledger.Id,
                     RowSummary = ledger.Summary,
                     DisplayText =
-                        $"⚠️ {data.Card.DisplayName}: {ledger.Date:yyyy-MM-dd}「{ledger.Summary}」の残額が " +
+                        $"⚠️ {data.Card.DisplayName}: {ledger.Date.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)}「{ledger.Summary}」の残額が " +
                         $"{ledger.Balance:N0}円（マイナス）です",
                     DetailText =
                         "交通系ICカードの残額はマイナスになりません。" +

@@ -15,6 +15,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
+using System.Globalization;
 
 
 namespace ICCardManager.ViewModels;
@@ -1055,7 +1056,7 @@ public partial class ReportViewModel : ViewModelBase
         var extension = Path.GetExtension(originalPath);
 
         // 日時を付加（yyyyMMdd_HHmmss形式）
-        var timestamp = DateTime.Now.ToString("yyyyMMdd_HHmmss");
+        var timestamp = DateTime.Now.ToString("yyyyMMdd_HHmmss", CultureInfo.InvariantCulture);
         var newFileName = $"{fileNameWithoutExt}_{timestamp}{extension}";
         var newPath = Path.Combine(directory, newFileName);
 
