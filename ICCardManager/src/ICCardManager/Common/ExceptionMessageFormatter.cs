@@ -1,4 +1,5 @@
-using System;
+﻿using System;
+using System.Data.SQLite;
 using System.IO;
 using ICCardManager.Common.Exceptions;
 
@@ -59,6 +60,17 @@ namespace ICCardManager.Common
         {
             switch (exception)
             {
+                // Issue #1986: SQLite の失敗（共有モードの Busy / Locked、UNC 断）は
+                // `default` の「予期しない問題」へ落ちていた。DB 障害はこの対応表で最も起こりやすい
+                // 部類であり、原因が名指しできないと職員は次の行動を選べない。
+                // 文言はモード中立（ローカルモードでも VACUUM・バックアップ・ヘルスチェックの
+                // 別接続と競合し得る。`development-conventions.md`「原因を断定する前に、
+                // その原因が成立する構成かを確認する」）。
+                case SQLiteException _:
+                    return ("データベースの読み書きができませんでした。",
+                            "ほかのパソコンや別の操作で同じデータを使用している可能性があります。"
+                            + "しばらく待ってから再度実行してください。");
+
                 case UnauthorizedAccessException _:
                     return ("ファイルへのアクセス権限がありません。",
                             "保存先フォルダーの書き込み権限を確認するか、管理者に連絡してください。");

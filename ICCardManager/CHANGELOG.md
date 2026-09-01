@@ -3,6 +3,20 @@
 ### Unreleased
 
 **修正**
+- Issue #1986 **CSV 取込のエラー文言が生の `ex.Message` と未マスクの IDm を職員へ表示していた**欠陥を是正した。`NewLedgerFromSegmentsBuilder` は `カード {cardIdm} の利用履歴自動作成中にエラーが発生しました: {ex.Message}` を取込結果一覧へ出しており、①本システム唯一の認証要素である IDm が平文で画面に出る（`.claude/rules/development-conventions.md` #1852）、②英語・技術用語を含む SQLite のメッセージがそのまま職員に見える（`error-messages.md` #1614）、という 2 つの違反を含んでいた。
+  - **#1852 の静的検査では原理的に検出できなかった**。`IdmLoggingMaskConventionTests` の走査対象は `Log…` で始まるメソッド呼び出しの**引数リスト**で、本件は `CsvImportError` の**オブジェクト初期化子への代入**だったため一度も判定されていない。**「マスクを通す規約」を「IDm が生で外へ出ない」の代理にしない**（#1855 と同じ family）。
+  - **是正の範囲はエラー文言に絞った**。IDm を `IdmMasker.Mask()` へ通したのは Builder の 2 分岐・未登録カードの 2 箇所（`CsvImportService.Detail.cs`）・仮想タッチのエラーダイアログ 1 箇所（`MainViewModel`）。取込プレビュー一覧の `{カード名} ({IDm})`（Issue #937）は職員が行とカードを突き合わせるための**意図的な識別表示**であり、一律に違反とすると正当なコードで赤くなる（#1786）ため対象外とした。
+  - **「UI 文言」と「ログ」を対で数えた**（#1817）。文言から `ex.Message` を外すと技術的詳細の出口がゼロになるため、`NewLedgerFromSegmentsBuilder` へ `ILogger` を**既定値なしの必須引数**で注入し、例外オブジェクトごと `LogError` へ残す（省略可能にすると配線漏れが「痕跡がどこにも残らない」形で潜在化する。#1820）。
+  - **`CsvImportError.Data` は生のまま残した**。本番コードから一度も読まれない突き合わせ用の内部キーで、画面（`Message` のみ表示）にもログにも出ない。マスクすると呼び出し元がカードを一意に特定できなくなるため、残す理由をコメントへ書いた。
+  - 回帰は `ImportErrorMessageExposureConventionTests`（静的検査。`Message =` 代入へ生 IDm／`ex.Message` を埋めていないことと、マスク済みの形が実在することを**対で**表明し、検出ロジック自体を「検出する 5 形／検出しない 7 形」のサンプル入力で固定）と、`NewLedgerFromSegmentsBuilderTests` / `CsvImportServiceTests` の挙動テストで固定する。**検出力は修正前のコードに当てて実測**（静的検査 3 件が赤、サンプル入力 12 件は緑）。
+  - **コードレビューで 6 件の指摘を受けて是正した**（うち 1 件は本 PR が作った退行）。
+    - **明細挿入失敗の案内が二重計上を招いていた**（退行）。明細インポートはトランザクションを持たないため、この分岐は `InsertAsync` が**コミット済み**の状態で到達し、明細を持たない台帳の行が残る。初版の「画面を更新してから、この行をもう一度取り込んでください」は、CSV の利用履歴 ID が空欄のままなので**2 つ目の台帳を作り**、6 年保存の台帳が二重計上になる。「なぜ」も他 PC の競合とは断定できない（台帳 ID はこの取込がミリ秒前に採番したもの）。文言を「二重に登録されるため、履歴画面で不要な行を削除してから取り込む」へ改めた。
+    - **`ExceptionMessageFormatter.ToUserMessage` に `SQLiteException` 分岐が無かった**。共有モードの Busy / Locked・UNC 断という**最も起こりやすい失敗**が「予期しない問題が発生しました」へ落ちていた。原因を名指しする分岐を足した（文言はモード中立。ローカルモードでも VACUUM・バックアップ・ヘルスチェックの別接続と競合し得る）。
+    - **`AppException` で文にならない連結になっていた**。`ToUserMessage` は `AppException` のとき `operation` を無視して `UserFriendlyMessage` をそのまま返すため、「カード … の」で始めると「カード … の データの操作中に…」となる。「について、」へ改めた。
+    - **`BusinessException.LentStatusUpdateConflict` の技術メッセージに生の IDm が残っていた**。`FileLogger` は `exception.Message` を平文のログファイル（users-full ACL）へ書き出すため、呼び出し元の `LogError` がテンプレート引数側でマスクしていても同じ行に生の値が並んでいた（#1852 / CWE-532）。
+    - **壊れた IDm が全マスクになり原因を追えなくなっていた**。`IdmMasker.Mask` は 16 文字未満の入力を全部 `*` に置き換えるため、Excel で先頭の 0 が失われた IDm を「登録されていません」と案内すると**値が一切見えず、案内も実際の原因と食い違う**。形式不正を別の原因として名指しし、調査の手掛かりに文字数を添える。文言ファクトリは**生の IDm を受け取らない**引数に作り替え、露出を構造的に不可能にした（#1883）。
+    - **ロガーが `null` の構築経路で出口がゼロになっていた**。`CsvImportService` の 7 引数コンストラクタは `logger: null` で連鎖するため、`_logger?.LogError` だけでは本 PR が文言から外した技術的詳細がどこにも残らない。`ErrorDialogHelper.LogException` へ委譲するフォールバックを足した（#1817）。
+    - **静的検査が「`ErrorMessage =` は適合」と嘘の表明をしていた**。`CsvImportService.ToUserFacingErrorMessage` は `IOException` / `default` の 2 分岐で生の `ex.Message` を返しており（同型は `CsvExportService` 5 箇所・`LedgerSplitService` 1 箇所）、本 Issue のスコープ外として別途追跡する。サンプル入力から誤解を招く 1 行を外し、検査の適用範囲を XML doc に明記した（#1726「到達不能な分岐とその回帰テストは誤った安心感を与える」と同じ形）。
 - Issue #1985 **`Data/` 配下 52 行を含む本番コード 90 行の日付整形・解析に `CultureInfo` の指定が無く、既定カレンダーが和暦のロケールで 6 年保存の台帳の日付が壊れる**欠陥を是正した。`DateTime.ToString("yyyy-MM-dd HH:mm:ss")` / `DateTime.Parse(string)` は `CurrentCulture` の**カレンダー**に従うため、ja-JP ＋ `JapaneseCalendar` では令和 8 年 9 月 1 日が `08-09-01 00:00:00` として保存される。SQL 側は `date()` 関数と文字列比較で範囲を絞る（`DbContext` の 6 年経過削除、`LedgerRepository` の期間検索ほか）ので、月次帳票・履歴の期間検索・6 年経過データの削除がすべて狂う。
   - **現状は OS ロケール依存の潜在バグ**（本文中に `CurrentCulture` を差し替えるコードは無く、通常の日本語 Windows は既定カレンダーがグレゴリオ暦）。ただし①コントロールパネルでカレンダー設定を変更した端末、②将来 `CurrentCulture` を差し替える変更、③`Thread.CurrentThread.CurrentCulture` を変えるライブラリの混入で、**静かに壊れて 6 年保存のデータへ入る**。CLAUDE.md が「和暦変換は表示時のみ」と定めている以上、保存層は文化圏から独立させる。
   - **同じ理由が既にコードに書かれていながら適用されていなかった**。`Data/` 配下で `InvariantCulture` を使っていたのは `LedgerRepository.ToYearMonthKey` の 1 か所だけで、その XML コメントは「和暦カレンダーが既定になると壊れる」と理由まで明記していた（`.claude/rules/development-conventions.md` #1951「兄弟メソッド間の非対称は、それ自体が合図」）。

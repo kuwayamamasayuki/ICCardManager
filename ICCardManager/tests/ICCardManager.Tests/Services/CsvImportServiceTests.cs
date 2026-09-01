@@ -5,6 +5,7 @@ using ICCardManager.Common.Exceptions;
 using ICCardManager.Data;
 using ICCardManager.Data.Repositories;
 using ICCardManager.Infrastructure.Caching;
+using ICCardManager.Infrastructure.Security;
 using ICCardManager.Models;
 using ICCardManager.Services;
 using Microsoft.Extensions.Logging;
@@ -3070,6 +3071,54 @@ FEDCBA9876543210,鈴木花子,002,テスト2";
         // Assert
         result.IsValid.Should().BeFalse();
         result.Errors.Should().Contain(e => e.Message.Contains("登録されていません"));
+
+        // Issue #1986: エラー文言の IDm はマスクを通す。「マスク済みを含む」と
+        // 「生を含まない」を対で表明する（前者だけだと IDm を丸ごと落とした実装でも緑になる）。
+        var unregisteredError = result.Errors.First(e => e.Message.Contains("登録されていません"));
+        unregisteredError.Message.Should().Contain(IdmMasker.Mask("FFFF456789ABCDEF"));
+        unregisteredError.Message.Should().NotContain(
+            "FFFF456789ABCDEF", "生の IDm を画面へ出さないこと（#1852）");
+        unregisteredError.Message.Should().EndWith(
+            "取り込んでください。", "3 要素（何が／なぜ／どうすれば）を満たし行動指示で終わること");
+        // Data は突き合わせ用の内部キーであり、画面にもログにも出ないため生のまま保持する。
+        unregisteredError.Data.Should().Be("FFFF456789ABCDEF");
+    }
+
+    /// <summary>
+    /// Issue #1986（コードレビューで検出）: <c>IdmMasker.Mask</c> は 16 文字未満の入力を全部
+    /// <c>*</c> に置き換えるため、Excel で先頭の 0 が失われた IDm を「登録されていません」と
+    /// 案内すると、職員には値が一切見えず案内も実際の原因と食い違う。
+    /// 形式不正は別の原因として名指しすることを表明する。
+    /// </summary>
+    [Fact]
+    public async Task PreviewLedgerDetailsAsync_利用履歴ID空欄_IDmの形式が不正_原因を名指しすること()
+    {
+        // Arrange - Excel が先頭の 0 を落とした形（15 文字）
+        var malformedIdm = "FFF456789ABCDEF";
+        var csvContent = @"利用履歴ID,利用日時,カードIDm,管理番号,乗車駅,降車駅,バス停,金額,残額,チャージ,ポイント還元,バス利用,グループID
+," + "2024-01-15 10:30:00," + malformedIdm + @",001,博多,天神,,260,9740,0,0,0,";
+
+        var filePath = Path.Combine(_testDirectory, "details_auto_id_malformed_idm.csv");
+        await Task.Run(() => File.WriteAllText(filePath, csvContent, CsvEncoding));
+
+        _cardRepositoryMock.Setup(x => x.GetByIdmAsync(malformedIdm, true))
+            .ReturnsAsync((IcCard?)null);
+
+        // Act
+        var result = await _service.PreviewLedgerDetailsAsync(filePath);
+
+        // Assert
+        result.IsValid.Should().BeFalse();
+        var error = result.Errors.Should().ContainSingle().Subject;
+        error.Message.Should().Contain("形式が正しくありません");
+        error.Message.Should().Contain("15文字", "実際の入力値の情報を含めて調査できるようにする");
+        error.Message.Should().EndWith("取り込んでください。");
+        // 「カードを登録してください」という実行できない指示を出さないこと
+        error.Message.Should().NotContain("カード管理画面（F2）でカードを登録");
+        // 全マスクの意味のない文字列を出さないこと
+        error.Message.Should().NotContain("***");
+        // 生の値も出さない
+        error.Message.Should().NotContain(malformedIdm);
     }
 
     /// <summary>

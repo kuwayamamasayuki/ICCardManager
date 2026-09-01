@@ -2,8 +2,13 @@
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
+using System.Globalization;
+using System.Text.RegularExpressions;
+using ICCardManager.Common;
 using ICCardManager.Data.Repositories;
+using ICCardManager.Infrastructure.Security;
 using ICCardManager.Models;
+using Microsoft.Extensions.Logging;
 
 namespace ICCardManager.Services.Import.Builders
 {
@@ -16,6 +21,7 @@ namespace ICCardManager.Services.Import.Builders
     {
         private readonly ILedgerRepository _ledgerRepository;
         private readonly SummaryGenerator _summaryGenerator;
+        private readonly ILogger _logger;
 
         /// <param name="ledgerRepository">台帳リポジトリ</param>
         /// <param name="summaryGenerator">
@@ -28,12 +34,21 @@ namespace ICCardManager.Services.Import.Builders
         /// 「設定した部署種別が静かに無視される」形で潜在化する
         /// （<c>.claude/rules/development-conventions.md</c> #1820）。
         /// </param>
+        /// <param name="logger">
+        /// ロガー（<c>null</c> 可）。Issue #1986: 失敗の文言から生の <c>ex.Message</c> を外したため、
+        /// 技術的詳細の出口はここだけになる。<b>省略可能にしない</b> — 既定値を付けると
+        /// 配線漏れが「障害の痕跡がどこにも残らない」形で潜在化する
+        /// （<c>.claude/rules/error-messages.md</c> #1817「UI 文言とログを対で数える」／
+        /// <c>development-conventions.md</c> #1820）。
+        /// </param>
         public NewLedgerFromSegmentsBuilder(
             ILedgerRepository ledgerRepository,
-            SummaryGenerator summaryGenerator)
+            SummaryGenerator summaryGenerator,
+            ILogger logger)
         {
             _ledgerRepository = ledgerRepository;
             _summaryGenerator = summaryGenerator ?? throw new ArgumentNullException(nameof(summaryGenerator));
+            _logger = logger;
         }
 
         /// <summary>
@@ -128,10 +143,29 @@ namespace ICCardManager.Services.Import.Builders
                     if (!success)
                     {
                         segmentFailed = true;
+                        LogFailure(
+                            null,
+                            "Issue #906: 新規台帳の利用明細を登録できませんでした（影響行数 0）: "
+                            + "CardIdm={CardIdm}, LedgerId={LedgerId}, 行番号={LineNumber}, 明細件数={DetailCount}",
+                            IdmMasker.Mask(cardIdm), newLedgerId, firstLineNumber, segmentDetails.Count);
                         errors.Add(new CsvImportError
                         {
                             LineNumber = firstLineNumber,
-                            Message = $"カード {cardIdm} の新規詳細の挿入に失敗しました",
+                            // Issue #1986（コードレビューで検出）: この分岐は
+                            // InsertAsync が**コミットされた後**に到達する（明細インポートは
+                            // トランザクションを持たない）。台帳の行だけが残るため、
+                            // 「もう一度取り込んでください」と案内すると CSV の利用履歴 ID は
+                            // 空欄のままなので**2 つ目の台帳が作られ**、6 年保存の台帳が
+                            // 二重計上になる。「なぜ」も他 PC の競合とは断定できない
+                            // （台帳 ID はこの取込がミリ秒前に採番したもの）。
+                            Message = $"カード {IdmMasker.Mask(cardIdm)} の利用明細を登録できませんでした。"
+                                + "台帳の行だけが作られ、利用明細を持たない行が残っています。"
+                                + "同じ CSV をそのまま取り込み直すと履歴が二重に登録されるため、"
+                                + "履歴画面でこの日の行を確認し、不要な行を削除してから取り込んでください。",
+                            // Data は突き合わせ用の内部キーであり、画面にもログにも出ない
+                            // （表示されるのは Message だけ。DataExportImportViewModel を参照）。
+                            // マスクすると呼び出し元がカードを一意に特定できなくなるため生のまま保持する
+                            // （Issue #1986 で消費側を数え上げて確認した）。
                             Data = cardIdm
                         });
                     }
@@ -141,14 +175,62 @@ namespace ICCardManager.Services.Import.Builders
             }
             catch (Exception ex)
             {
+                // 技術的詳細（ex.Message・スタックトレース）はログへ逃がし、
+                // ユーザー向けには 3 要素の文言だけを出す（#1614）。
+                LogFailure(
+                    ex,
+                    "Issue #906: 利用履歴の自動作成に失敗しました: "
+                    + "CardIdm={CardIdm}, 行番号={LineNumber}, 明細件数={DetailCount}",
+                    IdmMasker.Mask(cardIdm), firstLineNumber, detailRows.Count);
                 errors.Add(new CsvImportError
                 {
                     LineNumber = firstLineNumber,
-                    Message = $"カード {cardIdm} の利用履歴自動作成中にエラーが発生しました: {ex.Message}",
+                    // Issue #1986（コードレビューで検出）: ToUserMessage は AppException のとき
+                    // operation を無視して UserFriendlyMessage をそのまま返すため、
+                    // 「カード … の」で始めると「カード … の データの操作中に…」という
+                    // 文にならない連結になる。「について、」なら両方の分岐で文として成立する。
+                    Message = $"カード {IdmMasker.Mask(cardIdm)} について、"
+                        + ExceptionMessageFormatter.ToUserMessage(ex, "利用履歴の自動作成"),
+                    // Data の扱いは上の分岐のコメントを参照（Issue #1986）。
                     Data = cardIdm
                 });
                 return 0;
             }
+        }
+
+        /// <summary>
+        /// 失敗の痕跡をログへ残す。<see cref="_logger"/> が <c>null</c> のときは
+        /// <see cref="ErrorDialogHelper.LogException"/>（既存のファイルログ機構）へ委譲する。
+        /// </summary>
+        /// <remarks>
+        /// Issue #1986（コードレビューで検出）: 呼び出し元 <c>CsvImportService</c> の
+        /// <c>_logger</c> は <c>ILogger&lt;CsvImportService&gt;?</c> で、7 引数の公開コンストラクタは
+        /// <c>logger: null</c> で連鎖する。<c>_logger?.LogError</c> だけだとその構築経路では
+        /// <b>本 Issue が文言から外した技術的詳細がどこにも残らない</b>
+        /// （<c>error-messages.md</c> #1817「UI 文言とログを対で数える」。
+        /// <c>ILogger</c> を持たない層の受け皿が <c>ErrorDialogHelper.LogException</c> であることも
+        /// 同節が定めている）。
+        /// </remarks>
+        private void LogFailure(Exception ex, string messageTemplate, params object[] args)
+        {
+            if (_logger != null)
+            {
+                _logger.LogError(ex, messageTemplate, args);
+                return;
+            }
+
+            // 構造化テンプレートをそのまま渡せないため、プレースホルダを値で埋めてから記録する。
+            var rendered = messageTemplate;
+            var placeholders = Regex.Matches(messageTemplate, @"\{[A-Za-z_][A-Za-z0-9_]*\}");
+            for (var i = 0; i < placeholders.Count && i < args.Length; i++)
+            {
+                rendered = rendered.Replace(
+                    placeholders[i].Value,
+                    Convert.ToString(args[i], CultureInfo.InvariantCulture));
+            }
+
+            ErrorDialogHelper.LogException(
+                ex ?? new InvalidOperationException(rendered), rendered);
         }
     }
 }

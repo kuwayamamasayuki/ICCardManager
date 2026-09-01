@@ -1,4 +1,5 @@
-using FluentAssertions;
+﻿using FluentAssertions;
+using ICCardManager.Infrastructure.Security;
 using ICCardManager.Common.Exceptions;
 using Xunit;
 
@@ -236,5 +237,28 @@ public class BusinessExceptionTests
 
         var errorCodes = exceptions.Select(e => e.ErrorCode).ToArray();
         errorCodes.Should().OnlyHaveUniqueItems();
+    }
+
+    /// <summary>
+    /// Issue #1986（コードレビューで検出）: 例外の <c>Message</c> は <c>FileLogger</c> が
+    /// 平文のログファイル（users-full ACL）へ書き出すため、IDm はマスクを通す（#1852 / CWE-532）。
+    /// 呼び出し元の <c>LogError</c> がテンプレート引数側でマスクしていても、
+    /// 同じ行に生の値が並べば意味がない。
+    /// </summary>
+    [Fact]
+    public void LentStatusUpdateConflict_技術メッセージのIDmをマスクすること()
+    {
+        // Arrange
+        const string cardIdm = "0102030405060708";
+
+        // Act
+        var ex = BusinessException.LentStatusUpdateConflict(cardIdm, "貸出");
+
+        // Assert - 「マスク済みを含む」と「生を含まない」を対で表明する
+        ex.Message.Should().Contain(IdmMasker.Mask(cardIdm));
+        ex.Message.Should().NotContain(cardIdm, "ログファイルへ生の IDm を残さないこと");
+        // ユーザー向け文言はもともと IDm を含まない（退行させないことを併せて固定する）
+        ex.UserFriendlyMessage.Should().NotContain(cardIdm);
+        ex.ErrorCode.Should().Be("BIZ015");
     }
 }
