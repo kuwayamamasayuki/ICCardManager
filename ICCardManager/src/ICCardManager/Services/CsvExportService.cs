@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
@@ -6,6 +6,7 @@ using System.IO;
 using System.Text;
 using ICCardManager.Common;
 using ICCardManager.Data.Repositories;
+using Microsoft.Extensions.Logging;
 using ICCardManager.Infrastructure.Security;
 using ICCardManager.Models;
 
@@ -38,17 +39,55 @@ namespace ICCardManager.Services
         private readonly IStaffRepository _staffRepository;
         private readonly ILedgerRepository _ledgerRepository;
 
+        /// <summary>
+        /// 失敗の技術的詳細（<c>ex.Message</c>・スタックトレース）の出口。
+        /// </summary>
+        /// <remarks>
+        /// Issue #1991: 是正前はユーザー向け <c>ErrorMessage</c> へ代入した生の <c>ex.Message</c> が
+        /// <b>唯一の出口</b>だった（本クラスはロガーを持っていなかった）。文言を
+        /// <see cref="ExceptionMessageFormatter"/> へ寄せるだけだと、失敗の原因がどこにも残らない
+        /// （<c>error-messages.md</c> #1817「UI 文言とログを対で数える」）。
+        /// 既定値なしの必須引数にする — 省略可能にすると DI の配線漏れが
+        /// 「痕跡がどこにも残らない」形で潜在化する（#1820）。
+        /// </remarks>
+        private readonly ILogger<CsvExportService> _logger;
+
         // UTF-8 with BOM (Excel対応)
         private static readonly Encoding CsvEncoding = new UTF8Encoding(true);
 
         public CsvExportService(
             ICardRepository cardRepository,
             IStaffRepository staffRepository,
-            ILedgerRepository ledgerRepository)
+            ILedgerRepository ledgerRepository,
+            ILogger<CsvExportService> logger)
         {
             _cardRepository = cardRepository;
             _staffRepository = staffRepository;
             _ledgerRepository = ledgerRepository;
+            _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        }
+
+        /// <summary>
+        /// エクスポートの失敗を、ログ（技術的詳細）とユーザー向け文言（3 要素）へ振り分ける（Issue #1991）。
+        /// </summary>
+        /// <remarks>
+        /// 変換の対応表は <see cref="ExceptionMessageFormatter.ToUserMessage"/> ただ 1 つに寄せる。
+        /// メソッドごとに ladder を書き写すと、次に対応表を変える人が一部の経路を取りこぼす
+        /// （<c>error-messages.md</c> #1744）。
+        /// </remarks>
+        /// <param name="ex">捕捉した例外</param>
+        /// <param name="operation">ユーザー視点の操作名（文言の「何が」部分）</param>
+        /// <param name="filePath">出力先（結果オブジェクトへ引き継ぐ）</param>
+        private CsvExportResult ToFailureResult(Exception ex, string operation, string filePath)
+        {
+            _logger.LogError(ex, "CSV export failed: {Operation}", operation);
+
+            return new CsvExportResult
+            {
+                Success = false,
+                ErrorMessage = ExceptionMessageFormatter.ToUserMessage(ex, operation),
+                FilePath = filePath
+            };
         }
 
         /// <summary>
@@ -91,12 +130,7 @@ namespace ICCardManager.Services
             }
             catch (Exception ex)
             {
-                return new CsvExportResult
-                {
-                    Success = false,
-                    ErrorMessage = ex.Message,
-                    FilePath = filePath
-                };
+                return ToFailureResult(ex, "カード一覧のエクスポート", filePath);
             }
         }
 
@@ -140,12 +174,7 @@ namespace ICCardManager.Services
             }
             catch (Exception ex)
             {
-                return new CsvExportResult
-                {
-                    Success = false,
-                    ErrorMessage = ex.Message,
-                    FilePath = filePath
-                };
+                return ToFailureResult(ex, "職員一覧のエクスポート", filePath);
             }
         }
 
@@ -219,12 +248,7 @@ namespace ICCardManager.Services
             }
             catch (Exception ex)
             {
-                return new CsvExportResult
-                {
-                    Success = false,
-                    ErrorMessage = ex.Message,
-                    FilePath = filePath
-                };
+                return ToFailureResult(ex, "利用履歴のエクスポート", filePath);
             }
         }
 
@@ -334,12 +358,7 @@ namespace ICCardManager.Services
             }
             catch (Exception ex)
             {
-                return new CsvExportResult
-                {
-                    Success = false,
-                    ErrorMessage = ex.Message,
-                    FilePath = filePath
-                };
+                return ToFailureResult(ex, "利用明細のエクスポート", filePath);
             }
         }
 
@@ -394,12 +413,7 @@ namespace ICCardManager.Services
             }
             catch (Exception ex)
             {
-                return new CsvExportResult
-                {
-                    Success = false,
-                    ErrorMessage = ex.Message,
-                    FilePath = filePath
-                };
+                return ToFailureResult(ex, "取込用テンプレートの出力", filePath);
             }
         }
 

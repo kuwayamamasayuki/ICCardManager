@@ -206,7 +206,9 @@ namespace ICCardManager.Services
                 return new LedgerSplitResult
                 {
                     Success = false,
-                    ErrorMessage = ex.Message
+                    // Issue #1991: 生の ex.Message は英語・技術用語を含み職員には解読不能で、
+                    // 内部実装の露出にもなる（#1614）。技術的詳細は直前の LogError が残す。
+                    ErrorMessage = ExceptionMessageFormatter.ToUserMessage(ex, "履歴の分割")
                 };
             }
         }

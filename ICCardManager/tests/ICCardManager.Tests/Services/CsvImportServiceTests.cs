@@ -1,4 +1,5 @@
-﻿using System.IO;
+﻿using Microsoft.Extensions.Logging.Abstractions;
+using System.IO;
 using System.Text;
 using FluentAssertions;
 using ICCardManager.Common.Exceptions;
@@ -2435,6 +2436,62 @@ FEDCBA9876543210,鈴木花子,002,テスト2";
     }
 
     /// <summary>
+    /// 明細を置き換えたあとの失敗で、埋め込む理由が「何が」を二重に述べないこと（Issue #1991）。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <c>ExceptionMessageFormatter.ToUserMessage</c> の完全な文を埋め込むと、
+    /// 「明細は置き換えましたが…更新できませんでした。<b>明細の取り込みに失敗しました。</b>…
+    /// しばらく待ってから<b>再度実行してください</b>。…<b>履歴画面で…修正してください</b>。」となり、
+    /// ①「何が」が矛盾し ②両立しない行動指示が並ぶ。埋め込むのは「なぜ」だけにする。
+    /// </para>
+    /// <para>
+    /// 対の表明として、原因（データベースの読み書き）と、この経路が持つ行動指示
+    /// （履歴画面で確認）が<b>残っている</b>ことも見る。前者だけだと理由を丸ごと落とした実装でも緑になる。
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public async Task ImportLedgerDetailsAsync_明細置換後の失敗_埋め込む理由が何がを二重に述べないこと()
+    {
+        // Arrange
+        var csvContent = @"利用履歴ID,利用日時,カードIDm,管理番号,乗車駅,降車駅,バス停,金額,残額,チャージ,ポイント還元,バス利用,グループID
+1,2024-01-15 10:30:00,0123456789ABCDEF,001,博多,天神,,260,9740,0,0,0,";
+
+        var filePath = Path.Combine(_testDirectory, "details_embedded_reason.csv");
+        await Task.Run(() => File.WriteAllText(filePath, csvContent, CsvEncoding));
+
+        _ledgerRepositoryMock.Setup(x => x.ReplaceDetailsAsync(1, It.IsAny<IEnumerable<LedgerDetail>>()))
+            .ReturnsAsync(true);
+        // GetByIdAsync は事前パス（対象台帳の存在確認）でも呼ばれる。そこで落とすと
+        // 共通ハンドラーへ抜けてこの分岐へ到達しないため、2 回目（明細の置換が確定したあとの
+        // 再読取）だけを失敗させる（detailsReplaced = true の経路）。
+        _ledgerRepositoryMock.SetupSequence(x => x.GetByIdAsync(1))
+            .ReturnsAsync(new Ledger
+            {
+                Id = 1, CardIdm = "0123456789ABCDEF", Date = new DateTime(2024, 1, 15),
+                Summary = "鉄道", Income = 0, Expense = 260, Balance = 9740
+            })
+            .ThrowsAsync(new SQLiteException(SQLiteErrorCode.Busy, "database is locked"));
+
+        // Act
+        var result = await _service.ImportLedgerDetailsAsync(filePath);
+
+        // Assert
+        var message = result.Errors.Should().ContainSingle().Subject.Message;
+        message.Should().Contain("明細は置き換えましたが");
+        message.Should().NotContain("に失敗しました。",
+            "埋め込む理由に「何が」を含めない（この文は既に「何が」を述べている）");
+        message.Should().NotContain("再度実行してください",
+            "この経路で再実行すると明細が二重に置き換わる。行動指示はこの文が持つ");
+        message.Should().NotContain("再度お試しください",
+            "DatabaseException.QueryFailed の行動指示も同じ理由でこの経路には合わない");
+        message.Should().NotContain("database is locked", "生の ex.Message を出さない（#1614）");
+        // 対の表明: 理由とこの経路の行動指示は残っていること
+        message.Should().Contain("データベースの読み書きができませんでした",
+            "原因を名指しできる例外を汎用分岐へ落とさないこと（#1986）");
+        message.Should().EndWith("してください。");
+    }
+    /// <summary>
     /// 明細は「新しい順」で <c>ReplaceDetailsAsync</c> へ渡されること
     /// </summary>
     /// <remarks>
@@ -4401,7 +4458,8 @@ FEDCBA9876543210,鈴木花子,002,テスト2";
         _staffRepositoryMock.Setup(x => x.GetByIdmAsync("0123456789ABCDEF", true)).ReturnsAsync(staff);
 
         var exportService = new CsvExportService(
-            _cardRepositoryMock.Object, _staffRepositoryMock.Object, _ledgerRepositoryMock.Object);
+            _cardRepositoryMock.Object, _staffRepositoryMock.Object, _ledgerRepositoryMock.Object,
+            NullLogger<CsvExportService>.Instance);
         var filePath = Path.Combine(_testDirectory, "staff_roundtrip.csv");
         var exportResult = await exportService.ExportStaffAsync(filePath);
         exportResult.Success.Should().BeTrue();

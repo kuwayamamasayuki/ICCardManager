@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
@@ -25,7 +25,8 @@ namespace ICCardManager.Services
             var errors = new List<CsvImportError>();
             return await ExecuteImportWithErrorHandlingAsync(
                 () => ImportCardsInternalAsync(filePath, skipExisting, errors),
-                errors).ConfigureAwait(false);
+                errors,
+                "カードCSVの取り込み").ConfigureAwait(false);
         }
 
         /// <summary>
@@ -232,7 +233,7 @@ namespace ICCardManager.Services
                 _logger?.LogError(ex,
                     "カードCSVインポートのトランザクション中に SQLite エラーが発生しロールバック");
                 TryRollbackImportTransaction(scope);
-                throw DatabaseException.QueryFailed("CSV import transaction", ex);
+                throw MarkLogged(DatabaseException.QueryFailed("CSV import transaction", ex));
             }
             catch (Exception ex)
             {
@@ -240,6 +241,7 @@ namespace ICCardManager.Services
                 _logger?.LogError(ex,
                     "カードCSVインポートのトランザクション中に想定外の例外が発生しロールバック");
                 TryRollbackImportTransaction(scope);
+                MarkLogged(ex);
                 throw;
             }
 
@@ -258,7 +260,8 @@ namespace ICCardManager.Services
             var errors = new List<CsvImportError>();
             return await ExecutePreviewWithErrorHandlingAsync(
                 () => PreviewCardsInternalAsync(filePath, skipExisting, errors),
-                errors).ConfigureAwait(false);
+                errors,
+                "カードCSVの取り込み内容の確認").ConfigureAwait(false);
         }
 
         /// <summary>

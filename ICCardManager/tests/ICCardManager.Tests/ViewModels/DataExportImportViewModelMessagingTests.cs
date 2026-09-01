@@ -1,4 +1,5 @@
-﻿using System;
+﻿using Microsoft.Extensions.Logging.Abstractions;
+using System;
 using System.Collections.Generic;
 using System.Data.SQLite;
 using System.Threading.Tasks;
@@ -73,7 +74,8 @@ public class DataExportImportViewModelMessagingTests : IDisposable
         _exportServiceMock = new Mock<CsvExportService>(
             _cardRepositoryMock.Object,
             _staffRepositoryMock.Object,
-            _ledgerRepositoryMock.Object);
+            _ledgerRepositoryMock.Object,
+            NullLogger<CsvExportService>.Instance);
 
         _importServiceMock = new Mock<CsvImportService>(
             _cardRepositoryMock.Object,

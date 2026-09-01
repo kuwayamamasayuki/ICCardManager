@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
@@ -289,7 +289,7 @@ namespace ICCardManager.Services
                     _logger?.LogError(ex,
                         "履歴CSVインポートのトランザクション中に SQLite エラーが発生しロールバック");
                     TryRollbackImportTransaction(scope);
-                    throw DatabaseException.QueryFailed("CSV import transaction", ex);
+                    throw MarkLogged(DatabaseException.QueryFailed("CSV import transaction", ex));
                 }
                 catch (Exception ex)
                 {
@@ -297,6 +297,7 @@ namespace ICCardManager.Services
                     _logger?.LogError(ex,
                         "履歴CSVインポートのトランザクション中に想定外の例外が発生しロールバック");
                     TryRollbackImportTransaction(scope);
+                    MarkLogged(ex);
                     throw;
                 }
 
@@ -317,7 +318,7 @@ namespace ICCardManager.Services
                 return new CsvImportResult
                 {
                     Success = false,
-                    ErrorMessage = ToUserFacingErrorMessage(ex),
+                    ErrorMessage = ToUserFacingErrorMessage(ex, "利用履歴CSVの取り込み"),
                     Errors = errors
                 };
             }
@@ -510,7 +511,7 @@ namespace ICCardManager.Services
                 return new CsvImportPreviewResult
                 {
                     IsValid = false,
-                    ErrorMessage = ToUserFacingErrorMessage(ex),
+                    ErrorMessage = ToUserFacingErrorMessage(ex, "利用履歴CSVの取り込み内容の確認"),
                     Errors = errors
                 };
             }
