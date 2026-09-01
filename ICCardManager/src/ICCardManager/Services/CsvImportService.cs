@@ -380,10 +380,14 @@ namespace ICCardManager.Services
         /// </summary>
         /// <param name="operation">実行する処理</param>
         /// <param name="errors">エラーリスト（処理中にエラーが追加される場合に使用）</param>
+        /// <param name="operationName">
+        /// ユーザー視点の操作名（Issue #1991）。エラー文言の「何が」部分とログの識別子に用いる。
+        /// </param>
         /// <returns>インポート結果</returns>
         private async Task<CsvImportResult> ExecuteImportWithErrorHandlingAsync(
             Func<Task<CsvImportResult>> operation,
-            List<CsvImportError> errors = null)
+            List<CsvImportError> errors = null,
+            string operationName = "CSVの取り込み")
         {
             errors ??= new List<CsvImportError>();
 
@@ -396,7 +400,7 @@ namespace ICCardManager.Services
                 return new CsvImportResult
                 {
                     Success = false,
-                    ErrorMessage = ToUserFacingErrorMessage(ex),
+                    ErrorMessage = ToUserFacingErrorMessage(ex, operationName),
                     Errors = errors
                 };
             }
@@ -451,20 +455,64 @@ namespace ICCardManager.Services
         /// を使い、生の <c>ex.Message</c> を UI へ出さない（Issue #1614）。
         /// </para>
         /// </remarks>
-        private static string ToUserFacingErrorMessage(Exception ex)
+        private string ToUserFacingErrorMessage(Exception ex, string operation)
+        {
+            // Issue #1991: 是正前は IOException / default の 2 分岐が生の ex.Message を返しており、
+            // それが技術的詳細の**唯一の出口**だった（この catch 群はログを出していない）。
+            // 文言だけ差し替えると失敗の原因がどこにも残らないため、ログと対で行う（#1817）。
+            LogImportFailure(ex, operation);
+
+            return ToUserFacingErrorMessageCore(ex, operation);
+        }
+
+        /// <summary>
+        /// 例外 → ユーザー向け文言の変換だけを行う（ログは行わない）。
+        /// </summary>
+        /// <remarks>
+        /// <b>呼び出し元が既にログを出している経路では二重に出さない</b>（<c>error-messages.md</c> #1817）。
+        /// <c>CsvImportService.Detail.cs</c> の明細置換失敗は直前に <c>_logger?.LogError</c> を出しており、
+        /// そちらはこの純粋な変換だけを使う。ログを併設するのは
+        /// <see cref="ToUserFacingErrorMessage(Exception, string)"/> の側の責務。
+        /// </remarks>
+        private static string ToUserFacingErrorMessageCore(Exception ex, string operation)
         {
             switch (ex)
             {
                 case FileNotFoundException _:
-                    return "指定されたファイルが見つかりません。";
+                    return "指定されたファイルが見つかりません。"
+                           + "ファイルが移動・削除されていないか確認し、もう一度選び直してください。";
                 case UnauthorizedAccessException _:
-                    return "ファイルへのアクセス権限がありません。";
+                    return "ファイルへのアクセス権限がありません。"
+                           + "ファイルの読み取り権限を確認するか、管理者に連絡してください。";
                 case AppException appException:
                     return appException.UserFriendlyMessage;
-                case IOException _:
-                    return $"ファイルの読み込みエラー: {ex.Message}";
                 default:
-                    return $"予期しないエラーが発生しました: {ex.Message}";
+                    // 対応表は ExceptionMessageFormatter ただ 1 つに寄せる（#1744）。
+                    // IOException の「他のプログラムで開かれていないか確認し」は、Excel で開いたままの
+                    // CSV を取り込もうとした場合そのまま実行できる行動指示であり、この経路に適合する
+                    // （#1817「寄せる前に、その分岐で取れる行動が実際に実行できるかを確認する」）。
+                    // SQLiteException（共有モードの Busy / Locked）は #1986 で新設した分岐が名指しする。
+                    return ExceptionMessageFormatter.ToUserMessage(ex, operation);
+            }
+        }
+
+        /// <summary>
+        /// 取込・プレビューの失敗の技術的詳細をログへ残す（Issue #1991）。
+        /// </summary>
+        /// <remarks>
+        /// <c>ILogger</c> は省略可能な注入（Issue #1282）のため、未注入時は
+        /// <see cref="ErrorDialogHelper.LogException"/> の既存ファイルログ機構へ委譲する
+        /// （ロガーが無いことを「ログを出さない理由」にしない。<c>development-conventions.md</c> #1819）。
+        /// </remarks>
+        private void LogImportFailure(Exception ex, string operation)
+        {
+            if (_logger != null)
+            {
+                _logger.LogError(ex, "CSV import failed: {Operation}", operation);
+            }
+            else
+            {
+                ErrorDialogHelper.LogException(ex, operation);
             }
         }
 
@@ -473,10 +521,14 @@ namespace ICCardManager.Services
         /// </summary>
         /// <param name="operation">実行する処理</param>
         /// <param name="errors">エラーリスト（処理中にエラーが追加される場合に使用）</param>
+        /// <param name="operationName">
+        /// ユーザー視点の操作名（Issue #1991）。エラー文言の「何が」部分とログの識別子に用いる。
+        /// </param>
         /// <returns>プレビュー結果</returns>
         private async Task<CsvImportPreviewResult> ExecutePreviewWithErrorHandlingAsync(
             Func<Task<CsvImportPreviewResult>> operation,
-            List<CsvImportError> errors = null)
+            List<CsvImportError> errors = null,
+            string operationName = "取り込み内容の確認")
         {
             errors ??= new List<CsvImportError>();
 
@@ -489,7 +541,7 @@ namespace ICCardManager.Services
                 return new CsvImportPreviewResult
                 {
                     IsValid = false,
-                    ErrorMessage = ToUserFacingErrorMessage(ex),
+                    ErrorMessage = ToUserFacingErrorMessage(ex, operationName),
                     Errors = errors
                 };
             }

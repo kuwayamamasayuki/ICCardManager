@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
@@ -317,7 +317,7 @@ namespace ICCardManager.Services
                 return new CsvImportResult
                 {
                     Success = false,
-                    ErrorMessage = ToUserFacingErrorMessage(ex),
+                    ErrorMessage = ToUserFacingErrorMessage(ex, "利用履歴CSVの取り込み"),
                     Errors = errors
                 };
             }
@@ -510,7 +510,7 @@ namespace ICCardManager.Services
                 return new CsvImportPreviewResult
                 {
                     IsValid = false,
-                    ErrorMessage = ToUserFacingErrorMessage(ex),
+                    ErrorMessage = ToUserFacingErrorMessage(ex, "利用履歴CSVの取り込み内容の確認"),
                     Errors = errors
                 };
             }

@@ -3,6 +3,13 @@
 ### Unreleased
 
 **修正**
+- Issue #1991 **失敗結果の `ErrorMessage` が生の `ex.Message` をそのまま職員へ表示していた**問題を是正した（7 箇所、`.claude/rules/error-messages.md` #1614 違反）。共有モードで他 PC が書き込みロックを保持している最中に履歴 CSV を取り込むと、「インポートに失敗しました。予期しないエラーが発生しました: database is locked」という英文がモーダルに出ていた。
+  - **対象は `CsvImportService.ToUserFacingErrorMessage` の `IOException` / `default` 2 分岐、`CsvExportService` の 5 箇所、`LedgerSplitService` の 1 箇所。**変換は `ExceptionMessageFormatter.ToUserMessage` ただ 1 つへ寄せた（#1744。SQLite の Busy / Locked は #1986 で新設した分岐が原因を名指しする）。
+  - **「UI 文言」と「ログ」を対で数えた**（#1817）。`CsvExportService` は `ILogger` を持っておらず、ユーザー向け `ErrorMessage` へ代入された生の `ex.Message` が技術的詳細の**唯一の出口**だった。文言だけ差し替えると失敗の原因がどこにも残らないため、**既定値なしの必須引数**としてロガーを注入した（#1820）。取込側の catch 群も同様にログを出していなかったので、変換にログを併設した。
+  - **ただし呼び出し元が既にログを出している経路では二重に出さない**（#1817）。`CsvImportService.Detail.cs` の明細置換失敗は直前で `_logger?.LogError` を出しているため、ログを伴わない純粋な変換（`ToUserFacingErrorMessageCore`）を使う形に分けた。
+  - **寄せる前に「その分岐で取れる行動が実際に実行できるか」を確認した**（#1817）。`IOException` の「対象のファイルが他のプログラムで開かれていないか確認し」は、Excel で開いたままの CSV を取り込もうとした場合そのまま実行できる行動指示であり、この経路に適合する。
+  - **静的検査 `ImportErrorMessageExposureConventionTests` の走査対象へ `ErrorMessage` を追加し、「この系統は対象外」という XML doc の記述を削除した**（#1932「上位のコメントが食い違いをスコープ外と記録しているときは、その記録を消す」）。是正前のパターンは直前 1 文字が英数字だと一致しない否定後読みを持ち、`ErrorMessage =` を**原理的に検出できなかった**。`UserFriendlyMessage` のような他の接尾辞まで巻き込まないよう、許可する接頭辞は `Error` に限る（#1786）。
+  - 回帰は「禁止された形の不在」と「正しい形（変換ヘルパー経由）の存在」を**対で**表明する静的検査と、実際に返る文言・実際に残るログを固定する挙動テスト（`Services/RawExceptionMessageExposureTests`）で持つ。**検出力は変異で実測**（`LedgerSplitService` を修正前へ戻すと静的検査 1 件が赤、`default` 分岐を戻すと挙動 1 件が赤、ログ併設を外すとログの表明 2 件だけが赤 ＝ 文言とログの表明が独立して効いている）。
 - Issue #1988 **非推奨 `DbContext.GetConnection()` が生の共有 `SQLiteConnection` を返すため、セマフォ・トランザクション計数・保守ゲート・進行中リース計数のすべてを迂回できた**問題を是正した。`DbContext` はプロセス全体で接続を 1 本しか持たず SQLite のトランザクションは接続単位なので、生の接続を握った経路が発行する文は①他フローのトランザクションへ暗黙参加してそのロールバックで消える、②逆に自分でトランザクションを開けばセマフォを取らない `LeaseConnectionAsync` 経由の書き込みを巻き添えにする（Issue #1984 が塞いだ側）、③`SuspendConnections`（#1809）の進行中リース計数に載らずリストア中に使用中の接続を閉じられる、の 3 つが同時に成立していた。
   - **「危険な口を 1 つ消した」と「危険な口が無い」は別である。** `GetConnection().BeginTransaction()` は Issue #1984 で削除した非推奨 `BeginTransaction()` の**本体そのもの**で、同じ抜け道が別の綴りで残っていた（`.claude/rules/development-conventions.md`「数える単位は『その口が返すもの』まで遡る」／#1843「ガードは綴りではなく資源で書く」）。本番の呼び出し元は元からゼロ。
   - **回帰はリフレクションで固定する**（`DbContextConnectionAccessConventionTests`）。メソッド名を禁止する形では `AcquireRawAsync()` のような別名や `Task<SQLiteConnection>` で包んだ形が素通りするため、「`SQLiteConnection` を外へ出す公開面（メソッドの戻り値・プロパティ・フィールド）が存在しないこと」を数える。**「禁止された形の不在」と「正規の取得手段の実在」を対で**表明し、検査ロジック自体もサンプル型で固定した（#1786）。検出力は変異で実測（`GetConnection` 復活・別名 + `Task<>` 包みのいずれも赤）。

@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -31,14 +31,12 @@ namespace ICCardManager.Tests;
 /// 「失敗を通知する文言（<c>Message</c> への代入）」に絞り、プレビュー表示の扱いは別途判断する。
 /// </para>
 /// <para>
-/// <b>この検査の適用範囲（未是正の系統を正直に書く）。</b> 対象は <c>Message</c> プロパティへの
-/// 代入であり、<c>CsvImportResult.ErrorMessage</c> / <c>CsvImportPreviewResult.ErrorMessage</c> は
-/// <b>含まない</b>。あちらは <c>CsvImportService.ToUserFacingErrorMessage</c> が
-/// <c>IOException</c> と <c>default</c> の 2 分岐で生の <c>ex.Message</c> を返しており（#1614 違反）、
-/// 同型は <c>CsvExportService</c>（5 箇所）・<c>LedgerSplitService</c>（1 箇所）にも及ぶ。
-/// <b>本 Issue（#1986）のスコープ外として別途追跡する</b> — ここでその形を「適合」として
-/// サンプル入力に固定すると、<b>検査が嘘の安心感を与える</b>（#1726「到達不能な分岐と
-/// その回帰テストは手当てされているという誤った安心感を与える」と同じ形。コードレビューで検出）。
+/// <b>この検査の適用範囲。</b> 対象は <c>Message</c> と <c>ErrorMessage</c> の両プロパティへの代入。
+/// <c>ErrorMessage</c> は Issue #1991 で追加した — <c>CsvImportService.ToUserFacingErrorMessage</c> の
+/// <c>IOException</c> / <c>default</c> 2 分岐、<c>CsvExportService</c>（5 箇所）、
+/// <c>LedgerSplitService</c>（1 箇所）が生の <c>ex.Message</c> を返しており（#1614 違反）、
+/// #1986 の時点では「スコープ外」として本文に明記していた。是正が済んだので<b>その記述を消す</b>
+/// （#1932「上位のコメントが食い違いをスコープ外と記録しているときは、その記録を消す」）。
 /// </para>
 /// <para>
 /// 検査は「禁止された形の不在」と「正しい形が実際に使われていること」を<b>対で</b>表明する。
@@ -50,11 +48,17 @@ namespace ICCardManager.Tests;
 public class ImportErrorMessageExposureConventionTests
 {
     /// <summary>
-    /// オブジェクト初期化子・プロパティ代入の <c>Message =</c>（<c>ErrorMessage =</c> や
-    /// <c>x.Message ==</c> は除く）。
+    /// オブジェクト初期化子・プロパティ代入の <c>Message =</c> / <c>ErrorMessage =</c>
+    /// （<c>x.Message ==</c> のような比較は除く）。
     /// </summary>
+    /// <remarks>
+    /// Issue #1991: <c>ErrorMessage</c> を対象へ加えた。是正前の <c>MessageAssignmentPattern</c> は
+    /// 直前の 1 文字が英数字だと一致しない否定後読みを持つため、<c>ErrorMessage =</c> は
+    /// <b>原理的に検出できなかった</b>。<c>UserFriendlyMessage</c> のような他の接尾辞まで
+    /// 巻き込まないよう、許可する接頭辞を <c>Error</c> に限る（誤検出はガード自体の寿命を縮める。#1786）。
+    /// </remarks>
     private static readonly Regex MessageAssignmentPattern = new(
-        @"(?<![A-Za-z0-9_.])Message\s*=(?!=)",
+        @"(?<![A-Za-z0-9_.])(?:Error)?Message\s*=(?!=)",
         RegexOptions.Compiled);
 
     /// <summary>
@@ -168,6 +172,42 @@ public class ImportErrorMessageExposureConventionTests
     }
 
     /// <summary>
+    /// 「禁止された形の不在」だけでは、<c>ErrorMessage</c> の代入を丸ごと消した実装
+    /// （＝失敗の理由を一切伝えない実装）でも緑になる。正しい形が実際に使われていることを
+    /// 対で表明する（Issue #1991）。
+    /// </summary>
+    [Fact]
+    public void 失敗結果のErrorMessageが変換ヘルパーを実際に通っていること()
+    {
+        var routed = new List<string>();
+
+        foreach (var file in GetProductionSourceFiles())
+        {
+            var source = File.ReadAllText(file);
+            var relative = ToRelativePath(file);
+
+            foreach (var (lineNumber, expression) in ExtractMessageAssignments(source))
+            {
+                // 直接 ToUserMessage を呼ぶ形と、集約したヘルパー（ToUserFacingErrorMessage /
+                // ToUserFacingErrorMessageCore）を経由する形の両方を数える。後者を数えないと、
+                // 対応表を 1 か所へ寄せた実装（#1744 が推奨する形）で対の表明が空振りする。
+                if (expression.Contains("ExceptionMessageFormatter.ToUserMessage(")
+                    || expression.Contains("ToUserFacingErrorMessage"))
+                {
+                    routed.Add($"{relative}:{lineNumber}");
+                }
+            }
+        }
+
+        // Issue #1991 で是正した箇所（CsvExportService 5・LedgerSplitService 1・
+        // CsvImportService 系 4）のうち、代入式から直接観測できるもの。
+        routed.Should().HaveCountGreaterOrEqualTo(
+            5,
+            "Issue #1991 で ExceptionMessageFormatter へ寄せた ErrorMessage 代入が失われていないこと。実際: "
+            + string.Join(" / ", routed));
+    }
+
+    /// <summary>
     /// 検出ロジック自体をサンプル入力で固定する。実データが変わっても空振りしない（#1786）。
     /// </summary>
     [Theory]
@@ -187,6 +227,13 @@ public class ImportErrorMessageExposureConventionTests
     [InlineData("var o4 = new CsvImportError { Message = ExceptionMessageFormatter.ToUserMessage(ex, \"取込\") };", false, false)]
     // 比較（`==`）は代入ではないので対象外
     [InlineData("if (error.Message == ex.Message) { }", false, false)]
+    // Issue #1991: ErrorMessage も走査対象（是正前は否定後読みで原理的に検出できなかった）
+    [InlineData("var r1 = new CsvExportResult { ErrorMessage = ex.Message };", false, true)]
+    [InlineData("var r2 = new CsvImportResult { ErrorMessage = $\"読み込みエラー: {ex.Message}\" };", false, true)]
+    [InlineData("var r3 = new LedgerSplitResult { ErrorMessage = $\"カード {cardIdm} で失敗\" };", true, false)]
+    [InlineData("var o5 = new CsvExportResult { ErrorMessage = ExceptionMessageFormatter.ToUserMessage(ex, \"エクスポート\") };", false, false)]
+    // 他の接尾辞（UserFriendlyMessage 等）まで巻き込まないこと（誤検出はガードの寿命を縮める。#1786）
+    [InlineData("var m = appException.UserFriendlyMessage;", false, false)]
     public void 検出ロジックがサンプル入力に対して期待どおり判定すること(
         string snippet, bool expectRawIdm, bool expectExceptionMessage)
     {

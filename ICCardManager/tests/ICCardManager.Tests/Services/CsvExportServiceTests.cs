@@ -1,3 +1,4 @@
+﻿using Microsoft.Extensions.Logging.Abstractions;
 using System.IO;
 using System.Text;
 using FluentAssertions;
@@ -40,7 +41,8 @@ public class CsvExportServiceTests : IDisposable
         _service = new CsvExportService(
             _cardRepositoryMock.Object,
             _staffRepositoryMock.Object,
-            _ledgerRepositoryMock.Object);
+            _ledgerRepositoryMock.Object,
+            NullLogger<CsvExportService>.Instance);
     }
 
     public void Dispose()

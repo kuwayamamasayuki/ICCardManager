@@ -659,7 +659,7 @@ namespace ICCardManager.Services
         /// <c>SQLiteErrorCode.Constraint</c>（明細 INSERT の FOREIGN KEY 制約違反）は「親の履歴が消えた」
         /// 競合と同じ原因なので、<see cref="BuildParentLedgerConflictMessage"/> と同じ「なぜ」を名指しする。
         /// それ以外の SQLite 例外（Busy / Locked 等）は <see cref="DatabaseException.QueryFailed"/> の
-        /// 整備済み文言、その他は <see cref="ToUserFacingErrorMessage"/> の対応表へ寄せる。
+        /// 整備済み文言、その他は <see cref="ToUserFacingErrorMessageCore"/> の対応表へ寄せる（Issue #1991: この経路は直前で <c>_logger?.LogError</c> を出しているため、ログを併設しない側を使う）。
         /// </remarks>
         private static string BuildDetailReplaceFailureMessage(int ledgerId, Exception ex, bool detailsReplaced)
         {
@@ -672,7 +672,7 @@ namespace ICCardManager.Services
 
             var reason = ex is SQLiteException sqliteEx
                 ? DatabaseException.QueryFailed("ledger detail import", sqliteEx).UserFriendlyMessage
-                : ToUserFacingErrorMessage(ex);
+                : ToUserFacingErrorMessageCore(ex, "明細の取り込み");
 
             return detailsReplaced
                 ? $"利用履歴ID {ledgerId} の明細は置き換えましたが、親の履歴の摘要・金額を更新できませんでした。{reason}" +

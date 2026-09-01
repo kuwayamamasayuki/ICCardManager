@@ -1,4 +1,5 @@
-﻿using System.IO;
+﻿using Microsoft.Extensions.Logging.Abstractions;
+using System.IO;
 using System.Text;
 using FluentAssertions;
 using ICCardManager.Common.Exceptions;
@@ -4401,7 +4402,8 @@ FEDCBA9876543210,鈴木花子,002,テスト2";
         _staffRepositoryMock.Setup(x => x.GetByIdmAsync("0123456789ABCDEF", true)).ReturnsAsync(staff);
 
         var exportService = new CsvExportService(
-            _cardRepositoryMock.Object, _staffRepositoryMock.Object, _ledgerRepositoryMock.Object);
+            _cardRepositoryMock.Object, _staffRepositoryMock.Object, _ledgerRepositoryMock.Object,
+            NullLogger<CsvExportService>.Instance);
         var filePath = Path.Combine(_testDirectory, "staff_roundtrip.csv");
         var exportResult = await exportService.ExportStaffAsync(filePath);
         exportResult.Success.Should().BeTrue();
