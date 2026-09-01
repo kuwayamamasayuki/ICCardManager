@@ -116,15 +116,22 @@ namespace ICCardManager.Services
                     var card = await _cardRepository.GetByIdmAsync(cardIdm, includeDeleted: true).ConfigureAwait(false);
                     if (card == null)
                     {
+                        // 生の IDm はここで「マスク済みの値」「形式が妥当か」「文字数」へ畳み、
+                        // 以降（文言の組み立て）へは渡さない（Issue #1986）。
+                        var idmWellFormed = IsIdmWellFormed(cardIdm);
+                        var maskedIdm = IdmMasker.Mask(cardIdm);
+                        var idmLength = cardIdm?.Length ?? 0;
+
                         errors.Add(new CsvImportError
                         {
                             LineNumber = lineNumber,
                             // Issue #1986: IDm は本システム唯一の認証要素であり、エラー文言は
                             // 画面に出て職員の目に触れるためマスクを通す（#1852）。
                             // Data は突き合わせ用の内部キーで画面にもログにも出ないため生のまま。
-                            Message = $"カードIDm {IdmMasker.Mask(cardIdm)} が登録されていません。"
-                                + "この IDm のカードはカード管理に存在しません。"
-                                + "カード管理画面（F2）でカードを登録してから、もう一度取り込んでください。",
+                            // ファクトリへ生の IDm を渡さない（構造的に露出できなくする）。
+                            Message = idmWellFormed
+                                ? BuildUnregisteredCardMessage(maskedIdm)
+                                : BuildMalformedIdmMessage(idmLength),
                             Data = cardIdm
                         });
                         continue;
@@ -372,15 +379,22 @@ namespace ICCardManager.Services
                     var card = await _cardRepository.GetByIdmAsync(cardIdm, includeDeleted: true).ConfigureAwait(false);
                     if (card == null)
                     {
+                        // 生の IDm はここで「マスク済みの値」「形式が妥当か」「文字数」へ畳み、
+                        // 以降（文言の組み立て）へは渡さない（Issue #1986）。
+                        var idmWellFormed = IsIdmWellFormed(cardIdm);
+                        var maskedIdm = IdmMasker.Mask(cardIdm);
+                        var idmLength = cardIdm?.Length ?? 0;
+
                         errors.Add(new CsvImportError
                         {
                             LineNumber = lineNumber,
                             // Issue #1986: IDm は本システム唯一の認証要素であり、エラー文言は
                             // 画面に出て職員の目に触れるためマスクを通す（#1852）。
                             // Data は突き合わせ用の内部キーで画面にもログにも出ないため生のまま。
-                            Message = $"カードIDm {IdmMasker.Mask(cardIdm)} が登録されていません。"
-                                + "この IDm のカードはカード管理に存在しません。"
-                                + "カード管理画面（F2）でカードを登録してから、もう一度取り込んでください。",
+                            // ファクトリへ生の IDm を渡さない（構造的に露出できなくする）。
+                            Message = idmWellFormed
+                                ? BuildUnregisteredCardMessage(maskedIdm)
+                                : BuildMalformedIdmMessage(idmLength),
                             Data = cardIdm
                         });
                         continue;
@@ -582,6 +596,54 @@ namespace ICCardManager.Services
             => $"利用履歴ID {ledgerId} の明細を置き換えたあと、親の履歴が見つからず摘要・金額を更新できませんでした。" +
                "他のパソコンや別の操作でこの履歴が削除された可能性があります（その場合、置き換えた明細も履歴と一緒に削除されています）。" +
                "履歴画面でこの履歴の有無を確認し、必要な場合は利用履歴IDを空欄にした明細CSVを再度インポートして新規の履歴として登録してください。";
+
+        /// <summary>カード IDm の桁数（16進16文字）。</summary>
+        private const int IdmLength = 16;
+
+        /// <summary>
+        /// カード IDm が 16 進 <see cref="IdmLength"/> 文字の形式を満たすか。
+        /// （メソッド名を <c>…Idm</c> で終わらせない — 静的検査が IDm を保持する識別子として拾うため）
+        /// </summary>
+        private static bool IsIdmWellFormed(string cardIdm)
+            => cardIdm != null && cardIdm.Length == IdmLength && cardIdm.All(Uri.IsHexDigit);
+
+        /// <summary>
+        /// 明細 CSV のカード IDm が（形式は正しいが）登録されていないときのエラー文言。
+        /// </summary>
+        /// <param name="maskedIdm">
+        /// <see cref="IdmMasker.Mask"/> を通した IDm。
+        /// <b>生の IDm を受け取らない</b> — 引数の型で「マスクを通していない値は渡せない」ようにすると、
+        /// 規約ではなく構造が露出を防ぐ（<c>development-conventions.md</c> #1883
+        /// 「食い違った状態を表現できなくする」）。
+        /// </param>
+        private static string BuildUnregisteredCardMessage(string maskedIdm)
+            => $"カードIDm {maskedIdm} が登録されていません。"
+               + "この IDm のカードはカード管理に存在しません。"
+               + "カード管理画面（F2）でカードを登録してから、もう一度取り込んでください。";
+
+        /// <summary>
+        /// 明細 CSV のカード IDm が 16 進 <see cref="IdmLength"/> 文字でないときのエラー文言。
+        /// </summary>
+        /// <param name="rawLength">CSV に書かれていた値の文字数（値そのものは渡さない）。</param>
+        /// <remarks>
+        /// <para>
+        /// Issue #1986（コードレビューで検出）: <see cref="IdmMasker.Mask"/> は 16 文字未満の入力を
+        /// <b>全部 <c>*</c> に置き換える</b>（短いクレデンシャルを部分露出させないため）。
+        /// 壊れた IDm をそのまま「登録されていません」と案内すると、<b>職員には値が一切見えず、
+        /// しかも案内（「カードを登録してください」）が実際の原因と食い違う</b>。
+        /// </para>
+        /// <para>
+        /// この列は Excel で編集されることが多く、先頭の <c>0</c> が失われる・指数表記になる
+        /// といった破損が「登録されていません」の最も多い実原因である。形式不正は<b>別の原因</b>として
+        /// 名指しし、調査の手掛かりに文字数を添える（<c>error-messages.md</c>「実際の入力値を含める」。
+        /// 値そのものは出さないので露出は増えない）。
+        /// </para>
+        /// </remarks>
+        private static string BuildMalformedIdmMessage(int rawLength)
+            => $"カードIDm の形式が正しくありません（{rawLength.ToString(CultureInfo.InvariantCulture)}文字）。"
+               + $"カードIDm は 16進{IdmLength.ToString(CultureInfo.InvariantCulture)}文字である必要があります。"
+               + "Excel で開くと先頭の 0 が失われたり指数表記になることがあります。"
+               + "CSV のカードIDm 列を文字列として確認してから、もう一度取り込んでください。";
 
         /// <summary>
         /// 明細の置換／親 Ledger の更新が例外で中断したときのエラー文言を組み立てる（Issue #1614 / #1808）。

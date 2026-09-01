@@ -6,6 +6,8 @@ using FluentAssertions;
 using ICCardManager.Data.Repositories;
 using ICCardManager.Models;
 using ICCardManager.Services;
+using System.Data.SQLite;
+using ICCardManager.Common.Exceptions;
 using ICCardManager.Infrastructure.Security;
 using ICCardManager.Services.Import.Builders;
 using ICCardManager.Tests.Infrastructure;
@@ -221,6 +223,14 @@ public class NewLedgerFromSegmentsBuilderTests
         // 3 要素（何が／なぜ／どうすれば）を満たし、行動指示で終わること。
         errors[0].Message.Should().Contain("登録できませんでした");
         errors[0].Message.Should().EndWith("取り込んでください。");
+        // Issue #1986（コードレビューで検出）: この分岐は InsertAsync がコミット済みの状態で
+        // 到達し、明細を持たない台帳の行が残る。そのまま再取込すると CSV の利用履歴 ID は
+        // 空欄のままなので 2 つ目の台帳が作られ、6 年保存の台帳が二重計上になる。
+        // 「そのまま取り込み直せ」と読める案内を出さないことを表明する。
+        errors[0].Message.Should().Contain("二重に登録される");
+        errors[0].Message.Should().Contain("不要な行を削除");
+        // 原因を断定しない（台帳 ID はこの取込がミリ秒前に採番したもので、他 PC の競合ではない）
+        errors[0].Message.Should().NotContain("他のパソコン");
         // Data は突き合わせ用の内部キーであり、画面にもログにも出ないため生のまま保持する。
         errors[0].Data.Should().Be(CardIdm);
     }
@@ -257,6 +267,72 @@ public class NewLedgerFromSegmentsBuilderTests
         errors[0].Message.Should().Contain("利用履歴の自動作成に失敗しました。");
         errors[0].Message.Should().EndWith("してください。");
         errors[0].Data.Should().Be(CardIdm);
+    }
+
+    /// <summary>
+    /// Issue #1986（コードレビューで検出）: <c>ToUserMessage</c> は <c>AppException</c> のとき
+    /// <c>operation</c> を無視して <c>UserFriendlyMessage</c> をそのまま返す。
+    /// 「カード … の」で始めると文にならない連結になるため、両方の分岐で文として成立することを表明する。
+    /// </summary>
+    [Fact]
+    public async Task BuildAndInsertAsync_AppExceptionThrown_ComposesReadableSentence()
+    {
+        // Arrange
+        var repoMock = new Mock<ILedgerRepository>();
+        repoMock.Setup(r => r.InsertAsync(It.IsAny<Ledger>()))
+            .ThrowsAsync(DatabaseException.QueryFailed("ledger insert"));
+
+        var builder = new NewLedgerFromSegmentsBuilder(
+            repoMock.Object, new SummaryGenerator(), NullLogger.Instance);
+        var errors = new List<CsvImportError>();
+        var detail = Usage(new DateTime(2024, 9, 1, 8, 0, 0), amount: 260, balance: 9740);
+
+        // Act
+        await builder.BuildAndInsertAsync(
+            CardIdm,
+            new DateTime(2024, 9, 1),
+            new List<(int LineNumber, LedgerDetail Detail)> { (LineNumber: 50, Detail: detail) },
+            errors);
+
+        // Assert - AppException の整備済み文言が「について、」で自然につながること
+        errors.Should().ContainSingle();
+        errors[0].Message.Should().StartWith($"カード {IdmMasker.Mask(CardIdm)} について、");
+        errors[0].Message.Should().Contain("データの操作中にエラーが発生しました。");
+        // 「カード … の データの操作中に…」という壊れた連結にならないこと
+        errors[0].Message.Should().NotContain($"{IdmMasker.Mask(CardIdm)} のデータの操作中");
+    }
+
+    /// <summary>
+    /// Issue #1986（コードレビューで検出）: <c>SQLiteException</c>（共有モードの Busy / Locked、
+    /// UNC 断）は最も起こりやすい失敗だが、<c>ToUserMessage</c> の対応表に無く
+    /// 「予期しない問題が発生しました」へ落ちていた。原因を名指しできること。
+    /// </summary>
+    [Fact]
+    public async Task BuildAndInsertAsync_SQLiteExceptionThrown_NamesDatabaseCause()
+    {
+        // Arrange
+        var repoMock = new Mock<ILedgerRepository>();
+        repoMock.Setup(r => r.InsertAsync(It.IsAny<Ledger>()))
+            .ThrowsAsync(new SQLiteException(SQLiteErrorCode.Busy, "database is locked"));
+
+        var builder = new NewLedgerFromSegmentsBuilder(
+            repoMock.Object, new SummaryGenerator(), NullLogger.Instance);
+        var errors = new List<CsvImportError>();
+        var detail = Usage(new DateTime(2024, 10, 1, 8, 0, 0), amount: 260, balance: 9740);
+
+        // Act
+        await builder.BuildAndInsertAsync(
+            CardIdm,
+            new DateTime(2024, 10, 1),
+            new List<(int LineNumber, LedgerDetail Detail)> { (LineNumber: 60, Detail: detail) },
+            errors);
+
+        // Assert
+        errors.Should().ContainSingle();
+        errors[0].Message.Should().Contain("データベースの読み書きができませんでした。");
+        errors[0].Message.Should().NotContain(
+            "予期しない問題", "SQLite の失敗は既定分岐へ落とさない（原因を名指しする）");
+        errors[0].Message.Should().NotContain("SQLite", "技術用語を職員へ出さない");
     }
 
     /// <summary>

@@ -1,4 +1,5 @@
 ﻿using System;
+using ICCardManager.Infrastructure.Security;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
@@ -206,7 +207,11 @@ namespace ICCardManager.Common.Exceptions
         /// </remarks>
         public static BusinessException LentStatusUpdateConflict(string cardIdm, string operationName)
         {
-            var message = $"Lent status update affected 0 rows: {cardIdm} ({operationName})";
+            // Issue #1986: 例外の Message は FileLogger が平文のログファイル
+            // （users-full ACL）へ書き出すため、IDm はマスクを通す（#1852 / CWE-532）。
+            // 呼び出し元の LogError がテンプレート引数側でマスクしていても、
+            // 同じ行に生の値が並べば意味がない。
+            var message = $"Lent status update affected 0 rows: {IdmMasker.Mask(cardIdm)} ({operationName})";
             var userMessage =
                 $"{operationName}を記録できませんでした。" +
                 "カード管理画面（F2）で削除されていないか確認してください。";

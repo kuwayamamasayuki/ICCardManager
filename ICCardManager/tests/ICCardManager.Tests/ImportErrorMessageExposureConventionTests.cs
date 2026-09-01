@@ -31,6 +31,16 @@ namespace ICCardManager.Tests;
 /// 「失敗を通知する文言（<c>Message</c> への代入）」に絞り、プレビュー表示の扱いは別途判断する。
 /// </para>
 /// <para>
+/// <b>この検査の適用範囲（未是正の系統を正直に書く）。</b> 対象は <c>Message</c> プロパティへの
+/// 代入であり、<c>CsvImportResult.ErrorMessage</c> / <c>CsvImportPreviewResult.ErrorMessage</c> は
+/// <b>含まない</b>。あちらは <c>CsvImportService.ToUserFacingErrorMessage</c> が
+/// <c>IOException</c> と <c>default</c> の 2 分岐で生の <c>ex.Message</c> を返しており（#1614 違反）、
+/// 同型は <c>CsvExportService</c>（5 箇所）・<c>LedgerSplitService</c>（1 箇所）にも及ぶ。
+/// <b>本 Issue（#1986）のスコープ外として別途追跡する</b> — ここでその形を「適合」として
+/// サンプル入力に固定すると、<b>検査が嘘の安心感を与える</b>（#1726「到達不能な分岐と
+/// その回帰テストは手当てされているという誤った安心感を与える」と同じ形。コードレビューで検出）。
+/// </para>
+/// <para>
 /// 検査は「禁止された形の不在」と「正しい形が実際に使われていること」を<b>対で</b>表明する。
 /// 不在だけを見ると、文言から IDm を丸ごと落とした実装や、走査対象が 0 件へ縮んだ状態でも
 /// 緑になる（#1764 / #1786）。あわせて検出ロジック自体をサンプル入力で固定し、
@@ -137,7 +147,13 @@ public class ImportErrorMessageExposureConventionTests
 
             foreach (var (lineNumber, expression) in ExtractMessageAssignments(source))
             {
-                if (expression.Contains("IdmMasker.Mask("))
+                // 直接 Mask を呼ぶ形と、上流でマスク済みの値を受けた変数（`masked…`）を経由する形の
+                // 両方を数える。後者を数えないと、変数へ切り出すだけで対の表明が空振りする。
+                var carriesMaskedIdm = expression.Contains("IdmMasker.Mask(")
+                    || IdmTokenPattern.Matches(expression).Cast<Match>()
+                        .Any(m => MaskedVariablePattern.IsMatch(m.Value.Split('.').Last()));
+
+                if (carriesMaskedIdm)
                 {
                     maskedAssignments.Add($"{relative}:{lineNumber}");
                 }
@@ -169,8 +185,7 @@ public class ImportErrorMessageExposureConventionTests
     [InlineData("var e4 = new CsvImportError { Message = $\"失敗: {ex.Message}\" };", false, true)]
     [InlineData("var e5 = new CsvImportError { Message = $\"失敗: {sqliteEx.Message}\" };", false, true)]
     [InlineData("var o4 = new CsvImportError { Message = ExceptionMessageFormatter.ToUserMessage(ex, \"取込\") };", false, false)]
-    // ErrorMessage / 比較は対象外
-    [InlineData("result.ErrorMessage = $\"カード {cardIdm} が不正\";", false, false)]
+    // 比較（`==`）は代入ではないので対象外
     [InlineData("if (error.Message == ex.Message) { }", false, false)]
     public void 検出ロジックがサンプル入力に対して期待どおり判定すること(
         string snippet, bool expectRawIdm, bool expectExceptionMessage)
