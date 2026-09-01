@@ -98,7 +98,7 @@ StatusMessage = ExceptionMessageFormatter.ToUserMessage(ex, "台帳の保存");
 - 変換は `Common/ExceptionMessageFormatter.ToUserMessage(Exception, operation)` を使う。`operation` はユーザー視点の操作名（「台帳の保存」「エクスポート」「リストア」等）で、文言の「何が」部分になる。例外種別に応じた「なぜ／どうすれば」が付与される。`AppException` は整備済みの `UserFriendlyMessage` がそのまま使われる。
 - 技術的詳細（`ex.Message`）は必ずログへ残す。`ILogger` を注入済みなら `_logger.LogError(ex, ...)`、注入していない ViewModel / View コードビハインドでは `ErrorDialogHelper.LogException(ex, "操作名")`（既存のファイルログ機構を再利用、ダイアログ非表示）を使う。
 - トースト通知は文字数制約があるため、`ToUserMessage` のフル文言ではなく簡潔な行動指示（「もう一度タッチしてください」等）を優先してよい。
-- **ボタン行と幅を分け合うステータス欄も同様**に簡潔でよい（例: 帳票作成ダイアログ左下の `StatusMessage`。「事前チェック: 警告3件」「帳票作成を中止しました」）。直前のダイアログで「なぜ／どうすれば」を提示済みなら、ステータス欄で繰り返さない。§「最小文字数基準: 20文字以上」は `ValidationService` の Validator 文言に対する基準であり、これら表示領域が制約された箇所には適用しない（Issue #1688）。ただし文字数を詰めること自体を対策にせず、`TextWrapping="Wrap"` による折り返しを併せて担保すること（`.claude/rules/development-conventions.md` の UI/UX原則を参照）。
+- **ボタン行と幅を分け合うステータス欄も同様**に簡潔でよい（例: 帳票作成ダイアログ左下の `StatusMessage`。「事前チェック: 警告3件」「帳票作成を中止しました」）。直前のダイアログで「なぜ／どうすれば」を提示済みなら、ステータス欄で繰り返さない。§「最小文字数基準: 20文字以上」は `ValidationService` の Validator 文言に対する基準であり、これら表示領域が制約された箇所には適用しない（Issue #1688）。ただし文字数を詰めること自体を対策にせず、`TextWrapping="Wrap"` による折り返しを併せて担保すること（`.claude/rules/ui-conventions.md` の UI/UX原則を参照）。
 
 ### `ToUserMessage` と `ErrorDialogHelper.GetErrorInfo` の役割分担（ドリフト監査 EM-R5-01）
 
@@ -139,7 +139,7 @@ DB 制約（UNIQUE 等）の違反を捕捉してドメイン例外へ変換す�
 `UpdateAsync` / `RestoreAsync` / `DeleteAsync` が `bool` で `false` を返すのは、WHERE 句（`is_deleted = 0` または `= 1`）に **1 行も一致しなかった場合だけ**である（#1753 で導入した影響行数による競合検出）。つまり原因は「対象行が別の状態へ変わった」に特定でき、**「更新に失敗しました」と書く理由がない**。
 
 - **戻り値が `bool` の分岐を見たら、まずリポジトリの WHERE 句を読む**。`false` の意味が 1 つに定まるなら、その 1 つを文言に書く。#1759 では Card / Staff の両 ViewModel に同型の分岐が **7 か所**あり、いずれも 8〜9 文字の定型文だった
-- **原因を断定する前に、その原因が成立する構成かを確認する**（`.claude/rules/development-conventions.md` と同じ判断）。「他のパソコンで削除されました」はローカルモードでは誤りになる。「他のパソコンや**別の操作**で〜した**可能性があります**」とモード中立に書く
+- **原因を断定する前に、その原因が成立する構成かを確認する**（`.claude/rules/db-write-conventions.md` と同じ判断）。「他のパソコンで削除されました」はローカルモードでは誤りになる。「他のパソコンや**別の操作**で〜した**可能性があります**」とモード中立に書く
 - **操作ごとに「なぜ」を変える**。復元できなかった原因は「先に**復元**された」であって「削除された」ではない。文言を集約するときも `ForUpdate` / `ForRestore` / `ForDelete` を分け、互いの文言を含まないことをテストで表明する
 - **「一覧を確認してやり直す」と案内するなら、案内する側が先に一覧を再読込する**（#1753）。再読込しないと同じエラーを繰り返す。文言が「再読み込みしました」と述べる以上、**再読込を先に実行してから**文言を設定する
 - **エラー表示で入力内容を消さない**（#1757）。`CancelEdit()` 相当を呼ぶと、指摘された項目だけを直して再操作できない
@@ -179,7 +179,7 @@ DB 制約（UNIQUE 等）の違反を捕捉してドメイン例外へ変換す�
 
 - `CsvImportService` は共通ハンドラー 2 つと利用履歴の Import / Preview に同じ ladder を計 4 回持っており、#1744 で `FileOperationException` を足す際に 4 か所すべてへ同じ catch を書く必要があった（1 つ漏らすと `catch (Exception)` に落ちて生の `ex.Message` が UI に出る＝#1614 違反）。`catch (Exception)` 1 つから共通の変換関数を呼ぶ形へ統一した
 - 集約すると `AppException` を一括で `UserFriendlyMessage` へ寄せられる。#1744 では副次的に、利用履歴経路だけ `DatabaseException` が生の `ex.Message` で表示されていた欠陥も同時に消えた
-- **同じ規約が「文言の対応表」以外にも効く**: 何かを列挙するコードが 2 か所以上にできたら、それは片方だけ更新される日が来るという合図（`.claude/rules/development-conventions.md` の「全消し＋再生成」「ガードを書くときは経路を列挙する」と同じ判断）
+- **同じ規約が「文言の対応表」以外にも効く**: 何かを列挙するコードが 2 か所以上にできたら、それは片方だけ更新される日が来るという合図（`.claude/rules/viewmodel-conventions.md` の「全消し＋再生成」・`.claude/rules/development-conventions.md` の「ガードを書くときは経路を列挙する」と同じ判断）
 
 ## エラーコードは 1 つの原因だけを指す（Issue #1985）
 

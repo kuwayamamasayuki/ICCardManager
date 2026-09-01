@@ -2,6 +2,13 @@
 
 ### Unreleased
 
+**ドキュメント**
+- **常時ロードされる `.claude/rules/development-conventions.md`（約 109k 文字）を、担当する層ごとの条件付きロード 5 ファイルへ分割した**。Claude Code はセッション開始時に常時ルールを毎回読み込むため、Issue 由来の詳細規約が 1 ファイルに積み上がった結果、単一メモリファイルの警告しきい値（約 40k 文字）の 2.7 倍を毎セッション消費し、ドキュメントだけを触る作業でも DB 書き込みや WPF の規約を全部抱えていた。
+  - 分割先は `db-write-conventions.md`（DB設計原則・日付整形。`Data/**` `Services/**` `Infrastructure/**` `Common/**` `Models/**` と 02・05 設計書）、`service-conventions.md`（保存順・残額の選び方・接続文字列・バックアップ先・巡回する値・設定値の判定。同上）、`viewmodel-conventions.md`（fire-and-forget・処理中フラグ・丸め込み後の取り直し・全消し＋再生成。`ViewModels/**` `Views/**` `Resources/**` と 03・04 設計書）、`ui-conventions.md`（UI/UX原則。同上）、`logging.md`（ロギング。`src/**`）。**節の本文は 1 行も変えずに移動**し、各ファイルが単体でしきい値を下回る（最大 38k 文字）ことを確認した
+  - 常時ロード側には環境制約・論理削除の方針・ビルド警告ゼロ・ICカード関連と、**移動した節と移動先の索引**を残した。コード内コメント・テスト・設計書・本 CHANGELOG からの「`development-conventions.md` の「○○」」という参照（121 ファイル）は、この索引を経由して同名の節へ辿れるため書き換えていない。常時ロードされる他ルールファイル・`CLAUDE.md` の表・開発者ガイド・08_ドキュメント設計書の参照だけを移動先へ付け替えた
+  - **常時ロードのままにした判断**: `business-logic.md`（24k 文字）と `error-messages.md`（17k 文字）は単体でしきい値未満で、業務ルールと文言品質はどの作業でも前提になるため分割しない
+- **Stop フック `check-doc-sync.sh` のタイムアウトを 15 秒から 60 秒へ引き上げた**。OneDrive 上（`/mnt/d`、DrvFs）の `git status --porcelain` と `git log --name-only` が 15 秒に収まらず、直近の実行 3 回すべてがタイムアウトで打ち切られ、ドキュメント同期の確認が一度も機能していなかった
+
 **修正**
 - Issue #1991 **失敗結果の `ErrorMessage` が生の `ex.Message` をそのまま職員へ表示していた**問題を是正した（7 箇所、`.claude/rules/error-messages.md` #1614 違反）。共有モードで他 PC が書き込みロックを保持している最中に履歴 CSV を取り込むと、「インポートに失敗しました。予期しないエラーが発生しました: database is locked」という英文がモーダルに出ていた。
   - **対象は `CsvImportService.ToUserFacingErrorMessage` の `IOException` / `default` 2 分岐、`CsvExportService` の 5 箇所、`LedgerSplitService` の 1 箇所。**変換は `ExceptionMessageFormatter.ToUserMessage` ただ 1 つへ寄せた（#1744。SQLite の Busy / Locked は #1986 で新設した分岐が原因を名指しする）。
