@@ -131,7 +131,7 @@ namespace ICCardManager.Common.Exceptions
                 "西暦4桁のISO 8601形式（例: 2026-09-01 13:05:07）で保存されているべき値が、" +
                 "別の形式（和暦年など）になっています。" +
                 "システム管理画面（F6）からバックアップの復元を検討し、管理者に連絡してください。";
-            const string errorCode = "DB008";
+            const string errorCode = "DB009";
 
             return innerException != null
                 ? new DatabaseException(message, userMessage, errorCode, innerException)
