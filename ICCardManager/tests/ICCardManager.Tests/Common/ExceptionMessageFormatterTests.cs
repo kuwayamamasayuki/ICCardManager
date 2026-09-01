@@ -124,6 +124,54 @@ public class ExceptionMessageFormatterTests
         AssertQualityCriteria(message);
     }
 
+    // ---- ToReason（他の文へ埋め込むための「なぜ」だけ。Issue #1991） ----
+
+    /// <summary>
+    /// 埋め込み用は「何が」（〇〇に失敗しました）と「どうすれば」を含まないこと。
+    /// 含むと、埋め込み先が既に述べている「何が」と矛盾し（「明細は置き換えました」の直後に
+    /// 「明細の取り込みに失敗しました」）、両立しない行動指示が並ぶ。
+    /// </summary>
+    [Fact]
+    public void ToReason_操作名と行動指示を含まないこと()
+    {
+        var reason = ExceptionMessageFormatter.ToReason(new InvalidOperationException("boom"));
+
+        reason.Should().NotContain("に失敗しました");
+        reason.Should().NotContain("してください");
+        reason.Should().NotContain("boom", "生の ex.Message を出さない（#1614）");
+    }
+
+    /// <summary>
+    /// 対の表明。空文字や無内容へ退化していないこと（「なぜ」は残る）。
+    /// これが無いと、常に空文字を返す実装でも上のテストは緑になる。
+    /// </summary>
+    [Fact]
+    public void ToReason_理由そのものは残ること()
+    {
+        ExceptionMessageFormatter.ToReason(new InvalidOperationException("boom"))
+            .Should().Be(ExceptionMessageFormatter.ToUserMessage(
+                new InvalidOperationException("boom"), "処理")
+                .Replace("処理に失敗しました。", string.Empty)
+                .Replace("画面を最新の状態に更新してから再度実行してください。", string.Empty));
+
+        ExceptionMessageFormatter.ToReason(new System.Data.SQLite.SQLiteException(
+                System.Data.SQLite.SQLiteErrorCode.Busy, "database is locked"))
+            .Should().Contain("データベース", "原因を名指しできる分岐は名指しすること（#1986）");
+    }
+
+    /// <summary>
+    /// <see cref="AppException"/> は 3 要素が 1 文に畳まれており理由だけを取り出せないため、
+    /// 整備済みの <c>UserFriendlyMessage</c> をそのまま返す（是正前から埋め込んでいた挙動と同じ）。
+    /// </summary>
+    [Fact]
+    public void ToReason_AppExceptionは整備済み文言をそのまま返すこと()
+    {
+        var ex = new TestAppException("technical detail", "残額が不足しています。チャージしてください。", "TEST001");
+
+        ExceptionMessageFormatter.ToReason(ex).Should().Be("残額が不足しています。チャージしてください。");
+        ExceptionMessageFormatter.ToReason(ex).Should().NotContain("technical detail");
+    }
+
     /// <summary>
     /// テスト用の <see cref="AppException"/> 具象クラス（基底は abstract のため）。
     /// </summary>

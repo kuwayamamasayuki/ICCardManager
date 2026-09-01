@@ -382,12 +382,14 @@ namespace ICCardManager.Services
         /// <param name="errors">エラーリスト（処理中にエラーが追加される場合に使用）</param>
         /// <param name="operationName">
         /// ユーザー視点の操作名（Issue #1991）。エラー文言の「何が」部分とログの識別子に用いる。
+        /// <b>既定値を持たせない</b> — 省略できると全経路が同じ汎用名のままになり、
+        /// 職員一覧・カード一覧・明細のどれが失敗したのか文言から区別できなくなる（#1956 / #1820）。
         /// </param>
         /// <returns>インポート結果</returns>
         private async Task<CsvImportResult> ExecuteImportWithErrorHandlingAsync(
             Func<Task<CsvImportResult>> operation,
-            List<CsvImportError> errors = null,
-            string operationName = "CSVの取り込み")
+            List<CsvImportError> errors,
+            string operationName)
         {
             errors ??= new List<CsvImportError>();
 
@@ -462,20 +464,6 @@ namespace ICCardManager.Services
             // 文言だけ差し替えると失敗の原因がどこにも残らないため、ログと対で行う（#1817）。
             LogImportFailure(ex, operation);
 
-            return ToUserFacingErrorMessageCore(ex, operation);
-        }
-
-        /// <summary>
-        /// 例外 → ユーザー向け文言の変換だけを行う（ログは行わない）。
-        /// </summary>
-        /// <remarks>
-        /// <b>呼び出し元が既にログを出している経路では二重に出さない</b>（<c>error-messages.md</c> #1817）。
-        /// <c>CsvImportService.Detail.cs</c> の明細置換失敗は直前に <c>_logger?.LogError</c> を出しており、
-        /// そちらはこの純粋な変換だけを使う。ログを併設するのは
-        /// <see cref="ToUserFacingErrorMessage(Exception, string)"/> の側の責務。
-        /// </remarks>
-        private static string ToUserFacingErrorMessageCore(Exception ex, string operation)
-        {
             switch (ex)
             {
                 case FileNotFoundException _:
@@ -504,11 +492,36 @@ namespace ICCardManager.Services
         /// <see cref="ErrorDialogHelper.LogException"/> の既存ファイルログ機構へ委譲する
         /// （ロガーが無いことを「ログを出さない理由」にしない。<c>development-conventions.md</c> #1819）。
         /// </remarks>
+        /// <remarks>
+        /// <para>
+        /// <b>レベルは「システムの不具合か、利用者の入力の問題か」で分ける</b>
+        /// （<c>development-conventions.md</c> #1716「障害調査でこの行が無いと困るか」）。
+        /// ファイルが見つからない・権限が無い・文字コードが読めない（<see cref="AppException"/>）は
+        /// 職員が選び直せば解決する<b>想定内の失敗</b>で、その都度 <c>Error</c> を積むと
+        /// 本当の不具合が埋もれる。痕跡は残しつつ <c>Warning</c> にする（本番のログには出力される）。
+        /// </para>
+        /// </remarks>
         private void LogImportFailure(Exception ex, string operation)
         {
+            // 二重に記録しない（#1817）。カード／職員／利用履歴の各インポートは
+            // トランザクション内の catch が「ロールバックより先に」ログを書いてから再スローする
+            // （#1745。TryRollbackImportTransaction の remarks を参照）ため、
+            // その例外がここへ到達した時点で痕跡は既に残っている。
+            if (WasAlreadyLogged(ex))
+            {
+                return;
+            }
+
+            var isExpectedInputProblem =
+                ex is AppException || ex is FileNotFoundException || ex is UnauthorizedAccessException;
+
             if (_logger != null)
             {
-                _logger.LogError(ex, "CSV import failed: {Operation}", operation);
+                _logger.Log(
+                    isExpectedInputProblem ? LogLevel.Warning : LogLevel.Error,
+                    ex,
+                    "CSV import failed: {Operation}",
+                    operation);
             }
             else
             {
@@ -517,18 +530,62 @@ namespace ICCardManager.Services
         }
 
         /// <summary>
+        /// 「この例外は既にログへ記録済み」という印を付ける（Issue #1991）。
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// 印は<b>例外インスタンス自身</b>（<see cref="Exception.Data"/>）へ置く。
+        /// サービスのフィールドに持つと、シングルトンである本サービスで
+        /// 別のインポートが並走したときに互いの印を見てしまう。
+        /// </para>
+        /// <para>
+        /// <b>ラップするときは新しい例外の側へ付ける</b>。<c>SQLiteException</c> を
+        /// <see cref="DatabaseException.QueryFailed"/> で包む経路では、
+        /// 外側の <c>catch</c> へ届くのは包んだ側であり、元の例外の印は見られない。
+        /// </para>
+        /// <para>
+        /// 再スローは必ず <c>throw;</c> で行う（<c>throw ex;</c> はスタックトレースを消す）。
+        /// そのため本メソッドは戻り値を使わず<b>文として</b>呼ぶ形も許す。
+        /// </para>
+        /// </remarks>
+        /// <typeparam name="TException">例外の型</typeparam>
+        /// <param name="exception">印を付ける例外</param>
+        /// <returns>引数と同じ例外（<c>throw MarkLogged(...)</c> と書けるようにするため）</returns>
+        private static TException MarkLogged<TException>(TException exception)
+            where TException : Exception
+        {
+            // Exception.Data は一部の例外で null になり得る（リモーティング等）。
+            // 印を付けられないときは「未記録」として扱う（多く出るほうへ倒す ―
+            // 痕跡が残らないより二重に残るほうが障害調査では害が小さい）。
+            if (exception?.Data != null)
+            {
+                exception.Data[LoggedMarkerKey] = true;
+            }
+
+            return exception;
+        }
+
+        /// <summary>この例外が既にログへ記録済みか。</summary>
+        private static bool WasAlreadyLogged(Exception exception) =>
+            exception?.Data != null && exception.Data.Contains(LoggedMarkerKey);
+
+        /// <summary><see cref="MarkLogged{TException}"/> が使う印のキー。</summary>
+        private const string LoggedMarkerKey = "ICCardManager.CsvImport.AlreadyLogged";
+
+        /// <summary>
         /// CSVプレビュー処理を標準的な例外ハンドリングで実行
         /// </summary>
         /// <param name="operation">実行する処理</param>
         /// <param name="errors">エラーリスト（処理中にエラーが追加される場合に使用）</param>
         /// <param name="operationName">
         /// ユーザー視点の操作名（Issue #1991）。エラー文言の「何が」部分とログの識別子に用いる。
+        /// <b>既定値を持たせない</b>（理由は <see cref="ExecuteImportWithErrorHandlingAsync"/> を参照）。
         /// </param>
         /// <returns>プレビュー結果</returns>
         private async Task<CsvImportPreviewResult> ExecutePreviewWithErrorHandlingAsync(
             Func<Task<CsvImportPreviewResult>> operation,
-            List<CsvImportError> errors = null,
-            string operationName = "取り込み内容の確認")
+            List<CsvImportError> errors,
+            string operationName)
         {
             errors ??= new List<CsvImportError>();
 

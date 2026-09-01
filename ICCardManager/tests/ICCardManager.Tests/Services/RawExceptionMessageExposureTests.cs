@@ -176,7 +176,7 @@ public class RawExceptionMessageExposureTests : IDisposable
 
             result.Success.Should().BeFalse();
             result.ErrorMessage.Should().NotContain("Sequence contains no matching element");
-            result.ErrorMessage.Should().Contain("CSVの取り込み", "「何が」を操作名で述べること");
+            result.ErrorMessage.Should().Contain("カードCSVの取り込み", "「何が」を経路ごとの操作名で述べること");
             result.ErrorMessage.Should().EndWith("してください。");
         }
         finally
@@ -273,8 +273,11 @@ public class RawExceptionMessageExposureTests : IDisposable
         var connection = new SQLiteConnection("Data Source=:memory:");
         connection.Open();
         _disposables.Add(connection);
+        var transaction = connection.BeginTransaction();
+        _disposables.Add(transaction);
         var scope = new TransactionScope(
-            new ConnectionLease(connection, () => { }), connection.BeginTransaction());
+            new ConnectionLease(connection, () => { }), transaction);
+        _disposables.Add(scope);
 
         var dbContext = new Mock<DbContext>();
         dbContext
@@ -298,11 +301,139 @@ public class RawExceptionMessageExposureTests : IDisposable
 
     private readonly List<IDisposable> _disposables = new();
 
+    /// <summary>
+    /// **二重に記録しない**（#1817）。カード取込のトランザクション内 catch は
+    /// 「ロールバックより先に」ログを書いてから再スローする（#1745）ため、
+    /// その例外が共通ハンドラーへ届いた時点で痕跡は既に残っている。
+    /// </summary>
+    [Fact]
+    public async Task 取込失敗時_内側で記録済みの例外を二重に記録しないこと()
+    {
+        var (service, cardRepository, importLogger) = CreateImportService();
+        cardRepository
+            .Setup(x => x.GetByIdmAsync(It.IsAny<string>(), It.IsAny<bool>()))
+            .ReturnsAsync((IcCard?)null);
+        // トランザクションの内側で失敗させる（内側 catch が LogError + 再スロー）
+        cardRepository
+            .Setup(x => x.InsertAsync(It.IsAny<IcCard>(), It.IsAny<SQLiteTransaction>()))
+            .ThrowsAsync(new InvalidOperationException("boom"));
+
+        var path = WriteCardCsv();
+        try
+        {
+            await service.ImportCardsAsync(path);
+
+            importLogger.Entries
+                .Where(e => e.Level == LogLevel.Error)
+                .Should().ContainSingle(
+                    "同じ例外を 2 度 Error で記録しないこと（#1817）。実際: "
+                    + importLogger.FormatEntries());
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
+    /// <summary>
+    /// 対の表明。内側で記録されていない失敗（トランザクションへ入る前）は
+    /// 共通ハンドラーが記録すること。これが無いと「常に記録しない」実装でも緑になる。
+    /// </summary>
+    [Fact]
+    public async Task 取込失敗時_内側で記録されていない例外は共通ハンドラーが記録すること()
+    {
+        var (service, cardRepository, importLogger) = CreateImportService();
+        cardRepository
+            .Setup(x => x.GetByIdmAsync(It.IsAny<string>(), It.IsAny<bool>()))
+            .ThrowsAsync(new InvalidOperationException("boom"));
+
+        var path = WriteCardCsv();
+        try
+        {
+            await service.ImportCardsAsync(path);
+
+            importLogger.Entries.Where(e => e.Level == LogLevel.Error).Should().ContainSingle(
+                "実際: " + importLogger.FormatEntries());
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
+    /// <summary>
+    /// 想定内の入力の問題（存在しないファイル）は `Warning` に留める（#1716）。
+    /// 職員が選び直せば解決する失敗で `Error` を積むと、本当の不具合が埋もれる。
+    /// </summary>
+    [Fact]
+    public async Task 取込失敗時_想定内の入力の問題はWarningに留めること()
+    {
+        var (service, _, importLogger) = CreateImportService();
+
+        var missing = TempCsvPath();
+        var result = await service.ImportCardsAsync(missing);
+
+        result.Success.Should().BeFalse();
+        importLogger.Entries.Should().NotBeEmpty("痕跡は残すこと（#1819）");
+        importLogger.Entries.Where(e => e.Level == LogLevel.Error).Should().BeEmpty(
+            "想定内の入力の問題は Error にしないこと。実際: " + importLogger.FormatEntries());
+        importLogger.Entries.Should().Contain(e => e.Level == LogLevel.Warning);
+    }
+
+    /// <summary>
+    /// 操作名は経路ごとに具体的であること（#1956 / #1820）。
+    /// 既定値付きの引数にすると全経路が同じ汎用名になり、「何が」失敗したのか区別できない。
+    /// </summary>
+    [Fact]
+    public async Task 取込失敗時_経路ごとに異なる操作名を名乗ること()
+    {
+        var boom = new InvalidOperationException("boom");
+
+        var (cardService, cardRepository, _) = CreateImportService();
+        cardRepository
+            .Setup(x => x.GetByIdmAsync(It.IsAny<string>(), It.IsAny<bool>()))
+            .ThrowsAsync(boom);
+        _staffRepositoryMock
+            .Setup(x => x.GetByIdmAsync(It.IsAny<string>(), It.IsAny<bool>()))
+            .ThrowsAsync(boom);
+
+        var cardPath = WriteCardCsv();
+        var staffPath = WriteStaffCsv();
+        try
+        {
+            var cardResult = await cardService.ImportCardsAsync(cardPath);
+            var staffResult = await cardService.ImportStaffAsync(staffPath);
+
+            cardResult.ErrorMessage.Should().Contain("カードCSVの取り込み");
+            staffResult.ErrorMessage.Should().Contain("職員CSVの取り込み");
+            cardResult.ErrorMessage.Should().NotBe(staffResult.ErrorMessage,
+                "経路ごとに「何が」失敗したかを区別できること（#1956 / #1820）");
+        }
+        finally
+        {
+            File.Delete(cardPath);
+            File.Delete(staffPath);
+        }
+    }
+
+    private static string WriteStaffCsv()
+    {
+        var path = TempCsvPath();
+        File.WriteAllLines(path, new[]
+        {
+            "職員IDm,氏名,職員番号,備考",
+            "FEDCBA9876543210,博多 花子,12345,"
+        });
+        return path;
+    }
+
     public void Dispose()
     {
-        foreach (var disposable in _disposables)
+        // 登録の逆順で破棄する。接続を先に破棄すると、その接続に属する
+        // SQLiteTransaction の Dispose が ObjectDisposedException になる。
+        for (var i = _disposables.Count - 1; i >= 0; i--)
         {
-            disposable.Dispose();
+            _disposables[i].Dispose();
         }
     }
 }

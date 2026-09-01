@@ -39,6 +39,18 @@ namespace ICCardManager.Tests;
 /// （#1932「上位のコメントが食い違いをスコープ外と記録しているときは、その記録を消す」）。
 /// </para>
 /// <para>
+/// <b>この検査が見られない形（未是正の系統を正直に書く）。</b> 判定するのは
+/// <c>Message =</c> / <c>ErrorMessage =</c> への<b>代入式</b>だけで、
+/// <b>メソッドやコンストラクタの引数として渡す形は原理的に対象外</b>。
+/// 起票時点で <c>ReportService</c>（7 箇所。<c>FailureResult(…, $"…\n\n詳細: {ex.Message}")</c>）、
+/// <c>Infrastructure/Security/DllIntegrityVerifier</c>（2 箇所）、
+/// <c>Services/SafeFileLauncher</c>（2 箇所）が同じ #1614 の family として残っている
+/// （<c>App.xaml.cs</c> の起動致命エラーは <c>ShowFatalError</c> 相当でスタックトレースごと出す
+/// 意図的な設計。<c>error-messages.md</c> の役割分担を参照）。
+/// <b>ここでその形を「適合」としてサンプル入力に固定しない</b> — 検査が嘘の安心感を与える
+/// （#1726）。走査単位を「代入式」から広げるかどうかは、誤検出（#1786）と併せて別途判断する。
+/// </para>
+/// <para>
 /// 検査は「禁止された形の不在」と「正しい形が実際に使われていること」を<b>対で</b>表明する。
 /// 不在だけを見ると、文言から IDm を丸ごと落とした実装や、走査対象が 0 件へ縮んだ状態でも
 /// 緑になる（#1764 / #1786）。あわせて検出ロジック自体をサンプル入力で固定し、
@@ -199,10 +211,11 @@ public class ImportErrorMessageExposureConventionTests
             }
         }
 
-        // Issue #1991 で是正した箇所（CsvExportService 5・LedgerSplitService 1・
-        // CsvImportService 系 4）のうち、代入式から直接観測できるもの。
+        // Issue #1991 で是正した箇所のうち、代入式から直接観測できるもの:
+        // CsvExportService 1（5 経路を ToFailureResult へ集約）・LedgerSplitService 1・
+        // CsvImportService の共通ハンドラー 2・利用履歴の Import / Preview 2 の計 6。
         routed.Should().HaveCountGreaterOrEqualTo(
-            5,
+            6,
             "Issue #1991 で ExceptionMessageFormatter へ寄せた ErrorMessage 代入が失われていないこと。実際: "
             + string.Join(" / ", routed));
     }
@@ -233,7 +246,9 @@ public class ImportErrorMessageExposureConventionTests
     [InlineData("var r3 = new LedgerSplitResult { ErrorMessage = $\"カード {cardIdm} で失敗\" };", true, false)]
     [InlineData("var o5 = new CsvExportResult { ErrorMessage = ExceptionMessageFormatter.ToUserMessage(ex, \"エクスポート\") };", false, false)]
     // 他の接尾辞（UserFriendlyMessage 等）まで巻き込まないこと（誤検出はガードの寿命を縮める。#1786）
-    [InlineData("var m = appException.UserFriendlyMessage;", false, false)]
+    // `=` を伴う代入の形で書く — `=` が無い参照は元から走査対象外なので、除外の性質を何も検査できない
+    [InlineData("ex2.UserFriendlyMessage = ex.Message;", false, false)]
+    [InlineData("dto.ImportErrorMessage = ex.Message;", false, false)]
     public void 検出ロジックがサンプル入力に対して期待どおり判定すること(
         string snippet, bool expectRawIdm, bool expectExceptionMessage)
     {

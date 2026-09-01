@@ -54,6 +54,38 @@ namespace ICCardManager.Common
         }
 
         /// <summary>
+        /// 例外種別に応じた「なぜ（理由）」だけを返す（Issue #1991）。
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// <b>他の文の中へ埋め込むとき</b>に使う。<see cref="ToUserMessage"/> は
+        /// <c>"〇〇に失敗しました。"</c> という「何が」と行動指示を含む<b>完全な文</b>を返すため、
+        /// 既に「何が」と「どうすれば」を述べている文へ埋め込むと、
+        /// ①「何が」が二重になって<b>矛盾する</b>（「明細は置き換えました」の直後に
+        /// 「明細の取り込みに失敗しました」）、②<b>両立しない行動指示</b>が並ぶ
+        /// （「再度実行してください」と「履歴画面で修正してください」）、という害がある。
+        /// </para>
+        /// <para>
+        /// <see cref="AppException"/> は整備済みの <see cref="AppException.UserFriendlyMessage"/> を
+        /// そのまま返す（3 要素が 1 文に畳まれているため理由だけを取り出せない）。
+        /// これは是正前から <c>DatabaseException.QueryFailed(...).UserFriendlyMessage</c> を
+        /// 埋め込んでいた箇所と同じ挙動である。
+        /// </para>
+        /// </remarks>
+        /// <param name="exception">発生した例外</param>
+        /// <returns>「なぜ」だけの文（行動指示を含まない）</returns>
+        public static string ToReason(Exception exception)
+        {
+            if (exception is AppException appException &&
+                !string.IsNullOrWhiteSpace(appException.UserFriendlyMessage))
+            {
+                return appException.UserFriendlyMessage;
+            }
+
+            return GetReasonAndAction(exception).Reason;
+        }
+
+        /// <summary>
         /// 例外種別に応じた「なぜ（理由）」と「どうすれば（対処）」の組を返す。
         /// </summary>
         private static (string Reason, string Action) GetReasonAndAction(Exception exception)

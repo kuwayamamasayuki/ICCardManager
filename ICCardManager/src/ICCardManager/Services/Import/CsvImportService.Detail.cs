@@ -30,7 +30,8 @@ namespace ICCardManager.Services
             var errors = new List<CsvImportError>();
             return await ExecutePreviewWithErrorHandlingAsync(
                 () => PreviewLedgerDetailsInternalAsync(filePath, errors),
-                errors).ConfigureAwait(false);
+                errors,
+                "利用明細CSVの取り込み内容の確認").ConfigureAwait(false);
         }
 
         /// <summary>
@@ -306,7 +307,8 @@ namespace ICCardManager.Services
             var errors = new List<CsvImportError>();
             return await ExecuteImportWithErrorHandlingAsync(
                 () => ImportLedgerDetailsInternalAsync(filePath, errors),
-                errors).ConfigureAwait(false);
+                errors,
+                "利用明細CSVの取り込み").ConfigureAwait(false);
         }
 
         /// <summary>
@@ -658,8 +660,16 @@ namespace ICCardManager.Services
         /// <remarks>
         /// <c>SQLiteErrorCode.Constraint</c>（明細 INSERT の FOREIGN KEY 制約違反）は「親の履歴が消えた」
         /// 競合と同じ原因なので、<see cref="BuildParentLedgerConflictMessage"/> と同じ「なぜ」を名指しする。
-        /// それ以外の SQLite 例外（Busy / Locked 等）は <see cref="DatabaseException.QueryFailed"/> の
-        /// 整備済み文言、その他は <see cref="ToUserFacingErrorMessageCore"/> の対応表へ寄せる（Issue #1991: この経路は直前で <c>_logger?.LogError</c> を出しているため、ログを併設しない側を使う）。
+        /// それ以外は <see cref="ExceptionMessageFormatter.ToReason"/> へ寄せる。
+        /// <para>
+        /// Issue #1991: <b>埋め込むのは「なぜ」だけにする</b>。<c>ToUserMessage</c> の完全な文を
+        /// 埋め込むと「明細は置き換えました」の直後に「明細の取り込みに失敗しました」と述べて
+        /// <b>「何が」が矛盾</b>し、さらに「再度実行してください」と「履歴画面で修正してください」という
+        /// <b>両立しない行動指示</b>が並ぶ（コードレビューで検出）。「どうすれば」はこのメソッドが持つ。
+        /// </para>
+        /// <para>
+        /// この経路は直前で <c>_logger?.LogError</c> を出しているため、ログの併設は行わない（#1817）。
+        /// </para>
         /// </remarks>
         private static string BuildDetailReplaceFailureMessage(int ledgerId, Exception ex, bool detailsReplaced)
         {
@@ -670,9 +680,11 @@ namespace ICCardManager.Services
                        "履歴画面でこの履歴の有無を確認し、必要な場合は利用履歴IDを空欄にした明細CSVを再度インポートして新規の履歴として登録してください。";
             }
 
-            var reason = ex is SQLiteException sqliteEx
-                ? DatabaseException.QueryFailed("ledger detail import", sqliteEx).UserFriendlyMessage
-                : ToUserFacingErrorMessageCore(ex, "明細の取り込み");
+            // Issue #1991: SQLite かどうかで分けない。DatabaseException.QueryFailed の文言は
+            // 「再度お試しください」という行動指示を含み、この経路（明細は置き換え済み）では
+            // 再実行が明細の二重置換を招くため実行してはいけない指示になる。
+            // ToReason は「なぜ」だけを返し、SQLite の失敗も原因を名指しする（#1986 の分岐）。
+            var reason = ExceptionMessageFormatter.ToReason(ex);
 
             return detailsReplaced
                 ? $"利用履歴ID {ledgerId} の明細は置き換えましたが、親の履歴の摘要・金額を更新できませんでした。{reason}" +
