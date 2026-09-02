@@ -73,6 +73,53 @@ namespace ICCardManager.Services
         }
 
         /// <summary>
+        /// 同一日のレコード群が、時系列順を確定するために前日以前の最終残高（シード）を必要とするかを判定する。
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// Issue #1999: シードを「前日をチェーン解決して求める」形にすると、その前日もまた
+        /// シードを必要とし得る。どこまで遡るかを決めるのがこの判定で、
+        /// <b>「複数行あるか」ではなく「シードなしで開始点を一意に決められないか」で止める</b>。
+        /// 複数行の日はチャージと利用が同日にあるだけで日常的に発生するため、行数で判定すると
+        /// 上限段数まで毎回遡ることになる。実際にシードが要るのは
+        /// <see cref="ReconstructChain"/> の除外法（どのレコードの <c>Balance</c> にも一致しない
+        /// <c>balance_before</c> を持つ行を開始点とする）が候補をちょうど 1 つに絞れない日
+        /// ——同額のポイント還元と利用で残高が循環する Issue #1004 形状——に限られる。
+        /// </para>
+        /// <para>
+        /// 判定は <see cref="ReorderByBalanceChain"/> の開始点の決め方と対応させること。
+        /// 特殊レコード（新規購入・繰越）がある日は、その残高が開始点になるためシードは要らない。
+        /// </para>
+        /// </remarks>
+        /// <param name="sameDayLedgers">同一カード・同一日のレコード</param>
+        internal static bool RequiresSeed(IEnumerable<Ledger> sameDayLedgers)
+        {
+            if (sameDayLedgers == null)
+            {
+                return false;
+            }
+
+            var records = sameDayLedgers.ToList();
+            if (records.Count <= 1)
+            {
+                return false;
+            }
+
+            // 特殊レコードがあれば startBalance はその Balance で決まる（ReorderByBalanceChain と同じ）
+            if (records.Any(IsSpecialRecord))
+            {
+                return false;
+            }
+
+            var balanceSet = new HashSet<int>(records.Select(l => l.Balance));
+            var startCandidates = records.Count(
+                l => !balanceSet.Contains(l.Balance + l.Expense - l.Income));
+
+            // 候補が 0（循環）でも 2 以上（分岐）でも、開始点は当日の行だけからは決められない
+            return startCandidates != 1;
+        }
+
+        /// <summary>
         /// 残高チェーンを構築して同一日内のレコードを時系列順に並べる。
         /// balance_before = Balance + Expense - Income で処理前残高を逆算し、
         /// 前レコードのBalance = 次レコードのbalance_before となるチェーンを辿る。

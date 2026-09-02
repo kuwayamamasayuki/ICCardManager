@@ -702,13 +702,36 @@ ORDER BY date ASC, id ASC";
         }
 
         /// <summary>
-        /// 指定日より前の最終レコードの残高を取得する（残高チェーンの開始点シード用）。
+        /// 指定日より前の最終残高を取得する（残高チェーンの開始点シード用）。
         /// </summary>
         /// <remarks>
-        /// 前日側にも同日の id 逆転がありシードが中間残高になる可能性は残るが、
-        /// 再帰的に遡ると際限がないため 1 段のみとする。シードが不正確な場合でも
-        /// <see cref="LedgerOrderHelper.ReorderByBalanceChain"/> は id 順フォールバックで
-        /// 従来挙動（id 順）に一致するため、従来より悪化することはない。
+        /// <para>
+        /// Issue #1999: シード自体も <c>ORDER BY … id DESC LIMIT 1</c> では求まらない。
+        /// 前日に同日統合（Issue #837: チャージ行を新規 INSERT し、利用は古い id の行を UPDATE する）が
+        /// あると id 順と時系列が食い違い、前日の**中間残高**がシードになる。
+        /// 当日が Issue #1004 の循環形状だと、その誤ったシードが循環の中間残高にたまたま一致して
+        /// <see cref="LedgerOrderHelper.ReorderByBalanceChain"/> にそのまま採用され、
+        /// チェーンが回転した状態で確定する（除外法・id 順フォールバックへは落ちない）。
+        /// つまり「シードが不正確でも従来より悪化しない」は、循環日については成立しない。
+        /// </para>
+        /// <para>
+        /// そこでシードは「その日の全行をチェーン解決した最終残高」として求める。前日自身が
+        /// シードを必要とする（<see cref="LedgerOrderHelper.RequiresSeed"/> が真の）間だけ更に遡り、
+        /// <see cref="AppConstants.MaxBalanceChainSeedLookbackDays"/> 日で打ち切る。
+        /// **「複数行あるか」ではなく「開始点を一意に決められないか」で遡る**ので、
+        /// 通常のデータでは 1 日分（1 クエリ）で止まる。
+        /// 上限で打ち切った場合は、それまでに積んだ日をシード無しで古い順に解決する
+        /// （最も古い日だけが除外法・id 順フォールバックに委ねられる形で、
+        ///  1 行だけを id 順で取っていた従来より悪化することはない）。
+        /// </para>
+        /// <para>
+        /// なお貸出中プレースホルダ（`Income = Expense = 0`）は `balance_before` が自身の `Balance` と
+        /// 一致する自己ループのため開始点の候補にならず、シード日に残っていると
+        /// <see cref="LedgerOrderHelper.RequiresSeed"/> が真になって余分に遡る
+        /// （<paramref name="excludeLentRecords"/> が false の経路のみ）。返却時に物理削除されるので
+        /// 「その日が最新日でないのにプレースホルダが残っている」形は稀であり、
+        /// 上限で頭打ちになるため実害は無いが、「通常は 1 クエリ」の例外にあたる。
+        /// </para>
         /// </remarks>
         /// <param name="connection">リース済みの接続</param>
         /// <param name="cardIdm">カードIDm</param>
@@ -723,19 +746,83 @@ ORDER BY date ASC, id ASC";
         private static async Task<int?> GetPrecedingBalanceAsync(
             SQLiteConnection connection, string cardIdm, DateTime day, bool excludeLentRecords)
         {
+            // 新しい日から順に、シードを必要としなくなるまで稼働日を遡って積む
+            var lookbackDays = new List<List<Ledger>>();
+            var cursor = day;
+
+            for (var depth = 0; depth < AppConstants.MaxBalanceChainSeedLookbackDays; depth++)
+            {
+                var dayLedgers = await GetLastActiveDayLedgersBeforeAsync(
+                    connection, cardIdm, cursor, excludeLentRecords).ConfigureAwait(false);
+
+                if (dayLedgers.Count == 0)
+                {
+                    break;
+                }
+
+                lookbackDays.Add(dayLedgers);
+
+                if (!LedgerOrderHelper.RequiresSeed(dayLedgers))
+                {
+                    break;
+                }
+
+                cursor = dayLedgers[0].Date.Date;
+            }
+
+            if (lookbackDays.Count == 0)
+            {
+                return null;
+            }
+
+            // 古い日から順にチェーン解決し、その最終残高を次の日のシードにする
+            int? seed = null;
+            for (var i = lookbackDays.Count - 1; i >= 0; i--)
+            {
+                seed = LedgerOrderHelper.ReorderByBalanceChain(lookbackDays[i], seed).Last().Balance;
+            }
+
+            return seed;
+        }
+
+        /// <summary>
+        /// 指定日より前で最後に台帳レコードがある日（稼働日）の**全行**を取得する（Issue #1999）。
+        /// </summary>
+        /// <remarks>
+        /// 「その日の最終残高」を <c>LIMIT 1</c> で取ってはいけないため、日を絞ったうえで全行を返し、
+        /// 順序の確定は <see cref="LedgerOrderHelper.ReorderByBalanceChain"/> に委ねる（Issue #1731）。
+        /// <c>WHERE</c> で <c>date</c> を <c>DATE()</c> で包まないのは、包むと <c>idx_ledger_card_date</c> の
+        /// 探索キーにできず全件走査になるため（Issue #1834 / #1996）。日付は ISO 8601 の TEXT
+        /// （<c>yyyy-MM-dd HH:mm:ss</c>）で辞書順＝時系列順なので、
+        /// <c>date &lt; "yyyy-MM-dd 00:00:00"</c> は <c>DATE(date) &lt; "yyyy-MM-dd"</c> と同じ行集合になり、
+        /// <c>date &gt;= "yyyy-MM-dd"</c>（サブクエリが返す日付だけの文字列）はその日の全行を含む。
+        /// </remarks>
+        private static async Task<List<Ledger>> GetLastActiveDayLedgersBeforeAsync(
+            SQLiteConnection connection, string cardIdm, DateTime day, bool excludeLentRecords)
+        {
             var lentFilter = excludeLentRecords ? "AND is_lent_record = 0" : string.Empty;
+            var ledgers = new List<Ledger>();
 
             using var command = connection.CreateCommand();
-            command.CommandText = $@"SELECT balance FROM ledger
-WHERE card_idm = @cardIdm AND DATE(date) < @day {lentFilter}
-ORDER BY date DESC, id DESC
-LIMIT 1";
+            command.CommandText = $@"SELECT id, card_idm, lender_idm, date, summary, income, expense, balance,
+       staff_name, note, returner_idm, lent_at, returned_at, is_lent_record, companion_count
+FROM ledger
+WHERE card_idm = @cardIdm AND date < @dayStart {lentFilter}
+  AND date >= (
+    SELECT DATE(MAX(date)) FROM ledger
+    WHERE card_idm = @cardIdm AND date < @dayStart {lentFilter})
+ORDER BY date ASC, id ASC";
 
             command.Parameters.AddWithValue("@cardIdm", cardIdm);
-            command.Parameters.AddWithValue("@day", SqliteDateTimeFormat.ToDateText(day));
+            command.Parameters.AddWithValue("@dayStart", SqliteDateTimeFormat.ToDayStartText(day));
 
-            var result = await command.ExecuteScalarAsync().ConfigureAwait(false);
-            return result == null || result == DBNull.Value ? (int?)null : Convert.ToInt32(result);
+            using var reader = await command.ExecuteReaderAsync().ConfigureAwait(false);
+            while (await reader.ReadAsync().ConfigureAwait(false))
+            {
+                ledgers.Add(MapToLedger(reader));
+            }
+
+            return ledgers;
         }
 
         /// <inheritdoc/>
