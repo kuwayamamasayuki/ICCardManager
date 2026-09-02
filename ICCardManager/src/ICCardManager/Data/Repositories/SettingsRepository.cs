@@ -497,10 +497,13 @@ WHERE settings.value IS NULL OR substr(settings.value, 1, 7) <> @currentMonth";
                     success &= await SetAsync(KeyBackupPath, settings.BackupPath, scope);
                     success &= await SetAsync(KeyFontSize, FontSizeToString(settings.FontSize), scope);
 
-                    if (settings.LastVacuumDate.HasValue)
-                    {
-                        success &= await SetAsync(KeyLastVacuumDate, SqliteDateTimeFormat.ToDateText(settings.LastVacuumDate.Value), scope);
-                    }
+                    // Issue #1997: last_vacuum_date はここで書かない。
+                    // この値は TryAcquireMonthlyVacuumLockAsync の CAS（月ガード付き UPSERT）でしか
+                    // 更新してはならない。一括保存は素の ON CONFLICT DO UPDATE なので月ガードを持たず、
+                    // TTL キャッシュ由来の古い AppSettings（他 PC が CAS を獲得する前の値）を
+                    // そのまま書き戻して当月のロックを巻き戻す。
+                    // 保守用のキー（last_backup_success_at / last_backup_machine / last_vacuum_machine）も
+                    // 同じ理由で一括保存に載せない。集合は SettingsMaintenanceKeyConventionTests が固定する。
 
                     // ウィンドウ設定を保存
                     success &= await SaveWindowSettingsToDbAsync(settings.MainWindowSettings, scope);

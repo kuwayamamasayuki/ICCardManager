@@ -26,8 +26,13 @@ namespace ICCardManager.Models
         public FontSizeOption FontSize { get; set; } = FontSizeOption.Medium;
 
         /// <summary>
-        /// 最終VACUUM実行日
+        /// 最終VACUUM実行日（<b>読み取り専用の値</b>）
         /// </summary>
+        /// <remarks>
+        /// 設定しても <c>SaveAppSettingsAsync</c> は DB へ書き戻さない（Issue #1997）。
+        /// この値の更新経路は <c>SettingsRepository.TryAcquireMonthlyVacuumLockAsync</c> の
+        /// CAS（月ガード付き UPSERT、Issue #1482）だけである。
+        /// </remarks>
         public DateTime? LastVacuumDate { get; set; }
 
         /// <summary>

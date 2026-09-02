@@ -41,6 +41,20 @@ namespace ICCardManager.Data.Repositories
         /// <summary>
         /// AppSettingsオブジェクトを保存
         /// </summary>
+        /// <remarks>
+        /// <para>
+        /// <see cref="AppSettings.LastVacuumDate"/> は<b>設定しても DB へは反映されない</b>（Issue #1997）。
+        /// <c>last_vacuum_date</c> は月次 VACUUM の先勝ちロック（Issue #1482）そのものであり、
+        /// 更新経路は <see cref="TryAcquireMonthlyVacuumLockAsync"/> の CAS だけに限る。
+        /// 一括保存は月ガードを持たないため、TTL キャッシュ由来の古い値を書き戻して
+        /// 当月のロックを巻き戻し、同じ月に VACUUM が複数回走る。
+        /// </para>
+        /// <para>
+        /// 同じ理由で、保守処理が記録する <c>last_backup_success_at</c> / <c>last_backup_machine</c> /
+        /// <c>last_vacuum_machine</c>（Issue #1689）も一括保存の対象外（<see cref="AppSettings"/> に持たない）。
+        /// 後から更新要件が出たら専用メソッドを新設すること（一括保存へ戻さない、Issue #1726）。
+        /// </para>
+        /// </remarks>
         Task<bool> SaveAppSettingsAsync(AppSettings settings);
 
         /// <summary>
