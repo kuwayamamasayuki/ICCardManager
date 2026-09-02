@@ -42,7 +42,7 @@ namespace ICCardManager.Services
         public int Balance { get; set; }
 
         /// <summary>
-        /// 残額が警告閾値未満かどうか
+        /// 残額が警告閾値以下かどうか（境界は「以下」。判定は <see cref="Common.BalanceWarningPolicy"/>、Issue #1998）
         /// </summary>
         public bool IsLowBalance { get; set; }
 
@@ -701,7 +701,7 @@ namespace ICCardManager.Services
         {
             var settings = await _settingsRepository.GetAppSettingsAsync().ConfigureAwait(false);
             result.WarningBalance = settings.WarningBalance;
-            result.IsLowBalance = result.Balance < settings.WarningBalance;
+            result.IsLowBalance = BalanceWarningPolicy.IsLowBalance(result.Balance, settings.WarningBalance);
         }
 
         /// <summary>

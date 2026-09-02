@@ -36,7 +36,7 @@ namespace ICCardManager.Dtos
         /// <summary>長期未返却（督促対象）のカード枚数</summary>
         public int LongTermUnreturnedCount { get; set; }
 
-        /// <summary>残額がしきい値を下回っているカード枚数</summary>
+        /// <summary>残額がしきい値以下のカード枚数（境界を含む。<see cref="Common.BalanceWarningPolicy"/>）</summary>
         public int LowBalanceCount { get; set; }
 
         /// <summary>対象年月の帳票が未出力のカード枚数</summary>
@@ -88,7 +88,7 @@ namespace ICCardManager.Dtos
         /// <summary>現在の残額</summary>
         public int CurrentBalance { get; set; }
 
-        /// <summary>残額がしきい値を下回っているかどうか</summary>
+        /// <summary>残額がしきい値以下かどうか（境界を含む。<see cref="Common.BalanceWarningPolicy"/>）</summary>
         public bool IsBalanceWarning { get; set; }
 
         /// <summary>対象年月の帳票の出力状況</summary>

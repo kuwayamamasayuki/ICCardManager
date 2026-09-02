@@ -91,7 +91,7 @@
                                FontWeight="Bold"
                                Padding="0"
                                Margin="0,0,0,5"/>
-                        <TextBlock Text="残額がこの金額を下回った場合に警告を表示します"
+                        <TextBlock Text="残額がこの金額以下になった場合に警告を表示します"
                                    Foreground="{DynamicResource SecondaryTextBrush}"
                                    Margin="0,0,0,10"/>
                         <StackPanel Orientation="Horizontal">

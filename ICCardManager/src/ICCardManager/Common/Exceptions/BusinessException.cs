@@ -88,7 +88,7 @@ namespace ICCardManager.Common.Exceptions
         public static BusinessException LowBalance(string cardNumber, int balance, int threshold)
         {
             var message = $"Low balance warning for card {cardNumber}: {balance} (threshold: {threshold})";
-            var userMessage = $"残高が{threshold:N0}円を下回っています（現在残高: {balance:N0}円）。チャージをご検討ください。";
+            var userMessage = $"残高が{threshold:N0}円以下になっています（現在残高: {balance:N0}円）。チャージをご検討ください。";
             const string errorCode = "BIZ007";
 
             return new BusinessException(message, userMessage, errorCode);

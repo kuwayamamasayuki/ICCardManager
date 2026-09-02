@@ -132,8 +132,8 @@ namespace ICCardManager.Services
                     IsLongTermUnreturned = lentAt.HasValue
                         && CardUtilizationCalculator.IsLongTermUnreturned(lentAt.Value, asOf, longTermUnreturnedDays),
                     CurrentBalance = balance,
-                    // 既存の残額不足警告（WarningService）と同じく「以下」で判定する
-                    IsBalanceWarning = balance <= settings.WarningBalance,
+                    // 境界（「以下」）の判定は BalanceWarningPolicy に一本化する（Issue #1998）
+                    IsBalanceWarning = BalanceWarningPolicy.IsLowBalance(balance, settings.WarningBalance),
                     ReportState = reportStateByCard.TryGetValue(card.CardIdm, out var state)
                         ? state
                         : ReportExportState.Unknown,
