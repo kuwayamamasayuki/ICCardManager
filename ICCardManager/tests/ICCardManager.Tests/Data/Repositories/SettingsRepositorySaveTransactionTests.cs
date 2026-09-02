@@ -121,7 +121,10 @@ public class SettingsRepositorySaveTransactionTests : IDisposable
         (await _repository.GetAsync(SettingsRepository.KeyWarningBalance)).Should().Be("3000");
         (await _repository.GetAsync(SettingsRepository.KeyFontSize)).Should().Be("large");
         (await _repository.GetAsync(SettingsRepository.KeyBackupPath)).Should().Be(@"D:\Backup");
-        (await _repository.GetAsync(SettingsRepository.KeyLastVacuumDate)).Should().Be("2026-04-01");
+        // Issue #1997: last_vacuum_date は月次 VACUUM の先勝ちロックそのもの。
+        // 一括保存は月ガードを持たないため、入力に値があっても書き込まない。
+        (await _repository.GetAsync(SettingsRepository.KeyLastVacuumDate)).Should().BeNull(
+            "last_vacuum_date の更新経路は TryAcquireMonthlyVacuumLockAsync の CAS だけ（Issue #1997）");
         (await _repository.GetAsync(SettingsRepository.KeyDepartmentType)).Should().NotBeNull();
         (await _repository.GetAsync(SettingsRepository.KeyReportOutputFolder)).Should().Be(@"C:\Reports");
         (await _repository.GetAsync(SettingsRepository.KeySkipBusStopInputOnReturn)).Should().Be("true");

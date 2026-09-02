@@ -10,6 +10,7 @@ using Xunit;
 
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Linq;
 using System.Threading.Tasks;
 
@@ -284,14 +285,22 @@ public class SettingsRepositoryTests : IDisposable
         loaded.WarningBalance.Should().Be(3000);
         loaded.FontSize.Should().Be(FontSizeOption.Large);
         loaded.BackupPath.Should().Be(@"D:\MyBackup");
-        loaded.LastVacuumDate.Should().Be(new DateTime(2024, 7, 1));
+
+        // Issue #1997: LastVacuumDate は一括保存の対象外（CAS 経路だけが書く）
+        loaded.LastVacuumDate.Should().BeNull();
     }
 
     /// <summary>
-    /// LastVacuumDateがnullの場合は保存しないことを確認
+    /// LastVacuumDate は値の有無にかかわらず一括保存では書き込まれないことを確認（Issue #1997）。
     /// </summary>
-    [Fact]
-    public async Task SaveAppSettingsAsync_NullLastVacuumDate_DoesNotSaveDate()
+    /// <remarks>
+    /// 値なし（従来からの表明）と値あり（#1997 で反転した表明）を対で固定する。
+    /// 値ありの側が無いと、書き込みを復活させた実装でも緑になる。
+    /// </remarks>
+    [Theory]
+    [InlineData(null)]
+    [InlineData("2024-07-01")]
+    public async Task SaveAppSettingsAsync_LastVacuumDate_一括保存では書き込まないこと(string lastVacuumDate)
     {
         // Arrange
         var settings = new AppSettings
@@ -299,7 +308,9 @@ public class SettingsRepositoryTests : IDisposable
             WarningBalance = 5000,
             FontSize = FontSizeOption.Small,
             BackupPath = @"C:\Backup",
-            LastVacuumDate = null
+            LastVacuumDate = lastVacuumDate == null
+                ? (DateTime?)null
+                : DateTime.ParseExact(lastVacuumDate, "yyyy-MM-dd", CultureInfo.InvariantCulture)
         };
 
         // Act
@@ -308,8 +319,12 @@ public class SettingsRepositoryTests : IDisposable
         // Assert
         result.Should().BeTrue();
 
-        var lastVacuumDate = await _repository.GetAsync(SettingsRepository.KeyLastVacuumDate);
-        lastVacuumDate.Should().BeNull();
+        (await _repository.GetAsync(SettingsRepository.KeyLastVacuumDate)).Should().BeNull(
+            "一括保存は月ガードを持たないため last_vacuum_date を書いてはならない（Issue #1997）");
+
+        // 対の表明: ほかの設定は従来どおり保存されている（書き込みを丸ごと止めた実装では緑にならない）
+        (await _repository.GetAsync(SettingsRepository.KeyWarningBalance)).Should().Be("5000");
+        (await _repository.GetAsync(SettingsRepository.KeyBackupPath)).Should().Be(@"C:\Backup");
     }
 
     /// <summary>
@@ -361,7 +376,10 @@ public class SettingsRepositoryTests : IDisposable
         loaded.WarningBalance.Should().Be(original.WarningBalance);
         loaded.FontSize.Should().Be(original.FontSize);
         loaded.BackupPath.Should().Be(original.BackupPath);
-        loaded.LastVacuumDate.Should().Be(original.LastVacuumDate);
+
+        // Issue #1997: LastVacuumDate はラウンドトリップしない（一括保存の対象外）。
+        // 読み取り側は CAS が書いた値をそのまま返す（GetAppSettingsAsync_WithCustomValues_… が固定）。
+        loaded.LastVacuumDate.Should().BeNull();
     }
 
     #endregion
@@ -637,6 +655,69 @@ public class SettingsRepositoryTests : IDisposable
         results.Count(r => r).Should().Be(1, "先勝ちで正確に 1 つだけが true を返すべき");
         var stored = await _repository.GetAsync(SettingsRepository.KeyLastVacuumDate);
         stored.Should().Be("2026-05-14");
+    }
+
+    /// <summary>
+    /// CAS で獲得した当月の値が、その後の一括保存で巻き戻らないことを確認（Issue #1997）。
+    /// </summary>
+    /// <remarks>
+    /// 共有モードでは、CAS に負けた PC が TTL キャッシュに古い <c>LastVacuumDate</c> を保持したまま
+    /// 動き続ける（<c>TryAcquireMonthlyVacuumLockAsync</c> が無効化するのは自プロセスのキャッシュだけ）。
+    /// その PC がウィンドウ位置や帳票の出力先を保存すると、一括保存が先月の日付を書き戻し、
+    /// 次に起動した PC が CAS を再獲得して同じ月に 2 回目の VACUUM が走っていた。
+    /// </remarks>
+    [Fact]
+    public async Task TryAcquireMonthlyVacuumLockAsync_獲得後の一括保存_当月の値を巻き戻さないこと()
+    {
+        // Arrange: PC-A が当月分のロックを獲得済み
+        var today = new DateTime(2026, 5, 14);
+        (await _repository.TryAcquireMonthlyVacuumLockAsync(today)).Should().BeTrue();
+
+        // PC-B が持つ「CAS 獲得前」の古いキャッシュ（先月の日付）を模した設定インスタンス
+        var staleSettings = new AppSettings
+        {
+            WarningBalance = 8000,
+            FontSize = FontSizeOption.Large,
+            BackupPath = @"D:\Backup",
+            LastVacuumDate = new DateTime(2026, 4, 10)
+        };
+
+        // Act: PC-B がウィンドウ位置の保存などで一括保存を呼ぶ
+        (await _repository.SaveAppSettingsAsync(staleSettings)).Should().BeTrue();
+
+        // Assert: 当月のロックは維持され、再獲得できない
+        (await _repository.GetAsync(SettingsRepository.KeyLastVacuumDate)).Should().Be(
+            "2026-05-14",
+            "一括保存が先月の日付を書き戻すと当月のロックが巻き戻る（Issue #1997）");
+        (await _repository.TryAcquireMonthlyVacuumLockAsync(today)).Should().BeFalse(
+            "同じ月に 2 回目の VACUUM が走ってはいけない（Issue #1482）");
+    }
+
+    /// <summary>
+    /// 対の表明: 一括保存の後でも翌月のロックは通常どおり獲得できること（Issue #1997）。
+    /// </summary>
+    /// <remarks>
+    /// 上のテストだけだと、<c>last_vacuum_date</c> を一切更新しない実装（CAS ごと壊した実装）でも緑になる。
+    /// </remarks>
+    [Fact]
+    public async Task TryAcquireMonthlyVacuumLockAsync_一括保存の後でも翌月は獲得できること()
+    {
+        // Arrange
+        (await _repository.TryAcquireMonthlyVacuumLockAsync(new DateTime(2026, 5, 14))).Should().BeTrue();
+        await _repository.SaveAppSettingsAsync(new AppSettings
+        {
+            WarningBalance = 8000,
+            FontSize = FontSizeOption.Large,
+            BackupPath = @"D:\Backup",
+            LastVacuumDate = new DateTime(2026, 4, 10)
+        });
+
+        // Act
+        var acquired = await _repository.TryAcquireMonthlyVacuumLockAsync(new DateTime(2026, 6, 10));
+
+        // Assert
+        acquired.Should().BeTrue("月が変われば CAS の WHERE が真になり、次の月次 VACUUM が実行される");
+        (await _repository.GetAsync(SettingsRepository.KeyLastVacuumDate)).Should().Be("2026-06-10");
     }
 
     #endregion
