@@ -404,8 +404,17 @@ namespace ICCardManager.Tests.Services
             result.IsLowBalance.Should().BeFalse();
         }
 
+        /// <summary>
+        /// Issue #1998: 境界は「以下」。しきい値ちょうどの残額も警告対象に含める。
+        /// </summary>
+        /// <remarks>
+        /// 本テストは以前 <c>BalanceEqualThreshold_NotLow</c> として厳密な <c>&lt;</c> を固定していたが、
+        /// 設計書（04 §7.1 の設定値表・03 画面設計書）・管理者マニュアル・Excel 出力見出し、
+        /// および <c>DashboardService</c> / <c>AdminDashboardService</c> / <c>WarningService</c> の
+        /// 3 か所はいずれも「以下」であり、テスト側が仕様を後追いで固定していた。
+        /// </remarks>
         [Fact]
-        public async Task ApplyBalanceWarningAsync_BalanceEqualThreshold_NotLow()
+        public async Task ApplyBalanceWarningAsync_BalanceEqualThreshold_IsLow()
         {
             _mockSettingsRepo.Setup(r => r.GetAppSettingsAsync())
                 .ReturnsAsync(new AppSettings { WarningBalance = 1000 });
@@ -414,7 +423,7 @@ namespace ICCardManager.Tests.Services
             var result = new LendingResult { Balance = 1000 };
             await service.ApplyBalanceWarningAsync(result);
 
-            result.IsLowBalance.Should().BeFalse();
+            result.IsLowBalance.Should().BeTrue();
         }
     }
 }

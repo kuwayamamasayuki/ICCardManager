@@ -75,7 +75,7 @@ namespace ICCardManager.Services
                     CardType = card.CardType,
                     CardNumber = card.CardNumber,
                     CurrentBalance = balance,
-                    IsBalanceWarning = balance <= settings.WarningBalance,
+                    IsBalanceWarning = BalanceWarningPolicy.IsLowBalance(balance, settings.WarningBalance),
                     LastUsageDate = lastUsageDate,
                     IsLent = card.IsLent,
                     LentStaffName = staffName

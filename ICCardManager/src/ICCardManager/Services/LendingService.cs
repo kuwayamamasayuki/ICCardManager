@@ -701,7 +701,7 @@ namespace ICCardManager.Services
         {
             var settings = await _settingsRepository.GetAppSettingsAsync().ConfigureAwait(false);
             result.WarningBalance = settings.WarningBalance;
-            result.IsLowBalance = result.Balance < settings.WarningBalance;
+            result.IsLowBalance = BalanceWarningPolicy.IsLowBalance(result.Balance, settings.WarningBalance);
         }
 
         /// <summary>
