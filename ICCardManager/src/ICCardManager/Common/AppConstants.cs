@@ -199,6 +199,24 @@ namespace ICCardManager.Common
         public const int AdminDashboardUtilizationChartMaxCards = 15;
 
         /// <summary>
+        /// 残高チェーンの開始点（シード）を求めるために遡る「稼働日」の上限（Issue #1999）。
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// 「その日の最終残高」は、同額のポイント還元と利用で残高が循環する日（Issue #1004 形状）だと
+        /// 当日の行だけからは確定できず、前日以前の最終残高をシードとして必要とする。その前日自身も
+        /// 同日統合（Issue #837）で id 順と時系列が食い違っていれば <c>ORDER BY … id DESC LIMIT 1</c> では
+        /// 求まらないため、前日もチェーン解決する。前々日以降も同じことが起こり得るので上限を設ける。
+        /// </para>
+        /// <para>
+        /// 遡るのは <see cref="Services.LedgerOrderHelper.RequiresSeed"/> が真である間だけなので、
+        /// 通常のデータでは 1 日分（1 クエリ）で止まる。上限に達してもなお確定できない場合は
+        /// シード無しで解決し、従来どおり除外法・id 順フォールバックへ落ちる（悪化はしない）。
+        /// </para>
+        /// </remarks>
+        public const int MaxBalanceChainSeedLookbackDays = 5;
+
+        /// <summary>
         /// 二重起動防止に用いる名前付きミューテックスの名前（Issue #1910）。
         /// </summary>
         /// <remarks>
