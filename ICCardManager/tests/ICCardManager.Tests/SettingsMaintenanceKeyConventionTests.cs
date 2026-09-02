@@ -27,6 +27,13 @@ namespace ICCardManager.Tests;
 /// 期待値は本番の定数から導出せず<b>リテラルで書く</b>（#1884 / #1940: 本番と期待値が
 /// 同時に動くと表明が自己充足する）。
 /// </para>
+/// <para>
+/// <b>走査は一括保存から到達する private ヘルパーまで辿る</b>（コードレビューで検出）。
+/// 直接の本体だけを見ると、<c>SaveWindowSettingsToDbAsync</c> のようなヘルパー（あるいは今後
+/// 追加されるヘルパー）の内側へ保守用のキーを書き足した形が 4 件すべて緑のまま通り、
+/// #1997 がそのまま再発する（`.claude/rules/development-conventions.md` #1786
+/// 「守りたい性質ではなく、その性質を破れる全経路を列挙する」）。
+/// </para>
 /// </remarks>
 public class SettingsMaintenanceKeyConventionTests
 {
@@ -36,9 +43,8 @@ public class SettingsMaintenanceKeyConventionTests
     private const string SaveSignatureMarker = "Task<bool> SaveAppSettingsAsync(AppSettings settings)";
 
     /// <summary>
-    /// 一括保存が直接書き込む設定キー定数。
-    /// 増減させるときは、その値が「画面から編集する設定」であることを確かめること
-    /// （ウィンドウ位置は <c>SaveWindowSettingsToDbAsync</c> の内側で書くため、ここには現れない）。
+    /// 一括保存（到達する private ヘルパーを含む）が書き込む設定キー定数。
+    /// 増減させるときは、その値が「画面から編集する設定」であることを確かめること。
     /// </summary>
     private static readonly string[] ExpectedKeyConstants =
     {
@@ -51,6 +57,12 @@ public class SettingsMaintenanceKeyConventionTests
         "KeySkipBusStopInputOnReturn",
         "KeySkipCompanionCountInputOnReturn",
         "KeyReportOutputFolder",
+        // SaveWindowSettingsToDbAsync（一括保存から呼ばれる private ヘルパー）が書く
+        "KeyWindowLeft",
+        "KeyWindowTop",
+        "KeyWindowWidth",
+        "KeyWindowHeight",
+        "KeyWindowMaximized",
     };
 
     /// <summary>
@@ -67,7 +79,7 @@ public class SettingsMaintenanceKeyConventionTests
     [Fact]
     public void 一括保存が書き込む設定キーは画面から編集する設定だけであること()
     {
-        var body = ExtractSaveBody();
+        var body = ExtractSaveBodyWithCallees();
 
         ExtractKeyConstants(body).Should().BeEquivalentTo(
             ExpectedKeyConstants,
@@ -78,7 +90,7 @@ public class SettingsMaintenanceKeyConventionTests
     [Fact]
     public void 一括保存は保守用のキーを生の文字列でも書かないこと()
     {
-        var body = ExtractSaveBody();
+        var body = ExtractSaveBodyWithCallees();
 
         foreach (var literal in MaintenanceKeyLiterals)
         {
@@ -86,6 +98,25 @@ public class SettingsMaintenanceKeyConventionTests
                 literal,
                 $"{literal} は専用の書き込み経路だけが更新する（Issue #1482 / #1689 / #1997）");
         }
+    }
+
+    /// <summary>
+    /// 対の表明: 走査が一括保存から呼ばれる private ヘルパーの内側まで届いていること。
+    /// これが無いと、ヘルパーへ保守用のキーを書き足した形を検出できないまま緑になる。
+    /// </summary>
+    [Fact]
+    public void 走査は一括保存から呼ばれるヘルパーの内側まで届くこと()
+    {
+        var direct = TestSourceInspection.ExtractMethodBodyPreservingLiterals(
+            File.ReadAllText(RepositoryPath), SaveSignatureMarker);
+
+        direct.Should().NotContain(
+            "KeyWindowLeft",
+            "ウィンドウ設定キーは SaveWindowSettingsToDbAsync の内側にある（直接の本体には現れない）");
+
+        ExtractKeyConstants(ExtractSaveBodyWithCallees()).Should().Contain(
+            "KeyWindowLeft",
+            "呼び出し先まで辿らないと、ヘルパーへ保守用のキーを書き足した形を検出できない");
     }
 
     /// <summary>
@@ -115,18 +146,167 @@ public class SettingsMaintenanceKeyConventionTests
             success &= await SetAsync(KeyWarningBalance, ""1"", scope);
             success &= await SetAsync(SettingsRepository.KeyBackupPath, ""x"", scope);
             _cacheService.Invalidate(CacheKeys.AppSettings);
+            var legacy = LegacyKeyBackupPath;
+            var underscored = _KeyToastPosition;
             var keyed = KeyLastVacuumDate;
 ";
 
         ExtractKeyConstants(sample).Should().BeEquivalentTo(
             new[] { "KeyWarningBalance", "KeyBackupPath", "KeyLastVacuumDate" },
-            "CacheKeys のような別クラス名を Key… として拾わないこと");
+            "CacheKeys のような別クラス名も、識別子の途中に Key を含む名前（LegacyKeyBackupPath / " +
+            "_KeyToastPosition）も拾わないこと（後読みを外すとこの表明が赤くなる）");
     }
 
-    private static string ExtractSaveBody()
+    /// <summary>
+    /// 検査ロジック自体をサンプル入力で固定する: 呼び出し先の展開が 1 段だけで止まらないこと。
+    /// </summary>
+    [Fact]
+    public void 呼び出し先の展開は多段のヘルパーを辿ること()
     {
-        return TestSourceInspection.ExtractMethodBodyPreservingLiterals(
-            File.ReadAllText(RepositoryPath), SaveSignatureMarker);
+        const string sample = @"
+namespace Sample
+{
+    public class Repo
+    {
+        public async Task<bool> TargetAsync(int id)
+        {
+            await SetAsync(KeyWarningBalance);
+            await FirstHelperAsync(id);
+            return true;
+        }
+
+        private async Task FirstHelperAsync(int id)
+        {
+            await SecondHelperAsync(id);
+        }
+
+        private async Task SecondHelperAsync(int id)
+        {
+            await SetAsync(KeyWindowLeft);
+        }
+
+        private async Task UnreachableAsync(int id)
+        {
+            await SetAsync(KeyLastVacuumDate);
+        }
+    }
+}
+";
+
+        var body = ExpandWithCallees(sample, "Task<bool> TargetAsync(int id)");
+
+        ExtractKeyConstants(body).Should().BeEquivalentTo(
+            new[] { "KeyWarningBalance", "KeyWindowLeft" },
+            "2 段先のヘルパーまで辿り、呼ばれていないメソッドは巻き込まないこと");
+    }
+
+    private static string ExtractSaveBodyWithCallees()
+    {
+        return ExpandWithCallees(File.ReadAllText(RepositoryPath), SaveSignatureMarker);
+    }
+
+    /// <summary>
+    /// 指定メソッドの本体と、そこから到達する同一クラスの private メソッドの本体を連結して返す。
+    /// </summary>
+    private static string ExpandWithCallees(string source, string signatureMarker)
+    {
+        var declarations = ExtractPrivateMethodDeclarations(source);
+
+        var bodies = new List<string>();
+        var visited = new HashSet<string>(StringComparer.Ordinal);
+        var pending = new Queue<string>();
+
+        var rootBody = TestSourceInspection.ExtractMethodBodyPreservingLiterals(source, signatureMarker);
+        bodies.Add(rootBody);
+        EnqueueCallees(rootBody, declarations, visited, pending);
+
+        while (pending.Count > 0)
+        {
+            var name = pending.Dequeue();
+            var body = TestSourceInspection.ExtractMethodBodyPreservingLiterals(source, declarations[name]);
+            bodies.Add(body);
+            EnqueueCallees(body, declarations, visited, pending);
+        }
+
+        return string.Join("\n", bodies);
+    }
+
+    private static void EnqueueCallees(
+        string body,
+        IReadOnlyDictionary<string, string> declarations,
+        HashSet<string> visited,
+        Queue<string> pending)
+    {
+        foreach (Match match in Regex.Matches(body, @"(?<![A-Za-z0-9_.])(?<name>[A-Za-z_]\w*)\s*\("))
+        {
+            var name = match.Groups["name"].Value;
+            if (declarations.ContainsKey(name) && visited.Add(name))
+            {
+                pending.Enqueue(name);
+            }
+        }
+    }
+
+    /// <summary>
+    /// ソース中の private メソッド宣言を「名前 → シグネチャマーカー（戻り値の型＋引数リスト）」で返す。
+    /// </summary>
+    /// <remarks>
+    /// マーカーに引数リストを含めるのは、オーバーロードを持つメソッド（<c>SetAsync</c>）で
+    /// <see cref="TestSourceInspection.ExtractMethodBodyPreservingLiterals"/> が
+    /// 「複数一致」の例外で止まらないようにするため。同名のオーバーロードが複数あるときは
+    /// 引数の多い方（＝スコープを引き渡す形）を採る — どちらも設定キーを持たないため集合は変わらない。
+    /// </remarks>
+    private static IReadOnlyDictionary<string, string> ExtractPrivateMethodDeclarations(string source)
+    {
+        var code = TestSourceInspection.RemoveCommentsPreservingLines(source).Replace("\r\n", "\n");
+        var result = new Dictionary<string, string>(StringComparer.Ordinal);
+
+        var pattern = new Regex(
+            @"(?<![A-Za-z0-9_])private\s+(?:static\s+)?(?:async\s+)?(?<signature>[A-Za-z_][A-Za-z0-9_<>,\.\[\]\?\s]*?\s+(?<name>[A-Za-z_]\w*)\s*)\(");
+
+        foreach (Match match in pattern.Matches(code))
+        {
+            var openParen = match.Index + match.Length - 1;
+            var closeParen = FindMatchingParen(code, openParen);
+            if (closeParen < 0)
+            {
+                continue;
+            }
+
+            var name = match.Groups["name"].Value;
+            var marker = match.Groups["signature"].Value.Trim()
+                + code.Substring(openParen, closeParen - openParen + 1);
+
+            // 同名のオーバーロードは引数リストの長い方（スコープ引き渡し版）を採る
+            if (!result.TryGetValue(name, out var existing) || marker.Length > existing.Length)
+            {
+                result[name] = marker;
+            }
+        }
+
+        return result;
+    }
+
+    private static int FindMatchingParen(string code, int openParen)
+    {
+        var depth = 0;
+        for (var i = openParen; i < code.Length; i++)
+        {
+            if (code[i] == '(')
+            {
+                depth++;
+            }
+            else if (code[i] == ')')
+            {
+                depth--;
+                if (depth == 0)
+                {
+                    return i;
+                }
+            }
+        }
+
+        return -1;
     }
 
     private static IReadOnlyList<string> ExtractKeyConstants(string body)
