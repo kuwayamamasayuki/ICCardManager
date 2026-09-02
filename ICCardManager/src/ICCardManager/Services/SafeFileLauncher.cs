@@ -40,9 +40,15 @@ namespace ICCardManager.Services
             }
             catch (System.Exception ex)
             {
+                // #1614 / #1817: 生の ex.Message は出さず、技術的詳細はログへ残す（本クラスは ILogger を持たない）
+                ErrorDialogHelper.LogException(ex, "エクスプローラーの起動");
                 return SafeFileLaunchResult.Fail(
+                    // 「原因:」というラベルは具体的な原因を約束するが、ToReason は種別ごとの定型文で、
+                    // ここへ届く Win32Exception / InvalidOperationException は default 分岐
+                    //（「予期しない問題が発生しました。」）に落ちる。ラベルを外して素の一文として並べ、
+                    // 実際の原因はログへ誘導する。
                     "エクスプローラーの起動に失敗しました。" +
-                    $"原因: {ex.Message}。" +
+                    ExceptionMessageFormatter.ToReason(ex) +
                     "エクスプローラーが利用可能な環境か確認してください。");
             }
         }
@@ -78,9 +84,11 @@ namespace ICCardManager.Services
             }
             catch (System.Exception ex)
             {
+                ErrorDialogHelper.LogException(ex, "ファイルを開く");
                 return SafeFileLaunchResult.Fail(
+                    // 「原因:」ラベルを外す理由は上の OpenFolder と同じ
                     "ファイルを開けませんでした。" +
-                    $"原因: {ex.Message}。" +
+                    ExceptionMessageFormatter.ToReason(ex) +
                     "対応するアプリ（Excel 等）がインストールされているか確認してください。");
             }
         }

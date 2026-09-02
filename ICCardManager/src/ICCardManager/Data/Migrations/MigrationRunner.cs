@@ -4,6 +4,7 @@ using System.Linq;
 using System.Threading.Tasks;
 using System.Reflection;
 using System.Data.SQLite;
+using System.Text.Json;
 using ICCardManager.Common;
 
 namespace ICCardManager.Data.Migrations
@@ -396,9 +397,26 @@ namespace ICCardManager.Data.Migrations
                     return;
                 }
 
-                var afterData = success
-                    ? $"{{\"version\":{migration.Version},\"description\":\"{migration.Description}\",\"status\":\"success\"}}"
-                    : $"{{\"version\":{migration.Version},\"description\":\"{migration.Description}\",\"status\":\"failed\",\"error\":\"{errorMessage?.Replace("\"", "\\\"") ?? ""}\"}}";
+                // 手組みの JSON は " しかエスケープしておらず、SQLiteException.Message に含まれる
+                // 改行（"SQL logic error\r\n…"）やパスの \ で after_data が不正な JSON になっていた。
+                // OperationLogger.SerializeToJson と同じ設定でシリアライズする（日本語は \u エスケープしない）。
+                var afterDataFields = new Dictionary<string, object>
+                {
+                    ["version"] = migration.Version,
+                    ["description"] = migration.Description,
+                    ["status"] = success ? "success" : "failed",
+                };
+                if (!success)
+                {
+                    afterDataFields["error"] = errorMessage ?? "";
+                }
+                var afterData = JsonSerializer.Serialize(
+                    afterDataFields,
+                    new JsonSerializerOptions
+                    {
+                        WriteIndented = false,
+                        Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping
+                    });
 
                 using var command = _connection.CreateCommand();
                 // Issue #1014: CURRENT_TIMESTAMPはUTCのため、ローカル時刻を明示的に保存する

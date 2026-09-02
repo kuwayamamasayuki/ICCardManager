@@ -392,7 +392,8 @@ public partial class SettingsViewModel : ViewModelBase
                     }
                     catch (Exception ex)
                     {
-                        SetStatus($"データベース保存先の設定ファイルの保存に失敗しました: {ex.Message}", true);
+                        ErrorDialogHelper.LogException(ex, "データベース保存先の設定ファイルの保存");
+                        SetStatus(ExceptionMessageFormatter.ToUserMessage(ex, "データベース保存先の設定ファイルの保存"), true);
                         return;
                     }
 
@@ -548,7 +549,8 @@ public partial class SettingsViewModel : ViewModelBase
         }
         catch (Exception ex)
         {
-            SetStatus($"設定ファイルの削除に失敗しました: {ex.Message}", true);
+            ErrorDialogHelper.LogException(ex, "データベース保存先の設定ファイルの削除");
+            SetStatus(ExceptionMessageFormatter.ToUserMessage(ex, "データベース保存先の設定ファイルの削除"), true);
         }
     }
 

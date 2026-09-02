@@ -343,7 +343,26 @@ public partial class OperationLogSearchViewModel : ViewModelBase
     /// </summary>
     partial void OnPageSizeChanged(int value)
     {
-        _ = SearchAsync();
+        _ = SearchForPageSizeChangeAsync();
+    }
+
+    /// <summary>
+    /// ページサイズ変更に伴う再検索の本体。戻り値を捨てる呼び出し元に代わって、
+    /// 本体自身が最後の受け皿になる（`.claude/rules/viewmodel-conventions.md` #1816）。
+    /// 検索ボタン経由（RelayCommand）と違い、ここで受けないと例外は
+    /// TaskScheduler.UnobservedTaskException まで誰にも観測されず、画面は旧ページのまま止まる。
+    /// </summary>
+    private async Task SearchForPageSizeChangeAsync()
+    {
+        try
+        {
+            await SearchAsync();
+        }
+        catch (Exception ex)
+        {
+            ErrorDialogHelper.LogException(ex, "操作ログの検索（ページサイズ変更）");
+            SetStatus(ExceptionMessageFormatter.ToUserMessage(ex, "操作ログの検索"), isError: true);
+        }
     }
 
     /// <summary>

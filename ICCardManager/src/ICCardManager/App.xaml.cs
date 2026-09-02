@@ -171,6 +171,11 @@ namespace ICCardManager
             }
             catch (Exception ex)
             {
+                // ダイアログは「詳細はログファイルを確認してください」と案内するため、
+                // その案内が嘘にならないよう先にログへ残す（#1817「UI 文言とログを対で数える」）。
+                // ErrorDialogHelper は DI に依存しないので、コンテナ構築前の失敗でも書ける。
+                Common.ErrorDialogHelper.LogException(ex, "アプリケーション起動");
+
                 // DB関連のエラーの場合、パス情報も含めて表示（トラブルシューティング用）
                 var dbPathInfo = "";
                 try
@@ -179,7 +184,11 @@ namespace ICCardManager
                     if (!string.IsNullOrWhiteSpace(configPath))
                         dbPathInfo = $"\n\nデータベースパス: {configPath}";
                 }
-                catch { }
+                catch (Exception configEx)
+                {
+                    // 設定ファイルが読めないこと自体が起動失敗の原因であり得るため、無言にしない
+                    Common.ErrorDialogHelper.LogException(configEx, "起動エラー表示用のデータベースパス取得");
+                }
 
 #if DEBUG
                 var errorMessage = $"起動エラー: {ex.Message}{dbPathInfo}\n\n{ex.StackTrace}";

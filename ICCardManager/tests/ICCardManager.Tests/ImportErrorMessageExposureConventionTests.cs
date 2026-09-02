@@ -44,11 +44,10 @@ namespace ICCardManager.Tests;
 /// <list type="number">
 /// <item><description>
 /// <b>メソッドやコンストラクタの引数として渡す形</b>。起票時点で <c>ReportService</c>
-/// （7 箇所。<c>FailureResult(…, $"…\n\n詳細: {ex.Message}")</c>）、
-/// <c>Infrastructure/Security/DllIntegrityVerifier</c>（2 箇所）、
-/// <c>Services/SafeFileLauncher</c>（2 箇所）、
-/// <c>ViewModels/SettingsViewModel</c>（2 箇所。<c>SetStatus($"…: {ex.Message}", true)</c>）が
-/// 同じ #1614 の family として残っている
+/// （7 箇所）・<c>Services/SafeFileLauncher</c>（2 箇所）・<c>ViewModels/SettingsViewModel</c>
+/// （2 箇所）が同じ #1614 の family として残っていたが、リポジトリ全体のコードレビューで
+/// <c>ExceptionMessageFormatter.ToReason</c> / <c>ToUserMessage</c> ＋ <c>ErrorDialogHelper.LogException</c>
+/// へ寄せて是正済み。<c>Infrastructure/Security/DllIntegrityVerifier</c>（2 箇所）は未是正のまま残っている
 /// （<c>App.xaml.cs</c> の起動致命エラーは <c>ShowFatalError</c> 相当でスタックトレースごと出す
 /// 意図的な設計。<c>error-messages.md</c> の役割分担を参照）。
 /// </description></item>

@@ -178,9 +178,21 @@ public partial class ReportViewModel : ViewModelBase
     /// </summary>
     private async Task SaveOutputFolderAsync()
     {
-        var settings = await _settingsRepository.GetAppSettingsAsync();
-        settings.ReportOutputFolder = OutputFolder;
-        await _settingsRepository.SaveAppSettingsAsync(settings);
+        // 呼び出し元（OnOutputFolderChanged）は戻り値を捨てるため、本体が最後の受け皿になる
+        //（`.claude/rules/viewmodel-conventions.md` #1816）。ここで受けないと DB 保存の失敗は
+        // 誰にも観測されず、画面は新しいフォルダを示したまま次回起動で旧フォルダへ戻る。
+        try
+        {
+            var settings = await _settingsRepository.GetAppSettingsAsync();
+            settings.ReportOutputFolder = OutputFolder;
+            await _settingsRepository.SaveAppSettingsAsync(settings);
+        }
+        catch (Exception ex)
+        {
+            ErrorDialogHelper.LogException(ex, "帳票の出力先フォルダの保存");
+            SetStatus(ExceptionMessageFormatter.ToUserMessage(ex, "出力先フォルダの保存"), isError: true);
+            return;
+        }
 
         // 設定ファイルにも保存（インストーラーがアップグレード時に読み込む）
         try
@@ -447,8 +459,26 @@ public partial class ReportViewModel : ViewModelBase
         var capturedYear = SelectedYear;
         var capturedMonth = SelectedMonth;
 
-        var statuses = await Task.Run(() =>
-            _exportStatusService.GetStatuses(targets, capturedFolder, capturedYear, capturedMonth));
+        // OnOutputFolderChanged / 年月変更からは戻り値を捨てて呼ばれるため、本体が最後の受け皿になる
+        //（`.claude/rules/viewmodel-conventions.md` #1816）
+        IReadOnlyList<ReportExportStatus> statuses;
+        try
+        {
+            statuses = await Task.Run(() =>
+                _exportStatusService.GetStatuses(targets, capturedFolder, capturedYear, capturedMonth));
+        }
+        catch (Exception ex)
+        {
+            ErrorDialogHelper.LogException(ex, "帳票の出力状況の確認");
+
+            // 判定できなかったときに前回の「出力済み」バッジを残さない。出力先や年月を変えた直後に
+            // 失敗すると、残ったバッジは「別のフォルダ・別の月の結果」であり、当月まだ出力していない
+            // カードを出力済みと誤認させて物品出納簿が 1 枚欠ける。到達できないフォルダを
+            // 「未出力」ではなく「判定不能」で返す ReportExportStatusService と同じ扱いへ揃える。
+            ApplyExportStatuses(Array.Empty<ReportExportStatus>());
+            ExportStatusSummary = "出力状況を確認できませんでした。出力先フォルダと年月を確認し、「出力状況を更新」をやり直してください。";
+            return;
+        }
 
         ApplyExportStatuses(statuses);
     }
