@@ -25,6 +25,16 @@ namespace ICCardManager.Common
     /// 交通系語彙で分岐しない）ため、汎用コアである <c>Common</c> に置く
     /// （<c>.claude/rules/domain-boundaries.md</c> の決定木①）。
     /// </para>
+    /// <para>
+    /// <b>回帰の担保は 2 段構えで、静的検査は網羅ではない。</b>
+    /// <c>BalanceWarningComparisonConventionTests</c> の直書き検査は「しきい値の識別子が比較演算子に
+    /// 隣接する形」を見るので、<b>別名のローカルへ退避してから比較する形</b>
+    /// （<c>var t = settings.WarningBalance; … balance &lt;= t</c>）や
+    /// <c>balance.CompareTo(settings.WarningBalance) &lt;= 0</c> は原理的に拾えない。
+    /// これらは同テストの「残額警告フラグへの代入がすべて共通の判定を右辺に持つこと」が塞ぐ
+    /// （比較結果を <c>IsLowBalance</c> / <c>IsBalanceWarning</c> へ入れる限り検出される）。
+    /// <b>どちらにも掛からない新しい消費側を作るときは、この節を読んで判定をここへ委譲すること。</b>
+    /// </para>
     /// </remarks>
     internal static class BalanceWarningPolicy
     {

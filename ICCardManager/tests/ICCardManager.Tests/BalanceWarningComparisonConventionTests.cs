@@ -47,11 +47,35 @@ public class BalanceWarningComparisonConventionTests
     /// （<c>balance &lt;= settings.WarningBalance</c> / <c>warningBalance &gt;= balance</c> など）。
     /// </summary>
     /// <remarks>
+    /// <para>
     /// 片側だけを見張ると、比較の向きを反転した綴りでガードを素通りする
     /// （<c>.claude/rules/development-conventions.md</c> #1786「その性質を破れる全経路を列挙する」）。
+    /// </para>
+    /// <para>
+    /// <c>&gt;</c> の直前が <c>=</c> の場合は**ラムダ・式形式メンバーの矢印**（<c>=&gt;</c>）なので除外する。
+    /// 除外しないと <c>public int Threshold =&gt; settings.WarningBalance;</c> や
+    /// <c>.Select(s =&gt; s.WarningBalance)</c> が違反と判定され、**正当なコードで赤くなる**。
+    /// 誤検出はガード自体の寿命を縮める（#1786）。<c>&gt;=</c> は <c>&gt;</c> の直前が <c>=</c> ではないため
+    /// 従来どおり検出される。
+    /// </para>
     /// </remarks>
     private static readonly Regex InlineComparisonPattern = new Regex(
-        $@"(?:[<>]=?\s*{ThresholdIdentifier})|(?:{ThresholdIdentifier}\s*[<>]=?[^=])",
+        $@"(?:(?<!=)[<>]=?\s*{ThresholdIdentifier})|(?:{ThresholdIdentifier}\s*[<>]=?[^=])",
+        RegexOptions.Compiled);
+
+    /// <summary>
+    /// しきい値との比較結果を受け取るフラグへの代入。
+    /// </summary>
+    /// <remarks>
+    /// ファイル単位の包含検査（<see cref="残額警告を判定する全サービスが共通の判定を使っていること"/>）は
+    /// 「そのファイルのどこか 1 行に正規の呼び出しがあれば緑」なので、**同じファイル内で別の綴りへ
+    /// すり替えた形**を検出できない（コードレビューで検出）。代入の<b>右辺</b>まで見ると、
+    /// <see cref="InlineComparisonPattern"/> が原理的に拾えない綴り
+    /// （別名ローカルへ退避した比較 <c>var t = settings.WarningBalance; … balance &lt;= t</c>、
+    /// <c>balance.CompareTo(settings.WarningBalance) &lt;= 0</c>）も、結果をこのフラグへ入れる限り塞げる。
+    /// </remarks>
+    private static readonly Regex WarningFlagAssignmentPattern = new Regex(
+        @"\b(?:IsLowBalance|IsBalanceWarning)\s*=(?!=)",
         RegexOptions.Compiled);
 
     /// <summary>
@@ -75,6 +99,9 @@ public class BalanceWarningComparisonConventionTests
     [InlineData("if (balance > WarningBalanceMax)", false)]
     // 比較ではない代入・等値判定。
     [InlineData("if (settings.WarningBalance == 0)", false)]
+    // ラムダ・式形式メンバーの矢印。`>` の直前が `=` なので比較ではない。
+    [InlineData("public int Threshold => settings.WarningBalance;", false)]
+    [InlineData("cards.Select(s => s.WarningBalance).ToList();", false)]
     public void しきい値比較の検出パターンが既知の入力を正しく分類すること(string code, bool expected)
     {
         InlineComparisonPattern.IsMatch(code).Should().Be(expected);
@@ -126,6 +153,77 @@ public class BalanceWarningComparisonConventionTests
             code.Should().Contain(CanonicalCall,
                 $"{relativePath} は残額警告の境界を {CanonicalCall} で判定すること（Issue #1998）");
         }
+    }
+
+    [Fact]
+    public void 残額警告フラグへの代入がすべて共通の判定を右辺に持つこと()
+    {
+        var assignments = new List<string>();
+        var violations = new List<string>();
+
+        foreach (var file in EnumerateProductionSources())
+        {
+            var code = TestSourceInspection.ToCodeOnlyPreservingLines(File.ReadAllText(file));
+
+            foreach (Match match in WarningFlagAssignmentPattern.Matches(code))
+            {
+                var rightHandSide = ExtractRightHandSide(code, match.Index + match.Length);
+                var location = $"{Path.GetFileName(file)}: {match.Value.Trim()}{rightHandSide.Trim()}";
+
+                assignments.Add(location);
+                if (!rightHandSide.Contains(CanonicalCall))
+                {
+                    violations.Add(location);
+                }
+            }
+        }
+
+        // 空振り防止。代入が 1 件も見つからないなら、走査かパターンのどちらかが壊れている。
+        assignments.Should().HaveCountGreaterOrEqualTo(3,
+            "残額警告フラグへの代入は LendingService / DashboardService / AdminDashboardService の 3 経路に実在する");
+
+        violations.Should().BeEmpty(
+            $"残額警告フラグの右辺は {CanonicalCall} でなければならない。" +
+            "ファイル単位の包含検査は同じファイル内で別の綴りへすり替えた形を検出できないため、" +
+            "代入の右辺まで見る（Issue #1998）");
+    }
+
+    /// <summary>
+    /// 代入演算子の直後から、その式の終わり（<c>;</c> またはオブジェクト初期化子の <c>,</c>）までを返す。
+    /// </summary>
+    /// <remarks>
+    /// 終端が見つからないまま行末・ファイル末尾に達した場合はそこまでを返す。
+    /// 括弧の内側の <c>,</c>（<c>IsLowBalance(a, b)</c> の区切り）で切らないよう深さを数える。
+    /// </remarks>
+    private static string ExtractRightHandSide(string code, int startIndex)
+    {
+        var depth = 0;
+
+        for (var i = startIndex; i < code.Length; i++)
+        {
+            var c = code[i];
+
+            if (c == '(' || c == '[')
+            {
+                depth++;
+            }
+            else if (c == ')' || c == ']')
+            {
+                // 初期化子の閉じ括弧に当たった場合は、そこで式が終わっている。
+                if (depth == 0)
+                {
+                    return code.Substring(startIndex, i - startIndex);
+                }
+
+                depth--;
+            }
+            else if (depth == 0 && (c == ';' || c == ',' || c == '\n'))
+            {
+                return code.Substring(startIndex, i - startIndex);
+            }
+        }
+
+        return code.Substring(startIndex);
     }
 
     private static IEnumerable<string> EnumerateProductionSources()

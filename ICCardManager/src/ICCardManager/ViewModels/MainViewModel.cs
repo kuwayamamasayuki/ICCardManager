@@ -1463,7 +1463,7 @@ public partial class MainViewModel : ViewModelBase
     /// <item><description>成功時: 返却音を再生、残額付きのトースト通知を表示（メイン画面は変更しない。Issue #186）</description></item>
     /// <item><description>成功したがコミット後の付帯情報（残額・残額警告）を取得できなかった場合（<see cref="LendingResult.HasPostCommitFailure"/>、Issue #1805）: 警告音＋「返却は記録済み・再タッチしないでください」の警告トーストを表示し、残額付きの通知は出さない</description></item>
     /// <item><description>バス利用がある場合: バス停入力ダイアログを表示</description></item>
-    /// <item><description>残額が警告閾値未満の場合: 警告メッセージを表示</description></item>
+    /// <item><description>残額が警告閾値以下の場合（境界を含む。Issue #1998）: 警告メッセージを表示</description></item>
     /// <item><description>失敗時: エラー音を再生、エラーメッセージを表示</description></item>
     /// </list>
     /// </remarks>
