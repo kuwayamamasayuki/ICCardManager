@@ -106,7 +106,7 @@ namespace ICCardManager.Data.Repositories
         /// </summary>
         /// <returns>
         /// 指定した明細をすべて更新できた場合 true。
-        /// 1 件でも影響行数 0（他のパソコンや履歴詳細の全置換で rowid が振り直された等の競合、Issue #1753 / #1806）
+        /// 1 件でも影響行数 0（他のパソコンや履歴詳細の全置換で <c>ledger_detail.id</c> が振り直された等の競合、Issue #1753 / #1806）
         /// があった場合 false。
         /// <para>
         /// false のときに「1 件も反映されない」ことを保証できるのは、本メソッドが自前で

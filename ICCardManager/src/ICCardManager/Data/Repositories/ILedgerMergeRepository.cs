@@ -64,7 +64,7 @@ namespace ICCardManager.Data.Repositories
         /// 取り消し後も残る（Issue #1942 の同行者数がこの形だった）。
         /// </remarks>
         /// <returns>
-        /// 復元が確定したら true。統合後に統合先の明細が編集（rowid 振り直し）・削除されていた、
+        /// 復元が確定したら true。統合後に統合先の明細が編集（<c>ledger_detail.id</c> の振り直し）・削除されていた、
         /// または統合先そのものが削除されていた場合は競合として false（何も書き込まない。Issue #1806）
         /// </returns>
         Task<bool> UnmergeLedgersAsync(Services.LedgerMergeUndoData undoData);

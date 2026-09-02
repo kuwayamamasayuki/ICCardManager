@@ -90,10 +90,10 @@ FROM ledger
 WHERE id = @id;
 
 SELECT ledger_id, use_date, entry_station, exit_station,
-       bus_stops, amount, balance, is_charge, is_point_redemption, is_bus, group_id, rowid
+       bus_stops, amount, balance, is_charge, is_point_redemption, is_bus, group_id, id
 FROM ledger_detail
 WHERE ledger_id = @id
-ORDER BY use_date ASC, is_charge DESC, is_point_redemption DESC, rowid DESC";
+ORDER BY use_date ASC, is_charge DESC, is_point_redemption DESC, id DESC";
 
             command.Parameters.AddWithValue("@id", id);
 
@@ -125,7 +125,7 @@ ORDER BY lent_at DESC
 LIMIT 1;
 
 SELECT ledger_id, use_date, entry_station, exit_station,
-       bus_stops, amount, balance, is_charge, is_point_redemption, is_bus, group_id, rowid
+       bus_stops, amount, balance, is_charge, is_point_redemption, is_bus, group_id, id
 FROM ledger_detail
 WHERE ledger_id = (
     SELECT id FROM ledger
@@ -133,7 +133,7 @@ WHERE ledger_id = (
     ORDER BY lent_at DESC
     LIMIT 1
 )
-ORDER BY use_date ASC, is_charge DESC, is_point_redemption DESC, rowid DESC";
+ORDER BY use_date ASC, is_charge DESC, is_point_redemption DESC, id DESC";
 
             command.Parameters.AddWithValue("@cardIdm", cardIdm);
 
@@ -1283,7 +1283,7 @@ LIMIT 100";
             // Issue #1945: 旧実装は command.Transaction を設定せず N 回 autocommit しており、
             // 途中で失敗すると一部の明細だけが書き換わって確定していた（Issue #1724 と同じ形）。
             // さらに影響行数を捨てていたため、履歴詳細の全置換（ReplaceDetailsAsync の DELETE + INSERT）で
-            // rowid が振り直されたあとの更新は 0 行のまま「成功」を返し、呼び出し元が
+            // id が振り直されたあとの更新は 0 行のまま「成功」を返し、呼び出し元が
             // ledger.summary だけを書き換えて 6 年保存の台帳を自己矛盾させていた（Issue #1806）。
             // ReplaceDetailsAsync / DeleteAsync と同じ 3 分岐（05_クラス設計書 §5.5b）:
             //   1. tx 指定           … 呼び出し元の tx を共有し、commit/rollback には介入しない
@@ -1336,8 +1336,12 @@ LIMIT 100";
         /// 呼び出し元が用意した単一の接続・トランザクション上で実行し、commit/rollback には介入しない。
         /// </summary>
         /// <remarks>
-        /// WHERE に <c>ledger_id</c> を含めるのは Issue #1806 の規約（暗黙 rowid は再利用されるため、
-        /// rowid だけで行を特定すると無関係な台帳の明細を書き換え得る）。
+        /// WHERE に <c>ledger_id</c> を含めるのは Issue #1806 の規約（<c>id</c> は
+        /// <c>ReplaceDetailsAsync</c> の DELETE + INSERT で再利用されるため、<c>id</c> だけで行を特定すると
+        /// 無関係な台帳の明細を書き換え得る）。
+        /// Issue #2000: 行の同定に使う <c>id</c> は暗黙 rowid ではなく明示的な
+        /// <c>INTEGER PRIMARY KEY</c>（Migration_011）。暗黙 rowid のままでは月次 VACUUM（Issue #1482）が
+        /// 値を振り直し、同一 <c>ledger_id</c> 内で並びが入れ替わるとバス停名が別の明細行へ書き込まれる。
         /// </remarks>
         private static async Task<bool> UpdateDetailBusStopsCore(
             int ledgerId,
@@ -1350,11 +1354,11 @@ LIMIT 100";
                 using var command = connection.CreateCommand();
                 command.Transaction = transaction;
                 command.CommandText = @"UPDATE ledger_detail SET bus_stops = @busStops
-WHERE ledger_id = @ledgerId AND rowid = @rowid";
+WHERE ledger_id = @ledgerId AND id = @id";
 
                 command.Parameters.AddWithValue("@busStops", (object)busStops ?? DBNull.Value);
                 command.Parameters.AddWithValue("@ledgerId", ledgerId);
-                command.Parameters.AddWithValue("@rowid", sequenceNumber);
+                command.Parameters.AddWithValue("@id", sequenceNumber);
 
                 // Issue #1753: 影響行数 0 は「WHERE に一致する行が無い」＝競合。
                 // SQLite の changes() は値が変わらなくても一致した行を数えるため、
@@ -1482,7 +1486,7 @@ ORDER BY DATE(l.date) ASC,
         /// 残高チェーンで時系列順（古い→新しい）にソートして返す。
         /// SQLのORDER BYはフォールバック用の初期順序として使用し、
         /// 読み取り後に残高チェーンで正しい時系列順を決定する。
-        /// これにより、挿入順序（rowid）に依存しない安定した表示順が保証される。
+        /// これにより、挿入順序（ledger_detail.id）に依存しない安定した表示順が保証される。
         /// </remarks>
         private async Task<IEnumerable<LedgerDetail>> GetDetailsAsync(int ledgerId)
         {
@@ -1495,10 +1499,10 @@ ORDER BY DATE(l.date) ASC,
             // Issue #478: 同一日ではチャージ（is_charge=1）を利用より先に表示
             // SQL ORDER BYはフォールバック用（残高チェーン構築失敗時に使用される）
             command.CommandText = @"SELECT ledger_id, use_date, entry_station, exit_station,
-       bus_stops, amount, balance, is_charge, is_point_redemption, is_bus, group_id, rowid
+       bus_stops, amount, balance, is_charge, is_point_redemption, is_bus, group_id, id
 FROM ledger_detail
 WHERE ledger_id = @ledgerId
-ORDER BY use_date ASC, is_charge DESC, is_point_redemption DESC, rowid DESC";
+ORDER BY use_date ASC, is_charge DESC, is_point_redemption DESC, id DESC";
 
             command.Parameters.AddWithValue("@ledgerId", ledgerId);
 
@@ -1548,10 +1552,10 @@ ORDER BY use_date ASC, is_charge DESC, is_point_redemption DESC, rowid DESC";
             // パラメータプレースホルダーを動的生成
             var paramNames = idList.Select((_, i) => $"@id{i}").ToList();
             command.CommandText = $@"SELECT ledger_id, use_date, entry_station, exit_station,
-       bus_stops, amount, balance, is_charge, is_point_redemption, is_bus, group_id, rowid
+       bus_stops, amount, balance, is_charge, is_point_redemption, is_bus, group_id, id
 FROM ledger_detail
 WHERE ledger_id IN ({string.Join(", ", paramNames)})
-ORDER BY ledger_id, use_date ASC, is_charge DESC, is_point_redemption DESC, rowid DESC";
+ORDER BY ledger_id, use_date ASC, is_charge DESC, is_point_redemption DESC, id DESC";
 
             for (int i = 0; i < idList.Count; i++)
             {
@@ -1632,7 +1636,7 @@ ORDER BY ledger_id, use_date ASC, is_charge DESC, is_point_redemption DESC, rowi
         /// </summary>
         /// <remarks>
         /// SELECTの列順序: ledger_id, use_date, entry_station, exit_station,
-        /// bus_stops, amount, balance, is_charge, is_point_redemption, is_bus, group_id, rowid
+        /// bus_stops, amount, balance, is_charge, is_point_redemption, is_bus, group_id, id
         /// </remarks>
         private static LedgerDetail MapToLedgerDetail(DbDataReader reader)
         {
@@ -1649,7 +1653,7 @@ ORDER BY ledger_id, use_date ASC, is_charge DESC, is_point_redemption DESC, rowi
                 IsPointRedemption = !reader.IsDBNull(8) && reader.GetInt32(8) == 1,
                 IsBus = reader.GetInt32(9) == 1,
                 GroupId = reader.IsDBNull(10) ? null : reader.GetInt32(10),
-                // Issue #548: rowidを使って正しい時系列順を保持
+                // Issue #548: ledger_detail.id を使って正しい時系列順を保持
                 SequenceNumber = reader.IsDBNull(11) ? 0 : (int)reader.GetInt64(11)
             };
         }
@@ -1858,7 +1862,7 @@ WHERE card_idm IN ({string.Join(", ", parameters)})";
             // 「統合しました」と報告していた（呼び出し元の競合エラー分岐が到達不能だった）。
             // false を返すとトランザクションは呼び出し元でロールバックされる。
 
-            // 1. ソースの詳細をターゲットに移動（UPDATEでrowid保持）
+            // 1. ソースの詳細をターゲットに移動（UPDATEでid保持）
             //    0 行は競合ではない: 明細を持たない ledger（「新規購入」「○月から繰越」等）が実在するため、
             //    ここでは件数を検証しない。ソースの消滅は手順 3 の DELETE で検出する。
             foreach (var sourceId in sourceIds)
@@ -2013,7 +2017,7 @@ SELECT last_insert_rowid();";
                 idMapping[source.Id] = newId;
             }
 
-            // 2. Detailを元のLedgerに戻す（SequenceNumber=rowidでマッピング）
+            // 2. Detailを元のLedgerに戻す（SequenceNumber=ledger_detail.id でマッピング）
             foreach (var entry in undoData.DetailOriginalLedgerMap)
             {
                 var sequenceNumber = int.Parse(entry.Key);
@@ -2033,15 +2037,19 @@ SELECT last_insert_rowid();";
 
                     using var moveCommand = connection.CreateCommand();
                     moveCommand.Transaction = transaction;
-                    // Issue #1806: rowid だけでなく「いま統合先に属していること」も条件にする。
-                    // ledger_detail は暗黙 rowid（AUTOINCREMENT なし）のため、統合後に統合先の明細が
-                    // 編集（ReplaceDetailsAsync の DELETE + INSERT）されると rowid は振り直され、
-                    // 空いた rowid は無関係な別台帳の明細に再利用され得る。rowid だけで UPDATE すると
+                    // Issue #1806: id だけでなく「いま統合先に属していること」も条件にする。
+                    // 統合後に統合先の明細が編集（ReplaceDetailsAsync の DELETE + INSERT）されると
+                    // その id は空き、無関係な別台帳の明細に再利用され得る。id だけで UPDATE すると
                     // その明細を復活先へ移してしまう（交差破損）。UpdateDetailBusStopsAsync と同じスコープ。
+                    // Issue #2000: この undoData は ledger_merge_history.undo_data_json として
+                    // 永続化され、セッションをまたいで使われる。ledger_detail が暗黙 rowid だった頃は
+                    // 月次 VACUUM（Issue #1482）が値を振り直すため、ここで参照する識別子は
+                    // 「保存した時点の行」を指さなくなっていた（ledger_id の併記でも防げない）。
+                    // Migration_011 で id を明示的な INTEGER PRIMARY KEY にして値を固定している。
                     moveCommand.CommandText =
-                        "UPDATE ledger_detail SET ledger_id = @newLedgerId WHERE rowid = @rowid AND ledger_id = @targetId";
+                        "UPDATE ledger_detail SET ledger_id = @newLedgerId WHERE id = @id AND ledger_id = @targetId";
                     moveCommand.Parameters.AddWithValue("@newLedgerId", newLedgerId);
-                    moveCommand.Parameters.AddWithValue("@rowid", sequenceNumber);
+                    moveCommand.Parameters.AddWithValue("@id", sequenceNumber);
                     moveCommand.Parameters.AddWithValue("@targetId", undoData.OriginalTarget.Id);
 
                     // 0 行は「Undo データが指す明細がもう統合先に無い」＝競合（Issue #1753 の作法）。
@@ -2169,19 +2177,19 @@ VALUES (@mergedAt, @targetLedgerId, @description, @undoData)";
 
             using var command = connection.CreateCommand();
             // Issue #1913: ledger 内の並びは GetDetailsAsync / ReadAndSortDetailsAsync と同じ
-            // 「use_date ASC, is_charge DESC, is_point_redemption DESC, rowid DESC」にする。
-            // rowid は FeliCa 互換で「小さい値ほど新しい」（LedgerDetail.SequenceNumber の XML doc）
-            // ため、rowid 昇順は逆時系列を意味する。唯一の消費側（CsvExportService）は
+            // 「use_date ASC, is_charge DESC, is_point_redemption DESC, id DESC」にする。
+            // id は FeliCa 互換で「小さい値ほど新しい」（LedgerDetail.SequenceNumber の XML doc）
+            // ため、id 昇順は逆時系列を意味する。唯一の消費側（CsvExportService）は
             // LedgerDetailChronologicalSorter で並べ替えるが、残高チェーンを構築できないとき
             // （Balance が null の明細を含む・チェーンが循環する等）は preserveOrderOnFailure=true で
             // この SQL の順序をそのまま出力するため、ここが逆順だと CSV の明細が逆時系列で出る。
             command.CommandText = @"SELECT d.ledger_id, d.use_date, d.entry_station, d.exit_station,
-       d.bus_stops, d.amount, d.balance, d.is_charge, d.is_point_redemption, d.is_bus, d.group_id, d.rowid
+       d.bus_stops, d.amount, d.balance, d.is_charge, d.is_point_redemption, d.is_bus, d.group_id, d.id
 FROM ledger_detail d
 INNER JOIN ledger l ON d.ledger_id = l.id
 WHERE l.date BETWEEN @fromDate AND @toDate
 ORDER BY l.card_idm, l.date, l.id,
-         d.use_date ASC, d.is_charge DESC, d.is_point_redemption DESC, d.rowid DESC";
+         d.use_date ASC, d.is_charge DESC, d.is_point_redemption DESC, d.id DESC";
 
             command.Parameters.AddWithValue("@fromDate", SqliteDateTimeFormat.ToDayStartText(fromDate));
             command.Parameters.AddWithValue("@toDate", SqliteDateTimeFormat.ToDayEndText(toDate));
