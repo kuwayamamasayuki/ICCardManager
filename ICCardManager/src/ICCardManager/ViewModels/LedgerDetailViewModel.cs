@@ -599,9 +599,9 @@ namespace ICCardManager.ViewModels
                 }).ToList();
 
                 // 詳細を置き換え
-                // Issue #1913: ReplaceDetailsAsync は DELETE + INSERT で rowid を再採番するため、
+                // Issue #1913: ReplaceDetailsAsync は DELETE + INSERT で id を再採番するため、
                 // 挿入順がそのまま SequenceNumber の並びになる。LedgerDetail.SequenceNumber の規約は
-                // FeliCa 互換で「小さい rowid ＝ 新しい」なので、時系列昇順（古い順）の Items を
+                // FeliCa 互換で「小さい id ＝ 新しい」なので、時系列昇順（古い順）の Items を
                 // そのまま渡すと規約が反転する。新しい順にしてから渡す（LedgerSplitService と同じ）。
                 // 摘要生成（下の Generate）には昇順のまま渡すため、Reverse は DB 呼び出しにだけ適用する。
                 var success = await _ledgerRepository.ReplaceDetailsAsync(

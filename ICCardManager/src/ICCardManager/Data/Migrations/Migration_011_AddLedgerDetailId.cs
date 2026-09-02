@@ -62,7 +62,12 @@ namespace ICCardManager.Data.Migrations
             }
 
             // 1. 新スキーマのテーブルを作る。列の並び・型・既定値は移行前と同じで、先頭に id を足すだけ。
-            ExecuteNonQuery(connection, transaction, @"CREATE TABLE IF NOT EXISTS ledger_detail_new (
+            //    IF NOT EXISTS は使わない — 前回の中断で ledger_detail_new が残っていた場合、
+            //    その残骸へ INSERT して RENAME で本体を上書きすることになり、失敗が黙って
+            //    「壊れた移行の成功」へ化ける。冪等性は冒頭の HasColumn ガードが担うので、
+            //    ここは先に落として作り直す（作成の失敗はトランザクションごと巻き戻る）。
+            ExecuteNonQuery(connection, transaction, "DROP TABLE IF EXISTS ledger_detail_new");
+            ExecuteNonQuery(connection, transaction, @"CREATE TABLE ledger_detail_new (
     id                  INTEGER PRIMARY KEY,
     ledger_id           INTEGER REFERENCES ledger(id) ON DELETE CASCADE,
     use_date            TEXT,
@@ -103,7 +108,9 @@ FROM ledger_detail");
                 return;
             }
 
-            ExecuteNonQuery(connection, transaction, @"CREATE TABLE IF NOT EXISTS ledger_detail_old (
+            // Up と同じ理由で IF NOT EXISTS を使わない。
+            ExecuteNonQuery(connection, transaction, "DROP TABLE IF EXISTS ledger_detail_old");
+            ExecuteNonQuery(connection, transaction, @"CREATE TABLE ledger_detail_old (
     ledger_id           INTEGER REFERENCES ledger(id) ON DELETE CASCADE,
     use_date            TEXT,
     entry_station       TEXT,

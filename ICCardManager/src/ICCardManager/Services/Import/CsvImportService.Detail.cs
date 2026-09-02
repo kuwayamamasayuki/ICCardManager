@@ -502,8 +502,8 @@ namespace ICCardManager.Services
                 try
                 {
                     // Issue #1913: CSV の明細行は CsvExportService と同じ時系列昇順（古い→新しい）で
-                    // 並ぶ。ReplaceDetailsAsync は DELETE + INSERT で rowid を再採番するため、昇順のまま
-                    // 渡すと LedgerDetail.SequenceNumber の規約（FeliCa 互換で小さい rowid ＝ 新しい）が
+                    // 並ぶ。ReplaceDetailsAsync は DELETE + INSERT で id を再採番するため、昇順のまま
+                    // 渡すと LedgerDetail.SequenceNumber の規約（FeliCa 互換で小さい id ＝ 新しい）が
                     // 反転する。新しい順にしてから渡す（LedgerSplitService / LendingService と同じ）。
                     // 摘要生成・金額再計算（下の Generate / CalculateGroupFinancials）は昇順のまま使う。
                     var success = await _ledgerRepository.ReplaceDetailsAsync(

@@ -968,7 +968,7 @@ namespace ICCardManager.ViewModels
                     //
                     // Issue #1945: 同期は摘要の UPDATE と「同じ論理操作」なので同一 tx に束ねる（#1806）。
                     // 旧実装は commit のあと tx の外で実行し、しかも戻り値を見ていなかったため、
-                    // 履歴詳細の全置換（ReplaceDetailsAsync の DELETE + INSERT）で rowid が振り直されていると
+                    // 履歴詳細の全置換（ReplaceDetailsAsync の DELETE + INSERT）で ledger_detail.id が振り直されていると
                     // 同期が 0 行で素通りし、摘要だけが新しいバス停名で確定して
                     // 6 年保存の台帳が「摘要はバス停名入り・明細は★のまま」と自己矛盾した。
                     if (beforeLedger.Summary != ledger.Summary)
@@ -1022,7 +1022,7 @@ namespace ICCardManager.ViewModels
         /// </remarks>
         /// <returns>
         /// 書き戻す対象が無い場合も含め、明細を更新できた場合 true。
-        /// 影響行数 0（rowid の振り直し等の競合、Issue #1945）の場合 false。
+        /// 影響行数 0（<c>ledger_detail.id</c> の振り直し等の競合、Issue #1945）の場合 false。
         /// </returns>
         private async Task<bool> SyncBusStopsFromSummaryAsync(Ledger ledger, SQLiteTransaction transaction)
         {

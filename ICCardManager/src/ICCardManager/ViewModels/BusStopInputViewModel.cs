@@ -520,7 +520,7 @@ public partial class BusStopInputViewModel : ViewModelBase
                     .ToList();
 
                 // Issue #1945: 戻り値を握りつぶさない。履歴詳細の全置換（ReplaceDetailsAsync の
-                // DELETE + INSERT）で rowid が振り直されていると 0 行になる。
+                // DELETE + INSERT）で id が振り直されていると 0 行になる。
                 var detailsOk = await _ledgerRepository.UpdateDetailBusStopsAsync(
                     ledger.Id, updates, scope.Transaction);
                 if (!detailsOk)

@@ -10,7 +10,7 @@ namespace ICCardManager.Common
     /// </summary>
     /// <remarks>
     /// <para>
-    /// ICカード利用履歴の表示順は、SQLiteのrowidではなく残高チェーンで決定する。
+    /// ICカード利用履歴の表示順は、ledger_detail.idではなく残高チェーンで決定する。
     /// これにより、挿入順序に依存しない安定した時系列表示が可能になる。
     /// </para>
     /// <para>

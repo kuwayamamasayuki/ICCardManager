@@ -16,12 +16,12 @@ paths:
 > `development-conventions.md`（常時ロード）から分割した節をそのまま収録している。他ファイル・コード内コメント・CHANGELOG の「`development-conventions.md` の「○○」」という参照は、本ファイルの同名の節を指す。
 ## 保存順が意味を持つなら、並べ替えを呼び出し元に配らない（Issue #1913）
 
-`ledger_detail` は暗黙 rowid のテーブルで、`LedgerRepository.InsertDetailsAsync` / `ReplaceDetailsAsync` は**渡された順にそのまま INSERT する**（後者は DELETE + INSERT なので rowid が再採番される）。`LedgerDetail.SequenceNumber` の規約は FeliCa 互換で「**小さい rowid ＝ 新しい**」（#548 / #880 / #1822）なので、呼び出し元は時系列昇順（古い→新しい）の並びを `Reverse()` してから渡す必要がある。この「呼び出し元ごとに同じ並べ替えを配る」形が、**3 経路での配り忘れ**（履歴詳細ダイアログの保存・詳細 CSV の取り込み・CSV からの新規 Ledger 作成）を生んだ。
+`ledger_detail` の主キー `id` は `AUTOINCREMENT` を持たず（#2000。それ以前は暗黙 rowid だった）、`LedgerRepository.InsertDetailsAsync` / `ReplaceDetailsAsync` は**渡された順にそのまま INSERT する**（後者は DELETE + INSERT なので `id` が再採番される）。`LedgerDetail.SequenceNumber` の規約は FeliCa 互換で「**小さい `id` ＝ 新しい**」（#548 / #880 / #1822）なので、呼び出し元は時系列昇順（古い→新しい）の並びを `Reverse()` してから渡す必要がある。この「呼び出し元ごとに同じ並べ替えを配る」形が、**3 経路での配り忘れ**（履歴詳細ダイアログの保存・詳細 CSV の取り込み・CSV からの新規 Ledger 作成）を生んだ。
 
 - **本システムが明細を保持している並びは例外なく時系列昇順**（`GetByIdAsync` の残高チェーンソート、`SplitAtChargeBoundaries`、`CsvExportService` の出力順）。つまり「そのまま渡す」は**常に**規約の反転を意味する。**規約の向きと、手元にある唯一の並びが逆なら、その規約は配って守れない**
 - **症状が書き込みの直後に出ないと、配り忘れは長く残る**。保存時点の摘要はメモリ上の古い `SequenceNumber` から生成されるため正しく、**再読込のあと**で摘要のブロック順が逆になる（`SummaryGenerator.SortChronologically` は同一日付内で `SequenceNumber` 降順をタイブレークに使う。#1904）。**「保存した画面で確かめた」は、保存順の規約の検証にならない**
 - **並べ替えは DB 呼び出しにだけ適用し、同じメソッド内の摘要生成・金額再計算には元の並びを渡す**。回帰は「渡した並びが逆順であること」と「生成された摘要のブロック順は昇順のままであること」を**対で**表明する — 前者だけだと**摘要ごと逆順にした**実装でも緑になる
-- **モックでは検証できない**。rowid の再採番は DELETE + INSERT で初めて起きるため、実害（再読込後の逆転）は実 SQLite を通さないと再現しない。`LedgerDetailSaveOrderingIntegrationTests` が参考実装
+- **モックでは検証できない**。`id` の再採番は DELETE + INSERT で初めて起きるため、実害（再読込後の逆転）は実 SQLite を通さないと再現しない。`LedgerDetailSaveOrderingIntegrationTests` が参考実装
 - **回帰は全呼び出しの静的検査で固定する**（`LedgerDetailInsertOrderConventionTests`）。個別の挙動テストは経路の追加に追随できない（`error-messages.md` #1764）。検査は `TestSourceInspection.ExtractInvocationArguments` で**引数リスト全体**を切り出し、引数ごとに判定する（呼び出しが複数行にまたがるため行単位の grep では見られない。#1852）。転送メソッド（`LendingService.InsertDetails`）のような正当な例外は理由付きで許可し、**許可件数も表明する**（許可が静かに増えるのを防ぐ）
 - **「リポジトリ側で反転して手段を 1 つに寄せる」（#1763）が常に取れるとは限らない**。#1913 では参照が 179 か所あり貸出のホットパスを含むため、契約の反転は退行リスクだけが大きいと判断して見送った。**寄せられないなら、配り忘れを検出する検査を同時に用意する**
 
