@@ -210,8 +210,9 @@ namespace ICCardManager.Common
         /// </para>
         /// <para>
         /// 遡るのは <see cref="Services.LedgerOrderHelper.RequiresSeed"/> が真である間だけなので、
-        /// 通常のデータでは 1 日分（1 クエリ）で止まる。上限に達してもなお確定できない場合は
-        /// シード無しで解決し、従来どおり除外法・id 順フォールバックへ落ちる（悪化はしない）。
+        /// 通常のデータでは 1 日分（1 クエリ）で止まる。上限に達した場合は、それまでに積んだ日を
+        /// シード無しで古い順に解決する（最も古い日だけが除外法・id 順フォールバックに委ねられる形で、
+        /// 1 行だけを id 順で取っていた従来より悪化することはない）。
         /// </para>
         /// </remarks>
         public const int MaxBalanceChainSeedLookbackDays = 5;

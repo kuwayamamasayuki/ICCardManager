@@ -107,13 +107,17 @@ public class LedgerOrderHelperRequiresSeedTests
     /// ここが食い違うと、開始点が確定している日でも無駄に遡ることになる。
     /// </remarks>
     [Fact]
-    public void RequiresSeed_新規購入レコードがある日は循環していても不要であること()
+    public void RequiresSeed_新規購入レコードがある日は開始点が決まらない形でも不要であること()
     {
+        // 新規購入(balance_before = 0 → 1,696) と 払戻し(1,696 → 0) は互いの Balance を
+        // balance_before に持つため、特殊レコードを考慮しない判定だと候補 0 件（＝要シード）になる。
+        // 特殊レコードの分岐を消した実装で赤くなることを実測している
+        //（前の版は新規購入の balance_before = 0 がどのレコードの Balance にも無く、
+        //   分岐が無くても候補 1 件に落ち着いていたため、分岐を消しても緑だった）。
         var records = new[]
         {
             Ledger("新規購入", income: 1696, expense: 0, balance: 1696),
-            Ledger("ポイント還元", income: 240, expense: 0, balance: 1696),
-            Ledger("鉄道（博多～天神）", income: 0, expense: 240, balance: 1456)
+            Ledger("払戻しによる払出", income: 0, expense: 1696, balance: 0)
         };
 
         LedgerOrderHelper.RequiresSeed(records).Should().BeFalse();

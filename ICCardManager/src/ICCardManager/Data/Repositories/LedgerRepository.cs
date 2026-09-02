@@ -720,7 +720,17 @@ ORDER BY date ASC, id ASC";
         /// <see cref="AppConstants.MaxBalanceChainSeedLookbackDays"/> 日で打ち切る。
         /// **「複数行あるか」ではなく「開始点を一意に決められないか」で遡る**ので、
         /// 通常のデータでは 1 日分（1 クエリ）で止まる。
-        /// 上限で打ち切った場合はシード無しで解決するため、従来挙動（除外法・id 順）へ戻るだけで悪化しない。
+        /// 上限で打ち切った場合は、それまでに積んだ日をシード無しで古い順に解決する
+        /// （最も古い日だけが除外法・id 順フォールバックに委ねられる形で、
+        ///  1 行だけを id 順で取っていた従来より悪化することはない）。
+        /// </para>
+        /// <para>
+        /// なお貸出中プレースホルダ（`Income = Expense = 0`）は `balance_before` が自身の `Balance` と
+        /// 一致する自己ループのため開始点の候補にならず、シード日に残っていると
+        /// <see cref="LedgerOrderHelper.RequiresSeed"/> が真になって余分に遡る
+        /// （<paramref name="excludeLentRecords"/> が false の経路のみ）。返却時に物理削除されるので
+        /// 「その日が最新日でないのにプレースホルダが残っている」形は稀であり、
+        /// 上限で頭打ちになるため実害は無いが、「通常は 1 クエリ」の例外にあたる。
         /// </para>
         /// </remarks>
         /// <param name="connection">リース済みの接続</param>

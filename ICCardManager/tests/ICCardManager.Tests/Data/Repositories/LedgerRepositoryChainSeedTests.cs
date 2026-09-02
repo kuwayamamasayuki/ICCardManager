@@ -137,6 +137,50 @@ public class LedgerRepositoryChainSeedTests : IDisposable
     }
 
     /// <summary>
+    /// シードを必要とする日が 2 日続く場合、更に前の日まで遡って古い順に解決すること。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// 遡りが 1 日で止まる形（前日がシードを必要としない）だけを固定すると、
+    /// <b>複数日をつなぐ処理そのものが検査されない</b>。実際、この表明が無いと
+    /// ①解決ループを新しい日から回す（シードの伝播方向を逆にする）②上限を 1 日にする、
+    /// のどちらの変異でも全テストが緑になる（コードレビューで検出）。
+    /// </para>
+    /// <para>
+    /// 形状は 3 日とも実在するもので構成する。3/8 は id 逆転（Issue #837）、3/9 と 3/10 は
+    /// 循環（Issue #1004）。3/8 は開始点が一意に決まるのでそこで遡りが止まる。
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public async Task GetLatestLedgerAsync_シードを要する日が連続しても古い日から順に解決すること()
+    {
+        // Arrange
+        // 3/8（Issue #837 の id 逆転）: 時系列は チャージ(1,000→2,000) → 利用(2,000→1,790)。
+        // 利用行の id が小さい。開始点はチャージ行（balance_before = 1,000）で一意に決まるためシード不要。
+        await InsertAsync(new DateTime(2026, 3, 8), "鉄道（博多～天神）", expense: 210, balance: 1790);
+        await InsertAsync(new DateTime(2026, 3, 8), "チャージ", income: 1000, balance: 2000);
+
+        // 3/9（循環）: 時系列は チャージ(1,790→2,000) → 利用(2,000→1,790)。利用行の id が小さい。
+        // シード 1,790 なら最終 1,790、シード無しなら id 順フォールバックで最終 2,000 と分かれる。
+        await InsertAsync(new DateTime(2026, 3, 9), "鉄道（博多～天神）", expense: 210, balance: 1790);
+        await InsertAsync(new DateTime(2026, 3, 9), "チャージ", income: 210, balance: 2000);
+
+        // 3/10（循環）: 同上。シード 1,790 なら最終 1,790、シード 2,000 なら最終 2,000。
+        await InsertAsync(new DateTime(2026, 3, 10), "鉄道（博多～天神）", expense: 210, balance: 1790);
+        await InsertAsync(new DateTime(2026, 3, 10), "チャージ", income: 210, balance: 2000);
+
+        // Act
+        var result = await _repository.GetLatestLedgerAsync(TestCardIdm);
+
+        // Assert
+        // 3/8 → 1,790 を 3/9 のシードに、3/9 → 1,790 を 3/10 のシードにして初めて 1,790 になる。
+        // 上限 1 日だと 3/9 がシード無しで 2,000 になり、3/10 も 2,000 を返す。
+        result.Should().NotBeNull();
+        result!.Balance.Should().Be(
+            1790, "シードを要する日が続くときは、確定できる日まで遡って古い順に解決すべき");
+    }
+
+    /// <summary>
     /// 開始点を確定できない日が遡り上限を超えて連続しても、打ち切って結果を返すこと（無限に遡らない）。
     /// </summary>
     /// <remarks>
