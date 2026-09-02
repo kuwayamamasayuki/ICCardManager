@@ -181,7 +181,9 @@ public class SettingsRepositorySetConcurrencyTests : IDisposable
                 using (var command = lease.Connection.CreateCommand())
                 {
                     command.Transaction = transaction;
-                    command.CommandText = "DELETE FROM ledger WHERE date(date) < date('now', '-6 years', 'localtime')";
+                    // 本番の CleanupOldDataInternal と同じ SQL を使う（列を date() で包まない。
+                    // 包むと idx_ledger_date が使えず、この模擬も本番と別の実行計画になる）
+                    command.CommandText = "DELETE FROM ledger WHERE date < date('now', '-6 years', 'localtime')";
                     command.ExecuteNonQuery();
                 }
 

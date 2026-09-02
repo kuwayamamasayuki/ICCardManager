@@ -470,7 +470,13 @@ public partial class ReportViewModel : ViewModelBase
         catch (Exception ex)
         {
             ErrorDialogHelper.LogException(ex, "帳票の出力状況の確認");
-            ExportStatusSummary = "出力状況を確認できませんでした。出力先フォルダに到達できるか確認してください。";
+
+            // 判定できなかったときに前回の「出力済み」バッジを残さない。出力先や年月を変えた直後に
+            // 失敗すると、残ったバッジは「別のフォルダ・別の月の結果」であり、当月まだ出力していない
+            // カードを出力済みと誤認させて物品出納簿が 1 枚欠ける。到達できないフォルダを
+            // 「未出力」ではなく「判定不能」で返す ReportExportStatusService と同じ扱いへ揃える。
+            ApplyExportStatuses(Array.Empty<ReportExportStatus>());
+            ExportStatusSummary = "出力状況を確認できませんでした。出力先フォルダと年月を確認し、「出力状況を更新」をやり直してください。";
             return;
         }
 
