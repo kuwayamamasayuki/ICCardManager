@@ -1516,12 +1516,17 @@ ON CONFLICT(key) DO UPDATE SET value = excluded.value";
 
                 using var ledgerCommand = connection.CreateCommand();
                 ledgerCommand.Transaction = transaction;
-                ledgerCommand.CommandText = "DELETE FROM ledger WHERE date(date) < date('now', '-6 years', 'localtime')";
+                // 列を date() で包むと idx_ledger_date / idx_log_timestamp が使えず全件走査になる
+                //（EXPLAIN QUERY PLAN: SCAN → SEARCH USING INDEX）。date / timestamp は
+                // SqliteDateTimeFormat の ISO テキスト（yyyy-MM-dd HH:mm:ss）なので、日付だけの
+                // しきい値との文字列比較で同じ結果になる（しきい値当日の行は "yyyy-MM-dd 00:00:00" >
+                // "yyyy-MM-dd" で残り、date(date) < … と一致）。しきい値の評価は従来どおり SQLite に委ねる。
+                ledgerCommand.CommandText = "DELETE FROM ledger WHERE date < date('now', '-6 years', 'localtime')";
                 var ledgerCount = ledgerCommand.ExecuteNonQuery();
 
                 using var logCommand = connection.CreateCommand();
                 logCommand.Transaction = transaction;
-                logCommand.CommandText = "DELETE FROM operation_log WHERE date(timestamp) < date('now', '-6 years', 'localtime')";
+                logCommand.CommandText = "DELETE FROM operation_log WHERE timestamp < date('now', '-6 years', 'localtime')";
                 var logCount = logCommand.ExecuteNonQuery();
 
                 transaction.Commit();

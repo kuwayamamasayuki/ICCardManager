@@ -422,27 +422,33 @@ namespace ICCardManager.Services
             }
             catch (UnauthorizedAccessException ex)
             {
+                // #1614: 生の ex.Message は職員へ出さず、技術的詳細はログへ残す（#1817「UI 文言とログを対で数える」）。
+                // 本サービスは ILogger を持たないため ErrorDialogHelper.LogException を使う。
+                ErrorDialogHelper.LogException(ex, "帳票ファイルの保存");
                 return ReportGenerationResult.FailureResult(
                     "ファイルの保存に失敗しました",
-                    $"出力先フォルダへのアクセス権限がありません。別のフォルダを指定するか、管理者に連絡してください。\n\n詳細: {ex.Message}");
+                    $"出力先フォルダへのアクセス権限がありません。別のフォルダを指定するか、管理者に連絡してください。\n\n詳細: {ExceptionMessageFormatter.ToReason(ex)}");
             }
             catch (DirectoryNotFoundException ex)
             {
+                ErrorDialogHelper.LogException(ex, "帳票ファイルの保存");
                 return ReportGenerationResult.FailureResult(
                     "ファイルの保存に失敗しました",
-                    $"出力先フォルダが見つかりません。フォルダのパスを確認してください。\n\n詳細: {ex.Message}");
+                    $"出力先フォルダが見つかりません。フォルダのパスを確認してください。\n\n詳細: {ExceptionMessageFormatter.ToReason(ex)}");
             }
             catch (IOException ex)
             {
+                ErrorDialogHelper.LogException(ex, "帳票ファイルの保存");
                 return ReportGenerationResult.FailureResult(
                     "ファイルの保存に失敗しました",
-                    $"出力先ファイルに書き込めません。ファイルが他のアプリケーションで開かれている可能性があります。\n\n詳細: {ex.Message}");
+                    $"出力先ファイルに書き込めません。ファイルが他のアプリケーションで開かれている可能性があります。\n\n詳細: {ExceptionMessageFormatter.ToReason(ex)}");
             }
             catch (Exception ex)
             {
+                ErrorDialogHelper.LogException(ex, "帳票の作成");
                 return ReportGenerationResult.FailureResult(
                     "帳票の作成に失敗しました",
-                    $"予期しないエラーが発生しました。\n\n詳細: {ex.Message}");
+                    $"予期しないエラーが発生しました。\n\n詳細: {ExceptionMessageFormatter.ToReason(ex)}");
             }
         }
 
@@ -670,18 +676,22 @@ namespace ICCardManager.Services
             }
             catch (UnauthorizedAccessException ex)
             {
+                // #1614 / #1817: 生の ex.Message は出さず、ログへ残す（上の CreateMonthlyReportAsync と同じ形）
+                ErrorDialogHelper.LogException(ex, "帳票の出力先フォルダの作成");
                 return BatchReportGenerationResult.DirectoryCreationFailed(
-                    $"出力先フォルダへのアクセス権限がありません。別のフォルダを指定するか、管理者に連絡してください。\n\n詳細: {ex.Message}");
+                    $"出力先フォルダへのアクセス権限がありません。別のフォルダを指定するか、管理者に連絡してください。\n\n詳細: {ExceptionMessageFormatter.ToReason(ex)}");
             }
             catch (IOException ex)
             {
+                ErrorDialogHelper.LogException(ex, "帳票の出力先フォルダの作成");
                 return BatchReportGenerationResult.DirectoryCreationFailed(
-                    $"出力先フォルダの作成に失敗しました。パスを確認してください。\n\n詳細: {ex.Message}");
+                    $"出力先フォルダの作成に失敗しました。パスを確認してください。\n\n詳細: {ExceptionMessageFormatter.ToReason(ex)}");
             }
             catch (Exception ex)
             {
+                ErrorDialogHelper.LogException(ex, "帳票の出力先フォルダの作成");
                 return BatchReportGenerationResult.DirectoryCreationFailed(
-                    $"出力先フォルダの作成中に予期しないエラーが発生しました。\n\n詳細: {ex.Message}");
+                    $"出力先フォルダの作成中に予期しないエラーが発生しました。\n\n詳細: {ExceptionMessageFormatter.ToReason(ex)}");
             }
 
             foreach (var cardIdm in cardIdms)

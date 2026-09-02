@@ -40,9 +40,11 @@ namespace ICCardManager.Services
             }
             catch (System.Exception ex)
             {
+                // #1614 / #1817: 生の ex.Message は出さず、技術的詳細はログへ残す（本クラスは ILogger を持たない）
+                ErrorDialogHelper.LogException(ex, "エクスプローラーの起動");
                 return SafeFileLaunchResult.Fail(
                     "エクスプローラーの起動に失敗しました。" +
-                    $"原因: {ex.Message}。" +
+                    $"原因: {ExceptionMessageFormatter.ToReason(ex)}" +
                     "エクスプローラーが利用可能な環境か確認してください。");
             }
         }
@@ -78,9 +80,10 @@ namespace ICCardManager.Services
             }
             catch (System.Exception ex)
             {
+                ErrorDialogHelper.LogException(ex, "ファイルを開く");
                 return SafeFileLaunchResult.Fail(
                     "ファイルを開けませんでした。" +
-                    $"原因: {ex.Message}。" +
+                    $"原因: {ExceptionMessageFormatter.ToReason(ex)}" +
                     "対応するアプリ（Excel 等）がインストールされているか確認してください。");
             }
         }
