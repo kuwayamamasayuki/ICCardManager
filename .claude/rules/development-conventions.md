@@ -15,6 +15,8 @@
 |---|---|
 | DB設計原則 | `db-write-conventions.md` |
 | 日付の整形・解析は文化圏から独立させる（Issue #1985） | `db-write-conventions.md` |
+| WHERE で列を関数に包まない（Issue #1834 / #1996） | `db-write-conventions.md` |
+| 監査ログの JSON を手組みしない（Issue #1996） | `db-write-conventions.md` |
 | 保存順が意味を持つなら、並べ替えを呼び出し元に配らない（Issue #1913） | `service-conventions.md` |
 | 「規約どおりの並び」を、規約の例外がある場所で唯一の根拠にしない（Issue #1932） | `service-conventions.md` |
 | SQLite の接続文字列は 1 か所で組み立てる（Issue #1924） | `service-conventions.md` |
