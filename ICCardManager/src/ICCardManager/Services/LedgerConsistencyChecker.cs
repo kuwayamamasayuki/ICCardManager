@@ -195,7 +195,7 @@ namespace ICCardManager.Services
         public int LedgerId { get; set; }
 
         /// <summary>
-        /// 詳細のシーケンス番号（rowid）
+        /// 詳細のシーケンス番号（id）
         /// </summary>
         public int SequenceNumber { get; set; }
 

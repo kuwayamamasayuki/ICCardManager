@@ -80,11 +80,18 @@ namespace ICCardManager.Models
         /// </summary>
         /// <remarks>
         /// <para>
-        /// Issue #548: チャージが間に入っても正しい時系列順を保持するため。DB の rowid から取得する。
+        /// Issue #548: チャージが間に入っても正しい時系列順を保持するため。DB の
+        /// <c>ledger_detail.id</c> から取得する。
+        /// </para>
+        /// <para>
+        /// Issue #2000: この値は<b>行の同定にも使う</b>（バス停名の更新・統合の取り消し）。
+        /// 元は SQLite の暗黙 rowid だったが、暗黙 rowid は永続的な識別子ではなく月次 VACUUM
+        /// （Issue #1482）で振り直され得たため、Migration_011 で明示的な
+        /// <c>id INTEGER PRIMARY KEY</c>（rowid の別名）へ移した。値は移行時にそのまま引き継いでいる。
         /// </para>
         /// <para>
         /// <b>小さい値ほど新しい（＝後に利用した）</b>。交通系ICカードの利用履歴サービスが
-        /// 新しい順（block 0 ＝ 最新）で返す並びをそのまま rowid へ写すためで、
+        /// 新しい順（block 0 ＝ 最新）で返す並びをそのまま id へ写すためで、
         /// <see cref="ICCardManager.Infrastructure.CardReader.FelicaCardReader"/> の読み取り順に由来する
         /// FeliCa 互換の規約である（Issue #880）。<c>LendingService</c> は DB へ挿入する際に
         /// 時系列順（古い順）の並びを <c>Reverse()</c> してこの順序を維持している。

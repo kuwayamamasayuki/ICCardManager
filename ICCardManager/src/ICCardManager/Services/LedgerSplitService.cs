@@ -112,10 +112,10 @@ namespace ICCardManager.Services
                 originalLedger.Expense = firstExpense;
                 originalLedger.Balance = firstBalance;
 
-                // Issue #880: 挿入順を逆にして、FeliCa互換のrowid順序を維持
-                // ReplaceDetailsAsync はDELETE+INSERTのため、rowidが再採番される
-                // DBは rowid DESC で時系列表示（大きいrowid＝古い＝先に表示）するので、
-                // 新しい明細から先に挿入して小さいrowidを割り当てる必要がある
+                // Issue #880: 挿入順を逆にして、FeliCa互換のid の順序を維持
+                // ReplaceDetailsAsync はDELETE+INSERTのため、id が再採番される
+                // DBは id DESC で時系列表示（大きい id＝古い＝先に表示）するので、
+                // 新しい明細から先に挿入して小さいid を割り当てる必要がある
                 var detailsReplaced = await _ledgerRepository.ReplaceDetailsAsync(
                     originalLedger.Id, firstGroup.AsEnumerable().Reverse(), scope.Transaction).ConfigureAwait(false);
 
@@ -175,7 +175,7 @@ namespace ICCardManager.Services
 
                     var newId = await _ledgerRepository.InsertAsync(newLedger, scope.Transaction).ConfigureAwait(false);
                     newLedger.Id = newId;
-                    // Issue #880: 挿入順を逆にしてFeliCa互換のrowid順序を維持（上記コメント参照）
+                    // Issue #880: 挿入順を逆にしてFeliCa互換のid の順序を維持（上記コメント参照）
                     await _ledgerRepository.InsertDetailsAsync(newId, groupDetails.AsEnumerable().Reverse(), scope.Transaction).ConfigureAwait(false);
 
                     // Issue #1959: 監査ログの AfterData に実際の明細を載せる（既定の空リストのままにしない）

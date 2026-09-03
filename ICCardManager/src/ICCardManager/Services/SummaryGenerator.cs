@@ -903,19 +903,19 @@ namespace ICCardManager.Services
         /// </summary>
         /// <remarks>
         /// <para>
-        /// Issue #548, #880: FeliCa互換でrowid（=SequenceNumber）が小さいほど新しい（後に利用した）。
-        /// DESCで大きいrowid（古い）を先にして時系列順に。
+        /// Issue #548, #880: FeliCa互換でid（=SequenceNumber）が小さいほど新しい（後に利用した）。
+        /// DESCで大きいid（古い）を先にして時系列順に。
         /// SequenceNumberが0（未設定）の場合はBalance降順を使用。
         /// </para>
         /// <para>
-        /// Issue #1904（コードレビュー指摘）: 第一キーは rowid ではなく UseDate。
-        /// 単一バッチ（1回の返却で読み取った履歴）では日付昇順と rowid 降順が一致するため
-        /// 等価だが、**統合済み台帳（Issue #837 / #1458）では別バッチ由来の rowid が日付と
-        /// 無関係に交錯し得る**。日付をまたぐ統合行で rowid を第一キーにすると、摘要の
-        /// ブロック順・バス停対応付けが日付と矛盾する。同一日付内は従来どおり rowid 降順が
+        /// Issue #1904（コードレビュー指摘）: 第一キーは id ではなく UseDate。
+        /// 単一バッチ（1回の返却で読み取った履歴）では日付昇順と id 降順が一致するため
+        /// 等価だが、**統合済み台帳（Issue #837 / #1458）では別バッチ由来の id が日付と
+        /// 無関係に交錯し得る**。日付をまたぐ統合行で id を第一キーにすると、摘要の
+        /// ブロック順・バス停対応付けが日付と矛盾する。同一日付内は従来どおり id 降順が
         /// 第一（同日の時刻はすべて 00:00 で保存され、残高チェーンは循環し得るため。
         /// business-logic.md「同一日内の順序は id では決まらない」の裏面として、同日内の
-        /// タイブレークは rowid が最も強い）。
+        /// タイブレークは id が最も強い）。
         /// </para>
         /// </remarks>
         internal static List<LedgerDetail> SortChronologically(List<LedgerDetail> trips)

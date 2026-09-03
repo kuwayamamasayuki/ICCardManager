@@ -289,7 +289,7 @@ namespace ICCardManager.Services
                 };
 
                 // Issue #964: LedgerId単位で残高チェーンによる時系列ソートを適用
-                // SequenceNumber（rowid）順はFeliCa循環バッファの境界で不正確になるため、
+                // SequenceNumber（id）順はFeliCa循環バッファの境界で不正確になるため、
                 // 残高チェーンで確実な時系列順を得る
                 var sortedDetails = details
                     .GroupBy(d => d.LedgerId)

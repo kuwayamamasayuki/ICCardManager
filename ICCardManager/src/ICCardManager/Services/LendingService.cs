@@ -1116,7 +1116,7 @@ namespace ICCardManager.Services
                     // チャージ詳細も登録しないと重複チェック（GetExistingDetailKeysAsync）で
                     // 検出されず、次回返却時にチャージが再処理されてしまう
                     //
-                    // Issue #1822: 挿入順は「チャージ → 利用」で、rowid ベースの SequenceNumber は
+                    // Issue #1822: 挿入順は「チャージ → 利用」で、id ベースの SequenceNumber は
                     // 利用側が大きくなる。これは LedgerDetail.SequenceNumber の既定規約
                     // （FeliCa 互換で小さい値ほど新しい。下の通常経路が Reverse() で維持している）の
                     // 例外にあたる。残高不足マージで作る台帳の残高は上の mergedLedger.Balance で
@@ -1270,7 +1270,7 @@ namespace ICCardManager.Services
 
                             // 1. 新しい詳細を既存レコードに追加
                             // Issue #880互換: SplitAtChargeBoundariesが時系列順（古い順）で返すため、
-                            // 逆順にしてFeliCa互換のrowid順序を維持（小さいrowid＝新しい）
+                            // 逆順にしてFeliCa互換のid の順序を維持（小さい id＝新しい）
                             await InsertDetails(existingUsageLedger.Id, usageDetails.AsEnumerable().Reverse()).ConfigureAwait(false);
 
                             // 2. 全詳細を再読み込み
@@ -1398,7 +1398,7 @@ namespace ICCardManager.Services
                             var ledgerId = await InsertLedger(usageLedger).ConfigureAwait(false);
                             usageLedger.Id = ledgerId;
 
-                            // Issue #880互換: 挿入順を逆にしてFeliCa互換のrowid順序を維持
+                            // Issue #880互換: 挿入順を逆にしてFeliCa互換のid の順序を維持
                             await InsertDetails(ledgerId, usageDetails.AsEnumerable().Reverse()).ConfigureAwait(false);
 
                             createdLedgers.Add(usageLedger);

@@ -316,7 +316,7 @@ namespace ICCardManager.Services
             var regeneratedSummary = _summaryGenerator.Generate(sortedDetailsForSummary);
             target.Summary = !string.IsNullOrEmpty(regeneratedSummary) ? regeneratedSummary : target.Summary;
 
-            // 一時再採番を戻す（Issue #1979）。DB の SequenceNumber は rowid 由来で
+            // 一時再採番を戻す（Issue #1979）。DB の SequenceNumber は id 由来で
             // MergeLedgersAsync は ledger_detail を再親付けするだけなので変化しない。
             for (int i = 0; i < sortedDetailsForSummary.Count; i++)
             {
@@ -453,7 +453,7 @@ namespace ICCardManager.Services
                         {
                             Success = false,
                             // 復元の 0 行は「Undo データが指す明細・統合先がもう無い」。統合後の編集（明細の
-                            // 保存は DELETE + INSERT で rowid が変わる）・分割・削除、または他 PC の先行取り消し。
+                            // 保存は DELETE + INSERT で id が変わる）・分割・削除、または他 PC の先行取り消し。
                             ErrorMessage = "統合の取り消しに失敗しました。統合後にこの履歴の内容が編集・分割・削除されたか、" +
                                            "他のPCまたは他の操作で先に取り消された可能性があります。" +
                                            "画面を最新の状態に更新して履歴を確認してください。"
@@ -611,8 +611,8 @@ namespace ICCardManager.Services
         /// <list type="number">
         /// <item><description>
         /// <c>UseDate</c> の日付で昇順にグループ化する（日付なしは末尾）。
-        /// Issue #1904 のとおり第一キーは rowid ではなく日付 —
-        /// 統合済み台帳では別バッチ由来の rowid が日付と無関係に交錯する。
+        /// Issue #1904 のとおり第一キーは id ではなく日付 —
+        /// 統合済み台帳では別バッチ由来の id が日付と無関係に交錯する。
         /// </description></item>
         /// <item><description>
         /// 同一日内は残高チェーンで解決する（<c>LedgerDetailChronologicalSorter</c>。
