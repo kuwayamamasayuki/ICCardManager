@@ -2316,9 +2316,9 @@ public class MainViewModelTests : IDisposable
         // internalフィールドへ直接アクセスできないため、リフレクションで設定
         var field = typeof(MainViewModel).GetField("_balanceInconsistencies",
             System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-        field.SetValue(_viewModel, new Dictionary<int, (int ExpectedBalance, int ActualBalance)>
+        field.SetValue(_viewModel, new Dictionary<int, (int ExpectedBalance, int ActualBalance, bool IsInitialBalanceCorrection)>
         {
-            { 2, (900, 800) }
+            { 2, (900, 800, false) }
         });
 
         // Act
@@ -2403,7 +2403,7 @@ public class MainViewModelTests : IDisposable
 
         var markers = MainViewModel.BuildInconsistencyMarkers(result);
 
-        markers.Should().ContainKey(1).WhoseValue.Should().Be((3000, 5000), "期待値＝逆算した残高 / 実際＝記録されている残高");
+        markers.Should().ContainKey(1).WhoseValue.Should().Be((3000, 5000, true), "期待値＝逆算した残高 / 実際＝記録されている残高 / 訂正案由来");
         markers.Should().NotContainKey(2, "チェーンが切れた側の行は正しい行なので強調しない");
     }
 
@@ -2417,7 +2417,7 @@ public class MainViewModelTests : IDisposable
 
         var markers = MainViewModel.BuildInconsistencyMarkers(result);
 
-        markers.Should().ContainKey(3).WhoseValue.Should().Be((2530, 2000));
+        markers.Should().ContainKey(3).WhoseValue.Should().Be((2530, 2000, false));
         markers.Should().NotContainKey(1);
     }
 
@@ -2428,7 +2428,7 @@ public class MainViewModelTests : IDisposable
         _viewModel.HistoryLedgers.Add(new LedgerDto { Id = 2, Summary = "鉄道（天神～博多）", Expense = 210, Balance = 2790 });
         var field = typeof(MainViewModel).GetField("_balanceInconsistencies",
             System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-        field.SetValue(_viewModel, new Dictionary<int, (int ExpectedBalance, int ActualBalance)> { { 1, (3000, 5000) } });
+        field.SetValue(_viewModel, new Dictionary<int, (int ExpectedBalance, int ActualBalance, bool IsInitialBalanceCorrection)> { { 1, (3000, 5000, true) } });
 
         _viewModel.ApplyBalanceInconsistencyMarkers();
 
@@ -2447,12 +2447,44 @@ public class MainViewModelTests : IDisposable
         _viewModel.HistoryLedgers.Add(new LedgerDto { Id = 1, Summary = SummaryGenerator.GetMidYearCarryoverSummary(5), Income = 0, Balance = 8000 });
         var field = typeof(MainViewModel).GetField("_balanceInconsistencies",
             System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-        field.SetValue(_viewModel, new Dictionary<int, (int ExpectedBalance, int ActualBalance)> { { 1, (7500, 8000) } });
+        field.SetValue(_viewModel, new Dictionary<int, (int ExpectedBalance, int ActualBalance, bool IsInitialBalanceCorrection)> { { 1, (7500, 8000, true) } });
 
         _viewModel.ApplyBalanceInconsistencyMarkers();
 
         _viewModel.HistoryLedgers[0].BalanceInconsistencyMessage.Should().Contain("残額を 7,500円")
             .And.NotContain("受入と残額");
+    }
+
+    /// <summary>
+    /// 対の表明: 文言の分岐は摘要ではなくマーカーのフラグで決まる。導入行の摘要を持つ行に
+    /// 通常経路（前行からの前方計算）でマーカーが付いたとき、その期待値を「逆算した残高」と
+    /// 偽って案内してはならない（コードレビュー指摘）。
+    /// </summary>
+    [Fact]
+    public void ApplyBalanceInconsistencyMarkers_訂正案由来でなければ導入行の摘要でも通常の文言にすること()
+    {
+        _viewModel.HistoryLedgers.Add(new LedgerDto { Id = 5, Summary = "新規購入", Income = 3000, Balance = 3000 });
+        var field = typeof(MainViewModel).GetField("_balanceInconsistencies",
+            System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+        field.SetValue(_viewModel, new Dictionary<int, (int ExpectedBalance, int ActualBalance, bool IsInitialBalanceCorrection)> { { 5, (2800, 3000, false) } });
+
+        _viewModel.ApplyBalanceInconsistencyMarkers();
+
+        _viewModel.HistoryLedgers[0].BalanceInconsistencyMessage.Should().Contain("期待値 2,800円")
+            .And.NotContain("導入時の残額");
+    }
+
+    /// <summary>
+    /// 警告クリックで複数月を表示したとき、期間ラベルが開始月だけにならないこと（コードレビュー指摘）。
+    /// 通常の暦月表示は従来どおり開始月だけ。
+    /// </summary>
+    [Fact]
+    public void FormatHistoryPeriod_開始月と終了月が異なれば範囲で表示し同じ月なら開始月だけを表示すること()
+    {
+        MainViewModel.FormatHistoryPeriod(new DateTime(2025, 4, 1), new DateTime(2026, 9, 3))
+            .Should().Be("2025年4月～2026年9月");
+        MainViewModel.FormatHistoryPeriod(new DateTime(2026, 9, 1), new DateTime(2026, 9, 3))
+            .Should().Be("2026年9月");
     }
 
     /// <summary>
@@ -2478,6 +2510,10 @@ public class MainViewModelTests : IDisposable
 
         _viewModel.HistoryFromDate.Should().Be(new DateTime(2025, 4, 1), "導入行の日付から表示する");
         _viewModel.HistoryToDate.Should().Be(DateTime.Today);
+        _viewModel.HistoryPeriodDisplay.Should().Be(MainViewModel.FormatHistoryPeriod(new DateTime(2025, 4, 1), DateTime.Today),
+            "複数月を表示していることがラベルから分かること");
+        _ledgerRepositoryMock.Verify(r => r.GetByDateRangeAsync(cardIdm, It.Is<DateTime>(d => d.Year == 2000), It.IsAny<DateTime>()),
+            Times.Once, "全期間チェックはクリック時の 1 回だけで、履歴表示後の警告更新では再取得しない");
         _viewModel.HistoryLedgers.Should().Contain(l => l.Id == 1)
             .Which.HasBalanceInconsistency.Should().BeTrue("直すべき導入行を強調する");
         _viewModel.HistoryLedgers.Should().Contain(l => l.Id == 2)
@@ -2729,10 +2765,10 @@ public class MainViewModelTests : IDisposable
 
         var field = typeof(MainViewModel).GetField("_balanceInconsistencies",
             System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-        field.SetValue(_viewModel, new Dictionary<int, (int ExpectedBalance, int ActualBalance)>
+        field.SetValue(_viewModel, new Dictionary<int, (int ExpectedBalance, int ActualBalance, bool IsInitialBalanceCorrection)>
         {
-            { 1, (1100, 1000) },
-            { 3, (600, 500) }
+            { 1, (1100, 1000, false) },
+            { 3, (600, 500, false) }
         });
 
         // Act
@@ -2755,7 +2791,7 @@ public class MainViewModelTests : IDisposable
         // _balanceInconsistenciesを空にして（不整合が解消された状態を模擬）
         var field = typeof(MainViewModel).GetField("_balanceInconsistencies",
             System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-        field.SetValue(_viewModel, new Dictionary<int, (int ExpectedBalance, int ActualBalance)>());
+        field.SetValue(_viewModel, new Dictionary<int, (int ExpectedBalance, int ActualBalance, bool IsInitialBalanceCorrection)>());
 
         // Act
         _viewModel.ApplyBalanceInconsistencyMarkers();
@@ -2772,16 +2808,16 @@ public class MainViewModelTests : IDisposable
         // Arrange
         var field = typeof(MainViewModel).GetField("_balanceInconsistencies",
             System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-        field.SetValue(_viewModel, new Dictionary<int, (int ExpectedBalance, int ActualBalance)>
+        field.SetValue(_viewModel, new Dictionary<int, (int ExpectedBalance, int ActualBalance, bool IsInitialBalanceCorrection)>
         {
-            { 1, (1000, 900) }
+            { 1, (1000, 900, false) }
         });
 
         // Act
         _viewModel.CloseHistory();
 
         // Assert
-        var value = (Dictionary<int, (int, int)>)field.GetValue(_viewModel);
+        var value = (Dictionary<int, (int, int, bool)>)field.GetValue(_viewModel);
         value.Should().BeEmpty();
     }
 

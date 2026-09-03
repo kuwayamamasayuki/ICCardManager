@@ -643,8 +643,10 @@ namespace ICCardManager.ViewModels
         {
             if (_initialBalanceCorrection == null) return;
 
-            // Editモードでは IsAutoBalance=false のため、Income の代入で Balance は再計算されない。
-            // 念のため Income → Balance の順に代入し、最終値が逆算値になることを保証する。
+            // 自動計算が ON のままだと、Income の代入で Balance が「前行 + 受入」へ再計算され、
+            // さらに OFF へ戻したときに適用前の残高（_balanceBeforeAutoBalance）が復元されて適用が消える。
+            // 適用は手入力値の確定なので、先に OFF にしてから Income → Balance の順に代入する。
+            IsAutoBalance = false;
             if (_initialBalanceCorrection.AppliesToIncome)
             {
                 Income = _initialBalanceCorrection.SuggestedBalance;

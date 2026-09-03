@@ -1920,6 +1920,33 @@ public class LedgerRowEditViewModelTests : IDisposable
         _viewModel.Balance.Should().Be(7500);
     }
 
+    /// <summary>
+    /// 自動計算が ON のまま適用すると、Income の代入で残額が前方計算され、OFF に戻したときに
+    /// 適用前の残額が復元されて適用が消える（コードレビュー指摘）。適用は自動計算を切ってから行う。
+    /// </summary>
+    [Fact]
+    public async Task ApplyInitialBalanceSuggestion_自動計算がONでも適用後の値が残ること()
+    {
+        var ledger = new Ledger
+        {
+            Id = 1, CardIdm = TestCardIdm, Date = new DateTime(2025, 4, 1),
+            Summary = "新規購入", Income = 5000, Expense = 0, Balance = 5000
+        };
+        _ledgerRepoMock.Setup(r => r.GetByIdAsync(1)).ReturnsAsync(ledger);
+        var dto = new LedgerDto { Id = 1, CardIdm = TestCardIdm, Date = ledger.Date, Summary = "新規購入", Income = 5000, Balance = 5000 };
+        await _viewModel.InitializeForEditAsync(dto, TestOperatorIdm, previousBalance: 0,
+            initialBalanceCorrection: CreateCorrection(3000, appliesToIncome: true));
+        _viewModel.IsAutoBalance = true;
+        _viewModel.CanAutoBalance.Should().BeTrue("前提: 直前残高を渡したので自動計算を ON にできる");
+
+        _viewModel.ApplyInitialBalanceSuggestionCommand.Execute(null);
+        _viewModel.IsAutoBalance = false;   // 利用者が OFF に戻しても適用が消えない
+
+        _viewModel.IsAutoBalance.Should().BeFalse();
+        _viewModel.Income.Should().Be(3000);
+        _viewModel.Balance.Should().Be(3000);
+    }
+
     [Fact]
     public async Task ApplyInitialBalanceSuggestion_提案が無ければ実行できず何も変えないこと()
     {

@@ -380,7 +380,15 @@ public partial class MainViewModel : ViewModelBase
     /// <summary>
     /// 残高不整合のあるLedgerIdとその期待残高・実際残高のマップ（Issue #1052）
     /// </summary>
-    private Dictionary<int, (int ExpectedBalance, int ActualBalance)> _balanceInconsistencies = new();
+    /// <remarks>
+    /// Issue #2007: <c>IsInitialBalanceCorrection</c> は「導入時残高の訂正案として付け替えたマーカー」
+    /// であることを表す。このとき期待残高＝直後の記録から逆算した残高、実際残高＝導入行の記録。
+    /// 通常の不整合（前行から前方計算した期待値）とは意味が違うため、表示文言はこのフラグで分岐する。
+    /// 摘要文字列（「新規購入」等）で分岐すると、導入行の摘要を持つ行に通常経路でマーカーが付いたとき
+    /// （CSV 取込や編集で導入行が先頭でなくなった場合等）に、前方計算の値を「逆算した残高」と偽って
+    /// 案内してしまう（#1763「同じ判断を配らない」／#1883「食い違った状態を表現できなくする」）。
+    /// </remarks>
+    private Dictionary<int, (int ExpectedBalance, int ActualBalance, bool IsInitialBalanceCorrection)> _balanceInconsistencies = new();
 
     /// <summary>
     /// 履歴表示中のカードの現在残高
@@ -2265,10 +2273,10 @@ public partial class MainViewModel : ViewModelBase
             if (_balanceInconsistencies.TryGetValue(dto.Id, out var info))
             {
                 dto.HasBalanceInconsistency = true;
-                // Issue #2007: 導入行にマーカーが付くのは BuildInconsistencyMarkers が
-                // 「導入時残高の誤り」と判定して付け替えたときだけ（通常の検査は先頭行を検査しない）。
-                // そのときは期待値/実際ではなく、直すべき行と逆算した金額を案内する。
-                dto.BalanceInconsistencyMessage = Ledger.IsInitialRecordSummary(dto.Summary)
+                // Issue #2007: 「導入時残高の誤り」として BuildInconsistencyMarkers が導入行へ付け替えた
+                // マーカーは、期待値/実際ではなく、直すべき行と逆算した金額を案内する。
+                // 分岐は摘要ではなくマーカー自身のフラグで行う（_balanceInconsistencies の remarks）。
+                dto.BalanceInconsistencyMessage = info.IsInitialBalanceCorrection
                     ? InitialBalanceCorrectionMessage.ForHistoryRow(
                         recordedBalance: info.ActualBalance,
                         suggestedBalance: info.ExpectedBalance,
@@ -2288,7 +2296,22 @@ public partial class MainViewModel : ViewModelBase
     /// </summary>
     private void UpdateHistoryPeriodDisplay()
     {
-        HistoryPeriodDisplay = $"{HistoryFromDate.ToString("yyyy年M月", CultureInfo.InvariantCulture)}";
+        HistoryPeriodDisplay = FormatHistoryPeriod(HistoryFromDate, HistoryToDate);
+    }
+
+    /// <summary>
+    /// 履歴の期間ラベルを組み立てる。
+    /// </summary>
+    /// <remarks>
+    /// 通常の表示期間は暦月（年月ピッカー）なので開始月だけを出す。Issue #2007 の警告クリックは
+    /// 導入行の日付から今日までの複数月を表示するため、開始月と終了月が異なるときは範囲で出す
+    /// （開始月だけ出すと「その月を表示中」と読まれ、画面に並ぶ数年分の行と食い違う）。
+    /// </remarks>
+    internal static string FormatHistoryPeriod(DateTime from, DateTime to)
+    {
+        var fromText = from.ToString("yyyy年M月", CultureInfo.InvariantCulture);
+        if (from.Year == to.Year && from.Month == to.Month) return fromText;
+        return $"{fromText}～{to.ToString("yyyy年M月", CultureInfo.InvariantCulture)}";
     }
 
     #region 履歴期間選択コマンド
@@ -2838,21 +2861,21 @@ public partial class MainViewModel : ViewModelBase
     /// 導入行の写像（先頭明細の起点が導入行の残高）なので、同様に導入行へ寄せる。
     /// </para>
     /// </remarks>
-    internal static Dictionary<int, (int ExpectedBalance, int ActualBalance)> BuildInconsistencyMarkers(
+    internal static Dictionary<int, (int ExpectedBalance, int ActualBalance, bool IsInitialBalanceCorrection)> BuildInconsistencyMarkers(
         ConsistencyResult result)
     {
         var correction = result.InitialBalanceCorrection;
         if (correction != null)
         {
-            return new Dictionary<int, (int ExpectedBalance, int ActualBalance)>
+            return new Dictionary<int, (int ExpectedBalance, int ActualBalance, bool IsInitialBalanceCorrection)>
             {
-                { correction.LedgerId, (correction.SuggestedBalance, correction.RecordedBalance) }
+                { correction.LedgerId, (correction.SuggestedBalance, correction.RecordedBalance, true) }
             };
         }
 
         // 親レコード不整合 + 詳細レベル不整合（詳細の親LedgerId単位で集約）
         var markers = result.Inconsistencies
-            .ToDictionary(i => i.LedgerId, i => (i.ExpectedBalance, i.ActualBalance));
+            .ToDictionary(i => i.LedgerId, i => (i.ExpectedBalance, i.ActualBalance, false));
 
         // Issue #1059: 詳細レベル不整合がある親Ledgerもハイライト対象に追加
         foreach (var detailGroup in result.DetailInconsistencies.GroupBy(d => d.LedgerId))
@@ -2860,7 +2883,7 @@ public partial class MainViewModel : ViewModelBase
             if (!markers.ContainsKey(detailGroup.Key))
             {
                 var first = detailGroup.First();
-                markers[detailGroup.Key] = (first.ExpectedBalance, first.ActualBalance);
+                markers[detailGroup.Key] = (first.ExpectedBalance, first.ActualBalance, false);
             }
         }
         return markers;
@@ -2890,7 +2913,11 @@ public partial class MainViewModel : ViewModelBase
     /// 不整合を検出した場合、メイン画面右下の警告エリアに警告を表示します。
     /// 交通系ICカード内の履歴に記録されている残高が正であるため、自動修正は行いません。
     /// </remarks>
-    private async Task CheckAndNotifyConsistencyAsync()
+    /// <param name="fullPeriodResult">
+    /// Issue #2007: 呼び出し元が直前に取った全期間の判定結果。渡されたときは再取得しない
+    /// （警告クリック経路は導入行の日付を決めるために全期間を先に読んでいる。6 年分を 2 度読まない）。
+    /// </param>
+    private async Task CheckAndNotifyConsistencyAsync(ConsistencyResult fullPeriodResult = null)
     {
         if (HistoryCard == null) return;
 
@@ -2903,7 +2930,7 @@ public partial class MainViewModel : ViewModelBase
         // 出ないため「解消済み」と誤解され、不整合が放置される。
         // 表示期間の結果を流用しないのは、チェーンの起点が範囲によって変わるため
         // 部分範囲の判定が全期間の判定と一致する保証がないから。
-        var warningResult = await _ledgerConsistencyChecker.CheckBalanceConsistencyAsync(
+        var warningResult = fullPeriodResult ?? await _ledgerConsistencyChecker.CheckBalanceConsistencyAsync(
             HistoryCard.CardIdm, FullPeriodStart, FullPeriodEnd);
 
         ReplaceWarnings(
@@ -3679,7 +3706,8 @@ public partial class MainViewModel : ViewModelBase
                     await ShowHistoryAsync(card, fullPeriodResult.InitialBalanceCorrection?.Date);
                     // ShowHistoryAsync後に期間が確定するため、ここで整合性チェック＆ハイライト適用
                     // CheckAndNotifyConsistencyAsync内で_balanceInconsistenciesの更新とマーキングを行う
-                    await CheckAndNotifyConsistencyAsync();
+                    // （全期間の結果は直前に取ったものを渡して再取得しない）
+                    await CheckAndNotifyConsistencyAsync(fullPeriodResult);
                 }
                 break;
 
