@@ -1,7 +1,8 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
+using ICCardManager.Common;
 namespace ICCardManager.Models
 {
 /// <summary>
@@ -68,6 +69,17 @@ namespace ICCardManager.Models
         /// スキップしても履歴編集ダイアログから後で入力できる。
         /// </remarks>
         public bool SkipCompanionCountInputOnReturn { get; set; } = false;
+
+        /// <summary>
+        /// 返却時の同行者数入力ダイアログを「外0名」として自動的に閉じるまでの秒数（Issue #2009）
+        /// </summary>
+        /// <remarks>
+        /// 0 は「自動的に閉じない（必ず入力を待つ）」を意味する。複数名での利用が既定の部署はこちらを選ぶ。
+        /// 既定は <see cref="AppConstants.DefaultCompanionCountInputTimeoutSeconds"/>（30 秒）で、
+        /// カウントダウン中に入力・キー操作があれば自動クローズは取り消される。
+        /// <see cref="SkipCompanionCountInputOnReturn"/> が有効な場合はダイアログ自体が出ないため、この値は使われない。
+        /// </remarks>
+        public int CompanionCountInputTimeoutSeconds { get; set; } = AppConstants.DefaultCompanionCountInputTimeoutSeconds;
 
         /// <summary>
         /// 帳票出力先フォルダパス

@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
@@ -74,6 +74,7 @@ namespace ICCardManager.Views.Dialogs
             Control? target = _viewModel.FirstErrorField switch
             {
                 nameof(SettingsViewModel.WarningBalance) => WarningBalanceTextBox,
+                nameof(SettingsViewModel.CompanionCountInputTimeoutSeconds) => CompanionCountTimeoutTextBox,
                 nameof(SettingsViewModel.BackupPath) => BackupPathTextBox,
                 nameof(SettingsViewModel.DatabasePath) => DatabasePathTextBox,
                 _ => null

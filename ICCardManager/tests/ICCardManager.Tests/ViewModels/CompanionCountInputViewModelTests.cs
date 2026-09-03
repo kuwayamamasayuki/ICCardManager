@@ -1,9 +1,10 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
 using FluentAssertions;
 using ICCardManager.Data.Repositories;
+using ICCardManager.Tests.Infrastructure.Timing;
 using ICCardManager.Models;
 using ICCardManager.ViewModels;
 using Moq;
@@ -17,6 +18,7 @@ namespace ICCardManager.Tests.ViewModels;
 public class CompanionCountInputViewModelTests
 {
     private readonly Mock<ILedgerRepository> _ledgerRepoMock = new();
+    private readonly TestTimerFactory _timerFactory = new();
     private readonly CompanionCountInputViewModel _vm;
 
     public CompanionCountInputViewModelTests()
@@ -24,7 +26,7 @@ public class CompanionCountInputViewModelTests
         _ledgerRepoMock
             .Setup(r => r.UpdateCompanionCountAsync(It.IsAny<int>(), It.IsAny<int>()))
             .ReturnsAsync(true);
-        _vm = new CompanionCountInputViewModel(_ledgerRepoMock.Object);
+        _vm = new CompanionCountInputViewModel(_ledgerRepoMock.Object, _timerFactory);
     }
 
     private static Ledger Usage(int id, string summary = "鉄道（博多～天神）", int expense = 260, string staffName = "博多 花子")
@@ -42,7 +44,7 @@ public class CompanionCountInputViewModelTests
             new Ledger { Id = 0, Summary = "鉄道（未保存）", Expense = 100 },
         };
 
-        _vm.Initialize(ledgers);
+        _vm.Initialize(ledgers, autoCloseSeconds: 0);
 
         _vm.Items.Should().ContainSingle().Which.Ledger.Id.Should().Be(1);
         _vm.Items[0].CompanionCountText.Should().Be("0", "既定は同行者なし");
@@ -52,7 +54,7 @@ public class CompanionCountInputViewModelTests
     [Fact]
     public void Initialize_対象なし_案内を出すこと()
     {
-        _vm.Initialize(new List<Ledger>());
+        _vm.Initialize(new List<Ledger>(), autoCloseSeconds: 0);
         _vm.Items.Should().BeEmpty();
         _vm.StatusMessage.Should().Contain("ありません");
     }
@@ -60,7 +62,7 @@ public class CompanionCountInputViewModelTests
     [Fact]
     public async Task SaveAsync_全行0_書き込まずに閉じること()
     {
-        _vm.Initialize(new[] { Usage(1), Usage(2) });
+        _vm.Initialize(new[] { Usage(1), Usage(2) }, autoCloseSeconds: 0);
 
         await _vm.SaveAsync();
 
@@ -72,7 +74,7 @@ public class CompanionCountInputViewModelTests
     [Fact]
     public async Task SaveAsync_入力した行だけ更新すること()
     {
-        _vm.Initialize(new[] { Usage(1), Usage(2) });
+        _vm.Initialize(new[] { Usage(1), Usage(2) }, autoCloseSeconds: 0);
         _vm.Items[1].CompanionCountText = "2";
 
         await _vm.SaveAsync();
@@ -90,7 +92,7 @@ public class CompanionCountInputViewModelTests
     [InlineData("100")]
     public async Task SaveAsync_不正な入力_保存せず3要素の案内を出すこと(string text)
     {
-        _vm.Initialize(new[] { Usage(1) });
+        _vm.Initialize(new[] { Usage(1) }, autoCloseSeconds: 0);
         _vm.Items[0].CompanionCountText = text;
 
         await _vm.SaveAsync();
@@ -103,7 +105,7 @@ public class CompanionCountInputViewModelTests
     [Fact]
     public async Task SaveAsync_空欄は0として扱うこと()
     {
-        _vm.Initialize(new[] { Usage(1) });
+        _vm.Initialize(new[] { Usage(1) }, autoCloseSeconds: 0);
         _vm.Items[0].CompanionCountText = "";
 
         await _vm.SaveAsync();
@@ -116,7 +118,7 @@ public class CompanionCountInputViewModelTests
     public async Task SaveAsync_影響行数0_競合として案内し閉じないこと()
     {
         _ledgerRepoMock.Setup(r => r.UpdateCompanionCountAsync(1, 1)).ReturnsAsync(false);
-        _vm.Initialize(new[] { Usage(1) });
+        _vm.Initialize(new[] { Usage(1) }, autoCloseSeconds: 0);
         _vm.Items[0].CompanionCountText = "1";
 
         await _vm.SaveAsync();
@@ -132,7 +134,7 @@ public class CompanionCountInputViewModelTests
     {
         _ledgerRepoMock.Setup(r => r.UpdateCompanionCountAsync(It.IsAny<int>(), It.IsAny<int>()))
             .ThrowsAsync(new InvalidOperationException("database is locked"));
-        _vm.Initialize(new[] { Usage(1) });
+        _vm.Initialize(new[] { Usage(1) }, autoCloseSeconds: 0);
         _vm.Items[0].CompanionCountText = "1";
 
         await _vm.SaveAsync();
@@ -148,7 +150,7 @@ public class CompanionCountInputViewModelTests
     [Fact]
     public void Skip_書き込まずに閉じること()
     {
-        _vm.Initialize(new[] { Usage(1) });
+        _vm.Initialize(new[] { Usage(1) }, autoCloseSeconds: 0);
         _vm.Items[0].CompanionCountText = "3";
 
         _vm.Skip();

@@ -1,4 +1,4 @@
-using FluentAssertions;
+﻿using FluentAssertions;
 using ICCardManager.Services;
 using Xunit;
 
@@ -416,6 +416,40 @@ public class ValidationServiceTests
         // Act & Assert
         bool boolValue = result;
         boolValue.Should().BeFalse();
+    }
+
+    #endregion
+
+    #region ValidateCompanionCountInputTimeout（Issue #2009）
+
+    /// <summary>
+    /// 0 は「自動的に閉じない（必ず尋ねる）」を意味するため、下限の例外として許可する
+    /// </summary>
+    [Fact]
+    public void ValidateCompanionCountInputTimeout_0_自動的に閉じない指定として許可されること()
+    {
+        _service.ValidateCompanionCountInputTimeout(0).IsValid.Should().BeTrue();
+    }
+
+    [Theory]
+    [InlineData(5)]     // 下限
+    [InlineData(30)]    // 既定
+    [InlineData(300)]   // 上限
+    public void ValidateCompanionCountInputTimeout_範囲内_許可されること(int seconds)
+    {
+        _service.ValidateCompanionCountInputTimeout(seconds).IsValid.Should().BeTrue();
+    }
+
+    [Theory]
+    [InlineData(1)]     // ダイアログが描画される前に閉じ得る
+    [InlineData(4)]     // 下限の直下
+    [InlineData(301)]   // 上限の直上
+    [InlineData(-1)]    // 負値
+    public void ValidateCompanionCountInputTimeout_範囲外_拒否されること(int seconds)
+    {
+        var result = _service.ValidateCompanionCountInputTimeout(seconds);
+        result.IsValid.Should().BeFalse();
+        result.ErrorMessage.Should().NotBeNullOrWhiteSpace();
     }
 
     #endregion

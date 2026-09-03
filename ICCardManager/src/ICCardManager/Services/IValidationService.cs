@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
@@ -87,5 +87,12 @@ namespace ICCardManager.Services
         /// <param name="balance">残額警告閾値</param>
         /// <returns>バリデーション結果</returns>
         ValidationResult ValidateWarningBalance(int balance);
+
+        /// <summary>
+        /// 返却時の同行者数入力を自動的に閉じるまでの秒数を検証（Issue #2009）
+        /// </summary>
+        /// <param name="seconds">自動クローズ秒数。0 は「自動的に閉じない」</param>
+        /// <returns>バリデーション結果</returns>
+        ValidationResult ValidateCompanionCountInputTimeout(int seconds);
     }
 }

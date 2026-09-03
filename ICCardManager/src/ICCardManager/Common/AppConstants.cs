@@ -32,6 +32,24 @@ namespace ICCardManager.Common
         /// </summary>
         public const int DefaultCardLockTimeoutSeconds = 5;
 
+        /// <summary>
+        /// 返却時の同行者数入力ダイアログを「外0名」として自動的に閉じるまでの秒数（Issue #2009）。
+        /// 0 は「自動的に閉じない（必ず入力を待つ）」を意味する。
+        /// </summary>
+        public const int DefaultCompanionCountInputTimeoutSeconds = 30;
+
+        /// <summary>
+        /// 同行者数入力の自動クローズ秒数として設定できる下限（0 を除く）。
+        /// ダイアログが描画される前に閉じてしまわない値にする。
+        /// </summary>
+        public const int MinCompanionCountInputTimeoutSeconds = 5;
+
+        /// <summary>
+        /// 同行者数入力の自動クローズ秒数として設定できる上限（5 分）。
+        /// これを超える値は「自動的に閉じない」（0）と実質同じで、設定の意図が読めなくなる。
+        /// </summary>
+        public const int MaxCompanionCountInputTimeoutSeconds = 300;
+
         // --- バックアップ健全性（Issue #1689） ---
 
         /// <summary>

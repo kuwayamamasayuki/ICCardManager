@@ -38,6 +38,7 @@ public class SettingsViewModelTests
 
         // バリデーションはデフォルトで成功を返す
         _validationServiceMock.Setup(v => v.ValidateWarningBalance(It.IsAny<int>())).Returns(ValidationResult.Success());
+        _validationServiceMock.Setup(v => v.ValidateCompanionCountInputTimeout(It.IsAny<int>())).Returns(ValidationResult.Success());
 
         // Issue #1975: 既定（市長事務部局）から始め、保存で企業会計部局へ切り替わることを表明できるようにする
         _summaryGenerator = new SummaryGenerator(DepartmentType.MayorOffice);
@@ -688,6 +689,53 @@ public class SettingsViewModelTests
     }
 
     #endregion
+
+    #endregion
+
+    #region 同行者数入力の自動クローズ秒数（Issue #2009）
+
+    [Fact]
+    public async Task LoadSettingsAsync_同行者数入力の自動クローズ秒数を読み込むこと()
+    {
+        _settingsRepositoryMock
+            .Setup(r => r.GetAppSettingsAsync())
+            .ReturnsAsync(new AppSettings { CompanionCountInputTimeoutSeconds = 0 });
+
+        await _viewModel.LoadSettingsAsync();
+
+        _viewModel.CompanionCountInputTimeoutSeconds.Should().Be(0, "0 は「必ず尋ねる」設定");
+    }
+
+    [Fact]
+    public async Task SaveAsync_同行者数入力の自動クローズ秒数を保存すること()
+    {
+        _settingsRepositoryMock
+            .Setup(r => r.SaveAppSettingsAsync(It.IsAny<AppSettings>()))
+            .ReturnsAsync(false); // WPF依存のApplyFontSizeを回避するためfalseを返す
+        _viewModel.CompanionCountInputTimeoutSeconds = 45;
+
+        await _viewModel.SaveAsync();
+
+        _settingsRepositoryMock.Verify(
+            r => r.SaveAppSettingsAsync(It.Is<AppSettings>(s => s.CompanionCountInputTimeoutSeconds == 45)),
+            Times.Once);
+    }
+
+    [Fact]
+    public async Task SaveAsync_自動クローズ秒数が不正なら保存しないこと()
+    {
+        _validationServiceMock
+            .Setup(v => v.ValidateCompanionCountInputTimeout(3))
+            .Returns(ValidationResult.Failure("同行者数入力の自動クローズ秒数が3秒で短すぎます。5秒以上を入力するか、自動的に閉じない場合は 0 を入力してください。"));
+        _viewModel.CompanionCountInputTimeoutSeconds = 3;
+
+        await _viewModel.SaveAsync();
+
+        _settingsRepositoryMock.Verify(r => r.SaveAppSettingsAsync(It.IsAny<AppSettings>()), Times.Never);
+        _viewModel.IsStatusError.Should().BeTrue();
+        _viewModel.FirstErrorField.Should().Be(nameof(SettingsViewModel.CompanionCountInputTimeoutSeconds),
+            "エラーの入力欄へフォーカスを移せること（#1279）");
+    }
 
     #endregion
 }

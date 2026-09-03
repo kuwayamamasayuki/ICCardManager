@@ -1,4 +1,4 @@
-using FluentAssertions;
+﻿using FluentAssertions;
 using ICCardManager.Data;
 using ICCardManager.Data.Repositories;
 using ICCardManager.Infrastructure.Caching;
@@ -403,6 +403,41 @@ public class SettingsRepositoryTests : IDisposable
 
         loaded.SkipCompanionCountInputOnReturn.Should().BeTrue();
         _repository.GetAppSettings().SkipCompanionCountInputOnReturn.Should().BeTrue("同期版の読み込みも同じキーを見る");
+    }
+
+    #endregion
+
+    #region CompanionCountInputTimeoutSeconds テスト（Issue #2009）
+
+    [Fact]
+    public async Task GetAppSettingsAsync_Default_CompanionCountInputTimeoutIs30()
+    {
+        var result = await _repository.GetAppSettingsAsync();
+        result.CompanionCountInputTimeoutSeconds.Should().Be(30, "入力待ちで止まらないよう既定で自動的に閉じる");
+    }
+
+    [Fact]
+    public async Task SaveAndLoadAppSettings_CompanionCountInputTimeout_RoundTrip()
+    {
+        var settings = new AppSettings { WarningBalance = 10000, BackupPath = @"C:\Backup", CompanionCountInputTimeoutSeconds = 60 };
+
+        await _repository.SaveAppSettingsAsync(settings);
+        var loaded = await _repository.GetAppSettingsAsync();
+
+        loaded.CompanionCountInputTimeoutSeconds.Should().Be(60);
+        _repository.GetAppSettings().CompanionCountInputTimeoutSeconds.Should().Be(60, "同期版の読み込みも同じキーを見る");
+    }
+
+    [Fact]
+    public async Task SaveAndLoadAppSettings_CompanionCountInputTimeout_0も保存されること()
+    {
+        // 0 =「自動的に閉じない（必ず尋ねる）」。既定値へ戻されると設定の意味が失われる
+        var settings = new AppSettings { WarningBalance = 10000, BackupPath = @"C:\Backup", CompanionCountInputTimeoutSeconds = 0 };
+
+        await _repository.SaveAppSettingsAsync(settings);
+        var loaded = await _repository.GetAppSettingsAsync();
+
+        loaded.CompanionCountInputTimeoutSeconds.Should().Be(0);
     }
 
     #endregion

@@ -1,8 +1,9 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
 using System.Text.RegularExpressions;
+using ICCardManager.Common;
 
 namespace ICCardManager.Services
 {
@@ -202,6 +203,20 @@ namespace ICCardManager.Services
             }
 
             return ValidationResult.Success();
+        }
+
+        /// <summary>
+        /// 返却時の同行者数入力を自動的に閉じるまでの秒数を検証（Issue #2009）
+        /// </summary>
+        /// <remarks>
+        /// 0 は「自動的に閉じない（必ず入力を待つ）」を意味するため、下限の例外として許可する。
+        /// 1〜4 秒はダイアログが描画される前に閉じ得るので弾く。
+        /// </remarks>
+        public ValidationResult ValidateCompanionCountInputTimeout(int seconds)
+        {
+            // 判定と文言は入力時の即時フィードバック（CompanionCountTimeoutValidationRule）と共有する（#1763）
+            var reason = CompanionCountTimeoutRange.Describe(seconds);
+            return reason == null ? ValidationResult.Success() : ValidationResult.Failure(reason);
         }
 
         #endregion

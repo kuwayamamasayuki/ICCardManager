@@ -139,6 +139,15 @@ public partial class SettingsViewModel : ViewModelBase
     private bool _skipCompanionCountInputOnReturn;
 
     /// <summary>
+    /// 返却時の同行者数入力を「外0名」として自動的に閉じるまでの秒数（Issue #2009）
+    /// </summary>
+    /// <remarks>
+    /// 0 は「自動的に閉じない（必ず尋ねる）」。複数名での利用が既定の部署はこちらを選ぶ。
+    /// </remarks>
+    [ObservableProperty]
+    private int _companionCountInputTimeoutSeconds;
+
+    /// <summary>
     /// データベースの保存先フォルダパス（UI表示用。ファイル名は内部で自動付与）
     /// </summary>
     [ObservableProperty]
@@ -228,6 +237,7 @@ public partial class SettingsViewModel : ViewModelBase
             // バス停入力スキップ設定
             SkipBusStopInputOnReturn = settings.SkipBusStopInputOnReturn;
             SkipCompanionCountInputOnReturn = settings.SkipCompanionCountInputOnReturn;
+            CompanionCountInputTimeoutSeconds = settings.CompanionCountInputTimeoutSeconds;
 
             // DBフォルダパス設定（appsettings.jsonから読み込み済み）
             DatabasePath = _originalDatabasePath;
@@ -254,6 +264,15 @@ public partial class SettingsViewModel : ViewModelBase
             SetStatus(balanceResult.ErrorMessage!, true);
             // Issue #1279: 検証失敗フィールドを通知してフォーカス移動を促す
             FirstErrorField = nameof(WarningBalance);
+            return;
+        }
+
+        // 同行者数入力の自動クローズ秒数の検証（Issue #2009）
+        var companionTimeoutResult = _validationService.ValidateCompanionCountInputTimeout(CompanionCountInputTimeoutSeconds);
+        if (!companionTimeoutResult)
+        {
+            SetStatus(companionTimeoutResult.ErrorMessage!, true);
+            FirstErrorField = nameof(CompanionCountInputTimeoutSeconds);
             return;
         }
 
@@ -285,7 +304,8 @@ public partial class SettingsViewModel : ViewModelBase
                 ToastPosition = SelectedToastPositionItem?.Value ?? ToastPosition.TopRight,
                 DepartmentType = SelectedDepartmentTypeItem?.Value ?? DepartmentType.MayorOffice,
                 SkipBusStopInputOnReturn = SkipBusStopInputOnReturn,
-                SkipCompanionCountInputOnReturn = SkipCompanionCountInputOnReturn
+                SkipCompanionCountInputOnReturn = SkipCompanionCountInputOnReturn,
+                CompanionCountInputTimeoutSeconds = CompanionCountInputTimeoutSeconds
             };
 
             var success = await _settingsRepository.SaveAppSettingsAsync(settings);
@@ -786,6 +806,11 @@ public partial class SettingsViewModel : ViewModelBase
     }
 
     partial void OnSkipCompanionCountInputOnReturnChanged(bool value)
+    {
+        HasChanges = true;
+    }
+
+    partial void OnCompanionCountInputTimeoutSecondsChanged(int value)
     {
         HasChanges = true;
     }

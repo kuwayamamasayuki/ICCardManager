@@ -25,6 +25,8 @@ public class SettingsViewModelDatabasePathTests
     {
         repoMock ??= new Mock<ISettingsRepository>();
         validatorMock ??= new Mock<IValidationService>();
+        validatorMock.Setup(v => v.ValidateCompanionCountInputTimeout(It.IsAny<int>()))
+            .Returns(ValidationResult.Success());
         validatorMock.Setup(v => v.ValidateWarningBalance(It.IsAny<int>()))
             .Returns(ValidationResult.Success());
         soundMock ??= new Mock<ISoundPlayer>();

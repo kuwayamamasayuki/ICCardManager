@@ -1,4 +1,4 @@
-using FluentAssertions;
+﻿using FluentAssertions;
 using ICCardManager.Services;
 using Xunit;
 
@@ -128,5 +128,26 @@ public class ValidationServiceErrorMessageQualityTests
         AssertQualityCriteria(result.ErrorMessage);
         result.ErrorMessage.Should().Contain("50,000", "実際の入力値（カンマ区切り）");
         result.ErrorMessage.Should().Contain("20,000", "上限値");
+    }
+
+    // Issue #2009: 同行者数入力の自動クローズ秒数
+
+    [Fact]
+    public void ValidateCompanionCountInputTimeout_TooShort_MessageShowsActualAndLimit()
+    {
+        var result = _service.ValidateCompanionCountInputTimeout(3);
+        AssertQualityCriteria(result.ErrorMessage);
+        result.ErrorMessage.Should().Contain("3秒", "実際の入力値");
+        result.ErrorMessage.Should().Contain("5秒", "下限値");
+        result.ErrorMessage.Should().Contain("0", "自動的に閉じない場合の指定方法");
+    }
+
+    [Fact]
+    public void ValidateCompanionCountInputTimeout_TooLong_MessageShowsActualAndLimit()
+    {
+        var result = _service.ValidateCompanionCountInputTimeout(600);
+        AssertQualityCriteria(result.ErrorMessage);
+        result.ErrorMessage.Should().Contain("600秒", "実際の入力値");
+        result.ErrorMessage.Should().Contain("300秒", "上限値");
     }
 }

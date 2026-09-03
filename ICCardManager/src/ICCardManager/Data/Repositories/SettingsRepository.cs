@@ -1,6 +1,7 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Data.SQLite;
+using System.Globalization;
 using System.Linq;
 using System.Threading.Tasks;
 using System.IO;
@@ -58,6 +59,9 @@ namespace ICCardManager.Data.Repositories
 
         // 同行者数入力スキップ設定キー（Issue #1906）
         public const string KeySkipCompanionCountInputOnReturn = "skip_companion_count_input_on_return";
+
+        // 同行者数入力の自動クローズ秒数キー（Issue #2009。0 = 自動的に閉じない）
+        public const string KeyCompanionCountInputTimeoutSeconds = "companion_count_input_timeout_seconds";
 
         // 帳票出力先フォルダ設定キー
         public const string KeyReportOutputFolder = "report_output_folder";
@@ -320,6 +324,12 @@ WHERE settings.value IS NULL OR substr(settings.value, 1, 7) <> @currentMonth";
             // 同行者数入力スキップ設定（Issue #1906）
             settings.SkipCompanionCountInputOnReturn = Get(KeySkipCompanionCountInputOnReturn)?.ToLowerInvariant() == "true";
 
+            // 同行者数入力の自動クローズ秒数（Issue #2009）
+            if (int.TryParse(Get(KeyCompanionCountInputTimeoutSeconds), NumberStyles.Integer, CultureInfo.InvariantCulture, out var companionTimeout))
+            {
+                settings.CompanionCountInputTimeoutSeconds = companionTimeout;
+            }
+
             // 帳票出力先フォルダ設定
             var reportOutputFolder = Get(KeyReportOutputFolder);
             settings.ReportOutputFolder = reportOutputFolder ?? string.Empty;
@@ -431,6 +441,12 @@ WHERE settings.value IS NULL OR substr(settings.value, 1, 7) <> @currentMonth";
             // 同行者数入力スキップ設定（Issue #1906）
             settings.SkipCompanionCountInputOnReturn = (await GetAsync(KeySkipCompanionCountInputOnReturn).ConfigureAwait(false))?.ToLowerInvariant() == "true";
 
+            // 同行者数入力の自動クローズ秒数（Issue #2009）
+            if (int.TryParse(await GetAsync(KeyCompanionCountInputTimeoutSeconds).ConfigureAwait(false), NumberStyles.Integer, CultureInfo.InvariantCulture, out var companionTimeout))
+            {
+                settings.CompanionCountInputTimeoutSeconds = companionTimeout;
+            }
+
             // 帳票出力先フォルダ設定
             var reportOutputFolder = await GetAsync(KeyReportOutputFolder);
             settings.ReportOutputFolder = reportOutputFolder ?? string.Empty;
@@ -522,6 +538,9 @@ WHERE settings.value IS NULL OR substr(settings.value, 1, 7) <> @currentMonth";
 
                     // 同行者数入力スキップ設定を保存（Issue #1906）
                     success &= await SetAsync(KeySkipCompanionCountInputOnReturn, settings.SkipCompanionCountInputOnReturn.ToString().ToLowerInvariant(), scope).ConfigureAwait(false);
+
+                    // 同行者数入力の自動クローズ秒数を保存（Issue #2009）
+                    success &= await SetAsync(KeyCompanionCountInputTimeoutSeconds, settings.CompanionCountInputTimeoutSeconds.ToString(CultureInfo.InvariantCulture), scope).ConfigureAwait(false);
 
                     // 帳票出力先フォルダ設定を保存
                     success &= await SetAsync(KeyReportOutputFolder, settings.ReportOutputFolder ?? string.Empty, scope);
