@@ -1727,6 +1727,8 @@ public partial class MainViewModel : ViewModelBase
     /// Issue #1906: 返却で作られた利用行に対して同行者数入力ダイアログを表示する。
     /// 設定 <see cref="AppSettings.SkipCompanionCountInputOnReturn"/> が有効なら表示しない
     /// （その場合も履歴の行編集から後で入力できる）。
+    /// 表示した場合は <see cref="AppSettings.CompanionCountInputTimeoutSeconds"/> 秒で
+    /// 「外0名」として自動的に閉じる（Issue #2009。0 なら閉じない）。
     /// </summary>
     private async Task ShowCompanionCountInputIfNeededAsync(List<Ledger> targets, AppSettings settings)
     {
@@ -1735,8 +1737,11 @@ public partial class MainViewModel : ViewModelBase
             return;
         }
 
+        // Issue #2009: 入力待ちで止まったままにならないよう、設定した秒数で「外0名」として自動的に閉じる
+        // （0 は「自動的に閉じない」＝ 必ず尋ねる運用）
+        var autoCloseSeconds = settings.CompanionCountInputTimeoutSeconds;
         await _navigationService.ShowDialogAsync<Views.Dialogs.CompanionCountInputDialog>(
-            async d => await d.InitializeWithLedgersAsync(targets));
+            async d => await d.InitializeWithLedgersAsync(targets, autoCloseSeconds));
 
         // 同行者数の入力後に履歴が開いていれば再読み込み（氏名欄の「外N名」を反映）
         if (IsHistoryVisible)

@@ -1,4 +1,4 @@
-<Window x:Class="ICCardManager.Views.Dialogs.CompanionCountInputDialog"
+﻿<Window x:Class="ICCardManager.Views.Dialogs.CompanionCountInputDialog"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
@@ -45,6 +45,16 @@
                     <LineBreak/>
                     <Run Text="💡 入力すると物品出納簿の氏名欄に「博多 花子 外1名」のように表示されます。後から履歴の行編集でも入力できます。"/>
                 </TextBlock>
+                <!-- Issue #2009: 自動クローズの残り時間。入力を始めると消える -->
+                <TextBlock Text="{Binding CountdownMessage}"
+                           Visibility="{Binding IsCountdownRunning, Converter={StaticResource BoolToVisibilityConverter}}"
+                           FontSize="{DynamicResource SmallFontSize}"
+                           FontWeight="Bold"
+                           TextWrapping="Wrap"
+                           Margin="0,8,0,0"
+                           Foreground="{DynamicResource ReturnForegroundBrush}"
+                           AutomationProperties.Name="{Binding CountdownMessage}"
+                           AutomationProperties.LiveSetting="Polite"/>
             </StackPanel>
         </Border>
 

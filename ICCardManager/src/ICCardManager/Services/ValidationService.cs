@@ -1,8 +1,9 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
 using System.Text.RegularExpressions;
+using ICCardManager.Common;
 
 namespace ICCardManager.Services
 {
@@ -199,6 +200,40 @@ namespace ICCardManager.Services
                 return ValidationResult.Failure(
                     $"残額警告閾値が{balance:N0}円で上限を超えています。" +
                     $"{WarningBalanceMax:N0}円以下の値を設定してください。");
+            }
+
+            return ValidationResult.Success();
+        }
+
+        /// <summary>
+        /// 返却時の同行者数入力を自動的に閉じるまでの秒数を検証（Issue #2009）
+        /// </summary>
+        /// <remarks>
+        /// 0 は「自動的に閉じない（必ず入力を待つ）」を意味するため、下限の例外として許可する。
+        /// 1〜4 秒はダイアログが描画される前に閉じ得るので弾く。
+        /// </remarks>
+        public ValidationResult ValidateCompanionCountInputTimeout(int seconds)
+        {
+            if (seconds == 0)
+            {
+                // 0 =「自動的に閉じない」。必ず尋ねたい部署のための設定値
+                return ValidationResult.Success();
+            }
+
+            if (seconds < AppConstants.MinCompanionCountInputTimeoutSeconds)
+            {
+                return ValidationResult.Failure(
+                    $"同行者数入力の自動クローズ秒数が{seconds}秒で短すぎます。" +
+                    $"{AppConstants.MinCompanionCountInputTimeoutSeconds}秒以上を入力するか、" +
+                    "自動的に閉じない場合は 0 を入力してください。");
+            }
+
+            if (seconds > AppConstants.MaxCompanionCountInputTimeoutSeconds)
+            {
+                return ValidationResult.Failure(
+                    $"同行者数入力の自動クローズ秒数が{seconds}秒で上限を超えています。" +
+                    $"{AppConstants.MaxCompanionCountInputTimeoutSeconds}秒以下を入力するか、" +
+                    "自動的に閉じない場合は 0 を入力してください。");
             }
 
             return ValidationResult.Success();

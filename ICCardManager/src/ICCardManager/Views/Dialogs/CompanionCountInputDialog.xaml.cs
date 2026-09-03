@@ -1,4 +1,4 @@
-using System.Collections.Generic;
+﻿using System.Collections.Generic;
 using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Controls;
@@ -32,6 +32,11 @@ namespace ICCardManager.Views.Dialogs
                 }
             };
 
+            // Issue #2009: 職員が操作を始めたら自動クローズ（既定30秒）を取り消す。
+            // Preview 系で拾うのは、ListView 内の入力欄など子要素の操作も漏らさないため。
+            PreviewKeyDown += (s, e) => _viewModel.CancelCountdown();
+            PreviewMouseDown += (s, e) => _viewModel.CancelCountdown();
+
             // 最初の入力欄へフォーカス（既定 0 のまま Enter で閉じられる）
             ContentRendered += async (s, e) =>
             {
@@ -48,9 +53,13 @@ namespace ICCardManager.Views.Dialogs
         /// <summary>
         /// 返却で作られた利用行を指定して初期化する
         /// </summary>
-        public Task InitializeWithLedgersAsync(IEnumerable<Ledger> ledgers)
+        /// <param name="ledgers">返却で作られた台帳</param>
+        /// <param name="autoCloseSeconds">
+        /// 「外0名」として自動的に閉じるまでの秒数（Issue #2009）。0 なら自動的に閉じない
+        /// </param>
+        public Task InitializeWithLedgersAsync(IEnumerable<Ledger> ledgers, int autoCloseSeconds)
         {
-            _viewModel.Initialize(ledgers);
+            _viewModel.Initialize(ledgers, autoCloseSeconds);
             return Task.CompletedTask;
         }
 

@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Linq;
@@ -7,6 +7,7 @@ using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using ICCardManager.Common;
 using ICCardManager.Data.Repositories;
+using ICCardManager.Infrastructure.Timing;
 using ICCardManager.Models;
 
 namespace ICCardManager.ViewModels;
@@ -21,10 +22,18 @@ namespace ICCardManager.ViewModels;
 /// 0 の行は書き込まない（返却時に既に 0 で INSERT 済み）。
 /// 保存に失敗しても返却そのものは記録済みなので、「再タッチ」ではなく
 /// 履歴の行編集から後で入力できることを案内する。
+///
+/// Issue #2009: 入力待ちでカードリーダーの前が塞がると他の業務の邪魔になるため、
+/// 既定では <see cref="AppSettings.CompanionCountInputTimeoutSeconds"/> 秒で
+/// 「外0名」として自動的に閉じる（0 は「自動的に閉じない」）。
+/// 入力・キー操作があった時点でカウントダウンは取り消す
+/// — 入力途中の職員の目の前で閉じると、入力した値が保存されないまま失われる。
 /// </remarks>
 public partial class CompanionCountInputViewModel : ViewModelBase
 {
     private readonly ILedgerRepository _ledgerRepository;
+    private readonly ITimerFactory _timerFactory;
+    private ITimer _countdownTimer;
 
     [ObservableProperty]
     private ObservableCollection<CompanionCountInputItem> _items = new();
@@ -38,27 +47,135 @@ public partial class CompanionCountInputViewModel : ViewModelBase
     [ObservableProperty]
     private bool _isSaved;
 
-    public CompanionCountInputViewModel(ILedgerRepository ledgerRepository)
+    /// <summary>
+    /// 自動クローズまでの残り秒数（Issue #2009）。カウントダウン中のみ意味を持つ
+    /// </summary>
+    [ObservableProperty]
+    private int _remainingSeconds;
+
+    /// <summary>
+    /// 自動クローズのカウントダウンが動作中かどうか（Issue #2009）
+    /// </summary>
+    /// <remarks>
+    /// 設定が 0（自動的に閉じない）のとき、対象行が無いとき、
+    /// 職員が入力・操作を始めたとき（<see cref="CancelCountdown"/>）は false。
+    /// </remarks>
+    [ObservableProperty]
+    private bool _isCountdownRunning;
+
+    /// <summary>
+    /// タイムアウトによって「外0名」として自動的に閉じたかどうか（Issue #2009）
+    /// </summary>
+    public bool WasClosedByTimeout { get; private set; }
+
+    public CompanionCountInputViewModel(ILedgerRepository ledgerRepository, ITimerFactory timerFactory)
     {
         _ledgerRepository = ledgerRepository ?? throw new ArgumentNullException(nameof(ledgerRepository));
+        _timerFactory = timerFactory ?? throw new ArgumentNullException(nameof(timerFactory));
     }
+
+    /// <summary>
+    /// カウントダウンの案内文言（Issue #2009）
+    /// </summary>
+    public string CountdownMessage =>
+        IsCountdownRunning
+            ? $"あと{RemainingSeconds}秒で「外0名」として自動的に閉じます。入力を始めると自動的に閉じなくなります。"
+            : string.Empty;
 
     /// <summary>
     /// 返却で作られた利用行を指定して初期化する。
     /// 利用行（払出 &gt; 0 かつ貸出中レコードでない）だけを対象にし、チャージ・ポイント還元は除く。
     /// </summary>
-    public void Initialize(IEnumerable<Ledger> ledgers)
+    /// <param name="ledgers">返却で作られた台帳</param>
+    /// <param name="autoCloseSeconds">
+    /// 「外0名」として自動的に閉じるまでの秒数（Issue #2009）。0 以下なら自動的に閉じない。
+    /// 既定値を持たせない — 設定を渡し忘れた経路が「自動的に閉じない」側へ静かに倒れるのを防ぐ（#1956）
+    /// </param>
+    public void Initialize(IEnumerable<Ledger> ledgers, int autoCloseSeconds)
     {
+        StopCountdown();
+        foreach (var existing in Items)
+        {
+            existing.PropertyChanged -= OnItemPropertyChanged;
+        }
+
         Items.Clear();
         foreach (var ledger in SelectTargetLedgers(ledgers))
         {
-            Items.Add(new CompanionCountInputItem(ledger));
+            var item = new CompanionCountInputItem(ledger);
+            // 入力が始まったら自動クローズを取り消す（入力中の職員の目の前で閉じない）
+            item.PropertyChanged += OnItemPropertyChanged;
+            Items.Add(item);
         }
 
         StatusMessage = Items.Count == 0
             ? "同行者数を入力する利用履歴がありません"
             : $"{Items.Count}件の利用があります。複数名で利用した場合は本人を除く人数を入力してください（1人で利用した場合は 0 のまま保存）。";
+
+        if (Items.Count > 0 && autoCloseSeconds > 0)
+        {
+            StartCountdown(autoCloseSeconds);
+        }
     }
+
+    private void OnItemPropertyChanged(object sender, System.ComponentModel.PropertyChangedEventArgs e)
+    {
+        CancelCountdown();
+    }
+
+    private void StartCountdown(int autoCloseSeconds)
+    {
+        RemainingSeconds = autoCloseSeconds;
+        _countdownTimer = _timerFactory.Create();
+        _countdownTimer.Interval = TimeSpan.FromSeconds(1);
+        _countdownTimer.Tick += OnCountdownTick;
+        IsCountdownRunning = true;
+        _countdownTimer.Start();
+    }
+
+    private void OnCountdownTick(object sender, EventArgs e)
+    {
+        if (!IsCountdownRunning)
+        {
+            return;
+        }
+
+        RemainingSeconds--;
+        if (RemainingSeconds > 0)
+        {
+            return;
+        }
+
+        // タイムアウト = 「外0名」。返却時に 0 で INSERT 済みなので書き込みは不要
+        StopCountdown();
+        WasClosedByTimeout = true;
+        IsSaved = true;
+    }
+
+    /// <summary>
+    /// 自動クローズのカウントダウンを取り消す（Issue #2009）。
+    /// 入力欄の変更・キー操作・マウス操作を検知した時点でダイアログ側から呼ぶ
+    /// </summary>
+    public void CancelCountdown()
+    {
+        StopCountdown();
+    }
+
+    private void StopCountdown()
+    {
+        if (_countdownTimer != null)
+        {
+            _countdownTimer.Tick -= OnCountdownTick;
+            _countdownTimer.Stop();
+            _countdownTimer = null;
+        }
+
+        IsCountdownRunning = false;
+    }
+
+    partial void OnIsCountdownRunningChanged(bool value) => OnPropertyChanged(nameof(CountdownMessage));
+
+    partial void OnRemainingSecondsChanged(int value) => OnPropertyChanged(nameof(CountdownMessage));
 
     /// <summary>
     /// 同行者数の入力対象となる行を選ぶ純関数（MainViewModel 側の判定と共有する）
@@ -76,6 +193,9 @@ public partial class CompanionCountInputViewModel : ViewModelBase
     [RelayCommand]
     public async Task SaveAsync()
     {
+        // 職員が操作した時点で自動クローズは不要（保存中に閉じられると結果が見えない）
+        CancelCountdown();
+
         var invalid = Items.Where(i => !i.IsValid).ToList();
         if (invalid.Count > 0)
         {
@@ -138,6 +258,7 @@ public partial class CompanionCountInputViewModel : ViewModelBase
     [RelayCommand]
     public void Skip()
     {
+        CancelCountdown();
         IsSaved = true;
     }
 }

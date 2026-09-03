@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -56,6 +56,8 @@ public class SettingsMaintenanceKeyConventionTests
         "KeyDepartmentType",
         "KeySkipBusStopInputOnReturn",
         "KeySkipCompanionCountInputOnReturn",
+        // Issue #2009: 同行者数入力の自動クローズ秒数（設定画面から編集する）
+        "KeyCompanionCountInputTimeoutSeconds",
         "KeyReportOutputFolder",
         // SaveWindowSettingsToDbAsync（一括保存から呼ばれる private ヘルパー）が書く
         "KeyWindowLeft",
