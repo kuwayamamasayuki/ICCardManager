@@ -60,8 +60,8 @@ public class LedgerMergeServiceUnmergeAtomicityTests : IDisposable
             .Returns((string _, Func<Task<IEnumerable<Staff>>> factory, TimeSpan _) => factory());
 
         _ledgerRepository = new LedgerRepository(_dbContext);
-        var cardRepository = new CardRepository(_dbContext, cacheServiceMock.Object, Options.Create(new CacheOptions()));
-        var staffRepository = new StaffRepository(_dbContext, cacheServiceMock.Object, Options.Create(new CacheOptions()));
+        var cardRepository = new CardRepository(_dbContext, cacheServiceMock.Object, Options.Create(new CacheOptions()), NullLogger<CardRepository>.Instance);
+        var staffRepository = new StaffRepository(_dbContext, cacheServiceMock.Object, Options.Create(new CacheOptions()), NullLogger<StaffRepository>.Instance);
 
         // OperationLogger は virtual でないため実物。書き込み先の IOperationLogRepository はモック
         // （統合時の監査ログ INSERT を成功扱いにするだけで、本テストの関心事ではない）。

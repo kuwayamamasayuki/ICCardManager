@@ -11,6 +11,7 @@ using System;
 using System.Collections.Generic;
 using System.Threading.Tasks;
 using Xunit;
+using Microsoft.Extensions.Logging.Abstractions;
 
 namespace ICCardManager.Tests.Integration;
 
@@ -50,8 +51,8 @@ public class LedgerLogAtomicityTests : IDisposable
 
         _ledgerRepo = new LedgerRepository(_dbContext);
         _logRepo = new OperationLogRepository(_dbContext);
-        _cardRepo = new CardRepository(_dbContext, cacheServiceMock.Object, Options.Create(new CacheOptions()));
-        _staffRepo = new StaffRepository(_dbContext, cacheServiceMock.Object, Options.Create(new CacheOptions()));
+        _cardRepo = new CardRepository(_dbContext, cacheServiceMock.Object, Options.Create(new CacheOptions()), NullLogger<CardRepository>.Instance);
+        _staffRepo = new StaffRepository(_dbContext, cacheServiceMock.Object, Options.Create(new CacheOptions()), NullLogger<StaffRepository>.Instance);
 
         var ctxMock = new Mock<ICurrentOperatorContext>();
         ctxMock.SetupGet(c => c.HasSession).Returns(true);

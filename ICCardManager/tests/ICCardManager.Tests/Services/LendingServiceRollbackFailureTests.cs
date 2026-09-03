@@ -56,8 +56,8 @@ public sealed class LendingServiceRollbackFailureTests : IDisposable
         var cacheService = CreatePassThroughCacheService();
 
         _ledgerRepository = new LedgerRepository(_dbContext);
-        _realCardRepository = new CardRepository(_dbContext, cacheService, cacheOptions);
-        _staffRepository = new StaffRepository(_dbContext, cacheService, cacheOptions);
+        _realCardRepository = new CardRepository(_dbContext, cacheService, cacheOptions, NullLogger<CardRepository>.Instance);
+        _staffRepository = new StaffRepository(_dbContext, cacheService, cacheOptions, NullLogger<StaffRepository>.Instance);
         _settingsRepository = new SettingsRepository(_dbContext, cacheService, cacheOptions);
 
         _staffRepository.InsertAsync(new Staff

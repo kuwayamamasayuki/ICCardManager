@@ -1670,6 +1670,69 @@ ON CONFLICT(key) DO UPDATE SET value = excluded.value";
         }
 
         /// <summary>
+        /// 非一時的な <see cref="SQLiteException"/> を <c>false</c> へ畳む直前に、その痕跡をログへ残す（Issue #2001）
+        /// </summary>
+        /// <param name="logger">記録先。null のときは何もしない</param>
+        /// <param name="ex">畳む対象の例外</param>
+        /// <param name="operation">ユーザー視点の操作名（「交通系ICカードの登録」等）</param>
+        /// <remarks>
+        /// <para>
+        /// <see cref="IsTransientLockError"/> が false の失敗は「同じ条件で何度やっても失敗する」ものだが、
+        /// その原因は 1 つではない。ディスク満杯（SQLITE_FULL）・DB 破損（SQLITE_CORRUPT）・
+        /// 読み取り専用（SQLITE_READONLY）といった<b>運用対応が必要な状態</b>と、
+        /// 単なる入力起因の失敗が、呼び出し元からは同じ <c>false</c> にしか見えない。
+        /// 呼び出し元の契約（bool）は変えずに、原因を名指しできる情報（ResultCode と例外）だけをログへ逃がす。
+        /// </para>
+        /// <para>
+        /// 判定（<see cref="IsTransientLockError"/>）と同じく、記録の形も 1 か所に置く。
+        /// 各リポジトリへ書き写すと、片方だけが新しい文言・レベルになる
+        /// （<c>.claude/rules/development-conventions.md</c> #1763）。
+        /// </para>
+        /// <para>
+        /// <b>レベルは「システムの不具合か、利用者の入力の問題か」で分ける</b>
+        /// （<c>.claude/rules/error-messages.md</c> #1991）。この catch は ResultCode で分岐しないため
+        /// <c>SQLITE_CONSTRAINT</c>（主キー重複・UNIQUE 制約違反）も同じ 1 本の経路を通るが、
+        /// それは利用者が入力を直せば解決する<b>想定内の失敗</b>である。
+        /// 同一 IDm を 2 行含む CSV の取り込みのように日常的に起きるものを <c>Error</c> で積むと、
+        /// 本物のディスク満杯・DB 破損がログの中に埋もれる。制約違反は <c>Warning</c> とし、
+        /// それ以外（<c>SQLITE_FULL</c> / <c>SQLITE_CORRUPT</c> / <c>SQLITE_READONLY</c> 等、
+        /// 管理者の対応を要するもの）だけを <c>Error</c> にする。
+        /// </para>
+        /// <para>
+        /// <b>「どうすれば」も同時に分ける</b>。制約違反に「ディスクの空き容量を確認してください」と
+        /// 案内すると、実行できない指示で真の原因から遠ざける
+        /// （<c>.claude/rules/error-messages.md</c> #1817「取れる行動が違う経路には専用の文言」）。
+        /// </para>
+        /// <para>
+        /// IDm・氏名といった個人を特定し得る値は渡さない（<c>.claude/rules/logging.md</c>）。
+        /// 障害の切り分けに必要なのは ResultCode と例外そのものであり、どの行だったかではない。
+        /// </para>
+        /// <para>
+        /// <paramref name="logger"/> / <paramref name="ex"/> は非 null で呼ばれる想定
+        /// （呼び出し元は catch の中で、注入済みのロガーを渡す）。それでも null 条件演算子で書くのは、
+        /// <b>痕跡を残すための処理が本処理を巻き添えにして落ちない</b>ようにするためで、
+        /// 「null が来てよい」という宣言ではない（<c>.claude/rules/db-write-conventions.md</c>
+        /// 「catch の中の後始末は、それ自体が失敗し得ることを前提に書く」）。
+        /// </para>
+        /// </remarks>
+        internal static void LogNonTransientWriteFailure(ILogger logger, SQLiteException ex, string operation)
+        {
+            if (ex != null && ex.ResultCode == SQLiteErrorCode.Constraint)
+            {
+                logger?.LogWarning(ex,
+                    "{Operation}が制約違反で失敗しました（ResultCode={ResultCode}）。" +
+                    "入力値が既に登録されている値と重複していないか確認してください。",
+                    operation, ex.ResultCode);
+                return;
+            }
+
+            logger?.LogError(ex,
+                "{Operation}がデータベースエラーで失敗しました（ResultCode={ResultCode}）。" +
+                "ディスクの空き容量、データベースファイルの書き込み権限、破損の有無を確認してください。",
+                operation, ex?.ResultCode);
+        }
+
+        /// <summary>
         /// SQLITE_BUSY/SQLITE_LOCKED時にリトライ付きで非同期操作を実行
         /// </summary>
         /// <remarks>

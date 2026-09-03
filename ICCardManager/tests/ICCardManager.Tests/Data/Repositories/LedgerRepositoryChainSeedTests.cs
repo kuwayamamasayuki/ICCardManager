@@ -12,6 +12,7 @@ using Xunit;
 using System;
 using System.Collections.Generic;
 using System.Threading.Tasks;
+using Microsoft.Extensions.Logging.Abstractions;
 
 namespace ICCardManager.Tests.Data.Repositories;
 
@@ -51,7 +52,7 @@ public class LedgerRepositoryChainSeedTests : IDisposable
 
         _repository = new LedgerRepository(_dbContext);
         var cardRepository = new CardRepository(
-            _dbContext, cacheServiceMock.Object, Options.Create(new CacheOptions()));
+            _dbContext, cacheServiceMock.Object, Options.Create(new CacheOptions()), NullLogger<CardRepository>.Instance);
 
         cardRepository.InsertAsync(new IcCard
         {

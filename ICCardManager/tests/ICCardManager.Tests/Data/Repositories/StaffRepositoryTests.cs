@@ -12,6 +12,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
+using Microsoft.Extensions.Logging.Abstractions;
 
 
 namespace ICCardManager.Tests.Data.Repositories;
@@ -37,7 +38,7 @@ public class StaffRepositoryTests : IDisposable
             It.IsAny<TimeSpan>()))
             .Returns((string key, Func<Task<IEnumerable<Staff>>> factory, TimeSpan expiration) => factory());
 
-        _repository = new StaffRepository(_dbContext, _cacheServiceMock.Object, Options.Create(new CacheOptions()));
+        _repository = new StaffRepository(_dbContext, _cacheServiceMock.Object, Options.Create(new CacheOptions()), NullLogger<StaffRepository>.Instance);
     }
 
     public void Dispose()

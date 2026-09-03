@@ -67,8 +67,8 @@ public sealed class LendingServiceReturnDeadlockTests : IDisposable
         var cacheOptions = Options.Create(new CacheOptions());
 
         var ledgerRepo = new LedgerRepository(_dbContext);
-        _cardRepo = new CardRepository(_dbContext, cacheServiceMock.Object, cacheOptions);
-        _staffRepo = new StaffRepository(_dbContext, cacheServiceMock.Object, cacheOptions);
+        _cardRepo = new CardRepository(_dbContext, cacheServiceMock.Object, cacheOptions, NullLogger<CardRepository>.Instance);
+        _staffRepo = new StaffRepository(_dbContext, cacheServiceMock.Object, cacheOptions, NullLogger<StaffRepository>.Instance);
         var settingsRepo = new SettingsRepository(_dbContext, cacheServiceMock.Object, cacheOptions);
 
         var summaryGenerator = new SummaryGenerator(DepartmentType.MayorOffice);
