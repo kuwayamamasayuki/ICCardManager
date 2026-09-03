@@ -235,10 +235,9 @@
                                 <TextBox.Text>
                                     <Binding Path="CompanionCountInputTimeoutSeconds" UpdateSourceTrigger="PropertyChanged">
                                         <Binding.ValidationRules>
-                                            <validation:NumericRangeValidationRule
-                                                Min="0"
-                                                Max="300"
-                                                FieldName="同行者数入力の自動クローズ秒数"/>
+                                            <!-- 「0 または 5〜300」は連続範囲ではないため NumericRangeValidationRule では
+                                                 表現できない（1〜4 が入力時だけ妥当に見えて保存時に弾かれる）。#2009 -->
+                                            <validation:CompanionCountTimeoutValidationRule/>
                                         </Binding.ValidationRules>
                                     </Binding>
                                 </TextBox.Text>

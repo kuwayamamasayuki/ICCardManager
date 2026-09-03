@@ -36,6 +36,8 @@ namespace ICCardManager.Views.Dialogs
             // Preview 系で拾うのは、ListView 内の入力欄など子要素の操作も漏らさないため。
             PreviewKeyDown += (s, e) => _viewModel.CancelCountdown();
             PreviewMouseDown += (s, e) => _viewModel.CancelCountdown();
+            // 複数行を読むためのスクロールはクリックを伴わないため PreviewMouseDown では拾えない
+            PreviewMouseWheel += (s, e) => _viewModel.CancelCountdown();
 
             // 最初の入力欄へフォーカス（既定 0 のまま Enter で閉じられる）
             ContentRendered += async (s, e) =>

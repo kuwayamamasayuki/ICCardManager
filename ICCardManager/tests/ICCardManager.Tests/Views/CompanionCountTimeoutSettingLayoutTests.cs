@@ -1,4 +1,4 @@
-using System.IO;
+﻿using System.IO;
 using System.Text.RegularExpressions;
 using FluentAssertions;
 using Xunit;
@@ -25,8 +25,16 @@ public class CompanionCountTimeoutSettingLayoutTests
         return File.ReadAllText(path);
     }
 
+    /// <summary>
+    /// XAML コメント（&lt;!-- --&gt;）を取り除く。
+    /// 規約の理由を書いたコメント自体が違反として検出される極性の反転を避ける（#1692 / #1818）
+    /// </summary>
+    private static string RemoveXamlComments(string xaml)
+        => Regex.Replace(xaml, "<!--.*?-->", string.Empty, RegexOptions.Singleline);
+
     private static string ExtractTimeoutTextBox(string xaml)
     {
+        xaml = RemoveXamlComments(xaml);
         var match = Regex.Match(
             xaml,
             "<TextBox\\s+x:Name=\"CompanionCountTimeoutTextBox\".*?</TextBox>",
@@ -36,14 +44,15 @@ public class CompanionCountTimeoutSettingLayoutTests
     }
 
     [Fact]
-    public void 秒数欄は数値範囲の検証ルールを持つこと()
+    public void 秒数欄は保存時と同じ判定の検証ルールを持つこと()
     {
         var textBox = ExtractTimeoutTextBox(ReadSettingsDialogXaml());
 
-        textBox.Should().Contain("NumericRangeValidationRule",
+        textBox.Should().Contain("CompanionCountTimeoutValidationRule",
             "非数値を入力したとき、バインディングが黙って値を捨てて前の値のまま保存されるのを防ぐ（#1279）");
-        textBox.Should().Contain("Min=\"0\"", "0 は「自動的に閉じない」の指定として許可する");
-        textBox.Should().Contain("Max=\"300\"", "上限は AppConstants.MaxCompanionCountInputTimeoutSeconds と一致させる");
+        textBox.Should().NotContain("NumericRangeValidationRule",
+            "「0 または 5〜300」は連続範囲ではないため Min/Max では表現できず、" +
+            "1〜4 秒が入力時だけ妥当に見えて保存時に弾かれる（コードレビュー指摘）");
     }
 
     [Fact]

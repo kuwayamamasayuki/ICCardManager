@@ -214,29 +214,9 @@ namespace ICCardManager.Services
         /// </remarks>
         public ValidationResult ValidateCompanionCountInputTimeout(int seconds)
         {
-            if (seconds == 0)
-            {
-                // 0 =「自動的に閉じない」。必ず尋ねたい部署のための設定値
-                return ValidationResult.Success();
-            }
-
-            if (seconds < AppConstants.MinCompanionCountInputTimeoutSeconds)
-            {
-                return ValidationResult.Failure(
-                    $"同行者数入力の自動クローズ秒数が{seconds}秒で短すぎます。" +
-                    $"{AppConstants.MinCompanionCountInputTimeoutSeconds}秒以上を入力するか、" +
-                    "自動的に閉じない場合は 0 を入力してください。");
-            }
-
-            if (seconds > AppConstants.MaxCompanionCountInputTimeoutSeconds)
-            {
-                return ValidationResult.Failure(
-                    $"同行者数入力の自動クローズ秒数が{seconds}秒で上限を超えています。" +
-                    $"{AppConstants.MaxCompanionCountInputTimeoutSeconds}秒以下を入力するか、" +
-                    "自動的に閉じない場合は 0 を入力してください。");
-            }
-
-            return ValidationResult.Success();
+            // 判定と文言は入力時の即時フィードバック（CompanionCountTimeoutValidationRule）と共有する（#1763）
+            var reason = CompanionCountTimeoutRange.Describe(seconds);
+            return reason == null ? ValidationResult.Success() : ValidationResult.Failure(reason);
         }
 
         #endregion
