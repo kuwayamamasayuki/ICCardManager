@@ -14,6 +14,7 @@ using ICCardManager.Models;
 using Microsoft.Extensions.Options;
 using Moq;
 using Xunit;
+using Microsoft.Extensions.Logging.Abstractions;
 
 namespace ICCardManager.Tests.Data.Repositories;
 
@@ -66,8 +67,8 @@ public class WarekiCalendarDatePersistenceTests : IDisposable
             .Returns((string key, Func<Task<IEnumerable<Staff>>> factory, TimeSpan expiration) => factory());
 
         _ledgerRepository = new LedgerRepository(_dbContext);
-        _cardRepository = new CardRepository(_dbContext, cacheServiceMock.Object, Options.Create(new CacheOptions()));
-        _staffRepository = new StaffRepository(_dbContext, cacheServiceMock.Object, Options.Create(new CacheOptions()));
+        _cardRepository = new CardRepository(_dbContext, cacheServiceMock.Object, Options.Create(new CacheOptions()), NullLogger<CardRepository>.Instance);
+        _staffRepository = new StaffRepository(_dbContext, cacheServiceMock.Object, Options.Create(new CacheOptions()), NullLogger<StaffRepository>.Instance);
     }
 
     public void Dispose()

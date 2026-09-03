@@ -9,6 +9,7 @@ using ICCardManager.Models;
 using Microsoft.Extensions.Options;
 using Moq;
 using Xunit;
+using Microsoft.Extensions.Logging.Abstractions;
 
 namespace ICCardManager.Tests.Data;
 
@@ -63,9 +64,9 @@ public class DbContextMaintenanceTransactionTests : IDisposable
 
         var cacheServiceMock = new Mock<ICacheService>();
         var staffRepository = new StaffRepository(
-            _dbContext, cacheServiceMock.Object, Options.Create(new CacheOptions()));
+            _dbContext, cacheServiceMock.Object, Options.Create(new CacheOptions()), NullLogger<StaffRepository>.Instance);
         var cardRepository = new CardRepository(
-            _dbContext, cacheServiceMock.Object, Options.Create(new CacheOptions()));
+            _dbContext, cacheServiceMock.Object, Options.Create(new CacheOptions()), NullLogger<CardRepository>.Instance);
         _ledgerRepository = new LedgerRepository(_dbContext);
         _operationLogRepository = new OperationLogRepository(_dbContext);
 

@@ -11,6 +11,7 @@ using System.Data.SQLite;
 using System.Linq;
 using System.Threading.Tasks;
 using Xunit;
+using Microsoft.Extensions.Logging.Abstractions;
 
 namespace ICCardManager.Tests.Data;
 
@@ -34,7 +35,7 @@ public class CardNumberUniqueConstraintTests : IDisposable
             It.IsAny<TimeSpan>()))
             .Returns((string key, Func<Task<IEnumerable<IcCard>>> factory, TimeSpan expiration) => factory());
 
-        _repository = new CardRepository(_dbContext, _cacheServiceMock.Object, Options.Create(new CacheOptions()));
+        _repository = new CardRepository(_dbContext, _cacheServiceMock.Object, Options.Create(new CacheOptions()), NullLogger<CardRepository>.Instance);
     }
 
     public void Dispose()

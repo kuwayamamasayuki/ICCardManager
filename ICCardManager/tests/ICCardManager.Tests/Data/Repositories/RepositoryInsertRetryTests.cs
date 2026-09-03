@@ -13,6 +13,7 @@ using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
 using Xunit;
+using Microsoft.Extensions.Logging.Abstractions;
 
 namespace ICCardManager.Tests.Data.Repositories;
 
@@ -70,8 +71,8 @@ public class RepositoryInsertRetryTests : IDisposable
         _dbContext.InitializeDatabase();
         DisableBusyTimeout();
 
-        _cardRepository = new CardRepository(_dbContext, CreatePassThroughCache(), Options.Create(new CacheOptions()));
-        _staffRepository = new StaffRepository(_dbContext, CreatePassThroughCache(), Options.Create(new CacheOptions()));
+        _cardRepository = new CardRepository(_dbContext, CreatePassThroughCache(), Options.Create(new CacheOptions()), NullLogger<CardRepository>.Instance);
+        _staffRepository = new StaffRepository(_dbContext, CreatePassThroughCache(), Options.Create(new CacheOptions()), NullLogger<StaffRepository>.Instance);
     }
 
     public void Dispose()

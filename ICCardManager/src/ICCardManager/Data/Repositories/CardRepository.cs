@@ -4,6 +4,7 @@ using System.Linq;
 using System.Threading.Tasks;
 using ICCardManager.Infrastructure.Caching;
 using ICCardManager.Models;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using System.Data.Common;
 using System.Data.SQLite;
@@ -19,12 +20,26 @@ namespace ICCardManager.Data.Repositories
         private readonly DbContext _dbContext;
         private readonly ICacheService _cacheService;
         private readonly CacheOptions _cacheOptions;
+        private readonly ILogger<CardRepository> _logger;
 
-        public CardRepository(DbContext dbContext, ICacheService cacheService, IOptions<CacheOptions> cacheOptions)
+        /// <summary>
+        /// 交通系ICカードリポジトリを構築する
+        /// </summary>
+        /// <param name="dbContext">DB 接続コンテキスト</param>
+        /// <param name="cacheService">カード一覧のキャッシュ</param>
+        /// <param name="cacheOptions">キャッシュ TTL の設定</param>
+        /// <param name="logger">
+        /// Issue #2001: 非一時的な SQLite エラーを <c>false</c> へ畳む際の唯一の痕跡。
+        /// 既定値を持たせない（既定値付きにすると新しい呼び出し元が渡さないままになり、
+        /// ディスク満杯・DB 破損の痕跡が経路によって残ったり残らなかったりする）。
+        /// </param>
+        public CardRepository(DbContext dbContext, ICacheService cacheService, IOptions<CacheOptions> cacheOptions,
+            ILogger<CardRepository> logger)
         {
             _dbContext = dbContext;
             _cacheService = cacheService;
             _cacheOptions = cacheOptions.Value;
+            _logger = logger;
         }
 
         /// <inheritdoc/>
@@ -287,6 +302,11 @@ VALUES (@cardIdm, @cardType, @cardNumber, @note, 0, NULL, 0, NULL, NULL, @starti
                 // 他 PC が書き込みロックを持っている一瞬に当たっただけの登録が
                 // 恒久的な失敗として職員に報告される（兄弟メソッドの UpdateAsyncInternal /
                 // RestoreAsyncInternal はこの catch を持たず、非対称になっていた）。
+                //
+                // Issue #2001: ただし畳んだ先の false は呼び出し元にとって理由の無い失敗であり、
+                // ディスク満杯・DB 破損・読み取り専用といった運用対応が必要な状態が
+                // 入力ミスと同じ見た目になる。呼び出し元の契約は変えずに痕跡だけ残す。
+                DbContext.LogNonTransientWriteFailure(_logger, ex, "交通系ICカードの登録");
                 return false;
             }
         }

@@ -3,7 +3,6 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
-using System.Text.RegularExpressions;
 using Xunit;
 
 namespace ICCardManager.Tests.Data;
@@ -146,104 +145,19 @@ public class SQLiteBusySwallowConventionTests
 
     #region ヘルパー
 
+    // 抽出と判定は Issue #2001 の検査と共有する（SQLiteCatchBlockInspection）。
+    // 同じ構文を 2 か所で解釈すると、片方だけが実装のリファクタに追随する（#1763）。
     private static IEnumerable<(string Path, string Source)> EnumerateRepositorySources()
-    {
-        var root = Path.Combine(TestPaths.GetProductionSourceRoot(), "Data", "Repositories");
+        => SQLiteCatchBlockInspection.EnumerateProductionSources("Data", "Repositories");
 
-        foreach (var path in Directory.GetFiles(root, "*.cs", SearchOption.AllDirectories))
-        {
-            yield return (path, TestSourceInspection.ToCodeOnlyPreservingLines(File.ReadAllText(path)));
-        }
-    }
-
-    /// <summary>
-    /// <c>catch (SQLiteException …)</c> の例外フィルタと本体を切り出す
-    /// </summary>
-    /// <remarks>
-    /// 本体は波括弧の対応で切り出す（行単位の走査では入れ子の try/catch を追えない）。
-    /// フィルタが無い場合は <c>null</c> を返す。
-    /// </remarks>
     private static IReadOnlyList<(string Filter, string Body)> ExtractSQLiteCatchBlocks(string codeOnlySource)
-    {
-        var results = new List<(string, string)>();
+        => SQLiteCatchBlockInspection.ExtractSQLiteCatchBlocks(codeOnlySource);
 
-        foreach (Match match in Regex.Matches(codeOnlySource, @"catch\s*\(\s*SQLiteException[^)]*\)"))
-        {
-            var cursor = match.Index + match.Length;
-            string filter = null;
+    private static bool SwallowsToFalse(string body)
+        => SQLiteCatchBlockInspection.SwallowsToFalse(body);
 
-            var whenMatch = Regex.Match(
-                codeOnlySource.Substring(cursor),
-                @"^\s*when\s*\(");
-            if (whenMatch.Success)
-            {
-                var filterStart = cursor + whenMatch.Length - 1;
-                var filterEnd = FindMatching(codeOnlySource, filterStart, '(', ')');
-                if (filterEnd < 0)
-                {
-                    continue;
-                }
-
-                filter = codeOnlySource.Substring(filterStart + 1, filterEnd - filterStart - 1).Trim();
-                cursor = filterEnd + 1;
-            }
-
-            var braceStart = codeOnlySource.IndexOf('{', cursor);
-            if (braceStart < 0)
-            {
-                continue;
-            }
-
-            var braceEnd = FindMatching(codeOnlySource, braceStart, '{', '}');
-            if (braceEnd < 0)
-            {
-                continue;
-            }
-
-            results.Add((filter, codeOnlySource.Substring(braceStart + 1, braceEnd - braceStart - 1)));
-        }
-
-        return results;
-    }
-
-    private static int FindMatching(string source, int openIndex, char open, char close)
-    {
-        var depth = 0;
-        for (var i = openIndex; i < source.Length; i++)
-        {
-            if (source[i] == open)
-            {
-                depth++;
-            }
-            else if (source[i] == close)
-            {
-                depth--;
-                if (depth == 0)
-                {
-                    return i;
-                }
-            }
-        }
-
-        return -1;
-    }
-
-    private static bool SwallowsToFalse(string body) =>
-        Regex.IsMatch(body ?? string.Empty, @"\breturn\s+false\s*;");
-
-    /// <summary>
-    /// 例外フィルタが一過性ロックを<b>除外</b>しているか（＝否定形で参照しているか）
-    /// </summary>
-    /// <remarks>
-    /// 「<c>IsTransientLockError</c> という語が含まれるか」で判定すると、極性が反転した
-    /// <c>when (DbContext.IsTransientLockError(ex))</c>（＝一過性ロック<b>だけ</b>を false へ畳む、
-    /// この Issue が消そうとしている欠陥そのもの）が検査を素通りする
-    /// （<c>.claude/rules/development-conventions.md</c> #1786「極性の反転」）。
-    /// 否定（<c>!</c>）を伴う参照だけを適合とする。
-    /// </remarks>
-    private static bool ExcludesTransientLockError(string filter) =>
-        filter != null &&
-        Regex.IsMatch(filter, @"!\s*\(?\s*(?:DbContext\s*\.\s*)?IsTransientLockError\s*\(");
+    private static bool ExcludesTransientLockError(string filter)
+        => SQLiteCatchBlockInspection.ExcludesTransientLockError(filter);
 
     #endregion
 }

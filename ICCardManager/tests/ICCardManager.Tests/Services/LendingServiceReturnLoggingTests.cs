@@ -65,8 +65,8 @@ public sealed class LendingServiceReturnLoggingTests : IDisposable
         var cacheOptions = Options.Create(new CacheOptions());
 
         var ledgerRepo = new LedgerRepository(_dbContext);
-        var cardRepo = new CardRepository(_dbContext, cacheServiceMock.Object, cacheOptions);
-        var staffRepo = new StaffRepository(_dbContext, cacheServiceMock.Object, cacheOptions);
+        var cardRepo = new CardRepository(_dbContext, cacheServiceMock.Object, cacheOptions, NullLogger<CardRepository>.Instance);
+        var staffRepo = new StaffRepository(_dbContext, cacheServiceMock.Object, cacheOptions, NullLogger<StaffRepository>.Instance);
         var settingsRepo = new SettingsRepository(_dbContext, cacheServiceMock.Object, cacheOptions);
 
         _service = new LendingService(

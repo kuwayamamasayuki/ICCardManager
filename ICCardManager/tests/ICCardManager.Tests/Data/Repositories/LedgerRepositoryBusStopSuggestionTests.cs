@@ -10,6 +10,7 @@ using ICCardManager.Infrastructure.Caching;
 using Microsoft.Extensions.Options;
 using Moq;
 using Xunit;
+using Microsoft.Extensions.Logging.Abstractions;
 
 namespace ICCardManager.Tests.Data.Repositories;
 
@@ -46,7 +47,7 @@ public class LedgerRepositoryBusStopSuggestionTests : IDisposable
                 It.IsAny<string>(), It.IsAny<Func<Task<IEnumerable<IcCard>>>>(), It.IsAny<TimeSpan>()))
             .Returns((string key, Func<Task<IEnumerable<IcCard>>> factory, TimeSpan expiration) => factory());
         _cardRepository = new CardRepository(
-            _dbContext, cacheServiceMock.Object, Options.Create(new CacheOptions()));
+            _dbContext, cacheServiceMock.Object, Options.Create(new CacheOptions()), NullLogger<CardRepository>.Instance);
     }
 
     /// <summary>

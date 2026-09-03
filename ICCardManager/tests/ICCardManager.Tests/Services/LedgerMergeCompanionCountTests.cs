@@ -63,8 +63,8 @@ public class LedgerMergeCompanionCountTests : IDisposable
             .Returns((string _, Func<Task<IEnumerable<Staff>>> factory, TimeSpan _) => factory());
 
         _ledgerRepository = new LedgerRepository(_dbContext);
-        var cardRepository = new CardRepository(_dbContext, cacheServiceMock.Object, Options.Create(new CacheOptions()));
-        var staffRepository = new StaffRepository(_dbContext, cacheServiceMock.Object, Options.Create(new CacheOptions()));
+        var cardRepository = new CardRepository(_dbContext, cacheServiceMock.Object, Options.Create(new CacheOptions()), NullLogger<CardRepository>.Instance);
+        var staffRepository = new StaffRepository(_dbContext, cacheServiceMock.Object, Options.Create(new CacheOptions()), NullLogger<StaffRepository>.Instance);
 
         // OperationLogger のログ記録メソッドは virtual ではないため実物を使い、
         // 「実際に挿入された OperationLog の中身」を書き込み先のモックで捕捉する

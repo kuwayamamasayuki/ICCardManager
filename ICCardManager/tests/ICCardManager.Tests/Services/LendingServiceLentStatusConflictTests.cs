@@ -59,8 +59,8 @@ public sealed class LendingServiceLentStatusConflictTests : IDisposable
         var cacheService = CreatePassThroughCacheService();
 
         _ledgerRepository = new LedgerRepository(_dbContext);
-        _realCardRepository = new CardRepository(_dbContext, cacheService, cacheOptions);
-        _staffRepository = new StaffRepository(_dbContext, cacheService, cacheOptions);
+        _realCardRepository = new CardRepository(_dbContext, cacheService, cacheOptions, NullLogger<CardRepository>.Instance);
+        _staffRepository = new StaffRepository(_dbContext, cacheService, cacheOptions, NullLogger<StaffRepository>.Instance);
         _settingsRepository = new SettingsRepository(_dbContext, cacheService, cacheOptions);
 
         _staffRepository.InsertAsync(new Staff
@@ -245,7 +245,7 @@ public sealed class LendingServiceLentStatusConflictTests : IDisposable
         // Arrange: 実 DB 上でカードを論理削除し、WHERE is_deleted = 0 に一致しない状態を作る
         var cacheServiceMock = CreatePassThroughCacheServiceMock();
         var repository = new CardRepository(
-            _dbContext, cacheServiceMock.Object, Options.Create(new CacheOptions()));
+            _dbContext, cacheServiceMock.Object, Options.Create(new CacheOptions()), NullLogger<CardRepository>.Instance);
         await DeleteCardAsync();
         cacheServiceMock.Invocations.Clear();
 
@@ -267,7 +267,7 @@ public sealed class LendingServiceLentStatusConflictTests : IDisposable
     {
         var cacheServiceMock = CreatePassThroughCacheServiceMock();
         var repository = new CardRepository(
-            _dbContext, cacheServiceMock.Object, Options.Create(new CacheOptions()));
+            _dbContext, cacheServiceMock.Object, Options.Create(new CacheOptions()), NullLogger<CardRepository>.Instance);
         cacheServiceMock.Invocations.Clear();
 
         var updated = await repository.UpdateLentStatusAsync(TestCardIdm, true, DateTime.Now, TestStaffIdm);

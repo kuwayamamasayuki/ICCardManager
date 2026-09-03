@@ -60,7 +60,7 @@ public class LedgerDetailSaveOrderingIntegrationTests : IDisposable
             It.IsAny<TimeSpan>()))
             .Returns((string key, Func<Task<IEnumerable<IcCard>>> factory, TimeSpan _) => factory());
         var cardRepository = new CardRepository(
-            _dbContext, cacheServiceMock.Object, Options.Create(new CacheOptions()));
+            _dbContext, cacheServiceMock.Object, Options.Create(new CacheOptions()), NullLogger<CardRepository>.Instance);
         cardRepository.InsertAsync(new IcCard
         {
             CardIdm = TestCardIdm,
