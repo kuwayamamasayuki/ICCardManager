@@ -222,15 +222,27 @@
                                Margin="0,15,0,0"
                                Padding="0"/>
                         <StackPanel Orientation="Horizontal" Margin="0,5,0,0">
+            <!-- Issue #1279 と同じく ValidationRule を付ける。付けないと非数値の入力が
+                                 バインディングで黙って捨てられ、赤枠も出ないまま前の値が保存される -->
                             <TextBox x:Name="CompanionCountTimeoutTextBox"
-                                     Text="{Binding CompanionCountInputTimeoutSeconds, UpdateSourceTrigger=PropertyChanged}"
                                      Width="80"
                                      Padding="8,6"
                                      TextAlignment="Right"
                                      IsEnabled="{Binding SkipCompanionCountInputOnReturn, Converter={StaticResource InverseBooleanConverter}}"
                                      AutomationProperties.Name="同行者数入力の自動クローズ秒数"
                                      AutomationProperties.HelpText="返却時の同行者数入力を「外0名」として自動的に閉じるまでの秒数。0 を入力すると自動的に閉じません"
-                                     ToolTip="0 を入力すると自動的に閉じず、必ず同行者数を尋ねます（アクセスキー: Alt+D）"/>
+                                     ToolTip="0 を入力すると自動的に閉じず、必ず同行者数を尋ねます（アクセスキー: Alt+D）">
+                                <TextBox.Text>
+                                    <Binding Path="CompanionCountInputTimeoutSeconds" UpdateSourceTrigger="PropertyChanged">
+                                        <Binding.ValidationRules>
+                                            <validation:NumericRangeValidationRule
+                                                Min="0"
+                                                Max="300"
+                                                FieldName="同行者数入力の自動クローズ秒数"/>
+                                        </Binding.ValidationRules>
+                                    </Binding>
+                                </TextBox.Text>
+                            </TextBox>
                             <TextBlock Text="秒" VerticalAlignment="Center" Margin="6,0,0,0"/>
                         </StackPanel>
                         <TextBlock Text="※ 入力待ちで業務が止まらないよう、既定では30秒で「外0名」として自動的に閉じます。入力を始めると自動的に閉じません。複数名での利用が多く必ず尋ねたい場合は 0 を入力してください（5〜300秒、または 0）"

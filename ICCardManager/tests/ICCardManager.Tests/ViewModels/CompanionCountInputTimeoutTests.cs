@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Threading.Tasks;
 using FluentAssertions;
@@ -175,6 +175,18 @@ public class CompanionCountInputTimeoutTests
         _vm.IsCountdownRunning.Should().BeFalse();
         Timer.IsRunning.Should().BeFalse();
         _vm.WasClosedByTimeout.Should().BeFalse("職員の操作で閉じたのであってタイムアウトではない");
+    }
+
+    [Fact]
+    public void Initialize_タイムアウト済みの印を持ち越さないこと()
+    {
+        _vm.Initialize(new[] { Usage() }, autoCloseSeconds: 30);
+        Timer.SimulateTicks(30);
+        _vm.WasClosedByTimeout.Should().BeTrue();
+
+        _vm.Initialize(new[] { Usage(2) }, autoCloseSeconds: 30);
+
+        _vm.WasClosedByTimeout.Should().BeFalse("前回の結果を持ち越すと、閉じ方の判定が食い違う（#1883）");
     }
 
     [Fact]

@@ -94,6 +94,7 @@ public partial class CompanionCountInputViewModel : ViewModelBase
     public void Initialize(IEnumerable<Ledger> ledgers, int autoCloseSeconds)
     {
         StopCountdown();
+        WasClosedByTimeout = false;
         foreach (var existing in Items)
         {
             existing.PropertyChanged -= OnItemPropertyChanged;
