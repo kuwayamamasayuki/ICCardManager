@@ -380,7 +380,15 @@ public partial class MainViewModel : ViewModelBase
     /// <summary>
     /// 残高不整合のあるLedgerIdとその期待残高・実際残高のマップ（Issue #1052）
     /// </summary>
-    private Dictionary<int, (int ExpectedBalance, int ActualBalance)> _balanceInconsistencies = new();
+    /// <remarks>
+    /// Issue #2007: <c>IsInitialBalanceCorrection</c> は「導入時残高の訂正案として付け替えたマーカー」
+    /// であることを表す。このとき期待残高＝直後の記録から逆算した残高、実際残高＝導入行の記録。
+    /// 通常の不整合（前行から前方計算した期待値）とは意味が違うため、表示文言はこのフラグで分岐する。
+    /// 摘要文字列（「新規購入」等）で分岐すると、導入行の摘要を持つ行に通常経路でマーカーが付いたとき
+    /// （CSV 取込や編集で導入行が先頭でなくなった場合等）に、前方計算の値を「逆算した残高」と偽って
+    /// 案内してしまう（#1763「同じ判断を配らない」／#1883「食い違った状態を表現できなくする」）。
+    /// </remarks>
+    private Dictionary<int, (int ExpectedBalance, int ActualBalance, bool IsInitialBalanceCorrection)> _balanceInconsistencies = new();
 
     /// <summary>
     /// 履歴表示中のカードの現在残高
@@ -1971,14 +1979,22 @@ public partial class MainViewModel : ViewModelBase
     /// <summary>
     /// 履歴表示（メイン画面に表示）
     /// </summary>
-    private async Task ShowHistoryAsync(IcCard card)
+    /// <param name="card">表示するカード</param>
+    /// <param name="fromDate">
+    /// Issue #2007: 表示期間の開始日。省略時は当月 1 日。導入時残高の誤りを案内するときは
+    /// 導入行（何年も前になり得る）を画面に出すため、その日付から表示する。
+    /// </param>
+    private async Task ShowHistoryAsync(IcCard card, DateTime? fromDate = null)
     {
         HistoryCard = card.ToDto();
         HistoryCurrentPage = 1;
 
-        // 期間を今月にリセット
+        // 期間を今月にリセット（fromDate 指定時はその日から今日まで）
         var today = DateTime.Today;
-        HistoryFromDate = new DateTime(today.Year, today.Month, 1);
+        var defaultFrom = new DateTime(today.Year, today.Month, 1);
+        HistoryFromDate = fromDate.HasValue && fromDate.Value.Date <= today
+            ? fromDate.Value.Date
+            : defaultFrom;
         HistoryToDate = today;
         HistorySelectedYear = today.Year;
         HistorySelectedMonth = today.Month;
@@ -2257,8 +2273,15 @@ public partial class MainViewModel : ViewModelBase
             if (_balanceInconsistencies.TryGetValue(dto.Id, out var info))
             {
                 dto.HasBalanceInconsistency = true;
-                dto.BalanceInconsistencyMessage =
-                    $"残高不整合: 期待値 {info.ExpectedBalance:N0}円 / 実際 {info.ActualBalance:N0}円";
+                // Issue #2007: 「導入時残高の誤り」として BuildInconsistencyMarkers が導入行へ付け替えた
+                // マーカーは、期待値/実際ではなく、直すべき行と逆算した金額を案内する。
+                // 分岐は摘要ではなくマーカー自身のフラグで行う（_balanceInconsistencies の remarks）。
+                dto.BalanceInconsistencyMessage = info.IsInitialBalanceCorrection
+                    ? InitialBalanceCorrectionMessage.ForHistoryRow(
+                        recordedBalance: info.ActualBalance,
+                        suggestedBalance: info.ExpectedBalance,
+                        appliesToIncome: Ledger.InitialRecordCarriesIncome(dto.Summary))
+                    : $"残高不整合: 期待値 {info.ExpectedBalance:N0}円 / 実際 {info.ActualBalance:N0}円";
             }
             else
             {
@@ -2273,7 +2296,22 @@ public partial class MainViewModel : ViewModelBase
     /// </summary>
     private void UpdateHistoryPeriodDisplay()
     {
-        HistoryPeriodDisplay = $"{HistoryFromDate.ToString("yyyy年M月", CultureInfo.InvariantCulture)}";
+        HistoryPeriodDisplay = FormatHistoryPeriod(HistoryFromDate, HistoryToDate);
+    }
+
+    /// <summary>
+    /// 履歴の期間ラベルを組み立てる。
+    /// </summary>
+    /// <remarks>
+    /// 通常の表示期間は暦月（年月ピッカー）なので開始月だけを出す。Issue #2007 の警告クリックは
+    /// 導入行の日付から今日までの複数月を表示するため、開始月と終了月が異なるときは範囲で出す
+    /// （開始月だけ出すと「その月を表示中」と読まれ、画面に並ぶ数年分の行と食い違う）。
+    /// </remarks>
+    internal static string FormatHistoryPeriod(DateTime from, DateTime to)
+    {
+        var fromText = from.ToString("yyyy年M月", CultureInfo.InvariantCulture);
+        if (from.Year == to.Year && from.Month == to.Month) return fromText;
+        return $"{fromText}～{to.ToString("yyyy年M月", CultureInfo.InvariantCulture)}";
     }
 
     #region 履歴期間選択コマンド
@@ -2705,12 +2743,15 @@ public partial class MainViewModel : ViewModelBase
         // Issue #1740: 残高の自動計算に使う直前行の残高を、ダイアログを開く前に確定させる
         var previousBalance = FindPreviousBalanceForEdit(ledger);
 
+        // Issue #2007: 導入行なら、導入時残高の誤りの訂正案をダイアログへ渡す
+        var initialBalanceCorrection = await ResolveInitialBalanceCorrectionForEditAsync(ledger);
+
         // 全項目編集ダイアログ表示
         Views.Dialogs.LedgerRowEditDialog capturedEditDialog = null;
         var dialogResult = await _navigationService.ShowDialogAsync<Views.Dialogs.LedgerRowEditDialog>(
             async d =>
             {
-                await d.InitializeForEditAsync(ledger, operatorIdm, previousBalance);
+                await d.InitializeForEditAsync(ledger, operatorIdm, previousBalance, initialBalanceCorrection);
                 if (showSaveAndNext)
                 {
                     d.SetShowSaveAndNextButton(true);
@@ -2787,16 +2828,82 @@ public partial class MainViewModel : ViewModelBase
     /// <summary>
     /// 残高不整合警告を組み立てる（表示文言を1か所に集約する）
     /// </summary>
+    /// <remarks>
+    /// Issue #2007: 不整合が「導入時残高の誤り」の形状なら、件数ではなく原因を名指しする。
+    /// 件数の文言だと、ハイライトされる行（従来はチェーンが切れた側＝正しい行）を直す誘導になる。
+    /// </remarks>
     private static WarningItem BuildBalanceInconsistencyWarning(
         string cardType, string cardNumber, string cardIdm, ConsistencyResult result)
     {
         var totalCount = result.Inconsistencies.Count + result.DetailInconsistencies.Count;
         return new WarningItem
         {
-            DisplayText = $"⚠️ 残高の不整合が{totalCount}件あります（{cardType} {cardNumber}）",
+            DisplayText = result.InitialBalanceCorrection != null
+                ? InitialBalanceCorrectionMessage.ForWarningArea(cardType, cardNumber)
+                : $"⚠️ 残高の不整合が{totalCount}件あります（{cardType} {cardNumber}）",
             Type = WarningType.BalanceInconsistency,
             CardIdm = cardIdm
         };
+    }
+
+    /// <summary>
+    /// Issue #2007: 整合性チェック結果から、履歴一覧でハイライトする行と表示値のマップを組み立てる。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// 通常は不整合の行（チェーンが切れた側）をそのまま対象にする。ただし「導入時残高の誤り」の形状
+    /// （<see cref="ConsistencyResult.InitialBalanceCorrection"/>）では、切れた側の 2 行目はカード由来の
+    /// 正しい行なので対象から外し、代わりに<b>導入行</b>を「期待値＝逆算した残高／実際＝記録されている残高」
+    /// で対象にする。2 行目を強調したままだと、利用者が正しい行を誤った導入行に合わせて書き換える誘導になる。
+    /// </para>
+    /// <para>
+    /// 詳細レベルの不整合の親 Ledger も対象に含める（Issue #1059）が、導入時残高の誤りではその詳細不整合も
+    /// 導入行の写像（先頭明細の起点が導入行の残高）なので、同様に導入行へ寄せる。
+    /// </para>
+    /// </remarks>
+    internal static Dictionary<int, (int ExpectedBalance, int ActualBalance, bool IsInitialBalanceCorrection)> BuildInconsistencyMarkers(
+        ConsistencyResult result)
+    {
+        var correction = result.InitialBalanceCorrection;
+        if (correction != null)
+        {
+            return new Dictionary<int, (int ExpectedBalance, int ActualBalance, bool IsInitialBalanceCorrection)>
+            {
+                { correction.LedgerId, (correction.SuggestedBalance, correction.RecordedBalance, true) }
+            };
+        }
+
+        // 親レコード不整合 + 詳細レベル不整合（詳細の親LedgerId単位で集約）
+        var markers = result.Inconsistencies
+            .ToDictionary(i => i.LedgerId, i => (i.ExpectedBalance, i.ActualBalance, false));
+
+        // Issue #1059: 詳細レベル不整合がある親Ledgerもハイライト対象に追加
+        foreach (var detailGroup in result.DetailInconsistencies.GroupBy(d => d.LedgerId))
+        {
+            if (!markers.ContainsKey(detailGroup.Key))
+            {
+                var first = detailGroup.First();
+                markers[detailGroup.Key] = (first.ExpectedBalance, first.ActualBalance, false);
+            }
+        }
+        return markers;
+    }
+
+    /// <summary>
+    /// Issue #2007: 行編集を開く前に、その行が導入行で「導入時残高の誤り」が検知されているなら訂正案を返す。
+    /// </summary>
+    /// <remarks>
+    /// 全期間の整合性チェック（6 年分の読み取り）は導入行を開くときだけ走らせる。利用行では null を返し、
+    /// 問い合わせない。訂正案の行 ID が編集対象と一致するときだけ返す（一致しなければ別の形状）。
+    /// </remarks>
+    internal async Task<InitialBalanceCorrection> ResolveInitialBalanceCorrectionForEditAsync(LedgerDto ledger)
+    {
+        if (ledger == null || !Ledger.IsInitialRecordSummary(ledger.Summary)) return null;
+
+        var result = await _ledgerConsistencyChecker.CheckBalanceConsistencyAsync(
+            ledger.CardIdm, FullPeriodStart, FullPeriodEnd);
+        var correction = result.InitialBalanceCorrection;
+        return correction != null && correction.LedgerId == ledger.Id ? correction : null;
     }
 
     /// <summary>
@@ -2806,7 +2913,11 @@ public partial class MainViewModel : ViewModelBase
     /// 不整合を検出した場合、メイン画面右下の警告エリアに警告を表示します。
     /// 交通系ICカード内の履歴に記録されている残高が正であるため、自動修正は行いません。
     /// </remarks>
-    private async Task CheckAndNotifyConsistencyAsync()
+    /// <param name="fullPeriodResult">
+    /// Issue #2007: 呼び出し元が直前に取った全期間の判定結果。渡されたときは再取得しない
+    /// （警告クリック経路は導入行の日付を決めるために全期間を先に読んでいる。6 年分を 2 度読まない）。
+    /// </param>
+    private async Task CheckAndNotifyConsistencyAsync(ConsistencyResult fullPeriodResult = null)
     {
         if (HistoryCard == null) return;
 
@@ -2819,7 +2930,7 @@ public partial class MainViewModel : ViewModelBase
         // 出ないため「解消済み」と誤解され、不整合が放置される。
         // 表示期間の結果を流用しないのは、チェーンの起点が範囲によって変わるため
         // 部分範囲の判定が全期間の判定と一致する保証がないから。
-        var warningResult = await _ledgerConsistencyChecker.CheckBalanceConsistencyAsync(
+        var warningResult = fullPeriodResult ?? await _ledgerConsistencyChecker.CheckBalanceConsistencyAsync(
             HistoryCard.CardIdm, FullPeriodStart, FullPeriodEnd);
 
         ReplaceWarnings(
@@ -2833,19 +2944,8 @@ public partial class MainViewModel : ViewModelBase
         // レコード編集・削除後にもハイライトが正しく反映される
         if (_balanceInconsistencies.Count > 0 || !checkResult.IsConsistent)
         {
-            // 親レコード不整合 + 詳細レベル不整合（詳細の親LedgerId単位で集約）
-            _balanceInconsistencies = checkResult.Inconsistencies
-                .ToDictionary(i => i.LedgerId, i => (i.ExpectedBalance, i.ActualBalance));
-
-            // Issue #1059: 詳細レベル不整合がある親Ledgerもハイライト対象に追加
-            foreach (var detailGroup in checkResult.DetailInconsistencies.GroupBy(d => d.LedgerId))
-            {
-                if (!_balanceInconsistencies.ContainsKey(detailGroup.Key))
-                {
-                    var first = detailGroup.First();
-                    _balanceInconsistencies[detailGroup.Key] = (first.ExpectedBalance, first.ActualBalance);
-                }
-            }
+            // Issue #2007: 導入時残高の誤りなら、切れた側ではなく導入行をハイライト対象にする
+            _balanceInconsistencies = BuildInconsistencyMarkers(checkResult);
             ApplyBalanceInconsistencyMarkers();
         }
     }
@@ -3599,10 +3699,15 @@ public partial class MainViewModel : ViewModelBase
                 var card = await _cardRepository.GetByIdmAsync(warning.CardIdm);
                 if (card != null)
                 {
-                    await ShowHistoryAsync(card);
+                    // Issue #2007: 導入時残高の誤りなら、導入行（何年も前になり得る）を画面に出すため
+                    // その日付から表示する。当月だけ表示すると直すべき行が期間外で見えない。
+                    var fullPeriodResult = await _ledgerConsistencyChecker.CheckBalanceConsistencyAsync(
+                        card.CardIdm, FullPeriodStart, FullPeriodEnd);
+                    await ShowHistoryAsync(card, fullPeriodResult.InitialBalanceCorrection?.Date);
                     // ShowHistoryAsync後に期間が確定するため、ここで整合性チェック＆ハイライト適用
                     // CheckAndNotifyConsistencyAsync内で_balanceInconsistenciesの更新とマーキングを行う
-                    await CheckAndNotifyConsistencyAsync();
+                    // （全期間の結果は直前に取ったものを渡して再取得しない）
+                    await CheckAndNotifyConsistencyAsync(fullPeriodResult);
                 }
                 break;
 

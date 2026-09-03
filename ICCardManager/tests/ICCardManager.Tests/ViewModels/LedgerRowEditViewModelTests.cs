@@ -1839,5 +1839,179 @@ public class LedgerRowEditViewModelTests : IDisposable
     }
 
     #endregion
+
+    #region 導入時残高の訂正（Issue #2007）
+
+    private static InitialBalanceCorrection CreateCorrection(int suggested, bool appliesToIncome) =>
+        new InitialBalanceCorrection(
+            ledgerId: 1, date: new DateTime(2025, 4, 1), recordedBalance: 5000,
+            suggestedBalance: suggested, appliesToIncome: appliesToIncome);
+
+    private async Task InitializeInitialRecordEditAsync(string summary, int income, int balance, InitialBalanceCorrection correction)
+    {
+        var ledger = new Ledger
+        {
+            Id = 1, CardIdm = TestCardIdm, Date = new DateTime(2025, 4, 1),
+            Summary = summary, Income = income, Expense = 0, Balance = balance
+        };
+        _ledgerRepoMock.Setup(r => r.GetByIdAsync(1)).ReturnsAsync(ledger);
+        var dto = new LedgerDto
+        {
+            Id = 1, CardIdm = TestCardIdm, Date = ledger.Date, DateDisplay = "R7.4.1",
+            Summary = summary, Income = income, Expense = 0, Balance = balance
+        };
+        await _viewModel.InitializeForEditAsync(dto, TestOperatorIdm, previousBalance: null, initialBalanceCorrection: correction);
+    }
+
+    /// <summary>
+    /// 提案があるときは、逆算した金額と「なぜ／どうすれば」を 3 要素で表示する。
+    /// </summary>
+    [Fact]
+    public async Task InitializeForEdit_導入時残高の提案があれば逆算した金額と対処を表示すること()
+    {
+        await InitializeInitialRecordEditAsync("新規購入", 5000, 5000, CreateCorrection(3000, appliesToIncome: true));
+
+        _viewModel.HasInitialBalanceSuggestion.Should().BeTrue();
+        _viewModel.InitialBalanceSuggestionText.Should().Contain("5,000円")
+            .And.Contain("3,000円")
+            .And.Contain("受入と残額")
+            .And.MatchRegex("してください。?$");
+    }
+
+    [Fact]
+    public async Task InitializeForEdit_提案が無ければ提案エリアを出さないこと()
+    {
+        await InitializeInitialRecordEditAsync("新規購入", 3000, 3000, correction: null);
+
+        _viewModel.HasInitialBalanceSuggestion.Should().BeFalse();
+        _viewModel.InitialBalanceSuggestionText.Should().BeEmpty();
+    }
+
+    /// <summary>
+    /// 「適用」で受入と残額の両方が逆算値になる（新規購入は受入欄にも残高を書く）。
+    /// 片方だけ直すと、月次帳票の「受入 − 払出 = 残額」が崩れたまま残る。
+    /// </summary>
+    [Fact]
+    public async Task ApplyInitialBalanceSuggestion_新規購入では受入と残額の両方を逆算値にすること()
+    {
+        await InitializeInitialRecordEditAsync("新規購入", 5000, 5000, CreateCorrection(3000, appliesToIncome: true));
+
+        _viewModel.ApplyInitialBalanceSuggestionCommand.Execute(null);
+
+        _viewModel.Income.Should().Be(3000);
+        _viewModel.Balance.Should().Be(3000);
+        _viewModel.Expense.Should().Be(0);
+        _viewModel.CanSave.Should().BeTrue();
+        _viewModel.WarningMessage.Should().BeEmpty("受入と残額が一致した状態では警告を出さない");
+    }
+
+    /// <summary>
+    /// 対の表明: ○月から繰越は受入欄を空欄にする（<c>BuildInitialLedgerAsync</c> の <c>hasIncome</c>）ので、
+    /// 残額だけを直し受入は 0 のまま。これが無いと常に両方を書く実装でも緑になる。
+    /// </summary>
+    [Fact]
+    public async Task ApplyInitialBalanceSuggestion_年度途中繰越では残額だけを逆算値にすること()
+    {
+        await InitializeInitialRecordEditAsync(SummaryGenerator.GetMidYearCarryoverSummary(5), 0, 8000, CreateCorrection(7500, appliesToIncome: false));
+
+        _viewModel.ApplyInitialBalanceSuggestionCommand.Execute(null);
+
+        _viewModel.Income.Should().Be(0);
+        _viewModel.Balance.Should().Be(7500);
+    }
+
+    /// <summary>
+    /// 自動計算が ON のまま適用すると、Income の代入で残額が前方計算され、OFF に戻したときに
+    /// 適用前の残額が復元されて適用が消える（コードレビュー指摘）。適用は自動計算を切ってから行う。
+    /// </summary>
+    [Fact]
+    public async Task ApplyInitialBalanceSuggestion_自動計算がONでも適用後の値が残ること()
+    {
+        var ledger = new Ledger
+        {
+            Id = 1, CardIdm = TestCardIdm, Date = new DateTime(2025, 4, 1),
+            Summary = "新規購入", Income = 5000, Expense = 0, Balance = 5000
+        };
+        _ledgerRepoMock.Setup(r => r.GetByIdAsync(1)).ReturnsAsync(ledger);
+        var dto = new LedgerDto { Id = 1, CardIdm = TestCardIdm, Date = ledger.Date, Summary = "新規購入", Income = 5000, Balance = 5000 };
+        await _viewModel.InitializeForEditAsync(dto, TestOperatorIdm, previousBalance: 0,
+            initialBalanceCorrection: CreateCorrection(3000, appliesToIncome: true));
+        _viewModel.IsAutoBalance = true;
+        _viewModel.CanAutoBalance.Should().BeTrue("前提: 直前残高を渡したので自動計算を ON にできる");
+
+        _viewModel.ApplyInitialBalanceSuggestionCommand.Execute(null);
+        _viewModel.IsAutoBalance = false;   // 利用者が OFF に戻しても適用が消えない
+
+        _viewModel.IsAutoBalance.Should().BeFalse();
+        _viewModel.Income.Should().Be(3000);
+        _viewModel.Balance.Should().Be(3000);
+    }
+
+    [Fact]
+    public async Task ApplyInitialBalanceSuggestion_提案が無ければ実行できず何も変えないこと()
+    {
+        await InitializeInitialRecordEditAsync("新規購入", 3000, 3000, correction: null);
+
+        _viewModel.ApplyInitialBalanceSuggestionCommand.CanExecute(null).Should().BeFalse();
+        _viewModel.ApplyInitialBalanceSuggestionCommand.Execute(null);
+
+        _viewModel.Income.Should().Be(3000);
+        _viewModel.Balance.Should().Be(3000);
+    }
+
+    /// <summary>
+    /// 適用したあと保存すると、DB へ両方の値が書かれる（通常の行編集と同じ経路・同じ監査ログ）。
+    /// </summary>
+    [Fact]
+    public async Task ApplyInitialBalanceSuggestion_適用して保存すると受入と残額の両方がDBへ書かれること()
+    {
+        await InitializeInitialRecordEditAsync("新規購入", 5000, 5000, CreateCorrection(3000, appliesToIncome: true));
+        Ledger saved = null;
+        _ledgerRepoMock.Setup(r => r.UpdateAsync(It.IsAny<Ledger>(), It.IsAny<SQLiteTransaction>()))
+            .Callback<Ledger, SQLiteTransaction>((l, _) => saved = l)
+            .ReturnsAsync(true);
+
+        _viewModel.ApplyInitialBalanceSuggestionCommand.Execute(null);
+        await _viewModel.SaveCommand.ExecuteAsync(null);
+
+        saved.Should().NotBeNull();
+        saved.Income.Should().Be(3000);
+        saved.Balance.Should().Be(3000);
+        _viewModel.IsSaved.Should().BeTrue();
+    }
+
+    /// <summary>
+    /// 受入欄に残高を書く導入行で受入と残額が食い違っていたら、保存は塞がずに警告する
+    /// （#1812「曖昧な入力は塞ぐより解決結果を見せる」）。片方だけ直す操作ミスの予防。
+    /// </summary>
+    [Fact]
+    public async Task Validate_新規購入で受入と残額が食い違っていれば警告すること()
+    {
+        await InitializeInitialRecordEditAsync("新規購入", 5000, 5000, correction: null);
+
+        _viewModel.Balance = 3000;
+
+        _viewModel.CanSave.Should().BeTrue("保存は塞がない");
+        _viewModel.WarningMessage.Should().Contain("受入 5,000円")
+            .And.Contain("残額 3,000円")
+            .And.MatchRegex("してください。?$");
+    }
+
+    /// <summary>
+    /// 対の表明: 受入欄を空欄にする「○月から繰越」と通常の利用行では、この警告を出さない。
+    /// </summary>
+    [Theory]
+    [InlineData("5月から繰越", 0, 8000)]
+    [InlineData("鉄道（天神～博多）", 0, 2790)]
+    public async Task Validate_受入欄が空欄の行では受入と残額の食い違いを警告しないこと(string summary, int income, int balance)
+    {
+        await InitializeInitialRecordEditAsync(summary, income, balance, correction: null);
+
+        _viewModel.Balance = balance - 100;
+
+        _viewModel.WarningMessage.Should().NotContain("受入と残額");
+    }
+
+    #endregion
 }
 

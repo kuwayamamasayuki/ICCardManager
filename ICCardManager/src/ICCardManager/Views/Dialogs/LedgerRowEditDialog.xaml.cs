@@ -142,9 +142,14 @@ namespace ICCardManager.Views.Dialogs
         /// 履歴一覧の表示順で編集対象の直前にある行の残高（Issue #1740）。残高自動計算の起点。
         /// 直前行が表示範囲に無い場合は null を渡すと自動計算が無効化される。
         /// </param>
-        public async Task InitializeForEditAsync(LedgerDto ledgerDto, string operatorIdm, int? previousBalance = null)
+        /// <param name="initialBalanceCorrection">
+        /// Issue #2007: 導入時残高の訂正案（全期間の残高整合性チェックで検知された導入行の編集時のみ）。無ければ null。
+        /// </param>
+        public async Task InitializeForEditAsync(
+            LedgerDto ledgerDto, string operatorIdm, int? previousBalance = null,
+            Services.InitialBalanceCorrection initialBalanceCorrection = null)
         {
-            await _viewModel.InitializeForEditAsync(ledgerDto, operatorIdm, previousBalance);
+            await _viewModel.InitializeForEditAsync(ledgerDto, operatorIdm, previousBalance, initialBalanceCorrection);
         }
 
         /// <summary>

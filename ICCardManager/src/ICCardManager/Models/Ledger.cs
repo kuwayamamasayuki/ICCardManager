@@ -134,5 +134,41 @@ namespace ICCardManager.Models
         /// </remarks>
         public bool IsMidYearCarryover =>
             SummaryGenerator.IsMidYearCarryoverSummary(Summary);
+
+        /// <summary>
+        /// 導入時（カード登録時）に書かれる行かどうか（Issue #2007）
+        /// </summary>
+        /// <remarks>
+        /// <c>CardManageViewModel.BuildInitialLedgerAsync</c> が書く 3 種の行
+        /// （「新規購入」／「○月から繰越」／3 月登録の「前年度より繰越」）を指す。
+        /// <see cref="IsCarryover"/> は帳票の集計・ソート用で「前年度より繰越」を含まない
+        /// （帳票では in-memory 合成される行のため）が、導入時残高の誤りの検知では DB に実在する
+        /// 導入行をすべて対象にする必要があるので別に定義する。
+        /// 判定の文言はいずれも組織設定に追従する（#1818）。
+        /// </remarks>
+        public bool IsInitialRecord => IsInitialRecordSummary(Summary);
+
+        /// <summary>
+        /// 摘要が導入行のものかどうか（<see cref="IsInitialRecord"/> の静的版。DTO 側からも使う）
+        /// </summary>
+        public static bool IsInitialRecordSummary(string summary)
+        {
+            if (string.IsNullOrEmpty(summary)) return false;
+            return summary == "新規購入"
+                || SummaryGenerator.IsMidYearCarryoverSummary(summary)
+                || summary == SummaryGenerator.GetCarryoverFromPreviousYearSummary();
+        }
+
+        /// <summary>
+        /// その摘要の導入行が受入欄にも残高を書く行かどうか（Issue #2007）
+        /// </summary>
+        /// <remarks>
+        /// <c>BuildInitialLedgerAsync</c> の <c>hasIncome</c> と同じ判断。新規購入と前年度より繰越は
+        /// <c>Income = Balance</c>、「○月から繰越」は受入欄を空欄（0）にする（月次帳票の
+        /// 受入欄に金額が入るのは 4 月の前年度繰越と新規購入のみ）。導入時残高を訂正するとき、
+        /// 受入も一緒に直すかどうかはこの判定で決める。
+        /// </remarks>
+        public static bool InitialRecordCarriesIncome(string summary) =>
+            IsInitialRecordSummary(summary) && !SummaryGenerator.IsMidYearCarryoverSummary(summary);
     }
 }

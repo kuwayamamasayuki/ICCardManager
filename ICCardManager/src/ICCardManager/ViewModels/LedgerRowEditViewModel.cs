@@ -295,6 +295,25 @@ namespace ICCardManager.ViewModels
         private bool _isLentRecord;
 
         /// <summary>
+        /// Issue #2007: 呼び出し元（MainViewModel）が全期間の残高整合性チェックで検知した
+        /// 導入時残高の訂正案。無ければ null。
+        /// </summary>
+        private InitialBalanceCorrection _initialBalanceCorrection;
+
+        /// <summary>
+        /// Issue #2007: 導入時残高の訂正案があるか（提案エリアの表示条件・適用コマンドの実行可否）
+        /// </summary>
+        [ObservableProperty]
+        [NotifyCanExecuteChangedFor(nameof(ApplyInitialBalanceSuggestionCommand))]
+        private bool _hasInitialBalanceSuggestion;
+
+        /// <summary>
+        /// Issue #2007: 提案エリアの文言（何が／なぜ／どうすれば）
+        /// </summary>
+        [ObservableProperty]
+        private string _initialBalanceSuggestionText = string.Empty;
+
+        /// <summary>
         /// パンくずテキスト（Issue #1134）
         /// </summary>
         [ObservableProperty]
@@ -415,7 +434,13 @@ namespace ICCardManager.ViewModels
         /// null のときは自動計算を使用不可（<see cref="CanAutoBalance"/> = false）にして手入力のみとする。
         /// 既定値が null なのは、呼び出し元が渡し忘れても残高を破壊せず「便利機能が使えない」だけで済ませるため。
         /// </param>
-        public async Task InitializeForEditAsync(LedgerDto ledgerDto, string operatorIdm, int? previousBalance = null)
+        /// <param name="initialBalanceCorrection">
+        /// Issue #2007: 導入時残高の訂正案。呼び出し元が全期間の残高整合性チェックで、この行が
+        /// 「導入時残高の誤り」の形状の導入行だと検知したときだけ渡す。無ければ null。
+        /// </param>
+        public async Task InitializeForEditAsync(
+            LedgerDto ledgerDto, string operatorIdm, int? previousBalance = null,
+            InitialBalanceCorrection initialBalanceCorrection = null)
         {
             _operatorIdm = operatorIdm;
             _cardIdm = ledgerDto.CardIdm;
@@ -466,6 +491,17 @@ namespace ICCardManager.ViewModels
             // 貸出中レコードも削除可能とする。誤操作防止は RequestDelete() の確認メッセージで担保。
             CanDelete = true;
             IsLentRecord = ledgerDto.IsLentRecord;
+
+            // Issue #2007: 導入時残高の訂正案は、この行に対するものだけを受け付ける
+            // （呼び出し元が別の行の提案を渡しても、無関係な行の値を書き換えさせない）。
+            _initialBalanceCorrection =
+                initialBalanceCorrection != null && initialBalanceCorrection.LedgerId == ledgerDto.Id
+                    ? initialBalanceCorrection
+                    : null;
+            HasInitialBalanceSuggestion = _initialBalanceCorrection != null;
+            InitialBalanceSuggestionText = _initialBalanceCorrection != null
+                ? InitialBalanceCorrectionMessage.ForEditDialog(_initialBalanceCorrection)
+                : string.Empty;
 
             Validate();
             OnPropertyChanged(nameof(IsAddMode));
@@ -591,6 +627,31 @@ namespace ICCardManager.ViewModels
                 UpdateAutoBalanceAvailability();
             }
             Validate();
+        }
+
+        /// <summary>
+        /// Issue #2007: 導入時残高の訂正案を受入・残額へ適用する。
+        /// </summary>
+        /// <remarks>
+        /// 新規購入・前年度より繰越は受入欄にも残高を書く行なので受入と残額の両方を、
+        /// ○月から繰越は残額だけを逆算値にする（<see cref="InitialBalanceCorrection.AppliesToIncome"/>）。
+        /// 片方だけ直すと月次帳票の「受入 − 払出 = 残額」が崩れたまま残るため、1 操作で揃える。
+        /// 保存は通常の行編集と同じ経路（監査ログも同じ）。
+        /// </remarks>
+        [RelayCommand(CanExecute = nameof(HasInitialBalanceSuggestion))]
+        private void ApplyInitialBalanceSuggestion()
+        {
+            if (_initialBalanceCorrection == null) return;
+
+            // 自動計算が ON のままだと、Income の代入で Balance が「前行 + 受入」へ再計算され、
+            // さらに OFF へ戻したときに適用前の残高（_balanceBeforeAutoBalance）が復元されて適用が消える。
+            // 適用は手入力値の確定なので、先に OFF にしてから Income → Balance の順に代入する。
+            IsAutoBalance = false;
+            if (_initialBalanceCorrection.AppliesToIncome)
+            {
+                Income = _initialBalanceCorrection.SuggestedBalance;
+            }
+            Balance = _initialBalanceCorrection.SuggestedBalance;
         }
 
         /// <summary>
@@ -756,6 +817,14 @@ namespace ICCardManager.ViewModels
             if (Income == 0 && Expense == 0 && !isSpecialSummary)
             {
                 AddWarning("受入と払出が両方0円です。繰越等でなければ金額を入力してください。");
+            }
+
+            // Issue #2007: 受入欄に残高を書く導入行（新規購入・前年度より繰越）で受入と残額が食い違うと、
+            // 月次帳票の「受入 − 払出 = 残額」が崩れる。導入時残高を片方だけ直す操作ミスの予防。
+            // 保存は塞がない（#1812「曖昧な入力は塞ぐより解決結果を見せる」）。
+            if (Ledger.InitialRecordCarriesIncome(Summary) && Income != Balance)
+            {
+                AddWarning(InitialBalanceCorrectionMessage.ForIncomeBalanceMismatch(Income, Balance));
             }
 
             // 残高が負になるチェック

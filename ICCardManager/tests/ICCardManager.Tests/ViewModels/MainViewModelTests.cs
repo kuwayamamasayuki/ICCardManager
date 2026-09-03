@@ -2316,9 +2316,9 @@ public class MainViewModelTests : IDisposable
         // internalフィールドへ直接アクセスできないため、リフレクションで設定
         var field = typeof(MainViewModel).GetField("_balanceInconsistencies",
             System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-        field.SetValue(_viewModel, new Dictionary<int, (int ExpectedBalance, int ActualBalance)>
+        field.SetValue(_viewModel, new Dictionary<int, (int ExpectedBalance, int ActualBalance, bool IsInitialBalanceCorrection)>
         {
-            { 2, (900, 800) }
+            { 2, (900, 800, false) }
         });
 
         // Act
@@ -2331,6 +2331,220 @@ public class MainViewModelTests : IDisposable
         _viewModel.HistoryLedgers[1].BalanceInconsistencyMessage.Should().Contain("実際 800円");
         _viewModel.HistoryLedgers[2].HasBalanceInconsistency.Should().BeFalse();
     }
+
+    #region 導入時残高の誤りの検知と案内（Issue #2007）
+
+    /// <summary>
+    /// Issue #2007 の形状: 導入行（新規購入）の残高だけが誤り、以後はカード由来で正しい。
+    /// 全期間チェックはこの形を <c>InitialBalanceCorrection</c> として返す。
+    /// </summary>
+    private static List<Ledger> CreateInitialBalanceErrorLedgers(string cardIdm) => new()
+    {
+        new Ledger { Id = 1, CardIdm = cardIdm, Date = new DateTime(2025, 4, 1), Summary = "新規購入", Income = 5000, Expense = 0, Balance = 5000 },
+        new Ledger { Id = 2, CardIdm = cardIdm, Date = new DateTime(2025, 4, 2), Summary = "鉄道（天神～博多）", Income = 0, Expense = 210, Balance = 2790 },
+        new Ledger { Id = 3, CardIdm = cardIdm, Date = new DateTime(2025, 4, 3), Summary = "鉄道（博多～天神）", Income = 0, Expense = 260, Balance = 2530 }
+    };
+
+    /// <summary>
+    /// 警告文言は「残高の不整合が N 件」ではなく、導入時の残額が原因であることを名指しする。
+    /// 従来の文言では、ハイライトされる 2 行目（正しい行）を直す誘導になっていた。
+    /// </summary>
+    [Fact]
+    public async Task CheckAllCardsConsistencyAsync_導入時残高の誤りなら警告文言で原因を名指しすること()
+    {
+        const string cardIdm = "0102030405060708";
+        SetupWarningCheckDefaults();
+        _cardRepositoryMock.Setup(r => r.GetAllAsync())
+            .ReturnsAsync(new List<IcCard> { new IcCard { CardIdm = cardIdm, CardType = "はやかけん", CardNumber = "5042" } });
+        _ledgerRepositoryMock.Setup(r => r.GetByDateRangeAsync(cardIdm, It.IsAny<DateTime>(), It.IsAny<DateTime>()))
+            .ReturnsAsync(CreateInitialBalanceErrorLedgers(cardIdm));
+
+        await _viewModel.CheckAllCardsConsistencyAsync();
+
+        var warning = _viewModel.WarningMessages.Should().ContainSingle(w => w.Type == WarningType.BalanceInconsistency).Which;
+        warning.DisplayText.Should().Contain("導入時の残額")
+            .And.Contain("はやかけん 5042")
+            .And.NotContain("不整合が", "原因を名指しできるときは件数の汎用文言を使わない");
+    }
+
+    /// <summary>
+    /// 対の表明: 通常の不整合（導入行以外で切れている）では従来どおり件数の文言のまま。
+    /// これが無いと、全不整合を「導入時の残額」と決めつける実装でも緑になる。
+    /// </summary>
+    [Fact]
+    public async Task CheckAllCardsConsistencyAsync_通常の不整合では従来の件数文言のままであること()
+    {
+        const string cardIdm = "0102030405060708";
+        SetupWarningCheckDefaults();
+        _cardRepositoryMock.Setup(r => r.GetAllAsync())
+            .ReturnsAsync(new List<IcCard> { new IcCard { CardIdm = cardIdm, CardType = "はやかけん", CardNumber = "5042" } });
+        var ledgers = CreateInitialBalanceErrorLedgers(cardIdm);
+        ledgers[0].Balance = 3000; ledgers[0].Income = 3000;   // 導入行は正しい
+        ledgers[2].Balance = 2000;                              // 3 行目で切れる（本来 2,530）
+        _ledgerRepositoryMock.Setup(r => r.GetByDateRangeAsync(cardIdm, It.IsAny<DateTime>(), It.IsAny<DateTime>()))
+            .ReturnsAsync(ledgers);
+
+        await _viewModel.CheckAllCardsConsistencyAsync();
+
+        _viewModel.WarningMessages.Should().ContainSingle(w => w.Type == WarningType.BalanceInconsistency)
+            .Which.DisplayText.Should().Contain("残高の不整合が1件あります").And.NotContain("導入時");
+    }
+
+    /// <summary>
+    /// ハイライトは切れた側（2 行目）ではなく導入行に付け、逆算した金額と対処を添える。
+    /// 2 行目はカード由来の正しい行なので、ここを強調すると正しい行を書き換える誘導になる。
+    /// </summary>
+    [Fact]
+    public void BuildInconsistencyMarkers_導入時残高の誤りなら導入行だけをハイライト対象にすること()
+    {
+        var result = _ledgerConsistencyChecker.CheckConsistency(
+            CreateInitialBalanceErrorLedgers("0102030405060708"), "0102030405060708", DateTime.Today);
+        result.InitialBalanceCorrection.Should().NotBeNull("前提: この形状は導入時残高の誤りとして検知される");
+
+        var markers = MainViewModel.BuildInconsistencyMarkers(result);
+
+        markers.Should().ContainKey(1).WhoseValue.Should().Be((3000, 5000, true), "期待値＝逆算した残高 / 実際＝記録されている残高 / 訂正案由来");
+        markers.Should().NotContainKey(2, "チェーンが切れた側の行は正しい行なので強調しない");
+    }
+
+    [Fact]
+    public void BuildInconsistencyMarkers_通常の不整合では切れた行をそのままハイライト対象にすること()
+    {
+        var ledgers = CreateInitialBalanceErrorLedgers("0102030405060708");
+        ledgers[0].Balance = 3000; ledgers[0].Income = 3000;
+        ledgers[2].Balance = 2000;
+        var result = _ledgerConsistencyChecker.CheckConsistency(ledgers, "0102030405060708", DateTime.Today);
+
+        var markers = MainViewModel.BuildInconsistencyMarkers(result);
+
+        markers.Should().ContainKey(3).WhoseValue.Should().Be((2530, 2000, false));
+        markers.Should().NotContainKey(1);
+    }
+
+    [Fact]
+    public void ApplyBalanceInconsistencyMarkers_導入行のメッセージは逆算した残高と対処を含むこと()
+    {
+        _viewModel.HistoryLedgers.Add(new LedgerDto { Id = 1, Summary = "新規購入", Income = 5000, Balance = 5000 });
+        _viewModel.HistoryLedgers.Add(new LedgerDto { Id = 2, Summary = "鉄道（天神～博多）", Expense = 210, Balance = 2790 });
+        var field = typeof(MainViewModel).GetField("_balanceInconsistencies",
+            System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+        field.SetValue(_viewModel, new Dictionary<int, (int ExpectedBalance, int ActualBalance, bool IsInitialBalanceCorrection)> { { 1, (3000, 5000, true) } });
+
+        _viewModel.ApplyBalanceInconsistencyMarkers();
+
+        var message = _viewModel.HistoryLedgers[0].BalanceInconsistencyMessage;
+        message.Should().Contain("導入時の残額")
+            .And.Contain("5,000円")
+            .And.Contain("3,000円")
+            .And.Contain("受入と残額", "新規購入は受入欄も一緒に直す必要がある")
+            .And.MatchRegex("してください。?$", "行動指示で終わる（error-messages.md）");
+        _viewModel.HistoryLedgers[1].HasBalanceInconsistency.Should().BeFalse();
+    }
+
+    [Fact]
+    public void ApplyBalanceInconsistencyMarkers_受入欄が空欄の導入行では残額だけを直すよう案内すること()
+    {
+        _viewModel.HistoryLedgers.Add(new LedgerDto { Id = 1, Summary = SummaryGenerator.GetMidYearCarryoverSummary(5), Income = 0, Balance = 8000 });
+        var field = typeof(MainViewModel).GetField("_balanceInconsistencies",
+            System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+        field.SetValue(_viewModel, new Dictionary<int, (int ExpectedBalance, int ActualBalance, bool IsInitialBalanceCorrection)> { { 1, (7500, 8000, true) } });
+
+        _viewModel.ApplyBalanceInconsistencyMarkers();
+
+        _viewModel.HistoryLedgers[0].BalanceInconsistencyMessage.Should().Contain("残額を 7,500円")
+            .And.NotContain("受入と残額");
+    }
+
+    /// <summary>
+    /// 対の表明: 文言の分岐は摘要ではなくマーカーのフラグで決まる。導入行の摘要を持つ行に
+    /// 通常経路（前行からの前方計算）でマーカーが付いたとき、その期待値を「逆算した残高」と
+    /// 偽って案内してはならない（コードレビュー指摘）。
+    /// </summary>
+    [Fact]
+    public void ApplyBalanceInconsistencyMarkers_訂正案由来でなければ導入行の摘要でも通常の文言にすること()
+    {
+        _viewModel.HistoryLedgers.Add(new LedgerDto { Id = 5, Summary = "新規購入", Income = 3000, Balance = 3000 });
+        var field = typeof(MainViewModel).GetField("_balanceInconsistencies",
+            System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+        field.SetValue(_viewModel, new Dictionary<int, (int ExpectedBalance, int ActualBalance, bool IsInitialBalanceCorrection)> { { 5, (2800, 3000, false) } });
+
+        _viewModel.ApplyBalanceInconsistencyMarkers();
+
+        _viewModel.HistoryLedgers[0].BalanceInconsistencyMessage.Should().Contain("期待値 2,800円")
+            .And.NotContain("導入時の残額");
+    }
+
+    /// <summary>
+    /// 警告クリックで複数月を表示したとき、期間ラベルが開始月だけにならないこと（コードレビュー指摘）。
+    /// 通常の暦月表示は従来どおり開始月だけ。
+    /// </summary>
+    [Fact]
+    public void FormatHistoryPeriod_開始月と終了月が異なれば範囲で表示し同じ月なら開始月だけを表示すること()
+    {
+        MainViewModel.FormatHistoryPeriod(new DateTime(2025, 4, 1), new DateTime(2026, 9, 3))
+            .Should().Be("2025年4月～2026年9月");
+        MainViewModel.FormatHistoryPeriod(new DateTime(2026, 9, 1), new DateTime(2026, 9, 3))
+            .Should().Be("2026年9月");
+    }
+
+    /// <summary>
+    /// 警告クリックで開く履歴は既定で当月だが、導入行は何年も前にあり得る。
+    /// 導入時残高の誤りと分かっているときは、導入行の日付から表示して直す行を画面に出す。
+    /// </summary>
+    [Fact]
+    public async Task HandleWarningClick_導入時残高の誤りなら導入行の日付から履歴を表示して導入行を強調すること()
+    {
+        const string cardIdm = "0102030405060708";
+        SetupWarningCheckDefaults();
+        _cardRepositoryMock.Setup(r => r.GetByIdmAsync(cardIdm, It.IsAny<bool>()))
+            .ReturnsAsync(new IcCard { CardIdm = cardIdm, CardType = "はやかけん", CardNumber = "5042" });
+        _ledgerRepositoryMock.Setup(r => r.GetMergeHistoriesAsync(It.IsAny<bool>()))
+            .ReturnsAsync(new List<(int, DateTime, int, string, string, bool)>());
+        var ledgers = CreateInitialBalanceErrorLedgers(cardIdm);
+        _ledgerRepositoryMock.Setup(r => r.GetByDateRangeAsync(cardIdm, It.IsAny<DateTime>(), It.IsAny<DateTime>()))
+            .ReturnsAsync(ledgers);
+        _ledgerRepositoryMock.Setup(r => r.GetPagedAsync(cardIdm, It.IsAny<DateTime>(), It.IsAny<DateTime>(), It.IsAny<int>(), It.IsAny<int>()))
+            .ReturnsAsync((ledgers, ledgers.Count));
+
+        await _viewModel.HandleWarningClick(new WarningItem { Type = WarningType.BalanceInconsistency, CardIdm = cardIdm });
+
+        _viewModel.HistoryFromDate.Should().Be(new DateTime(2025, 4, 1), "導入行の日付から表示する");
+        _viewModel.HistoryToDate.Should().Be(DateTime.Today);
+        _viewModel.HistoryPeriodDisplay.Should().Be(MainViewModel.FormatHistoryPeriod(new DateTime(2025, 4, 1), DateTime.Today),
+            "複数月を表示していることがラベルから分かること");
+        _ledgerRepositoryMock.Verify(r => r.GetByDateRangeAsync(cardIdm, It.Is<DateTime>(d => d.Year == 2000), It.IsAny<DateTime>()),
+            Times.Once, "全期間チェックはクリック時の 1 回だけで、履歴表示後の警告更新では再取得しない");
+        _viewModel.HistoryLedgers.Should().Contain(l => l.Id == 1)
+            .Which.HasBalanceInconsistency.Should().BeTrue("直すべき導入行を強調する");
+        _viewModel.HistoryLedgers.Should().Contain(l => l.Id == 2)
+            .Which.HasBalanceInconsistency.Should().BeFalse("正しい行を強調しない");
+    }
+
+    /// <summary>
+    /// 行編集を開く前に、その行が導入行で導入時残高の誤りが検知されているときだけ提案を求める。
+    /// 通常の行では全期間チェック（6 年分の読み取り）を走らせない。
+    /// </summary>
+    [Fact]
+    public async Task ResolveInitialBalanceCorrectionForEditAsync_導入行なら全期間チェックの提案を返し利用行なら問い合わせないこと()
+    {
+        const string cardIdm = "0102030405060708";
+        _viewModel.HistoryCard = new CardDto { CardIdm = cardIdm, CardNumber = "5042" };
+        _ledgerRepositoryMock.Setup(r => r.GetByDateRangeAsync(cardIdm, It.IsAny<DateTime>(), It.IsAny<DateTime>()))
+            .ReturnsAsync(CreateInitialBalanceErrorLedgers(cardIdm));
+
+        var forInitial = await _viewModel.ResolveInitialBalanceCorrectionForEditAsync(
+            new LedgerDto { Id = 1, CardIdm = cardIdm, Summary = "新規購入" });
+        var forUsage = await _viewModel.ResolveInitialBalanceCorrectionForEditAsync(
+            new LedgerDto { Id = 2, CardIdm = cardIdm, Summary = "鉄道（天神～博多）" });
+
+        forInitial.Should().NotBeNull();
+        forInitial!.SuggestedBalance.Should().Be(3000);
+        forUsage.Should().BeNull();
+        _ledgerRepositoryMock.Verify(r => r.GetByDateRangeAsync(cardIdm, It.IsAny<DateTime>(), It.IsAny<DateTime>()), Times.Once,
+            "問い合わせるのは導入行を開くときだけ");
+    }
+
+    #endregion
 
     [Fact]
     public void ApplyBalanceInconsistencyMarkers_空のDictionaryでは何も変更されないこと()
@@ -2551,10 +2765,10 @@ public class MainViewModelTests : IDisposable
 
         var field = typeof(MainViewModel).GetField("_balanceInconsistencies",
             System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-        field.SetValue(_viewModel, new Dictionary<int, (int ExpectedBalance, int ActualBalance)>
+        field.SetValue(_viewModel, new Dictionary<int, (int ExpectedBalance, int ActualBalance, bool IsInitialBalanceCorrection)>
         {
-            { 1, (1100, 1000) },
-            { 3, (600, 500) }
+            { 1, (1100, 1000, false) },
+            { 3, (600, 500, false) }
         });
 
         // Act
@@ -2577,7 +2791,7 @@ public class MainViewModelTests : IDisposable
         // _balanceInconsistenciesを空にして（不整合が解消された状態を模擬）
         var field = typeof(MainViewModel).GetField("_balanceInconsistencies",
             System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-        field.SetValue(_viewModel, new Dictionary<int, (int ExpectedBalance, int ActualBalance)>());
+        field.SetValue(_viewModel, new Dictionary<int, (int ExpectedBalance, int ActualBalance, bool IsInitialBalanceCorrection)>());
 
         // Act
         _viewModel.ApplyBalanceInconsistencyMarkers();
@@ -2594,16 +2808,16 @@ public class MainViewModelTests : IDisposable
         // Arrange
         var field = typeof(MainViewModel).GetField("_balanceInconsistencies",
             System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-        field.SetValue(_viewModel, new Dictionary<int, (int ExpectedBalance, int ActualBalance)>
+        field.SetValue(_viewModel, new Dictionary<int, (int ExpectedBalance, int ActualBalance, bool IsInitialBalanceCorrection)>
         {
-            { 1, (1000, 900) }
+            { 1, (1000, 900, false) }
         });
 
         // Act
         _viewModel.CloseHistory();
 
         // Assert
-        var value = (Dictionary<int, (int, int)>)field.GetValue(_viewModel);
+        var value = (Dictionary<int, (int, int, bool)>)field.GetValue(_viewModel);
         value.Should().BeEmpty();
     }
 
