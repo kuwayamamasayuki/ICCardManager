@@ -349,6 +349,34 @@
 
         <!-- 警告表示エリア -->
         <StackPanel Grid.Row="3" Margin="0,5,0,5">
+            <!-- Issue #2007: 導入時残高の訂正案。呼び出し元が「導入時残高の誤り」を検知した導入行の編集でのみ表示。
+                 文言は 3 要素で長くなるため TextWrapping="Wrap" を明示する（文字サイズ 4 段階に幅では追随できない）。
+                 「適用」ボタンで受入と残額（○月から繰越は残額のみ）を 1 操作で逆算値に揃える —
+                 手で 2 か所を直すと片方だけ直す操作ミス（本 Issue が防ぎたい形）が残る。 -->
+            <Border x:Name="InitialBalanceSuggestionArea"
+                    Background="{DynamicResource ReturnBackgroundBrush}"
+                    CornerRadius="4"
+                    Padding="10,6"
+                    Margin="0,0,0,3"
+                    Visibility="{Binding HasInitialBalanceSuggestion, Converter={StaticResource BoolToVisibilityConverter}}">
+                <DockPanel LastChildFill="True">
+                    <Button DockPanel.Dock="Right"
+                            Content="逆算した金額を適用(_G)"
+                            Command="{Binding ApplyInitialBalanceSuggestionCommand}"
+                            Padding="12,4"
+                            Margin="10,0,0,0"
+                            VerticalAlignment="Center"
+                            FontSize="{DynamicResource BaseFontSize}"
+                            AutomationProperties.Name="逆算した金額を受入と残額に適用"
+                            ToolTip="直後の記録から逆算した残高を受入・残額に入力します（アクセスキー: Alt+G）"/>
+                    <TextBlock Text="{Binding InitialBalanceSuggestionText}"
+                               TextWrapping="Wrap"
+                               VerticalAlignment="Center"
+                               FontSize="{DynamicResource SmallFontSize}"
+                               AutomationProperties.Name="{Binding InitialBalanceSuggestionText}"/>
+                </DockPanel>
+            </Border>
+
             <!-- バリデーションエラー -->
             <TextBlock Text="{Binding ValidationMessage}"
                        Foreground="{DynamicResource DangerTextBrush}"
