@@ -3,6 +3,7 @@
 #   .\convert-to-pdf.ps1              # 全マニュアルを変換（更新があるもののみ）
 #   .\convert-to-pdf.ps1 -Force       # 全マニュアルを強制変換
 #   .\convert-to-pdf.ps1 -Target user # ユーザーマニュアルのみ変換
+#   .\convert-to-pdf.ps1 -Target it   # IT担当者ガイドのみ変換
 # 前提条件:
 #   1. Microsoft Word がインストールされていること（Microsoft 365 等）
 #   2. .docx ファイルが生成済みであること（.\convert-to-docx.ps1 を先に実行）
@@ -10,7 +11,7 @@
 #   .md → .docx（convert-to-docx.ps1）→ .pdf（本スクリプト / Word COM）
 
 param(
-    [ValidateSet("all", "intro", "user", "user-summary", "admin", "dev")]
+    [ValidateSet("all", "intro", "user", "user-summary", "admin", "it", "dev")]
     [string]$Target = "all",
     [switch]$Force
 )
@@ -46,6 +47,12 @@ $Manuals = @(
         Key = "admin"
         Input = "管理者マニュアル.docx"
         Output = "管理者マニュアル.pdf"
+    },
+    @{
+        Name = "IT担当者ガイド"
+        Key = "it"
+        Input = "IT担当者ガイド.docx"
+        Output = "IT担当者ガイド.pdf"
     },
     @{
         Name = "開発者ガイド"

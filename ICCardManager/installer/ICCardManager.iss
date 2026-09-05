@@ -90,16 +90,19 @@ Source: "..\docs\manual\はじめに.md"; DestDir: "{app}\Docs"; Flags: ignoreve
 Source: "..\docs\manual\ユーザーマニュアル.md"; DestDir: "{app}\Docs"; Flags: ignoreversion
 Source: "..\docs\manual\ユーザーマニュアル概要版.md"; DestDir: "{app}\Docs"; Flags: ignoreversion
 Source: "..\docs\manual\管理者マニュアル.md"; DestDir: "{app}\Docs"; Flags: ignoreversion
+Source: "..\docs\manual\IT担当者ガイド.md"; DestDir: "{app}\Docs"; Flags: ignoreversion
 ; docx形式
 Source: "..\docs\manual\はじめに.docx"; DestDir: "{app}\Docs"; Flags: ignoreversion
 Source: "..\docs\manual\ユーザーマニュアル.docx"; DestDir: "{app}\Docs"; Flags: ignoreversion
 Source: "..\docs\manual\ユーザーマニュアル概要版.docx"; DestDir: "{app}\Docs"; Flags: ignoreversion
 Source: "..\docs\manual\管理者マニュアル.docx"; DestDir: "{app}\Docs"; Flags: ignoreversion
+Source: "..\docs\manual\IT担当者ガイド.docx"; DestDir: "{app}\Docs"; Flags: ignoreversion skipifsourcedoesntexist
 ; PDF形式（Issue #642）
 Source: "..\docs\manual\はじめに.pdf"; DestDir: "{app}\Docs"; Flags: ignoreversion skipifsourcedoesntexist
 Source: "..\docs\manual\ユーザーマニュアル.pdf"; DestDir: "{app}\Docs"; Flags: ignoreversion skipifsourcedoesntexist
 Source: "..\docs\manual\ユーザーマニュアル概要版.pdf"; DestDir: "{app}\Docs"; Flags: ignoreversion skipifsourcedoesntexist
 Source: "..\docs\manual\管理者マニュアル.pdf"; DestDir: "{app}\Docs"; Flags: ignoreversion skipifsourcedoesntexist
+Source: "..\docs\manual\IT担当者ガイド.pdf"; DestDir: "{app}\Docs"; Flags: ignoreversion skipifsourcedoesntexist
 
 ; デバッグツール（Issue #447対応）
 ; Toolsフォルダにすべてのファイルを配置

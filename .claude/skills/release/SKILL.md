@@ -77,6 +77,7 @@ git checkout -b chore/bump-version-X.Y.Z
 - `CHANGELOG.md` — 新セクション追加
 - `docs/manual/ユーザーマニュアル.md` — Version string + 最終更新日
 - `docs/manual/管理者マニュアル.md` — Version string + 最終更新日
+- `docs/manual/IT担当者ガイド.md` — Version string + 最終更新日
 - `docs/manual/かんたん導入ガイド.md` — Version string + 最終更新日（Issue #1462）
 - `docs/manual/はじめに.md` — Version string + 最終更新日（Issue #1462）
 - `docs/manual/ユーザーマニュアル概要版.md` — Version string + 最終更新日（Issue #1462）

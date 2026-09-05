@@ -3,6 +3,7 @@
 #   .\convert-to-docx.ps1              # 全マニュアルを変換（更新があるもののみ）
 #   .\convert-to-docx.ps1 -Force       # 全マニュアルを強制変換
 #   .\convert-to-docx.ps1 -Target user # ユーザーマニュアルのみ変換
+#   .\convert-to-docx.ps1 -Target it   # IT担当者ガイドのみ変換
 #   .\convert-to-docx.ps1 -NoMermaid   # Mermaidフィルターを使用しない
 #   .\convert-to-docx.ps1 -Version 1.13.0  # バージョン文字列を注入して変換
 # 前提条件:
@@ -14,7 +15,7 @@
 #      作成: .\create-reference-doc.ps1 を実行
 
 param(
-    [ValidateSet("all", "intro", "user", "user-summary", "admin", "dev")]
+    [ValidateSet("all", "intro", "user", "user-summary", "admin", "it", "dev")]
     [string]$Target = "all",
     [switch]$Force,
     [switch]$NoMermaid,
@@ -191,6 +192,14 @@ $Manuals = @(
         Input = "管理者マニュアル.md"
         Output = "管理者マニュアル.docx"
         Title = "交通系ICカード管理システム：ピッすい 管理者マニュアル"
+        VersionTracked = $true   # アプリバージョンに追従
+    },
+    @{
+        Name = "IT担当者ガイド"
+        Key = "it"
+        Input = "IT担当者ガイド.md"
+        Output = "IT担当者ガイド.docx"
+        Title = "交通系ICカード管理システム：ピッすい IT担当者ガイド"
         VersionTracked = $true   # アプリバージョンに追従
     },
     @{
