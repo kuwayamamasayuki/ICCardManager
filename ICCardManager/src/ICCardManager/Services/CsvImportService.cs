@@ -791,7 +791,7 @@ namespace ICCardManager.Services
         /// <see cref="Infrastructure.Security.FormulaInjectionSanitizer.Sanitize"/> を適用し、
         /// <c>=</c> / <c>+</c> / <c>-</c> / <c>@</c> 等で始まる値の先頭に <c>'</c> を付ける。
         /// 取り込み側が同じ <c>Sanitize</c> を掛けていた頃は、UI から入力した <c>-異動予定</c> が
-        /// エクスポート→再取り込みで <c>'-異動予定</c> に恒久変化し、管理者マニュアル §5.6.5 が
+        /// エクスポート→再取り込みで <c>'-異動予定</c> に恒久変化し、管理者マニュアル §1.7.2 が
         /// 推奨する「エクスポート CSV を編集して取り込む」運用がそのまま汚染経路になっていた。
         /// </para>
         /// <para>
