@@ -89,19 +89,18 @@ namespace DebugDataViewer
 
         #region DBデータ関連プロパティ
 
+        // Issue #2012: ComboBox の選択肢と SQL サニタイズは同じ一覧でなければならない。
+        // 一覧の正は DebugTableCatalog（回帰は DebugTableCatalogTests が固定する）。
         [ObservableProperty]
-        private ObservableCollection<string> _tableNames = new()
-        {
-            "staff",
-            "ic_card",
-            "ledger",
-            "ledger_detail",
-            "operation_log",
-            "settings"
-        };
+        private ObservableCollection<string> _tableNames =
+            new(DebugTableCatalog.TableNames);
 
         [ObservableProperty]
         private string _selectedTableName = "staff";
+
+        /// <summary>データベースパスをどこから決めたか（Issue #2012）</summary>
+        [ObservableProperty]
+        private string _databaseSourceLabel = string.Empty;
 
         [ObservableProperty]
         private DataView _tableData;
@@ -114,13 +113,24 @@ namespace DebugDataViewer
 
         #endregion
 
-        public MainViewModel(ICardReader cardReader, DbContext dbContext)
+        public MainViewModel(ICardReader cardReader, DbContext dbContext, DatabasePathResolution databasePathResolution)
         {
             _cardReader = cardReader;
             _dbContext = dbContext;
 
             // データベースパスを取得
             DatabasePath = _dbContext.DatabasePath;
+
+            // Issue #2012: どこから DB パスを決めたかを常に表示する。
+            // 本体と違う DB を見ていることに気付けないと、障害調査で誤った結論を出す
+            DatabaseSourceLabel = databasePathResolution?.SourceLabel ?? "不明";
+            if (!string.IsNullOrEmpty(databasePathResolution?.RejectedConfiguredPath))
+            {
+                DbStatusMessage =
+                    $"設定ファイル（database_config.txt）の保存先「{databasePathResolution.RejectedConfiguredPath}」が" +
+                    "無効な形式のため使用できません。既定の保存先を開いています。" +
+                    "本体と同じデータベースを見るには、「DBを開く」から正しいファイルを選択してください。";
+            }
 
             // カード読み取りイベントを登録
             _cardReader.CardRead += OnCardRead;
@@ -334,7 +344,8 @@ namespace DebugDataViewer
                         ExitStation = detail.ExitStation ?? "-",
                         Amount = detail.Amount,
                         Balance = detail.Balance,
-                        TransactionType = detail.IsCharge ? "チャージ" : (detail.IsBus ? "バス" : "鉄道"),
+                        // Issue #2012: 本体の RouteDisplayFormatter と同じ優先順位で判定する
+                        TransactionType = HistoryTransactionType.Classify(detail),
                         RawData = FormatDetailAsRaw(detail)
                     });
                 }
@@ -419,8 +430,8 @@ namespace DebugDataViewer
                 await Task.Run(() =>
                 {
                     // テーブル名をサニタイズ（SQLインジェクション対策）
-                    var validTables = new[] { "staff", "ic_card", "ledger", "ledger_detail", "operation_log", "settings" };
-                    if (!validTables.Contains(SelectedTableName))
+                    // Issue #2012: 選択肢と同じ一覧を使う（2 か所に書くと片方だけ更新される）
+                    if (!DebugTableCatalog.IsKnownTable(SelectedTableName))
                     {
                         throw new ArgumentException($"無効なテーブル名: {SelectedTableName}");
                     }
@@ -504,6 +515,9 @@ namespace DebugDataViewer
 
                 // データベースパスを更新
                 DatabasePath = _dbContext.DatabasePath;
+
+                // Issue #2012: 起動時の解決結果はもう当てはまらない
+                DatabaseSourceLabel = "手動で選択";
 
                 // テーブルデータを再読み込み
                 await LoadTableDataAsync();

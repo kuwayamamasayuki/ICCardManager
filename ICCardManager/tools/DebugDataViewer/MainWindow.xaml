@@ -230,11 +230,16 @@
 
         <!-- フッター -->
         <StackPanel Grid.Row="2" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,15,0,0">
-            <TextBlock Text="{Binding DatabasePath, StringFormat=DB: {0}}"
-                       Foreground="Gray"
+            <!-- Issue #2012: どこから DB パスを決めたかを併記する。
+                 共有フォルダモードで本体と違う DB を見ていることに気付けるようにする -->
+            <TextBlock Foreground="Gray"
                        FontSize="11"
                        VerticalAlignment="Center"
-                       Margin="0,0,10,0"/>
+                       TextWrapping="Wrap"
+                       Margin="0,0,10,0">
+                <Run Text="{Binding DatabasePath, Mode=OneWay, StringFormat=DB: {0}}"/>
+                <Run Text="{Binding DatabaseSourceLabel, Mode=OneWay, StringFormat=（{0}）}"/>
+            </TextBlock>
             <Button Content="選択..."
                     Command="{Binding SelectDatabaseCommand}"
                     Padding="10,5"
