@@ -87,8 +87,16 @@ namespace DebugDataViewer
             });
 
             // データベースコンテキスト
-            var dbPath = FindDatabasePath();
-            services.AddSingleton(sp => new DbContext(dbPath));
+            // Issue #2012: database_config.txt（本体が実際に開いている DB）を優先する。
+            // 共有フォルダモード（#1559）では既定パスのローカル DB は存在しないか、
+            // 共有へ移行する前の古いコピーであり、本体と違う DB を黙って読むことになる。
+            var resolution = DatabasePathResolver.Resolve(
+                Environment.GetCommandLineArgs(),
+                AppDomain.CurrentDomain.BaseDirectory,
+                ICCardManager.ViewModels.SettingsViewModel.LoadDatabasePathFromConfigFile);
+
+            services.AddSingleton(resolution);
+            services.AddSingleton(sp => new DbContext(resolution.Path));
 
             // 物理カードリーダー（PaSoRi + felicalib）で FelicaCardReader を使用
             services.AddSingleton<ICardReader>(sp => CreateCardReader(sp));
@@ -141,43 +149,6 @@ namespace DebugDataViewer
             }
         }
 
-        /// <summary>
-        /// データベースファイルのパスを検索
-        /// </summary>
-        private string FindDatabasePath()
-        {
-            // 優先順位:
-            // 1. コマンドライン引数
-            // 2. 実行ファイルと同じディレクトリ
-            // 3. メインアプリの標準パス (CommonApplicationData = C:\ProgramData)
-
-            var args = Environment.GetCommandLineArgs();
-            if (args.Length > 1 && File.Exists(args[1]))
-            {
-                return args[1];
-            }
-
-            var exeDir = AppDomain.CurrentDomain.BaseDirectory;
-            var localDb = Path.Combine(exeDir, "iccard.db");
-            if (File.Exists(localDb))
-            {
-                return localDb;
-            }
-
-            // メインアプリの標準パス (C:\ProgramData\ICCardManager\iccard.db)
-            // メインアプリはCommonApplicationDataを使用して全ユーザーで共有している
-            var appDataPath = Path.Combine(
-                Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),
-                "ICCardManager",
-                "iccard.db");
-            if (File.Exists(appDataPath))
-            {
-                return appDataPath;
-            }
-
-            // 見つからない場合はCommonApplicationDataのパスを返す（メインアプリと同じ場所）
-            return appDataPath;
-        }
 
         protected override void OnExit(ExitEventArgs e)
         {

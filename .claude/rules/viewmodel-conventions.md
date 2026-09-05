@@ -3,6 +3,7 @@ paths:
   - "ICCardManager/src/ICCardManager/ViewModels/**"
   - "ICCardManager/src/ICCardManager/Views/**"
   - "ICCardManager/src/ICCardManager/Resources/**"
+  - "ICCardManager/tools/DebugDataViewer/**"
   - "ICCardManager/docs/design/03_画面設計書.md"
   - "ICCardManager/docs/design/04_機能設計書.md"
 ---

@@ -29,6 +29,12 @@
 
     <!-- テストプロジェクトからinternalメンバーへのアクセスを許可 -->
     <InternalsVisibleTo>ICCardManager.Tests</InternalsVisibleTo>
+    <!-- Issue #2012: 開発者向けツール DebugDataViewer が
+         SettingsViewModel.LoadDatabasePathFromConfigFile() を再利用するため。
+         同じ読み取りをツール側へ書き写すと、次に設定ファイルの扱いを変えた人が
+         片方を取りこぼす（error-messages.md #1744）。メソッドを public へ昇格させると
+         本体の公開 API が増え、ツール以外の消費者を招くため internal のままにする。 -->
+    <InternalsVisibleTo>DebugDataViewer</InternalsVisibleTo>
   </PropertyGroup>
 
   <!-- リリースビルド時はPDBファイルを生成しない -->
@@ -48,6 +54,11 @@
   <ItemGroup>
     <AssemblyAttribute Include="System.Runtime.CompilerServices.InternalsVisibleTo">
       <_Parameter1>ICCardManager.Tests</_Parameter1>
+    </AssemblyAttribute>
+    <!-- Issue #2012: 上の <InternalsVisibleTo> プロパティと同じ内容。
+         SDK バージョンによってどちらが効くかが変わるため両方に列挙する。 -->
+    <AssemblyAttribute Include="System.Runtime.CompilerServices.InternalsVisibleTo">
+      <_Parameter1>DebugDataViewer</_Parameter1>
     </AssemblyAttribute>
   </ItemGroup>
 
