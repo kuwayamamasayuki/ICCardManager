@@ -31,6 +31,7 @@
     <Grid Margin="15">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
             <RowDefinition Height="*"/>
             <RowDefinition Height="Auto"/>
         </Grid.RowDefinitions>
@@ -45,7 +46,22 @@
                        Margin="10,0,0,2"/>
         </StackPanel>
 
-        <TabControl Grid.Row="1">
+        <!-- 設定ファイルの保存先を採用できなかった場合の警告（Issue #2012）。
+             テーブル読み込みのたびに上書きされる DbStatusMessage と違い、
+             気付くまで消えないよう専用の領域に常時表示する -->
+        <Border Grid.Row="1"
+                Background="#FFF4E5"
+                BorderBrush="#E6A23C"
+                BorderThickness="1"
+                Padding="10"
+                Margin="0,0,0,15"
+                Visibility="{Binding HasConfigPathWarning, Converter={StaticResource BoolToVisibilityConverter}}">
+            <TextBlock Text="{Binding ConfigPathWarningMessage}"
+                       TextWrapping="Wrap"
+                       Foreground="#8A5300"/>
+        </Border>
+
+        <TabControl Grid.Row="2">
             <!-- カードデータタブ -->
             <TabItem Header="カードデータ">
                 <Grid Margin="15">
@@ -229,13 +245,18 @@
         </TabControl>
 
         <!-- フッター -->
-        <StackPanel Grid.Row="2" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,15,0,0">
+        <StackPanel Grid.Row="3" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,15,0,0">
             <!-- Issue #2012: どこから DB パスを決めたかを併記する。
-                 共有フォルダモードで本体と違う DB を見ていることに気付けるようにする -->
+                 共有フォルダモードで本体と違う DB を見ていることに気付けるようにする。
+                 横並び StackPanel の子は測定時に無限幅を与えられるため TextWrapping は効かない。
+                 長い UNC パスでボタンを画面外へ押し出さないよう、幅を制限して省略表示し、
+                 全文はツールチップで見せる -->
             <TextBlock Foreground="Gray"
                        FontSize="11"
                        VerticalAlignment="Center"
-                       TextWrapping="Wrap"
+                       MaxWidth="600"
+                       TextTrimming="CharacterEllipsis"
+                       ToolTip="{Binding DatabasePath, Mode=OneWay}"
                        Margin="0,0,10,0">
                 <Run Text="{Binding DatabasePath, Mode=OneWay, StringFormat=DB: {0}}"/>
                 <Run Text="{Binding DatabaseSourceLabel, Mode=OneWay, StringFormat=（{0}）}"/>

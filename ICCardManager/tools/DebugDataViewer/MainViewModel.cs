@@ -102,6 +102,23 @@ namespace DebugDataViewer
         [ObservableProperty]
         private string _databaseSourceLabel = string.Empty;
 
+        /// <summary>
+        /// <c>database_config.txt</c> の値を採用できなかったときの警告（Issue #2012）。
+        /// </summary>
+        /// <remarks>
+        /// <c>DbStatusMessage</c> はテーブルを読み込むたびに上書きされる一時的なステータス欄なので、
+        /// 起動時に一度だけ立てる警告をそこへ入れると <c>InitializeAsync</c> の初回読み込みで
+        /// 即座に消え、ユーザーの目に触れない
+        /// （<c>error-messages.md</c>「文言を長くしたら、その表示領域が『その状態で生きているか』を
+        /// 必ず確認する」#1727 / #1759）。専用のプロパティを持ち、画面上部に常時表示する。
+        /// </remarks>
+        [ObservableProperty]
+        [NotifyPropertyChangedFor(nameof(HasConfigPathWarning))]
+        private string _configPathWarningMessage = string.Empty;
+
+        /// <summary>設定ファイルの保存先に関する警告があるか（表示切り替え用）</summary>
+        public bool HasConfigPathWarning => !string.IsNullOrEmpty(ConfigPathWarningMessage);
+
         [ObservableProperty]
         private DataView _tableData;
 
@@ -126,10 +143,10 @@ namespace DebugDataViewer
             DatabaseSourceLabel = databasePathResolution?.SourceLabel ?? "不明";
             if (!string.IsNullOrEmpty(databasePathResolution?.RejectedConfiguredPath))
             {
-                DbStatusMessage =
+                ConfigPathWarningMessage =
                     $"設定ファイル（database_config.txt）の保存先「{databasePathResolution.RejectedConfiguredPath}」が" +
                     "無効な形式のため使用できません。既定の保存先を開いています。" +
-                    "本体と同じデータベースを見るには、「DBを開く」から正しいファイルを選択してください。";
+                    "本体と同じデータベースを見るには、画面右下の「選択...」ボタンから正しいファイルを選択してください。";
             }
 
             // カード読み取りイベントを登録
@@ -518,6 +535,7 @@ namespace DebugDataViewer
 
                 // Issue #2012: 起動時の解決結果はもう当てはまらない
                 DatabaseSourceLabel = "手動で選択";
+                ConfigPathWarningMessage = string.Empty;
 
                 // テーブルデータを再読み込み
                 await LoadTableDataAsync();
