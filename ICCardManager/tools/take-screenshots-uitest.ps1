@@ -17,6 +17,7 @@
 #     -OutputDir <path> : 出力先（既定: docs\screenshots\auto。.gitignore 対象）
 #     -Publish          : 撮影後に docs\screenshots\ へ上書きコピーする（見比べてから使うこと）
 #     -SkipBuild        : 本体・UITests の再ビルドをスキップ
+#     -Help             : 使い方を表示（未知の引数を渡した場合も使い方を表示して終了する）
 #
 # 注意:
 #   - 本体は Release 構成でビルド・起動する（Debug は仮想タッチパネルが写り込むため）
@@ -24,14 +25,50 @@
 #   - 既存の DB（%ProgramData%\ICCardManager\iccard.db）は撮影中だけ退避され、終了後に復元される
 #   - 表示スケールは 100% を推奨（docs\screenshots\README.md）
 
-[CmdletBinding()]
+# 位置指定引数を無効化する。有効のままだと `--help` のような未知の引数が最初の文字列パラメータ
+# （-OutputDir）に束縛され、その名前のフォルダーが作られてしまう。
+[CmdletBinding(PositionalBinding = $false)]
 param(
     [string]$OutputDir,
     [switch]$Publish,
-    [switch]$SkipBuild
+    [switch]$SkipBuild,
+    [Alias("h", "?")]
+    [switch]$Help,
+    # 上記に一致しなかった引数（--help / -foo / 位置指定の値）をここで受け取り、使い方を表示して終了する
+    [Parameter(ValueFromRemainingArguments = $true)]
+    [string[]]$UnknownArgs
 )
 
 $ErrorActionPreference = "Stop"
+
+function Show-Usage {
+    Write-Host @"
+使い方: .\tools\take-screenshots-uitest.ps1 [-OutputDir <path>] [-Publish] [-SkipBuild]
+
+  UI テスト基盤（FlaUI）でアプリを起動し、マニュアル用スクリーンショット 8 枚
+  （main / history / card / staff / report / export / settings / system）を自動撮影します。
+  Windows ネイティブの PowerShell から実行してください（WSL2 不可）。
+
+オプション:
+  -OutputDir <path>  出力先。既定: docs\screenshots\auto（Git 管理外）
+  -Publish           撮影後に docs\screenshots\ へ上書きコピーする（見比べてから使うこと）
+  -SkipBuild         本体・UITests の再ビルドをスキップする
+  -Help              この使い方を表示する
+
+詳細: docs\screenshots\README.md
+"@
+}
+
+if ($Help) {
+    Show-Usage
+    exit 0
+}
+if ($UnknownArgs -and $UnknownArgs.Count -gt 0) {
+    Write-Host "[ERROR] 想定していない引数です: $($UnknownArgs -join ' ')" -ForegroundColor Red
+    Write-Host ""
+    Show-Usage
+    exit 2
+}
 
 if ($env:WSL_DISTRO_NAME) {
     Write-Host "[ERROR] このスクリプトは Windows ネイティブ PowerShell から実行してください。" -ForegroundColor Red
