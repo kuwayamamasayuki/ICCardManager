@@ -3,6 +3,13 @@
 ### Unreleased
 
 **機能追加**
+- Issue #2021 **画面の変更があった際にマニュアル用スクリーンショットを自動更新できるようにした**。#2016 で撮影は自動化されたが「どの変更のときに、どの画像を撮り直すか」は人の判断に残っていた。画像ごとに「その画面を構成するソース」（XAML・コードビハインド・ViewModel。全画像に効く `App.xaml`・共通スタイル・変換器・投入データ・撮影ヘルパーは `common`）を対応表 `docs/screenshots/screenshot-sources.json` で宣言し、`tools/screenshot-sync.ps1` が git の差分（比較元との merge-base からの差分＋作業ツリー＋未追跡）と突き合わせて撮り直しが必要な画像を導出する。
+  - **判定の根拠はソースの変更であって、撮影後のピクセル比較ではない**。サンプルデータが「当月」を使うため、履歴画面などは毎月ピクセルが変わり、比較では常に「変更あり」になる
+  - `take-screenshots-uitest.ps1 -Changed` は影響を受けた画像だけを撮る（`--filter` を「パスのフィルタ AND 画像ごとのフィルタの OR」で合成。Theory の行は `FullyQualifiedName` に引数が含まれないので `DisplayName~card.png` で絞る）。`-Changed -Publish` はその画像だけを差し替える。パスの定義（起動構成・フィルタ・環境変数）も対応表が唯一の出所になり、#2019 の Debug パスは JSON へ 1 項目足すだけで載る
+  - **Claude Code の Stop フック**（`check-doc-sync.sh`）は、画面ソースが変わったのに画像が未更新ならその画像名と撮り直しコマンドを自問プロンプトに添える（判定はスクリプトへ委譲し、対応表をフックへ複製しない）。あわせてフックの基点をローカル `main` から `origin/main` 優先へ改めた（遅れた `main` を基点にすると他 PR の変更まで「このブランチの変更」として数えていた）
+  - **CI**（`screenshot-sync-check.yml`）は PR で同じ判定を行い、未更新なら warning アノテーションとジョブサマリーで案内する。見た目が変わらない変更（`AutomationProperties` の追加など）もソース単位では「影響あり」になるため、ジョブは失敗させない。撮影そのものは Windows デスクトップ・DB の退避を要するため CI では行わない
+  - **検知ロジックは PowerShell 1 本に置く**。撮影が Windows ネイティブでしか動かず、開発機の Windows 側に Python が無い（既存の `check-test-count-sync.py` は WSL2 と CI でしか動かない）。テストは xUnit から `powershell.exe` を子プロセスとして起動する（テストは Windows 側の `dotnet.exe` で走るので WSL2 からの実行でも CI でも同じ経路）。Windows PowerShell 5.1 が BOM 無しの UTF-8 を ANSI として読む問題は BOM を付けて避け、`-File` 経由で `-Files a b c` の 2 つ目以降が残余引数へ落ちる問題は残余引数を合流させて吸収した
+  - 対応表と実リポジトリの整合（ソースの実在・画像の実在・**撮影テストが保存する画像名の集合との一致（対の表明）**・フィルタが指すテストの実在）は `Tools/ScreenshotSyncMappingTests` が固定する。追加は **+27 件**（`Tools/ScreenshotSyncScriptTests` 19 件、`Tools/ScreenshotSyncMappingTests` 8 件）。07_テスト設計書 §2.59 参照
 - Issue #2016 **マニュアル用スクリーンショットを UI テスト基盤（FlaUI）で自動撮影できるようにした**。従来は `tools/TakeScreenshots.ps1` で人が画面を開いて Enter を押す対話式しかなく、UI を変えるたびに撮り直しが手作業だった。UITests の `AppFixture`（アプリ起動・DB 退避／復元）と PageObject（ダイアログを開く操作）をそのまま撮影の前処理に使い、`AutomationElement.CaptureToFile` で保存する。
   - 第 1 段階の対象は 8 枚（`main` / `history` と、ツールバーから開く `card` / `staff` / `report` / `export` / `settings` / `system`）。入口は `tools/take-screenshots-uitest.ps1`（本体を Release でビルド → `dotnet test --filter Category=Screenshot`）。出力は `docs/screenshots/auto/`（Git 管理外）で、見比べてから `-Publish` で `docs/screenshots/` へ上書きする（`-Publish` は撮影し直さず、確認した画像をそのままコピーする）。既存画像とのサイズ差を撮影後に出力する
   - **撮影は Release で起動する**。Debug ビルドはメイン画面下部に仮想タッチパネル（`App.IsDebugBuild`）が写り込む。`AppFixture.Launch` は環境変数 `ICCARDMANAGER_UITEST_CONFIGURATION` で `dotnet run --configuration` を選べるようにした（既定は従来どおり Debug。`Release` 以外は Debug へ丸める）

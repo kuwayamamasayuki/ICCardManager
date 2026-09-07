@@ -1,0 +1,111 @@
+{
+  "$comment": [
+    "Issue #2021: 自動撮影するスクリーンショットと、その画面を構成するソースファイルの対応表。",
+    "tools/screenshot-sync.ps1 がこの表を読み、変更されたソースから撮り直しが必要な画像を導出する。",
+    "パスはリポジトリのルート（ICCardManager.sln の 1 つ上）からの相対パスで、区切りは '/'。",
+    "glob は '*'（1 階層）と '**'（複数階層）だけを使う。",
+    "載せるのは画面の構成（レイアウト・文言・スタイル・表示変換）を持つファイル。",
+    "表示するデータを作る Service / Repository は載せない（データはサンプル投入で固定しているため）。",
+    "common に載せたファイルはすべての画像に影響する。",
+    "filter は dotnet test の --filter に渡す式。Theory の行は FullyQualifiedName に引数が含まれないので DisplayName で絞る。",
+    "整合性（ファイルの実在・画像の実在・テストの実在・撮影側との一致）は Tools/ScreenshotSyncMappingTests が固定する。"
+  ],
+  "publishedDir": "ICCardManager/docs/screenshots",
+  "common": [
+    "ICCardManager/src/ICCardManager/App.xaml",
+    "ICCardManager/src/ICCardManager/Resources/Styles/**",
+    "ICCardManager/src/ICCardManager/Views/Converters/**",
+    "ICCardManager/src/ICCardManager/Views/Helpers/**",
+    "ICCardManager/tests/ICCardManager.UITests/Infrastructure/ScreenshotHelper.cs",
+    "ICCardManager/tests/ICCardManager.UITests/Infrastructure/ScreenshotSeedData.cs"
+  ],
+  "passes": {
+    "Release": {
+      "configuration": "Release",
+      "filter": "Category=Screenshot",
+      "env": {}
+    }
+  },
+  "screenshots": [
+    {
+      "name": "main.png",
+      "pass": "Release",
+      "filter": "FullyQualifiedName~ManualScreenshotTests.main_",
+      "sources": [
+        "ICCardManager/src/ICCardManager/Views/MainWindow.xaml",
+        "ICCardManager/src/ICCardManager/Views/MainWindow.xaml.cs",
+        "ICCardManager/src/ICCardManager/ViewModels/MainViewModel.cs"
+      ]
+    },
+    {
+      "name": "history.png",
+      "pass": "Release",
+      "filter": "FullyQualifiedName~ManualScreenshotTests.history_",
+      "sources": [
+        "ICCardManager/src/ICCardManager/Views/MainWindow.xaml",
+        "ICCardManager/src/ICCardManager/Views/MainWindow.xaml.cs",
+        "ICCardManager/src/ICCardManager/ViewModels/MainViewModel.cs"
+      ]
+    },
+    {
+      "name": "card.png",
+      "pass": "Release",
+      "filter": "DisplayName~card.png",
+      "sources": [
+        "ICCardManager/src/ICCardManager/Views/Dialogs/CardManageDialog.xaml",
+        "ICCardManager/src/ICCardManager/Views/Dialogs/CardManageDialog.xaml.cs",
+        "ICCardManager/src/ICCardManager/ViewModels/CardManageViewModel.cs"
+      ]
+    },
+    {
+      "name": "staff.png",
+      "pass": "Release",
+      "filter": "DisplayName~staff.png",
+      "sources": [
+        "ICCardManager/src/ICCardManager/Views/Dialogs/StaffManageDialog.xaml",
+        "ICCardManager/src/ICCardManager/Views/Dialogs/StaffManageDialog.xaml.cs",
+        "ICCardManager/src/ICCardManager/ViewModels/StaffManageViewModel.cs"
+      ]
+    },
+    {
+      "name": "report.png",
+      "pass": "Release",
+      "filter": "DisplayName~report.png",
+      "sources": [
+        "ICCardManager/src/ICCardManager/Views/Dialogs/ReportDialog.xaml",
+        "ICCardManager/src/ICCardManager/Views/Dialogs/ReportDialog.xaml.cs",
+        "ICCardManager/src/ICCardManager/ViewModels/ReportViewModel.cs"
+      ]
+    },
+    {
+      "name": "export.png",
+      "pass": "Release",
+      "filter": "DisplayName~export.png",
+      "sources": [
+        "ICCardManager/src/ICCardManager/Views/Dialogs/DataExportImportDialog.xaml",
+        "ICCardManager/src/ICCardManager/Views/Dialogs/DataExportImportDialog.xaml.cs",
+        "ICCardManager/src/ICCardManager/ViewModels/DataExportImportViewModel.cs"
+      ]
+    },
+    {
+      "name": "settings.png",
+      "pass": "Release",
+      "filter": "DisplayName~settings.png",
+      "sources": [
+        "ICCardManager/src/ICCardManager/Views/Dialogs/SettingsDialog.xaml",
+        "ICCardManager/src/ICCardManager/Views/Dialogs/SettingsDialog.xaml.cs",
+        "ICCardManager/src/ICCardManager/ViewModels/SettingsViewModel.cs"
+      ]
+    },
+    {
+      "name": "system.png",
+      "pass": "Release",
+      "filter": "DisplayName~system.png",
+      "sources": [
+        "ICCardManager/src/ICCardManager/Views/Dialogs/SystemManageDialog.xaml",
+        "ICCardManager/src/ICCardManager/Views/Dialogs/SystemManageDialog.xaml.cs",
+        "ICCardManager/src/ICCardManager/ViewModels/SystemManageViewModel.cs"
+      ]
+    }
+  ]
+}

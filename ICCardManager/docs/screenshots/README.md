@@ -64,6 +64,35 @@ cd D:\OneDrive\交通系\src\ICCardManager
 
 職員証・交通系ICカードのタッチを要する画面（`staff_recognized.png` / `lend.png` / `return.png`）と、下記の対話式スクリプトにしか定義の無い画面は、引き続き対話式で撮影します。
 
+### 画面を変えたときの撮り直し（変更検知、Issue #2021）
+
+どの画像を撮り直すかは、対応表 `screenshot-sources.json`（画像 → その画面を構成するソースファイル）と git の差分から自動で決まります。
+
+```powershell
+cd D:\OneDrive\交通系\src\ICCardManager
+
+# 1. origin/main との差分から影響を受けた画像だけを docs\screenshots\auto\ へ撮影
+.\tools\take-screenshots-uitest.ps1 -Changed
+
+# 2. 見比べて問題なければ、その画像だけを docs\screenshots\ へ上書きコピー
+.\tools\take-screenshots-uitest.ps1 -Changed -Publish
+
+# 比較元を変えるとき（例: ローカルの main）
+.\tools\take-screenshots-uitest.ps1 -Changed -Base main
+
+# 撮らずに「どの画像が影響を受けるか」だけを見る
+.\tools\screenshot-sync.ps1            # 1 行 1 件（画像名・パス・更新済みか・理由）
+.\tools\screenshot-sync.ps1 -Verify    # 未更新の画像があれば終了コード 3
+```
+
+動作の要点：
+- **判定の根拠はソースの変更であって、撮影後のピクセル比較ではない**。サンプルデータが「当月」を使うため、履歴画面などは毎月ピクセルが変わり、比較では常に「変更あり」になる
+- 対応表には画面の構成（レイアウト・文言・スタイル・表示変換）を持つファイルだけを載せる。表示するデータを作る Service / Repository は載せない。`common` に載せたファイル（`App.xaml`、`Resources/Styles/**`、変換器、投入データ `ScreenshotSeedData.cs`、撮影ヘルパー `ScreenshotHelper.cs`）はすべての画像に影響する
+- 対応表と実リポジトリの整合（ソースの実在・画像の実在・撮影テストが保存する画像名との一致・フィルタが指すテストの実在）は単体テスト `Tools/ScreenshotSyncMappingTests` が固定する。**撮影対象を増やしたら対応表にも 1 行足す**（足さないとテストが赤になる）
+- 変更集合は「比較元との merge-base からの差分 ＋ 作業ツリー ＋ 未追跡ファイル」。比較元の既定は `origin/main`（無ければ `main`）
+- Claude Code の Stop フック（`.claude/hooks/check-doc-sync.sh`）は、画面ソースが変わったのに画像が未更新ならその画像名と上記コマンドを案内する。CI（`.github/workflows/screenshot-sync-check.yml`）も PR で同じ判定を行い、未更新なら warning アノテーションとサマリーで案内する（見た目が変わらない変更もソース単位では「影響あり」になるため、ジョブは失敗させない）
+- 撮影そのものは Windows デスクトップを要するため、フックや CI では行わない
+
 ### 対話式スクリプト
 
 PowerShellスクリプトを使用して、対話的にスクリーンショットを取得できます。
