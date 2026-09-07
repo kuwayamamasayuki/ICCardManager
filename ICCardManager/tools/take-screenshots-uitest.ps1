@@ -15,7 +15,8 @@
 #
 #   オプション:
 #     -OutputDir <path> : 出力先（既定: docs\screenshots\auto。.gitignore 対象）
-#     -Publish          : 撮影後に docs\screenshots\ へ上書きコピーする（見比べてから使うこと）
+#     -Publish          : 撮影は行わず、出力先にある画像を docs\screenshots\ へ上書きコピーする
+#                         （先に撮影 → auto\ の画像を見比べる → -Publish、の 2 段階で使う）
 #     -SkipBuild        : 本体・UITests の再ビルドをスキップ
 #     -Help             : 使い方を表示（未知の引数を渡した場合も使い方を表示して終了する）
 #
@@ -43,7 +44,8 @@ $ErrorActionPreference = "Stop"
 
 function Show-Usage {
     Write-Host @"
-使い方: .\tools\take-screenshots-uitest.ps1 [-OutputDir <path>] [-Publish] [-SkipBuild]
+使い方: .\tools\take-screenshots-uitest.ps1 [-OutputDir <path>] [-SkipBuild]
+        .\tools\take-screenshots-uitest.ps1 -Publish [-OutputDir <path>]
 
   UI テスト基盤（FlaUI）でアプリを起動し、マニュアル用スクリーンショット 8 枚
   （main / history / card / staff / report / export / settings / system）を自動撮影します。
@@ -51,7 +53,8 @@ function Show-Usage {
 
 オプション:
   -OutputDir <path>  出力先。既定: docs\screenshots\auto（Git 管理外）
-  -Publish           撮影後に docs\screenshots\ へ上書きコピーする（見比べてから使うこと）
+  -Publish           撮影は行わず、出力先にある画像を docs\screenshots\ へ上書きコピーする
+                     （先に撮影して auto\ の画像を見比べてから実行する 2 段階の運用）
   -SkipBuild         本体・UITests の再ビルドをスキップする
   -Help              この使い方を表示する
 
@@ -70,11 +73,6 @@ if ($UnknownArgs -and $UnknownArgs.Count -gt 0) {
     exit 2
 }
 
-if ($env:WSL_DISTRO_NAME) {
-    Write-Host "[ERROR] このスクリプトは Windows ネイティブ PowerShell から実行してください。" -ForegroundColor Red
-    exit 2
-}
-
 $repoRoot = Resolve-Path (Join-Path $PSScriptRoot "..\..")
 $projectRoot = Join-Path $repoRoot "ICCardManager"
 $mainCsproj = Join-Path $projectRoot "src\ICCardManager\ICCardManager.csproj"
@@ -82,6 +80,36 @@ $uiTestsCsproj = Join-Path $projectRoot "tests\ICCardManager.UITests\ICCardManag
 $publishedDir = Join-Path $projectRoot "docs\screenshots"
 if (-not $OutputDir) { $OutputDir = Join-Path $publishedDir "auto" }
 $testFilter = "Category=Screenshot"
+
+# -Publish: 撮影せず、出力先にある画像をそのまま docs\screenshots\ へ上書きする。
+# 撮影と同時に上書きすると、見比べる前に既存画像が置き換わってしまうため分けている。
+if ($Publish) {
+    if (-not (Test-Path $OutputDir)) {
+        Write-Host "[ERROR] 出力先が見つかりません: $OutputDir" -ForegroundColor Red
+        Write-Host "        先に引数なしで実行して撮影してください。" -ForegroundColor Yellow
+        exit 1
+    }
+    $staged = @(Get-ChildItem -Path $OutputDir -Filter *.png)
+    if ($staged.Count -eq 0) {
+        Write-Host "[ERROR] 出力先に画像がありません: $OutputDir" -ForegroundColor Red
+        Write-Host "        先に引数なしで実行して撮影してください。" -ForegroundColor Yellow
+        exit 1
+    }
+    Write-Host "docs\screenshots\ へ上書きコピーします（$($staged.Count) 枚）..." -ForegroundColor Green
+    foreach ($f in $staged) {
+        $dest = Join-Path $publishedDir $f.Name
+        $mark = if (Test-Path $dest) { "上書き" } else { "新規" }
+        Copy-Item -Path $f.FullName -Destination $dest -Force
+        Write-Host "   → $($f.Name)（$mark）" -ForegroundColor DarkGray
+    }
+    Write-Host "git diff で差分を確認してからコミットしてください。" -ForegroundColor Yellow
+    exit 0
+}
+
+if ($env:WSL_DISTRO_NAME) {
+    Write-Host "[ERROR] このスクリプトは Windows ネイティブ PowerShell から実行してください。" -ForegroundColor Red
+    exit 2
+}
 
 Write-Host "========================================" -ForegroundColor Cyan
 Write-Host " マニュアル用スクリーンショット自動撮影" -ForegroundColor Cyan
@@ -149,15 +177,8 @@ if ($testExitCode -eq 0) {
     Write-Host "   テスト出力を確認してください。DB は自動で復元されています。" -ForegroundColor Yellow
 }
 Write-Host "========================================" -ForegroundColor Cyan
-
-if ($Publish -and $testExitCode -eq 0 -and $captured.Count -gt 0) {
-    Write-Host ""
-    Write-Host "docs\screenshots\ へ上書きコピーします..." -ForegroundColor Green
-    foreach ($f in $captured) {
-        Copy-Item -Path $f.FullName -Destination (Join-Path $publishedDir $f.Name) -Force
-        Write-Host "   → $($f.Name)" -ForegroundColor DarkGray
-    }
-    Write-Host "git diff で差分を確認してからコミットしてください。" -ForegroundColor Yellow
+if ($testExitCode -eq 0 -and $captured.Count -gt 0) {
+    Write-Host "画像を見比べて問題なければ、-Publish で docs\screenshots\ へ上書きしてください。" -ForegroundColor Yellow
 }
 
 exit $testExitCode

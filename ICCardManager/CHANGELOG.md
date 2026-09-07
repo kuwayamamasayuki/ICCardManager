@@ -4,7 +4,7 @@
 
 **機能追加**
 - Issue #2016 **マニュアル用スクリーンショットを UI テスト基盤（FlaUI）で自動撮影できるようにした**。従来は `tools/TakeScreenshots.ps1` で人が画面を開いて Enter を押す対話式しかなく、UI を変えるたびに撮り直しが手作業だった。UITests の `AppFixture`（アプリ起動・DB 退避／復元）と PageObject（ダイアログを開く操作）をそのまま撮影の前処理に使い、`AutomationElement.CaptureToFile` で保存する。
-  - 第 1 段階の対象は 8 枚（`main` / `history` と、ツールバーから開く `card` / `staff` / `report` / `export` / `settings` / `system`）。入口は `tools/take-screenshots-uitest.ps1`（本体を Release でビルド → `dotnet test --filter Category=Screenshot`）。出力は `docs/screenshots/auto/`（Git 管理外）で、`-Publish` で `docs/screenshots/` へ上書きする。既存画像とのサイズ差を撮影後に出力する
+  - 第 1 段階の対象は 8 枚（`main` / `history` と、ツールバーから開く `card` / `staff` / `report` / `export` / `settings` / `system`）。入口は `tools/take-screenshots-uitest.ps1`（本体を Release でビルド → `dotnet test --filter Category=Screenshot`）。出力は `docs/screenshots/auto/`（Git 管理外）で、見比べてから `-Publish` で `docs/screenshots/` へ上書きする（`-Publish` は撮影し直さず、確認した画像をそのままコピーする）。既存画像とのサイズ差を撮影後に出力する
   - **撮影は Release で起動する**。Debug ビルドはメイン画面下部に仮想タッチパネル（`App.IsDebugBuild`）が写り込む。`AppFixture.Launch` は環境変数 `ICCARDMANAGER_UITEST_CONFIGURATION` で `dotnet run --configuration` を選べるようにした（既定は従来どおり Debug。`Release` 以外は Debug へ丸める）
   - **サンプルデータを投入してから撮る**（`ScreenshotSeedData`）。職員 2 名・交通系ICカード 3 枚（通常／貸出中／残額不足）と当月の利用履歴。残高チェーンは投入時に順に計算し、貸出中カードは `ic_card.is_lent` と `ledger.is_lent_record` を揃える（片方だけだと起動時の整合性修復で貸出中の表示が消える）。`AppFixture.LaunchWithSeededStaff` の「退避→初回起動→INSERT→再起動」を `LaunchWithSeed(Action<SQLiteConnection>)` へ抽出して共有した
   - **通常のテスト実行と CI には影響しない**。撮影クラスは環境変数 `ICCARDMANAGER_SCREENSHOT=1` が無ければ `Skip` し、CI は従来どおり `Category!=UI` で UI テストを除外する
