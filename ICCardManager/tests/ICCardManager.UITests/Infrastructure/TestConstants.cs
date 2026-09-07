@@ -186,6 +186,28 @@ namespace ICCardManager.UITests.Infrastructure
         [UiaName]
         public const string OperationLogActionTypeComboBox = "操作種別";
 
+        // ── 仮想タッチ操作パネル・トースト（Issue #2019。DEBUG ビルドのみ） ────────
+        /// <summary>メイン画面下部の DEBUG パネルの「職員証」ボタン（IDm FFFF000000000001 のタッチを模擬）。</summary>
+        public const string DebugPanelStaffButton = "職員証";
+
+        /// <summary>同「交通系ICカード」ボタン（IDm 07FE112233445566 のタッチを模擬）。</summary>
+        public const string DebugPanelIcCardButton = "交通系ICカード";
+
+        /// <summary>同「仮想タッチ」ボタン（履歴を指定できる仮想タッチダイアログを開く。Issue #640）。</summary>
+        public const string DebugPanelVirtualTouchButton = "仮想タッチ";
+
+        /// <summary>仮想タッチダイアログの AutomationProperties.Name。</summary>
+        public const string VirtualCardDialogName = "仮想交通系ICカード設定ダイアログ";
+        public const string VirtualCardHistoryGrid = "利用履歴一覧";
+        public const string VirtualCardAddEntryButton = "履歴追加";
+        public const string VirtualCardExecuteButton = "タッチ実行";
+
+        /// <summary>トースト通知ウィンドウの AutomationProperties.Name（メイン画面とは別のトップレベルウィンドウ）。</summary>
+        public const string ToastWindowName = "通知ウィンドウ";
+
+        /// <summary>返却後に開くバス停名入力ダイアログ。</summary>
+        public const string BusStopInputDialogName = "バス停名入力ダイアログ";
+
         // ── タイムアウト（秒） ────────────────────────────
         public const int AppLaunchTimeoutSeconds = 30;
         public const int DialogOpenTimeoutSeconds = 10;
