@@ -32,6 +32,9 @@
 
     <!-- SQLite: テスト用シードデータ投入（メインプロジェクトのバージョンと一致させる） -->
     <PackageReference Include="System.Data.SQLite.Core" Version="1.0.119" />
+
+    <!-- スクリーンショットの寸法読み取り（Issue #2016）。net48 の GAC アセンブリ -->
+    <Reference Include="System.Drawing" />
   </ItemGroup>
 
   <!-- dotnet test のソリューション全体実行から除外する。

@@ -66,5 +66,26 @@ namespace ICCardManager.UITests.Tests
             primaryPath.Should().Contain(Path.Combine("src", "ICCardManager", "bin"));
             primaryPath.Should().EndWith("ICCardManager.exe");
         }
+        // ── Issue #2016: 起動構成の解決 ──────────────────
+
+        [Theory]
+        [InlineData("Release", "Release")]
+        [InlineData("release", "Release")]
+        [InlineData("RELEASE", "Release")]
+        public void ResolveLaunchConfiguration_Releaseを指定するとReleaseで起動する(string value, string expected)
+        {
+            AppFixture.ResolveLaunchConfiguration(value).Should().Be(expected);
+        }
+
+        [Theory]
+        [InlineData(null)]
+        [InlineData("")]
+        [InlineData("Debug")]
+        [InlineData("Production")]
+        public void ResolveLaunchConfiguration_Release以外はすべてDebugへ丸める(string? value)
+        {
+            // 想定外の値で dotnet run が存在しない bin/<構成>/ を探しに行かないよう 2 値へ丸める
+            AppFixture.ResolveLaunchConfiguration(value).Should().Be("Debug");
+        }
     }
 }

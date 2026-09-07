@@ -58,6 +58,12 @@ namespace ICCardManager.UITests.Infrastructure
         public const string UsageGuideText = "📖 使い方";
         public const string CardList = "カード一覧";
         public const string HistoryArea = "利用履歴表示エリア";
+
+        /// <summary>
+        /// 履歴表示エリア内の「履歴を閉じる」ボタン。エリア自体は Border で UIA に公開されないため、
+        /// 履歴が開いたことの判定にはこのボタンの出現を使う（Issue #2016）。
+        /// </summary>
+        public const string CloseHistoryButton = "履歴を閉じる";
         public const string DashboardSortOrder = "ダッシュボードの並び順";
 
         // ── StaffAuthDialog ───────────────────────────────

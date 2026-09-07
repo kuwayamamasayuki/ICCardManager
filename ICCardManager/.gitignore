@@ -36,3 +36,6 @@ mermaid-filter.err
 
 # デバッグシンボル（本番環境不要）
 *.pdb
+
+# マニュアル用スクリーンショットの自動撮影出力（tools/take-screenshots-uitest.ps1、Issue #2016）
+docs/screenshots/auto/
