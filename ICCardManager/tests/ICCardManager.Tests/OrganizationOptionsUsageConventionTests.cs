@@ -17,7 +17,7 @@ namespace ICCardManager.Tests;
 /// <remarks>
 /// <para>
 /// 本 Issue の起点は「<c>TemplateMapping</c> の 18 項目中 5 項目しか使われていない」状態だった。
-/// 管理者マニュアル §7.4 が設定可能と案内している一方、本番コードは同名のローカル <c>const</c> と
+/// IT担当者ガイド §5.2（旧 管理者マニュアル §7.4）が設定可能と案内している一方、本番コードは同名のローカル <c>const</c> と
 /// 列リテラルを使っており、設定しても反映されない（＝広告と実装の乖離）。
 /// </para>
 /// <para>
@@ -76,7 +76,7 @@ public class OrganizationOptionsUsageConventionTests
         isRead.Should().BeTrue(
             $"組織設定 {ownerName}.{propertyName} が本番コードから一度も読まれていません。" +
             "設定できるのに反映されない項目（dead config）は、設定するほど壊れる状態になります。" +
-            "実装して読むか、項目そのものを削除してください（あわせて管理者マニュアル §7.4 の表も同期すること）。");
+            "実装して読むか、項目そのものを削除してください（あわせて IT担当者ガイド §5.2 の表も同期すること）。");
     }
 
     #region 空振り検出・検査ロジックの固定（Issue #1786）

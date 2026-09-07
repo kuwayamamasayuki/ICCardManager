@@ -450,14 +450,14 @@ $optionalScreens = @(
         Instructions = "メイン画面でカード一覧を表示した状態で Enter。カウントダウン中にアプリへフォーカスを戻し、並び替えメニューを開いてください"
         DelaySeconds = 5
     },
-    # Issue #1413: 管理者マニュアル §2.6 アンインストールデータ取り扱い選択
+    # Issue #1413: 管理者マニュアル §4.1 / IT担当者ガイド §2.2 アンインストールデータ取り扱い選択
     @{
         Name = "uninstall_data_choice.png"
         Title = "アンインストール時データ取り扱い選択"
         Instructions = "アンインストーラーを実行し、データ取り扱い選択ダイアログ（すべて削除/データのみ残す/何も削除しない）が表示されたら（※InnoSetupの別プロセスのため手動撮影）"
         ManualOnly = $true
     },
-    # Issue #1414: 管理者マニュアル §4 職員登録・編集ダイアログ
+    # Issue #1414: 管理者マニュアル §1.5 / §3.1 職員登録・編集ダイアログ
     @{
         Name = "staff_register_before_touch.png"
         Title = "職員新規登録ダイアログ（職員証タッチ前）"
@@ -476,7 +476,7 @@ $optionalScreens = @(
         Instructions = "職員管理画面で職員行を選択して「編集」、職員情報編集ダイアログ（右側の編集フォームに氏名・職員番号・備考・IDm 欄が表示された状態）が表示されたら。マニュアル §4.3 で参照"
         ForegroundOnly = $true
     },
-    # Issue #1415: 管理者マニュアル §5.3/§5.5 カード編集・払い戻しダイアログ
+    # Issue #1415: 管理者マニュアル §3.2.2/§3.2.3 カード編集・払い戻しダイアログ
     @{
         Name = "card_edit_dialog.png"
         Title = "交通系ICカード情報編集ダイアログ"
@@ -509,7 +509,7 @@ $optionalScreens = @(
         Instructions = "リストア画面で「ファイルを指定してリストア」を選択し、ファイル選択ダイアログが表示されたら"
         ForegroundOnly = $true
     },
-    # Issue #1418: 管理者マニュアル §8.4 felicalib.dll ハッシュ検証失敗エラー
+    # Issue #1418: IT担当者ガイド §8.4 felicalib.dll ハッシュ検証失敗エラー
     @{
         Name = "felicalib_verification_failed.png"
         Title = "felicalib.dll ハッシュ検証失敗ダイアログ"

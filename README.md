@@ -39,6 +39,7 @@
 | [ユーザーマニュアル概要版](ICCardManager/docs/manual/ユーザーマニュアル概要版.md) | よく使う操作を2ページにまとめた概要版 |
 | [ユーザーマニュアル](ICCardManager/docs/manual/ユーザーマニュアル.md) | 全機能の操作方法 |
 | [管理者マニュアル](ICCardManager/docs/manual/管理者マニュアル.md) | 設定・バックアップ・共有モードの管理手順 |
+| [IT担当者ガイド](ICCardManager/docs/manual/IT担当者ガイド.md) | 共有フォルダ・設定ファイル・セキュリティ・障害対応 |
 | [開発者ガイド](ICCardManager/docs/manual/開発者ガイド.md) | ビルド・テスト・アーキテクチャの解説 |
 
 ## リンク
