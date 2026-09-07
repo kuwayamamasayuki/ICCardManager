@@ -154,19 +154,31 @@ namespace ICCardManager.UITests.Infrastructure
         private static extern void SwitchToThisWindow(IntPtr hWnd, bool fAltTab);
 
         /// <summary>
-        /// ウィンドウを最大化する（Issue #2019）。
-        /// トースト通知は画面の隅（既定は右上）に出る別ウィンドウなので、メイン画面を最大化しておくと
-        /// トーストがメイン画面の矩形の内側に収まり、背景を含めずに 1 枚で撮れる。
+        /// メイン画面とトースト通知の両方を含む矩形を PNG に保存する（Issue #2019）。
         /// </summary>
-        public static void Maximize(Window window)
+        /// <remarks>
+        /// トースト通知は画面の隅（既定は右上）に出る別ウィンドウで、メイン画面の矩形の外にある。
+        /// メイン画面を最大化して内側に収める案は、トーストが画面の内容と重なって「どこに出るのか」が
+        /// 読み取りにくくなるため採らない。手動撮影の既存画像と同じく、2 つのウィンドウを囲む最小の矩形で撮る
+        /// （間にデスクトップが写るが、その方が「メイン画面の外に通知が出る」ことが伝わる）。
+        /// </remarks>
+        public static string CaptureWithToast(Window mainWindow, Window toast, string fileName)
         {
-            if (window == null) throw new ArgumentNullException(nameof(window));
-            var pattern = window.Patterns.Window.PatternOrDefault;
-            if (pattern != null && pattern.CanMaximize.ValueOrDefault)
+            if (mainWindow == null) throw new ArgumentNullException(nameof(mainWindow));
+            if (toast == null) throw new ArgumentNullException(nameof(toast));
+            if (string.IsNullOrWhiteSpace(fileName)) throw new ArgumentException("ファイル名を指定してください。", nameof(fileName));
+
+            // トーストは Topmost（ToastNotificationWindow.xaml）なので、メイン画面を前面化しても隠れない
+            BringToForeground(mainWindow);
+            var bounds = Rectangle.Union(GetVisibleFrameBounds(mainWindow), GetVisibleFrameBounds(toast));
+            var path = Path.Combine(OutputDirectory, fileName);
+            using (var image = FlaUI.Core.Capturing.Capture.Rectangle(bounds))
             {
-                pattern.SetWindowVisualState(FlaUI.Core.Definitions.WindowVisualState.Maximized);
+                image.ToFile(path);
             }
-            Thread.Sleep(SettleDelay);
+
+            ReportSize(path, fileName);
+            return path;
         }
 
         /// <summary>撮影テストをスキップすべきか（環境変数 <see cref="EnableEnvironmentVariable"/> が <c>1</c> でない）。</summary>
