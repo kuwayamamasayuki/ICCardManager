@@ -1,6 +1,8 @@
 using System;
 using FlaUI.Core.AutomationElements;
 using FlaUI.Core.Definitions;
+using FlaUI.Core.Input;
+using FlaUI.Core.WindowsAPI;
 using FlaUI.Core.Tools;
 using FlaUI.UIA3;
 using ICCardManager.UITests.Infrastructure;
@@ -110,6 +112,63 @@ namespace ICCardManager.UITests.PageObjects
             }
 
             return result.Result;
+        }
+
+        // ── カード一覧・履歴（Issue #2016） ──────────────────
+
+        /// <summary>
+        /// カード一覧（右サイドバー）の行をクリックして利用履歴を開き、履歴表示エリアが現れるまで待つ。
+        /// </summary>
+        /// <param name="cardDisplayName">
+        /// 行の AutomationProperties.Name（<c>IcCard.DisplayName</c> ＝ 「種別 管理番号」。例: 「はやかけん 001」）。
+        /// </param>
+        /// <returns>履歴表示エリア内の「履歴を閉じる」ボタン（表示完了の証拠）。</returns>
+        public AutomationElement OpenCardHistory(string cardDisplayName)
+        {
+            var list = CardListElement
+                ?? throw new InvalidOperationException(
+                    $"カード一覧が見つかりません: AutomationProperties.Name=\"{TestConstants.CardList}\"");
+
+            // ListViewItem は ItemContainerStyle で AutomationProperties.Name=DisplayName を持つ。
+            // 行の出現はダッシュボードの非同期読み込み完了後なので Retry で待つ。
+            var row = Retry.WhileNull(
+                () => list.FindFirstDescendant(cf => cf.ByName(cardDisplayName)),
+                TimeSpan.FromSeconds(TestConstants.DialogOpenTimeoutSeconds)).Result
+                ?? throw new TimeoutException(
+                    $"カード一覧に行が現れませんでした: \"{cardDisplayName}\"（{TestConstants.DialogOpenTimeoutSeconds}秒タイムアウト）");
+
+            // 行テンプレートの Border に MouseBinding(LeftClick) が付いているため、まず実クリックで開く。
+            // FlaUI のクリックは行の選択だけで終わり MouseBinding が発火しないことがある（実測）ので、
+            // 短い待機で開かなければ、選択済みの行に対して Enter（ListView の KeyBinding）で開く。
+            Window.SetForeground();
+            row.Click();
+            var closeButton = WaitForCloseHistoryButton(TimeSpan.FromSeconds(2));
+            if (closeButton == null)
+            {
+                // Keyboard.Press は押し下げだけ（離さない）なので、押下＋解放の Type を使う
+                row.Focus();
+                Keyboard.Type(VirtualKeyShort.RETURN);
+                closeButton = WaitForCloseHistoryButton(TimeSpan.FromSeconds(TestConstants.DialogOpenTimeoutSeconds));
+            }
+
+            return closeButton
+                ?? throw new TimeoutException(
+                    $"履歴表示エリアが表示されませんでした（\"{TestConstants.CloseHistoryButton}\" ボタンが現れない。{TestConstants.DialogOpenTimeoutSeconds}秒タイムアウト）");
+        }
+
+        /// <summary>
+        /// 履歴表示エリア内の「履歴を閉じる」ボタンが現れるまで待つ。
+        /// エリア自体は Border（UIA ツリーに公開されない）なので、このボタンの出現で表示完了を判定する。
+        /// </summary>
+        private AutomationElement? WaitForCloseHistoryButton(TimeSpan timeout)
+        {
+            return Retry.WhileNull(
+                () =>
+                {
+                    var button = FindByName(TestConstants.CloseHistoryButton);
+                    return button != null && !button.IsOffscreen ? button : null;
+                },
+                timeout).Result;
         }
 
         /// <summary>

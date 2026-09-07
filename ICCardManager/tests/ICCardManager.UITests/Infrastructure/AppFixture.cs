@@ -30,6 +30,23 @@ namespace ICCardManager.UITests.Infrastructure
         private static readonly string DbPath = Path.Combine(DbDirectory, "iccard.db");
         private static readonly string DbBackupPath = Path.Combine(DbDirectory, "iccard.db.uitest-backup");
 
+        /// <summary>
+        /// <c>dotnet run --no-build</c> に渡すビルド構成。環境変数 <c>ICCARDMANAGER_UITEST_CONFIGURATION</c> で
+        /// 上書きでき、未設定なら <c>Debug</c>（従来どおり。dotnet run の既定と一致）。
+        /// マニュアル用スクリーンショット（Issue #2016）は DEBUG 限定の仮想タッチパネルが写り込まないよう
+        /// <c>Release</c> で起動する。
+        /// </summary>
+        internal static string LaunchConfiguration => ResolveLaunchConfiguration(
+            Environment.GetEnvironmentVariable("ICCARDMANAGER_UITEST_CONFIGURATION"));
+
+        /// <summary>
+        /// 環境変数の値からビルド構成名を解決する（純粋関数）。<c>Release</c>（大文字小文字を無視）のときだけ
+        /// <c>Release</c>、それ以外はすべて <c>Debug</c>。想定外の値で <c>dotnet run</c> が別ディレクトリを探しに行かないよう
+        /// 2 値へ丸める。
+        /// </summary>
+        internal static string ResolveLaunchConfiguration(string? environmentValue) =>
+            string.Equals(environmentValue, "Release", StringComparison.OrdinalIgnoreCase) ? "Release" : "Debug";
+
         private readonly Application _app;
         private readonly UIA3Automation _automation;
         private readonly bool _dbBackedUp;
@@ -57,6 +74,40 @@ namespace ICCardManager.UITests.Infrastructure
         /// </remarks>
         public static AppFixture LaunchWithSeededStaff()
         {
+            return LaunchWithSeed(conn =>
+            {
+                // SQLite に職員を直接 INSERT する（テスト用ヘルパ）
+                // staff テーブルのスキーマ: staff_idm (PK), name, number, note, is_deleted, deleted_at
+                using var cmd = conn.CreateCommand();
+                cmd.CommandText =
+                    "INSERT OR IGNORE INTO staff (staff_idm, name, is_deleted) " +
+                    $"VALUES ('{SeededStaffIdm}', 'テスト職員', 0)";
+                cmd.ExecuteNonQuery();
+            });
+        }
+
+        /// <summary>
+        /// テスト用職員の IDm。DEBUG ビルドの仮想タッチボタン（<see cref="TestConstants.DebugVirtualTouchButtonName"/>）が
+        /// 送出する IDm と一致させる。
+        /// </summary>
+        public const string SeededStaffIdm = "FFFF000000000001";
+
+        /// <summary>
+        /// 任意のデータを事前投入してアプリを起動する。
+        /// </summary>
+        /// <param name="seed">
+        /// マイグレーション済みの空 DB に対して実行する投入処理。
+        /// 接続は開いた状態で渡され、戻った後に閉じられる。
+        /// </param>
+        /// <remarks>
+        /// 既存 DB を退避 → 空 DB でアプリを一度起動してマイグレーション → 終了後に <paramref name="seed"/> を実行 →
+        /// 再起動、という手順を取る。Dispose 時に退避した元の DB を復元する。
+        /// 初回起動の Dispose が DB をリストアしないよう、初回 Dispose 前に BackupPath を退避してリストアをスキップする。
+        /// </remarks>
+        public static AppFixture LaunchWithSeed(Action<SQLiteConnection> seed)
+        {
+            if (seed == null) throw new ArgumentNullException(nameof(seed));
+
             RecoverOrphanBackups();
 
             // 既存 DB を退避
@@ -89,16 +140,11 @@ namespace ICCardManager.UITests.Infrastructure
             // プロセス終了後の DB ファイルロック解放を待つ
             System.Threading.Thread.Sleep(1000);
 
-            // SQLite に職員を直接 INSERT する（テスト用ヘルパ）
-            // staff テーブルのスキーマ: staff_idm (PK), name, number, note, is_deleted, deleted_at
+            // マイグレーション済みの空 DB へ呼び出し元のデータを直接投入する
             using (var conn = new SQLiteConnection($"Data Source={DbPath};Version=3"))
             {
                 conn.Open();
-                using var cmd = conn.CreateCommand();
-                cmd.CommandText =
-                    "INSERT OR IGNORE INTO staff (staff_idm, name, is_deleted) " +
-                    "VALUES ('FFFF000000000001', 'テスト職員', 0)";
-                cmd.ExecuteNonQuery();
+                seed(conn);
             }
 
             // 再度起動（投入済み DB を使う）
@@ -152,7 +198,7 @@ namespace ICCardManager.UITests.Infrastructure
             var dotnetProcess = Process.Start(new ProcessStartInfo
             {
                 FileName = "dotnet",
-                Arguments = $"run --no-build --project \"{csprojPath}\"",
+                Arguments = $"run --no-build --configuration {LaunchConfiguration} --project \"{csprojPath}\"",
                 WorkingDirectory = projectRoot,
                 UseShellExecute = false
             });

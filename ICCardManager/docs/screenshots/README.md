@@ -32,7 +32,39 @@
 
 ## スクリーンショットの撮影方法
 
-### 自動取得スクリプト（推奨）
+### 完全自動撮影（UI テスト基盤、8 枚）
+
+UI テスト基盤（FlaUI）でアプリを起動し、画面を開く操作まで含めて自動で撮影します。人の操作は不要です。
+
+```powershell
+# Windows ネイティブの PowerShell から実行（WSL2 不可）
+cd D:\OneDrive\交通系\src\ICCardManager
+
+# 1. docs\screenshots\auto\ へ撮影（既存画像は上書きしない）
+.\tools\take-screenshots-uitest.ps1
+
+# 2. auto\ の画像を見比べて問題なければ、撮影せずにそのまま docs\screenshots\ へ上書きコピー
+.\tools\take-screenshots-uitest.ps1 -Publish
+```
+
+| 対象 | ファイル |
+|------|---------|
+| メイン画面（待機状態） | `main.png` |
+| 履歴照会画面 | `history.png` |
+| ツールバーから開くダイアログ | `card.png` `staff.png` `report.png` `export.png` `settings.png` `system.png` |
+
+動作の要点：
+- 本体を **Release** でビルド・起動する（Debug は画面下部に仮想タッチパネルが写り込むため）
+- 既存の DB（`%ProgramData%\ICCardManager\iccard.db`）は撮影中だけ退避し、終了後に復元する
+- 職員 2 名・交通系ICカード 3 枚（通常／貸出中／残額不足）と当月の利用履歴をサンプルとして投入する（`tests/ICCardManager.UITests/Infrastructure/ScreenshotSeedData.cs`）
+- 出力先 `docs\screenshots\auto\` は Git 管理外。撮影結果は既存画像とサイズを見比べてから `-Publish` で差し替える。`-Publish` は撮影し直さず、`auto\` にある画像をそのままコピーする（確認した画像と差し替える画像が同じであることを保証するため）
+- ステータスバーの「リーダー:」は撮影した PC の接続状態がそのまま写る（未接続なら「切断」）。警告欄もその PC の状態（更新の案内など）を含み得るので、差し替え前に確認すること
+- 撮影中はアプリのウィンドウが画面左上へ移動して前面に出る。マウス・キーボードに触れないこと
+- テストプロセスを DPI 対応にして物理ピクセルで撮るため、表示スケール 150% では 100% の 1.5 倍の寸法になる。既存画像と寸法を揃えたいときは表示スケールを 100% にして実行する
+
+職員証・交通系ICカードのタッチを要する画面（`staff_recognized.png` / `lend.png` / `return.png`）と、下記の対話式スクリプトにしか定義の無い画面は、引き続き対話式で撮影します。
+
+### 対話式スクリプト
 
 PowerShellスクリプトを使用して、対話的にスクリーンショットを取得できます。
 

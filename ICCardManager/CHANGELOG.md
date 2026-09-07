@@ -2,6 +2,15 @@
 
 ### Unreleased
 
+**機能追加**
+- Issue #2016 **マニュアル用スクリーンショットを UI テスト基盤（FlaUI）で自動撮影できるようにした**。従来は `tools/TakeScreenshots.ps1` で人が画面を開いて Enter を押す対話式しかなく、UI を変えるたびに撮り直しが手作業だった。UITests の `AppFixture`（アプリ起動・DB 退避／復元）と PageObject（ダイアログを開く操作）をそのまま撮影の前処理に使い、`AutomationElement.CaptureToFile` で保存する。
+  - 第 1 段階の対象は 8 枚（`main` / `history` と、ツールバーから開く `card` / `staff` / `report` / `export` / `settings` / `system`）。入口は `tools/take-screenshots-uitest.ps1`（本体を Release でビルド → `dotnet test --filter Category=Screenshot`）。出力は `docs/screenshots/auto/`（Git 管理外）で、見比べてから `-Publish` で `docs/screenshots/` へ上書きする（`-Publish` は撮影し直さず、確認した画像をそのままコピーする）。既存画像とのサイズ差を撮影後に出力する
+  - **撮影は Release で起動する**。Debug ビルドはメイン画面下部に仮想タッチパネル（`App.IsDebugBuild`）が写り込む。`AppFixture.Launch` は環境変数 `ICCARDMANAGER_UITEST_CONFIGURATION` で `dotnet run --configuration` を選べるようにした（既定は従来どおり Debug。`Release` 以外は Debug へ丸める）
+  - **サンプルデータを投入してから撮る**（`ScreenshotSeedData`）。職員 2 名・交通系ICカード 3 枚（通常／貸出中／残額不足）と当月の利用履歴。残高チェーンは投入時に順に計算し、貸出中カードは `ic_card.is_lent` と `ledger.is_lent_record` を揃える（片方だけだと起動時の整合性修復で貸出中の表示が消える）。`AppFixture.LaunchWithSeededStaff` の「退避→初回起動→INSERT→再起動」を `LaunchWithSeed(Action<SQLiteConnection>)` へ抽出して共有した
+  - **通常のテスト実行と CI には影響しない**。撮影クラスは環境変数 `ICCARDMANAGER_SCREENSHOT=1` が無ければ `Skip` し、CI は従来どおり `Category!=UI` で UI テストを除外する
+  - **対象外（第 2 段階）**: 職員証・交通系ICカードのタッチを要する `staff_recognized` / `lend` / `return`。仮想タッチが Debug 限定で、パネルを非表示にするアプリ側の切替を先に要する。対話式スクリプトは残り 41 画面のために残す
+  - 追加は **+15 件**（UITests。`ManualScreenshotTests` 8 件、`AppFixturePathResolutionTests` +7 件）。07_テスト設計書 ST-006a 参照
+
 **ドキュメント**
 - **管理者マニュアルを「作業別」構成へ書き直し、IT 担当者向けの内容を新設の `IT担当者ガイド.md` へ分離した**。読者を部署の庶務担当者に絞り、章立てを「はじめて使うとき／毎月すること／人やカードが増減したとき／年に一度すること／困ったとき／データを取り出す・戻す」と付録（設定画面・システム管理画面・管理者ダッシュボードの項目一覧）に組み替えた。各作業は「この作業をするとき／前提／手順／できたことの確認」の固定型で書き、Issue 番号と改善経緯を本文から外した。あわせて**カードの登録を 1 つの節（1.6）にまとめ、登録するカードによる場合分けを冒頭の表で示した**（1.6.1 新規購入／1.6.2 紙の出納簿から引き継ぐ・4月から／1.6.3 同・年度の途中から／1.6.4 履歴の取り込み／1.6.5 帳票での確認）。**紙の出納簿で管理していたカードを 4 月から引き継ぐ手順（繰越月に「3月」を選び「前年度より繰越」として記録する）は、旧版では §5.6.2 の一文と FAQ にしかなく手順として書かれていなかった**ため、1.6.2 として新設した。「新規購入」と「紙の出納簿からの繰越」が別々の節に分かれていた構成を改め、両方に効く注意（繰越額はカード残高より優先される／開始ページと累計は登録時にしか設定できない 等）は 1.6 の冒頭に 1 か所へまとめた。共有フォルダの構築・SQLite の接続・appsettings と OrganizationOptions・DLL 完全性検証・障害対応は IT担当者ガイドへ移した。節番号の変更に伴い、カード登録方法ダイアログの案内文・`AdminDashboardOtherSeriesCountManualConventionTests` の見出し定数・ユーザーマニュアル／かんたん導入ガイド／はじめに の参照・インストーラーと変換スクリプト（`convert-to-docx.ps1` / `convert-to-pdf.ps1` / `convert-to-docx.bat`）のファイル一覧・`bump-version.ps1` のバージョン注入対象・ルート `README.md` のドキュメント表・設計書（03・04・05・07・08）とテスト／`TakeScreenshots.ps1` の節番号参照を追随させた。繰越情報の復旧で IT 担当者へ渡す `ic_card` の列名は IT担当者ガイド §4.8 として残した。`.docx` / `.pdf` は次回リリース時に再生成する
 - **常時ロードされる `.claude/rules/development-conventions.md`（約 109k 文字）を、担当する層ごとの条件付きロード 5 ファイルへ分割した**。Claude Code はセッション開始時に常時ルールを毎回読み込むため、Issue 由来の詳細規約が 1 ファイルに積み上がった結果、単一メモリファイルの警告しきい値（約 40k 文字）の 2.7 倍を毎セッション消費し、ドキュメントだけを触る作業でも DB 書き込みや WPF の規約を全部抱えていた。
