@@ -107,11 +107,55 @@ namespace ICCardManager.UITests.Infrastructure
             Thread.Sleep(SettleDelay);
 
             var path = Path.Combine(OutputDirectory, fileName);
-            window.CaptureToFile(path);
+            var bounds = GetVisibleFrameBounds(window);
+            using (var image = FlaUI.Core.Capturing.Capture.Rectangle(bounds))
+            {
+                image.ToFile(path);
+            }
 
             ReportSize(path, fileName);
             return path;
         }
+
+        /// <summary>
+        /// ウィンドウの「実際に見えている」矩形（物理ピクセル）を返す。
+        /// </summary>
+        /// <remarks>
+        /// Windows 10/11 のウィンドウは、見えないリサイズ用の枠と影の領域を <c>GetWindowRect</c>
+        /// （FlaUI の <see cref="AutomationElement.BoundingRectangle"/> の元）に含むため、その矩形で撮ると
+        /// 周囲に背景が数ピクセル写り込む。Snipping Tool の「ウィンドウ」モードと同じく DWM の
+        /// <c>DWMWA_EXTENDED_FRAME_BOUNDS</c> で見えている枠の矩形を取る。取得できないときは従来の矩形へ戻す。
+        /// </remarks>
+        internal static Rectangle GetVisibleFrameBounds(Window window)
+        {
+            var fallback = window.BoundingRectangle;
+            var handle = window.Properties.NativeWindowHandle.ValueOrDefault;
+            if (handle == IntPtr.Zero)
+            {
+                return fallback;
+            }
+
+            // DWMWA_EXTENDED_FRAME_BOUNDS = 9
+            var hr = DwmGetWindowAttribute(handle, 9, out var rect, System.Runtime.InteropServices.Marshal.SizeOf<RECT>());
+            if (hr != 0 || rect.Right <= rect.Left || rect.Bottom <= rect.Top)
+            {
+                return fallback;
+            }
+
+            return Rectangle.FromLTRB(rect.Left, rect.Top, rect.Right, rect.Bottom);
+        }
+
+        [System.Runtime.InteropServices.StructLayout(System.Runtime.InteropServices.LayoutKind.Sequential)]
+        private struct RECT
+        {
+            public int Left;
+            public int Top;
+            public int Right;
+            public int Bottom;
+        }
+
+        [System.Runtime.InteropServices.DllImport("dwmapi.dll")]
+        private static extern int DwmGetWindowAttribute(IntPtr hwnd, int attribute, out RECT value, int size);
 
         private static void ReportSize(string capturedPath, string fileName)
         {
