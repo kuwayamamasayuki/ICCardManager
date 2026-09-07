@@ -52,7 +52,7 @@ cd D:\OneDrive\交通系\src\ICCardManager
 | Release | メイン画面（待機状態） | `main.png` |
 | Release | 履歴照会画面 | `history.png` |
 | Release | ツールバーから開くダイアログ | `card.png` `staff.png` `report.png` `export.png` `settings.png` `system.png` |
-| Debug | 職員証認識・貸出完了・返却完了（メイン画面を最大化して撮る） | `staff_recognized.png` `lend.png` `return.png` |
+| Debug | 職員証認識・貸出完了・返却完了（メイン画面と画面隅のトーストの両方を含む矩形で撮る） | `staff_recognized.png` `lend.png` `return.png` |
 | Debug | トースト単体（概要版マニュアル用） | `toast_staff_recognized.png` `toast_lend.png` `toast_return.png` |
 | Debug | バス停名入力ダイアログ | `busstop.png` |
 
@@ -62,7 +62,7 @@ cd D:\OneDrive\交通系\src\ICCardManager
 - 職員 2 名・交通系ICカード 3 枚（通常／貸出中／残額不足）と当月の利用履歴をサンプルとして投入する（`tests/ICCardManager.UITests/Infrastructure/ScreenshotSeedData.cs`）
 - 出力先 `docs\screenshots\auto\` は Git 管理外。撮影結果は既存画像とサイズを見比べてから `-Publish` で差し替える。`-Publish` は撮影し直さず、`auto\` にある画像をそのままコピーする（確認した画像と差し替える画像が同じであることを保証するため）
 - ステータスバーの「リーダー:」は撮影した PC の接続状態がそのまま写る（未接続なら「切断」）。警告欄もその PC の状態（更新の案内など）を含み得るので、差し替え前に確認すること
-- 撮影中はアプリのウィンドウが画面左上へ移動（貸出・返却は最大化）して前面に出る。マウス・キーボードに触れないこと
+- 撮影中はアプリのウィンドウが画面左上へ移動して前面に出る。マウス・キーボードに触れないこと
 - **管理者権限で動いているウィンドウを前面にしたまま実行しない**。Windows が前面化と入力注入を拒否するため、クリック・キー入力を要する撮影（履歴照会）が「アプリのウィンドウを前面にできません」で失敗する。そのウィンドウを閉じるか最小化してからやり直す
 - テストプロセスを DPI 対応にして物理ピクセルで撮るため、表示スケール 150% では 100% の 1.5 倍の寸法になる。既存画像と寸法を揃えたいときは表示スケールを 100% にして実行する
 

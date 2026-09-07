@@ -22,8 +22,9 @@ namespace ICCardManager.UITests.Tests
     /// UI Automation からボタンを押す。
     /// </para>
     /// <para>
-    /// トースト通知は画面の隅に出る別ウィンドウなので、メイン画面を最大化してその矩形の内側に収める。
-    /// あわせてトースト単体（概要版マニュアルの <c>toast_*.png</c>）も撮る。
+    /// トースト通知は画面の隅に出る別ウィンドウなので、メイン画面とトーストの両方を囲む矩形で撮る
+    /// （<see cref="ScreenshotHelper.CaptureWithToast"/>。最大化して内側に収めるとトーストが画面の内容と重なり、
+    /// どこに出るのかが読み取りにくい）。あわせてトースト単体（概要版マニュアルの <c>toast_*.png</c>）も撮る。
     /// </para>
     /// <para>
     /// 返却は「交通系ICカード」ボタンでは成立しない（履歴の読み取りが実カードリーダーへ委譲されて失敗する）ため、
@@ -55,13 +56,12 @@ namespace ICCardManager.UITests.Tests
 
             using var fixture = AppFixture.LaunchWithSeed(ScreenshotSeedData.SeedForVirtualTouch);
             ScreenshotHelper.MoveToTopLeft(fixture.MainWindow);
-            ScreenshotHelper.Maximize(fixture.MainWindow);
             var page = new MainWindowPage(fixture.MainWindow, fixture.Automation);
 
             // 1. 職員証タッチ → 認識トースト＋交通系ICカードタッチ待ち
             InvokeDebugPanelButton(page, TestConstants.DebugPanelStaffButton);
             var toast = WaitForToast(fixture);
-            File.Exists(ScreenshotHelper.Capture(fixture.MainWindow, "staff_recognized.png")).Should().BeTrue();
+            File.Exists(ScreenshotHelper.CaptureWithToast(fixture.MainWindow, toast, "staff_recognized.png")).Should().BeTrue();
             File.Exists(ScreenshotHelper.Capture(toast, "toast_staff_recognized.png", bringToFront: false)).Should().BeTrue();
 
             // 認識トーストが消えるのを待ってから次のタッチへ（貸出トーストと見分けるため）
@@ -70,7 +70,7 @@ namespace ICCardManager.UITests.Tests
             // 2. 交通系ICカードタッチ → 貸出完了トースト
             InvokeDebugPanelButton(page, TestConstants.DebugPanelIcCardButton);
             toast = WaitForToast(fixture);
-            File.Exists(ScreenshotHelper.Capture(fixture.MainWindow, "lend.png")).Should().BeTrue();
+            File.Exists(ScreenshotHelper.CaptureWithToast(fixture.MainWindow, toast, "lend.png")).Should().BeTrue();
             File.Exists(ScreenshotHelper.Capture(toast, "toast_lend.png", bringToFront: false)).Should().BeTrue();
         }
 
@@ -81,14 +81,13 @@ namespace ICCardManager.UITests.Tests
 
             using var fixture = AppFixture.LaunchWithSeed(conn => ScreenshotSeedData.SeedForVirtualTouch(conn, skipBusStopInput: true));
             ScreenshotHelper.MoveToTopLeft(fixture.MainWindow);
-            ScreenshotHelper.Maximize(fixture.MainWindow);
             var page = new MainWindowPage(fixture.MainWindow, fixture.Automation);
 
             // 鉄道利用（駅名あり）にして、バス停名未入力の警告が写り込まないようにする
             ExecuteVirtualTouchWithOneEntry(page, entryStation: "博多", exitStation: "天神");
 
             var toast = WaitForToast(fixture);
-            File.Exists(ScreenshotHelper.Capture(fixture.MainWindow, "return.png")).Should().BeTrue();
+            File.Exists(ScreenshotHelper.CaptureWithToast(fixture.MainWindow, toast, "return.png")).Should().BeTrue();
             File.Exists(ScreenshotHelper.Capture(toast, "toast_return.png", bringToFront: false)).Should().BeTrue();
         }
 
