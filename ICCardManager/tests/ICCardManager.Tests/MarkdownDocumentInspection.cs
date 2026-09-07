@@ -10,7 +10,7 @@ namespace ICCardManager.Tests;
 /// <remarks>
 /// <para>
 /// 節の切り出しは、ドキュメントのドリフトを静的検査する複数のテストが必要とする
-/// （Issue #1890 の 03_画面設計書 §3.23.4、Issue #1892 の管理者マニュアル §9.4.3）。
+/// （Issue #1890 の 03_画面設計書 §3.23.4、Issue #1892 の管理者マニュアル 付録 C.3）。
 /// 検査クラスごとに私的コピーを置くと、見出し判定の欠陥（コードフェンス内の <c>#</c> を
 /// 見出しと誤認して節を途中で打ち切る等）を直したときに片方だけが直る
 /// （<c>.claude/rules/development-conventions.md</c>「同じ論理的な処理に手段が 2 通りあるか」）。
@@ -40,7 +40,7 @@ internal static class MarkdownDocumentInspection
         if (heading == null || !heading.StartsWith("#", StringComparison.Ordinal))
         {
             throw new ArgumentException(
-                "見出しは「#」で始まる完全な形（例: \"#### 9.4.3 利用推移タブ\"）で指定してください。"
+                "見出しは「#」で始まる完全な形（例: \"#### C.3 利用推移タブ\"）で指定してください。"
                 + $"指定値: 「{heading}」",
                 nameof(heading));
         }

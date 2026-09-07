@@ -10,6 +10,7 @@ rem   convert-to-docx.bat /nomermaid Mermaidフィルターを使用しない
 rem   convert-to-docx.bat intro      はじめにのみ変換
 rem   convert-to-docx.bat user       ユーザーマニュアルのみ変換
 rem   convert-to-docx.bat admin      管理者マニュアルのみ変換
+rem   convert-to-docx.bat it         IT担当者ガイドのみ変換
 rem   convert-to-docx.bat dev        開発者ガイドのみ変換
 rem 前提条件:
 rem   1. pandocがインストールされていること
@@ -35,6 +36,7 @@ if "%~1"=="-nomermaid" set "NOMERMAID=1"
 if "%~1"=="intro" set "TARGET=intro"
 if "%~1"=="user" set "TARGET=user"
 if "%~1"=="admin" set "TARGET=admin"
+if "%~1"=="it" set "TARGET=it"
 if "%~1"=="dev" set "TARGET=dev"
 shift
 goto :parse_args
@@ -84,6 +86,10 @@ if "%TARGET%"=="user" call :convert_manual "ユーザーマニュアル" "ユー
 rem 管理者マニュアル
 if "%TARGET%"=="all" call :convert_manual "管理者マニュアル" "管理者マニュアル.md" "管理者マニュアル.docx" "交通系ICカード管理システム：ピッすい 管理者マニュアル"
 if "%TARGET%"=="admin" call :convert_manual "管理者マニュアル" "管理者マニュアル.md" "管理者マニュアル.docx" "交通系ICカード管理システム：ピッすい 管理者マニュアル"
+
+rem IT担当者ガイド
+if "%TARGET%"=="all" call :convert_manual "IT担当者ガイド" "IT担当者ガイド.md" "IT担当者ガイド.docx" "交通系ICカード管理システム：ピッすい IT担当者ガイド"
+if "%TARGET%"=="it" call :convert_manual "IT担当者ガイド" "IT担当者ガイド.md" "IT担当者ガイド.docx" "交通系ICカード管理システム：ピッすい IT担当者ガイド"
 
 rem 開発者ガイド
 if "%TARGET%"=="all" call :convert_manual "開発者ガイド" "開発者ガイド.md" "開発者ガイド.docx" "交通系ICカード管理システム：ピッすい 開発者ガイド"

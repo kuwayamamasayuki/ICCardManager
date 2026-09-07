@@ -24,6 +24,7 @@ $ReadmePath = Join-Path $ProjectRoot "README.md"
 $ChangelogPath = Join-Path $ProjectRoot "CHANGELOG.md"
 $UserManualPath = Join-Path $ProjectRoot "docs\manual\ユーザーマニュアル.md"
 $AdminManualPath = Join-Path $ProjectRoot "docs\manual\管理者マニュアル.md"
+$ItGuidePath = Join-Path $ProjectRoot "docs\manual\IT担当者ガイド.md"
 $QuickStartPath = Join-Path $ProjectRoot "docs\manual\かんたん導入ガイド.md"
 $IntroPath = Join-Path $ProjectRoot "docs\manual\はじめに.md"
 $UserManualBriefPath = Join-Path $ProjectRoot "docs\manual\ユーザーマニュアル概要版.md"
@@ -288,6 +289,12 @@ $adminManualContent = $adminManualContent -replace '\*\*バージョン\*\*: [^\
 $adminManualContent = $adminManualContent -replace '\*\*最終更新日\*\*: [^\r\n]+', "**最終更新日**: ${TodayJp}"
 Write-Success "管理者マニュアル.md: ${NewVersion}"
 
+# 3e2. IT担当者ガイド — バージョン + 最終更新日
+$itGuideContent = Get-Content $ItGuidePath -Raw -Encoding UTF8
+$itGuideContent = $itGuideContent -replace '\*\*バージョン\*\*: [^\r\n]+', "**バージョン**: ${NewVersion}"
+$itGuideContent = $itGuideContent -replace '\*\*最終更新日\*\*: [^\r\n]+', "**最終更新日**: ${TodayJp}"
+Write-Success "IT担当者ガイド.md: ${NewVersion}"
+
 # 3f. かんたん導入ガイド — バージョン + 最終更新日（Issue #1462）
 $quickStartContent = Get-Content $QuickStartPath -Raw -Encoding UTF8
 $quickStartContent = $quickStartContent -replace '\*\*バージョン\*\*: [^\r\n]+', "**バージョン**: ${NewVersion}"
@@ -330,6 +337,7 @@ if ($DryRun) {
         @{ Path = $ChangelogPath;        Content = $changelogContent },
         @{ Path = $UserManualPath;       Content = $userManualContent },
         @{ Path = $AdminManualPath;      Content = $adminManualContent },
+        @{ Path = $ItGuidePath;          Content = $itGuideContent },
         @{ Path = $QuickStartPath;       Content = $quickStartContent },
         @{ Path = $IntroPath;            Content = $introContent },
         @{ Path = $UserManualBriefPath;  Content = $userManualBriefContent },
@@ -366,11 +374,12 @@ $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
 [System.IO.File]::WriteAllText($ChangelogPath, $changelogContent, $utf8NoBom)
 [System.IO.File]::WriteAllText($UserManualPath, $userManualContent, $utf8NoBom)
 [System.IO.File]::WriteAllText($AdminManualPath, $adminManualContent, $utf8NoBom)
+[System.IO.File]::WriteAllText($ItGuidePath, $itGuideContent, $utf8NoBom)
 [System.IO.File]::WriteAllText($QuickStartPath, $quickStartContent, $utf8NoBom)
 [System.IO.File]::WriteAllText($IntroPath, $introContent, $utf8NoBom)
 [System.IO.File]::WriteAllText($UserManualBriefPath, $userManualBriefContent, $utf8NoBom)
 [System.IO.File]::WriteAllText($DeveloperGuidePath, $developerGuideContent, $utf8NoBom)
-Write-Success "9ファイルを更新しました"
+Write-Success "10ファイルを更新しました"
 
 # ─────────────────────────────────────────────────
 # 6. ブランチ作成・コミット・プッシュ・PR作成
@@ -389,6 +398,7 @@ $filesToAdd = @(
     $ChangelogPath,
     $UserManualPath,
     $AdminManualPath,
+    $ItGuidePath,
     $QuickStartPath,
     $IntroPath,
     $UserManualBriefPath,
@@ -418,6 +428,7 @@ $prBody = @"
 - ``CHANGELOG.md``
 - ``docs/manual/ユーザーマニュアル.md``
 - ``docs/manual/管理者マニュアル.md``
+- ``docs/manual/IT担当者ガイド.md``
 - ``docs/manual/かんたん導入ガイド.md``
 - ``docs/manual/はじめに.md``
 - ``docs/manual/ユーザーマニュアル概要版.md``

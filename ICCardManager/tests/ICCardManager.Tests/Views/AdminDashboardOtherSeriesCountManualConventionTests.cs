@@ -9,7 +9,7 @@ using Xunit;
 namespace ICCardManager.Tests.Views;
 
 /// <summary>
-/// Issue #1892: 管理者マニュアル §9.4.3 が「その他（N 名）」の N を実人数と断定していた問題を静的に固定する。
+/// Issue #1892: 管理者マニュアル 付録 C.3 が「その他（N 名）」の N を実人数と断定していた問題を静的に固定する。
 /// </summary>
 /// <remarks>
 /// <para>
@@ -43,7 +43,7 @@ namespace ICCardManager.Tests.Views;
 public class AdminDashboardOtherSeriesCountManualConventionTests
 {
     /// <summary>集約系列の説明が置かれている節（この節がマニュアル側の正典）。</summary>
-    private const string TargetHeading = "#### 9.4.3 利用推移タブ";
+    private const string TargetHeading = "#### C.3 利用推移タブ";
 
     /// <summary>
     /// N を実人数と断定する表現。マニュアルは「合算した職員の人数です」と書いていた。
@@ -114,7 +114,7 @@ public class AdminDashboardOtherSeriesCountManualConventionTests
 
         section.Should().Contain(
             phrase,
-            $"§9.4.3 は「{phrase}」に触れて N が近似値であることを管理者へ伝える必要がある"
+            $"付録 C.3 は「{phrase}」に触れて N が近似値であることを管理者へ伝える必要がある"
             + "（片方向だけだと、実装が持つ 2 つの近似の一方しか案内しないマニュアルが緑のまま通る。Issue #1892）");
     }
 
@@ -125,7 +125,7 @@ public class AdminDashboardOtherSeriesCountManualConventionTests
 
         section.Should().Contain(
             BuildExpectedLabelNotation(),
-            $"§9.4.3 は集約系列を名指しして説明する節であり、"
+            $"付録 C.3 は集約系列を名指しして説明する節であり、"
             + $"{nameof(ChartSeriesNameFormatter)}.{nameof(ChartSeriesNameFormatter.BuildOtherSeriesName)} "
             + "が組み立てる表示名と一致している必要がある（Issue #1858 / #1892）");
     }

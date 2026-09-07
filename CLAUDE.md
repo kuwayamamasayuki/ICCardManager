@@ -56,7 +56,7 @@ WSL2では "/mnt/c/Program Files/dotnet/dotnet.exe" を使用すること。
 
 - `ICCardManager/CHANGELOG.md` — **バージョン履歴・変更内容の Single Source of Truth**
 - `ICCardManager/docs/design/` — 設計書一式（用語集 00・00a と 01〜08）
-- `ICCardManager/docs/manual/` — マニュアル（ユーザー・管理者・開発者）
+- `ICCardManager/docs/manual/` — マニュアル（ユーザー・管理者・IT担当者・開発者）
 - `ICCardManager/src/ICCardManager/Resources/Templates/` — 月次帳票テンプレート（`物品出納簿テンプレート（企業会計部局）.xlsx`、`物品出納簿テンプレート（市長事務部局）.xlsx` の 2 ファイル）
 - `ICCardManager/docs/線区駅順コード/StationCode.csv` — 駅コード→駅名マスター（[出典](https://produ.irelang.jp/blog/2017/08/305/)、[新駅参照](https://ja.ysrl.org/atc/station-code.html)）
 - `BUG-AUDIT-2026-08-07.md` / `BUG-AUDIT-2026-08-07.data.json`（ルート直下） — リポジトリ全体バグ監査の報告書と生データ。Issue #1723〜#1750 の出典。未検証 54 件の精査結果は `ICCardManager/docs/superpowers/specs/2026-08-14-issue-1750-audit-triage.md`

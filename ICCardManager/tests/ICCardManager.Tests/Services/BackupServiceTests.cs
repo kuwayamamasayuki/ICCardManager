@@ -767,8 +767,8 @@ public class BackupServiceTests : IDisposable
     /// <remarks>
     /// 同期更新が必要な箇所:
     /// - ICCardManager/docs/manual/ユーザーマニュアル.md §7.2「バックアップ先フォルダ」
-    /// - ICCardManager/docs/manual/管理者マニュアル.md §3.3「バックアップ設定」
-    /// - ICCardManager/docs/manual/管理者マニュアル.md §6.1「バックアップとリストア」自動バックアップ
+    /// - ICCardManager/docs/manual/管理者マニュアル.md 付録 A「設定画面（F5）の項目一覧」／§2.3「バックアップが動いているか確かめる」
+    /// - ICCardManager/docs/manual/管理者マニュアル.md §6.1「手動バックアップ」／§2.3 の自動バックアップの保持ルール
     /// </remarks>
     [Fact]
     public void BackupRetentionConstants_MatchDocumentedValues()
