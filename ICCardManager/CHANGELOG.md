@@ -3,6 +3,12 @@
 ### Unreleased
 
 **機能追加**
+- Issue #2019 **マニュアル用スクリーンショットの自動撮影 第 2 段階 — 職員証・交通系ICカードのタッチを要する画面**（`staff_recognized` / `lend` / `return` / `busstop` と概要版マニュアル用のトースト単体 `toast_*` の計 7 枚）を、仮想タッチ（DEBUG ビルド限定）で再現して撮れるようにした。`tools/take-screenshots-uitest.ps1` は Release パス（#2016 の 8 枚）の後に Debug パスを流す。
+  - **アプリ側は Debug 限定の切替を 1 つだけ足した**（`App.IsScreenshotMode`。環境変数 `ICCARDMANAGER_SCREENSHOT_MODE=1`）。①メイン画面下部の仮想タッチ操作パネルを `Visibility` ではなく **`Opacity` を 0** にして消す（Collapsed だと UIA ツリーから消えて撮影側がボタンを押せない）。②起動時のテストデータ自動登録（`RegisterTestDataAsync`）を行わない — Debug 起動のたびに無条件で走るため、撮影側がシードで消しても再起動で戻る。Release ビルドではどちらも読まれない
+  - **返却は簡易ボタンでは成立しない**。「交通系ICカード」ボタンのタッチは履歴読み取りが `HybridCardReader` から実カードリーダーへ委譲されて失敗する。履歴を持てる仮想タッチダイアログ（#640）経由で行い、乗車駅・降車駅は WPF DataGrid セルの `ValuePattern` で入力する
+  - **トーストは別ウィンドウで画面の隅に出る**ため、メイン画面を最大化してその矩形の内側に収める。返却トーストの直後に重なるバス停名入力・同行者数入力（#2009）は設定でスキップし、バス停名入力ダイアログは別の撮影で撮る
+  - **管理者権限のウィンドウが前面にあると Windows が前面化と入力注入を拒否する**（実測: 「Switch USB」）。UIA の Invoke だけで済む撮影は影響を受けないが、クリック・Enter を要する履歴照会が「履歴が開かない」だけの分かりにくい失敗になっていたため、入力を伴う操作の前に前面化を確かめ、できなければ前面のウィンドウを名指しして案内する（`ScreenshotHelper.RequireForeground`）
+  - 追加は **+11 件**（`Views/ScreenshotModeTests` 8 件、UITests `TouchScreenshotTests` 3 件）。07_テスト設計書 ST-006b 参照
 - Issue #2016 **マニュアル用スクリーンショットを UI テスト基盤（FlaUI）で自動撮影できるようにした**。従来は `tools/TakeScreenshots.ps1` で人が画面を開いて Enter を押す対話式しかなく、UI を変えるたびに撮り直しが手作業だった。UITests の `AppFixture`（アプリ起動・DB 退避／復元）と PageObject（ダイアログを開く操作）をそのまま撮影の前処理に使い、`AutomationElement.CaptureToFile` で保存する。
   - 第 1 段階の対象は 8 枚（`main` / `history` と、ツールバーから開く `card` / `staff` / `report` / `export` / `settings` / `system`）。入口は `tools/take-screenshots-uitest.ps1`（本体を Release でビルド → `dotnet test --filter Category=Screenshot`）。出力は `docs/screenshots/auto/`（Git 管理外）で、見比べてから `-Publish` で `docs/screenshots/` へ上書きする（`-Publish` は撮影し直さず、確認した画像をそのままコピーする）。既存画像とのサイズ差を撮影後に出力する
   - **撮影は Release で起動する**。Debug ビルドはメイン画面下部に仮想タッチパネル（`App.IsDebugBuild`）が写り込む。`AppFixture.Launch` は環境変数 `ICCARDMANAGER_UITEST_CONFIGURATION` で `dotnet run --configuration` を選べるようにした（既定は従来どおり Debug。`Release` 以外は Debug へ丸める）

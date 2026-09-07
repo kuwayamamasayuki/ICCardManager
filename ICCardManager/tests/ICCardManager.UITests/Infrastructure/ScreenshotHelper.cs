@@ -69,6 +69,106 @@ namespace ICCardManager.UITests.Infrastructure
             Thread.Sleep(SettleDelay);
         }
 
+        /// <summary>
+        /// ウィンドウを確実に前面（アクティブ）にする。
+        /// </summary>
+        /// <remarks>
+        /// Windows は「最後に入力を受けたプロセス」以外からの <c>SetForegroundWindow</c> を拒否する（フォアグラウンド ロック）。
+        /// PowerShell スクリプト経由で起動した testhost はこれに該当し、<see cref="Window.SetForeground"/> が効かないまま
+        /// キー入力（Enter）が別のウィンドウへ流れて履歴が開かなかった（実測。WSL から直接起動したときは成功していた）。
+        /// ALT キーを押して離すと自プロセスが最後の入力元になり、直後の <c>SetForegroundWindow</c> が通る（定石の回避策）。
+        /// 前面化できたかは <c>GetForegroundWindow</c> で確かめ、失敗したら数回やり直す。
+        /// 撮影だけなら前面化できなくても矩形は撮れるので例外にはしない。クリック・キー入力を伴う操作の前には
+        /// <see cref="RequireForeground"/> を使う。
+        /// </remarks>
+        /// <returns>前面化できたら true。</returns>
+        public static bool BringToForeground(Window window)
+        {
+            if (window == null) throw new ArgumentNullException(nameof(window));
+            var handle = window.Properties.NativeWindowHandle.ValueOrDefault;
+
+            for (var attempt = 0; attempt < 3; attempt++)
+            {
+                if (attempt > 0 || GetForegroundWindow() != handle)
+                {
+                    FlaUI.Core.Input.Keyboard.Press(FlaUI.Core.WindowsAPI.VirtualKeyShort.ALT);
+                    FlaUI.Core.Input.Keyboard.Release(FlaUI.Core.WindowsAPI.VirtualKeyShort.ALT);
+                }
+                window.SetForeground();
+                if (handle != IntPtr.Zero && GetForegroundWindow() != handle)
+                {
+                    // SetForegroundWindow が拒否されたとき（前面が別プロセスのウィンドウで入力注入も届かない）の予備手段。
+                    // Alt+Tab 相当の切替として扱われ、フォアグラウンド ロックの対象外になる
+                    SwitchToThisWindow(handle, true);
+                }
+                Thread.Sleep(SettleDelay);
+                if (handle == IntPtr.Zero || GetForegroundWindow() == handle)
+                {
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        /// <summary>
+        /// クリック・キー入力を伴う操作の前に、ウィンドウを前面にする。できなければ原因を名指しして例外にする。
+        /// </summary>
+        /// <remarks>
+        /// 前面化できないのは、前面のウィンドウが管理者権限で動いている等、OS が前面化も入力注入も拒否している状況。
+        /// 黙って続けるとクリック・キー入力が届かず「履歴が開かない」だけの分かりにくい失敗になるため、
+        /// 何が前面にいるかを名指しして案内する（実測: 管理者権限の「Switch USB」が前面にあると必ず起きた）。
+        /// </remarks>
+        public static void RequireForeground(Window window)
+        {
+            if (BringToForeground(window))
+            {
+                return;
+            }
+            var foreground = GetForegroundWindow();
+            throw new InvalidOperationException(
+                $"アプリのウィンドウを前面にできません。前面にあるウィンドウ「{DescribeWindow(foreground)}」が" +
+                "管理者権限で動いている可能性があります。そのウィンドウを閉じるか最小化してから、撮影をやり直してください。");
+        }
+
+        private static string DescribeWindow(IntPtr handle)
+        {
+            var title = new System.Text.StringBuilder(256);
+            _ = GetWindowText(handle, title, title.Capacity);
+            _ = GetWindowThreadProcessId(handle, out var pid);
+            string process;
+            try { process = System.Diagnostics.Process.GetProcessById((int)pid).ProcessName; }
+            catch { process = "?"; }
+            return $"{title}（{process}.exe）";
+        }
+
+        [System.Runtime.InteropServices.DllImport("user32.dll", CharSet = System.Runtime.InteropServices.CharSet.Unicode)]
+        private static extern int GetWindowText(IntPtr hWnd, System.Text.StringBuilder text, int maxCount);
+
+        [System.Runtime.InteropServices.DllImport("user32.dll")]
+        private static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint processId);
+
+        [System.Runtime.InteropServices.DllImport("user32.dll")]
+        private static extern IntPtr GetForegroundWindow();
+
+        [System.Runtime.InteropServices.DllImport("user32.dll")]
+        private static extern void SwitchToThisWindow(IntPtr hWnd, bool fAltTab);
+
+        /// <summary>
+        /// ウィンドウを最大化する（Issue #2019）。
+        /// トースト通知は画面の隅（既定は右上）に出る別ウィンドウなので、メイン画面を最大化しておくと
+        /// トーストがメイン画面の矩形の内側に収まり、背景を含めずに 1 枚で撮れる。
+        /// </summary>
+        public static void Maximize(Window window)
+        {
+            if (window == null) throw new ArgumentNullException(nameof(window));
+            var pattern = window.Patterns.Window.PatternOrDefault;
+            if (pattern != null && pattern.CanMaximize.ValueOrDefault)
+            {
+                pattern.SetWindowVisualState(FlaUI.Core.Definitions.WindowVisualState.Maximized);
+            }
+            Thread.Sleep(SettleDelay);
+        }
+
         /// <summary>撮影テストをスキップすべきか（環境変数 <see cref="EnableEnvironmentVariable"/> が <c>1</c> でない）。</summary>
         public static bool ShouldSkip =>
             !string.Equals(Environment.GetEnvironmentVariable(EnableEnvironmentVariable), "1", StringComparison.Ordinal);
@@ -98,13 +198,19 @@ namespace ICCardManager.UITests.Infrastructure
         /// </summary>
         /// <param name="window">撮影するウィンドウ。</param>
         /// <param name="fileName">保存するファイル名（例: <c>main.png</c>）。</param>
-        public static string Capture(Window window, string fileName)
+        /// <param name="bringToFront">
+        /// 撮影前に前面化するか。トースト通知（フォーカスを奪わない別ウィンドウ）を撮るときは false にする。
+        /// 前面化すると他のウィンドウの Z 順が変わり、メイン画面の上に載っているトーストが隠れることがある。
+        /// </param>
+        public static string Capture(Window window, string fileName, bool bringToFront = true)
         {
             if (window == null) throw new ArgumentNullException(nameof(window));
             if (string.IsNullOrWhiteSpace(fileName)) throw new ArgumentException("ファイル名を指定してください。", nameof(fileName));
 
-            window.SetForeground();
-            Thread.Sleep(SettleDelay);
+            if (bringToFront)
+            {
+                BringToForeground(window);
+            }
 
             var path = Path.Combine(OutputDirectory, fileName);
             var bounds = GetVisibleFrameBounds(window);

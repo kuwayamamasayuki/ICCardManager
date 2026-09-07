@@ -129,31 +129,41 @@ namespace ICCardManager.UITests.PageObjects
                 ?? throw new InvalidOperationException(
                     $"カード一覧が見つかりません: AutomationProperties.Name=\"{TestConstants.CardList}\"");
 
-            // ListViewItem は ItemContainerStyle で AutomationProperties.Name=DisplayName を持つ。
-            // 行の出現はダッシュボードの非同期読み込み完了後なので Retry で待つ。
-            var row = Retry.WhileNull(
-                () => list.FindFirstDescendant(cf => cf.ByName(cardDisplayName)),
-                TimeSpan.FromSeconds(TestConstants.DialogOpenTimeoutSeconds)).Result
-                ?? throw new TimeoutException(
-                    $"カード一覧に行が現れませんでした: \"{cardDisplayName}\"（{TestConstants.DialogOpenTimeoutSeconds}秒タイムアウト）");
-
             // 行テンプレートの Border に MouseBinding(LeftClick) が付いているため、まず実クリックで開く。
             // FlaUI のクリックは行の選択だけで終わり MouseBinding が発火しないことがある（実測）ので、
             // 短い待機で開かなければ、選択済みの行に対して Enter（ListView の KeyBinding）で開く。
-            Window.SetForeground();
-            row.Click();
-            var closeButton = WaitForCloseHistoryButton(TimeSpan.FromSeconds(2));
-            if (closeButton == null)
+            // ダッシュボードの再読み込みで行が作り直されると掴んでいた要素が古くなるため、試行のたびに行を探し直す。
+            const int maxAttempts = 3;
+            for (var attempt = 1; attempt <= maxAttempts; attempt++)
             {
+                // ListViewItem は ItemContainerStyle で AutomationProperties.Name=DisplayName を持つ。
+                // 行の出現はダッシュボードの非同期読み込み完了後なので Retry で待つ。
+                var row = Retry.WhileNull(
+                    () => list.FindFirstDescendant(cf => cf.ByName(cardDisplayName)),
+                    TimeSpan.FromSeconds(TestConstants.DialogOpenTimeoutSeconds)).Result
+                    ?? throw new TimeoutException(
+                        $"カード一覧に行が現れませんでした: \"{cardDisplayName}\"（{TestConstants.DialogOpenTimeoutSeconds}秒タイムアウト）");
+
+                ScreenshotHelper.RequireForeground(Window);
+                row.Click();
+                var closeButton = WaitForCloseHistoryButton(TimeSpan.FromSeconds(2));
+                if (closeButton != null)
+                {
+                    return closeButton;
+                }
+
                 // Keyboard.Press は押し下げだけ（離さない）なので、押下＋解放の Type を使う
                 row.Focus();
                 Keyboard.Type(VirtualKeyShort.RETURN);
-                closeButton = WaitForCloseHistoryButton(TimeSpan.FromSeconds(TestConstants.DialogOpenTimeoutSeconds));
+                closeButton = WaitForCloseHistoryButton(TimeSpan.FromSeconds(3));
+                if (closeButton != null)
+                {
+                    return closeButton;
+                }
             }
 
-            return closeButton
-                ?? throw new TimeoutException(
-                    $"履歴表示エリアが表示されませんでした（\"{TestConstants.CloseHistoryButton}\" ボタンが現れない。{TestConstants.DialogOpenTimeoutSeconds}秒タイムアウト）");
+            throw new TimeoutException(
+                $"履歴表示エリアが表示されませんでした（\"{TestConstants.CloseHistoryButton}\" ボタンが現れない。クリック＋Enter を {maxAttempts} 回試行）");
         }
 
         /// <summary>

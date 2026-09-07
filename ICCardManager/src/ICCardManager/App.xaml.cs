@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
@@ -76,6 +76,45 @@ namespace ICCardManager
 #endif
             }
         }
+
+        /// <summary>
+        /// スクリーンショット撮影モードを有効にする環境変数（Issue #2019。DEBUG ビルド限定）。
+        /// 値が <c>1</c> のとき、①メイン画面下部の仮想タッチ操作パネルを透明にし（<see cref="DebugPanelOpacity"/>）、
+        /// ②起動時のテストデータ自動登録（<c>RegisterTestDataAsync</c>）を行わない。
+        /// マニュアル用スクリーンショットの自動撮影（<c>tools/take-screenshots-uitest.ps1</c>）が、
+        /// パネルとテストデータを写り込ませずに仮想タッチのボタンを UI Automation から押すために使う
+        /// （パネルの Visibility を Collapsed にすると UIA ツリーからも消えてボタンを押せなくなるため Opacity で消す）。
+        /// Release ビルドでは読まれない（パネル自体が <see cref="IsDebugBuild"/> で非表示、テストデータ登録も無い）。
+        /// </summary>
+        public const string ScreenshotModeEnvironmentVariable = "ICCARDMANAGER_SCREENSHOT_MODE";
+
+        /// <summary>
+        /// スクリーンショット撮影モードか。DEBUG ビルドで環境変数 <see cref="ScreenshotModeEnvironmentVariable"/> が
+        /// <c>1</c> のときだけ true。
+        /// </summary>
+        public static bool IsScreenshotMode
+        {
+            get
+            {
+#if DEBUG
+                return ResolveScreenshotMode(Environment.GetEnvironmentVariable(ScreenshotModeEnvironmentVariable));
+#else
+                return false;
+#endif
+            }
+        }
+
+        /// <summary>
+        /// 仮想タッチ操作パネルの不透明度（XAML から x:Static で参照）。撮影モードなら 0、それ以外は 1。
+        /// </summary>
+        public static double DebugPanelOpacity => IsScreenshotMode ? 0.0 : 1.0;
+
+        /// <summary>
+        /// 環境変数の値から撮影モードを決める（純粋関数）。<c>1</c> のときだけ true、それ以外（null・空・他の値）は false。
+        /// 寛容に解釈すると、意図せずパネルが消えたまま気付けない（Debug の操作手段が失われる）。
+        /// </summary>
+        internal static bool ResolveScreenshotMode(string environmentValue) =>
+            string.Equals(environmentValue, "1", StringComparison.Ordinal);
 
         /// <summary>
         /// アプリケーションのバージョン番号（XAMLからバインド可能: Issue #475）
@@ -690,8 +729,11 @@ namespace ICCardManager
             await dbContext.InitializeDatabaseAsync();
 
     #if DEBUG
-            // デバッグ時はテストデータを登録
-            await RegisterTestDataAsync();
+            // デバッグ時はテストデータを登録（スクリーンショット撮影モードでは撮影側が投入したデータだけを見せる。Issue #2019）
+            if (!IsScreenshotMode)
+            {
+                await RegisterTestDataAsync();
+            }
     #endif
 
             // 設定ファイルからの設定を適用（Issue #742）
