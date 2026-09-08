@@ -202,13 +202,28 @@ namespace ICCardManager.UITests.Tests
         /// 現在開いている StaffAuthDialog を返す（開いていなければ null）。
         /// </summary>
         /// <remarks>
+        /// <para>
         /// StaffAuthDialog は <c>Owner = Application.Current.MainWindow</c> で表示されるため、
         /// 呼び出し元が StaffManageDialog でもメインウィンドウの ModalWindows に現れる。
+        /// </para>
+        /// <para>
+        /// Issue #2018: <c>ModalWindows</c> の列挙と <c>Name</c> の参照は、まさに閉じかけの
+        /// ウィンドウに対して <c>ElementNotAvailableException</c> を投げ得る。FlaUI の
+        /// <c>Retry</c> は既定で例外を握りつぶさないため、ここで受けて「開いていない」へ倒す。
+        /// 「閉じるのを待つ」用途では、要素が消えていることは待っている状態そのもの。
+        /// </para>
         /// </remarks>
         private static Window? FindStaffAuthDialog(AppFixture fixture)
         {
-            return fixture.MainWindow.ModalWindows
-                .FirstOrDefault(w => w.Name == TestConstants.StaffAuthDialogName);
+            try
+            {
+                return fixture.MainWindow.ModalWindows
+                    .FirstOrDefault(w => w.Name == TestConstants.StaffAuthDialogName);
+            }
+            catch (Exception)
+            {
+                return null;
+            }
         }
 
         private static bool IsStaffAuthDialogOpen(AppFixture fixture)

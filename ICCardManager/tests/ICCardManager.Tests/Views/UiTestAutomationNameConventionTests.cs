@@ -33,10 +33,18 @@ namespace ICCardManager.Tests.Views;
 /// タイムアウト秒数など）は対象外。
 /// </para>
 /// <para>
-/// 空振り検出は「実データが非空であること」ではなく、抽出ロジックを既知のサンプル入力で
-/// 固定することで担保する（<c>development-conventions.md</c> #1786）。
-/// 実データ側の表明だけだと、マーカーを全部外した実装でも緑になる一方、
-/// 「非空であること」を実データへ課すと定数の正当な削除で赤くなる。
+/// 空振り検出は「実データが非空であること」ではなく、①抽出ロジックを既知のサンプル入力で
+/// 固定し、②<b>すべての定数へ分類の宣言を強制する</b>ことで担保する
+/// （<c>development-conventions.md</c> #1786）。②が無いと、マーカーの付け忘れが
+/// 「意図的に対象外」と区別できず検査が静かに素通りする（コードレビューで実測: 全マーカーを
+/// 外しても名指しで固定した 2 件以外は緑だった）。一方「非空であること」を実データへ課すと、
+/// 定数の正当な削除で赤くなり、修正者を「対象から外す」方向へ誘導してしまう。
+/// </para>
+/// <para>
+/// <b>この検査の限界</b>: XAML の属性値はプロジェクト全体で 1 つの集合にまとめて突き合わせる。
+/// したがって「その値がどこかの画面に存在する」ことは分かるが、「テストが開いている画面に
+/// 存在する」ことまでは保証しない（"キャンセル" のように複数のダイアログが持つ名前がある）。
+/// 画面単位の対応付けは維持コストに見合わないと判断した。
 /// </para>
 /// </remarks>
 public class UiTestAutomationNameConventionTests
@@ -117,11 +125,43 @@ public class UiTestAutomationNameConventionTests
     }
 
     /// <summary>
-    /// 「消し忘れ」の対の表明: マーカーの無い定数を静かに増やさせないための、既知の 2 定数の固定。
+    /// <c>TestConstants</c> の <c>public const string</c> は、例外なく
+    /// 「どの <c>AutomationProperties</c> と対応するか」または「対応しないこと（<c>[NotUiaName]</c>）」を
+    /// 宣言していること。
     /// </summary>
     /// <remarks>
-    /// 実データ全体へ「非空であること」を課すと定数の正当な削除で赤くなるため、
-    /// Issue #2018 で実際に壊れていた 2 定数だけを名指しで固定する。
+    /// <para>
+    /// マーカーの省略を許すと、新しい定数を足した人が付け忘れたときに上の 3 件が
+    /// <b>静かに素通りする</b>（fail-open）。実測でも、全定数からマーカーを外すと
+    /// 名指しで固定した 2 件以外は緑のままだった。省略を赤にすることで、
+    /// 「検査の対象に入っているか」を定数ごとに人が判断せざるを得なくする。
+    /// </para>
+    /// <para>
+    /// この形は「実データが非空であること」を課すのとは違い、定数を<b>削除</b>しても赤くならない
+    /// （#1786 が戒める「規約が推奨する方向の変更で赤になる」形にならない）。
+    /// 赤くなるのは分類を宣言しない定数を<b>追加</b>したときだけ。
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public void TestConstantsの文字列定数はすべてUIA属性との対応を宣言していること()
+    {
+        var undeclared = ExtractStringConstants(ReadTestConstantsSource())
+            .Where(c => c.Marker.Length == 0)
+            .Select(c => c.Name)
+            .ToList();
+
+        undeclared.Should().BeEmpty(
+            "Issue #2018: TestConstants の public const string は、[UiaName] / [UiaNamePrefix] / " +
+            "[UiaHelpText] のいずれか、または [NotUiaName] を付けて分類を宣言すること。" +
+            "省略を許すと付け忘れと「意図的に対象外」が区別できず、静的検査が素通りする。" +
+            $"未宣言: {string.Join(" / ", undeclared)}");
+    }
+
+    /// <summary>
+    /// 「消し忘れ」の対の表明: 既知の 2 定数の値とマーカーの固定。
+    /// </summary>
+    /// <remarks>
+    /// Issue #2018 で実際に壊れていた 2 定数を名指しで固定する。
     /// この 2 つは経路上どうしても UIA Name で探す必要があり、マーカーを外す理由が無い。
     /// </remarks>
     [Theory]
@@ -166,6 +206,32 @@ internal static class Sample
             ("UiaName", "Marked", "あ"),
             ("UiaNamePrefix", "Prefixed", "う"),
             ("UiaHelpText", "Helped", "え"),
+        });
+    }
+
+    [Fact]
+    public void 抽出はマーカーの無い定数とNotUiaNameを区別して拾うこと()
+    {
+        // 対の表明: 上のテストが「拾わない」ことを見ているのに対し、
+        // こちらは同じ入力で「未宣言」と「意図的に対象外」が別物として現れることを見る。
+        // 両者を混同すると、付け忘れの検出（fail-open の是正）が働かない。
+        const string sample = @"
+internal static class Sample
+{
+    [UiaName]
+    public const string Marked = ""あ"";
+
+    public const string Unmarked = ""い"";
+
+    [NotUiaName]
+    public const string Excluded = ""う"";
+}";
+
+        ExtractStringConstants(sample).Select(c => (c.Marker, c.Name)).Should().BeEquivalentTo(new[]
+        {
+            ("UiaName", "Marked"),
+            (string.Empty, "Unmarked"),
+            ("NotUiaName", "Excluded"),
         });
     }
 
@@ -276,32 +342,51 @@ internal static class Sample
     }
 
     /// <summary>
-    /// C# ソースから、<c>[UiaName]</c> 等のマーカーが直前に付いた
-    /// <c>public const string</c> 宣言を抜き出す。
+    /// C# ソースから <c>public const string</c> 宣言をすべて抜き出す。
+    /// 直前にマーカー属性が付いていればその名前を、無ければ空文字を <c>Marker</c> に入れる。
     /// </summary>
-    internal static IReadOnlyList<MarkedConstant> ExtractMarkedConstants(string source)
+    internal static IReadOnlyList<MarkedConstant> ExtractStringConstants(string source)
     {
         var code = StripComments(source);
 
         var pattern =
-            @"\[\s*(?<marker>UiaName|UiaNamePrefix|UiaHelpText)\s*\]\s*" +
+            @"(?:\[\s*(?<marker>UiaName|UiaNamePrefix|UiaHelpText|NotUiaName)\s*\]\s*)?" +
             @"public\s+const\s+string\s+(?<name>\w+)\s*=\s*""(?<value>[^""]*)""\s*;";
 
         return Regex.Matches(code, pattern)
             .Cast<Match>()
             .Select(m => new MarkedConstant(
-                m.Groups["marker"].Value,
+                m.Groups["marker"].Success ? m.Groups["marker"].Value : string.Empty,
                 m.Groups["name"].Value,
                 m.Groups["value"].Value))
             .ToList();
     }
 
     /// <summary>
+    /// <c>[UiaName]</c> / <c>[UiaNamePrefix]</c> / <c>[UiaHelpText]</c> が付いた定数だけを返す。
+    /// </summary>
+    internal static IReadOnlyList<MarkedConstant> ExtractMarkedConstants(string source)
+        => ExtractStringConstants(source)
+            .Where(c => c.Marker.Length > 0 && c.Marker != "NotUiaName")
+            .ToList();
+
+    /// <summary>
     /// 文字列リテラルの中身は保ったまま、行コメントとブロックコメントだけを取り除く。
     /// </summary>
     /// <remarks>
+    /// <para>
     /// <c>TestSourceInspection.ToCodeOnly</c> は文字列リテラルの中身も消すため、
     /// 定数の値そのものを検査する本テストには使えない（#1960 と同じ理由）。
+    /// </para>
+    /// <para>
+    /// <b>前提</b>: 逐語的文字列（<c>@"..."</c>）と通常の文字列を区別しない。
+    /// <c>""</c> のエスケープはどちらの解釈でも「文字を落とさない」ので影響しないが、
+    /// <b>末尾がバックスラッシュで終わる逐語的文字列</b>（<c>@"C:\"</c>）と
+    /// <c>char</c> リテラルの <c>'"'</c> では走査が 1 つ分ずれる。
+    /// 検査対象は <c>TestConstants.cs</c>（UI の要素名を並べた定数だけのファイル）に限られ、
+    /// どちらも現れないためこの前提で足りる。対象を広げるときは
+    /// <c>TestSourceInspection</c> 側へヘルパーを移して正しく扱うこと。
+    /// </para>
     /// </remarks>
     internal static string StripComments(string source)
     {

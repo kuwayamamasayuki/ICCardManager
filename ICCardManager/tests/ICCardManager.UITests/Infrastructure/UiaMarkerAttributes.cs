@@ -23,9 +23,10 @@ namespace ICCardManager.UITests.Infrastructure
     /// （UITests プロジェクトは net48 / FlaUI 依存で、単体テストから参照したくないため）。
     /// </para>
     /// <para>
-    /// マーカーを付けないこともできるが、その定数は静的検査の対象外になる。
-    /// <c>AutomationProperties.Name</c> ではないもの（TextBlock の本文、タイムアウト秒数など）
-    /// にだけ許される。
+    /// <b>マーカーの省略は許されない。</b> <c>AutomationProperties</c> と対応しない定数には
+    /// <see cref="NotUiaNameAttribute"/> を付けて「対応しないこと」を明示する。
+    /// 省略を許すと、新しい定数を足した人がマーカーを付け忘れたときに検査が静かに素通りし、
+    /// #2018 と同じ形（誰も気付かないまま UI テストが壊れている）が再発する。
     /// </para>
     /// </remarks>
     [AttributeUsage(AttributeTargets.Field, AllowMultiple = false)]
@@ -53,6 +54,26 @@ namespace ICCardManager.UITests.Infrastructure
     /// </summary>
     [AttributeUsage(AttributeTargets.Field, AllowMultiple = false)]
     internal sealed class UiaHelpTextAttribute : Attribute
+    {
+    }
+
+    /// <summary>
+    /// 定数が <c>AutomationProperties</c> のいずれとも対応しないことを宣言するマーカー
+    /// （Issue #2018）。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <c>TextBlock</c> の本文で要素を探す値（<c>TextBlock</c> は UIA Name が Text へフォールバックする）や、
+    /// そもそも要素名ではない値がこれにあたる。<b>なぜ対応しないのか</b>を必ず XML doc か
+    /// 直前のコメントに書くこと。
+    /// </para>
+    /// <para>
+    /// マーカーを省略できるようにすると、付け忘れと「意図的に対象外」が区別できず、
+    /// 静的検査が fail-open になる。付け忘れを赤にするために、明示のマーカーを用意している。
+    /// </para>
+    /// </remarks>
+    [AttributeUsage(AttributeTargets.Field, AllowMultiple = false)]
+    internal sealed class NotUiaNameAttribute : Attribute
     {
     }
 }

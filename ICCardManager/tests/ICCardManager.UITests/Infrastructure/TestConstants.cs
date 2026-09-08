@@ -74,12 +74,19 @@ namespace ICCardManager.UITests.Infrastructure
         // ── ステータスバー ────────────────────────────────
         // StatusBarItem は UIA ツリーに公開されないため、
         // 内部の TextBlock のテキスト内容で検索する。
+        // TextBlock は AutomationProperties.Name が無ければ UIA Name が Text へフォールバックするため、
+        // これらは AutomationProperties ではなく画面に出る文字列そのもの（前方一致で検索する）。
+        [NotUiaName]
         public const string CardReaderStatusTextPrefix = "リーダー:";
+        [NotUiaName]
         public const string AppVersionTextPrefix = "Ver.";
 
         // ── コンテンツエリア ──────────────────────────────
         // Border は UIA ツリーに公開されないため、
         // 内部の TextBlock のテキスト内容で検索する。
+        // 使い方ガイドの見出し TextBlock の Text。囲む Border には
+        // AutomationProperties.Name="使い方ガイド" が付いているが、テストが探しているのは見出しの文字列。
+        [NotUiaName]
         public const string UsageGuideText = "📖 使い方";
 
         // カード一覧（ListView）と履歴表示エリア（Border）は AutomationProperties.Name を持つ。
