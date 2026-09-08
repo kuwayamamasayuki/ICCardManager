@@ -142,6 +142,37 @@ namespace ICCardManager.Tests.Tools
                 "撮影矩形の取り方が変われば全画像の寸法が変わる");
         }
 
+        /// <summary>
+        /// <c>-Publish</c> は対応表に載っている画像だけを差し替えること。
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// 出力先には撮影対象以外の PNG も残る（失敗時の切り分け用 <c>history_FAILED.png</c> 等）。
+        /// 無条件に <c>*.png</c> をコピーすると、そうした成果物が <c>docs/screenshots/</c> へ公開され、
+        /// そのままコミットされ得る（コードレビューで検出）。この検査は対応表→公開画像の向きしか見ていないため、
+        /// 余分なファイルが増える側は捕まえられない。
+        /// </para>
+        /// <para>
+        /// <c>-Publish</c> の実行は実際の <c>docs/screenshots/</c> を書き換えるため挙動テストにできない。
+        /// スクリプトのテキスト上で固定する（#1794）。「禁止された形の不在」と「正しい形の存在」を対で見る —
+        /// 前者だけだと、コピーそのものを消した実装でも緑になる。
+        /// </para>
+        /// </remarks>
+        [Fact]
+        public void 撮影スクリプト_Publishは対応表に載っている画像だけをコピーする()
+        {
+            var script = File.ReadAllText(
+                Path.Combine(RepoRoot, "ICCardManager", "tools", "take-screenshots-uitest.ps1"));
+            // 規約の理由を書いたコメント自体が一致する極性の反転を避ける（#1692）
+            var code = string.Join("\n", script.Split('\n').Where(l => !l.TrimStart().StartsWith("#")));
+
+            Regex.IsMatch(code, @"Get-ChildItem\s+-Path\s+\$OutputDir\s+-Filter\s+\*\.png\s*\)")
+                .Should().BeFalse("出力先の PNG を絞り込まずに集める形は、対象外の成果物まで公開する");
+            Regex.IsMatch(code, @"Get-ChildItem\s+-Path\s+\$OutputDir\s+-Filter\s+\*\.png\s*\|\s*Where-Object\s*\{\s*\$targetNames\s+-contains\s+\$_\.Name\s*\}")
+                .Should().BeTrue("公開する画像は対応表由来の $targetNames で絞り込むこと");
+            code.Should().Contain("Copy-Item", "絞り込んだ画像を実際にコピーする経路が残っていること");
+        }
+
         // ── 抽出の固定（検査ロジック自体をサンプル入力で固定する。#1786） ──
 
         [Fact]

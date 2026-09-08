@@ -53,6 +53,51 @@ public class ScreenshotModeTests
             "撮影時にパネルを見えなくする切替は Opacity のバインドで行うこと（Issue #2019）");
     }
 
+    /// <summary>
+    /// 透明にしただけではヒットテストが生きたままで、画面下部に見えないクリック領域が残る。
+    /// そこを踏むと撮影中の画面に意図しない貸出・返却が記録される（コードレビューで検出）。
+    /// UIA の Invoke はヒットテストを経ないので、撮影側は引き続きボタンを押せる。
+    /// </summary>
+    [Fact]
+    public void MainWindow_仮想タッチパネルは撮影モードでヒットテストを止めている()
+    {
+        var panel = ExtractDebugPanel(ReadProductionFile("Views", "MainWindow.xaml"));
+
+        panel.Should().MatchRegex(
+            "IsHitTestVisible=\"\\{Binding\\s+Source=\\{x:Static\\s+app:App\\.IsDebugPanelInteractive\\}\\}\"",
+            "透明なパネルが見えないクリック領域として残らないよう、ヒットテストも撮影モードで落とすこと");
+    }
+
+    /// <summary>
+    /// 撮影モードは起動時のテストデータ登録を止めるため、DB に居るのは撮影側が投入した IDm だけ。
+    /// 一方で仮想タッチダイアログのカード・職員は本体の <c>DebugDataService</c> のハードコード一覧から作られ、
+    /// 撮影側はその<b>既定選択（先頭）</b>をそのまま使う。先頭が入れ替わると、撮影は
+    /// 「カードがデータベースに登録されていません」のモーダルで原因不明のタイムアウトになる。
+    /// </summary>
+    /// <remarks>
+    /// UITests は本体への ProjectReference を持たないため（型で結べない）、両側をソーステキストとして
+    /// 突き合わせる。「先頭であること」が仕様なので、リストの並べ替えはこの検査を赤にする。
+    /// </remarks>
+    [Fact]
+    public void 仮想タッチの既定選択は撮影側が投入するIDmと一致する()
+    {
+        // 文字列リテラルは検査対象そのものなので、コメントだけを剥がす（ToCodeOnly はリテラルごと消す）
+        var debugData = TestSourceInspection.RemoveCommentsPreservingLines(
+            ReadProductionFile("Services", "DebugDataService.cs"));
+
+        var firstCardIdm = ExtractFirstIdm(debugData, "TestCardList", "CardIdm");
+        var firstStaffIdm = ExtractFirstIdm(debugData, "TestStaffList", "StaffIdm");
+
+        var seedData = TestSourceInspection.RemoveCommentsPreservingLines(ReadUiTestFile("ScreenshotSeedData.cs"));
+        var appFixture = TestSourceInspection.RemoveCommentsPreservingLines(ReadUiTestFile("AppFixture.cs"));
+
+        ExtractConst(seedData, "VirtualTouchCardIdm").Should().Be(firstCardIdm,
+            "撮影側が投入する仮想タッチ用カードの IDm は DebugDataService.TestCardList の先頭と一致すること" +
+            "（撮影モードでは他のテストカードが DB に存在しない）");
+        ExtractConst(appFixture, "SeededStaffIdm").Should().Be(firstStaffIdm,
+            "撮影側が投入する職員の IDm は DebugDataService.TestStaffList の先頭と一致すること");
+    }
+
     [Fact]
     public void App_起動時のテストデータ登録は撮影モードでは行わない()
     {
@@ -74,6 +119,31 @@ public class ScreenshotModeTests
         var path = Path.Combine(TestPaths.GetProductionSourceRoot(), Path.Combine(relativeParts));
         File.Exists(path).Should().BeTrue($"検査対象のファイルが見つからない: {path}");
         return File.ReadAllText(path);
+    }
+
+    private static string ReadUiTestFile(string fileName)
+    {
+        var path = Path.Combine(
+            TestPaths.GetSolutionRoot(), "tests", "ICCardManager.UITests", "Infrastructure", fileName);
+        File.Exists(path).Should().BeTrue($"検査対象のファイルが見つからない: {path}");
+        return File.ReadAllText(path);
+    }
+
+    /// <summary>配列初期化子の先頭要素から IDm を取り出す。</summary>
+    private static string ExtractFirstIdm(string source, string listName, string idmProperty)
+    {
+        var list = Regex.Match(source, Regex.Escape(listName) + @"\s*=\s*\{(?<body>.*?)\};", RegexOptions.Singleline);
+        list.Success.Should().BeTrue($"{listName} の配列初期化子が見つかること");
+        var idm = Regex.Match(list.Groups["body"].Value, Regex.Escape(idmProperty) + @"\s*=\s*""(?<idm>[0-9A-Fa-f]+)""");
+        idm.Success.Should().BeTrue($"{listName} の先頭要素に {idmProperty} があること");
+        return idm.Groups["idm"].Value;
+    }
+
+    private static string ExtractConst(string source, string constName)
+    {
+        var match = Regex.Match(source, Regex.Escape(constName) + @"\s*=\s*""(?<value>[^""]*)""");
+        match.Success.Should().BeTrue($"定数 {constName} が見つかること");
+        return match.Groups["value"].Value;
     }
 
     /// <summary>

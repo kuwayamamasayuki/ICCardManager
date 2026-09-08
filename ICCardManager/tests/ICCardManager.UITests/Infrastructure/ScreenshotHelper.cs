@@ -102,11 +102,14 @@ namespace ICCardManager.UITests.Infrastructure
                     SwitchToThisWindow(handle, true);
                 }
                 Thread.Sleep(SettleDelay);
-                if (handle == IntPtr.Zero || GetForegroundWindow() == handle)
+                if (handle != IntPtr.Zero && GetForegroundWindow() == handle)
                 {
                     return true;
                 }
             }
+            // ハンドルが取れない場合も失敗として返す。ここで true を返すと、前面化できないときに
+            // 止めるための RequireForeground が素通りし（fail-open）、続く Click / Enter が
+            // 実際に前面にある別のウィンドウへ注入される（コードレビューで検出）。
             return false;
         }
 
@@ -221,7 +224,13 @@ namespace ICCardManager.UITests.Infrastructure
 
             if (bringToFront)
             {
-                BringToForeground(window);
+                BringToForeground(window);  // 内側で SettleDelay ぶん待つ
+            }
+            else
+            {
+                // 前面化しない経路にも同じ待ちを入れる。トースト（ToastNotificationWindow）は
+                // Opacity のフェードイン アニメーションを持つため、待たずに撮ると途中の状態が写る。
+                Thread.Sleep(SettleDelay);
             }
 
             var path = Path.Combine(OutputDirectory, fileName);

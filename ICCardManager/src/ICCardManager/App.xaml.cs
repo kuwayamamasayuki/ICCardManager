@@ -110,6 +110,20 @@ namespace ICCardManager
         public static double DebugPanelOpacity => IsScreenshotMode ? 0.0 : 1.0;
 
         /// <summary>
+        /// 仮想タッチ操作パネルがマウス操作を受け付けるか（XAML から x:Static で参照）。撮影モードでは false。
+        /// </summary>
+        /// <remarks>
+        /// <see cref="DebugPanelOpacity"/> で透明にしただけではヒットテストが生きたままで、
+        /// 画面下部に<b>見えないクリック領域</b>が残る。そこを踏むと
+        /// <c>SimulateStaffCardCommand</c> / <c>SimulateIcCardCommand</c> が走り、
+        /// 撮影中の画面に意図しない貸出・返却が記録される（コードレビューで検出）。
+        /// UI Automation の Invoke はヒットテストを経ないため、これを false にしても
+        /// 撮影側（<c>TouchScreenshotTests</c>）はボタンを押せる — Visibility を使わない理由はそのまま保たれる。
+        /// 撮影モード以外（通常の DEBUG ビルド）では true で、開発者はこれまでどおりクリックできる。
+        /// </remarks>
+        public static bool IsDebugPanelInteractive => !IsScreenshotMode;
+
+        /// <summary>
         /// 環境変数の値から撮影モードを決める（純粋関数）。<c>1</c> のときだけ true、それ以外（null・空・他の値）は false。
         /// 寛容に解釈すると、意図せずパネルが消えたまま気付けない（Debug の操作手段が失われる）。
         /// </summary>

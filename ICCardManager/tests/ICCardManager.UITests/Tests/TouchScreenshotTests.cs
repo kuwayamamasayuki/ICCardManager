@@ -167,15 +167,58 @@ namespace ICCardManager.UITests.Tests
             var toast = Retry.WhileNull(
                 () => FindToast(fixture),
                 ToastTimeout).Result;
-            toast.Should().NotBeNull($"トースト通知（\"{TestConstants.ToastWindowName}\"）が {ToastTimeout.TotalSeconds} 秒以内に表示されること");
+            toast.Should().NotBeNull(
+                $"トースト通知（\"{TestConstants.ToastWindowName}\"）が {ToastTimeout.TotalSeconds} 秒以内に表示されること。" +
+                DescribeBlockingModal(fixture));
             return toast!;
         }
 
+        /// <summary>
+        /// トーストが消えるのを待つ。<b>消えたことを表明する</b>のが要点。
+        /// </summary>
+        /// <remarks>
+        /// トーストはすべて同じ UIA Name（<see cref="TestConstants.ToastWindowName"/>）を持つため、
+        /// 前のトーストが残ったまま次の操作へ進むと <see cref="WaitForToast"/> が<b>古いトーストを掴む</b>。
+        /// 結果、貸出の撮影に「職員証を認識しました」が写った、もっともらしく見えて誤った画像ができ、
+        /// 見比べる人が気付かないまま <c>-Publish</c> で 6 年参照されるマニュアルへ載り得る（コードレビューで検出）。
+        /// </remarks>
         private static void WaitForToastGone(AppFixture fixture)
         {
-            Retry.WhileTrue(
+            // Success は「時間内に条件が false になった＝トーストが消えた」ことを表す
+            // （Result は最後に評価した値なので、ここでは Success を見る）。
+            var gone = Retry.WhileTrue(
                 () => FindToast(fixture) != null,
-                ToastTimeout);
+                ToastTimeout).Success;
+            gone.Should().BeTrue(
+                $"直前のトーストが {ToastTimeout.TotalSeconds} 秒以内に消えること" +
+                "（消える前に次を撮ると、同じ UIA Name の古いトーストを掴んで誤った画像になる）。" +
+                DescribeBlockingModal(fixture));
+        }
+
+        /// <summary>
+        /// 待機に失敗した原因になり得るモーダルを名指しする補助文。
+        /// </summary>
+        /// <remarks>
+        /// 仮想タッチダイアログのカード・職員は既定選択（先頭）を使うが、その中身は本体の
+        /// <c>DebugDataService.TestCardList</c> / <c>TestStaffList</c> という<b>ハードコードされた一覧</b>で、
+        /// 撮影モードでは <c>RegisterTestDataAsync</c> を止めるため DB に居るのは先頭の IDm だけ。
+        /// 一覧の順序が変わると「カードがデータベースに登録されていません」のモーダルが出て、
+        /// トースト待ちが原因不明のタイムアウトになる。せめて何が出ているかを名指しする
+        /// （順序そのものは <c>Views/ScreenshotModeTests</c> の静的検査が固定する。コードレビューで検出）。
+        /// </remarks>
+        private static string DescribeBlockingModal(AppFixture fixture)
+        {
+            try
+            {
+                var modal = fixture.MainWindow.ModalWindows.FirstOrDefault();
+                return modal == null
+                    ? string.Empty
+                    : $" 前面にモーダル「{modal.Name}」が出ています。";
+            }
+            catch
+            {
+                return string.Empty;
+            }
         }
 
         private static Window? FindToast(AppFixture fixture)
