@@ -1,4 +1,4 @@
-<Window x:Class="ICCardManager.Views.MainWindow"
+﻿<Window x:Class="ICCardManager.Views.MainWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
@@ -1023,9 +1023,15 @@
                     <Run Text="[Esc] キャンセル"/>
                 </TextBlock>
 
-                <!-- デバッグ用ボタン (DEBUG ビルドのみ表示: Issue #289) -->
+                <!-- デバッグ用ボタン (DEBUG ビルドのみ表示: Issue #289)
+                     Opacity は Issue #2019: スクリーンショット撮影モード（環境変数）で 0 にする。
+                     Visibility ではなく Opacity なのは、UIA ツリーに残してボタンを押せるようにするため。
+                     ただし透明でもヒットテストは生きているので、見えないクリック領域が残らないよう
+                     IsHitTestVisible も併せて落とす（UIA の Invoke はヒットテストを経ないので撮影は動く）。 -->
                 <StackPanel Grid.Column="1" Orientation="Horizontal" Margin="20,0,0,0"
-                            Visibility="{Binding Source={x:Static app:App.IsDebugBuild}, Converter={StaticResource BoolToVisibilityConverter}}">
+                            Visibility="{Binding Source={x:Static app:App.IsDebugBuild}, Converter={StaticResource BoolToVisibilityConverter}}"
+                            Opacity="{Binding Source={x:Static app:App.DebugPanelOpacity}}"
+                            IsHitTestVisible="{Binding Source={x:Static app:App.IsDebugPanelInteractive}}">
                     <TextBlock Text="[DEBUG]" FontSize="{DynamicResource SmallFontSize}" Foreground="{DynamicResource DangerTextBrush}" VerticalAlignment="Center" Margin="0,0,10,0"/>
                     <Button Content="職員証" Command="{Binding SimulateStaffCardCommand}" Padding="10,3" Margin="0,0,5,0"/>
                     <Button Content="交通系ICカード" Command="{Binding SimulateIcCardCommand}" Padding="10,3" Margin="0,0,5,0"/>

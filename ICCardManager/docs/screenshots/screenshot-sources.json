@@ -26,6 +26,13 @@
       "configuration": "Release",
       "filter": "Category=Screenshot",
       "env": {}
+    },
+    "Debug": {
+      "configuration": "Debug",
+      "filter": "Screenshot=Debug",
+      "env": {
+        "ICCARDMANAGER_SCREENSHOT_MODE": "1"
+      }
     }
   },
   "screenshots": [
@@ -114,6 +121,92 @@
         "ICCardManager/src/ICCardManager/Views/Dialogs/SystemManageDialog.xaml",
         "ICCardManager/src/ICCardManager/Views/Dialogs/SystemManageDialog.xaml.cs",
         "ICCardManager/src/ICCardManager/ViewModels/SystemManageViewModel.cs"
+      ]
+    },
+    {
+      "name": "staff_recognized.png",
+      "pass": "Debug",
+      "filter": "FullyQualifiedName~TouchScreenshotTests.staff_recognized_and_lend",
+      "sources": [
+        "ICCardManager/src/ICCardManager/Views/MainWindow.xaml",
+        "ICCardManager/src/ICCardManager/Views/MainWindow.xaml.cs",
+        "ICCardManager/src/ICCardManager/Views/ToastNotificationWindow.xaml",
+        "ICCardManager/src/ICCardManager/Views/ToastNotificationWindow.xaml.cs",
+        "ICCardManager/src/ICCardManager/ViewModels/MainViewModel.cs",
+        "ICCardManager/src/ICCardManager/Dtos/**",
+        "ICCardManager/src/ICCardManager/Common/DisplayFormatters.cs",
+        "ICCardManager/src/ICCardManager/Common/StaffNameFormatter.cs"
+      ]
+    },
+    {
+      "name": "toast_staff_recognized.png",
+      "pass": "Debug",
+      "filter": "FullyQualifiedName~TouchScreenshotTests.staff_recognized_and_lend",
+      "sources": [
+        "ICCardManager/src/ICCardManager/Views/ToastNotificationWindow.xaml",
+        "ICCardManager/src/ICCardManager/Views/ToastNotificationWindow.xaml.cs",
+        "ICCardManager/src/ICCardManager/ViewModels/MainViewModel.cs"
+      ]
+    },
+    {
+      "name": "lend.png",
+      "pass": "Debug",
+      "filter": "FullyQualifiedName~TouchScreenshotTests.staff_recognized_and_lend",
+      "sources": [
+        "ICCardManager/src/ICCardManager/Views/MainWindow.xaml",
+        "ICCardManager/src/ICCardManager/Views/MainWindow.xaml.cs",
+        "ICCardManager/src/ICCardManager/Views/ToastNotificationWindow.xaml",
+        "ICCardManager/src/ICCardManager/Views/ToastNotificationWindow.xaml.cs",
+        "ICCardManager/src/ICCardManager/ViewModels/MainViewModel.cs",
+        "ICCardManager/src/ICCardManager/Dtos/**",
+        "ICCardManager/src/ICCardManager/Common/DisplayFormatters.cs",
+        "ICCardManager/src/ICCardManager/Common/StaffNameFormatter.cs"
+      ]
+    },
+    {
+      "name": "toast_lend.png",
+      "pass": "Debug",
+      "filter": "FullyQualifiedName~TouchScreenshotTests.staff_recognized_and_lend",
+      "sources": [
+        "ICCardManager/src/ICCardManager/Views/ToastNotificationWindow.xaml",
+        "ICCardManager/src/ICCardManager/Views/ToastNotificationWindow.xaml.cs",
+        "ICCardManager/src/ICCardManager/ViewModels/MainViewModel.cs"
+      ]
+    },
+    {
+      "name": "return.png",
+      "pass": "Debug",
+      "filter": "FullyQualifiedName~TouchScreenshotTests.return_",
+      "sources": [
+        "ICCardManager/src/ICCardManager/Views/MainWindow.xaml",
+        "ICCardManager/src/ICCardManager/Views/MainWindow.xaml.cs",
+        "ICCardManager/src/ICCardManager/Views/ToastNotificationWindow.xaml",
+        "ICCardManager/src/ICCardManager/Views/ToastNotificationWindow.xaml.cs",
+        "ICCardManager/src/ICCardManager/ViewModels/MainViewModel.cs",
+        "ICCardManager/src/ICCardManager/Dtos/**",
+        "ICCardManager/src/ICCardManager/Common/DisplayFormatters.cs",
+        "ICCardManager/src/ICCardManager/Common/StaffNameFormatter.cs"
+      ]
+    },
+    {
+      "name": "toast_return.png",
+      "pass": "Debug",
+      "filter": "FullyQualifiedName~TouchScreenshotTests.return_",
+      "sources": [
+        "ICCardManager/src/ICCardManager/Views/ToastNotificationWindow.xaml",
+        "ICCardManager/src/ICCardManager/Views/ToastNotificationWindow.xaml.cs",
+        "ICCardManager/src/ICCardManager/ViewModels/MainViewModel.cs"
+      ]
+    },
+    {
+      "name": "busstop.png",
+      "pass": "Debug",
+      "filter": "FullyQualifiedName~TouchScreenshotTests.busstop",
+      "sources": [
+        "ICCardManager/src/ICCardManager/Views/Dialogs/BusStopInputDialog.xaml",
+        "ICCardManager/src/ICCardManager/Views/Dialogs/BusStopInputDialog.xaml.cs",
+        "ICCardManager/src/ICCardManager/ViewModels/BusStopInputViewModel.cs",
+        "ICCardManager/src/ICCardManager/Common/RouteDisplayFormatter.cs"
       ]
     }
   ]

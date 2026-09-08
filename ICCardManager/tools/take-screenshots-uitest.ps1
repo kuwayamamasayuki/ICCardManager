@@ -6,8 +6,9 @@
 #   対話式の TakeScreenshots.ps1 と違い、画面を開く操作も自動で行う。
 #   撮影対象と、各画像がどのパス（起動構成・テストフィルタ）で撮られるかは
 #   docs\screenshots\screenshot-sources.json（対応表）が唯一の定義。
-#   （職員証・交通系ICカードのタッチを要する staff_recognized / lend / return は対象外。
-#     それらは引き続き TakeScreenshots.ps1 で撮影する）
+#   （職員証・交通系ICカードのタッチを要する staff_recognized / lend / return / busstop も
+#     Debug パスで撮影する。Issue #2019。帳票プレビュー・インストーラーなど、対応表に定義の
+#     無い画面だけが引き続き TakeScreenshots.ps1 の対象）
 #
 # 使い方:
 #   PowerShell（Windows ネイティブ）で実行する:
@@ -27,7 +28,8 @@
 #     -Help             : 使い方を表示（未知の引数を渡した場合も使い方を表示して終了する）
 #
 # 注意:
-#   - 本体は対応表の passes に書かれた構成でビルド・起動する（第 1 段階は Release のみ。Debug は仮想タッチパネルが写り込むため）
+#   - 本体は対応表の passes に書かれた構成でビルド・起動する。Release パス（#2016）と、タッチを要する画面の
+#     Debug パス（#2019。仮想タッチが Debug 限定。ICCARDMANAGER_SCREENSHOT_MODE=1 で操作パネルを透明にする）
 #   - 撮影中はアプリのウィンドウが前面に出る。マウス・キーボードに触れないこと
 #   - 既存の DB（%ProgramData%\ICCardManager\iccard.db）は撮影中だけ退避され、終了後に復元される
 #   - 表示スケールは 100% を推奨（docs\screenshots\README.md）
@@ -141,10 +143,11 @@ if ($Publish) {
         Write-Host "        先に引数なしで実行して撮影してください。" -ForegroundColor Yellow
         exit 1
     }
-    $staged = @(Get-ChildItem -Path $OutputDir -Filter *.png)
+    # 対応表に載っている画像だけを差し替える。無条件に *.png をコピーすると、
+    # 失敗時の切り分け用に残る history_FAILED.png のような成果物まで docs\screenshots\ へ公開され、
+    # そのままコミットされ得る（-Changed の有無によらず効かせる。コードレビューで検出）
+    $staged = @(Get-ChildItem -Path $OutputDir -Filter *.png | Where-Object { $targetNames -contains $_.Name })
     if ($Changed) {
-        # 対象外の画像（以前の全撮影で残ったもの）まで差し替えない
-        $staged = @($staged | Where-Object { $targetNames -contains $_.Name })
         $missing = @($targetNames | Where-Object { $n = $_; -not ($staged | Where-Object { $_.Name -eq $n }) })
         if ($missing.Count -gt 0) {
             Write-Host "[ERROR] 撮り直しが必要な画像が出力先にありません: $($missing -join ', ')" -ForegroundColor Red

@@ -32,7 +32,7 @@
 
 ## スクリーンショットの撮影方法
 
-### 完全自動撮影（UI テスト基盤、8 枚）
+### 完全自動撮影（UI テスト基盤、15 枚）
 
 UI テスト基盤（FlaUI）でアプリを起動し、画面を開く操作まで含めて自動で撮影します。人の操作は不要です。
 
@@ -47,22 +47,26 @@ cd D:\OneDrive\交通系\src\ICCardManager
 .\tools\take-screenshots-uitest.ps1 -Publish
 ```
 
-| 対象 | ファイル |
-|------|---------|
-| メイン画面（待機状態） | `main.png` |
-| 履歴照会画面 | `history.png` |
-| ツールバーから開くダイアログ | `card.png` `staff.png` `report.png` `export.png` `settings.png` `system.png` |
+| パス | 対象 | ファイル |
+|------|------|---------|
+| Release | メイン画面（待機状態） | `main.png` |
+| Release | 履歴照会画面 | `history.png` |
+| Release | ツールバーから開くダイアログ | `card.png` `staff.png` `report.png` `export.png` `settings.png` `system.png` |
+| Debug | 職員証認識・貸出完了・返却完了（メイン画面と画面隅のトーストの両方を含む矩形で撮る） | `staff_recognized.png` `lend.png` `return.png` |
+| Debug | トースト単体（概要版マニュアル用） | `toast_staff_recognized.png` `toast_lend.png` `toast_return.png` |
+| Debug | バス停名入力ダイアログ | `busstop.png` |
 
 動作の要点：
-- 本体を **Release** でビルド・起動する（Debug は画面下部に仮想タッチパネルが写り込むため）
+- 本体を Release と Debug の両方でビルドし、2 パスで撮る。タッチを要する画面は仮想タッチ（Debug 限定）で再現し、撮影モード（環境変数 `ICCARDMANAGER_SCREENSHOT_MODE=1`）で仮想タッチパネルを透明にし、起動時のテストデータ自動登録を止める
 - 既存の DB（`%ProgramData%\ICCardManager\iccard.db`）は撮影中だけ退避し、終了後に復元する
 - 職員 2 名・交通系ICカード 3 枚（通常／貸出中／残額不足）と当月の利用履歴をサンプルとして投入する（`tests/ICCardManager.UITests/Infrastructure/ScreenshotSeedData.cs`）
-- 出力先 `docs\screenshots\auto\` は Git 管理外。撮影結果は既存画像とサイズを見比べてから `-Publish` で差し替える。`-Publish` は撮影し直さず、`auto\` にある画像をそのままコピーする（確認した画像と差し替える画像が同じであることを保証するため）
+- 出力先 `docs\screenshots\auto\` は Git 管理外。撮影結果は既存画像とサイズを見比べてから `-Publish` で差し替える。`-Publish` は撮影し直さず、`auto\` にある画像をそのままコピーする（確認した画像と差し替える画像が同じであることを保証するため）。コピーするのは**対応表に載っている画像だけ**で、失敗時の切り分け用に残る `*_FAILED.png` のような対象外の成果物は公開されない
 - ステータスバーの「リーダー:」は撮影した PC の接続状態がそのまま写る（未接続なら「切断」）。警告欄もその PC の状態（更新の案内など）を含み得るので、差し替え前に確認すること
 - 撮影中はアプリのウィンドウが画面左上へ移動して前面に出る。マウス・キーボードに触れないこと
+- **管理者権限で動いているウィンドウを前面にしたまま実行しない**。Windows が前面化と入力注入を拒否するため、クリック・キー入力を要する撮影（履歴照会）が「アプリのウィンドウを前面にできません」で失敗する。そのウィンドウを閉じるか最小化してからやり直す
 - テストプロセスを DPI 対応にして物理ピクセルで撮るため、表示スケール 150% では 100% の 1.5 倍の寸法になる。既存画像と寸法を揃えたいときは表示スケールを 100% にして実行する
 
-職員証・交通系ICカードのタッチを要する画面（`staff_recognized.png` / `lend.png` / `return.png`）と、下記の対話式スクリプトにしか定義の無い画面は、引き続き対話式で撮影します。
+下記の対話式スクリプトにしか定義の無い画面（帳票プレビュー・インストーラーなど）は、引き続き対話式で撮影します。
 
 ### 画面を変えたときの撮り直し（変更検知、Issue #2021）
 

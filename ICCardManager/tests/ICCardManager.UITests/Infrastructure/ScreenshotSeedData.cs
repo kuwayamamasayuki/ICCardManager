@@ -50,6 +50,46 @@ namespace ICCardManager.UITests.Infrastructure
         public const string SecondaryStaffName = "天神 太郎";
 
         /// <summary>
+        /// DEBUG パネルの「交通系ICカード」ボタンが模擬する IDm（<c>MainViewModel.SimulateIcCard</c> と一致させる）。
+        /// 第 2 段階（Issue #2019）の貸出・返却撮影で使う。
+        /// </summary>
+        public const string VirtualTouchCardIdm = "07FE112233445566";
+        public const string VirtualTouchCardType = "はやかけん";
+        public const string VirtualTouchCardNumber = "004";
+        public static string VirtualTouchCardDisplayName => $"{VirtualTouchCardType} {VirtualTouchCardNumber}";
+
+        /// <summary>
+        /// 第 2 段階（タッチを要する画面）用のサンプルデータ。<see cref="Seed"/> に加えて、
+        /// 仮想タッチ用のカードを未貸出で投入し、返却時の同行者数ダイアログ（#2009）をスキップする設定を書く
+        /// （自動で閉じるまで既定 30 秒待つと、その間にトーストが消える）。
+        /// </summary>
+        public static void SeedForVirtualTouch(SQLiteConnection conn) => SeedForVirtualTouch(conn, skipBusStopInput: true);
+
+        /// <param name="conn">接続。</param>
+        /// <param name="skipBusStopInput">
+        /// 返却後のバス停名入力ダイアログを出さない設定を書くか。返却トーストの撮影ではダイアログが
+        /// トーストの直後に重なるため true、バス停名入力ダイアログ自体を撮るときは false。
+        /// </param>
+        public static void SeedForVirtualTouch(SQLiteConnection conn, bool skipBusStopInput)
+        {
+            Seed(conn);
+
+            using var tx = conn.BeginTransaction();
+            InsertCard(conn, VirtualTouchCardIdm, VirtualTouchCardType, VirtualTouchCardNumber, isLent: false, lentAt: null, lentStaff: null);
+            // 残額警告のしきい値（既定 10,000 円）を十分に上回る残高にし、トーストに「残額不足」が出ないようにする
+            _ = InsertLedger(conn, VirtualTouchCardIdm, DayOfMonth(DateTime.Today, 1), "新規購入", 20000, 0, 0, PrimaryStaffName);
+
+            // settings は key/value。キーは SettingsRepository.KeySkipCompanionCountInputOnReturn、値は "true" 判定
+            Execute(conn,
+                "INSERT OR REPLACE INTO settings (key, value) VALUES (@key, @value)",
+                ("@key", "skip_companion_count_input_on_return"), ("@value", "true"));
+            Execute(conn,
+                "INSERT OR REPLACE INTO settings (key, value) VALUES (@key, @value)",
+                ("@key", "skip_bus_stop_input_on_return"), ("@value", skipBusStopInput ? "true" : "false"));
+            tx.Commit();
+        }
+
+        /// <summary>
         /// サンプルデータを投入する。
         /// </summary>
         public static void Seed(SQLiteConnection conn)

@@ -29,6 +29,7 @@ namespace ICCardManager.UITests.Tests
     [Collection("UI")]
     [Trait("Category", "UI")]
     [Trait("Category", "Screenshot")]
+    [Trait("Screenshot", "Release")]
     public class ManualScreenshotTests
     {
         public ManualScreenshotTests()
@@ -67,7 +68,16 @@ namespace ICCardManager.UITests.Tests
             ScreenshotHelper.MoveToTopLeft(fixture.MainWindow);
             var page = new MainWindowPage(fixture.MainWindow, fixture.Automation);
 
-            page.OpenCardHistory(ScreenshotSeedData.NormalCardDisplayName);
+            try
+            {
+                page.OpenCardHistory(ScreenshotSeedData.NormalCardDisplayName);
+            }
+            catch (System.TimeoutException)
+            {
+                // 失敗時の画面を残す（履歴が開かない原因の切り分け用。docs/screenshots/auto/ は Git 管理外）
+                ScreenshotHelper.Capture(fixture.MainWindow, "history_FAILED.png");
+                throw;
+            }
 
             var path = ScreenshotHelper.Capture(fixture.MainWindow, "history.png");
             File.Exists(path).Should().BeTrue();
