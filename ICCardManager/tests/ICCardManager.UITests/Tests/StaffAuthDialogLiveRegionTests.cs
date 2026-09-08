@@ -35,8 +35,7 @@ namespace ICCardManager.UITests.Tests
             // 仮想タッチボタンが DEBUG ビルドで表示されることを確認（タッチ操作はしない；
             // 本テストはダイアログ表示直後の構造検証に絞る。
             // 失敗パス・成功パスのメッセージ内容検証は別テストで実施）
-            var virtualTouch = dialog.FindFirstDescendant(
-                cf => cf.ByName(TestConstants.DebugVirtualTouchButtonName));
+            var virtualTouch = FindButton(dialog, TestConstants.DebugVirtualTouchButtonName);
             virtualTouch.Should().NotBeNull(
                 "DEBUG ビルドでは仮想タッチボタンが表示されるべき。Release ビルドではこのアサーションでスキップ判定が必要。");
 
@@ -57,8 +56,7 @@ namespace ICCardManager.UITests.Tests
                 "Issue #1509: StatusText の LiveSetting が Assertive でない。");
 
             // 後片付け: キャンセルでダイアログを閉じる
-            var cancelButton = dialog.FindFirstDescendant(
-                cf => cf.ByName(TestConstants.StaffAuthCancelButtonName));
+            var cancelButton = FindButton(dialog, TestConstants.StaffAuthCancelButtonName);
             cancelButton?.AsButton().Invoke();
         }
 
@@ -79,12 +77,30 @@ namespace ICCardManager.UITests.Tests
 
             // タイムアウト経過後にメッセージが反映されるのを単一の長めの retry で待つ
             // （デフォルト StaffCardTimeoutSeconds=60s + クローズ遅延 1s + 余裕 = 70s）
-            Retry.WhileFalse(
-                () => statusText!.Name.Contains("タイムアウト"),
-                TimeSpan.FromSeconds(70));
+            //
+            // Issue #2018: 反映を確認した時点の Name を retry の中で確定させる。
+            // タイムアウト後はダイアログが自動的に閉じるため、retry の外で Name を読み直すと
+            // 要素が既に無く ElementNotAvailableException になり得る（「反映されなかった」ではなく
+            // 「読めなかった」で落ちるので、失敗の原因を取り違える）。
+            var observed = Retry.WhileNull(
+                () =>
+                {
+                    try
+                    {
+                        var name = statusText!.Name;
+                        return name != null && name.Contains("タイムアウト") ? name : null;
+                    }
+                    catch (Exception)
+                    {
+                        // ダイアログが閉じて要素が消えた場合。次の試行までに retry が打ち切られる。
+                        return null;
+                    }
+                },
+                TimeSpan.FromSeconds(70)).Result;
 
-            statusText!.Name.Should().Contain("タイムアウト",
+            observed.Should().NotBeNull(
                 "Issue #1509: タイムアウト経過後に StatusText にタイムアウトメッセージが反映されていない");
+            observed.Should().Contain("タイムアウト");
         }
 
         [Fact]
@@ -97,8 +113,7 @@ namespace ICCardManager.UITests.Tests
 
             var dialog = TriggerStaffAuthDialog(page, fixture);
 
-            var virtualTouch = dialog.FindFirstDescendant(
-                cf => cf.ByName(TestConstants.DebugVirtualTouchButtonName));
+            var virtualTouch = FindButton(dialog, TestConstants.DebugVirtualTouchButtonName);
             virtualTouch.Should().NotBeNull(
                 "DEBUG ビルドでは仮想タッチボタンが表示されるべき。Release ビルドの場合は本テストをスキップ。");
             virtualTouch!.AsButton().Invoke();
@@ -115,13 +130,17 @@ namespace ICCardManager.UITests.Tests
                 "Issue #1509: 認証成功メッセージが StatusText に反映されているべき。" +
                 $"実際の Name: '{statusText.Name}'");
 
-            // 700ms 後にダイアログが自動クローズすることを確認
+            // 700ms 後に「認証ダイアログだけが」自動クローズすることを確認。
+            //
+            // Issue #2018: 呼び出し元の StaffManageDialog は開いたままなので、
+            // ModalWindows が空になることを期待してはならない（この経路は #1500 の追加当初から
+            // 削除ボタンを掴めておらず、この後段のアサーションは一度も実行されていなかった）。
             Retry.WhileTrue(
-                () => fixture.MainWindow.ModalWindows.Length > 0,
+                () => IsStaffAuthDialogOpen(fixture),
                 TimeSpan.FromSeconds(3));
 
-            fixture.MainWindow.ModalWindows.Should().BeEmpty(
-                "Issue #1509: 認証成功後 700ms でダイアログが自動的に閉じるべき");
+            IsStaffAuthDialogOpen(fixture).Should().BeFalse(
+                "Issue #1509: 認証成功後 700ms で認証ダイアログが自動的に閉じるべき");
         }
 
         /// <summary>
@@ -145,23 +164,114 @@ namespace ICCardManager.UITests.Tests
             var firstRow = dataGrid!.FindFirstDescendant(
                 cf => cf.ByControlType(ControlType.DataItem));
             firstRow.Should().NotBeNull("テスト職員が一覧に表示されているべき");
-            firstRow!.Click();
+            SelectRow(firstRow!);
 
             // 3. 削除ボタンクリック → StaffAuthDialog 表示
-            var deleteButton = staffManageDialog.FindFirstDescendant(
-                cf => cf.ByName(TestConstants.StaffManageDeleteButtonName));
-            deleteButton.Should().NotBeNull("削除ボタンが存在すべき");
+            //
+            // Issue #2018: ボタンの有効化は選択の反映（DataGrid.SelectedItem → SelectedStaff の
+            // TwoWay バインディング → NotNullToBoolConverter）を待つ必要があるため、
+            // 「見つかった」ではなく「有効になった」まで待つ。ここで待たずに Invoke すると
+            // ElementNotEnabledException になり、原因（行が選択できていない）が読み取れない。
+            var deleteButton = Retry.WhileNull(
+                () =>
+                {
+                    var button = FindButton(staffManageDialog, TestConstants.StaffManageDeleteButtonName);
+                    return button != null && button.IsEnabled ? button : null;
+                },
+                TimeSpan.FromSeconds(5)).Result;
+
+            deleteButton.Should().NotBeNull(
+                $"職員削除ボタン（AutomationProperties.Name=\"{TestConstants.StaffManageDeleteButtonName}\"）が" +
+                "有効な状態で存在すべき。無効のままなら一覧の行が選択できていない" +
+                "（IsEnabled は SelectedStaff の null 判定にバインドされている）。");
             deleteButton!.AsButton().Invoke();
 
             // 4. StaffAuthDialog の出現を待つ
             var authDialog = Retry.WhileNull(
-                () => fixture.MainWindow.ModalWindows
-                    .FirstOrDefault(w => w.Name == TestConstants.StaffAuthDialogName),
+                () => FindStaffAuthDialog(fixture),
                 TimeSpan.FromSeconds(5)).Result;
 
             authDialog.Should().NotBeNull(
                 $"StaffAuthDialog（{TestConstants.StaffAuthDialogName}）が表示されるべき");
-            return authDialog!.AsWindow();
+            return authDialog!;
         }
+
+        /// <summary>
+        /// 一覧の行を選択する。座標を使わず UIA の <c>SelectionItem</c> パターンで行う。
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// Issue #2018: 物理クリック（<c>AutomationElement.Click()</c>）は要素の中心座標へ
+        /// マウスを送るため、testhost が DPI 非対応だと 150% 表示の環境で論理座標と物理座標が
+        /// 食い違い、<b>例外も出さずに別の場所を押す</b>（行は選択されないまま先へ進み、
+        /// 次の「削除ボタンを押す」で ElementNotEnabledException になる）。
+        /// </para>
+        /// <para>
+        /// この経路は UIA ツリーの構造を検証するテストであり、マウス入力そのものは検証対象ではない。
+        /// <c>SelectionItemPattern.Select()</c> は座標を介さないので、DPI・ウィンドウ位置・
+        /// 前面かどうかに依存しない。DataGrid は <c>SelectionUnit</c> 既定（FullRow）・
+        /// <c>SelectionMode="Single"</c> なので、行（DataItem）がこのパターンを持つ。
+        /// パターンが無い実装へ変わった場合に備えてクリックへフォールバックする。
+        /// </para>
+        /// </remarks>
+        private static void SelectRow(AutomationElement row)
+        {
+            var selectionItem = row.Patterns.SelectionItem.PatternOrDefault;
+            if (selectionItem != null)
+            {
+                selectionItem.Select();
+                return;
+            }
+
+            row.Focus();
+            row.Click();
+        }
+
+        /// <summary>
+        /// 指定スコープ配下から、<paramref name="automationName"/> を持つ<b>ボタン</b>を探す。
+        /// </summary>
+        /// <remarks>
+        /// Issue #2018: <c>ByName</c> だけで探すと、ボタンの内側にある <c>Content</c> のテキスト要素
+        /// （UIA では Text）に一致することがある。Text は Invoke パターンを持たないため
+        /// <c>AsButton().Invoke()</c> が <c>PatternNotSupportedException</c> になり、
+        /// 「名前が違う」という本当の原因が分かりにくい失敗になる。
+        /// ControlType を And で加え、名前の偶然の一致で別種の要素を掴まないようにする。
+        /// </remarks>
+        private static AutomationElement? FindButton(AutomationElement scope, string automationName)
+        {
+            return scope.FindFirstDescendant(
+                cf => cf.ByControlType(ControlType.Button).And(cf.ByName(automationName)));
+        }
+
+        /// <summary>
+        /// 現在開いている StaffAuthDialog を返す（開いていなければ null）。
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// StaffAuthDialog は <c>Owner = Application.Current.MainWindow</c> で表示されるため、
+        /// 呼び出し元が StaffManageDialog でもメインウィンドウの ModalWindows に現れる。
+        /// </para>
+        /// <para>
+        /// Issue #2018: <c>ModalWindows</c> の列挙と <c>Name</c> の参照は、まさに閉じかけの
+        /// ウィンドウに対して <c>ElementNotAvailableException</c> を投げ得る。FlaUI の
+        /// <c>Retry</c> は既定で例外を握りつぶさないため、ここで受けて「開いていない」へ倒す。
+        /// 「閉じるのを待つ」用途では、要素が消えていることは待っている状態そのもの。
+        /// </para>
+        /// </remarks>
+        private static Window? FindStaffAuthDialog(AppFixture fixture)
+        {
+            try
+            {
+                return fixture.MainWindow.ModalWindows
+                    .FirstOrDefault(w => w.Name == TestConstants.StaffAuthDialogName);
+            }
+            catch (Exception)
+            {
+                return null;
+            }
+        }
+
+        private static bool IsStaffAuthDialogOpen(AppFixture fixture)
+            => FindStaffAuthDialog(fixture) != null;
     }
 }
