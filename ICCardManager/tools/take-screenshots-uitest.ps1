@@ -27,7 +27,8 @@
 #     -Help             : 使い方を表示（未知の引数を渡した場合も使い方を表示して終了する）
 #
 # 注意:
-#   - 本体は対応表の passes に書かれた構成でビルド・起動する（第 1 段階は Release のみ。Debug は仮想タッチパネルが写り込むため）
+#   - 本体は対応表の passes に書かれた構成でビルド・起動する。Release パス（#2016）と、タッチを要する画面の
+#     Debug パス（#2019。仮想タッチが Debug 限定。ICCARDMANAGER_SCREENSHOT_MODE=1 で操作パネルを透明にする）
 #   - 撮影中はアプリのウィンドウが前面に出る。マウス・キーボードに触れないこと
 #   - 既存の DB（%ProgramData%\ICCardManager\iccard.db）は撮影中だけ退避され、終了後に復元される
 #   - 表示スケールは 100% を推奨（docs\screenshots\README.md）

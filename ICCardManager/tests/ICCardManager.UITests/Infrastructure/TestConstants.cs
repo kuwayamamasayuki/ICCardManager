@@ -187,25 +187,39 @@ namespace ICCardManager.UITests.Infrastructure
         public const string OperationLogActionTypeComboBox = "操作種別";
 
         // ── 仮想タッチ操作パネル・トースト（Issue #2019。DEBUG ビルドのみ） ────────
+        // DEBUG パネルの 3 ボタンは AutomationProperties.Name を持たず、Content の文字列が
+        // そのまま UIA Name になる（MainWindow.xaml の <Button Content="…"/>）。撮影は開発時にしか
+        // 使わないパネルで、読み上げ対象でもないため属性を足していない。Content 由来の Name は
+        // 内側の Text 要素とも一致し得るので、探索側は ControlType.Button に限定すること
+        // （TouchScreenshotTests.InvokeDebugPanelButton）。
         /// <summary>メイン画面下部の DEBUG パネルの「職員証」ボタン（IDm FFFF000000000001 のタッチを模擬）。</summary>
+        [NotUiaName]
         public const string DebugPanelStaffButton = "職員証";
 
         /// <summary>同「交通系ICカード」ボタン（IDm 07FE112233445566 のタッチを模擬）。</summary>
+        [NotUiaName]
         public const string DebugPanelIcCardButton = "交通系ICカード";
 
         /// <summary>同「仮想タッチ」ボタン（履歴を指定できる仮想タッチダイアログを開く。Issue #640）。</summary>
+        [NotUiaName]
         public const string DebugPanelVirtualTouchButton = "仮想タッチ";
 
         /// <summary>仮想タッチダイアログの AutomationProperties.Name。</summary>
+        [UiaName]
         public const string VirtualCardDialogName = "仮想交通系ICカード設定ダイアログ";
+        [UiaName]
         public const string VirtualCardHistoryGrid = "利用履歴一覧";
+        [UiaName]
         public const string VirtualCardAddEntryButton = "履歴追加";
+        [UiaName]
         public const string VirtualCardExecuteButton = "タッチ実行";
 
         /// <summary>トースト通知ウィンドウの AutomationProperties.Name（メイン画面とは別のトップレベルウィンドウ）。</summary>
+        [UiaName]
         public const string ToastWindowName = "通知ウィンドウ";
 
         /// <summary>返却後に開くバス停名入力ダイアログ。</summary>
+        [UiaName]
         public const string BusStopInputDialogName = "バス停名入力ダイアログ";
 
         // ── タイムアウト（秒） ────────────────────────────
