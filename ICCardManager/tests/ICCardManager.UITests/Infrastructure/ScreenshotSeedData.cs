@@ -63,14 +63,28 @@ namespace ICCardManager.UITests.Infrastructure
         /// 仮想タッチ用のカードを未貸出で投入し、返却時の同行者数ダイアログ（#2009）をスキップする設定を書く
         /// （自動で閉じるまで既定 30 秒待つと、その間にトーストが消える）。
         /// </summary>
-        public static void SeedForVirtualTouch(SQLiteConnection conn) => SeedForVirtualTouch(conn, skipBusStopInput: true);
+        public static void SeedForVirtualTouch(SQLiteConnection conn) =>
+            SeedForVirtualTouch(conn, skipBusStopInput: true, skipCompanionCountInput: true);
 
         /// <param name="conn">接続。</param>
         /// <param name="skipBusStopInput">
         /// 返却後のバス停名入力ダイアログを出さない設定を書くか。返却トーストの撮影ではダイアログが
         /// トーストの直後に重なるため true、バス停名入力ダイアログ自体を撮るときは false。
         /// </param>
-        public static void SeedForVirtualTouch(SQLiteConnection conn, bool skipBusStopInput)
+        public static void SeedForVirtualTouch(SQLiteConnection conn, bool skipBusStopInput) =>
+            SeedForVirtualTouch(conn, skipBusStopInput, skipCompanionCountInput: true);
+
+        /// <param name="conn">接続。</param>
+        /// <param name="skipBusStopInput">
+        /// 返却後のバス停名入力ダイアログを出さない設定を書くか。返却トーストの撮影ではダイアログが
+        /// トーストの直後に重なるため true、バス停名入力ダイアログ自体を撮るときは false。
+        /// </param>
+        /// <param name="skipCompanionCountInput">
+        /// 返却後の同行者数入力ダイアログ（#1906）を出さない設定を書くか。false のときは
+        /// 自動クローズ（#2009。既定 30 秒）も無効化する（0 = 自動的に閉じない）。撮影の待ち時間が
+        /// 期限を越えると、ダイアログが撮る前に消えて「タイムアウトの原因が分からない失敗」になる。
+        /// </param>
+        public static void SeedForVirtualTouch(SQLiteConnection conn, bool skipBusStopInput, bool skipCompanionCountInput)
         {
             Seed(conn);
 
@@ -80,14 +94,97 @@ namespace ICCardManager.UITests.Infrastructure
             _ = InsertLedger(conn, VirtualTouchCardIdm, DayOfMonth(DateTime.Today, 1), "新規購入", 20000, 0, 0, PrimaryStaffName);
 
             // settings は key/value。キーは SettingsRepository.KeySkipCompanionCountInputOnReturn、値は "true" 判定
-            Execute(conn,
-                "INSERT OR REPLACE INTO settings (key, value) VALUES (@key, @value)",
-                ("@key", "skip_companion_count_input_on_return"), ("@value", "true"));
-            Execute(conn,
-                "INSERT OR REPLACE INTO settings (key, value) VALUES (@key, @value)",
-                ("@key", "skip_bus_stop_input_on_return"), ("@value", skipBusStopInput ? "true" : "false"));
+            SetSetting(conn, "skip_companion_count_input_on_return", skipCompanionCountInput ? "true" : "false");
+            SetSetting(conn, "skip_bus_stop_input_on_return", skipBusStopInput ? "true" : "false");
+            if (!skipCompanionCountInput)
+            {
+                // SettingsRepository.KeyCompanionCountInputTimeoutSeconds。0 =「自動的に閉じない（必ず尋ねる）」
+                SetSetting(conn, "companion_count_input_timeout_seconds", "0");
+            }
             tx.Commit();
         }
+
+        /// <summary>
+        /// 警告の出ないサンプルデータ（Issue #2011）。<see cref="Seed"/> の残額不足カードへチャージを 1 件足して
+        /// しきい値（既定 10,000 円）を上回らせ、メイン画面の「⚠ システム警告」エリアを消す。
+        /// </summary>
+        /// <remarks>
+        /// <c>main.png</c>（警告なし）と <c>main_with_warnings.png</c>（警告あり）は別々の画面として
+        /// マニュアルに載る。同じ投入データで撮ると 2 枚が同じ画像になり、
+        /// 「警告がない場合、このエリアは表示されません」という本文と食い違う。
+        /// </remarks>
+        public static void SeedWithoutWarnings(SQLiteConnection conn)
+        {
+            Seed(conn);
+
+            using var tx = conn.BeginTransaction();
+            // 残高チェーン（前行の残額 ＋ 受入 − 払出 ＝ 当行の残額）を保つため、Seed の最終残額から積む
+            _ = InsertLedger(conn, LowBalanceCardIdm, DayOfMonth(DateTime.Today, 4), "役務費によりチャージ",
+                income: 20000, expense: 0, previousBalance: LowBalanceCardSeededBalance, PrimaryStaffName);
+            tx.Commit();
+        }
+
+        /// <summary>
+        /// <see cref="Seed"/> 投入直後の残額不足カードの残額。<see cref="SeedWithoutWarnings"/> が
+        /// 残高チェーンを継ぐ起点に使う（新規購入 2,000 円 − 往復 520 円）。
+        /// </summary>
+        private const int LowBalanceCardSeededBalance = 2000 - 520;
+
+        /// <summary>
+        /// 帳票の事前チェック（#1688）で必ず警告が出るサンプルデータ（Issue #2011）。
+        /// <see cref="Seed"/> の貸出中カードの貸出日を先月へ遡らせる。
+        /// </summary>
+        /// <remarks>
+        /// 事前チェックの対象月が当月でも先月でも警告が出る形にしている。先月に貸し出されたままなら、
+        /// 対象月が当月なら「未返却のまま月をまたいでいる」、先月なら「貸出が未返却」が報告される
+        /// （<c>ReportPreflightChecker.CheckUnreturned</c>）。対象月の既定に依存しないので、
+        /// 既定が変わっても撮影が空の結果ダイアログにならない。
+        /// </remarks>
+        public static void SeedWithUnreturnedCard(SQLiteConnection conn)
+        {
+            Seed(conn);
+
+            var lentAt = ToText(FirstDayOfPreviousMonth(DateTime.Today));
+
+            using var tx = conn.BeginTransaction();
+            // 貸出中レコードと ic_card の両方を遡らせる。片方だけだと起動時の
+            // LendingService.CheckAndRepairLentStatusAsync が食い違いを修復して貸出中の表示が消える。
+            Execute(conn,
+                "UPDATE ledger SET date = @date, lent_at = @date WHERE card_idm = @card AND is_lent_record = 1",
+                ("@date", lentAt), ("@card", LentCardIdm));
+            Execute(conn,
+                "UPDATE ic_card SET last_lent_at = @date WHERE card_idm = @card",
+                ("@date", lentAt), ("@card", LentCardIdm));
+            tx.Commit();
+        }
+
+        /// <summary>
+        /// 同一とみなす駅・バス停（#1905）を登録したサンプルデータ（Issue #2011）。
+        /// 一覧が空のダイアログでは「何を登録する画面なのか」がマニュアルの読者に伝わらない。
+        /// </summary>
+        /// <remarks>
+        /// 値は <c>settings</c> のキー <c>transfer_station_groups</c>（JSON の配列の配列）。
+        /// 業務ロジック（<c>.claude/rules/business-logic.md</c>）が例に挙げる、
+        /// 道路を挟んで向かい合うバス停の組を入れる。
+        /// </remarks>
+        public static void SeedWithTransferStationGroups(SQLiteConnection conn)
+        {
+            Seed(conn);
+
+            using var tx = conn.BeginTransaction();
+            SetSetting(conn, "transfer_station_groups",
+                "[[\"天神日銀前\",\"天神中央郵便局前\"],[\"博多駅前\",\"博多駅前A\"]]");
+            tx.Commit();
+        }
+
+        /// <summary>先月の 1 日。</summary>
+        private static DateTime FirstDayOfPreviousMonth(DateTime today) =>
+            new DateTime(today.Year, today.Month, 1).AddMonths(-1);
+
+        private static void SetSetting(SQLiteConnection conn, string key, string value) =>
+            Execute(conn,
+                "INSERT OR REPLACE INTO settings (key, value) VALUES (@key, @value)",
+                ("@key", key), ("@value", value));
 
         /// <summary>
         /// サンプルデータを投入する。

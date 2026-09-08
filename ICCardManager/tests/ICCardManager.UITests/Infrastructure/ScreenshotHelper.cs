@@ -157,6 +157,65 @@ namespace ICCardManager.UITests.Infrastructure
         private static extern void SwitchToThisWindow(IntPtr hWnd, bool fAltTab);
 
         /// <summary>
+        /// ウィンドウの中の 1 要素だけを PNG に保存する（Issue #2011）。
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// 画面全体では説明したい箇所が小さくなりすぎる画像（カード一覧の状態表示、ステータスバーの
+        /// リーダー接続状態）に使う。ウィンドウ単位の <see cref="Capture(Window, string, bool)"/> と違い、
+        /// 要素の矩形は影・リサイズ枠を含まないので <c>DWMWA_EXTENDED_FRAME_BOUNDS</c> の補正は要らない。
+        /// </para>
+        /// <para>
+        /// 前面化は所有ウィンドウに対して行う。要素だけを前面化する手段は無く、背面のまま撮ると
+        /// 手前のウィンドウが写り込んだ「もっともらしく見えて誤った画像」ができる。
+        /// </para>
+        /// </remarks>
+        /// <param name="owner">要素を含むウィンドウ（前面化の対象）。</param>
+        /// <param name="element">撮影する要素。</param>
+        /// <param name="fileName">保存するファイル名。</param>
+        public static string CaptureElement(Window owner, AutomationElement element, string fileName) =>
+            CaptureElements(owner, fileName, element);
+
+        /// <summary>
+        /// 複数の要素をまとめて囲む矩形を PNG に保存する（Issue #2011）。
+        /// </summary>
+        /// <remarks>
+        /// 説明したい UI が複数の要素に分かれている場合に使う。ステータスバーのカードリーダー接続状態は
+        /// 文字列（TextBlock）と「再接続」ボタンの 2 要素で、これらを囲む <c>StatusBarItem</c> は
+        /// <c>AutomationProperties.Name</c> を付けても UIA ツリーに現れない（実測）ため、
+        /// 2 要素の合併矩形で撮る。
+        /// </remarks>
+        public static string CaptureElements(Window owner, string fileName, params AutomationElement[] elements)
+        {
+            if (owner == null) throw new ArgumentNullException(nameof(owner));
+            if (elements == null || elements.Length == 0) throw new ArgumentException("撮影する要素を指定してください。", nameof(elements));
+            if (string.IsNullOrWhiteSpace(fileName)) throw new ArgumentException("ファイル名を指定してください。", nameof(fileName));
+
+            BringToForeground(owner);  // 内側で SettleDelay ぶん待つ
+
+            var bounds = elements[0].BoundingRectangle;
+            for (var i = 1; i < elements.Length; i++)
+            {
+                bounds = Rectangle.Union(bounds, elements[i].BoundingRectangle);
+            }
+            if (bounds.Width <= 0 || bounds.Height <= 0)
+            {
+                throw new InvalidOperationException(
+                    $"撮影対象の要素に大きさがありません（{fileName}）。要素が画面外にあるか、まだ描画されていません。" +
+                    "メイン画面を左上へ寄せてから、要素の出現を待って撮影してください。");
+            }
+
+            var path = Path.Combine(OutputDirectory, fileName);
+            using (var image = FlaUI.Core.Capturing.Capture.Rectangle(bounds))
+            {
+                image.ToFile(path);
+            }
+
+            ReportSize(path, fileName);
+            return path;
+        }
+
+        /// <summary>
         /// メイン画面とトースト通知の両方を含む矩形を PNG に保存する（Issue #2019）。
         /// </summary>
         /// <remarks>

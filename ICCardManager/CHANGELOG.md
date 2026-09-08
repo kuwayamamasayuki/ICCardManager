@@ -3,6 +3,17 @@
 ### Unreleased
 
 **機能追加**
+- Issue #2011 **マニュアル用スクリーンショットの自動撮影 第 3 段階 — 撮り直しが必要な画面と、マニュアル本文にしか無かった画面を対象に加えた**。#2016 / #2019 で自動化できていたのは 15 枚で、Issue が挙げた「撮り直しが必要な 19 枚」の半分と、本文だけ追随して画像の無い 7 画面が対話式スクリプト（人が画面を開いて Enter を押す）に残っていた。撮影ケースを 14 枚ぶん足して対応表 `docs/screenshots/screenshot-sources.json` を 15 → 29 枚にし、新規 7 画面の画像をマニュアル本文へ挿入した。
+  - **Release パス（職員証認証の要らない画面）**: `main_with_warnings` `card_list_status_mixed` `error_no_reader` `history_merge` `operation_log` `restore_list` と、新規の `admin_dashboard`（#1692）`connection_diagnostics`（#1690）`report_preflight`（#1688）`transfer_station_groups`（#1905）
+  - **Debug パス（職員証認証・仮想タッチを要する画面）**: `ledger_row_edit` と、新規の `system_lend`（#1909）`companion_count`（#1906 / #2009）`virtual_touch`（#1577）。履歴行の追加・貸出記録の作成は監査対象の操作で職員証のタッチを要求するため（#635 / #1909）、実カードリーダーの無い撮影環境では DEBUG 限定の仮想タッチでしか通せない。「認証が要る画面は Release では撮れない」がパスの分かれ目である
+  - **`main.png` と `main_with_warnings.png` を別の投入データで撮る**。従来はどちらも同じサンプルデータ（残額不足カードを含む）で、撮ると 2 枚が同じ画像になり「警告がない場合、このエリアは表示されません」という本文と食い違う。`SeedWithoutWarnings` は残額不足カードへチャージを 1 件足してしきい値を上回らせる（残高チェーンは投入時に継ぐ）
+  - **画面の一部だけを撮る撮影を足した**（`ScreenshotHelper.CaptureElement` / `CaptureElements`）。カード一覧の状態表示（色・アイコン・テキストの 4 要素）とステータスバーの接続状態は、画面全体では小さすぎて読み取れない。`error_no_reader.png` は状態の文字列と「再接続」ボタンの合併矩形で撮る — 両者を囲む `StatusBarItem` は `AutomationProperties.Name` を持つが WPF が UIA ツリーへ公開しないため、要素としては取れない（実測）
+  - **投入データで作れない外部状態に依存する画像は対象外とした**。`error_no_reader.png` は撮影機に PaSoRi が繋がっていると「接続済み」の画像が同じ名前で保存され、見比べる人が気付かないままマニュアルへ載り得るので、切断でなければ**失敗ではなく Skip** する（リーダーの有無は撮影者の環境であって不具合ではない）。共有モードのネットワーク切断（`warning_network_disconnected.png`）と、OS 標準の `SaveFileDialog` を経る手動バックアップ（`backup_completed_status.png`）は対話式スクリプトに残し、その判断を対応表のコメントに書いた
+  - **二段目のダイアログを探す経路を 1 か所へ集約した**（`Infrastructure/DialogLocator`）。WPF のモーダルは開いた側の `ModalWindows` に現れるとは限らず、メイン画面の配下にだけ見えたり、トップレベルとしてしか観測できないことがある（#1522 で操作ログについて実測済み）。開いた側だけを見る実装は、その経路に現れなかった日に「ダイアログが開かない」という原因の分からないタイムアウトになる。`OperationLogQuickFilterDisplayTests` が持っていた 3 経路のフォールバックと同じ形を、撮影側でも使う
+  - **後片付けの `finally` が本当の失敗を覆い隠していた**。二段目のダイアログが開いたままだと親ダイアログは無効で、`Window.Close()` が `ElementNotEnabledException` を投げる。`try { 撮影 } finally { Close(); }` と書くと、撮影側の例外（本当の原因）がこの例外に置き換わり、ログには「閉じられなかった」しか残らない。実際 4 件がこの形で、原因の特定に 1 往復を要した。撮影テストは fixture の `Dispose` がプロセスを終了させるので、閉じる必要そのものが無い
+  - 対応表と実リポジトリの整合は既存の `Tools/ScreenshotSyncMappingTests` が引き続き固定する（画像名の集合と撮影テストが保存する画像名の一致・フィルタが指すテストの実在・ソースの実在）。`TestConstants` へ足した UIA 名は `Views/UiTestAutomationNameConventionTests` が XAML の実値と突き合わせる
+  - **本 PR では新規 7 画面の画像だけを公開し、撮り直しの 7 枚は差し替えていない**（マニュアル本文が参照する画像が無いと壊れるため新規は必須。既存画像の差し替えは見比べたうえで別 PR で行う）
+
 - Issue #2021 **画面の変更があった際にマニュアル用スクリーンショットを自動更新できるようにした**。#2016 で撮影は自動化されたが「どの変更のときに、どの画像を撮り直すか」は人の判断に残っていた。画像ごとに「その画面を構成するソース」（XAML・コードビハインド・ViewModel。全画像に効く `App.xaml`・共通スタイル・変換器・投入データ・撮影ヘルパーは `common`）を対応表 `docs/screenshots/screenshot-sources.json` で宣言し、`tools/screenshot-sync.ps1` が git の差分（比較元との merge-base からの差分＋作業ツリー＋未追跡）と突き合わせて撮り直しが必要な画像を導出する。
   - **判定の根拠はソースの変更であって、撮影後のピクセル比較ではない**。サンプルデータが「当月」を使うため、履歴画面などは毎月ピクセルが変わり、比較では常に「変更あり」になる
   - `take-screenshots-uitest.ps1 -Changed` は影響を受けた画像だけを撮る（`--filter` を「パスのフィルタ AND 画像ごとのフィルタの OR」で合成。Theory の行は `FullyQualifiedName` に引数が含まれないので `DisplayName~card.png` で絞る）。`-Changed -Publish` はその画像だけを差し替える。パスの定義（起動構成・フィルタ・環境変数）も対応表が唯一の出所になり、#2019 の Debug パスは JSON へ 1 項目足すだけで載る
