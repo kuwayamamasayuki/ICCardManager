@@ -26,6 +26,9 @@
 [CmdletBinding(PositionalBinding = $false)]
 param(
     [string]$Mapping,
+    # git を実行するリポジトリのルート。既定はこのスクリプトの 2 つ上（<repo>/ICCardManager/tools/）。
+    # テストが一時リポジトリで git 経路を検証するために差し替えられるようにしている
+    [string]$RepoRoot,
     [string]$Base,
     # powershell.exe -File 経由では `-Files a b c` の b c が残余引数へ落ちる（[string[]] へは a しか束縛されない）ため、
     # 残余引数（$RemainingFiles）を -Files の続きとして合流させる。`-` で始まる要素は未知の引数として使い方エラーにする
@@ -54,6 +57,7 @@ function Show-Usage {
 
 オプション:
   -Mapping <path>   対応表。既定: docs\screenshots\screenshot-sources.json
+  -RepoRoot <path>  git を実行するリポジトリのルート。既定: このスクリプトの 2 つ上
   -Base <ref>       比較元の git 参照。既定: origin/main（無ければ main）
   -Files <path>...  変更ファイルを引数で渡す（git を使わない）
   -FilesFromStdin   変更ファイルを標準入力から改行区切りで読む
@@ -85,7 +89,12 @@ if ($sourceModes.Count -gt 1) {
     Fail "-Base / -Files / -FilesFromStdin は同時に指定できません。"
 }
 
-$repoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..\..")).Path
+if ($RepoRoot) {
+    if (-not (Test-Path -LiteralPath $RepoRoot -PathType Container)) { Fail "リポジトリのルートが見つかりません: $RepoRoot" }
+    $repoRoot = (Resolve-Path -LiteralPath $RepoRoot).Path
+} else {
+    $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..\..")).Path
+}
 if (-not $Mapping) {
     $Mapping = Join-Path $repoRoot "ICCardManager\docs\screenshots\screenshot-sources.json"
 }

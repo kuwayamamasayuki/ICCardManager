@@ -109,6 +109,8 @@ $allShots = @($mapping.screenshots)
 if ($Changed) {
     $syncArgs = @("-NoProfile", "-ExecutionPolicy", "Bypass", "-File", $syncScript, "-Json")
     if ($Base) { $syncArgs += @("-Base", $Base) }
+    # 子スクリプトは UTF-8 で出力する（日本語のパスが理由に入っても文字化けさせない）
+    [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
     $syncOutput = & powershell.exe @syncArgs
     if ($LASTEXITCODE -ne 0) {
         Write-Host "[ERROR] 撮り直しの判定に失敗しました（screenshot-sync.ps1 ExitCode: $LASTEXITCODE）" -ForegroundColor Red

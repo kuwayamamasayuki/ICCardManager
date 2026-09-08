@@ -65,7 +65,7 @@ NON_DOC="$(printf '%s\n' "$CHANGED" \
 # 更新されていない場合はその画像名を添える。判定は docs/screenshots/screenshot-sources.json を読む
 # tools/screenshot-sync.ps1 に委ねる（対応表とロジックを hook 側に複製しない）。
 # 撮影は Windows デスクトップを要するため hook では行わず、-Changed の実行を促すに留める。
-# powershell.exe は WSL2 の interop で起動する（起動 0.3 秒程度）。無い環境では黙って飛ばす。
+# powershell.exe は WSL2 の interop で起動する（スクリプト込みで 1〜2 秒）。無い環境では黙って飛ばす。
 SCREENSHOT_LINE=""
 if command -v powershell.exe >/dev/null 2>&1 && [ -f ICCardManager/tools/screenshot-sync.ps1 ]; then
   NOT_UPDATED="$(printf '%s\n' "$CHANGED" \

@@ -173,9 +173,10 @@ namespace ICCardManager.Tests.Tools
         /// <summary>
         /// 撮影テストのソースから保存する画像名（<c>"xxx.png"</c> リテラル）を抽出する。
         /// 失敗時の切り分け用画像（<c>_FAILED.png</c>）は公開しないので除く。
+        /// 文字クラスに大文字を含めないと <c>_FAILED</c> がそもそも一致せず、除外句が到達不能になる（コードレビューで検出）。
         /// </summary>
         internal static IEnumerable<string> ExtractCapturedFileNames(string source) =>
-            Regex.Matches(source, "\"(?<name>[a-z0-9_]+\\.png)\"")
+            Regex.Matches(source, "\"(?<name>[A-Za-z0-9_]+\\.png)\"")
                 .Cast<Match>()
                 .Select(m => m.Groups["name"].Value)
                 .Where(n => !n.EndsWith("_FAILED.png", StringComparison.Ordinal))

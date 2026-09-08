@@ -240,6 +240,112 @@ namespace ICCardManager.Tests.Tools
             result.ExitCode.Should().Be(0, result.StdErr);
         }
 
+        // ── git 経路（-Base）─────────────────────────────────
+        // CI と take-screenshots-uitest.ps1 -Changed が実際に使う経路。一時リポジトリで
+        // 「コミット済み＋未ステージ＋未追跡」を 1 つの変更集合として集めることを確かめる
+
+        [Fact]
+        public void Base_コミット済みと未ステージと未追跡の変更をすべて集める()
+        {
+            var repo = CreateTempRepository();
+            // feature ブランチ: コミット済み（card）、未ステージ（main/lend を共有する MainWindow）、未追跡（Toast*）
+            WriteRepoFile(repo, "ICCardManager/src/ICCardManager/Views/Dialogs/CardManageDialog.xaml", "<Window>v2</Window>");
+            Git(repo, "add", "-A");
+            Git(repo, "commit", "-q", "-m", "change card dialog");
+            WriteRepoFile(repo, "ICCardManager/src/ICCardManager/Views/MainWindow.xaml", "<Window>v2</Window>");
+            WriteRepoFile(repo, "ICCardManager/src/ICCardManager/Views/ToastNotificationWindow.xaml", "<Window/>");
+
+            var result = RunScriptCore(_mappingPath, null, "-Json", "-RepoRoot", repo, "-Base", "main");
+
+            result.ExitCode.Should().Be(0, result.StdErr);
+            AffectedNames(result).Should().BeEquivalentTo(new[] { "card.png", "main.png", "lend.png" });
+            using var doc = JsonDocument.Parse(result.StdOut);
+            doc.RootElement.GetProperty("changedFiles").GetInt32().Should().Be(3);
+        }
+
+        [Fact]
+        public void Base_未指定ならorigin_mainが無いときmainを比較元にする()
+        {
+            var repo = CreateTempRepository();
+            WriteRepoFile(repo, "ICCardManager/src/ICCardManager/Views/Dialogs/CardManageDialog.xaml", "<Window>v2</Window>");
+
+            var result = RunScriptCore(_mappingPath, null, "-Json", "-RepoRoot", repo, "-Verify");
+
+            result.ExitCode.Should().Be(3, "画像は更新されていないので未更新扱いになること");
+            AffectedNames(result).Should().Equal("card.png");
+            NotUpdatedNames(result).Should().Equal("card.png");
+        }
+
+        [Fact]
+        public void Base_比較元に含まれる変更は数えない()
+        {
+            // main に既にある（比較元に含まれる）ファイルは、feature で触っていなければ影響なし
+            var repo = CreateTempRepository();
+
+            var result = RunScriptCore(_mappingPath, null, "-Json", "-RepoRoot", repo, "-Base", "main");
+
+            result.ExitCode.Should().Be(0, result.StdErr);
+            AffectedNames(result).Should().BeEmpty();
+        }
+
+        [Fact]
+        public void Base_存在しない参照_終了コード2()
+        {
+            var repo = CreateTempRepository();
+
+            var result = RunScriptCore(_mappingPath, null, "-RepoRoot", repo, "-Base", "no-such-branch");
+
+            result.ExitCode.Should().Be(2);
+            result.StdErr.Should().Contain("merge-base");
+        }
+
+        /// <summary>
+        /// main に対応表のソースを一式コミットし、feature ブランチへ切り替えた一時リポジトリを作る（origin は無い）。
+        /// </summary>
+        private string CreateTempRepository()
+        {
+            var repo = Path.Combine(_tempDir, "repo-" + Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(repo);
+            Git(repo, "init", "-q", "-b", "main");
+            WriteRepoFile(repo, "README.md", "readme");
+            WriteRepoFile(repo, "ICCardManager/src/ICCardManager/App.xaml", "<Application/>");
+            WriteRepoFile(repo, "ICCardManager/src/ICCardManager/Views/MainWindow.xaml", "<Window/>");
+            WriteRepoFile(repo, "ICCardManager/src/ICCardManager/Views/Dialogs/CardManageDialog.xaml", "<Window/>");
+            WriteRepoFile(repo, "ICCardManager/docs/screenshots/card.png", "png");
+            Git(repo, "add", "-A");
+            Git(repo, "commit", "-q", "-m", "baseline");
+            Git(repo, "checkout", "-q", "-b", "feature");
+            return repo;
+        }
+
+        private static void WriteRepoFile(string repo, string relativePath, string content)
+        {
+            var full = Path.Combine(repo, relativePath.Replace('/', Path.DirectorySeparatorChar));
+            Directory.CreateDirectory(Path.GetDirectoryName(full)!);
+            File.WriteAllText(full, content, new UTF8Encoding(false));
+        }
+
+        private static void Git(string repo, params string[] args)
+        {
+            var psi = new ProcessStartInfo
+            {
+                FileName = "git",
+                // 利用者の設定に依存しない（署名・改行変換・作者名）
+                Arguments = "-c user.name=test -c user.email=test@example.com -c commit.gpgsign=false -c core.autocrlf=false "
+                            + string.Join(" ", args.Select(a => a.Contains(' ') ? "\"" + a + "\"" : a)),
+                WorkingDirectory = repo,
+                UseShellExecute = false,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                CreateNoWindow = true,
+            };
+            using var p = Process.Start(psi)!;
+            var stderr = p.StandardError.ReadToEnd();
+            p.StandardOutput.ReadToEnd();
+            p.WaitForExit();
+            p.ExitCode.Should().Be(0, $"git {string.Join(" ", args)} が成功すること: {stderr}");
+        }
+
         // ── 対応表の妥当性 ─────────────────────────────────
 
         [Fact]

@@ -5,7 +5,9 @@
     "パスはリポジトリのルート（ICCardManager.sln の 1 つ上）からの相対パスで、区切りは '/'。",
     "glob は '*'（1 階層）と '**'（複数階層）だけを使う。",
     "載せるのは画面の構成（レイアウト・文言・スタイル・表示変換）を持つファイル。",
+    "表示変換には、画面に出す文字列を組み立てる DTO（Dtos/**、例: LedgerDto.DisplayStaffName）と Common の *Formatter（「外N名」・経路表示）を含める。",
     "表示するデータを作る Service / Repository は載せない（データはサンプル投入で固定しているため）。",
+    "制約: 判定は「変更集合に画像が含まれるか」だけを見て順序を見ない。画像を更新した後にソースを再修正した場合は検知できないので、最後の修正のあとに -Changed を実行すること。",
     "common に載せたファイルはすべての画像に影響する。",
     "filter は dotnet test の --filter に渡す式。Theory の行は FullyQualifiedName に引数が含まれないので DisplayName で絞る。",
     "整合性（ファイルの実在・画像の実在・テストの実在・撮影側との一致）は Tools/ScreenshotSyncMappingTests が固定する。"
@@ -34,7 +36,10 @@
       "sources": [
         "ICCardManager/src/ICCardManager/Views/MainWindow.xaml",
         "ICCardManager/src/ICCardManager/Views/MainWindow.xaml.cs",
-        "ICCardManager/src/ICCardManager/ViewModels/MainViewModel.cs"
+        "ICCardManager/src/ICCardManager/ViewModels/MainViewModel.cs",
+        "ICCardManager/src/ICCardManager/Dtos/**",
+        "ICCardManager/src/ICCardManager/Common/DisplayFormatters.cs",
+        "ICCardManager/src/ICCardManager/Common/StaffNameFormatter.cs"
       ]
     },
     {
@@ -44,7 +49,11 @@
       "sources": [
         "ICCardManager/src/ICCardManager/Views/MainWindow.xaml",
         "ICCardManager/src/ICCardManager/Views/MainWindow.xaml.cs",
-        "ICCardManager/src/ICCardManager/ViewModels/MainViewModel.cs"
+        "ICCardManager/src/ICCardManager/ViewModels/MainViewModel.cs",
+        "ICCardManager/src/ICCardManager/Dtos/**",
+        "ICCardManager/src/ICCardManager/Common/DisplayFormatters.cs",
+        "ICCardManager/src/ICCardManager/Common/StaffNameFormatter.cs",
+        "ICCardManager/src/ICCardManager/Common/RouteDisplayFormatter.cs"
       ]
     },
     {
