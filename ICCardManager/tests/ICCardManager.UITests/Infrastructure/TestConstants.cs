@@ -244,6 +244,10 @@ namespace ICCardManager.UITests.Infrastructure
         [UiaName]
         public const string ConnectionDiagnosticsItemList = "診断項目一覧";
 
+        /// <summary>操作ログの一覧。読み込みが終わったことの目印に使う。</summary>
+        [UiaName]
+        public const string OperationLogList = "操作ログ一覧";
+
         /// <summary>システム管理ダイアログから同一とみなす駅・バス停の設定（#1905）を開くボタン。</summary>
         [UiaName]
         public const string OpenTransferStationGroupButton = "同一とみなす駅・バス停を設定";
@@ -309,6 +313,19 @@ namespace ICCardManager.UITests.Infrastructure
         /// </summary>
         [NotUiaName]
         public const string SystemWarningHeaderText = "⚠ システム警告";
+
+        /// <summary>
+        /// 残額不足の警告だけを見分ける文字列（<c>WarningService</c> の LowBalance の
+        /// <c>DisplayText</c> にだけ現れる）。警告行は <c>DisplayText</c> をそのまま表示する
+        /// TextBlock なので、UIA Name が Text へフォールバックして一致する。
+        /// </summary>
+        /// <remarks>
+        /// 警告エリアには投入データで作れない環境由来の警告（更新の案内・journal_mode の低下）も並ぶため、
+        /// 「警告エリアが無いこと」は投入データの正しさの表明にならない。投入データが支配する
+        /// 残額不足だけを見る（実測でこの形を踏んだ）。
+        /// </remarks>
+        [NotUiaName]
+        public const string LowBalanceWarningMarker = "（しきい値:";
 
         // ── タイムアウト（秒） ────────────────────────────
         public const int AppLaunchTimeoutSeconds = 30;

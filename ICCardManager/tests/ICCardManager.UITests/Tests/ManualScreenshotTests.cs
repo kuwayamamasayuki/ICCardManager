@@ -61,6 +61,10 @@ namespace ICCardManager.UITests.Tests
             // カード一覧の読み込み完了（行の出現）を待ってから撮る
             page.CardListElement.Should().NotBeNull();
             WaitForCardRow(page, ScreenshotSeedData.NormalCardDisplayName);
+            // 残額不足の警告が出ていないことを表明する（main_with_warnings_ の「出ている」と対）。
+            // これが無いと、投入データが警告を消しきれていなくても 2 枚が同じ画像のまま緑になる
+            // （実際、貸出中カードの残額を引き上げ忘れた初版はこの形だった。コードレビューで検出）
+            RequireNoLowBalanceWarning(page);
 
             var path = ScreenshotHelper.Capture(fixture.MainWindow, "main.png");
             File.Exists(path).Should().BeTrue();
@@ -135,6 +139,11 @@ namespace ICCardManager.UITests.Tests
             reconnect.Should().NotBeNull(
                 $"切断時は \"{TestConstants.CardReaderReconnectButton}\" ボタンが現れること");
 
+            // カードリーダーの接続は非同期に確立する。判定から撮影までの間に「接続中」へ変わると、
+            // 画像の中身が名前（未接続）と食い違う。撮影の直前に読み直して食い違いを塞ぐ（コードレビューで検出）
+            statusText.Name.Should().Be(DisconnectedStatusText,
+                "撮影の直前まで未接続のままであること（途中で接続されたら、この名前の画像は撮らない）");
+
             File.Exists(ScreenshotHelper.CaptureElements(
                 fixture.MainWindow, "error_no_reader.png", statusText, reconnect!)).Should().BeTrue();
         }
@@ -178,9 +187,10 @@ namespace ICCardManager.UITests.Tests
 
             var dialog = page.ClickToolbarButtonAndWaitForDialog(
                 TestConstants.OpenAdminDashboardButton, TestConstants.AdminDashboardDialogName);
-            // 集計は非同期。一覧が現れる前に撮ると空のタイルだけが写る
-            dialog.FindByNameWithRetry(TestConstants.AdminDashboardCardOperationList)
-                .Should().NotBeNull("運用状況の集計が終わって一覧が現れること");
+            // 集計は非同期。DataGrid 自体は既定タブに常時あるので「見つかった」だけでは待ちにならない
+            // （処理中オーバーレイが出たままの画像になる。コードレビューで検出）。行の出現まで待つ
+            WaitForRow(dialog, TestConstants.AdminDashboardCardOperationList,
+                "運用状況の集計が終わってカードの行が現れること");
 
             File.Exists(ScreenshotHelper.Capture(dialog.Window, "admin_dashboard.png")).Should().BeTrue();
         }
@@ -210,10 +220,18 @@ namespace ICCardManager.UITests.Tests
             File.Exists(ScreenshotHelper.Capture(preflight, "report_preflight.png")).Should().BeTrue();
         }
 
+        /// <param name="fileName">保存するファイル名。</param>
+        /// <param name="buttonName">システム管理ダイアログで押すボタン。</param>
+        /// <param name="dialogName">開くダイアログ。</param>
+        /// <param name="readyListName">
+        /// 表示が完了したことの目印になる一覧の AutomationProperties.Name。ダイアログを開いた直後は
+        /// 一覧が空で、接続診断は <c>Window_Loaded</c> の非同期処理（DB・リーダー・空き容量の調査）が
+        /// 終わって初めて項目が並ぶ。ダイアログの出現だけを待つと途中の状態が写る（コードレビューで検出）。
+        /// </param>
         [SkippableTheory]
-        [InlineData("operation_log.png", TestConstants.OpenOperationLogButton, TestConstants.OperationLogDialogName)]
-        [InlineData("connection_diagnostics.png", TestConstants.OpenConnectionDiagnosticsButton, TestConstants.ConnectionDiagnosticsDialogName)]
-        public void system_システム管理から開く二段目のダイアログ(string fileName, string buttonName, string dialogName)
+        [InlineData("operation_log.png", TestConstants.OpenOperationLogButton, TestConstants.OperationLogDialogName, TestConstants.OperationLogList)]
+        [InlineData("connection_diagnostics.png", TestConstants.OpenConnectionDiagnosticsButton, TestConstants.ConnectionDiagnosticsDialogName, TestConstants.ConnectionDiagnosticsItemList)]
+        public void system_システム管理から開く二段目のダイアログ(string fileName, string buttonName, string dialogName, string readyListName)
         {
             Skip.If(ScreenshotHelper.ShouldSkip, SkipReason);
 
@@ -226,6 +244,7 @@ namespace ICCardManager.UITests.Tests
             system.ClickButton(buttonName);
 
             var child = DialogLocator.WaitForNestedDialog(fixture, system.Window, dialogName);
+            WaitForRow(new DialogPageBase(child), readyListName, $"{dialogName} の一覧に行が現れること");
             File.Exists(ScreenshotHelper.Capture(child, fileName)).Should().BeTrue();
         }
 
@@ -268,15 +287,9 @@ namespace ICCardManager.UITests.Tests
             var system = page.ClickToolbarButtonAndWaitForDialog(
                 TestConstants.OpenSystemManageButton, TestConstants.SystemManageDialogName);
             {
-                var list = system.FindByNameWithRetry(TestConstants.BackupFileList)?.AsListBox();
-                list.Should().NotBeNull($"システム管理ダイアログに \"{TestConstants.BackupFileList}\" があること");
-
-                var item = Retry.WhileNull(
-                    () => list!.Items.FirstOrDefault(),
-                    TimeSpan.FromSeconds(TestConstants.DialogOpenTimeoutSeconds)).Result;
-                item.Should().NotBeNull(
+                var item = WaitForRow(system, TestConstants.BackupFileList,
                     "バックアップ一覧に 1 件以上あること（起動時の自動バックアップが作られていること）");
-                item!.Select();
+                item.Patterns.SelectionItem.PatternOrDefault?.Select();
 
                 File.Exists(ScreenshotHelper.Capture(system.Window, "restore_list.png")).Should().BeTrue();
             }
@@ -354,6 +367,57 @@ namespace ICCardManager.UITests.Tests
                 "（残額不足のカードを含む投入データで起動していること）");
         }
 
+
+        /// <summary>
+        /// 残額不足の警告が出ていないことを確かめる。
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// <see cref="WaitForWarningArea"/> の対。「出ていること」だけを表明すると、投入データが警告を
+        /// 消しきれていない場合に <c>main.png</c> と <c>main_with_warnings.png</c> が同じ画像になっても緑になる。
+        /// 呼ぶのはカード一覧の行が現れた後（＝ダッシュボードの読み込みと残額チェックが済んだ後）にすること。
+        /// </para>
+        /// <para>
+        /// <b>「警告エリアが無いこと」では表明できない</b>（実測で判明）。警告エリアには
+        /// 更新の案内（<c>NewVersionAvailable</c>）や journal_mode の低下（<c>DatabaseJournalModeDegraded</c>）など
+        /// <b>投入データでは作れない環境由来の警告</b>も並ぶため、それを含めて禁止すると、そうした環境では
+        /// <c>main.png</c> が原理的に撮れなくなる。投入データが支配する残額不足だけを見る。
+        /// 環境由来の警告が写り込んでいないかは差し替え前の目視で確かめる（<c>docs/screenshots/README.md</c>）。
+        /// </para>
+        /// </remarks>
+        private static void RequireNoLowBalanceWarning(MainWindowPage page)
+        {
+            var warnings = page.Window.FindAllDescendants()
+                .Select(e => e.Name)
+                .Where(n => !string.IsNullOrWhiteSpace(n) && n.Contains(TestConstants.LowBalanceWarningMarker))
+                .ToArray();
+
+            warnings.Should().BeEmpty(
+                "残額不足の警告が出ていないこと（しきい値以下の残額のカードが投入データに残っていないこと）。" +
+                $"出ている警告: {string.Join(" / ", warnings)}");
+        }
+
+        /// <summary>
+        /// 一覧に行が現れるまで待つ。
+        /// </summary>
+        /// <remarks>
+        /// 一覧そのもの（DataGrid / ListView）は中身が空でも UIA ツリーに居るため、
+        /// 「一覧が見つかった」ことを非同期の読み込み完了の代わりにできない。行の出現まで待つ。
+        /// 行の ControlType は一覧の種類で変わる（DataGrid は <c>DataItem</c>、ListBox は <c>ListItem</c>）ので、
+        /// 種類ではなく <b>選択できること</b>（SelectionItem パターンを持つこと）で行を見分ける。
+        /// </remarks>
+        private static AutomationElement WaitForRow(DialogPageBase page, string listName, string because)
+        {
+            var list = page.FindByNameWithRetry(listName);
+            list.Should().NotBeNull($"\"{listName}\" が存在すること");
+
+            var row = Retry.WhileNull(
+                () => list!.FindAllDescendants()
+                    .FirstOrDefault(e => e.Patterns.SelectionItem.IsSupported),
+                TimeSpan.FromSeconds(TestConstants.OperationLogDialogOpenTimeoutSeconds)).Result;
+            row.Should().NotBeNull(because);
+            return row!;
+        }
 
         private static void WaitForCardRow(MainWindowPage page, string cardDisplayName)
         {

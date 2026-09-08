@@ -109,18 +109,38 @@ namespace ICCardManager.UITests.Infrastructure
         /// しきい値（既定 10,000 円）を上回らせ、メイン画面の「⚠ システム警告」エリアを消す。
         /// </summary>
         /// <remarks>
+        /// <para>
         /// <c>main.png</c>（警告なし）と <c>main_with_warnings.png</c>（警告あり）は別々の画面として
         /// マニュアルに載る。同じ投入データで撮ると 2 枚が同じ画像になり、
         /// 「警告がない場合、このエリアは表示されません」という本文と食い違う。
+        /// </para>
+        /// <para>
+        /// <b>残額不足カードだけを直しても警告は消えない</b>（コードレビューで検出）。残額警告の母集団は
+        /// <c>DashboardService</c> が <c>IcCard.IsInOperation</c>（未削除 かつ 未払戻）で作り、
+        /// <b>貸出中カードを除外しない</b>（#1947。貸出中でも残額を確かめる対象であるため）。
+        /// <see cref="Seed"/> の貸出中カードは新規購入 5,000 円のままで、しきい値（既定 10,000 円）以下なので
+        /// <c>BalanceWarningPolicy.IsLowBalance</c> が真になる。しきい値を下回るカードを<b>すべて</b>引き上げること。
+        /// </para>
         /// </remarks>
         public static void SeedWithoutWarnings(SQLiteConnection conn)
         {
             Seed(conn);
 
             using var tx = conn.BeginTransaction();
-            // 残高チェーン（前行の残額 ＋ 受入 − 払出 ＝ 当行の残額）を保つため、Seed の最終残額から積む
+
+            // 残額不足カード: 残高チェーン（前行の残額 ＋ 受入 − 払出 ＝ 当行の残額）を保つため、Seed の最終残額から積む
             _ = InsertLedger(conn, LowBalanceCardIdm, DayOfMonth(DateTime.Today, 4), "役務費によりチャージ",
                 income: 20000, expense: 0, previousBalance: LowBalanceCardSeededBalance, PrimaryStaffName);
+
+            // 貸出中カード: 行を足すと貸出中レコードより後ろに利用が現れて不自然なので、
+            // 新規購入の金額そのものを引き上げる。貸出中レコードは受入・払出が 0 なので残額も同額に揃える
+            Execute(conn,
+                "UPDATE ledger SET income = @amount, balance = @amount WHERE card_idm = @card AND is_lent_record = 0",
+                ("@amount", HealthyBalance), ("@card", LentCardIdm));
+            Execute(conn,
+                "UPDATE ledger SET balance = @amount WHERE card_idm = @card AND is_lent_record = 1",
+                ("@amount", HealthyBalance), ("@card", LentCardIdm));
+
             tx.Commit();
         }
 
@@ -129,6 +149,11 @@ namespace ICCardManager.UITests.Infrastructure
         /// 残高チェーンを継ぐ起点に使う（新規購入 2,000 円 − 往復 520 円）。
         /// </summary>
         private const int LowBalanceCardSeededBalance = 2000 - 520;
+
+        /// <summary>
+        /// 残額警告のしきい値（既定 10,000 円）を十分に上回る残額。<see cref="SeedWithoutWarnings"/> で使う。
+        /// </summary>
+        private const int HealthyBalance = 21480;
 
         /// <summary>
         /// 帳票の事前チェック（#1688）で必ず警告が出るサンプルデータ（Issue #2011）。
