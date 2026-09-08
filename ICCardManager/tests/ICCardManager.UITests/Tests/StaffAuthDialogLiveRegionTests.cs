@@ -164,12 +164,26 @@ namespace ICCardManager.UITests.Tests
             var firstRow = dataGrid!.FindFirstDescendant(
                 cf => cf.ByControlType(ControlType.DataItem));
             firstRow.Should().NotBeNull("テスト職員が一覧に表示されているべき");
-            firstRow!.Click();
+            SelectRow(firstRow!);
 
             // 3. 削除ボタンクリック → StaffAuthDialog 表示
-            var deleteButton = FindButton(staffManageDialog, TestConstants.StaffManageDeleteButtonName);
+            //
+            // Issue #2018: ボタンの有効化は選択の反映（DataGrid.SelectedItem → SelectedStaff の
+            // TwoWay バインディング → NotNullToBoolConverter）を待つ必要があるため、
+            // 「見つかった」ではなく「有効になった」まで待つ。ここで待たずに Invoke すると
+            // ElementNotEnabledException になり、原因（行が選択できていない）が読み取れない。
+            var deleteButton = Retry.WhileNull(
+                () =>
+                {
+                    var button = FindButton(staffManageDialog, TestConstants.StaffManageDeleteButtonName);
+                    return button != null && button.IsEnabled ? button : null;
+                },
+                TimeSpan.FromSeconds(5)).Result;
+
             deleteButton.Should().NotBeNull(
-                $"職員削除ボタン（AutomationProperties.Name=\"{TestConstants.StaffManageDeleteButtonName}\"）が存在すべき");
+                $"職員削除ボタン（AutomationProperties.Name=\"{TestConstants.StaffManageDeleteButtonName}\"）が" +
+                "有効な状態で存在すべき。無効のままなら一覧の行が選択できていない" +
+                "（IsEnabled は SelectedStaff の null 判定にバインドされている）。");
             deleteButton!.AsButton().Invoke();
 
             // 4. StaffAuthDialog の出現を待つ
@@ -180,6 +194,37 @@ namespace ICCardManager.UITests.Tests
             authDialog.Should().NotBeNull(
                 $"StaffAuthDialog（{TestConstants.StaffAuthDialogName}）が表示されるべき");
             return authDialog!;
+        }
+
+        /// <summary>
+        /// 一覧の行を選択する。座標を使わず UIA の <c>SelectionItem</c> パターンで行う。
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// Issue #2018: 物理クリック（<c>AutomationElement.Click()</c>）は要素の中心座標へ
+        /// マウスを送るため、testhost が DPI 非対応だと 150% 表示の環境で論理座標と物理座標が
+        /// 食い違い、<b>例外も出さずに別の場所を押す</b>（行は選択されないまま先へ進み、
+        /// 次の「削除ボタンを押す」で ElementNotEnabledException になる）。
+        /// </para>
+        /// <para>
+        /// この経路は UIA ツリーの構造を検証するテストであり、マウス入力そのものは検証対象ではない。
+        /// <c>SelectionItemPattern.Select()</c> は座標を介さないので、DPI・ウィンドウ位置・
+        /// 前面かどうかに依存しない。DataGrid は <c>SelectionUnit</c> 既定（FullRow）・
+        /// <c>SelectionMode="Single"</c> なので、行（DataItem）がこのパターンを持つ。
+        /// パターンが無い実装へ変わった場合に備えてクリックへフォールバックする。
+        /// </para>
+        /// </remarks>
+        private static void SelectRow(AutomationElement row)
+        {
+            var selectionItem = row.Patterns.SelectionItem.PatternOrDefault;
+            if (selectionItem != null)
+            {
+                selectionItem.Select();
+                return;
+            }
+
+            row.Focus();
+            row.Click();
         }
 
         /// <summary>
