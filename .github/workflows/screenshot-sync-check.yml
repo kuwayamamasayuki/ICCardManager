@@ -1,0 +1,77 @@
+name: Screenshot Sync Check
+
+# Issue #2021: 画面を構成するソース（XAML / ViewModel / 共通スタイル）が変わったのに、
+# マニュアルが参照するスクリーンショットが更新されていない PR を検出する。
+#
+# 撮影そのものは Windows デスクトップ・DB の退避・仮想タッチを要するため CI では行わない
+# （tools/take-screenshots-uitest.ps1 -Changed を開発機で実行する）。
+# 判定は tools/screenshot-sync.ps1（docs/screenshots/screenshot-sources.json を読む）に委ね、
+# ロジックを workflow 側へ複製しない。
+#
+# 「画面に影響し得る変更」には見た目が変わらないもの（AutomationProperties の追加・ViewModel の内部処理）も
+# 含まれるため、ジョブは失敗させず warning アノテーションとサマリーで案内する。
+
+on:
+  pull_request:
+    branches: [ main ]
+    paths:
+      - 'ICCardManager/src/**'
+      - 'ICCardManager/tests/ICCardManager.UITests/**'
+      - 'ICCardManager/docs/screenshots/**'
+      - 'ICCardManager/tools/screenshot-sync.ps1'
+      - '.github/workflows/screenshot-sync-check.yml'
+
+jobs:
+  screenshot-sync:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          # merge-base の算出に base ブランチの履歴が要る
+          fetch-depth: 0
+
+      - name: Detect screens whose sources changed but screenshots did not
+        shell: pwsh
+        run: |
+          # PR では HEAD が「base へマージした仮のコミット」なので、origin/main との merge-base からの差分が PR の変更集合になる
+          $out = & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass `
+            -File ICCardManager/tools/screenshot-sync.ps1 -Base origin/main -Verify -Json
+          $code = $LASTEXITCODE
+          if ($code -ne 0 -and $code -ne 3) {
+            Write-Host "::error::screenshot-sync.ps1 が失敗しました（ExitCode: $code）"
+            Write-Host ($out -join "`n")
+            exit $code
+          }
+          $result = ($out -join "`n") | ConvertFrom-Json
+          $affected = @($result.affected)
+          $notUpdated = @($result.notUpdated)
+
+          if ($affected.Count -eq 0) {
+            Write-Host "画面に影響する変更はありません（変更ファイル $($result.changedFiles) 件）。"
+            "### スクリーンショット同期`n`n画面に影響する変更はありません。" | Out-File -Append -Encoding utf8 $env:GITHUB_STEP_SUMMARY
+            exit 0
+          }
+
+          $lines = @("### スクリーンショット同期", "")
+          if ($notUpdated.Count -eq 0) {
+            Write-Host "影響を受けた画像はすべて更新されています: $($affected.name -join ', ')"
+            $lines += "影響を受けた画像 $($affected.Count) 枚はすべてこの PR で更新されています。"
+          } else {
+            $lines += "画面を構成するソースが変更されましたが、次の画像が更新されていません。"
+            $lines += "開発機の Windows PowerShell で ``ICCardManager\tools\take-screenshots-uitest.ps1 -Changed`` で撮影し、見比べてから ``-Changed -Publish`` で差し替えてください。見た目が変わらない変更であれば、その旨を PR に書いてください。"
+            $lines += ""
+            $lines += "| 画像 | 影響したソース |"
+            $lines += "|---|---|"
+            foreach ($a in $affected) {
+              if ($notUpdated -contains $a.name) {
+                # アノテーションは 1 行。理由（ファイル名）に改行が入っても壊れないようエスケープする
+                $reasonText = (($a.reasons -join ', ') -replace "`r", '%0D') -replace "`n", '%0A'
+                Write-Host "::warning::$($a.name) の画面ソースが変更されましたが画像は未更新です（$reasonText）"
+                $lines += "| $($a.name) | $($a.reasons -join '<br>') |"
+              }
+            }
+          }
+          ($lines -join "`n") | Out-File -Append -Encoding utf8 $env:GITHUB_STEP_SUMMARY
+          exit 0
