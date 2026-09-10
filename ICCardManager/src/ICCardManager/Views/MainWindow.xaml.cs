@@ -50,6 +50,20 @@ namespace ICCardManager.Views
         }
 
         /// <summary>
+        /// Issue #1907: 履歴表示エリアへのキー・クリック・ホイール操作を、返却確認の履歴に対する
+        /// 「職員が使い始めた」印として ViewModel へ伝える（以後は次の職員証タッチでも閉じない）。
+        /// </summary>
+        /// <remarks>
+        /// 自動で閉じる機能の主要な故障は「読んでいる・直している途中で閉じること」。
+        /// 複数行を読むためのスクロールはクリックを伴わないため、ホイールも拾う（#2009 と同じ判断）。
+        /// 返却確認以外で開いた履歴では no-op。
+        /// </remarks>
+        private void HistoryArea_PreviewInput(object sender, InputEventArgs e)
+        {
+            _viewModel.MarkReturnHistoryReviewTouched();
+        }
+
+        /// <summary>
         /// 表示期間テキストクリック → 月選択ポップアップを開く (Issue #945)
         /// </summary>
         /// <remarks>

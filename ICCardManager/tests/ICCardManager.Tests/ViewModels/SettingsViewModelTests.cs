@@ -695,6 +695,33 @@ public class SettingsViewModelTests
     #region 同行者数入力の自動クローズ秒数（Issue #2009）
 
     [Fact]
+    public async Task LoadSettingsAsync_返却時の利用履歴表示設定を読み込むこと()
+    {
+        _settingsRepositoryMock
+            .Setup(r => r.GetAppSettingsAsync())
+            .ReturnsAsync(new AppSettings { ShowHistoryOnReturn = false });
+
+        await _viewModel.LoadSettingsAsync();
+
+        _viewModel.ShowHistoryOnReturn.Should().BeFalse("Issue #1907: 無効にした組織の設定を画面へ反映する");
+    }
+
+    [Fact]
+    public async Task SaveAsync_返却時の利用履歴表示設定を保存すること()
+    {
+        _settingsRepositoryMock
+            .Setup(r => r.SaveAppSettingsAsync(It.IsAny<AppSettings>()))
+            .ReturnsAsync(false); // WPF依存のApplyFontSizeを回避するためfalseを返す
+        _viewModel.ShowHistoryOnReturn = false;
+
+        await _viewModel.SaveAsync();
+
+        _settingsRepositoryMock.Verify(
+            r => r.SaveAppSettingsAsync(It.Is<AppSettings>(s => !s.ShowHistoryOnReturn)),
+            Times.Once);
+    }
+
+    [Fact]
     public async Task LoadSettingsAsync_同行者数入力の自動クローズ秒数を読み込むこと()
     {
         _settingsRepositoryMock

@@ -33,6 +33,15 @@
 - **30秒ルールの武装（`LastProcessedCardIdm` / `LastProcessedTime` / `LastOperationType`）は台帳への記録が確定した直後に行う**（Issue #1805）。`ReturnAsync` はコミット後に残額の解決・残額警告の DB I/O を持つため、その後ろに置くと後処理の失敗で「返却は記録済みなのに未武装・`Success=false`」になり、「返却失敗・もう一度タッチ」の案内どおりに再タッチした職員の操作が貸出として新規に記録される。`Success` は「記録が確定した」ことだけを表し、付帯情報（残額・残額警告）の欠落は `LendingResult.HasPostCommitFailure` で別途伝える（詳細は `db-write-conventions.md` の「コミット確定後の後処理を、成否の判定に巻き込まない」）
 - **操作者の帰属はテストで表明する**。`CurrentState` や「例外が出ない」ではなく、**台帳に記録された IDm・氏名**（`ledger.LenderIdm` / `StaffName`）と `UpdateLentStatusAsync` の第4引数を具体値で検証する（`MainViewModelIntegrationTests` の `Retouch30Sec_*` 3件が参考実装）
 
+### 返却確認 — 返却直後の履歴自動表示（Issue #1907）
+
+返却後処理（バス停名入力 → 同行者数入力）の**後**に、返却したカードの履歴をメイン画面へ自動表示し、今回記録した行を強調して確認を促す（`MainViewModel.ShowReturnHistoryReviewAsync`。設定 `AppSettings.ShowHistoryOnReturn`、既定 有効）。
+
+- **閉じる契機は次の職員証タッチ**（`CloseReturnHistoryReviewIfUntouched`）。秒数で閉じる方式（#2009）は「複数行を読んでいる途中で閉じる」故障を避けられないため採らない。**職員が履歴エリアを操作したら閉じない**（`MarkReturnHistoryReviewTouched`。手動で開いた履歴と同じ扱い）
+- **#186（カードタッチでメイン画面を変更しない）の意図的な例外**。閉じる・置き換えるのは本システム自身が自動で開いたパネルに限り、職員が使っている履歴（手動で開いた／返却確認を操作した）は**表示中のカードが同じでも**奪わずトーストで促す（同じカードの行を統合のためにチェックしている最中に別の職員がそのカードを返却し得る。#1923）
+- **返却後の設定読み取りは 1 回**（バス停入力・同行者数入力・返却確認で共有）。コミット後の I/O を増やさない（#1805）
+- 詳細は 04_機能設計書 §4.6・03_画面設計書 §3.7「返却確認」
+
 ## バス利用判別ロジック
 ```
 IF entry_station（乗車駅）が空欄 AND

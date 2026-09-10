@@ -97,6 +97,21 @@ namespace ICCardManager.Dtos
         public bool IsLentRecord { get; set; }
 
         /// <summary>
+        /// 直前の返却で記録された行かどうか（Issue #1907: 返却確認のハイライト用）
+        /// </summary>
+        /// <remarks>
+        /// 返却直後にメイン画面へ自動表示した履歴で、今回の返却で台帳に入った行を職員が
+        /// 見分けられるようにする。一覧を作り直すたびに <c>MainViewModel</c> が付け直す。
+        /// 色だけに頼らないよう <see cref="RecentlyRecordedMark"/> の文字も併せて表示する（4 要素原則）。
+        /// </remarks>
+        public bool IsRecentlyRecorded { get; set; }
+
+        /// <summary>
+        /// 「今回」列に表示する印（<see cref="IsRecentlyRecorded"/> のとき「✔」、それ以外は空）
+        /// </summary>
+        public string RecentlyRecordedMark => IsRecentlyRecorded ? "✔" : string.Empty;
+
+        /// <summary>
         /// 繰越行フラグ（前年度繰越・前月繰越など、合成的に表示する行）
         /// </summary>
         public bool IsCarryoverRow { get; set; }

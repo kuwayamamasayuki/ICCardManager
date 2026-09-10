@@ -110,6 +110,16 @@ public class MainViewModelTests : IDisposable
         _ledgerRepositoryMock.Setup(r => r.GetDetailsByLedgerIdsAsync(It.IsAny<IEnumerable<int>>()))
             .ReturnsAsync(new Dictionary<int, List<LedgerDetail>>());
 
+        // Issue #1907: 返却後処理（HandleReturnSuccessAsync）は返却確認として履歴を自動表示するため、
+        // 履歴一覧の読み込みが通る既定値を置く（未設定だと GetPagedAsync は既定のタプル (null, 0)、
+        // GetMergeHistoriesAsync は null を返し、返却後処理そのものが NullReferenceException で落ちる）。
+        // 個々のテストが別の戻り値を必要とする場合はテスト側の Setup が後勝ちで上書きする
+        _ledgerRepositoryMock.Setup(r => r.GetPagedAsync(
+                It.IsAny<string>(), It.IsAny<DateTime>(), It.IsAny<DateTime>(), It.IsAny<int>(), It.IsAny<int>()))
+            .ReturnsAsync((new List<Ledger>(), 0));
+        _ledgerRepositoryMock.Setup(r => r.GetMergeHistoriesAsync(It.IsAny<bool>()))
+            .ReturnsAsync(new List<(int, DateTime, int, string, string, bool)>());
+
         _ledgerConsistencyChecker = new LedgerConsistencyChecker(_ledgerRepositoryMock.Object);
 
         _ledgerMergeService = new LedgerMergeService(

@@ -378,6 +378,43 @@ public partial class MainViewModel : ViewModelBase
     private bool _isHistoryVisible;
 
     /// <summary>
+    /// Issue #1907: 表示中の履歴が「返却直後に自動表示した返却確認」かどうか（案内バナーの表示条件）
+    /// </summary>
+    /// <remarks>
+    /// 返却確認の履歴は職員の操作で開いたものではないため、次の職員証タッチで自動的に閉じる
+    /// （<see cref="CloseReturnHistoryReviewIfUntouched"/>）。ただし職員が履歴パネルを操作した
+    /// （<see cref="MarkReturnHistoryReviewTouched"/>）あとは手動で開いたのと同じ扱いにし、閉じない。
+    /// 待機中のカードタッチ・警告クリックで開いた履歴（<see cref="ShowHistoryAsync"/>）では false に戻る。
+    /// </remarks>
+    [ObservableProperty]
+    private bool _isReturnHistoryReview;
+
+    /// <summary>
+    /// Issue #1907: 返却確認の履歴パネルを職員が操作したか（キー・クリック・ホイール）。
+    /// true なら次の職員証タッチでも閉じず、別カードの返却確認にも置き換えない。
+    /// </summary>
+    private bool _returnHistoryReviewTouched;
+
+    /// <summary>
+    /// Issue #1907: 直前の返却で台帳に記録された行の ID。一覧を作り直すたびに
+    /// <see cref="LedgerDto.IsRecentlyRecorded"/> を付け直すため、履歴を閉じるまで保持する。
+    /// </summary>
+    private readonly HashSet<int> _recentlyRecordedLedgerIds = new();
+
+    /// <summary>
+    /// Issue #1907: 返却確認バナーの見出し
+    /// </summary>
+    public string ReturnHistoryReviewMessage => "返却した利用履歴を確認してください";
+
+    /// <summary>
+    /// Issue #1907: 返却確認バナーの補足（今回の行の見分け方・直し方・閉じる契機）
+    /// </summary>
+    public string ReturnHistoryReviewNote =>
+        "「今回」列に ✔ の付いた行が今回の返却で記録された利用です。" +
+        "バス停名や駅名の入力漏れ・誤りがあれば、行の「変更」から修正できます。" +
+        "この表示は次の職員証タッチで自動的に閉じます（履歴を操作した場合は閉じません）。";
+
+    /// <summary>
     /// 残高不整合のあるLedgerIdとその期待残高・実際残高のマップ（Issue #1052）
     /// </summary>
     /// <remarks>
@@ -1189,6 +1226,12 @@ public partial class MainViewModel : ViewModelBase
             // メイン画面は変更せず、ポップアップ通知のみ表示（Issue #186）
             // 「職員証をタッチしてください」のメッセージはクリアする
             SetInternalState(AppState.WaitingForIcCard, clearStatusMessage: true);
+
+            // Issue #1907: 前の職員の返却確認（自動表示した履歴）は、次の職員証タッチ＝次の操作の開始で閉じる。
+            // 職員が操作していた履歴は閉じない。#186（メイン画面を変更しない）の例外だが、
+            // 閉じるのは本システム自身が自動で開いたパネルに限る。
+            CloseReturnHistoryReviewIfUntouched();
+
             _toastNotificationService.ShowStaffRecognizedNotification(staff.Name);
             StartTimeout();
             return;
@@ -1664,20 +1707,18 @@ public partial class MainViewModel : ViewModelBase
 
         await CheckWarningsAsync();
 
-        // バス停名入力（バス利用時）と同行者数入力（利用行がある場合）はどちらも AppSettings の
-        // スキップ設定を見るため、返却後の設定読み取りは 1 回にまとめる（コミット後の I/O を増やさない。#1805）
+        // バス停名入力（バス利用時）・同行者数入力（利用行がある場合）・返却確認の履歴表示（Issue #1907）は
+        // いずれも AppSettings を見るため、返却後の設定読み取りは 1 回にまとめる（コミット後の I/O を増やさない。#1805）
         var needsBusStopInput = result.HasBusUsage && result.CreatedLedgers.Count > 0;
         var companionCountTargets = CompanionCountInputViewModel.SelectTargetLedgers(result.CreatedLedgers);
-        var returnDialogSettings = needsBusStopInput || companionCountTargets.Count > 0
-            ? await _settingsRepository.GetAppSettingsAsync()
-            : null;
+        var returnDialogSettings = await _settingsRepository.GetAppSettingsAsync();
 
         // バス利用がある場合はバス停入力画面を表示
         if (needsBusStopInput)
         {
             var settings = returnDialogSettings;
 
-            if (!settings.SkipBusStopInputOnReturn)
+            if (settings != null && !settings.SkipBusStopInputOnReturn)
             {
                 // Issue #593: バス利用を含むLedgerをすべて取得（Summaryで判定）
                 // LastOrDefaultでは最後のLedgerのみ取得されるため、バス利用が別日にある場合に空ダイアログになる
@@ -1713,6 +1754,10 @@ public partial class MainViewModel : ViewModelBase
         // バス停名入力の後に出す（利用行が確定してから氏名欄の表記を決める）。
         // 対象は利用行（払出 > 0）のみで、チャージ・ポイント還元だけの返却では出さない。
         await ShowCompanionCountInputIfNeededAsync(companionCountTargets, returnDialogSettings);
+
+        // Issue #1907: バス停名・同行者数の入力がすべて終わったあとで、返却したカードの履歴を
+        // メイン画面に自動表示して確認を促す（入力漏れ・誤りを返却した職員自身がその場で見つける）。
+        await ShowReturnHistoryReviewAsync(card, result, returnDialogSettings);
 
         // Issue #596: 今月の履歴が不完全な可能性がある場合に通知
         if (result.MayHaveIncompleteHistory)
@@ -1751,6 +1796,112 @@ public partial class MainViewModel : ViewModelBase
             // 定期リフレッシュ（RefreshSharedDataAsync）と同じ理由で統合対象のチェックを引き継ぐ。
             await LoadHistoryLedgersAsync(preserveCheckedRows: true);
         }
+    }
+
+    /// <summary>
+    /// Issue #1907: 返却したカードの利用履歴をメイン画面に自動表示し、記録の確認を促す（返却確認）。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// 表示期間は当月 1 日からだが、今回記録した行が前月以前（3/31 乗車・4/1 返却）にあれば
+    /// その最古の利用日から表示し、記録した行がすべて画面に収まるようにする。
+    /// 今回記録した行は <see cref="LedgerDto.IsRecentlyRecorded"/> で強調する。
+    /// </para>
+    /// <para>
+    /// #186（カードタッチでメイン画面を変更しない＝職員の操作を妨げない）との両立:
+    /// 履歴パネルが職員の操作で開いている（手動で開いた／返却確認を操作した）なら、表示中のカードが
+    /// 同じでも乗っ取らず、トーストで確認を促すだけにする（同じカードの行を統合のためにチェックしている
+    /// 最中に別の職員がそのカードを返却し得る。#1923）。
+    /// 返却確認が操作されないまま残っているだけなら置き換える。
+    /// </para>
+    /// <para>
+    /// <see cref="LendingResult.HasPostCommitFailure"/>（記録済みだが残額を確認できなかった）でも表示する。
+    /// 目的は記録の確認であり、記録は確定しているため。
+    /// </para>
+    /// </remarks>
+    /// <param name="card">返却したカード</param>
+    /// <param name="result">返却結果（<see cref="LendingResult.CreatedLedgers"/> を強調対象にする）</param>
+    /// <param name="settings">返却後に 1 回だけ読んだ設定。<c>null</c>（読めなかった）なら表示しない</param>
+    internal async Task ShowReturnHistoryReviewAsync(IcCard card, LendingResult result, AppSettings? settings)
+    {
+        if (settings == null || !settings.ShowHistoryOnReturn)
+        {
+            return;
+        }
+
+        if (IsHistoryVisible && !IsReturnHistoryReviewReplaceable)
+        {
+            // 職員が履歴を使っている（手動で開いた／返却確認を操作した）。#186 のとおり画面を奪わず、確認だけ促す。
+            // 同じカードの履歴でも奪わない — 統合のために行をチェックしている最中に別の職員がそのカードを
+            // 返却し得る（#1923）。同じカードなら一覧は上で preserveCheckedRows 付きで再読込済みで、
+            // 今回の行はもう画面に出ている
+            _toastNotificationService.ShowInfo(
+                "履歴の確認",
+                "返却した交通系ICカードの利用履歴を確認してください。");
+            return;
+        }
+
+        // 貸出中レコード（返却で物理削除済み）と未採番の行は対象外
+        var recordedLedgers = (result.CreatedLedgers ?? new List<Ledger>())
+            .Where(l => l != null && !l.IsLentRecord && l.Id > 0)
+            .ToList();
+
+        var today = DateTime.Today;
+        var firstOfMonth = new DateTime(today.Year, today.Month, 1);
+        var earliestRecordedDate = recordedLedgers.Count > 0
+            ? recordedLedgers.Min(l => l.Date).Date
+            : (DateTime?)null;
+        // 当月内なら既定（当月 1 日から）。前月以前の利用があるときだけ遡る
+        var fromDate = earliestRecordedDate.HasValue && earliestRecordedDate.Value < firstOfMonth
+            ? earliestRecordedDate
+            : null;
+
+        _balanceInconsistencies.Clear();
+        await ShowHistoryAsync(card, fromDate, recordedLedgers.Select(l => l.Id));
+
+        IsReturnHistoryReview = true;
+        _returnHistoryReviewTouched = false;
+    }
+
+    /// <summary>
+    /// Issue #1907: 返却確認の履歴が「職員に使われていない」状態か（次の職員証タッチで閉じてよい／
+    /// 別カードの返却確認で置き換えてよい）
+    /// </summary>
+    private bool IsReturnHistoryReviewReplaceable => IsReturnHistoryReview && !_returnHistoryReviewTouched;
+
+    /// <summary>
+    /// Issue #1907: 返却確認の履歴パネルを職員が操作したことを記録する（View のキー・クリック・ホイール操作から呼ぶ）。
+    /// 以後は次の職員証タッチでも閉じず、別カードの返却確認にも置き換えない（手動で開いた履歴と同じ扱い）。
+    /// 返却確認以外で開いた履歴では何もしない。
+    /// </summary>
+    public void MarkReturnHistoryReviewTouched()
+    {
+        if (IsReturnHistoryReview)
+        {
+            _returnHistoryReviewTouched = true;
+        }
+    }
+
+    /// <summary>
+    /// Issue #1907: 職員が操作していない返却確認の履歴を閉じる（次の職員証タッチで呼ぶ）。
+    /// 1 台のカードリーダーを順番に使う運用では「次の職員がタッチした＝前の職員は確認を終えた」とみなせる。
+    /// </summary>
+    private void CloseReturnHistoryReviewIfUntouched()
+    {
+        if (IsReturnHistoryReviewReplaceable)
+        {
+            CloseHistory();
+        }
+    }
+
+    /// <summary>
+    /// Issue #1907: 返却確認の状態を解除する（履歴を閉じる／別の履歴を開くときに呼ぶ）
+    /// </summary>
+    private void EndReturnHistoryReview()
+    {
+        IsReturnHistoryReview = false;
+        _returnHistoryReviewTouched = false;
+        _recentlyRecordedLedgerIds.Clear();
     }
 
     /// <summary>
@@ -1989,8 +2140,19 @@ public partial class MainViewModel : ViewModelBase
     /// Issue #2007: 表示期間の開始日。省略時は当月 1 日。導入時残高の誤りを案内するときは
     /// 導入行（何年も前になり得る）を画面に出すため、その日付から表示する。
     /// </param>
-    private async Task ShowHistoryAsync(IcCard card, DateTime? fromDate = null)
+    /// <param name="recentlyRecordedLedgerIds">
+    /// Issue #1907: 直前の返却で記録された行の ID（返却確認の強調対象）。返却確認以外の経路では省略する。
+    /// 省略した経路で開いた履歴は返却確認ではない（<see cref="IsReturnHistoryReview"/> は false に戻る）。
+    /// </param>
+    private async Task ShowHistoryAsync(IcCard card, DateTime? fromDate = null, IEnumerable<int>? recentlyRecordedLedgerIds = null)
     {
+        // Issue #1907: どの経路で開いても、前の返却確認の状態（バナー・強調・操作済みの印）は引き継がない
+        EndReturnHistoryReview();
+        if (recentlyRecordedLedgerIds != null)
+        {
+            _recentlyRecordedLedgerIds.UnionWith(recentlyRecordedLedgerIds);
+        }
+
         HistoryCard = card.ToDto();
         HistoryCurrentPage = 1;
 
@@ -2019,6 +2181,7 @@ public partial class MainViewModel : ViewModelBase
         HistoryCard = null;
         HistoryLedgers.Clear();
         _balanceInconsistencies.Clear();
+        EndReturnHistoryReview();
     }
 
     /// <summary>
@@ -2152,6 +2315,9 @@ public partial class MainViewModel : ViewModelBase
             foreach (var ledger in ledgers)
             {
                 var dto = ledger.ToDto();
+
+                // Issue #1907: 直前の返却で記録された行を強調する（一覧を作り直すたびに付け直す）
+                dto.IsRecentlyRecorded = _recentlyRecordedLedgerIds.Contains(dto.Id);
 
                 // Issue #1923: 退避したチェックを同じ台帳 ID の行へ戻す。
                 // 他 PC が削除・統合した行は再取得結果に現れないため、そのチェックは自然に消える

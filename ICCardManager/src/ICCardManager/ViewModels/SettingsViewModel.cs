@@ -148,6 +148,12 @@ public partial class SettingsViewModel : ViewModelBase
     private int _companionCountInputTimeoutSeconds;
 
     /// <summary>
+    /// 返却時に利用履歴を自動表示して確認を促すかどうか（Issue #1907）
+    /// </summary>
+    [ObservableProperty]
+    private bool _showHistoryOnReturn;
+
+    /// <summary>
     /// データベースの保存先フォルダパス（UI表示用。ファイル名は内部で自動付与）
     /// </summary>
     [ObservableProperty]
@@ -238,6 +244,7 @@ public partial class SettingsViewModel : ViewModelBase
             SkipBusStopInputOnReturn = settings.SkipBusStopInputOnReturn;
             SkipCompanionCountInputOnReturn = settings.SkipCompanionCountInputOnReturn;
             CompanionCountInputTimeoutSeconds = settings.CompanionCountInputTimeoutSeconds;
+            ShowHistoryOnReturn = settings.ShowHistoryOnReturn;
 
             // DBフォルダパス設定（appsettings.jsonから読み込み済み）
             DatabasePath = _originalDatabasePath;
@@ -305,7 +312,8 @@ public partial class SettingsViewModel : ViewModelBase
                 DepartmentType = SelectedDepartmentTypeItem?.Value ?? DepartmentType.MayorOffice,
                 SkipBusStopInputOnReturn = SkipBusStopInputOnReturn,
                 SkipCompanionCountInputOnReturn = SkipCompanionCountInputOnReturn,
-                CompanionCountInputTimeoutSeconds = CompanionCountInputTimeoutSeconds
+                CompanionCountInputTimeoutSeconds = CompanionCountInputTimeoutSeconds,
+                ShowHistoryOnReturn = ShowHistoryOnReturn
             };
 
             var success = await _settingsRepository.SaveAppSettingsAsync(settings);
@@ -811,6 +819,11 @@ public partial class SettingsViewModel : ViewModelBase
     }
 
     partial void OnCompanionCountInputTimeoutSecondsChanged(int value)
+    {
+        HasChanges = true;
+    }
+
+    partial void OnShowHistoryOnReturnChanged(bool value)
     {
         HasChanges = true;
     }

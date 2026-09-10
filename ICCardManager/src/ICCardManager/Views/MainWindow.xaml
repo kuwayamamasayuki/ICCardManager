@@ -353,9 +353,16 @@
                 <Border Padding="15"
                         Background="White"
                         Visibility="{Binding IsHistoryVisible, Converter={StaticResource BoolToVisibilityConverter}}"
-                        AutomationProperties.Name="利用履歴表示エリア">
+                        AutomationProperties.Name="利用履歴表示エリア"
+                        PreviewKeyDown="HistoryArea_PreviewInput"
+                        PreviewMouseDown="HistoryArea_PreviewInput"
+                        PreviewMouseWheel="HistoryArea_PreviewInput">
+                    <!-- Issue #1907: 返却確認で自動表示した履歴は、職員がこのエリアを操作（キー・クリック・ホイール）
+                         した時点で手動表示へ格上げし、次の職員証タッチでも閉じない。複数行を読むためのスクロールは
+                         クリックを伴わないため、PreviewMouseDown だけでは拾えない（#2009 と同じ判断） -->
                     <Grid>
                         <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto"/>
                             <RowDefinition Height="Auto"/>
                             <RowDefinition Height="Auto"/>
                             <RowDefinition Height="*"/>
@@ -408,8 +415,38 @@
                             </Grid>
                         </Border>
 
+                        <!-- Issue #1907: 返却確認の案内（返却直後に自動表示したときだけ出る） -->
+                        <Border Grid.Row="1"
+                                Background="{DynamicResource ReturnBackgroundBrush}"
+                                BorderBrush="{DynamicResource InfoTextBrush}"
+                                BorderThickness="1"
+                                CornerRadius="4"
+                                Padding="12,8"
+                                Margin="0,0,0,10"
+                                Visibility="{Binding IsReturnHistoryReview, Converter={StaticResource BoolToVisibilityConverter}}"
+                                AutomationProperties.Name="{Binding ReturnHistoryReviewMessage}">
+                            <DockPanel>
+                                <TextBlock DockPanel.Dock="Left"
+                                           Text="🔍"
+                                           FontSize="{DynamicResource LargeFontSize}"
+                                           VerticalAlignment="Top"
+                                           Margin="0,0,10,0"/>
+                                <StackPanel>
+                                    <TextBlock Text="{Binding ReturnHistoryReviewMessage}"
+                                               FontSize="{DynamicResource BaseFontSize}"
+                                               FontWeight="Bold"
+                                               TextWrapping="Wrap"/>
+                                    <TextBlock Text="{Binding ReturnHistoryReviewNote}"
+                                               FontSize="{DynamicResource SmallFontSize}"
+                                               Foreground="{DynamicResource SecondaryTextBrush}"
+                                               TextWrapping="Wrap"
+                                               Margin="0,4,0,0"/>
+                                </StackPanel>
+                            </DockPanel>
+                        </Border>
+
                         <!-- 期間選択 -->
-                        <Grid Grid.Row="1" Margin="0,0,0,10">
+                        <Grid Grid.Row="2" Margin="0,0,0,10">
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="Auto"/>
                                 <ColumnDefinition Width="*"/>
@@ -529,7 +566,7 @@
                         </Grid>
 
                         <!-- 履歴一覧 -->
-                        <DataGrid Grid.Row="2"
+                        <DataGrid Grid.Row="3"
                                   x:Name="HistoryDataGrid"
                                   ItemsSource="{Binding HistoryLedgers}"
                                   AutoGenerateColumns="False"
@@ -562,6 +599,15 @@
                                         </DataTemplate>
                                     </DataGridTemplateColumn.CellTemplate>
                                 </DataGridTemplateColumn>
+                                <!-- Issue #1907: 直前の返却で記録された行の印。色（行背景）だけに頼らず文字でも示す -->
+                                <DataGridTextColumn Header="今回" Binding="{Binding RecentlyRecordedMark}" Width="45">
+                                    <DataGridTextColumn.ElementStyle>
+                                        <Style TargetType="TextBlock">
+                                            <Setter Property="HorizontalAlignment" Value="Center"/>
+                                            <Setter Property="ToolTip" Value="今回の返却で記録された行"/>
+                                        </Style>
+                                    </DataGridTextColumn.ElementStyle>
+                                </DataGridTextColumn>
                                 <DataGridTextColumn Header="日付" Binding="{Binding DateDisplay}" Width="90"/>
                                 <DataGridTextColumn Header="摘要" Binding="{Binding Summary}" Width="SizeToCells" MinWidth="200"/>
                                 <DataGridTextColumn Header="受入" Width="75">
@@ -637,6 +683,11 @@
                                             <Setter Property="Background" Value="{DynamicResource LendingBackgroundBrush}"/>
                                             <Setter Property="FontStyle" Value="Italic"/>
                                         </DataTrigger>
+                                        <!-- Issue #1907: 直前の返却で記録された行（返却の色＝寒色）。チェック・不整合の強調が優先 -->
+                                        <DataTrigger Binding="{Binding IsRecentlyRecorded}" Value="True">
+                                            <Setter Property="Background" Value="{DynamicResource ReturnBackgroundBrush}"/>
+                                            <Setter Property="ToolTip" Value="今回の返却で記録された行"/>
+                                        </DataTrigger>
                                         <DataTrigger Binding="{Binding IsChecked}" Value="True">
                                             <Setter Property="Background" Value="{DynamicResource CheckedRowBackgroundBrush}"/>
                                         </DataTrigger>
@@ -651,7 +702,7 @@
                         </DataGrid>
 
                         <!-- フッター（ページネーション） -->
-                        <Border Grid.Row="3"
+                        <Border Grid.Row="4"
                                 Background="{DynamicResource NeutralBackgroundBrush}"
                                 CornerRadius="4"
                                 Padding="10,8"
