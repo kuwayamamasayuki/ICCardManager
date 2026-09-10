@@ -1711,6 +1711,9 @@ public partial class MainViewModel : ViewModelBase
         // いずれも AppSettings を見るため、返却後の設定読み取りは 1 回にまとめる（コミット後の I/O を増やさない。#1805）
         var needsBusStopInput = result.HasBusUsage && result.CreatedLedgers.Count > 0;
         var companionCountTargets = CompanionCountInputViewModel.SelectTargetLedgers(result.CreatedLedgers);
+        // 本番の SettingsRepository は null を返さない。null ガードはテストの loose モック（未設定なら null）が
+        // 返却後処理そのものを NullReferenceException で落とさないためのもので、null なら各ダイアログ・
+        // 返却確認は「表示しない」側へ倒れる（Issue #1907 のコードレビューで指摘）
         var returnDialogSettings = await _settingsRepository.GetAppSettingsAsync();
 
         // バス利用がある場合はバス停入力画面を表示
@@ -1835,8 +1838,9 @@ public partial class MainViewModel : ViewModelBase
             // 同じカードの履歴でも奪わない — 統合のために行をチェックしている最中に別の職員がそのカードを
             // 返却し得る（#1923）。同じカードなら一覧は上で preserveCheckedRows 付きで再読込済みで、
             // 今回の行はもう画面に出ている
+            // タイトルは #596 の警告トースト「履歴の確認」（同じ返却で同時に出得る）と区別する
             _toastNotificationService.ShowInfo(
-                "履歴の確認",
+                "返却した履歴の確認",
                 "返却した交通系ICカードの利用履歴を確認してください。");
             return;
         }
@@ -1845,6 +1849,12 @@ public partial class MainViewModel : ViewModelBase
         var recordedLedgers = (result.CreatedLedgers ?? new List<Ledger>())
             .Where(l => l != null && !l.IsLentRecord && l.Id > 0)
             .ToList();
+
+        if (recordedLedgers.Count == 0)
+        {
+            // 借りたが使わずに返した（記録ゼロ）。確認すべき記録が無いのに画面を変えない（#186 の例外を広げない）
+            return;
+        }
 
         var today = DateTime.Today;
         var firstOfMonth = new DateTime(today.Year, today.Month, 1);
@@ -1858,6 +1868,16 @@ public partial class MainViewModel : ViewModelBase
 
         _balanceInconsistencies.Clear();
         await ShowHistoryAsync(card, fromDate, recordedLedgers.Select(l => l.Id));
+
+        // 一覧は日付昇順（GetPagedAsync の ORDER BY）なので、今回の行＝期間内で最新の行は末尾に来る。
+        // 期間内の行がページサイズを超えるカード（共用カードでは日常的）では 1 ページ目に今回の行が
+        // 1 つも無く、「✔ の行を確認してください」という案内が空振りする。最終ページへ移動して取り直す
+        // （コードレビューで検出）。View 側は IsReturnHistoryReview の立ち上がりで最初の ✔ 行へスクロールする
+        if (HistoryTotalPages > 1)
+        {
+            HistoryCurrentPage = HistoryTotalPages;
+            await LoadHistoryLedgersAsync();
+        }
 
         IsReturnHistoryReview = true;
         _returnHistoryReviewTouched = false;

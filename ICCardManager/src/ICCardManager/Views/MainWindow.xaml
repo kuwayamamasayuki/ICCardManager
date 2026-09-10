@@ -604,7 +604,12 @@
                                     <DataGridTextColumn.ElementStyle>
                                         <Style TargetType="TextBlock">
                                             <Setter Property="HorizontalAlignment" Value="Center"/>
-                                            <Setter Property="ToolTip" Value="今回の返却で記録された行"/>
+                                            <Style.Triggers>
+                                                <!-- ツールチップは ✔ の付いた行だけ（空セルに出ると記録されていない行まで「今回」に見える） -->
+                                                <DataTrigger Binding="{Binding IsRecentlyRecorded}" Value="True">
+                                                    <Setter Property="ToolTip" Value="今回の返却で記録された行"/>
+                                                </DataTrigger>
+                                            </Style.Triggers>
                                         </Style>
                                     </DataGridTextColumn.ElementStyle>
                                 </DataGridTextColumn>

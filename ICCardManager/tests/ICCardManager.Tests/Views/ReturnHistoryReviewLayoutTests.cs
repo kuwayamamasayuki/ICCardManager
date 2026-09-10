@@ -1,4 +1,5 @@
 using System.IO;
+using System.Linq;
 using System.Text.RegularExpressions;
 using FluentAssertions;
 using Xunit;
@@ -95,13 +96,46 @@ public class ReturnHistoryReviewLayoutTests
 
         // 4 要素原則（色・アイコン・テキスト・音）: 行背景に加えて「今回」列の ✔ を置く
         xaml.Should().Contain("Header=\"今回\" Binding=\"{Binding RecentlyRecordedMark}\"");
-        var trigger = Regex.Match(
+        // IsRecentlyRecorded の DataTrigger は「今回」列のツールチップ用と行スタイル用の 2 つある。
+        // 行背景を設定しているほう（行スタイル）が存在することを表明する
+        var triggers = Regex.Matches(
             xaml,
             "<DataTrigger Binding=\"\\{Binding IsRecentlyRecorded\\}\" Value=\"True\">(?<body>.*?)</DataTrigger>",
             RegexOptions.Singleline);
-        trigger.Success.Should().BeTrue("IsRecentlyRecorded の行スタイルが存在すること");
-        trigger.Groups["body"].Value.Should().Contain("ReturnBackgroundBrush",
-            "返却の色（寒色）で示す。色値リテラルではなくブラシキーを参照する（#1392）");
+        triggers.Count.Should().BeGreaterThan(0, "IsRecentlyRecorded の DataTrigger が存在すること");
+        triggers.Cast<Match>().Should().Contain(m => m.Groups["body"].Value.Contains("ReturnBackgroundBrush"),
+            "行スタイルで返却の色（寒色）を設定する。色値リテラルではなくブラシキーを参照する（#1392）");
+    }
+
+    [Fact]
+    public void 今回列のツールチップは印の付いた行だけに出ること()
+    {
+        var xaml = ReadXaml("Views", "MainWindow.xaml");
+
+        var column = Regex.Match(
+            xaml,
+            "<DataGridTextColumn Header=\"今回\".*?</DataGridTextColumn>",
+            RegexOptions.Singleline);
+        column.Success.Should().BeTrue();
+        // 空セルにも出ると、記録されていない行まで「今回の返却で記録された行」に見える（コードレビュー指摘）
+        var tooltipInTrigger = Regex.Match(
+            column.Value,
+            "<DataTrigger Binding=\"\\{Binding IsRecentlyRecorded\\}\" Value=\"True\">.*?ToolTip.*?</DataTrigger>",
+            RegexOptions.Singleline);
+        tooltipInTrigger.Success.Should().BeTrue("ツールチップは IsRecentlyRecorded の DataTrigger 内で設定する");
+        Regex.Matches(column.Value, "ToolTip").Count.Should().Be(1, "無条件の Setter を残さない");
+    }
+
+    [Fact]
+    public void 返却確認が開いたら今回の行までスクロールすること()
+    {
+        var path = Path.Combine(TestPaths.GetProductionSourceRoot(), "Views", "MainWindow.xaml.cs");
+        var code = TestSourceInspection.RemoveCommentsPreservingLines(File.ReadAllText(path));
+
+        // 一覧は日付昇順で今回の行は末尾。ページは ViewModel が合わせるが、1 ページ内の表示位置は View の責務
+        code.Should().Contain("nameof(MainViewModel.IsReturnHistoryReview)");
+        code.Should().Contain("HistoryDataGrid.ScrollIntoView(");
+        code.Should().Contain("IsRecentlyRecorded");
     }
 
     [Fact]

@@ -1506,9 +1506,10 @@ public class MainViewModelIntegrationTests
     /// </summary>
     /// <param name="usageDetails">カードから読み取る利用履歴。省略時は当日の鉄道利用 1 件</param>
     /// <param name="lentAt">貸出時刻。省略時は 2 時間前</param>
+    /// <param name="unrelatedRowCount">今回の返却とは無関係な既存行の数（id=999 から降順に採番）。省略時は 1</param>
     /// <returns>返却で INSERT された台帳（採番後）</returns>
     private List<Ledger> ArrangeReturnWithHistoryReview(
-        IReadOnlyList<LedgerDetail> usageDetails = null, DateTime? lentAt = null)
+        IReadOnlyList<LedgerDetail> usageDetails = null, DateTime? lentAt = null, int unrelatedRowCount = 1)
     {
         var lentAtValue = lentAt ?? DateTime.Now.AddHours(-2);
         var lentRecord = new Ledger
@@ -1555,18 +1556,25 @@ public class MainViewModelIntegrationTests
                 inserted.Add(l);
                 return Task.FromResult(l.Id);
             });
-        var unrelated = new Ledger
-        {
-            Id = 999, CardIdm = CardIdmA, Date = DateTime.Today.AddDays(-3),
-            Summary = "鉄道（天神～博多）", Expense = 260, Balance = 3000, StaffName = StaffName,
-        };
+        // 既存行は今回の行より古い（一覧は日付昇順＝古い行が先、今回の行は末尾。本番の ORDER BY と同じ形）
+        var unrelatedRows = Enumerable.Range(0, unrelatedRowCount)
+            .Select(i => new Ledger
+            {
+                Id = 999 - i, CardIdm = CardIdmA, Date = DateTime.Today.AddDays(-3 - i),
+                Summary = "鉄道（天神～博多）", Expense = 260, Balance = 3000, StaffName = StaffName,
+            })
+            .OrderBy(l => l.Date)
+            .ToList();
+        // 本番の GetPagedAsync と同じく OFFSET/LIMIT でページを切る（全行を返すモックでは、
+        // 今回の行が 2 ページ目に落ちる故障を再現できない）
         _ledgerRepositoryMock.Setup(r => r.GetPagedAsync(
                 CardIdmA, It.IsAny<DateTime>(), It.IsAny<DateTime>(), It.IsAny<int>(), It.IsAny<int>()))
-            .Returns(() =>
+            .Returns((string _, DateTime _, DateTime _, int page, int pageSize) =>
             {
-                var rows = new List<Ledger> { unrelated };
+                var rows = new List<Ledger>(unrelatedRows);
                 rows.AddRange(inserted);
-                return Task.FromResult<(IEnumerable<Ledger>, int)>((rows, rows.Count));
+                var pageRows = rows.Skip((page - 1) * pageSize).Take(pageSize).ToList();
+                return Task.FromResult<(IEnumerable<Ledger>, int)>((pageRows, rows.Count));
             });
         return inserted;
     }
@@ -1636,6 +1644,57 @@ public class MainViewModelIntegrationTests
         _viewModel.IsReturnHistoryReview.Should().BeTrue();
         _viewModel.HistoryFromDate.Should().Be(usageDate, "当月 1 日からでは記録した行が画面に出ない");
         _viewModel.HistoryToDate.Should().Be(DateTime.Today);
+    }
+
+    /// <summary>
+    /// 期間内の行がページサイズを超えるカードでは、今回の行（一覧は日付昇順なので末尾）が
+    /// 1 ページ目に無い。返却確認は今回の行があるページ（最終ページ）を表示すること（コードレビューで検出）。
+    /// </summary>
+    [Fact]
+    public async Task ReturnReview_期間内の行がページサイズを超えるときは今回の行があるページを表示すること()
+    {
+        var inserted = ArrangeReturnWithHistoryReview(unrelatedRowCount: 55);
+
+        await RunReturnFlowAsync();
+
+        _viewModel.IsReturnHistoryReview.Should().BeTrue();
+        _viewModel.HistoryTotalPages.Should().Be(2, "前提: 55 行＋今回の行が 50 行のページ 2 つに分かれる");
+        _viewModel.HistoryCurrentPage.Should().Be(2, "今回の行がある最終ページを表示する");
+        _viewModel.HistoryLedgers.Where(d => d.IsRecentlyRecorded).Select(d => d.Id)
+            .Should().BeEquivalentTo(inserted.Select(l => l.Id), "表示中のページに今回の行がすべて載っている");
+    }
+
+    /// <summary>
+    /// 対の表明: 1 ページに収まるなら 1 ページ目のまま（最終ページへの移動は必要なときだけ）。
+    /// No.1 が `HistoryCurrentPage` を見ていないため、ここで固定する。
+    /// </summary>
+    [Fact]
+    public async Task ReturnReview_1ページに収まるときは1ページ目のまま表示すること()
+    {
+        ArrangeReturnWithHistoryReview(unrelatedRowCount: 10);
+
+        await RunReturnFlowAsync();
+
+        _viewModel.HistoryTotalPages.Should().Be(1);
+        _viewModel.HistoryCurrentPage.Should().Be(1);
+        _viewModel.HistoryLedgers.Should().Contain(d => d.IsRecentlyRecorded);
+    }
+
+    /// <summary>
+    /// 借りたが使わずに返した（記録ゼロ）ときは、確認すべき記録が無いので履歴を開かない
+    /// （#186 の「メイン画面を変更しない」の例外を広げない。コードレビューで検出）。
+    /// </summary>
+    [Fact]
+    public async Task ReturnReview_記録した行が無い返却では履歴を表示しないこと()
+    {
+        ArrangeReturnWithHistoryReview(usageDetails: new List<LedgerDetail>());
+
+        await RunReturnFlowAsync();
+
+        _toastMock.Verify(t => t.ShowReturnNotification(
+            "はやかけん", "5042", It.IsAny<int>(), It.IsAny<bool>(), It.IsAny<int>()), Times.Once, "前提: 返却は成立");
+        _viewModel.IsHistoryVisible.Should().BeFalse();
+        _viewModel.IsReturnHistoryReview.Should().BeFalse();
     }
 
     /// <summary>
