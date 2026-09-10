@@ -31,6 +31,29 @@ namespace ICCardManager.Views
 
             Loaded += MainWindow_Loaded;
             Closing += MainWindow_Closing;
+            _viewModel.PropertyChanged += ViewModel_PropertyChanged;
+        }
+
+        /// <summary>
+        /// Issue #1907: 返却確認の履歴が開いたら、今回の返却で記録された最初の行までスクロールする。
+        /// </summary>
+        /// <remarks>
+        /// 一覧は日付昇順なので今回の行は末尾に来る。ページは ViewModel が最終ページへ合わせるが、
+        /// 1 ページに収まる場合でも DataGrid は先頭を表示するため、スクロールしないと ✔ の行が画面外に残る。
+        /// ViewModel は「今回の行」を知っているが表示位置は知らない（View の責務）。
+        /// </remarks>
+        private void ViewModel_PropertyChanged(object sender, System.ComponentModel.PropertyChangedEventArgs e)
+        {
+            if (e.PropertyName != nameof(MainViewModel.IsReturnHistoryReview) || !_viewModel.IsReturnHistoryReview)
+            {
+                return;
+            }
+
+            var firstRecorded = _viewModel.HistoryLedgers.FirstOrDefault(d => d.IsRecentlyRecorded);
+            if (firstRecorded != null)
+            {
+                HistoryDataGrid.ScrollIntoView(firstRecorded);
+            }
         }
 
         private async void MainWindow_Loaded(object sender, RoutedEventArgs e)
@@ -47,6 +70,20 @@ namespace ICCardManager.Views
             {
                 ErrorDialogHelper.ShowError(ex, "初期化エラー");
             }
+        }
+
+        /// <summary>
+        /// Issue #1907: 履歴表示エリアへのキー・クリック・ホイール操作を、返却確認の履歴に対する
+        /// 「職員が使い始めた」印として ViewModel へ伝える（以後は次の職員証タッチでも閉じない）。
+        /// </summary>
+        /// <remarks>
+        /// 自動で閉じる機能の主要な故障は「読んでいる・直している途中で閉じること」。
+        /// 複数行を読むためのスクロールはクリックを伴わないため、ホイールも拾う（#2009 と同じ判断）。
+        /// 返却確認以外で開いた履歴では no-op。
+        /// </remarks>
+        private void HistoryArea_PreviewInput(object sender, InputEventArgs e)
+        {
+            _viewModel.MarkReturnHistoryReviewTouched();
         }
 
         /// <summary>

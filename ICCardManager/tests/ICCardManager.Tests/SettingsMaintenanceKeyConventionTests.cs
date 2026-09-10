@@ -58,6 +58,8 @@ public class SettingsMaintenanceKeyConventionTests
         "KeySkipCompanionCountInputOnReturn",
         // Issue #2009: 同行者数入力の自動クローズ秒数（設定画面から編集する）
         "KeyCompanionCountInputTimeoutSeconds",
+        // Issue #1907: 返却時の利用履歴自動表示（設定画面から編集する）
+        "KeyShowHistoryOnReturn",
         "KeyReportOutputFolder",
         // SaveWindowSettingsToDbAsync（一括保存から呼ばれる private ヘルパー）が書く
         "KeyWindowLeft",

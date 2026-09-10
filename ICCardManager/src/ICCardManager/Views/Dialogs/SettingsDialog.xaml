@@ -249,6 +249,19 @@
                                    Foreground="{DynamicResource SecondaryTextBrush}"
                                    TextWrapping="Wrap"
                                    Margin="0,5,0,0"/>
+                        <!-- Issue #1907: 返却時の利用履歴自動表示（返却確認） -->
+                        <CheckBox IsChecked="{Binding ShowHistoryOnReturn}"
+                                  Content="返却時に利用履歴を表示して確認を促す(_H)"
+                                  Padding="5,0,0,0"
+                                  Margin="0,15,0,0"
+                                  AutomationProperties.Name="返却時の利用履歴表示設定"
+                                  AutomationProperties.HelpText="有効にすると、返却処理の後に返却した交通系ICカードの利用履歴をメイン画面に表示します"
+                                  ToolTip="有効にすると、返却処理（バス停名・同行者数の入力）の後に、返却した交通系ICカードの利用履歴をメイン画面に表示し、入力漏れ・誤りをその場で確かめられます（アクセスキー: Alt+H）"/>
+                        <TextBlock Text="※ 返却した職員自身が、バス停名や駅名の入力漏れ・誤りをその場で見つけられるようにします。表示した履歴は次の職員証タッチで自動的に閉じます（履歴を操作していた場合は閉じません）。無効にしても、待機中に交通系ICカードをタッチすれば履歴を表示できます"
+                                   FontSize="{DynamicResource SmallFontSize}"
+                                   Foreground="{DynamicResource SecondaryTextBrush}"
+                                   TextWrapping="Wrap"
+                                   Margin="0,5,0,0"/>
                     </StackPanel>
                 </GroupBox>
 

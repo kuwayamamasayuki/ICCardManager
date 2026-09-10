@@ -63,6 +63,9 @@ namespace ICCardManager.Data.Repositories
         // 同行者数入力の自動クローズ秒数キー（Issue #2009。0 = 自動的に閉じない）
         public const string KeyCompanionCountInputTimeoutSeconds = "companion_count_input_timeout_seconds";
 
+        // 返却時の利用履歴自動表示（返却確認）設定キー（Issue #1907。未保存 = 有効）
+        public const string KeyShowHistoryOnReturn = "show_history_on_return";
+
         // 帳票出力先フォルダ設定キー
         public const string KeyReportOutputFolder = "report_output_folder";
 
@@ -330,6 +333,9 @@ WHERE settings.value IS NULL OR substr(settings.value, 1, 7) <> @currentMonth";
                 settings.CompanionCountInputTimeoutSeconds = companionTimeout;
             }
 
+            // 返却時の利用履歴自動表示（Issue #1907）。既定は有効なので、未保存（null）は有効として読む
+            settings.ShowHistoryOnReturn = Get(KeyShowHistoryOnReturn)?.ToLowerInvariant() != "false";
+
             // 帳票出力先フォルダ設定
             var reportOutputFolder = Get(KeyReportOutputFolder);
             settings.ReportOutputFolder = reportOutputFolder ?? string.Empty;
@@ -447,6 +453,9 @@ WHERE settings.value IS NULL OR substr(settings.value, 1, 7) <> @currentMonth";
                 settings.CompanionCountInputTimeoutSeconds = companionTimeout;
             }
 
+            // 返却時の利用履歴自動表示（Issue #1907）。既定は有効なので、未保存（null）は有効として読む
+            settings.ShowHistoryOnReturn = (await GetAsync(KeyShowHistoryOnReturn).ConfigureAwait(false))?.ToLowerInvariant() != "false";
+
             // 帳票出力先フォルダ設定
             var reportOutputFolder = await GetAsync(KeyReportOutputFolder);
             settings.ReportOutputFolder = reportOutputFolder ?? string.Empty;
@@ -541,6 +550,9 @@ WHERE settings.value IS NULL OR substr(settings.value, 1, 7) <> @currentMonth";
 
                     // 同行者数入力の自動クローズ秒数を保存（Issue #2009）
                     success &= await SetAsync(KeyCompanionCountInputTimeoutSeconds, settings.CompanionCountInputTimeoutSeconds.ToString(CultureInfo.InvariantCulture), scope).ConfigureAwait(false);
+
+                    // 返却時の利用履歴自動表示（返却確認）を保存（Issue #1907）
+                    success &= await SetAsync(KeyShowHistoryOnReturn, settings.ShowHistoryOnReturn.ToString().ToLowerInvariant(), scope).ConfigureAwait(false);
 
                     // 帳票出力先フォルダ設定を保存
                     success &= await SetAsync(KeyReportOutputFolder, settings.ReportOutputFolder ?? string.Empty, scope);

@@ -141,6 +141,12 @@ public class MainViewModelIntegrationTests
         _staffRepositoryMock.Setup(r => r.GetAllAsync())
             .ReturnsAsync(new List<Staff>());
 
+        // 既定: 履歴一覧のページ取得は空（Issue #1907: 返却後に履歴が自動表示されるため、
+        // 返却フローのテストはすべてここを通る。未設定だと既定のタプル (null, 0) が返る）
+        _ledgerRepositoryMock.Setup(r => r.GetPagedAsync(
+                It.IsAny<string>(), It.IsAny<DateTime>(), It.IsAny<DateTime>(), It.IsAny<int>(), It.IsAny<int>()))
+            .ReturnsAsync((new List<Ledger>(), 0));
+
         // 既定: AppSettings (警告残高=1000円)
         var appSettings = new AppSettings { WarningBalance = 1000, SkipBusStopInputOnReturn = false };
         _settingsRepositoryMock.Setup(r => r.GetAppSettingsAsync()).ReturnsAsync(appSettings);
@@ -1488,6 +1494,449 @@ public class MainViewModelIntegrationTests
         // 貸出音も返却音も鳴らない
         _soundPlayerMock.Verify(s => s.Play(SoundType.Lend), Times.Never);
         _soundPlayerMock.Verify(s => s.Play(SoundType.Return), Times.Never);
+    }
+
+    #endregion
+
+    #region 返却確認の履歴自動表示（Issue #1907）
+
+    /// <summary>
+    /// 返却フローを組み立て、返却で INSERT された台帳に採番（101, 102, …）して
+    /// 履歴一覧（<c>GetPagedAsync</c>）がその行と、今回の返却とは無関係な既存行（id=999）を返すようにする。
+    /// </summary>
+    /// <param name="usageDetails">カードから読み取る利用履歴。省略時は当日の鉄道利用 1 件</param>
+    /// <param name="lentAt">貸出時刻。省略時は 2 時間前</param>
+    /// <param name="unrelatedRowCount">今回の返却とは無関係な既存行の数（id=999 から降順に採番）。省略時は 1</param>
+    /// <returns>返却で INSERT された台帳（採番後）</returns>
+    private List<Ledger> ArrangeReturnWithHistoryReview(
+        IReadOnlyList<LedgerDetail> usageDetails = null, DateTime? lentAt = null, int unrelatedRowCount = 1)
+    {
+        var lentAtValue = lentAt ?? DateTime.Now.AddHours(-2);
+        var lentRecord = new Ledger
+        {
+            Id = 100,
+            CardIdm = CardIdmA,
+            LenderIdm = StaffIdm,
+            Date = lentAtValue,
+            Summary = SummaryGenerator.GetLendingSummary(),
+            StaffName = StaffName,
+            LentAt = lentAtValue,
+            IsLentRecord = true,
+        };
+        _cardRepositoryMock.Setup(r => r.GetByIdmAsync(CardIdmA, It.IsAny<bool>()))
+            .ReturnsAsync(BuildLentCard(CardIdmA, lentAtValue));
+        _ledgerRepositoryMock.Setup(r => r.GetLentRecordAsync(CardIdmA)).ReturnsAsync(lentRecord);
+        _ledgerRepositoryMock.Setup(r => r.DeleteAllLentRecordsAsync(CardIdmA)).ReturnsAsync(1);
+        _cardRepositoryMock.Setup(r => r.UpdateLentStatusAsync(CardIdmA, false, null, null))
+            .ReturnsAsync(true);
+        _cardRepositoryMock.Setup(r => r.GetLentAsync(It.IsAny<bool>()))
+            .ReturnsAsync(new List<IcCard>());
+        _cardRepositoryMock.Setup(r => r.GetAllAsync()).ReturnsAsync(new List<IcCard>());
+        _cardReaderMock.Setup(r => r.TryReadHistoryAsync(CardIdmA))
+            .ReturnsAsync(CardReadResult<IReadOnlyList<LedgerDetail>>.Ok(usageDetails ?? new List<LedgerDetail>
+            {
+                new LedgerDetail
+                {
+                    UseDate = DateTime.Now.AddHours(-1),
+                    Balance = 2500,
+                    Amount = 210,
+                    IsCharge = false,
+                    EntryStation = "博多",
+                    ExitStation = "天神",
+                },
+            }));
+
+        // 返却で INSERT された台帳に採番し、履歴一覧はその行＋無関係な既存行を返す
+        var inserted = new List<Ledger>();
+        var nextId = 101;
+        _ledgerRepositoryMock.Setup(r => r.InsertAsync(It.IsAny<Ledger>()))
+            .Returns((Ledger l) =>
+            {
+                l.Id = nextId++;
+                inserted.Add(l);
+                return Task.FromResult(l.Id);
+            });
+        // 既存行は今回の行より古い（一覧は日付昇順＝古い行が先、今回の行は末尾。本番の ORDER BY と同じ形）
+        var unrelatedRows = Enumerable.Range(0, unrelatedRowCount)
+            .Select(i => new Ledger
+            {
+                Id = 999 - i, CardIdm = CardIdmA, Date = DateTime.Today.AddDays(-3 - i),
+                Summary = "鉄道（天神～博多）", Expense = 260, Balance = 3000, StaffName = StaffName,
+            })
+            .OrderBy(l => l.Date)
+            .ToList();
+        // 本番の GetPagedAsync と同じく OFFSET/LIMIT でページを切る（全行を返すモックでは、
+        // 今回の行が 2 ページ目に落ちる故障を再現できない）
+        _ledgerRepositoryMock.Setup(r => r.GetPagedAsync(
+                CardIdmA, It.IsAny<DateTime>(), It.IsAny<DateTime>(), It.IsAny<int>(), It.IsAny<int>()))
+            .Returns((string _, DateTime _, DateTime _, int page, int pageSize) =>
+            {
+                var rows = new List<Ledger>(unrelatedRows);
+                rows.AddRange(inserted);
+                var pageRows = rows.Skip((page - 1) * pageSize).Take(pageSize).ToList();
+                return Task.FromResult<(IEnumerable<Ledger>, int)>((pageRows, rows.Count));
+            });
+        return inserted;
+    }
+
+    private async Task RunReturnFlowAsync()
+    {
+        RaiseCardRead(StaffIdm);
+        await _dispatcherService.WaitForPendingAsync();
+        RaiseCardRead(CardIdmA);
+        await _dispatcherService.WaitForPendingAsync();
+    }
+
+    /// <summary>
+    /// Issue #1907 の中核: 返却が終わると返却したカードの履歴が返却確認として自動表示され、
+    /// 今回の返却で記録された行だけが強調されること。
+    /// </summary>
+    [Fact]
+    public async Task ReturnReview_返却後に返却したカードの履歴が表示され今回記録した行だけが強調されること()
+    {
+        var inserted = ArrangeReturnWithHistoryReview();
+
+        await RunReturnFlowAsync();
+
+        _viewModel.IsHistoryVisible.Should().BeTrue("返却したカードの記録をその場で確認させる");
+        _viewModel.IsReturnHistoryReview.Should().BeTrue("案内バナーの表示条件");
+        _viewModel.HistoryCard.Should().NotBeNull();
+        _viewModel.HistoryCard!.CardIdm.Should().Be(CardIdmA);
+        inserted.Should().NotBeEmpty("返却で利用行が INSERT されている前提");
+
+        var recordedIds = inserted.Select(l => l.Id).ToHashSet();
+        _viewModel.HistoryLedgers.Where(d => recordedIds.Contains(d.Id))
+            .Should().NotBeEmpty().And.OnlyContain(d => d.IsRecentlyRecorded && d.RecentlyRecordedMark == "✔",
+                "今回の返却で記録された行を「今回」列の ✔ と行背景で示す");
+        _viewModel.HistoryLedgers.Where(d => d.Id == 999)
+            .Should().ContainSingle().Which.IsRecentlyRecorded.Should().BeFalse("無関係な既存行は強調しない");
+        _viewModel.HistoryLedgers.Where(d => d.Id == 999)
+            .Should().ContainSingle().Which.RecentlyRecordedMark.Should().BeEmpty();
+
+        // 当月の利用なので表示期間は当月 1 日から（利用日が月初の深夜で前月へ落ちる場合はその日から）
+        var usageDate = inserted.Min(l => l.Date).Date;
+        var firstOfMonth = new DateTime(DateTime.Today.Year, DateTime.Today.Month, 1);
+        _viewModel.HistoryFromDate.Should().Be(usageDate < firstOfMonth ? usageDate : firstOfMonth);
+        _viewModel.HistoryToDate.Should().Be(DateTime.Today);
+        _viewModel.CurrentState.Should().Be(AppState.WaitingForStaffCard, "返却フロー自体は従来どおり完了する");
+    }
+
+    /// <summary>
+    /// 3/31 乗車・4/1 返却のように、今回記録した行が前月以前にあるときは、その利用日から表示して
+    /// 記録した行がすべて画面に収まること。
+    /// </summary>
+    [Fact]
+    public async Task ReturnReview_前月の利用を含む返却では表示期間がその利用日から始まること()
+    {
+        var lentAt = DateTime.Now.AddDays(-40);
+        var usageDate = DateTime.Today.AddDays(-35);
+        ArrangeReturnWithHistoryReview(new List<LedgerDetail>
+        {
+            new LedgerDetail
+            {
+                UseDate = usageDate.AddHours(9), Balance = 2500, Amount = 210,
+                IsCharge = false, EntryStation = "博多", ExitStation = "天神",
+            },
+        }, lentAt);
+
+        await RunReturnFlowAsync();
+
+        _viewModel.IsReturnHistoryReview.Should().BeTrue();
+        _viewModel.HistoryFromDate.Should().Be(usageDate, "当月 1 日からでは記録した行が画面に出ない");
+        _viewModel.HistoryToDate.Should().Be(DateTime.Today);
+    }
+
+    /// <summary>
+    /// 期間内の行がページサイズを超えるカードでは、今回の行（一覧は日付昇順なので末尾）が
+    /// 1 ページ目に無い。返却確認は今回の行があるページ（最終ページ）を表示すること（コードレビューで検出）。
+    /// </summary>
+    [Fact]
+    public async Task ReturnReview_期間内の行がページサイズを超えるときは今回の行があるページを表示すること()
+    {
+        var inserted = ArrangeReturnWithHistoryReview(unrelatedRowCount: 55);
+
+        await RunReturnFlowAsync();
+
+        _viewModel.IsReturnHistoryReview.Should().BeTrue();
+        _viewModel.HistoryTotalPages.Should().Be(2, "前提: 55 行＋今回の行が 50 行のページ 2 つに分かれる");
+        _viewModel.HistoryCurrentPage.Should().Be(2, "今回の行がある最終ページを表示する");
+        _viewModel.HistoryLedgers.Where(d => d.IsRecentlyRecorded).Select(d => d.Id)
+            .Should().BeEquivalentTo(inserted.Select(l => l.Id), "表示中のページに今回の行がすべて載っている");
+    }
+
+    /// <summary>
+    /// 対の表明: 1 ページに収まるなら 1 ページ目のまま（最終ページへの移動は必要なときだけ）。
+    /// No.1 が `HistoryCurrentPage` を見ていないため、ここで固定する。
+    /// </summary>
+    [Fact]
+    public async Task ReturnReview_1ページに収まるときは1ページ目のまま表示すること()
+    {
+        ArrangeReturnWithHistoryReview(unrelatedRowCount: 10);
+
+        await RunReturnFlowAsync();
+
+        _viewModel.HistoryTotalPages.Should().Be(1);
+        _viewModel.HistoryCurrentPage.Should().Be(1);
+        _viewModel.HistoryLedgers.Should().Contain(d => d.IsRecentlyRecorded);
+    }
+
+    /// <summary>
+    /// 借りたが使わずに返した（記録ゼロ）ときは、確認すべき記録が無いので履歴を開かない
+    /// （#186 の「メイン画面を変更しない」の例外を広げない。コードレビューで検出）。
+    /// </summary>
+    [Fact]
+    public async Task ReturnReview_記録した行が無い返却では履歴を表示しないこと()
+    {
+        ArrangeReturnWithHistoryReview(usageDetails: new List<LedgerDetail>());
+
+        await RunReturnFlowAsync();
+
+        _toastMock.Verify(t => t.ShowReturnNotification(
+            "はやかけん", "5042", It.IsAny<int>(), It.IsAny<bool>(), It.IsAny<int>()), Times.Once, "前提: 返却は成立");
+        _viewModel.IsHistoryVisible.Should().BeFalse();
+        _viewModel.IsReturnHistoryReview.Should().BeFalse();
+    }
+
+    /// <summary>
+    /// 対の表明: 設定で無効にした組織では従来どおり履歴を出さない（#186 の「メイン画面を変更しない」のまま）。
+    /// これが無いと「常に表示する」実装でも他のテストは緑になる。
+    /// </summary>
+    [Fact]
+    public async Task ReturnReview_設定で無効なら返却後に履歴を表示しないこと()
+    {
+        ArrangeReturnWithHistoryReview();
+        var appSettings = new AppSettings { WarningBalance = 1000, ShowHistoryOnReturn = false };
+        _settingsRepositoryMock.Setup(r => r.GetAppSettingsAsync()).ReturnsAsync(appSettings);
+        _settingsRepositoryMock.Setup(r => r.GetAppSettings()).Returns(appSettings);
+
+        await RunReturnFlowAsync();
+
+        _viewModel.IsHistoryVisible.Should().BeFalse();
+        _viewModel.IsReturnHistoryReview.Should().BeFalse();
+        _toastMock.Verify(t => t.ShowReturnNotification(
+            "はやかけん", "5042", It.IsAny<int>(), It.IsAny<bool>(), It.IsAny<int>()), Times.Once,
+            "返却そのものは従来どおり完了する");
+    }
+
+    /// <summary>
+    /// 返却確認はバス停名入力ダイアログの<b>後</b>に出ること（Issue の要望: 「返却処理時（バス履歴入力後）」）。
+    /// 先に出すと、入力前の「バス（★）」を確認させることになる。
+    /// </summary>
+    [Fact]
+    public async Task ReturnReview_バス停名入力ダイアログの後に表示されること()
+    {
+        ArrangeReturnWithHistoryReview(new List<LedgerDetail>
+        {
+            // 乗降駅なし・チャージなし＝バス利用（business-logic.md「バス利用判別ロジック」）。
+            // IsBus は FelicaHistoryBlockDecoder が確定する値で、LendingService はそれを見る
+            new LedgerDetail { UseDate = DateTime.Now.AddHours(-1), Balance = 2300, Amount = 200, IsCharge = false, IsBus = true },
+        });
+        var reviewVisibleWhenBusStopDialogShown = (bool?)null;
+        _navigationServiceMock
+            .Setup(n => n.ShowDialogAsync<ICCardManager.Views.Dialogs.BusStopInputDialog>(
+                It.IsAny<Func<ICCardManager.Views.Dialogs.BusStopInputDialog, Task>>()))
+            .Callback(() => reviewVisibleWhenBusStopDialogShown = _viewModel.IsReturnHistoryReview)
+            .ReturnsAsync(true);
+
+        await RunReturnFlowAsync();
+
+        reviewVisibleWhenBusStopDialogShown.Should().BeFalse("バス停名入力ダイアログが開いた時点では返却確認はまだ出ていない");
+        _viewModel.IsReturnHistoryReview.Should().BeTrue("バス停名入力の後に返却確認を出す");
+    }
+
+    /// <summary>
+    /// 次の職員証タッチ（次の操作の開始）で、操作されていない返却確認は閉じること。
+    /// 開いたまま残すと、以後の返却で毎回「別のカードで開いている」状態になり、
+    /// 前の職員のカードの履歴を見ながら操作することになる（設計時のユーザー指摘）。
+    /// </summary>
+    [Fact]
+    public async Task ReturnReview_次の職員証タッチで操作していない返却確認が閉じること()
+    {
+        ArrangeReturnWithHistoryReview();
+        await RunReturnFlowAsync();
+        _viewModel.IsReturnHistoryReview.Should().BeTrue("前提: 返却確認が出ている");
+
+        RaiseCardRead(StaffIdmB);
+        await _dispatcherService.WaitForPendingAsync();
+
+        _viewModel.IsHistoryVisible.Should().BeFalse("次の職員の操作の開始で閉じる");
+        _viewModel.IsReturnHistoryReview.Should().BeFalse();
+        _viewModel.HistoryCard.Should().BeNull();
+        _viewModel.CurrentState.Should().Be(AppState.WaitingForIcCard, "職員証の認識自体は従来どおり");
+    }
+
+    /// <summary>
+    /// 対の表明: 職員が返却確認の履歴を操作していた（読んでいる・直している）なら、
+    /// 次の職員証タッチでも閉じない（入力途中で消えるのが自動クローズの主要な故障。#2009 と同じ判断）。
+    /// これが無いと「職員証タッチで常に履歴を閉じる」実装でも上のテストは緑になる。
+    /// </summary>
+    [Fact]
+    public async Task ReturnReview_操作した返却確認は次の職員証タッチでも閉じないこと()
+    {
+        ArrangeReturnWithHistoryReview();
+        await RunReturnFlowAsync();
+        _viewModel.MarkReturnHistoryReviewTouched();
+
+        RaiseCardRead(StaffIdmB);
+        await _dispatcherService.WaitForPendingAsync();
+
+        _viewModel.IsHistoryVisible.Should().BeTrue("操作中の履歴を職員の目の前で閉じない");
+        _viewModel.IsReturnHistoryReview.Should().BeTrue("バナーと強調も残す");
+        _viewModel.HistoryCard!.CardIdm.Should().Be(CardIdmA);
+    }
+
+    /// <summary>
+    /// #186 との両立: 職員が別のカードの履歴を手動で開いているときは画面を奪わず、トーストで確認を促すだけにする。
+    /// </summary>
+    [Fact]
+    public async Task ReturnReview_別カードの履歴を職員が使っているときは乗っ取らずトーストで促すこと()
+    {
+        // 待機中にカード B をタッチして履歴を手動で開く
+        _cardRepositoryMock.Setup(r => r.GetByIdmAsync(CardIdmB, It.IsAny<bool>()))
+            .ReturnsAsync(new IcCard { CardIdm = CardIdmB, CardType = "nimoca", CardNumber = "0001", IsLent = false });
+        RaiseCardRead(CardIdmB);
+        await _dispatcherService.WaitForPendingAsync();
+        _viewModel.IsHistoryVisible.Should().BeTrue("前提: 手動で開いた履歴");
+        _viewModel.IsReturnHistoryReview.Should().BeFalse("手動で開いた履歴は返却確認ではない");
+
+        // カード A を返却する
+        ArrangeReturnWithHistoryReview();
+        await RunReturnFlowAsync();
+
+        _viewModel.HistoryCard!.CardIdm.Should().Be(CardIdmB, "職員が使っている履歴を奪わない（#186）");
+        _viewModel.IsReturnHistoryReview.Should().BeFalse();
+        _toastMock.Verify(t => t.ShowInfo(
+            It.Is<string>(title => title.Contains("履歴")),
+            It.Is<string>(m => m.Contains("利用履歴を確認してください"))), Times.Once);
+    }
+
+    /// <summary>
+    /// 同じカードの履歴を職員が手動で開いている（統合のために行を選んでいる等）ときも奪わないこと（#1923）。
+    /// 同じカードなら一覧は返却後処理の再読込（チェック引き継ぎ付き）で更新済みなので、置き換える必要が無い。
+    /// </summary>
+    [Fact]
+    public async Task ReturnReview_同じカードの履歴を職員が手動で開いているときも奪わないこと()
+    {
+        ArrangeReturnWithHistoryReview();
+        // 返却前にカード A（貸出中）の履歴を待機中のタッチで開く … 貸出中カードのタッチは返却になるため、
+        // 履歴は直接開く（手動で開いた履歴と同じ状態: IsReturnHistoryReview = false）
+        _viewModel.HistoryCard = new IcCard { CardIdm = CardIdmA, CardType = "はやかけん", CardNumber = "5042" }.ToDto();
+        _viewModel.IsHistoryVisible = true;
+        await _viewModel.LoadHistoryLedgersAsync();
+        _viewModel.HistoryLedgers.Should().ContainSingle(d => d.Id == 999).Which.IsChecked = true;
+
+        await RunReturnFlowAsync();
+
+        _viewModel.IsReturnHistoryReview.Should().BeFalse("職員が使っている履歴は返却確認へ置き換えない");
+        _viewModel.HistoryLedgers.Where(d => d.IsChecked).Select(d => d.Id).Should().Equal(new[] { 999 },
+            "統合のためのチェックを消さない（#1923）");
+        _toastMock.Verify(t => t.ShowInfo(
+            It.Is<string>(title => title.Contains("履歴")), It.IsAny<string>()), Times.Once);
+    }
+
+    /// <summary>
+    /// 操作されていない返却確認は、別カードの返却確認で置き換わること（乗っ取り防止は職員の操作にだけ効く）。
+    /// 返却フローは職員証タッチを経るため通常は先に閉じるが、判定自体は返却後処理の内側にあるので直接呼んで固定する。
+    /// </summary>
+    [Fact]
+    public async Task ReturnReview_操作していない返却確認は別カードの返却確認で置き換わること()
+    {
+        ArrangeReturnWithHistoryReview();
+        await RunReturnFlowAsync();
+        _viewModel.HistoryCard!.CardIdm.Should().Be(CardIdmA, "前提");
+
+        var cardB = new IcCard { CardIdm = CardIdmB, CardType = "nimoca", CardNumber = "0001" };
+        var resultB = new LendingResult { Success = true, OperationType = LendingOperationType.Return, Balance = 500 };
+        resultB.CreatedLedgers.Add(new Ledger { Id = 201, CardIdm = CardIdmB, Date = DateTime.Today, Expense = 200 });
+        _ledgerRepositoryMock.Setup(r => r.GetPagedAsync(
+                CardIdmB, It.IsAny<DateTime>(), It.IsAny<DateTime>(), It.IsAny<int>(), It.IsAny<int>()))
+            .ReturnsAsync((new List<Ledger> { resultB.CreatedLedgers[0] }, 1));
+
+        await _viewModel.HandleReturnSuccessAsync(cardB, resultB);
+
+        _viewModel.HistoryCard!.CardIdm.Should().Be(CardIdmB, "誰も使っていない返却確認は新しい返却の確認へ置き換える");
+        _viewModel.IsReturnHistoryReview.Should().BeTrue();
+        _viewModel.HistoryLedgers.Should().ContainSingle(d => d.Id == 201).Which.IsRecentlyRecorded.Should().BeTrue();
+        _toastMock.Verify(t => t.ShowInfo(It.IsAny<string>(), It.IsAny<string>()), Times.Never);
+    }
+
+    /// <summary>
+    /// 返却確認のあとに待機中のカードタッチで開いた履歴は返却確認ではない（バナーも強調も引き継がない）。
+    /// </summary>
+    [Fact]
+    public async Task ReturnReview_待機中のカードタッチで開き直した履歴は返却確認の状態を引き継がないこと()
+    {
+        ArrangeReturnWithHistoryReview();
+        await RunReturnFlowAsync();
+        _viewModel.IsReturnHistoryReview.Should().BeTrue("前提");
+
+        // 返却後のカード A は貸出中ではないので、待機中のタッチは履歴表示になる
+        _cardRepositoryMock.Setup(r => r.GetByIdmAsync(CardIdmA, It.IsAny<bool>()))
+            .ReturnsAsync(new IcCard { CardIdm = CardIdmA, CardType = "はやかけん", CardNumber = "5042", IsLent = false });
+        // 30 秒ルールの逆処理に入らないよう、直前の操作を忘れさせる
+        _lendingService.ClearHistory();
+        RaiseCardRead(CardIdmA);
+        await _dispatcherService.WaitForPendingAsync();
+
+        _viewModel.IsHistoryVisible.Should().BeTrue();
+        _viewModel.IsReturnHistoryReview.Should().BeFalse("手動で開いた履歴は返却確認ではない");
+        _viewModel.HistoryLedgers.Should().OnlyContain(d => !d.IsRecentlyRecorded, "強調は返却確認の間だけ");
+    }
+
+    /// <summary>
+    /// 「✕ 閉じる」で閉じると返却確認の状態（バナー・強調・操作済みの印）が解除されること。
+    /// </summary>
+    [Fact]
+    public async Task ReturnReview_閉じると返却確認の状態が解除されること()
+    {
+        ArrangeReturnWithHistoryReview();
+        await RunReturnFlowAsync();
+        _viewModel.MarkReturnHistoryReviewTouched();
+
+        _viewModel.CloseHistory();
+
+        _viewModel.IsHistoryVisible.Should().BeFalse();
+        _viewModel.IsReturnHistoryReview.Should().BeFalse();
+    }
+
+    /// <summary>
+    /// 記録は確定しているが残額を確認できなかった返却（Issue #1805）でも、記録の確認が目的なので履歴を表示すること。
+    /// </summary>
+    [Fact]
+    public async Task ReturnReview_残額を確認できなかった返却でも履歴を表示すること()
+    {
+        ArrangeReturnWithHistoryReview();
+        RaiseCardRead(StaffIdm);
+        await _dispatcherService.WaitForPendingAsync();
+        // 最初の設定読み取り（LendingService の残額警告）だけ失敗させ、返却後処理の読み取りは成功させる
+        ArrangeSettingsReadFailsOnce();
+
+        RaiseCardRead(CardIdmA);
+        await _dispatcherService.WaitForPendingAsync();
+
+        _toastMock.Verify(t => t.ShowWarning(
+            It.Is<string>(title => title.Contains("記録済み")), It.IsAny<string>()), Times.Once, "前提: #1805 の経路");
+        _viewModel.IsHistoryVisible.Should().BeTrue("記録は確定しているので確認させる");
+        _viewModel.IsReturnHistoryReview.Should().BeTrue();
+        _viewModel.HistoryCard!.CardIdm.Should().Be(CardIdmA);
+    }
+
+    /// <summary>
+    /// 返却確認以外で開いた履歴では <c>MarkReturnHistoryReviewTouched</c> は何もしない
+    /// （手動の履歴に「操作済み」の印を残して次の返却確認の判定を狂わせない）。
+    /// </summary>
+    [Fact]
+    public async Task MarkReturnHistoryReviewTouched_手動で開いた履歴では何も変えないこと()
+    {
+        _cardRepositoryMock.Setup(r => r.GetByIdmAsync(CardIdmB, It.IsAny<bool>()))
+            .ReturnsAsync(new IcCard { CardIdm = CardIdmB, CardType = "nimoca", CardNumber = "0001", IsLent = false });
+        RaiseCardRead(CardIdmB);
+        await _dispatcherService.WaitForPendingAsync();
+
+        _viewModel.MarkReturnHistoryReviewTouched();
+
+        _viewModel.IsReturnHistoryReview.Should().BeFalse();
+        _viewModel.IsHistoryVisible.Should().BeTrue();
     }
 
     #endregion

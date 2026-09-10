@@ -407,6 +407,40 @@ public class SettingsRepositoryTests : IDisposable
 
     #endregion
 
+    #region ShowHistoryOnReturn テスト（Issue #1907）
+
+    [Fact]
+    public async Task GetAppSettingsAsync_Default_ShowHistoryOnReturnIsTrue()
+    {
+        var result = await _repository.GetAppSettingsAsync();
+        result.ShowHistoryOnReturn.Should().BeTrue("既存環境（キー未保存）でも返却確認は有効になる");
+        _repository.GetAppSettings().ShowHistoryOnReturn.Should().BeTrue("同期版の読み込みも同じ既定");
+    }
+
+    [Fact]
+    public async Task SaveAndLoadAppSettings_ShowHistoryOnReturn_無効を往復できること()
+    {
+        var settings = new AppSettings { WarningBalance = 10000, BackupPath = @"C:\Backup", ShowHistoryOnReturn = false };
+
+        await _repository.SaveAppSettingsAsync(settings);
+        var loaded = await _repository.GetAppSettingsAsync();
+
+        loaded.ShowHistoryOnReturn.Should().BeFalse();
+        _repository.GetAppSettings().ShowHistoryOnReturn.Should().BeFalse("同期版の読み込みも同じキーを見る");
+    }
+
+    [Fact]
+    public async Task SaveAndLoadAppSettings_ShowHistoryOnReturn_無効にしたあと有効へ戻せること()
+    {
+        // 「未保存＝有効」と「false を保存」を区別しているため、true の保存が false を上書きできることを対で表明する
+        await _repository.SaveAppSettingsAsync(new AppSettings { WarningBalance = 10000, BackupPath = @"C:\Backup", ShowHistoryOnReturn = false });
+        await _repository.SaveAppSettingsAsync(new AppSettings { WarningBalance = 10000, BackupPath = @"C:\Backup", ShowHistoryOnReturn = true });
+
+        (await _repository.GetAppSettingsAsync()).ShowHistoryOnReturn.Should().BeTrue();
+    }
+
+    #endregion
+
     #region CompanionCountInputTimeoutSeconds テスト（Issue #2009）
 
     [Fact]

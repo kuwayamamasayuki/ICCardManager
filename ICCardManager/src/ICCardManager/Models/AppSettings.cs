@@ -82,6 +82,16 @@ namespace ICCardManager.Models
         public int CompanionCountInputTimeoutSeconds { get; set; } = AppConstants.DefaultCompanionCountInputTimeoutSeconds;
 
         /// <summary>
+        /// 返却時に、返却した交通系ICカードの利用履歴をメイン画面に自動表示して確認を促すかどうか（Issue #1907）
+        /// </summary>
+        /// <remarks>
+        /// バス停名の入力漏れ・誤り、未対応駅の入力漏れを、返却した職員自身がその場で見つけられるようにする。
+        /// 自動表示した履歴は次の職員証タッチで閉じる（履歴パネルを操作していた場合は閉じない）。
+        /// 既定は有効。無効にしても、待機中に交通系ICカードをタッチすれば従来どおり履歴を表示できる。
+        /// </remarks>
+        public bool ShowHistoryOnReturn { get; set; } = true;
+
+        /// <summary>
         /// 帳票出力先フォルダパス
         /// </summary>
         public string ReportOutputFolder { get; set; } = string.Empty;

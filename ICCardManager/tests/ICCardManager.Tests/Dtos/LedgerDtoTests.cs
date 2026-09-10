@@ -265,4 +265,16 @@ public class LedgerDtoTests
     }
 
     #endregion
+
+    #region IsRecentlyRecorded（Issue #1907）
+
+    [Fact]
+    public void RecentlyRecordedMark_今回記録した行は文字でも示すこと()
+    {
+        // 色（行背景）だけに頼らず「今回」列の文字で示す（4 要素原則）
+        new LedgerDto { IsRecentlyRecorded = true }.RecentlyRecordedMark.Should().Be("✔");
+        new LedgerDto { IsRecentlyRecorded = false }.RecentlyRecordedMark.Should().BeEmpty("既定は印なし");
+    }
+
+    #endregion
 }
