@@ -222,6 +222,111 @@ namespace ICCardManager.UITests.Infrastructure
         [UiaName]
         public const string BusStopInputDialogName = "バス停名入力ダイアログ";
 
+        // ── マニュアル用スクリーンショット 第 3 段階（Issue #2011） ──────
+
+        /// <summary>メイン画面のツールバーから管理者ダッシュボード（#1692）を開くボタン。</summary>
+        [UiaName]
+        public const string OpenAdminDashboardButton = "管理者ダッシュボードを開く";
+        [UiaName]
+        public const string AdminDashboardDialogName = "管理者ダッシュボード";
+
+        /// <summary>管理者ダッシュボードの「運用状況」タブの一覧。非同期の集計が終わったことの目印に使う。</summary>
+        [UiaName]
+        public const string AdminDashboardCardOperationList = "カードごとの運用状況一覧";
+
+        /// <summary>システム管理ダイアログから接続診断（#1690）を開くボタン。</summary>
+        [UiaName]
+        public const string OpenConnectionDiagnosticsButton = "接続診断を開く";
+        [UiaName]
+        public const string ConnectionDiagnosticsDialogName = "接続診断ダイアログ";
+
+        /// <summary>接続診断の結果一覧。診断が終わったことの目印に使う。</summary>
+        [UiaName]
+        public const string ConnectionDiagnosticsItemList = "診断項目一覧";
+
+        /// <summary>操作ログの一覧。読み込みが終わったことの目印に使う。</summary>
+        [UiaName]
+        public const string OperationLogList = "操作ログ一覧";
+
+        /// <summary>システム管理ダイアログから同一とみなす駅・バス停の設定（#1905）を開くボタン。</summary>
+        [UiaName]
+        public const string OpenTransferStationGroupButton = "同一とみなす駅・バス停を設定";
+        [UiaName]
+        public const string TransferStationGroupDialogName = "同一とみなす駅・バス停の設定ダイアログ";
+
+        /// <summary>システム管理ダイアログのリストア用バックアップ一覧。</summary>
+        [UiaName]
+        public const string BackupFileList = "バックアップファイル一覧";
+
+        /// <summary>帳票作成ダイアログの「すべてのカードを選択」ボタン（#1691）。</summary>
+        [UiaName]
+        public const string ReportSelectAllCardsButton = "すべてのカードを選択";
+
+        /// <summary>帳票作成ダイアログの事前チェック（#1688）を実行するボタン。</summary>
+        [UiaName]
+        public const string ReportPreflightButton = "帳票の事前チェック";
+        [UiaName]
+        public const string ReportPreflightDialogName = "帳票の事前チェック結果ダイアログ";
+
+        /// <summary>交通系ICカード管理ダイアログの「貸出記録の作成」ボタン（#1909）。</summary>
+        [UiaName]
+        public const string SystemLendButton = "貸出記録の作成";
+        [UiaName]
+        public const string SystemLendDialogName = "貸出記録の作成ダイアログ";
+
+        /// <summary>履歴表示エリアの「履歴行を追加」ボタン。開く先は追加・修正で共通のダイアログ。</summary>
+        [UiaName]
+        public const string AddLedgerRowButton = "履歴行を追加";
+        [UiaName]
+        public const string LedgerRowEditDialogName = "履歴行の追加・修正ダイアログ";
+
+        /// <summary>履歴一覧の各行にある統合対象のチェックボックス（#837 の同日統合ではなく履歴一覧の統合）。</summary>
+        [UiaName]
+        public const string MergeTargetCheckBox = "統合対象として選択";
+
+        /// <summary>返却後に開く同行者数入力ダイアログ（#1906 / #2009）。</summary>
+        [UiaName]
+        public const string CompanionCountInputDialogName = "同行者数入力ダイアログ";
+
+        /// <summary>
+        /// ステータスバーの「再接続」ボタン（カードリーダー切断時だけ表示される）。
+        /// </summary>
+        /// <remarks>
+        /// 接続状態を囲む <c>StatusBarItem</c> は <c>AutomationProperties.Name="カードリーダー接続状態"</c> を
+        /// 持つが、WPF は <c>StatusBarItem</c> を UIA ツリーへ公開しないため要素としては取れない（実測）。
+        /// 撮影では、状態の文字列（<see cref="CardReaderStatusTextPrefix"/> で探す TextBlock）と
+        /// このボタンの合併矩形をステータスバーの該当部分として扱う。
+        /// </remarks>
+        [UiaName]
+        public const string CardReaderReconnectButton = "カードリーダーに再接続";
+
+        /// <summary>
+        /// カードリーダーが切断されているときにステータスバーへ出る文字列（MainWindow.xaml の Setter の値）。
+        /// AutomationProperties.Name ではなく画面に出る文字列そのもの。
+        /// </summary>
+        [NotUiaName]
+        public const string CardReaderDisconnectedText = "リーダー: 切断";
+
+        /// <summary>
+        /// システム警告エリアの見出し TextBlock の Text。囲む要素に AutomationProperties.Name が無いため、
+        /// 警告が出たことの判定にはこの文字列を使う（<see cref="UsageGuideText"/> と同じ扱い）。
+        /// </summary>
+        [NotUiaName]
+        public const string SystemWarningHeaderText = "⚠ システム警告";
+
+        /// <summary>
+        /// 残額不足の警告だけを見分ける文字列（<c>WarningService</c> の LowBalance の
+        /// <c>DisplayText</c> にだけ現れる）。警告行は <c>DisplayText</c> をそのまま表示する
+        /// TextBlock なので、UIA Name が Text へフォールバックして一致する。
+        /// </summary>
+        /// <remarks>
+        /// 警告エリアには投入データで作れない環境由来の警告（更新の案内・journal_mode の低下）も並ぶため、
+        /// 「警告エリアが無いこと」は投入データの正しさの表明にならない。投入データが支配する
+        /// 残額不足だけを見る（実測でこの形を踏んだ）。
+        /// </remarks>
+        [NotUiaName]
+        public const string LowBalanceWarningMarker = "（しきい値:";
+
         // ── タイムアウト（秒） ────────────────────────────
         public const int AppLaunchTimeoutSeconds = 30;
         public const int DialogOpenTimeoutSeconds = 10;

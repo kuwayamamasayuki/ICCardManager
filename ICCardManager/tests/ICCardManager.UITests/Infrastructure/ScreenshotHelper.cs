@@ -157,6 +157,64 @@ namespace ICCardManager.UITests.Infrastructure
         private static extern void SwitchToThisWindow(IntPtr hWnd, bool fAltTab);
 
         /// <summary>
+        /// ウィンドウの中の 1 要素だけを PNG に保存する（Issue #2011）。
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// 画面全体では説明したい箇所が小さくなりすぎる画像（カード一覧の状態表示、ステータスバーの
+        /// リーダー接続状態）に使う。ウィンドウ単位の <see cref="Capture(Window, string, bool)"/> と違い、
+        /// 要素の矩形は影・リサイズ枠を含まないので <c>DWMWA_EXTENDED_FRAME_BOUNDS</c> の補正は要らない。
+        /// </para>
+        /// <para>
+        /// 前面化は所有ウィンドウに対して行う。要素だけを前面化する手段は無く、背面のまま撮ると
+        /// 手前のウィンドウが写り込んだ「もっともらしく見えて誤った画像」ができる。
+        /// </para>
+        /// </remarks>
+        /// <param name="owner">要素を含むウィンドウ（前面化の対象）。</param>
+        /// <param name="element">撮影する要素。</param>
+        /// <param name="fileName">保存するファイル名。</param>
+        public static string CaptureElement(Window owner, AutomationElement element, string fileName) =>
+            CaptureElements(owner, fileName, element);
+
+        /// <summary>
+        /// 複数の要素をまとめて囲む矩形を PNG に保存する（Issue #2011）。
+        /// </summary>
+        /// <remarks>
+        /// 説明したい UI が複数の要素に分かれている場合に使う。ステータスバーのカードリーダー接続状態は
+        /// 文字列（TextBlock）と「再接続」ボタンの 2 要素で、これらを囲む <c>StatusBarItem</c> は
+        /// <c>AutomationProperties.Name</c> を付けても UIA ツリーに現れない（実測）ため、
+        /// 2 要素の合併矩形で撮る。
+        /// </remarks>
+        public static string CaptureElements(Window owner, string fileName, params AutomationElement[] elements)
+        {
+            if (owner == null) throw new ArgumentNullException(nameof(owner));
+            if (elements == null || elements.Length == 0) throw new ArgumentException("撮影する要素を指定してください。", nameof(elements));
+            if (string.IsNullOrWhiteSpace(fileName)) throw new ArgumentException("ファイル名を指定してください。", nameof(fileName));
+
+            BringToForeground(owner);  // 内側で SettleDelay ぶん待つ
+
+            // 空の矩形は Union の前に弾く。Rectangle.Union は空の矩形（0,0,0,0）も 1 点として扱うため、
+            // 畳んだ後は「画面の左上から対象までを覆う大きな矩形」になり、Width / Height の検査を素通りする。
+            // 結果、名前は正しいのに中身が画面の切れ端という画像ができる（コードレビューで検出）。
+            // 要素が Collapsed になった・まだ配置されていない場合に実際に空が返る。
+            var bounds = Rectangle.Empty;
+            for (var i = 0; i < elements.Length; i++)
+            {
+                var rect = elements[i].BoundingRectangle;
+                if (rect.Width <= 0 || rect.Height <= 0)
+                {
+                    throw new InvalidOperationException(
+                        $"撮影対象の要素に大きさがありません（{fileName} の {i + 1} 件目）。" +
+                        "要素が画面外にあるか、非表示になったか、まだ描画されていません。" +
+                        "メイン画面を左上へ寄せてから、要素の出現を待って撮影してください。");
+                }
+                bounds = bounds.IsEmpty ? rect : Rectangle.Union(bounds, rect);
+            }
+
+            return CaptureRectangle(bounds, fileName);
+        }
+
+        /// <summary>
         /// メイン画面とトースト通知の両方を含む矩形を PNG に保存する（Issue #2019）。
         /// </summary>
         /// <remarks>
@@ -174,14 +232,7 @@ namespace ICCardManager.UITests.Infrastructure
             // トーストは Topmost（ToastNotificationWindow.xaml）なので、メイン画面を前面化しても隠れない
             BringToForeground(mainWindow);
             var bounds = Rectangle.Union(GetVisibleFrameBounds(mainWindow), GetVisibleFrameBounds(toast));
-            var path = Path.Combine(OutputDirectory, fileName);
-            using (var image = FlaUI.Core.Capturing.Capture.Rectangle(bounds))
-            {
-                image.ToFile(path);
-            }
-
-            ReportSize(path, fileName);
-            return path;
+            return CaptureRectangle(bounds, fileName);
         }
 
         /// <summary>撮影テストをスキップすべきか（環境変数 <see cref="EnableEnvironmentVariable"/> が <c>1</c> でない）。</summary>
@@ -233,15 +284,7 @@ namespace ICCardManager.UITests.Infrastructure
                 Thread.Sleep(SettleDelay);
             }
 
-            var path = Path.Combine(OutputDirectory, fileName);
-            var bounds = GetVisibleFrameBounds(window);
-            using (var image = FlaUI.Core.Capturing.Capture.Rectangle(bounds))
-            {
-                image.ToFile(path);
-            }
-
-            ReportSize(path, fileName);
-            return path;
+            return CaptureRectangle(GetVisibleFrameBounds(window), fileName);
         }
 
         /// <summary>
@@ -283,6 +326,97 @@ namespace ICCardManager.UITests.Infrastructure
 
         [System.Runtime.InteropServices.DllImport("dwmapi.dll")]
         private static extern int DwmGetWindowAttribute(IntPtr hwnd, int attribute, out RECT value, int size);
+
+        /// <summary>
+        /// 撮影した矩形が「描画済み」と言える程度に色を持つか（サンプルの最多色がこの割合未満か）。
+        /// </summary>
+        /// <remarks>
+        /// WPF はウィンドウを表示してから最初の描画が終わるまでの間、クライアント領域が白いままになる。
+        /// UIA の要素はその前から見えるため、要素の出現を待っても<b>未描画の白い画像</b>が撮れてしまう
+        /// （実測: 別のビルドを並行させて負荷を掛けた撮影で、テストは全件成功しながら
+        /// <c>main.png</c> / <c>operation_log.png</c> / <c>restore_list.png</c> 等が白紙になった）。
+        /// 判定は実測値から決めた ― 白紙は 0.940〜0.952、正常な画像は 0.187〜0.726 で、
+        /// 両者の間は広く空いている。要素だけを撮った画像（カード一覧 0.551・ステータスバー 0.436）も
+        /// 正常側に収まる。
+        /// </remarks>
+        private const double PaintedDominantColorLimit = 0.90;
+
+        /// <summary>描画の完了を待つ再試行の間隔と上限。</summary>
+        private static readonly TimeSpan PaintRetryInterval = TimeSpan.FromMilliseconds(500);
+        private static readonly TimeSpan PaintRetryTimeout = TimeSpan.FromSeconds(10);
+
+        /// <summary>
+        /// 矩形を撮り、描画済みになるまで撮り直してから保存する。
+        /// </summary>
+        /// <remarks>
+        /// 未描画を「失敗」ではなく「待てば直るもの」として扱う。時間内に描画されなければ、
+        /// 診断用に <c>_FAILED.png</c> として残したうえで例外にする（公開対象からは
+        /// <c>take-screenshots-uitest.ps1</c> の絞り込みが外す）。もっともらしく見えて中身の無い画像を
+        /// そのままの名前で残さないことが要点。
+        /// </remarks>
+        private static string CaptureRectangle(Rectangle bounds, string fileName)
+        {
+            var path = Path.Combine(OutputDirectory, fileName);
+            var deadline = DateTime.UtcNow + PaintRetryTimeout;
+            double dominant;
+
+            while (true)
+            {
+                using (var image = FlaUI.Core.Capturing.Capture.Rectangle(bounds))
+                {
+                    image.ToFile(path);
+                }
+
+                dominant = DominantColorShare(path);
+                if (dominant < PaintedDominantColorLimit)
+                {
+                    ReportSize(path, fileName);
+                    return path;
+                }
+                if (DateTime.UtcNow >= deadline)
+                {
+                    break;
+                }
+                Thread.Sleep(PaintRetryInterval);
+            }
+
+            var failedPath = Path.Combine(
+                OutputDirectory, Path.GetFileNameWithoutExtension(fileName) + "_FAILED.png");
+            try { File.Copy(path, failedPath, overwrite: true); File.Delete(path); } catch { /* 診断用なので失敗は無視 */ }
+
+            throw new InvalidOperationException(
+                $"撮影した画像がほぼ単色です（{fileName}: 最多色 {dominant:P1}）。" +
+                $"ウィンドウの描画が {PaintRetryTimeout.TotalSeconds} 秒以内に終わりませんでした。" +
+                "撮影中は他のビルドやテストを走らせないでください。" +
+                $"撮れた画像は {Path.GetFileName(failedPath)} に残しています。");
+        }
+
+        /// <summary>画像のサンプル画素のうち、最も多い色が占める割合。</summary>
+        private static double DominantColorShare(string path)
+        {
+            using var bmp = new Bitmap(path);
+            var counts = new System.Collections.Generic.Dictionary<int, int>();
+            var samples = 0;
+            // 4 画素おきに走査する（全画素を数えると 2457x1041 で 250 万回になる）
+            for (var y = 0; y < bmp.Height; y += 4)
+            {
+                for (var x = 0; x < bmp.Width; x += 4)
+                {
+                    var argb = bmp.GetPixel(x, y).ToArgb();
+                    counts.TryGetValue(argb, out var n);
+                    counts[argb] = n + 1;
+                    samples++;
+                }
+            }
+            if (samples == 0) return 1.0;
+
+            var max = 0;
+            foreach (var n in counts.Values)
+            {
+                if (n > max) max = n;
+            }
+            return (double)max / samples;
+        }
 
         private static void ReportSize(string capturedPath, string fileName)
         {

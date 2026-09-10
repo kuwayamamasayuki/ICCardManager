@@ -114,7 +114,127 @@ namespace ICCardManager.UITests.Tests
             }
         }
 
+        [SkippableFact]
+        public void companion_count_返却時の同行者数入力ダイアログ()
+        {
+            SkipUnlessDebugCapture();
+
+            // 同行者数の入力ダイアログを出す。自動クローズ（#2009）は 0 =「自動的に閉じない」にしてある
+            using var fixture = AppFixture.LaunchWithSeed(
+                conn => ScreenshotSeedData.SeedForVirtualTouch(conn, skipBusStopInput: true, skipCompanionCountInput: false));
+            ScreenshotHelper.MoveToTopLeft(fixture.MainWindow);
+            var page = new MainWindowPage(fixture.MainWindow, fixture.Automation);
+
+            // 鉄道利用（駅名あり）にして、バス停名入力ダイアログが先に開かないようにする
+            ExecuteVirtualTouchWithOneEntry(page, entryStation: "博多", exitStation: "天神");
+
+            var dialog = WaitForDialogLong(page, TestConstants.CompanionCountInputDialogName);
+            try
+            {
+                File.Exists(ScreenshotHelper.Capture(dialog, "companion_count.png")).Should().BeTrue();
+            }
+            finally
+            {
+                dialog.Close();
+            }
+        }
+
+        [SkippableFact]
+        public void virtual_touch_仮想タッチダイアログ()
+        {
+            SkipUnlessDebugCapture();
+
+            using var fixture = AppFixture.LaunchWithSeed(ScreenshotSeedData.SeedForVirtualTouch);
+            ScreenshotHelper.MoveToTopLeft(fixture.MainWindow);
+            var page = new MainWindowPage(fixture.MainWindow, fixture.Automation);
+
+            InvokeDebugPanelButton(page, TestConstants.DebugPanelVirtualTouchButton);
+            var dialog = page.WaitForDialog(TestConstants.VirtualCardDialogName);
+            try
+            {
+                // 履歴を 1 件足して、利用履歴の入力欄が空でない状態で撮る（使い方が読み取れる）
+                new DialogPageBase(dialog).ClickButton(TestConstants.VirtualCardAddEntryButton);
+
+                File.Exists(ScreenshotHelper.Capture(dialog, "virtual_touch.png")).Should().BeTrue();
+            }
+            finally
+            {
+                dialog.Close();
+            }
+        }
+
+        [SkippableFact]
+        public void system_lend_貸出記録の作成ダイアログ()
+        {
+            SkipUnlessDebugCapture();
+
+            using var fixture = AppFixture.LaunchWithSeed(ScreenshotSeedData.Seed);
+            ScreenshotHelper.MoveToTopLeft(fixture.MainWindow);
+            var page = new MainWindowPage(fixture.MainWindow, fixture.Automation);
+
+            var cardManage = page.ClickToolbarButtonAndWaitForDialog(
+                TestConstants.OpenCardManageButton, TestConstants.CardManageDialogName);
+            SelectCardRow(cardManage, ScreenshotSeedData.NormalCardNumber);
+            cardManage.ClickButton(TestConstants.SystemLendButton);
+
+            // 監査対象の操作なので職員証認証を挟む（#1909）。仮想タッチで通す
+            PassStaffAuthentication(fixture, cardManage.Window);
+
+            var dialog = DialogLocator.WaitForNestedDialog(
+                fixture, cardManage.Window, TestConstants.SystemLendDialogName);
+            File.Exists(ScreenshotHelper.Capture(dialog, "system_lend.png")).Should().BeTrue();
+        }
+
+        [SkippableFact]
+        public void ledger_row_edit_履歴行の追加修正ダイアログ()
+        {
+            SkipUnlessDebugCapture();
+
+            using var fixture = AppFixture.LaunchWithSeed(ScreenshotSeedData.Seed);
+            ScreenshotHelper.MoveToTopLeft(fixture.MainWindow);
+            var page = new MainWindowPage(fixture.MainWindow, fixture.Automation);
+
+            page.OpenCardHistory(ScreenshotSeedData.NormalCardDisplayName);
+            page.ClickButton(TestConstants.AddLedgerRowButton);
+
+            // 履歴の追加も監査対象なので職員証認証を挟む（#635）
+            PassStaffAuthentication(fixture, fixture.MainWindow);
+
+            var dialog = DialogLocator.WaitForNestedDialog(
+                fixture, fixture.MainWindow, TestConstants.LedgerRowEditDialogName);
+            File.Exists(ScreenshotHelper.Capture(dialog, "ledger_row_edit.png")).Should().BeTrue();
+        }
+
         // ── ヘルパー ─────────────────────────────────
+
+        /// <summary>
+        /// 職員証認証ダイアログを仮想タッチで通す。
+        /// </summary>
+        /// <remarks>
+        /// 認証ダイアログは実カードリーダーへのタッチを待つため、DEBUG ビルドの
+        /// 「職員証仮想タッチ（デバッグ用）」ボタン（#688）でしか通せない。これが
+        /// 履歴の追加・貸出記録の作成を Release パスで撮れない理由。
+        /// </remarks>
+        private static void PassStaffAuthentication(AppFixture fixture, Window owner)
+        {
+            var auth = DialogLocator.WaitForNestedDialog(fixture, owner, TestConstants.StaffAuthDialogName);
+            new DialogPageBase(auth).ClickButton(TestConstants.DebugVirtualTouchButtonName);
+        }
+
+        /// <summary>交通系ICカード管理ダイアログのカード一覧から、管理番号で行を選ぶ。</summary>
+        private static void SelectCardRow(DialogPageBase cardManage, string cardNumber)
+        {
+            var grid = cardManage.FindByNameWithRetry(TestConstants.CardList)?.AsGrid();
+            grid.Should().NotBeNull($"カード管理ダイアログに \"{TestConstants.CardList}\" があること");
+
+            var row = Retry.WhileNull(
+                () => grid!.Rows.FirstOrDefault(
+                    r => r.Cells.Any(c => string.Equals(c.Name, cardNumber, StringComparison.Ordinal))),
+                TimeSpan.FromSeconds(TestConstants.DialogOpenTimeoutSeconds)).Result;
+            row.Should().NotBeNull($"カード一覧に管理番号 \"{cardNumber}\" の行があること");
+            row!.Select();
+        }
+
 
         private static void SkipUnlessDebugCapture()
         {

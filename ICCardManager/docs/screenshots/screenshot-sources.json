@@ -10,7 +10,8 @@
     "制約: 判定は「変更集合に画像が含まれるか」だけを見て順序を見ない。画像を更新した後にソースを再修正した場合は検知できないので、最後の修正のあとに -Changed を実行すること。",
     "common に載せたファイルはすべての画像に影響する。",
     "filter は dotnet test の --filter に渡す式。Theory の行は FullyQualifiedName に引数が含まれないので DisplayName で絞る。",
-    "整合性（ファイルの実在・画像の実在・テストの実在・撮影側との一致）は Tools/ScreenshotSyncMappingTests が固定する。"
+    "整合性（ファイルの実在・画像の実在・テストの実在・撮影側との一致）は Tools/ScreenshotSyncMappingTests が固定する。",
+    "撮り直しの対象外: error_no_reader.png はリーダーの接続有無、warning_network_disconnected.png は共有モードのネットワーク切断という、投入データで作れない外部状態に依存する。前者は切断時のみ撮れるよう Skip で守り、後者と backup_completed_status.png（OS 標準の SaveFileDialog を経る）は対話式の tools/TakeScreenshots.ps1 に残す。"
   ],
   "publishedDir": "ICCardManager/docs/screenshots",
   "common": [
@@ -207,6 +208,162 @@
         "ICCardManager/src/ICCardManager/Views/Dialogs/BusStopInputDialog.xaml.cs",
         "ICCardManager/src/ICCardManager/ViewModels/BusStopInputViewModel.cs",
         "ICCardManager/src/ICCardManager/Common/RouteDisplayFormatter.cs"
+      ]
+    },
+    {
+      "name": "main_with_warnings.png",
+      "pass": "Release",
+      "filter": "FullyQualifiedName~ManualScreenshotTests.main_with_warnings_",
+      "sources": [
+        "ICCardManager/src/ICCardManager/Views/MainWindow.xaml",
+        "ICCardManager/src/ICCardManager/Views/MainWindow.xaml.cs",
+        "ICCardManager/src/ICCardManager/ViewModels/MainViewModel.cs",
+        "ICCardManager/src/ICCardManager/Dtos/**",
+        "ICCardManager/src/ICCardManager/Common/DisplayFormatters.cs",
+        "ICCardManager/src/ICCardManager/Common/StaffNameFormatter.cs",
+        "ICCardManager/src/ICCardManager/Services/WarningService.cs"
+      ]
+    },
+    {
+      "name": "card_list_status_mixed.png",
+      "pass": "Release",
+      "filter": "FullyQualifiedName~ManualScreenshotTests.card_list_",
+      "sources": [
+        "ICCardManager/src/ICCardManager/Views/MainWindow.xaml",
+        "ICCardManager/src/ICCardManager/Views/MainWindow.xaml.cs",
+        "ICCardManager/src/ICCardManager/ViewModels/MainViewModel.cs",
+        "ICCardManager/src/ICCardManager/Dtos/**",
+        "ICCardManager/src/ICCardManager/Common/DisplayFormatters.cs",
+        "ICCardManager/src/ICCardManager/Common/StaffNameFormatter.cs",
+        "ICCardManager/src/ICCardManager/Common/LendingStatusPresenter.cs"
+      ]
+    },
+    {
+      "name": "error_no_reader.png",
+      "pass": "Release",
+      "filter": "FullyQualifiedName~ManualScreenshotTests.error_no_reader_",
+      "sources": [
+        "ICCardManager/src/ICCardManager/Views/MainWindow.xaml",
+        "ICCardManager/src/ICCardManager/Views/MainWindow.xaml.cs",
+        "ICCardManager/src/ICCardManager/ViewModels/MainViewModel.cs"
+      ]
+    },
+    {
+      "name": "history_merge.png",
+      "pass": "Release",
+      "filter": "FullyQualifiedName~ManualScreenshotTests.history_merge_",
+      "sources": [
+        "ICCardManager/src/ICCardManager/Views/MainWindow.xaml",
+        "ICCardManager/src/ICCardManager/Views/MainWindow.xaml.cs",
+        "ICCardManager/src/ICCardManager/ViewModels/MainViewModel.cs",
+        "ICCardManager/src/ICCardManager/Dtos/**",
+        "ICCardManager/src/ICCardManager/Common/DisplayFormatters.cs",
+        "ICCardManager/src/ICCardManager/Common/StaffNameFormatter.cs",
+        "ICCardManager/src/ICCardManager/Common/RouteDisplayFormatter.cs"
+      ]
+    },
+    {
+      "name": "admin_dashboard.png",
+      "pass": "Release",
+      "filter": "FullyQualifiedName~ManualScreenshotTests.admin_dashboard_",
+      "sources": [
+        "ICCardManager/src/ICCardManager/Views/Dialogs/AdminDashboardDialog.xaml",
+        "ICCardManager/src/ICCardManager/Views/Dialogs/AdminDashboardDialog.xaml.cs",
+        "ICCardManager/src/ICCardManager/ViewModels/AdminDashboardViewModel.cs"
+      ]
+    },
+    {
+      "name": "report_preflight.png",
+      "pass": "Release",
+      "filter": "FullyQualifiedName~ManualScreenshotTests.report_preflight_",
+      "sources": [
+        "ICCardManager/src/ICCardManager/Views/Dialogs/ReportPreflightDialog.xaml",
+        "ICCardManager/src/ICCardManager/Views/Dialogs/ReportPreflightDialog.xaml.cs",
+        "ICCardManager/src/ICCardManager/ViewModels/ReportPreflightViewModel.cs",
+        "ICCardManager/src/ICCardManager/Services/ReportPreflightChecker.cs"
+      ]
+    },
+    {
+      "name": "operation_log.png",
+      "pass": "Release",
+      "filter": "DisplayName~operation_log.png",
+      "sources": [
+        "ICCardManager/src/ICCardManager/Views/Dialogs/OperationLogDialog.xaml",
+        "ICCardManager/src/ICCardManager/Views/Dialogs/OperationLogDialog.xaml.cs",
+        "ICCardManager/src/ICCardManager/ViewModels/OperationLogSearchViewModel.cs"
+      ]
+    },
+    {
+      "name": "connection_diagnostics.png",
+      "pass": "Release",
+      "filter": "DisplayName~connection_diagnostics.png",
+      "sources": [
+        "ICCardManager/src/ICCardManager/Views/Dialogs/ConnectionDiagnosticsDialog.xaml",
+        "ICCardManager/src/ICCardManager/Views/Dialogs/ConnectionDiagnosticsDialog.xaml.cs",
+        "ICCardManager/src/ICCardManager/ViewModels/ConnectionDiagnosticsViewModel.cs",
+        "ICCardManager/src/ICCardManager/Services/ConnectionDiagnosticsService.cs"
+      ]
+    },
+    {
+      "name": "transfer_station_groups.png",
+      "pass": "Release",
+      "filter": "FullyQualifiedName~ManualScreenshotTests.transfer_station_groups_",
+      "sources": [
+        "ICCardManager/src/ICCardManager/Views/Dialogs/TransferStationGroupDialog.xaml",
+        "ICCardManager/src/ICCardManager/Views/Dialogs/TransferStationGroupDialog.xaml.cs",
+        "ICCardManager/src/ICCardManager/ViewModels/TransferStationGroupViewModel.cs"
+      ]
+    },
+    {
+      "name": "restore_list.png",
+      "pass": "Release",
+      "filter": "FullyQualifiedName~ManualScreenshotTests.restore_list_",
+      "sources": [
+        "ICCardManager/src/ICCardManager/Views/Dialogs/SystemManageDialog.xaml",
+        "ICCardManager/src/ICCardManager/Views/Dialogs/SystemManageDialog.xaml.cs",
+        "ICCardManager/src/ICCardManager/ViewModels/SystemManageViewModel.cs"
+      ]
+    },
+    {
+      "name": "companion_count.png",
+      "pass": "Debug",
+      "filter": "FullyQualifiedName~TouchScreenshotTests.companion_count_",
+      "sources": [
+        "ICCardManager/src/ICCardManager/Views/Dialogs/CompanionCountInputDialog.xaml",
+        "ICCardManager/src/ICCardManager/Views/Dialogs/CompanionCountInputDialog.xaml.cs",
+        "ICCardManager/src/ICCardManager/ViewModels/CompanionCountInputViewModel.cs",
+        "ICCardManager/src/ICCardManager/Common/StaffNameFormatter.cs"
+      ]
+    },
+    {
+      "name": "virtual_touch.png",
+      "pass": "Debug",
+      "filter": "FullyQualifiedName~TouchScreenshotTests.virtual_touch_",
+      "sources": [
+        "ICCardManager/src/ICCardManager/Views/Dialogs/VirtualCardDialog.xaml",
+        "ICCardManager/src/ICCardManager/Views/Dialogs/VirtualCardDialog.xaml.cs",
+        "ICCardManager/src/ICCardManager/ViewModels/VirtualCardViewModel.cs"
+      ]
+    },
+    {
+      "name": "system_lend.png",
+      "pass": "Debug",
+      "filter": "FullyQualifiedName~TouchScreenshotTests.system_lend_",
+      "sources": [
+        "ICCardManager/src/ICCardManager/Views/Dialogs/SystemLendDialog.xaml",
+        "ICCardManager/src/ICCardManager/Views/Dialogs/SystemLendDialog.xaml.cs",
+        "ICCardManager/src/ICCardManager/ViewModels/SystemLendViewModel.cs"
+      ]
+    },
+    {
+      "name": "ledger_row_edit.png",
+      "pass": "Debug",
+      "filter": "FullyQualifiedName~TouchScreenshotTests.ledger_row_edit_",
+      "sources": [
+        "ICCardManager/src/ICCardManager/Views/Dialogs/LedgerRowEditDialog.xaml",
+        "ICCardManager/src/ICCardManager/Views/Dialogs/LedgerRowEditDialog.xaml.cs",
+        "ICCardManager/src/ICCardManager/ViewModels/LedgerRowEditViewModel.cs",
+        "ICCardManager/src/ICCardManager/Common/StaffNameFormatter.cs"
       ]
     }
   ]
