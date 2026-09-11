@@ -334,7 +334,7 @@ WHERE settings.value IS NULL OR substr(settings.value, 1, 7) <> @currentMonth";
             }
 
             // 返却時の利用履歴自動表示（Issue #1907）。既定は有効なので、未保存（null）は有効として読む
-            settings.ShowHistoryOnReturn = Get(KeyShowHistoryOnReturn)?.ToLowerInvariant() != "false";
+            settings.ShowHistoryOnReturn = ParseBool(Get(KeyShowHistoryOnReturn), defaultValue: true);
 
             // 帳票出力先フォルダ設定
             var reportOutputFolder = Get(KeyReportOutputFolder);
@@ -454,7 +454,7 @@ WHERE settings.value IS NULL OR substr(settings.value, 1, 7) <> @currentMonth";
             }
 
             // 返却時の利用履歴自動表示（Issue #1907）。既定は有効なので、未保存（null）は有効として読む
-            settings.ShowHistoryOnReturn = (await GetAsync(KeyShowHistoryOnReturn).ConfigureAwait(false))?.ToLowerInvariant() != "false";
+            settings.ShowHistoryOnReturn = ParseBool(await GetAsync(KeyShowHistoryOnReturn).ConfigureAwait(false), defaultValue: true);
 
             // 帳票出力先フォルダ設定
             var reportOutputFolder = await GetAsync(KeyReportOutputFolder);
@@ -622,6 +622,17 @@ WHERE settings.value IS NULL OR substr(settings.value, 1, 7) <> @currentMonth";
 
             return appDataPath;
         }
+
+        /// <summary>
+        /// 保存された文字列（"true" / "false"）を bool に変換する。認識できない値（未保存の null を含む）は既定値
+        /// </summary>
+        /// <remarks>
+        /// 既定が true の設定（<see cref="KeyShowHistoryOnReturn"/>、Issue #1907）で使う。
+        /// <c>?.ToLowerInvariant() != "false"</c> の形は、既定が false の兄弟キー（<c>== "true"</c>）と
+        /// 極性が逆の手組みの判定になり、認識できない値の扱いがキーごとに変わる（コードレビュー指摘）。
+        /// </remarks>
+        private static bool ParseBool(string value, bool defaultValue)
+            => bool.TryParse(value, out var parsed) ? parsed : defaultValue;
 
         /// <summary>
         /// 文字列からFontSizeOptionに変換

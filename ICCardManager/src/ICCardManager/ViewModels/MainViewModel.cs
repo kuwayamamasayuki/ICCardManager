@@ -1856,27 +1856,23 @@ public partial class MainViewModel : ViewModelBase
             return;
         }
 
+        // 当月内なら既定（当月 1 日から）。前月以前の利用があるときだけ、その最古の利用日まで遡る
         var today = DateTime.Today;
         var firstOfMonth = new DateTime(today.Year, today.Month, 1);
-        var earliestRecordedDate = recordedLedgers.Count > 0
-            ? recordedLedgers.Min(l => l.Date).Date
-            : (DateTime?)null;
-        // 当月内なら既定（当月 1 日から）。前月以前の利用があるときだけ遡る
-        var fromDate = earliestRecordedDate.HasValue && earliestRecordedDate.Value < firstOfMonth
-            ? earliestRecordedDate
-            : null;
+        var earliestRecordedDate = recordedLedgers.Min(l => l.Date).Date;
+        var fromDate = earliestRecordedDate < firstOfMonth ? earliestRecordedDate : (DateTime?)null;
 
         _balanceInconsistencies.Clear();
         await ShowHistoryAsync(card, fromDate, recordedLedgers.Select(l => l.Id));
 
         // 一覧は日付昇順（GetPagedAsync の ORDER BY）なので、今回の行＝期間内で最新の行は末尾に来る。
         // 期間内の行がページサイズを超えるカード（共用カードでは日常的）では 1 ページ目に今回の行が
-        // 1 つも無く、「✔ の行を確認してください」という案内が空振りする。最終ページへ移動して取り直す
-        // （コードレビューで検出）。View 側は IsReturnHistoryReview の立ち上がりで最初の ✔ 行へスクロールする
-        if (HistoryTotalPages > 1)
+        // 1 つも無く、「✔ の行を確認してください」という案内が空振りする。ページ送りの「最終ページ」と
+        // 同じ経路で最終ページへ移動する（コードレビューで検出。手段を 2 つにしない #1763）。
+        // View 側は IsReturnHistoryReview の立ち上がりで最初の ✔ 行へスクロールする
+        if (HistoryCanGoToLastPage)
         {
-            HistoryCurrentPage = HistoryTotalPages;
-            await LoadHistoryLedgersAsync();
+            await HistoryGoToLastPage();
         }
 
         IsReturnHistoryReview = true;
