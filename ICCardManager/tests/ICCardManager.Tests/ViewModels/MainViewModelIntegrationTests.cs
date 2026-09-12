@@ -1613,20 +1613,30 @@ public class MainViewModelIntegrationTests
         _viewModel.HistoryLedgers.Where(d => d.Id == 999)
             .Should().ContainSingle().Which.RecentlyRecordedMark.Should().BeEmpty();
 
-        // 当月の利用なので表示期間は当月 1 日から（利用日が月初の深夜で前月へ落ちる場合はその日から）
+        // 当月の利用なので表示期間は当月 1 日から
+        // （利用日が月初の深夜で前月へ落ちる場合は、その利用があった月の 1 日から）
         var usageDate = inserted.Min(l => l.Date).Date;
         var firstOfMonth = new DateTime(DateTime.Today.Year, DateTime.Today.Month, 1);
-        _viewModel.HistoryFromDate.Should().Be(usageDate < firstOfMonth ? usageDate : firstOfMonth);
+        _viewModel.HistoryFromDate.Should().Be(usageDate < firstOfMonth
+            ? new DateTime(usageDate.Year, usageDate.Month, 1)
+            : firstOfMonth);
         _viewModel.HistoryToDate.Should().Be(DateTime.Today);
         _viewModel.CurrentState.Should().Be(AppState.WaitingForStaffCard, "返却フロー自体は従来どおり完了する");
     }
 
     /// <summary>
-    /// 3/31 乗車・4/1 返却のように、今回記録した行が前月以前にあるときは、その利用日から表示して
-    /// 記録した行がすべて画面に収まること。
+    /// 3/31 乗車・4/1 返却のように、今回記録した行が前月以前にあるときは、
+    /// <b>その利用があった月の 1 日</b>から表示して記録した行がすべて画面に収まること。
     /// </summary>
+    /// <remarks>
+    /// 日付単位（3/31）ではなく月の 1 日へ丸めるのは、`GetPrecedingBalanceAsync` が
+    /// 「開始日の属する月の 1 日より前」の残高を返し、その値が合成する繰越行（#1155）と
+    /// 残高チェーンのシード（#1740）の両方に使われるため。月中の開始日だと繰越行が
+    /// 「2 月末の残高」になり、隠れた 3/1〜3/30 の行のぶん画面上の残高チェーンが合わなくなる
+    /// （記録の確認が目的の画面で最も困る形。コードレビューで検出）。
+    /// </remarks>
     [Fact]
-    public async Task ReturnReview_前月の利用を含む返却では表示期間がその利用日から始まること()
+    public async Task ReturnReview_前月の利用を含む返却では表示期間がその月の1日から始まること()
     {
         var lentAt = DateTime.Now.AddDays(-40);
         var usageDate = DateTime.Today.AddDays(-35);
@@ -1642,7 +1652,9 @@ public class MainViewModelIntegrationTests
         await RunReturnFlowAsync();
 
         _viewModel.IsReturnHistoryReview.Should().BeTrue();
-        _viewModel.HistoryFromDate.Should().Be(usageDate, "当月 1 日からでは記録した行が画面に出ない");
+        _viewModel.HistoryFromDate.Should().Be(new DateTime(usageDate.Year, usageDate.Month, 1),
+            "当月 1 日からでは記録した行が画面に出ず、月中の開始日では繰越行とチェーンのシードが狂う");
+        _viewModel.HistoryFromDate.Day.Should().Be(1, "表示期間の開始日は必ず月初（月単位の期間選択と揃える）");
         _viewModel.HistoryToDate.Should().Be(DateTime.Today);
     }
 
@@ -1794,6 +1806,17 @@ public class MainViewModelIntegrationTests
         // 待機中にカード B をタッチして履歴を手動で開く
         _cardRepositoryMock.Setup(r => r.GetByIdmAsync(CardIdmB, It.IsAny<bool>()))
             .ReturnsAsync(new IcCard { CardIdm = CardIdmB, CardType = "nimoca", CardNumber = "0001", IsLent = false });
+        // カード B の一覧に行を持たせる（空のままだと「印が付いていない」ことを表明できない）
+        _ledgerRepositoryMock.Setup(r => r.GetPagedAsync(
+                CardIdmB, It.IsAny<DateTime>(), It.IsAny<DateTime>(), It.IsAny<int>(), It.IsAny<int>()))
+            .ReturnsAsync((new List<Ledger>
+            {
+                new Ledger
+                {
+                    Id = 500, CardIdm = CardIdmB, Date = DateTime.Today.AddDays(-1),
+                    Summary = "鉄道（天神～薬院）", Expense = 210, Balance = 1200, StaffName = StaffName,
+                },
+            }, 1));
         RaiseCardRead(CardIdmB);
         await _dispatcherService.WaitForPendingAsync();
         _viewModel.IsHistoryVisible.Should().BeTrue("前提: 手動で開いた履歴");
@@ -1808,16 +1831,24 @@ public class MainViewModelIntegrationTests
         _toastMock.Verify(t => t.ShowInfo(
             It.Is<string>(title => title.Contains("履歴")),
             It.Is<string>(m => m.Contains("利用履歴を確認してください"))), Times.Once);
+        // 別のカードの一覧なので今回の行はそもそも並んでいない。印を付けるための再読込もしない
+        _viewModel.HistoryLedgers.Should().OnlyContain(d => !d.IsRecentlyRecorded,
+            "別カードの一覧に今回の行の印は付けない");
     }
 
     /// <summary>
     /// 同じカードの履歴を職員が手動で開いている（統合のために行を選んでいる等）ときも奪わないこと（#1923）。
-    /// 同じカードなら一覧は返却後処理の再読込（チェック引き継ぎ付き）で更新済みなので、置き換える必要が無い。
+    /// カード・表示期間・ページは変えないが、<b>今回の行の印（✔）は付ける</b>。
     /// </summary>
+    /// <remarks>
+    /// 「利用履歴を確認してください」と案内しながら、どの行が今回の記録かを示す手掛かりが画面に
+    /// 1 つも無い状態を残さない（コードレビューで検出）。同じカードで統合のために行を選んでいる
+    /// 最中に別の職員がそのカードを返却する形（#1923）は、職員が印を最も必要とする場面である。
+    /// </remarks>
     [Fact]
-    public async Task ReturnReview_同じカードの履歴を職員が手動で開いているときも奪わないこと()
+    public async Task ReturnReview_同じカードの履歴を職員が手動で開いているときは奪わずに今回の行へ印を付けること()
     {
-        ArrangeReturnWithHistoryReview();
+        var inserted = ArrangeReturnWithHistoryReview();
         // 返却前にカード A（貸出中）の履歴を待機中のタッチで開く … 貸出中カードのタッチは返却になるため、
         // 履歴は直接開く（手動で開いた履歴と同じ状態: IsReturnHistoryReview = false）
         _viewModel.HistoryCard = new IcCard { CardIdm = CardIdmA, CardType = "はやかけん", CardNumber = "5042" }.ToDto();
@@ -1828,10 +1859,19 @@ public class MainViewModelIntegrationTests
         await RunReturnFlowAsync();
 
         _viewModel.IsReturnHistoryReview.Should().BeFalse("職員が使っている履歴は返却確認へ置き換えない");
+        _viewModel.HistoryCard!.CardIdm.Should().Be(CardIdmA, "カードも表示期間も変えない");
         _viewModel.HistoryLedgers.Where(d => d.IsChecked).Select(d => d.Id).Should().Equal(new[] { 999 },
             "統合のためのチェックを消さない（#1923）");
         _toastMock.Verify(t => t.ShowInfo(
             It.Is<string>(title => title.Contains("履歴")), It.IsAny<string>()), Times.Once);
+
+        // 画面を奪わなくても、今回の記録がどの行かは分かるようにする
+        var recordedIds = inserted.Select(l => l.Id).ToHashSet();
+        _viewModel.HistoryLedgers.Where(d => recordedIds.Contains(d.Id))
+            .Should().NotBeEmpty().And.OnlyContain(d => d.IsRecentlyRecorded && d.RecentlyRecordedMark == "✔",
+                "案内だけ出して画面に手掛かりが無い状態を残さない");
+        _viewModel.HistoryLedgers.Should().ContainSingle(d => d.Id == 999)
+            .Which.IsRecentlyRecorded.Should().BeFalse("無関係な既存行には印を付けない");
     }
 
     /// <summary>
