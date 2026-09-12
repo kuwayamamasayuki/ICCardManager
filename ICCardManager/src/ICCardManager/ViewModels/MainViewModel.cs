@@ -1807,14 +1807,15 @@ public partial class MainViewModel : ViewModelBase
     /// <remarks>
     /// <para>
     /// 表示期間は当月 1 日からだが、今回記録した行が前月以前（3/31 乗車・4/1 返却）にあれば
-    /// その最古の利用日から表示し、記録した行がすべて画面に収まるようにする。
+    /// <b>その利用があった月の 1 日</b>から表示し、記録した行がすべて画面に収まるようにする。
     /// 今回記録した行は <see cref="LedgerDto.IsRecentlyRecorded"/> で強調する。
     /// </para>
     /// <para>
     /// #186（カードタッチでメイン画面を変更しない＝職員の操作を妨げない）との両立:
     /// 履歴パネルが職員の操作で開いている（手動で開いた／返却確認を操作した）なら、表示中のカードが
     /// 同じでも乗っ取らず、トーストで確認を促すだけにする（同じカードの行を統合のためにチェックしている
-    /// 最中に別の職員がそのカードを返却し得る。#1923）。
+    /// 最中に別の職員がそのカードを返却し得る。#1923）。ただし<b>同じカードを表示しているなら
+    /// 今回の行の目印（✔）は付ける</b> — カード・表示期間・ページを変えないので #186 の範囲に収まる。
     /// 返却確認が操作されないまま残っているだけなら置き換える。
     /// </para>
     /// <para>
@@ -1832,20 +1833,10 @@ public partial class MainViewModel : ViewModelBase
             return;
         }
 
-        if (IsHistoryVisible && !IsReturnHistoryReviewReplaceable)
-        {
-            // 職員が履歴を使っている（手動で開いた／返却確認を操作した）。#186 のとおり画面を奪わず、確認だけ促す。
-            // 同じカードの履歴でも奪わない — 統合のために行をチェックしている最中に別の職員がそのカードを
-            // 返却し得る（#1923）。同じカードなら一覧は上で preserveCheckedRows 付きで再読込済みで、
-            // 今回の行はもう画面に出ている
-            // タイトルは #596 の警告トースト「履歴の確認」（同じ返却で同時に出得る）と区別する
-            _toastNotificationService.ShowInfo(
-                "返却した履歴の確認",
-                "返却した交通系ICカードの利用履歴を確認してください。");
-            return;
-        }
-
-        // 貸出中レコード（返却で物理削除済み）と未採番の行は対象外
+        // 貸出中レコード（返却で物理削除済み）と未採番の行は対象外。
+        // 「記録ゼロ」の判定は履歴パネルの状態より前に行う（コードレビューで検出） — 後ろに置くと、
+        // 職員が履歴を開いているときだけ「確認してください」のトーストが出て、しかし確認すべき
+        // 記録は 1 行も無い（借りたが使わずに返した／重複除外で全件落ちた）という案内になる。
         var recordedLedgers = (result.CreatedLedgers ?? new List<Ledger>())
             .Where(l => l != null && !l.IsLentRecord && l.Id > 0)
             .ToList();
@@ -1856,11 +1847,50 @@ public partial class MainViewModel : ViewModelBase
             return;
         }
 
-        // 当月内なら既定（当月 1 日から）。前月以前の利用があるときだけ、その最古の利用日まで遡る
+        if (IsHistoryVisible && !IsReturnHistoryReviewReplaceable)
+        {
+            // 職員が履歴を使っている（手動で開いた／返却確認を操作した）。#186 のとおり画面を奪わず、確認だけ促す。
+            // 同じカードの履歴でも奪わない — 統合のために行をチェックしている最中に別の職員がそのカードを
+            // 返却し得る（#1923）
+            // タイトルは #596 の警告トースト「履歴の確認」（同じ返却で同時に出得る）と区別する。
+            // 案内は再読込より前に出す（再読込は DB I/O で失敗し得るため、失敗するサブシステムに
+            // 通知を依存させない。#1727）
+            _toastNotificationService.ShowInfo(
+                "返却した履歴の確認",
+                "返却した交通系ICカードの利用履歴を確認してください。");
+
+            // 画面は奪わないが、今回の行の目印は付ける（コードレビューで検出）。
+            // 「利用履歴を確認してください」と案内しながら、どの行が今回の記録かを示す手掛かりが
+            // 画面に 1 つも無い状態を残さない — カード・表示期間・ページは変えないので #186 の範囲に収まる。
+            // 同じカードを表示しているときだけ行う（別のカードなら今回の行はそもそも一覧に無い）。
+            if (HistoryCard != null && HistoryCard.CardIdm == card.CardIdm)
+            {
+                _recentlyRecordedLedgerIds.UnionWith(recordedLedgers.Select(l => l.Id));
+                // Issue #1923: 返却は履歴画面で行を選んでいる職員の操作ではないため、チェックは引き継ぐ
+                await LoadHistoryLedgersAsync(preserveCheckedRows: true);
+            }
+
+            return;
+        }
+
+        // 当月内なら既定（当月 1 日から）。前月以前の利用があるときだけ、その利用があった月の 1 日まで遡る。
+        //
+        // **日付単位ではなく月の 1 日へ丸める**（コードレビューで検出）。この履歴パネルの表示期間は
+        // 月単位が前提で、`GetPrecedingBalanceAsync` は「開始日の属する月の 1 日より前」の残高を返す。
+        // 開始日に 3/31 のような月中の日付を入れると、その値が
+        //   ・合成する「○月から繰越」行（#1155）
+        //   ・残高チェーンの並べ替えシード（#1740）
+        // の両方で「2 月末の残高」になり、3/1〜3/30 の行は期間外で隠れるため、
+        // 画面上の「受入 − 払出 = 残額」が合わなくなる（記録の確認が目的の画面で最も困る形）。
+        // シードの誤りはさらに悪く、循環する日の中間残高に偶然一致するとチェーンが回転した状態で
+        // 確定する（`business-logic.md` #1999）。月の 1 日へ丸めれば両方の消費側が正しくなり、
+        // 「記録した行がすべて画面に収まる」という本来の意図も満たせる。
         var today = DateTime.Today;
         var firstOfMonth = new DateTime(today.Year, today.Month, 1);
         var earliestRecordedDate = recordedLedgers.Min(l => l.Date).Date;
-        var fromDate = earliestRecordedDate < firstOfMonth ? earliestRecordedDate : (DateTime?)null;
+        var fromDate = earliestRecordedDate < firstOfMonth
+            ? new DateTime(earliestRecordedDate.Year, earliestRecordedDate.Month, 1)
+            : (DateTime?)null;
 
         _balanceInconsistencies.Clear();
         await ShowHistoryAsync(card, fromDate, recordedLedgers.Select(l => l.Id));
