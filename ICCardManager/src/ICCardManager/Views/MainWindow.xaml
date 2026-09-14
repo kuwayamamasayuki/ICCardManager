@@ -456,6 +456,17 @@
                                 <TextBlock Text="表示期間:"
                                            VerticalAlignment="Center"
                                            Margin="0,0,10,0"/>
+                                <!-- 前の月へ（Issue #2030）。表示期間テキストの Border の外に置き、クリックで月選択ポップアップが開かないようにする -->
+                                <Button x:Name="HistoryPreviousMonthButton"
+                                        Content="◀"
+                                        Command="{Binding HistoryGoToPreviousMonthCommand}"
+                                        Padding="8,4"
+                                        MinWidth="32"
+                                        VerticalAlignment="Center"
+                                        Margin="0,0,5,0"
+                                        ToolTip="前の月の履歴を表示"
+                                        AutomationProperties.Name="前の月"
+                                        AutomationProperties.HelpText="表示期間を1か月前へ移動します"/>
                                 <Border x:Name="HistoryPeriodDisplayBorder"
                                         Background="{DynamicResource ReturnBackgroundBrush}"
                                         CornerRadius="4"
@@ -468,6 +479,17 @@
                                                FontWeight="Bold"
                                                Foreground="{DynamicResource InfoTextBrush}"/>
                                 </Border>
+                                <!-- 次の月へ（Issue #2030）。今月を表示しているときは無効 -->
+                                <Button x:Name="HistoryNextMonthButton"
+                                        Content="▶"
+                                        Command="{Binding HistoryGoToNextMonthCommand}"
+                                        Padding="8,4"
+                                        MinWidth="32"
+                                        VerticalAlignment="Center"
+                                        Margin="5,0,0,0"
+                                        ToolTip="次の月の履歴を表示"
+                                        AutomationProperties.Name="次の月"
+                                        AutomationProperties.HelpText="表示期間を1か月後へ移動します"/>
                             </StackPanel>
 
                             <!-- 月選択ボタン（使用頻度順: 先月 > 今月。帳票画面と同じ順序） -->

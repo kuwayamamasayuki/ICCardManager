@@ -436,7 +436,13 @@ public partial class MainViewModel : ViewModelBase
     /// <summary>
     /// 履歴の表示期間開始日
     /// </summary>
+    /// <remarks>
+    /// Issue #2030: 表示期間の左右の矢印（前の月／次の月）は開始月を基準に移動先を決めるため、
+    /// 開始日が変わるたびに実行可否を再評価する。
+    /// </remarks>
     [ObservableProperty]
+    [NotifyCanExecuteChangedFor(nameof(HistoryGoToPreviousMonthCommand))]
+    [NotifyCanExecuteChangedFor(nameof(HistoryGoToNextMonthCommand))]
     private DateTime _historyFromDate;
 
     /// <summary>
@@ -2209,9 +2215,16 @@ public partial class MainViewModel : ViewModelBase
             ? fromDate.Value.Date
             : defaultFrom;
         HistoryToDate = today;
+        EnsureHistoryYearAvailable(today.Year);
         HistorySelectedYear = today.Year;
         HistorySelectedMonth = today.Month;
         UpdateHistoryPeriodDisplay();
+
+        // Issue #2030: 矢印の実行可否は「今日」にも依存するが、MVVM Toolkit の RelayCommand は
+        // CommandManager.RequerySuggested を購読しないため、開始日が前回と同じ値だと再評価されない
+        // （8/31 に開いた履歴を 9/1 に開き直しても ▶ が無効のまま残る）。開くたびに明示的に通知する
+        HistoryGoToPreviousMonthCommand.NotifyCanExecuteChanged();
+        HistoryGoToNextMonthCommand.NotifyCanExecuteChanged();
 
         await LoadHistoryLedgersAsync();
         IsHistoryVisible = true;
@@ -2555,6 +2568,93 @@ public partial class MainViewModel : ViewModelBase
     }
 
     /// <summary>
+    /// Issue #2030: 表示期間を 1 か月前へ移動する（表示期間の左の ◀）
+    /// </summary>
+    [RelayCommand(CanExecute = nameof(HistoryCanGoToPreviousMonth))]
+    public async Task HistoryGoToPreviousMonth()
+    {
+        await MoveHistoryMonthAsync(-1);
+    }
+
+    /// <summary>
+    /// Issue #2030: 表示期間を 1 か月後へ移動する（表示期間の右の ▶）
+    /// </summary>
+    [RelayCommand(CanExecute = nameof(HistoryCanGoToNextMonth))]
+    public async Task HistoryGoToNextMonth()
+    {
+        await MoveHistoryMonthAsync(1);
+    }
+
+    /// <summary>
+    /// 履歴: 前の月へ移動可能か
+    /// </summary>
+    public bool HistoryCanGoToPreviousMonth => ResolveAdjacentHistoryMonth(-1).HasValue;
+
+    /// <summary>
+    /// 履歴: 次の月へ移動可能か
+    /// </summary>
+    public bool HistoryCanGoToNextMonth => ResolveAdjacentHistoryMonth(1).HasValue;
+
+    private async Task MoveHistoryMonthAsync(int deltaMonths)
+    {
+        // CanExecute の評価から実行までに日付が変わり得るため、実行時にも境界を確かめる
+        var target = ResolveAdjacentHistoryMonth(deltaMonths);
+        if (!target.HasValue) return;
+
+        await SetHistoryMonth(target.Value.Year, target.Value.Month);
+    }
+
+    /// <summary>
+    /// Issue #2030: 月選択ポップアップの年リストに無い年を補う（降順を保つ）。
+    /// </summary>
+    /// <remarks>
+    /// 年リストは起動時に「今年から 6 年前まで」で作るだけなので、矢印で到達できる年がリストに無いことがある。
+    /// ①警告クリック（#2007）で下限より前の年を表示してから ▶ で進んだ場合 ②起動したまま年を越してから ▶ で
+    /// 新しい年へ進んだ場合。補わないと <see cref="HistorySelectedYear"/> がリスト外になり、ポップアップの年が空欄になる。
+    /// 矢印の導入前は、リスト外の年が <c>SetHistoryMonth</c> へ渡る経路は無かった。
+    /// </remarks>
+    private void EnsureHistoryYearAvailable(int year)
+    {
+        if (HistoryAvailableYears.Contains(year)) return;
+
+        var index = 0;
+        while (index < HistoryAvailableYears.Count && HistoryAvailableYears[index] > year) index++;
+        HistoryAvailableYears.Insert(index, year);
+    }
+
+    private DateTime? ResolveAdjacentHistoryMonth(int deltaMonths)
+    {
+        var oldestYear = HistoryAvailableYears.Count > 0 ? HistoryAvailableYears.Min() : DateTime.Today.Year;
+        return GetAdjacentHistoryMonth(HistoryFromDate, deltaMonths, DateTime.Today, oldestYear);
+    }
+
+    /// <summary>
+    /// Issue #2030: 表示期間の開始月から <paramref name="deltaMonths"/> か月ずらした月の 1 日を返す。
+    /// 移動できないときは null。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>基準は開始月</b>。警告クリック（#2007）で「2025年4月～2026年9月」のような範囲を表示しているときも、
+    /// ラベルの先頭の月から前後へ 1 か月ずつ移動する（範囲の表示は解除され暦月表示に戻る）。
+    /// </para>
+    /// <para>
+    /// <b>前へは月選択ポップアップで選べる最古の年の 1 月まで</b>（ポップアップと矢印で到達できる範囲を揃える。
+    /// 台帳の保存期間は 6 年）。<b>次へは今月まで</b> — <c>ledger.date</c> は利用日なので未来の月に行は無い。
+    /// 下限は後ろ向きの移動にだけ、上限は前向きの移動にだけ効かせる。警告クリックで下限より前の月を
+    /// 表示しているとき、次の月へ進む操作まで塞がないため。
+    /// </para>
+    /// </remarks>
+    internal static DateTime? GetAdjacentHistoryMonth(DateTime from, int deltaMonths, DateTime today, int oldestYear)
+    {
+        var target = new DateTime(from.Year, from.Month, 1).AddMonths(deltaMonths);
+
+        if (deltaMonths < 0 && target < new DateTime(oldestYear, 1, 1)) return null;
+        if (deltaMonths > 0 && target > new DateTime(today.Year, today.Month, 1)) return null;
+
+        return target;
+    }
+
+    /// <summary>
     /// 月選択ポップアップを開く
     /// </summary>
     [RelayCommand]
@@ -2589,6 +2689,7 @@ public partial class MainViewModel : ViewModelBase
     {
         HistoryFromDate = new DateTime(year, month, 1);
         HistoryToDate = new DateTime(year, month, DateTime.DaysInMonth(year, month));
+        EnsureHistoryYearAvailable(year);
         HistorySelectedYear = year;
         HistorySelectedMonth = month;
         HistoryCurrentPage = 1;
