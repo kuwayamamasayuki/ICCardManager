@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Reflection;
 using ICCardManager.Models;
 
 namespace ICCardManager.Services
@@ -30,20 +31,72 @@ namespace ICCardManager.Services
     /// </remarks>
     internal sealed class SummaryGenerationContext
     {
-        private readonly List<HashSet<string>> _transferStationGroups;
+        /// <summary>
+        /// 摘要テキストの文字列プロパティ（null を既定値で補う対象。Issue #2035）
+        /// </summary>
+        private static readonly PropertyInfo[] SummaryTextStringProperties = typeof(SummaryTextOptions)
+            .GetProperties(BindingFlags.Public | BindingFlags.Instance)
+            .Where(p => p.PropertyType == typeof(string) && p.CanRead && p.CanWrite)
+            .ToArray();
+
+        private static readonly SummaryTextOptions DefaultSummaryText = new();
+
+        /// <summary>
+        /// 併合済み・空白除外済みの同一視グループ（判定と観測が共有する唯一の値。Issue #2035）
+        /// </summary>
+        private readonly IReadOnlyList<IReadOnlyList<string>> _transferStationGroups;
+
+        /// <summary>
+        /// 名前 → 同一視グループの代表名（Issue #2035）
+        /// </summary>
+        /// <remarks>
+        /// <see cref="AreTransferStations"/> と <see cref="CanonicalStation"/> はどちらも
+        /// #1916 の候補探索（経路数に対して急速に増える）の内側で呼ばれる。旧実装は呼ばれるたびに
+        /// グループ全体を走査し、<see cref="CanonicalStation"/> は毎回グループを並べ替えていたため、
+        /// 登録グループ数に比例して遅くなっていた（実測: 20 区間の日 30 日分で、グループ 0 件 19.6ms・
+        /// 50 件 231.6ms・300 件 1,190.8ms）。世代を組み立てるときに 1 度だけ作り、判定は参照 1 回にする。
+        /// 両者が同じ辞書を引くので、<c>CanonicalStation(a) == CanonicalStation(b)</c> と
+        /// <c>AreTransferStations(a, b)</c> の等価性（<c>GetRemainingRoutes</c> の突合が依存する）も構造で保たれる。
+        /// </remarks>
+        private readonly Dictionary<string, string> _canonicalStations;
 
         private SummaryGenerationContext(
+            OrganizationOptions? source,
             OrganizationOptions options,
-            List<HashSet<string>> transferStationGroups,
+            IReadOnlyList<IReadOnlyList<string>> transferStationGroups,
+            Dictionary<string, string> canonicalStations,
             DepartmentType departmentType)
         {
+            Source = source;
             Options = options;
             _transferStationGroups = transferStationGroups;
+            _canonicalStations = canonicalStations;
             DepartmentType = departmentType;
         }
 
-        /// <summary>この世代の組織固有設定</summary>
+        /// <summary>
+        /// この世代の組織固有設定（null を既定値で補った後の値）
+        /// </summary>
+        /// <remarks>
+        /// Issue #2035: <see cref="OrganizationOptions.SummaryText"/> / <see cref="OrganizationOptions.SummaryRules"/>・
+        /// 同一視グループのリスト・摘要テキストの各文字列は <b>null にならない</b>。設定から来た null は
+        /// <see cref="Create"/> が 1 か所で既定値へ補うため、生成の各段階は null を守らずに参照してよい。
+        /// 空文字は「明示的な設定」として保持する（往復の接尾辞を空にする設定を
+        /// <c>CollapseExplicitGroupSummary</c> が想定しているため）。
+        /// </remarks>
         public OrganizationOptions Options { get; }
+
+        /// <summary>
+        /// この世代を組み立てた元の設定インスタンス（<see cref="Create"/> に渡されたもの、Issue #2035）
+        /// </summary>
+        /// <remarks>
+        /// DI 用コンストラクタ（<see cref="SummaryGenerator(DepartmentType, OrganizationOptions)"/>）が
+        /// <b>同じ設定インスタンスで世代を作り直さない</b>ための照合にだけ使う。作り直すと、
+        /// 実行中に反映した同一視グループ（<see cref="SummaryGenerator.ApplyTransferStationGroups"/>）が
+        /// 起動時の値へ戻る。生成には使わない（正規化済みの <see cref="Options"/> を使う）。
+        /// 差し替え（<see cref="WithTransferStationGroups"/> / <see cref="WithDepartmentType"/>）は元の値を引き継ぐ。
+        /// </remarks>
+        public OrganizationOptions? Source { get; }
 
         /// <summary>
         /// この世代の部署種別（チャージ摘要の切替に使用、Issue #1975）
@@ -72,11 +125,12 @@ namespace ICCardManager.Services
         /// 生成の入口（<c>CaptureContext</c>）が世代へ畳み込む。ここで受け取る形にすると
         /// 「静的な世代が持つ部署種別」という第 2 の情報源ができ、どちらが正かが失われる。
         /// </remarks>
-        public static SummaryGenerationContext Create(OrganizationOptions options)
+        public static SummaryGenerationContext Create(OrganizationOptions? options)
         {
-            var effective = options ?? new OrganizationOptions();
+            var effective = Normalize(options);
+            var groups = BuildTransferStationGroups(effective);
             return new SummaryGenerationContext(
-                effective, BuildTransferStationGroups(effective), DepartmentType.MayorOffice);
+                options, effective, groups, BuildCanonicalStations(groups), DepartmentType.MayorOffice);
         }
 
         /// <summary>
@@ -87,11 +141,13 @@ namespace ICCardManager.Services
         /// 生成の入口（<see cref="SummaryGenerator.CaptureContext"/>）から毎回呼んでも
         /// 走査コストは掛からない。<see cref="Options"/> はそのまま共有する
         /// （不変オブジェクトとして扱うため、共有しても中間状態は生じない）。
+        /// 汎用/固有の別: 汎用（部署種別によるチャージ摘要の切替は物品出納簿の様式）。
         /// </remarks>
         public SummaryGenerationContext WithDepartmentType(DepartmentType departmentType)
             => departmentType == DepartmentType
                 ? this
-                : new SummaryGenerationContext(Options, _transferStationGroups, departmentType);
+                : new SummaryGenerationContext(
+                    Source, Options, _transferStationGroups, _canonicalStations, departmentType);
 
         /// <summary>
         /// 同一視グループだけを差し替えた新しい世代を返す（Issue #1905 / #1919）
@@ -103,35 +159,41 @@ namespace ICCardManager.Services
         /// 生成ルールの ON/OFF は現行の値をそのまま引き継ぐ
         /// （<c>development-conventions.md</c>「UPDATE の SET 句は、その経路で
         /// 本当に編集する列に限る」と同じ判断）。
+        ///
+        /// Issue #2035: 引き継ぎは<b>複製</b>（<see cref="OrganizationOptions.ShallowCopy"/>）で行い、
+        /// プロパティを 1 つずつ書き写さない。書き写す形は、設定クラスへプロパティを足した日に
+        /// F6 で同一視グループを保存した時点でそのプロパティが黙って既定値へ戻る（#1726 と同じ形）。
+        /// 漏れは <c>SummaryGenerationContextTests</c> がリフレクションで検出する。
         /// </remarks>
         public SummaryGenerationContext WithTransferStationGroups(
             IEnumerable<IEnumerable<string>> groups)
         {
-            var newOptions = new OrganizationOptions
-            {
-                SummaryText = Options.SummaryText,
-                AreaPriority = Options.AreaPriority,
-                ReportLayout = Options.ReportLayout,
-                TemplateMapping = Options.TemplateMapping,
-                SummaryRules = new SummaryRulesOptions
-                {
-                    EnableRoundTripDetection = Options.SummaryRules.EnableRoundTripDetection,
-                    EnableTransferConsolidation = Options.SummaryRules.EnableTransferConsolidation,
-                    TransferStationGroups = (groups ?? Enumerable.Empty<IEnumerable<string>>())
-                        .Where(g => g != null)
-                        .Select(g => g.ToList())
-                        .ToList()
-                }
-            };
+            var newRules = Options.SummaryRules.ShallowCopy();
+            newRules.TransferStationGroups = (groups ?? Enumerable.Empty<IEnumerable<string>>())
+                .Where(g => g != null)
+                .Select(g => g.ToList())
+                .ToList();
 
-            return Create(newOptions);
+            var newOptions = Options.ShallowCopy();
+            newOptions.SummaryRules = newRules;
+
+            var newGroups = BuildTransferStationGroups(newOptions);
+            return new SummaryGenerationContext(
+                Source, newOptions, newGroups, BuildCanonicalStations(newGroups), DepartmentType);
         }
 
         /// <summary>
         /// この世代の同一視グループのコピーを返す（観測用、Issue #1905）
         /// </summary>
+        /// <remarks>
+        /// Issue #2035: 判定（<see cref="AreTransferStations"/> / <see cref="CanonicalStation"/>）が実際に使う
+        /// <b>併合済み・空白除外済み</b>のグループを返す。設定の生のリストを返すと、[A,B] と [B,C] の登録で
+        /// 2 グループが観測されるのに判定は 1 つの同値類 {A,B,C} で動き、このメソッドで結果を確かめる
+        /// テストは併合が壊れても緑のままになる。各グループの名前は設定に最初に現れた順、
+        /// グループの並びは各グループの先頭の名前が現れた順。
+        /// </remarks>
         public List<List<string>> GetTransferStationGroups()
-            => Options.SummaryRules.TransferStationGroups
+            => _transferStationGroups
                 .Select(g => g.ToList())
                 .ToList();
 
@@ -150,7 +212,7 @@ namespace ICCardManager.Services
         /// <see cref="BuildTransferStationGroups"/> がグループを同値類へ併合済みのため、
         /// 本メソッドは <c>CanonicalStation(a) == CanonicalStation(b)</c> と等価。
         /// </remarks>
-        public bool AreTransferStations(string station1, string station2)
+        public bool AreTransferStations(string? station1, string? station2)
         {
             // 完全一致
             if (station1 == station2)
@@ -158,16 +220,12 @@ namespace ICCardManager.Services
                 return true;
             }
 
-            // 同一グループ内かチェック
-            foreach (var group in _transferStationGroups)
-            {
-                if (group.Contains(station1) && group.Contains(station2))
-                {
-                    return true;
-                }
-            }
-
-            return false;
+            // 同一グループ内か（代表名が一致するか）。Dictionary は null キーを引けないため先に除く
+            return station1 != null
+                && station2 != null
+                && _canonicalStations.TryGetValue(station1, out var canonical1)
+                && _canonicalStations.TryGetValue(station2, out var canonical2)
+                && canonical1 == canonical2;
         }
 
         /// <summary>
@@ -186,19 +244,10 @@ namespace ICCardManager.Services
         /// （利用者が実際に乗降した停留所の名前をそのまま表示するため）。
         /// </para>
         /// </remarks>
-        public string CanonicalStation(string station)
-        {
-            foreach (var group in _transferStationGroups)
-            {
-                if (group.Contains(station))
-                {
-                    // .NET Framework 4.8 には Enumerable.Min(IComparer) のオーバーロードが無い
-                    return group.OrderBy(n => n, StringComparer.Ordinal).First();
-                }
-            }
-
-            return station;
-        }
+        public string? CanonicalStation(string? station)
+            => station != null && _canonicalStations.TryGetValue(station, out var canonical)
+                ? canonical
+                : station;
 
         /// <summary>
         /// TransferStationGroups を List&lt;List&lt;string&gt;&gt; から List&lt;HashSet&lt;string&gt;&gt; に変換
@@ -216,13 +265,36 @@ namespace ICCardManager.Services
         /// 「天神日銀前と天神中央郵便局前」「天神中央郵便局前と天神北」のように
         /// 重なるグループが実際に作られ得るため。
         /// </remarks>
-        private static List<HashSet<string>> BuildTransferStationGroups(OrganizationOptions options)
+        private static IReadOnlyList<IReadOnlyList<string>> BuildTransferStationGroups(OrganizationOptions options)
         {
+            // 観測（GetTransferStationGroups）で並びが揺れないよう、名前が最初に現れた位置を覚えておく
+            var firstSeen = new Dictionary<string, int>(StringComparer.Ordinal);
             var merged = new List<HashSet<string>>();
 
             foreach (var group in options.SummaryRules.TransferStationGroups)
             {
-                var names = new HashSet<string>(group.Where(n => !string.IsNullOrWhiteSpace(n)));
+                // Issue #2035: 設定のグループ・名前の null は空白と同じく除外する
+                if (group == null)
+                {
+                    continue;
+                }
+
+                var names = new HashSet<string>(StringComparer.Ordinal);
+                foreach (var name in group)
+                {
+                    if (string.IsNullOrWhiteSpace(name))
+                    {
+                        continue;
+                    }
+
+                    if (!firstSeen.ContainsKey(name))
+                    {
+                        firstSeen.Add(name, firstSeen.Count);
+                    }
+
+                    names.Add(name);
+                }
+
                 if (names.Count == 0)
                 {
                     continue;
@@ -239,7 +311,111 @@ namespace ICCardManager.Services
                 merged.Add(names);
             }
 
-            return merged;
+            return merged
+                .Select(g => (IReadOnlyList<string>)g.OrderBy(n => firstSeen[n]).ToList())
+                .OrderBy(g => firstSeen[g[0]])
+                .ToList();
+        }
+
+        /// <summary>
+        /// 名前 → 代表名の辞書を組み立てる（Issue #2035）
+        /// </summary>
+        /// <remarks>
+        /// 代表名はグループ内で序数比較が最小の名前（<see cref="CanonicalStation"/> の remarks 参照）。
+        /// </remarks>
+        private static Dictionary<string, string> BuildCanonicalStations(
+            IReadOnlyList<IReadOnlyList<string>> groups)
+        {
+            var canonicalStations = new Dictionary<string, string>(StringComparer.Ordinal);
+            foreach (var group in groups)
+            {
+                // .NET Framework 4.8 には Enumerable.Min(IComparer) のオーバーロードが無い
+                var canonical = group.OrderBy(n => n, StringComparer.Ordinal).First();
+                foreach (var name in group)
+                {
+                    canonicalStations[name] = canonical;
+                }
+            }
+
+            return canonicalStations;
+        }
+
+        /// <summary>
+        /// 設定の null を既定値で補った値を返す（Issue #2035）
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// 旧実装は <see cref="BuildTransferStationGroups"/> が <c>SummaryRules</c> と各グループを
+        /// null チェックせずに参照し（<see cref="WithTransferStationGroups"/> は null のグループを除外していた）、
+        /// 生成の各段階は <c>SummaryText.RailwayLabel</c> 等を直接参照していた（<c>ResolveBusLabel</c> だけが
+        /// null を守っていた）。null の扱いを参照する側ごとに書くと、次に参照を足す人が守り忘れる。
+        /// 世代の入口で 1 回だけ補い、以降は null を表現できない状態にする（#1883）。
+        /// </para>
+        /// <para>
+        /// null は「未設定＝既定値」として補い、<b>空文字は明示的な設定として保持する</b>。
+        /// 補うために<b>渡された設定インスタンスを書き換えない</b>（DI シングルトンの設定は
+        /// <c>TransferStationGroupService</c> も参照する）。null が無ければ元のインスタンスをそのまま使う。
+        /// </para>
+        /// <para>
+        /// なお appsettings.json の <c>null</c> は構成バインダーが空文字・空のグループへ変換するため、
+        /// 設定ファイル経由でここへ null が届くことは無い（実測）。null はコードから組み立てた設定でだけ起きる。
+        /// </para>
+        /// </remarks>
+        private static OrganizationOptions Normalize(OrganizationOptions? options)
+        {
+            var summaryText = NormalizeSummaryText(options?.SummaryText);
+            var summaryRules = NormalizeSummaryRules(options?.SummaryRules);
+
+            if (options != null
+                && ReferenceEquals(summaryText, options.SummaryText)
+                && ReferenceEquals(summaryRules, options.SummaryRules))
+            {
+                return options;
+            }
+
+            var normalized = options?.ShallowCopy() ?? new OrganizationOptions();
+            normalized.SummaryText = summaryText;
+            normalized.SummaryRules = summaryRules;
+            return normalized;
+        }
+
+        private static SummaryTextOptions NormalizeSummaryText(SummaryTextOptions? summaryText)
+        {
+            if (summaryText == null)
+            {
+                return new SummaryTextOptions();
+            }
+
+            var nullProperties = SummaryTextStringProperties.Where(p => p.GetValue(summaryText) == null).ToList();
+            if (nullProperties.Count == 0)
+            {
+                return summaryText;
+            }
+
+            var normalized = summaryText.ShallowCopy();
+            foreach (var property in nullProperties)
+            {
+                property.SetValue(normalized, property.GetValue(DefaultSummaryText));
+            }
+
+            return normalized;
+        }
+
+        private static SummaryRulesOptions NormalizeSummaryRules(SummaryRulesOptions? summaryRules)
+        {
+            if (summaryRules == null)
+            {
+                return new SummaryRulesOptions();
+            }
+
+            if (summaryRules.TransferStationGroups != null)
+            {
+                return summaryRules;
+            }
+
+            var normalized = summaryRules.ShallowCopy();
+            normalized.TransferStationGroups = new SummaryRulesOptions().TransferStationGroups;
+            return normalized;
         }
     }
 }

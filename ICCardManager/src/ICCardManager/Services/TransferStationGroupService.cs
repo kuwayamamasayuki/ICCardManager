@@ -32,8 +32,9 @@ namespace ICCardManager.Services
         /// </summary>
         /// <remarks>
         /// <see cref="OrganizationOptions"/> のインスタンスは DI のシングルトンで、
-        /// <c>App.xaml.cs</c> の起動時反映と <see cref="SummaryGenerator.ApplyTransferStationGroups"/> が
-        /// <c>SummaryRules.TransferStationGroups</c> を**その場で書き換える**。
+        /// <c>App.xaml.cs</c> の起動時反映が <c>SummaryRules.TransferStationGroups</c> を**その場で書き換える**
+        /// （<see cref="SummaryGenerator.ApplyTransferStationGroups"/> は Issue #1919 以降、設定インスタンスを
+        /// 書き換えず新しい世代を組み立てる）。
         /// 参照を持ち回ると「DB に未保存のときの初期値」が「最後に保存した値」に化けて
         /// フォールバックが初期値でなくなるため、構築時にコピーを取る。
         /// </remarks>

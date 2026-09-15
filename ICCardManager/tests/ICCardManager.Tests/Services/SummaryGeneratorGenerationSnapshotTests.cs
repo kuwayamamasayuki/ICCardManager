@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using FluentAssertions;
 using ICCardManager.Models;
 using ICCardManager.Services;
@@ -178,6 +179,125 @@ public class SummaryGeneratorGenerationSnapshotTests : IDisposable
     }
 
     /// <summary>
+    /// Issue #2035: <see cref="SummaryGenerator.GenerateByDate"/> のポイント還元の摘要も、
+    /// 捕捉した世代から作ること。
+    /// </summary>
+    /// <remarks>
+    /// 旧実装はチャージの行だけを世代から引き（<c>ResolveChargeSummary(context)</c>）、
+    /// ポイント還元の行は静的な <c>GetPointRedemptionSummary()</c> を呼んでいたため、
+    /// 1 回の生成の中で読む先が分かれていた。組織設定の差し替えを捕捉の直後に割り込ませ、
+    /// 同じ生成のチャージとポイント還元が同じ世代の文言になることを表明する。
+    /// </remarks>
+    [Fact]
+    public void GenerateByDate_ポイント還元の摘要も捕捉した世代から作ること()
+    {
+        // Arrange
+        SummaryGenerator.Configure(CreateTextOptions("旧チャージ", "旧ポイント還元"));
+        var generator = new OptionsSwappingGenerator(CreateTextOptions("新チャージ", "新ポイント還元"));
+
+        // Act
+        var summaries = generator.GenerateByDate(CreateChargeAndPointRedemptionDetails());
+
+        // Assert
+        generator.SwapPerformed.Should().BeTrue("差し替えを割り込ませられていること");
+        summaries.Select(s => s.Summary).Should().BeEquivalentTo(new[] { "旧チャージ", "旧ポイント還元" });
+    }
+
+    /// <summary>
+    /// 対のテスト: 組織設定の差し替えは次の生成から反映されること。
+    /// </summary>
+    /// <remarks>
+    /// これが無いと、ポイント還元の文言を起動時の値に固定する実装でも上のテストが緑になる。
+    /// </remarks>
+    [Fact]
+    public void GenerateByDate_組織設定の差し替えは次の生成から反映されること()
+    {
+        // Arrange
+        SummaryGenerator.Configure(CreateTextOptions("旧チャージ", "旧ポイント還元"));
+        var generator = new OptionsSwappingGenerator(CreateTextOptions("新チャージ", "新ポイント還元"));
+        generator.GenerateByDate(CreateChargeAndPointRedemptionDetails());
+
+        // Act
+        var summaries = generator.GenerateByDate(CreateChargeAndPointRedemptionDetails());
+
+        // Assert
+        summaries.Select(s => s.Summary).Should().BeEquivalentTo(new[] { "新チャージ", "新ポイント還元" });
+    }
+
+    /// <summary>
+    /// Issue #2035: DI 用コンストラクタで 2 つ目のインスタンスを作っても、
+    /// 実行中に反映した同一視グループを起動時の値へ戻さないこと。
+    /// </summary>
+    /// <remarks>
+    /// DI 用コンストラクタは静的な <see cref="SummaryGenerator.Configure"/> を呼ぶ。
+    /// 旧実装は同じ設定インスタンスでも毎回世代を作り直したため、2 つ目のインスタンスを作った時点で
+    /// システム管理画面（F6）で保存したグループが消えていた（今は Singleton 1 か所だけなので実害は無い）。
+    /// </remarks>
+    [Fact]
+    public void DI用コンストラクタで2つ目を作っても反映済みのグループを戻さないこと()
+    {
+        // Arrange
+        var options = new OrganizationOptions();
+        _ = new SummaryGenerator(DepartmentType.MayorOffice, options);
+        SummaryGenerator.ApplyTransferStationGroups(TenjinGroups);
+
+        // Act
+        _ = new SummaryGenerator(DepartmentType.EnterpriseAccount, options);
+
+        // Assert
+        SummaryGenerator.GetTransferStationGroups().Should().ContainSingle()
+            .Which.Should().Equal("天神日銀前", "天神中央郵便局前");
+    }
+
+    /// <summary>
+    /// 対のテスト: 別の設定インスタンスを渡した DI 用コンストラクタは、その設定を反映すること。
+    /// </summary>
+    /// <remarks>
+    /// これが無いと、DI 用コンストラクタが設定を一切反映しない実装でも上のテストが緑になる。
+    /// </remarks>
+    [Fact]
+    public void DI用コンストラクタへ別の設定を渡すとその設定を反映すること()
+    {
+        // Arrange
+        _ = new SummaryGenerator(DepartmentType.MayorOffice, new OrganizationOptions());
+        SummaryGenerator.ApplyTransferStationGroups(TenjinGroups);
+        var other = new OrganizationOptions();
+        other.SummaryText.BusLabel = "乗合自動車";
+        other.SummaryRules.TransferStationGroups = new List<List<string>> { new() { "薬院", "薬院大通" } };
+
+        // Act
+        _ = new SummaryGenerator(DepartmentType.MayorOffice, other);
+
+        // Assert
+        SummaryGenerator.BusLabel.Should().Be("乗合自動車");
+        SummaryGenerator.GetTransferStationGroups().Should().ContainSingle()
+            .Which.Should().Equal("薬院", "薬院大通");
+    }
+
+    private static OrganizationOptions CreateTextOptions(string chargeSummary, string pointRedemption)
+    {
+        var options = new OrganizationOptions();
+        options.SummaryText.ChargeSummaryMayorOffice = chargeSummary;
+        options.SummaryText.PointRedemption = pointRedemption;
+        return options;
+    }
+
+    /// <summary>同じ日のチャージとポイント還元（ICカード履歴は新しい順）</summary>
+    private static List<LedgerDetail> CreateChargeAndPointRedemptionDetails() => new()
+    {
+        new LedgerDetail
+        {
+            UseDate = new DateTime(2024, 12, 9), Amount = -100, Balance = 2100,
+            IsPointRedemption = true, SequenceNumber = 1
+        },
+        new LedgerDetail
+        {
+            UseDate = new DateTime(2024, 12, 9), Amount = -1000, Balance = 2000,
+            IsCharge = true, SequenceNumber = 2
+        },
+    };
+
+    /// <summary>
     /// Issue #1905 の報告事例（天神日銀前→下原中央→天神中央郵便局前、ICカード履歴は新しい順）
     /// </summary>
     private static List<LedgerDetail> CreateBusRoundTripDetails() => new()
@@ -221,6 +341,33 @@ public class SummaryGeneratorGenerationSnapshotTests : IDisposable
             {
                 SwapPerformed = true;
                 ApplyTransferStationGroups(_groupsToApply);
+            }
+            return captured;
+        }
+    }
+
+    /// <summary>
+    /// 世代を捕捉した直後に組織設定を差し替えるテスト用ジェネレーター（Issue #2035）
+    /// </summary>
+    private sealed class OptionsSwappingGenerator : SummaryGenerator
+    {
+        private readonly OrganizationOptions _optionsToApply;
+
+        public OptionsSwappingGenerator(OrganizationOptions optionsToApply)
+        {
+            _optionsToApply = optionsToApply;
+        }
+
+        /// <summary>差し替えを実際に割り込ませたか（空振りしていないことの表明用）</summary>
+        public bool SwapPerformed { get; private set; }
+
+        internal override SummaryGenerationContext CaptureContext()
+        {
+            var captured = base.CaptureContext();
+            if (!SwapPerformed)
+            {
+                SwapPerformed = true;
+                Configure(_optionsToApply);
             }
             return captured;
         }
