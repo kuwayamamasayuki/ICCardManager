@@ -8,8 +8,10 @@ using ICCardManager.Common;
 using ICCardManager.Data.Repositories;
 using ICCardManager.Infrastructure.Security;
 using ICCardManager.Models;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using System.Globalization;
+using System.Text.RegularExpressions;
 
 namespace ICCardManager.Services
 {
@@ -193,12 +195,33 @@ namespace ICCardManager.Services
         private readonly IReportDataBuilder _reportDataBuilder;
         private readonly OrganizationOptions _orgOptions;
         private readonly IReportFileNameFactory _fileNameFactory;
+        private readonly ILogger<ReportService> _logger;
+
+        /// <summary>
+        /// 書き込み途中の年度ファイルに付ける一時ファイルの拡張子（Issue #2040）
+        /// </summary>
+        /// <remarks>
+        /// 年度ファイル（<c>*.xlsx</c>）と取り違えられないことが要件。<see cref="ReportExportStatusService"/> は
+        /// 最終名のファイルを開いて「出力済み」を判定するため、書き込み途中の内容に最終名を与えると
+        /// 壊れたファイルが出力済みとして表示される。
+        /// </remarks>
+        internal const string ReportTempFileExtension = ".tmp";
+
+        /// <summary>
+        /// 一時ファイル名に含めるランダム識別子の文字数（Issue #2040）
+        /// </summary>
+        /// <remarks>
+        /// 共有フォルダーで複数台が同じ年度ファイルを同時に作成しても一時ファイルが衝突しない長さ。
+        /// GUID 全体（32 文字）にしないのはパス長上限（260 文字）へ早く到達するため（#1748 と同じ判断）。
+        /// </remarks>
+        internal const int TempFileTokenLength = 8;
 
         public ReportService(
             ICardRepository cardRepository,
             ILedgerRepository ledgerRepository,
             ISettingsRepository settingsRepository,
             IReportDataBuilder reportDataBuilder,
+            ILogger<ReportService> logger,
             IOptions<OrganizationOptions> orgOptions = null,
             IReportFileNameFactory fileNameFactory = null)
         {
@@ -206,6 +229,8 @@ namespace ICCardManager.Services
             _ledgerRepository = ledgerRepository;
             _settingsRepository = settingsRepository;
             _reportDataBuilder = reportDataBuilder;
+            // Issue #2040: 一時ファイルの回収・残置の痕跡を残すため必須引数で受ける（#1820 / #1956）
+            _logger = logger ?? throw new ArgumentNullException(nameof(logger));
             _orgOptions = orgOptions?.Value ?? new OrganizationOptions();
             // Issue #1820: 同じ組織設定から導出する。DI 未指定でも本サービスの _orgOptions と
             // 同じ設定値を使うため、書式が経路によって食い違うことはない。
@@ -283,19 +308,41 @@ namespace ICCardManager.Services
 
                 var card = data.Card;
 
+                // Issue #2040: 過去に中断した保存の一時ファイルを回収する（例外は投げない）
+                CleanupStaleTempFiles(outputPath);
+
                 // Issue #477: 既存ファイルがあれば開く、なければテンプレートから新規作成
                 XLWorkbook workbook;
                 bool isExistingFile = File.Exists(outputPath);
 
                 if (isExistingFile)
                 {
-                    workbook = new XLWorkbook(outputPath);
+                    try
+                    {
+                        workbook = OpenExistingWorkbook(outputPath);
+                    }
+                    catch (Exception ex) when (IsCorruptedPackageException(ex))
+                    {
+                        // Issue #2040: 修正前の版は年度ファイルへ直接上書き保存していたため、保存の中断で
+                        // zip が途中で切れたファイルが最終名のまま残り得る。汎用の「帳票の作成に失敗しました」では
+                        // 原因（ファイルが壊れている）も回復手段も分からず、作成が失敗し続ける。
+                        // 破損と判定するのは zip／パッケージ／XML の読み取り失敗だけに限る。それ以外
+                        // （ロック・権限・ClosedXML が対応しない要素を含む正常なファイル等）を「壊れている」と案内すると、
+                        // 正常なファイルを退避させて全月を作り直させる誘導になる。
+                        // 黙って作り直さないのは、壊れたファイルでも他の月の内容を取り出せる可能性があるため
+                        // （ReportExportStatusService が壊れたファイルを「不明」と表示し上書きしないのと同じ判断）。
+                        _logger.LogWarning(ex, "既存の帳票ファイルを開けませんでした: {Path}", outputPath);
+                        return ReportGenerationResult.FailureResult(
+                            "既存の帳票ファイルを開けません",
+                            BuildUnreadableExistingFileMessage(Path.GetFileName(outputPath)));
+                    }
                 }
                 else
                 {
                     workbook = new XLWorkbook(templatePath);
                 }
 
+                string tempPath;
                 using (workbook)
                 {
                     // シート名を決定（月名）
@@ -414,16 +461,29 @@ namespace ICCardManager.Services
                     }
                     workbook.Properties.Modified = now;
 
-                    // ファイルを保存
-                    workbook.SaveAs(outputPath);
+                    // Issue #2040: 最終名へ直接保存しない。一時ファイルへ書き切ってから差し替える
+                    tempPath = WriteWorkbookToTempFile(workbook, outputPath);
                 }
 
+                // ワークブックを閉じてから差し替える（読み込み元のハンドルが残っていると置換できない環境があるため）
+                CommitTempFile(tempPath, outputPath);
+
                 return ReportGenerationResult.SuccessResult(outputPath);
+            }
+            catch (ReportContentRetainedException ex)
+            {
+                // Issue #2040: 差し替えに失敗し年度ファイルが無い状態。作成した内容（これまでの月を含む）を
+                // 別名で残したので、その名前を示す。IOException の派生なので、この分岐は IOException より前に置く。
+                // 痕跡は CommitTempFile が _logger へ記録済み。
+                return ReportGenerationResult.FailureResult(
+                    "ファイルの保存に失敗しました",
+                    BuildRetainedContentMessage(Path.GetFileName(outputPath), Path.GetFileName(ex.RetainedPath)));
             }
             catch (UnauthorizedAccessException ex)
             {
                 // #1614: 生の ex.Message は職員へ出さず、技術的詳細はログへ残す（#1817「UI 文言とログを対で数える」）。
-                // 本サービスは ILogger を持たないため ErrorDialogHelper.LogException を使う。
+                // これらの分岐は ILogger 注入（#2040）より前から ErrorDialogHelper.LogException（エラーログ）へ記録しており、
+                // 障害調査の起点を変えないためそのまま残している。
                 // 例外種別が確定している分岐では ToReason を「詳細:」として併記しない。
                 // ToReason は種別ごとの定型文なので、直前の文と同じことを別の言い方で繰り返すだけになり
                 // （DirectoryNotFoundException は IOException 分岐に落ちるため「読み書き中に問題」と
@@ -455,6 +515,359 @@ namespace ICCardManager.Services
                 return ReportGenerationResult.FailureResult(
                     "帳票の作成に失敗しました",
                     $"{ExceptionMessageFormatter.ToReason(ex)}\n\n詳細はログファイルを確認してください。");
+            }
+        }
+
+        /// <summary>
+        /// 既存の年度ファイルが壊れていて開けないときの案内文言を組み立てる（Issue #2040）
+        /// </summary>
+        /// <param name="fileName">年度ファイルのファイル名（フォルダーを含まない）</param>
+        internal static string BuildUnreadableExistingFileMessage(string fileName)
+        {
+            return $"出力先の年度ファイル「{fileName}」が壊れているため開けません（以前の保存が途中で中断された可能性があります）。" +
+                "このファイルを別のフォルダーへ移動するか名前を変えてから、もう一度作成してください。" +
+                "移動したファイルに含まれていた他の月の帳票も、あらためて作成してください。\n\n詳細はログファイルを確認してください。";
+        }
+
+        /// <summary>
+        /// 年度ファイルの一時ファイルパスを組み立てる（Issue #2040）
+        /// </summary>
+        /// <remarks>
+        /// <c>{年度ファイル名}.{8 桁の識別子}.tmp</c>。回収処理が「この年度ファイルの一時ファイル」だけを
+        /// 選べるよう、最終名を接頭辞として含める。
+        /// </remarks>
+        internal static string BuildTempFilePath(string outputPath, string token)
+        {
+            return $"{outputPath}.{token}{ReportTempFileExtension}";
+        }
+
+        /// <summary>
+        /// ファイル名が指定した年度ファイルの一時ファイルか（Issue #2040）
+        /// </summary>
+        /// <remarks>
+        /// 出力先フォルダーは職員が選ぶ任意のフォルダー（ドキュメント等）であり、他のアプリケーションの
+        /// <c>.tmp</c> も置かれ得る。Win32 のワイルドカード照合は 8.3 短縮名にも一致するため、
+        /// 列挙結果をこの厳密な形で絞ってから削除する。
+        /// </remarks>
+        internal static bool IsTempFileNameOf(string candidateFileName, string outputFileName)
+        {
+            if (string.IsNullOrEmpty(candidateFileName) || string.IsNullOrEmpty(outputFileName))
+            {
+                return false;
+            }
+
+            var pattern = "^" + Regex.Escape(outputFileName) +
+                @"\.[0-9a-f]{" + TempFileTokenLength.ToString(CultureInfo.InvariantCulture) + "}" +
+                Regex.Escape(ReportTempFileExtension) + "$";
+            return Regex.IsMatch(candidateFileName, pattern, RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+        }
+
+        /// <summary>
+        /// ワークブックを一時ファイルへ書き切り、そのパスを返す（Issue #2040）
+        /// </summary>
+        /// <remarks>
+        /// 書き込みに失敗したら一時ファイルを削除して例外を再スローする。最終名のファイルには一切触れないため、
+        /// 既存の年度ファイル（それまでの月のシート）は保存前の状態のまま残る。
+        /// </remarks>
+        private string WriteWorkbookToTempFile(XLWorkbook workbook, string outputPath)
+        {
+            var token = Guid.NewGuid().ToString("N").Substring(0, TempFileTokenLength);
+            var tempPath = BuildTempFilePath(outputPath, token);
+
+            try
+            {
+                WriteWorkbookTo(workbook, tempPath);
+            }
+            catch
+            {
+                // 後始末の失敗で本来の失敗要因を置き換えない（db-write-conventions.md「catch の中の後始末」）
+                TryDeleteFile(tempPath, "書き込みを中断した帳票の一時ファイル");
+                throw;
+            }
+
+            return tempPath;
+        }
+
+        /// <summary>
+        /// ワークブックを指定パスへ書き出す（Issue #2040）
+        /// </summary>
+        /// <remarks>
+        /// 保存途中の中断（共有フォルダーの切断・ディスク満杯）は実機でしか起きないため、
+        /// 単体テストが差し替えて再現できるよう <c>internal virtual</c> にしている。
+        /// 拡張子で形式を決める <c>SaveAs(string)</c> ではなくストリームへ保存するのは、一時ファイルの拡張子が
+        /// <c>.xlsx</c> ではないため。<c>FileMode.CreateNew</c> は識別子が衝突したときに他 PC のファイルを
+        /// 上書きしないため。
+        /// </remarks>
+        internal virtual void WriteWorkbookTo(XLWorkbook workbook, string path)
+        {
+            // ClosedXML（Open XML SDK）はパッケージを組み立てる際に読み戻すため ReadWrite で開く
+            using var stream = new FileStream(path, FileMode.CreateNew, FileAccess.ReadWrite, FileShare.None);
+            workbook.SaveAs(stream);
+            stream.Flush(flushToDisk: true);
+        }
+
+        /// <summary>
+        /// 書き切った一時ファイルを最終名へ差し替える（Issue #2040）
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// 既存ファイルがあるときは削除＋移動ではなく <see cref="File.Replace(string, string, string, bool)"/> を使う。
+        /// バックアップ（#1748）と違い、年度ファイルは<b>それまでの月のシートを積み上げた状態そのもの</b>であり、
+        /// 削除と移動の間で失敗すると次回はテンプレートから作り直されて過去の月が消える。
+        /// <c>File.Replace</c> は失敗しても置換先を元の名前のまま残す。
+        /// </para>
+        /// <para>
+        /// 差し替えに失敗したとき、最終名のファイルが残っていれば一時ファイルは消す。中身は作り直せる出力に
+        /// すぎず、Excel で年度ファイルを開いたまま作成する（＝置換がロックで失敗する）のは日常的な操作なので、
+        /// 残すと出力先フォルダーに一時ファイルが溜まる。
+        /// </para>
+        /// <para>
+        /// 最終名が無いとき（新規ファイルの移動に失敗した／<c>File.Replace</c> が ERROR_UNABLE_TO_MOVE_REPLACEMENT(_2)
+        /// で置換先を別名へ退避したまま失敗した）は、一時ファイルが既存の月を含む<b>唯一の完全な内容</b>である。
+        /// 一時ファイルのまま残すだけでは守れない — 次回の作成は「年度ファイルが無い」と判断してテンプレートから
+        /// 作り直し（過去の月が消えた版が成功として保存される）、24 時間後には回収処理が一時ファイルを消す。
+        /// そこで ①まず最終名へ戻す（戻せれば保存は成立している） ②戻せなければ回収対象にならない復旧用の名前
+        /// （<see cref="BuildRecoveryFilePath"/>）へ移し、その名前を利用者へ示す。
+        /// </para>
+        /// </remarks>
+        private void CommitTempFile(string tempPath, string outputPath)
+        {
+            try
+            {
+                ReplaceTempFile(tempPath, outputPath);
+                return;
+            }
+            catch (Exception ex)
+            {
+                // 置換非対応の共有先などを切り分けられるよう Win32 のエラーコードを残す
+                _logger.LogWarning(ex,
+                    "帳票の年度ファイルへの差し替えに失敗しました: {TempPath} → {OutputPath}, HResult=0x{HResult}",
+                    tempPath,
+                    outputPath,
+                    ex.HResult.ToString("X8", CultureInfo.InvariantCulture));
+
+                if (OutputFileExists(outputPath))
+                {
+                    TryDeleteFile(tempPath, "差し替えられなかった帳票の一時ファイル");
+                    throw;
+                }
+
+                try
+                {
+                    MoveTempFile(tempPath, outputPath);
+                    _logger.LogWarning(
+                        "差し替えに失敗した年度ファイルを、作成した内容で復元しました: {OutputPath}",
+                        outputPath);
+                    return;
+                }
+                catch (Exception restoreEx)
+                {
+                    _logger.LogWarning(restoreEx, "年度ファイルの復元にも失敗しました: {OutputPath}", outputPath);
+                }
+
+                var retainedPath = RetainAsRecoveryFile(tempPath, outputPath);
+                throw new ReportContentRetainedException(retainedPath, ex);
+            }
+        }
+
+        /// <summary>
+        /// 一時ファイルで最終名のファイルを置き換える（無ければ移動する）
+        /// </summary>
+        /// <remarks>
+        /// <c>File.Replace</c> の失敗モード（置換先を消したまま失敗する等）は実機でしか起きないため、
+        /// 単体テストが差し替えて再現できるよう <c>internal virtual</c> にしている。
+        /// </remarks>
+        internal virtual void ReplaceTempFile(string tempPath, string outputPath)
+        {
+            if (File.Exists(outputPath))
+            {
+                File.Replace(tempPath, outputPath, destinationBackupFileName: null, ignoreMetadataErrors: true);
+            }
+            else
+            {
+                MoveTempFile(tempPath, outputPath);
+            }
+        }
+
+        /// <summary>
+        /// 一時ファイルを最終名へ移動する（テストの継ぎ目。<see cref="ReplaceTempFile"/> を参照）
+        /// </summary>
+        internal virtual void MoveTempFile(string tempPath, string outputPath)
+        {
+            File.Move(tempPath, outputPath);
+        }
+
+        /// <summary>
+        /// 既存の年度ファイルを開く（テストの継ぎ目。ClosedXML が読めない正常なファイルを再現するため）
+        /// </summary>
+        internal virtual XLWorkbook OpenExistingWorkbook(string path)
+        {
+            return new XLWorkbook(path);
+        }
+
+        /// <summary>
+        /// 例外が「ファイルが壊れている」ことを示すか（Issue #2040）
+        /// </summary>
+        /// <remarks>
+        /// zip の破損（<see cref="InvalidDataException"/>）、パッケージ構造の破損（<c>FileFormatException</c> /
+        /// <c>OpenXmlPackageException</c>）、XML の破損（<see cref="System.Xml.XmlException"/>）に限る。
+        /// 前 2 者は参照アセンブリの差異を避けるため型名で照合する。ラップされた例外も内側まで辿る。
+        /// </remarks>
+        internal static bool IsCorruptedPackageException(Exception exception)
+        {
+            for (var current = exception; current != null; current = current.InnerException)
+            {
+                if (current is InvalidDataException || current is System.Xml.XmlException)
+                {
+                    return true;
+                }
+
+                var typeName = current.GetType().FullName;
+                if (typeName == "System.IO.FileFormatException" ||
+                    typeName == "DocumentFormat.OpenXml.Packaging.OpenXmlPackageException")
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        /// <summary>
+        /// 差し替えに失敗し年度ファイルが無いときに、作成した内容を残す復旧用ファイルのパス（Issue #2040）
+        /// </summary>
+        /// <remarks>
+        /// <c>{年度ファイル名（拡張子なし）}_復旧_{8 桁}.xlsx</c>。回収処理（<c>.tmp</c> で終わる名前）の対象外で、
+        /// 出力済み判定（最終名の完全一致）にも現れない。拡張子を <c>.xlsx</c> にして、利用者が Excel で開いて
+        /// 中身を確かめられるようにする。
+        /// </remarks>
+        internal static string BuildRecoveryFilePath(string outputPath, string token)
+        {
+            var directory = Path.GetDirectoryName(outputPath) ?? string.Empty;
+            var name = Path.GetFileNameWithoutExtension(outputPath);
+            var extension = Path.GetExtension(outputPath);
+            return Path.Combine(directory, $"{name}_復旧_{token}{extension}");
+        }
+
+        /// <summary>
+        /// 一時ファイルを復旧用の名前へ移し、残したファイルのパスを返す（移せなければ一時ファイルのパス）
+        /// </summary>
+        private string RetainAsRecoveryFile(string tempPath, string outputPath)
+        {
+            var token = Guid.NewGuid().ToString("N").Substring(0, TempFileTokenLength);
+            var recoveryPath = BuildRecoveryFilePath(outputPath, token);
+            try
+            {
+                File.Move(tempPath, recoveryPath);
+                _logger.LogWarning(
+                    "年度ファイルへ差し替えられなかったため、作成した内容を復旧用ファイルに残しました: {RecoveryPath}（本来の名前: {OutputPath}）",
+                    recoveryPath,
+                    outputPath);
+                return recoveryPath;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex,
+                    "作成した内容を復旧用ファイルへ移せなかったため、一時ファイルのまま残しました: {TempPath}（本来の名前: {OutputPath}）",
+                    tempPath,
+                    outputPath);
+                return tempPath;
+            }
+        }
+
+        /// <summary>
+        /// 差し替えに失敗し作成した内容を別名で残したときの案内文言（Issue #2040）
+        /// </summary>
+        internal static string BuildRetainedContentMessage(string outputFileName, string retainedFileName)
+        {
+            return $"年度ファイル「{outputFileName}」を保存できなかったため、作成した内容（これまでの月を含む）を「{retainedFileName}」に残しました。" +
+                $"出力先フォルダーでこのファイルの名前を「{outputFileName}」に変えてから、もう一度作成してください。" +
+                "\n\n詳細はログファイルを確認してください。";
+        }
+
+        private static bool OutputFileExists(string outputPath)
+        {
+            try
+            {
+                return File.Exists(outputPath);
+            }
+            catch (Exception)
+            {
+                return false;
+            }
+        }
+
+        /// <summary>
+        /// 差し替えに失敗し、作成した内容を別名で残したことを伝える例外（Issue #2040）
+        /// </summary>
+        /// <remarks>
+        /// <see cref="IOException"/> の派生にして、専用の分岐が無い経路でも従来の保存失敗として扱われるようにする。
+        /// </remarks>
+        private sealed class ReportContentRetainedException : IOException
+        {
+            public ReportContentRetainedException(string retainedPath, Exception innerException)
+                : base("Report content was retained under a different name.", innerException)
+            {
+                RetainedPath = retainedPath;
+            }
+
+            public string RetainedPath { get; }
+        }
+
+        /// <summary>
+        /// 保存を中断した一時ファイルのうち十分に古いものを削除する（Issue #2040）
+        /// </summary>
+        /// <remarks>
+        /// 対象はこの年度ファイルの一時ファイルに限る（<see cref="IsTempFileNameOf"/>）。
+        /// 最善努力であり<b>例外を投げない</b> — 回収の失敗で帳票の作成を止めない。
+        /// </remarks>
+        private void CleanupStaleTempFiles(string outputPath)
+        {
+            try
+            {
+                var directory = Path.GetDirectoryName(outputPath);
+                var outputFileName = Path.GetFileName(outputPath);
+                if (string.IsNullOrEmpty(directory) || string.IsNullOrEmpty(outputFileName) || !Directory.Exists(directory))
+                {
+                    return;
+                }
+
+                var threshold = DateTime.Now.AddHours(-AppConstants.ReportTempFileStaleHours);
+                var candidates = new DirectoryInfo(directory)
+                    .GetFiles(outputFileName + ".*" + ReportTempFileExtension)
+                    .Where(f => IsTempFileNameOf(f.Name, outputFileName) && f.LastWriteTime < threshold);
+
+                foreach (var file in candidates)
+                {
+                    // 一時ファイルの残存は前回の保存が完走しなかった痕跡なので Information で残す（logging.md）
+                    _logger.LogInformation(
+                        "保存を中断した帳票の一時ファイルを削除します: {Path}, LastWrite={LastWrite}",
+                        file.FullName,
+                        file.LastWriteTime.ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture));
+                    TryDeleteFile(file.FullName, "保存を中断した帳票の一時ファイル");
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "保存を中断した帳票の一時ファイルの回収に失敗しました: {Path}", outputPath);
+            }
+        }
+
+        /// <summary>
+        /// ファイルを削除する。失敗しても例外を投げず Warning を残す
+        /// </summary>
+        private void TryDeleteFile(string path, string description)
+        {
+            try
+            {
+                if (File.Exists(path))
+                {
+                    File.Delete(path);
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "{Description}の削除に失敗しました: {Path}", description, path);
             }
         }
 

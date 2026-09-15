@@ -71,6 +71,7 @@ public class ReportViewModelBulkCreationTests : IDisposable
             _ledgerRepositoryMock.Object,
             _settingsRepositoryMock.Object,
             reportDataBuilder,
+            Microsoft.Extensions.Logging.Abstractions.NullLogger<ReportService>.Instance,
             (IOptions<OrganizationOptions>)null,
             (IReportFileNameFactory)null)
         {

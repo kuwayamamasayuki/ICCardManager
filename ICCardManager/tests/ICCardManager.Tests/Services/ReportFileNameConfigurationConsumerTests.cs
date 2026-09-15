@@ -80,6 +80,7 @@ public class ReportFileNameConfigurationConsumerTests : IDisposable
             ledgerRepository.Object,
             settingsRepository.Object,
             new ReportDataBuilder(cardRepository.Object, ledgerRepository.Object),
+            Microsoft.Extensions.Logging.Abstractions.NullLogger<ReportService>.Instance,
             orgOptions);
     }
 

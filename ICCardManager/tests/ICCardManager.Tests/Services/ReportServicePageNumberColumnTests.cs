@@ -82,6 +82,7 @@ public class ReportServicePageNumberColumnTests : IDisposable
             _ledgerRepositoryMock.Object,
             _settingsRepositoryMock.Object,
             reportDataBuilder,
+            Microsoft.Extensions.Logging.Abstractions.NullLogger<ReportService>.Instance,
             Options.Create(options));
     }
 
@@ -101,6 +102,7 @@ public class ReportServicePageNumberColumnTests : IDisposable
             _ledgerRepositoryMock.Object,
             _settingsRepositoryMock.Object,
             reportDataBuilder,
+            Microsoft.Extensions.Logging.Abstractions.NullLogger<ReportService>.Instance,
             Options.Create(options));
     }
 
