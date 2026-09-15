@@ -828,21 +828,33 @@ namespace ICCardManager.Services
         /// <returns>時系列順の run のリスト。各 run は同一モードの明細のみを含む</returns>
         /// <remarks>汎用/固有の別: 交通系固有（鉄道・バス混在の摘要組み立て）。</remarks>
         private static List<List<LedgerDetail>> SplitIntoModeRuns(List<LedgerDetail> details)
-        {
-            var runs = new List<List<LedgerDetail>>();
+            => SplitWhereKeyChanges(details, d => d.IsBus);
 
-            foreach (var detail in details)
+        /// <summary>
+        /// 並びを変えずに、隣接する要素のキーが変わる位置で分割する（Issue #2033）
+        /// </summary>
+        /// <remarks>
+        /// run 分割（<see cref="SplitIntoModeRuns"/>）・明示グループの区切り（<see cref="SplitIntoGroupSegments"/>）・
+        /// バス停名の形式の区切り（<see cref="GenerateBusSummaryAutomatic"/>）が同じ手順を使う（#1763）。
+        /// 汎用/固有の別: 汎用（キーを持つ列の分割）。
+        /// </remarks>
+        private static List<List<T>> SplitWhereKeyChanges<T, TKey>(IEnumerable<T> items, Func<T, TKey> keySelector)
+        {
+            var segments = new List<List<T>>();
+            var comparer = EqualityComparer<TKey>.Default;
+
+            foreach (var item in items)
             {
-                var lastRun = runs.Count > 0 ? runs[runs.Count - 1] : null;
-                if (lastRun == null || lastRun[0].IsBus != detail.IsBus)
+                var lastSegment = segments.Count > 0 ? segments[segments.Count - 1] : null;
+                if (lastSegment == null || !comparer.Equals(keySelector(lastSegment[0]), keySelector(item)))
                 {
-                    lastRun = new List<LedgerDetail>();
-                    runs.Add(lastRun);
+                    lastSegment = new List<T>();
+                    segments.Add(lastSegment);
                 }
-                lastRun.Add(detail);
+                lastSegment.Add(item);
             }
 
-            return runs;
+            return segments;
         }
 
         /// <summary>
@@ -941,12 +953,15 @@ namespace ICCardManager.Services
         /// **明細の並びが生成側の出力順と一致するときだけ**なので、並び順の定義を
         /// 消費側に書き写さず、生成パイプラインと同じ手順
         /// （<see cref="SortChronologically"/> → <see cref="CoalesceExplicitGroups"/> →
-        /// <see cref="SplitIntoModeRuns"/> → run 内の GroupId 優先順）を本メソッドに集約する。
+        /// <see cref="SplitIntoModeRuns"/>）を本メソッドに集約する。
         /// </para>
         /// <para>
-        /// GroupId を含む run では <see cref="GenerateBusSummaryWithGroupId"/> と同じく
-        /// 「グループ（最古 UseDate 順、各グループ内は時系列）→ 未グループ」の順になる。
-        /// 往復・乗継統合（<see cref="BuildRouteSummary"/>）が起きた場合は摘要側の
+        /// Issue #2033: run の内側も利用順に出力する（グループ・グループ外の経路の続き・
+        /// 「A～B」形式でないバス停名のいずれも、利用順の位置に現れる）ため、
+        /// 出力順は <see cref="CoalesceExplicitGroups"/> を通した run の並びそのものになる。
+        /// 従来は「グループ → 未グループ」「解析できた経路 → 解析できなかったバス停名」の
+        /// 固定順だったため、本メソッドもそれを書き写していた。
+        /// 往復・乗継統合（<see cref="BuildRouteSummary"/>）や重複除去が起きた場合は摘要側の
         /// バス停数が明細数より少なくなるが、同期側の件数一致ガードが書き戻しを
         /// 抑止するため、本メソッドは統合前の順序を返せば足りる。
         /// 汎用/固有の別: 交通系固有（バス混在表記）。
@@ -960,37 +975,36 @@ namespace ICCardManager.Services
 
             var runs = SplitIntoModeRuns(CoalesceExplicitGroups(SortChronologically(usageDetails)));
 
-            var result = new List<LedgerDetail>();
-            foreach (var run in runs)
-            {
-                if (!run[0].IsBus)
-                {
-                    continue;
-                }
-
-                var sortedRun = SortChronologically(run);
-                if (sortedRun.Any(t => t.GroupId.HasValue))
-                {
-                    // GenerateBusSummaryWithGroupId と同じ出力順
-                    var groupedTrips = sortedRun
-                        .Where(t => t.GroupId.HasValue)
-                        .GroupBy(t => t.GroupId!.Value)
-                        .OrderBy(g => g.Min(t => t.UseDate ?? DateTime.MaxValue));
-                    foreach (var group in groupedTrips)
-                    {
-                        result.AddRange(SortChronologically(group.ToList()));
-                    }
-
-                    result.AddRange(sortedRun.Where(t => !t.GroupId.HasValue));
-                }
-                else
-                {
-                    result.AddRange(sortedRun);
-                }
-            }
-
-            return result;
+            return runs
+                .Where(run => run[0].IsBus)
+                .SelectMany(run => run)
+                .ToList();
         }
+
+        /// <summary>
+        /// run を「同じ明示グループ（GroupId）の明細」「グループ外の明細の続き」の区切りへ分割する（Issue #2033）
+        /// </summary>
+        /// <param name="run">
+        /// <see cref="CoalesceExplicitGroups"/> を通した後の、同一モードの run（並びを変えずに渡すこと）
+        /// </param>
+        /// <returns>利用順に並んだ区切りのリスト。各区切りは GroupId が同じ（null どうしを含む）明細だけを持つ</returns>
+        /// <remarks>
+        /// <para>
+        /// 従来は鉄道・バスとも「全グループ → グループ外の経路をまとめて自動判定」の固定順で結合していたため、
+        /// グループより前に利用したグループ外の経路が後ろへ回り（A→B／C→D(G1)／D→E(G1) が「C～E、A～B」）、
+        /// さらにグループを挟んだグループ外の経路どうしが 1 つのリストとして往復・乗継統合されていた
+        /// （#1904「間に別の利用を挟む往復は往復と表記しない」と矛盾）。
+        /// </para>
+        /// <para>
+        /// <see cref="CoalesceExplicitGroups"/> がグループの明細を最古の位置へ隣接配置するため、
+        /// run の並びのまま隣接する GroupId で区切れば、グループは必ず 1 つの区切りに収まる。
+        /// run の内側で並べ替え直すとこの隣接配置が崩れるので、呼び出し側は run を並べ替えないこと。
+        /// 鉄道とバスで同じ区切り方を使う（#1763「同じ判断を配らない」）。
+        /// 汎用/固有の別: 交通系固有（鉄道・バスの摘要組み立て）。
+        /// </para>
+        /// </remarks>
+        private static List<List<LedgerDetail>> SplitIntoGroupSegments(IEnumerable<LedgerDetail> run)
+            => SplitWhereKeyChanges(run, d => d.GroupId);
 
         /// <summary>
         /// 経路リストに対して乗り継ぎ統合→往復検出→文字列整形の共通パイプラインを実行
@@ -1397,7 +1411,9 @@ namespace ICCardManager.Services
         /// <summary>
         /// 鉄道利用の摘要文字列を生成します。
         /// </summary>
-        /// <param name="trips">鉄道利用の履歴詳細リスト</param>
+        /// <param name="run">
+        /// 鉄道利用の run（<see cref="CoalesceExplicitGroups"/> を通した並びのまま。並べ替えないこと）
+        /// </param>
         /// <returns>「A駅～B駅」形式の摘要文字列。往復の場合は「A駅～B駅 往復」形式</returns>
         /// <remarks>
         /// <para>アルゴリズム：</para>
@@ -1410,78 +1426,54 @@ namespace ICCardManager.Services
         /// </remarks>
         /// <param name="context">この生成が参照する設定の世代（Issue #1919）</param>
         private string GenerateRailwaySummary(
-            List<LedgerDetail> trips, SummaryGenerationContext context)
+            List<LedgerDetail> run, SummaryGenerationContext context)
         {
-            if (trips.Count == 0)
+            // Issue #2033: run を並べ替え直さず、利用順の区切りごとに生成して結合する
+            //（グループ外の経路はグループをまたいで 1 つのリストにまとめない）
+            // 摘要に載らない明細（運賃 0 円の入場記録等。Issue #1735）は区切る前に除く。
+            // 除かないと、摘要に何も出ないグループが前後のグループ外経路の往復・乗継統合を分断する
+            //（コードレビューで検出）
+            var parts = new List<string>();
+
+            foreach (var segment in SplitIntoGroupSegments(run.Where(IsSummarizableTrip)))
             {
-                return string.Empty;
+                // Issue #484: GroupIdが設定されている場合はそのグループ化を優先
+                var segmentSummary = segment[0].GroupId.HasValue
+                    ? GenerateRailwayExplicitGroupSummary(segment, context)
+                    : GenerateRailwaySummaryAutomatic(segment, context);
+
+                if (!string.IsNullOrEmpty(segmentSummary))
+                {
+                    parts.Add(segmentSummary);
+                }
             }
 
-            var sortedTrips = SortChronologically(trips);
-
-            // Issue #484: GroupIdが設定されている場合はそのグループ化を優先
-            var hasGroupId = sortedTrips.Any(t => t.GroupId.HasValue);
-            if (hasGroupId)
-            {
-                return GenerateRailwaySummaryWithGroupId(sortedTrips, context);
-            }
-
-            // GroupIdが設定されていない場合は従来の自動判定
-            return GenerateRailwaySummaryAutomatic(sortedTrips, context);
+            return string.Join(RouteSeparator, parts);
         }
 
         /// <summary>
-        /// GroupIdに基づいて鉄道利用の摘要を生成（Issue #484）
+        /// 1 つの明示グループ（GroupId）の鉄道利用の摘要を生成（Issue #484）
         /// </summary>
-        private string GenerateRailwaySummaryWithGroupId(
-            List<LedgerDetail> sortedTrips, SummaryGenerationContext context)
+        /// <param name="summarizableTrips">
+        /// 同一 GroupId の明細（時系列順。<see cref="IsSummarizableTrip"/> で絞り込み済み。
+        /// Issue #1735: 運賃が発生した片側欠落明細は含まれ、欠落側はプレースホルダで補完される）
+        /// </param>
+        /// <param name="context">この生成が参照する設定の世代（Issue #1919）</param>
+        private string GenerateRailwayExplicitGroupSummary(
+            List<LedgerDetail> summarizableTrips, SummaryGenerationContext context)
         {
-            var result = new List<string>();
-
-            // GroupIdでグループ化（NULLは個別のグループとして扱う）
-            // まず、GroupIdがある経路とない経路を分離
-            // Issue #1735: 運賃が発生した片側欠落明細も摘要から落とさない（欠落側はプレースホルダで補完）
-            var groupedTrips = sortedTrips
-                .Where(t => t.GroupId.HasValue && IsSummarizableTrip(t))
-                .GroupBy(t => t.GroupId!.Value)
-                .OrderBy(g => g.Min(t => t.UseDate ?? DateTime.MaxValue));
-
-            var ungroupedTrips = sortedTrips
-                .Where(t => !t.GroupId.HasValue && IsSummarizableTrip(t))
-                .ToList();
-
-            // グループ化された経路を処理
-            foreach (var group in groupedTrips)
+            if (summarizableTrips.Count == 1)
             {
-                var groupTrips = SortChronologically(group.ToList());
-                if (groupTrips.Count == 1)
-                {
-                    var route = ToRoute(groupTrips[0]);
-                    result.Add($"{route.Entry}～{route.Exit}");
-                }
-                else
-                {
-                    // Issue #548: グループ内でも往復・乗継を自動判定
-                    // 単純にfirst/lastを使うと往復（A→B, B→A）で「A～A」になるバグがあった
-                    var groupSummary = GenerateRailwaySummaryAutomatic(groupTrips, context);
-                    if (!string.IsNullOrEmpty(groupSummary))
-                    {
-                        result.Add(CollapseExplicitGroupSummary(groupTrips, groupSummary, context));
-                    }
-                }
+                var route = ToRoute(summarizableTrips[0]);
+                return $"{route.Entry}～{route.Exit}";
             }
 
-            // グループ化されていない経路は自動判定
-            if (ungroupedTrips.Count > 0)
-            {
-                var autoSummary = GenerateRailwaySummaryAutomatic(ungroupedTrips, context);
-                if (!string.IsNullOrEmpty(autoSummary))
-                {
-                    result.Add(autoSummary);
-                }
-            }
-
-            return string.Join(RouteSeparator, result);
+            // Issue #548: グループ内でも往復・乗継を自動判定
+            // 単純にfirst/lastを使うと往復（A→B, B→A）で「A～A」になるバグがあった
+            var groupSummary = GenerateRailwaySummaryAutomatic(summarizableTrips, context);
+            return string.IsNullOrEmpty(groupSummary)
+                ? string.Empty
+                : CollapseExplicitGroupSummary(summarizableTrips, groupSummary, context);
         }
 
         /// <summary>
@@ -2133,65 +2125,28 @@ namespace ICCardManager.Services
         /// バス利用の摘要を生成
         /// </summary>
         private string GenerateBusSummary(
-            List<LedgerDetail> trips, SummaryGenerationContext context)
+            List<LedgerDetail> run, SummaryGenerationContext context)
         {
-            var sortedTrips = SortChronologically(trips);
-
-            // GroupIdが設定されている場合はグループ化を優先（鉄道と同様）
-            var hasGroupId = sortedTrips.Any(t => t.GroupId.HasValue);
-            if (hasGroupId)
-            {
-                return GenerateBusSummaryWithGroupId(sortedTrips, context);
-            }
-
-            return GenerateBusSummaryAutomatic(sortedTrips, context);
-        }
-
-        /// <summary>
-        /// GroupIdに基づいてバス利用の摘要を生成
-        /// </summary>
-        private string GenerateBusSummaryWithGroupId(
-            List<LedgerDetail> sortedTrips, SummaryGenerationContext context)
-        {
-            var result = new List<string>();
-
-            // GroupIdでグループ化（NULLは個別のグループとして扱う）
-            var groupedTrips = sortedTrips
-                .Where(t => t.GroupId.HasValue)
-                .GroupBy(t => t.GroupId!.Value)
-                .OrderBy(g => g.Min(t => t.UseDate ?? DateTime.MaxValue));
-
-            var ungroupedTrips = sortedTrips
-                .Where(t => !t.GroupId.HasValue)
-                .ToList();
-
-            // グループ化された経路を処理
-            foreach (var group in groupedTrips)
-            {
-                var groupTrips = SortChronologically(group.ToList());
-                var groupSummary = GenerateBusSummaryAutomatic(groupTrips, context);
-                if (!string.IsNullOrEmpty(groupSummary))
-                {
-                    result.Add(groupSummary);
-                }
-            }
-
-            // グループ化されていない経路は自動判定
-            if (ungroupedTrips.Count > 0)
-            {
-                var autoSummary = GenerateBusSummaryAutomatic(ungroupedTrips, context);
-                if (!string.IsNullOrEmpty(autoSummary))
-                {
-                    result.Add(autoSummary);
-                }
-            }
-
-            return string.Join(RouteSeparator, result);
+            // Issue #2033: 鉄道と同じ区切り方で、利用順の区切りごとに生成して結合する。
+            // GroupId の有無で生成の手順は変わらない（グループもグループ外の続きも自動判定）
+            return string.Join(
+                RouteSeparator,
+                SplitIntoGroupSegments(run).Select(segment => GenerateBusSummaryAutomatic(segment, context)));
         }
 
         /// <summary>
         /// 自動判定でバス利用の摘要を生成
         /// </summary>
+        /// <param name="sortedTrips">時系列順（古い順）のバス明細</param>
+        /// <param name="context">この生成が参照する設定の世代（Issue #1919）</param>
+        /// <remarks>
+        /// Issue #2033: 「A～B」形式のバス停名の続きと、解析できないバス停名（単独の停留所名・プレースホルダ）の続きを
+        /// 利用順の区切りとして扱う。従来は解析できなかったバス停名を結果の末尾へ付けていたため、
+        /// 「天神」→「A～B」→「B～C」が「A～C、天神」と移動した順と逆に読め、
+        /// 解析できないバス停名を挟んだ経路どうしも往復・乗継統合されていた。
+        /// 重複除去は同じ区切り（解析できないバス停名が続く範囲）の内側に限る
+        /// （区切りの内側では、隣接していない同じバス停名もまとめる。修正前からの挙動）。
+        /// </remarks>
         private string GenerateBusSummaryAutomatic(
             List<LedgerDetail> sortedTrips, SummaryGenerationContext context)
         {
@@ -2207,33 +2162,25 @@ namespace ICCardManager.Services
                 return ResolveBusPlaceholder(context);
             }
 
-            // Issue #985: 「A～B」形式のバス停名から乗り継ぎ統合・往復検出を行う
-            var parsedRoutes = allBusStops
-                .Select(ParseBusRoute)
-                .Where(r => r.HasValue)
-                .Select(r => r!.Value)
+            var parsedStops = allBusStops
+                .Select(bs => (Text: bs, Route: ParseBusRoute(bs)))
                 .ToList();
 
-            // 解析できなかったバス停名（「A～B」形式でないもの）
-            var unparsed = allBusStops
-                .Where(bs => !ParseBusRoute(bs).HasValue)
-                .Distinct()
-                .ToList();
-
-            if (parsedRoutes.Count >= 2)
+            var parts = new List<string>();
+            foreach (var segment in SplitWhereKeyChanges(parsedStops, s => s.Route.HasValue))
             {
-                // 共通パイプラインで統合・往復検出・整形
-                var routeSummary = BuildRouteSummary(parsedRoutes, context);
-
-                if (unparsed.Count > 0)
+                if (segment[0].Route.HasValue)
                 {
-                    return string.Join(RouteSeparator, new[] { routeSummary }.Concat(unparsed));
+                    // Issue #985: 「A～B」形式のバス停名から共通パイプラインで乗り継ぎ統合・往復検出・整形
+                    parts.Add(BuildRouteSummary(segment.Select(s => s.Route!.Value).ToList(), context));
                 }
-                return routeSummary;
+                else
+                {
+                    parts.AddRange(segment.Select(s => s.Text).Distinct());
+                }
             }
 
-            // 経路が1件以下の場合: 重複除去して連結
-            return string.Join(RouteSeparator, allBusStops.Distinct());
+            return string.Join(RouteSeparator, parts);
         }
 
         /// <summary>
