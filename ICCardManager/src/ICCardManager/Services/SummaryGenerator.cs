@@ -197,6 +197,9 @@ namespace ICCardManager.Services
         /// これは <see cref="ApplyTransferStationGroups"/> が静的状態へ反映されたことを
         /// 外から確かめるための観測点（テストが使用）。呼び出し元が書き換えても
         /// 静的状態に影響しないようコピーを返す。
+        ///
+        /// Issue #2035: 返すのは判定が実際に使う<b>併合済み・空白除外済み</b>のグループ
+        /// （<see cref="SummaryGenerationContext.GetTransferStationGroups"/> の remarks 参照）。
         /// </remarks>
         public static List<List<string>> GetTransferStationGroups()
             => _context.GetTransferStationGroups();
@@ -246,6 +249,9 @@ namespace ICCardManager.Services
         /// 差し替えは<b>フィールドへの代入 1 回</b>で行い、生成中の呼び出しは
         /// <see cref="CaptureContext"/> で捕捉済みの世代を最後まで一貫して見る（Issue #1919）。
         /// </para>
+        /// <para>
+        /// 汎用/固有の別: 汎用（部署種別によるチャージ摘要の切替は物品出納簿の様式）。
+        /// </para>
         /// </remarks>
         public void ApplyDepartmentType(DepartmentType departmentType)
         {
@@ -279,7 +285,7 @@ namespace ICCardManager.Services
         /// 指定した世代のバスラベルを解決する（Issue #1919）
         /// </summary>
         private static string ResolveBusLabel(SummaryGenerationContext context) => Coalesce(
-            context.Options.SummaryText?.BusLabel, DefaultSummaryText.BusLabel);
+            context.Options.SummaryText.BusLabel, DefaultSummaryText.BusLabel);
 
         /// <summary>
         /// バス停名未入力時のプレースホルダ（組織設定 <c>SummaryText.BusPlaceholder</c> 由来、Issue #1818）
@@ -304,7 +310,7 @@ namespace ICCardManager.Services
         /// 指定した世代のバス停名プレースホルダを解決する（Issue #1919）
         /// </summary>
         private static string ResolveBusPlaceholder(SummaryGenerationContext context) => Coalesce(
-            context.Options.SummaryText?.BusPlaceholder, DefaultSummaryText.BusPlaceholder);
+            context.Options.SummaryText.BusPlaceholder, DefaultSummaryText.BusPlaceholder);
 
         /// <summary>
         /// 設定値が空（null／空白のみ）なら既定値へフォールバックする
@@ -557,12 +563,26 @@ namespace ICCardManager.Services
         /// </summary>
         /// <param name="departmentType">部署種別（チャージ摘要の切替に使用）</param>
         /// <param name="options">組織固有設定</param>
+        /// <remarks>
+        /// Issue #2035: <b>同じ設定インスタンスで既に世代を組み立てていれば、作り直さない</b>。
+        /// 静的な世代はインスタンスをまたいで共有されるため、無条件に <see cref="Configure"/> を呼ぶと
+        /// 2 つ目のインスタンスをこのコンストラクタで作った時点で、実行中に反映した同一視グループ
+        /// （<see cref="ApplyTransferStationGroups"/>）が起動時の値へ戻る。現在は DI の Singleton 1 か所だけが
+        /// このコンストラクタを使うので実害は無いが、登録を変えた日に黙って壊れる形を残さない。
+        /// 別の設定インスタンスを渡された場合は従来どおり反映する。
+        /// 照合は<b>参照だけ</b>で行うため、同じインスタンスをその場で書き換えてから渡し直しても反映されない
+        /// （設定の差し替えは新しいインスタンスで <see cref="Configure"/> する、または
+        /// <see cref="ApplyTransferStationGroups"/> / <see cref="ApplyDepartmentType"/> を使う）。
+        /// </remarks>
         public SummaryGenerator(DepartmentType departmentType, OrganizationOptions options)
             : this(departmentType)
         {
             // DI経由で生成された場合、静的フィールドも設定する
             // （静的メソッドが参照するため、DI経由の初期化でも静的状態を更新）
-            Configure(options);
+            if (options == null || !ReferenceEquals(_context.Source, options))
+            {
+                Configure(options);
+            }
         }
 
         /// <summary>
@@ -720,7 +740,8 @@ namespace ICCardManager.Services
                     summariesToAdd.Add((oldestIndex, new DailySummary
                     {
                         Date = date,
-                        Summary = GetPointRedemptionSummary(),
+                        // Issue #2035: チャージの行と同じく、捕捉した世代から文言を引く
+                        Summary = ResolvePointRedemptionSummary(context),
                         IsCharge = false,
                         IsPointRedemption = true
                     }));
@@ -770,7 +791,8 @@ namespace ICCardManager.Services
                     var railwaySummary = GenerateRailwaySummary(run, context);
                     if (!string.IsNullOrEmpty(railwaySummary))
                     {
-                        summaryParts.Add($"{context.Options.SummaryText.RailwayLabel}（{railwaySummary}）");
+                        summaryParts.Add(
+                            $"{context.Options.SummaryText.RailwayLabel}{FullWidthOpenParenthesis}{railwaySummary}{FullWidthCloseParenthesis}");
                     }
                 }
             }
@@ -923,7 +945,7 @@ namespace ICCardManager.Services
             // Issue #942: 暗黙のポイント還元（金額が負でチャージでもない）も含めて判定
             if (detailList.All(d => d.IsPointRedemption || IsImplicitPointRedemption(d)))
             {
-                return context.Options.SummaryText.PointRedemption;
+                return ResolvePointRedemptionSummary(context);
             }
 
             // Issue #1904: 鉄道/バスの二分割は GenerateUsageSummary に一本化
@@ -1380,10 +1402,14 @@ namespace ICCardManager.Services
         /// <summary>
         /// 往復の端点を「往路の名前（復路の名前）」形式へ整形する（Issue #1905）
         /// </summary>
+        /// <remarks>
+        /// 全角括弧は <see cref="FullWidthOpenParenthesis"/> / <see cref="FullWidthCloseParenthesis"/> を使う
+        /// （生成・抽出・括弧の対応チェックが同じ文字を見るため、Issue #1914 / #2035）。
+        /// </remarks>
         private static string FormatEndpoint(string outboundName, string returnName)
             => string.Equals(outboundName, returnName, StringComparison.Ordinal)
                 ? outboundName
-                : $"{outboundName}（{returnName}）";
+                : $"{outboundName}{FullWidthOpenParenthesis}{returnName}{FullWidthCloseParenthesis}";
 
         /// <summary>
         /// 検出した往復 1 組（Issue #1905）
@@ -2249,6 +2275,7 @@ namespace ICCardManager.Services
         /// 静的な <see cref="CurrentOptions"/> から引いていては「1 回の生成が単一の世代を見る」
         /// という #1919 の性質が enum の側にしか成立しない。組織設定の差し替え
         /// （<see cref="Configure"/>）は現状 起動時のみだが、性質は経路ごとに欠けさせない。
+        /// 汎用/固有の別: 汎用（物品出納簿の様式。チャージ摘要）。
         /// </remarks>
         private static string ResolveChargeSummary(SummaryGenerationContext context)
             => SelectChargeSummary(context.Options, context.DepartmentType);
@@ -2256,6 +2283,9 @@ namespace ICCardManager.Services
         /// <summary>
         /// 部署種別に応じたチャージ摘要の文言を選ぶ（唯一の定義。#1763）
         /// </summary>
+        /// <remarks>
+        /// 汎用/固有の別: 汎用（物品出納簿の様式。チャージ摘要）。
+        /// </remarks>
         private static string SelectChargeSummary(
             OrganizationOptions options, DepartmentType departmentType)
         {
@@ -2269,8 +2299,23 @@ namespace ICCardManager.Services
         /// </summary>
         public static string GetPointRedemptionSummary()
         {
-            return CurrentOptions.SummaryText.PointRedemption;
+            return ResolvePointRedemptionSummary(_context);
         }
+
+        /// <summary>
+        /// 捕捉済みの世代からポイント還元の摘要を生成する（生成パイプライン用、Issue #2035）
+        /// </summary>
+        /// <remarks>
+        /// 旧実装の <see cref="GenerateByDate"/> は、チャージの行を世代から引く一方でポイント還元の行は
+        /// 静的な <see cref="GetPointRedemptionSummary"/> を呼んでおり、1 回の生成の中で読む先が分かれていた
+        /// （<see cref="ResolveChargeSummary"/> の remarks「性質は経路ごとに欠けさせない」に反していた）。
+        /// 静的 API とパイプラインの両方がこのメソッドを通るので、文言の定義は 1 つに保たれる。
+        /// 生成パイプラインが静的状態を読むメンバーを呼んでいないことは
+        /// <c>SummaryGenerationSnapshotConventionTests</c> が呼び出し関係を辿って検査する。
+        /// 汎用/固有の別: 交通系固有（ポイント還元は交通系ICカードの取引種別）。
+        /// </remarks>
+        private static string ResolvePointRedemptionSummary(SummaryGenerationContext context)
+            => context.Options.SummaryText.PointRedemption;
 
         /// <summary>
         /// 払い戻しの摘要を生成

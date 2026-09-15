@@ -42,6 +42,17 @@ namespace ICCardManager.Services
         /// テンプレート列マッピング設定
         /// </summary>
         public TemplateMappingOptions TemplateMapping { get; set; } = new();
+
+        /// <summary>
+        /// プロパティを 1 段だけ複製したインスタンスを返す（Issue #2035）
+        /// </summary>
+        /// <remarks>
+        /// 摘要生成の世代（<see cref="SummaryGenerationContext"/>）が、一部の項目だけを差し替えた
+        /// 設定を組み立てるために使う。プロパティを 1 つずつ書き写す形にすると、プロパティを足した日に
+        /// 書き写し漏れた項目が差し替えのたびに既定値へ戻る（#1726）。<c>MemberwiseClone</c> は
+        /// 足したプロパティも自動的に複製する。入れ子の設定オブジェクトは共有される（複製しない）。
+        /// </remarks>
+        internal OrganizationOptions ShallowCopy() => (OrganizationOptions)MemberwiseClone();
     }
 
     /// <summary>
@@ -146,6 +157,11 @@ namespace ICCardManager.Services
         /// 往復の接尾辞
         /// </summary>
         public string RoundTripSuffix { get; set; } = " 往復";
+
+        /// <summary>
+        /// プロパティを 1 段だけ複製したインスタンスを返す（Issue #2035。<see cref="OrganizationOptions.ShallowCopy"/> 参照）
+        /// </summary>
+        internal SummaryTextOptions ShallowCopy() => (SummaryTextOptions)MemberwiseClone();
     }
 
     /// <summary>
@@ -179,6 +195,11 @@ namespace ICCardManager.Services
             new List<string> { "天神", "西鉄福岡(天神)" },
             new List<string> { "千早", "西鉄千早" }
         };
+
+        /// <summary>
+        /// プロパティを 1 段だけ複製したインスタンスを返す（Issue #2035。<see cref="OrganizationOptions.ShallowCopy"/> 参照）
+        /// </summary>
+        internal SummaryRulesOptions ShallowCopy() => (SummaryRulesOptions)MemberwiseClone();
     }
 
     /// <summary>
