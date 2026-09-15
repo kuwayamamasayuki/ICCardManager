@@ -186,26 +186,41 @@ public class ReportFileNameFactoryTests
     [InlineData("物品出納簿_{0}_{1}_{2}年度.xlsx.")]   // 末尾がピリオド
     [InlineData("物品出納簿_{0}_{1}_{2}年度.csv")]     // Excel 以外の拡張子
     [InlineData("物品出納簿_{0}_{1}_{2}年度.xls")]     // 旧形式（ClosedXML は保存できない）
+    [InlineData("物品出納簿_{0}_{1}_{2}年度.xlsm")]    // マクロ有効ブック（中身は通常ブックになる）
     public void Excelの拡張子で終わらない書式は既定へフォールバックする(string format)
     {
         // ClosedXML の SaveAs は拡張子で形式を決めるため、ここで倒しておかないと
-        // ArgumentException が汎用 catch に落ちて全カードの帳票作成が失敗する
+        // ArgumentException が汎用 catch に落ちて全カードの帳票作成が失敗する。
+        // .xlsm は保存できてしまうが、ReportService は #2040 以降ストリームへ保存しており
+        // 拡張子で形式を選ぶ分岐を通らないため、中身が通常ブックのまま拡張子だけマクロ有効に
+        // なったファイルができる（Excel が形式の不一致を警告する）。
         var fileName = CreateFactory(format)
             .GetFiscalYearFileName("はやかけん", "H001", 2024);
 
         fileName.Should().Be("物品出納簿_はやかけん_H001_2024年度.xlsx");
     }
 
-    [Theory]
-    [InlineData("物品出納簿_{0}_{1}_{2}年度.xlsm", "物品出納簿_はやかけん_H001_2024年度.xlsm")]
-    [InlineData("物品出納簿_{0}_{1}_{2}年度.XLSX", "物品出納簿_はやかけん_H001_2024年度.XLSX")]
-    public void 許容される拡張子の書式は塞がない(string format, string expected)
+    [Fact]
+    public void 管理番号が拡張子で終わるカードでも書式に拡張子が無ければフォールバックする()
     {
-        // 対のテスト: 検査が広すぎて正当な書式まで倒していないこと。
-        // マクロ有効ブック（.xlsm）と大文字表記は ClosedXML が保存できる。
-        var fileName = CreateFactory(format).GetFiscalYearFileName("はやかけん", "H001", 2024);
+        // 判定はカードごとの生成名ではなく書式に対して行う（#1818「設定値で生成したものは、
+        // 設定値で判定する」）。生成名に対して拡張子を検査すると、管理番号がたまたま
+        // ".xlsx" で終わるカードだけが検査を通り、同じ設定・同じフォルダーで
+        // カードごとに命名規則が食い違う（縮退のログも通らなかったカードでしか出ない）。
+        var fileName = CreateFactory("物品出納簿_{2}年度_{0}_{1}")
+            .GetFiscalYearFileName("はやかけん", "H001.xlsx", 2024);
 
-        fileName.Should().Be(expected);
+        fileName.Should().Be("物品出納簿_はやかけん_H001.xlsx_2024年度.xlsx");
+    }
+
+    [Fact]
+    public void 大文字の拡張子の書式は塞がない()
+    {
+        // 対のテスト: 検査が広すぎて正当な書式まで倒していないこと
+        var fileName = CreateFactory("物品出納簿_{0}_{1}_{2}年度.XLSX")
+            .GetFiscalYearFileName("はやかけん", "H001", 2024);
+
+        fileName.Should().Be("物品出納簿_はやかけん_H001_2024年度.XLSX");
     }
 
     [Fact]
