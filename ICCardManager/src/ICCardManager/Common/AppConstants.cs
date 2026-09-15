@@ -126,6 +126,16 @@ namespace ICCardManager.Common
         /// </remarks>
         public const int BackupTempFileStaleHours = 24;
 
+        /// <summary>
+        /// 保存を中断した帳票の一時ファイルを削除するまでの経過時間（時間、Issue #2040）。
+        /// </summary>
+        /// <remarks>
+        /// 一時ファイルは失敗時に <c>ReportService</c> 自身が削除するが、保存中にプロセスが
+        /// 強制終了した場合は削除経路を通らずに残る。「十分に古いものだけ」に限るのは、
+        /// 共有フォルダーで**他 PC が作成中の一時ファイル**を消さないため（1 回の保存は秒オーダー）。
+        /// </remarks>
+        public const int ReportTempFileStaleHours = 24;
+
         // --- 接続診断（Issue #1690） ---
 
         /// <summary>

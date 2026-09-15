@@ -41,7 +41,8 @@ public class ReportServiceTests : IDisposable
             _cardRepositoryMock.Object,
             _ledgerRepositoryMock.Object,
             _settingsRepositoryMock.Object,
-            reportDataBuilder);
+            reportDataBuilder,
+            Microsoft.Extensions.Logging.Abstractions.NullLogger<ReportService>.Instance);
     }
 
     public void Dispose()

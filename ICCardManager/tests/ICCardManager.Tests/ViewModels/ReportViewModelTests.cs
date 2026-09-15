@@ -41,7 +41,7 @@ public class ReportViewModelTests
         _settingsRepositoryMock.Setup(s => s.GetAppSettings()).Returns(new AppSettings());
         // ReportServiceはコンクリートクラスのため、モックしたリポジトリで実インスタンスを作成
         var reportDataBuilder = new ReportDataBuilder(_cardRepositoryMock.Object, _ledgerRepositoryMock.Object);
-        _reportService = new ReportService(_cardRepositoryMock.Object, _ledgerRepositoryMock.Object, _settingsRepositoryMock.Object, reportDataBuilder);
+        _reportService = new ReportService(_cardRepositoryMock.Object, _ledgerRepositoryMock.Object, _settingsRepositoryMock.Object, reportDataBuilder, Microsoft.Extensions.Logging.Abstractions.NullLogger<ReportService>.Instance);
         _printService = new PrintService(reportDataBuilder);
         _navigationServiceMock = new Mock<INavigationService>();
 
