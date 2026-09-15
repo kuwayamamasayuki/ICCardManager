@@ -2497,6 +2497,209 @@ public class MainViewModelTests : IDisposable
             .Should().Be("2026年9月");
     }
 
+    #region Issue #2030: 表示期間を矢印で前後の月へ移動する
+
+    [Fact]
+    public void GetAdjacentHistoryMonth_開始月の前後の月の1日を返し年をまたげること()
+    {
+        var today = new DateTime(2026, 9, 15);
+
+        MainViewModel.GetAdjacentHistoryMonth(new DateTime(2026, 3, 1), -1, today, 2020)
+            .Should().Be(new DateTime(2026, 2, 1));
+        MainViewModel.GetAdjacentHistoryMonth(new DateTime(2026, 3, 1), 1, today, 2020)
+            .Should().Be(new DateTime(2026, 4, 1));
+        MainViewModel.GetAdjacentHistoryMonth(new DateTime(2026, 1, 1), -1, today, 2020)
+            .Should().Be(new DateTime(2025, 12, 1), "1 月の前は前年の 12 月");
+        MainViewModel.GetAdjacentHistoryMonth(new DateTime(2025, 12, 1), 1, today, 2020)
+            .Should().Be(new DateTime(2026, 1, 1), "12 月の次は翌年の 1 月");
+    }
+
+    [Fact]
+    public void GetAdjacentHistoryMonth_月中の日付や月末でも月単位で移動すること()
+    {
+        var today = new DateTime(2026, 9, 15);
+
+        // 3/31 の前月を AddMonths で直接求めると 2/28 になり、月の 1 日へ丸めないと期間の開始がずれる
+        MainViewModel.GetAdjacentHistoryMonth(new DateTime(2026, 3, 31), -1, today, 2020)
+            .Should().Be(new DateTime(2026, 2, 1));
+        MainViewModel.GetAdjacentHistoryMonth(new DateTime(2026, 1, 31), 1, today, 2020)
+            .Should().Be(new DateTime(2026, 2, 1));
+    }
+
+    [Fact]
+    public void GetAdjacentHistoryMonth_次の月へは今月まで進め未来の月へは進めないこと()
+    {
+        var today = new DateTime(2026, 9, 15);
+
+        MainViewModel.GetAdjacentHistoryMonth(new DateTime(2026, 8, 1), 1, today, 2020)
+            .Should().Be(new DateTime(2026, 9, 1), "今月へは進める");
+        MainViewModel.GetAdjacentHistoryMonth(new DateTime(2026, 9, 1), 1, today, 2020)
+            .Should().BeNull("利用日（ledger.date）が未来の月の行は無い");
+        MainViewModel.GetAdjacentHistoryMonth(new DateTime(2026, 9, 1), -1, today, 2020)
+            .Should().Be(new DateTime(2026, 8, 1), "今月の表示でも前の月へは戻れる");
+    }
+
+    [Fact]
+    public void GetAdjacentHistoryMonth_前の月へは最古の年の1月まで戻れそれより前へは戻れないこと()
+    {
+        var today = new DateTime(2026, 9, 15);
+
+        MainViewModel.GetAdjacentHistoryMonth(new DateTime(2020, 2, 1), -1, today, 2020)
+            .Should().Be(new DateTime(2020, 1, 1), "最古の年の 1 月へは戻れる");
+        MainViewModel.GetAdjacentHistoryMonth(new DateTime(2020, 1, 1), -1, today, 2020)
+            .Should().BeNull("月選択ポップアップで選べない年へは矢印でも移動しない");
+        MainViewModel.GetAdjacentHistoryMonth(new DateTime(2020, 1, 1), 1, today, 2020)
+            .Should().Be(new DateTime(2020, 2, 1), "最古の月の表示でも次の月へは進める");
+    }
+
+    [Fact]
+    public void GetAdjacentHistoryMonth_下限より前の月を表示中でも次の月へは進めること()
+    {
+        // 警告クリック（#2007）は導入行の日付から表示するため、ポップアップの最古の年より前を表示し得る。
+        // 下限を前向きの移動にまで効かせると、その状態から ◀ も ▶ も押せなくなる
+        var today = new DateTime(2026, 9, 15);
+
+        MainViewModel.GetAdjacentHistoryMonth(new DateTime(2018, 4, 1), 1, today, 2020)
+            .Should().Be(new DateTime(2018, 5, 1));
+        MainViewModel.GetAdjacentHistoryMonth(new DateTime(2018, 4, 1), -1, today, 2020)
+            .Should().BeNull();
+    }
+
+    [Fact]
+    public async Task HistoryGoToPreviousMonth_前の月の暦月へ期間を移し1ページ目から読み込み直すこと()
+    {
+        const string cardIdm = "0102030405060708";
+        _viewModel.HistoryCard = new CardDto { CardIdm = cardIdm, CardNumber = "5042" };
+        await _viewModel.HistorySetThisMonth();
+        _viewModel.HistoryCurrentPage = 3;
+
+        await _viewModel.HistoryGoToPreviousMonthCommand.ExecuteAsync(null);
+
+        var lastMonth = DateTime.Today.AddMonths(-1);
+        var expectedFrom = new DateTime(lastMonth.Year, lastMonth.Month, 1);
+        var expectedTo = new DateTime(lastMonth.Year, lastMonth.Month, DateTime.DaysInMonth(lastMonth.Year, lastMonth.Month));
+        _viewModel.HistoryFromDate.Should().Be(expectedFrom);
+        _viewModel.HistoryToDate.Should().Be(expectedTo);
+        _viewModel.HistoryPeriodDisplay.Should().Be(MainViewModel.FormatHistoryPeriod(expectedFrom, expectedTo));
+        _viewModel.HistoryCurrentPage.Should().Be(1, "月を変えたら 1 ページ目から表示する");
+        _viewModel.HistorySelectedYear.Should().Be(lastMonth.Year, "月選択ポップアップの初期値も移動先に揃える");
+        _viewModel.HistorySelectedMonth.Should().Be(lastMonth.Month);
+        _ledgerRepositoryMock.Verify(r => r.GetPagedAsync(cardIdm, expectedFrom, expectedTo, 1, It.IsAny<int>()),
+            Times.Once, "移動先の月で履歴を読み込み直す");
+    }
+
+    [Fact]
+    public async Task HistoryGoToNextMonth_次の月へ進み今月に着いたら次の月へは進めなくなること()
+    {
+        const string cardIdm = "0102030405060708";
+        _viewModel.HistoryCard = new CardDto { CardIdm = cardIdm, CardNumber = "5042" };
+        await _viewModel.HistorySetLastMonth();
+        _viewModel.HistoryGoToNextMonthCommand.CanExecute(null).Should().BeTrue("先月の表示からは今月へ進める");
+
+        await _viewModel.HistoryGoToNextMonthCommand.ExecuteAsync(null);
+
+        var today = DateTime.Today;
+        _viewModel.HistoryFromDate.Should().Be(new DateTime(today.Year, today.Month, 1));
+        _viewModel.HistoryGoToNextMonthCommand.CanExecute(null).Should().BeFalse("今月より先の月は表示しない");
+        _viewModel.HistoryGoToPreviousMonthCommand.CanExecute(null).Should().BeTrue("今月の表示でも前の月へは戻れる");
+    }
+
+    [Fact]
+    public async Task HistoryFromDate_変わると矢印の実行可否の再評価をボタンへ通知すること()
+    {
+        // CanExecute は問い合わせのたびに評価されるが、ボタンの有効・無効は CanExecuteChanged を
+        // 受けたときにしか更新されない。通知が無いと今月へ着いても ▶ が押せる見た目のまま残る
+        var nextRaised = 0;
+        var previousRaised = 0;
+        _viewModel.HistoryGoToNextMonthCommand.CanExecuteChanged += (_, _) => nextRaised++;
+        _viewModel.HistoryGoToPreviousMonthCommand.CanExecuteChanged += (_, _) => previousRaised++;
+
+        await _viewModel.HistorySetLastMonth();
+
+        nextRaised.Should().BeGreaterThan(0);
+        previousRaised.Should().BeGreaterThan(0);
+    }
+
+    [Fact]
+    public void HistoryGoToPreviousMonth_月選択ポップアップの最古の年の1月では実行できないこと()
+    {
+        // 下限は ViewModel が持つ年リスト（HistoryAvailableYears）の最古の年から決まることを、実物の年リストで確かめる
+        var oldestYear = _viewModel.HistoryAvailableYears.Min();
+        _viewModel.HistoryFromDate = new DateTime(oldestYear, 1, 1);
+
+        _viewModel.HistoryGoToPreviousMonthCommand.CanExecute(null).Should().BeFalse();
+        _viewModel.HistoryGoToNextMonthCommand.CanExecute(null).Should().BeTrue();
+
+        _viewModel.HistoryFromDate = new DateTime(oldestYear, 2, 1);
+        _viewModel.HistoryGoToPreviousMonthCommand.CanExecute(null).Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task HistoryGoToNextMonth_範囲表示中は開始月を基準に移動し暦月表示に戻ること()
+    {
+        // 警告クリック（#2007）は「導入行の月～今月」の範囲を表示する。矢印はラベル先頭の月を基準にする
+        const string cardIdm = "0102030405060708";
+        _viewModel.HistoryCard = new CardDto { CardIdm = cardIdm, CardNumber = "5042" };
+        var today = DateTime.Today;
+        var rangeStart = new DateTime(today.Year, today.Month, 1).AddMonths(-14);
+        _viewModel.HistoryFromDate = rangeStart;
+        _viewModel.HistoryToDate = today;
+
+        await _viewModel.HistoryGoToNextMonthCommand.ExecuteAsync(null);
+
+        var expectedFrom = rangeStart.AddMonths(1);
+        var expectedTo = expectedFrom.AddMonths(1).AddDays(-1);
+        _viewModel.HistoryFromDate.Should().Be(expectedFrom);
+        _viewModel.HistoryToDate.Should().Be(expectedTo);
+        _viewModel.HistoryPeriodDisplay.Should().Be(MainViewModel.FormatHistoryPeriod(expectedFrom, expectedFrom),
+            "範囲表記ではなく 1 か月の表記に戻る");
+        _ledgerRepositoryMock.Verify(r => r.GetPagedAsync(cardIdm, expectedFrom, expectedTo, 1, It.IsAny<int>()),
+            Times.Once, "移動先の月で履歴を読み込み直す");
+    }
+
+    [Fact]
+    public async Task HistoryGoToNextMonth_今月表示で直接実行しても期間を変えず読み込まないこと()
+    {
+        // AsyncRelayCommand.ExecuteAsync は CanExecute を確かめない。ボタンの無効化だけに頼らず、
+        // 実行時にも境界を確かめていることを固定する（評価から実行までに日付が変わり得る）
+        const string cardIdm = "0102030405060708";
+        _viewModel.HistoryCard = new CardDto { CardIdm = cardIdm, CardNumber = "5042" };
+        await _viewModel.HistorySetThisMonth();
+        var fromBefore = _viewModel.HistoryFromDate;
+        var toBefore = _viewModel.HistoryToDate;
+        _ledgerRepositoryMock.Invocations.Clear();
+
+        await _viewModel.HistoryGoToNextMonthCommand.ExecuteAsync(null);
+
+        _viewModel.HistoryFromDate.Should().Be(fromBefore);
+        _viewModel.HistoryToDate.Should().Be(toBefore);
+        _ledgerRepositoryMock.Verify(r => r.GetPagedAsync(
+                It.IsAny<string>(), It.IsAny<DateTime>(), It.IsAny<DateTime>(), It.IsAny<int>(), It.IsAny<int>()),
+            Times.Never, "未来の月は読み込まない");
+    }
+
+    [Fact]
+    public async Task HistoryGoToNextMonth_年リストに無い年へ進んだら年リストへ降順を保って補うこと()
+    {
+        // 警告クリック（#2007）で年リストの最古の年より前を表示してから ▶ で進むと、年リストに無い年へ着く。
+        // 補わないと月選択ポップアップの年が空欄になる
+        const string cardIdm = "0102030405060708";
+        _viewModel.HistoryCard = new CardDto { CardIdm = cardIdm, CardNumber = "5042" };
+        var oldestYear = _viewModel.HistoryAvailableYears.Min();
+        var outsideYear = oldestYear - 2;
+        _viewModel.HistoryFromDate = new DateTime(outsideYear, 4, 1);
+        _viewModel.HistoryToDate = DateTime.Today;
+
+        await _viewModel.HistoryGoToNextMonthCommand.ExecuteAsync(null);
+
+        _viewModel.HistorySelectedYear.Should().Be(outsideYear);
+        _viewModel.HistoryAvailableYears.Should().Contain(outsideYear);
+        _viewModel.HistoryAvailableYears.Should().BeInDescendingOrder("ポップアップの年は新しい順に並ぶ");
+        _viewModel.HistoryAvailableYears.Should().OnlyHaveUniqueItems();
+    }
+
+    #endregion
+
     /// <summary>
     /// 警告クリックで開く履歴は既定で当月だが、導入行は何年も前にあり得る。
     /// 導入時残高の誤りと分かっているときは、導入行の日付から表示して直す行を画面に出す。
