@@ -749,13 +749,13 @@ namespace ICCardManager.Services
         /// 往復・乗継統合は run 内でのみ働く（間にバスを挟む鉄道往復は run が分かれるため
         /// 「往復」表記にならない。時系列忠実性を優先する設計判断）。
         /// 明示グループ（GroupId）は <see cref="CoalesceExplicitGroups"/> で 1 単位として扱う。
+        /// 摘要に載らない鉄道明細（0 円の入場記録等）は run を区切らない（Issue #2034、<see cref="SplitIntoSummaryRuns"/>）。
         /// </para>
         /// </remarks>
         private string GenerateUsageSummary(
             List<LedgerDetail> usageDetails, SummaryGenerationContext context)
         {
-            var sortedDetails = SortChronologically(usageDetails);
-            var runs = SplitIntoModeRuns(CoalesceExplicitGroups(sortedDetails));
+            var runs = SplitIntoSummaryRuns(usageDetails);
 
             var summaryParts = new List<string>();
 
@@ -827,8 +827,33 @@ namespace ICCardManager.Services
         /// <param name="details">時系列順に並んだ明細リスト</param>
         /// <returns>時系列順の run のリスト。各 run は同一モードの明細のみを含む</returns>
         /// <remarks>汎用/固有の別: 交通系固有（鉄道・バス混在の摘要組み立て）。</remarks>
-        private static List<List<LedgerDetail>> SplitIntoModeRuns(List<LedgerDetail> details)
+        private static List<List<LedgerDetail>> SplitIntoModeRuns(IEnumerable<LedgerDetail> details)
             => SplitWhereKeyChanges(details, d => d.IsBus);
+
+        /// <summary>
+        /// 利用明細を、摘要のブロックになる run へ分割する（Issue #1904 / #2034）
+        /// </summary>
+        /// <param name="usageDetails">利用（鉄道・バス）の明細（順序は問わない）</param>
+        /// <returns>時系列順の run のリスト。摘要に載らない鉄道明細は含まない</returns>
+        /// <remarks>
+        /// <para>
+        /// Issue #2034: 摘要に載らない鉄道明細（運賃 0 円の入場記録等。<see cref="IsSummarizableTrip"/>、Issue #1735）は
+        /// run に分ける<b>前に</b>除く。除かないとその明細だけの鉄道 run が生まれ、run の摘要は空文字として捨てられるのに
+        /// 前後のバスの run は別のブロックのまま残る（「バス（A～B）、バス（B～A）」と同じラベルが隣り合い、往復・乗継統合もされない）。
+        /// 読み手に見えない記録は、#1904 の「間に別の利用を挟む」にあたらない。
+        /// </para>
+        /// <para>
+        /// 除くのは明示グループの隣接配置（<see cref="CoalesceExplicitGroups"/>）の後。グループの位置は従来どおり
+        /// グループ内で最古の明細（摘要に載らない明細を含む）で決まる。
+        /// 生成（<see cref="GenerateUsageSummary"/>）と同期の出力順（<see cref="GetBusStopEmissionOrder"/>）が
+        /// 同じ分割を使う（#1763「同じ判断を配らない」）。
+        /// 汎用/固有の別: 交通系固有（鉄道・バス混在の摘要組み立て）。
+        /// </para>
+        /// </remarks>
+        private static List<List<LedgerDetail>> SplitIntoSummaryRuns(List<LedgerDetail> usageDetails)
+            => SplitIntoModeRuns(
+                CoalesceExplicitGroups(SortChronologically(usageDetails))
+                    .Where(d => d.IsBus || IsSummarizableTrip(d)));
 
         /// <summary>
         /// 並びを変えずに、隣接する要素のキーが変わる位置で分割する（Issue #2033）
@@ -952,8 +977,7 @@ namespace ICCardManager.Services
         /// バス停名（摘要中の出現順）と明細を位置で対応付ける。その対応が成立するのは
         /// **明細の並びが生成側の出力順と一致するときだけ**なので、並び順の定義を
         /// 消費側に書き写さず、生成パイプラインと同じ手順
-        /// （<see cref="SortChronologically"/> → <see cref="CoalesceExplicitGroups"/> →
-        /// <see cref="SplitIntoModeRuns"/>）を本メソッドに集約する。
+        /// （<see cref="SplitIntoSummaryRuns"/>。Issue #2034 で摘要に載らない鉄道明細の除外を含む）を本メソッドに集約する。
         /// </para>
         /// <para>
         /// Issue #2033: run の内側も利用順に出力する（グループ・グループ外の経路の続き・
@@ -973,7 +997,7 @@ namespace ICCardManager.Services
                 .Where(d => !d.IsCharge && !d.IsPointRedemption && !IsImplicitPointRedemption(d))
                 .ToList();
 
-            var runs = SplitIntoModeRuns(CoalesceExplicitGroups(SortChronologically(usageDetails)));
+            var runs = SplitIntoSummaryRuns(usageDetails);
 
             return runs
                 .Where(run => run[0].IsBus)
@@ -1430,12 +1454,12 @@ namespace ICCardManager.Services
         {
             // Issue #2033: run を並べ替え直さず、利用順の区切りごとに生成して結合する
             //（グループ外の経路はグループをまたいで 1 つのリストにまとめない）
-            // 摘要に載らない明細（運賃 0 円の入場記録等。Issue #1735）は区切る前に除く。
-            // 除かないと、摘要に何も出ないグループが前後のグループ外経路の往復・乗継統合を分断する
-            //（コードレビューで検出）
+            // 摘要に載らない明細（運賃 0 円の入場記録等。Issue #1735）は run に分ける前に
+            // SplitIntoSummaryRuns が除いている（Issue #2034）。除かないと、摘要に何も出ないグループが
+            // 前後のグループ外経路の往復・乗継統合を分断する（#2033 のコードレビューで検出）
             var parts = new List<string>();
 
-            foreach (var segment in SplitIntoGroupSegments(run.Where(IsSummarizableTrip)))
+            foreach (var segment in SplitIntoGroupSegments(run))
             {
                 // Issue #484: GroupIdが設定されている場合はそのグループ化を優先
                 var segmentSummary = segment[0].GroupId.HasValue
