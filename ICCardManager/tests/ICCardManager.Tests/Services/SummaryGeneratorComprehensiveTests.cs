@@ -3805,4 +3805,193 @@ public class SummaryGeneratorComprehensiveTests : IDisposable
     }
 
     #endregion
+
+    #region Issue #2034: 摘要に載らない鉄道明細は run を区切らない
+
+    /// <summary>
+    /// 運賃 0 円の入場記録（Issue #1735 で摘要に載せない）だけの鉄道明細を作る
+    /// </summary>
+    private static LedgerDetail CreateEntryOnlyRailway(DateTime useDate, string entryStation, int amount, int balance)
+    {
+        return new LedgerDetail
+        {
+            UseDate = useDate,
+            EntryStation = entryStation,
+            ExitStation = null,
+            Amount = amount,
+            Balance = balance,
+            IsCharge = false,
+            IsBus = false
+        };
+    }
+
+    /// <summary>
+    /// 明細の時系列を SequenceNumber で明示する（小さいほど新しい。Issue #548 / #880）。
+    /// 0 円の入場記録は直前のバスと残高が同じになるため、残高のタイブレークと入力順に頼らず並びを固定する
+    /// （頼ると、ソートキーの変更で入場記録がバスの外側へ移り、修正前のコードでも緑になり得る）。
+    /// </summary>
+    private static LedgerDetail WithSequence(LedgerDetail detail, int sequenceNumber)
+    {
+        detail.SequenceNumber = sequenceNumber;
+        return detail;
+    }
+
+    /// <summary>
+    /// 欠陥を突く側: バス2回の間に摘要へ載らない鉄道明細（0 円の入場記録）があっても、
+    /// 前後のバスは 1 つの run として往復検出されること。
+    /// 修正前は「バス（博多駅～吉塚）、バス（吉塚～博多駅）」と同じラベルのブロックが隣り合っていた。
+    /// </summary>
+    [Fact]
+    public void Issue2034_摘要に載らない鉄道明細を挟むバスの往復は往復として表示する()
+    {
+        // Arrange: 1.バス 博多駅～吉塚 → 2.鉄道 吉塚で入場のみ・0円 → 3.バス 吉塚～博多駅（入力は新しい順）
+        var details = new List<LedgerDetail>
+        {
+            WithSequence(CreateBusUsage(new DateTime(2024, 12, 9), 230, 4330, busStops: "吉塚～博多駅"), 1),
+            WithSequence(CreateEntryOnlyRailway(new DateTime(2024, 12, 9), "吉塚", 0, 4560), 2),
+            WithSequence(CreateBusUsage(new DateTime(2024, 12, 9), 230, 4560, busStops: "博多駅～吉塚"), 3),
+        };
+
+        // Act
+        var result = _generator.Generate(details);
+
+        // Assert
+        result.Should().Be("バス（博多駅～吉塚 往復）");
+        _output.WriteLine($"Generate() = \"{result}\"");
+    }
+
+    /// <summary>
+    /// 欠陥を突く側（乗継）: 摘要に載らない鉄道明細を挟むバスの乗継も、1 つの区間へ統合されること。
+    /// GenerateByDate（返却時の台帳生成が通る経路）でも同じになること。
+    /// </summary>
+    [Fact]
+    public void Issue2034_GenerateByDate経路_摘要に載らない鉄道明細を挟むバスの乗継は統合する()
+    {
+        // Arrange: 1.バス 博多駅～吉塚 → 2.鉄道 吉塚で入場のみ・0円 → 3.バス 吉塚～千早
+        var details = new List<LedgerDetail>
+        {
+            WithSequence(CreateBusUsage(new DateTime(2024, 12, 9), 230, 4330, busStops: "吉塚～千早"), 1),
+            WithSequence(CreateEntryOnlyRailway(new DateTime(2024, 12, 9), "吉塚", 0, 4560), 2),
+            WithSequence(CreateBusUsage(new DateTime(2024, 12, 9), 230, 4560, busStops: "博多駅～吉塚"), 3),
+        };
+
+        // Act
+        var results = _generator.GenerateByDate(details);
+
+        // Assert
+        results.Should().HaveCount(1);
+        results[0].Summary.Should().Be("バス（博多駅～千早）");
+        OutputInputAndResult(details, results);
+    }
+
+    /// <summary>
+    /// 欠陥を突く側（未入力）: 摘要に載らない鉄道明細を挟むバス停名未入力のバスは、
+    /// プレースホルダを 2 つ並べず 1 ブロックにまとめること（修正前は「バス（★）、バス（★）」）。
+    /// </summary>
+    [Fact]
+    public void Issue2034_摘要に載らない鉄道明細を挟む未入力のバスは1ブロックにまとめる()
+    {
+        // Arrange: 1.バス（未入力） → 2.鉄道 天神で入場のみ・0円 → 3.バス（未入力）
+        var details = new List<LedgerDetail>
+        {
+            WithSequence(CreateBusUsage(new DateTime(2024, 12, 9), 230, 4330), 1),
+            WithSequence(CreateEntryOnlyRailway(new DateTime(2024, 12, 9), "天神", 0, 4560), 2),
+            WithSequence(CreateBusUsage(new DateTime(2024, 12, 9), 230, 4560), 3),
+        };
+
+        // Act
+        var result = _generator.Generate(details);
+
+        // Assert
+        result.Should().Be("バス（★）");
+        _output.WriteLine($"Generate() = \"{result}\"");
+    }
+
+    /// <summary>
+    /// 既存の挙動を塞いでいない側: 運賃が発生した片側欠落の鉄道明細（Issue #1735 で摘要に載る）は
+    /// 従来どおり「鉄道（博多～?）」のブロックとして前後のバスを区切り、往復にまとめないこと。
+    /// </summary>
+    [Fact]
+    public void Issue2034_運賃が発生した片側欠落の鉄道明細は従来どおりバスのrunを区切る()
+    {
+        // Arrange: 1.バス 博多駅～吉塚 → 2.鉄道 博多で入場・出場駅不明・210円 → 3.バス 吉塚～博多駅
+        var details = new List<LedgerDetail>
+        {
+            WithSequence(CreateBusUsage(new DateTime(2024, 12, 9), 230, 4120, busStops: "吉塚～博多駅"), 1),
+            WithSequence(CreateEntryOnlyRailway(new DateTime(2024, 12, 9), "博多", 210, 4350), 2),
+            WithSequence(CreateBusUsage(new DateTime(2024, 12, 9), 230, 4560, busStops: "博多駅～吉塚"), 3),
+        };
+
+        // Act
+        var result = _generator.Generate(details);
+
+        // Assert
+        result.Should().Be("バス（博多駅～吉塚）、鉄道（博多～?）、バス（吉塚～博多駅）");
+        _output.WriteLine($"Generate() = \"{result}\"");
+    }
+
+    /// <summary>
+    /// 既存の挙動を塞いでいない側: 摘要に載る鉄道明細を挟むバスは従来どおり往復にまとめないこと（Issue #1904）。
+    /// </summary>
+    [Fact]
+    public void Issue2034_摘要に載る鉄道明細を挟むバスは従来どおり往復にまとめない()
+    {
+        // Arrange: 1.バス 博多駅～吉塚 → 2.鉄道 吉塚→千早 → 3.バス 吉塚～博多駅
+        var details = new List<LedgerDetail>
+        {
+            WithSequence(CreateBusUsage(new DateTime(2024, 12, 9), 230, 3920, busStops: "吉塚～博多駅"), 1),
+            WithSequence(CreateRailwayUsage(new DateTime(2024, 12, 9), "吉塚", "千早", 210, 4150), 2),
+            WithSequence(CreateBusUsage(new DateTime(2024, 12, 9), 230, 4360, busStops: "博多駅～吉塚"), 3),
+        };
+
+        // Act
+        var result = _generator.Generate(details);
+
+        // Assert
+        result.Should().Be("バス（博多駅～吉塚）、鉄道（吉塚～千早）、バス（吉塚～博多駅）");
+        _output.WriteLine($"Generate() = \"{result}\"");
+    }
+
+    /// <summary>
+    /// 摘要に載らない鉄道明細を挟むバス 2 件（乗継でも往復でもない）が 1 ブロックに並び、
+    /// その摘要で同期すると各明細に元のバス停名が戻ること（生成と同期のラウンドトリップ）。
+    /// </summary>
+    /// <remarks>
+    /// 修正前に赤になるのは生成の表明（「バス（…）、バス（…）」）のため。同期の出力順
+    /// （GetBusStopEmissionOrder）は、鉄道明細を除いてもバス明細の集合と順序が変わらないので、
+    /// 除外の一本化そのものはこのテストでは観測できない（生成と同じ手順を使うことの意図は #1763）。
+    /// </remarks>
+    [Fact]
+    public void Issue2034_摘要に載らない鉄道明細を挟むバスの摘要を同期すると各明細に元のバス停名が戻る()
+    {
+        // Arrange: 1.バス 博多駅～吉塚 → 2.鉄道 吉塚で入場のみ・0円 → 3.バス 天神～千早（乗継でも往復でもない）
+        var bus1 = WithSequence(CreateBusUsage(new DateTime(2024, 12, 9), 230, 4560, busStops: "博多駅～吉塚"), 3);
+        var bus2 = WithSequence(CreateBusUsage(new DateTime(2024, 12, 9), 230, 4330, busStops: "天神～千早"), 1);
+        var details = new List<LedgerDetail>
+        {
+            bus2,
+            WithSequence(CreateEntryOnlyRailway(new DateTime(2024, 12, 9), "吉塚", 0, 4560), 2),
+            bus1,
+        };
+
+        // Act 1: 生成
+        var summary = _generator.Generate(details);
+        summary.Should().Be("バス（博多駅～吉塚、天神～千早）");
+
+        // Act 2: バス停名を未入力に戻してから、生成した摘要で同期する
+        bus1.BusStops = "★";
+        bus2.BusStops = "★";
+        var ledgers = new List<Ledger>
+        {
+            new() { Id = 1, Summary = summary, Details = details }
+        };
+        LedgerMergeService.SyncBusStopsFromSummary(ledgers);
+
+        // Assert
+        bus1.BusStops.Should().Be("博多駅～吉塚");
+        bus2.BusStops.Should().Be("天神～千早");
+        _output.WriteLine($"Generate() = \"{summary}\"");
+    }
+
+    #endregion
 }
