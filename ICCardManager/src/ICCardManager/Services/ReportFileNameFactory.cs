@@ -36,6 +36,16 @@ namespace ICCardManager.Services
         internal static readonly string DefaultFileNameFormat =
             new ReportLayoutOptions().FileNameFormat;
 
+        /// <summary>
+        /// 年度ファイルとして保存できる拡張子（Issue #2041）
+        /// </summary>
+        /// <remarks>
+        /// ClosedXML の <c>SaveAs(string)</c> / <c>new XLWorkbook(string)</c> は拡張子で形式を決め、
+        /// 対応しない拡張子を <see cref="ArgumentException"/> で拒否する。書式が拡張子を持たなければ
+        /// <b>全カードの帳票作成が失敗する</b>ため、生成名の拡張子をここで検査して既定書式へ倒す。
+        /// </remarks>
+        internal static readonly string[] AllowedExtensions = { ".xlsx", ".xlsm" };
+
         public ReportFileNameFactory(
             IOptions<OrganizationOptions> orgOptions = null,
             ILogger<ReportFileNameFactory> logger = null)
@@ -79,7 +89,8 @@ namespace ICCardManager.Services
             _logger?.LogInformation(
                 "帳票ファイル名の書式 ReportLayout.FileNameFormat=\"{ConfiguredFormat}\" は使用できないため、" +
                 "既定の書式 \"{DefaultFormat}\" で出力します（生成例: {FileName}）。" +
-                "プレースホルダは {{0}} {{1}} {{2}} のみ、フォルダー区切りとファイル名に使えない文字は指定できません。",
+                "プレースホルダは {{0}} {{1}} {{2}} のみで、3 つすべてを含める必要があります。" +
+                "フォルダー区切りとファイル名に使えない文字は指定できず、拡張子は .xlsx か .xlsm にしてください。",
                 configuredFormat,
                 DefaultFileNameFormat,
                 fileName);
@@ -121,7 +132,11 @@ namespace ICCardManager.Services
 
             // 書式由来のパス構造（"..\\evil\\{0}.xlsx" 等）は #1703 の保証を破るため既定書式へ倒す。
             // ファイル名として使えない文字を含む書式も、SaveAs の時点で例外になるためここで倒す。
-            usedFallback = fileName == null || !IsSingleFileName(fileName);
+            // Issue #2041: カード・年度を区別しない書式と、Excel の拡張子で終わらない書式も倒す。
+            usedFallback = fileName == null
+                || !IsSingleFileName(fileName)
+                || !HasAllowedExtension(fileName)
+                || !DistinguishesInputs(format);
             if (usedFallback)
             {
                 fileName = TryFormat(DefaultFileNameFormat, safeCardType, safeCardNumber, fiscalYear);
@@ -144,6 +159,62 @@ namespace ICCardManager.Services
                 // プレースホルダの誤り（"{3}" / 閉じ括弧の欠落等）。既定書式へ倒す。
                 return null;
             }
+        }
+
+        /// <summary>
+        /// 生成名が年度ファイルとして保存できる拡張子で終わるかを判定する（Issue #2041）
+        /// </summary>
+        private static bool HasAllowedExtension(string fileName)
+        {
+            foreach (var extension in AllowedExtensions)
+            {
+                if (fileName.EndsWith(extension, StringComparison.OrdinalIgnoreCase))
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        /// <summary>
+        /// 書式が「カード種別・管理番号・年度」のすべてを名前に反映するかを判定する（Issue #2041）
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// 年度ファイルは 1 枚のカードの 1 年度ぶんの月シートを積み上げる。3 つのいずれかが
+        /// 名前に現れない書式は<b>別のカード／別の年度が同じファイルへ書かれる</b>ことを意味し、
+        /// 一括作成では各カードが同じ月シートをクリアして書き直すため、最後の 1 枚以外の台帳が
+        /// 失われる。しかも生成自体は成功するので全件が「出力済み」と表示され、欠落に気付けない。
+        /// </para>
+        /// <para>
+        /// 判定は「書式に <c>{0}</c> が含まれるか」という<b>綴り</b>ではなく、値を変えて 2 回整形し
+        /// 結果が変わるかという<b>性質</b>で行う。綴りで見ると整列・書式指定子を伴う正当な書式
+        /// （<c>{0,10}</c> / <c>{2:0000}</c>）を取りこぼし、正当な設定を既定書式へ倒してしまう。
+        /// </para>
+        /// <para>
+        /// 管理番号だけでは足りない（部分ユニークインデックス <c>idx_card_type_number_active</c> が示すとおり、
+        /// 管理番号はカード種別と組でしか一意でない）ため、3 つすべてを必須とする。
+        /// </para>
+        /// </remarks>
+        private static bool DistinguishesInputs(string format)
+        {
+            const string ProbeCardType = "";
+            const string ProbeCardTypeAlt = "";
+            const string ProbeCardNumber = "";
+            const string ProbeCardNumberAlt = "";
+            const int ProbeFiscalYear = 2000;
+            const int ProbeFiscalYearAlt = 2001;
+
+            var baseline = TryFormat(format, ProbeCardType, ProbeCardNumber, ProbeFiscalYear);
+            if (baseline == null)
+            {
+                return false;
+            }
+
+            return baseline != TryFormat(format, ProbeCardTypeAlt, ProbeCardNumber, ProbeFiscalYear)
+                && baseline != TryFormat(format, ProbeCardType, ProbeCardNumberAlt, ProbeFiscalYear)
+                && baseline != TryFormat(format, ProbeCardType, ProbeCardNumber, ProbeFiscalYearAlt);
         }
 
         /// <summary>

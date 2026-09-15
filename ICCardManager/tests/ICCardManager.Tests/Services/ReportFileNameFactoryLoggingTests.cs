@@ -51,6 +51,8 @@ public class ReportFileNameFactoryLoggingTests
     [InlineData("物品出納簿_{3}.xlsx")]                  // 存在しないプレースホルダ
     [InlineData(@"..\..\evil\{0}_{1}_{2}.xlsx")]        // パス構造
     [InlineData("物品出納簿_{0}_{1}_{2}年度*.xlsx")]     // ファイル名に使えない文字
+    [InlineData("物品出納簿_{2}年度.xlsx")]              // カードを区別しない（Issue #2041）
+    [InlineData("物品出納簿_{0}_{1}_{2}年度")]           // 拡張子なし（Issue #2041）
     public void 使えない書式へ倒したときInformationで残すこと(string format)
     {
         var loggerMock = new Mock<ILogger<ReportFileNameFactory>>();
