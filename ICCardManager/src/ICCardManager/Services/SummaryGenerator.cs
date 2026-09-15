@@ -1815,18 +1815,31 @@ namespace ICCardManager.Services
         /// <see cref="DetectRoundTrips"/> へ渡すための区切り」であって、
         /// 循環の解釈（#878 の個別表示）を捨てる指示ではない。
         /// 打ち切りの直後に始まるチェーンが<b>打ち切ったチェーンの先頭の駅へ戻る</b>とき、
-        /// 両者は本来ひと続きの閉じた循環なので、確定済みのチェーンを取り消して
-        /// 併合した範囲で <see cref="AddConsolidatedChain"/> をやり直す。
+        /// 両者は本来ひと続きの閉じた循環なので、循環を閉じた後続チェーンを乗継統合せず個別表示にする
+        /// （ガードで閉じたチェーンは、直前の経路と区間数の釣り合う往復の片割れなら確定済みのまま残し、
+        /// 釣り合わなければ一緒に個別表示にする。下記 Issue #2032）。
         /// 復元しないと循環の後半だけが乗継統合され、途中駅（用務地）が摘要から消える
         /// （天神→博多／博多→天神／天神→薬院／薬院→博多 が
         ///  「鉄道（天神～博多 往復、天神～博多）」となり 薬院 が失われていた）。
         /// これは<b>先読みではなく後付けの判定</b>である点が重要で、
         /// 循環が閉じるかどうかは後続のチェーンを確定させて初めて分かる。
         /// なお復元してよいのは<b>逆走ガードだけが打ち切りの原因</b>だったときに限る
-        /// （乗車地がつながっていない＝<c>isTransfer</c> が false の打ち切りを併合すると
+        /// （乗車地がつながっていない＝<c>isTransfer</c> が false の打ち切りまで循環とみなすと
         /// 「閉じた循環」ではないものを循環として解釈し、成立していた往復を壊す。
         /// 既訪問（#1580）や抑止（#1916）による打ち切りはガードが無くても起きるため、
-        /// ガードのせいにして取り消してはならない）。
+        /// ガードのせいにして復元してはならない）。
+        ///
+        /// Issue #2032: #1917 の初版は、確定済みのチェーン（往復の片割れ）を取り消して循環ごと併合し
+        /// <see cref="AddConsolidatedChain"/> へ委ね直していたため、偶数長の循環が #878 の中間分割を通り、
+        /// ガードが往復の復路として切り離したチェーンが循環の前半へ持ち込まれて
+        /// 本物の往復が壊れ、起きていない往復が作られていた
+        /// （天神→博多／博多→天神／天神→薬院／薬院→大橋／大橋→博多 が
+        ///  「鉄道（天神～博多、博多～薬院 往復）」となっていた）。
+        /// 現在は往復の片割れを確定済みのまま残し、循環を閉じた後続チェーンだけを個別表示にする
+        /// （復路が複数区間でも往路との往復が保たれる）。ただしガードはチェーンの端点しか比べないので、
+        /// 片割れが直前の経路と区間数の釣り合わない場合（往路 3 区間・復路 2 区間など）は残さず、
+        /// 片割れも個別表示へ倒す — 残すと往路にしか無い駅を隠した「往復」が既定解に入り、
+        /// <see cref="HasOnlyBalancedRoundTrips"/>（候補にしか効かない）でも救われない（コードレビューで検出）。
         ///
         /// Issue #1905: かつては逆走判定が <see cref="SummaryGenerationContext.AreTransferStations"/> による同一視を含む一方で
         /// <see cref="DetectRoundTrips"/> の往復ペア照合は駅名の完全一致だったため、
@@ -1873,53 +1886,85 @@ namespace ICCardManager.Services
             string previousChainStart = null;
             string previousChainEnd = null;
 
-            // Issue #1917: 逆走ガードで閉じた直前チェーンの情報（閉じた循環の復元用）。
-            // pendingGuardChainStart < 0 は「直前の区切りは逆走ガードによるものではない」。
-            var pendingGuardChainStart = -1;
+            // Issue #1917: 直前の区切りが逆走ガードによるものなら、ガードで閉じたチェーンの先頭の駅
+            // （閉じた循環の検出用）。null は「直前の区切りは逆走ガードによるものではない」。
             string pendingGuardChainStartStation = null;
+            var pendingGuardChainStart = -1;
             var pendingGuardResultCount = -1;
+
+            // Issue #2032: ガードで閉じたチェーン（result[pendingGuardResultCount]）が、逆走した相手
+            // （その直前に確定した経路）と区間数の釣り合う往復の片割れとして残っているか。
+            // ガードはチェーンの端点しか比べないため、往路 2 区間に対して 3 区間の復路でも閉じる。
+            // 釣り合わない片割れを残すと、往路にしか無い駅を隠したまま「往復」と主張する。
+            bool IsBalancedReturnLeg()
+                => pendingGuardResultCount >= 1
+                    && result.Count == pendingGuardResultCount + 1
+                    && result[pendingGuardResultCount - 1].LegCount
+                        == result[pendingGuardResultCount].LegCount;
 
             // チェーンを result へ確定させる。
             // closedByReturnGuard は「この区切りが Issue #1902 の逆走ガードによるものか」。
             void EmitChain(int chainStart, int chainEnd, string start, string end, bool closedByReturnGuard)
             {
-                var emitChainStart = chainStart;
-                var emitStartStation = start;
-                var countBeforeEmit = result.Count;
-
                 // Issue #1917: 直前チェーンが逆走ガードで閉じられ、いま閉じるチェーンが
                 // その先頭の駅へ戻るなら、両者は本来ひと続きの「閉じた循環」である。
-                // ガードで分断したままだと AddConsolidatedChain の循環検出（Issue #878）へ
-                // 到達できず、循環の後半が乗継統合されて途中駅（用務地）が摘要から消える
-                // （天神→博多／博多→天神／天神→薬院／薬院→博多 で
+                // ガードで分断したまま乗継統合すると、循環の後半が 1 区間へ畳まれて途中駅（用務地）が
+                // 摘要から消える（天神→博多／博多→天神／天神→薬院／薬院→博多 で
                 //  「鉄道（天神～博多 往復、天神～博多）」となり 薬院 が失われていた）。
                 // ガードは往復ペアを DetectRoundTrips へ渡すための区切りであって、
                 // 循環の解釈（#878 の個別表示）を捨てる指示ではない。
-                if (pendingGuardChainStart >= 0
-                    && context.AreTransferStations(end, pendingGuardChainStartStation))
+                //
+                // Issue #2032: ただし循環を併合して AddConsolidatedChain（#878 の中間分割）へ委ね直すことはしない。
+                // ガードで閉じたチェーンは直前経路の完全な逆走＝往復の片割れであり、
+                // 併合すると ①偶数長では #878 の中間分割がその復路を循環の前半と束ね、本物の往復を壊して
+                // 起きていない往復を作る（天神→博多／博多→天神／天神→薬院／薬院→大橋／大橋→博多 が
+                //  「鉄道（天神～博多、博多～薬院 往復）」となり 大橋 も消えていた）、
+                // ②復路が複数区間なら個別表示でばらけて往路の相手がいなくなる。
+                // そこで往復の片割れが区間数の釣り合う往復を成すなら確定済みのまま残し
+                // （往復判定は DetectRoundTrips に委ねる）、循環を閉じた後続チェーンだけを個別表示にする。
+                // 釣り合わない（往路 2 区間・復路 3 区間など）なら片割れも個別表示へ倒す
+                // （残すと往路にしか無い駅を隠した「往復」になる。コードレビューで検出）。
+                var chainResultStart = result.Count;
+                var closesCycle = pendingGuardChainStartStation != null
+                    && context.AreTransferStations(end, pendingGuardChainStartStation);
+                if (closesCycle)
                 {
-                    result.RemoveRange(
-                        pendingGuardResultCount, result.Count - pendingGuardResultCount);
-                    emitChainStart = pendingGuardChainStart;
-                    emitStartStation = pendingGuardChainStartStation;
-                    countBeforeEmit = pendingGuardResultCount;
-                }
+                    if (!IsBalancedReturnLeg())
+                    {
+                        result.RemoveRange(
+                            pendingGuardResultCount, result.Count - pendingGuardResultCount);
+                        AddIndividually(pendingGuardChainStart, chainStart - 1);
+                        chainResultStart = result.Count;
+                    }
 
-                AddConsolidatedChain(
-                    result, routes, emitChainStart, chainEnd, emitStartStation, end,
-                    suppressedIndices, context, indexOffset);
-
-                if (closedByReturnGuard)
-                {
-                    pendingGuardChainStart = emitChainStart;
-                    pendingGuardChainStartStation = emitStartStation;
-                    pendingGuardResultCount = countBeforeEmit;
+                    AddIndividually(chainStart, chainEnd);
                 }
                 else
                 {
-                    pendingGuardChainStart = -1;
+                    AddConsolidatedChain(
+                        result, routes, chainStart, chainEnd, start, end,
+                        suppressedIndices, context, indexOffset);
+                }
+
+                if (closedByReturnGuard)
+                {
+                    pendingGuardChainStartStation = start;
+                    pendingGuardChainStart = chainStart;
+                    pendingGuardResultCount = chainResultStart;
+                }
+                else
+                {
                     pendingGuardChainStartStation = null;
+                    pendingGuardChainStart = -1;
                     pendingGuardResultCount = -1;
+                }
+            }
+
+            void AddIndividually(int from, int to)
+            {
+                for (int i = from; i <= to; i++)
+                {
+                    result.Add(new ConsolidatedRoute(routes[i].Entry, routes[i].Exit, 1));
                 }
             }
 
