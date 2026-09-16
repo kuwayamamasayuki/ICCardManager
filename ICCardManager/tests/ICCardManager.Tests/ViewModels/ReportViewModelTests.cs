@@ -1038,7 +1038,8 @@ public class ReportViewModelTests
     {
         SelectOneCard();
 
-        var canProceed = await _viewModel.RunPreflightBeforeCreateAsync(_viewModel.SelectedCards.ToList());
+        var canProceed = await _viewModel.RunPreflightBeforeCreateAsync(
+            _viewModel.SelectedCards.ToList(), _viewModel.SelectedYear, _viewModel.SelectedMonth);
 
         canProceed.Should().BeTrue();
         _navigationServiceMock.Verify(
@@ -1060,7 +1061,8 @@ public class ReportViewModelTests
                 It.IsAny<Action<ICCardManager.Views.Dialogs.ReportPreflightDialog>>()))
             .Returns(false);
 
-        var canProceed = await _viewModel.RunPreflightBeforeCreateAsync(_viewModel.SelectedCards.ToList());
+        var canProceed = await _viewModel.RunPreflightBeforeCreateAsync(
+            _viewModel.SelectedCards.ToList(), _viewModel.SelectedYear, _viewModel.SelectedMonth);
 
         canProceed.Should().BeFalse();
         _viewModel.StatusMessage.Should().Contain("中止");
@@ -1081,7 +1083,8 @@ public class ReportViewModelTests
                 It.IsAny<Action<ICCardManager.Views.Dialogs.ReportPreflightDialog>>()))
             .Returns(true);
 
-        var canProceed = await _viewModel.RunPreflightBeforeCreateAsync(_viewModel.SelectedCards.ToList());
+        var canProceed = await _viewModel.RunPreflightBeforeCreateAsync(
+            _viewModel.SelectedCards.ToList(), _viewModel.SelectedYear, _viewModel.SelectedMonth);
 
         canProceed.Should().BeTrue();
         _viewModel.StatusMessage.Should().NotContain("中止");
@@ -1100,7 +1103,8 @@ public class ReportViewModelTests
                 It.IsAny<Action<ICCardManager.Views.Dialogs.ReportPreflightDialog>>()))
             .Returns((bool?)null);
 
-        var canProceed = await _viewModel.RunPreflightBeforeCreateAsync(_viewModel.SelectedCards.ToList());
+        var canProceed = await _viewModel.RunPreflightBeforeCreateAsync(
+            _viewModel.SelectedCards.ToList(), _viewModel.SelectedYear, _viewModel.SelectedMonth);
 
         canProceed.Should().BeFalse();
     }
@@ -1178,6 +1182,129 @@ public class ReportViewModelTests
             n => n.ShowDialog<ICCardManager.Views.Dialogs.ReportPreflightDialog>(
                 It.IsAny<Action<ICCardManager.Views.Dialogs.ReportPreflightDialog>>()),
             Times.Never);
+    }
+
+    /// <summary>
+    /// 事前チェックの帳票データ構築を待機させ、呼ばれた年月を記録する（Issue #2045）。
+    /// 返す <see cref="TaskCompletionSource{T}"/> を完了させるまで検査は先へ進まない。
+    /// </summary>
+    private (TaskCompletionSource<bool> Entered, TaskCompletionSource<bool> Release, List<(int Year, int Month)> Calls)
+        SetupBlockingPreflightBuild()
+    {
+        var entered = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var release = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var calls = new List<(int Year, int Month)>();
+
+        _preflightDataBuilderMock
+            .Setup(b => b.BuildAsync(It.IsAny<string>(), It.IsAny<int>(), It.IsAny<int>()))
+            .Returns(async (string _, int year, int month) =>
+            {
+                lock (calls)
+                {
+                    calls.Add((year, month));
+                }
+                entered.TrySetResult(true);
+                await release.Task;
+                // 警告を出す（確認ダイアログへ進ませる）データを、呼ばれた年月で返す
+                return new MonthlyReportData
+                {
+                    Card = new IcCard { CardIdm = "0123456789ABCDEF", CardType = "はやかけん", CardNumber = "001" },
+                    Year = year,
+                    Month = month,
+                    Ledgers = new List<Ledger>
+                    {
+                        new Ledger { Id = 1, Date = new DateTime(year, month, 15), Summary = "鉄道（博多～天神）", Expense = 500, Balance = -120 }
+                    },
+                    MonthlyTotal = new ReportTotalData { Label = "月計", Income = 0, Expense = 500, Balance = null }
+                };
+            });
+
+        return (entered, release, calls);
+    }
+
+    /// <summary>
+    /// 帳票作成: 事前チェックの待機中に選択年月を変えても、検査対象は作成開始時点の年月であること（Issue #2045）
+    /// </summary>
+    /// <remarks>
+    /// 割り込み点はスレッドの競争ではなく、帳票データ構築を待機させて確定的に再現する。
+    /// 中止を選ばせてファイル生成へは進ませない（検査対象の年月だけを観測する）。
+    /// </remarks>
+    [Fact]
+    public async Task CreateReportAsync_WhenSelectedMonthChangesDuringPreflight_ChecksSnapshotMonth()
+    {
+        SelectOneCard();
+        _viewModel.OutputFolder = Path.GetTempPath();
+        _viewModel.SelectedYear = 2026;
+        _viewModel.SelectedMonth = 5;
+        var (entered, release, calls) = SetupBlockingPreflightBuild();
+        _navigationServiceMock
+            .Setup(n => n.ShowDialog<ICCardManager.Views.Dialogs.ReportPreflightDialog>(
+                It.IsAny<Action<ICCardManager.Views.Dialogs.ReportPreflightDialog>>()))
+            .Returns(false);
+
+        var creating = _viewModel.CreateReportAsync();
+        await entered.Task;
+
+        // 検査の待機中に、キーボードで月を変えた状況
+        _viewModel.SelectedMonth = 6;
+        _viewModel.SelectedYear = 2027;
+        release.SetResult(true);
+        await creating;
+
+        calls.Should().NotBeEmpty("事前チェックが帳票データを構築したこと（検査の空振り防止）");
+        calls.Should().OnlyContain(c => c.Year == 2026 && c.Month == 5,
+            "検査対象は作成開始時点のスナップショット（2026年5月）であること");
+        // 対の表明: 警告を検出して確認ダイアログまで到達している（検査の結果が作成判断に使われている）
+        _navigationServiceMock.Verify(
+            n => n.ShowDialog<ICCardManager.Views.Dialogs.ReportPreflightDialog>(
+                It.IsAny<Action<ICCardManager.Views.Dialogs.ReportPreflightDialog>>()),
+            Times.Once);
+        _viewModel.StatusMessage.Should().Contain("中止");
+    }
+
+    /// <summary>
+    /// 「事前チェック」ボタン: 検査の待機中に選択年月を変えても、検査対象は押した時点の年月であること（Issue #2045）
+    /// </summary>
+    [Fact]
+    public async Task RunPreflightCheckAsync_WhenSelectedMonthChangesDuringCheck_ChecksMonthAtStart()
+    {
+        SelectOneCard();
+        _viewModel.SelectedYear = 2026;
+        _viewModel.SelectedMonth = 5;
+        var (entered, release, calls) = SetupBlockingPreflightBuild();
+
+        var checking = _viewModel.RunPreflightCheckAsync();
+        await entered.Task;
+
+        _viewModel.SelectedMonth = 6;
+        release.SetResult(true);
+        await checking;
+
+        calls.Should().NotBeEmpty("事前チェックが帳票データを構築したこと（検査の空振り防止）");
+        calls.Should().OnlyContain(c => c.Year == 2026 && c.Month == 5,
+            "検査対象はボタンを押した時点の選択年月（2026年5月）であること");
+        _viewModel.StatusMessage.Should().Contain("警告1件");
+    }
+
+    /// <summary>
+    /// 対の表明: 検査の前に選択年月を変えた場合は、変更後の年月を検査すること（Issue #2045）
+    /// </summary>
+    /// <remarks>
+    /// スナップショットを「常に初期値（先月）を使う」形へ退化させた実装を検出する。
+    /// </remarks>
+    [Fact]
+    public async Task RunPreflightCheckAsync_WhenSelectedMonthChangedBeforeCheck_ChecksChangedMonth()
+    {
+        SelectOneCard();
+        _viewModel.SelectedYear = 2027;
+        _viewModel.SelectedMonth = 11;
+        var (_, release, calls) = SetupBlockingPreflightBuild();
+        release.SetResult(true);
+
+        await _viewModel.RunPreflightCheckAsync();
+
+        calls.Should().NotBeEmpty();
+        calls.Should().OnlyContain(c => c.Year == 2027 && c.Month == 11);
     }
 
     #endregion
