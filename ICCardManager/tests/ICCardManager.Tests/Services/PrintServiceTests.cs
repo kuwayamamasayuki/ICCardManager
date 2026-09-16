@@ -26,6 +26,9 @@ public class PrintServiceTests
     {
         _cardRepositoryMock = new Mock<ICardRepository>();
         _ledgerRepositoryMock = new Mock<ILedgerRepository>();
+        // Issue #2043: 前月末残高はリポジトリの確定済み単票クエリから取る。
+        // 各テストが仕込む GetByMonthAsync / GetCarryoverBalanceAsync をデータ源として解決する。
+        Infrastructure.PrecedingLedgerBalanceFake.Install(_ledgerRepositoryMock);
         var reportDataBuilder = new ReportDataBuilder(
             _cardRepositoryMock.Object,
             _ledgerRepositoryMock.Object);

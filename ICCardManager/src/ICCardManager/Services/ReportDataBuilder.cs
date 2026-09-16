@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Linq;
 using System.Threading.Tasks;
 using ICCardManager.Common;
@@ -37,16 +37,31 @@ namespace ICCardManager.Services
                 return null;
             }
 
-            // 前月末残高を取得（繰越行表示および残高チェーン並替に使用）
-            int? precedingBalance;
-            if (month == 4)
-            {
-                precedingBalance = await _ledgerRepository.GetCarryoverBalanceAsync(cardIdm, year - 1).ConfigureAwait(false);
-            }
-            else
-            {
-                precedingBalance = await GetPreviousMonthBalanceAsync(cardIdm, year, month).ConfigureAwait(false);
-            }
+            var fiscalYearStartYear = FiscalYearHelper.GetFiscalYear(year, month);
+
+            // 年度開始前の最終残高（＝前年度繰越）。
+            // 年度累計の残高チェーン並替のシードと、累計受入への加算（Issue #1494）の両方で使う。
+            var fiscalYearPrecedingBalance = await _ledgerRepository
+                .GetCarryoverBalanceAsync(cardIdm, fiscalYearStartYear - 1).ConfigureAwait(false);
+
+            // 前月末残高を取得（繰越行表示および残高チェーン並替に使用）。
+            // Issue #2043: 「当月 1 日より前の最終残高」はリポジトリの確定済み単票クエリで取る。
+            // 4月は年度境界と一致するため前年度繰越と同値（GetCarryoverBalanceAsync も
+            // GetLatestBeforeDateAsync と同じ規則で解決される）。
+            //
+            // 【母集団について】business-logic.md「シードの母集団は本体クエリと揃える」（#1770）の
+            // 例外にあたる。GetLatestBeforeDateAsync は貸出中レコード（is_lent_record = 1）を
+            // 含むが、シード先の ledgers / yearlyLedgers は摘要で除外している。これが安全なのは
+            // 貸出中プレースホルダが Income = Expense = 0 かつ Balance = 貸出時の残高（＝直前の
+            // 実績行の残額）であり、残高チェーン上は自己ループで、返却されるまで後続の利用行が
+            // 挿入されないため。つまり「貸出中行を含めても含めなくても最終残高は同じ」。
+            // 除外オプション付きの単票クエリは公開されていないので、この不変条件に依存する。
+            // 回帰は ReportDataBuilderTests の
+            // BuildAsync_PreviousMonthHasLentRecord_PrecedingBalanceIsUnchanged が固定する。
+            int? precedingBalance = month == 4
+                ? fiscalYearPrecedingBalance
+                : (await _ledgerRepository
+                    .GetLatestBeforeDateAsync(cardIdm, new DateTime(year, month, 1)).ConfigureAwait(false))?.Balance;
 
             // Issue #784: 残高チェーンに基づいて同一日内の時系列順を復元
             var ledgers = LedgerOrderHelper.ReorderByBalanceChain(
@@ -92,20 +107,21 @@ namespace ICCardManager.Services
             var monthlyExpense = ledgers.Sum(l => l.Expense);
 
             // 累計データを計算（4月の月計残額表示にも使用）
-            var fiscalYearStartYear = FiscalYearHelper.GetFiscalYear(year, month);
             var fiscalYearStart = FiscalYearHelper.GetFiscalYearStart(fiscalYearStartYear);
             var fiscalYearEnd = new DateTime(year, month, DateTime.DaysInMonth(year, month));
             // Issue #784: 残高チェーンに基づいて時系列順を復元
+            // Issue #2043: 年度開始前の最終残高をチェーン開始点のシードとして渡す。
+            // シード無しでは、年度先頭の稼働日が Issue #1004 形状（同額のポイント還元と利用で
+            // 残高が循環する日）だと開始点を当日の行だけからは決められず id 順フォールバックへ落ちる。
+            // 当月の明細（上）はシード付きなので、同じシート上で累計残額と最終データ行の残額が食い違う。
             var yearlyLedgers = LedgerOrderHelper.ReorderByBalanceChain(
                 (await _ledgerRepository.GetByDateRangeAsync(cardIdm, fiscalYearStart, fiscalYearEnd).ConfigureAwait(false))
-                    .Where(l => l.Summary != SummaryGenerator.GetLendingSummary()));
+                    .Where(l => l.Summary != SummaryGenerator.GetLendingSummary()),
+                fiscalYearPrecedingBalance);
 
             // Issue #1494: 「前年度より繰越」レコードは DB に保存されず CarryoverRowData として
             // 表示用に合成されるため、月計・累計の集計に明示的に加算する必要がある。
-            // 4月の precedingBalance と「年度開始時の前年度繰越額」は同値なので、変数として一元化。
-            var fiscalYearCarryoverIncome = (month == 4)
-                ? (precedingBalance ?? 0)
-                : (await _ledgerRepository.GetCarryoverBalanceAsync(cardIdm, fiscalYearStartYear - 1).ConfigureAwait(false) ?? 0);
+            var fiscalYearCarryoverIncome = fiscalYearPrecedingBalance ?? 0;
 
             // 累計も同様に「○月から繰越」レコードを除外（紙出納簿移行カード対策）
             var yearlyIncome = yearlyLedgers
@@ -118,9 +134,9 @@ namespace ICCardManager.Services
             // 年度内が空なら当月も必ず空であり、フォールバック先は常に 0 だった。その結果、
             // 5月以降の累計残額と3月の次年度繰越が 0 円で出力され、同一帳票内の繰越行および
             // 翌年度4月の「前年度より繰越」と矛盾していた。
-            // precedingBalance は 4月なら前年度繰越、5月以降は GetPreviousMonthBalanceAsync
-            // （年度内が空なら同じ前年度繰越へフォールバックする）。前年度繰越も無い新規カードでは
-            // null になり、その場合 fiscalYearCarryoverIncome が 0 を与える。
+            // precedingBalance は 4月なら前年度繰越、5月以降は「当月 1 日より前の最終残高」
+            // （年度内が空なら年度開始前の最終残高＝同じ前年度繰越になる）。前年度繰越も無い
+            // 新規カードでは null になり、その場合 fiscalYearCarryoverIncome が 0 を与える。
             var currentBalance = yearlyLedgers.LastOrDefault()?.Balance
                 ?? precedingBalance
                 ?? fiscalYearCarryoverIncome;
@@ -190,52 +206,6 @@ namespace ICCardManager.Services
                 CumulativeTotal = cumulativeTotal,
                 CarryoverToNextYear = carryoverToNextYear
             };
-        }
-
-        /// <summary>
-        /// 前月末の残高を取得
-        /// </summary>
-        /// <remarks>
-        /// Issue #1602: 直前月が利用空白でも、年度開始月（4月）まで 1 ヶ月ずつ遡り、
-        /// 利用のあった最後の月の月末残高を返す。これにより「○月から繰越」行の残高が
-        /// 利用空白月をまたいでも残高チェーン（受入 − 払出 = 残額）を維持する。
-        /// 年度開始月まで遡っても 1 件もデータがない場合のみ前年度繰越にフォールバックする。
-        /// （本メソッドは month != 4 のときだけ呼ばれる。4 月は呼び出し側で前年度繰越を直接取得する）
-        /// </remarks>
-        /// <param name="cardIdm">カードIDm</param>
-        /// <param name="year">年</param>
-        /// <param name="month">月</param>
-        /// <returns>前月末残高。年度内に過去データがない場合は前年度繰越（それもなければnull）</returns>
-        private async Task<int?> GetPreviousMonthBalanceAsync(string cardIdm, int year, int month)
-        {
-            var fiscalYearStartYear = FiscalYearHelper.GetFiscalYear(year, month);
-            var (cursorYear, cursorMonth) = FiscalYearHelper.GetPreviousMonth(year, month);
-
-            // 年度開始月（4月）まで 1 ヶ月ずつ遡り、利用のあった最後の月の月末残高を返す
-            while (true)
-            {
-                // Issue #784: 残高チェーンに基づいて時系列順を復元
-                var ledgers = LedgerOrderHelper.ReorderByBalanceChain(
-                    (await _ledgerRepository.GetByMonthAsync(cardIdm, cursorYear, cursorMonth).ConfigureAwait(false))
-                        .Where(l => l.Summary != SummaryGenerator.GetLendingSummary()));
-
-                if (ledgers.Count > 0)
-                {
-                    return ledgers.Last().Balance;
-                }
-
-                // 年度開始月（4月）まで遡り切ったら終了
-                if (cursorYear == fiscalYearStartYear && cursorMonth == 4)
-                {
-                    break;
-                }
-
-                (cursorYear, cursorMonth) = FiscalYearHelper.GetPreviousMonth(cursorYear, cursorMonth);
-            }
-
-            // 年度内に 1 件もデータがない場合は前年度繰越にフォールバック
-            var carryover = await _ledgerRepository.GetCarryoverBalanceAsync(cardIdm, fiscalYearStartYear - 1).ConfigureAwait(false);
-            return carryover;
         }
     }
 }
