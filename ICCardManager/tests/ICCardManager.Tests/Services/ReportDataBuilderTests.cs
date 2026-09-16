@@ -52,7 +52,7 @@ public class ReportDataBuilderTests
     private static Ledger CreateTestLedger(
         int id, string cardIdm, DateTime date,
         string summary, int income, int expense, int balance,
-        string? staffName = null, string? note = null)
+        string? staffName = null, string? note = null, bool isLentRecord = false)
     {
         return new Ledger
         {
@@ -64,7 +64,8 @@ public class ReportDataBuilderTests
             Expense = expense,
             Balance = balance,
             StaffName = staffName,
-            Note = note
+            Note = note,
+            IsLentRecord = isLentRecord
         };
     }
 
@@ -1000,7 +1001,7 @@ public class ReportDataBuilderTests
         var ledgers = new List<Ledger>
         {
             CreateTestLedger(1, TestCardIdm, new DateTime(2025, 5, 1),
-                SummaryGenerator.GetLendingSummary(), 0, 0, 4000), // 貸出中（除外対象）
+                SummaryGenerator.GetLendingSummary(), 0, 0, 4000, isLentRecord: true), // 貸出中（除外対象）
             CreateTestLedger(2, TestCardIdm, new DateTime(2025, 5, 10),
                 "鉄道（天神～博多）", 0, 210, 3790)
         };
@@ -1013,6 +1014,63 @@ public class ReportDataBuilderTests
         // Assert: 貸出中レコードはフィルタされ、1件のみ
         result.Ledgers.Should().HaveCount(1);
         result.Ledgers[0].Summary.Should().Be("鉄道（天神～博多）");
+    }
+
+    [Fact]
+    public async Task BuildAsync_LentRecordWithOutdatedSummary_IsExcluded()
+    {
+        // Arrange（Issue #2044 欠陥を突く側）: 貸出中に組織設定 SummaryText.LendingSummary が
+        // 変更され、既存の貸出中レコードは旧文言のまま残っている。
+        // 摘要を現在の設定値と比べる実装では除外をすり抜け、帳票に 0円／0円 の行が出る。
+        SetupCard();
+        var outdatedLendingSummary = SummaryGenerator.GetLendingSummary() + "（変更前の文言）";
+        outdatedLendingSummary.Should().NotBe(SummaryGenerator.GetLendingSummary(),
+            "前提: 貸出中レコードの摘要が現在の設定値と食い違っていること");
+
+        var ledgers = new List<Ledger>
+        {
+            CreateTestLedger(1, TestCardIdm, new DateTime(2025, 5, 10),
+                "鉄道（天神～博多）", 0, 210, 3790),
+            CreateTestLedger(2, TestCardIdm, new DateTime(2025, 5, 20),
+                outdatedLendingSummary, 0, 0, 3790, isLentRecord: true)
+        };
+
+        SetupBasicMonth(2025, 5, 4000, ledgers);
+
+        // Act
+        var result = await _builder.BuildAsync(TestCardIdm, 2025, 5);
+
+        // Assert: 明細・月計に貸出中レコードが入らない。
+        // 貸出中レコードは Income = Expense = 0 かつ Balance が直前の行と同じなので、年度累計の値は
+        // 除外の有無で変わらない（年度累計側の除外は LentRecordSummaryComparisonConventionTests が
+        // 呼び出しの形で固定する）。累計残額は値が崩れていないことの確認として置く。
+        result.Ledgers.Select(l => l.Id).Should().Equal(1);
+        result.MonthlyTotal.Expense.Should().Be(210);
+        result.CumulativeTotal!.Balance.Should().Be(3790);
+    }
+
+    [Fact]
+    public async Task BuildAsync_NonLentRecordWithLendingSummaryText_IsNotExcluded()
+    {
+        // Arrange（Issue #2044 正当な行を塞いでいない側）: 摘要がたまたま現在の貸出中の文言と
+        // 同じ通常行（is_lent_record = 0）。除外は行自身のフラグで決まり、摘要では決まらない。
+        // この表明が無いと「フラグか摘要のどちらかが貸出中なら除外する」広すぎる実装でも緑になる。
+        SetupCard();
+        var ledgers = new List<Ledger>
+        {
+            CreateTestLedger(1, TestCardIdm, new DateTime(2025, 5, 10),
+                SummaryGenerator.GetLendingSummary(), 0, 210, 3790)
+        };
+
+        SetupBasicMonth(2025, 5, 4000, ledgers);
+
+        // Act
+        var result = await _builder.BuildAsync(TestCardIdm, 2025, 5);
+
+        // Assert
+        result.Ledgers.Select(l => l.Id).Should().Equal(1);
+        result.MonthlyTotal.Expense.Should().Be(210);
+        result.CumulativeTotal!.Balance.Should().Be(3790);
     }
 
     #endregion
@@ -1792,7 +1850,7 @@ public class ReportDataBuilderTests
             CreateTestLedger(1, TestCardIdm, new DateTime(2025, 6, 10),
                 SummaryGenerator.GetChargeSummary(DepartmentType.MayorOffice), 1600, 0, 1600),
             CreateTestLedger(2, TestCardIdm, new DateTime(2025, 6, 28),
-                SummaryGenerator.GetLendingSummary(), 0, 0, 1600)
+                SummaryGenerator.GetLendingSummary(), 0, 0, 1600, isLentRecord: true)
         };
 
         SetupMonthlyLedgers(TestCardIdm, 2025, 6, juneLedgers);
@@ -1807,7 +1865,7 @@ public class ReportDataBuilderTests
         result.PrecedingBalance.Should().Be(1600);
         result.Carryover.Balance.Should().Be(1600);
         // 貸出中行は帳票の明細にも載らない（既存の除外が効いている）
-        result.Ledgers.Should().NotContain(l => l.Summary == SummaryGenerator.GetLendingSummary());
+        result.Ledgers.Should().NotContain(l => l.IsLentRecord);
     }
 
     [Fact]

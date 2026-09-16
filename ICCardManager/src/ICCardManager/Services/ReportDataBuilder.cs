@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
 using ICCardManager.Common;
@@ -51,7 +52,7 @@ namespace ICCardManager.Services
             //
             // 【母集団について】business-logic.md「シードの母集団は本体クエリと揃える」（#1770）の
             // 例外にあたる。GetLatestBeforeDateAsync は貸出中レコード（is_lent_record = 1）を
-            // 含むが、シード先の ledgers / yearlyLedgers は摘要で除外している。これが安全なのは
+            // 含むが、シード先の ledgers / yearlyLedgers は IsLentRecord で除外している。これが安全なのは
             // 貸出中プレースホルダが Income = Expense = 0 かつ Balance = 貸出時の残高（＝直前の
             // 実績行の残額）であり、残高チェーン上は自己ループで、返却されるまで後続の利用行が
             // 挿入されないため。つまり「貸出中行を含めても含めなくても最終残高は同じ」。
@@ -65,8 +66,7 @@ namespace ICCardManager.Services
 
             // Issue #784: 残高チェーンに基づいて同一日内の時系列順を復元
             var ledgers = LedgerOrderHelper.ReorderByBalanceChain(
-                (await _ledgerRepository.GetByMonthAsync(cardIdm, year, month).ConfigureAwait(false))
-                    .Where(l => l.Summary != SummaryGenerator.GetLendingSummary()),
+                ExcludeLentRecords(await _ledgerRepository.GetByMonthAsync(cardIdm, year, month).ConfigureAwait(false)),
                 precedingBalance);
 
             // 繰越行データを生成
@@ -115,8 +115,7 @@ namespace ICCardManager.Services
             // 残高が循環する日）だと開始点を当日の行だけからは決められず id 順フォールバックへ落ちる。
             // 当月の明細（上）はシード付きなので、同じシート上で累計残額と最終データ行の残額が食い違う。
             var yearlyLedgers = LedgerOrderHelper.ReorderByBalanceChain(
-                (await _ledgerRepository.GetByDateRangeAsync(cardIdm, fiscalYearStart, fiscalYearEnd).ConfigureAwait(false))
-                    .Where(l => l.Summary != SummaryGenerator.GetLendingSummary()),
+                ExcludeLentRecords(await _ledgerRepository.GetByDateRangeAsync(cardIdm, fiscalYearStart, fiscalYearEnd).ConfigureAwait(false)),
                 fiscalYearPrecedingBalance);
 
             // Issue #1494: 「前年度より繰越」レコードは DB に保存されず CarryoverRowData として
@@ -207,5 +206,20 @@ namespace ICCardManager.Services
                 CarryoverToNextYear = carryoverToNextYear
             };
         }
+
+        /// <summary>
+        /// 帳票の母集団から貸出中プレースホルダ（<c>is_lent_record = 1</c>）を除く。
+        /// </summary>
+        /// <remarks>
+        /// Issue #2044: 以前は摘要が<b>現在の設定値</b>の「（貸出中）」と一致するかで除外していた。
+        /// 組織設定 <c>SummaryText.LendingSummary</c> を貸出中に変更すると、既存の貸出中レコードは
+        /// 旧文言のまま残るため除外をすり抜け、物品出納簿に「0円／0円」の行が出力されていた。
+        /// 保存済みの行が貸出中かどうかは、行自身が持つフラグで判定する
+        /// （<c>business-logic.md</c>「ledger を集計するときの前提」／<c>ReportPreflightChecker</c> と同じ母集団）。
+        /// 逆に、摘要がたまたま同じ文言の通常行は除外しない。
+        /// </remarks>
+        private static IEnumerable<Ledger> ExcludeLentRecords(
+            IEnumerable<Ledger> ledgers)
+            => ledgers.Where(l => !l.IsLentRecord);
     }
 }
