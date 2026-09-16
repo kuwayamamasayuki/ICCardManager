@@ -679,7 +679,9 @@ public partial class ReportViewModel : ViewModelBase
 
         // Issue #1688: 出力前プリフライトチェック
         // 中止する場合に不要な上書き確認ダイアログを見せないよう、上書き確認より前に実施する
-        if (!await RunPreflightBeforeCreateAsync(targetCards))
+        // Issue #2045: 年月もスナップショットを渡す。検査した月・結果ダイアログに表示する月・
+        // 実際に書き込む月を同じ値にするため
+        if (!await RunPreflightBeforeCreateAsync(targetCards, targetYear, targetMonth))
         {
             return;
         }
@@ -888,10 +890,13 @@ public partial class ReportViewModel : ViewModelBase
     /// <see cref="CreateReportAsync"/> 経由では検証できない。判断部分だけを internal で公開する。
     /// </remarks>
     /// <param name="targetCards">対象カード（作成開始時点のスナップショット。Issue #1949）</param>
+    /// <param name="targetYear">対象年（作成開始時点のスナップショット。Issue #2045）</param>
+    /// <param name="targetMonth">対象月（作成開始時点のスナップショット。Issue #2045）</param>
     /// <returns>続行する場合true、ユーザーが中止を選んだ場合false</returns>
-    internal async Task<bool> RunPreflightBeforeCreateAsync(IReadOnlyList<CardDto> targetCards)
+    internal async Task<bool> RunPreflightBeforeCreateAsync(
+        IReadOnlyList<CardDto> targetCards, int targetYear, int targetMonth)
     {
-        var result = await RunPreflightAsync(targetCards);
+        var result = await RunPreflightAsync(targetCards, targetYear, targetMonth);
 
         // 警告がなければ確認を挟まずそのまま作成に進む
         if (!result.HasWarnings)
@@ -899,7 +904,7 @@ public partial class ReportViewModel : ViewModelBase
             return true;
         }
 
-        var dialogResult = ShowPreflightDialog(result, isConfirmationMode: true);
+        var dialogResult = ShowPreflightDialog(result, targetYear, targetMonth, isConfirmationMode: true);
         if (dialogResult == true)
         {
             return true;
@@ -928,8 +933,15 @@ public partial class ReportViewModel : ViewModelBase
             return;
         }
 
-        var result = await RunPreflightAsync(SelectedCards.ToList());
-        ShowPreflightDialog(result, isConfirmationMode: false);
+        // Issue #2045: 対象（カード・年月）は最初の await より前にスナップショットする。
+        // 検査の待機中に年月コンボボックスをキーボードで変えると、結果ダイアログが
+        // 検査していない月の名前で「問題なし」と表示される（処理中オーバーレイはマウスしか塞がない。#1761）
+        var targetCards = SelectedCards.ToList();
+        var targetYear = SelectedYear;
+        var targetMonth = SelectedMonth;
+
+        var result = await RunPreflightAsync(targetCards, targetYear, targetMonth);
+        ShowPreflightDialog(result, targetYear, targetMonth, isConfirmationMode: false);
 
         SetStatus(
             result.HasWarnings
@@ -945,12 +957,20 @@ public partial class ReportViewModel : ViewModelBase
     /// 対象カード。呼び出し元が <c>SelectedCards</c> をスナップショットして渡す
     /// （await をまたいで選択を引き直さないため。Issue #1949）
     /// </param>
-    private async Task<ReportPreflightResult> RunPreflightAsync(IReadOnlyList<CardDto> targetCards)
+    /// <param name="targetYear">対象年。呼び出し元がスナップショットして渡す（Issue #2045）</param>
+    /// <param name="targetMonth">対象月。呼び出し元がスナップショットして渡す（Issue #2045）</param>
+    /// <remarks>
+    /// Issue #2045: 本メソッドとダイアログ表示は <c>SelectedYear</c> / <c>SelectedMonth</c> を読まない。
+    /// 「現在の選択を読む手段」を作成フローの内側に残すと、呼び出し元がスナップショットしても
+    /// 検査対象・表示・作成対象のいずれかが別の月へずれる（#1949 のプリフライトにおけるカードと同じ判断）。
+    /// </remarks>
+    private async Task<ReportPreflightResult> RunPreflightAsync(
+        IReadOnlyList<CardDto> targetCards, int targetYear, int targetMonth)
     {
         var cardIdms = targetCards.Select(c => c.CardIdm).ToList();
         using (BeginBusy($"帳票データを確認中... ({cardIdms.Count}件)"))
         {
-            var result = await _preflightChecker.CheckAsync(cardIdms, SelectedYear, SelectedMonth);
+            var result = await _preflightChecker.CheckAsync(cardIdms, targetYear, targetMonth);
 
             // Issue #1691: 警告のあるカードを一覧上でマークする
             ApplyPreflightWarnings(result);
@@ -963,13 +983,16 @@ public partial class ReportViewModel : ViewModelBase
     /// プリフライトチェック結果ダイアログを表示する
     /// </summary>
     /// <param name="result">チェック結果</param>
+    /// <param name="targetYear">検査した年（Issue #2045: 画面の現在値ではなく検査に使った値を表示する）</param>
+    /// <param name="targetMonth">検査した月</param>
     /// <param name="isConfirmationMode">確認モード（作成フロー経由）かどうか</param>
     /// <returns>「このまま作成する」が選ばれた場合true</returns>
-    private bool? ShowPreflightDialog(ReportPreflightResult result, bool isConfirmationMode)
+    private bool? ShowPreflightDialog(
+        ReportPreflightResult result, int targetYear, int targetMonth, bool isConfirmationMode)
     {
         return _navigationService.ShowDialog<Views.Dialogs.ReportPreflightDialog>(d =>
         {
-            d.ViewModel.SetResult(result, SelectedYear, SelectedMonth, isConfirmationMode);
+            d.ViewModel.SetResult(result, targetYear, targetMonth, isConfirmationMode);
             d.Owner = Application.Current?.Windows.OfType<Window>().FirstOrDefault(w => w.IsActive)
                       ?? Application.Current?.MainWindow;
         });
