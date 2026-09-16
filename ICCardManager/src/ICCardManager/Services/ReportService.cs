@@ -16,50 +16,119 @@ using System.Text.RegularExpressions;
 namespace ICCardManager.Services
 {
 /// <summary>
+    /// 帳票作成の結末（Issue #2042）
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// 「作成した」「作成対象外だった」「失敗した」の 3 つは互いに排他なので 1 つの値で表す。
+    /// 旧実装は <c>Success</c> と <c>Skipped</c> の 2 つの bool で持っており、スキップが
+    /// <c>Success = true, Skipped = true</c> という<b>両方が立った状態</b>になっていた。
+    /// <c>Success</c> だけを見る呼び出し側（<c>ReportViewModel</c> の一括作成ループ）は
+    /// これを「作成した」と数え、<b>存在しないファイルのパス</b>を作成ファイル一覧へ並べていた。
+    /// </para>
+    /// <para>
+    /// 既定値（0）を <see cref="Failed"/> にしているのは、結末を設定し忘れた結果が
+    /// 「成功」に見えないようにするため。
+    /// </para>
+    /// </remarks>
+    public enum ReportGenerationOutcome
+    {
+        /// <summary>失敗した</summary>
+        Failed = 0,
+
+        /// <summary>帳票ファイルを作成した</summary>
+        Created = 1,
+
+        /// <summary>作成対象外のため作成しなかった（新規購入より前の月など）</summary>
+        Skipped = 2
+    }
+
+    /// <summary>
     /// 帳票作成結果
     /// </summary>
     public class ReportGenerationResult
     {
         /// <summary>
-        /// 成功フラグ
+        /// 結末（作成した／対象外／失敗した）
         /// </summary>
-        public bool Success { get; set; }
+        public ReportGenerationOutcome Outcome { get; private set; }
 
         /// <summary>
-        /// スキップフラグ（新規購入より前の月など、作成対象外の場合）
+        /// エラーではない（作成した、または作成対象外だった）
         /// </summary>
-        public bool Skipped { get; set; }
+        /// <remarks>
+        /// <b>「作成した件数」を数える用途に使ってはならない</b>（Issue #2042）。作成対象外の月は
+        /// エラーではないためここも true になる。ファイルを作ったかどうかは <see cref="Created"/> で判定する。
+        /// </remarks>
+        public bool Success => Outcome != ReportGenerationOutcome.Failed;
 
         /// <summary>
-        /// エラーメッセージ（失敗時）
+        /// 作成対象外だった（新規購入より前の月など）
         /// </summary>
-        public string ErrorMessage { get; set; }
+        public bool Skipped => Outcome == ReportGenerationOutcome.Skipped;
+
+        /// <summary>
+        /// 帳票ファイルを実際に作成した（Issue #2042）
+        /// </summary>
+        public bool Created => Outcome == ReportGenerationOutcome.Created;
+
+        /// <summary>
+        /// 全カードに共通する原因による失敗（Issue #2042）
+        /// </summary>
+        /// <remarks>
+        /// テンプレートが見つからない・組織設定のヘッダー列番号が範囲外、のように
+        /// <b>対象カードに依らず必ず同じ結果になる</b>失敗。一括作成はこれを受け取ったら中断する
+        /// （続けても同じ失敗が選択枚数だけ並ぶだけで、職員には何も分からない）。
+        /// 判定を文言の部分一致（<c>ErrorMessage.Contains("テンプレート")</c>）で代用しない —
+        /// 文言に「テンプレート」を含まない共通エラーは中断されず、カード固有の失敗文言に
+        /// たまたま「テンプレート」が含まれると一括作成全体が止まる。
+        /// </remarks>
+        public bool IsCommonFailure { get; private set; }
+
+        /// <summary>
+        /// エラーメッセージ（失敗時）／作成対象外とした理由（スキップ時）
+        /// </summary>
+        public string ErrorMessage { get; private set; }
 
         /// <summary>
         /// 詳細エラーメッセージ（失敗時）
         /// </summary>
-        public string DetailedErrorMessage { get; set; }
+        public string DetailedErrorMessage { get; private set; }
 
         /// <summary>
-        /// 出力ファイルパス（成功時）
+        /// 出力ファイルパス（作成時）
         /// </summary>
-        public string OutputPath { get; set; }
+        public string OutputPath { get; private set; }
 
         /// <summary>
-        /// 成功結果を作成
+        /// 作成結果を作成
         /// </summary>
         public static ReportGenerationResult SuccessResult(string outputPath) => new()
         {
-            Success = true,
+            Outcome = ReportGenerationOutcome.Created,
             OutputPath = outputPath
         };
 
         /// <summary>
-        /// 失敗結果を作成
+        /// 失敗結果を作成（そのカードに固有の失敗）
         /// </summary>
         public static ReportGenerationResult FailureResult(string message, string detailedMessage = null) => new()
         {
-            Success = false,
+            Outcome = ReportGenerationOutcome.Failed,
+            ErrorMessage = message,
+            DetailedErrorMessage = detailedMessage
+        };
+
+        /// <summary>
+        /// 全カードに共通する原因による失敗結果を作成（Issue #2042）
+        /// </summary>
+        /// <remarks>
+        /// 一括作成を中断させる。<see cref="IsCommonFailure"/> を参照。
+        /// </remarks>
+        public static ReportGenerationResult CommonFailureResult(string message, string detailedMessage = null) => new()
+        {
+            Outcome = ReportGenerationOutcome.Failed,
+            IsCommonFailure = true,
             ErrorMessage = message,
             DetailedErrorMessage = detailedMessage
         };
@@ -69,8 +138,7 @@ namespace ICCardManager.Services
         /// </summary>
         public static ReportGenerationResult SkippedResult(string reason) => new()
         {
-            Success = true, // エラーではないのでSuccessはtrue
-            Skipped = true,
+            Outcome = ReportGenerationOutcome.Skipped,
             ErrorMessage = reason
         };
     }
@@ -108,7 +176,7 @@ namespace ICCardManager.Services
         /// <summary>
         /// 成功した件数（スキップを除く）
         /// </summary>
-        public int SuccessCount => Results.Count(r => r.Result.Success && !r.Result.Skipped);
+        public int SuccessCount => Results.Count(r => r.Result.Created);
 
         /// <summary>
         /// 失敗した件数
@@ -126,10 +194,44 @@ namespace ICCardManager.Services
         public bool AllSuccess => !IsTemplateError && !IsDirectoryError && Results.All(r => r.Result.Success);
 
         /// <summary>
-        /// 成功したファイルパスの一覧
+        /// 全カード共通の原因による失敗で中断したか（Issue #2042）
         /// </summary>
+        public bool IsAborted => Results.Any(r => r.Result.IsCommonFailure);
+
+        /// <summary>
+        /// 中断の原因（Issue #2042。中断していなければ <c>null</c>）
+        /// </summary>
+        /// <remarks>
+        /// ステータス欄のように幅の限られた表示へ出す簡潔な見出し。「なぜ／どうすれば」は
+        /// <see cref="AbortDetail"/> をダイアログで示す（`.claude/rules/error-messages.md` #1688）。
+        /// </remarks>
+        public string AbortReason => AbortedResult?.ErrorMessage;
+
+        /// <summary>
+        /// 中断の原因の詳細（Issue #2042。中断していなければ <c>null</c>）
+        /// </summary>
+        public string AbortDetail => AbortedResult is ReportGenerationResult aborted
+            ? aborted.DetailedErrorMessage ?? aborted.ErrorMessage
+            : null;
+
+        /// <summary>
+        /// 中断の原因となった結果（Issue #2042。中断していなければ <c>null</c>）
+        /// </summary>
+        private ReportGenerationResult AbortedResult => Results
+            .Where(r => r.Result.IsCommonFailure)
+            .Select(r => r.Result)
+            .FirstOrDefault();
+
+        /// <summary>
+        /// 作成したファイルパスの一覧
+        /// </summary>
+        /// <remarks>
+        /// Issue #2042: 判定は <see cref="ReportGenerationResult.Created"/> ただ 1 つに寄せる。
+        /// スキップは <c>OutputPath</c> を持たないため旧来の <c>Success</c> 判定でも結果は同じだったが、
+        /// 「作成した」の数え方が 2 通りあると、片方だけが直される日が来る。
+        /// </remarks>
         public IReadOnlyList<string> SuccessfulFiles => Results
-            .Where(r => r.Result.Success && r.Result.OutputPath != null)
+            .Where(r => r.Result.Created && r.Result.OutputPath != null)
             .Select(r => r.Result.OutputPath!)
             .ToList()
             .AsReadOnly();
@@ -175,9 +277,17 @@ namespace ICCardManager.Services
                 return $"フォルダエラー: {DirectoryErrorMessage}";
             }
 
+            if (IsAborted)
+            {
+                // Issue #2042: 全カード共通の原因なので、残りを試しても同じ失敗が並ぶだけ
+                return $"帳票作成を中断しました: {AbortReason}";
+            }
+
             if (AllSuccess)
             {
-                return $"{SuccessCount}件の帳票を作成しました。";
+                return SkippedCount > 0
+                    ? $"{SuccessCount}件の帳票を作成しました。（対象期間外 {SkippedCount}件）"
+                    : $"{SuccessCount}件の帳票を作成しました。";
             }
 
             return $"{SuccessCount}件成功、{FailureCount}件失敗しました。";
@@ -265,7 +375,8 @@ namespace ICCardManager.Services
                 var headerColumnError = ValidateHeaderColumns();
                 if (headerColumnError != null)
                 {
-                    return ReportGenerationResult.FailureResult(
+                    // Issue #2042: 組織設定は全カードに共通なので、一括作成では中断させる
+                    return ReportGenerationResult.CommonFailureResult(
                         "組織設定のヘッダー列番号が正しくありません",
                         headerColumnError);
                 }
@@ -279,7 +390,8 @@ namespace ICCardManager.Services
                 }
                 catch (TemplateNotFoundException ex)
                 {
-                    return ReportGenerationResult.FailureResult(
+                    // Issue #2042: テンプレートは全カードで共有するので、一括作成では中断させる
+                    return ReportGenerationResult.CommonFailureResult(
                         "テンプレートファイルが見つかりません",
                         ex.GetDetailedMessage());
                 }
@@ -489,6 +601,9 @@ namespace ICCardManager.Services
                 // （DirectoryNotFoundException は IOException 分岐に落ちるため「読み書き中に問題」と
                 // headline の「フォルダが見つかりません」が食い違う）、「詳細」という語が空手形になる。
                 // 実際の詳細（パス・原文）はログにあるので、そこへ誘導する。
+                // Issue #2042: これはカード固有の失敗として扱う（共通失敗にしない）。フォルダーの権限だけでなく、
+                // 特定の年度ファイルの読み取り専用属性・そのファイルだけに付いた ACL でも起き得るため、
+                // 「残りのカードも必ず同じ結果になる」とは言えない。1 枚だけ失敗する形が実在する。
                 ErrorDialogHelper.LogException(ex, "帳票ファイルの保存");
                 return ReportGenerationResult.FailureResult(
                     "ファイルの保存に失敗しました",
@@ -496,8 +611,10 @@ namespace ICCardManager.Services
             }
             catch (DirectoryNotFoundException ex)
             {
+                // Issue #2042: 出力先フォルダは一括作成の全カードで共有するため、見つからなければ
+                // 残りのカードも必ず同じ結果になる（一括作成は出力先を先に作らない）。中断させる。
                 ErrorDialogHelper.LogException(ex, "帳票ファイルの保存");
-                return ReportGenerationResult.FailureResult(
+                return ReportGenerationResult.CommonFailureResult(
                     "ファイルの保存に失敗しました",
                     "出力先フォルダが見つかりません。フォルダのパスを確認してください。\n\n詳細はログファイルを確認してください。");
             }
@@ -1132,6 +1249,14 @@ namespace ICCardManager.Services
 
                 var result = await CreateMonthlyReportAsync(cardIdm, year, month, outputPath).ConfigureAwait(false);
                 results.Add((cardIdm, cardName, result));
+
+                // Issue #2042: 全カードに共通する原因（テンプレート・組織設定）の失敗は、続けても
+                // 同じ失敗が選択枚数だけ並ぶだけなので中断する。ViewModel 側の一括ループ
+                // （ReportViewModel.CreateReportAsync）と判断を揃えておく。
+                if (result.IsCommonFailure)
+                {
+                    break;
+                }
             }
 
             return new BatchReportGenerationResult(results);

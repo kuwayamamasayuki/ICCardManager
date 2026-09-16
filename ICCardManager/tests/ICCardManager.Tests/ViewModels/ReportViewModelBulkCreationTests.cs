@@ -435,4 +435,210 @@ public class ReportViewModelBulkCreationTests : IDisposable
 
         _previewRequests.Select(r => (r.Year, r.Month)).Should().Equal(new[] { (2026, 7), (2026, 7) });
     }
+
+    #region Issue #2042: 作成対象外・全カード共通の失敗
+
+    /// <summary>
+    /// 欠陥を突く側: 作成対象外（新規購入より前の月）は作成件数にも作成ファイル一覧にも入らないこと
+    /// </summary>
+    /// <remarks>
+    /// <c>ReportGenerationResult.SkippedResult</c> は「エラーではない」ため <c>Success</c> が true になる。
+    /// 修正前は <c>Success</c> だけを見ていたため、<b>何も保存していないカードのパス</b>を
+    /// 作成ファイル一覧へ加え「3件の帳票を作成しました」と報告していた（クリックしても開けない）。
+    /// </remarks>
+    [Fact]
+    public async Task CreateReportAsync_対象期間外のカードは作成件数にも作成ファイル一覧にも入らないこと()
+    {
+        SelectCard("0000000000000001", "001");
+        SelectCard("0000000000000002", "002");
+        SelectCard("0000000000000003", "003");
+
+        SetupReportCreation(cardIdm => cardIdm == "0000000000000002"
+            ? ReportGenerationResult.SkippedResult("新規購入（2026/07）より前の月です")
+            : ReportGenerationResult.SuccessResult(cardIdm));
+
+        await _viewModel.CreateReportAsync();
+
+        _viewModel.CreatedFiles.Should().HaveCount(2);
+        _viewModel.CreatedFiles.Should().NotContain(p => p.Contains("はやかけん_002"));
+        _viewModel.StatusMessage.Should().Be("2件の帳票を作成しました（対象期間外 1件）");
+        _viewModel.IsStatusError.Should().BeFalse();
+
+        // 作成対象外は失敗ではないので、失敗カードの警告ダイアログは出さない
+        _navigationServiceMock.Verify(
+            n => n.ShowWarning(It.IsAny<string>(), It.IsAny<string>()), Times.Never);
+    }
+
+    /// <summary>
+    /// 対の表明: 作成対象外が無ければ全件が作成ファイル一覧に入り、内訳を付けないこと
+    /// </summary>
+    /// <remarks>
+    /// これが無いと、作成ファイル一覧への追加を丸ごと止めた実装でも上のテストが緑になる。
+    /// </remarks>
+    [Fact]
+    public async Task CreateReportAsync_対象期間外が無ければ全件が作成ファイル一覧に入り内訳を付けないこと()
+    {
+        SelectCard("0000000000000001", "001");
+        SelectCard("0000000000000002", "002");
+
+        await _viewModel.CreateReportAsync();
+
+        _viewModel.CreatedFiles.Should().HaveCount(2);
+        _viewModel.CreatedFiles.Should().Contain(p => p.Contains("はやかけん_001"));
+        _viewModel.CreatedFiles.Should().Contain(p => p.Contains("はやかけん_002"));
+        _viewModel.StatusMessage.Should().Be("2件の帳票を作成しました");
+        _viewModel.StatusMessage.Should().NotContain("対象期間外");
+    }
+
+    /// <summary>
+    /// 欠陥を突く側: 全カードに共通する原因の失敗は、文言に「テンプレート」を含まなくても中断すること
+    /// </summary>
+    /// <remarks>
+    /// 組織設定のヘッダー列番号の誤り（<c>ReportService.ValidateHeaderColumns</c>）は全カードで同じ結果になるが、
+    /// 文言に「テンプレート」を含まない。修正前は文言の部分一致で中断を判断していたため、
+    /// <b>同じ失敗が選択枚数だけ並ぶ</b>（最大 20 枚）だけで職員には何も分からなかった。
+    /// </remarks>
+    [Fact]
+    public async Task CreateReportAsync_全カード共通の失敗は文言にテンプレートを含まなくても中断すること()
+    {
+        SelectCard("0000000000000001", "001");
+        SelectCard("0000000000000002", "002");
+        SelectCard("0000000000000003", "003");
+
+        SetupReportCreation(_ => ReportGenerationResult.CommonFailureResult(
+            "組織設定のヘッダー列番号が正しくありません",
+            "組織設定のヘッダー列番号が帳票の範囲外です（PageNumberColumn=20）。"
+            + "appsettings.json の OrganizationOptions:TemplateMapping で 1〜12 の値に修正してください。"));
+
+        await _viewModel.CreateReportAsync();
+
+        // 1 枚目で中断するので、2 枚目以降は要求されない
+        _createdForCardIdms.Should().Equal(new[] { "0000000000000001" });
+        _viewModel.StatusMessage.Should().Be("帳票作成を中断しました（組織設定のヘッダー列番号が正しくありません）");
+        _viewModel.IsStatusError.Should().BeTrue();
+        _navigationServiceMock.Verify(
+            n => n.ShowError(It.Is<string>(m => m.Contains("範囲外")), It.IsAny<string>()), Times.Once);
+    }
+
+    /// <summary>
+    /// 対の表明: カード固有の失敗は、文言に「テンプレート」を含んでいても中断しないこと
+    /// </summary>
+    /// <remarks>
+    /// これが無いと、失敗を見たら常に中断する実装でも上のテストが緑になる。
+    /// 文言照合のままだと、この形が一括作成全体を止める。
+    /// </remarks>
+    [Fact]
+    public async Task CreateReportAsync_カード固有の失敗は文言にテンプレートを含んでも中断しないこと()
+    {
+        SelectCard("0000000000000001", "001");
+        SelectCard("0000000000000002", "002");
+        SelectCard("0000000000000003", "003");
+
+        SetupReportCreation(cardIdm => cardIdm == "0000000000000001"
+            ? ReportGenerationResult.FailureResult("テンプレートから作成したシートに書き込めませんでした")
+            : ReportGenerationResult.SuccessResult(cardIdm));
+
+        await _viewModel.CreateReportAsync();
+
+        _createdForCardIdms.Should().Equal(
+            new[] { "0000000000000001", "0000000000000002", "0000000000000003" });
+        _viewModel.StatusMessage.Should().Be("2/3件の帳票を作成しました（一部失敗）");
+        _navigationServiceMock.Verify(
+            n => n.ShowError(It.IsAny<string>(), It.IsAny<string>()), Times.Never);
+    }
+
+    /// <summary>
+    /// 対の表明: 作成対象外と失敗が混在しても、それぞれを分けて報告すること
+    /// </summary>
+    /// <remarks>
+    /// 作成対象外を失敗として数える実装（分母・内訳がずれる）を検出する。
+    /// </remarks>
+    [Fact]
+    public async Task CreateReportAsync_対象期間外と失敗が混在したら内訳を分けて報告すること()
+    {
+        SelectCard("0000000000000001", "001");
+        SelectCard("0000000000000002", "002");
+        SelectCard("0000000000000003", "003");
+
+        SetupReportCreation(cardIdm => cardIdm switch
+        {
+            "0000000000000002" => ReportGenerationResult.SkippedResult("新規購入（2026/07）より前の月です"),
+            "0000000000000003" => ReportGenerationResult.FailureResult("帳票データを取得できませんでした"),
+            _ => ReportGenerationResult.SuccessResult(cardIdm)
+        });
+
+        await _viewModel.CreateReportAsync();
+
+        _viewModel.CreatedFiles.Should().HaveCount(1);
+        _viewModel.StatusMessage.Should().Be("1/3件の帳票を作成しました（一部失敗、対象期間外 1件）");
+        _viewModel.IsStatusError.Should().BeTrue();
+
+        // 警告に並ぶのは失敗したカードだけ（作成対象外は含めない）
+        _navigationServiceMock.Verify(
+            n => n.ShowWarning(
+                It.Is<string>(m => m.Contains("はやかけん 003") && !m.Contains("はやかけん 002")),
+                It.IsAny<string>()),
+            Times.Once);
+    }
+
+    /// <summary>
+    /// 全件が作成対象外なら「0件の帳票を作成しました」ではなく理由を主語にして報告すること
+    /// </summary>
+    /// <remarks>
+    /// 「0件の帳票を作成しました（対象期間外 3件）」は、作成したつもりで出力フォルダーを
+    /// 探しに行かせる。1 枚も作っていないときは、作らなかった理由を先に述べる。
+    /// </remarks>
+    [Fact]
+    public async Task CreateReportAsync_全件が対象期間外なら作成しなかった理由を報告すること()
+    {
+        SelectCard("0000000000000001", "001");
+        SelectCard("0000000000000002", "002");
+        SelectCard("0000000000000003", "003");
+
+        SetupReportCreation(_ => ReportGenerationResult.SkippedResult("新規購入（2026/07）より前の月です"));
+
+        await _viewModel.CreateReportAsync();
+
+        _viewModel.CreatedFiles.Should().BeEmpty();
+        _viewModel.StatusMessage.Should().Be("対象期間外のため帳票を作成しませんでした（3件）");
+        _viewModel.IsStatusError.Should().BeFalse("作成対象外はエラーではない");
+    }
+
+    /// <summary>
+    /// 中断より前に失敗したカードを、中断のエラーダイアログへ併記すること
+    /// </summary>
+    /// <remarks>
+    /// 中断は早期 return で終わるため、併記しないと「一部失敗」の警告ダイアログにも到達せず、
+    /// それまでの失敗が画面のどこにも出ないまま終わる（コードレビューで検出）。
+    /// </remarks>
+    [Fact]
+    public async Task CreateReportAsync_中断より前に失敗したカードをエラーダイアログへ併記すること()
+    {
+        SelectCard("0000000000000001", "001");
+        SelectCard("0000000000000002", "002");
+        SelectCard("0000000000000003", "003");
+
+        SetupReportCreation(cardIdm => cardIdm switch
+        {
+            "0000000000000001" => ReportGenerationResult.FailureResult("帳票データを取得できませんでした"),
+            "0000000000000002" => ReportGenerationResult.CommonFailureResult(
+                "テンプレートファイルが見つかりません",
+                "テンプレートを配置してから、もう一度作成してください。"),
+            _ => ReportGenerationResult.SuccessResult(cardIdm)
+        });
+
+        await _viewModel.CreateReportAsync();
+
+        _createdForCardIdms.Should().Equal(new[] { "0000000000000001", "0000000000000002" });
+        _navigationServiceMock.Verify(
+            n => n.ShowError(
+                It.Is<string>(m =>
+                    m.Contains("テンプレートを配置してから")
+                    && m.Contains("はやかけん 001")
+                    && !m.Contains("はやかけん 002")),
+                "帳票作成を中断しました"),
+            Times.Once);
+    }
+
+    #endregion
 }
