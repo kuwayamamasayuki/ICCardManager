@@ -736,7 +736,11 @@ public partial class ReportViewModel : ViewModelBase
 
         try
         {
-            var successCount = 0;
+            // Issue #2042: 「作成した」「作成対象外だった」「失敗した」を別々に数える。
+            // ReportGenerationResult.Success は「エラーではない」の意味で、作成対象外の月でも
+            // true になるため、これを作成件数に使うと存在しないファイルのパスが一覧へ並ぶ。
+            var createdCount = 0;
+            var skippedCount = 0;
             var failedCards = new List<(string CardName, string ErrorMessage)>();
             var totalCount = targetCards.Count;
 
@@ -769,29 +773,53 @@ public partial class ReportViewModel : ViewModelBase
                 var result = await Task.Run(() =>
                     _reportService.CreateMonthlyReportAsync(capturedCardIdm, targetYear, targetMonth, capturedOutputPath));
 
-                if (result.Success)
+                if (result.Created)
                 {
                     CreatedFiles.Add(outputPath);
-                    successCount++;
+                    createdCount++;
+                }
+                else if (result.Skipped)
+                {
+                    // Issue #2042: 新規購入より前の月などは何も保存されていない。
+                    // 作成ファイル一覧へ加えると、クリックしても開けないパスが並ぶ。
+                    skippedCount++;
                 }
                 else
                 {
                     failedCards.Add(($"{card.CardType} {card.CardNumber}", result.ErrorMessage ?? "不明なエラー"));
 
-                    // テンプレートエラーの場合は中断
-                    if (result.ErrorMessage?.Contains("テンプレート") == true)
+                    // Issue #2042: 全カードに共通する原因（テンプレート・組織設定）の失敗は中断する。
+                    // 判定は結果のフラグで行う。文言の部分一致（"テンプレート" を含むか）では、
+                    // 文言に現れない共通エラーで同じ失敗が選択枚数だけ並び、逆にカード固有の失敗文言に
+                    // たまたま「テンプレート」が含まれると一括作成全体が止まる。
+                    if (result.IsCommonFailure)
                     {
                         // Issue #1793: 本メソッドの処理中スコープは using 宣言形
                         // （`using var busyScope = ...`）でメソッド末尾まで続くため、
                         // ここは BeginCancellableBusy スコープの内側にあたる。囲まないと
                         // 全面オーバーレイと「帳票を作成中...」の進捗バーがダイアログの背後で回り続ける。
+                        // Issue #2042: 中断より前に失敗したカードがあれば併記する。中断はここで
+                        // 早期に返るため、併記しないとそれらの失敗は画面のどこにも出ないまま終わる
+                        // （末尾の 1 件は中断の原因になったカード自身なので除く）。
+                        var precedingFailures = failedCards
+                            .Take(failedCards.Count - 1)
+                            .Select(f => $"・{f.CardName}: {f.ErrorMessage}")
+                            .ToList();
+
+                        var abortMessage = result.DetailedErrorMessage ?? result.ErrorMessage;
+                        if (precedingFailures.Count > 0)
+                        {
+                            abortMessage += "\n\n中断より前に、以下のカードで帳票作成に失敗しています:\n"
+                                + string.Join("\n", precedingFailures);
+                        }
+
                         using (SuspendBusy())
                         {
-                            _navigationService.ShowError(
-                                result.DetailedErrorMessage ?? result.ErrorMessage,
-                                "テンプレートエラー");
+                            _navigationService.ShowError(abortMessage, "帳票作成を中断しました");
                         }
-                        SetStatus("テンプレートエラーにより中断しました", true);
+                        // ステータス欄はボタン列と幅を分け合うため簡潔にする。「なぜ／どうすれば」は
+                        // 直前のエラーダイアログで提示済み（Issue #1688 と同じ判断）
+                        SetStatus($"帳票作成を中断しました（{result.ErrorMessage}）", true);
                         return;
                     }
                 }
@@ -800,13 +828,28 @@ public partial class ReportViewModel : ViewModelBase
             // 完了時の進捗を100%に
             busyScope.ReportProgress(totalCount, totalCount, "完了");
 
-            if (successCount == totalCount)
+            // Issue #2042: 作成対象外（新規購入より前の月など）は失敗ではないので、
+            // 「一部失敗」ではなく件数を分けて示す。分母は開始時点のスナップショット件数（Issue #1949）。
+            // 内訳の整形は 1 か所に置く（同じ文字列を 2 通りに組み立てない。#1763）。
+            var skippedNote = skippedCount > 0 ? $"対象期間外 {skippedCount}件" : string.Empty;
+
+            if (failedCards.Count == 0)
             {
-                SetStatus($"{successCount}件の帳票を作成しました", false);
+                // 1 枚も作れなかったときに「0件の帳票を作成しました」と報告すると、
+                // 作成したつもりで出力フォルダーを探すことになる。理由を主語にする。
+                SetStatus(
+                    createdCount == 0 && skippedCount > 0
+                        ? $"対象期間外のため帳票を作成しませんでした（{skippedCount}件）"
+                        : $"{createdCount}件の帳票を作成しました"
+                          + (skippedNote.Length > 0 ? $"（{skippedNote}）" : string.Empty),
+                    false);
             }
             else
             {
-                SetStatus($"{successCount}/{totalCount}件の帳票を作成しました（一部失敗）", true);
+                SetStatus(
+                    $"{createdCount}/{totalCount}件の帳票を作成しました（一部失敗"
+                    + (skippedNote.Length > 0 ? $"、{skippedNote}" : string.Empty) + "）",
+                    true);
 
                 // 失敗したカードの詳細を表示
                 if (failedCards.Count > 0)
