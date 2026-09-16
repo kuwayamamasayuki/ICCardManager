@@ -34,6 +34,9 @@ public class ReportServiceTests : IDisposable
         _settingsRepositoryMock.Setup(s => s.GetAppSettings()).Returns(new AppSettings());
         // Issue #1281: ReportService が非同期版を使うようになったため同モックも追加
         _settingsRepositoryMock.Setup(s => s.GetAppSettingsAsync()).ReturnsAsync(new AppSettings());
+        // Issue #2043: 前月末残高はリポジトリの確定済み単票クエリから取る。
+        // 各テストが仕込む GetByMonthAsync / GetCarryoverBalanceAsync をデータ源として解決する。
+        Infrastructure.PrecedingLedgerBalanceFake.Install(_ledgerRepositoryMock);
         var reportDataBuilder = new ReportDataBuilder(
             _cardRepositoryMock.Object,
             _ledgerRepositoryMock.Object);

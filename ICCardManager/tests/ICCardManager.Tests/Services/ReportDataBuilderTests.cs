@@ -26,6 +26,12 @@ public class ReportDataBuilderTests
     {
         _cardRepositoryMock = new Mock<ICardRepository>();
         _ledgerRepositoryMock = new Mock<ILedgerRepository>();
+
+        // Issue #2043: ReportDataBuilder は前月末残高を、リポジトリの確定済み単票クエリ
+        // GetLatestBeforeDateAsync（残高チェーンをシード付きで解決する、Issue #1731 / #1999）から取る。
+        // 固定値を返すモックでは「シードの有無で結果が変わる日」を再現できないためフェイクを置く。
+        Infrastructure.PrecedingLedgerBalanceFake.Install(_ledgerRepositoryMock);
+
         _builder = new ReportDataBuilder(
             _cardRepositoryMock.Object,
             _ledgerRepositoryMock.Object);
@@ -122,9 +128,8 @@ public class ReportDataBuilderTests
     /// </summary>
     /// <remarks>
     /// <see cref="SetupBasicMonth"/> は「前月に台帳あり／年度範囲は空」という
-    /// 実 DB では生じ得ない構成のため流用しない。ReportDataBuilder の
-    /// GetPreviousMonthBalanceAsync は年度開始月まで 1 ヶ月ずつ遡るので、
-    /// 年度内の全月について空を返すよう設定する。
+    /// 実 DB では生じ得ない構成のため流用しない。年度内の全月について空を返すよう設定し、
+    /// 前月末残高（Issue #2043 以降は GetLatestBeforeDateAsync）が前年度繰越へ落ちる形にする。
     /// </remarks>
     /// <param name="previousYearCarryover">前年度繰越額。存在しない場合は null</param>
     private void SetupIdleFiscalYear(int year, int month, int? previousYearCarryover)
@@ -1685,6 +1690,165 @@ public class ReportDataBuilderTests
         result.CumulativeTotal.Expense.Should().Be(300);
         (result.CumulativeTotal.Income - result.CumulativeTotal.Expense)
             .Should().Be(result.CumulativeTotal.Balance);
+    }
+
+    #endregion
+
+    #region 残高チェーンのシード（Issue #2043）
+
+    /// <summary>
+    /// 同額のポイント還元と利用で残高が循環する日（Issue #1004 形状）を作る。
+    /// 当日の行だけでは開始点を一意に決められないため、シードが無いと id 順フォールバックへ落ちる。
+    /// </summary>
+    /// <remarks>id は「利用より先にポイント還元」の順に振り、id 順フォールバックが誤る形にしている。</remarks>
+    private static List<Ledger> CreateCircularDayLedgers(
+        DateTime date, int balanceBefore, int amount, int firstId)
+    {
+        return new List<Ledger>
+        {
+            // ポイント還元（balance_before = balanceBefore - amount）
+            CreateTestLedger(firstId, TestCardIdm, date,
+                SummaryGenerator.GetPointRedemptionSummary(), amount, 0, balanceBefore),
+            // 利用（balance_before = balanceBefore）
+            CreateTestLedger(firstId + 1, TestCardIdm, date,
+                "鉄道（天神～博多）", 0, amount, balanceBefore - amount)
+        };
+    }
+
+    [Fact]
+    public async Task BuildAsync_PreviousMonthEndsOnCircularDay_CarryoverUsesChainFinalBalance()
+    {
+        // Arrange: 6月の唯一の稼働日（6/20）が循環日。当月の行だけでは開始点を決められないため、
+        // シードは前月（5月）の最終残高 1,000円になる。
+        // ※ 循環日が月の途中なら同月内の前日がシードになるので、月の最初の稼働日に置く必要がある
+        SetupCard();
+        SetupCarryoverBalance(TestCardIdm, 2024, null);
+
+        var mayLedgers = new List<Ledger>
+        {
+            CreateTestLedger(1, TestCardIdm, new DateTime(2025, 5, 15),
+                SummaryGenerator.GetChargeSummary(DepartmentType.MayorOffice), 1000, 0, 1000)
+        };
+        var juneLedgers =
+            CreateCircularDayLedgers(new DateTime(2025, 6, 20), balanceBefore: 1000, amount: 200, firstId: 2);
+
+        SetupMonthlyLedgers(TestCardIdm, 2025, 5, mayLedgers);
+        SetupMonthlyLedgers(TestCardIdm, 2025, 6, juneLedgers);
+        SetupMonthlyLedgers(TestCardIdm, 2025, 7, new List<Ledger>());
+        SetupDateRangeLedgers(TestCardIdm,
+            new DateTime(2025, 4, 1), new DateTime(2025, 7, 31),
+            mayLedgers.Concat(juneLedgers).ToList());
+
+        // Act
+        var result = await _builder.BuildAsync(TestCardIdm, 2025, 7);
+
+        // Assert: 循環の中間残高（800円）ではなく、その日の最終残高（1,000円）が繰越額になる
+        result.PrecedingBalance.Should().Be(1000);
+        result.Carryover.Should().NotBeNull();
+        result.Carryover.Balance.Should().Be(1000);
+    }
+
+    [Fact]
+    public async Task BuildAsync_PreviousMonthEndsOnNormalDay_CarryoverKeepsLastBalance()
+    {
+        // Arrange（対の表明）: 循環しない通常日（チャージ → 利用）では従来どおり最終残高を採る
+        SetupCard();
+        SetupCarryoverBalance(TestCardIdm, 2024, null);
+
+        var juneLedgers = new List<Ledger>
+        {
+            CreateTestLedger(1, TestCardIdm, new DateTime(2025, 6, 20),
+                SummaryGenerator.GetChargeSummary(DepartmentType.MayorOffice), 1000, 0, 1800),
+            CreateTestLedger(2, TestCardIdm, new DateTime(2025, 6, 20),
+                "鉄道（天神～博多）", 0, 200, 1600)
+        };
+
+        SetupMonthlyLedgers(TestCardIdm, 2025, 6, juneLedgers);
+        SetupMonthlyLedgers(TestCardIdm, 2025, 7, new List<Ledger>());
+        SetupDateRangeLedgers(TestCardIdm,
+            new DateTime(2025, 4, 1), new DateTime(2025, 7, 31), juneLedgers);
+
+        // Act
+        var result = await _builder.BuildAsync(TestCardIdm, 2025, 7);
+
+        // Assert
+        result.PrecedingBalance.Should().Be(1600);
+        result.Carryover.Balance.Should().Be(1600);
+    }
+
+    [Fact]
+    public async Task BuildAsync_FiscalYearStartsOnCircularDay_CumulativeUsesChainFinalBalance()
+    {
+        // Arrange: 年度先頭の稼働日（4/10）が循環日。シードは年度開始前の残高（前年度繰越 3,000円）
+        SetupCard();
+        SetupCarryoverBalance(TestCardIdm, 2024, 3000);
+
+        var aprilLedgers =
+            CreateCircularDayLedgers(new DateTime(2025, 4, 10), balanceBefore: 3000, amount: 200, firstId: 1);
+
+        SetupMonthlyLedgers(TestCardIdm, 2025, 4, aprilLedgers);
+        SetupMonthlyLedgers(TestCardIdm, 2025, 5, new List<Ledger>());
+        SetupDateRangeLedgers(TestCardIdm,
+            new DateTime(2025, 4, 1), new DateTime(2025, 5, 31), aprilLedgers);
+
+        // Act
+        var result = await _builder.BuildAsync(TestCardIdm, 2025, 5);
+
+        // Assert: 循環の中間残高（2,800円）ではなく最終残高（3,000円）。繰越行とも食い違わない
+        result.CumulativeTotal.Should().NotBeNull();
+        result.CumulativeTotal.Balance.Should().Be(3000);
+        result.PrecedingBalance.Should().Be(3000);
+        (result.CumulativeTotal.Income - result.CumulativeTotal.Expense)
+            .Should().Be(result.CumulativeTotal.Balance);
+    }
+
+    [Fact]
+    public async Task BuildAsync_FiscalYearStartsOnNormalDay_CumulativeKeepsLastBalance()
+    {
+        // Arrange（対の表明）: 循環しない通常日では従来どおりの累計残額
+        SetupCard();
+        SetupCarryoverBalance(TestCardIdm, 2024, 3000);
+
+        var aprilLedgers = new List<Ledger>
+        {
+            CreateTestLedger(1, TestCardIdm, new DateTime(2025, 4, 10),
+                SummaryGenerator.GetChargeSummary(DepartmentType.MayorOffice), 500, 0, 3500),
+            CreateTestLedger(2, TestCardIdm, new DateTime(2025, 4, 10),
+                "鉄道（天神～博多）", 0, 300, 3200)
+        };
+
+        SetupMonthlyLedgers(TestCardIdm, 2025, 4, aprilLedgers);
+        SetupMonthlyLedgers(TestCardIdm, 2025, 5, new List<Ledger>());
+        SetupDateRangeLedgers(TestCardIdm,
+            new DateTime(2025, 4, 1), new DateTime(2025, 5, 31), aprilLedgers);
+
+        // Act
+        var result = await _builder.BuildAsync(TestCardIdm, 2025, 5);
+
+        // Assert
+        result.CumulativeTotal.Balance.Should().Be(3200);
+        result.CumulativeTotal.Income.Should().Be(3500);
+        result.CumulativeTotal.Expense.Should().Be(300);
+    }
+
+    [Fact]
+    public async Task BuildAsync_April_PrecedingBalance_StillComesFromPreviousFiscalYearCarryover()
+    {
+        // Arrange（対の表明）: 4月の繰越額は年度境界と一致するため前年度繰越から採る
+        SetupCard();
+        SetupCarryoverBalance(TestCardIdm, 2024, 4200);
+        SetupMonthlyLedgers(TestCardIdm, 2025, 4, new List<Ledger>());
+        SetupDateRangeLedgers(TestCardIdm,
+            new DateTime(2025, 4, 1), new DateTime(2025, 4, 30), new List<Ledger>());
+
+        // Act
+        var result = await _builder.BuildAsync(TestCardIdm, 2025, 4);
+
+        // Assert
+        result.PrecedingBalance.Should().Be(4200);
+        result.Carryover.Summary.Should().Be(SummaryGenerator.GetCarryoverFromPreviousYearSummary());
+        result.Carryover.Income.Should().Be(4200);
+        _ledgerRepositoryMock.Verify(r => r.GetCarryoverBalanceAsync(TestCardIdm, 2024), Times.AtLeastOnce);
     }
 
     #endregion
