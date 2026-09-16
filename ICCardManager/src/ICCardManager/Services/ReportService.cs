@@ -396,7 +396,8 @@ namespace ICCardManager.Services
                         ex.GetDetailedMessage());
                 }
 
-                // Issue #501: 新規購入より前の月はスキップ
+                // Issue #501: 導入（カード登録時の新規購入・繰越）より前の月はスキップ
+                // Issue #2046: 導入行の判定は Ledger.IsInitialRecordSummary（3 種）。「前年度より繰越」も含む
                 var purchaseDate = await _ledgerRepository.GetPurchaseDateAsync(cardIdm).ConfigureAwait(false);
                 if (purchaseDate.HasValue)
                 {
@@ -405,7 +406,7 @@ namespace ICCardManager.Services
                     if (requestedMonth < purchaseMonth)
                     {
                         return ReportGenerationResult.SkippedResult(
-                            $"新規購入（{purchaseDate.Value.ToString("yyyy/MM", CultureInfo.InvariantCulture)}）より前の月です");
+                            $"カードの導入（新規購入・繰越の登録、{purchaseDate.Value.ToString("yyyy/MM", CultureInfo.InvariantCulture)}）より前の月です");
                     }
                 }
 
