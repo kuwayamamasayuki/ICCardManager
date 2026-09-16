@@ -26,8 +26,18 @@ public class PrintServicePaginationTests
     private const double ExpectedDataRowHeight = 22;
     private const double ExpectedDataRowHeightDouble = 38;
     private const double ExpectedSummaryRowHeight = 22;
-    private const int LandscapeMaxChars = 20;
-    private const int PortraitMaxChars = 12;
+    private const double ExpectedTripleRowHeight = 54;   // 22 + 16×2（折り返し1行ごとに +16）
+
+    // A4 の DIP（1/96 インチ）寸法。210mm / 25.4 × 96 ≈ 793.7、297mm / 25.4 × 96 ≈ 1122.5
+    // Issue #2047: 以前はポイント値（595×842）を「A4 実寸」として使っていた
+    private const double A4LongEdgeDip = 1122.5;
+    private const double A4ShortEdgeDip = 793.7;
+
+    // A4 実寸での摘要欄の 1 行あたり全角文字数の見積もり（DIP）
+    // 横: (1122.5 - 余白100 - 外枠2) × 3.3/11.2 - セル内余白9 ≈ 291.7、禁則の余裕 1 文字(11)を引いて 280.7 → 25 文字
+    // 縦: (793.7 - 100 - 2) × 3.3/11.2 - 9 ≈ 194.8、- 11 = 183.8 → 16 文字
+    private const int LandscapeSummaryMaxChars = 25;
+    private const int PortraitSummaryMaxChars = 16;
 
     private static ReportRow Row(string summary = "", ReportRowType type = ReportRowType.Data) =>
         new ReportRow { Summary = summary, RowType = type };
@@ -81,7 +91,7 @@ public class PrintServicePaginationTests
     {
         var row = Row(summary: "");
 
-        PrintService.GetDataRowHeight(row, isLandscape: true).Should().Be(ExpectedDataRowHeight);
+        PrintService.GetDataRowHeight(row, A4LongEdgeDip).Should().Be(ExpectedDataRowHeight);
     }
 
     /// <summary>
@@ -92,63 +102,180 @@ public class PrintServicePaginationTests
     {
         var row = new ReportRow { Summary = null };
 
-        PrintService.GetDataRowHeight(row, isLandscape: true).Should().Be(ExpectedDataRowHeight);
+        PrintService.GetDataRowHeight(row, A4LongEdgeDip).Should().Be(ExpectedDataRowHeight);
     }
 
     /// <summary>
-    /// 横向き: 20文字ちょうどは1行に収まる
+    /// 横向き（A4 実寸）: 摘要欄の上限ちょうどは1行に収まる
     /// </summary>
     [Fact]
-    public void GetDataRowHeight_Landscape_20Chars_ReturnsSingleHeight()
+    public void GetDataRowHeight_Landscape_MaxChars_ReturnsSingleHeight()
     {
-        var row = Row(summary: new string('あ', LandscapeMaxChars));
+        var row = Row(summary: new string('あ', LandscapeSummaryMaxChars));
 
-        PrintService.GetDataRowHeight(row, isLandscape: true).Should().Be(ExpectedDataRowHeight);
+        PrintService.GetDataRowHeight(row, A4LongEdgeDip).Should().Be(ExpectedDataRowHeight);
     }
 
     /// <summary>
-    /// 横向き: 21文字 → 2行高さ（境界の1文字超過）
+    /// 横向き（A4 実寸）: 上限＋1文字 → 2行高さ（境界の1文字超過）
     /// </summary>
     [Fact]
-    public void GetDataRowHeight_Landscape_21Chars_ReturnsDoubleHeight()
+    public void GetDataRowHeight_Landscape_MaxCharsPlusOne_ReturnsDoubleHeight()
     {
-        var row = Row(summary: new string('あ', LandscapeMaxChars + 1));
+        var row = Row(summary: new string('あ', LandscapeSummaryMaxChars + 1));
 
-        PrintService.GetDataRowHeight(row, isLandscape: true).Should().Be(ExpectedDataRowHeightDouble);
+        PrintService.GetDataRowHeight(row, A4LongEdgeDip).Should().Be(ExpectedDataRowHeightDouble);
     }
 
     /// <summary>
-    /// 縦向き: 12文字ちょうどは1行に収まる
+    /// 縦向き（A4 実寸）: 摘要欄の上限ちょうどは1行に収まる
     /// </summary>
     [Fact]
-    public void GetDataRowHeight_Portrait_12Chars_ReturnsSingleHeight()
+    public void GetDataRowHeight_Portrait_MaxChars_ReturnsSingleHeight()
     {
-        var row = Row(summary: new string('あ', PortraitMaxChars));
+        var row = Row(summary: new string('あ', PortraitSummaryMaxChars));
 
-        PrintService.GetDataRowHeight(row, isLandscape: false).Should().Be(ExpectedDataRowHeight);
+        PrintService.GetDataRowHeight(row, A4ShortEdgeDip).Should().Be(ExpectedDataRowHeight);
     }
 
     /// <summary>
-    /// 縦向き: 13文字 → 2行高さ
+    /// 縦向き（A4 実寸）: 上限＋1文字 → 2行高さ
     /// </summary>
     [Fact]
-    public void GetDataRowHeight_Portrait_13Chars_ReturnsDoubleHeight()
+    public void GetDataRowHeight_Portrait_MaxCharsPlusOne_ReturnsDoubleHeight()
     {
-        var row = Row(summary: new string('あ', PortraitMaxChars + 1));
+        var row = Row(summary: new string('あ', PortraitSummaryMaxChars + 1));
 
-        PrintService.GetDataRowHeight(row, isLandscape: false).Should().Be(ExpectedDataRowHeightDouble);
+        PrintService.GetDataRowHeight(row, A4ShortEdgeDip).Should().Be(ExpectedDataRowHeightDouble);
     }
 
     /// <summary>
-    /// 同じ15文字でも、横向きでは1行・縦向きでは2行になる（用紙方向で分岐）
+    /// Issue #2047（コードレビュー）: 見積もりは禁則処理で行末の文字が送られる分として各行 1 文字の余裕を取る。
+    /// 実際の文字幅（横 291.7 ＝ 26 文字）にちょうど収まる摘要も 2 行分として数える
     /// </summary>
     [Fact]
-    public void GetDataRowHeight_OrientationDictatesWrapping()
+    public void GetDataRowHeight_ReservesOneCharPerLineForLineBreakingRules()
     {
-        var row = Row(summary: new string('あ', 15));
+        var row = Row(summary: new string('あ', 26));
 
-        PrintService.GetDataRowHeight(row, isLandscape: true).Should().Be(ExpectedDataRowHeight);
-        PrintService.GetDataRowHeight(row, isLandscape: false).Should().Be(ExpectedDataRowHeightDouble);
+        PrintService.GetDataRowHeight(row, A4LongEdgeDip).Should().Be(ExpectedDataRowHeightDouble);
+    }
+
+    /// <summary>
+    /// 同じ20文字でも、横向きでは1行・縦向きでは2行になる（ページ幅で分岐）
+    /// </summary>
+    [Fact]
+    public void GetDataRowHeight_PageWidthDictatesWrapping()
+    {
+        var row = Row(summary: new string('あ', 20));
+
+        PrintService.GetDataRowHeight(row, A4LongEdgeDip).Should().Be(ExpectedDataRowHeight);
+        PrintService.GetDataRowHeight(row, A4ShortEdgeDip).Should().Be(ExpectedDataRowHeightDouble);
+    }
+
+    /// <summary>
+    /// Issue #2047: 摘要が2行分の上限を超える長さなら、3行分として数える
+    /// （旧実装は「1行 or 2行」しか返さなかった）
+    /// </summary>
+    [Fact]
+    public void GetDataRowHeight_SummaryBeyondTwoLines_ReturnsTripleHeight()
+    {
+        var row = Row(summary: new string('あ', (LandscapeSummaryMaxChars * 2) + 1));
+
+        PrintService.GetDataRowHeight(row, A4LongEdgeDip).Should().Be(ExpectedTripleRowHeight);
+    }
+
+    /// <summary>
+    /// Issue #2047: 残高不足時の備考は、摘要が短くても備考欄で3行に折り返すため3行分として数える
+    /// （旧実装は摘要の文字数しか見ず1行分としていた）
+    /// </summary>
+    [Fact]
+    public void GetDataRowHeight_LongNoteWithShortSummary_CountsNoteWrapping()
+    {
+        var row = new ReportRow
+        {
+            Summary = "鉄道（博多～天神）",
+            StaffName = "博多 花子",
+            Note = "支払額210円のうち不足額140円は現金で支払（旅費支給）",
+        };
+
+        PrintService.GetDataRowHeight(row, A4LongEdgeDip).Should().Be(ExpectedTripleRowHeight);
+    }
+
+    /// <summary>
+    /// Issue #2047: 氏名欄は狭いため、縦向きでは「外N名」付きの氏名が折り返す。
+    /// 横向きでは同じ氏名が1行に収まる（折り返しを常に数える実装を検出する対の表明）
+    /// </summary>
+    [Fact]
+    public void GetDataRowHeight_StaffNameWrapsOnlyInNarrowColumn()
+    {
+        var row = new ReportRow { Summary = "鉄道（博多～天神）", StaffName = "博多 花子 外１名" };
+
+        PrintService.GetDataRowHeight(row, A4LongEdgeDip).Should().Be(ExpectedDataRowHeight);
+        PrintService.GetDataRowHeight(row, A4ShortEdgeDip).Should().Be(ExpectedDataRowHeightDouble);
+    }
+
+    #endregion
+
+    #region Issue #2047: ページ寸法・列幅・折り返し行数
+
+    /// <summary>
+    /// Issue #2047: A4 のページ寸法は DIP（1/96 インチ）で返す。ポイント値（842×595）ではない
+    /// </summary>
+    [Fact]
+    public void GetPageSize_ReturnsA4InDip()
+    {
+        var landscape = PrintService.GetPageSize(System.Printing.PageOrientation.Landscape);
+        var portrait = PrintService.GetPageSize(System.Printing.PageOrientation.Portrait);
+
+        landscape.Width.Should().BeApproximately(A4LongEdgeDip, 0.1);
+        landscape.Height.Should().BeApproximately(A4ShortEdgeDip, 0.1);
+        portrait.Width.Should().BeApproximately(A4ShortEdgeDip, 0.1);
+        portrait.Height.Should().BeApproximately(A4LongEdgeDip, 0.1);
+    }
+
+    /// <summary>
+    /// 列ごとの文字幅は、テーブル幅（ページ幅 − 余白100 − 外枠2）を Star 比率で配分し、
+    /// セル内余白（段落マージン8 ＋ 罫線1）を引いた値。全列を足し戻すとテーブル幅になる
+    /// </summary>
+    [Fact]
+    public void GetColumnTextWidth_AllColumnsSumToTableWidth()
+    {
+        const double pageWidth = 1000;
+        const int columnCount = 7;
+        const double cellInset = 9;
+
+        var total = Enumerable.Range(0, columnCount)
+            .Sum(i => PrintService.GetColumnTextWidth(pageWidth, i) + cellInset);
+
+        total.Should().BeApproximately(pageWidth - 100 - 2, 0.001);
+        // 摘要欄（3.3/11.2）は備考欄（1.7/11.2）より広い
+        PrintService.GetColumnTextWidth(pageWidth, 1)
+            .Should().BeGreaterThan(PrintService.GetColumnTextWidth(pageWidth, 6));
+    }
+
+    [Theory]
+    [InlineData(null, 1)]
+    [InlineData("", 1)]
+    [InlineData("あいうえお", 1)]      // 55 ≤ 60
+    [InlineData("あいうえおか", 2)]    // 66 > 60
+    [InlineData("あ\nい", 2)]          // 改行は強制改行
+    [InlineData("あ\r\nい", 2)]        // CRLF も 1 回の改行
+    [InlineData("1234567890", 2)]      // 半角 6.6 × 10 = 66 > 60
+    [InlineData("123456789", 1)]       // 半角 6.6 × 9 = 59.4 ≤ 60
+    public void EstimateLineCount_WrapsByWidth(string text, int expected)
+    {
+        // 幅 60 DIP ＝ 全角 5 文字（11 × 5 = 55）＋ 端数
+        PrintService.EstimateLineCount(text, textWidth: 60).Should().Be(expected);
+    }
+
+    /// <summary>
+    /// 1 文字も置けない幅でも無限に改行せず、1 文字 1 行として数える
+    /// </summary>
+    [Fact]
+    public void EstimateLineCount_WidthNarrowerThanOneChar_OneLinePerChar()
+    {
+        PrintService.EstimateLineCount("あいう", textWidth: 5).Should().Be(3);
     }
 
     #endregion
@@ -323,16 +450,16 @@ public class PrintServicePaginationTests
 
     #region Issue #1262: 実寸A4と端数行・合計行配置のテスト
 
-    // A4 用紙の実寸（FlowDocument 設定値と一致: PrintService.CreateFlowDocument）
-    private const double A4LandscapeWidth = 842;
-    private const double A4LandscapeHeight = 595;
-    private const double A4PortraitWidth = 595;
-    private const double A4PortraitHeight = 842;
+    // A4 用紙の実寸（DIP）。Issue #2047 でポイント値（842×595）から是正
+    private const double A4LandscapeWidth = A4LongEdgeDip;
+    private const double A4LandscapeHeight = A4ShortEdgeDip;
+    private const double A4PortraitWidth = A4ShortEdgeDip;
+    private const double A4PortraitHeight = A4LongEdgeDip;
 
     /// <summary>
     /// Issue #1262: A4 横向き実寸で 30 行（短い摘要）のデータは 2 ページに分割されること。
-    /// 利用可能高さ = 595-100-130 = 365pt, 短い行22pt → 1ページ16行 + 合計2行44pt。
-    /// 30行なら 16+14 or 15+15 程度で 2 ページ分割する。
+    /// 利用可能高さ = 793.7-100-130 = 563.7, 短い行22 → 1ページ25行。
+    /// 30行なら 25+5 で 2 ページ分割する。
     /// </summary>
     [Fact]
     public void GroupRowsByPage_A4Landscape_30Rows_FitsInTwoPages()
@@ -440,7 +567,7 @@ public class PrintServicePaginationTests
 
     /// <summary>
     /// Issue #1262: A4 縦向き実寸のページ容量。
-    /// 利用可能高さ = 842-100-130 = 612pt, 短い行22pt → 1ページ27行程度 + 合計。
+    /// 利用可能高さ = 1122.5-100-130 = 892.5, 短い行22 → 1ページ40行程度 + 合計。
     /// </summary>
     [Fact]
     public void GroupRowsByPage_A4Portrait_HasLargerPerPageCapacityThanLandscape()
@@ -521,10 +648,10 @@ public class PrintServicePaginationTests
     #region Issue #1810: 最終ページの合計行スペース確保
 
     /// <summary>
-    /// Issue #1810: A4横向き実寸で16行（短摘要）＋合計1行のとき、本文だけなら
-    /// 1ページに収まる（16×22=352 ≤ 365）が合計行を含めると収まらない
-    /// （352+22=374 > 365）。最終行の判定で合計行の高さが常に予約され、
-    /// 2ページに分割されること。
+    /// Issue #1810: A4横向き実寸で25行（短摘要）＋合計1行のとき、本文だけなら
+    /// 1ページに収まる（25×22=550 ≤ 563.7）が合計行を含めると収まらない
+    /// （550+22=572 > 563.7）。最終行の判定で合計行の高さが常に予約され、
+    /// 2ページに分割されること。（Issue #2047 で寸法を DIP へ是正し行数を更新）
     /// </summary>
     /// <remarks>
     /// 修正前は canFitAll=false → spaceForSummary=0 となり1ページに確定し、
@@ -532,9 +659,9 @@ public class PrintServicePaginationTests
     /// 自動送りで月計・累計行だけがタイトル・列ヘッダーのない次ページに孤立していた。
     /// </remarks>
     [Fact]
-    public void GroupRowsByPage_A4Landscape_16RowsWithOneSummary_SplitsIntoTwoPages()
+    public void GroupRowsByPage_A4Landscape_25RowsWithOneSummary_SplitsIntoTwoPages()
     {
-        var rows = Enumerable.Range(0, 16).Select(i => Row($"行{i:D2}")).ToList();
+        var rows = Enumerable.Range(0, 25).Select(i => Row($"行{i:D2}")).ToList();
 
         var pages = PrintService.GroupRowsByPage(
             rows,
@@ -543,21 +670,21 @@ public class PrintServicePaginationTests
             summaryRowCount: 1); // 月計のみ
 
         pages.Should().HaveCount(2,
-            "本文16行は収まるが合計行が収まらないため、最終行を合計行と一緒に次ページへ送る");
-        pages[0].Should().HaveCount(15);
+            "本文25行は収まるが合計行が収まらないため、最終行を合計行と一緒に次ページへ送る");
+        pages[0].Should().HaveCount(24);
         pages[1].Should().HaveCount(1);
         pages.SelectMany(p => p).Select(r => r.Summary)
             .Should().Equal(rows.Select(r => r.Summary));
     }
 
     /// <summary>
-    /// Issue #1810: 合計行が2行（月計＋累計）の場合は15行でも溢れる
-    /// （15×22=330, 330+44=374 > 365）。最終行が合計行と一緒に次ページへ送られること。
+    /// Issue #1810: 合計行が2行（月計＋累計）の場合は24行でも溢れる
+    /// （24×22=528, 528+44=572 > 563.7）。最終行が合計行と一緒に次ページへ送られること。
     /// </summary>
     [Fact]
-    public void GroupRowsByPage_A4Landscape_15RowsWithTwoSummaries_SplitsIntoTwoPages()
+    public void GroupRowsByPage_A4Landscape_24RowsWithTwoSummaries_SplitsIntoTwoPages()
     {
-        var rows = Enumerable.Range(0, 15).Select(i => Row($"行{i:D2}")).ToList();
+        var rows = Enumerable.Range(0, 24).Select(i => Row($"行{i:D2}")).ToList();
 
         var pages = PrintService.GroupRowsByPage(
             rows,
@@ -566,19 +693,19 @@ public class PrintServicePaginationTests
             summaryRowCount: 2); // 月計 + 累計
 
         pages.Should().HaveCount(2,
-            "本文15行＋合計2行は1ページに収まらないため2ページに分割される");
-        pages[0].Should().HaveCount(14);
+            "本文24行＋合計2行は1ページに収まらないため2ページに分割される");
+        pages[0].Should().HaveCount(23);
         pages[1].Should().HaveCount(1);
     }
 
     /// <summary>
-    /// Issue #1810: 本文＋合計行がちょうど収まる場合（15×22+22=352 ≤ 365）は
+    /// Issue #1810: 本文＋合計行がちょうど収まる場合（24×22+22=550 ≤ 563.7）は
     /// 従来どおり1ページに収まること（過剰分割しない）。
     /// </summary>
     [Fact]
-    public void GroupRowsByPage_A4Landscape_15RowsWithOneSummary_StaysSinglePage()
+    public void GroupRowsByPage_A4Landscape_24RowsWithOneSummary_StaysSinglePage()
     {
-        var rows = Enumerable.Range(0, 15).Select(i => Row($"行{i:D2}")).ToList();
+        var rows = Enumerable.Range(0, 24).Select(i => Row($"行{i:D2}")).ToList();
 
         var pages = PrintService.GroupRowsByPage(
             rows,
@@ -586,8 +713,63 @@ public class PrintServicePaginationTests
             pageHeight: A4LandscapeHeight,
             summaryRowCount: 1);
 
-        pages.Should().HaveCount(1, "本文15行＋合計1行=352pt は 365pt に収まる");
-        pages[0].Should().HaveCount(15);
+        pages.Should().HaveCount(1, "本文24行＋合計1行=550 は 563.7 に収まる");
+        pages[0].Should().HaveCount(24);
+    }
+
+    #endregion
+
+    #region Issue #2047: 備考欄の折り返しを含めた改ページ
+
+    /// <summary>
+    /// Issue #2047: 残高不足の備考（備考欄で3行）を持つ行が続くと、見積もり上も3行分の高さを積む。
+    /// 11行×54=594 > 563.7 のため2ページ（10行＋1行）に分割される。
+    /// 旧実装は摘要の文字数しか見ず1行（22）として数え、1ページに収まると判定していた
+    /// （実際の印字では FlowDocument が自動改ページし、月計が見出しの無いページへ回る）。
+    /// </summary>
+    [Fact]
+    public void GroupRowsByPage_A4Landscape_RowsWithLongNote_SplitsByNoteHeight()
+    {
+        var rows = Enumerable.Range(0, 11)
+            .Select(i => new ReportRow
+            {
+                Summary = $"鉄道（博多～天神）{i:D2}",
+                Note = "支払額210円のうち不足額140円は現金で支払（旅費支給）",
+            })
+            .ToList();
+
+        var pages = PrintService.GroupRowsByPage(
+            rows,
+            pageWidth: A4LandscapeWidth,
+            pageHeight: A4LandscapeHeight,
+            summaryRowCount: 1);
+
+        pages.Should().HaveCount(2);
+        pages[0].Should().HaveCount(10);
+        pages[1].Should().HaveCount(1);
+    }
+
+    /// <summary>
+    /// 対の表明: 同じ11行でも備考が短ければ1ページに収まる（備考の有無で分割を常に増やす実装を検出する）
+    /// </summary>
+    [Fact]
+    public void GroupRowsByPage_A4Landscape_RowsWithShortNote_StaysSinglePage()
+    {
+        var rows = Enumerable.Range(0, 11)
+            .Select(i => new ReportRow
+            {
+                Summary = $"鉄道（博多～天神）{i:D2}",
+                Note = "旅費支給",
+            })
+            .ToList();
+
+        var pages = PrintService.GroupRowsByPage(
+            rows,
+            pageWidth: A4LandscapeWidth,
+            pageHeight: A4LandscapeHeight,
+            summaryRowCount: 1);
+
+        pages.Should().HaveCount(1);
     }
 
     #endregion

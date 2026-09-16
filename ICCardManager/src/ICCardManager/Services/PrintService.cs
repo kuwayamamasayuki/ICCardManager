@@ -181,17 +181,30 @@ namespace ICCardManager.Services
             List<ReportPrintData> dataList,
             PageOrientation orientation)
         {
+            return CreateFlowDocumentForMultipleCards(dataList, GetPageSize(orientation));
+        }
+
+        /// <summary>
+        /// 複数カードの帳票データからFlowDocumentを生成（ページ寸法指定、DIP）
+        /// </summary>
+        /// <remarks>
+        /// Issue #2047: 印刷時は印刷ダイアログが返す用紙寸法でドキュメントを組み直すため、
+        /// 用紙方向ではなく寸法そのものを受け取る入口を持つ。
+        /// </remarks>
+        public FlowDocument CreateFlowDocumentForMultipleCards(
+            List<ReportPrintData> dataList,
+            Size pageSize)
+        {
             if (dataList.Count == 0)
             {
                 return new FlowDocument();
             }
 
             // 最初のカードでドキュメントを作成
-            var combinedDoc = CreateFlowDocument(dataList[0], orientation);
+            var combinedDoc = CreateFlowDocument(dataList[0], pageSize);
 
-            // 用紙サイズを取得
-            double pageWidth = orientation == PageOrientation.Landscape ? 842 : 595;
-            double pageHeight = orientation == PageOrientation.Landscape ? 595 : 842;
+            double pageWidth = pageSize.Width;
+            double pageHeight = pageSize.Height;
 
             // 2枚目以降のカードを追加
             for (int i = 1; i < dataList.Count; i++)
@@ -229,6 +242,14 @@ namespace ICCardManager.Services
         }
 
         // ページレイアウト定数
+        // Issue #2047: FlowDocument の寸法・フォントサイズ・余白はすべて DIP（1/96 インチ）。
+        // かつて A4 を 842×595 と「ポイント（1/72 インチ）」で指定しており、約 8.8×6.2 インチ
+        // （A4 ではない）のページで改ページ位置を計算していた。
+        private const double MillimetersPerInch = 25.4;
+        private const double DipsPerInch = 96;
+        private const double A4ShortEdgeDip = 210 / MillimetersPerInch * DipsPerInch;  // ≈ 793.7
+        private const double A4LongEdgeDip = 297 / MillimetersPerInch * DipsPerInch;   // ≈ 1122.5
+
         private const double PagePaddingSize = 50;        // ページ余白（上下左右）
 
         // ヘッダー部分の高さ（実測値ベース、少し余裕を持たせる）
@@ -240,13 +261,30 @@ namespace ICCardManager.Services
         // データ行の高さ（実測値ベース）
         private const double DataRowHeight = 22;          // 1行データ（FontSize11 + パディング + 罫線）
         private const double DataRowHeightDouble = 38;    // 2行データ（摘要が折り返す場合）
+        private const double AdditionalLineHeight = DataRowHeightDouble - DataRowHeight; // 折り返し1行ごとの増分
 
         // 合計行の高さ
         private const double SummaryRowHeight = 22;       // 月計/累計/繰越行
 
-        // 摘要欄の1行あたり文字数（実測値：セル幅÷フォントサイズ）
-        private const int SummaryCharsLandscape = 20;     // 横向き時（幅211pt / 11pt）
-        private const int SummaryCharsPortrait = 12;      // 縦向き時（幅138pt / 11pt）
+        // 本文のフォントサイズ（DIP）
+        private const double DocumentFontSize = 11;
+
+        // データテーブルの列幅（Star 比率）。CreateDataTableInternal の列定義と見積もりの両方がこれを使う
+        // 元の比率: 60:200:80:80:80:80:100 = 680 → Star比率: 1:3.3:1.3:1.3:1.3:1.3:1.7 ≈ 11.2
+        private static readonly double[] DataColumnStarWidths = { 1, 3.3, 1.3, 1.3, 1.3, 1.3, 1.7 };
+
+        // 折り返し得る列（摘要・氏名・備考）。日付・金額列は短く折り返さない
+        private const int SummaryColumnIndex = 1;
+        private const int StaffNameColumnIndex = 5;
+        private const int NoteColumnIndex = 6;
+
+        private const double DataTableBorderWidth = 1 * 2;      // テーブル外枠（左右）
+        private const double DataCellHorizontalInset = 4 * 2 + 0.5 * 2; // 段落マージン（左右）＋セル罫線（左右）
+
+        // 半角文字（ASCII・半角カナ）の幅を全角の何倍と見積もるか。
+        // 小さく見積もると改ページ位置の計算より実際の行が高くなり、合計行が見出しの無いページへ回る。
+        // 過大に見積もる側（余白が増えるだけ）へ倒す
+        private const double HalfWidthCharEm = 0.6;
 
         /// <summary>
         /// ヘッダー部分の合計高さを取得（タイトル + カード情報 + 列ヘッダー + テーブル罫線）
@@ -260,19 +298,120 @@ namespace ICCardManager.Services
         }
 
         /// <summary>
-        /// データ行の高さを取得（摘要欄の文字数に基づく）
+        /// 用紙方向に対応する A4 のページ寸法（DIP）を取得
         /// </summary>
         /// <remarks>
-        /// 純粋関数。摘要が空または1行に収まる場合は <see cref="DataRowHeight"/>、
-        /// 折り返す場合は <see cref="DataRowHeightDouble"/> を返す。
+        /// 純粋関数。Issue #2047: <see cref="FlowDocument.PageWidth"/> / <see cref="FlowDocument.PageHeight"/> は
+        /// DIP（1/96 インチ）で解釈されるため、A4 は 793.7×1122.5 になる（ポイントの 595×842 ではない）。
         /// </remarks>
-        internal static double GetDataRowHeight(ReportRow row, bool isLandscape)
+        internal static Size GetPageSize(PageOrientation orientation)
         {
-            if (string.IsNullOrEmpty(row.Summary))
-                return DataRowHeight;
+            return orientation == PageOrientation.Landscape
+                ? new Size(A4LongEdgeDip, A4ShortEdgeDip)
+                : new Size(A4ShortEdgeDip, A4LongEdgeDip);
+        }
 
-            var maxChars = isLandscape ? SummaryCharsLandscape : SummaryCharsPortrait;
-            return (row.Summary?.Length ?? 0) <= maxChars ? DataRowHeight : DataRowHeightDouble;
+        /// <summary>
+        /// データテーブルの指定列で、文字を並べられる幅（DIP）を取得
+        /// </summary>
+        /// <remarks>
+        /// 純粋関数。ページ幅から余白・テーブル外枠を引いた幅を Star 比率で配分し、
+        /// セル内の段落マージンと罫線を引く。
+        /// </remarks>
+        internal static double GetColumnTextWidth(double pageWidth, int columnIndex)
+        {
+            var tableWidth = pageWidth - (PagePaddingSize * 2) - DataTableBorderWidth;
+            var columnWidth = tableWidth * DataColumnStarWidths[columnIndex] / DataColumnStarWidths.Sum();
+            return columnWidth - DataCellHorizontalInset;
+        }
+
+        /// <summary>
+        /// 行高さの見積もりに使う列の文字幅（DIP）。実際の文字幅から 1 文字分を差し引く
+        /// </summary>
+        /// <remarks>
+        /// WPF は禁則処理（「）」「、」を行頭に置かない等）と数字の連なり（「210円」）を分けない折り返しで、
+        /// 行末の文字を次の行へ送ることがある。1 文字ずつ積む見積もりはこれを数えないため、
+        /// 各行に 1 文字分の余裕を取り、見積もりを過大側へ倒す（Issue #2047 のコードレビューで検出）。
+        /// </remarks>
+        private static double GetWrapEstimateWidth(double pageWidth, int columnIndex)
+        {
+            return GetColumnTextWidth(pageWidth, columnIndex) - DocumentFontSize;
+        }
+
+        /// <summary>
+        /// テキストを指定幅へ折り返したときの行数を見積もる
+        /// </summary>
+        /// <remarks>
+        /// 純粋関数。1 文字ずつ積み上げ、幅を超える文字で改行する（Issue #2047）。
+        /// 全角文字は 1em、半角文字は <see cref="HalfWidthCharEm"/>em と見積もる。
+        /// 改行文字は強制改行として数える。空・null は 1 行。
+        /// </remarks>
+        internal static int EstimateLineCount(string text, double textWidth)
+        {
+            if (string.IsNullOrEmpty(text))
+            {
+                return 1;
+            }
+
+            var lines = 1;
+            double currentWidth = 0;
+
+            foreach (var ch in text)
+            {
+                if (ch == '\r')
+                {
+                    continue;
+                }
+
+                if (ch == '\n')
+                {
+                    lines++;
+                    currentWidth = 0;
+                    continue;
+                }
+
+                var charWidth = (IsHalfWidth(ch) ? HalfWidthCharEm : 1.0) * DocumentFontSize;
+
+                // 行頭の文字は幅を超えても置く（1 文字も置けない列でも無限に改行しない）
+                if (currentWidth > 0 && currentWidth + charWidth > textWidth)
+                {
+                    lines++;
+                    currentWidth = charWidth;
+                }
+                else
+                {
+                    currentWidth += charWidth;
+                }
+            }
+
+            return lines;
+        }
+
+        private static bool IsHalfWidth(char ch)
+        {
+            // ASCII 印字可能文字と半角カナ
+            return (ch >= 0x20 && ch <= 0x7E) || (ch >= 0xFF61 && ch <= 0xFF9F);
+        }
+
+        /// <summary>
+        /// データ行の高さを取得（折り返し得る全列の必要行数の最大値に基づく）
+        /// </summary>
+        /// <remarks>
+        /// 純粋関数。Issue #2047: かつては摘要の文字数だけで「1 行 or 2 行」を返しており、
+        /// 3 行以上の折り返しと、より狭い備考欄・氏名欄の折り返しを数えていなかった
+        /// （残高不足時の備考「支払額210円のうち不足額140円は現金で支払（旅費支給）」は備考欄で 3 行になる）。
+        /// 見積もりより実際の行が高いと FlowDocument が自動で改ページし、月計・累計が
+        /// タイトルと列見出しの無いページへ回る（#1810 で防ごうとした症状）。
+        /// </remarks>
+        internal static double GetDataRowHeight(ReportRow row, double pageWidth)
+        {
+            var lines = Math.Max(
+                EstimateLineCount(row.Summary, GetWrapEstimateWidth(pageWidth, SummaryColumnIndex)),
+                Math.Max(
+                    EstimateLineCount(row.StaffName, GetWrapEstimateWidth(pageWidth, StaffNameColumnIndex)),
+                    EstimateLineCount(row.Note, GetWrapEstimateWidth(pageWidth, NoteColumnIndex))));
+
+            return DataRowHeight + ((lines - 1) * AdditionalLineHeight);
         }
 
         /// <summary>
@@ -298,7 +437,6 @@ namespace ICCardManager.Services
             double pageHeight,
             int summaryRowCount)
         {
-            var isLandscape = pageWidth > pageHeight;
             var availableHeight = GetAvailableDataHeight(pageHeight);
             var summaryTotalHeight = summaryRowCount * SummaryRowHeight;
 
@@ -309,7 +447,7 @@ namespace ICCardManager.Services
             for (int i = 0; i < rows.Count; i++)
             {
                 var row = rows[i];
-                var rowHeight = GetDataRowHeight(row, isLandscape);
+                var rowHeight = GetDataRowHeight(row, pageWidth);
 
                 // Issue #1810: 最終行では合計行（月計・累計・繰越）の高さを常に予約する。
                 // 予約しないと本文だけでページが確定し、合計行が FlowDocument の自動送りで
@@ -355,19 +493,20 @@ namespace ICCardManager.Services
         /// </summary>
         public FlowDocument CreateFlowDocument(ReportPrintData data, PageOrientation orientation)
         {
-            // 用紙方向に応じたページサイズを設定
-            double pageWidth, pageHeight;
+            return CreateFlowDocument(data, GetPageSize(orientation));
+        }
 
-            if (orientation == PageOrientation.Landscape)
-            {
-                pageWidth = 842;   // A4横
-                pageHeight = 595;
-            }
-            else
-            {
-                pageWidth = 595;   // A4縦
-                pageHeight = 842;
-            }
+        /// <summary>
+        /// FlowDocumentを生成（ページ寸法指定、DIP）
+        /// </summary>
+        /// <remarks>
+        /// Issue #2047: 改ページ位置（<see cref="GroupRowsByPage"/>）と FlowDocument の寸法を
+        /// 同じ <paramref name="pageSize"/> から決める。寸法だけを後から書き換えると改ページ位置と食い違う。
+        /// </remarks>
+        public FlowDocument CreateFlowDocument(ReportPrintData data, Size pageSize)
+        {
+            double pageWidth = pageSize.Width;
+            double pageHeight = pageSize.Height;
 
             var doc = new FlowDocument
             {
@@ -376,7 +515,7 @@ namespace ICCardManager.Services
                 PagePadding = new Thickness(PagePaddingSize),
                 ColumnWidth = double.MaxValue,
                 FontFamily = new FontFamily("Yu Gothic UI, Meiryo, MS Gothic"),
-                FontSize = 11
+                FontSize = DocumentFontSize
             };
 
             // 合計行の数を計算
@@ -720,15 +859,11 @@ namespace ICCardManager.Services
             };
 
             // 列定義（比例幅を使用して用紙サイズに自動調整）
-            // 元の比率: 60:200:80:80:80:80:100 = 680
-            // Star比率: 1:3.3:1.3:1.3:1.3:1.3:1.7 ≈ 11.2
-            table.Columns.Add(new TableColumn { Width = new GridLength(1, GridUnitType.Star) });     // 日付
-            table.Columns.Add(new TableColumn { Width = new GridLength(3.3, GridUnitType.Star) });   // 摘要
-            table.Columns.Add(new TableColumn { Width = new GridLength(1.3, GridUnitType.Star) });   // 受入
-            table.Columns.Add(new TableColumn { Width = new GridLength(1.3, GridUnitType.Star) });   // 払出
-            table.Columns.Add(new TableColumn { Width = new GridLength(1.3, GridUnitType.Star) });   // 残高
-            table.Columns.Add(new TableColumn { Width = new GridLength(1.3, GridUnitType.Star) });   // 氏名
-            table.Columns.Add(new TableColumn { Width = new GridLength(1.7, GridUnitType.Star) });   // 備考
+            // 日付・摘要・受入・払出・残高・氏名・備考。行高さの見積もり（GetColumnTextWidth）と同じ比率を使う
+            foreach (var starWidth in DataColumnStarWidths)
+            {
+                table.Columns.Add(new TableColumn { Width = new GridLength(starWidth, GridUnitType.Star) });
+            }
 
             var rowGroup = new TableRowGroup();
 
@@ -779,50 +914,77 @@ namespace ICCardManager.Services
         }
 
         /// <summary>
-        /// 印刷を実行
+        /// 印刷ダイアログで確定した印刷先（用紙寸法と送信手段）
         /// </summary>
-        public bool Print(FlowDocument document, string documentName)
+        internal sealed class PrintRequest
         {
-            var printDialog = new PrintDialog();
+            /// <summary>印刷に使う用紙の寸法（DIP）</summary>
+            public Size PageSize { get; }
 
-            if (printDialog.ShowDialog() == true)
+            /// <summary>ページ分割済みのドキュメントをプリンターへ送る</summary>
+            public Action<DocumentPaginator, string> Send { get; }
+
+            public PrintRequest(Size pageSize, Action<DocumentPaginator, string> send)
             {
-                // ページ設定
-                document.PageWidth = printDialog.PrintableAreaWidth;
-                document.PageHeight = printDialog.PrintableAreaHeight;
-
-                var paginator = ((IDocumentPaginatorSource)document).DocumentPaginator;
-                printDialog.PrintDocument(paginator, documentName);
-
-                return true;
+                PageSize = pageSize;
+                Send = send;
             }
-
-            return false;
         }
 
         /// <summary>
-        /// 印刷設定付きで印刷を実行
+        /// 印刷ダイアログを表示し、確定した印刷先を返す（キャンセル時は null）
         /// </summary>
-        public bool PrintWithSettings(FlowDocument document, string documentName, PageOrientation orientation)
+        /// <remarks>
+        /// 印刷ダイアログ（モーダル・プリンター依存）を単体テストで差し替えるための継ぎ目として virtual にしている。
+        /// 本番では派生クラスを作らない。
+        /// </remarks>
+        internal virtual PrintRequest RequestPrint(PageOrientation orientation)
         {
             var printDialog = new PrintDialog();
 
             // 用紙方向を設定
             printDialog.PrintTicket.PageOrientation = orientation;
 
-            if (printDialog.ShowDialog() == true)
+            if (printDialog.ShowDialog() != true)
             {
-                // ページ設定
-                document.PageWidth = printDialog.PrintableAreaWidth;
-                document.PageHeight = printDialog.PrintableAreaHeight;
-
-                var paginator = ((IDocumentPaginatorSource)document).DocumentPaginator;
-                printDialog.PrintDocument(paginator, documentName);
-
-                return true;
+                return null;
             }
 
-            return false;
+            return new PrintRequest(
+                new Size(printDialog.PrintableAreaWidth, printDialog.PrintableAreaHeight),
+                (paginator, name) => printDialog.PrintDocument(paginator, name));
+        }
+
+        /// <summary>
+        /// 印刷設定付きで印刷を実行
+        /// </summary>
+        /// <param name="documentName">印刷ジョブ名</param>
+        /// <param name="orientation">印刷ダイアログの初期の用紙方向</param>
+        /// <param name="buildDocument">指定寸法（DIP）でドキュメントを組み立てる関数</param>
+        /// <remarks>
+        /// Issue #2047: かつてはプレビュー用のドキュメントの <c>PageWidth</c> / <c>PageHeight</c> を
+        /// 印刷ダイアログの寸法へ上書きして印刷しており、改ページ位置（<see cref="GroupRowsByPage"/>）は
+        /// プレビュー時の寸法のまま残った。印刷ダイアログで縦向きに変えると印字幅が狭くなって行があふれ、
+        /// 月計・累計が見出しの無いページへ送られていた。印刷時は確定した寸法でドキュメントを
+        /// 組み直し、プレビュー用のドキュメントは書き換えない。
+        /// </remarks>
+        public bool PrintWithSettings(
+            string documentName,
+            PageOrientation orientation,
+            Func<Size, FlowDocument> buildDocument)
+        {
+            var request = RequestPrint(orientation);
+            if (request == null)
+            {
+                return false;
+            }
+
+            var document = buildDocument(request.PageSize);
+            var paginator = ((IDocumentPaginatorSource)document).DocumentPaginator;
+            paginator.PageSize = request.PageSize;
+            request.Send(paginator, documentName);
+
+            return true;
         }
     }
 }

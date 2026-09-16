@@ -59,19 +59,6 @@ public partial class PrintPreviewViewModel : ViewModelBase
     [ObservableProperty]
     private string _statusMessage = string.Empty;
 
-    [ObservableProperty]
-    private double _contentScaleFactor = 1.0;
-
-    /// <summary>
-    /// A4横向きの幅（基準サイズ）
-    /// </summary>
-    private const double LandscapeWidth = 842;
-
-    /// <summary>
-    /// A4縦向きの幅
-    /// </summary>
-    private const double PortraitWidth = 595;
-
     /// <summary>
     /// コンテンツの自動縮小スケール（1.0 = 100%、縦向き時は小さくなる）
     /// </summary>
@@ -132,19 +119,6 @@ public partial class PrintPreviewViewModel : ViewModelBase
     public PrintPreviewViewModel(PrintService printService)
     {
         _printService = printService;
-    }
-
-    /// <summary>
-    /// ドキュメントを設定（従来互換）
-    /// </summary>
-    public void SetDocument(FlowDocument document, string title)
-    {
-        _reportDataList = null; // 再生成不可
-        Document = document;
-        DocumentTitle = title;
-        CurrentPage = 1;
-        InternalUpdatePageCount();
-        StatusMessage = $"「{title}」を表示中";
     }
 
     /// <summary>
@@ -379,13 +353,16 @@ public partial class PrintPreviewViewModel : ViewModelBase
     [RelayCommand]
     private void Print()
     {
-        if (Document == null)
+        if (Document == null || _reportDataList == null || _reportDataList.Count == 0)
         {
             StatusMessage = "印刷するドキュメントがありません";
             return;
         }
 
-        var result = _printService.PrintWithSettings(Document, DocumentTitle, SelectedOrientation);
+        // Issue #2047: 印刷ダイアログで確定した用紙寸法でドキュメントを組み直す。
+        // プレビュー中の Document を書き換えると、改ページ位置と寸法が食い違ううえ、
+        // 印刷後のプレビューにも寸法の変わったドキュメントが残る
+        var result = _printService.PrintWithSettings(DocumentTitle, SelectedOrientation, BuildDocument);
 
         if (result)
         {
@@ -398,6 +375,20 @@ public partial class PrintPreviewViewModel : ViewModelBase
     }
 
     /// <summary>
+    /// 帳票データから指定寸法（DIP）のドキュメントを組み立てる
+    /// </summary>
+    /// <remarks>
+    /// プレビュー（用紙方向から決まる A4 寸法）と印刷（印刷ダイアログで確定した寸法）の
+    /// 両方がこの 1 か所を通る。改ページ位置は寸法ごとに計算し直される。
+    /// </remarks>
+    private FlowDocument BuildDocument(System.Windows.Size pageSize)
+    {
+        return _reportDataList!.Count == 1
+            ? _printService.CreateFlowDocument(_reportDataList[0], pageSize)
+            : _printService.CreateFlowDocumentForMultipleCards(_reportDataList, pageSize);
+    }
+
+    /// <summary>
     /// 用紙方向変更時の処理
     /// </summary>
     partial void OnSelectedOrientationChanged(PageOrientation value)
@@ -405,14 +396,7 @@ public partial class PrintPreviewViewModel : ViewModelBase
         // 帳票データがある場合はドキュメントを再生成（行数が変わるため）
         if (_reportDataList != null && _reportDataList.Count > 0)
         {
-            if (_reportDataList.Count == 1)
-            {
-                Document = _printService.CreateFlowDocument(_reportDataList[0], value);
-            }
-            else
-            {
-                Document = _printService.CreateFlowDocumentForMultipleCards(_reportDataList, value);
-            }
+            Document = BuildDocument(PrintService.GetPageSize(value));
 
             // 用紙方向変更時は最初のページに戻す
             CurrentPage = 1;
@@ -423,33 +407,6 @@ public partial class PrintPreviewViewModel : ViewModelBase
 
             var orientationName = GetOrientationDisplayName(value);
             StatusMessage = $"用紙方向を{orientationName}に変更しました";
-        }
-        else if (Document != null)
-        {
-            // 従来の動作（帳票データがない場合はページサイズのみ変更）
-            if (value == PageOrientation.Landscape)
-            {
-                Document.PageWidth = LandscapeWidth;
-                Document.PageHeight = PortraitWidth;
-                ContentScaleFactor = 1.0;
-            }
-            else
-            {
-                ContentScaleFactor = PortraitWidth / LandscapeWidth;
-                Document.PageWidth = LandscapeWidth;
-                Document.PageHeight = LandscapeWidth / ContentScaleFactor;
-            }
-
-            ContentScale = 1.0;
-            CurrentPage = 1;
-            InternalUpdatePageCount();
-            DocumentNeedsRefresh?.Invoke(this, EventArgs.Empty);
-
-            var orientationName = GetOrientationDisplayName(value);
-            var scaleInfo = value == PageOrientation.Portrait
-                ? $"（{ContentScaleFactor:P0}に縮小）"
-                : "";
-            StatusMessage = $"用紙方向を{orientationName}に変更しました{scaleInfo}";
         }
     }
 }
