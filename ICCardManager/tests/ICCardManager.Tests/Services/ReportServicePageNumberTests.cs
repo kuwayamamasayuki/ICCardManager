@@ -378,4 +378,130 @@ public class ReportServicePageNumberTests
     }
 
     #endregion
+
+    #region RenumberFollowingMonthSheets（Issue #2048）
+
+    /// <summary>
+    /// 帳票と同じレイアウト（1 ページ 22 行、改ページは前ページの最終行 22k の直後）で
+    /// 頁番号を付けたシートを作る。ページ k（0 始まり）の頁番号セルは 2 + 22k 行目。
+    /// </summary>
+    private static IXLWorksheet CreateReportLikeSheet(XLWorkbook workbook, string sheetName, int firstPageNumber, int pageCount)
+    {
+        var sheet = workbook.AddWorksheet(sheetName);
+        for (int k = 0; k < pageCount; k++)
+        {
+            if (k > 0)
+            {
+                sheet.PageSetup.AddHorizontalPageBreak(22 * k);
+            }
+            sheet.Cell(2 + 22 * k, PageNumberColumn).Value = firstPageNumber + k;
+        }
+        return sheet;
+    }
+
+    private static int PageNumberAt(IXLWorksheet sheet, int pageIndex) =>
+        sheet.Cell(2 + 22 * pageIndex, PageNumberColumn).GetValue<int>();
+
+    /// <summary>
+    /// 作成した月より後の月だけを、継続ページも含めて月順に連番へ付け直す。前の月は動かさない。
+    /// </summary>
+    [Fact]
+    public void RenumberFollowingMonthSheets_RenumbersLaterMonthsIncludingContinuationPages()
+    {
+        using var workbook = new XLWorkbook();
+        // 4月・5月はどちらも「付け直せば別の値になる」番号にしておく。付け直しの開始位置を誤って
+        // 4月や作成した月（5月）から始める実装だと、これらの表明が赤になる
+        var april = CreateReportLikeSheet(workbook, "4月", firstPageNumber: 7, pageCount: 1);   // カードの開始頁(1)と異なる
+        var may = CreateReportLikeSheet(workbook, "5月", firstPageNumber: 20, pageCount: 1);    // 作成した月（4月の続きではない）
+        var june = CreateReportLikeSheet(workbook, "6月", firstPageNumber: 10, pageCount: 3);  // 旧番号のまま
+        var july = CreateReportLikeSheet(workbook, "7月", firstPageNumber: 3, pageCount: 1);   // 重複
+        var card = CreateCard(startingPageNumber: 1);
+
+        ReportService.RenumberFollowingMonthSheets(workbook, card, 5, PageNumberColumn);
+
+        PageNumberAt(april, 0).Should().Be(7, "作成した月より前の月は付け直さない");
+        PageNumberAt(may, 0).Should().Be(20, "作成した月自体は付け直さない（作成時に決めた番号を正とする）");
+        PageNumberAt(june, 0).Should().Be(21);
+        PageNumberAt(june, 1).Should().Be(22);
+        PageNumberAt(june, 2).Should().Be(23);
+        PageNumberAt(july, 0).Should().Be(24, "付け直した 6月の最終ページに続く");
+    }
+
+    /// <summary>
+    /// 年をまたぐ月順（12月 → 1月 → 3月）で付け直し、間の欠けた月（2月）は飛ばして続ける。
+    /// </summary>
+    [Fact]
+    public void RenumberFollowingMonthSheets_FollowsFiscalMonthOrderAcrossYearEnd()
+    {
+        using var workbook = new XLWorkbook();
+        // シートの並び順ではなく年度の月順で辿ることを確かめるため、意図的に逆順で追加する
+        var march = CreateReportLikeSheet(workbook, "3月", firstPageNumber: 99, pageCount: 1);
+        var january = CreateReportLikeSheet(workbook, "1月", firstPageNumber: 50, pageCount: 2);
+        CreateReportLikeSheet(workbook, "12月", firstPageNumber: 20, pageCount: 1);
+        var card = CreateCard(startingPageNumber: 1);
+
+        ReportService.RenumberFollowingMonthSheets(workbook, card, 12, PageNumberColumn);
+
+        PageNumberAt(january, 0).Should().Be(21);
+        PageNumberAt(january, 1).Should().Be(22);
+        PageNumberAt(march, 0).Should().Be(23);
+    }
+
+    /// <summary>
+    /// 頁番号セルが空のシート（有効な頁情報を持たない）は書き込まず、探索と同じくスキップする。
+    /// </summary>
+    [Fact]
+    public void RenumberFollowingMonthSheets_SheetWithoutPageInfo_IsLeftUntouchedAndSkipped()
+    {
+        using var workbook = new XLWorkbook();
+        CreateReportLikeSheet(workbook, "4月", firstPageNumber: 7, pageCount: 1);
+        var may = workbook.AddWorksheet("5月");
+        var june = CreateReportLikeSheet(workbook, "6月", firstPageNumber: 30, pageCount: 1);
+        var card = CreateCard(startingPageNumber: 1);
+
+        ReportService.RenumberFollowingMonthSheets(workbook, card, 4, PageNumberColumn);
+
+        may.Cell(2, PageNumberColumn).IsEmpty().Should().BeTrue("頁情報を持たないシートへ番号を書き込まない");
+        PageNumberAt(june, 0).Should().Be(8, "空の 5月を飛ばして 4月に続く");
+    }
+
+    /// <summary>
+    /// 頁番号の入っていない位置の改ページ（Excel で手作業により足された等）では、番号を数えるだけで
+    /// その位置のセルは書き換えない。明細行の備考欄を上書きしないため。
+    /// </summary>
+    [Fact]
+    public void RenumberFollowingMonthSheets_BreakWithoutPageNumberCell_CountsButDoesNotOverwrite()
+    {
+        using var workbook = new XLWorkbook();
+        CreateReportLikeSheet(workbook, "4月", firstPageNumber: 1, pageCount: 1);
+        var may = CreateReportLikeSheet(workbook, "5月", firstPageNumber: 9, pageCount: 2);
+        may.PageSetup.AddHorizontalPageBreak(10);          // 手作業で足された改ページ（明細行の途中）
+        may.Cell(12, PageNumberColumn).Value = "備考の文字列";
+        var card = CreateCard(startingPageNumber: 1);
+
+        ReportService.RenumberFollowingMonthSheets(workbook, card, 4, PageNumberColumn);
+
+        PageNumberAt(may, 0).Should().Be(2);
+        may.Cell(12, PageNumberColumn).GetString().Should().Be("備考の文字列", "頁番号でないセルは上書きしない");
+        PageNumberAt(may, 1).Should().Be(4, "改ページ数で数える規則（GetLastPageNumberFromWorksheet）と揃える");
+    }
+
+    /// <summary>
+    /// 年度最終月（3月）や不正な月では何もしない。
+    /// </summary>
+    [Theory]
+    [InlineData(3)]
+    [InlineData(13)]
+    public void RenumberFollowingMonthSheets_NoFollowingMonth_DoesNothing(int month)
+    {
+        using var workbook = new XLWorkbook();
+        var april = CreateReportLikeSheet(workbook, "4月", firstPageNumber: 40, pageCount: 1);
+        var card = CreateCard(startingPageNumber: 1);
+
+        ReportService.RenumberFollowingMonthSheets(workbook, card, month, PageNumberColumn);
+
+        PageNumberAt(april, 0).Should().Be(40);
+    }
+
+    #endregion
 }
