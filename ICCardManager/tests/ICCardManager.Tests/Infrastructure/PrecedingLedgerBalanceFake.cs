@@ -69,7 +69,14 @@ internal static class PrecedingLedgerBalanceFake
             cursor = cursor.AddMonths(-1);
         }
 
-        var before = ledgers.Where(l => l.Date < beforeDate).ToList();
+        // シードは「年度開始時点の残高」なので、replay する範囲も年度開始日以降に限る。
+        // 年度開始より前の日まで遡って当てると、その日が循環日のときフェイクと実装で
+        // 結果が分かれ、実装が壊れていてもテストが緑になり得る（コードレビューで検出）。
+        // 年度内が 1 日も無いカードは下の seed（前年度繰越）へ落ちる（#1602 / #1728 と同じ）。
+        var fiscalYearStart = FiscalYearHelper.GetFiscalYearStart(fiscalYear);
+        var before = ledgers
+            .Where(l => l.Date >= fiscalYearStart && l.Date < beforeDate)
+            .ToList();
         if (before.Count == 0)
         {
             // 台帳が 1 件も無いカードでも、前年度繰越があればその残高が「当月 1 日より前の最終残高」になる

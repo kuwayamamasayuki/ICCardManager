@@ -1777,6 +1777,40 @@ public class ReportDataBuilderTests
     }
 
     [Fact]
+    public async Task BuildAsync_PreviousMonthHasLentRecord_PrecedingBalanceIsUnchanged()
+    {
+        // Arrange（母集団の表明）: 前月末に貸出中プレースホルダが残っている
+        // （6/28 に貸し出したまま月をまたぎ、7月分の帳票を作成する形）。
+        // GetLatestBeforeDateAsync は貸出中レコードを除外しない（#1731）ため、
+        // 繰越額がプレースホルダ由来になり得る。プレースホルダは Income = Expense = 0 で
+        // Balance が直前の実績行と一致するため、含めても最終残高は変わらない。
+        SetupCard();
+        SetupCarryoverBalance(TestCardIdm, 2024, null);
+
+        var juneLedgers = new List<Ledger>
+        {
+            CreateTestLedger(1, TestCardIdm, new DateTime(2025, 6, 10),
+                SummaryGenerator.GetChargeSummary(DepartmentType.MayorOffice), 1600, 0, 1600),
+            CreateTestLedger(2, TestCardIdm, new DateTime(2025, 6, 28),
+                SummaryGenerator.GetLendingSummary(), 0, 0, 1600)
+        };
+
+        SetupMonthlyLedgers(TestCardIdm, 2025, 6, juneLedgers);
+        SetupMonthlyLedgers(TestCardIdm, 2025, 7, new List<Ledger>());
+        SetupDateRangeLedgers(TestCardIdm,
+            new DateTime(2025, 4, 1), new DateTime(2025, 7, 31), juneLedgers);
+
+        // Act
+        var result = await _builder.BuildAsync(TestCardIdm, 2025, 7);
+
+        // Assert: 貸出中行があっても繰越額は実績行の残額のまま
+        result.PrecedingBalance.Should().Be(1600);
+        result.Carryover.Balance.Should().Be(1600);
+        // 貸出中行は帳票の明細にも載らない（既存の除外が効いている）
+        result.Ledgers.Should().NotContain(l => l.Summary == SummaryGenerator.GetLendingSummary());
+    }
+
+    [Fact]
     public async Task BuildAsync_FiscalYearStartsOnCircularDay_CumulativeUsesChainFinalBalance()
     {
         // Arrange: 年度先頭の稼働日（4/10）が循環日。シードは年度開始前の残高（前年度繰越 3,000円）

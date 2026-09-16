@@ -48,6 +48,16 @@ namespace ICCardManager.Services
             // Issue #2043: 「当月 1 日より前の最終残高」はリポジトリの確定済み単票クエリで取る。
             // 4月は年度境界と一致するため前年度繰越と同値（GetCarryoverBalanceAsync も
             // GetLatestBeforeDateAsync と同じ規則で解決される）。
+            //
+            // 【母集団について】business-logic.md「シードの母集団は本体クエリと揃える」（#1770）の
+            // 例外にあたる。GetLatestBeforeDateAsync は貸出中レコード（is_lent_record = 1）を
+            // 含むが、シード先の ledgers / yearlyLedgers は摘要で除外している。これが安全なのは
+            // 貸出中プレースホルダが Income = Expense = 0 かつ Balance = 貸出時の残高（＝直前の
+            // 実績行の残額）であり、残高チェーン上は自己ループで、返却されるまで後続の利用行が
+            // 挿入されないため。つまり「貸出中行を含めても含めなくても最終残高は同じ」。
+            // 除外オプション付きの単票クエリは公開されていないので、この不変条件に依存する。
+            // 回帰は ReportDataBuilderTests の
+            // BuildAsync_PreviousMonthHasLentRecord_PrecedingBalanceIsUnchanged が固定する。
             int? precedingBalance = month == 4
                 ? fiscalYearPrecedingBalance
                 : (await _ledgerRepository
