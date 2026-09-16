@@ -19,7 +19,7 @@ namespace ICCardManager.Services
     /// 検証対象は <see cref="IReportDataBuilder.BuildAsync"/> が返す <see cref="MonthlyReportData"/>
     /// （＝帳票が実際に描画するデータ）とする。DB を別クエリで再集計すると
     /// 「帳票には出ているのにチェックは通る」という乖離が生まれるため。
-    /// 例外は未返却検出のみで、ReportDataBuilder が「（貸出中）」レコードを除外するため
+    /// 例外は未返却検出のみで、ReportDataBuilder が貸出中レコード（is_lent_record = 1）を除外するため
     /// <see cref="ILedgerRepository.GetAllLentRecordsAsync"/> から別途取得する。
     /// </remarks>
     public class ReportPreflightChecker
