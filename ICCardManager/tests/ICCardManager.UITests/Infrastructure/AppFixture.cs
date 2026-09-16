@@ -27,9 +27,6 @@ namespace ICCardManager.UITests.Infrastructure
                 Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),
                 "ICCardManager");
 
-        private static readonly string DbPath = Path.Combine(DbDirectory, "iccard.db");
-        private static readonly string DbBackupPath = Path.Combine(DbDirectory, "iccard.db.uitest-backup");
-
         /// <summary>
         /// <c>dotnet run --no-build</c> に渡すビルド構成。環境変数 <c>ICCARDMANAGER_UITEST_CONFIGURATION</c> で
         /// 上書きでき、未設定なら <c>Debug</c>（従来どおり。dotnet run の既定と一致）。
@@ -49,15 +46,20 @@ namespace ICCardManager.UITests.Infrastructure
 
         private readonly Application _app;
         private readonly UIA3Automation _automation;
-        private readonly bool _dbBackedUp;
+
+        /// <summary>
+        /// 終了時に DB を復元するガード。入れ子の起動（<see cref="LaunchWithSeed"/> のマイグレーション用起動）は
+        /// 復元の責任を持たないため null。
+        /// </summary>
+        private readonly UiTestDatabaseGuard? _ownedDatabaseGuard;
         private readonly Process? _dotnetProcess;
         private bool _disposed;
 
-        private AppFixture(Application app, UIA3Automation automation, bool dbBackedUp, Process? dotnetProcess = null)
+        private AppFixture(Application app, UIA3Automation automation, UiTestDatabaseGuard? ownedDatabaseGuard, Process? dotnetProcess)
         {
             _app = app;
             _automation = automation;
-            _dbBackedUp = dbBackedUp;
+            _ownedDatabaseGuard = ownedDatabaseGuard;
             _dotnetProcess = dotnetProcess;
         }
 
@@ -67,10 +69,7 @@ namespace ICCardManager.UITests.Infrastructure
         /// <remarks>
         /// StaffAuthDialog をトリガーするテスト用。
         /// IDm "FFFF000000000001"（DebugVirtualTouchButton と一致）で職員「テスト職員」を登録する。
-        /// 既存 DB がある場合は退避し、新規空 DB を作って職員を投入する。
-        /// マイグレーションは一時的にアプリを起動して実行させ、終了後に職員 INSERT を行い、
-        /// 再度本起動する。ただし初回起動の Dispose が DB をリストアしないよう、
-        /// 初回 Dispose 前に BackupPath を削除してリストアをスキップする。
+        /// 既存 DB の退避・復元は <see cref="LaunchWithSeed"/> と同じ。
         /// </remarks>
         public static AppFixture LaunchWithSeededStaff()
         {
@@ -101,82 +100,105 @@ namespace ICCardManager.UITests.Infrastructure
         /// </param>
         /// <remarks>
         /// 既存 DB を退避 → 空 DB でアプリを一度起動してマイグレーション → 終了後に <paramref name="seed"/> を実行 →
-        /// 再起動、という手順を取る。Dispose 時に退避した元の DB を復元する。
-        /// 初回起動の Dispose が DB をリストアしないよう、初回 Dispose 前に BackupPath を退避してリストアをスキップする。
+        /// 再起動、という手順を取る。退避は入口で 1 回だけ行い、返したフィクスチャの Dispose で元の DB を復元する。
+        /// 途中で失敗した場合も復元してから例外を投げる（Issue #2062）。
         /// </remarks>
         public static AppFixture LaunchWithSeed(Action<SQLiteConnection> seed)
         {
             if (seed == null) throw new ArgumentNullException(nameof(seed));
 
-            RecoverOrphanBackups();
+            return LaunchWithSeedCore(
+                DbDirectory,
+                launchForMigration: () =>
+                {
+                    var initialFixture = StartApplication(ownedDatabaseGuard: null);
+                    try
+                    {
+                        // メインウィンドウを取得することでアプリが完全初期化（DB マイグレーション完了）を保証
+                        _ = initialFixture.MainWindow;
+                        return initialFixture;
+                    }
+                    catch
+                    {
+                        initialFixture.Dispose();
+                        throw;
+                    }
+                },
+                seedDatabase: dbPath =>
+                {
+                    using var conn = new SQLiteConnection($"Data Source={dbPath};Version=3");
+                    conn.Open();
+                    seed(conn);
+                },
+                launchOwningGuard: StartApplication);
+        }
 
-            // 既存 DB を退避
-            if (File.Exists(DbPath))
+        /// <summary>
+        /// <see cref="LaunchWithSeed"/> の手順（退避・マイグレーション・投入・本起動・失敗時の復元）。
+        /// アプリの起動を差し替えて、実際に起動せずに DB の退避・復元を検証できるよう切り出している（Issue #2062）。
+        /// </summary>
+        /// <param name="dbDirectory">DB を置くフォルダー。</param>
+        /// <param name="launchForMigration">
+        /// マイグレーションのための起動。完了するまで待ってから返すこと。返した値は投入の前に Dispose する。
+        /// DB の復元はしない（ガードを渡さない）。
+        /// </param>
+        /// <param name="seedDatabase">マイグレーション済み DB のパスを受け取り、データを投入する。</param>
+        /// <param name="launchOwningGuard">本起動。受け取ったガードで、自身の Dispose 時に DB を復元すること。</param>
+        internal static TFixture LaunchWithSeedCore<TFixture>(
+            string dbDirectory,
+            Func<IDisposable> launchForMigration,
+            Action<string> seedDatabase,
+            Func<UiTestDatabaseGuard, TFixture> launchOwningGuard)
+        {
+            var guard = UiTestDatabaseGuard.Acquire(dbDirectory);
+            try
             {
-                CopyFileWithRetry(DbPath, DbBackupPath, maxRetries: 5, delayMs: 500);
+                // 空の状態からマイグレーションさせる
+                guard.DeleteWorkingDatabase();
+
+                using (launchForMigration())
+                {
+                }
+
+                // プロセス終了後の DB ファイルロック解放を待つ
+                System.Threading.Thread.Sleep(1000);
+
+                seedDatabase(guard.DatabasePath);
+
+                // 本起動は退避し直さない。旧実装はここで投入済み DB を退避ファイルへ上書きし、元の DB を失っていた
+                return launchOwningGuard(guard);
             }
-
-            // 空 DB ファイルを削除（アプリ初回起動でマイグレーション実行）
-            try { File.Delete(DbPath); } catch { /* ignore */ }
-
-            // アプリを起動して初期マイグレーションを実行させる
-            var initialFixture = Launch();
-            // メインウィンドウを取得することでアプリが完全初期化（DB マイグレーション完了）を保証
-            _ = initialFixture.MainWindow;
-
-            // Dispose 時に DB がリストアされないよう、BackupPath を退避してからリストアを防ぐ
-            // ※ initialFixture._dbBackedUp = true だと Dispose 後に BackupPath から DbPath へ復元されるため、
-            //    BackupPath を別名に移動しておき、Dispose 後に職員 INSERT → 再起動、最後に元の BackupPath を復元
-            var seededBackupPath = DbBackupPath + ".seeded-original";
-            if (File.Exists(DbBackupPath))
+            catch
             {
-                CopyFileWithRetry(DbBackupPath, seededBackupPath, maxRetries: 3, delayMs: 300);
-                try { File.Delete(DbBackupPath); } catch { /* ignore */ }
+                guard.Restore();
+                throw;
             }
-
-            // 初回 Dispose（_dbBackedUp=true だが BackupPath が無いのでリストアされない）
-            initialFixture.Dispose();
-
-            // プロセス終了後の DB ファイルロック解放を待つ
-            System.Threading.Thread.Sleep(1000);
-
-            // マイグレーション済みの空 DB へ呼び出し元のデータを直接投入する
-            using (var conn = new SQLiteConnection($"Data Source={DbPath};Version=3"))
-            {
-                conn.Open();
-                seed(conn);
-            }
-
-            // 再度起動（投入済み DB を使う）
-            // この時点で BackupPath は存在しない（上で削除済み）ので Launch() 内の dbBackedUp=false
-            // → Dispose 時にリストアなし。元の DB は seededBackupPath に保管されているので後で処理が必要。
-            // ただし UITest 終了後のリストアは別途考慮が必要。簡略化のため seededBackupPath を BackupPath に戻す。
-            if (File.Exists(seededBackupPath))
-            {
-                CopyFileWithRetry(seededBackupPath, DbBackupPath, maxRetries: 3, delayMs: 300);
-                try { File.Delete(seededBackupPath); } catch { /* ignore */ }
-            }
-
-            // 再起動（投入済み DB を使う）。Launch() は DbPath が存在するため BackupPath へバックアップする。
-            // BackupPath に元の DB（seededBackupPath から復元済み）があるので正しくリストアされる。
-            return Launch();
         }
 
         /// <summary>
         /// アプリケーションを起動し、メインウィンドウが表示されるまで待機する。
+        /// 既存 DB を退避し、Dispose で復元する。
         /// </summary>
         public static AppFixture Launch()
         {
-            RecoverOrphanBackups();
-
-            // DB バックアップ（既存 DB がある場合のみ）
-            // 前回のテストプロセスが DB を解放するまで少し待つ場合がある
-            var dbBackedUp = false;
-            if (File.Exists(DbPath))
+            var guard = UiTestDatabaseGuard.Acquire(DbDirectory);
+            try
             {
-                dbBackedUp = CopyFileWithRetry(DbPath, DbBackupPath, maxRetries: 5, delayMs: 500);
+                return StartApplication(guard);
             }
+            catch
+            {
+                guard.Restore();
+                throw;
+            }
+        }
 
+        /// <summary>
+        /// アプリケーションを起動する。DB の退避は行わない（呼び出し元が <see cref="UiTestDatabaseGuard"/> を取得済み）。
+        /// </summary>
+        /// <param name="ownedDatabaseGuard">Dispose 時に復元するガード。復元の責任を持たない起動では null。</param>
+        private static AppFixture StartApplication(UiTestDatabaseGuard? ownedDatabaseGuard)
+        {
             // dotnet run --no-build でアプリを起動する。
             // SDK-style の .NET Framework 4.8 プロジェクトでは exe の直接起動だと
             // アセンブリ解決に失敗する場合があるため、dotnet CLI 経由で起動する。
@@ -209,13 +231,23 @@ namespace ICCardManager.UITests.Infrastructure
             }
 
             // 子プロセス（ICCardManager.exe）が出現するのを待つ
-            var appProcess = WaitForAppProcess(dotnetProcess, startTime,
-                TimeSpan.FromSeconds(TestConstants.AppLaunchTimeoutSeconds));
+            Process appProcess;
+            try
+            {
+                appProcess = WaitForAppProcess(dotnetProcess, startTime,
+                    TimeSpan.FromSeconds(TestConstants.AppLaunchTimeoutSeconds));
+            }
+            catch
+            {
+                // 呼び出し元が DB を復元する前に、DB を掴み得るプロセスを止める
+                try { if (!dotnetProcess.HasExited) dotnetProcess.Kill(); } catch { /* 既に終了済み */ }
+                throw;
+            }
 
             var app = Application.Attach(appProcess);
             var automation = new UIA3Automation();
 
-            return new AppFixture(app, automation, dbBackedUp, dotnetProcess);
+            return new AppFixture(app, automation, ownedDatabaseGuard, dotnetProcess);
         }
 
         /// <summary>
@@ -310,12 +342,8 @@ namespace ICCardManager.UITests.Infrastructure
 
             _automation.Dispose();
 
-            // DB リストア
-            if (_dbBackedUp && File.Exists(DbBackupPath))
-            {
-                CopyFileWithRetry(DbBackupPath, DbPath, maxRetries: 3, delayMs: 500);
-                try { File.Delete(DbBackupPath); } catch { /* ignore */ }
-            }
+            // DB を復元する（失敗したら退避ファイルは残り、次回の起動が回復する）
+            _ownedDatabaseGuard?.Restore();
         }
 
         /// <summary>
@@ -356,41 +384,6 @@ namespace ICCardManager.UITests.Infrastructure
             throw new TimeoutException(
                 $"ICCardManager プロセスが {timeout.TotalSeconds} 秒以内に見つかりませんでした。\n" +
                 $"dotnet run プロセス状態: {(dotnetProcess.HasExited ? "終了済み" : "実行中")}");
-        }
-
-        /// <summary>
-        /// 前回テスト実行中にプロセス中断で残ったオーファンバックアップを復元する。
-        /// Issue #1509 関連: LaunchWithSeededStaff が中断された場合のユーザー DB 保護。
-        /// </summary>
-        private static void RecoverOrphanBackups()
-        {
-            var seededOriginalPath = DbBackupPath + ".seeded-original";
-            if (File.Exists(seededOriginalPath))
-            {
-                // seeded-original が残っている → 信頼できる元 DB として DbPath へ復元する
-                CopyFileWithRetry(seededOriginalPath, DbPath, maxRetries: 3, delayMs: 500);
-                try { File.Delete(seededOriginalPath); } catch { /* ignore */ }
-            }
-        }
-
-        /// <summary>
-        /// ファイルロック対策としてリトライ付きでファイルをコピーする。
-        /// </summary>
-        private static bool CopyFileWithRetry(string source, string dest, int maxRetries, int delayMs)
-        {
-            for (var i = 0; i < maxRetries; i++)
-            {
-                try
-                {
-                    File.Copy(source, dest, overwrite: true);
-                    return true;
-                }
-                catch (IOException) when (i < maxRetries - 1)
-                {
-                    System.Threading.Thread.Sleep(delayMs);
-                }
-            }
-            return false;
         }
 
         /// <summary>

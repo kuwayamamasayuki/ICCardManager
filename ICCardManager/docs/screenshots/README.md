@@ -64,7 +64,8 @@ cd D:\OneDrive\交通系\src\ICCardManager
 
 動作の要点：
 - 本体を Release と Debug の両方でビルドし、2 パスで撮る。タッチを要する画面は仮想タッチ（Debug 限定）で再現し、撮影モード（環境変数 `ICCARDMANAGER_SCREENSHOT_MODE=1`）で仮想タッチパネルを透明にし、起動時のテストデータ自動登録を止める
-- 既存の DB（`%ProgramData%\ICCardManager\iccard.db`）は撮影中だけ退避し、終了後に復元する
+- 既存の DB（`%ProgramData%\ICCardManager\iccard.db`）は撮影中だけ退避し、終了後に復元する。撮影が途中で落ちた場合は、退避ファイル（`iccard.db.uitest-backup`）が残り、次に UI テストを実行したときに書き戻される
+- `database_config.txt` で DB の保存先を変えている PC では撮影を中止する（アプリが退避していない DB を開くため）。設定画面（F5）の「デフォルトに戻す」で既定に戻してから実行する
 - 職員 2 名・交通系ICカード 3 枚（通常／貸出中／残額不足）と当月の利用履歴をサンプルとして投入する（`tests/ICCardManager.UITests/Infrastructure/ScreenshotSeedData.cs`）
 - 出力先 `docs\screenshots\auto\` は Git 管理外。撮影結果は既存画像とサイズを見比べてから `-Publish` で差し替える。`-Publish` は撮影し直さず、`auto\` にある画像をそのままコピーする（確認した画像と差し替える画像が同じであることを保証するため）。コピーするのは**対応表に載っている画像だけ**で、失敗時の切り分け用に残る `*_FAILED.png` のような対象外の成果物は公開されない
 - ステータスバーの「リーダー:」は撮影した PC の接続状態がそのまま写る（未接続なら「切断」）。警告欄もその PC の状態（更新の案内など）を含み得るので、差し替え前に確認すること
