@@ -2118,6 +2118,62 @@ public class ReportServiceTests : IDisposable
         File.Exists(outputPath).Should().BeTrue("ファイルが作成される");
     }
 
+    /// <summary>
+    /// Issue #2046: 繰越月 3 月で登録したカード（導入行「前年度より繰越」、日付は新年度の 4/1）は
+    /// 前年度の 3 月の帳票をスキップし、導入月の 4 月は作成すること（欠陥を突く側と対の表明）
+    /// </summary>
+    /// <remarks>
+    /// 導入日の取得（<c>GetPurchaseDateAsync</c> が「前年度より繰越」を導入行と認識すること）は
+    /// <c>LedgerRepositoryPurchaseDateTests</c> が実 DB で固定する。ここでは導入日が年度をまたぐ
+    /// 4/1 のときに、帳票側の比較が前年度の 3 月を導入前と判定することを固定する。
+    /// </remarks>
+    [Theory]
+    [InlineData(2026, 3, true)]
+    [InlineData(2025, 12, true)]
+    [InlineData(2026, 4, false)]
+    public async Task CreateMonthlyReportAsync_前年度より繰越で登録したカードは導入前の月だけスキップすること(
+        int year, int month, bool expectedSkipped)
+    {
+        // Arrange
+        var cardIdm = "0102030405060708";
+        var card = CreateTestCard(cardIdm);
+        var outputPath = CreateTempFilePath();
+        var introducedOn = new DateTime(2026, 4, 1);
+
+        _cardRepositoryMock
+            .Setup(r => r.GetByIdmAsync(cardIdm, true))
+            .ReturnsAsync(card);
+        _ledgerRepositoryMock
+            .Setup(r => r.GetPurchaseDateAsync(cardIdm))
+            .ReturnsAsync(introducedOn);
+        _ledgerRepositoryMock
+            .Setup(r => r.GetByMonthAsync(cardIdm, It.IsAny<int>(), It.IsAny<int>()))
+            .ReturnsAsync((string _, int y, int m) => y == 2026 && m == 4
+                ? new List<Ledger>
+                {
+                    CreateTestLedger(1, cardIdm, introducedOn,
+                        SummaryGenerator.GetCarryoverFromPreviousYearSummary(), 5000, 0, 5000)
+                }
+                : new List<Ledger>());
+        _ledgerRepositoryMock
+            .Setup(r => r.GetCarryoverBalanceAsync(cardIdm, It.IsAny<int>()))
+            .ReturnsAsync((int?)null);
+
+        // Act
+        var result = await _reportService.CreateMonthlyReportAsync(cardIdm, year, month, outputPath);
+
+        // Assert
+        result.Success.Should().BeTrue();
+        result.Skipped.Should().Be(expectedSkipped);
+        File.Exists(outputPath).Should().Be(!expectedSkipped,
+            "導入前の月は空の帳票を作らず、導入月以降は作成する");
+        if (expectedSkipped)
+        {
+            // 「新規購入」だけを名指しすると繰越で登録したカードの職員には理由が伝わらない
+            result.ErrorMessage.Should().Contain("導入").And.Contain("繰越").And.Contain("2026/04");
+        }
+    }
+
     #endregion
 
     #region Issue #457: ページネーション

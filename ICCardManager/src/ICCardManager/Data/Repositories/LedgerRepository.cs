@@ -2210,19 +2210,26 @@ ORDER BY l.card_idm, l.date, l.id,
             var connection = lease.Connection;
 
             using var command = connection.CreateCommand();
-            // Issue #501: 新規購入レコードの最初の日付を取得
-            // Issue #510: 年度途中導入の繰越レコード（「○月から繰越」）も認識する
-            command.CommandText = @"SELECT MIN(date) FROM ledger
+            // Issue #501: 導入行（カード登録時の行）の最初の日付を取得
+            // Issue #2046: 導入行の判定は SQL に書かず Ledger.IsInitialRecordSummary の 1 か所へ寄せる。
+            // 以前は「summary = '新規購入' OR summary LIKE 繰越パターン」で、3 月登録の「前年度より繰越」
+            // （日付は新年度の 4/1）を認識せず、導入前の月の帳票が空のまま作成されていた。
+            // SQL は日付の昇順に流すだけにし、最初に一致した行で読み取りを打ち切る（＝MIN(date) と同じ意味）。
+            // 導入行は通常そのカードの先頭行なので、ほとんどの場合 1 行で止まる。
+            command.CommandText = @"SELECT date, summary FROM ledger
 WHERE card_idm = @cardIdm
-  AND (summary = '新規購入' OR summary LIKE @midYearCarryoverPattern ESCAPE '\')";
+ORDER BY date ASC, id ASC";
 
             command.Parameters.AddWithValue("@cardIdm", cardIdm);
-            AddMidYearCarryoverParameter(command);
 
-            var result = await command.ExecuteScalarAsync();
-            if (result != null && result != DBNull.Value)
+            using var reader = await command.ExecuteReaderAsync();
+            while (await reader.ReadAsync())
             {
-                return SqliteDateTimeFormat.ParseStored((string)result);
+                var summary = reader.IsDBNull(1) ? null : reader.GetString(1);
+                if (Ledger.IsInitialRecordSummary(summary))
+                {
+                    return SqliteDateTimeFormat.ParseStored(reader.GetString(0));
+                }
             }
 
             return null;

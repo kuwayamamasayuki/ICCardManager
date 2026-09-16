@@ -104,8 +104,15 @@ namespace ICCardManager.Data.Repositories
         Task<Dictionary<int, List<LedgerDetail>>> GetDetailsByLedgerIdsAsync(IEnumerable<int> ledgerIds);
 
         /// <summary>
-        /// 指定カードの新規購入日（または繰越日）を取得
+        /// 指定カードの導入日（最も古い導入行の日付）を取得
         /// </summary>
+        /// <remarks>
+        /// 導入行は <see cref="Models.Ledger.IsInitialRecordSummary"/> の 3 種（「新規購入」／「○月から繰越」／
+        /// 3 月登録の「前年度より繰越」）。判定を SQL に書き写さず同じ 1 つの判定を使う（Issue #2046）。
+        /// 導入行が無いカード（導入前のデータ）は null。
+        /// 判定は摘要の文字列を現在の組織設定と照合するため、登録後に摘要の設定を変えると旧文言の導入行は
+        /// 認識されず null になる（スキップしない側へ倒れる。導入行はフラグを持たないので #2044 の形は取れない）。
+        /// </remarks>
         Task<DateTime?> GetPurchaseDateAsync(string cardIdm);
 
         /// <summary>
