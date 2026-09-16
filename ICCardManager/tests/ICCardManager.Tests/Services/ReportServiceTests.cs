@@ -3072,6 +3072,172 @@ public class ReportServiceTests : IDisposable
 
     #endregion
 
+    #region Issue #2048: 後続の月シートの頁番号の付け直し
+
+    /// <summary>2 ページ目の頁番号セル（23 行目から始まるページの 2 行目）</summary>
+    private const int SecondPageNumberRow = 24;
+
+    private List<Ledger> CreateManyLedgers(string cardIdm, int year, int month, int count, int idOffset) =>
+        Enumerable.Range(1, count)
+            .Select(i => CreateTestLedger(
+                idOffset + i, cardIdm, new DateTime(year, month, Math.Min(i, 28)),
+                $"鉄道（駅{i}～駅{i + 1}）", 0, 10, 9000 - i * 10))
+            .ToList();
+
+    /// <summary>
+    /// Issue #2048: 前の月を再作成してページ数が減ったら、後続の月の頁番号が連番に付け直されること。
+    /// </summary>
+    /// <remarks>
+    /// 修正前は作成する月のシートだけに頁番号を付けていたため、5月は旧 4月（2 ページ）を前提にした
+    /// 7・8 のまま残り、通し頁 6 が欠番になった。2 ページ目（継続ページ）の頁番号も対象であることを併せて表明する。
+    /// </remarks>
+    [Fact]
+    public async Task CreateMonthlyReportAsync_RegeneratePreviousMonthWithFewerPages_RenumbersFollowingMonths()
+    {
+        var cardIdm = "0102030405060708";
+        var card = CreateTestCard(cardIdm);
+        card.StartingPageNumber = 5;
+        var outputPath = CreateTempFilePath();
+        var year = 2024;
+
+        var aprilLarge = CreateManyLedgers(cardIdm, year, 4, 13, 0);
+        var aprilSmall = new List<Ledger>
+        {
+            CreateTestLedger(1, cardIdm, new DateTime(year, 4, 10), "鉄道（博多～天神）", 0, 300, 9700)
+        };
+        var mayLedgers = CreateManyLedgers(cardIdm, year, 5, 13, 100);
+
+        _cardRepositoryMock.Setup(r => r.GetByIdmAsync(cardIdm, true)).ReturnsAsync(card);
+        _ledgerRepositoryMock.Setup(r => r.GetByMonthAsync(cardIdm, year, 4)).ReturnsAsync(aprilLarge);
+        _ledgerRepositoryMock.Setup(r => r.GetByMonthAsync(cardIdm, year, 5)).ReturnsAsync(mayLedgers);
+        _ledgerRepositoryMock.Setup(r => r.GetCarryoverBalanceAsync(cardIdm, year - 1)).ReturnsAsync(10000);
+        _ledgerRepositoryMock
+            .Setup(r => r.GetByDateRangeAsync(cardIdm, It.IsAny<DateTime>(), It.IsAny<DateTime>()))
+            .ReturnsAsync(aprilLarge.Concat(mayLedgers).ToList());
+
+        // 4月（2 ページ: 5, 6）→ 5月（2 ページ: 7, 8）
+        await _reportService.CreateMonthlyReportAsync(cardIdm, year, 4, outputPath);
+        await _reportService.CreateMonthlyReportAsync(cardIdm, year, 5, outputPath);
+
+        using (var before = new XLWorkbook(outputPath))
+        {
+            before.Worksheet("5月").Cell(2, 12).GetValue<int>().Should().Be(7, "前提: 5月は 4月（2 ページ）の後の 7 から");
+        }
+
+        // 4月を 1 ページへ減らして再作成
+        _ledgerRepositoryMock.Setup(r => r.GetByMonthAsync(cardIdm, year, 4)).ReturnsAsync(aprilSmall);
+        _ledgerRepositoryMock
+            .Setup(r => r.GetByDateRangeAsync(cardIdm, It.IsAny<DateTime>(), It.IsAny<DateTime>()))
+            .ReturnsAsync(aprilSmall.Concat(mayLedgers).ToList());
+        var result = await _reportService.CreateMonthlyReportAsync(cardIdm, year, 4, outputPath);
+
+        result.Success.Should().BeTrue();
+        using var workbook = new XLWorkbook(outputPath);
+        var maySheet = workbook.Worksheet("5月");
+        workbook.Worksheet("4月").Cell(2, 12).GetValue<int>().Should().Be(5);
+        maySheet.PageSetup.RowBreaks.Count.Should().Be(1, "5月は 2 ページのまま（明細は再出力しない）");
+        maySheet.Cell(2, 12).GetValue<int>().Should().Be(6, "4月が 1 ページになったので 5月は 6 から");
+        maySheet.Cell(SecondPageNumberRow, 12).GetValue<int>().Should().Be(7, "5月の継続ページも付け直す");
+    }
+
+    /// <summary>
+    /// Issue #2048: 月順でなく作成しても（7月 → 6月）、後から作った月の後続が付け直されて重複しないこと。
+    /// </summary>
+    [Fact]
+    public async Task CreateMonthlyReportAsync_CreateEarlierMonthAfterLaterMonth_RenumbersLaterMonth()
+    {
+        var cardIdm = "0102030405060708";
+        var card = CreateTestCard(cardIdm);
+        card.StartingPageNumber = 3;
+        var outputPath = CreateTempFilePath();
+        var year = 2024;
+
+        var aprilLedgers = new List<Ledger>
+        {
+            CreateTestLedger(1, cardIdm, new DateTime(year, 4, 10), "鉄道（博多～天神）", 0, 300, 9700)
+        };
+        var juneLedgers = new List<Ledger>
+        {
+            CreateTestLedger(2, cardIdm, new DateTime(year, 6, 10), "鉄道（天神～博多）", 0, 200, 9500)
+        };
+        var julyLedgers = new List<Ledger>
+        {
+            CreateTestLedger(3, cardIdm, new DateTime(year, 7, 15), "鉄道（博多～天神）", 0, 200, 9300)
+        };
+
+        _cardRepositoryMock.Setup(r => r.GetByIdmAsync(cardIdm, true)).ReturnsAsync(card);
+        _ledgerRepositoryMock.Setup(r => r.GetByMonthAsync(cardIdm, year, 4)).ReturnsAsync(aprilLedgers);
+        _ledgerRepositoryMock.Setup(r => r.GetByMonthAsync(cardIdm, year, 5)).ReturnsAsync(new List<Ledger>());
+        _ledgerRepositoryMock.Setup(r => r.GetByMonthAsync(cardIdm, year, 6)).ReturnsAsync(juneLedgers);
+        _ledgerRepositoryMock.Setup(r => r.GetByMonthAsync(cardIdm, year, 7)).ReturnsAsync(julyLedgers);
+        _ledgerRepositoryMock.Setup(r => r.GetCarryoverBalanceAsync(cardIdm, year - 1)).ReturnsAsync(10000);
+        _ledgerRepositoryMock
+            .Setup(r => r.GetByDateRangeAsync(cardIdm, It.IsAny<DateTime>(), It.IsAny<DateTime>()))
+            .ReturnsAsync(aprilLedgers.Concat(juneLedgers).Concat(julyLedgers).ToList());
+
+        await _reportService.CreateMonthlyReportAsync(cardIdm, year, 4, outputPath);
+        await _reportService.CreateMonthlyReportAsync(cardIdm, year, 7, outputPath);
+        var result = await _reportService.CreateMonthlyReportAsync(cardIdm, year, 6, outputPath);
+
+        result.Success.Should().BeTrue();
+        using var workbook = new XLWorkbook(outputPath);
+        workbook.Worksheet("4月").Cell(2, 12).GetValue<int>().Should().Be(3);
+        workbook.Worksheet("6月").Cell(2, 12).GetValue<int>().Should().Be(4);
+        workbook.Worksheet("7月").Cell(2, 12).GetValue<int>().Should().Be(5, "6月（4）の後に続く。修正前は 4 のまま重複した");
+    }
+
+    /// <summary>
+    /// Issue #2048（対の表明）: 月順どおりに作成したときの頁番号は従来と同じであること。
+    /// </summary>
+    /// <remarks>
+    /// 付け直しを組み込んでも、月順どおりの作成とページ数の変わらない再作成では通し頁が従来と同じであることを
+    /// 固定する（継続ページの書き込み位置や開始頁の取り違えを検出する）。付け直しの範囲（前の月・作成した月を
+    /// 動かさないこと）は月順どおりのファイルでは観測できないため、<c>ReportServicePageNumberTests</c> が固定する。
+    /// </remarks>
+    [Fact]
+    public async Task CreateMonthlyReportAsync_CreateMonthsInOrderAndRegenerateSamePageCount_KeepsPageNumbers()
+    {
+        var cardIdm = "0102030405060708";
+        var card = CreateTestCard(cardIdm);
+        card.StartingPageNumber = 3;
+        var outputPath = CreateTempFilePath();
+        var year = 2024;
+
+        var aprilLedgers = new List<Ledger>
+        {
+            CreateTestLedger(1, cardIdm, new DateTime(year, 4, 10), "鉄道（博多～天神）", 0, 300, 9700)
+        };
+        var mayLedgers = CreateManyLedgers(cardIdm, year, 5, 13, 100);
+        var juneLedgers = new List<Ledger>
+        {
+            CreateTestLedger(200, cardIdm, new DateTime(year, 6, 10), "鉄道（天神～博多）", 0, 200, 8500)
+        };
+
+        _cardRepositoryMock.Setup(r => r.GetByIdmAsync(cardIdm, true)).ReturnsAsync(card);
+        _ledgerRepositoryMock.Setup(r => r.GetByMonthAsync(cardIdm, year, 4)).ReturnsAsync(aprilLedgers);
+        _ledgerRepositoryMock.Setup(r => r.GetByMonthAsync(cardIdm, year, 5)).ReturnsAsync(mayLedgers);
+        _ledgerRepositoryMock.Setup(r => r.GetByMonthAsync(cardIdm, year, 6)).ReturnsAsync(juneLedgers);
+        _ledgerRepositoryMock.Setup(r => r.GetCarryoverBalanceAsync(cardIdm, year - 1)).ReturnsAsync(10000);
+        _ledgerRepositoryMock
+            .Setup(r => r.GetByDateRangeAsync(cardIdm, It.IsAny<DateTime>(), It.IsAny<DateTime>()))
+            .ReturnsAsync(aprilLedgers.Concat(mayLedgers).Concat(juneLedgers).ToList());
+
+        await _reportService.CreateMonthlyReportAsync(cardIdm, year, 4, outputPath);
+        await _reportService.CreateMonthlyReportAsync(cardIdm, year, 5, outputPath);
+        await _reportService.CreateMonthlyReportAsync(cardIdm, year, 6, outputPath);
+        // ページ数の変わらない再作成（5月は 2 ページのまま）
+        var result = await _reportService.CreateMonthlyReportAsync(cardIdm, year, 5, outputPath);
+
+        result.Success.Should().BeTrue();
+        using var workbook = new XLWorkbook(outputPath);
+        workbook.Worksheet("4月").Cell(2, 12).GetValue<int>().Should().Be(3);
+        workbook.Worksheet("5月").Cell(2, 12).GetValue<int>().Should().Be(4);
+        workbook.Worksheet("5月").Cell(SecondPageNumberRow, 12).GetValue<int>().Should().Be(5);
+        workbook.Worksheet("6月").Cell(2, 12).GetValue<int>().Should().Be(6);
+    }
+
+    #endregion
+
     #region 4月累計行省略テスト（Issue #813）
 
     /// <summary>

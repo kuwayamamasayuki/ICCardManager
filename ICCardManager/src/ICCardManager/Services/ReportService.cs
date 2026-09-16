@@ -565,6 +565,10 @@ namespace ICCardManager.Services
                     // Issue #457: 印刷範囲を設定（全データを含む）
                     SetPrintArea(worksheet, currentRow, rowsOnCurrentPage, RowsPerPage);
 
+                    // Issue #2048: この月のページ数が変わった・月順でなく作成した場合に、後続の月の通し頁が
+                    // 欠番・重複しないよう付け直す（頁番号セルだけを書き換え、明細は再出力しない）
+                    RenumberFollowingMonthSheets(workbook, card, month, _orgOptions.TemplateMapping.PageNumberColumn);
+
                     // Issue #752: ドキュメントプロパティの日時を更新
                     // ClosedXMLはSaveAs時にCreated/Modifiedを自動更新しないため、明示的に設定する
                     var now = DateTime.Now;
@@ -1161,13 +1165,10 @@ namespace ICCardManager.Services
         /// </summary>
         private static void ReorderWorksheetsByMonth(XLWorkbook workbook)
         {
-            // 月の順序（4月が最初、3月が最後）
-            var monthOrder = new[] { 4, 5, 6, 7, 8, 9, 10, 11, 12, 1, 2, 3 };
-
             var sheets = workbook.Worksheets.ToList();
             var position = 1;
 
-            foreach (var month in monthOrder)
+            foreach (var month in FiscalMonthOrder)
             {
                 var sheetName = GetMonthSheetName(month);
                 var sheet = sheets.FirstOrDefault(s => s.Name == sheetName);
@@ -1434,6 +1435,9 @@ namespace ICCardManager.Services
             return firstPageNumber + pageBreakCount;
         }
 
+        /// <summary>年度内の月順序（4月=先頭, 3月=末尾）。頁番号の継続と付け直しで共有する</summary>
+        private static readonly int[] FiscalMonthOrder = { 4, 5, 6, 7, 8, 9, 10, 11, 12, 1, 2, 3 };
+
         /// <summary>
         /// 月の開始ページ番号を算出（Issue #809）
         /// </summary>
@@ -1455,19 +1459,75 @@ namespace ICCardManager.Services
         /// <param name="pageNumberColumn">ページ番号の列番号（<see cref="TemplateMappingOptions.PageNumberColumn"/>、Issue #1956）</param>
         internal static int GetStartingPageNumberForMonth(XLWorkbook workbook, IcCard card, int month, int pageNumberColumn)
         {
-            // 年度内の月順序（4月=先頭, 3月=末尾）
-            var fiscalMonthOrder = new[] { 4, 5, 6, 7, 8, 9, 10, 11, 12, 1, 2, 3 };
-            var currentIndex = Array.IndexOf(fiscalMonthOrder, month);
+            var currentIndex = Array.IndexOf(FiscalMonthOrder, month);
 
             // 4月（年度最初の月）または不正な月 → StartingPageNumber をそのまま使用
             if (currentIndex <= 0)
                 return card.StartingPageNumber;
 
             var nearestPreviousLastPage = FindNearestPreviousMonthLastPage(
-                workbook, fiscalMonthOrder, currentIndex, pageNumberColumn);
+                workbook, FiscalMonthOrder, currentIndex, pageNumberColumn);
             return nearestPreviousLastPage > 0
                 ? nearestPreviousLastPage + 1
                 : card.StartingPageNumber;
+        }
+
+        /// <summary>
+        /// 作成した月より後の月シートの頁番号を、年度の月順に付け直す（Issue #2048）
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// 開始頁は作成時に「直近の前月シートの最終頁 + 1」で決まる（#809）が、その計算は作成する月にしか
+        /// 適用されない。前の月を再作成してページ数が変わる・月順でなく作成する（7月の後に 6月）と、
+        /// 後続の月は古い前提の番号のまま残り、通し頁に欠番・重複ができていた。
+        /// </para>
+        /// <para>
+        /// 付け直すのは頁番号セルだけで、明細は再出力しない。後続の月の開始頁は
+        /// <see cref="GetStartingPageNumberForMonth"/> で求めるので、作成時と同じ規則（頁情報を持たない
+        /// シートの読み飛ばし・前月が無ければ <see cref="IcCard.StartingPageNumber"/>）になる。月順に 1 枚ずつ
+        /// 付け直すため、ある月の計算はその直前に付け直した月の番号を見る。
+        /// </para>
+        /// <para>
+        /// 頁情報を持たないシート（<see cref="GetLastPageNumberFromWorksheet"/> が 0）は書き込まない。
+        /// 探索でも読み飛ばされる対象であり、番号を足すと帳票でないシートに値を書き込み得る。
+        /// </para>
+        /// </remarks>
+        /// <param name="workbook">対象ワークブック</param>
+        /// <param name="card">対象カード</param>
+        /// <param name="month">作成した月</param>
+        /// <param name="pageNumberColumn">ページ番号の列番号（<see cref="TemplateMappingOptions.PageNumberColumn"/>）</param>
+        internal static void RenumberFollowingMonthSheets(XLWorkbook workbook, IcCard card, int month, int pageNumberColumn)
+        {
+            var currentIndex = Array.IndexOf(FiscalMonthOrder, month);
+            if (currentIndex < 0)
+                return;
+
+            for (int i = currentIndex + 1; i < FiscalMonthOrder.Length; i++)
+            {
+                var followingMonth = FiscalMonthOrder[i];
+                if (!workbook.Worksheets.TryGetWorksheet(GetMonthSheetName(followingMonth), out var sheet))
+                    continue;
+                if (GetLastPageNumberFromWorksheet(sheet, pageNumberColumn) == 0)
+                    continue;
+
+                var pageNumber = GetStartingPageNumberForMonth(workbook, card, followingMonth, pageNumberColumn);
+                SetPageNumber(sheet, 1, pageNumber, pageNumberColumn);
+
+                // CheckAndInsertPageBreak は「新しいページの開始行 - 1」に改ページを入れ、その開始行を基準に
+                // 頁番号を書く。改ページの行から各ページの開始行を復元すれば、書き込み位置が作成時と一致する。
+                // 番号を数えるのは GetLastPageNumberFromWorksheet と同じく改ページ数だが、書き換えるのは
+                // 既に頁番号（整数）が入っているセルだけにする。Excel で手作業により足された改ページの位置は
+                // 明細行（備考欄）に当たり得るため、利用者が選んでいない月の内容を上書きしない。
+                foreach (var breakRow in sheet.PageSetup.RowBreaks.OrderBy(r => r))
+                {
+                    pageNumber++;
+                    var pageNumberCell = sheet.Cell(breakRow + 2, pageNumberColumn);
+                    if (!pageNumberCell.IsEmpty() && pageNumberCell.TryGetValue<int>(out _))
+                    {
+                        SetPageNumber(sheet, breakRow + 1, pageNumber, pageNumberColumn);
+                    }
+                }
+            }
         }
 
         /// <summary>
@@ -1499,7 +1559,7 @@ namespace ICCardManager.Services
         {
             for (int i = currentIndex - 1; i >= 0; i--)
             {
-                var prevMonthName = $"{fiscalMonthOrder[i]}月";
+                var prevMonthName = GetMonthSheetName(fiscalMonthOrder[i]);
                 if (workbook.Worksheets.TryGetWorksheet(prevMonthName, out var prevSheet))
                 {
                     var lastPage = GetLastPageNumberFromWorksheet(prevSheet, pageNumberColumn);
