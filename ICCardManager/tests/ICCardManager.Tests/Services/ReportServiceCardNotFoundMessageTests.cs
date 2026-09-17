@@ -25,8 +25,8 @@ namespace ICCardManager.Tests.Services;
 /// 生の IDm を職員向けの文言に出し、行動指示も無かった（#1852 / #1986 の CWE-532 回避、#1275 の 3 要素）。
 /// </para>
 /// <para>
-/// 経路は単票作成（<see cref="ReportService.CreateMonthlyReportAsync"/>。画面の一括作成はこれをカードごとに呼ぶ）と
-/// サービスの一括 API（<see cref="ReportService.CreateMonthlyReportsAsync"/>）の 2 つあるため、両方を実サービスで通す。
+/// 経路は単票作成（<see cref="ReportService.CreateMonthlyReportAsync"/>。画面の一括作成はこれをカードごとに呼ぶ）の
+/// 1 つで、実サービスで通す（本番から呼ばれていなかったサービスの一括 API は Issue #2051 で削除した）。
 /// 文言の表明とログの表明は別テストに分け、片方だけが壊れたときにテスト名から読み取れるようにする（#1991）。
 /// </para>
 /// </remarks>
@@ -93,13 +93,6 @@ public class ReportServiceCardNotFoundMessageTests : IDisposable
     private async Task<ReportGenerationResult> CreateSingleAsync()
         => await CreateService().CreateMonthlyReportAsync(UnknownCardIdm, Year, Month, OutputPath());
 
-    private async Task<ReportGenerationResult> CreateBatchAsync()
-    {
-        var batch = await CreateService().CreateMonthlyReportsAsync(new[] { UnknownCardIdm }, Year, Month, _directory);
-        batch.Results.Should().ContainSingle();
-        return batch.Results.Single().Result;
-    }
-
     /// <summary>文言の品質（IDm を含まない・交通系ICカードと明記・行動指示で終わる）を表明する。</summary>
     private static void AssertMessageQuality(ReportGenerationResult result)
     {
@@ -157,22 +150,6 @@ public class ReportServiceCardNotFoundMessageTests : IDisposable
         AssertMaskedLog();
     }
 
-    [Fact]
-    public async Task CreateMonthlyReportsAsync_未登録カードの文言にIDmを含めず行動指示で終わること()
-    {
-        var result = await CreateBatchAsync();
-
-        AssertMessageQuality(result);
-    }
-
-    [Fact]
-    public async Task CreateMonthlyReportsAsync_未登録カードはマスクしたIDmをログへ残すこと()
-    {
-        await CreateBatchAsync();
-
-        AssertMaskedLog();
-    }
-
     /// <summary>
     /// 対の表明: 登録済みのカードではこの失敗を返さず、見つからない旨のログも出さないこと
     /// </summary>
@@ -191,29 +168,6 @@ public class ReportServiceCardNotFoundMessageTests : IDisposable
 
         var notFound = ReportService.BuildCardNotFoundResult();
         result.ErrorMessage.Should().NotBe(notFound.ErrorMessage, _logger.FormatEntries());
-        _logger.Entries.Should().NotContain(e => e.Message.Contains(IdmMasker.Mask(registeredIdm)));
-    }
-
-    /// <summary>
-    /// 対の表明（一括 API 側）: 登録済みのカードは見つからない旨の結果にしないこと
-    /// </summary>
-    /// <remarks>
-    /// 一括 API はカードの取得を自前で行うため、単票側の対の表明とは別に置く。
-    /// </remarks>
-    [Fact]
-    public async Task CreateMonthlyReportsAsync_登録済みカードでは見つからない旨を返さないこと()
-    {
-        const string registeredIdm = "FEDCBA9876543210";
-        _cardRepositoryMock
-            .Setup(r => r.GetByIdmAsync(registeredIdm, true))
-            .ReturnsAsync(new IcCard { CardIdm = registeredIdm, CardType = "はやかけん", CardNumber = "001" });
-
-        var batch = await CreateService().CreateMonthlyReportsAsync(new[] { registeredIdm }, Year, Month, _directory);
-
-        batch.Results.Should().ContainSingle();
-        var (_, cardName, result) = batch.Results.Single();
-        cardName.Should().Be("はやかけん 001", "カードが見つかった経路ではカード名を解決する");
-        result.ErrorMessage.Should().NotBe(ReportService.BuildCardNotFoundResult().ErrorMessage, _logger.FormatEntries());
         _logger.Entries.Should().NotContain(e => e.Message.Contains(IdmMasker.Mask(registeredIdm)));
     }
 }

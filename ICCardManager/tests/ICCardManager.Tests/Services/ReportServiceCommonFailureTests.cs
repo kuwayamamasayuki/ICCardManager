@@ -34,7 +34,6 @@ namespace ICCardManager.Tests.Services;
 public class ReportServiceCommonFailureTests : IDisposable
 {
     private const string CardIdm = "0102030405060708";
-    private const string OtherCardIdm = "0807060504030201";
     private const string UnknownCardIdm = "FFFFFFFFFFFFFFFF";
     private const int Year = 2024;
     private const int Month = 10;
@@ -55,9 +54,6 @@ public class ReportServiceCommonFailureTests : IDisposable
         _cardRepositoryMock
             .Setup(r => r.GetByIdmAsync(CardIdm, true))
             .ReturnsAsync(new IcCard { CardIdm = CardIdm, CardType = "はやかけん", CardNumber = "001" });
-        _cardRepositoryMock
-            .Setup(r => r.GetByIdmAsync(OtherCardIdm, true))
-            .ReturnsAsync(new IcCard { CardIdm = OtherCardIdm, CardType = "nimoca", CardNumber = "002" });
         _cardRepositoryMock
             .Setup(r => r.GetByIdmAsync(UnknownCardIdm, true))
             .ReturnsAsync((IcCard)null);
@@ -222,82 +218,6 @@ public class ReportServiceCommonFailureTests : IDisposable
 
         result.Success.Should().BeFalse();
         result.IsCommonFailure.Should().BeFalse();
-    }
-
-    #endregion
-
-    #region 一括作成ループの中断
-
-    /// <summary>
-    /// 欠陥を突く側: サービス側の一括ループも、共通原因の失敗で残りのカードを処理しないこと
-    /// </summary>
-    [Fact]
-    public async Task CreateMonthlyReportsAsync_共通原因の失敗で残りのカードを処理しないこと()
-    {
-        var serviceMock = CreateBatchServiceMock(
-            cardIdm => cardIdm == CardIdm
-                ? ReportGenerationResult.CommonFailureResult(
-                    "テンプレートファイルが見つかりません", "テンプレートを配置してください。")
-                : ReportGenerationResult.SuccessResult(cardIdm));
-
-        var result = await serviceMock.Object.CreateMonthlyReportsAsync(
-            new[] { CardIdm, OtherCardIdm }, Year, Month, _directory);
-
-        result.Results.Should().HaveCount(1, "1 枚目で中断するので 2 枚目は処理されない");
-        result.IsAborted.Should().BeTrue();
-        result.AbortReason.Should().Be("テンプレートファイルが見つかりません");
-        result.SuccessCount.Should().Be(0);
-    }
-
-    /// <summary>
-    /// 対の表明: カード固有の失敗では残りのカードを処理し続けること
-    /// </summary>
-    /// <remarks>
-    /// これが無いと、失敗を見たら常に打ち切る実装でも上のテストが緑になる。
-    /// 失敗するカードは<b>先頭</b>に置く（末尾だと「常に打ち切る」実装でも件数が変わらない）。
-    /// </remarks>
-    [Fact]
-    public async Task CreateMonthlyReportsAsync_カード固有の失敗では残りのカードを処理し続けること()
-    {
-        var serviceMock = CreateBatchServiceMock(
-            cardIdm => cardIdm == CardIdm
-                ? ReportGenerationResult.FailureResult("帳票データを取得できませんでした")
-                : ReportGenerationResult.SuccessResult(cardIdm));
-
-        var result = await serviceMock.Object.CreateMonthlyReportsAsync(
-            new[] { CardIdm, OtherCardIdm }, Year, Month, _directory);
-
-        result.Results.Should().HaveCount(2);
-        result.IsAborted.Should().BeFalse();
-        result.AbortReason.Should().BeNull();
-        result.SuccessCount.Should().Be(1);
-        result.FailureCount.Should().Be(1);
-    }
-
-    /// <summary>単票作成だけを差し替えて、一括ループそのものを検査するためのモックを作る。</summary>
-    private Mock<ReportService> CreateBatchServiceMock(Func<string, ReportGenerationResult> resultSelector)
-    {
-        // Moq は引数の並びでコンストラクタを解決するため、省略可能引数を持つ形では
-        // 明示的に全引数を渡す（ReportViewModelBulkCreationTests と同じ作法）。
-        var serviceMock = new Mock<ReportService>(
-            _cardRepositoryMock.Object,
-            _ledgerRepositoryMock.Object,
-            _settingsRepositoryMock.Object,
-            CreateDataBuilder(),
-            NullLogger<ReportService>.Instance,
-            (IOptions<OrganizationOptions>)null,
-            (IReportFileNameFactory)null)
-        {
-            CallBase = true
-        };
-
-        serviceMock
-            .Setup(s => s.CreateMonthlyReportAsync(
-                It.IsAny<string>(), It.IsAny<int>(), It.IsAny<int>(), It.IsAny<string>()))
-            .Returns((string cardIdm, int _, int __, string ___) =>
-                Task.FromResult(resultSelector(cardIdm)));
-
-        return serviceMock;
     }
 
     #endregion

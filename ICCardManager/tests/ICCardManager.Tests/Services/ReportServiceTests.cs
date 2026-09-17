@@ -529,70 +529,6 @@ public class ReportServiceTests : IDisposable
         worksheet.Cell(9, 2).GetString().Should().Be("利用4");   // 9/15, ID:4
     }
 
-    /// <summary>
-    /// TC007: 複数カードの帳票一括作成が正しく動作する
-    /// </summary>
-    [Fact]
-    public async Task CreateMonthlyReportsAsync_WithMultipleCards_ShouldCreateMultipleFiles()
-    {
-        // Arrange
-        var cardIdm1 = "0102030405060708";
-        var cardIdm2 = "0807060504030201";
-        var card1 = CreateTestCard(cardIdm1, "はやかけん", "001");
-        var card2 = CreateTestCard(cardIdm2, "nimoca", "002");
-        var year = 2024;
-        var month = 10;
-        var outputFolder = Path.Combine(Path.GetTempPath(), $"ReportTest_{Guid.NewGuid()}");
-
-        var ledgers1 = new List<Ledger>
-        {
-            CreateTestLedger(1, cardIdm1, new DateTime(2024, 10, 5), "鉄道（博多～天神）", 0, 300, 9700)
-        };
-        var ledgers2 = new List<Ledger>
-        {
-            CreateTestLedger(2, cardIdm2, new DateTime(2024, 10, 10), "役務費によりチャージ", 5000, 0, 15000)
-        };
-
-        _cardRepositoryMock
-            .Setup(r => r.GetByIdmAsync(cardIdm1, true))
-            .ReturnsAsync(card1);
-        _cardRepositoryMock
-            .Setup(r => r.GetByIdmAsync(cardIdm2, true))
-            .ReturnsAsync(card2);
-        _ledgerRepositoryMock
-            .Setup(r => r.GetByMonthAsync(cardIdm1, year, month))
-            .ReturnsAsync(ledgers1);
-        _ledgerRepositoryMock
-            .Setup(r => r.GetByMonthAsync(cardIdm2, year, month))
-            .ReturnsAsync(ledgers2);
-
-        try
-        {
-            // Act
-            var result = await _reportService.CreateMonthlyReportsAsync(
-                new[] { cardIdm1, cardIdm2 }, year, month, outputFolder);
-
-            // Assert
-            result.AllSuccess.Should().BeTrue();
-            result.SuccessfulFiles.Should().HaveCount(2);
-            result.SuccessfulFiles.Should().Contain(f => f.Contains("はやかけん_001"));
-            result.SuccessfulFiles.Should().Contain(f => f.Contains("nimoca_002"));
-
-            foreach (var filePath in result.SuccessfulFiles)
-            {
-                File.Exists(filePath).Should().BeTrue();
-            }
-        }
-        finally
-        {
-            // クリーンアップ
-            if (Directory.Exists(outputFolder))
-            {
-                Directory.Delete(outputFolder, true);
-            }
-        }
-    }
-
     #endregion
 
     #region 異常系テスト
@@ -669,57 +605,6 @@ public class ReportServiceTests : IDisposable
         result.Success.Should().BeFalse();
         result.ErrorMessage.Should().NotBeNullOrEmpty();
         File.Exists(outputPath).Should().BeFalse();
-    }
-
-    /// <summary>
-    /// TC010: 複数カード一括作成で存在しないカードは失敗として記録される
-    /// </summary>
-    [Fact]
-    public async Task CreateMonthlyReportsAsync_WithNonExistentCard_ShouldSkipInvalidCard()
-    {
-        // Arrange
-        var validCardIdm = "0102030405060708";
-        var invalidCardIdm = "FFFFFFFFFFFFFFFF";
-        var card = CreateTestCard(validCardIdm);
-        var year = 2024;
-        var month = 10;
-        var outputFolder = Path.Combine(Path.GetTempPath(), $"ReportTest_{Guid.NewGuid()}");
-
-        var ledgers = new List<Ledger>
-        {
-            CreateTestLedger(1, validCardIdm, new DateTime(2024, 10, 5), "鉄道（博多～天神）", 0, 300, 9700)
-        };
-
-        _cardRepositoryMock
-            .Setup(r => r.GetByIdmAsync(validCardIdm, true))
-            .ReturnsAsync(card);
-        _cardRepositoryMock
-            .Setup(r => r.GetByIdmAsync(invalidCardIdm, true))
-            .ReturnsAsync((IcCard?)null);
-        _ledgerRepositoryMock
-            .Setup(r => r.GetByMonthAsync(validCardIdm, year, month))
-            .ReturnsAsync(ledgers);
-
-        try
-        {
-            // Act
-            var result = await _reportService.CreateMonthlyReportsAsync(
-                new[] { validCardIdm, invalidCardIdm }, year, month, outputFolder);
-
-            // Assert
-            result.SuccessCount.Should().Be(1);
-            result.FailureCount.Should().Be(1);
-            result.SuccessfulFiles.Should().HaveCount(1);
-            result.SuccessfulFiles.First().Should().Contain("はやかけん_001");
-        }
-        finally
-        {
-            // クリーンアップ
-            if (Directory.Exists(outputFolder))
-            {
-                Directory.Delete(outputFolder, true);
-            }
-        }
     }
 
     #endregion

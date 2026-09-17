@@ -41,7 +41,7 @@ namespace ICCardManager.Services
             worksheet.Row(row).Height = 30;
 
             // Issue #1480: 行全体の Range を 1 回だけ取得して再利用（重複生成を削減）
-            var fullRange = worksheet.Range(row, 1, row, 12);
+            var fullRange = worksheet.Range(row, 1, row, ReportService.TemplateLastColumn);
 
             // Issue #591: 既存ファイル上書き時に前回の太字書式が残る場合があるため、
             // データ行では太字を明示的にリセットする
@@ -62,7 +62,7 @@ namespace ICCardManager.Services
             summaryRange.Style.Alignment.WrapText = true; // 折り返して全体を表示
 
             // I列からL列を結合（備考）
-            var noteRange = worksheet.Range(row, 9, row, 12);
+            var noteRange = worksheet.Range(row, 9, row, ReportService.TemplateLastColumn);
             noteRange.Merge();
             noteRange.Style.Alignment.WrapText = true; // 折り返して全体を表示
 
@@ -81,7 +81,7 @@ namespace ICCardManager.Services
 
             // 両端（A列左側、L列右側）は太線で表示
             worksheet.Cell(row, 1).Style.Border.LeftBorder = XLBorderStyleValues.Medium;
-            worksheet.Cell(row, 12).Style.Border.RightBorder = XLBorderStyleValues.Medium;
+            worksheet.Cell(row, ReportService.TemplateLastColumn).Style.Border.RightBorder = XLBorderStyleValues.Medium;
 
             // 行全体を上下中央揃えに設定
             fullRange.Style.Alignment.Vertical = XLAlignmentVerticalValues.Center;
@@ -106,7 +106,7 @@ namespace ICCardManager.Services
             // Issue #858: 全列のフォントサイズを14ptに明示的に設定
             // テンプレートの最初のシートを直接使う場合とAdd()で新規作成する場合で
             // デフォルトフォントサイズが異なるため、明示的に統一する
-            var fullRange = worksheet.Range(row, 1, row, 12);
+            var fullRange = worksheet.Range(row, 1, row, ReportService.TemplateLastColumn);
             fullRange.Style.Font.FontSize = 14;
 
             // Issue #947: 金額列（受入E・払出F・残額G）のフォントサイズを16ptに設定
@@ -123,7 +123,7 @@ namespace ICCardManager.Services
             summaryRange.Style.Alignment.WrapText = true;
 
             // I列からL列を結合（備考）
-            var noteRange = worksheet.Range(row, 9, row, 12);
+            var noteRange = worksheet.Range(row, 9, row, ReportService.TemplateLastColumn);
             noteRange.Merge();
             noteRange.Style.Alignment.WrapText = true;
 
@@ -144,7 +144,7 @@ namespace ICCardManager.Services
 
             // 両端（A列左側、L列右側）は太線で表示
             worksheet.Cell(row, 1).Style.Border.LeftBorder = XLBorderStyleValues.Medium;
-            worksheet.Cell(row, 12).Style.Border.RightBorder = XLBorderStyleValues.Medium;
+            worksheet.Cell(row, ReportService.TemplateLastColumn).Style.Border.RightBorder = XLBorderStyleValues.Medium;
 
             // 行全体を上下中央揃えに設定
             fullRange.Style.Alignment.Vertical = XLAlignmentVerticalValues.Center;
@@ -193,7 +193,7 @@ namespace ICCardManager.Services
             }
 
             // 複数行範囲を 1 度だけ取得し、罫線・太字リセットを一括適用
-            var fullRange = worksheet.Range(firstRow, 1, lastRow, 12);
+            var fullRange = worksheet.Range(firstRow, 1, lastRow, ReportService.TemplateLastColumn);
 
             // Issue #591: 既存ファイル上書き時に残った太字書式をリセット
             fullRange.Style.Font.Bold = false;
@@ -208,13 +208,13 @@ namespace ICCardManager.Services
 
             // 両端（A列左側、L列右側）は太線で表示（範囲一括適用）
             worksheet.Range(firstRow, 1, lastRow, 1).Style.Border.LeftBorder = XLBorderStyleValues.Medium;
-            worksheet.Range(firstRow, 12, lastRow, 12).Style.Border.RightBorder = XLBorderStyleValues.Medium;
+            worksheet.Range(firstRow, ReportService.TemplateLastColumn, lastRow, ReportService.TemplateLastColumn).Style.Border.RightBorder = XLBorderStyleValues.Medium;
 
             // セル結合は行単位で実行（複数行をまとめると 1 つの結合セルになるため）
             for (int row = firstRow; row <= lastRow; row++)
             {
                 worksheet.Range(row, 2, row, 4).Merge();   // B-D 列（摘要）
-                worksheet.Range(row, 9, row, 12).Merge();  // I-L 列（備考）
+                worksheet.Range(row, 9, row, ReportService.TemplateLastColumn).Merge();  // I-L 列（備考）
             }
         }
 
