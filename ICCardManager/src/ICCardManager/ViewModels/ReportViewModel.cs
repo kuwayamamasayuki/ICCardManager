@@ -440,6 +440,13 @@ public partial class ReportViewModel : ViewModelBase
     [RelayCommand]
     public async Task RefreshExportStatusAsync()
     {
+        // Issue #2058: 年月・出力先の変更からは戻り値を捨てて起動されるため、更新が並走し得る。
+        // 先に始まった更新が後から終わると、古い年月・古いフォルダの結果で新しい結果を上書きする。
+        // 世代番号を採番し、await の後により新しい更新が始まっていたら結果を捨てる
+        //（`.claude/rules/viewmodel-conventions.md`「非同期チェックの陳腐化」#1739）。
+        // 早期 return の経路でも採番し、保留中の古い更新を無効にする。
+        var generation = ++_exportStatusGeneration;
+
         if (_exportStatusService == null || Cards.Count == 0)
         {
             ExportStatusSummary = string.Empty;
@@ -471,22 +478,41 @@ public partial class ReportViewModel : ViewModelBase
         {
             ErrorDialogHelper.LogException(ex, "帳票の出力状況の確認");
 
+            // 古い更新の失敗で、より新しい更新の成功結果（バッジと集計）を消さない
+            if (generation != _exportStatusGeneration)
+            {
+                return;
+            }
+
             // 判定できなかったときに前回の「出力済み」バッジを残さない。出力先や年月を変えた直後に
             // 失敗すると、残ったバッジは「別のフォルダ・別の月の結果」であり、当月まだ出力していない
             // カードを出力済みと誤認させて物品出納簿が 1 枚欠ける。到達できないフォルダを
             // 「未出力」ではなく「判定不能」で返す ReportExportStatusService と同じ扱いへ揃える。
-            ApplyExportStatuses(Array.Empty<ReportExportStatus>());
+            ApplyExportStatuses(Array.Empty<ReportExportStatus>(), capturedYear, capturedMonth);
             ExportStatusSummary = "出力状況を確認できませんでした。出力先フォルダと年月を確認し、「出力状況を更新」をやり直してください。";
             return;
         }
 
-        ApplyExportStatuses(statuses);
+        if (generation != _exportStatusGeneration)
+        {
+            return;
+        }
+
+        ApplyExportStatuses(statuses, capturedYear, capturedMonth);
     }
+
+    /// <summary>
+    /// 出力状況の更新の世代番号（Issue #2058）。UI スレッドでのみ読み書きする。
+    /// </summary>
+    private int _exportStatusGeneration;
 
     /// <summary>
     /// 判定結果をカード一覧へ反映し、集計文言を更新する
     /// </summary>
-    internal void ApplyExportStatuses(IReadOnlyList<ReportExportStatus> statuses)
+    /// <param name="statuses">判定結果</param>
+    /// <param name="year">判定に使った年（画面の現在値ではない。Issue #2058）</param>
+    /// <param name="month">判定に使った月（同上）</param>
+    internal void ApplyExportStatuses(IReadOnlyList<ReportExportStatus> statuses, int year, int month)
     {
         var byCardIdm = (statuses ?? new List<ReportExportStatus>())
             .Where(s => s != null && !string.IsNullOrEmpty(s.CardIdm))
@@ -507,13 +533,17 @@ public partial class ReportViewModel : ViewModelBase
             }
         }
 
-        UpdateExportStatusSummary();
+        UpdateExportStatusSummary(year, month);
     }
 
     /// <summary>
     /// チェックリストの集計文言を更新する
     /// </summary>
-    private void UpdateExportStatusSummary()
+    /// <remarks>
+    /// 年月は判定に使った値を受け取り、<see cref="SelectedYear"/> / <see cref="SelectedMonth"/> を読まない
+    /// （Issue #2058）。判定の待機中に年月が変わると、新しい月の名前で古い月の件数を表示するため。
+    /// </remarks>
+    private void UpdateExportStatusSummary(int year, int month)
     {
         if (Cards.Count == 0)
         {
@@ -525,7 +555,7 @@ public partial class ReportViewModel : ViewModelBase
         var notExported = Cards.Count(c => c.ExportState == ReportExportState.NotExported);
         var unknown = Cards.Count(c => c.ExportState == ReportExportState.Unknown);
 
-        var summary = $"{SelectedYear}年{SelectedMonth}月: 出力済み {exported}件 / 未出力 {notExported}件";
+        var summary = $"{year}年{month}月: 出力済み {exported}件 / 未出力 {notExported}件";
         if (unknown > 0)
         {
             summary += $" / 確認できません {unknown}件";
