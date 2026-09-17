@@ -60,6 +60,15 @@
   - **常時ロードのままにした判断**: `business-logic.md`（24k 文字）と `error-messages.md`（17k 文字）は単体でしきい値未満で、業務ルールと文言品質はどの作業でも前提になるため分割しない
 - **Stop フック `check-doc-sync.sh` のタイムアウトを 15 秒から 60 秒へ引き上げた**。OneDrive 上（`/mnt/d`、DrvFs）の `git status --porcelain` と `git log --name-only` が 15 秒に収まらず、直近の実行 3 回すべてがタイムアウトで打ち切られ、ドキュメント同期の確認が一度も機能していなかった
 
+**リファクタリング**
+- Issue #2051 **帳票まわりに残っていた本番未使用のコードを削除し、「一本化した」と書かれながら一本化されていなかった帳票幅のリテラルを定数へ寄せた**。次に変更する人が片方だけ直す原因を取り除く（#1763「同じ判断を配らない」／#1924「主張は実装で検算する」）
+  - **削除**: `PrintService.CreateCombinedFlowDocumentAsync`（呼び出し元なし。仮に使うと `ConfigureAwait(false)` の後にスレッドプール上で WPF の `FlowDocument` を作り、先頭カードが見つからないだけで null を返し、2 枚目以降は改ページの見積もり `GroupRowsByPage` を通らなかった）／`ReportService.CreateMonthlyReportsAsync`（テストからのみ呼ばれていた。一括作成のループは `ReportViewModel` の 1 つだけで、共通原因による中断〔#2042〕と未登録カードの文言〔#2049〕を 2 つのループへ書き写していた）／未使用の private ラッパー `ApplyEmptyRowBorder`
+  - 同一内容だった `WriteMonthlyTotalRow` と `WriteCumulativeRow` を `WriteTotalRow` 1 つにした
+  - `ExcelStyleFormatter`（罫線・結合）と `ReportService`（見出し・備考欄・列幅のコピー、合計行の書式）に残っていたリテラルの `12` 16 か所を `ReportService.TemplateLastColumn` へ置き換えた。起票時に挙げられたシート名の自前組み立てと月順配列の重複は #2048 で解消済みだったことを確認した
+  - 再発防止に静的検査 `ReportTemplateColumnLiteralConventionTests` を置いた（定数を参照するファイルから走査対象を導出し、列番号としてのリテラル `12` を検出する。行番号の 12・`Enumerable.Range(1, 12)`・月の範囲判定は誤検出しないことをサンプル入力で固定。修正前のコードに当てて赤を実測）
+  - 一括 API を呼んでいたテスト 7 件（`ReportServiceTests` 2・`ReportServiceCommonFailureTests` 2・`ReportServiceCardNotFoundMessageTests` 3）を削除し、規約テスト 24 件を追加した。単体 6,778→6,795・合計 6,850→6,867。04_機能設計書 §8.8、05_クラス設計書（ReportService / PrintService のクラス図・帳票幅の節）、06_シーケンス図、07_テスト設計書 §1.1a・§2・UT-019・§2.58 を同期更新（Issue #2051）
+  - 一括 API 専用だった `BatchReportGenerationResult` は、結果の集計を固定する `ReportGenerationResultTests` が残っているため今回は据え置いた
+
 **修正**
 - Issue #2050 **帳票の一括作成で、テンプレートが配置先に無く埋め込みリソースから使うときにカードごとに新しい一時ファイルを展開していた重複を解消した**。`TemplateResolver.ResolveTemplatePath` は呼ぶたびに `%TEMP%\ICCardManager` へ新しい .xlsx を展開していたため、一括作成ではカード枚数＋1（サービスの一括 API の事前確認分）の同じファイルが積み上がり、削除は次回起動時まで行われなかった。展開を部署種別ごとにプロセス内で 1 回へ抑え、ファイルが消えている・長さが埋め込みリソースと一致しないときだけ展開し直す。通常のインストールでは配置先（`Resources\Templates`）のテンプレートが使われるため、この重複は起きていなかった（予備の経路の是正）
   - Issue 起票時に挙げられた前月末残高の月ごとの遡り（最大 11 回の `GetByMonthAsync`）と `GetCarryoverBalanceAsync` の重複は、#2043 で単票クエリへ寄せた時点で解消済みだったことを確認した

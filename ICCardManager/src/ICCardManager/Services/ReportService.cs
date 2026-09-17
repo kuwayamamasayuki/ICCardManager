@@ -535,7 +535,7 @@ namespace ICCardManager.Services
 
                     // 月計行
                     (currentRow, rowsOnCurrentPage, currentPageNumber) = CheckAndInsertPageBreak(worksheet, currentRow, rowsOnCurrentPage, RowsPerPage, currentPageNumber, _orgOptions.TemplateMapping.PageNumberColumn);
-                    currentRow = WriteMonthlyTotalRow(worksheet, currentRow,
+                    currentRow = WriteTotalRow(worksheet, currentRow,
                         rowSet.MonthlyTotal);
                     rowsOnCurrentPage++;
 
@@ -543,7 +543,7 @@ namespace ICCardManager.Services
                     if (rowSet.CumulativeTotal != null)
                     {
                         (currentRow, rowsOnCurrentPage, currentPageNumber) = CheckAndInsertPageBreak(worksheet, currentRow, rowsOnCurrentPage, RowsPerPage, currentPageNumber, _orgOptions.TemplateMapping.PageNumberColumn);
-                        currentRow = WriteCumulativeRow(worksheet, currentRow,
+                        currentRow = WriteTotalRow(worksheet, currentRow,
                             rowSet.CumulativeTotal);
                         rowsOnCurrentPage++;
                     }
@@ -1074,14 +1074,14 @@ namespace ICCardManager.Services
         private static void CopyWorksheetFormat(IXLWorksheet source, IXLWorksheet target)
         {
             // 1〜4行目（ヘッダ部分）をコピー
-            var headerRange = source.Range(1, 1, 4, 12);
+            var headerRange = source.Range(1, 1, 4, TemplateLastColumn);
             headerRange.CopyTo(target.Cell(1, 1));
 
             // 17〜22行目（備考欄/フッタ部分）をコピー
             CopyNotesSection(source, target);
 
             // 列幅をコピー
-            for (int col = 1; col <= 12; col++)
+            for (int col = 1; col <= TemplateLastColumn; col++)
             {
                 target.Column(col).Width = source.Column(col).Width;
             }
@@ -1166,7 +1166,7 @@ namespace ICCardManager.Services
         /// </remarks>
         private static void CopyNotesSection(IXLWorksheet source, IXLWorksheet target)
         {
-            var notesRange = source.Range(17, 1, 22, 12);
+            var notesRange = source.Range(17, 1, 22, TemplateLastColumn);
             notesRange.CopyTo(target.Cell(17, 1));
 
             // 行の高さもコピー
@@ -1217,88 +1217,6 @@ namespace ICCardManager.Services
         }
 
         /// <summary>
-        /// 複数カードの月次帳票を一括作成
-        /// </summary>
-        /// <param name="cardIdms">対象カードIDmのリスト</param>
-        /// <param name="year">年</param>
-        /// <param name="month">月</param>
-        /// <param name="outputFolder">出力先フォルダ</param>
-        /// <returns>一括作成結果</returns>
-        public async Task<BatchReportGenerationResult> CreateMonthlyReportsAsync(
-            IEnumerable<string> cardIdms, int year, int month, string outputFolder)
-        {
-            var results = new List<(string CardIdm, string CardName, ReportGenerationResult Result)>();
-
-            // テンプレートの存在確認を先に行う
-            // Issue #1281: 非同期版を使い UI スレッドブロックを回避
-            var batchSettings = await _settingsRepository.GetAppSettingsAsync().ConfigureAwait(false);
-            if (!TemplateResolver.TemplateExists(batchSettings.DepartmentType))
-            {
-                try
-                {
-                    TemplateResolver.ResolveTemplatePath(batchSettings.DepartmentType);
-                }
-                catch (TemplateNotFoundException ex)
-                {
-                    return BatchReportGenerationResult.TemplateNotFound(ex.GetDetailedMessage());
-                }
-            }
-
-            try
-            {
-                Directory.CreateDirectory(outputFolder);
-            }
-            catch (UnauthorizedAccessException ex)
-            {
-                // #1614 / #1817: 生の ex.Message は出さず、ログへ残す（上の CreateMonthlyReportAsync と同じ形）
-                ErrorDialogHelper.LogException(ex, "帳票の出力先フォルダの作成");
-                return BatchReportGenerationResult.DirectoryCreationFailed(
-                    "出力先フォルダへのアクセス権限がありません。別のフォルダを指定するか、管理者に連絡してください。\n\n詳細はログファイルを確認してください。");
-            }
-            catch (IOException ex)
-            {
-                ErrorDialogHelper.LogException(ex, "帳票の出力先フォルダの作成");
-                return BatchReportGenerationResult.DirectoryCreationFailed(
-                    "出力先フォルダの作成に失敗しました。パスを確認してください。\n\n詳細はログファイルを確認してください。");
-            }
-            catch (Exception ex)
-            {
-                ErrorDialogHelper.LogException(ex, "帳票の出力先フォルダの作成");
-                return BatchReportGenerationResult.DirectoryCreationFailed(
-                    $"出力先フォルダを作成できませんでした。{ExceptionMessageFormatter.ToReason(ex)}\n\n詳細はログファイルを確認してください。");
-            }
-
-            foreach (var cardIdm in cardIdms)
-            {
-                var card = await _cardRepository.GetByIdmAsync(cardIdm, includeDeleted: true).ConfigureAwait(false);
-                if (card == null)
-                {
-                    results.Add((cardIdm, null, CardNotFound(cardIdm)));
-                    continue;
-                }
-
-                var cardName = $"{card.CardType} {card.CardNumber}";
-                // Issue #477: 年度ファイル名に変更
-                var fiscalYear = GetFiscalYear(year, month);
-                var fileName = GetFiscalYearFileName(card.CardType, card.CardNumber, fiscalYear);
-                var outputPath = Path.Combine(outputFolder, fileName);
-
-                var result = await CreateMonthlyReportAsync(cardIdm, year, month, outputPath).ConfigureAwait(false);
-                results.Add((cardIdm, cardName, result));
-
-                // Issue #2042: 全カードに共通する原因（テンプレート・組織設定）の失敗は、続けても
-                // 同じ失敗が選択枚数だけ並ぶだけなので中断する。ViewModel 側の一括ループ
-                // （ReportViewModel.CreateReportAsync）と判断を揃えておく。
-                if (result.IsCommonFailure)
-                {
-                    break;
-                }
-            }
-
-            return new BatchReportGenerationResult(results);
-        }
-
-        /// <summary>
         /// 年度を計算（4月〜翌3月が同一年度）
         /// </summary>
         /// <param name="year">西暦年</param>
@@ -1328,7 +1246,7 @@ namespace ICCardManager.Services
         /// 物品出納簿テンプレートの帳票幅（L 列 = 12）。
         /// </summary>
         /// <remarks>
-        /// 罫線・結合セル・印刷範囲（<c>ExcelStyleFormatter</c> の <c>PrintAreas.Add(1, 1, lastRow, 12)</c>）・
+        /// 罫線・結合セル・印刷範囲（<c>ExcelStyleFormatter</c>）・テンプレートの列幅と見出し・備考欄のコピー・
         /// 継続ページへのヘッダーコピー（<see cref="CopyHeaderToNewPage"/>）がいずれもこの幅を前提にしており、
         /// テンプレートファイル自体に埋め込まれているため<b>設定では変えられない</b>（Issue #1820 が
         /// 明細行について述べているのと同じ理由）。ヘッダー各列はこの幅の内側でのみ移動できる。
@@ -1746,44 +1664,16 @@ namespace ICCardManager.Services
         }
 
         /// <summary>
-        /// 月計行を出力
+        /// 月計行・累計行を出力
         /// </summary>
         /// <remarks>
-        /// Issue #451対応: 受入金額・払出金額は0も表示（空欄にしない）
-        /// Issue #813: 4月のみ累計行省略のため残額を表示
+        /// Issue #451対応: 受入金額・払出金額は0も表示（空欄にしない）。上下の罫線は太線にする
+        /// Issue #813: 残額は設定されている場合のみ表示（4月の月計、すべての累計）
         /// Issue #1023: ReportTotal を受け取るように変更
+        /// Issue #2051: 月計用と累計用に同一内容のメソッドが 2 つあったため 1 つにした
+        /// （片方だけが直される日が来る。#1763）。行の種類は <see cref="ReportTotal.Label"/> が表す。
         /// </remarks>
-        private int WriteMonthlyTotalRow(IXLWorksheet worksheet, int row, ReportTotal total)
-        {
-            WriteTotalRowCore(worksheet, row, total);
-
-            // 罫線を適用（月計行は上下を太線に）
-            ApplySummaryRowBorder(worksheet, row);
-
-            return row + 1;
-        }
-
-        /// <summary>
-        /// 累計行を出力
-        /// </summary>
-        /// <remarks>
-        /// Issue #451対応: 受入金額・払出金額は0も表示（空欄にしない）
-        /// Issue #1023: ReportTotal を受け取るように変更
-        /// </remarks>
-        private int WriteCumulativeRow(IXLWorksheet worksheet, int row, ReportTotal total)
-        {
-            WriteTotalRowCore(worksheet, row, total);
-
-            // 罫線を適用（累計行は上下を太線に）
-            ApplySummaryRowBorder(worksheet, row);
-
-            return row + 1;
-        }
-
-        /// <summary>
-        /// 月計行・累計行の共通出力処理
-        /// </summary>
-        private void WriteTotalRowCore(IXLWorksheet worksheet, int row, ReportTotal total)
+        private int WriteTotalRow(IXLWorksheet worksheet, int row, ReportTotal total)
         {
             // 列配置: A=出納年月日, B-D=摘要(結合), E=受入金額, F=払出金額, G=残額, H=氏名, I-L=備考(結合)
             worksheet.Cell(row, 1).Value = "";           // 出納年月日（空欄）(A列)
@@ -1807,13 +1697,18 @@ namespace ICCardManager.Services
             worksheet.Cell(row, 6).Style.NumberFormat.Format = "#,##0";
 
             // 合計行にスタイルを適用
-            var range = worksheet.Range(row, 1, row, 12);
+            var range = worksheet.Range(row, 1, row, TemplateLastColumn);
             range.Style.Font.Bold = true;
 
             // ラベル（B列）を中央揃え・14ptに設定
             var summaryCell = worksheet.Cell(row, 2);
             summaryCell.Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Center;
             summaryCell.Style.Font.FontSize = 14;
+
+            // 罫線を適用（月計・累計行は上下を太線に）
+            ApplySummaryRowBorder(worksheet, row);
+
+            return row + 1;
         }
 
         /// <summary>
@@ -1838,7 +1733,7 @@ namespace ICCardManager.Services
             ApplyDataRowBorder(worksheet, row);
 
             // 繰越行にスタイルを適用（ApplyDataRowBorder後に設定して上書き）
-            var range = worksheet.Range(row, 1, row, 12);
+            var range = worksheet.Range(row, 1, row, TemplateLastColumn);
             range.Style.Font.Bold = true;
 
             return row + 1;
@@ -1943,7 +1838,7 @@ namespace ICCardManager.Services
         private static void CopyNotesToNewPage(IXLWorksheet worksheet, int targetStartRow)
         {
             // 17-22行目の内容を新しいページにコピー
-            var sourceRange = worksheet.Range(17, 1, 22, 12);
+            var sourceRange = worksheet.Range(17, 1, 22, TemplateLastColumn);
             sourceRange.CopyTo(worksheet.Cell(targetStartRow, 1));
 
             // 行の高さもコピー
@@ -1972,12 +1867,6 @@ namespace ICCardManager.Services
                     worksheet, currentRow, currentRow + emptyRowsCount - 1);
             }
         }
-
-        /// <summary>
-        /// Issue #457: 空白行に罫線を適用
-        /// </summary>
-        private static void ApplyEmptyRowBorder(IXLWorksheet worksheet, int row)
-            => ExcelStyleFormatter.ApplyEmptyRowBorder(worksheet, row);
 
         /// <summary>
         /// Issue #457: ワークシートの印刷設定を行う
