@@ -11,6 +11,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
+using System.Windows.Input;
 
 
 namespace ICCardManager.ViewModels;
@@ -616,6 +617,16 @@ public partial class BusStopInputItem : ObservableObject
     private bool _showSuggestions;
 
     /// <summary>
+    /// Issue #2072: キーボード（↓↑）で選択中の候補の位置。-1 は「どの候補も選んでいない」。
+    /// </summary>
+    /// <remarks>
+    /// 候補の並びが変わる（入力で再フィルターされる）か候補が閉じたら -1 へ戻す。
+    /// 前の並びの位置を引き継ぐと、Enter で職員が見ていない候補を確定してしまう。
+    /// </remarks>
+    [ObservableProperty]
+    private int _selectedSuggestionIndex = -1;
+
+    /// <summary>
     /// Issue #1570: 一つ前の行のアイテム。「往復」ボタンで参照する。
     /// 先頭行では null。<see cref="BusStopInputViewModel"/> の初期化処理で
     /// <see cref="BusStopInputViewModel.BusUsages"/> 構築後に直前のアイテムが設定される。
@@ -671,6 +682,7 @@ public partial class BusStopInputItem : ObservableObject
     /// </remarks>
     internal void UpdateFilteredSuggestions(string input)
     {
+        SelectedSuggestionIndex = -1;
         FilteredSuggestions.Clear();
 
         if (_allSuggestions.Count == 0)
@@ -741,6 +753,89 @@ public partial class BusStopInputItem : ObservableObject
     public void HideSuggestions()
     {
         ShowSuggestions = false;
+    }
+
+    partial void OnShowSuggestionsChanged(bool value)
+    {
+        // 候補が閉じたら選択も捨てる（Popup の StaysOpen=False で外側クリックにより閉じた場合を含む）
+        if (!value)
+        {
+            SelectedSuggestionIndex = -1;
+        }
+    }
+
+    /// <summary>
+    /// Issue #2072: 入力欄で押されたキーを候補リストの操作として処理する。
+    /// </summary>
+    /// <param name="key">押されたキー（IME 変換中は <see cref="Key.ImeProcessed"/> が来るため処理しない）</param>
+    /// <returns>
+    /// 候補リストの操作として消費した場合 true。呼び出し側はキーを処理済みにし、
+    /// ダイアログの既定ボタン（Enter＝保存）・キャンセルボタン（Esc＝スキップ）へ届かないようにする。
+    /// </returns>
+    /// <remarks>
+    /// <list type="bullet">
+    /// <item>↓: 次の候補を選ぶ。候補が閉じていれば開いて先頭を選ぶ</item>
+    /// <item>↑: 前の候補を選ぶ。先頭で押すと選択を外す（入力中の文字列へ戻る）</item>
+    /// <item>Enter: 選択中の候補を確定する。候補が開いているが未選択なら候補を閉じるだけで保存しない</item>
+    /// <item>Esc: 候補を閉じる（スキップしない）</item>
+    /// </list>
+    /// 候補が閉じているときの Enter / Esc は消費しない（従来どおり保存 / スキップ）。
+    /// 候補が開いている間の Enter で保存すると、入力途中の文字列がそのまま 6 年保存の台帳へ入る。
+    /// </remarks>
+    public bool HandleSuggestionKey(Key key)
+    {
+        switch (key)
+        {
+            case Key.Down:
+                if (!ShowSuggestions)
+                {
+                    UpdateFilteredSuggestions(BusStops);
+                    if (!ShowSuggestions)
+                    {
+                        return false;
+                    }
+                }
+                if (FilteredSuggestions.Count == 0)
+                {
+                    return false;
+                }
+                SelectedSuggestionIndex = Math.Min(SelectedSuggestionIndex + 1, FilteredSuggestions.Count - 1);
+                return true;
+
+            case Key.Up:
+                if (!ShowSuggestions)
+                {
+                    return false;
+                }
+                SelectedSuggestionIndex = Math.Max(SelectedSuggestionIndex - 1, -1);
+                return true;
+
+            case Key.Enter:
+                if (!ShowSuggestions)
+                {
+                    return false;
+                }
+                if (SelectedSuggestionIndex >= 0 && SelectedSuggestionIndex < FilteredSuggestions.Count)
+                {
+                    SelectSuggestion(FilteredSuggestions[SelectedSuggestionIndex]);
+                }
+                else
+                {
+                    ShowSuggestions = false;
+                }
+                return true;
+
+            case Key.Escape:
+                if (!ShowSuggestions)
+                {
+                    return false;
+                }
+                ShowSuggestions = false;
+                return true;
+
+            default:
+                return false;
+        }
     }
 
     /// <summary>

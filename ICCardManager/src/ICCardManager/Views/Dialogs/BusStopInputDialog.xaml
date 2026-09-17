@@ -42,7 +42,7 @@
                            TextWrapping="Wrap">
                     <Run Text="バス停名は「乗車バス停～降車バス停」の形式で入力してください。"/>
                     <LineBreak/>
-                    <Run Text="💡 入力中に過去の履歴から候補が表示されます。候補をクリックまたは↓↑キーで選択できます。"/>
+                    <Run Text="💡 入力中に過去の履歴から候補が表示されます。候補はクリックするか、↓↑キーで選んで Enter キーで確定できます（Esc キーで候補を閉じます）。"/>
                 </TextBlock>
             </StackPanel>
         </Border>
@@ -88,7 +88,9 @@
                                          AutomationProperties.Name="バス停名"
                                          AutomationProperties.HelpText="乗車バス停～降車バス停の形式で入力。過去の履歴から候補が表示されます。フォーカス時に直近利用のバス停が表示されます。"
                                          ToolTip="乗車バス停～降車バス停（例: 天神～博多駅）"
-                                         GotFocus="BusStopTextBox_GotFocus"/>
+                                         GotFocus="BusStopTextBox_GotFocus"
+                                         PreviewKeyDown="BusStopTextBox_PreviewKeyDown"
+                                         LostKeyboardFocus="BusStopTextBox_LostKeyboardFocus"/>
                                 <TextBlock Text="入力例: ○○バス停～△△バス停" Foreground="{DynamicResource SecondaryTextBrush}" FontSize="{DynamicResource SmallFontSize}" Margin="0,2,0,0"/>
                             </StackPanel>
 
@@ -108,35 +110,62 @@
                                     <Border.Effect>
                                         <DropShadowEffect BlurRadius="8" ShadowDepth="2" Opacity="0.3"/>
                                     </Border.Effect>
-                                    <ScrollViewer VerticalScrollBarVisibility="Auto">
-                                        <ItemsControl ItemsSource="{Binding FilteredSuggestions}">
-                                            <ItemsControl.ItemTemplate>
-                                                <DataTemplate>
-                                                    <Border Padding="10,8"
-                                                            Cursor="Hand"
-                                                            Background="Transparent">
-                                                        <Border.Style>
-                                                            <Style TargetType="Border">
-                                                                <Style.Triggers>
-                                                                    <Trigger Property="IsMouseOver" Value="True">
-                                                                        <Setter Property="Background" Value="{DynamicResource ReturnBackgroundBrush}"/>
-                                                                    </Trigger>
-                                                                </Style.Triggers>
-                                                            </Style>
-                                                        </Border.Style>
-                                                        <Border.InputBindings>
-                                                            <MouseBinding MouseAction="LeftClick"
-                                                                          Command="{Binding DataContext.SelectSuggestionCommand, RelativeSource={RelativeSource AncestorType=ItemsControl}}"
-                                                                          CommandParameter="{Binding}"/>
-                                                        </Border.InputBindings>
-                                                        <TextBlock Text="{Binding}"
-                                                                   FontSize="{DynamicResource BaseFontSize}"
-                                                                   Foreground="{DynamicResource WaitingForegroundBrush}"/>
-                                                    </Border>
-                                                </DataTemplate>
-                                            </ItemsControl.ItemTemplate>
-                                        </ItemsControl>
-                                    </ScrollViewer>
+                                    <!-- Issue #2072: ↓↑キーでの選択を画面に示すため ListBox にし、選択位置を ViewModel と同期する。
+                                         キーボードフォーカスは入力欄に残す（ListBox / 項目は Focusable=False）。
+                                         キー操作は入力欄の PreviewKeyDown → BusStopInputItem.HandleSuggestionKey が担う -->
+                                    <ListBox ItemsSource="{Binding FilteredSuggestions}"
+                                             SelectedIndex="{Binding SelectedSuggestionIndex, Mode=TwoWay}"
+                                             SelectionChanged="SuggestionList_SelectionChanged"
+                                             Focusable="False"
+                                             BorderThickness="0"
+                                             Background="Transparent"
+                                             ScrollViewer.VerticalScrollBarVisibility="Auto"
+                                             ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                                             AutomationProperties.Name="バス停名の候補">
+                                        <ListBox.ItemContainerStyle>
+                                            <Style TargetType="ListBoxItem">
+                                                <Setter Property="Focusable" Value="False"/>
+                                                <Setter Property="Template">
+                                                    <Setter.Value>
+                                                        <ControlTemplate TargetType="ListBoxItem">
+                                                            <!-- 選択中は背景色に加えて左端の線でも示す（色だけに頼らない、Issue #1274） -->
+                                                            <Border x:Name="SuggestionItemBorder"
+                                                                    Background="Transparent"
+                                                                    BorderBrush="Transparent"
+                                                                    BorderThickness="4,0,0,0">
+                                                                <ContentPresenter/>
+                                                            </Border>
+                                                            <ControlTemplate.Triggers>
+                                                                <Trigger Property="IsMouseOver" Value="True">
+                                                                    <Setter TargetName="SuggestionItemBorder" Property="Background" Value="{DynamicResource ReturnBackgroundBrush}"/>
+                                                                </Trigger>
+                                                                <Trigger Property="IsSelected" Value="True">
+                                                                    <Setter TargetName="SuggestionItemBorder" Property="Background" Value="{DynamicResource ReturnBackgroundBrush}"/>
+                                                                    <Setter TargetName="SuggestionItemBorder" Property="BorderBrush" Value="{DynamicResource HeaderBackgroundBrush}"/>
+                                                                </Trigger>
+                                                            </ControlTemplate.Triggers>
+                                                        </ControlTemplate>
+                                                    </Setter.Value>
+                                                </Setter>
+                                            </Style>
+                                        </ListBox.ItemContainerStyle>
+                                        <ListBox.ItemTemplate>
+                                            <DataTemplate>
+                                                <Border Padding="10,8"
+                                                        Cursor="Hand"
+                                                        Background="Transparent">
+                                                    <Border.InputBindings>
+                                                        <MouseBinding MouseAction="LeftClick"
+                                                                      Command="{Binding DataContext.SelectSuggestionCommand, RelativeSource={RelativeSource AncestorType=ListBox}}"
+                                                                      CommandParameter="{Binding}"/>
+                                                    </Border.InputBindings>
+                                                    <TextBlock Text="{Binding}"
+                                                               FontSize="{DynamicResource BaseFontSize}"
+                                                               Foreground="{DynamicResource WaitingForegroundBrush}"/>
+                                                </Border>
+                                            </DataTemplate>
+                                        </ListBox.ItemTemplate>
+                                    </ListBox>
                                 </Border>
                             </Popup>
                         </Grid>
