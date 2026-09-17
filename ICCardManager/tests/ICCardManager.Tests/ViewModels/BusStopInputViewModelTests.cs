@@ -13,6 +13,7 @@ using System.Collections.Generic;
 using System.Data.SQLite;
 using System.Linq;
 using System.Threading.Tasks;
+using System.Windows.Input;
 
 
 namespace ICCardManager.Tests.ViewModels;
@@ -1323,6 +1324,219 @@ public class BusStopInputItemTests
         // Assert
         item.ShowSuggestions.Should().BeFalse();
     }
+
+    #region Issue #2072: 候補リストのキーボード操作
+
+    // 回帰は「候補が開いている間の Enter / Esc は保存・スキップへ渡さない」と
+    // 「候補が閉じていれば渡す」を対で置く。前者だけだと Enter を常に消費する
+    // （＝Enter で一切保存できない）実装でも緑になる。
+
+    [Fact]
+    public void HandleSuggestionKey_候補が開いている間のEnterは消費し入力途中の値を確定しないこと()
+    {
+        // Arrange
+        var item = CreateItem(suggestions: new List<string> { "天神～博多駅前", "天神南～薬院" });
+        item.BusStops = "天神";
+        item.ShowSuggestions.Should().BeTrue("前提: 入力で候補が開いている");
+
+        // Act
+        var handled = item.HandleSuggestionKey(Key.Enter);
+
+        // Assert
+        handled.Should().BeTrue("消費しないと既定ボタン（保存）へ届き、入力途中の「天神」が保存される");
+        item.BusStops.Should().Be("天神", "候補を選んでいない Enter で入力値を書き換えない");
+        item.ShowSuggestions.Should().BeFalse("未選択の Enter は候補を閉じる");
+    }
+
+    [Fact]
+    public void HandleSuggestionKey_候補が閉じていればEnterは消費せず保存へ渡すこと()
+    {
+        // Arrange
+        var item = CreateItem(suggestions: new List<string> { "天神～博多駅前" });
+        item.BusStops = "天神～博多駅前"; // 完全一致のみなので候補は開かない
+        item.ShowSuggestions.Should().BeFalse("前提: 候補が閉じている");
+
+        // Act
+        var handled = item.HandleSuggestionKey(Key.Enter);
+
+        // Assert
+        handled.Should().BeFalse("候補が閉じていれば Enter は従来どおり保存ボタンへ渡す");
+        item.BusStops.Should().Be("天神～博多駅前");
+    }
+
+    [Fact]
+    public void HandleSuggestionKey_下キーで先頭の候補を選びEnterで確定すること()
+    {
+        // Arrange
+        var item = CreateItem(suggestions: new List<string> { "天神～博多駅前", "天神南～薬院" });
+        item.BusStops = "天神";
+
+        // Act
+        var downHandled = item.HandleSuggestionKey(Key.Down);
+        var selectedAfterDown = item.SelectedSuggestionIndex;
+        var enterHandled = item.HandleSuggestionKey(Key.Enter);
+
+        // Assert
+        downHandled.Should().BeTrue();
+        selectedAfterDown.Should().Be(0);
+        enterHandled.Should().BeTrue();
+        item.BusStops.Should().Be("天神～博多駅前");
+        item.ShowSuggestions.Should().BeFalse();
+    }
+
+    [Fact]
+    public void HandleSuggestionKey_下キーを繰り返すと次の候補へ進み末尾で止まること()
+    {
+        // Arrange
+        var item = CreateItem(suggestions: new List<string> { "天神～博多駅前", "天神南～薬院" });
+        item.BusStops = "天神";
+
+        // Act & Assert
+        item.HandleSuggestionKey(Key.Down);
+        item.HandleSuggestionKey(Key.Down);
+        item.SelectedSuggestionIndex.Should().Be(1);
+        item.HandleSuggestionKey(Key.Down).Should().BeTrue("末尾でも候補操作として消費する");
+        item.SelectedSuggestionIndex.Should().Be(1, "末尾から先頭へ巡回しない");
+
+        item.HandleSuggestionKey(Key.Enter);
+        item.BusStops.Should().Be("天神南～薬院");
+    }
+
+    [Fact]
+    public void HandleSuggestionKey_上キーで前の候補へ戻り先頭では選択を外すこと()
+    {
+        // Arrange
+        var item = CreateItem(suggestions: new List<string> { "天神～博多駅前", "天神南～薬院" });
+        item.BusStops = "天神";
+        item.HandleSuggestionKey(Key.Down);
+        item.HandleSuggestionKey(Key.Down);
+
+        // Act & Assert
+        item.HandleSuggestionKey(Key.Up).Should().BeTrue();
+        item.SelectedSuggestionIndex.Should().Be(0);
+        item.HandleSuggestionKey(Key.Up).Should().BeTrue();
+        item.SelectedSuggestionIndex.Should().Be(-1, "先頭で↑を押すと入力中の文字列へ戻る");
+        item.HandleSuggestionKey(Key.Up).Should().BeTrue();
+        item.SelectedSuggestionIndex.Should().Be(-1);
+
+        item.HandleSuggestionKey(Key.Enter);
+        item.BusStops.Should().Be("天神", "選択を外した後の Enter は候補を確定しない");
+    }
+
+    [Fact]
+    public void HandleSuggestionKey_候補が閉じていれば上キーは消費しないこと()
+    {
+        var item = CreateItem(suggestions: new List<string> { "天神～博多駅前" });
+        item.BusStops = "天神～博多駅前";
+
+        item.HandleSuggestionKey(Key.Up).Should().BeFalse();
+        item.SelectedSuggestionIndex.Should().Be(-1);
+    }
+
+    [Fact]
+    public void HandleSuggestionKey_候補が閉じているとき下キーで候補を開き先頭を選ぶこと()
+    {
+        // Arrange
+        var item = CreateItem(suggestions: new List<string> { "天神～博多駅前", "天神南～薬院" });
+        item.BusStops = "天神";
+        item.HideSuggestions();
+
+        // Act
+        var handled = item.HandleSuggestionKey(Key.Down);
+
+        // Assert
+        handled.Should().BeTrue();
+        item.ShowSuggestions.Should().BeTrue();
+        item.SelectedSuggestionIndex.Should().Be(0);
+    }
+
+    [Fact]
+    public void HandleSuggestionKey_出せる候補が無ければ下キーは消費しないこと()
+    {
+        var item = CreateItem(suggestions: new List<string> { "天神～博多駅前" });
+        item.BusStops = "小倉";
+
+        item.HandleSuggestionKey(Key.Down).Should().BeFalse();
+        item.ShowSuggestions.Should().BeFalse();
+        item.SelectedSuggestionIndex.Should().Be(-1);
+    }
+
+    [Fact]
+    public void HandleSuggestionKey_候補が開いている間のEscは候補を閉じるだけでスキップへ渡さないこと()
+    {
+        // Arrange
+        var item = CreateItem(suggestions: new List<string> { "天神～博多駅前" });
+        item.BusStops = "天神";
+        item.HandleSuggestionKey(Key.Down);
+
+        // Act
+        var handled = item.HandleSuggestionKey(Key.Escape);
+
+        // Assert
+        handled.Should().BeTrue("消費しないとキャンセルボタン（スキップ）へ届き、入力がすべて★で上書きされる");
+        item.ShowSuggestions.Should().BeFalse();
+        item.SelectedSuggestionIndex.Should().Be(-1);
+        item.BusStops.Should().Be("天神");
+    }
+
+    [Fact]
+    public void HandleSuggestionKey_候補が閉じていればEscは消費せずスキップへ渡すこと()
+    {
+        var item = CreateItem(suggestions: new List<string> { "天神～博多駅前" });
+        item.BusStops = "天神～博多駅前";
+
+        item.HandleSuggestionKey(Key.Escape).Should().BeFalse();
+    }
+
+    [Fact]
+    public void HandleSuggestionKey_入力で候補が絞り直されたら選択を外すこと()
+    {
+        // Arrange
+        var item = CreateItem(suggestions: new List<string> { "天神～博多駅前", "天神南～薬院" });
+        item.BusStops = "天神";
+        item.HandleSuggestionKey(Key.Down);
+        item.HandleSuggestionKey(Key.Down);
+
+        // Act - 続けて入力すると候補の並びが変わる
+        item.BusStops = "天神南";
+
+        // Assert
+        item.SelectedSuggestionIndex.Should().Be(-1, "前の並びの位置を引き継ぐと、見ていない候補を Enter で確定してしまう");
+        item.HandleSuggestionKey(Key.Enter);
+        item.BusStops.Should().Be("天神南");
+    }
+
+    [Fact]
+    public void HandleSuggestionKey_他の候補の先頭部分と一致する候補を確定しても候補が開き直さないこと()
+    {
+        // 確定で BusStops を書き換えると再フィルターで「天神～博多駅前」が候補に残り再表示される。
+        // 閉じる順序が逆になると、確定直後の Enter が保存へ届かない
+        var item = CreateItem(suggestions: new List<string> { "天神～博多", "天神～博多駅前" });
+        item.BusStops = "天神";
+        item.HandleSuggestionKey(Key.Down);
+
+        item.HandleSuggestionKey(Key.Enter).Should().BeTrue();
+
+        item.BusStops.Should().Be("天神～博多");
+        item.ShowSuggestions.Should().BeFalse();
+        item.SelectedSuggestionIndex.Should().Be(-1);
+        item.HandleSuggestionKey(Key.Enter).Should().BeFalse("確定後の Enter は保存へ渡す");
+    }
+
+    [Fact]
+    public void HandleSuggestionKey_IME変換中のキーは消費しないこと()
+    {
+        // IME の変換確定の Enter は Key.ImeProcessed として届く。消費すると変換を確定できない
+        var item = CreateItem(suggestions: new List<string> { "天神～博多駅前" });
+        item.BusStops = "天神";
+        item.HandleSuggestionKey(Key.Down);
+
+        item.HandleSuggestionKey(Key.ImeProcessed).Should().BeFalse();
+        item.ShowSuggestions.Should().BeTrue();
+        item.SelectedSuggestionIndex.Should().Be(0);
+    }
+
+    #endregion
 
     [Fact]
     public void AmountDisplay_金額が正しくフォーマットされること()

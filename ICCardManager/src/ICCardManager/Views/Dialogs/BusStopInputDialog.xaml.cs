@@ -4,6 +4,7 @@ using System.Linq;
 using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Input;
 using System.Windows.Media;
 using ICCardManager.Models;
 using ICCardManager.ViewModels;
@@ -91,6 +92,54 @@ namespace ICCardManager.Views.Dialogs
             if (sender is System.Windows.Controls.TextBox textBox && textBox.DataContext is BusStopInputItem item)
             {
                 item.OnTextBoxGotFocus();
+            }
+        }
+
+        /// <summary>
+        /// Issue #2072: 入力欄のキーを候補リストの操作（↓↑ で選択、Enter で確定、Esc で閉じる）として処理する。
+        /// </summary>
+        /// <remarks>
+        /// Preview で処理済みにしないと、Enter が既定ボタン（保存）、Esc がキャンセルボタン（スキップ）へ届き、
+        /// 入力途中の文字列が保存される／入力がすべて破棄される。判定は ViewModel（<see cref="BusStopInputItem.HandleSuggestionKey"/>）が持つ。
+        /// </remarks>
+        private void BusStopTextBox_PreviewKeyDown(object sender, KeyEventArgs e)
+        {
+            if (sender is TextBox textBox && textBox.DataContext is BusStopInputItem item
+                && item.HandleSuggestionKey(e.Key))
+            {
+                e.Handled = true;
+                if (e.Key == Key.Enter)
+                {
+                    // 候補の確定でテキストを差し替えるとキャレットが先頭へ戻るため、続けて入力できるよう末尾へ置く
+                    textBox.CaretIndex = textBox.Text.Length;
+                }
+            }
+        }
+
+        /// <summary>
+        /// Issue #2072: 入力欄からフォーカスが離れたら、その行の候補を閉じる。
+        /// </summary>
+        /// <remarks>
+        /// Enter / Esc の横取りはフォーカスのある行の候補の開閉だけを見るため、Tab で別の行へ移った後に
+        /// 前の行の候補が画面に残ると、候補が見えているのに Enter で保存される。
+        /// 候補リストはフォーカスを取らない（Focusable=False）ので、候補のクリックでは発火しない。
+        /// </remarks>
+        private void BusStopTextBox_LostKeyboardFocus(object sender, KeyboardFocusChangedEventArgs e)
+        {
+            if (sender is TextBox textBox && textBox.DataContext is BusStopInputItem item)
+            {
+                item.HideSuggestions();
+            }
+        }
+
+        /// <summary>
+        /// Issue #2072: キーボードで選んだ候補がスクロール範囲の外にあっても見えるようにする
+        /// </summary>
+        private void SuggestionList_SelectionChanged(object sender, SelectionChangedEventArgs e)
+        {
+            if (sender is ListBox listBox && listBox.SelectedItem != null)
+            {
+                listBox.ScrollIntoView(listBox.SelectedItem);
             }
         }
 
