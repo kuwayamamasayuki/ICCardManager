@@ -1,5 +1,6 @@
 using System.IO;
 using FluentAssertions;
+using ICCardManager.Models;
 using ICCardManager.Services;
 using Xunit;
 
@@ -14,6 +15,7 @@ namespace ICCardManager.Tests.Services;
 /// <summary>
 /// TemplateResolverの単体テスト
 /// </summary>
+[Collection(TemplateTempFileCollection.Name)]
 public class TemplateResolverTests : IDisposable
 {
     public void Dispose()
@@ -116,6 +118,104 @@ public class TemplateResolverTests : IDisposable
             path.Should().NotBeNullOrEmpty();
             File.Exists(path).Should().BeTrue();
         }
+    }
+
+    #endregion
+
+    #region 埋め込みテンプレートの展開（Issue #2050）
+
+    /// <summary>
+    /// 同じ部署種別の展開を繰り返しても、一時ファイルは 1 つだけ作られ同じパスが返ること。
+    /// 旧実装は呼ぶたびに新しい一時 .xlsx を作り、一括作成でカード枚数ぶん積み上がっていた。
+    /// </summary>
+    [Fact]
+    [Trait("Category", "Unit")]
+    public void ExtractEmbeddedTemplate_CalledRepeatedly_ReusesSingleTempFile()
+    {
+        var first = TemplateResolver.ExtractEmbeddedTemplate(DepartmentType.MayorOffice);
+        var second = TemplateResolver.ExtractEmbeddedTemplate(DepartmentType.MayorOffice);
+        var third = TemplateResolver.ExtractEmbeddedTemplate(DepartmentType.MayorOffice);
+
+        first.Should().NotBeNullOrEmpty();
+        second.Should().Be(first, "展開済みの一時テンプレートを再利用するべき");
+        third.Should().Be(first);
+        File.Exists(first).Should().BeTrue();
+    }
+
+    /// <summary>
+    /// 部署種別が違えば別のテンプレートを返すこと（再利用が部署種別を取り違えない）。
+    /// </summary>
+    [Fact]
+    [Trait("Category", "Unit")]
+    public void ExtractEmbeddedTemplate_DifferentDepartments_ReturnDistinctTemplates()
+    {
+        var mayor = TemplateResolver.ExtractEmbeddedTemplate(DepartmentType.MayorOffice);
+        var enterprise = TemplateResolver.ExtractEmbeddedTemplate(DepartmentType.EnterpriseAccount);
+        var mayorAgain = TemplateResolver.ExtractEmbeddedTemplate(DepartmentType.MayorOffice);
+
+        enterprise.Should().NotBe(mayor);
+        mayorAgain.Should().Be(mayor, "別の部署種別を展開しても市長事務部局の展開結果は差し替わらないべき");
+        File.ReadAllBytes(enterprise).Should().NotEqual(File.ReadAllBytes(mayor),
+            "部署種別ごとに異なるテンプレートの内容であるべき");
+    }
+
+    /// <summary>
+    /// 展開済みの一時ファイルが消えていたら、消えたパスを返さず展開し直すこと。
+    /// 一時フォルダーの掃除で消えたパスを返すと、帳票作成がテンプレートを開けずに失敗する。
+    /// </summary>
+    [Fact]
+    [Trait("Category", "Unit")]
+    public void ExtractEmbeddedTemplate_CachedFileDeleted_ExtractsAgain()
+    {
+        var first = TemplateResolver.ExtractEmbeddedTemplate(DepartmentType.MayorOffice);
+        var expectedBytes = File.ReadAllBytes(first);
+        File.Delete(first);
+
+        var second = TemplateResolver.ExtractEmbeddedTemplate(DepartmentType.MayorOffice);
+
+        second.Should().NotBe(first);
+        File.Exists(second).Should().BeTrue();
+        File.ReadAllBytes(second).Should().Equal(expectedBytes);
+    }
+
+    /// <summary>
+    /// 展開済みの一時ファイルの長さが埋め込みリソースと一致しなければ（途中で切れた等）、
+    /// 再利用せず展開し直すこと。
+    /// </summary>
+    [Fact]
+    [Trait("Category", "Unit")]
+    public void ExtractEmbeddedTemplate_CachedFileTruncated_ExtractsAgain()
+    {
+        var first = TemplateResolver.ExtractEmbeddedTemplate(DepartmentType.MayorOffice);
+        var expectedBytes = File.ReadAllBytes(first);
+        File.WriteAllBytes(first, expectedBytes.Take(expectedBytes.Length / 2).ToArray());
+
+        var second = TemplateResolver.ExtractEmbeddedTemplate(DepartmentType.MayorOffice);
+
+        second.Should().NotBe(first, "長さが一致しない一時ファイルは再利用しないべき");
+        File.ReadAllBytes(second).Should().Equal(expectedBytes);
+    }
+
+    /// <summary>
+    /// 同時に展開しても全員が同じ完全なファイルを受け取ること。
+    /// lock を外す退行はタイミング次第で緑になり得るため、その検出は保証しない。
+    /// </summary>
+    [Fact]
+    [Trait("Category", "Unit")]
+    public async Task ExtractEmbeddedTemplate_ConcurrentCalls_ShareOneCompleteFile()
+    {
+        // 前のテストの展開結果に依存しないよう、まず消してから競わせる
+        var stale = TemplateResolver.ExtractEmbeddedTemplate(DepartmentType.EnterpriseAccount);
+        var expectedBytes = File.ReadAllBytes(stale);
+        File.Delete(stale);
+
+        var tasks = Enumerable.Range(0, 10)
+            .Select(_ => Task.Run(() => TemplateResolver.ExtractEmbeddedTemplate(DepartmentType.EnterpriseAccount)))
+            .ToArray();
+        var results = await Task.WhenAll(tasks);
+
+        results.Distinct().Should().ContainSingle("同時に呼ばれても展開は 1 回だけであるべき");
+        File.ReadAllBytes(results[0]).Should().Equal(expectedBytes);
     }
 
     #endregion

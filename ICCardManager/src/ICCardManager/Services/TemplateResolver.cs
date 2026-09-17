@@ -142,11 +142,33 @@ namespace ICCardManager.Services
         }
 
         /// <summary>
+        /// 展開済みの一時テンプレート（部署種別ごと）。<see cref="ExtractLock"/> の内側でのみ読み書きする。
+        /// </summary>
+        private static readonly Dictionary<DepartmentType, string> ExtractedTemplatePaths =
+            new Dictionary<DepartmentType, string>();
+
+        private static readonly object ExtractLock = new object();
+
+        /// <summary>
         /// 埋め込みリソースからテンプレートを一時ファイルに展開
         /// </summary>
         /// <param name="departmentType">部署種別</param>
         /// <returns>一時ファイルのパス。展開に失敗した場合はnull</returns>
-        private static string ExtractEmbeddedTemplate(DepartmentType departmentType = DepartmentType.MayorOffice)
+        /// <remarks>
+        /// Issue #2050: 展開はプロセス内で部署種別ごとに 1 回だけ行い、以後は同じ一時ファイルを返す。
+        /// 本メソッドに到達するのは、テンプレートがアプリケーションの配置先（Resources/Templates）に無い
+        /// ときだけ（通常のインストールでは配置先のファイルが見つかる）。その場合、旧実装は呼ぶたびに新しい一時 .xlsx を作っていたため、帳票の一括作成ではカードの枚数ぶん
+        /// （一括作成の事前確認 <see cref="TemplateExists(DepartmentType)"/> の分も含めて）
+        /// 同じ内容のファイルが %TEMP% に積み上がり、削除は次回起動時まで行われなかった。
+        /// <para>
+        /// 再利用してよいのは「ファイルが残っていて、長さが埋め込みリソースと一致する」ときだけ。
+        /// 一時フォルダーの掃除（<see cref="CleanupTempFiles"/> や OS・利用者による削除）で消えた、
+        /// あるいは書き込みが途中で切れたファイルを返すと、帳票作成がテンプレートを開けずに失敗する。
+        /// 呼び出し元は一時テンプレートを読むだけ（帳票は別の一時ファイルへ保存する）なので、
+        /// 共有しても内容は書き換わらない。
+        /// </para>
+        /// </remarks>
+        internal static string ExtractEmbeddedTemplate(DepartmentType departmentType = DepartmentType.MayorOffice)
         {
             var assembly = Assembly.GetExecutingAssembly();
             var embeddedResourceName = GetEmbeddedResourceName(departmentType);
@@ -157,16 +179,67 @@ namespace ICCardManager.Services
                 return null;
             }
 
-            // 一時ディレクトリに展開
-            var tempDir = Path.Combine(Path.GetTempPath(), "ICCardManager");
-            Directory.CreateDirectory(tempDir);
+            lock (ExtractLock)
+            {
+                if (ExtractedTemplatePaths.TryGetValue(departmentType, out var cachedPath)
+                    && IsReusableExtraction(cachedPath, stream.Length))
+                {
+                    return cachedPath;
+                }
 
-            var tempPath = Path.Combine(tempDir, $"{TempFilePrefix}{Guid.NewGuid():N}.xlsx");
+                // 一時ディレクトリに展開
+                var tempDir = Path.Combine(Path.GetTempPath(), "ICCardManager");
+                Directory.CreateDirectory(tempDir);
 
-            using var fileStream = File.Create(tempPath);
-            stream.CopyTo(fileStream);
+                var tempPath = Path.Combine(tempDir, $"{TempFilePrefix}{Guid.NewGuid():N}.xlsx");
 
-            return tempPath;
+                try
+                {
+                    using (var fileStream = File.Create(tempPath))
+                    {
+                        stream.CopyTo(fileStream);
+                    }
+                }
+                catch
+                {
+                    // 書き込みが途中で切れたファイルを残さない（残れば次回起動時の掃除まで積み上がる）
+                    TryDeleteFile(tempPath);
+                    throw;
+                }
+
+                // 書き込みが完了してから登録する（途中で失敗したファイルを再利用の候補にしない）
+                ExtractedTemplatePaths[departmentType] = tempPath;
+                return tempPath;
+            }
+        }
+
+        /// <summary>
+        /// 展開済みの一時テンプレートを再利用してよいか
+        /// </summary>
+        private static bool IsReusableExtraction(string path, long expectedLength)
+        {
+            try
+            {
+                var info = new FileInfo(path);
+                return info.Exists && info.Length == expectedLength;
+            }
+            catch (Exception ex) when (ex is IOException || ex is UnauthorizedAccessException)
+            {
+                // 状態を確かめられないファイルは使わず、展開し直す
+                return false;
+            }
+        }
+
+        private static void TryDeleteFile(string path)
+        {
+            try
+            {
+                File.Delete(path);
+            }
+            catch (Exception ex) when (ex is IOException || ex is UnauthorizedAccessException)
+            {
+                // 削除できなくても次回起動時の CleanupTempFiles が回収する
+            }
         }
 
         /// <summary>

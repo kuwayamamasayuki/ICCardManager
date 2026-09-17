@@ -18,6 +18,7 @@ namespace ICCardManager.Tests.Services;
 /// <summary>
 /// ReportServiceの単体テスト
 /// </summary>
+[Collection(TemplateTempFileCollection.Name)]
 public class ReportServiceTests : IDisposable
 {
     private readonly Mock<ICardRepository> _cardRepositoryMock;
