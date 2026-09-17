@@ -233,7 +233,7 @@ public partial class ReportViewModel : ViewModelBase
     /// </summary>
     partial void OnSelectedYearChanged(int value)
     {
-        UpdateMonthButtonHighlights();
+        OnTargetPeriodChanged();
     }
 
     /// <summary>
@@ -241,6 +241,23 @@ public partial class ReportViewModel : ViewModelBase
     /// </summary>
     partial void OnSelectedMonthChanged(int value)
     {
+        OnTargetPeriodChanged();
+    }
+
+    /// <summary>
+    /// 対象年月（年または月）が実際に変わったときの共通処理
+    /// </summary>
+    /// <remarks>
+    /// Issue #2059: 事前チェックの警告マークは検査した年月の結果であり、マーク自身は年月を持たない。
+    /// 年月が変わった後も残すと、問題の無い月を「警告あり」、問題のある月を「問題なし」と読ませる。
+    /// 生成された setter は値が変わったときだけ本メソッドへ到達するため、同じ年月の再選択では消えない。
+    /// 出力先フォルダは事前チェックの結果に影響しないので、フォルダの変更では消さない。
+    /// ハイライトの更新（<see cref="UpdateMonthButtonHighlights"/>）とは分けておく — ハイライトだけを
+    /// 更新し直す用途で呼ばれたときに、年月が変わっていないのにマークを消さないため。
+    /// </remarks>
+    private void OnTargetPeriodChanged()
+    {
+        ClearPreflightWarnings();
         UpdateMonthButtonHighlights();
     }
 
@@ -254,6 +271,7 @@ public partial class ReportViewModel : ViewModelBase
 
         IsThisMonthSelected = (SelectedYear == now.Year && SelectedMonth == now.Month);
         IsLastMonthSelected = (SelectedYear == lastMonth.Year && SelectedMonth == lastMonth.Month);
+
 
         // Issue #1691: 対象年月が変われば「出力済み / 未出力」も変わる。
         // 初期化前（コンストラクタでの既定値設定）は出力先フォルダが未確定のため走らせない。
@@ -627,8 +645,18 @@ public partial class ReportViewModel : ViewModelBase
     /// チェック対象は選択中のカードのみのため、実行のたびに全カードを0件へ戻してから
     /// 検出件数を割り当てる（前回チェック時の古い警告件数が残らないようにする）。
     /// </remarks>
-    internal void ApplyPreflightWarnings(ReportPreflightResult result)
+    /// <param name="result">チェック結果</param>
+    /// <param name="checkedYear">検査した年（画面の現在値ではない。Issue #2059）</param>
+    /// <param name="checkedMonth">検査した月（同上）</param>
+    internal void ApplyPreflightWarnings(ReportPreflightResult result, int checkedYear, int checkedMonth)
     {
+        // Issue #2059: 検査の待機中に年月が変わっていたら、結果を書き戻さない。
+        // 年月の変更で一度消したマークを、検査していない年月の画面へ古い結果で復活させることになる。
+        if (checkedYear != SelectedYear || checkedMonth != SelectedMonth)
+        {
+            return;
+        }
+
         var countByCardIdm = (result?.Warnings ?? new List<ReportPreflightWarning>())
             .Where(w => w != null && !string.IsNullOrEmpty(w.CardIdm))
             .GroupBy(w => w.CardIdm)
@@ -638,6 +666,17 @@ public partial class ReportViewModel : ViewModelBase
         {
             card.PreflightWarningCount =
                 countByCardIdm.TryGetValue(card.CardIdm, out var count) ? count : 0;
+        }
+    }
+
+    /// <summary>
+    /// 全カードの事前チェック警告マークを消す（Issue #2059: 対象年月の変更時）
+    /// </summary>
+    private void ClearPreflightWarnings()
+    {
+        foreach (var card in Cards)
+        {
+            card.PreflightWarningCount = 0;
         }
     }
 
@@ -1003,7 +1042,7 @@ public partial class ReportViewModel : ViewModelBase
             var result = await _preflightChecker.CheckAsync(cardIdms, targetYear, targetMonth);
 
             // Issue #1691: 警告のあるカードを一覧上でマークする
-            ApplyPreflightWarnings(result);
+            ApplyPreflightWarnings(result, targetYear, targetMonth);
 
             return result;
         }
