@@ -414,9 +414,7 @@ namespace ICCardManager.Services
                 var data = await _reportDataBuilder.BuildAsync(cardIdm, year, month).ConfigureAwait(false);
                 if (data == null)
                 {
-                    return ReportGenerationResult.FailureResult(
-                        "カード情報が見つかりません",
-                        $"指定されたカード（IDm: {cardIdm}）は登録されていません。");
+                    return CardNotFound(cardIdm);
                 }
 
                 var card = data.Card;
@@ -639,6 +637,44 @@ namespace ICCardManager.Services
                     $"{ExceptionMessageFormatter.ToReason(ex)}\n\n詳細はログファイルを確認してください。");
             }
         }
+
+        /// <summary>
+        /// 対象の交通系ICカードが DB に見つからないときの失敗結果を返し、マスクした IDm をログへ残す（Issue #2049）
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// 帳票作成画面が表示している一覧と DB の登録内容が食い違い、カードのレコード自体が無いときに到達する
+        /// （削除済みカードは <c>includeDeleted: true</c> で取得するため、論理削除では到達しない）。
+        /// </para>
+        /// <para>
+        /// 生の IDm は文言にもログにも出さない（#1852 / #1986）。職員は 16 桁の IDm から対象を特定できず、
+        /// 一括作成の失敗一覧には管理番号が並ぶので、文言は IDm を必要としない。
+        /// 文言のファクトリ（<see cref="BuildCardNotFoundResult"/>）は IDm を受け取らない形にして、
+        /// 規約ではなく構造で露出を防ぐ。
+        /// </para>
+        /// </remarks>
+        private ReportGenerationResult CardNotFound(string cardIdm)
+        {
+            _logger.LogWarning(
+                "帳票作成の対象の交通系ICカードがデータベースに見つかりません: {CardIdm}",
+                IdmMasker.Mask(cardIdm));
+            return BuildCardNotFoundResult();
+        }
+
+        /// <summary>
+        /// 対象の交通系ICカードが見つからないときの失敗結果（Issue #2049）
+        /// </summary>
+        /// <remarks>
+        /// 一括作成の失敗一覧（<c>ReportViewModel</c>）は <see cref="ReportGenerationResult.ErrorMessage"/> だけを
+        /// 「・はやかけん 001: …」の形で並べ、<see cref="ReportGenerationResult.DetailedErrorMessage"/> は表示しない。
+        /// 行動指示を詳細側にだけ書くと職員へ届かないため、見出し側にも短い行動指示を含める。
+        /// </remarks>
+        internal static ReportGenerationResult BuildCardNotFoundResult()
+            => ReportGenerationResult.FailureResult(
+                "交通系ICカードが登録されていません。帳票作成画面を開き直してください",
+                "対象の交通系ICカードがデータベースに見つかりません。" +
+                "画面に表示中の一覧が、データベースの登録内容と食い違っている可能性があります。" +
+                "帳票作成画面を開き直し、一覧から対象の交通系ICカードを選び直してください。");
 
         /// <summary>
         /// 既存の年度ファイルが壊れていて開けないときの案内文言を組み立てる（Issue #2040）
@@ -1237,9 +1273,7 @@ namespace ICCardManager.Services
                 var card = await _cardRepository.GetByIdmAsync(cardIdm, includeDeleted: true).ConfigureAwait(false);
                 if (card == null)
                 {
-                    results.Add((cardIdm, null, ReportGenerationResult.FailureResult(
-                        "カード情報が見つかりません",
-                        $"指定されたカード（IDm: {cardIdm}）は登録されていません。")));
+                    results.Add((cardIdm, null, CardNotFound(cardIdm)));
                     continue;
                 }
 
