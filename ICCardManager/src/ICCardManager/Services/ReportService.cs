@@ -668,13 +668,12 @@ namespace ICCardManager.Services
         /// 一括作成の失敗一覧（<c>ReportViewModel</c>）は <see cref="ReportGenerationResult.ErrorMessage"/> だけを
         /// 「・はやかけん 001: …」の形で並べ、<see cref="ReportGenerationResult.DetailedErrorMessage"/> は表示しない。
         /// 行動指示を詳細側にだけ書くと職員へ届かないため、見出し側にも短い行動指示を含める。
+        /// 文言は印刷プレビュー（Issue #2066）と共有する（<see cref="ReportCardNotFoundMessage"/>）。
         /// </remarks>
         internal static ReportGenerationResult BuildCardNotFoundResult()
             => ReportGenerationResult.FailureResult(
-                "交通系ICカードが登録されていません。帳票作成画面を開き直してください",
-                "対象の交通系ICカードがデータベースに見つかりません。" +
-                "画面に表示中の一覧が、データベースの登録内容と食い違っている可能性があります。" +
-                "帳票作成画面を開き直し、一覧から対象の交通系ICカードを選び直してください。");
+                ReportCardNotFoundMessage.Headline,
+                ReportCardNotFoundMessage.Detail);
 
         /// <summary>
         /// 既存の年度ファイルが壊れていて開けないときの案内文言を組み立てる（Issue #2040）

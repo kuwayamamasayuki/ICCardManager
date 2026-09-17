@@ -1112,13 +1112,18 @@ public partial class ReportViewModel : ViewModelBase
         var targetYear = SelectedYear;
         var targetMonth = SelectedMonth;
 
+        // Issue #2066: 前回のプレビューの失敗表示を残さない（成功したのに古いエラーが並ぶのを防ぐ）
+        SetStatus(string.Empty, false);
+
         using (BeginBusy("プレビューを準備中..."))
         {
             // 帳票データを取得
             var reportData = await _printService.GetReportDataAsync(card.CardIdm, targetYear, targetMonth);
             if (reportData == null)
             {
-                SetStatus("帳票データを取得できませんでした", true);
+                // Issue #2066: null は「対象の交通系ICカードが DB に無い」ときだけ（痕跡は PrintService がログへ残す）。
+                // 帳票作成（#2049）と同じ原因なので、文言も同じものを使う。
+                SetStatus(ReportCardNotFoundMessage.Headline, true);
                 return;
             }
 
@@ -1166,6 +1171,9 @@ public partial class ReportViewModel : ViewModelBase
         var previewYear = SelectedYear;
         var previewMonth = SelectedMonth;
 
+        // Issue #2066: 前回のプレビューの失敗表示を残さない
+        SetStatus(string.Empty, false);
+
         // 複数カードの場合は結合ドキュメントを生成
         using (BeginBusy($"プレビューを準備中... ({previewCards.Count}件)"))
         {
@@ -1174,25 +1182,56 @@ public partial class ReportViewModel : ViewModelBase
 
             // 各カードの帳票データを取得
             var reportDataList = new List<Services.ReportPrintData>();
+            var foundCards = new List<CardDto>();
+            var missingCardNames = new List<string>();
             foreach (var cardVm in orderedSelectedCards)
             {
                 var data = await _printService.GetReportDataAsync(cardVm.CardIdm, previewYear, previewMonth);
                 if (data != null)
                 {
                     reportDataList.Add(data);
+                    foundCards.Add(cardVm);
+                }
+                else
+                {
+                    // Issue #2066: 黙って除外すると、抜けたことに気付かないまま印刷し得る（物品出納簿が 1 枚欠ける）。
+                    // 名指しには一覧の表示名（スナップショット）を使い、IDm は出さない（#1852 / #1986）。
+                    missingCardNames.Add(cardVm.DisplayName);
                 }
             }
 
             if (reportDataList.Count == 0)
             {
-                SetStatus("帳票データを取得できませんでした", true);
+                SetStatus(ReportCardNotFoundMessage.ForAllMissingPreview(missingCardNames.Count), true);
                 return;
             }
 
-            // ドキュメントタイトルを生成（表示順で）
-            var documentTitle = orderedSelectedCards.Count == 2
-                ? $"物品出納簿_{orderedSelectedCards[0].DisplayName}_{orderedSelectedCards[1].DisplayName}_{previewYear}年{previewMonth}月"
-                : $"物品出納簿_{orderedSelectedCards.Count}件_{previewYear}年{previewMonth}月";
+            if (missingCardNames.Count > 0)
+            {
+                // Issue #2066: 一部だけ見つからないときは、残りで続けるかを職員に委ねる。
+                // Issue #1793: 処理中スコープの内側で同期モーダルを出すので SuspendBusy で囲む。
+                bool proceed;
+                using (SuspendBusy())
+                {
+                    proceed = _navigationService.ShowWarningConfirmation(
+                        ReportCardNotFoundMessage.ForPartialPreviewConfirmation(missingCardNames, reportDataList.Count),
+                        "印刷プレビュー");
+                }
+
+                if (!proceed)
+                {
+                    // ダイアログは閉じているので、どのカードが原因だったかを画面に残す
+                    SetStatus(ReportCardNotFoundMessage.ForPartialPreviewCancelledStatus(missingCardNames), true);
+                    return;
+                }
+
+                // プレビューを閉じた後にも、除外したカードがあったことを画面に残す
+                SetStatus(ReportCardNotFoundMessage.ForPartialPreviewStatus(missingCardNames), true);
+            }
+
+            // ドキュメントタイトルを生成（表示順で）。
+            // Issue #2066: 実際にプレビューへ含めたカードで名付ける（除外したカードの名前・件数を載せない）。
+            var documentTitle = BuildMultiplePreviewDocumentTitle(foundCards, previewYear, previewMonth);
 
             // プレビューダイアログを表示（List<ReportPrintData>を渡して用紙方向変更時に再生成可能に）
             // Issue #1793: 単票プレビューと同じ理由で SuspendBusy で囲む。
@@ -1207,6 +1246,23 @@ public partial class ReportViewModel : ViewModelBase
                 });
             }
         }
+    }
+
+    /// <summary>
+    /// 複数カードのプレビューのドキュメントタイトルを組み立てる
+    /// </summary>
+    /// <remarks>
+    /// Issue #2066: 引数は<b>実際にプレビューへ含めたカード</b>。未登録で除外したカードを数えると、
+    /// 2 枚分のプレビューに「3件」と名付けることになる。除外の結果 1 枚だけ残ったときは単票プレビューと同じ形にする。
+    /// </remarks>
+    internal static string BuildMultiplePreviewDocumentTitle(IReadOnlyList<CardDto> previewedCards, int year, int month)
+    {
+        return previewedCards.Count switch
+        {
+            1 => $"物品出納簿_{previewedCards[0].CardType}_{previewedCards[0].CardNumber}_{year}年{month}月",
+            2 => $"物品出納簿_{previewedCards[0].DisplayName}_{previewedCards[1].DisplayName}_{year}年{month}月",
+            _ => $"物品出納簿_{previewedCards.Count}件_{year}年{month}月",
+        };
     }
 
     /// <summary>

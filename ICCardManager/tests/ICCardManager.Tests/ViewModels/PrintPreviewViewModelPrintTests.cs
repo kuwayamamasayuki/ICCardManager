@@ -35,7 +35,7 @@ public class PrintPreviewViewModelPrintTests
         private readonly Size? _dialogPageSize;
 
         public FakePrintService(Size? dialogPageSize)
-            : base(new Mock<IReportDataBuilder>().Object)
+            : base(new Mock<IReportDataBuilder>().Object, Microsoft.Extensions.Logging.Abstractions.NullLogger<PrintService>.Instance)
         {
             _dialogPageSize = dialogPageSize;
         }
