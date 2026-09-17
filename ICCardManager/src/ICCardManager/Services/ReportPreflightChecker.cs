@@ -21,6 +21,13 @@ namespace ICCardManager.Services
     /// 「帳票には出ているのにチェックは通る」という乖離が生まれるため。
     /// 例外は未返却検出のみで、ReportDataBuilder が貸出中レコード（is_lent_record = 1）を除外するため
     /// <see cref="ILedgerRepository.GetAllLentRecordsAsync"/> から別途取得する。
+    ///
+    /// Issue #2050: 帳票作成（<see cref="ReportService.CreateMonthlyReportAsync"/>）は、ここで組み立てた
+    /// <see cref="MonthlyReportData"/> を受け取らず、カードごとに組み立て直す（意図的な二重ビルド）。
+    /// チェック結果を見て「続行」を選ぶまでの間（ダイアログ・上書き確認）に、共有モードでは他の PC が
+    /// 返却・履歴の修正を行い得る。チェック時点のデータを使い回すと、その変更を含まない古い内容が
+    /// 6 年保存の物品出納簿へ書き込まれる。1 カードあたりの DB 往復は通常数回（カード・前年度繰越・
+    /// 前月末残高・当月・年度範囲）に抑えてあり、正確さと引き換えにするほどの差ではない。
     /// </remarks>
     public class ReportPreflightChecker
     {
