@@ -72,7 +72,7 @@
                            TextWrapping="Wrap"
                            VerticalAlignment="Center"
                            Margin="0,0,12,0"
-                           AutomationProperties.Name="集計の基準日時">
+                           AutomationProperties.HelpText="集計の基準日時">
                     <Run Text="📊 集計基準:"/>
                     <Run Text="{Binding AsOf, Mode=OneWay, StringFormat='{}{0:yyyy/MM/dd HH:mm}'}"/>
                 </TextBlock>
@@ -688,7 +688,7 @@
                        VerticalAlignment="Center"
                        Margin="0,0,12,0"
                        AutomationProperties.LiveSetting="Polite"
-                       AutomationProperties.Name="操作の結果"/>
+                       AutomationProperties.HelpText="操作の結果"/>
 
             <!-- テキストが2行に折り返してもボタンが縦に引き伸ばされないよう中央揃え -->
             <StackPanel Grid.Column="1"
@@ -740,7 +740,7 @@
                            Margin="0,10,0,0"
                            HorizontalAlignment="Center"
                            AutomationProperties.LiveSetting="Assertive"
-                           AutomationProperties.Name="集計の実行状況"/>
+                           AutomationProperties.HelpText="集計の実行状況"/>
             </StackPanel>
         </Border>
     </Grid>
