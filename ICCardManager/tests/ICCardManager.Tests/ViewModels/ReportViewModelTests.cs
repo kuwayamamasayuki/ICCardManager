@@ -1441,6 +1441,191 @@ public class ReportViewModelTests
         _viewModel.ExportStatusSummary.Should().BeEmpty();
     }
 
+    #region 出力状況の更新の陳腐化（Issue #2058）
+
+    /// <summary>
+    /// 月ごとに <c>GetStatuses</c> を止めるゲート。判定の待機中という割り込み点を、
+    /// スレッドを競争させずに確定的に再現する。
+    /// </summary>
+    private sealed class ExportStatusGate
+    {
+        private readonly Dictionary<int, (ManualResetEventSlim Entered, ManualResetEventSlim Release)> _gates = new();
+
+        public void Block(int month) =>
+            _gates[month] = (new ManualResetEventSlim(false), new ManualResetEventSlim(false));
+
+        public void WaitUntilEntered(int month) =>
+            _gates[month].Entered.Wait(TimeSpan.FromSeconds(10)).Should().BeTrue($"{month}月の判定が開始されること");
+
+        public void Release(int month) => _gates[month].Release.Set();
+
+        public void PassThrough(int month)
+        {
+            if (_gates.TryGetValue(month, out var gate))
+            {
+                gate.Entered.Set();
+                gate.Release.Wait(TimeSpan.FromSeconds(10)).Should().BeTrue($"{month}月の判定の待機が解除されること");
+            }
+        }
+    }
+
+    /// <summary>
+    /// 月ごとに異なる判定結果を返し、ゲートで止められるようにする。
+    /// 5月は全カード「出力済み」、6月は全カード「未出力」。
+    /// </summary>
+    private ExportStatusGate SetupMonthDependentExportStatuses(Func<int, Exception> failure = null)
+    {
+        var gate = new ExportStatusGate();
+        _exportStatusServiceMock
+            .Setup(s => s.GetStatuses(
+                It.IsAny<IEnumerable<ReportExportTarget>>(),
+                It.IsAny<string>(),
+                It.IsAny<int>(),
+                It.IsAny<int>()))
+            .Returns((IEnumerable<ReportExportTarget> targets, string folder, int year, int month) =>
+            {
+                gate.PassThrough(month);
+                var ex = failure?.Invoke(month);
+                if (ex != null)
+                {
+                    throw ex;
+                }
+
+                var state = month == 5 ? ReportExportState.Exported : ReportExportState.NotExported;
+                return targets
+                    .Select(t => new ReportExportStatus { CardIdm = t.CardIdm, State = state })
+                    .ToList();
+            });
+        return gate;
+    }
+
+    /// <summary>
+    /// 判定の待機中に年月を変えても、集計文言は判定に使った年月の名前になること（欠陥 1）
+    /// </summary>
+    [Fact]
+    public async Task RefreshExportStatusAsync_WhenMonthChangesWhileChecking_ShouldNameSummaryWithCheckedMonth()
+    {
+        // Arrange
+        await LoadThreeCardsAsync();
+        _viewModel.SelectedYear = 2026;
+        _viewModel.SelectedMonth = 5;
+        var gate = SetupMonthDependentExportStatuses();
+        gate.Block(5);
+
+        // Act: 5月の判定を待機させている間に 6月へ変える
+        var refreshMay = _viewModel.RefreshExportStatusAsync();
+        gate.WaitUntilEntered(5);
+        _viewModel.SelectedMonth = 6;
+        gate.Release(5);
+        await refreshMay;
+
+        // Assert: 5月の結果は 5月の名前で表示される
+        _viewModel.ExportStatusSummary.Should().Be("2026年5月: 出力済み 3件 / 未出力 0件");
+        _viewModel.ExportStatusSummary.Should().NotContain("6月");
+    }
+
+    /// <summary>
+    /// 先に始まった更新が後から終わっても、後から始まった更新の結果が残ること（欠陥 2）
+    /// </summary>
+    [Fact]
+    public async Task RefreshExportStatusAsync_WhenOlderRefreshFinishesLast_ShouldKeepNewerResult()
+    {
+        // Arrange
+        await LoadThreeCardsAsync();
+        _viewModel.SelectedYear = 2026;
+        _viewModel.SelectedMonth = 5;
+        var gate = SetupMonthDependentExportStatuses();
+        gate.Block(5);
+
+        // Act: 5月の更新を止めたまま 6月の更新を完了させ、その後に 5月の更新を終わらせる
+        var refreshMay = _viewModel.RefreshExportStatusAsync();
+        gate.WaitUntilEntered(5);
+        _viewModel.SelectedMonth = 6;
+        await _viewModel.RefreshExportStatusAsync();
+        gate.Release(5);
+        await refreshMay;
+
+        // Assert: 6月の結果（未出力）が残り、5月の「出力済み」バッジで上書きされない
+        _viewModel.Cards.Should().OnlyContain(c => c.ExportState == ReportExportState.NotExported);
+        _viewModel.ExportStatusSummary.Should().Be("2026年6月: 出力済み 0件 / 未出力 3件");
+    }
+
+    /// <summary>
+    /// 古い更新の失敗で、新しい更新の成功結果を消さないこと
+    /// </summary>
+    [Fact]
+    public async Task RefreshExportStatusAsync_WhenOlderRefreshFailsLast_ShouldKeepNewerResult()
+    {
+        // Arrange
+        await LoadThreeCardsAsync();
+        _viewModel.SelectedYear = 2026;
+        _viewModel.SelectedMonth = 5;
+        var gate = SetupMonthDependentExportStatuses(
+            month => month == 5 ? new IOException("network path was not found") : null);
+        gate.Block(5);
+
+        // Act
+        var refreshMay = _viewModel.RefreshExportStatusAsync();
+        gate.WaitUntilEntered(5);
+        _viewModel.SelectedMonth = 6;
+        await _viewModel.RefreshExportStatusAsync();
+        gate.Release(5);
+        await refreshMay;
+
+        // Assert
+        _viewModel.Cards.Should().OnlyContain(c => c.ExportState == ReportExportState.NotExported);
+        _viewModel.ExportStatusSummary.Should().Be("2026年6月: 出力済み 0件 / 未出力 3件");
+    }
+
+    /// <summary>
+    /// 対の表明: 待機を挟んでも、更新が 1 本だけなら結果が反映されること
+    /// （世代判定が結果を常に捨てる実装を検出する）
+    /// </summary>
+    [Fact]
+    public async Task RefreshExportStatusAsync_WhenSingleRefreshWaits_ShouldApplyResult()
+    {
+        // Arrange
+        await LoadThreeCardsAsync();
+        _viewModel.SelectedYear = 2026;
+        _viewModel.SelectedMonth = 5;
+        var gate = SetupMonthDependentExportStatuses();
+        gate.Block(5);
+
+        // Act
+        var refreshMay = _viewModel.RefreshExportStatusAsync();
+        gate.WaitUntilEntered(5);
+        gate.Release(5);
+        await refreshMay;
+
+        // Assert
+        _viewModel.Cards.Should().OnlyContain(c => c.ExportState == ReportExportState.Exported);
+        _viewModel.ExportStatusSummary.Should().Be("2026年5月: 出力済み 3件 / 未出力 0件");
+    }
+
+    /// <summary>
+    /// 対の表明: 1 本だけの更新が失敗したら、バッジを消して失敗を案内すること（#1996 を維持）
+    /// </summary>
+    [Fact]
+    public async Task RefreshExportStatusAsync_WhenSingleRefreshFails_ShouldClearBadgesAndReportFailure()
+    {
+        // Arrange
+        await LoadThreeCardsAsync();
+        _viewModel.SelectedYear = 2026;
+        _viewModel.SelectedMonth = 5;
+        SetupMonthDependentExportStatuses();
+        await _viewModel.RefreshExportStatusAsync();
+        SetupMonthDependentExportStatuses(_ => new IOException("network path was not found"));
+
+        // Act
+        await _viewModel.RefreshExportStatusAsync();
+
+        // Assert
+        _viewModel.Cards.Should().OnlyContain(c => c.ExportState == ReportExportState.Unknown);
+        _viewModel.ExportStatusSummary.Should().Contain("出力状況を確認できませんでした");
+    }
+
+    #endregion
+
     /// <summary>
     /// 一括出力の対象選択は払戻済カードを除外すること
     /// </summary>
