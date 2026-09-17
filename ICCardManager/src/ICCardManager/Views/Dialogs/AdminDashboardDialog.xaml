@@ -732,7 +732,7 @@
                              Value="{Binding ProgressValue}"
                              Maximum="{Binding ProgressMax}"
                              Width="200" Height="20"
-                             Foreground="{DynamicResource PrimaryBrush}"/>
+                             Foreground="{DynamicResource InfoTextBrush}"/>
                 <TextBlock Text="{Binding BusyMessage}"
                            Foreground="{DynamicResource OnPrimaryBrush}"
                            FontSize="{DynamicResource BaseFontSize}"

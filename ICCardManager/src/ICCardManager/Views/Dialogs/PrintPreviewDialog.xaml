@@ -209,7 +209,7 @@
                 <!-- ステータスメッセージ -->
                 <TextBlock Grid.Column="0"
                            Text="{Binding StatusMessage}"
-                           Foreground="{DynamicResource PrimaryBrush}"
+                           Foreground="{DynamicResource InfoTextBrush}"
                            FontWeight="Bold"
                            VerticalAlignment="Center"
                            AutomationProperties.LiveSetting="Polite"/>

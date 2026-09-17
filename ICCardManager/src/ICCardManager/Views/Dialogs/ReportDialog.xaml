@@ -362,7 +362,7 @@
                        AutomationProperties.HelpText="帳票作成ステータス">
                 <TextBlock.Style>
                     <Style TargetType="TextBlock">
-                        <Setter Property="Foreground" Value="{DynamicResource PrimaryBrush}"/>
+                        <Setter Property="Foreground" Value="{DynamicResource InfoTextBrush}"/>
                         <Style.Triggers>
                             <DataTrigger Binding="{Binding IsStatusError}" Value="True">
                                 <Setter Property="Foreground" Value="{DynamicResource DangerTextBrush}"/>
@@ -430,7 +430,7 @@
                              Value="{Binding ProgressValue}"
                              Maximum="{Binding ProgressMax}"
                              Width="250" Height="20"
-                             Foreground="{DynamicResource PrimaryBrush}"
+                             Foreground="{DynamicResource InfoTextBrush}"
                              AutomationProperties.Name="帳票作成進捗"
                              AutomationProperties.HelpText="帳票作成処理の進行状況を示します。"/>
                 <TextBlock Text="{Binding BusyMessage}"

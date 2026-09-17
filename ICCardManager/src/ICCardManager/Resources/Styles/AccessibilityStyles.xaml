@@ -53,6 +53,9 @@
     <SolidColorBrush x:Key="WaitingBorderBrush" Color="#9E9E9E"/>
 
     <!-- プライマリカラー -->
+    <!-- PrimaryBrush は主要ボタンの塗り・枠線・選択状態のアクセント。地色 #F5F5F5 に対して
+         4.22:1 しかないため文字色には使わない（Issue #2074）。青系の文字色が要るときは
+         InfoTextBrush(#1565C0、地色 5.27:1) を使う -->
     <SolidColorBrush x:Key="PrimaryBrush" Color="#1976D2"/>
     <SolidColorBrush x:Key="PrimaryDarkBrush" Color="#0D47A1"/>
     <SolidColorBrush x:Key="PrimaryLightBrush" Color="#BBDEFB"/>
@@ -71,9 +74,13 @@
     <SolidColorBrush x:Key="OnPrimaryBrush" Color="#FFFFFF"/>
 
     <!-- テキストカラー -->
-    <!-- SecondaryTextBrush は旧 Color="Gray"（#808080、白背景 3.95:1）。補足説明として 20 箇所以上で
-         使われる最多の文字色でありながら AA に届いていなかった。#757575（4.61:1）へ是正する（Issue #2074） -->
-    <SolidColorBrush x:Key="SecondaryTextBrush" Color="#757575"/>
+    <!-- SecondaryTextBrush は旧 Color="Gray"（#808080、白背景 3.95:1）。補足説明として 90 箇所以上で
+         使われる最多の文字色でありながら AA に届いていなかった。#6E6E6E へ是正する（Issue #2074）。
+         判定の地色は白ではなく NeutralBackgroundBrush(#F5F5F5) — 文字が載る面は白だけでなく
+         一覧の交互行(#FAFAFA)とパネル(#F5F5F5)があり、暗い文字にはそちらのほうが厳しい。
+         白基準で選んだ #757575 は白 4.61:1 に対しパネル上 4.23:1 で未達だった（コードレビューで検出）。
+         #6E6E6E は 白 5.10:1 / 交互行 4.89:1 / パネル 4.68:1 -->
+    <SolidColorBrush x:Key="SecondaryTextBrush" Color="#6E6E6E"/>
     <SolidColorBrush x:Key="MutedTextBrush" Color="#666666"/>
     <SolidColorBrush x:Key="DangerTextBrush" Color="#D32F2F"/>
     <!-- ヒント／補足説明用（Brown 700）。色覚多様性に配慮した茶色系で、💡や⚠の説明文に使う（Issue #1461） -->

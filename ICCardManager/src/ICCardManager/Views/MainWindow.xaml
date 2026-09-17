@@ -225,7 +225,7 @@
                              AutomationProperties.Name="残り時間プログレスバー">
                     <ProgressBar.Style>
                         <Style TargetType="ProgressBar">
-                            <Setter Property="Foreground" Value="{DynamicResource PrimaryBrush}"/>
+                            <Setter Property="Foreground" Value="{DynamicResource InfoTextBrush}"/>
                             <Style.Triggers>
                                 <DataTrigger Binding="{Binding IsTimeoutWarning}" Value="True">
                                     <Setter Property="Foreground" Value="{DynamicResource WarningForegroundBrush}"/>
@@ -1232,7 +1232,7 @@
                         <Style TargetType="TextBlock">
                             <!-- 既定: Connected -->
                             <Setter Property="Text" Value="🔗 共有モード"/>
-                            <Setter Property="Foreground" Value="{DynamicResource PrimaryBrush}"/>
+                            <Setter Property="Foreground" Value="{DynamicResource InfoTextBrush}"/>
                             <Setter Property="ToolTip" Value="共有フォルダ上のデータベースに接続中です（複数PC同時利用）"/>
                             <Style.Triggers>
                                 <DataTrigger Binding="{Binding SharedDbConnectionState}"

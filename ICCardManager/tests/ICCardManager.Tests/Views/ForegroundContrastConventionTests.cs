@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Text.RegularExpressions;
@@ -10,7 +11,7 @@ using Xunit;
 namespace ICCardManager.Tests.Views;
 
 /// <summary>
-/// Issue #2074: 文字色として使うブラシが、白背景（アプリの既定面）で WCAG AA の
+/// Issue #2074: 文字色として使うブラシが、アプリの面（背景）に対して WCAG AA の
 /// コントラスト比 4.5:1 を満たすことを固定する。
 /// </summary>
 /// <remarks>
@@ -24,16 +25,32 @@ namespace ICCardManager.Tests.Views;
 /// 守りたい性質（可読性）は<b>解決後の色値</b>で表明する。
 /// </para>
 /// <para>
-/// 走査対象はファイル名で列挙せず <c>Views/</c> 配下の XAML から導出する
-/// （<c>.claude/rules/development-conventions.md</c> #1786「ガードを書くときは経路を列挙する」）。
-/// 色値は <c>AccessibilityStyles.xaml</c>（色値の Single Source of Truth、Issue #1392 / #1461）から読む。
+/// <b>走査は「文字色が決まる経路」を列挙して設計する</b>
+/// （<c>.claude/rules/development-conventions.md</c> #1786）。本リポジトリには 5 形あり、
+/// どれか 1 つでも落とすと実害のある箇所が丸ごと素通りする:
+/// </para>
+/// <list type="number">
+///   <item>属性形 <c>Foreground="{DynamicResource K}"</c></item>
+///   <item><c>&lt;Setter Property="Foreground" Value="{StaticResource K}"/&gt;</c>
+///         （メイン画面のカード一覧・ステータスバーはすべてこの形）</item>
+///   <item><c>Foreground="{Binding P, Converter={StaticResource ResourceKeyToBrushConverter}}"</c>
+///         → C# のプロパティ <c>P</c> がキー文字列を返す</item>
+///   <item>コードビハインドの <c>X.Foreground = …FindResource(k)</c>
+///         （<c>k</c> はローカル変数で、名前に <c>Foreground</c> を含むとは限らない）</item>
+///   <item>名前に <c>Foreground</c> を含むメンバーが返すキー
+///         （<c>DiagnosticStatusPresenter.GetForegroundResourceKey</c>）</item>
+/// </list>
+/// <para>
+/// 走査対象のファイルはファイル名で列挙せず本番ソースツリーから導出する。
+/// <b><c>Views/</c> だけに絞らない</b> — <c>Resources/Styles/AccessibilityStyles.xaml</c> は
+/// <c>TargetType</c> 単位の <c>Style</c> で文字色を決めており、個々の画面より波及が大きい。
 /// </para>
 /// <para>
 /// <b>本検査が見ないもの</b>: 濃色の塗り（<c>Background</c>）の上に白文字を載せる形の
 /// コントラスト。これは「背景側の色」を直す話で対象ブラシも修正箇所も異なるため、
 /// 本 Issue のスコープ外（別途起票）。ここでは白文字ブラシを
 /// <see cref="LightOnDarkBrushKeys"/> として明示的に除外し、除外が濃色へ静かに広がらないよう
-/// 「除外キーは実際に白背景では読めないほど明るいこと」を対で表明する。
+/// 「除外キーは地色では読めないほど明るいこと」を対で表明する。
 /// </para>
 /// </remarks>
 public class ForegroundContrastConventionTests
@@ -41,78 +58,60 @@ public class ForegroundContrastConventionTests
     /// <summary>
     /// WCAG 2.1 AA が通常サイズの文字に求めるコントラスト比。
     /// </summary>
-    private const double MinContrastAgainstWhite = 4.5;
+    private const double MinContrast = 4.5;
 
     /// <summary>
-    /// アプリの既定の地色。ダイアログ・一覧・ステータスバーはいずれも白系の面に文字を載せる。
+    /// 判定の基準にする地色。<b>白（#FFFFFF）ではない</b>。
     /// </summary>
-    private const string SurfaceColor = "#FFFFFF";
+    /// <remarks>
+    /// <para>
+    /// 文字が載る面は白だけではない。一覧の交互行（<c>AlternatingRowBrush</c> #FAFAFA）と
+    /// パネル（<c>NeutralBackgroundBrush</c> #F5F5F5）が全画面で使われており、
+    /// <b>暗い文字にとってはこれらのほうが厳しい</b>（同じ文字色でもコントラストは下がる）。
+    /// </para>
+    /// <para>
+    /// 白だけを見ると「4.5:1 を達成した」と宣言しながら実際には未達の組み合わせが残る。
+    /// #2074 の初版がまさにその形で、<c>SecondaryTextBrush</c>（最多の文字色）は
+    /// 白 4.61:1 に対し <c>NeutralBackgroundBrush</c> 上では 4.23:1 だった（コードレビューで検出）。
+    /// 3 面のうち<b>最も厳しい面</b>を基準にする。
+    /// </para>
+    /// <para>
+    /// 有彩色の面（選択行の <c>CheckedRowBackgroundBrush</c> 等）は本検査の対象外。
+    /// そこに載る文字色は面ごとに決まっており、面と文字の対応を静的に辿れないため。
+    /// </para>
+    /// </remarks>
+    private const string SurfaceColor = "#F5F5F5";
 
     /// <summary>
-    /// 「濃色の塗りの上に載せる文字色」として定義されており、白背景では使わないブラシ。
+    /// 基準の地色が実際に「最も厳しい面」であることを確かめるための、面のブラシキー。
+    /// </summary>
+    private static readonly string[] NeutralSurfaceBrushKeys =
+    {
+        "NeutralBackgroundBrush",
+        "AlternatingRowBrush",
+    };
+
+    /// <summary>
+    /// 「濃色の塗りの上に載せる文字色」として定義されており、明るい面では使わないブラシ。
     /// </summary>
     /// <remarks>
     /// 除外は<b>ホワイトリストではなく例外</b>であり、増えるときは必ずこの配列への追記になる。
     /// 追記された色が実は濃色（＝ただ検査を避けたいだけ）でないことは
-    /// <see cref="除外キーは白背景では読めないほど明るい色であること"/> が表明する。
+    /// <see cref="除外キーは明るい面では読めないほど明るい色であること"/> が表明する。
     /// </remarks>
     private static readonly string[] LightOnDarkBrushKeys = { "OnPrimaryBrush" };
 
-    /// <summary>
-    /// 属性として書かれた Foreground（<c>Foreground="{DynamicResource X}"</c>）。
-    /// </summary>
-    private static readonly Regex ForegroundAttributePattern = new Regex(
-        "Foreground\\s*=\\s*\"\\{(?:Dynamic|Static)Resource\\s+(?<key>[A-Za-z0-9_]+)\\}\"",
-        RegexOptions.Compiled);
-
-    /// <summary>
-    /// Style / Trigger の Setter として書かれた Foreground。
-    /// </summary>
-    /// <remarks>
-    /// 属性形だけを見ると、メイン画面のカード一覧・ステータスバーのように
-    /// <c>DataTrigger</c> で色を差し替える箇所（#2074 の実害の中心）を 1 件も拾えない。
-    /// </remarks>
-    private static readonly Regex ForegroundSetterPattern = new Regex(
-        "<Setter\\s+Property=\"Foreground\"\\s+Value=\"\\{(?:Dynamic|Static)Resource\\s+(?<key>[A-Za-z0-9_]+)\\}\"",
-        RegexOptions.Compiled);
-
-    /// <summary>
-    /// 名前に <c>Foreground</c> を含むメンバーの宣言。
-    /// </summary>
-    /// <remarks>
-    /// <para>
-    /// XAML だけを走査すると、C# 側が<b>文字列でブラシキーを組み立てる経路</b>が丸ごと漏れる。
-    /// 本リポジトリには 2 形あり、どちらも <c>ResourceKeyToBrushConverter</c> または
-    /// <c>TryFindResource</c> を経て最終的に <c>Foreground</c> になる:
-    /// </para>
-    /// <list type="bullet">
-    ///   <item><c>ToastNotificationWindow.xaml.cs</c> の <c>titleForegroundKey = "…";</c>（ローカル変数）</item>
-    ///   <item><c>DiagnosticStatusPresenter.GetForegroundResourceKey</c> の <c>return "…";</c>（メソッド）</item>
-    /// </list>
-    /// <para>
-    /// 「ファイル全体の文字列リテラルのうちブラシキーと一致するもの」を拾う形にすると、
-    /// 塗りに使うキー（<c>ChartGeometryCalculator</c> の <c>BrushKey</c>）まで巻き込む。
-    /// <b>名前に <c>Foreground</c> を含むメンバーの本体</b>に限って拾う。
-    /// </para>
-    /// </remarks>
-    private static readonly Regex ForegroundMemberDeclarationPattern = new Regex(
-        "\\b[A-Za-z0-9_]*[Ff]oreground[A-Za-z0-9_]*\\b",
-        RegexOptions.Compiled);
+    #region 検査
 
     [Fact]
-    public void 文字色に使うブラシは白背景で4対5対1以上のコントラストを持つこと()
+    public void 文字色に使うブラシは地色に対して4対5対1以上のコントラストを持つこと()
     {
         var brushes = LoadBrushes();
         var usages = CollectForegroundUsages();
 
         var violations = usages
             .Where(u => !LightOnDarkBrushKeys.Contains(u.Key, StringComparer.Ordinal))
-            .Select(u => new
-            {
-                u.Key,
-                Color = ResolveColor(brushes, u.Key),
-                u.Sources,
-            })
+            .Select(u => new { u.Key, Color = ResolveColor(brushes, u.Key), u.Sources })
             .Select(x => new
             {
                 x.Key,
@@ -120,9 +119,9 @@ public class ForegroundContrastConventionTests
                 x.Sources,
                 Contrast = ColorMetrics.Contrast(x.Color, SurfaceColor),
             })
-            .Where(x => x.Contrast < MinContrastAgainstWhite)
+            .Where(x => x.Contrast < MinContrast)
             .Select(x => string.Format(
-                System.Globalization.CultureInfo.InvariantCulture,
+                CultureInfo.InvariantCulture,
                 "{0} ({1}) = {2:F2}:1 — {3}",
                 x.Key,
                 x.Color,
@@ -131,14 +130,40 @@ public class ForegroundContrastConventionTests
             .ToList();
 
         violations.Should().BeEmpty(
-            "文字色は白背景で {0}:1 以上必要（Issue #2074）。"
-                + "枠線・塗り用のブラシ（*BorderBrush / *ActionBrush）ではなく "
+            "文字色は地色 {0} に対して {1}:1 以上必要（Issue #2074）。"
+                + "枠線・塗り用のブラシ（*BorderBrush / *ActionBrush / PrimaryBrush）ではなく "
                 + "*ForegroundBrush / *TextBrush を使うこと",
-            MinContrastAgainstWhite);
+            SurfaceColor,
+            MinContrast);
     }
 
     [Fact]
-    public void 除外キーは白背景では読めないほど明るい色であること()
+    public void 基準の地色が実際に最も厳しい面であること()
+    {
+        // 基準を「白」に戻す変更が入ったとき、それが緩和であることを検出する。
+        // 暗い文字にとっては、明るい面ほどコントラストが高い＝甘い判定になる。
+        var brushes = LoadBrushes();
+        var reference = ColorMetrics.RelativeLuminance(SurfaceColor);
+
+        ColorMetrics.RelativeLuminance("#FFFFFF").Should().BeGreaterThan(
+            reference, "白は基準の地色より明るい（＝判定が甘くなる）こと");
+
+        foreach (var key in NeutralSurfaceBrushKeys)
+        {
+            var color = ResolveColor(brushes, key);
+
+            ColorMetrics.RelativeLuminance(color).Should().BeGreaterOrEqualTo(
+                reference,
+                "{0} ({1}) は基準の地色 {2} 以上に明るいこと"
+                    + "（より暗い無彩色の面が増えたら基準を見直す）",
+                key,
+                color,
+                SurfaceColor);
+        }
+    }
+
+    [Fact]
+    public void 除外キーは明るい面では読めないほど明るい色であること()
     {
         var brushes = LoadBrushes();
 
@@ -149,104 +174,16 @@ public class ForegroundContrastConventionTests
             var color = ResolveColor(brushes, key);
 
             // 濃色を除外リストへ紛れ込ませると、本検査を避けるためだけの抜け道になる。
-            // 「濃色背景専用」を名乗る以上、白背景では実際に読めない明るさであること。
-            ColorMetrics.Contrast(color, SurfaceColor).Should().BeLessThan(
-                MinContrastAgainstWhite,
+            // 「濃色背景専用」を名乗る以上、明るい面では実際に読めない明るさであること。
+            ColorMetrics.Contrast(color, "#FFFFFF").Should().BeLessThan(
+                MinContrast,
                 "{0} は「濃色背景専用の文字色」として除外されている。"
-                    + "白背景でも読める濃さなら除外する理由が無い",
+                    + "明るい面でも読める濃さなら除外する理由が無い",
                 key);
 
             ColorMetrics.RelativeLuminance(color).Should().BeGreaterThan(
-                0.5,
-                "{0} は濃色の塗りの上に載せる明るい文字色であること", key);
+                0.5, "{0} は濃色の塗りの上に載せる明るい文字色であること", key);
         }
-    }
-
-    [Fact]
-    public void 走査が空振りしていないこと()
-    {
-        var usages = CollectForegroundUsages();
-
-        // 対象の抽出が壊れると、検査は何も見ないまま緑になる
-        usages.Should().HaveCountGreaterThan(
-            8, "Views 配下で文字色として使われているブラシが複数種類あること");
-
-        usages.Sum(u => u.Sources.Count).Should().BeGreaterThan(
-            30, "Foreground バインドの抽出が Setter 形・属性形の両方を拾えていること");
-
-        // 実害の中心だった DataTrigger の Setter 形が拾えていること（属性形だけを見る
-        // 検査に退行すると、メイン画面のカード一覧・ステータスバーが 1 件も走査されない）
-        usages.Should().Contain(
-            u => u.Sources.Any(s => s.StartsWith("MainWindow.xaml", StringComparison.Ordinal)),
-            "メイン画面の Foreground が走査対象に含まれること");
-
-        // コードビハインドがキー文字列で差し替える経路
-        usages.Should().Contain(
-            u => u.Sources.Any(s => s.StartsWith("ToastNotificationWindow.xaml.cs", StringComparison.Ordinal)),
-            "コードビハインドが差し替える文字色も走査対象に含まれること");
-
-        // ViewModel / Common がキー文字列を返し ResourceKeyToBrushConverter で解決する経路。
-        // Views/ だけを走査していると Common/ にあるこのファイルへ 1 件も届かない
-        usages.Should().Contain(
-            u => u.Sources.Any(s => s.StartsWith("DiagnosticStatusPresenter.cs", StringComparison.Ordinal)),
-            "C# 側がキー文字列で返す文字色も走査対象に含まれること");
-    }
-
-    [Fact]
-    public void 塗りに使うブラシキーを文字色として誤検出しないこと()
-    {
-        // 同じブラシキーは塗りにも使われる（ChartGeometryCalculator が SuccessActionBrush を
-        // 積み上げ棒の塗りとして受け取る）。塗りは 4.5:1 の対象ではないので、
-        // 「ファイル全体のリテラルを拾う」形に退行すると正当な既存コードが赤になる。
-        var brushKeys = LoadBrushes().Keys.ToList();
-
-        const string FillSource = @"
-public IReadOnlyList<Bar> CalculateBars(double[] values, string brushKey)
-{
-    var fallback = ""SuccessActionBrush"";
-    return Build(values, brushKey ?? fallback);
-}";
-
-        const string ForegroundSource = @"
-public static string GetForegroundResourceKey(DiagnosticStatus status)
-{
-    switch (status)
-    {
-        case DiagnosticStatus.Warning:
-            return ""WarningActionBrush"";
-        default:
-            return ""SecondaryTextBrush"";
-    }
-}";
-
-        ExtractForegroundMemberBrushKeys(FillSource, brushKeys)
-            .Should().BeEmpty("名前に Foreground を含まないメンバーの塗りキーは拾わないこと");
-
-        ExtractForegroundMemberBrushKeys(ForegroundSource, brushKeys)
-            .Should().BeEquivalentTo(
-                new[] { "WarningActionBrush", "SecondaryTextBrush" },
-                "名前に Foreground を含むメンバーが返すキーは本体まで辿って拾うこと");
-    }
-
-    [Theory]
-    // 旧実装が Foreground に使っていた枠線・塗り用のブラシ（検出されるべき）
-    [InlineData("#F44336", false)] // ErrorBorderBrush
-    [InlineData("#4CAF50", false)] // SuccessActionBrush
-    [InlineData("#FF9800", false)] // WarningActionBrush
-    [InlineData("#F57F17", false)] // 旧 WarningForegroundBrush（名前では捕まらない違反）
-    [InlineData("#808080", false)] // 旧 SecondaryTextBrush（Gray）
-    // 是正後の文字色（検出されないべき）
-    [InlineData("#B71C1C", true)] // ErrorForegroundBrush
-    [InlineData("#1B5E20", true)] // SuccessForegroundBrush
-    [InlineData("#AC5910", true)] // WarningForegroundBrush
-    [InlineData("#757575", true)] // SecondaryTextBrush
-    public void 判定ロジックが既知の入力で期待どおり動くこと(string color, bool expectedPass)
-    {
-        // 実データが空でも空振り検出が働くよう、判定そのものを既知の入力で固定する
-        // （.claude/rules/development-conventions.md #1786）
-        var passes = ColorMetrics.Contrast(color, SurfaceColor) >= MinContrastAgainstWhite;
-
-        passes.Should().Be(expectedPass);
     }
 
     [Fact]
@@ -272,11 +209,201 @@ public static string GetForegroundResourceKey(DiagnosticStatus status)
                 var b = ResolveColor(brushes, keys[j]);
 
                 ColorMetrics.MinDeltaEAcrossColorVisionTypes(a, b).Should().BeGreaterThan(
-                    8.0,
-                    "{0} と {1} は色覚多様性でも分離していること", keys[i], keys[j]);
+                    8.0, "{0} と {1} は色覚多様性でも分離していること", keys[i], keys[j]);
             }
         }
     }
+
+    #endregion
+
+    #region 空振り検出（走査が実際に各経路へ届いていること）
+
+    [Fact]
+    public void 走査が5つの経路すべてへ届いていること()
+    {
+        var usages = CollectForegroundUsages();
+        var sources = usages.SelectMany(u => u.Sources).Distinct(StringComparer.Ordinal).ToList();
+
+        usages.Should().HaveCountGreaterThan(
+            8, "文字色として使われているブラシが複数種類あること");
+
+        // ① 属性形 ② Setter 形（メイン画面のカード一覧・ステータスバーは Setter 形しかない）
+        sources.Should().Contain(
+            "MainWindow.xaml", "メイン画面の Foreground が走査対象に含まれること");
+
+        // TargetType 単位の Style。個々の画面より波及が大きいのに Views/ の外にある
+        sources.Should().Contain(
+            "AccessibilityStyles.xaml",
+            "スタイル辞書自身の Foreground が走査対象に含まれること");
+
+        // ③ Binding + ResourceKeyToBrushConverter → C# のプロパティ
+        sources.Should().Contain(
+            "ReportExportStatusPresenter.cs",
+            "Binding 経由で C# が返すキーが走査対象に含まれること");
+
+        // ④ コードビハインドの .Foreground = …FindResource(ローカル変数)
+        sources.Should().Contain(
+            "StaffAuthDialog.xaml.cs",
+            "ローカル変数を経由する文字色が走査対象に含まれること");
+        sources.Should().Contain(
+            "ToastNotificationWindow.xaml.cs",
+            "コードビハインドが差し替える文字色が走査対象に含まれること");
+
+        // ⑤ 名前に Foreground を含むメンバーが返すキー
+        sources.Should().Contain(
+            "DiagnosticStatusPresenter.cs",
+            "C# 側がキー文字列で返す文字色が走査対象に含まれること");
+    }
+
+    [Fact]
+    public void ブラシ定義の抽出が全件を拾えていること()
+    {
+        // 抽出漏れは非対称に効く。XAML 経路は ResolveColor が赤くなるが、
+        // C# 経路は「ブラシキーと一致しない」として収集自体が止まり緑のまま（fail-open）。
+        var xaml = StripXamlComments(File.ReadAllText(AccessibilityStylesPath));
+        var declared = Regex.Matches(xaml, "<SolidColorBrush\\b").Count;
+
+        LoadBrushes().Should().HaveCount(
+            declared,
+            "AccessibilityStyles.xaml の SolidColorBrush 定義をすべて抽出できていること"
+                + "（属性順や追加属性で正規表現から漏れると、そのキーだけ静かに検査されなくなる）");
+    }
+
+    [Fact]
+    public void システム色への参照を対象外としていること()
+    {
+        // AccessibilityStyles.xaml は {DynamicResource {x:Static SystemColors.…}} で
+        // OS の文字色へ委ねる箇所を持つ。ブラシキーではないので検査できないが、
+        // 「見ていない」ことを表明しておかないと、見落としと区別が付かない。
+        var xaml = StripXamlComments(File.ReadAllText(AccessibilityStylesPath));
+
+        Regex.Matches(xaml, "SystemColors\\.[A-Za-z]+BrushKey").Count.Should().BeGreaterThan(
+            0, "システム色への委譲が実在すること（消えたら本テストの前提が変わる）");
+
+        CollectForegroundUsages()
+            .Select(u => u.Key)
+            .Should().NotContain(
+                k => k.StartsWith("SystemColors", StringComparison.Ordinal),
+                "システム色は OS が決めるため本検査の対象外");
+    }
+
+    #endregion
+
+    #region 判定ロジックそのものの固定（実データが空でも働く）
+
+    [Theory]
+    // 旧実装が Foreground に使っていた枠線・塗り用のブラシ（検出されるべき）
+    [InlineData("#F44336", false)] // ErrorBorderBrush
+    [InlineData("#4CAF50", false)] // SuccessActionBrush
+    [InlineData("#FF9800", false)] // WarningActionBrush
+    [InlineData("#F57F17", false)] // 旧 WarningForegroundBrush（名前では捕まらない違反）
+    [InlineData("#808080", false)] // 旧 SecondaryTextBrush（Gray）
+    [InlineData("#757575", false)] // 白基準なら通るが地色基準では落ちる（4.61 → 4.23）
+    [InlineData("#1976D2", false)] // PrimaryBrush（同上。4.60 → 4.22）
+    // 是正後の文字色（検出されないべき）
+    [InlineData("#B71C1C", true)] // ErrorForegroundBrush
+    [InlineData("#1B5E20", true)] // SuccessForegroundBrush
+    [InlineData("#AC5910", true)] // WarningForegroundBrush
+    [InlineData("#6E6E6E", true)] // SecondaryTextBrush
+    [InlineData("#1565C0", true)] // InfoTextBrush
+    public void 判定ロジックが既知の入力で期待どおり動くこと(string color, bool expectedPass)
+    {
+        // 実データが空でも空振り検出が働くよう、判定そのものを既知の入力で固定する
+        // （.claude/rules/development-conventions.md #1786）
+        var passes = ColorMetrics.Contrast(color, SurfaceColor) >= MinContrast;
+
+        passes.Should().Be(expectedPass);
+    }
+
+    [Fact]
+    public void 走査が塗りと文字色を取り違えないこと()
+    {
+        // 同じブラシキーは塗りにも使われる（ChartGeometryCalculator が SuccessActionBrush を
+        // 積み上げ棒の塗りとして受け取る）。拾う側・拾わない側をサンプル入力で対に固定する。
+        var brushKeys = LoadBrushes().Keys.ToList();
+
+        const string FillSource = @"
+public IReadOnlyList<Bar> CalculateBars(double[] values, string brushKey)
+{
+    var fallback = ""SuccessActionBrush"";
+    return Build(values, brushKey ?? fallback);
+}";
+
+        const string ForegroundMemberSource = @"
+public static string GetForegroundResourceKey(DiagnosticStatus status)
+{
+    switch (status)
+    {
+        case DiagnosticStatus.Warning:
+            return ""WarningActionBrush"";
+        default:
+            return ""SecondaryTextBrush"";
+    }
+}";
+
+        const string LocalVariableSource = @"
+private void Apply(bool isError)
+{
+    var borderKey = isError ? ""ErrorBorderBrush"" : ""SuccessBorderBrush"";
+    var fgKey = isError ? ""ErrorForegroundBrush"" : ""SuccessForegroundBrush"";
+    StatusBorder.BorderBrush = (Brush)FindResource(borderKey);
+    StatusText.Foreground = (Brush)FindResource(fgKey);
+}";
+
+        CollectFromCSharp(FillSource, brushKeys, new string[0])
+            .Should().BeEmpty("Foreground へ流れないキーは拾わないこと");
+
+        CollectFromCSharp(ForegroundMemberSource, brushKeys, new string[0])
+            .Should().BeEquivalentTo(
+                new[] { "WarningActionBrush", "SecondaryTextBrush" },
+                "名前に Foreground を含むメンバーが返すキーは本体まで辿って拾うこと");
+
+        var fromLocal = CollectFromCSharp(LocalVariableSource, brushKeys, new string[0]).ToList();
+        fromLocal.Should().Contain("ErrorForegroundBrush");
+        fromLocal.Should().Contain("SuccessForegroundBrush");
+        fromLocal.Should().NotContain(
+            "ErrorBorderBrush",
+            "隣で BorderBrush へ流れているキーまで巻き込まないこと（誤検出はガードの寿命を縮める）");
+    }
+
+    [Fact]
+    public void バインド経由のプロパティ名を抽出できること()
+    {
+        const string Xaml =
+            "<TextBlock Foreground=\"{Binding ExportStateBrushKey, "
+            + "Converter={StaticResource ResourceKeyToBrushConverter}}\"/>"
+            + "<Rectangle Fill=\"{Binding BrushKey, "
+            + "Converter={StaticResource ResourceKeyToBrushConverter}}\"/>";
+
+        ExtractConverterBoundPropertyNames(Xaml).Should().BeEquivalentTo(
+            new[] { "ExportStateBrushKey" },
+            "Foreground のバインドだけを拾い、Fill（塗り）のバインドは拾わないこと");
+    }
+
+    [Fact]
+    public void Setterの書き方の違いを取りこぼさないこと()
+    {
+        const string Xaml = @"
+<Setter Property=""Foreground"" Value=""{DynamicResource AttributeOrderA}""/>
+<Setter Value=""{StaticResource AttributeOrderB}"" Property=""Foreground""/>
+<Setter TargetName=""x"" Property=""Foreground"" Value=""{DynamicResource WithTargetName}""/>
+<Setter Property='Foreground' Value='{DynamicResource SingleQuoted}'/>
+<Setter Property=""Background"" Value=""{DynamicResource NotForeground}""/>
+<TextBlock Foreground=""{StaticResource PlainAttribute}""/>";
+
+        ExtractXamlForegroundKeys(Xaml).Should().BeEquivalentTo(
+            new[]
+            {
+                "AttributeOrderA",
+                "AttributeOrderB",
+                "WithTargetName",
+                "SingleQuoted",
+                "PlainAttribute",
+            },
+            "属性順・TargetName の有無・引用符の種類で取りこぼさず、Background は拾わないこと");
+    }
+
+    #endregion
 
     #region ヘルパー
 
@@ -293,12 +420,17 @@ public static string GetForegroundResourceKey(DiagnosticStatus status)
         public List<string> Sources { get; }
     }
 
+    private static string ProductionRoot => TestPaths.GetProductionSourceRoot();
+
+    private static string AccessibilityStylesPath
+        => Path.Combine(ProductionRoot, "Resources", "Styles", "AccessibilityStyles.xaml");
+
     /// <summary>
-    /// <c>Views/</c> 配下から、文字色として参照されているリソースキーと参照元を集める。
+    /// 本番ソース全体から、文字色として参照されているリソースキーと参照元を集める。
     /// </summary>
     private static IReadOnlyList<ForegroundUsage> CollectForegroundUsages()
     {
-        var viewsRoot = Path.Combine(TestPaths.GetProductionSourceRoot(), "Views");
+        var brushKeys = LoadBrushes().Keys.ToList();
         var usages = new Dictionary<string, ForegroundUsage>(StringComparer.Ordinal);
 
         void Add(string key, string source)
@@ -315,102 +447,305 @@ public static string GetForegroundResourceKey(DiagnosticStatus status)
             }
         }
 
-        foreach (var path in Directory.GetFiles(viewsRoot, "*.xaml", SearchOption.AllDirectories))
+        // XAML: 属性形・Setter 形・Binding 形
+        var boundPropertyNames = new List<string>();
+        foreach (var path in EnumerateProductionFiles("*.xaml"))
         {
             var text = StripXamlComments(File.ReadAllText(path));
             var name = Path.GetFileName(path);
 
-            foreach (Match m in ForegroundAttributePattern.Matches(text))
-            {
-                Add(m.Groups["key"].Value, name);
-            }
-
-            foreach (Match m in ForegroundSetterPattern.Matches(text))
-            {
-                Add(m.Groups["key"].Value, name);
-            }
-        }
-
-        // C# 側が文字列でブラシキーを組み立てる経路。Views/ だけでなく本番ソース全体を見る
-        // （DiagnosticStatusPresenter は Common/ にあり、Views/ の走査には掛からない）
-        var brushKeys = LoadBrushes().Keys.ToList();
-        foreach (var path in Directory.GetFiles(
-            TestPaths.GetProductionSourceRoot(), "*.cs", SearchOption.AllDirectories))
-        {
-            if (IsGeneratedOrIntermediate(path))
-            {
-                continue;
-            }
-
-            var text = StripCSharpComments(File.ReadAllText(path));
-            var name = Path.GetFileName(path);
-
-            foreach (var key in ExtractForegroundMemberBrushKeys(text, brushKeys))
+            foreach (var key in ExtractXamlForegroundKeys(text))
             {
                 Add(key, name);
             }
+
+            boundPropertyNames.AddRange(ExtractConverterBoundPropertyNames(text));
+        }
+
+        // C#: .Foreground への代入・名前に Foreground を含むメンバー・バインド先のプロパティ
+        var seeds = boundPropertyNames.Distinct(StringComparer.Ordinal).ToList();
+        var sources = EnumerateProductionFiles("*.cs")
+            .Select(p => (Name: Path.GetFileName(p), Text: StripCSharpComments(File.ReadAllText(p))))
+            .ToList();
+
+        foreach (var (key, file) in CollectFromCSharp(sources, brushKeys, seeds))
+        {
+            Add(key, file);
         }
 
         return usages.Values.ToList();
     }
 
-    /// <summary>
-    /// ビルド生成物（<c>obj/</c>・<c>bin/</c>・<c>*.g.cs</c>）を走査から外す。
-    /// </summary>
+    private static IEnumerable<string> EnumerateProductionFiles(string pattern)
+        => Directory.GetFiles(ProductionRoot, pattern, SearchOption.AllDirectories)
+            .Where(p => !IsGeneratedOrIntermediate(p));
+
     private static bool IsGeneratedOrIntermediate(string path)
-        => path.IndexOf(Path.DirectorySeparatorChar + "obj" + Path.DirectorySeparatorChar, StringComparison.Ordinal) >= 0
-            || path.IndexOf(Path.DirectorySeparatorChar + "bin" + Path.DirectorySeparatorChar, StringComparison.Ordinal) >= 0
+    {
+        var sep = Path.DirectorySeparatorChar;
+        return path.IndexOf(sep + "obj" + sep, StringComparison.Ordinal) >= 0
+            || path.IndexOf(sep + "bin" + sep, StringComparison.Ordinal) >= 0
             || path.EndsWith(".g.cs", StringComparison.Ordinal)
             || path.EndsWith(".g.i.cs", StringComparison.Ordinal);
+    }
+
+    #endregion
+
+    #region XAML の抽出
 
     /// <summary>
-    /// 名前に <c>Foreground</c> を含む識別子の「本体」に現れるブラシキーのリテラルを取り出す。
+    /// 属性の中身（<c>名前="値"</c> の並び）から、指定した属性の値を取り出す。
     /// </summary>
     /// <remarks>
-    /// <para>
-    /// 対象は 2 形。①メンバー（メソッド・プロパティ）の宣言に続く本体
-    /// （<c>GetForegroundResourceKey</c> の <c>switch</c>）と、②ローカル変数への代入
-    /// （<c>titleForegroundKey = "LendingForegroundBrush";</c>）。
-    /// </para>
-    /// <para>
-    /// ファイル全体のリテラルを拾う形にしないのは、<b>同じブラシキーが塗りにも使われる</b>ため
-    /// （<c>ChartGeometryCalculator</c> が <c>SuccessActionBrush</c> を積み上げ棒の塗りとして受け取る）。
-    /// 塗りは 4.5:1 の対象ではないので、拾うと誤検出になる。
-    /// </para>
+    /// 単引用符も XAML では合法。属性順に依存しないよう、タグ全体を読んでから属性を引く。
     /// </remarks>
-    private static IEnumerable<string> ExtractForegroundMemberBrushKeys(
-        string source, IReadOnlyCollection<string> brushKeys)
+    private static string GetAttribute(string tag, string attributeName)
     {
-        var found = new List<string>();
+        var m = Regex.Match(
+            tag,
+            attributeName + "\\s*=\\s*(?:\"(?<v>[^\"]*)\"|'(?<v>[^']*)')");
+        return m.Success ? m.Groups["v"].Value : null;
+    }
 
-        foreach (Match m in ForegroundMemberDeclarationPattern.Matches(source))
+    private static string ExtractResourceKey(string markup)
+    {
+        if (markup == null)
         {
-            var body = ReadMemberOrStatementBody(source, m.Index + m.Length);
-            if (body == null)
+            return null;
+        }
+
+        var m = Regex.Match(markup, "^\\{(?:Dynamic|Static)Resource\\s+(?<key>[A-Za-z0-9_]+)\\}$");
+        return m.Success ? m.Groups["key"].Value : null;
+    }
+
+    /// <summary>
+    /// XAML から、文字色として指定されているリソースキーを取り出す。
+    /// </summary>
+    internal static IEnumerable<string> ExtractXamlForegroundKeys(string xaml)
+    {
+        var keys = new List<string>();
+
+        // ① 属性形（Foreground="{DynamicResource K}"）。
+        //    TextElement.Foreground などの添付プロパティも接尾辞一致で拾う
+        foreach (Match m in Regex.Matches(
+            xaml,
+            "(?:^|[\\s.])Foreground\\s*=\\s*(?:\"(?<v>[^\"]*)\"|'(?<v>[^']*)')"))
+        {
+            var key = ExtractResourceKey(m.Groups["v"].Value);
+            if (key != null)
+            {
+                keys.Add(key);
+            }
+        }
+
+        // ② Setter 形。属性順・TargetName の有無に依存しないよう、タグ全体を読んでから引く
+        foreach (Match m in Regex.Matches(xaml, "<Setter\\b[^>]*>"))
+        {
+            var property = GetAttribute(m.Value, "Property");
+            if (property == null
+                || !property.EndsWith("Foreground", StringComparison.Ordinal))
             {
                 continue;
             }
 
-            foreach (Match literal in Regex.Matches(body, "\"(?<key>[A-Za-z0-9_]+)\""))
+            var key = ExtractResourceKey(GetAttribute(m.Value, "Value"));
+            if (key != null)
             {
-                var key = literal.Groups["key"].Value;
-                if (brushKeys.Contains(key, StringComparer.Ordinal))
+                keys.Add(key);
+            }
+        }
+
+        return keys.Distinct(StringComparer.Ordinal);
+    }
+
+    /// <summary>
+    /// <c>Foreground="{Binding P, Converter={StaticResource ResourceKeyToBrushConverter}}"</c>
+    /// の <c>P</c> を取り出す。
+    /// </summary>
+    /// <remarks>
+    /// 同じコンバーターは <c>Fill</c> / <c>Stroke</c>（塗り・線）にも使われるため、
+    /// <b>Foreground のバインドだけ</b>を対象にする。
+    /// </remarks>
+    internal static IEnumerable<string> ExtractConverterBoundPropertyNames(string xaml)
+    {
+        var names = new List<string>();
+
+        foreach (Match m in Regex.Matches(
+            xaml,
+            "(?:^|[\\s.])Foreground\\s*=\\s*[\"']\\{Binding\\s+(?:Path=)?(?<prop>[A-Za-z0-9_.]+)"
+                + "[^\"']*ResourceKeyToBrushConverter"))
+        {
+            var prop = m.Groups["prop"].Value;
+            var lastDot = prop.LastIndexOf('.');
+            names.Add(lastDot >= 0 ? prop.Substring(lastDot + 1) : prop);
+        }
+
+        return names.Distinct(StringComparer.Ordinal);
+    }
+
+    #endregion
+
+    #region C# の抽出
+
+    /// <summary>
+    /// 参照を辿る深さの上限。
+    /// </summary>
+    /// <remarks>
+    /// 実在する最長の経路は 2 段（XAML のバインド → ViewModel のプロパティ →
+    /// <c>DiagnosticStatusPresenter</c> のメソッド）。上限が無いと、識別子を辿るうちに
+    /// 無関係なメンバーまで到達して<b>塗りのキーを文字色として誤検出する</b>。
+    /// </remarks>
+    private const int MaxResolutionDepth = 3;
+
+    /// <summary>
+    /// 本番ソース全体から、文字色として流れるブラシキーと、それが書かれているファイルを集める。
+    /// </summary>
+    internal static IEnumerable<(string Key, string File)> CollectFromCSharp(
+        IReadOnlyList<(string Name, string Text)> sources,
+        IReadOnlyCollection<string> brushKeys,
+        IReadOnlyCollection<string> boundPropertyNames)
+    {
+        var found = new HashSet<(string, string)>();
+        var visited = new HashSet<string>(StringComparer.Ordinal);
+        var pending = new Queue<(string Name, int Depth)>();
+
+        foreach (var (file, text) in sources)
+        {
+            // 種 1: `X.Foreground = <式>;` の右辺
+            foreach (Match m in Regex.Matches(text, "\\.Foreground\\s*=\\s*(?<expr>[^;]*);"))
+            {
+                Harvest(m.Groups["expr"].Value, file, 0);
+            }
+
+            // 種 2: 名前に Foreground を含むメンバー／変数の本体
+            foreach (Match m in Regex.Matches(
+                text, "\\b[A-Za-z0-9_]*[Ff]oreground[A-Za-z0-9_]*\\b"))
+            {
+                var body = ReadMemberOrStatementBody(text, m.Index + m.Length);
+                if (body != null)
                 {
-                    found.Add(key);
+                    Harvest(body, file, 0);
                 }
             }
         }
 
-        return found.Distinct(StringComparer.Ordinal);
+        // 種 3: XAML のバインドが指しているプロパティ
+        foreach (var name in boundPropertyNames)
+        {
+            pending.Enqueue((name, 0));
+        }
+
+        while (pending.Count > 0)
+        {
+            var (name, depth) = pending.Dequeue();
+            if (depth >= MaxResolutionDepth || !visited.Add(name))
+            {
+                continue;
+            }
+
+            foreach (var (file, text) in sources)
+            {
+                foreach (var body in ReadDeclarationBodies(text, name))
+                {
+                    Harvest(body, file, depth + 1);
+                }
+            }
+        }
+
+        return found.Select(x => (x.Item1, x.Item2));
+
+        void Harvest(string text, string file, int depth)
+        {
+            foreach (Match literal in Regex.Matches(text, "\"(?<key>[A-Za-z0-9_]+)\""))
+            {
+                var key = literal.Groups["key"].Value;
+                if (brushKeys.Contains(key, StringComparer.Ordinal))
+                {
+                    found.Add((key, file));
+                }
+            }
+
+            if (depth >= MaxResolutionDepth)
+            {
+                return;
+            }
+
+            // 辿る識別子は「ローカル変数（先頭小文字）」と「呼び出し（直後が `(`）」に限る。
+            // 型名・名前空間まで辿ると、無関係なメンバーの本体からリテラルを拾ってしまう
+            foreach (Match id in Regex.Matches(
+                text, "\\b(?<name>[a-z_][A-Za-z0-9_]*)\\b|\\b(?<name>[A-Za-z_][A-Za-z0-9_]*)\\s*\\("))
+            {
+                pending.Enqueue((id.Groups["name"].Value, depth + 1));
+            }
+        }
+    }
+
+    /// <summary>
+    /// 単一のソース断片を対象にした <see cref="CollectFromCSharp"/>（判定ロジックの固定用）。
+    /// </summary>
+    internal static IEnumerable<string> CollectFromCSharp(
+        string source,
+        IReadOnlyCollection<string> brushKeys,
+        IReadOnlyCollection<string> boundPropertyNames)
+        => CollectFromCSharp(
+                new[] { ("(inline)", source) },
+                brushKeys,
+                boundPropertyNames)
+            .Select(x => x.Key)
+            .Distinct(StringComparer.Ordinal);
+
+    /// <summary>
+    /// 指定した名前の「宣言・代入」の本体を返す。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// 対象は 2 形。①代入（<c>var fgKey = …;</c> / <c>titleForegroundKey = …;</c>）と、
+    /// ②メンバー宣言（<c>public static string GetForegroundResourceKey(…) { … }</c> /
+    /// <c>public string P =&gt; …;</c>）。
+    /// </para>
+    /// <para>
+    /// <b>呼び出し側は拾わない</b>。<c>Foo(</c> に一致するだけで本体を読むと、
+    /// <c>string.IsNullOrEmpty(…)</c> のような無関係な呼び出しから後続のリテラルを
+    /// 巻き込む。メンバー宣言は「戻り値の型 + 名前 + <c>(</c>」の形を要求する。
+    /// </para>
+    /// </remarks>
+    private static IEnumerable<string> ReadDeclarationBodies(string source, string name)
+    {
+        var escaped = Regex.Escape(name);
+        var bodies = new List<string>();
+
+        // ① 代入（`==` を除く）
+        foreach (Match m in Regex.Matches(source, "\\b" + escaped + "\\s*=(?!=)"))
+        {
+            var semicolon = source.IndexOf(';', m.Index);
+            if (semicolon > m.Index)
+            {
+                bodies.Add(source.Substring(m.Index, semicolon - m.Index));
+            }
+        }
+
+        // ② メンバー宣言（メソッド・プロパティ）
+        foreach (Match m in Regex.Matches(
+            source,
+            "[A-Za-z0-9_<>\\[\\],?.]+\\s+" + escaped + "\\s*(?<tail>\\(|=>|\\{)"))
+        {
+            var body = ReadMemberOrStatementBody(source, m.Groups["tail"].Index);
+            if (body != null)
+            {
+                bodies.Add(body);
+            }
+        }
+
+        return bodies;
     }
 
     /// <summary>
     /// 識別子の直後から、その識別子が属する「本体」の文字列を返す。
     /// </summary>
     /// <remarks>
-    /// 引数リスト <c>( … )</c> は読み飛ばし、最初に現れたのが <c>{</c> ならブロックを対応する
-    /// <c>}</c> まで、<c>=</c>（<c>=&gt;</c> を含む）なら式として <c>;</c> まで、<c>;</c> なら
-    /// 本体を持たない参照として <c>null</c> を返す。
+    /// 引数リスト <c>( … )</c> は読み飛ばし、最初に現れたのが <c>{</c> ならブロックを
+    /// 対応する <c>}</c> まで、<c>=</c>（<c>=&gt;</c> を含む）なら式として <c>;</c> まで、
+    /// <c>;</c> なら本体を持たない参照として <c>null</c> を返す。
     /// </remarks>
     private static string ReadMemberOrStatementBody(string source, int start)
     {
@@ -432,7 +767,6 @@ public static string GetForegroundResourceKey(DiagnosticStatus status)
 
             if (c == ';')
             {
-                // 本体を持たない（フィールド宣言・単なる参照）
                 return null;
             }
 
@@ -475,38 +809,14 @@ public static string GetForegroundResourceKey(DiagnosticStatus status)
 
     private static string ReadBalancedBlock(string source, int openBraceIndex)
     {
-        if (openBraceIndex < 0 || openBraceIndex >= source.Length || source[openBraceIndex] != '{')
-        {
-            return null;
-        }
-
-        var depth = 0;
-        for (var i = openBraceIndex; i < source.Length; i++)
-        {
-            if (source[i] == '{')
-            {
-                depth++;
-            }
-            else if (source[i] == '}')
-            {
-                depth--;
-                if (depth == 0)
-                {
-                    return source.Substring(openBraceIndex, i - openBraceIndex + 1);
-                }
-            }
-        }
-
-        return null;
+        var closing = FindMatching(source, openBraceIndex, '{', '}');
+        return closing < 0 ? null : source.Substring(openBraceIndex, closing - openBraceIndex + 1);
     }
 
-    /// <summary>
-    /// リソースキーを <c>AccessibilityStyles.xaml</c> の色値へ解決する。
-    /// </summary>
-    /// <remarks>
-    /// 解決できないキーは<b>検査を素通りさせず失敗させる</b>。見つからないキーを黙って
-    /// 無視すると、色値を別の場所へ直書きした瞬間に検査が効かなくなる（fail-open）。
-    /// </remarks>
+    #endregion
+
+    #region 色値の解決
+
     private static string ResolveColor(IDictionary<string, string> brushes, string key)
     {
         brushes.Should().ContainKey(
@@ -527,16 +837,17 @@ public static string GetForegroundResourceKey(DiagnosticStatus status)
     /// </remarks>
     private static IDictionary<string, string> LoadBrushes()
     {
-        var path = Path.Combine(
-            TestPaths.GetProductionSourceRoot(), "Resources", "Styles", "AccessibilityStyles.xaml");
-        var xaml = StripXamlComments(File.ReadAllText(path));
+        var xaml = StripXamlComments(File.ReadAllText(AccessibilityStylesPath));
 
         var result = new Dictionary<string, string>(StringComparer.Ordinal);
-        foreach (Match m in Regex.Matches(
-            xaml,
-            "<SolidColorBrush\\s+x:Key=\"(?<key>[^\"]+)\"\\s+Color=\"(?<color>#[0-9A-Fa-f]{6,8})\"\\s*/>"))
+        foreach (Match m in Regex.Matches(xaml, "<SolidColorBrush\\b(?<attrs>[^>]*)/>"))
         {
-            result[m.Groups["key"].Value] = m.Groups["color"].Value.ToUpperInvariant();
+            var key = GetAttribute(m.Groups["attrs"].Value, "x:Key");
+            var color = GetAttribute(m.Groups["attrs"].Value, "Color");
+            if (key != null && color != null && color.StartsWith("#", StringComparison.Ordinal))
+            {
+                result[key] = color.ToUpperInvariant();
+            }
         }
 
         result.Should().NotBeEmpty("AccessibilityStyles.xaml のブラシ抽出が空振りしていないこと");
@@ -547,11 +858,16 @@ public static string GetForegroundResourceKey(DiagnosticStatus status)
     private static string StripXamlComments(string xaml)
         => Regex.Replace(xaml, "<!--.*?-->", string.Empty, RegexOptions.Singleline);
 
+    /// <summary>
+    /// C# のコメントを除去する（文字列リテラルは残す）。
+    /// </summary>
+    /// <remarks>
+    /// 素の正規表現で <c>//</c> を消すと <c>"http://…"</c> のような文字列リテラルの中身まで
+    /// 消えて引用符の対応が崩れ、以後のリテラル抽出が別の場所を見る。
+    /// 私的コピーを増やさず <see cref="TestSourceInspection"/> のリテラル対応版へ委譲する。
+    /// </remarks>
     private static string StripCSharpComments(string source)
-        => Regex.Replace(
-            Regex.Replace(source, "/\\*.*?\\*/", string.Empty, RegexOptions.Singleline),
-            "//[^\r\n]*",
-            string.Empty);
+        => TestSourceInspection.RemoveCommentsPreservingLines(source);
 
     #endregion
 }
