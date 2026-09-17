@@ -72,7 +72,7 @@
                            TextWrapping="Wrap"
                            VerticalAlignment="Center"
                            Margin="0,0,12,0"
-                           AutomationProperties.Name="集計の基準日時">
+                           AutomationProperties.HelpText="集計の基準日時">
                     <Run Text="📊 集計基準:"/>
                     <Run Text="{Binding AsOf, Mode=OneWay, StringFormat='{}{0:yyyy/MM/dd HH:mm}'}"/>
                 </TextBlock>
