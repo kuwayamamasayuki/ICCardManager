@@ -1,4 +1,4 @@
-<Window x:Class="ICCardManager.Views.Dialogs.ReportPreflightDialog"
+﻿<Window x:Class="ICCardManager.Views.Dialogs.ReportPreflightDialog"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
@@ -59,7 +59,7 @@
                            Margin="0,6,0,0"
                            TextWrapping="Wrap"
                            AutomationProperties.LiveSetting="Assertive"
-                           AutomationProperties.Name="警告件数"/>
+                           AutomationProperties.HelpText="警告件数"/>
             </StackPanel>
         </Border>
 
@@ -117,7 +117,7 @@
                        TextWrapping="Wrap"
                        Foreground="{DynamicResource HintForegroundBrush}"
                        AutomationProperties.LiveSetting="Polite"
-                       AutomationProperties.Name="警告の詳細と対処方法"/>
+                       AutomationProperties.HelpText="警告の詳細と対処方法"/>
         </Border>
 
         <!-- ボタンエリア -->

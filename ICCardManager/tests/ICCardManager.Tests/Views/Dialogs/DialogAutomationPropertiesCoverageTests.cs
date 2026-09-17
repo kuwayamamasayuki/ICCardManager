@@ -264,6 +264,13 @@ public class DialogAutomationPropertiesCoverageTests
     /// Issue #1501: OperationLogDialog 側の動的 TextBlock 4 要素（ページ情報・現在ページ番号・
     /// 検索ステータスメッセージ・処理中メッセージ）を追加。PR #1500 の `CHANGELOG.md` および
     /// `docs/design/03_画面設計書.md` で対象として明示されていたが回帰テストに反映されていなかった。
+    /// <para>
+    /// Issue #2073: 本テストは <c>x:Name</c> を持つ TextBlock を**個別に列挙**するため、
+    /// <c>Text="{Binding …}"</c> だけの TextBlock（Views 配下に 16 箇所あった）を検出できない。
+    /// 走査範囲を導出する横断ガードは
+    /// <see cref="ICCardManager.Tests.Views.DynamicTextAutomationNameConventionTests"/> が担う。
+    /// 本テストは「この 7 要素が今後も対象であり続けること」を名指しで固定する役に留める。
+    /// </para>
     /// </remarks>
     [Theory]
     [InlineData("StaffAuthDialog.xaml", "OperationDescriptionText")]

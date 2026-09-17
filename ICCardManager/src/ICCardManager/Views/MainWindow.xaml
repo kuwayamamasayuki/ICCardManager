@@ -747,13 +747,17 @@
                                             Command="{Binding HistoryGoToFirstPageCommand}"
                                             Padding="8,4"
                                             MinWidth="32"
-                                            ToolTip="最初のページへ"/>
+                                            ToolTip="最初のページへ"
+                                            AutomationProperties.Name="最初のページ"
+                                            AutomationProperties.HelpText="履歴の1ページ目へ移動します"/>
                                     <Button Content="◀"
                                             Command="{Binding HistoryGoToPrevPageCommand}"
                                             Padding="8,4"
                                             MinWidth="32"
                                             Margin="5,0,0,0"
-                                            ToolTip="前のページへ"/>
+                                            ToolTip="前のページへ"
+                                            AutomationProperties.Name="前のページ"
+                                            AutomationProperties.HelpText="履歴を1ページ前へ移動します"/>
 
                                     <TextBlock Text="ページ"
                                                VerticalAlignment="Center"
@@ -773,13 +777,17 @@
                                             Padding="8,4"
                                             MinWidth="32"
                                             Margin="15,0,0,0"
-                                            ToolTip="次のページへ"/>
+                                            ToolTip="次のページへ"
+                                            AutomationProperties.Name="次のページ"
+                                            AutomationProperties.HelpText="履歴を1ページ次へ移動します"/>
                                     <Button Content="⏭"
                                             Command="{Binding HistoryGoToLastPageCommand}"
                                             Padding="8,4"
                                             MinWidth="32"
                                             Margin="5,0,0,0"
-                                            ToolTip="最後のページへ"/>
+                                            ToolTip="最後のページへ"
+                                            AutomationProperties.Name="最後のページ"
+                                            AutomationProperties.HelpText="履歴の最終ページへ移動します"/>
                                 </StackPanel>
 
                                 <!-- 件数表示 -->

@@ -1,4 +1,4 @@
-<Window x:Class="ICCardManager.Views.Dialogs.TransferStationGroupDialog"
+﻿<Window x:Class="ICCardManager.Views.Dialogs.TransferStationGroupDialog"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
@@ -222,7 +222,7 @@
                            Margin="0,10,0,0"
                            HorizontalAlignment="Center"
                            AutomationProperties.LiveSetting="Assertive"
-                           AutomationProperties.Name="保存の実行状況"/>
+                           AutomationProperties.HelpText="保存の実行状況"/>
             </StackPanel>
         </Border>
     </Grid>

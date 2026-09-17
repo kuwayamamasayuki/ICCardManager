@@ -48,6 +48,9 @@
             </Grid.ColumnDefinitions>
 
             <!-- アイコン -->
+            <!-- Issue #2073: 絵文字は読み上げても意味が伝わらず、種別はタイトル文言が併せて伝えるため、
+                 ここは固定の Name を保つ（Text の内容を隠していない装飾要素）。
+                 DynamicTextAutomationNameConventionTests の装飾アイコン許容リストに登録済み。 -->
             <TextBlock x:Name="IconText"
                        Grid.Column="0"
                        FontSize="{DynamicResource IconFontSize}"
@@ -58,26 +61,30 @@
             <!-- メッセージ -->
             <!-- Issue #1273: タイトルは単一行＋省略（CharacterEllipsis）でトースト高さ暴走を防止。
                  メッセージとサブメッセージは Wrap を維持しつつ Window.MaxHeight 内に収める。 -->
+            <!-- Issue #2073: 3つの TextBlock は Show() が Text を差し替えるため、固定の読み上げ名を
+                 AutomationProperties.Name ではなく HelpText で持つ。Name に固定文言を置くと
+                 TextBlockAutomationPeer の Text フォールバックを上書きし、カード名・残額・エラー内容が
+                 スクリーンリーダー経路から丸ごと消える（Issue #1812 と同じ形）。 -->
             <StackPanel Grid.Column="1" VerticalAlignment="Center">
                 <TextBlock x:Name="TitleText"
                            FontSize="{DynamicResource TitleFontSize}"
                            FontWeight="Bold"
                            TextWrapping="NoWrap"
                            TextTrimming="CharacterEllipsis"
-                           AutomationProperties.Name="通知タイトル"/>
+                           AutomationProperties.HelpText="通知タイトル"/>
                 <TextBlock x:Name="MessageText"
                            FontSize="{DynamicResource BaseFontSize}"
                            Margin="0,5,0,0"
                            TextWrapping="Wrap"
                            Opacity="0.8"
-                           AutomationProperties.Name="通知メッセージ"/>
+                           AutomationProperties.HelpText="通知メッセージ"/>
                 <TextBlock x:Name="SubMessageText"
                            FontSize="{DynamicResource SmallFontSize}"
                            Margin="0,5,0,0"
                            TextWrapping="Wrap"
                            Opacity="0.6"
                            Visibility="Collapsed"
-                           AutomationProperties.Name="追加メッセージ"/>
+                           AutomationProperties.HelpText="追加メッセージ"/>
             </StackPanel>
         </Grid>
     </Border>

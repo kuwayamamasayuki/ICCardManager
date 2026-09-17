@@ -1,4 +1,4 @@
-<Window x:Class="ICCardManager.Views.Dialogs.ReportDialog"
+﻿<Window x:Class="ICCardManager.Views.Dialogs.ReportDialog"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
@@ -359,7 +359,7 @@
                        VerticalAlignment="Center"
                        Margin="0,0,10,0"
                        AutomationProperties.LiveSetting="Assertive"
-                       AutomationProperties.Name="帳票作成ステータス">
+                       AutomationProperties.HelpText="帳票作成ステータス">
                 <TextBlock.Style>
                     <Style TargetType="TextBlock">
                         <Setter Property="Foreground" Value="{DynamicResource PrimaryBrush}"/>
@@ -439,7 +439,7 @@
                            Margin="0,10,0,0"
                            HorizontalAlignment="Center"
                            AutomationProperties.LiveSetting="Polite"
-                           AutomationProperties.Name="処理中メッセージ"/>
+                           AutomationProperties.HelpText="処理中メッセージ"/>
                 <Button Content="キャンセル"
                         Command="{Binding CancelOperationCommand}"
                         Visibility="{Binding CanCancel, Converter={StaticResource BoolToVisibilityConverter}}"
