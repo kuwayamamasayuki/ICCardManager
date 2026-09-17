@@ -29,7 +29,7 @@ public class PrintPreviewViewModelTests
     {
         // PrintServiceのコンストラクタにはIReportDataBuilderが必要
         var reportDataBuilderMock = new Mock<IReportDataBuilder>();
-        var printService = new PrintService(reportDataBuilderMock.Object);
+        var printService = new PrintService(reportDataBuilderMock.Object, Microsoft.Extensions.Logging.Abstractions.NullLogger<PrintService>.Instance);
         _viewModel = new PrintPreviewViewModel(printService);
     }
 

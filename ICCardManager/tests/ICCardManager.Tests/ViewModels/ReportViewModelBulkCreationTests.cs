@@ -9,6 +9,8 @@ using ICCardManager.Dtos;
 using ICCardManager.Models;
 using ICCardManager.Services;
 using ICCardManager.ViewModels;
+using ICCardManager.Views.Dialogs;
+using System.Text.RegularExpressions;
 using Microsoft.Extensions.Options;
 using Moq;
 using Xunit;
@@ -94,7 +96,7 @@ public class ReportViewModelBulkCreationTests : IDisposable
             .Returns(new List<ReportExportStatus>());
 
         // Issue #1949: 複数カードのプレビュー生成ループが全カードを同じ年月で取得することを表明する
-        _printServiceMock = new Mock<PrintService>(reportDataBuilder, (IOptions<OrganizationOptions>)null) { CallBase = true };
+        _printServiceMock = new Mock<PrintService>(reportDataBuilder, Microsoft.Extensions.Logging.Abstractions.NullLogger<PrintService>.Instance, (IOptions<OrganizationOptions>)null) { CallBase = true };
         SetupPreviewData();
 
         _safeFileLauncherMock.Setup(l => l.LaunchFolder(It.IsAny<string>()))
@@ -360,7 +362,8 @@ public class ReportViewModelBulkCreationTests : IDisposable
     /// プレビュー用データの応答を設定する（Issue #1949）
     /// </summary>
     /// <param name="onFirstRequest">1 件目の取得時に実行する副作用（選択変更の再現用）</param>
-    private void SetupPreviewData(Action? onFirstRequest = null)
+    /// <param name="isMissing">DB にカードが無い（帳票データが null になる）IDm の判定（Issue #2066）</param>
+    private void SetupPreviewData(Action? onFirstRequest = null, Func<string, bool>? isMissing = null)
     {
         _printServiceMock
             .Setup(s => s.GetReportDataAsync(It.IsAny<string>(), It.IsAny<int>(), It.IsAny<int>()))
@@ -370,6 +373,11 @@ public class ReportViewModelBulkCreationTests : IDisposable
                 if (_previewRequests.Count == 1)
                 {
                     onFirstRequest?.Invoke();
+                }
+
+                if (isMissing?.Invoke(cardIdm) == true)
+                {
+                    return Task.FromResult<ReportPrintData?>(null);
                 }
 
                 return Task.FromResult<ReportPrintData?>(new ReportPrintData
@@ -638,6 +646,194 @@ public class ReportViewModelBulkCreationTests : IDisposable
                     && !m.Contains("はやかけん 002")),
                 "帳票作成を中断しました"),
             Times.Once);
+    }
+
+    #endregion
+
+    #region Issue #2066: 印刷プレビューで交通系ICカードが見つからない
+
+    /// <summary>16 桁の 16 進数（IDm の形）。</summary>
+    private static readonly Regex IdmShaped = new Regex("[0-9A-Fa-f]{16}");
+
+    /// <summary>行動指示で終わる形（error-messages.md「行動指示型で終わる」）。</summary>
+    private static readonly Regex EndsWithAction = new Regex("(してください|しますか？)。?$");
+
+    /// <summary>未登録カードの案内文言の品質（IDm を含まない・交通系ICカードと明記・行動指示で終わる）</summary>
+    private static void AssertCardNotFoundText(string text, string name)
+    {
+        text.Should().NotBeNullOrWhiteSpace(name);
+        IdmShaped.IsMatch(text).Should().BeFalse($"{name} に 16 桁の IDm を出さない（#1852 / #1986）: {text}");
+        text.Should().NotContain("IDm", $"{name} は職員が識別できない技術用語を使わない");
+        text.Should().Contain("交通系ICカード", $"{name} は職員証と区別できる呼び方にする");
+        text.Should().NotContain("帳票データを取得できませんでした", $"{name} は原因を名指しする");
+        EndsWithAction.IsMatch(text).Should().BeTrue($"{name} は行動指示で終わる: {text}");
+    }
+
+    private void VerifyPreviewOpened(Times times)
+        => _navigationServiceMock.Verify(
+            n => n.ShowDialog<PrintPreviewDialog>(It.IsAny<Action<PrintPreviewDialog>>()), times);
+
+    /// <summary>
+    /// 欠陥を突く側: 1 枚のプレビューで見つからないとき、原因と行動指示を示すこと
+    /// </summary>
+    /// <remarks>
+    /// 修正前は「帳票データを取得できませんでした」とだけ表示し、職員は「データが無い月なのか」
+    /// 「壊れているのか」「何をすればよいのか」が分からなかった。帳票作成（#2049）と同じ文言にそろえる。
+    /// </remarks>
+    [Fact]
+    public async Task PreviewReportAsync_未登録カードは原因と行動指示を示しプレビューを開かないこと()
+    {
+        var card = SelectCard("0123456789ABCDEF", "001");
+        SetupPreviewData(isMissing: _ => true);
+
+        await _viewModel.PreviewReportAsync(card);
+
+        AssertCardNotFoundText(_viewModel.StatusMessage, "StatusMessage");
+        _viewModel.StatusMessage.Should().Be(ReportService.BuildCardNotFoundResult().ErrorMessage,
+            "帳票作成と同じ原因なので同じ文言にする（#1763）");
+        _viewModel.IsStatusError.Should().BeTrue();
+        VerifyPreviewOpened(Times.Never());
+    }
+
+    /// <summary>
+    /// 欠陥を突く側: 複数枚で一部だけ見つからないとき、抜けたカードを名指しして続けるかを尋ねること
+    /// </summary>
+    /// <remarks>
+    /// 修正前は <c>if (data != null)</c> で黙って除外し、2 枚分だけのプレビューが開いていた
+    /// （抜けたことに気付かないまま印刷すると物品出納簿が 1 枚欠ける）。
+    /// </remarks>
+    [Fact]
+    public async Task PreviewSelectedAsync_一部が未登録なら抜けたカードを名指しして確認すること()
+    {
+        SelectCard("0000000000000001", "001");
+        SelectCard("0123456789ABCDEF", "002");
+        SelectCard("0000000000000003", "003");
+        SetupPreviewData(isMissing: idm => idm == "0123456789ABCDEF");
+        string? confirmation = null;
+        _navigationServiceMock
+            .Setup(n => n.ShowWarningConfirmation(It.IsAny<string>(), It.IsAny<string>()))
+            .Callback((string message, string _) => confirmation = message)
+            .Returns(true);
+
+        await _viewModel.PreviewSelectedAsync();
+
+        confirmation.Should().NotBeNull("一部が抜けたことを、プレビューを開く前に知らせる");
+        AssertCardNotFoundText(confirmation!, "確認ダイアログ");
+        confirmation.Should().Contain("はやかけん 002", "抜けたカードを名指しする");
+        confirmation.Should().NotContain("はやかけん 001").And.NotContain("はやかけん 003",
+            "見つかったカードを抜けたカードとして並べない");
+        confirmation.Should().Contain("2件", "残りの件数を示す");
+
+        VerifyPreviewOpened(Times.Once());
+        _viewModel.StatusMessage.Should().Contain("はやかけん 002",
+            "プレビューを閉じた後にも、除外したカードがあったことを残す");
+        AssertCardNotFoundText(_viewModel.StatusMessage, "StatusMessage");
+    }
+
+    /// <summary>
+    /// 確認で「いいえ」を選んだら、プレビューを開かないこと
+    /// </summary>
+    [Fact]
+    public async Task PreviewSelectedAsync_一部が未登録で続けないを選ぶとプレビューを開かないこと()
+    {
+        SelectCard("0000000000000001", "001");
+        SelectCard("0123456789ABCDEF", "002");
+        SelectCard("0000000000000003", "003");
+        SetupPreviewData(isMissing: idm => idm == "0123456789ABCDEF");
+        _navigationServiceMock
+            .Setup(n => n.ShowWarningConfirmation(It.IsAny<string>(), It.IsAny<string>()))
+            .Returns(false);
+
+        await _viewModel.PreviewSelectedAsync();
+
+        VerifyPreviewOpened(Times.Never());
+        _viewModel.IsStatusError.Should().BeTrue();
+        AssertCardNotFoundText(_viewModel.StatusMessage, "StatusMessage");
+        _viewModel.StatusMessage.Should().Contain("はやかけん 002",
+            "確認ダイアログは閉じているので、原因のカードを画面に残す");
+        _viewModel.StatusMessage.Should().Contain("中止", "プレビューを開かなかったことを示す");
+    }
+
+    /// <summary>
+    /// 前回のプレビューの失敗表示が、次に成功したプレビューの後まで残らないこと
+    /// </summary>
+    [Fact]
+    public async Task PreviewSelectedAsync_前回の失敗表示は次の成功したプレビューで消えること()
+    {
+        SelectCard("0123456789ABCDEF", "001");
+        SelectCard("FEDCBA9876543210", "002");
+        SetupPreviewData(isMissing: _ => true);
+        await _viewModel.PreviewSelectedAsync();
+        _viewModel.IsStatusError.Should().BeTrue("前提: 1 回目は失敗表示になる");
+
+        SetupPreviewData();
+        await _viewModel.PreviewSelectedAsync();
+
+        VerifyPreviewOpened(Times.Once());
+        _viewModel.IsStatusError.Should().BeFalse();
+        _viewModel.StatusMessage.Should().BeEmpty();
+    }
+
+    /// <summary>
+    /// 全件が見つからないときは、件数を添えて案内し、確認もプレビューも出さないこと（一部抜けと区別する）
+    /// </summary>
+    [Fact]
+    public async Task PreviewSelectedAsync_全件が未登録なら件数を添えて案内しプレビューを開かないこと()
+    {
+        SelectCard("0123456789ABCDEF", "001");
+        SelectCard("FEDCBA9876543210", "002");
+        SelectCard("00112233445566AA", "003");
+        SetupPreviewData(isMissing: _ => true);
+
+        await _viewModel.PreviewSelectedAsync();
+
+        AssertCardNotFoundText(_viewModel.StatusMessage, "StatusMessage");
+        _viewModel.StatusMessage.Should().Contain("3件");
+        _viewModel.IsStatusError.Should().BeTrue();
+        _navigationServiceMock.Verify(
+            n => n.ShowWarningConfirmation(It.IsAny<string>(), It.IsAny<string>()), Times.Never());
+        VerifyPreviewOpened(Times.Never());
+    }
+
+    /// <summary>
+    /// 対の表明: 全件見つかるときは、確認を挟まずにプレビューを開き、エラーを表示しないこと
+    /// </summary>
+    /// <remarks>
+    /// これが無いと、常に確認を出す実装や常にエラーを表示する実装でも上のテストが緑になる。
+    /// </remarks>
+    [Fact]
+    public async Task PreviewSelectedAsync_全件登録済みなら確認を挟まずにプレビューを開くこと()
+    {
+        SelectCard("0000000000000001", "001");
+        SelectCard("0000000000000002", "002");
+        SelectCard("0000000000000003", "003");
+
+        await _viewModel.PreviewSelectedAsync();
+
+        _navigationServiceMock.Verify(
+            n => n.ShowWarningConfirmation(It.IsAny<string>(), It.IsAny<string>()), Times.Never());
+        VerifyPreviewOpened(Times.Once());
+        _viewModel.IsStatusError.Should().BeFalse();
+        _viewModel.StatusMessage.Should().BeEmpty();
+    }
+
+    /// <summary>
+    /// ドキュメントタイトルは、実際にプレビューへ含めたカードで名付けること
+    /// </summary>
+    /// <remarks>
+    /// 修正前は選択した全カードで名付けていたため、除外が起きると 2 枚分のプレビューに「3件」と付く。
+    /// </remarks>
+    [Fact]
+    public void BuildMultiplePreviewDocumentTitle_含めたカードの枚数と名前で名付けること()
+    {
+        CardDto Card(string number) => new() { CardIdm = "0000000000000001", CardType = "はやかけん", CardNumber = number };
+
+        ReportViewModel.BuildMultiplePreviewDocumentTitle(new[] { Card("001") }, 2026, 7)
+            .Should().Be("物品出納簿_はやかけん_001_2026年7月");
+        ReportViewModel.BuildMultiplePreviewDocumentTitle(new[] { Card("001"), Card("003") }, 2026, 7)
+            .Should().Be("物品出納簿_はやかけん 001_はやかけん 003_2026年7月");
+        ReportViewModel.BuildMultiplePreviewDocumentTitle(new[] { Card("001"), Card("002"), Card("003") }, 2026, 7)
+            .Should().Be("物品出納簿_3件_2026年7月");
     }
 
     #endregion

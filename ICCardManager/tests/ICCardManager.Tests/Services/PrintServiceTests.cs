@@ -4,8 +4,11 @@ using System.Linq;
 using System.Threading.Tasks;
 using FluentAssertions;
 using ICCardManager.Data.Repositories;
+using ICCardManager.Infrastructure.Security;
 using ICCardManager.Models;
 using ICCardManager.Services;
+using ICCardManager.Tests.Infrastructure;
+using Microsoft.Extensions.Logging;
 using Moq;
 using Xunit;
 
@@ -19,6 +22,7 @@ public class PrintServiceTests
     private readonly Mock<ICardRepository> _cardRepositoryMock;
     private readonly Mock<ILedgerRepository> _ledgerRepositoryMock;
     private readonly PrintService _printService;
+    private readonly RecordingLogger<PrintService> _logger = new();
 
     private const string TestCardIdm = "0102030405060708";
 
@@ -32,7 +36,7 @@ public class PrintServiceTests
         var reportDataBuilder = new ReportDataBuilder(
             _cardRepositoryMock.Object,
             _ledgerRepositoryMock.Object);
-        _printService = new PrintService(reportDataBuilder);
+        _printService = new PrintService(reportDataBuilder, _logger);
     }
 
     #region ヘルパーメソッド
@@ -587,6 +591,56 @@ public class PrintServiceTests
         result.Should().NotBeNull();
         result!.MonthlyTotal.Income.Should().Be(5000);
         result.MonthlyTotal.Expense.Should().Be(0, "チャージのみの月でも払出金額は0として保持される");
+    }
+
+    #endregion
+
+    #region Issue #2066: 対象の交通系ICカードが見つからないときの痕跡
+
+    /// <summary>
+    /// 欠陥を突く側: カードのレコードが無いとき、マスクした IDm で Warning ログを残すこと
+    /// </summary>
+    /// <remarks>
+    /// 修正前は null を返すだけでログを一切出さず、印刷プレビューの失敗は職員の画面にしか現れなかった
+    /// （#1727「ログには出ている」は無言失敗の免罪符にならない — ここはログすら無かった）。
+    /// </remarks>
+    [Fact]
+    public async Task GetReportDataAsync_未登録カードはマスクしたIDmでWarningログを残すこと()
+    {
+        const string unknownIdm = "0123456789ABCDEF";
+        _cardRepositoryMock.Setup(r => r.GetByIdmAsync(unknownIdm, true)).ReturnsAsync((IcCard)null);
+
+        var result = await _printService.GetReportDataAsync(unknownIdm, 2024, 6);
+
+        result.Should().BeNull();
+        var because = _logger.FormatEntries();
+        _logger.Entries.Should().Contain(
+            e => e.Level == LogLevel.Warning && e.Message.Contains(IdmMasker.Mask(unknownIdm)),
+            "障害調査のために、どのカードかをマスクした IDm でログへ残す: " + because);
+        _logger.Entries.Should().NotContain(
+            e => e.Message.Contains(unknownIdm),
+            "ログにも生の IDm を出さない（#1852）: " + because);
+    }
+
+    /// <summary>
+    /// 対の表明: 登録済みのカードでは見つからない旨のログを出さないこと
+    /// </summary>
+    /// <remarks>
+    /// これが無いと、常にログを出す実装でも上のテストが緑になる。
+    /// </remarks>
+    [Fact]
+    public async Task GetReportDataAsync_登録済みカードでは見つからない旨のログを出さないこと()
+    {
+        _cardRepositoryMock.Setup(r => r.GetByIdmAsync(TestCardIdm, true)).ReturnsAsync(CreateTestCard());
+        _ledgerRepositoryMock
+            .Setup(r => r.GetByMonthAsync(It.IsAny<string>(), It.IsAny<int>(), It.IsAny<int>()))
+            .ReturnsAsync(new List<Ledger>());
+
+        var result = await _printService.GetReportDataAsync(TestCardIdm, 2024, 6);
+
+        result.Should().NotBeNull();
+        _logger.Entries.Should().NotContain(
+            e => e.Message.Contains(IdmMasker.Mask(TestCardIdm)), _logger.FormatEntries());
     }
 
     #endregion

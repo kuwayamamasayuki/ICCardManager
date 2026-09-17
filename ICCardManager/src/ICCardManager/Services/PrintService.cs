@@ -8,7 +8,9 @@ using System.Windows.Controls;
 using System.Windows.Documents;
 using System.Windows.Media;
 using ICCardManager.Common;
+using ICCardManager.Infrastructure.Security;
 using ICCardManager.Models;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 // Issue #1023: ReportRow, ReportTotal は Models/ReportRow.cs で定義
 
@@ -58,12 +60,21 @@ namespace ICCardManager.Services
     {
         private readonly IReportDataBuilder _reportDataBuilder;
         private readonly OrganizationOptions _orgOptions;
+        private readonly ILogger<PrintService> _logger;
 
+        /// <param name="reportDataBuilder">帳票データの構築</param>
+        /// <param name="logger">
+        /// 対象の交通系ICカードが見つからないときの痕跡を残す（Issue #2066）。
+        /// 省略可能にすると配線漏れが「痕跡がどこにも残らない」形で潜在化するため、既定値を持たない（#1820）。
+        /// </param>
+        /// <param name="orgOptions">組織設定</param>
         public PrintService(
             IReportDataBuilder reportDataBuilder,
+            ILogger<PrintService> logger,
             IOptions<OrganizationOptions> orgOptions = null)
         {
             _reportDataBuilder = reportDataBuilder;
+            _logger = logger ?? throw new ArgumentNullException(nameof(logger));
             _orgOptions = orgOptions?.Value ?? new OrganizationOptions();
         }
 
@@ -74,6 +85,10 @@ namespace ICCardManager.Services
         /// Issue #1949: 複数カードのプレビュー生成ループ（<c>ReportViewModel.PreviewSelectedAsync</c>）が
         /// 全カードを同じ年月で取得することを回帰テストで表明するための継ぎ目として virtual にしている。
         /// 本番では派生クラスを作らない。
+        /// <para>
+        /// null を返すのは対象の交通系ICカードのレコード自体が DB に無いとき（削除済みカードは含めて取得する）。
+        /// 呼び出し元（印刷プレビュー）が職員へ案内するため、ここではマスクした IDm で痕跡だけを残す（Issue #2066）。
+        /// </para>
         /// </remarks>
         public virtual async Task<ReportPrintData?> GetReportDataAsync(string cardIdm, int year, int month)
         {
@@ -81,6 +96,10 @@ namespace ICCardManager.Services
             var data = await _reportDataBuilder.BuildAsync(cardIdm, year, month).ConfigureAwait(false);
             if (data == null)
             {
+                // 生の IDm はログにも出さない（#1852）。帳票作成側（ReportService.CardNotFound, #2049）と同じ扱い。
+                _logger.LogWarning(
+                    "印刷プレビューの対象の交通系ICカードがデータベースに見つかりません: {CardIdm}",
+                    IdmMasker.Mask(cardIdm));
                 return null;
             }
 
