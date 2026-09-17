@@ -1309,6 +1309,167 @@ public class ReportViewModelTests
 
     #endregion
 
+    #region 事前チェック警告マークの陳腐化（Issue #2059）
+
+    /// <summary>
+    /// 事前チェックが警告を出すカード 1 枚を一覧へ読み込み、選択状態にする
+    /// </summary>
+    /// <remarks>
+    /// 警告マークは <c>Cards</c> の DTO に付くため、<c>SelectedCards</c> だけへ足す
+    /// <see cref="SelectOneCard"/> では観測できない。
+    /// </remarks>
+    private async Task<CardDto> LoadOneWarningCardAsync(int year, int month)
+    {
+        _cardRepositoryMock.Setup(r => r.GetAllAsync()).ReturnsAsync(new List<IcCard>
+        {
+            new() { CardIdm = "0123456789ABCDEF", CardType = "はやかけん", CardNumber = "001" }
+        });
+        await _viewModel.LoadCardsAsync();
+        _viewModel.SelectedYear = year;
+        _viewModel.SelectedMonth = month;
+        return _viewModel.Cards.Single();
+    }
+
+    /// <summary>
+    /// 欠陥を突く側: 事前チェックの後に月を変えると、警告マークが消えること
+    /// </summary>
+    [Fact]
+    public async Task RunPreflightCheckAsync_ThenSelectedMonthChanges_ShouldClearWarningMarker()
+    {
+        var card = await LoadOneWarningCardAsync(2026, 5);
+        SetupPreflightWarning();
+        await _viewModel.RunPreflightCheckAsync();
+        card.PreflightWarningCount.Should().Be(1, "前提: 5月の事前チェックでマークが付いていること");
+
+        _viewModel.SelectedMonth = 6;
+
+        card.PreflightWarningCount.Should().Be(0);
+        card.HasPreflightWarning.Should().BeFalse();
+    }
+
+    /// <summary>
+    /// 欠陥を突く側: 年だけを変えても、警告マークが消えること
+    /// </summary>
+    [Fact]
+    public async Task RunPreflightCheckAsync_ThenSelectedYearChanges_ShouldClearWarningMarker()
+    {
+        var card = await LoadOneWarningCardAsync(2026, 5);
+        SetupPreflightWarning();
+        await _viewModel.RunPreflightCheckAsync();
+        card.PreflightWarningCount.Should().Be(1, "前提: 2026年5月の事前チェックでマークが付いていること");
+
+        _viewModel.SelectedYear = 2025;
+
+        card.PreflightWarningCount.Should().Be(0);
+    }
+
+    /// <summary>
+    /// 対の表明: 年月を変えなければ、警告マークは残ること
+    /// </summary>
+    /// <remarks>
+    /// 「事前チェックの直後に消す」実装を検出する。
+    /// </remarks>
+    [Fact]
+    public async Task RunPreflightCheckAsync_WithoutPeriodChange_ShouldKeepWarningMarker()
+    {
+        var card = await LoadOneWarningCardAsync(2026, 5);
+        SetupPreflightWarning();
+
+        await _viewModel.RunPreflightCheckAsync();
+
+        card.PreflightWarningCount.Should().Be(1);
+        card.HasPreflightWarning.Should().BeTrue();
+    }
+
+    /// <summary>
+    /// 対の表明: 同じ年月を再選択しても、警告マークは消えないこと
+    /// </summary>
+    /// <remarks>
+    /// 「先月」ボタンを先月の表示中にもう一度押す（年月が変わらない）操作で消す実装を検出する。
+    /// 生成された setter は値が変わったときしか変更通知を呼ばないため、消去を「先月」「今月」の
+    /// コマンド本体へ置いた形がこのテストの検出対象になる。
+    /// 年月の基準は <see cref="ReportViewModel.SelectLastMonth"/> 自身に決めさせ、テスト側で
+    /// <c>DateTime.Now</c> を読まない（月末の境界で基準が食い違わないようにする）。
+    /// </remarks>
+    [Fact]
+    public async Task RunPreflightCheckAsync_ThenSamePeriodReselected_ShouldKeepWarningMarker()
+    {
+        var card = await LoadOneWarningCardAsync(2026, 5);
+        _viewModel.SelectLastMonth();
+        SetupPreflightWarning();
+        await _viewModel.RunPreflightCheckAsync();
+        card.PreflightWarningCount.Should().Be(1, "前提: 事前チェックでマークが付いていること");
+
+        _viewModel.SelectLastMonth();
+
+        card.PreflightWarningCount.Should().Be(1);
+    }
+
+    /// <summary>
+    /// 欠陥を突く側: 検査の待機中に月を変えたら、検査していない月の画面へ古い結果を書き戻さないこと
+    /// </summary>
+    /// <remarks>
+    /// 年月の変更でマークを消しても、待機中の検査が後から書き戻すと同じ食い違いが残る。
+    /// </remarks>
+    [Fact]
+    public async Task RunPreflightCheckAsync_WhenSelectedMonthChangesDuringCheck_ShouldNotApplyWarningMarker()
+    {
+        var card = await LoadOneWarningCardAsync(2026, 5);
+        var (entered, release, calls) = SetupBlockingPreflightBuild();
+
+        var checking = _viewModel.RunPreflightCheckAsync();
+        await entered.Task;
+        _viewModel.SelectedMonth = 6;
+        release.SetResult(true);
+        await checking;
+
+        calls.Should().NotBeEmpty("事前チェックが帳票データを構築したこと（検査の空振り防止）");
+        _viewModel.StatusMessage.Should().Contain("警告1件", "検査自体は 5 月の警告を検出していること");
+        card.PreflightWarningCount.Should().Be(0, "6 月を表示中の一覧へ 5 月の結果を付けないこと");
+    }
+
+    /// <summary>
+    /// 対の表明: 検査の待機中に年月を変えなければ、待機の後でも結果が反映されること
+    /// </summary>
+    /// <remarks>
+    /// 「待機を挟んだら書き戻さない」形へ退化した実装を検出する。
+    /// </remarks>
+    [Fact]
+    public async Task RunPreflightCheckAsync_WhenCheckWaitsWithoutPeriodChange_ShouldApplyWarningMarker()
+    {
+        var card = await LoadOneWarningCardAsync(2026, 5);
+        var (entered, release, _) = SetupBlockingPreflightBuild();
+
+        var checking = _viewModel.RunPreflightCheckAsync();
+        await entered.Task;
+        release.SetResult(true);
+        await checking;
+
+        card.PreflightWarningCount.Should().Be(1);
+    }
+
+    /// <summary>
+    /// 検査した年月が画面の年月と異なる結果は、一覧へ反映しないこと
+    /// </summary>
+    [Fact]
+    public async Task ApplyPreflightWarnings_WithDifferentPeriod_ShouldNotApply()
+    {
+        var card = await LoadOneWarningCardAsync(2026, 6);
+        var result = new ReportPreflightResult();
+        result.Warnings.Add(new ReportPreflightWarning { CardIdm = card.CardIdm });
+
+        _viewModel.ApplyPreflightWarnings(result, 2026, 5);
+        card.PreflightWarningCount.Should().Be(0, "月が異なる");
+
+        _viewModel.ApplyPreflightWarnings(result, 2025, 6);
+        card.PreflightWarningCount.Should().Be(0, "年が異なる");
+
+        _viewModel.ApplyPreflightWarnings(result, 2026, 6);
+        card.PreflightWarningCount.Should().Be(1, "対の表明: 年月が一致すれば反映する");
+    }
+
+    #endregion
+
     #region 出力済みチェックリスト・一括出力テスト（Issue #1691）
 
     /// <summary>
@@ -1731,7 +1892,7 @@ public class ReportViewModelTests
         result.Warnings.Add(new ReportPreflightWarning { CardIdm = "03" });
 
         // Act
-        _viewModel.ApplyPreflightWarnings(result);
+        _viewModel.ApplyPreflightWarnings(result, _viewModel.SelectedYear, _viewModel.SelectedMonth);
 
         // Assert
         var byIdm = _viewModel.Cards.ToDictionary(c => c.CardIdm);
@@ -1753,10 +1914,10 @@ public class ReportViewModelTests
         await LoadThreeCardsAsync();
         var first = new ReportPreflightResult();
         first.Warnings.Add(new ReportPreflightWarning { CardIdm = "01" });
-        _viewModel.ApplyPreflightWarnings(first);
+        _viewModel.ApplyPreflightWarnings(first, _viewModel.SelectedYear, _viewModel.SelectedMonth);
 
         // Act: 2回目は警告なし
-        _viewModel.ApplyPreflightWarnings(new ReportPreflightResult());
+        _viewModel.ApplyPreflightWarnings(new ReportPreflightResult(), _viewModel.SelectedYear, _viewModel.SelectedMonth);
 
         // Assert
         _viewModel.Cards.Should().OnlyContain(c => c.PreflightWarningCount == 0);
