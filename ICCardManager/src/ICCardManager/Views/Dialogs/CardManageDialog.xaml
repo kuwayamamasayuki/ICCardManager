@@ -85,7 +85,7 @@
                                 <TextBlock AutomationProperties.Name="{Binding LentStatusAccessibilityText, Mode=OneWay}">
                                     <TextBlock.Style>
                                         <Style TargetType="TextBlock">
-                                            <Setter Property="Foreground" Value="{DynamicResource SuccessActionBrush}"/>
+                                            <Setter Property="Foreground" Value="{DynamicResource SuccessForegroundBrush}"/>
                                             <Setter Property="FontWeight" Value="Bold"/>
                                             <Style.Triggers>
                                                 <!-- Issue #530: 払戻済状態（最優先） -->
@@ -99,7 +99,7 @@
                                                         <Condition Binding="{Binding IsRefunded}" Value="False"/>
                                                         <Condition Binding="{Binding IsLent}" Value="True"/>
                                                     </MultiDataTrigger.Conditions>
-                                                    <Setter Property="Foreground" Value="{DynamicResource WarningActionBrush}"/>
+                                                    <Setter Property="Foreground" Value="{DynamicResource WarningForegroundBrush}"/>
                                                     <Setter Property="FontWeight" Value="Bold"/>
                                                 </MultiDataTrigger>
                                                 <!-- 選択時は白文字に -->
@@ -149,7 +149,7 @@
                             Command="{Binding DeleteCommand}"
                             Padding="15,8"
                             Margin="0,0,10,5"
-                            Foreground="{DynamicResource ErrorBorderBrush}"
+                            Foreground="{DynamicResource ErrorForegroundBrush}"
                             AutomationProperties.Name="カード削除"
                             AutomationProperties.HelpText="選択したカードを削除します。削除後も履歴は保持されます。"
                             ToolTip="選択したカードを削除"/>
@@ -165,7 +165,7 @@
                             Command="{Binding RefundCommand}"
                             Padding="15,8"
                             Margin="0,0,0,5"
-                            Foreground="{DynamicResource WarningActionBrush}"
+                            Foreground="{DynamicResource WarningForegroundBrush}"
                             AutomationProperties.Name="カード払い戻し"
                             AutomationProperties.HelpText="選択したカードを払い戻します。残高が払出金額として記録され、カードは「払戻済」状態になります。帳票作成は引き続き可能です。"
                             ToolTip="払い戻し処理を行い、カードを「払戻済」状態に設定"/>
@@ -336,7 +336,7 @@
                            AutomationProperties.Name="{Binding StatusMessage}">
                     <TextBlock.Style>
                         <Style TargetType="TextBlock">
-                            <Setter Property="Foreground" Value="{DynamicResource PrimaryBrush}"/>
+                            <Setter Property="Foreground" Value="{DynamicResource InfoTextBrush}"/>
                             <Setter Property="Visibility" Value="Visible"/>
                             <Style.Triggers>
                                 <DataTrigger Binding="{Binding IsStatusError}" Value="True">

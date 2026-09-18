@@ -225,10 +225,10 @@
                              AutomationProperties.Name="残り時間プログレスバー">
                     <ProgressBar.Style>
                         <Style TargetType="ProgressBar">
-                            <Setter Property="Foreground" Value="{DynamicResource PrimaryBrush}"/>
+                            <Setter Property="Foreground" Value="{DynamicResource InfoTextBrush}"/>
                             <Style.Triggers>
                                 <DataTrigger Binding="{Binding IsTimeoutWarning}" Value="True">
-                                    <Setter Property="Foreground" Value="{DynamicResource WarningActionBrush}"/>
+                                    <Setter Property="Foreground" Value="{DynamicResource WarningForegroundBrush}"/>
                                 </DataTrigger>
                             </Style.Triggers>
                         </Style>
@@ -931,7 +931,7 @@
                                                        FontSize="{DynamicResource LargeFontSize}"
                                                        VerticalAlignment="Center"
                                                        Margin="0,0,8,0"
-                                                       Foreground="{DynamicResource ErrorBorderBrush}"
+                                                       Foreground="{DynamicResource ErrorForegroundBrush}"
                                                        ToolTip="残高警告"
                                                        Visibility="{Binding IsBalanceWarning, Converter={StaticResource BoolToVisibilityConverter}}"/>
                                             <!-- 残高（右寄せ） -->
@@ -945,7 +945,7 @@
                                                         <Setter Property="Foreground" Value="{DynamicResource WaitingForegroundBrush}"/>
                                                         <Style.Triggers>
                                                             <DataTrigger Binding="{Binding IsBalanceWarning}" Value="True">
-                                                                <Setter Property="Foreground" Value="{DynamicResource ErrorBorderBrush}"/>
+                                                                <Setter Property="Foreground" Value="{DynamicResource ErrorForegroundBrush}"/>
                                                             </DataTrigger>
                                                         </Style.Triggers>
                                                     </Style>
@@ -971,10 +971,10 @@
                                                        AutomationProperties.Name="{Binding LentStatusAccessibilityText, Mode=OneWay}">
                                                 <TextBlock.Style>
                                                     <Style TargetType="TextBlock">
-                                                        <Setter Property="Foreground" Value="{DynamicResource SuccessActionBrush}"/>
+                                                        <Setter Property="Foreground" Value="{DynamicResource SuccessForegroundBrush}"/>
                                                         <Style.Triggers>
                                                             <DataTrigger Binding="{Binding IsLent}" Value="True">
-                                                                <Setter Property="Foreground" Value="{DynamicResource WarningActionBrush}"/>
+                                                                <Setter Property="Foreground" Value="{DynamicResource WarningForegroundBrush}"/>
                                                             </DataTrigger>
                                                         </Style.Triggers>
                                                     </Style>
@@ -1002,7 +1002,7 @@
                                FontSize="{DynamicResource BaseFontSize}"
                                FontWeight="Bold"
                                Margin="0,15,0,10"
-                               Foreground="{DynamicResource ErrorBorderBrush}"
+                               Foreground="{DynamicResource ErrorForegroundBrush}"
                                Visibility="{Binding WarningMessages.Count, Converter={StaticResource IntToVisibilityConverter}, Mode=OneWay}"/>
 
                     <!-- Issue #541: 警告エリアにスクロール機能を追加（高さ制限対応） -->
@@ -1161,17 +1161,17 @@
                         <TextBlock.Style>
                             <Style TargetType="TextBlock">
                                 <Setter Property="Text" Value="🔌"/>
-                                <Setter Property="Foreground" Value="{DynamicResource ErrorBorderBrush}"/>
+                                <Setter Property="Foreground" Value="{DynamicResource ErrorForegroundBrush}"/>
                                 <Setter Property="ToolTip" Value="カードリーダー切断"/>
                                 <Style.Triggers>
                                     <DataTrigger Binding="{Binding CardReaderConnectionState}" Value="{x:Static cardReader:CardReaderConnectionState.Connected}">
                                         <Setter Property="Text" Value="🔗"/>
-                                        <Setter Property="Foreground" Value="{DynamicResource SuccessActionBrush}"/>
+                                        <Setter Property="Foreground" Value="{DynamicResource SuccessForegroundBrush}"/>
                                         <Setter Property="ToolTip" Value="カードリーダー接続中"/>
                                     </DataTrigger>
                                     <DataTrigger Binding="{Binding CardReaderConnectionState}" Value="{x:Static cardReader:CardReaderConnectionState.Reconnecting}">
                                         <Setter Property="Text" Value="🔄"/>
-                                        <Setter Property="Foreground" Value="{DynamicResource WarningActionBrush}"/>
+                                        <Setter Property="Foreground" Value="{DynamicResource WarningForegroundBrush}"/>
                                         <Setter Property="ToolTip" Value="再接続中..."/>
                                     </DataTrigger>
                                 </Style.Triggers>
@@ -1184,11 +1184,11 @@
                         <TextBlock.Style>
                             <Style TargetType="TextBlock">
                                 <Setter Property="Text" Value="リーダー: 切断"/>
-                                <Setter Property="Foreground" Value="{DynamicResource ErrorBorderBrush}"/>
+                                <Setter Property="Foreground" Value="{DynamicResource ErrorForegroundBrush}"/>
                                 <Style.Triggers>
                                     <DataTrigger Binding="{Binding CardReaderConnectionState}" Value="{x:Static cardReader:CardReaderConnectionState.Connected}">
                                         <Setter Property="Text" Value="リーダー: 接続中"/>
-                                        <Setter Property="Foreground" Value="{DynamicResource SuccessActionBrush}"/>
+                                        <Setter Property="Foreground" Value="{DynamicResource SuccessForegroundBrush}"/>
                                     </DataTrigger>
                                     <DataTrigger Binding="{Binding CardReaderConnectionState}" Value="{x:Static cardReader:CardReaderConnectionState.Reconnecting}">
                                         <Setter Property="Text">
@@ -1196,7 +1196,7 @@
                                                 <Binding Path="CardReaderReconnectAttempts" StringFormat="リーダー: 再接続中 ({0}/10)"/>
                                             </Setter.Value>
                                         </Setter>
-                                        <Setter Property="Foreground" Value="{DynamicResource WarningActionBrush}"/>
+                                        <Setter Property="Foreground" Value="{DynamicResource WarningForegroundBrush}"/>
                                     </DataTrigger>
                                 </Style.Triggers>
                             </Style>
@@ -1232,19 +1232,19 @@
                         <Style TargetType="TextBlock">
                             <!-- 既定: Connected -->
                             <Setter Property="Text" Value="🔗 共有モード"/>
-                            <Setter Property="Foreground" Value="{DynamicResource PrimaryBrush}"/>
+                            <Setter Property="Foreground" Value="{DynamicResource InfoTextBrush}"/>
                             <Setter Property="ToolTip" Value="共有フォルダ上のデータベースに接続中です（複数PC同時利用）"/>
                             <Style.Triggers>
                                 <DataTrigger Binding="{Binding SharedDbConnectionState}"
                                              Value="{x:Static services:SharedDbConnectionState.Reconnecting}">
                                     <Setter Property="Text" Value="🔄 共有モード（再接続中）"/>
-                                    <Setter Property="Foreground" Value="{DynamicResource WarningActionBrush}"/>
+                                    <Setter Property="Foreground" Value="{DynamicResource WarningForegroundBrush}"/>
                                     <Setter Property="ToolTip" Value="共有DBへの接続を再試行中です。"/>
                                 </DataTrigger>
                                 <DataTrigger Binding="{Binding SharedDbConnectionState}"
                                              Value="{x:Static services:SharedDbConnectionState.Disconnected}">
                                     <Setter Property="Text" Value="⚠ 共有モード（切断中）"/>
-                                    <Setter Property="Foreground" Value="{DynamicResource ErrorBorderBrush}"/>
+                                    <Setter Property="Foreground" Value="{DynamicResource ErrorForegroundBrush}"/>
                                     <Setter Property="ToolTip" Value="共有DBへの接続が切断されています。ネットワーク接続を確認してください。"/>
                                 </DataTrigger>
                             </Style.Triggers>
@@ -1264,7 +1264,7 @@
                                 <Setter Property="Foreground" Value="{DynamicResource SecondaryTextBrush}"/>
                                 <Style.Triggers>
                                     <DataTrigger Binding="{Binding IsRefreshStale}" Value="True">
-                                        <Setter Property="Foreground" Value="{DynamicResource WarningActionBrush}"/>
+                                        <Setter Property="Foreground" Value="{DynamicResource WarningForegroundBrush}"/>
                                         <Setter Property="FontWeight" Value="Bold"/>
                                     </DataTrigger>
                                 </Style.Triggers>

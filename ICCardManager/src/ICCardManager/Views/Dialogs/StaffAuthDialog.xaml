@@ -88,7 +88,7 @@
                        Text=""
                        FontSize="{DynamicResource LargeFontSize}"
                        FontWeight="Bold"
-                       Foreground="{DynamicResource PrimaryBrush}"
+                       Foreground="{DynamicResource InfoTextBrush}"
                        HorizontalAlignment="Center"
                        AutomationProperties.HelpText="この時間が0になると認証は自動的にキャンセルされます"
                        AutomationProperties.LiveSetting="Polite"/>

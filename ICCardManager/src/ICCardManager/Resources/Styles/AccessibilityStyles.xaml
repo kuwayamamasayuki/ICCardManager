@@ -8,10 +8,20 @@
 
     <!-- ===== 色定義（WCAG 2.1 AA準拠） ===== -->
     <!-- コントラスト比4.5:1以上を確保 -->
+    <!-- Issue #2074: 「*ForegroundBrush は文字色」「*BorderBrush / *ActionBrush は枠線・塗り」という
+         役割分担を色値で守る。文字色として使うブラシは白背景（アプリの既定面）で 4.5:1 以上あること。
+         ForegroundContrastConventionTests が Views 配下の Foreground バインドを全走査して固定する。
+         枠線・塗り用のブラシ（LendingBorderBrush #FF9800 等）は 4.5:1 を満たさないが、
+         WCAG 1.4.3 が求めるのは文字色のコントラストなので、Foreground に使わない限り問題にならない。 -->
 
     <!-- 貸出状態（暖色系） - オレンジ/アンバー -->
+    <!-- LendingForegroundBrush は旧 #E65100（白背景 3.79:1）。単に濃くすると WarningForegroundBrush と
+         同じ明度域へ寄り、1 型／2 型色覚では橙どうしが分離できなくなる（実測 ΔEcvd 10.9 → 3 前後）。
+         「明度差を開く」方向へ倒して #732800（白背景 10.33:1、L*27.2）とした。実測値:
+           貸出–警告 ΔEcvd 10.9 → 19.9（改善）／貸出–返却 ΔEcvd 73.4（暖色 vs 寒色の分離は維持）
+           意味色 4 色（エラー・成功・貸出・警告）の最小 ΔEcvd は 8.41 → 8.38 でほぼ維持 -->
     <SolidColorBrush x:Key="LendingBackgroundBrush" Color="#FFF3E0"/>
-    <SolidColorBrush x:Key="LendingForegroundBrush" Color="#E65100"/>
+    <SolidColorBrush x:Key="LendingForegroundBrush" Color="#732800"/>
     <SolidColorBrush x:Key="LendingBorderBrush" Color="#FF9800"/>
 
     <!-- 返却状態（寒色系） - 青/シアン -->
@@ -30,8 +40,11 @@
     <SolidColorBrush x:Key="SuccessBorderBrush" Color="#4CAF50"/>
 
     <!-- 警告状態 - 黄色 -->
+    <!-- WarningForegroundBrush は旧 #F57F17（白背景 2.65:1）。名前が Foreground であるにもかかわらず
+         文字色として最も薄く、Issue #2074 で WarningActionBrush(#FF9800) の置き換え先に選んだ時点で
+         規約違反が残る形だった。#AC5910（白背景 5.01:1 / WarningBackgroundBrush 上 4.88:1）へ是正する -->
     <SolidColorBrush x:Key="WarningBackgroundBrush" Color="#FFFDE7"/>
-    <SolidColorBrush x:Key="WarningForegroundBrush" Color="#F57F17"/>
+    <SolidColorBrush x:Key="WarningForegroundBrush" Color="#AC5910"/>
     <SolidColorBrush x:Key="WarningBorderBrush" Color="#FFC107"/>
 
     <!-- 待機状態 - グレー -->
@@ -40,6 +53,9 @@
     <SolidColorBrush x:Key="WaitingBorderBrush" Color="#9E9E9E"/>
 
     <!-- プライマリカラー -->
+    <!-- PrimaryBrush は主要ボタンの塗り・枠線・選択状態のアクセント。地色 #F5F5F5 に対して
+         4.22:1 しかないため文字色には使わない（Issue #2074）。青系の文字色が要るときは
+         InfoTextBrush(#1565C0、地色 5.27:1) を使う -->
     <SolidColorBrush x:Key="PrimaryBrush" Color="#1976D2"/>
     <SolidColorBrush x:Key="PrimaryDarkBrush" Color="#0D47A1"/>
     <SolidColorBrush x:Key="PrimaryLightBrush" Color="#BBDEFB"/>
@@ -52,10 +68,19 @@
     <!-- ヘッダー・アクセントカラー -->
     <SolidColorBrush x:Key="HeaderBackgroundBrush" Color="#2196F3"/>
     <SolidColorBrush x:Key="InfoTextBrush" Color="#1565C0"/>
-    <SolidColorBrush x:Key="OnPrimaryBrush" Color="White"/>
+    <!-- 濃色の塗り（主要ボタン・ヘッダー）の上に載せる文字色。白背景では読めないため、
+         Foreground のコントラスト検査（Issue #2074）では「濃色背景専用」として明示的に除外する。
+         名前付きの色（White）のままだと検査が色値を解決できないので #FFFFFF で書く -->
+    <SolidColorBrush x:Key="OnPrimaryBrush" Color="#FFFFFF"/>
 
     <!-- テキストカラー -->
-    <SolidColorBrush x:Key="SecondaryTextBrush" Color="Gray"/>
+    <!-- SecondaryTextBrush は旧 Color="Gray"（#808080、白背景 3.95:1）。補足説明として 90 箇所以上で
+         使われる最多の文字色でありながら AA に届いていなかった。#6E6E6E へ是正する（Issue #2074）。
+         判定の地色は白ではなく NeutralBackgroundBrush(#F5F5F5) — 文字が載る面は白だけでなく
+         一覧の交互行(#FAFAFA)とパネル(#F5F5F5)があり、暗い文字にはそちらのほうが厳しい。
+         白基準で選んだ #757575 は白 4.61:1 に対しパネル上 4.23:1 で未達だった（コードレビューで検出）。
+         #6E6E6E は 白 5.10:1 / 交互行 4.89:1 / パネル 4.68:1 -->
+    <SolidColorBrush x:Key="SecondaryTextBrush" Color="#6E6E6E"/>
     <SolidColorBrush x:Key="MutedTextBrush" Color="#666666"/>
     <SolidColorBrush x:Key="DangerTextBrush" Color="#D32F2F"/>
     <!-- ヒント／補足説明用（Brown 700）。色覚多様性に配慮した茶色系で、💡や⚠の説明文に使う（Issue #1461） -->
@@ -69,6 +94,9 @@
     <SolidColorBrush x:Key="AlternatingRowBrush" Color="#FAFAFA"/>
 
     <!-- アクション・オーバーレイ -->
+    <!-- SuccessActionBrush / WarningActionBrush は主要ボタンの「塗り」。白背景でのコントラストは
+         2.8:1 / 2.2:1 しかないため文字色には使わない（Issue #2074）。文字色が要るときは
+         SuccessForegroundBrush / WarningForegroundBrush を使う -->
     <SolidColorBrush x:Key="SuccessActionBrush" Color="#4CAF50"/>
     <SolidColorBrush x:Key="WarningActionBrush" Color="#FF9800"/>
     <SolidColorBrush x:Key="OverlayBrush" Color="#80000000"/>

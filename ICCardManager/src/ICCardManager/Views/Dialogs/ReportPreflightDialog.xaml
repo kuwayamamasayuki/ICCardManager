@@ -79,7 +79,7 @@
                             <TextBlock Text="{Binding Name}"
                                        FontWeight="Bold"
                                        Margin="0,8,0,4"
-                                       Foreground="{DynamicResource PrimaryBrush}"/>
+                                       Foreground="{DynamicResource InfoTextBrush}"/>
                         </DataTemplate>
                     </GroupStyle.HeaderTemplate>
                 </GroupStyle>

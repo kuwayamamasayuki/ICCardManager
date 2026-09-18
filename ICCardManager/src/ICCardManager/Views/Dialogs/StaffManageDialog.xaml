@@ -106,7 +106,7 @@
                             IsEnabled="{Binding SelectedStaff, Converter={StaticResource NotNullToBoolConverter}}"
                             Padding="15,8"
                             Margin="0,0,0,5"
-                            Foreground="{DynamicResource ErrorBorderBrush}"
+                            Foreground="{DynamicResource ErrorForegroundBrush}"
                             AutomationProperties.Name="職員削除"
                             AutomationProperties.HelpText="選択した職員を削除します。削除後も履歴は保持されます。"
                             ToolTip="選択した職員を削除"/>
@@ -275,7 +275,7 @@
                            AutomationProperties.Name="{Binding StatusMessage}">
                     <TextBlock.Style>
                         <Style TargetType="TextBlock">
-                            <Setter Property="Foreground" Value="{DynamicResource PrimaryBrush}"/>
+                            <Setter Property="Foreground" Value="{DynamicResource InfoTextBrush}"/>
                             <Setter Property="Visibility" Value="Visible"/>
                             <Style.Triggers>
                                 <DataTrigger Binding="{Binding IsStatusError}" Value="True">

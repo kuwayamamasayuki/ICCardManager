@@ -84,7 +84,7 @@
                     <TextBlock Text="{Binding IncomeDisplay}"
                                FontSize="{DynamicResource LargeFontSize}"
                                FontWeight="Bold"
-                               Foreground="{DynamicResource SuccessActionBrush}"
+                               Foreground="{DynamicResource SuccessForegroundBrush}"
                                VerticalAlignment="Center"
                                Margin="0,0,15,0"
                                Visibility="{Binding IncomeDisplay, Converter={StaticResource BoolToVisibilityConverter}}"/>

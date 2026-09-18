@@ -201,7 +201,7 @@
         <TextBlock Grid.Row="2"
                    Text="{Binding StatusMessage}"
                    TextWrapping="Wrap"
-                   Foreground="{DynamicResource PrimaryBrush}"
+                   Foreground="{DynamicResource InfoTextBrush}"
                    FontWeight="Bold"
                    FontSize="{DynamicResource SmallFontSize}"
                    Margin="0,10,0,0"/>
