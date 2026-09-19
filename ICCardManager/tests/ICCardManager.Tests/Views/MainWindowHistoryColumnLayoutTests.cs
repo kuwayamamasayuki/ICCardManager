@@ -49,6 +49,47 @@ public class MainWindowHistoryColumnLayoutTests
     }
 
     /// <summary>
+    /// 値が空の行では、セルの <c>ToolTip</c> を外すこと。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Issue #2076 のコードレビューで検出。害は 2 つある。①空文字を <c>ToolTip</c> に渡すと
+    /// 中身の無いツールチップが出る ②<c>ToolTipService</c> は**最も近い祖先**の <c>ToolTip</c> を使うため、
+    /// セルに置いた <c>ToolTip</c> が <c>DataGridRow</c> の <c>ToolTip</c> をこのセルの上でだけ**覆う** —
+    /// 残高不整合行（#1052）の説明や「今回の返却で記録された行」（#1907）が、
+    /// 空のポップアップに置き換わる。
+    /// </para>
+    /// <para>
+    /// **両列とも空になり得る**。備考は任意入力で、利用者は導入行（新規購入・○月から繰越・
+    /// 前年度より繰越）で空になる — <c>BuildInitialLedgerAsync</c> が <c>StaffName = null</c> /
+    /// <c>CompanionCount = 0</c> で書き、<c>StaffNameFormatter.Format</c> が空文字を返すため。
+    /// そして導入行こそ残高不整合の起点になりやすい（#2007）。
+    /// </para>
+    /// </remarks>
+    [Theory]
+    [InlineData("利用者")]
+    [InlineData("備考")]
+    public void 値が空の行ではセルのToolTipを外すこと(string header)
+    {
+        var body = XamlElementInspection.StripXmlComments(FindColumn(header)!.Body);
+
+        var clearedValues = XamlElementInspection.EnumerateElements(body, "DataTrigger")
+            .Select(t => new
+            {
+                Value = XamlElementInspection.GetAttribute(t.StartTag, "Value"),
+                ToolTip = XamlElementInspection.GetSetterValue(t.Body, "ToolTip"),
+            })
+            .Where(t => t.ToolTip == "{x:Null}")
+            .Select(t => t.Value)
+            .ToList();
+
+        clearedValues.Should().BeEquivalentTo(new[] { string.Empty, "{x:Null}" },
+            $"Issue #2076: 「{header}」が空文字／null の行では ToolTip を外すこと。" +
+            "残すと中身の無いツールチップが出るうえ、行レベルの ToolTip（#1052 の残高不整合の説明・" +
+            "#1907 の「今回の返却で記録された行」）をこのセルの上でだけ覆う");
+    }
+
+    /// <summary>
     /// 切り詰めを前提にしても、既定幅は通常の値が収まる程度に確保しておくこと。
     /// </summary>
     /// <remarks>

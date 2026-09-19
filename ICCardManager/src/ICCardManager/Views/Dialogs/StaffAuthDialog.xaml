@@ -6,6 +6,7 @@
         Width="450"
         MinWidth="380"
         MinHeight="260"
+        MaxHeight="680"
         WindowStartupLocation="CenterOwner"
         ResizeMode="CanResize"
         ShowInTaskbar="False"
@@ -14,70 +15,82 @@
         AutomationProperties.HelpText="重要な操作を行うために職員証による認証が必要です">
 
     <Grid Margin="25">
+        <!-- Issue #2076: §5.6「入力フォーム型ダイアログの構造」に揃える。SizeToContent="Height" は
+             内容の高さに合わせて伸びるため、MaxHeight が無いと画面高さを超え得る。
+             上限を付けたら、そこで押し出される側（残り時間・キャンセル）をスクロール領域の外へ出す。 -->
         <Grid.RowDefinitions>
-            <RowDefinition Height="Auto"/>
-            <RowDefinition Height="Auto"/>
             <RowDefinition Height="*"/>
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="Auto"/>
         </Grid.RowDefinitions>
 
-        <!-- アイコンとタイトル -->
-        <StackPanel Grid.Row="0" HorizontalAlignment="Center" Margin="0,0,0,20">
-            <TextBlock Text="🔐" FontSize="{DynamicResource DialogLargeIconFontSize}" HorizontalAlignment="Center" Margin="0,0,0,10"
-                       AutomationProperties.Name="認証アイコン"
-                       AutomationProperties.HelpText="鍵のアイコン。職員証による認証画面であることを示します"/>
-            <!-- Issue #1468: TextBlock は Text 自体がスクリーンリーダーに読み上げられる。
-                 Name を付けると Text の読み上げが上書きされるため、HelpText のみで補足。 -->
-            <TextBlock Text="操作者を記録するため、職員証をタッチしてください"
-                       FontSize="{DynamicResource LargeFontSize}"
-                       FontWeight="Bold"
-                       HorizontalAlignment="Center"
-                       TextWrapping="Wrap"
-                       TextAlignment="Center"
-                       AutomationProperties.HelpText="職員証をICカードリーダーにタッチして本人確認を行ってください"/>
-        </StackPanel>
+        <ScrollViewer Grid.Row="0" VerticalScrollBarVisibility="Auto">
+            <Grid>
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="Auto"/>
+                </Grid.RowDefinitions>
 
-        <!-- 操作内容の説明 -->
-        <Border Grid.Row="1" Background="{DynamicResource ReturnBackgroundBrush}" CornerRadius="4" Padding="12" Margin="0,0,0,15">
-            <StackPanel>
-                <TextBlock Text="操作内容:"
-                           FontSize="{DynamicResource SmallFontSize}"
-                           Foreground="{DynamicResource MutedTextBrush}"
-                           Margin="0,0,0,3"/>
-                <!-- Issue #1468: 動的にテキストが書き換わる TextBlock では AutomationProperties.Name を設定しない。
-                     Name を付けると Text のフォールバック読み上げが上書きされ、内容変化がスクリーン
-                     リーダーに伝わらないため、HelpText のみで補足情報を付与する。 -->
-                <TextBlock x:Name="OperationDescriptionText"
-                           Text="履歴の編集"
-                           FontSize="{DynamicResource BaseFontSize}"
-                           FontWeight="SemiBold"
-                           Foreground="{DynamicResource InfoTextBrush}"
-                           AutomationProperties.HelpText="この認証によって許可される操作の内容です"/>
-            </StackPanel>
-        </Border>
+                <!-- アイコンとタイトル -->
+                <StackPanel Grid.Row="0" HorizontalAlignment="Center" Margin="0,0,0,20">
+                    <TextBlock Text="🔐" FontSize="{DynamicResource DialogLargeIconFontSize}" HorizontalAlignment="Center" Margin="0,0,0,10"
+                               AutomationProperties.Name="認証アイコン"
+                               AutomationProperties.HelpText="鍵のアイコン。職員証による認証画面であることを示します"/>
+                    <!-- Issue #1468: TextBlock は Text 自体がスクリーンリーダーに読み上げられる。
+                         Name を付けると Text の読み上げが上書きされるため、HelpText のみで補足。 -->
+                    <TextBlock Text="操作者を記録するため、職員証をタッチしてください"
+                               FontSize="{DynamicResource LargeFontSize}"
+                               FontWeight="Bold"
+                               HorizontalAlignment="Center"
+                               TextWrapping="Wrap"
+                               TextAlignment="Center"
+                               AutomationProperties.HelpText="職員証をICカードリーダーにタッチして本人確認を行ってください"/>
+                </StackPanel>
 
-        <!-- ステータスメッセージ -->
-        <!-- Issue #1509: StatusBorder は常時可視化して AutomationTree 上に常駐させる。
-             Collapsed → Visible 遷移では LiveRegionChanged が発火しないため、
-             Text 更新時に code-behind から AutomationPeer.RaiseAutomationEvent を明示発火する。
-             初期は背景透明・枠なしで視覚的に中立、Text 設定時に背景色・枠を切り替える。 -->
-        <Border x:Name="StatusBorder" Grid.Row="2" CornerRadius="4" Padding="12" Margin="0,0,0,15"
-                Background="Transparent" BorderThickness="0" MinHeight="44">
-            <!-- Issue #1468/#1509: 動的更新される TextBlock。Name を付けず Text 自体を読み上げ対象にし、
-                 LiveSetting=Assertive でステータス変化（成功・失敗）を即時通知する。 -->
-            <TextBlock x:Name="StatusText"
-                       Text=""
-                       FontSize="{DynamicResource BaseFontSize}"
-                       TextWrapping="Wrap"
-                       HorizontalAlignment="Center"
-                       VerticalAlignment="Center"
-                       AutomationProperties.HelpText="認証処理の現在の状態（成功・失敗・進行中など）"
-                       AutomationProperties.LiveSetting="Assertive"/>
-        </Border>
+                <!-- 操作内容の説明 -->
+                <Border Grid.Row="1" Background="{DynamicResource ReturnBackgroundBrush}" CornerRadius="4" Padding="12" Margin="0,0,0,15">
+                    <StackPanel>
+                        <TextBlock Text="操作内容:"
+                                   FontSize="{DynamicResource SmallFontSize}"
+                                   Foreground="{DynamicResource MutedTextBrush}"
+                                   Margin="0,0,0,3"/>
+                        <!-- Issue #1468: 動的にテキストが書き換わる TextBlock では AutomationProperties.Name を設定しない。
+                             Name を付けると Text のフォールバック読み上げが上書きされ、内容変化がスクリーン
+                             リーダーに伝わらないため、HelpText のみで補足情報を付与する。 -->
+                        <TextBlock x:Name="OperationDescriptionText"
+                                   Text="履歴の編集"
+                                   FontSize="{DynamicResource BaseFontSize}"
+                                   FontWeight="SemiBold"
+                                   Foreground="{DynamicResource InfoTextBrush}"
+                                   AutomationProperties.HelpText="この認証によって許可される操作の内容です"/>
+                    </StackPanel>
+                </Border>
 
-        <!-- タイムアウト表示 -->
-        <StackPanel Grid.Row="3" HorizontalAlignment="Center" Margin="0,0,0,20">
+                <!-- ステータスメッセージ -->
+                <!-- Issue #1509: StatusBorder は常時可視化して AutomationTree 上に常駐させる。
+                     Collapsed → Visible 遷移では LiveRegionChanged が発火しないため、
+                     Text 更新時に code-behind から AutomationPeer.RaiseAutomationEvent を明示発火する。
+                     初期は背景透明・枠なしで視覚的に中立、Text 設定時に背景色・枠を切り替える。 -->
+                <Border x:Name="StatusBorder" Grid.Row="2" CornerRadius="4" Padding="12" Margin="0,0,0,15"
+                        Background="Transparent" BorderThickness="0" MinHeight="44">
+                    <!-- Issue #1468/#1509: 動的更新される TextBlock。Name を付けず Text 自体を読み上げ対象にし、
+                         LiveSetting=Assertive でステータス変化（成功・失敗）を即時通知する。 -->
+                    <TextBlock x:Name="StatusText"
+                               Text=""
+                               FontSize="{DynamicResource BaseFontSize}"
+                               TextWrapping="Wrap"
+                               HorizontalAlignment="Center"
+                               VerticalAlignment="Center"
+                               AutomationProperties.HelpText="認証処理の現在の状態（成功・失敗・進行中など）"
+                               AutomationProperties.LiveSetting="Assertive"/>
+                </Border>
+
+            </Grid>
+        </ScrollViewer>
+
+        <!-- タイムアウト表示（ScrollViewer の外側。内容が伸びても常に見える） -->
+        <StackPanel Grid.Row="1" HorizontalAlignment="Center" Margin="0,0,0,20">
             <TextBlock Text="残り時間:"
                        FontSize="{DynamicResource SmallFontSize}"
                        Foreground="{DynamicResource MutedTextBrush}"
@@ -94,8 +107,8 @@
                        AutomationProperties.LiveSetting="Polite"/>
         </StackPanel>
 
-        <!-- キャンセルボタン -->
-        <StackPanel Grid.Row="4" HorizontalAlignment="Center" Orientation="Horizontal">
+        <!-- キャンセルボタン（同上） -->
+        <StackPanel Grid.Row="2" HorizontalAlignment="Center" Orientation="Horizontal">
             <Button x:Name="CancelButton"
                     Content="キャンセル"
                     MinWidth="120"

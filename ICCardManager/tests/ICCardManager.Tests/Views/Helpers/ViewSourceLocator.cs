@@ -46,4 +46,35 @@ public static class ViewSourceLocator
         throw new InvalidOperationException(
             $"{relativePath} を {AppContext.BaseDirectory} の親階層から解決できませんでした");
     }
+
+    /// <summary>
+    /// <c>src/ICCardManager/</c> 配下の相対パスから、ディレクトリの絶対パスを解決する。
+    /// </summary>
+    /// <param name="relativePath">
+    /// <c>src/ICCardManager/</c> からの相対パス（例: <c>"Views"</c>）
+    /// </param>
+    /// <remarks>
+    /// <see cref="Resolve"/> はファイルの存在で判定するため、配下の全 XAML を走査する規約テスト
+    /// （<c>DialogLayoutConventionTests</c> / <c>FontScaledFixedHeightConventionTests</c>）は
+    /// ディレクトリを解決する私的コピーを各自で持っていた（Issue #2076 のコードレビューで検出）。
+    /// 集約しないと、テスト出力ディレクトリの構成が変わったときに直し漏れたクラスだけが
+    /// 静かに検査対象を見失う（本クラス新設時＝Issue #1740 と同じ理由）。
+    /// </remarks>
+    /// <exception cref="InvalidOperationException">親階層を遡っても見つからない場合</exception>
+    public static string ResolveDirectory(string relativePath)
+    {
+        var current = new DirectoryInfo(AppContext.BaseDirectory);
+        while (current != null)
+        {
+            var candidate = Path.Combine(current.FullName, "src", "ICCardManager", relativePath);
+            if (Directory.Exists(candidate))
+            {
+                return candidate;
+            }
+            current = current.Parent;
+        }
+
+        throw new InvalidOperationException(
+            $"{relativePath} ディレクトリを {AppContext.BaseDirectory} の親階層から解決できませんでした");
+    }
 }

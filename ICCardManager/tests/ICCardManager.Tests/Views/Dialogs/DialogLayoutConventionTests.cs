@@ -5,6 +5,7 @@ using System.IO;
 using System.Linq;
 using System.Text.RegularExpressions;
 using FluentAssertions;
+using ICCardManager.Tests.Views.Helpers;
 using Xunit;
 
 namespace ICCardManager.Tests.Views.Dialogs;
@@ -176,8 +177,72 @@ public class DialogLayoutConventionTests
         heights.Should().ContainKey("SettingsDialog.xaml")
             .WhoseValue.Should().Be(680, "§5.6 が 820 → 680 に抑えた実例として明記している値");
         heights.Should().ContainKey("SystemManageDialog.xaml")
-            .WhoseValue.Should().BeGreaterThan(0, "Issue #2076 で是正した対象が読めていること");
+            .WhoseValue.Should().Be(680, "Issue #2076 で是正した対象が読めていること");
+        heights["CardTypeSelectionDialog.xaml"].Should().BeNull(
+            "SizeToContent=\"Height\" のダイアログは Height を持たない — " +
+            "未指定を 0 へ畳めると上限の無いダイアログを見逃すため、null のまま区別する");
         heights.Count.Should().BeGreaterThan(10, "Views/Dialogs/ の全ダイアログが走査対象であること");
+    }
+
+    /// <summary>
+    /// <c>SizeToContent</c> で高さが伸びるダイアログは、上限（<c>MaxHeight</c>）を宣言しなければならない。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Issue #2076 のコードレビューで検出。<c>SizeToContent="Height"</c> は内容の高さに合わせて
+    /// ウィンドウを伸ばすため、<c>Height</c> を持たない — つまり上の検査（高さ ≤ 720）は
+    /// **この形のダイアログを 1 件も見ていなかった**。上限が無ければ文字サイズ「特大」で
+    /// 画面高さを超え、本 Issue が直している欠陥そのものになる。
+    /// </para>
+    /// <para>
+    /// ガードは「守りたい性質」ではなく「その性質を破れる全経路」を列挙して書く（#1786）。
+    /// 高さの上限を決める経路は <c>Height</c>（固定）と <c>MaxHeight</c>（<c>SizeToContent</c>）の 2 つある。
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public void SizeToContentで伸びるダイアログが高さの上限を宣言していること()
+    {
+        var violations = new List<string>();
+
+        foreach (var (name, windowTag) in EnumerateDialogWindowTags())
+        {
+            var sizeToContent = XamlElementInspection.GetAttribute(windowTag, "SizeToContent");
+            if (sizeToContent == null
+                || sizeToContent.IndexOf("Height", StringComparison.Ordinal) < 0)
+            {
+                continue;
+            }
+
+            if (ReadNumericAttribute(windowTag, "MaxHeight") == null)
+            {
+                violations.Add(name);
+            }
+        }
+
+        violations.Should().BeEmpty(
+            "Issue #2076: SizeToContent=\"Height\" は内容の高さに合わせて伸びるため、MaxHeight が無いと" +
+            "画面高さを超え得る（Height を持たないので高さ ≤ 720 の検査も素通りする）。違反: " +
+            string.Join(", ", violations));
+    }
+
+    /// <summary>
+    /// 上限の検査が空振りしていないことを、実在する <c>SizeToContent</c> ダイアログの数で固定する。
+    /// </summary>
+    [Fact]
+    public void SizeToContentのダイアログが実際に走査されていること()
+    {
+        var sizeToContentDialogs = EnumerateDialogWindowTags()
+            .Where(t => XamlElementInspection.GetAttribute(t.WindowTag, "SizeToContent") != null)
+            .Select(t => t.Name)
+            .ToList();
+
+        sizeToContentDialogs.Should().Contain(new[]
+        {
+            "CardRegistrationModeDialog.xaml",
+            "CardTypeSelectionDialog.xaml",
+            "StaffAuthDialog.xaml",
+        }, "SizeToContent を使う 3 つのダイアログが走査対象に含まれていること" +
+           "（含まれていなければ上の検査は何も見ていない）");
     }
 
     /// <summary>タスクバーを除いた 1366×768 の実用高さ（03_画面設計書 §5.6）。</summary>
@@ -187,16 +252,21 @@ public class DialogLayoutConventionTests
         => Directory.EnumerateFiles(DialogsDirectory, "*.xaml", SearchOption.TopDirectoryOnly)
             .Select(path => (Path.GetFileName(path), ExtractWindowOpeningTag(File.ReadAllText(path))));
 
-    /// <summary>開始タグから数値属性を読む。未指定・非数値（バインディング等）は 0 を返す。</summary>
-    private static double ReadNumericAttribute(string windowTag, string attributeName)
+    /// <summary>開始タグから数値属性を読む。未指定・非数値（バインディング等）は null を返す。</summary>
+    /// <remarks>
+    /// 属性の切り出しは <see cref="XamlElementInspection.GetAttribute"/> へ委譲する。
+    /// 私的コピーを書くと、そのコピーが既に解決済みだった欠陥（単引用符の属性・
+    /// 属性名の境界判定）を再現する（testing.md「検査の下請け処理の複製をこれ以上増やさない」）。
+    /// **未指定を 0 へ畳まない** — 0 にすると「指定が無い」と「十分小さい」が区別できず、
+    /// 上限の無い <c>SizeToContent="Height"</c> のダイアログが検査を素通りする（コードレビューで検出）。
+    /// </remarks>
+    private static double? ReadNumericAttribute(string windowTag, string attributeName)
     {
-        var match = Regex.Match(
-            windowTag,
-            $@"(?<![A-Za-z]){Regex.Escape(attributeName)}\s*=\s*(""(?<v>[^""]*)""|'(?<v>[^']*)')");
-        return match.Success
-               && double.TryParse(match.Groups["v"].Value, NumberStyles.Float, CultureInfo.InvariantCulture, out var value)
+        var raw = XamlElementInspection.GetAttribute(windowTag, attributeName);
+        return raw != null
+               && double.TryParse(raw, NumberStyles.Float, CultureInfo.InvariantCulture, out var value)
             ? value
-            : 0;
+            : (double?)null;
     }
 
     /// <summary>
@@ -217,20 +287,5 @@ public class DialogLayoutConventionTests
         return xaml.Substring(start, end - start + 1);
     }
 
-    private static string ResolveViewsDirectory()
-    {
-        var current = new DirectoryInfo(AppContext.BaseDirectory);
-        while (current != null)
-        {
-            var candidate = Path.Combine(current.FullName, "src", "ICCardManager", "Views");
-            if (Directory.Exists(candidate))
-            {
-                return candidate;
-            }
-            current = current.Parent;
-        }
-
-        throw new InvalidOperationException(
-            $"Views ディレクトリを {AppContext.BaseDirectory} の親階層から解決できませんでした");
-    }
+    private static string ResolveViewsDirectory() => ViewSourceLocator.ResolveDirectory("Views");
 }

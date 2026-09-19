@@ -24,6 +24,12 @@ namespace ICCardManager.Tests.Views.Dialogs;
 /// 緑になる（#1757「正当な操作を塞いでいないことを対で固定する」の裏返し）。
 /// </para>
 /// <para>
+/// <c>SizeToContent="Height"</c> のダイアログ（カード登録方法・カード種別選択・職員証認証）も
+/// 同じ対象になる。上限（<c>MaxHeight</c>）を付けた以上、そこで押し出される側はスクロール領域の
+/// 外に置かなければならない — 上限だけを付けると「画面外へ出る」が「切れて見えない」に変わるだけで、
+/// **押す手段が無いことは変わらない**（Issue #2076 のコードレビューで検出）。
+/// </para>
+/// <para>
 /// 実描画（実際に何 px になるか）の確認には UI オートメーションが要るため、ここでは
 /// XAML テキスト上の構造だけを検査する。文字サイズ「特大」での表示は手動検証する。
 /// </para>
@@ -31,11 +37,13 @@ namespace ICCardManager.Tests.Views.Dialogs;
 public class LowResolutionDialogLayoutTests
 {
     /// <summary>
-    /// 縦に長い 2 つのダイアログで、ボタン行が <c>ScrollViewer</c> の外側にあること。
+    /// 対象ダイアログで、ボタン行が <c>ScrollViewer</c> の外側にあること。
     /// </summary>
     [Theory]
     [InlineData("SystemManageDialog.xaml", "閉じる")]
     [InlineData("CardRegistrationModeDialog.xaml", "OK")]
+    [InlineData("CardTypeSelectionDialog.xaml", "キャンセル")]
+    [InlineData("StaffAuthDialog.xaml", "キャンセル")]
     public void ボタン行がスクロール領域の外にあること(string fileName, string buttonContent)
     {
         var xaml = XamlElementInspection.StripXmlComments(ReadDialog(fileName));
@@ -60,6 +68,8 @@ public class LowResolutionDialogLayoutTests
     [Theory]
     [InlineData("SystemManageDialog.xaml", "リストア（データ復元）")]
     [InlineData("CardRegistrationModeDialog.xaml", "紙の出納簿からの繰越")]
+    [InlineData("CardTypeSelectionDialog.xaml", "未登録のカードです")]
+    [InlineData("StaffAuthDialog.xaml", "StatusText")]
     public void 伸び得る内容がスクロール領域の中にあること(string fileName, string marker)
     {
         var xaml = XamlElementInspection.StripXmlComments(ReadDialog(fileName));

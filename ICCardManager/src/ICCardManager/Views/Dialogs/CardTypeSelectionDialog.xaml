@@ -15,61 +15,73 @@
         AutomationProperties.HelpText="未登録カードを職員証または交通系ICカードとして登録するかを選択します">
 
     <Grid Margin="25">
+        <!-- Issue #2076: §5.6「入力フォーム型ダイアログの構造」に揃える。MaxHeight を付けた以上、
+             そこで押し出される側（ボタン行）はスクロール領域の外に置く。
+             この画面は交通系ICカードをリーダーに載せたまま答える必要があり（#482）、
+             ボタンが画面外に出ると操作を完了する手段が無い。 -->
         <Grid.RowDefinitions>
-            <RowDefinition Height="Auto"/>
-            <RowDefinition Height="Auto"/>
             <RowDefinition Height="*"/>
             <RowDefinition Height="Auto"/>
         </Grid.RowDefinitions>
 
-        <!-- アイコンとメッセージ -->
-        <!-- Issue #2076: 横方向 StackPanel は子を無限幅で測定するため TextWrapping が効かない（#1687）。 -->
-        <Grid Grid.Row="0" Margin="0,0,0,20">
-            <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="Auto"/>
-                <ColumnDefinition Width="*"/>
-            </Grid.ColumnDefinitions>
-            <TextBlock Grid.Column="0" Text="❓" FontSize="{DynamicResource DialogIconFontSize}" VerticalAlignment="Center" Margin="0,0,15,0"/>
-            <StackPanel Grid.Column="1" VerticalAlignment="Center">
-                <TextBlock Text="未登録のカードです"
-                           FontSize="{DynamicResource LargeFontSize}"
-                           TextWrapping="Wrap"
-                           FontWeight="Bold"/>
-                <TextBlock Text="どのように登録しますか？"
-                           FontSize="{DynamicResource BaseFontSize}"
-                           TextWrapping="Wrap"
-                           Foreground="{DynamicResource MutedTextBrush}"
-                           Margin="0,5,0,0"/>
-            </StackPanel>
-        </Grid>
+        <ScrollViewer Grid.Row="0" VerticalScrollBarVisibility="Auto">
+            <Grid>
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="Auto"/>
+                </Grid.RowDefinitions>
 
-        <!-- 説明文 -->
-        <StackPanel Grid.Row="1">
-            <Border Background="{DynamicResource WarningBackgroundBrush}" CornerRadius="4" Padding="12" Margin="0,0,0,10">
-                <TextBlock TextWrapping="Wrap"
-                           FontSize="{DynamicResource SmallFontSize}"
-                           Foreground="{DynamicResource HintForegroundBrush}">
-                    <Run Text="💡 ヒント: "/>
-                    <Run Text="職員の認証に使用するカードは「職員証」、交通費精算に使用するカードは「交通系ICカード」を選択してください。"/>
-                </TextBlock>
-            </Border>
-            <!-- Issue #482: カードを離さないよう警告 -->
-            <Border Background="{DynamicResource ErrorBackgroundBrush}" CornerRadius="4" Padding="12" Margin="0,0,0,10">
-                <TextBlock TextWrapping="Wrap"
-                           FontSize="{DynamicResource SmallFontSize}"
-                           Foreground="{DynamicResource DangerTextBrush}">
-                    <Run Text="⚠ 注意: "/>
-                    <Run Text="選択が完了するまでカードをリーダーから離さないでください。"/>
-                </TextBlock>
-            </Border>
-        </StackPanel>
+                <!-- アイコンとメッセージ -->
+                <!-- Issue #2076: 横方向 StackPanel は子を無限幅で測定するため TextWrapping が効かない（#1687）。 -->
+                <Grid Grid.Row="0" Margin="0,0,0,20">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto"/>
+                        <ColumnDefinition Width="*"/>
+                    </Grid.ColumnDefinitions>
+                    <TextBlock Grid.Column="0" Text="❓" FontSize="{DynamicResource DialogIconFontSize}" VerticalAlignment="Center" Margin="0,0,15,0"/>
+                    <StackPanel Grid.Column="1" VerticalAlignment="Center">
+                        <TextBlock Text="未登録のカードです"
+                                   FontSize="{DynamicResource LargeFontSize}"
+                                   TextWrapping="Wrap"
+                                   FontWeight="Bold"/>
+                        <TextBlock Text="どのように登録しますか？"
+                                   FontSize="{DynamicResource BaseFontSize}"
+                                   TextWrapping="Wrap"
+                                   Foreground="{DynamicResource MutedTextBrush}"
+                                   Margin="0,5,0,0"/>
+                    </StackPanel>
+                </Grid>
 
-        <!-- ボタン -->
+                <!-- 説明文 -->
+                <StackPanel Grid.Row="1">
+                    <Border Background="{DynamicResource WarningBackgroundBrush}" CornerRadius="4" Padding="12" Margin="0,0,0,10">
+                        <TextBlock TextWrapping="Wrap"
+                                   FontSize="{DynamicResource SmallFontSize}"
+                                   Foreground="{DynamicResource HintForegroundBrush}">
+                            <Run Text="💡 ヒント: "/>
+                            <Run Text="職員の認証に使用するカードは「職員証」、交通費精算に使用するカードは「交通系ICカード」を選択してください。"/>
+                        </TextBlock>
+                    </Border>
+                    <!-- Issue #482: カードを離さないよう警告 -->
+                    <Border Background="{DynamicResource ErrorBackgroundBrush}" CornerRadius="4" Padding="12" Margin="0,0,0,10">
+                        <TextBlock TextWrapping="Wrap"
+                                   FontSize="{DynamicResource SmallFontSize}"
+                                   Foreground="{DynamicResource DangerTextBrush}">
+                            <Run Text="⚠ 注意: "/>
+                            <Run Text="選択が完了するまでカードをリーダーから離さないでください。"/>
+                        </TextBlock>
+                    </Border>
+                </StackPanel>
+
+            </Grid>
+        </ScrollViewer>
+
+        <!-- ボタン（ScrollViewer の外側。内容が伸びても常に見える） -->
         <!-- Issue #2076: 幅 450 の中に最小幅 120/140/100 のボタンを横並びしており、
              文字サイズ「大」以上で右端の「キャンセル」が切れていた。
              入らなければ段を分ける WrapPanel へ移す（UniformGrid は全ボタンを同幅に揃えて
              特大で切れるため使わない。#1692）。高さも固定をやめ MinHeight とする。 -->
-        <WrapPanel Grid.Row="3" Orientation="Horizontal" HorizontalAlignment="Center">
+        <WrapPanel Grid.Row="1" Orientation="Horizontal" HorizontalAlignment="Center">
             <Button x:Name="StaffCardButton"
                     Content="職員証"
                     MinWidth="120"

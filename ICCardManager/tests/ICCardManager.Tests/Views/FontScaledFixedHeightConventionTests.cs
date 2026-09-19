@@ -108,9 +108,18 @@ public class FontScaledFixedHeightConventionTests
         // MaxHeight は band の上限であって中身を切らないので拾わない
         Scan(@"<Button Content=""印刷"" MaxHeight=""28""/>").Should().BeEmpty();
 
-        // スクロールできる入力欄は許容側へ分類する（拾うが違反にしない）
+        // スクロールできる複数行の入力欄は許容側へ分類する（拾うが違反にしない）
         Scan(@"<TextBox AcceptsReturn=""True"" Height=""80"" VerticalScrollBarVisibility=""Auto""/>")
             .Should().ContainSingle().Which.Scrollable.Should().BeTrue();
+
+        // スクロールバーを宣言しても、改行を受け付けない 1 行の入力欄は逆に文字が切れるので違反
+        // （属性を 1 つ足すだけで逃げられる fail-open な除外にしない）
+        Scan(@"<TextBox Height=""28"" VerticalScrollBarVisibility=""Auto""/>")
+            .Should().ContainSingle().Which.Scrollable.Should().BeFalse();
+
+        // スクロールを明示的に切っている形も違反
+        Scan(@"<TextBox AcceptsReturn=""True"" Height=""80"" VerticalScrollBarVisibility=""Disabled""/>")
+            .Should().ContainSingle().Which.Scrollable.Should().BeFalse();
 
         // レイアウト要素は文字を直接持たないため対象外
         Scan(@"<Border Height=""28""/>").Should().BeEmpty();
@@ -132,7 +141,7 @@ public class FontScaledFixedHeightConventionTests
 
     private static IEnumerable<FixedHeightControl> EnumerateFixedHeightControls()
     {
-        foreach (var path in Directory.EnumerateFiles(ResolveViewsDirectory(), "*.xaml", SearchOption.AllDirectories))
+        foreach (var path in Directory.EnumerateFiles(ViewSourceLocator.ResolveDirectory("Views"), "*.xaml", SearchOption.AllDirectories))
         {
             foreach (var control in Scan(File.ReadAllText(path)))
             {
@@ -172,29 +181,27 @@ public class FontScaledFixedHeightConventionTests
     /// <summary>
     /// 中身をスクロールできるか（＝固定高さでも文字が失われないか）。
     /// </summary>
+    /// <remarks>
+    /// スクロールバーの宣言だけを条件にすると fail-open になる（Issue #2076 のコードレビューで検出）—
+    /// 1 行の <c>TextBox</c> は改行を受け付けないので縦にスクロールしようが無く、
+    /// 属性を 1 つ足すだけで高さを直さずに検査を逃れられてしまう。
+    /// 許容するのは**複数行の入力欄**（<c>AcceptsReturn="True"</c> とスクロールバーが揃っている）だけで、
+    /// これは実在する 2 箇所（カード管理・職員管理の備考欄）の形でもある。
+    /// </remarks>
     private static bool IsScrollableViewport(XamlElementInspection.XamlElement element)
-        => XamlElementInspection.GetAttribute(element.StartTag, "VerticalScrollBarVisibility") is { } v
-           && !string.Equals(v, "Disabled", StringComparison.Ordinal);
+    {
+        var scrollBar = XamlElementInspection.GetAttribute(element.StartTag, "VerticalScrollBarVisibility");
+        if (scrollBar == null || string.Equals(scrollBar, "Disabled", StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        var acceptsReturn = XamlElementInspection.GetAttribute(element.StartTag, "AcceptsReturn");
+        return string.Equals(acceptsReturn, "True", StringComparison.OrdinalIgnoreCase);
+    }
 
     private static bool IsNumericLiteral(string value)
         => value.Length > 0 && value.All(c => char.IsDigit(c) || c == '.');
-
-    private static string ResolveViewsDirectory()
-    {
-        var current = new DirectoryInfo(AppContext.BaseDirectory);
-        while (current != null)
-        {
-            var candidate = Path.Combine(current.FullName, "src", "ICCardManager", "Views");
-            if (Directory.Exists(candidate))
-            {
-                return candidate;
-            }
-            current = current.Parent;
-        }
-
-        throw new InvalidOperationException(
-            $"Views ディレクトリを {AppContext.BaseDirectory} の親階層から解決できませんでした");
-    }
 
     private sealed record FixedHeightControl(string File, int Line, string Tag, string Height, bool Scrollable);
 }

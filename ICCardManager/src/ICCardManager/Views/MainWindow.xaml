@@ -635,8 +635,10 @@
                                         </Style>
                                     </DataGridTextColumn.ElementStyle>
                                 </DataGridTextColumn>
-                                <!-- Issue #2076: 「2026/09/19」は文字サイズ「大」以上で 90px に収まらない -->
-                                <DataGridTextColumn Header="日付" Binding="{Binding DateDisplay}" Width="110"/>
+                                <!-- Issue #2076: 「2026/09/19」は文字サイズ「大」以上で 90px に収まらない。
+                                     ただし固定幅の合計が広がると、最小幅（MainWindow は 1400）のときに
+                                     右端の「操作」列が横スクロールの向こうへ押し出されるため、広げ幅は必要最小限にする -->
+                                <DataGridTextColumn Header="日付" Binding="{Binding DateDisplay}" Width="100"/>
                                 <DataGridTextColumn Header="摘要" Binding="{Binding Summary}" Width="SizeToCells" MinWidth="200"/>
                                 <DataGridTextColumn Header="受入" Width="75">
                                     <DataGridTextColumn.Binding>
@@ -673,22 +675,37 @@
                                      省略記号も ToolTip も無いため「外１名」が黙って見えなくなっていた。
                                      幅を広げたうえで、文字サイズ 4 段階に幅では追随できない分を
                                      TextTrimming（切れていることが見て分かる）と ToolTip（全文を読める）で担保する。 -->
-                                <DataGridTextColumn Header="利用者" Binding="{Binding DisplayStaffName}" Width="130">
+                                <DataGridTextColumn Header="利用者" Binding="{Binding DisplayStaffName}" Width="120">
                                     <DataGridTextColumn.ElementStyle>
                                         <Style TargetType="TextBlock">
                                             <Setter Property="TextTrimming" Value="CharacterEllipsis"/>
                                             <Setter Property="ToolTip" Value="{Binding DisplayStaffName}"/>
+                                            <Style.Triggers>
+                                                <!-- 利用者が空の行は実在する（新規購入・○月から繰越・前年度より繰越は
+                                                     StaffName が null で CompanionCount=0 なので StaffNameFormatter.Format が空文字を返す）。
+                                                     セルに ToolTip を置くと ToolTipService が最も近い祖先の ToolTip を隠すため、
+                                                     空のまま残すと中身の無いツールチップが出るうえ、
+                                                     行レベルの ToolTip（#1907 の「今回の返却で記録された行」・
+                                                     #1052 の残高不整合の説明）をこのセルの上でだけ覆ってしまう -->
+                                                <DataTrigger Binding="{Binding DisplayStaffName}" Value="">
+                                                    <Setter Property="ToolTip" Value="{x:Null}"/>
+                                                </DataTrigger>
+                                                <DataTrigger Binding="{Binding DisplayStaffName}" Value="{x:Null}">
+                                                    <Setter Property="ToolTip" Value="{x:Null}"/>
+                                                </DataTrigger>
+                                            </Style.Triggers>
                                         </Style>
                                     </DataGridTextColumn.ElementStyle>
                                 </DataGridTextColumn>
-                                <DataGridTextColumn Header="備考" Binding="{Binding Note}" Width="110">
+                                <DataGridTextColumn Header="備考" Binding="{Binding Note}" Width="100">
                                     <DataGridTextColumn.ElementStyle>
                                         <Style TargetType="TextBlock">
                                             <Setter Property="TextTrimming" Value="CharacterEllipsis"/>
                                             <Setter Property="ToolTip" Value="{Binding Note}"/>
                                             <Style.Triggers>
                                                 <!-- 備考は空の行が多い。空文字/null のまま ToolTip を付けると
-                                                     中身の無いツールチップが出る（上の「今回」列と同じ判断） -->
+                                                     中身の無いツールチップが出る（上の「今回」列と同じ判断）。
+                                                     さらに、空のまま残すと行レベルの ToolTip（#1907 / #1052）をこのセルの上で覚う -->
                                                 <DataTrigger Binding="{Binding Note}" Value="">
                                                     <Setter Property="ToolTip" Value="{x:Null}"/>
                                                 </DataTrigger>
