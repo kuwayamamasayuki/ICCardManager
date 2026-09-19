@@ -2,6 +2,7 @@ using System.IO;
 using System.Linq;
 using System.Text.RegularExpressions;
 using FluentAssertions;
+using ICCardManager.Tests.Views.Helpers;
 using Xunit;
 
 namespace ICCardManager.Tests.Views;
@@ -41,20 +42,32 @@ public class LedgerDetailDialogToolbarLayoutTests
         widths.Should().Equal(new[] { "Auto", "*" },
             "Issue #2075: 文言を Auto 列に置くとボタン列が押しつぶされる");
 
-        // ボタンをまとめた StackPanel は Grid.Column 未指定＝0 列目（Auto）に居ること。
-        var buttonPanel = Regex.Match(toolbar, @"<StackPanel\b[^>]*>");
-        buttonPanel.Success.Should().BeTrue("ツールバーにボタンをまとめた StackPanel が存在すべき");
-        buttonPanel.Value.Should().NotMatchRegex(@"Grid\.Column\s*=",
-            "ボタンは 0 列目（Auto）に置くこと");
-        buttonPanel.Value.Should().MatchRegex(@"VerticalAlignment\s*=\s*""Center""",
-            "隣の文言が2行に折り返してもボタンが縦に引き伸ばされないようにする");
+        // ボタンをまとめた StackPanel（＝Button を含むもの）は 0 列目（Auto）に居ること。
+        // 「領域内の最初の StackPanel」で決め打つと、将来 文言側を StackPanel で包んだときに
+        // 別の要素を検査してしまう（コードレビューで検出）。
+        var buttonPanel = XamlElementInspection.EnumerateElements(toolbar, "StackPanel")
+            .SingleOrDefault(e => e.Body.Contains("<Button"));
+        buttonPanel.Should().NotBeNull("ツールバーにボタンをまとめた StackPanel が 1 つだけ存在すべき");
 
-        var statusTextBlock = Regex.Match(
-            toolbar,
-            @"<TextBlock\b[^>]*Text\s*=\s*""\{Binding\s+StatusMessage\}""[^>]*>");
-        statusTextBlock.Success.Should().BeTrue("ツールバーに StatusMessage の TextBlock が存在すべき");
-        statusTextBlock.Value.Should().MatchRegex(@"Grid\.Column\s*=\s*""1""",
+        // Grid.Column は未指定（＝0）でも明示的な "0" でもよい。明示は可読性上むしろ望ましく、
+        // 「書いたら赤」は修正者を不要な書き換えへ誘導する（コードレビューで検出）。
+        ColumnOf(buttonPanel!.StartTag).Should().Be(0, "ボタンは 0 列目（Auto）に置くこと");
+        XamlElementInspection.GetAttribute(buttonPanel.StartTag, "VerticalAlignment")
+            .Should().Be("Center", "隣の文言が2行に折り返してもボタンが縦に引き伸ばされないようにする");
+
+        var statusTextBlock = XamlElementInspection.EnumerateElements(toolbar, "TextBlock")
+            .SingleOrDefault(e => XamlElementInspection.GetBindingPropertyName(
+                XamlElementInspection.GetAttribute(e.StartTag, "Text")) == "StatusMessage");
+        statusTextBlock.Should().NotBeNull("ツールバーに StatusMessage の TextBlock が存在すべき");
+        ColumnOf(statusTextBlock!.StartTag).Should().Be(1,
             "文言は 1 列目（*）に置き、はみ出しを折り返しで吸収する");
+    }
+
+    /// <summary><c>Grid.Column</c> の値を返す。未指定は WPF の既定と同じ 0 として扱う。</summary>
+    private static int ColumnOf(string startTag)
+    {
+        var value = XamlElementInspection.GetAttribute(startTag, "Grid.Column");
+        return value == null ? 0 : int.Parse(value);
     }
 
     /// <summary>
@@ -74,6 +87,6 @@ public class LedgerDetailDialogToolbarLayoutTests
         var toolbar = xaml.Substring(start, end - start);
 
         // 規約の理由を書いたコメント自体が検査対象にならないよう取り除く（#1692）。
-        return Regex.Replace(toolbar, @"<!--[\s\S]*?-->", string.Empty);
+        return XamlElementInspection.StripXmlComments(toolbar);
     }
 }

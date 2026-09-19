@@ -4,6 +4,7 @@ using System.IO;
 using System.Linq;
 using System.Text.RegularExpressions;
 using FluentAssertions;
+using ICCardManager.Tests.Views.Helpers;
 using Xunit;
 
 namespace ICCardManager.Tests.Views;
@@ -23,15 +24,29 @@ namespace ICCardManager.Tests.Views;
 /// 実描画の検証には UI オートメーションが要るため、XAML テキスト上で静的に検証する。
 /// </para>
 /// <para>
-/// 走査対象はファイル名で列挙せず <c>Views/</c> 配下の全 XAML から導出する。画面が追加されたときに
-/// 検査から静かに漏れるのを防ぐため（development-conventions.md #1786）。
+/// **走査対象はファイル名で列挙せず <c>Views/</c> 配下の全 XAML から導出する**。画面が追加されたときに
+/// 検査から静かに漏れるのを防ぐため（#1786）。あわせて**記述形式の軸でも導出する** —
+/// 同じ性質は開始タグの属性のほか <c>&lt;Run Text="{Binding …}"/&gt;</c>・
+/// <c>&lt;TextBlock.Text&gt;</c> プロパティ要素・<c>&lt;Setter Property="Text" …/&gt;</c> でも表現でき、
+/// 折り返しも <c>&lt;Setter Property="TextWrapping" …/&gt;</c> で与えられる（いずれも本リポジトリに実在）。
+/// 開始タグの属性だけを見る形にすると、**同じ欠陥が別の書き方でガードを素通りする**うえ、
+/// Setter で折り返している要素を違反と**誤検出**して修正者をガードの弱体化へ誘導する（#1786）。
+/// 走査は <see cref="XamlElementInspection"/> へ集約し、私的コピーを増やさない（testing.md）。
 /// </para>
 /// <para>
-/// 対象プロパティは Issue #2075 が名指しする「ステータス／検証メッセージ」に限る。
+/// **検査できない範囲**: 外部のリソース辞書で定義した <c>Style</c> から折り返しを与える形は、
+/// XAML テキスト上では解決できない。現時点で対象プロパティにその形は無いが、
+/// 使うと誤検出になる（見ていない範囲は「見ていない」と明示する）。
+/// </para>
+/// <para>
+/// **対象プロパティ**は Issue #2075 が名指しする「ステータス／検証メッセージ」に限る。
 /// <c>BusyMessage</c>（処理中オーバーレイの固定文言）や <c>HistoryStatusMessage</c>
-/// （「1～20件を表示（全123件）」という定型の件数表示）は 3 要素の文言ではなく、
-/// とくに後者は横方向 <c>StackPanel</c> の中にあるため <c>TextWrapping</c> を付けても機能しない。
-/// 機能しない属性を検査で強制すると「緑だが守っていない」状態を作るので対象に含めない。
+/// （「1～20件を表示（全123件）」という定型の件数表示）、<c>MainWindow</c> の
+/// <c>NextActionMessage</c>（「職員証をタッチしてください」等の短い案内）は 3 要素の文言ではない。
+/// とくに後ろの 2 つは**横方向 <c>StackPanel</c> の中にあり <c>TextWrapping</c> が機能しない**（#1687。
+/// <c>NextActionMessage</c> は属性を持つが効いていない）。機能しない属性を検査で強制すると
+/// 「緑だが守っていない」状態を作るので対象に含めない。これらを白リストへ足す前に、
+/// 親パネルを幅の制約があるもの（<c>DockPanel</c> / <c>Grid</c>）へ変えること。
 /// </para>
 /// </remarks>
 public class StatusMessageWrappingConventionTests
@@ -45,21 +60,8 @@ public class StatusMessageWrappingConventionTests
         "WarningMessage",
     };
 
-    /// <summary>
-    /// <c>TextBlock</c> の開始タグ。<c>&lt;TextBlock.Style&gt;</c> のようなプロパティ要素に
-    /// 一致しないよう、要素名の直後が空白・<c>/</c>・<c>&gt;</c> であることを要求する。
-    /// </summary>
-    private static readonly Regex TextBlockStartTagPattern =
-        new(@"<TextBlock(?=[\s/>])[^>]*>", RegexOptions.Compiled | RegexOptions.Singleline);
-
-    private static readonly Regex MessageBindingPattern =
-        new(@"Text\s*=\s*""\{Binding\s+(?:Path\s*=\s*)?(?<prop>[A-Za-z0-9_]+)\s*[,}]", RegexOptions.Compiled);
-
-    private static readonly Regex XamlCommentPattern =
-        new(@"<!--[\s\S]*?-->", RegexOptions.Compiled);
-
-    private static readonly Regex TextWrappingWrapPattern =
-        new(@"TextWrapping\s*=\s*""Wrap""", RegexOptions.Compiled);
+    /// <summary>折り返しとして認める <c>TextWrapping</c> の値。</summary>
+    private static readonly string[] WrappingValues = { "Wrap", "WrapWithOverflow" };
 
     [Fact]
     public void ステータス系メッセージのTextBlockはすべて折り返すこと()
@@ -78,9 +80,8 @@ public class StatusMessageWrappingConventionTests
     /// 走査が空振りしていないことを、Issue #2075 で実際に是正した画面の存在で固定する。
     /// </summary>
     /// <remarks>
-    /// 「対象が非空であること」だけを見ると、正規表現が縮んで 1 件も拾わなくなった状態を検出できない
-    /// （development-conventions.md #1786）。検査ロジック自体の固定は
-    /// <see cref="検査ロジックが違反と適合をサンプル入力で区別すること"/> が担う。
+    /// 「対象が非空であること」だけを見ると、正規表現が縮んで 1 件も拾わなくなった状態を検出できない（#1786）。
+    /// 検査ロジック自体の固定は <see cref="検査ロジックが違反と適合をサンプル入力で区別すること"/> が担う。
     /// </remarks>
     [Fact]
     public void Issue2075で是正した画面がすべて走査対象に含まれること()
@@ -110,15 +111,43 @@ public class StatusMessageWrappingConventionTests
         Scan(@"<TextBlock Text=""{Binding StatusMessage, Mode=OneWay}"" TextWrapping=""Wrap""/>")
             .Should().ContainSingle().Which.HasWrap.Should().BeTrue();
 
-        // Path= 付きのバインドも拾う
+        // WrapWithOverflow も折り返しとして認める
+        Scan(@"<TextBlock Text=""{Binding StatusMessage}"" TextWrapping=""WrapWithOverflow""/>")
+            .Should().ContainSingle().Which.HasWrap.Should().BeTrue();
+
+        // Path= 付き・ドット付きパス・単引用符でも拾う（黙って捨てない）
         Scan(@"<TextBlock Text=""{Binding Path=ValidationMessage}""/>")
             .Should().ContainSingle().Which.Property.Should().Be("ValidationMessage");
-
-        // 開始タグのみのTextBlock（子要素に TextBlock.Style を持つ形）も拾う
-        Scan(@"<TextBlock Text=""{Binding WarningMessage}"">
-                   <TextBlock.Style><Style TargetType=""TextBlock""/></TextBlock.Style>
-               </TextBlock>")
+        Scan(@"<TextBlock Text=""{Binding DataContext.StatusMessage, RelativeSource={RelativeSource Self}}""/>")
+            .Should().ContainSingle().Which.Property.Should().Be("StatusMessage");
+        Scan(@"<TextBlock Text='{Binding WarningMessage}'/>")
             .Should().ContainSingle().Which.Property.Should().Be("WarningMessage");
+
+        // 属性値に > を含んでいても、開始タグを途中で切らない
+        Scan(@"<TextBlock ToolTip=""1 > 0"" Text=""{Binding StatusMessage}"" TextWrapping=""Wrap""/>")
+            .Should().ContainSingle().Which.HasWrap.Should().BeTrue();
+
+        // Run で文言を出す形も拾い、折り返しは外側の TextBlock で判定する
+        Scan(@"<TextBlock><Run Text=""{Binding StatusMessage}""/></TextBlock>")
+            .Should().ContainSingle().Which.HasWrap.Should().BeFalse();
+        Scan(@"<TextBlock TextWrapping=""Wrap""><Run Text=""{Binding StatusMessage}""/></TextBlock>")
+            .Should().ContainSingle().Which.HasWrap.Should().BeTrue();
+
+        // Style の Setter で Text / TextWrapping を与える形も拾う
+        Scan(@"<TextBlock Text=""{Binding StatusMessage}"">
+                   <TextBlock.Style><Style TargetType=""TextBlock"">
+                       <Setter Property=""TextWrapping"" Value=""Wrap""/>
+                   </Style></TextBlock.Style>
+               </TextBlock>")
+            .Should().ContainSingle().Which.HasWrap.Should().BeTrue();
+        Scan(@"<TextBlock><TextBlock.Style><Style TargetType=""TextBlock"">
+                   <Setter Property=""Text"" Value=""{Binding ErrorMessage}""/>
+               </Style></TextBlock.Style></TextBlock>")
+            .Should().ContainSingle().Which.Property.Should().Be("ErrorMessage");
+
+        // TextBlock.Text プロパティ要素も拾う
+        Scan(@"<TextBlock><TextBlock.Text><Binding Path=""StatusMessage""/></TextBlock.Text></TextBlock>")
+            .Should().ContainSingle().Which.Property.Should().Be("StatusMessage");
 
         // 規約の理由を書いたコメント自体を違反として拾わない（極性の反転、#1692）
         Scan(@"<!-- StatusMessage には TextWrapping を付けない、ではなく付けること -->
@@ -130,6 +159,10 @@ public class StatusMessageWrappingConventionTests
 
         // Text 以外のバインド（DataTrigger 等）は拾わない
         Scan(@"<DataTrigger Binding=""{Binding StatusMessage}"" Value=""""/>").Should().BeEmpty();
+
+        // 行番号はコメントを挟んでもずれない
+        Scan("<!-- 1 行目\n2 行目 -->\n<TextBlock Text=\"{Binding StatusMessage}\"/>")
+            .Should().ContainSingle().Which.Line.Should().Be(3);
     }
 
     private static IReadOnlyList<MessageTextBlock> EnumerateMessageTextBlocks()
@@ -146,32 +179,82 @@ public class StatusMessageWrappingConventionTests
 
     private static IReadOnlyList<MessageTextBlock> Scan(string xaml, string file = "(sample)")
     {
-        // 規約の理由を書いたコメントが違反として検出されないよう、先にコメントを取り除く（#1692）。
-        var withoutComments = XamlCommentPattern.Replace(xaml, match => new string('\n', match.Value.Count(c => c == '\n')));
+        var source = XamlElementInspection.StripXmlComments(xaml);
 
         var results = new List<MessageTextBlock>();
-        foreach (Match tag in TextBlockStartTagPattern.Matches(withoutComments))
+        foreach (var element in XamlElementInspection.EnumerateElements(source, "TextBlock"))
         {
-            var binding = MessageBindingPattern.Match(tag.Value);
-            if (!binding.Success)
-            {
-                continue;
-            }
-
-            var property = binding.Groups["prop"].Value;
-            if (!MessageProperties.Contains(property, StringComparer.Ordinal))
+            var property = FindMessageProperty(element);
+            if (property == null)
             {
                 continue;
             }
 
             results.Add(new MessageTextBlock(
                 File: file,
-                Line: withoutComments.Take(tag.Index).Count(c => c == '\n') + 1,
+                Line: element.Line,
                 Property: property,
-                HasWrap: TextWrappingWrapPattern.IsMatch(tag.Value)));
+                HasWrap: HasWrapping(element)));
         }
 
         return results;
+    }
+
+    /// <summary>
+    /// この <c>TextBlock</c> が表示する対象プロパティ名を返す（どの記述形式でも拾う）。
+    /// </summary>
+    private static string? FindMessageProperty(XamlElementInspection.XamlElement element)
+    {
+        // ① 開始タグの Text 属性
+        var candidates = new List<string?>
+        {
+            XamlElementInspection.GetBindingPropertyName(
+                XamlElementInspection.GetAttribute(element.StartTag, "Text")),
+            // ② <Setter Property="Text" Value="{Binding …}"/>
+            XamlElementInspection.GetBindingPropertyName(
+                XamlElementInspection.GetSetterValue(element.Body, "Text")),
+        };
+
+        // ③ 本体の <Run Text="{Binding …}"/>
+        foreach (var run in XamlElementInspection.EnumerateElements(element.Body, "Run"))
+        {
+            candidates.Add(XamlElementInspection.GetBindingPropertyName(
+                XamlElementInspection.GetAttribute(run.StartTag, "Text")));
+        }
+
+        // ④ <TextBlock.Text> プロパティ要素の中の <Binding Path="…"/>
+        foreach (var textProperty in XamlElementInspection.EnumerateElements(element.Body, "TextBlock.Text"))
+        {
+            foreach (var binding in XamlElementInspection.EnumerateElements(textProperty.Body, "Binding"))
+            {
+                candidates.Add(XamlElementInspection.GetAttribute(binding.StartTag, "Path"));
+            }
+        }
+
+        return candidates
+            .Select(NormalizePropertyName)
+            .FirstOrDefault(p => p != null && MessageProperties.Contains(p, StringComparer.Ordinal));
+    }
+
+    /// <summary>パス表記（<c>DataContext.StatusMessage</c>）を最後の区切りへ正規化する。</summary>
+    private static string? NormalizePropertyName(string? path)
+    {
+        if (string.IsNullOrWhiteSpace(path))
+        {
+            return null;
+        }
+
+        var last = path!.Split('.').Last();
+        return Regex.IsMatch(last, @"^[A-Za-z_][A-Za-z0-9_]*$") ? last : null;
+    }
+
+    private static bool HasWrapping(XamlElementInspection.XamlElement element)
+    {
+        var fromAttribute = XamlElementInspection.GetAttribute(element.StartTag, "TextWrapping");
+        var fromSetter = XamlElementInspection.GetSetterValue(element.Body, "TextWrapping");
+
+        return WrappingValues.Contains(fromAttribute, StringComparer.Ordinal)
+               || WrappingValues.Contains(fromSetter, StringComparer.Ordinal);
     }
 
     private sealed record MessageTextBlock(string File, int Line, string Property, bool HasWrap);
