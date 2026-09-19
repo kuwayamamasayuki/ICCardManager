@@ -397,7 +397,8 @@
             </Grid.ColumnDefinitions>
 
             <!-- エクスポートボタン -->
-            <StackPanel Grid.Column="0" Orientation="Horizontal">
+            <!-- Issue #2075: 隣のステータス文言が2行に折り返してもボタンが縦に引き伸ばされないようにする -->
+            <StackPanel Grid.Column="0" Orientation="Horizontal" VerticalAlignment="Center">
                 <Button Content="Excelエクスポート"
                         Command="{Binding ExportToExcelCommand}"
                         Padding="15,8"
@@ -420,6 +421,7 @@
             <TextBlock x:Name="StatusMessageText"
                        Grid.Column="1"
                        Text="{Binding StatusMessage}"
+                       TextWrapping="Wrap"
                        VerticalAlignment="Center"
                        Margin="20,0"
                        AutomationProperties.HelpText="操作ログ検索の処理結果や件数を表示します"
@@ -441,6 +443,7 @@
                     Content="閉じる"
                     Click="CloseButton_Click"
                     Padding="20,8"
+                    VerticalAlignment="Center"
                     IsCancel="True"
                     AutomationProperties.Name="閉じる"
                     AutomationProperties.HelpText="操作ログダイアログを閉じます"

@@ -5,6 +5,7 @@ using System.Linq;
 using System.Globalization;
 using System.Text.RegularExpressions;
 using FluentAssertions;
+using ICCardManager.Tests.Views.Helpers;
 using Xunit;
 
 namespace ICCardManager.Tests.Views;
@@ -314,7 +315,6 @@ public class DynamicTextAutomationNameConventionTests
     // 検出器
     // ------------------------------------------------------------------
 
-    private static readonly Regex XmlCommentRegex = new(@"<!--.*?-->", RegexOptions.Singleline);
 
     /// <summary>
     /// 「動的に Text が変わる TextBlock」を導出する。
@@ -434,194 +434,21 @@ public class DynamicTextAutomationNameConventionTests
     private static bool IsMarkupExtension(string? value)
         => value != null && value.TrimStart().StartsWith("{", StringComparison.Ordinal);
 
-    /// <summary>
-    /// XML コメントを除去する。**行数は保つ**（改行だけを残す）。
-    /// </summary>
-    /// <remarks>
-    /// 単純に削除すると、複数行コメントのあるファイルで報告する行番号がずれる
-    /// （`TestSourceInspection.ToCodeOnlyPreservingLines` が C# 側で同じ理由から採っている方針。
-    /// <c>.claude/rules/testing.md</c>「行番号を報告する検査には…」）。
-    /// </remarks>
+    // 以下の走査ヘルパーは Issue #2075 で ICCardManager.Tests.Views.Helpers.XamlElementInspection へ
+    // 集約した（同じ判断を 2 か所に置かない。.claude/rules/testing.md「検査の下請け処理も同じ」）。
+    // 本クラスは呼び出し側の可読性のために薄いラッパーだけを残す。
+
     private static string StripXmlComments(string xaml)
-        => XmlCommentRegex.Replace(xaml, m => new string('\n', m.Value.Count(c => c == '\n')));
+        => XamlElementInspection.StripXmlComments(xaml);
 
-    /// <summary>
-    /// 要素（開始タグと本体）を列挙する。
-    /// </summary>
-    /// <remarks>
-    /// 開始タグの終わりは**引用符を見ながら**決めるため、属性値に <c>&gt;</c> を含む XAML でも
-    /// 途中で切れない。<c>&lt;Button.Content&gt;</c> のようなプロパティ要素は
-    /// タグ名の直後が <c>.</c> なので <c>Button</c> とは一致しない。
-    /// </remarks>
-    private static IEnumerable<(int Line, string StartTag, string Body)> EnumerateElements(string xaml, string tagName)
-    {
-        var pos = 0;
-        while (pos < xaml.Length)
-        {
-            var start = FindTagStart(xaml, tagName, pos, closing: false);
-            if (start < 0)
-            {
-                yield break;
-            }
+    private static IEnumerable<XamlElementInspection.XamlElement> EnumerateElements(string xaml, string tagName)
+        => XamlElementInspection.EnumerateElements(xaml, tagName);
 
-            var startTagEnd = FindStartTagEnd(xaml, start);
-            if (startTagEnd < 0)
-            {
-                yield break;
-            }
-
-            var startTag = xaml.Substring(start, startTagEnd - start + 1);
-            var body = string.Empty;
-            var next = startTagEnd + 1;
-
-            if (!startTag.EndsWith("/>", StringComparison.Ordinal))
-            {
-                var depth = 1;
-                var scan = next;
-                while (depth > 0)
-                {
-                    var nestedOpen = FindTagStart(xaml, tagName, scan, closing: false);
-                    var close = FindTagStart(xaml, tagName, scan, closing: true);
-                    if (close < 0)
-                    {
-                        break;
-                    }
-
-                    if (nestedOpen >= 0 && nestedOpen < close)
-                    {
-                        var nestedEnd = FindStartTagEnd(xaml, nestedOpen);
-                        if (nestedEnd < 0)
-                        {
-                            break;
-                        }
-
-                        if (!xaml.Substring(nestedOpen, nestedEnd - nestedOpen + 1).EndsWith("/>", StringComparison.Ordinal))
-                        {
-                            depth++;
-                        }
-                        scan = nestedEnd + 1;
-                        continue;
-                    }
-
-                    depth--;
-                    var closeEnd = xaml.IndexOf('>', close);
-                    if (closeEnd < 0)
-                    {
-                        break;
-                    }
-
-                    if (depth == 0)
-                    {
-                        body = xaml.Substring(next, close - next);
-                        next = closeEnd + 1;
-                    }
-                    scan = closeEnd + 1;
-                }
-            }
-
-            yield return (LineOf(xaml, start), startTag, body);
-            pos = Math.Max(next, start + 1);
-        }
-    }
-
-    /// <summary>
-    /// <c>&lt;タグ名</c>（または <c>&lt;/タグ名</c>）の開始位置を返す。
-    /// タグ名の直後が識別子の一部（<c>.</c> を含む）でないことを確かめ、
-    /// <c>&lt;Button.Content&gt;</c> を <c>&lt;Button&gt;</c> と取り違えないようにする。
-    /// </summary>
-    private static int FindTagStart(string xaml, string tagName, int from, bool closing)
-    {
-        var marker = (closing ? "</" : "<") + tagName;
-        var index = from;
-        while (index < xaml.Length)
-        {
-            index = xaml.IndexOf(marker, index, StringComparison.Ordinal);
-            if (index < 0)
-            {
-                return -1;
-            }
-
-            var after = index + marker.Length;
-            if (after >= xaml.Length)
-            {
-                return -1;
-            }
-
-            var ch = xaml[after];
-            if (char.IsWhiteSpace(ch) || ch == '>' || ch == '/')
-            {
-                return index;
-            }
-
-            index = after;
-        }
-
-        return -1;
-    }
-
-    /// <summary>
-    /// 開始タグの閉じ <c>&gt;</c> の位置を、引用符（<c>"</c> / <c>'</c>）の内側を除いて探す。
-    /// </summary>
-    private static int FindStartTagEnd(string xaml, int start)
-    {
-        var quote = '\0';
-        for (var i = start; i < xaml.Length; i++)
-        {
-            var ch = xaml[i];
-            if (quote != '\0')
-            {
-                if (ch == quote)
-                {
-                    quote = '\0';
-                }
-                continue;
-            }
-
-            if (ch == '"' || ch == '\'')
-            {
-                quote = ch;
-            }
-            else if (ch == '>')
-            {
-                return i;
-            }
-        }
-
-        return -1;
-    }
-
-    /// <summary>
-    /// 開始タグから属性値を取り出す（<c>"…"</c> と <c>'…'</c> の両方を受ける）。
-    /// </summary>
     private static string? GetAttribute(string tag, string attributeName)
-    {
-        var match = Regex.Match(tag,
-            $@"(?<![\w.]){Regex.Escape(attributeName)}\s*=\s*(""(?<v>[^""]*)""|'(?<v>[^']*)')");
-        return match.Success ? match.Groups["v"].Value : null;
-    }
+        => XamlElementInspection.GetAttribute(tag, attributeName);
 
-    /// <summary>
-    /// 本体に含まれる <c>&lt;Setter Property="…" Value="…"/&gt;</c> の値を返す。
-    /// <c>Style</c> 経由で <c>AutomationProperties.Name</c> を付ける形（`ReportDialog.xaml` に実在）を拾う。
-    /// </summary>
     private static string? GetSetterValue(string body, string propertyName)
-    {
-        foreach (var (_, startTag, _) in EnumerateElements(body, "Setter"))
-        {
-            if (GetAttribute(startTag, "Property") == propertyName)
-            {
-                var value = GetAttribute(startTag, "Value");
-                if (value != null)
-                {
-                    return value;
-                }
-            }
-        }
-
-        return null;
-    }
-
-    private static int LineOf(string source, int index) => source.Take(index).Count(c => c == '\n') + 1;
+        => XamlElementInspection.GetSetterValue(body, propertyName);
 
     private static IEnumerable<(string XamlPath, string Xaml, string CodeBehind)> EnumerateViewFiles()
     {
