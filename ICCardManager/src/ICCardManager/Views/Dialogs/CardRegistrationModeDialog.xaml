@@ -1,11 +1,12 @@
-<Window x:Class="ICCardManager.Views.Dialogs.CardRegistrationModeDialog"
+﻿<Window x:Class="ICCardManager.Views.Dialogs.CardRegistrationModeDialog"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="カード登録方法の選択"
         SizeToContent="Height"
-        Width="450"
+        Width="480"
         MinWidth="380"
         MinHeight="260"
+        MaxHeight="680"
         WindowStartupLocation="CenterOwner"
         ResizeMode="CanResize"
         ShowInTaskbar="False"
@@ -14,219 +15,245 @@
         AutomationProperties.HelpText="交通系ICカードを新規購入として登録するか、紙の出納簿からの繰越として登録するかを選択します">
 
     <Grid Margin="25">
+        <!-- Issue #2076: §5.6「入力フォーム型ダイアログの構造」に揃える。
+             繰越設定パネル（IsEnabled で切り替えるだけで常に描画される）を含む内容は縦に長く、
+             文字サイズ「大」以上や 1366×768 では OK／キャンセルが画面外へ出ていた。
+             内容は ScrollViewer に入れ、ボタン行は最下行（Auto）に固定する。
+             Window の MaxHeight と併せて、SizeToContent="Height" でも画面高さを超えない。 -->
         <Grid.RowDefinitions>
-            <RowDefinition Height="Auto"/>
-            <RowDefinition Height="Auto"/>
-            <RowDefinition Height="Auto"/>
             <RowDefinition Height="*"/>
             <RowDefinition Height="Auto"/>
         </Grid.RowDefinitions>
 
-        <!-- アイコンとメッセージ -->
-        <StackPanel Grid.Row="0" Orientation="Horizontal" Margin="0,0,0,15">
-            <TextBlock Text="🗂" FontSize="{DynamicResource DialogIconFontSize}" VerticalAlignment="Center" Margin="0,0,15,0"/>
-            <StackPanel VerticalAlignment="Center">
-                <TextBlock Text="カード登録方法の選択"
-                           FontSize="{DynamicResource LargeFontSize}"
-                           FontWeight="Bold"/>
-                <TextBlock Text="このカードはどのように登録しますか？"
-                           FontSize="{DynamicResource BaseFontSize}"
-                           Foreground="{DynamicResource MutedTextBrush}"
-                           Margin="0,5,0,0"/>
-            </StackPanel>
-        </StackPanel>
+        <ScrollViewer Grid.Row="0" VerticalScrollBarVisibility="Auto">
+            <Grid>
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="Auto"/>
+                </Grid.RowDefinitions>
 
-        <!-- オプション1: 新規購入 -->
-        <Border Grid.Row="1"
-                Background="{DynamicResource NeutralBackgroundBrush}"
-                CornerRadius="4"
-                Padding="12"
-                Margin="0,0,0,10"
-                BorderBrush="{DynamicResource DividerBrush}"
-                BorderThickness="1"
-                PreviewMouseLeftButtonDown="NewPurchaseBorder_PreviewMouseLeftButtonDown">
-            <StackPanel>
-                <RadioButton x:Name="NewPurchaseRadio"
-                             GroupName="RegistrationMode"
-                             Content="新規購入"
-                             FontSize="{DynamicResource BaseFontSize}"
-                             FontWeight="Bold"
-                             IsChecked="True"
-                             Checked="NewPurchaseRadio_Checked"
-                             AutomationProperties.Name="新規購入として登録"/>
-                <TextBlock Text="新しく購入したカードを登録します"
-                           FontSize="{DynamicResource SmallFontSize}"
-                           Foreground="{DynamicResource MutedTextBrush}"
-                           Margin="20,5,0,0"/>
-
-                <!-- 購入日選択（Issue #658） -->
-                <StackPanel x:Name="NewPurchaseOptionsPanel" Margin="20,10,0,0" IsEnabled="True">
-                    <StackPanel Orientation="Horizontal">
-                        <TextBlock Text="購入日:"
+                <!-- アイコンとメッセージ -->
+                <!-- Issue #2076: 横方向 StackPanel は子を無限幅で測定するため TextWrapping が効かない（#1687）。
+                     幅制約のある Grid（Auto / *）でアイコンと見出しを並べる。 -->
+                <Grid Grid.Row="0" Margin="0,0,0,15">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto"/>
+                        <ColumnDefinition Width="*"/>
+                    </Grid.ColumnDefinitions>
+                    <TextBlock Grid.Column="0" Text="🗂" FontSize="{DynamicResource DialogIconFontSize}" VerticalAlignment="Center" Margin="0,0,15,0"/>
+                    <StackPanel Grid.Column="1" VerticalAlignment="Center">
+                        <TextBlock Text="カード登録方法の選択"
+                                   FontSize="{DynamicResource LargeFontSize}"
+                                   TextWrapping="Wrap"
+                                   FontWeight="Bold"/>
+                        <TextBlock Text="このカードはどのように登録しますか？"
                                    FontSize="{DynamicResource BaseFontSize}"
-                                   VerticalAlignment="Center"
-                                   Margin="0,0,8,0"/>
-                        <DatePicker x:Name="PurchaseDatePicker"
-                                    Width="130"
-                                    Padding="5"
-                                    FontSize="{DynamicResource BaseFontSize}"
-                                    AutomationProperties.Name="購入日の選択"/>
+                                   TextWrapping="Wrap"
+                                   Foreground="{DynamicResource MutedTextBrush}"
+                                   Margin="0,5,0,0"/>
                     </StackPanel>
-                </StackPanel>
-            </StackPanel>
-        </Border>
+                </Grid>
 
-        <!-- オプション2: 紙の出納簿からの繰越 -->
-        <Border Grid.Row="2"
-                Background="{DynamicResource NeutralBackgroundBrush}"
-                CornerRadius="4"
-                Padding="12"
-                Margin="0,0,0,10"
-                BorderBrush="{DynamicResource DividerBrush}"
-                BorderThickness="1"
-                PreviewMouseLeftButtonDown="CarryoverBorder_PreviewMouseLeftButtonDown">
-            <StackPanel>
-                <RadioButton x:Name="CarryoverRadio"
-                             GroupName="RegistrationMode"
-                             Content="紙の出納簿からの繰越"
-                             FontSize="{DynamicResource BaseFontSize}"
-                             FontWeight="Bold"
-                             Checked="CarryoverRadio_Checked"
-                             AutomationProperties.Name="紙の出納簿からの繰越として登録"/>
-                <TextBlock Text="年度途中から本アプリを使用する場合に選択します"
-                           FontSize="{DynamicResource SmallFontSize}"
-                           Foreground="{DynamicResource MutedTextBrush}"
-                           Margin="20,5,0,0"/>
+                <!-- オプション1: 新規購入 -->
+                <Border Grid.Row="1"
+                        Background="{DynamicResource NeutralBackgroundBrush}"
+                        CornerRadius="4"
+                        Padding="12"
+                        Margin="0,0,0,10"
+                        BorderBrush="{DynamicResource DividerBrush}"
+                        BorderThickness="1"
+                        PreviewMouseLeftButtonDown="NewPurchaseBorder_PreviewMouseLeftButtonDown">
+                    <StackPanel>
+                        <RadioButton x:Name="NewPurchaseRadio"
+                                     GroupName="RegistrationMode"
+                                     Content="新規購入"
+                                     FontSize="{DynamicResource BaseFontSize}"
+                                     FontWeight="Bold"
+                                     IsChecked="True"
+                                     Checked="NewPurchaseRadio_Checked"
+                                     AutomationProperties.Name="新規購入として登録"/>
+                        <TextBlock Text="新しく購入したカードを登録します"
+                                   TextWrapping="Wrap"
+                                   FontSize="{DynamicResource SmallFontSize}"
+                                   Foreground="{DynamicResource MutedTextBrush}"
+                                   Margin="20,5,0,0"/>
 
-                <!-- 繰越設定 -->
-                <StackPanel x:Name="CarryoverOptionsPanel"
-                            Margin="20,10,0,0"
-                            IsEnabled="False">
-                    <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
-                        <ComboBox x:Name="CarryoverMonthCombo"
-                                  Width="80"
-                                  FontSize="{DynamicResource BaseFontSize}"
-                                  SelectionChanged="CarryoverMonthCombo_SelectionChanged"
-                                  AutomationProperties.Name="繰越月の選択"/>
-                        <TextBlock Text=" から繰越"
-                                   FontSize="{DynamicResource BaseFontSize}"
-                                   VerticalAlignment="Center"/>
+                        <!-- 購入日選択（Issue #658） -->
+                        <StackPanel x:Name="NewPurchaseOptionsPanel" Margin="20,10,0,0" IsEnabled="True">
+                            <StackPanel Orientation="Horizontal">
+                                <TextBlock Text="購入日:"
+                                           FontSize="{DynamicResource BaseFontSize}"
+                                           VerticalAlignment="Center"
+                                           Margin="0,0,8,0"/>
+                                <DatePicker x:Name="PurchaseDatePicker"
+                                            Width="130"
+                                            Padding="5"
+                                            FontSize="{DynamicResource BaseFontSize}"
+                                            AutomationProperties.Name="購入日の選択"/>
+                            </StackPanel>
+                        </StackPanel>
                     </StackPanel>
-                    <!-- Issue #1812: 選択した繰越月から実際に生成される繰越レコード日付を提示する。
-                         繰越月が登録月より後の場合は前年扱いになるため注意書きを併記する。
-                         文字サイズが4段階で変わるためTextWrapping="Wrap"で折り返しを担保する。 -->
-                    <TextBlock x:Name="CarryoverDatePreviewText"
+                </Border>
+
+                <!-- オプション2: 紙の出納簿からの繰越 -->
+                <Border Grid.Row="2"
+                        Background="{DynamicResource NeutralBackgroundBrush}"
+                        CornerRadius="4"
+                        Padding="12"
+                        Margin="0,0,0,10"
+                        BorderBrush="{DynamicResource DividerBrush}"
+                        BorderThickness="1"
+                        PreviewMouseLeftButtonDown="CarryoverBorder_PreviewMouseLeftButtonDown">
+                    <StackPanel>
+                        <RadioButton x:Name="CarryoverRadio"
+                                     GroupName="RegistrationMode"
+                                     Content="紙の出納簿からの繰越"
+                                     FontSize="{DynamicResource BaseFontSize}"
+                                     FontWeight="Bold"
+                                     Checked="CarryoverRadio_Checked"
+                                     AutomationProperties.Name="紙の出納簿からの繰越として登録"/>
+                        <TextBlock Text="年度途中から本アプリを使用する場合に選択します"
+                                   TextWrapping="Wrap"
+                                   FontSize="{DynamicResource SmallFontSize}"
+                                   Foreground="{DynamicResource MutedTextBrush}"
+                                   Margin="20,5,0,0"/>
+
+                        <!-- 繰越設定 -->
+                        <StackPanel x:Name="CarryoverOptionsPanel"
+                                    Margin="20,10,0,0"
+                                    IsEnabled="False">
+                            <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
+                                <ComboBox x:Name="CarryoverMonthCombo"
+                                          Width="80"
+                                          FontSize="{DynamicResource BaseFontSize}"
+                                          SelectionChanged="CarryoverMonthCombo_SelectionChanged"
+                                          AutomationProperties.Name="繰越月の選択"/>
+                                <TextBlock Text=" から繰越"
+                                           FontSize="{DynamicResource BaseFontSize}"
+                                           VerticalAlignment="Center"/>
+                            </StackPanel>
+                            <!-- Issue #1812: 選択した繰越月から実際に生成される繰越レコード日付を提示する。
+                                 繰越月が登録月より後の場合は前年扱いになるため注意書きを併記する。
+                                 文字サイズが4段階で変わるためTextWrapping="Wrap"で折り返しを担保する。 -->
+                            <TextBlock x:Name="CarryoverDatePreviewText"
+                                       FontSize="{DynamicResource SmallFontSize}"
+                                       Foreground="{DynamicResource HintForegroundBrush}"
+                                       TextWrapping="Wrap"
+                                       Margin="0,0,0,8"
+                                       AutomationProperties.Name="繰越レコードの日付"/>
+                            <StackPanel Orientation="Horizontal">
+                                <TextBlock Text="開始ページ:"
+                                           FontSize="{DynamicResource BaseFontSize}"
+                                           VerticalAlignment="Center"
+                                           Margin="0,0,8,0"/>
+                                <TextBox x:Name="StartingPageTextBox"
+                                         Width="60"
+                                         Text="1"
+                                         FontSize="{DynamicResource BaseFontSize}"
+                                         TextAlignment="Right"
+                                         AutomationProperties.Name="開始ページ番号"/>
+                            </StackPanel>
+
+                            <!-- Issue #756: 繰越額入力 -->
+                            <StackPanel Orientation="Horizontal" Margin="0,8,0,0">
+                                <TextBlock Text="繰越額:"
+                                           FontSize="{DynamicResource BaseFontSize}"
+                                           VerticalAlignment="Center"
+                                           Margin="0,0,8,0"/>
+                                <TextBox x:Name="CarryoverBalanceTextBox"
+                                         Width="120"
+                                         Padding="10,6"
+                                         FontSize="{DynamicResource BaseFontSize}"
+                                         TextAlignment="Right"
+                                         AutomationProperties.Name="繰越額"
+                                         ToolTip="紙の出納簿の前月末残高を入力してください"/>
+                                <TextBlock Text="円"
+                                           FontSize="{DynamicResource BaseFontSize}"
+                                           VerticalAlignment="Center"
+                                           Margin="5,0,0,0"/>
+                            </StackPanel>
+                            <TextBlock Text="※ 紙の出納簿の前月末残高を入力してください"
+                                   TextWrapping="Wrap"
+                                       FontSize="{DynamicResource SmallFontSize}"
+                                       Foreground="{DynamicResource MutedTextBrush}"
+                                       Margin="0,4,0,0"/>
+
+                            <!-- Issue #1215: 紙の出納簿の累計受入・累計払出入力 -->
+                            <StackPanel Orientation="Horizontal" Margin="0,10,0,0">
+                                <TextBlock Text="累計受入:"
+                                           FontSize="{DynamicResource BaseFontSize}"
+                                           VerticalAlignment="Center"
+                                           Margin="0,0,8,0"/>
+                                <TextBox x:Name="CarryoverIncomeTotalTextBox"
+                                         Width="120"
+                                         Text="0"
+                                         Padding="10,6"
+                                         FontSize="{DynamicResource BaseFontSize}"
+                                         TextAlignment="Right"
+                                         AutomationProperties.Name="累計受入金額"
+                                         ToolTip="紙の出納簿の前月末時点の累計受入金額を入力してください"/>
+                                <TextBlock Text="円"
+                                           FontSize="{DynamicResource BaseFontSize}"
+                                           VerticalAlignment="Center"
+                                           Margin="5,0,0,0"/>
+                            </StackPanel>
+                            <StackPanel Orientation="Horizontal" Margin="0,8,0,0">
+                                <TextBlock Text="累計払出:"
+                                           FontSize="{DynamicResource BaseFontSize}"
+                                           VerticalAlignment="Center"
+                                           Margin="0,0,8,0"/>
+                                <TextBox x:Name="CarryoverExpenseTotalTextBox"
+                                         Width="120"
+                                         Text="0"
+                                         Padding="10,6"
+                                         FontSize="{DynamicResource BaseFontSize}"
+                                         TextAlignment="Right"
+                                         AutomationProperties.Name="累計払出金額"
+                                         ToolTip="紙の出納簿の前月末時点の累計払出金額を入力してください"/>
+                                <TextBlock Text="円"
+                                           FontSize="{DynamicResource BaseFontSize}"
+                                           VerticalAlignment="Center"
+                                           Margin="5,0,0,0"/>
+                            </StackPanel>
+                            <TextBlock Text="※ 月次帳票の「累計」欄に加算されます（当該年度のみ）"
+                                   TextWrapping="Wrap"
+                                       FontSize="{DynamicResource SmallFontSize}"
+                                       Foreground="{DynamicResource MutedTextBrush}"
+                                       Margin="0,4,0,0"/>
+                        </StackPanel>
+                    </StackPanel>
+                </Border>
+
+                <!-- ヒント -->
+                <Border Grid.Row="3"
+                        Background="{DynamicResource ReturnBackgroundBrush}"
+                        CornerRadius="4"
+                        Padding="12"
+                        Margin="0,0,0,10"
+                        VerticalAlignment="Top">
+                    <TextBlock TextWrapping="Wrap"
                                FontSize="{DynamicResource SmallFontSize}"
-                               Foreground="{DynamicResource HintForegroundBrush}"
-                               TextWrapping="Wrap"
-                               Margin="0,0,0,8"
-                               AutomationProperties.Name="繰越レコードの日付"/>
-                    <StackPanel Orientation="Horizontal">
-                        <TextBlock Text="開始ページ:"
-                                   FontSize="{DynamicResource BaseFontSize}"
-                                   VerticalAlignment="Center"
-                                   Margin="0,0,8,0"/>
-                        <TextBox x:Name="StartingPageTextBox"
-                                 Width="60"
-                                 Text="1"
-                                 FontSize="{DynamicResource BaseFontSize}"
-                                 TextAlignment="Right"
-                                 AutomationProperties.Name="開始ページ番号"/>
-                    </StackPanel>
+                               Foreground="{DynamicResource InfoTextBrush}">
+                        <Run Text="💡 ヒント: "/>
+                        <Run Text="紙の出納簿からの繰越を選択した場合、月途中のデータは後からCSVインポートで取り込むことができます。"/>
+                        <LineBreak/>
+                        <Run Text="特に年度途中からの導入時は手順が複雑になる場合があります。詳しくは管理者マニュアルの「1.6 交通系ICカードを登録する」をご参照ください。"/>
+                    </TextBlock>
+                </Border>
 
-                    <!-- Issue #756: 繰越額入力 -->
-                    <StackPanel Orientation="Horizontal" Margin="0,8,0,0">
-                        <TextBlock Text="繰越額:"
-                                   FontSize="{DynamicResource BaseFontSize}"
-                                   VerticalAlignment="Center"
-                                   Margin="0,0,8,0"/>
-                        <TextBox x:Name="CarryoverBalanceTextBox"
-                                 Width="120"
-                                 Padding="10,6"
-                                 FontSize="{DynamicResource BaseFontSize}"
-                                 TextAlignment="Right"
-                                 AutomationProperties.Name="繰越額"
-                                 ToolTip="紙の出納簿の前月末残高を入力してください"/>
-                        <TextBlock Text="円"
-                                   FontSize="{DynamicResource BaseFontSize}"
-                                   VerticalAlignment="Center"
-                                   Margin="5,0,0,0"/>
-                    </StackPanel>
-                    <TextBlock Text="※ 紙の出納簿の前月末残高を入力してください"
-                               FontSize="{DynamicResource SmallFontSize}"
-                               Foreground="{DynamicResource MutedTextBrush}"
-                               Margin="0,4,0,0"/>
+            </Grid>
+        </ScrollViewer>
 
-                    <!-- Issue #1215: 紙の出納簿の累計受入・累計払出入力 -->
-                    <StackPanel Orientation="Horizontal" Margin="0,10,0,0">
-                        <TextBlock Text="累計受入:"
-                                   FontSize="{DynamicResource BaseFontSize}"
-                                   VerticalAlignment="Center"
-                                   Margin="0,0,8,0"/>
-                        <TextBox x:Name="CarryoverIncomeTotalTextBox"
-                                 Width="120"
-                                 Text="0"
-                                 Padding="10,6"
-                                 FontSize="{DynamicResource BaseFontSize}"
-                                 TextAlignment="Right"
-                                 AutomationProperties.Name="累計受入金額"
-                                 ToolTip="紙の出納簿の前月末時点の累計受入金額を入力してください"/>
-                        <TextBlock Text="円"
-                                   FontSize="{DynamicResource BaseFontSize}"
-                                   VerticalAlignment="Center"
-                                   Margin="5,0,0,0"/>
-                    </StackPanel>
-                    <StackPanel Orientation="Horizontal" Margin="0,8,0,0">
-                        <TextBlock Text="累計払出:"
-                                   FontSize="{DynamicResource BaseFontSize}"
-                                   VerticalAlignment="Center"
-                                   Margin="0,0,8,0"/>
-                        <TextBox x:Name="CarryoverExpenseTotalTextBox"
-                                 Width="120"
-                                 Text="0"
-                                 Padding="10,6"
-                                 FontSize="{DynamicResource BaseFontSize}"
-                                 TextAlignment="Right"
-                                 AutomationProperties.Name="累計払出金額"
-                                 ToolTip="紙の出納簿の前月末時点の累計払出金額を入力してください"/>
-                        <TextBlock Text="円"
-                                   FontSize="{DynamicResource BaseFontSize}"
-                                   VerticalAlignment="Center"
-                                   Margin="5,0,0,0"/>
-                    </StackPanel>
-                    <TextBlock Text="※ 月次帳票の「累計」欄に加算されます（当該年度のみ）"
-                               FontSize="{DynamicResource SmallFontSize}"
-                               Foreground="{DynamicResource MutedTextBrush}"
-                               Margin="0,4,0,0"/>
-                </StackPanel>
-            </StackPanel>
-        </Border>
-
-        <!-- ヒント -->
-        <Border Grid.Row="3"
-                Background="{DynamicResource ReturnBackgroundBrush}"
-                CornerRadius="4"
-                Padding="12"
-                Margin="0,0,0,10"
-                VerticalAlignment="Top">
-            <TextBlock TextWrapping="Wrap"
-                       FontSize="{DynamicResource SmallFontSize}"
-                       Foreground="{DynamicResource InfoTextBrush}">
-                <Run Text="💡 ヒント: "/>
-                <Run Text="紙の出納簿からの繰越を選択した場合、月途中のデータは後からCSVインポートで取り込むことができます。"/>
-                <LineBreak/>
-                <Run Text="特に年度途中からの導入時は手順が複雑になる場合があります。詳しくは管理者マニュアルの「1.6 交通系ICカードを登録する」をご参照ください。"/>
-            </TextBlock>
-        </Border>
-
-        <!-- ボタン -->
-        <StackPanel Grid.Row="4"
+        <!-- ボタン（ScrollViewer の外側。内容が伸びても常に見える） -->
+        <StackPanel Grid.Row="1"
                     Orientation="Horizontal"
                     HorizontalAlignment="Right">
             <Button x:Name="OkButton"
                     Content="OK"
                     MinWidth="100"
-                    Height="36"
+                    MinHeight="36"
                     Padding="16,0"
                     Margin="0,0,10,0"
                     FontSize="{DynamicResource BaseFontSize}"
@@ -241,7 +268,7 @@
             <Button x:Name="CancelButton"
                     Content="キャンセル"
                     MinWidth="120"
-                    Height="36"
+                    MinHeight="36"
                     Padding="16,0"
                     FontSize="{DynamicResource BaseFontSize}"
                     IsCancel="True"

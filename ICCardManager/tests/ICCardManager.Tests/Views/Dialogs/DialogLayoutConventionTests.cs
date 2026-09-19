@@ -1,6 +1,8 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.IO;
+using System.Linq;
 using System.Text.RegularExpressions;
 using FluentAssertions;
 using Xunit;
@@ -118,6 +120,83 @@ public class DialogLayoutConventionTests
             "SizeToContent を使用するリサイズ可能ダイアログは、MinWidth / MinHeight を併記して" +
             "操作不能な極小サイズへの縮小を防ぐこと（Issue #1616）。違反ダイアログ: " +
             string.Join(", ", violations));
+    }
+
+    /// <summary>
+    /// ダイアログの初期 <c>Height</c> と <c>MinHeight</c> は、1366×768 の実用高さ 720 を超えてはならない。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Issue #2076: 03_画面設計書 §5.6 は「<c>MinHeight ≤ 720</c>」と「初期 Height が実用高さを
+    /// 超える場合は適切な初期値に抑える（SettingsDialog は 820 → 680）」を定めているが、
+    /// どちらも検査が無く、<c>SystemManageDialog</c> が <c>Height="860"</c> / <c>MinHeight="700"</c> で
+    /// 残っていた。ノート PC では「閉じる」やリストアのボタンが画面外に出て、押す手段が無い。
+    /// </para>
+    /// <para>
+    /// 走査対象は <c>Views/Dialogs/</c> の全 XAML から導出する（ファイル名で列挙すると
+    /// ダイアログが増えたときに静かに漏れる。#1786）。<c>SizeToContent="Height"</c> の
+    /// ダイアログは <c>Height</c> を持たないので、その場合は <c>MaxHeight</c> が同じ役割を担う。
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public void ダイアログの初期高さと最小高さが低解像度の実用高さを超えないこと()
+    {
+        var violations = new List<string>();
+
+        foreach (var (name, windowTag) in EnumerateDialogWindowTags())
+        {
+            foreach (var attribute in new[] { "Height", "MaxHeight", "MinHeight" })
+            {
+                var value = ReadNumericAttribute(windowTag, attribute);
+                if (value > PracticalScreenHeight)
+                {
+                    violations.Add($"{name} ({attribute}={value})");
+                }
+            }
+        }
+
+        violations.Should().BeEmpty(
+            "Issue #2076: 1366×768 のノート PC（タスクバーを除いた実用高さ " + PracticalScreenHeight + "）で" +
+            "ボタンが画面外に出ると押す手段が無い。03_画面設計書 §5.6 に従い初期値・最小値を抑えること。" +
+            "違反: " + string.Join(", ", violations));
+    }
+
+    /// <summary>
+    /// 高さの検査が空振りしていないことを、実在するダイアログの値で固定する。
+    /// </summary>
+    /// <remarks>
+    /// 「違反ゼロ」だけを見ると、属性の照合が縮んで 1 件も読めなくなった状態と区別できない（#1786）。
+    /// </remarks>
+    [Fact]
+    public void 高さの検査がダイアログの実際の値を読めていること()
+    {
+        var heights = EnumerateDialogWindowTags()
+            .ToDictionary(t => t.Name, t => ReadNumericAttribute(t.WindowTag, "Height"), StringComparer.Ordinal);
+
+        heights.Should().ContainKey("SettingsDialog.xaml")
+            .WhoseValue.Should().Be(680, "§5.6 が 820 → 680 に抑えた実例として明記している値");
+        heights.Should().ContainKey("SystemManageDialog.xaml")
+            .WhoseValue.Should().BeGreaterThan(0, "Issue #2076 で是正した対象が読めていること");
+        heights.Count.Should().BeGreaterThan(10, "Views/Dialogs/ の全ダイアログが走査対象であること");
+    }
+
+    /// <summary>タスクバーを除いた 1366×768 の実用高さ（03_画面設計書 §5.6）。</summary>
+    private const double PracticalScreenHeight = 720;
+
+    private static IEnumerable<(string Name, string WindowTag)> EnumerateDialogWindowTags()
+        => Directory.EnumerateFiles(DialogsDirectory, "*.xaml", SearchOption.TopDirectoryOnly)
+            .Select(path => (Path.GetFileName(path), ExtractWindowOpeningTag(File.ReadAllText(path))));
+
+    /// <summary>開始タグから数値属性を読む。未指定・非数値（バインディング等）は 0 を返す。</summary>
+    private static double ReadNumericAttribute(string windowTag, string attributeName)
+    {
+        var match = Regex.Match(
+            windowTag,
+            $@"(?<![A-Za-z]){Regex.Escape(attributeName)}\s*=\s*(""(?<v>[^""]*)""|'(?<v>[^']*)')");
+        return match.Success
+               && double.TryParse(match.Groups["v"].Value, NumberStyles.Float, CultureInfo.InvariantCulture, out var value)
+            ? value
+            : 0;
     }
 
     /// <summary>
