@@ -3,6 +3,13 @@
 ### Unreleased
 
 **不具合修正**
+- Issue #2075 **行編集・履歴詳細・操作ログ・印刷プレビューのステータス／検証文言が折り返されず、末尾の行動指示が切れていた欠陥を是正した**。これらの文言は「何が／なぜ／どうすれば」の 3 要素で構成されるため長く（行編集の保存競合の案内は約 120 文字、操作ログの検索失敗は `ExceptionMessageFormatter.ToUserMessage` の結果）、`TextWrapping` が無いと右端で切れて**回復手段だけが読めない**状態になっていた。同じダイアログ内でも隣の `WarningMessage`（#1914）と `InitialBalanceSuggestionText` には折り返しが付いており、**この 2 つだけが規約から外れていた**
+  - **該当 5 箇所に `TextWrapping="Wrap"` を付けた**。`LedgerRowEditDialog` の `ValidationMessage` と `StatusMessage`、`LedgerDetailDialog` / `OperationLogDialog` / `PrintPreviewDialog` の `StatusMessage`。**Issue が挙げていたのは 4 箇所で、印刷プレビューは着手時の全画面走査で見つかった**（Issue の一覧は起票時点のスナップショットである）
+  - **履歴詳細ダイアログは列を入れ替えた**。文言を `Auto` 列に置いていたため、摘要更新の競合文言（約 60 文字）の希望幅までその列が広がり、左の「すべて統合」「すべて分割」「自動検出に戻す」が押しつぶされていた。ボタンを `Auto`、文言を `*` に移し、はみ出しは折り返しが吸収する形（帳票作成ダイアログ #1688 と同じ）にした。**`*` 列に置くことと折り返しを付けることは対で必要** — `*` 列でも `TextWrapping` が無ければ列幅を無視して隣の要素の下へはみ出し、`TextWrapping` があっても `Auto` 列では折り返しが起きない
+  - あわせて、文言と同じ行に並ぶボタン側に `VerticalAlignment="Center"` を付けた（操作ログ・印刷プレビューの「閉じる」、履歴詳細のボタン列）。文言が 2 行に折り返したときにボタンが縦に引き伸ばされるため
+  - **対象を `BusyMessage` や `HistoryStatusMessage` まで広げなかった**。前者は処理中オーバーレイの固定文言、後者は「1～20件を表示（全123件）」という定型の件数表示で 3 要素の文言ではない。とくに後者は横方向 `StackPanel` の中にあり、**`TextWrapping` を付けても機能しない**（#1687）。機能しない属性を検査で強制すると「緑だが守っていない」状態を作るため、規約の対象から外して理由をテストに残した
+  - 追加は **+4 件**（`Views/StatusMessageWrappingConventionTests` 3 件・`Views/LedgerDetailDialogToolbarLayoutTests` 1 件を新設）。前者は走査対象を `Views/` 配下全体から導出するため、画面が追加されても検査から漏れない（#1786）。検出力は修正前の XAML に当てて実測（5 箇所を名指しして赤・列の入れ替えも赤）。07_テスト設計書 §2 参照
+  - マニュアル用スクリーンショットへの影響は無い（文言が短いうちは見た目が変わらない）
 - Issue #2074 **枠線・塗り用の明るいブラシを文字色に使っていて、地色とのコントラストが WCAG AA（4.5:1）に届いていなかった箇所を是正した**。カード一覧の残額警告アイコンと金額、貸出状態の文字、ステータスバーの接続状態（カードリーダー・DB・共有モード）、履歴の各種強調表示が薄く、とくに `WarningActionBrush`（#FF9800、2.2:1）のオレンジ文字は晴れた窓際や古いモニターではほとんど読めなかった。`AccessibilityStyles.xaml` 冒頭の「コントラスト比4.5:1以上を確保」という宣言とも合っていなかった
   - **文字色に流用していた枠線・塗り用のブラシを、対応する文字色ブラシへ付け替えた**（46 箇所）。`ErrorBorderBrush` → `ErrorForegroundBrush`、`SuccessActionBrush` → `SuccessForegroundBrush`、`WarningActionBrush` → `WarningForegroundBrush`、`WaitingBorderBrush` → `WaitingForegroundBrush`、`HeaderBackgroundBrush` / `PrimaryBrush` → `InfoTextBrush`
   - **名前ベースの検査では直り切らなかった**。Issue の修正方針（案）である「`*BorderBrush` / `*ActionBrush` を Foreground に使わない」という規約だけを見る形にすると、**置き換え先として選んだ `WarningForegroundBrush` 自身が白背景 2.65:1** で、是正後も規約違反が残ったまま全件緑になる。「リソースキーが違えば色も違う」が成り立たないのと同じ理由（#1855）で、検査は**解決後の色値**で行う形にした。同じ理由で `SecondaryTextBrush`（`Gray` = #808080、90 箇所超で使われる最多の文字色）と `LendingForegroundBrush`（#E65100）も名前は Foreground でありながら AA に届いておらず、あわせて是正した

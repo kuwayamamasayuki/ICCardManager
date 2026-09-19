@@ -209,6 +209,8 @@
                 <!-- ステータスメッセージ -->
                 <TextBlock Grid.Column="0"
                            Text="{Binding StatusMessage}"
+                           TextWrapping="Wrap"
+                           Margin="0,0,10,0"
                            Foreground="{DynamicResource InfoTextBrush}"
                            FontWeight="Bold"
                            VerticalAlignment="Center"
@@ -220,6 +222,7 @@
                         Click="CloseButton_Click"
                         Padding="20,8"
                         MinWidth="100"
+                        VerticalAlignment="Center"
                         IsCancel="True"
                         AutomationProperties.Name="閉じる"
                         ToolTip="ダイアログを閉じる (Escape)"/>

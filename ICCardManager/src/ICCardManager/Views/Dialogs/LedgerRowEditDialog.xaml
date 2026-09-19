@@ -378,7 +378,10 @@
             </Border>
 
             <!-- バリデーションエラー -->
+            <!-- Issue #2075: 検証文言は「何が／なぜ／どうすれば」の3要素で長くなるため折り返しを明示する
+                 （文字サイズは4段階で変わるので幅の調整では担保できない） -->
             <TextBlock Text="{Binding ValidationMessage}"
+                       TextWrapping="Wrap"
                        Foreground="{DynamicResource DangerTextBrush}"
                        FontSize="{DynamicResource SmallFontSize}"
                        FontWeight="Bold">
@@ -429,7 +432,10 @@
             </Border>
 
             <!-- ステータスメッセージ -->
+            <!-- Issue #2075: 保存競合時の案内（BusStopConflictMessage 等）は行動指示まで含めて
+                 100 文字を超えるため、折り返さないと「どうすれば」が右端で切れる -->
             <TextBlock Text="{Binding StatusMessage}"
+                       TextWrapping="Wrap"
                        Foreground="{DynamicResource DangerTextBrush}"
                        FontSize="{DynamicResource SmallFontSize}">
                 <TextBlock.Style>
