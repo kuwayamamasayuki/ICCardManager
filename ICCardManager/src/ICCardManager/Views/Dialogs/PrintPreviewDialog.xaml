@@ -1,4 +1,4 @@
-<Window x:Class="ICCardManager.Views.Dialogs.PrintPreviewDialog"
+﻿<Window x:Class="ICCardManager.Views.Dialogs.PrintPreviewDialog"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
@@ -61,16 +61,16 @@
                                Margin="0,0,10,0"/>
                     <Button Content="−"
                             Command="{Binding ZoomOutCommand}"
-                            Width="30"
-                            Height="28"
+                            MinWidth="30"
+                            MinHeight="28"
                             FontSize="{DynamicResource BaseFontSize}"
                             FontWeight="Bold"
                             ToolTip="縮小"
                             AutomationProperties.Name="ズーム縮小"/>
                     <ComboBox ItemsSource="{Binding ZoomLevels}"
                               SelectedItem="{Binding ZoomLevel}"
-                              Width="80"
-                              Height="28"
+                              MinWidth="80"
+                              MinHeight="28"
                               Margin="5,0"
                               VerticalContentAlignment="Center"
                               AutomationProperties.Name="ズーム倍率">
@@ -82,15 +82,15 @@
                     </ComboBox>
                     <Button Content="＋"
                             Command="{Binding ZoomInCommand}"
-                            Width="30"
-                            Height="28"
+                            MinWidth="30"
+                            MinHeight="28"
                             FontSize="{DynamicResource BaseFontSize}"
                             FontWeight="Bold"
                             ToolTip="拡大"
                             AutomationProperties.Name="ズーム拡大"/>
                     <Button Content="100%"
                             Command="{Binding ResetZoomCommand}"
-                            Height="28"
+                            MinHeight="28"
                             Padding="10,0"
                             Margin="10,0,0,0"
                             ToolTip="100%にリセット"
@@ -104,15 +104,15 @@
                                Margin="0,0,10,0"/>
                     <Button Content="⏮"
                             Click="FirstPageButton_Click"
-                            Width="30"
-                            Height="28"
+                            MinWidth="30"
+                            MinHeight="28"
                             FontSize="{DynamicResource SmallFontSize}"
                             ToolTip="最初のページ"
                             AutomationProperties.Name="最初のページ"/>
                     <Button Content="◀"
                             Click="PreviousPageButton_Click"
-                            Width="30"
-                            Height="28"
+                            MinWidth="30"
+                            MinHeight="28"
                             FontSize="{DynamicResource SmallFontSize}"
                             Margin="2,0"
                             ToolTip="前のページ"
@@ -129,16 +129,16 @@
                     </Border>
                     <Button Content="▶"
                             Click="NextPageButton_Click"
-                            Width="30"
-                            Height="28"
+                            MinWidth="30"
+                            MinHeight="28"
                             FontSize="{DynamicResource SmallFontSize}"
                             Margin="2,0"
                             ToolTip="次のページ"
                             AutomationProperties.Name="次のページ"/>
                     <Button Content="⏭"
                             Click="LastPageButton_Click"
-                            Width="30"
-                            Height="28"
+                            MinWidth="30"
+                            MinHeight="28"
                             FontSize="{DynamicResource SmallFontSize}"
                             ToolTip="最後のページ"
                             AutomationProperties.Name="最後のページ"/>
@@ -151,8 +151,8 @@
                                Margin="0,0,10,0"/>
                     <ComboBox ItemsSource="{Binding Orientations}"
                               SelectedItem="{Binding SelectedOrientation}"
-                              Width="140"
-                              Height="28"
+                              MinWidth="140"
+                              MinHeight="28"
                               VerticalContentAlignment="Center"
                               AutomationProperties.Name="用紙方向">
                         <ComboBox.ItemTemplate>
@@ -167,7 +167,7 @@
                     </ComboBox>
                     <Button Content="印刷"
                             Command="{Binding PrintCommand}"
-                            Height="28"
+                            MinHeight="28"
                             Padding="20,0"
                             Margin="15,0,0,0"
                             Background="{DynamicResource HeaderBackgroundBrush}"

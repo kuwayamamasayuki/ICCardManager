@@ -8,9 +8,9 @@
         mc:Ignorable="d"
         d:DataContext="{d:DesignInstance Type=vm:SystemManageViewModel}"
         Title="システム管理"
-        Height="860"
+        Height="680"
         Width="650"
-        MinHeight="700"
+        MinHeight="420"
         MinWidth="520"
         WindowStartupLocation="CenterOwner"
         ResizeMode="CanResize"
@@ -26,289 +26,304 @@
     </Window.Resources>
 
     <Grid Margin="20">
+        <!-- Issue #2076: §5.6「入力フォーム型ダイアログの構造」に揃える。
+             文字サイズ「大」以上や 1366×768 のノート PC では 5 つの GroupBox が縦に伸びて
+             「閉じる」ボタンが画面外へ出るため、内容は ScrollViewer に入れ、ボタン行は最下行に固定する。 -->
         <Grid.RowDefinitions>
-            <!-- データベース情報（Issue #1686） -->
-            <RowDefinition Height="Auto"/>
-            <RowDefinition Height="Auto"/>
-            <RowDefinition Height="Auto"/>
-            <!-- 摘要の設定（Issue #1905） -->
-            <RowDefinition Height="Auto"/>
             <RowDefinition Height="*"/>
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="Auto"/>
         </Grid.RowDefinitions>
 
-        <!-- データベース情報（Issue #1686） -->
-        <!-- 「このPCがどのDBを見ているか」を設定画面を開かずに確認できる常設表示。
-             共有モードのトラブル時、最初の切り分け（どのDBか・到達/書込できるか）をこの画面で完了させる。 -->
-        <GroupBox Grid.Row="0" Header="データベース情報" Margin="0,0,0,15" Padding="15">
-            <StackPanel>
-                <StackPanel Orientation="Horizontal" Margin="0,0,0,5">
-                    <TextBlock Text="{Binding DatabaseModeIcon, Mode=OneWay}"
-                               FontSize="{DynamicResource BaseFontSize}"
-                               Margin="0,0,5,0"/>
-                    <TextBlock Text="{Binding DatabaseModeText, Mode=OneWay}"
-                               FontWeight="Bold"
-                               FontSize="{DynamicResource BaseFontSize}"
-                               AutomationProperties.Name="{Binding DatabaseModeText}"/>
-                </StackPanel>
-
-                <TextBlock Text="{Binding DatabasePathDisplay, Mode=OneWay, StringFormat=現在のデータベース: {0}}"
-                           ToolTip="{Binding DatabasePathDisplay}"
-                           TextTrimming="CharacterEllipsis"
-                           Foreground="{DynamicResource SecondaryTextBrush}"
-                           FontSize="{DynamicResource SmallFontSize}"
-                           Margin="0,0,0,10"
-                           AutomationProperties.Name="{Binding DatabasePathDisplay, StringFormat=現在のデータベース: {0}}"/>
-
-                <!-- Issue #1690: 「接続をテスト」（DBのみ）を接続診断へ統合。
-                     DBの到達性・書込権限は診断項目に内包されるため機能は後退しない。 -->
-                <Button Content="接続診断"
-                        Command="{Binding OpenConnectionDiagnosticsCommand}"
-                        Padding="15,10"
-                        HorizontalAlignment="Left"
-                        AutomationProperties.Name="接続診断を開く"
-                        AutomationProperties.HelpText="データベース、ICカードリーダー、バックアップ保存先の状態をまとめて確認し、結果をコピーできます。"
-                        ToolTip="データベース・ICカードリーダー・バックアップ保存先の状態をまとめて確認します"/>
-            </StackPanel>
-        </GroupBox>
-
-        <!-- 操作ログ -->
-        <GroupBox Grid.Row="1" Header="操作ログ" Margin="0,0,0,15" Padding="15">
-            <StackPanel>
-                <TextBlock Text="システムの操作履歴を確認できます。"
-                           Foreground="{DynamicResource SecondaryTextBrush}"
-                           FontSize="{DynamicResource SmallFontSize}"
-                           Margin="0,0,0,10"/>
-
-                <Button Content="操作ログを表示"
-                        Command="{Binding OpenOperationLogCommand}"
-                        Padding="15,10"
-                        Background="{DynamicResource HeaderBackgroundBrush}"
-                        Foreground="{DynamicResource OnPrimaryBrush}"
-                        HorizontalAlignment="Left"
-                        AutomationProperties.Name="操作ログを表示"
-                        ToolTip="操作履歴の検索・確認を行います"/>
-            </StackPanel>
-        </GroupBox>
-
-        <!-- バックアップ状況（Issue #1689） -->
-        <!-- 起動時の自動バックアップは fire-and-forget のため、失敗しても管理者は気づけなかった。
-             最終成功日時・世代数・空き容量をここに常設表示し「静かな失敗」を早期発見できるようにする。
-             長文になり得る行はすべて TextWrapping="Wrap"（横 StackPanel を使わない）。Issue #1687 / #1688 参照。 -->
-        <GroupBox Grid.Row="2" Header="バックアップ状況" Margin="0,0,0,15" Padding="15">
-            <StackPanel>
-                <!-- 最終成功日時: 色だけでなくアイコンでも状態を伝える（UI/UX原則） -->
-                <DockPanel Margin="0,0,0,8">
-                    <TextBlock DockPanel.Dock="Left"
-                               Text="{Binding BackupHealthIcon, Mode=OneWay}"
-                               Margin="0,0,6,0"
-                               VerticalAlignment="Top"
-                               FontSize="{DynamicResource BaseFontSize}">
-                        <TextBlock.Style>
-                            <Style TargetType="TextBlock">
-                                <Setter Property="Foreground" Value="{DynamicResource SecondaryTextBrush}"/>
-                                <Style.Triggers>
-                                    <DataTrigger Binding="{Binding IsBackupStale}" Value="True">
-                                        <Setter Property="Foreground" Value="{DynamicResource DangerTextBrush}"/>
-                                    </DataTrigger>
-                                </Style.Triggers>
-                            </Style>
-                        </TextBlock.Style>
-                    </TextBlock>
-
-                    <TextBlock Text="{Binding LastBackupSuccessText, Mode=OneWay}"
-                               TextWrapping="Wrap"
-                               FontWeight="Bold"
-                               FontSize="{DynamicResource BaseFontSize}"
-                               AutomationProperties.Name="{Binding LastBackupSuccessText}">
-                        <TextBlock.Style>
-                            <Style TargetType="TextBlock">
-                                <Style.Triggers>
-                                    <DataTrigger Binding="{Binding IsBackupStale}" Value="True">
-                                        <Setter Property="Foreground" Value="{DynamicResource DangerTextBrush}"/>
-                                    </DataTrigger>
-                                </Style.Triggers>
-                            </Style>
-                        </TextBlock.Style>
-                    </TextBlock>
-                </DockPanel>
-
-                <TextBlock Text="{Binding BackupGenerationText, Mode=OneWay}"
-                           TextWrapping="Wrap"
-                           Foreground="{DynamicResource SecondaryTextBrush}"
-                           FontSize="{DynamicResource SmallFontSize}"
-                           AutomationProperties.Name="{Binding BackupGenerationText}"/>
-
-                <TextBlock Text="{Binding BackupFreeSpaceText, Mode=OneWay}"
-                           TextWrapping="Wrap"
-                           Foreground="{DynamicResource SecondaryTextBrush}"
-                           FontSize="{DynamicResource SmallFontSize}"
-                           AutomationProperties.Name="{Binding BackupFreeSpaceText}"/>
-
-                <TextBlock Text="{Binding BackupFolderText, Mode=OneWay}"
-                           TextWrapping="Wrap"
-                           ToolTip="{Binding BackupFolderText}"
-                           Foreground="{DynamicResource SecondaryTextBrush}"
-                           FontSize="{DynamicResource SmallFontSize}"
-                           AutomationProperties.Name="{Binding BackupFolderText}"/>
-
-                <!-- Issue #1924: 設定した保存先が使えず既定パスへ退避しているときだけ表示する。
-                     バックアップ自体は既定パスへ成功するため長期未成功の警告（Issue #1689）には
-                     掛からず、この行が「共有フォルダーに世代が増えない」ことの唯一の手掛かりになる。 -->
-                <TextBlock Text="{Binding BackupFolderFallbackText, Mode=OneWay}"
-                           TextWrapping="Wrap"
-                           Foreground="{DynamicResource DangerTextBrush}"
-                           FontSize="{DynamicResource SmallFontSize}"
-                           Margin="0,4,0,0"
-                           Visibility="{Binding IsBackupFolderFallback, Converter={StaticResource BoolToVisibilityConverter}}"
-                           AutomationProperties.Name="{Binding BackupFolderFallbackText}"/>
-
-                <!-- 共有モードでのみ「どのPCが実施したか」を表示（ローカルモードでは自明なため出さない） -->
-                <TextBlock Text="{Binding LastBackupMachineText, Mode=OneWay}"
-                           TextWrapping="Wrap"
-                           Foreground="{DynamicResource SecondaryTextBrush}"
-                           FontSize="{DynamicResource SmallFontSize}"
-                           Visibility="{Binding IsSharedMode, Converter={StaticResource BoolToVisibilityConverter}}"
-                           AutomationProperties.Name="{Binding LastBackupMachineText}"/>
-
-                <TextBlock Text="{Binding LastVacuumText, Mode=OneWay}"
-                           TextWrapping="Wrap"
-                           Foreground="{DynamicResource SecondaryTextBrush}"
-                           FontSize="{DynamicResource SmallFontSize}"
-                           Visibility="{Binding IsSharedMode, Converter={StaticResource BoolToVisibilityConverter}}"
-                           AutomationProperties.Name="{Binding LastVacuumText}"/>
-
-                <TextBlock Text="任意のタイミングでデータベースのバックアップを作成できます。"
-                           TextWrapping="Wrap"
-                           Foreground="{DynamicResource SecondaryTextBrush}"
-                           FontSize="{DynamicResource SmallFontSize}"
-                           Margin="0,10,0,10"/>
-
-                <StackPanel Orientation="Horizontal">
-                    <Button Content="バックアップを作成"
-                            Command="{Binding CreateBackupCommand}"
-                            Padding="15,10"
-                            Background="{DynamicResource SuccessActionBrush}"
-                            Foreground="{DynamicResource OnPrimaryBrush}"
-                            AutomationProperties.Name="バックアップを作成"
-                            ToolTip="現在のデータベースのバックアップを作成します"/>
-
-                    <Button Content="バックアップフォルダを開く"
-                            Command="{Binding OpenBackupFolderCommand}"
-                            Padding="15,10"
-                            Margin="10,0,0,0"
-                            AutomationProperties.Name="バックアップフォルダを開く"
-                            ToolTip="バックアップファイルが保存されているフォルダを開きます"/>
-                </StackPanel>
-
-                <!-- 最後に作成したバックアップ -->
-                <TextBlock Text="{Binding LastBackupFile, StringFormat=作成先: {0}}"
-                           Foreground="{DynamicResource SecondaryTextBrush}"
-                           FontSize="{DynamicResource SmallFontSize}"
-                           Margin="0,10,0,0"
-                           TextTrimming="CharacterEllipsis"
-                           Visibility="{Binding LastBackupFile, Converter={StaticResource BoolToVisibilityConverter}}"/>
-            </StackPanel>
-        </GroupBox>
-
-        <!-- リストア -->
-        <!-- 摘要の設定（Issue #1905） -->
-        <!-- 道路を挟んで向かい合うバス停のように、名前は違うが実質同じ場所を登録する。
-             登録しないと、そこで折り返した往復が乗継とみなされ目的地が摘要から消える。 -->
-        <GroupBox Grid.Row="3" Header="摘要の設定" Margin="0,0,0,15" Padding="15">
-            <StackPanel>
-                <TextBlock Text="名前は異なるが実質同じ場所である駅・バス停を登録できます。登録すると、行きと帰りで乗降場所の名前が違う移動も往復として摘要にまとまります。"
-                           TextWrapping="Wrap"
-                           Foreground="{DynamicResource SecondaryTextBrush}"
-                           FontSize="{DynamicResource SmallFontSize}"
-                           Margin="0,0,0,10"/>
-
-                <Button Content="同一とみなす駅・バス停を設定"
-                        Command="{Binding OpenTransferStationGroupsCommand}"
-                        Padding="15,10"
-                        Background="{DynamicResource HeaderBackgroundBrush}"
-                        Foreground="{DynamicResource OnPrimaryBrush}"
-                        HorizontalAlignment="Left"
-                        AutomationProperties.Name="同一とみなす駅・バス停を設定"
-                        ToolTip="名前が異なるが実質同じ場所である駅・バス停をグループとして登録します"/>
-            </StackPanel>
-        </GroupBox>
-
-        <GroupBox Grid.Row="4" Header="リストア（データ復元）" Padding="15">
+        <ScrollViewer Grid.Row="0" VerticalScrollBarVisibility="Auto">
             <Grid>
                 <Grid.RowDefinitions>
+                    <!-- データベース情報（Issue #1686） -->
                     <RowDefinition Height="Auto"/>
-                    <RowDefinition Height="*"/>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="Auto"/>
+                    <!-- 摘要の設定（Issue #1905） -->
+                    <RowDefinition Height="Auto"/>
                     <RowDefinition Height="Auto"/>
                 </Grid.RowDefinitions>
 
-                <TextBlock Grid.Row="0"
-                           Text="バックアップファイルを選択してデータを復元します。"
-                           Foreground="{DynamicResource SecondaryTextBrush}"
-                           FontSize="{DynamicResource SmallFontSize}"
-                           Margin="0,0,0,10"/>
+                <!-- データベース情報（Issue #1686） -->
+                <!-- 「このPCがどのDBを見ているか」を設定画面を開かずに確認できる常設表示。
+                     共有モードのトラブル時、最初の切り分け（どのDBか・到達/書込できるか）をこの画面で完了させる。 -->
+                <GroupBox Grid.Row="0" Header="データベース情報" Margin="0,0,0,15" Padding="15">
+                    <StackPanel>
+                        <StackPanel Orientation="Horizontal" Margin="0,0,0,5">
+                            <TextBlock Text="{Binding DatabaseModeIcon, Mode=OneWay}"
+                                       FontSize="{DynamicResource BaseFontSize}"
+                                       Margin="0,0,5,0"/>
+                            <TextBlock Text="{Binding DatabaseModeText, Mode=OneWay}"
+                                       FontWeight="Bold"
+                                       FontSize="{DynamicResource BaseFontSize}"
+                                       AutomationProperties.Name="{Binding DatabaseModeText}"/>
+                        </StackPanel>
 
-                <!-- バックアップ一覧 -->
-                <Border Grid.Row="1" BorderBrush="{DynamicResource NeutralBorderBrush}" BorderThickness="1" CornerRadius="4"
-                        MinHeight="120">
-                    <ListView ItemsSource="{Binding BackupFiles}"
-                              SelectedItem="{Binding SelectedBackup}"
-                              SelectionMode="Single"
-                              AutomationProperties.Name="バックアップファイル一覧">
-                        <ListView.View>
-                            <GridView>
-                                <GridViewColumn Header="ファイル名" Width="220"
-                                                DisplayMemberBinding="{Binding FileName}"/>
-                                <GridViewColumn Header="作成日時" Width="150">
-                                    <GridViewColumn.CellTemplate>
-                                        <DataTemplate>
-                                            <TextBlock Text="{Binding CreatedAt, StringFormat=yyyy/MM/dd HH:mm:ss}"/>
-                                        </DataTemplate>
-                                    </GridViewColumn.CellTemplate>
-                                </GridViewColumn>
-                                <GridViewColumn Header="サイズ" Width="80">
-                                    <GridViewColumn.CellTemplate>
-                                        <DataTemplate>
-                                            <TextBlock Text="{Binding FileSize, Converter={StaticResource FileSizeConverter}}"
-                                                       HorizontalAlignment="Right"/>
-                                        </DataTemplate>
-                                    </GridViewColumn.CellTemplate>
-                                </GridViewColumn>
-                            </GridView>
-                        </ListView.View>
-                    </ListView>
-                </Border>
+                        <TextBlock Text="{Binding DatabasePathDisplay, Mode=OneWay, StringFormat=現在のデータベース: {0}}"
+                                   ToolTip="{Binding DatabasePathDisplay}"
+                                   TextTrimming="CharacterEllipsis"
+                                   Foreground="{DynamicResource SecondaryTextBrush}"
+                                   FontSize="{DynamicResource SmallFontSize}"
+                                   Margin="0,0,0,10"
+                                   AutomationProperties.Name="{Binding DatabasePathDisplay, StringFormat=現在のデータベース: {0}}"/>
 
-                <!-- リストアボタン -->
-                <StackPanel Grid.Row="2" Orientation="Horizontal" Margin="0,10,0,0">
-                    <Button Content="選択したバックアップからリストア"
-                            Command="{Binding RestoreCommand}"
-                            Padding="15,10"
-                            Background="{DynamicResource WarningActionBrush}"
-                            Foreground="{DynamicResource OnPrimaryBrush}"
-                            AutomationProperties.Name="選択したバックアップからリストア"
-                            ToolTip="選択したバックアップファイルからデータを復元します"/>
+                        <!-- Issue #1690: 「接続をテスト」（DBのみ）を接続診断へ統合。
+                             DBの到達性・書込権限は診断項目に内包されるため機能は後退しない。 -->
+                        <Button Content="接続診断"
+                                Command="{Binding OpenConnectionDiagnosticsCommand}"
+                                Padding="15,10"
+                                HorizontalAlignment="Left"
+                                AutomationProperties.Name="接続診断を開く"
+                                AutomationProperties.HelpText="データベース、ICカードリーダー、バックアップ保存先の状態をまとめて確認し、結果をコピーできます。"
+                                ToolTip="データベース・ICカードリーダー・バックアップ保存先の状態をまとめて確認します"/>
+                    </StackPanel>
+                </GroupBox>
 
-                    <Button Content="ファイルを指定してリストア"
-                            Command="{Binding RestoreFromFileCommand}"
-                            Padding="15,10"
-                            Margin="10,0,0,0"
-                            AutomationProperties.Name="ファイルを指定してリストア"
-                            ToolTip="任意のバックアップファイルを選択してデータを復元します"/>
+                <!-- 操作ログ -->
+                <GroupBox Grid.Row="1" Header="操作ログ" Margin="0,0,0,15" Padding="15">
+                    <StackPanel>
+                        <TextBlock Text="システムの操作履歴を確認できます。"
+                                   Foreground="{DynamicResource SecondaryTextBrush}"
+                                   FontSize="{DynamicResource SmallFontSize}"
+                                   Margin="0,0,0,10"/>
 
-                    <Button Content="一覧を更新"
-                            Command="{Binding LoadBackupsCommand}"
-                            Padding="15,10"
-                            Margin="10,0,0,0"
-                            AutomationProperties.Name="バックアップ一覧を更新"
-                            ToolTip="バックアップファイルの一覧を再読み込みします"/>
-                </StackPanel>
+                        <Button Content="操作ログを表示"
+                                Command="{Binding OpenOperationLogCommand}"
+                                Padding="15,10"
+                                Background="{DynamicResource HeaderBackgroundBrush}"
+                                Foreground="{DynamicResource OnPrimaryBrush}"
+                                HorizontalAlignment="Left"
+                                AutomationProperties.Name="操作ログを表示"
+                                ToolTip="操作履歴の検索・確認を行います"/>
+                    </StackPanel>
+                </GroupBox>
+
+                <!-- バックアップ状況（Issue #1689） -->
+                <!-- 起動時の自動バックアップは fire-and-forget のため、失敗しても管理者は気づけなかった。
+                     最終成功日時・世代数・空き容量をここに常設表示し「静かな失敗」を早期発見できるようにする。
+                     長文になり得る行はすべて TextWrapping="Wrap"（横 StackPanel を使わない）。Issue #1687 / #1688 参照。 -->
+                <GroupBox Grid.Row="2" Header="バックアップ状況" Margin="0,0,0,15" Padding="15">
+                    <StackPanel>
+                        <!-- 最終成功日時: 色だけでなくアイコンでも状態を伝える（UI/UX原則） -->
+                        <DockPanel Margin="0,0,0,8">
+                            <TextBlock DockPanel.Dock="Left"
+                                       Text="{Binding BackupHealthIcon, Mode=OneWay}"
+                                       Margin="0,0,6,0"
+                                       VerticalAlignment="Top"
+                                       FontSize="{DynamicResource BaseFontSize}">
+                                <TextBlock.Style>
+                                    <Style TargetType="TextBlock">
+                                        <Setter Property="Foreground" Value="{DynamicResource SecondaryTextBrush}"/>
+                                        <Style.Triggers>
+                                            <DataTrigger Binding="{Binding IsBackupStale}" Value="True">
+                                                <Setter Property="Foreground" Value="{DynamicResource DangerTextBrush}"/>
+                                            </DataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </TextBlock.Style>
+                            </TextBlock>
+
+                            <TextBlock Text="{Binding LastBackupSuccessText, Mode=OneWay}"
+                                       TextWrapping="Wrap"
+                                       FontWeight="Bold"
+                                       FontSize="{DynamicResource BaseFontSize}"
+                                       AutomationProperties.Name="{Binding LastBackupSuccessText}">
+                                <TextBlock.Style>
+                                    <Style TargetType="TextBlock">
+                                        <Style.Triggers>
+                                            <DataTrigger Binding="{Binding IsBackupStale}" Value="True">
+                                                <Setter Property="Foreground" Value="{DynamicResource DangerTextBrush}"/>
+                                            </DataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </TextBlock.Style>
+                            </TextBlock>
+                        </DockPanel>
+
+                        <TextBlock Text="{Binding BackupGenerationText, Mode=OneWay}"
+                                   TextWrapping="Wrap"
+                                   Foreground="{DynamicResource SecondaryTextBrush}"
+                                   FontSize="{DynamicResource SmallFontSize}"
+                                   AutomationProperties.Name="{Binding BackupGenerationText}"/>
+
+                        <TextBlock Text="{Binding BackupFreeSpaceText, Mode=OneWay}"
+                                   TextWrapping="Wrap"
+                                   Foreground="{DynamicResource SecondaryTextBrush}"
+                                   FontSize="{DynamicResource SmallFontSize}"
+                                   AutomationProperties.Name="{Binding BackupFreeSpaceText}"/>
+
+                        <TextBlock Text="{Binding BackupFolderText, Mode=OneWay}"
+                                   TextWrapping="Wrap"
+                                   ToolTip="{Binding BackupFolderText}"
+                                   Foreground="{DynamicResource SecondaryTextBrush}"
+                                   FontSize="{DynamicResource SmallFontSize}"
+                                   AutomationProperties.Name="{Binding BackupFolderText}"/>
+
+                        <!-- Issue #1924: 設定した保存先が使えず既定パスへ退避しているときだけ表示する。
+                             バックアップ自体は既定パスへ成功するため長期未成功の警告（Issue #1689）には
+                             掛からず、この行が「共有フォルダーに世代が増えない」ことの唯一の手掛かりになる。 -->
+                        <TextBlock Text="{Binding BackupFolderFallbackText, Mode=OneWay}"
+                                   TextWrapping="Wrap"
+                                   Foreground="{DynamicResource DangerTextBrush}"
+                                   FontSize="{DynamicResource SmallFontSize}"
+                                   Margin="0,4,0,0"
+                                   Visibility="{Binding IsBackupFolderFallback, Converter={StaticResource BoolToVisibilityConverter}}"
+                                   AutomationProperties.Name="{Binding BackupFolderFallbackText}"/>
+
+                        <!-- 共有モードでのみ「どのPCが実施したか」を表示（ローカルモードでは自明なため出さない） -->
+                        <TextBlock Text="{Binding LastBackupMachineText, Mode=OneWay}"
+                                   TextWrapping="Wrap"
+                                   Foreground="{DynamicResource SecondaryTextBrush}"
+                                   FontSize="{DynamicResource SmallFontSize}"
+                                   Visibility="{Binding IsSharedMode, Converter={StaticResource BoolToVisibilityConverter}}"
+                                   AutomationProperties.Name="{Binding LastBackupMachineText}"/>
+
+                        <TextBlock Text="{Binding LastVacuumText, Mode=OneWay}"
+                                   TextWrapping="Wrap"
+                                   Foreground="{DynamicResource SecondaryTextBrush}"
+                                   FontSize="{DynamicResource SmallFontSize}"
+                                   Visibility="{Binding IsSharedMode, Converter={StaticResource BoolToVisibilityConverter}}"
+                                   AutomationProperties.Name="{Binding LastVacuumText}"/>
+
+                        <TextBlock Text="任意のタイミングでデータベースのバックアップを作成できます。"
+                                   TextWrapping="Wrap"
+                                   Foreground="{DynamicResource SecondaryTextBrush}"
+                                   FontSize="{DynamicResource SmallFontSize}"
+                                   Margin="0,10,0,10"/>
+
+                        <StackPanel Orientation="Horizontal">
+                            <Button Content="バックアップを作成"
+                                    Command="{Binding CreateBackupCommand}"
+                                    Padding="15,10"
+                                    Background="{DynamicResource SuccessActionBrush}"
+                                    Foreground="{DynamicResource OnPrimaryBrush}"
+                                    AutomationProperties.Name="バックアップを作成"
+                                    ToolTip="現在のデータベースのバックアップを作成します"/>
+
+                            <Button Content="バックアップフォルダを開く"
+                                    Command="{Binding OpenBackupFolderCommand}"
+                                    Padding="15,10"
+                                    Margin="10,0,0,0"
+                                    AutomationProperties.Name="バックアップフォルダを開く"
+                                    ToolTip="バックアップファイルが保存されているフォルダを開きます"/>
+                        </StackPanel>
+
+                        <!-- 最後に作成したバックアップ -->
+                        <TextBlock Text="{Binding LastBackupFile, StringFormat=作成先: {0}}"
+                                   Foreground="{DynamicResource SecondaryTextBrush}"
+                                   FontSize="{DynamicResource SmallFontSize}"
+                                   Margin="0,10,0,0"
+                                   TextTrimming="CharacterEllipsis"
+                                   Visibility="{Binding LastBackupFile, Converter={StaticResource BoolToVisibilityConverter}}"/>
+                    </StackPanel>
+                </GroupBox>
+
+                <!-- リストア -->
+                <!-- 摘要の設定（Issue #1905） -->
+                <!-- 道路を挟んで向かい合うバス停のように、名前は違うが実質同じ場所を登録する。
+                     登録しないと、そこで折り返した往復が乗継とみなされ目的地が摘要から消える。 -->
+                <GroupBox Grid.Row="3" Header="摘要の設定" Margin="0,0,0,15" Padding="15">
+                    <StackPanel>
+                        <TextBlock Text="名前は異なるが実質同じ場所である駅・バス停を登録できます。登録すると、行きと帰りで乗降場所の名前が違う移動も往復として摘要にまとまります。"
+                                   TextWrapping="Wrap"
+                                   Foreground="{DynamicResource SecondaryTextBrush}"
+                                   FontSize="{DynamicResource SmallFontSize}"
+                                   Margin="0,0,0,10"/>
+
+                        <Button Content="同一とみなす駅・バス停を設定"
+                                Command="{Binding OpenTransferStationGroupsCommand}"
+                                Padding="15,10"
+                                Background="{DynamicResource HeaderBackgroundBrush}"
+                                Foreground="{DynamicResource OnPrimaryBrush}"
+                                HorizontalAlignment="Left"
+                                AutomationProperties.Name="同一とみなす駅・バス停を設定"
+                                ToolTip="名前が異なるが実質同じ場所である駅・バス停をグループとして登録します"/>
+                    </StackPanel>
+                </GroupBox>
+
+                <GroupBox Grid.Row="4" Header="リストア（データ復元）" Padding="15">
+                    <Grid>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="*"/>
+                            <RowDefinition Height="Auto"/>
+                        </Grid.RowDefinitions>
+
+                        <TextBlock Grid.Row="0"
+                                   Text="バックアップファイルを選択してデータを復元します。"
+                                   Foreground="{DynamicResource SecondaryTextBrush}"
+                                   FontSize="{DynamicResource SmallFontSize}"
+                                   Margin="0,0,0,10"/>
+
+                        <!-- バックアップ一覧 -->
+                        <!-- Issue #2076: 外側が ScrollViewer になったため、ここを高さ無制限のまま置くと
+                             世代数のぶんだけ一覧が縦に伸び、外側のスクロール量が世代数に比例して増える。
+                             MaxHeight で band を切り、band を超えた分は ListView 自身のスクロールで見る。 -->
+                        <Border Grid.Row="1" BorderBrush="{DynamicResource NeutralBorderBrush}" BorderThickness="1" CornerRadius="4"
+                                MinHeight="120"
+                                MaxHeight="260">
+                            <ListView ItemsSource="{Binding BackupFiles}"
+                                      SelectedItem="{Binding SelectedBackup}"
+                                      SelectionMode="Single"
+                                      AutomationProperties.Name="バックアップファイル一覧">
+                                <ListView.View>
+                                    <GridView>
+                                        <GridViewColumn Header="ファイル名" Width="220"
+                                                        DisplayMemberBinding="{Binding FileName}"/>
+                                        <GridViewColumn Header="作成日時" Width="150">
+                                            <GridViewColumn.CellTemplate>
+                                                <DataTemplate>
+                                                    <TextBlock Text="{Binding CreatedAt, StringFormat=yyyy/MM/dd HH:mm:ss}"/>
+                                                </DataTemplate>
+                                            </GridViewColumn.CellTemplate>
+                                        </GridViewColumn>
+                                        <GridViewColumn Header="サイズ" Width="80">
+                                            <GridViewColumn.CellTemplate>
+                                                <DataTemplate>
+                                                    <TextBlock Text="{Binding FileSize, Converter={StaticResource FileSizeConverter}}"
+                                                               HorizontalAlignment="Right"/>
+                                                </DataTemplate>
+                                            </GridViewColumn.CellTemplate>
+                                        </GridViewColumn>
+                                    </GridView>
+                                </ListView.View>
+                            </ListView>
+                        </Border>
+
+                        <!-- リストアボタン -->
+                        <StackPanel Grid.Row="2" Orientation="Horizontal" Margin="0,10,0,0">
+                            <Button Content="選択したバックアップからリストア"
+                                    Command="{Binding RestoreCommand}"
+                                    Padding="15,10"
+                                    Background="{DynamicResource WarningActionBrush}"
+                                    Foreground="{DynamicResource OnPrimaryBrush}"
+                                    AutomationProperties.Name="選択したバックアップからリストア"
+                                    ToolTip="選択したバックアップファイルからデータを復元します"/>
+
+                            <Button Content="ファイルを指定してリストア"
+                                    Command="{Binding RestoreFromFileCommand}"
+                                    Padding="15,10"
+                                    Margin="10,0,0,0"
+                                    AutomationProperties.Name="ファイルを指定してリストア"
+                                    ToolTip="任意のバックアップファイルを選択してデータを復元します"/>
+
+                            <Button Content="一覧を更新"
+                                    Command="{Binding LoadBackupsCommand}"
+                                    Padding="15,10"
+                                    Margin="10,0,0,0"
+                                    AutomationProperties.Name="バックアップ一覧を更新"
+                                    ToolTip="バックアップファイルの一覧を再読み込みします"/>
+                        </StackPanel>
+                    </Grid>
+                </GroupBox>
             </Grid>
-        </GroupBox>
+        </ScrollViewer>
 
         <!-- ステータスメッセージ -->
-        <Border Grid.Row="5"
+        <Border Grid.Row="1"
                 Padding="10"
                 Margin="0,15,0,0"
                 CornerRadius="5"
@@ -340,7 +355,7 @@
         </Border>
 
         <!-- 閉じるボタン -->
-        <StackPanel Grid.Row="6"
+        <StackPanel Grid.Row="2"
                     Orientation="Horizontal"
                     HorizontalAlignment="Right"
                     Margin="0,15,0,0">
@@ -354,7 +369,7 @@
         </StackPanel>
 
         <!-- 処理中オーバーレイ -->
-        <Border Grid.RowSpan="7"
+        <Border Grid.RowSpan="3"
                 Background="{DynamicResource OverlayBrush}"
                 Visibility="{Binding IsBusy, Converter={StaticResource BoolToVisibilityConverter}}">
             <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center">
