@@ -8,7 +8,7 @@
         mc:Ignorable="d"
         d:DataContext="{d:DesignInstance Type=vm:AdminDashboardViewModel}"
         Title="管理者ダッシュボード"
-        Height="780"
+        Height="700"
         Width="1100"
         MinHeight="640"
         MinWidth="900"
