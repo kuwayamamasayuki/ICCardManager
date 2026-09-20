@@ -48,5 +48,37 @@ namespace ICCardManager.Common
         {
             return balance <= warningBalance;
         }
+
+        /// <summary>
+        /// 返却トーストに出す残額警告の文言を組み立てる。
+        /// </summary>
+        /// <param name="warningBalance">残額警告しきい値（円。<c>AppSettings.WarningBalance</c>）。</param>
+        /// <returns><c>⚠️ 残額不足（10,000円以下）</c> のような 1 行の文言。</returns>
+        /// <remarks>
+        /// <para>
+        /// <b>境界の表記は判定と同じ場所に置く（Issue #2077）。</b>従来この文言は
+        /// <c>ToastNotificationWindow.ShowReturn</c> が <c>$"⚠️ 残額不足（&lt;{warningBalance:N0}円）"</c> と
+        /// 直接組み立てており、#1998 で判定を「以下」へ統一した後も<b>表記だけが「未満」のまま</b>残っていた。
+        /// 残額がちょうど 10,000 円のカードを返却すると「残額不足（&lt;10,000円）」と出る
+        /// ——警告は正しいのに、その理由として述べている条件が事実と合わない。チャージは千円単位で
+        /// 行われるため、しきい値ちょうどの残額は日常的に発生する。
+        /// </para>
+        /// <para>
+        /// 判定（<see cref="IsLowBalance"/>）と表記を同じクラスに置くと、境界を動かすときに
+        /// 両方が視野に入る。片方だけを直せる形にしないこと
+        /// （<c>.claude/rules/db-write-conventions.md</c> #1763「同じ判断を配らない」）。
+        /// </para>
+        /// <para>
+        /// <b>短さは仕様である。</b>トーストは文字サイズ「大/特大」で折り返しが増えるため、
+        /// #1273 で「残額が少なくなっています（しきい値: 10,000円）」（約 26 文字）から
+        /// 現在の形（約 16 文字）へ短縮した経緯がある。語彙は Excel 出力の見出し
+        /// （<c>残額不足（N円以下）</c>）・管理者マニュアルと揃えており、
+        /// <c>≦</c> のような記号ではなく「以下」と書くのは、読み手が庶務担当者だからである。
+        /// </para>
+        /// </remarks>
+        internal static string FormatLowBalanceNotice(int warningBalance)
+        {
+            return $"⚠️ 残額不足（{DisplayFormatters.FormatBalanceWithUnit(warningBalance)}以下）";
+        }
     }
 }

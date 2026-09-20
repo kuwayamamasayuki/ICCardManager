@@ -44,5 +44,64 @@ namespace ICCardManager.Tests.Common
         {
             BalanceWarningPolicy.IsLowBalance(balance, warningBalance).Should().Be(expected);
         }
+
+        // ------------------------------------------------------------------
+        // Issue #2077: 返却トーストの文言が判定（以下）と一致していること
+        // ------------------------------------------------------------------
+
+        [Fact]
+        public void 残額警告の文言がしきい値を含む表記になっていること()
+        {
+            // Issue #2077 の本体。#1998 で判定は「以下」へ統一されたのに、表記だけが
+            // "残額不足（<10,000円）" のまま残っていた。10,000 円ちょうどのカードを返却すると
+            // 警告は出るのに、その理由として述べている条件（10,000 円未満）を満たしていない。
+            BalanceWarningPolicy.FormatLowBalanceNotice(10000)
+                .Should().Be("⚠️ 残額不足（10,000円以下）");
+        }
+
+        [Fact]
+        public void 残額警告の文言が厳密不等号や未満を含まないこと()
+        {
+            var notice = BalanceWarningPolicy.FormatLowBalanceNotice(10000);
+
+            notice.Should().NotContain("<");
+            notice.Should().NotContain("＜");
+            notice.Should().NotContain("未満");
+        }
+
+        [Theory]
+        [InlineData(10000, 10000, true)]
+        [InlineData(10001, 10000, false)]
+        [InlineData(20000, 20000, true)]
+        [InlineData(0, 0, true)]
+        public void 文言が示す境界と判定の境界が一致していること(int balance, int warningBalance, bool expectedLow)
+        {
+            // 文言は「しきい値<b>以下</b>」と述べる。述べたとおりに読んだ結果
+            //（残額 <= しきい値）が、実際の判定と一致することを表明する。
+            // 文言のリテラルだけを固定すると、判定側を「未満」へ戻した実装でも緑になる。
+            var notice = BalanceWarningPolicy.FormatLowBalanceNotice(warningBalance);
+            notice.Should().Contain("以下");
+
+            var impliedByNotice = balance <= warningBalance;
+            BalanceWarningPolicy.IsLowBalance(balance, warningBalance)
+                .Should().Be(impliedByNotice).And.Be(expectedLow);
+        }
+
+        [Fact]
+        public void 残額警告の文言が桁区切りを含むこと()
+        {
+            // しきい値をそのまま埋め込む実装（"20000円以下"）への退行を検出する。
+            BalanceWarningPolicy.FormatLowBalanceNotice(20000).Should().Contain("20,000円");
+        }
+
+        [Fact]
+        public void 残額警告の文言が短く保たれていること()
+        {
+            // 対の表明。#1273 はトーストが文字サイズ「大/特大」で折り返し過多になる問題を
+            // 文言の簡潔化で解いた。「以下」表記へ直すついでに
+            // 「残額が少なくなっています（しきい値: 10,000円）」のような長文へ戻さない。
+            BalanceWarningPolicy.FormatLowBalanceNotice(10000).Length
+                .Should().BeLessOrEqualTo(20);
+        }
     }
 }

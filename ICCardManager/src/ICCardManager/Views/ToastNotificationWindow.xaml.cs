@@ -6,6 +6,7 @@ using System.Windows;
 using System.Windows.Media;
 using System.Windows.Media.Animation;
 using System.Windows.Threading;
+using ICCardManager.Common;
 using ICCardManager.Models;
 
 namespace ICCardManager.Views
@@ -171,11 +172,11 @@ namespace ICCardManager.Views
         /// <param name="warningBalance">残額警告しきい値</param>
         public static void ShowReturn(string cardInfo, int balance, bool isLowBalance = false, int warningBalance = 0)
         {
-            // Issue #1273: 文字サイズ「大/特大」でも折返しが増えないよう、警告文を簡潔化。
-            //  旧: "⚠️ 残額が少なくなっています（しきい値: 10,000円）"（約26文字）
-            //  新: "⚠️ 残額不足（<10,000円）"（約14文字）
+            // Issue #1273: 文字サイズ「大/特大」でも折返しが増えないよう、警告文を簡潔化した。
+            // Issue #2077: 境界の表記は判定（#1998 で「以下」へ統一）と同じ場所に置く。
+            // ここで文言を組み立て直さないこと（BalanceWarningPolicy.FormatLowBalanceNotice へ委譲）。
             var subMessage = isLowBalance
-                ? $"⚠️ 残額不足（<{warningBalance:N0}円）"
+                ? BalanceWarningPolicy.FormatLowBalanceNotice(warningBalance)
                 : null;
             Show(ToastType.Return, "おかえりなさい！", cardInfo, $"残額: {balance:N0}円", subMessage);
         }
