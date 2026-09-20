@@ -4,6 +4,7 @@ using System.IO;
 using System.Linq;
 using System.Text.RegularExpressions;
 using FluentAssertions;
+using ICCardManager.Tests.Views.Helpers;
 using Xunit;
 
 namespace ICCardManager.Tests;
@@ -36,16 +37,25 @@ namespace ICCardManager.Tests;
 /// </remarks>
 public class BalanceWarningNoticeTextConventionTests
 {
-    /// <summary>正しい形（残額警告の文言を組み立てる唯一の手段）。</summary>
-    private const string CanonicalCall = "BalanceWarningPolicy.FormatLowBalanceNotice";
+    /// <summary>正しい形（残額警告の表記を組み立てる唯一の手段。核＋装飾の 2 つ）。</summary>
+    private const string CanonicalCall = "BalanceWarningPolicy.FormatLowBalance";
 
     /// <summary>
     /// 禁止された形。残額不足の見出しの近傍に厳密不等号（<c>&lt;</c> / <c>＜</c>）または
     /// 「未満」を置いた表記。
     /// </summary>
     /// <remarks>
+    /// <para>
     /// 近傍を 24 文字に限るのは、無関係な比較式（同じ行の後方にある <c>balance &lt; x</c> 等）を
     /// 巻き込まないため。文字列リテラルの境界（引用符）と改行はまたがない。
+    /// </para>
+    /// <para>
+    /// <b>アンカー（<c>残額不足</c>）は字面であり、意味ではない。</b>見出しを定数・リソース経由で
+    /// 組み立てる形（<c>LowBalanceLabel + "（&lt;…"</c>）や別語彙（「残額わずか」「10,000円を下回る」）は
+    /// 原理的に掛からない。これは静的検査の限界であって、規約が及ばない範囲ではない
+    /// — 境界を述べる表記は <see cref="CanonicalCall"/>* へ委譲すること
+    /// （その委譲は<see cref="境界を表記する全箇所が共通の生成へ委譲していること"/>が対で表明する）。
+    /// </para>
     /// </remarks>
     private static readonly Regex ForbiddenNoticePattern = new Regex(
         "残額不足[^\"\\r\\n]{0,24}?(?:[<＜]|未満)",
@@ -80,10 +90,15 @@ public class BalanceWarningNoticeTextConventionTests
     public void 本番コードが残額警告の文言に厳密不等号を使っていないこと()
     {
         var violations = new List<string>();
+        var scanned = new List<string>();
 
         foreach (var file in EnumerateProductionSources())
         {
-            var source = TestSourceInspection.RemoveCommentsPreservingLines(File.ReadAllText(file));
+            scanned.Add(file);
+            // どちらもコメントは除去し、リテラル（＝検査対象の文言）は残す。行数も保つ。
+            var source = file.EndsWith(".xaml", StringComparison.OrdinalIgnoreCase)
+                ? XamlElementInspection.StripXmlComments(File.ReadAllText(file))
+                : TestSourceInspection.RemoveCommentsPreservingLines(File.ReadAllText(file));
 
             foreach (Match match in ForbiddenNoticePattern.Matches(source))
             {
@@ -92,30 +107,51 @@ public class BalanceWarningNoticeTextConventionTests
             }
         }
 
+        // 空振り防止。拡張子の条件を誤ると走査が静かに縮む（#1786）。
+        scanned.Should().Contain(f => f.EndsWith(".cs", StringComparison.OrdinalIgnoreCase),
+            "本番の .cs を走査していること");
+        scanned.Should().Contain(f => f.EndsWith(".xaml", StringComparison.OrdinalIgnoreCase),
+            "本番の .xaml を走査していること（見出しは XAML にも実在する）");
+
         violations.Should().BeEmpty(
             "残額警告の境界は「以下」である（Issue #1998）。表記に「<」「未満」を使うと、" +
             "しきい値ちょうどの残額で警告を出しながら、満たしていない条件を理由として示すことになる" +
             "（チャージは千円単位のため境界ちょうどは日常的に発生する。Issue #2077）");
     }
 
-    [Fact]
-    public void 返却トーストが残額警告の文言を共通の生成へ委譲していること()
+    [Theory]
+    // 返却トースト（装飾付きの文言）。
+    [InlineData("Views", "ToastNotificationWindow.xaml.cs")]
+    // 管理者ダッシュボードの Excel 出力（集計見出し）。しきい値の表記はここにもある。
+    [InlineData("Services", "AdminDashboardExcelExportService.cs")]
+    public void 境界を表記する全箇所が共通の生成へ委譲していること(string directory, string fileName)
     {
         // 対の表明。禁止形の不在だけを見ると、文言の生成を丸ごと消した実装でも緑になる。
-        var path = Path.Combine(
-            TestPaths.GetProductionSourceRoot(), "Views", "ToastNotificationWindow.xaml.cs");
+        // 消費側をここへ列挙するのは「絞り込みが無い形は静的検査では検出できない」ため
+        // （#1947）。新しく境界を表記する画面を作ったら、この一覧に足すこと。
+        var path = Path.Combine(TestPaths.GetProductionSourceRoot(), directory, fileName);
 
-        File.Exists(path).Should().BeTrue("検査対象が存在すること（空振り防止）");
+        File.Exists(path).Should().BeTrue($"{fileName} が存在すること（検査対象の空振り防止）");
 
         var code = TestSourceInspection.ToCodeOnly(File.ReadAllText(path));
         code.Should().Contain(CanonicalCall,
-            $"返却トーストの残額警告は {CanonicalCall} で組み立てること。" +
+            $"{fileName} の残額不足の表記は {CanonicalCall}* で組み立てること。" +
             "判定（BalanceWarningPolicy.IsLowBalance）と表記を同じ場所に置かないと、" +
             "境界を動かしたときに片方だけが取り残される（Issue #2077）");
     }
 
+    /// <summary>
+    /// 走査対象は本番ソースの <c>.cs</c> と <c>.xaml</c>。
+    /// </summary>
+    /// <remarks>
+    /// <c>.cs</c> だけを見る形は fail-open だった（コードレビューで検出）。
+    /// <c>AdminDashboardDialog.xaml</c> には既に <c>Text="💰 残額不足"</c> があり、
+    /// そこへ XAML 側でしきい値の接尾辞を書き足す経路が素通りする。
+    /// </remarks>
     private static IEnumerable<string> EnumerateProductionSources()
-        => Directory.EnumerateFiles(TestPaths.GetProductionSourceRoot(), "*.cs", SearchOption.AllDirectories)
+        => Directory.EnumerateFiles(TestPaths.GetProductionSourceRoot(), "*.*", SearchOption.AllDirectories)
+            .Where(f => f.EndsWith(".cs", StringComparison.OrdinalIgnoreCase)
+                        || f.EndsWith(".xaml", StringComparison.OrdinalIgnoreCase))
             .Where(f => !f.Contains($"{Path.DirectorySeparatorChar}obj{Path.DirectorySeparatorChar}")
                         && !f.Contains($"{Path.DirectorySeparatorChar}bin{Path.DirectorySeparatorChar}"));
 }

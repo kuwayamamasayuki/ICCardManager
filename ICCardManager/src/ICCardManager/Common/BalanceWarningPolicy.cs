@@ -50,6 +50,30 @@ namespace ICCardManager.Common
         }
 
         /// <summary>
+        /// 残額不足の見出しに境界を添えた表記を組み立てる。
+        /// </summary>
+        /// <param name="warningBalance">残額警告しきい値（円。<c>AppSettings.WarningBalance</c>）。</param>
+        /// <returns><c>残額不足（10,000円以下）</c>。</returns>
+        /// <remarks>
+        /// <para>
+        /// <b>核（見出し＋境界）と装飾（トーストの <c>⚠️ </c>）を分ける（Issue #2077）。</b>
+        /// 境界を述べる表記は返却トースト（<see cref="FormatLowBalanceNotice"/>）だけでなく
+        /// 管理者ダッシュボードの Excel 出力（<c>AdminDashboardExcelExportService</c> の集計見出し）にもあり、
+        /// 装飾を焼き込んだ文言しか無いと後者から再利用できない。再利用できない形にすると、
+        /// 「境界を動かすときに判定と表記の両方が視野に入る」という本クラスの目的が
+        /// <b>消費側の数だけ半分ずつ失われる</b>（#1763「同じ判断を配らない」。コードレビューで検出）。
+        /// </para>
+        /// <para>
+        /// 装飾を付けるかどうかは表示先で決める。Excel のセルは見出しの列であり、
+        /// 1 行ごとに警告記号を並べる場所ではない。
+        /// </para>
+        /// </remarks>
+        internal static string FormatLowBalanceThresholdLabel(int warningBalance)
+        {
+            return $"残額不足（{DisplayFormatters.FormatBalanceWithUnit(warningBalance)}以下）";
+        }
+
+        /// <summary>
         /// 返却トーストに出す残額警告の文言を組み立てる。
         /// </summary>
         /// <param name="warningBalance">残額警告しきい値（円。<c>AppSettings.WarningBalance</c>）。</param>
@@ -78,7 +102,7 @@ namespace ICCardManager.Common
         /// </remarks>
         internal static string FormatLowBalanceNotice(int warningBalance)
         {
-            return $"⚠️ 残額不足（{DisplayFormatters.FormatBalanceWithUnit(warningBalance)}以下）";
+            return $"⚠️ {FormatLowBalanceThresholdLabel(warningBalance)}";
         }
     }
 }

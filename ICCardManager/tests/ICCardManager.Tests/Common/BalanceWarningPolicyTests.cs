@@ -60,6 +60,25 @@ namespace ICCardManager.Tests.Common
         }
 
         [Fact]
+        public void 境界の表記が装飾を含まないこと()
+        {
+            // 核（見出し＋境界）と装飾（トーストの ⚠️）を分ける。装飾を焼き込むと
+            // Excel の集計見出しから再利用できず、境界の表記が 2 か所に分かれる
+            // （コードレビューで検出）。
+            BalanceWarningPolicy.FormatLowBalanceThresholdLabel(10000)
+                .Should().Be("残額不足（10,000円以下）");
+        }
+
+        [Fact]
+        public void トーストの文言が境界の表記をそのまま含むこと()
+        {
+            // 2 つが別々に書かれていないことを表明する。片方だけを直せる形にしない。
+            var label = BalanceWarningPolicy.FormatLowBalanceThresholdLabel(3000);
+
+            BalanceWarningPolicy.FormatLowBalanceNotice(3000).Should().Contain(label);
+        }
+
+        [Fact]
         public void 残額警告の文言が厳密不等号や未満を含まないこと()
         {
             var notice = BalanceWarningPolicy.FormatLowBalanceNotice(10000);
