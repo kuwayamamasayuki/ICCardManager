@@ -1074,7 +1074,8 @@
                                             HorizontalContentAlignment="Stretch"
                                             Command="{Binding DataContext.HandleWarningClickCommand, RelativeSource={RelativeSource AncestorType=ItemsControl}}"
                                             CommandParameter="{Binding}"
-                                            AutomationProperties.Name="{Binding DisplayText}">
+                                            AutomationProperties.Name="{Binding DisplayText}"
+                                            AutomationProperties.HelpText="{Binding Text, ElementName=WarningActionHint}">
                                         <Button.Template>
                                             <ControlTemplate TargetType="Button">
                                                 <!-- 見た目は Border 時代と同一に保つ。枠線は既定で透明の 2px を確保しておき、
@@ -1116,8 +1117,14 @@
                                                  ヒントは「クリック／Enterキーで」と両方の手段を書く。
                                                  これが唯一の除去手段である種別（CardReaderError）で
                                                  「クリックして」とだけ案内すると、マウスを使わない職員に
-                                                 実行できない指示を出すことになる -->
+                                                 実行できない指示を出すことになる。
+                                                 この文言の読み手はまさにスクリーンリーダー利用者なので、
+                                                 Button の AutomationProperties.HelpText へ ElementName で
+                                                 結び、読み上げからも失われないようにする（Name は警告文そのもの
+                                                 なので、ヒントは補足＝HelpText 側。#2073）。文言はここ 1 か所
+                                                 にしか書かない（#1763） -->
                                             <TextBlock DockPanel.Dock="Right"
+                                                       x:Name="WarningActionHint"
                                                        FontSize="{DynamicResource SmallFontSize}"
                                                        Foreground="{DynamicResource SecondaryTextBrush}"
                                                        VerticalAlignment="Center"

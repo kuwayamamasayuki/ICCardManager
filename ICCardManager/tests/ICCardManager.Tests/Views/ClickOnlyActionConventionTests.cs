@@ -52,11 +52,27 @@ namespace ICCardManager.Tests.Views;
 /// <b>粗い条件を置くなら、それ単独で判定が成立していないことを確かめる。</b>
 /// </para>
 /// <para>
-/// <b>検査できない範囲</b>: 実際にフォーカスが当たるか・Enter で <c>Command</c> が起動するかは
-/// WPF の実行時挙動であり、XAML テキストからは確かめられない（<c>Window</c> は STA 依存で
-/// xUnit から生成できない）。ここで固定するのは「キーボードで到達できる作りになっているか」までで、
-/// 実機でのフォーカス移動・読み上げは手動検証する。
+/// <b>検査できない範囲</b>（見ていないものは「見ていない」と書く）:
 /// </para>
+/// <list type="bullet">
+/// <item>
+/// 実際にフォーカスが当たるか・Enter で <c>Command</c> が起動するかは WPF の実行時挙動であり、
+/// XAML テキストからは確かめられない（<c>Window</c> は STA 依存で xUnit から生成できない）。
+/// ここで固定するのは「キーボードで到達できる作りになっているか」までで、
+/// 実機でのフォーカス移動・読み上げは手動検証する。
+/// </item>
+/// <item>
+/// <b>クリック専用の経路は <c>MouseBinding</c> だけではない</b>。非フォーカス要素
+/// （<c>Border</c> / <c>Grid</c> / <c>TextBlock</c> 等）へ直接付けた
+/// <c>MouseLeftButtonUp</c> / <c>PreviewMouseLeftButtonDown</c> のイベントハンドラーも同じ形で、
+/// この検査は拾わない。<b>実在する例</b>: <c>MainWindow.xaml</c> の
+/// <c>HistoryPeriodDisplayBorder</c>（表示月の選択ポップアップ、#945）。
+/// 前後月の ◀ ▶（#2030）はキーボードで押せるが、任意の月を選ぶポップアップはクリックでしか開けない。
+/// <b>走査を広げるのは是正と同じ PR で行う</b>（先に広げると既存違反で赤になり、抑制を積む形＝#1786 の形骸化を招く。#1843）。
+/// なお <c>CardRegistrationModeDialog.xaml</c> の同型は内側に <c>RadioButton</c> を持つため違反ではない
+/// ので、広げるときは「内側にフォーカスできる要素が無いこと」を条件に含めること。
+/// </item>
+/// </list>
 /// <para>
 /// 走査は <see cref="XamlElementInspection"/> へ集約し、私的コピーを増やさない（testing.md）。
 /// </para>
@@ -142,6 +158,17 @@ public class ClickOnlyActionConventionTests
                 XamlElementInspection.GetAttribute(button.StartTag, "AutomationProperties.Name"))
             .Should().Be("DisplayText",
                 "読み上げ名は警告文そのものを動的に読ませる（固定ラベルを置くと中身が読まれない。#1812）");
+
+        // 右端のヒント（「（クリック／Enterキーで消去）」）は Button の Name に含まれないため、
+        // HelpText で読み上げへ渡す。**文言は 1 か所にしか書かない**ので ElementName で結ぶ（#1763）
+        XamlElementInspection.GetAttribute(button.StartTag, "AutomationProperties.HelpText")
+            .Should().Be("{Binding Text, ElementName=WarningActionHint}",
+                "この文言の読み手はスクリーンリーダー利用者そのものなので、読み上げから失わせない（Issue #2078）");
+
+        XamlElementInspection.EnumerateElements(warningArea, "TextBlock")
+            .Select(t => XamlElementInspection.GetAttribute(t.StartTag, "x:Name"))
+            .Should().Contain("WarningActionHint",
+                "HelpText の参照先（ヒントの TextBlock）が実在すること — 参照が切れても XAML はエラーにならない");
     }
 
     /// <summary>
@@ -200,6 +227,16 @@ public class ClickOnlyActionConventionTests
                 @"<KeyBinding Key=""Enter"" Command=""{Binding OtherCommand}""/><ListBox>" + clickRow + "</ListBox>")
             .Should().ContainSingle();
 
+        // Gesture="LeftClick"（MouseAction と同じ意味の書き方）も拾う
+        FindViolations(
+                @"<ItemsControl><MouseBinding Gesture=""LeftClick"" Command=""{Binding DoItCommand}""/></ItemsControl>")
+            .Should().ContainSingle();
+
+        // 異種コンテナの入れ子でも、外側の内側にある LeftClick は「器の中」と判定する
+        // （型の並び順で潰すと外側が残り、正当な実装を違反と誤検出する。コードレビューで検出）
+        FindViolations($"{keyHandler}<ListView><ListBox>{clickRow}</ListBox>{clickRow}</ListView>")
+            .Should().BeEmpty();
+
         // LeftClick 以外（ダブルクリック等）は対象外
         FindViolations(
                 @"<ItemsControl><MouseBinding MouseAction=""LeftDoubleClick"" Command=""{Binding DoItCommand}""/></ItemsControl>")
@@ -248,10 +285,15 @@ public class ClickOnlyActionConventionTests
     /// </remarks>
     private static string MaskNavigableContainers(string source)
     {
+        // 入れ子は外側から潰す。型の並び順で潰すと、ListView ⊃ ListBox のような**異種の入れ子**で
+        // 内側が先に消え、外側の本体が `masked` に一致しなくなって外側が潰されずに残る
+        // （BusStopInputDialog.xaml に実在する形。コードレビューで検出）。
+        // 外側の本体は内側を含むので必ず長い ＝ 長さの降順が深さの昇順になる。
         var bodies = KeyboardNavigableContainers
             .SelectMany(container => XamlElementInspection.EnumerateElements(source, container))
             .Select(e => e.Body)
             .Where(body => body.Length > 0)
+            .OrderByDescending(body => body.Length)
             .ToList();
 
         var masked = source;
@@ -275,9 +317,16 @@ public class ClickOnlyActionConventionTests
     private static bool HasKeyHandler(string xaml)
         => xaml.IndexOf("KeyDown=", StringComparison.Ordinal) >= 0;
 
+    /// <summary>
+    /// 左クリックを表す <c>MouseBinding</c> の属性（<c>MouseAction</c> と <c>Gesture</c> はどちらも合法）。
+    /// </summary>
+    private static bool IsLeftClick(string startTag)
+        => XamlElementInspection.GetAttribute(startTag, "MouseAction") == "LeftClick"
+           || XamlElementInspection.GetAttribute(startTag, "Gesture") == "LeftClick";
+
     private static IReadOnlyList<ClickAction> ExtractLeftClickCommands(string xaml)
         => XamlElementInspection.EnumerateElements(xaml, "MouseBinding")
-            .Where(e => XamlElementInspection.GetAttribute(e.StartTag, "MouseAction") == "LeftClick")
+            .Where(e => IsLeftClick(e.StartTag))
             .Select(e => new
             {
                 e.Line,
