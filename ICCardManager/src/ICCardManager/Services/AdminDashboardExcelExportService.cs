@@ -90,8 +90,11 @@ namespace ICCardManager.Services
             row = WriteOverviewRow(sheet, row, "貸出中", status.LentCardCount);
             row = WriteOverviewRow(sheet, row,
                 $"長期未返却（{status.LongTermUnreturnedThresholdDays}日以上）", status.LongTermUnreturnedCount);
+            // 境界の表記は判定（BalanceWarningPolicy.IsLowBalance、境界は「以下」）と
+            // 同じ場所から取る。ここで組み立て直さないこと（Issue #2077）。
             row = WriteOverviewRow(sheet, row,
-                $"残額不足（{status.WarningBalance:N0}円以下）", status.LowBalanceCount);
+                BalanceWarningPolicy.FormatLowBalanceThresholdLabel(status.WarningBalance),
+                status.LowBalanceCount);
             row = WriteOverviewRow(sheet, row,
                 $"{status.ReportYear}年{status.ReportMonth}月の帳票が未出力", status.ReportNotExportedCount);
             row = WriteOverviewRow(sheet, row, "帳票の出力状況を判定できず", status.ReportStatusUnknownCount);
