@@ -1055,42 +1055,68 @@
                     <ScrollViewer Grid.Row="4"
                                   VerticalScrollBarVisibility="Auto"
                                   HorizontalScrollBarVisibility="Disabled">
-                        <!-- Issue #672: 警告をクリック可能に -->
-                        <ItemsControl ItemsSource="{Binding WarningMessages}">
+                        <!-- Issue #672: 警告をクリック可能に
+                             Issue #2078: 行は Border ではなく Button にする。Border は ContentElement ではないため
+                             MouseBinding を付けてもキーボードフォーカスもキー入力も受けず、マウスを使わない職員は
+                             「クリックして再接続」「クリックして消去」を実行できなかった。除去の契機がクリックだけの
+                             種別（CardReaderError、#1811）では、警告を取り除く手段そのものが無い状態だった。
+                             Button なら Enter / Space が既定で効き、UIA の Invoke パターンも自動で付く。
+                             TabNavigation="Local" で警告行どうしを Tab で順に辿れるようにし、
+                             グループ全体の位置は TabIndex（カード一覧の 10 の次）で決める。 -->
+                        <ItemsControl ItemsSource="{Binding WarningMessages}"
+                                      TabIndex="11"
+                                      KeyboardNavigation.TabNavigation="Local"
+                                      AutomationProperties.Name="システム警告一覧"
+                                      AutomationProperties.HelpText="Tabキーで警告を選び、Enterキーまたはスペースキーで実行します">
                             <ItemsControl.ItemTemplate>
                                 <DataTemplate>
-                                    <Border CornerRadius="4"
-                                            Margin="0,2" Padding="10,8"
-                                            Cursor="Hand"
+                                    <Button Cursor="Hand"
+                                            HorizontalContentAlignment="Stretch"
+                                            Command="{Binding DataContext.HandleWarningClickCommand, RelativeSource={RelativeSource AncestorType=ItemsControl}}"
+                                            CommandParameter="{Binding}"
                                             AutomationProperties.Name="{Binding DisplayText}">
-                                        <Border.InputBindings>
-                                            <MouseBinding MouseAction="LeftClick"
-                                                          Command="{Binding DataContext.HandleWarningClickCommand, RelativeSource={RelativeSource AncestorType=ItemsControl}}"
-                                                          CommandParameter="{Binding}"/>
-                                        </Border.InputBindings>
-                                        <Border.Style>
-                                            <Style TargetType="Border">
-                                                <Setter Property="Background" Value="{DynamicResource LendingBackgroundBrush}"/>
-                                                <Style.Triggers>
+                                        <Button.Template>
+                                            <ControlTemplate TargetType="Button">
+                                                <!-- 見た目は Border 時代と同一に保つ。枠線は既定で透明の 2px を確保しておき、
+                                                     種別・フォーカスでは色だけを差し替える（太さを変えるとレイアウトがずれる）。 -->
+                                                <Border x:Name="RowBorder"
+                                                        CornerRadius="4"
+                                                        Margin="0,2" Padding="10,8"
+                                                        BorderThickness="2"
+                                                        BorderBrush="Transparent"
+                                                        Background="{DynamicResource LendingBackgroundBrush}">
+                                                    <ContentPresenter/>
+                                                </Border>
+                                                <ControlTemplate.Triggers>
                                                     <Trigger Property="IsMouseOver" Value="True">
-                                                        <Setter Property="Background" Value="{DynamicResource LendingBorderBrush}"/>
+                                                        <Setter TargetName="RowBorder" Property="Background" Value="{DynamicResource LendingBorderBrush}"/>
                                                     </Trigger>
                                                     <!-- Issue #1110: DB接続断は赤色で表示（致命的状態を強調） -->
                                                     <DataTrigger Binding="{Binding Type}" Value="DatabaseConnectionLost">
-                                                        <Setter Property="Background" Value="{DynamicResource ErrorBackgroundBrush}"/>
-                                                        <Setter Property="BorderBrush" Value="{DynamicResource ErrorBorderBrush}"/>
-                                                        <Setter Property="BorderThickness" Value="1"/>
+                                                        <Setter TargetName="RowBorder" Property="Background" Value="{DynamicResource ErrorBackgroundBrush}"/>
+                                                        <Setter TargetName="RowBorder" Property="BorderBrush" Value="{DynamicResource ErrorBorderBrush}"/>
                                                     </DataTrigger>
-                                                </Style.Triggers>
-                                            </Style>
-                                        </Border.Style>
+                                                    <!-- Issue #2078: フォーカス枠は種別トリガーより後ろに置く。
+                                                         トリガーは後勝ちのため、前に置くと DB 接続断の行だけ
+                                                         「いまどこにフォーカスがあるか」が見えなくなる。 -->
+                                                    <Trigger Property="IsKeyboardFocused" Value="True">
+                                                        <Setter TargetName="RowBorder" Property="BorderBrush" Value="{DynamicResource HeaderBackgroundBrush}"/>
+                                                    </Trigger>
+                                                </ControlTemplate.Triggers>
+                                            </ControlTemplate>
+                                        </Button.Template>
                                         <!-- Issue #1687: 横方向StackPanelは子を無限幅で測定しWrapが効かないため、
                                              DockPanel（ヒント右端＋本文が残り幅で折り返し）で長文警告のはみ出しを防ぐ -->
                                         <DockPanel>
-                                            <!-- Issue #1110: DB接続断時に「クリックして再接続」ヒントを表示
-                                                 Issue #1811: カードリーダーエラーは「クリックして消去」。
+                                            <!-- Issue #1110: DB接続断時に再接続のヒントを表示
+                                                 Issue #1811: カードリーダーエラーは消去のヒント。
                                                  Text はローカル値にするとスタイルのトリガーで上書きできないため、
-                                                 種別ごとのトリガーで Visibility と Text を併せて設定する -->
+                                                 種別ごとのトリガーで Visibility と Text を併せて設定する
+                                                 Issue #2078: 行が Button になりキーボードでも実行できるため、
+                                                 ヒントは「クリック／Enterキーで」と両方の手段を書く。
+                                                 これが唯一の除去手段である種別（CardReaderError）で
+                                                 「クリックして」とだけ案内すると、マウスを使わない職員に
+                                                 実行できない指示を出すことになる -->
                                             <TextBlock DockPanel.Dock="Right"
                                                        FontSize="{DynamicResource SmallFontSize}"
                                                        Foreground="{DynamicResource SecondaryTextBrush}"
@@ -1102,11 +1128,11 @@
                                                         <Style.Triggers>
                                                             <DataTrigger Binding="{Binding Type}" Value="DatabaseConnectionLost">
                                                                 <Setter Property="Visibility" Value="Visible"/>
-                                                                <Setter Property="Text" Value="（クリックして再接続）"/>
+                                                                <Setter Property="Text" Value="（クリック／Enterキーで再接続）"/>
                                                             </DataTrigger>
                                                             <DataTrigger Binding="{Binding Type}" Value="CardReaderError">
                                                                 <Setter Property="Visibility" Value="Visible"/>
-                                                                <Setter Property="Text" Value="（クリックして消去）"/>
+                                                                <Setter Property="Text" Value="（クリック／Enterキーで消去）"/>
                                                             </DataTrigger>
                                                         </Style.Triggers>
                                                     </Style>
@@ -1116,7 +1142,7 @@
                                                        TextWrapping="Wrap"
                                                        FontSize="{DynamicResource SmallFontSize}"/>
                                         </DockPanel>
-                                    </Border>
+                                    </Button>
                                 </DataTemplate>
                             </ItemsControl.ItemTemplate>
                         </ItemsControl>
