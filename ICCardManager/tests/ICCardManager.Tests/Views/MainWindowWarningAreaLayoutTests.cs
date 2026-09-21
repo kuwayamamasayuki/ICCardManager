@@ -58,13 +58,13 @@ public class MainWindowWarningAreaLayoutTests
 
         hintTextBlock.Should().MatchRegex(
             @"<DataTrigger\s+Binding\s*=\s*""\{Binding\s+Type\}""\s+Value\s*=\s*""DatabaseConnectionLost"">" +
-            @"(?:(?!</DataTrigger>)[\s\S])*?<Setter\s+Property\s*=\s*""Text""\s+Value\s*=\s*""（クリックして再接続）""",
-            "DB接続断の警告には「クリックして再接続」のヒントを出す（Issue #1110）");
+            @"(?:(?!</DataTrigger>)[\s\S])*?<Setter\s+Property\s*=\s*""Text""\s+Value\s*=\s*""（クリック／Enterキーで再接続）""",
+            "DB接続断の警告には再接続のヒントを出す。Issue #2078 で行が Button になり Enter キーでも実行できるため、両方の手段を書く（Issue #1110 / #2078）");
 
         hintTextBlock.Should().MatchRegex(
             @"<DataTrigger\s+Binding\s*=\s*""\{Binding\s+Type\}""\s+Value\s*=\s*""CardReaderError"">" +
-            @"(?:(?!</DataTrigger>)[\s\S])*?<Setter\s+Property\s*=\s*""Text""\s+Value\s*=\s*""（クリックして消去）""",
-            "カードリーダーエラーの警告はクリックで取り除けるため、そのヒントを出す（Issue #1811）");
+            @"(?:(?!</DataTrigger>)[\s\S])*?<Setter\s+Property\s*=\s*""Text""\s+Value\s*=\s*""（クリック／Enterキーで消去）""",
+            "カードリーダーエラーの警告はこれが唯一の除去手段なので、マウス・キーボード両方の手段を書く（Issue #1811 / #2078）");
     }
 
     /// <summary>
