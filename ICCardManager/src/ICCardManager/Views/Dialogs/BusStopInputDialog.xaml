@@ -30,12 +30,17 @@
         </Grid.RowDefinitions>
 
         <!-- 説明 -->
-        <Border Grid.Row="0" Background="{DynamicResource LendingBackgroundBrush}" CornerRadius="4" Padding="15" Margin="0,0,0,15">
+        <!-- Issue #2079: この画面は返却処理の途中（返却 → バス停名入力 → 同行者数入力）に出るため、
+             ヘッダーは返却系の寒色を使う。暖色（LendingBackgroundBrush / LendingForegroundBrush）は
+             「貸出」専用のシグナル色で汎用の情報ヘッダー用途を持たない（03_画面設計書 §4.2.1）ため、
+             ここで使うと返却の途中で「貸出になった？」と読まれる。
+             ReturnBackgroundBrush の情報ヘッダー兼用は Issue #1399 の設計判断 -->
+        <Border Grid.Row="0" Background="{DynamicResource ReturnBackgroundBrush}" CornerRadius="4" Padding="15" Margin="0,0,0,15">
             <StackPanel>
                 <TextBlock Text="バス利用のバス停名を入力してください"
                            FontSize="{DynamicResource BaseFontSize}"
                            FontWeight="Bold"
-                           Foreground="{DynamicResource LendingForegroundBrush}"/>
+                           Foreground="{DynamicResource ReturnForegroundBrush}"/>
                 <TextBlock FontSize="{DynamicResource SmallFontSize}"
                            Foreground="{DynamicResource HintForegroundBrush}"
                            Margin="0,5,0,0"
@@ -71,6 +76,10 @@
                                    FontSize="{DynamicResource SmallFontSize}"/>
 
                         <!-- 金額 -->
+                        <!-- Issue #2079: ここの LendingForegroundBrush は「貸出」のシグナルではなく、
+                             金額を強調するためにアプリ全体で共用している文字色（LedgerDetailDialog・
+                             LedgerRowEditDialog・CompanionCountInputDialog の金額欄と同じ）。
+                             ヘッダー（上）と違い状態を表す色ではないので返却色へは揃えない -->
                         <TextBlock Grid.Column="1"
                                    Text="{Binding AmountDisplay}"
                                    VerticalAlignment="Center"

@@ -96,6 +96,9 @@
                         </StackPanel>
 
                         <!-- 払出金額 -->
+                        <!-- Issue #2079: LendingForegroundBrush は「貸出」のシグナルではなく、
+                             金額を強調するためにアプリ全体で共用している文字色。ヘッダー（上）と違い
+                             状態を表す色ではないので返却色へは揃えない -->
                         <TextBlock Grid.Column="2"
                                    Text="{Binding ExpenseDisplay}"
                                    VerticalAlignment="Center"
