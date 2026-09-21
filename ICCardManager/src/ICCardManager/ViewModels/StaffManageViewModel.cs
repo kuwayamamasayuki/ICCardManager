@@ -22,7 +22,7 @@ namespace ICCardManager.ViewModels
 /// <summary>
     /// 職員管理画面のViewModel
     /// </summary>
-    public partial class StaffManageViewModel : ViewModelBase
+    public partial class StaffManageViewModel : ViewModelBase, IEditFormViewModel
     {
         private readonly IStaffRepository _staffRepository;
         private readonly ICardReader _cardReader;

@@ -4,6 +4,7 @@ using System.ComponentModel;
 using System.Linq;
 using System.Threading.Tasks;
 using System.Windows;
+using System.Windows.Input;
 using System.Windows.Threading;
 using ICCardManager.Common;
 using ICCardManager.Models;
@@ -172,6 +173,15 @@ namespace ICCardManager.Views.Dialogs
         private void CloseButton_Click(object sender, RoutedEventArgs e)
         {
             Close();
+        }
+
+        /// <summary>
+        /// Issue #2080: Escape キーの意味を編集状態から決める。
+        /// 判断は <see cref="EditFormKeyPolicy"/> に置き、ここでは結線だけを行う。
+        /// </summary>
+        private void Dialog_KeyDown(object sender, KeyEventArgs e)
+        {
+            EditFormKeyPolicy.HandleEscape(this, _viewModel, e);
         }
     }
 }

@@ -17,8 +17,9 @@
         ResizeMode="CanResize"
         FontSize="{DynamicResource BaseFontSize}"
         FocusManager.FocusedElement="{Binding ElementName=NameTextBox}"
+        KeyDown="Dialog_KeyDown"
         AutomationProperties.Name="職員管理ダイアログ"
-        AutomationProperties.HelpText="職員の登録・編集・削除ができます。職員証をタッチして新規登録できます。Escキーで閉じます。">
+        AutomationProperties.HelpText="職員の登録・編集・削除ができます。職員証をタッチして新規登録できます。編集中はEnterキーで保存（備考欄では改行になります）、Escキーで編集の取り消しができます。編集していないときはEscキーで閉じます。">
 
     <Window.Resources>
         <BooleanToVisibilityConverter x:Key="BoolToVisibilityConverter"/>
@@ -76,11 +77,14 @@
 
             <!-- ボタン -->
             <DockPanel Grid.Row="2" Margin="0,10,0,0" LastChildFill="True">
-                <!-- 完了ボタン（右端固定） -->
+                <!-- 完了ボタン（右端固定）。
+                     Issue #2080: IsCancel="True" は付けない。付けると編集フォームに
+                     入力している最中の Escape でもダイアログごと閉じて入力が失われる。
+                     Escape の意味は編集中かどうかで変わるため、Dialog_KeyDown →
+                     EditFormKeyPolicy で一元的に決める。 -->
                 <Button DockPanel.Dock="Right"
                         Content="完了"
                         Click="CloseButton_Click"
-                        IsCancel="True"
                         Padding="20,8"
                         Margin="10,0,0,5"
                         VerticalAlignment="Top"/>
@@ -302,8 +306,12 @@
                             Command="{Binding CancelEditCommand}"
                             Padding="15,8"
                             Margin="0,0,10,0"/>
+                    <!-- Issue #2080: 入力欄で Enter を押したときに走るのは「保存」であること。
+                         既定ボタンを編集中に限るのは、一覧を見ているだけのときに
+                         Enter で保存が走らないようにするため（TransferStationGroupDialog と同じ流儀）。 -->
                     <Button Content="保存"
                             Command="{Binding SaveCommand}"
+                            IsDefault="{Binding IsEditing}"
                             Padding="15,8"
                             Background="{DynamicResource HeaderBackgroundBrush}"
                             Foreground="{DynamicResource OnPrimaryBrush}"/>

@@ -23,7 +23,7 @@ namespace ICCardManager.ViewModels
 /// <summary>
     /// カード管理画面のViewModel
     /// </summary>
-    public partial class CardManageViewModel : ViewModelBase
+    public partial class CardManageViewModel : ViewModelBase, IEditFormViewModel
     {
         private readonly ICardRepository _cardRepository;
         private readonly ILedgerRepository _ledgerRepository;

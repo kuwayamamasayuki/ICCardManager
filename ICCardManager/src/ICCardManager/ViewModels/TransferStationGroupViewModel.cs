@@ -23,7 +23,7 @@ namespace ICCardManager.ViewModels
     /// カード管理・職員管理と同じ流儀）。
     /// </para>
     /// </remarks>
-    public partial class TransferStationGroupViewModel : ViewModelBase
+    public partial class TransferStationGroupViewModel : ViewModelBase, IEditFormViewModel
     {
         private readonly ITransferStationGroupService _groupService;
         private readonly IDialogService _dialogService;

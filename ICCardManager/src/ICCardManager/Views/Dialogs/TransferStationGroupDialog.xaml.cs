@@ -1,7 +1,9 @@
 using System;
 using System.Windows;
+using System.Windows.Input;
 using ICCardManager.Common;
 using ICCardManager.ViewModels;
+using ICCardManager.Views.Helpers;
 
 namespace ICCardManager.Views.Dialogs
 {
@@ -9,8 +11,9 @@ namespace ICCardManager.Views.Dialogs
     /// 同一とみなす駅・バス停の編集ダイアログ（Issue #1905）
     /// </summary>
     /// <remarks>
-    /// 追加・編集・削除は操作のたびに保存されるため、「閉じる」は
-    /// <c>IsCancel="True"</c> による単純な取り消しでよい（未保存の状態を持たない）。
+    /// 追加・編集・削除は操作のたびに保存されるが、編集フォームを開いている間は
+    /// 未保存の入力を持つ。Issue #2080: そのため「閉じる」に <c>IsCancel="True"</c> は付けず、
+    /// Escape の意味は <see cref="EditFormKeyPolicy"/> が編集状態から決める。
     /// </remarks>
     public partial class TransferStationGroupDialog : Window
     {
@@ -63,6 +66,23 @@ namespace ICCardManager.Views.Dialogs
                     Close();
                 }
             }
+        }
+
+        /// <summary>
+        /// 閉じるボタンクリック
+        /// </summary>
+        private void CloseButton_Click(object sender, RoutedEventArgs e)
+        {
+            Close();
+        }
+
+        /// <summary>
+        /// Issue #2080: Escape キーの意味を編集状態から決める。
+        /// 判断は <see cref="EditFormKeyPolicy"/> に置き、ここでは結線だけを行う。
+        /// </summary>
+        private void Dialog_KeyDown(object sender, KeyEventArgs e)
+        {
+            EditFormKeyPolicy.HandleEscape(this, _viewModel, e);
         }
     }
 }
