@@ -219,5 +219,14 @@ namespace ICCardManager.Views.Dialogs
         {
             Close();
         }
+
+        /// <summary>
+        /// Issue #2080: Escape キーの意味を編集状態から決める。
+        /// 判断は <see cref="EditFormKeyPolicy"/> に置き、ここでは結線だけを行う。
+        /// </summary>
+        private void Dialog_PreviewKeyDown(object sender, KeyEventArgs e)
+        {
+            EditFormKeyPolicy.HandleEscape(this, _viewModel, e);
+        }
     }
 }
