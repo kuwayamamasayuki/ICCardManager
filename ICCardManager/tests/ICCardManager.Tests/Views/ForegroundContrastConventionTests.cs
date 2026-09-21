@@ -260,11 +260,10 @@ public class ForegroundContrastConventionTests
     {
         // 抽出漏れは非対称に効く。XAML 経路は ResolveColor が赤くなるが、
         // C# 経路は「ブラシキーと一致しない」として収集自体が止まり緑のまま（fail-open）。
-        var xaml = StripXamlComments(File.ReadAllText(AccessibilityStylesPath));
-        var declared = Regex.Matches(xaml, "<SolidColorBrush\\b").Count;
-
+        // 数える側も AccessibilityBrushes へ寄せる（#1763）。ここに私的な数え方を残すと、
+        // 数え方を変える人が片方を取りこぼし、その片方だけが静かに誤検出／見落としになる
         LoadBrushes().Should().HaveCount(
-            declared,
+            AccessibilityBrushes.CountDeclarations(),
             "AccessibilityStyles.xaml の SolidColorBrush 定義をすべて抽出できていること"
                 + "（属性順や追加属性で正規表現から漏れると、そのキーだけ静かに検査されなくなる）");
     }

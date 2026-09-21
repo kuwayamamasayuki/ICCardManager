@@ -157,7 +157,13 @@ internal static class XamlElementInspection
     /// <b>特定のタグ名に限らない</b>性質を検査するときに使う。タグ名で列挙すると
     /// <c>Button</c> / <c>Border</c> / <c>ToggleButton</c> … と<b>ファイル名の列挙と同じ漏れ方</b>をする
     /// （<c>.claude/rules/development-conventions.md</c> #1786）。
-    /// 終了タグ・XML 宣言・処理命令・プロパティ要素は返さない。
+    /// 終了タグ・XML 宣言・処理命令は返さない。
+    /// <b>プロパティ要素（<c>&lt;Button.Style&gt;</c>）は返る</b> — タグ名の文字クラスが <c>.</c> の手前で
+    /// 止まるため <c>Button</c> として一致し、本メソッドはタグ名で絞らないので除外もしない。
+    /// 塗り・文字色の属性を持たないので現状は無害だが、属性を見る検査で使うときは自分で除く。
+    /// <b>閉じ <c>&gt;</c> を見つけられないタグは、そのタグだけを飛ばして走査を続ける</b> —
+    /// そこで打ち切ると 1 つの不正なタグでファイルの残りが丸ごと検査対象から消え、
+    /// 網羅性を目的とするガードが<b>緑のまま無力化する</b>（#1786）。
     /// </remarks>
     internal static IEnumerable<XamlElementSpan> EnumerateStartTags(string xaml)
     {
@@ -167,7 +173,7 @@ internal static class XamlElementInspection
             var end = FindStartTagEnd(xaml, start);
             if (end < 0)
             {
-                yield break;
+                continue;
             }
 
             yield return new XamlElementSpan(

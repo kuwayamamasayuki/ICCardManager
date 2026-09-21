@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using System.Text.RegularExpressions;
 
 namespace ICCardManager.Tests.Views.Helpers;
@@ -65,9 +66,19 @@ internal static class AccessibilityBrushes
     }
 
     /// <summary>
-    /// <c>AccessibilityStyles.xaml</c> に現れる <c>&lt;SolidColorBrush</c> の個数。
+    /// <c>AccessibilityStyles.xaml</c> に現れる<b>キー付きの</b> <c>&lt;SolidColorBrush</c> の個数。
     /// <see cref="Load"/> の全件性を表明するための期待値。
     /// </summary>
+    /// <remarks>
+    /// <b>キーを持たないブラシは数えない</b>。<c>&lt;Setter.Value&gt;</c> やテンプレートの既定値として
+    /// インラインで書かれた <c>SolidColorBrush</c> は<b>構造上ここで引ける対象ではない</b>ので、
+    /// 数に含めると正当な追記で「抽出が漏れている」と赤くなり、次に読む人を誤った方向へ導く
+    /// （誤検出はガード自体の寿命を縮める。#1786 / #1764）。
+    /// 一方、<b>キーはあるが色値が <c>#RRGGBB</c> でない</b>（<c>Color="Red"</c> 等）ものは数に含める —
+    /// これは #1822 / #2074 が禁じている形で、検出されるべき違反だから。
+    /// </remarks>
     public static int CountDeclarations()
-        => Regex.Matches(ReadStyles(), "<SolidColorBrush\\b").Count;
+        => Regex.Matches(ReadStyles(), "<SolidColorBrush\\b(?<attrs>[^>]*)/>")
+            .Cast<Match>()
+            .Count(m => XamlElementInspection.GetAttribute(m.Groups["attrs"].Value, "x:Key") != null);
 }

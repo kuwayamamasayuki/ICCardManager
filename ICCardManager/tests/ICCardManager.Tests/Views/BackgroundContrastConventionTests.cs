@@ -46,6 +46,20 @@ namespace ICCardManager.Tests.Views;
 /// 「見落とし」ではなく「意図した対象外」であることを明示する。
 /// ② を足したのは、同じ違反を <c>Style</c> で包むだけで ① の外へ逃がせてしまうため。
 /// </para>
+/// <para>
+/// <b>本検査が保証するのは「通常状態」だけである</b>（コードレビューで検出）。
+/// 対象のボタンはいずれも <c>Style</c> を指定しておらず、本リポジトリには暗黙の
+/// <c>&lt;Style TargetType="Button"&gt;</c> も無いため、WPF の既定テンプレートで描画される。
+/// その <c>IsMouseOver</c> / <c>IsPressed</c> トリガーは <c>TargetName</c> 経由で
+/// <b>枠の <c>Background</c> だけをテーマのブラシへ差し替え、<c>Foreground</c> はローカル値の白のまま残す</b>ので、
+/// ポインタを載せている間のコントラストは 1.3:1 前後まで落ちる。
+/// リポジトリ自身の <c>AccessibleButtonStyle</c>（hover は <c>PrimaryLightBrush</c> #BBDEFB）も同じ形である。
+/// <b>トリガーの <c>Setter</c> は <c>TargetName</c> を持ち、同じブロックに <c>Foreground</c> を持たない</b>ため、
+/// <see cref="ExtractSetterPairs"/> は構造上この組を作れない。
+/// これは本 Issue 以前からの状態（旧 #4CAF50 でも hover 時は同じ）で本 PR が持ち込んだものではないが、
+/// <b>「4.5:1 を固定した」という主張が対話状態を覆っていないこと</b>はここに書き残しておく。
+/// 是正は全ボタンのテンプレートに関わるため別 Issue で扱う。
+/// </para>
 /// </remarks>
 public class BackgroundContrastConventionTests
 {
@@ -146,9 +160,11 @@ public class BackgroundContrastConventionTests
         var minBaseFontSize = ReadMinimumBaseFontSize();
         var titleRatio = ReadTitleFontSizeRatio();
 
-        (minBaseFontSize * titleRatio).Should().BeGreaterOrEqualTo(
+        // 本番（App.xaml.cs）は Math.Round してからリソースへ入れる。丸めを省くと境界で
+        // テストだけが甘くなる（12 × 1.6 = 19.2 に対し実際に適用されるのは 19）
+        Math.Round(minBaseFontSize * titleRatio, MidpointRounding.AwayFromZero).Should().BeGreaterOrEqualTo(
             LargeTextBoldMinPx,
-            "文字サイズ「小」（BaseFontSize={0}）でも TitleFontSize={1} は太字の大きな文字の下限 {2}px 以上であること。"
+            "文字サイズ「小」（BaseFontSize={0}）でも TitleFontSize={1:F0} は太字の大きな文字の下限 {2}px 以上であること。"
                 + "下回るなら HeaderBackgroundBrush の 3:1 という例外が成立しなくなる",
             minBaseFontSize,
             minBaseFontSize * titleRatio,
@@ -281,6 +297,21 @@ public class BackgroundContrastConventionTests
             "単引用符・添付プロパティ形・属性値に > を含むタグも拾い、"
                 + "文字色の無いタグとリソースキーでないバインドは対象外とすること");
         pairs.Select(p => p.ForegroundKey).Should().AllBe("OnPrimaryBrush");
+    }
+
+    [Fact]
+    public void 閉じられないタグがあっても走査が止まらないこと()
+    {
+        // 網羅性を目的とするガードが「1 つの不正なタグでファイルの残りを見なくなる」形は
+        // 緑のまま無力化する（#1786）。そのタグだけを飛ばして続けること。
+        const string Xaml =
+            "<Button ToolTip=\"閉じ引用符が無い\n"
+            + "<Button Background=\"{DynamicResource SuccessActionBrush}\"\n"
+            + "        Foreground=\"{DynamicResource OnPrimaryBrush}\"/>\n";
+
+        ExtractSameTagPairs(Xaml).Select(p => p.BackgroundKey).Should().Equal(
+            new[] { "SuccessActionBrush" },
+            "閉じ > を決められないタグの後ろにある要素も走査対象に残ること");
     }
 
     [Fact]
@@ -515,17 +546,29 @@ public class BackgroundContrastConventionTests
     /// <summary>
     /// 設定画面が提供する文字サイズの選択肢のうち、最小の <c>BaseFontSize</c> を本番ソースから読む。
     /// </summary>
+    /// <remarks>
+    /// <b>「非空であること」では空振りを検出しきれない</b>。数値リテラル以外で書かれた選択肢
+    /// （<c>BaseFontSize = AppConstants.TinyFontSize</c> 等）は正規表現に一致せず<b>黙って落ちる</b>ので、
+    /// 既存の選択肢が残っている限り最小値は 12 のまま緑になり、前提の検査が静かに止まる（#1764 の fail-open）。
+    /// <c>FontSizeItem</c> の生成数と読み取れた値の数が<b>一致すること</b>まで表明する。
+    /// </remarks>
     private static double ReadMinimumBaseFontSize()
     {
         var source = ReadProductionSource(Path.Combine("ViewModels", "SettingsViewModel.cs"));
+        var declared = Regex.Matches(source, @"new\s+FontSizeItem\b").Count;
         var values = Regex.Matches(source, @"BaseFontSize\s*=\s*(?<v>\d+(?:\.\d+)?)")
             .Cast<Match>()
             .Select(m => double.Parse(m.Groups["v"].Value, CultureInfo.InvariantCulture))
             .ToList();
 
-        values.Should().NotBeEmpty(
-            "SettingsViewModel から文字サイズの選択肢を読み出せること"
-                + "（読めないと本テストは何も検査しないまま緑になる）");
+        declared.Should().BeGreaterThan(
+            0, "SettingsViewModel に文字サイズの選択肢が実在すること（消えたら本テストの前提が変わる）");
+        values.Should().HaveCount(
+            declared,
+            "文字サイズの選択肢 {0} 件すべてから BaseFontSize を数値として読み出せること"
+                + "（数値リテラル以外で書かれた選択肢は正規表現から静かに落ち、"
+                + "既存の選択肢が残っている限り最小値が変わらないまま緑になる）",
+            declared);
 
         return values.Min();
     }
