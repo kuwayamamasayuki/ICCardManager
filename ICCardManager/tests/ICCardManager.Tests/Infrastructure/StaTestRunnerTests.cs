@@ -49,6 +49,16 @@ public class StaTestRunnerTests
                 "ExceptionDispatchInfo で投げ直し、STA スレッド上の発生位置を失わないこと");
     }
 
+    /// <summary>
+    /// 上限を超えたら打ち切り、そのとき何が残るかを固定する。
+    /// </summary>
+    /// <remarks>
+    /// 上限は 3 秒と長めに取る。アクションは最大 30 秒ブロックするので<b>打ち切りは必ず起きる</b>一方、
+    /// 「スレッド起動 → STA 初期化 → 最初の段階の記録」が上限に収まらないと
+    /// 期待する段階名がメッセージに入らず、**このテスト自身が Issue #2083 と同じ
+    /// スケジューリング依存の間欠失敗**になる（コードレビューで検出）。
+    /// 上限を伸ばしても検出力は落ちない。
+    /// </remarks>
     [Fact]
     public void 打ち切り時の失敗メッセージに経過時間と完了した段階が残ること()
     {
@@ -63,7 +73,7 @@ public class StaTestRunnerTests
                     stages.Complete("Window の生成");
                     release.Wait(TimeSpan.FromSeconds(30));
                 },
-                TimeSpan.FromMilliseconds(200));
+                TimeSpan.FromSeconds(3));
         }
         catch (Exception ex)
         {
@@ -115,11 +125,22 @@ public class StaTestRunnerTests
             .WithMessage("段階名が空です。*", "空の段階名は診断の役に立たない");
     }
 
+    /// <summary>
+    /// どちらのオーバーロードも、STA スレッドを起こす前に拒否すること。
+    /// </summary>
+    /// <remarks>
+    /// 片方だけを表明すると、もう一方のガードを外した実装でも緑になる
+    /// （`Action` 版は `Action&lt;StaStageLog&gt;` 版へ委譲するので、
+    /// 委譲先のガードだけを消すと <c>NullReferenceException</c> が
+    /// STA スレッド上で起きて打ち切り待ちに化ける）。
+    /// </remarks>
     [Fact]
     public void アクション未指定なら実行前に拒否すること()
     {
-        Action act = () => StaTestRunner.Run((Action)null!);
+        Action runAction = () => StaTestRunner.Run((Action)null!);
+        Action runWithStages = () => StaTestRunner.Run((Action<StaStageLog>)null!);
 
-        act.Should().Throw<ArgumentNullException>();
+        runAction.Should().Throw<ArgumentNullException>();
+        runWithStages.Should().Throw<ArgumentNullException>();
     }
 }

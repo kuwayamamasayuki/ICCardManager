@@ -68,6 +68,13 @@ internal static class StaTestRunner
     /// <summary>
     /// 上限を指定して実行する（打ち切り時の診断を検証するテスト専用）。
     /// </summary>
+    /// <remarks>
+    /// <b>打ち切った場合、STA スレッドはそのまま走り続ける。</b>
+    /// その後にアクションが投げた例外は誰も読まない（打ち切りの失敗が先に確定するため）。
+    /// これは意図した割り切りで、止める手段（<c>Thread.Abort</c>）は .NET Framework でも
+    /// 任意の位置で例外を起こすため、WPF のオブジェクトを半端な状態で壊す。
+    /// 打ち切りのメッセージが「検証対象の値には到達していない」と述べているのはこのため。
+    /// </remarks>
     internal static void Run(Action<StaStageLog> action, TimeSpan timeout)
     {
         if (action == null)
