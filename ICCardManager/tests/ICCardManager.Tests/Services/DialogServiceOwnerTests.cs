@@ -1,12 +1,11 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
-using System.Runtime.ExceptionServices;
 using System.Text.RegularExpressions;
-using System.Threading;
 using System.Windows;
 using FluentAssertions;
 using ICCardManager.Services;
+using ICCardManager.Tests.Infrastructure;
 using Xunit;
 
 namespace ICCardManager.Tests.Services;
@@ -27,7 +26,12 @@ namespace ICCardManager.Tests.Services;
 /// 実際にクリックが遮られることの確認は手動検証に委ねる。
 /// オーナーを<b>選ぶ規則</b>そのものは <c>DialogOwnerResolverTests</c> が担う。
 /// </para>
+/// <para>
+/// WPF の <c>Window</c> は STA スレッドでしか生成できないため、
+/// <see cref="StaTestRunner"/> が用意する専用スレッドで検証する（Issue #2083）。
+/// </para>
 /// </remarks>
+[Collection(StaThreadCollection.Name)]
 public class DialogServiceOwnerTests
 {
     private sealed record ShowCall(
@@ -70,46 +74,13 @@ public class DialogServiceOwnerTests
         }
     }
 
-    /// <summary>
-    /// WPF の <c>Window</c> は STA スレッドでしか生成できないため、専用スレッドで検証する
-    /// </summary>
-    private static void RunOnSta(Action action)
-    {
-        Exception captured = null;
-
-        var thread = new Thread(() =>
-        {
-            try
-            {
-                action();
-            }
-            catch (Exception ex)
-            {
-                captured = ex;
-            }
-            finally
-            {
-                System.Windows.Threading.Dispatcher.CurrentDispatcher.InvokeShutdown();
-            }
-        });
-
-        thread.SetApartmentState(ApartmentState.STA);
-        thread.IsBackground = true;
-        thread.Start();
-        thread.Join(TimeSpan.FromSeconds(30)).Should().BeTrue("STA スレッドが時間内に完了すること");
-
-        if (captured != null)
-        {
-            ExceptionDispatchInfo.Capture(captured).Throw();
-        }
-    }
-
     [Fact]
     public void すべてのメッセージ表示メソッドが解決したオーナーをMessageBoxへ渡すこと()
     {
-        RunOnSta(() =>
+        StaTestRunner.Run(stages =>
         {
             var owner = new Window();
+            stages.Complete("Window の生成");
             try
             {
                 var sut = new RecordingDialogService(owner);
@@ -120,6 +91,7 @@ public class DialogServiceOwnerTests
                 sut.ShowConfirmation("確認", "確認タイトル");
                 sut.ShowWarningConfirmation("警告確認", "警告確認タイトル");
                 sut.ShowThreeWayConfirmation("3 択確認", "3 択確認タイトル");
+                stages.Complete("6 メソッドの呼び出し");
 
                 sut.Calls.Should().HaveCount(6, "6 つのメッセージ表示メソッドすべてが継ぎ目を経由すること");
                 sut.ResolveOwnerCallCount.Should().Be(6, "表示のたびにオーナーを解決し直すこと（アクティブなウィンドウは変わり得る）");

@@ -2,13 +2,12 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Printing;
-using System.Runtime.ExceptionServices;
-using System.Threading;
 using System.Windows;
 using System.Windows.Documents;
 using FluentAssertions;
 using ICCardManager.Models;
 using ICCardManager.Services;
+using ICCardManager.Tests.Infrastructure;
 using ICCardManager.ViewModels;
 using Moq;
 using Xunit;
@@ -22,8 +21,10 @@ namespace ICCardManager.Tests.ViewModels;
 /// 旧実装はプレビュー用の <see cref="FlowDocument"/> の寸法だけを印刷ダイアログの値へ上書きし、
 /// 改ページ位置（<c>PrintService.GroupRowsByPage</c>）はプレビュー時の寸法のまま印刷していた。
 /// 印刷ダイアログは <c>PrintService.RequestPrint</c> を差し替えて再現する。
-/// <see cref="FlowDocument"/> は STA スレッドでしか扱えないため、専用スレッドで検証する。
+/// <see cref="FlowDocument"/> は STA スレッドでしか扱えないため、
+/// <see cref="StaTestRunner"/> が用意する専用スレッドで検証する（Issue #2083）。
 /// </remarks>
+[Collection(StaThreadCollection.Name)]
 public class PrintPreviewViewModelPrintTests
 {
     // A4 の DIP 寸法（210mm / 297mm を 1/96 インチで表した値）
@@ -62,37 +63,6 @@ public class PrintPreviewViewModelPrintTests
         }
     }
 
-    private static void RunOnSta(Action action)
-    {
-        Exception? captured = null;
-
-        var thread = new Thread(() =>
-        {
-            try
-            {
-                action();
-            }
-            catch (Exception ex)
-            {
-                captured = ex;
-            }
-            finally
-            {
-                System.Windows.Threading.Dispatcher.CurrentDispatcher.InvokeShutdown();
-            }
-        });
-
-        thread.SetApartmentState(ApartmentState.STA);
-        thread.IsBackground = true;
-        thread.Start();
-        thread.Join(TimeSpan.FromSeconds(30)).Should().BeTrue("STA スレッドが時間内に完了すること");
-
-        if (captured != null)
-        {
-            ExceptionDispatchInfo.Capture(captured).Throw();
-        }
-    }
-
     /// <summary>
     /// A4 横向きでは 2 ページ、A4 縦向きでは 1 ページに収まる行数の帳票データ
     /// （横: データ領域 563.7 に 25 行、縦: 892.5 に 40 行）
@@ -118,17 +88,19 @@ public class PrintPreviewViewModelPrintTests
     [Fact]
     public void Print_印刷ダイアログの寸法でドキュメントを組み直しプレビューは書き換えないこと()
     {
-        RunOnSta(() =>
+        StaTestRunner.Run(stages =>
         {
             var service = new FakePrintService(new Size(A4ShortEdgeDip, A4LongEdgeDip));
             var viewModel = new PrintPreviewViewModel(service);
             viewModel.SetDocument(CreateReportData(), "物品出納簿");
+            stages.Complete("プレビューの組版（SetDocument）");
 
             var preview = viewModel.Document!;
             preview.PageWidth.Should().BeApproximately(A4LongEdgeDip, 0.1, "プレビューは A4 横向き（DIP）");
             CountPageSections(preview).Should().Be(2, "前提: A4 横向きでは 30 行が 2 ページに分割される");
 
             viewModel.PrintCommand.Execute(null);
+            stages.Complete("印刷の実行（PrintCommand）");
 
             service.SentPaginator.Should().NotBeNull();
             var printed = service.SentPaginator!.Source.Should().BeOfType<FlowDocument>().Subject;
@@ -150,16 +122,18 @@ public class PrintPreviewViewModelPrintTests
     [Fact]
     public void Print_複数カードでも印刷ダイアログの寸法で組み直すこと()
     {
-        RunOnSta(() =>
+        StaTestRunner.Run(stages =>
         {
             var service = new FakePrintService(new Size(A4ShortEdgeDip, A4LongEdgeDip));
             var viewModel = new PrintPreviewViewModel(service);
             viewModel.SetDocument(new List<ReportPrintData> { CreateReportData(), CreateReportData() }, "物品出納簿（2件）");
+            stages.Complete("プレビューの組版（SetDocument）");
 
             var preview = viewModel.Document!;
             CountPageSections(preview).Should().Be(4, "前提: A4 横向きでは各カード 2 ページ");
 
             viewModel.PrintCommand.Execute(null);
+            stages.Complete("印刷の実行（PrintCommand）");
 
             var printed = service.SentPaginator!.Source.Should().BeOfType<FlowDocument>().Subject;
             printed.PageWidth.Should().BeApproximately(A4ShortEdgeDip, 0.1);
@@ -171,13 +145,15 @@ public class PrintPreviewViewModelPrintTests
     [Fact]
     public void Print_印刷ダイアログをキャンセルしたら何も送らないこと()
     {
-        RunOnSta(() =>
+        StaTestRunner.Run(stages =>
         {
             var service = new FakePrintService(dialogPageSize: null);
             var viewModel = new PrintPreviewViewModel(service);
             viewModel.SetDocument(CreateReportData(), "物品出納簿");
+            stages.Complete("プレビューの組版（SetDocument）");
 
             viewModel.PrintCommand.Execute(null);
+            stages.Complete("印刷の実行（PrintCommand）");
 
             service.RequestCount.Should().Be(1);
             service.SentPaginator.Should().BeNull();
