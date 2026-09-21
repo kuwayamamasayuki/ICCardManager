@@ -56,8 +56,14 @@ public class ReturnFlowDialogHeaderColorConventionTests
         return TestSourceInspection.ToCodeOnly(File.ReadAllText(path));
     }
 
+    /// <remarks>
+    /// アクセス修飾子だけを起点にすると <c>partial void On…Changed</c>（`[ObservableProperty]` の
+    /// 変更ハンドラー。`MainViewModel` に実在）を 1 件も拾えない（コードレビューで検出）。
+    /// 修飾子の集合を広げ、1 つ以上あることだけを要求する。
+    /// </remarks>
     private static readonly Regex MethodDeclarationRegex = new(
-        @"(?m)^[ \t]*(?:private|protected|internal|public)[^\r\n;()=]*?\b(?<name>\w+)[ \t]*\(");
+        @"(?m)^[ \t]*(?:(?:private|protected|internal|public|static|async|partial|virtual|override|sealed)[ \t]+)+"
+        + @"[^\r\n;()=]*?\b(?<name>\w+)[ \t]*\(");
 
     /// <summary>
     /// メソッド名 → 本体（<c>{ }</c> または <c>=&gt; …;</c>）の対応表を作る。
@@ -73,14 +79,26 @@ public class ReturnFlowDialogHeaderColorConventionTests
     /// </para>
     /// </remarks>
     private static IReadOnlyDictionary<string, string> CollectMethodBodies(string codeOnly)
+        => CollectMethodBodies(codeOnly, out _);
+
+    /// <param name="overloadedNames">
+    /// 同名の宣言が 2 つ以上あった名前。マーカーの引き当ては先頭一致なので
+    /// <b>1 つ目の宣言しか見えない</b>。呼び出し側はこれと到達集合の交わりが空であることを
+    /// 表明し、オーバーロードが増えた日に<b>黙って見落とすのではなく赤くなる</b>ようにする
+    /// （コードレビューで検出）。
+    /// </param>
+    private static IReadOnlyDictionary<string, string> CollectMethodBodies(
+        string codeOnly, out IReadOnlyCollection<string> overloadedNames)
     {
         var bodies = new Dictionary<string, string>(StringComparer.Ordinal);
+        var overloaded = new HashSet<string>(StringComparer.Ordinal);
 
         foreach (Match match in MethodDeclarationRegex.Matches(codeOnly))
         {
             var name = match.Groups["name"].Value;
             if (bodies.ContainsKey(name))
             {
+                overloaded.Add(name);
                 continue;
             }
 
@@ -103,6 +121,7 @@ public class ReturnFlowDialogHeaderColorConventionTests
             bodies[name] = TestSourceInspection.ExtractMethodBody(codeOnly, marker);
         }
 
+        overloadedNames = overloaded;
         return bodies;
     }
 
@@ -129,15 +148,26 @@ public class ReturnFlowDialogHeaderColorConventionTests
         return -1;
     }
 
-    private static readonly Regex ShowDialogRegex =
-        new(@"ShowDialogAsync<Views\.Dialogs\.(?<dialog>\w+)>");
+    /// <remarks>
+    /// <para>
+    /// ダイアログを開く形は 1 つではない。<c>INavigationService.ShowDialogAsync&lt;T&gt;</c> のほか、
+    /// DI から解決して <c>ShowDialog()</c> を呼ぶ形（<c>IncompleteBusStopDialog.xaml.cs</c> に実在）
+    /// があり、型引数は <c>using</c> があれば <c>Views.Dialogs.</c> の修飾を持たない。
+    /// どちらの形でも拾えるようにする（コードレビューで検出）。
+    /// </para>
+    /// <para>
+    /// 型引数が <c>Dialog</c> で終わることを要求して、無関係なジェネリック呼び出しを拾わない。
+    /// </para>
+    /// </remarks>
+    private static readonly Regex ShowDialogRegex = new(
+        @"(?:ShowDialogAsync|GetRequiredService|GetService)<(?:Views\.Dialogs\.)?(?<dialog>\w+Dialog)>");
 
     /// <summary>
     /// <paramref name="entryPoint"/> から到達するメソッドを推移的に辿り、開かれるダイアログ名を集める。
     /// </summary>
     private static IReadOnlyList<string> CollectReachableDialogs(string codeOnly, string entryPoint)
     {
-        var methods = CollectMethodBodies(codeOnly);
+        var methods = CollectMethodBodies(codeOnly, out var overloadedNames);
         methods.Should().ContainKey(
             entryPoint, "返却フローの起点が MainViewModel に存在すること（リネームしたら本定数も更新する）");
 
@@ -169,6 +199,12 @@ public class ReturnFlowDialogHeaderColorConventionTests
             }
         }
 
+        // 到達した名前にオーバーロードがあると、2 つ目以降の本体を黙って見落とす。
+        // 「見落とし得る状態」になった時点で赤くする（コードレビューで検出）。
+        visited.Intersect(overloadedNames, StringComparer.Ordinal).Should().BeEmpty(
+            "到達するメソッドに同名のオーバーロードが無いこと。"
+                + "増えた場合は引き当てを引数の数まで見る形へ広げること");
+
         return dialogs.ToList();
     }
 
@@ -177,6 +213,11 @@ public class ReturnFlowDialogHeaderColorConventionTests
     #region ヘッダーの切り出し
 
     /// <summary>ダイアログ上部の説明ヘッダー（<c>Grid.Row="0"</c> の Border）。</summary>
+    /// <param name="Body">
+    /// ヘッダーの<b>開始タグと本体の両方</b>。本体だけを見ると、開始タグの属性
+    /// （<c>BorderBrush="{DynamicResource LendingForegroundBrush}"</c> 等）で暖色を戻す形が
+    /// 素通りする（コードレビューで検出）。
+    /// </param>
     private sealed record Header(string Background, string TitleForeground, string Body);
 
     private static Header ExtractHeader(string xaml, string label)
@@ -198,8 +239,20 @@ public class ReturnFlowDialogHeaderColorConventionTests
         var foreground = XamlElementInspection.GetAttribute(title!.StartTag, "Foreground");
         foreground.Should().NotBeNull($"{label} の説明ヘッダーの見出しに Foreground が指定されていること");
 
-        return new Header(background!, foreground!, border.Body);
+        return new Header(background!, foreground!, border.StartTag + border.Body);
     }
+
+    /// <summary>一覧の金額欄（<c>Text</c> が金額にバインドされた TextBlock）を返す。</summary>
+    private static XamlElementInspection.XamlElement? FindAmountTextBlock(string strippedXaml)
+        => XamlElementInspection.EnumerateElements(strippedXaml, "TextBlock")
+            .FirstOrDefault(e =>
+            {
+                var text = XamlElementInspection.GetAttribute(e.StartTag, "Text");
+                var property = XamlElementInspection.GetBindingPropertyName(text);
+                return property != null
+                    && (property.EndsWith("AmountDisplay", StringComparison.Ordinal)
+                        || property.EndsWith("ExpenseDisplay", StringComparison.Ordinal));
+            });
 
     private static string ResourceKeyOf(string markupExtension)
     {
@@ -263,22 +316,33 @@ public class ReturnFlowDialogHeaderColorConventionTests
     #region 対の表明（正当な既存挙動を塞いでいないこと・走査が届いていること）
 
     [Fact]
-    public void 金額欄の強調色は検査の対象外であること()
+    public void 金額欄は検査の対象外であること()
     {
-        // #2079 の判断: 金額の LendingForegroundBrush は「貸出」のシグナルではなく、
-        // LedgerDetailDialog / LedgerRowEditDialog と共用の「金額の強調色」。
-        // ヘッダーだけを見る検査であることを対で固定する — 走査をファイル全体へ広げた実装は、
-        // アプリ全体の金額表現を巻き込んで赤くなる（規約が推奨しない方向へ修正者を誘導する。#1786）。
-        var busStop = File.ReadAllText(
-            ViewSourceLocator.Resolve(Path.Combine("Views", "Dialogs", "BusStopInputDialog.xaml")));
-        var stripped = XamlElementInspection.StripXmlComments(busStop);
+        // #2079 の判断: 金額の強調色は「貸出」のシグナルではなく、LedgerDetailDialog /
+        // LedgerRowEditDialog と共用の「金額の強調色」。ヘッダーだけを見る検査であることを
+        // 対で固定する — 走査をファイル全体へ広げた実装は、アプリ全体の金額表現を巻き込んで
+        // 赤くなる（規約が推奨しない方向へ修正者を誘導する。#1786）。
+        //
+        // ここで固定するのは「金額欄がヘッダーの外にあり、本検査が触れていない」ことだけで、
+        // 金額欄が特定のブラシであることは固定しない。リテラルで留めると、金額専用の
+        // ブラシを新設する（＝このブラシの二重用途を解消する）変更でこのテストが赤になり、
+        // 規約が推奨する方向の修正を妨げる（コードレビューで検出）。
+        var codeOnly = ReadMainViewModelCodeOnly();
 
-        stripped.Should().Contain(
-            "LendingForegroundBrush",
-            "金額欄の強調色は現状維持であること（ここが消えたら #2079 の判断が変わっている）");
+        foreach (var dialog in CollectReachableDialogs(codeOnly, ReturnFlowEntryPoint))
+        {
+            var xaml = File.ReadAllText(
+                ViewSourceLocator.Resolve(Path.Combine("Views", "Dialogs", $"{dialog}.xaml")));
+            var stripped = XamlElementInspection.StripXmlComments(xaml);
 
-        ExtractHeader(busStop, "BusStopInputDialog").Body.Should().NotContain(
-            "LendingForegroundBrush", "ただしヘッダーの内側には残っていないこと");
+            var amount = FindAmountTextBlock(stripped);
+            amount.Should().NotBeNull("{0} の一覧に金額欄が存在すること", dialog);
+
+            ExtractHeader(xaml, dialog).Body.Should().NotContain(
+                amount!.StartTag,
+                "{0} の金額欄はヘッダーの外にあること（本検査の対象外であることの根拠）",
+                dialog);
+        }
     }
 
     [Fact]
@@ -300,6 +364,27 @@ public class ReturnFlowDialogHeaderColorConventionTests
             .Should().NotContain(
                 "CompanionCountInputDialog",
                 "直接の本体には現れない＝展開なしでは拾えないこと（この前提が変わったら対の表明を書き直す）");
+    }
+
+    [Fact]
+    public void 宣言の走査がアクセス修飾子を持たないメソッドにも届いていること()
+    {
+        // `[ObservableProperty]` の変更ハンドラーは `partial void On…Changed` で、
+        // アクセス修飾子を持たない。ここから非同期処理を起こす形（`_ = XxxAsync()`、#1996）が
+        // あるため、走査から落ちると呼び出し関係が途切れる（コードレビューで検出）。
+        var codeOnly = ReadMainViewModelCodeOnly();
+        var methods = CollectMethodBodies(codeOnly);
+
+        var partialHandlers = Regex.Matches(codeOnly, @"(?m)^[ \t]*partial void[ \t]+(?<name>\w+)[ \t]*\(")
+            .Cast<Match>()
+            .Select(m => m.Groups["name"].Value)
+            .Distinct(StringComparer.Ordinal)
+            .ToList();
+
+        partialHandlers.Should().NotBeEmpty(
+            "MainViewModel に partial なハンドラーが実在すること（消えたら本テストの前提を書き直す）");
+        methods.Keys.Should().Contain(
+            partialHandlers, "アクセス修飾子を持たない宣言も走査対象に含まれること");
     }
 
     [Fact]
@@ -332,6 +417,22 @@ public class ReturnFlowDialogHeaderColorConventionTests
         ResourceKeyOf(good.Background).Should().Be(ReturnBackground);
         ResourceKeyOf(good.TitleForeground).Should().Be(ReturnForeground);
         good.Body.Should().NotContain("Lending");
+
+        // 開始タグの属性で暖色を戻す形も検出すること。本体だけを走査する実装では
+        // 背景・見出しの検査を通り抜ける（コードレビューで検出）
+        const string warmBorderOnly = @"<Window><Grid>
+    <Border Grid.Row=""0"" Background=""{DynamicResource ReturnBackgroundBrush}""
+            BorderBrush=""{DynamicResource LendingForegroundBrush}"" BorderThickness=""2"">
+        <StackPanel>
+            <TextBlock Text=""見出し"" Foreground=""{DynamicResource ReturnForegroundBrush}""/>
+        </StackPanel>
+    </Border>
+</Grid></Window>";
+
+        var warmBorder = ExtractHeader(warmBorderOnly, "sample");
+        ResourceKeyOf(warmBorder.Background).Should().Be(ReturnBackground, "背景と見出しは規約どおりでも");
+        ResourceKeyOf(warmBorder.TitleForeground).Should().Be(ReturnForeground);
+        warmBorder.Body.Should().Contain("Lending", "開始タグの属性に残った暖色を検出すること");
     }
 
     #endregion
