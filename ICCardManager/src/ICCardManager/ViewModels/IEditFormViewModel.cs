@@ -21,6 +21,15 @@ namespace ICCardManager.ViewModels
         /// <summary>編集フォームを表示中か</summary>
         bool IsEditing { get; }
 
+        /// <summary>
+        /// 処理中か（<see cref="ViewModelBase.IsBusy"/>）
+        /// </summary>
+        /// <remarks>
+        /// 処理中オーバーレイが塞ぐのはマウスのヒットテストだけで、キーボードは配下へ届く（#1761）。
+        /// 保存の待機中に <see cref="CancelEdit"/> が走ると、継続が読む入力欄が空になっている。
+        /// </remarks>
+        bool IsBusy { get; }
+
         /// <summary>編集を取り消してフォームを閉じる</summary>
         void CancelEdit();
     }

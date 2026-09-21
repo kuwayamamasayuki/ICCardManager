@@ -53,7 +53,18 @@ public class EditFormKeyboardConventionTests
         new Regex(@"\{\s*Binding\s+(?:Path\s*=\s*)?IsEditing\s*[,}]", RegexOptions.Compiled);
 
     /// <summary>Escape を自前で処理するハンドラー名（XAML とコードビハインドで一致していること）。</summary>
-    private const string EscapeHandlerName = "Dialog_PreviewKeyDown";
+    private const string EscapeHandlerName = "Dialog_KeyDown";
+
+    /// <summary>
+    /// Escape を拾うルーティングイベント。<b>バブル</b>であること（コードレビューで検出）。
+    /// </summary>
+    /// <remarks>
+    /// <c>PreviewKeyDown</c>（トンネル）はウィンドウが最初に受け取るため、Escape を正当に消費する
+    /// コントロールより先に走る。カード種別の <c>ComboBox</c> はドロップダウンを開いている間の Escape を
+    /// <c>OnKeyDown</c>（バブル）で閉じるので、トンネルで拾うと「候補を開いたが選び直さずに閉じる」操作が
+    /// <b>編集フォームごとの破棄</b>になる — この Issue が消そうとしている故障そのもの。
+    /// </remarks>
+    private const string EscapeRoutedEvent = "KeyDown";
 
     #region 走査対象の導出
 
@@ -215,10 +226,15 @@ public class EditFormKeyboardConventionTests
     {
         foreach (var dialog in EnumerateEditFormDialogs())
         {
-            XamlElementInspection.GetAttribute(RootWindowStartTag(dialog.Xaml), "PreviewKeyDown")
+            XamlElementInspection.GetAttribute(RootWindowStartTag(dialog.Xaml), EscapeRoutedEvent)
                 .Should().Be(EscapeHandlerName,
-                    $"{dialog.FileName}: 入力欄にフォーカスがある状態でも届くよう、" +
-                    "Escape は Window の PreviewKeyDown（トンネル）で拾う");
+                    $"{dialog.FileName}: Escape は Window の KeyDown（バブル）で拾う");
+
+            XamlElementInspection.GetAttribute(RootWindowStartTag(dialog.Xaml), "PreviewKeyDown")
+                .Should().BeNull(
+                    $"{dialog.FileName}: トンネル（PreviewKeyDown）で拾うと、Escape を正当に消費する" +
+                    "コントロール（カード種別の ComboBox のドロップダウン）より先に走り、" +
+                    "「候補を閉じるつもりの Escape」が編集フォームごとの破棄になる（コードレビューで検出）");
 
             dialog.CodeBehind.Should().Contain($"private void {EscapeHandlerName}(",
                 $"{dialog.FileName}.cs: XAML が指すハンドラーが実在すること" +
@@ -287,6 +303,73 @@ public class EditFormKeyboardConventionTests
                 .Should().Contain("CancelEditCommand",
                     $"{dialog.FileName}: 「キャンセル」ボタンが CancelEditCommand にバインドされていること" +
                     "（Escape と同じ経路であることの対の表明）");
+        }
+    }
+
+    /// <summary>
+    /// Escape を処理する前に処理中（<c>IsBusy</c>）を見ていることを固定する（コードレビューで検出）。
+    /// </summary>
+    /// <remarks>
+    /// 判断そのものは <see cref="ICCardManager.Tests.Views.Helpers.EditFormKeyPolicyTests"/> が
+    /// 単体テストで固定する。ここでは<b>その判断が実際に ViewModel の状態から作られていること</b>
+    /// （契約に <c>IsBusy</c> があり、結線が両方の状態を渡していること）を表明する —
+    /// 純関数側だけを見ると、引数に定数 <c>false</c> を渡す実装でも緑になる。
+    /// </remarks>
+    [Fact]
+    public void Escapeの判断が編集状態と処理中の両方から作られていること()
+    {
+        typeof(IEditFormViewModel).GetProperty("IsBusy").Should().NotBeNull(
+            "Issue #2080（コードレビュー）: 保存の待機中に CancelEdit が走ると、" +
+            "継続が空の入力欄を読み、試みてすらいない編集が競合として案内される");
+
+        foreach (var dialog in EnumerateEditFormDialogs())
+        {
+            dialog.CodeBehind.Should().Contain("EditFormKeyPolicy.HandleEscape(this, _viewModel, e)",
+                $"{dialog.FileName}.cs: 結線は ViewModel をそのまま渡し、" +
+                "どの状態を見るかは EditFormKeyPolicy が決める（状態の取り出しを呼び出し元へ配らない）");
+        }
+    }
+
+    /// <summary>
+    /// Enter で保存できると案内する画面では、Enter が改行になる入力欄の存在を文言が断らないこと。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// 備考欄は <c>AcceptsReturn="True"</c> なので、そこにフォーカスがある間の Enter は改行になり
+    /// 既定ボタンは発火しない。備考はフォームの最後の欄＝入力を終えたときにいる場所なので、
+    /// 「Enter キーで保存」とだけ案内すると、読み上げでそれを知った職員は改行を積むことになる
+    /// （#2077「境界を述べている文言を数える」と同じ、<b>操作を述べる文言が実装と食い違う</b>形）。
+    /// </para>
+    /// <para>
+    /// <b>対の表明</b>: 複数行の入力欄を持たない画面（<c>TransferStationGroupDialog</c> は
+    /// <c>AcceptsReturn="False"</c>）に同じ但し書きを求めない。求めると、実際には起きない制限を
+    /// 案内することになる。
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public void 複数行の入力欄がある画面だけがEnterの但し書きを持つこと()
+    {
+        foreach (var dialog in EnumerateEditFormDialogs())
+        {
+            var hasMultilineInput = XamlElementInspection.EnumerateElements(dialog.Xaml, "TextBox")
+                .Any(t => string.Equals(
+                    XamlElementInspection.GetAttribute(t.StartTag, "AcceptsReturn"), "True", StringComparison.Ordinal));
+
+            var helpText = XamlElementInspection.GetAttribute(
+                RootWindowStartTag(dialog.Xaml), "AutomationProperties.HelpText") ?? string.Empty;
+
+            if (hasMultilineInput)
+            {
+                helpText.Should().Contain("改行",
+                    $"{dialog.FileName}: AcceptsReturn=\"True\" の欄では Enter が改行になり保存されない。" +
+                    "「Enter キーで保存」とだけ案内すると、その欄にいる職員には実行できない指示になる");
+            }
+            else
+            {
+                helpText.Should().NotContain("改行",
+                    $"{dialog.FileName}: 複数行の入力欄が無い画面に但し書きを付けると、" +
+                    "実際には起きない制限を案内することになる（対の表明）");
+            }
         }
     }
 }

@@ -15,7 +15,7 @@
         WindowStartupLocation="CenterOwner"
         ResizeMode="CanResize"
         Loaded="Window_Loaded"
-        PreviewKeyDown="Dialog_PreviewKeyDown"
+        KeyDown="Dialog_KeyDown"
         FontSize="{DynamicResource BaseFontSize}"
         AutomationProperties.Name="同一とみなす駅・バス停の設定ダイアログ"
         AutomationProperties.HelpText="名前が異なるが実質同じ場所である駅・バス停をグループとして登録します。編集中はEnterキーで保存、Escapeキーで編集の取り消しができます。編集していないときはEscapeキーで閉じます。">
@@ -203,7 +203,7 @@
             <!-- Issue #2080: IsCancel="True" は付けない。追加・編集・削除は操作のたびに
                  保存されるが、編集フォームに入力している最中は未保存の入力を持つため、
                  Escape でダイアログごと閉じると入力が失われる。Escape の意味は
-                 編集中かどうかで変わるので、Dialog_PreviewKeyDown → EditFormKeyPolicy で決める。 -->
+                 編集中かどうかで変わるので、Dialog_KeyDown → EditFormKeyPolicy で決める。 -->
             <Button Content="閉じる"
                     Click="CloseButton_Click"
                     Padding="20,10"

@@ -16,9 +16,9 @@
         ResizeMode="CanResize"
         FontSize="{DynamicResource BaseFontSize}"
         FocusManager.FocusedElement="{Binding ElementName=CardDataGrid}"
-        PreviewKeyDown="Dialog_PreviewKeyDown"
+        KeyDown="Dialog_KeyDown"
         AutomationProperties.Name="交通系ICカード管理ダイアログ"
-        AutomationProperties.HelpText="交通系ICカードの登録・編集・削除ができます。カードをタッチして新規登録できます。編集中はEnterキーで保存、Escキーで編集の取り消しができます。編集していないときはEscキーで閉じます。">
+        AutomationProperties.HelpText="交通系ICカードの登録・編集・削除ができます。カードをタッチして新規登録できます。編集中はEnterキーで保存（備考欄では改行になります）、Escキーで編集の取り消しができます。編集していないときはEscキーで閉じます。">
 
     <Window.Resources>
         <BooleanToVisibilityConverter x:Key="BoolToVisibilityConverter"/>
@@ -125,7 +125,7 @@
                 <!-- 完了ボタン（右端固定）。
                      Issue #2080: IsCancel="True" は付けない。付けると編集フォームに
                      入力している最中の Escape でもダイアログごと閉じて入力が失われる。
-                     Escape の意味は編集中かどうかで変わるため、Dialog_PreviewKeyDown →
+                     Escape の意味は編集中かどうかで変わるため、Dialog_KeyDown →
                      EditFormKeyPolicy で一元的に決める。 -->
                 <Button DockPanel.Dock="Right"
                         Content="完了"
