@@ -35,6 +35,19 @@ internal static class XamlElementInspection
     /// <param name="Body">開始タグと終了タグの間（自己終了なら空）。</param>
     internal sealed record XamlElement(int Line, string StartTag, string Body);
 
+    /// <summary>走査で切り出した 1 要素と、元の文字列上での位置。</summary>
+    /// <param name="Line">開始タグの行番号（1 始まり）。</param>
+    /// <param name="Start">開始タグの <c>&lt;</c> の位置。</param>
+    /// <param name="Length">終了タグの <c>&gt;</c> までを含む長さ（自己終了なら開始タグの長さ）。</param>
+    /// <param name="StartTag">開始タグ。</param>
+    /// <param name="Body">開始タグと終了タグの間（自己終了なら空）。</param>
+    /// <remarks>
+    /// 「入れ子の要素を本体から取り除いてから走査する」形（<c>&lt;Style&gt;</c> の直下の
+    /// <c>&lt;Setter&gt;</c> だけを見たい等）には位置が要る。<see cref="XamlElement"/> は
+    /// 分解代入で使われているため、位置を足すのではなく別の型で返す。
+    /// </remarks>
+    internal sealed record XamlElementSpan(int Line, int Start, int Length, string StartTag, string Body);
+
     /// <summary>
     /// XML コメントを取り除く。**改行だけを残して行数を保つ**。
     /// </summary>
@@ -54,6 +67,17 @@ internal static class XamlElementInspection
     /// <c>Button</c> とは一致しない。同名の入れ子は深さを数えて対応付ける。
     /// </remarks>
     internal static IEnumerable<XamlElement> EnumerateElements(string xaml, string tagName)
+    {
+        foreach (var span in EnumerateElementSpans(xaml, tagName))
+        {
+            yield return new XamlElement(span.Line, span.StartTag, span.Body);
+        }
+    }
+
+    /// <summary>
+    /// <see cref="EnumerateElements"/> と同じ走査を、元の文字列上での位置付きで返す。
+    /// </summary>
+    internal static IEnumerable<XamlElementSpan> EnumerateElementSpans(string xaml, string tagName)
     {
         var pos = 0;
         while (pos < xaml.Length)
@@ -119,8 +143,35 @@ internal static class XamlElementInspection
                 }
             }
 
-            yield return new XamlElement(LineOf(xaml, start), startTag, body);
+            yield return new XamlElementSpan(
+                LineOf(xaml, start), start, Math.Max(next - start, startTag.Length), startTag, body);
             pos = Math.Max(next, start + 1);
+        }
+    }
+
+    /// <summary>
+    /// タグ名を問わず、すべての開始タグ（および自己終了タグ）を列挙する。
+    /// </summary>
+    /// <remarks>
+    /// 「同一タグに <c>Background</c> と <c>Foreground</c> の両方が書かれている」のように
+    /// <b>特定のタグ名に限らない</b>性質を検査するときに使う。タグ名で列挙すると
+    /// <c>Button</c> / <c>Border</c> / <c>ToggleButton</c> … と<b>ファイル名の列挙と同じ漏れ方</b>をする
+    /// （<c>.claude/rules/development-conventions.md</c> #1786）。
+    /// 終了タグ・XML 宣言・処理命令・プロパティ要素は返さない。
+    /// </remarks>
+    internal static IEnumerable<XamlElementSpan> EnumerateStartTags(string xaml)
+    {
+        foreach (Match m in Regex.Matches(xaml, @"<(?<name>[A-Za-z_][A-Za-z0-9_:]*)"))
+        {
+            var start = m.Index;
+            var end = FindStartTagEnd(xaml, start);
+            if (end < 0)
+            {
+                yield break;
+            }
+
+            yield return new XamlElementSpan(
+                LineOf(xaml, start), start, end - start + 1, xaml.Substring(start, end - start + 1), string.Empty);
         }
     }
 
@@ -198,6 +249,43 @@ internal static class XamlElementInspection
         var match = Regex.Match(tag,
             $@"(?<![\w.]){Regex.Escape(attributeName)}\s*=\s*(""(?<v>[^""]*)""|'(?<v>[^']*)')");
         return match.Success ? match.Groups["v"].Value : null;
+    }
+
+    /// <summary>
+    /// 開始タグから、依存関係プロパティの属性値を取り出す。
+    /// <b>添付プロパティ形（<c>TextElement.Foreground="…"</c>）も同じプロパティとして拾う。</b>
+    /// </summary>
+    /// <remarks>
+    /// <see cref="GetAttribute"/> は <c>(?&lt;![\w.])</c> で所有者付きの形を<b>意図的に除外</b>する
+    /// （<c>x:Key</c> のような属性名をそのまま引くため）。文字色・塗りのように
+    /// <c>Foreground</c> / <c>Background</c> が添付プロパティとしても書ける対象では、
+    /// 除外したままだと同じ指定が書き方の違いだけで検査を素通りする。
+    /// </remarks>
+    internal static string? GetPropertyAttribute(string tag, string propertyName)
+    {
+        var match = Regex.Match(tag,
+            $@"(?:^|[\s])(?:[A-Za-z_][A-Za-z0-9_]*\.)?{Regex.Escape(propertyName)}\s*=\s*(""(?<v>[^""]*)""|'(?<v>[^']*)')");
+        return match.Success ? match.Groups["v"].Value : null;
+    }
+
+    /// <summary>
+    /// <c>&lt;Setter Property="…"/&gt;</c> の <c>Property</c> が、所有者の修飾を除いて
+    /// <paramref name="propertyName"/> と一致するか。
+    /// </summary>
+    /// <remarks>
+    /// <c>Property="TextElement.Foreground"</c> と <c>Property="Foreground"</c> は同じ指定であり、
+    /// 片方だけを見る検査は書き方の違いで素通りする（<see cref="GetPropertyAttribute"/> と同じ理由）。
+    /// </remarks>
+    internal static bool IsSetterFor(string? setterProperty, string propertyName)
+    {
+        if (setterProperty == null)
+        {
+            return false;
+        }
+
+        var lastDot = setterProperty.LastIndexOf('.');
+        var name = lastDot >= 0 ? setterProperty.Substring(lastDot + 1) : setterProperty;
+        return string.Equals(name, propertyName, StringComparison.Ordinal);
     }
 
     /// <summary>

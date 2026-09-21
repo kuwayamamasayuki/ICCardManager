@@ -157,7 +157,7 @@
                             Padding="20,8"
                             MinWidth="100"
                             Margin="0,0,10,6"
-                            Background="{DynamicResource HeaderBackgroundBrush}"
+                            Background="{DynamicResource PrimaryBrush}"
                             Foreground="{DynamicResource OnPrimaryBrush}"
                             AutomationProperties.Name="グループを保存"
                             AutomationProperties.HelpText="入力した内容を保存します。"

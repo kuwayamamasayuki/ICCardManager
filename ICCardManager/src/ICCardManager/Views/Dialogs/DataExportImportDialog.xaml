@@ -287,7 +287,7 @@
                             <Button Content="カードをタッチ"
                                     Command="{Binding StartCardTouchCommand}"
                                     Padding="10,5"
-                                    Background="{DynamicResource HeaderBackgroundBrush}"
+                                    Background="{DynamicResource PrimaryBrush}"
                                     Foreground="{DynamicResource OnPrimaryBrush}"
                                     AutomationProperties.Name="カードタッチ開始"
                                     ToolTip="カードリーダーでカードを読み取ります">
@@ -382,7 +382,7 @@
                     Command="{Binding ImportCommand}"
                     Padding="15,10"
                     Margin="10,0,0,0"
-                    Background="{DynamicResource HeaderBackgroundBrush}"
+                    Background="{DynamicResource PrimaryBrush}"
                     Foreground="{DynamicResource OnPrimaryBrush}"
                     AutomationProperties.Name="直接CSVインポート"
                     ToolTip="プレビューなしで直接インポートします（アクセスキー: Alt+R）"/>
