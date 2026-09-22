@@ -186,9 +186,15 @@ if ($Json) {
 }
 if ($notCaptured.Count -gt 0) {
     foreach ($n in $notCaptured) {
+        # 「なぜ」は事実と食い違わせない。対象外の画像は出力先にある場合（前回以前の残骸）と
+        # そもそも無い場合があり、存在を断定すると原因の切り分けを誤らせる（コードレビューで検出）
+        $exists = Test-Path -LiteralPath (Join-Path $outputDirFull $n.name) -PathType Leaf
         $text = switch ($n.reason) {
             "not-captured" { "直近の撮影の対象だったが作られなかった（テストがスキップまたは失敗した可能性があります）" }
-            "not-targeted" { "直近の撮影の対象ではない（出力先にあるのは前回以前の画像です）" }
+            "not-targeted" {
+                if ($exists) { "直近の撮影の対象ではない（出力先にあるのは前回以前の画像です）" }
+                else { "直近の撮影の対象ではなく、出力先にもありません" }
+            }
             default        { "直近の撮影では作られたが、その後ファイルが無くなっている" }
         }
         [Console]::Error.WriteLine("[ERROR] $($n.name): $text")

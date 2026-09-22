@@ -200,6 +200,8 @@ namespace ICCardManager.Tests.Tools
 
             // 正しい形: 撮影前に -Clear、撮影後に -Write、公開前に -Verify
             code.Should().Contain("screenshot-capture-manifest.ps1", "判定は 1 つのスクリプトへ寄せること");
+            Regex.IsMatch(code, @"\$staged\s*=\s*@\(\$staged\s*\|\s*Where-Object\s*\{\s*\$verified\s+-contains\s+\$_\.Name\s*\}\)")
+                .Should().BeTrue("公開するのは今回の撮影で作られたと確かめられた画像だけに絞ること");
             foreach (var mode in new[] { "-Clear", "-Write", "-Verify" })
             {
                 Regex.IsMatch(code, @"Invoke-ManifestScript\s*\(\s*@\(""" + Regex.Escape(mode) + @"""")
@@ -213,13 +215,61 @@ namespace ICCardManager.Tests.Tools
         [Fact]
         public void 撮影スクリプト_マニフェストへ渡す対象は対応表由来の名前に限る()
         {
-            var code = CaptureScriptCode();
-            var calls = Regex.Matches(code, @"Invoke-ManifestScript\s*\((?<args>[^\r\n]*)\)")
-                .Cast<Match>().Select(m => m.Groups["args"].Value).ToList();
+            var calls = ExtractManifestCallArguments(CaptureScriptCode()).ToList();
 
             calls.Should().NotBeEmpty("Invoke-ManifestScript の抽出が空振りしていないこと");
+            calls.Should().HaveCount(3, "撮影前の -Clear・撮影後の -Write・公開前の -Verify の 3 経路");
             calls.Should().OnlyContain(a => a.Contains("$targetNames"),
                 "対象は対応表から導いた $targetNames だけを渡すこと（利用者が別用途で置いたファイルを消さない）");
+        }
+
+        /// <summary>
+        /// 撮影スクリプトから <c>Invoke-ManifestScript (...)</c> の引数式を取り出す。
+        /// </summary>
+        /// <remarks>
+        /// 1 行内に限る正規表現（<c>[^\r\n]*</c>）で書くと、呼び出しを複数行へ折り返しただけで抽出から静かに落ち、
+        /// 「すべての呼び出しが <c>$targetNames</c> を渡している」という表明が fail-open になる（#1764）。
+        /// 括弧の対応で切り出し、抽出ロジック自体をサンプル入力で固定する（#1786）。
+        /// </remarks>
+        internal static IEnumerable<string> ExtractManifestCallArguments(string code)
+        {
+            const string marker = "Invoke-ManifestScript";
+            for (var i = code.IndexOf(marker, StringComparison.Ordinal); i >= 0; i = code.IndexOf(marker, i + marker.Length, StringComparison.Ordinal))
+            {
+                var open = i + marker.Length;
+                while (open < code.Length && char.IsWhiteSpace(code[open])) open++;
+                // 関数定義（`function Invoke-ManifestScript {`）や引数を持たない参照は対象外
+                if (open >= code.Length || code[open] != '(') continue;
+
+                var depth = 0;
+                for (var j = open; j < code.Length; j++)
+                {
+                    if (code[j] == '(') depth++;
+                    else if (code[j] == ')' && --depth == 0)
+                    {
+                        yield return code.Substring(open + 1, j - open - 1);
+                        break;
+                    }
+                }
+            }
+        }
+
+        [Fact]
+        public void 抽出_複数行へ折り返した呼び出しも拾い_関数定義は拾わない()
+        {
+            const string sample = @"
+function Invoke-ManifestScript {
+    param([string[]]$ScriptArgs)
+}
+$a = Invoke-ManifestScript (@(""-Clear"") + @(""-Targets"") + $targetNames)
+$b = Invoke-ManifestScript (@(""-Write"", ""-Json"") +
+    @(""-Targets"") + $other)
+";
+            var calls = ExtractManifestCallArguments(sample).ToList();
+
+            calls.Should().HaveCount(2, "関数定義は拾わず、折り返した呼び出しは拾うこと");
+            calls[0].Should().Contain("$targetNames");
+            calls[1].Should().Contain("$other").And.Contain("-Json", "折り返した 2 行目まで引数に含めること");
         }
 
         /// <summary>

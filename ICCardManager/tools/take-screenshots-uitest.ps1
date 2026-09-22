@@ -176,17 +176,32 @@ if ($Publish) {
     # 「出力先にあるか」は「今回の撮影で作られたか」ではない。auto\ は .gitignore 対象で前回の実行の成果物が
     # 残り続けるため、撮影が漏れた画像は残骸がそのまま再公開され、内容が前回と同じなら git diff にも現れない
     # （Issue #2095）。判定はマニフェスト 1 か所へ寄せる（-Changed の有無によらず効かせる）
-    $verify = Invoke-ManifestScript (@("-Verify") + @("-Targets") + $targetNames)
+    $verify = Invoke-ManifestScript (@("-Verify", "-Json") + @("-Targets") + $targetNames)
+    # 対象名の検証など JSON を出さずに失敗する経路があるので、空出力を ConvertFrom-Json へ渡さない
+    # （渡すと ErrorActionPreference = Stop で生の例外文言が出る）。公開できる画像が無いものとして下の案内へ落とす
+    $verified = if ($verify.Output) { @(($verify.Output | ConvertFrom-Json).captured) } else { @() }
     if ($verify.ExitCode -ne 0) {
-        Write-Host "[ERROR] 今回の撮影で作られていない画像を公開しようとしています（上の行が対象）。" -ForegroundColor Red
-        Write-Host "        出力先に残る前回以前の画像は公開しません。" -ForegroundColor Yellow
         $captureHint = if ($Changed) { ".\tools\take-screenshots-uitest.ps1 -Changed" } else { ".\tools\take-screenshots-uitest.ps1" }
-        Write-Host "        先に撮影してください: $captureHint" -ForegroundColor Yellow
-        exit 1
+        if ($Changed) {
+            # -Changed は「この画像を撮り直す」と名指しして走るので、1 枚でも欠けたら公開しない
+            # （main の $missing 判定と同じ全か無か。欠けたまま一部だけ公開すると、撮り直したつもりの画像が残る）
+            Write-Host "[ERROR] 撮り直しが必要な画像が今回の撮影で作られていません（上の行が対象）。" -ForegroundColor Red
+            Write-Host "        出力先に残る前回以前の画像は公開しません。" -ForegroundColor Yellow
+            Write-Host "        先に撮影してください: $captureHint" -ForegroundColor Yellow
+            exit 1
+        }
+        # 全撮影では、撮れた分だけ公開する（main と同じ）。その環境では原理的に撮れない画像
+        # （リーダー未接続でしか撮れない error_no_reader.png 等）が必ず混ざるため、全か無かにすると
+        # 全撮影の公開が恒久的にできなくなる。公開しないものを名指しして残りを進める（コードレビューで検出）
+        Write-Host "[WARN] 今回の撮影で作られていない画像は公開しません（上の行が対象）。" -ForegroundColor Yellow
+        Write-Host "       撮れる環境で撮り直してから、もう一度 $captureHint -Publish を実行してください。" -ForegroundColor Yellow
+        Write-Host ""
     }
+    # 「今回の撮影で作られた」と確かめられたものだけへ絞る（残骸は公開しない）
+    $staged = @($staged | Where-Object { $verified -contains $_.Name })
     if ($staged.Count -eq 0) {
-        Write-Host "[ERROR] 出力先に画像がありません: $OutputDir" -ForegroundColor Red
-        Write-Host "        先に引数なしで実行して撮影してください。" -ForegroundColor Yellow
+        Write-Host "[ERROR] 今回の撮影で作られた画像が出力先にありません: $OutputDir" -ForegroundColor Red
+        Write-Host "        先に引数なしで実行して撮影してください（出力先に残る前回以前の画像は公開しません）。" -ForegroundColor Yellow
         exit 1
     }
     Write-Host "docs\screenshots\ へ上書きコピーします（$($staged.Count) 枚）..." -ForegroundColor Green

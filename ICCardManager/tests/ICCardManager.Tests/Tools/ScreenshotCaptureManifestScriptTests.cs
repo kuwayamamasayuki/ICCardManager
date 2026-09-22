@@ -237,9 +237,26 @@ namespace ICCardManager.Tests.Tools
         [InlineData("main.txt")]
         [InlineData("*.png")]
         [InlineData(".screenshot-manifest.json")]
+        // 先頭がドットの隠しファイル。`.png` の規則だけでは通ってしまうので、独立した守りとして固定する
+        [InlineData(".hidden.png")]
         public void Targets_対応表の画像名の形でない値は使い方エラー(string target)
         {
             var result = Run("-Clear", "-Targets", target);
+
+            result.ExitCode.Should().Be(2, result.StdOut);
+        }
+
+        /// <summary>
+        /// 対象名の検証はモードによらず入口で行うこと。<c>-Clear</c> 経由だけをテストすると、
+        /// 検証を <c>-Clear</c> の内側へ移した実装でも緑になる。
+        /// </summary>
+        [Theory]
+        [InlineData("-Clear")]
+        [InlineData("-Write")]
+        [InlineData("-Verify")]
+        public void Targets_不正な名前はどのモードでも使い方エラー(string mode)
+        {
+            var result = Run(mode, "-Targets", "../main.png");
 
             result.ExitCode.Should().Be(2, result.StdOut);
         }
