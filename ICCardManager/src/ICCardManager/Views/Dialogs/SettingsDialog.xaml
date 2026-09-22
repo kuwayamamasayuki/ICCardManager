@@ -403,7 +403,7 @@
                         Click="SaveButton_Click"
                         Padding="20,10"
                         MinWidth="100"
-                        Background="{DynamicResource HeaderBackgroundBrush}"
+                        Background="{DynamicResource PrimaryBrush}"
                         Foreground="{DynamicResource OnPrimaryBrush}"
                         IsDefault="True"
                         AutomationProperties.Name="設定を保存"

@@ -313,7 +313,7 @@
                             Command="{Binding SaveCommand}"
                             IsDefault="{Binding IsEditing}"
                             Padding="15,8"
-                            Background="{DynamicResource HeaderBackgroundBrush}"
+                            Background="{DynamicResource PrimaryBrush}"
                             Foreground="{DynamicResource OnPrimaryBrush}"/>
                 </StackPanel>
             </Grid>

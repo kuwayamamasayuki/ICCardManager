@@ -55,7 +55,9 @@
     <!-- プライマリカラー -->
     <!-- PrimaryBrush は主要ボタンの塗り・枠線・選択状態のアクセント。地色 #F5F5F5 に対して
          4.22:1 しかないため文字色には使わない（Issue #2074）。青系の文字色が要るときは
-         InfoTextBrush(#1565C0、地色 5.27:1) を使う -->
+         InfoTextBrush(#1565C0、地色 5.27:1) を使う。
+         塗りとしては OnPrimaryBrush(#FFFFFF) に対して 4.60:1 で、青いボタンの塗りはこちらへ寄せる
+         （HeaderBackgroundBrush は 3.12:1 で通常サイズのボタン文字には足りない。Issue #2085） -->
     <SolidColorBrush x:Key="PrimaryBrush" Color="#1976D2"/>
     <SolidColorBrush x:Key="PrimaryDarkBrush" Color="#0D47A1"/>
     <SolidColorBrush x:Key="PrimaryLightBrush" Color="#BBDEFB"/>
@@ -66,6 +68,10 @@
     <!-- ===== アプリケーション共通カラー（Issue #721） ===== -->
 
     <!-- ヘッダー・アクセントカラー -->
+    <!-- HeaderBackgroundBrush は「見出し帯・枠線・選択状態のアクセント」専用。白文字との
+         コントラストは 3.12:1 で、TitleFontSize（BaseFontSize × 1.6。文字サイズ「小」でも 19px）＋
+         Bold の見出しは WCAG の「大きな文字」の 3:1 を満たすが、通常サイズのボタン文字には足りない。
+         ボタンの塗りには PrimaryBrush(#1976D2、白文字 4.60:1) を使うこと（Issue #2085） -->
     <SolidColorBrush x:Key="HeaderBackgroundBrush" Color="#2196F3"/>
     <SolidColorBrush x:Key="InfoTextBrush" Color="#1565C0"/>
     <!-- 濃色の塗り（主要ボタン・ヘッダー）の上に載せる文字色。白背景では読めないため、
@@ -94,11 +100,17 @@
     <SolidColorBrush x:Key="AlternatingRowBrush" Color="#FAFAFA"/>
 
     <!-- アクション・オーバーレイ -->
-    <!-- SuccessActionBrush / WarningActionBrush は主要ボタンの「塗り」。白背景でのコントラストは
-         2.8:1 / 2.2:1 しかないため文字色には使わない（Issue #2074）。文字色が要るときは
-         SuccessForegroundBrush / WarningForegroundBrush を使う -->
-    <SolidColorBrush x:Key="SuccessActionBrush" Color="#4CAF50"/>
-    <SolidColorBrush x:Key="WarningActionBrush" Color="#FF9800"/>
+    <!-- SuccessActionBrush / WarningActionBrush は主要ボタンの「塗り」で、上には OnPrimaryBrush(#FFFFFF)
+         が載る。旧 #4CAF50 / #FF9800 は白文字とのコントラストが 2.78:1 / 2.16:1 しかなく、
+         ボタンの文字は WCAG の「大きな文字」に該当しない（BaseFontSize 14px = 10.5pt）ため
+         4.5:1 を満たしていなかった。色相を保ったまま暗くして是正する（Issue #2085）:
+           SuccessActionBrush #4CAF50 → #357A38（白文字 5.26:1、hue 122° 維持）
+           WarningActionBrush #FF9800 → #995B00（白文字 5.45:1、hue 36° 維持）
+         暗くすると色覚多様性での分離が落ちるため対で実測した（緑×橙×青の最小 ΔEcvd は 21.97 → 13.97）。
+         これらは塗り専用で、文字色には使わない（白背景 5.3:1 前後あるが、意味色の文字は
+         SuccessForegroundBrush / WarningForegroundBrush に寄せる。Issue #2074） -->
+    <SolidColorBrush x:Key="SuccessActionBrush" Color="#357A38"/>
+    <SolidColorBrush x:Key="WarningActionBrush" Color="#995B00"/>
     <SolidColorBrush x:Key="OverlayBrush" Color="#80000000"/>
 
     <!-- ===== 明細グループ配色（履歴詳細ダイアログ） ===== -->

@@ -577,7 +577,7 @@
                                                 <Button Content="適用"
                                                         Command="{Binding HistoryApplySelectedMonthCommand}"
                                                         Padding="15,5"
-                                                        Background="{DynamicResource HeaderBackgroundBrush}"
+                                                        Background="{DynamicResource PrimaryBrush}"
                                                         Foreground="{DynamicResource OnPrimaryBrush}"
                                                         AutomationProperties.Name="選択した月を適用"/>
                                             </StackPanel>

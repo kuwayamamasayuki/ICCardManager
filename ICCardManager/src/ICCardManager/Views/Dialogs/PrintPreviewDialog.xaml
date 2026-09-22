@@ -170,7 +170,7 @@
                             MinHeight="28"
                             Padding="20,0"
                             Margin="15,0,0,0"
-                            Background="{DynamicResource HeaderBackgroundBrush}"
+                            Background="{DynamicResource PrimaryBrush}"
                             Foreground="{DynamicResource OnPrimaryBrush}"
                             FontWeight="Bold"
                             ToolTip="印刷ダイアログを開く"

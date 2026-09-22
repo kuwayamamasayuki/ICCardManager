@@ -61,7 +61,9 @@
                                     <Setter Property="AutomationProperties.HelpText" Value="クリックすると対象年月を先月に切り替えます。現在は未選択です。"/>
                                     <Style.Triggers>
                                         <DataTrigger Binding="{Binding IsLastMonthSelected}" Value="True">
-                                            <Setter Property="Background" Value="{DynamicResource HeaderBackgroundBrush}"/>
+                                            <!-- 選択中は白文字を載せるため、塗りは PrimaryBrush（白文字 4.60:1）。
+                                                 HeaderBackgroundBrush は 3.12:1 で通常サイズの文字には足りない（Issue #2085） -->
+                                            <Setter Property="Background" Value="{DynamicResource PrimaryBrush}"/>
                                             <Setter Property="Foreground" Value="{DynamicResource OnPrimaryBrush}"/>
                                             <Setter Property="FontWeight" Value="Bold"/>
                                             <Setter Property="AutomationProperties.Name" Value="先月（選択中）"/>
@@ -84,7 +86,8 @@
                                     <Setter Property="AutomationProperties.HelpText" Value="クリックすると対象年月を今月に切り替えます。現在は未選択です。"/>
                                     <Style.Triggers>
                                         <DataTrigger Binding="{Binding IsThisMonthSelected}" Value="True">
-                                            <Setter Property="Background" Value="{DynamicResource HeaderBackgroundBrush}"/>
+                                            <!-- 同上（Issue #2085） -->
+                                            <Setter Property="Background" Value="{DynamicResource PrimaryBrush}"/>
                                             <Setter Property="Foreground" Value="{DynamicResource OnPrimaryBrush}"/>
                                             <Setter Property="FontWeight" Value="Bold"/>
                                             <Setter Property="AutomationProperties.Name" Value="今月（選択中）"/>
@@ -401,7 +404,7 @@
                         Padding="20,10"
                         Margin="0,0,10,0"
                         MinWidth="100"
-                        Background="{DynamicResource HeaderBackgroundBrush}"
+                        Background="{DynamicResource PrimaryBrush}"
                         Foreground="{DynamicResource OnPrimaryBrush}"
                         AutomationProperties.Name="印刷プレビュー"
                         AutomationProperties.HelpText="選択したカードの帳票をプレビュー表示します"

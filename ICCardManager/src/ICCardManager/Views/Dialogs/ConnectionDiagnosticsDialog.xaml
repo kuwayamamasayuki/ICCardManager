@@ -184,7 +184,7 @@
                         Padding="20,10"
                         MinWidth="120"
                         Margin="0,0,10,0"
-                        Background="{DynamicResource HeaderBackgroundBrush}"
+                        Background="{DynamicResource PrimaryBrush}"
                         Foreground="{DynamicResource OnPrimaryBrush}"
                         AutomationProperties.Name="診断結果をコピー"
                         AutomationProperties.HelpText="診断結果と環境情報をクリップボードへコピーします。メールに貼り付けてIT担当へ送れます。"

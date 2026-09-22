@@ -90,7 +90,7 @@
                     Margin="0,0,10,10"
                     FontSize="{DynamicResource BaseFontSize}"
                     FontWeight="Bold"
-                    Background="{DynamicResource HeaderBackgroundBrush}"
+                    Background="{DynamicResource PrimaryBrush}"
                     Foreground="{DynamicResource OnPrimaryBrush}"
                     Click="StaffCardButton_Click"
                     AutomationProperties.Name="職員証として登録"

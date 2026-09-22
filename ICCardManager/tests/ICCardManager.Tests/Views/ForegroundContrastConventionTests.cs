@@ -260,11 +260,10 @@ public class ForegroundContrastConventionTests
     {
         // 抽出漏れは非対称に効く。XAML 経路は ResolveColor が赤くなるが、
         // C# 経路は「ブラシキーと一致しない」として収集自体が止まり緑のまま（fail-open）。
-        var xaml = StripXamlComments(File.ReadAllText(AccessibilityStylesPath));
-        var declared = Regex.Matches(xaml, "<SolidColorBrush\\b").Count;
-
+        // 数える側も AccessibilityBrushes へ寄せる（#1763）。ここに私的な数え方を残すと、
+        // 数え方を変える人が片方を取りこぼし、その片方だけが静かに誤検出／見落としになる
         LoadBrushes().Should().HaveCount(
-            declared,
+            AccessibilityBrushes.CountDeclarations(),
             "AccessibilityStyles.xaml の SolidColorBrush 定義をすべて抽出できていること"
                 + "（属性順や追加属性で正規表現から漏れると、そのキーだけ静かに検査されなくなる）");
     }
@@ -422,8 +421,7 @@ private void Apply(bool isError)
 
     private static string ProductionRoot => TestPaths.GetProductionSourceRoot();
 
-    private static string AccessibilityStylesPath
-        => Path.Combine(ProductionRoot, "Resources", "Styles", "AccessibilityStyles.xaml");
+    private static string AccessibilityStylesPath => AccessibilityBrushes.StylesPath;
 
     /// <summary>
     /// 本番ソース全体から、文字色として参照されているリソースキーと参照元を集める。
@@ -834,21 +832,13 @@ private void Apply(bool isError)
     /// <remarks>
     /// コメントを先に除去する。規約の理由を述べたコメントに書かれた色値（「旧 #F57F17」等）を
     /// 定義として拾わないため（<c>.claude/rules/development-conventions.md</c> #1692 の極性の反転）。
+    /// 抽出そのものは <see cref="AccessibilityBrushes"/> へ集約してある
+    /// （塗り側の <see cref="BackgroundContrastConventionTests"/> と同じ読み出しを使い、
+    /// 片方だけが本番の書き方の変化に追随できなくなる形を避ける。#1763）。
     /// </remarks>
     private static IDictionary<string, string> LoadBrushes()
     {
-        var xaml = StripXamlComments(File.ReadAllText(AccessibilityStylesPath));
-
-        var result = new Dictionary<string, string>(StringComparer.Ordinal);
-        foreach (Match m in Regex.Matches(xaml, "<SolidColorBrush\\b(?<attrs>[^>]*)/>"))
-        {
-            var key = GetAttribute(m.Groups["attrs"].Value, "x:Key");
-            var color = GetAttribute(m.Groups["attrs"].Value, "Color");
-            if (key != null && color != null && color.StartsWith("#", StringComparison.Ordinal))
-            {
-                result[key] = color.ToUpperInvariant();
-            }
-        }
+        var result = AccessibilityBrushes.Load();
 
         result.Should().NotBeEmpty("AccessibilityStyles.xaml のブラシ抽出が空振りしていないこと");
 
