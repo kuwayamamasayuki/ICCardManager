@@ -1,5 +1,6 @@
 ﻿<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
-                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+                    xmlns:conv="clr-namespace:ICCardManager.Views.Converters">
 
     <!-- =====================================
          アクセシビリティ対応スタイル
@@ -112,6 +113,12 @@
     <SolidColorBrush x:Key="SuccessActionBrush" Color="#357A38"/>
     <SolidColorBrush x:Key="WarningActionBrush" Color="#995B00"/>
     <SolidColorBrush x:Key="OverlayBrush" Color="#80000000"/>
+    <!-- 無効なボタンの塗り（Issue #2094）。上には OnPrimaryBrush(#FFFFFF) が載る（6.19:1）。
+         旧実装は枠を Opacity=0.5 で落としていたが、不透明度は塗りも文字も同じだけ地色へ寄せるため、
+         白文字のボタンでは 1.4:1 前後まで落ちて無効なボタンのラベルが読めなかった。
+         無効であることは彩度が消えることで伝わる（意味色 4 色との ΔE は 46 以上）。
+         塗り専用で、文字色には使わない（SecondaryTextBrush(#6E6E6E) とは役割が違う） -->
+    <SolidColorBrush x:Key="DisabledFillBrush" Color="#616161"/>
 
     <!-- ===== 明細グループ配色（履歴詳細ダイアログ） ===== -->
     <!-- Issue #1822: LedgerDetailDialog.xaml 内で色値リテラルを直書きしていたものを SSOT へ集約。
@@ -195,6 +202,61 @@
     </Style>
 
     <!-- ===== ボタンスタイル ===== -->
+
+    <!-- 対話状態（hover / pressed / 無効）の塗りを導出するコンバーター（Issue #2094）。
+         MultiBinding の値の並びは InteractiveFillConverter.Convert と 1 対 1 で対応する -->
+    <conv:InteractiveFillConverter x:Key="InteractiveFillConverter"/>
+
+    <!-- ボタンの共通テンプレート（Issue #2094）。
+         AccessibleButtonStyle（サイズも整える汎用ボタン）と FilledActionButtonStyle（塗り付きの主要ボタン）が
+         同じテンプレートを共有する。2 つに書き写すと、次に対話状態を触る人が片方を取りこぼす（#1763）。
+
+         塗りは「状態ごとに別の色を Setter で当てる」のではなく、ボタン自身の Background と Foreground から
+         MultiBinding で導出する。文字色と逆方向へ明度をずらすので、通常状態が白文字に対して 4.5:1 を
+         満たしていれば（Issue #2085）hover / pressed も自動的に満たす。
+         高コントラストモードだけは下のトリガーで上書きする（トリガーはテンプレート内のローカル値より優先される） -->
+    <ControlTemplate x:Key="AccessibleButtonTemplate" TargetType="Button">
+        <Border x:Name="border"
+                BorderBrush="{TemplateBinding BorderBrush}"
+                BorderThickness="{TemplateBinding BorderThickness}"
+                CornerRadius="4"
+                Padding="{TemplateBinding Padding}">
+            <Border.Background>
+                <MultiBinding Converter="{StaticResource InteractiveFillConverter}">
+                    <Binding RelativeSource="{RelativeSource TemplatedParent}" Path="Background"/>
+                    <Binding RelativeSource="{RelativeSource TemplatedParent}" Path="Foreground"/>
+                    <Binding RelativeSource="{RelativeSource TemplatedParent}" Path="IsMouseOver"/>
+                    <Binding RelativeSource="{RelativeSource TemplatedParent}" Path="IsPressed"/>
+                    <Binding RelativeSource="{RelativeSource TemplatedParent}" Path="IsEnabled"/>
+                    <!-- 塗りを単色として解決できないボタン（塗りを持たないメイン画面の機能ボタン列）の
+                         フォールバック。既定の濃い文字が載る前提で、黒文字に対して 14.95:1 / 4.56:1 -->
+                    <Binding Source="{StaticResource PrimaryLightBrush}"/>
+                    <Binding Source="{StaticResource PrimaryBrush}"/>
+                    <Binding Source="{StaticResource DisabledFillBrush}"/>
+                </MultiBinding>
+            </Border.Background>
+            <ContentPresenter HorizontalAlignment="Center"
+                              VerticalAlignment="Center"/>
+        </Border>
+        <ControlTemplate.Triggers>
+            <!-- 無効時は塗りを灰色へ固定する（塗りの側はコンバーターが決める）。
+                 文字色を白へ揃えて 6.19:1 を確保する -->
+            <Trigger Property="IsEnabled" Value="False">
+                <Setter Property="Foreground" Value="{StaticResource OnPrimaryBrush}"/>
+            </Trigger>
+            <Trigger Property="IsFocused" Value="True">
+                <Setter TargetName="border" Property="BorderBrush" Value="{StaticResource PrimaryDarkBrush}"/>
+                <Setter TargetName="border" Property="BorderThickness" Value="2"/>
+            </Trigger>
+            <!-- 高コントラストモード対応 -->
+            <DataTrigger Binding="{Binding Source={x:Static SystemParameters.HighContrast}}" Value="True">
+                <Setter TargetName="border" Property="Background" Value="{DynamicResource {x:Static SystemColors.ControlBrushKey}}"/>
+                <Setter Property="Foreground" Value="{DynamicResource {x:Static SystemColors.ControlTextBrushKey}}"/>
+                <Setter TargetName="border" Property="BorderBrush" Value="{DynamicResource {x:Static SystemColors.ActiveBorderBrushKey}}"/>
+            </DataTrigger>
+        </ControlTemplate.Triggers>
+    </ControlTemplate>
+
     <!-- 高齢者向けに最適化されたボタンサイズとフォーカス表示 -->
     <!-- 高コントラストモード時はシステムカラーを自動適用 -->
     <Style x:Key="AccessibleButtonStyle" TargetType="Button">
@@ -203,42 +265,17 @@
         <Setter Property="MinWidth" Value="75"/>
         <Setter Property="MinHeight" Value="40"/>
         <Setter Property="Cursor" Value="Hand"/>
-        <Setter Property="Template">
-            <Setter.Value>
-                <ControlTemplate TargetType="Button">
-                    <Border x:Name="border"
-                            Background="{TemplateBinding Background}"
-                            BorderBrush="{TemplateBinding BorderBrush}"
-                            BorderThickness="{TemplateBinding BorderThickness}"
-                            CornerRadius="4"
-                            Padding="{TemplateBinding Padding}">
-                        <ContentPresenter HorizontalAlignment="Center"
-                                          VerticalAlignment="Center"/>
-                    </Border>
-                    <ControlTemplate.Triggers>
-                        <Trigger Property="IsMouseOver" Value="True">
-                            <Setter TargetName="border" Property="Background" Value="{StaticResource PrimaryLightBrush}"/>
-                        </Trigger>
-                        <Trigger Property="IsPressed" Value="True">
-                            <Setter TargetName="border" Property="Background" Value="{StaticResource PrimaryBrush}"/>
-                        </Trigger>
-                        <Trigger Property="IsEnabled" Value="False">
-                            <Setter TargetName="border" Property="Opacity" Value="0.5"/>
-                        </Trigger>
-                        <Trigger Property="IsFocused" Value="True">
-                            <Setter TargetName="border" Property="BorderBrush" Value="{StaticResource PrimaryDarkBrush}"/>
-                            <Setter TargetName="border" Property="BorderThickness" Value="2"/>
-                        </Trigger>
-                        <!-- 高コントラストモード対応 -->
-                        <DataTrigger Binding="{Binding Source={x:Static SystemParameters.HighContrast}}" Value="True">
-                            <Setter TargetName="border" Property="Background" Value="{DynamicResource {x:Static SystemColors.ControlBrushKey}}"/>
-                            <Setter Property="Foreground" Value="{DynamicResource {x:Static SystemColors.ControlTextBrushKey}}"/>
-                            <Setter TargetName="border" Property="BorderBrush" Value="{DynamicResource {x:Static SystemColors.ActiveBorderBrushKey}}"/>
-                        </DataTrigger>
-                    </ControlTemplate.Triggers>
-                </ControlTemplate>
-            </Setter.Value>
-        </Setter>
+        <Setter Property="Template" Value="{StaticResource AccessibleButtonTemplate}"/>
+    </Style>
+
+    <!-- 塗りを持つ主要ボタン用のスタイル（Issue #2094）。
+         Background / Foreground はボタン側が指定する（Issue #2085 の静的検査が測る組をそのまま残すため）。
+         サイズ系の Setter を持たないのは、対象の 34 箇所がいずれも Padding を自前で持っており、
+         寸法まで揃えると対話状態の是正と無関係なレイアウト変更が混ざるため -->
+    <Style x:Key="FilledActionButtonStyle" TargetType="Button">
+        <Setter Property="FocusVisualStyle" Value="{StaticResource AccessibleFocusVisual}"/>
+        <Setter Property="Cursor" Value="Hand"/>
+        <Setter Property="Template" Value="{StaticResource AccessibleButtonTemplate}"/>
     </Style>
 
     <!-- プライマリボタンスタイル -->

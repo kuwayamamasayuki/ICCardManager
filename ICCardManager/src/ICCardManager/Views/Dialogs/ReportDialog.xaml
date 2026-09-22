@@ -53,9 +53,14 @@
                                 ToolTip="対象年月を先月に設定">
                             <Button.Content>先月</Button.Content>
                             <Button.Style>
-                                <Style TargetType="Button">
+                                <!-- 選択中は白文字を載せるため、対話状態の塗りを導出する FilledActionButtonStyle を
+                                     土台にする（Issue #2094）。BasedOn を外すと WPF の既定テンプレートへ戻り、
+                                     選択中にポインタを載せた瞬間だけ白文字が読めなくなる。
+                                     枠線は既定テンプレートが与えていたので、テンプレートを差し替えるぶん自分で指定する -->
+                                <Style TargetType="Button" BasedOn="{StaticResource FilledActionButtonStyle}">
                                     <Setter Property="Background" Value="{DynamicResource ReturnBackgroundBrush}"/>
                                     <Setter Property="BorderBrush" Value="{DynamicResource HeaderBackgroundBrush}"/>
+                                    <Setter Property="BorderThickness" Value="1"/>
                                     <Setter Property="FontWeight" Value="Normal"/>
                                     <Setter Property="AutomationProperties.Name" Value="先月を選択"/>
                                     <Setter Property="AutomationProperties.HelpText" Value="クリックすると対象年月を先月に切り替えます。現在は未選択です。"/>
@@ -78,9 +83,14 @@
                                 ToolTip="対象年月を今月に設定">
                             <Button.Content>今月</Button.Content>
                             <Button.Style>
-                                <Style TargetType="Button">
+                                <!-- 選択中は白文字を載せるため、対話状態の塗りを導出する FilledActionButtonStyle を
+                                     土台にする（Issue #2094）。BasedOn を外すと WPF の既定テンプレートへ戻り、
+                                     選択中にポインタを載せた瞬間だけ白文字が読めなくなる。
+                                     枠線は既定テンプレートが与えていたので、テンプレートを差し替えるぶん自分で指定する -->
+                                <Style TargetType="Button" BasedOn="{StaticResource FilledActionButtonStyle}">
                                     <Setter Property="Background" Value="{DynamicResource ReturnBackgroundBrush}"/>
                                     <Setter Property="BorderBrush" Value="{DynamicResource HeaderBackgroundBrush}"/>
+                                    <Setter Property="BorderThickness" Value="1"/>
                                     <Setter Property="FontWeight" Value="Normal"/>
                                     <Setter Property="AutomationProperties.Name" Value="今月を選択"/>
                                     <Setter Property="AutomationProperties.HelpText" Value="クリックすると対象年月を今月に切り替えます。現在は未選択です。"/>
@@ -186,7 +196,8 @@
                                AutomationProperties.HelpText="対象年月の帳票について、出力済みのカード数と未出力のカード数です。"/>
 
                     <!-- Issue #1691: 月初の定例作業（前月分を全カード出力）を1操作にまとめる -->
-                    <Button Grid.Column="2"
+                    <Button Style="{StaticResource FilledActionButtonStyle}"
+                            Grid.Column="2"
                             Content="先月分を一括出力"
                             Command="{Binding BulkExportLastMonthCommand}"
                             Padding="12,6"
@@ -399,7 +410,8 @@
                         AutomationProperties.Name="帳票の事前チェック"
                         AutomationProperties.HelpText="帳票を出力せずに、未返却カード・負残高・繰越の不一致がないかを確認します"
                         ToolTip="出力前に未返却・負残高・繰越の不一致を確認"/>
-                <Button Content="プレビュー"
+                <Button Style="{StaticResource FilledActionButtonStyle}"
+                        Content="プレビュー"
                         Command="{Binding PreviewSelectedCommand}"
                         Padding="20,10"
                         Margin="0,0,10,0"
@@ -409,7 +421,8 @@
                         AutomationProperties.Name="印刷プレビュー"
                         AutomationProperties.HelpText="選択したカードの帳票をプレビュー表示します"
                         ToolTip="選択したカードの帳票をプレビュー"/>
-                <Button Content="作成"
+                <Button Style="{StaticResource FilledActionButtonStyle}"
+                        Content="作成"
                         Command="{Binding CreateReportCommand}"
                         Padding="20,10"
                         MinWidth="100"

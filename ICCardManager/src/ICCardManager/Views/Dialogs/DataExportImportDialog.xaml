@@ -126,7 +126,8 @@
                 </Grid>
 
                 <!-- エクスポートボタン -->
-                <Button Content="CSVエクスポート(_X)"
+                <Button Style="{StaticResource FilledActionButtonStyle}"
+                        Content="CSVエクスポート(_X)"
                         Command="{Binding ExportCommand}"
                         Padding="15,10"
                         HorizontalAlignment="Left"
@@ -292,7 +293,9 @@
                                     AutomationProperties.Name="カードタッチ開始"
                                     ToolTip="カードリーダーでカードを読み取ります">
                                 <Button.Style>
-                                    <Style TargetType="Button">
+                                    <!-- 対話状態の塗りを導出するため FilledActionButtonStyle を土台にする（Issue #2094）。
+                                         BasedOn を外すと WPF の既定テンプレートへ戻り、hover 時に白文字が読めなくなる -->
+                                    <Style TargetType="Button" BasedOn="{StaticResource FilledActionButtonStyle}">
                                         <Style.Triggers>
                                             <DataTrigger Binding="{Binding UseCardListSelection}" Value="True">
                                                 <Setter Property="IsEnabled" Value="False"/>
@@ -362,14 +365,16 @@
 
         <!-- アクションボタン（常に表示） -->
         <StackPanel Grid.Row="2" Orientation="Horizontal" Margin="0,0,0,10">
-            <Button Content="プレビュー(_P)"
+            <Button Style="{StaticResource FilledActionButtonStyle}"
+                    Content="プレビュー(_P)"
                     Command="{Binding PreviewImportCommand}"
                     Padding="15,10"
                     Background="{DynamicResource WarningActionBrush}"
                     Foreground="{DynamicResource OnPrimaryBrush}"
                     AutomationProperties.Name="インポートプレビュー"
                     ToolTip="CSVファイルの内容をプレビューし、変更点を確認します（アクセスキー: Alt+P）"/>
-            <Button Content="インポート実行(_M)"
+            <Button Style="{StaticResource FilledActionButtonStyle}"
+                    Content="インポート実行(_M)"
                     Command="{Binding ExecuteImportCommand}"
                     Padding="15,10"
                     Margin="10,0,0,0"
@@ -378,7 +383,8 @@
                     IsEnabled="{Binding HasPreview}"
                     AutomationProperties.Name="インポート実行"
                     ToolTip="プレビュー済みのデータをインポートします（アクセスキー: Alt+M）"/>
-            <Button Content="直接インポート(_R)"
+            <Button Style="{StaticResource FilledActionButtonStyle}"
+                    Content="直接インポート(_R)"
                     Command="{Binding ImportCommand}"
                     Padding="15,10"
                     Margin="10,0,0,0"

@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
@@ -58,7 +58,9 @@ namespace ICCardManager.Tests.Views;
 /// <see cref="ExtractSetterPairs"/> は構造上この組を作れない。
 /// これは本 Issue 以前からの状態（旧 #4CAF50 でも hover 時は同じ）で本 PR が持ち込んだものではないが、
 /// <b>「4.5:1 を固定した」という主張が対話状態を覆っていないこと</b>はここに書き残しておく。
-/// 是正は全ボタンのテンプレートに関わるため別 Issue で扱う。
+/// 是正は全ボタンのテンプレートに関わるため Issue #2094 で扱い、対話状態は
+/// <see cref="InteractiveStateContrastConventionTests"/> が引き継いだ
+/// （塗りと文字色の組の抽出は <see cref="Helpers.FillForegroundPairs"/> で共有する）。
 /// </para>
 /// </remarks>
 public class BackgroundContrastConventionTests
@@ -73,18 +75,6 @@ public class BackgroundContrastConventionTests
     /// WCAG の「大きな文字」の下限（太字の場合）。14pt = 96dpi で 18.666…px。
     /// </summary>
     private const double LargeTextBoldMinPx = 18.66;
-
-    /// <summary>
-    /// <c>Style</c> 由来の <c>Setter</c> を「同じブロックのもの」として束ねる単位。
-    /// </summary>
-    private static readonly string[] SetterBlockTags =
-    {
-        "Style",
-        "Trigger",
-        "DataTrigger",
-        "MultiTrigger",
-        "MultiDataTrigger",
-    };
 
     /// <summary>
     /// 主要な「塗り」のブラシ。暗くしたときに色覚多様性での分離が後退していないかを対で測る。
@@ -107,7 +97,7 @@ public class BackgroundContrastConventionTests
     [Fact]
     public void 塗りの上に載る文字は塗りに対して4対5対1以上のコントラストを持つこと()
     {
-        var pairs = CollectResolvedPairs();
+        var pairs = FillForegroundPairs.CollectResolved();
 
         var violations = pairs
             .Select(p => new
@@ -202,7 +192,7 @@ public class BackgroundContrastConventionTests
     [Fact]
     public void 走査が同一タグ形とSetter形の両方へ届いていること()
     {
-        var pairs = CollectResolvedPairs();
+        var pairs = FillForegroundPairs.CollectResolved();
 
         pairs.Should().HaveCountGreaterThan(
             20, "塗りと文字色の組が静的に辿れる箇所が複数あること");
@@ -214,7 +204,7 @@ public class BackgroundContrastConventionTests
 
         // ② Setter 形。Style で包むだけで ① の外へ逃がせないことを表明する
         pairs.Should().Contain(
-            p => p.Source == "ReportDialog.xaml" && p.Form == PairForm.Setter,
+            p => p.Source == "ReportDialog.xaml" && p.Form == FillForegroundPairs.PairForm.Setter,
             "DataTrigger の Setter で塗りと文字色を決める形が走査対象に含まれること");
 
         // TargetType 単位の Style。個々の画面より波及が大きいのに Views/ の外にある
@@ -238,10 +228,10 @@ public class BackgroundContrastConventionTests
     {
         // 「塗りだけを指定し、文字色は別の要素が決める」形（MainWindow のヘッダー帯など）は
         // 本検査の対象外。対象外であることを表明しておかないと、見落としと区別が付かない。
-        var unpaired = EnumerateProductionXaml()
+        var unpaired = FillForegroundPairs.EnumerateProductionXaml()
             .SelectMany(f => XamlElementInspection.EnumerateStartTags(f.Text)
-                .Where(t => ResourceKeyOf(XamlElementInspection.GetPropertyAttribute(t.StartTag, "Background")) != null
-                            && ResourceKeyOf(XamlElementInspection.GetPropertyAttribute(t.StartTag, "Foreground")) == null)
+                .Where(t => FillForegroundPairs.ResourceKeyOf(XamlElementInspection.GetPropertyAttribute(t.StartTag, "Background")) != null
+                            && FillForegroundPairs.ResourceKeyOf(XamlElementInspection.GetPropertyAttribute(t.StartTag, "Foreground")) == null)
                 .Select(t => f.Name))
             .ToList();
 
@@ -290,7 +280,7 @@ public class BackgroundContrastConventionTests
             + "<Border Background=\"{DynamicResource HeaderBackgroundBrush}\"/>\n"
             + "<Button Background=\"{Binding Fill}\" Foreground=\"{DynamicResource OnPrimaryBrush}\"/>\n";
 
-        var pairs = ExtractSameTagPairs(Xaml).ToList();
+        var pairs = FillForegroundPairs.ExtractSameTagPairs(Xaml).ToList();
 
         pairs.Select(p => p.BackgroundKey).Should().Equal(
             new[] { "SuccessActionBrush", "WarningActionBrush" },
@@ -309,7 +299,7 @@ public class BackgroundContrastConventionTests
             + "<Button Background=\"{DynamicResource SuccessActionBrush}\"\n"
             + "        Foreground=\"{DynamicResource OnPrimaryBrush}\"/>\n";
 
-        ExtractSameTagPairs(Xaml).Select(p => p.BackgroundKey).Should().Equal(
+        FillForegroundPairs.ExtractSameTagPairs(Xaml).Select(p => p.BackgroundKey).Should().Equal(
             new[] { "SuccessActionBrush" },
             "閉じ > を決められないタグの後ろにある要素も走査対象に残ること");
     }
@@ -331,7 +321,7 @@ public class BackgroundContrastConventionTests
             + "  </Style.Triggers>\n"
             + "</Style>\n";
 
-        var pairs = ExtractSetterPairs(Xaml).ToList();
+        var pairs = FillForegroundPairs.ExtractSetterPairs(Xaml).ToList();
 
         pairs.Should().HaveCount(1, "対応付くのは DataTrigger の中の 1 組だけであること");
         pairs[0].BackgroundKey.Should().Be("PrimaryBrush");
@@ -354,7 +344,7 @@ public class BackgroundContrastConventionTests
             + "  </Style.Triggers>\n"
             + "</Style>\n";
 
-        ExtractSetterPairs(Xaml).Should().BeEmpty(
+        FillForegroundPairs.ExtractSetterPairs(Xaml).Should().BeEmpty(
             "外側のブロックの文字色と内側のブロックの塗りを対応付けないこと");
     }
 
@@ -362,185 +352,11 @@ public class BackgroundContrastConventionTests
 
     #region ヘルパー
 
-    private enum PairForm
-    {
-        /// <summary>同一の開始タグに Background と Foreground の両方。</summary>
-        SameTag,
-
-        /// <summary>同一の Style / Trigger ブロックの直下に両方の Setter。</summary>
-        Setter,
-    }
-
-    private sealed class FillPair
-    {
-        public FillPair(PairForm form, string backgroundKey, string foregroundKey)
-        {
-            Form = form;
-            BackgroundKey = backgroundKey;
-            ForegroundKey = foregroundKey;
-            Source = string.Empty;
-        }
-
-        public PairForm Form { get; }
-
-        public string BackgroundKey { get; }
-
-        public string ForegroundKey { get; }
-
-        public string Source { get; set; }
-
-        public int Line { get; set; }
-
-        public string BackgroundColor { get; set; } = string.Empty;
-
-        public string ForegroundColor { get; set; } = string.Empty;
-    }
-
-    /// <summary>
-    /// 本番 XAML 全体から、塗りと文字色の組を色値まで解決して集める。
-    /// </summary>
-    private static IReadOnlyList<FillPair> CollectResolvedPairs()
-    {
-        var brushes = AccessibilityBrushes.Load();
-        var result = new List<FillPair>();
-
-        foreach (var file in EnumerateProductionXaml())
-        {
-            foreach (var pair in ExtractSameTagPairs(file.Text).Concat(ExtractSetterPairs(file.Text)))
-            {
-                if (!brushes.TryGetValue(pair.BackgroundKey, out var background)
-                    || !brushes.TryGetValue(pair.ForegroundKey, out var foreground))
-                {
-                    // AccessibilityStyles.xaml 以外で定義されたブラシ（画面ローカルのリソース）は
-                    // 色値を解決できない。色値リテラルの直書きは #1822 / #2074 が別途禁じている
-                    continue;
-                }
-
-                pair.Source = file.Name;
-                pair.BackgroundColor = background;
-                pair.ForegroundColor = foreground;
-                result.Add(pair);
-            }
-        }
-
-        return result;
-    }
-
-    /// <summary>① 同一の開始タグに <c>Background</c> と <c>Foreground</c> の両方がある形。</summary>
-    private static IEnumerable<FillPair> ExtractSameTagPairs(string xaml)
-    {
-        foreach (var tag in XamlElementInspection.EnumerateStartTags(xaml))
-        {
-            var background = ResourceKeyOf(XamlElementInspection.GetPropertyAttribute(tag.StartTag, "Background"));
-            var foreground = ResourceKeyOf(XamlElementInspection.GetPropertyAttribute(tag.StartTag, "Foreground"));
-            if (background == null || foreground == null)
-            {
-                continue;
-            }
-
-            yield return new FillPair(PairForm.SameTag, background, foreground) { Line = tag.Line };
-        }
-    }
-
-    /// <summary>
-    /// ② 同一の <c>Style</c> / <c>Trigger</c> ブロックの<b>直下</b>に両方の <c>Setter</c> がある形。
-    /// </summary>
-    /// <remarks>
-    /// 入れ子のブロックは本体から取り除いてから走査する。取り除かないと、
-    /// 外側の <c>Style</c> が内側の <c>DataTrigger</c> の <c>Setter</c> を自分のものとして数え、
-    /// 「非選択時の塗り × 選択時の文字色」という<b>実際には同時に成立しない組</b>を作る。
-    /// </remarks>
-    private static IEnumerable<FillPair> ExtractSetterPairs(string xaml)
-    {
-        foreach (var tagName in SetterBlockTags)
-        {
-            foreach (var block in XamlElementInspection.EnumerateElementSpans(xaml, tagName))
-            {
-                var direct = RemoveNestedBlocks(block.Body);
-
-                string? background = null;
-                string? foreground = null;
-                foreach (var setter in XamlElementInspection.EnumerateElements(direct, "Setter"))
-                {
-                    var property = XamlElementInspection.GetAttribute(setter.StartTag, "Property");
-                    var value = ResourceKeyOf(XamlElementInspection.GetAttribute(setter.StartTag, "Value"));
-                    if (value == null)
-                    {
-                        continue;
-                    }
-
-                    if (XamlElementInspection.IsSetterFor(property, "Background"))
-                    {
-                        background = value;
-                    }
-                    else if (XamlElementInspection.IsSetterFor(property, "Foreground"))
-                    {
-                        foreground = value;
-                    }
-                }
-
-                if (background != null && foreground != null)
-                {
-                    yield return new FillPair(PairForm.Setter, background, foreground) { Line = block.Line };
-                }
-            }
-        }
-    }
-
-    /// <summary>
-    /// 入れ子のブロック（<see cref="SetterBlockTags"/>）を空白で潰す。改行は残して行番号を保つ。
-    /// </summary>
-    private static string RemoveNestedBlocks(string body)
-    {
-        var chars = body.ToCharArray();
-        foreach (var tagName in SetterBlockTags)
-        {
-            foreach (var nested in XamlElementInspection.EnumerateElementSpans(body, tagName))
-            {
-                var end = Math.Min(nested.Start + nested.Length, chars.Length);
-                for (var i = nested.Start; i < end; i++)
-                {
-                    if (chars[i] != '\n')
-                    {
-                        chars[i] = ' ';
-                    }
-                }
-            }
-        }
-
-        return new string(chars);
-    }
-
-    /// <summary>
-    /// <c>{DynamicResource K}</c> / <c>{StaticResource K}</c> からキー <c>K</c> を取り出す。
-    /// </summary>
-    private static string? ResourceKeyOf(string? markup)
-    {
-        if (markup == null)
-        {
-            return null;
-        }
-
-        var m = Regex.Match(markup, @"^\{(?:Dynamic|Static)Resource\s+(?<key>[A-Za-z0-9_]+)\}$");
-        return m.Success ? m.Groups["key"].Value : null;
-    }
-
     private static string Resolve(IDictionary<string, string> brushes, string key)
     {
         brushes.Should().ContainKey(
             key, "{0} は AccessibilityStyles.xaml に #RRGGBB 形式で定義されているべき", key);
         return brushes[key];
-    }
-
-    private static IEnumerable<(string Name, string Text)> EnumerateProductionXaml()
-    {
-        var root = TestPaths.GetProductionSourceRoot();
-        var separator = Path.DirectorySeparatorChar;
-
-        return Directory.GetFiles(root, "*.xaml", SearchOption.AllDirectories)
-            .Where(p => p.IndexOf(separator + "obj" + separator, StringComparison.Ordinal) < 0
-                        && p.IndexOf(separator + "bin" + separator, StringComparison.Ordinal) < 0)
-            .Select(p => (Path.GetFileName(p), XamlElementInspection.StripXmlComments(File.ReadAllText(p))));
     }
 
     /// <summary>

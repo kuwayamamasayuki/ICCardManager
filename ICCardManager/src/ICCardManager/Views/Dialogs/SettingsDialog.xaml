@@ -399,7 +399,8 @@
                         AutomationProperties.Name="キャンセル"
                         AutomationProperties.HelpText="変更を保存せずにダイアログを閉じます"
                         ToolTip="変更を破棄 (Escape / Alt+C)"/>
-                <Button Content="保存(_S)"
+                <Button Style="{StaticResource FilledActionButtonStyle}"
+                        Content="保存(_S)"
                         Click="SaveButton_Click"
                         Padding="20,10"
                         MinWidth="100"

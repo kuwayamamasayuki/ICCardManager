@@ -446,7 +446,9 @@
                         AutomationProperties.Name="保存"
                         ToolTip="変更を保存します">
                     <Button.Style>
-                        <Style TargetType="Button">
+                        <!-- 対話状態の塗りを導出するため FilledActionButtonStyle を土台にする（Issue #2094）。
+                             BasedOn を外すと WPF の既定テンプレートへ戻り、hover 時に白文字が読めなくなる -->
+                        <Style TargetType="Button" BasedOn="{StaticResource FilledActionButtonStyle}">
                             <Setter Property="Visibility" Value="{Binding HasChanges, Converter={StaticResource BoolToVisibilityConverter}}"/>
                             <Style.Triggers>
                                 <DataTrigger Binding="{Binding HasMultipleGroups}" Value="True">
@@ -468,7 +470,8 @@
                             </Style.Triggers>
                         </Style>
                     </StackPanel.Style>
-                    <Button Content="別々の履歴に分割"
+                    <Button Style="{StaticResource FilledActionButtonStyle}"
+                            Content="別々の履歴に分割"
                             Command="{Binding SaveWithFullSplitCommand}"
                             Padding="15,8"
                             Margin="0,0,6,0"
@@ -476,7 +479,8 @@
                             Foreground="{DynamicResource OnPrimaryBrush}"
                             AutomationProperties.Name="別々の履歴に分割"
                             ToolTip="グループごとに別の履歴レコードを作成します"/>
-                    <Button Content="摘要のみ更新"
+                    <Button Style="{StaticResource FilledActionButtonStyle}"
+                            Content="摘要のみ更新"
                             Command="{Binding SaveCommand}"
                             Padding="15,8"
                             Margin="0,0,10,0"

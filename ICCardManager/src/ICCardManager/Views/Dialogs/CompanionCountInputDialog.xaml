@@ -158,7 +158,8 @@
                     AutomationProperties.Name="スキップ"
                     AutomationProperties.HelpText="同行者数を入力せずにダイアログを閉じます。後で履歴の行編集から入力できます。"
                     ToolTip="後で入力する場合はスキップ (Escape / Alt+K)"/>
-            <Button Content="保存(_S)"
+            <Button Style="{StaticResource FilledActionButtonStyle}"
+                    Content="保存(_S)"
                     Command="{Binding SaveCommand}"
                     Padding="20,10"
                     Background="{DynamicResource SuccessActionBrush}"

@@ -250,7 +250,8 @@
         <StackPanel Grid.Row="1"
                     Orientation="Horizontal"
                     HorizontalAlignment="Right">
-            <Button x:Name="OkButton"
+            <Button Style="{StaticResource FilledActionButtonStyle}"
+                    x:Name="OkButton"
                     Content="OK"
                     MinWidth="100"
                     MinHeight="36"

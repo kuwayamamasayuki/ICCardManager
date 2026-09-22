@@ -1,4 +1,4 @@
-<Window x:Class="ICCardManager.Views.Dialogs.BusStopInputDialog"
+﻿<Window x:Class="ICCardManager.Views.Dialogs.BusStopInputDialog"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
@@ -230,7 +230,8 @@
                     AutomationProperties.Name="スキップ"
                     AutomationProperties.HelpText="バス停名を入力せずにダイアログを閉じます。後で入力できます。"
                     ToolTip="後で入力する場合はスキップ (Escape / Alt+K)"/>
-            <Button Content="保存(_S)"
+            <Button Style="{StaticResource FilledActionButtonStyle}"
+                    Content="保存(_S)"
                     Command="{Binding SaveCommand}"
                     Padding="20,10"
                     Background="{DynamicResource SuccessActionBrush}"

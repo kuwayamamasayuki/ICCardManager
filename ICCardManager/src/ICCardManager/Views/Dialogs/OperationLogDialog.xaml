@@ -202,7 +202,8 @@
                             AutomationProperties.Name="検索条件をクリア"
                             AutomationProperties.HelpText="入力した検索条件をすべてリセットして既定値に戻します"
                             ToolTip="検索条件をクリア"/>
-                    <Button Content="検索"
+                    <Button Style="{StaticResource FilledActionButtonStyle}"
+                            Content="検索"
                             Command="{Binding SearchCommand}"
                             Background="{DynamicResource PrimaryBrush}"
                             Foreground="{DynamicResource OnPrimaryBrush}"

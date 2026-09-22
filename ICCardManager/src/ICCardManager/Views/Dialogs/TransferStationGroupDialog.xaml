@@ -151,7 +151,8 @@
                          ダイアログが閉じて入力が失われる（入力を持つ他のダイアログと同じ流儀）。
                          Issue #2080: 編集中に限るのは、一覧を見ているだけのときに
                          Enter で保存が走らないようにするため。 -->
-                    <Button Content="保存"
+                    <Button Style="{StaticResource FilledActionButtonStyle}"
+                            Content="保存"
                             Command="{Binding SaveCommand}"
                             IsDefault="{Binding IsEditing}"
                             Padding="20,8"
