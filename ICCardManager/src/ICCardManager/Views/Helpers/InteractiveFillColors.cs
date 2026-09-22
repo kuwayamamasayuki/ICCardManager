@@ -16,9 +16,11 @@ namespace ICCardManager.Views.Helpers
     /// <para>
     /// <b>是正は「別の色へ差し替える」のではなく「同じ色を文字色と逆方向へずらす」形で行う。</b>
     /// 文字色より塗りが明るければ塗りを暗く、暗ければ明るくする。この向きなら
-    /// <b>コントラスト比は必ず上がる</b>（相対輝度が文字色から離れるだけなので単調）ため、
+    /// <b>コントラスト比は上がる</b>（相対輝度が文字色から離れるだけなので単調）ため、
     /// 通常状態が 4.5:1 を満たしていれば対話状態も自動的に満たす。役割ごとの hover 色を人手で
     /// 選び直す必要が無く、「同じ判断を配らない」（<c>db-write-conventions.md</c> #1763）も守れる。
+    /// <b>逆方向に余地が無い塗り</b>（ほぼ白い塗り）だけは例外で、
+    /// 可読性を保てる範囲で文字色側へずらす（<see cref="Shift"/> を参照）。
     /// </para>
     /// <para>
     /// <b>色相は保つ</b>。暗くする側はチャンネルの定数倍（RGB 比が変わらない）、明るくする側は
@@ -48,6 +50,16 @@ namespace ICCardManager.Views.Helpers
         /// 「押したのか、載せているだけなのか」が分からない。
         /// </remarks>
         public const double PressedAmount = 0.30;
+
+        /// <summary>
+        /// 文字色側へずらすことを許す下限のコントラスト比（WCAG 2.1 AA、通常サイズの文字）。
+        /// </summary>
+        public const double MinimumContrast = 4.5;
+
+        /// <summary>
+        /// 「逆方向に余地がある」とみなす、いちばん大きく動いたチャンネルの差（0〜255）。
+        /// </summary>
+        private const int MinimumPerceptibleChannelShift = 12;
 
         /// <summary>
         /// 対話状態の塗りを決める。<b>状態の優先順位もここ 1 か所で決める。</b>
@@ -115,19 +127,68 @@ namespace ICCardManager.Views.Helpers
         }
 
         /// <summary>
-        /// 塗りを文字色と<b>逆方向</b>へ <paramref name="amount"/> だけずらす。
+        /// 塗りを対話状態のぶんだけずらす。
         /// </summary>
         /// <remarks>
-        /// 文字色のほうが明るい（あるいは同じ）なら暗く、暗いなら明るくする。
-        /// どちらの向きでも塗りの相対輝度は文字色から遠ざかるので、
-        /// WCAG のコントラスト比は<b>下がらない</b>。
+        /// <para>
+        /// <b>既定は文字色と逆方向</b>（文字色のほうが明るいか同じなら暗く、暗いなら明るく）。
+        /// この向きなら塗りの相対輝度は文字色から遠ざかるだけなので、
+        /// WCAG のコントラスト比は下がらない。
+        /// </para>
+        /// <para>
+        /// <b>ただし逆方向に余地が無い塗りがある</b>。ほぼ白い塗り（帳票の「先月／今月」の
+        /// 非選択状態 <c>ReturnBackgroundBrush</c> #E3F2FD など）をさらに明るくしても
+        /// チャンネルが数しか動かず、<b>対話状態のフィードバックが消える</b>
+        /// （既定テンプレートは #BEE6FD をはっきり当てていたので、そのままでは退行になる）。
+        /// そのときは<b>可読性を保てる範囲で文字色側へずらす</b> —
+        /// <see cref="MinimumContrast"/> を下回らないことを条件にし、
+        /// 下回るなら逆方向のまま（小さな変化）に留める。
+        /// </para>
+        /// <para>
+        /// <b>向きは 1 回だけ決める。</b>判定に使うのは <see cref="HoverAmount"/>（小さいほうの幅）で、
+        /// 幅ごとに決め直すと hover と pressed で向きが食い違い得る
+        /// （幅が大きいほど変化は大きいので、小さいほうで足りるなら大きいほうでも足りる）。
+        /// </para>
         /// </remarks>
         public static Color Shift(Color fill, Color text, double amount)
         {
-            return RelativeLuminance(text) >= RelativeLuminance(fill)
-                ? Darken(fill, amount)
-                : Lighten(fill, amount);
+            var textIsLighter = RelativeLuminance(text) >= RelativeLuminance(fill);
+
+            var away = textIsLighter ? Darken(fill, amount) : Lighten(fill, amount);
+            var reference = textIsLighter ? Darken(fill, HoverAmount) : Lighten(fill, HoverAmount);
+            if (IsPerceptible(fill, reference))
+            {
+                return away;
+            }
+
+            var toward = textIsLighter ? Lighten(fill, amount) : Darken(fill, amount);
+            return Contrast(toward, text) >= MinimumContrast ? toward : away;
         }
+
+        /// <summary>2 色の WCAG コントラスト比（明暗どちらが引数でも同じ値）。</summary>
+        public static double Contrast(Color a, Color b)
+        {
+            var la = RelativeLuminance(a);
+            var lb = RelativeLuminance(b);
+            return (Math.Max(la, lb) + 0.05) / (Math.Min(la, lb) + 0.05);
+        }
+
+        /// <summary>
+        /// ずらした結果が見て分かるか。
+        /// </summary>
+        /// <remarks>
+        /// 厳密には CIE L*a*b* の ΔE で測るべきだが、ここで要るのは
+        /// 「向きを決めるための、余地があるかどうか」だけなので、
+        /// <b>いちばん大きく動いたチャンネルの差</b>で近似する。
+        /// <see cref="MinimumPerceptibleChannelShift"/> はほぼ白い塗り（差 1〜6）と
+        /// 意味色の塗り（差 18〜32）の間が広く空いていることから選んだ。
+        /// 近似の妥当性は、実パレットの ΔE を測る回帰テストが対で担保する。
+        /// </remarks>
+        private static bool IsPerceptible(Color from, Color to)
+            => Math.Max(
+                   Math.Abs(from.R - to.R),
+                   Math.Max(Math.Abs(from.G - to.G), Math.Abs(from.B - to.B)))
+               >= MinimumPerceptibleChannelShift;
 
         /// <summary>WCAG 2.1 の相対輝度（0〜1）。</summary>
         public static double RelativeLuminance(Color color)

@@ -69,59 +69,92 @@ public class InteractiveStateContrastConventionTests
     #region 導出の性質（実データが空でも働く）
 
     [Theory]
-    // 濃い塗り＋白文字 → 暗くする（Issue #2085 が選んだ 3 色 ＋ 履歴詳細の InfoTextBrush 流用）
+    // 濃い塗り＋白文字（逆方向＝暗くする側に余地がある）
     [InlineData("#357A38", "#FFFFFF")]
     [InlineData("#995B00", "#FFFFFF")]
     [InlineData("#1976D2", "#FFFFFF")]
     [InlineData("#1565C0", "#FFFFFF")]
-    // 淡い塗り＋濃い文字 → 明るくする（DangerButtonStyle / ReportDialog の非選択状態）
+    // 淡い塗り＋濃い文字（逆方向＝明るくする側に余地が無い）
     [InlineData("#FFEBEE", "#B71C1C")]
     [InlineData("#E3F2FD", "#000000")]
+    [InlineData("#FFF3E0", "#732800")]
     // 極端な入力
     [InlineData("#FFFFFF", "#000000")]
     [InlineData("#000000", "#FFFFFF")]
-    public void ずらした塗りはコントラストを下げないこと(string fill, string text)
+    public void ずらした塗りが可読性を保つこと(string fill, string text)
     {
         var f = Parse(fill);
         var t = Parse(text);
-        var baseline = Contrast(f, t);
+        Contrast(f, t).Should().BeGreaterOrEqualTo(MinContrast, "前提: 通常状態が読めること");
 
         foreach (var amount in new[] { InteractiveFillColors.HoverAmount, InteractiveFillColors.PressedAmount })
         {
             Contrast(InteractiveFillColors.Shift(f, t, amount), t).Should().BeGreaterOrEqualTo(
-                baseline,
-                "{0} の上の {1} は、ずらし幅 {2} でもコントラスト（{3:F2}:1）を下回らないこと",
-                fill,
-                text,
-                amount,
-                baseline);
+                MinContrast, "{0} の上の {1} は、ずらし幅 {2} でも読めること", fill, text, amount);
         }
     }
 
     [Theory]
-    [InlineData("#357A38", "#FFFFFF", true)]  // 文字が明るい → 暗くする
+    [InlineData("#357A38", "#FFFFFF", true)]  // 文字が明るい → 暗くする（逆方向に余地あり）
     [InlineData("#995B00", "#FFFFFF", true)]
-    [InlineData("#FFEBEE", "#B71C1C", false)] // 文字が暗い → 明るくする
-    [InlineData("#E3F2FD", "#000000", false)]
-    public void ずらす向きは文字色と逆であること(string fill, string text, bool expectDarker)
+    [InlineData("#FFEBEE", "#B71C1C", false)] // 逆方向（明るく）に余地が無いが、文字色側へずらすと読めなくなるので逆方向のまま
+    public void 逆方向に余地があるときは文字色と逆へずらすこと(string fill, string text, bool expectDarker)
     {
         var f = Parse(fill);
         var shifted = InteractiveFillColors.Shift(f, Parse(text), InteractiveFillColors.HoverAmount);
 
-        var darker = InteractiveFillColors.RelativeLuminance(shifted) < InteractiveFillColors.RelativeLuminance(f);
-        darker.Should().Be(
+        IsDarker(f, shifted).Should().Be(
             expectDarker,
             "{0} に {1} を載せるとき、塗りは文字色と逆方向へ動くこと（暗くする={2}）",
             fill,
             text,
             expectDarker);
+        Contrast(shifted, Parse(text)).Should().BeGreaterOrEqualTo(
+            Contrast(f, Parse(text)), "逆方向へずらす限りコントラストは下がらないこと");
+    }
+
+    [Theory]
+    // ほぼ白い塗りは「さらに明るく」に余地が無く、逆方向のままでは対話状態の合図が消える
+    // （既定テンプレートは #BEE6FD をはっきり当てていたので、そのままでは退行になる）
+    [InlineData("#E3F2FD", "#000000")] // 帳票「先月／今月」の非選択状態
+    [InlineData("#FFF3E0", "#732800")] // 職員証認証ダイアログのデバッグ用ボタン
+    public void 逆方向に余地が無いときは可読性を保てる範囲で文字色側へずらすこと(string fill, string text)
+    {
+        var f = Parse(fill);
+        var t = Parse(text);
+
+        foreach (var amount in new[] { InteractiveFillColors.HoverAmount, InteractiveFillColors.PressedAmount })
+        {
+            var shifted = InteractiveFillColors.Shift(f, t, amount);
+
+            IsDarker(f, shifted).Should().BeTrue(
+                "{0} は明るくする余地が無いので、読める範囲で文字色側（暗い側）へずらすこと", fill);
+            ColorMetrics.DeltaE(ToHex(f), ToHex(shifted)).Should().BeGreaterOrEqualTo(
+                MinPerceptibleDeltaE, "ずらした結果が見て分かること");
+            Contrast(shifted, t).Should().BeGreaterOrEqualTo(MinContrast, "それでも読めること");
+        }
+    }
+
+    [Theory]
+    [InlineData("#357A38", "#FFFFFF")]
+    [InlineData("#E3F2FD", "#000000")]
+    [InlineData("#FFEBEE", "#B71C1C")]
+    public void ずらす向きがhoverとpressedで一致すること(string fill, string text)
+    {
+        // 幅ごとに向きを決め直すと、載せると明るくなり押すと暗くなる、という一貫しない挙動になる
+        var f = Parse(fill);
+        var t = Parse(text);
+
+        IsDarker(f, InteractiveFillColors.Shift(f, t, InteractiveFillColors.PressedAmount)).Should().Be(
+            IsDarker(f, InteractiveFillColors.Shift(f, t, InteractiveFillColors.HoverAmount)),
+            "{0} の hover と pressed は同じ向きへずれること", fill);
     }
 
     [Theory]
     [InlineData("#357A38", "#FFFFFF")]
     [InlineData("#995B00", "#FFFFFF")]
     [InlineData("#1976D2", "#FFFFFF")]
-    [InlineData("#FFEBEE", "#B71C1C")]
+    [InlineData("#E3F2FD", "#000000")]
     public void ずらしても色相が保たれること(string fill, string text)
     {
         // 緑＝肯定／橙＝注意／青＝主要という役割の手掛かりが、対話中に失われないこと。
@@ -189,27 +222,24 @@ public class InteractiveStateContrastConventionTests
     #region 実データ（本番のパレットに当てる）
 
     [Fact]
-    public void 塗りの上に載る文字は対話状態でも4対5対1以上のコントラストを持つこと()
+    public void 結線したボタンは対話状態でも4対5対1以上のコントラストを持つこと()
     {
         var violations = new List<string>();
 
-        foreach (var pair in LightTextPairs())
+        foreach (var state in RoutedButtonFills())
         {
-            var fill = Parse(pair.BackgroundColor);
-            var text = Parse(pair.ForegroundColor);
-
-            foreach (var (state, amount) in InteractiveAmounts())
+            foreach (var (label, amount) in InteractiveAmounts())
             {
-                var shifted = InteractiveFillColors.Shift(fill, text, amount);
-                var contrast = Contrast(shifted, text);
+                var shifted = InteractiveFillColors.Shift(state.Fill, state.Text, amount);
+                var contrast = Contrast(shifted, state.Text);
                 if (contrast < MinContrast)
                 {
                     violations.Add(string.Format(
                         CultureInfo.InvariantCulture,
                         "{0} の上の {1}（{2}） = {3:F2}:1",
-                        pair.BackgroundKey,
-                        pair.ForegroundKey,
-                        state,
+                        state.FillKey,
+                        state.TextKey,
+                        label,
                         contrast));
                 }
             }
@@ -220,20 +250,20 @@ public class InteractiveStateContrastConventionTests
     }
 
     [Fact]
-    public void 対話状態の変化が知覚できること()
+    public void 結線したボタンの対話状態の変化が知覚できること()
     {
-        // コントラストの表明だけでは、ずらし幅を 0 にした実装（＝押せる合図が消える）を検出できない
+        // コントラストの表明だけでは、ずらし幅を 0 にした実装（＝押せる合図が消える）を検出できない。
+        // **文字色を明示していないボタンも対象にする** — 帳票の「先月／今月」の非選択状態は
+        // ほぼ白い塗り＋既定の濃い文字で、「文字色と逆方向」だけに倒すと ΔE 1.3 で合図が消える
         var weak = new List<string>();
 
-        foreach (var pair in LightTextPairs())
+        foreach (var state in RoutedButtonFills())
         {
-            var fill = Parse(pair.BackgroundColor);
-            var text = Parse(pair.ForegroundColor);
-            var hover = InteractiveFillColors.Shift(fill, text, InteractiveFillColors.HoverAmount);
-            var pressed = InteractiveFillColors.Shift(fill, text, InteractiveFillColors.PressedAmount);
+            var hover = InteractiveFillColors.Shift(state.Fill, state.Text, InteractiveFillColors.HoverAmount);
+            var pressed = InteractiveFillColors.Shift(state.Fill, state.Text, InteractiveFillColors.PressedAmount);
 
-            AddIfBelow(weak, pair.BackgroundKey, "通常→hover", fill, hover);
-            AddIfBelow(weak, pair.BackgroundKey, "hover→pressed", hover, pressed);
+            AddIfBelow(weak, state.FillKey, "通常→hover", state.Fill, hover);
+            AddIfBelow(weak, state.FillKey, "hover→pressed", hover, pressed);
         }
 
         weak.Should().BeEmpty(
@@ -269,12 +299,16 @@ public class InteractiveStateContrastConventionTests
     public void 走査が実データへ届いていること()
     {
         // 実データが空でも空振りしないよう、母集団が実在することを表明する
-        var pairs = LightTextPairs();
+        var states = RoutedButtonFills();
 
-        pairs.Should().HaveCountGreaterThan(2, "白文字を載せた塗りの組が複数あること");
-        pairs.Should().Contain(
-            p => p.BackgroundKey == "SuccessActionBrush" && p.ForegroundKey == "OnPrimaryBrush",
+        states.Should().HaveCountGreaterThan(2, "結線したボタンの塗りが複数あること");
+        states.Should().Contain(
+            st => st.FillKey == "SuccessActionBrush" && st.TextKey == "OnPrimaryBrush",
             "白文字を載せた主要ボタンが走査対象に含まれること");
+        states.Should().Contain(
+            st => st.FillKey == "ReturnBackgroundBrush" && st.TextKey == DefaultTextKey,
+            "文字色を明示していないボタン（帳票の「先月／今月」の非選択状態）も"
+                + "既定の濃い文字として走査対象に含まれること");
     }
 
     [Fact]
@@ -373,6 +407,39 @@ public class InteractiveStateContrastConventionTests
 
         offenders.Should().BeEmpty(
             "トリガーで枠の塗りを別のブラシへ差し替えないこと（Issue #2094）");
+    }
+
+    [Fact]
+    public void 共有テンプレートがアクセスキーを認識すること()
+    {
+        // ContentPresenter.RecognizesAccessKey の既定値は false で、true にしているのは
+        // WPF の既定テンプレートだけ。自前テンプレートで省くと「保存(_S)」の _ が下線にならず
+        // そのまま表示され、Alt+S も効かなくなる（Issue #1276 の退行。コードレビューで検出）
+        var presenters = XamlElementInspection.EnumerateStartTags(SharedTemplate())
+            .Where(t => t.StartTag.StartsWith("<ContentPresenter", StringComparison.Ordinal))
+            .ToList();
+
+        presenters.Should().NotBeEmpty("共有テンプレートが内容を描画していること");
+        presenters.Should().OnlyContain(
+            t => XamlElementInspection.GetAttribute(t.StartTag, "RecognizesAccessKey") == "True",
+            "共有テンプレートの ContentPresenter は RecognizesAccessKey=\"True\" を明示すること");
+    }
+
+    [Fact]
+    public void アクセスキーを持つボタンが結線対象に含まれること()
+    {
+        // 上の表明は「テンプレートが正しい」ことしか言わない。アクセスキーを持つボタンが
+        // 実際にこのテンプレートを通ることを対で固定しないと、結線を外した実装でも緑になる
+        var withMnemonic = FilledButtons()
+            .Where(b => HasAccessKey(b.Element.StartTag) || HasAccessKey(b.Element.Body))
+            .Select(b => b.Source)
+            .Distinct()
+            .ToList();
+
+        withMnemonic.Should().NotBeEmpty(
+            "アクセスキー（Content の _X）を持つボタンが結線対象に含まれること（実際に結線されているかは 塗りと文字色を持つボタンは共有テンプレートのスタイルを使うこと が見る）");
+        withMnemonic.Should().Contain(
+            "SettingsDialog.xaml", "設定画面の「保存(_S)」が走査対象に含まれること");
     }
 
     #endregion
@@ -522,27 +589,96 @@ public class InteractiveStateContrastConventionTests
         return keys;
     }
 
+    /// <summary>
+    /// 文字色を明示していないボタンに載る、テーマ既定の文字色。
+    /// </summary>
+    /// <remarks>
+    /// WPF の既定は <c>SystemColors.ControlTextBrush</c>（標準テーマで黒）。
+    /// 明示されていないことを「検査しない理由」にすると、
+    /// <b>書かれていないことが緩和の理由</b>になる（#2085 のしきい値の判断と同じ）。
+    /// </remarks>
+    private const string DefaultTextKey = "(既定の濃い文字)";
+
+    /// <summary>共有テンプレートへ結線したボタンが、ある状態で見せる塗りと文字色。</summary>
+    private sealed class ButtonFillState
+    {
+        public ButtonFillState(string fillKey, string textKey, Color fill, Color text)
+        {
+            FillKey = fillKey;
+            TextKey = textKey;
+            Fill = fill;
+            Text = text;
+        }
+
+        public string FillKey { get; }
+
+        public string TextKey { get; }
+
+        public Color Fill { get; }
+
+        public Color Text { get; }
+    }
+
+    /// <summary>
+    /// 共有テンプレートへ結線したボタンが取り得る「塗り × 文字色」を、色の重複を除いて集める。
+    /// </summary>
+    /// <remarks>
+    /// <b>母集団を「文字色が明示された組」に限らない</b>（コードレビューで検出）。
+    /// 帳票の「先月／今月」は非選択状態が <c>ReturnBackgroundBrush</c>(#E3F2FD) ＋ 既定の濃い文字で、
+    /// 白文字の組しか見ない検査では**構造上**この形を見られない。既定テンプレートは hover に
+    /// #BEE6FD をはっきり当てていたので、見落とすと<b>対話フィードバックが消える退行</b>になる。
+    /// </remarks>
+    private static IReadOnlyList<ButtonFillState> RoutedButtonFills()
+    {
+        var brushes = AccessibilityBrushes.Load();
+        var defaultText = Parse(DefaultDarkText);
+        var result = new Dictionary<string, ButtonFillState>(StringComparer.Ordinal);
+
+        foreach (var button in FilledButtons())
+        {
+            var specs = FillForegroundPairs.ExtractSameTagFills(button.Element.StartTag)
+                .Concat(FillForegroundPairs.ExtractSetterFills(button.Element.Body));
+
+            foreach (var spec in specs)
+            {
+                if (!brushes.TryGetValue(spec.BackgroundKey, out var fill))
+                {
+                    continue;
+                }
+
+                var textKey = DefaultTextKey;
+                var text = defaultText;
+                if (spec.ForegroundKey != null)
+                {
+                    if (!brushes.TryGetValue(spec.ForegroundKey, out var foreground))
+                    {
+                        continue;
+                    }
+
+                    textKey = spec.ForegroundKey;
+                    text = Parse(foreground);
+                }
+
+                result[spec.BackgroundKey + "/" + textKey] =
+                    new ButtonFillState(spec.BackgroundKey, textKey, Parse(fill), text);
+            }
+        }
+
+        return result.Values.ToList();
+    }
+
+    private static bool IsDarker(Color from, Color to)
+        => InteractiveFillColors.RelativeLuminance(to) < InteractiveFillColors.RelativeLuminance(from);
+
+    /// <summary>アクセスキー（<c>_X</c>）を含むか。<c>__</c> はエスケープなので数えない。</summary>
+    private static bool HasAccessKey(string text)
+        => System.Text.RegularExpressions.Regex.IsMatch(text, @"(?<!_)_[A-Za-z0-9]");
+
     /// <summary>塗りと文字色の組を、色の重複を除いて返す。</summary>
     private static IReadOnlyList<FillForegroundPairs.FillPair> DistinctPairs()
         => FillForegroundPairs.CollectResolved()
             .GroupBy(p => p.BackgroundKey + "/" + p.ForegroundKey)
             .Select(g => g.First())
-            .ToList();
-
-    /// <summary>
-    /// 本 Issue の対象となる組 — <b>既定テンプレートの hover の上で読めなくなる文字色</b>を持つもの。
-    /// </summary>
-    /// <remarks>
-    /// 淡い塗り＋濃い文字の組（デバッグ用の仮想タッチボタン、未使用の <c>DangerButtonStyle</c>）は
-    /// 既定テンプレートでも読めるので対象外。
-    /// <b>明るい塗りは「文字色と逆方向（さらに明るく）」への余地がほとんど無い</b>ため、
-    /// 対話状態の色差を可読性と両立して出せない — 色で合図したいなら塗りを濃色へ寄せること
-    /// （Issue #2085 と同じ判断）。対象外であることは
-    /// <see cref="対象外の組が既定テンプレートのhoverでも読めること"/> が対で表明する。
-    /// </remarks>
-    private static IReadOnlyList<FillForegroundPairs.FillPair> LightTextPairs()
-        => DistinctPairs()
-            .Where(p => IsUnreadableOnThemeHover(p.ForegroundColor))
             .ToList();
 
     private static bool IsUnreadableOnThemeHover(string foregroundColor)

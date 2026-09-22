@@ -235,8 +235,11 @@
                     <Binding Source="{StaticResource DisabledFillBrush}"/>
                 </MultiBinding>
             </Border.Background>
+            <!-- RecognizesAccessKey の既定値は false で、true にしているのは WPF の既定テンプレートだけ。
+                 省くと「保存(_S)」の _ が下線にならずそのまま表示され、Alt+S も効かなくなる（Issue #1276 の退行） -->
             <ContentPresenter HorizontalAlignment="Center"
-                              VerticalAlignment="Center"/>
+                              VerticalAlignment="Center"
+                              RecognizesAccessKey="True"/>
         </Border>
         <ControlTemplate.Triggers>
             <!-- 無効時は塗りを灰色へ固定する（塗りの側はコンバーターが決める）。
@@ -286,6 +289,11 @@
     </Style>
 
     <!-- 危険ボタンスタイル（削除など） -->
+    <!-- Issue #2094: 淡い塗り（#FFEBEE）＋濃い文字なので、対話状態で「文字色と逆方向（さらに明るく）」へ
+         ずらす余地がほとんど無く、文字色側（暗く）へずらすと 4.5:1 を割る（hover で 4.09:1）。
+         結果として対話状態の色の変化は小さい。濃い赤の塗りへ寄せる案は、WarningActionBrush(#995B00) との
+         色覚多様性での距離が ΔEcvd 6.71（しきい値 8.0 未満）で分離できなくなるため採らない。
+         現状このスタイルを使っているボタンは無い（使うときは上を踏まえて塗りを選び直すこと） -->
     <Style x:Key="DangerButtonStyle" TargetType="Button" BasedOn="{StaticResource AccessibleButtonStyle}">
         <Setter Property="Background" Value="{StaticResource ErrorBackgroundBrush}"/>
         <Setter Property="Foreground" Value="{StaticResource ErrorForegroundBrush}"/>

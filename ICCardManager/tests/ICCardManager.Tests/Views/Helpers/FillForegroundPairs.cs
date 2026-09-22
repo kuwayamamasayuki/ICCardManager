@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -108,19 +108,53 @@ internal static class FillForegroundPairs
         return result;
     }
 
+    /// <summary>
+    /// 塗りと、同じ場所で決まる文字色（無ければ <c>null</c>）。
+    /// </summary>
+    /// <remarks>
+    /// <b>文字色が書かれていない塗りも返す</b>のは、対話状態の検査（Issue #2094）が
+    /// 「文字色は既定のまま塗りだけを指定したボタン」（<c>ReportDialog.xaml</c> の
+    /// 「先月／今月」の非選択状態が実在）も見る必要があるため。
+    /// コントラストの検査（Issue #2085）は文字色が決まる組だけを使うので、
+    /// <see cref="ExtractSameTagPairs"/> / <see cref="ExtractSetterPairs"/> が絞り込む。
+    /// <b>走査を 2 つに分けない</b> — 分けると片方だけが本番の書き方の変化に追随できなくなる（#1763）。
+    /// </remarks>
+    internal sealed class FillSpec
+    {
+        public FillSpec(PairForm form, string backgroundKey, string? foregroundKey, int line)
+        {
+            Form = form;
+            BackgroundKey = backgroundKey;
+            ForegroundKey = foregroundKey;
+            Line = line;
+        }
+
+        public PairForm Form { get; }
+
+        public string BackgroundKey { get; }
+
+        public string? ForegroundKey { get; }
+
+        public int Line { get; }
+    }
+
     /// <summary>① 同一の開始タグに <c>Background</c> と <c>Foreground</c> の両方がある形。</summary>
     internal static IEnumerable<FillPair> ExtractSameTagPairs(string xaml)
+        => ToPairs(ExtractSameTagFills(xaml));
+
+    /// <summary>① の一般形。<c>Foreground</c> を持たない塗りも返す。</summary>
+    internal static IEnumerable<FillSpec> ExtractSameTagFills(string xaml)
     {
         foreach (var tag in XamlElementInspection.EnumerateStartTags(xaml))
         {
             var background = ResourceKeyOf(XamlElementInspection.GetPropertyAttribute(tag.StartTag, "Background"));
-            var foreground = ResourceKeyOf(XamlElementInspection.GetPropertyAttribute(tag.StartTag, "Foreground"));
-            if (background == null || foreground == null)
+            if (background == null)
             {
                 continue;
             }
 
-            yield return new FillPair(PairForm.SameTag, background, foreground) { Line = tag.Line };
+            var foreground = ResourceKeyOf(XamlElementInspection.GetPropertyAttribute(tag.StartTag, "Foreground"));
+            yield return new FillSpec(PairForm.SameTag, background, foreground, tag.Line);
         }
     }
 
@@ -133,6 +167,10 @@ internal static class FillForegroundPairs
     /// 「非選択時の塗り × 選択時の文字色」という<b>実際には同時に成立しない組</b>を作る。
     /// </remarks>
     internal static IEnumerable<FillPair> ExtractSetterPairs(string xaml)
+        => ToPairs(ExtractSetterFills(xaml));
+
+    /// <summary>② の一般形。<c>Foreground</c> の <c>Setter</c> を持たない塗りも返す。</summary>
+    internal static IEnumerable<FillSpec> ExtractSetterFills(string xaml)
     {
         foreach (var tagName in SetterBlockTags)
         {
@@ -161,13 +199,18 @@ internal static class FillForegroundPairs
                     }
                 }
 
-                if (background != null && foreground != null)
+                if (background != null)
                 {
-                    yield return new FillPair(PairForm.Setter, background, foreground) { Line = block.Line };
+                    yield return new FillSpec(PairForm.Setter, background, foreground, block.Line);
                 }
             }
         }
     }
+
+    private static IEnumerable<FillPair> ToPairs(IEnumerable<FillSpec> specs)
+        => specs
+            .Where(spec => spec.ForegroundKey != null)
+            .Select(spec => new FillPair(spec.Form, spec.BackgroundKey, spec.ForegroundKey!) { Line = spec.Line });
 
     /// <summary>
     /// <c>{DynamicResource K}</c> / <c>{StaticResource K}</c> からキー <c>K</c> を取り出す。
