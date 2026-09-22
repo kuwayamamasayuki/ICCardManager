@@ -702,7 +702,8 @@
                         AutomationProperties.Name="出力したファイルを開く"
                         ToolTip="直前に出力した Excel ファイルを開く"/>
 
-                <Button Content="Excel出力"
+                <Button Style="{StaticResource FilledActionButtonStyle}"
+                        Content="Excel出力"
                         Command="{Binding ExportToExcelCommand}"
                         Padding="20,10"
                         MinWidth="120"

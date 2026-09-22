@@ -137,7 +137,8 @@
                     AutomationProperties.Name="中止して修正する"
                     AutomationProperties.HelpText="帳票作成を中止します。履歴画面で警告の内容を修正してください。"
                     ToolTip="帳票作成を中止する (Escape)"/>
-            <Button Content="このまま作成する"
+            <Button Style="{StaticResource FilledActionButtonStyle}"
+                    Content="このまま作成する"
                     Click="ContinueCreationButton_Click"
                     Visibility="{Binding IsConfirmationMode, Converter={StaticResource BoolToVisibilityConverter}}"
                     Padding="20,10"

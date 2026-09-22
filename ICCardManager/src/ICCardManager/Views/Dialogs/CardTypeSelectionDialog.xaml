@@ -82,7 +82,8 @@
              入らなければ段を分ける WrapPanel へ移す（UniformGrid は全ボタンを同幅に揃えて
              特大で切れるため使わない。#1692）。高さも固定をやめ MinHeight とする。 -->
         <WrapPanel Grid.Row="1" Orientation="Horizontal" HorizontalAlignment="Center">
-            <Button x:Name="StaffCardButton"
+            <Button Style="{StaticResource FilledActionButtonStyle}"
+                    x:Name="StaffCardButton"
                     Content="職員証"
                     MinWidth="120"
                     MinHeight="40"
@@ -97,7 +98,8 @@
                     AutomationProperties.HelpText="このカードを職員証として登録します"
                     ToolTip="職員の認証に使用するカードとして登録"/>
 
-            <Button x:Name="IcCardButton"
+            <Button Style="{StaticResource FilledActionButtonStyle}"
+                    x:Name="IcCardButton"
                     Content="交通系ICカード"
                     MinWidth="140"
                     MinHeight="40"

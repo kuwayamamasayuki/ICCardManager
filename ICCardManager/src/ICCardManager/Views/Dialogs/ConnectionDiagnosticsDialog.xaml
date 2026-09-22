@@ -179,7 +179,8 @@
                         AutomationProperties.HelpText="もう一度すべての項目を確認します。"
                         ToolTip="もう一度すべての項目を確認します"/>
 
-                <Button Content="結果をコピー"
+                <Button Style="{StaticResource FilledActionButtonStyle}"
+                        Content="結果をコピー"
                         Command="{Binding CopyResultCommand}"
                         Padding="20,10"
                         MinWidth="120"

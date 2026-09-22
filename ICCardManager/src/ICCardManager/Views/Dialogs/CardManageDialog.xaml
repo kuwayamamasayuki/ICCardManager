@@ -1,4 +1,4 @@
-<Window x:Class="ICCardManager.Views.Dialogs.CardManageDialog"
+﻿<Window x:Class="ICCardManager.Views.Dialogs.CardManageDialog"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
@@ -370,7 +370,8 @@
                     <!-- Issue #2080: 入力欄で Enter を押したときに走るのは「保存」であること。
                          既定ボタンを編集中に限るのは、一覧を見ているだけのときに
                          Enter で保存が走らないようにするため（TransferStationGroupDialog と同じ流儀）。 -->
-                    <Button Content="保存"
+                    <Button Style="{StaticResource FilledActionButtonStyle}"
+                            Content="保存"
                             Command="{Binding SaveCommand}"
                             IsDefault="{Binding IsEditing}"
                             Padding="15,8"

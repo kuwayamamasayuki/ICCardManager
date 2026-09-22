@@ -165,7 +165,8 @@
                             </DataTemplate>
                         </ComboBox.ItemTemplate>
                     </ComboBox>
-                    <Button Content="印刷"
+                    <Button Style="{StaticResource FilledActionButtonStyle}"
+                            Content="印刷"
                             Command="{Binding PrintCommand}"
                             MinHeight="28"
                             Padding="20,0"

@@ -502,7 +502,8 @@
                         AutomationProperties.Name="保存せず次の履歴へ"
                         ToolTip="保存せずに次の履歴を開きます"/>
                 <!-- 保存して次へ（Issue #1134） -->
-                <Button Content="保存して次へ"
+                <Button Style="{StaticResource FilledActionButtonStyle}"
+                        Content="保存して次へ"
                         Command="{Binding SaveAndEditNextCommand}"
                         IsEnabled="{Binding CanSave}"
                         Visibility="{Binding ShowSaveAndNextButton, Converter={StaticResource BoolToVisibilityConverter}}"
@@ -513,7 +514,8 @@
                         FontSize="{DynamicResource BaseFontSize}"
                         AutomationProperties.Name="保存して次の履歴を編集"
                         ToolTip="保存して次の履歴を開きます"/>
-                <Button Content="保存"
+                <Button Style="{StaticResource FilledActionButtonStyle}"
+                        Content="保存"
                         Command="{Binding SaveCommand}"
                         IsEnabled="{Binding CanSave}"
                         Padding="25,10"
