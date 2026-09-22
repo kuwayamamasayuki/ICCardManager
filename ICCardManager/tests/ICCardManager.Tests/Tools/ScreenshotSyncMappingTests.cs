@@ -161,16 +161,76 @@ namespace ICCardManager.Tests.Tools
         [Fact]
         public void 撮影スクリプト_Publishは対応表に載っている画像だけをコピーする()
         {
-            var script = File.ReadAllText(
-                Path.Combine(RepoRoot, "ICCardManager", "tools", "take-screenshots-uitest.ps1"));
-            // 規約の理由を書いたコメント自体が一致する極性の反転を避ける（#1692）
-            var code = string.Join("\n", script.Split('\n').Where(l => !l.TrimStart().StartsWith("#")));
+            var code = CaptureScriptCode();
 
             Regex.IsMatch(code, @"Get-ChildItem\s+-Path\s+\$OutputDir\s+-Filter\s+\*\.png\s*\)")
                 .Should().BeFalse("出力先の PNG を絞り込まずに集める形は、対象外の成果物まで公開する");
             Regex.IsMatch(code, @"Get-ChildItem\s+-Path\s+\$OutputDir\s+-Filter\s+\*\.png\s*\|\s*Where-Object\s*\{\s*\$targetNames\s+-contains\s+\$_\.Name\s*\}")
                 .Should().BeTrue("公開する画像は対応表由来の $targetNames で絞り込むこと");
             code.Should().Contain("Copy-Item", "絞り込んだ画像を実際にコピーする経路が残っていること");
+        }
+
+        /// <summary>
+        /// 撮影と <c>-Publish</c> の両方が「今回の撮影で作られたか」をマニフェスト 1 か所で判定すること（Issue #2095）。
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// 出力先 <c>auto\</c> は <c>.gitignore</c> 対象で前回の実行の成果物が残り続けるため、
+        /// 「ファイルが存在するか」だけを見る判定は、撮影が漏れた画像の残骸をそのまま再公開する。
+        /// 内容が前回と同じなら <c>git diff</c> にも現れないので、撮影漏れを差分の有無から判別できない。
+        /// 判定は <c>screenshot-capture-manifest.ps1</c> へ寄せ、撮影側は撮影前に対象を消して
+        /// 「存在＝今回作られた」を成立させ、<c>-Publish</c> はマニフェストを検証してから公開する。
+        /// </para>
+        /// <para>
+        /// 撮影パス自体はテストから踏めないので、スクリプトのテキスト上で固定する（#1794）。
+        /// 「禁止された形の不在」と「正しい形の存在」を対で見る — 前者だけだと、判定そのものを消した実装でも緑になる。
+        /// マニフェストスクリプトの判定の中身は <see cref="ScreenshotCaptureManifestScriptTests"/> が固定する。
+        /// </para>
+        /// </remarks>
+        [Fact]
+        public void 撮影スクリプト_撮影前の掃除と公開前の検証をマニフェストへ委譲する()
+        {
+            var code = CaptureScriptCode();
+
+            // 禁止された形: 出力先にファイルがあることを「今回撮れた」の根拠にする
+            Regex.IsMatch(code, @"\$missing\s*=")
+                .Should().BeFalse("ファイルの存在だけで公開可否を決める形は、前回の残骸を再公開する（Issue #2095）");
+            Regex.IsMatch(code, @"\$captured\s*=\s*@\(Get-ChildItem")
+                .Should().BeFalse("完了報告の枚数も、出力先の列挙ではなく今回の撮影の記録から数えること");
+
+            // 正しい形: 撮影前に -Clear、撮影後に -Write、公開前に -Verify
+            code.Should().Contain("screenshot-capture-manifest.ps1", "判定は 1 つのスクリプトへ寄せること");
+            foreach (var mode in new[] { "-Clear", "-Write", "-Verify" })
+            {
+                Regex.IsMatch(code, @"Invoke-ManifestScript\s*\(\s*@\(""" + Regex.Escape(mode) + @"""")
+                    .Should().BeTrue($"マニフェストスクリプトを {mode} で呼ぶ経路が残っていること");
+            }
+        }
+
+        /// <summary>
+        /// <c>-Clear</c> はファイルを消すため、渡してよい名前を対応表由来の <c>$targetNames</c> に限ること（Issue #2095）。
+        /// </summary>
+        [Fact]
+        public void 撮影スクリプト_マニフェストへ渡す対象は対応表由来の名前に限る()
+        {
+            var code = CaptureScriptCode();
+            var calls = Regex.Matches(code, @"Invoke-ManifestScript\s*\((?<args>[^\r\n]*)\)")
+                .Cast<Match>().Select(m => m.Groups["args"].Value).ToList();
+
+            calls.Should().NotBeEmpty("Invoke-ManifestScript の抽出が空振りしていないこと");
+            calls.Should().OnlyContain(a => a.Contains("$targetNames"),
+                "対象は対応表から導いた $targetNames だけを渡すこと（利用者が別用途で置いたファイルを消さない）");
+        }
+
+        /// <summary>
+        /// 撮影スクリプトの本文（コメント行を除く）。
+        /// 規約の理由を書いたコメント自体が検査に一致する極性の反転を避ける（#1692）。
+        /// </summary>
+        private static string CaptureScriptCode()
+        {
+            var script = File.ReadAllText(
+                Path.Combine(RepoRoot, "ICCardManager", "tools", "take-screenshots-uitest.ps1"));
+            return string.Join("\n", script.Split('\n').Where(l => !l.TrimStart().StartsWith("#")));
         }
 
         // ── 抽出の固定（検査ロジック自体をサンプル入力で固定する。#1786） ──

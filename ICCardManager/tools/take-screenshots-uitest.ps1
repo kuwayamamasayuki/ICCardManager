@@ -22,7 +22,7 @@
 #     -Changed          : 対応表（screenshot-sources.json）と git の差分から、撮り直しが必要な画像だけを対象にする
 #     -Base <ref>       : -Changed の比較元（既定: origin/main。無ければ main）
 #     -OutputDir <path> : 出力先（既定: docs\screenshots\auto。.gitignore 対象）
-#     -Publish          : 撮影は行わず、出力先にある画像を docs\screenshots\ へ上書きコピーする
+#     -Publish          : 撮影は行わず、直近の撮影で作られた画像を docs\screenshots\ へ上書きコピーする
 #                         （先に撮影 → auto\ の画像を見比べる → -Publish、の 2 段階で使う）
 #     -SkipBuild        : 本体・UITests の再ビルドをスキップ
 #     -Help             : 使い方を表示（未知の引数を渡した場合も使い方を表示して終了する）
@@ -33,6 +33,9 @@
 #   - 撮影中はアプリのウィンドウが前面に出る。マウス・キーボードに触れないこと
 #   - 既存の DB（%ProgramData%\ICCardManager\iccard.db）は撮影中だけ退避され、終了後に復元される
 #   - 表示スケールは 100% を推奨（docs\screenshots\README.md）
+#   - 撮影の前に対象画像を出力先から消し、撮影後に「今回作られた画像」をマニフェスト
+#     （auto\.screenshot-manifest.json）へ記録する。-Publish はこれを見て、撮影が漏れた画像の
+#     残骸が再公開されるのを防ぐ（Issue #2095。判定は screenshot-capture-manifest.ps1 の 1 か所）
 
 # 位置指定引数を無効化する。有効のままだと `--help` のような未知の引数が最初の文字列パラメータ
 # （-OutputDir）に束縛され、その名前のフォルダーが作られてしまう。
@@ -65,7 +68,7 @@ function Show-Usage {
   -Changed           画面に影響するソースの変更（git の差分）から、撮り直しが必要な画像だけを対象にする
   -Base <ref>        -Changed の比較元。既定: origin/main（無ければ main）
   -OutputDir <path>  出力先。既定: docs\screenshots\auto（Git 管理外）
-  -Publish           撮影は行わず、出力先にある画像を docs\screenshots\ へ上書きコピーする
+  -Publish           撮影は行わず、直近の撮影で作られた画像を docs\screenshots\ へ上書きコピーする
                      （先に撮影して auto\ の画像を見比べてから実行する 2 段階の運用。-Changed と併用すると対象の画像だけ）
   -SkipBuild         本体・UITests の再ビルドをスキップする
   -Help              この使い方を表示する
@@ -96,11 +99,34 @@ $uiTestsCsproj = Join-Path $projectRoot "tests\ICCardManager.UITests\ICCardManag
 $publishedDir = Join-Path $projectRoot "docs\screenshots"
 $mappingPath = Join-Path $publishedDir "screenshot-sources.json"
 $syncScript = Join-Path $PSScriptRoot "screenshot-sync.ps1"
+$manifestScript = Join-Path $PSScriptRoot "screenshot-capture-manifest.ps1"
 if (-not $OutputDir) { $OutputDir = Join-Path $publishedDir "auto" }
+
+# 撮影と -Publish は別プロセスなので、「今回の撮影で作られたか」はマニフェスト 1 か所で判定する（Issue #2095）。
+# 子スクリプトは日本語を UTF-8 で出す。native の stderr で例外にしないよう ErrorActionPreference を落として呼ぶ
+function Invoke-ManifestScript {
+    param([string[]]$ScriptArgs)
+
+    [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+    $allArgs = @("-NoProfile", "-ExecutionPolicy", "Bypass", "-File", $manifestScript, "-OutputDir", $OutputDir) + $ScriptArgs
+    $prevEap = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"
+    try {
+        $out = & powershell.exe @allArgs
+        $code = $LASTEXITCODE
+    } finally {
+        $ErrorActionPreference = $prevEap
+    }
+    return @{ ExitCode = $code; Output = ($out -join "`n") }
+}
 
 # ---- 対応表を読む（撮影対象とパスの定義。撮り直しの判定も同じ表で行う） ----
 if (-not (Test-Path $mappingPath)) {
     Write-Host "[ERROR] 対応表が見つかりません: $mappingPath" -ForegroundColor Red
+    exit 1
+}
+if (-not (Test-Path $manifestScript)) {
+    Write-Host "[ERROR] 撮影記録スクリプトが見つかりません: $manifestScript" -ForegroundColor Red
     exit 1
 }
 $mapping = Get-Content -LiteralPath $mappingPath -Raw -Encoding UTF8 | ConvertFrom-Json
@@ -147,13 +173,16 @@ if ($Publish) {
     # 失敗時の切り分け用に残る history_FAILED.png のような成果物まで docs\screenshots\ へ公開され、
     # そのままコミットされ得る（-Changed の有無によらず効かせる。コードレビューで検出）
     $staged = @(Get-ChildItem -Path $OutputDir -Filter *.png | Where-Object { $targetNames -contains $_.Name })
-    if ($Changed) {
-        $missing = @($targetNames | Where-Object { $n = $_; -not ($staged | Where-Object { $_.Name -eq $n }) })
-        if ($missing.Count -gt 0) {
-            Write-Host "[ERROR] 撮り直しが必要な画像が出力先にありません: $($missing -join ', ')" -ForegroundColor Red
-            Write-Host "        先に -Changed で撮影してください。" -ForegroundColor Yellow
-            exit 1
-        }
+    # 「出力先にあるか」は「今回の撮影で作られたか」ではない。auto\ は .gitignore 対象で前回の実行の成果物が
+    # 残り続けるため、撮影が漏れた画像は残骸がそのまま再公開され、内容が前回と同じなら git diff にも現れない
+    # （Issue #2095）。判定はマニフェスト 1 か所へ寄せる（-Changed の有無によらず効かせる）
+    $verify = Invoke-ManifestScript (@("-Verify") + @("-Targets") + $targetNames)
+    if ($verify.ExitCode -ne 0) {
+        Write-Host "[ERROR] 今回の撮影で作られていない画像を公開しようとしています（上の行が対象）。" -ForegroundColor Red
+        Write-Host "        出力先に残る前回以前の画像は公開しません。" -ForegroundColor Yellow
+        $captureHint = if ($Changed) { ".\tools\take-screenshots-uitest.ps1 -Changed" } else { ".\tools\take-screenshots-uitest.ps1" }
+        Write-Host "        先に撮影してください: $captureHint" -ForegroundColor Yellow
+        exit 1
     }
     if ($staged.Count -eq 0) {
         Write-Host "[ERROR] 出力先に画像がありません: $OutputDir" -ForegroundColor Red
@@ -236,6 +265,15 @@ if (-not $SkipBuild) {
 
 New-Item -ItemType Directory -Force -Path $OutputDir | Out-Null
 
+# 撮影の前に対象の残骸（前回の画像・前回の _FAILED.png・前回のマニフェスト）を消す。
+# こうして初めて「出力先にある＝今回撮れた」が成立し、撮影漏れが完了報告と -Publish の両方に現れる（Issue #2095）
+$clear = Invoke-ManifestScript (@("-Clear") + @("-Targets") + $targetNames)
+if ($clear.ExitCode -ne 0) {
+    Write-Host "[ERROR] 出力先の前回分を消せませんでした（ExitCode: $($clear.ExitCode)）" -ForegroundColor Red
+    exit 1
+}
+$startedAt = (Get-Date).ToString("o")
+
 Write-Host "撮影中..." -ForegroundColor Green
 Write-Host "       出力先: $OutputDir" -ForegroundColor DarkGray
 Write-Host "       撮影中はマウス・キーボードに触れないでください。" -ForegroundColor Yellow
@@ -265,17 +303,39 @@ foreach ($pass in $passes) {
 }
 
 Write-Host ""
-$captured = @(Get-ChildItem -Path $OutputDir -Filter *.png -ErrorAction SilentlyContinue | Where-Object { $targetNames -contains $_.Name })
+# 撮影の前に対象を消してあるので、ここで存在するものは今回の実行で作られたものだけ。
+# 結果はマニフェストへ書き、別プロセスの -Publish が同じ根拠で判定できるようにする（Issue #2095）
+$write = Invoke-ManifestScript (@("-Write", "-StartedAt", $startedAt, "-Json") + @("-Targets") + $targetNames)
+if ($write.ExitCode -ne 0) {
+    Write-Host "[ERROR] 撮影結果を記録できませんでした（ExitCode: $($write.ExitCode)）" -ForegroundColor Red
+    exit 1
+}
+$manifest = $write.Output | ConvertFrom-Json
+$captured = @($manifest.captured)
+$notCaptured = @($manifest.notCaptured)
+
 Write-Host "========================================" -ForegroundColor Cyan
-if ($testExitCode -eq 0) {
-    Write-Host " ✓ 撮影完了: $($captured.Count) 枚（対象 $($targetNames.Count) 枚）" -ForegroundColor Green
-    foreach ($f in $captured) { Write-Host "   $($f.Name)" -ForegroundColor DarkGray }
+# 「対象と一致したか」ではなく「今回の実行で作られたか」で数える。xUnit の Skip.If はテスト成功なので
+# dotnet test の ExitCode だけでは「撮れなかった」と「撮る必要が無かった」が同じ結果へ畳まれる（Issue #2095）
+if ($notCaptured.Count -eq 0 -and $testExitCode -eq 0) {
+    Write-Host " ✓ 撮影完了: 今回の実行で $($captured.Count) 枚を撮影（対象 $($targetNames.Count) 枚）" -ForegroundColor Green
+    foreach ($n in $captured) { Write-Host "   $n" -ForegroundColor DarkGray }
 } else {
-    Write-Host " ✗ 撮影に失敗したものがあります（ExitCode: $testExitCode）" -ForegroundColor Red
-    Write-Host "   テスト出力を確認してください。DB は自動で復元されています。" -ForegroundColor Yellow
+    if ($testExitCode -eq 0) {
+        Write-Host " ! 撮影されなかった画像があります: $($notCaptured.Count) 枚（今回の実行で撮影 $($captured.Count) 枚 / 対象 $($targetNames.Count) 枚）" -ForegroundColor Yellow
+    } else {
+        Write-Host " ✗ 撮影に失敗したものがあります（ExitCode: $testExitCode）" -ForegroundColor Red
+        Write-Host "   テスト出力を確認してください。DB は自動で復元されています。" -ForegroundColor Yellow
+        Write-Host "   今回の実行で撮影 $($captured.Count) 枚 / 対象 $($targetNames.Count) 枚" -ForegroundColor Yellow
+    }
+    foreach ($n in $notCaptured) { Write-Host "   × $n" -ForegroundColor Yellow }
+    if ($notCaptured.Count -gt 0) {
+        Write-Host "   撮影テストがスキップされた（リーダー未接続など、その環境では撮れない画像）か、失敗した可能性があります。" -ForegroundColor Yellow
+        Write-Host "   これらは -Publish の対象に入れられません（前回の画像をそのまま公開しないため）。" -ForegroundColor Yellow
+    }
 }
 Write-Host "========================================" -ForegroundColor Cyan
-if ($testExitCode -eq 0 -and $captured.Count -gt 0) {
+if ($testExitCode -eq 0 -and $notCaptured.Count -eq 0 -and $captured.Count -gt 0) {
     $publishHint = if ($Changed) { "-Changed -Publish" } else { "-Publish" }
     Write-Host "画像を見比べて問題なければ、$publishHint で docs\screenshots\ へ上書きしてください。" -ForegroundColor Yellow
 }
