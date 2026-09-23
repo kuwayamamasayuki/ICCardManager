@@ -120,7 +120,7 @@ internal static class TestSourceInspection
     /// <c>#if !DEBUG</c> / <c>#if DEBUG_FOO</c> のような別の記号は対象にしない
     /// （語境界で照合する。前方一致だと Release 側のコードを消してしまう）。
     /// </remarks>
-    private static bool IsDebugOnlyDirective(string trimmedLine)
+    internal static bool IsDebugOnlyDirective(string trimmedLine)
         => Regex.IsMatch(trimmedLine, @"^#if\s+\(?\s*DEBUG\s*\)?\s*$");
 
     /// <summary>
