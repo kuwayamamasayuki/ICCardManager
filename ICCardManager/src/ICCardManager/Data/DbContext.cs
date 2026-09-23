@@ -491,9 +491,7 @@ namespace ICCardManager.Data
         /// </remarks>
         private static string GetDefaultDatabasePath()
         {
-            var appDataPath = Path.Combine(
-                Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),
-                "ICCardManager");
+            var appDataPath = AppDataPaths.RootDirectory;
 
             // ディレクトリを作成（権限はインストーラーが設定済み、Issue #1455 / #1499）
             EnsureDirectoryExists(appDataPath);
