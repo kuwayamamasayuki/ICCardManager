@@ -48,12 +48,10 @@ public class ReturnHistoryReviewLayoutTests
     /// </summary>
     /// <remarks>
     /// <see cref="XamlElementInspection.EnumerateElements"/> は同名の入れ子を外側の本体として読み飛ばすため、
-    /// Border の内側にある Border（案内バナー）を拾えない。開始タグを起点に要素を求め直す。
+    /// Border の内側にある Border（案内バナー）を拾えない。
     /// </remarks>
     private static IEnumerable<XamlElementInspection.XamlElementSpan> Borders(string xaml)
-        => XamlElementInspection.EnumerateStartTags(xaml)
-            .Where(t => Regex.IsMatch(t.StartTag, @"^<Border[\s/>]"))
-            .Select(t => XamlElementInspection.ElementStartingAt(xaml, t.Start)!);
+        => XamlElementInspection.EnumerateElementsIncludingNested(xaml, "Border");
 
     /// <summary>履歴表示エリアの Border（<c>AutomationProperties.Name="利用履歴表示エリア"</c>）。</summary>
     private static XamlElementInspection.XamlElementSpan ExtractHistoryArea(string mainWindowXaml)
@@ -148,7 +146,7 @@ public class ReturnHistoryReviewLayoutTests
         // 行背景は履歴一覧の行スタイルで設定する（「今回」列のツールチップ用トリガーと取り違えない）
         RowStyleTrueTriggers(ExtractHistoryRowStyle(xaml))
             .Where(t => t.Property == "IsRecentlyRecorded")
-            .Select(t => XamlElementInspection.GetSetterValue(t.Body, "Background"))
+            .SelectMany(t => SetterValues(t.Body, "Background"))
             .Should().ContainSingle().Which.Should().Be("{DynamicResource ReturnBackgroundBrush}",
                 "行スタイルで返却の色（寒色）を設定する。色値リテラルではなくブラシキーを参照する（#1392）");
     }
@@ -202,10 +200,50 @@ public class ReturnHistoryReviewLayoutTests
 
         order.Should().Contain(new[] { "IsRecentlyRecorded", "IsChecked", "HasBalanceInconsistency" },
             "比べる 3 つのトリガーがいずれも行スタイルにあること（空振りで順序の検査が成立しないように）");
-        order.IndexOf("IsRecentlyRecorded").Should()
-            .BeLessThan(order.IndexOf("IsChecked"), "チェック済みの強調が今回の強調より後（優先）であること")
-            .And.BeLessThan(order.IndexOf("HasBalanceInconsistency"), "残高不整合の警告が今回の強調より後（優先）であること");
+        IsLowerPriorityThanAll(order, "IsRecentlyRecorded", "IsChecked", "HasBalanceInconsistency").Should().BeTrue(
+            "チェック済みの強調・残高不整合の警告は、どの「今回」のトリガーよりも後（優先）であること。" +
+            $"行スタイルのトリガーの記述順: {string.Join(" → ", order)}");
     }
+
+    /// <summary>
+    /// 後勝ちの順序判定を、全出現で比べていることを合成入力で固定する（Issue #2102 のコードレビュー）。
+    /// </summary>
+    /// <remarks>
+    /// 最初の出現だけ（<c>IndexOf</c>）で比べると、末尾に 2 つ目の「今回」のトリガーを足して警告を覆う形がすり抜ける。
+    /// </remarks>
+    [Theory]
+    [InlineData("IsRecentlyRecorded,IsChecked,HasBalanceInconsistency", true)]
+    [InlineData("IsChecked,IsRecentlyRecorded,HasBalanceInconsistency", false)]
+    // 末尾に足した 2 つ目の「今回」が警告を覆う（最初の出現だけを見ると合格してしまう形）
+    [InlineData("IsRecentlyRecorded,IsChecked,HasBalanceInconsistency,IsRecentlyRecorded", false)]
+    // 警告側が複数回出ても、すべてが「今回」より後なら優先される
+    [InlineData("IsRecentlyRecorded,IsChecked,HasBalanceInconsistency,IsChecked", true)]
+    public void 後勝ちの順序判定は全出現で比べること(string order, bool expected)
+    {
+        IsLowerPriorityThanAll(order.Split(','), "IsRecentlyRecorded", "IsChecked", "HasBalanceInconsistency")
+            .Should().Be(expected, $"入力: {order}");
+    }
+
+    /// <summary>
+    /// <paramref name="lower"/> のどの出現も、<paramref name="higher"/> のどの出現より前にあるか（Style.Triggers は後勝ち）。
+    /// </summary>
+    private static bool IsLowerPriorityThanAll(IReadOnlyList<string> order, string lower, params string[] higher)
+    {
+        var lastLower = order.ToList().LastIndexOf(lower);
+        return higher.All(h => order.Select((p, i) => (p, i)).Where(x => x.p == h).All(x => x.i > lastLower));
+    }
+
+    /// <summary>
+    /// 本体の <c>Setter</c> のうち、所有者の修飾を除いて <paramref name="propertyName"/> を設定するものの値。
+    /// </summary>
+    /// <remarks>
+    /// <see cref="XamlElementInspection.GetSetterValue"/> は <c>Property</c> を完全一致で比べるため、
+    /// <c>Property="DataGridRow.Background"</c> と書いた Setter を見落とす（Issue #2102 のコードレビュー）。
+    /// </remarks>
+    private static IEnumerable<string?> SetterValues(string body, string propertyName)
+        => XamlElementInspection.EnumerateElements(body, "Setter")
+            .Where(s => XamlElementInspection.IsSetterFor(XamlElementInspection.GetAttribute(s.StartTag, "Property"), propertyName))
+            .Select(s => XamlElementInspection.GetAttribute(s.StartTag, "Value"));
 
     [Fact]
     public void 設定画面に返却時の利用履歴表示の切り替えがあること()

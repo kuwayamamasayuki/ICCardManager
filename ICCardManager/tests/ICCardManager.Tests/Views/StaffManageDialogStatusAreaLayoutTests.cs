@@ -47,21 +47,17 @@ public class StaffManageDialogStatusAreaLayoutTests
     public void Status_message_should_not_live_inside_the_editing_only_form_panel()
     {
         var xaml = ReadXaml();
-        var status = ExtractStatusTextBlock(xaml);
+        var status = EditingFormStatusAreaInspection.ExtractStatusTextBlock(xaml, "StaffManageDialog.xaml");
 
         // 「内側に無い」が空振りで成立しないよう、IsEditing で畳まれるフォーム本体が実在することを先に確かめる
-        XamlElementInspection.EnumerateStartTags(xaml)
-            .Where(IsCollapsedWhenNotEditing)
-            .Select(t => XamlElementInspection.ElementStartingAt(xaml, t.Start)!)
+        EditingFormStatusAreaInspection.EnumerateEditingOnlyElements(xaml)
             .Should().Contain(panel => XamlElementInspection.EnumerateStartTags(panel.Body)
                     .Any(tag => XamlElementInspection.GetBindingPropertyName(
                         XamlElementInspection.GetAttribute(tag.StartTag, "Text")) == "EditNote"),
                 "この検査は「フォーム本体（備考欄まで）が IsEditing で表示制御されている」ことが前提。" +
                 "前提が崩れたら検査の意味も変わるため、ここで気付けるようにする");
 
-        XamlElementInspection.EnumerateEnclosingElements(xaml, status.Start)
-            .Where(e => IsCollapsedWhenNotEditing(e))
-            .Select(e => $"{e.Line}行目")
+        EditingFormStatusAreaInspection.EditingOnlyAncestorsOf(xaml, status)
             .Should().BeEmpty(
                 "編集フォームは非編集時に Collapsed になるため、" +
                 "ここにステータス欄を置くと削除の結果メッセージが表示されない（Issue #1759）");
@@ -77,11 +73,11 @@ public class StaffManageDialogStatusAreaLayoutTests
     [Fact]
     public void Status_message_should_sit_in_its_own_row_without_an_is_editing_visibility()
     {
-        var status = ExtractStatusTextBlock(ReadXaml());
+        var status = EditingFormStatusAreaInspection.ExtractStatusTextBlock(ReadXaml(), "StaffManageDialog.xaml");
 
         XamlElementInspection.GetAttribute(status.StartTag, "Grid.Row").Should().NotBeNull(
             "ステータス欄は右ペインの独立した行に置く（Issue #1759）");
-        IsCollapsedWhenNotEditing(status).Should().BeFalse(
+        EditingFormStatusAreaInspection.IsCollapsedWhenNotEditing(status).Should().BeFalse(
             "ステータス欄は編集中かどうかに関わらず表示できる必要がある（Issue #1759）");
     }
 
@@ -91,9 +87,9 @@ public class StaffManageDialogStatusAreaLayoutTests
     [Fact]
     public void Status_message_should_wrap()
     {
-        var status = ExtractStatusTextBlock(ReadXaml());
+        var status = EditingFormStatusAreaInspection.ExtractStatusTextBlock(ReadXaml(), "StaffManageDialog.xaml");
 
-        XamlElementInspection.GetAttribute(status.StartTag, "TextWrapping").Should().Be("Wrap",
+        XamlElementInspection.GetUnconditionalPropertyValue(status, "TextWrapping").Should().Be("Wrap",
             "右ペインは狭く、競合エラーの案内は長文になるため折り返しが必要");
     }
 
@@ -103,7 +99,7 @@ public class StaffManageDialogStatusAreaLayoutTests
     [Fact]
     public void Status_message_should_collapse_when_empty()
     {
-        var status = ExtractStatusTextBlock(ReadXaml());
+        var status = EditingFormStatusAreaInspection.ExtractStatusTextBlock(ReadXaml(), "StaffManageDialog.xaml");
 
         XamlElementInspection.EnumerateElements(status.Body, "DataTrigger")
             .Where(t => XamlElementInspection.GetBindingPropertyName(
@@ -117,23 +113,5 @@ public class StaffManageDialogStatusAreaLayoutTests
     private static string ReadXaml()
         => XamlElementInspection.StripXmlComments(File.ReadAllText(StaffManageDialogXamlPath));
 
-    /// <summary>
-    /// <c>Text="{Binding StatusMessage}"</c> を持つ TextBlock を 1 つに絞って返す。
-    /// </summary>
-    private static XamlElementInspection.XamlElementSpan ExtractStatusTextBlock(string xaml)
-    {
-        var candidates = XamlElementInspection.EnumerateElementSpans(xaml, "TextBlock")
-            .Where(t => XamlElementInspection.GetBindingPropertyName(
-                XamlElementInspection.GetAttribute(t.StartTag, "Text")) == "StatusMessage")
-            .ToList();
 
-        candidates.Should().ContainSingle(
-            "StaffManageDialog.xaml に StatusMessage を表示する TextBlock がちょうど 1 つ存在すべき");
-        return candidates[0];
-    }
-
-    /// <summary>開始タグの <c>Visibility</c> が <c>IsEditing</c> へ束縛されているか。</summary>
-    private static bool IsCollapsedWhenNotEditing(XamlElementInspection.XamlElementSpan element)
-        => XamlElementInspection.GetBindingPropertyName(
-            XamlElementInspection.GetAttribute(element.StartTag, "Visibility")) == "IsEditing";
 }

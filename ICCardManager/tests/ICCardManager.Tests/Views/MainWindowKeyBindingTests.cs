@@ -163,12 +163,45 @@ public class MainWindowKeyBindingTests
             .ToDictionary(g => g.Key, g => g.First().Command);
 
     /// <summary>ショートカット一覧の <c>&lt;TextBlock Text="F2: 職員管理"/&gt;</c> を、キー → 表記で返す。</summary>
-    private static Dictionary<string, string> ShortcutHelpLabels()
-        => XamlElementInspection.EnumerateElements(ReadXaml(), "TextBlock")
+    private static Dictionary<string, string> ShortcutHelpLabels() => ToShortcutHelpLabels(ReadXaml());
+
+    /// <summary>
+    /// 同じキーの表記が 2 つあるときは、どちらが正か判断できないので原因を名指しして失敗させる。
+    /// </summary>
+    /// <remarks>
+    /// <c>ToDictionary</c> へそのまま渡すと <c>ArgumentException</c>（「同じキーを含む項目が既に追加されています」）で落ち、
+    /// どのキーが重複したのか読み取れない（Issue #2102 のコードレビュー）。
+    /// </remarks>
+    private static Dictionary<string, string> ToShortcutHelpLabels(string xaml)
+    {
+        var entries = XamlElementInspection.EnumerateElements(xaml, "TextBlock")
             .Select(t => Regex.Match(XamlElementInspection.GetAttribute(t.StartTag, "Text") ?? string.Empty,
                 @"^(?<key>F\d+):\s*(?<label>.+)$"))
             .Where(m => m.Success)
-            .ToDictionary(m => m.Groups["key"].Value, m => m.Groups["label"].Value.Trim());
+            .Select(m => (Key: m.Groups["key"].Value, Label: m.Groups["label"].Value.Trim()))
+            .ToList();
+
+        entries.GroupBy(e => e.Key)
+            .Where(g => g.Count() > 1)
+            .Select(g => $"{g.Key}: {string.Join(" / ", g.Select(e => e.Label))}")
+            .Should().BeEmpty("ショートカット一覧に同じキーの表記が複数あると、利用者はどちらが正しいか判断できない");
+
+        return entries.ToDictionary(e => e.Key, e => e.Label);
+    }
+
+    /// <summary>
+    /// 一覧の読み取りが、同じキーの重複を例外ではなく原因を名指しした失敗として報告することを固定する。
+    /// </summary>
+    [Fact]
+    public void ショートカット一覧の同じキーの重複は原因を名指しして失敗すること()
+    {
+        var act = () => ToShortcutHelpLabels(
+            @"<StackPanel><TextBlock Text=""F2: 職員管理""/><TextBlock Text=""F2: カード管理""/></StackPanel>");
+
+        act.Should().Throw<System.Exception>()
+            .Where(e => !(e is System.ArgumentException), "ToDictionary の重複キー例外ではなく、表明の失敗として報告すること")
+            .WithMessage("*F2: 職員管理 / カード管理*");
+    }
 
     private static IEnumerable<string> ButtonStartTags(string? commandName)
         => XamlElementInspection.EnumerateElements(ReadXaml(), "Button")

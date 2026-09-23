@@ -40,8 +40,101 @@ public class BusStopInputDialogSuggestionKeyboardLayoutTests
 
         var handlerBody = ExtractHandlerBody(handlerName!);
         handlerBody.Should().Contain("HandleSuggestionKey(e.Key)", "キーの判定は ViewModel に委ねる");
-        handlerBody.Should().MatchRegex(@"e\.Handled\s*=\s*true",
-            "候補操作として消費したキーを処理済みにしないと、Enter で入力途中の値が保存される");
+        IsHandledOnlyWhenSuggestionConsumed(handlerBody).Should().BeTrue(
+            "候補操作として消費したキー（HandleSuggestionKey が true を返したとき）だけを処理済みにすること。" +
+            "処理済みにしないと Enter で入力途中の値が保存され、判定を否定したり分岐の外で処理済みにすると、" +
+            "候補を消費しなかったキー（通常の文字入力・保存の Enter）まで握りつぶす");
+    }
+
+    /// <summary>
+    /// 「消費したキーだけを処理済みにする」判定を合成入力で固定する（Issue #2102 のコードレビュー）。
+    /// </summary>
+    /// <remarks>
+    /// 以前は <c>HandleSuggestionKey(e.Key)</c> と <c>e.Handled = true</c> の字句の存在だけを見ていたため、
+    /// 条件を <c>!item.HandleSuggestionKey(e.Key)</c> に反転しても緑だった。
+    /// </remarks>
+    [Theory]
+    [InlineData("if (sender is TextBox t && item.HandleSuggestionKey(e.Key)) { e.Handled = true; }", true)]
+    [InlineData("if (item.HandleSuggestionKey(e.Key))\n{\n    e.Handled = true;\n    if (e.Key == Key.Enter) { t.CaretIndex = 0; }\n}", true)]
+    [InlineData("if (sender is TextBox t && !item.HandleSuggestionKey(e.Key)) { e.Handled = true; }", false)]
+    [InlineData("if (item.HandleSuggestionKey(e.Key) == false) { e.Handled = true; }", false)]
+    [InlineData("if (item.HandleSuggestionKey(e.Key)) { t.CaretIndex = 0; } e.Handled = true;", false)]
+    [InlineData("if (item.HandleSuggestionKey(e.Key)) { e.Handled = true; } e.Handled = true;", false)]
+    [InlineData("item.HandleSuggestionKey(e.Key); e.Handled = true;", false)]
+    public void 消費したキーだけを処理済みにする判定が条件の極性と分岐の範囲を見ていること(string body, bool expected)
+    {
+        IsHandledOnlyWhenSuggestionConsumed(body).Should().Be(expected, $"入力: {body}");
+    }
+
+    /// <summary>
+    /// ハンドラー本体（コメント・文字列を除いたコード）で、<c>e.Handled = true</c> が
+    /// 否定なしの <c>HandleSuggestionKey(e.Key)</c> を条件に含む <c>if</c> の分岐の内側にだけあるか。
+    /// </summary>
+    private static bool IsHandledOnlyWhenSuggestionConsumed(string codeOnlyBody)
+    {
+        var handled = new Regex(@"e\.Handled\s*=\s*true");
+        foreach (Match m in Regex.Matches(codeOnlyBody, @"\bif\s*\("))
+        {
+            var open = m.Index + m.Length - 1;
+            var close = FindMatching(codeOnlyBody, open, '(', ')');
+            if (close < 0)
+            {
+                continue;
+            }
+
+            var condition = codeOnlyBody.Substring(open + 1, close - open - 1);
+            if (!Regex.IsMatch(condition, @"HandleSuggestionKey\s*\(\s*e\.Key\s*\)"))
+            {
+                continue;
+            }
+
+            if (Regex.IsMatch(condition, @"!\s*(?:[\w?]+\s*\.\s*)*HandleSuggestionKey")
+                || Regex.IsMatch(condition, @"HandleSuggestionKey\s*\(\s*e\.Key\s*\)\s*(?:==\s*false|!=\s*true)"))
+            {
+                return false;
+            }
+
+            var blockOpen = close + 1;
+            while (blockOpen < codeOnlyBody.Length && char.IsWhiteSpace(codeOnlyBody[blockOpen]))
+            {
+                blockOpen++;
+            }
+
+            if (blockOpen >= codeOnlyBody.Length || codeOnlyBody[blockOpen] != '{')
+            {
+                return false;
+            }
+
+            var blockClose = FindMatching(codeOnlyBody, blockOpen, '{', '}');
+            if (blockClose < 0)
+            {
+                return false;
+            }
+
+            var block = codeOnlyBody.Substring(blockOpen, blockClose - blockOpen + 1);
+            var outside = codeOnlyBody.Remove(blockOpen, blockClose - blockOpen + 1);
+            return handled.IsMatch(block) && !handled.IsMatch(outside);
+        }
+
+        return false;
+    }
+
+    private static int FindMatching(string text, int openIndex, char open, char close)
+    {
+        var depth = 0;
+        for (var i = openIndex; i < text.Length; i++)
+        {
+            if (text[i] == open)
+            {
+                depth++;
+            }
+            else if (text[i] == close && --depth == 0)
+            {
+                return i;
+            }
+        }
+
+        return -1;
     }
 
     [Fact]

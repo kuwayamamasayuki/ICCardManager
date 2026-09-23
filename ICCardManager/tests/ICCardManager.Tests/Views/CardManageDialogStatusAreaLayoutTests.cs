@@ -48,21 +48,17 @@ public class CardManageDialogStatusAreaLayoutTests
     public void Status_message_should_not_live_inside_the_editing_only_form_panel()
     {
         var xaml = ReadXaml();
-        var status = ExtractStatusTextBlock(xaml);
+        var status = EditingFormStatusAreaInspection.ExtractStatusTextBlock(xaml, "CardManageDialog.xaml");
 
         // 「内側に無い」が空振りで成立しないよう、IsEditing で畳まれるフォーム本体が実在することを先に確かめる
-        XamlElementInspection.EnumerateStartTags(xaml)
-            .Where(IsCollapsedWhenNotEditing)
-            .Select(t => XamlElementInspection.ElementStartingAt(xaml, t.Start)!)
+        EditingFormStatusAreaInspection.EnumerateEditingOnlyElements(xaml)
             .Should().Contain(panel => XamlElementInspection.EnumerateStartTags(panel.Body)
                     .Any(tag => XamlElementInspection.GetBindingPropertyName(
                         XamlElementInspection.GetAttribute(tag.StartTag, "Text")) == "EditNote"),
                 "この検査は「フォーム本体（備考欄まで）が IsEditing で表示制御されている」ことが前提。" +
                 "前提が崩れたら検査の意味も変わるため、ここで気付けるようにする");
 
-        XamlElementInspection.EnumerateEnclosingElements(xaml, status.Start)
-            .Where(e => IsCollapsedWhenNotEditing(e))
-            .Select(e => $"{e.Line}行目")
+        EditingFormStatusAreaInspection.EditingOnlyAncestorsOf(xaml, status)
             .Should().BeEmpty(
                 "編集フォームは CancelEdit() で Collapsed になるため、" +
                 "ここにステータス欄を置くと保存完了メッセージが表示されない（Issue #1727）");
@@ -78,11 +74,11 @@ public class CardManageDialogStatusAreaLayoutTests
     [Fact]
     public void Status_message_should_sit_in_its_own_row_without_an_is_editing_visibility()
     {
-        var status = ExtractStatusTextBlock(ReadXaml());
+        var status = EditingFormStatusAreaInspection.ExtractStatusTextBlock(ReadXaml(), "CardManageDialog.xaml");
 
         XamlElementInspection.GetAttribute(status.StartTag, "Grid.Row").Should().NotBeNull(
             "ステータス欄は右ペインの独立した行に置く（Issue #1727）");
-        IsCollapsedWhenNotEditing(status).Should().BeFalse(
+        EditingFormStatusAreaInspection.IsCollapsedWhenNotEditing(status).Should().BeFalse(
             "ステータス欄は編集中かどうかに関わらず表示できる必要がある（Issue #1727）");
     }
 
@@ -92,9 +88,9 @@ public class CardManageDialogStatusAreaLayoutTests
     [Fact]
     public void Status_message_should_wrap()
     {
-        var status = ExtractStatusTextBlock(ReadXaml());
+        var status = EditingFormStatusAreaInspection.ExtractStatusTextBlock(ReadXaml(), "CardManageDialog.xaml");
 
-        XamlElementInspection.GetAttribute(status.StartTag, "TextWrapping").Should().Be("Wrap",
+        XamlElementInspection.GetUnconditionalPropertyValue(status, "TextWrapping").Should().Be("Wrap",
             "右ペインは幅 350 と狭く、取込失敗の案内は長文になるため折り返しが必要");
     }
 
@@ -104,7 +100,7 @@ public class CardManageDialogStatusAreaLayoutTests
     [Fact]
     public void Status_message_should_collapse_when_empty()
     {
-        var status = ExtractStatusTextBlock(ReadXaml());
+        var status = EditingFormStatusAreaInspection.ExtractStatusTextBlock(ReadXaml(), "CardManageDialog.xaml");
 
         XamlElementInspection.EnumerateElements(status.Body, "DataTrigger")
             .Where(t => XamlElementInspection.GetBindingPropertyName(
@@ -126,13 +122,17 @@ public class CardManageDialogStatusAreaLayoutTests
     [InlineData(@"<Grid><TextBlock Text=""種別""/><TextBox TextWrapping=""Wrap""/><TextBlock Grid.Row=""2"" Text=""{Binding StatusMessage}""></TextBlock></Grid>", false, null)]
     [InlineData(@"<Grid><StackPanel Visibility=""{Binding IsEditing}""><StackPanel><TextBlock Text=""{Binding StatusMessage}"" TextWrapping=""Wrap""/></StackPanel></StackPanel></Grid>", true, "Wrap")]
     [InlineData(@"<Grid><StackPanel Visibility=""{Binding IsEditing}""/><TextBlock Text=""{Binding StatusMessage}"" TextWrapping=""Wrap""/></Grid>", false, "Wrap")]
+    // 折り返しを要素自身の Style の Setter で書く正当な形は認める（コードレビュー指摘の誤検出）
+    [InlineData(@"<Grid><TextBlock Grid.Row=""2"" Text=""{Binding StatusMessage}""><TextBlock.Style><Style TargetType=""TextBlock""><Setter Property=""TextWrapping"" Value=""Wrap""/></Style></TextBlock.Style></TextBlock></Grid>", false, "Wrap")]
+    // トリガーの中だけの Setter は常には効かないので認めない
+    [InlineData(@"<Grid><TextBlock Text=""{Binding StatusMessage}""><TextBlock.Style><Style><Style.Triggers><DataTrigger Binding=""{Binding IsLong}"" Value=""True""><Setter Property=""TextWrapping"" Value=""Wrap""/></DataTrigger></Style.Triggers></Style></TextBlock.Style></TextBlock></Grid>", false, null)]
     public void 抽出と祖先の判定がステータス欄そのものを見ていること(string xaml, bool insideEditingPanel, string? wrapping)
     {
-        var status = ExtractStatusTextBlock(xaml);
+        var status = EditingFormStatusAreaInspection.ExtractStatusTextBlock(xaml, "CardManageDialog.xaml");
 
-        XamlElementInspection.GetAttribute(status.StartTag, "TextWrapping").Should().Be(wrapping,
-            "別の要素（前にある TextBox）の TextWrapping を拾わないこと");
-        XamlElementInspection.EnumerateEnclosingElements(xaml, status.Start).Any(IsCollapsedWhenNotEditing)
+        XamlElementInspection.GetUnconditionalPropertyValue(status, "TextWrapping").Should().Be(wrapping,
+            "別の要素（前にある TextBox）の TextWrapping を拾わず、要素自身の Style の無条件の Setter は拾うこと");
+        EditingFormStatusAreaInspection.EditingOnlyAncestorsOf(xaml, status).Any()
             .Should().Be(insideEditingPanel,
                 "同名の入れ子の内側でも祖先として辿れ、自己終了の兄弟は祖先とみなさないこと");
     }
@@ -140,23 +140,5 @@ public class CardManageDialogStatusAreaLayoutTests
     private static string ReadXaml()
         => XamlElementInspection.StripXmlComments(File.ReadAllText(CardManageDialogXamlPath));
 
-    /// <summary>
-    /// <c>Text="{Binding StatusMessage}"</c> を持つ TextBlock を 1 つに絞って返す。
-    /// </summary>
-    private static XamlElementInspection.XamlElementSpan ExtractStatusTextBlock(string xaml)
-    {
-        var candidates = XamlElementInspection.EnumerateElementSpans(xaml, "TextBlock")
-            .Where(t => XamlElementInspection.GetBindingPropertyName(
-                XamlElementInspection.GetAttribute(t.StartTag, "Text")) == "StatusMessage")
-            .ToList();
 
-        candidates.Should().ContainSingle(
-            "CardManageDialog.xaml に StatusMessage を表示する TextBlock がちょうど 1 つ存在すべき");
-        return candidates[0];
-    }
-
-    /// <summary>開始タグの <c>Visibility</c> が <c>IsEditing</c> へ束縛されているか。</summary>
-    private static bool IsCollapsedWhenNotEditing(XamlElementInspection.XamlElementSpan element)
-        => XamlElementInspection.GetBindingPropertyName(
-            XamlElementInspection.GetAttribute(element.StartTag, "Visibility")) == "IsEditing";
 }

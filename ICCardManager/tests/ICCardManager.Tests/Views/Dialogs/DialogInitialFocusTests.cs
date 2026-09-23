@@ -1,5 +1,6 @@
 using System;
 using System.IO;
+using System.Linq;
 using System.Text.RegularExpressions;
 using FluentAssertions;
 using ICCardManager.Tests.Views.Helpers;
@@ -40,22 +41,48 @@ public class DialogInitialFocusTests
         File.Exists(xamlPath).Should().BeTrue(
             $"テスト対象の XAML ファイルが存在すべき: {xamlPath}");
 
-        var xaml = File.ReadAllText(xamlPath);
+        var rootStartTag = XamlElementInspection.GetRootStartTag(File.ReadAllText(xamlPath));
+        rootStartTag.Should().MatchRegex(@"^<Window[\s/>]", $"{xamlFileName}: ルート要素は Window であるべき");
 
-        var focusPattern = new Regex(
-            @"FocusManager\.FocusedElement\s*=\s*""\{Binding\s+ElementName\s*=\s*(?<name>[A-Za-z_][A-Za-z0-9_]*)\}""",
-            RegexOptions.Compiled);
-        var focusMatch = focusPattern.Match(xaml);
-        focusMatch.Success.Should().BeTrue(
-            $"{xamlFileName}: Window ルート要素に FocusManager.FocusedElement 属性が設定されるべき");
-        focusMatch.Groups["name"].Value.Should().Be(expectedElementName,
-            $"{xamlFileName}: 初期フォーカス先は {expectedElementName} であるべき");
+        GetFocusedElementName(rootStartTag!).Should().Be(expectedElementName,
+            $"{xamlFileName}: Window ルート要素に FocusManager.FocusedElement=\"{{Binding ElementName={expectedElementName}}}\" が設定されるべき" +
+            "（子要素やコメントの中の記述では起動時の初期フォーカスにならない）");
 
-        var xNamePattern = new Regex(
-            @"x:Name\s*=\s*""" + Regex.Escape(expectedElementName) + @"""",
-            RegexOptions.Compiled);
-        xNamePattern.IsMatch(xaml).Should().BeTrue(
-            $"{xamlFileName}: FocusManager.FocusedElement の参照先 x:Name=\"{expectedElementName}\" が同一 XAML 内に存在すべき");
+        var xaml = XamlElementInspection.StripXmlComments(File.ReadAllText(xamlPath));
+        XamlElementInspection.EnumerateStartTags(xaml)
+            .Count(t => XamlElementInspection.GetAttribute(t.StartTag, "x:Name") == expectedElementName)
+            .Should().Be(1,
+                $"{xamlFileName}: FocusManager.FocusedElement の参照先 x:Name=\"{expectedElementName}\" が同一 XAML 内に 1 つ存在すべき");
+    }
+
+    /// <summary>
+    /// 初期フォーカス先をルート要素の開始タグだけから読むことを合成入力で固定する（Issue #2102）。
+    /// </summary>
+    /// <remarks>
+    /// 以前はファイル全体へ正規表現を掛けてコメントも除いていなかったため、ルートから属性を消して
+    /// ファイル末尾のコメントにだけ残しても緑だった。
+    /// </remarks>
+    [Theory]
+    [InlineData(@"<Window FocusManager.FocusedElement=""{Binding ElementName=Target}""><TextBox x:Name=""Target""/></Window>", "Target")]
+    [InlineData(@"<Window Title=""x""><TextBox x:Name=""Target""/></Window><!-- FocusManager.FocusedElement=""{Binding ElementName=Target}"" -->", null)]
+    [InlineData(@"<Window Title=""x""><Grid FocusManager.FocusedElement=""{Binding ElementName=Target}""><TextBox x:Name=""Target""/></Grid></Window>", null)]
+    [InlineData(@"<?xml version=""1.0""?>
+<!-- <Window FocusManager.FocusedElement=""{Binding ElementName=Other}""> -->
+<Window
+    FocusManager.FocusedElement=""{Binding ElementName=Target}""/>", "Target")]
+    public void 初期フォーカス先はWindowのルート要素の開始タグだけから読むこと(string xaml, string? expected)
+    {
+        GetFocusedElementName(XamlElementInspection.GetRootStartTag(xaml) ?? string.Empty)
+            .Should().Be(expected, $"入力: {xaml}");
+    }
+
+    /// <summary>開始タグの <c>FocusManager.FocusedElement="{Binding ElementName=…}"</c> が指す名前。</summary>
+    private static string? GetFocusedElementName(string startTag)
+    {
+        var value = XamlElementInspection.GetAttribute(startTag, "FocusManager.FocusedElement");
+        var match = Regex.Match(value ?? string.Empty,
+            @"^\{Binding\s+ElementName\s*=\s*(?<name>[A-Za-z_][A-Za-z0-9_]*)\s*\}$");
+        return match.Success ? match.Groups["name"].Value : null;
     }
 
     /// <summary>
@@ -69,7 +96,8 @@ public class DialogInitialFocusTests
         var codeBehindPath = Path.Combine(DialogsDirectory, "BusStopInputDialog.xaml.cs");
         File.Exists(codeBehindPath).Should().BeTrue();
 
-        var source = File.ReadAllText(codeBehindPath);
+        // コメントと文字列リテラルを除いたコードで見る（コメントアウトした呼び出しに一致させない。Issue #2102）
+        var source = TestSourceInspection.ToCodeOnly(File.ReadAllText(codeBehindPath));
 
         source.Should().Contain("ContentRendered",
             "動的 ListView 項目のフォーカスは項目生成後の ContentRendered イベントで行うべき");

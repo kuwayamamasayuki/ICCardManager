@@ -1,6 +1,5 @@
-using System;
 using System.IO;
-using System.Text.RegularExpressions;
+using System.Linq;
 using FluentAssertions;
 using ICCardManager.Tests.Views.Helpers;
 using Xunit;
@@ -29,6 +28,11 @@ namespace ICCardManager.Tests.Views.Dialogs;
 /// ③「操作」「対象」列に Width="Auto" を使わない — WPF DataGrid の Auto 幅は実体化済み行の
 /// 最大値を保持して縮まないため、一度長い値を含むページを表示すると星列を圧迫し続ける。
 /// </para>
+/// <para>
+/// Issue #2102: 検査は XML コメントを除いたうえで<b>対象の要素を 1 つに絞ってから</b>属性を見る。
+/// 以前はファイル全体への正規表現で、コメントを除かず、属性の記述順（<c>Header</c> → <c>Binding</c>）にも依存していた
+/// （<c>Binding</c> を先に書いただけで抽出に失敗し、<c>Setter</c> の属性順を入れ替えると Wrap を見落とした）。
+/// </para>
 /// </remarks>
 public class OperationLogDialogColumnWidthLayoutTests
 {
@@ -45,9 +49,9 @@ public class OperationLogDialogColumnWidthLayoutTests
     {
         var xaml = ReadDialog(TargetXaml);
 
-        xaml.Should().Contain("<DataGrid.Columns>",
+        XamlElementInspection.EnumerateElements(xaml, "DataGrid.Columns").Should().NotBeEmpty(
             "抽出対象の XAML が想定と異なると、以降の検査がすべて空振りする");
-        Regex.Matches(xaml, @"<DataGridTextColumn\s").Count.Should().Be(6,
+        XamlElementInspection.EnumerateElementsIncludingNested(xaml, "DataGridTextColumn").Should().HaveCount(6,
             "操作ログ一覧は 日時／操作／対象／対象詳細／操作者／詳細 の6列構成である");
     }
 
@@ -58,9 +62,9 @@ public class OperationLogDialogColumnWidthLayoutTests
     {
         var comboBox = ExtractElement(ReadDialog(TargetXaml), "ComboBox", automationName);
 
-        comboBox.Should().MatchRegex(@"MinWidth=""\d+""",
+        XamlElementInspection.GetAttribute(comboBox, "MinWidth").Should().MatchRegex(@"^\d+$",
             $"{automationName} コンボは MinWidth で内容と文字サイズに追随する必要がある（Issue #1787）");
-        comboBox.Should().NotMatchRegex(@"\sWidth=""\d+""",
+        XamlElementInspection.GetAttribute(comboBox, "Width").Should().BeNull(
             $"{automationName} コンボに固定 Width を戻すと、「エクスポート」等の全角6文字の選択肢が " +
             "文字サイズ「大」以上で切れる（Issue #1787）");
     }
@@ -74,7 +78,7 @@ public class OperationLogDialogColumnWidthLayoutTests
     {
         var column = ExtractColumn(ReadDialog(TargetXaml), header, binding);
 
-        column.Should().MatchRegex(@"<Setter\s+Property=""TextWrapping""\s+Value=""Wrap""\s*/>",
+        ElementStyleSetterValue(column, "TextWrapping").Should().Be("Wrap",
             $"「{header}」列は TextWrapping=\"Wrap\" で文字サイズ「大」以上の文字切れを担保する必要がある" +
             "（幅を広げる対処は特大でまた破綻するため。Issue #1787）");
     }
@@ -86,7 +90,7 @@ public class OperationLogDialogColumnWidthLayoutTests
     {
         var column = ExtractColumn(ReadDialog(TargetXaml), header, binding);
 
-        column.Should().NotMatchRegex(@"\sWidth=""Auto""",
+        XamlElementInspection.GetAttribute(column.StartTag, "Width").Should().NotBe("Auto",
             $"「{header}」列に Width=\"Auto\" を使うと、WPF DataGrid の Auto 幅は実体化済み行の最大値を " +
             "保持して縮まないため、一度「バックアップ」等の長い値を含むページを表示すると以後も " +
             "広がったままになり、星列（対象詳細・詳細）を圧迫し続ける（Issue #1787）");
@@ -99,10 +103,10 @@ public class OperationLogDialogColumnWidthLayoutTests
 
         // 「対象詳細」は Issue #1741 でファイル名を表示するようになった内容依存列。
         // 固定 250px のままだと最小幅（MinWidth=800）で「詳細」列に ~50px しか残らない。
-        ExtractColumn(xaml, "対象詳細", "TargetDisplayName")
-            .Should().MatchRegex(@"Width=""\*""");
-        ExtractColumn(xaml, "詳細", "DetailSummary")
-            .Should().MatchRegex(@"Width=""\*""");
+        XamlElementInspection.GetAttribute(ExtractColumn(xaml, "対象詳細", "TargetDisplayName").StartTag, "Width")
+            .Should().Be("*");
+        XamlElementInspection.GetAttribute(ExtractColumn(xaml, "詳細", "DetailSummary").StartTag, "Width")
+            .Should().Be("*");
     }
 
     [Theory]
@@ -112,48 +116,93 @@ public class OperationLogDialogColumnWidthLayoutTests
     {
         var column = ExtractColumn(ReadDialog(TargetXaml), header, binding);
 
-        var match = Regex.Match(column, @"MinWidth=""(\d+)""");
-        match.Success.Should().BeTrue(
+        var minWidth = XamlElementInspection.GetAttribute(column.StartTag, "MinWidth");
+        int.TryParse(minWidth, out var value).Should().BeTrue(
             $"「{header}」列は MinWidth で最低限の可読幅を確保する必要がある（Issue #1787）");
-        int.Parse(match.Groups[1].Value).Should().BeGreaterThanOrEqualTo(150,
+        value.Should().BeGreaterThanOrEqualTo(150,
             $"「{header}」列が 150px を下回ると、摘要やファイル名が実質的に読めなくなる");
     }
 
     /// <summary>
-    /// 指定ヘッダー・バインドを持つ DataGridTextColumn の定義範囲を切り出す。
-    /// 自己終了タグ（&lt;… /&gt;）と開始～終了タグの両形式に対応する。
+    /// 列の抽出と Setter の読み取りが、コメント・属性の記述順に左右されないことを合成入力で固定する（Issue #2102）。
     /// </summary>
-    private static string ExtractColumn(string xaml, string header, string binding)
+    [Theory]
+    // Binding を Header より先に書いても見つかり、Setter の属性順が逆でも Wrap を読める
+    [InlineData(@"<DataGrid.Columns><DataGridTextColumn Binding=""{Binding ActionDisplay}"" Header=""操作""><DataGridTextColumn.ElementStyle><Style><Setter Value=""Wrap"" Property=""TextWrapping""/></Style></DataGridTextColumn.ElementStyle></DataGridTextColumn></DataGrid.Columns>", "Wrap")]
+    // コメントアウトした Setter は数えない
+    [InlineData(@"<DataGrid.Columns><DataGridTextColumn Header=""操作"" Binding=""{Binding ActionDisplay}""><DataGridTextColumn.ElementStyle><Style><!-- <Setter Property=""TextWrapping"" Value=""Wrap""/> --></Style></DataGridTextColumn.ElementStyle></DataGridTextColumn></DataGrid.Columns>", null)]
+    // トリガーの中だけの Setter は常には効かないので数えない
+    [InlineData(@"<DataGrid.Columns><DataGridTextColumn Header=""操作"" Binding=""{Binding ActionDisplay}""><DataGridTextColumn.ElementStyle><Style><Style.Triggers><DataTrigger Binding=""{Binding Action}"" Value=""INSERT""><Setter Property=""TextWrapping"" Value=""Wrap""/></DataTrigger></Style.Triggers></Style></DataGridTextColumn.ElementStyle></DataGridTextColumn></DataGrid.Columns>", null)]
+    // 次の列の Setter を拾わない（旧実装は自己終了タグの列から次の列の終了タグまでをまたいで一致し得た）
+    [InlineData(@"<DataGrid.Columns><DataGridTextColumn Header=""操作"" Binding=""{Binding ActionDisplay}""/><DataGridTextColumn Header=""対象"" Binding=""{Binding TargetTableDisplay}""><DataGridTextColumn.ElementStyle><Style><Setter Property=""TextWrapping"" Value=""Wrap""/></Style></DataGridTextColumn.ElementStyle></DataGridTextColumn></DataGrid.Columns>", null)]
+    public void 列の抽出と折り返しの読み取りが対象の列そのものを見ていること(string rawXaml, string? expected)
     {
-        var pattern =
-            $@"<DataGridTextColumn\s+Header=""{Regex.Escape(header)}""\s+Binding=""\{{Binding {Regex.Escape(binding)}\}}""" +
-            @"(?:[^>]*?/>|.*?</DataGridTextColumn>)";
-        var match = Regex.Match(xaml, pattern, RegexOptions.Singleline);
+        var column = ExtractColumn(XamlElementInspection.StripXmlComments(rawXaml), "操作", "ActionDisplay");
 
-        match.Success.Should().BeTrue(
-            $"「{header}」列（Binding={binding}）の定義を XAML から抽出できませんでした。" +
-            "列の Header / Binding を変更した場合は本テストの期待値も更新してください。");
-        return match.Value;
+        ElementStyleSetterValue(column, "TextWrapping").Should().Be(expected, $"入力: {rawXaml}");
     }
 
     /// <summary>
-    /// 指定 AutomationProperties.Name を持つ要素の開始タグ範囲を切り出す。
+    /// 指定ヘッダー・バインドを持つ DataGridTextColumn を 1 つに絞って返す（属性の記述順を問わない）。
+    /// </summary>
+    private static XamlElementInspection.XamlElementSpan ExtractColumn(string xaml, string header, string binding)
+    {
+        var columns = XamlElementInspection.EnumerateElementsIncludingNested(xaml, "DataGridTextColumn")
+            .Where(c => XamlElementInspection.GetAttribute(c.StartTag, "Header") == header
+                        && XamlElementInspection.GetBindingPropertyName(
+                            XamlElementInspection.GetAttribute(c.StartTag, "Binding")) == binding)
+            .ToList();
+
+        columns.Should().ContainSingle(
+            $"「{header}」列（Binding={binding}）の定義が XAML にちょうど 1 つ存在すべき。" +
+            "列の Header / Binding を変更した場合は本テストの期待値も更新してください。");
+        return columns[0];
+    }
+
+    /// <summary>
+    /// 列の <c>ElementStyle</c> で<b>常に効く</b> Setter の値（<c>Style.Triggers</c> の中は数えない）。
+    /// </summary>
+    private static string? ElementStyleSetterValue(XamlElementInspection.XamlElementSpan column, string propertyName)
+    {
+        foreach (var style in XamlElementInspection.EnumerateElements(column.Body, "DataGridTextColumn.ElementStyle")
+                     .SelectMany(e => XamlElementInspection.EnumerateElements(e.Body, "Style")))
+        {
+            var body = style.Body;
+            foreach (var triggers in XamlElementInspection.EnumerateElementSpans(body, "Style.Triggers").Reverse().ToList())
+            {
+                body = body.Remove(triggers.Start, triggers.Length);
+            }
+
+            var setter = XamlElementInspection.EnumerateElements(body, "Setter")
+                .FirstOrDefault(s => XamlElementInspection.IsSetterFor(
+                    XamlElementInspection.GetAttribute(s.StartTag, "Property"), propertyName));
+            if (setter != null)
+            {
+                return XamlElementInspection.GetAttribute(setter.StartTag, "Value");
+            }
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// 指定 AutomationProperties.Name を持つ要素の開始タグを 1 つに絞って返す（属性の記述順を問わない）。
     /// </summary>
     private static string ExtractElement(string xaml, string elementName, string automationName)
     {
-        var pattern =
-            $@"<{Regex.Escape(elementName)}\s[^>]*?AutomationProperties\.Name=""{Regex.Escape(automationName)}""[^>]*?/>";
-        var match = Regex.Match(xaml, pattern, RegexOptions.Singleline);
+        var elements = XamlElementInspection.EnumerateElementsIncludingNested(xaml, elementName)
+            .Where(e => XamlElementInspection.GetAttribute(e.StartTag, "AutomationProperties.Name") == automationName)
+            .ToList();
 
-        match.Success.Should().BeTrue(
-            $"AutomationProperties.Name=\"{automationName}\" の {elementName} を XAML から抽出できませんでした。");
-        return match.Value;
+        elements.Should().ContainSingle(
+            $"AutomationProperties.Name=\"{automationName}\" の {elementName} が XAML にちょうど 1 つ存在すべき。");
+        return elements[0].StartTag;
     }
 
     private static string ReadDialog(string fileName)
     {
         var path = Path.Combine(DialogsDirectory, fileName);
         File.Exists(path).Should().BeTrue($"{fileName} が {DialogsDirectory} に存在する必要があります");
-        return File.ReadAllText(path);
+        return XamlElementInspection.StripXmlComments(File.ReadAllText(path));
     }
 }

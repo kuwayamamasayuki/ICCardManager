@@ -168,6 +168,38 @@ public class DialogMinimumSizeTests
     }
 
     /// <summary>
+    /// <c>Views/Dialogs/</c> のうちリサイズできない（最小サイズの検査から除外される）ダイアログは、閉じた集合であること。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// 除外規則（<see cref="IsUserResizable"/>）は「リサイズできない Window には最小サイズが働かない」という正しい理由で
+    /// 対象を絞るが、それは同時に<b>迂回経路</b>でもある — <c>ResizeMode="NoResize"</c> を足すだけで、
+    /// 1366×768 に収まらない高さのダイアログが最小サイズの検査（<c>MinHeight ≦ 720</c>）ごと対象外になる
+    /// （Issue #2102 のコードレビュー）。リサイズできないダイアログはむしろ、利用者が縮めて逃がす手段も無い。
+    /// </para>
+    /// <para>
+    /// 代わりに「リサイズできない Window は <c>Height ≦ 720</c> を検査する」形は採らない。リサイズできない Window は
+    /// <c>SizeToContent</c> で高さが内容から決まることが多く（<c>ToastNotificationWindow.xaml</c> がそう）、
+    /// 静的に読める <c>Height</c> が無いと検査が黙って空振りする（fail-open）。閉じた集合で表明すれば、
+    /// 新しくリサイズできないダイアログを作った時点で赤になり、高さが画面に収まるかの判断を強制できる（fail-closed）。
+    /// 現状は該当するダイアログが無い。
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public void Dialogsフォルダーのリサイズできないダイアログは閉じた集合であること()
+    {
+        var notResizable = EnumerateWindowRoots()
+            .Where(w => w.RelativePath.StartsWith(DialogsFolder, StringComparison.Ordinal))
+            .Where(w => !IsUserResizable(w.RootStartTag))
+            .Select(w => w.RelativePath)
+            .ToList();
+
+        notResizable.Should().BeEmpty(
+            "リサイズできないダイアログは最小サイズの検査から外れるうえ、利用者が縮めて画面に収める手段も無い。" +
+            "ResizeMode を CanResize に戻すか、1366×768（実用の高さ 720px）に収まることを確かめてから本テストの集合へ加えること");
+    }
+
+    /// <summary>
     /// 最小サイズの除外規則（ユーザーがリサイズできない Window は最小サイズが働かない）を合成入力で固定する。
     /// </summary>
     /// <remarks>
@@ -268,12 +300,7 @@ public class DialogMinimumSizeTests
         }
     }
 
-    /// <summary>
-    /// XML コメントを除いた最初の開始タグ（＝ルート要素）を返す。XML 宣言・処理命令は開始タグに数えない。
-    /// </summary>
-    private static string? GetRootStartTag(string xaml)
-        => XamlElementInspection.EnumerateStartTags(XamlElementInspection.StripXmlComments(xaml))
-            .FirstOrDefault()?.StartTag;
+    private static string? GetRootStartTag(string xaml) => XamlElementInspection.GetRootStartTag(xaml);
 
     private static string ReadRootStartTag(string relativePath)
     {

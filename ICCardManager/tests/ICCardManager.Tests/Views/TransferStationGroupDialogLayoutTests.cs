@@ -43,20 +43,16 @@ public class TransferStationGroupDialogLayoutTests
     public void ステータス欄が編集フォームの内側に無いこと()
     {
         var xaml = ReadXaml();
-        var status = ExtractStatusTextBlock(xaml);
+        var status = EditingFormStatusAreaInspection.ExtractStatusTextBlock(xaml, "TransferStationGroupDialog.xaml");
 
         // 「内側に無い」が空振りで成立しないよう、IsEditing で畳まれる編集フォームが実在することを先に確かめる
-        XamlElementInspection.EnumerateStartTags(xaml)
-            .Where(IsCollapsedWhenNotEditing)
-            .Select(t => XamlElementInspection.ElementStartingAt(xaml, t.Start)!)
+        EditingFormStatusAreaInspection.EnumerateEditingOnlyElements(xaml)
             .Should().Contain(panel => XamlElementInspection.EnumerateStartTags(panel.Body)
                     .Any(tag => XamlElementInspection.GetBindingPropertyName(
                         XamlElementInspection.GetAttribute(tag.StartTag, "Command")) == "SaveCommand"),
                 "この検査は「編集フォーム（保存ボタンまで）が IsEditing で表示制御されている」ことが前提");
 
-        XamlElementInspection.EnumerateEnclosingElements(xaml, status.Start)
-            .Where(e => IsCollapsedWhenNotEditing(e))
-            .Select(e => $"{e.Line}行目")
+        EditingFormStatusAreaInspection.EditingOnlyAncestorsOf(xaml, status)
             .Should().BeEmpty(
                 "編集フォームは CancelEdit() で Collapsed になるため、" +
                 "ここにステータス欄を置くと完了メッセージが表示されない（Issue #1727）");
@@ -72,11 +68,11 @@ public class TransferStationGroupDialogLayoutTests
     [Fact]
     public void ステータス欄が独立した行に存在すること()
     {
-        var status = ExtractStatusTextBlock(ReadXaml());
+        var status = EditingFormStatusAreaInspection.ExtractStatusTextBlock(ReadXaml(), "TransferStationGroupDialog.xaml");
 
         XamlElementInspection.GetAttribute(status.StartTag, "Grid.Row").Should().NotBeNull(
             "ステータス欄はルート Grid の独立した行に置く");
-        IsCollapsedWhenNotEditing(status).Should().BeFalse(
+        EditingFormStatusAreaInspection.IsCollapsedWhenNotEditing(status).Should().BeFalse(
             "ステータス欄は編集中かどうかに関わらず表示できる必要がある");
     }
 
@@ -86,7 +82,8 @@ public class TransferStationGroupDialogLayoutTests
     [Fact]
     public void ステータス欄が折り返すこと()
     {
-        XamlElementInspection.GetAttribute(ExtractStatusTextBlock(ReadXaml()).StartTag, "TextWrapping")
+        XamlElementInspection.GetUnconditionalPropertyValue(
+                EditingFormStatusAreaInspection.ExtractStatusTextBlock(ReadXaml(), "TransferStationGroupDialog.xaml"), "TextWrapping")
             .Should().Be("Wrap",
                 "重複エラーの案内は 80 文字を超えるため折り返しが必要（Issue #1687 / #1688）");
     }
@@ -143,23 +140,5 @@ public class TransferStationGroupDialogLayoutTests
         XamlElementInspection.GetAttribute(overlays[0].StartTag, "Grid.RowSpan").Should().Be(rowCount.ToString());
     }
 
-    /// <summary>
-    /// <c>Text="{Binding StatusMessage}"</c> を持つ TextBlock を 1 つに絞って返す。
-    /// </summary>
-    private static XamlElementInspection.XamlElementSpan ExtractStatusTextBlock(string xaml)
-    {
-        var candidates = XamlElementInspection.EnumerateElementSpans(xaml, "TextBlock")
-            .Where(t => XamlElementInspection.GetBindingPropertyName(
-                XamlElementInspection.GetAttribute(t.StartTag, "Text")) == "StatusMessage")
-            .ToList();
 
-        candidates.Should().ContainSingle(
-            "TransferStationGroupDialog.xaml に StatusMessage を表示する TextBlock がちょうど 1 つ存在すべき");
-        return candidates[0];
-    }
-
-    /// <summary>開始タグの <c>Visibility</c> が <c>IsEditing</c> へ束縛されているか。</summary>
-    private static bool IsCollapsedWhenNotEditing(XamlElementInspection.XamlElementSpan element)
-        => XamlElementInspection.GetBindingPropertyName(
-            XamlElementInspection.GetAttribute(element.StartTag, "Visibility")) == "IsEditing";
 }

@@ -47,10 +47,50 @@ public class MainWindowHistoryColumnLayoutTests
                 $"Issue #2076: 「{header}」列は幅に収まらない値を黙って捨てず、" +
                 "省略記号で切れていることを示すこと");
 
+        // 期待値（セルのバインド名）が読めないまま比べると、ToolTip 側も null のとき null == null で合格する。
+        // 先に読めていることを表明する（Issue #2102 のコードレビュー。Binding をプロパティ要素形へ書き換え、
+        // ToolTip の Setter を消しても緑だった）
+        var cellBinding = GetColumnBindingPropertyName(column!);
+        cellBinding.Should().NotBeNull($"「{header}」列のセルのバインド先を読み取れること（比較の空振りを防ぐ）");
+
         XamlElementInspection.GetBindingPropertyName(XamlElementInspection.GetSetterValue(unconditional, "ToolTip"))
-            .Should().Be(
-                XamlElementInspection.GetBindingPropertyName(XamlElementInspection.GetAttribute(column.StartTag, "Binding")),
+            .Should().Be(cellBinding,
                 $"Issue #2076: 切り詰めた「{header}」の全文を読む手段（セルと同じ値の ToolTip）を対で用意すること");
+    }
+
+    /// <summary>
+    /// 列のバインド名の読み取りが、属性形とプロパティ要素形の両方を受けることを合成入力で固定する（Issue #2102）。
+    /// </summary>
+    [Theory]
+    [InlineData(@"<DataGridTextColumn Header=""利用者"" Binding=""{Binding DisplayStaffName}""/>", "DisplayStaffName")]
+    [InlineData(@"<DataGridTextColumn Header=""利用者""><DataGridTextColumn.Binding><Binding Path=""DisplayStaffName""/></DataGridTextColumn.Binding></DataGridTextColumn>", "DisplayStaffName")]
+    [InlineData(@"<DataGridTextColumn Header=""利用者""><DataGridTextColumn.Binding><Binding Path=""Ledger.DisplayStaffName"" Mode=""OneWay""/></DataGridTextColumn.Binding></DataGridTextColumn>", "DisplayStaffName")]
+    [InlineData(@"<DataGridTextColumn Header=""利用者""/>", null)]
+    public void 列のバインド名は属性形とプロパティ要素形の両方から読むこと(string xaml, string? expected)
+    {
+        var column = XamlElementInspection.EnumerateElements(xaml, "DataGridTextColumn").Single();
+
+        GetColumnBindingPropertyName(column).Should().Be(expected, $"入力: {xaml}");
+    }
+
+    /// <summary>
+    /// 列のセルのバインド名。<c>Binding="{Binding …}"</c> 属性と、
+    /// <c>&lt;DataGridTextColumn.Binding&gt;&lt;Binding Path="…"/&gt;</c> のプロパティ要素形の両方を読む。
+    /// </summary>
+    private static string? GetColumnBindingPropertyName(XamlElementInspection.XamlElement column)
+    {
+        var attribute = XamlElementInspection.GetAttribute(column.StartTag, "Binding");
+        if (attribute != null)
+        {
+            return XamlElementInspection.GetBindingPropertyName(attribute);
+        }
+
+        var path = XamlElementInspection.EnumerateElements(column.Body, "DataGridTextColumn.Binding")
+            .SelectMany(p => XamlElementInspection.EnumerateElements(p.Body, "Binding"))
+            .Select(b => XamlElementInspection.GetAttribute(b.StartTag, "Path"))
+            .FirstOrDefault(p => !string.IsNullOrEmpty(p));
+
+        return path == null ? null : XamlElementInspection.GetBindingPropertyName($"{{Binding {path}}}");
     }
 
     /// <summary>

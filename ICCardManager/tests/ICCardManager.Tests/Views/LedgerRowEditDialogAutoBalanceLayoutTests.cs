@@ -45,9 +45,36 @@ public class LedgerRowEditDialogAutoBalanceLayoutTests
     {
         var checkBox = ExtractAutoBalanceCheckBox();
 
-        XamlElementInspection.GetAttribute(checkBox.StartTag, "IsEnabled").Should().Be("{Binding CanAutoBalance}",
-            "直前行の残高が不明なときは自動計算を操作できてはならない（Issue #1740）");
+        IsBoundDirectlyTo(XamlElementInspection.GetAttribute(checkBox.StartTag, "IsEnabled"), "CanAutoBalance")
+            .Should().BeTrue("直前行の残高が不明なときは自動計算を操作できてはならない（Issue #1740）");
     }
+
+    /// <summary>
+    /// 結線の判定を合成入力で固定する（Issue #2102 のコードレビュー）。
+    /// </summary>
+    /// <remarks>
+    /// 完全一致で比べていた頃は、<c>Mode=OneWay</c> を足しただけの正当な結線を弾いていた（誤検出）。
+    /// 一方で値を反転し得る <c>Converter</c> 付きの結線は、同じ名前に束縛していても「無効化される」とは言えないので認めない。
+    /// </remarks>
+    [Theory]
+    [InlineData("{Binding CanAutoBalance}", true)]
+    [InlineData("{Binding CanAutoBalance, Mode=OneWay}", true)]
+    [InlineData("{Binding Path=CanAutoBalance}", true)]
+    [InlineData("{Binding CanAutoBalance, Converter={StaticResource InverseBooleanConverter}}", false)]
+    [InlineData("{Binding IsAutoBalanceEnabled}", false)]
+    [InlineData("True", false)]
+    [InlineData(null, false)]
+    public void 有効無効の結線の判定がバインド先と値の変換を見ていること(string? value, bool expected)
+    {
+        IsBoundDirectlyTo(value, "CanAutoBalance").Should().Be(expected, $"入力: {value ?? "(なし)"}");
+    }
+
+    /// <summary>
+    /// <paramref name="value"/> が <paramref name="propertyName"/> へ値を変換せずに束縛した <c>{Binding …}</c> か。
+    /// </summary>
+    private static bool IsBoundDirectlyTo(string? value, string propertyName)
+        => XamlElementInspection.GetBindingPropertyName(value) == propertyName
+           && !System.Text.RegularExpressions.Regex.IsMatch(value!, @"\bConverter\s*=");
 
     /// <summary>
     /// 無効化の理由を説明する ToolTip が結線されていること。

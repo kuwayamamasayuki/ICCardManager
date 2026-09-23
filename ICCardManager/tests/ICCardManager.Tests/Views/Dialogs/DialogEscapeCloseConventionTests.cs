@@ -140,6 +140,17 @@ public class DialogEscapeCloseConventionTests
     [InlineData(@"<Window></Window>",
         "private void Dialog_KeyDown(object sender, KeyEventArgs e)\n{\n    EditFormKeyPolicy.HandleEscape(this, _viewModel, e);\n}",
         EscapeCloseMeans.None)]
+    // WPF の bool 変換は大文字小文字を区別しない（Issue #2102 のコードレビュー: 小文字の true を誤検出していた）
+    [InlineData(@"<Window><Button Content=""閉じる"" IsCancel=""true""/></Window>", "", EscapeCloseMeans.IsCancel)]
+    [InlineData(@"<Window><Button Content=""閉じる"" IsCancel=""False""/></Window>", "", EscapeCloseMeans.None)]
+    // Window の PreviewKeyDown から委ねる形も認める
+    [InlineData(@"<Window PreviewKeyDown=""Dialog_PreviewKeyDown""></Window>",
+        "private void Dialog_PreviewKeyDown(object sender, KeyEventArgs e)\n{\n    EditFormKeyPolicy.HandleEscape(this, _viewModel, e);\n}",
+        EscapeCloseMeans.EditFormKeyPolicy)]
+    // 子要素の PreviewKeyDown は Window の Escape を拾わないので認めない
+    [InlineData(@"<Window><TextBox PreviewKeyDown=""Dialog_PreviewKeyDown""/></Window>",
+        "private void Dialog_PreviewKeyDown(object sender, KeyEventArgs e)\n{\n    EditFormKeyPolicy.HandleEscape(this, _viewModel, e);\n}",
+        EscapeCloseMeans.None)]
     public void Esc手段の判定がコメントを数えず結線を見ていること(string xaml, string codeBehind, EscapeCloseMeans expected)
     {
         var means = DetectEscapeCloseMeans(xaml, codeBehind);
@@ -189,15 +200,20 @@ public class DialogEscapeCloseConventionTests
         var xaml = XamlElementInspection.StripXmlComments(rawXaml);
         var means = new List<EscapeCloseMeans>();
 
+        // WPF の bool / Key の型変換は大文字小文字を区別しない（IsCancel="true" も Key="escape" も有効）。
+        // 大文字の表記だけを認めると、正当な XAML が「Esc で閉じる手段なし」と誤検出される（Issue #2102 のコードレビュー）
         if (XamlElementInspection.EnumerateStartTags(xaml)
-            .Any(tag => XamlElementInspection.GetAttribute(tag.StartTag, "IsCancel") == "True"))
+            .Any(tag => string.Equals(
+                XamlElementInspection.GetPropertyAttribute(tag.StartTag, "IsCancel")?.Trim(), "True",
+                StringComparison.OrdinalIgnoreCase)))
         {
             means.Add(EscapeCloseMeans.IsCancel);
         }
 
         if (XamlElementInspection.EnumerateElements(xaml, "KeyBinding")
             .Any(element =>
-                XamlElementInspection.GetAttribute(element.StartTag, "Key") == "Escape"
+                string.Equals(XamlElementInspection.GetAttribute(element.StartTag, "Key")?.Trim(), "Escape",
+                    StringComparison.OrdinalIgnoreCase)
                 && Regex.IsMatch(
                     XamlElementInspection.GetAttribute(element.StartTag, "Command") ?? string.Empty,
                     @"^\{Binding\s+\w*Close\w*Command\}$")))
@@ -214,26 +230,34 @@ public class DialogEscapeCloseConventionTests
     }
 
     /// <summary>
-    /// ルートの Window が <c>KeyDown</c> で指すハンドラーが、コードビハインドで
+    /// ルートの Window が <c>KeyDown</c> / <c>PreviewKeyDown</c> で指すハンドラーが、コードビハインドで
     /// <c>EditFormKeyPolicy.HandleEscape</c> を呼んでいるか。
     /// </summary>
+    /// <remarks>
+    /// <c>PreviewKeyDown</c> で受けても Escape は同じく処理できる（子のコントロールより先に拾う違いだけ）。
+    /// <c>KeyDown</c> だけを認めると、正当な書き方が誤検出される（Issue #2102 のコードレビュー）。
+    /// </remarks>
     private static bool DelegatesEscapeToEditFormKeyPolicy(string xaml, string rawCodeBehind)
     {
         var window = XamlElementInspection.EnumerateElements(xaml, "Window").FirstOrDefault();
-        var handler = window == null ? null : XamlElementInspection.GetAttribute(window.StartTag, "KeyDown");
-        if (string.IsNullOrEmpty(handler))
+        if (window == null)
         {
             return false;
         }
 
         var code = TestSourceInspection.ToCodeOnly(rawCodeBehind);
-        var signature = Regex.Match(code, $@"\bvoid\s+{Regex.Escape(handler)}\s*\(");
-        if (!signature.Success)
+        foreach (var handler in new[] { "KeyDown", "PreviewKeyDown" }
+                     .Select(e => XamlElementInspection.GetAttribute(window.StartTag, e))
+                     .Where(h => !string.IsNullOrEmpty(h)))
         {
-            return false;
+            var signature = Regex.Match(code, $@"\bvoid\s+{Regex.Escape(handler!)}\s*\(");
+            if (signature.Success
+                && TestSourceInspection.ExtractMethodBody(code, signature.Value).Contains("EditFormKeyPolicy.HandleEscape("))
+            {
+                return true;
+            }
         }
 
-        return TestSourceInspection.ExtractMethodBody(code, signature.Value)
-            .Contains("EditFormKeyPolicy.HandleEscape(");
+        return false;
     }
 }
