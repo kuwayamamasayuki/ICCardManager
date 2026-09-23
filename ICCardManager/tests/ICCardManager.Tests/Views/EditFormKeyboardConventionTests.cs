@@ -314,6 +314,9 @@ public class EditFormKeyboardConventionTests
     /// 単体テストで固定する。ここでは<b>その判断が実際に ViewModel の状態から作られていること</b>
     /// （契約に <c>IsBusy</c> があり、結線が両方の状態を渡していること）を表明する —
     /// 純関数側だけを見ると、引数に定数 <c>false</c> を渡す実装でも緑になる。
+    /// <c>HandleEscape</c> の内側（<c>ResolveEscapeAction</c> へ渡す値と、結果の振り分け）は
+    /// ソーステキストではなく <c>EditFormKeyPolicyTests.HandleEscapeは編集状態と処理中に応じて振り分けること</c>
+    /// が実物の <c>Window</c> とキーイベントで固定する（Issue #2102）。
     /// </remarks>
     [Fact]
     public void Escapeの判断が編集状態と処理中の両方から作られていること()

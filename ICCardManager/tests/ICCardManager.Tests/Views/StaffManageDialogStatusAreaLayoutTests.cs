@@ -1,6 +1,7 @@
 using System.IO;
-using System.Text.RegularExpressions;
+using System.Linq;
 using FluentAssertions;
+using ICCardManager.Tests.Views.Helpers;
 using Xunit;
 
 namespace ICCardManager.Tests.Views;
@@ -26,12 +27,18 @@ namespace ICCardManager.Tests.Views;
 /// <para>
 /// カード管理ダイアログの同等の検査は <c>CardManageDialogStatusAreaLayoutTests</c>
 /// （Issue #1727）。同じ構成へ揃えるための対（つい）の回帰テストである。
+/// 抽出と祖先の判定をサンプル入力で固定するテストもそちらに置く。
+/// </para>
+/// <para>
+/// Issue #2102: 検査は<b>ステータス欄の TextBlock を 1 つに絞ってから</b>その属性と祖先を見る。
+/// 以前はファイル全体への正規表現が前にある自己終了の TextBlock からマッチを始め、
+/// 備考欄 TextBox の <c>TextWrapping="Wrap"</c> を拾っていた（ステータス欄の Wrap を消しても緑）。
 /// </para>
 /// </remarks>
 public class StaffManageDialogStatusAreaLayoutTests
 {
     private static readonly string StaffManageDialogXamlPath =
-        Helpers.ViewSourceLocator.Resolve(Path.Combine("Views", "Dialogs", "StaffManageDialog.xaml"));
+        ViewSourceLocator.Resolve(Path.Combine("Views", "Dialogs", "StaffManageDialog.xaml"));
 
     /// <summary>
     /// ステータス欄が、IsEditing で表示制御されるコンテナの内側に無いこと。
@@ -39,11 +46,21 @@ public class StaffManageDialogStatusAreaLayoutTests
     [Fact]
     public void Status_message_should_not_live_inside_the_editing_only_form_panel()
     {
-        var formPanel = ExtractEditingOnlyFormPanel();
+        var xaml = ReadXaml();
+        var status = EditingFormStatusAreaInspection.ExtractStatusTextBlock(xaml, "StaffManageDialog.xaml");
 
-        formPanel.Should().NotContain("{Binding StatusMessage}",
-            "編集フォームは非編集時に Collapsed になるため、" +
-            "ここにステータス欄を置くと削除の結果メッセージが表示されない（Issue #1759）");
+        // 「内側に無い」が空振りで成立しないよう、IsEditing で畳まれるフォーム本体が実在することを先に確かめる
+        EditingFormStatusAreaInspection.EnumerateEditingOnlyElements(xaml)
+            .Should().Contain(panel => XamlElementInspection.EnumerateStartTags(panel.Body)
+                    .Any(tag => XamlElementInspection.GetBindingPropertyName(
+                        XamlElementInspection.GetAttribute(tag.StartTag, "Text")) == "EditNote"),
+                "この検査は「フォーム本体（備考欄まで）が IsEditing で表示制御されている」ことが前提。" +
+                "前提が崩れたら検査の意味も変わるため、ここで気付けるようにする");
+
+        EditingFormStatusAreaInspection.EditingOnlyAncestorsOf(xaml, status)
+            .Should().BeEmpty(
+                "編集フォームは非編集時に Collapsed になるため、" +
+                "ここにステータス欄を置くと削除の結果メッセージが表示されない（Issue #1759）");
     }
 
     /// <summary>
@@ -51,15 +68,16 @@ public class StaffManageDialogStatusAreaLayoutTests
     /// </summary>
     /// <remarks>
     /// 「無いこと」だけを検査すると、ステータス欄そのものが削除されても素通りする。
-    /// 置き場所が存在することも併せて表明する。
+    /// 置き場所が存在することも併せて表明する（抽出が 1 件に定まらなければ失敗する）。
     /// </remarks>
     [Fact]
     public void Status_message_should_sit_in_its_own_row_without_an_is_editing_visibility()
     {
-        var statusTextBlock = ExtractStatusTextBlock();
+        var status = EditingFormStatusAreaInspection.ExtractStatusTextBlock(ReadXaml(), "StaffManageDialog.xaml");
 
-        statusTextBlock.Should().NotMatchRegex(
-            @"Visibility\s*=\s*""\{Binding\s+IsEditing",
+        XamlElementInspection.GetAttribute(status.StartTag, "Grid.Row").Should().NotBeNull(
+            "ステータス欄は右ペインの独立した行に置く（Issue #1759）");
+        EditingFormStatusAreaInspection.IsCollapsedWhenNotEditing(status).Should().BeFalse(
             "ステータス欄は編集中かどうかに関わらず表示できる必要がある（Issue #1759）");
     }
 
@@ -69,9 +87,9 @@ public class StaffManageDialogStatusAreaLayoutTests
     [Fact]
     public void Status_message_should_wrap()
     {
-        var statusTextBlock = ExtractStatusTextBlock();
+        var status = EditingFormStatusAreaInspection.ExtractStatusTextBlock(ReadXaml(), "StaffManageDialog.xaml");
 
-        statusTextBlock.Should().Contain(@"TextWrapping=""Wrap""",
+        XamlElementInspection.GetUnconditionalPropertyValue(status, "TextWrapping").Should().Be("Wrap",
             "右ペインは狭く、競合エラーの案内は長文になるため折り返しが必要");
     }
 
@@ -81,54 +99,19 @@ public class StaffManageDialogStatusAreaLayoutTests
     [Fact]
     public void Status_message_should_collapse_when_empty()
     {
-        var statusTextBlock = ExtractStatusTextBlock();
+        var status = EditingFormStatusAreaInspection.ExtractStatusTextBlock(ReadXaml(), "StaffManageDialog.xaml");
 
-        statusTextBlock.Should().MatchRegex(
-            @"<DataTrigger\s+Binding\s*=\s*""\{Binding\s+StatusMessage\}""\s+Value\s*=\s*""""[\s\S]*?Visibility""\s+Value\s*=\s*""Collapsed""",
-            "未設定のステータスが行高を占めるとボタンが下へずれる（Issue #1759）");
+        XamlElementInspection.EnumerateElements(status.Body, "DataTrigger")
+            .Where(t => XamlElementInspection.GetBindingPropertyName(
+                            XamlElementInspection.GetAttribute(t.StartTag, "Binding")) == "StatusMessage"
+                        && XamlElementInspection.GetAttribute(t.StartTag, "Value") == string.Empty)
+            .Select(t => XamlElementInspection.GetSetterValue(t.Body, "Visibility"))
+            .Should().ContainSingle().Which.Should().Be("Collapsed",
+                "未設定のステータスが行高を占めるとボタンが下へずれる（Issue #1759）");
     }
 
-    /// <summary>
-    /// <c>Visibility="{Binding IsEditing}"</c> を持つ「フォーム本体」StackPanel の全文を抽出する。
-    /// </summary>
-    private static string ExtractEditingOnlyFormPanel()
-    {
-        var xaml = File.ReadAllText(StaffManageDialogXamlPath);
+    private static string ReadXaml()
+        => XamlElementInspection.StripXmlComments(File.ReadAllText(StaffManageDialogXamlPath));
 
-        var pattern = new Regex(
-            @"<!--\s*フォーム本体\s*-->\s*<StackPanel\b[\s\S]*?\n                </StackPanel>",
-            RegexOptions.Compiled);
 
-        var match = pattern.Match(xaml);
-        match.Success.Should().BeTrue("StaffManageDialog.xaml に「フォーム本体」の StackPanel が存在すべき");
-
-        match.Value.Should().Contain("{Binding IsEditing",
-            "この検査は「フォーム本体が IsEditing で表示制御されている」ことが前提。" +
-            "前提が崩れたら検査の意味も変わるため、ここで気付けるようにする");
-
-        // 抽出範囲が縮むと「StatusMessage が無い」が空振りで成立してしまうため、
-        // フォーム末尾の入力欄まで届いていることを確かめる。
-        match.Value.Should().Contain("EditNote",
-            "フォーム本体の抽出がフォーム末尾（備考欄）まで届いていること");
-
-        return match.Value;
-    }
-
-    /// <summary>
-    /// ステータスメッセージの TextBlock 定義全文を抽出する。
-    /// </summary>
-    private static string ExtractStatusTextBlock()
-    {
-        var xaml = File.ReadAllText(StaffManageDialogXamlPath);
-
-        var pattern = new Regex(
-            @"<TextBlock\b(?:(?!</TextBlock>)[\s\S])*?Text\s*=\s*""\{Binding\s+StatusMessage\}""[\s\S]*?</TextBlock>",
-            RegexOptions.Compiled);
-
-        var match = pattern.Match(xaml);
-        match.Success.Should().BeTrue(
-            "StaffManageDialog.xaml に StatusMessage を表示する TextBlock が存在すべき");
-
-        return match.Value;
-    }
 }

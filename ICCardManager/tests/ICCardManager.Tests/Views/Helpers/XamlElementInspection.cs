@@ -354,4 +354,167 @@ internal static class XamlElementInspection
     }
 
     internal static int LineOf(string source, int index) => source.Take(index).Count(c => c == '\n') + 1;
+
+    /// <summary>
+    /// 位置 <paramref name="index"/> を内側に含む要素（祖先）を、タグ名を問わず外側から順に列挙する。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// 「ステータス欄が <c>Visibility="{Binding IsEditing}"</c> のパネルの内側に無いこと」のように
+    /// <b>祖先の性質</b>を検査するときに使う（Issue #2102）。検査対象の要素を 1 つに絞ってから
+    /// その祖先を辿るので、ファイル全体への正規表現や「コメントを目印に範囲を切り出す」形が要らない。
+    /// </para>
+    /// <para>
+    /// <see cref="EnumerateElements"/> は同名の入れ子を外側の要素の本体として読み飛ばすため、
+    /// 祖先の列挙には使えない（<c>StackPanel</c> の内側の <c>StackPanel</c> が返らない）。
+    /// ここでは開始タグを 1 つずつ起点にして、その要素の範囲を求め直す。
+    /// 自己終了タグは何も含まないので返さない。<b>コメントは呼び出し側で除去しておくこと</b>
+    /// （コメント内のタグ風の字句を要素とみなさないため）。
+    /// </para>
+    /// </remarks>
+    internal static IEnumerable<XamlElementSpan> EnumerateEnclosingElements(string xaml, int index)
+    {
+        foreach (var tag in EnumerateStartTags(xaml))
+        {
+            if (tag.Start >= index)
+            {
+                yield break;
+            }
+
+            if (tag.StartTag.EndsWith("/>", StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            var element = ElementStartingAt(xaml, tag.Start);
+            if (element != null && element.Start + element.Length > index)
+            {
+                yield return element;
+            }
+        }
+    }
+
+    /// <summary>
+    /// 位置 <paramref name="start"/> の <c>&lt;</c> から始まる要素（開始タグ・本体・終了タグ）を返す。
+    /// そこに開始タグが無ければ null。
+    /// </summary>
+    /// <remarks>
+    /// <see cref="EnumerateStartTags"/> で絞り込んだタグ（タグ名を問わない）の本体まで見たいときに使う。
+    /// 同名の入れ子の内側にある要素でも、その要素自身の範囲を返す。
+    /// </remarks>
+    internal static XamlElementSpan? ElementStartingAt(string xaml, int start)
+    {
+        var name = new Regex(@"\G<(?<name>[A-Za-z_][A-Za-z0-9_:.]*)").Match(xaml, start);
+        if (!name.Success)
+        {
+            return null;
+        }
+
+        var element = EnumerateElementSpans(xaml.Substring(start), name.Groups["name"].Value).FirstOrDefault();
+        return element == null || element.Start != 0
+            ? null
+            : new XamlElementSpan(LineOf(xaml, start), start, element.Length, element.StartTag, element.Body);
+    }
+
+    /// <summary>
+    /// 指定したタグ名の要素を、<b>同名の入れ子の内側にあるものも含めて</b>記述順に列挙する。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <see cref="EnumerateElements"/> は同名の入れ子を外側の要素の本体として読み飛ばすため、
+    /// <c>StackPanel</c> の内側の <c>StackPanel</c>（<c>x:Name="QuickFilterPanel"</c> 等）や
+    /// <c>Border</c> の内側の <c>Border</c>（返却確認の案内バナー）を返さない。
+    /// 開始タグを 1 つずつ起点にして要素の範囲を求め直す（Issue #2102 のコードレビューで、
+    /// 同じ形のインライン実装が 4 ファイルに複製されていたため集約した）。
+    /// </para>
+    /// <para>
+    /// プロパティ要素（<c>&lt;StackPanel.Resources&gt;</c>）は <paramref name="tagName"/> と一致しない。
+    /// <b>コメントは呼び出し側で除去しておくこと</b>（<see cref="EnumerateEnclosingElements"/> と同じ）。
+    /// </para>
+    /// </remarks>
+    internal static IEnumerable<XamlElementSpan> EnumerateElementsIncludingNested(string xaml, string tagName)
+    {
+        foreach (var tag in EnumerateStartTags(xaml))
+        {
+            if (FindTagStart(xaml, tagName, tag.Start, closing: false) != tag.Start)
+            {
+                continue;
+            }
+
+            var element = ElementStartingAt(xaml, tag.Start);
+            if (element != null)
+            {
+                yield return element;
+            }
+        }
+    }
+
+    /// <summary>
+    /// XML コメントを除いた最初の開始タグ（＝ルート要素）を返す。XML 宣言・処理命令は開始タグに数えない。
+    /// ルート要素が無ければ null。
+    /// </summary>
+    /// <remarks>
+    /// 「Window のルート要素に〇〇が設定されていること」をファイル全体への正規表現で書くと、
+    /// 子要素の同名属性やコメント内の記述に一致して合格する（Issue #2102。<c>DialogMinimumSizeTests</c> の
+    /// <c>MinWidth</c>、<c>DialogInitialFocusTests</c> の <c>FocusManager.FocusedElement</c>）。
+    /// </remarks>
+    internal static string? GetRootStartTag(string xaml)
+        => EnumerateStartTags(StripXmlComments(xaml)).FirstOrDefault()?.StartTag;
+
+    /// <summary>
+    /// 要素に<b>常に効く</b>プロパティ値を返す。開始タグの属性を優先し、無ければ要素自身の
+    /// <c>&lt;Tag.Style&gt;&lt;Style&gt;</c> の本体（<c>Style.Triggers</c> を除く）の <c>Setter</c> を見る。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// 「ステータス欄が折り返すこと」を開始タグの属性だけで検査すると、同じ指定を Style の Setter で書いた
+    /// 正当な XAML で赤になる（Issue #2102 のコードレビュー。誤検出は修正者を「対象から外す」方向へ誘導する。#1786）。
+    /// </para>
+    /// <para>
+    /// トリガー内の Setter は条件付きなので数えない（空の行で <c>{x:Null}</c> にする Setter を拾うと、
+    /// 無条件の指定を消しても「指定がある」と判定する）。<c>Setter</c> の <c>Property</c> は
+    /// <see cref="IsSetterFor"/> で所有者の修飾を除いて照合する。<c>Style="{StaticResource …}"</c> で
+    /// 参照する共有スタイルは追わない（参照先の解決はリソース辞書の走査が要るため対象外）。
+    /// </para>
+    /// </remarks>
+    internal static string? GetUnconditionalPropertyValue(XamlElementSpan element, string propertyName)
+    {
+        var attribute = GetAttribute(element.StartTag, propertyName);
+        if (attribute != null)
+        {
+            return attribute;
+        }
+
+        var name = Regex.Match(element.StartTag, @"^<(?<name>[A-Za-z_][A-Za-z0-9_:]*)");
+        if (!name.Success)
+        {
+            return null;
+        }
+
+        foreach (var styleProperty in EnumerateElements(element.Body, name.Groups["name"].Value + ".Style"))
+        {
+            foreach (var style in EnumerateElements(styleProperty.Body, "Style"))
+            {
+                var body = style.Body;
+                foreach (var triggers in EnumerateElementSpans(body, "Style.Triggers").Reverse().ToList())
+                {
+                    body = body.Remove(triggers.Start, triggers.Length);
+                }
+
+                foreach (var setter in EnumerateElements(body, "Setter"))
+                {
+                    if (IsSetterFor(GetAttribute(setter.StartTag, "Property"), propertyName))
+                    {
+                        var value = GetAttribute(setter.StartTag, "Value");
+                        if (value != null)
+                        {
+                            return value;
+                        }
+                    }
+                }
+            }
+        }
+
+        return null;
+    }
 }

@@ -1,7 +1,9 @@
-using System;
+using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using System.Text.RegularExpressions;
 using FluentAssertions;
+using ICCardManager.Tests.Views.Helpers;
 using Xunit;
 
 namespace ICCardManager.Tests.Views.Dialogs;
@@ -27,12 +29,18 @@ namespace ICCardManager.Tests.Views.Dialogs;
 /// XAML 構造的不変条件」を静的解析で固定し、再びクリッピングを誘発するレイアウト変更を
 /// レビュー段階で検出することを目的とする（実描画リグレッションは Issue #1522 の FlaUI テストが担当）。
 /// </para>
+/// <para>
+/// Issue #2102: 検査は XML コメントを除いたうえで<b>対象の要素を 1 つに絞ってから</b>属性・本体を見る。
+/// 以前はファイル全体への正規表現で、①コメントを除かず（「今日」ボタンをコメントアウトしても
+/// <c>SetTodayCommand</c> の字句がパネル内に残って緑）、②<c>&lt;!-- 検索条件 --&gt;</c> というコメントを目印に範囲を切り出し、
+/// ③<c>&lt;/StackPanel&gt;</c> の非貪欲一致で同名の入れ子の内側の終了タグで切れ、④属性の記述順に依存していた。
+/// </para>
 /// </remarks>
 public class OperationLogDialogQuickFilterLayoutTests
 {
     private const string TargetXaml = "OperationLogDialog.xaml";
 
-    private static readonly string DialogsDirectory = ResolveDialogsDirectory();
+    private static readonly string DialogsDirectory = ViewSourceLocator.ResolveDirectory(Path.Combine("Views", "Dialogs"));
 
     /// <summary>
     /// クイックフィルタボタン群は専用の StackPanel (x:Name="QuickFilterPanel") に分離されていること。
@@ -42,8 +50,7 @@ public class OperationLogDialogQuickFilterLayoutTests
     {
         var xaml = ReadDialog(TargetXaml);
 
-        xaml.Should().MatchRegex(
-            @"<StackPanel\s+x:Name=""QuickFilterPanel""",
+        FindNamedStackPanels(xaml, "QuickFilterPanel").Should().ContainSingle(
             "OperationLogDialog: クイックフィルタボタン群は x:Name=\"QuickFilterPanel\" の専用 StackPanel に " +
             "分離されている必要がある（Issue #1505）。期間 DatePicker と同じ StackPanel に同居させると " +
             "星共有列の幅不足で描画クリップが発生する。");
@@ -57,15 +64,13 @@ public class OperationLogDialogQuickFilterLayoutTests
     [Fact]
     public void QuickFilterPanel_should_occupy_dedicated_row_with_full_span()
     {
-        var xaml = ReadDialog(TargetXaml);
+        var openingTag = ExtractNamedStackPanel(ReadDialog(TargetXaml), "QuickFilterPanel").StartTag;
 
-        var openingTag = ExtractStackPanelOpeningTag(xaml, "QuickFilterPanel");
-
-        openingTag.Should().Contain("Grid.Row=\"2\"",
+        XamlElementInspection.GetAttribute(openingTag, "Grid.Row").Should().Be("2",
             "QuickFilterPanel は Row 2 に配置されるべき（Issue #1505/#1523）。" +
             "Row 0=期間、Row 1=操作種別+対象、Row 2=クイックフィルタ、Row 3=対象ID+操作者名+検索 の 4 行構成。");
 
-        openingTag.Should().Contain("Grid.ColumnSpan=\"5\"",
+        XamlElementInspection.GetAttribute(openingTag, "Grid.ColumnSpan").Should().Be("5",
             "QuickFilterPanel は 6 列構成の Grid において Col 1 から Col 5 までを ColumnSpan=\"5\" で全幅占有し、" +
             "再び星共有列の幅不足でクリップされないようにすべき（Issue #1505）。");
     }
@@ -78,17 +83,15 @@ public class OperationLogDialogQuickFilterLayoutTests
     [Fact]
     public void DateRangePanel_should_span_all_star_columns_on_row0()
     {
-        var xaml = ReadDialog(TargetXaml);
+        var openingTag = ExtractNamedStackPanel(ReadDialog(TargetXaml), "DateRangePanel").StartTag;
 
-        var openingTag = ExtractStackPanelOpeningTag(xaml, "DateRangePanel");
-
-        openingTag.Should().Contain("Grid.Row=\"0\"",
+        XamlElementInspection.GetAttribute(openingTag, "Grid.Row").Should().Be("0",
             "DateRangePanel は Row 0 単独行に配置されるべき（Issue #1523）。");
 
-        openingTag.Should().Contain("Grid.Column=\"1\"",
+        XamlElementInspection.GetAttribute(openingTag, "Grid.Column").Should().Be("1",
             "DateRangePanel は Col 1 起点で配置されるべき（Col 0 は「期間:」ラベル）。");
 
-        openingTag.Should().Contain("Grid.ColumnSpan=\"5\"",
+        XamlElementInspection.GetAttribute(openingTag, "Grid.ColumnSpan").Should().Be("5",
             "DateRangePanel は 6 列構成の Grid で Col 1-5 を ColumnSpan=\"5\" で全幅占有すべき（Issue #1523）。" +
             "Col 1 単独だと StackPanel 希望幅 270px が星共有列の幅不足で確保されず、終了日 DatePicker が " +
             "クリップされる（MinWidth=800 で ~180px しか得られない）。");
@@ -104,24 +107,23 @@ public class OperationLogDialogQuickFilterLayoutTests
     [InlineData("TargetTables", "対象")]
     public void Row0_should_not_contain_action_or_target_combobox(string bindingPath, string controlName)
     {
-        var xaml = ReadDialog(TargetXaml);
+        var comboBoxes = XamlElementInspection.EnumerateElementsIncludingNested(ReadDialog(TargetXaml), "ComboBox")
+            .Where(c => XamlElementInspection.GetBindingPropertyName(
+                XamlElementInspection.GetAttribute(c.StartTag, "ItemsSource")) == bindingPath)
+            .ToList();
+        comboBoxes.Should().ContainSingle($"{controlName} ComboBox（ItemsSource={{Binding {bindingPath}}}）がちょうど 1 つ存在すべき");
 
-        // ComboBox の Grid.Row 属性を、属性順に依存せず抽出する
-        var pattern = $@"<ComboBox\b(?:(?!</ComboBox>|/>).)*?ItemsSource=""\{{Binding {Regex.Escape(bindingPath)}\}}""(?:(?!</ComboBox>|/>).)*?(?:/>|</ComboBox>)";
-        var comboBoxMatch = Regex.Match(xaml, pattern, RegexOptions.Singleline);
-        comboBoxMatch.Success.Should().BeTrue($"{controlName} ComboBox（ItemsSource={{Binding {bindingPath}}}）が見つかりません");
-
-        var gridRowMatch = Regex.Match(comboBoxMatch.Value, @"Grid\.Row=""(?<row>\d+)""");
-        gridRowMatch.Success.Should().BeTrue($"{controlName} ComboBox に Grid.Row 属性がありません");
-
-        gridRowMatch.Groups["row"].Value.Should().NotBe("0",
+        // Grid.Row を省略すると Row 0 に置かれる（WPF の既定値）ため、属性の存在も求める
+        var row = XamlElementInspection.GetAttribute(comboBoxes[0].StartTag, "Grid.Row");
+        row.Should().NotBeNull($"{controlName} ComboBox に Grid.Row 属性がありません（省略すると Row 0 に置かれる）");
+        row.Should().NotBe("0",
             $"{controlName} ComboBox は Row 0（期間行）と同居してはならない（Issue #1523）。" +
             "DateRangePanel の ColumnSpan=\"5\" と衝突し、終了日 DatePicker のクリップが再発する。");
     }
 
     /// <summary>
     /// 3 つのクイックフィルタコマンド（SetTodayCommand / SetThisMonthCommand / SetLastMonthCommand）は
-    /// 必ず QuickFilterPanel の内側に配置されていること。
+    /// 必ず QuickFilterPanel の内側のボタンへ結線されていること。
     /// </summary>
     [Theory]
     [InlineData("SetTodayCommand", "今日")]
@@ -129,11 +131,9 @@ public class OperationLogDialogQuickFilterLayoutTests
     [InlineData("SetLastMonthCommand", "先月")]
     public void QuickFilter_buttons_should_live_inside_QuickFilterPanel(string commandName, string buttonLabel)
     {
-        var xaml = ReadDialog(TargetXaml);
+        var panel = ExtractNamedStackPanel(ReadDialog(TargetXaml), "QuickFilterPanel");
 
-        var panelBody = ExtractStackPanelInnerXaml(xaml, "QuickFilterPanel");
-
-        panelBody.Should().Contain(commandName,
+        ButtonsBoundTo(panel.Body, commandName).Should().ContainSingle(
             $"クイックフィルタボタン「{buttonLabel}」({commandName}) は QuickFilterPanel の内側に配置されているべき（Issue #1505）。");
     }
 
@@ -147,11 +147,9 @@ public class OperationLogDialogQuickFilterLayoutTests
     [InlineData("SetLastMonthCommand")]
     public void QuickFilter_commands_should_not_be_in_DatePicker_StackPanel(string commandName)
     {
-        var xaml = ReadDialog(TargetXaml);
+        var datePickerPanel = ExtractDatePickerStackPanel(ReadDialog(TargetXaml));
 
-        var datePickerPanel = ExtractDatePickerStackPanel(xaml);
-
-        datePickerPanel.Should().NotContain(commandName,
+        ButtonsBoundTo(datePickerPanel.Body, commandName).Should().BeEmpty(
             $"OperationLogDialog: {commandName} は期間 DatePicker と同じ StackPanel に置かれてはならない（Issue #1505）。" +
             "Grid の星共有列で StackPanel の希望幅が確保されず、後続セルの描画と衝突しボタンが視覚的に隠れる。");
     }
@@ -163,34 +161,38 @@ public class OperationLogDialogQuickFilterLayoutTests
     [Fact]
     public void DatePicker_StackPanel_should_not_contain_any_Button()
     {
-        var xaml = ReadDialog(TargetXaml);
+        var datePickerPanel = ExtractDatePickerStackPanel(ReadDialog(TargetXaml));
 
-        var datePickerPanel = ExtractDatePickerStackPanel(xaml);
-
-        Regex.IsMatch(datePickerPanel, @"<Button\b")
-            .Should().BeFalse(
-            "OperationLogDialog: 期間 DatePicker の StackPanel には Button を含めないこと（Issue #1505）。" +
-            "クイックフィルタは QuickFilterPanel に分離する設計。");
+        XamlElementInspection.EnumerateElementsIncludingNested(datePickerPanel.Body, "Button")
+            .Should().BeEmpty(
+                "OperationLogDialog: 期間 DatePicker の StackPanel には Button を含めないこと（Issue #1505）。" +
+                "クイックフィルタは QuickFilterPanel に分離する設計。");
     }
 
     /// <summary>
-    /// 検索条件 Border 内の Grid は Row を 4 行構成 (Row 0/1/2/3) に持つこと。
+    /// 検索条件 Grid は Row を 4 行構成 (Row 0/1/2/3) に持つこと。
     /// Issue #1523 で期間 DatePicker を独立行に分離したため、Row 数は 3 → 4 に増加した。
     /// </summary>
+    /// <remarks>
+    /// 検索条件 Grid は「QuickFilterPanel の親の Grid」として構造で特定する
+    /// （以前は <c>&lt;!-- 検索条件 --&gt;</c> コメント以降の最初の <c>Grid.RowDefinitions</c> を見ていた。Issue #2102）。
+    /// </remarks>
     [Fact]
     public void Filter_grid_should_have_four_row_definitions()
     {
         var xaml = ReadDialog(TargetXaml);
+        var filterGrid = ParentOf(xaml, ExtractNamedStackPanel(xaml, "QuickFilterPanel"));
+        filterGrid.StartTag.Should().MatchRegex(@"^<Grid[\s/>]", "QuickFilterPanel の親は検索条件 Grid であるべき");
+        ParentOf(xaml, ExtractNamedStackPanel(xaml, "DateRangePanel")).Start.Should().Be(filterGrid.Start,
+            "期間とクイックフィルタは同じ検索条件 Grid の行を分け合う");
 
-        // ルート Grid (5行構成) と区別するため、「<!-- 検索条件 -->」コメント以降を対象に検索する
-        var filterSectionIndex = xaml.IndexOf("<!-- 検索条件 -->", StringComparison.Ordinal);
-        filterSectionIndex.Should().BeGreaterThan(-1, "検索条件セクションのコメントが必要");
+        var rowDefinitions = XamlElementInspection.EnumerateElementSpans(xaml, "Grid.RowDefinitions")
+            .Where(r => ParentOf(xaml, r).Start == filterGrid.Start)
+            .ToList();
+        rowDefinitions.Should().ContainSingle("OperationLogDialog: 検索条件 Grid に Grid.RowDefinitions が必要");
 
-        var filterSection = xaml.Substring(filterSectionIndex);
-        var rowDefsMatch = Regex.Match(filterSection, @"<Grid\.RowDefinitions>([\s\S]*?)</Grid\.RowDefinitions>");
-        rowDefsMatch.Success.Should().BeTrue("OperationLogDialog: 検索条件 Grid に Grid.RowDefinitions が必要");
-
-        var rowCount = Regex.Matches(rowDefsMatch.Groups[1].Value, @"<RowDefinition\b").Count;
+        var rowCount = XamlElementInspection.EnumerateStartTags(rowDefinitions[0].Body)
+            .Count(t => Regex.IsMatch(t.StartTag, @"^<RowDefinition[\s/>]"));
 
         rowCount.Should().Be(4,
             "OperationLogDialog: 検索条件 Grid は 4 行構成（Row 0=期間 / Row 1=操作種別+対象 / Row 2=クイックフィルタ / " +
@@ -199,61 +201,75 @@ public class OperationLogDialogQuickFilterLayoutTests
     }
 
     /// <summary>
-    /// 指定した x:Name を持つ StackPanel の開始タグ全体を抽出する。
+    /// 抽出がコメント・同名の入れ子・属性の記述順に左右されないことを合成入力で固定する（Issue #2102）。
     /// </summary>
-    private static string ExtractStackPanelOpeningTag(string xaml, string nameValue)
+    [Theory]
+    // 属性の記述順が違っても（x:Name が先頭でなくても）見つかる
+    [InlineData(@"<Grid><StackPanel Grid.Row=""2"" x:Name=""QuickFilterPanel""><Button Command=""{Binding SetTodayCommand}""/></StackPanel></Grid>", 1)]
+    // コメントアウトしたボタンは数えない（旧実装はコメント内の字句に一致して合格していた）
+    [InlineData(@"<Grid><StackPanel x:Name=""QuickFilterPanel""><!-- <Button Command=""{Binding SetTodayCommand}""/> --></StackPanel></Grid>", 0)]
+    // 同名の入れ子の内側の終了タグで切れない（旧実装は非貪欲の </StackPanel> で内側の終了タグまでしか見なかった）
+    [InlineData(@"<Grid><StackPanel x:Name=""QuickFilterPanel""><StackPanel><Button Command=""{Binding SetThisMonthCommand}""/></StackPanel><Button Command=""{Binding SetTodayCommand}""/></StackPanel></Grid>", 1)]
+    // パネルの外にあるボタンは数えない
+    [InlineData(@"<Grid><StackPanel x:Name=""QuickFilterPanel""/><Button Command=""{Binding SetTodayCommand}""/></Grid>", 0)]
+    public void パネルの内側のボタンをコメントと入れ子に左右されずに数えること(string rawXaml, int expected)
     {
-        var pattern = $@"<StackPanel\s+x:Name=""{Regex.Escape(nameValue)}""[^>]*?>";
-        var match = Regex.Match(xaml, pattern);
-        match.Success.Should().BeTrue($"x:Name=\"{nameValue}\" の StackPanel 開始タグが見つかりません");
-        return match.Value;
+        var xaml = XamlElementInspection.StripXmlComments(rawXaml);
+
+        ButtonsBoundTo(ExtractNamedStackPanel(xaml, "QuickFilterPanel").Body, "SetTodayCommand")
+            .Should().HaveCount(expected, $"入力: {rawXaml}");
+    }
+
+    private static IEnumerable<XamlElementInspection.XamlElementSpan> FindNamedStackPanels(string xaml, string name)
+        => XamlElementInspection.EnumerateElementsIncludingNested(xaml, "StackPanel")
+            .Where(p => XamlElementInspection.GetAttribute(p.StartTag, "x:Name") == name);
+
+    /// <summary>
+    /// 指定した x:Name を持つ StackPanel を 1 つに絞って返す（同名の入れ子の内側にあっても見つける）。
+    /// </summary>
+    private static XamlElementInspection.XamlElementSpan ExtractNamedStackPanel(string xaml, string name)
+    {
+        var panels = FindNamedStackPanels(xaml, name).ToList();
+        panels.Should().ContainSingle($"x:Name=\"{name}\" の StackPanel がちょうど 1 つ存在すべき");
+        return panels[0];
     }
 
     /// <summary>
-    /// 指定した x:Name を持つ StackPanel の中身（子要素 XAML）を抽出する。
+    /// FromDate の DatePicker を直接含む StackPanel（最も内側の祖先の StackPanel）を返す。
     /// </summary>
-    private static string ExtractStackPanelInnerXaml(string xaml, string nameValue)
+    private static XamlElementInspection.XamlElementSpan ExtractDatePickerStackPanel(string xaml)
     {
-        var pattern = $@"<StackPanel\s+x:Name=""{Regex.Escape(nameValue)}""[^>]*?>([\s\S]*?)</StackPanel>";
-        var match = Regex.Match(xaml, pattern);
-        match.Success.Should().BeTrue($"x:Name=\"{nameValue}\" の StackPanel 内容が抽出できません");
-        return match.Groups[1].Value;
+        var datePickers = XamlElementInspection.EnumerateElementsIncludingNested(xaml, "DatePicker")
+            .Where(d => XamlElementInspection.GetBindingPropertyName(
+                XamlElementInspection.GetAttribute(d.StartTag, "SelectedDate")) == "FromDate")
+            .ToList();
+        datePickers.Should().ContainSingle("開始日（SelectedDate={Binding FromDate}）の DatePicker がちょうど 1 つ存在すべき");
+
+        var panel = XamlElementInspection.EnumerateEnclosingElements(xaml, datePickers[0].Start)
+            .LastOrDefault(e => Regex.IsMatch(e.StartTag, @"^<StackPanel[\s>]"));
+        panel.Should().NotBeNull("期間 DatePicker を含む StackPanel が見つかりません");
+        return panel!;
     }
 
-    /// <summary>
-    /// FromDate / ToDate の DatePicker を含む期間 StackPanel の中身を抽出する。
-    /// x:Name を持たないため、SelectedDate="{Binding FromDate}" を含む StackPanel を識別する。
-    /// </summary>
-    private static string ExtractDatePickerStackPanel(string xaml)
+    /// <summary>最も内側の祖先要素（親）。</summary>
+    private static XamlElementInspection.XamlElementSpan ParentOf(string xaml, XamlElementInspection.XamlElementSpan element)
     {
-        // FromDate の DatePicker を含む StackPanel ブロックを抽出
-        var pattern = @"<StackPanel\b(?:(?!</StackPanel>).)*?SelectedDate=""\{Binding FromDate\}""(?:(?!</StackPanel>).)*?</StackPanel>";
-        var match = Regex.Match(xaml, pattern, RegexOptions.Singleline);
-        match.Success.Should().BeTrue("期間 DatePicker を含む StackPanel が見つかりません");
-        return match.Value;
+        var parent = XamlElementInspection.EnumerateEnclosingElements(xaml, element.Start).LastOrDefault();
+        parent.Should().NotBeNull($"{element.Line}行目の要素に親があるべき");
+        return parent!;
     }
+
+    /// <summary>本体の中で、<c>Command</c> を <paramref name="commandName"/> へ結線した Button（入れ子の内側も含む）。</summary>
+    private static IReadOnlyList<XamlElementInspection.XamlElementSpan> ButtonsBoundTo(string body, string commandName)
+        => XamlElementInspection.EnumerateElementsIncludingNested(body, "Button")
+            .Where(b => XamlElementInspection.GetBindingPropertyName(
+                XamlElementInspection.GetAttribute(b.StartTag, "Command")) == commandName)
+            .ToList();
 
     private static string ReadDialog(string fileName)
     {
         var path = Path.Combine(DialogsDirectory, fileName);
         File.Exists(path).Should().BeTrue($"ダイアログ {fileName} が存在すべき");
-        return File.ReadAllText(path);
-    }
-
-    private static string ResolveDialogsDirectory()
-    {
-        var current = new DirectoryInfo(AppContext.BaseDirectory);
-        while (current != null)
-        {
-            var candidate = Path.Combine(current.FullName, "src", "ICCardManager", "Views", "Dialogs");
-            if (Directory.Exists(candidate))
-            {
-                return candidate;
-            }
-            current = current.Parent;
-        }
-
-        throw new InvalidOperationException(
-            $"Views/Dialogs ディレクトリを {AppContext.BaseDirectory} の親階層から解決できませんでした");
+        return XamlElementInspection.StripXmlComments(File.ReadAllText(path));
     }
 }

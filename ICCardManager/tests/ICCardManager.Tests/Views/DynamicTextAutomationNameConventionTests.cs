@@ -7,6 +7,7 @@ using System.Text.RegularExpressions;
 using FluentAssertions;
 using ICCardManager.Tests.Views.Helpers;
 using Xunit;
+using static ICCardManager.Tests.Views.Helpers.XamlElementInspection;
 
 namespace ICCardManager.Tests.Views;
 
@@ -297,18 +298,31 @@ public class DynamicTextAutomationNameConventionTests
     /// <summary>
     /// 履歴のページ送りは 4 方向すべてが個別に識別できること（Issue #2073）。
     /// </summary>
+    /// <remarks>
+    /// Issue #2102: 旧実装はファイルのどこかに読み上げ名があるかだけを見ていたため、
+    /// ⏮ と ⏭ の読み上げ名を入れ替えても緑だった。ボタンをコマンドで 1 つに絞り、
+    /// **同じ要素の**グリフと読み上げ名の対応を表明する。
+    /// </remarks>
     [Theory]
-    [InlineData("最初のページ")]
-    [InlineData("前のページ")]
-    [InlineData("次のページ")]
-    [InlineData("最後のページ")]
-    public void 履歴のページ送りボタンは4方向すべてに読み上げ名を持つこと(string expectedName)
+    [InlineData("HistoryGoToFirstPageCommand", "⏮", "最初のページ")]
+    [InlineData("HistoryGoToPrevPageCommand", "◀", "前のページ")]
+    [InlineData("HistoryGoToNextPageCommand", "▶", "次のページ")]
+    [InlineData("HistoryGoToLastPageCommand", "⏭", "最後のページ")]
+    public void 履歴のページ送りボタンは4方向すべてに読み上げ名を持つこと(
+        string commandName, string expectedGlyph, string expectedName)
     {
         var mainWindow = EnumerateViewFiles().Single(v => Path.GetFileName(v.XamlPath) == "MainWindow.xaml");
 
-        mainWindow.Xaml.Should().MatchRegex(
-            $@"AutomationProperties\.Name\s*=\s*""{Regex.Escape(expectedName)}""",
-            $"履歴のページ送りに AutomationProperties.Name=\"{expectedName}\" が必要（月送り ◀ ▶ と同じ作法）。");
+        var buttons = EnumerateElements(StripXmlComments(mainWindow.Xaml), "Button")
+            .Where(b => GetBindingPropertyName(GetAttribute(b.StartTag, "Command")) == commandName)
+            .ToList();
+        buttons.Should().ContainSingle($"Command=\"{{Binding {commandName}}}\" のボタンがちょうど 1 つ存在すること");
+
+        GetAttribute(buttons[0].StartTag, "Content").Should().Be(expectedGlyph,
+            $"{commandName} のボタンは {expectedGlyph} を表示するはず");
+        GetAttribute(buttons[0].StartTag, "AutomationProperties.Name").Should().Be(expectedName,
+            $"{expectedGlyph}（{commandName}）の読み上げ名は \"{expectedName}\" であること（月送り ◀ ▶ と同じ作法）。" +
+            "方向を取り違えた読み上げ名は、名前が無いより誤操作を招く（Issue #2102）。");
     }
 
     // ------------------------------------------------------------------
@@ -431,24 +445,10 @@ public class DynamicTextAutomationNameConventionTests
         return true;
     }
 
-    private static bool IsMarkupExtension(string? value)
-        => value != null && value.TrimStart().StartsWith("{", StringComparison.Ordinal);
-
-    // 以下の走査ヘルパーは Issue #2075 で ICCardManager.Tests.Views.Helpers.XamlElementInspection へ
-    // 集約した（同じ判断を 2 か所に置かない。.claude/rules/testing.md「検査の下請け処理も同じ」）。
-    // 本クラスは呼び出し側の可読性のために薄いラッパーだけを残す。
-
-    private static string StripXmlComments(string xaml)
-        => XamlElementInspection.StripXmlComments(xaml);
-
-    private static IEnumerable<XamlElementInspection.XamlElement> EnumerateElements(string xaml, string tagName)
-        => XamlElementInspection.EnumerateElements(xaml, tagName);
-
-    private static string? GetAttribute(string tag, string attributeName)
-        => XamlElementInspection.GetAttribute(tag, attributeName);
-
-    private static string? GetSetterValue(string body, string propertyName)
-        => XamlElementInspection.GetSetterValue(body, propertyName);
+    // 走査ヘルパー（StripXmlComments / EnumerateElements / GetAttribute / GetSetterValue /
+    // IsMarkupExtension / GetBindingPropertyName）は ICCardManager.Tests.Views.Helpers.XamlElementInspection を
+    // using static で直接使う（Issue #2075 で集約、#2102 で私的なラッパーと IsMarkupExtension の複製を撤去。
+    // 同じ判断を 2 か所に置かない。.claude/rules/testing.md「検査の下請け処理も同じ」）。
 
     private static IEnumerable<(string XamlPath, string Xaml, string CodeBehind)> EnumerateViewFiles()
     {

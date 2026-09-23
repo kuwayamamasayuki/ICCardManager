@@ -141,7 +141,7 @@ public class ChartSeriesPaletteTests
         // 検査対象のブラシ名を許可リストで書くと、名前を変えただけで素通りする（fail-open）。
         // XAML から実際に使われているキーを取り出して色値で判定する。
         var fills = ResolvePalette().Values.ToList();
-        var brushes = LoadBrushes();
+        var brushes = AccessibilityBrushes.Load();
         var strokeKeys = ExtractStrokeResourceKeys();
 
         strokeKeys.Should().HaveCountGreaterThanOrEqualTo(
@@ -220,7 +220,7 @@ public class ChartSeriesPaletteTests
         colors.Values.Should().OnlyContain(v => Regex.IsMatch(v, "^#[0-9A-Fa-f]{6,8}$"));
 
         // 抽出器そのものが動いていることを、パレット以外の既知のキーでも確かめる
-        LoadBrushes().Should().ContainKey("PrimaryBrush")
+        AccessibilityBrushes.Load().Should().ContainKey("PrimaryBrush")
             .WhoseValue.Should().Be("#1976D2");
     }
 
@@ -230,7 +230,7 @@ public class ChartSeriesPaletteTests
 
     private static IDictionary<string, string> ResolvePalette()
     {
-        var brushes = LoadBrushes();
+        var brushes = AccessibilityBrushes.Load();
         var result = new Dictionary<string, string>(StringComparer.Ordinal);
 
         foreach (var key in PaletteKeys)
@@ -240,30 +240,6 @@ public class ChartSeriesPaletteTests
                 "系列色 {0} は AccessibilityStyles.xaml に定義されているべき（色値リテラルの直書きは禁止）",
                 key);
             result[key] = brushes[key];
-        }
-
-        return result;
-    }
-
-    /// <summary>
-    /// <c>AccessibilityStyles.xaml</c> の <c>SolidColorBrush</c> をキー → 色値で返す。
-    /// </summary>
-    /// <remarks>
-    /// コメントを先に除去する。規約の理由を述べたコメントに書かれた色値を拾わないため
-    /// （<c>.claude/rules/development-conventions.md</c> #1692 の極性の反転）。
-    /// </remarks>
-    private static IDictionary<string, string> LoadBrushes()
-    {
-        var path = Path.Combine(
-            TestPaths.GetProductionSourceRoot(), "Resources", "Styles", "AccessibilityStyles.xaml");
-        var xaml = Regex.Replace(File.ReadAllText(path), "<!--.*?-->", string.Empty, RegexOptions.Singleline);
-
-        var result = new Dictionary<string, string>(StringComparer.Ordinal);
-        foreach (Match m in Regex.Matches(
-            xaml,
-            "<SolidColorBrush\\s+x:Key=\"(?<key>[^\"]+)\"\\s+Color=\"(?<color>#[0-9A-Fa-f]{6,8})\"\\s*/>"))
-        {
-            result[m.Groups["key"].Value] = m.Groups["color"].Value.ToUpperInvariant();
         }
 
         return result;
@@ -283,7 +259,7 @@ public class ChartSeriesPaletteTests
     {
         var path = Path.Combine(
             TestPaths.GetProductionSourceRoot(), "Views", "Dialogs", "AdminDashboardDialog.xaml");
-        var xaml = Regex.Replace(File.ReadAllText(path), "<!--.*?-->", string.Empty, RegexOptions.Singleline);
+        var xaml = XamlElementInspection.StripXmlComments(File.ReadAllText(path));
 
         // 重複は畳まない。畳むと「2 か所とも同じブラシを指している」正常な状態と
         // 「1 か所しか抽出できていない」空振りが同じ件数になり、空振り検出が効かなくなる

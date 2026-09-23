@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Text.RegularExpressions;
@@ -58,10 +59,14 @@ public class LedgerDetailDialogCloseGuardTests
     [Fact]
     public void XAML全体でIsCancelを宣言しないこと()
     {
-        var xaml = File.ReadAllText(XamlPath);
+        var xaml = XamlElementInspection.StripXmlComments(File.ReadAllText(XamlPath));
 
-        // 「IsCancel は付けない」という規約コメント自体を違反と誤検出しないよう、属性の形で照合する
-        Regex.IsMatch(xaml, @"IsCancel\s*=\s*""True""").Should().BeFalse(
+        // 「IsCancel は付けない」という規約コメント自体を違反と誤検出しないよう、コメントを除いたうえで
+        // 開始タグごとに属性として照合する（大文字小文字は XAML の bool 変換と同じく区別しない）
+        XamlElementInspection.EnumerateStartTags(xaml)
+            .Select(t => XamlElementInspection.GetAttribute(t.StartTag, "IsCancel"))
+            .Any(v => string.Equals(v, "True", System.StringComparison.OrdinalIgnoreCase))
+            .Should().BeFalse(
             "IsCancel は Click 処理の後に無条件で DialogResult=false を設定するため、" +
             "OnClosing の破棄確認で「いいえ」を選んでも DialogResult が false のまま残り、" +
             "以後の Escape / クリックが無反応になる（Issue #1743）。" +
@@ -95,6 +100,13 @@ public class LedgerDetailDialogCloseGuardTests
     /// 空の override を残したまま確認を Click ハンドラへ戻す改変を検出できない。
     /// メソッド本体を取り出して、判定の委譲とクローズの中止の両方を確かめる。
     /// </remarks>
+    /// <remarks>
+    /// Issue #2102: 旧版は本体に <c>.CanClose(</c> と <c>e.Cancel = true</c> が<b>それぞれ</b>現れるかしか
+    /// 見ておらず、<c>!_viewModel.CanClose(…)</c> の <c>!</c> を外して「閉じてよいときに閉じない／
+    /// 破棄を断ったときに閉じる」形へ反転しても緑だった。<see cref="FindCanCloseGuard"/> で
+    /// <c>CanClose</c> を条件に持つ <c>if</c> を 1 つに絞り、その条件が否定であることと、
+    /// その <c>if</c> の本体が <c>e.Cancel = true</c> を持つことを<b>同じ分岐について</b>表明する。
+    /// </remarks>
     [Fact]
     public void OnClosingがCanCloseを呼びクローズを中止すること()
     {
@@ -103,9 +115,72 @@ public class LedgerDetailDialogCloseGuardTests
         body.Should().Contain(".CanClose(",
             "破棄確認の判定は ViewModel.CanClose へ委譲し、単体テスト可能な形へ一元化する（Issue #1743）");
 
-        Regex.IsMatch(body, @"e\.Cancel\s*=\s*true").Should().BeTrue(
+        var (condition, block) = FindCanCloseGuard(body);
+
+        IsNegatedCanClose(condition).Should().BeTrue(
+            "CanClose が false（破棄を断った）ときにだけクローズを止める。否定が外れると、" +
+            "変更が無いときに閉じられず、破棄を断ったときに閉じる（Issue #1743）。条件: " + condition);
+
+        Regex.IsMatch(block, @"\be\.Cancel\s*=\s*true\s*;").Should().BeTrue(
             "CanClose が false を返したときに e.Cancel = true でクローズを止めなければ、" +
-            "確認で「いいえ」を選んでもダイアログは閉じる（Issue #1743）");
+            "確認で「いいえ」を選んでもダイアログは閉じる（Issue #1743）。分岐の本体: " + block);
+    }
+
+    /// <summary>
+    /// 分岐の抽出と否定の判定をサンプル入力で固定する（否定の有無・分岐の取り違え）。
+    /// </summary>
+    [Fact]
+    public void CanCloseの分岐の抽出が否定と本体を取り違えないこと()
+    {
+        const string correct =
+            "class C { protected override void OnClosing(CancelEventArgs e) { base.OnClosing(e); " +
+            "if (e.Cancel) { return; } " +
+            "if (_viewModel != null && !_viewModel.CanClose(Confirm)) { e.Cancel = true; return; } } }";
+        var (condition, block) = FindCanCloseGuard(ExtractMethodBodyFrom(correct, "protected override void OnClosing"));
+        IsNegatedCanClose(condition).Should().BeTrue();
+        block.Should().Contain("e.Cancel = true");
+
+        const string inverted =
+            "class C { protected override void OnClosing(CancelEventArgs e) { " +
+            "if (_viewModel != null && _viewModel.CanClose(Confirm)) { e.Cancel = true; return; } } }";
+        var (invertedCondition, _) = FindCanCloseGuard(ExtractMethodBodyFrom(inverted, "protected override void OnClosing"));
+        IsNegatedCanClose(invertedCondition).Should().BeFalse("否定を外した形は違反として検出される");
+
+        const string elsewhere =
+            "class C { protected override void OnClosing(CancelEventArgs e) { " +
+            "if (!_viewModel.CanClose(Confirm)) { Log(); } e.Cancel = true; } }";
+        var (_, elsewhereBlock) = FindCanCloseGuard(ExtractMethodBodyFrom(elsewhere, "protected override void OnClosing"));
+        Regex.IsMatch(elsewhereBlock, @"\be\.Cancel\s*=\s*true\s*;").Should().BeFalse(
+            "分岐の外（無条件）の e.Cancel = true を分岐の本体と取り違えない");
+    }
+
+    /// <summary>
+    /// 否定の判定と分岐の本体の抽出が、書き方の違い（波括弧なし・<c>is false</c>・<c>== false</c>・二重否定）を取り違えないこと。
+    /// </summary>
+    /// <remarks>
+    /// コードレビューで検出: 旧版は波括弧なしの <c>if (…) e.Cancel = true;</c> と <c>is false</c> を違反と誤検出し（赤）、
+    /// 二重否定の <c>!x.CanClose(c) == false</c>（＝否定ではない）を通していた。誤検出は修正者を検査の除外へ、
+    /// 見逃しは反転した実装の通過へつながるので、両方向を対で固定する。
+    /// </remarks>
+    [Theory]
+    [InlineData("if (!_viewModel.CanClose(Confirm)) { e.Cancel = true; }", true)]
+    [InlineData("if (!_viewModel.CanClose(Confirm)) e.Cancel = true;", true)]
+    [InlineData("if (_viewModel.CanClose(Confirm) is false) { e.Cancel = true; }", true)]
+    [InlineData("if (_viewModel.CanClose(Confirm) == false) e.Cancel = true;", true)]
+    [InlineData("if (_viewModel?.CanClose(() => Confirm()) != true) { e.Cancel = true; }", true)]
+    [InlineData("if (_viewModel.CanClose(Confirm)) { e.Cancel = true; }", false)]
+    [InlineData("if (!_viewModel.CanClose(Confirm) == false) { e.Cancel = true; }", false)]
+    [InlineData("if (!!_viewModel.CanClose(Confirm)) e.Cancel = true;", false)]
+    [InlineData("if (_viewModel.CanClose(Confirm) is true) { e.Cancel = true; }", false)]
+    public void CanCloseの否定の判定が書き方の違いを取り違えないこと(string guard, bool expectedNegated)
+    {
+        var source = "class C { protected override void OnClosing(CancelEventArgs e) { base.OnClosing(e); "
+                     + guard + " } }";
+        var (condition, block) = FindCanCloseGuard(ExtractMethodBodyFrom(source, "protected override void OnClosing"));
+
+        IsNegatedCanClose(condition).Should().Be(expectedNegated, "条件: " + condition);
+        Regex.IsMatch(block, @"\be\.Cancel\s*=\s*true\s*;").Should().BeTrue(
+            "波括弧の有無にかかわらず分岐の本体を取り出すこと。本体: " + block);
     }
 
     /// <summary>
@@ -174,11 +249,10 @@ public class LedgerDetailDialogCloseGuardTests
     /// </summary>
     private static string ExtractCloseButton()
     {
-        var xaml = File.ReadAllText(XamlPath);
+        var xaml = XamlElementInspection.StripXmlComments(File.ReadAllText(XamlPath));
 
-        var element = Regex.Matches(xaml, @"<Button\b[^>]*?/>")
-            .Cast<Match>()
-            .Select(m => m.Value)
+        var element = XamlElementInspection.EnumerateElements(xaml, "Button")
+            .Select(e => e.StartTag)
             .FirstOrDefault(e => GetAttribute(e, "Content") == "閉じる");
 
         element.Should().NotBeNull("LedgerDetailDialog.xaml に「閉じる」ボタンが存在するはず");
@@ -199,9 +273,8 @@ public class LedgerDetailDialogCloseGuardTests
 
     private static string ExtractEscapeKeyBindingFrom(string xaml)
     {
-        var element = Regex.Matches(xaml, @"<KeyBinding\b[^>]*?/>")
-            .Cast<Match>()
-            .Select(m => m.Value)
+        var element = XamlElementInspection.EnumerateElements(XamlElementInspection.StripXmlComments(xaml), "KeyBinding")
+            .Select(e => e.StartTag)
             .FirstOrDefault(e => GetAttribute(e, "Key") == "Escape");
 
         element.Should().NotBeNull(
@@ -222,11 +295,114 @@ public class LedgerDetailDialogCloseGuardTests
     private static string ToCodeOnly(string source) => TestSourceInspection.ToCodeOnly(source);
 
     /// <summary>
-    /// 要素テキストから属性値を取り出す（見つからなければ null）。
+    /// 開始タグから属性値を取り出す（見つからなければ null）。共有の <see cref="XamlElementInspection"/> へ委譲する
+    /// （旧版の私的な複製は <c>'…'</c> の属性値を拾えず、<c>Button.Content</c> のような所有者付きの属性にも一致した）。
     /// </summary>
     private static string? GetAttribute(string element, string attributeName)
+        => XamlElementInspection.GetAttribute(element, attributeName);
+
+    /// <summary>
+    /// <c>CanClose(</c> を条件に持つ <c>if</c> をちょうど 1 つ見つけ、その条件と本体を返す。
+    /// 本体は波括弧の内側、波括弧が無ければ直後の 1 文（<c>;</c> まで）。
+    /// </summary>
+    /// <remarks>
+    /// 条件は括弧の対応を数えて切り出す（<c>CanClose(() =&gt; Confirm())</c> のように条件の中に括弧があっても
+    /// 途中で切れない）。波括弧なしの本体を読めないと、規約どおりの書き換えで赤になる（コードレビューで検出）。
+    /// </remarks>
+    private static (string Condition, string Block) FindCanCloseGuard(string codeOnlyBody)
     {
-        var match = Regex.Match(element, attributeName + @"\s*=\s*""(?<value>[^""]*)""");
-        return match.Success ? match.Groups["value"].Value : null;
+        var guards = new List<(string Condition, string Block)>();
+        foreach (Match m in Regex.Matches(codeOnlyBody, @"\bif\s*\("))
+        {
+            var conditionStart = m.Index + m.Length;
+            var conditionEnd = FindClosing(codeOnlyBody, conditionStart - 1, '(', ')');
+            if (conditionEnd < 0)
+            {
+                continue;
+            }
+
+            var condition = codeOnlyBody.Substring(conditionStart, conditionEnd - conditionStart);
+            if (!condition.Contains(".CanClose("))
+            {
+                continue;
+            }
+
+            var bodyStart = conditionEnd + 1;
+            while (bodyStart < codeOnlyBody.Length && char.IsWhiteSpace(codeOnlyBody[bodyStart]))
+            {
+                bodyStart++;
+            }
+
+            string block;
+            if (bodyStart < codeOnlyBody.Length && codeOnlyBody[bodyStart] == '{')
+            {
+                var blockEnd = FindClosing(codeOnlyBody, bodyStart, '{', '}');
+                block = blockEnd < 0 ? string.Empty : codeOnlyBody.Substring(bodyStart + 1, blockEnd - bodyStart - 1);
+            }
+            else
+            {
+                var statementEnd = codeOnlyBody.IndexOf(';', bodyStart);
+                block = statementEnd < 0 ? string.Empty : codeOnlyBody.Substring(bodyStart, statementEnd - bodyStart + 1);
+            }
+
+            guards.Add((condition, block));
+        }
+
+        guards.Should().HaveCount(1,
+            "OnClosing には CanClose を条件に持つ if がちょうど 1 つある（破棄確認は 1 か所に一元化する。Issue #1743）");
+        return guards[0];
+    }
+
+    /// <summary><paramref name="open"/> の位置の開き括弧に対応する閉じ括弧の位置。見つからなければ -1。</summary>
+    private static int FindClosing(string text, int open, char openChar, char closeChar)
+    {
+        var depth = 0;
+        for (var i = open; i < text.Length; i++)
+        {
+            if (text[i] == openChar)
+            {
+                depth++;
+            }
+            else if (text[i] == closeChar && --depth == 0)
+            {
+                return i;
+            }
+        }
+
+        return -1;
+    }
+
+    /// <summary>
+    /// 条件の中の <c>CanClose(…)</c> が、否定として評価されるか。
+    /// </summary>
+    /// <remarks>
+    /// 前置の <c>!</c> の個数と、後置の比較（<c>== false</c> / <c>is false</c> / <c>!= true</c> は否定、
+    /// <c>== true</c> / <c>is true</c> / <c>!= false</c> は否定しない）を数え、否定の回数が奇数なら否定とする。
+    /// <c>!x.CanClose(c) == false</c> は <c>(!x.CanClose(c)) == false</c> と評価されるので二重否定（否定ではない）。
+    /// </remarks>
+    private static bool IsNegatedCanClose(string condition)
+    {
+        var call = Regex.Match(condition, @"(?<bangs>(?:!\s*)*)[\w?.]*\.CanClose\(");
+        if (!call.Success)
+        {
+            return false;
+        }
+
+        var negations = call.Groups["bangs"].Value.Count(c => c == '!');
+        var argumentsEnd = FindClosing(condition, call.Index + call.Length - 1, '(', ')');
+        if (argumentsEnd < 0)
+        {
+            return false;
+        }
+
+        var comparison = Regex.Match(
+            condition.Substring(argumentsEnd + 1),
+            @"^\s*(?:(?<negate>==\s*false|is\s+false|!=\s*true)|==\s*true|is\s+true|!=\s*false)\b");
+        if (comparison.Groups["negate"].Success)
+        {
+            negations++;
+        }
+
+        return negations % 2 == 1;
     }
 }
