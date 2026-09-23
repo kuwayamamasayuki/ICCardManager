@@ -354,4 +354,65 @@ internal static class XamlElementInspection
     }
 
     internal static int LineOf(string source, int index) => source.Take(index).Count(c => c == '\n') + 1;
+
+    /// <summary>
+    /// 位置 <paramref name="index"/> を内側に含む要素（祖先）を、タグ名を問わず外側から順に列挙する。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// 「ステータス欄が <c>Visibility="{Binding IsEditing}"</c> のパネルの内側に無いこと」のように
+    /// <b>祖先の性質</b>を検査するときに使う（Issue #2102）。検査対象の要素を 1 つに絞ってから
+    /// その祖先を辿るので、ファイル全体への正規表現や「コメントを目印に範囲を切り出す」形が要らない。
+    /// </para>
+    /// <para>
+    /// <see cref="EnumerateElements"/> は同名の入れ子を外側の要素の本体として読み飛ばすため、
+    /// 祖先の列挙には使えない（<c>StackPanel</c> の内側の <c>StackPanel</c> が返らない）。
+    /// ここでは開始タグを 1 つずつ起点にして、その要素の範囲を求め直す。
+    /// 自己終了タグは何も含まないので返さない。<b>コメントは呼び出し側で除去しておくこと</b>
+    /// （コメント内のタグ風の字句を要素とみなさないため）。
+    /// </para>
+    /// </remarks>
+    internal static IEnumerable<XamlElementSpan> EnumerateEnclosingElements(string xaml, int index)
+    {
+        foreach (var tag in EnumerateStartTags(xaml))
+        {
+            if (tag.Start >= index)
+            {
+                yield break;
+            }
+
+            if (tag.StartTag.EndsWith("/>", StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            var element = ElementStartingAt(xaml, tag.Start);
+            if (element != null && element.Start + element.Length > index)
+            {
+                yield return element;
+            }
+        }
+    }
+
+    /// <summary>
+    /// 位置 <paramref name="start"/> の <c>&lt;</c> から始まる要素（開始タグ・本体・終了タグ）を返す。
+    /// そこに開始タグが無ければ null。
+    /// </summary>
+    /// <remarks>
+    /// <see cref="EnumerateStartTags"/> で絞り込んだタグ（タグ名を問わない）の本体まで見たいときに使う。
+    /// 同名の入れ子の内側にある要素でも、その要素自身の範囲を返す。
+    /// </remarks>
+    internal static XamlElementSpan? ElementStartingAt(string xaml, int start)
+    {
+        var name = new Regex(@"\G<(?<name>[A-Za-z_][A-Za-z0-9_:.]*)").Match(xaml, start);
+        if (!name.Success)
+        {
+            return null;
+        }
+
+        var element = EnumerateElementSpans(xaml.Substring(start), name.Groups["name"].Value).FirstOrDefault();
+        return element == null || element.Start != 0
+            ? null
+            : new XamlElementSpan(LineOf(xaml, start), start, element.Length, element.StartTag, element.Body);
+    }
 }

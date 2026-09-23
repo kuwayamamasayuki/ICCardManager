@@ -38,14 +38,38 @@ public class MainWindowHistoryColumnLayoutTests
 
         column.Should().NotBeNull($"履歴一覧に「{header}」列が存在すること（走査が空振りしていない）");
 
-        XamlElementInspection.GetSetterValue(column!.Body, "TextTrimming")
+        // Issue #2102: 常に効く値だけを見る。DataTrigger 内の Setter（空の行で ToolTip を外す {x:Null}）を
+        // 拾うと、無条件の ToolTip を消しても「ToolTip がある」と判定してしまう
+        var unconditional = UnconditionalStyleBody(column!);
+
+        XamlElementInspection.GetSetterValue(unconditional, "TextTrimming")
             .Should().Be("CharacterEllipsis",
                 $"Issue #2076: 「{header}」列は幅に収まらない値を黙って捨てず、" +
                 "省略記号で切れていることを示すこと");
 
-        XamlElementInspection.GetSetterValue(column.Body, "ToolTip")
-            .Should().NotBeNullOrEmpty(
-                $"Issue #2076: 切り詰めた「{header}」の全文を読む手段（ToolTip）を対で用意すること");
+        XamlElementInspection.GetBindingPropertyName(XamlElementInspection.GetSetterValue(unconditional, "ToolTip"))
+            .Should().Be(
+                XamlElementInspection.GetBindingPropertyName(XamlElementInspection.GetAttribute(column.StartTag, "Binding")),
+                $"Issue #2076: 切り詰めた「{header}」の全文を読む手段（セルと同じ値の ToolTip）を対で用意すること");
+    }
+
+    /// <summary>
+    /// 列の <c>ElementStyle</c> の本体から <c>Style.Triggers</c> を取り除いたもの（常に効く Setter だけが残る）。
+    /// </summary>
+    private static string UnconditionalStyleBody(XamlElementInspection.XamlElement column)
+    {
+        var styles = XamlElementInspection.EnumerateElements(column.Body, "DataGridTextColumn.ElementStyle")
+            .SelectMany(e => XamlElementInspection.EnumerateElements(e.Body, "Style"))
+            .ToList();
+        styles.Should().ContainSingle("列の ElementStyle がちょうど 1 つ存在すること");
+
+        var body = styles[0].Body;
+        foreach (var triggers in XamlElementInspection.EnumerateElementSpans(body, "Style.Triggers").Reverse().ToList())
+        {
+            body = body.Remove(triggers.Start, triggers.Length);
+        }
+
+        return body;
     }
 
     /// <summary>
