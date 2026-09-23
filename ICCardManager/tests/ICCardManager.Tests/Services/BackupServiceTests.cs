@@ -6,6 +6,7 @@ using ICCardManager.Data.Repositories;
 using ICCardManager.Models;
 using ICCardManager.Services;
 using Microsoft.Extensions.Logging.Abstractions;
+using ICCardManager.Tests.Infrastructure.Timing;
 using Moq;
 using Xunit;
 
@@ -28,6 +29,12 @@ public class BackupServiceTests : IDisposable
     private readonly DbContext _dbContext;
     private readonly Mock<ISettingsRepository> _settingsRepositoryMock;
     private readonly BackupService _service;
+
+    /// <summary>
+    /// バックアップのファイル名に使う現在時刻（Issue #2100）。以前はテスト側の「今日」と、本体がファイル名に使う
+    /// <c>DateTime.Now</c> を別々に評価しており、0 時をまたいだ実行で別の日として扱われて赤くなった。
+    /// </summary>
+    private readonly FixedSystemClock _clock = new(new DateTime(2025, 6, 15, 12, 0, 0));
 
     public BackupServiceTests()
     {
@@ -54,7 +61,8 @@ public class BackupServiceTests : IDisposable
         _service = new BackupService(
             _dbContext,
             _settingsRepositoryMock.Object,
-            NullLogger<BackupService>.Instance);
+            NullLogger<BackupService>.Instance,
+            _clock);
     }
 
     public void Dispose()
@@ -666,9 +674,9 @@ public class BackupServiceTests : IDisposable
     public async Task ExecuteAutoBackupAsync_同日の古い世代を削除して最新1世代だけ残すこと()
     {
         // Arrange - 同じ日の古い自動バックアップを 20 個作成（20 台運用の再現）。
-        // 時刻は「本日の 0 時から現在まで」を等分した点に置く。固定時刻（6 時など）にすると、
-        // その時刻より前にテストを実行したときだけダミーが最新世代になり、結果が実行時刻に依存する。
-        var now = DateTime.Now;
+        // 時刻は「本日の 0 時から現在まで」を等分した点に置く（ダミーがすべて今回の世代より古くなる）。
+        // 「現在」は本体がファイル名に使うのと同じ時計から取る（Issue #2100: 別々に評価すると 0 時をまたいで赤くなる）。
+        var now = _clock.Now;
         const int ExistingGenerations = 20;
         for (int i = 0; i < ExistingGenerations; i++)
         {
@@ -697,7 +705,8 @@ public class BackupServiceTests : IDisposable
     public async Task ExecuteAutoBackupAsync_保持日数を超える古い日の世代を削除すること()
     {
         // Arrange - 過去 30 日分（各日 1 世代）を作成。今回の作成分を加えると 31 日分になる。
-        var today = DateTime.Now.Date;
+        // 「今日」は本体がファイル名に使うのと同じ時計から取る（Issue #2100）
+        var today = _clock.Now.Date;
         for (int i = 1; i <= AppConstants.BackupRetentionDays; i++)
         {
             var timestamp = today.AddDays(-i).AddHours(9).ToString("yyyyMMdd_HHmmss");
@@ -731,7 +740,7 @@ public class BackupServiceTests : IDisposable
         // Arrange - リストア直前に取られた退避（同じ日）
         var preRestorePath = Path.Combine(
             _backupDirectory,
-            $"backup_pre_restore_{DateTime.Now:yyyyMMdd_HHmmss}.db");
+            $"backup_pre_restore_{_clock.Now:yyyyMMdd_HHmmss}.db");
         await Task.Run(() => File.WriteAllText(preRestorePath, "pre-restore"));
 
         // Act

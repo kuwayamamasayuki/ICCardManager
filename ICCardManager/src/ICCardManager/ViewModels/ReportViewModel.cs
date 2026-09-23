@@ -8,6 +8,7 @@ using CommunityToolkit.Mvvm.Input;
 using ICCardManager.Common;
 using ICCardManager.Data.Repositories;
 using ICCardManager.Dtos;
+using ICCardManager.Infrastructure.Timing;
 using ICCardManager.Services;
 using Microsoft.Win32;
 
@@ -33,6 +34,16 @@ public partial class ReportViewModel : ViewModelBase
     private readonly ISafeFileLauncher _safeFileLauncher;
     private readonly ReportPreflightChecker _preflightChecker;
     private readonly IReportExportStatusService _exportStatusService;
+
+    /// <summary>
+    /// 現在時刻の取得元（Issue #2100）
+    /// </summary>
+    /// <remarks>
+    /// 「先月」「今月」は実行した月で値が決まり、年をまたぐ誤り（1 月の「先月」を当年 12 月にする等）は
+    /// 1 月にしか現れない。<c>DateTime.Now</c> を直接読むと、その境界をテストで固定できない。
+    /// 省略時の既定は本番と同じシステム時計。
+    /// </remarks>
+    private readonly ISystemClock _clock;
     private bool _isInitialized;
 
     [ObservableProperty]
@@ -102,7 +113,8 @@ public partial class ReportViewModel : ViewModelBase
         ISettingsRepository settingsRepository,
         ISafeFileLauncher safeFileLauncher,
         ReportPreflightChecker preflightChecker,
-        IReportExportStatusService exportStatusService)
+        IReportExportStatusService exportStatusService,
+        ISystemClock? clock = null)
     {
         _reportService = reportService;
         _printService = printService;
@@ -112,19 +124,20 @@ public partial class ReportViewModel : ViewModelBase
         _safeFileLauncher = safeFileLauncher;
         _preflightChecker = preflightChecker;
         _exportStatusService = exportStatusService;
+        _clock = clock ?? new SystemClock();
 
         // CreatedFiles の中身が変化したときに HasCreatedFiles の通知を発火する
         _createdFiles.CollectionChanged += OnCreatedFilesCollectionChanged;
 
         // 年の選択肢を初期化（過去5年分）
-        var currentYear = DateTime.Now.Year;
+        var currentYear = _clock.Now.Year;
         for (var year = currentYear; year >= currentYear - 5; year--)
         {
             Years.Add(year);
         }
 
         // デフォルト値（先月が最も使用頻度が高いため、先月をデフォルトに設定）
-        var lastMonth = DateTime.Now.AddMonths(-1);
+        var lastMonth = _clock.Now.AddMonths(-1);
         SelectedYear = lastMonth.Year;
         SelectedMonth = lastMonth.Month;
         OutputFolder = Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments);
@@ -211,7 +224,7 @@ public partial class ReportViewModel : ViewModelBase
     [RelayCommand]
     public void SelectThisMonth()
     {
-        var now = DateTime.Now;
+        var now = _clock.Now;
         SelectedYear = now.Year;
         SelectedMonth = now.Month;
     }
@@ -222,7 +235,7 @@ public partial class ReportViewModel : ViewModelBase
     [RelayCommand]
     public void SelectLastMonth()
     {
-        var now = DateTime.Now;
+        var now = _clock.Now;
         var lastMonth = now.AddMonths(-1);
         SelectedYear = lastMonth.Year;
         SelectedMonth = lastMonth.Month;
@@ -266,7 +279,7 @@ public partial class ReportViewModel : ViewModelBase
     /// </summary>
     internal void UpdateMonthButtonHighlights()
     {
-        var now = DateTime.Now;
+        var now = _clock.Now;
         var lastMonth = now.AddMonths(-1);
 
         IsThisMonthSelected = (SelectedYear == now.Year && SelectedMonth == now.Month);

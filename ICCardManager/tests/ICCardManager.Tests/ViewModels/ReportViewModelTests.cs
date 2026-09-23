@@ -4,6 +4,7 @@ using ICCardManager.Data.Repositories;
 using ICCardManager.Dtos;
 using ICCardManager.Models;
 using ICCardManager.Services;
+using ICCardManager.Tests.Infrastructure.Timing;
 using ICCardManager.ViewModels;
 using Moq;
 using Xunit;
@@ -31,6 +32,12 @@ public class ReportViewModelTests
     private readonly PrintService _printService;
     private readonly Mock<IReportDataBuilder> _preflightDataBuilderMock;
     private readonly Mock<IReportExportStatusService> _exportStatusServiceMock;
+    /// <summary>
+    /// ViewModel が読む現在時刻（Issue #2100）。「先月」「今月」は実行した月で値が決まるため、
+    /// 実時計のままだと年をまたぐ誤りを 1 月にしか検出できない。既定は年の途中に固定し、
+    /// 境界を検証するテストは個別に書き換える。
+    /// </summary>
+    private readonly FixedSystemClock _clock = new(new DateTime(2025, 6, 15, 10, 0, 0));
     private readonly ReportViewModel _viewModel;
 
     public ReportViewModelTests()
@@ -84,7 +91,8 @@ public class ReportViewModelTests
             _settingsRepositoryMock.Object,
             _safeFileLauncherMock.Object,
             preflightChecker,
-            _exportStatusServiceMock.Object);
+            _exportStatusServiceMock.Object,
+            _clock);
     }
 
     /// <summary>
@@ -133,9 +141,34 @@ public class ReportViewModelTests
     public void Constructor_ShouldSetDefaultYearAndMonthToLastMonth()
     {
         // Assert
-        var lastMonth = DateTime.Now.AddMonths(-1);
-        _viewModel.SelectedYear.Should().Be(lastMonth.Year);
-        _viewModel.SelectedMonth.Should().Be(lastMonth.Month);
+        // 時計は 2025/6/15 に固定している → 先月は 2025 年 5 月
+        _viewModel.SelectedYear.Should().Be(2025);
+        _viewModel.SelectedMonth.Should().Be(5);
+    }
+
+    /// <summary>
+    /// 1月に画面を開くと、既定の対象年月が前年12月になり、年の選択肢も開いた年を基準にすること（Issue #2100）
+    /// </summary>
+    [Fact]
+    public void Constructor_InJanuary_ShouldDefaultToDecemberOfPreviousYear()
+    {
+        // Arrange & Act
+        var viewModel = new ReportViewModel(
+            _reportService,
+            _printService,
+            _cardRepositoryMock.Object,
+            _navigationServiceMock.Object,
+            _settingsRepositoryMock.Object,
+            _safeFileLauncherMock.Object,
+            new ReportPreflightChecker(_preflightDataBuilderMock.Object, _ledgerRepositoryMock.Object),
+            _exportStatusServiceMock.Object,
+            new FixedSystemClock(new DateTime(2026, 1, 15, 9, 0, 0)));
+
+        // Assert
+        viewModel.SelectedYear.Should().Be(2025);
+        viewModel.SelectedMonth.Should().Be(12);
+        viewModel.IsLastMonthSelected.Should().BeTrue();
+        viewModel.Years.Should().Equal(2026, 2025, 2024, 2023, 2022, 2021);
     }
 
     /// <summary>
@@ -145,10 +178,8 @@ public class ReportViewModelTests
     public void Constructor_ShouldHaveYearsForPast5Years()
     {
         // Assert
-        var currentYear = DateTime.Now.Year;
-        _viewModel.Years.Should().HaveCount(6);
-        _viewModel.Years.Should().Contain(currentYear);
-        _viewModel.Years.Should().Contain(currentYear - 5);
+        // 時計は 2025/6/15 に固定している
+        _viewModel.Years.Should().Equal(2025, 2024, 2023, 2022, 2021, 2020);
     }
 
     /// <summary>
@@ -440,9 +471,9 @@ public class ReportViewModelTests
         _viewModel.SelectThisMonth();
 
         // Assert
-        var now = DateTime.Now;
-        _viewModel.SelectedYear.Should().Be(now.Year);
-        _viewModel.SelectedMonth.Should().Be(now.Month);
+        // 時計は 2025/6/15 に固定している
+        _viewModel.SelectedYear.Should().Be(2025);
+        _viewModel.SelectedMonth.Should().Be(6);
     }
 
     /// <summary>
@@ -455,39 +486,68 @@ public class ReportViewModelTests
         _viewModel.SelectLastMonth();
 
         // Assert
-        var lastMonth = DateTime.Now.AddMonths(-1);
-        _viewModel.SelectedYear.Should().Be(lastMonth.Year);
-        _viewModel.SelectedMonth.Should().Be(lastMonth.Month);
+        // 時計は 2025/6/15 に固定している → 先月は 2025 年 5 月
+        _viewModel.SelectedYear.Should().Be(2025);
+        _viewModel.SelectedMonth.Should().Be(5);
     }
 
     /// <summary>
     /// 1月に「先月」を選択すると前年の12月になること
     /// </summary>
+    /// <remarks>
+    /// Issue #2100: 以前は名前に反して実時計で動き、if/else の両分岐が同じ検証をしていたうえ、
+    /// 期待値も本体と同じ <c>Now.AddMonths(-1)</c> から作っていたため、年をまたぐ誤り
+    /// （<c>SelectedYear = now.Year</c> 等）は 1 月に実行したときしか検出できなかった。
+    /// 時計を 1 月に固定し、期待値はリテラルで書く。
+    /// </remarks>
     [Fact]
     public void SelectLastMonth_InJanuary_ShouldSetToDecemberOfPreviousYear()
     {
         // Arrange
-        // テスト実行時が1月の場合を想定してテスト
-        // 先月は常に1ヶ月前になるため、このテストはどの月でも成功する
+        _clock.Now = new DateTime(2026, 1, 15, 9, 0, 0);
 
         // Act
         _viewModel.SelectLastMonth();
 
         // Assert
-        var lastMonth = DateTime.Now.AddMonths(-1);
-        // 年またぎのケースも含めて正しく計算されていることを確認
-        if (lastMonth.Month == 12)
-        {
-            // 1月にテストを実行した場合
-            _viewModel.SelectedMonth.Should().Be(12);
-            _viewModel.SelectedYear.Should().Be(lastMonth.Year);
-        }
-        else
-        {
-            // その他の月にテストを実行した場合
-            _viewModel.SelectedMonth.Should().Be(lastMonth.Month);
-            _viewModel.SelectedYear.Should().Be(lastMonth.Year);
-        }
+        _viewModel.SelectedYear.Should().Be(2025);
+        _viewModel.SelectedMonth.Should().Be(12);
+        _viewModel.IsLastMonthSelected.Should().BeTrue();
+        _viewModel.IsThisMonthSelected.Should().BeFalse();
+    }
+
+    /// <summary>
+    /// 「先月」「今月」が月・年・年度の境界で正しい年月を選ぶこと（Issue #2100）
+    /// </summary>
+    /// <remarks>
+    /// 1 月（年をまたぐ）・年度初め（4 月の「先月」は前年度の 3 月）・年度末（3 月）・
+    /// 月末日（31 日から AddMonths(-1) で 30 日の月へ丸まる）を固定データとして並べる。
+    /// </remarks>
+    [Theory]
+    [InlineData(2026, 1, 1, 2025, 12, 2026, 1)]    // 元日：先月は前年 12 月
+    [InlineData(2026, 1, 31, 2025, 12, 2026, 1)]   // 1 月末日
+    [InlineData(2026, 3, 31, 2026, 2, 2026, 3)]    // 年度末（31 日 → 2 月は 28 日へ丸まる）
+    [InlineData(2026, 4, 1, 2026, 3, 2026, 4)]     // 年度初め：先月は前年度の 3 月
+    [InlineData(2026, 12, 31, 2026, 11, 2026, 12)] // 大晦日
+    public void SelectLastMonthAndThisMonth_AtBoundaries_ShouldSelectExpectedYearMonth(
+        int year, int month, int day,
+        int lastMonthYear, int lastMonthMonth, int thisMonthYear, int thisMonthMonth)
+    {
+        // Arrange
+        _clock.Now = new DateTime(year, month, day, 23, 59, 59);
+
+        // Act & Assert: 先月
+        _viewModel.SelectLastMonth();
+        _viewModel.SelectedYear.Should().Be(lastMonthYear);
+        _viewModel.SelectedMonth.Should().Be(lastMonthMonth);
+        _viewModel.IsLastMonthSelected.Should().BeTrue();
+
+        // Act & Assert: 今月
+        _viewModel.SelectThisMonth();
+        _viewModel.SelectedYear.Should().Be(thisMonthYear);
+        _viewModel.SelectedMonth.Should().Be(thisMonthMonth);
+        _viewModel.IsThisMonthSelected.Should().BeTrue();
+        _viewModel.IsLastMonthSelected.Should().BeFalse();
     }
 
     #endregion
@@ -559,9 +619,9 @@ public class ReportViewModelTests
     public void ManualSelection_SameMonthDifferentYear_ShouldNotHighlight()
     {
         // Arrange
-        var now = DateTime.Now;
-        _viewModel.SelectedYear = now.Year - 1;
-        _viewModel.SelectedMonth = now.Month;
+        // 時計は 2025/6/15 に固定している（今月＝2025 年 6 月）
+        _viewModel.SelectedYear = 2024;
+        _viewModel.SelectedMonth = 6;
 
         // Assert
         _viewModel.IsThisMonthSelected.Should().BeFalse();
@@ -579,9 +639,9 @@ public class ReportViewModelTests
         _viewModel.IsLastMonthSelected.Should().BeFalse();
 
         // Act - コンボボックスで先月と同じ値を手動設定
-        var lastMonth = DateTime.Now.AddMonths(-1);
-        _viewModel.SelectedYear = lastMonth.Year;
-        _viewModel.SelectedMonth = lastMonth.Month;
+        // 時計は 2025/6/15 に固定している（先月＝2025 年 5 月）
+        _viewModel.SelectedYear = 2025;
+        _viewModel.SelectedMonth = 5;
 
         // Assert
         _viewModel.IsLastMonthSelected.Should().BeTrue();
@@ -594,9 +654,9 @@ public class ReportViewModelTests
     public void ManualSelection_MatchingThisMonth_ShouldHighlight()
     {
         // Act - コンボボックスで今月と同じ値を手動設定
-        var now = DateTime.Now;
-        _viewModel.SelectedYear = now.Year;
-        _viewModel.SelectedMonth = now.Month;
+        // 時計は 2025/6/15 に固定している（今月＝2025 年 6 月）
+        _viewModel.SelectedYear = 2025;
+        _viewModel.SelectedMonth = 6;
 
         // Assert
         _viewModel.IsThisMonthSelected.Should().BeTrue();
@@ -1848,9 +1908,9 @@ public class ReportViewModelTests
         await _viewModel.BulkExportLastMonthAsync();
 
         // Assert
-        var lastMonth = DateTime.Now.AddMonths(-1);
-        _viewModel.SelectedYear.Should().Be(lastMonth.Year);
-        _viewModel.SelectedMonth.Should().Be(lastMonth.Month);
+        // 時計は 2025/6/15 に固定している → 先月は 2025 年 5 月
+        _viewModel.SelectedYear.Should().Be(2025);
+        _viewModel.SelectedMonth.Should().Be(5);
         _viewModel.IsLastMonthSelected.Should().BeTrue();
         // 払戻済を除く2枚が選択されている
         _viewModel.SelectedCards.Should().HaveCount(2);

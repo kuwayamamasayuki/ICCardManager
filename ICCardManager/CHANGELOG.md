@@ -3,6 +3,11 @@
 ### Unreleased
 
 **不具合修正**
+- Issue #2100 **現在時刻に依存するテストが、1 月に必ず赤くなる・実行した月によって何も検証しない・0 時をまたぐと赤くなる状態だった欠陥を是正した**。カード登録の繰越テストは、1 月に実行すると「1 月から繰越」の開始日が当年 2/1 になって「今日」の履歴がすべて除外され、必ず赤くなっていた（隣のテストは 1 月だけ「履歴あり」の経路を通らないまま緑）。帳票画面の「1 月に先月を選ぶ」テストは名前に反して実時計で動き、デバッグ用テストデータの年度境界テストは 10〜3 月の実行で何も検証していなかった
+  - **本体に `ISystemClock` を注入できるようにした**（`CardManageViewModel` / `ReportViewModel` / `OperationLogSearchViewModel` / `DebugDataService` / `BackupService`）。省略時の既定は本番と同じシステム時計なので、アプリの動作は変わらない
+  - あわせて、カード登録が登録日時を 3 か所で別々に読んでいたのを 1 回の読み取りへ揃えた。登録の途中で月末の 0 時をまたぐと、繰越年度と繰越レコードの日付が別々の月から決まり得たため（例: 11/30 23:59:59 に「12 月から繰越」で登録すると、年度は前年度・日付は翌年 1/1 になり得た）
+  - テストは固定日時で検証し、1 月・年度末・年度初め・うるう年・日付が変わる直前直後を Theory の固定データとして明示した。foreach で検証するテストには、先に対象件数の表明を置いた
+  - 本体が時計を無視する実装へ戻ると、対象 6 クラスで 36 件が赤になることを実測した
 - Issue #2099 **「CI で回帰を固定している」と書かれた UI テストプロジェクトの GUI 不要テストが、CI で一度も実行されていなかった欠陥を是正した**。UITests の csproj はソリューション単位の `dotnet test` から自分を外している（`BuildingSolutionFile` 条件で `IsTestProject=false`）ため、CI の `--filter "Category!=UI"` を付けてもプロジェクトごと対象外だった。`UiTestDatabaseGuardTests`（#2062）と `AppFixturePathResolutionTests` の 27 件が該当する。ci.yml に UITests の csproj を直接指定し `Category!=UI&Category!=Screenshot` で絞るステップを追加した
   - **CI のテストとビルド警告ゼロ検証を Release と Debug の両方で行う**。`#if DEBUG` 側のテストと Debug 限定コードの警告は、これまで CI で検証されていなかった。テストは matrix の 2 ジョブで並走させるため所要時間（壁時計）はほぼ増えない
   - **CI のハングを失敗として報告する**。すべての `dotnet test` に `--blame-hang-timeout 5m`、両ジョブに `timeout-minutes: 30` を付けた。これまではデッドロックしてもジョブの既定上限（6 時間）まで止まり続けた。あわせて、デッドロック検出をうたうのに上限なしで待っていたテスト 3 件（`LendingServiceTests.LendAsync_MultipleConsecutiveOperations_NoDeadlock` ほか）を `Task.WhenAny` とタイムアウトに揃えた

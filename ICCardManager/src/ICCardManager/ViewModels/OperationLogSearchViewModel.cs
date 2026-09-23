@@ -5,6 +5,7 @@ using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using ICCardManager.Common;
 using ICCardManager.Data.Repositories;
+using ICCardManager.Infrastructure.Timing;
 using ICCardManager.Models;
 using ICCardManager.Services;
 using Microsoft.Win32;
@@ -166,21 +167,33 @@ public partial class OperationLogSearchViewModel : ViewModelBase
     // 派生プロパティ化し Text を単一バインドにすることで LiveRegion 通知時に新テキストが読み上げられる。
     public string PageNumberDisplay => $"{CurrentPage} / {TotalPages} ページ";
 
+    /// <summary>
+    /// 「今日」「今月」「先月」の基準となる現在時刻の取得元（Issue #2100）
+    /// </summary>
+    /// <remarks>
+    /// <c>DateTime.Today</c> を直接読むと、テスト側の「今日」とコマンドが読む「今日」を別々に評価することになり、
+    /// 0 時をまたいだ実行で赤くなる。月・年をまたぐ境界も固定日時で検証できない。
+    /// 省略時の既定は本番と同じシステム時計。
+    /// </remarks>
+    private readonly ISystemClock _clock;
+
     public OperationLogSearchViewModel(
         IOperationLogRepository operationLogRepository,
         IDialogService dialogService,
         OperationLogExcelExportService excelExportService,
         ISafeFileLauncher safeFileLauncher,
-        OperationLogger operationLogger)
+        OperationLogger operationLogger,
+        ISystemClock? clock = null)
     {
         _operationLogRepository = operationLogRepository;
         _dialogService = dialogService;
         _excelExportService = excelExportService;
         _safeFileLauncher = safeFileLauncher;
         _operationLogger = operationLogger;
+        _clock = clock ?? new SystemClock();
 
         // デフォルトは今月
-        var today = DateTime.Today;
+        var today = _clock.Now.Date;
         FromDate = new DateTime(today.Year, today.Month, 1);
         ToDate = today;
 
@@ -371,7 +384,7 @@ public partial class OperationLogSearchViewModel : ViewModelBase
     [RelayCommand]
     public void ClearFilters()
     {
-        var today = DateTime.Today;
+        var today = _clock.Now.Date;
         FromDate = new DateTime(today.Year, today.Month, 1);
         ToDate = today;
         SelectedAction = ActionTypes[0];
@@ -495,7 +508,7 @@ public partial class OperationLogSearchViewModel : ViewModelBase
     [RelayCommand]
     public void SetToday()
     {
-        var today = DateTime.Today;
+        var today = _clock.Now.Date;
         FromDate = today;
         ToDate = today;
     }
@@ -506,7 +519,7 @@ public partial class OperationLogSearchViewModel : ViewModelBase
     [RelayCommand]
     public void SetThisMonth()
     {
-        var today = DateTime.Today;
+        var today = _clock.Now.Date;
         FromDate = new DateTime(today.Year, today.Month, 1);
         ToDate = new DateTime(today.Year, today.Month, DateTime.DaysInMonth(today.Year, today.Month));
     }
@@ -517,7 +530,7 @@ public partial class OperationLogSearchViewModel : ViewModelBase
     [RelayCommand]
     public void SetLastMonth()
     {
-        var lastMonth = DateTime.Today.AddMonths(-1);
+        var lastMonth = _clock.Now.Date.AddMonths(-1);
         FromDate = new DateTime(lastMonth.Year, lastMonth.Month, 1);
         ToDate = new DateTime(lastMonth.Year, lastMonth.Month, DateTime.DaysInMonth(lastMonth.Year, lastMonth.Month));
     }

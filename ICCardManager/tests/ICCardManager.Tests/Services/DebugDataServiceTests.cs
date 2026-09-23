@@ -6,6 +6,7 @@ using ICCardManager.Data;
 using ICCardManager.Data.Repositories;
 using ICCardManager.Models;
 using ICCardManager.Services;
+using ICCardManager.Tests.Infrastructure.Timing;
 using Moq;
 using Xunit;
 
@@ -29,6 +30,16 @@ public class DebugDataServiceTests : IDisposable
     private readonly Mock<ICardRepository> _cardRepoMock;
     private readonly Mock<ILedgerRepository> _ledgerRepoMock;
     private readonly DebugDataService _service;
+
+    /// <summary>
+    /// テストデータの基準日（Issue #2100）。
+    /// </summary>
+    /// <remarks>
+    /// サンプル履歴は基準日から 180 日前までを生成するため、N-002 の年度境界（3/31・4/1）が生成範囲に
+    /// 入るのは基準日が 4 月〜9 月下旬のときだけ。実時計のままだと 10〜3 月の実行では境界との衝突回避を
+    /// 一度も通らずに緑になっていた。既定は境界が生成範囲に入る日に固定し、他の月は Theory で与える。
+    /// </remarks>
+    private readonly FixedSystemClock _clock = new(new DateTime(2025, 6, 15, 10, 0, 0));
 
     /// <summary>
     /// InsertAsyncで挿入されたLedgerをキャプチャするリスト
@@ -104,7 +115,8 @@ public class DebugDataServiceTests : IDisposable
             _dbContextMock.Object,
             _staffRepoMock.Object,
             _cardRepoMock.Object,
-            _ledgerRepoMock.Object);
+            _ledgerRepoMock.Object,
+            _clock);
     }
 
     #region FindNthWeekendDayBefore
@@ -169,9 +181,22 @@ public class DebugDataServiceTests : IDisposable
 
     #region RegisterAllTestDataAsync — 残高チェーン検証
 
-    [Fact]
-    public async Task RegisterAllTestDataAsync_BalanceChainsAreConsistent()
+    /// <summary>
+    /// 全カードの残高チェーンが連続していること
+    /// </summary>
+    /// <remarks>
+    /// Issue #2100: 基準日によって年度繰越（3/31・4/1）がサンプル履歴の途中に入るか、範囲の外に出るかが変わる。
+    /// 両方の形を固定日付で与える。
+    /// </remarks>
+    [Theory]
+    [InlineData("2025-06-15")] // 年度境界が生成範囲の途中にある
+    [InlineData("2025-04-01")] // 基準日が年度初日そのもの
+    [InlineData("2026-01-15")] // 年度境界が生成範囲より前にある
+    public async Task RegisterAllTestDataAsync_BalanceChainsAreConsistent(string todayText)
     {
+        // Arrange
+        _clock.Now = DateTime.Parse(todayText, System.Globalization.CultureInfo.InvariantCulture).AddHours(10);
+
         // Act
         await _service.RegisterAllTestDataAsync();
 
@@ -234,6 +259,9 @@ public class DebugDataServiceTests : IDisposable
                         l.Note.Contains("支払額") && l.Note.Contains("不足額"))
             .ToList();
 
+        // Issue #2100: 対象が空だと foreach は何も検証せずに緑になる
+        insufficientLedgers.Should().NotBeEmpty("H-001の不足分チャージレコードが存在するべき");
+
         foreach (var ledger in insufficientLedgers)
         {
             var isWeekend = ledger.Date.DayOfWeek == DayOfWeek.Saturday ||
@@ -278,35 +306,56 @@ public class DebugDataServiceTests : IDisposable
         // （RegisterAllTestDataAsync_BalanceChainsAreConsistent で全体チェック済み）
     }
 
-    [Fact]
-    public async Task RegisterAllTestDataAsync_N002CarryoverDoesNotCollideWithSampleHistory()
+    /// <summary>
+    /// N-002の年度境界日（3/31, 4/1）には繰越レコードだけがあり、サンプル履歴と重ならないこと
+    /// </summary>
+    /// <remarks>
+    /// Issue #2100: 以前は実時計で動き、境界日のレコードを foreach で検証していたため、
+    /// 境界が生成範囲の外になる 10〜3 月の実行では衝突回避を一度も通らないまま緑になっていた。
+    /// 基準日を固定し、境界日の件数（繰越の 1 件ちょうど）と、境界をはさむサンプル履歴の実在を先に表明する。
+    /// </remarks>
+    [Theory]
+    [InlineData("2025-06-15", "2025-03-31", "2025-04-01", true)]  // 境界が生成範囲の途中（3/31 月・4/1 火）
+    [InlineData("2025-09-24", "2025-03-31", "2025-04-01", true)]  // 生成範囲の先頭（3/28 金）が境界の直前の平日
+    [InlineData("2026-01-15", "2025-03-31", "2025-04-01", false)] // 境界が生成範囲より前
+    public async Task RegisterAllTestDataAsync_N002CarryoverDoesNotCollideWithSampleHistory(
+        string todayText, string march31Text, string april1Text, bool boundaryInSampleRange)
     {
+        // Arrange
+        var culture = System.Globalization.CultureInfo.InvariantCulture;
+        _clock.Now = DateTime.Parse(todayText, culture).AddHours(10);
+        var march31 = DateTime.Parse(march31Text, culture);
+        var april1 = DateTime.Parse(april1Text, culture);
+
         // Act
         await _service.RegisterAllTestDataAsync();
 
-        // Assert: N-002の年度境界日（3/31, 4/1）にサンプル履歴レコードが存在しないこと
+        // Assert
         var n002Idm = DebugDataService.TestCardList[5].CardIdm;
-        var today = DateTime.Now.Date;
-        var fiscalYear = FiscalYearHelper.GetFiscalYear(today);
-        var fiscalYearStart = FiscalYearHelper.GetFiscalYearStart(fiscalYear);
-        var previousFiscalYearEnd = fiscalYearStart.AddDays(-1);
-
         var n002Ledgers = _capturedLedgers.Where(l => l.CardIdm == n002Idm).ToList();
 
-        // 3/31のレコードは繰越OUTのみであること
-        var march31Records = n002Ledgers.Where(l => l.Date.Date == previousFiscalYearEnd.Date).ToList();
-        foreach (var record in march31Records)
-        {
-            record.Summary.Should().Be(SummaryGenerator.GetCarryoverToNextYearSummary(),
-                $"3/31のレコードは繰越OUTのみであるべき（実際: {record.Summary}）");
-        }
+        // 3/31のレコードは繰越OUTの1件だけであること
+        var march31Records = n002Ledgers.Where(l => l.Date.Date == march31).ToList();
+        march31Records.Should().ContainSingle("3/31のレコードは繰越OUTのみであるべき")
+            .Which.Summary.Should().Be(SummaryGenerator.GetCarryoverToNextYearSummary());
 
-        // 4/1のレコードは繰越INのみであること
-        var april1Records = n002Ledgers.Where(l => l.Date.Date == fiscalYearStart.Date).ToList();
-        foreach (var record in april1Records)
+        // 4/1のレコードは繰越INの1件だけであること
+        var april1Records = n002Ledgers.Where(l => l.Date.Date == april1).ToList();
+        april1Records.Should().ContainSingle("4/1のレコードは繰越INのみであるべき")
+            .Which.Summary.Should().Be(SummaryGenerator.GetCarryoverFromPreviousYearSummary());
+
+        // 境界をはさむサンプル履歴が実在すること（衝突回避を実際に通ったこと）
+        var sampleHistory = n002Ledgers.Where(l => l.Note == "テストデータ").ToList();
+        sampleHistory.Should().NotBeEmpty("N-002のサンプル履歴が生成されるべき");
+        if (boundaryInSampleRange)
         {
-            record.Summary.Should().Be(SummaryGenerator.GetCarryoverFromPreviousYearSummary(),
-                $"4/1のレコードは繰越INのみであるべき（実際: {record.Summary}）");
+            sampleHistory.Should().Contain(l => l.Date < march31, "年度境界より前のサンプル履歴があるべき");
+            sampleHistory.Should().Contain(l => l.Date > april1, "年度境界より後のサンプル履歴があるべき");
+        }
+        else
+        {
+            sampleHistory.Should().OnlyContain(l => l.Date > april1,
+                "境界が生成範囲より前なら、サンプル履歴はすべて年度初日より後になるべき");
         }
     }
 
