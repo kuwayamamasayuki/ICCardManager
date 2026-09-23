@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using FluentAssertions;
 using ICCardManager.Tests.Views.Helpers;
 using Xunit;
@@ -48,7 +49,7 @@ public class DataExportImportViewModelImportPathSharingTests
             "OpenFileDialog",
             "抽出範囲が想定どおり ImportAsync の本体であること");
 
-        AssertDelegatesToSharedImport(body, ImportSignature);
+        AssertDelegatesToSharedImport(TestSourceInspection.ToCodeOnly(body), ImportSignature);
     }
 
     /// <summary>
@@ -64,7 +65,7 @@ public class DataExportImportViewModelImportPathSharingTests
             "プレビューを実行してください",
             "抽出範囲が想定どおり ExecuteImportAsync の本体であること");
 
-        AssertDelegatesToSharedImport(body, ExecuteImportSignature);
+        AssertDelegatesToSharedImport(TestSourceInspection.ToCodeOnly(body), ExecuteImportSignature);
     }
 
     /// <summary>
@@ -81,7 +82,9 @@ public class DataExportImportViewModelImportPathSharingTests
     [InlineData("_importService.ImportLedgerDetailsAsync(")]
     public void インポートサービスの呼び分けはソース全体で1箇所であること(string invocation)
     {
-        var source = ReadViewModelSource();
+        // コメントを数えない。「呼び分けは RunImportAsync の _importService.ImportCardsAsync( だけ」のような
+        // 説明コメントが 1 件と数えられると、実コードの呼び出しを消しても 1 箇所のまま緑になる（Issue #2101）。
+        var source = TestSourceInspection.ToCodeOnly(ReadViewModelSource());
 
         CountOccurrences(source, invocation).Should().Be(
             1,
@@ -91,6 +94,8 @@ public class DataExportImportViewModelImportPathSharingTests
     /// <summary>
     /// コマンド本体が結果処理（サービス呼び出し・監査ログ・完了通知）を持たず、共通メソッドを呼ぶこと
     /// </summary>
+    /// <param name="body">コメントと文字列リテラルを除いた本体（<see cref="TestSourceInspection.ToCodeOnly"/> 済み）。</param>
+    /// <param name="signature">報告用のシグネチャ。</param>
     private static void AssertDelegatesToSharedImport(string body, string signature)
     {
         body.Should().Contain(
@@ -144,20 +149,63 @@ public class DataExportImportViewModelImportPathSharingTests
         body.Should().Contain(
             extractionMarker,
             $"抽出範囲が想定どおり {signature} の本体であること");
-        body.Should().Contain(
+
+        var code = TestSourceInspection.ToCodeOnly(body);
+        code.Should().Contain(
             DialogInvocation,
             $"{signature} が検査対象のダイアログ表示を1つも含まないなら、本テストは何も検査していない");
 
-        foreach (var index in IndexesOf(body, DialogInvocation))
-        {
-            var preceding = body.Substring(0, index).TrimEnd();
+        FindImmediateDialogInvocations(code).Should().BeEmpty(
+            $"{signature} の {DialogInvocation} は、代入または return で保持する遅延ラムダ"
+            + "（`pending = () => ...` / `return () => ...`）に載せること。"
+            + "その場で呼ぶ（引数として渡したラムダを含む）と BeginBusy スコープ内で実行され、"
+            + "完了ダイアログの背後にプログレスバーが残る（Issue #1784）");
+    }
 
-            preceding.Should().EndWith(
-                "=>",
-                $"{signature} の {DialogInvocation} は遅延ラムダ（`() => ...`）に載せること。"
-                + "その場で呼ぶと BeginBusy スコープ内で実行され、"
-                + "完了ダイアログの背後にプログレスバーが残る（Issue #1784）");
-        }
+    /// <summary>
+    /// <see cref="FindImmediateDialogInvocations"/> の判定をサンプル入力で固定する（Issue #2101）。
+    /// </summary>
+    /// <remarks>
+    /// 旧実装は「呼び出しの直前が <c>=&gt;</c> なら遅延」とみなしていたため、
+    /// <c>Task.Run(() =&gt; _dialogService.ShowError(…))</c> のように<b>引数として渡した（その場で走る）
+    /// ラムダ</b>も合格にしていた。遅延とみなすのは、代入の右辺または <c>return</c> で保持されるラムダだけ
+    /// （判定は <see cref="TestSourceInspection.IsHeldLambdaHead"/> に 1 つだけ置き、
+    /// <c>BusyScopeDialogConventionTests</c> と共有する）。
+    /// </remarks>
+    [Theory]
+    // 遅延（Issue #1784 の方式）
+    [InlineData("pendingResultDialog = () => _dialogService.ShowError(m, \"インポートエラー\");", false)]
+    [InlineData("return () => _dialogService.ShowInformation(m, \"インポート完了\");", false)]
+    [InlineData("return () => { _dialogService.ShowWarning(m, \"t\"); };", false)]
+    [InlineData("pending = () =>\n    _dialogService.ShowWarning(\n        m, \"t\");", false)]
+    // 規約の理由を書いたコメント・文字列は検査しない（極性の反転。#1692）
+    [InlineData("// _dialogService.ShowError(m) を直接呼ばないこと\nreturn () => _dialogService.ShowError(m, \"t\");", false)]
+    [InlineData("SetStatus(\"_dialogService.ShowError は呼ばない\", true);", false)]
+    // その場で実行される
+    [InlineData("_dialogService.ShowError(m, \"インポートエラー\");", true)]
+    [InlineData("Task.Run(() => _dialogService.ShowError(m, \"t\"));", true)]
+    [InlineData("Dispatcher.Invoke(() => { _dialogService.ShowError(m, \"t\"); });", true)]
+    [InlineData("new Action(() => _dialogService.ShowError(m, \"t\"))();", true)]
+    [InlineData("button.Click += (s, e) => _dialogService.ShowError(m, \"t\");", true)]
+    public void 即時実行のダイアログ表示の判定がサンプル入力で固定されていること(string statement, bool expectedImmediate)
+    {
+        var code = TestSourceInspection.ToCodeOnly("void M()\n{\n" + statement + "\n}");
+
+        FindImmediateDialogInvocations(code).Any().Should().Be(expectedImmediate);
+    }
+
+    /// <summary>
+    /// 保持される遅延ラムダに載っていない（＝書かれた地点で実行される）ダイアログ表示の位置を列挙する。
+    /// </summary>
+    /// <param name="codeOnly"><see cref="TestSourceInspection.ToCodeOnly"/> 済みのテキスト。</param>
+    internal static IReadOnlyList<int> FindImmediateDialogInvocations(string codeOnly)
+    {
+        var heldBlocks = TestSourceInspection.ExtractHeldLambdaBlockBodies(codeOnly);
+
+        return IndexesOf(codeOnly, DialogInvocation)
+            .Where(index => !TestSourceInspection.IsHeldLambdaHead(codeOnly, index)
+                            && !heldBlocks.Any(b => b.Start <= index && index <= b.End))
+            .ToList();
     }
 
     /// <summary>
@@ -170,7 +218,7 @@ public class DataExportImportViewModelImportPathSharingTests
     [Fact]
     public void 遅延させた結果ダイアログの実行地点はBeginBusyスコープの外にあること()
     {
-        var body = ExtractMethodBody(ReadViewModelSource(), RunImportSignature);
+        var body = TestSourceInspection.ToCodeOnly(ExtractMethodBody(ReadViewModelSource(), RunImportSignature));
 
         CountOccurrences(body, DeferredDialogInvoke).Should().Be(
             1,
@@ -192,44 +240,15 @@ public class DataExportImportViewModelImportPathSharingTests
     /// <summary>
     /// <c>using (BeginBusy(...))</c> の本体（対応する <c>}</c> まで）を取り出す
     /// </summary>
-    private static string ExtractBusyScopeBody(string methodBody)
+    /// <param name="codeOnlyMethodBody"><see cref="TestSourceInspection.ToCodeOnly"/> 済みのメソッド本体。</param>
+    private static string ExtractBusyScopeBody(string codeOnlyMethodBody)
     {
-        const string BusyScopeHeader = "using (BeginBusy(";
+        var scopes = TestSourceInspection.ExtractUsingScopeBodies(codeOnlyMethodBody, "BeginBusy");
+        scopes.Should().ContainSingle(
+            $"{RunImportSignature} が BeginBusy スコープをちょうど 1 つ持つこと（処理中表示を変えたら本テストも見直すこと）");
 
-        var headerIndex = methodBody.IndexOf(BusyScopeHeader, StringComparison.Ordinal);
-        headerIndex.Should().BeGreaterOrEqualTo(
-            0,
-            $"{RunImportSignature} が {BusyScopeHeader} を持つこと（処理中表示を外したら本テストも見直すこと）");
-
-        return ExtractBlockAt(methodBody, headerIndex);
-    }
-
-    /// <summary>
-    /// 指定位置以降の最初の <c>{</c> から対応する <c>}</c> までを取り出す
-    /// </summary>
-    private static string ExtractBlockAt(string source, int fromIndex)
-    {
-        var openIndex = source.IndexOf('{', fromIndex);
-        openIndex.Should().BeGreaterOrEqualTo(0, "ブロックの開始位置が見つかること");
-
-        var depth = 0;
-        for (var i = openIndex; i < source.Length; i++)
-        {
-            if (source[i] == '{')
-            {
-                depth++;
-            }
-            else if (source[i] == '}')
-            {
-                depth--;
-                if (depth == 0)
-                {
-                    return source.Substring(openIndex + 1, i - openIndex - 1);
-                }
-            }
-        }
-
-        throw new InvalidOperationException("ブロックの終端が見つかりませんでした");
+        var (start, end) = scopes[0];
+        return codeOnlyMethodBody.Substring(start, end - start + 1);
     }
 
     private static IEnumerable<int> IndexesOf(string source, string value)
@@ -249,37 +268,17 @@ public class DataExportImportViewModelImportPathSharingTests
             ViewSourceLocator.Resolve(Path.Combine("ViewModels", "DataExportImportViewModel.cs")));
 
     /// <summary>
-    /// メソッドシグネチャ直後の <c>{</c> から対応する <c>}</c> までを本体として取り出す
+    /// メソッド本体（<c>{ }</c> 含む）を、コメントを除き文字列リテラルを残したまま取り出す。
     /// </summary>
+    /// <remarks>
+    /// 抽出は <see cref="TestSourceInspection.ExtractMethodBodyPreservingLiterals"/> に寄せる（Issue #2101）。
+    /// 生のソースで波括弧を数える私的コピーは、コメントや文字列の中の <c>{</c> <c>}</c> で抽出範囲が
+    /// 黙って伸び縮みし、doc コメント中のシグネチャ文字列を本体と取り違える。リテラルを残すのは、
+    /// 抽出の妥当性を文言（「プレビューを実行してください」「インポート中...」）で確かめるため。
+    /// 禁止トークンの検査は呼び出し側で <see cref="TestSourceInspection.ToCodeOnly"/> を通してから行う。
+    /// </remarks>
     private static string ExtractMethodBody(string source, string signature)
-    {
-        var signatureIndex = source.IndexOf(signature, StringComparison.Ordinal);
-        signatureIndex.Should().BeGreaterOrEqualTo(
-            0,
-            $"検査対象 {signature} がソース中に存在すること（改名したら本テストも追随すること）");
-
-        var openIndex = source.IndexOf('{', signatureIndex + signature.Length);
-        openIndex.Should().BeGreaterOrEqualTo(0, $"{signature} の本体開始位置が見つかること");
-
-        var depth = 0;
-        for (var i = openIndex; i < source.Length; i++)
-        {
-            if (source[i] == '{')
-            {
-                depth++;
-            }
-            else if (source[i] == '}')
-            {
-                depth--;
-                if (depth == 0)
-                {
-                    return source.Substring(openIndex + 1, i - openIndex - 1);
-                }
-            }
-        }
-
-        throw new InvalidOperationException($"{signature} の本体終端が見つかりませんでした");
-    }
+        => TestSourceInspection.ExtractMethodBodyPreservingLiterals(source, signature);
 
     private static int CountOccurrences(string source, string value)
     {

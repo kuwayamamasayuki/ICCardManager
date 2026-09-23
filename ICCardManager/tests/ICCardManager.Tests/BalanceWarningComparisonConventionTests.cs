@@ -64,6 +64,60 @@ public class BalanceWarningComparisonConventionTests
         RegexOptions.Compiled);
 
     /// <summary>
+    /// しきい値を別名へ退避する代入・宣言（<c>var t = settings.WarningBalance;</c> /
+    /// <c>_threshold = options.WarningBalance;</c> / 初期化子の <c>Limit = s.WarningBalance,</c>）。group 1 が別名。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// 退避してから比べる形（<c>var t = settings.WarningBalance; if (b &lt; t)</c>）は
+    /// <see cref="InlineComparisonPattern"/> を原理的に素通りする（Issue #2101）。
+    /// 結果を <c>IsLowBalance</c> フラグへ入れる経路は <see cref="WarningFlagAssignmentPattern"/> が塞ぐが、
+    /// <c>if</c> の条件や別名のフラグへ入れる経路は塞げない。
+    /// </para>
+    /// <para>
+    /// メンバーへの代入（<c>result.WarningBalance = settings.WarningBalance;</c>）は別名ではないので、
+    /// 左辺の直前が <c>.</c> の形と、別名がしきい値の識別子そのものである形は除く。
+    /// </para>
+    /// </remarks>
+    private static readonly Regex ThresholdAliasPattern = new Regex(
+        $@"(?<![.\w])(\w+)\s*=(?![=>])\s*{ThresholdIdentifier}\s*[;,)}}]",
+        RegexOptions.Compiled);
+
+    /// <summary>
+    /// サニタイズ済みのソースから、しきい値との直書きの比較（別名経由・<c>CompareTo</c> を含む）を列挙する。
+    /// </summary>
+    /// <remarks>
+    /// 実データの検査とサンプル入力の固定は、必ずこの 1 本の判定を通す（Issue #2101）。
+    /// </remarks>
+    /// <param name="codeOnly"><see cref="TestSourceInspection.ToCodeOnly"/> 済みのソース。</param>
+    internal static IReadOnlyList<string> DetectInlineComparisons(string codeOnly)
+    {
+        var found = InlineComparisonPattern.Matches(codeOnly).Cast<Match>().Select(m => m.Value).ToList();
+
+        // balance.CompareTo(settings.WarningBalance) <= 0 / settings.WarningBalance.CompareTo(balance)
+        var compareTo = new Regex(
+            $@"(?:\.\s*CompareTo\s*\(\s*{ThresholdIdentifier}\s*\))|(?:{ThresholdIdentifier}\s*\.\s*CompareTo\s*\()");
+        found.AddRange(compareTo.Matches(codeOnly).Cast<Match>().Select(m => m.Value));
+
+        var aliases = ThresholdAliasPattern.Matches(codeOnly)
+            .Cast<Match>()
+            .Select(m => m.Groups[1].Value)
+            .Where(name => !Regex.IsMatch(name, @"^[Ww]arningBalance$"))
+            .Distinct();
+
+        foreach (var alias in aliases)
+        {
+            var token = $@"(?<![.\w]){Regex.Escape(alias)}\b";
+            var aliasComparison = new Regex(
+                $@"(?:(?<!=)[<>]=?\s*{token})|(?:{token}\s*[<>]=?[^=])" +
+                $@"|(?:\.\s*CompareTo\s*\(\s*{token}\s*\))|(?:{token}\s*\.\s*CompareTo\s*\()");
+            found.AddRange(aliasComparison.Matches(codeOnly).Cast<Match>().Select(m => m.Value));
+        }
+
+        return found;
+    }
+
+    /// <summary>
     /// しきい値との比較結果を受け取るフラグへの代入。
     /// </summary>
     /// <remarks>
@@ -102,9 +156,22 @@ public class BalanceWarningComparisonConventionTests
     // ラムダ・式形式メンバーの矢印。`>` の直前が `=` なので比較ではない。
     [InlineData("public int Threshold => settings.WarningBalance;", false)]
     [InlineData("cards.Select(s => s.WarningBalance).ToList();", false)]
+    // Issue #2101: しきい値を別名へ退避してから比べる形・CompareTo による比較
+    [InlineData("var t = settings.WarningBalance; if (b < t) { }", true)]
+    [InlineData("var t = settings.WarningBalance; if (t >= b) { }", true)]
+    [InlineData("_threshold = options.WarningBalance; var low = balance <= _threshold;", true)]
+    [InlineData("var dto = new X { Limit = s.WarningBalance }; if (b <= Limit) { }", true)]
+    [InlineData("var t = settings.WarningBalance; var low = b.CompareTo(t) <= 0;", true)]
+    [InlineData("var low = balance.CompareTo(settings.WarningBalance) <= 0;", true)]
+    // 退避しても共通の判定へ渡すだけなら違反ではない（対の表明）
+    [InlineData("var t = settings.WarningBalance; var low = BalanceWarningPolicy.IsLowBalance(b, t);", false)]
+    // メンバーへの転記は別名ではない（同名の別オブジェクトのメンバー比較を巻き込まない）
+    [InlineData("result.WarningBalance = settings.WarningBalance; if (other.Count < result.Count) { }", false)]
+    // 別名と同じ名前の別メンバー（x.t）は対象外
+    [InlineData("var t = settings.WarningBalance; if (b < x.t) { }", false)]
     public void しきい値比較の検出パターンが既知の入力を正しく分類すること(string code, bool expected)
     {
-        InlineComparisonPattern.IsMatch(code).Should().Be(expected);
+        DetectInlineComparisons(TestSourceInspection.ToCodeOnly(code)).Any().Should().Be(expected);
     }
 
     [Fact]
@@ -121,9 +188,9 @@ public class BalanceWarningComparisonConventionTests
             }
 
             var code = TestSourceInspection.ToCodeOnly(File.ReadAllText(file));
-            if (InlineComparisonPattern.IsMatch(code))
+            foreach (var comparison in DetectInlineComparisons(code))
             {
-                violations.Add(Path.GetFileName(file));
+                violations.Add($"{Path.GetFileName(file)}: {comparison.Trim()}");
             }
         }
 

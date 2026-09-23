@@ -60,10 +60,56 @@ public class CardReadDispatchConventionTests
     /// <c>Dispatcher.InvokeAsyncObserved</c>（Issue #1873）は受け手が <c>Dispatcher</c> だが、
     /// 末尾の語境界（<c>(?![A-Za-z0-9_])</c>）により <c>InvokeAsync</c> の前方一致では拾わない。
     /// </para>
+    /// <para>
+    /// 受け手は「<c>Dispatcher</c> で終わる語から始まるメンバーアクセスの連鎖」として照合する（Issue #2101）。
+    /// 直前が <c>Dispatcher</c> であることだけを見ると、<c>Dispatcher.CurrentDispatcher.InvokeAsync(async …)</c>
+    /// （受け手は <c>CurrentDispatcher</c>）や <c>Dispatcher.FromThread(t).BeginInvoke(…)</c> が同じ欠陥のまま素通りする。
+    /// </para>
     /// </remarks>
     private static readonly Regex RawDispatcherInvokeAsyncPattern = new(
-        @"(?<![A-Za-z0-9_])Dispatcher\s*\??\s*\.\s*(?:InvokeAsync|BeginInvoke)(?![A-Za-z0-9_])",
+        @"(?<![A-Za-z0-9_])\w*Dispatcher(?![A-Za-z0-9_])(?:\s*\??\s*\.\s*\w+(?:\s*\([^()]*\))?)*?" +
+        @"\s*\??\s*\.\s*(?:InvokeAsync|BeginInvoke)(?![A-Za-z0-9_])",
         RegexOptions.Compiled);
+
+    /// <summary>
+    /// <c>Dispatcher</c> を別名の変数・フィールドへ退避する宣言（<c>var d = Dispatcher.CurrentDispatcher;</c> /
+    /// <c>Dispatcher _ui;</c>）。group 1 が別名。
+    /// </summary>
+    /// <remarks>
+    /// 退避した別名から <c>d.InvokeAsync(async …)</c> と呼ぶと、受け手の字句に <c>Dispatcher</c> が現れず
+    /// <see cref="RawDispatcherInvokeAsyncPattern"/> を素通りする（Issue #2101）。
+    /// </remarks>
+    private static readonly Regex DispatcherAliasDeclarationPattern = new(
+        @"(?:\bDispatcher\s+(\w+)\s*[=;,)])" +
+        @"|(?:\bvar\s+(\w+)\s*=\s*(?:[\w.?\s]*\.\s*)?(?:\w*Dispatcher|Dispatcher\s*\.\s*FromThread\s*\([^()]*\))\s*;)",
+        RegexOptions.Compiled);
+
+    /// <summary>
+    /// 生の Dispatcher へ非同期ディスパッチしている箇所を列挙する（直接の受け手と、退避した別名の両方）。
+    /// </summary>
+    /// <param name="codeOnly"><see cref="TestSourceInspection.ToCodeOnly"/> 済みのソース。</param>
+    internal static IReadOnlyList<string> DetectRawDispatches(string codeOnly)
+    {
+        var found = RawDispatcherInvokeAsyncPattern.Matches(codeOnly)
+            .Cast<Match>()
+            .Select(m => m.Value)
+            .ToList();
+
+        var aliases = DispatcherAliasDeclarationPattern.Matches(codeOnly)
+            .Cast<Match>()
+            .Select(m => m.Groups[1].Success ? m.Groups[1].Value : m.Groups[2].Value)
+            .Distinct();
+
+        foreach (var alias in aliases)
+        {
+            var aliasCall = new Regex(
+                @"(?<![A-Za-z0-9_])(?:this\s*\.\s*)?" + Regex.Escape(alias) +
+                @"\s*\??\s*\.\s*(?:InvokeAsync|BeginInvoke)(?![A-Za-z0-9_])");
+            found.AddRange(aliasCall.Matches(codeOnly).Cast<Match>().Select(m => m.Value));
+        }
+
+        return found;
+    }
 
     private static string ViewModelsDirectory =>
         Path.Combine(TestPaths.GetSolutionRoot(), "src", "ICCardManager", "ViewModels");
@@ -102,7 +148,7 @@ public class CardReadDispatchConventionTests
     {
         // Act
         var violations = LoadViewModelSources()
-            .Where(s => RawDispatcherInvokeAsyncPattern.IsMatch(s.CodeOnly))
+            .Where(s => DetectRawDispatches(s.CodeOnly).Count > 0)
             .Select(s => s.FileName)
             .ToList();
 
@@ -161,7 +207,7 @@ public class CardReadDispatchConventionTests
     {
         // Act
         var violations = LoadViewSources()
-            .Where(s => RawDispatcherInvokeAsyncPattern.IsMatch(s.CodeOnly))
+            .Where(s => DetectRawDispatches(s.CodeOnly).Count > 0)
             .Select(s => s.FileName)
             .ToList();
 
@@ -219,8 +265,22 @@ public class CardReadDispatchConventionTests
     // View 側の正しい形（Issue #1873）。InvokeAsync の前方一致で拾わないこと
     [InlineData("Dispatcher.InvokeAsyncObserved(() => HandleCardReadAsync(e.Idm), \"職員証の認証\");", false)]
     [InlineData("dataGrid.Dispatcher.InvokeAsyncObserved(() => X(), \"再検索\", DispatcherPriority.ContextIdle);", false)]
+    // Issue #2101: 受け手が Dispatcher の静的メンバー・メソッドの戻り値でも検出すること
+    [InlineData("Dispatcher.CurrentDispatcher.InvokeAsync(async () => await X());", true)]
+    [InlineData("Dispatcher.CurrentDispatcher.BeginInvoke(new Action(async () => await X()));", true)]
+    [InlineData("Dispatcher.FromThread(thread).InvokeAsync(async () => await X());", true)]
+    [InlineData("_uiDispatcher.InvokeAsync(async () => await X());", true)]
+    // Issue #2101: 別名へ退避してから呼ぶ形
+    [InlineData("var d = Dispatcher.CurrentDispatcher; d.InvokeAsync(async () => await X());", true)]
+    [InlineData("var d = Application.Current.Dispatcher; d?.BeginInvoke(new Action(() => X()));", true)]
+    [InlineData("private readonly Dispatcher _ui; void M() => _ui.InvokeAsync(async () => await X());", true)]
+    // 同期の Invoke・観測ヘルパー・IDispatcherService は対象外（対の表明）
+    [InlineData("Dispatcher.CurrentDispatcher.Invoke(() => X());", false)]
+    [InlineData("Dispatcher.CurrentDispatcher.InvokeAsyncObserved(() => X(), \"再検索\");", false)]
+    [InlineData("var d = Dispatcher.CurrentDispatcher; d.Invoke(() => X());", false)]
+    [InlineData("var s = _dispatcherService; s.InvokeAsync(() => X());", false)]
     public void 検出パターンはサンプル入力で固定されていること(string line, bool expected)
     {
-        RawDispatcherInvokeAsyncPattern.IsMatch(line).Should().Be(expected);
+        DetectRawDispatches(TestSourceInspection.ToCodeOnly(line)).Any().Should().Be(expected);
     }
 }
