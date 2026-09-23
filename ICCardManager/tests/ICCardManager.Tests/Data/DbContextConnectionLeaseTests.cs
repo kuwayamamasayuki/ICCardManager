@@ -226,8 +226,12 @@ public class DbContextConnectionLeaseTests : IDisposable
         // Act - BeginTransactionAsync（セマフォ保持）内でLeaseConnectionAsync（セマフォ不要）
         using var scope = await dbContext.BeginTransactionAsync();
 
-        // トランザクション内でリポジトリメソッド相当の操作（LeaseConnectionAsync）
-        using var innerLease = await dbContext.LeaseConnectionAsync();
+        // トランザクション内でリポジトリメソッド相当の操作（LeaseConnectionAsync）。
+        // 上限付きで待つ（Issue #2099）。そのまま await すると、デッドロックは失敗ではなく停止になる。
+        var leaseTask = dbContext.LeaseConnectionAsync();
+        var winner = await Task.WhenAny(leaseTask, Task.Delay(TimeSpan.FromSeconds(10)));
+        winner.Should().BeSameAs(leaseTask, "トランザクション保持中の LeaseConnectionAsync はセマフォを取り直さず、すぐに接続を返すこと");
+        using var innerLease = await leaseTask;
 
         // Assert - 同一接続が返り、操作可能であること
         innerLease.Connection.Should().BeSameAs(scope.Lease.Connection);

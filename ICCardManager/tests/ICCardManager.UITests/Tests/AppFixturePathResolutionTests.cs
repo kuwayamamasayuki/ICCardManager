@@ -8,6 +8,8 @@ namespace ICCardManager.UITests.Tests
     /// <summary>
     /// AppFixture のパス解決ロジックのユニットテスト。
     /// GUI 不要のため Category=UI を付けず、CI でも実行される。
+    /// UITests はソリューション単位の実行から外れているため、CI は ci.yml の
+    /// 「Run GUI-free tests in UITests project」ステップで csproj を直接指定して実行する（Issue #2099）。
     /// </summary>
     public class AppFixturePathResolutionTests
     {

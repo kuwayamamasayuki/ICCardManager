@@ -3,6 +3,11 @@
 ### Unreleased
 
 **不具合修正**
+- Issue #2099 **「CI で回帰を固定している」と書かれた UI テストプロジェクトの GUI 不要テストが、CI で一度も実行されていなかった欠陥を是正した**。UITests の csproj はソリューション単位の `dotnet test` から自分を外している（`BuildingSolutionFile` 条件で `IsTestProject=false`）ため、CI の `--filter "Category!=UI"` を付けてもプロジェクトごと対象外だった。`UiTestDatabaseGuardTests`（#2062）と `AppFixturePathResolutionTests` の 27 件が該当する。ci.yml に UITests の csproj を直接指定し `Category!=UI&Category!=Screenshot` で絞るステップを追加した
+  - **CI のテストとビルド警告ゼロ検証を Release と Debug の両方で行う**。`#if DEBUG` 側のテストと Debug 限定コードの警告は、これまで CI で検証されていなかった。テストは matrix の 2 ジョブで並走させるため所要時間（壁時計）はほぼ増えない
+  - **CI のハングを失敗として報告する**。すべての `dotnet test` に `--blame-hang-timeout 5m`、両ジョブに `timeout-minutes: 30` を付けた。これまではデッドロックしてもジョブの既定上限（6 時間）まで止まり続けた。あわせて、デッドロック検出をうたうのに上限なしで待っていたテスト 3 件（`LendingServiceTests.LendAsync_MultipleConsecutiveOperations_NoDeadlock` ほか）を `Task.WhenAny` とタイムアウトに揃えた
+  - GitHub が読まない場所にあった内容の異なる複製 `ICCardManager/.github/workflows/ci.yml` を削除した
+  - 回帰は `CiWorkflowConventionTests`（11 件）が静的検査で固定する。修正前の ci.yml・複製・テストに当てると 7 件が赤になることを実測した
 - Issue #2098 **単体テストを実行するだけで、開発機の本物の `C:\ProgramData\ICCardManager`（DB 設定・バックアップ・エラーログ）が書き換わっていた欠陥を是正した**。既定の保存先へ空のテスト DB のバックアップを作って同じ実行の世代削除が本物の自動バックアップを間引き（残ったファイルはリストア画面の先頭に「最新」として並ぶ）、`database_config.txt`（共有モードの DB パス）を退避せずに削除し、エラーログへ架空の「リストア」エラーを追記していた。#2062（UI テストが実 DB を上書き）と同じ種類の欠陥
   - **根本原因は、置き場所を差し替える手段が無かったこと**。DB・バックアップ・設定ファイル・エラーログ・ファイルログの 6 か所がそれぞれ `CommonApplicationData` からパスを組み立てていた。解決を `Common/AppDataPaths.RootDirectory` 1 か所へ寄せ、テストアセンブリはモジュール初期化子（`Tests/Infrastructure/TestAppDataIsolation`）で**どのテストよりも先に 1 回だけ**一時フォルダーへ差し替える。Issue が名指しした 4 件に加え、`FileLoggerProviderTests`（本物の配下にフォルダーを作っていた）と `new DbContext()`（本物のフォルダーを作成）もまとめて塞がる
   - **設定ファイルを書き換えるテストは、テストごとの一時フォルダーを注入する**。`SettingsViewModel` に置き場所を受け取る internal コンストラクタを足した（DI は public コンストラクタしか選ばないので本番の経路は変わらない）。プロセス単位の差し替えだけでは、並列に走る別クラスが同じ `database_config.txt` を読んで実行順に依存する
