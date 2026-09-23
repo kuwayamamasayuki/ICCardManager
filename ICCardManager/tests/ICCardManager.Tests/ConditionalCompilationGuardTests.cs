@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Text.RegularExpressions;
 using FluentAssertions;
 using Xunit;
 
@@ -130,6 +131,13 @@ public class ConditionalCompilationGuardTests
     [InlineData("#if DEBUG\na();\n#else\nReg<X>();\n#endif\n", 1, "4")]
     // 検出する形: DEBUG で始まる別の記号（旧実装は前方一致で DEBUG とみなしていた）
     [InlineData("#if DEBUG_EXTRA\nReg<X>();\n#endif\n", 1, "2")]
+    // DEBUG と無関係な条件の #else は DEBUG を意味しない（Issue #2101 のコードレビューで検出）
+    [InlineData("#if TRACE\na();\n#else\nReg<X>();\n#endif\n", 1, "4")]
+    [InlineData("#if DEBUG\na();\n#elif FOO\nb();\n#else\nReg<X>();\n#endif\n", 1, "6")]
+    // #if !DEBUG の #else は DEBUG 限定。DEBUG 限定の枝の内側の入れ子も DEBUG 限定
+    [InlineData("#if !DEBUG\na();\n#else\nReg<X>();\n#endif\n", 1, "")]
+    [InlineData("#if !DEBUG\nReg<X>();\n#endif\n", 1, "2")]
+    [InlineData("#if DEBUG\n#if TRACE\nReg<X>();\n#endif\n#endif\n", 1, "")]
     public void 識別子の全出現がDEBUGガード内かを判定できること(
         string source, int expectedOccurrences, string expectedOutsideLines)
     {
@@ -188,15 +196,27 @@ public class ConditionalCompilationGuardTests
 
     /// <summary>
     /// C# プリプロセッサディレクティブのスタックを追跡し、
-    /// 指定行が <c>#if DEBUG</c>（または <c>#else</c> で反転した !DEBUG）の評価で
-    /// 「DEBUG ブロック内」となっているかを判定する。
+    /// 指定行が DEBUG ビルドでしかコンパイルされない位置にあるかを判定する。
     /// </summary>
     /// <remarks>
-    /// 入れ子の <c>#if</c> は AND で結合する。いずれかが false なら DEBUG ブロック内とはみなさない。
+    /// <para>
+    /// 各 <c>#if</c> を「どの記号で始まったか」と「いま何番目の枝か」で持ち、枝の意味を導出する
+    /// （Issue #2101 のコードレビューで検出）。真偽 1 ビットを <c>#else</c> で反転する形は、
+    /// <c>#if TRACE … #else</c> や <c>#if DEBUG … #elif FOO … #else</c> を「DEBUG 限定」と誤判定していた
+    /// — DEBUG と無関係な条件の否定は DEBUG を意味しない。
+    /// </para>
+    /// <list type="bullet">
+    /// <item><c>#if DEBUG</c>: 最初の枝だけが DEBUG 限定。<c>#elif</c> / <c>#else</c> は !DEBUG を含むので DEBUG 限定ではない</item>
+    /// <item><c>#if !DEBUG</c>: 最初の枝は Release 側。以降の枝は DEBUG を含むので DEBUG 限定</item>
+    /// <item>それ以外の記号: どの枝も DEBUG について何も言わない</item>
+    /// </list>
+    /// <para>
+    /// 入れ子は AND なので、囲むいずれかの枝が DEBUG 限定なら DEBUG 限定とみなす。
+    /// </para>
     /// </remarks>
     internal static bool IsLineInsideDebugBlock(string source, int targetLineNumber)
     {
-        var stack = new Stack<bool>();
+        var stack = new Stack<(DirectiveKind Kind, bool IsFirstBranch)>();
         var lines = source.Replace("\r\n", "\n").Split('\n');
 
         for (int i = 0; i < lines.Length; i++)
@@ -207,21 +227,21 @@ public class ConditionalCompilationGuardTests
             // 判定は RemoveDebugOnlyRegions と同じ語境界付きの照合へ寄せる
             if (TestSourceInspection.IsDebugOnlyDirective(trimmed))
             {
-                stack.Push(true);
+                stack.Push((DirectiveKind.Debug, true));
+            }
+            else if (NotDebugDirective.IsMatch(trimmed))
+            {
+                stack.Push((DirectiveKind.NotDebug, true));
             }
             else if (trimmed.StartsWith("#if ", StringComparison.Ordinal))
             {
-                stack.Push(false);
+                stack.Push((DirectiveKind.Other, true));
             }
-            else if (trimmed.StartsWith("#else", StringComparison.Ordinal) && stack.Count > 0)
+            else if ((trimmed.StartsWith("#else", StringComparison.Ordinal) ||
+                      trimmed.StartsWith("#elif ", StringComparison.Ordinal)) && stack.Count > 0)
             {
                 var top = stack.Pop();
-                stack.Push(!top);
-            }
-            else if (trimmed.StartsWith("#elif ", StringComparison.Ordinal) && stack.Count > 0)
-            {
-                stack.Pop();
-                stack.Push(false);
+                stack.Push((top.Kind, false));
             }
             else if (trimmed.StartsWith("#endif", StringComparison.Ordinal) && stack.Count > 0)
             {
@@ -230,10 +250,28 @@ public class ConditionalCompilationGuardTests
 
             if (i + 1 == targetLineNumber)
             {
-                return stack.Count > 0 && stack.All(x => x);
+                return stack.Any(IsDebugOnlyBranch);
             }
         }
 
         return false;
     }
+
+    private enum DirectiveKind
+    {
+        Debug,
+        NotDebug,
+        Other,
+    }
+
+    private static readonly Regex NotDebugDirective =
+        new(@"^#if\s+!\s*\(?\s*DEBUG\s*\)?\s*$", RegexOptions.Compiled);
+
+    private static bool IsDebugOnlyBranch((DirectiveKind Kind, bool IsFirstBranch) frame)
+        => frame.Kind switch
+        {
+            DirectiveKind.Debug => frame.IsFirstBranch,
+            DirectiveKind.NotDebug => !frame.IsFirstBranch,
+            _ => false,
+        };
 }
