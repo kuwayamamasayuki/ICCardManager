@@ -309,16 +309,22 @@ public class ErrorDialogHelperTests
     public void LogException_操作名と例外型とエラーコードをログファイルへ書き込むこと()
     {
         var marker = Guid.NewGuid().ToString("N");
-
-        ErrorDialogHelper.LogException(
-            new InvalidOperationException($"technical detail {marker}"),
-            "リストア");
-
         var logDirectory = ErrorDialogHelper.LogDirectory;
         logDirectory.Should().StartWith(TestAppDataIsolation.RootDirectory,
             "テストが開発機の本物のエラーログへ書き込んではならない");
 
-        var entry = FindLogLine(logDirectory, marker);
+        // LogError は File.AppendAllText（他者の書き込みを許さない）で追記し、失敗は握りつぶす。
+        // 並列に走る別のテストが同じ瞬間に同じファイルへ追記すると 1 回分が共有違反で失われ得るため、
+        // 数回まで書き直す。検査しているのは「書いた行の中身」であり、競合時に取りこぼさないことではない。
+        string? entry = null;
+        for (var attempt = 0; attempt < 5 && entry == null; attempt++)
+        {
+            ErrorDialogHelper.LogException(
+                new InvalidOperationException($"technical detail {marker}"),
+                "リストア");
+            entry = FindLogLine(logDirectory, marker);
+        }
+
         entry.Should().NotBeNull("LogException はエラーログへ 1 行書き込むこと");
         entry.Should().Contain("ERROR [SYS004]", "InvalidOperationException は SYS004 に分類される");
         entry.Should().Contain("(リストア)", "呼び出し元の操作名を記録すること");

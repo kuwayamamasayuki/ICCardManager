@@ -28,12 +28,17 @@ internal static class TestAppDataIsolation
     /// <summary>このテストプロセスが使うアプリケーションデータの置き場所。</summary>
     internal static string RootDirectory { get; private set; } = string.Empty;
 
+    /// <summary>前回以前の実行の残骸とみなす経過時間（並走中の別プロセスのフォルダーは消さない）。</summary>
+    private static readonly TimeSpan StaleAge = TimeSpan.FromDays(1);
+
     [ModuleInitializer]
     internal static void Initialize()
     {
+        var parent = Path.Combine(Path.GetTempPath(), "ICCardManager.Tests");
+        SweepStale(parent);
+
         RootDirectory = Path.Combine(
-            Path.GetTempPath(),
-            "ICCardManager.Tests",
+            parent,
             $"appdata_{Process.GetCurrentProcess().Id}_{Guid.NewGuid():N}");
         Directory.CreateDirectory(RootDirectory);
 
@@ -41,6 +46,33 @@ internal static class TestAppDataIsolation
 
         AppDomain.CurrentDomain.ProcessExit += (_, _) => TryDelete(RootDirectory);
         AppDomain.CurrentDomain.DomainUnload += (_, _) => TryDelete(RootDirectory);
+    }
+
+    /// <summary>
+    /// 終了時の後片付けに失敗した（SQLite のファイルが解放前・プロセスが強制終了された）過去の実行の
+    /// フォルダーを消す。同時に走っている別のテストプロセスのフォルダーを消さないよう、1 日以上前のものに限る。
+    /// </summary>
+    private static void SweepStale(string parent)
+    {
+        try
+        {
+            if (!Directory.Exists(parent))
+            {
+                return;
+            }
+
+            foreach (var directory in Directory.GetDirectories(parent, "appdata_*"))
+            {
+                if (DateTime.UtcNow - Directory.GetLastWriteTimeUtc(directory) > StaleAge)
+                {
+                    TryDelete(directory);
+                }
+            }
+        }
+        catch
+        {
+            // 掃除の失敗はテスト結果に影響させない
+        }
     }
 
     private static void TryDelete(string directory)

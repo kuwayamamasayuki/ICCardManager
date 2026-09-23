@@ -59,7 +59,7 @@ namespace ICCardManager.Common
         /// </remarks>
         internal static void RedirectRootDirectory(string rootDirectory)
         {
-            if (string.IsNullOrWhiteSpace(rootDirectory) || !Path.IsPathRooted(rootDirectory))
+            if (!IsFullyQualified(rootDirectory))
             {
                 throw new ArgumentException(
                     "アプリケーションデータの差し替え先には絶対パスを指定してください。",
@@ -67,6 +67,31 @@ namespace ICCardManager.Common
             }
 
             _redirectedRootDirectory = rootDirectory;
+        }
+
+        /// <summary>
+        /// ドライブ付きの絶対パス（<c>C:\…</c>）または UNC（<c>\\server\share…</c>）か。
+        /// </summary>
+        /// <remarks>
+        /// <see cref="Path.IsPathRooted"/> は <c>\foo</c>（カレントドライブ相対）や <c>C:foo</c>
+        /// （ドライブのカレントディレクトリ相対）も真とするため使わない。
+        /// </remarks>
+        private static bool IsFullyQualified(string path)
+        {
+            if (string.IsNullOrWhiteSpace(path))
+            {
+                return false;
+            }
+
+            if (path.StartsWith(@"\\", StringComparison.Ordinal))
+            {
+                return path.Length > 2;
+            }
+
+            return path.Length >= 3
+                && char.IsLetter(path[0])
+                && path[1] == ':'
+                && (path[2] == '\\' || path[2] == '/');
         }
     }
 }

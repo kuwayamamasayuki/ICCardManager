@@ -80,6 +80,8 @@ public class AppDataPathsTests
     [InlineData("")]
     [InlineData("   ")]
     [InlineData(@"relative\appdata")]
+    [InlineData(@"\appdata")]
+    [InlineData(@"C:appdata")]
     public void RedirectRootDirectory_絶対パス以外は拒否すること(string? rootDirectory)
     {
         var before = AppDataPaths.RootDirectory;

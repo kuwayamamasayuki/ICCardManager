@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.IO;
 using FluentAssertions;
 using ICCardManager.Data.Repositories;
@@ -136,8 +136,29 @@ public class SettingsViewModelDatabasePathTests : IDisposable
             "database_config.txt のファイルパスからフォルダ部分を表示する");
     }
 
-    // 保存（SaveAsync）が注入された置き場所へ database_config.txt / department_config.txt を書くことは、
-    // 単体テストからは確かめられない。書き込みは保存成功後の App.ApplyFontSize（WPF の
-    // Application.Current が必要）より後ろにあり、テストプロセスでは到達しない。
-    // 実機での確認手順は Issue #2098 の PR に記載した。
+    /// <summary>
+    /// Issue #2098: 保存（SaveAsync）が、注入された置き場所へ設定ファイルを書き込むこと（静的検査）。
+    /// </summary>
+    /// <remarks>
+    /// 書き込みは保存成功後の <c>App.ApplyFontSize</c>（WPF の <c>Application.Current</c> が必要）より
+    /// 後ろにあり、単体テストからは到達しない。挙動で表明できないため、本体が静的な置き場所
+    /// （<c>GetDatabaseConfigPath()</c> 等 ＝ テストプロセスでは共有、本番では同じ）ではなく
+    /// インスタンスの置き場所へ書いていることをソーステキストで固定する。
+    /// 「禁止形の不在」と「正しい形の存在」を対で見る（書き込みごと消した実装でも緑にならないように）。
+    /// </remarks>
+    [Fact]
+    public void SaveAsync_注入された置き場所へ設定ファイルを書き込むこと()
+    {
+        var source = File.ReadAllText(Path.Combine(
+            TestPaths.GetProductionSourceRoot(), "ViewModels", "SettingsViewModel.cs"));
+        var body = TestSourceInspection.ExtractMethodBody(
+            TestSourceInspection.ToCodeOnly(source), "public async Task SaveAsync()");
+
+        body.Should().Contain("SaveConfigFile(DatabaseConfigPath,",
+            "DB 保存先は注入された置き場所の database_config.txt へ保存する");
+        body.Should().Contain("DepartmentConfigPath,",
+            "部署種別は注入された置き場所の department_config.txt へ保存する");
+        body.Should().NotContain("GetDatabaseConfigPath()");
+        body.Should().NotContain("GetDepartmentConfigPath()");
+    }
 }

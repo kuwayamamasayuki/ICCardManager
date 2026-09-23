@@ -137,10 +137,34 @@ public class BackupServiceTests : IDisposable
         Path.GetDirectoryName(result).Should().Be(customBackupPath);
     }
 
-    // Issue #2098: 「バックアップパスが空なら既定の保存先を使う」テストは削除した。
-    // 既定の保存先（C:\ProgramData\ICCardManager\backup）へ空のテスト DB のバックアップを作り、
-    // 同じ実行の世代削除が本物の自動バックアップを間引いていた。既定の保存先の解決は
-    // BackupServiceHealthRecordingTests が ResolveBackupFolderDetailAsync で検証している。
+    /// <summary>
+    /// バックアップパスが空の場合、既定の保存先へバックアップが作られることを確認
+    /// </summary>
+    /// <remarks>
+    /// Issue #2098: 以前は既定の保存先が開発機の本物の C:\ProgramData\ICCardManager\backup で、
+    /// 空のテスト DB のバックアップを作ったうえ、同じ実行の世代削除が本物の自動バックアップを
+    /// 間引いていた。現在はテストプロセスの入口でアプリケーションデータが一時フォルダーへ
+    /// 差し替わっている（TestAppDataIsolation）ため、ここへ書いても実データには触れない。
+    /// 旧テストは「パスに ICCardManager と backup を含む」しか見ていなかったので、作られた場所を
+    /// 既定の保存先と一致で表明する。
+    /// </remarks>
+    [Fact]
+    public async Task ExecuteAutoBackupAsync_EmptyBackupPath_UsesDefaultPath()
+    {
+        // Arrange
+        _settingsRepositoryMock.Setup(x => x.GetAppSettingsAsync())
+            .ReturnsAsync(new AppSettings { BackupPath = string.Empty });
+
+        // Act
+        var result = await _service.ExecuteAutoBackupAsync();
+
+        // Assert
+        result.Should().NotBeNull();
+        Path.GetDirectoryName(result).Should().Be(PathValidator.GetDefaultBackupPath());
+        result.Should().StartWith(ICCardManager.Tests.Infrastructure.TestAppDataIsolation.RootDirectory,
+            "テストが開発機の本物のバックアップ先へ書き込んではならない");
+        File.Exists(result).Should().BeTrue();
+    }
 
     /// <summary>
     /// バックアップディレクトリが存在しない場合に自動作成されることを確認

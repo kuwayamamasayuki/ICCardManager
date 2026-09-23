@@ -26,21 +26,28 @@ namespace ICCardManager.Tests;
 /// </remarks>
 public class AppDataPathsConventionTests
 {
-    /// <summary>本番で <c>CommonApplicationData</c> を参照してよい唯一のファイル。</summary>
-    private const string ProductionAllowedFile = "AppDataPaths.cs";
+    /// <summary>本番で <c>CommonApplicationData</c> を参照してよい唯一のファイル（本番ソースルートからの相対パス）。</summary>
+    private static readonly string ProductionAllowedFile = Path.Combine("Common", "AppDataPaths.cs");
 
     /// <summary>
     /// テストで <c>CommonApplicationData</c> を参照してよい唯一のファイル（本番の既定値を固定するため。書き込みはしない）。
     /// </summary>
-    private const string TestAllowedFile = "AppDataPathsTests.cs";
+    private static readonly string TestAllowedFile = Path.Combine("Common", "AppDataPathsTests.cs");
 
     /// <summary><c>Environment.SpecialFolder.CommonApplicationData</c> の参照（<c>using static</c> 形も含む）。</summary>
     private static readonly Regex CommonAppDataPattern =
         new(@"\bCommonApplicationData\b", RegexOptions.Compiled);
 
-    /// <summary>文字列リテラルで ProgramData を直書きする形（<c>@"C:\ProgramData\..."</c> 等）。</summary>
-    private static readonly Regex ProgramDataLiteralPattern =
-        new(@"""[^""\r\n]*ProgramData", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+    /// <summary>
+    /// 文字列リテラル 1 つ分（逐語的 <c>@"…"</c> と通常の <c>"…"</c>）。中身に ProgramData を含むものを違反とする
+    /// （<c>@"C:\ProgramData\..."</c> や <c>GetEnvironmentVariable("ProgramData")</c>）。
+    /// </summary>
+    /// <remarks>
+    /// 「引用符から同じ行の ProgramData まで」で照合すると、<c>Foo("x", ProgramDataPath)</c> のように
+    /// リテラルの外にある識別子まで拾う（誤検出）。リテラルを 1 つずつ取り出してから中身を見る。
+    /// </remarks>
+    private static readonly Regex StringLiteralPattern =
+        new(@"\$?@""(?:[^""]|"""")*""|\$?""(?:[^""\\\r\n]|\\.)*""", RegexOptions.Compiled);
 
     [Fact]
     public void 本番でアプリケーションデータの置き場所を解決するのはAppDataPathsだけであること()
@@ -49,7 +56,7 @@ public class AppDataPathsConventionTests
 
         foreach (var file in EnumerateSources(TestPaths.GetProductionSourceRoot()))
         {
-            if (IsFileNamed(file, ProductionAllowedFile))
+            if (IsRelativePath(file, TestPaths.GetProductionSourceRoot(), ProductionAllowedFile))
             {
                 continue;
             }
@@ -73,7 +80,7 @@ public class AppDataPathsConventionTests
 
         foreach (var file in EnumerateSources(GetTestSourceRoot()))
         {
-            if (IsFileNamed(file, TestAllowedFile))
+            if (IsRelativePath(file, GetTestSourceRoot(), TestAllowedFile))
             {
                 continue;
             }
@@ -100,7 +107,7 @@ public class AppDataPathsConventionTests
     [Fact]
     public void AppDataPathsが解決しテストプロセスがモジュール初期化子で差し替えていること()
     {
-        var appDataPaths = Path.Combine(TestPaths.GetProductionSourceRoot(), "Common", ProductionAllowedFile);
+        var appDataPaths = Path.Combine(TestPaths.GetProductionSourceRoot(), ProductionAllowedFile);
         File.Exists(appDataPaths).Should().BeTrue("検査対象が見つからないと空振りする");
         var productionCode = TestSourceInspection.ToCodeOnly(File.ReadAllText(appDataPaths));
         CommonAppDataPattern.IsMatch(productionCode).Should().BeTrue(
@@ -125,6 +132,8 @@ public class AppDataPathsConventionTests
     [InlineData("var p = Path.Combine(AppDataPaths.RootDirectory, \"backup\");", false)]
     [InlineData("// CommonApplicationData（C:\\ProgramData）は AppDataPaths だけが参照する", false)]
     [InlineData("/// C:\\ProgramData\\ICCardManager\\Logs を使用する", false)]
+    [InlineData("var p = Environment.GetEnvironmentVariable(\"ProgramData\");", true)]
+    [InlineData("Foo(\"x\", ProgramDataPath);", false)]
     public void 本番の検出パターンがサンプル入力を正しく判定すること(string snippet, bool expectedViolation)
     {
         IsProductionViolation(snippet).Should().Be(expectedViolation);
@@ -147,13 +156,20 @@ public class AppDataPathsConventionTests
     {
         var codeOnly = TestSourceInspection.ToCodeOnly(source);
         var withLiterals = TestSourceInspection.RemoveCommentsPreservingLines(source);
-        return CommonAppDataPattern.IsMatch(codeOnly) || ProgramDataLiteralPattern.IsMatch(withLiterals);
+        return CommonAppDataPattern.IsMatch(codeOnly)
+            || StringLiteralPattern.Matches(withLiterals).Cast<Match>()
+                .Any(m => m.Value.IndexOf("ProgramData", StringComparison.OrdinalIgnoreCase) >= 0);
     }
 
     /// <summary>
     /// テスト: 識別子としての参照だけを違反とする。パス文字列をデータとして渡すリテラル
     /// （共有モード判定の <c>[InlineData(@"C:\ProgramData\...")]</c> 等）はファイルに触れないので対象外。
     /// </summary>
+    /// <remarks>
+    /// 裏返すと、テストがリテラルのパスで本物の ProgramData を直接書き換える形（<c>File.Delete(@"C:\ProgramData\…")</c>）は
+    /// 本検査では検出できない。リテラルがデータとして使われるか I/O の引数になるかはテキストからは判別できず、
+    /// 前者の正当な用途が十数件あるため、ここでは誤検出を避ける側に倒した（ガードの寿命を縮めない。#1786）。
+    /// </remarks>
     private static bool IsTestViolation(string source)
         => CommonAppDataPattern.IsMatch(TestSourceInspection.ToCodeOnly(source));
 
@@ -168,8 +184,14 @@ public class AppDataPathsConventionTests
             .Where(f => !f.Contains(Path.DirectorySeparatorChar + "bin" + Path.DirectorySeparatorChar));
     }
 
-    private static bool IsFileNamed(string path, string fileName)
-        => string.Equals(Path.GetFileName(path), fileName, StringComparison.OrdinalIgnoreCase);
+    /// <summary>
+    /// 走査中のファイルが、ルートからの相対パスで指定したファイルそのものか（同名の別ファイルを除外しない）。
+    /// </summary>
+    private static bool IsRelativePath(string path, string root, string relativePath)
+        => string.Equals(
+            Path.GetFullPath(path),
+            Path.GetFullPath(Path.Combine(root, relativePath)),
+            StringComparison.OrdinalIgnoreCase);
 
     private static string RelativePath(string fullPath)
     {
