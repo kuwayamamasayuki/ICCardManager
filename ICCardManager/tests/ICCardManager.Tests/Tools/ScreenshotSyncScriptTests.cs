@@ -431,6 +431,9 @@ namespace ICCardManager.Tests.Tools
         public static string ScreenshotSyncScriptPath =>
             Path.Combine(RepositoryRoot, "ICCardManager", "tools", "screenshot-sync.ps1");
 
+        public static string ScreenshotCaptureManifestScriptPath =>
+            Path.Combine(RepositoryRoot, "ICCardManager", "tools", "screenshot-capture-manifest.ps1");
+
         public static ScriptResult Run(string scriptPath, IReadOnlyList<string> args, string? stdin = null)
         {
             File.Exists(scriptPath).Should().BeTrue($"スクリプトが存在すること: {scriptPath}");
