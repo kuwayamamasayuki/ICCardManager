@@ -44,17 +44,40 @@ public class CompletionMessageOrderConventionTests
     /// <c>_viewModel.StatusMessage</c> のような読み取りを拾わないよう、
     /// メンバーアクセスを伴わない代入だけに限定する。
     /// </summary>
+    /// <remarks>
+    /// <c>this.</c> 修飾の代入も自分自身のプロパティへの代入なので拾う（Issue #2101）。
+    /// 旧実装は <see cref="StatusMessageEraserCall"/> 側だけ <c>this.</c> に対応しており、
+    /// <c>this.StatusMessage = …; CancelEdit();</c> は代入として認識されず<b>違反が素通り</b>した。
+    /// 同じ表記ゆれは代入側と打ち消し側の両方に効くため、両方で同じ形を受ける。
+    /// </remarks>
     private static readonly Regex StatusMessageAssignment =
-        new Regex(@"(?<![.\w])StatusMessage\s*=(?!=)", RegexOptions.Compiled);
+        new Regex(@"(?:(?<![.\w])|(?<=(?<![.\w])this\.))StatusMessage\s*=(?!=)", RegexOptions.Compiled);
 
     /// <summary>
-    /// <c>CancelEdit();</c> の呼び出し（メソッド定義そのものは末尾の <c>;</c> が無いため一致しない）。
+    /// <c>StatusMessage</c> を無条件に空へ戻す自己呼び出し（<c>CancelEdit();</c> / <c>StartEdit();</c>）。
+    /// メソッド定義そのものは末尾の <c>;</c> が無いため一致しない。
     /// <c>this.</c> 修飾も同じ自己呼び出しなので拾う。ここを拾い損ねると、その形しか
     /// 持たないファイルは <see cref="EnumerateTargetFiles"/> の対象から丸ごと外れ、
     /// <b>テストは緑のまま</b>検査されなくなる。
     /// </summary>
-    private static readonly Regex CancelEditCall =
-        new Regex(@"(?:(?<![.\w])|(?<=this\.))CancelEdit\s*\(\s*\)\s*;", RegexOptions.Compiled);
+    /// <remarks>
+    /// <para>
+    /// Issue #2101: <c>CardManageViewModel.StartEdit</c> / <c>StaffManageViewModel.StartEdit</c> も
+    /// 本体の末尾で <c>StatusMessage = string.Empty;</c> を<b>条件なしに</b>実行するため、
+    /// <c>CancelEdit()</c> と同じく直前に設定した完了メッセージを消す。対象に加えた。
+    /// </para>
+    /// <para>
+    /// 編集中の <c>SelectedCard</c> / <c>SelectedStaff</c> への代入も <c>On…Changed</c> で
+    /// <c>StatusMessage</c> を空にするが、これは<b>対象に加えない</b>。消えるのは
+    /// 「値が null でない・編集中（<c>IsEditing</c>）・新規登録モードでない」ときだけで、
+    /// 静的には判定できない。完了メッセージは <c>CancelEdit()</c>（<c>IsEditing = false</c>）の
+    /// <b>あと</b>に設定する規約なので、その後ろの選択復帰は消さない — これを違反にすると
+    /// 「<c>CancelEdit()</c> → 完了メッセージ → 選択復帰」という正しい形が赤になる（#1786 の誤検出の害）。
+    /// 本番の <c>Selected…</c> 代入は現状すべて <c>null</c> の代入（消えない側）である。
+    /// </para>
+    /// </remarks>
+    private static readonly Regex StatusMessageEraserCall =
+        new Regex(@"(?:(?<![.\w])|(?<=(?<![.\w])this\.))(?:CancelEdit|StartEdit)\s*\(\s*\)\s*;", RegexOptions.Compiled);
 
     /// <summary>
     /// 完了メッセージの設定が <c>CancelEdit()</c> に消されていないことを、本番ソース全体で表明する。
@@ -70,7 +93,8 @@ public class CompletionMessageOrderConventionTests
         violations.Should().BeEmpty(
             "CancelEdit() は StatusMessage / IsStatusError をクリアするため、"
             + "同じブロックでその前に設定した完了メッセージは一度も表示されない。"
-            + "設定は再読込・CancelEdit()・選択復帰といった後処理の**あと**へ置くこと（Issue #1764）");
+            + "設定は再読込・CancelEdit()・選択復帰といった後処理の**あと**へ置くこと（Issue #1764）。違反: "
+            + string.Join(" / ", violations));
     }
 
     /// <summary>
@@ -283,11 +307,83 @@ if (success)
     }
 
     /// <summary>
+    /// Issue #2101: 検査ロジックが <c>this.</c> 修飾の<b>代入</b>も検出することを固定する。
+    /// </summary>
+    /// <remarks>
+    /// 打ち消し側（<c>this.CancelEdit();</c>）だけを <c>this.</c> に対応させても、
+    /// 代入側が <c>this.StatusMessage = …</c> なら代入として認識されず、違反は素通りする。
+    /// </remarks>
+    [Fact]
+    public void 検査ロジックがthis修飾の代入も検出すること()
+    {
+        const string qualified = @"
+if (success)
+{
+    this.StatusMessage = ""更新しました"";
+    CancelEdit();
+}";
+
+        FindViolations(qualified).Should().ContainSingle(
+            "this.StatusMessage への代入も同じプロパティへの代入であり、CancelEdit() で消える");
+    }
+
+    /// <summary>
+    /// Issue #2101: 検査ロジックが <c>StartEdit()</c> による打ち消しも検出することを固定する。
+    /// </summary>
+    /// <remarks>
+    /// <c>StartEdit()</c> は本体の末尾で <c>StatusMessage = string.Empty;</c> を条件なしに実行する
+    /// （<c>CardManageViewModel</c> / <c>StaffManageViewModel</c>）。
+    /// </remarks>
+    [Fact]
+    public void 検査ロジックがStartEditによる打ち消しも検出すること()
+    {
+        const string startEdit = @"
+if (restored)
+{
+    StatusMessage = ""復元しました"";
+    StartEdit();
+}";
+
+        FindViolations(startEdit).Should().ContainSingle(
+            "StartEdit() も StatusMessage を空へ戻すため、直前の完了メッセージは表示されない");
+    }
+
+    /// <summary>
+    /// Issue #2101: 検査ロジックが、他オブジェクトのプロパティへの代入・<c>CancelEdit</c> 以外の
+    /// 同名接尾辞のメソッド・<c>CancelEdit()</c> のあとの選択復帰を違反としないことを固定する。
+    /// </summary>
+    /// <remarks>
+    /// <c>SelectedCard</c> への代入は編集中にだけ <c>StatusMessage</c> を消す。
+    /// <c>CancelEdit()</c> のあとは編集中ではないため、完了メッセージのあとの選択復帰は正しい形である
+    /// （<see cref="StatusMessageEraserCall"/> の remarks を参照）。
+    /// </remarks>
+    [Fact]
+    public void 検査ロジックが打ち消さない形を違反としないこと()
+    {
+        const string compliant = @"
+if (success)
+{
+    _viewModel.StatusMessage = ""他の画面"";
+    other.CancelEdit();
+    DataContext.StartEdit();
+}
+
+if (updated)
+{
+    CancelEdit();
+    StatusMessage = ""更新しました"";
+    SelectedCard = updatedCard;
+}";
+
+        FindViolations(compliant).Should().BeEmpty();
+    }
+
+    /// <summary>
     /// <c>CancelEdit();</c> を呼ぶ本番 ViewModel を列挙する。
     /// </summary>
     private static IEnumerable<string> EnumerateTargetFiles()
         => Directory.EnumerateFiles(ViewModelDirectory, "*.cs", SearchOption.AllDirectories)
-            .Where(path => CancelEditCall.IsMatch(
+            .Where(path => StatusMessageEraserCall.IsMatch(
                 TestSourceInspection.ToCodeOnlyPreservingLines(File.ReadAllText(path))))
             .OrderBy(path => path, StringComparer.Ordinal);
 
@@ -335,7 +431,7 @@ if (success)
             var lineNumber = i + 1;
             var current = blocks.Peek();
 
-            if (CancelEditCall.IsMatch(code) && current.AssignmentLine != null)
+            if (StatusMessageEraserCall.IsMatch(code) && current.AssignmentLine != null)
             {
                 current.CancelledAtLine = lineNumber;
             }
@@ -373,7 +469,7 @@ if (success)
         if (block.AssignmentLine is int assignedAt && block.CancelledAtLine is int cancelledAt)
         {
             violations.Add(
-                $"{assignedAt} 行目で設定した StatusMessage が {cancelledAt} 行目の CancelEdit() で消える");
+                $"{assignedAt} 行目で設定した StatusMessage が {cancelledAt} 行目の CancelEdit() / StartEdit() で消える");
         }
     }
 

@@ -3,7 +3,9 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Text.RegularExpressions;
+using System.Threading.Tasks;
 using FluentAssertions;
+using ICCardManager.Data.Repositories;
 using Xunit;
 
 namespace ICCardManager.Tests;
@@ -59,9 +61,65 @@ public class RepositoryWriteResultConventionTests
     /// <b>検査を複製せず同じクラスへ資源を足す</b>のは、判定ロジック（<c>ClassifyCallSite</c>）が
     /// 2 か所に分かれると片方だけが直る日が来るため（#1763）。
     /// </para>
+    /// <para>
+    /// Issue #2101: 対象を名前の直書き（<c>DeleteAsync</c> / <c>UpdateLentStatusAsync</c> の 2 つ）から、
+    /// <b>リポジトリのインターフェースが宣言する <c>Task&lt;bool&gt;</c> / <c>Task&lt;CardOperationResult&gt;</c> の
+    /// メソッド</b>の導出へ変えた（<see cref="DeriveCheckedMethodNames"/>）。直書きの間、同じく競合時に
+    /// <c>false</c> を返す <c>UpdateAsync</c> / <c>RestoreAsync</c>（#1759）が検査から漏れていた。
+    /// 導出にすると、書き込み API を足した日に<b>既定で検査対象に入る</b>（fail-closed）。
+    /// 対象外にするには <see cref="ExcludedMethods"/> へ理由とともに載せる必要がある。
+    /// </para>
     /// </remarks>
-    private static readonly Regex InvocationPattern =
-        new Regex(@"\.(DeleteAsync|UpdateLentStatusAsync)\b", RegexOptions.Compiled);
+    private static Regex InvocationPattern => InvocationPatternCache.Value;
+
+    /// <summary>
+    /// <see cref="ExcludedMethods"/> の初期化後に組み立てるため遅延させる
+    /// （静的フィールドの初期化子は宣言順に走る）。
+    /// </summary>
+    private static readonly Lazy<Regex> InvocationPatternCache = new(() => new Regex(
+        $@"\.({string.Join("|", DeriveCheckedMethodNames())})\b",
+        RegexOptions.Compiled));
+
+    /// <summary>
+    /// <c>bool</c> を返しても「<c>false</c> ＝影響行数 0 ＝競合」を意味しないため、戻り値の消費を強制しないメソッド。
+    /// </summary>
+    /// <remarks>
+    /// 載せてよいのは、<c>false</c> が競合を表さないことを<b>実装から説明できる</b>ものだけ。
+    /// 載っている名前がインターフェースから消えたら <c>除外リストは実在するメソッドだけを指すこと</c> が赤になる
+    /// （古い除外が、同名で意味の違う新しいメソッドを黙って見逃すのを防ぐ）。
+    /// </remarks>
+    private static readonly IReadOnlyDictionary<string, string> ExcludedMethods = new Dictionary<string, string>
+    {
+        ["ExistsAsync"] = "問い合わせ（bool は存在の有無という答えそのもの）",
+        ["HasOtherLentRecordsAsync"] = "問い合わせ（bool は他の貸出中レコードの有無という答えそのもの）",
+        ["InsertAsync"] = "新しい行の INSERT。制約違反は例外で通知され、影響行数 0 が競合を意味することはない",
+        ["InsertDetailAsync"] = "新しい明細行の INSERT（InsertAsync と同じ理由）",
+        ["InsertDetailsAsync"] = "新しい明細行の一括 INSERT（InsertAsync と同じ理由）",
+        ["SetAsync"] = "設定の UPSERT（ON CONFLICT DO UPDATE）。行の有無に依らず書き込まれ、失敗は例外で通知される",
+        ["SaveAppSettingsAsync"] = "設定の一括 UPSERT（SetAsync と同じ理由）",
+    };
+
+    /// <summary>
+    /// リポジトリのインターフェースから、戻り値の消費を強制する書き込みメソッド名を導出する。
+    /// </summary>
+    internal static IReadOnlyList<string> DeriveCheckedMethodNames()
+        => DeriveBoolReturningRepositoryMethodNames()
+            .Where(name => !ExcludedMethods.ContainsKey(name))
+            .ToList();
+
+    /// <summary>
+    /// <c>ICCardManager.Data.Repositories</c> のインターフェースが宣言する、
+    /// 成否を返す（<c>Task&lt;bool&gt;</c> / <c>Task&lt;CardOperationResult&gt;</c>）メソッド名。
+    /// </summary>
+    private static IReadOnlyList<string> DeriveBoolReturningRepositoryMethodNames()
+        => typeof(ICardRepository).Assembly.GetTypes()
+            .Where(t => t.IsInterface && t.Namespace == typeof(ICardRepository).Namespace)
+            .SelectMany(t => t.GetMethods())
+            .Where(m => m.ReturnType == typeof(Task<bool>) || m.ReturnType == typeof(Task<CardOperationResult>))
+            .Select(m => m.Name)
+            .Distinct()
+            .OrderBy(n => n, StringComparer.Ordinal)
+            .ToList();
 
     /// <summary>
     /// 削除の呼び出しがすべて戻り値を受けていること。
@@ -88,9 +146,11 @@ public class RepositoryWriteResultConventionTests
         }
 
         violations.Should().BeEmpty(
-            "DeleteAsync / UpdateLentStatusAsync が false を返すのは影響行数 0（＝競合）のときだけであり、" +
+            $"リポジトリの書き込み API（{string.Join(" / ", DeriveCheckedMethodNames())}）が false を返すのは" +
+            "影響行数 0（＝競合）のときだけであり、" +
             "捨てると削除していないのに監査ログへ「削除した」と記録され（Issue #1944 / #1753 / #1808）、" +
-            "貸出中レコードと ic_card.is_lent が恒久的に食い違う（Issue #1953）");
+            "貸出中レコードと ic_card.is_lent が恒久的に食い違う（Issue #1953）。違反: " +
+            string.Join(" / ", violations));
 
         // 空振り検出: 検査対象が消えた／パターンが合わなくなった状態で緑にしない。
         //
@@ -138,6 +198,20 @@ public class RepositoryWriteResultConventionTests
     [InlineData("{ await _cardRepository.UpdateLentStatusAsync(idm, true, now, staffIdm); }", false)]
     [InlineData("var ok = await _cardRepository.UpdateLentStatusAsync(idm, false, null, null);", true)]
     [InlineData("var ok = await _cardRepository\n    .UpdateLentStatusAsync(idm, true, now, staffIdm);", true)]
+    // Issue #2101: 破棄への代入は「受けている」ように見えて捨てている
+    [InlineData("_ = await _repo.DeleteAsync(id);", false)]
+    [InlineData("{ _ = await _cardRepository.UpdateLentStatusAsync(idm, true, now, staffIdm); }", false)]
+    [InlineData("var _ = await _repo.DeleteAsync(id);", false)]
+    [InlineData("_ = _repo.DeleteAsync(id);", false)]
+    // Issue #2101: 競合時に false を返す UpdateAsync / RestoreAsync（#1759）も対象
+    [InlineData("{ await _cardRepository.UpdateAsync(card); }", false)]
+    [InlineData("{ await _staffRepository.RestoreAsync(staffIdm); }", false)]
+    [InlineData("var updated = await _cardRepository.UpdateAsync(card, scope.Transaction);", true)]
+    [InlineData("if (!await _staffRepository.RestoreAsync(staffIdm)) { return; }", true)]
+    // 正しい形: 破棄ではない代入（複合代入・名前に _ を含む変数・メンバーへの代入）
+    [InlineData("ok &= await _repo.DeleteAsync(id);", true)]
+    [InlineData("_deleted = await _repo.DeleteAsync(id);", true)]
+    [InlineData("result._ = await _repo.DeleteAsync(id);", true)]
     public void 検査は戻り値の受け取りを区別すること(string code, bool expectedConsumed)
     {
         var source = TestSourceInspection.ToCodeOnly(code);
@@ -164,6 +238,35 @@ public class RepositoryWriteResultConventionTests
 
         InvocationPattern.Matches(source).Count.Should().Be(
             0, "監査ログ・一括削除・保持期間の削除は本検査の対象ではない");
+    }
+
+    /// <summary>
+    /// Issue #2101: 検査対象がインターフェースから導出され、競合時に false を返す既知の書き込み API を
+    /// すべて含むこと（導出が縮退して対象が消えた状態で緑にしない）。
+    /// </summary>
+    [Fact]
+    public void 検査対象は競合時にfalseを返す書き込みAPIを含むこと()
+    {
+        DeriveCheckedMethodNames().Should().Contain(new[]
+        {
+            "DeleteAsync",            // #1944
+            "UpdateLentStatusAsync",  // #1953
+            "UpdateAsync",            // #1759（旧実装で漏れていた）
+            "RestoreAsync",           // #1759（旧実装で漏れていた）
+        });
+    }
+
+    /// <summary>
+    /// Issue #2101: 除外リストが、インターフェースに実在する成否を返すメソッドだけを指していること。
+    /// </summary>
+    /// <remarks>
+    /// 消えたメソッドの名前が除外に残ると、後から同名で意味の違う書き込み API が足されたとき
+    /// 理由の検討なしに黙って対象外になる。
+    /// </remarks>
+    [Fact]
+    public void 除外リストは実在するメソッドだけを指すこと()
+    {
+        DeriveBoolReturningRepositoryMethodNames().Should().Contain(ExcludedMethods.Keys);
     }
 
     private enum CallSiteVerdict
@@ -218,6 +321,13 @@ public class RepositoryWriteResultConventionTests
             return CallSiteVerdict.Discarded;
         }
 
+        // 破棄への代入（`_ = await …;` / `var _ = await …;`）は、戻り値を受けているように見えて
+        // 捨てている（Issue #2101）。式文として単独で書くのと同じ扱いにする。
+        if (c == '=' && IsDiscardAssignment(source, i))
+        {
+            return CallSiteVerdict.Discarded;
+        }
+
         // 代入・引数・条件式・ラムダ本体など、値が使われる文脈
         if (c == '=' || c == '(' || c == ',' || c == '>' || c == '!' ||
             c == '&' || c == '|' || c == '?' || c == ':')
@@ -233,6 +343,30 @@ public class RepositoryWriteResultConventionTests
         }
 
         return CallSiteVerdict.Unrecognized;
+    }
+
+    /// <summary>
+    /// <paramref name="equalsIndex"/> の <c>=</c> が、破棄 <c>_</c> への単純代入か。
+    /// </summary>
+    /// <remarks>
+    /// 複合代入（<c>ok &amp;= …</c>）・比較（<c>==</c> / <c>!=</c> / <c>&lt;=</c> / <c>&gt;=</c>）は
+    /// 値を使っているので対象外。<c>x._ = …</c> のようなメンバーへの代入も破棄ではない。
+    /// </remarks>
+    private static bool IsDiscardAssignment(string source, int equalsIndex)
+    {
+        if (equalsIndex > 0 && "=!<>+-*/%&|^?".IndexOf(source[equalsIndex - 1]) >= 0)
+        {
+            return false;
+        }
+
+        var i = SkipWhitespaceBackward(source, equalsIndex - 1);
+        if (ReadWordBackward(source, i) != "_")
+        {
+            return false;
+        }
+
+        var before = SkipWhitespaceBackward(source, i - 1);
+        return before < 0 || source[before] != '.';
     }
 
     private static int SkipWhitespaceBackward(string source, int i)

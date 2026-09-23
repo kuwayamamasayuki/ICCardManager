@@ -162,6 +162,27 @@ public class InvariantCultureDateConventionTests
     [InlineData("var s = x.ToString(\"C\"); var t = y.ToString(\"P1\"); var u = z.ToString(\"#,##0.0\");", 0)]
     // 違反: 引数リストの丸括弧が書式文字列の内側にある形でも取りこぼさない（fail-open の封じ）
     [InlineData("var s = d.ToString(\"HH:mm (JST)\");", 1)]
+    // 違反（Issue #2101）: CurrentCulture を明示しても現在カルチャで整形・解析する
+    [InlineData("var s = d.ToString(\"yyyy/MM/dd\", CultureInfo.CurrentCulture);", 1)]
+    [InlineData("var s = d.ToString(\"yyyy/MM/dd\", Thread.CurrentThread.CurrentCulture);", 1)]
+    [InlineData("var d = DateTime.Parse(text, CultureInfo.CurrentCulture);", 1)]
+    [InlineData("var d = DateTime.ParseExact(text, \"yyyy-MM-dd\", CultureInfo.CurrentUICulture);", 1)]
+    // 違反（Issue #2101）: 番号付きの書式ホール（string.Format / AppendFormat）
+    [InlineData("var s = string.Format(\"{0:yyyy/MM/dd}\", d);", 1)]
+    [InlineData("sb.AppendFormat(\"{0:HH:mm}〜{1:HH:mm}\", from, to);", 2)]
+    [InlineData("var s = string.Format(CultureInfo.CurrentCulture, \"{0:yyyy/MM/dd}\", d);", 1)]
+    // 違反（Issue #2101）: 書式もカルチャも受け取らない整形メソッド
+    [InlineData("var s = d.ToShortDateString();", 1)]
+    [InlineData("var s = d.ToLongTimeString();", 1)]
+    // 違反（Issue #2101）: 日付の標準書式指定子（パターン自体が CurrentCulture から来る）
+    [InlineData("var s = d.ToString(\"d\");", 1)]
+    [InlineData("var s = d.ToString(\"g\");", 1)]
+    // 正常（Issue #2101）: 不変カルチャを渡した番号付き書式・標準書式
+    [InlineData("var s = string.Format(CultureInfo.InvariantCulture, \"{0:yyyy/MM/dd}\", d);", 0)]
+    [InlineData("var s = d.ToString(\"d\", CultureInfo.InvariantCulture);", 0)]
+    // 正常（Issue #2101）: 日付書式ではない番号付きホール・桁付きの数値書式
+    [InlineData("var s = string.Format(\"{0:N0}円 / {1}\", amount, name);", 0)]
+    [InlineData("var s = count.ToString(\"D2\");", 0)]
     public void 検出ロジックがサンプル入力で期待どおり働くこと(string source, int expectedCount)
     {
         FindCultureSensitiveDateOperations(source).Should().HaveCount(expectedCount);
@@ -189,12 +210,45 @@ public class InvariantCultureDateConventionTests
         foreach (var (index, arguments) in TestSourceInspection.ExtractInvocationArguments(
                      commentStrippedSource, ToStringInvocation))
         {
-            if (arguments.Count != 1 || !IsDateFormatArgument(arguments[0]))
+            if (arguments.Count == 0 || arguments.Count > 2 || !IsDateFormatArgument(arguments[0]))
             {
                 continue;
             }
 
-            violations.Add((LineOf(commentStrippedSource, index), $"ToString({arguments[0]})"));
+            // 2 引数でも、渡しているのが現在カルチャなら 1 引数と同じ欠陥（Issue #2101）。
+            // 旧実装は引数が 1 つの形しか見ておらず `ToString("yyyy", CultureInfo.CurrentCulture)` が通った
+            if (arguments.Count == 2 && IsInvariantProvider(arguments[1]))
+            {
+                continue;
+            }
+
+            violations.Add((LineOf(commentStrippedSource, index), $"ToString({string.Join(", ", arguments)})"));
+        }
+
+        // `ToShortDateString()` 等は書式もカルチャも受け取らず、常に CurrentCulture で整形する（Issue #2101）
+        foreach (Match match in CurrentCultureOnlyDateMethod.Matches(commentStrippedSource))
+        {
+            violations.Add((LineOf(commentStrippedSource, match.Index), $"{match.Groups["name"].Value}()"));
+        }
+
+        // `string.Format("{0:yyyy/MM/dd}", d)` の番号付き書式ホール（Issue #2101）。
+        // 名前付きのホール（下の DateFormatHole）は識別子で始まることを要求するため、番号で始まる形を
+        // 取りこぼしていた。先頭引数に InvariantCulture を渡した Format の書式文字列だけは適合とする。
+        var invariantFormatLiterals = InvariantFormatCall.Matches(commentStrippedSource)
+            .Cast<Match>()
+            .Where(m => IsInvariantProvider(m.Groups["provider"].Value))
+            .Select(m => (Start: m.Groups["literal"].Index, End: m.Groups["literal"].Index + m.Groups["literal"].Length))
+            .ToList();
+
+        foreach (Match match in NumberedDateFormatHole.Matches(commentStrippedSource))
+        {
+            if (invariantFormatLiterals.Any(s => s.Start <= match.Index && match.Index < s.End))
+            {
+                continue;
+            }
+
+            violations.Add((LineOf(commentStrippedSource, match.Index),
+                $"番号付き書式 {{…:{match.Groups["fmt"].Value}}}"));
         }
 
         // 単一引数の `.ToString("<日付書式>")` は丸括弧の対応を使わずに直接照合する。
@@ -227,7 +281,9 @@ public class InvariantCultureDateConventionTests
 
         foreach (var (index, arguments) in parseInvocations)
         {
-            if (arguments.Any(a => a.Contains("CultureInfo") || a.Contains("FormatProvider")))
+            // 「CultureInfo の字句がある」ではなく「不変カルチャが渡っている」で判定する（Issue #2101）。
+            // 旧実装は `DateTime.Parse(text, CultureInfo.CurrentCulture)` を適合にしていた
+            if (arguments.Any(IsInvariantProvider) && !arguments.Any(ReferencesCurrentCulture))
             {
                 continue;
             }
@@ -265,11 +321,60 @@ public class InvariantCultureDateConventionTests
     {
         if (argument.StartsWith("\"", StringComparison.Ordinal))
         {
-            return DateFormatLiteral.IsMatch(argument);
+            return DateFormatLiteral.IsMatch(argument) || StandardDateFormatLiteral.IsMatch(argument);
         }
 
         return DateFormatIdentifier.IsMatch(argument);
     }
+
+    /// <summary>
+    /// 日付の標準書式指定子（1 文字）の文字列リテラル（<c>"d"</c> / <c>"D"</c> / <c>"g"</c> / <c>"t"</c> …）。
+    /// </summary>
+    /// <remarks>
+    /// Issue #2101: 標準書式は<b>パターンそのものが CurrentCulture から来る</b>ため、カスタム書式以上に
+    /// カルチャ依存である（<c>"d"</c> は ja-JP で <c>yyyy/MM/dd</c>、en-US で <c>M/d/yyyy</c>）。
+    /// <c>"D"</c> / <c>"F"</c> / <c>"G"</c> は整数の書式（桁数指定なし）とも同じ綴りだが、本番の数値整形は
+    /// <c>"N0"</c> 等の桁付き書式で行っており、1 文字の形は日付とみなして fail-closed に倒す。
+    /// </remarks>
+    private static readonly Regex StandardDateFormatLiteral = new(
+        @"^""[dDfFgGmMoOrRsStTuUyY]""$", RegexOptions.Compiled);
+
+    /// <summary>カルチャ引数が不変カルチャを指しているか（現在カルチャを指していないか）</summary>
+    /// <remarks>
+    /// Issue #2101: 旧実装は <c>CultureInfo</c> という字句の有無で判定しており、
+    /// <c>CultureInfo.CurrentCulture</c> を明示した形を「カルチャを渡している」として通していた。
+    /// 明示しても現在カルチャで整形・解析する点は無指定と同じ欠陥である。
+    /// </remarks>
+    private static bool IsInvariantProvider(string argument)
+        => !ReferencesCurrentCulture(argument)
+           && (argument.Contains("InvariantCulture")
+               || argument.Contains("InvariantInfo")
+               || argument.Contains("FormatProvider"));
+
+    private static bool ReferencesCurrentCulture(string argument)
+        => CurrentCultureReference.IsMatch(argument);
+
+    /// <summary>現在カルチャへの参照（<c>CultureInfo.CurrentCulture</c> / <c>Thread.CurrentThread.CurrentCulture</c> 等）</summary>
+    private static readonly Regex CurrentCultureReference = new(
+        @"\bCurrent(?:UI)?Culture\b|\bCurrentInfo\b", RegexOptions.Compiled);
+
+    /// <summary>書式もカルチャも受け取らず、常に CurrentCulture で整形するメソッド</summary>
+    private static readonly Regex CurrentCultureOnlyDateMethod = new(
+        @"\.(?<name>To(?:Short|Long)(?:Date|Time)String)\s*\(", RegexOptions.Compiled);
+
+    /// <summary>
+    /// 番号付きの日付書式ホール（<c>{0:yyyy/MM/dd}</c>）。<c>string.Format</c> / <c>AppendFormat</c> の書式文字列に現れる。
+    /// </summary>
+    private static readonly Regex NumberedDateFormatHole = new(
+        @"\{\d+(?:,\s*-?\d+)?:(?<fmt>[^}""]*(?:yyyy|yy|MMM|ddd|HH|mm:ss|M月|d日|MM[/-]dd|dd[/-]MM)[^}""]*)\}",
+        RegexOptions.Compiled);
+
+    /// <summary>
+    /// 先頭引数に書式プロバイダーを渡した <c>Format</c> / <c>AppendFormat</c> と、その直後の書式文字列リテラル。
+    /// </summary>
+    private static readonly Regex InvariantFormatCall = new(
+        @"\b(?:Format|AppendFormat)\s*\(\s*(?<provider>[^,()""]+?)\s*,\s*(?<literal>@?""(?:[^""\\]|\\.|"""")*"")",
+        RegexOptions.Compiled);
 
     /// <summary>日付・時刻の書式と判定する部分文字列</summary>
     /// <remarks>
@@ -282,7 +387,7 @@ public class InvariantCultureDateConventionTests
 
     /// <summary>単一引数の <c>.ToString("&lt;日付書式&gt;")</c>（丸括弧の対応に依存しない照合）</summary>
     private static readonly Regex SingleArgumentDateToString = new(
-        @"\.ToString\(\s*(?<literal>""[^""]*(?:yy|MMM|ddd|HH|mm:ss|M月|d日|MM[/-]dd|dd[/-]MM)[^""]*"")\s*\)",
+        @"\.ToString\(\s*(?<literal>""[^""]*(?:yy|MMM|ddd|HH|mm:ss|M月|d日|MM[/-]dd|dd[/-]MM)[^""]*""|""[dDfFgGmMoOrRsStTuUyY]"")\s*\)",
         RegexOptions.Compiled);
 
     /// <summary>
