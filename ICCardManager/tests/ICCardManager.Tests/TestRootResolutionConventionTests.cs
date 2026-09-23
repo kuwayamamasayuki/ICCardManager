@@ -138,7 +138,14 @@ public class TestRootResolutionConventionTests
     [InlineData("var git = Path.Combine(root, @\".git\");", true)]
     [InlineData("File.Exists(root + \"/.git\")", true)]
     [InlineData("File.Exists(root + \"\\\\.git\")", true)]
+    // .git の配下を指す形と大文字小文字の表記ゆれ（Issue #2101 のコードレビューで検出）
+    [InlineData("File.Exists(Path.Combine(dir.FullName, \".git/HEAD\"))", true)]
+    [InlineData("var head = Path.Combine(root, @\".git\\HEAD\");", true)]
+    [InlineData("Directory.Exists(Path.Combine(dir.FullName, \".Git\"))", true)]
+    [InlineData("Directory.Exists(root + \"/.GIT/\")", true)]
     // 検出しない形
+    [InlineData("var workflow = Path.Combine(root, \".github/workflows/ci.yml\");", false)]
+    [InlineData("var attributes = Path.Combine(root, \".gitattributes\");", false)]
     [InlineData("// .git を基点にしない（Issue #2101）", false)]
     [InlineData("var ignore = Path.Combine(root, \".gitignore\");", false)]
     [InlineData("var url = \"https://example.com/repo.git\";", false)]
@@ -149,7 +156,8 @@ public class TestRootResolutionConventionTests
     }
 
     /// <summary>
-    /// 内容が <c>.git</c>（前後のパス区切りは許す）である文字列リテラルの行番号（1 始まり）を返す
+    /// 内容が <c>.git</c>（前のパス区切りと、後ろに続く配下のパスは許す。大文字小文字は区別しない）である
+    /// 文字列リテラルの行番号（1 始まり）を返す
     /// </summary>
     /// <remarks>
     /// コメントは除去し、文字列リテラルの中身は残して照合する。リテラルの開始引用符の直前が
@@ -189,6 +197,11 @@ public class TestRootResolutionConventionTests
     /// <summary>
     /// <c>".git"</c> / <c>@".git"</c> / <c>"/.git"</c> / <c>"\\.git"</c> のようなリテラル
     /// </summary>
+    /// <remarks>
+    /// <c>.git</c> の配下を指すリテラル（<c>".git/HEAD"</c>）と大文字小文字の表記ゆれ（<c>".Git"</c>。
+    /// Windows のファイルシステムでは同じものを指す）も拾う（Issue #2101 のコードレビューで検出）。
+    /// <c>.git</c> の直後はパス区切りか引用符に限るので、<c>.gitignore</c> / <c>.github</c> / <c>repo.git</c> は拾わない。
+    /// </remarks>
     private static readonly Regex GitDirectoryLiteral = new(
-        @"(?<!\\)""[\\/]*\.git[\\/]*""", RegexOptions.Compiled);
+        @"(?<!\\)""[\\/]*\.git(?:[\\/][^""]*)?""", RegexOptions.Compiled | RegexOptions.IgnoreCase);
 }

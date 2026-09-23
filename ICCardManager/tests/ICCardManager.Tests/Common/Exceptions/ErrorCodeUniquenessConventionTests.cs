@@ -108,11 +108,31 @@ public class ErrorCodeUniquenessConventionTests
     [Theory]
     [InlineData("const string errorCode = \"DB001\";", 1)]
     [InlineData("base(message, userMessage, \"DB008\")", 1)]
+    // 以下は Issue #2101 のコードレビューで、収集を「コードを割り当てる位置」に限ったのに伴って固定した形
+    // 本番ソースに実在する採番の書き方
+    [InlineData("public const string DuplicateCardNumberErrorCode = \"CARD001\";", 1)]
+    [InlineData("_ => (\"予期しないエラーが発生しました。\", \"SYS999\")", 1)]
+    [InlineData(": base($\"version {v} (required: {r ?? \"unknown\"}, ok)\", Build(a, b), \"DB008\")", 1)]
+    // 同じ意味を持つ別の書き方
+    [InlineData("public override string ErrorCode => \"DB010\";", 1)]
+    [InlineData(": this(message, errorCode: \"CR010\")", 1)]
+    [InlineData("return (message, \"SYS007\");", 1)]
+    // 連番が 4 桁でも採番として読む
+    [InlineData("const string errorCode = \"DB0010\";", 1)]
     // コメント中の言及は採番ではない
     [InlineData("// DB001 は接続エラーに使用済み", 0)]
     [InlineData("/// <remarks>DB008 と衝突しないこと</remarks>", 0)]
     // 採番ではない文字列は拾わない
     [InlineData("var name = \"DBBackup\";", 0)]
+    // 既存のコードを参照するだけの比較・分岐は採番ではない（Issue #2101 のコードレビューで検出）
+    [InlineData("if (ex.ErrorCode == \"CR001\") { }", 0)]
+    [InlineData("if (ex.ErrorCode != \"CR001\") { }", 0)]
+    [InlineData("switch (code) { case \"DB001\": break; }", 0)]
+    [InlineData("var kind = code switch { \"DB001\" => 1, _ => 0 };", 0)]
+    // 書式が似ているだけの任意のリテラルは採番ではない（同）
+    [InlineData("var encoding = \"UTF008\";", 0)]
+    [InlineData("hybridReader.SimulateCardRead(\"FFFF000000000001\");", 0)]
+    [InlineData("Assert(ex.ErrorCode, \"DB001\");", 0)]
     public void 抽出ロジックがサンプル入力で期待どおり働くこと(string source, int expectedCount)
     {
         ExtractCodes(source).Should().HaveCount(expectedCount);
@@ -125,17 +145,21 @@ public class ErrorCodeUniquenessConventionTests
     /// 「同じファイル内の重複」（旧実装が素通りしていた形）と「ファイルをまたぐ重複」の両方を
     /// 検出し、重複の無い形を検出しないことを対で固定する。検出しない形が無いと、
     /// あらゆるコードを重複とみなす実装でも緑になる。
+    /// 各サンプルは本番ソースと同じ採番の形（<c>const string errorCode = "…";</c>）で書く
+    /// （Issue #2101 のコードレビューで、収集を「コードを割り当てる位置」に限ったため）。
     /// </remarks>
     [Theory]
     // 同じファイル内の重複（旧実装では検出されなかった）
-    [InlineData("A(\"DB001\"); B(\"DB001\");", "", "DB001")]
+    [InlineData("const string errorCode = \"DB001\"; const string errorCode = \"DB001\";", "", "DB001")]
     // ファイルをまたぐ重複
-    [InlineData("A(\"DB008\");", "B(\"DB008\");", "DB008")]
+    [InlineData("const string errorCode = \"DB008\";", "base(m, u, \"DB008\")", "DB008")]
     // 重複の無い形
-    [InlineData("A(\"DB001\"); B(\"DB002\");", "", "")]
-    [InlineData("A(\"DB001\");", "B(\"DB002\");", "")]
+    [InlineData("const string errorCode = \"DB001\"; const string errorCode = \"DB002\";", "", "")]
+    [InlineData("const string errorCode = \"DB001\";", "const string errorCode = \"DB002\";", "")]
     // コメント中の言及は重複に数えない
-    [InlineData("A(\"DB001\"); // DB001 は接続エラー", "", "")]
+    [InlineData("const string errorCode = \"DB001\"; // DB001 は接続エラー", "", "")]
+    // 既存のコードを参照する比較は重複に数えない（Issue #2101 のコードレビューで検出）
+    [InlineData("const string errorCode = \"CR001\";", "if (ex.ErrorCode == \"CR001\") { }", "")]
     public void 重複判定がサンプル入力で期待どおり働くこと(string fileA, string fileB, string expectedDuplicateCodes)
     {
         var entries = ExtractCodes(fileA).Select(c => (c, "A.cs"))
@@ -153,12 +177,15 @@ public class ErrorCodeUniquenessConventionTests
     /// 接頭辞の一致判定がサンプル入力で期待どおり働くこと（Issue #2101）
     /// </summary>
     [Theory]
-    [InlineData("A(\"CR001\"); B(\"CR002\");", false)]
-    [InlineData("A(\"BIZ001\"); B(\"BIZ015\");", false)]
+    [InlineData("const string errorCode = \"CR001\"; const string errorCode = \"CR002\";", false)]
+    [InlineData("const string errorCode = \"BIZ001\"; const string errorCode = \"BIZ015\";", false)]
     // 分類の混在（CardReaderException の中に DB 番号）
-    [InlineData("A(\"CR001\"); B(\"DB002\");", true)]
+    [InlineData("const string errorCode = \"CR001\"; const string errorCode = \"DB002\";", true)]
     // 接頭辞の前方一致で同一視しない（FILE と FI は別の分類）
-    [InlineData("A(\"FILE001\"); B(\"FIL002\");", true)]
+    [InlineData("const string errorCode = \"FILE001\"; const string errorCode = \"FIL002\";", true)]
+    // 他の分類のコードを参照する比較は混在に数えない（Issue #2101 のコードレビューで検出）
+    [InlineData("const string errorCode = \"CR001\"; if (inner.ErrorCode == \"DB001\") { }", false)]
+    [InlineData("const string errorCode = \"CR001\"; var encoding = \"UTF008\";", false)]
     public void 接頭辞の一致判定がサンプル入力で期待どおり働くこと(string source, bool expectMixed)
     {
         var entries = ExtractCodes(source).Select(c => (c, "A.cs")).ToList();
@@ -216,15 +243,93 @@ public class ErrorCodeUniquenessConventionTests
 
     private static string PrefixOf(string code) => code.TrimEnd('0', '1', '2', '3', '4', '5', '6', '7', '8', '9');
 
-    /// <summary>ソースからエラーコードのリテラルを抽出する（コメントは除去してから照合する）</summary>
+    /// <summary>
+    /// ソースから<b>エラーコードを割り当てる位置</b>に書かれたリテラルを出現順に抽出する（コメントは除去してから照合する）
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Issue #2101 のコードレビューで検出: 走査を本番ソース全体へ広げたため、書式が似ているだけの任意のリテラル
+    /// （<c>"UTF008"</c> や、IDm の <c>"FFFF000000000001"</c>）や、既存のコードを<b>参照する</b>だけの比較
+    /// （<c>ErrorCode == "CR001"</c> / <c>case "DB001":</c>）まで採番として数えると、重複・接頭辞の混在を誤検出する。
+    /// 本番ソースで採番が実際に書かれている形（Issue #2101 の時点で 57 件）に限って読む。
+    /// </para>
+    /// <list type="bullet">
+    /// <item>名前が <c>ErrorCode</c> で終わる変数・定数・プロパティへの代入と名前付き引数
+    /// （<c>const string errorCode = "DB001";</c> / <c>DuplicateCardNumberErrorCode = "CARD001"</c> /
+    /// <c>ErrorCode =&gt; "X001"</c> / <c>errorCode: "X001"</c>）。</item>
+    /// <item>コンストラクター初期化子と例外の生成の引数（<c>: base(message, userMessage, "DB008")</c>）。</item>
+    /// <item>戻り値のタプルの末尾の要素（<c>ErrorDialogHelper.GetErrorInfo</c> の
+    /// <c>_ =&gt; ("…", "SYS999")</c>）。</item>
+    /// </list>
+    /// <para>
+    /// 位置の判定は構造（引数の区切り・丸括弧の対応）で行うため、コードのリテラルを識別子の目印へ置き換えてから
+    /// <see cref="TestSourceInspection.ToCodeOnlyPreservingLines"/> で他の文字列リテラルの中身を剥がす
+    /// （メッセージの中の丸括弧・カンマ・補間式が引数の区切りを狂わせないため）。
+    /// 連番の桁数は 3 桁以上を読む（4 桁の <c>DB0010</c> で採番しても検査から漏れないため）。
+    /// </para>
+    /// </remarks>
     private static IReadOnlyList<string> ExtractCodes(string source)
-        => ErrorCodeLiteral
-            .Matches(TestSourceInspection.RemoveCommentsPreservingLines(source))
-            .Cast<Match>()
-            .Select(m => m.Groups["code"].Value)
-            .ToList();
+    {
+        var marked = ErrorCodeLiteral.Replace(
+            TestSourceInspection.RemoveCommentsPreservingLines(source),
+            m => CodeMarkerPrefix + m.Groups["code"].Value + CodeMarkerSuffix);
+        var codeOnly = TestSourceInspection.ToCodeOnlyPreservingLines(marked);
 
-    /// <summary>エラーコードの文字列リテラル（接頭辞の大文字 ＋ 3 桁の連番）</summary>
+        var found = new List<(int Index, string Code)>();
+
+        foreach (Match m in AssignedToErrorCodeName.Matches(codeOnly))
+        {
+            found.Add((m.Index, m.Groups["code"].Value));
+        }
+
+        foreach (Match m in ReturnedAsTupleElement.Matches(codeOnly))
+        {
+            found.Add((m.Index, m.Groups["code"].Value));
+        }
+
+        foreach (var (index, arguments) in TestSourceInspection.ExtractInvocationArguments(codeOnly, ConstructorInvocation))
+        {
+            found.AddRange(arguments
+                .Select(a => CodeMarker.Match(a))
+                .Where(m => m.Success)
+                .Select(m => (index, m.Groups["code"].Value)));
+        }
+
+        return found
+            .OrderBy(f => f.Index)
+            .Select(f => f.Code)
+            .ToList();
+    }
+
+    private const string CodeMarkerPrefix = "__ErrorCodeLiteral_";
+
+    private const string CodeMarkerSuffix = "__";
+
+    /// <summary>
+    /// エラーコードの形をした文字列リテラル（接頭辞の大文字 ＋ 3 桁以上の連番）。
+    /// 別のリテラルの中にエスケープして書いたもの（<c>""DB001""</c>）は置き換えない。
+    /// </summary>
     private static readonly Regex ErrorCodeLiteral = new(
-        @"""(?<code>[A-Z]{2,5}\d{3})""", RegexOptions.Compiled);
+        @"(?<!"")""(?<code>[A-Z]{2,5}\d{3,})""(?!"")", RegexOptions.Compiled);
+
+    /// <summary>置き換えた目印。引数 1 つがこれだけから成るときに採番とみなす。</summary>
+    private static readonly Regex CodeMarker = new(
+        $@"^{CodeMarkerPrefix}(?<code>[A-Z]{{2,5}}\d{{3,}}){CodeMarkerSuffix}$", RegexOptions.Compiled);
+
+    /// <summary>
+    /// 名前が <c>ErrorCode</c> で終わる識別子への代入・初期化・式形式のプロパティ・名前付き引数。
+    /// 比較（<c>==</c> / <c>!=</c>）は既存のコードの参照であって採番ではないので読まない。
+    /// </summary>
+    private static readonly Regex AssignedToErrorCodeName = new(
+        $@"(?<![\w.])\w*ErrorCode\s*(?:=>|=(?!=)|:(?!:))\s*{CodeMarkerPrefix}(?<code>[A-Z]{{2,5}}\d{{3,}}){CodeMarkerSuffix}",
+        RegexOptions.Compiled | RegexOptions.IgnoreCase);
+
+    /// <summary>戻り値（<c>return</c> / 式形式・switch 式の腕）として返すタプルの末尾の要素。</summary>
+    private static readonly Regex ReturnedAsTupleElement = new(
+        $@"(?:=>|\breturn)\s*\([^()]*,\s*{CodeMarkerPrefix}(?<code>[A-Z]{{2,5}}\d{{3,}}){CodeMarkerSuffix}\s*\)",
+        RegexOptions.Compiled);
+
+    /// <summary>コンストラクター初期化子（<c>base(</c> / <c>this(</c>）と例外の生成（<c>new XxxException(</c>）。</summary>
+    private static readonly Regex ConstructorInvocation = new(
+        @"(?<![\w.])(?:base|this)\b|\bnew\s+[\w.]*Exception\b", RegexOptions.Compiled);
 }

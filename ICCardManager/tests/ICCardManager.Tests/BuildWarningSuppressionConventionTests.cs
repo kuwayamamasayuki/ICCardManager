@@ -462,6 +462,7 @@ public class BuildWarningSuppressionConventionTests
   <!-- <NoWarn>$(NoWarn);CS1111</NoWarn> -->
   <PropertyGroup>
     <NoWarnings>CS2222</NoWarnings>
+    <nowarnings>CS2222</nowarnings>
     <WarningsNotAsErrors>CS3333</WarningsNotAsErrors>
     <NoWarn>$(NoWarn)</NoWarn>
   </PropertyGroup>
@@ -508,6 +509,25 @@ public class BuildWarningSuppressionConventionTests
             $"「{value}」を 1 トークンとして読むと CS8618 と照合されず、禁止した ID の抑制が素通りする");
     }
 
+    /// <summary>
+    /// MSBuild のプロパティ名は大文字小文字を区別しないため、要素名の表記ゆれも同じプロパティとして読む
+    /// （Issue #2101 のコードレビューで検出）。
+    /// </summary>
+    [Theory]
+    [InlineData("<nowarn>$(NoWarn);CS8618</nowarn>", "NoWarn", "$(NoWarn);CS8618")]
+    [InlineData("<NOWARN Condition=\"true\">CS8618</NOWARN>", "NoWarn", "CS8618")]
+    [InlineData("<nullable>disable</nullable>", "Nullable", "disable")]
+    [InlineData("<warninglevel>0</warninglevel>", "WarningLevel", "0")]
+    [InlineData("<warningsasmessages>CS8618</warningsasmessages>", "WarningsAsMessages", "CS8618")]
+    public void MSBuild要素の抽出_要素名の大文字小文字を区別しないこと(string element, string elementName, string expected)
+    {
+        var sample = $"<Project><PropertyGroup>{element}</PropertyGroup></Project>";
+
+        ExtractElementValues(sample, elementName).Should().Equal(
+            new[] { expected },
+            $"「{element}」は MSBuild では {elementName} と同じプロパティとして評価される");
+    }
+
     [Fact]
     public void Nullableの抽出_属性付きの要素を出現順に読みコメントアウトは読まないこと()
     {
@@ -548,6 +568,8 @@ public class BuildWarningSuppressionConventionTests
     [InlineData("dotnet_diagnostic.CS8618.severity=silent", "CS8618", true)]
     [InlineData("  dotnet_diagnostic.cs8618.severity = suggestion", "CS8618", true)]
     [InlineData("dotnet_diagnostic.CA2007.severity = none", "CA2007", true)]
+    // refactoring は Hidden 相当（Issue #2101 のコードレビューで検出）
+    [InlineData("dotnet_diagnostic.CS8618.severity = refactoring", "CS8618", true)]
     [InlineData("dotnet_analyzer_diagnostic.severity = none", null, true)]
     [InlineData("dotnet_analyzer_diagnostic.category-Style.severity = silent", null, true)]
     [InlineData("dotnet_diagnostic.CS8618.severity = warning", null, false)]
@@ -583,6 +605,22 @@ public class BuildWarningSuppressionConventionTests
     [InlineData("msbuild /warnAsMessage:CS8618", "NoWarn", "CS8618")]
     [InlineData("dotnet build -p:Nullable=disable", "Nullable", "disable")]
     [InlineData("dotnet build -p:WarningLevel=0", "WarningLevel", "0")]
+    // 以下は Issue #2101 のコードレビューで検出した形
+    // dotnet CLI の長い形と、コロンの代わりに空白で区切る形
+    [InlineData("dotnet build --property:NoWarn=CS8618", "NoWarn", "CS8618")]
+    [InlineData("dotnet build --property NoWarn=CS8618", "NoWarn", "CS8618")]
+    [InlineData("dotnet build -p NoWarn=CS8618", "NoWarn", "CS8618")]
+    [InlineData("dotnet build --nowarn:CS8618", "NoWarn", "CS8618")]
+    // スクリプトでの環境変数の設定（MSBuild は環境変数をプロパティとして読む）
+    [InlineData("$env:NoWarn='CS8618'", "NoWarn", "CS8618")]
+    [InlineData("  $env:NOWARN = \"CS8618\"", "NOWARN", "CS8618")]
+    [InlineData("[Environment]::SetEnvironmentVariable('NoWarn', 'CS8618', 'Process')", "NoWarn", "CS8618")]
+    [InlineData("set NoWarn=CS8618", "NoWarn", "CS8618")]
+    [InlineData("set \"NoWarn=CS8618\"", "NoWarn", "CS8618")]
+    [InlineData("export NoWarn=CS8618", "NoWarn", "CS8618")]
+    [InlineData("NoWarn=CS8618 dotnet build", "NoWarn", "CS8618")]
+    [InlineData("export Nullable=disable", "Nullable", "disable")]
+    [InlineData("set WarningLevel=0", "WarningLevel", "0")]
     public void コマンドラインの抽出_抑制に使えるプロパティを読むこと(string line, string expectedName, string expectedValue)
     {
         ExtractCommandLineProperties(line, isYaml: false)
@@ -598,6 +636,15 @@ public class BuildWarningSuppressionConventionTests
     [InlineData("# dotnet build -p:NoWarn=CS8618")]
     [InlineData("    # 警告を消した「手段」（NoWarn / #pragma への逃げ）は検査する")]
     [InlineData("copy bin/p:NoWarn=CS8618")]
+    // 空白区切りの -p を読むようにしたのに伴い、別コマンドの -p を拾わないこと（Issue #2101 のコードレビュー）
+    [InlineData("mkdir -p NoWarn")]
+    [InlineData("mkdir -p out/NoWarn")]
+    // 環境変数を読むようにしたのに伴い、参照・別の変数・コメント・行の途中の文字列を拾わないこと（同）
+    [InlineData("echo $env:NoWarn")]
+    [InlineData("if ($env:NoWarn -eq 'CS8618') { exit 1 }")]
+    [InlineData("set Configuration=Release")]
+    [InlineData("REM set NoWarn=CS8618")]
+    [InlineData("Write-Host \"NoWarn=CS8618\"")]
     public void コマンドラインの抽出_抑制に使えないものを読まないこと(string line)
     {
         ExtractCommandLineProperties(line, isYaml: true)
@@ -627,11 +674,17 @@ public class BuildWarningSuppressionConventionTests
     /// <summary>
     /// コマンドラインの <c>NoWarn</c> 値も <see cref="ExtractSuppressions"/> で ID へ分解し、
     /// MSBuild のエスケープ（<c>%3B</c>）を区切りとして扱うこと。
+    /// 環境変数で既存値を引き継ぐ参照（<c>%NoWarn%</c> / <c>$env:NoWarn</c> / <c>${NoWarn}</c>）は ID として数えない
+    /// （数えると理由コメントの無い「抑制」として誤検出する。Issue #2101 のコードレビューで環境変数を読むようにしたのに伴う）。
     /// </summary>
-    [Fact]
-    public void コマンドラインの抑制_エスケープした区切りでIDへ分解すること()
+    [Theory]
+    [InlineData("dotnet build -p:NoWarn=CS1111%3B8618")]
+    [InlineData("set NoWarn=%NoWarn%;CS1111;8618")]
+    [InlineData("$env:NoWarn = \"$env:NoWarn;CS1111;8618\"")]
+    [InlineData("export NoWarn=\"${NoWarn};CS1111;8618\"")]
+    public void コマンドラインの抑制_エスケープした区切りでIDへ分解すること(string line)
     {
-        ExtractSuppressions("dotnet build -p:NoWarn=CS1111%3B8618", InspectedFileKind.CommandLine)
+        ExtractSuppressions(line, InspectedFileKind.CommandLine)
             .Select(e => e.WarningId)
             .Should().BeEquivalentTo(new[] { "CS1111", NullableFieldWarningId });
     }
@@ -986,11 +1039,16 @@ public class BuildWarningSuppressionConventionTests
     /// 指定した MSBuild 要素の値をすべて出現順に返す。属性（<c>Condition</c> 等）付きの要素も読み、
     /// コメントアウトされた要素は読まない。
     /// </summary>
+    /// <remarks>
+    /// 要素名は大文字小文字を区別せずに照合する。MSBuild のプロパティ名は大文字小文字を区別しないため、
+    /// <c>&lt;nowarn&gt;</c> / <c>&lt;nullable&gt;</c> / <c>&lt;warninglevel&gt;</c> も同じプロパティとして効く
+    /// （Issue #2101 のコードレビューで検出）。
+    /// </remarks>
     internal static IReadOnlyList<string> ExtractElementValues(string msbuildText, string elementName)
         => Regex.Matches(
                 RemoveXmlComments(msbuildText),
                 $@"<{Regex.Escape(elementName)}(?:\s[^>]*)?>(?<value>.*?)</{Regex.Escape(elementName)}\s*>",
-                RegexOptions.Singleline)
+                RegexOptions.Singleline | RegexOptions.IgnoreCase)
             .Cast<Match>()
             .Select(m => m.Groups["value"].Value)
             .ToList();
@@ -1007,7 +1065,8 @@ public class BuildWarningSuppressionConventionTests
         => !int.TryParse(value.Trim(), out var level) || level < DefaultWarningLevel;
 
     /// <summary>
-    /// <c>.editorconfig</c> / <c>.globalconfig</c> で重大度を <c>none</c> / <c>silent</c> / <c>suggestion</c> へ下げている行を返す。
+    /// <c>.editorconfig</c> / <c>.globalconfig</c> で重大度を <c>none</c> / <c>silent</c> / <c>suggestion</c> /
+    /// <c>refactoring</c> へ下げている行を返す。
     /// </summary>
     /// <remarks>
     /// C# コンパイラの警告（CS*）も <c>dotnet_diagnostic.&lt;ID&gt;.severity</c> で重大度を変えられるため、
@@ -1036,8 +1095,9 @@ public class BuildWarningSuppressionConventionTests
                 continue;
             }
 
+            // refactoring は Roslyn では Hidden（silent）相当で、警告として表示されない（Issue #2101 のコードレビューで検出）
             var severity = match.Groups["severity"].Value.ToLowerInvariant();
-            if (severity is "none" or "silent" or "suggestion")
+            if (severity is "none" or "silent" or "suggestion" or "refactoring")
             {
                 var id = match.Groups["id"].Success ? NormalizeWarningId(match.Groups["id"].Value) : null;
                 result.Add(new SeverityDowngrade(i + 1, id, severity));
@@ -1068,7 +1128,13 @@ public class BuildWarningSuppressionConventionTests
                 continue;
             }
 
-            foreach (Match m in Regex.Matches(line, @"(?<![\w/\\-])[-/](?:p|property):(?<value>""[^""]*""|'[^']*'|\S+)", RegexOptions.IgnoreCase))
+            // 接頭辞は -p / --property / /p のいずれも取り得る（dotnet CLI は --property: を受け付ける）。
+            // 区切りはコロンのほか空白も取り得る（-p NoWarn=CS8618）。空白区切りは mkdir -p dir のような
+            // 別コマンドの -p を拾わないよう、直後が「名前=」の形のときに限る（Issue #2101 のコードレビューで検出）
+            foreach (Match m in Regex.Matches(
+                line,
+                @"(?<![\w/\\-])(?:--?|/)(?:p|property)(?::|\s+(?=[A-Za-z_][\w.-]*\s*=))(?<value>""[^""]*""|'[^']*'|\S+)",
+                RegexOptions.IgnoreCase))
             {
                 string? name = null;
                 var value = new StringBuilder();
@@ -1097,7 +1163,7 @@ public class BuildWarningSuppressionConventionTests
                 }
             }
 
-            foreach (Match m in Regex.Matches(line, @"(?<![\w/\\-])[-/](?:nowarn|warnasmessage):(?<value>""[^""]*""|'[^']*'|\S+)", RegexOptions.IgnoreCase))
+            foreach (Match m in Regex.Matches(line, @"(?<![\w/\\-])(?:--?|/)(?:nowarn|warnasmessage):(?<value>""[^""]*""|'[^']*'|\S+)", RegexOptions.IgnoreCase))
             {
                 result.Add(("NoWarn", Unquote(m.Groups["value"].Value)));
             }
@@ -1106,8 +1172,19 @@ public class BuildWarningSuppressionConventionTests
             {
                 var env = Regex.Match(
                     line,
-                    @"^-?\s*(?<name>NoWarn|MSBuildWarningsAsMessages|WarningsAsMessages|WarningLevel|Nullable)\s*:\s*(?<value>.+?)\s*$",
+                    $@"^-?\s*(?<name>{EnvironmentPropertyNamePattern})\s*:\s*(?<value>.+?)\s*$",
                     RegexOptions.IgnoreCase);
+                if (env.Success)
+                {
+                    result.Add((env.Groups["name"].Value, Unquote(env.Groups["value"].Value)));
+                }
+            }
+
+            // スクリプト（ワークフローの run: の中を含む）で設定した環境変数も MSBuild はプロパティとして読む。
+            // YAML の env: だけを見ると ps1 / cmd / sh の設定を素通りする（Issue #2101 のコードレビューで検出）
+            foreach (var pattern in ScriptEnvironmentAssignmentPatterns)
+            {
+                var env = pattern.Match(line);
                 if (env.Success)
                 {
                     result.Add((env.Groups["name"].Value, Unquote(env.Groups["value"].Value)));
@@ -1117,6 +1194,41 @@ public class BuildWarningSuppressionConventionTests
 
         return result;
     }
+
+    /// <summary>
+    /// 環境変数として設定されたときに警告の抑制・Nullable の無効化・警告レベルの引き下げになるプロパティ名。
+    /// </summary>
+    private const string EnvironmentPropertyNamePattern =
+        "NoWarn|MSBuildWarningsAsMessages|WarningsAsMessages|WarningLevel|Nullable";
+
+    /// <summary>
+    /// スクリプトでの環境変数の設定。行頭（字下げ可）の代入だけを読み、値の参照（<c>echo $env:NoWarn</c>）や
+    /// 別の変数の設定（<c>set Configuration=Release</c>）は読まない。
+    /// </summary>
+    /// <remarks>
+    /// PowerShell: <c>$env:NoWarn = 'CS8618'</c> / <c>$env:NoWarn += ';CS8618'</c> /
+    /// <c>[Environment]::SetEnvironmentVariable('NoWarn', 'CS8618')</c>。
+    /// cmd: <c>set NoWarn=CS8618</c> / <c>set "NoWarn=CS8618"</c>。
+    /// sh: <c>export NoWarn=CS8618</c> と、コマンドの前置き <c>NoWarn=CS8618 dotnet build</c>。
+    /// </remarks>
+    private static readonly Regex[] ScriptEnvironmentAssignmentPatterns =
+    {
+        new Regex(
+            $@"^\s*\$env:(?<name>{EnvironmentPropertyNamePattern})\s*\+?=\s*(?<value>""[^""]*""|'[^']*'|\S+)",
+            RegexOptions.IgnoreCase),
+        new Regex(
+            $@"\[(?:System\.)?Environment\]::SetEnvironmentVariable\(\s*[""'](?<name>{EnvironmentPropertyNamePattern})[""']\s*,\s*(?<value>""[^""]*""|'[^']*')",
+            RegexOptions.IgnoreCase),
+        new Regex(
+            $@"^\s*set\s+""(?<name>{EnvironmentPropertyNamePattern})=(?<value>[^""]*)""",
+            RegexOptions.IgnoreCase),
+        new Regex(
+            $@"^\s*set\s+(?<name>{EnvironmentPropertyNamePattern})=(?<value>.*?)\s*$",
+            RegexOptions.IgnoreCase),
+        new Regex(
+            $@"^\s*(?:export\s+)?(?<name>{EnvironmentPropertyNamePattern})=(?<value>""[^""]*""|'[^']*'|\S+)",
+            RegexOptions.IgnoreCase),
+    };
 
     /// <summary>
     /// <c>#pragma warning disable</c> の行なら抑制する警告 ID（正規化済み）を返し、そうでなければ null を返す。
@@ -1223,10 +1335,16 @@ public class BuildWarningSuppressionConventionTests
     /// 警告 ID の並びを分割する。<c>;</c> と <c>,</c>（前後の空白・改行を含む）、
     /// MSBuild のエスケープ（<c>%3B</c> / <c>%2C</c>）を区切りとして扱い、<c>$(...)</c> の継承は除く。
     /// </summary>
+    /// <remarks>
+    /// スクリプトの環境変数で既存値を引き継ぐ参照（<c>%NoWarn%</c> / <c>$env:NoWarn</c> / <c>${NoWarn}</c>）も
+    /// ID ではないため除く（Issue #2101 のコードレビューで環境変数を読むようにしたのに伴う）。
+    /// </remarks>
     private static IEnumerable<string> SplitWarningIds(string value)
         => Regex.Split(Regex.Replace(value, "%3[Bb]|%2[Cc]", ";"), @"[;,\s]+")
             .Select(token => token.Trim())
-            .Where(token => token.Length > 0 && !token.StartsWith("$(", StringComparison.Ordinal))
+            .Where(token => token.Length > 0
+                && !token.StartsWith("$", StringComparison.Ordinal)
+                && !token.StartsWith("%", StringComparison.Ordinal))
             .Select(NormalizeWarningId);
 
     /// <summary>

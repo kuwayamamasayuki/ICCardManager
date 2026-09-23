@@ -84,7 +84,7 @@ public class ConfigureAwaitConventionTests
                 continue;
             }
 
-            var source = TestSourceInspection.ToCodeOnlyPreservingLines(File.ReadAllText(file));
+            var source = ToInspectableSource(File.ReadAllText(file));
             foreach (var line in FindAwaitsWithoutConfigureAwait(source))
             {
                 violations.Add($"{relativePath}:{line}");
@@ -115,7 +115,7 @@ public class ConfigureAwaitConventionTests
             File.Exists(path).Should().BeTrue(
                 $"除外リストの {entry.Key}（理由: {entry.Value}）が存在しない。是正・改名済みなら除外を削除すること");
 
-            var source = TestSourceInspection.ToCodeOnlyPreservingLines(File.ReadAllText(path));
+            var source = ToInspectableSource(File.ReadAllText(path));
             FindAwaitsWithoutConfigureAwait(source).Should().NotBeEmpty(
                 $"除外リストの {entry.Key} は既に規約を満たしている。除外を削除して検査対象へ戻すこと");
         }
@@ -231,12 +231,40 @@ public class ConfigureAwaitConventionTests
     // 同じ文の別の被演算子に付いた ConfigureAwait は数えない（三項・null 合体）
     [InlineData("var x = f ? await A() : await B().ConfigureAwait(false);", true)]
     [InlineData("var x = await A() ?? await B().ConfigureAwait(false);", true)]
+    // 以下は Issue #2101 のコードレビューで検出した形
+    // await の直後に空白を置かない形（`await(A())`）も await 式である
+    [InlineData("await(A());", true)]
+    [InlineData("var n = await(A()).Count;", true)]
+    [InlineData("await(A()).ConfigureAwait(false);", false)]
+    // 被演算子全体を丸括弧で包んだ形は、括弧の内側の連鎖で判定する
+    [InlineData("await(A().ConfigureAwait(false));", false)]
+    [InlineData("await (A().ConfigureAwait(false));", false)]
+    [InlineData("await (A().ConfigureAwait(true));", true)]
+    [InlineData("await (Task.WhenAll(B().ConfigureAwait(false)));", true)]
+    // 補間文字列の補間式の中の await（補間式ごと捨てると素通りする）
+    [InlineData("var s = $\"件数: {await A()}\";", true)]
+    [InlineData("var s = $@\"件数: {await A()}\";", true)]
+    [InlineData("var s = $\"件数: {await A().ConfigureAwait(false)}\";", false)]
+    // 語境界: await を含む識別子や文字列は await 式ではない
+    [InlineData("var awaited = Awaiter(1);", false)]
+    [InlineData("var s = \"await(A())\";", false)]
     public void 深さ0の連鎖のConfigureAwaitFalseだけを適合とすること(string statement, bool expectViolation)
     {
-        var source = TestSourceInspection.ToCodeOnlyPreservingLines(statement);
+        var source = ToInspectableSource(statement);
 
         FindAwaitsWithoutConfigureAwait(source).Any().Should().Be(expectViolation, statement);
     }
+
+    /// <summary>
+    /// 検査の前処理。実データの検査・除外リストの検査・サンプル入力の固定がすべて同じ前処理を通るよう 1 か所に置く。
+    /// </summary>
+    /// <remarks>
+    /// 補間式（<c>$"{await A()}"</c>）を残すため <c>preserveInterpolationHoles: true</c> で呼ぶ。
+    /// 既定の <c>false</c> では補間式もリテラルとして捨てられ、補間式の中の await が一度も検査されない
+    /// （Issue #2101 のコードレビューで検出）。
+    /// </remarks>
+    private static string ToInspectableSource(string source)
+        => TestSourceInspection.ToCodeOnlyPreservingLines(source, preserveInterpolationHoles: true);
 
     private static IEnumerable<string> EnumerateTargetFiles(string sourceRoot)
     {
@@ -308,7 +336,9 @@ public class ConfigureAwaitConventionTests
                 continue;
             }
 
-            if (index >= codeOnlySource.Length || !char.IsWhiteSpace(codeOnlySource[index]))
+            // 直後に空白を置かない `await(A());` も await 式（Issue #2101 のコードレビューで検出）
+            if (index >= codeOnlySource.Length ||
+                !(char.IsWhiteSpace(codeOnlySource[index]) || codeOnlySource[index] == '('))
             {
                 continue;
             }
@@ -339,7 +369,34 @@ public class ConfigureAwaitConventionTests
         }
 
         var operandEnd = FindAwaitOperandEnd(source, operandStart);
-        return HasConfigureAwaitFalseAtDepthZero(source, operandStart, operandEnd);
+        return IsOperandChainConfigured(source, operandStart, operandEnd);
+    }
+
+    /// <summary>
+    /// [<paramref name="start"/>, <paramref name="end"/>) の被演算子が <c>.ConfigureAwait(false)</c> を伴うか
+    /// </summary>
+    /// <remarks>
+    /// 被演算子全体が丸括弧で包まれている形（<c>await (A().ConfigureAwait(false))</c> /
+    /// <c>await(A().ConfigureAwait(false))</c>）は、括弧の内側の連鎖で判定する。
+    /// 深さ 0 だけを見ると内側の付与が見えず、正しい形を違反と誤検出する（Issue #2101 のコードレビューで
+    /// <c>await(</c> を検査対象に加えたのに伴う）。内側が単一の連鎖でない（三項演算子など）なら違反とみなす。
+    /// </remarks>
+    private static bool IsOperandChainConfigured(string source, int start, int end)
+    {
+        if (start < end && source[start] == '(')
+        {
+            var close = FindMatchingClose(source, start);
+            if (close >= 0 && close < end && SkipWhitespace(source, close + 1) >= end)
+            {
+                var innerStart = SkipWhitespace(source, start + 1);
+                var innerEnd = FindAwaitOperandEnd(source, innerStart);
+                return innerEnd <= close
+                    && SkipWhitespace(source, innerEnd) == close
+                    && IsOperandChainConfigured(source, innerStart, innerEnd);
+            }
+        }
+
+        return HasConfigureAwaitFalseAtDepthZero(source, start, end);
     }
 
     /// <summary>

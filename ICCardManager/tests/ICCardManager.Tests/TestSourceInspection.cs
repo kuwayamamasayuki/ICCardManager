@@ -1283,20 +1283,6 @@ internal static class TestSourceInspection
             .ToList();
 
     /// <summary>
-    /// <paramref name="index"/> の位置の式が、後で呼ぶために保持されるラムダの中にある
-    /// （＝その場では実行されない）かを返す。
-    /// </summary>
-    /// <remarks>
-    /// 式形式（<c>pending = () =&gt; Show()</c>）は呼び出しの直前で、ブロック形式
-    /// （<c>pending = () =&gt; { Show(); }</c>）は囲むラムダ本体の開始位置で判定する。
-    /// 多数の位置を判定するなら <see cref="ExtractHeldLambdaBlockBodies"/> を 1 回だけ求めて
-    /// <see cref="IsHeldLambdaHead"/> と組み合わせること。
-    /// </remarks>
-    public static bool IsInsideHeldLambda(string codeOnlySource, int index)
-        => IsHeldLambdaHead(codeOnlySource, index)
-           || ExtractHeldLambdaBlockBodies(codeOnlySource).Any(b => b.Start <= index && index <= b.End);
-
-    /// <summary>
     /// メソッド呼び出しの<b>引数リスト全体</b>を丸括弧の対応で切り出し、最上位のカンマで分割して返す。
     /// </summary>
     /// <remarks>
