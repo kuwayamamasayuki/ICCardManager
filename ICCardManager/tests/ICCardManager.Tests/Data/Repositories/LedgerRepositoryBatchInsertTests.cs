@@ -186,8 +186,12 @@ public class LedgerRepositoryBatchInsertTests : IDisposable
         var act = async () => await _repository.InsertDetailsAsync(invalidLedgerId, details);
         await act.Should().ThrowAsync<SQLiteException>();
 
-        // セマフォが解放されていないと、ここで実質ハングする。テスト全体のタイムアウトで失敗する。
-        using var scope = await _dbContext.BeginTransactionAsync();
+        // セマフォが解放されていないと、ここで待ち続ける。xUnit にはテスト単位の既定の
+        // タイムアウトが無いため、上限付きで待って失敗として報告する（Issue #2099）。
+        var beginTask = _dbContext.BeginTransactionAsync();
+        var winner = await Task.WhenAny(beginTask, Task.Delay(TimeSpan.FromSeconds(10)));
+        winner.Should().BeSameAs(beginTask, "例外の後もセマフォが解放され、次のトランザクションを開けること");
+        using var scope = await beginTask;
         scope.Should().NotBeNull();
     }
 }

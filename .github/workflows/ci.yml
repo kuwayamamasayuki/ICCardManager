@@ -20,8 +20,22 @@ env:
   DOTNET_CLI_TELEMETRY_OPTOUT: true
 
 jobs:
+  # テストは Release と Debug の両方で回す（Issue #2099）。#if DEBUG 側のテスト（Debug 構成でだけ
+  # コンパイルされる）は Release だけでは一度も実行されない。matrix の 2 ジョブは別ランナーで
+  # 並走するため、所要時間（壁時計）はほぼ増えない。
+  #
+  # ハングへの備えは二段で置く（Issue #2099）。--blame-hang-timeout は 1 件のテストが止まったとき
+  # そのテスト名を記録して実行を打ち切り、timeout-minutes はそれ以外（ビルドや復元の停止）を止める。
+  # どちらも無いと、デッドロックは「失敗」ではなくジョブの既定上限（6 時間）までの停止になる。
+  # 通常の所要時間は 1 ジョブ 6 分前後。
   build-and-test:
     runs-on: windows-latest
+    timeout-minutes: 30
+
+    strategy:
+      fail-fast: false
+      matrix:
+        configuration: [ Release, Debug ]
 
     defaults:
       run:
@@ -40,12 +54,19 @@ jobs:
       run: dotnet restore
 
     - name: Build
-      run: dotnet build --no-restore --configuration Release
+      run: dotnet build --no-restore --configuration ${{ matrix.configuration }}
 
     - name: Run tests
-      run: dotnet test --no-build --configuration Release --verbosity normal --filter "Category!=UI" --collect:"XPlat Code Coverage" --results-directory ./coverage
+      run: dotnet test --no-build --configuration ${{ matrix.configuration }} --verbosity normal --filter "Category!=UI" --blame-hang-timeout 5m --blame-hang-dump-type none --collect:"XPlat Code Coverage" --results-directory ./coverage
+
+    # UITests はソリューション単位の実行から自分を外している（csproj の BuildingSolutionFile 条件）ため、
+    # 上の「Run tests」には含まれない。GUI 不要のテスト（Category=UI を持たないもの）を回すには
+    # csproj を直接指定する必要がある（Issue #2099）。アプリを起動するテストは filter で除く。
+    - name: Run GUI-free tests in UITests project
+      run: dotnet test tests/ICCardManager.UITests/ICCardManager.UITests.csproj --no-build --configuration ${{ matrix.configuration }} --verbosity normal --filter "Category!=UI&Category!=Screenshot" --blame-hang-timeout 5m --blame-hang-dump-type none
 
     - name: Upload coverage reports
+      if: matrix.configuration == 'Release'
       uses: codecov/codecov-action@v7
       with:
         directory: ./ICCardManager/coverage
@@ -54,6 +75,7 @@ jobs:
 
   code-quality:
     runs-on: windows-latest
+    timeout-minutes: 30
 
     defaults:
       run:
@@ -81,25 +103,36 @@ jobs:
     #
     # -warnaserror は NU* / MSB* まで昇格させて CI を不安定にするため使わず、
     # コンパイラ警告行を数える方式にする。
+    #
+    # 規約は Release / Debug の双方で 0 警告を求める（#if DEBUG 側のコードは Release では
+    # コンパイルされず、その警告は Release のビルドには現れない。Issue #2099）。
+    # 構成ごとに出力を分けて数えるため、警告がどちらの構成で出たかがログから分かる。
     - name: Build with analyzers (ビルド警告ゼロを検証)
       shell: pwsh
       run: |
-        $output = dotnet build --no-restore --configuration Release --nologo 2>&1 | Out-String
-        Write-Host $output
-        if ($LASTEXITCODE -ne 0) {
-          Write-Host "::error::ビルドに失敗しました。"
-          exit $LASTEXITCODE
+        $total = 0
+        foreach ($configuration in @('Release', 'Debug')) {
+          $output = dotnet build --no-restore --configuration $configuration --nologo 2>&1 | Out-String
+          Write-Host $output
+          if ($LASTEXITCODE -ne 0) {
+            Write-Host "::error::$configuration 構成のビルドに失敗しました。"
+            exit $LASTEXITCODE
+          }
+
+          $warnings = @($output -split "`r?`n" |
+            Where-Object { $_ -match ': warning ' } |
+            ForEach-Object { $_.Trim() } |
+            Sort-Object -Unique)
+
+          if ($warnings.Count -gt 0) {
+            Write-Host "::error::$configuration 構成でビルド警告が $($warnings.Count) 件あります。宣言側を是正するか、やむを得ない場合は csproj の NoWarn へ理由コメント付きで追加してください（.claude/rules/development-conventions.md）。"
+            $warnings | ForEach-Object { Write-Host $_ }
+            $total += $warnings.Count
+          } else {
+            Write-Host "$configuration 構成: ビルド警告 0 件"
+          }
         }
 
-        $warnings = $output -split "`r?`n" |
-          Where-Object { $_ -match ': warning ' } |
-          ForEach-Object { $_.Trim() } |
-          Sort-Object -Unique
-
-        if ($warnings.Count -gt 0) {
-          Write-Host "::error::ビルド警告が $($warnings.Count) 件あります。宣言側を是正するか、やむを得ない場合は csproj の NoWarn へ理由コメント付きで追加してください（.claude/rules/development-conventions.md）。"
-          $warnings | ForEach-Object { Write-Host $_ }
+        if ($total -gt 0) {
           exit 1
         }
-
-        Write-Host "ビルド警告 0 件"

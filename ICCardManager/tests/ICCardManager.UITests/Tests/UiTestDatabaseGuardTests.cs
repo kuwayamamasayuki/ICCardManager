@@ -10,6 +10,8 @@ namespace ICCardManager.UITests.Tests
     /// UI テストが開発機の既存 DB を壊さないことの検証（Issue #2062）。
     /// アプリは起動せず、一時フォルダー上でファイルの退避・復元だけを検証する。
     /// GUI 不要のため Category=UI を付けず、CI でも実行される。
+    /// UITests はソリューション単位の実行から外れているため、CI は ci.yml の
+    /// 「Run GUI-free tests in UITests project」ステップで csproj を直接指定して実行する（Issue #2099）。
     /// </summary>
     /// <remarks>
     /// DB の中身は SQLite である必要がないため、ファイルごとに異なる文字列で「どの DB か」を識別する。

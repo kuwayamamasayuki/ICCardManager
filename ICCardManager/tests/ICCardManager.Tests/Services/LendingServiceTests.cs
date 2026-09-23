@@ -1855,17 +1855,20 @@ public class LendingServiceTests : IDisposable
         _cardRepositoryMock.Setup(x => x.UpdateLentStatusAsync(It.IsAny<string>(), It.IsAny<bool>(), It.IsAny<DateTime?>(), It.IsAny<string?>()))
             .ReturnsAsync(true);
 
-        // Act - 連続して10回の操作を実行（タイムアウトなし = デッドロックなし）
+        // Act - 連続して10回の操作を実行
         var tasks = Enumerable.Range(0, 10)
             .Select(_ => _service.LendAsync(TestStaffIdm, TestCardIdm))
             .ToList();
 
-        // 10秒以内に完了すればデッドロックなし
-        var completedInTime = await Task.WhenAll(tasks).ConfigureAwait(false);
+        // 上限付きで待つ（Issue #2099）。WhenAll をそのまま await すると、デッドロックは
+        // 「失敗」ではなくテストの停止になり、CI ではジョブの上限まで何も報告されない。
+        var allTask = Task.WhenAll(tasks);
+        var winner = await Task.WhenAny(allTask, Task.Delay(TimeSpan.FromSeconds(30)));
 
-        // Assert - 全ての操作が完了（デッドロックなし）
-        completedInTime.Should().NotBeNull();
-        completedInTime.Should().HaveCount(10);
+        // Assert - 全ての操作が時間内に完了（デッドロックなし）
+        winner.Should().BeSameAs(allTask, "連続した 10 回の LendAsync が 30 秒以内に完了すること（排他ロックの取り合いでデッドロックしない）");
+        var results = await allTask;
+        results.Should().HaveCount(10);
     }
 
     /// <summary>
