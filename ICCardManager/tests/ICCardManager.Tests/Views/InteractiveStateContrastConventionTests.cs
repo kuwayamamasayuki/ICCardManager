@@ -453,8 +453,7 @@ public class InteractiveStateContrastConventionTests
         // 既定の濃い文字が残って 3.39:1 になる。存在と所在（TargetName を持たない＝ボタン自身の
         // Foreground を書き換える）を見る。値の可読性は 無効時の塗りと文字が読めること が見る
         var triggers = XamlElementInspection.EnumerateElements(SharedTemplate(), "Trigger")
-            .Where(t => XamlElementInspection.GetAttribute(t.StartTag, "Property") == "IsEnabled"
-                        && XamlElementInspection.GetAttribute(t.StartTag, "Value") == "False")
+            .Where(t => IsDisabledTrigger(t.StartTag))
             .ToList();
 
         triggers.Should().ContainSingle("共有テンプレートに IsEnabled=False のトリガーが 1 つあること");
@@ -748,13 +747,37 @@ public class InteractiveStateContrastConventionTests
     }
 
     /// <summary>
+    /// <c>IsEnabled</c> が偽のときに成立する <c>&lt;Trigger&gt;</c> の開始タグか。
+    /// </summary>
+    /// <remarks>
+    /// XAML の bool 変換は大文字小文字を区別しない（<c>Value="false"</c> も同じ意味）。
+    /// <c>== "False"</c> で比べると、等価な書き換えで検査が赤になり（コードレビューで検出）、
+    /// 修正者を検査の除外へ誘導する（#1786）。所有者付き（<c>UIElement.IsEnabled</c>）も同じプロパティとして扱う。
+    /// </remarks>
+    private static bool IsDisabledTrigger(string startTag)
+        => XamlElementInspection.IsSetterFor(XamlElementInspection.GetAttribute(startTag, "Property"), "IsEnabled")
+           && string.Equals(
+               XamlElementInspection.GetAttribute(startTag, "Value")?.Trim(), "False", StringComparison.OrdinalIgnoreCase);
+
+    [Theory]
+    [InlineData(@"<Trigger Property=""IsEnabled"" Value=""False"">", true)]
+    [InlineData(@"<Trigger Property=""IsEnabled"" Value=""false"">", true)]
+    [InlineData(@"<Trigger Value='FALSE' Property='UIElement.IsEnabled'>", true)]
+    [InlineData(@"<Trigger Property=""IsEnabled"" Value=""True"">", false)]
+    [InlineData(@"<Trigger Property=""IsMouseOver"" Value=""False"">", false)]
+    [InlineData(@"<Trigger Property=""IsEnabledChanged"" Value=""False"">", false)]
+    public void 無効時のトリガーの判定が書き方の違いを取り違えないこと(string startTag, bool expected)
+    {
+        IsDisabledTrigger(startTag).Should().Be(expected);
+    }
+
+    /// <summary>
     /// 共有テンプレートの <c>IsEnabled=False</c> トリガーが揃える文字色のキー。
     /// </summary>
     private static string DisabledForegroundKey()
     {
         var key = XamlElementInspection.EnumerateElements(SharedTemplate(), "Trigger")
-            .Where(t => XamlElementInspection.GetAttribute(t.StartTag, "Property") == "IsEnabled"
-                        && XamlElementInspection.GetAttribute(t.StartTag, "Value") == "False")
+            .Where(t => IsDisabledTrigger(t.StartTag))
             .SelectMany(t => XamlElementInspection.EnumerateElements(t.Body, "Setter"))
             .Where(s => XamlElementInspection.IsSetterFor(
                 XamlElementInspection.GetAttribute(s.StartTag, "Property"), "Foreground"))

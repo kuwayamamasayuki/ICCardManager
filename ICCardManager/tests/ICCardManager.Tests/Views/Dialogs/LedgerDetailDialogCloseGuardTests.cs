@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Text.RegularExpressions;
@@ -154,6 +155,35 @@ public class LedgerDetailDialogCloseGuardTests
     }
 
     /// <summary>
+    /// 否定の判定と分岐の本体の抽出が、書き方の違い（波括弧なし・<c>is false</c>・<c>== false</c>・二重否定）を取り違えないこと。
+    /// </summary>
+    /// <remarks>
+    /// コードレビューで検出: 旧版は波括弧なしの <c>if (…) e.Cancel = true;</c> と <c>is false</c> を違反と誤検出し（赤）、
+    /// 二重否定の <c>!x.CanClose(c) == false</c>（＝否定ではない）を通していた。誤検出は修正者を検査の除外へ、
+    /// 見逃しは反転した実装の通過へつながるので、両方向を対で固定する。
+    /// </remarks>
+    [Theory]
+    [InlineData("if (!_viewModel.CanClose(Confirm)) { e.Cancel = true; }", true)]
+    [InlineData("if (!_viewModel.CanClose(Confirm)) e.Cancel = true;", true)]
+    [InlineData("if (_viewModel.CanClose(Confirm) is false) { e.Cancel = true; }", true)]
+    [InlineData("if (_viewModel.CanClose(Confirm) == false) e.Cancel = true;", true)]
+    [InlineData("if (_viewModel?.CanClose(() => Confirm()) != true) { e.Cancel = true; }", true)]
+    [InlineData("if (_viewModel.CanClose(Confirm)) { e.Cancel = true; }", false)]
+    [InlineData("if (!_viewModel.CanClose(Confirm) == false) { e.Cancel = true; }", false)]
+    [InlineData("if (!!_viewModel.CanClose(Confirm)) e.Cancel = true;", false)]
+    [InlineData("if (_viewModel.CanClose(Confirm) is true) { e.Cancel = true; }", false)]
+    public void CanCloseの否定の判定が書き方の違いを取り違えないこと(string guard, bool expectedNegated)
+    {
+        var source = "class C { protected override void OnClosing(CancelEventArgs e) { base.OnClosing(e); "
+                     + guard + " } }";
+        var (condition, block) = FindCanCloseGuard(ExtractMethodBodyFrom(source, "protected override void OnClosing"));
+
+        IsNegatedCanClose(condition).Should().Be(expectedNegated, "条件: " + condition);
+        Regex.IsMatch(block, @"\be\.Cancel\s*=\s*true\s*;").Should().BeTrue(
+            "波括弧の有無にかかわらず分岐の本体を取り出すこと。本体: " + block);
+    }
+
+    /// <summary>
     /// CloseButton_Click が確認ダイアログを直接出さないこと（確認は OnClosing に一元化）。
     /// </summary>
     [Fact]
@@ -272,22 +302,107 @@ public class LedgerDetailDialogCloseGuardTests
         => XamlElementInspection.GetAttribute(element, attributeName);
 
     /// <summary>
-    /// <c>CanClose(</c> を条件に持つ <c>if</c> をちょうど 1 つ見つけ、その条件と本体（波括弧の内側）を返す。
+    /// <c>CanClose(</c> を条件に持つ <c>if</c> をちょうど 1 つ見つけ、その条件と本体を返す。
+    /// 本体は波括弧の内側、波括弧が無ければ直後の 1 文（<c>;</c> まで）。
     /// </summary>
+    /// <remarks>
+    /// 条件は括弧の対応を数えて切り出す（<c>CanClose(() =&gt; Confirm())</c> のように条件の中に括弧があっても
+    /// 途中で切れない）。波括弧なしの本体を読めないと、規約どおりの書き換えで赤になる（コードレビューで検出）。
+    /// </remarks>
     private static (string Condition, string Block) FindCanCloseGuard(string codeOnlyBody)
     {
-        var guards = Regex.Matches(codeOnlyBody, @"\bif\s*\((?<cond>[^{}]*?)\)\s*\{(?<block>[^{}]*)\}")
-            .Cast<Match>()
-            .Where(m => m.Groups["cond"].Value.Contains(".CanClose("))
-            .ToList();
+        var guards = new List<(string Condition, string Block)>();
+        foreach (Match m in Regex.Matches(codeOnlyBody, @"\bif\s*\("))
+        {
+            var conditionStart = m.Index + m.Length;
+            var conditionEnd = FindClosing(codeOnlyBody, conditionStart - 1, '(', ')');
+            if (conditionEnd < 0)
+            {
+                continue;
+            }
+
+            var condition = codeOnlyBody.Substring(conditionStart, conditionEnd - conditionStart);
+            if (!condition.Contains(".CanClose("))
+            {
+                continue;
+            }
+
+            var bodyStart = conditionEnd + 1;
+            while (bodyStart < codeOnlyBody.Length && char.IsWhiteSpace(codeOnlyBody[bodyStart]))
+            {
+                bodyStart++;
+            }
+
+            string block;
+            if (bodyStart < codeOnlyBody.Length && codeOnlyBody[bodyStart] == '{')
+            {
+                var blockEnd = FindClosing(codeOnlyBody, bodyStart, '{', '}');
+                block = blockEnd < 0 ? string.Empty : codeOnlyBody.Substring(bodyStart + 1, blockEnd - bodyStart - 1);
+            }
+            else
+            {
+                var statementEnd = codeOnlyBody.IndexOf(';', bodyStart);
+                block = statementEnd < 0 ? string.Empty : codeOnlyBody.Substring(bodyStart, statementEnd - bodyStart + 1);
+            }
+
+            guards.Add((condition, block));
+        }
 
         guards.Should().HaveCount(1,
             "OnClosing には CanClose を条件に持つ if がちょうど 1 つある（破棄確認は 1 か所に一元化する。Issue #1743）");
-        return (guards[0].Groups["cond"].Value, guards[0].Groups["block"].Value);
+        return guards[0];
     }
 
-    /// <summary>条件が <c>CanClose(…)</c> の否定（<c>!x.CanClose(…)</c> / <c>x.CanClose(…) == false</c>）を含むか。</summary>
+    /// <summary><paramref name="open"/> の位置の開き括弧に対応する閉じ括弧の位置。見つからなければ -1。</summary>
+    private static int FindClosing(string text, int open, char openChar, char closeChar)
+    {
+        var depth = 0;
+        for (var i = open; i < text.Length; i++)
+        {
+            if (text[i] == openChar)
+            {
+                depth++;
+            }
+            else if (text[i] == closeChar && --depth == 0)
+            {
+                return i;
+            }
+        }
+
+        return -1;
+    }
+
+    /// <summary>
+    /// 条件の中の <c>CanClose(…)</c> が、否定として評価されるか。
+    /// </summary>
+    /// <remarks>
+    /// 前置の <c>!</c> の個数と、後置の比較（<c>== false</c> / <c>is false</c> / <c>!= true</c> は否定、
+    /// <c>== true</c> / <c>is true</c> / <c>!= false</c> は否定しない）を数え、否定の回数が奇数なら否定とする。
+    /// <c>!x.CanClose(c) == false</c> は <c>(!x.CanClose(c)) == false</c> と評価されるので二重否定（否定ではない）。
+    /// </remarks>
     private static bool IsNegatedCanClose(string condition)
-        => Regex.IsMatch(condition, @"!\s*[\w?.]*\.CanClose\(")
-           || Regex.IsMatch(condition, @"\.CanClose\([^()]*\)\s*==\s*false\b");
+    {
+        var call = Regex.Match(condition, @"(?<bangs>(?:!\s*)*)[\w?.]*\.CanClose\(");
+        if (!call.Success)
+        {
+            return false;
+        }
+
+        var negations = call.Groups["bangs"].Value.Count(c => c == '!');
+        var argumentsEnd = FindClosing(condition, call.Index + call.Length - 1, '(', ')');
+        if (argumentsEnd < 0)
+        {
+            return false;
+        }
+
+        var comparison = Regex.Match(
+            condition.Substring(argumentsEnd + 1),
+            @"^\s*(?:(?<negate>==\s*false|is\s+false|!=\s*true)|==\s*true|is\s+true|!=\s*false)\b");
+        if (comparison.Groups["negate"].Success)
+        {
+            negations++;
+        }
+
+        return negations % 2 == 1;
+    }
 }

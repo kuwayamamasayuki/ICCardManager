@@ -215,19 +215,60 @@ private void PositionToast()
                 "コメント・マニュアルが「既定は右上」と説明しているため（Issue #1697）");
     }
 
+    /// <summary>
+    /// 既存の DB に保存されている表示位置の文字列。<b>本体から導出せずリテラルで固定する</b>。
+    /// </summary>
+    /// <remarks>
+    /// 保存と読み込みの往復だけを見ると、両方向の書式を一貫して入れ替えても緑になる（コードレビューで検出）。
+    /// そうなると、既に DB に入っている値（例: 利用者が左下を選んで保存した <c>bottom_left</c>）が
+    /// 別の隅として読まれる（または読めずに右上へ倒れる）。保存値は既存 DB との互換の契約なので、
+    /// 変えるならマイグレーションと併せて変える。
+    /// </remarks>
+    private static readonly Dictionary<ToastPosition, string> StoredToastPositionLiterals = new()
+    {
+        [ToastPosition.TopRight] = "top_right",
+        [ToastPosition.TopLeft] = "top_left",
+        [ToastPosition.BottomRight] = "bottom_right",
+        [ToastPosition.BottomLeft] = "bottom_left",
+    };
+
     [Fact]
     public void SettingsRepository_should_round_trip_every_ToastPosition_value()
     {
-        var stored = new List<string>();
-        foreach (ToastPosition position in Enum.GetValues(typeof(ToastPosition)))
-        {
-            var text = InvokeSettingsRepositoryConverter<string>("ToastPositionToString", position);
-            stored.Add(text);
-            InvokeSettingsRepositoryConverter<ToastPosition>("ParseToastPosition", text)
-                .Should().Be(position, $"保存した「{text}」を読み込むと元の位置へ戻る");
-        }
+        StoredToastPositionLiterals.Keys.Should().BeEquivalentTo(
+            Enum.GetValues(typeof(ToastPosition)).Cast<ToastPosition>(),
+            "表示位置を足したら、既存 DB との互換を考えたうえで保存値をここへ足す");
 
-        stored.Should().OnlyHaveUniqueItems("位置ごとに別の値として保存されなければ、読み込みで区別できない");
+        foreach (var entry in StoredToastPositionLiterals)
+        {
+            InvokeSettingsRepositoryConverter<string>("ToastPositionToString", entry.Key)
+                .Should().Be(entry.Value, $"{entry.Key} は既存の DB と同じ「{entry.Value}」で保存される");
+            InvokeSettingsRepositoryConverter<ToastPosition>("ParseToastPosition", entry.Value)
+                .Should().Be(entry.Key, $"既存の DB の「{entry.Value}」は {entry.Key} として読まれる");
+        }
+    }
+
+    /// <summary>
+    /// 範囲外の値（<c>default:</c> 節）が右上（既定）へ配置されること。
+    /// </summary>
+    /// <remarks>
+    /// <see cref="PositionToast_should_place_each_ToastPosition_value_at_its_own_corner"/> は名前の付いた
+    /// 4 つの case しか見ない（コードレビューで検出）。<c>(ToastPosition)99</c> のような値や、将来の
+    /// メンバーの追加で case を書き忘れた値の置き場所は <c>default:</c> が決めるので、そこも既定と同じ隅であることを表明する。
+    /// </remarks>
+    [Fact]
+    public void PositionToast_should_place_out_of_range_value_at_TopRight()
+    {
+        var sections = ExtractPositionToastSections();
+
+        sections.Should().ContainKey("default", "範囲外の値の置き場所を default: で決めていること");
+        var left = GetSingleAssignment(sections["default"], "Left");
+        var top = GetSingleAssignment(sections["default"], "Top");
+
+        left.Should().NotBeNull("default: の節が自分の座標計算を持つこと");
+        top.Should().NotBeNull("default: の節が自分の座標計算を持つこと");
+        left!.Should().Contain("workArea.Right", "範囲外の値は既定（右上）と同じ右端へ置く（Issue #1697）");
+        top!.Should().Contain("workArea.Top", "範囲外の値は既定（右上）と同じ上端へ置く（Issue #1697）");
     }
 
     [Fact]

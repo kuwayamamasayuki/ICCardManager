@@ -119,29 +119,35 @@ public class ForegroundContrastConventionTests
     /// <para>
     /// <b>組の単位で固定する（ファイル単位にしない）</b>。ファイルごと許すと、同じ画面に
     /// 新しい違反が入っても緑になる。行番号は含めない（無関係な編集で行がずれるたびに赤くなる）。
-    /// 解消したら <see cref="既知の地色との組の違反がまだ残っていること"/> が赤くなり、外すよう促す。
+    /// </para>
+    /// <para>
+    /// <b>件数で固定する</b>（コードレビューで検出。<c>ColorLiteralSingleSourceOfTruthTests</c> の許可リストと同じ方針）。
+    /// 組の集合だけで持つと、同じ画面に同じ組を増やしても緑になり、一部だけ直しても陳腐化を検出できない。
+    /// 件数は「その組を作る要素の数」で、増えれば
+    /// <see cref="文字色は実際に載る地色に対して4対5対1以上のコントラストを持つこと"/> が、減れば
+    /// <see cref="既知の地色との組の違反がまだ残っていること"/> が赤くなる（実数との完全一致）。
     /// </para>
     /// </remarks>
-    private static readonly HashSet<(string File, string ForegroundKey, string BackgroundKey)> KnownSurfaceViolations = new()
+    private static readonly Dictionary<(string File, string ForegroundKey, string BackgroundKey), int> KnownSurfaceViolations = new()
     {
         // Issue #2109: 明細のグループバッジ（白文字 on #388E3C = 4.12:1、on #F57C00 = 2.70:1）
-        ("LedgerDetailDialog.xaml", "OnPrimaryBrush", "LedgerGroupBadge2Brush"),
-        ("LedgerDetailDialog.xaml", "OnPrimaryBrush", "LedgerGroupBadge3Brush"),
+        [("LedgerDetailDialog.xaml", "OnPrimaryBrush", "LedgerGroupBadge2Brush")] = 1,
+        [("LedgerDetailDialog.xaml", "OnPrimaryBrush", "LedgerGroupBadge3Brush")] = 1,
 
         // Issue #2109: エラー表示の枠（DangerTextBrush #D32F2F on ErrorBackgroundBrush #FFEBEE = 4.36:1）
-        ("CardTypeSelectionDialog.xaml", "DangerTextBrush", "ErrorBackgroundBrush"),
-        ("DataExportImportDialog.xaml", "DangerTextBrush", "ErrorBackgroundBrush"),
-        ("SystemManageDialog.xaml", "DangerTextBrush", "ErrorBackgroundBrush"),
+        [("CardTypeSelectionDialog.xaml", "DangerTextBrush", "ErrorBackgroundBrush")] = 1,
+        [("DataExportImportDialog.xaml", "DangerTextBrush", "ErrorBackgroundBrush")] = 1,
+        [("SystemManageDialog.xaml", "DangerTextBrush", "ErrorBackgroundBrush")] = 1,
 
         // Issue #2109 の追記候補（#2102 で検査を広げて見つかった。#2109 の本文には未記載）:
         // 返却系の淡い青の地色（ReturnBackgroundBrush #E3F2FD）の上の補足文字（#6E6E6E = 4.46:1）と
         // メイン画面のデバッグ用パネルの [DEBUG] 表示（#D32F2F = 4.36:1）
-        ("ConnectionDiagnosticsDialog.xaml", "SecondaryTextBrush", "ReturnBackgroundBrush"),
-        ("LedgerDetailDialog.xaml", "SecondaryTextBrush", "ReturnBackgroundBrush"),
-        ("MainWindow.xaml", "SecondaryTextBrush", "ReturnBackgroundBrush"),
-        ("OperationLogDialog.xaml", "SecondaryTextBrush", "ReturnBackgroundBrush"),
-        ("TransferStationGroupDialog.xaml", "SecondaryTextBrush", "ReturnBackgroundBrush"),
-        ("MainWindow.xaml", "DangerTextBrush", "ReturnBackgroundBrush"),
+        [("ConnectionDiagnosticsDialog.xaml", "SecondaryTextBrush", "ReturnBackgroundBrush")] = 1,
+        [("LedgerDetailDialog.xaml", "SecondaryTextBrush", "ReturnBackgroundBrush")] = 2,
+        [("MainWindow.xaml", "SecondaryTextBrush", "ReturnBackgroundBrush")] = 3,
+        [("OperationLogDialog.xaml", "SecondaryTextBrush", "ReturnBackgroundBrush")] = 1,
+        [("TransferStationGroupDialog.xaml", "SecondaryTextBrush", "ReturnBackgroundBrush")] = 2,
+        [("MainWindow.xaml", "DangerTextBrush", "ReturnBackgroundBrush")] = 1,
     };
 
     #region 検査
@@ -264,41 +270,53 @@ public class ForegroundContrastConventionTests
         // （エラー表示の ErrorBackgroundBrush、グループバッジの色）の上に載る文字を見ていなかった。
         // 要素木をたどって「文字色 × 実際の地色」の組を作り、色値で測る。
         // 既知の違反（Issue #2109 で起票済み・未解決）は許可リストで固定し、それ以外の違反は赤にする
-        var violations = SurfaceViolations();
-
-        var unexpected = violations
-            .Where(v => !KnownSurfaceViolations.Contains((v.File, v.ForegroundKey, v.BackgroundKey)))
-            .Select(v => v.Describe())
+        // 件数を超えた分は、同じ組でも新しい違反として報告する（組の集合で許すと、同じ画面に同じ組を足しても緑）
+        var unexpected = SurfaceViolations()
+            .GroupBy(v => (v.File, v.ForegroundKey, v.BackgroundKey))
+            .Where(g => !KnownSurfaceViolations.TryGetValue(g.Key, out var allowed) || g.Count() > allowed)
+            .SelectMany(g => g.Select(v => v.Describe()
+                + (KnownSurfaceViolations.TryGetValue(g.Key, out var allowed)
+                    ? string.Format(CultureInfo.InvariantCulture, "（許可リストは {0} 件、実数は {1} 件）", allowed, g.Count())
+                    : string.Empty)))
             .ToList();
 
+        // 件数で比べるので、違反は 1 件目だけでなく全件を示す（FluentAssertions は先頭しか表示しない）
         unexpected.Should().BeEmpty(
             "文字色はその文字が載る地色に対して {0}:1 以上必要（Issue #2074 / #2102）。"
-                + "地色を変えずに文字色だけを差し替えると、別の地色の上で読めなくなることがある",
-            MinContrast);
+                + "地色を変えずに文字色だけを差し替えると、別の地色の上で読めなくなることがある:\n{1}",
+            MinContrast,
+            string.Join("\n", unexpected));
     }
 
     [Fact]
     public void 既知の地色との組の違反がまだ残っていること()
     {
-        // 許可リストの陳腐化検出。Issue #2109 で配色を直したら、該当する行を許可リストから外すこと
+        // 許可リストの陳腐化検出。Issue #2109 で配色を直したら、該当する行の件数を減らす（0 なら外す）こと
         // （残しておくと、同じ組が再び入っても検査が緑になる）
-        var violations = SurfaceViolations()
-            .Select(v => (v.File, v.ForegroundKey, v.BackgroundKey))
-            .ToList();
+        var actual = SurfaceViolations()
+            .GroupBy(v => (v.File, v.ForegroundKey, v.BackgroundKey))
+            .ToDictionary(g => g.Key, g => g.Count());
 
         KnownSurfaceViolations.Should().NotBeEmpty(
             "許可リストが空になったら、このテストごと削除してよい（Issue #2109 の解消）");
-        foreach (var known in KnownSurfaceViolations)
-        {
-            violations.Should().Contain(
-                known,
-                "許可リストの {0} の {1} on {2} は、まだ {3}:1 未満のはず。"
-                    + "解消されたなら許可リストから外すこと（Issue #2109）",
-                known.File,
-                known.ForegroundKey,
-                known.BackgroundKey,
-                MinContrast);
-        }
+
+        var stale = KnownSurfaceViolations
+            .Where(kv => !actual.TryGetValue(kv.Key, out var count) || count < kv.Value)
+            .Select(kv => string.Format(
+                CultureInfo.InvariantCulture,
+                "{0} の {1} on {2}: 許可リストは {3} 件、実数は {4} 件",
+                kv.Key.File,
+                kv.Key.ForegroundKey,
+                kv.Key.BackgroundKey,
+                kv.Value,
+                actual.TryGetValue(kv.Key, out var count) ? count : 0))
+            .ToList();
+
+        stale.Should().BeEmpty(
+            "許可リストの違反が減っている（{0}:1 以上へ是正された）。許可リストの件数を実数へ減らし、"
+                + "0 件になった行は外すこと（Issue #2109）:\n{1}",
+            MinContrast,
+            string.Join("\n", stale));
     }
 
     [Fact]
@@ -324,6 +342,12 @@ public class ForegroundContrastConventionTests
                  && p.BackgroundKey.StartsWith("LedgerGroupBadge", StringComparison.Ordinal),
             "同じ条件で切り替わる塗りと文字色は、同時に起こる組だけを作ること"
                 + "（未所属の灰色の文字は色付きのバッジの上には載らない）");
+        pairs.Should().Contain(
+            p => p.File == "AdminDashboardDialog.xaml"
+                 && p.ForegroundKey == "SecondaryTextBrush"
+                 && p.BackgroundKey == "NeutralBackgroundBrush",
+            "キー付きのスタイル（サマリータイルの SummaryTileStyle）が決める塗りの上の組が作られること"
+                + "（Style 属性を見た時点で打ち切る形へ戻ると消える）");
 
         // 測らない・緩める組は、その理由が実在する範囲に留まっていること
         var brushes = AccessibilityBrushes.Load();
@@ -555,7 +579,7 @@ private void Apply(bool isError)
     <TextBlock Foreground=""{DynamicResource NoSurface}""/>
 </Grid>";
 
-        XamlSurfacePairs.Collect("sample.xaml", Xaml).Pairs
+        XamlSurfacePairs.Collect("sample.xaml", Xaml, XamlSurfacePairs.NoSharedStyles).Pairs
             .Select(p => (p.ForegroundKey, p.BackgroundKey))
             .Should().BeEquivalentTo(
                 new[] { ("ThroughTransparent", "PanelBrush") },
@@ -597,7 +621,7 @@ private void Apply(bool isError)
     </TextBlock>
 </Border>";
 
-        XamlSurfacePairs.Collect("sample.xaml", Xaml).Pairs
+        XamlSurfacePairs.Collect("sample.xaml", Xaml, XamlSurfacePairs.NoSharedStyles).Pairs
             .Select(p => (p.ForegroundKey, p.BackgroundKey))
             .Should().BeEquivalentTo(new[] { ("OnBadge", "Badge1"), ("OnBadge", "Badge2") });
     }
@@ -621,9 +645,158 @@ private void Apply(bool isError)
     </TextBlock>
 </Border>";
 
-        XamlSurfacePairs.Collect("sample.xaml", Xaml).Pairs
+        XamlSurfacePairs.Collect("sample.xaml", Xaml, XamlSurfacePairs.NoSharedStyles).Pairs
             .Select(p => (p.ForegroundKey, p.BackgroundKey))
             .Should().BeEquivalentTo(new[] { ("Local", "Panel") });
+    }
+
+    [Fact]
+    public void キー付きのスタイルを解決してから塗りと文字色を読むこと()
+    {
+        // コードレビューで検出: Style="{StaticResource …}" を見た時点で「確かめられない」と打ち切っていたため、
+        // 共有のエラー枠スタイル（ErrorStatusStyle）の上に DangerTextBrush を載せても組が作られなかった
+        const string SharedDictionary = @"
+<ResourceDictionary xmlns=""http://schemas.microsoft.com/winfx/2006/xaml/presentation""
+                    xmlns:x=""http://schemas.microsoft.com/winfx/2006/xaml"">
+    <Style x:Key=""IndicatorStyle"" TargetType=""Border"">
+        <Setter Property=""Padding"" Value=""8""/>
+    </Style>
+    <Style x:Key=""ErrorFrameStyle"" TargetType=""Border"" BasedOn=""{StaticResource IndicatorStyle}"">
+        <Setter Property=""Background"" Value=""{StaticResource ErrorSurface}""/>
+    </Style>
+    <Style x:Key=""DerivedFrameStyle"" TargetType=""Border"" BasedOn=""{StaticResource ErrorFrameStyle}"">
+        <Setter Property=""Margin"" Value=""4""/>
+    </Style>
+</ResourceDictionary>";
+
+        const string Xaml = @"
+<Grid xmlns=""http://schemas.microsoft.com/winfx/2006/xaml/presentation""
+      xmlns:x=""http://schemas.microsoft.com/winfx/2006/xaml"">
+    <Grid.Resources>
+        <Style x:Key=""LocalTextStyle"" TargetType=""TextBlock"">
+            <Setter Property=""Foreground"" Value=""{DynamicResource FromLocalStyle}""/>
+        </Style>
+    </Grid.Resources>
+    <Border Style=""{StaticResource ErrorFrameStyle}"">
+        <TextBlock Foreground=""{DynamicResource OnSharedStyle}""/>
+    </Border>
+    <Border Style=""{StaticResource DerivedFrameStyle}"">
+        <TextBlock Foreground=""{DynamicResource ThroughBasedOn}""/>
+    </Border>
+    <Border Background=""{DynamicResource Panel}"">
+        <TextBlock Style=""{StaticResource LocalTextStyle}""/>
+    </Border>
+    <Border Style=""{StaticResource DefinedElsewhere}"">
+        <TextBlock Foreground=""{DynamicResource UnderUnresolved}""/>
+    </Border>
+</Grid>";
+
+        XamlSurfacePairs.Collect("sample.xaml", Xaml, XamlSurfacePairs.LoadKeyedStyles(SharedDictionary)).Pairs
+            .Select(p => (p.ForegroundKey, p.BackgroundKey))
+            .Should().BeEquivalentTo(
+                new[]
+                {
+                    ("OnSharedStyle", "ErrorSurface"),
+                    ("ThroughBasedOn", "ErrorSurface"),
+                    ("FromLocalStyle", "Panel"),
+                },
+                "共有のスタイル辞書・BasedOn・同じファイルの中のスタイルを解決し、"
+                    + "解決できないスタイルの上では組を作らないこと");
+    }
+
+    [Fact]
+    public void 継承した文字色が内側の別の塗りに載る組を作ること()
+    {
+        // コードレビューで検出: 文字色を決めた要素から祖先へしか辿らなかったため、白文字を決めた枠の
+        // 内側に淡い塗りの枠があっても組が作られなかった（白文字 on #FFEBEE が緑）
+        const string Xaml = @"
+<Grid xmlns=""http://schemas.microsoft.com/winfx/2006/xaml/presentation"">
+    <Border Background=""{DynamicResource Primary}"" TextElement.Foreground=""{DynamicResource OnPrimary}"">
+        <StackPanel>
+            <Border Background=""{DynamicResource ErrorSurface}"">
+                <TextBlock Text=""内側の塗りの上""/>
+            </Border>
+            <TextBlock Text=""外側の塗りの上""/>
+            <Button Background=""{DynamicResource ButtonSurface}"">
+                <TextBlock Text=""テーマが文字色を決め直す""/>
+            </Button>
+            <Border Background=""{DynamicResource ErrorSurface}"">
+                <TextBlock Foreground=""{DynamicResource OwnForeground}""/>
+            </Border>
+        </StackPanel>
+    </Border>
+    <Border Background=""{DynamicResource NoForegroundAbove}"">
+        <TextBlock Text=""継承する文字色が無い""/>
+    </Border>
+</Grid>";
+
+        XamlSurfacePairs.Collect("sample.xaml", Xaml, XamlSurfacePairs.NoSharedStyles).Pairs
+            .Select(p => (p.ForegroundKey, p.BackgroundKey))
+            .Should().BeEquivalentTo(
+                new[]
+                {
+                    // 文字色を決めた枠自身の組（従来どおり）
+                    ("OnPrimary", "Primary"),
+                    // 継承した文字色 × 内側の塗り
+                    ("OnPrimary", "ErrorSurface"),
+                    // 自分で文字色を決めた TextBlock は従来の経路で組になる
+                    ("OwnForeground", "ErrorSurface"),
+                },
+                "継承した文字色は内側の塗りとも組にし、テーマが文字色を決め直す要素（Button）を越えた継承・"
+                    + "継承する文字色が無い文字では組を作らないこと");
+    }
+
+    [Fact]
+    public void 要素で書いた塗りと文字色は解釈せずに組を作らないこと()
+    {
+        // コードレビューで検出: <Setter.Value> の中身を「値が無い＝透明」と読み、塗られている面を
+        // 素通りして祖先の塗りと誤った組を作っていた。確かめられない値は組を作らない側へ倒す
+        const string Xaml = @"
+<Border xmlns=""http://schemas.microsoft.com/winfx/2006/xaml/presentation"" Background=""{DynamicResource Panel}"">
+    <StackPanel>
+        <Border>
+            <Border.Style>
+                <Style TargetType=""Border"">
+                    <Setter Property=""Background"">
+                        <Setter.Value>
+                            <SolidColorBrush Color=""{DynamicResource SomeColor}""/>
+                        </Setter.Value>
+                    </Setter>
+                </Style>
+            </Border.Style>
+            <TextBlock Foreground=""{DynamicResource UnderSetterValue}""/>
+        </Border>
+        <Border>
+            <Border.Background>
+                <SolidColorBrush Color=""{DynamicResource SomeColor}""/>
+            </Border.Background>
+            <TextBlock Foreground=""{DynamicResource UnderPropertyElement}""/>
+        </Border>
+        <TextBlock>
+            <TextBlock.Style>
+                <Style TargetType=""TextBlock"">
+                    <Style.Triggers>
+                        <Trigger Property=""IsMouseOver"" Value=""True"">
+                            <Setter Property=""Foreground"">
+                                <Setter.Value>
+                                    <SolidColorBrush Color=""{DynamicResource SomeColor}""/>
+                                </Setter.Value>
+                            </Setter>
+                        </Trigger>
+                    </Style.Triggers>
+                </Style>
+            </TextBlock.Style>
+        </TextBlock>
+        <TextBlock Foreground=""{DynamicResource Plain}""/>
+    </StackPanel>
+</Border>";
+
+        XamlSurfacePairs.Collect("sample.xaml", Xaml, XamlSurfacePairs.NoSharedStyles).Pairs
+            .Select(p => (p.ForegroundKey, p.BackgroundKey))
+            .Should().BeEquivalentTo(
+                new[] { ("Plain", "Panel") },
+                "Setter.Value・プロパティ要素で書いた値は解釈せず、その要素を起点にした組を作らないこと"
+                    + "（素直に書いた隣の文字は従来どおり組になる）");
     }
 
     #endregion
@@ -635,10 +808,18 @@ private void Apply(bool isError)
     {
         var pairs = new List<XamlSurfacePairs.SurfacePair>();
         var tooComplex = new List<string>();
+        var files = FillForegroundPairs.EnumerateProductionXaml().ToList();
 
-        foreach (var (name, text) in FillForegroundPairs.EnumerateProductionXaml())
+        // 画面が Style="{StaticResource …}" で参照する共有スタイルを解決できるようにする（コードレビューで検出）
+        var styleDictionaries = files.Where(f => f.Name == "AccessibilityStyles.xaml").ToList();
+        styleDictionaries.Should().ContainSingle("共有スタイルの辞書 AccessibilityStyles.xaml が走査対象に 1 つあること");
+        var sharedStyles = XamlSurfacePairs.LoadKeyedStyles(styleDictionaries[0].Text);
+        sharedStyles.Should().ContainKey("ErrorStatusStyle", "共有のエラー枠スタイルを解決先として読めていること");
+        sharedStyles["ErrorStatusStyle"].Should().NotBeNull("キーが一意に解決できること");
+
+        foreach (var (name, text) in files)
         {
-            var result = XamlSurfacePairs.Collect(name, text);
+            var result = XamlSurfacePairs.Collect(name, text, sharedStyles);
             pairs.AddRange(result.Pairs);
             tooComplex.AddRange(result.TooComplex);
         }

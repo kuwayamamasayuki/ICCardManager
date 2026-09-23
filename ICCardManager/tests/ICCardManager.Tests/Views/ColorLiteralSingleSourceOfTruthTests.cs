@@ -47,9 +47,11 @@ public class ColorLiteralSingleSourceOfTruthTests
 
     /// <summary>
     /// 属性値として書かれた色値リテラル（<c>Foo="#RGB"</c>〜<c>Foo="#AARRGGBB"</c>）。
+    /// 単引用符（<c>Foo='#RGB'</c>）も受ける — XAML はどちらも合法で、二重引用符だけを見ると書き方の違いで素通りする
+    /// （コードレビューで検出）。
     /// </summary>
     private static readonly Regex ColorLiteralPattern =
-        new Regex("[A-Za-z0-9_.:]+\\s*=\\s*\"#[0-9A-Fa-f]{3,8}\"", RegexOptions.Compiled);
+        new Regex("[A-Za-z0-9_.:]+\\s*=\\s*(?:\"#[0-9A-Fa-f]{3,8}\"|'#[0-9A-Fa-f]{3,8}')", RegexOptions.Compiled);
 
     /// <summary>
     /// 名前付きの色として扱う名前（<see cref="System.Windows.Media.Colors"/> のプロパティ名）。
@@ -123,14 +125,8 @@ public class ColorLiteralSingleSourceOfTruthTests
             10, "Views 配下の XAML 走査が空振りしていないこと");
 
         var violations = xamlFiles
-            // コメントは除去する。「色値リテラルを直書きしない」という規約の理由を述べたコメント自体が
-            // 違反として検出される極性の反転を避けるため（#1692）。除去は共有ヘルパーへ寄せる（Issue #2102）
-            .Select(path => (Path: path, Text: XamlElementInspection.StripXmlComments(File.ReadAllText(path))))
-            // Color="#..." だけでなく Background / Foreground / BorderBrush 等、
-            // ブラシを取りうる全属性の色値リテラルを対象にする
-            // （検査を Color= に絞ると、より一般的な Background="#FFF3E0" の形が素通りする）。
-            .Where(f => ColorLiteralPattern.IsMatch(f.Text))
-            .Select(f => Path.GetFileName(f.Path))
+            .Where(path => ContainsHexColorLiteral(File.ReadAllText(path)))
+            .Select(path => Path.GetFileName(path))
             .ToList();
 
         violations.Should().BeEmpty(
@@ -210,6 +206,62 @@ public class ColorLiteralSingleSourceOfTruthTests
                 },
                 "色を取る属性（添付プロパティ・Setter を含む）の色名だけを拾い、"
                     + "Transparent・色を取らない属性・トリガーの条件値・コメントは拾わないこと");
+    }
+
+    [Fact]
+    public void 名前付きの色の検出が要素の本体に書いた色も拾うこと()
+    {
+        // コードレビューで検出: 開始タグの属性しか見ていなかったため、同じ色をプロパティ要素・
+        // Setter.Value の本体テキストで書くと素通りした（WPF の BrushConverter はどちらも受け付ける）
+        const string Xaml = @"
+<Grid>
+    <TextBlock>
+        <TextBlock.Foreground>Orange</TextBlock.Foreground>
+    </TextBlock>
+    <Setter Property=""Background"">
+        <Setter.Value>Red</Setter.Value>
+    </Setter>
+    <Setter Property=""Text"">
+        <Setter.Value>Blue</Setter.Value>
+    </Setter>
+    <Color x:Key=""LocalColor"">Purple</Color>
+    <TextBlock>
+        <TextBlock.Text>Green</TextBlock.Text>
+    </TextBlock>
+    <Border>
+        <Border.Background>Transparent</Border.Background>
+    </Border>
+    <!-- <Border><Border.Background>Yellow</Border.Background></Border> -->
+</Grid>";
+
+        CollectNamedColorUsages(new[] { ("sample.xaml", Xaml) })
+            .Select(u => u.Usage)
+            .Should().BeEquivalentTo(
+                new[]
+                {
+                    "<TextBlock.Foreground>Orange",
+                    "Setter Background=\"Red\"",
+                    "<Color>Purple",
+                },
+                "色を取るプロパティ要素・Setter.Value・Color 要素の本体の色名を拾い、"
+                    + "色を取らないプロパティ・Transparent・コメントは拾わないこと");
+    }
+
+    [Theory]
+    [InlineData(@"<Border Background=""#FFF3E0""/>", true)]
+    [InlineData(@"<SolidColorBrush Color='#E3F2FD'/>", true)]
+    [InlineData(@"<TextBlock><TextBlock.Foreground>#D32F2F</TextBlock.Foreground></TextBlock>", true)]
+    [InlineData(@"<Setter Property=""Foreground""><Setter.Value> #D32F2F </Setter.Value></Setter>", true)]
+    [InlineData(@"<Color x:Key=""Local"">#FF123456</Color>", true)]
+    [InlineData(@"<Border Background=""{DynamicResource PanelBrush}""/>", false)]
+    [InlineData(@"<TextBlock><TextBlock.Text>#123</TextBlock.Text></TextBlock>", false)]
+    [InlineData(@"<Setter Property=""Text""><Setter.Value>#123</Setter.Value></Setter>", false)]
+    [InlineData(@"<!-- <Border Background=""#FFF3E0""/> -->", false)]
+    public void 色値リテラルの検出が属性と要素の本体の両方を見ること(string xaml, bool expected)
+    {
+        // コードレビューで検出: 属性形しか見ていなかったため、同じ色値をプロパティ要素・
+        // Setter.Value の本体で書くと素通りした。色を取らないプロパティの本体とコメントは拾わない
+        ContainsHexColorLiteral("<Grid>" + xaml + "</Grid>").Should().Be(expected);
     }
 
     [Fact]
@@ -300,8 +352,78 @@ public class ColorLiteralSingleSourceOfTruthTests
                     }
                 }
             }
+
+            foreach (var body in CollectColorBodies(text))
+            {
+                if (NamedColors.Contains(body.Value))
+                {
+                    yield return (name, body.Line, body.Usage);
+                }
+            }
         }
     }
+
+    /// <summary>
+    /// 色値リテラル（<c>#RGB</c>〜<c>#AARRGGBB</c>）が直書きされているか。コメントは除いて見る。
+    /// </summary>
+    /// <remarks>
+    /// 属性形（<c>Background="#FFF3E0"</c>。<c>Color=</c> に絞らず、ブラシを取りうる全属性）に加えて、
+    /// 色を取るプロパティ要素・<c>&lt;Setter.Value&gt;</c>・<c>&lt;Color&gt;</c> の本体に書いた形も見る
+    /// （コードレビューで検出。本体の形は属性の検査を素通りしていた）。
+    /// コメントの除去は「色値リテラルを直書きしない」という規約の理由を述べたコメント自体が
+    /// 違反として検出される極性の反転を避けるため（#1692）。
+    /// </remarks>
+    private static bool ContainsHexColorLiteral(string xaml)
+    {
+        var text = XamlElementInspection.StripXmlComments(xaml);
+        return ColorLiteralPattern.IsMatch(text)
+               || CollectColorBodies(text).Any(b => HexColorValuePattern.IsMatch(b.Value));
+    }
+
+    /// <summary>
+    /// 色を取る場所の<b>本体テキスト</b>を集める（子要素を持たない本体に限る）。
+    /// </summary>
+    /// <remarks>
+    /// 対象は ① 色を取るプロパティ要素（<c>&lt;TextBlock.Foreground&gt;Orange&lt;/TextBlock.Foreground&gt;</c>）、
+    /// ② <c>Property</c> が色を取る <c>Setter</c> の <c>&lt;Setter.Value&gt;</c>、
+    /// ③ <c>&lt;Color&gt;</c> 要素（<c>&lt;Color x:Key="…"&gt;Red&lt;/Color&gt;</c>）。
+    /// 本体に子要素がある形（<c>&lt;Setter.Value&gt;&lt;SolidColorBrush Color="Red"/&gt;</c>）は、
+    /// 子要素の属性として属性形の検査が拾う。
+    /// </remarks>
+    private static IEnumerable<(int Line, string Usage, string Value)> CollectColorBodies(string xaml)
+    {
+        var text = XamlElementInspection.StripXmlComments(xaml);
+        foreach (Match m in TextOnlyElementPattern.Matches(text))
+        {
+            var tag = m.Groups["tag"].Value;
+            var value = m.Groups["v"].Value.Trim();
+            var line = XamlElementInspection.LineOf(text, m.Index);
+
+            if (tag == "Setter.Value")
+            {
+                var setter = XamlElementInspection.EnumerateEnclosingElements(text, m.Index)
+                    .LastOrDefault(e => Regex.IsMatch(e.StartTag, @"^<Setter[\s>]"));
+                var property = setter == null ? null : XamlElementInspection.GetAttribute(setter.StartTag, "Property");
+                if (property != null && IsColorProperty(property))
+                {
+                    var shortName = property.Substring(property.LastIndexOf('.') + 1);
+                    yield return (line, $"Setter {shortName}=\"{value}\"", value);
+                }
+            }
+            else if (tag == "Color" || (tag.IndexOf('.') > 0 && IsColorProperty(tag)))
+            {
+                yield return (line, $"<{tag}>{value}", value);
+            }
+        }
+    }
+
+    /// <summary>子要素を持たない要素（開始タグ・本体テキスト・終了タグ）。</summary>
+    private static readonly Regex TextOnlyElementPattern = new(
+        @"<(?<tag>[A-Za-z_][A-Za-z0-9_.:]*)(?:\s[^<>]*)?>(?<v>[^<]*)</\k<tag>\s*>",
+        RegexOptions.Compiled);
+
+    /// <summary>本体テキストが色値リテラルそのものか。</summary>
+    private static readonly Regex HexColorValuePattern = new(@"^#[0-9A-Fa-f]{3,8}$", RegexOptions.Compiled);
 
     /// <summary>開始タグの中の <c>名前="値"</c>（単引用符も受ける）。</summary>
     private static readonly Regex AttributePattern = new(

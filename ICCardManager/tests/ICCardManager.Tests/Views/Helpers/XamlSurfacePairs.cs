@@ -30,13 +30,35 @@ namespace ICCardManager.Tests.Views.Helpers;
 /// 列挙し、状態ごとに両方を評価する。
 /// </para>
 /// <para>
+/// <b>キー付きのスタイル（<c>Style="{StaticResource ErrorStatusStyle}"</c>）は解決してから読む</b>
+/// （コードレビューで検出）。解決先は同じファイルの中のキー付きスタイルと、
+/// <c>AccessibilityStyles.xaml</c> のキー付きスタイル（呼び出し側が <see cref="LoadKeyedStyles"/> で渡す）で、
+/// <c>BasedOn</c> も同じ規則でたどる。以前は <c>Style</c> 属性を見た時点で「確かめられない」として
+/// 打ち切っていたため、共有のエラー枠スタイルを使う画面に #2109 と同じ組を足しても緑だった。
+/// </para>
+/// <para>
+/// <b>文字色を決めた要素の子孫にある別の塗りも組にする</b>（同）。文字色は継承するので、
+/// 文字色を決めた要素から祖先へたどるだけでは「白文字を決めた枠の内側に、淡い塗りの枠がある」形が
+/// 現れない。文字色を自分で決めていない <c>TextBlock</c> については、祖先から継承する文字色を求め、
+/// その文字色を決めた要素より<b>内側</b>にある塗りとの組を作る（外側の塗りとの組は、文字色を決めた要素
+/// 自身の組として既に作られている）。継承は、既定のテーマスタイルが文字色を持たないパネル類
+/// （<see cref="InheritancePassThrough"/>）を通るときだけ信じる — ボタン・入力欄などはテーマが文字色を
+/// 決め直すので、そこを越えた継承を信じると起こらない組を報告する。
+/// </para>
+/// <para>
 /// <b>確かめられない経路は組を作らない（地色の固定値による検査へ任せる）</b>:
 /// </para>
 /// <list type="bullet">
 /// <item>塗りが <c>{Binding}</c> / <c>{TemplateBinding}</c> / 名前付きの色など、ブラシキーでない</item>
-/// <item>塗りを決めるスタイルが別の場所にある（<c>Style="{StaticResource …}"</c>）</item>
+/// <item>塗り・文字色を要素で書いている（<c>&lt;Setter.Value&gt;</c> / <c>&lt;Border.Background&gt;</c>）
+///       — 中身を解釈しない。値が無い（＝透明）と読むと、実際には塗られている面を素通りして
+///       祖先の塗りと誤った組を作る</item>
+/// <item>スタイルのキーを解決できない（別のファイルにある・同じキーが複数ある・<c>{x:Type …}</c> のようなキー）</item>
+/// <item>暗黙のスタイル（<c>x:Key</c> の無い <c>TargetType</c> 単位のスタイル）とテーマの既定値 — 読まない</item>
 /// <item>テンプレート（<c>DataTemplate</c> / <c>ControlTemplate</c>）の境界を越える
 ///       — テンプレートの外側の要素は実行時の親とは限らない</item>
+/// <item>継承した文字色が、<see cref="InheritancePassThrough"/> 以外の要素を越えて届く形、
+///       および <c>TextBlock</c> 以外（文字列の <c>Content</c> から暗黙に作られる文字）への継承</item>
 /// <item>祖先のどこにも塗りが無い（面の地色は <c>ForegroundContrastConventionTests</c> の固定値が見る）</item>
 /// </list>
 /// </remarks>
@@ -44,6 +66,36 @@ internal static class XamlSurfacePairs
 {
     /// <summary>1 要素あたりに評価する状態数の上限。越えたら組を作らず <see cref="TooComplex"/> に記録する。</summary>
     private const int MaxStates = 256;
+
+    /// <summary><c>BasedOn</c> をたどる深さの上限（循環参照で止まらなくならないように）。</summary>
+    private const int MaxStyleDepth = 8;
+
+    /// <summary>x:Key の名前空間。</summary>
+    private static readonly XNamespace XamlNamespace = "http://schemas.microsoft.com/winfx/2006/xaml";
+
+    /// <summary>共有のスタイルを渡さないときに使う空の辞書（合成入力のテスト用）。</summary>
+    internal static readonly IReadOnlyDictionary<string, XElement?> NoSharedStyles =
+        new Dictionary<string, XElement?>(StringComparer.Ordinal);
+
+    /// <summary>
+    /// 継承した文字色を信じて通り抜けてよい要素。既定のテーマスタイルが文字色を持たないもの。
+    /// </summary>
+    /// <remarks>
+    /// <c>Button</c> / <c>TextBox</c> / <c>ComboBox</c> / <c>Label</c> などはテーマのスタイルが
+    /// <c>Foreground</c> を決め直すので、祖先の文字色はその内側へ届かない。ここに無い要素を越える継承は
+    /// 組にしない（起こらない組を報告すると、誤検出が修正者を検査の除外へ誘導する。#1786）。
+    /// </remarks>
+    private static readonly HashSet<string> InheritancePassThrough = new(StringComparer.Ordinal)
+    {
+        "Border",
+        "Grid",
+        "StackPanel",
+        "DockPanel",
+        "WrapPanel",
+        "Canvas",
+        "UniformGrid",
+        "Viewbox",
+    };
 
     /// <summary>要素木をたどるのを止めるテンプレート系の要素。</summary>
     private static readonly HashSet<string> TemplateBoundaries = new(StringComparer.Ordinal)
@@ -70,60 +122,157 @@ internal static class XamlSurfacePairs
     /// <summary>
     /// 1 ファイルの XAML から組を集める。
     /// </summary>
+    /// <param name="fileName">報告に使うファイル名。</param>
+    /// <param name="xaml">XAML（コメントの有無は問わない）。</param>
+    /// <param name="sharedStyles">
+    /// ファイルの外で定義されたキー付きスタイル（<see cref="LoadKeyedStyles"/> で <c>AccessibilityStyles.xaml</c> から読む）。
+    /// 既定値を持たせない — 渡し忘れると共有スタイルを使う要素が黙って検査の外へ出る。
+    /// </param>
     /// <exception cref="XmlException">XAML が XML として読めないとき（黙って空を返さない）。</exception>
-    internal static Result Collect(string fileName, string xaml)
+    internal static Result Collect(string fileName, string xaml, IReadOnlyDictionary<string, XElement?> sharedStyles)
     {
         var document = XDocument.Parse(xaml, LoadOptions.SetLineInfo);
+        var styles = new StyleScope(KeyedStylesOf(document), sharedStyles);
         var pairs = new HashSet<SurfacePair>();
         var tooComplex = new List<string>();
 
         foreach (var element in document.Descendants().Where(IsObjectElement))
         {
-            var foreground = ReadRule(element, "Foreground");
-            if (foreground == null || foreground.IsUnknown)
+            var foreground = ReadRule(element, "Foreground", styles);
+            if (foreground != null)
+            {
+                if (!foreground.IsUnknown)
+                {
+                    AddPairs(fileName, element, foreground, BackgroundChain(element, stopAt: null, styles), pairs, tooComplex);
+                }
+
+                continue;
+            }
+
+            // 文字色を自分で決めていない TextBlock: 祖先から継承した文字色と、
+            // その文字色を決めた要素より内側の塗りとの組（外側の塗りは文字色を決めた要素の組で作られている）
+            if (element.Name.LocalName != "TextBlock")
             {
                 continue;
             }
 
-            var chain = BackgroundChain(element);
-            var conditions = foreground.Conditions()
-                .Concat(chain.SelectMany(r => r.Conditions()))
-                .GroupBy(c => c.Key, StringComparer.Ordinal)
-                .ToDictionary(
-                    g => g.Key,
-                    g => g.Select(c => (string?)c.Value).Distinct(StringComparer.Ordinal).Append(null).ToList(),
-                    StringComparer.Ordinal);
-
-            var states = EnumerateStates(conditions).Take(MaxStates + 1).ToList();
-            if (states.Count > MaxStates)
+            var inherited = InheritedForeground(element, styles);
+            if (inherited == null || inherited.Value.Rule.IsUnknown)
             {
-                tooComplex.Add($"{fileName}:{LineOf(element)}");
                 continue;
             }
 
-            foreach (var state in states)
-            {
-                var foregroundKey = FillForegroundPairs.ResourceKeyOf(foreground.Evaluate(state));
-                if (foregroundKey == null)
-                {
-                    continue;
-                }
-
-                var backgroundKey = ResolveBackground(chain, state);
-                if (backgroundKey != null)
-                {
-                    pairs.Add(new SurfacePair(
-                        fileName,
-                        LineOf(element),
-                        foregroundKey,
-                        backgroundKey,
-                        (string?)element.Attribute("FontSize"),
-                        (string?)element.Attribute("FontWeight")));
-                }
-            }
+            AddPairs(
+                fileName,
+                element,
+                inherited.Value.Rule,
+                BackgroundChain(element, stopAt: inherited.Value.Owner, styles),
+                pairs,
+                tooComplex);
         }
 
         return new Result(pairs.ToList(), tooComplex);
+    }
+
+    /// <summary>
+    /// XAML（リソース辞書）から、キー付きのスタイルを「キー → スタイル」で読む。
+    /// 同じキーが複数あるときは値を null にする（どちらが効くかを静的に決めない）。
+    /// </summary>
+    internal static IReadOnlyDictionary<string, XElement?> LoadKeyedStyles(string xaml)
+        => KeyedStylesOf(XDocument.Parse(xaml, LoadOptions.SetLineInfo));
+
+    private static Dictionary<string, XElement?> KeyedStylesOf(XDocument document)
+    {
+        var result = new Dictionary<string, XElement?>(StringComparer.Ordinal);
+        foreach (var style in document.Descendants().Where(e => e.Name.LocalName == "Style"))
+        {
+            var key = (string?)style.Attribute(XamlNamespace + "Key");
+            if (key == null)
+            {
+                continue;
+            }
+
+            result[key] = result.ContainsKey(key) ? null : style;
+        }
+
+        return result;
+    }
+
+    private static void AddPairs(
+        string fileName,
+        XElement element,
+        Rule foreground,
+        IReadOnlyList<Rule> chain,
+        HashSet<SurfacePair> pairs,
+        List<string> tooComplex)
+    {
+        var conditions = foreground.Conditions()
+            .Concat(chain.SelectMany(r => r.Conditions()))
+            .GroupBy(c => c.Key, StringComparer.Ordinal)
+            .ToDictionary(
+                g => g.Key,
+                g => g.Select(c => (string?)c.Value).Distinct(StringComparer.Ordinal).Append(null).ToList(),
+                StringComparer.Ordinal);
+
+        var states = EnumerateStates(conditions).Take(MaxStates + 1).ToList();
+        if (states.Count > MaxStates)
+        {
+            tooComplex.Add($"{fileName}:{LineOf(element)}");
+            return;
+        }
+
+        foreach (var state in states)
+        {
+            var foregroundKey = FillForegroundPairs.ResourceKeyOf(foreground.Evaluate(state));
+            if (foregroundKey == null)
+            {
+                continue;
+            }
+
+            var backgroundKey = ResolveBackground(chain, state);
+            if (backgroundKey != null)
+            {
+                pairs.Add(new SurfacePair(
+                    fileName,
+                    LineOf(element),
+                    foregroundKey,
+                    backgroundKey,
+                    (string?)element.Attribute("FontSize"),
+                    (string?)element.Attribute("FontWeight")));
+            }
+        }
+    }
+
+    /// <summary>
+    /// 要素が祖先から継承する文字色と、それを決めた要素。継承を信じられない経路なら null。
+    /// </summary>
+    private static (XElement Owner, Rule Rule)? InheritedForeground(XElement element, StyleScope styles)
+    {
+        for (var current = element.Parent; current != null; current = current.Parent)
+        {
+            if (TemplateBoundaries.Contains(current.Name.LocalName))
+            {
+                return null;
+            }
+
+            if (!IsObjectElement(current))
+            {
+                continue;
+            }
+
+            var rule = ReadRule(current, "Foreground", styles);
+            if (rule != null)
+            {
+                return (current, rule);
+            }
+
+            if (!InheritancePassThrough.Contains(current.Name.LocalName))
+            {
+                return null;
+            }
+        }
+
+        return null;
     }
 
     /// <summary>
@@ -153,12 +302,13 @@ internal static class XamlSurfacePairs
 
     /// <summary>
     /// 要素自身から祖先へ向かって、塗りの規則を並べる。テンプレートの境界と、
-    /// 常に不透明な塗り（トリガーを持たないブラシキー）・確かめられない塗りで止める。
+    /// 常に不透明な塗り（トリガーを持たないブラシキー）・確かめられない塗り・
+    /// <paramref name="stopAt"/>（含まない）で止める。
     /// </summary>
-    private static IReadOnlyList<Rule> BackgroundChain(XElement element)
+    private static IReadOnlyList<Rule> BackgroundChain(XElement element, XElement? stopAt, StyleScope styles)
     {
         var chain = new List<Rule>();
-        for (var current = element; current != null; current = current.Parent)
+        for (var current = element; current != null && current != stopAt; current = current.Parent)
         {
             if (TemplateBoundaries.Contains(current.Name.LocalName))
             {
@@ -170,7 +320,7 @@ internal static class XamlSurfacePairs
                 continue;
             }
 
-            var rule = ReadRule(current, "Background") ?? Rule.None;
+            var rule = ReadRule(current, "Background", styles) ?? Rule.None;
             chain.Add(rule);
 
             if (rule.IsUnknown || (rule.Triggers.Count == 0 && !IsSeeThrough(rule.Base)))
@@ -189,7 +339,7 @@ internal static class XamlSurfacePairs
     /// WPF の優先順位どおり、<b>ローカル値（属性）はスタイルのトリガーより強い</b>。
     /// 属性が書かれていればそれだけを見る。
     /// </remarks>
-    private static Rule? ReadRule(XElement element, string property)
+    private static Rule? ReadRule(XElement element, string property, StyleScope styles)
     {
         var attribute = element.Attributes().FirstOrDefault(a => IsProperty(a.Name.LocalName, property));
         if (attribute != null)
@@ -197,38 +347,110 @@ internal static class XamlSurfacePairs
             return new Rule(attribute.Value, Array.Empty<Trigger>(), isUnknown: false);
         }
 
+        // <Border.Background><SolidColorBrush …/></Border.Background> — 中身を解釈しない。
+        // 「属性が無い＝決めていない」と読むと、塗られている面を透明として素通りする
+        if (element.Elements().Any(c => IsPropertyElementFor(c, property)))
+        {
+            return Rule.Unknown;
+        }
+
         var style = element.Elements()
             .Where(c => c.Name.LocalName == element.Name.LocalName + ".Style")
             .SelectMany(c => c.Elements().Where(s => s.Name.LocalName == "Style"))
             .FirstOrDefault();
-        if (style == null)
+        if (style != null)
         {
-            // 別の場所にあるスタイルが決めている可能性がある
-            return element.Attribute("Style") != null ? Rule.Unknown : null;
+            return RuleFromStyle(style, property, styles, depth: 0);
         }
 
-        var baseValue = SettersFor(style, property).LastOrDefault();
-        var triggers = style.Elements()
-            .Where(c => c.Name.LocalName == "Style.Triggers")
-            .SelectMany(c => c.Elements())
-            .SelectMany(t => SettersFor(t, property).Select(v => new Trigger(ConditionKeyOf(t), ConditionValueOf(t), v)))
-            .ToList();
-
-        if (baseValue == null && triggers.Count == 0)
+        var styleAttribute = (string?)element.Attribute("Style");
+        if (styleAttribute == null)
         {
-            return style.Attribute("BasedOn") != null ? Rule.Unknown : null;
+            return null;
         }
 
-        return new Rule(baseValue, triggers, isUnknown: false);
+        var resolved = styles.Resolve(styleAttribute);
+        return resolved == null ? Rule.Unknown : RuleFromStyle(resolved, property, styles, depth: 0);
     }
 
-    /// <summary><paramref name="owner"/> 直下の <c>Setter</c>（<c>TargetName</c> なし）のうち、プロパティに一致する値。</summary>
-    private static IEnumerable<string?> SettersFor(XElement owner, string property)
+    /// <summary>
+    /// スタイルがプロパティ <paramref name="property"/> をどう決めているかを読む（<c>BasedOn</c> をたどる）。
+    /// 決めていなければ null。
+    /// </summary>
+    /// <remarks>
+    /// 派生したスタイルの <c>Setter</c> は基底の <c>Setter</c> を上書きし、トリガーは基底の後ろに並ぶ
+    /// （後に書かれたトリガーが勝つ）。基底を解決できないとき、派生側が基本の値を自分で決めていれば
+    /// それを使い（以前と同じ）、決めていなければ確かめられないとする。
+    /// </remarks>
+    private static Rule? RuleFromStyle(XElement style, string property, StyleScope styles, int depth)
+    {
+        if (depth > MaxStyleDepth)
+        {
+            return Rule.Unknown;
+        }
+
+        var baseSetters = SettersFor(style, property).ToList();
+        var triggerSetters = style.Elements()
+            .Where(c => c.Name.LocalName == "Style.Triggers")
+            .SelectMany(c => c.Elements())
+            .SelectMany(t => SettersFor(t, property).Select(s => (Trigger: t, Setter: s)))
+            .ToList();
+
+        // <Setter.Value>…</Setter.Value> で書かれた値は解釈しない（null＝透明と読むと誤った組を作る）
+        if (baseSetters.Any(s => s.IsElementValue) || triggerSetters.Any(t => t.Setter.IsElementValue))
+        {
+            return Rule.Unknown;
+        }
+
+        var ownTriggers = triggerSetters
+            .Select(t => new Trigger(ConditionKeyOf(t.Trigger), ConditionValueOf(t.Trigger), t.Setter.Value))
+            .ToList();
+
+        Rule? inherited = null;
+        var basedOn = (string?)style.Attribute("BasedOn");
+        if (basedOn != null)
+        {
+            var baseStyle = styles.Resolve(basedOn);
+            inherited = baseStyle == null ? Rule.Unknown : RuleFromStyle(baseStyle, property, styles, depth + 1);
+        }
+
+        if (baseSetters.Count == 0 && ownTriggers.Count == 0)
+        {
+            return inherited;
+        }
+
+        var ownBase = baseSetters.Count > 0 ? baseSetters[baseSetters.Count - 1].Value : null;
+        if (inherited == null)
+        {
+            return new Rule(ownBase, ownTriggers, isUnknown: false);
+        }
+
+        if (inherited.IsUnknown)
+        {
+            // 基底を解決できない: 基本の値を自分で決めていなければ、既定の状態の値が分からない
+            return baseSetters.Count == 0 ? Rule.Unknown : new Rule(ownBase, ownTriggers, isUnknown: false);
+        }
+
+        return new Rule(
+            baseSetters.Count > 0 ? ownBase : inherited.Base,
+            inherited.Triggers.Concat(ownTriggers).ToList(),
+            isUnknown: false);
+    }
+
+    /// <summary>
+    /// <paramref name="owner"/> 直下の <c>Setter</c>（<c>TargetName</c> なし）のうち、プロパティに一致するもの。
+    /// 値を <c>&lt;Setter.Value&gt;</c> の要素で書いている（<c>Value</c> 属性が無い）ものは <c>IsElementValue</c> を立てる。
+    /// </summary>
+    private static IEnumerable<(string? Value, bool IsElementValue)> SettersFor(XElement owner, string property)
         => owner.Elements()
             .Where(s => s.Name.LocalName == "Setter"
                         && s.Attribute("TargetName") == null
                         && XamlElementInspection.IsSetterFor((string?)s.Attribute("Property"), property))
-            .Select(s => (string?)s.Attribute("Value"));
+            .Select(s => ((string?)s.Attribute("Value"), s.Attribute("Value") == null));
+
+    /// <summary><c>&lt;所有者.プロパティ&gt;</c> の形のプロパティ要素か。</summary>
+    private static bool IsPropertyElementFor(XElement element, string property)
+        => element.Name.LocalName.EndsWith("." + property, StringComparison.Ordinal);
 
     private static string ConditionKeyOf(XElement trigger)
         => trigger.Name.LocalName switch
@@ -274,6 +496,37 @@ internal static class XamlSurfacePairs
     private static bool IsObjectElement(XElement element) => element.Name.LocalName.IndexOf('.') < 0;
 
     private static int LineOf(XElement element) => ((IXmlLineInfo)element).LineNumber;
+
+    /// <summary>キー付きスタイルの解決先（同じファイルを先に、次に共有のスタイル辞書を見る）。</summary>
+    private sealed class StyleScope
+    {
+        private readonly IReadOnlyDictionary<string, XElement?> _local;
+        private readonly IReadOnlyDictionary<string, XElement?> _shared;
+
+        public StyleScope(IReadOnlyDictionary<string, XElement?> local, IReadOnlyDictionary<string, XElement?> shared)
+        {
+            _local = local;
+            _shared = shared;
+        }
+
+        /// <summary><c>{StaticResource K}</c> / <c>{DynamicResource K}</c> のスタイル。解決できなければ null。</summary>
+        public XElement? Resolve(string markup)
+        {
+            var key = FillForegroundPairs.ResourceKeyOf(markup);
+            if (key == null)
+            {
+                return null;
+            }
+
+            // 同じキーが複数あるとき（値が null）は、どれが効くかを静的に決めない
+            if (_local.TryGetValue(key, out var local))
+            {
+                return local;
+            }
+
+            return _shared.TryGetValue(key, out var shared) ? shared : null;
+        }
+    }
 
     private sealed class Trigger
     {

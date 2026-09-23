@@ -157,19 +157,31 @@ public class EditFormKeyPolicyTests
             var closing = false;
             dialog.Closing += (_, _) => closing = true;
 
-            var args = new KeyEventArgs(Keyboard.PrimaryDevice, new FakePresentationSource(), 0, key)
+            try
             {
-                RoutedEvent = Keyboard.KeyDownEvent,
-            };
+                var args = new KeyEventArgs(Keyboard.PrimaryDevice, new FakePresentationSource(), 0, key)
+                {
+                    RoutedEvent = Keyboard.KeyDownEvent,
+                };
 
-            ProductionHelpers.EditFormKeyPolicy.HandleEscape(dialog, viewModel, args);
+                ProductionHelpers.EditFormKeyPolicy.HandleEscape(dialog, viewModel, args);
 
-            viewModel.CancelEditCount.Should().BeLessThanOrEqualTo(1);
-            (viewModel.CancelEditCount == 1 && closing).Should().BeFalse("取り消しと閉じるは同時に起きない");
-            outcome = viewModel.CancelEditCount == 1
-                ? EditFormEscapeOutcome.CancelEdit
-                : closing ? EditFormEscapeOutcome.CloseDialog : EditFormEscapeOutcome.Nothing;
-            handled = args.Handled;
+                viewModel.CancelEditCount.Should().BeLessThanOrEqualTo(1);
+                (viewModel.CancelEditCount == 1 && closing).Should().BeFalse("取り消しと閉じるは同時に起きない");
+                outcome = viewModel.CancelEditCount == 1
+                    ? EditFormEscapeOutcome.CancelEdit
+                    : closing ? EditFormEscapeOutcome.CloseDialog : EditFormEscapeOutcome.Nothing;
+                handled = args.Handled;
+            }
+            finally
+            {
+                // 取り消し・何もしない経路では HandleEscape が Close しないので、ここで後始末する
+                // （閉じずに残すと、STA スレッドの終了までウィンドウが生き残る。コードレビューで検出）
+                if (!closing)
+                {
+                    dialog.Close();
+                }
+            }
         });
         return (outcome, handled);
     }
