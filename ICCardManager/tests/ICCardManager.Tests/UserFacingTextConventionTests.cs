@@ -28,7 +28,7 @@ namespace ICCardManager.Tests;
 /// </para>
 /// <para>
 /// 除外するのは、ユーザーの目に触れないことが構文から確定する形だけに限る:
-/// C# のコメント・<c>Log…(</c> で始まるメソッド呼び出しの引数（ログファイルにしか出ない）、
+/// C# のコメント・<c>ILogger</c> の <c>Log…(</c> と <c>ErrorDialogHelper.LogException(</c> の引数（ログファイルにしか出ない）、
 /// XAML のコメント・名前空間宣言・<c>x:</c> / デザイン時（<c>d:</c> / <c>mc:</c>）の属性。
 /// </para>
 /// </remarks>
@@ -68,12 +68,22 @@ public class UserFacingTextConventionTests
     /// この引数リストの内側の文字列リテラルはログファイルにしか出ないため走査しない。
     /// </summary>
     /// <remarks>
-    /// 受け手のフィールド名ではなく「<c>Log</c> で始まるメソッド呼び出し」で照合する
-    /// （<c>IdmLoggingMaskConventionTests</c> と同じ資源の捉え方。#1843）。直前が識別子文字でないことを
-    /// 要求するため <c>Catalog(</c> のような語尾一致は拾わない。
+    /// <para>
+    /// 除外はログファイルにしか出ないことが確定する呼び出しに限る: <c>ILogger</c> の拡張メソッド
+    /// （<c>Log</c> / <c>LogTrace</c> / <c>LogDebug</c> / <c>LogInformation</c> / <c>LogWarning</c> /
+    /// <c>LogError</c> / <c>LogCritical</c>。受け手の名前は問わず、<c>?.</c> を含むメンバーアクセスとして呼ぶ形）と、
+    /// <c>ErrorDialogHelper.LogException</c>（ファイルログへ書くだけでダイアログは出さない）。
+    /// </para>
+    /// <para>
+    /// 旧実装は「<c>Log</c> で始まるメソッド呼び出し」を一律に除外しており、<c>OperationLogger.Log*Async</c>
+    /// （<c>operation_log</c> へ書き、操作ログ画面と Excel 出力に表示される）の引数や、将来の
+    /// <c>LoginAsync(</c> / <c>Logout(</c> の引数まで走査から外れていた（Issue #2101 のコードレビューで検出）。
+    /// 名前の接頭辞で除外すると、ユーザーの目に触れる出力先が同じ接頭辞を持った日に黙って対象外になる。
+    /// </para>
     /// </remarks>
     private static readonly Regex LogInvocationPattern = new(
-        @"(?<![A-Za-z0-9_])Log[A-Za-z]*\s*\(",
+        @"(?:(?<=[A-Za-z0-9_)\]]\s*\??\s*\.\s*)Log(?:Trace|Debug|Information|Warning|Error|Critical)?\s*\()" +
+        @"|(?:(?<![A-Za-z0-9_])ErrorDialogHelper\s*\.\s*LogException\s*\()",
         RegexOptions.Compiled);
 
     /// <summary>
@@ -157,6 +167,16 @@ public class UserFacingTextConventionTests
     [InlineData("/* ICカード */ var y = 2;", false)]
     // 準拠: 正規表記
     [InlineData("StatusMessage = \"交通系ICカードをタッチしてください\";", false)]
+    // 違反（Issue #2101 のコードレビューで検出）: Log で始まってもログファイル以外へ出る呼び出し。
+    // OperationLogger は operation_log へ書き、操作ログ画面と Excel 出力に表示される
+    [InlineData("await _operationLogger.LogCardUpdateAsync(before, after, \"ICカードの情報を更新\");", true)]
+    [InlineData("await LoginAsync(\"ICカードで認証してください\");", true)]
+    // 違反（同）: ログ呼び出しの引数の文字リテラル '(' で範囲が伸び、後続の文言まで除外されない
+    [InlineData("Task.Run(() => { _logger.LogDebug(\"c={C}\", c == '('); MessageBox.Show(\"ICカードを確認\"); });", true)]
+    // 準拠（同）: null 条件の受け手・引数名が logger の ILogger・名前空間で修飾したヘルパー
+    [InlineData("_logger?.LogWarning(\"ICカードが見つかりません\");", false)]
+    [InlineData("logger.LogError(ex, \"ICカードの読み取りに失敗\");", false)]
+    [InlineData("Common.ErrorDialogHelper.LogException(ex, \"ICカードの読み取り\");", false)]
     public void CSharpの文言抽出が表示される形と表示されない形を区別すること(string snippet, bool expectedViolation)
     {
         var violations = ExtractCSharpUserFacingStringLiterals(snippet)
@@ -329,13 +349,13 @@ public class UserFacingTextConventionTests
     /// <remarks>
     /// <para>
     /// コメントを除去したうえで<b>すべての</b>文字列リテラルを対象にし、
-    /// <c>Log…(</c> 呼び出しの引数リストの内側にあるものだけを除く。文言は
+    /// ログ呼び出し（<see cref="LogInvocationPattern"/>）の引数リストの内側にあるものだけを除く。文言は
     /// ダイアログ・トーストの引数、<c>StatusMessage</c> / <c>ErrorMessage</c> への代入、
     /// 定数、式形式メンバー、switch 式の腕と、呼び出しの形を取らない場所に多く置かれるため、
     /// 「ユーザー向けの形」を列挙する方式では追随できない（Issue #2101）。
     /// </para>
     /// <para>
-    /// ログ呼び出しの範囲は、リテラルの中身を空白で塗りつぶした写しの上で丸括弧を数えて求める。
+    /// ログ呼び出しの範囲は、リテラル（文字リテラルを含む）の中身を空白で塗りつぶした写しの上で丸括弧を数えて求める。
     /// リテラルを残したまま数えると、ログ文言の中の <c>(</c> / <c>)</c> が範囲を黙って伸縮させ、
     /// ログの外側にある文言まで除外される（fail-open）。
     /// </para>
@@ -349,6 +369,7 @@ public class UserFacingTextConventionTests
         var content = TestSourceInspection.RemoveCommentsPreservingLines(source);
 
         var literals = new List<(string Text, int Start, int End)>();
+        var charLiterals = new List<(int Start, int End)>();
         var i = 0;
         while (i < content.Length)
         {
@@ -366,16 +387,20 @@ public class UserFacingTextConventionTests
 
             if (c == '\'')
             {
-                i = SkipCharLiteral(content, i);
+                var next = SkipCharLiteral(content, i);
+                charLiterals.Add((i, next));
+                i = next;
                 continue;
             }
 
             i++;
         }
 
-        // リテラルの中身を空白で塗りつぶした写し（オフセットと改行は保つ）
+        // リテラルの中身を空白で塗りつぶした写し（オフセットと改行は保つ）。
+        // 文字リテラルも塗りつぶす。残すとログ呼び出しの引数の '(' が深さを狂わせ、範囲がログの外まで
+        // 伸びて後続の文言が除外される（Issue #2101 のコードレビューで検出）。
         var masked = content.ToCharArray();
-        foreach (var (_, start, end) in literals)
+        foreach (var (start, end) in literals.Select(l => (l.Start, l.End)).Concat(charLiterals))
         {
             for (var k = start; k < end && k < masked.Length; k++)
             {

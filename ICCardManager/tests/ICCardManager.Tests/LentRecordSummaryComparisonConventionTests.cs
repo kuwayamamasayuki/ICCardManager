@@ -79,8 +79,33 @@ public class LentRecordSummaryComparisonConventionTests
     /// </remarks>
     private const string LendingValue =
         @"(?:(?:[\w.]+\s*\.\s*)?GetLendingSummary\s*\(\s*\)" +
-        @"|(?:[\w.?]+\s*\.\s*)?(?<![A-Za-z0-9_])LendingSummary(?![A-Za-z0-9_(])" +
+        "|" + LendingSettingValue +
         "|@?\"（貸出中）\")";
+
+    /// <summary>
+    /// 貸出中の摘要の設定値そのもの（<c>SummaryText.LendingSummary</c>）と、それを受け取った
+    /// 引数・フィールド（<c>lendingSummary</c> / <c>_lendingSummary</c>）。
+    /// </summary>
+    /// <remarks>
+    /// 設定値を引数やフィールドで受け取って比べる形（<c>bool IsLent(Ledger l, string lendingSummary)
+    /// =&gt; l.Summary == lendingSummary;</c>）は、大文字小文字の違いだけで素通りしていた
+    /// （Issue #2101 のコードレビューで検出）。本番コードでこの名前を貸出中の摘要以外に使っている箇所は無い
+    /// （導入時に実測）。
+    /// </remarks>
+    private const string LendingSettingValue =
+        @"(?:[\w.?]+\s*\.\s*)?(?<![A-Za-z0-9_])_?[Ll]endingSummary(?![A-Za-z0-9_(])";
+
+    /// <summary>
+    /// 値を変えずに運ぶ後置（<c>.Trim()</c> 等）と、既定値の補い（<c>?? "（貸出中）"</c>）。
+    /// </summary>
+    /// <remarks>
+    /// 別名の右辺が値そのもので終わる形しか見ないと、<c>var l = GetLendingSummary().Trim();</c> や
+    /// <c>var l = _o?.SummaryText?.LendingSummary ?? "（貸出中）";</c> で退避した別名との比較が素通りする
+    /// （Issue #2101 のコードレビューで検出）。
+    /// </remarks>
+    private const string ValueCarryingSuffix =
+        @"(?:\s*\??\s*\.\s*(?:Trim|TrimStart|TrimEnd|Normalize|ToString)\s*\(\s*\))*" +
+        @"(?:\s*\?\?\s*[^;]+?)?";
 
     /// <summary>
     /// 貸出中の摘要を別名へ退避する宣言・代入（<c>var lending = SummaryGenerator.GetLendingSummary();</c> /
@@ -92,7 +117,20 @@ public class LentRecordSummaryComparisonConventionTests
     /// </remarks>
     /// <param name="valuePattern">右辺として照合する値（<see cref="LendingValue"/> と既知の別名）。</param>
     private static Regex AliasDeclarationPattern(string valuePattern)
-        => new Regex($@"(?<![.\w])(\w+)\s*=(?![=>])\s*{valuePattern}\s*;");
+        => new Regex($@"(?<![.\w])(\w+)\s*=(?![=>])\s*{valuePattern}{ValueCarryingSuffix}\s*;");
+
+    /// <summary>
+    /// 補間文字列で SQL の条件式へ貸出中の摘要を埋め込む形（<c>$"… WHERE summary &lt;&gt; '{GetLendingSummary()}'"</c>）。
+    /// </summary>
+    /// <remarks>
+    /// リテラル直書きの SQL（<c>summary = '（貸出中）'</c>）だけを見ると、生成値を補間で埋め込んだ同じ比較が
+    /// 素通りする（Issue #2101 のコードレビューで検出）。条件の文脈に限る理由は <see cref="SqlSummaryParameterPattern"/> と同じ
+    /// （<c>SET summary = '{…}'</c> は代入）。
+    /// </remarks>
+    private static Regex InterpolatedSqlComparisonPattern(string valuePattern)
+        => new Regex(
+            @"(?i:\b(?:WHERE|AND|OR|ON|WHEN|NOT)\s+\(?\s*(?:\w+\.)?summary\s*(?:=|<>|!=|\bLIKE\b)\s*)'?[^'{}\n]*\{\s*" +
+            valuePattern);
 
     /// <summary>
     /// SQL の条件式で摘要をパラメータと比べる形（<c>WHERE summary &lt;&gt; @lending</c>）。group 1 がパラメータ名。
@@ -128,7 +166,7 @@ public class LentRecordSummaryComparisonConventionTests
             .ToList();
 
         // 設定の直読み（GetLendingSummary を経由しない同じ値）との比較
-        AddComparisons(found, code, @"(?:[\w.?]+\s*\.\s*)?(?<![A-Za-z0-9_])LendingSummary(?![A-Za-z0-9_(])");
+        AddComparisons(found, code, LendingSettingValue);
 
         // 別名（不動点まで）
         var aliases = new HashSet<string>(StringComparer.Ordinal);
@@ -157,6 +195,12 @@ public class LentRecordSummaryComparisonConventionTests
         var boundValue = aliases.Count == 0
             ? LendingValue
             : $"(?:{LendingValue}|(?<![.\\w])(?:{string.Join("|", aliases.Select(Regex.Escape))})\\b)";
+
+        // SQL の補間（生成値・設定値・別名を条件式へ直接埋め込む形）
+        found.AddRange(InterpolatedSqlComparisonPattern(boundValue).Matches(code)
+            .Cast<Match>()
+            .Select(m => (m.Index, m.Value)));
+
         foreach (Match match in SqlSummaryParameterPattern.Matches(code))
         {
             var parameter = match.Groups[1].Value;
@@ -241,6 +285,19 @@ public class LentRecordSummaryComparisonConventionTests
     // UPDATE の SET 句は代入。摘要以外のパラメータとの比較も対象外
     [InlineData("SET summary = @summary, income = @income WHERE id = @id", false)]
     [InlineData("WHERE summary = @purchaseSummary", false)]
+    // Issue #2101 のコードレビューで検出: 末尾に ?? や .Trim() を伴う別名
+    [InlineData("var l = _o?.SummaryText?.LendingSummary ?? \"（貸出中）\"; if (x.Summary == l) { }", true)]
+    [InlineData("var l = SummaryGenerator.GetLendingSummary().Trim(); if (x.Summary != l) { }", true)]
+    // 同: 補間で SQL へ埋め込んだ比較
+    [InlineData("var sql = $\"SELECT * FROM ledger WHERE summary <> '{SummaryGenerator.GetLendingSummary()}'\";", true)]
+    [InlineData("var sql = $\"SELECT * FROM ledger WHERE card_idm = @idm AND summary = '{lending}'\"; var lending = SummaryGenerator.GetLendingSummary();", true)]
+    // 同: 引数・フィールドとして受け取った設定値（大文字小文字の違う綴り）
+    [InlineData("bool IsLent(Ledger l, string lendingSummary) => l.Summary == lendingSummary;", true)]
+    [InlineData("if (_lendingSummary.Equals(l.Summary)) { }", true)]
+    // 対の表明: 代入としての SQL・未設定判定・比較せずに使う別名
+    [InlineData("var sql = $\"UPDATE ledger SET summary = '{SummaryGenerator.GetLendingSummary()}' WHERE id = @id\";", false)]
+    [InlineData("if (lendingSummary == null) { }", false)]
+    [InlineData("var l = SummaryGenerator.GetLendingSummary().Trim(); ledger.Summary = l;", false)]
     public void 貸出中の摘要との比較の検出パターンが既知の入力を正しく分類すること(string code, bool expected)
     {
         DetectViolations(TestSourceInspection.RemoveCommentsPreservingLines(code)).Any().Should().Be(expected);

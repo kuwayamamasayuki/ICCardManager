@@ -183,6 +183,15 @@ public class InvariantCultureDateConventionTests
     // 正常（Issue #2101）: 日付書式ではない番号付きホール・桁付きの数値書式
     [InlineData("var s = string.Format(\"{0:N0}円 / {1}\", amount, name);", 0)]
     [InlineData("var s = count.ToString(\"D2\");", 0)]
+    // 違反（Issue #2101 のコードレビューで検出）: 標準書式指定子は書式ホールでも同じ欠陥
+    [InlineData("var s = $\"{date:d}\";", 1)]
+    [InlineData("var s = $\"{entry.Timestamp:g} に保存\";", 1)]
+    [InlineData("var s = string.Format(\"{0:d}〜{1:d}\", from, to);", 2)]
+    [InlineData("_logger.LogInformation(\"期間={From:d}\", from);", 1)]
+    // 正常（同）: 桁付きの数値書式のホール・不変カルチャを渡した番号付きの標準書式
+    [InlineData("var s = $\"{count:D2}件 {rate:P1}\";", 0)]
+    [InlineData("var s = string.Format(\"{0:D3}\", n);", 0)]
+    [InlineData("var s = string.Format(CultureInfo.InvariantCulture, \"{0:d}\", d);", 0)]
     public void 検出ロジックがサンプル入力で期待どおり働くこと(string source, int expectedCount)
     {
         FindCultureSensitiveDateOperations(source).Should().HaveCount(expectedCount);
@@ -365,9 +374,26 @@ public class InvariantCultureDateConventionTests
     /// <summary>
     /// 番号付きの日付書式ホール（<c>{0:yyyy/MM/dd}</c>）。<c>string.Format</c> / <c>AppendFormat</c> の書式文字列に現れる。
     /// </summary>
+    /// <remarks>
+    /// 1 文字の標準書式（<c>{0:d}</c> / <c>{0:g}</c>）も対象（<see cref="StandardDateFormatSpecifier"/>）。
+    /// </remarks>
     private static readonly Regex NumberedDateFormatHole = new(
-        @"\{\d+(?:,\s*-?\d+)?:(?<fmt>[^}""]*(?:yyyy|yy|MMM|ddd|HH|mm:ss|M月|d日|MM[/-]dd|dd[/-]MM)[^}""]*)\}",
+        @"\{\d+(?:,\s*-?\d+)?:(?<fmt>[^}""]*(?:yyyy|yy|MMM|ddd|HH|mm:ss|M月|d日|MM[/-]dd|dd[/-]MM)[^}""]*|" +
+        StandardDateFormatSpecifier + @")\}",
         RegexOptions.Compiled);
+
+    /// <summary>
+    /// 日付の標準書式指定子（1 文字）。書式ホールの <c>:</c> の直後から <c>}</c> までがこの 1 文字だけの形に一致させる。
+    /// </summary>
+    /// <remarks>
+    /// Issue #2101 のコードレビューで検出: <c>ToString("d")</c> を違反にしながら、同じ書式を
+    /// 補間の穴（<c>$"{date:d}"</c>）・番号付きの穴（<c>string.Format("{0:g}", d)</c>）に書くと通っていた。
+    /// 穴の値が日付か数値かは静的に判別できない（<c>{count:D}</c> は整数の書式）ため、
+    /// <see cref="StandardDateFormatLiteral"/> と同じく fail-closed に倒す。後ろに桁数が続く形
+    /// （<c>{count:D2}</c>）は数値の書式として対象外にする。本番コードに 1 文字の書式ホールは無く
+    /// （導入時に実測）、数値を 1 文字の書式で整形したい場合は <c>N0</c> 等の桁付き書式を使えばよい。
+    /// </remarks>
+    private const string StandardDateFormatSpecifier = "[dDfFgGmMoOrRsStTuUyY]";
 
     /// <summary>
     /// 先頭引数に書式プロバイダーを渡した <c>Format</c> / <c>AppendFormat</c> と、その直後の書式文字列リテラル。
@@ -398,7 +424,8 @@ public class InvariantCultureDateConventionTests
     /// （<c>{ a ? b : c }</c>）を誤検出しない。
     /// </remarks>
     private static readonly Regex DateFormatHole = new(
-        @"\{[A-Za-z_][\w.?\[\]()]*(?:,\s*-?\d+)?:(?<fmt>[^}""]*(?:yyyy|yy|MMM|ddd|HH|mm:ss|M月|d日|MM[/-]dd|dd[/-]MM)[^}""]*)\}",
+        @"\{[A-Za-z_][\w.?\[\]()]*(?:,\s*-?\d+)?:(?<fmt>[^}""]*(?:yyyy|yy|MMM|ddd|HH|mm:ss|M月|d日|MM[/-]dd|dd[/-]MM)[^}""]*|" +
+        StandardDateFormatSpecifier + @")\}",
         RegexOptions.Compiled);
 
     private static readonly Regex DateFormatIdentifier = new(

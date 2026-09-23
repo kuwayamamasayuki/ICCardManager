@@ -40,7 +40,12 @@ public class BalanceWarningComparisonConventionTests
     /// （<c>ValidationService</c> の入力値範囲）や <c>WarningBalanceDisplay</c> を巻き込まないよう
     /// 語境界で閉じる。接頭辞は <c>WarningBalance</c> / <c>warningBalance</c> の双方を拾う。
     /// </summary>
-    private const string ThresholdIdentifier = @"(?:\w+\s*\.\s*)?[Ww]arningBalance\b";
+    /// <remarks>
+    /// 修飾は任意の段数と null 条件演算子（<c>_app.Settings.WarningBalance</c> /
+    /// <c>settings?.WarningBalance</c>）を許す。修飾を 1 段の <c>.</c> に限ると、これらの綴りで
+    /// 比較・別名の両方が素通りする（Issue #2101 のコードレビューで検出）。
+    /// </remarks>
+    private const string ThresholdIdentifier = @"(?:\w+\s*\??\s*\.\s*)*[Ww]arningBalance\b";
 
     /// <summary>
     /// 禁止された形。しきい値を大小比較演算子の左右いずれかに直接置いた比較
@@ -78,9 +83,15 @@ public class BalanceWarningComparisonConventionTests
     /// メンバーへの代入（<c>result.WarningBalance = settings.WarningBalance;</c>）は別名ではないので、
     /// 左辺の直前が <c>.</c> の形と、別名がしきい値の識別子そのものである形は除く。
     /// </para>
+    /// <para>
+    /// 右辺はしきい値の値をそのまま運ぶ綴りを許す: 先頭のキャスト（<c>(int)settings.WarningBalance</c>）と
+    /// 末尾の <c>??</c>（<c>settings?.WarningBalance ?? 0</c>）。右辺が <c>ident.WarningBalance</c>
+    /// ちょうどの形しか見ないと、これらで退避した別名との比較が素通りする（Issue #2101 のコードレビューで検出）。
+    /// </para>
     /// </remarks>
     private static readonly Regex ThresholdAliasPattern = new Regex(
-        $@"(?<![.\w])(\w+)\s*=(?![=>])\s*{ThresholdIdentifier}\s*[;,)}}]",
+        $@"(?<![.\w])(\w+)\s*=(?![=>])\s*(?:\(\s*[\w.]+\s*\??\s*\)\s*)?{ThresholdIdentifier}" +
+        $@"(?:\s*\?\?\s*[^;,)}}]+?)?\s*[;,)}}]",
         RegexOptions.Compiled);
 
     /// <summary>
@@ -169,6 +180,18 @@ public class BalanceWarningComparisonConventionTests
     [InlineData("result.WarningBalance = settings.WarningBalance; if (other.Count < result.Count) { }", false)]
     // 別名と同じ名前の別メンバー（x.t）は対象外
     [InlineData("var t = settings.WarningBalance; if (b < x.t) { }", false)]
+    // Issue #2101 のコードレビューで検出: 修飾が 2 段以上・null 条件演算子・キャスト・末尾の ?? を挟んだ別名
+    [InlineData("var t = _app.Settings.WarningBalance; if (b < t) { }", true)]
+    [InlineData("var t = settings?.WarningBalance; if (b <= t) { }", true)]
+    [InlineData("var t = (int)settings.WarningBalance; if (b <= t) { }", true)]
+    [InlineData("var t = settings?.WarningBalance ?? 0; if (b <= t) { }", true)]
+    // 同じ綴りを別名へ退避せず直接比べる形
+    [InlineData("if (b <= _app.Settings.WarningBalance) { }", true)]
+    [InlineData("if (b <= settings?.WarningBalance) { }", true)]
+    // 対の表明: 共通の判定へ渡すだけ・別の識別子・メンバーへの転記は違反ではない
+    [InlineData("var t = settings?.WarningBalance ?? 0; var low = BalanceWarningPolicy.IsLowBalance(b, t);", false)]
+    [InlineData("var t = _app.Settings.WarningBalanceMax ?? 0; if (b < t) { }", false)]
+    [InlineData("result.WarningBalance = settings?.WarningBalance ?? 0; if (other.Count < result.Count) { }", false)]
     public void しきい値比較の検出パターンが既知の入力を正しく分類すること(string code, bool expected)
     {
         DetectInlineComparisons(TestSourceInspection.ToCodeOnly(code)).Any().Should().Be(expected);

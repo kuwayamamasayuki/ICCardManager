@@ -65,9 +65,13 @@ public class CardReadDispatchConventionTests
     /// 直前が <c>Dispatcher</c> であることだけを見ると、<c>Dispatcher.CurrentDispatcher.InvokeAsync(async …)</c>
     /// （受け手は <c>CurrentDispatcher</c>）や <c>Dispatcher.FromThread(t).BeginInvoke(…)</c> が同じ欠陥のまま素通りする。
     /// </para>
+    /// <para>
+    /// 連鎖の途中の引数リストは 1 段の入れ子まで許す（<c>Dispatcher.FromThread(GetThread()).InvokeAsync</c>）。
+    /// 入れ子を許さないと、引数にメソッド呼び出しを書いただけで素通りする（Issue #2101 のコードレビューで検出）。
+    /// </para>
     /// </remarks>
     private static readonly Regex RawDispatcherInvokeAsyncPattern = new(
-        @"(?<![A-Za-z0-9_])\w*Dispatcher(?![A-Za-z0-9_])(?:\s*\??\s*\.\s*\w+(?:\s*\([^()]*\))?)*?" +
+        @"(?<![A-Za-z0-9_])\w*Dispatcher(?![A-Za-z0-9_])(?:\s*\??\s*\.\s*\w+(?:\s*\((?:[^()]|\([^()]*\))*\))?)*?" +
         @"\s*\??\s*\.\s*(?:InvokeAsync|BeginInvoke)(?![A-Za-z0-9_])",
         RegexOptions.Compiled);
 
@@ -78,10 +82,12 @@ public class CardReadDispatchConventionTests
     /// <remarks>
     /// 退避した別名から <c>d.InvokeAsync(async …)</c> と呼ぶと、受け手の字句に <c>Dispatcher</c> が現れず
     /// <see cref="RawDispatcherInvokeAsyncPattern"/> を素通りする（Issue #2101）。
+    /// 型の直後の <c>?</c>（<c>private Dispatcher? _dispatcher;</c>）も許す。本プロジェクトは Nullable 有効で、
+    /// 遅延初期化のフィールドはこの綴りになる（Issue #2101 のコードレビューで検出）。
     /// </remarks>
     private static readonly Regex DispatcherAliasDeclarationPattern = new(
-        @"(?:\bDispatcher\s+(\w+)\s*[=;,)])" +
-        @"|(?:\bvar\s+(\w+)\s*=\s*(?:[\w.?\s]*\.\s*)?(?:\w*Dispatcher|Dispatcher\s*\.\s*FromThread\s*\([^()]*\))\s*;)",
+        @"(?:\bDispatcher\s*\??\s+(\w+)\s*[=;,)])" +
+        @"|(?:\bvar\s+(\w+)\s*=\s*(?:[\w.?\s]*\.\s*)?(?:\w*Dispatcher|Dispatcher\s*\.\s*FromThread\s*\((?:[^()]|\([^()]*\))*\))\s*;)",
         RegexOptions.Compiled);
 
     /// <summary>
@@ -89,14 +95,27 @@ public class CardReadDispatchConventionTests
     /// </summary>
     /// <param name="codeOnly"><see cref="TestSourceInspection.ToCodeOnly"/> 済みのソース。</param>
     internal static IReadOnlyList<string> DetectRawDispatches(string codeOnly)
+        => DetectRawDispatches(codeOnly, new[] { codeOnly });
+
+    /// <summary>
+    /// <paramref name="codeOnly"/> の生の Dispatcher へのディスパッチを列挙する。別名は <paramref name="aliasSources"/> 全体から集める。
+    /// </summary>
+    /// <remarks>
+    /// 別名をファイル単位で集めると、partial クラスの別ファイルで宣言したフィールド
+    /// （<c>private Dispatcher _ui;</c>）からの <c>_ui.InvokeAsync(async …)</c> が素通りする
+    /// （Issue #2101 のコードレビューで検出）。走査対象（ViewModels / Views）全体を別名の出所にする。
+    /// 名前（<c>_dispatcher</c> 等）で受け手を推定する方式は採らない — <c>IDispatcherService</c> を
+    /// <c>_dispatcher</c> と名付けた正しい形を誤検出するため。別の型で同名のフィールドがあれば誤検出側へ倒れる。
+    /// </remarks>
+    internal static IReadOnlyList<string> DetectRawDispatches(string codeOnly, IEnumerable<string> aliasSources)
     {
         var found = RawDispatcherInvokeAsyncPattern.Matches(codeOnly)
             .Cast<Match>()
             .Select(m => m.Value)
             .ToList();
 
-        var aliases = DispatcherAliasDeclarationPattern.Matches(codeOnly)
-            .Cast<Match>()
+        var aliases = aliasSources
+            .SelectMany(source => DispatcherAliasDeclarationPattern.Matches(source).Cast<Match>())
             .Select(m => m.Groups[1].Success ? m.Groups[1].Value : m.Groups[2].Value)
             .Distinct();
 
@@ -123,6 +142,10 @@ public class CardReadDispatchConventionTests
     private static IReadOnlyList<(string FileName, string CodeOnly)> LoadViewSources()
         => LoadSources(ViewsDirectory, "Views");
 
+    /// <summary>別名の出所（ViewModels と Views の全ソース。partial クラスの別ファイルの宣言を拾うため）。</summary>
+    private static IReadOnlyList<string> LoadAliasSources()
+        => LoadViewModelSources().Concat(LoadViewSources()).Select(s => s.CodeOnly).ToList();
+
     private static IReadOnlyList<(string FileName, string CodeOnly)> LoadSources(
         string directory, string label)
     {
@@ -147,8 +170,9 @@ public class CardReadDispatchConventionTests
     public void ViewModels_生のDispatcherへ非同期ラムダをディスパッチしないこと()
     {
         // Act
+        var aliasSources = LoadAliasSources();
         var violations = LoadViewModelSources()
-            .Where(s => DetectRawDispatches(s.CodeOnly).Count > 0)
+            .Where(s => DetectRawDispatches(s.CodeOnly, aliasSources).Count > 0)
             .Select(s => s.FileName)
             .ToList();
 
@@ -206,8 +230,9 @@ public class CardReadDispatchConventionTests
     public void Viewsが生のDispatcherへディスパッチしないこと()
     {
         // Act
+        var aliasSources = LoadAliasSources();
         var violations = LoadViewSources()
-            .Where(s => DetectRawDispatches(s.CodeOnly).Count > 0)
+            .Where(s => DetectRawDispatches(s.CodeOnly, aliasSources).Count > 0)
             .Select(s => s.FileName)
             .ToList();
 
@@ -279,8 +304,38 @@ public class CardReadDispatchConventionTests
     [InlineData("Dispatcher.CurrentDispatcher.InvokeAsyncObserved(() => X(), \"再検索\");", false)]
     [InlineData("var d = Dispatcher.CurrentDispatcher; d.Invoke(() => X());", false)]
     [InlineData("var s = _dispatcherService; s.InvokeAsync(() => X());", false)]
+    // Issue #2101 のコードレビューで検出: Null 許容の宣言（Nullable 有効のプロジェクト）・入れ子の丸括弧
+    [InlineData("private Dispatcher? _dispatcher; void M() => _dispatcher.InvokeAsync(async () => await X());", true)]
+    [InlineData("private readonly System.Windows.Threading.Dispatcher? _ui; void M() => _ui?.BeginInvoke(new Action(() => X()));", true)]
+    [InlineData("Dispatcher.FromThread(GetThread()).InvokeAsync(async () => await X());", true)]
+    [InlineData("var d = Dispatcher.FromThread(GetThread()); d.InvokeAsync(async () => await X());", true)]
+    // 対の表明: Null 許容の IDispatcherService・同期の Invoke は対象外
+    [InlineData("private IDispatcherService? _dispatcher; void M() => _dispatcher.InvokeAsync(() => X());", false)]
+    [InlineData("private Dispatcher? _dispatcher; void M() => _dispatcher.Invoke(() => X());", false)]
     public void 検出パターンはサンプル入力で固定されていること(string line, bool expected)
     {
         DetectRawDispatches(TestSourceInspection.ToCodeOnly(line)).Any().Should().Be(expected);
+    }
+
+    /// <summary>
+    /// 別名の宣言と呼び出しが partial クラスの別ファイルに分かれていても検出すること
+    /// （Issue #2101 のコードレビューで検出）。
+    /// </summary>
+    /// <remarks>
+    /// 別名をファイル単位で集めると、宣言を持たないファイル側の <c>_ui.InvokeAsync(async …)</c> は
+    /// 受け手の字句に <c>Dispatcher</c> が現れないため素通りする。別名は走査対象全体から集める。
+    /// </remarks>
+    [Theory]
+    [InlineData("partial class Vm { private readonly Dispatcher _ui; }", "partial class Vm { void M() => _ui.InvokeAsync(async () => await X()); }", true)]
+    [InlineData("partial class Vm { private Dispatcher? _ui; }", "partial class Vm { void M() => _ui?.BeginInvoke(new Action(() => X())); }", true)]
+    // 対の表明: 別ファイルの宣言が IDispatcherService なら対象外・同期の Invoke は対象外
+    [InlineData("partial class Vm { private readonly IDispatcherService _ui; }", "partial class Vm { void M() => _ui.InvokeAsync(() => X()); }", false)]
+    [InlineData("partial class Vm { private readonly Dispatcher _ui; }", "partial class Vm { void M() => _ui.Invoke(() => X()); }", false)]
+    public void 別ファイルで宣言した別名からのディスパッチも検出すること(
+        string declaringFile, string invokingFile, bool expected)
+    {
+        var sources = new[] { declaringFile, invokingFile }.Select(TestSourceInspection.ToCodeOnly).ToList();
+
+        DetectRawDispatches(sources[1], sources).Any().Should().Be(expected);
     }
 }

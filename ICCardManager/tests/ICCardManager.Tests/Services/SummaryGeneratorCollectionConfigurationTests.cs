@@ -219,6 +219,67 @@ public class SummaryGeneratorCollectionConfigurationTests
         RestoresDefaultsOnDispose(TestSourceInspection.ToCodeOnly(code)).Should().Be(expected);
     }
 
+    /// <summary>
+    /// 静的な可変状態の抽出（<see cref="ExtractMutableStaticMembers"/>）をサンプル入力で固定する
+    /// （Issue #2101 のコードレビューで検出）。
+    /// </summary>
+    /// <remarks>
+    /// フィールドだけを数えると、世代を静的自動プロパティ（<c>static X Y { get; set; }</c>）へ移した日に
+    /// 可変状態が 0 件へ縮み、書き換える API も 1 つも導出されなくなる。
+    /// </remarks>
+    [Theory]
+    [InlineData("private static SummaryGenerationContext _context = SummaryGenerationContext.Default;", "_context", true)]
+    [InlineData("private static SummaryGenerationContext _context;", "_context", true)]
+    [InlineData("public static SummaryGenerationContext Current { get; set; }", "Current", true)]
+    [InlineData("internal static SummaryGenerationContext Current { get; private set; } = SummaryGenerationContext.Default;", "Current", true)]
+    // 対の表明: readonly・const・getter だけの自動プロパティ・式形式のプロパティは可変状態ではない
+    [InlineData("private static readonly SummaryRules _defaults = new SummaryRules();", "_defaults", false)]
+    [InlineData("public const string LendingText = \"x\";", "LendingText", false)]
+    [InlineData("public static SummaryGenerationContext Current { get; }", "Current", false)]
+    [InlineData("public static SummaryRules Rules => _context.Rules;", "Rules", false)]
+    public void 静的な可変状態の抽出がサンプル入力で固定されていること(string code, string member, bool expected)
+    {
+        ExtractMutableStaticMembers(TestSourceInspection.ToCodeOnly(code)).Contains(member).Should().Be(expected);
+    }
+
+    /// <summary>
+    /// 静的自動プロパティへの代入と、書き換える型を生成する型（多段の伝播）を導出できること
+    /// （Issue #2101 のコードレビューで検出）。
+    /// </summary>
+    /// <remarks>
+    /// 書き換える型の導出が 1 段だと、その型を内部で生成する本番の型（<c>Outer</c>）を生成する
+    /// テストクラスが検査から漏れる。導出は不動点まで繰り返す。
+    /// </remarks>
+    [Fact]
+    public void 静的自動プロパティと多段の生成を書き換え手段として導出すること()
+    {
+        var sources = new[]
+        {
+            "public class SummaryGenerator { public static Ctx Current { get; set; } " +
+            "public static void Use(Ctx c) { Current = c; } public static Ctx Read() => Current; " +
+            "public SummaryGenerator(int a, Ctx c) { Use(c); } public SummaryGenerator(int a) { } }",
+            "public class Holder { public void Save() { SummaryGenerator.Use(x); } }",
+            "public class Outer { private readonly Holder _holder = new Holder(); }",
+            "public class Unrelated { public Ctx M() => SummaryGenerator.Read(); }",
+        }.Select(TestSourceInspection.ToCodeOnly).ToList();
+
+        var mutators = DeriveMutators(sources);
+
+        mutators.StaticMembers.Should().Contain("Current");
+        mutators.Methods.Should().Contain("Use").And.NotContain("Read");
+        mutators.ConstructorArities.Should().Contain(2).And.NotContain(1);
+        mutators.Types.Should().Contain(new[] { "Holder", "Outer" }).And.NotContain("Unrelated");
+
+        MutatesSummaryGeneratorState("SummaryGenerator.Current = new Ctx();", mutators).Should().BeTrue(
+            "公開された静的自動プロパティへの代入はテストから直接行える書き換えである");
+        MutatesSummaryGeneratorState("var o = new Outer();", mutators).Should().BeTrue(
+            "書き換える型を生成する型の生成も書き換えにつながる");
+        MutatesSummaryGeneratorState("var c = SummaryGenerator.Current;", mutators).Should().BeFalse(
+            "読むだけのアクセスは書き換えではない（対の表明）");
+        MutatesSummaryGeneratorState("var u = new Unrelated();", mutators).Should().BeFalse(
+            "読むだけの型の生成は書き換えではない（対の表明）");
+    }
+
     #region 導出
 
     /// <summary>
@@ -229,12 +290,17 @@ public class SummaryGeneratorCollectionConfigurationTests
         public ProductionMutators(
             IReadOnlyCollection<string> methods,
             IReadOnlyCollection<int> constructorArities,
-            IReadOnlyCollection<string> types)
+            IReadOnlyCollection<string> types,
+            IReadOnlyCollection<string> staticMembers)
         {
             Methods = methods;
             ConstructorArities = constructorArities;
             Types = types;
+            StaticMembers = staticMembers;
         }
+
+        /// <summary>SummaryGenerator の静的な可変状態（フィールド・setter を持つ静的自動プロパティ）の名前。</summary>
+        public IReadOnlyCollection<string> StaticMembers { get; }
 
         /// <summary>静的な可変フィールドへ代入する SummaryGenerator の static メソッド名。</summary>
         public IReadOnlyCollection<string> Methods { get; }
@@ -252,8 +318,8 @@ public class SummaryGeneratorCollectionConfigurationTests
     /// 本番コードから書き換え手段を導出する。
     /// </summary>
     /// <remarks>
-    /// 「書き換え」は SummaryGenerator の <b>static かつ readonly / const でないフィールド</b>への代入で定義する
-    /// （現在は <c>_context</c> のみ）。API 名を手で列挙すると、書き換える API が増えた日に検査から漏れる。
+    /// 「書き換え」は SummaryGenerator の <b>static かつ readonly / const でないフィールド、または setter を持つ
+    /// 静的自動プロパティ</b>への代入で定義する（現在は <c>_context</c> のみ。<see cref="ExtractMutableStaticMembers"/>）。API 名を手で列挙すると、書き換える API が増えた日に検査から漏れる。
     /// </remarks>
     internal static ProductionMutators DeriveProductionMutators()
     {
@@ -268,12 +334,22 @@ public class SummaryGeneratorCollectionConfigurationTests
             .Select(f => TestSourceInspection.ToCodeOnly(File.ReadAllText(f)))
             .ToList();
 
+        return _productionMutators = DeriveMutators(sources);
+    }
+
+    /// <summary>
+    /// ソース群（コメント・リテラル除去済み）から書き換え手段を導出する。
+    /// </summary>
+    /// <remarks>
+    /// 本番コードの導出とサンプル入力の固定は、必ずこの 1 本の導出を通す（Issue #2101）。
+    /// </remarks>
+    internal static ProductionMutators DeriveMutators(IReadOnlyList<string> sources)
+    {
         var generatorSources = sources.Where(c => Regex.IsMatch(c, @"\bclass\s+SummaryGenerator\b")).ToList();
         generatorSources.Should().NotBeEmpty("SummaryGenerator の定義が見つからないと導出が空振りする");
 
         var staticFields = generatorSources
-            .SelectMany(c => Regex.Matches(c, @"\bstatic\s+(?!readonly\b|const\b)[^=;(){}]*?\b(\w+)\s*[=;]").Cast<Match>())
-            .Select(m => m.Groups[1].Value)
+            .SelectMany(ExtractMutableStaticMembers)
             .ToHashSet(StringComparer.Ordinal);
         staticFields.Should().NotBeEmpty("SummaryGenerator の静的な可変フィールドが見つからないと導出が空振りする");
 
@@ -325,7 +401,61 @@ public class SummaryGeneratorCollectionConfigurationTests
             }
         }
 
-        return _productionMutators = new ProductionMutators(methods, arities, types);
+        // 書き換える型を生成する本番の型も、生成したテストにとっては書き換えにつながる。
+        // 1 段で止めると「書き換える型を内部で生成する型」を生成するテストが検査から漏れるため、
+        // 不動点まで繰り返す（Issue #2101 のコードレビューで検出）。
+        var nonGeneratorSources = sources.Except(generatorSources).ToList();
+        while (true)
+        {
+            var candidates = nonGeneratorSources
+                .Where(code => types.Any(type => ConstructsType(code, type)))
+                .SelectMany(code => Regex.Matches(code, @"\bclass\s+(\w+)").Cast<Match>())
+                .Select(c => c.Groups[1].Value)
+                .ToList();
+            if (candidates.Where(types.Add).ToList().Count == 0)
+            {
+                break;
+            }
+        }
+
+        return new ProductionMutators(methods, arities, types, staticFields);
+    }
+
+    /// <summary>
+    /// ソース（コメント・リテラル除去済み）が <paramref name="type"/> を生成しているか（通常の new・target-typed new）。
+    /// </summary>
+    private static bool ConstructsType(string codeOnly, string type)
+    {
+        var t = Regex.Escape(type);
+        return Regex.IsMatch(codeOnly,
+            $@"\bnew\s+{t}\s*\(|(?<![.\w<]){t}\s+\w+\s*(?:\([^()]*\))?\s*(?:=>|=)\s*new\s*\(");
+    }
+
+    /// <summary>
+    /// SummaryGenerator のソース（コメント・リテラル除去済み）から、静的な可変状態のメンバー名を列挙する。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// フィールド（<c>static X _y;</c> / <c>static X _y = …;</c>）に加え、setter（<c>set</c> / <c>init</c>。
+    /// アクセス修飾子付きを含む）を持つ静的自動プロパティ（<c>static X Y { get; set; }</c>）を数える。
+    /// フィールドだけを数えると、世代を静的自動プロパティへ移した日に可変状態が 0 件へ縮み、
+    /// 書き換える API も導出されなくなる（Issue #2101 のコードレビューで検出）。
+    /// </para>
+    /// <para>
+    /// 式形式のプロパティ（<c>static X Y =&gt; …;</c>）は読むだけなので除く。旧実装は <c>=&gt;</c> の <c>=</c> を
+    /// フィールド初期化子と取り違えていた。
+    /// </para>
+    /// </remarks>
+    internal static IReadOnlyCollection<string> ExtractMutableStaticMembers(string generatorCodeOnly)
+    {
+        const string declaration = @"\bstatic\s+(?!readonly\b|const\b)[^=;(){}]*?\b(\w+)\s*";
+        var fields = Regex.Matches(generatorCodeOnly, declaration + @"(?:=(?!>)|;)").Cast<Match>();
+        var autoProperties = Regex.Matches(
+                generatorCodeOnly,
+                declaration + @"\{\s*(?:\w+\s+)*get\s*;\s*(?:\w+\s+)*(?:set|init)\s*;\s*\}")
+            .Cast<Match>();
+
+        return fields.Concat(autoProperties).Select(m => m.Groups[1].Value).Distinct().ToList();
     }
 
     /// <summary>
@@ -335,6 +465,13 @@ public class SummaryGeneratorCollectionConfigurationTests
     {
         if (mutators.Methods.Count > 0 && Regex.IsMatch(codeOnly,
                 $@"(?<![.\w])SummaryGenerator\s*\.\s*(?:{string.Join("|", mutators.Methods.Select(Regex.Escape))})\s*\("))
+        {
+            return true;
+        }
+
+        // 公開された静的な可変状態（静的自動プロパティ等）への直接の代入（Issue #2101 のコードレビューで検出）
+        if (mutators.StaticMembers.Count > 0 && Regex.IsMatch(codeOnly,
+                $@"(?<![.\w])SummaryGenerator\s*\.\s*(?:{string.Join("|", mutators.StaticMembers.Select(Regex.Escape))})\s*=(?![=>])"))
         {
             return true;
         }
@@ -353,12 +490,7 @@ public class SummaryGeneratorCollectionConfigurationTests
         }
 
         // 書き換える本番の型の生成
-        return mutators.Types.Any(type =>
-        {
-            var t = Regex.Escape(type);
-            return Regex.IsMatch(codeOnly,
-                $@"\bnew\s+{t}\s*\(|(?<![.\w<]){t}\s+\w+\s*(?:\([^()]*\))?\s*(?:=>|=)\s*new\s*\(");
-        });
+        return mutators.Types.Any(type => ConstructsType(codeOnly, type));
     }
 
     /// <summary>

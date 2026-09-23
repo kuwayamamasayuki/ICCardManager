@@ -75,9 +75,16 @@ public class CompletionMessageOrderConventionTests
     /// 「<c>CancelEdit()</c> → 完了メッセージ → 選択復帰」という正しい形が赤になる（#1786 の誤検出の害）。
     /// 本番の <c>Selected…</c> 代入は現状すべて <c>null</c> の代入（消えない側）である。
     /// </para>
+    /// <para>
+    /// <c>[RelayCommand]</c> が生成するコマンド経由の呼び出し（<c>StartEditCommand.Execute(null);</c>）も
+    /// 同じメソッドを同期で呼ぶため拾う（Issue #2101 のコードレビューで検出）。<c>CanExecute</c> は呼ばないので対象外。
+    /// </para>
     /// </remarks>
     private static readonly Regex StatusMessageEraserCall =
-        new Regex(@"(?:(?<![.\w])|(?<=(?<![.\w])this\.))(?:CancelEdit|StartEdit)\s*\(\s*\)\s*;", RegexOptions.Compiled);
+        new Regex(
+            @"(?:(?<![.\w])|(?<=(?<![.\w])this\.))(?:CancelEdit|StartEdit)" +
+            @"(?:\s*\(\s*\)|Command\s*\??\s*\.\s*Execute\s*\([^()]*\))\s*;",
+            RegexOptions.Compiled);
 
     /// <summary>
     /// 完了メッセージの設定が <c>CancelEdit()</c> に消されていないことを、本番ソース全体で表明する。
@@ -346,6 +353,58 @@ if (restored)
 
         FindViolations(startEdit).Should().ContainSingle(
             "StartEdit() も StatusMessage を空へ戻すため、直前の完了メッセージは表示されない");
+    }
+
+    /// <summary>
+    /// Issue #2101 のコードレビューで検出: 検査ロジックが、生成されたコマンド経由の呼び出し
+    /// （<c>StartEditCommand.Execute(null);</c>）による打ち消しも検出することを固定する。
+    /// </summary>
+    /// <remarks>
+    /// <c>[RelayCommand]</c> が生成する <c>StartEditCommand</c> / <c>CancelEditCommand</c> の
+    /// <c>Execute</c> は同じメソッドを同期で呼ぶため、直接の呼び出しと同じく直前の完了メッセージを消す。
+    /// </remarks>
+    [Fact]
+    public void 検査ロジックがコマンド経由の打ち消しも検出すること()
+    {
+        const string viaCommand = @"
+if (restored)
+{
+    StatusMessage = ""復元しました"";
+    StartEditCommand.Execute(null);
+}
+
+if (updated)
+{
+    this.StatusMessage = ""更新しました"";
+    this.CancelEditCommand.Execute(null);
+}";
+
+        FindViolations(viaCommand).Should().HaveCount(2,
+            "コマンドの Execute は同じメソッドを呼ぶため、直前の完了メッセージは表示されない");
+    }
+
+    /// <summary>
+    /// 同: コマンド経由でも、打ち消さない形（他オブジェクトのコマンド・<c>CanExecute</c>・
+    /// 打ち消しのあとの設定）は違反としないことを固定する（対の表明）。
+    /// </summary>
+    [Fact]
+    public void 検査ロジックがコマンド経由でも打ち消さない形を違反としないこと()
+    {
+        const string compliant = @"
+if (success)
+{
+    StatusMessage = ""他の画面"";
+    other.StartEditCommand.Execute(null);
+    var can = CancelEditCommand.CanExecute(null);
+}
+
+if (updated)
+{
+    CancelEditCommand.Execute(null);
+    StatusMessage = ""更新しました"";
+}";
+
+        FindViolations(compliant).Should().BeEmpty();
     }
 
     /// <summary>
