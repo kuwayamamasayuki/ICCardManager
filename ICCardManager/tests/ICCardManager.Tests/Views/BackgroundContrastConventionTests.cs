@@ -5,6 +5,7 @@ using System.IO;
 using System.Linq;
 using System.Text.RegularExpressions;
 using FluentAssertions;
+using ICCardManager.Models;
 using ICCardManager.Tests.Views.Helpers;
 using Xunit;
 
@@ -147,7 +148,8 @@ public class BackgroundContrastConventionTests
         // 上の 3:1 が成立する前提は「見出しが大きな文字であること」。
         // 文字サイズは設定で 4 段階に変わるため、最小の段でも 18.66px を下回らないことを固定する。
         // 定数はテスト側に書き写さず本番ソースから読む（#1821「本番の判定に使う閾値をテスト側で作り直さない」）。
-        var minBaseFontSize = ReadMinimumBaseFontSize();
+        // 最小の段は、画面の選択肢の説明ではなく実際にリソースへ入る値から決める（Issue #2102）
+        var minBaseFontSize = ReadAppliedBaseFontSizes().Values.Min();
         var titleRatio = ReadTitleFontSizeRatio();
 
         // 本番（App.xaml.cs）は Math.Round してからリソースへ入れる。丸めを省くと境界で
@@ -159,6 +161,20 @@ public class BackgroundContrastConventionTests
             minBaseFontSize,
             minBaseFontSize * titleRatio,
             LargeTextBoldMinPx);
+    }
+
+    [Fact]
+    public void 設定画面が表示する文字サイズと実際に適用される文字サイズが一致すること()
+    {
+        // 文字サイズの値は App.ApplyFontSize（適用）と SettingsViewModel（選択肢の表示）の 2 か所にある。
+        // 上の検査は適用側を読むので、表示側だけがずれると「小（12）」と表示しながら別の大きさで
+        // 描画する状態になり、どちらの検査にも現れない（Issue #2102）
+        var applied = ReadAppliedBaseFontSizes();
+        var displayed = ReadDisplayedBaseFontSizes();
+
+        displayed.Should().BeEquivalentTo(
+            applied,
+            "設定画面の選択肢が示す BaseFontSize は、App.ApplyFontSize が実際に適用する値と段ごとに一致すること");
     }
 
     [Fact]
@@ -360,33 +376,67 @@ public class BackgroundContrastConventionTests
     }
 
     /// <summary>
-    /// 設定画面が提供する文字サイズの選択肢のうち、最小の <c>BaseFontSize</c> を本番ソースから読む。
+    /// 文字サイズの各段で<b>実際に適用される</b> <c>BaseFontSize</c> を、
+    /// <c>App.ApplyFontSize</c> の <c>switch</c> から「段 → 値」で読む。
     /// </summary>
     /// <remarks>
-    /// <b>「非空であること」では空振りを検出しきれない</b>。数値リテラル以外で書かれた選択肢
-    /// （<c>BaseFontSize = AppConstants.TinyFontSize</c> 等）は正規表現に一致せず<b>黙って落ちる</b>ので、
-    /// 既存の選択肢が残っている限り最小値は 12 のまま緑になり、前提の検査が静かに止まる（#1764 の fail-open）。
-    /// <c>FontSizeItem</c> の生成数と読み取れた値の数が<b>一致すること</b>まで表明する。
+    /// <para>
+    /// <b>画面に表示する値ではなく、リソースへ入れる値を読む</b>（Issue #2102）。
+    /// 以前は設定画面の選択肢（<c>SettingsViewModel.FontSizeOptions</c> の <c>BaseFontSize</c>）から
+    /// 読んでいたが、あれは選択肢の説明用で、実際に <c>Application.Current.Resources["BaseFontSize"]</c> へ
+    /// 入るのは <c>App.ApplyFontSize</c> の値である。<c>FontSizeOption.Small =&gt; 12.0</c> を 10 にしても
+    /// 検査は緑のままだった。
+    /// </para>
+    /// <para>
+    /// <b>「非空であること」では空振りを検出しきれない</b>。数値リテラル以外で書かれた腕は
+    /// 正規表現に一致せず<b>黙って落ちる</b>（#1764 の fail-open）ので、
+    /// <see cref="FontSizeOption"/> の全メンバーが読み出せることまで表明する。
+    /// </para>
     /// </remarks>
-    private static double ReadMinimumBaseFontSize()
+    private static IReadOnlyDictionary<FontSizeOption, double> ReadAppliedBaseFontSizes()
+    {
+        var body = TestSourceInspection.ExtractMethodBody(
+            TestSourceInspection.ToCodeOnly(File.ReadAllText(
+                Path.Combine(TestPaths.GetProductionSourceRoot(), "App.xaml.cs"))),
+            "public static void ApplyFontSize(");
+        var values = Regex.Matches(body, @"FontSizeOption\.(?<name>[A-Za-z]+)\s*=>\s*(?<v>\d+(?:\.\d+)?)")
+            .Cast<Match>()
+            .ToDictionary(
+                m => (FontSizeOption)Enum.Parse(typeof(FontSizeOption), m.Groups["name"].Value),
+                m => double.Parse(m.Groups["v"].Value, CultureInfo.InvariantCulture));
+
+        values.Keys.Should().BeEquivalentTo(
+            Enum.GetValues(typeof(FontSizeOption)).Cast<FontSizeOption>(),
+            "App.ApplyFontSize の switch から、文字サイズの全段の BaseFontSize を数値として読み出せること"
+                + "（数値リテラル以外で書かれた腕は正規表現から静かに落ち、"
+                + "残った段だけで最小値を決めたまま緑になる）");
+
+        return values;
+    }
+
+    /// <summary>
+    /// 設定画面が選択肢として表示する「段 → <c>BaseFontSize</c>」を <c>SettingsViewModel</c> から読む。
+    /// </summary>
+    private static IReadOnlyDictionary<FontSizeOption, double> ReadDisplayedBaseFontSizes()
     {
         var source = ReadProductionSource(Path.Combine("ViewModels", "SettingsViewModel.cs"));
         var declared = Regex.Matches(source, @"new\s+FontSizeItem\b").Count;
-        var values = Regex.Matches(source, @"BaseFontSize\s*=\s*(?<v>\d+(?:\.\d+)?)")
+        var values = Regex.Matches(
+                source,
+                @"new\s+FontSizeItem\s*\{[^}]*?Value\s*=\s*FontSizeOption\.(?<name>[A-Za-z]+)[^}]*?"
+                    + @"BaseFontSize\s*=\s*(?<v>\d+(?:\.\d+)?)[^}]*\}")
             .Cast<Match>()
-            .Select(m => double.Parse(m.Groups["v"].Value, CultureInfo.InvariantCulture))
-            .ToList();
+            .ToDictionary(
+                m => (FontSizeOption)Enum.Parse(typeof(FontSizeOption), m.Groups["name"].Value),
+                m => double.Parse(m.Groups["v"].Value, CultureInfo.InvariantCulture));
 
         declared.Should().BeGreaterThan(
             0, "SettingsViewModel に文字サイズの選択肢が実在すること（消えたら本テストの前提が変わる）");
         values.Should().HaveCount(
             declared,
-            "文字サイズの選択肢 {0} 件すべてから BaseFontSize を数値として読み出せること"
-                + "（数値リテラル以外で書かれた選択肢は正規表現から静かに落ち、"
-                + "既存の選択肢が残っている限り最小値が変わらないまま緑になる）",
-            declared);
+            "文字サイズの選択肢 {0} 件すべてから段と BaseFontSize を読み出せること", declared);
 
-        return values.Min();
+        return values;
     }
 
     /// <summary>

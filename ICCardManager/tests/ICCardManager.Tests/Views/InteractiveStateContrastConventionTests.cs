@@ -273,11 +273,31 @@ public class InteractiveStateContrastConventionTests
     [Fact]
     public void 無効時の塗りと文字が読めること()
     {
-        // 旧実装は枠を Opacity=0.5 で落としており、白文字のボタンでは 1.4:1 前後まで落ちていた
+        // 旧実装は枠を Opacity=0.5 で落としており、白文字のボタンでは 1.4:1 前後まで落ちていた。
+        // 組はテスト側に書き写さず共有テンプレートから読む（Issue #2102）。キーを直書きしていた間は、
+        // 文字色を白へ揃えるトリガーを消しても（＝黒文字 on #616161、3.39:1）緑のままだった
         var brushes = AccessibilityBrushes.Load();
+        var fillKey = SharedFillBindings()[DisabledFallbackIndex].Source;
+        var textKey = DisabledForegroundKey();
 
-        Contrast(Parse(Resolve(brushes, "DisabledFillBrush")), Parse(Resolve(brushes, "OnPrimaryBrush")))
-            .Should().BeGreaterOrEqualTo(MinContrast, "無効なボタンのラベルも読めること");
+        Contrast(Parse(Resolve(brushes, fillKey!)), Parse(Resolve(brushes, textKey)))
+            .Should().BeGreaterOrEqualTo(
+                MinContrast, "無効なボタンのラベル（{0} の上の {1}）も読めること", fillKey, textKey);
+    }
+
+    [Fact]
+    public void 無効時の文字色を揃えないと既定の濃い文字が読めないこと()
+    {
+        // 上の表明が「トリガーがある」ことに依存している理由を測って固定する。
+        // 無効時の塗りは濃い灰色なので、トリガーを外して既定の濃い文字が残ると読めない
+        var brushes = AccessibilityBrushes.Load();
+        var fillKey = SharedFillBindings()[DisabledFallbackIndex].Source;
+
+        Contrast(Parse(Resolve(brushes, fillKey!)), Parse(DefaultDarkText))
+            .Should().BeLessThan(
+                MinContrast,
+                "無効時の塗り {0} は既定の濃い文字では読めない（だから文字色を揃えるトリガーが要る）",
+                fillKey);
     }
 
     [Fact]
@@ -381,8 +401,9 @@ public class InteractiveStateContrastConventionTests
     {
         var template = SharedTemplate();
 
-        template.Should().Contain(
-            "InteractiveFillConverter",
+        // 字句がテンプレートのどこかにあることではなく、枠の Background そのものが
+        // コンバーターへの MultiBinding であることを見る（並びは次のテストが見る）
+        SharedFillMultiBinding().Should().NotBeNull(
             "塗りの導出はコンバーター 1 か所で行うこと（状態ごとの Setter へ配らない）");
         template.Should().NotContain(
             "Property=\"Opacity\"",
@@ -390,6 +411,64 @@ public class InteractiveStateContrastConventionTests
         template.Should().Contain(
             "SystemParameters.HighContrast",
             "高コントラストモードの分岐を残すこと（色の決定を OS へ委ねる）");
+    }
+
+    [Fact]
+    public void 共有テンプレートのMultiBindingがコンバーターの期待する並びで値を渡すこと()
+    {
+        // Issue #2102: コンバーターは値の個数が違えば Binding.DoNothing を返す。
+        // Binding を 1 本消すと塗りが消えて白文字が読めなくなるが、字句の存在だけを見る検査は緑のままだった。
+        // 並びの意味（位置ごとに何を渡すか）はコンバーターの挙動テスト（InteractiveFillConverterTests）が、
+        // テンプレートがその並びで渡していることは本テストが見る
+        var bindings = SharedFillBindings();
+
+        bindings.Select(b => b.Describe()).Should().Equal(
+            new[]
+            {
+                "TemplatedParent.Background",
+                "TemplatedParent.Foreground",
+                "TemplatedParent.IsMouseOver",
+                "TemplatedParent.IsPressed",
+                "TemplatedParent.IsEnabled",
+                "StaticResource",
+                "StaticResource",
+                "StaticResource",
+            },
+            "InteractiveFillConverter.Convert の値の並び（塗り・文字色・hover・pressed・有効・"
+                + "hover / pressed / 無効のフォールバック）と 1 対 1 で対応すること");
+
+        bindings.Should().HaveCount(
+            ConverterExpectedValueCount(),
+            "テンプレートが渡す値の個数がコンバーターの期待する個数と一致すること"
+                + "（食い違うとコンバーターは何もせず、塗りが消える）");
+        bindings.Skip(5).Select(b => b.Source).Should().OnlyHaveUniqueItems(
+            "hover / pressed / 無効のフォールバックはそれぞれ別のブラシであること"
+                + "（同じブラシを渡すと状態の違いが見えない）");
+    }
+
+    [Fact]
+    public void 共有テンプレートが無効時に文字色を揃えること()
+    {
+        // Issue #2102: 無効時の塗りは濃い灰色なので、文字色を揃えるトリガーを消すと
+        // 既定の濃い文字が残って 3.39:1 になる。存在と所在（TargetName を持たない＝ボタン自身の
+        // Foreground を書き換える）を見る。値の可読性は 無効時の塗りと文字が読めること が見る
+        var triggers = XamlElementInspection.EnumerateElements(SharedTemplate(), "Trigger")
+            .Where(t => XamlElementInspection.GetAttribute(t.StartTag, "Property") == "IsEnabled"
+                        && XamlElementInspection.GetAttribute(t.StartTag, "Value") == "False")
+            .ToList();
+
+        triggers.Should().ContainSingle("共有テンプレートに IsEnabled=False のトリガーが 1 つあること");
+
+        var setters = XamlElementInspection.EnumerateElements(triggers[0].Body, "Setter")
+            .Where(s => XamlElementInspection.IsSetterFor(
+                XamlElementInspection.GetAttribute(s.StartTag, "Property"), "Foreground"))
+            .ToList();
+
+        setters.Should().ContainSingle("無効時のトリガーが文字色を 1 つに決めること");
+        XamlElementInspection.GetAttribute(setters[0].StartTag, "TargetName").Should().BeNull(
+            "テンプレート内の部品ではなくボタン自身の Foreground を書き換えること（ContentPresenter が継承する）");
+        FillForegroundPairs.ResourceKeyOf(XamlElementInspection.GetAttribute(setters[0].StartTag, "Value"))
+            .Should().NotBeNull("文字色はスタイル辞書のブラシキーで指定すること（色値の直書きは #1822 違反）");
     }
 
     [Fact]
@@ -576,17 +655,129 @@ public class InteractiveStateContrastConventionTests
     /// </remarks>
     private static IReadOnlyList<string> FallbackFillKeys()
     {
-        var keys = XamlElementInspection.EnumerateStartTags(SharedTemplate())
-            .Select(t => FillForegroundPairs.ResourceKeyOf(
-                XamlElementInspection.GetAttribute(t.StartTag, "Source")))
+        var bindings = SharedFillBindings();
+        var keys = new[] { bindings[HoverFallbackIndex].Source, bindings[PressedFallbackIndex].Source }
             .Where(k => k != null)
             .Select(k => k!)
-            .Where(k => k != "DisabledFillBrush")
             .ToList();
 
         keys.Should().HaveCount(
             2, "hover / pressed のフォールバックが共有テンプレートから読み出せること");
         return keys;
+    }
+
+    /// <summary>コンバーターへ渡す値のうち、hover のフォールバックの位置。</summary>
+    private const int HoverFallbackIndex = 5;
+
+    /// <summary>コンバーターへ渡す値のうち、pressed のフォールバックの位置。</summary>
+    private const int PressedFallbackIndex = 6;
+
+    /// <summary>コンバーターへ渡す値のうち、無効時の塗りの位置。</summary>
+    private const int DisabledFallbackIndex = 7;
+
+    /// <summary>共有テンプレートの塗りの <c>MultiBinding</c> に並ぶ 1 本の <c>Binding</c>。</summary>
+    private sealed class FillBinding
+    {
+        public FillBinding(string? path, string? relativeSource, string? source)
+        {
+            Path = path;
+            RelativeSource = relativeSource;
+            Source = source;
+        }
+
+        public string? Path { get; }
+
+        public string? RelativeSource { get; }
+
+        /// <summary><c>Source="{StaticResource K}"</c> の <c>K</c>。</summary>
+        public string? Source { get; }
+
+        /// <summary>並びを比べるための表記。フォールバックのキーはテスト側に書き写さない（#1821）。</summary>
+        public string Describe()
+        {
+            if (Source != null)
+            {
+                return "StaticResource";
+            }
+
+            var owner = RelativeSource != null
+                        && RelativeSource.IndexOf("TemplatedParent", StringComparison.Ordinal) >= 0
+                ? "TemplatedParent"
+                : RelativeSource ?? "(DataContext)";
+            return owner + "." + Path;
+        }
+    }
+
+    /// <summary>
+    /// 共有テンプレートの枠（<c>x:Name="border"</c>）の <c>Border.Background</c> にある、
+    /// <c>InteractiveFillConverter</c> への <c>MultiBinding</c>。
+    /// </summary>
+    /// <remarks>
+    /// <b>所在まで絞ってから</b>見る（Issue #2102）。テンプレートのどこかに字句があることを見るだけでは、
+    /// <c>MultiBinding</c> を別の要素へ移しても、コメントにだけ名前が残っても緑になる。
+    /// </remarks>
+    private static XamlElementInspection.XamlElement? SharedFillMultiBinding()
+    {
+        var border = XamlElementInspection.EnumerateElements(SharedTemplate(), "Border")
+            .FirstOrDefault(b => XamlElementInspection.GetAttribute(b.StartTag, "x:Name") == "border");
+        if (border == null)
+        {
+            return null;
+        }
+
+        return XamlElementInspection.EnumerateElements(border.Body, "Border.Background")
+            .SelectMany(bg => XamlElementInspection.EnumerateElements(bg.Body, "MultiBinding"))
+            .SingleOrDefault(mb => FillForegroundPairs.ResourceKeyOf(
+                XamlElementInspection.GetAttribute(mb.StartTag, "Converter")) == "InteractiveFillConverter");
+    }
+
+    /// <summary><see cref="SharedFillMultiBinding"/> に並ぶ <c>Binding</c> を、書かれた順に返す。</summary>
+    private static IReadOnlyList<FillBinding> SharedFillBindings()
+    {
+        var multiBinding = SharedFillMultiBinding();
+        multiBinding.Should().NotBeNull(
+            "共有テンプレートの枠の Background が InteractiveFillConverter への MultiBinding であること"
+                + "（読めないと以降の検査は何も見ないまま緑になる）");
+
+        return XamlElementInspection.EnumerateElements(multiBinding!.Body, "Binding")
+            .Select(b => new FillBinding(
+                XamlElementInspection.GetAttribute(b.StartTag, "Path"),
+                XamlElementInspection.GetAttribute(b.StartTag, "RelativeSource"),
+                FillForegroundPairs.ResourceKeyOf(XamlElementInspection.GetAttribute(b.StartTag, "Source"))))
+            .ToList();
+    }
+
+    /// <summary>
+    /// 共有テンプレートの <c>IsEnabled=False</c> トリガーが揃える文字色のキー。
+    /// </summary>
+    private static string DisabledForegroundKey()
+    {
+        var key = XamlElementInspection.EnumerateElements(SharedTemplate(), "Trigger")
+            .Where(t => XamlElementInspection.GetAttribute(t.StartTag, "Property") == "IsEnabled"
+                        && XamlElementInspection.GetAttribute(t.StartTag, "Value") == "False")
+            .SelectMany(t => XamlElementInspection.EnumerateElements(t.Body, "Setter"))
+            .Where(s => XamlElementInspection.IsSetterFor(
+                XamlElementInspection.GetAttribute(s.StartTag, "Property"), "Foreground"))
+            .Select(s => FillForegroundPairs.ResourceKeyOf(XamlElementInspection.GetAttribute(s.StartTag, "Value")))
+            .FirstOrDefault(k => k != null);
+
+        key.Should().NotBeNull(
+            "共有テンプレートが無効時の文字色をトリガーで揃えていること"
+                + "（無いと無効時の塗りの上に既定の濃い文字が残る）");
+        return key!;
+    }
+
+    /// <summary>
+    /// <see cref="InteractiveFillConverter"/> が期待する値の個数を本番から読む（テスト側に書き写さない）。
+    /// </summary>
+    private static int ConverterExpectedValueCount()
+    {
+        var field = typeof(ICCardManager.Views.Converters.InteractiveFillConverter).GetField(
+            "ExpectedValueCount",
+            System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
+
+        field.Should().NotBeNull("InteractiveFillConverter が期待する値の個数を定数で持っていること");
+        return (int)field!.GetRawConstantValue()!;
     }
 
     /// <summary>
