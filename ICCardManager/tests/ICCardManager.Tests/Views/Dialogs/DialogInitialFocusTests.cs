@@ -2,6 +2,7 @@ using System;
 using System.IO;
 using System.Text.RegularExpressions;
 using FluentAssertions;
+using ICCardManager.Tests.Views.Helpers;
 using Xunit;
 
 namespace ICCardManager.Tests.Views.Dialogs;
@@ -20,7 +21,7 @@ namespace ICCardManager.Tests.Views.Dialogs;
 /// </remarks>
 public class DialogInitialFocusTests
 {
-    private static readonly string DialogsDirectory = ResolveDialogsDirectory();
+    private static readonly string DialogsDirectory = ViewSourceLocator.ResolveDirectory(Path.Combine("Views", "Dialogs"));
 
     /// <summary>
     /// 各ダイアログ XAML に <c>FocusManager.FocusedElement="{Binding ElementName=...}"</c>
@@ -76,26 +77,5 @@ public class DialogInitialFocusTests
             "最初のバス停テキストボックスに Focus() を呼ぶコードが存在すべき");
         source.Should().Contain("FindFirstBusStopTextBox",
             "最初の TextBox を探すヘルパー FindFirstBusStopTextBox が実装されているべき");
-    }
-
-    /// <summary>
-    /// テスト実行環境の bin/Debug/net48 から親を辿って
-    /// ICCardManager プロジェクトの Views/Dialogs ディレクトリを解決する。
-    /// </summary>
-    private static string ResolveDialogsDirectory()
-    {
-        var current = new DirectoryInfo(AppContext.BaseDirectory);
-        while (current != null)
-        {
-            var candidate = Path.Combine(current.FullName, "src", "ICCardManager", "Views", "Dialogs");
-            if (Directory.Exists(candidate))
-            {
-                return candidate;
-            }
-            current = current.Parent;
-        }
-
-        throw new InvalidOperationException(
-            $"Views/Dialogs ディレクトリを {AppContext.BaseDirectory} の親階層から解決できませんでした");
     }
 }

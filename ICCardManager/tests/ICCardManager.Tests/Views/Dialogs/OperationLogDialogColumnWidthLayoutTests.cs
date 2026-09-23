@@ -2,6 +2,7 @@ using System;
 using System.IO;
 using System.Text.RegularExpressions;
 using FluentAssertions;
+using ICCardManager.Tests.Views.Helpers;
 using Xunit;
 
 namespace ICCardManager.Tests.Views.Dialogs;
@@ -33,7 +34,7 @@ public class OperationLogDialogColumnWidthLayoutTests
 {
     private const string TargetXaml = "OperationLogDialog.xaml";
 
-    private static readonly string DialogsDirectory = ResolveDialogsDirectory();
+    private static readonly string DialogsDirectory = ViewSourceLocator.ResolveDirectory(Path.Combine("Views", "Dialogs"));
 
     /// <summary>
     /// 抽出の妥当性を先に固定する（対象 XAML を読めていない状態で他のテストが
@@ -154,22 +155,5 @@ public class OperationLogDialogColumnWidthLayoutTests
         var path = Path.Combine(DialogsDirectory, fileName);
         File.Exists(path).Should().BeTrue($"{fileName} が {DialogsDirectory} に存在する必要があります");
         return File.ReadAllText(path);
-    }
-
-    private static string ResolveDialogsDirectory()
-    {
-        var current = new DirectoryInfo(AppContext.BaseDirectory);
-        while (current != null)
-        {
-            var candidate = Path.Combine(current.FullName, "src", "ICCardManager", "Views", "Dialogs");
-            if (Directory.Exists(candidate))
-            {
-                return candidate;
-            }
-            current = current.Parent;
-        }
-
-        throw new InvalidOperationException(
-            $"Views/Dialogs ディレクトリを {AppContext.BaseDirectory} の親階層から解決できませんでした");
     }
 }

@@ -2,6 +2,7 @@ using System;
 using System.IO;
 using System.Text.RegularExpressions;
 using FluentAssertions;
+using ICCardManager.Tests.Views.Helpers;
 using Xunit;
 
 namespace ICCardManager.Tests.Views.Dialogs;
@@ -32,7 +33,7 @@ public class OperationLogDialogQuickFilterLayoutTests
 {
     private const string TargetXaml = "OperationLogDialog.xaml";
 
-    private static readonly string DialogsDirectory = ResolveDialogsDirectory();
+    private static readonly string DialogsDirectory = ViewSourceLocator.ResolveDirectory(Path.Combine("Views", "Dialogs"));
 
     /// <summary>
     /// クイックフィルタボタン群は専用の StackPanel (x:Name="QuickFilterPanel") に分離されていること。
@@ -238,22 +239,5 @@ public class OperationLogDialogQuickFilterLayoutTests
         var path = Path.Combine(DialogsDirectory, fileName);
         File.Exists(path).Should().BeTrue($"ダイアログ {fileName} が存在すべき");
         return File.ReadAllText(path);
-    }
-
-    private static string ResolveDialogsDirectory()
-    {
-        var current = new DirectoryInfo(AppContext.BaseDirectory);
-        while (current != null)
-        {
-            var candidate = Path.Combine(current.FullName, "src", "ICCardManager", "Views", "Dialogs");
-            if (Directory.Exists(candidate))
-            {
-                return candidate;
-            }
-            current = current.Parent;
-        }
-
-        throw new InvalidOperationException(
-            $"Views/Dialogs ディレクトリを {AppContext.BaseDirectory} の親階層から解決できませんでした");
     }
 }
