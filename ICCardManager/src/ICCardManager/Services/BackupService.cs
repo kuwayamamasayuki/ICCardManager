@@ -11,6 +11,7 @@ using ICCardManager.Common.Exceptions;
 using ICCardManager.Data;
 using ICCardManager.Data.Repositories;
 using ICCardManager.Dtos;
+using ICCardManager.Infrastructure.Timing;
 using Microsoft.Extensions.Logging;
 
 namespace ICCardManager.Services
@@ -23,6 +24,16 @@ namespace ICCardManager.Services
         private readonly DbContext _dbContext;
         private readonly ISettingsRepository _settingsRepository;
         private readonly ILogger<BackupService> _logger;
+
+        /// <summary>
+        /// バックアップのファイル名・成功日時に使う現在時刻の取得元（Issue #2100）
+        /// </summary>
+        /// <remarks>
+        /// 世代削除はファイル名のタイムスタンプで日をまとめる（Issue #1813）。<c>DateTime.Now</c> を直接読むと、
+        /// テストが用意した「今日」と本体がファイル名に使う「今日」を別々に評価することになり、
+        /// 0 時をまたいだ実行で別の日として扱われて赤くなる。省略時の既定は本番と同じシステム時計。
+        /// </remarks>
+        private readonly ISystemClock _clock;
 
         /// <summary>
         /// 自動バックアップの保持日数（Issue #1689 で <see cref="AppConstants"/> に集約。
@@ -78,10 +89,27 @@ namespace ICCardManager.Services
             DbContext dbContext,
             ISettingsRepository settingsRepository,
             ILogger<BackupService> logger)
+            : this(dbContext, settingsRepository, logger, new SystemClock())
+        {
+        }
+
+        /// <summary>
+        /// 時計を差し替えるコンストラクタ（Issue #2100）
+        /// </summary>
+        /// <remarks>
+        /// 省略可能引数にしないのは、<c>new Mock&lt;BackupService&gt;(dbContext, settings, logger)</c> のような
+        /// クラスモックが引数の個数でコンストラクタを探すため（省略可能引数は一致しない）。
+        /// </remarks>
+        internal BackupService(
+            DbContext dbContext,
+            ISettingsRepository settingsRepository,
+            ILogger<BackupService> logger,
+            ISystemClock clock)
         {
             _dbContext = dbContext;
             _settingsRepository = settingsRepository;
             _logger = logger;
+            _clock = clock ?? throw new ArgumentNullException(nameof(clock));
         }
 
         /// <summary>
@@ -111,7 +139,7 @@ namespace ICCardManager.Services
                 // バックアップファイル名を生成
                 // Issue #1813: 世代削除は「ファイル名のタイムスタンプ」で日をまとめるため、
                 // 書き込み側と判定側が同じ書式定数を共有する。
-                var timestamp = DateTime.Now.ToString(BackupTimestampFormat, CultureInfo.InvariantCulture);
+                var timestamp = _clock.Now.ToString(BackupTimestampFormat, CultureInfo.InvariantCulture);
                 var backupFileName = $"{BackupFilePrefix}{timestamp}{BackupFileExtension}";
                 var backupFilePath = Path.Combine(backupPath, backupFileName);
 
@@ -302,7 +330,7 @@ namespace ICCardManager.Services
             {
                 await _settingsRepository.SetAsync(
                     SettingsRepository.KeyLastBackupSuccessAt,
-                    SqliteDateTimeFormat.ToText(DateTime.Now)).ConfigureAwait(false);
+                    SqliteDateTimeFormat.ToText(_clock.Now)).ConfigureAwait(false);
                 await _settingsRepository.SetAsync(
                     SettingsRepository.KeyLastBackupMachine,
                     Environment.MachineName).ConfigureAwait(false);
@@ -1162,6 +1190,7 @@ namespace ICCardManager.Services
         /// <param name="backupPath">バックアップ保存先フォルダー</param>
         private void CleanupStaleTempFiles(string backupPath)
         {
+            // 比較相手はファイルシステムの更新日時（実時刻）なので、注入した時計ではなく実時刻で測る（Issue #2100）
             var threshold = DateTime.Now.AddHours(-AppConstants.BackupTempFileStaleHours);
 
             List<FileInfo> tempFiles;

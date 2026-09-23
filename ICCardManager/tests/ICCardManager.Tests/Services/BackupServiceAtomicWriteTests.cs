@@ -9,6 +9,7 @@ using ICCardManager.Data;
 using ICCardManager.Data.Repositories;
 using ICCardManager.Models;
 using ICCardManager.Services;
+using ICCardManager.Tests.Infrastructure.Timing;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using Xunit;
@@ -34,6 +35,13 @@ public class BackupServiceAtomicWriteTests : IDisposable
     private readonly BackupService _service;
 
     /// <summary>
+    /// バックアップのファイル名に使う現在時刻（Issue #2100）。世代の日付はテスト側で組み立てるため、
+    /// 本体がファイル名に使う「今日」と同じ時計から取らないと、0 時をまたいだ実行で日がずれて赤くなる。
+    /// 一時ファイルの鮮度判定はファイルシステムの更新日時（実時刻）と比べるので、この時計の影響を受けない。
+    /// </summary>
+    private readonly FixedSystemClock _clock = new(new DateTime(2025, 6, 15, 12, 0, 0));
+
+    /// <summary>
     /// 切り詰めを再現するサイズ。ページ 1（マジックヘッダを含む）だけが書かれた状態を模す。
     /// </summary>
     private const int TruncatedLength = 4096;
@@ -57,7 +65,8 @@ public class BackupServiceAtomicWriteTests : IDisposable
         _service = new BackupService(
             _dbContext,
             _settingsRepositoryMock.Object,
-            NullLogger<BackupService>.Instance);
+            NullLogger<BackupService>.Instance,
+            _clock);
     }
 
     public void Dispose()
@@ -201,7 +210,7 @@ public class BackupServiceAtomicWriteTests : IDisposable
     public async Task ExecuteAutoBackupAsync_一時ファイルが世代数を消費しないこと()
     {
         // Arrange: 保持上限ちょうどの日数分の世代を作る（1 日 1 世代、Issue #1813）
-        var baseDay = DateTime.Now.Date.AddDays(-AppConstants.BackupRetentionDays);
+        var baseDay = _clock.Now.Date.AddDays(-AppConstants.BackupRetentionDays);
         for (int i = 0; i < AppConstants.BackupRetentionDays; i++)
         {
             var path = Path.Combine(

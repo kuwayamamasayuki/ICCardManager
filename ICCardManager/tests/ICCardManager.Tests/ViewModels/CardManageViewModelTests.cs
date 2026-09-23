@@ -55,6 +55,16 @@ public class CardManageViewModelTests
     /// 「記録して再スローしない」代役を使う。
     /// </summary>
     private readonly RecordingDispatcherService _dispatcher = new();
+    /// <summary>
+    /// ViewModel が読む現在時刻（Issue #2100）。
+    /// </summary>
+    /// <remarks>
+    /// 履歴インポートの開始日は登録日の月で年が決まる（「繰越月 ≦ 登録月なら当年」）ため、
+    /// 実時計のままだと 1 月にだけ赤くなるテストが生まれる。既定は年の途中の日付に固定し、
+    /// 境界を検証するテストは個別に書き換える。過去の年を選んでいるのは、時計を無視して
+    /// <c>DateTime.Now</c> を読む実装へ戻したときに開始日が食い違って赤くなるようにするため。
+    /// </remarks>
+    private readonly FixedSystemClock _clock = new(new DateTime(2025, 6, 15, 10, 0, 0));
     private readonly CardManageViewModel _viewModel;
 
     public CardManageViewModelTests()
@@ -126,7 +136,8 @@ public class CardManageViewModelTests
             messenger,
             _dispatcher,
             Mock.Of<INavigationService>(),
-            () => throw new InvalidOperationException("このテストは貸出記録作成ダイアログを使用しません"));
+            () => throw new InvalidOperationException("このテストは貸出記録作成ダイアログを使用しません"),
+            clock: _clock);
     }
 
     #region カード一覧読み込みテスト
@@ -1291,38 +1302,52 @@ public class CardManageViewModelTests
     public void GetImportFromDate_NewPurchase_ShouldReturnToday()
     {
         // Arrange
+        var registrationDate = new DateTime(2026, 1, 15, 14, 30, 0);
         var modeResult = new ICCardManager.Views.Dialogs.CardRegistrationModeResult
         {
             IsNewPurchase = true
         };
 
         // Act
-        var result = CardManageViewModel.GetImportFromDate(modeResult);
+        var result = CardManageViewModel.GetImportFromDate(modeResult, registrationDate);
 
-        // Assert
-        result.Should().Be(DateTime.Today);
+        // Assert: 時刻を切り捨てた登録日（月初めの 1/1 ではない）
+        result.Should().Be(new DateTime(2026, 1, 15));
     }
 
     /// <summary>
-    /// 繰越時、GetImportFromDateがSummaryGenerator.GetMidYearCarryoverDateと同じ値を返すこと
+    /// 繰越時、GetImportFromDateが繰越月の翌月1日を返し、その年を登録日の月で決めること
     /// </summary>
-    [Fact]
-    public void GetImportFromDate_Carryover_ShouldReturnMidYearCarryoverDate()
+    /// <remarks>
+    /// Issue #2100: 以前は <c>DateTime.Now</c> を内部で読み、期待値も同じ関数から作っていたため、
+    /// 年をまたぐ誤りを実行した月でしか検出できず、期待値も本体と一緒に動いていた。
+    /// 1 月・年度末・年度初めの境界を固定データで与え、期待値はリテラルで書く。
+    /// </remarks>
+    [Theory]
+    [InlineData(2026, 1, 15, 10, 2025, 11, 1)]  // 1 月登録・10 月繰越 → 前年の 10 月 → 前年 11/1
+    [InlineData(2026, 1, 15, 12, 2026, 1, 1)]   // 1 月登録・12 月繰越 → 前年の 12 月 → 当年 1/1（年をまたぐ）
+    [InlineData(2026, 1, 15, 1, 2026, 2, 1)]    // 1 月登録・1 月繰越 → 当年の 1 月 → 当年 2/1
+    [InlineData(2026, 3, 31, 3, 2026, 4, 1)]    // 年度末（3/31）登録・3 月繰越 → 当年 4/1
+    [InlineData(2026, 3, 31, 4, 2025, 5, 1)]    // 年度末登録・4 月繰越 → 前年の 4 月 → 前年 5/1
+    [InlineData(2026, 4, 1, 3, 2026, 4, 1)]     // 年度初め（4/1）登録・3 月繰越 → 当年 4/1
+    [InlineData(2025, 10, 20, 10, 2025, 11, 1)] // 年の途中・同じ月 → 当年
+    public void GetImportFromDate_Carryover_ShouldResolveYearFromRegistrationMonth(
+        int regYear, int regMonth, int regDay, int carryoverMonth,
+        int expectedYear, int expectedMonth, int expectedDay)
     {
         // Arrange
-        var carryoverMonth = 10; // 10月繰越
         var modeResult = new ICCardManager.Views.Dialogs.CardRegistrationModeResult
         {
             IsNewPurchase = false,
             CarryoverMonth = carryoverMonth
         };
-        var expected = SummaryGenerator.GetMidYearCarryoverDate(carryoverMonth, DateTime.Now);
 
         // Act
-        var result = CardManageViewModel.GetImportFromDate(modeResult);
+        var result = CardManageViewModel.GetImportFromDate(
+            modeResult, new DateTime(regYear, regMonth, regDay, 9, 0, 0));
 
         // Assert
-        result.Should().Be(expected);
+        result.Should().Be(new DateTime(expectedYear, expectedMonth, expectedDay));
     }
 
     #endregion
@@ -1343,8 +1368,8 @@ public class CardManageViewModelTests
             PurchaseDate = purchaseDate
         };
 
-        // Act
-        var result = CardManageViewModel.GetImportFromDate(modeResult);
+        // Act: 登録日とは別の日を購入日に指定する
+        var result = CardManageViewModel.GetImportFromDate(modeResult, new DateTime(2026, 3, 10, 9, 0, 0));
 
         // Assert
         result.Should().Be(purchaseDate.Date);
@@ -1364,10 +1389,10 @@ public class CardManageViewModelTests
         };
 
         // Act
-        var result = CardManageViewModel.GetImportFromDate(modeResult);
+        var result = CardManageViewModel.GetImportFromDate(modeResult, new DateTime(2026, 3, 10, 23, 59, 59));
 
         // Assert
-        result.Should().Be(DateTime.Today);
+        result.Should().Be(new DateTime(2026, 3, 10));
     }
 
     #endregion
@@ -1384,7 +1409,7 @@ public class CardManageViewModelTests
         // Arrange
         var idm = "0102030405060708";
         var balance = 5000;
-        var today = DateTime.Today;
+        var today = _clock.Now.Date;
 
         var preReadHistory = new List<LedgerDetail>
         {
@@ -1616,35 +1641,39 @@ public class CardManageViewModelTests
     #region Issue #819: 繰越額が履歴逆算値で上書きされるバグの修正
 
     /// <summary>
-    /// 履歴がある場合でもユーザー指定の繰越額が優先されること
-    /// （履歴から逆算した初期残高で上書きされないこと）
+    /// 繰越モードで登録する入力を整える（Issue #2100）。
     /// </summary>
-    [Fact]
-    public async Task SaveAsync_CarryoverMode_WithHistoryAndCarryoverBalance_ShouldUseUserSpecifiedBalance()
+    /// <remarks>
+    /// 登録日時は <see cref="_clock"/> で固定する。以前は「今日」の履歴と実時計を使っていたため、
+    /// 1 月に実行すると「1 月から繰越」の開始日が当年 2/1 になって当日の履歴がすべて除外され、
+    /// 「履歴あり」の経路を一度も通らないまま（ユーザー指定額のテストは偽陽性で緑、逆算のテストは赤）になっていた。
+    /// </remarks>
+    private void ArrangeCarryoverRegistration(
+        string idm, DateTime registeredAt, int carryoverMonth, int? carryoverBalance, DateTime useDate)
     {
-        // Arrange
-        var idm = "0102030405060708";
-        var userSpecifiedBalance = 8000; // ユーザーが入力した繰越額
-        var today = DateTime.Today;
+        _clock.Now = registeredAt;
 
-        // 履歴データ（この履歴から逆算すると 4790 + 210 = 5000 になるが、
-        // ユーザーが 8000 を指定しているのでそちらが優先されるべき）
+        // 履歴データ: 利用 210円、残高 4790円 → 逆算すると 4790 + 210 = 5000
         var preReadHistory = new List<LedgerDetail>
         {
-            new() { UseDate = today, EntryStation = "博多", ExitStation = "天神", Amount = 210, Balance = 4790 }
+            new() { UseDate = useDate, EntryStation = "博多", ExitStation = "天神", Amount = 210, Balance = 4790 }
         };
 
         _cardRepositoryMock.Setup(r => r.GetByIdmAsync(idm, true)).ReturnsAsync((IcCard?)null);
         _cardRepositoryMock.Setup(r => r.InsertAsync(It.IsAny<IcCard>())).ReturnsAsync(true);
+        // 履歴の取り込みを最後まで通す（既定値の null では重複判定で止まり、利用行が記録されない）
+        _ledgerRepositoryMock.Setup(r => r.GetExistingDetailKeysAsync(idm, It.IsAny<DateTime>()))
+            .ReturnsAsync(new HashSet<(DateTime?, int?, bool)>());
+        _ledgerRepositoryMock.Setup(r => r.GetLatestBeforeDateAsync(idm, It.IsAny<DateTime>()))
+            .ReturnsAsync((Ledger?)null);
 
-        // 繰越モード + ユーザー指定の繰越額
         _dialogServiceMock.Setup(d => d.ShowCardRegistrationModeDialog(It.IsAny<int?>()))
             .Returns(new ICCardManager.Views.Dialogs.CardRegistrationModeResult
             {
                 IsNewPurchase = false,
-                CarryoverMonth = 1,
+                CarryoverMonth = carryoverMonth,
                 StartingPageNumber = 1,
-                CarryoverBalance = userSpecifiedBalance
+                CarryoverBalance = carryoverBalance
             });
 
         _viewModel.SetPreReadBalance(4790);
@@ -1654,65 +1683,181 @@ public class CardManageViewModelTests
         _viewModel.EditCardIdm = idm;
         _viewModel.EditCardType = "はやかけん";
         _viewModel.EditCardNumber = "H-001";
+    }
+
+    /// <summary>
+    /// 履歴がある場合でもユーザー指定の繰越額が優先されること
+    /// （履歴から逆算した初期残高で上書きされないこと）
+    /// </summary>
+    /// <remarks>
+    /// 1 月登録（前年 12 月からの繰越＝年をまたぐ）・開始日ちょうどの利用を境界として含める。
+    /// 「履歴あり」の経路を実際に通ったことを、利用行（払出 210 円）の記録で併せて表明する。
+    /// </remarks>
+    [Theory]
+    [InlineData(2025, 1, 20, 12, 2025, 1, 10, 2025, 1)]  // 1 月登録・前年 12 月から繰越
+    [InlineData(2025, 2, 20, 1, 2025, 2, 10, 2025, 2)]   // 2 月登録・1 月から繰越
+    [InlineData(2025, 12, 20, 11, 2025, 12, 1, 2025, 12)] // 開始日（12/1）ちょうどの利用
+    public async Task SaveAsync_CarryoverMode_WithHistoryAndCarryoverBalance_ShouldUseUserSpecifiedBalance(
+        int regYear, int regMonth, int regDay, int carryoverMonth,
+        int useYear, int useMonth, int useDay, int importYear, int importMonth)
+    {
+        // Arrange
+        var idm = "0102030405060708";
+        var userSpecifiedBalance = 8000; // ユーザーが入力した繰越額
+        ArrangeCarryoverRegistration(idm, new DateTime(regYear, regMonth, regDay, 10, 0, 0),
+            carryoverMonth, userSpecifiedBalance, new DateTime(useYear, useMonth, useDay));
 
         // Act
         await _viewModel.SaveAsync();
 
         // Assert: ユーザー指定の繰越額（8,000円）が使用され、
         // 履歴から逆算した値（5,000円）ではないこと
+        var expectedSummary = SummaryGenerator.GetMidYearCarryoverSummary(carryoverMonth);
         _ledgerRepositoryMock.Verify(r => r.InsertAsync(It.Is<Ledger>(l =>
             l.Income == 0 &&
             l.Balance == userSpecifiedBalance &&
-            l.Summary == "1月から繰越"
+            l.Summary == expectedSummary &&
+            l.Date == new DateTime(importYear, importMonth, 1)
         )), Times.Once);
+        // 「履歴あり」の経路を通ったこと（利用行が記録されている）
+        _ledgerRepositoryMock.Verify(r => r.InsertAsync(It.Is<Ledger>(l => l.Expense == 210)), Times.Once);
     }
 
     /// <summary>
     /// 履歴があり繰越額が未指定の場合、従来通り履歴から逆算した値が使用されること
     /// </summary>
-    [Fact]
-    public async Task SaveAsync_CarryoverMode_WithHistoryAndNoCarryoverBalance_ShouldUseCalculatedBalance()
+    /// <remarks>
+    /// Issue #2100: 以前は実時計の「今日」で書かれており、1 月に実行すると必ず赤くなっていた。
+    /// </remarks>
+    [Theory]
+    [InlineData(2025, 1, 20, 12, 2025, 1, 10, 2025, 1)]  // 1 月登録・前年 12 月から繰越
+    [InlineData(2025, 2, 20, 1, 2025, 2, 10, 2025, 2)]   // 2 月登録・1 月から繰越
+    [InlineData(2025, 12, 20, 11, 2025, 12, 1, 2025, 12)] // 開始日（12/1）ちょうどの利用
+    public async Task SaveAsync_CarryoverMode_WithHistoryAndNoCarryoverBalance_ShouldUseCalculatedBalance(
+        int regYear, int regMonth, int regDay, int carryoverMonth,
+        int useYear, int useMonth, int useDay, int importYear, int importMonth)
     {
         // Arrange
         var idm = "0102030405060708";
-        var today = DateTime.Today;
-
-        // 履歴データ: 利用 210円、残高 4790円 → 逆算すると 4790 + 210 = 5000
-        var preReadHistory = new List<LedgerDetail>
-        {
-            new() { UseDate = today, EntryStation = "博多", ExitStation = "天神", Amount = 210, Balance = 4790 }
-        };
-
-        _cardRepositoryMock.Setup(r => r.GetByIdmAsync(idm, true)).ReturnsAsync((IcCard?)null);
-        _cardRepositoryMock.Setup(r => r.InsertAsync(It.IsAny<IcCard>())).ReturnsAsync(true);
-
-        // 繰越モード、CarryoverBalance は null（未指定）
-        _dialogServiceMock.Setup(d => d.ShowCardRegistrationModeDialog(It.IsAny<int?>()))
-            .Returns(new ICCardManager.Views.Dialogs.CardRegistrationModeResult
-            {
-                IsNewPurchase = false,
-                CarryoverMonth = 1,
-                StartingPageNumber = 1,
-                CarryoverBalance = null
-            });
-
-        _viewModel.SetPreReadBalance(4790);
-        _viewModel.SetPreReadHistory(preReadHistory);
-
-        _viewModel.StartNewCard();
-        _viewModel.EditCardIdm = idm;
-        _viewModel.EditCardType = "はやかけん";
-        _viewModel.EditCardNumber = "H-001";
+        ArrangeCarryoverRegistration(idm, new DateTime(regYear, regMonth, regDay, 10, 0, 0),
+            carryoverMonth, carryoverBalance: null, new DateTime(useYear, useMonth, useDay));
 
         // Act
         await _viewModel.SaveAsync();
 
         // Assert: CarryoverBalanceがnullなので、履歴から逆算した値（5,000円）が使用されること
+        var expectedSummary = SummaryGenerator.GetMidYearCarryoverSummary(carryoverMonth);
         _ledgerRepositoryMock.Verify(r => r.InsertAsync(It.Is<Ledger>(l =>
             l.Income == 0 &&
             l.Balance == 5000 &&
-            l.Summary == "1月から繰越"
+            l.Summary == expectedSummary &&
+            l.Date == new DateTime(importYear, importMonth, 1)
         )), Times.Once);
+        _ledgerRepositoryMock.Verify(r => r.InsertAsync(It.Is<Ledger>(l => l.Expense == 210)), Times.Once);
+    }
+
+    /// <summary>
+    /// 1 月に「1 月から繰越」で登録した場合、1 月の利用は紙の出納簿側に属するため取り込まず、
+    /// 繰越額にはカードの現在残高を使うこと（Issue #2100）
+    /// </summary>
+    /// <remarks>
+    /// 旧テストが 1 月にだけ赤くなっていた経路そのもの。繰越の開始日は当年 2/1 になり、
+    /// 1 月の履歴はすべて除外されて「履歴なし」の分岐（事前読み取り残高 4,790 円）へ進む。
+    /// これは不具合ではなく仕様であることを、固定日時で明示しておく。
+    /// </remarks>
+    [Fact]
+    public async Task SaveAsync_CarryoverMode_RegisteredInJanuaryWithJanuaryCarryover_ShouldNotImportJanuaryHistory()
+    {
+        // Arrange
+        var idm = "0102030405060708";
+        ArrangeCarryoverRegistration(idm, new DateTime(2025, 1, 20, 10, 0, 0),
+            carryoverMonth: 1, carryoverBalance: null, useDate: new DateTime(2025, 1, 20));
+
+        // Act
+        await _viewModel.SaveAsync();
+
+        // Assert
+        var expectedSummary = SummaryGenerator.GetMidYearCarryoverSummary(1);
+        _ledgerRepositoryMock.Verify(r => r.InsertAsync(It.Is<Ledger>(l =>
+            l.Income == 0 &&
+            l.Balance == 4790 &&
+            l.Summary == expectedSummary &&
+            l.Date == new DateTime(2025, 2, 1)
+        )), Times.Once);
+        _ledgerRepositoryMock.Verify(r => r.InsertAsync(It.Is<Ledger>(l => l.Expense == 210)), Times.Never);
+    }
+
+    /// <summary>
+    /// 登録の途中で月末の 0 時をまたいでも、繰越年度と繰越レコードの日付が同じ登録日時から決まること（Issue #2100）
+    /// </summary>
+    /// <remarks>
+    /// 「12 月から繰越」は 11/30 の登録なら前年 12 月（→ 当年 1/1・前年度）、12/1 の登録なら当年 12 月
+    /// （→ 翌年 1/1・当年度）へ解決される。時計を読むたびに進む時計を渡し、1 回目の読み取り（11/30）で
+    /// 全体が決まることを表明する。読むたびに時計を引く実装では、年度は 2024、日付は 2026/1/1 と食い違う。
+    /// </remarks>
+    [Fact]
+    public async Task SaveAsync_CarryoverMode_RegistrationStraddlingMonthEnd_ShouldUseSingleRegistrationTime()
+    {
+        // Arrange
+        var idm = "0102030405060708";
+        var steppingClock = new SteppingClock(
+            new DateTime(2025, 11, 30, 23, 59, 59),
+            new DateTime(2025, 12, 1, 0, 0, 0));
+        var viewModel = new CardManageViewModel(
+            _cardRepositoryMock.Object,
+            _ledgerRepositoryMock.Object,
+            _cardReaderMock.Object,
+            _validationServiceMock.Object,
+            _operationLoggerMock.Object,
+            _dialogServiceMock.Object,
+            _staffAuthServiceMock.Object,
+            _lendingService,
+            new WeakReferenceMessenger(),
+            _dispatcher,
+            Mock.Of<INavigationService>(),
+            () => throw new InvalidOperationException("このテストは貸出記録作成ダイアログを使用しません"),
+            clock: steppingClock);
+
+        IcCard? insertedCard = null;
+        _cardRepositoryMock.Setup(r => r.GetByIdmAsync(idm, true)).ReturnsAsync((IcCard?)null);
+        _cardRepositoryMock.Setup(r => r.InsertAsync(It.IsAny<IcCard>()))
+            .Callback<IcCard>(c => insertedCard = c)
+            .ReturnsAsync(true);
+        _dialogServiceMock.Setup(d => d.ShowCardRegistrationModeDialog(It.IsAny<int?>()))
+            .Returns(new ICCardManager.Views.Dialogs.CardRegistrationModeResult
+            {
+                IsNewPurchase = false,
+                CarryoverMonth = 12,
+                StartingPageNumber = 1
+            });
+        viewModel.SetPreReadBalance(4790);
+        viewModel.SetPreReadHistory(new List<LedgerDetail>());
+        viewModel.StartNewCard();
+        viewModel.EditCardIdm = idm;
+        viewModel.EditCardType = "はやかけん";
+        viewModel.EditCardNumber = "H-001";
+
+        // Act
+        await viewModel.SaveAsync();
+
+        // Assert: 11/30 の登録として、前年 12 月からの繰越（2025/1/1・2024 年度）で揃う
+        insertedCard.Should().NotBeNull();
+        insertedCard!.CarryoverFiscalYear.Should().Be(2024);
+        _ledgerRepositoryMock.Verify(r => r.InsertAsync(It.Is<Ledger>(l =>
+            l.Summary == SummaryGenerator.GetMidYearCarryoverSummary(12) &&
+            l.Date == new DateTime(2025, 1, 1)
+        )), Times.Once);
+    }
+
+    /// <summary>読むたびに次の時刻へ進む時計（最後の時刻で止まる）。</summary>
+    private sealed class SteppingClock : ISystemClock
+    {
+        private readonly DateTime[] _times;
+        private int _index;
+
+        public SteppingClock(params DateTime[] times) => _times = times;
+
+        public DateTime Now => _times[Math.Min(_index++, _times.Length - 1)];
     }
 
     #endregion
@@ -1744,7 +1889,7 @@ public class CardManageViewModelTests
     {
         var preReadHistory = new List<LedgerDetail>
         {
-            new() { UseDate = DateTime.Today, EntryStation = "博多", ExitStation = "天神", Amount = 210, Balance = 4790 }
+            new() { UseDate = _clock.Now.Date, EntryStation = "博多", ExitStation = "天神", Amount = 210, Balance = 4790 }
         };
 
         _cardRepositoryMock.Setup(r => r.GetByIdmAsync(idm, true)).ReturnsAsync((IcCard?)null);

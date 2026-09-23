@@ -60,6 +60,17 @@ namespace ICCardManager.ViewModels
 
         private readonly ILogger<CardManageViewModel>? _logger;
 
+        /// <summary>
+        /// 現在時刻の取得元（Issue #2100）
+        /// </summary>
+        /// <remarks>
+        /// 履歴インポートの開始日（<see cref="GetImportFromDate"/>）は「繰越月 ≦ 登録月なら当年」と
+        /// 登録日の月で分岐するため、<c>DateTime.Now</c> を直接読むとテストの結果が実行した月で変わる
+        /// （1 月に実行すると「1 月から繰越」の開始日が当年 2 月 1 日になり、当日の履歴がすべて除外される）。
+        /// 省略時の既定は本番と同じシステム時計なので、省略しても本番の値と食い違わない。
+        /// </remarks>
+        private readonly ISystemClock _clock;
+
         [ObservableProperty]
         private ObservableCollection<CardDto> _cards = new();
 
@@ -180,7 +191,8 @@ namespace ICCardManager.ViewModels
             IDispatcherService dispatcherService,
             INavigationService navigationService,
             Func<SystemLendViewModel> systemLendViewModelFactory,
-            ILogger<CardManageViewModel>? logger = null)
+            ILogger<CardManageViewModel>? logger = null,
+            ISystemClock? clock = null)
         {
             _cardRepository = cardRepository;
             _ledgerRepository = ledgerRepository;
@@ -196,6 +208,7 @@ namespace ICCardManager.ViewModels
             _systemLendViewModelFactory = systemLendViewModelFactory
                 ?? throw new ArgumentNullException(nameof(systemLendViewModelFactory));
             _logger = logger;
+            _clock = clock ?? new SystemClock();
 
             // カード読み取りイベント
             _cardReader.CardRead += OnCardRead;
@@ -581,6 +594,10 @@ namespace ICCardManager.ViewModels
                     }
                     _registrationModeResult = modeResult;
 
+                    // Issue #2100: 登録日時は 1 回だけ読み、繰越年度・履歴の取込開始日・初期レコードの日付で共有する。
+                    // 読むたびに時計を引くと、年末の 0 時をまたいだ登録で年度と日付が別々の年から決まる。
+                    var registeredAt = _clock.Now;
+
                     var card = new IcCard
                     {
                         CardIdm = EditCardIdm,
@@ -594,7 +611,7 @@ namespace ICCardManager.ViewModels
                     if (!modeResult.IsNewPurchase && modeResult.CarryoverMonth.HasValue)
                     {
                         var carryoverDate = SummaryGenerator.GetMidYearCarryoverDate(
-                            modeResult.CarryoverMonth.Value, DateTime.Now);
+                            modeResult.CarryoverMonth.Value, registeredAt);
                         card.CarryoverIncomeTotal = modeResult.CarryoverIncomeTotal;
                         card.CarryoverExpenseTotal = modeResult.CarryoverExpenseTotal;
                         card.CarryoverFiscalYear = FiscalYearHelper.GetFiscalYear(
@@ -659,7 +676,7 @@ namespace ICCardManager.ViewModels
                             catch { history = null; }
                         }
 
-                        var importFromDate = GetImportFromDate(modeResult);
+                        var importFromDate = GetImportFromDate(modeResult, registeredAt);
                         var filteredHistory = history?
                             .Where(d => d.UseDate.HasValue && d.UseDate.Value.Date >= importFromDate)
                             .OrderBy(d => d.UseDate)
@@ -675,7 +692,7 @@ namespace ICCardManager.ViewModels
                             var preHistoryBalance = CalculatePreHistoryBalance(filteredHistory);
                             // Issue #819: ユーザーが繰越額を明示的に入力した場合はそちらを優先
                             var initialBalance = modeResult.CarryoverBalance ?? preHistoryBalance;
-                            var initialLedger = await BuildInitialLedgerAsync(EditCardIdm, modeResult,
+                            var initialLedger = await BuildInitialLedgerAsync(EditCardIdm, modeResult, registeredAt,
                                 overrideDate: importFromDate, overrideBalance: initialBalance);
 
                             // Issue #1727: 初期残高行は履歴最古エントリから逆算した値のため、
@@ -720,7 +737,7 @@ namespace ICCardManager.ViewModels
                             // リトライ（ExecuteWithRetryAsync）・トランザクション・FailureReason を
                             // そのまま再利用する。同メソッドは
                             // 「filtered.Count == 0 かつ initialLedger != null」の分岐を既に持つ。
-                            var initialLedger = await BuildInitialLedgerAsync(EditCardIdm, modeResult);
+                            var initialLedger = await BuildInitialLedgerAsync(EditCardIdm, modeResult, registeredAt);
 
                             // Issue #1282: 残額を読み取れなかった場合（カード未タッチ・読み取りエラー）は
                             // 初期レコードを作らずカード登録のみ成功させる。null は「読み取り失敗」の
@@ -1158,7 +1175,7 @@ namespace ICCardManager.ViewModels
                 }
 
                 // 払い戻しのLedgerを作成
-                var now = DateTime.Now;
+                var now = _clock.Now;
                 var refundLedger = new Ledger
                 {
                     CardIdm = refundCardIdm,
@@ -1744,12 +1761,14 @@ namespace ICCardManager.ViewModels
         /// </remarks>
         /// <param name="cardIdm">カードのIDm</param>
         /// <param name="modeResult">登録モードの選択結果</param>
+        /// <param name="registeredAt">登録日時（Issue #2100: 呼び出し元が 1 回だけ読んだ値を共有する）</param>
         /// <param name="overrideDate">日付の上書き（Issue #596: 履歴がある場合、インポート開始日を使用）</param>
         /// <param name="overrideBalance">残高の上書き（Issue #596: 履歴がある場合、逆算した初期残高を使用）</param>
         /// <returns>組み立てた初期レコード。残額が取得できない場合や組み立てに失敗した場合は null</returns>
         private async Task<Ledger> BuildInitialLedgerAsync(
             string cardIdm,
             Views.Dialogs.CardRegistrationModeResult modeResult,
+            DateTime registeredAt,
             DateTime? overrideDate = null,
             int? overrideBalance = null)
         {
@@ -1770,7 +1789,7 @@ namespace ICCardManager.ViewModels
                 // 残額が取得できた場合のみレコードを作成
                 if (balance.HasValue)
                 {
-                    var now = DateTime.Now;
+                    var now = registeredAt;
 
                     // Issue #510: 登録モードに応じて摘要を決定
                     // 繰越月が3月の場合は年度末＝前年度繰越と同義なので、
@@ -1888,14 +1907,21 @@ namespace ICCardManager.ViewModels
         /// <remarks>
         /// 新規購入: 当日（Issue #657: 月初めではなく購入日を使用）
         /// 繰越: 繰越月の翌月1日（SummaryGenerator.GetMidYearCarryoverDateを使用）
+        /// <para>
+        /// 登録日時は引数で受け取る（Issue #2100）。繰越の開始日は登録日の月で年が決まるため、
+        /// 内部で <c>DateTime.Now</c> を読むと、1 月・年度末のような境界を固定日時で検証できない。
+        /// </para>
         /// </remarks>
-        internal static DateTime GetImportFromDate(Views.Dialogs.CardRegistrationModeResult modeResult)
+        /// <param name="modeResult">カード登録モードの選択結果</param>
+        /// <param name="registrationDate">登録日時（購入日未指定の新規購入ではこの日付を開始日にする）</param>
+        internal static DateTime GetImportFromDate(
+            Views.Dialogs.CardRegistrationModeResult modeResult, DateTime registrationDate)
         {
             if (modeResult.IsNewPurchase)
-                return modeResult.PurchaseDate?.Date ?? DateTime.Today;
+                return modeResult.PurchaseDate?.Date ?? registrationDate.Date;
             else
                 return SummaryGenerator.GetMidYearCarryoverDate(
-                    modeResult.CarryoverMonth!.Value, DateTime.Now);
+                    modeResult.CarryoverMonth!.Value, registrationDate);
         }
 
         /// <summary>

@@ -2,6 +2,7 @@
 using ICCardManager.Data.Repositories;
 using ICCardManager.Models;
 using ICCardManager.Services;
+using ICCardManager.Tests.Infrastructure.Timing;
 using ICCardManager.ViewModels;
 using Moq;
 using Xunit;
@@ -29,6 +30,11 @@ public class OperationLogSearchViewModelTests
     private readonly Mock<OperationLogExcelExportService> _excelExportServiceMock;
     private readonly Mock<ICCardManager.Services.ISafeFileLauncher> _safeFileLauncherMock;
     private readonly Mock<IOperationLogRepository> _auditRepoMock;
+    /// <summary>
+    /// ViewModel が読む現在時刻（Issue #2100）。以前は「今日」をテスト側とコマンド側で別々に評価しており、
+    /// 0 時をまたいだ実行で赤くなった。境界を検証するテストは個別に書き換える。
+    /// </summary>
+    private readonly FixedSystemClock _clock = new(new DateTime(2025, 6, 15, 10, 0, 0));
     private readonly OperationLogSearchViewModel _viewModel;
 
     public OperationLogSearchViewModelTests()
@@ -55,7 +61,8 @@ public class OperationLogSearchViewModelTests
             _dialogServiceMock.Object,
             _excelExportServiceMock.Object,
             _safeFileLauncherMock.Object,
-            new OperationLogger(_auditRepoMock.Object, operatorContextMock.Object));
+            new OperationLogger(_auditRepoMock.Object, operatorContextMock.Object),
+            _clock);
     }
 
     /// <summary>
@@ -117,9 +124,9 @@ public class OperationLogSearchViewModelTests
     [Fact]
     public void Constructor_デフォルトで今月の期間が設定されること()
     {
-        var today = DateTime.Today;
-        _viewModel.FromDate.Should().Be(new DateTime(today.Year, today.Month, 1));
-        _viewModel.ToDate.Should().Be(today);
+        // 時計は 2025/6/15 10:00 に固定している
+        _viewModel.FromDate.Should().Be(new DateTime(2025, 6, 1));
+        _viewModel.ToDate.Should().Be(new DateTime(2025, 6, 15));
     }
 
     [Fact]
@@ -167,31 +174,57 @@ public class OperationLogSearchViewModelTests
 
     #region 日付プリセットコマンド
 
-    [Fact]
-    public void SetToday_今日の日付が設定されること()
+    /// <remarks>
+    /// Issue #2100: 以前は「今日」をコマンド実行の前にテスト側で取得しており、0 時をまたぐと赤くなった。
+    /// 日付が変わる直前・直後の時刻を固定データとして与え、期待値はリテラルで書く。
+    /// </remarks>
+    [Theory]
+    [InlineData(2026, 1, 1, 0, 0, 0, 2026, 1, 1)]          // 元日の 0 時ちょうど
+    [InlineData(2025, 12, 31, 23, 59, 59, 2025, 12, 31)]   // 大晦日の日付が変わる直前（時刻は切り捨てる）
+    public void SetToday_今日の日付が設定されること(
+        int year, int month, int day, int hour, int minute, int second,
+        int expectedYear, int expectedMonth, int expectedDay)
     {
-        var today = DateTime.Today;
+        _clock.Now = new DateTime(year, month, day, hour, minute, second);
+
         _viewModel.SetTodayCommand.Execute(null);
-        _viewModel.FromDate.Should().Be(today);
-        _viewModel.ToDate.Should().Be(today);
+
+        var expected = new DateTime(expectedYear, expectedMonth, expectedDay);
+        _viewModel.FromDate.Should().Be(expected);
+        _viewModel.ToDate.Should().Be(expected);
     }
 
-    [Fact]
-    public void SetThisMonth_今月の日付が設定されること()
+    [Theory]
+    [InlineData(2024, 2, 15, 2024, 2, 1, 2024, 2, 29)]    // うるう年の 2 月
+    [InlineData(2025, 2, 28, 2025, 2, 1, 2025, 2, 28)]    // 平年の 2 月末日
+    [InlineData(2025, 12, 31, 2025, 12, 1, 2025, 12, 31)] // 大晦日
+    public void SetThisMonth_今月の日付が設定されること(
+        int year, int month, int day,
+        int fromYear, int fromMonth, int fromDay, int toYear, int toMonth, int toDay)
     {
+        _clock.Now = new DateTime(year, month, day, 23, 59, 59);
+
         _viewModel.SetThisMonthCommand.Execute(null);
-        var today = DateTime.Today;
-        _viewModel.FromDate.Should().Be(new DateTime(today.Year, today.Month, 1));
-        _viewModel.ToDate.Should().Be(new DateTime(today.Year, today.Month, DateTime.DaysInMonth(today.Year, today.Month)));
+
+        _viewModel.FromDate.Should().Be(new DateTime(fromYear, fromMonth, fromDay));
+        _viewModel.ToDate.Should().Be(new DateTime(toYear, toMonth, toDay));
     }
 
-    [Fact]
-    public void SetLastMonth_先月の日付が設定されること()
+    [Theory]
+    [InlineData(2026, 1, 15, 2025, 12, 1, 2025, 12, 31)] // 1 月：先月は前年 12 月（年をまたぐ）
+    [InlineData(2025, 3, 31, 2025, 2, 1, 2025, 2, 28)]   // 31 日：先月の末日へ丸まる
+    [InlineData(2024, 3, 31, 2024, 2, 1, 2024, 2, 29)]   // うるう年
+    [InlineData(2025, 4, 1, 2025, 3, 1, 2025, 3, 31)]    // 年度初め：先月は前年度の 3 月
+    public void SetLastMonth_先月の日付が設定されること(
+        int year, int month, int day,
+        int fromYear, int fromMonth, int fromDay, int toYear, int toMonth, int toDay)
     {
+        _clock.Now = new DateTime(year, month, day, 0, 0, 0);
+
         _viewModel.SetLastMonthCommand.Execute(null);
-        var lastMonth = DateTime.Today.AddMonths(-1);
-        _viewModel.FromDate.Should().Be(new DateTime(lastMonth.Year, lastMonth.Month, 1));
-        _viewModel.ToDate.Should().Be(new DateTime(lastMonth.Year, lastMonth.Month, DateTime.DaysInMonth(lastMonth.Year, lastMonth.Month)));
+
+        _viewModel.FromDate.Should().Be(new DateTime(fromYear, fromMonth, fromDay));
+        _viewModel.ToDate.Should().Be(new DateTime(toYear, toMonth, toDay));
     }
 
     [Fact]
@@ -201,9 +234,15 @@ public class OperationLogSearchViewModelTests
         _viewModel.SelectedTargetTable = _viewModel.TargetTables[1];
         _viewModel.TargetIdFilter = "ABC";
         _viewModel.OperatorNameFilter = "山田";
+        _viewModel.FromDate = new DateTime(2020, 1, 1);
+        _viewModel.ToDate = new DateTime(2020, 1, 31);
+        _clock.Now = new DateTime(2026, 1, 15, 9, 0, 0);
 
         _viewModel.ClearFiltersCommand.Execute(null);
 
+        // 期間は（コンストラクタ時点ではなく）実行時点の今月初日〜今日へ戻る
+        _viewModel.FromDate.Should().Be(new DateTime(2026, 1, 1));
+        _viewModel.ToDate.Should().Be(new DateTime(2026, 1, 15));
         _viewModel.SelectedAction.Should().Be(_viewModel.ActionTypes[0]);
         _viewModel.SelectedTargetTable.Should().Be(_viewModel.TargetTables[0]);
         _viewModel.TargetIdFilter.Should().BeEmpty();

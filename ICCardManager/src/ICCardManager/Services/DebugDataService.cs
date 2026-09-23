@@ -7,6 +7,7 @@ using System.Threading.Tasks;
 using ICCardManager.Common;
 using ICCardManager.Data;
 using ICCardManager.Data.Repositories;
+using ICCardManager.Infrastructure.Timing;
 using ICCardManager.Models;
 
 namespace ICCardManager.Services
@@ -20,6 +21,17 @@ namespace ICCardManager.Services
         private readonly IStaffRepository _staffRepository;
         private readonly ICardRepository _cardRepository;
         private readonly ILedgerRepository _ledgerRepository;
+
+        /// <summary>
+        /// 生成するテストデータの基準日（「今日」）の取得元（Issue #2100）
+        /// </summary>
+        /// <remarks>
+        /// サンプル履歴は基準日から 180 日前までを生成するため、N-002 の年度境界（3/31・4/1）が
+        /// 生成範囲に入るのは基準日が 4〜9 月のときだけになる。<c>DateTime.Now</c> を直接読むと、
+        /// 10〜3 月に実行したテストは境界との衝突回避を一度も通らないまま緑になる。
+        /// 省略時の既定は本番と同じシステム時計。
+        /// </remarks>
+        private readonly ISystemClock _clock;
 
         /// <summary>
         /// テストデータの初期残高（全カード共通）
@@ -64,12 +76,14 @@ namespace ICCardManager.Services
             DbContext dbContext,
             IStaffRepository staffRepository,
             ICardRepository cardRepository,
-            ILedgerRepository ledgerRepository)
+            ILedgerRepository ledgerRepository,
+            ISystemClock clock = null)
         {
             _dbContext = dbContext;
             _staffRepository = staffRepository;
             _cardRepository = cardRepository;
             _ledgerRepository = ledgerRepository;
+            _clock = clock ?? new SystemClock();
         }
 
         /// <summary>
@@ -216,7 +230,7 @@ namespace ICCardManager.Services
             var finalBalances = new Dictionary<string, int>();
             var fiscalYearBoundaryBalances = new Dictionary<string, int>();
             var random = new Random(42); // 再現性のためシード固定
-            var today = DateTime.Now.Date;
+            var today = _clock.Now.Date;
 
             // N-002の年度境界日を計算
             var fiscalYear = FiscalYearHelper.GetFiscalYear(today);
@@ -444,7 +458,7 @@ namespace ICCardManager.Services
             Dictionary<string, int> finalBalances,
             Dictionary<string, int> fiscalYearBoundaryBalances)
         {
-            var today = DateTime.Now.Date;
+            var today = _clock.Now.Date;
             var staffName = TestStaffList[0].Name; // 山田太郎
 
             // ── カード H-001: 乗り継ぎ・ポイント還元・不足分チャージ ──
