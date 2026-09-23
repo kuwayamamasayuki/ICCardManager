@@ -46,4 +46,38 @@ internal static class TestPaths
     /// </summary>
     public static string GetProductionSourceRoot()
         => Path.Combine(GetSolutionRoot(), "src", "ICCardManager");
+
+    /// <summary>
+    /// git の管理情報の名前（リポジトリでは<b>ディレクトリ</b>、git worktree では<b>ファイル</b>）。
+    /// </summary>
+    /// <remarks>
+    /// テストコードでこの名前を直書きしてよいのは本クラスだけ（<see cref="TestRootResolutionConventionTests"/>、
+    /// Issue #2101）。<c>Directory.Exists(".git")</c> で基点を探す実装は worktree で本体の作業ツリーを
+    /// 黙って検査するため、判定を 1 か所へ寄せる。走査から除外する名前などの用途もこの定数を参照する。
+    /// </remarks>
+    public const string GitMarkerName = ".git";
+
+    /// <summary>
+    /// <paramref name="startDirectory"/> から祖先方向へたどり、最初に git の管理情報
+    /// （ディレクトリまたは worktree のファイル）がある階層を返す。見つからなければ <c>null</c>。
+    /// </summary>
+    /// <remarks>
+    /// ソリューションルート（<see cref="GetSolutionRoot"/>）の 1 階層上にあるリポジトリ直下の設定
+    /// （<c>.editorconfig</c> 等）を読む検査のためにある。ディレクトリだけを探す形
+    /// （<c>Directory.Exists</c>）にすると、リポジトリの中にある worktree（<c>.claude/worktrees/…</c>）では
+    /// worktree 直下の <c>.git</c> ファイルを素通りして本体の作業ツリーへ届くため、ファイルも認める。
+    /// </remarks>
+    public static string? FindRepositoryRoot(string startDirectory)
+    {
+        for (var dir = new DirectoryInfo(startDirectory); dir != null; dir = dir.Parent)
+        {
+            var marker = Path.Combine(dir.FullName, GitMarkerName);
+            if (Directory.Exists(marker) || File.Exists(marker))
+            {
+                return dir.FullName;
+            }
+        }
+
+        return null;
+    }
 }

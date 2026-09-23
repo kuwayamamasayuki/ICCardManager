@@ -84,7 +84,7 @@ public class BuildWarningSuppressionConventionTests
     {
         "bin",
         "obj",
-        ".git",
+        TestPaths.GitMarkerName,
         ".vs",
         "node_modules",
         "TestResults",
@@ -147,7 +147,7 @@ public class BuildWarningSuppressionConventionTests
         }
 
         // ソリューションルートの祖先（リポジトリ直下）の .editorconfig も継承されるため走査対象に入る
-        var repositoryRoot = FindRepositoryRoot(solutionRoot);
+        var repositoryRoot = TestPaths.FindRepositoryRoot(solutionRoot);
         repositoryRoot.Should().NotBeNull("リポジトリのルート（.git のある階層）を解決できること");
         inspected.Should().Contain(NormalizePath(Path.Combine(repositoryRoot!, ".editorconfig")),
             "リポジトリ直下の .editorconfig はソリューション配下のファイルへも継承され得る");
@@ -719,7 +719,7 @@ public class BuildWarningSuppressionConventionTests
                 return NormalizePath(path);
             }
 
-            Directory.CreateDirectory(Path.Combine(repo, ".git"));
+            Directory.CreateDirectory(Path.Combine(repo, TestPaths.GitMarkerName));
 
             var expected = new[]
             {
@@ -823,7 +823,7 @@ public class BuildWarningSuppressionConventionTests
     {
         var files = new List<string>(EnumerateFilesRecursively(solutionRoot));
 
-        var repositoryRoot = FindRepositoryRoot(solutionRoot);
+        var repositoryRoot = TestPaths.FindRepositoryRoot(solutionRoot);
         if (repositoryRoot != null)
         {
             for (var dir = Directory.GetParent(solutionRoot); dir != null; dir = dir.Parent)
@@ -846,21 +846,6 @@ public class BuildWarningSuppressionConventionTests
             .Where(f => ClassifyFile(f) != InspectedFileKind.None)
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToList();
-    }
-
-    /// <summary>ソリューションルートの祖先方向で最初に <c>.git</c>（ディレクトリまたは worktree のファイル）がある階層。</summary>
-    internal static string? FindRepositoryRoot(string solutionRoot)
-    {
-        for (var dir = new DirectoryInfo(solutionRoot); dir != null; dir = dir.Parent)
-        {
-            var marker = Path.Combine(dir.FullName, ".git");
-            if (Directory.Exists(marker) || File.Exists(marker))
-            {
-                return dir.FullName;
-            }
-        }
-
-        return null;
     }
 
     internal static InspectedFileKind ClassifyFile(string path)
@@ -1301,7 +1286,7 @@ public class BuildWarningSuppressionConventionTests
     private static string DisplayPath(string fullPath)
     {
         var solutionRoot = TestPaths.GetSolutionRoot();
-        var baseDir = FindRepositoryRoot(solutionRoot) ?? solutionRoot;
+        var baseDir = TestPaths.FindRepositoryRoot(solutionRoot) ?? solutionRoot;
         return fullPath.StartsWith(baseDir, StringComparison.OrdinalIgnoreCase)
             ? fullPath.Substring(baseDir.Length).TrimStart(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)
             : fullPath;
