@@ -39,26 +39,57 @@ namespace ICCardManager.Tests.Views;
 /// 使うと誤検出になる（見ていない範囲は「見ていない」と明示する）。
 /// </para>
 /// <para>
-/// **対象プロパティ**は Issue #2075 が名指しする「ステータス／検証メッセージ」に限る。
+/// **対象プロパティは名前の列挙ではなく命名の規則から導出する**（Issue #2102）。
+/// 旧版は <c>StatusMessage</c> / <c>ValidationMessage</c> / <c>ErrorMessage</c> / <c>WarningMessage</c> の
+/// 4 つの許可リストだけを見ており、<c>ReportDialog</c> の <c>PreflightWarningText</c>（帳票作成前の
+/// 警告文）から折り返しを消しても緑だった — 画面ではなく**プロパティ名**を列挙した形も、
+/// ファイル名の列挙と同じ漏れ方をする（#1786）。規則（<see cref="MessagePropertyPattern"/>）は
+/// 本リポジトリの <c>Views/**/*.xaml</c> で <c>TextBlock</c> にバインドされている名前を調べて決めた:
+/// </para>
+/// <list type="bullet">
+/// <item><c>…Message</c> で終わる名前は、ViewModel が状況に応じて組み立てる文言（ステータス・検証・
+/// 警告・案内）に使われている（<c>StatusMessage</c> / <c>CountdownMessage</c> / <c>EmptyStateMessage</c> /
+/// <c>ReturnHistoryReviewMessage</c> …）</item>
+/// <item><c>Warning</c> / <c>Error</c> を含み <c>…Text</c> で終わる名前は、警告・エラーの文言
+/// （<c>PreflightWarningText</c>）。<c>WarningIcon</c> のような文言でない名前は <c>Text</c> で終わらないので除かれる</item>
+/// <item>それ以外の <c>…Text</c>（<c>BackupFolderText</c> / <c>LastRefreshText</c> …）は値や日時の表示で、
+/// 3 要素の文言ではないため対象にしない</item>
+/// </list>
+/// <para>
+/// 規則に一致しても対象外とする名前は <see cref="ExcludedProperties"/> に理由とともに置く。
 /// <c>BusyMessage</c>（処理中オーバーレイの固定文言）や <c>HistoryStatusMessage</c>
 /// （「1～20件を表示（全123件）」という定型の件数表示）、<c>MainWindow</c> の
 /// <c>NextActionMessage</c>（「職員証をタッチしてください」等の短い案内）は 3 要素の文言ではない。
 /// とくに後ろの 2 つは**横方向 <c>StackPanel</c> の中にあり <c>TextWrapping</c> が機能しない**（#1687。
 /// <c>NextActionMessage</c> は属性を持つが効いていない）。機能しない属性を検査で強制すると
-/// 「緑だが守っていない」状態を作るので対象に含めない。これらを白リストへ足す前に、
+/// 「緑だが守っていない」状態を作るので対象に含めない。これらを対象へ戻す前に、
 /// 親パネルを幅の制約があるもの（<c>DockPanel</c> / <c>Grid</c>）へ変えること。
+/// 除外した名前が画面から消えたら除外も外す（<see cref="除外したプロパティが実在すること"/>）。
 /// </para>
 /// </remarks>
 public class StatusMessageWrappingConventionTests
 {
-    /// <summary>折り返しを必須とするメッセージ系プロパティ。</summary>
-    private static readonly string[] MessageProperties =
+    /// <summary>
+    /// 折り返しを必須とする文言系プロパティの命名規則（導出の理由はクラスの remarks を参照）。
+    /// </summary>
+    private static readonly Regex MessagePropertyPattern = new(
+        @"^(?:[A-Za-z0-9_]*Message|[A-Za-z0-9_]*(?:Warning|Error)[A-Za-z0-9_]*Text)$",
+        RegexOptions.Compiled);
+
+    /// <summary>
+    /// 規則に一致するが対象外とするプロパティ（理由はクラスの remarks を参照）。
+    /// </summary>
+    private static readonly string[] ExcludedProperties =
     {
-        "StatusMessage",
-        "ValidationMessage",
-        "ErrorMessage",
-        "WarningMessage",
+        "BusyMessage",
+        "HistoryStatusMessage",
+        "NextActionMessage",
     };
+
+    private static bool IsMessageProperty(string? name)
+        => name != null
+           && MessagePropertyPattern.IsMatch(name)
+           && !ExcludedProperties.Contains(name, StringComparer.Ordinal);
 
     /// <summary>折り返しとして認める <c>TextWrapping</c> の値。</summary>
     private static readonly string[] WrappingValues = { "Wrap", "WrapWithOverflow" };
@@ -97,7 +128,33 @@ public class StatusMessageWrappingConventionTests
             "LedgerDetailDialog.xaml|StatusMessage",
             "OperationLogDialog.xaml|StatusMessage",
             "PrintPreviewDialog.xaml|StatusMessage",
+            // Issue #2102: 許可リストの外にあった警告文。規則から導出されて対象に入ること
+            "ReportDialog.xaml|PreflightWarningText",
         });
+    }
+
+    /// <summary>
+    /// 除外したプロパティが実際に画面にあること（除外が古くなって、同じ名前の新しい文言を
+    /// 黙って対象から外すことを防ぐ）。
+    /// </summary>
+    [Fact]
+    public void 除外したプロパティが実在すること()
+    {
+        var bound = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var file in EnumerateViewXamlFiles())
+        {
+            var source = XamlElementInspection.StripXmlComments(File.ReadAllText(file));
+            foreach (var element in XamlElementInspection.EnumerateElements(source, "TextBlock"))
+            {
+                foreach (var name in EnumerateBoundTextProperties(element))
+                {
+                    bound.Add(name);
+                }
+            }
+        }
+
+        bound.Should().Contain(ExcludedProperties,
+            "画面から消えた名前は ExcludedProperties から外す（残すと、同じ名前で追加された文言が検査から漏れる）");
     }
 
     [Fact]
@@ -156,6 +213,17 @@ public class StatusMessageWrappingConventionTests
 
         // 対象外のプロパティは拾わない
         Scan(@"<TextBlock Text=""{Binding BusyMessage}""/>").Should().BeEmpty();
+        Scan(@"<TextBlock Text=""{Binding HistoryStatusMessage}""/>").Should().BeEmpty();
+        Scan(@"<TextBlock Text=""{Binding BackupFolderText}""/>").Should().BeEmpty("値の表示は 3 要素の文言ではない");
+        Scan(@"<TextBlock Text=""{Binding WarningIcon}""/>").Should().BeEmpty("文言でない名前は Text で終わらない");
+
+        // 名前を列挙していない文言も規則から拾う（Issue #2102）
+        Scan(@"<TextBlock Text=""{Binding PreflightWarningText}""/>")
+            .Should().ContainSingle().Which.HasWrap.Should().BeFalse();
+        Scan(@"<TextBlock Text=""{Binding ImportResultMessage}""/>")
+            .Should().ContainSingle().Which.Property.Should().Be("ImportResultMessage");
+        Scan(@"<TextBlock Text=""{Binding SaveErrorText}""/>")
+            .Should().ContainSingle().Which.Property.Should().Be("SaveErrorText");
 
         // Text 以外のバインド（DataTrigger 等）は拾わない
         Scan(@"<DataTrigger Binding=""{Binding StatusMessage}"" Value=""""/>").Should().BeEmpty();
@@ -167,13 +235,19 @@ public class StatusMessageWrappingConventionTests
 
     private static IReadOnlyList<MessageTextBlock> EnumerateMessageTextBlocks()
     {
+        return EnumerateViewXamlFiles()
+            .SelectMany(file => Scan(File.ReadAllText(file), file))
+            .ToList();
+    }
+
+    private static IReadOnlyList<string> EnumerateViewXamlFiles()
+    {
         var viewsRoot = Path.Combine(TestPaths.GetProductionSourceRoot(), "Views");
         Directory.Exists(viewsRoot).Should().BeTrue($"View のソースルート {viewsRoot} が存在すべき");
 
         return Directory
             .EnumerateFiles(viewsRoot, "*.xaml", SearchOption.AllDirectories)
             .OrderBy(f => f, StringComparer.Ordinal)
-            .SelectMany(file => Scan(File.ReadAllText(file), file))
             .ToList();
     }
 
@@ -204,6 +278,12 @@ public class StatusMessageWrappingConventionTests
     /// この <c>TextBlock</c> が表示する対象プロパティ名を返す（どの記述形式でも拾う）。
     /// </summary>
     private static string? FindMessageProperty(XamlElementInspection.XamlElement element)
+        => EnumerateBoundTextProperties(element).FirstOrDefault(IsMessageProperty);
+
+    /// <summary>
+    /// この <c>TextBlock</c> の文言にバインドされているプロパティ名を、記述形式を問わず列挙する。
+    /// </summary>
+    private static IEnumerable<string> EnumerateBoundTextProperties(XamlElementInspection.XamlElement element)
     {
         // ① 開始タグの Text 属性
         var candidates = new List<string?>
@@ -233,7 +313,8 @@ public class StatusMessageWrappingConventionTests
 
         return candidates
             .Select(NormalizePropertyName)
-            .FirstOrDefault(p => p != null && MessageProperties.Contains(p, StringComparer.Ordinal));
+            .Where(p => p != null)
+            .Select(p => p!);
     }
 
     /// <summary>パス表記（<c>DataContext.StatusMessage</c>）を最後の区切りへ正規化する。</summary>

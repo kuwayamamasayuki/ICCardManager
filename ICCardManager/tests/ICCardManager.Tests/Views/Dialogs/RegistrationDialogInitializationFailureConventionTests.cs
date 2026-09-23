@@ -111,6 +111,37 @@ public class RegistrationDialogInitializationFailureConventionTests
     }
 
     /// <summary>
+    /// 初期化と登録開始の呼び出しが、失敗を受け止める <c>try</c> の内側にあること（Issue #2102）。
+    /// </summary>
+    /// <remarks>
+    /// 旧版は <c>catch</c> の形と、本体のどこかに <c>InitializeAsync</c> / <c>StartNew*WithIdmAsync</c> が
+    /// あることしか見ておらず、呼び出しを <c>try</c> の手前へ出しても緑だった。そうすると失敗は
+    /// <c>catch</c> を通らず <c>async void</c> から未処理例外として抜け、<c>Close()</c> に届かない —
+    /// 上の <c>catch</c> の要件が守ろうとしている状態（抑制が保持されたまま画面が残る）そのものになる。
+    /// </remarks>
+    [Fact]
+    public void 初期化と登録開始をtryの内側で呼ぶこと()
+    {
+        var violations = new List<string>();
+
+        foreach (var (fileName, codeOnly) in LoadRegistrationDialogSources())
+        {
+            var loadedBody = ExtractLoadedHandlerBody(codeOnly);
+            loadedBody.Should().NotBeNullOrWhiteSpace($"{fileName} の Loaded ハンドラー本体を抽出できること");
+
+            if (!CallsInitializationInsideTry(loadedBody))
+            {
+                violations.Add(fileName);
+            }
+        }
+
+        violations.Should().BeEmpty(
+            "InitializeAsync と StartNew*WithIdmAsync は、Close() を保証する catch を持つ try の内側で呼ぶこと。" +
+            "外へ出すと初期化の失敗が catch を通らず、カード読み取り抑制（#1807）が回収されない（Issue #1844）。" +
+            $"違反: {string.Join(", ", violations)}");
+    }
+
+    /// <summary>
     /// 初期化失敗の案内に生の <c>ex.Message</c> を出さないこと（Issue #1614 / #1817）。
     /// </summary>
     [Fact]
@@ -208,7 +239,66 @@ public class RegistrationDialogInitializationFailureConventionTests
         HasGuaranteedCloseOnFailure(body).Should().BeFalse();
     }
 
+    [Fact]
+    public void 検査ロジック_初期化をtryの内側で呼ぶ形を適合として扱うこと()
+    {
+        const string body = @"
+            try
+            {
+                await _viewModel.InitializeAsync();
+                if (x) { var shouldClose = await _viewModel.StartNewCardWithIdmAsync(_presetIdm); }
+            }
+            catch (Exception ex) { try { Show(); } finally { Close(); } }
+        ";
+
+        CallsInitializationInsideTry(body).Should().BeTrue();
+    }
+
+    [Theory]
+    [InlineData("await _viewModel.InitializeAsync();", "var shouldClose = await _viewModel.StartNewCardWithIdmAsync(_presetIdm);")]
+    [InlineData("var shouldClose = await _viewModel.StartNewCardWithIdmAsync(_presetIdm);", "await _viewModel.InitializeAsync();")]
+    public void 検査ロジック_呼び出しをtryの外へ出した形を違反として検出すること(string outside, string inside)
+    {
+        var body = outside + " try { " + inside + " } catch (Exception ex) { try { Show(); } finally { Close(); } }";
+
+        CallsInitializationInsideTry(body).Should().BeFalse();
+    }
+
+    [Fact]
+    public void 検査ロジック_catchの中のtryを初期化のtryと取り違えないこと()
+    {
+        // 呼び出しが catch の中の try にだけあっても、失敗を受け止める try の内側ではない
+        const string body = @"
+            try { Prepare(); }
+            catch (Exception ex)
+            {
+                try { await _viewModel.InitializeAsync(); await _viewModel.StartNewCardWithIdmAsync(_presetIdm); }
+                finally { Close(); }
+            }
+        ";
+
+        CallsInitializationInsideTry(body).Should().BeFalse();
+    }
+
     #endregion
+
+    /// <summary>
+    /// メソッド直下（入れ子でない）の <c>try</c> ブロックのどれかが <c>InitializeAsync</c> と
+    /// 登録開始の両方を含み、かつ直下の <c>try</c> の外（<c>catch</c> の中を含む）にはどちらも現れないか。
+    /// </summary>
+    internal static bool CallsInitializationInsideTry(string methodBody)
+    {
+        var tryBodies = ExtractKeywordBlocks(methodBody, "try", allowFilterParentheses: false, topLevelOnly: true);
+        var guarded = tryBodies.Any(b => b.Contains("InitializeAsync") && StartNewWithIdmPattern.IsMatch(b));
+
+        var outside = methodBody;
+        foreach (var tryBody in tryBodies)
+        {
+            outside = outside.Replace(tryBody, string.Empty);
+        }
+
+        return guarded && !outside.Contains("InitializeAsync") && !StartNewWithIdmPattern.IsMatch(outside);
+    }
 
     /// <summary>
     /// <c>*_Loaded</c> ハンドラーの本体を抽出する。

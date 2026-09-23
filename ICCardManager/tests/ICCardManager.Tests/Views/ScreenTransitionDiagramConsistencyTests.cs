@@ -317,7 +317,7 @@ public class ScreenTransitionDiagramConsistencyTests
     public void 職員認証を要求する操作の集合が設計書の記述と一致する()
     {
         var actual = EnumerateStaffAuthCallingViewModels()
-            .SelectMany(f => StaffAuthCallPattern.Matches(File.ReadAllText(f)).Cast<Match>())
+            .SelectMany(f => StaffAuthCallPattern.Matches(ReadCodeKeepingLiterals(f)).Cast<Match>())
             .Select(m => m.Groups["operation"].Value)
             .Distinct()
             .OrderBy(o => o, StringComparer.Ordinal)
@@ -346,11 +346,40 @@ public class ScreenTransitionDiagramConsistencyTests
             string.Join("\n", returnEdges));
     }
 
+    /// <summary>
+    /// コメントアウトした呼び出しは認証を要求しないので数えない（Issue #2102）。
+    /// </summary>
+    [Fact]
+    public void 職員認証の呼び出しはコメントを除いて数える()
+    {
+        const string sample =
+            "// var r = await _staffAuthService.RequestAuthenticationAsync(\"職員の削除\");\n" +
+            "/* await _staffAuthService.RequestAuthenticationAsync(\"履歴の削除\"); */\n" +
+            "var authResult = await _staffAuthService.RequestAuthenticationAsync(\"履歴の分割\");\n";
+
+        StaffAuthCallPattern.Matches(TestSourceInspection.RemoveCommentsPreservingLines(sample))
+            .Cast<Match>()
+            .Select(m => m.Groups["operation"].Value)
+            .Should().Equal(new[] { "履歴の分割" },
+                "コメントアウトした呼び出しを「認証あり」と数えると、認証を外した変更が緑のまま通る");
+    }
+
+    /// <summary>
+    /// 操作名の文字列リテラルを残したままコメントだけを除いたソースを返す。
+    /// </summary>
+    /// <remarks>
+    /// Issue #2102: 旧版は生のソースへ <see cref="StaffAuthCallPattern"/> を当てていたため、
+    /// コメントアウトした <c>RequestAuthenticationAsync</c> も「認証あり」と数えていた。
+    /// 操作名はリテラルなので <see cref="TestSourceInspection.ToCodeOnly"/> は使えない。
+    /// </remarks>
+    private static string ReadCodeKeepingLiterals(string path)
+        => TestSourceInspection.RemoveCommentsPreservingLines(File.ReadAllText(path));
+
     private static IEnumerable<string> EnumerateStaffAuthCallingViewModels()
     {
         return Directory
             .GetFiles(Path.Combine(GetSourceRoot(), "ViewModels"), "*.cs", SearchOption.AllDirectories)
-            .Where(f => StaffAuthCallPattern.IsMatch(File.ReadAllText(f)))
+            .Where(f => StaffAuthCallPattern.IsMatch(ReadCodeKeepingLiterals(f)))
             .OrderBy(f => f, StringComparer.Ordinal);
     }
 

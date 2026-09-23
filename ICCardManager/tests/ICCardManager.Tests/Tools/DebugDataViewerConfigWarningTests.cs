@@ -1,7 +1,11 @@
+using System.IO;
+using System.Linq;
+using System.Text.RegularExpressions;
 using DebugDataViewer;
 using FluentAssertions;
 using ICCardManager.Data;
 using ICCardManager.Infrastructure.CardReader;
+using ICCardManager.Tests.Views.Helpers;
 using Moq;
 using Xunit;
 
@@ -66,8 +70,41 @@ namespace ICCardManager.Tests.Tools
 
             var viewModel = CreateViewModel(resolution);
 
-            viewModel.ConfigPathWarningMessage.Should().Contain("選択...");
             viewModel.ConfigPathWarningMessage.Should().EndWith("してください。");
+
+            // Issue #2102: 旧版は文言に「選択...」が含まれるかしか見ておらず、画面（XAML）の側で
+            // ボタンの表記を変えても、ボタンを消しても緑だった。文言が名指すボタンを実際の XAML から探し、
+            // 名指したとおりの場所（画面右下＝最下段の右寄せのフッター）にあって、DB を選び直す
+            // コマンドへつながっていることを確かめる。
+            var buttonNames = Regex.Matches(viewModel.ConfigPathWarningMessage, "「(?<name>[^」]+)」ボタン")
+                .Cast<System.Text.RegularExpressions.Match>()
+                .Select(m => m.Groups["name"].Value)
+                .ToList();
+            buttonNames.Should().ContainSingle("行動指示はボタンを 1 つ名指す");
+
+            var xaml = XamlElementInspection.StripXmlComments(File.ReadAllText(Path.Combine(
+                TestPaths.GetSolutionRoot(), "tools", "DebugDataViewer", "MainWindow.xaml")));
+            var buttons = XamlElementInspection.EnumerateElements(xaml, "Button")
+                .Where(b => XamlElementInspection.GetAttribute(b.StartTag, "Content") == buttonNames[0])
+                .ToList();
+            buttons.Should().ContainSingle($"文言が名指す「{buttonNames[0]}」ボタンが画面に 1 つだけ実在する");
+
+            XamlElementInspection.GetBindingPropertyName(
+                    XamlElementInspection.GetAttribute(buttons[0].StartTag, "Command"))
+                .Should().Be(nameof(MainViewModel.SelectDatabaseCommand),
+                    "名指したボタンが、正しいデータベースファイルを選び直す操作につながっていること");
+
+            var footer = XamlElementInspection.EnumerateElements(xaml, "StackPanel")
+                .Where(p => p.Body.Contains(buttons[0].StartTag))
+                .OrderBy(p => p.Body.Length)
+                .First();
+            var rootRowCount = Regex.Matches(
+                XamlElementInspection.EnumerateElements(xaml, "Grid.RowDefinitions").First().Body,
+                @"<RowDefinition\b").Count;
+            XamlElementInspection.GetAttribute(footer.StartTag, "Grid.Row")
+                .Should().Be((rootRowCount - 1).ToString(), "文言は「画面右下」と述べている（最下段）");
+            XamlElementInspection.GetAttribute(footer.StartTag, "HorizontalAlignment")
+                .Should().Be("Right", "文言は「画面右下」と述べている（右寄せ）");
         }
     }
 }
