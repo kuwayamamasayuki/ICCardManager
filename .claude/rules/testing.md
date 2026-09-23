@@ -76,6 +76,16 @@ paths:
   - **「間欠的に赤い」の裏に「常に緑で何も守っていない」が同居していることがある**。#1961 のテストは、`ExecuteAutoBackupAsync` が `ResolveBackupFolderAsync`（内部で `Task.Run` を `ConfigureAwait(false)` で await）を通るため**継続が必ずプールへ移り**、守っているはずの `Task.Run(BackupDatabaseTo)` を丸ごと削除しても緑だった。**間欠失敗を調べるときは、まず「そのテストは正しい退行を検出できるか」を変異で実測する** — 揺らぎを消しただけでは、何も検査しないテストを安定させることになる。
   - **模擬が SUT へ届いていることを対で表明する**。「正しい実装で緑」だけでは、模擬を丸ごと外した実装でも緑になる。「模擬を極端側へ振ると赤くなる」（#1961 では *どのスレッドも UI と判定させると `null` を返す*）を 1 件置く。
 - **失敗を戻り値（`null` / `false`）で表すメソッドのテストに `NullLogger` を渡さない**（Issue #1961）。ガードの発火・I/O 失敗・権限失敗がすべて同じ戻り値へ畳まれる（#1737）うえ、**サービスが記録した理由まで一緒に捨てる**ため、CI が赤くなっても run のログから切り分けられない。`Tests/Infrastructure/RecordingLogger<T>` を渡し、`FormatEntries()` をアサーションの `because` へ載せる。
+- **同時実行・ロック・トランザクションのテストは、競合を「実際に起こして」から表明する**（Issue #2103）。名前が「同時」「並列」「ロック」「トランザクション」でも、次の形では競合が一度も起きず、守りたいガードを丸ごと消しても緑になる
+  - **モックが完了済みの Task を返すと、`Task.WhenAll(task1, task2)` は直列に走る**。1 件目は同期的に最後まで走り切ってから 2 件目が始まり、「1 件だけ成功」はモックの状態遷移が弾いているだけになる。1 件目を**ロックの内側**（台帳の書き込み等）で `TaskCompletionSource` により止め、**止めている間に** 2 件目が「待機している」「まだ状態を読んでいない」ことを表明してから解放する（`LendingServiceTests` の `BlockFirstCallGate`）
+  - **SQLite の競合は、同じ接続を共有させると起きない**。同じ `DbContext` の接続は接続リースのセマフォで直列化されるため、CAS を「SELECT してから UPDATE」の 2 文へ退行させても緑になる。**ファイル DB に別々の `DbContext`（別 PC 相当）**を向け、開始合図で一斉に走らせる。割り込みは確率的なので回数を重ねる（`SettingsRepositoryTests` の VACUUM ロック）
+  - **ADO 層の再試行が、検査したい待機を肩代わりすることがある**。System.Data.SQLite は SQLITE_BUSY を受けると `CommandTimeout`（既定 30 秒）の間自前で再試行するため、`PRAGMA busy_timeout` を消しても書き込みは成功する。busy_timeout を観測するならコマンドの `CommandTimeout = 0` にする
+  - **トランザクションの受け渡しを `null` で検査しない**。`Verify(..., tx)` の `tx` が `null` だと、受け取った tx を捨てて `null` を渡す実装とも一致する。インメモリ SQLite で実際に `BeginTransaction()` した非 null の tx を渡し、参照の同一性を表明する
+  - **「失敗したら巻き戻す」をモックのリポジトリで検査しない**。書き込みが DB に届いていなければ、失敗分岐で `Commit()` しても観測できない。片方の書き込みを実リポジトリへ委譲し、**DB を読み返して**表明する（#1745 と同じ判断）
+  - **拒否の理由がガードであることを、別の失敗要因を取り除いて確かめる**。リストアの共有モード判定は、開いたままのハンドルで `File.Move` が失敗することでも `false` になっていた。`FileShare.Delete` 付きのハンドルなら名前の変更は妨げないので、ガードだけが拒否の理由になる。対の表明（ガードが効かないモードでは同じ条件で成功する）を置く
+  - **状態をリフレクションで作ってから入力を与える形は、その状態へ至る経路を検査していない**。「処理中は読み取りを無視する」は、処理の await 中に 2 件目が届く形で再現する。テスト用ディスパッチャーは用途で選ぶ — その場で走り切る `SynchronousDispatcherService` では await 中の割り込みも「`InvokeAsync` の後に立てたフラグを処理が読む」順序依存も再現しないので、本番と同じく後で実行する `DeferredDispatcherService` を使う
+  - **並行テストで集めた例外は、特定の型だけを表明しない**。`OfType<ObjectDisposedException>()` だけを見ると、同じ競合から生じる別の例外（NullReference・SemaphoreFull）を握りつぶす
+  - **変異が挙動を変えないことがある（等価変異）**。`MainViewModel` の処理中ガードは、後続の `switch` に処理中の分岐が無いため、消しても挙動が変わらない。テストでは検出できないので、観測できる性質（2 件目が何も起こさない）を壊す変異で検出力を測り、等価であることを記録しておく
 - **`await act.Should().NotThrowAsync()` だけで終わらせない**。「例外が出ない」は結果を何も検証していない。返り値・副作用のどちらかを必ず具体値で表明する
 - **fire-and-forget の完了を固定時間の待機で待たない**。`Task.Delay(50)` は遅いマシンで不安定になる。モックの `Callback` で `TaskCompletionSource` を立て、`Task.WhenAny` に十分長いタイムアウト（5秒程度）を添えて待つ
 - **STA スレッドの完了待ちは、上限の倍率ではなく競合の側を減らす**（Issue #2083）。WPF の `Window` / `FlowDocument` を扱うテストは `Thread.Join` 以外に完了を待つ手段が無いが、待っているのは**計算時間ではなくスケジューリング**である。GitHub ホストランナーは 2 コア共有で、STA スレッドは初回に `PresentationFramework` の初期化を伴うため他のテストコレクションと CPU を奪い合う。実測 0.1 秒に対して上限 30 秒（約 290 倍の余裕）がありながら PR #2082 の CI で打ち切られた ― **この比なら、倍率を増やしても根治しない**。STA を要するテストは `Tests/Infrastructure/StaTestRunner` を使い、`[Collection(StaThreadCollection.Name)]`（`DisableParallelization = true`）で並列実行の相手そのものを減らす。

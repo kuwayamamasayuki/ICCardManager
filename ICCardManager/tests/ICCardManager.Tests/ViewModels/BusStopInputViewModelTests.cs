@@ -423,8 +423,54 @@ public class BusStopInputViewModelTests : IDisposable
     /// Issue #1945: 摘要の更新が競合（影響行数 0）したときも保存失敗として扱うこと。
     /// 明細だけが確定して摘要が古いまま残る鏡像の不整合を、トランザクションが巻き戻す。
     /// </summary>
+    /// <remarks>
+    /// Issue #2103: 旧テストはリポジトリがモックだったため、明細の書き込みがそもそも DB に届いておらず、
+    /// 失敗分岐の <c>return false;</c> の前に <c>scope.Commit();</c> を足しても緑だった。
+    /// 明細の更新だけを実リポジトリへ委譲し、DB に「巻き戻された」ことを読み返して表明する。
+    /// あわせて、メモリ上の明細と摘要も保存前へ戻ること（呼び出し元と共有しているため）を表明する。
+    /// </remarks>
     [Fact]
-    public async Task SaveAsync_摘要の更新が競合したら保存失敗になること_Issue1945()
+    public async Task SaveAsync_摘要の更新が競合したら保存失敗になり明細の書き込みも巻き戻ること_Issue1945()
+    {
+        // Arrange: 実 DB に★の台帳と明細を用意する
+        var (ledger, details) = await SeedBusLedgerAsync();
+        var realRepository = new LedgerRepository(_dbContext);
+
+        _settingsRepoMock.Setup(s => s.GetAppSettingsAsync()).ReturnsAsync(new AppSettings());
+        _ledgerRepoMock.Setup(r => r.UpdateDetailBusStopsAsync(
+                It.IsAny<int>(), It.IsAny<IEnumerable<(int, string)>>(), It.IsAny<SQLiteTransaction>()))
+            .Returns<int, IEnumerable<(int SequenceNumber, string BusStops)>, SQLiteTransaction>(
+                (id, updates, tx) => realRepository.UpdateDetailBusStopsAsync(id, updates, tx));
+        _ledgerRepoMock.Setup(r => r.UpdateAsync(It.IsAny<Ledger>(), It.IsAny<SQLiteTransaction>()))
+            .ReturnsAsync(false); // 台帳が他 PC で削除された等
+
+        _viewModel.InitializeWithDetails(ledger, details);
+        _viewModel.BusUsages[0].BusStops = "天神～博多";
+
+        // Act
+        await _viewModel.SaveAsync();
+
+        // Assert: 画面
+        _viewModel.IsSaved.Should().BeFalse();
+        _viewModel.StatusMessage.Should().Be("保存に失敗しました");
+        _viewModel.BusUsages[0].BusStops.Should().Be("天神～博多", "入力欄は残し、そのまま保存をやり直せるようにする");
+
+        // Assert: DB（明細の書き込みはトランザクションごと巻き戻る）
+        _ledgerRepoMock.Verify(r => r.UpdateDetailBusStopsAsync(
+                ledger.Id, It.IsAny<IEnumerable<(int, string)>>(), It.IsNotNull<SQLiteTransaction>()),
+            Times.Once, "明細は実際にトランザクションの内側で書かれている（書かれていなければ巻き戻しを検査できない）");
+        ReadDetailBusStops(ledger.Id).Should().Equal(new[] { "★" }, "commit せずに抜けるので明細は保存前のまま");
+
+        // Assert: メモリ（呼び出し元と共有している Ledger / LedgerDetail）
+        ledger.Summary.Should().Be("バス（★）", "DB と食い違う摘要をメモリに残さない");
+        details[0].BusStops.Should().Be("★", "DB と食い違うバス停名をメモリに残さない");
+    }
+
+    /// <summary>
+    /// Issue #2103: 明細の更新が競合（影響行数 0）したときも、メモリ上のバス停名は保存前へ戻ること。
+    /// </summary>
+    [Fact]
+    public async Task SaveAsync_明細の更新が競合したらメモリ上のバス停名も保存前へ戻ること_Issue2103()
     {
         // Arrange
         var details = new List<LedgerDetail>
@@ -436,9 +482,7 @@ public class BusStopInputViewModelTests : IDisposable
         _settingsRepoMock.Setup(s => s.GetAppSettingsAsync()).ReturnsAsync(new AppSettings());
         _ledgerRepoMock.Setup(r => r.UpdateDetailBusStopsAsync(
                 It.IsAny<int>(), It.IsAny<IEnumerable<(int, string)>>(), It.IsAny<SQLiteTransaction>()))
-            .ReturnsAsync(true);
-        _ledgerRepoMock.Setup(r => r.UpdateAsync(It.IsAny<Ledger>(), It.IsAny<SQLiteTransaction>()))
-            .ReturnsAsync(false); // 台帳が他 PC で削除された等
+            .ReturnsAsync(false); // ledger_detail の振り直し等
 
         _viewModel.InitializeWithDetails(ledger, details);
         _viewModel.BusUsages[0].BusStops = "天神～博多";
@@ -447,8 +491,137 @@ public class BusStopInputViewModelTests : IDisposable
         await _viewModel.SaveAsync();
 
         // Assert
+        _viewModel.StatusMessage.Should().Be(BusStopInputViewModel.BusStopConflictMessage);
+        details[0].BusStops.Should().Be("★");
+        ledger.Summary.Should().Be("バス（★）");
+        _viewModel.BusUsages[0].BusStops.Should().Be("天神～博多");
+    }
+
+    /// <summary>
+    /// Issue #2103: スキップ（★で保存）が失敗したときも、メモリ上の明細と摘要は DB と同じ値（入力済みのバス停名）へ戻ること。
+    /// </summary>
+    [Fact]
+    public async Task SkipAsync_保存に失敗したらメモリ上の明細と摘要を保存前へ戻すこと_Issue2103()
+    {
+        // Arrange: 既にバス停名が保存されている台帳を開き直した状態
+        var details = new List<LedgerDetail>
+        {
+            new LedgerDetail { LedgerId = 1, IsBus = true, BusStops = "天神～博多", Amount = 200, SequenceNumber = 1 }
+        };
+        var savedSummary = SummaryGenerator.FormatBusSummary("天神～博多");
+        var ledger = new Ledger { Id = 1, Summary = savedSummary, Details = details };
+
+        _settingsRepoMock.Setup(s => s.GetAppSettingsAsync()).ReturnsAsync(new AppSettings());
+        _ledgerRepoMock.Setup(r => r.UpdateDetailBusStopsAsync(
+                It.IsAny<int>(), It.IsAny<IEnumerable<(int, string)>>(), It.IsAny<SQLiteTransaction>()))
+            .ReturnsAsync(true);
+        _ledgerRepoMock.Setup(r => r.UpdateAsync(It.IsAny<Ledger>(), It.IsAny<SQLiteTransaction>()))
+            .ReturnsAsync(false);
+
+        _viewModel.InitializeWithDetails(ledger, details);
+
+        // Act
+        await _viewModel.SkipAsync();
+
+        // Assert
         _viewModel.IsSaved.Should().BeFalse();
-        _viewModel.StatusMessage.Should().Be("保存に失敗しました");
+        details[0].BusStops.Should().Be("天神～博多", "スキップは確定していないので、★へ置き換えた明細を元へ戻す");
+        ledger.Summary.Should().Be(savedSummary);
+    }
+
+    /// <summary>
+    /// 対の表明（Issue #2103）: 保存に成功したときは、メモリ上の明細と摘要が新しい値になること。
+    /// この表明が無いと、成否にかかわらず常に保存前へ戻す実装でも上の 2 件は緑になる。
+    /// </summary>
+    [Fact]
+    public async Task SaveAsync_保存に成功したらメモリ上の明細と摘要は新しい値になること_Issue2103()
+    {
+        // Arrange: 実 DB に★の台帳と明細を用意し、両方の書き込みを実リポジトリへ委譲する
+        var (ledger, details) = await SeedBusLedgerAsync();
+        var realRepository = new LedgerRepository(_dbContext);
+
+        _settingsRepoMock.Setup(s => s.GetAppSettingsAsync()).ReturnsAsync(new AppSettings());
+        _ledgerRepoMock.Setup(r => r.UpdateDetailBusStopsAsync(
+                It.IsAny<int>(), It.IsAny<IEnumerable<(int, string)>>(), It.IsAny<SQLiteTransaction>()))
+            .Returns<int, IEnumerable<(int SequenceNumber, string BusStops)>, SQLiteTransaction>(
+                (id, updates, tx) => realRepository.UpdateDetailBusStopsAsync(id, updates, tx));
+        _ledgerRepoMock.Setup(r => r.UpdateAsync(It.IsAny<Ledger>(), It.IsAny<SQLiteTransaction>()))
+            .Returns<Ledger, SQLiteTransaction>((l, tx) => realRepository.UpdateAsync(l, tx));
+
+        _viewModel.InitializeWithDetails(ledger, details);
+        _viewModel.BusUsages[0].BusStops = "天神～博多";
+
+        // Act
+        await _viewModel.SaveAsync();
+
+        // Assert
+        _viewModel.IsSaved.Should().BeTrue();
+        ReadDetailBusStops(ledger.Id).Should().Equal(new[] { "天神～博多" });
+        details[0].BusStops.Should().Be("天神～博多");
+        ledger.Summary.Should().Be(SummaryGenerator.FormatBusSummary("天神～博多"));
+    }
+
+    /// <summary>
+    /// Issue #2103: 実 DB にバス利用 1 件（バス停名は★）の台帳を登録し、登録した Ledger と明細を返す。
+    /// </summary>
+    private async Task<(Ledger Ledger, List<LedgerDetail> Details)> SeedBusLedgerAsync()
+    {
+        const string cardIdm = "0123456789ABCDEF";
+        using (var lease = _dbContext.LeaseConnection())
+        using (var command = lease.Connection.CreateCommand())
+        {
+            command.CommandText =
+                "INSERT INTO ic_card (card_idm, card_type, card_number, is_deleted) VALUES (@idm, 'はやかけん', 'H001', 0)";
+            command.Parameters.AddWithValue("@idm", cardIdm);
+            command.ExecuteNonQuery();
+        }
+
+        var repository = new LedgerRepository(_dbContext);
+        var ledger = new Ledger
+        {
+            CardIdm = cardIdm,
+            Date = new DateTime(2026, 1, 10),
+            Summary = "バス（★）",
+            Expense = 200,
+            Balance = 2300
+        };
+        ledger.Id = await repository.InsertAsync(ledger);
+
+        var details = new List<LedgerDetail>
+        {
+            new LedgerDetail
+            {
+                LedgerId = ledger.Id, IsBus = true, BusStops = "★", Amount = 200, Balance = 2300,
+                SequenceNumber = 1, UseDate = new DateTime(2026, 1, 10)
+            }
+        };
+        (await repository.InsertDetailsAsync(ledger.Id, details)).Should().BeTrue("前提: 明細を登録できること");
+        // SequenceNumber は ledger_detail.id（UpdateDetailBusStopsAsync の照合キー）。採番された値に揃える
+        using (var lease = _dbContext.LeaseConnection())
+        using (var command = lease.Connection.CreateCommand())
+        {
+            command.CommandText = "SELECT id FROM ledger_detail WHERE ledger_id = @id";
+            command.Parameters.AddWithValue("@id", ledger.Id);
+            details[0].SequenceNumber = Convert.ToInt32(command.ExecuteScalar());
+        }
+        ledger.Details = details;
+        ReadDetailBusStops(ledger.Id).Should().Equal(new[] { "★" }, "前提: 明細が★で登録されていること");
+        return (ledger, details);
+    }
+
+    private List<string> ReadDetailBusStops(int ledgerId)
+    {
+        using var lease = _dbContext.LeaseConnection();
+        using var command = lease.Connection.CreateCommand();
+        command.CommandText = "SELECT bus_stops FROM ledger_detail WHERE ledger_id = @id ORDER BY id";
+        command.Parameters.AddWithValue("@id", ledgerId);
+        using var reader = command.ExecuteReader();
+        var result = new List<string>();
+        while (reader.Read())
+        {
+            result.Add(reader.IsDBNull(0) ? null! : reader.GetString(0));
+        }
+        return result;
     }
 
     #endregion

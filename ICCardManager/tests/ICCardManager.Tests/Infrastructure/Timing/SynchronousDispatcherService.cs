@@ -15,6 +15,14 @@ namespace ICCardManager.Tests.Infrastructure.Timing
     /// ディスパッチされた全タスクの完了を決定論的に待機できます。
     /// これにより、テストコードでTask.Delayに依存する必要がなくなります。
     /// </para>
+    /// <para>
+    /// <b>本番（<see cref="WpfDispatcherService"/>）との挙動差</b>（Issue #2103）: 本番は処理をキューへ積んで
+    /// 呼び出し元へすぐ戻り、例外はログへ記録するだけで呼び出し元へ届けない。本クラスはその場で同期的に
+    /// 走り切り、例外を再スローする。そのため「<c>InvokeAsync</c> の後に立てるフラグをハンドラーが参照する」
+    /// といった実行順序に依存する不具合や、「処理の await 中に次のディスパッチが届く」割り込みは再現しない。
+    /// それらを検査するテストは <see cref="DeferredDispatcherService"/> を使うこと
+    /// （例外の伝え方だけを本番に揃えるなら <see cref="RecordingDispatcherService"/>）。
+    /// </para>
     /// </remarks>
     public class SynchronousDispatcherService : IDispatcherService
     {

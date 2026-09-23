@@ -15,6 +15,7 @@ using System;
 using System.Collections.Generic;
 using System.Data.SQLite;
 using System.Linq;
+using System.Threading;
 using System.Threading.Tasks;
 
 
@@ -1629,59 +1630,57 @@ public class LendingServiceTests : IDisposable
     #region 同時操作排他制御テスト（Issue #24）
 
     /// <summary>
-    /// 同一カードへの同時貸出操作で、一方のみが成功することを確認
+    /// 同一カードへの同時貸出: 先の貸出がロックを持っている間、後の貸出はカードの状態を読まずに待機し、
+    /// 先の貸出が確定したあとで「既に貸出中」として拒否されること。
     /// </summary>
+    /// <remarks>
+    /// Issue #2103: 旧テストはモックがすべて完了済みの Task を返すため、1 件目が最後まで走り切ってから
+    /// 2 件目が始まっていた。「1 件だけ成功」はモックが状態を切り替えて弾いていただけで、
+    /// <c>cardLock.WaitAsync</c> を消しても緑だった。ここでは 1 件目を台帳の書き込み
+    /// （ロックとトランザクションの内側）で止め、止めた状態で 2 件目の様子を表明してから解放する。
+    /// </remarks>
     [Fact]
-    public async Task LendAsync_ConcurrentLendOnSameCard_OnlyOneSucceeds()
+    public async Task LendAsync_ConcurrentLendOnSameCard_SecondWaitsForLockThenIsRejected()
     {
         // Arrange
-        var card = CreateTestCard(isLent: false);
-        var staff = CreateTestStaff();
-        var lendCount = 0;
-        var lockObj = new object();
+        var isLent = false;
+        var cardLookupCount = 0;
+        var gate = new BlockFirstCallGate();
 
         _cardRepositoryMock.Setup(x => x.GetByIdmAsync(TestCardIdm, false))
-            .ReturnsAsync(() =>
-            {
-                // 最初の呼び出しは未貸出、2回目以降は貸出中を返す
-                lock (lockObj)
-                {
-                    var currentCount = lendCount;
-                    if (currentCount == 0)
-                    {
-                        return CreateTestCard(isLent: false);
-                    }
-                    return CreateTestCard(isLent: true);
-                }
-            });
+            .Callback(() => Interlocked.Increment(ref cardLookupCount))
+            .ReturnsAsync(() => CreateTestCard(isLent: Volatile.Read(ref isLent)));
         _staffRepositoryMock.Setup(x => x.GetByIdmAsync(TestStaffIdm, false))
-            .ReturnsAsync(staff);
+            .ReturnsAsync(CreateTestStaff());
         _ledgerRepositoryMock.Setup(x => x.InsertAsync(It.IsAny<Ledger>()))
-            .ReturnsAsync(() =>
-            {
-                lock (lockObj)
-                {
-                    return ++lendCount;
-                }
-            });
-        _cardRepositoryMock.Setup(x => x.UpdateLentStatusAsync(It.IsAny<string>(), It.IsAny<bool>(), It.IsAny<DateTime?>(), It.IsAny<string?>()))
+            .Returns(() => gate.PassAsync(1));
+        _cardRepositoryMock.Setup(x => x.UpdateLentStatusAsync(TestCardIdm, true, It.IsAny<DateTime?>(), It.IsAny<string?>()))
+            .Callback(() => Volatile.Write(ref isLent, true))
             .ReturnsAsync(true);
 
-        // Act - 2つの貸出を同時実行
+        // Act 1: 1 件目をロックとトランザクションを持ったまま止める
         var task1 = _service.LendAsync(TestStaffIdm, TestCardIdm);
+        await gate.WaitUntilBlockedAsync();
+
+        // Act 2: 止めた状態で 2 件目を始める
         var task2 = _service.LendAsync(TestStaffIdm, TestCardIdm);
+        await Task.Delay(200);
 
-        var results = await Task.WhenAll(task1, task2);
+        // Assert（1 件目がロックを持っている間）
+        task2.IsCompleted.Should().BeFalse("1 件目がカードのロックを持っている間、2 件目は待機する");
+        Volatile.Read(ref cardLookupCount).Should().Be(1,
+            "2 件目はロックを取るまでカードの状態を読まない（読むと 1 件目の確定前の「未貸出」を見て二重に貸し出す）");
 
-        // Assert - 排他制御により、1つのみ成功（もう1つは「既に貸出中」または「処理中」でブロック）
-        var successCount = results.Count(r => r.Success);
-        var errorMessages = results.Where(r => !r.Success).Select(r => r.ErrorMessage).ToList();
+        // Act 3: 1 件目を解放
+        gate.Release();
+        var results = await WhenAllWithinAsync(task1, task2);
 
-        successCount.Should().Be(1, "排他制御により同時貸出は1つのみ成功");
-        // 失敗理由は「既に貸出中」または「他の処理が実行中」
-        errorMessages.Should().ContainSingle();
-        errorMessages[0].Should().Match(m =>
-            m!.Contains("貸出中") || m.Contains("処理が実行中"));
+        // Assert（解放後）
+        results[0].Success.Should().BeTrue("先にロックを取った 1 件目が貸出を確定する");
+        results[1].Success.Should().BeFalse("2 件目は 1 件目の確定後の状態（貸出中）を読む");
+        results[1].ErrorMessage.Should().Be("このカードは既に貸出中です。");
+        _ledgerRepositoryMock.Verify(x => x.InsertAsync(It.IsAny<Ledger>()), Times.Once,
+            "貸出中レコードは 1 件だけ作られる");
     }
 
     /// <summary>
@@ -1715,60 +1714,60 @@ public class LendingServiceTests : IDisposable
     }
 
     /// <summary>
-    /// 同一カードへの同時返却操作で、一方のみが成功することを確認
+    /// 同一カードへの同時返却: 先の返却がロックを持っている間、後の返却はカードの状態を読まずに待機し、
+    /// 先の返却が確定したあとで「貸出されていません」として拒否されること。
     /// </summary>
+    /// <remarks>
+    /// Issue #2103: 旧テストは 1 件目が最後まで走り切ってから 2 件目が始まっており、ロックを
+    /// 一度も競合させていなかった。ここでは 1 件目を貸出中レコードの削除（ロックとトランザクションの内側）で止める。
+    /// </remarks>
     [Fact]
-    public async Task ReturnAsync_ConcurrentReturnOnSameCard_OnlyOneSucceeds()
+    public async Task ReturnAsync_ConcurrentReturnOnSameCard_SecondWaitsForLockThenIsRejected()
     {
         // Arrange
-        var card = CreateTestCard(isLent: true);
-        var staff = CreateTestStaff();
+        var isLent = true;
+        var cardLookupCount = 0;
+        var gate = new BlockFirstCallGate();
         var lentRecord = CreateTestLentRecord();
-        var returnCount = 0;
-        var lockObj = new object();
 
         _cardRepositoryMock.Setup(x => x.GetByIdmAsync(TestCardIdm, false))
-            .ReturnsAsync(() =>
-            {
-                lock (lockObj)
-                {
-                    // 最初は貸出中、返却後は未貸出
-                    return returnCount == 0 ? CreateTestCard(isLent: true) : CreateTestCard(isLent: false);
-                }
-            });
+            .Callback(() => Interlocked.Increment(ref cardLookupCount))
+            .ReturnsAsync(() => CreateTestCard(isLent: Volatile.Read(ref isLent)));
         _staffRepositoryMock.Setup(x => x.GetByIdmAsync(TestStaffIdm, false))
-            .ReturnsAsync(staff);
+            .ReturnsAsync(CreateTestStaff());
         _ledgerRepositoryMock.Setup(x => x.GetLentRecordAsync(TestCardIdm))
-            .ReturnsAsync(() =>
-            {
-                lock (lockObj)
-                {
-                    return returnCount == 0 ? lentRecord : null;
-                }
-            });
+            .ReturnsAsync(() => Volatile.Read(ref isLent) ? lentRecord : null);
         _ledgerRepositoryMock.Setup(x => x.DeleteAllLentRecordsAsync(TestCardIdm))
-            .Callback(() =>
-            {
-                lock (lockObj)
-                {
-                    returnCount++;
-                }
-            })
-            .ReturnsAsync(1);
+            .Returns(() => gate.PassAsync(1));
         _cardRepositoryMock.Setup(x => x.UpdateLentStatusAsync(TestCardIdm, false, null, null))
+            .Callback(() => Volatile.Write(ref isLent, false))
             .ReturnsAsync(true);
         _settingsRepositoryMock.Setup(x => x.GetAppSettingsAsync())
             .ReturnsAsync(new AppSettings { WarningBalance = 1000 });
 
-        // Act - 2つの返却を同時実行
+        // Act 1: 1 件目をロックとトランザクションを持ったまま止める
         var task1 = _service.ReturnAsync(TestStaffIdm, TestCardIdm, new List<LedgerDetail>());
+        await gate.WaitUntilBlockedAsync();
+
+        // Act 2: 止めた状態で 2 件目を始める
         var task2 = _service.ReturnAsync(TestStaffIdm, TestCardIdm, new List<LedgerDetail>());
+        await Task.Delay(200);
 
-        var results = await Task.WhenAll(task1, task2);
+        // Assert（1 件目がロックを持っている間）
+        task2.IsCompleted.Should().BeFalse("1 件目がカードのロックを持っている間、2 件目は待機する");
+        Volatile.Read(ref cardLookupCount).Should().Be(1,
+            "2 件目はロックを取るまでカードの状態を読まない（読むと 1 件目の確定前の「貸出中」を見て二重に返却する）");
 
-        // Assert - 排他制御により、1つのみ成功
-        var successCount = results.Count(r => r.Success);
-        successCount.Should().Be(1, "排他制御により同時返却は1つのみ成功");
+        // Act 3: 1 件目を解放
+        gate.Release();
+        var results = await WhenAllWithinAsync(task1, task2);
+
+        // Assert（解放後）
+        results[0].Success.Should().BeTrue("先にロックを取った 1 件目が返却を確定する");
+        results[1].Success.Should().BeFalse("2 件目は 1 件目の確定後の状態（未貸出）を読む");
+        results[1].ErrorMessage.Should().Be("このカードは貸出されていません。");
+        _ledgerRepositoryMock.Verify(x => x.DeleteAllLentRecordsAsync(TestCardIdm), Times.Once,
+            "返却の記録は 1 回だけ行われる");
     }
 
     /// <summary>
@@ -1810,11 +1809,15 @@ public class LendingServiceTests : IDisposable
 
         // 2つ目の処理を開始 - タイムアウトするはず
         var task2 = shortTimeoutService.LendAsync(TestStaffIdm, timeoutCardIdm);
-        var result2 = await task2; // Task1がロックを保持しているのでタイムアウト
+        // Issue #2103: 上限付きで待つ。ロックが無いと task2 は task1 の止まっているトランザクションの
+        // 後ろで待ち続けるため、素の await では失敗ではなくテストの停止になる（Issue #2099）
+        var winner = await Task.WhenAny(task2, Task.Delay(TimeSpan.FromSeconds(10)));
+        winner.Should().BeSameAs(task2, "Task1 がロックを保持しているので、Task2 はロック待ちのタイムアウトで返ること");
+        var result2 = await task2;
 
         // Task1を完了させる
         tcs.SetResult(1);
-        var result1 = await task1;
+        (await WhenAllWithinAsync(task1)).Should().ContainSingle(r => r.Success, "Task1 は解放後に貸出を確定する");
 
         // Assert - 2つ目はタイムアウトでエラー
         result2.Success.Should().BeFalse("排他ロックのタイムアウトによりエラー");
@@ -1872,62 +1875,65 @@ public class LendingServiceTests : IDisposable
     }
 
     /// <summary>
-    /// 同一カードへの貸出と返却の同時実行で排他制御が機能することを確認
+    /// 同一カードへの返却と貸出の同時実行: 返却がロックを持っている間、貸出は待機し、
+    /// 返却の確定後の状態（未貸出）を読んで貸出を確定すること。
     /// </summary>
+    /// <remarks>
+    /// Issue #2103: 旧テストは貸出が先に走り切って「既に貸出中」で弾かれ、その後で返却が成功するだけで、
+    /// ロックを一度も競合させていなかった（ロックを消しても同じ結果になる）。
+    /// ここでは返却を貸出中レコードの削除（ロックとトランザクションの内側）で止める。
+    /// ロックが無ければ、貸出は返却の確定前の「貸出中」を読んで失敗する。
+    /// </remarks>
     [Fact]
-    public async Task LendAndReturnAsync_ConcurrentOnSameCard_ProperlyHandled()
+    public async Task LendAndReturnAsync_ConcurrentOnSameCard_LendWaitsForReturnAndSeesReturnedState()
     {
         // Arrange
-        var cardLent = true; // 最初は貸出中
-        var lockObj = new object();
+        var isLent = true; // 最初は貸出中
+        var cardLookupCount = 0;
+        var gate = new BlockFirstCallGate();
         var lentRecord = CreateTestLentRecord();
-        var staff = CreateTestStaff();
 
         _cardRepositoryMock.Setup(x => x.GetByIdmAsync(TestCardIdm, false))
-            .ReturnsAsync(() =>
-            {
-                lock (lockObj)
-                {
-                    return CreateTestCard(isLent: cardLent);
-                }
-            });
+            .Callback(() => Interlocked.Increment(ref cardLookupCount))
+            .ReturnsAsync(() => CreateTestCard(isLent: Volatile.Read(ref isLent)));
         _staffRepositoryMock.Setup(x => x.GetByIdmAsync(TestStaffIdm, false))
-            .ReturnsAsync(staff);
+            .ReturnsAsync(CreateTestStaff());
         _ledgerRepositoryMock.Setup(x => x.GetLentRecordAsync(TestCardIdm))
-            .ReturnsAsync(() =>
-            {
-                lock (lockObj)
-                {
-                    return cardLent ? lentRecord : null;
-                }
-            });
-        _ledgerRepositoryMock.Setup(x => x.InsertAsync(It.IsAny<Ledger>()))
-            .ReturnsAsync(1);
+            .ReturnsAsync(() => Volatile.Read(ref isLent) ? lentRecord : null);
         _ledgerRepositoryMock.Setup(x => x.DeleteAllLentRecordsAsync(TestCardIdm))
-            .Callback(() =>
-            {
-                lock (lockObj)
-                {
-                    cardLent = false;
-                }
-            })
-            .ReturnsAsync(1);
-        _cardRepositoryMock.Setup(x => x.UpdateLentStatusAsync(It.IsAny<string>(), It.IsAny<bool>(), It.IsAny<DateTime?>(), It.IsAny<string?>()))
+            .Returns(() => gate.PassAsync(1));
+        _ledgerRepositoryMock.Setup(x => x.InsertAsync(It.IsAny<Ledger>()))
+            .ReturnsAsync(2);
+        _cardRepositoryMock.Setup(x => x.UpdateLentStatusAsync(TestCardIdm, false, null, null))
+            .Callback(() => Volatile.Write(ref isLent, false))
+            .ReturnsAsync(true);
+        _cardRepositoryMock.Setup(x => x.UpdateLentStatusAsync(TestCardIdm, true, It.IsAny<DateTime?>(), It.IsAny<string?>()))
+            .Callback(() => Volatile.Write(ref isLent, true))
             .ReturnsAsync(true);
         _settingsRepositoryMock.Setup(x => x.GetAppSettingsAsync())
             .ReturnsAsync(new AppSettings { WarningBalance = 1000 });
 
-        // Act - 貸出と返却を同時実行
-        var lendTask = _service.LendAsync(TestStaffIdm, TestCardIdm);
+        // Act 1: 返却をロックとトランザクションを持ったまま止める
         var returnTask = _service.ReturnAsync(TestStaffIdm, TestCardIdm, new List<LedgerDetail>());
+        await gate.WaitUntilBlockedAsync();
 
-        var results = await Task.WhenAll(lendTask, returnTask);
-        var lendResult = results[0];
-        var returnResult = results[1];
+        // Act 2: 止めた状態で貸出を始める
+        var lendTask = _service.LendAsync(TestStaffIdm, TestCardIdm);
+        await Task.Delay(200);
 
-        // Assert - どちらか一方のみ成功（排他制御により順序が保証される）
-        var successCount = results.Count(r => r.Success);
-        successCount.Should().Be(1, "排他制御により同時操作は1つのみ成功");
+        // Assert（返却がロックを持っている間）
+        lendTask.IsCompleted.Should().BeFalse("返却がカードのロックを持っている間、貸出は待機する");
+        Volatile.Read(ref cardLookupCount).Should().Be(1, "貸出はロックを取るまでカードの状態を読まない");
+
+        // Act 3: 返却を解放
+        gate.Release();
+        var results = await WhenAllWithinAsync(returnTask, lendTask);
+
+        // Assert（解放後）: 返却 → 貸出の順に直列化され、両方とも確定する
+        results[0].Success.Should().BeTrue("先にロックを取った返却が確定する");
+        results[1].Success.Should().BeTrue(
+            "貸出は返却の確定後の状態（未貸出）を読むので成功する: " + results[1].ErrorMessage);
+        Volatile.Read(ref isLent).Should().BeTrue("最後に確定したのは貸出");
     }
 
     #endregion
@@ -1954,6 +1960,52 @@ public class LendingServiceTests : IDisposable
         }
 
         protected override int GetLockTimeoutMs() => 100; // 100msの短いタイムアウト
+    }
+
+    /// <summary>
+    /// 最初の呼び出しだけを止める関所（Issue #2103）。
+    /// </summary>
+    /// <remarks>
+    /// 同時実行のテストで 1 件目を「ロックを持ったまま」止め、その間に 2 件目の様子を表明するために使う。
+    /// モックが完了済みの Task を返すと、1 件目は同期的に最後まで走り切り、ロックが一度も競合しない。
+    /// 2 回目以降の呼び出しはそのまま通す。
+    /// </remarks>
+    private sealed class BlockFirstCallGate
+    {
+        private readonly TaskCompletionSource<bool> _blocked =
+            new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        private readonly TaskCompletionSource<bool> _released =
+            new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        private int _callCount;
+
+        public async Task<T> PassAsync<T>(T value)
+        {
+            if (Interlocked.Increment(ref _callCount) == 1)
+            {
+                _blocked.TrySetResult(true);
+                await _released.Task.ConfigureAwait(false);
+            }
+            return value;
+        }
+
+        public async Task WaitUntilBlockedAsync()
+        {
+            var winner = await Task.WhenAny(_blocked.Task, Task.Delay(TimeSpan.FromSeconds(10)));
+            winner.Should().BeSameAs(_blocked.Task, "1 件目がロックの内側（関所）まで進むこと");
+        }
+
+        public void Release() => _released.TrySetResult(true);
+    }
+
+    /// <summary>
+    /// 上限付きで全件の完了を待つ（Issue #2099: デッドロックを停止ではなく失敗として報告する）。
+    /// </summary>
+    private static async Task<LendingResult[]> WhenAllWithinAsync(params Task<LendingResult>[] tasks)
+    {
+        var all = Task.WhenAll(tasks);
+        var winner = await Task.WhenAny(all, Task.Delay(TimeSpan.FromSeconds(30)));
+        winner.Should().BeSameAs(all, "解放後は 30 秒以内に全件が完了すること（デッドロックしない）");
+        return await all;
     }
 
     #endregion
