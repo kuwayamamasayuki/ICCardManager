@@ -3,6 +3,7 @@ using System.IO;
 using FluentAssertions;
 using ICCardManager.Common;
 using ICCardManager.Common.Exceptions;
+using ICCardManager.Tests.Infrastructure;
 using Xunit;
 
 namespace ICCardManager.Tests.Common;
@@ -292,6 +293,61 @@ public class ErrorDialogHelperTests
             "リストア");
 
         act.Should().NotThrow();
+    }
+
+    /// <summary>
+    /// Issue #2098: <c>LogException</c> がエラーログへ操作名・例外型・エラーコードを書き込むこと。
+    /// </summary>
+    /// <remarks>
+    /// 旧テストは <c>NotThrow</c> だけを表明しており、本体を <c>return;</c> にしても緑だった。
+    /// さらに開発機の本物の <c>C:\ProgramData\ICCardManager\Logs</c> へ架空の「リストア」エラーを
+    /// 追記していた。書き込み先はテストプロセスでは一時フォルダーへ差し替わっている
+    /// （<c>TestAppDataIsolation</c>）。他のテストも同じファイルへ追記し得るため、
+    /// メッセージに埋め込んだ一意な印で自分の行を特定する。
+    /// </remarks>
+    [Fact]
+    public void LogException_操作名と例外型とエラーコードをログファイルへ書き込むこと()
+    {
+        var marker = Guid.NewGuid().ToString("N");
+
+        ErrorDialogHelper.LogException(
+            new InvalidOperationException($"technical detail {marker}"),
+            "リストア");
+
+        var logDirectory = ErrorDialogHelper.LogDirectory;
+        logDirectory.Should().StartWith(TestAppDataIsolation.RootDirectory,
+            "テストが開発機の本物のエラーログへ書き込んではならない");
+
+        var entry = FindLogLine(logDirectory, marker);
+        entry.Should().NotBeNull("LogException はエラーログへ 1 行書き込むこと");
+        entry.Should().Contain("ERROR [SYS004]", "InvalidOperationException は SYS004 に分類される");
+        entry.Should().Contain("(リストア)", "呼び出し元の操作名を記録すること");
+        entry.Should().Contain("InvalidOperationException:", "例外型を記録すること");
+    }
+
+    private static string? FindLogLine(string logDirectory, string marker)
+    {
+        if (!Directory.Exists(logDirectory))
+        {
+            return null;
+        }
+
+        foreach (var file in Directory.GetFiles(logDirectory, "error_*.log"))
+        {
+            // 並列に走る他のテストが追記中でも読めるよう、書き込み共有を許して開く
+            using var stream = new FileStream(file, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+            using var reader = new StreamReader(stream);
+            string? line;
+            while ((line = reader.ReadLine()) != null)
+            {
+                if (line.Contains(marker))
+                {
+                    return line;
+                }
+            }
+        }
+
+        return null;
     }
 
     #endregion

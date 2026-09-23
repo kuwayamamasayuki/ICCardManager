@@ -9,6 +9,7 @@ using System.Text;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using System.Globalization;
+using ICCardManager.Common;
 
 namespace ICCardManager.Infrastructure.Logging
 {
@@ -66,8 +67,7 @@ namespace ICCardManager.Infrastructure.Logging
 
             // ログディレクトリを決定（DBと同じくCommonApplicationDataに保存）
             // C:\ProgramData\ICCardManager\Logs を使用し、全ユーザーで共有
-            var appDataDirectory = Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData);
-            _logDirectory = Path.Combine(appDataDirectory, "ICCardManager", Options.Path);
+            _logDirectory = Path.Combine(AppDataPaths.RootDirectory, Options.Path);
 
             if (Options.Enabled)
             {

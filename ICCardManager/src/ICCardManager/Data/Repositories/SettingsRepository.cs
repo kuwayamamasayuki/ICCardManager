@@ -611,17 +611,10 @@ WHERE settings.value IS NULL OR substr(settings.value, 1, 7) <> @currentMonth";
         /// デフォルトのバックアップパスを取得
         /// </summary>
         /// <remarks>
-        /// CommonApplicationData（C:\ProgramData）を使用して全ユーザーで共有
+        /// C:\ProgramData\ICCardManager\backup（全ユーザーで共有）。解決は
+        /// <see cref="PathValidator.GetDefaultBackupPath"/> 1 か所に寄せる（Issue #2098）。
         /// </remarks>
-        private static string GetDefaultBackupPath()
-        {
-            var appDataPath = Path.Combine(
-                Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),
-                "ICCardManager",
-                "backup");
-
-            return appDataPath;
-        }
+        private static string GetDefaultBackupPath() => PathValidator.GetDefaultBackupPath();
 
         /// <summary>
         /// 保存された文字列（"true" / "false"）を bool に変換する。認識できない値（未保存の null を含む）は既定値

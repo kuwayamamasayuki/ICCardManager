@@ -719,10 +719,7 @@ namespace ICCardManager.Common
         /// </remarks>
         public static string GetDefaultBackupPath()
         {
-            return Path.Combine(
-                Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),
-                "ICCardManager",
-                "backup");
+            return Path.Combine(AppDataPaths.RootDirectory, "backup");
         }
     }
 }

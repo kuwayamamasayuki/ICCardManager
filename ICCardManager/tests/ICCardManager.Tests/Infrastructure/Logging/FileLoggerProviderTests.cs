@@ -3,6 +3,7 @@ using System.IO;
 using System.Linq;
 using System.Threading;
 using FluentAssertions;
+using ICCardManager.Common;
 using ICCardManager.Infrastructure.Logging;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -20,9 +21,9 @@ public class FileLoggerProviderTests : IDisposable
 
     public FileLoggerProviderTests()
     {
-        _testLogDir = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),
-            "ICCardManager", $"TestLogs_{Guid.NewGuid():N}");
+        // Issue #2098: 本体は AppDataPaths.RootDirectory 配下へ書く。テストプロセスでは一時フォルダーへ
+        // 差し替わっているため、開発機の本物の C:\ProgramData\ICCardManager には触れない
+        _testLogDir = Path.Combine(AppDataPaths.RootDirectory, $"TestLogs_{Guid.NewGuid():N}");
     }
 
     public void Dispose()

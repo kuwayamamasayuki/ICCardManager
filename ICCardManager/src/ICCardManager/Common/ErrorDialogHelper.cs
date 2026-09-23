@@ -18,12 +18,14 @@ namespace ICCardManager.Common
     public static class ErrorDialogHelper
     {
         /// <summary>
-        /// ログディレクトリ（CommonApplicationDataを使用して全ユーザーで共有）
+        /// ログディレクトリ（C:\ProgramData\ICCardManager\Logs。全ユーザーで共有）
         /// </summary>
-        private static readonly string LogDirectory = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),
-            "ICCardManager",
-            "Logs");
+        /// <remarks>
+        /// 静的フィールドへキャッシュせず、参照のたびに <see cref="AppDataPaths.RootDirectory"/> から
+        /// 解決する。キャッシュすると、テストがアプリケーションデータを一時フォルダーへ差し替える前に
+        /// 型が初期化された場合、本物のログへ書き込み続ける（Issue #2098）。
+        /// </remarks>
+        internal static string LogDirectory => Path.Combine(AppDataPaths.RootDirectory, "Logs");
 
         /// <summary>
         /// 例外に応じたエラーダイアログを表示

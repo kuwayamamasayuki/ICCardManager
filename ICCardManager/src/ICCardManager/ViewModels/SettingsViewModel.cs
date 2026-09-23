@@ -40,6 +40,17 @@ public partial class SettingsViewModel : ViewModelBase
     /// </remarks>
     private readonly SummaryGenerator _summaryGenerator;
 
+    /// <summary>
+    /// この画面が読み書きする設定ファイル（<c>database_config.txt</c> 等）の置き場所（Issue #2098）。
+    /// </summary>
+    /// <remarks>
+    /// 本番では <see cref="AppDataPaths.RootDirectory"/>（<c>C:\ProgramData\ICCardManager</c>）。
+    /// テストはテストごとの一時フォルダーを注入する。静的メソッド
+    /// （<see cref="GetDatabaseConfigPath"/> 等）は起動処理・帳票画面から呼ばれるため
+    /// 常に <see cref="AppDataPaths.RootDirectory"/> を見る。
+    /// </remarks>
+    private readonly string _configDirectory;
+
     [ObservableProperty]
     private int _warningBalance;
 
@@ -174,15 +185,49 @@ public partial class SettingsViewModel : ViewModelBase
         IOptions<DatabaseOptions> databaseOptions, // DI互換のため引数を維持（本体では未使用）
         IDialogService dialogService,
         SummaryGenerator summaryGenerator)
+        : this(
+            settingsRepository,
+            validationService,
+            soundPlayer,
+            dialogService,
+            summaryGenerator,
+            AppDataPaths.RootDirectory)
+    {
+    }
+
+    /// <summary>
+    /// 設定ファイルの置き場所を指定して生成する（Issue #2098）。
+    /// </summary>
+    /// <param name="settingsRepository">設定リポジトリ</param>
+    /// <param name="validationService">入力検証サービス</param>
+    /// <param name="soundPlayer">効果音・音声の再生</param>
+    /// <param name="dialogService">確認ダイアログの表示</param>
+    /// <param name="summaryGenerator">摘要生成器（部署種別の反映先。Issue #1975）</param>
+    /// <param name="configDirectory">
+    /// <c>database_config.txt</c> / <c>department_config.txt</c> を読み書きするフォルダー。
+    /// テストはテストごとの一時フォルダーを渡し、開発機の本物の設定ファイルや、
+    /// 並列に走る他のテストの設定ファイルに触れないようにする。
+    /// </param>
+    /// <remarks>
+    /// DI コンテナは public コンストラクタだけを候補にするため、本コンストラクタは選ばれない。
+    /// </remarks>
+    internal SettingsViewModel(
+        ISettingsRepository settingsRepository,
+        IValidationService validationService,
+        ISoundPlayer soundPlayer,
+        IDialogService dialogService,
+        SummaryGenerator summaryGenerator,
+        string configDirectory)
     {
         _settingsRepository = settingsRepository;
         _validationService = validationService;
         _soundPlayer = soundPlayer;
         _dialogService = dialogService;
         _summaryGenerator = summaryGenerator;
+        _configDirectory = configDirectory;
         // database_config.txtから直接読む（設定ファイルが正。DI経由のDatabaseOptionsは
         // アプリ起動時に固定されるため、同一セッション中に設定変更しても反映されない）
-        var fullPath = LoadDatabasePathFromConfigFile();
+        var fullPath = LoadConfigFile(DatabaseConfigPath);
         _originalDatabasePath = ExtractDirectoryPath(fullPath);
         _databasePath = _originalDatabasePath;
     }
@@ -352,7 +397,8 @@ public partial class SettingsViewModel : ViewModelBase
                 // 部署種別を設定ファイルに保存（インストーラーがアップグレード時に読み込む）
                 try
                 {
-                    SaveDepartmentConfigToFile(
+                    SaveConfigFile(
+                        DepartmentConfigPath,
                         SettingsRepository.DepartmentTypeToString(settings.DepartmentType));
                 }
                 catch
@@ -413,7 +459,7 @@ public partial class SettingsViewModel : ViewModelBase
 
                     try
                     {
-                        SaveDatabasePathToConfigFile(fullDbPath);
+                        SaveConfigFile(DatabaseConfigPath, fullDbPath);
                         DatabasePath = validatedFolderPath;
                         _originalDatabasePath = validatedFolderPath;
                         IsDatabasePathChanged = false;
@@ -515,7 +561,7 @@ public partial class SettingsViewModel : ViewModelBase
         {
             Description = "データベース保存先フォルダを選択（共有フォルダのUNCパスも使用可能）",
             SelectedPath = string.IsNullOrEmpty(DatabasePath)
-                ? Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData)
+                ? GetDefaultDatabaseFolder()
                 : DatabasePath,
             ShowNewFolderButton = true
         })
@@ -534,9 +580,7 @@ public partial class SettingsViewModel : ViewModelBase
     /// </summary>
     internal static string GetDefaultDatabaseFolder()
     {
-        return Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),
-            "ICCardManager");
+        return AppDataPaths.RootDirectory;
     }
 
     /// <summary>
@@ -560,7 +604,7 @@ public partial class SettingsViewModel : ViewModelBase
 
         try
         {
-            var configPath = GetDatabaseConfigPath();
+            var configPath = DatabaseConfigPath;
             if (File.Exists(configPath))
             {
                 File.Delete(configPath);
@@ -589,15 +633,23 @@ public partial class SettingsViewModel : ViewModelBase
     // インストーラー（Inno Setup）はShift_JIS、アプリはUTF-8 BOMで書き込むため、
     // 読み取り時はBOMで自動判定する。
 
+    private const string DatabaseConfigFileName = "database_config.txt";
+    private const string DepartmentConfigFileName = "department_config.txt";
+    private const string ReportOutputConfigFileName = "report_output_config.txt";
+
     /// <summary>
     /// ProgramData配下の設定ファイルのフルパスを取得
     /// </summary>
     private static string GetConfigFilePath(string fileName)
     {
-        return Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),
-            "ICCardManager", fileName);
+        return Path.Combine(AppDataPaths.RootDirectory, fileName);
     }
+
+    /// <summary>この画面が読み書きする database_config.txt（Issue #2098）</summary>
+    private string DatabaseConfigPath => Path.Combine(_configDirectory, DatabaseConfigFileName);
+
+    /// <summary>この画面が書き込む department_config.txt（Issue #2098）</summary>
+    private string DepartmentConfigPath => Path.Combine(_configDirectory, DepartmentConfigFileName);
 
     /// <summary>
     /// 設定ファイルからテキストを読み込む（BOM自動判定）
@@ -681,24 +733,16 @@ public partial class SettingsViewModel : ViewModelBase
     // データベース設定ファイル
     // =========================================================================
 
-    /// <summary>
-    /// データベースパスを設定ファイルに保存
-    /// </summary>
-    /// <remarks>
-    /// appsettings.jsonはProgram Files内にあり一般ユーザーには書き込めないため、
-    /// C:\ProgramData\ICCardManager\database_config.txt に保存する。
-    /// </remarks>
-    internal static void SaveDatabasePathToConfigFile(string databasePath)
-    {
-        SaveConfigFile(GetDatabaseConfigPath(), databasePath);
-    }
+    // 保存は SaveAsync が DatabaseConfigPath（注入された置き場所）へ直接行う。
+    // appsettings.jsonはProgram Files内にあり一般ユーザーには書き込めないため、
+    // C:\ProgramData\ICCardManager\database_config.txt に保存する（Issue #2098 で静的な保存口を廃止）。
 
     /// <summary>
     /// データベース設定ファイルのパスを取得
     /// </summary>
     internal static string GetDatabaseConfigPath()
     {
-        return GetConfigFilePath("database_config.txt");
+        return GetConfigFilePath(DatabaseConfigFileName);
     }
 
     /// <summary>
@@ -718,7 +762,7 @@ public partial class SettingsViewModel : ViewModelBase
     /// </summary>
     internal static string GetDepartmentConfigPath()
     {
-        return GetConfigFilePath("department_config.txt");
+        return GetConfigFilePath(DepartmentConfigFileName);
     }
 
     /// <summary>
@@ -727,14 +771,6 @@ public partial class SettingsViewModel : ViewModelBase
     internal static string LoadDepartmentConfigFromFile()
     {
         return LoadConfigFile(GetDepartmentConfigPath());
-    }
-
-    /// <summary>
-    /// 部署種別を設定ファイルに保存（インストーラーがアップグレード時に読み込む）
-    /// </summary>
-    internal static void SaveDepartmentConfigToFile(string departmentValue)
-    {
-        SaveConfigFile(GetDepartmentConfigPath(), departmentValue);
     }
 
     // =========================================================================
@@ -746,7 +782,7 @@ public partial class SettingsViewModel : ViewModelBase
     /// </summary>
     internal static string GetReportOutputConfigPath()
     {
-        return GetConfigFilePath("report_output_config.txt");
+        return GetConfigFilePath(ReportOutputConfigFileName);
     }
 
     /// <summary>
