@@ -792,7 +792,9 @@ public class MainViewModelIntegrationTests
 
         // Act 1: 職員証 → カード A（貸出の台帳書き込みで止まる）
         Touch(StaffIdm);
-        await dispatcher.WaitForPendingAsync();
+        var staffDrain = dispatcher.WaitForPendingAsync();
+        (await Task.WhenAny(staffDrain, Task.Delay(TimeSpan.FromSeconds(10))))
+            .Should().BeSameAs(staffDrain, "前提: 職員証の処理が 10 秒以内に終わること");
         viewModel.CurrentState.Should().Be(AppState.WaitingForIcCard, "前提: 職員証を認識している");
 
         Touch(CardIdmA);

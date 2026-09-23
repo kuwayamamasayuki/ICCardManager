@@ -21,9 +21,18 @@ namespace ICCardManager.Tests.Infrastructure.Timing
     /// <see cref="RecordingDispatcherService"/> は例外の伝え方を本番に揃えたが、実行はやはり同期的である。
     /// </para>
     /// <para>
-    /// 本クラスは実行順序も本番に揃える。<see cref="RunPending"/> を呼ぶまで何も実行せず、呼ぶと積まれた順に
+    /// 本クラスは開始の順序を本番に揃える。<see cref="RunPending"/> を呼ぶまで何も実行せず、呼ぶと積まれた順に
     /// 開始する。非同期の処理は最初の <c>await</c> で制御を返し、次の処理がそのまま開始される
     /// （本番のディスパッチャーも async ラムダの完了を待たずに次の項目へ進む）。
+    /// </para>
+    /// <para>
+    /// <b>模していない点</b>: 本番では async ラムダの <c>await</c> の後の続きも UI スレッドのキューへ戻り、
+    /// 1 本のスレッドで順に実行される。本クラスは同期コンテキストを持たないため、<c>await</c> の後の続きは
+    /// スレッドプール（または xUnit の同期コンテキスト）で走り、テストスレッドの <see cref="RunPending"/> と
+    /// 並行し得る。模しているのは「開始が遅れること」と「例外を記録するだけで再スローしないこと」までで、
+    /// 「1 件目の続きと 2 件目の処理の実行順」は模していない。止めた処理を解放したら、
+    /// <see cref="WaitForPendingAsync"/> で完了を待ってから状態を表明すること（<see cref="RunPending"/> の実行中に
+    /// 解放すると、ViewModel の状態を 2 本のスレッドが同時に触り得る）。
     /// </para>
     /// </remarks>
     public class DeferredDispatcherService : IDispatcherService

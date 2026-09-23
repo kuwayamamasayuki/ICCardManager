@@ -459,11 +459,11 @@ public class BusStopInputViewModelTests : IDisposable
         _ledgerRepoMock.Verify(r => r.UpdateDetailBusStopsAsync(
                 ledger.Id, It.IsAny<IEnumerable<(int, string)>>(), It.IsNotNull<SQLiteTransaction>()),
             Times.Once, "明細は実際にトランザクションの内側で書かれている（書かれていなければ巻き戻しを検査できない）");
-        ReadDetailBusStops(ledger.Id).Should().Equal(new[] { "★" }, "commit せずに抜けるので明細は保存前のまま");
+        ReadDetailBusStops(ledger.Id).Should().Equal(new[] { SummaryGenerator.BusPlaceholder }, "commit せずに抜けるので明細は保存前のまま");
 
         // Assert: メモリ（呼び出し元と共有している Ledger / LedgerDetail）
-        ledger.Summary.Should().Be("バス（★）", "DB と食い違う摘要をメモリに残さない");
-        details[0].BusStops.Should().Be("★", "DB と食い違うバス停名をメモリに残さない");
+        ledger.Summary.Should().Be(PlaceholderSummary, "DB と食い違う摘要をメモリに残さない");
+        details[0].BusStops.Should().Be(SummaryGenerator.BusPlaceholder, "DB と食い違うバス停名をメモリに残さない");
     }
 
     /// <summary>
@@ -475,9 +475,9 @@ public class BusStopInputViewModelTests : IDisposable
         // Arrange
         var details = new List<LedgerDetail>
         {
-            new LedgerDetail { LedgerId = 1, IsBus = true, BusStops = "★", Amount = 200, SequenceNumber = 1 }
+            new LedgerDetail { LedgerId = 1, IsBus = true, BusStops = SummaryGenerator.BusPlaceholder, Amount = 200, SequenceNumber = 1 }
         };
-        var ledger = new Ledger { Id = 1, Summary = "バス（★）", Details = details };
+        var ledger = new Ledger { Id = 1, Summary = PlaceholderSummary, Details = details };
 
         _settingsRepoMock.Setup(s => s.GetAppSettingsAsync()).ReturnsAsync(new AppSettings());
         _ledgerRepoMock.Setup(r => r.UpdateDetailBusStopsAsync(
@@ -492,8 +492,8 @@ public class BusStopInputViewModelTests : IDisposable
 
         // Assert
         _viewModel.StatusMessage.Should().Be(BusStopInputViewModel.BusStopConflictMessage);
-        details[0].BusStops.Should().Be("★");
-        ledger.Summary.Should().Be("バス（★）");
+        details[0].BusStops.Should().Be(SummaryGenerator.BusPlaceholder);
+        ledger.Summary.Should().Be(PlaceholderSummary);
         _viewModel.BusUsages[0].BusStops.Should().Be("天神～博多");
     }
 
@@ -526,7 +526,56 @@ public class BusStopInputViewModelTests : IDisposable
         // Assert
         _viewModel.IsSaved.Should().BeFalse();
         details[0].BusStops.Should().Be("天神～博多", "スキップは確定していないので、★へ置き換えた明細を元へ戻す");
+        _viewModel.BusUsages[0].BusStops.Should().Be("天神～博多", "入力欄も元へ戻す（★のまま残すと、保存をやり直したときに★で保存される）");
         ledger.Summary.Should().Be(savedSummary);
+    }
+
+    /// <summary>
+    /// Issue #2103（本番の経路）: <see cref="BusStopInputViewModel.InitializeWithLedgersAsync"/> で DB から読み直せなかった
+    /// Ledger（他のパソコンで削除された等）は呼び出し元のインスタンスをそのまま書き換える。複数 Ledger のうち
+    /// 2 件目の摘要の更新が失敗したら、1 件目も含めて呼び出し元のインスタンスが保存前の値へ戻ること。
+    /// </summary>
+    [Fact]
+    public async Task InitializeWithLedgersAsync_読み直せなかったLedgerは保存失敗時に呼び出し元のインスタンスも戻ること_Issue2103()
+    {
+        // Arrange: 返却で作られた 2 件（どちらも GetByIdAsync で読み直せない）
+        var details1 = new List<LedgerDetail>
+        {
+            new LedgerDetail { LedgerId = 11, IsBus = true, BusStops = SummaryGenerator.BusPlaceholder, Amount = 200, SequenceNumber = 1 }
+        };
+        var details2 = new List<LedgerDetail>
+        {
+            new LedgerDetail { LedgerId = 12, IsBus = true, BusStops = SummaryGenerator.BusPlaceholder, Amount = 300, SequenceNumber = 2 }
+        };
+        var ledger1 = new Ledger { Id = 11, Summary = PlaceholderSummary, Details = details1 };
+        var ledger2 = new Ledger { Id = 12, Summary = PlaceholderSummary, Details = details2 };
+
+        _settingsRepoMock.Setup(s => s.GetAppSettingsAsync()).ReturnsAsync(new AppSettings());
+        _ledgerRepoMock.Setup(r => r.GetByIdAsync(It.IsAny<int>())).ReturnsAsync((Ledger)null!);
+        _ledgerRepoMock.Setup(r => r.UpdateDetailBusStopsAsync(
+                It.IsAny<int>(), It.IsAny<IEnumerable<(int, string)>>(), It.IsAny<SQLiteTransaction>()))
+            .ReturnsAsync(true);
+        _ledgerRepoMock.Setup(r => r.UpdateAsync(It.Is<Ledger>(l => l.Id == 11), It.IsAny<SQLiteTransaction>()))
+            .ReturnsAsync(true);
+        _ledgerRepoMock.Setup(r => r.UpdateAsync(It.Is<Ledger>(l => l.Id == 12), It.IsAny<SQLiteTransaction>()))
+            .ReturnsAsync(false); // 2 件目は他のパソコンで削除された
+
+        await _viewModel.InitializeWithLedgersAsync(new[] { ledger1, ledger2 });
+        _viewModel.BusUsages.Should().HaveCount(2, "前提: 2 件のバス利用が並ぶ");
+        _viewModel.BusUsages[0].BusStops = "天神～博多";
+        _viewModel.BusUsages[1].BusStops = "博多～天神";
+
+        // Act
+        await _viewModel.SaveAsync();
+
+        // Assert: 1 件目は摘要の更新まで進んでいたが、トランザクションごと巻き戻るのでメモリも戻す
+        _viewModel.IsSaved.Should().BeFalse();
+        _ledgerRepoMock.Verify(r => r.UpdateAsync(It.Is<Ledger>(l => l.Id == 11), It.IsAny<SQLiteTransaction>()), Times.Once,
+            "前提: 1 件目の摘要は更新まで進んでいる");
+        ledger1.Summary.Should().Be(PlaceholderSummary);
+        ledger2.Summary.Should().Be(PlaceholderSummary);
+        details1[0].BusStops.Should().Be(SummaryGenerator.BusPlaceholder);
+        details2[0].BusStops.Should().Be(SummaryGenerator.BusPlaceholder);
     }
 
     /// <summary>
@@ -581,7 +630,7 @@ public class BusStopInputViewModelTests : IDisposable
         {
             CardIdm = cardIdm,
             Date = new DateTime(2026, 1, 10),
-            Summary = "バス（★）",
+            Summary = PlaceholderSummary,
             Expense = 200,
             Balance = 2300
         };
@@ -591,7 +640,7 @@ public class BusStopInputViewModelTests : IDisposable
         {
             new LedgerDetail
             {
-                LedgerId = ledger.Id, IsBus = true, BusStops = "★", Amount = 200, Balance = 2300,
+                LedgerId = ledger.Id, IsBus = true, BusStops = SummaryGenerator.BusPlaceholder, Amount = 200, Balance = 2300,
                 SequenceNumber = 1, UseDate = new DateTime(2026, 1, 10)
             }
         };
@@ -605,9 +654,12 @@ public class BusStopInputViewModelTests : IDisposable
             details[0].SequenceNumber = Convert.ToInt32(command.ExecuteScalar());
         }
         ledger.Details = details;
-        ReadDetailBusStops(ledger.Id).Should().Equal(new[] { "★" }, "前提: 明細が★で登録されていること");
+        ReadDetailBusStops(ledger.Id).Should().Equal(new[] { SummaryGenerator.BusPlaceholder }, "前提: 明細が★で登録されていること");
         return (ledger, details);
     }
+
+    /// <summary>Issue #1818: プレースホルダは組織設定由来のため直書きしない</summary>
+    private static string PlaceholderSummary => SummaryGenerator.FormatBusSummary(SummaryGenerator.BusPlaceholder);
 
     private List<string> ReadDetailBusStops(int ledgerId)
     {

@@ -600,11 +600,22 @@ public partial class BusStopInputViewModel : ViewModelBase
     /// Issue #2103: 保存に失敗したとき、メモリ上の明細と摘要を DB と同じ値へ戻す。
     /// </summary>
     /// <remarks>
-    /// DB はトランザクションで巻き戻るが、書き換えた <see cref="Ledger"/> / <see cref="LedgerDetail"/> は
-    /// 呼び出し元と共有している（返却フローでは同じ Ledger を直後の同行者数入力ダイアログへ渡す）。
+    /// <para>
+    /// DB はトランザクションで巻き戻るが、書き換えた <see cref="Ledger"/> / <see cref="LedgerDetail"/> は巻き戻らない。
     /// 戻さないと、メモリ上は「バス（天神～博多）」なのに台帳は「バス（★）」のままという食い違いが残る。
+    /// </para>
+    /// <para>
+    /// とくに <see cref="InitializeWithLedgersAsync"/> で DB から読み直せなかった Ledger（Id が 0、
+    /// または他のパソコンで削除された）は呼び出し元のインスタンスをそのまま書き換えており、
+    /// 返却フローでは同じインスタンスが直後の同行者数入力ダイアログへ渡る。「他のパソコンで削除された」は
+    /// 摘要の更新が失敗する典型的な原因でもあるため、失敗と共有はそろって起きる。
+    /// 読み直せた Ledger はこの ViewModel 専用のインスタンスで、呼び出し元とは共有しない。
+    /// </para>
+    /// <para>
     /// 入力欄（<see cref="BusStopInputItem.BusStops"/>）は戻さないので、職員はそのまま保存をやり直せる
-    /// （保存のたびに入力欄の値を明細へ書き直すため）。
+    /// （保存のたびに入力欄の値を明細へ書き直すため）。保存せずに閉じた場合の明細の書き込み
+    /// （入力のたびに書き込まれる）は、この復元の対象外である。
+    /// </para>
     /// </remarks>
     private void RestorePersistedState()
     {
@@ -664,6 +675,9 @@ public partial class BusStopInputViewModel : ViewModelBase
 
         using (BeginBusy("保存中..."))
         {
+            // Issue #2103: スキップが失敗したら入力欄も元へ戻す（★で上書きしたまま残すと、
+            // 職員の入力が失われ、そのまま「保存」をやり直すと★で保存される）
+            var inputsBeforeSkip = BusUsages.Select(item => (item, item.BusStops)).ToList();
             var success = false;
             try
             {
@@ -678,9 +692,14 @@ public partial class BusStopInputViewModel : ViewModelBase
             }
             finally
             {
-                // Issue #2103: 保存と同じく、失敗したらメモリ上の明細と摘要を DB と同じ値へ戻す
+                // Issue #2103: 保存と同じく、失敗したらメモリ上の明細と摘要を DB と同じ値へ戻す。
+                // 入力欄の復元は明細へも書き込む（OnBusStopsChanged）ため、明細の復元より先に行う
                 if (!success)
                 {
+                    foreach (var (item, busStops) in inputsBeforeSkip)
+                    {
+                        item.BusStops = busStops;
+                    }
                     RestorePersistedState();
                 }
             }
