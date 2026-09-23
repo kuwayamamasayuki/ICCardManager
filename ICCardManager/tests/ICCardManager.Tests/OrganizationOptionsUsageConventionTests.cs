@@ -37,8 +37,12 @@ namespace ICCardManager.Tests;
 /// </remarks>
 public class OrganizationOptionsUsageConventionTests
 {
-    private static readonly string ProductionRoot = Path.Combine(
-        FindRepoRoot(), "ICCardManager", "src", "ICCardManager");
+    /// <remarks>
+    /// Issue #2101: 旧実装は <c>.git</c> ディレクトリを探して親をたどっていた。git worktree では
+    /// <c>.git</c> がファイルになるため、リポジトリ内の worktree では本体の作業ツリーを黙って検査し、
+    /// リポジトリ外の worktree では型初期化で落ちる。<see cref="TestPaths"/> へ寄せる。
+    /// </remarks>
+    private static readonly string ProductionRoot = TestPaths.GetProductionSourceRoot();
 
     /// <summary>
     /// 既定値の宣言そのものなので検査対象から除外するファイル
@@ -162,21 +166,6 @@ public class OrganizationOptionsUsageConventionTests
         }
 
         return sources;
-    }
-
-    private static string FindRepoRoot()
-    {
-        var dir = new DirectoryInfo(AppContext.BaseDirectory);
-        while (dir != null && !Directory.Exists(Path.Combine(dir.FullName, ".git")))
-        {
-            dir = dir.Parent;
-        }
-        if (dir == null)
-        {
-            throw new InvalidOperationException(
-                $"リポジトリルート (.git を含むディレクトリ) が見つかりませんでした。基準: {AppContext.BaseDirectory}");
-        }
-        return dir.FullName;
     }
 
     #endregion

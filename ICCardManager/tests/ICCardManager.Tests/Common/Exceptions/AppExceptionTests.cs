@@ -748,74 +748,7 @@ public class AppExceptionTests
 
     #endregion
 
-    #region Error Code Uniqueness Tests
-
-    [Fact]
-    public void AllErrorCodes_AreUniqueWithinCategory()
-    {
-        // This test verifies that error codes follow the pattern and don't conflict
-        var cardReaderCodes = new[]
-        {
-            CardReaderException.NotConnected().ErrorCode,
-            CardReaderException.ReadFailed().ErrorCode,
-            CardReaderException.HistoryReadFailed().ErrorCode,
-            CardReaderException.BalanceReadFailed().ErrorCode,
-            CardReaderException.Timeout().ErrorCode,
-            CardReaderException.ServiceNotAvailable().ErrorCode,
-            CardReaderException.MonitorError().ErrorCode,
-            CardReaderException.ReconnectFailed(1).ErrorCode,
-            CardReaderException.CardRemoved().ErrorCode
-        };
-
-        cardReaderCodes.Should().OnlyHaveUniqueItems();
-        cardReaderCodes.Should().AllSatisfy(code => code.Should().StartWith("CR"));
-
-        var databaseCodes = new[]
-        {
-            DatabaseException.ConnectionFailed().ErrorCode,
-            DatabaseException.QueryFailed().ErrorCode,
-            DatabaseException.NotFound("test", "1").ErrorCode,
-            DatabaseException.DuplicateEntry("test", "1").ErrorCode,
-            DatabaseException.ForeignKeyViolation().ErrorCode,
-            DatabaseException.TransactionFailed().ErrorCode,
-            DatabaseException.FileAccessDenied().ErrorCode
-        };
-
-        databaseCodes.Should().OnlyHaveUniqueItems();
-        databaseCodes.Should().AllSatisfy(code => code.Should().StartWith("DB"));
-
-        var validationCodes = new[]
-        {
-            ValidationException.Required("f", "F").ErrorCode,
-            ValidationException.OutOfRange("f", "F", 0, 1).ErrorCode,
-            ValidationException.InvalidFormat("f", "F", "x").ErrorCode,
-            ValidationException.InvalidIdm("f").ErrorCode,
-            ValidationException.TooLong("f", "F", 1).ErrorCode,
-            ValidationException.Multiple(new Dictionary<string, string>()).ErrorCode,
-            ValidationException.InvalidDate("f", "F").ErrorCode
-        };
-
-        validationCodes.Should().OnlyHaveUniqueItems();
-        validationCodes.Should().AllSatisfy(code => code.Should().StartWith("VAL"));
-
-        var fileOperationCodes = new[]
-        {
-            FileOperationException.FileNotFound("/p").ErrorCode,
-            FileOperationException.ReadFailed("/p").ErrorCode,
-            FileOperationException.WriteFailed("/p").ErrorCode,
-            FileOperationException.AccessDenied("/p").ErrorCode,
-            FileOperationException.FileInUse("/p").ErrorCode,
-            FileOperationException.InvalidFormat("/p").ErrorCode,
-            FileOperationException.DirectoryCreationFailed("/p").ErrorCode,
-            // Issue #1744: 新しいファクトリを足したらこの配列にも足すこと。
-            // 足し忘れると「重複しないこと」の検査対象から外れ、次の追加者が同じコードを採っても緑のまま通る
-            FileOperationException.UndecidableEncoding("/p").ErrorCode,
-            FileOperationException.UnreadableDeclaredEncoding("UTF-8（BOM付き）", "/p").ErrorCode
-        };
-
-        fileOperationCodes.Should().OnlyHaveUniqueItems();
-        fileOperationCodes.Should().AllSatisfy(code => code.Should().StartWith("FILE"));
-    }
-
-    #endregion
+    // エラーコードの重複・分類（接頭辞）の検査は ErrorCodeUniquenessConventionTests が本番ソースの走査で担う。
+    // ファクトリの手書き一覧（旧 AllErrorCodes_AreUniqueWithinCategory）は DB009 を載せ忘れており、
+    // ファクトリを足すたびに一覧へ足す運用が守られていなかった（Issue #2101）。
 }

@@ -29,8 +29,8 @@ namespace ICCardManager.Tests;
 /// 複数行のブロックコメントを空白 1 文字へ畳むため行番号がずれる。
 /// </para>
 /// <para>
-/// 同種の波括弧抽出は <c>DataExportImportViewModelImportPathSharingTests</c> /
-/// <c>DialogAutomationPropertiesCoverageTests</c> にも私的コピーが存在する。
+/// 同種の波括弧抽出は <c>DialogAutomationPropertiesCoverageTests</c> にも私的コピーが存在する
+/// （<c>DataExportImportViewModelImportPathSharingTests</c> の私的コピーは Issue #2101 で本ヘルパーへ寄せた）。
 /// 新規の規約テストは本ヘルパーを使い、複製をこれ以上増やさないこと
 /// （既存コピーの集約は別途行う。<see cref="TestPaths"/> と同じ方針）。
 /// </para>
@@ -120,7 +120,7 @@ internal static class TestSourceInspection
     /// <c>#if !DEBUG</c> / <c>#if DEBUG_FOO</c> のような別の記号は対象にしない
     /// （語境界で照合する。前方一致だと Release 側のコードを消してしまう）。
     /// </remarks>
-    private static bool IsDebugOnlyDirective(string trimmedLine)
+    internal static bool IsDebugOnlyDirective(string trimmedLine)
         => Regex.IsMatch(trimmedLine, @"^#if\s+\(?\s*DEBUG\s*\)?\s*$");
 
     /// <summary>
@@ -1231,6 +1231,56 @@ internal static class TestSourceInspection
 
         return bodies;
     }
+
+    /// <summary>
+    /// 「変数へ代入される／<c>return</c> される」ラムダの直前形。末尾が <c>=&gt;</c> であること。
+    /// </summary>
+    /// <remarks>
+    /// <c>+=</c>（イベント購読）・<c>==</c> / <c>&lt;=</c> 等の比較は代入とみなさない。
+    /// </remarks>
+    private static readonly Regex HeldLambdaTailPattern = new Regex(
+        @"(?:(?<![=!<>+\-*/%&|^])=|\breturn\b)\s*(?:async\s+)?(?:\(\s*\)|\w+|\([^()]*\))\s*=>\s*\z",
+        RegexOptions.Compiled);
+
+    /// <summary>
+    /// <paramref name="index"/> の直前が「後で呼ぶために保持されるラムダ」の本体開始位置か
+    /// （<c>pending = () =&gt; |</c> / <c>return () =&gt; |</c> の <c>|</c> の位置か）を返す。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Issue #1784 / #1793 の遅延 <c>Action</c> 方式の判定。<b>「ラムダの中にある」だけでは
+    /// 遅延実行の根拠にならない</b> — <c>Task.Run(() =&gt; …)</c> や <c>Dispatcher.InvokeAsync(() =&gt; { … })</c> の
+    /// 本体はその場で走る。直前が <c>=&gt;</c> であることだけで判定すると、これらの即時実行を
+    /// 遅延とみなして<b>ガードが fail-open になる</b>（Issue #2101）。代入の右辺または <c>return</c> の
+    /// 直後に置かれたラムダ（＝値として保持され、後で呼ばれる形）だけを遅延とみなす。
+    /// </para>
+    /// <para>
+    /// 判定を 1 か所に置くのは、<c>BusyScopeDialogConventionTests</c> と
+    /// <c>DataExportImportViewModelImportPathSharingTests</c> が同じ規約（Issue #1784）を見ているため。
+    /// 片方だけが緩むと、同じ形がもう片方の検査では違反、こちらでは合格になる。
+    /// </para>
+    /// </remarks>
+    /// <param name="codeOnlySource"><see cref="ToCodeOnly"/> / <see cref="ToCodeOnlyPreservingLines"/> を通したソース。</param>
+    /// <param name="index">判定したい位置（呼び出しの先頭、またはブロック本体の <c>{</c>）。</param>
+    public static bool IsHeldLambdaHead(string codeOnlySource, int index)
+    {
+        if (codeOnlySource == null)
+        {
+            throw new ArgumentNullException(nameof(codeOnlySource));
+        }
+
+        var from = Math.Max(0, index - 160);
+        return HeldLambdaTailPattern.IsMatch(codeOnlySource.Substring(from, index - from));
+    }
+
+    /// <summary>
+    /// 後で呼ぶために保持されるラムダのうち、ブロック本体（<c>=&gt; { … }</c>）を持つものの範囲を列挙する。
+    /// </summary>
+    /// <param name="codeOnlySource"><see cref="ToCodeOnly"/> / <see cref="ToCodeOnlyPreservingLines"/> を通したソース。</param>
+    public static IReadOnlyList<(int Start, int End)> ExtractHeldLambdaBlockBodies(string codeOnlySource)
+        => ExtractLambdaBlockBodies(codeOnlySource)
+            .Where(b => IsHeldLambdaHead(codeOnlySource, b.Start))
+            .ToList();
 
     /// <summary>
     /// メソッド呼び出しの<b>引数リスト全体</b>を丸括弧の対応で切り出し、最上位のカンマで分割して返す。

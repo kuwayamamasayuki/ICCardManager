@@ -109,29 +109,6 @@ public class BusyScopeDialogConventionTests
         => code.Take(index).Count(c => c == '\n') + 1;
 
     /// <summary>
-    /// 「変数へ代入される／<c>return</c> される」ラムダの直前形。末尾が <c>=&gt;</c> であること。
-    /// </summary>
-    /// <remarks>
-    /// <b>「ラムダの中にある」だけでは遅延実行の根拠にならない。</b>
-    /// <c>Dispatcher.InvokeAsync(async () =&gt; { ... })</c> や <c>Task.Run(() =&gt; { ... })</c> の本体は
-    /// その場（＝<c>IsBusy=true</c> のまま）で走るため、ラムダを一律に除外すると
-    /// <b>ガードが fail-open になる</b>（<c>.claude/rules/testing.md</c>「ガードの検出漏れは緑になる」）。
-    /// 除外してよいのは Issue #1784 の遅延 <c>Action</c> 方式、すなわち
-    /// <c>pending = () =&gt; ...</c> / <c>return () =&gt; ...</c> のように<b>後で呼ぶために保持される</b>形だけ。
-    /// </remarks>
-    private static readonly Regex HeldLambdaTailPattern = new Regex(
-        @"(?:(?<![=!<>+\-*/%&|^])=|\breturn\b)\s*(?:async\s+)?(?:\(\s*\)|\w+|\([^()]*\))\s*=>\s*\z");
-
-    /// <summary>
-    /// <paramref name="index"/> の直前が「保持されるラムダの本体開始位置」か
-    /// </summary>
-    private static bool IsHeldForLaterInvocation(string code, int index)
-    {
-        var from = Math.Max(0, index - 160);
-        return HeldLambdaTailPattern.IsMatch(code.Substring(from, index - from));
-    }
-
-    /// <summary>
     /// その呼び出しが「遅延実行される（後で呼ぶために保持されたラムダの中にある）」か
     /// </summary>
     /// <remarks>
@@ -144,26 +121,45 @@ public class BusyScopeDialogConventionTests
     /// <para>
     /// この除外を入れないと、<b>規約を守っている実装（#1784）で赤になる</b>。誤検出はガード自体の
     /// 寿命を縮める（<c>.claude/rules/testing.md</c>「違反の確定を早まらない」）。ただし
-    /// <b>除外を「ラムダ全般」へ広げると今度は fail-open になる</b>ため、
-    /// <see cref="HeldLambdaTailPattern"/> で保持されるラムダに限定する。
+    /// <b>除外を「ラムダ全般」へ広げると今度は fail-open になる</b>
+    /// （<c>Dispatcher.InvokeAsync(async () =&gt; { ... })</c> や <c>Task.Run(() =&gt; { ... })</c> の本体は
+    /// その場＝<c>IsBusy=true</c> のまま走る）ため、保持されるラムダに限定する。判定は
+    /// <see cref="TestSourceInspection.IsHeldLambdaHead"/> に 1 つだけ置く（Issue #2101。
+    /// <c>DataExportImportViewModelImportPathSharingTests</c> も同じ判定を使う）。
     /// </para>
     /// </remarks>
     private static bool IsDeferred(string code, int callIndex, IReadOnlyList<(int Start, int End)> heldLambdaBlocks)
-        => IsInsideAny(heldLambdaBlocks, callIndex) || IsHeldForLaterInvocation(code, callIndex);
-
-    /// <summary>
-    /// 後で呼ぶために保持されるラムダ（ブロック本体）の範囲を列挙する
-    /// </summary>
-    private static IReadOnlyList<(int Start, int End)> ExtractHeldLambdaBlocks(string code)
-        => TestSourceInspection.ExtractLambdaBlockBodies(code)
-            .Where(b => IsHeldForLaterInvocation(code, b.Start))
-            .ToList();
+        => IsInsideAny(heldLambdaBlocks, callIndex) || TestSourceInspection.IsHeldLambdaHead(code, callIndex);
 
     /// <summary>
     /// 指定位置を含む最も内側のスコープがあるか
     /// </summary>
     private static bool IsInsideAny(IReadOnlyList<(int Start, int End)> scopes, int index)
         => scopes.Any(s => s.Start <= index && index <= s.End);
+
+    /// <summary>
+    /// サニタイズ済みのソースから、規約に違反するモーダル呼び出し（位置と呼び出し名）を列挙する。
+    /// </summary>
+    /// <remarks>
+    /// 実データの検査（<see cref="BeginBusyスコープ内のモーダル表示はSuspendBusyで囲まれていること"/>）と
+    /// サンプル入力の固定（<see cref="検査ロジックが既知のサンプル入力で違反を検出できること"/>）は、
+    /// <b>必ずこの 1 本の判定を通す</b>（Issue #2101）。条件式を両方に書き写すと、実データ側だけを
+    /// 緩めてもサンプルのテストは緑のまま残り、検出力の固定が名目だけになる。
+    /// </remarks>
+    private static IReadOnlyList<(int Index, string Call)> FindViolations(string code)
+    {
+        var busyScopes = ExtractBusyScopes(code);
+        var suspendScopes = TestSourceInspection.ExtractUsingScopeBodies(code, "SuspendBusy");
+        var lambdaBlocks = TestSourceInspection.ExtractHeldLambdaBlockBodies(code);
+
+        return ModalCallPattern.Matches(code)
+            .Cast<Match>()
+            .Where(m => IsInsideAny(busyScopes, m.Index)
+                        && !IsInsideAny(suspendScopes, m.Index)
+                        && !IsDeferred(code, m.Index, lambdaBlocks))
+            .Select(m => (m.Index, m.Groups[1].Value))
+            .ToList();
+    }
 
     [Fact]
     public void BeginBusyスコープ内のモーダル表示はSuspendBusyで囲まれていること()
@@ -172,24 +168,9 @@ public class BusyScopeDialogConventionTests
 
         foreach (var (path, code) in GetFilesWithBusyScopes())
         {
-            var busyScopes = ExtractBusyScopes(code);
-            var suspendScopes = TestSourceInspection.ExtractUsingScopeBodies(code, "SuspendBusy");
-            var lambdaBlocks = ExtractHeldLambdaBlocks(code);
-
-            foreach (Match call in ModalCallPattern.Matches(code))
+            foreach (var (index, call) in FindViolations(code))
             {
-                if (!IsInsideAny(busyScopes, call.Index))
-                {
-                    continue;
-                }
-
-                if (IsInsideAny(suspendScopes, call.Index) || IsDeferred(code, call.Index, lambdaBlocks))
-                {
-                    continue;
-                }
-
-                violations.Add(
-                    $"{Path.GetFileName(path)}:{ToLineNumber(code, call.Index)} {call.Groups[1].Value}");
+                violations.Add($"{Path.GetFileName(path)}:{ToLineNumber(code, index)} {call}");
             }
         }
 
@@ -363,7 +344,19 @@ void M()
     }
 }";
 
+        // 式形式でも、引数として渡したラムダはその場で走る（直前が `=>` であることは遅延の根拠にならない。Issue #2101）
+        const string immediateExpressionLambda = @"
+void M()
+{
+    using (BeginBusy(""保存中...""))
+    {
+        Task.Run(() => _dialogService.ShowError(""ng"", ""t""));
+    }
+}";
+
         DetectViolations(violating).Should().Be(1, "SuspendBusy で囲まれていない呼び出しを検出すること");
+        DetectViolations(immediateExpressionLambda).Should().Be(1,
+            "引数として渡した式形式のラムダは遅延ではないので除外しないこと（Issue #2101）");
         DetectViolations(compliant).Should().Be(0, "SuspendBusy で囲めば違反ではない");
         DetectViolations(outsideScope).Should().Be(0, "BeginBusy スコープの外は対象外");
         DetectViolations(deferredExpression).Should().Be(0,
@@ -383,17 +376,9 @@ void M()
             "非モーダルのトースト通知は誤検出しないこと（Issue #1837 の対の表明）");
     }
 
+    /// <summary>
+    /// サンプル入力を実データと<b>同じ前処理・同じ判定</b>（<see cref="FindViolations"/>）に通して違反数を返す。
+    /// </summary>
     private static int DetectViolations(string source)
-    {
-        var code = TestSourceInspection.ToCodeOnlyPreservingLines(source);
-        var busyScopes = ExtractBusyScopes(code);
-        var suspendScopes = TestSourceInspection.ExtractUsingScopeBodies(code, "SuspendBusy");
-        var lambdaBlocks = ExtractHeldLambdaBlocks(code);
-
-        return ModalCallPattern.Matches(code)
-            .Cast<Match>()
-            .Count(m => IsInsideAny(busyScopes, m.Index)
-                        && !IsInsideAny(suspendScopes, m.Index)
-                        && !IsDeferred(code, m.Index, lambdaBlocks));
-    }
+        => FindViolations(TestSourceInspection.ToCodeOnlyPreservingLines(source)).Count;
 }

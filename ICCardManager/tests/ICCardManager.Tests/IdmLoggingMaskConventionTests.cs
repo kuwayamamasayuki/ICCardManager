@@ -59,9 +59,24 @@ public class IdmLoggingMaskConventionTests
         @"(?<![A-Za-z0-9_])Log[A-Za-z]*",
         RegexOptions.Compiled);
 
-    /// <summary>IDm を指す識別子（<c>idm</c> / <c>cardIdm</c> / <c>CardIdm</c> / <c>LenderIdm</c> …）。</summary>
+    /// <summary>
+    /// IDm を指す識別子（<c>idm</c> / <c>cardIdm</c> / <c>CardIdm</c> / <c>LenderIdm</c> / <c>CardIDm</c> / <c>IDM</c> …）。
+    /// </summary>
+    /// <remarks>
+    /// Issue #2101: 旧実装は <c>[Ii]dm</c> だけを照合しており、FeliCa の表記どおりの <c>IDm</c>
+    /// （<c>card.CardIDm</c> / <c>GetIDm()</c>）を拾わなかった。大文字小文字を一律に無視しないのは、
+    /// <c>midMonth</c>（<c>idM</c>）のような無関係な語を拾わないため — 照合するのは
+    /// 「<c>I</c>/<c>i</c> + 小文字 <c>dm</c>」と「大文字 <c>ID</c> + <c>m</c>/<c>M</c>」の 2 形だけ。
+    /// </remarks>
     private static readonly Regex IdmIdentifierPattern = new(
-        @"(?<![A-Za-z0-9_])[A-Za-z0-9_]*[Ii]dm[A-Za-z0-9_]*",
+        @"(?<![A-Za-z0-9_])[A-Za-z0-9_]*(?:[Ii]dm|ID[mM])[A-Za-z0-9_]*",
+        RegexOptions.Compiled);
+
+    /// <summary>
+    /// マスクの呼び出し（<c>IdmMasker.Mask(</c>）。この丸括弧の内側に現れる IDm はマスク済みとみなす。
+    /// </summary>
+    private static readonly Regex MaskInvocationPattern = new(
+        @"(?<![A-Za-z0-9_])IdmMasker\s*\.\s*Mask\s*\(",
         RegexOptions.Compiled);
 
     /// <summary>
@@ -140,32 +155,62 @@ public class IdmLoggingMaskConventionTests
     }
 
     private static bool IsUnmaskedIdmArgument(string argument)
+        => FindUnmaskedIdmIdentifiers(argument).Count > 0;
+
+    /// <summary>
+    /// 1 つの引数の中で、マスクを通っていない IDm 識別子の出現を列挙する。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Issue #2101: 判定は<b>識別子の出現ごと</b>に行う。旧実装は引数に <c>IdmMasker</c> の字句が
+    /// 1 つでもあれば引数全体を適合扱いにしていたため、同じ引数の中にマスク済みと生が同居する形
+    /// （<c>$"{IdmMasker.Mask(a)} → {b.CardIdm}"</c>・三項演算子の片側だけのマスク・文字列連結）が
+    /// 素通りした。出現位置が <c>IdmMasker.Mask(…)</c> の丸括弧の内側にあるかで判定する。
+    /// </para>
+    /// <para>
+    /// <c>masked…</c> という名前の変数は、上流で <c>IdmMasker.Mask</c> を通した値を
+    /// 受けている前提で許容する（呼び出し行だけでは追えないため名前で判断する）。
+    /// </para>
+    /// </remarks>
+    internal static IReadOnlyList<string> FindUnmaskedIdmIdentifiers(string argument)
     {
         if (ParameterDeclarationPattern.IsMatch(argument))
         {
             // Log… で始まるメソッドの「定義」— 呼び出しではない
-            return false;
+            return Array.Empty<string>();
         }
 
-        var idmIdentifiers = IdmIdentifierPattern
+        var maskedSpans = new List<(int Start, int End)>();
+        foreach (Match mask in MaskInvocationPattern.Matches(argument))
+        {
+            var depth = 0;
+            for (var k = mask.Index + mask.Length - 1; k < argument.Length; k++)
+            {
+                if (argument[k] == '(')
+                {
+                    depth++;
+                }
+                else if (argument[k] == ')')
+                {
+                    depth--;
+                    if (depth == 0)
+                    {
+                        // 閉じないマスク呼び出しは範囲に数えない（fail-closed: 内側の IDm は違反として残る）
+                        maskedSpans.Add((mask.Index, k));
+                        break;
+                    }
+                }
+            }
+        }
+
+        return IdmIdentifierPattern
             .Matches(argument)
             .Cast<Match>()
+            .Where(m => !m.Value.StartsWith("IdmMasker", StringComparison.Ordinal))
+            .Where(m => !m.Value.StartsWith("masked", StringComparison.OrdinalIgnoreCase))
+            .Where(m => !maskedSpans.Any(s => s.Start < m.Index && m.Index < s.End))
             .Select(m => m.Value)
-            .Where(v => !v.StartsWith("IdmMasker", StringComparison.Ordinal))
             .ToList();
-
-        if (idmIdentifiers.Count == 0)
-        {
-            return false;
-        }
-
-        if (argument.Contains("IdmMasker"))
-        {
-            return false;
-        }
-
-        // 上流でマスク済みの値を受けた変数（maskedIdm 等）
-        return !idmIdentifiers.All(v => v.StartsWith("masked", StringComparison.OrdinalIgnoreCase));
     }
 
     /// <summary>
@@ -219,6 +264,19 @@ public class IdmLoggingMaskConventionTests
     [InlineData("LogCardOutcome(idm, result);", true)]
     // 違反: 補間文字列の補間式へ生の IDm を埋め込む形
     [InlineData("_logger.LogWarning($\"修復しました: {card.CardIdm}\");", true)]
+    // 違反（Issue #2101）: 同じ補間文字列の中でマスク済みと生が同居する形
+    [InlineData("_logger.LogInformation($\"{IdmMasker.Mask(a)} → {b.CardIdm}\");", true)]
+    // 違反（Issue #2101）: 三項演算子の片側だけをマスクする形
+    [InlineData("_logger.LogInformation(\"IDm={Idm}\", ok ? IdmMasker.Mask(a) : b.CardIdm);", true)]
+    // 違反（Issue #2101）: マスク済みの値へ生の値を連結する形
+    [InlineData("_logger.LogInformation(\"IDm={Idm}\", IdmMasker.Mask(a) + \"/\" + staffIdm);", true)]
+    // 違反（Issue #2101）: FeliCa の表記どおりの IDm（旧実装は [Ii]dm しか見ていなかった）
+    [InlineData("_logger.LogWarning(\"IDm={Idm}\", card.CardIDm);", true)]
+    [InlineData("_logger.LogWarning(\"IDm={Idm}\", reader.GetIDm());", true)]
+    // 準拠: 三項演算子の両側をマスクの内側で選ぶ形
+    [InlineData("_logger.LogInformation(\"IDm={Idm}\", IdmMasker.Mask(ok ? a.CardIdm : b.CardIDm));", false)]
+    // 準拠: 無関係な語（idM）を IDm と取り違えない
+    [InlineData("_logger.LogInformation(\"{Month}\", midMonth);", false)]
     // 準拠: マスクを通している
     [InlineData("_logger.LogInformation(\"カード検出 IDm={Idm}\", IdmMasker.Mask(idm));", false)]
     // 準拠: 補間文字列でもマスクを通している

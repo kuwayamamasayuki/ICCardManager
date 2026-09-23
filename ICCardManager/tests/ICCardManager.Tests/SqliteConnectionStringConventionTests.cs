@@ -45,10 +45,29 @@ public class SqliteConnectionStringConventionTests
         new(@"data\s+source\s*=", RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
     /// <summary>
-    /// <c>SQLiteConnectionStringBuilder</c> の生成を検出する。
+    /// <c>SQLiteConnectionStringBuilder</c> の使用を検出する（型名の出現そのもの）。
     /// </summary>
+    /// <remarks>
+    /// <c>new SQLiteConnectionStringBuilder</c> という生成式だけを見ると、target-typed new
+    /// （<c>SQLiteConnectionStringBuilder b = new() { DataSource = p };</c>）・完全修飾名
+    /// （<c>new System.Data.SQLite.SQLiteConnectionStringBuilder</c>）・<c>using</c> 別名が素通りする（Issue #2101）。
+    /// DbContext 以外に型名が現れる正当な理由は無いため、生成式ではなく型名で照合する。
+    /// 照合はコメントと文字列リテラルを除いたコードに対して行う（型名を説明する文言を誤検出しないため）。
+    /// </remarks>
     private static readonly Regex BuilderPattern =
-        new(@"new\s+SQLiteConnectionStringBuilder", RegexOptions.Compiled);
+        new(@"(?<![A-Za-z0-9_])SQLiteConnectionStringBuilder(?![A-Za-z0-9_])", RegexOptions.Compiled);
+
+    /// <summary>
+    /// 1 ファイル分の生のソースが、接続文字列を自前に組み立てているかを判定する。
+    /// </summary>
+    /// <remarks>
+    /// 実データの検査とサンプル入力の固定は、必ずこの 1 本の判定を通す（前処理ごと共有する）。
+    /// <c>Data Source</c> はリテラルの中身が検査対象なのでコメントだけを除いたテキストで、
+    /// 型名はリテラルも除いたテキストで照合する。
+    /// </remarks>
+    internal static bool AssemblesConnectionString(string rawSource)
+        => DataSourceLiteralPattern.IsMatch(TestSourceInspection.RemoveCommentsPreservingLines(rawSource))
+           || BuilderPattern.IsMatch(TestSourceInspection.ToCodeOnly(rawSource));
 
     /// <summary>
     /// Issue #1924: 接続文字列の組み立ては <c>DbContext</c> だけが行うこと。
@@ -70,9 +89,7 @@ public class SqliteConnectionStringConventionTests
                 continue;
             }
 
-            var code = TestSourceInspection.RemoveCommentsPreservingLines(File.ReadAllText(file));
-
-            if (DataSourceLiteralPattern.IsMatch(code) || BuilderPattern.IsMatch(code))
+            if (AssemblesConnectionString(File.ReadAllText(file)))
             {
                 violations.Add(RelativePath(file));
             }
@@ -120,13 +137,18 @@ public class SqliteConnectionStringConventionTests
     [InlineData("var b = new SQLiteConnectionStringBuilder { DataSource = p };", true)]
     [InlineData("new SQLiteConnection(DbContext.BuildConnectionString(path));", false)]
     [InlineData("// Data Source= を直接組み立てないこと", false)]
+    // Issue #2101: 生成式に型名が現れない・綴りが異なる形
+    [InlineData("SQLiteConnectionStringBuilder b = new() { DataSource = p };", true)]
+    [InlineData("var b = new System.Data.SQLite.SQLiteConnectionStringBuilder { DataSource = p };", true)]
+    [InlineData("private readonly SQLiteConnectionStringBuilder _builder = new();", true)]
+    [InlineData("using Csb = System.Data.SQLite.SQLiteConnectionStringBuilder;", true)]
+    // 型名を説明するコメント・文字列、名前が前方一致するだけの別の識別子は対象外（対の表明）
+    [InlineData("/// <c>SQLiteConnectionStringBuilder</c> は DbContext だけが使う", false)]
+    [InlineData("_logger.LogDebug(\"SQLiteConnectionStringBuilder を使わない\");", false)]
+    [InlineData("var x = MySQLiteConnectionStringBuilderFactory.Create();", false)]
     public void 検出パターンがサンプル入力を正しく判定すること(string snippet, bool expectedViolation)
     {
-        var code = TestSourceInspection.RemoveCommentsPreservingLines(snippet);
-
-        var detected = DataSourceLiteralPattern.IsMatch(code) || BuilderPattern.IsMatch(code);
-
-        detected.Should().Be(expectedViolation);
+        AssemblesConnectionString(snippet).Should().Be(expectedViolation);
     }
 
     private static IEnumerable<string> EnumerateProductionSources()
