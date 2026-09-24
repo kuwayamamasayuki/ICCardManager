@@ -148,13 +148,7 @@ namespace ICCardManager.Services
             // 標準サニタイズを適用
             var sanitized = Sanitize(name, SanitizeOptions.Standard);
 
-            // 最大長で切り詰め
-            if (sanitized.Length > 50)
-            {
-                sanitized = sanitized.Substring(0, 50);
-            }
-
-            return sanitized;
+            return TruncateToMaxLength(sanitized, 50);
         }
 
         /// <summary>
@@ -176,13 +170,7 @@ namespace ICCardManager.Services
             // 標準サニタイズを適用
             var sanitized = Sanitize(number, SanitizeOptions.Standard);
 
-            // 最大長で切り詰め
-            if (sanitized.Length > 20)
-            {
-                sanitized = sanitized.Substring(0, 20);
-            }
-
-            return sanitized;
+            return TruncateToMaxLength(sanitized, 20);
         }
 
         /// <summary>
@@ -204,13 +192,7 @@ namespace ICCardManager.Services
             // 標準サニタイズを適用
             var sanitized = Sanitize(note, SanitizeOptions.Standard);
 
-            // 最大長で切り詰め
-            if (sanitized.Length > 200)
-            {
-                sanitized = sanitized.Substring(0, 200);
-            }
-
-            return sanitized;
+            return TruncateToMaxLength(sanitized, 200);
         }
 
         /// <summary>
@@ -232,18 +214,40 @@ namespace ICCardManager.Services
             // 標準サニタイズを適用
             var sanitized = Sanitize(cardNumber, SanitizeOptions.Standard);
 
-            // 最大長で切り詰め
-            if (sanitized.Length > 20)
-            {
-                sanitized = sanitized.Substring(0, 20);
-            }
-
-            return sanitized;
+            return TruncateToMaxLength(sanitized, 20);
         }
 
         #endregion
 
         #region プライベートメソッド
+
+        /// <summary>
+        /// サニタイズ済みの文字列を最大長で切り詰める
+        /// </summary>
+        /// <param name="sanitized"><see cref="Sanitize"/> を <see cref="SanitizeOptions.Standard"/> で通した文字列</param>
+        /// <param name="maxLength">最大長（UTF-16 のコード単位で数える）</param>
+        /// <returns>最大長以内に切り詰めた文字列</returns>
+        /// <remarks>
+        /// <para>
+        /// 切り詰めはサニタイズの「後」に走るため、ここで作った不正な形はどこでも取り除かれずに DB へ届く（Issue #2110）。
+        /// 切り詰め位置がサロゲートペアの間に当たるときは、ペアごと落として 1 つ手前で切る
+        /// （入力は <see cref="RemoveInvalidSurrogates"/> 済みなので、末尾の上位サロゲートの次は必ずその下位サロゲート）。
+        /// </para>
+        /// <para>
+        /// 切り詰めた結果の末尾が空白（改行を含む）になった場合は、ペアを落としたかどうかによらず落とす。
+        /// 前後の空白は切り詰めの前に削除済みで、ここで残すと <see cref="SanitizeOptions.Trim"/> の結果が崩れる。
+        /// </para>
+        /// </remarks>
+        private static string TruncateToMaxLength(string sanitized, int maxLength)
+        {
+            if (sanitized.Length <= maxLength)
+            {
+                return sanitized;
+            }
+
+            var length = char.IsHighSurrogate(sanitized[maxLength - 1]) ? maxLength - 1 : maxLength;
+            return sanitized.Substring(0, length).TrimEnd();
+        }
 
         /// <summary>
         /// 不正なサロゲートペアを削除

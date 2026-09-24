@@ -1,3 +1,5 @@
+using System;
+using System.Collections.Generic;
 using FluentAssertions;
 using ICCardManager.Services;
 using Xunit;
@@ -301,6 +303,155 @@ public class InputSanitizerEdgeCaseTests
         var result = InputSanitizer.SanitizeStaffNumber(null);
 
         result.Should().BeEmpty();
+    }
+
+    #endregion
+
+    #region 切り詰めとサロゲートペア（Issue #2110）
+
+    // 最大長で切り詰める 4 メソッド。切り詰めは RemoveInvalidSurrogates の「後」に走るため、
+    // ここで分断されたペアの片割れは、どこでも取り除かれずに DB へ届く。
+    private static readonly Dictionary<string, (Func<string, string> Sanitize, int MaxLength)> TruncatingMethods =
+        new Dictionary<string, (Func<string, string>, int)>
+        {
+            [nameof(InputSanitizer.SanitizeName)] = (InputSanitizer.SanitizeName, 50),
+            [nameof(InputSanitizer.SanitizeStaffNumber)] = (InputSanitizer.SanitizeStaffNumber, 20),
+            [nameof(InputSanitizer.SanitizeNote)] = (InputSanitizer.SanitizeNote, 200),
+            [nameof(InputSanitizer.SanitizeCardNumber)] = (InputSanitizer.SanitizeCardNumber, 20),
+        };
+
+    public static TheoryData<string> TruncatingMethodNames()
+    {
+        var data = new TheoryData<string>();
+        foreach (var name in TruncatingMethods.Keys)
+        {
+            data.Add(name);
+        }
+        return data;
+    }
+
+    /// <summary>
+    /// UTF-16 のコード単位で数えて N 文字目にサロゲートペアの上位がかかる場合、
+    /// ペアを分断せず 1 つ手前で切ること（単独の上位サロゲートを残さない）。
+    /// </summary>
+    [Theory]
+    [MemberData(nameof(TruncatingMethodNames))]
+    public void 最大長の位置にかかるサロゲートペアは分断せずペアごと落とすこと(string methodName)
+    {
+        var (sanitize, maxLength) = TruncatingMethods[methodName];
+        var prefix = new string('あ', maxLength - 1);
+
+        var result = sanitize(prefix + "😀");
+
+        result.Should().Be(prefix);
+        HasLoneSurrogate(result).Should().BeFalse();
+    }
+
+    /// <summary>
+    /// 最大長にちょうど収まるサロゲートペアは、切り詰めで落とさないこと（対の表明）。
+    /// これが無いと、サロゲートペアを含む入力を常に 1 文字短く切る実装でも上のテストは緑になる。
+    /// </summary>
+    [Theory]
+    [MemberData(nameof(TruncatingMethodNames))]
+    public void 最大長にちょうど収まるサロゲートペアは保つこと(string methodName)
+    {
+        var (sanitize, maxLength) = TruncatingMethods[methodName];
+        var expected = new string('あ', maxLength - 2) + "😀";
+
+        var result = sanitize(expected + "い");
+
+        result.Should().Be(expected);
+    }
+
+    /// <summary>
+    /// ペアを落として 1 つ手前で切った結果、末尾が空白になる場合は空白も落とすこと。
+    /// 切り詰めの前に Trim を済ませているので、ここで落とさないと Standard の「前後の空白を削除」が崩れる。
+    /// </summary>
+    [Theory]
+    [MemberData(nameof(TruncatingMethodNames))]
+    public void ペアを落として末尾が空白になる場合は空白も落とすこと(string methodName)
+    {
+        var (sanitize, maxLength) = TruncatingMethods[methodName];
+        var prefix = new string('あ', maxLength - 2);
+
+        var result = sanitize(prefix + " 😀");
+
+        result.Should().Be(prefix);
+    }
+
+    /// <summary>
+    /// サロゲートペアを含まない入力でも、切り詰めた結果の末尾が空白なら空白を落とすこと。
+    /// 末尾の空白の除去はペアを落としたときに限らず、切り詰めのたびに効く。
+    /// </summary>
+    [Theory]
+    [MemberData(nameof(TruncatingMethodNames))]
+    public void 切り詰めた結果の末尾が空白ならサロゲートペアが無くても空白を落とすこと(string methodName)
+    {
+        var (sanitize, maxLength) = TruncatingMethods[methodName];
+        var prefix = new string('あ', maxLength - 1);
+
+        var result = sanitize(prefix + " い");
+
+        result.Should().Be(prefix);
+    }
+
+    /// <summary>
+    /// サロゲートペアをどの位置に置いても、結果は単独のサロゲートを含まず、最大長以内で、
+    /// サニタイズ済みの入力の先頭部分であること（位置を走査する不変条件）。
+    /// </summary>
+    [Theory]
+    [MemberData(nameof(TruncatingMethodNames))]
+    public void サロゲートペアの位置によらず結果は単独のサロゲートを含まない入力の先頭部分であること(string methodName)
+    {
+        var (sanitize, maxLength) = TruncatingMethods[methodName];
+
+        for (var position = 0; position <= maxLength + 1; position++)
+        {
+            var input = new string('あ', position) + "😀" + new string('い', maxLength);
+
+            var result = sanitize(input);
+
+            HasLoneSurrogate(result).Should().BeFalse($"ペアを {position} 文字目に置いた入力");
+            result.Length.Should().BeLessOrEqualTo(maxLength, $"ペアを {position} 文字目に置いた入力");
+            input.Should().StartWith(result, $"ペアを {position} 文字目に置いた入力");
+        }
+    }
+
+    /// <summary>
+    /// 検査の固定: <see cref="HasLoneSurrogate"/> が単独の上位・下位を検出し、正しいペアを検出しないこと。
+    /// これが壊れると上の表明はすべて空振りで緑になる。
+    /// </summary>
+    /// <remarks>
+    /// InlineData にしない。xUnit は Theory の引数を直列化するため、単独のサロゲートが置換文字（U+FFFD）へ化ける。
+    /// </remarks>
+    [Fact]
+    public void 単独のサロゲートの検査が既知の入力を正しく判定すること()
+    {
+        HasLoneSurrogate("あ\uD83D").Should().BeTrue("末尾の単独の上位サロゲート");
+        HasLoneSurrogate("\uDE00あ").Should().BeTrue("先頭の単独の下位サロゲート");
+        HasLoneSurrogate("\uD83Dあ\uDE00").Should().BeTrue("間に別の文字を挟んだ上位と下位");
+        HasLoneSurrogate("あ😀").Should().BeFalse("正しいペア");
+        HasLoneSurrogate("あい").Should().BeFalse("サロゲートを含まない");
+    }
+
+    private static bool HasLoneSurrogate(string value)
+    {
+        for (var i = 0; i < value.Length; i++)
+        {
+            if (char.IsHighSurrogate(value[i]))
+            {
+                if (i + 1 >= value.Length || !char.IsLowSurrogate(value[i + 1]))
+                {
+                    return true;
+                }
+                i++;
+            }
+            else if (char.IsLowSurrogate(value[i]))
+            {
+                return true;
+            }
+        }
+        return false;
     }
 
     #endregion
