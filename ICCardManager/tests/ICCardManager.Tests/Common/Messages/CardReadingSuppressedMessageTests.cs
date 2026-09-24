@@ -55,6 +55,12 @@ public class CardReadingSuppressedMessageTests
     /// <summary>
     /// 複数ソースの同時抑制が正しく動作すること
     /// </summary>
+    /// <remarks>
+    /// 本テストはメッセージの配送を確かめるために受信側の処理をテスト内に書いており、
+    /// メイン画面の受信ハンドラーそのものは通らない。メイン画面が抑制元ごとに管理していること
+    /// （1 つの画面の解除で他の画面の抑制が解けないこと）は
+    /// <c>MainViewModelTests.CardReadingSuppression_ShouldTrackSources</c> が本物のメッセンジャーで検証する（Issue #2104）。
+    /// </remarks>
     [Fact]
     public void MultipleSourceSuppression_ShouldTrackAllSources()
     {

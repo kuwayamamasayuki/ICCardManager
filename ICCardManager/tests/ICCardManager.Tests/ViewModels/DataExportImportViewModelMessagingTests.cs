@@ -546,5 +546,46 @@ public class DataExportImportViewModelMessagingTests : IDisposable
         _dispatcher.ObservedExceptions.Should().BeEmpty();
     }
 
+    /// <summary>
+    /// Issue #2104: 照合の待機中にキャンセルされたら、登録済みカードが見つかっても
+    /// カードの指定（TouchedCardIdm）を行わないこと。
+    /// </summary>
+    /// <remarks>
+    /// 上のテストは未登録カードの分岐しか通らない。再判定を「未登録の分岐の中」へ移す実装
+    /// （登録済みの分岐は再判定を経ずに進む）でも緑になるため、登録済みの分岐でも中止を表明する。
+    /// キャンセルしたはずのカードがインポート対象に残ると、職員が選び直さないまま別のカードへ取り込む。
+    /// </remarks>
+    [Fact]
+    public async Task HandleCardReadAsync_照合中にキャンセルされた_登録済みカードでも指定しないこと()
+    {
+        // Arrange
+        var idm = "0102030405060708";
+        _cardRepositoryMock.Setup(r => r.GetByIdmAsync(idm, false))
+            .Returns(() =>
+            {
+                // 照合の待機中に「キャンセル」が押された状況（抑制はここで解放される）
+                _viewModel.CancelCardTouch();
+                return Task.FromResult<ICCardManager.Models.IcCard?>(new ICCardManager.Models.IcCard
+                {
+                    CardIdm = idm,
+                    CardType = "はやかけん",
+                    CardNumber = "H-001"
+                });
+            });
+
+        await _viewModel.StartCardTouchAsync();
+        _receivedMessages.Clear();
+
+        // Act
+        await _viewModel.HandleCardReadAsync(idm);
+
+        // Assert
+        _viewModel.TouchedCardIdm.Should().BeNullOrEmpty("中止したタッチでカードを指定しないこと（#1842）");
+        _viewModel.TouchedCardInfo.Should().BeNullOrEmpty();
+        _receivedMessages.Should().OnlyContain(m => m.Value == false,
+            "中止後に抑制を取り直さないこと");
+        _dispatcher.ObservedExceptions.Should().BeEmpty();
+    }
+
     #endregion
 }

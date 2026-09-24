@@ -603,6 +603,115 @@ public class DataExportImportViewModelTests : IDisposable
 
     #endregion
 
+    #region エクスポートの分岐・監査ログ・例外文言（Issue #2104）
+
+    /// <summary>
+    /// Issue #2104: データ種別ごとに対応するエクスポートを、画面の指定（削除済みを含めるか・日付範囲）で呼び、
+    /// 成功したら出力先と件数を監査ログへ記録すること。
+    /// </summary>
+    /// <remarks>
+    /// 既存のテストは Cards の分岐と IsBusy しか見ておらず、Staff／Ledgers／LedgerDetails の分岐の取り違え、
+    /// 日付範囲の受け渡し、監査ログ（Issue #1302）の記録内容はどれも未検証だった。
+    /// 件数はデータ種別ごとに変え、別の分岐の結果を記録していないことも区別する。
+    /// </remarks>
+    [Theory]
+    [InlineData(DataType.Cards, 3)]
+    [InlineData(DataType.Staff, 4)]
+    [InlineData(DataType.Ledgers, 5)]
+    [InlineData(DataType.LedgerDetails, 6)]
+    public async Task ExportToFileAsync_データ種別ごとのエクスポートを呼び監査ログに記録すること(
+        DataType dataType, int exportedCount)
+    {
+        // Arrange
+        var filePath = System.IO.Path.Combine(System.IO.Path.GetTempPath(), $"export_{dataType}.csv");
+        var startDate = new DateTime(2026, 4, 1);
+        var endDate = new DateTime(2026, 6, 30);
+        _viewModel.SelectedExportType = dataType;
+        _viewModel.IncludeDeletedInExport = true;
+        _viewModel.ExportStartDate = startDate;
+        _viewModel.ExportEndDate = endDate;
+
+        var success = new CsvExportResult { Success = true, FilePath = filePath, ExportedCount = exportedCount };
+        _exportServiceMock.Setup(x => x.ExportCardsAsync(filePath, true)).ReturnsAsync(success);
+        _exportServiceMock.Setup(x => x.ExportStaffAsync(filePath, true)).ReturnsAsync(success);
+        _exportServiceMock.Setup(x => x.ExportLedgersAsync(filePath, startDate, endDate, null)).ReturnsAsync(success);
+        _exportServiceMock.Setup(x => x.ExportLedgerDetailsAsync(filePath, startDate, endDate)).ReturnsAsync(success);
+
+        // Act
+        await _viewModel.ExportToFileAsync(filePath);
+
+        // Assert: 選んだデータ種別のエクスポートだけを、画面の指定どおりの引数で 1 回呼ぶ
+        _exportServiceMock.Verify(x => x.ExportCardsAsync(filePath, true),
+            dataType == DataType.Cards ? Times.Once() : Times.Never());
+        _exportServiceMock.Verify(x => x.ExportStaffAsync(filePath, true),
+            dataType == DataType.Staff ? Times.Once() : Times.Never());
+        _exportServiceMock.Verify(x => x.ExportLedgersAsync(filePath, startDate, endDate, null),
+            dataType == DataType.Ledgers ? Times.Once() : Times.Never());
+        _exportServiceMock.Verify(x => x.ExportLedgerDetailsAsync(filePath, startDate, endDate),
+            dataType == DataType.LedgerDetails ? Times.Once() : Times.Never());
+
+        // 監査ログ: 対象テーブル・出力先・件数
+        var expectedTable = dataType switch
+        {
+            DataType.Cards => OperationLogger.Tables.IcCard,
+            DataType.Staff => OperationLogger.Tables.Staff,
+            DataType.Ledgers => OperationLogger.Tables.Ledger,
+            _ => OperationLogger.Tables.LedgerDetail,
+        };
+        var log = await GetSingleLogAsync(OperationLogger.Actions.Export);
+        log.TargetTable.Should().Be(expectedTable);
+        log.TargetId.Should().Be(System.IO.Path.GetFileName(filePath));
+        GetAfterDataString(log, "FilePath").Should().Be(filePath);
+        using (var document = System.Text.Json.JsonDocument.Parse(log.AfterData))
+        {
+            document.RootElement.GetProperty("RecordCount").GetInt32().Should().Be(exportedCount);
+        }
+        _viewModel.StatusMessage.Should().Contain($"{exportedCount}件");
+    }
+
+    /// <summary>
+    /// Issue #2104: エクスポートが失敗を返したら監査ログを記録しないこと（上のテストと対になる表明）。
+    /// </summary>
+    [Fact]
+    public async Task ExportToFileAsync_失敗したら監査ログを記録しないこと()
+    {
+        var filePath = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "export_failed.csv");
+        _viewModel.SelectedExportType = DataType.Cards;
+        _exportServiceMock
+            .Setup(x => x.ExportCardsAsync(It.IsAny<string>(), It.IsAny<bool>()))
+            .ReturnsAsync(new CsvExportResult { Success = false, ErrorMessage = "出力先に書き込めませんでした" });
+
+        await _viewModel.ExportToFileAsync(filePath);
+
+        await AssertNoLogAsync(OperationLogger.Actions.Export);
+        _viewModel.StatusMessage.Should().Contain("出力先に書き込めませんでした");
+    }
+
+    /// <summary>
+    /// Issue #2104: エクスポート中の例外は、生の例外メッセージではなく 3 要素の文言で案内し（Issue #1614）、
+    /// 監査ログを記録しないこと。
+    /// </summary>
+    [Fact]
+    public async Task ExportToFileAsync_例外時は生の例外メッセージを出さず監査ログも記録しないこと()
+    {
+        const string rawMessage = "Access to the path 'C:\\secret\\export.csv' is denied.";
+        var filePath = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "export_exception.csv");
+        _viewModel.SelectedExportType = DataType.Ledgers;
+        _exportServiceMock
+            .Setup(x => x.ExportLedgersAsync(It.IsAny<string>(), It.IsAny<DateTime>(), It.IsAny<DateTime>(), It.IsAny<string>()))
+            .ThrowsAsync(new UnauthorizedAccessException(rawMessage));
+
+        await _viewModel.ExportToFileAsync(filePath);
+
+        _viewModel.StatusMessage.Should().NotContain(rawMessage);
+        _viewModel.StatusMessage.Should().Be(
+            ICCardManager.Common.ExceptionMessageFormatter.ToUserMessage(
+                new UnauthorizedAccessException(rawMessage), "エクスポート"));
+        await AssertNoLogAsync(OperationLogger.Actions.Export);
+    }
+
+    #endregion
+
     #region OpenExportedFile / OpenExportFolder（Issue #1465）
 
     [Fact]
@@ -909,6 +1018,32 @@ public class DataExportImportViewModelTests : IDisposable
             new WeakReferenceMessenger(),
             _safeFileLauncherMock.Object,
             _dispatcher);
+    }
+
+    /// <summary>
+    /// operation_log に記録された、指定した操作の唯一の行を取得する
+    /// </summary>
+    private async Task<ICCardManager.Models.OperationLog> GetSingleLogAsync(string action)
+    {
+        var logs = await _operationLogRepository.GetByDateRangeAsync(
+            DateTime.Today.AddDays(-1),
+            DateTime.Today.AddDays(1));
+
+        return logs.Should()
+            .ContainSingle(l => l.Action == action)
+            .Which;
+    }
+
+    /// <summary>
+    /// operation_log に指定した操作の行が 1 件も無いことを表明する
+    /// </summary>
+    private async Task AssertNoLogAsync(string action)
+    {
+        var logs = await _operationLogRepository.GetByDateRangeAsync(
+            DateTime.Today.AddDays(-1),
+            DateTime.Today.AddDays(1));
+
+        logs.Should().NotContain(l => l.Action == action);
     }
 
     /// <summary>

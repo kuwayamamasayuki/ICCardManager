@@ -40,8 +40,12 @@ public class ConnectionDiagnosticsViewModelTests
         Title = kind.ToString(),
         Status = status,
         SummaryText = "要約",
-        DetailText = "詳細と対処方法です。確認してください。"
+        // Issue #2104: 項目ごとに異なる文言にする。全項目が同じ文言だと、選択に関係なく
+        // 先頭の項目の詳細を返す実装でも「選択した項目の詳細」の表明が緑になる。
+        DetailText = DetailTextOf(kind)
     };
+
+    private static string DetailTextOf(DiagnosticItemKind kind) => $"{kind} の詳細と対処方法です。確認してください。";
 
     private static DiagnosticReport BuildReport(params DiagnosticItem[] items) => new()
     {
@@ -99,7 +103,7 @@ public class ConnectionDiagnosticsViewModelTests
         await vm.RunDiagnosticsAsync();
 
         vm.SelectedItem.Kind.Should().Be(DiagnosticItemKind.JournalMode);
-        vm.SelectedDetailText.Should().Be("詳細と対処方法です。確認してください。");
+        vm.SelectedDetailText.Should().Be(DetailTextOf(DiagnosticItemKind.JournalMode));
     }
 
     [Fact]
@@ -321,6 +325,8 @@ public class ConnectionDiagnosticsViewModelTests
         vm.SelectedItem = vm.Items.Last();
 
         changed.Should().BeTrue();
+        vm.SelectedDetailText.Should().Be(DetailTextOf(DiagnosticItemKind.CardReader),
+            "選択を変えたら、選んだ項目の詳細を表示すること");
     }
 
     #endregion
