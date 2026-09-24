@@ -373,8 +373,9 @@ public class AdminDashboardExcelExportServiceTests : IDisposable
     {
         // Issue #2106: 旧版は列ごとに 1〜2 列しか検査しておらず、貸出状況・貸出職員・貸出日時・
         // 経過日数・長期未返却・残額不足・最終利用日の書き込みは一度も読み返していなかった。
-        // 1 行目は全項目が「立っている」カード、2 行目は全項目が「立っていない」カードにし、
-        // 各列に互いに区別できる値を置く（経過日数 17 と残額 2,500 等、取り違えれば値で分かる）。
+        // 1 行目は長期未返却の貸出中カード、2 行目は残額不足の在庫カードにし、
+        // 各列に互いに区別できる値を置く（経過日数 17 と残額 12,000 等、取り違えれば値で分かる）。
+        // 「○」を付ける 2 列（長期未返却・残額不足）は行ごとに立つ側を変え、列の取り違えも区別する。
         var lent = new AdminDashboardCardStatus
         {
             CardIdm = "AAAA000000000001",
@@ -384,8 +385,8 @@ public class AdminDashboardExcelExportServiceTests : IDisposable
             LentAt = new DateTime(2026, 7, 17, 8, 45, 0),
             ElapsedLentDays = 17,
             IsLongTermUnreturned = true,
-            CurrentBalance = 2500,
-            IsBalanceWarning = true,
+            CurrentBalance = 12000,
+            IsBalanceWarning = false,
             ReportState = ReportExportState.NotExported,
             LastUsageDate = new DateTime(2026, 7, 16)
         };
@@ -398,8 +399,8 @@ public class AdminDashboardExcelExportServiceTests : IDisposable
             LentAt = null,
             ElapsedLentDays = null,
             IsLongTermUnreturned = false,
-            CurrentBalance = 12000,
-            IsBalanceWarning = false,
+            CurrentBalance = 2500,
+            IsBalanceWarning = true,
             ReportState = ReportExportState.Exported,
             LastUsageDate = null
         };
@@ -414,10 +415,10 @@ public class AdminDashboardExcelExportServiceTests : IDisposable
             "残額", "残額不足", "帳票の出力状況", "最終利用日");
         ReadRow(2).Should().Equal(
             "はやかけん 001", "貸出中", "博多 花子", "2026/07/17 08:45", "17", "○",
-            "2500", "○", "未出力", "2026/07/16");
+            "12000", "", "未出力", "2026/07/16");
         ReadRow(3).Should().Equal(
-            new[] { "nimoca 002", "在庫", "", "", "", "", "12000", "", "出力済み", "" },
-            "在庫のカードに貸出・注意の印や最終利用日を書くと誤読される");
+            new[] { "nimoca 002", "在庫", "", "", "", "", "2500", "○", "出力済み", "" },
+            "在庫のカードに貸出の情報や最終利用日を書くと誤読される");
         sheet.Cell(2, 5).DataType.Should().Be(XLDataType.Number, "経過日数は並べ替え・集計できる数値で書く");
         sheet.Cell(2, 7).DataType.Should().Be(XLDataType.Number);
         sheet.Cell(4, 1).GetString().Should().BeEmpty("カードの枚数ぶんだけ行を書く");
