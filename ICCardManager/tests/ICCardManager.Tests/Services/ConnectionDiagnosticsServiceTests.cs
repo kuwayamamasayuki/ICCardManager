@@ -74,11 +74,27 @@ public class ConnectionDiagnosticsServiceTests : IDisposable
     /// <summary>
     /// OS 依存の実測部分を差し替えられるテスト用サブクラス
     /// </summary>
+    /// <remarks>
+    /// Issue #2106: 差し替えたメソッドが引数に関係なく固定値を返すと、本体が誤ったパス
+    /// （別のフォルダ・null）を渡しても結果が変わらず緑になる。そこで
+    /// ①受け取った引数を記録し（<see cref="ProbedFolders"/> 等）、
+    /// ②本番の実装と同じく「パスが無ければ特定できない」側の値を返す
+    /// ようにして、正しいパスが渡っていることを表明できるようにしている。
+    /// </remarks>
     private sealed class TestableService : ConnectionDiagnosticsService
     {
         public FolderWriteAccess FolderAccess { get; set; } = FolderWriteAccess.Writable;
         public long? FreeSpace { get; set; } = 50L * 1024 * 1024 * 1024;
         public bool FileReachable { get; set; } = true;
+
+        /// <summary><see cref="ProbeFolderWriteAccess"/> が受け取った保存先</summary>
+        public List<string> ProbedFolders { get; } = new();
+
+        /// <summary><see cref="GetFreeSpaceBytes"/> が受け取った保存先</summary>
+        public List<string> FreeSpaceFolders { get; } = new();
+
+        /// <summary><see cref="ProbeDatabaseFileReachable"/> が受け取った DB パス</summary>
+        public List<string> ProbedDatabasePaths { get; } = new();
 
         public TestableService(
             IDatabaseInfo databaseInfo,
@@ -93,11 +109,25 @@ public class ConnectionDiagnosticsServiceTests : IDisposable
         {
         }
 
-        protected override FolderWriteAccess ProbeFolderWriteAccess(string folder) => FolderAccess;
+        // 本番（FolderWriteAccessProbe.Probe / DiskSpaceHelper / File.Exists）と同じく、
+        // パスが無いときは「特定できない」側へ倒す。
+        protected override FolderWriteAccess ProbeFolderWriteAccess(string folder)
+        {
+            ProbedFolders.Add(folder);
+            return string.IsNullOrWhiteSpace(folder) ? FolderWriteAccess.PathNotSpecified : FolderAccess;
+        }
 
-        protected override long? GetFreeSpaceBytes(string folder) => FreeSpace;
+        protected override long? GetFreeSpaceBytes(string folder)
+        {
+            FreeSpaceFolders.Add(folder);
+            return string.IsNullOrWhiteSpace(folder) ? null : FreeSpace;
+        }
 
-        protected override bool ProbeDatabaseFileReachable(string databasePath) => FileReachable;
+        protected override bool ProbeDatabaseFileReachable(string databasePath)
+        {
+            ProbedDatabasePaths.Add(databasePath);
+            return !string.IsNullOrWhiteSpace(databasePath) && FileReachable;
+        }
     }
 
     private TestableService CreateService() => new(
@@ -544,13 +574,46 @@ public class ConnectionDiagnosticsServiceTests : IDisposable
     {
         _backupService.Setup(s => s.ResolveBackupFolderAsync())
             .ThrowsAsync(new InvalidOperationException("設定の読み取りに失敗"));
+        // Issue #2106: 旧版は差し替え側で PathNotSpecified を返させていたため、本体が解決に
+        // 失敗した後で別のフォルダ（一時フォルダ等）を渡しても緑だった。差し替え側は
+        // 「書き込める」のままにし、本体が「特定できない」ことを null で伝えているかを見る。
         var service = CreateService();
-        service.FolderAccess = FolderWriteAccess.PathNotSpecified;
 
-        var item = await RunAndGet(DiagnosticItemKind.BackupFolderWritable, service);
+        var report = await service.RunDiagnosticsAsync();
 
+        // 「null のまま実測メソッドへ渡す」か「null なら実測を呼ばない」かは本体の自由。
+        // 固定したいのは「解決できなかった保存先を別のパスで代用しない」ことだけ
+        service.ProbedFolders.Should().OnlyContain(f => f == null, "解決できなかった保存先を別のパスで代用しない");
+        service.FreeSpaceFolders.Should().OnlyContain(f => f == null);
+        var item = report.Items.Single(i => i.Kind == DiagnosticItemKind.BackupFolderWritable);
         item.Status.Should().Be(DiagnosticStatus.Error);
+        item.SummaryText.Should().Be("保存先が特定できません");
         item.DetailText.Should().Contain("F5");
+        report.Items.Single(i => i.Kind == DiagnosticItemKind.DiskFreeSpace).SummaryText.Should().Be("不明");
+    }
+
+    [Fact]
+    public async Task Probes_ReceiveTheResolvedPaths()
+    {
+        // Issue #2106: 実測（書込可否・空き容量・DB ファイル到達）の継ぎ目へ、解決した
+        // パスがそのまま渡っていることを表明する。差し替えが引数を見ていなかった間は、
+        // 本体が別のパス（DB のフォルダと保存先の取り違え等）を渡しても緑だった。
+        // 保存先と DB パスは互いに異なる値にして、取り違えを区別できるようにする。
+        const string backupFolder = @"\\fileserver\share\ICCardManager\backup";
+        const string databasePath = @"\\fileserver\share\ICCardManager\iccard.db";
+        _backupService.Setup(s => s.ResolveBackupFolderAsync()).ReturnsAsync(backupFolder);
+        _databaseInfo.SetupGet(d => d.DatabasePath).Returns(databasePath);
+        var service = CreateService();
+
+        var report = await service.RunDiagnosticsAsync();
+
+        service.ProbedFolders.Should().Equal(backupFolder);
+        service.FreeSpaceFolders.Should().Equal(backupFolder);
+        service.ProbedDatabasePaths.Should().Equal(databasePath);
+        report.Items.Single(i => i.Kind == DiagnosticItemKind.BackupFolderWritable)
+            .DetailText.Should().Be($"バックアップ保存先（{backupFolder}）へ書き込めています。");
+        report.Items.Single(i => i.Kind == DiagnosticItemKind.DatabaseReachability)
+            .DetailText.Should().Be($"データベース（{databasePath}）を読み取れています。");
     }
 
     #endregion

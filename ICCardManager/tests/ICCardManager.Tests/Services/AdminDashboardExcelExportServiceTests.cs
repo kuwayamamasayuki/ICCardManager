@@ -260,18 +260,84 @@ public class AdminDashboardExcelExportServiceTests : IDisposable
     #region 概要シート
 
     [Fact]
-    public async Task ExportAsync_OverviewSheet_RecordsThresholdsUsed()
+    public async Task ExportAsync_OverviewSheet_RecordsThresholdsAndCountsRowByRow()
     {
-        using var workbook = await ExportAndOpenAsync(
-            CreateStatus(CreateCard(isLongTermUnreturned: true, elapsedLentDays: 20, isLent: true)), null);
+        // しきい値が本文に残らないと、後から見た人がどの基準の集計か判断できない。
+        // Issue #2106: 旧版はラベルの部分一致しか見ておらず、件数（B 列）を 1 つも検査していなかった。
+        // 件数を取り違えた（貸出中の行に長期未返却の件数を書く等）実装でも緑になる。
+        // 各件数を互いに異なる値にし、しきい値も既定（14 日・10,000 円）と異なる値にして、
+        // どのプロパティがどの行に書かれたかを結果から読めるようにする。
+        // 帳票の年月も集計基準日時（2026/08）と異なる値にし、AsOf から組み立て直す誤りを区別する。
+        var status = new AdminDashboardOperationStatus
+        {
+            AsOf = new DateTime(2026, 8, 3, 9, 5, 0),
+            LongTermUnreturnedThresholdDays = 21,
+            WarningBalance = 3000,
+            ReportYear = 2026,
+            ReportMonth = 7,
+            TotalCardCount = 9,
+            LentCardCount = 6,
+            LongTermUnreturnedCount = 4,
+            LowBalanceCount = 3,
+            ReportNotExportedCount = 2,
+            ReportStatusUnknownCount = 1,
+            Cards = new AdminDashboardCardStatus[0]
+        };
+
+        using var workbook = await ExportAndOpenAsync(status, null);
 
         var sheet = workbook.Worksheet(AdminDashboardExcelExportService.OverviewSheetName);
-        var labels = Enumerable.Range(1, 10).Select(r => sheet.Cell(r, 1).GetString()).ToList();
+        var rows = Enumerable.Range(1, 8)
+            .Select(r => (Label: sheet.Cell(r, 1).GetString(), Value: sheet.Cell(r, 2).GetString()))
+            .ToList();
 
-        // しきい値が本文に残らないと、後から見た人がどの基準の集計か判断できない
-        labels.Should().Contain(l => l.Contains("14日以上"));
-        labels.Should().Contain(l => l.Contains("10,000円以下"));
-        labels.Should().Contain(l => l.Contains("2026年8月"));
+        rows.Should().Equal(new[]
+        {
+            ("項目", "値"),
+            ("集計基準日時", "2026/08/03 09:05"),
+            ("対象カード枚数", "9"),
+            ("貸出中", "6"),
+            ("長期未返却（21日以上）", "4"),
+            ("残額不足（3,000円以下）", "3"),
+            ("2026年7月の帳票が未出力", "2"),
+            ("帳票の出力状況を判定できず", "1")
+        });
+        // 件数は数値として書く（文字列だと Excel で集計できない）
+        Enumerable.Range(3, 6).Select(r => sheet.Cell(r, 2).DataType)
+            .Should().OnlyContain(t => t == XLDataType.Number);
+    }
+
+    [Fact]
+    public async Task ExportAsync_OverviewSheet_WithAnalytics_RecordsAnalysisPeriod()
+    {
+        // Issue #2106: 分析期間の 3 行（開始・終了・日数）は一度も検査されていなかった。
+        // 開始と終了を取り違えても、日数に別の値を書いても緑になる。
+        using var workbook = await ExportAndOpenAsync(CreateStatus(CreateCard()), CreateAnalytics());
+
+        var sheet = workbook.Worksheet(AdminDashboardExcelExportService.OverviewSheetName);
+        var rows = Enumerable.Range(1, 20)
+            .Select(r => (Label: sheet.Cell(r, 1).GetString(), Value: sheet.Cell(r, 2).GetString()))
+            .ToList();
+        var start = rows.FindIndex(r => r.Label == "分析期間（開始）");
+
+        start.Should().BeGreaterThan(0, "分析結果を付けたときは分析期間を概要に残す");
+        rows.Skip(start).Take(3).Should().Equal(new[]
+        {
+            ("分析期間（開始）", "2026/06/01"),
+            ("分析期間（終了）", "2026/08/31"),
+            ("分析期間の日数", "92")
+        });
+    }
+
+    [Fact]
+    public async Task ExportAsync_OverviewSheet_WithoutAnalytics_OmitsAnalysisPeriod()
+    {
+        // 対の表明。分析結果を付けないときに期間の行を出すと、空の期間で集計したと誤読される
+        using var workbook = await ExportAndOpenAsync(CreateStatus(CreateCard()), null);
+
+        var sheet = workbook.Worksheet(AdminDashboardExcelExportService.OverviewSheetName);
+        Enumerable.Range(1, 20).Select(r => sheet.Cell(r, 1).GetString())
+            .Should().NotContain(l => l.StartsWith("分析期間", StringComparison.Ordinal));
     }
 
     [Fact]
@@ -300,6 +366,62 @@ public class AdminDashboardExcelExportServiceTests : IDisposable
         sheet.Cell(2, 1).GetString().Should().Be("はやかけん 001");
         sheet.Cell(3, 1).GetString().Should().Be("nimoca 002");
         sheet.Cell(4, 1).GetString().Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task ExportAsync_OperationSheet_WritesEachColumnFromItsOwnProperty()
+    {
+        // Issue #2106: 旧版は列ごとに 1〜2 列しか検査しておらず、貸出状況・貸出職員・貸出日時・
+        // 経過日数・長期未返却・残額不足・最終利用日の書き込みは一度も読み返していなかった。
+        // 1 行目は長期未返却の貸出中カード、2 行目は残額不足の在庫カードにし、
+        // 各列に互いに区別できる値を置く（経過日数 17 と残額 12,000 等、取り違えれば値で分かる）。
+        // 「○」を付ける 2 列（長期未返却・残額不足）は行ごとに立つ側を変え、列の取り違えも区別する。
+        var lent = new AdminDashboardCardStatus
+        {
+            CardIdm = "AAAA000000000001",
+            DisplayName = "はやかけん 001",
+            IsLent = true,
+            LentStaffName = "博多 花子",
+            LentAt = new DateTime(2026, 7, 17, 8, 45, 0),
+            ElapsedLentDays = 17,
+            IsLongTermUnreturned = true,
+            CurrentBalance = 12000,
+            IsBalanceWarning = false,
+            ReportState = ReportExportState.NotExported,
+            LastUsageDate = new DateTime(2026, 7, 16)
+        };
+        var inStock = new AdminDashboardCardStatus
+        {
+            CardIdm = "BBBB000000000002",
+            DisplayName = "nimoca 002",
+            IsLent = false,
+            LentStaffName = string.Empty,
+            LentAt = null,
+            ElapsedLentDays = null,
+            IsLongTermUnreturned = false,
+            CurrentBalance = 2500,
+            IsBalanceWarning = true,
+            ReportState = ReportExportState.Exported,
+            LastUsageDate = null
+        };
+
+        using var workbook = await ExportAndOpenAsync(CreateStatus(lent, inStock), null);
+
+        var sheet = workbook.Worksheet(AdminDashboardExcelExportService.OperationSheetName);
+        string[] ReadRow(int row) => Enumerable.Range(1, 10).Select(c => sheet.Cell(row, c).GetString()).ToArray();
+
+        ReadRow(1).Should().Equal(
+            "カード", "貸出状況", "貸出職員", "貸出日時", "経過日数", "長期未返却",
+            "残額", "残額不足", "帳票の出力状況", "最終利用日");
+        ReadRow(2).Should().Equal(
+            "はやかけん 001", "貸出中", "博多 花子", "2026/07/17 08:45", "17", "○",
+            "12000", "", "未出力", "2026/07/16");
+        ReadRow(3).Should().Equal(
+            new[] { "nimoca 002", "在庫", "", "", "", "", "2500", "○", "出力済み", "" },
+            "値の無い項目（貸出職員・貸出日時・経過日数・最終利用日）は空欄で書く");
+        sheet.Cell(2, 5).DataType.Should().Be(XLDataType.Number, "経過日数は並べ替え・集計できる数値で書く");
+        sheet.Cell(2, 7).DataType.Should().Be(XLDataType.Number);
+        sheet.Cell(4, 1).GetString().Should().BeEmpty("カードの枚数ぶんだけ行を書く");
     }
 
     [Fact]

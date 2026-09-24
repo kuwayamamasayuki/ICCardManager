@@ -1,5 +1,6 @@
 using System;
 using System.IO;
+using System.Linq;
 using FluentAssertions;
 using ICCardManager.Common;
 using ICCardManager.Common.Exceptions;
@@ -56,6 +57,95 @@ public class ExceptionMessageFormatterTests
         var message = ExceptionMessageFormatter.ToUserMessage(exception, "台帳の保存");
 
         AssertQualityCriteria(message);
+    }
+
+    /// <summary>
+    /// 例外型ごとの「なぜ」「どうすれば」をリテラルで固定する（Issue #2106）。
+    /// </summary>
+    /// <remarks>
+    /// 上の品質基準（20 文字以上・行動指示で終わる）はどの分岐の文言も満たすため、
+    /// 分岐どうしで理由と行動指示を入れ替えても、全部を default 分岐へ寄せても緑だった。
+    /// 期待値は本体を呼ばずにリテラルで書く。
+    /// </remarks>
+    public static TheoryData<Exception, string> ExpectedMessagesByExceptionType => new()
+    {
+        {
+            new System.Data.SQLite.SQLiteException(System.Data.SQLite.SQLiteErrorCode.Busy, "database is locked"),
+            "台帳の保存に失敗しました。データベースの読み書きができませんでした。" +
+            "ほかのパソコンや別の操作で同じデータを使用している可能性があります。しばらく待ってから再度実行してください。"
+        },
+        {
+            new UnauthorizedAccessException("Access to the path 'C:\\db' is denied."),
+            "台帳の保存に失敗しました。ファイルへのアクセス権限がありません。" +
+            "保存先フォルダーの書き込み権限を確認するか、管理者に連絡してください。"
+        },
+        {
+            new IOException("The process cannot access the file."),
+            "台帳の保存に失敗しました。ファイルの読み書き中に問題が発生しました。" +
+            "対象のファイルが他のプログラムで開かれていないか確認し、しばらく待ってから再度実行してください。"
+        },
+        {
+            new TimeoutException("The operation has timed out."),
+            "台帳の保存に失敗しました。処理に時間がかかり、中断されました。しばらく待ってから再度実行してください。"
+        },
+        {
+            new InvalidOperationException("Collection was modified."),
+            "台帳の保存に失敗しました。現在の状態ではこの操作を実行できません。" +
+            "画面を最新の状態に更新してから再度実行してください。"
+        },
+        {
+            new ArgumentException("Value does not fall within the expected range."),
+            "台帳の保存に失敗しました。入力された値に問題があります。入力内容を確認してから再度実行してください。"
+        },
+        {
+            // ArgumentNullException は ArgumentException の派生なので同じ分岐に入る
+            new ArgumentNullException("param"),
+            "台帳の保存に失敗しました。入力された値に問題があります。入力内容を確認してから再度実行してください。"
+        },
+        {
+            new NotSupportedException("Specified method is not supported."),
+            "台帳の保存に失敗しました。この操作は現在サポートされていません。" +
+            "操作内容を確認し、必要であれば管理者に連絡してください。"
+        },
+        {
+            new Exception("Object reference not set to an instance of an object."),
+            "台帳の保存に失敗しました。予期しない問題が発生しました。" +
+            "しばらく待ってから再度実行してください。解決しない場合は管理者に連絡してください。"
+        },
+    };
+
+    [Theory]
+    [MemberData(nameof(ExpectedMessagesByExceptionType))]
+    public void ToUserMessage_例外型ごとに固有の理由と行動指示を返すこと(Exception exception, string expected)
+    {
+        ExceptionMessageFormatter.ToUserMessage(exception, "台帳の保存").Should().Be(expected);
+    }
+
+    /// <summary>
+    /// 分岐ごとの文言が互いに異なること（Issue #2106）。
+    /// 上のリテラル固定は期待値の側を書き換えれば通ってしまうため、
+    /// 「どの分岐も default と同じ文言に寄せない」ことを独立に表明する。
+    /// </summary>
+    [Fact]
+    public void ToUserMessage_分岐ごとの理由と文言が互いに異なること()
+    {
+        // 分岐ごとの代表（ArgumentNullException は ArgumentException と同じ分岐なので含めない）
+        var representatives = new Exception[]
+        {
+            new System.Data.SQLite.SQLiteException(System.Data.SQLite.SQLiteErrorCode.Busy, "database is locked"),
+            new UnauthorizedAccessException(),
+            new IOException(),
+            new TimeoutException(),
+            new InvalidOperationException(),
+            new ArgumentException(),
+            new NotSupportedException(),
+            new Exception(),
+        };
+
+        representatives.Select(e => ExceptionMessageFormatter.ToUserMessage(e, "台帳の保存"))
+            .Should().OnlyHaveUniqueItems("例外型ごとに取れる行動が違うため、同じ文言へ畳まない");
+        representatives.Select(ExceptionMessageFormatter.ToReason)
+            .Should().OnlyHaveUniqueItems("「なぜ」も例外型ごとに異なる");
     }
 
     [Theory]
@@ -144,19 +234,19 @@ public class ExceptionMessageFormatterTests
     /// <summary>
     /// 対の表明。空文字や無内容へ退化していないこと（「なぜ」は残る）。
     /// これが無いと、常に空文字を返す実装でも上のテストは緑になる。
+    /// Issue #2106: 旧版は期待値を同じ <c>ToUserMessage</c> の出力から作っており、
+    /// 両者が揃って変わる退行（理由の入れ替え・default への集約）を検出できなかった。期待値はリテラルで書く。
     /// </summary>
     [Fact]
     public void ToReason_理由そのものは残ること()
     {
         ExceptionMessageFormatter.ToReason(new InvalidOperationException("boom"))
-            .Should().Be(ExceptionMessageFormatter.ToUserMessage(
-                new InvalidOperationException("boom"), "処理")
-                .Replace("処理に失敗しました。", string.Empty)
-                .Replace("画面を最新の状態に更新してから再度実行してください。", string.Empty));
+            .Should().Be("現在の状態ではこの操作を実行できません。");
 
         ExceptionMessageFormatter.ToReason(new System.Data.SQLite.SQLiteException(
                 System.Data.SQLite.SQLiteErrorCode.Busy, "database is locked"))
-            .Should().Contain("データベース", "原因を名指しできる分岐は名指しすること（#1986）");
+            .Should().Be("データベースの読み書きができませんでした。",
+                "原因を名指しできる分岐は名指しすること（#1986）");
     }
 
     /// <summary>

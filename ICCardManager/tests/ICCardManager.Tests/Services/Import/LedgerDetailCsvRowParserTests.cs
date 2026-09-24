@@ -147,6 +147,91 @@ public class LedgerDetailCsvRowParserTests
         detail.GroupId.Should().BeNull();
     }
 
+    /// <summary>
+    /// Issue #2106: 3 つのフラグ列（[9]チャージ / [10]ポイント還元 / [11]バス利用）がそれぞれ自分の列から読まれること。
+    /// </summary>
+    /// <remarks>
+    /// 旧テストは 3 列すべてが "0" だったため、列の添字を取り違えても（例: ポイント還元を [11] から読む）緑だった。
+    /// 1 列だけを "1" にした行を列ごとに与え、立ったフラグが 1 つだけで、それが対応するプロパティであることを表明する。
+    /// ポイント還元の写像が壊れると、明細画面・摘要でポイント還元が鉄道利用として扱われる。
+    /// </remarks>
+    [Theory]
+    [InlineData("1", "0", "0", true, false, false)]
+    [InlineData("0", "1", "0", false, true, false)]
+    [InlineData("0", "0", "1", false, false, true)]
+    public void ParseFields_EachFlagColumn_MapsToItsOwnProperty(
+        string isChargeText, string isPointRedemptionText, string isBusText,
+        bool expectedIsCharge, bool expectedIsPointRedemption, bool expectedIsBus)
+    {
+        var fields = ValidThirteenColumnFields(
+            isCharge: isChargeText,
+            isPointRedemption: isPointRedemptionText,
+            isBus: isBusText);
+        var errors = new List<CsvImportError>();
+
+        var detail = LedgerDetailCsvRowParser.ParseFields(fields, lineNumber: 2, line: "raw", errors);
+
+        errors.Should().BeEmpty();
+        detail.Should().NotBeNull();
+        detail!.IsCharge.Should().Be(expectedIsCharge, "チャージは [9] 列から読む");
+        detail.IsPointRedemption.Should().Be(expectedIsPointRedemption, "ポイント還元は [10] 列から読む");
+        detail.IsBus.Should().Be(expectedIsBus, "バス利用は [11] 列から読む");
+    }
+
+    /// <summary>
+    /// Issue #2106: フラグ列の検証エラーは、実際に不正な値を持つ列の名前で報告されること（列名の取り違えを検出する）。
+    /// </summary>
+    [Theory]
+    [InlineData(9, "チャージ")]
+    [InlineData(10, "ポイント還元")]
+    [InlineData(11, "バス利用")]
+    public void ParseFields_InvalidFlagColumn_ReportsThatColumnName(int columnIndex, string expectedFieldName)
+    {
+        var fields = ValidThirteenColumnFields();
+        fields[columnIndex] = "x";
+        var errors = new List<CsvImportError>();
+
+        var detail = LedgerDetailCsvRowParser.ParseFields(fields, lineNumber: 7, line: "raw", errors);
+
+        detail.Should().BeNull();
+        errors.Should().ContainSingle();
+        errors[0].LineNumber.Should().Be(7);
+        errors[0].Message.Should().StartWith(expectedFieldName);
+        errors[0].Data.Should().Be("x");
+    }
+
+    /// <summary>
+    /// Issue #2106: バス停列 [6] とグループID列 [12] が値を持つ行で、それぞれのプロパティへ写ること
+    /// （旧テストはどちらも空欄で、null への正規化しか見ていなかった）。
+    /// </summary>
+    [Fact]
+    public void ParseFields_BusRowWithGroupId_MapsBusStopsAndGroupId()
+    {
+        var fields = ValidThirteenColumnFields(
+            entryStation: "",
+            exitStation: "",
+            busStops: "天神～博多駅前",
+            amount: "210",
+            balance: "9530",
+            isBus: "1",
+            groupId: "3");
+        var errors = new List<CsvImportError>();
+
+        var detail = LedgerDetailCsvRowParser.ParseFields(fields, lineNumber: 2, line: "raw", errors);
+
+        errors.Should().BeEmpty();
+        detail.Should().NotBeNull();
+        detail!.EntryStation.Should().BeNull();
+        detail.ExitStation.Should().BeNull();
+        detail.BusStops.Should().Be("天神～博多駅前");
+        detail.Amount.Should().Be(210);
+        detail.Balance.Should().Be(9530);
+        detail.IsBus.Should().BeTrue();
+        detail.IsCharge.Should().BeFalse();
+        detail.IsPointRedemption.Should().BeFalse();
+        detail.GroupId.Should().Be(3);
+    }
+
     [Fact]
     public void ParseFields_InvalidBalance_AddsError()
     {

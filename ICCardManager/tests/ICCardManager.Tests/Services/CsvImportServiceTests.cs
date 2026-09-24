@@ -368,6 +368,65 @@ FEDCBA9876543210,PASMO,002,テスト2";
     }
 
     /// <summary>
+    /// Issue #2106: 小文字の IDm を含む CSV を取り込むと、既存チェックも登録も大文字の IDm で行われること。
+    /// </summary>
+    /// <remarks>
+    /// 既存テストの IDm は "0123456789ABCDEF" のように既に大文字だったため、
+    /// <c>CsvImportService.Card.cs</c> の <c>ToUpperInvariant</c> を消しても緑だった。
+    /// 大文字化が外れると、同じカードが大文字と小文字の 2 行として登録され得る（IDm は DB の主キー）。
+    /// </remarks>
+    [Fact]
+    public async Task ImportCardsAsync_LowercaseIdm_LooksUpAndInsertsUppercaseIdm()
+    {
+        var csvContent = @"カードIDm,カード種別,管理番号,備考
+0123456789abcdef,Suica,001,テスト1";
+        var filePath = Path.Combine(_testDirectory, "cards_lowercase.csv");
+        await Task.Run(() => File.WriteAllText(filePath, csvContent, CsvEncoding));
+
+        _cardRepositoryMock.Setup(x => x.GetByIdmAsync(It.IsAny<string>(), true)).ReturnsAsync((IcCard?)null);
+        var inserted = new List<IcCard>();
+        _cardRepositoryMock
+            .Setup(x => x.InsertAsync(It.IsAny<IcCard>(), It.IsAny<SQLiteTransaction>()))
+            .Callback<IcCard, SQLiteTransaction>((c, _) => inserted.Add(c))
+            .ReturnsAsync(true);
+
+        var result = await _service.ImportCardsAsync(filePath);
+
+        result.Success.Should().BeTrue();
+        result.ImportedCount.Should().Be(1);
+        inserted.Should().ContainSingle().Which.CardIdm.Should().Be("0123456789ABCDEF");
+        _cardRepositoryMock.Verify(x => x.GetByIdmAsync("0123456789ABCDEF", true), Times.Once);
+        _cardRepositoryMock.Verify(x => x.GetByIdmAsync("0123456789abcdef", It.IsAny<bool>()), Times.Never);
+    }
+
+    /// <summary>
+    /// Issue #2106: 小文字の IDm で書かれた行も、大文字で登録済みのカードと照合されて更新になる（新規登録にならない）こと。
+    /// </summary>
+    [Fact]
+    public async Task ImportCardsAsync_LowercaseIdmOfExistingCard_UpdatesExistingInsteadOfInsert()
+    {
+        var csvContent = @"カードIDm,カード種別,管理番号,備考
+0123456789abcdef,Suica,001,新しい備考";
+        var filePath = Path.Combine(_testDirectory, "cards_lowercase_existing.csv");
+        await Task.Run(() => File.WriteAllText(filePath, csvContent, CsvEncoding));
+
+        var existingCard = new IcCard { CardIdm = "0123456789ABCDEF", CardType = "Suica", CardNumber = "001", Note = "古い備考" };
+        // 大文字で問い合わせたときだけ既存カードが見つかる（loose モックは他の引数に null を返す）
+        _cardRepositoryMock.Setup(x => x.GetByIdmAsync("0123456789ABCDEF", true)).ReturnsAsync(existingCard);
+        _cardRepositoryMock.Setup(x => x.InsertAsync(It.IsAny<IcCard>(), It.IsAny<SQLiteTransaction>())).ReturnsAsync(true);
+        _cardRepositoryMock.Setup(x => x.UpdateAsync(It.IsAny<IcCard>(), It.IsAny<SQLiteTransaction>())).ReturnsAsync(true);
+
+        var result = await _service.ImportCardsAsync(filePath, skipExisting: true);
+
+        result.Success.Should().BeTrue();
+        result.ImportedCount.Should().Be(1);
+        _cardRepositoryMock.Verify(
+            x => x.UpdateAsync(It.Is<IcCard>(c => c.CardIdm == "0123456789ABCDEF" && c.Note == "新しい備考"), It.IsAny<SQLiteTransaction>()),
+            Times.Once);
+        _cardRepositoryMock.Verify(x => x.InsertAsync(It.IsAny<IcCard>(), It.IsAny<SQLiteTransaction>()), Times.Never);
+    }
+
+    /// <summary>
     /// バリデーションエラーが正しく検出されることを確認
     /// </summary>
     [Fact]
@@ -928,6 +987,29 @@ FEDCBA9876543210,PASMO,002,テスト2";
         result.NewCount.Should().Be(0);
         result.SkipCount.Should().Be(1);
         result.Items.Should().ContainSingle(item => item.Action == ImportAction.Skip);
+    }
+
+    /// <summary>
+    /// Issue #2106: プレビューでも小文字の IDm は大文字へ正規化され、大文字で登録済みのカードと照合されること
+    /// （プレビューと取込本体で判定が食い違わない）。
+    /// </summary>
+    [Fact]
+    public async Task PreviewCardsAsync_LowercaseIdmOfExistingCard_ShowsUppercaseIdmAsSkip()
+    {
+        var csvContent = @"カードIDm,カード種別,管理番号,備考
+0123456789abcdef,Suica,001,テスト";
+        var filePath = Path.Combine(_testDirectory, "cards_preview_lowercase.csv");
+        await Task.Run(() => File.WriteAllText(filePath, csvContent, CsvEncoding));
+
+        var existingCard = new IcCard { CardIdm = "0123456789ABCDEF", CardType = "Suica", CardNumber = "001", Note = "テスト" };
+        _cardRepositoryMock.Setup(x => x.GetByIdmAsync("0123456789ABCDEF", true)).ReturnsAsync(existingCard);
+
+        var result = await _service.PreviewCardsAsync(filePath, skipExisting: true);
+
+        result.IsValid.Should().BeTrue();
+        result.NewCount.Should().Be(0, "大文字で登録済みのカードと同じカードとして照合される");
+        result.SkipCount.Should().Be(1);
+        result.Items.Should().ContainSingle().Which.Idm.Should().Be("0123456789ABCDEF");
     }
 
     /// <summary>

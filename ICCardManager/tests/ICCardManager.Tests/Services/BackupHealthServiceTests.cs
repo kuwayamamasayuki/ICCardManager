@@ -8,6 +8,7 @@ using ICCardManager.Data;
 using ICCardManager.Data.Repositories;
 using ICCardManager.Dtos;
 using ICCardManager.Services;
+using ICCardManager.Tests.Infrastructure;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
@@ -273,13 +274,27 @@ public class BackupHealthServiceTests : IDisposable
     public async Task RecordVacuumMachineAsync_WhenSaveFails_DoesNotThrow()
     {
         // 記録は監視用の補助情報。失敗しても VACUUM の完了を取り消さない。
+        // Issue #2106: 旧版は NotThrowAsync だけで、保存を試みたか・失敗を痕跡として残したかを
+        // 見ていなかった（本体を空にしても緑）。書き込みの試行と Warning ログの両方を具体値で表明する。
+        var saveFailure = new IOException("書き込みできません");
         _settingsRepositoryMock
             .Setup(r => r.SetAsync(SettingsRepository.KeyLastVacuumMachine, It.IsAny<string>()))
-            .ThrowsAsync(new IOException("書き込みできません"));
+            .ThrowsAsync(saveFailure);
+        var logger = new RecordingLogger<BackupHealthService>();
+        var service = new BackupHealthService(
+            _backupServiceMock.Object, _settingsRepositoryMock.Object, logger);
 
-        Func<Task> act = async () => await _service.RecordVacuumMachineAsync();
+        Func<Task> act = async () => await service.RecordVacuumMachineAsync();
 
         await act.Should().NotThrowAsync();
+        _settingsRepositoryMock.Verify(
+            r => r.SetAsync(SettingsRepository.KeyLastVacuumMachine, Environment.MachineName),
+            Times.Once);
+        logger.Entries.Should().ContainSingle(logger.FormatEntries());
+        var entry = logger.Entries[0];
+        entry.Level.Should().Be(LogLevel.Warning, "記録の失敗は本処理の成否に影響しない想定内の失敗");
+        entry.Exception.Should().BeSameAs(saveFailure, "原因の例外を痕跡として残す");
+        entry.Message.Should().Be("VACUUM実施PC名の記録に失敗しました（VACUUM自体は完了しています）");
     }
 
     #endregion

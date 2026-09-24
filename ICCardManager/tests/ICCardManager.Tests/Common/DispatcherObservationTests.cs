@@ -1,8 +1,11 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
+using System.Runtime.CompilerServices;
 using System.Threading.Tasks;
 using FluentAssertions;
 using ICCardManager.Common;
+using ICCardManager.Tests.Infrastructure;
 using Xunit;
 
 namespace ICCardManager.Tests.Common;
@@ -66,20 +69,36 @@ public class DispatcherObservationTests
         log.Should().BeEmpty();
     }
 
+    /// <remarks>
+    /// Issue #2106: 旧版は <c>faulted.Exception</c> / <c>IsFaulted</c>（入力 Task 自身の性質）しか
+    /// 見ておらず、<c>Observe</c> の本体を空にしても緑だった。しかも <c>Task.Exception</c> の読み取りは
+    /// それ自体が例外を観測済みにするため、テストが検証対象の効果を自分で作っていた。
+    /// ここでは入力 Task へ一切触れずに手放し、GC とファイナライザを回して
+    /// <c>TaskScheduler.UnobservedTaskException</c> が「その例外について」発火しないことを観測する。
+    /// 同じ GC の中で、観測されない対照の Task が実際に発火することも表明する
+    /// （対照が発火しないなら、GC が回っていないだけで何も検証していない）。
+    /// </remarks>
     [Fact]
     public void Observe_例外を観測済みにしてUnobservedTaskExceptionを発生させないこと()
     {
         // Arrange
-        var (_, sink) = CreateSink();
-        var faulted = Task.FromException(new InvalidOperationException("boom"));
+        var (log, sink) = CreateSink();
 
-        // Act
-        DispatcherObservation.Observe(faulted, "職員証の認証", sink);
+        using var monitor = new UnobservedTaskExceptionMonitor();
+
+        // Act: Task への参照は下請けメソッドの中だけに閉じ、テスト側からは例外だけを持つ
+        var observedException = CreateFaultedTaskAndObserve(sink);
+        var controlException = UnobservedTaskExceptionMonitor.CreateAbandonedFaultedTask();
+
+        monitor.CollectUntilRaised(controlException);
 
         // Assert: 未観測のままだと GC 契機で TaskScheduler.UnobservedTaskException が発火し、
         // App.xaml.cs のハンドラが操作と無関係なタイミングでダイアログを表示してしまう
-        faulted.Exception.Should().NotBeNull();
-        faulted.IsFaulted.Should().BeTrue();
+        monitor.WasRaised(controlException).Should().BeTrue(
+            "対照（Observe へ渡さない失敗 Task）は発火するはず。発火しないなら GC が回っておらず本テストは何も検証していない");
+        monitor.WasRaised(observedException).Should().BeFalse(
+            "Observe へ渡した失敗 Task の例外は観測済みになり、UnobservedTaskException を発生させない");
+        log.Should().ContainSingle().Which.Exception.Should().BeSameAs(observedException);
     }
 
     [Fact]
@@ -96,22 +115,40 @@ public class DispatcherObservationTests
         log.Should().BeEmpty();
     }
 
+    /// <remarks>
+    /// Issue #2106: 記録は <c>ContinueWith</c> の中で走るため、そこで投げた例外は
+    /// 呼び出し元へは届かず<b>継続の Task に閉じ込められる</b>。旧版の <c>NotThrow</c> は
+    /// try/catch を消しても緑だった。閉じ込められた例外は誰も観測しないので、
+    /// GC 契機で <c>UnobservedTaskException</c> として（操作と無関係なタイミングで）表面化する。
+    /// ここではその発火が「記録の失敗で投げた例外について」起きないことを観測する。
+    /// </remarks>
     [Fact]
     public void Observe_記録そのものが失敗しても例外を漏らさないこと()
     {
         // Arrange: ログ出力自体も失敗し得る（ファイルログの書き込み失敗等）。
         // ここで二次例外を漏らすと、本クラスが防いでいるはずの「無言の失敗」を
         // このクラス自身が作ることになる（development-conventions.md Issue #1745）。
-        var faulted = Task.FromException(new InvalidOperationException("boom"));
+        using var monitor = new UnobservedTaskExceptionMonitor();
+        var loggingFailure = new UnauthorizedAccessException("ログファイルへ書き込めません");
+        var sinkCalls = 0;
 
         // Act
-        Action act = () => DispatcherObservation.Observe(
-            faulted,
-            "職員証の認証",
-            (_, _) => throw new UnauthorizedAccessException("ログファイルへ書き込めません"));
+        Action act = () => CreateFaultedTaskAndObserve((_, _) =>
+        {
+            sinkCalls++;
+            throw loggingFailure;
+        });
+        act.Should().NotThrow();
+        var controlException = UnobservedTaskExceptionMonitor.CreateAbandonedFaultedTask();
+
+        monitor.CollectUntilRaised(controlException);
 
         // Assert
-        act.Should().NotThrow();
+        sinkCalls.Should().Be(1, "記録先が実際に呼ばれて失敗したこと（呼ばれていなければ本テストは何も検証していない）");
+        monitor.WasRaised(controlException).Should().BeTrue(
+            "対照は発火するはず。発火しないなら GC が回っておらず本テストは何も検証していない");
+        monitor.WasRaised(loggingFailure).Should().BeFalse(
+            "記録の失敗を継続の中で握りつぶさないと、継続の Task が未観測の例外を抱えて GC 契機で発火する");
     }
 
     [Fact]
@@ -137,5 +174,20 @@ public class DispatcherObservationTests
         // Assert
         syncOverload.Should().Throw<ArgumentNullException>();
         asyncOverload.Should().Throw<ArgumentNullException>();
+    }
+
+    /// <summary>
+    /// 失敗 Task を作って <c>Observe</c> へ渡し、Task への参照を残さずに例外だけを返す。
+    /// </summary>
+    /// <remarks>
+    /// 呼び出し側のスタックに Task が残ると GC で回収されず、ファイナライザが走らない。
+    /// インライン化されると同じ理由で参照が延命され得るため禁止する。
+    /// </remarks>
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static Exception CreateFaultedTaskAndObserve(Action<Exception, string> sink)
+    {
+        var exception = new InvalidOperationException("observed-" + Guid.NewGuid().ToString("N"));
+        DispatcherObservation.Observe(Task.FromException(exception), "職員証の認証", sink);
+        return exception;
     }
 }

@@ -428,41 +428,74 @@ public class ExcelStyleFormatterTests
     #region ApplyEmptyRowBordersToRange (Issue #1480)
 
     /// <summary>
-    /// ApplyEmptyRowBordersToRange: 1 行範囲は per-row 版と同等の見た目を生成する
+    /// 1 行の空白行: per-row 版（<c>ApplyEmptyRowBorder</c>）と範囲版の 1 行指定が、
+    /// どちらも期待どおりの行高さ・罫線・太字・結合を生成する
     /// Issue #1480: 後方互換性検証
     /// </summary>
-    [Fact]
-    public void ApplyEmptyRowBordersToRange_SingleRow_ProducesSameResultAsPerRow()
+    /// <remarks>
+    /// Issue #2106: 旧版は per-row 版と範囲版の出力を互いに比べていたが、per-row 版は範囲版へ
+    /// 委譲しているため同じ処理どうしの比較になり、範囲版が壊れても両者が揃って変わって緑だった。
+    /// 期待値は本体を呼ばずにリテラルで書き、両方の入口をそれぞれ固定する。
+    /// 太字は既定値（false）のままでは「リセットしたこと」を観測できないため、
+    /// 既存ファイル上書き時（Issue #591）と同じく事前に太字を立てておく。
+    /// </remarks>
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void ApplyEmptyRow_SingleRow_罫線と行高さと結合が期待どおりであること(bool usePerRowEntry)
     {
-        using var perRowBook = new XLWorkbook();
-        var perRowSheet = perRowBook.AddWorksheet("Test");
-        ExcelStyleFormatter.ApplyEmptyRowBorder(perRowSheet, 5);
+        using var workbook = new XLWorkbook();
+        var worksheet = workbook.AddWorksheet("Test");
+        worksheet.Range(5, 1, 5, 12).Style.Font.Bold = true;
 
-        using var rangeBook = new XLWorkbook();
-        var rangeSheet = rangeBook.AddWorksheet("Test");
-        ExcelStyleFormatter.ApplyEmptyRowBordersToRange(rangeSheet, 5, 5);
-
-        // 行高さ
-        rangeSheet.Row(5).Height.Should().Be(perRowSheet.Row(5).Height);
-
-        // 罫線・太字・結合の全項目
-        foreach (var col in new[] { 1, 2, 5, 8, 9, 12 })
+        if (usePerRowEntry)
         {
-            rangeSheet.Cell(5, col).Style.Border.TopBorder
-                .Should().Be(perRowSheet.Cell(5, col).Style.Border.TopBorder, $"列 {col} の TopBorder");
-            rangeSheet.Cell(5, col).Style.Border.BottomBorder
-                .Should().Be(perRowSheet.Cell(5, col).Style.Border.BottomBorder, $"列 {col} の BottomBorder");
-            rangeSheet.Cell(5, col).Style.Border.LeftBorder
-                .Should().Be(perRowSheet.Cell(5, col).Style.Border.LeftBorder, $"列 {col} の LeftBorder");
-            rangeSheet.Cell(5, col).Style.Border.RightBorder
-                .Should().Be(perRowSheet.Cell(5, col).Style.Border.RightBorder, $"列 {col} の RightBorder");
-            rangeSheet.Cell(5, col).Style.Font.Bold
-                .Should().Be(perRowSheet.Cell(5, col).Style.Font.Bold, $"列 {col} の Bold");
+            ExcelStyleFormatter.ApplyEmptyRowBorder(worksheet, 5);
+        }
+        else
+        {
+            ExcelStyleFormatter.ApplyEmptyRowBordersToRange(worksheet, 5, 5);
         }
 
-        // セル結合の状態（B-D, I-L）
-        rangeSheet.Cell(5, 2).IsMerged().Should().Be(perRowSheet.Cell(5, 2).IsMerged(), "B-D 列結合");
-        rangeSheet.Cell(5, 9).IsMerged().Should().Be(perRowSheet.Cell(5, 9).IsMerged(), "I-L 列結合");
+        worksheet.Row(5).Height.Should().Be(30);
+
+        // 列ごとの期待値（左, 右）。A 列左端・L 列右端は太線、列間は細線。
+        // 結合セル（B-D / I-L）の内側の縦線は結合によって消える（None）。
+        var thin = XLBorderStyleValues.Thin;
+        var medium = XLBorderStyleValues.Medium;
+        var none = XLBorderStyleValues.None;
+        var expectedLeftRight = new (XLBorderStyleValues Left, XLBorderStyleValues Right)[]
+        {
+            (medium, thin), // A
+            (thin, none),   // B（B-D 結合の左端）
+            (none, none),   // C（結合の内側）
+            (none, thin),   // D（B-D 結合の右端）
+            (thin, thin),   // E
+            (thin, thin),   // F
+            (thin, thin),   // G
+            (thin, thin),   // H
+            (thin, none),   // I（I-L 結合の左端）
+            (none, none),   // J
+            (none, none),   // K
+            (none, medium), // L（I-L 結合の右端＝表の右端）
+        };
+
+        for (var col = 1; col <= 12; col++)
+        {
+            var border = worksheet.Cell(5, col).Style.Border;
+            border.TopBorder.Should().Be(XLBorderStyleValues.Thin, $"列 {col} の TopBorder");
+            border.BottomBorder.Should().Be(XLBorderStyleValues.Thin, $"列 {col} の BottomBorder");
+            border.LeftBorder.Should().Be(expectedLeftRight[col - 1].Left, $"列 {col} の LeftBorder");
+            border.RightBorder.Should().Be(expectedLeftRight[col - 1].Right, $"列 {col} の RightBorder");
+            worksheet.Cell(5, col).Style.Font.Bold.Should().BeFalse($"列 {col} の太字はリセットされる（Issue #591）");
+        }
+
+        // セル結合（B-D, I-L）。範囲まで固定し、隣の列を巻き込んでいないことも表明する
+        worksheet.Cell(5, 2).MergedRange().RangeAddress.ToString().Should().Be("B5:D5");
+        worksheet.Cell(5, 9).MergedRange().RangeAddress.ToString().Should().Be("I5:L5");
+        worksheet.Cell(5, 1).IsMerged().Should().BeFalse("A 列は結合しない");
+        worksheet.Cell(5, 5).IsMerged().Should().BeFalse("E 列は結合しない");
+        worksheet.Cell(5, 8).IsMerged().Should().BeFalse("H 列は結合しない");
     }
 
     /// <summary>

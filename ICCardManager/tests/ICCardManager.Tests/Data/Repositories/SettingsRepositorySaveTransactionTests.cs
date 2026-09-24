@@ -55,8 +55,10 @@ public class SettingsRepositorySaveTransactionTests : IDisposable
             FontSize = fontSize,
             BackupPath = @"D:\Backup",
             LastVacuumDate = new DateTime(2026, 4, 1),
+            // SoundMode / ToastPosition / DepartmentType は既定値（Beep / TopRight / MayorOffice）と異なる値にする。
+            // 既定値のままだと、保存・読込のどちらかが欠落しても既定値で一致して緑になる（Issue #2106）
             SoundMode = SoundMode.VoiceMale,
-            ToastPosition = ToastPosition.TopRight,
+            ToastPosition = ToastPosition.BottomLeft,
             DepartmentType = DepartmentType.EnterpriseAccount,
             SkipBusStopInputOnReturn = true,
             ReportOutputFolder = @"C:\Reports",
@@ -125,9 +127,97 @@ public class SettingsRepositorySaveTransactionTests : IDisposable
         // 一括保存は月ガードを持たないため、入力に値があっても書き込まない。
         (await _repository.GetAsync(SettingsRepository.KeyLastVacuumDate)).Should().BeNull(
             "last_vacuum_date の更新経路は TryAcquireMonthlyVacuumLockAsync の CAS だけ（Issue #1997）");
-        (await _repository.GetAsync(SettingsRepository.KeyDepartmentType)).Should().NotBeNull();
+        // 既定（mayor_office）と異なる値で保存しているので、書き込まれていなければ区別できる
+        (await _repository.GetAsync(SettingsRepository.KeyDepartmentType)).Should().Be("enterprise_account");
         (await _repository.GetAsync(SettingsRepository.KeyReportOutputFolder)).Should().Be(@"C:\Reports");
         (await _repository.GetAsync(SettingsRepository.KeySkipBusStopInputOnReturn)).Should().Be("true");
+    }
+
+    /// <summary>
+    /// 保存した列挙値・ウィンドウ設定が、DB を経由して別インスタンスから同じ値で読み返せること（Issue #2106）。
+    /// </summary>
+    /// <remarks>
+    /// DepartmentType は摘要の「旅費によりチャージ／役務費によりチャージ」を左右する。
+    /// 書き込み側（*ToString）と読み込み側（Parse*）の対応がずれると、保存は成功しても
+    /// 読み返しで既定値へ落ちる。キーの生値だけでなく、読み込み経路を通した往復で表明する。
+    /// 読み返しは別インスタンスで行う。キャッシュのモックは常にファクトリを呼ぶ（＝毎回 DB を読む）ので、
+    /// 保存した <see cref="AppSettings"/> インスタンスではなく DB から組み立てた値を見ていることは
+    /// <c>NotBeSameAs</c> と各値の一致で表明する。
+    /// </remarks>
+    [Fact]
+    public async Task SaveAppSettingsAsync_RoundTripThroughDb_RestoresNonDefaultEnumsAndWindowSettings()
+    {
+        // Arrange: 既定値（Beep / TopRight / MayorOffice / 未保存のウィンドウ）とすべて異なる値
+        var settings = CreateValidSettings(FontSizeOption.Small);
+        settings.SoundMode = SoundMode.VoiceFemale;
+        settings.ToastPosition = ToastPosition.BottomLeft;
+        settings.DepartmentType = DepartmentType.EnterpriseAccount;
+        settings.MainWindowSettings = new WindowSettings
+        {
+            Left = 123,
+            Top = 45,
+            Width = 1024,
+            Height = 768,
+            IsMaximized = true,
+        };
+
+        // Act
+        (await _repository.SaveAppSettingsAsync(settings)).Should().BeTrue();
+
+        var freshCache = new Mock<ICacheService>();
+        freshCache.Setup(c => c.GetOrCreateAsync(
+                It.IsAny<string>(),
+                It.IsAny<Func<Task<AppSettings>>>(),
+                It.IsAny<TimeSpan>()))
+            .Returns((string key, Func<Task<AppSettings>> factory, TimeSpan expiration) => factory());
+        var freshRepository = new SettingsRepository(_dbContext, freshCache.Object, Options.Create(new CacheOptions()));
+        var loaded = await freshRepository.GetAppSettingsAsync();
+
+        // Assert
+        loaded.Should().NotBeSameAs(settings);
+        loaded.SoundMode.Should().Be(SoundMode.VoiceFemale);
+        loaded.ToastPosition.Should().Be(ToastPosition.BottomLeft);
+        loaded.DepartmentType.Should().Be(DepartmentType.EnterpriseAccount);
+        loaded.FontSize.Should().Be(FontSizeOption.Small);
+        loaded.MainWindowSettings.Left.Should().Be(123);
+        loaded.MainWindowSettings.Top.Should().Be(45);
+        loaded.MainWindowSettings.Width.Should().Be(1024);
+        loaded.MainWindowSettings.Height.Should().Be(768);
+        loaded.MainWindowSettings.IsMaximized.Should().BeTrue();
+    }
+
+    /// <summary>
+    /// 往復テストの対: 列挙値のすべての値が往復で保たれること（Issue #2106）。
+    /// </summary>
+    /// <remarks>
+    /// 1 つの値だけの往復では、別の値の対応が既定値へ落ちる退行（例: VoiceMale の変換漏れ）を見逃す。
+    /// </remarks>
+    [Fact]
+    public async Task SaveAppSettingsAsync_RoundTrip_PreservesEveryEnumValue()
+    {
+        foreach (var department in (DepartmentType[])Enum.GetValues(typeof(DepartmentType)))
+        {
+            var settings = CreateValidSettings();
+            settings.DepartmentType = department;
+            (await _repository.SaveAppSettingsAsync(settings)).Should().BeTrue();
+            (await _repository.GetAppSettingsAsync()).DepartmentType.Should().Be(department);
+        }
+
+        foreach (var sound in (SoundMode[])Enum.GetValues(typeof(SoundMode)))
+        {
+            var settings = CreateValidSettings();
+            settings.SoundMode = sound;
+            (await _repository.SaveAppSettingsAsync(settings)).Should().BeTrue();
+            (await _repository.GetAppSettingsAsync()).SoundMode.Should().Be(sound);
+        }
+
+        foreach (var position in (ToastPosition[])Enum.GetValues(typeof(ToastPosition)))
+        {
+            var settings = CreateValidSettings();
+            settings.ToastPosition = position;
+            (await _repository.SaveAppSettingsAsync(settings)).Should().BeTrue();
+            (await _repository.GetAppSettingsAsync()).ToastPosition.Should().Be(position);
+        }
     }
 
     [Fact]

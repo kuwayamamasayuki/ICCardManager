@@ -355,6 +355,12 @@ public class StaffRepositoryTests : IDisposable
     /// <summary>
     /// 名前をnullに更新はできない（必須項目）
     /// </summary>
+    /// <remarks>
+    /// Issue #2106: 旧版は名前ではなく職員番号を null にしており、テスト名の性質を一度も検査していなかった。
+    /// 名前は staff.name の NOT NULL 制約で拒否され、DB 上の名前・職員番号はどちらも元のまま残る。
+    /// 対のテスト <see cref="UpdateAsync_WithNullNumber_ClearsNumberAndKeepsName"/> で、
+    /// 任意項目の null 化まで塞いでいないことを表明する。
+    /// </remarks>
     [Fact]
     public async Task UpdateAsync_WithNullName_StillRequiresName()
     {
@@ -362,10 +368,38 @@ public class StaffRepositoryTests : IDisposable
         var staff = CreateTestStaff("STAFF00000000001", "山田太郎", "001");
         await _repository.InsertAsync(staff);
 
-        // 更新後も名前が残っていることを確認
-        staff.Number = null;
-        await _repository.UpdateAsync(staff);
+        staff.Name = null!;
+        staff.Number = "999";
 
+        // Act
+        Func<Task> act = () => _repository.UpdateAsync(staff);
+
+        // Assert: NOT NULL 制約違反で拒否され、行は一切変わらない
+        (await act.Should().ThrowAsync<System.Data.SQLite.SQLiteException>())
+            .Which.ResultCode.Should().Be(System.Data.SQLite.SQLiteErrorCode.Constraint);
+
+        var unchanged = await _repository.GetByIdmAsync(staff.StaffIdm);
+        unchanged!.Name.Should().Be("山田太郎");
+        unchanged.Number.Should().Be("001");
+    }
+
+    /// <summary>
+    /// 任意項目（職員番号）は null に更新でき、名前は保たれる
+    /// </summary>
+    [Fact]
+    public async Task UpdateAsync_WithNullNumber_ClearsNumberAndKeepsName()
+    {
+        // Arrange
+        var staff = CreateTestStaff("STAFF00000000001", "山田太郎", "001");
+        await _repository.InsertAsync(staff);
+
+        staff.Number = null;
+
+        // Act
+        var result = await _repository.UpdateAsync(staff);
+
+        // Assert
+        result.Should().BeTrue();
         var updated = await _repository.GetByIdmAsync(staff.StaffIdm);
         updated!.Name.Should().Be("山田太郎");
         updated.Number.Should().BeNull();

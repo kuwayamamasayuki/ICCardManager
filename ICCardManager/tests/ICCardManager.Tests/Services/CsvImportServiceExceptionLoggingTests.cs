@@ -2,9 +2,9 @@
 using System.Collections.Generic;
 using System.Data.SQLite;
 using System.IO;
+using System.Linq;
 using System.Text;
 using System.Threading;
-using System.Threading.Tasks;
 using FluentAssertions;
 using ICCardManager.Common.Exceptions;
 using ICCardManager.Data;
@@ -19,13 +19,35 @@ using Xunit;
 namespace ICCardManager.Tests.Services;
 
 /// <summary>
-/// Issue #1282: CsvImportService の catch (SQLiteException) / catch (Exception) 両ブロックで
-/// 例外を握りつぶさずに LogError で痕跡を残すことを保証する。
+/// カード／職員 CSV インポートの<b>トランザクション内の catch</b>（Issue #1282 / #1745 / #1991）が、
+/// 失敗を「ロールバックより先に」「1 回だけ」記録し、「記録済みの印」を付けて再スローすることを保証する。
 /// </summary>
+/// <remarks>
+/// <para>
+/// Issue #2106: 旧版は「Error レベルで該当型の例外が 1 回以上記録されたこと」しか見ておらず、
+/// 内側の catch を丸ごと消しても、外側の共通ハンドラー（<c>LogImportFailure</c>）が同じ型の例外を
+/// Error で記録するため緑のままだった。<c>RawExceptionMessageExposureTests</c> の
+/// 「技術的詳細をログへ残すこと」と実質同じ内容でもあった。
+/// </para>
+/// <para>
+/// ここでは内側の catch にしか無い性質を表明する。
+/// <list type="bullet">
+/// <item>記録の文言がトランザクション内の局面（「〇〇CSVインポートのトランザクション中に…」）を名乗る
+///   ― 外側は操作名（「カードCSVの取り込み」）しか名乗らない（内側の catch を消すと赤）</item>
+/// <item>記録した時点でトランザクションがまだ巻き戻っていない（ログをロールバックの後ろへ回すと赤。#1745）</item>
+/// <item>Error の記録は 1 件だけ（「記録済みの印」を付け忘れると外側が再度記録して赤。#1991）</item>
+/// <item>SQLite の失敗は元の <see cref="SQLiteException"/> を記録し、<see cref="DatabaseException"/> へ包んで
+///   整備済みの文言で報告する（ラップを外すと赤）</item>
+/// </list>
+/// 外側の共通ハンドラーの振る舞い（トランザクション前の失敗を記録する・想定内は Warning）は
+/// <c>RawExceptionMessageExposureTests</c> が担う。
+/// </para>
+/// </remarks>
 public class CsvImportServiceExceptionLoggingTests : IDisposable
 {
     private readonly string _testDirectory;
     private readonly SQLiteConnection _connection;
+    private readonly SQLiteTransaction _transaction;
     private readonly Mock<DbContext> _dbContextMock;
     private readonly Mock<ICardRepository> _cardRepositoryMock;
     private readonly Mock<IStaffRepository> _staffRepositoryMock;
@@ -34,7 +56,7 @@ public class CsvImportServiceExceptionLoggingTests : IDisposable
     private readonly Mock<ICacheService> _cacheServiceMock;
     /// <summary>Issue #1955: 摘要の再生成が参照する部署種別の供給元。</summary>
     private readonly Mock<ISettingsRepository> _settingsRepositoryMock;
-    private readonly Mock<ILogger<CsvImportService>> _loggerMock;
+    private readonly TransactionObservingLogger _logger;
 
     private static readonly Encoding CsvEncoding = new UTF8Encoding(true);
 
@@ -52,7 +74,6 @@ public class CsvImportServiceExceptionLoggingTests : IDisposable
         _settingsRepositoryMock = new Mock<ISettingsRepository>();
         _settingsRepositoryMock.Setup(x => x.GetAppSettingsAsync())
             .ReturnsAsync(new AppSettings());
-        _loggerMock = new Mock<ILogger<CsvImportService>>();
 
         _validationServiceMock.Setup(x => x.ValidateCardIdm(It.IsAny<string>()))
             .Returns(ValidationResult.Success());
@@ -63,10 +84,12 @@ public class CsvImportServiceExceptionLoggingTests : IDisposable
         _connection.Open();
 
         var lease = new ConnectionLease(_connection, () => { });
-        var transaction = _connection.BeginTransaction();
-        var scope = new ICCardManager.Data.TransactionScope(lease, transaction);
+        _transaction = _connection.BeginTransaction();
+        var scope = new ICCardManager.Data.TransactionScope(lease, _transaction);
         _dbContextMock.Setup(x => x.BeginTransactionAsync(It.IsAny<CancellationToken>()))
             .ReturnsAsync(scope);
+
+        _logger = new TransactionObservingLogger(_transaction);
     }
 
     public void Dispose()
@@ -86,7 +109,7 @@ public class CsvImportServiceExceptionLoggingTests : IDisposable
             _dbContextMock.Object,
             _cacheServiceMock.Object,
             _settingsRepositoryMock.Object,
-            _loggerMock.Object);
+            _logger);
     }
 
     private string CreateCardsCsv()
@@ -111,113 +134,145 @@ public class CsvImportServiceExceptionLoggingTests : IDisposable
     }
 
     /// <summary>
-    /// 内部処理で投げられた SQLiteException は Internal の catch(SQLiteException) で
-    /// LogError の後に DatabaseException にラップされ、外側の ExecuteImportWithErrorHandlingAsync で
-    /// Success=false の結果に変換される。ここでは LogError が呼ばれたこと（無言握りつぶしでない）を確認。
+    /// トランザクション内（INSERT）で失敗させ、取込を実行する。
     /// </summary>
-    [Fact]
-    public async Task ImportCardsAsync_SQLiteException発生時にLogErrorを出すこと()
+    /// <param name="target">"card" または "staff"</param>
+    /// <param name="thrown">INSERT が投げる例外</param>
+    private async System.Threading.Tasks.Task<CsvImportResult> ImportFailingInsideTransactionAsync(
+        string target, Exception thrown)
     {
-        // Arrange: InsertAsync 時に SQLiteException を投げるように設定
-        _cardRepositoryMock.Setup(x => x.GetByIdmAsync(It.IsAny<string>(), It.IsAny<bool>()))
-            .ReturnsAsync((IcCard?)null);
-        _cardRepositoryMock.Setup(x => x.InsertAsync(It.IsAny<IcCard>(), It.IsAny<SQLiteTransaction>()))
-            .ThrowsAsync(new SQLiteException("simulated SQLite failure"));
-
         var service = CreateService();
-        var csvPath = CreateCardsCsv();
+        if (target == "card")
+        {
+            _cardRepositoryMock.Setup(x => x.GetByIdmAsync(It.IsAny<string>(), It.IsAny<bool>()))
+                .ReturnsAsync((IcCard?)null);
+            _cardRepositoryMock.Setup(x => x.InsertAsync(It.IsAny<IcCard>(), It.IsAny<SQLiteTransaction>()))
+                .ThrowsAsync(thrown);
+            return await service.ImportCardsAsync(CreateCardsCsv(), false);
+        }
 
-        // Act
-        var result = await service.ImportCardsAsync(csvPath, false);
-
-        // Assert: 外側の例外ハンドラが Success=false を返し、ログが記録されている
-        result.Success.Should().BeFalse();
-
-        _loggerMock.Verify(
-            x => x.Log(
-                LogLevel.Error,
-                It.IsAny<EventId>(),
-                It.Is<It.IsAnyType>((v, t) => true),
-                It.IsAny<SQLiteException>(),
-                It.IsAny<Func<It.IsAnyType, Exception, string>>()),
-            Times.AtLeastOnce,
-            "Issue #1282: CSV インポート中の SQLite エラーは LogError で記録すべき");
+        _staffRepositoryMock.Setup(x => x.GetByIdmAsync(It.IsAny<string>(), It.IsAny<bool>()))
+            .ReturnsAsync((Staff?)null);
+        _staffRepositoryMock.Setup(x => x.InsertAsync(It.IsAny<Staff>(), It.IsAny<SQLiteTransaction>()))
+            .ThrowsAsync(thrown);
+        return await service.ImportStaffAsync(CreateStaffCsv(), false);
     }
 
-    [Fact]
-    public async Task ImportCardsAsync_一般例外発生時にLogErrorを出すこと()
+    /// <summary>
+    /// トランザクション内の失敗は、内側の catch が「局面を名乗って」「ロールバックより先に」
+    /// 「1 回だけ」Error で記録する（Issue #1282 / #1745 / #1991）。
+    /// </summary>
+    [Theory]
+    [InlineData("card", "カードCSVインポートのトランザクション中に SQLite エラーが発生しロールバック", true)]
+    [InlineData("card", "カードCSVインポートのトランザクション中に想定外の例外が発生しロールバック", false)]
+    [InlineData("staff", "職員CSVインポートのトランザクション中に SQLite エラーが発生しロールバック", true)]
+    [InlineData("staff", "職員CSVインポートのトランザクション中に想定外の例外が発生しロールバック", false)]
+    public async System.Threading.Tasks.Task トランザクション内の失敗は内側のcatchがロールバックより先に1回だけ記録すること(
+        string target, string expectedOperation, bool sqliteFailure)
     {
-        // Arrange: InsertAsync が一般例外（InvalidOperationException）を投げる
-        _cardRepositoryMock.Setup(x => x.GetByIdmAsync(It.IsAny<string>(), It.IsAny<bool>()))
-            .ReturnsAsync((IcCard?)null);
-        _cardRepositoryMock.Setup(x => x.InsertAsync(It.IsAny<IcCard>(), It.IsAny<SQLiteTransaction>()))
-            .ThrowsAsync(new InvalidOperationException("simulated generic failure"));
-
-        var service = CreateService();
-        var csvPath = CreateCardsCsv();
+        // Arrange
+        Exception thrown = sqliteFailure
+            ? new SQLiteException("simulated SQLite failure")
+            : new InvalidOperationException("simulated generic failure");
 
         // Act
-        var result = await service.ImportCardsAsync(csvPath, false);
+        var result = await ImportFailingInsideTransactionAsync(target, thrown);
 
         // Assert
         result.Success.Should().BeFalse();
 
-        _loggerMock.Verify(
-            x => x.Log(
-                LogLevel.Error,
-                It.IsAny<EventId>(),
-                It.Is<It.IsAnyType>((v, t) => true),
-                It.IsAny<InvalidOperationException>(),
-                It.IsAny<Func<It.IsAnyType, Exception, string>>()),
-            Times.AtLeastOnce,
-            "Issue #1282: CSV インポート中の想定外例外も LogError で記録すべき（無言握りつぶし防止）");
+        var errors = _logger.Entries.Where(e => e.Level == LogLevel.Error).ToList();
+        errors.Should().ContainSingle(
+            "内側の catch が付けた「記録済みの印」で外側は記録しない（#1991）。実際: " + _logger.FormatEntries());
+
+        var entry = errors[0];
+        entry.Message.Should().Be($"CSV import failed: {expectedOperation}",
+            "外側の共通ハンドラー（操作名のみ）ではなく、内側の catch が局面を名乗って記録すること");
+        entry.Exception.Should().BeSameAs(thrown, "包む前の元の例外を記録すること");
+        entry.TransactionActiveAtLogTime.Should().BeTrue(
+            "ログはロールバックより先に書くこと（#1745。後ろへ回すとロールバックの失敗で痕跡ごと失われ得る）");
+
+        TransactionObservingLogger.IsActive(_transaction).Should().BeFalse(
+            "記録の後にロールバックされていること（観測手段が常に true を返していないことの対）");
+
+        if (sqliteFailure)
+        {
+            // SQLiteException は DatabaseException へ包んで再スローし、整備済みの文言で報告する（#1282）
+            result.ErrorMessage.Should().Be(DatabaseException.QueryFailed().UserFriendlyMessage);
+        }
     }
 
-    [Fact]
-    public async Task ImportStaffAsync_SQLiteException発生時にLogErrorを出すこと()
+    /// <summary>
+    /// 記録の時点のトランザクション状態も併せて記録するロガー。
+    /// </summary>
+    /// <remarks>
+    /// <see cref="SQLiteTransaction.Connection"/> はコミット／ロールバックで <c>null</c> になる。
+    /// ログ出力の瞬間にまだ接続を持っていれば、ロールバックより先に記録したと分かる。
+    /// </remarks>
+    private sealed class TransactionObservingLogger : ILogger<CsvImportService>
     {
-        _staffRepositoryMock.Setup(x => x.GetByIdmAsync(It.IsAny<string>(), It.IsAny<bool>()))
-            .ReturnsAsync((Staff?)null);
-        _staffRepositoryMock.Setup(x => x.InsertAsync(It.IsAny<Staff>(), It.IsAny<SQLiteTransaction>()))
-            .ThrowsAsync(new SQLiteException("simulated SQLite failure (staff)"));
+        private readonly SQLiteTransaction _transaction;
+        private readonly List<Entry> _entries = new();
+        private readonly object _sync = new();
 
-        var service = CreateService();
-        var csvPath = CreateStaffCsv();
+        public TransactionObservingLogger(SQLiteTransaction transaction)
+        {
+            _transaction = transaction;
+        }
 
-        var result = await service.ImportStaffAsync(csvPath, false);
-        result.Success.Should().BeFalse();
+        public IReadOnlyList<Entry> Entries
+        {
+            get { lock (_sync) { return _entries.ToList(); } }
+        }
 
-        _loggerMock.Verify(
-            x => x.Log(
-                LogLevel.Error,
-                It.IsAny<EventId>(),
-                It.Is<It.IsAnyType>((v, t) => true),
-                It.IsAny<SQLiteException>(),
-                It.IsAny<Func<It.IsAnyType, Exception, string>>()),
-            Times.AtLeastOnce);
-    }
+        public IDisposable BeginScope<TState>(TState state)
+            where TState : notnull
+            => new NullScope();
 
-    [Fact]
-    public async Task ImportStaffAsync_一般例外発生時にLogErrorを出すこと()
-    {
-        _staffRepositoryMock.Setup(x => x.GetByIdmAsync(It.IsAny<string>(), It.IsAny<bool>()))
-            .ReturnsAsync((Staff?)null);
-        _staffRepositoryMock.Setup(x => x.InsertAsync(It.IsAny<Staff>(), It.IsAny<SQLiteTransaction>()))
-            .ThrowsAsync(new InvalidOperationException("simulated generic failure (staff)"));
+        public bool IsEnabled(LogLevel logLevel) => true;
 
-        var service = CreateService();
-        var csvPath = CreateStaffCsv();
+        public void Log<TState>(
+            LogLevel logLevel,
+            EventId eventId,
+            TState state,
+            Exception? exception,
+            Func<TState, Exception?, string> formatter)
+        {
+            var entry = new Entry(logLevel, formatter(state, exception), exception, IsActive(_transaction));
+            lock (_sync)
+            {
+                _entries.Add(entry);
+            }
+        }
 
-        var result = await service.ImportStaffAsync(csvPath, false);
-        result.Success.Should().BeFalse();
+        /// <summary>
+        /// トランザクションがまだ巻き戻し・確定されていないか。
+        /// ロールバック後は <see cref="SQLiteTransaction.Connection"/> が <c>null</c>、
+        /// スコープの破棄後は <see cref="ObjectDisposedException"/> になる（どちらも「終わった」）。
+        /// </summary>
+        public static bool IsActive(SQLiteTransaction transaction)
+        {
+            try
+            {
+                return transaction.Connection != null;
+            }
+            catch (ObjectDisposedException)
+            {
+                return false;
+            }
+        }
 
-        _loggerMock.Verify(
-            x => x.Log(
-                LogLevel.Error,
-                It.IsAny<EventId>(),
-                It.Is<It.IsAnyType>((v, t) => true),
-                It.IsAny<InvalidOperationException>(),
-                It.IsAny<Func<It.IsAnyType, Exception, string>>()),
-            Times.AtLeastOnce);
+        public string FormatEntries() => string.Join(
+            " / ",
+            Entries.Select(e => $"[{e.Level}] {e.Message} ({e.Exception?.GetType().Name}, tx={(e.TransactionActiveAtLogTime ? "active" : "ended")})"));
+
+        public sealed record Entry(LogLevel Level, string Message, Exception? Exception, bool TransactionActiveAtLogTime);
+
+        private sealed class NullScope : IDisposable
+        {
+            public void Dispose()
+            {
+            }
+        }
     }
 }

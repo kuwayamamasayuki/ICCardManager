@@ -1,7 +1,9 @@
 using System;
+using System.Runtime.CompilerServices;
 using System.Threading.Tasks;
 using FluentAssertions;
 using ICCardManager.Infrastructure.Timing;
+using ICCardManager.Tests.Infrastructure;
 using Microsoft.Extensions.Logging;
 using Moq;
 using Xunit;
@@ -102,21 +104,47 @@ public class WpfDispatcherServiceTests
         act.Should().NotThrow();
     }
 
+    /// <remarks>
+    /// Issue #2106: 旧版は <c>faulted.Exception</c> / <c>IsFaulted</c>（入力 Task 自身の性質）しか見ておらず、
+    /// しかも <c>Task.Exception</c> の読み取りはそれ自体が例外を観測済みにするため、
+    /// <c>ObserveTask</c> の本体を空にしても緑だった。Task へ一切触れずに手放し、GC 後の
+    /// <see cref="TaskScheduler.UnobservedTaskException"/> がその例外について発火しないことを、
+    /// 観測しない対照の Task が発火することと対で観測する（<c>DispatcherObservationTests</c> と同じ方法）。
+    /// </remarks>
     [Fact]
     public void ObserveTask_例外を観測済みにしてUnobservedTaskExceptionを発生させないこと()
     {
         // Arrange
         var sut = new WpfDispatcherService(new Mock<ILogger<WpfDispatcherService>>().Object);
-        var faulted = Task.FromException(new InvalidOperationException("boom"));
+        using var monitor = new UnobservedTaskExceptionMonitor();
 
-        // Act
-        sut.ObserveTask(faulted);
+        // Act: Task への参照は下請けメソッドの中だけに閉じ、テスト側からは例外だけを持つ
+        var observedException = CreateFaultedTaskAndObserve(sut);
+        var controlException = UnobservedTaskExceptionMonitor.CreateAbandonedFaultedTask();
 
-        // Assert: 継続内で Exception を参照済みなら、Task 側も観測済みになる。
-        // 未観測のままだと GC 契機で TaskScheduler.UnobservedTaskException が発火し、
+        monitor.CollectUntilRaised(controlException);
+
+        // Assert: 未観測のままだと GC 契機で TaskScheduler.UnobservedTaskException が発火し、
         // App.xaml.cs のハンドラが「バックグラウンド処理エラー」ダイアログを
         // 操作と無関係なタイミングで表示してしまう。
-        faulted.Exception.Should().NotBeNull();
-        faulted.IsFaulted.Should().BeTrue();
+        monitor.WasRaised(controlException).Should().BeTrue(
+            "対照（ObserveTask へ渡さない失敗 Task）は発火するはず。発火しないなら GC が回っておらず本テストは何も検証していない");
+        monitor.WasRaised(observedException).Should().BeFalse(
+            "ObserveTask へ渡した失敗 Task の例外は観測済みになり、UnobservedTaskException を発生させない");
+    }
+
+    /// <summary>
+    /// 失敗 Task を作って <c>ObserveTask</c> へ渡し、Task への参照を残さずに例外だけを返す。
+    /// </summary>
+    /// <remarks>
+    /// 呼び出し側のスタックに Task が残ると GC で回収されず、ファイナライザが走らない。
+    /// インライン化されると同じ理由で参照が延命され得るため禁止する。
+    /// </remarks>
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static Exception CreateFaultedTaskAndObserve(WpfDispatcherService sut)
+    {
+        var exception = new InvalidOperationException("observed-" + Guid.NewGuid().ToString("N"));
+        sut.ObserveTask(Task.FromException(exception));
+        return exception;
     }
 }

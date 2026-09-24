@@ -434,33 +434,82 @@ public class DebugDataServiceTests : IDisposable
         }
     }
 
+    /// <summary>
+    /// Issue #1485 / #2106: 削除対象の IDm は SQL テキストへ埋め込まず、パラメータとして渡すこと。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// 旧テスト（<c>DoesNotInjectFromQuotedIdm</c>）は引用符を含む IDm を<b>DB 側</b>へ入れていたが、
+    /// SQL に渡るのは定数の <see cref="DebugDataService.TestCardList"/> / <see cref="DebugDataService.TestStaffList"/>
+    /// だけなので、その値は SQL 文にそもそも現れない。<c>IN ('{string.Join("','", idms)}')</c> の埋め込みへ
+    /// 戻しても緑のままのトートロジーだった。
+    /// </para>
+    /// <para>
+    /// ここでは実際に実行されたコマンド（SQL テキストと束縛されたパラメータ）を
+    /// <see cref="SQLiteConnection.Changed"/> の <see cref="SQLiteConnectionEventType.NewDataReader"/>
+    /// （＝実行の瞬間）で捕まえ、①SQL テキストに IDm も引用符も現れないこと ②IDm がパラメータ値として
+    /// 渡っていることを表明する。定数リストを差し替える形は、同じ静的配列を読む他のテストクラスと並列実行で競合するため採らない。
+    /// </para>
+    /// </remarks>
     [Fact]
-    public async Task CleanExistingTestDataAsync_DoesNotInjectFromQuotedIdm()
+    public async Task CleanExistingTestDataAsync_BindsIdmsAsParameters_NotEmbeddedInSql()
     {
-        // Arrange: 引用符を含む悪意ある IDm を持つレコードを事前に挿入。
-        // 文字列補間ベースの旧実装ではこの値が SQL を破壊しうるが、
-        // パラメータ化により安全に扱われることを検証する。
-        const string maliciousIdm = "'; DROP TABLE ic_card; --";
-        using (var cmd = _connection.CreateCommand())
+        var testCardIdms = DebugDataService.TestCardList.Select(c => c.CardIdm).ToArray();
+        var testStaffIdms = DebugDataService.TestStaffList.Select(s => s.StaffIdm).ToArray();
+
+        var executed = new List<(string Sql, List<object> ParameterValues)>();
+        SQLiteConnectionEventHandler handler = (sender, e) =>
         {
-            cmd.CommandText = "INSERT INTO ic_card (card_idm) VALUES (@idm)";
-            cmd.Parameters.AddWithValue("@idm", maliciousIdm);
-            cmd.ExecuteNonQuery();
+            // Changed は全接続共通の静的イベントなので、このテストの接続だけを拾う
+            if (!ReferenceEquals(sender, _connection) ||
+                e.EventType != SQLiteConnectionEventType.NewDataReader ||
+                e.Command == null)
+            {
+                return;
+            }
+
+            var values = e.Command.Parameters.Cast<System.Data.IDataParameter>().Select(p => p.Value).ToList();
+            lock (executed)
+            {
+                executed.Add((e.Command.CommandText, values));
+            }
+        };
+
+        SQLiteConnection.Changed += handler;
+        try
+        {
+            await _service.CleanExistingTestDataAsync();
+        }
+        finally
+        {
+            SQLiteConnection.Changed -= handler;
         }
 
-        // Act
-        await _service.CleanExistingTestDataAsync();
+        var deletes = executed.Where(c => c.Sql.TrimStart().StartsWith("DELETE", StringComparison.OrdinalIgnoreCase)).ToList();
+        deletes.Select(c => c.Sql.TrimStart().Substring(0, c.Sql.TrimStart().IndexOf(" WHERE", StringComparison.Ordinal)))
+            .Should().Equal(
+                new[]
+                {
+                    "DELETE FROM ledger_detail",
+                    "DELETE FROM ledger",
+                    "DELETE FROM ic_card",
+                    "DELETE FROM staff"
+                },
+                "外部キーの順（明細 → 台帳 → カード → 職員）に 4 文を実行する（観測が空振りしていないことも兼ねる）");
 
-        // Assert 1: ic_card テーブルが破壊されていない
-        using (var cmd = _connection.CreateCommand())
+        foreach (var (sql, _) in deletes)
         {
-            cmd.CommandText = "SELECT name FROM sqlite_master WHERE type='table' AND name='ic_card'";
-            cmd.ExecuteScalar().Should().Be("ic_card", "パラメータ化により ic_card テーブルは破壊されないべき");
+            sql.Should().NotContain("'", "値を文字列リテラルとして SQL へ埋め込まない");
+            foreach (var idm in testCardIdms.Concat(testStaffIdms))
+            {
+                sql.Should().NotContain(idm, "IDm は SQL テキストではなくパラメータで渡す");
+            }
         }
 
-        // Assert 2: maliciousIdm は TestCardList に含まれないため削除対象外として残存
-        CountWhere("ic_card", "card_idm", maliciousIdm).Should().Be(1,
-            "パラメータ化により悪意ある IDm を持つ行は SQL 文として解釈されず、削除対象外のため残存すべき");
+        deletes[0].ParameterValues.Should().BeEquivalentTo(testCardIdms, "明細の削除はテストカードの IDm を束縛する");
+        deletes[1].ParameterValues.Should().BeEquivalentTo(testCardIdms, "台帳の削除はテストカードの IDm を束縛する");
+        deletes[2].ParameterValues.Should().BeEquivalentTo(testCardIdms, "カードの削除はテストカードの IDm を束縛する");
+        deletes[3].ParameterValues.Should().BeEquivalentTo(testStaffIdms, "職員の削除はテスト職員の IDm を束縛する");
     }
 
     private int CountWhere(string table, string column, string value)
