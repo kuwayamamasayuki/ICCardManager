@@ -569,10 +569,10 @@ public class LendingHistoryAnalyzerTests
 
     /// <summary>
     /// 残高チェーン（古→新）に基づいて並び替えられる
-    /// （Sorter委譲のスモークテスト: フォールバック含めて例外を投げない）
+    /// （Sorter委譲。例外を投げないことと、並びそのものを表明する）
     /// </summary>
     [Fact]
-    public void SortChronologically_DoesNotThrow_OnArbitraryInput()
+    public void SortChronologically_OrdersByBalanceChain()
     {
         var details = new List<LedgerDetail>
         {
@@ -584,7 +584,10 @@ public class LendingHistoryAnalyzerTests
         Action act = () => LendingHistoryAnalyzer.SortChronologically(details);
 
         act.Should().NotThrow();
-        LendingHistoryAnalyzer.SortChronologically(details).Should().HaveCount(3);
+        // Issue #2105: 件数だけだと、入力をそのまま返す（並べ替えない）実装でも緑になる。
+        // 各 200 円の利用なので残高チェーンは 800 → 600 → 400（古→新）に確定する。
+        LendingHistoryAnalyzer.SortChronologically(details)
+            .Select(d => d.Balance).Should().Equal(800, 600, 400);
     }
 
     #endregion

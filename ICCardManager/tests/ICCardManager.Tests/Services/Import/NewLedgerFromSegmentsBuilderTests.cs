@@ -86,12 +86,88 @@ public class NewLedgerFromSegmentsBuilderTests
         // Assert
         count.Should().Be(1);
         errors.Should().BeEmpty();
+        // Issue #2105: CardIdm と Date だけでは、金額・摘要を 0／空のまま書く実装でも緑になる。
         repoMock.Verify(r => r.InsertAsync(It.Is<Ledger>(
-            l => l.CardIdm == CardIdm && l.Date == new DateTime(2024, 3, 1))),
+            l => l.CardIdm == CardIdm && l.Date == new DateTime(2024, 3, 1)
+                 && l.Summary == "鉄道（博多～天神）"
+                 && l.Income == 0 && l.Expense == 260 && l.Balance == 9740)),
             Times.Once);
         repoMock.Verify(
             r => r.InsertDetailsAsync(100, It.IsAny<IEnumerable<LedgerDetail>>()),
             Times.Once);
+    }
+
+    /// <summary>
+    /// 同じ日に「利用 → チャージ → 利用」があると、チャージの境界で 3 行の台帳に分かれ、
+    /// 各行が自分の区間の金額と残額を持つこと。
+    /// </summary>
+    /// <remarks>
+    /// Issue #2105: 明細がすべて「利用」の入力では分割は常に 1 つなので、
+    /// <c>SplitAtChargeBoundaries</c> を省いた実装（全明細を 1 行にまとめる）でも緑になっていた。
+    /// 1 行にまとめると受入 1,000・払出 470 が同じ行に載り、物品出納簿の
+    /// 「チャージと利用は別行」（business-logic.md「月次帳票」）が崩れる。
+    /// </remarks>
+    [Fact]
+    public async Task BuildAndInsertAsync_ChargeBetweenUsages_SplitsIntoThreeLedgersWithOwnAmounts()
+    {
+        // Arrange - 時系列: 利用 260（残 9,740）→ チャージ 1,000（残 10,740）→ 利用 210（残 10,530）
+        var repoMock = new Mock<ILedgerRepository>();
+        var insertedLedgers = new List<Ledger>();
+        var nextId = 500;
+        repoMock.Setup(r => r.InsertAsync(It.IsAny<Ledger>()))
+            .Callback<Ledger>(l => insertedLedgers.Add(l))
+            .ReturnsAsync(() => nextId++);
+        var insertedDetails = new Dictionary<int, List<LedgerDetail>>();
+        repoMock.Setup(r => r.InsertDetailsAsync(It.IsAny<int>(), It.IsAny<IEnumerable<LedgerDetail>>()))
+            .Callback<int, IEnumerable<LedgerDetail>>((id, details) => insertedDetails[id] = details.ToList())
+            .ReturnsAsync(true);
+
+        var useDate = new DateTime(2024, 3, 1);
+        var morning = Usage(useDate, amount: 260, balance: 9740);
+        var charge = new LedgerDetail
+        {
+            UseDate = useDate,
+            Amount = 1000,
+            Balance = 10740,
+            IsCharge = true
+        };
+        var evening = Usage(useDate, amount: 210, balance: 10530);
+        evening.EntryStation = "薬院";
+        evening.ExitStation = "大橋";
+
+        var builder = new NewLedgerFromSegmentsBuilder(repoMock.Object, new SummaryGenerator(), NullLogger.Instance);
+        var errors = new List<CsvImportError>();
+
+        // Act - CSV の並び（新しい順）で渡す
+        var count = await builder.BuildAndInsertAsync(
+            CardIdm,
+            useDate,
+            new List<(int LineNumber, LedgerDetail Detail)>
+            {
+                (LineNumber: 2, Detail: evening),
+                (LineNumber: 3, Detail: charge),
+                (LineNumber: 4, Detail: morning)
+            },
+            errors);
+
+        // Assert
+        count.Should().Be(3);
+        errors.Should().BeEmpty();
+        insertedLedgers.Select(l => (l.Summary, l.Income, l.Expense, l.Balance)).Should().Equal(
+            new[]
+            {
+                ("鉄道（博多～天神）", 0, 260, 9740),
+                (SummaryGenerator.GetChargeSummary(DepartmentType.MayorOffice), 1000, 0, 10740),
+                ("鉄道（薬院～大橋）", 0, 210, 10530)
+            },
+            "チャージの境界で分割し、各行は自分の区間の受入・払出・残額を持つこと");
+        insertedLedgers.Should().OnlyContain(l => l.CardIdm == CardIdm && l.Date == useDate);
+
+        // 各台帳へは自分の区間の明細だけが渡ること
+        insertedDetails.Keys.Should().BeEquivalentTo(new[] { 500, 501, 502 });
+        insertedDetails[500].Should().ContainSingle().Which.Should().BeSameAs(morning);
+        insertedDetails[501].Should().ContainSingle().Which.Should().BeSameAs(charge);
+        insertedDetails[502].Should().ContainSingle().Which.Should().BeSameAs(evening);
     }
 
     /// <summary>

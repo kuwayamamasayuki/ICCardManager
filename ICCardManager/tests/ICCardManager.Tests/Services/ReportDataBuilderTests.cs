@@ -448,7 +448,7 @@ public class ReportDataBuilderTests
         var yearlyLedgers = new List<Ledger>
         {
             CreateTestLedger(1, TestCardIdm, new DateTime(2025, 8, 1),
-                "7月から繰越", 0, 0, 7000),
+                SummaryGenerator.GetMidYearCarryoverSummary(7), 0, 0, 7000),
             CreateTestLedger(2, TestCardIdm, new DateTime(2025, 9, 28),
                 "鉄道", 0, 200, 6800),
             CreateTestLedger(50, TestCardIdm, new DateTime(2025, 10, 3),
@@ -525,7 +525,7 @@ public class ReportDataBuilderTests
         var augustLedgers = new List<Ledger>
         {
             CreateTestLedger(1, TestCardIdm, new DateTime(2025, 8, 1),
-                "7月から繰越", 5000, 0, 5000),   // 紙出納簿移行カードの繰越レコード
+                SummaryGenerator.GetMidYearCarryoverSummary(7), 5000, 0, 5000),   // 紙出納簿移行カードの繰越レコード
             CreateTestLedger(2, TestCardIdm, new DateTime(2025, 8, 10),
                 "鉄道（天神～博多）", 0, 210, 4790)
         };
@@ -650,7 +650,7 @@ public class ReportDataBuilderTests
         var yearlyLedgers = new List<Ledger>
         {
             CreateTestLedger(150, TestCardIdm, new DateTime(2025, 8, 1),
-                "7月から繰越", 0, 0, 3500),
+                SummaryGenerator.GetMidYearCarryoverSummary(7), 0, 0, 3500),
             CreateTestLedger(199, TestCardIdm, new DateTime(2026, 2, 25), "鉄道", 0, 200, 3000),
             CreateTestLedger(200, TestCardIdm, new DateTime(2026, 3, 10), "鉄道", 0, 300, 2700)
         };

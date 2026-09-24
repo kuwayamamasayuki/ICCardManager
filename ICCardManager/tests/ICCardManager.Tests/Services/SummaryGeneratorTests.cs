@@ -534,8 +534,9 @@ public class SummaryGeneratorTests : IDisposable
 
         var result = _generator.Generate(details);
 
-        result.Should().Contain("薬院～天神 往復");
-        result.Should().Contain("博多～吉塚");
+        // Issue #2105: 部分一致だと、往復で消費した復路が余りにも残る退行（#1905 / #1919）で
+        // 「バス（薬院～天神 往復、天神～薬院、博多～吉塚）」になっても緑になる。完全一致で比べる。
+        result.Should().Be("バス（薬院～天神 往復、博多～吉塚）");
     }
 
     /// <summary>
@@ -554,8 +555,8 @@ public class SummaryGeneratorTests : IDisposable
 
         var result = _generator.Generate(details);
 
-        result.Should().Contain("鉄道（博多～天神）");
-        result.Should().Contain("バス（天神～渡辺通 往復）");
+        // Issue #2105: 部分一致ではブロックの並び（利用順。#1904）や余分な区間の混入を検出できない。
+        result.Should().Be("鉄道（博多～天神）、バス（天神～渡辺通 往復）");
     }
 
     /// <summary>
@@ -673,8 +674,8 @@ public class SummaryGeneratorTests : IDisposable
 
         var result = _generator.Generate(details);
 
-        result.Should().Contain("鉄道（博多～天神）");
-        result.Should().Contain("バス（薬院～博多駅）");
+        // Issue #2105: 部分一致ではブロックの並び（利用順。#1904）や余分な区間の混入を検出できない。
+        result.Should().Be("鉄道（博多～天神）、バス（薬院～博多駅）");
     }
 
     #endregion

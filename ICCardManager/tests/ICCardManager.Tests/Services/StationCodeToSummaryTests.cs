@@ -886,8 +886,9 @@ public class StationCodeToSummaryTests
         // Assert - 乗継として統合される
         // 注: 駅コードが異なる（空港線の中洲川端=0xE711、箱崎線の中洲川端=0xE801）ため
         // 駅名が同じでも乗継として認識される
-        result.Should().Contain("天神");
-        result.Should().Contain("貝塚");
+        // Issue #2105: 部分一致（「天神」「貝塚」を含む）では、乗継統合を止めて
+        // 3 区間を個別に並べた実装でも緑になる。途中駅が省略されていることまで表明する。
+        result.Should().Be("鉄道（天神～貝塚）");
         OutputTestResult("3区間連続利用", result);
     }
 

@@ -640,13 +640,17 @@ public class LedgerSplitServiceTests : IDisposable
         await _service.SplitAsync(1, details);
 
         // Assert: 元のLedgerに紐づく詳細のGroupIdがクリアされている
+        // Issue #2105: AllSatisfy は空のリストでも通るため、各グループが自分の明細を 1 件ずつ
+        // 持っていることを先に表明する（分割で明細が 0 件になっても緑、を防ぐ）
         replacedDetails.Should().NotBeNull();
-        replacedDetails!.Should().AllSatisfy(d =>
+        replacedDetails!.Select(d => d.EntryStation).Should().Equal("博多");
+        replacedDetails.Should().AllSatisfy(d =>
             d.GroupId.Should().BeNull("分割後はGroupIdがクリアされる"));
 
         // 新しいLedgerに紐づく詳細のGroupIdもクリアされている
         insertedDetails.Should().NotBeNull();
-        insertedDetails!.Should().AllSatisfy(d =>
+        insertedDetails!.Select(d => d.EntryStation).Should().Equal("天神");
+        insertedDetails.Should().AllSatisfy(d =>
             d.GroupId.Should().BeNull("分割後はGroupIdがクリアされる"));
     }
 

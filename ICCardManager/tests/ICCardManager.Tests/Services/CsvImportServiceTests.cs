@@ -116,6 +116,63 @@ public class CsvImportServiceTests : IDisposable
         GC.SuppressFinalize(this);
     }
 
+    /// <summary>
+    /// コミットしたかロールバックしたかを観測できるトランザクションを <c>BeginTransactionAsync</c> へ差し込む。
+    /// </summary>
+    /// <remarks>
+    /// Issue #2105: 既定のセットアップのトランザクションには何も書き込まれていないため、
+    /// コミットしてもロールバックしても観測できる差が無い。ロールバックのテストが見ていたのは
+    /// 本体が代入した <c>ImportedCount == 0</c> だけで、「常に Commit する」実装でも緑だった。
+    /// ここでは取込の前にトランザクション内へ 1 行書いておき（＝取込が先に済ませた書き込みの代役）、
+    /// 取込後にその行が残っているか（<see cref="CountProbeRows"/>）で結果を見分ける。
+    /// </remarks>
+    /// <returns>検査用の接続（呼び出し元で破棄する）</returns>
+    private SQLiteConnection UseObservableTransaction()
+    {
+        var connection = new SQLiteConnection("Data Source=:memory:");
+        connection.Open();
+        using (var create = connection.CreateCommand())
+        {
+            create.CommandText = "CREATE TABLE probe (id INTEGER)";
+            create.ExecuteNonQuery();
+        }
+
+        var transaction = connection.BeginTransaction();
+        using (var insert = connection.CreateCommand())
+        {
+            insert.Transaction = transaction;
+            insert.CommandText = "INSERT INTO probe (id) VALUES (1)";
+            insert.ExecuteNonQuery();
+        }
+
+        var scope = new ICCardManager.Data.TransactionScope(new ConnectionLease(connection, () => { }), transaction);
+        _dbContextMock.Setup(x => x.BeginTransactionAsync(It.IsAny<System.Threading.CancellationToken>()))
+            .ReturnsAsync(scope);
+        return connection;
+    }
+
+    /// <summary>
+    /// <see cref="UseObservableTransaction"/> がトランザクション内に書いた行が残っている件数
+    /// （コミットされていれば 1、巻き戻っていれば 0）。
+    /// </summary>
+    private static long CountProbeRows(SQLiteConnection connection)
+    {
+        using var command = connection.CreateCommand();
+        command.CommandText = "SELECT COUNT(*) FROM probe";
+        return (long)command.ExecuteScalar();
+    }
+
+    /// <summary>
+    /// ロールバックしたこと（トランザクション内の書き込みが残らず、カードのキャッシュも無効化しない）を表明する。
+    /// </summary>
+    private void AssertRolledBack(SQLiteConnection probeConnection)
+    {
+        CountProbeRows(probeConnection).Should().Be(0, "失敗行がある以上、トランザクション内の書き込みを確定させないこと");
+        _cacheServiceMock.Verify(
+            x => x.InvalidateByPrefix(It.IsAny<string>()), Times.Never,
+            "コミットしていないのでキャッシュを無効化する理由が無い（無効化はコミット直後にだけ行う）");
+    }
+
     #region ImportCardsAsync テスト
 
     /// <summary>
@@ -248,7 +305,8 @@ FEDCBA9876543210,PASMO,002,テスト2";
         error.Message.Should().Contain("N-001");
         error.Message.Should().Contain("既に使用されています");
         error.Message.Should().EndWith("別の番号を指定してください。");
-        error.Message.Should().NotContain("予期しないエラー");
+        // Issue #2105: 既定分岐の文言は「予期しない問題」に変わっており、「予期しないエラー」では原理的に失敗しない
+        error.Message.Should().NotContain("予期しない");
     }
 
     /// <summary>
@@ -267,6 +325,7 @@ FEDCBA9876543210,PASMO,002,テスト2";
         var deletedCard = new IcCard { CardIdm = "0123456789ABCDEF", IsDeleted = true };
         _cardRepositoryMock.Setup(x => x.GetByIdmAsync("0123456789ABCDEF", true)).ReturnsAsync(deletedCard);
         _cardRepositoryMock.Setup(x => x.RestoreAsync("0123456789ABCDEF", It.IsAny<SQLiteTransaction>())).ReturnsAsync(false);
+        using var probe = UseObservableTransaction();
 
         // Act
         var result = await _service.ImportCardsAsync(filePath);
@@ -275,6 +334,8 @@ FEDCBA9876543210,PASMO,002,テスト2";
         result.Success.Should().BeFalse();
         result.ImportedCount.Should().Be(0, "失敗時はロールバックされる");
         result.ErrorCount.Should().BeGreaterThan(0);
+        // Issue #2105: ImportedCount は本体が代入した値にすぎない。実際に巻き戻したことを観測する
+        AssertRolledBack(probe);
         // 復元失敗時はUpdateAsyncは呼ばれない
         _cardRepositoryMock.Verify(x => x.UpdateAsync(It.IsAny<IcCard>(), It.IsAny<SQLiteTransaction>()), Times.Never);
     }
@@ -530,6 +591,7 @@ INVALID_IDM,Suica,001,テスト";
         _cardRepositoryMock.Setup(x => x.RestoreAsync("0123456789ABCDEF", It.IsAny<SQLiteTransaction>())).ReturnsAsync(true);
         // Updateは失敗
         _cardRepositoryMock.Setup(x => x.UpdateAsync(It.IsAny<IcCard>(), It.IsAny<SQLiteTransaction>())).ReturnsAsync(false);
+        using var probe = UseObservableTransaction();
 
         // Act
         var result = await _service.ImportCardsAsync(filePath);
@@ -538,6 +600,8 @@ INVALID_IDM,Suica,001,テスト";
         result.Success.Should().BeFalse();
         result.ImportedCount.Should().Be(0, "Restore後Update失敗でロールバック");
         result.ErrorCount.Should().BeGreaterThan(0);
+        // Issue #2105: 成功した Restore（is_deleted = 0）が確定していないことを観測する
+        AssertRolledBack(probe);
         // Restoreは1回呼ばれ、Updateも1回呼ばれる（成功判定の結合AND）
         _cardRepositoryMock.Verify(
             x => x.RestoreAsync("0123456789ABCDEF", It.IsAny<SQLiteTransaction>()),
@@ -570,6 +634,7 @@ FEDCBA9876543210,PASMO,002,削除済み復元";
             .ReturnsAsync(new IcCard { CardIdm = "FEDCBA9876543210", IsDeleted = true });
         _cardRepositoryMock.Setup(x => x.RestoreAsync("FEDCBA9876543210", It.IsAny<SQLiteTransaction>())).ReturnsAsync(true);
         _cardRepositoryMock.Setup(x => x.UpdateAsync(It.IsAny<IcCard>(), It.IsAny<SQLiteTransaction>())).ReturnsAsync(true);
+        using var probe = UseObservableTransaction();
 
         // Act
         var result = await _service.ImportCardsAsync(filePath);
@@ -577,6 +642,12 @@ FEDCBA9876543210,PASMO,002,削除済み復元";
         // Assert: 両方成功
         result.Success.Should().BeTrue();
         result.ImportedCount.Should().Be(2, "新規1 + 復元1 の合計2件がカウントされる");
+        // Issue #2105: ロールバックのテスト（AssertRolledBack）の対。同じ観測手段で「コミットした」ことが
+        // 見えること（「常にロールバックする」実装や、観測手段が常に 0 を返す誤りを検出する）
+        CountProbeRows(probe).Should().Be(1, "全行成功ならトランザクション内の書き込みを確定させること");
+        _cacheServiceMock.Verify(
+            x => x.InvalidateByPrefix(CacheKeys.CardPrefixForInvalidation), Times.Once,
+            "コミット直後にカードのキャッシュを無効化すること");
         _cardRepositoryMock.Verify(
             x => x.InsertAsync(It.IsAny<IcCard>(), It.IsAny<SQLiteTransaction>()),
             Times.Once,
@@ -608,6 +679,7 @@ FEDCBA9876543210,PASMO,002,削除済みで復元失敗";
         _cardRepositoryMock.Setup(x => x.GetByIdmAsync("FEDCBA9876543210", true))
             .ReturnsAsync(new IcCard { CardIdm = "FEDCBA9876543210", IsDeleted = true });
         _cardRepositoryMock.Setup(x => x.RestoreAsync("FEDCBA9876543210", It.IsAny<SQLiteTransaction>())).ReturnsAsync(false);
+        using var probe = UseObservableTransaction();
 
         // Act
         var result = await _service.ImportCardsAsync(filePath);
@@ -617,6 +689,8 @@ FEDCBA9876543210,PASMO,002,削除済みで復元失敗";
         result.ImportedCount.Should().Be(0,
             "トランザクション原子性: Restore失敗で新規カードの登録もロールバック");
         result.ErrorCount.Should().Be(1);
+        // Issue #2105: 1 件目の新規登録が確定していないことを観測する
+        AssertRolledBack(probe);
     }
 
     /// <summary>
@@ -2897,7 +2971,8 @@ FEDCBA9876543210,鈴木花子,002,テスト2";
         succeeded.Should().BeFalse();
         errorMessage.Should().Contain("文字コード");
         errorMessage.Should().EndWith("インポートしてください。");
-        errorMessage.Should().NotContain("予期しないエラー", "生の例外メッセージを UI へ出さない（Issue #1614）");
+        // Issue #2105: 既定分岐の文言は「予期しない問題」。「予期しないエラー」では原理的に失敗しない
+        errorMessage.Should().NotContain("予期しない", "既定分岐（生の例外の受け皿）へ落ちていないこと（Issue #1614）");
     }
 
     [Theory]
@@ -2922,7 +2997,7 @@ FEDCBA9876543210,鈴木花子,002,テスト2";
         errorMessage.Should().Contain("壊れている", "原因が曖昧さではなく破損であることを伝える");
         errorMessage.Should().NotContain("判別できませんでした");
         errorMessage.Should().EndWith("インポートしてください。");
-        errorMessage.Should().NotContain("予期しないエラー");
+        errorMessage.Should().NotContain("予期しない", "既定分岐へ落ちていないこと（Issue #2105）");
     }
 
     [Fact]
@@ -3313,12 +3388,16 @@ FEDCBA9876543210,鈴木花子,002,テスト2";
     /// <summary>
     /// チャージ行の利用履歴ID空欄でincomeが正しく計算されること
     /// </summary>
+    /// <remarks>
+    /// Issue #2105: 以前は金額欄が空のチャージ行を取り込み、残額（Balance）しか見ていなかったため、
+    /// テスト名が約束する Income を一度も検証していなかった（Income を 0 のまま書く実装でも緑）。
+    /// </remarks>
     [Fact]
     public async Task ImportLedgerDetailsAsync_チャージ行_incomeが正しく計算()
     {
         // Arrange
         var csvContent = @"利用履歴ID,利用日時,カードIDm,管理番号,乗車駅,降車駅,バス停,金額,残額,チャージ,ポイント還元,バス利用,グループID
-,2024-01-15 10:00:00,0123456789ABCDEF,001,,,,,10000,1,0,0,";
+,2024-01-15 10:00:00,0123456789ABCDEF,001,,,,3000,10000,1,0,0,";
 
         var filePath = Path.Combine(_testDirectory, "details_auto_charge.csv");
         await Task.Run(() => File.WriteAllText(filePath, csvContent, CsvEncoding));
@@ -3339,10 +3418,11 @@ FEDCBA9876543210,鈴木花子,002,テスト2";
         // Assert
         result.Success.Should().BeTrue();
         capturedLedger.Should().NotBeNull();
-        // チャージ行はAmountが空でBalanceが10000、IsCharge=1
-        // CalculateGroupFinancialsでチャージのAmountがnull→income=0
-        // ただしBalanceは10000
-        capturedLedger!.Balance.Should().Be(10000);
+        // チャージ 3,000 円（残額 10,000 円）は受入に計上し、払出には含めない
+        capturedLedger!.Income.Should().Be(3000);
+        capturedLedger.Expense.Should().Be(0);
+        capturedLedger.Balance.Should().Be(10000);
+        capturedLedger.Summary.Should().Be(SummaryGenerator.GetChargeSummary(DepartmentType.MayorOffice));
     }
 
     #endregion

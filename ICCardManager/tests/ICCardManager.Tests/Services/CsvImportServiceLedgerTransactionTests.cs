@@ -6,6 +6,7 @@ using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 using FluentAssertions;
+using ICCardManager.Common.Exceptions;
 using ICCardManager.Data;
 using ICCardManager.Data.Repositories;
 using ICCardManager.Infrastructure.Caching;
@@ -355,8 +356,13 @@ SELECT last_insert_rowid();";
         // Assert
         result.ErrorMessage.Should().NotBeNullOrWhiteSpace("失敗の理由が呼び出し元へ伝わること");
         result.ErrorMessage.Should().NotContain("database is locked", "生の例外メッセージを UI へ出さない（Issue #1614）");
-        result.ErrorMessage.Should().NotContain("予期しないエラー", "対応表で変換されず default 分岐へ落ちていないこと");
+        result.ErrorMessage.Should().NotContain("予期しない", "対応表で変換されず default 分岐へ落ちていないこと");
         result.ErrorMessage.Should().EndWith("ください。", "行動指示で終わること（error-messages.md）");
+        // Issue #2105: #1986 で ToUserMessage に SQLite 用の分岐が入ったため、ラップを外しても上の 3 つは
+        // 満たされる（「…データベースの読み書きができませんでした。…してください。」）。
+        // ラップしたこと自体は、DatabaseException の整備済み文言が届いていることで表明する。
+        result.ErrorMessage.Should().Be(DatabaseException.QueryFailed().UserFriendlyMessage,
+            "トランザクション内の SQLiteException は DatabaseException へラップしてから再スローすること（Issue #1745）");
     }
 
     /// <summary>
@@ -480,13 +486,19 @@ SELECT last_insert_rowid();";
         // Assert
         result.Success.Should().BeFalse();
         (await CountLedgerRowsAsync()).Should().Be(0, "巻き戻っている以上、1行も残らないこと");
-        result.ErrorMessage.Should().NotContain("予期しないエラー",
+        result.ErrorMessage.Should().NotContain("予期しない",
             "ロールバックの二次例外が本来の失敗要因を置き換えて default 分岐へ落ちていないこと");
         result.ErrorMessage.Should().NotContain("No transaction is active",
             "ロールバック失敗の生の英語メッセージを UI へ出さない（Issue #1614）");
         result.ErrorMessage.Should().NotContain("database is locked",
             "本来の失敗要因も生のままは出さない（Issue #1614）");
         result.ErrorMessage.Should().EndWith("ください。", "行動指示で終わること（error-messages.md）");
+        // Issue #2105: 素の scope.Rollback() に戻すと、二次例外（InvalidOperationException）が外側の catch へ抜け
+        // 「…現在の状態ではこの操作を実行できません。…してください。」になる。この文言も上の表明を
+        // すべて満たすため、本来の失敗要因（SQLite の失敗をラップした DatabaseException）の文言であることを
+        // 完全一致で表明する。
+        result.ErrorMessage.Should().Be(DatabaseException.QueryFailed().UserFriendlyMessage,
+            "ロールバックの二次例外ではなく、本来の失敗要因の文言が届くこと");
     }
 
     /// <summary>
