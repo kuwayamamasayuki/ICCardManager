@@ -417,6 +417,10 @@ public partial class DataExportImportViewModel : ViewModelBase
     /// </summary>
     internal async Task ExportToFileAsync(string filePath)
     {
+        // Issue #2111: 対象データ種別を最初の await より前にローカル変数へ確定させる。
+        // データ種別のコンボボックスは処理中オーバーレイがあってもキーボードで操作できるため、
+        // 出力後にプロパティを読み直すと、監査ログへ実際とは異なる対象テーブルが記録される（インポート側の Issue #1741 と同じ罠）。
+        var exportType = SelectedExportType;
         CsvExportResult result = null;
         using (BeginBusy("エクスポート中..."))
         {
@@ -424,7 +428,7 @@ public partial class DataExportImportViewModel : ViewModelBase
             await Task.Yield();
             try
             {
-                switch (SelectedExportType)
+                switch (exportType)
                 {
                     case DataType.Cards:
                         result = await _exportService.ExportCardsAsync(filePath, IncludeDeletedInExport);
@@ -453,10 +457,8 @@ public partial class DataExportImportViewModel : ViewModelBase
                     SetStatus($"エクスポート完了: {result.ExportedCount}件を出力しました", false);
 
                     // Issue #1302: 監査ログ記録
-                    await _operationLogger.LogExportAsync(
-                        MapDataTypeToTableName(SelectedExportType),
-                        result.FilePath,
-                        result.ExportedCount);
+                    // Issue #2111: 記録の失敗を出力の失敗として通知しない（TryLogExportAsync の remarks 参照）
+                    await TryLogExportAsync(MapDataTypeToTableName(exportType), result);
                 }
                 else
                 {
@@ -1016,6 +1018,42 @@ public partial class DataExportImportViewModel : ViewModelBase
             // 無言で握りつぶさない。技術的詳細はログへ、ユーザーへは呼び出し元が案内する。
             ErrorDialogHelper.LogException(ex, "インポートの操作ログ記録");
             return false;
+        }
+    }
+
+    /// <summary>
+    /// エクスポートの監査ログを記録する。記録に失敗しても例外は伝播させない（Issue #2111）
+    /// </summary>
+    /// <remarks>
+    /// 監査ログ記録はファイルの出力が確定した後の後処理であり、ここでの失敗を
+    /// <see cref="ExportToFileAsync"/> の catch へ流すと、保存済みのエクスポートが
+    /// 「エクスポートに失敗しました」と通知され、職員が再実行する。
+    /// 「コミット確定後の後処理を、成否の判定に巻き込まない」（Issue #1805）に従う。
+    /// <see cref="OperationLogger.LogExportAsync"/> は内部で例外を握りつぶさないため、
+    /// 共有モードで他 PC が DB をロックしていると SQLITE_BUSY が実際に送出される。
+    /// <para>
+    /// 記録の成否を職員へ通知しないのは、操作ログ画面の Excel エクスポート
+    /// （<c>OperationLogSearchViewModel.TryLogExportAsync</c>、Issue #1787）と同じ判断に揃えるため。
+    /// インポート（<see cref="TryLogImportAsync"/>、Issue #1741）は再実行が二重登録を招くので
+    /// 「再実行しない」と案内する必要があるが、エクスポートの再実行は保存ダイアログが上書きを確認するだけで
+    /// データを壊さず、案内すべき復旧行動が無い。同じ失敗を画面ごとに別の扱いにしない。
+    /// </para>
+    /// </remarks>
+    /// <param name="targetTable">監査ログへ記録する対象テーブル（出力開始時点で確定済みの値）</param>
+    /// <param name="result">成功したエクスポートの結果</param>
+    private async Task TryLogExportAsync(string targetTable, CsvExportResult result)
+    {
+        try
+        {
+            await _operationLogger.LogExportAsync(
+                targetTable,
+                result.FilePath,
+                result.ExportedCount);
+        }
+        catch (Exception ex)
+        {
+            // 無言で握りつぶさない。技術的詳細は本番のログファイルへ残す。
+            ErrorDialogHelper.LogException(ex, "エクスポートの操作ログ記録");
         }
     }
 

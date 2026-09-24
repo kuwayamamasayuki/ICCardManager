@@ -704,6 +704,92 @@ public class DataExportImportViewModelTests : IDisposable
 
     #endregion
 
+    #region エクスポートの監査ログ記録の失敗を出力の失敗として扱わない（Issue #2111）
+
+    /// <summary>
+    /// Issue #2111: 監査ログの記録だけが失敗しても、出力済みのエクスポートを「失敗」と通知しないこと（欠陥を突く側）。
+    /// </summary>
+    /// <remarks>
+    /// 監査ログ記録はファイルの出力が確定した後の後処理。修正前は本体と同じ try の中にあったため、
+    /// operation_log への INSERT が失敗すると catch が成功表示を「エクスポートに失敗しました」で上書きし、
+    /// 職員が再実行していた（インポート側の Issue #1741 と同じ形）。
+    /// 失敗の注入は #1741 と同じくリポジトリ境界で行い、本番と同じ経路で例外を伝播させる。
+    /// 対になる「正常時は正しいテーブル名・パス・件数が記録されること」は Issue #2104 の Theory が表明している。
+    /// </remarks>
+    [Fact]
+    public async Task ExportToFileAsync_監査ログ記録の失敗をエクスポート失敗として通知しないこと()
+    {
+        // Arrange: operation_log への INSERT だけが失敗する ViewModel
+        var filePath = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "export_audit_failure.csv");
+        var dialogServiceMock = new Mock<IDialogService>();
+        var viewModel = CreateViewModelWithFailingAuditLog(dialogServiceMock);
+        viewModel.SelectedExportType = DataType.Cards;
+        _exportServiceMock
+            .Setup(x => x.ExportCardsAsync(filePath, It.IsAny<bool>()))
+            .ReturnsAsync(new CsvExportResult { Success = true, FilePath = filePath, ExportedCount = 3 });
+
+        bool? isBusyAtShowInformation = null;
+        dialogServiceMock
+            .Setup(d => d.ShowInformation(It.IsAny<string>(), It.IsAny<string>()))
+            .Callback(() => isBusyAtShowInformation = viewModel.IsBusy);
+
+        // Act
+        await viewModel.ExportToFileAsync(filePath);
+
+        // Assert: 出力は成功として扱われること（成功の表示を上書きしない）
+        viewModel.IsStatusError.Should().BeFalse();
+        viewModel.StatusMessage.Should().Be("エクスポート完了: 3件を出力しました");
+        viewModel.LastExportedFile.Should().Be(filePath);
+        dialogServiceMock.Verify(
+            d => d.ShowError(It.IsAny<string>(), It.IsAny<string>()),
+            Times.Never,
+            "ファイルは出力済みのためエラーとして通知してはならない");
+
+        // Assert: 通常どおりの完了ダイアログで出力先・件数を伝えること。
+        // 記録の成否は職員へ通知しない（操作ログ画面の Excel エクスポート、Issue #1787 と同じ判断。
+        // エクスポートの再実行はデータを壊さず、案内すべき復旧行動が無い）。
+        dialogServiceMock.Verify(
+            d => d.ShowInformation(
+                It.Is<string>(m => m.Contains(filePath) && m.Contains("3件")),
+                "エクスポート完了"),
+            Times.Once);
+        dialogServiceMock.Verify(
+            d => d.ShowWarning(It.IsAny<string>(), It.IsAny<string>()),
+            Times.Never);
+        isBusyAtShowInformation.Should().BeFalse("Issue #1383: ダイアログ表示時にはプログレスバーが閉じていること");
+    }
+
+    /// <summary>
+    /// Issue #2111: エクスポート中に画面のデータ種別が変わっても、監査ログの対象テーブルは実際に出力したデータになること。
+    /// </summary>
+    /// <remarks>
+    /// 修正前は監査ログのテーブル名を、出力の await の後に <c>SelectedExportType</c> から読み直していた。
+    /// データ種別のコンボボックスは処理中オーバーレイがあってもキーボードで操作できる（オーバーレイが塞ぐのは
+    /// マウスのヒットテストだけ）ため、別テーブルとして記録され得る。インポート側の Issue #1741
+    /// （<c>ExecuteImportAsync_await中にデータ種別が変わっても対象テーブルは実際の取込先になること</c>）と同じ形。
+    /// </remarks>
+    [Fact]
+    public async Task ExportToFileAsync_await中にデータ種別が変わっても対象テーブルは実際の出力元になること()
+    {
+        var filePath = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "export_type_switched.csv");
+        _viewModel.SelectedExportType = DataType.Cards;
+        _exportServiceMock
+            .Setup(x => x.ExportCardsAsync(filePath, It.IsAny<bool>()))
+            // 出力中に画面のデータ種別が切り替わる状況を再現する
+            .Callback(() => _viewModel.SelectedExportType = DataType.Staff)
+            .ReturnsAsync(new CsvExportResult { Success = true, FilePath = filePath, ExportedCount = 3 });
+
+        await _viewModel.ExportToFileAsync(filePath);
+
+        _viewModel.SelectedExportType.Should().Be(DataType.Staff, "前提: 実行中に種別が切り替わっていること");
+        var log = await GetSingleLogAsync(OperationLogger.Actions.Export);
+        log.TargetTable.Should().Be(
+            OperationLogger.Tables.IcCard,
+            "実際に出力したのはカードテーブルであるため");
+    }
+
+    #endregion
+
     #region OpenExportedFile / OpenExportFolder（Issue #1465）
 
     [Fact]
