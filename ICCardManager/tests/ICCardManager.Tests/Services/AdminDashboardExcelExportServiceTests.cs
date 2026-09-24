@@ -418,7 +418,7 @@ public class AdminDashboardExcelExportServiceTests : IDisposable
             "12000", "", "未出力", "2026/07/16");
         ReadRow(3).Should().Equal(
             new[] { "nimoca 002", "在庫", "", "", "", "", "2500", "○", "出力済み", "" },
-            "在庫のカードに貸出の情報や最終利用日を書くと誤読される");
+            "値の無い項目（貸出職員・貸出日時・経過日数・最終利用日）は空欄で書く");
         sheet.Cell(2, 5).DataType.Should().Be(XLDataType.Number, "経過日数は並べ替え・集計できる数値で書く");
         sheet.Cell(2, 7).DataType.Should().Be(XLDataType.Number);
         sheet.Cell(4, 1).GetString().Should().BeEmpty("カードの枚数ぶんだけ行を書く");

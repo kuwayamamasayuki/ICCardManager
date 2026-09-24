@@ -51,6 +51,9 @@ public class BusTextConfigurationConsumerTests : IDisposable
     /// </summary>
     private readonly List<DbContext> _dbContexts = new();
 
+    /// <summary>バス停入力の保存で、明細・摘要の書き込みが受け取ったトランザクション（呼ばれた順）</summary>
+    private readonly List<SQLiteTransaction> _persistTransactions = new();
+
     public void Dispose()
     {
         SummaryGenerator.ResetToDefaults();
@@ -257,10 +260,16 @@ public class BusTextConfigurationConsumerTests : IDisposable
     /// <remarks>
     /// 旧版はメモリ上の <see cref="LedgerDetail.BusStops"/> しか見ておらず、保存経路が入力欄の値
     /// （空欄）を書く退行や、保存そのものを呼ばない退行でも緑だった。
-    /// 書き込みは 1 つのトランザクションで行う（Issue #1945）ため、非 null の tx で呼ばれたことも併せて見る。
+    /// 書き込みは 1 つのトランザクションで行う（Issue #1945）ため、2 つの書き込みが受け取った tx が
+    /// 非 null かつ<b>同一のインスタンス</b>であることも併せて見る（非 null だけでは、明細だけを
+    /// 先に別のトランザクションでコミットする退行を見逃す。testing.md #2103「参照の同一性を表明する」）。
     /// </remarks>
-    private static void VerifyPersisted(Mock<ILedgerRepository> ledgerRepo)
+    private void VerifyPersisted(Mock<ILedgerRepository> ledgerRepo)
     {
+        _persistTransactions.Should().HaveCount(2, "明細のバス停名と摘要の 2 つを書く");
+        _persistTransactions[0].Should().NotBeNull();
+        _persistTransactions[1].Should().BeSameAs(_persistTransactions[0], "明細と摘要は同じトランザクションで書く");
+
         // 式ツリーにはタプルリテラルを書けないため、期待値は外で組み立てる
         var expectedUpdates = new List<(int SequenceNumber, string BusStops)> { (1, CustomPlaceholder) };
         var expectedSummary = $"{CustomBusLabel}（{CustomPlaceholder}）";
@@ -314,8 +323,12 @@ public class BusTextConfigurationConsumerTests : IDisposable
         ledgerRepo.Setup(r => r.UpdateDetailBusStopsAsync(
                 It.IsAny<int>(), It.IsAny<IEnumerable<(int SequenceNumber, string BusStops)>>(),
                 It.IsAny<SQLiteTransaction>()))
+            .Callback<int, IEnumerable<(int SequenceNumber, string BusStops)>, SQLiteTransaction>(
+                (_, _, tx) => _persistTransactions.Add(tx))
             .ReturnsAsync(true);
-        ledgerRepo.Setup(r => r.UpdateAsync(It.IsAny<Ledger>(), It.IsAny<SQLiteTransaction>())).ReturnsAsync(true);
+        ledgerRepo.Setup(r => r.UpdateAsync(It.IsAny<Ledger>(), It.IsAny<SQLiteTransaction>()))
+            .Callback<Ledger, SQLiteTransaction>((_, tx) => _persistTransactions.Add(tx))
+            .ReturnsAsync(true);
         ledgerRepo.Setup(r => r.GetByIdAsync(It.IsAny<int>()))
             .ReturnsAsync((Ledger)null);
 

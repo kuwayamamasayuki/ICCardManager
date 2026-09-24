@@ -1,11 +1,11 @@
 using System;
-using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Linq;
 using System.Runtime.CompilerServices;
 using System.Threading.Tasks;
 using FluentAssertions;
 using ICCardManager.Common;
+using ICCardManager.Tests.Infrastructure;
 using Xunit;
 
 namespace ICCardManager.Tests.Common;
@@ -88,7 +88,7 @@ public class DispatcherObservationTests
 
         // Act: Task への参照は下請けメソッドの中だけに閉じ、テスト側からは例外だけを持つ
         var observedException = CreateFaultedTaskAndObserve(sink);
-        var controlException = CreateAbandonedFaultedTask();
+        var controlException = UnobservedTaskExceptionMonitor.CreateAbandonedFaultedTask();
 
         monitor.CollectUntilRaised(controlException);
 
@@ -139,7 +139,7 @@ public class DispatcherObservationTests
             throw loggingFailure;
         });
         act.Should().NotThrow();
-        var controlException = CreateAbandonedFaultedTask();
+        var controlException = UnobservedTaskExceptionMonitor.CreateAbandonedFaultedTask();
 
         monitor.CollectUntilRaised(controlException);
 
@@ -189,64 +189,5 @@ public class DispatcherObservationTests
         var exception = new InvalidOperationException("observed-" + Guid.NewGuid().ToString("N"));
         DispatcherObservation.Observe(Task.FromException(exception), "職員証の認証", sink);
         return exception;
-    }
-
-    /// <summary>対照: 誰も観測しない失敗 Task を作って手放し、例外だけを返す。</summary>
-    [MethodImpl(MethodImplOptions.NoInlining)]
-    private static Exception CreateAbandonedFaultedTask()
-    {
-        var exception = new InvalidOperationException("control-" + Guid.NewGuid().ToString("N"));
-        _ = Task.FromException(exception);
-        return exception;
-    }
-
-    /// <summary>
-    /// <see cref="TaskScheduler.UnobservedTaskException"/> で発火した例外を集める。
-    /// </summary>
-    /// <remarks>
-    /// イベントはプロセス全体で共有されるため、並列に走る別テストの発火も届く。
-    /// 判定は例外インスタンスの同一性で行い、他テストの発火を誤って数えない。
-    /// </remarks>
-    private sealed class UnobservedTaskExceptionMonitor : IDisposable
-    {
-        private readonly ConcurrentBag<Exception> _raised = new();
-
-        public UnobservedTaskExceptionMonitor()
-        {
-            TaskScheduler.UnobservedTaskException += OnUnobserved;
-        }
-
-        public bool WasRaised(Exception exception) => _raised.Any(e => ReferenceEquals(e, exception));
-
-        /// <summary>
-        /// 対照の発火が観測されるまで GC とファイナライザを回す（上限あり）。
-        /// </summary>
-        public void CollectUntilRaised(Exception control)
-        {
-            for (var i = 0; i < 20 && !WasRaised(control); i++)
-            {
-                GC.Collect();
-                GC.WaitForPendingFinalizers();
-                GC.Collect();
-            }
-
-            // 対照が発火した GC で、同時に手放した他方の Task も回収されている。
-            // 念のためもう 1 周回して、ファイナライザの取りこぼしを無くす。
-            GC.Collect();
-            GC.WaitForPendingFinalizers();
-        }
-
-        public void Dispose()
-        {
-            TaskScheduler.UnobservedTaskException -= OnUnobserved;
-        }
-
-        private void OnUnobserved(object? sender, UnobservedTaskExceptionEventArgs e)
-        {
-            foreach (var inner in e.Exception.Flatten().InnerExceptions)
-            {
-                _raised.Add(inner);
-            }
-        }
     }
 }

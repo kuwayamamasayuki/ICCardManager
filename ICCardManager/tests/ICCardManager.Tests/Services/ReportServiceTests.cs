@@ -1578,8 +1578,9 @@ public class ReportServiceTests : IDisposable
         // ファイル I/O 系の分岐（「ファイルの保存に失敗しました」）や共通失敗にはならない。
         result.Success.Should().BeFalse("無効な文字を含むパスでは帳票作成に失敗するべき");
         result.ErrorMessage.Should().Be("帳票の作成に失敗しました");
+        // 期待値はリテラルで書く（本番の ToReason から作ると、その文言が空になる退行を検出できない）
         result.DetailedErrorMessage.Should().Be(
-            $"{ExceptionMessageFormatter.ToReason(new ArgumentException())}\n\n詳細はログファイルを確認してください。");
+            "入力された値に問題があります。\n\n詳細はログファイルを確認してください。");
         result.IsCommonFailure.Should().BeFalse("不正なパスはこのカードの出力先に固有の失敗であり、一括作成を中断させない");
     }
 
@@ -1605,8 +1606,12 @@ public class ReportServiceTests : IDisposable
         // Issue #2106: カード未登録の分岐（Issue #2049）の文言と完全一致で比べる。
         // 「空でない」だけでは、例外分岐の「帳票の作成に失敗しました」へ落ちても緑になる。
         result.Success.Should().BeFalse("存在しないカードでは帳票作成に失敗するべき");
-        result.ErrorMessage.Should().Be(ReportCardNotFoundMessage.Headline);
-        result.DetailedErrorMessage.Should().Be(ReportCardNotFoundMessage.Detail);
+        // 期待値はリテラルで書く（本番の定数から作ると、定数が空になる退行を検出できない）
+        result.ErrorMessage.Should().Be("交通系ICカードが登録されていません。帳票作成画面を開き直してください");
+        result.DetailedErrorMessage.Should().Be(
+            "対象の交通系ICカードがデータベースに見つかりません。" +
+            "画面に表示中の一覧が、データベースの登録内容と食い違っている可能性があります。" +
+            "帳票作成画面を開き直し、一覧から対象の交通系ICカードを選び直してください。");
         result.IsCommonFailure.Should().BeFalse("カード未登録は 1 枚に固有の失敗であり、一括作成を中断させない");
         File.Exists(outputPath).Should().BeFalse("カードが無ければ帳票ファイルを作らない");
     }

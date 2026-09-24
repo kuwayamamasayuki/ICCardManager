@@ -140,7 +140,9 @@ public class SettingsRepositorySaveTransactionTests : IDisposable
     /// DepartmentType は摘要の「旅費によりチャージ／役務費によりチャージ」を左右する。
     /// 書き込み側（*ToString）と読み込み側（Parse*）の対応がずれると、保存は成功しても
     /// 読み返しで既定値へ落ちる。キーの生値だけでなく、読み込み経路を通した往復で表明する。
-    /// 読み返しはキャッシュを持たない別インスタンスで行い、in-memory の値を見ていないことを保証する。
+    /// 読み返しは別インスタンスで行う。キャッシュのモックは常にファクトリを呼ぶ（＝毎回 DB を読む）ので、
+    /// 保存した <see cref="AppSettings"/> インスタンスではなく DB から組み立てた値を見ていることは
+    /// <c>NotBeSameAs</c> と各値の一致で表明する。
     /// </remarks>
     [Fact]
     public async Task SaveAppSettingsAsync_RoundTripThroughDb_RestoresNonDefaultEnumsAndWindowSettings()
@@ -197,7 +199,7 @@ public class SettingsRepositorySaveTransactionTests : IDisposable
         {
             var settings = CreateValidSettings();
             settings.DepartmentType = department;
-            await _repository.SaveAppSettingsAsync(settings);
+            (await _repository.SaveAppSettingsAsync(settings)).Should().BeTrue();
             (await _repository.GetAppSettingsAsync()).DepartmentType.Should().Be(department);
         }
 
@@ -205,7 +207,7 @@ public class SettingsRepositorySaveTransactionTests : IDisposable
         {
             var settings = CreateValidSettings();
             settings.SoundMode = sound;
-            await _repository.SaveAppSettingsAsync(settings);
+            (await _repository.SaveAppSettingsAsync(settings)).Should().BeTrue();
             (await _repository.GetAppSettingsAsync()).SoundMode.Should().Be(sound);
         }
 
@@ -213,7 +215,7 @@ public class SettingsRepositorySaveTransactionTests : IDisposable
         {
             var settings = CreateValidSettings();
             settings.ToastPosition = position;
-            await _repository.SaveAppSettingsAsync(settings);
+            (await _repository.SaveAppSettingsAsync(settings)).Should().BeTrue();
             (await _repository.GetAppSettingsAsync()).ToastPosition.Should().Be(position);
         }
     }

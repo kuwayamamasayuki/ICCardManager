@@ -444,7 +444,7 @@ public class AppExceptionTests
     /// 例外ごとの具体値で表明する。
     /// </remarks>
     [Fact]
-    public void AllCustomExceptions_Exceptionとして捕捉しても整備済み文言とエラーコードを保つこと()
+    public void AllCustomExceptions_汎用ハンドラーのToUserMessageは基底型で受けても各例外の整備済み文言を使うこと()
     {
         var cases = new (Func<Exception> Create, string ErrorCode, string UserFriendlyMessage)[]
         {
@@ -470,11 +470,10 @@ public class AppExceptionTests
                 caught = ex;
             }
 
-            var appException = caught.Should().BeAssignableTo<AppException>().Subject;
-            appException.ErrorCode.Should().Be(errorCode);
-            appException.UserFriendlyMessage.Should().Be(userFriendlyMessage);
-            ICCardManager.Common.ExceptionMessageFormatter.ToUserMessage(appException, "処理")
+            // 汎用ハンドラーと同じく、静的な型が Exception のまま渡す
+            ICCardManager.Common.ExceptionMessageFormatter.ToUserMessage(caught!, "処理")
                 .Should().Be(userFriendlyMessage, "汎用ハンドラーは基底型で受けても整備済みの文言を使う");
+            caught.Should().BeAssignableTo<AppException>().Which.ErrorCode.Should().Be(errorCode);
         }
     }
 

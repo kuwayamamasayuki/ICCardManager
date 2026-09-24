@@ -581,8 +581,10 @@ public class ConnectionDiagnosticsServiceTests : IDisposable
 
         var report = await service.RunDiagnosticsAsync();
 
-        service.ProbedFolders.Should().Equal(new string[] { null }, "解決できなかった保存先を別のパスで代用しない");
-        service.FreeSpaceFolders.Should().Equal(new string[] { null });
+        // 「null のまま実測メソッドへ渡す」か「null なら実測を呼ばない」かは本体の自由。
+        // 固定したいのは「解決できなかった保存先を別のパスで代用しない」ことだけ
+        service.ProbedFolders.Should().OnlyContain(f => f == null, "解決できなかった保存先を別のパスで代用しない");
+        service.FreeSpaceFolders.Should().OnlyContain(f => f == null);
         var item = report.Items.Single(i => i.Kind == DiagnosticItemKind.BackupFolderWritable);
         item.Status.Should().Be(DiagnosticStatus.Error);
         item.SummaryText.Should().Be("保存先が特定できません");

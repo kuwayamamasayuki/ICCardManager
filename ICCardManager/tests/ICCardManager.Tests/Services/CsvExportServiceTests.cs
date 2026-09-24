@@ -1,4 +1,6 @@
-﻿using Microsoft.Extensions.Logging.Abstractions;
+﻿using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
+using ICCardManager.Tests.Infrastructure;
 using System.IO;
 using System.Text;
 using FluentAssertions;
@@ -1366,13 +1368,22 @@ public class CsvExportServiceTests : IDisposable
     public async Task ExportLedgerTemplateAsync_InvalidPath_ReturnsFailureWithOperationName()
     {
         var invalidPath = Path.Combine(_testDirectory, "nonexistent", "nested", "template.csv");
+        var logger = new RecordingLogger<CsvExportService>();
+        var service = new CsvExportService(
+            _cardRepositoryMock.Object, _staffRepositoryMock.Object, _ledgerRepositoryMock.Object, logger);
 
-        var result = await _service.ExportLedgerTemplateAsync(invalidPath, "0123456789ABCDEF", "H-007");
+        var result = await service.ExportLedgerTemplateAsync(invalidPath, "0123456789ABCDEF", "H-007");
 
         result.Success.Should().BeFalse();
         result.FilePath.Should().Be(invalidPath);
-        result.ErrorMessage.Should().Contain("取込用テンプレートの出力");
+        // フォルダーが無い（DirectoryNotFoundException は IOException の派生）ので、ファイル I/O の分岐の文言になる
+        result.ErrorMessage.Should().Be(
+            "取込用テンプレートの出力に失敗しました。ファイルの読み書き中に問題が発生しました。" +
+            "対象のファイルが他のプログラムで開かれていないか確認し、しばらく待ってから再度実行してください。");
         File.Exists(invalidPath).Should().BeFalse();
+        // 生の例外メッセージを画面から外した以上、技術的詳細はログにしか残らない（#1820）
+        logger.Entries.Should().ContainSingle(e => e.Level == LogLevel.Error)
+            .Which.Exception.Should().BeOfType<DirectoryNotFoundException>();
     }
 
     #endregion
