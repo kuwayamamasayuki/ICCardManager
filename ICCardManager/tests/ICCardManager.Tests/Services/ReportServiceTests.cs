@@ -19,7 +19,11 @@ namespace ICCardManager.Tests.Services;
 /// <summary>
 /// ReportServiceの単体テスト
 /// </summary>
-[Collection(TemplateTempFileCollection.Name)]
+/// <remarks>
+/// Issue #2108: 一時テンプレートを消す <c>CleanupTempFiles</c> のテストを <c>TemplateResolverTests</c> へ移し、
+/// 直列のコレクション（<see cref="TemplateTempFileCollection"/>）から外した。帳票作成は出力フォルダーの
+/// 実テンプレートを使うので、並列に走っても一時テンプレートの掃除と干渉しない。
+/// </remarks>
 public class ReportServiceTests : IDisposable
 {
     private readonly Mock<ICardRepository> _cardRepositoryMock;
@@ -1541,6 +1545,33 @@ public class ReportServiceTests : IDisposable
     }
 
     /// <summary>
+    /// このクラスを直列のコレクションに入れない前提: テスト環境の帳票作成は、どの部局のテンプレートも
+    /// 一時フォルダーへ展開せず出力フォルダーの実ファイルを使うこと（Issue #2108）。
+    /// </summary>
+    /// <remarks>
+    /// 一時テンプレートへ展開する経路に落ちると、並列に走る <c>TemplateResolverTests</c> の
+    /// <c>CleanupTempFiles</c> が読んでいる途中のファイルを消し、帳票作成が偶発的に失敗する（Issue #2050）。
+    /// そうなった場合はこのテストが先に赤くなり、コレクションへ戻す必要があることを知らせる。
+    /// </remarks>
+    [Fact]
+    [Trait("Category", "Integration")]
+    public void TemplateResolver_テスト環境ではどの部局も一時テンプレートへ展開しないこと()
+    {
+        var tempDir = Path.Combine(Path.GetTempPath(), "ICCardManager");
+        var departments = Enum.GetValues(typeof(DepartmentType)).Cast<DepartmentType>().ToList();
+        departments.Should().HaveCountGreaterThan(1, "市長事務部局・企業会計部局の両方を確かめる");
+
+        foreach (var department in departments)
+        {
+            var templatePath = TemplateResolver.ResolveTemplatePath(department);
+
+            File.Exists(templatePath).Should().BeTrue();
+            Path.GetFullPath(templatePath).Should().NotStartWith(Path.GetFullPath(tempDir),
+                $"{department} のテンプレートが一時フォルダーへ展開されると、並列の掃除と干渉する");
+        }
+    }
+
+    /// <summary>
     /// 無効な出力パス（不正な文字を含む）でのReportService呼び出し時のエラーハンドリング
     /// </summary>
     /// <remarks>
@@ -1647,41 +1678,6 @@ public class ReportServiceTests : IDisposable
             result.Success.Should().BeTrue($"帳票作成が成功するべき: {outputPath}");
             File.Exists(outputPath).Should().BeTrue($"出力ファイルが存在するべき: {outputPath}");
         }
-    }
-
-    /// <summary>
-    /// ReportService呼び出し後もTemplateResolverのクリーンアップが正常に動作する
-    /// </summary>
-    [Fact]
-    [Trait("Category", "Integration")]
-    public async Task TemplateResolver_AfterReportCreation_CleanupWorksCorrectly()
-    {
-        // Arrange
-        var cardIdm = "0102030405060708";
-        var card = CreateTestCard(cardIdm);
-        var outputPath = CreateTempFilePath();
-
-        var ledgers = new List<Ledger>
-        {
-            CreateTestLedger(1, cardIdm, new DateTime(2024, 1, 10), "鉄道（博多～天神）", 0, 500, 9500)
-        };
-
-        _cardRepositoryMock
-            .Setup(r => r.GetByIdmAsync(cardIdm, true))
-            .ReturnsAsync(card);
-        _ledgerRepositoryMock
-            .Setup(r => r.GetByMonthAsync(cardIdm, 2024, 1))
-            .ReturnsAsync(ledgers);
-
-        // Act - 帳票作成
-        var result = await _reportService.CreateMonthlyReportAsync(cardIdm, 2024, 1, outputPath);
-
-        // Act - クリーンアップ実行
-        var cleanupAction = () => TemplateResolver.CleanupTempFiles();
-
-        // Assert
-        result.Success.Should().BeTrue();
-        cleanupAction.Should().NotThrow("帳票作成後もクリーンアップがエラーなく実行されるべき");
     }
 
     /// <summary>

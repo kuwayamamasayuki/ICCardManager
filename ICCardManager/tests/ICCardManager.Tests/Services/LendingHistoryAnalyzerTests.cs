@@ -563,6 +563,36 @@ public class LendingHistoryAnalyzerTests
             .Should().BeTrue();
     }
 
+    /// <summary>
+    /// 履歴が空 → 完全（false）。取り込む履歴が無いことを「押し出された」とは言わない
+    /// </summary>
+    /// <remarks>Issue #2108: LendingServiceTests にあった同じ観点の重複テストからこちらへ移した。</remarks>
+    [Fact]
+    public void CheckHistoryCompleteness_Empty_ReturnsFalse()
+    {
+        LendingHistoryAnalyzer.CheckHistoryCompleteness(new List<LedgerDetail>(), new DateTime(2026, 4, 1))
+            .Should().BeFalse();
+    }
+
+    /// <summary>
+    /// 20件のうち日付のあるものがすべて今月以降で、残りが日付なし → 不完全の可能性（true）。
+    /// 日付なしの履歴を「先月以前」と数えないこと
+    /// </summary>
+    /// <remarks>Issue #2108: LendingServiceTests にあった同じ観点の重複テストからこちらへ移した。</remarks>
+    [Fact]
+    public void CheckHistoryCompleteness_CurrentMonthAndNullDates_ReturnsTrue()
+    {
+        var monthStart = new DateTime(2026, 4, 1);
+        var details = Enumerable.Range(0, 18)
+            .Select(i => Detail(monthStart.AddDays(i), 200, 1000))
+            .ToList();
+        details.Add(Detail(null, 200, 1000));
+        details.Add(Detail(null, 200, 1000));
+
+        LendingHistoryAnalyzer.CheckHistoryCompleteness(details, monthStart)
+            .Should().BeTrue();
+    }
+
     #endregion
 
     #region SortChronologically

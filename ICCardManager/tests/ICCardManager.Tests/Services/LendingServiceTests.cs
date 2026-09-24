@@ -1,5 +1,6 @@
 ﻿using FluentAssertions;
 using ICCardManager.Data;
+using ICCardManager.Tests.Infrastructure.Timing;
 using ICCardManager.Data.Repositories;
 using ICCardManager.Infrastructure.Security;
 using ICCardManager.Models;
@@ -27,6 +28,7 @@ namespace ICCardManager.Tests.Services;
 public class LendingServiceTests : IDisposable
 {
     private readonly DbContext _dbContext;
+    private readonly RecordingRetryDelay _retryDelay;
     private readonly Mock<ICardRepository> _cardRepositoryMock;
     private readonly Mock<IStaffRepository> _staffRepositoryMock;
     private readonly Mock<ILedgerRepository> _ledgerRepositoryMock;
@@ -45,6 +47,8 @@ public class LendingServiceTests : IDisposable
         // in-memory SQLiteを使用
         _dbContext = new DbContext(":memory:");
         _dbContext.InitializeDatabase();
+        // Issue #2108: ExecuteWithRetryAsync のバックオフを実際に待たず、要求された待機時間を記録する
+        _retryDelay = RecordingRetryDelay.AttachTo(_dbContext);
 
         _cardRepositoryMock = new Mock<ICardRepository>();
         _staffRepositoryMock = new Mock<IStaffRepository>();
@@ -1619,6 +1623,8 @@ public class LendingServiceTests : IDisposable
 
         // リトライが実際に発生したことを表明する（発生していなければこのテストは重複の有無を何も検証していない）
         deleteLentRecordsCalls.Should().Be(2, "1回目は SQLITE_BUSY、2回目のリトライで成功していること");
+        _retryDelay.Delays.Should().Equal(new[] { DbContext.LocalRetryDelays[0] },
+            "1 回だけ失敗させたので、バックオフの先頭の時間を 1 回だけ待つこと");
 
         // ロールバック済みの1回目分が残らず、成功した2回目の分だけが積まれること
         result.CreatedLedgers.Should().HaveCount(1,
@@ -1786,7 +1792,11 @@ public class LendingServiceTests : IDisposable
             .ReturnsAsync(card);
         _staffRepositoryMock.Setup(x => x.GetByIdmAsync(TestStaffIdm, false))
             .ReturnsAsync(staff);
+        // Issue #2108: Task1 がロックを取得して InsertAsync に到達したことを合図で受け取る
+        // （固定時間の待機は遅いマシンで Task1 より先に Task2 がロックを取る競合を残す）
+        var insertReached = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
         _ledgerRepositoryMock.Setup(x => x.InsertAsync(It.IsAny<Ledger>()))
+            .Callback(() => insertReached.TrySetResult(true))
             .Returns(tcs.Task); // TaskCompletionSourceで完了を制御
         _cardRepositoryMock.Setup(x => x.UpdateLentStatusAsync(It.IsAny<string>(), It.IsAny<bool>(), It.IsAny<DateTime?>(), It.IsAny<string?>()))
             .ReturnsAsync(true);
@@ -1805,7 +1815,8 @@ public class LendingServiceTests : IDisposable
 
         // Act - 最初の処理を開始し、ロックを保持させる
         var task1 = shortTimeoutService.LendAsync(TestStaffIdm, timeoutCardIdm);
-        await Task.Delay(30); // Task1がロックを取得しInsertAsyncに到達するまで待機
+        var reached = await Task.WhenAny(insertReached.Task, Task.Delay(TimeSpan.FromSeconds(10)));
+        reached.Should().BeSameAs(insertReached.Task, "Task1 がロックを取得して InsertAsync に到達していること");
 
         // 2つ目の処理を開始 - タイムアウトするはず
         var task2 = shortTimeoutService.LendAsync(TestStaffIdm, timeoutCardIdm);
@@ -2537,138 +2548,8 @@ public class LendingServiceTests : IDisposable
 
     #region 履歴完全性チェックテスト（Issue #596）
 
-    /// <summary>
-    /// 20件すべてが今月の履歴の場合、不完全な可能性ありと判定されること
-    /// </summary>
-    [Fact]
-    public void CheckHistoryCompleteness_All20EntriesCurrentMonth_ReturnsTrue()
-    {
-        // Arrange
-        var currentMonthStart = new DateTime(2026, 2, 1);
-        var details = Enumerable.Range(1, 20).Select(i => new LedgerDetail
-        {
-            UseDate = new DateTime(2026, 2, i),
-            Balance = 1000 - i * 10,
-            Amount = 210
-        }).ToList();
-
-        // Act
-        var result = LendingService.CheckHistoryCompleteness(details, currentMonthStart);
-
-        // Assert
-        result.Should().BeTrue("20件すべてが今月なので、今月初旬の履歴が押し出されている可能性がある");
-    }
-
-    /// <summary>
-    /// 20件の中に先月以前の履歴がある場合、今月分は全件カバー済みと判定されること
-    /// </summary>
-    [Fact]
-    public void CheckHistoryCompleteness_HasPreCurrentMonthEntries_ReturnsFalse()
-    {
-        // Arrange
-        var currentMonthStart = new DateTime(2026, 2, 1);
-        var details = new List<LedgerDetail>();
-
-        // 今月分15件
-        for (int i = 1; i <= 15; i++)
-        {
-            details.Add(new LedgerDetail
-            {
-                UseDate = new DateTime(2026, 2, i),
-                Balance = 1000 - i * 10,
-                Amount = 210
-            });
-        }
-        // 先月分5件
-        for (int i = 27; i <= 31; i++)
-        {
-            if (i <= 31)
-            {
-                details.Add(new LedgerDetail
-                {
-                    UseDate = new DateTime(2026, 1, Math.Min(i, 31)),
-                    Balance = 2000 - i * 10,
-                    Amount = 210
-                });
-            }
-        }
-
-        // Act
-        var result = LendingService.CheckHistoryCompleteness(details, currentMonthStart);
-
-        // Assert
-        result.Should().BeFalse("先月の履歴が含まれているので、今月分は全件カバー済み");
-    }
-
-    /// <summary>
-    /// 20件未満の履歴の場合、カード内の全履歴取得済みと判定されること
-    /// </summary>
-    [Fact]
-    public void CheckHistoryCompleteness_LessThan20Entries_ReturnsFalse()
-    {
-        // Arrange
-        var currentMonthStart = new DateTime(2026, 2, 1);
-        var details = Enumerable.Range(1, 15).Select(i => new LedgerDetail
-        {
-            UseDate = new DateTime(2026, 2, i),
-            Balance = 1000 - i * 10,
-            Amount = 210
-        }).ToList();
-
-        // Act
-        var result = LendingService.CheckHistoryCompleteness(details, currentMonthStart);
-
-        // Assert
-        result.Should().BeFalse("20件未満なのでカード内の全履歴を取得済み");
-    }
-
-    /// <summary>
-    /// 空の履歴の場合、不完全とは判定されないこと
-    /// </summary>
-    [Fact]
-    public void CheckHistoryCompleteness_EmptyHistory_ReturnsFalse()
-    {
-        // Arrange
-        var currentMonthStart = new DateTime(2026, 2, 1);
-        var details = new List<LedgerDetail>();
-
-        // Act
-        var result = LendingService.CheckHistoryCompleteness(details, currentMonthStart);
-
-        // Assert
-        result.Should().BeFalse("空の履歴は不完全とは判定されない");
-    }
-
-    /// <summary>
-    /// 日付なしのエントリを含む場合でも正しく判定されること
-    /// </summary>
-    [Fact]
-    public void CheckHistoryCompleteness_WithNullDates_HandledCorrectly()
-    {
-        // Arrange
-        var currentMonthStart = new DateTime(2026, 2, 1);
-        var details = new List<LedgerDetail>();
-
-        // 今月分18件
-        for (int i = 1; i <= 18; i++)
-        {
-            details.Add(new LedgerDetail
-            {
-                UseDate = new DateTime(2026, 2, i),
-                Balance = 1000 - i * 10,
-                Amount = 210
-            });
-        }
-        // 日付なし2件
-        details.Add(new LedgerDetail { UseDate = null, Balance = 500 });
-        details.Add(new LedgerDetail { UseDate = null, Balance = 400 });
-
-        // Act
-        var result = LendingService.CheckHistoryCompleteness(details, currentMonthStart);
-
-        // Assert
-        result.Should().BeTrue("日付のあるエントリがすべて今月なので、不完全の可能性あり");
-    }
+    // Issue #2108: CheckHistoryCompleteness（純関数）の判定表は LendingHistoryAnalyzerTests に一本化した。
+    // ここには LendingService が判定結果を MayHaveIncompleteHistory へ反映する経路のテストだけを置く。
 
     /// <summary>
     /// ReturnAsync で今月の既存レコードがない場合、MayHaveIncompleteHistoryが設定されること

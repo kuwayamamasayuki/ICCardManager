@@ -38,7 +38,6 @@ public class DataExportImportViewModelTests : IDisposable
     private readonly Mock<CsvImportService> _importServiceMock;
     private readonly Mock<CsvExportService> _exportServiceMock;
     private readonly Mock<ICCardManager.Services.ISafeFileLauncher> _safeFileLauncherMock;
-    private readonly SQLiteConnection _connection;
     private readonly DbContext _realDbContext;
     private readonly OperationLogRepository _operationLogRepository;
     /// <summary>
@@ -59,17 +58,11 @@ public class DataExportImportViewModelTests : IDisposable
         _cacheServiceMock = new Mock<ICacheService>();
         _dialogServiceMock = new Mock<IDialogService>();
 
-        // SQLiteインメモリ接続（DbContextモックのトランザクション用）
-        // セマフォを保持しないConnectionLease/TransactionScopeを使用
-        _connection = new SQLiteConnection("Data Source=:memory:");
-        _connection.Open();
+        // 操作ログの書き込み先（実 DB）。取り込み本体（CsvImportService）はモックで、
+        // 仮想メソッドを差し替えて使うため BeginTransactionAsync は呼ばれない（Issue #2108 で未使用の
+        // トランザクションの準備を削除した）
         _realDbContext = new DbContext(":memory:");
         _realDbContext.InitializeDatabase();
-        var noOpLease = new ConnectionLease(_connection, () => { });
-        var noOpTransaction = _connection.BeginTransaction();
-        var transactionScope = new ICCardManager.Data.TransactionScope(noOpLease, noOpTransaction);
-        _dbContextMock.Setup(x => x.BeginTransactionAsync(It.IsAny<System.Threading.CancellationToken>()))
-            .ReturnsAsync(transactionScope);
 
         // CsvExportService（コンストラクタで必要だが、テスト対象ではない）
         _exportServiceMock = new Mock<CsvExportService>(
@@ -115,7 +108,6 @@ public class DataExportImportViewModelTests : IDisposable
 
     public void Dispose()
     {
-        _connection?.Dispose();
         _realDbContext?.Dispose();
     }
 

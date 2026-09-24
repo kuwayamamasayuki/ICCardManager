@@ -1387,7 +1387,8 @@ ON CONFLICT(key) DO UPDATE SET value = excluded.value";
                     System.Diagnostics.Debug.WriteLine(
                         $"[DbContext] CleanupOldDataリトライ（{attempt + 1}/{delays.Length}回目、{totalDelay}ms待機）: {ex.ResultCode}");
 #endif
-                    Thread.Sleep(totalDelay);
+                    // Issue #2108: 待機は差し替え口（RetryDelayAsync）を通す。同期メソッドなので完了を待つ
+                    RetryDelayAsync(totalDelay, CancellationToken.None).GetAwaiter().GetResult();
                 }
             }
         }
@@ -1647,6 +1648,23 @@ ON CONFLICT(key) DO UPDATE SET value = excluded.value";
         internal static readonly int[] SharedRetryDelays = { 200, 500, 1000, 2000, 5000 };
 
         /// <summary>
+        /// リトライの間の待機を行う処理（Issue #2108）。既定は <see cref="Task.Delay(int, CancellationToken)"/>。
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// テストはここを「待たずに要求された待機時間を記録する」実装へ差し替える。
+        /// 待機時間の配列（<see cref="LocalRetryDelays"/> / <see cref="SharedRetryDelays"/>）を
+        /// 空や 0 へ差し替える形にしないのは、配列の長さが<b>リトライ回数そのもの</b>であり、
+        /// 値が<b>検証したいバックオフの仕様</b>だからである。待機の実行だけを差し替えれば、
+        /// テストは実時間を使わずに「何回・何ミリ秒待とうとしたか」を表明できる。
+        /// </para>
+        /// <para>
+        /// 同期版の <see cref="CleanupOldData"/> もこの処理の完了を待って使う（差し替え口を 1 つに保つ）。
+        /// </para>
+        /// </remarks>
+        internal Func<int, CancellationToken, Task> RetryDelayAsync { get; set; } = Task.Delay;
+
+        /// <summary>
         /// 一過性のロック競合（SQLITE_BUSY / SQLITE_LOCKED）かどうかを判定する（Issue #1951）
         /// </summary>
         /// <remarks>
@@ -1765,7 +1783,7 @@ ON CONFLICT(key) DO UPDATE SET value = excluded.value";
                     System.Diagnostics.Debug.WriteLine(
                         $"[DbContext] DB操作リトライ（{attempt + 1}/{delays.Length}回目、{totalDelay}ms待機）: {ex.ResultCode}");
 #endif
-                    await Task.Delay(totalDelay, cancellationToken).ConfigureAwait(false);
+                    await RetryDelayAsync(totalDelay, cancellationToken).ConfigureAwait(false);
                 }
             }
         }

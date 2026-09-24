@@ -4,6 +4,7 @@ using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Text.RegularExpressions;
+using System.Threading;
 using FluentAssertions;
 using ICCardManager.Tests.Views.Helpers;
 using Xunit;
@@ -804,7 +805,15 @@ private void Apply(bool isError)
     #region ヘルパー
 
     /// <summary>本番 XAML 全体から「文字色 × 実際に載る地色」の組を集める。</summary>
-    private static IReadOnlyList<XamlSurfacePairs.SurfacePair> CollectSurfacePairs()
+    /// <remarks>
+    /// Issue #2108: 集計は入力（本番ソース）が同じなら結果も同じなので、クラスの複数のテストで 1 回だけ行う。
+    /// </remarks>
+    private static IReadOnlyList<XamlSurfacePairs.SurfacePair> CollectSurfacePairs() => SurfacePairsCache.Value;
+
+    private static readonly Lazy<IReadOnlyList<XamlSurfacePairs.SurfacePair>> SurfacePairsCache =
+        new Lazy<IReadOnlyList<XamlSurfacePairs.SurfacePair>>(CollectSurfacePairsCore, LazyThreadSafetyMode.ExecutionAndPublication);
+
+    private static IReadOnlyList<XamlSurfacePairs.SurfacePair> CollectSurfacePairsCore()
     {
         var pairs = new List<XamlSurfacePairs.SurfacePair>();
         var tooComplex = new List<string>();
@@ -933,14 +942,21 @@ private void Apply(bool isError)
         public List<string> Sources { get; }
     }
 
-    private static string ProductionRoot => TestPaths.GetProductionSourceRoot();
-
     private static string AccessibilityStylesPath => AccessibilityBrushes.StylesPath;
 
     /// <summary>
     /// 本番ソース全体から、文字色として参照されているリソースキーと参照元を集める。
     /// </summary>
-    private static IReadOnlyList<ForegroundUsage> CollectForegroundUsages()
+    /// <remarks>
+    /// Issue #2108: 本番ソース全体（C# と XAML）を走査する重い集計で、旧実装は 3 つのテストがそれぞれ
+    /// 実行していた（1 回あたり十数秒）。クラス内で 1 回だけ行い、結果を共有する。
+    /// </remarks>
+    private static IReadOnlyList<ForegroundUsage> CollectForegroundUsages() => ForegroundUsagesCache.Value;
+
+    private static readonly Lazy<IReadOnlyList<ForegroundUsage>> ForegroundUsagesCache =
+        new Lazy<IReadOnlyList<ForegroundUsage>>(CollectForegroundUsagesCore, LazyThreadSafetyMode.ExecutionAndPublication);
+
+    private static IReadOnlyList<ForegroundUsage> CollectForegroundUsagesCore()
     {
         var brushKeys = AccessibilityBrushes.Load().Keys.ToList();
         var usages = new Dictionary<string, ForegroundUsage>(StringComparer.Ordinal);
@@ -961,10 +977,10 @@ private void Apply(bool isError)
 
         // XAML: 属性形・Setter 形・Binding 形
         var boundPropertyNames = new List<string>();
-        foreach (var path in EnumerateProductionFiles("*.xaml"))
+        foreach (var file in ProductionSourceFiles.Xaml)
         {
-            var text = XamlElementInspection.StripXmlComments(File.ReadAllText(path));
-            var name = Path.GetFileName(path);
+            var text = XamlElementInspection.StripXmlComments(file.Text);
+            var name = file.Name;
 
             foreach (var key in ExtractXamlForegroundKeys(text))
             {
@@ -976,8 +992,8 @@ private void Apply(bool isError)
 
         // C#: .Foreground への代入・名前に Foreground を含むメンバー・バインド先のプロパティ
         var seeds = boundPropertyNames.Distinct(StringComparer.Ordinal).ToList();
-        var sources = EnumerateProductionFiles("*.cs")
-            .Select(p => (Name: Path.GetFileName(p), Text: StripCSharpComments(File.ReadAllText(p))))
+        var sources = ProductionSourceFiles.CSharp
+            .Select(f => (Name: f.Name, Text: StripCSharpComments(f.Text)))
             .ToList();
 
         foreach (var (key, file) in CollectFromCSharp(sources, brushKeys, seeds))
@@ -988,18 +1004,8 @@ private void Apply(bool isError)
         return usages.Values.ToList();
     }
 
-    private static IEnumerable<string> EnumerateProductionFiles(string pattern)
-        => Directory.GetFiles(ProductionRoot, pattern, SearchOption.AllDirectories)
-            .Where(p => !IsGeneratedOrIntermediate(p));
-
-    private static bool IsGeneratedOrIntermediate(string path)
-    {
-        var sep = Path.DirectorySeparatorChar;
-        return path.IndexOf(sep + "obj" + sep, StringComparison.Ordinal) >= 0
-            || path.IndexOf(sep + "bin" + sep, StringComparison.Ordinal) >= 0
-            || path.EndsWith(".g.cs", StringComparison.Ordinal)
-            || path.EndsWith(".g.i.cs", StringComparison.Ordinal);
-    }
+    // Issue #2108: 本番ソースの列挙・読み込みは ProductionSourceFiles へ寄せた。XAML から生成される
+    // .g.cs / .g.i.cs は obj 配下にしか無く、ProductionSourceFiles は bin / obj へ降りないので同時に除外される。
 
     #endregion
 

@@ -149,24 +149,14 @@ public class OrganizationOptionsUsageConventionTests
         return Regex.IsMatch(codeOnlySource, pattern);
     }
 
+    /// <remarks>
+    /// Issue #2108: Theory の 36 ケースそれぞれが本番ソース全体を読み込み・サニタイズし直していた。
+    /// 読み込みとコメント除去は <see cref="ProductionSourceFiles"/> がプロセスで 1 回だけ行う。
+    /// </remarks>
     private static Dictionary<string, string> LoadProductionSources()
-    {
-        var sources = new Dictionary<string, string>();
-
-        foreach (var path in Directory.EnumerateFiles(ProductionRoot, "*.cs", SearchOption.AllDirectories))
-        {
-            if (path.Contains($"{Path.DirectorySeparatorChar}obj{Path.DirectorySeparatorChar}") ||
-                path.Contains($"{Path.DirectorySeparatorChar}bin{Path.DirectorySeparatorChar}") ||
-                Path.GetFileName(path) == OptionsDeclarationFileName)
-            {
-                continue;
-            }
-
-            sources[path] = TestSourceInspection.RemoveCommentsPreservingLines(File.ReadAllText(path));
-        }
-
-        return sources;
-    }
+        => ProductionSourceFiles.CSharp
+            .Where(f => f.Name != OptionsDeclarationFileName)
+            .ToDictionary(f => f.FullPath, f => f.CommentsRemovedPreservingLines);
 
     #endregion
 }

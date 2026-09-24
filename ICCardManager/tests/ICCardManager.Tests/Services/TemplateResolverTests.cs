@@ -232,6 +232,31 @@ public class TemplateResolverTests : IDisposable
     }
 
     /// <summary>
+    /// 起動時の掃除（<see cref="TemplateResolver.CleanupTempFiles"/>）が展開済みのテンプレートを消しても、
+    /// 次の帳票作成では消えたパスを返さず展開し直すこと。
+    /// </summary>
+    /// <remarks>
+    /// Issue #2108: <c>ReportServiceTests</c> にあった「帳票作成後もクリーンアップがエラーなく実行される」
+    /// （<c>NotThrow</c> のみ）をここへ移した。テスト環境の帳票作成は出力フォルダーの実ファイルを使い
+    /// 一時テンプレートに触れないため、あの 1 件のために <c>ReportServiceTests</c>（約 100 件）全体を
+    /// 直列のコレクションに入れていた。掃除とキャッシュの関係は一時テンプレートを直接見て表明する。
+    /// </remarks>
+    [Fact]
+    [Trait("Category", "Unit")]
+    public void CleanupTempFiles_展開済みテンプレートを消しても次の展開で作り直すこと()
+    {
+        var first = TemplateResolver.ExtractEmbeddedTemplate(DepartmentType.MayorOffice);
+        var expectedBytes = File.ReadAllBytes(first);
+
+        TemplateResolver.CleanupTempFiles();
+
+        File.Exists(first).Should().BeFalse("掃除は展開済みの一時テンプレートを削除すること");
+        var second = TemplateResolver.ExtractEmbeddedTemplate(DepartmentType.MayorOffice);
+        second.Should().NotBe(first, "消えたパスをキャッシュから返さないこと");
+        File.ReadAllBytes(second).Should().Equal(expectedBytes);
+    }
+
+    /// <summary>
     /// 蓄積した一時テンプレート（ICCardManager_Template_*.xlsx）を実際に削除し、
     /// プレフィックスに一致しない無関係なファイルは残すこと（Issue #1600）。
     /// </summary>

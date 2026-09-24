@@ -127,8 +127,7 @@ public class ReportTemplateColumnLiteralConventionTests
 
         foreach (var file in EnumerateTemplateWidthConsumers())
         {
-            var code = TestSourceInspection.ToCodeOnlyPreservingLines(File.ReadAllText(file));
-            violations.AddRange(FindTemplateWidthLiterals(code).Select(f => $"{Path.GetFileName(file)}:{f}"));
+            violations.AddRange(FindTemplateWidthLiterals(file.CodeOnlyPreservingLines).Select(f => $"{file.Name}:{f}"));
         }
 
         violations.Should().BeEmpty(
@@ -139,15 +138,13 @@ public class ReportTemplateColumnLiteralConventionTests
     [Fact]
     public void 帳票幅を参照するファイルの導出が既知のファイルを含むこと()
     {
-        var names = EnumerateTemplateWidthConsumers().Select(Path.GetFileName).ToList();
+        var names = EnumerateTemplateWidthConsumers().Select(f => f.Name).ToList();
 
         names.Should().Contain(new[] { "ReportService.cs", "ExcelStyleFormatter.cs" },
             "導出した走査対象が縮んでいると、リテラルの検査が空振りする（#1786）");
     }
 
-    private static IEnumerable<string> EnumerateTemplateWidthConsumers()
-        => Directory.EnumerateFiles(TestPaths.GetProductionSourceRoot(), "*.cs", SearchOption.AllDirectories)
-            .Where(f => !f.Contains($"{Path.DirectorySeparatorChar}obj{Path.DirectorySeparatorChar}")
-                        && !f.Contains($"{Path.DirectorySeparatorChar}bin{Path.DirectorySeparatorChar}"))
-            .Where(f => TestSourceInspection.ToCodeOnly(File.ReadAllText(f)).Contains("TemplateLastColumn"));
+    /// <remarks>Issue #2108: 読み込みとサニタイズは <see cref="ProductionSourceFiles"/> がプロセスで 1 回だけ行う。</remarks>
+    private static IEnumerable<ProductionSourceFiles.SourceFile> EnumerateTemplateWidthConsumers()
+        => ProductionSourceFiles.CSharp.Where(f => f.CodeOnly.Contains("TemplateLastColumn"));
 }

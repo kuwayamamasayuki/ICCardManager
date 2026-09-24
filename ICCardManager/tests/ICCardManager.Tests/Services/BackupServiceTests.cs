@@ -762,9 +762,7 @@ public class BackupServiceTests : IDisposable
         // Act - 新しいバックアップを作成
         var result = await _service.ExecuteAutoBackupAsync();
 
-        // Assert
-        await Task.Delay(500);
-
+        // Assert（世代削除は ExecuteAutoBackupAsync の中で await 済みなので待機は要らない。Issue #2108）
         result.Should().NotBeNull();
         var backupFiles = Directory.GetFiles(_backupDirectory, "backup_*.db");
         backupFiles.Length.Should().Be(1);
@@ -790,9 +788,7 @@ public class BackupServiceTests : IDisposable
         // Act
         var result = await _service.ExecuteAutoBackupAsync();
 
-        // Assert
-        await Task.Delay(500);
-
+        // Assert（世代削除は ExecuteAutoBackupAsync の中で await 済みなので待機は要らない。Issue #2108）
         result.Should().NotBeNull();
         var backupFiles = Directory.GetFiles(_backupDirectory, "backup_*.db");
         backupFiles.Length.Should().Be(AppConstants.BackupRetentionDays);
@@ -819,9 +815,7 @@ public class BackupServiceTests : IDisposable
         // Act
         var result = await _service.ExecuteAutoBackupAsync();
 
-        // Assert
-        await Task.Delay(500);
-
+        // Assert（世代削除は ExecuteAutoBackupAsync の中で await 済みなので待機は要らない。Issue #2108）
         result.Should().NotBeNull();
         File.Exists(preRestorePath).Should().BeTrue(
             "リストア → 再起動 → 自動バックアップの流れで唯一の退避が同日中に消えてはならない");

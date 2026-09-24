@@ -304,13 +304,16 @@ public class InputSanitizerTests
     }
 
     /// <summary>
-    /// 50文字を超える職員名が切り詰められること
+    /// 50文字を超える職員名が切り詰められること（境界: 51 文字）
     /// </summary>
+    /// <remarks>
+    /// Issue #2108: InputSanitizerEdgeCaseTests にあった同じ観点のテスト（55 文字）を削除し、ここで境界の直上を見る。
+    /// </remarks>
     [Fact]
     public void SanitizeName_LongName_TruncatesTo50Characters()
     {
         // Arrange
-        var input = new string('あ', 60);
+        var input = new string('あ', 51);
 
         // Act
         var result = InputSanitizer.SanitizeName(input);
@@ -389,22 +392,6 @@ public class InputSanitizerTests
 
         // Assert
         result.Should().Be("テスト備考（記号含む：！＠＃）");
-    }
-
-    /// <summary>
-    /// 200文字を超える備考が切り詰められること
-    /// </summary>
-    [Fact]
-    public void SanitizeNote_LongNote_TruncatesTo200Characters()
-    {
-        // Arrange
-        var input = new string('あ', 250);
-
-        // Act
-        var result = InputSanitizer.SanitizeNote(input);
-
-        // Assert
-        result.Should().HaveLength(200);
     }
 
     /// <summary>

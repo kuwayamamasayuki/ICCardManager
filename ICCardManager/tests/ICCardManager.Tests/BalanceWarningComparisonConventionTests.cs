@@ -205,15 +205,15 @@ public class BalanceWarningComparisonConventionTests
         foreach (var file in EnumerateProductionSources())
         {
             // BalanceWarningPolicy.cs は比較の定義そのものを持つため対象外。
-            if (string.Equals(Path.GetFileName(file), "BalanceWarningPolicy.cs", StringComparison.OrdinalIgnoreCase))
+            if (string.Equals(file.Name, "BalanceWarningPolicy.cs", StringComparison.OrdinalIgnoreCase))
             {
                 continue;
             }
 
-            var code = TestSourceInspection.ToCodeOnly(File.ReadAllText(file));
+            var code = file.CodeOnly;
             foreach (var comparison in DetectInlineComparisons(code))
             {
-                violations.Add($"{Path.GetFileName(file)}: {comparison.Trim()}");
+                violations.Add($"{file.Name}: {comparison.Trim()}");
             }
         }
 
@@ -253,12 +253,12 @@ public class BalanceWarningComparisonConventionTests
 
         foreach (var file in EnumerateProductionSources())
         {
-            var code = TestSourceInspection.ToCodeOnlyPreservingLines(File.ReadAllText(file));
+            var code = file.CodeOnlyPreservingLines;
 
             foreach (Match match in WarningFlagAssignmentPattern.Matches(code))
             {
                 var rightHandSide = ExtractRightHandSide(code, match.Index + match.Length);
-                var location = $"{Path.GetFileName(file)}: {match.Value.Trim()}{rightHandSide.Trim()}";
+                var location = $"{file.Name}: {match.Value.Trim()}{rightHandSide.Trim()}";
 
                 assignments.Add(location);
                 if (!rightHandSide.Contains(CanonicalCall))
@@ -316,8 +316,7 @@ public class BalanceWarningComparisonConventionTests
         return code.Substring(startIndex);
     }
 
-    private static IEnumerable<string> EnumerateProductionSources()
-        => Directory.EnumerateFiles(TestPaths.GetProductionSourceRoot(), "*.cs", SearchOption.AllDirectories)
-            .Where(f => !f.Contains($"{Path.DirectorySeparatorChar}obj{Path.DirectorySeparatorChar}")
-                        && !f.Contains($"{Path.DirectorySeparatorChar}bin{Path.DirectorySeparatorChar}"));
+    /// <remarks>Issue #2108: 読み込みとサニタイズは <see cref="ProductionSourceFiles"/> がプロセスで 1 回だけ行う。</remarks>
+    private static IEnumerable<ProductionSourceFiles.SourceFile> EnumerateProductionSources()
+        => ProductionSourceFiles.CSharp;
 }

@@ -10,6 +10,7 @@ using ICCardManager.Dtos;
 using ICCardManager.Models;
 using ICCardManager.Services;
 using Moq;
+using ICCardManager.Tests.Infrastructure;
 using Xunit;
 
 namespace ICCardManager.Tests.Services;
@@ -514,43 +515,7 @@ public class AdminDashboardServiceTests
 
     #region GetOperationStatusAsync — SQLite の直列アクセス
 
-    /// <summary>
-    /// リポジトリ呼び出しの保持区間が重ならないことを数えるための計測器。
-    /// </summary>
-    /// <remarks>
-    /// 呼び出し「順序」だけを見る Moq の <c>MockSequence</c> では並列化のリグレッションを
-    /// 検出できない（<c>Task.WhenAll</c> へ書き換えても開始順序は変わらないため）。
-    /// 実際の同時実行数を数える方式は `DashboardServiceTests` の Issue #1452 回帰テストと同じ。
-    /// </remarks>
-    private sealed class ConcurrencyProbe
-    {
-        private readonly object _lock = new object();
-        private int _activeCalls;
-
-        public int MaxConcurrentCalls { get; private set; }
-
-        public async Task<T> TrackAsync<T>(T value)
-        {
-            lock (_lock)
-            {
-                _activeCalls++;
-                if (_activeCalls > MaxConcurrentCalls)
-                {
-                    MaxConcurrentCalls = _activeCalls;
-                }
-            }
-
-            // 並列があれば検出されるよう少し滞留させる
-            await Task.Delay(20).ConfigureAwait(false);
-
-            lock (_lock)
-            {
-                _activeCalls--;
-            }
-
-            return value;
-        }
-    }
+    // Issue #2108: 同時実行数の計測器は DashboardServiceTests と共通の Tests/Infrastructure/ConcurrencyProbe へ寄せた。
 
     [Fact]
     public async Task GetOperationStatusAsync_DoesNotOverlapRepositoryCalls()

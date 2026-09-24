@@ -84,15 +84,15 @@ public class CardOperationPopulationConventionTests
         foreach (var file in EnumerateProductionSources())
         {
             // IcCard.cs は IsInOperation の定義そのものを持つため対象外。
-            if (string.Equals(Path.GetFileName(file), "IcCard.cs", StringComparison.OrdinalIgnoreCase))
+            if (string.Equals(file.Name, "IcCard.cs", StringComparison.OrdinalIgnoreCase))
             {
                 continue;
             }
 
-            var code = TestSourceInspection.ToCodeOnly(File.ReadAllText(file));
+            var code = file.CodeOnly;
             if (InlinePredicatePattern.IsMatch(code))
             {
-                violations.Add(Path.GetFileName(file));
+                violations.Add(file.Name);
             }
         }
 
@@ -121,8 +121,7 @@ public class CardOperationPopulationConventionTests
         }
     }
 
-    private static IEnumerable<string> EnumerateProductionSources()
-        => Directory.EnumerateFiles(TestPaths.GetProductionSourceRoot(), "*.cs", SearchOption.AllDirectories)
-            .Where(f => !f.Contains($"{Path.DirectorySeparatorChar}obj{Path.DirectorySeparatorChar}")
-                        && !f.Contains($"{Path.DirectorySeparatorChar}bin{Path.DirectorySeparatorChar}"));
+    /// <remarks>Issue #2108: 読み込みとサニタイズは <see cref="ProductionSourceFiles"/> がプロセスで 1 回だけ行う。</remarks>
+    private static IEnumerable<ProductionSourceFiles.SourceFile> EnumerateProductionSources()
+        => ProductionSourceFiles.CSharp;
 }

@@ -115,7 +115,9 @@ public class BackupServiceRetentionTests : IDisposable
         {
             for (int run = 0; run < 30; run++)
             {
-                files.Add(CreateAutomaticBackup(newestDay.AddDays(-day).AddHours(8).AddMinutes(run)));
+                // Issue #2108: 900 件を実ファイルで作らない。自動バックアップの日時はファイル名だけで決まる
+                //（作成日時に依存しないことは「作成日時ではなくファイル名の日時で判定すること」が実ファイルで固定する）
+                files.Add(AutomaticBackupEntry(newestDay.AddDays(-day).AddHours(8).AddMinutes(run)));
             }
         }
 
@@ -303,6 +305,13 @@ public class BackupServiceRetentionTests : IDisposable
 
     private FileInfo CreateAutomaticBackup(DateTime timestamp) =>
         CreateBackup($"backup_{Stamp(timestamp)}.db");
+
+    /// <summary>
+    /// 実ファイルを作らない自動バックアップの <see cref="FileInfo"/>。<see cref="BackupService.SelectBackupsToDelete"/> は
+    /// 自動バックアップをファイル名だけで判定する（ファイルの中身・作成日時を読まない）ので、件数の多い入力に使う。
+    /// </summary>
+    private FileInfo AutomaticBackupEntry(DateTime timestamp) =>
+        new FileInfo(Path.Combine(_directory, $"backup_{Stamp(timestamp)}.db"));
 
     private List<FileInfo> CreateAutomaticBackupsForConsecutiveDays(DateTime newestDay, int dayCount) =>
         Enumerable.Range(0, dayCount)

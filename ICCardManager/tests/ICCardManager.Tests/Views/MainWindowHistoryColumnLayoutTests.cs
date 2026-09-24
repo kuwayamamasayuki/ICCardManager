@@ -1,5 +1,7 @@
+using System;
 using System.IO;
 using System.Linq;
+using System.Threading;
 using FluentAssertions;
 using ICCardManager.Tests.Views.Helpers;
 using Xunit;
@@ -173,12 +175,15 @@ public class MainWindowHistoryColumnLayoutTests
             "「博多 花子 外１名」（#1906）が収まらなかった");
     }
 
-    private static XamlElementInspection.XamlElement? FindColumn(string header)
-    {
-        var xaml = XamlElementInspection.StripXmlComments(
-            File.ReadAllText(ViewSourceLocator.Resolve(Path.Combine("Views", "MainWindow.xaml"))));
+    /// <summary>
+    /// コメントを除いた MainWindow.xaml。Theory の各ケースで読み直さず、クラスで 1 回だけ読む（Issue #2108）。
+    /// </summary>
+    private static readonly Lazy<string> MainWindowXaml = new Lazy<string>(
+        () => XamlElementInspection.StripXmlComments(
+            File.ReadAllText(ViewSourceLocator.Resolve(Path.Combine("Views", "MainWindow.xaml")))),
+        LazyThreadSafetyMode.ExecutionAndPublication);
 
-        return XamlElementInspection.EnumerateElements(xaml, "DataGridTextColumn")
+    private static XamlElementInspection.XamlElement? FindColumn(string header)
+        => XamlElementInspection.EnumerateElements(MainWindowXaml.Value, "DataGridTextColumn")
             .FirstOrDefault(c => XamlElementInspection.GetAttribute(c.StartTag, "Header") == header);
-    }
 }
