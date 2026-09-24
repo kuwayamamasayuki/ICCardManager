@@ -85,25 +85,29 @@ public class OperationLogRepositoryTests : IDisposable
 
     #region GetByDateRangeAsync テスト
 
+    /// <summary>
+    /// 期間の両端（開始日・終了日）を日単位で含み、前後の日を含まないこと（Issue #2106）。
+    /// </summary>
+    /// <remarks>
+    /// 終了日は「その日の 0:00」ではなく「その日いっぱい」を意味する。本体の SQL を
+    /// sargable 規約（#1834）に合わせて <c>timestamp &lt;= '2024-01-20'</c> と書き換えると、
+    /// 文字列比較では "2024-01-20 12:00:00" &gt; "2024-01-20" となり終了日の日中の行が落ちる。
+    /// どちらの形の SQL でも「終了日の昼・23:59:59 が含まれる」ことを、返る行の集合で表明する。
+    /// </remarks>
     [Fact]
-    public async Task GetByDateRangeAsync_WithLogsInRange_ReturnsLogs()
+    public async Task GetByDateRangeAsync_IncludesWholeFromAndToDays_ExcludesAdjacentDays()
     {
         // Arrange
-        var log1 = CreateTestLog(timestamp: new DateTime(2024, 1, 15, 10, 0, 0));
-        var log2 = CreateTestLog(timestamp: new DateTime(2024, 1, 20, 14, 30, 0));
-        var log3 = CreateTestLog(timestamp: new DateTime(2024, 2, 5, 9, 0, 0));
-
-        await _repository.InsertAsync(log1);
-        await _repository.InsertAsync(log2);
-        await _repository.InsertAsync(log3);
+        var ids = await SeedBoundaryLogsAsync();
 
         // Act
         var result = await _repository.GetByDateRangeAsync(
-            new DateTime(2024, 1, 1),
-            new DateTime(2024, 1, 31));
+            new DateTime(2024, 1, 10),
+            new DateTime(2024, 1, 20));
 
-        // Assert
-        result.Should().HaveCount(2);
+        // Assert: 範囲内の 4 件だけが、時刻の昇順で返る
+        result.Select(l => l.Id).Should().Equal(
+            ids.FromDayMidnight, ids.Middle, ids.ToDayNoon, ids.ToDayLastSecond);
     }
 
     [Fact]
@@ -197,10 +201,10 @@ public class OperationLogRepositoryTests : IDisposable
     #region SearchAsync テスト
 
     [Fact]
-    public async Task SearchFirstPageAsync_WithDateRange_FiltersCorrectly()
+    public async Task SearchFirstPageAsync_WithDateRange_IncludesWholeFromAndToDays_ExcludesAdjacentDays()
     {
-        // Arrange
-        await SeedTestLogs();
+        // Arrange: 境界日のデータ（GetByDateRangeAsync の同名テストの remarks を参照）
+        var ids = await SeedBoundaryLogsAsync();
 
         var criteria = new OperationLogSearchCriteria
         {
@@ -211,10 +215,30 @@ public class OperationLogRepositoryTests : IDisposable
         // Act
         var result = await _repository.SearchFirstPageAsync(criteria, pageSize: 100);
 
+        // Assert: 範囲内の 4 件だけ（前日 23:59:59 と翌日 0:00 は含まない）
+        result.Items.Select(l => l.Id).Should().Equal(
+            ids.FromDayMidnight, ids.Middle, ids.ToDayNoon, ids.ToDayLastSecond);
+        result.TotalCount.Should().Be(4);
+    }
+
+    [Fact]
+    public async Task SearchAllAsync_WithDateRange_IncludesWholeToDay()
+    {
+        // Arrange: エクスポート経路（SearchAllAsync）も同じ期間条件を使う
+        var ids = await SeedBoundaryLogsAsync();
+
+        var criteria = new OperationLogSearchCriteria
+        {
+            FromDate = new DateTime(2024, 1, 10),
+            ToDate = new DateTime(2024, 1, 20)
+        };
+
+        // Act
+        var result = await _repository.SearchAllAsync(criteria);
+
         // Assert
-        result.Items.Should().NotBeEmpty();
-        result.Items.All(l => l.Timestamp >= new DateTime(2024, 1, 10) &&
-                               l.Timestamp <= new DateTime(2024, 1, 20, 23, 59, 59)).Should().BeTrue();
+        result.Select(l => l.Id).Should().Equal(
+            ids.FromDayMidnight, ids.Middle, ids.ToDayNoon, ids.ToDayLastSecond);
     }
 
     [Fact]
@@ -714,21 +738,31 @@ public class OperationLogRepositoryTests : IDisposable
         };
     }
 
-    private async Task SeedTestLogs()
-    {
-        var logs = new[]
-        {
-            CreateTestLog(timestamp: new DateTime(2024, 1, 5, 9, 0, 0), action: "INSERT"),
-            CreateTestLog(timestamp: new DateTime(2024, 1, 15, 10, 0, 0), action: "UPDATE"),
-            CreateTestLog(timestamp: new DateTime(2024, 1, 20, 14, 30, 0), action: "DELETE"),
-            CreateTestLog(timestamp: new DateTime(2024, 2, 1, 9, 0, 0), action: "INSERT"),
-            CreateTestLog(timestamp: new DateTime(2024, 2, 15, 16, 0, 0), action: "UPDATE"),
-        };
+    /// <summary>
+    /// 期間 2024/1/10〜1/20 の境界に置いたログの ID。
+    /// </summary>
+    private sealed record BoundaryLogIds(
+        int DayBeforeLastSecond,
+        int FromDayMidnight,
+        int Middle,
+        int ToDayNoon,
+        int ToDayLastSecond,
+        int DayAfterMidnight);
 
-        foreach (var log in logs)
-        {
-            await _repository.InsertAsync(log);
-        }
+    /// <summary>
+    /// 期間 2024/1/10〜1/20 の境界（前日 23:59:59・開始日 0:00・中日・終了日の昼・終了日 23:59:59・翌日 0:00）に
+    /// 1 件ずつログを置く。挿入順を時刻順と食い違わせ、並びが id ではなく時刻で決まることも観測できるようにする。
+    /// </summary>
+    private async Task<BoundaryLogIds> SeedBoundaryLogsAsync()
+    {
+        var toDayNoon = await _repository.InsertAsync(CreateTestLog(timestamp: new DateTime(2024, 1, 20, 12, 0, 0)));
+        var dayAfter = await _repository.InsertAsync(CreateTestLog(timestamp: new DateTime(2024, 1, 21, 0, 0, 0)));
+        var middle = await _repository.InsertAsync(CreateTestLog(timestamp: new DateTime(2024, 1, 15, 10, 0, 0)));
+        var dayBefore = await _repository.InsertAsync(CreateTestLog(timestamp: new DateTime(2024, 1, 9, 23, 59, 59)));
+        var toDayLast = await _repository.InsertAsync(CreateTestLog(timestamp: new DateTime(2024, 1, 20, 23, 59, 59)));
+        var fromDay = await _repository.InsertAsync(CreateTestLog(timestamp: new DateTime(2024, 1, 10, 0, 0, 0)));
+
+        return new BoundaryLogIds(dayBefore, fromDay, middle, toDayNoon, toDayLast, dayAfter);
     }
 
     #endregion

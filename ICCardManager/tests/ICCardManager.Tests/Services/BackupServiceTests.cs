@@ -5,7 +5,9 @@ using ICCardManager.Data;
 using ICCardManager.Data.Repositories;
 using ICCardManager.Models;
 using ICCardManager.Services;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
+using ICCardManager.Tests.Infrastructure;
 using ICCardManager.Tests.Infrastructure.Timing;
 using Moq;
 using Xunit;
@@ -426,36 +428,107 @@ public class BackupServiceTests : IDisposable
     }
 
     /// <summary>
-    /// リストア失敗時（バックアップファイルがロック中）にfalseを返すことを確認
+    /// リストア失敗時（バックアップファイルがロック中）にfalseを返し、元のDBを復元することを確認
     /// </summary>
+    /// <remarks>
+    /// Issue #2106: 旧版は 1 バイトのファイルを FileShare.None で開いていたため、ヘッダ検査
+    /// （<c>IsValidSqliteFile</c>）の段階で「SQLite ではない」と弾かれ、ロックの経路（コピーの失敗 →
+    /// 退避した元の DB の復元 → I/O エラーとして false）を一度も通っていなかった。しかも DbContext を
+    /// リストア前に破棄しており、接続の一時停止の失敗でも false になり得た。
+    /// ここでは有効な SQLite ファイルの先頭ページ（ヘッダを含む 4096 バイト）より後ろだけをバイト範囲ロックし、
+    /// ヘッダ検査は通るがコピーが失敗する状態を作る。経路はログ（I/O エラーとして記録されたこと）で確かめる。
+    /// 対のテスト <see cref="RestoreFromBackup_SameValidFileWithoutLock_ReturnsTrue"/> を参照。
+    /// </remarks>
     [Fact]
-    public void RestoreFromBackup_BackupFileLocked_ReturnsFalse()
+    public async Task RestoreFromBackup_BackupFileLocked_ReturnsFalse()
     {
         // Arrange
+        var backupFilePath = await CreateValidBackupCopyAsync("locked.db");
+        BackupService.IsValidSqliteFile(backupFilePath).Should().BeTrue("ヘッダ検査は通る入力でロックの経路を検査する");
+
         var restoreTargetPath = Path.Combine(_testDirectory, "restore_failure_target.db");
-        File.WriteAllText(restoreTargetPath, "original database content");
+        const string originalContent = "original database content";
+        File.WriteAllText(restoreTargetPath, originalContent);
 
-        var lockedFilePath = Path.Combine(_backupDirectory, "locked.db");
+        using var restoreDbContext = new DbContext(restoreTargetPath);
+        var logger = new RecordingLogger<BackupService>();
+        var testService = new BackupService(restoreDbContext, _settingsRepositoryMock.Object, logger);
 
-        // ロックされたファイルを作成
-        using var lockedStream = new FileStream(lockedFilePath, FileMode.Create, FileAccess.ReadWrite, FileShare.None);
-        lockedStream.WriteByte(0);
-
-        var restoreDbContext = new DbContext(restoreTargetPath);
-        var testService = new BackupService(
-            restoreDbContext,
-            _settingsRepositoryMock.Object,
-            NullLogger<BackupService>.Instance);
-        restoreDbContext.Dispose();
+        // ヘッダより後ろをバイト範囲ロックする（ヘッダの読み取りは妨げない）。
+        // ハンドル自体は読み取り専用・読み取り共有で開く。書き込みアクセスで開くと、
+        // FileShare.Read で開くヘッダ検査が共有違反で失敗し、ロックの経路へ届かない
+        // ロック範囲は FileStream の既定バッファ（4096 バイト）より後ろから始める。ヘッダ検査は 100 バイトしか
+        // 読まないが、FileStream はバッファ単位で先読みするため、それより手前をロックすると検査側で読み取りが失敗する
+        using var lockedStream = new FileStream(backupFilePath, FileMode.Open, FileAccess.Read, FileShare.Read);
+        lockedStream.Lock(LockedRangeStart, lockedStream.Length - LockedRangeStart);
 
         // Act
-        var result = testService.RestoreFromBackup(lockedFilePath);
+        var result = testService.RestoreFromBackup(backupFilePath);
 
         // Assert
-        result.Should().BeFalse();
-        // 元のファイルが保持されている
-        File.Exists(restoreTargetPath).Should().BeTrue();
+        result.Should().BeFalse(logger.FormatEntries());
+
+        // ロックの経路: コピーの失敗を捕まえて元の DB を戻し（Warning）、I/O エラーとして記録する（Error）
+        logger.Entries.Should().Contain(e =>
+                e.Level == LogLevel.Warning && e.Message.Contains("元のデータベースを復元します") && e.Exception is IOException,
+            logger.FormatEntries());
+        logger.Entries.Should().Contain(e =>
+                e.Level == LogLevel.Error && e.Message.Contains("I/Oエラー") && e.Exception is IOException,
+            logger.FormatEntries());
+        logger.Entries.Should().NotContain(e => e.Message.Contains("SQLiteデータベースではありません"),
+            "ヘッダ検査で弾かれていないこと");
+
+        // 元のファイルが内容ごと復元され、退避ファイルは残らない
+        File.ReadAllText(restoreTargetPath).Should().Be(originalContent);
+        File.Exists(restoreTargetPath + ".temp").Should().BeFalse();
     }
+
+    /// <summary>
+    /// <see cref="RestoreFromBackup_BackupFileLocked_ReturnsFalse"/> の対: 同じ作り方の有効なファイルでも、
+    /// ロックしなければリストアが成功すること（Issue #2106）。
+    /// </summary>
+    /// <remarks>
+    /// これが無いと、入力の作り方そのもの（コピーしたバックアップ・DbContext の扱い）が原因で
+    /// 常に失敗していても、ロックのテストは緑になる。
+    /// </remarks>
+    [Fact]
+    public async Task RestoreFromBackup_SameValidFileWithoutLock_ReturnsTrue()
+    {
+        // Arrange
+        var backupFilePath = await CreateValidBackupCopyAsync("unlocked.db");
+        var backupBytes = File.ReadAllBytes(backupFilePath);
+
+        var restoreTargetPath = Path.Combine(_testDirectory, "restore_success_target.db");
+        File.WriteAllText(restoreTargetPath, "original database content");
+
+        using var restoreDbContext = new DbContext(restoreTargetPath);
+        var logger = new RecordingLogger<BackupService>();
+        var testService = new BackupService(restoreDbContext, _settingsRepositoryMock.Object, logger);
+
+        // Act
+        var result = testService.RestoreFromBackup(backupFilePath);
+
+        // Assert
+        result.Should().BeTrue(logger.FormatEntries());
+        File.ReadAllBytes(restoreTargetPath).Should().Equal(backupBytes);
+        File.Exists(restoreTargetPath + ".temp").Should().BeFalse();
+    }
+
+    /// <summary>
+    /// 有効な SQLite のバックアップを作り、バックアップ世代の命名から外れた名前でコピーする
+    /// </summary>
+    private async Task<string> CreateValidBackupCopyAsync(string fileName)
+    {
+        var backup = await _service.ExecuteAutoBackupAsync();
+        backup.Should().NotBeNull("有効な SQLite ファイルを用意できること");
+        var path = Path.Combine(_testDirectory, fileName);
+        File.Copy(backup!, path);
+        new FileInfo(path).Length.Should().BeGreaterThan(LockedRangeStart, "ヘッダより後ろにロックする範囲があること");
+        return path;
+    }
+
+    /// <summary>ロックの開始位置（FileStream の既定バッファ長）。</summary>
+    private const int LockedRangeStart = 4096;
 
     /// <summary>
     /// リストア時に元のDBファイルが退避・復元されることを確認

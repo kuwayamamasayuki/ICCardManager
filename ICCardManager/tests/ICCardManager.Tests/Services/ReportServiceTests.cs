@@ -1,6 +1,7 @@
 using System.IO;
 using ClosedXML.Excel;
 using FluentAssertions;
+using ICCardManager.Common;
 using ICCardManager.Data.Repositories;
 using ICCardManager.Models;
 using ICCardManager.Services;
@@ -1572,8 +1573,14 @@ public class ReportServiceTests : IDisposable
         var result = await _reportService.CreateMonthlyReportAsync(cardIdm, 2024, 1, invalidPath);
 
         // Assert
+        // Issue #2106: 「空でない」だけでは、どの分岐の文言かを区別できない。
+        // 不正な文字のパスは ArgumentException（種別の確定しない catch (Exception)）へ落ち、
+        // ファイル I/O 系の分岐（「ファイルの保存に失敗しました」）や共通失敗にはならない。
         result.Success.Should().BeFalse("無効な文字を含むパスでは帳票作成に失敗するべき");
-        result.ErrorMessage.Should().NotBeNullOrEmpty("エラーメッセージが設定されるべき");
+        result.ErrorMessage.Should().Be("帳票の作成に失敗しました");
+        result.DetailedErrorMessage.Should().Be(
+            $"{ExceptionMessageFormatter.ToReason(new ArgumentException())}\n\n詳細はログファイルを確認してください。");
+        result.IsCommonFailure.Should().BeFalse("不正なパスはこのカードの出力先に固有の失敗であり、一括作成を中断させない");
     }
 
     /// <summary>
@@ -1595,8 +1602,13 @@ public class ReportServiceTests : IDisposable
         var result = await _reportService.CreateMonthlyReportAsync(cardIdm, 2024, 1, outputPath);
 
         // Assert
+        // Issue #2106: カード未登録の分岐（Issue #2049）の文言と完全一致で比べる。
+        // 「空でない」だけでは、例外分岐の「帳票の作成に失敗しました」へ落ちても緑になる。
         result.Success.Should().BeFalse("存在しないカードでは帳票作成に失敗するべき");
-        result.ErrorMessage.Should().NotBeNullOrEmpty("エラーメッセージが設定されるべき");
+        result.ErrorMessage.Should().Be(ReportCardNotFoundMessage.Headline);
+        result.DetailedErrorMessage.Should().Be(ReportCardNotFoundMessage.Detail);
+        result.IsCommonFailure.Should().BeFalse("カード未登録は 1 枚に固有の失敗であり、一括作成を中断させない");
+        File.Exists(outputPath).Should().BeFalse("カードが無ければ帳票ファイルを作らない");
     }
 
     /// <summary>
