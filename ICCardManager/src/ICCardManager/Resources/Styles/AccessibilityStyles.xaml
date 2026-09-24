@@ -86,10 +86,19 @@
          判定の地色は白ではなく NeutralBackgroundBrush(#F5F5F5) — 文字が載る面は白だけでなく
          一覧の交互行(#FAFAFA)とパネル(#F5F5F5)があり、暗い文字にはそちらのほうが厳しい。
          白基準で選んだ #757575 は白 4.61:1 に対しパネル上 4.23:1 で未達だった（コードレビューで検出）。
-         #6E6E6E は 白 5.10:1 / 交互行 4.89:1 / パネル 4.68:1 -->
-    <SolidColorBrush x:Key="SecondaryTextBrush" Color="#6E6E6E"/>
+         #6E6E6E は 白 5.10:1 / 交互行 4.89:1 / パネル 4.68:1。
+         さらに Issue #2109 で、淡い意味色の面（返却系の ReturnBackgroundBrush #E3F2FD 等）に載る補足文字が
+         4.46:1 で未達だったため #696969 へ是正した。補足文字は画面ごとに載る面が決まっていない汎用の文字色なので、
+         意味色の地色 6 面すべてで測る（最小は ErrorBackgroundBrush 4.80:1 / ReturnBackgroundBrush 4.81:1。
+         SemanticSurfaceContrastTests が固定する） -->
+    <SolidColorBrush x:Key="SecondaryTextBrush" Color="#696969"/>
     <SolidColorBrush x:Key="MutedTextBrush" Color="#666666"/>
-    <SolidColorBrush x:Key="DangerTextBrush" Color="#D32F2F"/>
+    <!-- DangerTextBrush は旧 #D32F2F。白では 4.98:1 あるが、エラー表示の枠（ErrorBackgroundBrush #FFEBEE）の上で
+         4.36:1、成功の面（#E8F5E9）の上で 4.43:1 と未達だった（Issue #2109）。この「ErrorBackgroundBrush の枠に
+         DangerTextBrush の文字」は error-messages.md が推奨パターンとして載せている組なので、
+         文字色側を #C62828（Red 800）へ暗くした: 枠 4.92:1 / 白 5.62:1 / 意味色の地色 6 面の最小 4.92:1。
+         地色側（ErrorBackgroundBrush）を白へ寄せる案は、エラー枠が淡い赤で「エラーである」と伝える役割を弱めるため採らない -->
+    <SolidColorBrush x:Key="DangerTextBrush" Color="#C62828"/>
     <!-- ヒント／補足説明用（Brown 700）。色覚多様性に配慮した茶色系で、💡や⚠の説明文に使う（Issue #1461） -->
     <SolidColorBrush x:Key="HintForegroundBrush" Color="#795548"/>
 
@@ -117,7 +126,7 @@
          旧実装は枠を Opacity=0.5 で落としていたが、不透明度は塗りも文字も同じだけ地色へ寄せるため、
          白文字のボタンでは 1.4:1 前後まで落ちて無効なボタンのラベルが読めなかった。
          無効であることは彩度が消えることで伝わる（意味色 4 色との ΔE は 46 以上）。
-         塗り専用で、文字色には使わない（SecondaryTextBrush(#6E6E6E) とは役割が違う） -->
+         塗り専用で、文字色には使わない（SecondaryTextBrush(#696969) とは役割が違う） -->
     <SolidColorBrush x:Key="DisabledFillBrush" Color="#616161"/>
 
     <!-- ===== 明細グループ配色（履歴詳細ダイアログ） ===== -->
@@ -132,10 +141,19 @@
     <SolidColorBrush x:Key="LedgerGroupBackground3Brush" Color="#FFF3E0"/>
     <SolidColorBrush x:Key="LedgerGroupBackground4Brush" Color="#F3E5F5"/>
     <SolidColorBrush x:Key="LedgerGroupBackground5Brush" Color="#FFEBEE"/>
-    <!-- グループバッジ（同サイクルの濃色） -->
+    <!-- グループバッジ（同サイクルの濃色）。上には白文字（OnPrimaryBrush）でグループ番号が載る。
+         番号は SmallFontSize の太字で WCAG の「大きな文字」に当たらないため、白文字に対して 4.5:1 が要る。
+         Issue #2109 で、旧 #388E3C（4.12:1）と旧 #F57C00（2.70:1）を色相を保ったまま暗くした:
+           LedgerGroupBadge2Brush #388E3C → #2E7D32（Green 800、白文字 5.13:1）
+           LedgerGroupBadge3Brush #F57C00 → #B55400（白文字 4.96:1、橙の色相を維持）
+         橙を暗くすると 5 番の赤（#D32F2F）と同じ明度域へ寄り、1 型／2 型色覚での分離が落ちる
+         （5 色間の最小 ΔEcvd 13.78 → 10.17。実測）。より暗い茶色（#904000 前後）なら分離は 12 前後まで戻るが、
+         行背景（LedgerGroupBackground3Brush の淡い橙）との対応が読み取れなくなるため採らない。
+         番号の文字でもグループを区別できるので、色は補助の手掛かりである。
+         白文字のコントラストと色覚多様性での分離は SemanticSurfaceContrastTests が固定する -->
     <SolidColorBrush x:Key="LedgerGroupBadge1Brush" Color="#1976D2"/>
-    <SolidColorBrush x:Key="LedgerGroupBadge2Brush" Color="#388E3C"/>
-    <SolidColorBrush x:Key="LedgerGroupBadge3Brush" Color="#F57C00"/>
+    <SolidColorBrush x:Key="LedgerGroupBadge2Brush" Color="#2E7D32"/>
+    <SolidColorBrush x:Key="LedgerGroupBadge3Brush" Color="#B55400"/>
     <SolidColorBrush x:Key="LedgerGroupBadge4Brush" Color="#7B1FA2"/>
     <SolidColorBrush x:Key="LedgerGroupBadge5Brush" Color="#D32F2F"/>
 
