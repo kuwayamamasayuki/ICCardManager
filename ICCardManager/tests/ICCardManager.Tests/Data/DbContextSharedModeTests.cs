@@ -128,58 +128,92 @@ public class DbContextSharedModeTests : IDisposable
 
     #region 同時書き込みテスト（SQLITE_BUSY統合テスト）
 
+    /// <summary>
+    /// 別の接続（別 PC 相当）が書き込みロックを保持している間、<see cref="DbContext"/> の接続からの
+    /// 書き込みは <c>busy_timeout</c> で待機し、ロックが解放されたあとで成功すること。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Issue #2103: 旧テストは 2 本目の接続の INSERT を 1 本目のコミットの**後**に実行しており、
+    /// ロック待ちが一度も起きていなかった。しかも 2 本目の接続は自分で <c>PRAGMA busy_timeout</c> を
+    /// 設定していたため、<see cref="DbContext"/> の <c>ConfigurePragmas</c> から busy_timeout を
+    /// 消しても緑のままだった。
+    /// </para>
+    /// <para>
+    /// ここでは待つ側に <see cref="DbContext"/> の接続（PRAGMA を DbContext 自身が設定したもの）を使い、
+    /// ロックを保持したまま「待つ側が書き込みを発行済みで、まだ終わっていない」ことを表明してから解放する。
+    /// </para>
+    /// <para>
+    /// 待つ側のコマンドは <c>CommandTimeout = 0</c> にする。System.Data.SQLite は SQLITE_BUSY を受けると
+    /// <c>CommandTimeout</c>（既定 30 秒）の間、自前で再試行するため、既定のままでは busy_timeout が
+    /// 無くてもこの再試行が待機を肩代わりし、DbContext が PRAGMA を設定したかどうかを観測できない。
+    /// </para>
+    /// </remarks>
     [Fact]
-    public async Task 同時書き込みでbusy_timeoutにより待機して成功すること()
+    public async Task 同時書き込み_他の接続が書き込みロックを保持中はbusy_timeoutで待機しロック解放後に成功すること()
     {
         var dbPath = Path.Combine(_testDirectory, "concurrent_write.db");
-        using var dbContext = new DbContext(dbPath);
-        dbContext.InitializeDatabase();
-
-        // テーブル作成
-        using var lease = dbContext.LeaseConnection();
-        var conn = lease.Connection;
-        using var createCmd = conn.CreateCommand();
-        createCmd.CommandText = "CREATE TABLE IF NOT EXISTS test (id INTEGER PRIMARY KEY, value TEXT)";
-        createCmd.ExecuteNonQuery();
-
-        // 2つ目の接続（別プロセスのシミュレーション）
-        using var conn2 = new System.Data.SQLite.SQLiteConnection($"Data Source={dbPath}");
-        conn2.Open();
-        using var pragmaCmd = conn2.CreateCommand();
-        pragmaCmd.CommandText = "PRAGMA busy_timeout = 5000;";
-        pragmaCmd.ExecuteNonQuery();
-
-        // conn1でトランザクション開始（書き込みロック取得）
-        using var tx1 = conn.BeginTransaction();
-        using var insertCmd1 = conn.CreateCommand();
-        insertCmd1.Transaction = tx1;
-        insertCmd1.CommandText = "INSERT INTO test (value) VALUES ('from_conn1')";
-        insertCmd1.ExecuteNonQuery();
-
-        // conn2から同時書き込みを試行（busy_timeoutにより待機→conn1がコミットした後に成功）
-        var task2 = Task.Run(() =>
+        using (var setup = new DbContext(dbPath))
         {
-            using var insertCmd2 = conn2.CreateCommand();
-            insertCmd2.CommandText = "INSERT INTO test (value) VALUES ('from_conn2')";
-            // conn1がロックを保持中なので、busy_timeoutで待機する
-            // 別スレッドでconn1をコミットしてからinsertする
-            return insertCmd2;
+            setup.InitializeDatabase();
+            using var setupLease = setup.LeaseConnection();
+            using var createCmd = setupLease.Connection.CreateCommand();
+            createCmd.CommandText = "CREATE TABLE IF NOT EXISTS test (id INTEGER PRIMARY KEY, value TEXT)";
+            createCmd.ExecuteNonQuery();
+        }
+
+        // ロックを保持する側（別 PC 相当）。DbContext を通さない素の接続で、busy_timeout は設定しない
+        using var holder = new System.Data.SQLite.SQLiteConnection($"Data Source={dbPath}");
+        holder.Open();
+        using (var beginCmd = holder.CreateCommand())
+        {
+            // BEGIN IMMEDIATE で RESERVED ロックを取り、他の接続の書き込みを塞ぐ
+            beginCmd.CommandText = "BEGIN IMMEDIATE; INSERT INTO test (value) VALUES ('from_holder');";
+            beginCmd.ExecuteNonQuery();
+        }
+
+        // 待つ側: 別の DbContext（PRAGMA は DbContext.ConfigurePragmas が設定する）
+        using var waiterContext = new DbContext(dbPath);
+        var insertIssued = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var waiterTask = Task.Run(() =>
+        {
+            using var lease = waiterContext.LeaseConnection();
+            using var insertCmd = lease.Connection.CreateCommand();
+            insertCmd.CommandText = "INSERT INTO test (value) VALUES ('from_waiter')";
+            insertCmd.CommandTimeout = 0;
+            insertIssued.SetResult(true);
+            insertCmd.ExecuteNonQuery();
         });
 
-        // conn1をコミット（conn2のロック待ちが解消される）
-        await Task.Delay(100);
-        tx1.Commit();
+        (await Task.WhenAny(insertIssued.Task, Task.Delay(TimeSpan.FromSeconds(10))))
+            .Should().BeSameAs(insertIssued.Task, "待つ側が書き込みを発行するところまで進むこと");
 
-        // conn2から書き込み
-        using var insertCmd2Direct = conn2.CreateCommand();
-        insertCmd2Direct.CommandText = "INSERT INTO test (value) VALUES ('from_conn2')";
-        insertCmd2Direct.ExecuteNonQuery();
+        // ロックを保持したまま: 待つ側は busy_timeout（ローカルモード 5000ms）で待機中のはず
+        var early = await Task.WhenAny(waiterTask, Task.Delay(500));
+        early.Should().NotBeSameAs(waiterTask,
+            "ロックの保持中に書き込みが終わった（失敗した）なら、busy_timeout が効いていない: " +
+            waiterTask.Exception?.GetBaseException().Message);
 
-        // 両方の行が存在することを確認
-        using var countCmd = conn2.CreateCommand();
-        countCmd.CommandText = "SELECT COUNT(*) FROM test";
-        var count = Convert.ToInt32(countCmd.ExecuteScalar());
-        count.Should().Be(2);
+        // ロックを解放 → 待つ側の書き込みが成功する
+        using (var commitCmd = holder.CreateCommand())
+        {
+            commitCmd.CommandText = "COMMIT;";
+            commitCmd.ExecuteNonQuery();
+        }
+
+        (await Task.WhenAny(waiterTask, Task.Delay(TimeSpan.FromSeconds(10))))
+            .Should().BeSameAs(waiterTask, "ロック解放後は待機が解けて書き込みが終わること");
+        await waiterTask;
+
+        using var selectCmd = holder.CreateCommand();
+        selectCmd.CommandText = "SELECT value FROM test ORDER BY id";
+        using var reader = selectCmd.ExecuteReader();
+        var values = new System.Collections.Generic.List<string>();
+        while (reader.Read())
+        {
+            values.Add(reader.GetString(0));
+        }
+        values.Should().Equal("from_holder", "from_waiter");
     }
 
     [Fact]

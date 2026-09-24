@@ -149,62 +149,153 @@ public class BackupServiceRestoreSafetyTests : IDisposable
     #region RestoreFromBackup 共有モード テスト
 
     /// <summary>
-    /// 共有モードで他PCが接続中の場合、リストアが拒否されること
+    /// 共有モードで他PCが接続中の場合、リストアが拒否され、DB が書き換わらないこと
     /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Issue #2103: 旧テストはローカルの一時パスで <c>IsSharedMode == false</c> のまま動いており、
+    /// さらに他 PC の接続を <c>FileShare.ReadWrite</c> のハンドルで模していたため、拒否の実際の理由は
+    /// 「開いたままのハンドルで <c>File.Move</c> が IOException になる」ことだった。
+    /// 共有モードの判定（<c>IsSharedMode &amp;&amp; !CanAcquireExclusiveLock(...)</c>）を丸ごと消しても緑だった。
+    /// </para>
+    /// <para>
+    /// ここでは <c>forceSharedMode: true</c> で共有モードにし、他 PC のハンドルに
+    /// <c>FileShare.Delete</c> を付ける。これで <c>File.Move</c> は成功する（名前の変更を妨げない）ため、
+    /// リストアを止められるのはガードだけになる。対の表明（ローカルモードでは同じハンドルがあっても
+    /// リストアが進む）が、このハンドル自体はリストアを妨げないことを示す。
+    /// </para>
+    /// </remarks>
     [Fact]
     [Trait("Category", "Unit")]
-    public void RestoreFromBackup_共有モードで他接続ありの場合falseを返すこと()
+    public void RestoreFromBackup_共有モードで他接続ありの場合falseを返しDBを書き換えないこと()
     {
         var dbPath = Path.Combine(_testDirectory, "shared_restore.db");
-        using var dbContext = new DbContext(dbPath);
+        using var dbContext = new DbContext(dbPath, null, forceSharedMode: true);
         dbContext.InitializeDatabase();
 
-        // バックアップファイルを作成
+        // バックアップファイルを作成してから、現在の DB だけに印を付ける
         var backupPath = Path.Combine(_backupDirectory, "backup.db");
         File.Copy(dbPath, backupPath);
+        WriteMarker(dbContext, "current");
 
         var service = new BackupService(
             dbContext,
             CreateSettingsRepositoryMock().Object,
             NullLogger<BackupService>.Instance);
 
-        // 他プロセスのロックをシミュレート（DBファイルを排他的に開く）
-        // まず自PCの接続を閉じてから他PCロックをシミュレートする
+        // 他 PC の接続を模す。FileShare.Delete を付けるので File.Move（名前の変更）は妨げない
         dbContext.CloseConnection();
-        using var otherPcLock = new FileStream(dbPath, FileMode.Open, FileAccess.ReadWrite, FileShare.ReadWrite);
+        using (OpenOtherPcHandle(dbPath))
+        {
+            // Act
+            var result = service.RestoreFromBackup(backupPath);
 
-        // Act
-        var result = service.RestoreFromBackup(backupPath);
+            // Assert
+            result.Should().BeFalse("他PCが接続中のためリストアは拒否されるべき");
+        }
 
-        // Assert
-        result.Should().BeFalse("他PCが接続中のためリストアは拒否されるべき");
+        File.Exists(dbPath + ".temp").Should().BeFalse("拒否した場合は現在の DB を退避しない");
+        ReadMarker(dbPath).Should().Be("current", "拒否した場合は現在の DB をそのまま残す");
+    }
+
+    /// <summary>
+    /// 対の表明（Issue #2103）: ローカルモードでは、同じ「他のハンドル」があってもリストアが進むこと。
+    /// </summary>
+    /// <remarks>
+    /// 他 PC の接続を検出して拒否するのは共有モードだけ（Issue #1108）。この表明が無いと、
+    /// 上のテストが「ガードで拒否された」のか「ハンドルのせいで File.Move が失敗した」のかを区別できない。
+    /// </remarks>
+    [Fact]
+    [Trait("Category", "Unit")]
+    public void RestoreFromBackup_ローカルモードでは他のハンドルがあってもリストアが進むこと()
+    {
+        var dbPath = Path.Combine(_testDirectory, "local_restore.db");
+        using var dbContext = new DbContext(dbPath, null, forceSharedMode: false);
+        dbContext.InitializeDatabase();
+
+        var backupPath = Path.Combine(_backupDirectory, "backup_local.db");
+        File.Copy(dbPath, backupPath);
+        WriteMarker(dbContext, "current");
+
+        var service = new BackupService(
+            dbContext,
+            CreateSettingsRepositoryMock().Object,
+            NullLogger<BackupService>.Instance);
+
+        dbContext.CloseConnection();
+        using (OpenOtherPcHandle(dbPath))
+        {
+            // Act
+            var result = service.RestoreFromBackup(backupPath);
+
+            // Assert
+            result.Should().BeTrue("ローカルモードは他 PC の接続を検出しない（このハンドルは File.Move を妨げない）");
+        }
+
+        ReadMarker(dbPath).Should().BeNull("バックアップ（印を付ける前の DB）でリストアされている");
     }
 
     /// <summary>
     /// 共有モードで他PCが接続していない場合、リストアが成功すること
     /// </summary>
+    /// <remarks>
+    /// Issue #2103: 旧テストは共有モードになっておらず、ガードを通っていなかった。
+    /// 共有モードでは自 PC の接続が残っていても排他ロックの確認に失敗するため、
+    /// <c>SuspendConnections</c> が自 PC の接続を閉じてから確認していることもこのテストが担う。
+    /// </remarks>
     [Fact]
     [Trait("Category", "Unit")]
     public void RestoreFromBackup_共有モードで他接続なしの場合成功すること()
     {
         var dbPath = Path.Combine(_testDirectory, "shared_restore_ok.db");
-        using var dbContext = new DbContext(dbPath);
+        using var dbContext = new DbContext(dbPath, null, forceSharedMode: true);
         dbContext.InitializeDatabase();
 
         // バックアップファイルを作成
         var backupPath = Path.Combine(_backupDirectory, "backup_ok.db");
         File.Copy(dbPath, backupPath);
+        WriteMarker(dbContext, "current");
 
         var service = new BackupService(
             dbContext,
             CreateSettingsRepositoryMock().Object,
             NullLogger<BackupService>.Instance);
 
-        // Act（他接続なし）
+        // Act（他接続なし。自 PC の接続は開いたまま渡す）
         var result = service.RestoreFromBackup(backupPath);
 
         // Assert
         result.Should().BeTrue();
+        ReadMarker(dbPath).Should().BeNull("バックアップ（印を付ける前の DB）でリストアされている");
+    }
+
+    private const string MarkerKey = "issue2103_restore_marker";
+
+    /// <summary>
+    /// 他 PC の SQLite 接続を模したハンドル。<c>FileShare.Delete</c> を付けるため名前の変更は妨げないが、
+    /// <c>FileShare.None</c> での排他オープン（<see cref="BackupService.CanAcquireExclusiveLock"/>）は失敗させる。
+    /// </summary>
+    private static FileStream OpenOtherPcHandle(string dbPath) =>
+        new FileStream(dbPath, FileMode.Open, FileAccess.ReadWrite, FileShare.ReadWrite | FileShare.Delete);
+
+    private static void WriteMarker(DbContext dbContext, string value)
+    {
+        using var lease = dbContext.LeaseConnection();
+        using var command = lease.Connection.CreateCommand();
+        command.CommandText = "INSERT OR REPLACE INTO settings (key, value) VALUES (@key, @value)";
+        command.Parameters.AddWithValue("@key", MarkerKey);
+        command.Parameters.AddWithValue("@value", value);
+        command.ExecuteNonQuery();
+    }
+
+    private static string? ReadMarker(string dbPath)
+    {
+        using var connection = new System.Data.SQLite.SQLiteConnection($"Data Source={dbPath}");
+        connection.Open();
+        using var command = connection.CreateCommand();
+        command.CommandText = "SELECT value FROM settings WHERE key = @key";
+        command.Parameters.AddWithValue("@key", MarkerKey);
+        return command.ExecuteScalar() as string;
     }
 
     /// <summary>

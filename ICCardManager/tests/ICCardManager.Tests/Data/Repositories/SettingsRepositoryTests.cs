@@ -11,6 +11,7 @@ using Xunit;
 using System;
 using System.Collections.Generic;
 using System.Globalization;
+using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
 
@@ -700,30 +701,75 @@ public class SettingsRepositoryTests : IDisposable
     }
 
     /// <summary>
-    /// 同一 DbContext から複数 Repository が同時に呼び出しても、true を返すのは厳密に 1 つだけ
+    /// 別々の接続（別 PC 相当）から同じ月のロックを同時に取りに行っても、true を返すのは厳密に 1 台だけ
     /// </summary>
     /// <remarks>
-    /// SQLite の接続レベルロックで実質シリアル化されるが、その上でアプリ層の CAS（WHERE 句）が
-    /// 正しく機能して「先勝ち 1 つ、残りは false」となることを保証する。
+    /// <para>
+    /// Issue #2103: 旧テストは 10 個のリポジトリが同じ <c>:memory:</c> の接続 1 本を共有しており、
+    /// 接続リースのセマフォで直列化されていた。そのため CAS を「SELECT してから UPDATE」の 2 文へ退行させても
+    /// 1 台ずつ順に判定されて緑のままだった。複数 PC の間ではその 2 文の間に他 PC の書き込みが挟まり、二重に獲得される。
+    /// </para>
+    /// <para>
+    /// ここではファイル DB に別々の <see cref="DbContext"/>（別々の接続）を向け、開始合図で一斉に取りに行かせる。
+    /// 1 回の競合では割り込みが起きないこともあるため、月を変えて複数回繰り返す。
+    /// </para>
     /// </remarks>
     [Fact]
-    public async Task TryAcquireMonthlyVacuumLockAsync_並列実行時_trueを返すのは1つだけ()
+    public async Task TryAcquireMonthlyVacuumLockAsync_別々の接続から同時に取りに行ってもtrueを返すのは1台だけ()
     {
         // Arrange
-        var today = new DateTime(2026, 5, 14);
-        const int parallelCount = 10;
-        var repos = Enumerable.Range(0, parallelCount)
-            .Select(_ => new SettingsRepository(_dbContext, _cacheServiceMock.Object, Options.Create(new CacheOptions())))
-            .ToList();
+        var directory = Path.Combine(Path.GetTempPath(), $"VacuumLockContention_{Guid.NewGuid():N}");
+        Directory.CreateDirectory(directory);
+        var dbPath = Path.Combine(directory, "shared.db");
+        const int pcCount = 8;
+        var contexts = new List<DbContext>();
+        try
+        {
+            using (var setup = new DbContext(dbPath))
+            {
+                setup.InitializeDatabase();
+            }
 
-        // Act: 10 並列で同時呼出
-        var tasks = repos.Select(r => r.TryAcquireMonthlyVacuumLockAsync(today)).ToList();
-        var results = await Task.WhenAll(tasks);
+            var repos = new List<SettingsRepository>();
+            for (var i = 0; i < pcCount; i++)
+            {
+                var context = new DbContext(dbPath);
+                contexts.Add(context);
+                repos.Add(new SettingsRepository(context, new Mock<ICacheService>().Object, Options.Create(new CacheOptions())));
+            }
 
-        // Assert
-        results.Count(r => r).Should().Be(1, "先勝ちで正確に 1 つだけが true を返すべき");
-        var stored = await _repository.GetAsync(SettingsRepository.KeyLastVacuumDate);
-        stored.Should().Be("2026-05-14");
+            for (var month = 1; month <= 12; month++)
+            {
+                var today = new DateTime(2026, month, 14);
+                var start = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+
+                // Act: 全台を開始合図の手前で待たせ、一斉に取りに行かせる
+                var tasks = repos.Select(r => Task.Run(async () =>
+                {
+                    await start.Task;
+                    return await r.TryAcquireMonthlyVacuumLockAsync(today);
+                })).ToList();
+                start.SetResult(true);
+
+                var all = Task.WhenAll(tasks);
+                (await Task.WhenAny(all, Task.Delay(TimeSpan.FromSeconds(60))))
+                    .Should().BeSameAs(all, $"{month} 月: 全台が 60 秒以内に判定を終えること");
+                var results = await all;
+
+                // Assert
+                results.Count(r => r).Should().Be(1, $"{month} 月: 別々の接続から同時に取りに行っても、先勝ちで 1 台だけが獲得する");
+                (await repos[0].GetAsync(SettingsRepository.KeyLastVacuumDate))
+                    .Should().Be(today.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture));
+            }
+        }
+        finally
+        {
+            foreach (var context in contexts)
+            {
+                context.Dispose();
+            }
+            try { Directory.Delete(directory, recursive: true); } catch (IOException) { }
+        }
     }
 
     /// <summary>

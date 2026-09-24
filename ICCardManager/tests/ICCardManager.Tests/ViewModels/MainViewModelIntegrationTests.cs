@@ -75,6 +75,7 @@ public class MainViewModelIntegrationTests
     private readonly DashboardService _dashboardService;
     private readonly TestTimerFactory _timerFactory = new();
     private readonly SynchronousDispatcherService _dispatcherService = new();
+    private readonly DbContext _dbContext;
     private readonly MainViewModel _viewModel;
 
     public MainViewModelIntegrationTests()
@@ -87,6 +88,7 @@ public class MainViewModelIntegrationTests
         var lockManager = new CardLockManager(NullLogger<CardLockManager>.Instance);
         var dbContext = new DbContext(":memory:");
         dbContext.InitializeDatabase();
+        _dbContext = dbContext;
 
         _lendingService = new LendingService(
             dbContext,
@@ -164,8 +166,20 @@ public class MainViewModelIntegrationTests
         _cardReaderMock.Setup(r => r.TryReadHistoryAsync(It.IsAny<string>()))
             .ReturnsAsync(CardReadResult<IReadOnlyList<LedgerDetail>>.Ok(new List<LedgerDetail>()));
 
-        _viewModel = new MainViewModel(
-            _cardReaderMock.Object,
+        _viewModel = CreateViewModel(_cardReaderMock.Object, _dispatcherService);
+    }
+
+    /// <summary>
+    /// 本クラスの共有モック・サービスで <see cref="MainViewModel"/> を組み立てる。
+    /// </summary>
+    /// <remarks>
+    /// Issue #2103: ディスパッチャーを差し替えた ViewModel を 1 件だけ別に作るために切り出した。
+    /// カードリーダーも別に渡すこと（同じモックを渡すと、<see cref="_viewModel"/> も同じタッチを処理する）。
+    /// </remarks>
+    private MainViewModel CreateViewModel(ICardReader cardReader, IDispatcherService dispatcherService)
+    {
+        return new MainViewModel(
+            cardReader,
             _soundPlayerMock.Object,
             _staffRepositoryMock.Object,
             _cardRepositoryMock.Object,
@@ -181,14 +195,14 @@ public class MainViewModelIntegrationTests
             _ledgerConsistencyChecker,
             Options.Create(new AppOptions { StaffCardTimeoutSeconds = 60 }),
             _timerFactory,
-            _dispatcherService,
+            dispatcherService,
             _databaseInfoMock.Object,
             _cacheServiceMock.Object,
             _sharedModeMonitor,
             _warningService,
             _dashboardService,
             new Mock<ICCardManager.Services.ISafeFileLauncher>().Object,
-            dbContext);
+            _dbContext);
     }
 
     private void RaiseCardRead(string idm)
@@ -718,7 +732,7 @@ public class MainViewModelIntegrationTests
     #region 複数カード並行操作時のロック処理（Processing 中の読み取り抑止）
 
     /// <summary>
-    /// Issue #1259: Processing 状態では新規カード読み取りが無視される
+    /// Issue #1259: 貸出処理の await 中に届いた 2 件目のタッチは無視される
     /// （MainViewModel レベルでの一次ロック）
     /// </summary>
     /// <remarks>
@@ -728,31 +742,92 @@ public class MainViewModelIntegrationTests
     /// CurrentState == Processing の間は CardRead を無視する設計になっている。
     /// </para>
     /// <para>
-    /// カードごとの永続的な排他は <see cref="LendingService"/> の
-    /// <see cref="CardLockManager"/> で担保されているため、ここでは VM 側の
-    /// 一次フィルタを検証する。
+    /// Issue #2103: 旧テストはリフレクションで状態を Processing にしてからタッチを発火していたため、
+    /// 本当に守りたい「貸出処理の await 中に届いた 2 件目のタッチ」を再現していなかった。
+    /// ここでは貸出の台帳書き込みを止め、止めている間に 2 件目のタッチを届ける。
+    /// ディスパッチャーは本番と同じく「後で実行する」<see cref="DeferredDispatcherService"/> を使う
+    /// （同期の代役はディスパッチした処理をその場で走り切るため、1 件目の await 中に 2 件目を割り込ませられない）。
+    /// </para>
+    /// <para>
+    /// なお <c>HandleCardReadAsync</c> 入口の Processing ガードだけを消す変異は検出できない（等価変異）。
+    /// ガードの後ろの <c>switch</c> に Processing の case も default も無く、ガードが無くても何も起きないため。
+    /// このテストが検出するのは、観測できる性質（2 件目が何も起こさないこと）を壊す変異 ―
+    /// 貸出の await 中に状態を Processing にしない／switch に Processing を処理する分岐を足す ― である。
     /// </para>
     /// </remarks>
     [Fact]
-    public async Task ConcurrentRead_Processing状態中の新規カード読み取りは無視されること()
+    public async Task ConcurrentRead_貸出処理のawait中に届いた2件目のタッチは無視されること()
     {
-        // Arrange: 状態を Processing に直接設定（リフレクション）
-        var currentStateProp = typeof(MainViewModel).GetProperty("CurrentState")!;
-        currentStateProp.SetValue(_viewModel, AppState.Processing);
+        // Arrange: この 1 件だけ、本番と同じ「後で実行する」ディスパッチャーと専用のカードリーダーで組み立てる
+        var dispatcher = new DeferredDispatcherService();
+        var readerMock = new Mock<ICardReader>();
+        readerMock.Setup(r => r.ReadBalanceAsync(It.IsAny<string>())).ReturnsAsync(1500);
+        readerMock.Setup(r => r.TryReadHistoryAsync(It.IsAny<string>()))
+            .ReturnsAsync(CardReadResult<IReadOnlyList<LedgerDetail>>.Ok(new List<LedgerDetail>()));
+        var viewModel = CreateViewModel(readerMock.Object, dispatcher);
 
-        // Act: カード読み取りを発火
-        RaiseCardRead(CardIdmA);
-        await _dispatcherService.WaitForPendingAsync();
+        void Touch(string idm) => readerMock.Raise(r => r.CardRead += null,
+            readerMock.Object, new CardReadEventArgs { Idm = idm });
 
-        // Assert: リポジトリ/リーダーへのアクセスは発生していない
-        _cardRepositoryMock.Verify(r => r.GetByIdmAsync(It.IsAny<string>(), It.IsAny<bool>()),
-            Times.Never);
-        _staffRepositoryMock.Verify(r => r.GetByIdmAsync(It.IsAny<string>(), It.IsAny<bool>()),
-            Times.Never);
-        _cardReaderMock.Verify(r => r.ReadBalanceAsync(It.IsAny<string>()), Times.Never);
-        _cardReaderMock.Verify(r => r.TryReadHistoryAsync(It.IsAny<string>()), Times.Never);
-        // 状態は Processing のまま維持される
-        _viewModel.CurrentState.Should().Be(AppState.Processing);
+        _cardRepositoryMock.Setup(r => r.GetByIdmAsync(CardIdmA, It.IsAny<bool>()))
+            .ReturnsAsync(BuildAvailableCard(CardIdmA));
+        _cardRepositoryMock.Setup(r => r.GetByIdmAsync(CardIdmB, It.IsAny<bool>()))
+            .ReturnsAsync(BuildAvailableCard(CardIdmB));
+        _cardRepositoryMock.Setup(r => r.UpdateLentStatusAsync(
+                It.IsAny<string>(), true, It.IsAny<DateTime?>(), It.IsAny<string>()))
+            .ReturnsAsync(true);
+        _cardRepositoryMock.Setup(r => r.GetLentAsync(It.IsAny<bool>())).ReturnsAsync(new List<IcCard>());
+        _cardRepositoryMock.Setup(r => r.GetAllAsync()).ReturnsAsync(new List<IcCard>());
+
+        // 貸出の台帳書き込みで止める（LendingService のカードロックとトランザクションの内側）
+        var insertEntered = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseInsert = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        _ledgerRepositoryMock.Setup(r => r.InsertAsync(It.IsAny<Ledger>()))
+            .Returns(async () =>
+            {
+                insertEntered.TrySetResult(true);
+                await releaseInsert.Task.ConfigureAwait(false);
+                return 1;
+            });
+
+        // Act 1: 職員証 → カード A（貸出の台帳書き込みで止まる）
+        Touch(StaffIdm);
+        var staffDrain = dispatcher.WaitForPendingAsync();
+        (await Task.WhenAny(staffDrain, Task.Delay(TimeSpan.FromSeconds(10))))
+            .Should().BeSameAs(staffDrain, "前提: 職員証の処理が 10 秒以内に終わること");
+        viewModel.CurrentState.Should().Be(AppState.WaitingForIcCard, "前提: 職員証を認識している");
+
+        Touch(CardIdmA);
+        dispatcher.RunPending();
+        (await Task.WhenAny(insertEntered.Task, Task.Delay(TimeSpan.FromSeconds(10))))
+            .Should().BeSameAs(insertEntered.Task, "前提: カード A の貸出が台帳書き込みまで進むこと");
+        viewModel.CurrentState.Should().Be(AppState.Processing, "貸出の await 中は処理中");
+
+        // Act 2: 貸出の await 中に 2 件目のタッチ（別のカード B）を届ける
+        Touch(CardIdmB);
+        dispatcher.RunPending();
+
+        // Assert（1 件目が止まっている間）: 2 件目は照合も読み取りも行わない
+        _staffRepositoryMock.Verify(r => r.GetByIdmAsync(CardIdmB, It.IsAny<bool>()), Times.Never,
+            "処理中に届いたタッチは職員証の照合に進まない");
+        _cardRepositoryMock.Verify(r => r.GetByIdmAsync(CardIdmB, It.IsAny<bool>()), Times.Never,
+            "処理中に届いたタッチはカードの照合に進まない");
+        readerMock.Verify(r => r.ReadBalanceAsync(CardIdmB), Times.Never);
+
+        // Act 3: 1 件目を解放
+        releaseInsert.SetResult(true);
+        var drain = dispatcher.WaitForPendingAsync();
+        (await Task.WhenAny(drain, Task.Delay(TimeSpan.FromSeconds(30))))
+            .Should().BeSameAs(drain, "解放後は 30 秒以内に貸出処理が終わること");
+
+        // Assert（解放後）: カード A だけが貸し出され、カード B には何も起きていない
+        dispatcher.ObservedExceptions.Should().BeEmpty();
+        _cardRepositoryMock.Verify(r => r.UpdateLentStatusAsync(
+            CardIdmA, true, It.IsAny<DateTime?>(), StaffIdm), Times.Once);
+        _cardRepositoryMock.Verify(r => r.UpdateLentStatusAsync(
+            CardIdmB, It.IsAny<bool>(), It.IsAny<DateTime?>(), It.IsAny<string>()), Times.Never);
+        _ledgerRepositoryMock.Verify(r => r.InsertAsync(It.IsAny<Ledger>()), Times.Once);
+        viewModel.CurrentState.Should().Be(AppState.WaitingForStaffCard, "貸出完了後は職員証タッチ待ちへ戻る");
     }
 
     /// <summary>

@@ -631,6 +631,7 @@ public class CardLockManagerTests : IDisposable
                 catch (Exception ex) { exceptions.Add(ex); }
             }));
 
+            var acquiredCount = 0;
             var getLockTasks = Enumerable.Range(0, 5).Select(workerIdx => Task.Run(async () =>
             {
                 try
@@ -639,10 +640,22 @@ public class CardLockManagerTests : IDisposable
                     {
                         var key = $"card{j % 100}";
                         var sem = lockManager.GetLock(key);
-                        // セマフォを実際に使う（ObjectDisposedExceptionが出ないこと）
-                        await sem.WaitAsync(50);
-                        sem.Release();
-                        lockManager.ReleaseLockReference(key);
+                        try
+                        {
+                            // セマフォを実際に使う（ObjectDisposedExceptionが出ないこと）。
+                            // Issue #2103: 取得できたときだけ Release する。旧実装は WaitAsync の戻り値を捨てて
+                            // 無条件に Release しており、待機がタイムアウトすると他のワーカーが保持中の
+                            // セマフォを横から解放していた（SemaphoreFullException の温床）
+                            if (await sem.WaitAsync(TimeSpan.FromSeconds(5)))
+                            {
+                                Interlocked.Increment(ref acquiredCount);
+                                sem.Release();
+                            }
+                        }
+                        finally
+                        {
+                            lockManager.ReleaseLockReference(key);
+                        }
                     }
                 }
                 catch (Exception ex) { exceptions.Add(ex); }
@@ -650,9 +663,13 @@ public class CardLockManagerTests : IDisposable
 
             await Task.WhenAll(cleanupTasks.Concat(getLockTasks));
 
-            // Assert: ObjectDisposedExceptionが一度も発生していないこと
-            exceptions.OfType<ObjectDisposedException>().Should().BeEmpty(
-                "TOCTOU修正によりObjectDisposedExceptionは発生しないべき");
+            // Assert: 例外が 1 件も発生していないこと。
+            // Issue #2103: 旧実装は ObjectDisposedException だけを見ており、それ以外（NullReference・
+            // SemaphoreFull・KeyNotFound など、同じ競合から生じ得る例外）は集めたまま握りつぶしていた
+            exceptions.Should().BeEmpty(
+                "TOCTOU修正によりクリーンアップとGetLockを並行させても例外は発生しないべき: " +
+                string.Join(" / ", exceptions.Select(e => e.GetType().Name + ": " + e.Message)));
+            acquiredCount.Should().Be(5 * 100, "すべてのワーカーが毎回ロックを取得できること（待機のタイムアウトで素通りしていない）");
         }
         finally
         {

@@ -1657,12 +1657,21 @@ public class LedgerRowEditViewModelTests : IDisposable
     /// 旧実装は commit のあと tx の外で同期し、しかも戻り値を見ていなかったため、
     /// 摘要だけが新しいバス停名で確定して 6 年保存の台帳が自己矛盾した。
     /// </summary>
+    /// <remarks>
+    /// Issue #2103: 旧テストはリポジトリがモックだったため、摘要の UPDATE がそもそも DB に届いておらず、
+    /// 同期失敗の分岐で <c>scope.Commit();</c> を呼んでも緑だった。摘要の UPDATE だけを実リポジトリへ委譲し、
+    /// DB の摘要が保存前のまま（＝トランザクションごと巻き戻った）であることを読み返して表明する。
+    /// </remarks>
     [Fact]
     public async Task SaveEdit_バス停名同期が競合したら保存失敗として巻き戻すこと_Issue1945()
     {
-        // Arrange
+        // Arrange: 実 DB に★の台帳を用意し、摘要の UPDATE を実リポジトリへ委譲する
         var ledger = CreateBusLedger("バス（★）");
+        var realRepository = new LedgerRepository(_dbContext);
+        await SeedLedgerRowAsync(realRepository, ledger);
         var dto = ArrangeBusLedgerForEdit(ledger);
+        _ledgerRepoMock.Setup(r => r.UpdateAsync(It.IsAny<Ledger>(), It.IsAny<SQLiteTransaction>()))
+            .Returns<Ledger, SQLiteTransaction>((l, tx) => realRepository.UpdateAsync(l, tx));
         _ledgerRepoMock.Setup(r => r.UpdateDetailBusStopsAsync(
                 It.IsAny<int>(), It.IsAny<IEnumerable<(int, string)>>(), It.IsAny<SQLiteTransaction>()))
             .ReturnsAsync(false);
@@ -1676,6 +1685,42 @@ public class LedgerRowEditViewModelTests : IDisposable
         // Assert
         _viewModel.IsSaved.Should().BeFalse();
         _viewModel.StatusMessage.Should().Be(LedgerRowEditViewModel.BusStopConflictMessage);
+        _ledgerRepoMock.Verify(r => r.UpdateAsync(
+                It.Is<Ledger>(l => l.Id == ledger.Id && l.Summary == "バス（天神～博多）"), It.IsNotNull<SQLiteTransaction>()),
+            Times.Once, "摘要は実際にトランザクションの内側で書かれている（書かれていなければ巻き戻しを検査できない）");
+        ReadLedgerSummary(ledger.Id).Should().Be("バス（★）",
+            "同期が競合したら commit せずに抜けるので、摘要の UPDATE も巻き戻る（文言の「変更は取り消しています」の根拠）");
+    }
+
+    /// <summary>
+    /// Issue #2103: <paramref name="ledger"/> を実 DB へ登録し、採番された id を <paramref name="ledger"/> と明細へ反映する。
+    /// </summary>
+    private async Task SeedLedgerRowAsync(LedgerRepository repository, Ledger ledger)
+    {
+        using (var lease = _dbContext.LeaseConnection())
+        using (var command = lease.Connection.CreateCommand())
+        {
+            command.CommandText =
+                "INSERT OR IGNORE INTO ic_card (card_idm, card_type, card_number, is_deleted) VALUES (@idm, 'はやかけん', 'H001', 0)";
+            command.Parameters.AddWithValue("@idm", ledger.CardIdm);
+            command.ExecuteNonQuery();
+        }
+
+        ledger.Id = await repository.InsertAsync(ledger);
+        foreach (var detail in ledger.Details)
+        {
+            detail.LedgerId = ledger.Id;
+        }
+        ReadLedgerSummary(ledger.Id).Should().Be(ledger.Summary, "前提: 台帳を登録できること");
+    }
+
+    private string? ReadLedgerSummary(int ledgerId)
+    {
+        using var lease = _dbContext.LeaseConnection();
+        using var command = lease.Connection.CreateCommand();
+        command.CommandText = "SELECT summary FROM ledger WHERE id = @id";
+        command.Parameters.AddWithValue("@id", ledgerId);
+        return command.ExecuteScalar() as string;
     }
 
     /// <summary>

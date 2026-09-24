@@ -118,6 +118,7 @@ public partial class BusStopInputViewModel : ViewModelBase
                 StatusMessage = $"{BusUsages.Count}件のバス利用があります";
             }
 
+            CapturePersistedState();
             HasUnsavedChanges = false;
         }
     }
@@ -152,6 +153,7 @@ public partial class BusStopInputViewModel : ViewModelBase
             StatusMessage = $"{BusUsages.Count}件のバス利用があります。バス停名を入力してください。{suggestionInfo}";
         }
 
+        CapturePersistedState();
         HasUnsavedChanges = false;
     }
 
@@ -209,6 +211,7 @@ public partial class BusStopInputViewModel : ViewModelBase
             StatusMessage = $"{BusUsages.Count}件のバス利用があります。バス停名を入力してください。{suggestionInfo}";
         }
 
+        CapturePersistedState();
         HasUnsavedChanges = false;
     }
 
@@ -237,6 +240,7 @@ public partial class BusStopInputViewModel : ViewModelBase
             StatusMessage = $"{BusUsages.Count}件のバス利用があります。バス停名を入力してください。";
         }
 
+        CapturePersistedState();
         HasUnsavedChanges = false;
     }
 
@@ -460,18 +464,32 @@ public partial class BusStopInputViewModel : ViewModelBase
 
         using (BeginBusy("保存中..."))
         {
-            // 各バス利用のバス停名を更新
-            foreach (var item in BusUsages)
+            // Issue #2103: 保存に失敗したら、メモリ上の明細（バス停名）と摘要を DB と同じ値へ戻す
+            // （RestorePersistedState の remarks）。入力欄は戻さないので、職員はそのまま保存をやり直せる。
+            var success = false;
+            try
             {
-                item.Detail.BusStops = string.IsNullOrWhiteSpace(item.BusStops)
-                    ? SummaryGenerator.BusPlaceholder // 未入力の場合はプレースホルダ
-                    : item.BusStops;
-            }
+                // 各バス利用のバス停名を更新
+                foreach (var item in BusUsages)
+                {
+                    item.Detail.BusStops = string.IsNullOrWhiteSpace(item.BusStops)
+                        ? SummaryGenerator.BusPlaceholder // 未入力の場合はプレースホルダ
+                        : item.BusStops;
+                }
 
-            var success = await PersistBusStopsAsync();
+                success = await PersistBusStopsAsync();
+            }
+            finally
+            {
+                if (!success)
+                {
+                    RestorePersistedState();
+                }
+            }
 
             if (success)
             {
+                CapturePersistedState();
                 StatusMessage = "保存しました";
                 HasUnsavedChanges = false;
                 IsSaved = true;
@@ -493,9 +511,7 @@ public partial class BusStopInputViewModel : ViewModelBase
         var settings = await _settingsRepository.GetAppSettingsAsync();
         var summaryGenerator = new SummaryGenerator(settings.DepartmentType);
 
-        var targetLedgers = _ledgers != null && _ledgers.Count > 0
-            ? _ledgers
-            : (Ledger != null ? new List<Ledger> { Ledger } : new List<Ledger>());
+        var targetLedgers = GetTargetLedgers();
 
         if (targetLedgers.Count == 0) return false;
 
@@ -544,6 +560,98 @@ public partial class BusStopInputViewModel : ViewModelBase
     }
 
     /// <summary>
+    /// 保存対象の Ledger（Issue #1203: 複数 Ledger モードならその全件、単一モードなら <see cref="Ledger"/>）。
+    /// </summary>
+    private List<Ledger> GetTargetLedgers()
+    {
+        if (_ledgers != null && _ledgers.Count > 0)
+        {
+            return _ledgers;
+        }
+        return Ledger != null ? new List<Ledger> { Ledger } : new List<Ledger>();
+    }
+
+    /// <summary>
+    /// Issue #2103: DB に保存されているのと同じメモリ上の値（明細のバス停名・摘要）。
+    /// 初期化時と保存成功時に取り直す。
+    /// </summary>
+    private InMemoryStateSnapshot _persistedState;
+
+    /// <summary>
+    /// Issue #2103: 現在のメモリ上の値を「DB と同じ値」として退避する。
+    /// </summary>
+    /// <remarks>
+    /// 初期化の時点で取る。入力欄のバス停名は入力のたびに <see cref="LedgerDetail.BusStops"/> へ
+    /// そのまま書き込まれる（<see cref="BusStopInputItem"/> の <c>OnBusStopsChanged</c>）ため、
+    /// 保存を始めた時点で取っても、既に保存前の値は失われている。
+    /// </remarks>
+    private void CapturePersistedState()
+    {
+        var details = BusUsages
+            .Select(item => (item.Detail, item.Detail.BusStops))
+            .ToList();
+        var summaries = GetTargetLedgers()
+            .Select(ledger => (ledger, ledger.Summary))
+            .ToList();
+        _persistedState = new InMemoryStateSnapshot(details, summaries);
+    }
+
+    /// <summary>
+    /// Issue #2103: 保存に失敗したとき、メモリ上の明細と摘要を DB と同じ値へ戻す。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// DB はトランザクションで巻き戻るが、書き換えた <see cref="Ledger"/> / <see cref="LedgerDetail"/> は巻き戻らない。
+    /// 戻さないと、メモリ上は「バス（天神～博多）」なのに台帳は「バス（★）」のままという食い違いが残る。
+    /// </para>
+    /// <para>
+    /// とくに <see cref="InitializeWithLedgersAsync"/> で DB から読み直せなかった Ledger（Id が 0、
+    /// または他のパソコンで削除された）は呼び出し元のインスタンスをそのまま書き換えており、
+    /// 返却フローでは同じインスタンスが直後の同行者数入力ダイアログへ渡る。「他のパソコンで削除された」は
+    /// 摘要の更新が失敗する典型的な原因でもあるため、失敗と共有はそろって起きる。
+    /// 読み直せた Ledger はこの ViewModel 専用のインスタンスで、呼び出し元とは共有しない。
+    /// </para>
+    /// <para>
+    /// 入力欄（<see cref="BusStopInputItem.BusStops"/>）は戻さないので、職員はそのまま保存をやり直せる
+    /// （保存のたびに入力欄の値を明細へ書き直すため）。保存せずに閉じた場合の明細の書き込み
+    /// （入力のたびに書き込まれる）は、この復元の対象外である。
+    /// </para>
+    /// </remarks>
+    private void RestorePersistedState()
+    {
+        _persistedState?.Restore();
+    }
+
+    /// <summary>
+    /// Issue #2103: 退避したメモリ上の値。<see cref="Restore"/> で書き戻す。
+    /// </summary>
+    private sealed class InMemoryStateSnapshot
+    {
+        private readonly List<(LedgerDetail Detail, string BusStops)> _details;
+        private readonly List<(Ledger Ledger, string Summary)> _summaries;
+
+        public InMemoryStateSnapshot(
+            List<(LedgerDetail Detail, string BusStops)> details,
+            List<(Ledger Ledger, string Summary)> summaries)
+        {
+            _details = details;
+            _summaries = summaries;
+        }
+
+        public void Restore()
+        {
+            foreach (var (detail, busStops) in _details)
+            {
+                detail.BusStops = busStops;
+            }
+            foreach (var (ledger, summary) in _summaries)
+            {
+                ledger.Summary = summary;
+            }
+        }
+    }
+
+    /// <summary>
     /// Issue #1945: 直近の保存でバス停名の更新が競合（影響行数 0）したかどうか。
     /// 失敗の理由が「行が見つからない」ことに特定できるため、汎用の失敗文言と区別して案内する。
     /// </summary>
@@ -567,17 +675,38 @@ public partial class BusStopInputViewModel : ViewModelBase
 
         using (BeginBusy("保存中..."))
         {
-            // Issue #1156: スキップ時は入力済みの内容も破棄し、すべてプレースホルダにする
-            foreach (var item in BusUsages)
+            // Issue #2103: スキップが失敗したら入力欄も元へ戻す（★で上書きしたまま残すと、
+            // 職員の入力が失われ、そのまま「保存」をやり直すと★で保存される）
+            var inputsBeforeSkip = BusUsages.Select(item => (item, item.BusStops)).ToList();
+            var success = false;
+            try
             {
-                item.BusStops = SummaryGenerator.BusPlaceholder;
-                item.Detail.BusStops = SummaryGenerator.BusPlaceholder;
-            }
+                // Issue #1156: スキップ時は入力済みの内容も破棄し、すべてプレースホルダにする
+                foreach (var item in BusUsages)
+                {
+                    item.BusStops = SummaryGenerator.BusPlaceholder;
+                    item.Detail.BusStops = SummaryGenerator.BusPlaceholder;
+                }
 
-            var success = await PersistBusStopsAsync();
+                success = await PersistBusStopsAsync();
+            }
+            finally
+            {
+                // Issue #2103: 保存と同じく、失敗したらメモリ上の明細と摘要を DB と同じ値へ戻す。
+                // 入力欄の復元は明細へも書き込む（OnBusStopsChanged）ため、明細の復元より先に行う
+                if (!success)
+                {
+                    foreach (var (item, busStops) in inputsBeforeSkip)
+                    {
+                        item.BusStops = busStops;
+                    }
+                    RestorePersistedState();
+                }
+            }
 
             if (success)
             {
+                CapturePersistedState();
                 StatusMessage = "スキップしました（後で入力が必要です）";
                 IsSaved = true;
             }
