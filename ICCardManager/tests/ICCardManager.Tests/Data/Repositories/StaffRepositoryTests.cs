@@ -463,6 +463,168 @@ public class StaffRepositoryTests : IDisposable
 
     #endregion
 
+    #region RestoreAsync テスト（Issue #2107）
+
+    /// <summary>
+    /// 正当な側: 論理削除した職員を復元でき、削除日時が消えること
+    /// </summary>
+    [Fact]
+    public async Task RestoreAsync_DeletedStaff_ReturnsTrueAndClearsDeletedAt()
+    {
+        var staff = CreateTestStaff("STAFF00000000001", "山田太郎", "001");
+        await _repository.InsertAsync(staff);
+        await _repository.DeleteAsync(staff.StaffIdm);
+
+        var result = await _repository.RestoreAsync(staff.StaffIdm);
+
+        result.Should().BeTrue();
+        var restored = await _repository.GetByIdmAsync(staff.StaffIdm);
+        restored.Should().NotBeNull("復元した職員は有効な職員として取得できるべき");
+        restored!.IsDeleted.Should().BeFalse();
+        restored.DeletedAt.Should().BeNull();
+    }
+
+    /// <summary>
+    /// 欠陥を突く側: 既に有効な職員の復元は false を返すこと（競合の検出）
+    /// </summary>
+    /// <remarks>
+    /// 他 PC が先に復元した場合、この false が「先に復元された」という競合の案内の根拠になる（#1759）。
+    /// <c>WHERE … AND is_deleted = 1</c> を消すと有効な行にも一致して true が返り、案内が出なくなる。
+    /// </remarks>
+    [Fact]
+    public async Task RestoreAsync_ActiveStaff_ReturnsFalse()
+    {
+        var staff = CreateTestStaff("STAFF00000000001", "山田太郎", "001");
+        await _repository.InsertAsync(staff);
+
+        var result = await _repository.RestoreAsync(staff.StaffIdm);
+
+        result.Should().BeFalse("有効な職員は復元の対象ではなく、影響行数 0 は競合を意味するため");
+    }
+
+    /// <summary>
+    /// 存在しない職員の復元は false を返すこと
+    /// </summary>
+    [Fact]
+    public async Task RestoreAsync_NonExistingStaff_ReturnsFalse()
+    {
+        var result = await _repository.RestoreAsync("NOTEXISTINGIDM00");
+
+        result.Should().BeFalse();
+    }
+
+    /// <summary>
+    /// トランザクション付きの復元は、コミットすれば反映され、ロールバックすれば削除状態のまま残ること
+    /// </summary>
+    /// <remarks>
+    /// 職員 CSV 取込の復元経路が使うオーバーロード。コミットしない側の表明が無いと、
+    /// トランザクションを無視して自動コミットする実装でも緑になる。
+    /// </remarks>
+    [Fact]
+    public async Task RestoreAsync_WithTransaction_AppliesOnlyOnCommit()
+    {
+        var committed = CreateTestStaff("STAFF00000000001", "山田太郎", "001");
+        var rolledBack = CreateTestStaff("STAFF00000000002", "鈴木花子", "002");
+        await _repository.InsertAsync(committed);
+        await _repository.InsertAsync(rolledBack);
+        await _repository.DeleteAsync(committed.StaffIdm);
+        await _repository.DeleteAsync(rolledBack.StaffIdm);
+
+        using (var scope = await _dbContext.BeginTransactionAsync())
+        {
+            (await _repository.RestoreAsync(committed.StaffIdm, scope.Transaction)).Should().BeTrue();
+            scope.Commit();
+        }
+        using (var scope = await _dbContext.BeginTransactionAsync())
+        {
+            (await _repository.RestoreAsync(rolledBack.StaffIdm, scope.Transaction)).Should().BeTrue();
+            // Commit しない（Dispose でロールバック）
+        }
+
+        (await _repository.GetByIdmAsync(committed.StaffIdm))!.IsDeleted.Should().BeFalse();
+        (await _repository.GetByIdmAsync(rolledBack.StaffIdm, includeDeleted: true))!.IsDeleted.Should().BeTrue(
+            "ロールバックした復元は反映されないべき");
+    }
+
+    #endregion
+
+    #region キャッシュ無効化（Issue #1759 / #2107）
+
+    // 影響行数 0 は「他 PC がこの職員の状態を変えた」ことの証明であり、手元の職員一覧が古いと確定した瞬間である。
+    // そこで無効化しないと、競合を案内された利用者が一覧を再読込しても古い一覧が返る（#1759）。
+    // `if (result > 0)` で無効化を囲む退行は、DB の状態を見るテストでは検出できないため、キャッシュへの呼び出しで表明する。
+
+    [Fact]
+    public async Task UpdateAsync_ZeroRowsAffected_StillInvalidatesStaffCache()
+    {
+        var staff = CreateTestStaff("STAFF00000000001", "山田太郎", "001");
+        await _repository.InsertAsync(staff);
+        await _repository.DeleteAsync(staff.StaffIdm);
+        _cacheServiceMock.Invocations.Clear();
+
+        var result = await _repository.UpdateAsync(CreateTestStaff(staff.StaffIdm, "山田次郎", "001"));
+
+        result.Should().BeFalse("前提: 削除済みの職員は更新されない（影響行数 0）");
+        VerifyStaffCacheInvalidated(Times.Once());
+    }
+
+    [Fact]
+    public async Task DeleteAsync_ZeroRowsAffected_StillInvalidatesStaffCache()
+    {
+        var staff = CreateTestStaff("STAFF00000000001", "山田太郎", "001");
+        await _repository.InsertAsync(staff);
+        await _repository.DeleteAsync(staff.StaffIdm);
+        _cacheServiceMock.Invocations.Clear();
+
+        var result = await _repository.DeleteAsync(staff.StaffIdm);
+
+        result.Should().BeFalse("前提: 既に削除済み（影響行数 0）");
+        VerifyStaffCacheInvalidated(Times.Once());
+    }
+
+    [Fact]
+    public async Task RestoreAsync_ZeroRowsAffected_StillInvalidatesStaffCache()
+    {
+        var staff = CreateTestStaff("STAFF00000000001", "山田太郎", "001");
+        await _repository.InsertAsync(staff);
+        _cacheServiceMock.Invocations.Clear();
+
+        var result = await _repository.RestoreAsync(staff.StaffIdm);
+
+        result.Should().BeFalse("前提: 既に有効（影響行数 0）");
+        VerifyStaffCacheInvalidated(Times.Once());
+    }
+
+    /// <summary>
+    /// 対の表明: トランザクション内の更新・復元ではキャッシュを無効化しないこと
+    /// </summary>
+    /// <remarks>
+    /// コミット前に無効化すると、並行する読み取りが未確定の値を読み直してキャッシュへ載せ得る。
+    /// これが無いと、トランザクションの有無を問わず無条件に無効化する実装でも上の 3 件が緑になる。
+    /// </remarks>
+    [Fact]
+    public async Task UpdateAndRestoreAsync_WithinTransaction_DoNotInvalidateStaffCache()
+    {
+        var staff = CreateTestStaff("STAFF00000000001", "山田太郎", "001");
+        await _repository.InsertAsync(staff);
+        await _repository.DeleteAsync(staff.StaffIdm);
+        _cacheServiceMock.Invocations.Clear();
+
+        using (var scope = await _dbContext.BeginTransactionAsync())
+        {
+            (await _repository.RestoreAsync(staff.StaffIdm, scope.Transaction)).Should().BeTrue("前提: 復元が実際に行われる");
+            (await _repository.UpdateAsync(CreateTestStaff(staff.StaffIdm, "山田次郎", "001"), scope.Transaction)).Should().BeTrue("前提: 更新が実際に行われる");
+            scope.Commit();
+        }
+
+        VerifyStaffCacheInvalidated(Times.Never());
+    }
+
+    private void VerifyStaffCacheInvalidated(Times times)
+        => _cacheServiceMock.Verify(c => c.InvalidateByPrefix(CacheKeys.StaffPrefixForInvalidation), times);
+
+    #endregion
+
     #region ExistsAsync テスト
 
     /// <summary>

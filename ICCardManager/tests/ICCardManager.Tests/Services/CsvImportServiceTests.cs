@@ -932,6 +932,137 @@ FEDCBA9876543210,鈴木花子,002,テスト2";
 
     #endregion
 
+    #region ImportStaffAsync 復元経路（Issue #2107）
+
+    // カード側（ImportCardsAsync_DeletedCard_*）と同じ形の検証が職員側に 1 件も無かった。
+    // 復元経路は「削除済みなら skipExisting でもスキップしない」「Restore が成功したときだけ Update する」
+    // 「どちらかが失敗したら全体を巻き戻す」の 3 つの判断を持つ。
+
+    /// <summary>
+    /// 削除済み職員は skipExisting=true でもスキップせず、復元してから CSV の値で更新し、コミットすること
+    /// </summary>
+    [Fact]
+    public async Task ImportStaffAsync_DeletedStaff_RestoresAndUpdates()
+    {
+        var csvContent = @"職員IDm,氏名,職員番号,備考
+0123456789ABCDEF,山田次郎,002,復元したい";
+        var filePath = Path.Combine(_testDirectory, "staff_restore.csv");
+        await Task.Run(() => File.WriteAllText(filePath, csvContent, CsvEncoding));
+
+        // CSV と全項目一致でも、削除済みなら skipExisting の対象にしない（値は変えておき、更新内容も表明する）
+        var deletedStaff = new Staff { StaffIdm = "0123456789ABCDEF", Name = "山田太郎", Number = "001", Note = "旧備考", IsDeleted = true };
+        _staffRepositoryMock.Setup(x => x.GetByIdmAsync("0123456789ABCDEF", true)).ReturnsAsync(deletedStaff);
+        _staffRepositoryMock.Setup(x => x.RestoreAsync("0123456789ABCDEF", It.IsAny<SQLiteTransaction>())).ReturnsAsync(true);
+        _staffRepositoryMock.Setup(x => x.UpdateAsync(It.IsAny<Staff>(), It.IsAny<SQLiteTransaction>())).ReturnsAsync(true);
+        using var probe = UseObservableTransaction();
+
+        var result = await _service.ImportStaffAsync(filePath, skipExisting: true);
+
+        result.Success.Should().BeTrue();
+        result.ImportedCount.Should().Be(1, "削除済み職員は復元＋更新されて件数に含まれる");
+        result.SkippedCount.Should().Be(0, "削除済みはスキップされない");
+        CountProbeRows(probe).Should().Be(1, "復元が成功したのでトランザクションを確定させるべき");
+        _staffRepositoryMock.Verify(x => x.RestoreAsync("0123456789ABCDEF", It.IsNotNull<SQLiteTransaction>()), Times.Once,
+            "取込のトランザクション内で復元するべき");
+        _staffRepositoryMock.Verify(
+            x => x.UpdateAsync(
+                It.Is<Staff>(s => s.StaffIdm == "0123456789ABCDEF" && s.Name == "山田次郎" && s.Number == "002" && s.Note == "復元したい"),
+                It.IsNotNull<SQLiteTransaction>()),
+            Times.Once,
+            "復元後に CSV の値で更新するべき");
+        _staffRepositoryMock.Verify(x => x.InsertAsync(It.IsAny<Staff>(), It.IsAny<SQLiteTransaction>()), Times.Never,
+            "既存（削除済み）の職員を新規登録しない");
+    }
+
+    /// <summary>
+    /// 対の表明: 有効な既存職員には復元を呼ばず、更新だけを行うこと
+    /// </summary>
+    /// <remarks>
+    /// これが無いと、既存の職員すべてに復元を呼ぶ実装でも上のテストが緑になる。有効な職員への復元は
+    /// 影響行数 0（false）を返すので、その実装では通常の更新が「復元・更新に失敗しました」になる。
+    /// </remarks>
+    [Fact]
+    public async Task ImportStaffAsync_ActiveStaff_UpdatesWithoutRestore()
+    {
+        var csvContent = @"職員IDm,氏名,職員番号,備考
+0123456789ABCDEF,山田次郎,002,更新";
+        var filePath = Path.Combine(_testDirectory, "staff_active_update.csv");
+        await Task.Run(() => File.WriteAllText(filePath, csvContent, CsvEncoding));
+
+        var activeStaff = new Staff { StaffIdm = "0123456789ABCDEF", Name = "山田太郎", Number = "001", Note = "旧備考", IsDeleted = false };
+        _staffRepositoryMock.Setup(x => x.GetByIdmAsync("0123456789ABCDEF", true)).ReturnsAsync(activeStaff);
+        _staffRepositoryMock.Setup(x => x.UpdateAsync(It.IsAny<Staff>(), It.IsAny<SQLiteTransaction>())).ReturnsAsync(true);
+
+        var result = await _service.ImportStaffAsync(filePath, skipExisting: true);
+
+        result.Success.Should().BeTrue();
+        result.ImportedCount.Should().Be(1);
+        _staffRepositoryMock.Verify(x => x.RestoreAsync(It.IsAny<string>(), It.IsAny<SQLiteTransaction>()), Times.Never,
+            "有効な職員は復元の対象ではない");
+    }
+
+    /// <summary>
+    /// 復元に失敗したら更新を試みず、行番号付きのエラーとして報告して全体を巻き戻すこと
+    /// </summary>
+    /// <remarks>
+    /// 他 PC が先に復元していた場合（影響行数 0）がこの経路に当たる。
+    /// </remarks>
+    [Fact]
+    public async Task ImportStaffAsync_DeletedStaff_RestoreFailure_RollsBack()
+    {
+        var csvContent = @"職員IDm,氏名,職員番号,備考
+0123456789ABCDEF,山田太郎,001,復元失敗";
+        var filePath = Path.Combine(_testDirectory, "staff_restore_fail.csv");
+        await Task.Run(() => File.WriteAllText(filePath, csvContent, CsvEncoding));
+
+        var deletedStaff = new Staff { StaffIdm = "0123456789ABCDEF", Name = "山田太郎", IsDeleted = true };
+        _staffRepositoryMock.Setup(x => x.GetByIdmAsync("0123456789ABCDEF", true)).ReturnsAsync(deletedStaff);
+        _staffRepositoryMock.Setup(x => x.RestoreAsync("0123456789ABCDEF", It.IsAny<SQLiteTransaction>())).ReturnsAsync(false);
+        _staffRepositoryMock.Setup(x => x.UpdateAsync(It.IsAny<Staff>(), It.IsAny<SQLiteTransaction>())).ReturnsAsync(true);
+        using var probe = UseObservableTransaction();
+
+        var result = await _service.ImportStaffAsync(filePath);
+
+        result.Success.Should().BeFalse();
+        result.ImportedCount.Should().Be(0);
+        var error = result.Errors.Should().ContainSingle().Subject;
+        error.LineNumber.Should().Be(2, "CSV の 2 行目（ヘッダーの次）の復元に失敗した");
+        error.Message.Should().Be("職員の復元・更新に失敗しました", "通常の更新失敗と区別できる文言で報告するべき");
+        AssertRolledBack(probe);
+        _staffRepositoryMock.Verify(x => x.UpdateAsync(It.IsAny<Staff>(), It.IsAny<SQLiteTransaction>()), Times.Never,
+            "復元できなかった職員を更新しない（更新は WHERE is_deleted = 0 なので、呼んでも成功しない）");
+    }
+
+    /// <summary>
+    /// 復元は成功したが更新が失敗した場合も、復元ごと巻き戻すこと
+    /// </summary>
+    /// <remarks>
+    /// 部分的な確定（復元だけされて氏名は古いまま）を残さない。成否は Restore と Update の両方で判定する。
+    /// </remarks>
+    [Fact]
+    public async Task ImportStaffAsync_RestoreSucceedsButUpdateFails_RollsBack()
+    {
+        var csvContent = @"職員IDm,氏名,職員番号,備考
+0123456789ABCDEF,山田太郎,001,復元できたが更新失敗";
+        var filePath = Path.Combine(_testDirectory, "staff_restore_update_fail.csv");
+        await Task.Run(() => File.WriteAllText(filePath, csvContent, CsvEncoding));
+
+        var deletedStaff = new Staff { StaffIdm = "0123456789ABCDEF", Name = "山田太郎", IsDeleted = true };
+        _staffRepositoryMock.Setup(x => x.GetByIdmAsync("0123456789ABCDEF", true)).ReturnsAsync(deletedStaff);
+        _staffRepositoryMock.Setup(x => x.RestoreAsync("0123456789ABCDEF", It.IsAny<SQLiteTransaction>())).ReturnsAsync(true);
+        _staffRepositoryMock.Setup(x => x.UpdateAsync(It.IsAny<Staff>(), It.IsAny<SQLiteTransaction>())).ReturnsAsync(false);
+        using var probe = UseObservableTransaction();
+
+        var result = await _service.ImportStaffAsync(filePath);
+
+        result.Success.Should().BeFalse();
+        result.ImportedCount.Should().Be(0);
+        result.Errors.Should().ContainSingle().Which.Message.Should().Be("職員の復元・更新に失敗しました");
+        AssertRolledBack(probe);
+    }
+
+    #endregion
+
     #region PreviewCardsAsync テスト
 
     /// <summary>
@@ -1326,6 +1457,36 @@ FEDCBA9876543210,鈴木花子,002,テスト2";
             item.Changes.Any(c => c.FieldName == "備考" &&
                                   c.OldValue == "旧備考" &&
                                   c.NewValue == "新備考"));
+    }
+
+    /// <summary>
+    /// Issue #2107: 削除済み職員はプレビューでも復元（状態: 削除済み → 有効）として表示されること
+    /// </summary>
+    /// <remarks>
+    /// プレビューは取込本体と別に同じ判断を持つ（<c>PreviewStaffAsync</c>）。取込側だけを検証すると、
+    /// プレビューが「スキップ」と表示したのに取込では復元される、という食い違いを見逃す。
+    /// </remarks>
+    [Fact]
+    public async Task PreviewStaffAsync_DeletedStaff_ShowsRestoreActionWithStateChange()
+    {
+        var csvContent = @"職員IDm,氏名,職員番号,備考
+0123456789ABCDEF,山田太郎,001,テスト";
+        var filePath = Path.Combine(_testDirectory, "staff_preview_restore.csv");
+        await Task.Run(() => File.WriteAllText(filePath, csvContent, CsvEncoding));
+
+        // 全項目一致の削除済み職員: 有効な職員なら skipExisting=true でスキップされる入力
+        var deletedStaff = new Staff { StaffIdm = "0123456789ABCDEF", Name = "山田太郎", Number = "001", Note = "テスト", IsDeleted = true };
+        _staffRepositoryMock.Setup(x => x.GetByIdmAsync("0123456789ABCDEF", true)).ReturnsAsync(deletedStaff);
+
+        var result = await _service.PreviewStaffAsync(filePath, skipExisting: true);
+
+        result.IsValid.Should().BeTrue();
+        result.UpdateCount.Should().Be(1, "復元は更新として数える");
+        result.SkipCount.Should().Be(0, "削除済みはスキップしない");
+        var item = result.Items.Should().ContainSingle().Subject;
+        item.Action.Should().Be(ImportAction.Restore);
+        item.Changes.Should().ContainSingle("全項目一致なので、変更は状態の 1 件だけ").Which
+            .Should().BeEquivalentTo(new { FieldName = "状態", OldValue = "削除済み", NewValue = "有効" });
     }
 
     #endregion

@@ -276,6 +276,52 @@ namespace ICCardManager.Tests.Tools
             NotUpdatedNames(result).Should().Equal("card.png");
         }
 
+        /// <summary>
+        /// Issue #2107: 既定の比較元はブランチの分岐点であり、HEAD ではないこと（コミット済みの変更も集める）
+        /// </summary>
+        /// <remarks>
+        /// 上のテストは未コミットの変更だけを置いており、main と HEAD が同じコミットを指していた。
+        /// そのため既定の比較元を <c>"HEAD"</c> に変えても差分は変わらず緑だった。コミット済みの変更だけを置けば、
+        /// HEAD を比較元にした実装では何も集まらない。
+        /// </remarks>
+        [Fact]
+        public void Base_未指定ならコミット済みの変更も分岐点から集める()
+        {
+            var repo = CreateTempRepository();
+            WriteRepoFile(repo, "ICCardManager/src/ICCardManager/Views/Dialogs/CardManageDialog.xaml", "<Window>v2</Window>");
+            Git(repo, "add", "-A");
+            Git(repo, "commit", "-q", "-m", "change card dialog");
+
+            var result = RunScriptCore(_mappingPath, null, "-Json", "-RepoRoot", repo);
+
+            result.ExitCode.Should().Be(0, result.StdErr);
+            AffectedNames(result).Should().Equal(new[] { "card.png" }, "作業ツリーが綺麗でも、ブランチでコミットした変更は撮り直しの対象");
+        }
+
+        /// <summary>
+        /// Issue #2107: 既定の比較元は origin/main が在ればそちらを優先すること
+        /// </summary>
+        /// <remarks>
+        /// ローカルの main は遅れがち（または進みがち）で、CI が比べる origin/main と食い違う。
+        /// ここではローカルの main を HEAD まで進め、origin/main だけが分岐前を指す形を作る。
+        /// main を比較元にした実装では差分が空になる。
+        /// </remarks>
+        [Fact]
+        public void Base_未指定ならorigin_mainを優先する()
+        {
+            var repo = CreateTempRepository();
+            Git(repo, "update-ref", "refs/remotes/origin/main", "main");
+            WriteRepoFile(repo, "ICCardManager/src/ICCardManager/Views/Dialogs/CardManageDialog.xaml", "<Window>v2</Window>");
+            Git(repo, "add", "-A");
+            Git(repo, "commit", "-q", "-m", "change card dialog");
+            Git(repo, "branch", "-f", "main", "HEAD");
+
+            var result = RunScriptCore(_mappingPath, null, "-Json", "-RepoRoot", repo);
+
+            result.ExitCode.Should().Be(0, result.StdErr);
+            AffectedNames(result).Should().Equal(new[] { "card.png" }, "origin/main との分岐点から数えるべき");
+        }
+
         [Fact]
         public void Base_比較元に含まれる変更は数えない()
         {

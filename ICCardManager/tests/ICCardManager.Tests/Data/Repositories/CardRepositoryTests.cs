@@ -623,6 +623,135 @@ public class CardRepositoryTests : IDisposable
 
     #endregion
 
+    #region RestoreAsync テスト（Issue #2107）
+
+    /// <summary>
+    /// 欠陥を突く側: 既に有効なカードの復元は false を返し、行を変えないこと（競合の検出）
+    /// </summary>
+    /// <remarks>
+    /// 他 PC が先に復元した場合、この false が「先に復元された」という競合の案内の根拠になる（#1759）。
+    /// <c>WHERE … AND is_deleted = 1</c> を消すと有効な行にも一致して true が返り、案内が出なくなる。
+    /// 正当な側（削除済みカードの復元は成功する）は <c>CardNumberUniqueConstraintTests.RestoreAsync_NumberNotTaken_Succeeds</c>。
+    /// </remarks>
+    [Fact]
+    public async Task RestoreAsync_ActiveCard_ReturnsFalse()
+    {
+        var card = CreateTestCard("0102030405060708", "はやかけん", "H001");
+        await _repository.InsertAsync(card);
+
+        var result = await _repository.RestoreAsync(card.CardIdm);
+
+        result.Should().BeFalse("有効なカードは復元の対象ではなく、影響行数 0 は競合を意味するため");
+        (await _repository.GetByIdmAsync(card.CardIdm))!.IsDeleted.Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task RestoreAsync_NonExistingCard_ReturnsFalse()
+    {
+        var result = await _repository.RestoreAsync("FFFFFFFFFFFFFFFF");
+
+        result.Should().BeFalse();
+    }
+
+    #endregion
+
+    #region キャッシュ無効化（Issue #1759 / #2107）
+
+    // 影響行数 0 は「他 PC がこのカードの状態を変えた」ことの証明であり、手元のカード一覧が古いと確定した瞬間である。
+    // そこで無効化しないと、競合を案内された利用者が一覧を再読込しても古い一覧が返る（#1759）。
+    // `if (result > 0)` で無効化を囲む退行は、DB の状態を見るテストでは検出できないため、キャッシュへの呼び出しで表明する。
+
+    [Fact]
+    public async Task UpdateAsync_ZeroRowsAffected_StillInvalidatesCardCache()
+    {
+        var card = CreateTestCard("0102030405060708", "はやかけん", "H001");
+        await _repository.InsertAsync(card);
+        (await _repository.DeleteAsync(card.CardIdm)).Should().Be(CardOperationResult.Success);
+        _cacheServiceMock.Invocations.Clear();
+
+        var result = await _repository.UpdateAsync(CreateTestCard(card.CardIdm, "はやかけん", "H002"));
+
+        result.Should().BeFalse("前提: 削除済みのカードは更新されない（影響行数 0）");
+        VerifyCardCacheInvalidated(Times.Once());
+    }
+
+    [Fact]
+    public async Task RestoreAsync_ZeroRowsAffected_StillInvalidatesCardCache()
+    {
+        var card = CreateTestCard("0102030405060708", "はやかけん", "H001");
+        await _repository.InsertAsync(card);
+        _cacheServiceMock.Invocations.Clear();
+
+        var result = await _repository.RestoreAsync(card.CardIdm);
+
+        result.Should().BeFalse("前提: 既に有効（影響行数 0）");
+        VerifyCardCacheInvalidated(Times.Once());
+    }
+
+    [Fact]
+    public async Task UpdateLentStatusAsync_ZeroRowsAffected_StillInvalidatesCardCache()
+    {
+        var card = CreateTestCard("0102030405060708", "はやかけん", "H001");
+        await _repository.InsertAsync(card);
+        (await _repository.DeleteAsync(card.CardIdm)).Should().Be(CardOperationResult.Success);
+        _cacheServiceMock.Invocations.Clear();
+
+        var result = await _repository.UpdateLentStatusAsync(card.CardIdm, true, DateTime.Now, TestStaffIdm);
+
+        result.Should().BeFalse("前提: 削除済みのカードの貸出状態は更新されない（影響行数 0）");
+        VerifyCardCacheInvalidated(Times.Once());
+    }
+
+    /// <summary>
+    /// 削除の影響行数 0 でも、キャッシュを捨てること
+    /// </summary>
+    /// <remarks>
+    /// 原因の診断（<c>DiagnoseFailureAsync</c>）の読み直しはキャッシュを経由しないため、ここで表明するのは
+    /// 「読み直しの前に捨てる」順序ではなく、他 PC が変えた状態を一覧の次の読み込みへ反映させること。
+    /// </remarks>
+    [Fact]
+    public async Task DeleteAsync_ZeroRowsAffected_StillInvalidatesCardCache()
+    {
+        var card = CreateTestCard("0102030405060708", "はやかけん", "H001");
+        await _repository.InsertAsync(card);
+        (await _repository.DeleteAsync(card.CardIdm)).Should().Be(CardOperationResult.Success);
+        _cacheServiceMock.Invocations.Clear();
+
+        var result = await _repository.DeleteAsync(card.CardIdm);
+
+        result.Should().Be(CardOperationResult.Conflict, "前提: 既に削除済み（影響行数 0）");
+        VerifyCardCacheInvalidated(Times.Once());
+    }
+
+    /// <summary>
+    /// 対の表明: トランザクション内の更新・復元ではキャッシュを無効化しないこと
+    /// </summary>
+    /// <remarks>
+    /// これが無いと、トランザクションの有無を問わず無条件に無効化する実装でも上の表明が緑になる。
+    /// </remarks>
+    [Fact]
+    public async Task UpdateAndRestoreAsync_WithinTransaction_DoNotInvalidateCardCache()
+    {
+        var card = CreateTestCard("0102030405060708", "はやかけん", "H001");
+        await _repository.InsertAsync(card);
+        (await _repository.DeleteAsync(card.CardIdm)).Should().Be(CardOperationResult.Success);
+        _cacheServiceMock.Invocations.Clear();
+
+        using (var scope = await _dbContext.BeginTransactionAsync())
+        {
+            (await _repository.RestoreAsync(card.CardIdm, scope.Transaction)).Should().BeTrue();
+            (await _repository.UpdateAsync(CreateTestCard(card.CardIdm, "はやかけん", "H002"), scope.Transaction)).Should().BeTrue();
+            scope.Commit();
+        }
+
+        VerifyCardCacheInvalidated(Times.Never());
+    }
+
+    private void VerifyCardCacheInvalidated(Times times)
+        => _cacheServiceMock.Verify(c => c.InvalidateByPrefix(CacheKeys.CardPrefixForInvalidation), times);
+
+    #endregion
+
     #region ExistsAsync テスト
 
     /// <summary>

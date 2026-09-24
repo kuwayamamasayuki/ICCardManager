@@ -4,6 +4,7 @@ using System.Linq;
 using System.Threading.Tasks;
 using FluentAssertions;
 using ICCardManager.Data.Repositories;
+using ICCardManager.Models;
 using ICCardManager.Services;
 using Microsoft.Extensions.Logging;
 using Moq;
@@ -256,6 +257,64 @@ public class TransferStationGroupServiceTests : IDisposable
         // Assert
         ok.Should().BeTrue();
         restored.Should().BeEquivalentTo(original);
+    }
+
+    #endregion
+
+    #region 保存後の摘要生成（Issue #2107）
+
+    // 上の SaveGroupsAsync のテストは SummaryGenerator.GetTransferStationGroups()（設定の観測点）しか見ておらず、
+    // 保存した値が摘要生成の判定に実際に使われることまでは表明していなかった。観測点だけが新しい値を返し、
+    // 生成が古い世代を見続ける形（#1919 の世代の差し替え漏れ）でも緑になる。
+
+    /// <summary>報告事例（#1905）: 天神日銀前→下原中央、下原中央→天神中央郵便局前（履歴は新しい順）。</summary>
+    private static List<LedgerDetail> TenjinRoundTripByBus() => new()
+    {
+        new LedgerDetail { UseDate = new DateTime(2024, 12, 9), Amount = 230, Balance = 4330, IsBus = true, BusStops = "下原中央～天神中央郵便局前" },
+        new LedgerDetail { UseDate = new DateTime(2024, 12, 9), Amount = 230, Balance = 4560, IsBus = true, BusStops = "天神日銀前～下原中央" },
+    };
+
+    /// <summary>
+    /// 保存に成功したら、既に動いている摘要生成（Singleton）の次の生成から、新しいグループで往復を検出すること
+    /// </summary>
+    /// <remarks>
+    /// 生成器は保存の<b>前</b>に作る。本番の <see cref="SummaryGenerator"/> は Singleton で起動時に作られるため、
+    /// 生成器の構築時に設定を取り込む実装では、画面から保存しても再起動まで反映されない。
+    /// </remarks>
+    [Fact]
+    public async Task SaveGroupsAsync_保存成功_以後の摘要生成が新しいグループで往復を検出すること()
+    {
+        var generator = new SummaryGenerator();
+        _settingsRepository
+            .Setup(r => r.SetAsync(SettingsRepository.KeyTransferStationGroups, It.IsAny<string>()))
+            .ReturnsAsync(true);
+
+        await CreateService().SaveGroupsAsync(new[] { new[] { "天神日銀前", "天神中央郵便局前" } });
+
+        generator.GenerateByDate(TenjinRoundTripByBus()).Should().ContainSingle()
+            .Which.Summary.Should().Be("バス（天神日銀前（天神中央郵便局前）～下原中央 往復）",
+                "同一視を登録したので往復として認識され、目的地（下原中央）が残るべき");
+    }
+
+    /// <summary>
+    /// 対の表明: 保存に失敗したら、摘要生成は従来のグループのまま（目的地が乗継として省略される）であること
+    /// </summary>
+    /// <remarks>
+    /// これが無いと、保存の成否にかかわらず同じ摘要になる入力（グループが効かない入力）でも上のテストが緑になり得る。
+    /// </remarks>
+    [Fact]
+    public async Task SaveGroupsAsync_保存失敗_摘要生成は従来のグループのままであること()
+    {
+        var generator = new SummaryGenerator();
+        _settingsRepository
+            .Setup(r => r.SetAsync(SettingsRepository.KeyTransferStationGroups, It.IsAny<string>()))
+            .ReturnsAsync(false);
+
+        await CreateService().SaveGroupsAsync(new[] { new[] { "天神日銀前", "天神中央郵便局前" } });
+
+        generator.GenerateByDate(TenjinRoundTripByBus()).Should().ContainSingle()
+            .Which.Summary.Should().Be("バス（天神日銀前～天神中央郵便局前）",
+                "保存できなかったグループを摘要生成に使わないべき");
     }
 
     #endregion

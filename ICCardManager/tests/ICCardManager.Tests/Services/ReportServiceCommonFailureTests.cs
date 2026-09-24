@@ -220,5 +220,35 @@ public class ReportServiceCommonFailureTests : IDisposable
         result.IsCommonFailure.Should().BeFalse();
     }
 
+    /// <summary>
+    /// Issue #2107: 権限エラーはカード固有の失敗として返すこと（共通原因にしない）
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// 権限エラーはフォルダーの ACL だけでなく、特定の年度ファイルの読み取り専用属性や、そのファイルだけに
+    /// 付いた ACL でも起きる。共通原因にすると、一括作成が 1 枚目の権限エラーで止まり、残りのカードが
+    /// 作られなくなる（#2042）。
+    /// </para>
+    /// <para>
+    /// 文言まで表明するのは、権限エラーの分岐を消しても末尾の <c>catch (Exception)</c> が同じく
+    /// <c>FailureResult</c> を返すため。フラグだけ見ると、専用の分岐が無くなったことに気付けない。
+    /// 末尾の分岐も <c>ExceptionMessageFormatter.ToReason</c> 経由で「ファイルへのアクセス権限がありません」を含むため、
+    /// 照合は専用分岐にしか無い文言（見出しの「ファイルの保存に失敗しました」と「出力先フォルダへの」）で行う（コードレビューで検出）。
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public async Task CreateMonthlyReportAsync_権限エラーは共通原因の失敗にしないこと()
+    {
+        var service = CreateSeamService();
+        service.WriteFailure = () => new UnauthorizedAccessException("アクセスが拒否されました");
+
+        var result = await service.CreateMonthlyReportAsync(CardIdm, Year, Month, OutputPath());
+
+        result.Success.Should().BeFalse();
+        result.IsCommonFailure.Should().BeFalse("1 枚だけ読み取り専用になっている年度ファイルが実在するため、残りのカードは作成できる");
+        result.ErrorMessage.Should().Be("ファイルの保存に失敗しました", "末尾の分岐の見出しは「帳票の作成に失敗しました」");
+        result.DetailedErrorMessage.Should().Contain("出力先フォルダへのアクセス権限がありません", "権限エラー専用の分岐を通ったことを表明する");
+    }
+
     #endregion
 }
