@@ -38,6 +38,21 @@ public class AdminDashboardServiceTests
 
     private static readonly DateTime AsOf = new DateTime(2026, 8, 3, 9, 0, 0);
 
+    /// <summary>
+    /// 残額警告のしきい値。<see cref="AppSettings.WarningBalance"/> の既定値（10,000 円）と
+    /// 異なる値にしておく（Issue #2106）。既定値と同じ値では、設定を読まずに
+    /// <c>new AppSettings().WarningBalance</c> を使う実装でも同じ判定になり、
+    /// 「設定値で判定している」ことを検査できない（#1818）。
+    /// </summary>
+    private const int NonDefaultWarningBalance = 7000;
+
+    /// <summary>
+    /// 長期未返却の判定日数。<see cref="AppConstants.LongTermUnreturnedDays"/>（14 日）と
+    /// 異なる値にしておく（Issue #2106）。既定値を渡すと、引数を無視して定数で判定する実装でも
+    /// 同じ結果になる。
+    /// </summary>
+    private const int NonDefaultLongTermUnreturnedDays = 30;
+
     private AdminDashboardService CreateService() => new AdminDashboardService(
         _cardRepository.Object,
         _ledgerRepository.Object,
@@ -57,7 +72,7 @@ public class AdminDashboardServiceTests
         IEnumerable<ReportExportStatus> reportStatuses = null)
     {
         _settingsRepository.Setup(r => r.GetAppSettingsAsync())
-            .ReturnsAsync(settings ?? new AppSettings { WarningBalance = 10000, ReportOutputFolder = @"C:\reports" });
+            .ReturnsAsync(settings ?? new AppSettings { WarningBalance = NonDefaultWarningBalance, ReportOutputFolder = @"C:\reports" });
         _cardRepository.Setup(r => r.GetAllAsync())
             .ReturnsAsync(cards ?? new List<IcCard>());
         _ledgerRepository.Setup(r => r.GetAllLentRecordsAsync())
@@ -183,16 +198,22 @@ public class AdminDashboardServiceTests
     #region GetOperationStatusAsync — 長期未返却
 
     [Theory]
-    [InlineData(13, false)]
-    [InlineData(14, true)]
-    [InlineData(15, true)]
+    [InlineData(14, false)]
+    [InlineData(29, false)]
+    [InlineData(30, true)]
+    [InlineData(31, true)]
     public async Task GetOperationStatusAsync_FlagsLongTermUnreturnedAtThreshold(int elapsedDays, bool expected)
     {
+        // Issue #2106: 判定日数は引数で渡した値（30 日）を使う。既定の 14 日を渡すと、
+        // 引数を無視して AppConstants.LongTermUnreturnedDays で判定する実装でも緑になる。
+        // 14・29 日の行は、定数で判定する実装なら督促対象になってしまう入力。
+        NonDefaultLongTermUnreturnedDays.Should().NotBe(AppConstants.LongTermUnreturnedDays,
+            "既定値と同じ日数では、引数を使っているかを判別できない");
         SetupDefaults(
             cards: new[] { Card(CardA, isLent: true) },
             lentRecords: new[] { LentRecord(CardA, AsOf.AddDays(-elapsedDays)) });
 
-        var result = await CreateService().GetOperationStatusAsync(AsOf, AppConstants.LongTermUnreturnedDays);
+        var result = await CreateService().GetOperationStatusAsync(AsOf, NonDefaultLongTermUnreturnedDays);
 
         result.Cards.Single().IsLongTermUnreturned.Should().Be(expected);
         result.LongTermUnreturnedCount.Should().Be(expected ? 1 : 0);
@@ -211,22 +232,29 @@ public class AdminDashboardServiceTests
         card.LentAt.Should().Be(AsOf.AddDays(-20));
     }
 
-    [Fact]
-    public async Task GetOperationStatusAsync_WithDuplicateLentRecords_UsesTheNewestOne()
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task GetOperationStatusAsync_WithDuplicateLentRecords_UsesTheNewestOne(bool newestFirst)
     {
-        // Issue #1196: 共有モードでは同一カードに複数の貸出中レコードが残ることがある
+        // Issue #1196: 共有モードでは同一カードに複数の貸出中レコードが残ることがある。
+        // Issue #2106: 本番のクエリ（LedgerRepository.GetAllLentRecordsAsync）は
+        // ORDER BY lent_at DESC なので、新しいレコードが先に来る（newestFirst = true）。
+        // 逆順だけで試すと「後に来たものを採る」実装でも緑になり、本番の並びでは
+        // 古いレコードが採られて経過日数が過大に出る。並びに依存せず最新を採ることを
+        // 両方の並びで固定する（逆順の行は「先に来たものを採る」実装を落とす）。
+        var newest = LentRecord(CardA, AsOf.AddDays(-2), lenderIdm: null, staffName: "新しい貸出の職員");
+        var oldest = LentRecord(CardA, AsOf.AddDays(-60), lenderIdm: null, staffName: "古い貸出の職員");
         SetupDefaults(
             cards: new[] { Card(CardA, isLent: true) },
-            lentRecords: new[]
-            {
-                LentRecord(CardA, AsOf.AddDays(-60)),
-                LentRecord(CardA, AsOf.AddDays(-2))
-            });
+            lentRecords: newestFirst ? new[] { newest, oldest } : new[] { oldest, newest });
 
         var card = (await CreateService().GetOperationStatusAsync(AsOf, AppConstants.LongTermUnreturnedDays)).Cards.Single();
 
+        card.LentAt.Should().Be(AsOf.AddDays(-2));
         card.ElapsedLentDays.Should().Be(2, "古いレコードを採ると経過日数を過大に見せてしまう");
         card.IsLongTermUnreturned.Should().BeFalse();
+        card.LentStaffName.Should().Be("新しい貸出の職員", "督促先も最新の貸出記録から解決する");
     }
 
     [Fact]
@@ -288,12 +316,17 @@ public class AdminDashboardServiceTests
     #region GetOperationStatusAsync — 残額
 
     [Theory]
-    [InlineData(9999, true)]
-    [InlineData(10000, true)]
-    [InlineData(10001, false)]
+    [InlineData(6999, true)]
+    [InlineData(7000, true)]
+    [InlineData(7001, false)]
+    [InlineData(10000, false)]
     public async Task GetOperationStatusAsync_FlagsLowBalanceInclusiveOfThreshold(int balance, bool expected)
     {
-        // 既存の残額不足警告（WarningService）と同じく「以下」で判定する
+        // 既存の残額不足警告（WarningService）と同じく「以下」で判定する。
+        // Issue #2106: しきい値は設定（7,000 円）から読む。既定値（10,000 円）で判定する
+        // 実装では 7001・10000 円の行が警告になってしまう。
+        NonDefaultWarningBalance.Should().NotBe(new AppSettings().WarningBalance,
+            "既定値と同じしきい値では、設定を読んでいるかを判別できない");
         SetupDefaults(
             cards: new[] { Card(CardA) },
             balances: new Dictionary<string, (int, DateTime?)> { [CardA] = (balance, AsOf.AddDays(-1)) });
@@ -456,12 +489,14 @@ public class AdminDashboardServiceTests
     [Fact]
     public async Task GetOperationStatusAsync_MarksAttentionForAnyProblem()
     {
+        // Issue #2106: CardB の残額 8,000 円は設定のしきい値（7,000 円）を上回るが、
+        // 既定値（10,000 円）を下回る。既定値で判定する実装では CardB にも注意が付く。
         SetupDefaults(
             cards: new[] { Card(CardA), Card(CardB, number: "002") },
             balances: new Dictionary<string, (int, DateTime?)>
             {
                 [CardA] = (500, AsOf.AddDays(-1)),
-                [CardB] = (50000, AsOf.AddDays(-1))
+                [CardB] = (8000, AsOf.AddDays(-1))
             },
             reportStatuses: new[]
             {
@@ -865,18 +900,25 @@ public class AdminDashboardServiceTests
     {
         // 通し番号は表示順に乗るため、同名・同額の系列の並びが実行のたびに変わると
         // ラベルまで入れ替わる。バケットキーで並びを固定していることを表明する。
+        // Issue #2106: 2 系列の中身が同一だと、並びが入れ替わっても結果を区別できない
+        // （バケットキーによる並べ替えを消しても緑）。合計・氏名は同じまま、利用した月を
+        // 系列ごとに変えて「どちらの系列が先に来たか」を読めるようにする。
+        // 入力は StaffB を先に置く（並べ替えが無ければ入力順＝StaffB が先になる）。
         SetupAnalyticsDefaults(
             monthlyUsage: new[]
             {
-                new MonthlyUsageRow { YearMonth = "2026-05", LenderIdm = StaffB, StaffName = "福岡 太郎", TotalExpense = 1000 },
+                new MonthlyUsageRow { YearMonth = "2026-06", LenderIdm = StaffB, StaffName = "福岡 太郎", TotalExpense = 1000 },
                 new MonthlyUsageRow { YearMonth = "2026-05", LenderIdm = StaffA, StaffName = "福岡 太郎", TotalExpense = 1000 }
             });
 
         var result = await CreateService().GetAnalyticsAsync(
-            new DateTime(2026, 5, 1), new DateTime(2026, 5, 31), AsOf);
+            new DateTime(2026, 5, 1), new DateTime(2026, 6, 30), AsOf);
 
-        // StaffA < StaffB（序数比較）なので、金額が同じなら常に StaffA が先。
-        result.UsageSeries.Select(s => s.MonthlyExpenses[0]).Should().Equal(new[] { 1000, 1000 });
+        // StaffA < StaffB（序数比較）なので、金額が同じなら常に StaffA（5 月に利用）が先。
+        result.UsageSeries.Should().HaveCount(2);
+        result.UsageSeries.Select(s => s.TotalExpense).Should().Equal(new[] { 1000, 1000 });
+        result.UsageSeries[0].MonthlyExpenses.Should().Equal(new[] { 1000, 0 }, "StaffA の系列が先頭");
+        result.UsageSeries[1].MonthlyExpenses.Should().Equal(new[] { 0, 1000 }, "StaffB の系列が 2 番目");
         result.UsageSeries.Select(s => s.Name)
             .Should().Equal(new[] { "福岡 太郎（1 人目）", "福岡 太郎（2 人目）" });
     }
