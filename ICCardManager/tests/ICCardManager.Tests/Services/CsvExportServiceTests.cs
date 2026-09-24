@@ -63,6 +63,25 @@ public class CsvExportServiceTests : IDisposable
         GC.SuppressFinalize(this);
     }
 
+    /// <summary>UTF-8 の BOM（Excel が文字コードを判別するために必要）</summary>
+    private static readonly byte[] Utf8Bom = { 0xEF, 0xBB, 0xBF };
+
+    /// <summary>
+    /// ファイル先頭のバイト列が UTF-8 BOM ちょうど 1 つで始まり、その直後にヘッダー行が続くことを表明する。
+    /// </summary>
+    /// <remarks>
+    /// Issue #2106: <c>File.ReadAllLines(path, Encoding.UTF8)</c> は BOM の有無にかかわらず同じ文字列を返すため、
+    /// 読み取った行を比べるだけでは BOM を外した実装（Excel で開くと文字化けする）を検出できない。
+    /// バイト列を直接読んで表明する。BOM の二重付与も検出できるよう、BOM の直後をヘッダーと照合する。
+    /// </remarks>
+    private static void AssertStartsWithSingleUtf8BomThenHeader(string filePath, string expectedHeader)
+    {
+        var bytes = File.ReadAllBytes(filePath);
+        bytes.Take(3).Should().Equal(Utf8Bom, "Excel で文字化けしないよう UTF-8 BOM 付きで出力する");
+        var afterBom = new UTF8Encoding(false).GetString(bytes, 3, bytes.Length - 3);
+        afterBom.Should().StartWith(expectedHeader + "\r\n", "BOM は 1 つだけで、直後にヘッダー行が続く");
+    }
+
     #region ExportCardsAsync テスト
 
     /// <summary>
@@ -94,6 +113,16 @@ public class CsvExportServiceTests : IDisposable
         var lines = await Task.Run(() => File.ReadAllLines(filePath, Encoding.UTF8));
         lines.Should().HaveCount(3); // ヘッダー + 2行
         lines[0].Should().Be("カードIDm,カード種別,管理番号,備考,削除済み");
+
+        // Issue #2106: ヘッダーだけでなく各列の値を行単位で完全一致させる（列の取り違え・値の欠落を検出する）。
+        // 並びは OrderByCardDefault に委ねるため、行の集合として比べる
+        lines.Skip(1).Should().BeEquivalentTo(new[]
+        {
+            "0123456789ABCDEF,Suica,001,テスト1,0",
+            "FEDCBA9876543210,PASMO,002,,0"
+        });
+
+        AssertStartsWithSingleUtf8BomThenHeader(filePath, "カードIDm,カード種別,管理番号,備考,削除済み");
     }
 
     /// <summary>
@@ -119,9 +148,19 @@ public class CsvExportServiceTests : IDisposable
         result.Success.Should().BeTrue();
         result.ExportedCount.Should().Be(2);
 
-        var content = await Task.Run(() => File.ReadAllText(filePath, Encoding.UTF8));
-        content.Should().Contain(",0"); // 削除済み=0
-        content.Should().Contain(",1"); // 削除済み=1
+        // Issue #2106: 旧実装は content.Should().Contain(",0") / Contain(",1") で、",001" / ",002"（管理番号）に
+        // 必ず一致していたため、削除済みフラグの三項演算子を反転しても緑だった。
+        // 列を分割し、各カードの「削除済み」列（末尾）を完全一致で比べる
+        var lines = await Task.Run(() => File.ReadAllLines(filePath, Encoding.UTF8));
+        lines.Should().HaveCount(3);
+        var deletedFlagByIdm = lines.Skip(1)
+            .Select(l => l.Split(','))
+            .ToDictionary(f => f[0], f => f[4]);
+        deletedFlagByIdm.Should().Equal(new Dictionary<string, string>
+        {
+            ["0123456789ABCDEF"] = "0",   // IsDeleted = false
+            ["FEDCBA9876543210"] = "1"    // IsDeleted = true
+        });
     }
 
     /// <summary>
@@ -361,6 +400,13 @@ public class CsvExportServiceTests : IDisposable
         lines.Should().HaveCount(3); // ヘッダー + 2行
         // Issue #1906: 同行者数列を末尾に追加（利用者列は生の氏名のまま）
         lines[0].Should().Be("ID,日時,カードIDm,管理番号,摘要,受入金額,払出金額,残額,利用者,備考,同行者数");
+
+        // Issue #2106: データ行を完全一致で比べる。旧実装はヘッダーしか見ておらず、
+        // 受入金額と払出金額の列を入れ替えても緑だった（利用行は払出列、チャージ行は受入列に値が入る）
+        lines[1].Should().Be("1,2024-01-15 00:00:00,0123456789ABCDEF,,鉄道（博多～天神）,,260,9740,山田太郎,,");
+        lines[2].Should().Be("2,2024-01-16 00:00:00,0123456789ABCDEF,,チャージ,5000,,14740,山田太郎,,");
+
+        AssertStartsWithSingleUtf8BomThenHeader(filePath, "ID,日時,カードIDm,管理番号,摘要,受入金額,払出金額,残額,利用者,備考,同行者数");
     }
 
     /// <summary>
@@ -1229,6 +1275,104 @@ public class CsvExportServiceTests : IDisposable
         lines[3].Should().Contain(",216,");  // チャージ
         lines[4].Should().Contain(",渡辺通,薬院,");
         lines[4].Should().Contain(",6,");
+    }
+
+    #endregion
+
+    #region ExportLedgerTemplateAsync テスト (Issue #510 / #2106)
+
+    /// <summary>
+    /// 取込用テンプレートのヘッダーは、履歴エクスポート（＝取込形式）のヘッダーと同一で、UTF-8 BOM 付きで出力されること。
+    /// </summary>
+    /// <remarks>
+    /// テンプレートは「エクスポート CSV と同じ形式で取り込める」ことが目的なので、リテラルの固定に加え、
+    /// 実際の <see cref="CsvExportService.ExportLedgersAsync"/> の出力ヘッダーとも突き合わせる
+    /// （片方だけ列を足したときに食い違いを検出する）。
+    /// </remarks>
+    [Fact]
+    public async Task ExportLedgerTemplateAsync_HeaderMatchesLedgerExportAndHasBom()
+    {
+        const string expectedHeader = "ID,日時,カードIDm,管理番号,摘要,受入金額,払出金額,残額,利用者,備考,同行者数";
+        var templatePath = Path.Combine(_testDirectory, "template.csv");
+
+        var result = await _service.ExportLedgerTemplateAsync(templatePath, "0123456789ABCDEF", "H-007");
+
+        result.Success.Should().BeTrue();
+        result.ExportedCount.Should().Be(0, "テンプレートはデータ行を含まない");
+        result.FilePath.Should().Be(templatePath);
+        result.ErrorMessage.Should().BeNull();
+
+        var templateLines = await Task.Run(() => File.ReadAllLines(templatePath, Encoding.UTF8));
+        templateLines[0].Should().Be(expectedHeader);
+        AssertStartsWithSingleUtf8BomThenHeader(templatePath, expectedHeader);
+
+        // 履歴エクスポート（取込形式）の実出力ヘッダーと一致すること
+        _ledgerRepositoryMock
+            .Setup(x => x.GetByDateRangeAsync(null, It.IsAny<DateTime>(), It.IsAny<DateTime>()))
+            .ReturnsAsync(new List<Ledger>());
+        var exportPath = Path.Combine(_testDirectory, "ledger_header.csv");
+        (await _service.ExportLedgersAsync(exportPath, new DateTime(2024, 4, 1), new DateTime(2024, 4, 30)))
+            .Success.Should().BeTrue();
+        var exportLines = await Task.Run(() => File.ReadAllLines(exportPath, Encoding.UTF8));
+        templateLines[0].Should().Be(exportLines[0], "テンプレートは取込形式（＝履歴エクスポート）と同じ列構成");
+    }
+
+    /// <summary>
+    /// ヘッダー以降はすべて「#」で始まるコメント行で、対象カードの IDm・管理番号が案内と入力例の該当列に埋め込まれること。
+    /// </summary>
+    [Fact]
+    public async Task ExportLedgerTemplateAsync_CommentLinesEmbedCardIdmAndNumberInCorrectColumns()
+    {
+        const string cardIdm = "FEDCBA9876543210";
+        const string cardNumber = "H-007";
+        var templatePath = Path.Combine(_testDirectory, "template_card.csv");
+
+        var result = await _service.ExportLedgerTemplateAsync(templatePath, cardIdm, cardNumber);
+
+        result.Success.Should().BeTrue();
+        var lines = await Task.Run(() => File.ReadAllLines(templatePath, Encoding.UTF8));
+        var headerColumnCount = lines[0].Split(',').Length;
+        headerColumnCount.Should().Be(11);
+
+        var body = lines.Skip(1).ToList();
+        body.Should().NotBeEmpty();
+        body.Should().OnlyContain(l => l.StartsWith("#"), "ヘッダー以外はデータ行として取り込まれないコメント行");
+        body.Should().Contain($"# カードIDm: {cardIdm}");
+        body.Should().Contain($"# 管理番号: {cardNumber}");
+
+        // 入力例（先頭の # を消せばそのまま取込行になる行）: 列数がヘッダーと一致し、
+        // カードIDm 列（3 列目）と管理番号列（4 列目）に対象カードの値が入る
+        var exampleRows = body
+            .Where(l => l.StartsWith("#,"))
+            .Select(l => l.Substring(1).Split(','))
+            .ToList();
+        exampleRows.Should().HaveCount(2);
+        exampleRows.Should().OnlyContain(f => f.Length == headerColumnCount, "入力例の列数はヘッダーと一致する");
+        exampleRows.Should().OnlyContain(f => f[0] == "", "ID 列は新規追加なので空欄");
+        exampleRows.Should().OnlyContain(f => f[2] == cardIdm, "カードIDm 列に対象カードの IDm");
+        exampleRows.Should().OnlyContain(f => f[3] == cardNumber, "管理番号列に対象カードの管理番号");
+
+        // 利用の例は払出列、チャージの例は受入列に金額が入る（列の取り違えを案内しない）
+        exampleRows[0][5].Should().BeEmpty();
+        exampleRows[0][6].Should().Be("220");
+        exampleRows[1][5].Should().Be("5000");
+        exampleRows[1][6].Should().BeEmpty();
+    }
+
+    /// <summary>
+    /// 出力先に書き込めないときは失敗を返し、操作名を含む 3 要素の文言を示すこと。
+    /// </summary>
+    [Fact]
+    public async Task ExportLedgerTemplateAsync_InvalidPath_ReturnsFailureWithOperationName()
+    {
+        var invalidPath = Path.Combine(_testDirectory, "nonexistent", "nested", "template.csv");
+
+        var result = await _service.ExportLedgerTemplateAsync(invalidPath, "0123456789ABCDEF", "H-007");
+
+        result.Success.Should().BeFalse();
+        result.FilePath.Should().Be(invalidPath);
+        result.ErrorMessage.Should().Contain("取込用テンプレートの出力");
+        File.Exists(invalidPath).Should().BeFalse();
     }
 
     #endregion

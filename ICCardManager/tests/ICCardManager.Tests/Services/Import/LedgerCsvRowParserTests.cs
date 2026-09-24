@@ -13,7 +13,18 @@ namespace ICCardManager.Tests.Services.Import;
 /// </summary>
 public class LedgerCsvRowParserTests
 {
-    private const string ExistingCardIdm = "0102030405060708";
+    /// <summary>
+    /// 登録済みカードの IDm（DB 上の正規形＝大文字）。
+    /// </summary>
+    /// <remarks>
+    /// Issue #2106: 旧値 "0102030405060708" は数字だけで、<c>ToUpperInvariant</c> を消しても入力と出力が
+    /// 同じ文字列になるため大文字化を検証できなかった。英字を含む値にし、入力には小文字版
+    /// （<see cref="LowercaseExistingCardIdm"/>）を与えて大文字化を表明する。
+    /// </remarks>
+    private const string ExistingCardIdm = "0102030405ABCDEF";
+
+    /// <summary><see cref="ExistingCardIdm"/> の小文字表記（Excel 等で小文字化された CSV を模す）</summary>
+    private const string LowercaseExistingCardIdm = "0102030405abcdef";
 
     private static HashSet<string> ExistingCards() =>
         new HashSet<string>(StringComparer.OrdinalIgnoreCase) { ExistingCardIdm };
@@ -192,15 +203,16 @@ public class LedgerCsvRowParserTests
         var errors = new List<CsvImportError>();
 
         // Act
+        // Issue #2106: 対象カードの IDm も小文字で渡し、大文字へ正規化されて使われることを表明する
         var result = LedgerCsvRowParser.TryParseRow(
             fields, lineNumber: 6, line: "raw",
             hasIdColumn: false, minColumns: 9,
-            ExistingCards(), targetCardIdm: ExistingCardIdm, errors);
+            ExistingCards(), targetCardIdm: LowercaseExistingCardIdm, errors);
 
         // Assert
         result.Should().NotBeNull();
         errors.Should().BeEmpty();
-        result.CardIdm.Should().Be(ExistingCardIdm.ToUpperInvariant());
+        result.CardIdm.Should().Be("0102030405ABCDEF");
     }
 
     [Fact]
@@ -245,8 +257,10 @@ public class LedgerCsvRowParserTests
     public void TryParseRow_ValidRow_ReturnsParsed()
     {
         // Arrange
+        // Issue #2106: CSV の IDm は小文字で与え、DB の正規形（大文字）で返ることを表明する
         var fields = ValidNineColumnFields(
             date: "2024-02-20 09:00:00",
+            cardIdm: LowercaseExistingCardIdm,
             summary: "鉄道（博多～天神）",
             income: "",
             expense: "260",
@@ -266,7 +280,7 @@ public class LedgerCsvRowParserTests
         errors.Should().BeEmpty();
         result.LineNumber.Should().Be(10);
         result.LedgerId.Should().BeNull();
-        result.CardIdm.Should().Be(ExistingCardIdm.ToUpperInvariant());
+        result.CardIdm.Should().Be("0102030405ABCDEF");
         result.Date.Should().Be(new DateTime(2024, 2, 20, 9, 0, 0));
         result.Summary.Should().Be("鉄道（博多～天神）");
         result.Income.Should().Be(0);
@@ -293,7 +307,29 @@ public class LedgerCsvRowParserTests
         result.Should().NotBeNull();
         errors.Should().BeEmpty();
         result.LedgerId.Should().Be(42);
-        result.CardIdm.Should().Be(ExistingCardIdm.ToUpperInvariant());
+        result.CardIdm.Should().Be("0102030405ABCDEF");
+    }
+
+    /// <summary>
+    /// Issue #2106: 登録済みカードとの照合は大文字小文字を区別しない集合で行われるため、
+    /// 大文字化を外しても「登録されていません」にはならず、小文字の IDm がそのまま台帳へ入る。
+    /// 小文字の IDm を与えた行が、大文字の IDm で返ることを ID 列ありの形式でも表明する。
+    /// </summary>
+    [Fact]
+    public void TryParseRow_LowercaseIdmWithIdColumn_ReturnsUppercaseIdm()
+    {
+        var fields = ValidTenColumnFields("7");
+        fields[2] = "  " + LowercaseExistingCardIdm + " ";
+        var errors = new List<CsvImportError>();
+
+        var result = LedgerCsvRowParser.TryParseRow(
+            fields, lineNumber: 13, line: "raw",
+            hasIdColumn: true, minColumns: 10,
+            ExistingCards(), targetCardIdm: null, errors);
+
+        errors.Should().BeEmpty();
+        result.Should().NotBeNull();
+        result!.CardIdm.Should().Be("0102030405ABCDEF", "前後の空白を除き、大文字へ正規化する");
     }
 
     [Fact]
