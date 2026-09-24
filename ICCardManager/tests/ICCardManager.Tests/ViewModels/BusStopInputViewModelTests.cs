@@ -275,7 +275,7 @@ public class BusStopInputViewModelTests : IDisposable
         await _viewModel.SaveAsync();
 
         // Assert: 未入力のバス停は★マーク
-        detail1.BusStops.Should().Be("★");
+        detail1.BusStops.Should().Be(SummaryGenerator.BusPlaceholder);
         detail2.BusStops.Should().Be("天神バス停");
     }
 
@@ -293,7 +293,7 @@ public class BusStopInputViewModelTests : IDisposable
         // Arrange
         var details = new List<LedgerDetail>
         {
-            new LedgerDetail { LedgerId = 1, IsBus = true, BusStops = "★", Amount = 200, SequenceNumber = 1 }
+            new LedgerDetail { LedgerId = 1, IsBus = true, BusStops = SummaryGenerator.BusPlaceholder, Amount = 200, SequenceNumber = 1 }
         };
         var ledger = new Ledger { Id = 1, Summary = "バス（★）", Details = details };
 
@@ -325,7 +325,7 @@ public class BusStopInputViewModelTests : IDisposable
         // Arrange
         var details = new List<LedgerDetail>
         {
-            new LedgerDetail { LedgerId = 1, IsBus = true, BusStops = "★", Amount = 200, SequenceNumber = 1 }
+            new LedgerDetail { LedgerId = 1, IsBus = true, BusStops = SummaryGenerator.BusPlaceholder, Amount = 200, SequenceNumber = 1 }
         };
         var ledger = new Ledger { Id = 1, Summary = "バス（★）", Details = details };
 
@@ -388,7 +388,7 @@ public class BusStopInputViewModelTests : IDisposable
         // Arrange
         var details = new List<LedgerDetail>
         {
-            new LedgerDetail { LedgerId = 1, IsBus = true, BusStops = "★", Amount = 200, SequenceNumber = 1 }
+            new LedgerDetail { LedgerId = 1, IsBus = true, BusStops = SummaryGenerator.BusPlaceholder, Amount = 200, SequenceNumber = 1 }
         };
         var ledger = new Ledger { Id = 1, Summary = "バス（★）", Details = details };
 
@@ -955,7 +955,7 @@ public class BusStopInputViewModelTests : IDisposable
         await _viewModel.SkipAsync();
 
         // Assert
-        detail1.BusStops.Should().Be("★");
+        detail1.BusStops.Should().Be(SummaryGenerator.BusPlaceholder);
         _viewModel.IsSaved.Should().BeTrue();
     }
 
@@ -988,10 +988,10 @@ public class BusStopInputViewModelTests : IDisposable
         await _viewModel.SkipAsync();
 
         // Assert: 入力済みの内容も含め、すべて★にリセットされる
-        detail1.BusStops.Should().Be("★");
-        detail2.BusStops.Should().Be("★");
-        _viewModel.BusUsages[0].BusStops.Should().Be("★");
-        _viewModel.BusUsages[1].BusStops.Should().Be("★");
+        detail1.BusStops.Should().Be(SummaryGenerator.BusPlaceholder);
+        detail2.BusStops.Should().Be(SummaryGenerator.BusPlaceholder);
+        _viewModel.BusUsages[0].BusStops.Should().Be(SummaryGenerator.BusPlaceholder);
+        _viewModel.BusUsages[1].BusStops.Should().Be(SummaryGenerator.BusPlaceholder);
         _viewModel.IsSaved.Should().BeTrue();
     }
 
@@ -1174,8 +1174,8 @@ public class BusStopInputViewModelTests : IDisposable
 
         await _viewModel.SkipAsync();
 
-        ledger1.Details[0].BusStops.Should().Be("★");
-        ledger2.Details[0].BusStops.Should().Be("★");
+        ledger1.Details[0].BusStops.Should().Be(SummaryGenerator.BusPlaceholder);
+        ledger2.Details[0].BusStops.Should().Be(SummaryGenerator.BusPlaceholder);
         _ledgerRepoMock.Verify(r => r.UpdateAsync(ledger1, It.IsAny<SQLiteTransaction>()), Times.Once);
         _ledgerRepoMock.Verify(r => r.UpdateAsync(ledger2, It.IsAny<SQLiteTransaction>()), Times.Once);
         _viewModel.IsSaved.Should().BeTrue();
@@ -1289,7 +1289,7 @@ public class BusStopInputViewModelTests : IDisposable
         var ledger = new Ledger { Id = 1 };
         var details = new List<LedgerDetail>
         {
-            new LedgerDetail { IsBus = true, BusStops = "★" },
+            new LedgerDetail { IsBus = true, BusStops = SummaryGenerator.BusPlaceholder },
             new LedgerDetail { IsBus = true, BusStops = "既存値" },
         };
         _viewModel.InitializeWithDetails(ledger, details);
@@ -1385,13 +1385,13 @@ public class BusStopInputItemTests
     public void Constructor_星マークのみのBusStopsは空文字として初期化されること()
     {
         // Issue #1205: ユーザーが★を削除する手間を省くため、★のみは空欄として扱う
-        var detail = new LedgerDetail { IsBus = true, BusStops = "★" };
+        var detail = new LedgerDetail { IsBus = true, BusStops = SummaryGenerator.BusPlaceholder };
 
         var item = new BusStopInputItem(detail);
 
         item.BusStops.Should().BeEmpty();
         // Detail 側の永続値は変えない（保存時の空欄→★変換で元に戻る）
-        detail.BusStops.Should().Be("★");
+        detail.BusStops.Should().Be(SummaryGenerator.BusPlaceholder);
     }
 
     [Fact]
@@ -1423,26 +1423,28 @@ public class BusStopInputItemTests
     [Fact]
     public void サジェスト_先頭一致が優先されること()
     {
-        // Arrange
+        // Arrange: 部分一致の候補を先頭に置く（Issue #2104）。
+        // 入力の段階で先頭一致が先頭にあると、並べ替えをせず Contains で抽出するだけの実装でも
+        // 先頭の候補が「天神」で始まり、優先していることを区別できない。
         var suggestions = new List<string>
         {
-            "天神バス停～博多駅前",
+            "大天神ビル前",
             "博多駅前～天神バス停",
-            "天神中央公園前",
-            "大天神ビル前"
+            "天神バス停～博多駅前",
+            "天神中央公園前"
         };
         var item = CreateItem(suggestions: suggestions);
 
         // Act: 「天神」と入力
         item.BusStops = "天神";
 
-        // Assert: 先頭一致（天神バス停、天神中央公園前）が先、部分一致（大天神ビル前）が後
+        // Assert: 先頭一致（元の順序を保つ）が先、部分一致（元の順序を保つ）が後
         item.ShowSuggestions.Should().BeTrue();
-        item.FilteredSuggestions.Should().HaveCountGreaterOrEqualTo(2);
-
-        // 先頭一致が先に来る
-        var first = item.FilteredSuggestions[0];
-        first.Should().StartWith("天神");
+        item.FilteredSuggestions.Should().Equal(
+            "天神バス停～博多駅前",
+            "天神中央公園前",
+            "大天神ビル前",
+            "博多駅前～天神バス停");
     }
 
     [Fact]
@@ -1490,17 +1492,20 @@ public class BusStopInputItemTests
     [Fact]
     public void サジェスト_最大8件までに制限されること()
     {
-        // Arrange: 10個のサジェスト候補
-        var suggestions = Enumerable.Range(1, 10)
-            .Select(i => $"バス停{i}")
-            .ToList();
-        var item = CreateItem(suggestions: suggestions);
+        // Arrange: 先頭一致 6 件・部分一致 6 件（Issue #2104）。
+        // 旧テストは 10 件すべてが先頭一致だったため、先頭一致の上限（5 件）で止まり、
+        // 全体の上限（8 件）に一度も到達しなかった（BeLessOrEqualTo(8) は 0 件でも緑）。
+        // 先頭一致・部分一致をそれぞれの上限（5 件）を超えて用意し、5 件＋5 件＝10 件から 8 件で打ち切られることを見る。
+        var startsWith = Enumerable.Range(1, 6).Select(i => $"バス停{i}").ToList();
+        var contains = Enumerable.Range(1, 6).Select(i => $"北バス停{i}").ToList();
+        var item = CreateItem(suggestions: startsWith.Concat(contains).ToList());
 
         // Act
         item.BusStops = "バス停";
 
-        // Assert
-        item.FilteredSuggestions.Count.Should().BeLessOrEqualTo(8);
+        // Assert: 先頭一致の上位 5 件のあとに部分一致の上位 3 件が続き、計 8 件で打ち切られる
+        item.FilteredSuggestions.Should().Equal(
+            startsWith.Take(5).Concat(contains.Take(3)));
     }
 
     [Fact]
@@ -1933,7 +1938,7 @@ public class BusStopInputItemTests
     {
         // Arrange
         var existing = new List<string> { "天神～博多" };
-        var newEntries = new List<string> { "★" };
+        var newEntries = new List<string> { SummaryGenerator.BusPlaceholder };
 
         // Act
         var warnings = BusStopInputViewModel.DetectSimilarBusStops(existing, newEntries);

@@ -245,8 +245,15 @@ public class PrintPreviewViewModelTests
             new double[] { 50, 75, 100, 125, 150, 200 });
     }
 
+    /// <summary>
+    /// Issue #2104: 一覧に無い倍率から拡大すると、次に大きい倍率へ移ること（ZoomOut と対称）。
+    /// </summary>
+    /// <remarks>
+    /// 旧実装は「一覧の中の位置」の判定を先に行っていたため、位置 -1 が「末尾より前」として扱われ、
+    /// 拡大を押したのに先頭の 50% へ縮小していた。旧テストはこの縮小を期待値として固定していた。
+    /// </remarks>
     [Fact]
-    public void ZoomIn_リストにない値からの場合にZoomLevels先頭に移動すること()
+    public void ZoomIn_リストにない値からの場合に次に大きい値が選択されること()
     {
         // Arrange: リストにない値を設定
         _viewModel.ZoomLevel = 110;
@@ -254,11 +261,21 @@ public class PrintPreviewViewModelTests
         // Act
         _viewModel.ZoomInCommand.Execute(null);
 
-        // Assert:
-        // 注: Array.IndexOf == -1 の場合、-1 < Length - 1 (= 5) は常にtrueなので
-        // ZoomLevels[-1 + 1] = ZoomLevels[0] = 50 が返る
-        // （else if の「次に大きい値を選択」ロジックは到達不能コード）
-        _viewModel.ZoomLevel.Should().Be(50);
+        // Assert: 110より大きい最初のレベル = 125
+        _viewModel.ZoomLevel.Should().Be(125);
+    }
+
+    /// <summary>
+    /// Issue #2104: 一覧の最大より大きい倍率から拡大しても、縮小しないこと。
+    /// </summary>
+    [Fact]
+    public void ZoomIn_リストの最大より大きい値からの場合は変化しないこと()
+    {
+        _viewModel.ZoomLevel = 250;
+
+        _viewModel.ZoomInCommand.Execute(null);
+
+        _viewModel.ZoomLevel.Should().Be(250);
     }
 
     [Fact]

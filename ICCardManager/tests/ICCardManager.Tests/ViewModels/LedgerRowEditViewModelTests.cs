@@ -473,16 +473,17 @@ public class LedgerRowEditViewModelTests : IDisposable
     [Fact]
     public async Task EditMode_AutoBalanceOn_前行残高を起点に再計算されること()
     {
-        // Arrange
+        // Arrange: Issue #2104 — 前行残高 + 受入 − 払出 が DB の残高（5,000 円）と一致しない起点を渡す。
+        // 一致する起点（2,000 円）だと、ON にしても再計算しない実装でも 5,000 円のままで緑になる。
         var dto = SetupChargeRowForEdit();
-        await _viewModel.InitializeForEditAsync(dto, TestOperatorIdm, previousBalance: 2000);
+        await _viewModel.InitializeForEditAsync(dto, TestOperatorIdm, previousBalance: 1500);
 
         // Act
         _viewModel.IsAutoBalance = true;
 
-        // Assert: 2000 + 3000 - 0
-        _viewModel.Balance.Should().Be(5000);
-        _viewModel.PreviousBalance.Should().Be(2000);
+        // Assert: 1500 + 3000 - 0
+        _viewModel.Balance.Should().Be(4500);
+        _viewModel.PreviousBalance.Should().Be(1500);
     }
 
     /// <summary>
@@ -491,16 +492,17 @@ public class LedgerRowEditViewModelTests : IDisposable
     [Fact]
     public async Task EditMode_AutoBalanceOn_金額修正時も前行残高を起点に追随すること()
     {
-        // Arrange
+        // Arrange: Issue #2104 — DB の残高と食い違う起点にする。起点が 2,000 円（DB と整合）だと、
+        // 前行残高ではなく「DB の残高 + 金額の差分」で追随する実装（5000 + 2000）でも 7,000 円になり区別できない。
         var dto = SetupChargeRowForEdit();
-        await _viewModel.InitializeForEditAsync(dto, TestOperatorIdm, previousBalance: 2000);
+        await _viewModel.InitializeForEditAsync(dto, TestOperatorIdm, previousBalance: 1500);
         _viewModel.IsAutoBalance = true;
 
         // Act: チャージ額を 3,000 → 5,000 に訂正
         _viewModel.Income = 5000;
 
-        // Assert: 2000 + 5000 - 0
-        _viewModel.Balance.Should().Be(7000);
+        // Assert: 1500 + 5000 - 0
+        _viewModel.Balance.Should().Be(6500);
     }
 
     /// <summary>
@@ -651,13 +653,14 @@ public class LedgerRowEditViewModelTests : IDisposable
     [Fact]
     public async Task EditMode_自動計算ONのまま利用日を変更しても古い起点で計算しないこと()
     {
-        // Arrange
+        // Arrange: Issue #2104 — 自動計算の値（1000 + 3000 = 4000）を DB の残高（5000）と異ならせる。
+        // 同じ値だと、自動計算を解除せず古い起点の値を残す実装でも「DB 値へ戻る」の表明が緑になる。
         var dto = SetupChargeRowForEdit();
-        await _viewModel.InitializeForEditAsync(dto, TestOperatorIdm, previousBalance: 2000);
+        await _viewModel.InitializeForEditAsync(dto, TestOperatorIdm, previousBalance: 1000);
         _viewModel.IsAutoBalance = true;
-        _viewModel.Balance.Should().Be(5000);
+        _viewModel.Balance.Should().Be(4000);
 
-        // Act: 利用日を後ろの日付へ訂正（この行はもう 2000 の次ではない）
+        // Act: 利用日を後ろの日付へ訂正（この行はもう 1000 の次ではない）
         _viewModel.EditDate = new DateTime(2026, 1, 26);
 
         // Assert: 自動計算は解除され、ON にする前の DB 値へ戻る
@@ -1047,7 +1050,7 @@ public class LedgerRowEditViewModelTests : IDisposable
         {
             Id = 2, CardIdm = TestCardIdm,
             Date = new DateTime(2026, 1, 15),
-            Summary = "（貸出中）",
+            Summary = SummaryGenerator.GetLendingSummary(),
             Income = 0, Expense = 0, Balance = 2300,
             LenderIdm = _staffA.StaffIdm,
             StaffName = _staffA.Name,
@@ -1059,7 +1062,7 @@ public class LedgerRowEditViewModelTests : IDisposable
         {
             Id = 2, CardIdm = TestCardIdm,
             Date = new DateTime(2026, 1, 15), DateDisplay = "R8.1.15",
-            Summary = "（貸出中）",
+            Summary = SummaryGenerator.GetLendingSummary(),
             Income = 0, Expense = 0, Balance = 2300,
             StaffName = _staffA.Name,
             IsLentRecord = true
@@ -1647,7 +1650,7 @@ public class LedgerRowEditViewModelTests : IDisposable
         Summary = summary, Expense = 200, Balance = 2300,
         Details = new List<LedgerDetail>
         {
-            new LedgerDetail { LedgerId = 1, IsBus = true, BusStops = "★", Amount = 200, Balance = 2300, SequenceNumber = 1 }
+            new LedgerDetail { LedgerId = 1, IsBus = true, BusStops = SummaryGenerator.BusPlaceholder, Amount = 200, Balance = 2300, SequenceNumber = 1 }
         }
     };
 
@@ -1827,7 +1830,7 @@ public class LedgerRowEditViewModelTests : IDisposable
         var before = DetailsOf(log.BeforeData);
         before.GetArrayLength().Should().Be(1, "編集前の明細が「変更前」に無いと、全明細が新規追加として描画される");
         before[0].GetProperty("BusStops").GetString().Should().Be(
-            "★", "書き戻し前のプレースホルダが記録されるべき");
+            SummaryGenerator.BusPlaceholder, "書き戻し前のプレースホルダが記録されるべき");
     }
 
     /// <summary>

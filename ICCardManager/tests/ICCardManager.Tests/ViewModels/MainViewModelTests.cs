@@ -1,5 +1,6 @@
 ﻿using CommunityToolkit.Mvvm.Messaging;
 using FluentAssertions;
+using ICCardManager.Common.Messages;
 using ICCardManager.Data;
 using ICCardManager.Data.Repositories;
 using ICCardManager.Infrastructure.Caching;
@@ -139,7 +140,8 @@ public class MainViewModelTests : IDisposable
         int timeoutSeconds = 60,
         IDispatcherService dispatcherService = null,
         ICardReader cardReader = null,
-        ILogger<MainViewModel> logger = null)
+        ILogger<MainViewModel> logger = null,
+        IMessenger messenger = null)
     {
         var databaseInfoMock = new Mock<IDatabaseInfo>();
         return new MainViewModel(
@@ -153,7 +155,7 @@ public class MainViewModelTests : IDisposable
             _toastMock.Object,
             _staffAuthServiceMock.Object,
             _ledgerMergeService,
-            _messengerMock.Object,
+            messenger ?? _messengerMock.Object,
             _navigationServiceMock.Object,
             _operationLoggerMock.Object,
             _ledgerConsistencyChecker,
@@ -1791,8 +1793,32 @@ public class MainViewModelTests : IDisposable
     [Fact]
     public void CardReadingSuppression_ShouldTrackSources()
     {
-        // Assert - 初期状態では抑制されていない
-        _viewModel.IsCardReadingSuppressed.Should().BeFalse();
+        // Issue #2104: メッセンジャーをモックにすると、コンストラクターで登録した受信ハンドラーが
+        // 一度も実行されない。本物の WeakReferenceMessenger を渡して、ハンドラーそのものを通す。
+        var messenger = new WeakReferenceMessenger();
+        var viewModel = CreateViewModel(messenger: messenger);
+
+        // 初期状態では抑制されていない
+        viewModel.IsCardReadingSuppressed.Should().BeFalse();
+
+        // 2 つの画面がそれぞれ抑制を開始する
+        messenger.Send(new CardReadingSuppressedMessage(true, CardReadingSource.StaffRegistration));
+        messenger.Send(new CardReadingSuppressedMessage(true, CardReadingSource.CardRegistration));
+        viewModel.IsCardReadingSuppressed.Should().BeTrue();
+
+        // 片方が解除しても、もう片方の抑制は残る（解除で全体を Clear() する実装を検出する）
+        messenger.Send(new CardReadingSuppressedMessage(false, CardReadingSource.StaffRegistration));
+        viewModel.IsCardReadingSuppressed.Should().BeTrue(
+            "職員登録の抑制を解除しても、カード登録の抑制は続いていること");
+
+        // 抑制していない画面からの解除は、他の画面の抑制に影響しない
+        messenger.Send(new CardReadingSuppressedMessage(false, CardReadingSource.Authentication));
+        viewModel.IsCardReadingSuppressed.Should().BeTrue(
+            "抑制していない画面からの解除で、他の画面の抑制が解けないこと");
+
+        // すべての画面が解除したら抑制が解ける
+        messenger.Send(new CardReadingSuppressedMessage(false, CardReadingSource.CardRegistration));
+        viewModel.IsCardReadingSuppressed.Should().BeFalse();
     }
 
     /// <summary>
@@ -2776,18 +2802,47 @@ public class MainViewModelTests : IDisposable
     [Fact]
     public async Task MergeHistoryLedgers_認証キャンセル時_統合を実行しない()
     {
-        // Arrange: 隣接する2件をチェック済みにする
-        _viewModel.HistoryLedgers.Add(new LedgerDto { Id = 1, IsChecked = true });
-        _viewModel.HistoryLedgers.Add(new LedgerDto { Id = 2, IsChecked = true });
-        // _staffAuthServiceMock は未設定 → RequestAuthenticationAsync は既定で null（=認証キャンセル）を返す
+        // Arrange: 認証以外は「統合が最後まで成功する」状態にしてから、認証だけをキャンセルさせる。
+        // Issue #2104: 確認ダイアログを未設定（既定で false）のままにすると、認証ゲートを外しても
+        // 確認ダイアログの「いいえ」で止まるため、ゲートの有無を区別できなかった。
+        ArrangeMergeableCheckedLedgers();
+        _staffAuthServiceMock
+            .Setup(a => a.RequestAuthenticationAsync(It.IsAny<string>()))
+            .ReturnsAsync((StaffAuthResult)null);
 
         // Act
         await _viewModel.MergeHistoryLedgersCommand.ExecuteAsync(null);
 
         // Assert: 認証を要求し、キャンセルされたため確認ダイアログ・統合処理へ進まない
-        // （認証ゲートは確認ダイアログ MessageBox.Show より前に位置するため、本テストは UI を起動しない）
         _staffAuthServiceMock.Verify(
             s => s.RequestAuthenticationAsync("履歴の統合"), Times.Once);
+        _navigationServiceMock.Verify(
+            n => n.ShowConfirmation(It.IsAny<string>(), It.IsAny<string>()), Times.Never,
+            "認証をキャンセルしたら確認ダイアログを出さないこと");
+        _ledgerRepositoryMock.Verify(
+            r => r.MergeLedgersAsync(
+                It.IsAny<int>(), It.IsAny<IEnumerable<int>>(), It.IsAny<Ledger>(), It.IsAny<SQLiteTransaction>()),
+            Times.Never,
+            "認証をキャンセルしたら統合を実行しないこと");
+    }
+
+    /// <summary>
+    /// Issue #2104: 上の認証キャンセルのテストと対になる表明。同じ準備で認証が通れば統合まで進むこと。
+    /// これが無いと、統合を無条件に止める実装でも認証キャンセルのテストは緑になる。
+    /// </summary>
+    [Fact]
+    public async Task MergeHistoryLedgers_認証が通れば統合を実行すること()
+    {
+        ArrangeMergeableCheckedLedgers();
+
+        await _viewModel.MergeHistoryLedgersCommand.ExecuteAsync(null);
+
+        _navigationServiceMock.Verify(
+            n => n.ShowConfirmation(It.IsAny<string>(), "履歴の統合"), Times.Once);
+        _ledgerRepositoryMock.Verify(
+            r => r.MergeLedgersAsync(
+                It.IsAny<int>(), It.IsAny<IEnumerable<int>>(), It.IsAny<Ledger>(), It.IsAny<SQLiteTransaction>()),
+            Times.Once);
     }
 
     /// <summary>
@@ -3476,14 +3531,27 @@ public class MainViewModelTests : IDisposable
         var lentLedger = new LedgerDto
         {
             Id = 103,
+            CardIdm = DeleteConflictCardIdm,
             IsLentRecord = true,
         };
-        // _staffAuthServiceMock は未設定なのでデフォルトで null（=キャンセル）が返る
+        // Issue #2104: 認証以外（確認・読み取り・削除）はすべて成功する状態にしてから、認証だけを
+        // キャンセルさせる。確認ダイアログを未設定（既定で false）のままにすると、認証ゲートを
+        // 外しても確認の「いいえ」で止まるため、ゲートの有無を区別できなかった。
+        ArrangeLedgerDelete(
+            new Ledger { Id = 103, CardIdm = DeleteConflictCardIdm, IsLentRecord = true },
+            deleted: true);
+        _staffAuthServiceMock
+            .Setup(a => a.RequestAuthenticationAsync(It.IsAny<string>()))
+            .ReturnsAsync((StaffAuthResult)null);
 
         // Act
         await _viewModel.DeleteLedgerRowCommand.ExecuteAsync(lentLedger);
 
         // Assert
+        _navigationServiceMock.Verify(
+            d => d.ShowWarningConfirmation(It.IsAny<string>(), It.IsAny<string>()),
+            Times.Never,
+            "認証キャンセル時は確認ダイアログを出さない");
         _ledgerRepositoryMock.Verify(
             r => r.DeleteAsync(It.IsAny<int>(), It.IsAny<SQLiteTransaction>()),
             Times.Never,
@@ -3679,6 +3747,162 @@ public class MainViewModelTests : IDisposable
         await _viewModel.HandleReturnSuccessAsync(CreateTestCard(), result);
 
         order.Should().Equal("bus", "companion");
+    }
+
+    /// <summary>
+    /// Issue #2104: 同行者数入力ダイアログへ、設定の秒数（#2009 の自動クローズ）と対象行が渡ること。
+    /// </summary>
+    /// <remarks>
+    /// <c>ShowDialogAsync</c> のモックは初期化用の <c>Func</c> を実行しないため、呼ばれた回数だけを見ると
+    /// <c>InitializeWithLedgersAsync(targets, autoCloseSeconds)</c> の秒数を 0 に固定しても（自動で閉じる機能が
+    /// 消えても）緑になる。<c>Func</c> を捕まえ、本物の <see cref="CompanionCountInputViewModel"/> を持つ
+    /// ダイアログへ適用して、ViewModel が受け取った値を観測する。
+    /// 0（自動的に閉じない）も通すのは、秒数を定数へ置き換えた実装を検出するため。
+    /// </remarks>
+    [Theory]
+    [InlineData(45)]
+    [InlineData(0)]
+    public async Task HandleReturnSuccessAsync_同行者数ダイアログへ設定の秒数と対象行を渡すこと(int timeoutSeconds)
+    {
+        SetupForReturnSuccess();
+        _settingsRepositoryMock
+            .Setup(s => s.GetAppSettingsAsync())
+            .ReturnsAsync(new AppSettings
+            {
+                CompanionCountInputTimeoutSeconds = timeoutSeconds,
+                ShowHistoryOnReturn = false,
+                WarningBalance = 500
+            });
+        Func<ICCardManager.Views.Dialogs.CompanionCountInputDialog, Task> configure = null;
+        _navigationServiceMock
+            .Setup(n => n.ShowDialogAsync<ICCardManager.Views.Dialogs.CompanionCountInputDialog>(
+                It.IsAny<Func<ICCardManager.Views.Dialogs.CompanionCountInputDialog, Task>>()))
+            .Callback<Func<ICCardManager.Views.Dialogs.CompanionCountInputDialog, Task>>(f => configure = f)
+            .ReturnsAsync((bool?)true);
+        var result = new LendingResult
+        {
+            Success = true,
+            Balance = 1000,
+            CreatedLedgers = new List<Ledger>
+            {
+                new Ledger { Id = 10, Summary = "鉄道（博多～天神）", Expense = 260, IsLentRecord = false },
+                new Ledger { Id = 11, Summary = SummaryGenerator.GetChargeSummary(DepartmentType.MayorOffice), Income = 3000, Expense = 0, IsLentRecord = false },
+            },
+        };
+
+        await _viewModel.HandleReturnSuccessAsync(CreateTestCard(), result);
+
+        configure.Should().NotBeNull("同行者数入力ダイアログを表示していること");
+        var dialogViewModel = new CompanionCountInputViewModel(_ledgerRepositoryMock.Object, new TestTimerFactory());
+        await configure(CreateCompanionCountDialogWithoutWindow(dialogViewModel));
+
+        dialogViewModel.Items.Select(i => i.Ledger.Id).Should().Equal(new[] { 10 },
+            "利用行（払出 > 0）だけが入力対象になること");
+        dialogViewModel.IsCountdownRunning.Should().Be(timeoutSeconds > 0,
+            "設定の秒数が 0 なら自動的に閉じない、1 以上なら自動で閉じること（Issue #2009）");
+        if (timeoutSeconds > 0)
+        {
+            dialogViewModel.RemainingSeconds.Should().Be(timeoutSeconds,
+                "設定の秒数（AppSettings.CompanionCountInputTimeoutSeconds）をそのまま渡すこと");
+        }
+    }
+
+    /// <summary>
+    /// ウィンドウを実体化せずに <see cref="ICCardManager.Views.Dialogs.CompanionCountInputDialog"/> を用意する。
+    /// </summary>
+    /// <remarks>
+    /// <c>Window</c> の生成は STA スレッドとアプリケーションのリソースを要する。検証したいのは
+    /// 「初期化用の <c>Func</c> が ViewModel へ何を渡すか」だけなので、コンストラクター（<c>InitializeComponent</c>）を
+    /// 通さずに確保し、ViewModel だけを差し込む。<c>InitializeWithLedgersAsync</c> は ViewModel へ委譲するだけで
+    /// ウィンドウの機能に触れない。フィールド名が変わった場合は <c>GetField</c> が null になり、ここで失敗する。
+    /// </remarks>
+    private static ICCardManager.Views.Dialogs.CompanionCountInputDialog CreateCompanionCountDialogWithoutWindow(
+        CompanionCountInputViewModel viewModel)
+    {
+        var dialog = (ICCardManager.Views.Dialogs.CompanionCountInputDialog)
+            System.Runtime.Serialization.FormatterServices.GetUninitializedObject(
+                typeof(ICCardManager.Views.Dialogs.CompanionCountInputDialog));
+        var field = typeof(ICCardManager.Views.Dialogs.CompanionCountInputDialog).GetField(
+            "_viewModel", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+        field.Should().NotBeNull("ダイアログが ViewModel を _viewModel フィールドで保持していること");
+        field!.SetValue(dialog, viewModel);
+        return dialog;
+    }
+
+    /// <summary>
+    /// Issue #2104: 返却後の入力（バス停名・同行者数）と返却確認は、設定の読み取りを 1 回で共有すること
+    /// （business-logic.md「返却後の設定読み取りは 1 回」。コミット後の I/O を増やさない。#1805）。
+    /// </summary>
+    /// <remarks>
+    /// 読み取りの総数は固定しない（ダッシュボード更新・警告の再チェックも設定を読むため、共有とは無関係な
+    /// 増減で赤になり、逆に増減が相殺すると欠陥を見逃す）。代わりに読み取りのたびに異なる秒数を返し、
+    /// ①同行者数ダイアログが受け取った秒数から「どの読み取りの値か」を特定して、それがバス停名ダイアログの
+    /// 直前の読み取り（共有の 1 回）であること、②同行者数ダイアログを開いたあとは（返却確認を含め）
+    /// 1 回も読まないことを表明する。消費側が自分で読み直すと ① か ② のどちらかが崩れる。
+    /// </remarks>
+    [Fact]
+    public async Task HandleReturnSuccessAsync_返却後の入力と返却確認で設定の読み取りを共有すること()
+    {
+        const int secondsBase = 100;
+        SetupForReturnSuccess();
+        ArrangeHistoryPaging(_ => 1, pageSize: 30);
+        _viewModel.IsHistoryVisible = false;
+        var reads = 0;
+        _settingsRepositoryMock
+            .Setup(s => s.GetAppSettingsAsync())
+            .ReturnsAsync(() => new AppSettings
+            {
+                // 何回目の読み取りかを秒数に刻む（1 回目 = 101）
+                CompanionCountInputTimeoutSeconds = secondsBase + ++reads,
+                ShowHistoryOnReturn = true,
+                WarningBalance = 500
+            });
+        var readsWhenBusStopDialogShown = -1;
+        _navigationServiceMock
+            .Setup(n => n.ShowDialogAsync<ICCardManager.Views.Dialogs.BusStopInputDialog>(
+                It.IsAny<Func<ICCardManager.Views.Dialogs.BusStopInputDialog, Task>>()))
+            .Callback(() => readsWhenBusStopDialogShown = reads)
+            .ReturnsAsync((bool?)true);
+        var readsWhenCompanionDialogShown = -1;
+        Func<ICCardManager.Views.Dialogs.CompanionCountInputDialog, Task> configure = null;
+        _navigationServiceMock
+            .Setup(n => n.ShowDialogAsync<ICCardManager.Views.Dialogs.CompanionCountInputDialog>(
+                It.IsAny<Func<ICCardManager.Views.Dialogs.CompanionCountInputDialog, Task>>()))
+            .Callback<Func<ICCardManager.Views.Dialogs.CompanionCountInputDialog, Task>>(f =>
+            {
+                readsWhenCompanionDialogShown = reads;
+                configure = f;
+            })
+            .ReturnsAsync((bool?)true);
+        var result = new LendingResult
+        {
+            Success = true,
+            Balance = 1000,
+            HasBusUsage = true,
+            CreatedLedgers = new List<Ledger>
+            {
+                new Ledger { Id = 10, CardIdm = "0123456789ABCDEF", Date = new DateTime(2026, 8, 10),
+                    Summary = SummaryGenerator.FormatBusSummary(SummaryGenerator.BusPlaceholder),
+                    Expense = 230, IsLentRecord = false },
+            },
+        };
+
+        await _viewModel.HandleReturnSuccessAsync(CreateTestCard(), result);
+
+        // 3 つの消費側がすべて動いたこと（動いていなければ以下の表明は意味を持たない）
+        readsWhenBusStopDialogShown.Should().BeGreaterThan(0, "バス停名入力ダイアログを表示していること");
+        configure.Should().NotBeNull("同行者数入力ダイアログを表示していること");
+        _viewModel.IsHistoryVisible.Should().BeTrue("返却確認で履歴を自動表示していること");
+
+        // ① 同行者数ダイアログは、バス停名ダイアログの直前に読んだ設定（共有の 1 回）を使う
+        var dialogViewModel = new CompanionCountInputViewModel(_ledgerRepositoryMock.Object, new TestTimerFactory());
+        await configure(CreateCompanionCountDialogWithoutWindow(dialogViewModel));
+        dialogViewModel.RemainingSeconds.Should().Be(secondsBase + readsWhenBusStopDialogShown,
+            "同行者数入力は、バス停名入力と同じ読み取りの設定を使うこと（読み直さない）");
+
+        // ② 同行者数ダイアログを開いたあとは、返却確認を含めて設定を読まない
+        reads.Should().Be(readsWhenCompanionDialogShown,
+            "返却確認は、返却後の入力と同じ読み取りの設定を使うこと（読み直さない）");
     }
 
     #endregion

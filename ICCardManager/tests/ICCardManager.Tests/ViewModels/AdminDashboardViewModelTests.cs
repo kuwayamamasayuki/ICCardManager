@@ -1103,12 +1103,19 @@ public class AdminDashboardViewModelTests
             .ThrowsAsync(new IOException("access denied"));
         var vm = CreateViewModel();
         await vm.LoadOperationStatusAsync();
+        // Issue #2104: ダイアログを出した「時点」の IsBusy を捕まえる。処理の完了後に IsBusy を見るだけでは、
+        // Busy スコープの中でダイアログを出す実装（モーダル中もプログレスバーが残る）でも緑になる。
+        bool? isBusyAtShowError = null;
+        _dialogService
+            .Setup(d => d.ShowError(It.IsAny<string>(), It.IsAny<string>()))
+            .Callback(() => isBusyAtShowError = vm.IsBusy);
 
         await vm.ExportToExcelFileAsync("dummy.xlsx");
 
         vm.IsStatusError.Should().BeTrue();
         vm.StatusMessage.Should().NotContain("access denied");
-        vm.IsBusy.Should().BeFalse("Issue #1383: ダイアログ表示前に IsBusy を落とす");
+        isBusyAtShowError.Should().BeFalse("Issue #1383: ダイアログ表示前に IsBusy を落とす");
+        vm.IsBusy.Should().BeFalse();
         _dialogService.Verify(d => d.ShowError(It.IsAny<string>(), It.IsAny<string>()), Times.Once);
         vm.LastExportedFile.Should().BeEmpty();
     }

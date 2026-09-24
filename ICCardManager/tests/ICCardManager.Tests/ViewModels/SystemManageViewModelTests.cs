@@ -791,6 +791,28 @@ public class SystemManageViewModelTests : IDisposable
         _viewModel.BackupHealthIcon.Should().Be("⚠");
     }
 
+    /// <summary>
+    /// Issue #2104: 経過日数がしきい値ちょうどなら、まだ警告しないこと（「超えて」経過したら警告）。
+    /// </summary>
+    /// <remarks>
+    /// しきい値 + 1 日と 0 日しか見ていないと、判定の <c>&gt;</c> を <c>&gt;=</c> に変えても緑になる。
+    /// メイン画面の <c>WarningType.BackupStale</c> と同じ境界（business-logic.md「超えて経過すると」）。
+    /// </remarks>
+    [Fact]
+    public async Task バックアップ状況_経過日数がしきい値ちょうどなら警告しないこと()
+    {
+        SetupHealth(new BackupHealthInfo
+        {
+            LastSuccessAt = DateTime.Now.Date.AddDays(-AppConstants.BackupStaleWarningDays)
+        });
+
+        await _viewModel.LoadBackupHealthAsync();
+
+        _viewModel.IsBackupStale.Should().BeFalse(
+            $"{AppConstants.BackupStaleWarningDays}日ちょうどは「超えて」いないので警告しないこと");
+        _viewModel.BackupHealthIcon.Should().Be("✔");
+    }
+
     [Fact]
     public async Task バックアップ状況_しきい値内なら正常アイコンになること()
     {

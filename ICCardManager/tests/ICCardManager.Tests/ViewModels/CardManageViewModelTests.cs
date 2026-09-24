@@ -978,7 +978,7 @@ public class CardManageViewModelTests
             l.Income == 0 &&
             l.Expense == 3000 &&
             l.Balance == 0 &&
-            l.Summary == "払戻しによる払出" &&
+            l.Summary == SummaryGenerator.GetRefundSummary() &&
             l.IsLentRecord == false)), Times.Once);
         // 最新残高を取得していること
         _ledgerRepositoryMock.Verify(r => r.GetLatestLedgerAsync(idm), Times.Once);
@@ -1020,7 +1020,7 @@ public class CardManageViewModelTests
             l.Income == 0 &&
             l.Expense == 0 &&
             l.Balance == 0 &&
-            l.Summary == "払戻しによる払出")), Times.Once);
+            l.Summary == SummaryGenerator.GetRefundSummary())), Times.Once);
         _cardRepositoryMock.Verify(r => r.SetRefundedAsync(idm), Times.Once);
     }
 
@@ -1197,10 +1197,13 @@ public class CardManageViewModelTests
         // Arrange
         var idm = "0102030405060708";
         var balance = 5000;
+        // Issue #2104: 保存時に再読取した場合の値は事前読取と異なる値にする。同じ値だと、
+        // 事前読取残高を捨てて再読取する実装（`?? _preReadBalance` の削除）でも同じ 5000 になり区別できない。
+        var reReadBalance = 3210;
 
         _cardRepositoryMock.Setup(r => r.GetByIdmAsync(idm, true)).ReturnsAsync((IcCard?)null);
         _cardRepositoryMock.Setup(r => r.InsertAsync(It.IsAny<IcCard>())).ReturnsAsync(true);
-        _cardReaderMock.Setup(r => r.ReadBalanceAsync(idm)).ReturnsAsync(balance);
+        _cardReaderMock.Setup(r => r.ReadBalanceAsync(idm)).ReturnsAsync(reReadBalance);
 
         // SetPreReadBalanceを使用して事前読み取り残高を設定（MainViewModelからの呼び出しをシミュレート）
         _viewModel.SetPreReadBalance(balance);
@@ -1221,6 +1224,8 @@ public class CardManageViewModelTests
             l.Income == balance &&
             l.Balance == balance
         )), Times.Once);
+        // 事前読取残高があれば保存時にカードを読み直さないこと
+        _cardReaderMock.Verify(r => r.ReadBalanceAsync(It.IsAny<string>()), Times.Never);
     }
 
     /// <summary>
@@ -1418,6 +1423,11 @@ public class CardManageViewModelTests
 
         _cardRepositoryMock.Setup(r => r.GetByIdmAsync(idm, true)).ReturnsAsync((IcCard?)null);
         _cardRepositoryMock.Setup(r => r.InsertAsync(It.IsAny<IcCard>())).ReturnsAsync(true);
+        // 履歴の取り込みを最後まで通す（既定値の null では重複判定で止まり、利用行が記録されない）
+        _ledgerRepositoryMock.Setup(r => r.GetExistingDetailKeysAsync(idm, It.IsAny<DateTime>()))
+            .ReturnsAsync(new HashSet<(DateTime?, int?, bool)>());
+        _ledgerRepositoryMock.Setup(r => r.GetLatestBeforeDateAsync(idm, It.IsAny<DateTime>()))
+            .ReturnsAsync((Ledger?)null);
 
         _viewModel.SetPreReadBalance(balance);
         _viewModel.SetPreReadHistory(preReadHistory);
@@ -1433,6 +1443,10 @@ public class CardManageViewModelTests
         // Assert
         // 事前読み取り履歴が使用されるため、カードリーダーのReadHistoryAsyncは呼ばれないこと
         _cardReaderMock.Verify(r => r.ReadHistoryAsync(It.IsAny<string>()), Times.Never);
+        // Issue #2104: 事前読み取り履歴が実際に取り込まれたこと（利用行が記録されている）。
+        // 再読取をしないことだけを見ると、履歴の取り込みごと飛ばす実装でも緑になる。
+        _ledgerRepositoryMock.Verify(r => r.InsertAsync(It.Is<Ledger>(l =>
+            l.CardIdm == idm && l.Expense == 210 && l.Balance == 4790)), Times.Once);
     }
 
     /// <summary>

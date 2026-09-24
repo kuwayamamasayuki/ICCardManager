@@ -301,11 +301,9 @@ public partial class PrintPreviewViewModel : ViewModelBase
     private void ZoomIn()
     {
         var currentIndex = Array.IndexOf(ZoomLevels, ZoomLevel);
-        if (currentIndex < ZoomLevels.Length - 1)
-        {
-            ZoomLevel = ZoomLevels[currentIndex + 1];
-        }
-        else if (currentIndex == -1)
+        // Issue #2104: 「リストにない」判定を先に行う。位置の判定を先に置くと -1 が
+        // 「末尾より前」として扱われ、拡大を押したのに先頭（最小）の倍率へ縮小していた
+        if (currentIndex == -1)
         {
             // 現在の値がリストにない場合、次に大きい値を選択
             var nextLevel = ZoomLevels.FirstOrDefault(z => z > ZoomLevel);
@@ -313,6 +311,10 @@ public partial class PrintPreviewViewModel : ViewModelBase
             {
                 ZoomLevel = nextLevel;
             }
+        }
+        else if (currentIndex < ZoomLevels.Length - 1)
+        {
+            ZoomLevel = ZoomLevels[currentIndex + 1];
         }
     }
 

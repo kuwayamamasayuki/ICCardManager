@@ -651,18 +651,20 @@ public class OperationLogSearchViewModelTests
         // Arrange
         await _viewModel.SearchAsync(); // 初期化（空ページ）
 
-        var capturedPageSize = 0;
+        // Issue #2104: fire-and-forget の完了を固定時間の待機（Task.Delay(50)）で待たない（testing.md）。
+        // 再検索の呼び出しそのものを TaskCompletionSource で受け取り、十分長い上限を添えて待つ。
+        var searched = new TaskCompletionSource<int>(TaskCreationOptions.RunContinuationsAsynchronously);
         _repoMock.Setup(r => r.SearchLastPageAsync(It.IsAny<OperationLogSearchCriteria>(), It.IsAny<int>()))
-            .Callback<OperationLogSearchCriteria, int>((_, size) => capturedPageSize = size)
+            .Callback<OperationLogSearchCriteria, int>((_, size) => searched.TrySetResult(size))
             .ReturnsAsync(BuildPage(Array.Empty<OperationLog>(), 0, false, false));
 
         // Act
         _viewModel.PageSize = 100;
-        // OnPageSizeChanged は fire-and-forget なので少し待つ
-        await Task.Delay(50);
+        var completed = await Task.WhenAny(searched.Task, Task.Delay(TimeSpan.FromSeconds(5)));
 
         // Assert: 新しい PageSize で呼ばれた
-        capturedPageSize.Should().Be(100);
+        completed.Should().BeSameAs(searched.Task, "ページサイズを変えたら再検索すること");
+        (await searched.Task).Should().Be(100);
     }
 
     #endregion

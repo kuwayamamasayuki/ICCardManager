@@ -3,9 +3,11 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
 using FluentAssertions;
+using ICCardManager.Common;
 using ICCardManager.Data.Repositories;
 using ICCardManager.Tests.Infrastructure.Timing;
 using ICCardManager.Models;
+using ICCardManager.Services;
 using ICCardManager.ViewModels;
 using Moq;
 using Xunit;
@@ -38,9 +40,11 @@ public class CompanionCountInputViewModelTests
         var ledgers = new List<Ledger>
         {
             Usage(1),
-            new Ledger { Id = 2, Summary = "役務費によりチャージ", Income = 3000, Expense = 0 },
-            new Ledger { Id = 3, Summary = "ポイント還元", Income = 10, Expense = 0 },
-            new Ledger { Id = 4, Summary = "（貸出中）", IsLentRecord = true, Expense = 0 },
+            new Ledger { Id = 2, Summary = SummaryGenerator.GetChargeSummary(DepartmentType.MayorOffice), Income = 3000, Expense = 0 },
+            new Ledger { Id = 3, Summary = SummaryGenerator.GetPointRedemptionSummary(), Income = 10, Expense = 0 },
+            // Issue #2104: 貸出中の行は払出 > 0 にして、「払出 > 0」の条件とは独立に「貸出中は対象外」を検証する。
+            // 払出 0 のままだと、!IsLentRecord の条件を消しても払出の条件で除かれて緑になる。
+            new Ledger { Id = 4, Summary = SummaryGenerator.GetLendingSummary(), IsLentRecord = true, Expense = 260 },
             new Ledger { Id = 0, Summary = "鉄道（未保存）", Expense = 100 },
         };
 
@@ -100,6 +104,22 @@ public class CompanionCountInputViewModelTests
         _vm.IsSaved.Should().BeFalse();
         _ledgerRepoMock.Verify(r => r.UpdateCompanionCountAsync(It.IsAny<int>(), It.IsAny<int>()), Times.Never);
         _vm.StatusMessage.Should().Contain(text).And.Contain("0～99").And.EndWith("入力してください。");
+    }
+
+    /// <summary>
+    /// Issue #2104: 上限（99 名）ちょうどは受け付けて保存すること。
+    /// 上限超過（100）を拒否するテストだけでは、上限を 98 以下へ誤って狭めても緑になる。
+    /// </summary>
+    [Fact]
+    public async Task SaveAsync_上限ちょうどの人数を保存すること()
+    {
+        _vm.Initialize(new[] { Usage(1) }, autoCloseSeconds: 0);
+        _vm.Items[0].CompanionCountText = StaffNameFormatter.MaxCompanionCount.ToString();
+
+        await _vm.SaveAsync();
+
+        _vm.IsSaved.Should().BeTrue();
+        _ledgerRepoMock.Verify(r => r.UpdateCompanionCountAsync(1, StaffNameFormatter.MaxCompanionCount), Times.Once);
     }
 
     [Fact]

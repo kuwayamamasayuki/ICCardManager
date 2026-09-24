@@ -6,6 +6,7 @@ using FluentAssertions;
 using ICCardManager.Data.Repositories;
 using ICCardManager.Dtos;
 using ICCardManager.Models;
+using ICCardManager.Services;
 using ICCardManager.ViewModels;
 using Moq;
 using Xunit;
@@ -64,7 +65,45 @@ public class IncompleteBusStopViewModelTests
 
         // Assert
         _viewModel.Items.Should().HaveCount(2);
-        _viewModel.Items.Should().OnlyContain(i => i.Summary.Contains("★"));
+        _viewModel.Items.Should().OnlyContain(i => i.Summary.Contains(SummaryGenerator.BusPlaceholder));
+    }
+
+    /// <summary>
+    /// Issue #2104: 直近 1 年分（1 年前 ～ 現在）の履歴を取得すること。
+    /// </summary>
+    /// <remarks>
+    /// 他のテストは取得期間を <c>It.IsAny</c> で受けているため、期間（<c>AddYears(-1)</c>）を変えても緑になる。
+    /// 本体は現在時刻を 2 回読むため、呼び出しの前後の時刻で挟んで表明する。
+    /// </remarks>
+    [Fact]
+    public async Task InitializeAsync_直近1年分の履歴を取得すること()
+    {
+        // Arrange
+        DateTime? requestedFrom = null;
+        DateTime? requestedTo = null;
+        _ledgerRepositoryMock
+            .Setup(r => r.GetByDateRangeAsync(null, It.IsAny<DateTime>(), It.IsAny<DateTime>()))
+            .Callback<string, DateTime, DateTime>((_, from, to) =>
+            {
+                requestedFrom = from;
+                requestedTo = to;
+            })
+            .ReturnsAsync(new List<Ledger>());
+        _cardRepositoryMock
+            .Setup(r => r.GetAllAsync())
+            .ReturnsAsync(new List<IcCard>());
+
+        // Act
+        var before = DateTime.Now;
+        await _viewModel.InitializeAsync();
+        var after = DateTime.Now;
+
+        // Assert
+        requestedFrom.Should().NotBeNull();
+        requestedFrom!.Value.Should().BeOnOrAfter(before.AddYears(-1)).And.BeOnOrBefore(after.AddYears(-1),
+            "取得の開始は現在から 1 年前であること");
+        requestedTo!.Value.Should().BeOnOrAfter(before).And.BeOnOrBefore(after,
+            "取得の終了は現在であること");
     }
 
     /// <summary>
