@@ -109,48 +109,6 @@ public class ForegroundContrastConventionTests
     /// </remarks>
     private static readonly string[] LightOnDarkBrushKeys = { "OnPrimaryBrush" };
 
-    /// <summary>
-    /// 地色との組で既知の違反（ファイル名・文字色・地色）。<b>Issue #2109（未解決）で起票済み</b>。
-    /// </summary>
-    /// <remarks>
-    /// <para>
-    /// Issue #2102 で検査を「実際に載る地色」へ広げた時点で本番に実在したもの。本体の配色は
-    /// #2109 で直すため、ここでは検査の是正だけを行い、違反を名指しで固定する。
-    /// </para>
-    /// <para>
-    /// <b>組の単位で固定する（ファイル単位にしない）</b>。ファイルごと許すと、同じ画面に
-    /// 新しい違反が入っても緑になる。行番号は含めない（無関係な編集で行がずれるたびに赤くなる）。
-    /// </para>
-    /// <para>
-    /// <b>件数で固定する</b>（コードレビューで検出。<c>ColorLiteralSingleSourceOfTruthTests</c> の許可リストと同じ方針）。
-    /// 組の集合だけで持つと、同じ画面に同じ組を増やしても緑になり、一部だけ直しても陳腐化を検出できない。
-    /// 件数は「その組を作る要素の数」で、増えれば
-    /// <see cref="文字色は実際に載る地色に対して4対5対1以上のコントラストを持つこと"/> が、減れば
-    /// <see cref="既知の地色との組の違反がまだ残っていること"/> が赤くなる（実数との完全一致）。
-    /// </para>
-    /// </remarks>
-    private static readonly Dictionary<(string File, string ForegroundKey, string BackgroundKey), int> KnownSurfaceViolations = new()
-    {
-        // Issue #2109: 明細のグループバッジ（白文字 on #388E3C = 4.12:1、on #F57C00 = 2.70:1）
-        [("LedgerDetailDialog.xaml", "OnPrimaryBrush", "LedgerGroupBadge2Brush")] = 1,
-        [("LedgerDetailDialog.xaml", "OnPrimaryBrush", "LedgerGroupBadge3Brush")] = 1,
-
-        // Issue #2109: エラー表示の枠（DangerTextBrush #D32F2F on ErrorBackgroundBrush #FFEBEE = 4.36:1）
-        [("CardTypeSelectionDialog.xaml", "DangerTextBrush", "ErrorBackgroundBrush")] = 1,
-        [("DataExportImportDialog.xaml", "DangerTextBrush", "ErrorBackgroundBrush")] = 1,
-        [("SystemManageDialog.xaml", "DangerTextBrush", "ErrorBackgroundBrush")] = 1,
-
-        // Issue #2109 の追記候補（#2102 で検査を広げて見つかった。#2109 の本文には未記載）:
-        // 返却系の淡い青の地色（ReturnBackgroundBrush #E3F2FD）の上の補足文字（#6E6E6E = 4.46:1）と
-        // メイン画面のデバッグ用パネルの [DEBUG] 表示（#D32F2F = 4.36:1）
-        [("ConnectionDiagnosticsDialog.xaml", "SecondaryTextBrush", "ReturnBackgroundBrush")] = 1,
-        [("LedgerDetailDialog.xaml", "SecondaryTextBrush", "ReturnBackgroundBrush")] = 2,
-        [("MainWindow.xaml", "SecondaryTextBrush", "ReturnBackgroundBrush")] = 3,
-        [("OperationLogDialog.xaml", "SecondaryTextBrush", "ReturnBackgroundBrush")] = 1,
-        [("TransferStationGroupDialog.xaml", "SecondaryTextBrush", "ReturnBackgroundBrush")] = 2,
-        [("MainWindow.xaml", "DangerTextBrush", "ReturnBackgroundBrush")] = 1,
-    };
-
     #region 検査
 
     [Fact]
@@ -270,54 +228,16 @@ public class ForegroundContrastConventionTests
         // Issue #2102: 上の検査は地色を #F5F5F5 に固定しており、親の Border が塗る地色
         // （エラー表示の ErrorBackgroundBrush、グループバッジの色）の上に載る文字を見ていなかった。
         // 要素木をたどって「文字色 × 実際の地色」の組を作り、色値で測る。
-        // 既知の違反（Issue #2109 で起票済み・未解決）は許可リストで固定し、それ以外の違反は赤にする
-        // 件数を超えた分は、同じ組でも新しい違反として報告する（組の集合で許すと、同じ画面に同じ組を足しても緑）
-        var unexpected = SurfaceViolations()
-            .GroupBy(v => (v.File, v.ForegroundKey, v.BackgroundKey))
-            .Where(g => !KnownSurfaceViolations.TryGetValue(g.Key, out var allowed) || g.Count() > allowed)
-            .SelectMany(g => g.Select(v => v.Describe()
-                + (KnownSurfaceViolations.TryGetValue(g.Key, out var allowed)
-                    ? string.Format(CultureInfo.InvariantCulture, "（許可リストは {0} 件、実数は {1} 件）", allowed, g.Count())
-                    : string.Empty)))
-            .ToList();
+        // #2102 の時点で実在した違反は名指しの許可リストで固定していたが、Issue #2109 で配色を是正して
+        // 許可リストは空になった。例外を残さず、1 件でも違反があれば赤にする
+        var violations = SurfaceViolations().Select(v => v.Describe()).ToList();
 
-        // 件数で比べるので、違反は 1 件目だけでなく全件を示す（FluentAssertions は先頭しか表示しない）
-        unexpected.Should().BeEmpty(
-            "文字色はその文字が載る地色に対して {0}:1 以上必要（Issue #2074 / #2102）。"
+        // 違反は 1 件目だけでなく全件を示す（FluentAssertions は先頭しか表示しない）
+        violations.Should().BeEmpty(
+            "文字色はその文字が載る地色に対して {0}:1 以上必要（Issue #2074 / #2102 / #2109）。"
                 + "地色を変えずに文字色だけを差し替えると、別の地色の上で読めなくなることがある:\n{1}",
             MinContrast,
-            string.Join("\n", unexpected));
-    }
-
-    [Fact]
-    public void 既知の地色との組の違反がまだ残っていること()
-    {
-        // 許可リストの陳腐化検出。Issue #2109 で配色を直したら、該当する行の件数を減らす（0 なら外す）こと
-        // （残しておくと、同じ組が再び入っても検査が緑になる）
-        var actual = SurfaceViolations()
-            .GroupBy(v => (v.File, v.ForegroundKey, v.BackgroundKey))
-            .ToDictionary(g => g.Key, g => g.Count());
-
-        KnownSurfaceViolations.Should().NotBeEmpty(
-            "許可リストが空になったら、このテストごと削除してよい（Issue #2109 の解消）");
-
-        var stale = KnownSurfaceViolations
-            .Where(kv => !actual.TryGetValue(kv.Key, out var count) || count < kv.Value)
-            .Select(kv => string.Format(
-                CultureInfo.InvariantCulture,
-                "{0} の {1} on {2}: 許可リストは {3} 件、実数は {4} 件",
-                kv.Key.File,
-                kv.Key.ForegroundKey,
-                kv.Key.BackgroundKey,
-                kv.Value,
-                actual.TryGetValue(kv.Key, out var count) ? count : 0))
-            .ToList();
-
-        stale.Should().BeEmpty(
-            "許可リストの違反が減っている（{0}:1 以上へ是正された）。許可リストの件数を実数へ減らし、"
-                + "0 件になった行は外すこと（Issue #2109）:\n{1}",
-            MinContrast,
-            string.Join("\n", stale));
+            string.Join("\n", violations));
     }
 
     [Fact]
@@ -337,6 +257,30 @@ public class ForegroundContrastConventionTests
                  && p.ForegroundKey == "OnPrimaryBrush"
                  && p.BackgroundKey == "LedgerGroupBadge1Brush",
             "親と子のスタイルのトリガーで切り替わる組が作られること");
+
+        // Issue #2109 で是正した組。配色を直して違反が消えたあとも、組そのものは作られ続けていること
+        // （違反ゼロが「是正した」ではなく「見なくなった」で成立していないこと）
+        pairs.Should().Contain(
+            p => p.File == "LedgerDetailDialog.xaml"
+                 && p.ForegroundKey == "OnPrimaryBrush"
+                 && p.BackgroundKey == "LedgerGroupBadge3Brush",
+            "グループバッジ 3 番（#2109 で 2.70:1 だった組）が走査対象に含まれること");
+        pairs.Should().Contain(
+            p => p.File == "LedgerDetailDialog.xaml"
+                 && p.ForegroundKey == "OnPrimaryBrush"
+                 && p.BackgroundKey == "LedgerGroupBadge2Brush",
+            "グループバッジ 2 番（#2109 で 4.12:1 だった組）が走査対象に含まれること");
+        pairs.Should().Contain(
+            p => p.File == "CardTypeSelectionDialog.xaml"
+                 && p.ForegroundKey == "DangerTextBrush"
+                 && p.BackgroundKey == "ErrorBackgroundBrush",
+            "エラー表示の枠の赤文字（#2109 で 4.36:1 だった組）が走査対象に含まれること");
+        pairs.Should().Contain(
+            p => p.File == "MainWindow.xaml"
+                 && p.ForegroundKey == "SecondaryTextBrush"
+                 && p.BackgroundKey == "ReturnBackgroundBrush",
+            "返却系の面の補足文字（#2109 で 4.46:1 だった組）が走査対象に含まれること");
+
         pairs.Should().NotContain(
             p => p.File == "LedgerDetailDialog.xaml"
                  && p.ForegroundKey == "SecondaryTextBrush"
@@ -454,7 +398,9 @@ public class ForegroundContrastConventionTests
     [InlineData("#B71C1C", true)] // ErrorForegroundBrush
     [InlineData("#1B5E20", true)] // SuccessForegroundBrush
     [InlineData("#AC5910", true)] // WarningForegroundBrush
-    [InlineData("#6E6E6E", true)] // SecondaryTextBrush
+    [InlineData("#6E6E6E", true)] // #2074 の SecondaryTextBrush（固定の地色では通るが、返却系の面 #E3F2FD では 4.46:1。#2109）
+    [InlineData("#696969", true)] // SecondaryTextBrush（#2109 で是正）
+    [InlineData("#C62828", true)] // DangerTextBrush（#2109 で是正）
     [InlineData("#1565C0", true)] // InfoTextBrush
     public void 判定ロジックが既知の入力で期待どおり動くこと(string color, bool expectedPass)
     {
@@ -556,7 +502,7 @@ private void Apply(bool isError)
     [Fact]
     public void 地色との組を親の塗りと子の文字色から作ること()
     {
-        // 判定ロジックを既知の入力で固定する（実データの違反が #2109 で消えても空振りを検出できるように）
+        // 判定ロジックを既知の入力で固定する（実データの違反が #2109 で消えた後も空振りを検出できるように）
         const string Xaml = @"
 <Grid xmlns=""http://schemas.microsoft.com/winfx/2006/xaml/presentation"">
     <!-- <Border Background=""{DynamicResource CommentedBrush}""><TextBlock Foreground=""{DynamicResource X}""/></Border> -->
