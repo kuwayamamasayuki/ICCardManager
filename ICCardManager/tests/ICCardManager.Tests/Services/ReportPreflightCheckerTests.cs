@@ -145,6 +145,42 @@ namespace ICCardManager.Tests.Services
         }
 
         /// <summary>
+        /// 実際の貸出中レコードは時刻付き（<c>Date = now</c>）であり、月の境界は日付で判定する
+        /// </summary>
+        /// <remarks>
+        /// Issue #2105: 以前の境界テストは貸出日が深夜 0 時のものしか無く、本体の
+        /// <c>lentRecord.Date.Date</c> から <c>.Date</c> を外すと 7/31 14:00 の貸出が
+        /// 「月末日 0 時より後」と判定されて無警告になるのに緑だった。月初（7/1）の境界も未検証だった。
+        /// </remarks>
+        [Theory]
+        [InlineData(2026, 6, 30, 23, 59, ReportPreflightIssueType.UnreturnedAcrossMonth)]   // 前月末日の深夜
+        [InlineData(2026, 7, 1, 0, 0, ReportPreflightIssueType.LendingRecordInMonth)]       // 月初ちょうど
+        [InlineData(2026, 7, 1, 9, 30, ReportPreflightIssueType.LendingRecordInMonth)]      // 月初の日中
+        [InlineData(2026, 7, 31, 14, 0, ReportPreflightIssueType.LendingRecordInMonth)]     // 月末日の日中
+        [InlineData(2026, 7, 31, 23, 59, ReportPreflightIssueType.LendingRecordInMonth)]    // 月末日の深夜
+        public void CheckReportData_LentWithTimeOfDay_ClassifiesByDate(
+            int year, int month, int day, int hour, int minute, ReportPreflightIssueType expected)
+        {
+            var result = Check(
+                CreateConsistentJulyData(),
+                CreateLentRecord(new DateTime(year, month, day, hour, minute, 0)));
+
+            result.Warnings.Should().ContainSingle()
+                .Which.IssueType.Should().Be(expected);
+        }
+
+        /// <summary>
+        /// 翌月初の時刻付き貸出は当月帳票に影響しないため報告しない（境界値の対）
+        /// </summary>
+        [Fact]
+        public void CheckReportData_LentOnFirstDayOfNextMonthWithTime_ReportsNothing()
+        {
+            var result = Check(CreateConsistentJulyData(), CreateLentRecord(new DateTime(2026, 8, 1, 0, 0, 1)));
+
+            result.Warnings.Should().BeEmpty();
+        }
+
+        /// <summary>
         /// 対象月より後の貸出は当月帳票に影響しないため報告しない（境界値）
         /// </summary>
         [Fact]
@@ -390,22 +426,69 @@ namespace ICCardManager.Tests.Services
         [Fact]
         public void CheckReportData_MonthContainsMidYearCarryover_SkipsMonthlyChainCheck()
         {
+            var result = Check(CreateMidYearMigrationJulyData(SummaryGenerator.GetMidYearCarryoverSummary(6)));
+
+            result.Warnings.Should().NotContain(w =>
+                w.IssueType == ReportPreflightIssueType.TotalMismatch && w.RowSummary == "7月計");
+        }
+
+        /// <summary>
+        /// 上のテストの対（入力の前提確認）: 同じデータで先頭行の摘要だけを差し替えると、検算して不一致を報告する
+        /// </summary>
+        /// <remarks>
+        /// Issue #2105: 以前の入力は「○月から繰越」を挿入した後でも
+        /// 3,000 ＋ 1,000 − 500 ＝ 3,500 で月末残額と一致していたため、スキップ
+        /// （<c>if (data.Ledgers.Any(l =&gt; IsMidYearCarryoverSummary(...))) return;</c>）を
+        /// 削除しても警告が出ず緑のままだった。<b>スキップしなければ結果が変わる入力</b>であることを、
+        /// この対のテストで表明する（摘要だけを差し替えると警告が出る）。
+        /// <para>
+        /// 月計（受入 1,000）は手で固定している。本物の <c>ReportDataBuilder</c> なら、摘要が「○月から繰越」で
+        /// ない 3,000 円の行は月計へ含まれ（受入 4,000）検算は一致する。したがってこのテストは
+        /// 「通常の行でも不一致を報告する」という仕様の表明ではなく、<b>スキップの判定が摘要で決まり、
+        /// スキップが無ければこの入力は警告になる</b>ことの前提確認である。
+        /// </para>
+        /// </remarks>
+        [Fact]
+        public void CheckReportData_SameAmountsWithoutMidYearCarryover_ReportsTotalMismatch()
+        {
+            var result = Check(CreateMidYearMigrationJulyData("鉄道（博多～天神）"));
+
+            var mismatch = result.Warnings.Single(w => w.IssueType == ReportPreflightIssueType.TotalMismatch);
+            mismatch.RowSummary.Should().Be("7月計");
+            mismatch.DisplayText.Should().Contain("前月末残高 0円").And.Contain("月末残額 3,500円");
+        }
+
+        /// <summary>
+        /// 紙出納簿から 7 月に移行したカードの 7 月分データ（Issue #510）。
+        /// </summary>
+        /// <remarks>
+        /// 先頭の「6月から繰越」（<c>Income = 残高 3,000</c>）は月計の受入から除外される（Issue #1494）。
+        /// 前月末残高を 0 円とすると「0 ＋ 受入 1,000 − 払出 500 ＝ 500」は月末残額 3,500 と一致しない —
+        /// 検算をスキップしなければ必ず警告になる形。
+        /// <para>
+        /// 前月以前に台帳が 1 件も無い典型的な移行カードでは前月末残高が <c>null</c> になり、
+        /// 本体はその手前（<c>!data.PrecedingBalance.HasValue</c>）で検算を打ち切るため、このスキップには届かない。
+        /// スキップに届くのは前月以前に台帳があるカードだけで、ここではその残高を 0 円としている。
+        /// 前月末残高があれば <c>ReportDataBuilder</c> は必ず繰越行を作るため、繰越行（残額 0）も残す
+        /// （繰越行の検算は 0 ＋ 3,000 ＝ 3,000 で整合し、余分な警告は出ない）。
+        /// </para>
+        /// </remarks>
+        private static MonthlyReportData CreateMidYearMigrationJulyData(string firstRowSummary)
+        {
             var data = CreateConsistentJulyData();
+            data.PrecedingBalance = 0;
+            data.Carryover.Balance = 0;
             data.Ledgers.Insert(0, new Ledger
             {
                 Id = 10,
                 CardIdm = TestCardIdm,
                 Date = new DateTime(2026, 7, 1),
-                Summary = SummaryGenerator.GetMidYearCarryoverSummary(6),
+                Summary = firstRowSummary,
                 Income = 3000,
                 Expense = 0,
                 Balance = 3000
             });
-
-            var result = Check(data);
-
-            result.Warnings.Should().NotContain(w =>
-                w.IssueType == ReportPreflightIssueType.TotalMismatch && w.RowSummary == "7月計");
+            return data;
         }
 
         /// <summary>

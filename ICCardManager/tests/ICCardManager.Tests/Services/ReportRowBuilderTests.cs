@@ -44,7 +44,7 @@ public class ReportRowBuilderTests
                 Id = 1,
                 CardIdm = "0102030405060708",
                 Date = new DateTime(2025, 8, 1),
-                Summary = "7月から繰越",
+                Summary = SummaryGenerator.GetMidYearCarryoverSummary(7),
                 Income = 5000,   // 既存データで残っているケース
                 Expense = 0,
                 Balance = 5000
@@ -54,7 +54,7 @@ public class ReportRowBuilderTests
         var result = ReportRowBuilder.Build(data);
 
         result.DataRows.Should().HaveCount(1);
-        result.DataRows[0].Summary.Should().Be("7月から繰越");
+        result.DataRows[0].Summary.Should().Be(SummaryGenerator.GetMidYearCarryoverSummary(7));
         result.DataRows[0].Income.Should().BeNull();   // 空欄
         result.DataRows[0].Balance.Should().Be(5000);
     }

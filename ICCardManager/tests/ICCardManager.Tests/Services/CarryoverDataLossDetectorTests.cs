@@ -182,6 +182,38 @@ public class CarryoverDataLossDetectorTests
         result[0].LostAt.Should().Be(new DateTime(2026, 5, 20));
     }
 
+    /// <summary>
+    /// 同じカードに「消失」と判定できるログが 2 件あっても、1 カード 1 件（最古の消失）にまとめること
+    /// </summary>
+    /// <remarks>
+    /// Issue #2105: 上のテストの 2 件目は Before も既定値（Damaged → Damaged）なので、
+    /// そもそも消失と判定されない。本体の「検出済みのカードは読み飛ばす」
+    /// （<c>if (detectedIdms.Contains(log.TargetId)) continue;</c>）を消しても結果は 1 件のままで緑だった。
+    /// ここでは間に値を入れ直して 2 回とも消失した形を与え、読み飛ばさなければ 2 件になる入力にする。
+    /// </remarks>
+    [Fact]
+    public async Task DetectAsync_同一カードで2回消失した場合_最古の1件だけを返すこと()
+    {
+        var reentered = MigratedCard();
+        reentered.StartingPageNumber = 9;
+        reentered.CarryoverIncomeTotal = 50000;
+        reentered.CarryoverExpenseTotal = 41000;
+        reentered.CarryoverFiscalYear = 2026;
+        var first = UpdateLog(MigratedCard(), DamagedCard(), new DateTime(2026, 5, 20), id: 10);
+        var second = UpdateLog(reentered, DamagedCard(), new DateTime(2026, 6, 1), id: 11);
+
+        var detector = CreateDetector(
+            logs: new[] { second, first },
+            currentCards: new[] { DamagedCard() });
+
+        var result = await detector.DetectAsync();
+
+        result.Should().ContainSingle("1 枚のカードについて警告を 2 行に分けない");
+        result[0].LostStartingPageNumber.Should().Be(7, "最初に失われた値を示す");
+        result[0].LostCarryoverIncomeTotal.Should().Be(45000);
+        result[0].LostAt.Should().Be(new DateTime(2026, 5, 20));
+    }
+
     [Fact]
     public async Task DetectAsync_複数カードが被害を受けている場合_すべて返すこと()
     {

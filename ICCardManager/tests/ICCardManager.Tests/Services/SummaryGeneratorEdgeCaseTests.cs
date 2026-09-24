@@ -75,6 +75,9 @@ public class SummaryGeneratorEdgeCaseTests : IDisposable
         // Assert
         result.Should().HaveCount(1);
         result[0].Summary.Should().NotContain("往復", "往復検出が無効なので「往復」は出力されない");
+        // Issue #2105: NotContain だけだと、経路を落として空文字を返す実装でも緑になる。
+        // 往路・復路が両方とも区間として残っていることを完全一致で表明する。
+        result[0].Summary.Should().Be("鉄道（博多～天神、天神～博多）");
     }
 
     #endregion
@@ -124,6 +127,8 @@ public class SummaryGeneratorEdgeCaseTests : IDisposable
         result.Should().HaveCount(1);
         // 乗継統合無効の場合、「博多～天神、天神～薬院」のように個別表示
         result[0].Summary.Should().Contain("天神", "中間駅（天神）が省略されない");
+        // Issue #2105: 「天神」を含むだけなら、区間を落とした「鉄道（博多～天神）」でも緑になる。
+        result[0].Summary.Should().Be("鉄道（博多～天神、天神～薬院）");
     }
 
     #endregion
@@ -172,6 +177,9 @@ public class SummaryGeneratorEdgeCaseTests : IDisposable
         // Assert
         result.Should().HaveCount(1);
         result[0].Summary.Should().NotContain("往復");
+        // Issue #2105: テスト名が約束する「個別表示」の形を確かめる。NotContain だけだと
+        // 経路を落として空文字を返す実装や、乗継統合で「博多～博多」に畳む実装でも緑になる。
+        result[0].Summary.Should().Be("鉄道（博多～天神、天神～博多）");
     }
 
     #endregion
@@ -213,8 +221,9 @@ public class SummaryGeneratorEdgeCaseTests : IDisposable
 
         // Assert - 乗継統合により「博多～薬院」に統合されるべき
         result.Should().HaveCount(1);
-        result[0].Summary.Should().Contain("博多");
-        result[0].Summary.Should().Contain("薬院");
+        // Issue #2105: 部分一致（「博多」「薬院」を含む）だと、AreTransferStations を完全一致へ
+        // 戻して統合されなくなった「鉄道（博多～天神、西鉄福岡(天神)～薬院）」でも緑になる。
+        result[0].Summary.Should().Be("鉄道（博多～薬院）");
     }
 
     #endregion
