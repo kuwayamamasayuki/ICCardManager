@@ -245,12 +245,19 @@ public class DbContextSharedModeTests : IDisposable
 
     #region UNCパス接続テスト
 
-    [Fact]
+    /// <summary>
+    /// 実機の共有フォルダーで UNC パスの開き方を比べる診断（手動実行用）
+    /// </summary>
+    /// <remarks>
+    /// Issue #2107: 開発機の固定ホスト名に依存し、存在しなければ <c>return</c> で成功扱いになっていた
+    /// （CI では名前解決を待ったうえで何も検証せずに緑になる）。回帰の検出は担えないので Skip にする。
+    /// 変換そのものの回帰は、純関数として <c>DbContextSharedModeDetectionTests.BuildConnectionString_*</c> が固定している。
+    /// 実機で確かめるときは Skip を外し、<c>uncPath</c> を手元の共有フォルダーへ書き換えて実行する。
+    /// </remarks>
+    [Fact(Skip = "診断用（実機の共有フォルダーが必要）。UNC の変換は DbContextSharedModeDetectionTests.BuildConnectionString_* が検証する")]
     public void UNCパス経由でSQLite接続が可能であること()
     {
         var uncPath = @"\\MASAYUKI-COM\share\iccard.db";
-        if (!System.IO.File.Exists(uncPath))
-            return;
 
         var results = new System.Collections.Generic.List<string>();
 

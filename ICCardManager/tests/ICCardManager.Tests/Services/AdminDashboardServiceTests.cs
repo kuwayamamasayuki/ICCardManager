@@ -1212,6 +1212,34 @@ public class AdminDashboardServiceTests
         result.BalanceSeries.Single().CardIdm.Should().Be(CardA);
     }
 
+    /// <summary>
+    /// Issue #2107: 期間内に取引が無くても、期間前に残高があるカードは水平線として描くこと
+    /// </summary>
+    /// <remarks>
+    /// 上の <see cref="GetAnalyticsAsync_OmitsCardsWithoutAnyBalanceRow"/> の対。あちらだけだと、
+    /// 期間内の行が無いカードを無条件に落とす実装（<c>continue</c>）でも緑になり、
+    /// 期間中まったく使われなかったカードの残高がグラフから消える。「残高が無い」のか
+    /// 「使われていない」のかを区別できなくなるうえ、遊休カードを見つけるという目的も果たせない。
+    /// </remarks>
+    [Fact]
+    public async Task GetAnalyticsAsync_DrawsFlatLineForCardWithOnlyBalanceBeforePeriod()
+    {
+        SetupAnalyticsDefaults(
+            cards: new[] { Card(CardA), Card(CardB, number: "002") },
+            balancesBeforePeriod: new Dictionary<string, int> { [CardB] = 8000 },
+            monthEndBalances: new[]
+            {
+                new MonthEndBalanceRow { CardIdm = CardA, YearMonth = "2026-06", Balance = 5000 }
+            });
+
+        var result = await CreateService().GetAnalyticsAsync(
+            new DateTime(2026, 5, 1), new DateTime(2026, 7, 31), AsOf);
+
+        result.BalanceSeries.Select(s => s.CardIdm).Should().Equal(CardA, CardB);
+        result.BalanceSeries.Single(s => s.CardIdm == CardB).MonthlyBalances
+            .Should().Equal(new double?[] { 8000.0, 8000.0, 8000.0 }, "期間前の残高が期間を通して続く");
+    }
+
     [Fact]
     public async Task GetAnalyticsAsync_CarriesCardDisplayNameIntoBalanceSeries()
     {

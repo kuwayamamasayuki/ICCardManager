@@ -443,10 +443,7 @@ namespace ICCardManager
                 }
             });
 
-            // 共有モード時はキャッシュTTLを短縮（他PCの変更を素早く反映するため）
-            // ※ ローカル操作ではキャッシュが即座に無効化されるため、
-            //   TTLは「他PCの操作結果が見えるまでの遅延」のみに影響する。
-            //   20台同時接続での負荷を考慮し、過度に短くしない。
+            // 共有モード時はキャッシュTTLを短縮（他PCの変更を素早く反映するため。値と理由は CacheOptions.ApplySharedModeTtl）
             // Issue #1597: 「パス指定の有無」ではなく DbContext と同一の共有モード判定
             //   （UNC／マップドネットワークドライブ）に揃える。ローカルフルパス指定では短縮しない。
             services.PostConfigure<CacheOptions>(cacheOptions =>
@@ -456,10 +453,7 @@ namespace ICCardManager
                 var dbPath = GetValidatedDatabaseConfigPath();
                 if (Data.DbContext.IsSharedModePath(dbPath))
                 {
-                    cacheOptions.CardListSeconds = 15;
-                    cacheOptions.LentCardsSeconds = 10;
-                    cacheOptions.StaffListSeconds = 30;
-                    cacheOptions.SettingsMinutes = 3;
+                    cacheOptions.ApplySharedModeTtl();
                 }
             });
 

@@ -1,4 +1,7 @@
 using System;
+using System.Security.AccessControl;
+using System.Security.Principal;
+using System.Threading;
 using FluentAssertions;
 using ICCardManager.Common;
 using Xunit;
@@ -138,4 +141,78 @@ public class SingleInstanceGuardTests
         // カードリーダーを取り合う形が残る（AppConstants の remarks 参照）。
         AppConstants.SingleInstanceMutexName.Should().StartWith(@"Global\");
     }
+
+    #region アクセス拒否の振り分け（Issue #2107）
+
+    /// <summary>
+    /// 自分のアクセスを拒否する DACL 付きでミューテックスを作る（別ユーザーの既定 DACL で保護された先行インスタンスの代役）。
+    /// </summary>
+    /// <remarks>
+    /// 名前付きミューテックスの既定 DACL は作成者以外を許可しないため、別セッションの先行インスタンスが
+    /// 作ったミューテックスを開こうとすると <see cref="UnauthorizedAccessException"/> になる。
+    /// 同じプロセスでも、現在のユーザーを拒否する ACE を付けて作れば同じ状況を再現できる。
+    /// </remarks>
+    private static Mutex CreateMutexDenyingCurrentUser(string name)
+    {
+        var security = new MutexSecurity();
+        security.AddAccessRule(new MutexAccessRule(
+            WindowsIdentity.GetCurrent().User!, MutexRights.FullControl, AccessControlType.Deny));
+        var mutex = new Mutex(initiallyOwned: false, name, out var createdNew, security);
+        createdNew.Should().BeTrue("前提: テスト用のミューテックスを新規に作れているべき");
+        return mutex;
+    }
+
+    /// <summary>
+    /// 欠陥を突く側: 既存のミューテックスに拒否されたら、別セッションで起動中として起動を中止すること
+    /// </summary>
+    /// <remarks>
+    /// 振り分けを <see cref="SingleInstanceStatus.GuardUnavailable"/> と入れ替えると、同じ端末の別ユーザーが
+    /// 起動しているのに 2 つ目が起動し、1 台のカードリーダーを 2 つのピッすいが取り合う（#1910）。
+    /// </remarks>
+    [Fact]
+    public void 別ユーザーのDACLで保護された先行インスタンスがあれば別セッションで起動中として中止すること()
+    {
+        var name = UniqueName();
+        using var foreign = CreateMutexDenyingCurrentUser(name);
+
+        using var guard = SingleInstanceGuard.Acquire(name);
+
+        guard.Status.Should().Be(SingleInstanceStatus.AlreadyRunningInOtherSession);
+        guard.IsPrimaryInstance.Should().BeFalse("別セッションで起動中なので、この端末で 2 つ目を起動しない");
+        guard.AcquisitionError.Should().BeOfType<UnauthorizedAccessException>("ログへ残すために拒否の例外を持ち帰る");
+    }
+
+    /// <summary>
+    /// 拒否されたミューテックスも「実在する」と判定すること（<c>TryOpenExisting</c> の拒否は実在の証拠）
+    /// </summary>
+    /// <remarks>
+    /// この分岐を「実在しない」に倒すと、上の状況が <see cref="SingleInstanceStatus.GuardUnavailable"/>
+    /// （起動を継続）に化ける。
+    /// </remarks>
+    [Fact]
+    public void アクセスを拒否されたミューテックスを実在と判定すること()
+    {
+        var name = UniqueName();
+        using var foreign = CreateMutexDenyingCurrentUser(name);
+
+        SingleInstanceGuard.NamedMutexExists(name).Should().BeTrue();
+    }
+
+    /// <summary>
+    /// 振り分けの両側: 実在すれば別セッション、実在しなければ判定不能（起動を継続）
+    /// </summary>
+    /// <remarks>
+    /// 実在しないのに拒否される（<c>Global\</c> へ作る権限が無い）端末は単体テストで作れないため、
+    /// 振り分けは純関数で固定する。判定不能を「別セッション」へ倒すと、誰も起動していない端末で
+    /// ピッすいが起動できなくなる。
+    /// </remarks>
+    [Theory]
+    [InlineData(true, SingleInstanceStatus.AlreadyRunningInOtherSession)]
+    [InlineData(false, SingleInstanceStatus.GuardUnavailable)]
+    public void アクセス拒否はミューテックスの実在で振り分けること(bool mutexExists, SingleInstanceStatus expected)
+    {
+        SingleInstanceGuard.ClassifyAccessDenied(mutexExists).Should().Be(expected);
+    }
+
+    #endregion
 }

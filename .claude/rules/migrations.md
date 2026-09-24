@@ -52,8 +52,9 @@ paths:
    - `Description` は日本語で要約
 3. `Up()` は上記「冪等パターン」に従って書く
 4. `Down()` は可能ならロールバック、不可能なら空実装 + 理由コメント
-5. `ICCardManager/tests/ICCardManager.Tests/Data/Migrations/MigrationIdempotencyTests.cs` に `Migration_0NN_<name>_Up_IsIdempotent` を追加
-   - 先行マイグレーションを順に `RunMigrationOnce` して DB を準備し、対象を `RunMigrationTwice` で実行
+5. 冪等性テストは**追加不要**（`MigrationIdempotencyTests.Up_SecondRunDoesNotChangeSchemaOrData` が `MigrationRunner` の自動検出から対象を導出し、新しい版も自動で対象になる。Issue #2107）
+   - 検証は「2 回目の `Up()` の前後で、スキーマ（`sqlite_master` の全定義）と全テーブルの全行が一致すること」。行を入れた DB で流すため、例外にならない非冪等（行の重複・書き換え・インデックスの消失）も検出する
+   - テーブルを作り直す移行（002 / 003 / 011）は、**作り直しで消えるインデックスを移行前と同じ定義で作り直していること**を、その版の専用テストで直前の版までのスキーマと比べて表明する（`Migration_011_AddLedgerDetailIdTests.Up_RecreatesLedgerDetailIndexesAsBeforeMigration`）。冪等性テストは 1 回目と 2 回目を比べるので、1 回目で消えたものは検出できない
 6. スキーマに列追加した場合は `docs/design/02_DB設計書.md` の該当テーブルに反映
 
 ## 自動検出

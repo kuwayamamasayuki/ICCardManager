@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
 using FluentAssertions;
+using ICCardManager.Infrastructure.Caching;
 using ICCardManager.Infrastructure.Timing;
 using ICCardManager.Services;
 using ICCardManager.Tests.Infrastructure.Timing;
@@ -230,12 +231,16 @@ public class SharedModeMonitorTests
     public void HealthCheckIntervalSeconds_共有モードの最大キャッシュTTLと一致すること()
     {
         // Issue #1493: TTLを超えて stale データが滞留しないよう、
-        // ヘルスチェック間隔は共有モード上書き後のキャッシュ TTL の最大値（CardListSeconds=15）と一致させる。
+        // ヘルスチェック間隔は共有モード上書き後のカード系キャッシュ TTL の最大値と一致させる。
         // 双方が独立に書き換わって整合性が崩れることを CI で検出する回帰防止テスト。
-        const int 共有モードCardListSeconds = 15; // App.xaml.cs:203 で設定
+        // Issue #2107: 以前はテスト内に書いた定数 15 と比べていたため、本番の上書き値
+        // （当時は App.xaml.cs に直書き）を 30 に変えても緑だった。本番が使う CacheOptions.ApplySharedModeTtl を通す。
+        var options = new CacheOptions();
+        options.ApplySharedModeTtl();
+
         SharedModeMonitor.HealthCheckIntervalSeconds.Should().Be(
-            共有モードCardListSeconds,
-            "共有モード時のキャッシュ最大TTLとヘルスチェック間隔が一致していること");
+            Math.Max(options.CardListSeconds, options.LentCardsSeconds),
+            "共有モード時のカード系キャッシュの最大TTLとヘルスチェック間隔が一致していること");
     }
 
     [Fact]

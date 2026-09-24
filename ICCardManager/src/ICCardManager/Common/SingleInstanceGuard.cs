@@ -112,11 +112,8 @@ namespace ICCardManager.Common
                 //       無い／グループポリシーで剥がされている ＝ 判定不能（起動は止めない）
                 // 判別は「そのミューテックスが実在するか」で行う。OpenMutex は作成の権限を
                 // 要求しないため、存在しなければ (b) と確定できる。
-                return NamedMutexExists(mutexName)
-                    ? new SingleInstanceGuard(
-                        SingleInstanceStatus.AlreadyRunningInOtherSession, mutex: null, acquisitionError: ex)
-                    : new SingleInstanceGuard(
-                        SingleInstanceStatus.GuardUnavailable, mutex: null, acquisitionError: ex);
+                return new SingleInstanceGuard(
+                    ClassifyAccessDenied(NamedMutexExists(mutexName)), mutex: null, acquisitionError: ex);
             }
             catch (Exception ex)
             {
@@ -126,6 +123,18 @@ namespace ICCardManager.Common
                     SingleInstanceStatus.GuardUnavailable, mutex: null, acquisitionError: ex);
             }
         }
+
+        /// <summary>
+        /// 作成時のアクセス拒否を、ミューテックスの実在で 2 つの原因へ振り分ける
+        /// </summary>
+        /// <remarks>
+        /// 実在する（＝別ユーザーの既定 DACL に拒否された）なら別セッションで起動中、
+        /// 実在しない（＝作る権限が無い）なら判定不能として起動を止めない。
+        /// 後者は <c>SeCreateGlobalPrivilege</c> を剥がした端末でしか起きず単体テストから再現できないため、
+        /// 振り分けだけを切り出して固定している（Issue #2107）。
+        /// </remarks>
+        internal static SingleInstanceStatus ClassifyAccessDenied(bool mutexExists)
+            => mutexExists ? SingleInstanceStatus.AlreadyRunningInOtherSession : SingleInstanceStatus.GuardUnavailable;
 
         /// <summary>
         /// その名前のミューテックスが<b>既に存在するか</b>を判定する

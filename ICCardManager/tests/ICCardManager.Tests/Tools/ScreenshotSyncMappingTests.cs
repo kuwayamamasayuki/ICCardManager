@@ -224,6 +224,101 @@ namespace ICCardManager.Tests.Tools
         }
 
         /// <summary>
+        /// 公開前の検証で欠けがあったとき、<c>-Changed</c> では公開を止め、全撮影では撮れた分だけ公開すること（Issue #2095 / #2107）。
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// #2095 の「呼び出し方で分ける」は、それまでテストで表明されていなかった。<c>if ($Changed) { … exit 1 }</c> を消すと、
+        /// 撮り直したつもりの画像が欠けたまま一部だけ公開されるが、上のテストはすべて緑のままだった。
+        /// </para>
+        /// <para>
+        /// 対の表明として、全撮影の側（<c>$Changed</c> の分岐の外）では <c>exit 1</c> しないことも見る。
+        /// 全撮影では原理的に撮れない画像（リーダー未接続でしか撮れない画像）が必ず混ざるため、
+        /// 全か無かにすると全撮影の公開が恒久的にできなくなる。
+        /// </para>
+        /// </remarks>
+        [Fact]
+        public void 撮影スクリプト_検証の欠けはChangedでは公開を止め全撮影では続行する()
+        {
+            var verifyFailed = ExtractBlockAfter(CaptureScriptCode(), @"if\s*\(\s*\$verify\.ExitCode\s+-ne\s+0\s*\)");
+            verifyFailed.Should().NotBeNull("公開前の検証に失敗したときの分岐が残っていること");
+
+            // 行頭の if 文に限る（直前の `$captureHint = if ($Changed) { … }` は案内文を選ぶ式であり、分岐ではない）
+            var changedOnly = ExtractBlockAfter(verifyFailed!, @"(?m)^\s*if\s*\(\s*\$Changed\s*\)");
+            changedOnly.Should().NotBeNull("-Changed のときだけの分岐があること");
+            Regex.IsMatch(changedOnly!, @"\bexit\s+1\b")
+                .Should().BeTrue("-Changed は名指しした画像が 1 枚でも欠けたら公開しないこと");
+
+            var outsideChanged = verifyFailed!.Replace(changedOnly, string.Empty);
+            Regex.IsMatch(outsideChanged, @"\bexit\b")
+                .Should().BeFalse("全撮影では欠けた画像を名指しして、撮れた分の公開を続けること");
+        }
+
+        /// <summary>
+        /// 撮影の手順が「-Clear → dotnet test → -Write」の順であること（Issue #2095 / #2107）。
+        /// </summary>
+        /// <remarks>
+        /// 「存在＝今回作られた」は、撮影の<b>前に</b>消し、撮影の<b>後に</b>記録して初めて成り立つ。
+        /// 呼び出しの存在だけを見る上のテストは、-Clear を撮影の後へ移した（今回撮った画像を消す）形や、
+        /// -Write を撮影の前へ移した（何も撮れていない状態を記録する）形を検出できない。
+        /// </remarks>
+        [Fact]
+        public void 撮影スクリプト_撮影の前に掃除し撮影の後に記録する()
+        {
+            var code = CaptureScriptCode();
+
+            var clear = Regex.Match(code, @"Invoke-ManifestScript\s*\(\s*@\(""-Clear""");
+            var capture = Regex.Match(code, @"\bdotnet\s+test\b");
+            var write = Regex.Match(code, @"Invoke-ManifestScript\s*\(\s*@\(""-Write""");
+
+            clear.Success.Should().BeTrue();
+            capture.Success.Should().BeTrue();
+            write.Success.Should().BeTrue();
+            clear.Index.Should().BeLessThan(capture.Index, "撮影の前に前回の残骸を消すこと");
+            capture.Index.Should().BeLessThan(write.Index, "撮影の後に今回作られた画像を記録すること");
+        }
+
+        /// <summary>
+        /// <paramref name="headerPattern"/> に一致した位置の直後にある <c>{ … }</c> の中身を、括弧の対応で取り出す。
+        /// 見つからなければ null。
+        /// </summary>
+        internal static string? ExtractBlockAfter(string code, string headerPattern)
+        {
+            var header = Regex.Match(code, headerPattern);
+            if (!header.Success)
+            {
+                return null;
+            }
+
+            var open = code.IndexOf('{', header.Index + header.Length);
+            if (open < 0)
+            {
+                return null;
+            }
+
+            var depth = 0;
+            for (var i = open; i < code.Length; i++)
+            {
+                if (code[i] == '{') depth++;
+                else if (code[i] == '}' && --depth == 0)
+                {
+                    return code.Substring(open + 1, i - open - 1);
+                }
+            }
+
+            return null;
+        }
+
+        [Fact]
+        public void 抽出_ブロックは入れ子の波括弧を含めて取り出す()
+        {
+            const string sample = "if ($a) { x; if ($b) { y } z } w";
+
+            ExtractBlockAfter(sample, @"if\s*\(\$a\)").Should().Be(" x; if ($b) { y } z ");
+            ExtractBlockAfter(sample, @"if\s*\(\$c\)").Should().BeNull();
+        }
+
+        /// <summary>
         /// 撮影スクリプトから <c>Invoke-ManifestScript (...)</c> の引数式を取り出す。
         /// </summary>
         /// <remarks>
