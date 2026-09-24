@@ -125,7 +125,8 @@ public class WarningServiceTests
         // Assert
         warning.Should().NotBeNull();
         warning!.Type.Should().Be(WarningType.IncompleteBusStop);
-        warning.DisplayText.Should().Contain("3", "★を含む3件がカウントされる");
+        // Issue #2106: Contain("3") は「13件」「3,000件」にも一致する。区切り（「が」「件」）を含む完全な文言で比べる
+        warning.DisplayText.Should().Be("⚠️ バス停名が未入力の履歴が3件あります", "★を含む3件がカウントされる");
     }
 
     [Fact]
@@ -167,7 +168,8 @@ public class WarningServiceTests
 
         // Assert
         warning.Should().NotBeNull("★を含む1件は検出される（null/空はnull安全に無視）");
-        warning!.DisplayText.Should().Contain("1", "カウントは1件");
+        // Issue #2106: Contain("1") は「11件」「21件」にも一致するため、完全な文言で比べる
+        warning!.DisplayText.Should().Be("⚠️ バス停名が未入力の履歴が1件あります", "カウントは1件");
     }
 
     [Fact]
@@ -185,14 +187,19 @@ public class WarningServiceTests
             })
             .ReturnsAsync(new List<Ledger>());
 
-        // Act
+        // Act: 本体は DateTime.Now を直接読むため、呼び出しの前後の時刻で挟んで起点を確定する
+        var before = DateTime.Now;
         await _service.CheckIncompleteBusStopsAsync();
+        var after = DateTime.Now;
 
-        // Assert: 期間が「現在から1年前 〜 現在」になっている
+        // Assert: 期間が「現在から1年前 〜 現在」になっている。
+        // Issue #2106: 旧版は幅（約 1 年）しか見ておらず、期間がまるごと過去へずれても
+        // （例: 2 年前〜1 年前）緑だった。起点と終点をそれぞれ呼び出し時刻の前後で挟む。
         capturedFrom.Should().NotBeNull();
         capturedTo.Should().NotBeNull();
-        var elapsedYears = (capturedTo!.Value - capturedFrom!.Value).TotalDays / 365.0;
-        elapsedYears.Should().BeApproximately(1.0, 0.05, "おおよそ1年間の範囲で取得すること");
+        capturedTo!.Value.Should().BeOnOrAfter(before).And.BeOnOrBefore(after, "終点は呼び出した時点の現在時刻");
+        capturedFrom!.Value.Should().BeOnOrAfter(before.AddYears(-1)).And.BeOnOrBefore(
+            after.AddYears(-1), "起点は呼び出した時点のちょうど 1 年前（日付単位へ丸めない）");
     }
 
     #endregion

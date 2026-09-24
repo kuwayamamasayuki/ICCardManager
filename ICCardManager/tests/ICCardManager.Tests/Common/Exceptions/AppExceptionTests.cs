@@ -429,22 +429,52 @@ public class AppExceptionTests
         businessException.Should().BeAssignableTo<AppException>();
     }
 
+    /// <summary>
+    /// <see cref="Exception"/> として投げて捕捉しても、整備済みの文言とエラーコードが
+    /// 失われないこと。
+    /// </summary>
+    /// <remarks>
+    /// Issue #2106: 旧名 <c>AllCustomExceptions_AreSerializableAsException</c> は「シリアライズ可能」を
+    /// 名乗りながら、<c>Exception[]</c> の要素が <c>Exception</c> へ代入可能であること（コンパイルが保証する
+    /// 自明な性質）しか表明していなかった。本番の例外クラスはいずれも <c>[Serializable]</c> も
+    /// シリアライズ用コンストラクタも持たず、往復を保証していない（WPF の単一プロセスアプリで
+    /// AppDomain 越し・リモーティングを使わないため）。保証していない性質は表明しない。
+    /// 代わりに、上位の汎用ハンドラー（<c>catch (Exception)</c> → <see cref="ICCardManager.Common.ExceptionMessageFormatter"/> /
+    /// <c>ErrorDialogHelper.GetErrorInfo</c>）が頼っている「基底型で受けても文言とコードを取り出せる」ことを、
+    /// 例外ごとの具体値で表明する。
+    /// </remarks>
     [Fact]
-    public void AllCustomExceptions_AreSerializableAsException()
+    public void AllCustomExceptions_Exceptionとして捕捉しても整備済み文言とエラーコードを保つこと()
     {
-        // Arrange & Act
-        var exceptions = new Exception[]
+        var cases = new (Func<Exception> Create, string ErrorCode, string UserFriendlyMessage)[]
         {
-            CardReaderException.NotConnected(),
-            DatabaseException.ConnectionFailed(),
-            ValidationException.Required("test", "テスト"),
-            BusinessException.CardAlreadyLent("CARD123")
+            (() => CardReaderException.NotConnected(), "CR001",
+                "カードリーダーが接続されていません。接続を確認してください。"),
+            (() => DatabaseException.ConnectionFailed(), "DB001",
+                "データベースへの接続に失敗しました。管理者に連絡してください。"),
+            (() => ValidationException.Required("test", "テスト"), "VAL001",
+                "テストを入力してください。"),
+            (() => BusinessException.CardAlreadyLent("CARD123"), "BIZ001",
+                "このカードは既に貸出中です。"),
         };
 
-        // Assert - All should be assignable to Exception
-        foreach (var exception in exceptions)
+        foreach (var (create, errorCode, userFriendlyMessage) in cases)
         {
-            exception.Should().BeAssignableTo<Exception>();
+            Exception? caught = null;
+            try
+            {
+                throw create();
+            }
+            catch (Exception ex)
+            {
+                caught = ex;
+            }
+
+            var appException = caught.Should().BeAssignableTo<AppException>().Subject;
+            appException.ErrorCode.Should().Be(errorCode);
+            appException.UserFriendlyMessage.Should().Be(userFriendlyMessage);
+            ICCardManager.Common.ExceptionMessageFormatter.ToUserMessage(appException, "処理")
+                .Should().Be(userFriendlyMessage, "汎用ハンドラーは基底型で受けても整備済みの文言を使う");
         }
     }
 

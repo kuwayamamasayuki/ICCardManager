@@ -117,8 +117,10 @@ public class ValidationServiceErrorMessageQualityTests
     {
         var result = _service.ValidateWarningBalance(-100);
         AssertQualityCriteria(result.ErrorMessage);
-        result.ErrorMessage.Should().Contain("-100", "実際の入力値");
-        result.ErrorMessage.Should().Contain("0", "下限値");
+        // Issue #2106: Contain("0") は入力値「-100」自身にも一致し、下限値を何も検証していなかった。
+        // 値と単位・助詞を含む区切りで比べる
+        result.ErrorMessage.Should().Contain("-100円で下限を下回っています", "実際の入力値");
+        result.ErrorMessage.Should().Contain("。0円以上の値を設定してください", "下限値（直前の句点まで含めないと「10,000円以上」にも一致する）");
     }
 
     [Fact]
@@ -139,7 +141,8 @@ public class ValidationServiceErrorMessageQualityTests
         AssertQualityCriteria(result.ErrorMessage);
         result.ErrorMessage.Should().Contain("3秒", "実際の入力値");
         result.ErrorMessage.Should().Contain("5秒", "下限値");
-        result.ErrorMessage.Should().Contain("0", "自動的に閉じない場合の指定方法");
+        // Issue #2106: Contain("0") は入力値や上下限（例: 10秒・300秒）の数字にも一致し得るため、指定方法の文言ごと比べる
+        result.ErrorMessage.Should().Contain("自動的に閉じない場合は 0 を入力してください", "自動的に閉じない場合の指定方法");
     }
 
     [Fact]

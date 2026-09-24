@@ -139,44 +139,58 @@ public class RetryJitterTests
     /// ThreadStatic 化しただけでは同一ティック内に生成されたインスタンスが
     /// 同じ乱数列になり、ジッターが揃って thundering herd 緩和が失われる。
     /// シードを Interlocked で採番していることを、生成された系列の相違で表明する。
+    /// <para>
+    /// Issue #2106: 旧版は <c>Distinct().HaveCountGreaterThan(1)</c> で、8 本中 7 本が同じ系列でも緑だった。
+    /// 採番が <c>Interlocked.Increment</c> ならシードはスレッドごとに必ず異なり、
+    /// 20 個の値（各 0〜499）からなる系列が偶然一致する確率は無視できるため、
+    /// <b>全スレッドの系列が互いに異なること</b>を表明する。
+    /// <c>++</c> へ退行した場合の重複は採番の競合が起きたときにだけ現れる（確率的）ため、
+    /// 1 回の一斉起動ではなく複数回繰り返して競合の機会を増やす
+    /// （6 コアの開発機で <c>++</c> へ変異させると、50 回では 5 回中 2 回、200 回では 8 回中 7 回が赤になった。
+    /// 検出は確率的であり、1 回の緑は退行が無いことの証明にならない）。
+    /// </para>
     /// </remarks>
     [Fact]
     public void GetJitter_同時起動したスレッド間で乱数列が一致しないこと()
     {
-        const int threadCount = 8;
+        const int rounds = 200;
+        const int threadCount = 16;
         const int samplesPerThread = 20;
 
-        var sequences = new string[threadCount];
-        var barrier = new Barrier(threadCount);
-        var threads = new Thread[threadCount];
-
-        for (var i = 0; i < threadCount; i++)
+        for (var round = 0; round < rounds; round++)
         {
-            var index = i;
-            threads[i] = new Thread(() =>
+            var sequences = new string[threadCount];
+            using var barrier = new Barrier(threadCount);
+            var threads = new Thread[threadCount];
+
+            for (var i = 0; i < threadCount; i++)
             {
-                // 全スレッドを同一タイミングへ揃えてから初回呼び出しを行う
-                barrier.SignalAndWait();
-                var samples = Enumerable.Range(0, samplesPerThread)
-                    .Select(_ => RetryJitter.GetJitter(1000))
-                    .ToList();
-                sequences[index] = string.Join(",", samples);
-            });
-        }
+                var index = i;
+                threads[i] = new Thread(() =>
+                {
+                    // 全スレッドを同一タイミングへ揃えてから初回呼び出しを行う
+                    barrier.SignalAndWait();
+                    var samples = Enumerable.Range(0, samplesPerThread)
+                        .Select(_ => RetryJitter.GetJitter(1000))
+                        .ToList();
+                    sequences[index] = string.Join(",", samples);
+                });
+            }
 
-        foreach (var thread in threads)
-        {
-            thread.Start();
-        }
+            foreach (var thread in threads)
+            {
+                thread.Start();
+            }
 
-        foreach (var thread in threads)
-        {
-            thread.Join();
-        }
+            foreach (var thread in threads)
+            {
+                thread.Join();
+            }
 
-        sequences.Distinct().Should().HaveCountGreaterThan(
-            1,
-            "全スレッドが同じ乱数列を返すなら、共有モードの全 PC が同一タイミングで再試行する");
+            sequences.Should().OnlyHaveUniqueItems(
+                $"{round + 1} 回目の一斉起動: 同じ乱数列を返すスレッドがあるなら、" +
+                "共有モードの複数 PC（スレッド）が同一タイミングで再試行する");
+        }
     }
 
     /// <summary>

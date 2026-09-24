@@ -229,28 +229,57 @@ public class BusTextConfigurationConsumerTests : IDisposable
     [Fact]
     public async Task BusStopInput_スキップ時は設定したプレースホルダで保存する()
     {
-        var (viewModel, detail) = ArrangeBusStopInput(initialBusStops: "天神～博多");
+        var (viewModel, detail, ledgerRepo) = ArrangeBusStopInput(initialBusStops: "天神～博多");
 
         await viewModel.SkipAsync();
 
         detail.BusStops.Should().Be(CustomPlaceholder);
+        // Issue #2106: メモリ上の明細だけでなく、DB へ書く値（明細のバス停名・再生成した摘要）を固定する
+        VerifyPersisted(ledgerRepo);
     }
 
     [Fact]
     public async Task BusStopInput_未入力の保存は設定したプレースホルダへ変換する()
     {
-        var (viewModel, detail) = ArrangeBusStopInput(initialBusStops: null);
+        var (viewModel, detail, ledgerRepo) = ArrangeBusStopInput(initialBusStops: null);
         viewModel.BusUsages[0].BusStops = string.Empty;
 
         await viewModel.SaveAsync();
 
         detail.BusStops.Should().Be(CustomPlaceholder);
+        // Issue #2106: 入力欄は空のまま。DB へは空欄ではなくプレースホルダが書かれること
+        VerifyPersisted(ledgerRepo);
+    }
+
+    /// <summary>
+    /// DB へ保存される値（明細のバス停名と、明細から再生成した摘要）を具体値で検証する（Issue #2106）。
+    /// </summary>
+    /// <remarks>
+    /// 旧版はメモリ上の <see cref="LedgerDetail.BusStops"/> しか見ておらず、保存経路が入力欄の値
+    /// （空欄）を書く退行や、保存そのものを呼ばない退行でも緑だった。
+    /// 書き込みは 1 つのトランザクションで行う（Issue #1945）ため、非 null の tx で呼ばれたことも併せて見る。
+    /// </remarks>
+    private static void VerifyPersisted(Mock<ILedgerRepository> ledgerRepo)
+    {
+        // 式ツリーにはタプルリテラルを書けないため、期待値は外で組み立てる
+        var expectedUpdates = new List<(int SequenceNumber, string BusStops)> { (1, CustomPlaceholder) };
+        var expectedSummary = $"{CustomBusLabel}（{CustomPlaceholder}）";
+        ledgerRepo.Verify(r => r.UpdateDetailBusStopsAsync(
+                1,
+                It.Is<IEnumerable<(int SequenceNumber, string BusStops)>>(updates =>
+                    updates.SequenceEqual(expectedUpdates)),
+                It.IsNotNull<SQLiteTransaction>()),
+            Times.Once);
+        ledgerRepo.Verify(r => r.UpdateAsync(
+                It.Is<Ledger>(l => l.Id == 1 && l.Summary == expectedSummary),
+                It.IsNotNull<SQLiteTransaction>()),
+            Times.Once);
     }
 
     [Fact]
     public void BusStopInput_既存値がプレースホルダのみなら空欄で初期化する()
     {
-        var (viewModel, _) = ArrangeBusStopInput(initialBusStops: CustomPlaceholder);
+        var (viewModel, _, _) = ArrangeBusStopInput(initialBusStops: CustomPlaceholder);
 
         viewModel.BusUsages[0].BusStops.Should().BeEmpty(
             "職員がプレースホルダを消す手間を省くための挙動（Issue #1205）が設定変更に追従する");
@@ -276,7 +305,7 @@ public class BusTextConfigurationConsumerTests : IDisposable
         ledgerRepo.Verify(r => r.GetBusStopSuggestionsAsync(CustomPlaceholder), Times.Once);
     }
 
-    private (BusStopInputViewModel ViewModel, LedgerDetail Detail) ArrangeBusStopInput(
+    private (BusStopInputViewModel ViewModel, LedgerDetail Detail, Mock<ILedgerRepository> LedgerRepo) ArrangeBusStopInput(
         string initialBusStops)
     {
         var ledgerRepo = new Mock<ILedgerRepository>();
@@ -312,7 +341,7 @@ public class BusTextConfigurationConsumerTests : IDisposable
         var ledger = new Ledger { Id = 1, Details = new List<LedgerDetail> { detail } };
         viewModel.InitializeWithDetails(ledger, new List<LedgerDetail> { detail });
 
-        return (viewModel, detail);
+        return (viewModel, detail, ledgerRepo);
     }
 
     #endregion
