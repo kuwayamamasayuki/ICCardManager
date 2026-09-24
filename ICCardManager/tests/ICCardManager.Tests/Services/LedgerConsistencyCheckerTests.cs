@@ -186,4 +186,141 @@ public class LedgerConsistencyCheckerTests
     }
 
     #endregion
+
+    #region Issue #2112: 期間の初日が循環日のときのシード
+
+    // 前月末（2/27）の最終残高は 1,000 円。
+    // 3/2 は期間（3/1〜3/31）の最初の稼働日で、同額 210 円の利用（1000→790）とポイント還元（790→1000）が
+    // あり残高が循環する（Issue #1004 形状）。同日統合（#837）で id は還元（20）が利用（21）より小さい。
+    // 当日の行だけでは開始点が決まらず、シードが無いと id 順（還元→利用）に落ちて当日の最終残高が 790 になる。
+    private static readonly DateTime Issue2112PeriodFrom = new DateTime(2026, 3, 1);
+    private static readonly DateTime Issue2112PeriodTo = new DateTime(2026, 3, 31);
+    private const int Issue2112PrecedingBalance = 1000;
+    private const int Issue2112CycleAmount = 210;
+    private const int Issue2112NextDayExpense = 200;
+
+    private static Ledger Issue2112PrecedingLedger() =>
+        new Ledger { Id = 10, CardIdm = TestCardIdm, Date = new DateTime(2026, 2, 27),
+            Summary = "鉄道（天神～博多）", Income = 0, Expense = 260, Balance = Issue2112PrecedingBalance };
+
+    private static List<Ledger> Issue2112PeriodLedgers(int nextDayBalance) => new List<Ledger>
+    {
+        new Ledger { Id = 20, CardIdm = TestCardIdm, Date = new DateTime(2026, 3, 2),
+            Summary = "ポイント還元", Income = Issue2112CycleAmount, Expense = 0,
+            Balance = Issue2112PrecedingBalance },
+        new Ledger { Id = 21, CardIdm = TestCardIdm, Date = new DateTime(2026, 3, 2),
+            Summary = "鉄道（薬院～博多）", Income = 0, Expense = Issue2112CycleAmount,
+            Balance = Issue2112PrecedingBalance - Issue2112CycleAmount },
+        new Ledger { Id = 22, CardIdm = TestCardIdm, Date = new DateTime(2026, 3, 5),
+            Summary = "鉄道（天神～博多）", Income = 0, Expense = Issue2112NextDayExpense,
+            Balance = nextDayBalance },
+    };
+
+    private void SetupIssue2112Repository(int nextDayBalance)
+    {
+        _ledgerRepoMock
+            .Setup(x => x.GetByDateRangeAsync(TestCardIdm, Issue2112PeriodFrom, Issue2112PeriodTo))
+            .ReturnsAsync(Issue2112PeriodLedgers(nextDayBalance));
+        _ledgerRepoMock
+            .Setup(x => x.GetLatestBeforeDateAsync(TestCardIdm, Issue2112PeriodFrom))
+            .ReturnsAsync(Issue2112PrecedingLedger());
+    }
+
+    /// <summary>
+    /// Issue #2112: 期間の最初の稼働日が循環日でも、期間より前の最終残高をシードにして並べるため、
+    /// 正しい台帳に偽の不整合を報告しないこと。
+    /// </summary>
+    /// <remarks>
+    /// 循環日が期間の途中にあるだけでは欠陥を突けない（前の稼働日の最終残高が日をまたいで
+    /// シードになる。#2043 の初版が外した形）。ここでは循環日を期間の最初の稼働日に置く。
+    /// 循環を回転させた並びは当日の中では整合して見えるため、偽の不整合は<b>翌稼働日の行</b>に現れる。
+    /// </remarks>
+    [Fact]
+    public async Task CheckBalanceConsistencyAsync_CycleDayIsFirstWorkingDayOfPeriod_NoFalseInconsistency()
+    {
+        // Arrange: 3/5 の行は正しい（1000 − 200 = 800）
+        SetupIssue2112Repository(nextDayBalance: Issue2112PrecedingBalance - Issue2112NextDayExpense);
+
+        // Act
+        var result = await _checker.CheckBalanceConsistencyAsync(TestCardIdm, Issue2112PeriodFrom, Issue2112PeriodTo);
+
+        // Assert
+        result.IsConsistent.Should().BeTrue(
+            "3/2 は 1000→790（利用）→1000（還元）で閉じており、3/5 は 1000 − 200 = 800 で整合する");
+        result.Inconsistencies.Should().BeEmpty();
+    }
+
+    /// <summary>
+    /// Issue #2112（対の表明）: シードで並べ替えても、循環日の後の本当の不整合は引き続き検出し、
+    /// 期待値は正しい並び（当日の最終残高 1,000 円）から計算すること。
+    /// </summary>
+    /// <remarks>
+    /// 前のテストだけだと「チェックを丸ごと止めた実装」でも緑になる。
+    /// 期待値まで表明するのは、ハイライト・警告文言がこの値を利用者へ示すため
+    /// （シード無しでは 790 − 200 = 590 という存在しない残高を「正しい値」として案内する）。
+    /// </remarks>
+    [Fact]
+    public async Task CheckBalanceConsistencyAsync_CycleDayIsFirstWorkingDayOfPeriod_StillReportsRealInconsistencyWithCorrectExpectation()
+    {
+        // Arrange: 3/5 の残額が 50 円ずれている
+        const int wrongBalance = Issue2112PrecedingBalance - Issue2112NextDayExpense - 50;
+        SetupIssue2112Repository(nextDayBalance: wrongBalance);
+
+        // Act
+        var result = await _checker.CheckBalanceConsistencyAsync(TestCardIdm, Issue2112PeriodFrom, Issue2112PeriodTo);
+
+        // Assert
+        result.IsConsistent.Should().BeFalse();
+        result.Inconsistencies.Should().ContainSingle()
+            .Which.Should().Be((22, Issue2112PrecedingBalance - Issue2112NextDayExpense, wrongBalance));
+    }
+
+    /// <summary>
+    /// Issue #2112: シードは「期間の開始日より前の最終残高」を、残高チェーンで確定済みの単票クエリ
+    /// （<see cref="ILedgerRepository.GetLatestBeforeDateAsync"/>）から取ること。
+    /// 履歴画面（MainViewModel.GetPrecedingBalanceAsync）・帳票（ReportDataBuilder）と同じ根拠（#1763）。
+    /// </summary>
+    [Fact]
+    public async Task CheckBalanceConsistencyAsync_TakesSeedFromLatestLedgerBeforePeriodStart()
+    {
+        // Arrange
+        SetupIssue2112Repository(nextDayBalance: Issue2112PrecedingBalance - Issue2112NextDayExpense);
+
+        // Act
+        await _checker.CheckBalanceConsistencyAsync(TestCardIdm, Issue2112PeriodFrom, Issue2112PeriodTo);
+
+        // Assert
+        _ledgerRepoMock.Verify(x => x.GetLatestBeforeDateAsync(TestCardIdm, Issue2112PeriodFrom), Times.Once);
+    }
+
+    /// <summary>
+    /// Issue #2112（正当な既存挙動）: 期間より前に履歴が無い（シードが null）場合も、
+    /// 期間内の行だけで従来どおり検査すること。
+    /// </summary>
+    [Fact]
+    public async Task CheckBalanceConsistencyAsync_NoLedgerBeforePeriod_ChecksWithoutSeed()
+    {
+        // Arrange: 期間より前の行が無い。3/2 は 1 行だけなので開始点はシード無しで決まる
+        _ledgerRepoMock
+            .Setup(x => x.GetByDateRangeAsync(TestCardIdm, Issue2112PeriodFrom, Issue2112PeriodTo))
+            .ReturnsAsync(new List<Ledger>
+            {
+                new Ledger { Id = 30, CardIdm = TestCardIdm, Date = new DateTime(2026, 3, 2),
+                    Summary = "新規購入", Income = 1000, Expense = 0, Balance = 1000 },
+                new Ledger { Id = 31, CardIdm = TestCardIdm, Date = new DateTime(2026, 3, 5),
+                    Summary = "鉄道（天神～博多）", Income = 0, Expense = 200, Balance = 750 },
+            });
+        _ledgerRepoMock
+            .Setup(x => x.GetLatestBeforeDateAsync(TestCardIdm, Issue2112PeriodFrom))
+            .ReturnsAsync((Ledger)null);
+
+        // Act
+        var result = await _checker.CheckBalanceConsistencyAsync(TestCardIdm, Issue2112PeriodFrom, Issue2112PeriodTo);
+
+        // Assert: 1000 − 200 = 800 ≠ 750
+        result.Inconsistencies.Should().ContainSingle()
+            .Which.Should().Be((31, 800, 750));
+    }
+
+    #endregion
 }

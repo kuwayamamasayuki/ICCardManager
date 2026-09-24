@@ -37,8 +37,21 @@ namespace ICCardManager.Services
             // Issue #1004: 同一日内の順序を残高チェーンで決定する
             // ID順だとポイント還元と利用の順序が残高推移と一致せず、
             // 偽の不整合が報告される場合がある
+            //
+            // Issue #2112: 期間より前の最終残高をチェーン開始点のシードとして渡す。
+            // 期間の最初の稼働日が同額のポイント還元と利用で残高が循環する日（#1004 形状）だと、
+            // 当日の行だけでは開始点が決まらず id 順フォールバックへ落ちる。回転した並びは
+            // 当日の中では整合して見えるが、当日の最終残高が中間残高になるため、
+            // 正しい翌稼働日の行が不整合として報告される（期待値も存在しない残高になる）。
+            // 2 日目以降は前の稼働日の最終残高が日をまたいで引き継がれるので、効くのは期間の初日だけ。
+            // シードは履歴画面（MainViewModel.GetPrecedingBalanceAsync）・帳票（ReportDataBuilder）と
+            // 同じ確定済みの単票クエリで取る（#2043 / #1763）。母集団はどちらも貸出中レコードを含み揃っている。
+            // 前の行が無ければ null（シード無しの従来挙動）。
+            var precedingBalance = (await _ledgerRepository
+                .GetLatestBeforeDateAsync(cardIdm, fromDate).ConfigureAwait(false))?.Balance;
             var ledgers = LedgerOrderHelper.ReorderByBalanceChain(
-                await _ledgerRepository.GetByDateRangeAsync(cardIdm, fromDate, toDate).ConfigureAwait(false));
+                await _ledgerRepository.GetByDateRangeAsync(cardIdm, fromDate, toDate).ConfigureAwait(false),
+                precedingBalance);
 
             // Issue #1059: 詳細レベルのチェックのためにDetailsを読み込む
             if (ledgers.Count > 0)
