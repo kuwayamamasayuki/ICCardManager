@@ -34,6 +34,10 @@ namespace ICCardManager.Tests;
 /// 新規の規約テストは本ヘルパーを使い、複製をこれ以上増やさないこと
 /// （既存コピーの集約は別途行う。<see cref="TestPaths"/> と同じ方針）。
 /// </para>
+/// <para>
+/// 本番ソース全体を走査する検査は、ファイルの列挙・読み込みと本ヘルパーによるサニタイズを
+/// <see cref="ProductionSourceFiles"/> から取る（プロセスで 1 回だけ行われる。Issue #2108）。
+/// </para>
 /// </remarks>
 internal static class TestSourceInspection
 {

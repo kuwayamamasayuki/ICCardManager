@@ -28,7 +28,7 @@ namespace ICCardManager.Tests.ViewModels;
 /// <summary>
 /// CardManageViewModelの単体テスト
 /// </summary>
-public class CardManageViewModelTests
+public class CardManageViewModelTests : IDisposable
 {
     private readonly Mock<ICardRepository> _cardRepositoryMock;
     private readonly Mock<ILedgerRepository> _ledgerRepositoryMock;
@@ -45,6 +45,8 @@ public class CardManageViewModelTests
     private readonly Mock<IDialogService> _dialogServiceMock;
     private readonly Mock<IStaffAuthService> _staffAuthServiceMock;
     private readonly LendingService _lendingService;
+    private readonly DbContext _dbContext;
+    private readonly CardLockManager _lockManager;
     /// <summary>
     /// ViewModel が MainViewModel へ送るカード読み取り抑制メッセージ（Issue #852）を記録する（Issue #1807）。
     /// </summary>
@@ -84,17 +86,17 @@ public class CardManageViewModelTests
         // LendingServiceの作成（Issue #596対応）
         var settingsRepositoryMock = new Mock<ISettingsRepository>();
         var summaryGenerator = new SummaryGenerator();
-        var lockManager = new CardLockManager(NullLogger<CardLockManager>.Instance);
-        var dbContext = new DbContext(":memory:");
-        dbContext.InitializeDatabase();
+        _lockManager = new CardLockManager(NullLogger<CardLockManager>.Instance);
+        _dbContext = new DbContext(":memory:");
+        _dbContext.InitializeDatabase();
         _lendingService = new LendingService(
-            dbContext,
+            _dbContext,
             _cardRepositoryMock.Object,
             _staffRepositoryMock.Object,
             _ledgerRepositoryMock.Object,
             settingsRepositoryMock.Object,
             summaryGenerator,
-            lockManager,
+            _lockManager,
             Options.Create(new AppOptions()),
             NullLogger<LendingService>.Instance);
 
@@ -138,6 +140,17 @@ public class CardManageViewModelTests
             Mock.Of<INavigationService>(),
             () => throw new InvalidOperationException("このテストは貸出記録作成ダイアログを使用しません"),
             clock: _clock);
+    }
+
+    /// <summary>
+    /// Issue #2108: テストごとに作るインメモリ DB の接続とロックの待機ハンドルを解放する
+    /// （旧版は Dispose せず、ファイナライザーに任せていた）。
+    /// </summary>
+    public void Dispose()
+    {
+        _dbContext.Dispose();
+        _lockManager.Dispose();
+        GC.SuppressFinalize(this);
     }
 
     #region カード一覧読み込みテスト

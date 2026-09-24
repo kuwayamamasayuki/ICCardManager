@@ -71,25 +71,16 @@ public class MessageBoxOwnerConventionTests
     /// </summary>
     private static readonly Regex OwnedByThisPattern = new Regex(@"(?<!\w)MessageBox\.Show\s*\(\s*this\s*,");
 
-    private static IReadOnlyList<string> GetProductionSourceFiles()
-        => Directory.GetFiles(TestPaths.GetProductionSourceRoot(), "*.cs", SearchOption.AllDirectories)
-            .Where(p => !IsGenerated(p))
-            .OrderBy(p => p, StringComparer.OrdinalIgnoreCase)
-            .ToList();
-
     /// <summary>
-    /// ビルド生成物（<c>obj/</c> 配下の <c>*.g.cs</c> 等）は規約の対象外
+    /// 本番ソースを、ソースルートからの相対パス（区切りは <c>\</c>）付きで列挙する。
     /// </summary>
-    private static bool IsGenerated(string path)
-    {
-        var relative = ToRelative(path);
-        return relative.StartsWith(@"obj\", StringComparison.OrdinalIgnoreCase)
-            || relative.StartsWith(@"bin\", StringComparison.OrdinalIgnoreCase);
-    }
-
-    private static string ToRelative(string path)
-        => path.Substring(TestPaths.GetProductionSourceRoot().Length).TrimStart(Path.DirectorySeparatorChar, '/')
-            .Replace('/', '\\');
+    /// <remarks>
+    /// Issue #2108: 読み込みは <see cref="ProductionSourceFiles"/>（プロセスで 1 回だけ）を使う。
+    /// ビルド生成物（<c>obj/</c> 配下の <c>*.g.cs</c> 等）は規約の対象外で、ProductionSourceFiles は bin / obj へ降りない。
+    /// </remarks>
+    private static IEnumerable<(string Relative, string Source)> GetProductionSources()
+        => ProductionSourceFiles.CSharp
+            .Select(f => (f.RelativePath.Replace('/', '\\'), f.Text));
 
     /// <summary>
     /// 違反（オーナーを渡していない <c>MessageBox.Show</c>）を列挙する
@@ -123,16 +114,15 @@ public class MessageBoxOwnerConventionTests
     {
         var violations = new List<string>();
 
-        foreach (var path in GetProductionSourceFiles())
+        foreach (var (relative, source) in GetProductionSources())
         {
-            var relative = ToRelative(path);
             if (string.Equals(relative, FallbackFile, StringComparison.OrdinalIgnoreCase))
             {
                 // 唯一のフォールバック地点。ここだけは owner==null のとき ownerless で表示する
                 continue;
             }
 
-            violations.AddRange(FindOwnerlessCalls(relative, File.ReadAllText(path)));
+            violations.AddRange(FindOwnerlessCalls(relative, source));
         }
 
         violations.Should().BeEmpty(

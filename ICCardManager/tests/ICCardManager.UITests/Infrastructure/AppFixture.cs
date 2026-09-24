@@ -53,13 +53,24 @@ namespace ICCardManager.UITests.Infrastructure
         /// </summary>
         private readonly UiTestDatabaseGuard? _ownedDatabaseGuard;
         private readonly Process? _dotnetProcess;
+
+        /// <summary>
+        /// アプリ本体（ICCardManager.exe）のプロセス。終了を待って DB ファイルのロック解放を確かめるために持つ（Issue #2108）。
+        /// </summary>
+        private readonly Process _appProcess;
         private bool _disposed;
 
-        private AppFixture(Application app, UIA3Automation automation, UiTestDatabaseGuard? ownedDatabaseGuard, Process? dotnetProcess)
+        /// <summary>
+        /// 終了処理でプロセスの終了を待つ上限。通常は終了の要求から数百 ms で終わる。
+        /// </summary>
+        private static readonly TimeSpan ProcessExitTimeout = TimeSpan.FromSeconds(10);
+
+        private AppFixture(Application app, UIA3Automation automation, UiTestDatabaseGuard? ownedDatabaseGuard, Process appProcess, Process? dotnetProcess)
         {
             _app = app;
             _automation = automation;
             _ownedDatabaseGuard = ownedDatabaseGuard;
+            _appProcess = appProcess;
             _dotnetProcess = dotnetProcess;
         }
 
@@ -156,12 +167,11 @@ namespace ICCardManager.UITests.Infrastructure
                 // 空の状態からマイグレーションさせる
                 guard.DeleteWorkingDatabase();
 
+                // Issue #2108: Dispose がプロセスの終了まで待つので、DB ファイルのロックは解放済み。
+                // 固定時間の待機（旧: 1 秒）は要らない
                 using (launchForMigration())
                 {
                 }
-
-                // プロセス終了後の DB ファイルロック解放を待つ
-                System.Threading.Thread.Sleep(1000);
 
                 seedDatabase(guard.DatabasePath);
 
@@ -247,7 +257,7 @@ namespace ICCardManager.UITests.Infrastructure
             var app = Application.Attach(appProcess);
             var automation = new UIA3Automation();
 
-            return new AppFixture(app, automation, ownedDatabaseGuard, dotnetProcess);
+            return new AppFixture(app, automation, ownedDatabaseGuard, appProcess, dotnetProcess);
         }
 
         /// <summary>
@@ -337,13 +347,35 @@ namespace ICCardManager.UITests.Infrastructure
                 // 既に終了済み
             }
 
-            // プロセス終了後に少し待機（DB ファイルロック解放を待つ）
-            System.Threading.Thread.Sleep(500);
+            // Issue #2108: 固定時間の待機（旧: 500ms）ではなく、プロセスの終了そのものを待つ。
+            // 終了したプロセスのファイルハンドルは OS が閉じているので、DB を復元できる
+            WaitForExit(_appProcess);
+            WaitForExit(_dotnetProcess);
 
             _automation.Dispose();
 
             // DB を復元する（失敗したら退避ファイルは残り、次回の起動が回復する）
             _ownedDatabaseGuard?.Restore();
+        }
+
+        /// <summary>
+        /// プロセスの終了を上限付きで待つ。終了済み・取得不能なら何もしない。
+        /// </summary>
+        private static void WaitForExit(Process? process)
+        {
+            try
+            {
+                if (process != null && !process.WaitForExit((int)ProcessExitTimeout.TotalMilliseconds))
+                {
+                    // 黙って復元へ進まない。DB を掴んだままなら復元が失敗し、退避ファイルは次回の起動が回復する
+                    System.Diagnostics.Trace.WriteLine(
+                        $"[AppFixture] プロセス {process.Id} が {ProcessExitTimeout.TotalSeconds} 秒以内に終了しませんでした。DB の復元に失敗する可能性があります。");
+                }
+            }
+            catch
+            {
+                // 既に終了済み・権限不足。復元は続ける（失敗したら退避ファイルが残り、次回の起動が回復する）
+            }
         }
 
         /// <summary>

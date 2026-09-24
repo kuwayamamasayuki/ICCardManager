@@ -3,6 +3,7 @@ using ICCardManager.Data;
 using ICCardManager.Data.Repositories;
 using ICCardManager.Infrastructure.Caching;
 using ICCardManager.Models;
+using ICCardManager.Tests.Infrastructure.Timing;
 using Microsoft.Extensions.Options;
 using Moq;
 using System;
@@ -140,6 +141,7 @@ public class RepositoryInsertRetryTests : IDisposable
     public async Task カード登録_ロックが解けない場合はSQLiteExceptionとして報告されること()
     {
         using var lockHolder = HoldWriteLockIndefinitely();
+        var retryDelay = RecordingRetryDelay.AttachTo(_dbContext);
         var card = CreateCard("CARD000000000002", "nimoca", "2");
 
         var act = async () => await _cardRepository.InsertAsync(card);
@@ -148,6 +150,8 @@ public class RepositoryInsertRetryTests : IDisposable
             "握りつぶすとリトライ判定（ResultCode）に届かない");
         DbContext.IsTransientLockError(thrown.Which).Should().BeTrue(
             "報告される ResultCode は Busy / Locked のいずれかであること");
+        retryDelay.Delays.Should().Equal(DbContext.LocalRetryDelays,
+            "例外として報告されるのは、ローカルモードのリトライを使い切った後であること");
     }
 
     /// <summary>
@@ -158,12 +162,14 @@ public class RepositoryInsertRetryTests : IDisposable
     public async Task 職員登録_ロックが解けない場合はSQLiteExceptionとして報告されること()
     {
         using var lockHolder = HoldWriteLockIndefinitely();
+        var retryDelay = RecordingRetryDelay.AttachTo(_dbContext);
         var staff = CreateStaff("STAFF00000000002", "天神 太郎");
 
         var act = async () => await _staffRepository.InsertAsync(staff);
 
         var thrown = await act.Should().ThrowAsync<SQLiteException>();
         DbContext.IsTransientLockError(thrown.Which).Should().BeTrue();
+        retryDelay.Delays.Should().Equal(DbContext.LocalRetryDelays);
     }
 
     #endregion

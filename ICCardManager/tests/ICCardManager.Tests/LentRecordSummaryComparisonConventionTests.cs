@@ -310,12 +310,12 @@ public class LentRecordSummaryComparisonConventionTests
 
         foreach (var file in EnumerateProductionSources())
         {
-            var code = TestSourceInspection.RemoveCommentsPreservingLines(File.ReadAllText(file));
+            var code = file.CommentsRemovedPreservingLines;
 
             foreach (var (index, text) in DetectViolations(code))
             {
                 var line = code.Take(index).Count(c => c == '\n') + 1;
-                violations.Add($"{Path.GetFileName(file)}:{line}: {text.Trim()}");
+                violations.Add($"{file.Name}:{line}: {text.Trim()}");
             }
         }
 
@@ -347,8 +347,7 @@ public class LentRecordSummaryComparisonConventionTests
         wrapped.Should().Be(fetches, "台帳を取得するすべての呼び出しが ExcludeLentRecords を通ること（Issue #2044）");
     }
 
-    private static IEnumerable<string> EnumerateProductionSources()
-        => Directory.EnumerateFiles(TestPaths.GetProductionSourceRoot(), "*.cs", SearchOption.AllDirectories)
-            .Where(f => !f.Contains($"{Path.DirectorySeparatorChar}obj{Path.DirectorySeparatorChar}")
-                        && !f.Contains($"{Path.DirectorySeparatorChar}bin{Path.DirectorySeparatorChar}"));
+    /// <remarks>Issue #2108: 読み込みとサニタイズは <see cref="ProductionSourceFiles"/> がプロセスで 1 回だけ行う。</remarks>
+    private static IEnumerable<ProductionSourceFiles.SourceFile> EnumerateProductionSources()
+        => ProductionSourceFiles.CSharp;
 }

@@ -5,6 +5,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using FluentAssertions;
 using ICCardManager.Data;
+using ICCardManager.Tests.Infrastructure.Timing;
 using ICCardManager.Data.Repositories;
 using ICCardManager.Infrastructure.Caching;
 using ICCardManager.Models;
@@ -42,6 +43,7 @@ public sealed class LendingServiceRollbackFailureTests : IDisposable
     private const string TestStaffIdm = "FFFF000000000001";
 
     private readonly ScopeCapturingDbContext _dbContext;
+    private readonly RecordingRetryDelay _retryDelay;
     private readonly CardRepository _realCardRepository;
     private readonly LedgerRepository _ledgerRepository;
     private readonly StaffRepository _staffRepository;
@@ -51,6 +53,8 @@ public sealed class LendingServiceRollbackFailureTests : IDisposable
     {
         _dbContext = new ScopeCapturingDbContext(":memory:");
         _dbContext.InitializeDatabase();
+        // Issue #2108: ExecuteWithRetryAsync のバックオフを実際に待たず、要求された待機時間を記録する
+        _retryDelay = RecordingRetryDelay.AttachTo(_dbContext);
 
         var cacheOptions = Options.Create(new CacheOptions());
         var cacheService = CreatePassThroughCacheService();
@@ -183,6 +187,8 @@ public sealed class LendingServiceRollbackFailureTests : IDisposable
         repaired.Should().Be(1,
             "ロールバックの二次例外が本来の SQLITE_BUSY を置き換えると、リトライが働かず修復が例外で終わる");
         attempts.Should().BeGreaterThan(1, "リトライが行われたことを示す");
+        _retryDelay.Delays.Should().Equal(new[] { DbContext.LocalRetryDelays[0] },
+            "1 回だけ失敗させたので、バックオフの先頭の時間を 1 回だけ待つこと");
     }
 
     private LendingService CreateService(

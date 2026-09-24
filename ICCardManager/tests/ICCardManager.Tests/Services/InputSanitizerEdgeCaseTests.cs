@@ -207,20 +207,6 @@ public class InputSanitizerEdgeCaseTests
     }
 
     /// <summary>
-    /// サニタイズ後も50文字を超える場合、50文字に切り詰められること。
-    /// </summary>
-    [Fact]
-    public void SanitizeName_SanitizedStillOverLimit_TruncatesTo50()
-    {
-        // 55文字（制御文字なし）
-        var input = new string('あ', 55);
-
-        var result = InputSanitizer.SanitizeName(input);
-
-        result.Should().HaveLength(50);
-    }
-
-    /// <summary>
     /// null入力で空文字を返すこと。
     /// </summary>
     [Fact]

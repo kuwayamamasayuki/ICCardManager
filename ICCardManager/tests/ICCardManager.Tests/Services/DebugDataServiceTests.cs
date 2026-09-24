@@ -24,7 +24,6 @@ namespace ICCardManager.Tests.Services;
 public class DebugDataServiceTests : IDisposable
 {
     private readonly SQLiteConnection _connection;
-    private readonly DbContext _realDbContext;
     private readonly Mock<DbContext> _dbContextMock;
     private readonly Mock<IStaffRepository> _staffRepoMock;
     private readonly Mock<ICardRepository> _cardRepoMock;
@@ -59,19 +58,6 @@ public class DebugDataServiceTests : IDisposable
         _connection.Open();
         using (var cmd = _connection.CreateCommand())
         {
-            cmd.CommandText = @"
-                CREATE TABLE IF NOT EXISTS staff (staff_idm TEXT PRIMARY KEY);
-                CREATE TABLE IF NOT EXISTS ic_card (card_idm TEXT PRIMARY KEY);
-                CREATE TABLE IF NOT EXISTS ledger (id INTEGER PRIMARY KEY, card_idm TEXT);
-                CREATE TABLE IF NOT EXISTS ledger_detail (ledger_id INTEGER);";
-            cmd.ExecuteNonQuery();
-        }
-
-        // 実際のDbContext（インメモリ）を使ってテーブル作成
-        _realDbContext = new DbContext(":memory:");
-        using (var realLease = _realDbContext.LeaseConnection())
-        {
-            using var cmd = realLease.Connection.CreateCommand();
             cmd.CommandText = @"
                 CREATE TABLE IF NOT EXISTS staff (staff_idm TEXT PRIMARY KEY);
                 CREATE TABLE IF NOT EXISTS ic_card (card_idm TEXT PRIMARY KEY);
@@ -525,7 +511,6 @@ public class DebugDataServiceTests : IDisposable
     public void Dispose()
     {
         _connection?.Dispose();
-        _realDbContext?.Dispose();
     }
 }
 #endif

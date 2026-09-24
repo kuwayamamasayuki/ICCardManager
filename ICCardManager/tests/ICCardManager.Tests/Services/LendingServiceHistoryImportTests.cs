@@ -1,5 +1,6 @@
 using FluentAssertions;
 using ICCardManager.Data;
+using ICCardManager.Tests.Infrastructure.Timing;
 using ICCardManager.Data.Repositories;
 using ICCardManager.Models;
 using ICCardManager.Services;
@@ -42,6 +43,7 @@ namespace ICCardManager.Tests.Services;
 public class LendingServiceHistoryImportTests : IDisposable
 {
     private readonly DbContext _dbContext;
+    private readonly RecordingRetryDelay _retryDelay;
     private readonly Mock<ILedgerRepository> _ledgerRepositoryMock;
     private readonly LendingService _service;
     private readonly CardLockManager _lockManager;
@@ -51,6 +53,8 @@ public class LendingServiceHistoryImportTests : IDisposable
     public LendingServiceHistoryImportTests()
     {
         _dbContext = TestDbContextFactory.Create();
+        // Issue #2108: ExecuteWithRetryAsync のバックオフを実際に待たず、要求された待機時間を記録する
+        _retryDelay = RecordingRetryDelay.AttachTo(_dbContext);
 
         _ledgerRepositoryMock = new Mock<ILedgerRepository>();
         var settingsRepositoryMock = new Mock<ISettingsRepository>();
@@ -132,6 +136,8 @@ public class LendingServiceHistoryImportTests : IDisposable
         result.Success.Should().BeTrue("一過性の SQLITE_BUSY はリトライで吸収されるべき");
         result.ImportedCount.Should().BeGreaterThan(0);
         insertAttempts.Should().BeGreaterThan(1, "リトライが行われたことを示す");
+        _retryDelay.Delays.Should().Equal(new[] { DbContext.LocalRetryDelays[0] },
+            "1 回だけ失敗させたので、バックオフの先頭の時間を 1 回だけ待つこと");
     }
 
     /// <summary>
@@ -468,6 +474,8 @@ public class LendingServiceHistoryImportTests : IDisposable
         // Assert
         result.Success.Should().BeTrue("一過性の SQLITE_BUSY はリトライで吸収されるべき");
         insertAttempts.Should().BeGreaterThan(1, "リトライが行われたことを示す");
+        _retryDelay.Delays.Should().Equal(new[] { DbContext.LocalRetryDelays[0] },
+            "1 回だけ失敗させたので、バックオフの先頭の時間を 1 回だけ待つこと");
     }
 
     /// <summary>
@@ -517,6 +525,7 @@ public class LendingServiceHistoryImportTests : IDisposable
         using var lockManager = new CardLockManager(NullLogger<CardLockManager>.Instance);
         using var dbContext = new ScopeCapturingDbContext(":memory:");
         dbContext.InitializeDatabase();
+        var retryDelay = RecordingRetryDelay.AttachTo(dbContext);
 
         using (var lease = await dbContext.LeaseConnectionAsync())
         using (var seed = lease.Connection.CreateCommand())
@@ -567,6 +576,8 @@ public class LendingServiceHistoryImportTests : IDisposable
         result.Success.Should().BeTrue(
             "ロールバックの二次例外が本来の SQLITE_BUSY を置き換えると、リトライが働かず失敗で確定する");
         insertAttempts.Should().BeGreaterThan(1, "リトライが行われたことを示す");
+        retryDelay.Delays.Should().Equal(new[] { DbContext.LocalRetryDelays[0] },
+            "1 回だけ失敗させたので、バックオフの先頭の時間を 1 回だけ待つこと");
 
         using var countLease = await dbContext.LeaseConnectionAsync();
         using var countCommand = countLease.Connection.CreateCommand();

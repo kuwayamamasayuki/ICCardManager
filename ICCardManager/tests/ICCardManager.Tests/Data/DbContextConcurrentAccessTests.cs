@@ -8,6 +8,9 @@ using System.Threading;
 using System.Threading.Tasks;
 using FluentAssertions;
 using ICCardManager.Data;
+using ICCardManager.Tests.Infrastructure;
+using ICCardManager.Tests.Infrastructure.Timing;
+using Microsoft.Extensions.Logging;
 using Xunit;
 
 namespace ICCardManager.Tests.Data;
@@ -222,6 +225,7 @@ public class DbContextConcurrentAccessTests : IDisposable
         // Arrange
         using var dbContext = new DbContext(_dbPath);
         dbContext.InitializeDatabase();
+        var retryDelay = RecordingRetryDelay.AttachTo(dbContext);
         using var lease = dbContext.LeaseConnection();
         var conn = lease.Connection;
         using var createCmd = conn.CreateCommand();
@@ -246,6 +250,9 @@ public class DbContextConcurrentAccessTests : IDisposable
         // Assert
         result.Should().Be("success");
         attemptCount.Should().Be(3, "2回のBUSYエラー後、3回目で成功するべき");
+        retryDelay.Delays.Should().Equal(
+            new[] { DbContext.LocalRetryDelays[0], DbContext.LocalRetryDelays[1] },
+            "失敗した 2 回の後にだけ、ローカルモードのバックオフの先頭から順に待つこと");
     }
 
     /// <summary>
@@ -256,6 +263,7 @@ public class DbContextConcurrentAccessTests : IDisposable
     public async Task ExecuteWithRetryAsync_LOCKED発生時にリトライして成功すること()
     {
         using var dbContext = new DbContext(_dbPath);
+        RecordingRetryDelay.AttachTo(dbContext);
         var attemptCount = 0;
 
         var result = await dbContext.ExecuteWithRetryAsync(async () =>
@@ -284,6 +292,8 @@ public class DbContextConcurrentAccessTests : IDisposable
         // Issue #1559: UNCパス指定で共有モードを発動させ、リトライ回数のみを検証
         using var dbContext = new DbContext(@"\\server\share\retry_test.db");
         dbContext.IsSharedMode.Should().BeTrue("UNCパス指定時は共有モード");
+        // Issue #2108: バックオフ（合計約 8.7 秒）を実際に待たず、要求された待機時間を記録する
+        var retryDelay = RecordingRetryDelay.AttachTo(dbContext);
 
         var attemptCount = 0;
         var act = () => dbContext.ExecuteWithRetryAsync(async () =>
@@ -296,6 +306,16 @@ public class DbContextConcurrentAccessTests : IDisposable
         await act.Should().ThrowAsync<SQLiteException>();
         // 初回 + 5回リトライ = 6回
         attemptCount.Should().Be(6, "共有モードでは最大5回のリトライ（初回+5回）");
+
+        // 共有モードの待機は「基本待機 + ジッター（0 以上、基本待機の半分未満）」
+        retryDelay.Delays.Should().HaveCount(DbContext.SharedRetryDelays.Length,
+            "最後の失敗の後は待たずに例外を返すため、待機はリトライの回数だけ");
+        for (var i = 0; i < DbContext.SharedRetryDelays.Length; i++)
+        {
+            var baseDelay = DbContext.SharedRetryDelays[i];
+            retryDelay.Delays[i].Should().BeInRange(baseDelay, baseDelay + (baseDelay / 2) - 1,
+                $"{i + 1} 回目の待機は共有モードのバックオフ {baseDelay}ms にジッターを加えた値であること");
+        }
     }
 
     /// <summary>
@@ -306,6 +326,8 @@ public class DbContextConcurrentAccessTests : IDisposable
     public async Task ExecuteWithRetryAsync_ローカルモードで最大3回リトライすること()
     {
         using var dbContext = new DbContext();
+        // Issue #2108: バックオフ（合計 2.6 秒）を実際に待たず、要求された待機時間を記録する
+        var retryDelay = RecordingRetryDelay.AttachTo(dbContext);
 
         var attemptCount = 0;
         var act = () => dbContext.ExecuteWithRetryAsync(async () =>
@@ -318,6 +340,36 @@ public class DbContextConcurrentAccessTests : IDisposable
         await act.Should().ThrowAsync<SQLiteException>();
         // 初回 + 3回リトライ = 4回
         attemptCount.Should().Be(4, "ローカルモードでは最大3回のリトライ（初回+3回）");
+        retryDelay.Delays.Should().Equal(DbContext.LocalRetryDelays,
+            "ローカルモードはジッターを加えず、バックオフの値をそのまま順に待つこと");
+    }
+
+    /// <summary>
+    /// 本番の既定の待機（<see cref="DbContext.RetryDelayAsync"/>）は、要求された時間を実際に待つこと。
+    /// </summary>
+    /// <remarks>
+    /// Issue #2108: リトライのテストは待機を記録器へ差し替えて実時間を使わない。その差し替え口の既定が
+    /// 待たない実装へ変わると、本番のバックオフが消えても差し替えたテストはすべて緑のままになるため、
+    /// 既定だけは実時間で確かめる（下限のみを見るので、遅いマシンでも揺れない）。
+    /// </remarks>
+    [Fact]
+    [Trait("Category", "Unit")]
+    public async Task RetryDelayAsync_既定は要求された時間を実際に待つこと()
+    {
+        using var dbContext = new DbContext(_dbPath);
+        const int RequestedMilliseconds = 100;
+
+        var stopwatch = System.Diagnostics.Stopwatch.StartNew();
+        await dbContext.RetryDelayAsync(RequestedMilliseconds, CancellationToken.None);
+        stopwatch.Stop();
+
+        // Task.Delay はタイマー分解能（約 15ms）ぶん早く完了し得るので、その分だけ下限を緩める
+        stopwatch.ElapsedMilliseconds.Should().BeGreaterOrEqualTo(RequestedMilliseconds - 20);
+
+        using var cts = new CancellationTokenSource();
+        cts.Cancel();
+        var canceled = () => dbContext.RetryDelayAsync(RequestedMilliseconds, cts.Token);
+        await canceled.Should().ThrowAsync<OperationCanceledException>("キャンセルされた待機は中断されること");
     }
 
     /// <summary>
@@ -328,6 +380,7 @@ public class DbContextConcurrentAccessTests : IDisposable
     public async Task ExecuteWithRetryAsync_キャンセルトークンでリトライを中断できること()
     {
         using var dbContext = new DbContext(_dbPath);
+        var retryDelay = RecordingRetryDelay.AttachTo(dbContext);
         using var cts = new CancellationTokenSource();
         var attemptCount = 0;
 
@@ -343,6 +396,9 @@ public class DbContextConcurrentAccessTests : IDisposable
         }, cts.Token);
 
         await act.Should().ThrowAsync<OperationCanceledException>();
+        attemptCount.Should().Be(2, "キャンセル後はリトライの待機で中断し、3 回目を試行しないこと");
+        retryDelay.Delays.Should().Equal(new[] { DbContext.LocalRetryDelays[0] },
+            "待機したのはキャンセル前の 1 回だけ（キャンセル済みのトークンでの待機は即座に中断される）");
     }
 
     #endregion
@@ -414,16 +470,31 @@ public class DbContextConcurrentAccessTests : IDisposable
     }
 
     /// <summary>
-    /// Vacuum失敗時にfalseを返すこと（例外をスローしない）
+    /// Vacuum: 他接続が読み取りトランザクションを保持していると、例外ではなく false を返し、
+    /// 待てば解消する失敗（Busy）として Warning を残すこと
     /// </summary>
+    /// <remarks>
+    /// Issue #2108: 旧版は <c>NotThrow</c> しか見ておらず（「成否はタイミング依存」と注記）、
+    /// そのうえ busy_timeout を毎回待っていた（全件実行で約 37 秒）。読み取りトランザクションが共有ロックを
+    /// 保持している間、VACUUM は排他ロックを取れないので失敗は確定的に起きる。
+    /// busy_timeout を 0 にして待ちを縮め（全件実行で数秒。System.Data.SQLite 自身の再試行ぶんは残る）、
+    /// 戻り値とログの両方を表明する。
+    /// </remarks>
     [Fact]
     [Trait("Category", "Integration")]
-    public void Vacuum_他接続がアクティブでも例外をスローしないこと()
+    public void Vacuum_他接続が読み取り中ならfalseを返しWarningを残すこと()
     {
-        using var dbContext1 = new DbContext(_dbPath);
+        var logger = new RecordingLogger<DbContext>();
+        using var dbContext1 = new DbContext(_dbPath, logger);
         dbContext1.InitializeDatabase();
+        using (var lease = dbContext1.LeaseConnection())
+        using (var pragma = lease.Connection.CreateCommand())
+        {
+            pragma.CommandText = "PRAGMA busy_timeout = 0;";
+            pragma.ExecuteNonQuery();
+        }
 
-        // 2つ目の接続でトランザクションを開きっぱなしにする
+        // 2つ目の接続でトランザクションを開きっぱなしにする（SELECT で共有ロックを取る）
         using var conn2 = new SQLiteConnection($"Data Source={_dbPath}");
         conn2.Open();
         using var tx = conn2.BeginTransaction();
@@ -432,9 +503,17 @@ public class DbContextConcurrentAccessTests : IDisposable
         cmd.CommandText = "SELECT COUNT(*) FROM sqlite_master";
         cmd.ExecuteScalar();
 
-        // 例外がスローされないことを確認（VACUUMの成否はタイミング依存）
-        var act = () => dbContext1.Vacuum();
-        act.Should().NotThrow("Vacuumは他接続がアクティブでも例外ではなくboolを返すべき");
+        var result = dbContext1.Vacuum();
+
+        result.Should().BeFalse("共有ロックが保持されている間は VACUUM できない。例外ではなく false で返すこと");
+        logger.Entries.Should().ContainSingle(e => e.Level == LogLevel.Warning, logger.FormatEntries())
+            .Which.Message.Should().Contain("ResultCode=Busy",
+                "待てば解消する失敗として記録し、恒久的な失敗（Error）と区別すること");
+        logger.Entries.Should().NotContain(e => e.Level == LogLevel.Error, logger.FormatEntries());
+
+        // 対の表明: 読み取りを終えれば、同じ DbContext で VACUUM できる（失敗の理由が他接続のロックだったこと）
+        tx.Commit();
+        dbContext1.Vacuum().Should().BeTrue(logger.FormatEntries());
     }
 
     #endregion

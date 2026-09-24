@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Data.SQLite;
 using System.Threading;
 using System.Threading.Tasks;
 using FluentAssertions;
@@ -6,6 +7,7 @@ using ICCardManager.Data;
 using ICCardManager.Data.Repositories;
 using ICCardManager.Infrastructure.Caching;
 using ICCardManager.Models;
+using ICCardManager.Tests.Infrastructure.Timing;
 using Microsoft.Extensions.Options;
 using Moq;
 using Xunit;
@@ -275,6 +277,60 @@ public class DbContextMaintenanceTransactionTests : IDisposable
         // 対の表明: リースを解放すれば次回は削除できる（恒久的に止まらない）
         var (retryCount, _) = await Task.Run(() => _dbContext.CleanupOldData());
         retryCount.Should().Be(1);
+    }
+
+    /// <summary>
+    /// 一過性のロック競合（SQLITE_BUSY）は、ローカルモードのバックオフで待ってから再試行し、削除を完了すること。
+    /// </summary>
+    /// <remarks>
+    /// Issue #2108: 待機は <see cref="DbContext.RetryDelayAsync"/> を通る（同期版でも差し替え口は 1 つ）。
+    /// 記録器へ差し替えて、実時間を使わずに「何ミリ秒待とうとしたか」を表明する。
+    /// </remarks>
+    [Fact]
+    public async Task CleanupOldData_一過性のロック競合はバックオフで待って再試行すること()
+    {
+        await _ledgerRepository.InsertAsync(CreateLedger(DateTime.Now.AddYears(-7), "7年前のデータ"));
+        var retryDelay = RecordingRetryDelay.AttachTo(_dbContext);
+        var attempts = 0;
+        _dbContext.MaintenanceTransactionOpenedHook = () =>
+        {
+            if (++attempts == 1)
+            {
+                throw new SQLiteException(SQLiteErrorCode.Busy, "database is locked");
+            }
+        };
+
+        var (ledgerCount, _) = await Task.Run(() => _dbContext.CleanupOldData());
+
+        ledgerCount.Should().Be(1, "2 回目の試行で削除が完了すること");
+        attempts.Should().Be(2);
+        retryDelay.Delays.Should().Equal(new[] { DbContext.LocalRetryDelays[0] },
+            "失敗した 1 回の後にだけ、バックオフの先頭の時間を待つこと");
+    }
+
+    /// <summary>
+    /// 対の表明: ロック競合が解けなければ、バックオフを使い切ってから例外を返し、何も削除しないこと。
+    /// </summary>
+    [Fact]
+    public async Task CleanupOldData_ロック競合が解けなければバックオフを使い切って例外を返すこと()
+    {
+        await _ledgerRepository.InsertAsync(CreateLedger(DateTime.Now.AddYears(-7), "7年前のデータ"));
+        var retryDelay = RecordingRetryDelay.AttachTo(_dbContext);
+        var attempts = 0;
+        _dbContext.MaintenanceTransactionOpenedHook = () =>
+        {
+            attempts++;
+            throw new SQLiteException(SQLiteErrorCode.Busy, "database is locked");
+        };
+
+        var act = () => Task.Run(() => _dbContext.CleanupOldData());
+
+        await act.Should().ThrowAsync<SQLiteException>();
+        attempts.Should().Be(DbContext.LocalRetryDelays.Length + 1, "初回 + バックオフの回数だけ再試行すること");
+        retryDelay.Delays.Should().Equal(DbContext.LocalRetryDelays);
+        _dbContext.MaintenanceTransactionOpenedHook = null;
+        (await CountAsync("SELECT COUNT(*) FROM ledger WHERE summary = '7年前のデータ'"))
+            .Should().Be(1, "失敗した試行はすべてロールバックされていること");
     }
 
     private async Task<long> CountAsync(string sql)

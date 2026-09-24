@@ -153,15 +153,15 @@ public class DomainBoundaryConventionTests
     [Fact]
     public void DataLayer_DoesNotReferenceTransitSpecificLogic()
     {
-        var dataRoot = Path.Combine(GetSourceRoot(), "Data");
+        var dataRoot = Path.Combine(ProductionSourceFiles.Root, "Data");
         Directory.Exists(dataRoot).Should().BeTrue(
             $"Data ディレクトリが見つからない: {dataRoot}。テストのソースルート解決ロジックを確認してください。");
 
         var violations = new List<string>();
-        foreach (var csPath in EnumerateProductionSourceFiles(dataRoot))
+        foreach (var file in ProductionSourceFiles.CSharp.Under("Data"))
         {
             foreach (var hit in FindSymbolsInCode(
-                csPath, TransitLogicSymbolsForbiddenInDataLayer, RemoveAllowedDataLayerCalls))
+                file, TransitLogicSymbolsForbiddenInDataLayer, RemoveAllowedDataLayerCalls))
             {
                 violations.Add(hit);
             }
@@ -212,15 +212,14 @@ public class DomainBoundaryConventionTests
     /// </summary>
     /// <remarks>
     /// パスの綴り誤りやディレクトリ移動でソースルート解決が壊れると、
-    /// <c>EnumerateProductionSourceFiles</c> が空を返して 3 テストすべてが<b>無条件に green</b> になる。
+    /// <c>ProductionSourceFiles</c> の列挙が空を返して 3 テストすべてが<b>無条件に green</b> になる。
     /// 規約テストの最も危険な壊れ方（`.claude/rules/testing.md`「通るが目的を果たさないテスト」）なので、
     /// 走査対象の実在と、境界内に検査対象記号が<b>実際に存在すること</b>を併せて検証する。
     /// </remarks>
     [Fact]
     public void BoundaryScan_ActuallyCoversProductionSources()
     {
-        var sourceRoot = GetSourceRoot();
-        var allFiles = EnumerateProductionSourceFiles(sourceRoot).ToList();
+        var allFiles = ProductionSourceFiles.CSharp;
 
         allFiles.Should().HaveCountGreaterThan(100,
             $"src/ICCardManager 配下の .cs ファイルが十分に走査されていない（{allFiles.Count} 件）。" +
@@ -228,9 +227,9 @@ public class DomainBoundaryConventionTests
 
         // 検査対象の記号が境界内に実在することを確認する。
         // 記号がリネーム・削除されると 3 テストは「違反ゼロ」で green のまま無意味になる。
-        var cardReaderRoot = Path.Combine(sourceRoot, "Infrastructure", "CardReader");
-        var cardReaderSources = EnumerateProductionSourceFiles(cardReaderRoot)
-            .Select(File.ReadAllText)
+        var cardReaderRoot = Path.Combine(ProductionSourceFiles.Root, "Infrastructure", "CardReader");
+        var cardReaderSources = ProductionSourceFiles.CSharp.Under(CardReaderInfrastructureDir)
+            .Select(f => f.Text)
             .ToList();
 
         cardReaderSources.Should().NotBeEmpty(
@@ -259,18 +258,16 @@ public class DomainBoundaryConventionTests
         IReadOnlyList<string> symbols,
         Func<string, bool> isAllowed)
     {
-        var sourceRoot = GetSourceRoot();
         var violations = new List<string>();
 
-        foreach (var csPath in EnumerateProductionSourceFiles(sourceRoot))
+        foreach (var file in ProductionSourceFiles.CSharp)
         {
-            var relativePath = MakeRelativeToSourceRoot(csPath);
-            if (isAllowed(relativePath))
+            if (isAllowed(file.RelativePath))
             {
                 continue;
             }
 
-            violations.AddRange(FindSymbolsInCode(csPath, symbols));
+            violations.AddRange(FindSymbolsInCode(file, symbols));
         }
 
         return violations;
@@ -284,10 +281,10 @@ public class DomainBoundaryConventionTests
     /// 違反として報告する行テキストは変換前の原文を使う。
     /// </param>
     private static IEnumerable<string> FindSymbolsInCode(
-        string csPath, IReadOnlyList<string> symbols, Func<string, string>? sanitizeLine = null)
+        ProductionSourceFiles.SourceFile file, IReadOnlyList<string> symbols, Func<string, string>? sanitizeLine = null)
     {
-        var codeLines = StripComments(File.ReadAllText(csPath)).Split('\n');
-        var relativePath = MakeRelativeToSourceRoot(csPath);
+        var codeLines = StripComments(file.Text).Split('\n');
+        var relativePath = file.RelativePath;
 
         for (int i = 0; i < codeLines.Length; i++)
         {
@@ -304,40 +301,10 @@ public class DomainBoundaryConventionTests
         }
     }
 
-    /// <summary>
-    /// 本番ソース（bin / obj 配下の生成物を除く .cs ファイル）を列挙する。
-    /// </summary>
-    private static IEnumerable<string> EnumerateProductionSourceFiles(string root)
-    {
-        if (!Directory.Exists(root))
-        {
-            yield break;
-        }
-
-        foreach (var path in Directory.EnumerateFiles(root, "*.cs", SearchOption.AllDirectories))
-        {
-            if (IsGeneratedOutput(path))
-            {
-                continue;
-            }
-
-            yield return path;
-        }
-    }
-
-    /// <summary>
-    /// ビルド生成物（bin / obj）配下かどうか。
-    /// これを除外しないと XAML から生成された .g.cs が走査対象に入り、
-    /// コンポジションルートの DI 登録が生成コード側でも重複検出される。
-    /// </summary>
-    private static bool IsGeneratedOutput(string fullPath)
-    {
-        var relative = MakeRelativeToSourceRoot(fullPath);
-        var segments = relative.Split(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
-        return segments.Any(s =>
-            string.Equals(s, "bin", StringComparison.OrdinalIgnoreCase)
-            || string.Equals(s, "obj", StringComparison.OrdinalIgnoreCase));
-    }
+    // Issue #2108: 本番ソースの列挙・読み込みは ProductionSourceFiles（プロセスで 1 回だけ）へ寄せた。
+    // 旧実装はファイルごとに GetSourceRoot()（親方向の探索）を繰り返し、obj 配下の生成物まで列挙してから捨てていた。
+    // bin / obj を除外しないと XAML から生成された .g.cs が走査対象に入り、コンポジションルートの DI 登録が
+    // 生成コード側でも重複検出される — この除外は ProductionSourceFiles が「降りない」形で持つ。
 
     private static bool IsUnderCardReaderInfrastructure(string relativePath) =>
         relativePath.Replace('/', '\\').StartsWith(CardReaderInfrastructureDir + '\\', StringComparison.OrdinalIgnoreCase);
@@ -479,35 +446,5 @@ public class DomainBoundaryConventionTests
         }
 
         return result.ToString();
-    }
-
-    // ------------------------------------------------------------------
-    // パス解決（UserFacingTextConventionTests と同じ方式）
-    // ------------------------------------------------------------------
-
-    private static string GetSourceRoot()
-    {
-        var dir = new DirectoryInfo(AppContext.BaseDirectory);
-        while (dir != null && !File.Exists(Path.Combine(dir.FullName, "ICCardManager.sln")))
-        {
-            dir = dir.Parent;
-        }
-
-        if (dir == null)
-        {
-            throw new InvalidOperationException(
-                $"ICCardManager.sln が AppContext.BaseDirectory ({AppContext.BaseDirectory}) から見つからない。" +
-                "テスト実行ディレクトリの構造を確認してください。");
-        }
-
-        return Path.Combine(dir.FullName, "src", "ICCardManager");
-    }
-
-    private static string MakeRelativeToSourceRoot(string fullPath)
-    {
-        var root = GetSourceRoot();
-        return fullPath.StartsWith(root, StringComparison.Ordinal)
-            ? fullPath.Substring(root.Length).TrimStart(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)
-            : fullPath;
     }
 }

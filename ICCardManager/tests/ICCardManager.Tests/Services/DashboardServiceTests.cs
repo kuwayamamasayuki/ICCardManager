@@ -9,6 +9,7 @@ using ICCardManager.Models;
 using ICCardManager.Services;
 using ICCardManager.ViewModels;
 using Moq;
+using ICCardManager.Tests.Infrastructure;
 using Xunit;
 
 namespace ICCardManager.Tests.Services;
@@ -501,50 +502,9 @@ public class DashboardServiceTests
             "1000 > 0 なので警告対象外");
     }
 
-    /// <summary>
-    /// Issue #1261: 長期貸出中カード（返却期限超過の実運用ケース）も、
-    /// IsLent=true + LentStaffName + LastUsageDate が正しく表示されて可視化されること。
-    /// </summary>
-    /// <remarks>
-    /// DashboardService は明示的な「返却期限超過フラグ」を持たないが、
-    /// 貸出中カードはダッシュボード上で IsLent=true かつ LentStaffName 付きで
-    /// 常に表示され、ユーザーが長期貸出を目視確認できる設計になっている。
-    /// 本テストは「長期貸出でもカードが消えない／LentStaffName が復元される」ことを保証する。
-    /// </remarks>
-    [Fact]
-    public async Task BuildDashboardAsync_長期貸出中カードもLentStaffName付きで可視化される()
-    {
-        // Arrange: 60日前から貸出中のカード（返却期限超過相当）
-        var cards = new[]
-        {
-            new IcCard
-            {
-                CardIdm = "FFFF000000000001",
-                CardType = "はやかけん",
-                CardNumber = "H-001",
-                IsLent = true,
-                LastLentAt = DateTime.Now.AddDays(-60),
-                LastLentStaff = "STAFF00000000001"
-            }
-        };
-        var balances = new Dictionary<string, (int, DateTime?)>
-        {
-            ["FFFF000000000001"] = (1500, DateTime.Now.AddDays(-60))
-        };
-        var staff = new[] { new Staff { StaffIdm = "STAFF00000000001", Name = "長期利用者" } };
-        SetupRepositories(cards, balances, staff);
-
-        // Act
-        var result = await _service.BuildDashboardAsync(DashboardSortOrder.CardName);
-
-        // Assert
-        result.Items.Should().HaveCount(1, "長期貸出でもカードは消えず表示される");
-        var item = result.Items[0];
-        item.IsLent.Should().BeTrue();
-        item.LentStaffName.Should().Be("長期利用者",
-            "長期貸出中でも職員名が解決されて表示される（返却期限超過の可視化）");
-        item.LastUsageDate.Should().NotBeNull("最終利用日が表示される");
-    }
+    // Issue #2108: 「長期貸出中カードも LentStaffName 付きで可視化される」（Issue #1261）は、
+    // BuildDashboardAsync_カードと残高と職員名を結合すること と同じ入力・同じ表明の重複だったので削除した。
+    // DashboardService は貸出開始日（LastLentAt）を読まないため、「60 日前から貸出中」という条件は結果に影響しない。
 
     #endregion
 
@@ -558,49 +518,31 @@ public class DashboardServiceTests
         // 4 リポジトリを並列起動していたため、本テストでリポジトリ呼び出しの保持区間が
         // オーバーラップしないこと（最大同時実行数 ≦ 1）を検証する。
 
-        var activeCalls = 0;
-        var maxConcurrentCalls = 0;
-        var lockObj = new object();
-
-        async Task<T> InstrumentedAsync<T>(T value)
-        {
-            lock (lockObj)
-            {
-                activeCalls++;
-                if (activeCalls > maxConcurrentCalls)
-                    maxConcurrentCalls = activeCalls;
-            }
-            // 並列があれば検出されるよう少し滞留させる
-            await Task.Delay(20).ConfigureAwait(false);
-            lock (lockObj)
-            {
-                activeCalls--;
-            }
-            return value;
-        }
+        // Issue #2108: 計測器は AdminDashboardServiceTests と共通（Tests/Infrastructure/ConcurrencyProbe）
+        var probe = new ConcurrencyProbe();
 
         _settingsRepositoryMock
             .Setup(s => s.GetAppSettingsAsync())
-            .Returns(() => InstrumentedAsync(new AppSettings { WarningBalance = 1000 }));
+            .Returns(() => probe.TrackAsync(new AppSettings { WarningBalance = 1000 }));
         _cardRepositoryMock
             .Setup(c => c.GetAllAsync())
-            .Returns(() => InstrumentedAsync<IEnumerable<IcCard>>(new List<IcCard>
+            .Returns(() => probe.TrackAsync<IEnumerable<IcCard>>(new List<IcCard>
             {
                 new IcCard { CardIdm = "0102030405060708", CardType = "はやかけん", CardNumber = "H-001" }
             }));
         _ledgerRepositoryMock
             .Setup(l => l.GetAllLatestBalancesAsync())
-            .Returns(() => InstrumentedAsync(
+            .Returns(() => probe.TrackAsync(
                 new Dictionary<string, (int Balance, DateTime? LastUsageDate)>()));
         _staffRepositoryMock
             .Setup(s => s.GetAllAsync())
-            .Returns(() => InstrumentedAsync<IEnumerable<Staff>>(new List<Staff>()));
+            .Returns(() => probe.TrackAsync<IEnumerable<Staff>>(new List<Staff>()));
 
         // Act
         await _service.BuildDashboardAsync(DashboardSortOrder.CardName);
 
         // Assert
-        maxConcurrentCalls.Should().Be(1,
+        probe.MaxConcurrentCalls.Should().Be(1,
             "BuildDashboardAsync は同一 SQLiteConnection 上の SQLITE_MISUSE を防ぐため、" +
             "リポジトリ呼び出しを直列化する（Issue #1452）");
     }

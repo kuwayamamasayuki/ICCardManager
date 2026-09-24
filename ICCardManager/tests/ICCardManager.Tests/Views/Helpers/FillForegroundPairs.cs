@@ -227,16 +227,10 @@ internal static class FillForegroundPairs
     }
 
     /// <summary>本番 XAML（コメント除去済み）をファイル名付きで列挙する。</summary>
+    /// <remarks>Issue #2108: 読み込みは <see cref="ProductionSourceFiles"/>（プロセスで 1 回だけ）を使う。</remarks>
     internal static IEnumerable<(string Name, string Text)> EnumerateProductionXaml()
-    {
-        var root = TestPaths.GetProductionSourceRoot();
-        var separator = Path.DirectorySeparatorChar;
-
-        return Directory.GetFiles(root, "*.xaml", SearchOption.AllDirectories)
-            .Where(p => p.IndexOf(separator + "obj" + separator, StringComparison.Ordinal) < 0
-                        && p.IndexOf(separator + "bin" + separator, StringComparison.Ordinal) < 0)
-            .Select(p => (Path.GetFileName(p), XamlElementInspection.StripXmlComments(File.ReadAllText(p))));
-    }
+        => ProductionSourceFiles.Xaml
+            .Select(f => (f.Name, XamlElementInspection.StripXmlComments(f.Text)));
 
     /// <summary>
     /// 入れ子のブロック（<see cref="SetterBlockTags"/>）を空白で潰す。改行は残して行番号を保つ。

@@ -18,7 +18,7 @@ namespace ICCardManager.Tests.ViewModels;
 /// <summary>
 /// CardManageViewModelのメッセージング機能テスト（Issue #852）
 /// </summary>
-public class CardManageViewModelMessagingTests
+public class CardManageViewModelMessagingTests : IDisposable
 {
     private readonly Mock<ICardRepository> _cardRepositoryMock;
     private readonly Mock<ILedgerRepository> _ledgerRepositoryMock;
@@ -29,6 +29,8 @@ public class CardManageViewModelMessagingTests
     private readonly Mock<IDialogService> _dialogServiceMock;
     private readonly Mock<IStaffAuthService> _staffAuthServiceMock;
     private readonly LendingService _lendingService;
+    private readonly DbContext _dbContext;
+    private readonly CardLockManager _lockManager;
     private readonly WeakReferenceMessenger _messenger;
     private readonly CardManageViewModel _viewModel;
 
@@ -47,17 +49,17 @@ public class CardManageViewModelMessagingTests
 
         var settingsRepositoryMock = new Mock<ISettingsRepository>();
         var summaryGenerator = new SummaryGenerator();
-        var lockManager = new CardLockManager(NullLogger<CardLockManager>.Instance);
-        var dbContext = new DbContext(":memory:");
-        dbContext.InitializeDatabase();
+        _lockManager = new CardLockManager(NullLogger<CardLockManager>.Instance);
+        _dbContext = new DbContext(":memory:");
+        _dbContext.InitializeDatabase();
         _lendingService = new LendingService(
-            dbContext,
+            _dbContext,
             _cardRepositoryMock.Object,
             _staffRepositoryMock.Object,
             _ledgerRepositoryMock.Object,
             settingsRepositoryMock.Object,
             summaryGenerator,
-            lockManager,
+            _lockManager,
             Options.Create(new AppOptions()),
             NullLogger<LendingService>.Instance);
 
@@ -76,6 +78,17 @@ public class CardManageViewModelMessagingTests
             new ICCardManager.Tests.Infrastructure.Timing.RecordingDispatcherService(),
             Mock.Of<INavigationService>(),
             () => throw new InvalidOperationException("このテストは貸出記録作成ダイアログを使用しません"));
+    }
+
+    /// <summary>
+    /// Issue #2108: テストごとに作るインメモリ DB の接続とロックの待機ハンドルを解放する
+    /// （旧版は Dispose せず、ファイナライザーに任せていた）。
+    /// </summary>
+    public void Dispose()
+    {
+        _dbContext.Dispose();
+        _lockManager.Dispose();
+        GC.SuppressFinalize(this);
     }
 
     /// <summary>

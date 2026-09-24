@@ -43,8 +43,9 @@ public class ConnectionDiagnosticsServiceTests : IDisposable
 
     public ConnectionDiagnosticsServiceTests()
     {
+        // Issue #2108: DbContext はクラスモックの BackupService を組み立てるためだけに渡す。
+        // 診断はすべて差し替えた IDatabaseInfo 等を読み、スキーマを使わないので初期化しない
         _dbContext = new DbContext(":memory:");
-        _dbContext.InitializeDatabase();
 
         _backupService = new Mock<BackupService>(
             _dbContext,

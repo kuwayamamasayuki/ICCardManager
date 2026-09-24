@@ -39,15 +39,9 @@ public class DepartmentTypeTests
         result.Should().Be("旅費によりチャージ");
     }
 
-    [Fact]
-    public void GetChargeSummary_NoParameter_DefaultsToMayorOffice()
-    {
-        // Act
-        var result = SummaryGenerator.GetChargeSummary(DepartmentType.MayorOffice);
-
-        // Assert
-        result.Should().Be("役務費によりチャージ");
-    }
+    // Issue #2108: 「引数なしなら市長事務部局」と名乗りながら MayorOffice を明示して呼んでいた
+    // 重複テスト（GetChargeSummary_MayorOffice_Returns役務費 と同一）を削除した。GetChargeSummary に
+    // 引数なしのオーバーロードは無い。既定の部署種別は Generate_DefaultConstructor_ChargeOnly_Returns役務費 が見る。
 
     #endregion
 

@@ -37,7 +37,6 @@ public class CsvImportServiceTests : IDisposable
     /// <summary>Issue #1955: 摘要の再生成が参照する部署種別の供給元。</summary>
     private readonly Mock<ISettingsRepository> _settingsRepositoryMock;
     private readonly SQLiteConnection _connection;
-    private readonly DbContext _realDbContext;
     private readonly CsvImportService _service;
 
     // UTF-8 with BOM (Excel対応)
@@ -72,7 +71,6 @@ public class CsvImportServiceTests : IDisposable
         var connectionString = "Data Source=:memory:";
         _connection = new SQLiteConnection(connectionString);
         _connection.Open();
-        _realDbContext = new DbContext(":memory:");
         var noOpLease = new ConnectionLease(_connection, () => { });
         var noOpTransaction = _connection.BeginTransaction();
         var transactionScope = new ICCardManager.Data.TransactionScope(noOpLease, noOpTransaction);
@@ -98,7 +96,6 @@ public class CsvImportServiceTests : IDisposable
     {
         // SQLite接続を閉じる
         _connection?.Dispose();
-        _realDbContext?.Dispose();
 
         // テスト用ディレクトリを削除
         try
