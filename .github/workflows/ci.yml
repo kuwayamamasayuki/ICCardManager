@@ -41,25 +41,37 @@ jobs:
       run:
         working-directory: ICCardManager
 
+    # アクションはタグではなく commit SHA で固定する（全ワークフロー共通。Issue #2117）。タグは作者が
+    # 別のコミットへ付け替えられるため、@v7 のままでは付け替えられた中身がそのまま実行される
+    # （release.yml は contents: write の権限で配布物を作る）。末尾の「# vX.Y.Z」は Dependabot が
+    # SHA と一緒に書き換える目印なので消さないこと。
     steps:
     - name: Checkout
-      uses: actions/checkout@v7
+      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
     - name: Setup .NET
-      uses: actions/setup-dotnet@v6
+      uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
       with:
         dotnet-version: ${{ env.DOTNET_VERSION }}
 
+    # 復元はロックファイル（packages.lock.json）どおりに行い、食い違えば失敗させる（全ワークフロー共通。Issue #2117）。
+    # 素の restore は食い違いを黙ってロックファイルの書き換えで吸収するため、ロックファイルが何も固定しなくなる
+    # （#2117 の時点で、本体の ClosedXML 更新にテストと DebugDataViewer のロックファイルが追随していなかった）。
+    # NU1004 で落ちたら、手元で dotnet restore --force-evaluate を実行し、変わったロックファイルをコミットする。
+    # 必ず Windows の dotnet.exe で実行すること — 本体と DebugDataViewer のロックファイルの RID の節
+    # （.NETFramework,Version=v4.8/win7-x86）は Windows でしか生成されず、Linux（WSL の dotnet・Dependabot）で
+    # 作ると節が落ちて NU1004 になる。
     - name: Restore dependencies
-      run: dotnet restore
+      run: dotnet restore --locked-mode
 
     - name: Build
       run: dotnet build --no-restore --configuration ${{ matrix.configuration }}
 
-    # カバレッジは送信する Release でだけ収集する（Issue #2116）。送信ステップ（Upload coverage reports）が
-    # Release に限られているため、Debug で収集しても時間を使うだけになる。
+    # カバレッジは送信・報告する Release でだけ収集する（Issue #2116）。送信ステップ（Upload coverage reports）と
+    # 報告ステップ（Report coverage）が Release に限られているため、Debug で収集しても時間を使うだけになる。
+    # 収集の設定（マイグレーション・自動生成コードの除外）は coverlet.runsettings に置く（Issue #2117）。
     - name: Run tests
-      run: dotnet test --no-build --configuration ${{ matrix.configuration }} --verbosity normal --filter "Category!=UI" --blame-hang-timeout 5m --blame-hang-dump-type none ${{ matrix.configuration == 'Release' && '--collect:"XPlat Code Coverage" --results-directory ./coverage' || '' }}
+      run: dotnet test --no-build --configuration ${{ matrix.configuration }} --verbosity normal --filter "Category!=UI" --blame-hang-timeout 5m --blame-hang-dump-type none ${{ matrix.configuration == 'Release' && '--collect:"XPlat Code Coverage" --settings tests/ICCardManager.Tests/coverlet.runsettings --results-directory ./coverage' || '' }}
 
     # UITests はソリューション単位の実行から自分を外している（csproj の BuildingSolutionFile 条件）ため、
     # 上の「Run tests」には含まれない。GUI 不要のテスト（Category=UI を持たないもの）を回すには
@@ -69,11 +81,40 @@ jobs:
 
     - name: Upload coverage reports
       if: matrix.configuration == 'Release'
-      uses: codecov/codecov-action@v7
+      uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
       with:
         directory: ./ICCardManager/coverage
         fail_ci_if_error: false
       continue-on-error: true
+
+    # カバレッジは閾値で合否を決めず、実測値をジョブのサマリーへ出すだけにする（Issue #2117）。
+    # 行カバレッジは「テストが何を表明しているか」を測らない（.claude/rules/testing.md「カバレッジだけでなく、
+    # 実際の品質を重視する」）。閾値を置くと、表明の無いテストで数字を満たす方向へ誘導する。
+    # 一方で数字が誰の目にも触れない状態も避ける — 上の codecov への送信はトークンが無く、
+    # 「Token required」で毎回失敗していた（continue-on-error で緑のまま）。
+    - name: Report coverage
+      if: matrix.configuration == 'Release'
+      shell: pwsh
+      run: |
+        $report = Get-ChildItem -Path ./coverage -Recurse -Filter coverage.cobertura.xml | Select-Object -First 1
+        if (-not $report) {
+          Write-Host "::warning::カバレッジの結果（coverage.cobertura.xml）が見つかりません。Run tests の --collect と --results-directory を確認してください。"
+          exit 0
+        }
+        [xml]$xml = Get-Content -LiteralPath $report.FullName -Raw
+        $invariant = [Globalization.CultureInfo]::InvariantCulture
+        $line = [math]::Round([double]::Parse($xml.coverage.'line-rate', $invariant) * 100, 1)
+        $branch = [math]::Round([double]::Parse($xml.coverage.'branch-rate', $invariant) * 100, 1)
+        Write-Host "行カバレッジ: $line% / 分岐カバレッジ: $branch%"
+        @(
+          '### カバレッジ（Release）'
+          ''
+          '| 行 | 分岐 |'
+          '|---|---|'
+          "| $line% | $branch% |"
+          ''
+          '閾値による合否判定は行いません（Issue #2117）。'
+        ) -join "`n" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
 
   code-quality:
     runs-on: windows-latest
@@ -85,18 +126,18 @@ jobs:
 
     steps:
     - name: Checkout
-      uses: actions/checkout@v7
+      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
     - name: Setup .NET
-      uses: actions/setup-dotnet@v6
+      uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
       with:
         dotnet-version: ${{ env.DOTNET_VERSION }}
 
     - name: Restore dependencies
-      run: dotnet restore
+      run: dotnet restore --locked-mode
 
     - name: Check code format
-      run: dotnet format --verify-no-changes --verbosity diagnostic
+      run: dotnet format --no-restore --verify-no-changes --verbosity diagnostic
       continue-on-error: true
 
     # ビルド警告ゼロを維持する（.claude/rules/development-conventions.md、Issue #1786）。
