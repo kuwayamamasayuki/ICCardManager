@@ -51,6 +51,7 @@ WSL2では "/mnt/c/Program Files/dotnet/dotnet.exe" を使用すること。
 | `async-configureawait.md` | 条件付き（`Services/**`、`Data/**`、`Infrastructure/**`、`Common/**`） | async/ConfigureAwait(false) 規約（Service 層のみ付与、ViewModels/Views/tests は付けない、CA2007、Issue #1287） |
 | `migrations.md` | 条件付き（`Data/Migrations/**`、02_DB設計書） | マイグレーション作成規約（冪等性必須、AddColumnIfNotExists 引数検証、新規マイグレーション追加手順） |
 | `domain-boundaries.md` | 条件付き（`Services/**`、`Models/**`、`Infrastructure/**`、05_クラス設計書） | 交通系固有ロジックの境界（3リング、新しいロジックの置き場所の決定木、SummaryGenerator の汎用/固有の同居、Issue #1695） |
+| `summary-generation.md` | 条件付き（`SummaryGenerator`・`SummaryGenerationContext`・`LedgerMergeService`・`LedgerRowEditViewModel`・`BusStopInputViewModel`・同テスト、04_機能設計書） | 摘要生成の実装規約（同一視グループの世代捕捉、乗継統合の候補探索、循環と往復の扱い、摘要からのバス停名抽出） |
 
 ## 参照ドキュメント
 
