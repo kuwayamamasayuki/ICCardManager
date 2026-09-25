@@ -38,6 +38,9 @@ public partial class SystemManageViewModel : ViewModelBase
     /// 単体テストが実モーダルに入って止まり、<b>スコープ内側の続行確認へ到達するテストが
     /// 1 件も書けない</b>ため。リストア完了の通知（スコープ外の 2 か所）は Issue #1837 で
     /// 併せて移行し、本クラスに <c>MessageBox</c> の直呼びは残っていない。
+    /// Issue #2130 で 2 つのリストア経路の本体を <c>ExecuteRestoreAsync</c> へ、完了通知を
+    /// <c>NotifyRestoreCompleted</c> へ寄せたため、スコープ内側の続行確認と完了通知の呼び出し箇所はそれぞれ 1 か所になった
+    /// （入口の確認は経路ごとに文言が違うため 2 か所のまま）。
     /// </remarks>
     private readonly IDialogService _dialogService;
 
@@ -368,7 +371,9 @@ public partial class SystemManageViewModel : ViewModelBase
                     SetStatus($"バックアップを作成しました: {Path.GetFileName(backupFilePath)}", false);
 
                     // Issue #1302: 監査ログ記録
-                    await _operationLogger.LogBackupAsync(backupFilePath);
+                    // Issue #2130: 記録の失敗を作成の失敗として通知せず、一覧の再読込まで進む
+                    // （TryLogBackupAsync の remarks 参照）
+                    await TryLogBackupAsync(backupFilePath);
 
                     // Issue #1417: バックアップ一覧を更新するが、件数表示で完了メッセージを上書きしない
                     await LoadBackupsInternalAsync(announceCount: false);
@@ -445,83 +450,10 @@ public partial class SystemManageViewModel : ViewModelBase
             return;
         }
 
-        bool restoreSuccess = false;
-
-        using (BeginBusy("リストア中..."))
-        {
-            try
-            {
-                // リストア前バックアップの保存先を設定から取得
-                var preRestoreBackupPath = await GetPreRestoreBackupPathAsync();
-
-                // リストア前に現在のDBをバックアップ
-                // Issue #1361: UI スレッドから sync 呼び出しは LeaseConnection の UI スレッドガード (#1281) に抵触するため、
-                // Task.Run で委譲する CreateBackupAsync を使用する
-                var backupSuccess = await _backupService.CreateBackupAsync(preRestoreBackupPath);
-                if (!backupSuccess)
-                {
-                    // バックアップ失敗時はユーザーに確認
-                    //
-                    // Issue #1793: この確認は BeginBusy("リストア中...") スコープの内側にある。
-                    // スコープの前へ移すことはできない（直前の CreateBackupAsync の結果を見て
-                    // 初めて必要性が決まる）ため、SuspendBusy で一時中断してから表示する。
-                    // 中断しないと全面オーバーレイと「リストア中...」のプログレスバーが
-                    // ダイアログの背後で回り続け、職員は 6 年保存の台帳 DB を上書きするか否かの
-                    // 決定を「処理が続いているのか分からない」状態で迫られる。
-                    bool continueWithoutBackup;
-                    using (SuspendBusy())
-                    {
-                        continueWithoutBackup = _dialogService.ShowWarningConfirmation(
-                            "現在のデータのバックアップに失敗しました。\n" +
-                            "バックアップなしでリストアを続行しますか？",
-                            "警告");
-                    }
-                    if (!continueWithoutBackup)
-                    {
-                        SetStatus("リストアをキャンセルしました", false);
-                        return;
-                    }
-                }
-
-                // リストア実行
-                // Issue #1809: 同期版は内部で DbContext.SuspendConnections（接続セマフォの同期取得）を呼び、
-                // UI スレッドから呼ぶと #1281 のガードで常に失敗する。CreateBackupAsync と同じく
-                // Task.Run で委譲する非同期版を使う
-                restoreSuccess = await _backupService.RestoreFromBackupAsync(targetBackupPath);
-                if (restoreSuccess)
-                {
-                    SetStatus("リストアが完了しました。アプリケーションを再起動してください。", false);
-
-                    // Issue #1302: 監査ログ記録 (リストア後の新DB上に痕跡を残す)
-                    await _operationLogger.LogRestoreAsync(targetBackupPath);
-                }
-                else
-                {
-                    // Issue #1108: 共有モード時は他PC接続が原因の可能性を示唆
-                    var errorMessage = _backupService.IsSharedMode
-                        ? "リストアに失敗しました。他のPCでアプリケーションが起動中の可能性があります。" +
-                          "すべてのPCでアプリケーションを終了してから再度お試しください。"
-                        : "リストアに失敗しました。バックアップファイルが破損しているか、データベースが使用中の可能性があります。" +
-                          "別のバックアップファイルを選ぶか、アプリケーションを再起動してから再度お試しください。";
-                    SetStatus(errorMessage, true);
-                }
-            }
-            catch (Exception ex)
-            {
-                // 技術的詳細はログへ。UI には 3 要素のユーザー向け文言を表示（Issue #1614）。
-                ErrorDialogHelper.LogException(ex, "リストア");
-                SetStatus(ExceptionMessageFormatter.ToUserMessage(ex, "リストア"), true);
-            }
-        }
+        var outcome = await ExecuteRestoreAsync(targetBackupPath);
 
         // プログレスバーを非表示にしてから再起動を促すダイアログを表示
-        if (restoreSuccess)
-        {
-            _navigationService.ShowInformation(
-                "リストアが完了しました。\n\n" +
-                "変更を反映するには、アプリケーションを再起動してください。",
-                "リストア完了");
-        }
+        NotifyRestoreCompleted(outcome);
     }
 
     private bool CanRestore() => SelectedBackup != null;
@@ -568,6 +500,13 @@ public partial class SystemManageViewModel : ViewModelBase
             return;
         }
 
+        await RestoreFromFileCoreAsync(dialog.FileName);
+    }
+
+    // Issue #2130: OpenFileDialog はテスト不能 (UI スレッド要求) のため、ファイル選択より後ろを
+    // internal メソッドに抽出してテスト可能化する（CreateBackupCoreAsync と同じ形、Issue #1417）。
+    internal async Task RestoreFromFileCoreAsync(string sourceFilePath)
+    {
         // Issue #1705: 外部ファイルからのリストアも DB 全体を置換する破壊的操作のため、
         // 選択バックアップからのリストアと同様に職員認証を必須とする。
         var authResult = await _staffAuthService.RequestAuthenticationAsync("データベースのリストア");
@@ -589,7 +528,7 @@ public partial class SystemManageViewModel : ViewModelBase
         // **スコープ内側の続行確認（本 Issue の対象）へ到達するテストが書けない**。
         var result = _dialogService.ShowWarningConfirmation(
             $"以下のファイルからデータを復元します。\n\n" +
-            $"ファイル: {Path.GetFileName(dialog.FileName)}\n\n" +
+            $"ファイル: {Path.GetFileName(sourceFilePath)}\n\n" +
             sharedModeWarning2 +
             $"現在のデータは上書きされます。\n" +
             $"（復元前に現在のデータは自動バックアップされます）\n\n" +
@@ -601,8 +540,53 @@ public partial class SystemManageViewModel : ViewModelBase
             return;
         }
 
-        bool restoreFromFileSuccess = false;
+        var outcome = await ExecuteRestoreAsync(sourceFilePath);
 
+        // プログレスバーを非表示にしてから再起動を促すダイアログを表示
+        NotifyRestoreCompleted(outcome);
+
+        if (outcome != RestoreOutcome.NotRestored)
+        {
+            // バックアップ一覧を更新
+            // Issue #2130: 件数表示で完了メッセージ（記録の失敗時は「やり直さないでください」の案内）を
+            // 上書きしない（バックアップ作成の Issue #1417 と同じ判断）。件数告知ありの LoadBackupsAsync だと、
+            // ダイアログを閉じた後のステータス欄には「N件のバックアップが見つかりました」だけが残っていた。
+            await LoadBackupsInternalAsync(announceCount: false);
+        }
+    }
+
+    /// <summary>
+    /// リストアの結果（Issue #2130）
+    /// </summary>
+    /// <remarks>
+    /// 「DB を置き換えたか」と「操作ログへ記録できたか」は別の事実であり、bool 1 つに畳むと
+    /// 後者の失敗が前者の失敗として扱われる（修正前の欠陥）。置き換えていない場合に
+    /// 記録の成否は意味を持たないため、3 値で表して食い違った組み合わせを表現できなくする。
+    /// </remarks>
+    internal enum RestoreOutcome
+    {
+        /// <summary>リストアしていない（キャンセル・失敗・例外）</summary>
+        NotRestored,
+
+        /// <summary>DB を置き換え、操作ログへも記録した</summary>
+        Restored,
+
+        /// <summary>DB を置き換えたが、操作ログへの記録に失敗した</summary>
+        RestoredWithoutAuditLog
+    }
+
+    /// <summary>
+    /// リストアの本体（リストア前バックアップ → 置き換え → 監査ログ記録）を実行する。
+    /// 選択したバックアップからのリストアと外部ファイルからのリストアで共通。
+    /// </summary>
+    /// <remarks>
+    /// Issue #2130: 2 つの経路は同じ本体を別々に書き写しており、監査ログ記録の失敗が
+    /// 成功表示を上書きする欠陥も 2 か所に同じ形で入っていた。直すなら片方だけ直す日が来るため
+    /// 1 か所へ寄せる（Issue #1763「同じ判断を配らない」）。
+    /// </remarks>
+    /// <param name="sourcePath">リストア元のバックアップファイルのパス（呼び出し元で確定済みの値）</param>
+    private async Task<RestoreOutcome> ExecuteRestoreAsync(string sourcePath)
+    {
         using (BeginBusy("リストア中..."))
         {
             try
@@ -635,48 +619,146 @@ public partial class SystemManageViewModel : ViewModelBase
                     if (!continueWithoutBackup)
                     {
                         SetStatus("リストアをキャンセルしました", false);
-                        return;
+                        return RestoreOutcome.NotRestored;
                     }
                 }
 
-                // リストア実行（Issue #1809: 非同期版を使う理由は RestoreAsync と同じ）
-                restoreFromFileSuccess = await _backupService.RestoreFromBackupAsync(dialog.FileName);
-                if (restoreFromFileSuccess)
-                {
-                    SetStatus("リストアが完了しました。アプリケーションを再起動してください。", false);
-
-                    // Issue #1302: 監査ログ記録 (リストア後の新DB上に痕跡を残す)
-                    await _operationLogger.LogRestoreAsync(dialog.FileName);
-                }
-                else
+                // リストア実行
+                // Issue #1809: 同期版は内部で DbContext.SuspendConnections（接続セマフォの同期取得）を呼び、
+                // UI スレッドから呼ぶと #1281 のガードで常に失敗する。CreateBackupAsync と同じく
+                // Task.Run で委譲する非同期版を使う
+                var restoreSuccess = await _backupService.RestoreFromBackupAsync(sourcePath);
+                if (!restoreSuccess)
                 {
                     // Issue #1108: 共有モード時は他PC接続が原因の可能性を示唆
-                    var errorMessage2 = _backupService.IsSharedMode
+                    var errorMessage = _backupService.IsSharedMode
                         ? "リストアに失敗しました。他のPCでアプリケーションが起動中の可能性があります。" +
                           "すべてのPCでアプリケーションを終了してから再度お試しください。"
                         : "リストアに失敗しました。バックアップファイルが破損しているか、データベースが使用中の可能性があります。" +
                           "別のバックアップファイルを選ぶか、アプリケーションを再起動してから再度お試しください。";
-                    SetStatus(errorMessage2, true);
+                    SetStatus(errorMessage, true);
+                    return RestoreOutcome.NotRestored;
                 }
+
+                // Issue #1302: 監査ログ記録 (リストア後の新DB上に痕跡を残す)
+                // Issue #2130: 記録の失敗をリストアの失敗として catch へ流さない（TryLogRestoreAsync の remarks 参照）
+                if (await TryLogRestoreAsync(sourcePath))
+                {
+                    SetStatus("リストアが完了しました。アプリケーションを再起動してください。", false);
+                    return RestoreOutcome.Restored;
+                }
+
+                // リストアは成功しているのでエラー表示（赤）にはしない。やり直さないことだけを添える
+                SetStatus(
+                    "リストアが完了しました。アプリケーションを再起動してください。" +
+                    "（操作ログへの記録には失敗しましたが、リストアはやり直さないでください）",
+                    false);
+                return RestoreOutcome.RestoredWithoutAuditLog;
             }
             catch (Exception ex)
             {
                 // 技術的詳細はログへ。UI には 3 要素のユーザー向け文言を表示（Issue #1614）。
                 ErrorDialogHelper.LogException(ex, "リストア");
                 SetStatus(ExceptionMessageFormatter.ToUserMessage(ex, "リストア"), true);
+                return RestoreOutcome.NotRestored;
             }
         }
+    }
 
-        // プログレスバーを非表示にしてから再起動を促すダイアログを表示
-        if (restoreFromFileSuccess)
+    /// <summary>
+    /// リストアの完了を通知する（<see cref="ExecuteRestoreAsync"/> の処理中スコープを閉じた後に呼ぶ）
+    /// </summary>
+    /// <remarks>
+    /// Issue #2130: 操作ログへの記録に失敗した場合は、完了ダイアログを警告へ切り替えて
+    /// <see cref="RestoreAuditLogFailureNotice"/> を添える。リストアの再実行は無害ではない
+    /// （別のバックアップ、または同じバックアップでも以後の入力ごと 6 年保存の台帳 DB を上書きし得る）ため、
+    /// エクスポート（Issue #2111。再実行が無害なので通知しない）とは扱いを分け、
+    /// インポート（Issue #1741。再実行が二重登録を招くので「再実行しない」と案内する）に揃える。
+    /// </remarks>
+    private void NotifyRestoreCompleted(RestoreOutcome outcome)
+    {
+        const string completionMessage =
+            "リストアが完了しました。\n\n" +
+            "変更を反映するには、アプリケーションを再起動してください。";
+
+        switch (outcome)
         {
-            _navigationService.ShowInformation(
-                "リストアが完了しました。\n\n" +
-                "変更を反映するには、アプリケーションを再起動してください。",
-                "リストア完了");
+            case RestoreOutcome.Restored:
+                _navigationService.ShowInformation(completionMessage, "リストア完了");
+                break;
+            case RestoreOutcome.RestoredWithoutAuditLog:
+                _navigationService.ShowWarning(
+                    completionMessage + RestoreAuditLogFailureNotice,
+                    "リストア完了（操作ログ記録の失敗あり）");
+                break;
+        }
+    }
 
-            // バックアップ一覧を更新
-            await LoadBackupsAsync();
+    /// <summary>
+    /// リストアの監査ログ記録に失敗したときに完了ダイアログへ添える案内（Issue #2130）
+    /// </summary>
+    /// <remarks>
+    /// 「何が」＝操作ログへの記録に失敗、「なぜ」＝データベースは置き換え済み（リストア自体は完了）、
+    /// 「どうすれば」＝リストアをやり直さない／監査記録が必要なら管理者へ連絡、の3要素で構成する
+    /// （インポートの <c>DataExportImportViewModel.AuditLogFailureNotice</c>、Issue #1741 と同じ構成）。
+    /// </remarks>
+    internal const string RestoreAuditLogFailureNotice =
+        "\n\n※リストアは完了していますが、操作ログへの記録に失敗しました。"
+        + "データベースは選択したファイルの内容に置き換わっているため、リストアをやり直さないでください。"
+        + "監査記録が必要な場合はシステム管理者へ連絡してください。";
+
+    /// <summary>
+    /// リストアの監査ログを記録する。記録に失敗しても例外は伝播させず false を返す（Issue #2130）
+    /// </summary>
+    /// <remarks>
+    /// 監査ログ記録は DB の置き換えが確定した後の後処理であり、ここでの失敗を
+    /// <see cref="ExecuteRestoreAsync"/> の catch へ流すと、置き換え済みのリストアが
+    /// 「リストアに失敗しました」系の文言で通知される一方、再起動を促す完了ダイアログも出て、
+    /// 職員は成功と失敗のどちらを信じればよいか判断できない。
+    /// 「コミット確定後の後処理を、成否の判定に巻き込まない」（Issue #1805）に従う。
+    /// <see cref="OperationLogger.LogRestoreAsync"/> は内部で例外を握りつぶさないため、
+    /// 共有モードで他 PC が DB をロックしていると SQLITE_BUSY が実際に送出される。
+    /// </remarks>
+    /// <returns>記録できたら true、失敗したら false</returns>
+    private async Task<bool> TryLogRestoreAsync(string sourcePath)
+    {
+        try
+        {
+            await _operationLogger.LogRestoreAsync(sourcePath);
+            return true;
+        }
+        catch (Exception ex)
+        {
+            // 無言で握りつぶさない。技術的詳細はログへ、ユーザーへは呼び出し元が案内する。
+            ErrorDialogHelper.LogException(ex, "リストアの操作ログ記録");
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// バックアップ作成の監査ログを記録する。記録に失敗しても例外は伝播させない（Issue #2130）
+    /// </summary>
+    /// <remarks>
+    /// 監査ログ記録はバックアップファイルの作成が確定した後の後処理であり、ここでの失敗を
+    /// <see cref="CreateBackupCoreAsync"/> の catch へ流すと、作成済みのバックアップが
+    /// 「バックアップの作成に失敗しました」と通知され、直後の一覧の再読込も飛ばされて
+    /// 作ったファイルが一覧に出ない。職員は作り直し、同じ時点の世代が重複する。
+    /// <para>
+    /// 記録の成否を職員へ通知しないのは、エクスポート（<c>DataExportImportViewModel.TryLogExportAsync</c>、
+    /// Issue #2111）と同じ判断。作成済みのファイルは一覧に出ており、案内すべき復旧行動が無い。
+    /// リストア（<see cref="TryLogRestoreAsync"/>）は再実行が台帳 DB を上書きし得るので案内する。
+    /// </para>
+    /// </remarks>
+    private async Task TryLogBackupAsync(string backupFilePath)
+    {
+        try
+        {
+            await _operationLogger.LogBackupAsync(backupFilePath);
+        }
+        catch (Exception ex)
+        {
+            // 無言で握りつぶさない。技術的詳細は本番のログファイルへ残す。
+            ErrorDialogHelper.LogException(ex, "バックアップ作成の操作ログ記録");
         }
     }
 

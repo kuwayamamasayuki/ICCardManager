@@ -1028,4 +1028,325 @@ public class SystemManageViewModelTests : IDisposable
     }
 
     #endregion
+
+    #region 監査ログ記録の失敗を本体の失敗として扱わない（Issue #2130）
+
+    // 修正前は LogBackupAsync / LogRestoreAsync が本体と同じ try の中にあり、operation_log への
+    // INSERT が失敗すると catch が成功表示を失敗文言で上書きしていた（バックアップ作成は一覧の再読込も
+    // 飛ばされる）。失敗の注入は #1741 / #2111 と同じくリポジトリ境界（IOperationLogRepository）で行い、
+    // 本番と同じ経路で例外を伝播させる。
+    // 対になる「正常時は正しいパスが記録されること」は実 DB（in-memory）へ記録させて読み返す。
+
+    private const string RestoreCompletedStatus = "リストアが完了しました。アプリケーションを再起動してください。";
+
+    /// <summary>
+    /// operation_log への INSERT だけが失敗する ViewModel を作る（他の依存は既定のモックを共有する）
+    /// </summary>
+    private SystemManageViewModel CreateViewModelWithFailingAuditLog()
+    {
+        var failingRepository = new Mock<IOperationLogRepository>();
+        failingRepository
+            .Setup(r => r.InsertAsync(It.IsAny<OperationLog>()))
+            .ThrowsAsync(new InvalidOperationException("operation_log への書き込みに失敗しました"));
+
+        var operationLogger = new OperationLogger(
+            failingRepository.Object,
+            new CurrentOperatorContext(new SystemClock()));
+
+        return new SystemManageViewModel(
+            _backupServiceMock.Object,
+            _settingsRepositoryMock.Object,
+            _navigationServiceMock.Object,
+            operationLogger,
+            _safeFileLauncherMock.Object,
+            _databaseInfoMock.Object,
+            _staffAuthServiceMock.Object,
+            _backupHealthServiceMock.Object,
+            _dialogServiceMock.Object);
+    }
+
+    /// <summary>
+    /// リストアが最後まで成功する準備（認証・確認の承諾・リストア前バックアップ成功・置き換え成功）
+    /// </summary>
+    private void SetupSuccessfulRestore(string sourcePath)
+    {
+        System.IO.Directory.CreateDirectory(TempBackupFolder);
+        _settingsRepositoryMock.Setup(r => r.GetAppSettingsAsync())
+            .ReturnsAsync(new AppSettings { BackupPath = TempBackupFolder });
+        _backupServiceMock.Setup(s => s.CreateBackupAsync(It.IsAny<string>())).ReturnsAsync(true);
+        _backupServiceMock.Setup(s => s.GetBackupFilesAsync())
+            .ReturnsAsync(Enumerable.Empty<BackupFileInfo>());
+        _backupServiceMock.Setup(s => s.RestoreFromBackupAsync(sourcePath)).ReturnsAsync(true);
+        _dialogServiceMock
+            .Setup(d => d.ShowWarningConfirmation(It.IsAny<string>(), It.Is<string>(t => t == "リストアの確認")))
+            .Returns(true);
+    }
+
+    /// <summary>
+    /// 実 DB に記録された、指定したファイル名を対象とする唯一の操作ログ
+    /// </summary>
+    private async Task<OperationLog> GetSingleDatabaseLogAsync(string fileName)
+    {
+        var logs = (await new OperationLogRepository(_dbContext)
+            .GetByTargetAsync(OperationLogger.Tables.Database, fileName)).ToList();
+        logs.Should().ContainSingle($"{fileName} を対象とする操作ログがちょうど 1 件記録されているべき");
+        return logs.Single();
+    }
+
+    private static string ReadLoggedFilePath(OperationLog log)
+    {
+        using var document = System.Text.Json.JsonDocument.Parse(log.AfterData!);
+        return document.RootElement.GetProperty("FilePath").GetString()!;
+    }
+
+    [Fact]
+    public async Task CreateBackupCoreAsync_監査ログ記録が失敗しても成功表示を保ち一覧を再読込すること()
+    {
+        // Arrange: 作成は成功し、operation_log への記録だけが失敗する
+        const string backupPath = "/backups/backup_manual_20260925_101500.db";
+        var viewModel = CreateViewModelWithFailingAuditLog();
+        _backupServiceMock.Setup(s => s.CreateBackupAsync(backupPath)).ReturnsAsync(true);
+        _backupServiceMock.Setup(s => s.GetBackupFilesAsync())
+            .ReturnsAsync(new List<BackupFileInfo>
+            {
+                new BackupFileInfo { FileName = "backup_manual_20260925_101500.db", FilePath = backupPath, CreatedAt = DateTime.Now },
+            });
+
+        // Act
+        await viewModel.CreateBackupCoreAsync(backupPath);
+
+        // Assert: 作成済みのバックアップを「失敗」と表示しない
+        viewModel.StatusMessage.Should().Be("バックアップを作成しました: backup_manual_20260925_101500.db");
+        viewModel.IsStatusError.Should().BeFalse();
+        viewModel.LastBackupFile.Should().Be(backupPath);
+
+        // Assert: 記録の失敗で一覧の再読込が飛ばされず、作ったファイルが一覧に出る
+        _backupServiceMock.Verify(s => s.GetBackupFilesAsync(), Times.Once,
+            "記録が失敗しても一覧の再読込まで進むべき（飛ばされると職員が作り直し、同じ時点の世代が重複する）");
+        viewModel.BackupFiles.Select(f => f.FilePath).Should().Equal(backupPath);
+
+        // Assert: 記録の失敗は職員へ通知しない（エクスポート #2111 と同じ判断。案内すべき復旧行動が無い）
+        _navigationServiceMock.Verify(n => n.ShowWarning(It.IsAny<string>(), It.IsAny<string>()), Times.Never);
+        _navigationServiceMock.Verify(n => n.ShowError(It.IsAny<string>(), It.IsAny<string>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task CreateBackupCoreAsync_正常時は作成したバックアップのパスが操作ログへ記録されること()
+    {
+        // Arrange: 実 DB へ記録する既定の ViewModel
+        const string backupPath = "/backups/backup_manual_20260925_111500.db";
+        _backupServiceMock.Setup(s => s.CreateBackupAsync(backupPath)).ReturnsAsync(true);
+        _backupServiceMock.Setup(s => s.GetBackupFilesAsync())
+            .ReturnsAsync(Enumerable.Empty<BackupFileInfo>());
+
+        // Act
+        await _viewModel.CreateBackupCoreAsync(backupPath);
+
+        // Assert
+        var log = await GetSingleDatabaseLogAsync("backup_manual_20260925_111500.db");
+        log.Action.Should().Be(OperationLogger.Actions.Backup);
+        ReadLoggedFilePath(log).Should().Be(backupPath);
+        _viewModel.StatusMessage.Should().Be("バックアップを作成しました: backup_manual_20260925_111500.db");
+    }
+
+    [Fact]
+    public async Task RestoreAsync_監査ログ記録が失敗しても成功表示を保ちやり直さないよう案内すること()
+    {
+        // Arrange
+        const string sourcePath = "/backups/backup_20260901_090000.db";
+        var viewModel = CreateViewModelWithFailingAuditLog();
+        viewModel.SelectedBackup = new BackupFileInfo
+        {
+            FileName = "backup_20260901_090000.db",
+            FilePath = sourcePath,
+            CreatedAt = new DateTime(2026, 9, 1, 9, 0, 0)
+        };
+        SetupSuccessfulRestore(sourcePath);
+
+        bool? isBusyAtWarning = null;
+        _navigationServiceMock
+            .Setup(n => n.ShowWarning(It.IsAny<string>(), It.IsAny<string>()))
+            .Callback(() => isBusyAtWarning = viewModel.IsBusy);
+
+        // Act
+        await viewModel.RestoreAsync();
+
+        // Assert: 置き換え済みのリストアを「失敗」と表示しない（赤にもしない）
+        viewModel.StatusMessage.Should().StartWith(RestoreCompletedStatus);
+        viewModel.StatusMessage.Should().Contain("やり直さないでください");
+        viewModel.StatusMessage.Should().NotContain("リストアに失敗しました");
+        viewModel.IsStatusError.Should().BeFalse();
+
+        // Assert: 完了ダイアログは警告へ切り替わり、やり直さないよう案内する
+        _navigationServiceMock.Verify(
+            n => n.ShowWarning(
+                It.Is<string>(m => m.Contains("再起動してください") && m.EndsWith(SystemManageViewModel.RestoreAuditLogFailureNotice)),
+                "リストア完了（操作ログ記録の失敗あり）"),
+            Times.Once);
+        _navigationServiceMock.Verify(n => n.ShowInformation(It.IsAny<string>(), It.IsAny<string>()), Times.Never,
+            "記録の失敗を通常の完了として隠さない");
+        isBusyAtWarning.Should().BeFalse("Issue #1383: ダイアログ表示時にはプログレスバーが閉じていること");
+    }
+
+    [Fact]
+    public async Task RestoreAsync_正常時は選択したバックアップのパスが記録され通常の完了ダイアログを出すこと()
+    {
+        // Arrange: 実 DB へ記録する既定の ViewModel
+        const string sourcePath = "/backups/backup_20260902_090000.db";
+        _viewModel.SelectedBackup = new BackupFileInfo
+        {
+            FileName = "backup_20260902_090000.db",
+            FilePath = sourcePath,
+            CreatedAt = new DateTime(2026, 9, 2, 9, 0, 0)
+        };
+        SetupSuccessfulRestore(sourcePath);
+
+        // Act
+        await _viewModel.RestoreAsync();
+
+        // Assert
+        var log = await GetSingleDatabaseLogAsync("backup_20260902_090000.db");
+        log.Action.Should().Be(OperationLogger.Actions.Restore);
+        ReadLoggedFilePath(log).Should().Be(sourcePath);
+
+        _viewModel.StatusMessage.Should().Be(RestoreCompletedStatus);
+        _viewModel.IsStatusError.Should().BeFalse();
+        _navigationServiceMock.Verify(
+            n => n.ShowInformation(It.Is<string>(m => m.Contains("再起動してください")), "リストア完了"),
+            Times.Once);
+        _navigationServiceMock.Verify(n => n.ShowWarning(It.IsAny<string>(), It.IsAny<string>()), Times.Never,
+            "記録できたときに記録の失敗を案内しない");
+    }
+
+    [Fact]
+    public async Task RestoreAsync_置き換えに失敗したときは記録せず完了ダイアログも出さないこと()
+    {
+        // Arrange: 置き換えだけが失敗する（記録の失敗と取り違えて「完了」側へ倒れないことの対）
+        const string sourcePath = "/backups/backup_20260903_090000.db";
+        _viewModel.SelectedBackup = new BackupFileInfo
+        {
+            FileName = "backup_20260903_090000.db",
+            FilePath = sourcePath,
+            CreatedAt = new DateTime(2026, 9, 3, 9, 0, 0)
+        };
+        SetupSuccessfulRestore(sourcePath);
+        _backupServiceMock.Setup(s => s.RestoreFromBackupAsync(sourcePath)).ReturnsAsync(false);
+
+        // Act
+        await _viewModel.RestoreAsync();
+
+        // Assert
+        var logs = await new OperationLogRepository(_dbContext)
+            .GetByTargetAsync(OperationLogger.Tables.Database, "backup_20260903_090000.db");
+        logs.Should().BeEmpty("置き換えていないリストアを操作ログへ記録しない");
+        _viewModel.StatusMessage.Should().StartWith("リストアに失敗しました");
+        _viewModel.IsStatusError.Should().BeTrue();
+        _navigationServiceMock.Verify(n => n.ShowInformation(It.IsAny<string>(), It.IsAny<string>()), Times.Never);
+        _navigationServiceMock.Verify(n => n.ShowWarning(It.IsAny<string>(), It.IsAny<string>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task RestoreFromFileCoreAsync_監査ログ記録が失敗しても成功表示を保ちやり直さないよう案内すること()
+    {
+        // Arrange
+        const string sourcePath = "/external/iccard_20260904.db";
+        var viewModel = CreateViewModelWithFailingAuditLog();
+        SetupSuccessfulRestore(sourcePath);
+
+        // Act
+        await viewModel.RestoreFromFileCoreAsync(sourcePath);
+
+        // Assert
+        viewModel.StatusMessage.Should().StartWith(RestoreCompletedStatus);
+        viewModel.StatusMessage.Should().Contain("やり直さないでください");
+        viewModel.IsStatusError.Should().BeFalse();
+        _navigationServiceMock.Verify(
+            n => n.ShowWarning(
+                It.Is<string>(m => m.EndsWith(SystemManageViewModel.RestoreAuditLogFailureNotice)),
+                "リストア完了（操作ログ記録の失敗あり）"),
+            Times.Once);
+        _navigationServiceMock.Verify(n => n.ShowInformation(It.IsAny<string>(), It.IsAny<string>()), Times.Never);
+
+        // Assert: 外部ファイルからのリストアは完了後に一覧を読み直す（従来の挙動を記録の失敗でも保つ）
+        _backupServiceMock.Verify(s => s.GetBackupFilesAsync(), Times.Once);
+    }
+
+    [Fact]
+    public async Task RestoreFromFileCoreAsync_正常時は指定したファイルのパスが記録され通常の完了ダイアログを出すこと()
+    {
+        // Arrange
+        const string sourcePath = "/external/iccard_20260905.db";
+        SetupSuccessfulRestore(sourcePath);
+
+        // Act
+        await _viewModel.RestoreFromFileCoreAsync(sourcePath);
+
+        // Assert
+        _backupServiceMock.Verify(s => s.RestoreFromBackupAsync(sourcePath), Times.Once);
+        var log = await GetSingleDatabaseLogAsync("iccard_20260905.db");
+        log.Action.Should().Be(OperationLogger.Actions.Restore);
+        ReadLoggedFilePath(log).Should().Be(sourcePath);
+
+        _viewModel.StatusMessage.Should().Be(RestoreCompletedStatus);
+        _navigationServiceMock.Verify(
+            n => n.ShowInformation(It.Is<string>(m => m.Contains("再起動してください")), "リストア完了"),
+            Times.Once);
+        _navigationServiceMock.Verify(n => n.ShowWarning(It.IsAny<string>(), It.IsAny<string>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task RestoreFromFileCoreAsync_認証がキャンセルされた場合_リストアを実行しないこと()
+    {
+        // Arrange: 後続（確認・リストア前バックアップ・置き換え）はすべて成功する準備をしたうえで、
+        // 認証だけを崩す（testing.md #2104「ガードで止まったことは、後続を成功する側に設定してから表明する」）。
+        // ファイル選択の後ろを抽出した際に #1705 の認証ゲートを落としていないことを固定する。
+        const string sourcePath = "/external/iccard_20260906.db";
+        SetupSuccessfulRestore(sourcePath);
+        _staffAuthServiceMock
+            .Setup(a => a.RequestAuthenticationAsync(It.IsAny<string>()))
+            .ReturnsAsync((StaffAuthResult?)null);
+
+        // Act
+        await _viewModel.RestoreFromFileCoreAsync(sourcePath);
+
+        // Assert
+        _backupServiceMock.Verify(b => b.RestoreFromBackupAsync(It.IsAny<string>()), Times.Never);
+        _dialogServiceMock.Verify(
+            d => d.ShowWarningConfirmation(It.IsAny<string>(), It.IsAny<string>()), Times.Never);
+        _viewModel.StatusMessage.Should().Contain("職員認証");
+    }
+
+    [Fact]
+    public async Task RestoreFromFileCoreAsync_置き換えに失敗したときは一覧を読み直さず失敗表示を残すこと()
+    {
+        // Arrange: 置き換えだけが失敗する。一覧の再読込はリストアした場合に限る（修正前も成功時のみ）
+        const string sourcePath = "/external/iccard_20260907.db";
+        SetupSuccessfulRestore(sourcePath);
+        _backupServiceMock.Setup(s => s.RestoreFromBackupAsync(sourcePath)).ReturnsAsync(false);
+
+        // Act
+        await _viewModel.RestoreFromFileCoreAsync(sourcePath);
+
+        // Assert
+        _backupServiceMock.Verify(s => s.GetBackupFilesAsync(), Times.Never,
+            "リストアしていないのに一覧を読み直さない");
+        _viewModel.StatusMessage.Should().StartWith("リストアに失敗しました");
+        _viewModel.IsStatusError.Should().BeTrue();
+        _navigationServiceMock.Verify(n => n.ShowInformation(It.IsAny<string>(), It.IsAny<string>()), Times.Never);
+        _navigationServiceMock.Verify(n => n.ShowWarning(It.IsAny<string>(), It.IsAny<string>()), Times.Never);
+    }
+
+    [Fact]
+    public void RestoreAuditLogFailureNotice_3要素を満たしリストアのやり直しを促さないこと()
+    {
+        var notice = SystemManageViewModel.RestoreAuditLogFailureNotice.Trim();
+
+        notice.Should().Contain("操作ログへの記録に失敗しました", "何が");
+        notice.Should().Contain("リストアは完了しています", "なぜ: 本体は完了済みであること");
+        notice.Should().Contain("リストアをやり直さないでください", "どうすれば: 再実行は台帳 DB を上書きし得る");
+        notice.Should().MatchRegex("してください。$", "行動指示で終わるべき");
+        notice.Should().NotContain("再度", "リストアの再実行を促す語を含めない");
+    }
+
+    #endregion
 }
