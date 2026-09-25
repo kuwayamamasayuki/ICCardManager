@@ -439,6 +439,17 @@ jobs:
         File.Exists(Path.Combine(TestPaths.GetSolutionRoot(), settings)).Should().BeTrue(
             $"--settings に渡す {settings} が存在しないと、Release のテスト実行そのものが失敗する");
 
+        // 収集する構成（Release）のビルドは PDB を生成すること。本体の csproj は Release で DebugType=none にしており、
+        // coverlet は PDB の無いアセンブリを計装できない（#2117 で実測: 行カバレッジ 0%、対象行 0 行のレポートになっていた）
+        var matrixBuild = ExtractDotnetCommands(workflow, "build")
+            .Where(c => c.Contains("${{ matrix.configuration }}"))
+            .Should().ContainSingle("テストの前にソリューションをビルドするステップが 1 つだけあること").Subject;
+        ExtractExpressions(matrixBuild)
+            .Where(e => IsReleaseOnlyExpression(e) && Regex.IsMatch(e, @"-p:DebugType=(portable|embedded)\b"))
+            .Should().ContainSingle(
+                "Release のビルドに ${{ matrix.configuration == 'Release' && '-p:DebugType=portable …' || '' }} が無いと、" +
+                "収集したカバレッジは常に 0% になる: " + matrixBuild);
+
         var reportStep = ExtractStepsContaining(workflow, "coverage.cobertura.xml")
             .Should().ContainSingle("カバレッジを報告するステップが 1 つだけあること").Subject;
         Regex.IsMatch(reportStep, @"^\s*if:\s*matrix\.configuration\s*==\s*'Release'\s*$", RegexOptions.Multiline).Should().BeTrue(

@@ -7,6 +7,7 @@
   - `dotnet restore --locked-mode` を**採用**。全ワークフローの復元をロックモードにし、後続の build/test/publish/format に `--no-restore`（または `--no-build`）を付けた。素の restore は食い違いをロックファイルの書き換えで黙って吸収するため、Dependabot の ClosedXML 更新（#1713）がテストと DebugDataViewer のロックファイルに反映されていないことに誰も気付けなかった。3 つのロックファイルを再生成した
   - アクションの commit SHA 固定を**採用**。全ワークフローの `uses:` をタグから `owner/repo@<SHA> # vX.Y.Z` へ変えた（固定時点の各メジャータグと同じコミットなので挙動は変わらない）。Dependabot は SHA と版数コメントを一緒に更新する
   - カバレッジの閾値は**見送り**。行カバレッジはテストが何を表明しているかを測らないため、合否には使わない。代わりに実測値をジョブのサマリーへ出すステップを加えた。codecov への送信はトークンが無く毎回拒否されていた（`continue-on-error` で緑のまま）
+  - Release で集めたカバレッジが**常に 0% の空のレポート**だったのを是正した。本体の csproj は Release で PDB を作らず（`DebugType=none`）、coverlet は PDB の無いアセンブリを計装できない。ci.yml の Release ビルドにだけ `-p:DebugType=portable` を付けた（配布物のビルドは変えていない）
   - 開発者ガイドにパッケージ更新時のロックファイル更新手順（`dotnet restore --force-evaluate`）を追記し、ClosedXML の版数表記（0.105.0 → 0.105.1）を実態に合わせた
   - リポジトリ直下に `global.json` を置き、SDK を 8.0 系（`rollForward: latestFeature`）に固定した。ロックファイルの中身は SDK の版で変わり（SDK 8 は RID `win7-x86` と暗黙の `Microsoft.NETFramework.ReferenceAssemblies` 参照を書き、SDK 10 は書かない）、ランナーに入っている SDK 10 で復元されると NU1004 で失敗するため。配布用インストーラーを作る開発機の SDK とも揃う
   - `Directory.Build.targets` を新設し、`Microsoft.NETFramework.ReferenceAssemblies` を明示的に参照した。SDK はこれを「マシンに .NET Framework の targeting pack が無いときだけ」暗黙に追加するため、pack の無い開発機と pack のある CI のランナーでロックファイルの中身が食い違っていた

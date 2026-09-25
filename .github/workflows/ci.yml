@@ -65,8 +65,11 @@ jobs:
     - name: Restore dependencies
       run: dotnet restore --locked-mode
 
+    # Release では PDB を生成させる（Issue #2117）。本体と DebugDataViewer の csproj は Release で DebugType=none にしており、
+    # coverlet は PDB の無いアセンブリを計装できないため、Release で集めたカバレッジは常に 0% の空のレポートだった。
+    # コマンドラインのプロパティは csproj の値より優先される。配布物を作る release.yml・インストーラーのビルドには付けない。
     - name: Build
-      run: dotnet build --no-restore --configuration ${{ matrix.configuration }}
+      run: dotnet build --no-restore --configuration ${{ matrix.configuration }} ${{ matrix.configuration == 'Release' && '-p:DebugType=portable -p:DebugSymbols=true' || '' }}
 
     # カバレッジは送信・報告する Release でだけ収集する（Issue #2116）。送信ステップ（Upload coverage reports）と
     # 報告ステップ（Report coverage）が Release に限られているため、Debug で収集しても時間を使うだけになる。
@@ -106,6 +109,9 @@ jobs:
         $invariant = [Globalization.CultureInfo]::InvariantCulture
         $line = [math]::Round([double]::Parse($xml.coverage.'line-rate', $invariant) * 100, 1)
         $branch = [math]::Round([double]::Parse($xml.coverage.'branch-rate', $invariant) * 100, 1)
+        if ([int]$xml.coverage.'lines-valid' -eq 0) {
+          Write-Host "::warning::カバレッジの対象行が 0 行です。アセンブリが計装されていません（PDB が無い等）。Build の -p:DebugType=portable を確認してください。"
+        }
         Write-Host "行カバレッジ: $line% / 分岐カバレッジ: $branch%"
         @(
           '### カバレッジ（Release）'
