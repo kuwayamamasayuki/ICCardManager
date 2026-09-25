@@ -8,6 +8,14 @@
 # - セキュリティ更新（vulnerability alert 対応）は別ルートで開き、即座に対処
 # - 通常アップデートは週次で確認、意図せぬ破壊的変更を避けるため
 #   メジャーバージョンアップはデフォルトで無視
+#
+# ロックファイル（Issue #2117）: CI は dotnet restore --locked-mode で復元する。Dependabot は更新した
+# プロジェクトのロックファイルしか書き換えないため、本体（src/ICCardManager）のパッケージを更新する PR では、
+# 本体を参照するテスト・DebugDataViewer のロックファイルが古いまま残り、CI が NU1004 で失敗する。
+# その PR のブランチで dotnet restore --force-evaluate を実行し、変わったロックファイルを追加でコミットすること。
+# Dependabot は Linux で復元するため、本体のロックファイルからも RID の節（.NETFramework,Version=v4.8/win7-x86。
+# Windows でしか生成されない）が落ち、それだけでも NU1004 になる。再生成は必ず Windows の dotnet.exe で行うこと。
+# アクション（github-actions）は commit SHA で固定しており、Dependabot は SHA と「# vX.Y.Z」を一緒に書き換える。
 version: 2
 
 updates:

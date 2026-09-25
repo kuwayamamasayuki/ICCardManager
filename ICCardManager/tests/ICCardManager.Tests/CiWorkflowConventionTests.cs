@@ -395,9 +395,9 @@ jobs:
     }
 
     /// <summary>
-    /// カバレッジは送信する構成（Release）でだけ収集する（Issue #2116）。送信ステップは
+    /// カバレッジは報告する構成（Release）でだけ収集する（Issue #2116）。報告ステップ（Report coverage）は
     /// <c>if: matrix.configuration == 'Release'</c> で Release に限っているため、Debug で収集しても時間を使うだけになる。
-    /// 対の表明として、Release では収集していること（送信するものが無くならないこと）も見る。
+    /// 対の表明として、Release では収集していること（報告するものが無くならないこと）も見る。
     /// </summary>
     [Fact]
     public void カバレッジの収集はReleaseの構成に限られていること()
@@ -405,16 +405,62 @@ jobs:
         var commands = ExtractDotnetTestCommands(File.ReadAllText(CiWorkflowPath));
         var collecting = commands.Where(c => c.Contains("--collect")).ToList();
 
-        collecting.Should().NotBeEmpty("Release のカバレッジを収集しなくなると、送信ステップが空振りする");
+        collecting.Should().NotBeEmpty("Release のカバレッジを収集しなくなると、報告ステップが空振りする");
 
         foreach (var command in collecting)
         {
             RemoveExpressions(command).Should().NotContain("--collect",
-                "無条件に付けると Debug でも収集し、送信されない結果のために時間を使う: " + command);
+                "無条件に付けると Debug でも収集し、報告されない結果のために時間を使う: " + command);
             ExtractExpressions(command).Where(e => e.Contains("--collect")).Should().OnlyContain(
                 e => IsReleaseOnlyExpression(e),
                 "収集のフラグは ${{ matrix.configuration == 'Release' && '...' || '' }} の形で Release に限る");
         }
+    }
+
+    /// <summary>
+    /// カバレッジの報告ステップは、収集と同じ構成（Release）で、収集した場所を読む（Issue #2117）。
+    /// 片方だけ場所を変えると、報告は「結果が見つからない」警告を出すだけで緑のまま数字が消える。
+    /// 報告は閾値で合否を決めない（#2117 の判断。行カバレッジはテストが何を表明しているかを測らない）。
+    /// </summary>
+    [Fact]
+    public void カバレッジの報告は収集と同じ構成と場所を読み合否を決めないこと()
+    {
+        var workflow = File.ReadAllText(CiWorkflowPath);
+        var collect = ExtractDotnetTestCommands(workflow)
+            .SelectMany(ExtractExpressions)
+            .Where(e => e.Contains("--collect"))
+            .Should().ContainSingle("カバレッジを収集する dotnet test は 1 つだけのはず").Subject;
+
+        var resultsDirectory = Regex.Match(collect, @"--results-directory\s+([^\s']+)").Groups[1].Value;
+        resultsDirectory.Should().NotBeEmpty("収集先を明示しないと、報告ステップがどこを読むべきか決まらない");
+
+        var settings = Regex.Match(collect, @"--settings\s+([^\s']+)").Groups[1].Value;
+        settings.Should().NotBeEmpty("除外の設定（マイグレーション・自動生成コード）を収集に効かせる");
+        File.Exists(Path.Combine(TestPaths.GetSolutionRoot(), settings)).Should().BeTrue(
+            $"--settings に渡す {settings} が存在しないと、Release のテスト実行そのものが失敗する");
+
+        // 収集する構成（Release）のビルドは PDB を生成すること。本体の csproj は Release で DebugType=none にしており、
+        // coverlet は PDB の無いアセンブリを計装できない（#2117 で実測: 行カバレッジ 0%、対象行 0 行のレポートになっていた）
+        var matrixBuild = ExtractDotnetCommands(workflow, "build")
+            .Where(c => c.Contains("${{ matrix.configuration }}"))
+            .Should().ContainSingle("テストの前にソリューションをビルドするステップが 1 つだけあること").Subject;
+        ExtractExpressions(matrixBuild)
+            .Where(e => IsReleaseOnlyExpression(e) && Regex.IsMatch(e, @"-p:DebugType=(portable|embedded)\b"))
+            .Should().ContainSingle(
+                "Release のビルドに ${{ matrix.configuration == 'Release' && '-p:DebugType=portable …' || '' }} が無いと、" +
+                "収集したカバレッジは常に 0% になる: " + matrixBuild);
+
+        var reportStep = ExtractStepsContaining(workflow, "coverage.cobertura.xml")
+            .Should().ContainSingle("カバレッジを報告するステップが 1 つだけあること").Subject;
+        Regex.IsMatch(reportStep, @"^\s*if:\s*matrix\.configuration\s*==\s*'Release'\s*$", RegexOptions.Multiline).Should().BeTrue(
+            "収集は Release に限っているので、報告も Release に限る（Debug では毎回「見つからない」警告になる）");
+
+        var script = ExtractJobs(workflow).Values
+            .Select(block => ExtractStepRunBlock(block, "Report coverage"))
+            .Single(s => s != null)!;
+        script.Should().Contain("-Path " + resultsDirectory, "収集先と同じ場所を読む");
+        Regex.IsMatch(script, @"\bexit\s+(?!0\b)\S|\bthrow\b|\bWrite-Error\b|::error::").Should().BeFalse(
+            "カバレッジは閾値で合否を決めない（Issue #2117）。行カバレッジを満たすための表明の無いテストへ誘導しないため");
     }
 
     /// <summary>
@@ -615,17 +661,250 @@ jobs:
 
     #endregion
 
+    #region ⑤依存の固定（Issue #2117）
+
+    /// <summary>
+    /// 検出ロジックを既知の入力で固定する。実データは是正後にすべて適合するため、それだけでは
+    /// 「何も検出できない」誤りと区別できない（#1786）。
+    /// </summary>
+    [Fact]
+    public void 検出ロジックがアクションの参照の固定と復元のフラグを読めること()
+    {
+        const string workflow =
+            "    steps:\n" +
+            "    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1\n" +
+            "    # - uses: actions/checkout@v4\n" +
+            "    - name: Setup\n" +
+            "      uses: actions/setup-dotnet@v6\n" +
+            "    - name: Publish\n" +
+            "      run: |\n" +
+            "        dotnet publish src/App.csproj `\n" +
+            "          --configuration Release `\n" +
+            "          --no-build\n" +
+            "    - name: Restore\n" +
+            "      run: dotnet restore --locked-mode\n";
+
+        ExtractUsesReferences(workflow).Should().Equal(
+            new[] { "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1", "actions/setup-dotnet@v6" },
+            "コメント行の uses: は数えず、- uses: と uses: の両方の形を拾う");
+
+        IsPinnedToCommitSha("actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1").Should().BeTrue();
+        IsPinnedToCommitSha("actions/setup-dotnet@v6").Should().BeFalse("タグは付け替えられる");
+        IsPinnedToCommitSha("actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1").Should().BeFalse(
+            "版数のコメントが無いと、何の版を固定しているのか読めず、Dependabot の更新も追えない");
+        IsPinnedToCommitSha("actions/checkout@3d3c42e # v7.0.1").Should().BeFalse("短縮 SHA は一意でなくなり得る");
+        IsPinnedToCommitSha("actions/checkout@3D3C42E5AAC5BA805825DA76410C181273BA90B1 # v7.0.1").Should().BeFalse(
+            "SHA は gh api の出力・Dependabot の書式と同じ小文字に揃える（表記ゆれは同じ版の食い違いに見える）");
+        IsPinnedToCommitSha("actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7").Should().BeFalse(
+            "メジャー版だけのコメントでは、どのリリースを固定したのか分からない");
+        IsPinnedToCommitSha("./.github/actions/local").Should().BeTrue("リポジトリ内のアクションは同じコミットのものが使われる");
+        ActionName("actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1").Should().Be("actions/checkout");
+
+        var publish = ExtractDotnetCommands(workflow, "publish").Should().ContainSingle().Subject;
+        publish.Should().Contain("--no-build", "折り返したコマンドの 2 行目以降のフラグも読む");
+        SuppressesImplicitRestore(publish).Should().BeTrue();
+
+        ExtractDotnetCommands(workflow, "restore").Should().Equal("run: dotnet restore --locked-mode");
+        SuppressesImplicitRestore("dotnet build --configuration Release").Should().BeFalse();
+        SuppressesImplicitRestore("dotnet build --no-restore --configuration Release").Should().BeTrue();
+        SuppressesImplicitRestore("dotnet build --no-restore-foo").Should().BeFalse("前方一致で別のフラグを取り違えない");
+        SuppressesImplicitRestore("dotnet build ${{ matrix.configuration == 'Release' && '--no-restore' || '' }}").Should().BeFalse(
+            "片方の構成でしか付かないフラグは、付いているとみなさない");
+    }
+
+    /// <summary>
+    /// すべてのワークフローのアクションを commit SHA で固定する（Issue #2117）。タグ（<c>@v7</c>）は作者が
+    /// 別のコミットへ付け替えられるため、付け替えられた中身がそのまま実行される。release.yml は
+    /// <c>contents: write</c> の権限で配布物を作るので、その経路を塞ぐ。
+    /// </summary>
+    [Fact]
+    public void すべてのアクションはcommit_SHAで固定されていること()
+    {
+        var references = AllWorkflows()
+            .SelectMany(w => ExtractUsesReferences(w.Content).Select(r => (w.Name, Reference: r)))
+            .ToList();
+
+        references.Select(r => ActionName(r.Reference)).Should().Contain(
+            new[] { "actions/checkout", "softprops/action-gh-release" },
+            "導出が空振りすると無検査で緑になる");
+
+        references.Where(r => !IsPinnedToCommitSha(r.Reference))
+            .Select(r => $"{r.Name}: {r.Reference}")
+            .Should().BeEmpty(
+                "アクションは「owner/repo@<40 桁の SHA> # vX.Y.Z」の形で固定すること（Issue #2117）。" +
+                "SHA は gh api repos/<owner>/<repo>/git/ref/tags/<タグ> で引ける（注釈付きタグは git/tags/<SHA> でコミットまで辿る）");
+    }
+
+    /// <summary>
+    /// 同じアクションはすべてのワークフローで同じ版を使う。Dependabot は一括で書き換えるが、手で 1 か所だけ
+    /// 直すと、ワークフローごとに違う中身が走る（ci.yml で試した版と release.yml で配布物を作る版が食い違う）。
+    /// </summary>
+    [Fact]
+    public void 同じアクションはすべてのワークフローで同じ版に固定されていること()
+    {
+        var divergent = AllWorkflows()
+            .SelectMany(w => ExtractUsesReferences(w.Content).Select(r => (w.Name, Reference: r)))
+            .GroupBy(r => ActionName(r.Reference))
+            .Where(g => g.Select(r => r.Reference).Distinct().Count() > 1)
+            .Select(g => $"{g.Key}: " + string.Join(" / ", g.Select(r => $"{r.Name}={r.Reference}")))
+            .ToList();
+
+        divergent.Should().BeEmpty("同じアクションの版がワークフローごとに食い違っている");
+    }
+
+    /// <summary>
+    /// ワークフローの復元はロックファイル（<c>packages.lock.json</c>）どおりに行い、食い違えば失敗させる（Issue #2117）。
+    /// 素の <c>dotnet restore</c> は食い違いをロックファイルの書き換えで黙って吸収するため、ロックファイルが
+    /// 何も固定しない。#2117 の時点で、本体の ClosedXML 更新（Dependabot）にテストと DebugDataViewer の
+    /// ロックファイルが追随しておらず、CI はそれに気付く手段を持っていなかった。
+    /// </summary>
+    [Fact]
+    public void すべてのdotnet_restoreはロックモードで実行されること()
+    {
+        var checkedWorkflows = new List<string>();
+
+        foreach (var (file, content) in AllWorkflows())
+        {
+            foreach (var command in ExtractDotnetCommands(content, "restore"))
+            {
+                checkedWorkflows.Add(file);
+                var unconditional = RemoveExpressions(command);
+                unconditional.Should().Contain("--locked-mode",
+                    $"{file}: ロックファイルと食い違ったら失敗させる。${{{{ }}}} の式の中に置くと片方の構成でしか効かない: {command}");
+                unconditional.Should().NotContain("--force-evaluate",
+                    $"{file}: --force-evaluate はロックファイルを作り直す（手元で更新するときの手段で、CI で使うと固定が外れる）: {command}");
+            }
+        }
+
+        checkedWorkflows.Should().Contain(new[] { "ci.yml", "release.yml" }, "導出が空振りすると無検査で緑になる");
+    }
+
+    /// <summary>
+    /// ロックモードの復元の後に、ロックモードでない暗黙の復元を走らせない。<c>dotnet build</c> などは
+    /// 既定で復元をやり直すため、明示の復元をロックモードにしても、その後ろで素の復元が走る（Issue #2117）。
+    /// </summary>
+    [Fact]
+    public void 復元を伴うdotnetコマンドは暗黙の復元を行わないこと()
+    {
+        var checkedCommands = new List<string>();
+        var violations = new List<string>();
+
+        foreach (var (file, content) in AllWorkflows())
+        {
+            foreach (var verb in new[] { "build", "test", "publish", "pack", "run", "format" })
+            {
+                foreach (var command in ExtractDotnetCommands(content, verb))
+                {
+                    checkedCommands.Add($"{file}:{verb}");
+                    if (!SuppressesImplicitRestore(command))
+                    {
+                        violations.Add($"{file}: {command}");
+                    }
+                }
+            }
+        }
+
+        checkedCommands.Should().Contain(new[] { "ci.yml:build", "ci.yml:test", "release.yml:publish" },
+            "導出が空振りすると無検査で緑になる");
+        violations.Should().BeEmpty(
+            "--no-restore（または --no-build）を付けること。付けないと、ロックモードの復元の後で素の復元が走る");
+    }
+
+    /// <summary>
+    /// SDK はリポジトリ直下の <c>global.json</c> で、ワークフローが導入する版（<c>DOTNET_VERSION</c>）と同じメジャーに固定する
+    /// （Issue #2117）。ロックファイルの中身は SDK の版で変わる — SDK 8 は <c>win7-x86</c> の RID と
+    /// <c>Microsoft.NETFramework.ReferenceAssemblies</c> の暗黙の参照を書くが、SDK 10 は <c>win-x86</c> を推論し暗黙の参照を足さない。
+    /// windows-latest には SDK 10 も入っており、<c>global.json</c> が無いと setup-dotnet で 8.0.x を入れても
+    /// 最新の SDK で復元され、SDK 8 で作ったロックファイルと食い違って NU1004 で失敗した（#2117 の初回 CI）。
+    /// </summary>
+    [Fact]
+    public void SDKはglobal_jsonでワークフローと同じメジャー版に固定されていること()
+    {
+        var globalJsonPath = Path.Combine(RepositoryRoot, "global.json");
+        File.Exists(globalJsonPath).Should().BeTrue(
+            "global.json が無いと、ランナーに入っている最新の SDK で復元され、ロックファイルの中身が変わる");
+        var globalJson = File.ReadAllText(globalJsonPath);
+
+        var pinned = Regex.Match(globalJson, @"""version""\s*:\s*""(\d+)\.\d+\.\d+""");
+        pinned.Success.Should().BeTrue("global.json に sdk.version が必要");
+        var rollForward = Regex.Match(globalJson, @"""rollForward""\s*:\s*""(\w+)""").Groups[1].Value;
+        new[] { "patch", "feature", "minor", "latestPatch", "latestFeature", "latestMinor", "disable" }
+            .Should().Contain(rollForward, "latestMajor / major は別のメジャー版の SDK へ移り、固定の意味が無くなる");
+
+        var versions = AllWorkflows()
+            .Select(w => (w.Name, Match: Regex.Match(w.Content, @"^\s*DOTNET_VERSION:\s*'(\d+)\.\d+\.x'", RegexOptions.Multiline)))
+            .Where(w => w.Match.Success)
+            .ToList();
+        versions.Select(v => v.Name).Should().Contain(new[] { "ci.yml", "release.yml" }, "導出が空振りすると無検査で緑になる");
+        versions.Should().OnlyContain(v => v.Match.Groups[1].Value == pinned.Groups[1].Value,
+            "ワークフローが導入する SDK と global.json のメジャー版が食い違うと、CI は SDK を見つけられずに失敗する");
+    }
+
+    /// <summary>
+    /// .NET Framework の参照アセンブリのパッケージは明示的に参照する（Issue #2117）。SDK はこれを
+    /// 「マシンに targeting pack が無いときだけ」暗黙に追加するため、暗黙のままだとロックファイルの中身が
+    /// マシンの環境で変わる。開発機（pack なし）で作ったロックファイルが CI のランナー（pack あり）と食い違い、
+    /// SDK を揃えた後もロックモードの復元が NU1004 で失敗した（#2117 の 2 回目の CI）。
+    /// </summary>
+    [Fact]
+    public void NET_Frameworkの参照アセンブリは環境によらず明示的に参照されていること()
+    {
+        var targetsPath = Path.Combine(TestPaths.GetSolutionRoot(), "Directory.Build.targets");
+        File.Exists(targetsPath).Should().BeTrue("全プロジェクトへ効かせる参照は Directory.Build.targets に置く");
+        var targets = Regex.Replace(File.ReadAllText(targetsPath), @"<!--.*?-->", "", RegexOptions.Singleline);
+
+        Regex.IsMatch(targets, @"<PackageReference\s+Include=""Microsoft\.NETFramework\.ReferenceAssemblies""\s+Version=""[\d.]+""")
+            .Should().BeTrue("暗黙の追加に任せると、targeting pack の有無でロックファイルが変わる（コメントの中の記述は数えない）");
+
+        var projects = GetSolutionProjects();
+        projects.Should().NotBeEmpty("導出が空振りすると無検査で緑になる");
+        foreach (var project in projects)
+        {
+            var lockFile = File.ReadAllText(Path.Combine(TestPaths.GetSolutionRoot(), Path.GetDirectoryName(project)!, "packages.lock.json"));
+            Regex.IsMatch(lockFile, @"""Microsoft\.NETFramework\.ReferenceAssemblies"":\s*\{\s*""type"":\s*""Direct""").Should().BeTrue(
+                $"{project} のロックファイルに参照アセンブリのパッケージが直接の依存として記録されていない");
+        }
+    }
+
+    /// <summary>
+    /// ロックモードの復元は、ロックファイルを持つプロジェクトでしか固定にならない。ロックファイルの生成は
+    /// <c>Directory.Build.props</c> の <c>RestorePackagesWithLockFile</c> が全プロジェクトへ効かせており、
+    /// ソリューションのすべてのプロジェクトがロックファイルをコミットしていることを表明する。
+    /// 対象は sln から導出する（プロジェクト名で列挙すると、プロジェクトを足したときに静かに漏れる。#1786）。
+    /// </summary>
+    [Fact]
+    public void ソリューションのすべてのプロジェクトにロックファイルがあること()
+    {
+        var solutionRoot = TestPaths.GetSolutionRoot();
+
+        var props = File.ReadAllText(Path.Combine(solutionRoot, "Directory.Build.props"));
+        Regex.IsMatch(props, @"<RestorePackagesWithLockFile>\s*true\s*</RestorePackagesWithLockFile>").Should().BeTrue(
+            "ロックファイルの生成を全プロジェクトへ効かせる設定");
+
+        var projects = GetSolutionProjects();
+        projects.Should().Contain("src/ICCardManager/ICCardManager.csproj", "導出が空振りすると無検査で緑になる");
+
+        foreach (var project in projects)
+        {
+            var csproj = File.ReadAllText(Path.Combine(solutionRoot, project));
+            Regex.IsMatch(csproj, @"<RestorePackagesWithLockFile>\s*false\s*</RestorePackagesWithLockFile>").Should().BeFalse(
+                $"{project} がロックファイルの生成を止めると、そのプロジェクトの依存は何にも固定されない");
+
+            var lockFile = Path.Combine(solutionRoot, Path.GetDirectoryName(project)!, "packages.lock.json");
+            File.Exists(lockFile).Should().BeTrue(
+                $"{project} のロックファイルが無い。手元で dotnet restore を実行し、生成された packages.lock.json をコミットすること");
+        }
+    }
+
+    #endregion
+
     #region 読み取りヘルパー
 
     /// <summary>ソリューションに含まれ、ソリューション単位の <c>dotnet test</c> から自分を外している csproj（作業ディレクトリからの相対、<c>/</c> 区切り）。</summary>
     private static List<string> GetProjectsExcludedFromSolutionTestRun()
     {
         var solutionRoot = TestPaths.GetSolutionRoot();
-        var sln = File.ReadAllText(Path.Combine(solutionRoot, "ICCardManager.sln"));
-
-        return Regex.Matches(sln, @"^Project\(""[^""]*""\)\s*=\s*""[^""]*"",\s*""([^""]+\.csproj)""", RegexOptions.Multiline)
-            .Cast<Match>()
-            .Select(m => m.Groups[1].Value.Replace('\\', '/'))
+        return GetSolutionProjects()
             .Where(p => IsExcludedFromSolutionTestRun(File.ReadAllText(Path.Combine(solutionRoot, p))))
             .ToList();
     }
@@ -696,12 +975,78 @@ jobs:
     }
 
     /// <summary><c>dotnet test</c> を含む行（YAML のコメント行を除く）。1 行 1 コマンドの前提で読む。</summary>
-    private static List<string> ExtractDotnetTestCommands(string text)
-        => SplitLines(text)
-            .Where(l => !l.TrimStart().StartsWith("#", StringComparison.Ordinal))
-            .Where(l => Regex.IsMatch(l, @"\bdotnet\s+test\b"))
-            .Select(l => l.Trim())
+    private static List<string> ExtractDotnetTestCommands(string text) => ExtractDotnetCommands(text, "test");
+
+    /// <summary>
+    /// <c>dotnet &lt;verb&gt;</c> のコマンド（YAML のコメント行を除く）。行末の継続記号（PowerShell の <c>`</c>・
+    /// bash の <c>\</c>）で折り返したコマンドは 1 つにつなげて読む（Issue #2117）。release.yml の
+    /// <c>dotnet publish</c> は折り返しており、1 行目だけを読むと 2 行目以降のフラグを見落とす。
+    /// </summary>
+    private static List<string> ExtractDotnetCommands(string text, string verb)
+    {
+        var logical = new List<string>();
+        var pending = "";
+        foreach (var line in SplitLines(text))
+        {
+            if (line.TrimStart().StartsWith("#", StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            var trimmed = line.Trim();
+            if (trimmed.EndsWith("`", StringComparison.Ordinal) || trimmed.EndsWith("\\", StringComparison.Ordinal))
+            {
+                pending += trimmed.Substring(0, trimmed.Length - 1).TrimEnd() + " ";
+                continue;
+            }
+
+            logical.Add(pending + trimmed);
+            pending = "";
+        }
+
+        if (pending.Length > 0)
+        {
+            logical.Add(pending.TrimEnd());
+        }
+
+        return logical
+            .Where(l => Regex.IsMatch(l, @"\bdotnet\s+" + Regex.Escape(verb) + @"\b"))
             .ToList();
+    }
+
+    /// <summary>ワークフローの <c>uses:</c> の参照（コメント行を除く。<c>- uses:</c> の形も含む）。</summary>
+    private static List<string> ExtractUsesReferences(string workflow)
+        => SplitLines(workflow)
+            .Where(l => !l.TrimStart().StartsWith("#", StringComparison.Ordinal))
+            .Select(l => Regex.Match(l, @"^\s*(?:-\s+)?uses:\s*(.+?)\s*$"))
+            .Where(m => m.Success)
+            .Select(m => m.Groups[1].Value)
+            .ToList();
+
+    /// <summary>
+    /// <c>owner/repo@&lt;40 桁の SHA&gt; # vX.Y.Z</c> の形か。末尾の版数コメントは Dependabot が SHA と一緒に
+    /// 書き換える目印で、無いと人が読んでも何の版か分からない。リポジトリ内のアクション（<c>./</c>）は対象外。
+    /// </summary>
+    private static bool IsPinnedToCommitSha(string reference)
+        => reference.StartsWith("./", StringComparison.Ordinal)
+           || Regex.IsMatch(reference, @"^[A-Za-z0-9_.-]+/[A-Za-z0-9_./-]+@[0-9a-f]{40}\s+#\s*v\d+\.\d+\.\d+$");
+
+    /// <summary>参照からアクション名（<c>owner/repo[/path]</c>）を取り出す。</summary>
+    private static string ActionName(string reference) => reference.Split('@')[0];
+
+    /// <summary>暗黙の復元を行わないフラグ（<c>--no-restore</c>、または復元もしない <c>--no-build</c>）が付いているか。</summary>
+    private static bool SuppressesImplicitRestore(string command)
+        => Regex.IsMatch(RemoveExpressions(command), @"(^|\s)--no-(restore|build)(\s|$)");
+
+    /// <summary>ソリューションに含まれる csproj（ソリューションルートからの相対、<c>/</c> 区切り）。</summary>
+    private static List<string> GetSolutionProjects()
+    {
+        var sln = File.ReadAllText(Path.Combine(TestPaths.GetSolutionRoot(), "ICCardManager.sln"));
+        return Regex.Matches(sln, @"^Project\(""[^""]*""\)\s*=\s*""[^""]*"",\s*""([^""]+\.csproj)""", RegexOptions.Multiline)
+            .Cast<Match>()
+            .Select(m => m.Groups[1].Value.Replace('\\', '/'))
+            .ToList();
+    }
 
     /// <summary>GitHub Actions の式（<c>${{ … }}</c>）。</summary>
     private static readonly Regex ActionsExpression = new(@"\$\{\{.*?\}\}", RegexOptions.Compiled);

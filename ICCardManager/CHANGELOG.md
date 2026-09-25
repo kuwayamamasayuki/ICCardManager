@@ -3,6 +3,15 @@
 ### Unreleased
 
 **不具合修正**
+- Issue #2117 **CI のロックファイル（`packages.lock.json`）が何も固定しておらず、本体のパッケージ更新にテストと DebugDataViewer のロックファイルが追随していなかった**のを是正し、削除した複製 ci.yml にあった設定案 3 つの採否を決めた
+  - `dotnet restore --locked-mode` を**採用**。全ワークフローの復元をロックモードにし、後続の build/test/publish/format に `--no-restore`（または `--no-build`）を付けた。素の restore は食い違いをロックファイルの書き換えで黙って吸収するため、Dependabot の ClosedXML 更新（#1713）がテストと DebugDataViewer のロックファイルに反映されていないことに誰も気付けなかった。3 つのロックファイルを再生成した
+  - アクションの commit SHA 固定を**採用**。全ワークフローの `uses:` をタグから `owner/repo@<SHA> # vX.Y.Z` へ変えた（固定時点の各メジャータグと同じコミットなので挙動は変わらない）。Dependabot は SHA と版数コメントを一緒に更新する
+  - カバレッジの閾値は**見送り**。行カバレッジはテストが何を表明しているかを測らないため、合否には使わない。代わりに実測値をジョブのサマリーへ出すステップを加えた。codecov への送信はトークンが無く毎回拒否されていた（`continue-on-error` で緑のまま）ため、送信ステップを削除した。外部から毎回取得する CLI のリスクとトークン管理に見合う使い方（PR ごとのパッチカバレッジの確認）が無いと判断した
+  - Release で集めたカバレッジが**常に 0% の空のレポート**だったのを是正した。本体の csproj は Release で PDB を作らず（`DebugType=none`）、coverlet は PDB の無いアセンブリを計装できない。ci.yml の Release ビルドにだけ `-p:DebugType=portable` を付けた（配布物のビルドは変えていない）。是正後の実測は行 61.3%／分岐 60.9%
+  - 開発者ガイドにパッケージ更新時のロックファイル更新手順（`dotnet restore --force-evaluate`）を追記し、ClosedXML の版数表記（0.105.0 → 0.105.1）を実態に合わせた
+  - リポジトリ直下に `global.json` を置き、SDK を 8.0 系（`rollForward: latestFeature`）に固定した。ロックファイルの中身は SDK の版で変わり（SDK 8 は RID `win7-x86` と暗黙の `Microsoft.NETFramework.ReferenceAssemblies` 参照を書き、SDK 10 は書かない）、ランナーに入っている SDK 10 で復元されると NU1004 で失敗するため。配布用インストーラーを作る開発機の SDK とも揃う
+  - `Directory.Build.targets` を新設し、`Microsoft.NETFramework.ReferenceAssemblies` を明示的に参照した。SDK はこれを「マシンに .NET Framework の targeting pack が無いときだけ」暗黙に追加するため、pack の無い開発機と pack のある CI のランナーでロックファイルの中身が食い違っていた
+  - 単体テスト +9（`CiWorkflowConventionTests` 16→25）で 7,837→7,846、合計 7,909→7,918
 - Issue #2116 **リリース用のワークフロー（release.yml）のテストにハング対策が無く、デッドロックするとタグを打ったリリースが既定の上限（6 時間）まで止まり続ける状態だった**のを是正した
   - release.yml の `dotnet test` に `--blame-hang-timeout 5m --blame-hang-dump-type none` を、`build-release` ジョブに `timeout-minutes: 45` を付けた。test-count-sync-check.yml（30 分）・vulnerability-scan.yml（15 分）・screenshot-sync-check.yml（15 分）のジョブにも `timeout-minutes` を付けた
   - 回帰を防ぐ静的検査 `CiWorkflowConventionTests` の「すべての dotnet test にハング検出」「すべてのジョブに timeout-minutes」は、名前に反して ci.yml しか読んでいなかった。走査対象を `.github/workflows` から導出するよう広げた（ファイル名で列挙しない）

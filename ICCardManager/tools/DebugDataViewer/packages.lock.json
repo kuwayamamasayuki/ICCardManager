@@ -76,15 +76,15 @@
       },
       "ClosedXML": {
         "type": "Transitive",
-        "resolved": "0.105.0",
-        "contentHash": "U0hAdnYyPvF7TqHMFloxrS7pmozab79tFFF4c/bgPtqeelUs7ILpUd3r3c7C0a/DXsUZb3k1n4Pf7Q2LMyMQOg==",
+        "resolved": "0.105.1",
+        "contentHash": "X1ruIP9h2FBEK7jmO0peq3s6/Zqt5ve5a9f9kn6WUjdsUWvGbQlqxuGLz822xuFLlmnSeAfWFTGeX/tZlmAt+g==",
         "dependencies": {
           "ClosedXML.Parser": "2.0.0",
           "DocumentFormat.OpenXml": "[3.1.1, 4.0.0)",
           "ExcelNumberFormat": "1.1.0",
           "Microsoft.Bcl.HashCode": "1.1.1",
           "RBush.Signed": "4.0.0",
-          "SixLabors.Fonts": "1.0.0",
+          "SixLabors.Fonts": "[1.0.0, 3.0.0)",
           "System.Buffers": "4.5.1",
           "System.Memory": "4.5.5"
         }
@@ -531,7 +531,7 @@
       "iccardmanager": {
         "type": "Project",
         "dependencies": {
-          "ClosedXML": "[0.105.0, )",
+          "ClosedXML": "[0.105.1, )",
           "CommunityToolkit.Mvvm": "[8.4.2, )",
           "FelicaLib.DotNet": "[1.2.67, )",
           "Microsoft.Extensions.Caching.Memory": "[8.0.1, )",
@@ -543,6 +543,7 @@
           "System.Data.SQLite.Core": "[1.0.119, )"
         }
       }
-    }
+    },
+    ".NETFramework,Version=v4.8/win7-x86": {}
   }
 }
