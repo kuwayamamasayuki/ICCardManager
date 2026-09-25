@@ -4,6 +4,12 @@ on:
   push:
     tags:
       - 'v*'
+  # タグを打つ前にワークフロー自体を試走するための手動実行（Issue #2116）。
+  # 復元・ビルド・テスト・発行・ZIP 作成までを行い、GitHub Release の作成はタグの push に限る
+  # （「Create Release」の if:）。条件を外すと、手動実行がブランチ名のリリースを公開する。手動実行ではタグを ref に
+  # 選べるため、ref だけで判定すると既存タグでの試走が公開済みの Release の ZIP を差し替える（event_name も見る）。
+  # 試走は main で行う（ZIP 名に github.ref_name を使うため、/ を含むブランチ名では ZIP 作成が失敗する）。
+  workflow_dispatch:
 
 env:
   DOTNET_VERSION: '8.0.x'
@@ -11,8 +17,12 @@ env:
   DOTNET_CLI_TELEMETRY_OPTOUT: true
 
 jobs:
+  # ハングへの備えは ci.yml と同じ二段（Issue #2099 / #2116）。--blame-hang-timeout は止まったテストの名前を
+  # 記録して実行を打ち切り、timeout-minutes はそれ以外（復元・ビルド・発行の停止）を止める。
+  # どちらも無いと、デッドロックはジョブの既定上限（6 時間）までの停止になり、リリースが出ない理由も分からない。
   build-release:
     runs-on: windows-latest
+    timeout-minutes: 45
     permissions:
       contents: write
 
@@ -36,7 +46,7 @@ jobs:
       run: dotnet build --no-restore --configuration Release
 
     - name: Run tests
-      run: dotnet test tests/ICCardManager.Tests/ICCardManager.Tests.csproj --no-build --configuration Release --verbosity normal
+      run: dotnet test tests/ICCardManager.Tests/ICCardManager.Tests.csproj --no-build --configuration Release --verbosity normal --blame-hang-timeout 5m --blame-hang-dump-type none
 
     - name: Publish
       run: |
@@ -57,6 +67,7 @@ jobs:
       shell: pwsh
 
     - name: Create Release
+      if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
       uses: softprops/action-gh-release@v3
       with:
         name: ICCardManager ${{ steps.version.outputs.VERSION }}

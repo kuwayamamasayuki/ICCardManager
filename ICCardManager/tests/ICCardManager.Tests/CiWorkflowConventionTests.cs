@@ -25,6 +25,11 @@ namespace ICCardManager.Tests;
 /// 複製は Issue #2115 で削除し、検査もファイル名ではなく <c>.github</c> ディレクトリ単位へ広げた。
 /// </para>
 /// <para>
+/// Issue #2116: ③の検査（ハング検出・timeout-minutes）は「すべての〜」と名乗りながら ci.yml しか読んでおらず、
+/// release.yml のテストにはハング対策が無かった。走査対象を <c>.github/workflows</c> から導出し、
+/// <c>${{ }}</c> の式の中にだけあるフラグ（片方の構成でしか付かない）は「付いている」とみなさないようにした。
+/// </para>
+/// <para>
 /// ワークフローは YAML だが、テストプロジェクトに YAML パーサーは無いため行単位で読む。
 /// 読み取りの前提（字下げ・1 行 1 コマンド）が崩れたときは<b>赤へ倒れる</b>よう書いている
 /// （例: <c>dotnet test</c> を複数行へ折り返すと、フラグの無い行として検出される）。
@@ -35,7 +40,30 @@ public class CiWorkflowConventionTests
 {
     private static string RepositoryRoot => Path.GetDirectoryName(TestPaths.GetSolutionRoot())!;
 
-    private static string CiWorkflowPath => Path.Combine(RepositoryRoot, ".github", "workflows", "ci.yml");
+    private static string WorkflowsDirectory => Path.Combine(RepositoryRoot, ".github", "workflows");
+
+    private static string CiWorkflowPath => Path.Combine(WorkflowsDirectory, "ci.yml");
+
+    /// <summary>
+    /// GitHub Actions が読むすべてのワークフロー（ファイル名 → 内容）。ディレクトリから導出する（Issue #2116）。
+    /// </summary>
+    /// <remarks>
+    /// #2099 のハング対策の検査は ci.yml だけを読んでいたため、同じ <c>dotnet test</c> を持つ release.yml の
+    /// 欠落を検出できなかった。ファイル名で列挙すると、ワークフローを足したときに静かに漏れる（#1786）。
+    /// </remarks>
+    private static IReadOnlyList<(string Name, string Content)> AllWorkflows()
+    {
+        var workflows = Directory.GetFiles(WorkflowsDirectory)
+            .Where(f => f.EndsWith(".yml", StringComparison.OrdinalIgnoreCase)
+                        || f.EndsWith(".yaml", StringComparison.OrdinalIgnoreCase))
+            .OrderBy(f => f, StringComparer.Ordinal)
+            .Select(f => (Path.GetFileName(f), File.ReadAllText(f)))
+            .ToList();
+
+        workflows.Select(w => w.Item1).Should().Contain(new[] { "ci.yml", "release.yml" },
+            "導出が空振りすると、以降の検査が無検査で緑になる");
+        return workflows;
+    }
 
     #region 検出ロジックの固定
 
@@ -99,6 +127,8 @@ jobs:
 
         ExtractJobs("jobs:\n  a:\n    timeout-minutes: 5\n  b:  # 行末コメント\n    runs-on: x\n").Keys
             .Should().Equal(new[] { "a", "b" }, "行末コメント付きの見出しを前のジョブへ併合しない");
+        ExtractJobs("jobs:\n  a:\n    timeout-minutes: 5\n# 字下げ 0 のコメント\n  b:\n    runs-on: x\nenv:\n  c: 1\n").Keys
+            .Should().Equal(new[] { "a", "b" }, "字下げ 0 のコメントで走査を打ち切らず、後続のジョブを読み飛ばさない。jobs: の外（env:）では止まる");
 
         IsCategoryExclusionOnly("Category!=UI&Category!=Screenshot").Should().BeTrue();
         IsCategoryExclusionOnly("Category!=UI&FullyQualifiedName~Foo").Should().BeFalse();
@@ -107,6 +137,60 @@ jobs:
         steps.Should().ContainSingle().Which.Should().StartWith("    - name: Other");
         ExtractStepsContaining(SampleWorkflow + "      continue-on-error: true\n", "tests/Foo/Foo.csproj")
             .Single().Should().Contain("continue-on-error", "ステップの後続行（字下げが深い）まで含める");
+    }
+
+    /// <summary>
+    /// <c>${{ }}</c> の式を含む <c>dotnet test</c> の行を、無条件に付くフラグと条件付きのフラグに分けて読めること
+    /// （Issue #2116）。式の中にだけあるフラグは片方の構成でしか付かないため、「行に含まれるか」で数えると
+    /// Debug でハング検出が外れた形も適合に見える。
+    /// </summary>
+    [Fact]
+    public void 検出ロジックが式を含むdotnet_testの行を無条件の部分と条件付きの部分に分けられること()
+    {
+        const string workflow =
+            "    - name: Run tests\n" +
+            "      run: dotnet test --configuration ${{ matrix.configuration }} --filter \"Category!=UI\" --blame-hang-timeout 5m " +
+            "${{ matrix.configuration == 'Release' && '--collect:\"XPlat Code Coverage\" --results-directory ./coverage' || '' }}\n";
+
+        var command = ExtractDotnetTestCommands(workflow).Should().ContainSingle().Subject;
+
+        var unconditional = RemoveExpressions(command);
+        unconditional.Should().NotContain("${{").And.NotContain("--collect", "条件付きのフラグは無条件の部分に残さない");
+        unconditional.Should().Contain("--blame-hang-timeout 5m", "式の外のフラグは残す");
+        ExtractFilterExpression(unconditional).Should().Be("Category!=UI", "式の中の引用符に惑わされずに filter を読む");
+
+        var expressions = ExtractExpressions(command);
+        expressions.Should().HaveCount(2);
+        expressions[0].Should().Be("${{ matrix.configuration }}");
+        IsReleaseOnlyExpression(expressions[1]).Should().BeTrue();
+
+        IsReleaseOnlyExpression("${{ matrix.configuration }}").Should().BeFalse("構成の値を展開するだけの式は条件ではない");
+        IsReleaseOnlyExpression("${{ matrix.configuration == 'Debug' && '--collect:x' || '' }}").Should().BeFalse();
+        IsReleaseOnlyExpression("${{ matrix.configuration != 'Release' && '--collect:x' || '' }}").Should().BeFalse();
+        IsReleaseOnlyExpression("${{ matrix.configuration == 'Release' && '--collect:x' || '--collect:y' }}").Should().BeFalse(
+            "else 側にもフラグがあると Debug でも収集する");
+
+        RemoveExpressions("dotnet test ${{ matrix.configuration == 'Release' && '--blame-hang-timeout 5m' || '' }}")
+            .Should().NotContain("--blame-hang-timeout", "片方の構成でしか付かないハング検出は、付いているとみなさない");
+    }
+
+    /// <summary>
+    /// Release を作るステップがタグの実行に限られていることを、ステップの <c>if:</c> から読めること（Issue #2116）。
+    /// </summary>
+    [Fact]
+    public void 検出ロジックがステップの条件からタグの実行に限られていることを読めること()
+    {
+        IsGatedToTagRef("    - name: Create Release\n      if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')\n      uses: x\n").Should().BeTrue();
+        IsGatedToTagRef("    - name: Create Release\n      if: ${{ github.event_name == 'push' && startsWith(github.ref, 'refs/tags/') }}\n      uses: x\n").Should().BeTrue();
+        IsGatedToTagRef("    - name: Create Release\n      if: startsWith(github.ref, 'refs/tags/v')\n      uses: x\n").Should().BeFalse(
+            "手動実行でも ref にタグを選べるため、ref だけの条件では既存タグでの試走が Release を作成・上書きする");
+        IsGatedToTagRef("    - name: Create Release\n      if: github.event_name == 'push' || startsWith(github.ref, 'refs/tags/v')\n      uses: x\n").Should().BeFalse(
+            "|| で合成するとどちらか一方で通ってしまう");
+        IsGatedToTagRef("    - name: Create Release\n      uses: x\n").Should().BeFalse("条件の無いステップは手動実行でも走る");
+        IsGatedToTagRef("    - name: Create Release\n      if: github.event_name != 'pull_request'\n      uses: x\n").Should().BeFalse(
+            "タグ以外の条件は手動実行を止めない");
+        IsGatedToTagRef("    - name: Create Release\n      # if: startsWith(github.ref, 'refs/tags/')\n      uses: x\n").Should().BeFalse(
+            "コメントアウトした条件は効かない");
     }
 
     [Fact]
@@ -155,7 +239,8 @@ jobs:
 
             foreach (var command in direct)
             {
-                var filter = ExtractFilterExpression(command);
+                // 式の中の filter は片方の構成でしか付かないため、無条件の部分から読む（Issue #2116）
+                var filter = ExtractFilterExpression(RemoveExpressions(command));
                 filter.Should().NotBeNull($"アプリを起動するテストを除く filter が要る: {command}");
                 filter.Should().Contain("Category!=UI", "GUI を要するテスト（Category=UI）は CI のランナーでは実行できない");
                 IsCategoryExclusionOnly(filter!).Should().BeTrue(
@@ -252,31 +337,105 @@ jobs:
 
     #region ③ハング対策
 
+    /// <summary>
+    /// すべてのワークフローのすべての <c>dotnet test</c> にハング検出が無条件に付いていること。
+    /// 走査対象は <c>.github/workflows</c> から導出する（Issue #2116。#2099 では ci.yml しか見ておらず、
+    /// release.yml のテストには付いていなかった）。
+    /// </summary>
     [Fact]
     public void すべてのdotnet_testにハング検出が付いていること()
     {
-        var commands = ExtractDotnetTestCommands(File.ReadAllText(CiWorkflowPath));
-        commands.Should().NotBeEmpty();
+        var checkedWorkflows = new List<string>();
 
-        foreach (var command in commands)
+        foreach (var (file, content) in AllWorkflows())
         {
-            command.Should().Contain("--blame-hang-timeout",
-                "1 件のテストが止まったとき、そのテスト名を記録して実行を打ち切るため（Issue #2099）。" +
-                "無いとデッドロックは失敗ではなく CI の停止になる");
+            var commands = ExtractDotnetTestCommands(content);
+            if (commands.Count > 0)
+            {
+                checkedWorkflows.Add(file);
+            }
+
+            foreach (var command in commands)
+            {
+                RemoveExpressions(command).Should().Contain("--blame-hang-timeout",
+                    $"{file}: 1 件のテストが止まったとき、そのテスト名を記録して実行を打ち切るため（Issue #2099 / #2116）。" +
+                    "無いとデッドロックは失敗ではなく CI の停止になる。${{ }} の式の中に置くと片方の構成でしか付かない: " + command);
+            }
         }
+
+        checkedWorkflows.Should().Contain(new[] { "ci.yml", "release.yml" },
+            "テストを実行するワークフローを 1 つも読めていなければ、この検査は無検査で緑になる");
     }
 
+    /// <summary>
+    /// すべてのワークフローのすべてのジョブに <c>timeout-minutes</c> があること（Issue #2099 / #2116）。
+    /// テストを実行しないジョブも対象にする — 復元・ビルド・外部コマンドの停止も既定の 6 時間まで続く。
+    /// </summary>
     [Fact]
     public void すべてのジョブにtimeout_minutesが設定されていること()
     {
-        var jobs = ExtractJobs(File.ReadAllText(CiWorkflowPath));
-        jobs.Should().NotBeEmpty();
+        var checkedJobs = new List<string>();
 
-        foreach (var (name, block) in jobs.Select(j => (j.Key, j.Value)))
+        foreach (var (file, content) in AllWorkflows())
         {
-            var minutes = ExtractTimeoutMinutes(block);
-            minutes.Should().NotBeNull($"ジョブ {name} に timeout-minutes が無いと、既定の 6 時間まで止まり続ける（Issue #2099）");
-            minutes!.Value.Should().BeInRange(1, 60, $"ジョブ {name} の上限は通常の所要時間（6 分前後）に見合う値にする");
+            var jobs = ExtractJobs(content);
+            jobs.Should().NotBeEmpty($"{file} からジョブを 1 つも読めない場合は読み取りの前提（jobs: 直下の字下げ 2）を疑うこと");
+
+            foreach (var (name, block) in jobs.Select(j => (j.Key, j.Value)))
+            {
+                checkedJobs.Add($"{file}:{name}");
+                var minutes = ExtractTimeoutMinutes(block);
+                minutes.Should().NotBeNull($"{file} のジョブ {name} に timeout-minutes が無いと、既定の 6 時間まで止まり続ける（Issue #2099 / #2116）");
+                minutes!.Value.Should().BeInRange(1, 60, $"{file} のジョブ {name} の上限は通常の所要時間に見合う値にする");
+            }
+        }
+
+        checkedJobs.Should().Contain(new[] { "ci.yml:build-and-test", "release.yml:build-release" },
+            "導出が空振りすると無検査で緑になる");
+    }
+
+    /// <summary>
+    /// カバレッジは送信する構成（Release）でだけ収集する（Issue #2116）。送信ステップは
+    /// <c>if: matrix.configuration == 'Release'</c> で Release に限っているため、Debug で収集しても時間を使うだけになる。
+    /// 対の表明として、Release では収集していること（送信するものが無くならないこと）も見る。
+    /// </summary>
+    [Fact]
+    public void カバレッジの収集はReleaseの構成に限られていること()
+    {
+        var commands = ExtractDotnetTestCommands(File.ReadAllText(CiWorkflowPath));
+        var collecting = commands.Where(c => c.Contains("--collect")).ToList();
+
+        collecting.Should().NotBeEmpty("Release のカバレッジを収集しなくなると、送信ステップが空振りする");
+
+        foreach (var command in collecting)
+        {
+            RemoveExpressions(command).Should().NotContain("--collect",
+                "無条件に付けると Debug でも収集し、送信されない結果のために時間を使う: " + command);
+            ExtractExpressions(command).Where(e => e.Contains("--collect")).Should().OnlyContain(
+                e => IsReleaseOnlyExpression(e),
+                "収集のフラグは ${{ matrix.configuration == 'Release' && '...' || '' }} の形で Release に限る");
+        }
+    }
+
+    /// <summary>
+    /// GitHub Release を作るステップは、タグの実行でだけ走ること（Issue #2116）。
+    /// release.yml はタグを打つ前に試せるよう <c>workflow_dispatch</c> を持つため、条件が無いと
+    /// 手動実行が「ブランチ名のリリース」を公開してしまう。対象はステップの内容（使う Action）から導出する。
+    /// </summary>
+    [Fact]
+    public void GitHub_Releaseを作るステップはタグの実行に限られていること()
+    {
+        var releaseSteps = AllWorkflows()
+            .SelectMany(w => ExtractStepsContaining(w.Content, "action-gh-release").Select(s => (w.Name, Step: s)))
+            .ToList();
+
+        releaseSteps.Select(s => s.Name).Should().Contain("release.yml", "導出が空振りすると無検査で緑になる");
+
+        foreach (var (file, step) in releaseSteps)
+        {
+            IsGatedToTagRef(step).Should().BeTrue(
+                $"{file}: Release を作るステップに startsWith(github.ref, 'refs/tags/') の条件が無いと、" +
+                "workflow_dispatch の試走で公開のリリースが作られる:\n" + step);
         }
     }
 
@@ -493,9 +652,9 @@ jobs:
         for (var i = jobsIndex + 1; i < lines.Length; i++)
         {
             var line = lines[i];
-            if (Regex.IsMatch(line, @"^\S"))
+            if (Regex.IsMatch(line, @"^[^\s#]"))
             {
-                break; // jobs: の外へ出た
+                break; // jobs: の外へ出た（字下げ 0 のコメントは jobs: の内側にも置けるので、境界とみなさない）
             }
 
             var header = Regex.Match(line, @"^  ([A-Za-z0-9_-]+):\s*(#.*)?$");
@@ -543,6 +702,39 @@ jobs:
             .Where(l => Regex.IsMatch(l, @"\bdotnet\s+test\b"))
             .Select(l => l.Trim())
             .ToList();
+
+    /// <summary>GitHub Actions の式（<c>${{ … }}</c>）。</summary>
+    private static readonly Regex ActionsExpression = new(@"\$\{\{.*?\}\}", RegexOptions.Compiled);
+
+    /// <summary>行に含まれる <c>${{ … }}</c> の式を、出現順に返す。</summary>
+    private static List<string> ExtractExpressions(string command)
+        => ActionsExpression.Matches(command).Cast<Match>().Select(m => m.Value).ToList();
+
+    /// <summary>
+    /// 式を取り除いた「無条件に付く部分」。式の中のフラグは構成によって付いたり付かなかったりするため、
+    /// 「必ず付いていること」を見る検査はこちらを読む（Issue #2116）。
+    /// </summary>
+    private static string RemoveExpressions(string command) => ActionsExpression.Replace(command, " ");
+
+    /// <summary>
+    /// <c>${{ matrix.configuration == 'Release' &amp;&amp; '…' || '' }}</c> の形か（Release のときだけ文字列を足し、
+    /// それ以外では何も足さない）。
+    /// </summary>
+    private static bool IsReleaseOnlyExpression(string expression)
+        => Regex.IsMatch(
+            expression,
+            @"^\$\{\{\s*matrix\.configuration\s*==\s*'Release'\s*&&\s*'[^']*'\s*\|\|\s*''\s*\}\}$");
+
+    /// <summary>
+    /// ステップのブロックに、タグの push に限る <c>if:</c>
+    /// （<c>github.event_name == 'push' &amp;&amp; startsWith(github.ref, 'refs/tags/…')</c>）があるか。
+    /// ref だけでは足りない — <c>workflow_dispatch</c> でも ref にタグを選べる（Issue #2116 のコードレビューで検出）。
+    /// </summary>
+    private static bool IsGatedToTagRef(string step)
+        => Regex.IsMatch(
+            step,
+            @"^\s*if:\s*(\$\{\{\s*)?github\.event_name\s*==\s*'push'\s*&&\s*startsWith\(\s*github\.ref\s*,\s*'refs/tags/[^']*'\s*\)\s*(\}\})?\s*$",
+            RegexOptions.Multiline);
 
     private static string? ExtractFilterExpression(string command)
     {

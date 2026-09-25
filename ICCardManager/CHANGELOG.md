@@ -3,6 +3,12 @@
 ### Unreleased
 
 **不具合修正**
+- Issue #2116 **リリース用のワークフロー（release.yml）のテストにハング対策が無く、デッドロックするとタグを打ったリリースが既定の上限（6 時間）まで止まり続ける状態だった**のを是正した
+  - release.yml の `dotnet test` に `--blame-hang-timeout 5m --blame-hang-dump-type none` を、`build-release` ジョブに `timeout-minutes: 45` を付けた。test-count-sync-check.yml（30 分）・vulnerability-scan.yml（15 分）・screenshot-sync-check.yml（15 分）のジョブにも `timeout-minutes` を付けた
+  - 回帰を防ぐ静的検査 `CiWorkflowConventionTests` の「すべての dotnet test にハング検出」「すべてのジョブに timeout-minutes」は、名前に反して ci.yml しか読んでいなかった。走査対象を `.github/workflows` から導出するよう広げた（ファイル名で列挙しない）
+  - ci.yml の Debug ジョブが、送信しないカバレッジを収集していた。`${{ matrix.configuration == 'Release' && '…' || '' }}` の式で収集を Release に限った。式の中にだけあるフラグは片方の構成でしか付かないため、ハング検出の検査は式を取り除いた部分を読むようにした（Debug だけハング検出が外れる形も検出する）
+  - release.yml に `workflow_dispatch` を足し、タグを打つ前に main でワークフローを試走できるようにした。GitHub Release の作成はタグの実行に限り（`if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')`）、この条件が外れていないことも静的検査で固定した
+  - 単体テスト +4（`CiWorkflowConventionTests` 12→16）で 7,833→7,837、合計 7,905→7,909
 - Issue #2112 **履歴画面が、表示期間の最初の利用日に同額のポイント還元と利用がある月で、正しい行を「残高の不整合」として強調することがあった**のを是正した
   - 残高チェックは同じ日の行の並び順を残高のつながりから決めるが、その日の残高が元の金額へ戻る形（同額のポイント還元と利用）だと、どちらが先かを当日の行だけでは決められない。履歴画面と帳票は期間より前の最終残高を手がかりに並べていたが、残高チェックだけが手がかりを渡しておらず、登録順で並べていた。登録順が実際の順と逆だと、その日の最終残高を取り違え、**正しい次の利用日の行**を履歴グリッドで不整合として強調していた
   - メイン画面の警告エリアの「残高の不整合」警告は全期間（最初の履歴から）で判定しており、期間の初日より前に行が無いため影響を受けていなかった。誤っていたのは表示期間の判定を使う強調表示だけである

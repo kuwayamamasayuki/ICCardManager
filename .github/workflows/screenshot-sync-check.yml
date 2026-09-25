@@ -22,8 +22,10 @@ on:
       - '.github/workflows/screenshot-sync-check.yml'
 
 jobs:
+  # ジョブの上限（Issue #2116）。git の差分と判定スクリプトだけなので、止まったときに既定の 6 時間まで待たない。
   screenshot-sync:
     runs-on: windows-latest
+    timeout-minutes: 15
 
     steps:
       - name: Checkout
