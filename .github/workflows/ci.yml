@@ -71,8 +71,8 @@ jobs:
     - name: Build
       run: dotnet build --no-restore --configuration ${{ matrix.configuration }} ${{ matrix.configuration == 'Release' && '-p:DebugType=portable -p:DebugSymbols=true' || '' }}
 
-    # カバレッジは送信・報告する Release でだけ収集する（Issue #2116）。送信ステップ（Upload coverage reports）と
-    # 報告ステップ（Report coverage）が Release に限られているため、Debug で収集しても時間を使うだけになる。
+    # カバレッジは報告する Release でだけ収集する（Issue #2116）。報告ステップ（Report coverage）が
+    # Release に限られているため、Debug で収集しても時間を使うだけになる。
     # 収集の設定（マイグレーション・自動生成コードの除外）は coverlet.runsettings に置く（Issue #2117）。
     - name: Run tests
       run: dotnet test --no-build --configuration ${{ matrix.configuration }} --verbosity normal --filter "Category!=UI" --blame-hang-timeout 5m --blame-hang-dump-type none ${{ matrix.configuration == 'Release' && '--collect:"XPlat Code Coverage" --settings tests/ICCardManager.Tests/coverlet.runsettings --results-directory ./coverage' || '' }}
@@ -83,19 +83,12 @@ jobs:
     - name: Run GUI-free tests in UITests project
       run: dotnet test tests/ICCardManager.UITests/ICCardManager.UITests.csproj --no-build --configuration ${{ matrix.configuration }} --verbosity normal --filter "Category!=UI&Category!=Screenshot" --blame-hang-timeout 5m --blame-hang-dump-type none
 
-    - name: Upload coverage reports
-      if: matrix.configuration == 'Release'
-      uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
-      with:
-        directory: ./ICCardManager/coverage
-        fail_ci_if_error: false
-      continue-on-error: true
-
     # カバレッジは閾値で合否を決めず、実測値をジョブのサマリーへ出すだけにする（Issue #2117）。
     # 行カバレッジは「テストが何を表明しているか」を測らない（.claude/rules/testing.md「カバレッジだけでなく、
     # 実際の品質を重視する」）。閾値を置くと、表明の無いテストで数字を満たす方向へ誘導する。
-    # 一方で数字が誰の目にも触れない状態も避ける — 上の codecov への送信はトークンが無く、
-    # 「Token required」で毎回失敗していた（continue-on-error で緑のまま）。
+    # 一方で数字が誰の目にも触れない状態も避ける。以前は codecov へ送信していたが、トークンが無く
+    # 「Token required」で毎回失敗しており（continue-on-error で緑のまま）、外部から毎回取得する CLI の
+    # リスクとトークン管理に見合う使い方も無かったため削除した（Issue #2117）。
     - name: Report coverage
       if: matrix.configuration == 'Release'
       shell: pwsh

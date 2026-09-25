@@ -395,9 +395,9 @@ jobs:
     }
 
     /// <summary>
-    /// カバレッジは送信する構成（Release）でだけ収集する（Issue #2116）。送信ステップは
+    /// カバレッジは報告する構成（Release）でだけ収集する（Issue #2116）。報告ステップ（Report coverage）は
     /// <c>if: matrix.configuration == 'Release'</c> で Release に限っているため、Debug で収集しても時間を使うだけになる。
-    /// 対の表明として、Release では収集していること（送信するものが無くならないこと）も見る。
+    /// 対の表明として、Release では収集していること（報告するものが無くならないこと）も見る。
     /// </summary>
     [Fact]
     public void カバレッジの収集はReleaseの構成に限られていること()
@@ -405,12 +405,12 @@ jobs:
         var commands = ExtractDotnetTestCommands(File.ReadAllText(CiWorkflowPath));
         var collecting = commands.Where(c => c.Contains("--collect")).ToList();
 
-        collecting.Should().NotBeEmpty("Release のカバレッジを収集しなくなると、送信ステップが空振りする");
+        collecting.Should().NotBeEmpty("Release のカバレッジを収集しなくなると、報告ステップが空振りする");
 
         foreach (var command in collecting)
         {
             RemoveExpressions(command).Should().NotContain("--collect",
-                "無条件に付けると Debug でも収集し、送信されない結果のために時間を使う: " + command);
+                "無条件に付けると Debug でも収集し、報告されない結果のために時間を使う: " + command);
             ExtractExpressions(command).Where(e => e.Contains("--collect")).Should().OnlyContain(
                 e => IsReleaseOnlyExpression(e),
                 "収集のフラグは ${{ matrix.configuration == 'Release' && '...' || '' }} の形で Release に限る");
