@@ -86,6 +86,31 @@ public class DbContextResilienceTests : IDisposable
         result.Should().Be(15000);
     }
 
+    /// <summary>
+    /// ローカルモードでDB接続時にbusy_timeout PRAGMAが正しく設定されること
+    /// </summary>
+    /// <remarks>
+    /// Issue #2135: 「接続に設定されていること」はここで決定的に表明し、「実際に待機してロック解放後に成功すること」は
+    /// <c>DbContextSharedModeTests</c> の同時書き込みテストが実時間で表明する。挙動テストはランナーの負荷で
+    /// 判定できない回をやり直すため、PRAGMA が消えた退行をこちらでも確実に捕まえる。
+    /// </remarks>
+    [Fact]
+    [Trait("Category", "Unit")]
+    public void 接続リース_ローカルモードでbusy_timeoutが5000msに設定されること()
+    {
+        var dbPath = Path.Combine(_testDirectory, "pragma_local.db");
+        using var dbContext = new DbContext(dbPath);
+        dbContext.IsSharedMode.Should().BeFalse();
+        using var lease = dbContext.LeaseConnection();
+
+        using var command = lease.Connection.CreateCommand();
+        command.CommandText = "PRAGMA busy_timeout;";
+        var result = Convert.ToInt32(command.ExecuteScalar());
+
+        result.Should().Be(DbContext.LocalBusyTimeoutMs);
+        result.Should().Be(5000);
+    }
+
     #endregion
 
     #region リトライ戦略テスト

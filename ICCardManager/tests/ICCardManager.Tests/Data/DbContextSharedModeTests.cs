@@ -1,11 +1,15 @@
 ﻿using System;
+using System.Collections.Generic;
 using System.Data;
+using System.Data.SQLite;
+using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
 using FluentAssertions;
 using ICCardManager.Data;
 using Xunit;
+using Xunit.Sdk;
 
 namespace ICCardManager.Tests.Data;
 
@@ -141,18 +145,97 @@ public class DbContextSharedModeTests : IDisposable
     /// </para>
     /// <para>
     /// ここでは待つ側に <see cref="DbContext"/> の接続（PRAGMA を DbContext 自身が設定したもの）を使い、
-    /// ロックを保持したまま「待つ側が書き込みを発行済みで、まだ終わっていない」ことを表明してから解放する。
+    /// ロックを保持したまま待つ側に書き込みを発行させてから解放する。
     /// </para>
     /// <para>
     /// 待つ側のコマンドは <c>CommandTimeout = 0</c> にする。System.Data.SQLite は SQLITE_BUSY を受けると
     /// <c>CommandTimeout</c>（既定 30 秒）の間、自前で再試行するため、既定のままでは busy_timeout が
     /// 無くてもこの再試行が待機を肩代わりし、DbContext が PRAGMA を設定したかどうかを観測できない。
     /// </para>
+    /// <para>
+    /// Issue #2135: 判定は**待つ側が自分で測った経過時間**で行う。旧版は「テスト本体が 500ms 待つ間に
+    /// 待つ側が終わっていないこと」で判定しており、テスト本体の継続がスレッドプールで busy_timeout
+    /// （5 秒）を超えて遅れると、busy_timeout が効いて 5 秒待ったうえで失敗した待つ側を
+    /// 「待たずに失敗した」と取り違えた（CI の Debug ジョブで 1 回、所要 7 秒で赤）。
+    /// </para>
+    /// <list type="bullet">
+    /// <item>成功: 解放後に書き込めた。経過時間がロックの保持時間以上であることは計測の健全性の確認であって、
+    /// 競合が起きたことの証明ではない（待つ側が合図の直後に解放まで横取りされれば、競合なしでも満たす。
+    /// PRAGMA が消えた退行は <c>DbContextResilienceTests</c> の PRAGMA のテストが決定的に捕まえる）</item>
+    /// <item>SQLITE_BUSY で失敗し、経過時間が busy_timeout の半分未満 ＝ 待たずに失敗した（busy_timeout が効いていない）→ 赤</item>
+    /// <item>SQLITE_BUSY で失敗し、経過時間が busy_timeout の半分以上 ＝ 待機はしたが、テスト本体の解放が間に合わなかった
+    /// → 判定できないので DB を作り直してやり直す（「解放後に成功する」を確かめないまま緑にはしない）</item>
+    /// </list>
+    /// <para>
+    /// PRAGMA が無いときの失敗は数十ミリ秒以内に起き、効いているときの失敗は busy_timeout ちょうどで起きるので、
+    /// 境界を半分に置けば両者の間は広く空く。テスト本体のスケジューリング遅延は待つ側の経過時間を
+    /// **伸ばす方向にしか**働かないため、「待たずに失敗した」を遅延が作り出すことはない。
+    /// </para>
     /// </remarks>
     [Fact]
     public async Task 同時書き込み_他の接続が書き込みロックを保持中はbusy_timeoutで待機しロック解放後に成功すること()
     {
-        var dbPath = Path.Combine(_testDirectory, "concurrent_write.db");
+        var waitedLowerBound = TimeSpan.FromMilliseconds(DbContext.LocalBusyTimeoutMs / 2);
+        var inconclusiveAttempts = new List<string>();
+
+        for (var attempt = 1; attempt <= MaxLockContentionAttempts; attempt++)
+        {
+            var outcome = await RunLockContentionAttemptAsync(
+                Path.Combine(_testDirectory, $"concurrent_write_{attempt}.db"));
+
+            if (outcome.Error == null)
+            {
+                outcome.WaiterElapsed.Should().BeGreaterOrEqualTo(LockHoldDuration - TimerResolutionMargin,
+                    "計測は合図より前に始め、解放は合図から保持時間の後なので、成功時の経過時間は保持時間を下回らない");
+                outcome.StoredValues.Should().Equal("from_holder", "from_waiter");
+                return;
+            }
+
+            outcome.Error.Should().BeOfType<SQLiteException>(
+                "ロック待ち以外の理由で失敗してはならない: " + outcome.Error);
+            ((SQLiteException)outcome.Error).ResultCode.Should().Be(SQLiteErrorCode.Busy,
+                "ロック待ち以外の理由で失敗してはならない: " + outcome.Error.Message);
+            outcome.WaiterElapsed.Should().BeGreaterOrEqualTo(waitedLowerBound,
+                $"待つ側が {outcome.WaiterElapsed.TotalMilliseconds:F0}ms で SQLITE_BUSY により失敗した。" +
+                $"busy_timeout（{DbContext.LocalBusyTimeoutMs}ms）が効いていれば、その間は待機してから失敗する");
+
+            // busy_timeout は効いた（待機してから失敗した）が、テスト本体の解放が間に合わなかった。判定できないのでやり直す
+            inconclusiveAttempts.Add(
+                $"試行 {attempt}: 待つ側は {outcome.WaiterElapsed.TotalMilliseconds:F0}ms 待機して失敗" +
+                $"（ロックの保持 {outcome.LockHeld.TotalMilliseconds:F0}ms）");
+        }
+
+        throw new XunitException(
+            $"{MaxLockContentionAttempts} 回とも、テスト本体がロックを解放する前に待つ側の busy_timeout が満了した。" +
+            "busy_timeout 自体は効いている（待機してから失敗した）が、「解放後に成功すること」を確かめられなかった。" +
+            "ランナーの負荷が高い可能性がある: " + string.Join(" / ", inconclusiveAttempts));
+    }
+
+    /// <summary>
+    /// 同時書き込みテストの試行上限。やり直すのは「待つ側は待機したが、テスト本体の解放が間に合わなかった」ときだけ
+    /// </summary>
+    private const int MaxLockContentionAttempts = 3;
+
+    /// <summary>待つ側が書き込みを発行してから、ロックを保持し続ける時間</summary>
+    private static readonly TimeSpan LockHoldDuration = TimeSpan.FromMilliseconds(500);
+
+    /// <summary>Task.Delay はタイマー分解能（約 15ms）ぶん早く完了し得るので、その分だけ下限を緩める</summary>
+    private static readonly TimeSpan TimerResolutionMargin = TimeSpan.FromMilliseconds(50);
+
+    private sealed class LockContentionOutcome
+    {
+        public TimeSpan WaiterElapsed { get; set; }
+        public Exception? Error { get; set; }
+        public TimeSpan LockHeld { get; set; }
+        public List<string> StoredValues { get; } = new List<string>();
+    }
+
+    /// <summary>
+    /// 素の接続でロックを取り、別の <see cref="DbContext"/> に書き込みを発行させ、
+    /// <see cref="LockHoldDuration"/> 保持してから解放する。待つ側の経過時間は待つ側自身が測る。
+    /// </summary>
+    private static async Task<LockContentionOutcome> RunLockContentionAttemptAsync(string dbPath)
+    {
         using (var setup = new DbContext(dbPath))
         {
             setup.InitializeDatabase();
@@ -162,8 +245,10 @@ public class DbContextSharedModeTests : IDisposable
             createCmd.ExecuteNonQuery();
         }
 
+        var outcome = new LockContentionOutcome();
+
         // ロックを保持する側（別 PC 相当）。DbContext を通さない素の接続で、busy_timeout は設定しない
-        using var holder = new System.Data.SQLite.SQLiteConnection($"Data Source={dbPath}");
+        using var holder = new SQLiteConnection($"Data Source={dbPath}");
         holder.Open();
         using (var beginCmd = holder.CreateCommand())
         {
@@ -181,18 +266,30 @@ public class DbContextSharedModeTests : IDisposable
             using var insertCmd = lease.Connection.CreateCommand();
             insertCmd.CommandText = "INSERT INTO test (value) VALUES ('from_waiter')";
             insertCmd.CommandTimeout = 0;
+            // 計測は合図より前に始める。テスト本体は合図を見てからロックを保持し始めるので、
+            // 成功時の経過時間は必ずロックの保持時間以上になる
+            var stopwatch = Stopwatch.StartNew();
             insertIssued.SetResult(true);
-            insertCmd.ExecuteNonQuery();
+            try
+            {
+                insertCmd.ExecuteNonQuery();
+            }
+            catch (Exception ex)
+            {
+                outcome.Error = ex;
+            }
+            finally
+            {
+                outcome.WaiterElapsed = stopwatch.Elapsed;
+            }
         });
 
         (await Task.WhenAny(insertIssued.Task, Task.Delay(TimeSpan.FromSeconds(10))))
             .Should().BeSameAs(insertIssued.Task, "待つ側が書き込みを発行するところまで進むこと");
 
-        // ロックを保持したまま: 待つ側は busy_timeout（ローカルモード 5000ms）で待機中のはず
-        var early = await Task.WhenAny(waiterTask, Task.Delay(500));
-        early.Should().NotBeSameAs(waiterTask,
-            "ロックの保持中に書き込みが終わった（失敗した）なら、busy_timeout が効いていない: " +
-            waiterTask.Exception?.GetBaseException().Message);
+        // ロックを保持したまま待つ。待つ側が途中で終わったかどうかはここでは判定しない（待つ側の経過時間で判定する）
+        var holding = Stopwatch.StartNew();
+        await Task.Delay(LockHoldDuration);
 
         // ロックを解放 → 待つ側の書き込みが成功する
         using (var commitCmd = holder.CreateCommand())
@@ -200,6 +297,7 @@ public class DbContextSharedModeTests : IDisposable
             commitCmd.CommandText = "COMMIT;";
             commitCmd.ExecuteNonQuery();
         }
+        outcome.LockHeld = holding.Elapsed;
 
         (await Task.WhenAny(waiterTask, Task.Delay(TimeSpan.FromSeconds(10))))
             .Should().BeSameAs(waiterTask, "ロック解放後は待機が解けて書き込みが終わること");
@@ -208,12 +306,11 @@ public class DbContextSharedModeTests : IDisposable
         using var selectCmd = holder.CreateCommand();
         selectCmd.CommandText = "SELECT value FROM test ORDER BY id";
         using var reader = selectCmd.ExecuteReader();
-        var values = new System.Collections.Generic.List<string>();
         while (reader.Read())
         {
-            values.Add(reader.GetString(0));
+            outcome.StoredValues.Add(reader.GetString(0));
         }
-        values.Should().Equal("from_holder", "from_waiter");
+        return outcome;
     }
 
     [Fact]
