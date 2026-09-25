@@ -277,6 +277,10 @@
 - **Stop フック `check-doc-sync.sh` のタイムアウトを 15 秒から 60 秒へ引き上げた**。OneDrive 上（`/mnt/d`、DrvFs）の `git status --porcelain` と `git log --name-only` が 15 秒に収まらず、直近の実行 3 回すべてがタイムアウトで打ち切られ、ドキュメント同期の確認が一度も機能していなかった
 
 **リファクタリング**
+- Issue #2115 **GitHub が読まない場所に残っていた設定ファイルの複製 `ICCardManager/.github/workflows/release.yml` と `ICCardManager/.github/dependabot.yml` を削除した**（`ICCardManager/.github/` ごと無くなった）。GitHub Actions も Dependabot もリポジトリ直下の `.github/` しか読まず、どちらも実物と内容が異なっていた（release.yml は別の版、dependabot.yml は `directory` の指定が違い、実物にある運用方針コメントが無い）。#2099 では `ci.yml` の複製だけを削除していた
+  - 静的検査 `CiWorkflowConventionTests` の「ci.yml の複製が無いこと」を「ソリューション配下に `.github` ディレクトリ自体が無いこと」へ広げた。ファイル名で探していたため、同じ場所の release.yml / dependabot.yml を検出できていなかった。削除前のツリーに当てて赤になることを実測した
+  - 検出ロジックを一時ディレクトリの既知の入力で固定するテストを 1 件足した（入れ子の `.github` を拾い、`node_modules`・`bin`・`obj`・`TestResults` は除外する。設計書の図の生成に使う mermaid-cli の `node_modules` には、パッケージ自身の `.github` が開発機で 20 個以上ある）
+  - 単体テスト +1（`CiWorkflowConventionTests` 11→12）で 7,832→7,833、合計 7,904→7,905
 - Issue #2051 **帳票まわりに残っていた本番未使用のコードを削除し、「一本化した」と書かれながら一本化されていなかった帳票幅のリテラルを定数へ寄せた**。次に変更する人が片方だけ直す原因を取り除く（#1763「同じ判断を配らない」／#1924「主張は実装で検算する」）
   - **削除**: `PrintService.CreateCombinedFlowDocumentAsync`（呼び出し元なし。仮に使うと `ConfigureAwait(false)` の後にスレッドプール上で WPF の `FlowDocument` を作り、先頭カードが見つからないだけで null を返し、2 枚目以降は改ページの見積もり `GroupRowsByPage` を通らなかった）／`ReportService.CreateMonthlyReportsAsync`（テストからのみ呼ばれていた。一括作成のループは `ReportViewModel` の 1 つだけで、共通原因による中断〔#2042〕と未登録カードの文言〔#2049〕を 2 つのループへ書き写していた）／未使用の private ラッパー `ApplyEmptyRowBorder`
   - 同一内容だった `WriteMonthlyTotalRow` と `WriteCumulativeRow` を `WriteTotalRow` 1 つにした

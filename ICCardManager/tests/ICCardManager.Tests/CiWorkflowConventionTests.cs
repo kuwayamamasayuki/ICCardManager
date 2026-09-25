@@ -21,7 +21,8 @@ namespace ICCardManager.Tests;
 /// ③<c>--blame-hang-timeout</c> もジョブの <c>timeout-minutes</c> も無く、デッドロックは
 /// 失敗ではなくジョブの既定上限（6 時間）までの停止になっていた。
 /// ④GitHub が読まない場所（<c>ICCardManager/.github/workflows/ci.yml</c>）に内容の異なる複製があり、
-/// 規約の参照先を取り違える原因になっていた。
+/// 規約の参照先を取り違える原因になっていた。同じ場所に残っていた <c>release.yml</c> / <c>dependabot.yml</c> の
+/// 複製は Issue #2115 で削除し、検査もファイル名ではなく <c>.github</c> ディレクトリ単位へ広げた。
 /// </para>
 /// <para>
 /// ワークフローは YAML だが、テストプロジェクトに YAML パーサーは無いため行単位で読む。
@@ -337,47 +338,118 @@ jobs:
     #region ④読まれない複製
 
     /// <summary>
-    /// GitHub はリポジトリ直下の <c>.github/workflows</c> しか読まない。
-    /// それ以外の場所に置いた ci.yml は実行されないまま実物と食い違い、規約の参照先を取り違える原因になる。
+    /// GitHub はリポジトリ直下の <c>.github/</c> しか読まない（Actions の <c>workflows/</c> も Dependabot の
+    /// <c>dependabot.yml</c> も）。それ以外の場所に置いた <c>.github</c> の中身は実行されないまま実物と食い違い、
+    /// 規約の参照先を取り違える原因になる。
     /// </summary>
     /// <remarks>
+    /// <para>
+    /// 検出の単位はファイル名ではなく <c>.github</c> ディレクトリ自体（Issue #2115）。#2099 では
+    /// <c>ci.yml</c> の名前で探していたため、同じ場所に残っていた <c>release.yml</c> と
+    /// <c>dependabot.yml</c> の複製を検出できなかった。名前で列挙すると、次に別の名前の複製が置かれても
+    /// 静かに漏れる（#1786）。
+    /// </para>
+    /// <para>
     /// 走査はソリューションルート（<c>ICCardManager/</c>、複製が実在した場所）に限る。リポジトリ全体を
     /// 走査すると、開発機に置かれた作業ツリーの複製（<c>.claude/worktrees/</c> 等、git 管理外）まで
-    /// 拾って誤検出になる。
+    /// 拾って誤検出になる。依存物（<c>node_modules</c>）へ降りないことも同じ理由で必須 —
+    /// 設計書の図の生成に使う mermaid-cli の <c>node_modules</c> には、パッケージ自身の <c>.github</c> が
+    /// 開発機で 20 個以上実在する。
+    /// </para>
     /// </remarks>
     [Fact]
-    public void ci_ymlの複製がソリューション配下に存在しないこと()
+    public void ソリューション配下にgithubディレクトリが存在しないこと()
     {
         File.Exists(CiWorkflowPath).Should().BeTrue("CI の実体はリポジトリ直下の .github/workflows/ci.yml");
 
         var solutionRoot = TestPaths.GetSolutionRoot();
-        var copies = FindFiles(solutionRoot, "ci.yml")
+        var copies = FindDirectories(solutionRoot, ".github")
             .Select(p => p.Substring(solutionRoot.Length).TrimStart(Path.DirectorySeparatorChar))
             .ToList();
 
         copies.Should().BeEmpty(
-            "GitHub が読まない場所の ci.yml は実行されず、内容も実物と食い違う（Issue #2099）");
+            "GitHub が読むのはリポジトリ直下の .github だけで、それ以外の場所の .github は実行されず、内容も実物と食い違う（Issue #2099 / #2115）");
     }
 
-    /// <summary>ビルド出力・依存物・git の管理領域を除いて、名前が一致するファイルを再帰的に探す。</summary>
-    private static IEnumerable<string> FindFiles(string directory, string fileName)
+    /// <summary>
+    /// 検出ロジックを既知の入力で固定する。実データ（ソリューション配下）は是正後に <c>.github</c> を
+    /// 1 つも持たないため、それだけでは「探索が何も見つけられない」誤りと区別できない（#1786）。
+    /// </summary>
+    [Fact]
+    public void 検出ロジックが入れ子のgithubディレクトリを拾い依存物とビルド出力を除外すること()
     {
-        foreach (var file in Directory.GetFiles(directory, fileName))
+        var root = Path.Combine(Path.GetTempPath(), $"ICCardManagerTest_{Guid.NewGuid():N}");
+        try
         {
-            yield return file;
-        }
+            foreach (var relative in new[]
+            {
+                ".github",                                      // 直下（ICCardManager/.github そのものの形）
+                Path.Combine("docs", "sub", ".github"),         // 深い位置
+                Path.Combine("docs", "sub", ".github", "nested", ".github"), // 一致した内側へは降りない（二重に数えない）
+                Path.Combine("tools", ".GitHub"),               // 大文字小文字は区別しない（Windows では同じ名前）
+                Path.Combine("node_modules", "pkg", ".github"), // 依存物は除外
+                Path.Combine("src", "bin", ".github"),          // ビルド出力は除外
+                Path.Combine("src", "obj", ".github"),
+                Path.Combine("src", "Bin", ".github"),          // 除外も大文字小文字を区別しない
+                Path.Combine("Node_Modules", "pkg", ".github"),
+                Path.Combine("TestResults", ".github"),
+                ".github-old",                                  // 名前の前方一致は対象外
+            })
+            {
+                Directory.CreateDirectory(Path.Combine(root, relative));
+            }
 
+            // .github の中のファイルは検出に関係しない（空の .github も読まれない複製の置き場になり得る）
+            File.WriteAllText(Path.Combine(root, ".github", "dependabot.yml"), "version: 2");
+
+            var found = FindDirectories(root, ".github")
+                .Select(p => p.Substring(root.Length).TrimStart(Path.DirectorySeparatorChar).Replace(Path.DirectorySeparatorChar, '/'))
+                .OrderBy(p => p, StringComparer.Ordinal)
+                .ToList();
+
+            found.Should().Equal(".github", "docs/sub/.github", "tools/.GitHub");
+        }
+        finally
+        {
+            try
+            {
+                Directory.Delete(root, recursive: true);
+            }
+            catch (IOException)
+            {
+                // 後片付けの失敗で、アサーションの失敗を置き換えない（ProductionSourceFilesTests と同じ作法）
+            }
+            catch (UnauthorizedAccessException)
+            {
+            }
+        }
+    }
+
+    /// <summary>
+    /// ビルド出力・依存物を除いて、名前が一致するディレクトリを再帰的に探す（名前の比較はすべて大文字小文字を区別しない）。
+    /// 一致したディレクトリの内側へは降りない（中身ではなくディレクトリ自体の存在が違反のため）。
+    /// </summary>
+    private static IEnumerable<string> FindDirectories(string directory, string directoryName)
+    {
         foreach (var child in Directory.GetDirectories(directory))
         {
             var name = Path.GetFileName(child);
-            if (name is "bin" or "obj" or "node_modules" or "TestResults")
+            if (string.Equals(name, directoryName, StringComparison.OrdinalIgnoreCase))
+            {
+                yield return child;
+                continue;
+            }
+
+            if (ProductionSourceFiles.IsBuildOutputDirectoryName(name)
+                || string.Equals(name, "node_modules", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(name, "TestResults", StringComparison.OrdinalIgnoreCase))
             {
                 continue;
             }
 
-            foreach (var file in FindFiles(child, fileName))
+            foreach (var found in FindDirectories(child, directoryName))
             {
-                yield return file;
+                yield return found;
             }
         }
     }
