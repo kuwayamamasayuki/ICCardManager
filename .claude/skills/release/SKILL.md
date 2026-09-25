@@ -106,6 +106,7 @@ gh release upload vX.Y.Z "installer/output/ICCardManager_Setup_X.Y.Z.exe" --clob
 ## 補足
 - `build-installer.ps1` はクリーンビルド、dotnet publish、マニュアル変換(-NoMermaid)、Inno Setupを一括実行
 - `release.yml` GitHub Action は `v*` タグpushでRelease + ZIPを自動作成
+- `release.yml` を変更した後は、タグを打つ前に main で試走できる（`gh workflow run release.yml --ref main`）。試走は復元〜テスト〜発行〜ZIP 作成までで、GitHub Release は作らない（Issue #2116）
 - 順序: Version bump PR → マージ → Tag → Build → GitHub Release
 
 ## 開発者ガイド §2.5「アーキテクチャの発展」の更新（Issue #1472 対策）

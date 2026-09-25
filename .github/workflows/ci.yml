@@ -56,8 +56,10 @@ jobs:
     - name: Build
       run: dotnet build --no-restore --configuration ${{ matrix.configuration }}
 
+    # カバレッジは送信する Release でだけ収集する（Issue #2116）。送信ステップ（Upload coverage reports）が
+    # Release に限られているため、Debug で収集しても時間を使うだけになる。
     - name: Run tests
-      run: dotnet test --no-build --configuration ${{ matrix.configuration }} --verbosity normal --filter "Category!=UI" --blame-hang-timeout 5m --blame-hang-dump-type none --collect:"XPlat Code Coverage" --results-directory ./coverage
+      run: dotnet test --no-build --configuration ${{ matrix.configuration }} --verbosity normal --filter "Category!=UI" --blame-hang-timeout 5m --blame-hang-dump-type none ${{ matrix.configuration == 'Release' && '--collect:"XPlat Code Coverage" --results-directory ./coverage' || '' }}
 
     # UITests はソリューション単位の実行から自分を外している（csproj の BuildingSolutionFile 条件）ため、
     # 上の「Run tests」には含まれない。GUI 不要のテスト（Category=UI を持たないもの）を回すには
