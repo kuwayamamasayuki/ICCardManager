@@ -1,0 +1,13 @@
+<Project>
+  <!--
+    .NET Framework の参照アセンブリを NuGet パッケージから明示的に取る（Issue #2117）。
+    SDK はこのパッケージを「マシンに .NET Framework の targeting pack が無いときだけ」暗黙に追加するため、
+    暗黙のままだとロックファイル（packages.lock.json）の中身がマシンの環境で変わる。開発機（pack なし）で
+    作ったロックファイルが CI のランナー（pack あり）と食い違い、ロックモードの復元が NU1004 で失敗した。
+    明示すると SDK は暗黙の追加をやめ、どの環境でも同じロックファイルになる。参照アセンブリも環境によらず同じものになる。
+    TargetFramework は csproj で決まるため、条件は props ではなくこの targets で評価する。
+  -->
+  <ItemGroup Condition="'$(TargetFrameworkIdentifier)' == '.NETFramework'">
+    <PackageReference Include="Microsoft.NETFramework.ReferenceAssemblies" Version="1.0.3" PrivateAssets="All" />
+  </ItemGroup>
+</Project>

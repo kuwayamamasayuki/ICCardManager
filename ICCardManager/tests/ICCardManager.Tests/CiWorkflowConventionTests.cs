@@ -830,6 +830,32 @@ jobs:
     }
 
     /// <summary>
+    /// .NET Framework の参照アセンブリのパッケージは明示的に参照する（Issue #2117）。SDK はこれを
+    /// 「マシンに targeting pack が無いときだけ」暗黙に追加するため、暗黙のままだとロックファイルの中身が
+    /// マシンの環境で変わる。開発機（pack なし）で作ったロックファイルが CI のランナー（pack あり）と食い違い、
+    /// SDK を揃えた後もロックモードの復元が NU1004 で失敗した（#2117 の 2 回目の CI）。
+    /// </summary>
+    [Fact]
+    public void NET_Frameworkの参照アセンブリは環境によらず明示的に参照されていること()
+    {
+        var targetsPath = Path.Combine(TestPaths.GetSolutionRoot(), "Directory.Build.targets");
+        File.Exists(targetsPath).Should().BeTrue("全プロジェクトへ効かせる参照は Directory.Build.targets に置く");
+        var targets = Regex.Replace(File.ReadAllText(targetsPath), @"<!--.*?-->", "", RegexOptions.Singleline);
+
+        Regex.IsMatch(targets, @"<PackageReference\s+Include=""Microsoft\.NETFramework\.ReferenceAssemblies""\s+Version=""[\d.]+""")
+            .Should().BeTrue("暗黙の追加に任せると、targeting pack の有無でロックファイルが変わる（コメントの中の記述は数えない）");
+
+        var projects = GetSolutionProjects();
+        projects.Should().NotBeEmpty("導出が空振りすると無検査で緑になる");
+        foreach (var project in projects)
+        {
+            var lockFile = File.ReadAllText(Path.Combine(TestPaths.GetSolutionRoot(), Path.GetDirectoryName(project)!, "packages.lock.json"));
+            Regex.IsMatch(lockFile, @"""Microsoft\.NETFramework\.ReferenceAssemblies"":\s*\{\s*""type"":\s*""Direct""").Should().BeTrue(
+                $"{project} のロックファイルに参照アセンブリのパッケージが直接の依存として記録されていない");
+        }
+    }
+
+    /// <summary>
     /// ロックモードの復元は、ロックファイルを持つプロジェクトでしか固定にならない。ロックファイルの生成は
     /// <c>Directory.Build.props</c> の <c>RestorePackagesWithLockFile</c> が全プロジェクトへ効かせており、
     /// ソリューションのすべてのプロジェクトがロックファイルをコミットしていることを表明する。
