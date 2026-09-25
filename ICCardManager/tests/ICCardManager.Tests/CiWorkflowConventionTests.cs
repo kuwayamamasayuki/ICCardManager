@@ -800,6 +800,36 @@ jobs:
     }
 
     /// <summary>
+    /// SDK はリポジトリ直下の <c>global.json</c> で、ワークフローが導入する版（<c>DOTNET_VERSION</c>）と同じメジャーに固定する
+    /// （Issue #2117）。ロックファイルの中身は SDK の版で変わる — SDK 8 は <c>win7-x86</c> の RID と
+    /// <c>Microsoft.NETFramework.ReferenceAssemblies</c> の暗黙の参照を書くが、SDK 10 は <c>win-x86</c> を推論し暗黙の参照を足さない。
+    /// windows-latest には SDK 10 も入っており、<c>global.json</c> が無いと setup-dotnet で 8.0.x を入れても
+    /// 最新の SDK で復元され、SDK 8 で作ったロックファイルと食い違って NU1004 で失敗した（#2117 の初回 CI）。
+    /// </summary>
+    [Fact]
+    public void SDKはglobal_jsonでワークフローと同じメジャー版に固定されていること()
+    {
+        var globalJsonPath = Path.Combine(RepositoryRoot, "global.json");
+        File.Exists(globalJsonPath).Should().BeTrue(
+            "global.json が無いと、ランナーに入っている最新の SDK で復元され、ロックファイルの中身が変わる");
+        var globalJson = File.ReadAllText(globalJsonPath);
+
+        var pinned = Regex.Match(globalJson, @"""version""\s*:\s*""(\d+)\.\d+\.\d+""");
+        pinned.Success.Should().BeTrue("global.json に sdk.version が必要");
+        var rollForward = Regex.Match(globalJson, @"""rollForward""\s*:\s*""(\w+)""").Groups[1].Value;
+        new[] { "patch", "feature", "minor", "latestPatch", "latestFeature", "latestMinor", "disable" }
+            .Should().Contain(rollForward, "latestMajor / major は別のメジャー版の SDK へ移り、固定の意味が無くなる");
+
+        var versions = AllWorkflows()
+            .Select(w => (w.Name, Match: Regex.Match(w.Content, @"^\s*DOTNET_VERSION:\s*'(\d+)\.\d+\.x'", RegexOptions.Multiline)))
+            .Where(w => w.Match.Success)
+            .ToList();
+        versions.Select(v => v.Name).Should().Contain(new[] { "ci.yml", "release.yml" }, "導出が空振りすると無検査で緑になる");
+        versions.Should().OnlyContain(v => v.Match.Groups[1].Value == pinned.Groups[1].Value,
+            "ワークフローが導入する SDK と global.json のメジャー版が食い違うと、CI は SDK を見つけられずに失敗する");
+    }
+
+    /// <summary>
     /// ロックモードの復元は、ロックファイルを持つプロジェクトでしか固定にならない。ロックファイルの生成は
     /// <c>Directory.Build.props</c> の <c>RestorePackagesWithLockFile</c> が全プロジェクトへ効かせており、
     /// ソリューションのすべてのプロジェクトがロックファイルをコミットしていることを表明する。

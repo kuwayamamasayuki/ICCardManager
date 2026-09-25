@@ -60,7 +60,8 @@ jobs:
     # NU1004 で落ちたら、手元で dotnet restore --force-evaluate を実行し、変わったロックファイルをコミットする。
     # 必ず Windows の dotnet.exe で実行すること — 本体と DebugDataViewer のロックファイルの RID の節
     # （.NETFramework,Version=v4.8/win7-x86）は Windows でしか生成されず、Linux（WSL の dotnet・Dependabot）で
-    # 作ると節が落ちて NU1004 になる。
+    # 作ると節が落ちて NU1004 になる。SDK の版でも中身が変わる（SDK 10 は win-x86 と書く）ため、リポジトリ直下の
+    # global.json で SDK を 8.0 系に固定している（ランナーには SDK 10 も入っている）。
     - name: Restore dependencies
       run: dotnet restore --locked-mode
 
