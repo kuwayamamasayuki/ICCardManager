@@ -4,7 +4,7 @@
 - インターネット非接続環境で動作する（クラウドサービス利用不可）
 - Microsoft 365 E3のみ例外的に利用可能
 - Windows 10/11対応（クロスプラットフォーム対応不要）
-- 自己完結型ビルド（single-file publish）で配布
+- `dotnet publish` のフォルダー出力を Inno Setup インストーラー（`ICCardManager/installer/`）に同梱して配布する。ターゲットは .NET Framework 4.8（`net48`）のため single-file publish / self-contained は使えない
 - **共有フォルダモード**: SMB共有フォルダ上にDBを配置し、複数PC（最大約20台）で共有可能。UNCパスまたはマップドネットワークドライブ指定時に自動判定（Issue #1559）。ローカルフルパス指定では共有モードにならない
 
 ## 分割した節の索引

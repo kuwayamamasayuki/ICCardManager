@@ -29,7 +29,7 @@ Phase 1 を開始する前に、依存パッケージの既知 CVE を必ず確�
 | 結果 | 対応 |
 |------|------|
 | `No vulnerable packages` | リリース続行 |
-| Critical / High 検出 | **リリース保留**。修正版にアップグレードしてから再開（[開発者ガイド §5.7](../../ICCardManager/docs/manual/開発者ガイド.md) 参照） |
+| Critical / High 検出 | **リリース保留**。修正版にアップグレードしてから再開（[開発者ガイド §5.7](../../../ICCardManager/docs/manual/開発者ガイド.md) 参照） |
 | Moderate / Low 検出 | リリースノートに記載、計画的対応 |
 
 CVE スキャンの詳細プロセスは `docs/manual/開発者ガイド.md` §5.7 を参照。
@@ -111,7 +111,7 @@ gh release upload vX.Y.Z "installer/output/ICCardManager_Setup_X.Y.Z.exe" --clob
 
 ## 開発者ガイド §2.5「アーキテクチャの発展」の更新（Issue #1472 対策）
 
-過去、リリース毎に追加された構造変更が `docs/manual/開発者ガイド.md` §2.5 に反映されず、章タイトルだけが古いバージョン上限で残る不具合があった（v2.7.0 までしか書かれていない状態で v2.8.0 がリリースされ、Issue #1472 で発覚）。再発防止のため、リリース時に以下を必ず確認する。
+構造変更は `docs/manual/開発者ガイド.md` §2.5 へ同じリリースで反映する。反映しないと章タイトルのバージョン上限だけが古いまま残るため、リリース時に以下を確認する。
 
 ### チェック手順
 
@@ -127,7 +127,7 @@ gh release upload vX.Y.Z "installer/output/ICCardManager_Setup_X.Y.Z.exe" --clob
    - **§2.5 章タイトル**: 「アーキテクチャの発展（v2.5.0〜vX.Y.Z）」の上限バージョンを更新し、本文導入も同様に伸長
    - **§2.5 配下のサブセクション**: 構造変更ごとに `#### 2.5.N <タイトル>（#Issue、vX.Y.Z）` を追加
 
-3. 文書を `bump-version.ps1` の `## 更新対象ファイル一覧` （手動リリースなら本 SKILL §1）に従って同一バージョン PR でコミットする。
+3. 文書を `bump-version.ps1` が PR 本文に列挙する `## 更新ファイル` （手動リリースなら本 SKILL §1）に従って同一バージョン PR でコミットする。
 
 ### 文面の参考スタイル
 
@@ -146,7 +146,7 @@ gh release upload vX.Y.Z "installer/output/ICCardManager_Setup_X.Y.Z.exe" --clob
 - **WSL2 パス**: スクリプト呼び出しは `./tools/release.ps1` 形式で。bare path だと Windows 側で解決できない
 - **タグ重複**: 失敗リトライ時、タグ `vX.Y.Z` が既に存在する場合は `-SkipTag` で既存タグをスキップ
 - **ISCC.exe パス**: `settings.local.json` の許可パスと実際のインストール先が一致していること
-- **CHANGELOG.md の `### Unreleased`**: `bump-version.ps1` は既存 `### Unreleased` セクションを検出すると、見出しを `### vX.Y.Z (date)` にリネームし、Unreleased 本文（手動キュレーションされたエントリ）を保持したまま、コミットメッセージから自動生成したエントリを末尾に追記する。**重複エントリが発生する場合があるため、PR レビュー時に手動で整理すること**。Unreleased が存在しない場合は「# 更新履歴」直後に新規セクションを挿入する従来挙動。
+- **CHANGELOG.md の `### Unreleased`**: `bump-version.ps1` は既存 `### Unreleased` セクションを検出すると、見出しを `### vX.Y.Z (date)` にリネームする。Unreleased に本文があればそれを正典として採用し、コミットメッセージからの自動生成エントリは破棄する（本文が空のときだけ自動生成を採用）。Unreleased が存在しない場合は「# 更新履歴」直後に新規セクションを挿入する従来挙動。
 
 ## CHANGELOG.md `### Unreleased` 運用ルール
 
