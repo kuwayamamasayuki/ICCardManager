@@ -46,17 +46,41 @@ namespace ICCardManager.Services
         void ShowInfo(string title, string message);
 
         /// <summary>
-        /// 警告通知を表示
+        /// 警告通知を表示（自動で消える。表示時間は貸出・返却の通知より長い。Issue #2141）
         /// </summary>
         /// <param name="title">タイトル</param>
         /// <param name="message">メッセージ</param>
         void ShowWarning(string title, string message);
 
         /// <summary>
+        /// 「操作は台帳に記録済みだが後処理が完了しなかった」ことの案内を表示（Issue #2141）
+        /// </summary>
+        /// <param name="title">タイトル（「返却は記録済み」等）</param>
+        /// <param name="message">メッセージ（「再タッチしないでください」を含む）</param>
+        /// <remarks>
+        /// 警告の見た目で表示し、<see cref="ShowError"/> と同じく<b>自動では消さない</b>。
+        /// 再タッチを止める指示が 3 秒で消えると、見逃した職員の再タッチが30秒ルールの逆処理で
+        /// 逆の操作を新たに記録する（#1725 / #1805）。
+        /// </remarks>
+        void ShowRecordedNotice(string title, string message);
+
+        /// <summary>
         /// エラー通知を表示
         /// </summary>
         /// <param name="title">タイトル</param>
         /// <param name="message">メッセージ</param>
+        /// <remarks>
+        /// 自動では消えない。同時に 1 枚だけ表示し、新しい通知が古い通知を置き換える（Issue #2141）。
+        /// </remarks>
         void ShowError(string title, string message);
+
+        /// <summary>
+        /// 自動では消えない通知（エラー・記録済みの案内）を閉じる（Issue #2141）
+        /// </summary>
+        /// <remarks>
+        /// 次の職員証タッチ（次の操作の開始）とメイン画面の Esc キーから呼ぶ。
+        /// 前の職員宛ての案内を、次の職員の操作の上に残さないため。
+        /// </remarks>
+        void DismissPersistentNotifications();
     }
 }

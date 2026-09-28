@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.ComponentModel;
 using System.Linq;
 using System.Threading.Tasks;
 using System.Windows;
@@ -22,6 +23,10 @@ namespace ICCardManager.Views.Dialogs
 
             _viewModel = viewModel;
             DataContext = _viewModel;
+
+            // Issue #2141: 「キャンセル」ボタンと Escape からのクローズ要求。
+            // Close() を経由するため OnClosing の破棄確認を通る
+            _viewModel.OnCloseRequested = Close;
 
             // 保存完了時に自動的に閉じる
             _viewModel.PropertyChanged += (s, e) =>
@@ -169,12 +174,46 @@ namespace ICCardManager.Views.Dialogs
         }
 
         /// <summary>
-        /// キャンセルボタンクリック
+        /// 閉じる直前の未保存変更ガード（Issue #2141）
         /// </summary>
-        private void CancelButton_Click(object sender, RoutedEventArgs e)
+        /// <remarks>
+        /// 「キャンセル」ボタン・Escape（どちらも <see cref="LedgerRowEditViewModel.RequestCloseCommand"/> →
+        /// <see cref="Window.Close"/>）・タイトルバーの ✕ / Alt+F4 のすべてのクローズ経路がここを通るため、
+        /// 破棄確認を本メソッドに一元化する（<c>LedgerDetailDialog</c> #1743 と同じ形）。
+        /// </remarks>
+        protected override void OnClosing(CancelEventArgs e)
         {
-            DialogResult = false;
-            Close();
+            base.OnClosing(e);
+
+            if (e.Cancel)
+            {
+                return;
+            }
+
+            if (!_viewModel.CanClose(ConfirmDiscardChanges))
+            {
+                e.Cancel = true;
+            }
+        }
+
+        /// <summary>
+        /// 未保存の変更を破棄してよいかを利用者に確認する
+        /// </summary>
+        /// <returns>破棄してよい場合 true</returns>
+        /// <remarks>
+        /// オーナーに自ウィンドウを渡す（#1837。ownerless だとアプリが非フォアグラウンドのとき
+        /// 背後のこのダイアログが無効化されない）。
+        /// </remarks>
+        private bool ConfirmDiscardChanges()
+        {
+            var result = MessageBox.Show(
+                this,
+                "保存されていない変更があります。破棄して閉じてよろしいですか？",
+                "確認",
+                MessageBoxButton.YesNo,
+                MessageBoxImage.Warning);
+
+            return result == MessageBoxResult.Yes;
         }
     }
 }

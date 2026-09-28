@@ -1238,6 +1238,8 @@ public partial class MainViewModel : ViewModelBase
             // 閉じるのは本システム自身が自動で開いたパネルに限る。
             CloseReturnHistoryReviewIfUntouched();
 
+            // Issue #2141: 前の職員宛てのエラー・記録済みの案内（自動では消えない通知）も、次の操作の開始で閉じる
+            _toastNotificationService.DismissPersistentNotifications();
             _toastNotificationService.ShowStaffRecognizedNotification(staff.Name);
             StartTimeout();
             return;
@@ -1304,6 +1306,8 @@ public partial class MainViewModel : ViewModelBase
             OnPropertyChanged(nameof(NextActionMessage));
 
             _soundPlayer.Play(SoundType.Notify);
+            // Issue #2141: 持ち替え（別の職員証）も次の操作の開始なので、自動では消えない通知を閉じる
+            _toastNotificationService.DismissPersistentNotifications();
             _toastNotificationService.ShowStaffRecognizedNotification(staff.Name);
             StartTimeout();
             return;
@@ -1490,7 +1494,8 @@ public partial class MainViewModel : ViewModelBase
 
                 // エラー時はトースト通知で表示（メイン画面は変更しない）
                 // フォールバック文言にも行動指示を付与（Issue #1614）。トーストは文字数制約があるため簡潔に。
-                _toastNotificationService.ShowError("エラー", result.ErrorMessage ?? "貸出処理に失敗しました。もう一度タッチしてください。");
+                // Issue #2141: finally の ResetState() で職員証タッチ待ちへ戻るので「職員証のタッチから」と案内する
+                _toastNotificationService.ShowError("エラー", result.ErrorMessage ?? OperationRetryGuidance.BuildFailureMessage("貸出"));
             }
         }
         catch (Exception ex)
@@ -1541,9 +1546,11 @@ public partial class MainViewModel : ViewModelBase
             {
                 // リーダーエラー: 不正確なデータをDBに記録しないため返却処理を中断
                 _soundPlayer.Play(SoundType.Error);
+                // Issue #2141: 状態リセット（finally）で職員証が消えるため、交通系ICカードだけを
+                // タッチし直すと履歴表示になる。やり直しは職員証のタッチからと案内する
                 _toastNotificationService.ShowError(
                     "カードリーダーエラー",
-                    "履歴の読み取りに失敗しました。カードを再度タッチしてください。");
+                    "履歴の読み取りに失敗しました。" + OperationRetryGuidance.RestartFromStaffCard);
                 return; // 状態リセットは finally が行う
             }
             var usageDetailsList = historyResult.Value.ToList();
@@ -1570,7 +1577,8 @@ public partial class MainViewModel : ViewModelBase
 
                 // エラー時はトースト通知で表示（メイン画面は変更しない）
                 // フォールバック文言にも行動指示を付与（Issue #1614）。トーストは文字数制約があるため簡潔に。
-                _toastNotificationService.ShowError("エラー", result.ErrorMessage ?? "返却処理に失敗しました。もう一度タッチしてください。");
+                // Issue #2141: finally の ResetState() で職員証タッチ待ちへ戻るので「職員証のタッチから」と案内する
+                _toastNotificationService.ShowError("エラー", result.ErrorMessage ?? OperationRetryGuidance.BuildFailureMessage("返却"));
             }
         }
         catch (Exception ex)
@@ -1638,9 +1646,10 @@ public partial class MainViewModel : ViewModelBase
         else
         {
             _soundPlayer.Play(SoundType.Error);
+            // Issue #2141: 呼び出し元の finally が職員証タッチ待ちへ戻すので「職員証のタッチから」と案内する
             _toastNotificationService.ShowError(
                 "エラー",
-                $"{operationName}処理に失敗しました。もう一度タッチしてください。");
+                OperationRetryGuidance.BuildFailureMessage(operationName));
         }
     }
 
@@ -1657,7 +1666,9 @@ public partial class MainViewModel : ViewModelBase
     private void NotifyRecordedButIncomplete(string operationName, string reason)
     {
         _soundPlayer.Play(SoundType.Warning);
-        _toastNotificationService.ShowWarning(
+        // Issue #2141: 再タッチを止める最重要の指示なので、自動では消さない（3 秒で消えると、見逃した職員の
+        // 再タッチが逆の操作として新たに記録される）。次の職員証タッチ・クリック・Esc で閉じる
+        _toastNotificationService.ShowRecordedNotice(
             $"{operationName}は記録済み",
             $"{reason}再タッチしないでください。");
     }
@@ -3520,9 +3531,51 @@ public partial class MainViewModel : ViewModelBase
 
         if (dialog.ShowDialog() == true && dialog.SelectedHistoryId.HasValue)
         {
-            await ExecuteUnmergeAsync(dialog.SelectedHistoryId.Value);
+            var selectedId = dialog.SelectedHistoryId.Value;
+            var selected = items.FirstOrDefault(i => i.Id == selectedId);
+            if (selected != null)
+            {
+                await ConfirmAndExecuteUnmergeAsync(selected);
+            }
         }
     }
+
+    /// <summary>
+    /// 取り消す統合を名指しして確認し、同意されたときだけ取り消す（Issue #2141）
+    /// </summary>
+    /// <returns>取り消しへ進んだ場合 true（取り消しの成否は問わない）</returns>
+    /// <remarks>
+    /// <para>
+    /// 統合履歴の一覧はダブルクリックでも閉じる（「選択した統合を元に戻す」と同じ結果になる）。
+    /// 旧実装は確認なしで取り消しへ進み、しかもダブルクリックが一覧全体に付いていたため、
+    /// 行を選んだあとのスクロールバーや列見出しのダブルクリックでも 6 年保存の台帳が書き換わった。
+    /// </para>
+    /// <para>
+    /// 確認はダイアログの外（ここ）の 1 か所に置く。ボタンとダブルクリックの両方の経路が通るため、
+    /// 片方にだけ確認がある状態を作らない（#2080「確認を入れるなら両方に入れる」）。
+    /// <see cref="Views.Dialogs.MergeHistoryDialog"/> は <c>Window</c> を直接生成するため単体テストから踏めず、
+    /// 確認と実行をこのメソッドへ切り出して検査できるようにしている。
+    /// </para>
+    /// </remarks>
+    internal async Task<bool> ConfirmAndExecuteUnmergeAsync(Views.Dialogs.MergeHistoryItem item)
+    {
+        if (!_navigationService.ShowWarningConfirmation(BuildUnmergeConfirmationMessage(item), "統合の取り消し"))
+        {
+            return false;
+        }
+
+        await ExecuteUnmergeAsync(item.Id);
+        return true;
+    }
+
+    /// <summary>
+    /// 統合の取り消し確認の文言（Issue #2141）。取り消す対象を統合日時と内容で名指しする。
+    /// </summary>
+    internal static string BuildUnmergeConfirmationMessage(Views.Dialogs.MergeHistoryItem item)
+        => "次の統合を取り消して、統合する前の履歴に戻します。\n\n" +
+           $"統合日時: {item.MergedAtDisplay}\n" +
+           $"内容: {item.Description}\n\n" +
+           "取り消してよろしいですか？";
 
     /// <summary>
     /// undo実行の共通処理
@@ -3809,9 +3862,15 @@ public partial class MainViewModel : ViewModelBase
     /// <summary>
     /// キャンセルコマンド（Escキー）
     /// </summary>
+    /// <remarks>
+    /// Issue #2141: 自動では消えない通知（エラー・記録済みの案内）も閉じる。トーストはフォーカスを受けない
+    /// （<c>ShowActivated="False"</c>）ため、クリック以外に閉じる手段が無かった（#2078「クリックでしか実行できない操作を作らない」）。
+    /// </remarks>
     [RelayCommand]
     public void Cancel()
     {
+        _toastNotificationService.DismissPersistentNotifications();
+
         if (CurrentState == AppState.WaitingForIcCard)
         {
             ResetState();

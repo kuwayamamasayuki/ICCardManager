@@ -27,18 +27,34 @@
                    Margin="0,0,0,12"/>
 
         <!-- 統合履歴リスト -->
+        <!-- Issue #2141: ダブルクリックは ListView 全体ではなく行（ListViewItem）に限る。
+             ListView 全体に付けると、行を選んだあとのスクロールバーや列見出しのダブルクリックでも
+             取り消しへ進んでいた。取り消しの実行前には呼び出し元が対象を名指しして確認する。 -->
         <ListView x:Name="HistoryListView"
                   Grid.Row="1"
                   SelectionMode="Single"
                   Margin="0,0,0,16"
-                  AutomationProperties.Name="統合履歴一覧"
-                  MouseDoubleClick="HistoryListView_MouseDoubleClick">
+                  AutomationProperties.Name="統合履歴一覧">
+            <ListView.ItemContainerStyle>
+                <Style TargetType="ListViewItem">
+                    <EventSetter Event="MouseDoubleClick" Handler="HistoryItem_MouseDoubleClick"/>
+                </Style>
+            </ListView.ItemContainerStyle>
             <ListView.View>
                 <GridView>
                     <GridViewColumn Header="統合日時" Width="140"
                                     DisplayMemberBinding="{Binding MergedAtDisplay}"/>
-                    <GridViewColumn Header="内容" Width="320"
-                                    DisplayMemberBinding="{Binding Description}"/>
+                    <!-- Issue #2141: 固定幅に収まらない内容を黙って切らない（#2076）。
+                         省略記号で切れていることを示し、ツールチップで全文を読めるようにする -->
+                    <GridViewColumn Header="内容" Width="320">
+                        <GridViewColumn.CellTemplate>
+                            <DataTemplate>
+                                <TextBlock Text="{Binding Description}"
+                                           TextTrimming="CharacterEllipsis"
+                                           ToolTip="{Binding Description}"/>
+                            </DataTemplate>
+                        </GridViewColumn.CellTemplate>
+                    </GridViewColumn>
                 </GridView>
             </ListView.View>
         </ListView>

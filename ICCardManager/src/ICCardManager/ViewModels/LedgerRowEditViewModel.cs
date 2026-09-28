@@ -1176,12 +1176,67 @@ namespace ICCardManager.ViewModels
         }
 
         /// <summary>
-        /// キャンセル
+        /// ダイアログのクローズ要求時に View が呼ぶ処理（Issue #2141）
         /// </summary>
+        /// <remarks>
+        /// 「キャンセル」ボタンと Escape キー（<see cref="RequestCloseCommand"/>）から呼ばれる。
+        /// View は <c>Window.Close()</c> を設定し、閉じる経路をすべて <c>OnClosing</c> の
+        /// 破棄確認（<see cref="CanClose"/>）へ通す（<c>LedgerDetailViewModel</c> #1743 と同じ形）。
+        /// </remarks>
+        public Action OnCloseRequested { get; set; }
+
+        /// <summary>
+        /// ダイアログのクローズを要求する（Issue #2141）
+        /// </summary>
+        /// <remarks>
+        /// <c>Button.IsCancel</c> を使わない。<c>IsCancel</c> は Click の後に無条件で
+        /// <c>DialogResult=false</c> を設定し、破棄確認で「いいえ」を選んでも閉じる動作が残る（#1743）。
+        /// </remarks>
         [RelayCommand]
-        private void Cancel()
+        private void RequestClose()
         {
-            // 何もせずに閉じる（IsSavedはfalseのまま）
+            OnCloseRequested?.Invoke();
+        }
+
+        /// <summary>
+        /// ダイアログを閉じてよいか判定する（Issue #2141）
+        /// </summary>
+        /// <param name="confirmDiscard">未保存の変更を破棄してよいか利用者に確認する処理</param>
+        /// <returns>閉じてよい場合 true</returns>
+        /// <remarks>
+        /// <para>
+        /// 摘要・金額・備考の修正途中に Esc・「キャンセル」・✕ を押すと、確認なしで入力が失われていた。
+        /// 「次へ」「戻る」は <see cref="HasUnsavedChanges"/> で確認していたが、閉じる経路だけが通っていなかった。
+        /// </para>
+        /// <para>
+        /// <b>行き先が決まった閉じる（保存・削除要求・次へ・戻る）は確認しない。</b>これらは
+        /// <c>PropertyChanged</c> を受けた View が <c>Close()</c> するので、同じ <c>OnClosing</c> を通る。
+        /// 保存の後も入力値は初期値と異なる（＝未保存の変更ありと判定される）ため、先に除外しないと
+        /// 保存するたびに「破棄しますか」と尋ねることになる。「次へ」「戻る」は各コマンドの中で確認済み。
+        /// </para>
+        /// <para>
+        /// 処理中（保存中）は閉じさせない。保存の結果（<see cref="IsSaved"/>）は処理中に立つので、
+        /// 行き先の判定を先に置く。
+        /// </para>
+        /// </remarks>
+        public bool CanClose(Func<bool> confirmDiscard)
+        {
+            if (IsSaved || IsDeleteRequested || IsSaveAndEditNextRequested || IsSkipToNextRequested || IsBackRequested)
+            {
+                return true;
+            }
+
+            if (IsBusy)
+            {
+                return false;
+            }
+
+            if (!HasUnsavedChanges())
+            {
+                return true;
+            }
+
+            return confirmDiscard();
         }
 
         /// <summary>

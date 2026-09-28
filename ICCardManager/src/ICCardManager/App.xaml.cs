@@ -146,6 +146,9 @@ namespace ICCardManager
             // グローバル例外ハンドラーを登録
             SetupGlobalExceptionHandlers();
 
+            // Issue #2141: 処理中のダイアログを ✕・Alt+F4・Esc で閉じさせない（全ウィンドウへ 1 度に掛ける）
+            Views.Helpers.BusyCloseGuard.Register();
+
             // 古いログファイルを削除
             ErrorDialogHelper.CleanupOldLogs();
 

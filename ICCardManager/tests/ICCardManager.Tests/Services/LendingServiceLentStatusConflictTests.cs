@@ -132,7 +132,9 @@ public sealed class LendingServiceLentStatusConflictTests : IDisposable
         result.ErrorMessage.Should().NotBeNullOrWhiteSpace();
         result.ErrorMessage.Should().Contain("削除", "「なぜ」＝カードが削除された可能性を述べること");
         result.ErrorMessage.Should().Contain("カード管理", "「どうすれば」＝状態を確認できる画面へ誘導すること");
-        result.ErrorMessage.Should().NotContain("もう一度タッチ",
+        // Issue #2141: 既定分岐の汎用文言は「職員証のタッチからやり直してください」へ変わった。
+        // 旧文言で否定しても原理的に失敗しない（testing.md #2105）ので、現在の既定分岐の文言で否定する
+        result.ErrorMessage.Should().NotContain(ICCardManager.Common.OperationRetryGuidance.RestartFromStaffCard,
             "再タッチしても同じ競合が続くため、既定分岐の汎用文言へ落ちていないこと");
 
         // トーストは幅上限（520px 固定）で折り返しつつ高さ上限で切られるため、長文は末尾＝

@@ -11,7 +11,7 @@ namespace ICCardManager.ViewModels
 /// <summary>
     /// ViewModelの基底クラス
     /// </summary>
-    public abstract partial class ViewModelBase : ObservableObject
+    public abstract partial class ViewModelBase : ObservableObject, IBusyState
     {
         private bool _isBusy;
         private string _busyMessage;

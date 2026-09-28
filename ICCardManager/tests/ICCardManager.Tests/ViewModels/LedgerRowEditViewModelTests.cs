@@ -1573,6 +1573,136 @@ public class LedgerRowEditViewModelTests : IDisposable
             d => d.ShowWarningConfirmation(It.IsAny<string>(), It.IsAny<string>()), Times.Never);
     }
 
+    #region Issue #2141: 閉じる経路（Esc・キャンセル・✕）の未保存確認
+
+    /*
+     * 摘要・金額・備考の修正途中に Esc・「キャンセル」・✕ を押すと、確認なしで入力が失われていた。
+     * 「次へ」「戻る」は HasUnsavedChanges で確認していたが、閉じる経路だけが通っていなかった。
+     * View（LedgerRowEditDialog.OnClosing）はすべての閉じる経路で CanClose を呼ぶ（結線は
+     * LedgerRowEditDialogCloseConventionTests が静的検査で固定する）。
+     */
+
+    /// <summary>
+    /// 編集モードで摘要を変更した状態にする（Issue の故障シナリオ）。
+    /// </summary>
+    private async Task ArrangeEditWithUnsavedSummaryAsync()
+    {
+        await ArrangeEditAsync();
+        _viewModel.Summary = "鉄道（天神～博多 往復）";
+    }
+
+    /// <summary>
+    /// 編集モードで初期化しただけの状態にする。
+    /// </summary>
+    private async Task ArrangeEditAsync()
+    {
+        _ledgerRepoMock.Setup(r => r.GetByIdAsync(1)).ReturnsAsync(new Ledger
+        {
+            Id = 1, CardIdm = TestCardIdm, Date = new DateTime(2026, 1, 10),
+            Summary = "鉄道（天神～博多）", Income = 0, Expense = 210, Balance = 2300,
+            Details = new List<LedgerDetail>()
+        });
+        await _viewModel.InitializeForEditAsync(
+            new LedgerDto
+            {
+                Id = 1, CardIdm = TestCardIdm, Date = new DateTime(2026, 1, 10),
+                Summary = "鉄道（天神～博多）", Income = 0, Expense = 210, Balance = 2300
+            },
+            TestOperatorIdm);
+    }
+
+    [Theory]
+    [InlineData(true, true)]
+    [InlineData(false, false)]
+    public async Task CanClose_編集途中の変更があれば確認の結果に従うこと(bool confirmed, bool expected)
+    {
+        await ArrangeEditWithUnsavedSummaryAsync();
+        var asked = 0;
+
+        var canClose = _viewModel.CanClose(() => { asked++; return confirmed; });
+
+        canClose.Should().Be(expected);
+        asked.Should().Be(1, "未保存の変更があるときは破棄してよいか尋ねる");
+    }
+
+    /// <summary>
+    /// 対の表明: 変更が無ければ確認を出さずに閉じる（「常に尋ねる」実装を落とす）。
+    /// </summary>
+    [Fact]
+    public async Task CanClose_変更が無ければ確認せずに閉じられること()
+    {
+        await ArrangeEditAsync();
+        var asked = 0;
+
+        var canClose = _viewModel.CanClose(() => { asked++; return false; });
+
+        canClose.Should().BeTrue();
+        asked.Should().Be(0);
+    }
+
+    [Fact]
+    public void CanClose_追加モードで入力途中なら確認すること()
+    {
+        _viewModel.Mode = LedgerRowEditMode.Add;
+        _viewModel.Summary = "入力途中";
+
+        _viewModel.CanClose(() => false).Should().BeFalse("「いいえ」なら閉じない");
+    }
+
+    /// <summary>
+    /// 保存・削除要求・次へ・戻るで閉じるときは確認しない。
+    /// </summary>
+    /// <remarks>
+    /// これらは PropertyChanged を受けた View が Close() するので同じ OnClosing を通る。保存後も入力値は
+    /// 初期値と異なるため、除外しないと保存するたびに「破棄しますか」と尋ねる（保存したのに閉じられない）。
+    /// </remarks>
+    [Theory]
+    [InlineData(nameof(LedgerRowEditViewModel.IsSaved))]
+    [InlineData(nameof(LedgerRowEditViewModel.IsDeleteRequested))]
+    [InlineData(nameof(LedgerRowEditViewModel.IsSaveAndEditNextRequested))]
+    [InlineData(nameof(LedgerRowEditViewModel.IsSkipToNextRequested))]
+    [InlineData(nameof(LedgerRowEditViewModel.IsBackRequested))]
+    public async Task CanClose_行き先が決まった閉じるは確認しないこと(string decidedFlag)
+    {
+        await ArrangeEditWithUnsavedSummaryAsync();
+        typeof(LedgerRowEditViewModel).GetProperty(decidedFlag)!.SetValue(_viewModel, true);
+        var asked = 0;
+
+        var canClose = _viewModel.CanClose(() => { asked++; return false; });
+
+        canClose.Should().BeTrue($"{decidedFlag} で閉じるのはアプリ自身の操作");
+        asked.Should().Be(0);
+    }
+
+    /// <summary>
+    /// 保存中は利用者の操作で閉じさせない。ただし保存が済んで閉じる（IsSaved は処理中に立つ）のは妨げない。
+    /// </summary>
+    [Fact]
+    public async Task CanClose_保存中は閉じず保存が済んだ閉じるは妨げないこと()
+    {
+        await ArrangeEditWithUnsavedSummaryAsync();
+        _viewModel.IsBusy = true;
+
+        _viewModel.CanClose(() => true).Should().BeFalse("保存中の Esc・✕ で画面を閉じない");
+
+        _viewModel.IsSaved = true;
+        _viewModel.CanClose(() => false).Should().BeTrue(
+            "保存は IsBusy のまま IsSaved を立てて閉じる。これを止めると保存しても画面が閉じない");
+    }
+
+    [Fact]
+    public void RequestClose_Viewが設定した閉じる処理を呼ぶこと()
+    {
+        var requested = 0;
+        _viewModel.OnCloseRequested = () => requested++;
+
+        _viewModel.RequestCloseCommand.Execute(null);
+
+        requested.Should().Be(1, "Esc・キャンセルは Close() を経由して OnClosing の確認を通る");
+    }
+
+    #endregion
+
 
     #region 摘要の全角括弧の対応（Issue #1914）
 

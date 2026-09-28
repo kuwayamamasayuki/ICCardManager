@@ -114,7 +114,7 @@ namespace ICCardManager.ViewModels
     /// 利用履歴詳細ダイアログ用ViewModel（Issue #484: 統合・分割機能対応）
     /// Issue #548: 分割線クリック方式UIに変更
     /// </summary>
-    public partial class LedgerDetailViewModel : ObservableObject
+    public partial class LedgerDetailViewModel : ObservableObject, IBusyState
     {
         private readonly ILedgerRepository _ledgerRepository;
         private readonly SummaryGenerator _summaryGenerator;
