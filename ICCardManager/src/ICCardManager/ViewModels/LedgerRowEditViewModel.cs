@@ -599,6 +599,13 @@ namespace ICCardManager.ViewModels
             Validate();
         }
 
+        // Issue #2141: 利用者の付け替えも未保存の変更として追跡する（追跡していなかったため、
+        // 利用者だけを変えて Esc・✕ で閉じると確認なしで変更が消えた）。初期化中は _trackChanges が false
+        partial void OnSelectedStaffChanged(Staff? value)
+        {
+            TrackFieldChange();
+        }
+
         partial void OnEditDateChanged(DateTime value)
         {
             TrackFieldChange();
@@ -1322,12 +1329,17 @@ namespace ICCardManager.ViewModels
         /// </summary>
         /// <remarks>
         /// Editモードで初期値と現在値を比較。Addモードではフィールドに入力があれば変更ありとする。
+        /// Issue #2141: 閉じる経路（Esc・キャンセル・✕）の確認もこの判定に拠るため、追加モードで
+        /// 備考・同行者数・利用者だけを入力した場合も変更ありとする（摘要・金額しか見ていなかった頃は、
+        /// これらだけを入れて閉じると確認なしで入力が消えた）。日付は含めない — 既定値（今日）から
+        /// 挿入位置の操作でも変わるため、入力の有無の代理にならない。
         /// </remarks>
         private bool HasUnsavedChanges()
         {
             if (Mode == LedgerRowEditMode.Add)
             {
-                return !string.IsNullOrWhiteSpace(Summary) || Income != 0 || Expense != 0;
+                return !string.IsNullOrWhiteSpace(Summary) || Income != 0 || Expense != 0
+                    || !string.IsNullOrWhiteSpace(Note) || CompanionCount != 0 || SelectedStaff != null;
             }
 
             // Editモード: 初期値が設定されていれば比較

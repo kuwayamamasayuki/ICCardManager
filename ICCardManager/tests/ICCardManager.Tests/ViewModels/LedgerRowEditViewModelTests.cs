@@ -1650,6 +1650,43 @@ public class LedgerRowEditViewModelTests : IDisposable
     }
 
     /// <summary>
+    /// 追加モードで摘要・金額以外の項目だけを入力した場合も確認する（コードレビューで検出）。
+    /// </summary>
+    /// <remarks>
+    /// 未保存の判定が摘要・金額しか見ていなかったため、備考・同行者数・利用者だけを入れて閉じると確認なしで消えた。
+    /// 何も入力していない追加モードは確認しない（対の表明は <see cref="SkipToNext_未保存の変更が無ければ確認を出さずに進むこと"/>）。
+    /// </remarks>
+    [Theory]
+    [InlineData("Note")]
+    [InlineData("CompanionCount")]
+    [InlineData("SelectedStaff")]
+    public void CanClose_追加モードで摘要金額以外だけを入力しても確認すること(string field)
+    {
+        _viewModel.Mode = LedgerRowEditMode.Add;
+        switch (field)
+        {
+            case "Note": _viewModel.Note = "出張の備考"; break;
+            case "CompanionCount": _viewModel.CompanionCount = 1; break;
+            case "SelectedStaff": _viewModel.SelectedStaff = _staffA; break;
+        }
+        var asked = 0;
+
+        _viewModel.CanClose(() => { asked++; return false; }).Should().BeFalse();
+        asked.Should().Be(1);
+    }
+
+    [Fact]
+    public async Task CanClose_編集モードで利用者だけを付け替えても確認すること()
+    {
+        await ArrangeEditAsync();
+        _viewModel.SelectedStaff = _staffA;
+        var asked = 0;
+
+        _viewModel.CanClose(() => { asked++; return false; }).Should().BeFalse();
+        asked.Should().Be(1, "利用者の付け替えも未保存の変更（コードレビューで検出）");
+    }
+
+    /// <summary>
     /// 保存・削除要求・次へ・戻るで閉じるときは確認しない。
     /// </summary>
     /// <remarks>

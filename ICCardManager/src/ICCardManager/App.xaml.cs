@@ -200,6 +200,9 @@ namespace ICCardManager
                 var mainWindow = ServiceProvider.GetRequiredService<MainWindow>();
                 _logger.LogDebug("MainWindow取得完了");
 
+                // Issue #2141: BusyCloseGuard はメイン画面を対象外にするため Application.MainWindow で判定する。
+                // WPF の「最初に生成された Window」という自動設定に頼らず、明示する
+                MainWindow = mainWindow;
                 mainWindow.Show();
                 _logger.LogInformation("アプリケーション起動完了");
 
