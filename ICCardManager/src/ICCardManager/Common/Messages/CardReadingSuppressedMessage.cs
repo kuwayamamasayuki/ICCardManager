@@ -54,7 +54,17 @@ namespace ICCardManager.Common.Messages
         /// <c>_cardReader.Error</c> の <c>-=</c> が no-op になり <c>finally</c> の <c>+=</c> が 2 回走って二重購読になる
         /// （<see cref="UnregisteredCardDialog"/> ＝ Issue #1807 と同型）。判定の区間だけを抑制するために使用する。
         /// </remarks>
-        BalanceMismatchCheck
+        BalanceMismatchCheck,
+
+        /// <summary>
+        /// 終了確認（<c>MainViewModel.ConfirmExit</c>）
+        /// </summary>
+        /// <remarks>
+        /// Issue #2143: 確認の MessageBox は入れ子のメッセージポンプを回すため、表示中もカードの読み取りは処理される。
+        /// 職員証タッチ後に閉じようとして確認の裏で交通系ICカードをタッチすると、貸出・返却が台帳に確定し、
+        /// 「はい」でその後処理（バス停名・同行者数の入力）の途中に終了する（#1807 と同じ形）。確認の区間だけを抑制する。
+        /// </remarks>
+        ExitConfirmation
     }
 
     /// <summary>

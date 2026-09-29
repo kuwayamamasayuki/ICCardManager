@@ -323,9 +323,11 @@
                                         <ColumnDefinition Width="*"/>
                                     </Grid.ColumnDefinitions>
                                     <TextBlock Grid.Column="0" Text="3️⃣" FontSize="{DynamicResource BaseFontSize}" VerticalAlignment="Top"/>
+                                    <!-- Issue #2143: 再タッチは取り消しではなく逆の操作の記録なので「修正」と書かない。
+                                         秒数は設定値（RetouchWindowSeconds）から組み立てた文言を表示する -->
                                     <TextBlock Grid.Column="1" TextWrapping="Wrap" FontSize="{DynamicResource BaseFontSize}">
-                                        <Run FontWeight="Bold">誤操作の修正：</Run>
-                                        <Run>30秒以内に同じカードを再タッチすると逆の処理（貸出→返却、返却→貸出）ができます</Run>
+                                        <Run FontWeight="Bold">操作を間違えたとき：</Run>
+                                        <Run Text="{Binding RetouchGuideText, Mode=OneTime}"/>
                                     </TextBlock>
                                 </Grid>
                             </StackPanel>

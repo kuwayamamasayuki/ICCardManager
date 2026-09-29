@@ -32,7 +32,8 @@ namespace ICCardManager.Views.Helpers
     /// <para>
     /// 全ウィンドウへクラスハンドラーで 1 度に掛ける（<see cref="Register"/>）。画面ごとに結線すると、
     /// 画面が増えたときに掛け忘れる（#1786「走査対象は性質から導出する」）。メイン画面は対象外 —
-    /// 閉じることがアプリの終了を意味し、その扱いは <c>MainWindow.OnClosing</c> が持つ。
+    /// 閉じることがアプリの終了を意味し、その扱いは <c>MainWindow</c> 自身の <c>SC_CLOSE</c> フック
+    /// （終了確認、Issue #2143）が持つ。
     /// </para>
     /// <para>
     /// 判断は純関数（<see cref="ShouldBlockUserClose"/> / <see cref="IsUserCloseCommand"/> /

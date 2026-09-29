@@ -36,6 +36,60 @@ namespace ICCardManager.Views
         }
 
         /// <summary>
+        /// Issue #2143: ✕・Alt+F4・システムメニューの「閉じる」で、終了してよいかを確認する。
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// 共有 PC でメイン画面を閉じると、誰かが起動し直すまで以後のタッチに何も反応しない。
+        /// 確認は「終了」ボタンと同じ <see cref="MainViewModel.ConfirmExit"/> を通す。
+        /// </para>
+        /// <para>
+        /// <b><see cref="Window.Closing"/> では確認しない。</b><c>Closing</c> は OS のサインアウト・シャットダウンや
+        /// <c>Application.Shutdown()</c>（「終了」ボタンで確認済み）でも発生するため、そこで尋ねると
+        /// 確認が二重になり、OS の終了を確認ダイアログで止めてしまう。利用者の「閉じる」操作だけが通る
+        /// <c>WM_SYSCOMMAND(SC_CLOSE)</c> で判定する（判定は <see cref="BusyCloseGuard.IsUserCloseCommand"/> を共有する）。
+        /// </para>
+        /// </remarks>
+        protected override void OnSourceInitialized(EventArgs e)
+        {
+            base.OnSourceInitialized(e);
+            HwndSource.FromHwnd(new WindowInteropHelper(this).Handle)?.AddHook(ConfirmUserCloseHook);
+        }
+
+        private IntPtr ConfirmUserCloseHook(IntPtr hwnd, int msg, IntPtr wParam, IntPtr lParam, ref bool handled)
+        {
+            if (!BusyCloseGuard.IsUserCloseCommand(msg, wParam))
+            {
+                return IntPtr.Zero;
+            }
+
+            // 確認の表示中に届いた 2 度目の閉じる操作（オーナーを解決できず確認がメイン画面を無効化しない場合の
+            // タスクバーからの「閉じる」等）は握り潰す。通すと確認が 2 枚重なる
+            if (_isConfirmingExit)
+            {
+                handled = true;
+                return IntPtr.Zero;
+            }
+
+            _isConfirmingExit = true;
+            try
+            {
+                if (!_viewModel.ConfirmExit())
+                {
+                    handled = true;
+                }
+            }
+            finally
+            {
+                _isConfirmingExit = false;
+            }
+            return IntPtr.Zero;
+        }
+
+        /// <summary>終了確認を表示している間 true（<see cref="ConfirmUserCloseHook"/> の再入ガード）</summary>
+        private bool _isConfirmingExit;
+
+        /// <summary>
         /// Issue #1907: 返却確認の履歴が開いたら、今回の返却で記録された最初の行までスクロールする。
         /// </summary>
         /// <remarks>
