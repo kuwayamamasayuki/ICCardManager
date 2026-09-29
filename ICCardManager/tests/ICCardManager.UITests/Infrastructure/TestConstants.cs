@@ -214,9 +214,15 @@ namespace ICCardManager.UITests.Infrastructure
         [UiaName]
         public const string VirtualCardExecuteButton = "タッチ実行";
 
-        /// <summary>トースト通知ウィンドウの AutomationProperties.Name（メイン画面とは別のトップレベルウィンドウ）。</summary>
-        [UiaName]
-        public const string ToastWindowName = "通知ウィンドウ";
+        /// <summary>
+        /// トースト通知ウィンドウの AutomationProperties.HelpText（メイン画面とは別のトップレベルウィンドウ）。
+        /// </summary>
+        /// <remarks>
+        /// Issue #2142: Name は通知の内容（タイトル・本文）を読み上げるため表示のたびに変わる。
+        /// 固定の「通知ウィンドウ」は HelpText へ移したので、トーストの識別も HelpText で行う。
+        /// </remarks>
+        [UiaHelpText]
+        public const string ToastWindowHelpText = "通知ウィンドウ";
 
         /// <summary>返却後に開くバス停名入力ダイアログ。</summary>
         [UiaName]

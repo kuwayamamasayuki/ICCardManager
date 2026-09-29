@@ -309,13 +309,11 @@
                     <!-- Issue #2080: 入力欄で Enter を押したときに走るのは「保存」であること。
                          既定ボタンを編集中に限るのは、一覧を見ているだけのときに
                          Enter で保存が走らないようにするため（TransferStationGroupDialog と同じ流儀）。 -->
-                    <Button Style="{StaticResource FilledActionButtonStyle}"
+                    <Button Style="{StaticResource PrimaryActionButtonStyle}"
                             Content="保存"
                             Command="{Binding SaveCommand}"
                             IsDefault="{Binding IsEditing}"
-                            Padding="15,8"
-                            Background="{DynamicResource PrimaryBrush}"
-                            Foreground="{DynamicResource OnPrimaryBrush}"/>
+                            Padding="15,8"/>
                 </StackPanel>
             </Grid>
         </Border>

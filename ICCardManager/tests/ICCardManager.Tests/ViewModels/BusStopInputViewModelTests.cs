@@ -993,6 +993,101 @@ public class BusStopInputViewModelTests : IDisposable
         _viewModel.BusUsages[0].BusStops.Should().Be(SummaryGenerator.BusPlaceholder);
         _viewModel.BusUsages[1].BusStops.Should().Be(SummaryGenerator.BusPlaceholder);
         _viewModel.IsSaved.Should().BeTrue();
+
+        // Issue #2142: 入力済みの欄があるので、破棄の確認を経てからスキップしている
+        _dialogServiceMock.Verify(
+            d => d.ShowWarningConfirmation(It.IsAny<string>(), BusStopInputViewModel.SkipDiscardConfirmationTitle),
+            Times.Once);
+    }
+
+    [Fact]
+    public async Task SkipAsync_入力済みの欄があり確認でいいえを選ぶと何も書かずに入力を残すこと_Issue2142()
+    {
+        // Arrange: 入力済み 1 行（職員が入力）＋ 未入力 1 行
+        var detail1 = new LedgerDetail { IsBus = true, BusStops = null, Amount = 200, SequenceNumber = 1 };
+        var detail2 = new LedgerDetail { IsBus = true, BusStops = null, Amount = 150, SequenceNumber = 2 };
+        var ledger = new Ledger { Id = 1, Summary = "バス（★）", Details = new List<LedgerDetail> { detail1, detail2 } };
+        _viewModel.InitializeWithDetails(ledger, ledger.Details);
+        _viewModel.BusUsages[0].BusStops = "薬院大通～六本松三丁目";
+
+        string? shownMessage = null;
+        _dialogServiceMock.Setup(d => d.ShowWarningConfirmation(It.IsAny<string>(), BusStopInputViewModel.SkipDiscardConfirmationTitle))
+            .Callback<string, string>((m, _) => shownMessage = m)
+            .Returns(false);
+
+        // Act: Esc（＝スキップボタン）
+        await _viewModel.SkipAsync();
+
+        // Assert: 入力は残り、DB へは何も書かず、ダイアログも閉じない
+        _viewModel.BusUsages[0].BusStops.Should().Be("薬院大通～六本松三丁目");
+        _viewModel.IsSaved.Should().BeFalse();
+        _ledgerRepoMock.Verify(r => r.UpdateDetailBusStopsAsync(
+            It.IsAny<int>(), It.IsAny<List<(int, string)>>(), It.IsAny<SQLiteTransaction>()), Times.Never);
+        _ledgerRepoMock.Verify(r => r.UpdateAsync(It.IsAny<Ledger>(), It.IsAny<SQLiteTransaction>()), Times.Never);
+        // 確認文は何が失われるか（★になる）と、残す方法（保存）を述べる
+        shownMessage.Should().Contain($"「{SummaryGenerator.BusPlaceholder}」");
+        shownMessage.Should().Contain("「保存」");
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task RequestCloseCommand_Escはスキップと同じ破棄の確認を通ること_Issue2142(bool confirm)
+    {
+        // Esc（Window の KeyBinding）は確認つきのスキップへ委譲する。確認を経ずに閉じる経路を作らない
+        var detail1 = new LedgerDetail { IsBus = true, BusStops = null, Amount = 200, SequenceNumber = 1 };
+        var ledger = new Ledger { Id = 1, Details = new List<LedgerDetail> { detail1 } };
+        _settingsRepoMock.Setup(s => s.GetAppSettingsAsync()).ReturnsAsync(new AppSettings());
+        _ledgerRepoMock.Setup(r => r.UpdateDetailBusStopsAsync(
+                It.IsAny<int>(), It.IsAny<List<(int, string)>>(), It.IsAny<SQLiteTransaction>()))
+            .ReturnsAsync(true);
+        _ledgerRepoMock.Setup(r => r.UpdateAsync(It.IsAny<Ledger>(), It.IsAny<SQLiteTransaction>()))
+            .ReturnsAsync(true);
+        _dialogServiceMock.Setup(d => d.ShowWarningConfirmation(It.IsAny<string>(), BusStopInputViewModel.SkipDiscardConfirmationTitle))
+            .Returns(confirm);
+        _viewModel.InitializeWithDetails(ledger, ledger.Details);
+        _viewModel.BusUsages[0].BusStops = "薬院大通～六本松三丁目";
+
+        await _viewModel.RequestCloseCommand.ExecuteAsync(null);
+
+        _dialogServiceMock.Verify(
+            d => d.ShowWarningConfirmation(It.IsAny<string>(), BusStopInputViewModel.SkipDiscardConfirmationTitle), Times.Once);
+        _viewModel.IsSaved.Should().Be(confirm, "「はい」ならスキップして閉じ、「いいえ」なら閉じない");
+        _viewModel.BusUsages[0].BusStops.Should().Be(confirm ? SummaryGenerator.BusPlaceholder : "薬院大通～六本松三丁目");
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("   ")]
+    [InlineData("<placeholder>")]
+    public async Task SkipAsync_入力済みの欄が無ければ確認を出さずにスキップすること_Issue2142(string? busStops)
+    {
+        // Arrange: 失われる入力が無い（空欄・空白・★のみ）。返却フローを遅くしないため確認を挟まない。
+        // "<placeholder>" はプレースホルダ（組織設定由来のため直書きしない。#1818）を表す
+        busStops = busStops == "<placeholder>" ? SummaryGenerator.BusPlaceholder : busStops;
+        var detail1 = new LedgerDetail { IsBus = true, BusStops = busStops, Amount = 200, SequenceNumber = 1 };
+        var ledger = new Ledger { Id = 1, Details = new List<LedgerDetail> { detail1 } };
+        _settingsRepoMock.Setup(s => s.GetAppSettingsAsync())
+            .ReturnsAsync(new AppSettings());
+        _ledgerRepoMock.Setup(r => r.UpdateDetailBusStopsAsync(
+                It.IsAny<int>(), It.IsAny<List<(int, string)>>(), It.IsAny<SQLiteTransaction>()))
+            .ReturnsAsync(true);
+        _ledgerRepoMock.Setup(r => r.UpdateAsync(It.IsAny<Ledger>(), It.IsAny<SQLiteTransaction>()))
+            .ReturnsAsync(true);
+        // 確認が出たら「いいえ」— 出てしまう実装ではスキップされず IsSaved が false のまま赤になる
+        _dialogServiceMock.Setup(d => d.ShowWarningConfirmation(It.IsAny<string>(), It.IsAny<string>()))
+            .Returns(false);
+        _viewModel.InitializeWithDetails(ledger, ledger.Details);
+
+        // Act
+        await _viewModel.SkipAsync();
+
+        // Assert
+        _viewModel.IsSaved.Should().BeTrue();
+        detail1.BusStops.Should().Be(SummaryGenerator.BusPlaceholder);
+        _dialogServiceMock.Verify(
+            d => d.ShowWarningConfirmation(It.IsAny<string>(), It.IsAny<string>()), Times.Never);
     }
 
     [Fact]

@@ -99,7 +99,7 @@ namespace ICCardManager.Views.Dialogs
         /// Issue #2072: 入力欄のキーを候補リストの操作（↓↑ で選択、Enter で確定、Esc で閉じる）として処理する。
         /// </summary>
         /// <remarks>
-        /// Preview で処理済みにしないと、Enter が既定ボタン（保存）、Esc がキャンセルボタン（スキップ）へ届き、
+        /// Preview で処理済みにしないと、Enter が既定ボタン（保存）、Esc がスキップ（Window の KeyBinding。#2142）へ届き、
         /// 入力途中の文字列が保存される／入力がすべて破棄される。判定は ViewModel（<see cref="BusStopInputItem.HandleSuggestionKey"/>）が持つ。
         /// </remarks>
         private void BusStopTextBox_PreviewKeyDown(object sender, KeyEventArgs e)

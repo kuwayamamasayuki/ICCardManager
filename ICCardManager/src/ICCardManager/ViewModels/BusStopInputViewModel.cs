@@ -666,12 +666,55 @@ public partial class BusStopInputViewModel : ViewModelBase
         "最新の内容を確認してから入力し直してください。";
 
     /// <summary>
+    /// Issue #2142: スキップで破棄される入力がある場合の確認ダイアログのタイトル。
+    /// </summary>
+    internal const string SkipDiscardConfirmationTitle = "入力内容の破棄の確認";
+
+    /// <summary>
+    /// Issue #2142: スキップすると失われる入力（空欄でも「★」でもないバス停名）が 1 つ以上あるか。
+    /// </summary>
+    internal bool HasInputDiscardedBySkip()
+        => BusUsages.Any(b => !string.IsNullOrWhiteSpace(b.BusStops)
+                              && !SummaryGenerator.IsBusStopPlaceholder(b.BusStops));
+
+    /// <summary>
+    /// Issue #2142: Esc キーによる閉じる要求。このダイアログを閉じる手段はスキップ（★で保存）なので、確認つきの
+    /// <see cref="SkipAsync"/> へ委譲する。
+    /// </summary>
+    /// <remarks>
+    /// スキップボタンに <c>IsCancel</c> を付けると、WPF は Click 処理の後に無条件で <c>DialogResult=false</c> を設定するため、
+    /// 破棄の確認で「いいえ」を選んでもダイアログが閉じる（★も保存されず入力も失われる）。Esc はこのコマンドへ
+    /// <c>KeyBinding</c> で結線し、閉じるのは <see cref="IsSaved"/> を契機にするだけにする。
+    /// </remarks>
+    [RelayCommand]
+    private Task RequestCloseAsync() => SkipAsync();
+
+    /// <summary>
     /// スキップ（★マークを付けて保存）
     /// </summary>
+    /// <remarks>
+    /// Issue #2142: スキップは入力済みの内容も「★」へ置き換える（#1156）ため、入力済みの欄があるときだけ
+    /// 確認を挟む。スキップは Esc にも割り当たっており（当初はスキップボタンの <c>IsCancel</c>、現在は <see cref="RequestCloseCommand"/>）、元に戻せない破棄が
+    /// Esc 1 回で起きていた。確認はボタンと Esc の両方が通るこのメソッドに置く（片方にだけ置くと
+    /// 同じ判断が 2 か所に分かれる。ui-conventions #2080）。確認ダイアログは同期モーダルなので
+    /// 処理中スコープの外で出す（#1793）。
+    /// </remarks>
     [RelayCommand]
     public async Task SkipAsync()
     {
         if (Ledger == null) return;
+
+        if (HasInputDiscardedBySkip())
+        {
+            var message = "入力したバス停名は保存されず、すべて「" + SummaryGenerator.BusPlaceholder +
+                          "」（後で入力が必要）になります。" + Environment.NewLine + Environment.NewLine +
+                          "入力内容を破棄してスキップしますか？" + Environment.NewLine +
+                          "入力内容を残す場合は「いいえ」を選び、「保存」を押してください。";
+            if (!_dialogService.ShowWarningConfirmation(message, SkipDiscardConfirmationTitle))
+            {
+                return;
+            }
+        }
 
         using (BeginBusy("保存中..."))
         {
@@ -899,7 +942,7 @@ public partial class BusStopInputItem : ObservableObject
     /// <param name="key">押されたキー（IME 変換中は <see cref="Key.ImeProcessed"/> が来るため処理しない）</param>
     /// <returns>
     /// 候補リストの操作として消費した場合 true。呼び出し側はキーを処理済みにし、
-    /// ダイアログの既定ボタン（Enter＝保存）・キャンセルボタン（Esc＝スキップ）へ届かないようにする。
+    /// ダイアログの既定ボタン（Enter＝保存）・Esc の KeyBinding（スキップ。#2142）へ届かないようにする。
     /// </returns>
     /// <remarks>
     /// <list type="bullet">

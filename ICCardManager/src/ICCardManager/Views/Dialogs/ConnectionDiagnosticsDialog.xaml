@@ -179,14 +179,12 @@
                         AutomationProperties.HelpText="もう一度すべての項目を確認します。"
                         ToolTip="もう一度すべての項目を確認します"/>
 
-                <Button Style="{StaticResource FilledActionButtonStyle}"
+                <Button Style="{StaticResource SecondaryActionButtonStyle}"
                         Content="結果をコピー"
                         Command="{Binding CopyResultCommand}"
                         Padding="20,10"
                         MinWidth="120"
                         Margin="0,0,10,0"
-                        Background="{DynamicResource PrimaryBrush}"
-                        Foreground="{DynamicResource OnPrimaryBrush}"
                         AutomationProperties.Name="診断結果をコピー"
                         AutomationProperties.HelpText="診断結果と環境情報をクリップボードへコピーします。メールに貼り付けてIT担当へ送れます。"
                         ToolTip="診断結果をクリップボードへコピーする"/>

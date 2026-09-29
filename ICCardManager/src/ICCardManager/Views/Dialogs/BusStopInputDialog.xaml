@@ -17,6 +17,15 @@
         AutomationProperties.Name="バス停名入力ダイアログ"
         AutomationProperties.HelpText="バス利用の乗車・降車バス停名を入力します。過去の入力履歴から候補が表示されます。">
 
+    <Window.InputBindings>
+        <!-- Escape: スキップ（Issue #2142）。IsCancel は Click 処理の後に無条件で DialogResult=false を設定するため、
+             破棄の確認で「いいえ」を選んでもダイアログが閉じ、★も保存されないまま入力が失われる。
+             KeyBinding 経由でスキップ（確認つき）を呼び、閉じるのは保存・スキップの成功（IsSaved）だけにする
+             （LedgerDetailDialog #1743 / LedgerRowEditDialog #2141 と同じ形）。
+             候補が開いている間の Esc は入力欄の PreviewKeyDown が消費するので、ここへは届かない（#2072） -->
+        <KeyBinding Key="Escape" Command="{Binding RequestCloseCommand}"/>
+    </Window.InputBindings>
+
     <Window.Resources>
         <BooleanToVisibilityConverter x:Key="BoolToVisibilityConverter"/>
     </Window.Resources>
@@ -225,17 +234,14 @@
                     Command="{Binding SkipCommand}"
                     Padding="15,10"
                     Margin="0,0,10,0"
-                    IsCancel="True"
                     FontSize="{DynamicResource BaseFontSize}"
                     AutomationProperties.Name="スキップ"
-                    AutomationProperties.HelpText="バス停名を入力せずにダイアログを閉じます。後で入力できます。"
+                    AutomationProperties.HelpText="バス停名を入力せずにダイアログを閉じます。後で入力できます。入力済みのバス停名がある場合は、破棄してよいか確認します。"
                     ToolTip="後で入力する場合はスキップ (Escape / Alt+K)"/>
-            <Button Style="{StaticResource FilledActionButtonStyle}"
+            <Button Style="{StaticResource PrimaryActionButtonStyle}"
                     Content="保存(_S)"
                     Command="{Binding SaveCommand}"
                     Padding="20,10"
-                    Background="{DynamicResource SuccessActionBrush}"
-                    Foreground="{DynamicResource OnPrimaryBrush}"
                     IsDefault="True"
                     FontSize="{DynamicResource BaseFontSize}"
                     AutomationProperties.Name="バス停名を保存"

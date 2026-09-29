@@ -165,14 +165,12 @@
                             </DataTemplate>
                         </ComboBox.ItemTemplate>
                     </ComboBox>
-                    <Button Style="{StaticResource FilledActionButtonStyle}"
+                    <Button Style="{StaticResource SecondaryActionButtonStyle}"
                             Content="印刷"
                             Command="{Binding PrintCommand}"
                             MinHeight="28"
                             Padding="20,0"
                             Margin="15,0,0,0"
-                            Background="{DynamicResource PrimaryBrush}"
-                            Foreground="{DynamicResource OnPrimaryBrush}"
                             FontWeight="Bold"
                             ToolTip="印刷ダイアログを開く"
                             AutomationProperties.Name="印刷を実行"/>

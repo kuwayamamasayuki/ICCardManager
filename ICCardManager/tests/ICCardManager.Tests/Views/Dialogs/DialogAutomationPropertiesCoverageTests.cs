@@ -387,7 +387,15 @@ public class DialogAutomationPropertiesCoverageTests
                 "ViewModel の PropertyChanged の受け手が、対応する TextBlock について発火メソッドを呼び出していること。" +
                 "呼び出しが無いと、発火メソッドが定義されていても読み上げは起きない（Issue #2102）。");
 
+        // Issue #2142: 発火の本体は共有ヘルパー（LiveRegionAnnouncer）へ寄せた。発火メソッドが委譲していることと、
+        // 委譲先が実際に RaiseAutomationEvent を呼ぶことを対で見る（委譲先を空にした実装を落とす）
         TestSourceInspection.ExtractMethodBody(code, "private static void RaiseLiveRegionChanged(")
+            .Should().MatchRegex(@"\bLiveRegionAnnouncer\.Announce\s*\(",
+                "発火メソッドが共有ヘルパーへ委譲していること（発火の順序の扱いを 1 か所に置く。#1763）。");
+
+        var announcer = TestSourceInspection.ToCodeOnly(File.ReadAllText(
+            Path.Combine(TestPaths.GetProductionSourceRoot(), "Views", "Helpers", "LiveRegionAnnouncer.cs")));
+        TestSourceInspection.ExtractMethodBody(announcer, "public static void Announce(")
             .Should().MatchRegex(@"RaiseAutomationEvent\s*\(\s*AutomationEvents\.LiveRegionChanged\s*\)",
                 "AutomationProperties.LiveSetting='Polite' 単独では発火しないため、" +
                 "明示的な RaiseAutomationEvent(AutomationEvents.LiveRegionChanged) 呼び出しが必須" +

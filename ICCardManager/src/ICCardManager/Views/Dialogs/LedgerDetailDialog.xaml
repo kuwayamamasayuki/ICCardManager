@@ -436,19 +436,26 @@
                            Visibility="{Binding HasChanges, Converter={StaticResource BoolToVisibilityConverter}}"/>
             </StackPanel>
             <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+                <!-- Issue #2142: 並びは他のダイアログと同じ「右端が主操作、その左に閉じる」。
+                     閉じるが保存ボタン群の右にあると、保存のつもりで右端を押して閉じる操作になる -->
+                <!-- IsCancel は付けない（Issue #1743: 未保存確認で「いいえ」を選んでも
+                     DialogResult=false が設定されて閉じてしまう。Escape は InputBindings が担う） -->
+                <Button Content="閉じる"
+                        Click="CloseButton_Click"
+                        Padding="20,8"
+                        Margin="0,0,10,0"
+                        AutomationProperties.Name="閉じる"
+                        ToolTip="ダイアログを閉じる (Escape)"/>
                 <!-- 通常保存ボタン（1グループまたはグループなしの場合） -->
                 <Button Content="保存 (Ctrl+S)"
                         Command="{Binding SaveCommand}"
                         Padding="15,8"
-                        Margin="0,0,10,0"
-                        Background="{DynamicResource SuccessActionBrush}"
-                        Foreground="{DynamicResource OnPrimaryBrush}"
                         AutomationProperties.Name="保存"
                         ToolTip="変更を保存します">
                     <Button.Style>
-                        <!-- 対話状態の塗りを導出するため FilledActionButtonStyle を土台にする（Issue #2094）。
+                        <!-- 塗りは役割スタイル（Issue #2142）から受け取る。役割スタイルは FilledActionButtonStyle を土台にしており、対話状態の塗りを導出する（Issue #2094）。
                              BasedOn を外すと WPF の既定テンプレートへ戻り、hover 時に白文字が読めなくなる -->
-                        <Style TargetType="Button" BasedOn="{StaticResource FilledActionButtonStyle}">
+                        <Style TargetType="Button" BasedOn="{StaticResource PrimaryActionButtonStyle}">
                             <Setter Property="Visibility" Value="{Binding HasChanges, Converter={StaticResource BoolToVisibilityConverter}}"/>
                             <Style.Triggers>
                                 <DataTrigger Binding="{Binding HasMultipleGroups}" Value="True">
@@ -470,32 +477,20 @@
                             </Style.Triggers>
                         </Style>
                     </StackPanel.Style>
-                    <Button Style="{StaticResource FilledActionButtonStyle}"
+                    <Button Style="{StaticResource SecondaryActionButtonStyle}"
                             Content="別々の履歴に分割"
                             Command="{Binding SaveWithFullSplitCommand}"
                             Padding="15,8"
                             Margin="0,0,6,0"
-                            Background="{DynamicResource InfoTextBrush}"
-                            Foreground="{DynamicResource OnPrimaryBrush}"
                             AutomationProperties.Name="別々の履歴に分割"
                             ToolTip="グループごとに別の履歴レコードを作成します"/>
-                    <Button Style="{StaticResource FilledActionButtonStyle}"
+                    <Button Style="{StaticResource PrimaryActionButtonStyle}"
                             Content="摘要のみ更新"
                             Command="{Binding SaveCommand}"
                             Padding="15,8"
-                            Margin="0,0,10,0"
-                            Background="{DynamicResource SuccessActionBrush}"
-                            Foreground="{DynamicResource OnPrimaryBrush}"
                             AutomationProperties.Name="摘要のみ更新"
                             ToolTip="1つの履歴レコードのまま摘要を変更します"/>
                 </StackPanel>
-                <!-- IsCancel は付けない（Issue #1743: 未保存確認で「いいえ」を選んでも
-                     DialogResult=false が設定されて閉じてしまう。Escape は InputBindings が担う） -->
-                <Button Content="閉じる"
-                        Click="CloseButton_Click"
-                        Padding="20,8"
-                        AutomationProperties.Name="閉じる"
-                        ToolTip="ダイアログを閉じる (Escape)"/>
             </StackPanel>
         </Grid>
 

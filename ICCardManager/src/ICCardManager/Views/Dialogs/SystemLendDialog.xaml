@@ -132,12 +132,10 @@
                     AutomationProperties.Name="キャンセル"
                     AutomationProperties.HelpText="貸出記録を作成せずに閉じます"
                     ToolTip="作成せずに閉じる (Escape / Alt+C)"/>
-            <Button Style="{StaticResource FilledActionButtonStyle}"
+            <Button Style="{StaticResource PrimaryActionButtonStyle}"
                     Content="貸出記録を作成(_S)"
                     Command="{Binding SaveCommand}"
                     Padding="20,10"
-                    Background="{DynamicResource SuccessActionBrush}"
-                    Foreground="{DynamicResource OnPrimaryBrush}"
                     IsDefault="True"
                     FontSize="{DynamicResource BaseFontSize}"
                     AutomationProperties.Name="貸出記録を作成"

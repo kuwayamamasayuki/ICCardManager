@@ -210,13 +210,24 @@ public class BackgroundContrastConventionTests
     {
         var pairs = FillForegroundPairs.CollectResolved();
 
+        // Issue #2142: 主要ボタンの塗りは役割スタイル（AccessibilityStyles.xaml の 3 つ）へ寄せたので、
+        // ボタンごとに書かれていた組はスタイル辞書の 1 か所ずつに集約された（件数が減るのは意図どおり）
         pairs.Should().HaveCountGreaterThan(
-            20, "塗りと文字色の組が静的に辿れる箇所が複数あること");
+            8, "塗りと文字色の組が静的に辿れる箇所が複数あること");
 
-        // ① 同一タグ形（主要ボタン）
+        // ① 同一タグ形（役割スタイルを使わない、選択肢の識別色のボタン）
         pairs.Should().Contain(
-            p => p.Source == "BusStopInputDialog.xaml" && p.BackgroundKey == "SuccessActionBrush",
-            "同一タグに Background と Foreground を書いた主要ボタンが走査対象に含まれること");
+            p => p.Source == "CardTypeSelectionDialog.xaml" && p.Form == FillForegroundPairs.PairForm.SameTag,
+            "同一タグに Background と Foreground を書いたボタンが走査対象に含まれること");
+
+        // 役割スタイル（主操作・二次操作・注意）の塗りがすべて走査対象に含まれること
+        foreach (var roleFill in new[] { "SuccessActionBrush", "PrimaryBrush", "WarningActionBrush" })
+        {
+            pairs.Should().Contain(
+                p => p.Source == "AccessibilityStyles.xaml" && p.BackgroundKey == roleFill
+                     && p.ForegroundKey == "OnPrimaryBrush",
+                "役割スタイルの塗り {0} と白文字の組が走査対象に含まれること（Issue #2142）", roleFill);
+        }
 
         // ② Setter 形。Style で包むだけで ① の外へ逃がせないことを表明する
         pairs.Should().Contain(

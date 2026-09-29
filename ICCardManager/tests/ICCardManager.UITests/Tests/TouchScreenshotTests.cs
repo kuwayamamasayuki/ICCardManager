@@ -288,7 +288,7 @@ namespace ICCardManager.UITests.Tests
                 () => FindToast(fixture),
                 ToastTimeout).Result;
             toast.Should().NotBeNull(
-                $"トースト通知（\"{TestConstants.ToastWindowName}\"）が {ToastTimeout.TotalSeconds} 秒以内に表示されること。" +
+                $"トースト通知（\"{TestConstants.ToastWindowHelpText}\"）が {ToastTimeout.TotalSeconds} 秒以内に表示されること。" +
                 DescribeBlockingModal(fixture));
             return toast!;
         }
@@ -297,7 +297,7 @@ namespace ICCardManager.UITests.Tests
         /// トーストが消えるのを待つ。<b>消えたことを表明する</b>のが要点。
         /// </summary>
         /// <remarks>
-        /// トーストはすべて同じ UIA Name（<see cref="TestConstants.ToastWindowName"/>）を持つため、
+        /// トーストはすべて同じ UIA HelpText（<see cref="TestConstants.ToastWindowHelpText"/>）を持つため、
         /// 前のトーストが残ったまま次の操作へ進むと <see cref="WaitForToast"/> が<b>古いトーストを掴む</b>。
         /// 結果、貸出の撮影に「職員証を認識しました」が写った、もっともらしく見えて誤った画像ができ、
         /// 見比べる人が気付かないまま <c>-Publish</c> で 6 年参照されるマニュアルへ載り得る（コードレビューで検出）。
@@ -311,7 +311,7 @@ namespace ICCardManager.UITests.Tests
                 ToastTimeout).Success;
             gone.Should().BeTrue(
                 $"直前のトーストが {ToastTimeout.TotalSeconds} 秒以内に消えること" +
-                "（消える前に次を撮ると、同じ UIA Name の古いトーストを掴んで誤った画像になる）。" +
+                "（消える前に次を撮ると、同じ UIA HelpText の古いトーストを掴んで誤った画像になる）。" +
                 DescribeBlockingModal(fixture));
         }
 
@@ -346,7 +346,7 @@ namespace ICCardManager.UITests.Tests
             try
             {
                 return fixture.App.GetAllTopLevelWindows(fixture.Automation)
-                    .FirstOrDefault(w => w.Name == TestConstants.ToastWindowName);
+                    .FirstOrDefault(w => w.HelpText == TestConstants.ToastWindowHelpText);
             }
             catch
             {

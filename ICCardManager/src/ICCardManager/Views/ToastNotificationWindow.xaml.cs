@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
 using System.Windows;
+using System.Windows.Automation;
 using System.Windows.Media;
 using System.Windows.Media.Animation;
 using System.Windows.Threading;
@@ -289,7 +290,16 @@ namespace ICCardManager.Views
                     toast.SubMessageText.Visibility = Visibility.Visible;
                 }
 
+                // Issue #2142: 読み上げソフトには、表示した内容そのものを伝える（Name を固定ラベルにしない）
+                AutomationProperties.SetName(toast, BuildAnnouncement(
+                    toast.TitleText.Text,
+                    toast.MessageText.Text,
+                    toast.SubMessageText.Visibility == Visibility.Visible ? toast.SubMessageText.Text : null));
+
                 toast.Show();
+
+                // Issue #2142: LiveSetting だけでは LiveRegionChanged は発火しない。表示の後に明示的に通知する
+                LiveRegionAnnouncer.Announce(toast, "通知のスクリーンリーダーへの読み上げ");
 
                 // Issue #2141: 自動では消えない通知は 1 枚に差し替える（同じ画面隅へ重ねて積まない）
                 if (!autoClose)
@@ -318,9 +328,39 @@ namespace ICCardManager.Views
             ToastBorder.BorderBrush = ResolveBrush(borderKey);
             TitleText.Foreground = ResolveBrush(titleForegroundKey);
 
-            var messageBrush = ResolveBrush("WaitingForegroundBrush");
-            MessageText.Foreground = messageBrush;
-            SubMessageText.Foreground = messageBrush;
+            MessageText.Foreground = ResolveBrush(MessageForegroundKey);
+            SubMessageText.Foreground = ResolveBrush(SubMessageForegroundKey);
+        }
+
+        /// <summary>
+        /// 本文の文字色のリソースキー（通知の種類によらない）
+        /// </summary>
+        internal const string MessageForegroundKey = "WaitingForegroundBrush";
+
+        /// <summary>
+        /// 補足行（残額不足の警告・閉じ方の案内）の文字色のリソースキー
+        /// </summary>
+        /// <remarks>
+        /// Issue #2142: 本文より控えめに見せるための階層を <c>Opacity</c>（旧 0.6）ではなく文字色で表す。
+        /// 不透明度は文字を地色へ寄せるため、4 種の背景すべてで約 3.1:1 まで落ちていた。
+        /// 補足行には残額不足の警告が入るので、読めることが本文と同じだけ要る（4.5:1 以上。ToastNotificationStyleTests）。
+        /// </remarks>
+        internal const string SubMessageForegroundKey = "SecondaryTextBrush";
+
+        /// <summary>
+        /// 読み上げソフトへ伝える通知の内容（窓の Name）を組み立てる
+        /// </summary>
+        /// <remarks>
+        /// Issue #2142: UIA は LiveRegionChanged を受けると<b>通知した要素の Name</b> を読む。
+        /// 窓の Name が固定の「通知ウィンドウ」だったため、通知を発火しても結果（カード名・残額・エラー内容）は
+        /// 伝わらなかった。表示している行をそのまま、表示順に空白で区切って並べる（空の行は飛ばし、行内の改行も空白にする）。
+        /// </remarks>
+        internal static string BuildAnnouncement(string title, string message, string subMessage)
+        {
+            var lines = new[] { title, message, subMessage }
+                .Where(t => !string.IsNullOrWhiteSpace(t))
+                .Select(t => t.Replace("\r\n", "\n").Replace('\n', ' ').Trim());
+            return string.Join(" ", lines);
         }
 
         // Issue #2141: 種類ごとの見た目を純関数へ切り出した（Window は STA 依存で xUnit から実行できないため）。

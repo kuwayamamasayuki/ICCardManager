@@ -4,11 +4,10 @@ using System.ComponentModel;
 using System.Linq;
 using System.Threading.Tasks;
 using System.Windows;
-using System.Windows.Automation.Peers;
 using System.Windows.Controls;
-using System.Windows.Threading;
 using ICCardManager.Common;
 using ICCardManager.ViewModels;
+using ICCardManager.Views.Helpers;
 
 namespace ICCardManager.Views.Dialogs
 {
@@ -120,25 +119,17 @@ namespace ICCardManager.Views.Dialogs
             };
         }
 
+        /// <summary>
+        /// 表示の更新が済んだ後に LiveRegionChanged を発火する（発火の順序の理由は <see cref="LiveRegionAnnouncer"/>）。
+        /// </summary>
+        /// <remarks>
+        /// Issue #2142: 同じ発火処理がトースト通知とメイン画面にも要るため、共有のヘルパーへ寄せた（#1763）。
+        /// ただしページ送りの中間ページでは、フォーカス位置のキー操作フィードバック中に Narrator が
+        /// Live Region 通知を抑制するため完全には読み上げられない既知制約がある（PR #1555 参照）。
+        /// </remarks>
         private static void RaiseLiveRegionChanged(UIElement element)
         {
-            // Issue #1507: PropertyChanged → Binding の Text 更新 → Render → LiveRegionChanged 発火、
-            // の順を保証するため、 DispatcherPriority.ApplicationIdle で 1 サイクル待ってから発火する。
-            // 同期発火だと Binding の Source→Target 更新が完了する前に Narrator が peer.GetName() を問い合わせ、
-            // 古い Text 値が読まれる挙動になる（実機検証で判明）。
-            // ApplicationIdle はフォーカス関連の Narrator 処理を含むすべての処理が完了したアイドル状態で走る。
-            // ただし Narrator はフォーカス位置のキー操作フィードバック中は Live Region 通知を抑制する
-            // 仕様があり、ページ送りの中間ページでは完全に読み上げられない既知制約あり（PR #1555 参照）。
-            // Issue #1873: ディスパッチした処理の例外を観測してログへ残す
-            element.Dispatcher.InvokeAsyncObserved(
-                () =>
-                {
-                    var peer = UIElementAutomationPeer.FromElement(element)
-                               ?? UIElementAutomationPeer.CreatePeerForElement(element);
-                    peer?.RaiseAutomationEvent(AutomationEvents.LiveRegionChanged);
-                },
-                "操作ログのスクリーンリーダー通知",
-                DispatcherPriority.ApplicationIdle);
+            LiveRegionAnnouncer.Announce(element, "操作ログのスクリーンリーダー通知");
         }
 
         private void OnClosed(object? sender, EventArgs e)

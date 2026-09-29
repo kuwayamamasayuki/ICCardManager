@@ -103,10 +103,10 @@ public class ColorLiteralSingleSourceOfTruthTests
     /// </remarks>
     private static readonly Dictionary<(string File, string Usage), int> KnownNamedColorLiterals = new()
     {
-        // 白いカード状のパネル（地色 #F5F5F5 の上に置く面）
-        [("MainWindow.xaml", "Background=\"White\"")] = 4,
+        // 印刷プレビューの用紙の白（「紙」を表す意図した白。ハイコントラストでも紙は白いまま見せる）。
+        // メイン画面・帳票作成の白いカード状の面は Issue #2142 で SurfaceBrush へ寄せた
+        // （ハイコントラスト（黒）で白地に白文字になっていたため）
         [("PrintPreviewDialog.xaml", "Background=\"White\"")] = 2,
-        [("ReportDialog.xaml", "Background=\"White\"")] = 1,
 
         // 一覧の選択ハイライトを消したときの、選択行の文字色（SystemColors のキーを上書きしている）
         [("MainWindow.xaml", "Color=\"Black\"")] = 2,

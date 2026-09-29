@@ -108,6 +108,13 @@
     <SolidColorBrush x:Key="DividerBrush" Color="#BDBDBD"/>
     <SolidColorBrush x:Key="SubtleBorderBrush" Color="#CCCCCC"/>
     <SolidColorBrush x:Key="AlternatingRowBrush" Color="#FAFAFA"/>
+    <!-- 白いカード状の面（地色 NeutralBackgroundBrush の上に置くパネル・一覧・ポップアップ）。Issue #2142。
+         中の文字は色を指定せずシステムの文字色を継承するため、ハイコントラスト（黒）では白文字になる。
+         Background="White" の直書きでは白地に白文字で読めなくなるので、ハイコントラスト時は
+         Views/Helpers/HighContrastSurface がこのキーをシステムのウィンドウ背景色（SystemColors.WindowBrush）へ
+         差し替える。必ず DynamicResource で参照すること（StaticResource では差し替えが届かない）。
+         印刷プレビューの用紙の白は「紙」を表す意図した白なので対象外 -->
+    <SolidColorBrush x:Key="SurfaceBrush" Color="#FFFFFF"/>
 
     <!-- アクション・オーバーレイ -->
     <!-- SuccessActionBrush / WarningActionBrush は主要ボタンの「塗り」で、上には OnPrimaryBrush(#FFFFFF)
@@ -299,11 +306,30 @@
         <Setter Property="Template" Value="{StaticResource AccessibleButtonTemplate}"/>
     </Style>
 
-    <!-- プライマリボタンスタイル -->
-    <Style x:Key="PrimaryButtonStyle" TargetType="Button" BasedOn="{StaticResource AccessibleButtonStyle}">
+    <!-- ===== 役割ごとの塗り付きボタン（Issue #2142） =====
+         塗りの色はボタンの「役割」で決め、ボタン側に Background を直書きしない。直書きだと「保存」が画面ごとに
+         緑と青に分かれ、安全な「プレビュー」がリストアと同じ警告色になり、文字色用の InfoTextBrush が塗りに
+         流用されていた。役割は次の 3 つだけ（並びは「右端が主操作、その左にキャンセル／閉じる」。
+         ButtonRoleConventionTests が色の直書きの不在と並びを静的検査で固定する）:
+           - PrimaryActionButtonStyle   主操作（その画面の目的を確定する操作。保存・OK・作成・実行）… 緑
+           - SecondaryActionButtonStyle 二次操作（確定を伴わない、または主操作の補助。プレビュー・検索・印刷・
+                                        保存して次へ・分割 等）… 青
+           - CautionActionButtonStyle   注意（取り消しにくい上書き。リストア 等）… 橙
+         寸法（Padding・MinWidth）は持たない。各ボタンが自前で持っており、色の統一と無関係なレイアウト変更を
+         混ぜないため（FilledActionButtonStyle と同じ判断） -->
+    <Style x:Key="PrimaryActionButtonStyle" TargetType="Button" BasedOn="{StaticResource FilledActionButtonStyle}">
+        <Setter Property="Background" Value="{StaticResource SuccessActionBrush}"/>
+        <Setter Property="Foreground" Value="{StaticResource OnPrimaryBrush}"/>
+    </Style>
+
+    <Style x:Key="SecondaryActionButtonStyle" TargetType="Button" BasedOn="{StaticResource FilledActionButtonStyle}">
         <Setter Property="Background" Value="{StaticResource PrimaryBrush}"/>
         <Setter Property="Foreground" Value="{StaticResource OnPrimaryBrush}"/>
-        <Setter Property="FontWeight" Value="SemiBold"/>
+    </Style>
+
+    <Style x:Key="CautionActionButtonStyle" TargetType="Button" BasedOn="{StaticResource FilledActionButtonStyle}">
+        <Setter Property="Background" Value="{StaticResource WarningActionBrush}"/>
+        <Setter Property="Foreground" Value="{StaticResource OnPrimaryBrush}"/>
     </Style>
 
     <!-- 危険ボタンスタイル（削除など） -->
