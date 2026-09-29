@@ -36,7 +36,24 @@
             <RowDefinition Height="*"/>      <!-- Row 1: インポート設定（スクロール可能、残領域を使用） -->
             <RowDefinition Height="Auto"/>   <!-- Row 2: アクションボタン -->
             <RowDefinition Height="Auto"/>   <!-- Row 3: ステータスメッセージ -->
-            <RowDefinition Height="2*" MinHeight="0"/>  <!-- Row 4: プレビュー結果＋エラー（リサイズ可能） -->
+            <!-- Row 4: プレビュー結果＋エラー。Issue #2147: 行の比率は中身の表示状態と無関係に効くため、
+                 常に 2* だとプレビュー前（インポート設定を操作している最中）も残りの高さの 2/3 が空白として確保され、
+                 インポート設定がスクロールしなければ見えなかった。プレビュー表示中だけ 2* で分け合い、
+                 それ以外は Auto（エラー一覧だけならその高さ、何も無ければ上余白だけ）にして余りをインポート設定へ回す。
+                 表示中も Auto にすると DataGrid が全件ぶん縦に伸びて閉じるボタンを画面外へ押し出す（#2076）。
+                 高さはローカル値で書かない（ローカル値は Style の Setter より優先され、トリガーが効かなくなる） -->
+            <RowDefinition MinHeight="0">
+                <RowDefinition.Style>
+                    <Style TargetType="RowDefinition">
+                        <Setter Property="Height" Value="Auto"/>
+                        <Style.Triggers>
+                            <DataTrigger Binding="{Binding HasPreview}" Value="True">
+                                <Setter Property="Height" Value="2*"/>
+                            </DataTrigger>
+                        </Style.Triggers>
+                    </Style>
+                </RowDefinition.Style>
+            </RowDefinition>
             <RowDefinition Height="Auto"/>   <!-- Row 5: Close button（常に表示） -->
         </Grid.RowDefinitions>
 
