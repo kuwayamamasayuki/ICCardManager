@@ -702,14 +702,12 @@
                         AutomationProperties.Name="出力したファイルを開く"
                         ToolTip="直前に出力した Excel ファイルを開く"/>
 
-                <Button Style="{StaticResource FilledActionButtonStyle}"
+                <Button Style="{StaticResource SecondaryActionButtonStyle}"
                         Content="Excel出力"
                         Command="{Binding ExportToExcelCommand}"
                         Padding="20,10"
                         MinWidth="120"
                         Margin="0,0,10,0"
-                        Background="{DynamicResource PrimaryBrush}"
-                        Foreground="{DynamicResource OnPrimaryBrush}"
                         AutomationProperties.Name="集計結果をExcelへ出力"
                         AutomationProperties.HelpText="運用状況と利用分析をExcelファイルへ出力します。"
                         ToolTip="運用状況と利用分析をExcelファイルへ出力する"/>

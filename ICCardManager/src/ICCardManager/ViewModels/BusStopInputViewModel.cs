@@ -666,12 +666,43 @@ public partial class BusStopInputViewModel : ViewModelBase
         "最新の内容を確認してから入力し直してください。";
 
     /// <summary>
+    /// Issue #2142: スキップで破棄される入力がある場合の確認ダイアログのタイトル。
+    /// </summary>
+    internal const string SkipDiscardConfirmationTitle = "入力内容の破棄の確認";
+
+    /// <summary>
+    /// Issue #2142: スキップすると失われる入力（空欄でも「★」でもないバス停名）が 1 つ以上あるか。
+    /// </summary>
+    internal bool HasInputDiscardedBySkip()
+        => BusUsages.Any(b => !string.IsNullOrWhiteSpace(b.BusStops)
+                              && !SummaryGenerator.IsBusStopPlaceholder(b.BusStops));
+
+    /// <summary>
     /// スキップ（★マークを付けて保存）
     /// </summary>
+    /// <remarks>
+    /// Issue #2142: スキップは入力済みの内容も「★」へ置き換える（#1156）ため、入力済みの欄があるときだけ
+    /// 確認を挟む。スキップボタンは Esc（<c>IsCancel</c>）にも割り当たっており、元に戻せない破棄が
+    /// Esc 1 回で起きていた。確認はボタンと Esc の両方が通るこのメソッドに置く（片方にだけ置くと
+    /// 同じ判断が 2 か所に分かれる。ui-conventions #2080）。確認ダイアログは同期モーダルなので
+    /// 処理中スコープの外で出す（#1793）。
+    /// </remarks>
     [RelayCommand]
     public async Task SkipAsync()
     {
         if (Ledger == null) return;
+
+        if (HasInputDiscardedBySkip())
+        {
+            var message = "入力したバス停名は保存されず、すべて「" + SummaryGenerator.BusPlaceholder +
+                          "」（後で入力が必要）になります。" + Environment.NewLine + Environment.NewLine +
+                          "入力内容を破棄してスキップしますか？" + Environment.NewLine +
+                          "入力内容を残す場合は「いいえ」を選び、「保存」を押してください。";
+            if (!_dialogService.ShowWarningConfirmation(message, SkipDiscardConfirmationTitle))
+            {
+                return;
+            }
+        }
 
         using (BeginBusy("保存中..."))
         {

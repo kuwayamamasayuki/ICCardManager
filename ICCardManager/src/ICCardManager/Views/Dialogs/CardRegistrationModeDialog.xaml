@@ -126,7 +126,8 @@
                                     IsEnabled="False">
                             <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
                                 <ComboBox x:Name="CarryoverMonthCombo"
-                                          Width="80"
+                                          MinWidth="80"
+                                          HorizontalAlignment="Left"
                                           FontSize="{DynamicResource BaseFontSize}"
                                           SelectionChanged="CarryoverMonthCombo_SelectionChanged"
                                           AutomationProperties.Name="繰越月の選択"/>
@@ -246,36 +247,35 @@
             </Grid>
         </ScrollViewer>
 
-        <!-- ボタン（ScrollViewer の外側。内容が伸びても常に見える） -->
+        <!-- ボタン（ScrollViewer の外側。内容が伸びても常に見える）。
+             Issue #2142: 並びは他のダイアログと同じ「右端が主操作（OK）、その左にキャンセル」。幅も揃える -->
         <StackPanel Grid.Row="1"
                     Orientation="Horizontal"
                     HorizontalAlignment="Right">
-            <Button Style="{StaticResource FilledActionButtonStyle}"
-                    x:Name="OkButton"
-                    Content="OK"
+            <Button x:Name="CancelButton"
+                    Content="キャンセル"
                     MinWidth="100"
                     MinHeight="36"
                     Padding="16,0"
                     Margin="0,0,10,0"
                     FontSize="{DynamicResource BaseFontSize}"
-                    FontWeight="Bold"
-                    Background="{DynamicResource SuccessActionBrush}"
-                    Foreground="{DynamicResource OnPrimaryBrush}"
-                    Click="OkButton_Click"
-                    IsDefault="True"
-                    AutomationProperties.Name="OK"
-                    AutomationProperties.HelpText="選択した方法でカードを登録します"/>
-
-            <Button x:Name="CancelButton"
-                    Content="キャンセル"
-                    MinWidth="120"
-                    MinHeight="36"
-                    Padding="16,0"
-                    FontSize="{DynamicResource BaseFontSize}"
                     IsCancel="True"
                     Click="CancelButton_Click"
                     AutomationProperties.Name="キャンセル"
                     AutomationProperties.HelpText="登録をキャンセルします"/>
+
+            <Button Style="{StaticResource PrimaryActionButtonStyle}"
+                    x:Name="OkButton"
+                    Content="OK"
+                    MinWidth="100"
+                    MinHeight="36"
+                    Padding="16,0"
+                    FontSize="{DynamicResource BaseFontSize}"
+                    FontWeight="Bold"
+                    Click="OkButton_Click"
+                    IsDefault="True"
+                    AutomationProperties.Name="OK"
+                    AutomationProperties.HelpText="選択した方法でカードを登録します"/>
         </StackPanel>
     </Grid>
 </Window>

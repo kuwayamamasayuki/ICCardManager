@@ -50,7 +50,8 @@
                        Margin="0,0,8,0"/>
             <ComboBox ItemsSource="{Binding DateFilterOptions}"
                       SelectedItem="{Binding SelectedDateFilter}"
-                      Width="150"
+                      MinWidth="150"
+                      HorizontalAlignment="Left"
                       FontSize="{DynamicResource BaseFontSize}"
                       AutomationProperties.Name="利用日フィルタ"
                       ToolTip="表示する利用日を絞り込みます"/>
@@ -60,7 +61,8 @@
                        Margin="20,0,8,0"/>
             <ComboBox ItemsSource="{Binding CardFilterOptions}"
                       SelectedItem="{Binding SelectedCardFilter}"
-                      Width="200"
+                      MinWidth="200"
+                      HorizontalAlignment="Left"
                       FontSize="{DynamicResource BaseFontSize}"
                       AutomationProperties.Name="カード名フィルタ"
                       ToolTip="表示するカードを絞り込みます"/>

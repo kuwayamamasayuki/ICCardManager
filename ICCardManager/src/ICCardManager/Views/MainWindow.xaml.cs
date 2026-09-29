@@ -10,6 +10,7 @@ using ICCardManager.Common;
 using ICCardManager.Data.Repositories;
 using ICCardManager.Models;
 using ICCardManager.ViewModels;
+using ICCardManager.Views.Helpers;
 
 namespace ICCardManager.Views
 {
@@ -44,6 +45,12 @@ namespace ICCardManager.Views
         /// </remarks>
         private void ViewModel_PropertyChanged(object sender, System.ComponentModel.PropertyChangedEventArgs e)
         {
+            if (ShouldAnnounceNextAction(e.PropertyName))
+            {
+                LiveRegionAnnouncer.Announce(NextActionMessageText, "次の操作ガイドのスクリーンリーダーへの読み上げ");
+                return;
+            }
+
             if (e.PropertyName != nameof(MainViewModel.IsReturnHistoryReview) || !_viewModel.IsReturnHistoryReview)
             {
                 return;
@@ -55,6 +62,18 @@ namespace ICCardManager.Views
                 HistoryDataGrid.ScrollIntoView(firstRecorded);
             }
         }
+
+        /// <summary>
+        /// Issue #2142: 状態が変わったこと（職員証タッチ待ち → 交通系ICカードタッチ待ち 等）を読み上げソフトへ伝えるか。
+        /// </summary>
+        /// <remarks>
+        /// 次の操作ガイドは <c>LiveSetting="Polite"</c> を持っていたが、LiveRegionChanged を発火する箇所が
+        /// どこにも無く、状態の変化は一度も読み上げられていなかった（ui-conventions #2073）。
+        /// 通知するのは文言そのものを Name に持つ <c>NextActionMessageText</c>（Name は文言にバインド）。
+        /// 判断を純関数へ切り出してあるのは、<see cref="Window"/> が STA 依存で xUnit から生成できないため。
+        /// </remarks>
+        internal static bool ShouldAnnounceNextAction(string propertyName)
+            => propertyName == nameof(MainViewModel.NextActionMessage);
 
         private async void MainWindow_Loaded(object sender, RoutedEventArgs e)
         {

@@ -110,17 +110,17 @@
 
         <!-- アクションボタン -->
         <StackPanel Grid.Row="4" Orientation="Horizontal" HorizontalAlignment="Right">
-            <Button Style="{StaticResource FilledActionButtonStyle}"
-                    Content="タッチ実行" Command="{Binding ApplyAndTouchCommand}"
-                    Padding="24,8" Margin="0,0,8,0" FontWeight="Bold"
-                    Background="{DynamicResource SuccessActionBrush}" Foreground="{DynamicResource OnPrimaryBrush}"
-                    AutomationProperties.Name="タッチ実行"
-                    ToolTip="指定した情報で仮想交通系ICカードタッチをシミュレーション実行します"/>
+            <!-- Issue #2142: 並びは他のダイアログと同じ「右端が主操作、その左に閉じる」 -->
             <Button Content="閉じる" Click="CloseButton_Click"
                     IsCancel="True"
-                    Padding="24,8"
+                    Padding="24,8" Margin="0,0,8,0"
                     AutomationProperties.Name="閉じる"
                     ToolTip="ダイアログを閉じる"/>
+            <Button Style="{StaticResource PrimaryActionButtonStyle}"
+                    Content="タッチ実行" Command="{Binding ApplyAndTouchCommand}"
+                    Padding="24,8" FontWeight="Bold"
+                    AutomationProperties.Name="タッチ実行"
+                    ToolTip="指定した情報で仮想交通系ICカードタッチをシミュレーション実行します"/>
         </StackPanel>
     </Grid>
 </Window>

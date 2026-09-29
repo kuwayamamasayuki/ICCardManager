@@ -141,6 +141,63 @@ public class BalanceWarningNoticeTextConventionTests
     }
 
     /// <summary>
+    /// Issue #2142: しきい値の説明文に「下回る」「未満」「より少ない」を使った表記。
+    /// </summary>
+    /// <remarks>
+    /// <see cref="ForbiddenNoticePattern"/> は見出し（<c>残額不足</c>）を起点にするため、
+    /// 設定画面の入力欄の説明（「この金額を下回ると警告が表示されます」）は原理的に掛からなかった。
+    /// 画面の表示文は「以下」なのに、読み上げ用の説明（<c>AutomationProperties.HelpText</c>）だけが「未満」を述べており、
+    /// スクリーンリーダーの利用者にだけ境界が違って伝わっていた。
+    /// </remarks>
+    private static readonly Regex ForbiddenThresholdDescriptionPattern = new Regex(
+        "下回|未満|より少な|より小さ",
+        RegexOptions.Compiled);
+
+    [Theory]
+    [InlineData("この金額を下回ると警告が表示されます", true)]
+    [InlineData("10,000円未満で警告します", true)]
+    [InlineData("この金額より少なくなると警告します", true)]
+    [InlineData("残額がこの金額以下になると警告が表示されます", false)]
+    [InlineData("0～20,000円の範囲で設定（アクセスキー: Alt+W）", false)]
+    public void しきい値の説明の禁止表記パターンが既知の入力を正しく分類すること(string text, bool expected)
+    {
+        ForbiddenThresholdDescriptionPattern.IsMatch(text).Should().Be(expected);
+    }
+
+    [Fact]
+    public void 設定画面の残額警告しきい値の説明がすべて境界を以下と述べていること()
+    {
+        // Issue #2142: 対象は「残額警告」のグループの中の、利用者へ見える文言・読み上げられる文言すべて。
+        // 入力欄の HelpText だけを見ると、隣の表示文や ToolTip を「未満」へ書き換えた退行を素通りする
+        var path = Path.Combine(TestPaths.GetProductionSourceRoot(), "Views", "Dialogs", "SettingsDialog.xaml");
+        var xaml = XamlElementInspection.StripXmlComments(File.ReadAllText(path));
+
+        var group = XamlElementInspection.EnumerateElementsIncludingNested(xaml, "GroupBox")
+            .SingleOrDefault(g => XamlElementInspection.GetAttribute(g.StartTag, "Header") == "残額警告");
+        group.Should().NotBeNull("設定画面に「残額警告」のグループが実在すること（検査対象の空振り防止）");
+
+        var texts = XamlElementInspection.EnumerateStartTags(group!.Body)
+            .SelectMany(t => new[] { "Text", "AutomationProperties.HelpText", "AutomationProperties.Name", "ToolTip", "Content" }
+                .Select(a => XamlElementInspection.GetAttribute(t.StartTag, a)))
+            .Where(v => !string.IsNullOrEmpty(v) && !XamlElementInspection.IsMarkupExtension(v))
+            .ToList();
+
+        // 対の表明: 境界を述べる文言が実在し、その 2 つ（表示文と読み上げ用の説明）が「以下」と述べていること
+        texts.Where(t => t!.Contains("以下")).Should().HaveCountGreaterOrEqualTo(2,
+            "表示文（「この金額以下になった場合」）と入力欄の読み上げ用説明（HelpText）の両方が境界を「以下」と述べること。" +
+            "見つかった文言: " + string.Join(" / ", texts));
+
+        var input = XamlElementInspection.EnumerateElementsIncludingNested(group.Body, "TextBox")
+            .Single(t => t.Body.Contains("Path=\"WarningBalance\""));
+        XamlElementInspection.GetAttribute(input.StartTag, "AutomationProperties.HelpText")
+            .Should().Contain("以下", "読み上げ用の説明も画面の表示文と同じ境界を述べること（Issue #2142）");
+
+        texts.Where(t => ForbiddenThresholdDescriptionPattern.IsMatch(t!)).Should().BeEmpty(
+            "残額警告の境界は「以下」である（Issue #1998）。読み上げ用の説明だけが「下回ると」だと、" +
+            "スクリーンリーダーの利用者にだけしきい値ちょうどでは警告されないと伝わる（Issue #2142）");
+    }
+
+    /// <summary>
     /// 走査対象は本番ソースの <c>.cs</c> と <c>.xaml</c>。
     /// </summary>
     /// <remarks>

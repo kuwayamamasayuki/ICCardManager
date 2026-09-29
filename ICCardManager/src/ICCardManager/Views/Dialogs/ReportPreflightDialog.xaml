@@ -125,30 +125,8 @@
                     Orientation="Horizontal"
                     HorizontalAlignment="Right"
                     Margin="0,15,0,0">
-            <!-- 確認モード: 中止／続行を選ばせる -->
-            <!-- IsCancel="True" により DialogResult=false が自動設定される（Click ハンドラ不要） -->
-            <Button Content="中止して修正する"
-                    Visibility="{Binding IsConfirmationMode, Converter={StaticResource BoolToVisibilityConverter}}"
-                    Padding="20,10"
-                    Margin="0,0,10,0"
-                    MinWidth="140"
-                    IsDefault="True"
-                    IsCancel="True"
-                    AutomationProperties.Name="中止して修正する"
-                    AutomationProperties.HelpText="帳票作成を中止します。履歴画面で警告の内容を修正してください。"
-                    ToolTip="帳票作成を中止する (Escape)"/>
-            <Button Style="{StaticResource FilledActionButtonStyle}"
-                    Content="このまま作成する"
-                    Click="ContinueCreationButton_Click"
-                    Visibility="{Binding IsConfirmationMode, Converter={StaticResource BoolToVisibilityConverter}}"
-                    Padding="20,10"
-                    MinWidth="140"
-                    Background="{DynamicResource SuccessActionBrush}"
-                    Foreground="{DynamicResource OnPrimaryBrush}"
-                    AutomationProperties.Name="このまま作成する"
-                    AutomationProperties.HelpText="警告を承知のうえで帳票を作成します。"
-                    ToolTip="警告を無視して帳票を作成する"/>
-
+            <!-- Issue #2142: 参照モードの「閉じる」は確認モードの 2 つと同時には表示されないが、記述順も
+                 「右端が主操作、その左にキャンセル／閉じる」に揃えておく（ButtonRoleConventionTests が記述順で検査する） -->
             <!-- 参照モード: 閉じるだけ -->
             <Button Content="閉じる"
                     Padding="20,10"
@@ -171,6 +149,28 @@
                     </Style>
                 </Button.Style>
             </Button>
+
+            <!-- 確認モード: 中止／続行を選ばせる -->
+            <!-- IsCancel="True" により DialogResult=false が自動設定される（Click ハンドラ不要） -->
+            <Button Content="中止して修正する"
+                    Visibility="{Binding IsConfirmationMode, Converter={StaticResource BoolToVisibilityConverter}}"
+                    Padding="20,10"
+                    Margin="0,0,10,0"
+                    MinWidth="140"
+                    IsDefault="True"
+                    IsCancel="True"
+                    AutomationProperties.Name="中止して修正する"
+                    AutomationProperties.HelpText="帳票作成を中止します。履歴画面で警告の内容を修正してください。"
+                    ToolTip="帳票作成を中止する (Escape)"/>
+            <Button Style="{StaticResource PrimaryActionButtonStyle}"
+                    Content="このまま作成する"
+                    Click="ContinueCreationButton_Click"
+                    Visibility="{Binding IsConfirmationMode, Converter={StaticResource BoolToVisibilityConverter}}"
+                    Padding="20,10"
+                    MinWidth="140"
+                    AutomationProperties.Name="このまま作成する"
+                    AutomationProperties.HelpText="警告を承知のうえで帳票を作成します。"
+                    ToolTip="警告を無視して帳票を作成する"/>
         </StackPanel>
     </Grid>
 </Window>

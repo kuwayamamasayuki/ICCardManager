@@ -66,7 +66,7 @@
                               SelectedItem="{Binding SelectedExportType}"
                               Padding="8"
                               HorizontalAlignment="Left"
-                              Width="200"
+                              MinWidth="200"
                               AutomationProperties.Name="エクスポートするデータ種別"
                               ToolTip="エクスポートするデータの種類を選択します（アクセスキー: Alt+T）">
                         <ComboBox.ItemTemplate>
@@ -126,13 +126,11 @@
                 </Grid>
 
                 <!-- エクスポートボタン -->
-                <Button Style="{StaticResource FilledActionButtonStyle}"
+                <Button Style="{StaticResource PrimaryActionButtonStyle}"
                         Content="CSVエクスポート(_X)"
                         Command="{Binding ExportCommand}"
                         Padding="15,10"
                         HorizontalAlignment="Left"
-                        Background="{DynamicResource SuccessActionBrush}"
-                        Foreground="{DynamicResource OnPrimaryBrush}"
                         AutomationProperties.Name="CSVエクスポート実行"
                         ToolTip="選択したデータをCSVファイルにエクスポートします（アクセスキー: Alt+X）"/>
 
@@ -192,7 +190,7 @@
                               SelectedItem="{Binding SelectedImportType}"
                               Padding="8"
                               HorizontalAlignment="Left"
-                              Width="200"
+                              MinWidth="200"
                               AutomationProperties.Name="インポートするデータ種別"
                               ToolTip="インポートするデータの種類を選択します（アクセスキー: Alt+I）">
                         <ComboBox.ItemTemplate>
@@ -249,7 +247,7 @@
                                   Padding="8"
                                   Margin="20,0,0,10"
                                   HorizontalAlignment="Left"
-                                  Width="350"
+                                  MinWidth="350"
                                   AutomationProperties.Name="インポート先カード選択"
                                   ToolTip="インポート先のカードを選択します">
                             <ComboBox.ItemTemplate>
@@ -288,14 +286,12 @@
                             <Button Content="カードをタッチ"
                                     Command="{Binding StartCardTouchCommand}"
                                     Padding="10,5"
-                                    Background="{DynamicResource PrimaryBrush}"
-                                    Foreground="{DynamicResource OnPrimaryBrush}"
                                     AutomationProperties.Name="カードタッチ開始"
                                     ToolTip="カードリーダーでカードを読み取ります">
                                 <Button.Style>
-                                    <!-- 対話状態の塗りを導出するため FilledActionButtonStyle を土台にする（Issue #2094）。
+                                    <!-- 塗りは役割スタイル（Issue #2142）から受け取る。役割スタイルは FilledActionButtonStyle を土台にしており、対話状態の塗りを導出する（Issue #2094）。
                                          BasedOn を外すと WPF の既定テンプレートへ戻り、hover 時に白文字が読めなくなる -->
-                                    <Style TargetType="Button" BasedOn="{StaticResource FilledActionButtonStyle}">
+                                    <Style TargetType="Button" BasedOn="{StaticResource SecondaryActionButtonStyle}">
                                         <Style.Triggers>
                                             <DataTrigger Binding="{Binding UseCardListSelection}" Value="True">
                                                 <Setter Property="IsEnabled" Value="False"/>
@@ -365,31 +361,25 @@
 
         <!-- アクションボタン（常に表示） -->
         <StackPanel Grid.Row="2" Orientation="Horizontal" Margin="0,0,0,10">
-            <Button Style="{StaticResource FilledActionButtonStyle}"
+            <Button Style="{StaticResource SecondaryActionButtonStyle}"
                     Content="プレビュー(_P)"
                     Command="{Binding PreviewImportCommand}"
                     Padding="15,10"
-                    Background="{DynamicResource WarningActionBrush}"
-                    Foreground="{DynamicResource OnPrimaryBrush}"
                     AutomationProperties.Name="インポートプレビュー"
                     ToolTip="CSVファイルの内容をプレビューし、変更点を確認します（アクセスキー: Alt+P）"/>
-            <Button Style="{StaticResource FilledActionButtonStyle}"
+            <Button Style="{StaticResource PrimaryActionButtonStyle}"
                     Content="インポート実行(_M)"
                     Command="{Binding ExecuteImportCommand}"
                     Padding="15,10"
                     Margin="10,0,0,0"
-                    Background="{DynamicResource SuccessActionBrush}"
-                    Foreground="{DynamicResource OnPrimaryBrush}"
                     IsEnabled="{Binding HasPreview}"
                     AutomationProperties.Name="インポート実行"
                     ToolTip="プレビュー済みのデータをインポートします（アクセスキー: Alt+M）"/>
-            <Button Style="{StaticResource FilledActionButtonStyle}"
+            <Button Style="{StaticResource CautionActionButtonStyle}"
                     Content="直接インポート(_R)"
                     Command="{Binding ImportCommand}"
                     Padding="15,10"
                     Margin="10,0,0,0"
-                    Background="{DynamicResource PrimaryBrush}"
-                    Foreground="{DynamicResource OnPrimaryBrush}"
                     AutomationProperties.Name="直接CSVインポート"
                     ToolTip="プレビューなしで直接インポートします（アクセスキー: Alt+R）"/>
         </StackPanel>

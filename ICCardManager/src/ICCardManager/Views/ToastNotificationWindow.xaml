@@ -17,8 +17,13 @@
         ShowActivated="False"
         ResizeMode="NoResize"
         FontSize="{DynamicResource BaseFontSize}"
-        AutomationProperties.Name="通知ウィンドウ"
+        AutomationProperties.HelpText="通知ウィンドウ"
         AutomationProperties.LiveSetting="Assertive">
+    <!-- Issue #2142: 読み上げソフトへ貸出・返却の結果を伝えるのは、この窓の LiveRegionChanged である
+         （#186 によりメイン画面は変わらないので、通知が唯一の結果表示）。UIA は通知した要素の Name を読むため、
+         Name は固定のラベルではなく通知の内容を Show() が設定する（AutomationProperties.SetName）。
+         固定の「通知ウィンドウ」は HelpText へ移した。LiveSetting を付けただけでは通知は発火しないので、
+         Show() が LiveRegionAnnouncer で明示的に発火する（ui-conventions #2073）。 -->
 
     <Window.Resources>
         <!-- フェードイン・アウトアニメーション -->
@@ -61,6 +66,9 @@
             <!-- メッセージ -->
             <!-- Issue #1273: タイトルは単一行＋省略（CharacterEllipsis）でトースト高さ暴走を防止。
                  メッセージとサブメッセージは Wrap を維持しつつ Window.MaxHeight 内に収める。 -->
+            <!-- Issue #2142: 本文・補足の階層は Opacity ではなく文字色（ApplyStyle）で表す。
+                 Opacity は文字を地色へ寄せるので、補足行（Opacity 0.6）は貸出・返却・エラーの 3 種の背景すべてで
+                 約 3.1:1 まで落ちていた。この行には残額不足の警告と「クリックまたは Esc キーで閉じる」が入る。 -->
             <!-- Issue #2073: 3つの TextBlock は Show() が Text を差し替えるため、固定の読み上げ名を
                  AutomationProperties.Name ではなく HelpText で持つ。Name に固定文言を置くと
                  TextBlockAutomationPeer の Text フォールバックを上書きし、カード名・残額・エラー内容が
@@ -76,13 +84,11 @@
                            FontSize="{DynamicResource BaseFontSize}"
                            Margin="0,5,0,0"
                            TextWrapping="Wrap"
-                           Opacity="0.8"
                            AutomationProperties.HelpText="通知メッセージ"/>
                 <TextBlock x:Name="SubMessageText"
                            FontSize="{DynamicResource SmallFontSize}"
                            Margin="0,5,0,0"
                            TextWrapping="Wrap"
-                           Opacity="0.6"
                            Visibility="Collapsed"
                            AutomationProperties.HelpText="追加メッセージ"/>
             </StackPanel>

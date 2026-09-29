@@ -202,11 +202,9 @@
                             AutomationProperties.Name="検索条件をクリア"
                             AutomationProperties.HelpText="入力した検索条件をすべてリセットして既定値に戻します"
                             ToolTip="検索条件をクリア"/>
-                    <Button Style="{StaticResource FilledActionButtonStyle}"
+                    <Button Style="{StaticResource SecondaryActionButtonStyle}"
                             Content="検索"
                             Command="{Binding SearchCommand}"
-                            Background="{DynamicResource PrimaryBrush}"
-                            Foreground="{DynamicResource OnPrimaryBrush}"
                             Padding="20,6"
                             FontWeight="Bold"
                             AutomationProperties.Name="検索を実行"
@@ -326,7 +324,8 @@
                                VerticalAlignment="Center"/>
                     <ComboBox ItemsSource="{Binding PageSizeOptions}"
                               SelectedItem="{Binding PageSize}"
-                              Width="60"
+                              MinWidth="60"
+                              HorizontalAlignment="Left"
                               VerticalAlignment="Center"
                               AutomationProperties.Name="1ページあたりの表示件数"
                               AutomationProperties.HelpText="一覧に1ページあたり表示する操作ログの件数を選択します"

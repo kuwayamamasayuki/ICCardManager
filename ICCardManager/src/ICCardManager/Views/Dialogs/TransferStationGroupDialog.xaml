@@ -145,24 +145,13 @@
                          Padding="6"
                          AutomationProperties.Name="同一とみなす駅名・バス停名"
                          AutomationProperties.HelpText="読点で区切って2つ以上入力します。例: 天神日銀前、天神中央郵便局前"/>
-                <WrapPanel Margin="0,10,0,0">
-                    <!-- 入力欄で Enter を押したときに走るのは「保存」であること。
+                <WrapPanel Margin="0,10,0,0" HorizontalAlignment="Right">
+                    <!-- Issue #2142: 並びは他のダイアログと同じ「右端が主操作（保存）、その左にキャンセル」。
+                         入力欄で Enter を押したときに走るのは「保存」であること。
                          「閉じる」に IsDefault を付けると、名前を入力して Enter を押した瞬間に
                          ダイアログが閉じて入力が失われる（入力を持つ他のダイアログと同じ流儀）。
                          Issue #2080: 編集中に限るのは、一覧を見ているだけのときに
                          Enter で保存が走らないようにするため。 -->
-                    <Button Style="{StaticResource FilledActionButtonStyle}"
-                            Content="保存"
-                            Command="{Binding SaveCommand}"
-                            IsDefault="{Binding IsEditing}"
-                            Padding="20,8"
-                            MinWidth="100"
-                            Margin="0,0,10,6"
-                            Background="{DynamicResource PrimaryBrush}"
-                            Foreground="{DynamicResource OnPrimaryBrush}"
-                            AutomationProperties.Name="グループを保存"
-                            AutomationProperties.HelpText="入力した内容を保存します。"
-                            ToolTip="入力した内容を保存する"/>
                     <Button Content="キャンセル"
                             Command="{Binding CancelEditCommand}"
                             Padding="20,8"
@@ -171,6 +160,16 @@
                             AutomationProperties.Name="編集をキャンセル"
                             AutomationProperties.HelpText="編集を中止してフォームを閉じます。"
                             ToolTip="編集を中止する"/>
+                    <Button Style="{StaticResource PrimaryActionButtonStyle}"
+                            Content="保存"
+                            Command="{Binding SaveCommand}"
+                            IsDefault="{Binding IsEditing}"
+                            Padding="20,8"
+                            MinWidth="100"
+                            Margin="0,0,0,6"
+                            AutomationProperties.Name="グループを保存"
+                            AutomationProperties.HelpText="入力した内容を保存します。"
+                            ToolTip="入力した内容を保存する"/>
                 </WrapPanel>
             </StackPanel>
         </Border>

@@ -326,6 +326,9 @@ public class InteractiveStateContrastConventionTests
             st => st.FillKey == "SuccessActionBrush" && st.TextKey == "OnPrimaryBrush",
             "白文字を載せた主要ボタンが走査対象に含まれること");
         states.Should().Contain(
+            st => st.FillKey == "WarningActionBrush" && st.TextKey == "OnPrimaryBrush",
+            "注意の役割スタイル（リストア等）の塗りも、役割スタイルを辿って走査対象に含まれること（Issue #2142）");
+        states.Should().Contain(
             st => st.FillKey == "ReturnBackgroundBrush" && st.TextKey == DefaultTextKey,
             "文字色を明示していないボタン（帳票の「先月／今月」の非選択状態）も"
                 + "既定の濃い文字として走査対象に含まれること");
@@ -378,22 +381,33 @@ public class InteractiveStateContrastConventionTests
         attached.Should().Contain("FilledActionButtonStyle", "塗り付きボタン用のスタイルが実在すること");
         attached.Should().Contain("AccessibleButtonStyle", "汎用ボタン用のスタイルが共有テンプレートを使うこと");
         attached.Should().Contain(
-            "PrimaryButtonStyle", "BasedOn で辿るスタイルも許容集合に含まれること（1 段で止めないこと）");
+            "PrimaryActionButtonStyle", "BasedOn で辿るスタイルも許容集合に含まれること（1 段で止めないこと）");
         attached.Should().NotContain(
             "AccessibleTextBoxStyle", "Button 以外のスタイルを許容集合へ混ぜないこと");
     }
 
     [Fact]
-    public void 走査がボタンの2つの記述形へ届いていること()
+    public void 走査がボタンの3つの記述形へ届いていること()
     {
         var buttons = FilledButtons();
 
         buttons.Should().Contain(
-            b => b.Source == "BusStopInputDialog.xaml",
+            b => b.Source == "CardTypeSelectionDialog.xaml"
+                 && XamlElementInspection.GetAttribute(b.Element.StartTag, "Background") != null,
             "開始タグに Background と Foreground を書いたボタンが走査対象に含まれること");
         buttons.Should().Contain(
             b => b.Source == "ReportDialog.xaml" && b.Element.Body.Contains("<Button.Style>"),
             "Button.Style の Trigger で塗りと文字色を決めるボタンが走査対象に含まれること");
+
+        // Issue #2142: 塗りを役割スタイル（PrimaryActionButtonStyle 等）から受け取るボタン。
+        // 開始タグに色が無いので、スタイルを辿らない走査では 1 つも拾えず、hover の検査の外へ出る
+        buttons.Should().Contain(
+            b => b.Source == "BusStopInputDialog.xaml"
+                 && XamlElementInspection.GetAttribute(b.Element.StartTag, "Background") == null,
+            "役割スタイルから塗りと文字色を受け取るボタンが走査対象に含まれること");
+        buttons.Should().Contain(
+            b => b.Source == "LedgerDetailDialog.xaml" && b.Element.Body.Contains("PrimaryActionButtonStyle"),
+            "Button.Style の BasedOn で役割スタイルを土台にしたボタンも走査対象に含まれること");
     }
 
     [Fact]
@@ -550,13 +564,15 @@ public class InteractiveStateContrastConventionTests
         var brushes = AccessibilityBrushes.Load();
         var result = new List<FilledButton>();
 
+        var styleFills = StyleFillSpecs();
+
         foreach (var file in FillForegroundPairs.EnumerateProductionXaml())
         {
             foreach (var button in XamlElementInspection.EnumerateElements(file.Text, "Button"))
             {
-                var hasLightTextPair = FillForegroundPairs.ExtractSameTagPairs(button.StartTag)
-                    .Concat(FillForegroundPairs.ExtractSetterPairs(button.Body))
-                    .Any(pair => brushes.TryGetValue(pair.ForegroundKey, out var foreground)
+                var hasLightTextPair = FillSpecsOf(button, styleFills)
+                    .Any(spec => spec.ForegroundKey != null
+                                 && brushes.TryGetValue(spec.ForegroundKey, out var foreground)
                                  && IsUnreadableOnThemeHover(foreground));
                 if (hasLightTextPair)
                 {
@@ -566,6 +582,64 @@ public class InteractiveStateContrastConventionTests
         }
 
         return result;
+    }
+
+    /// <summary>
+    /// ボタンが取り得る塗り（と文字色）。開始タグ・<c>&lt;Button.Style&gt;</c> の Setter に加えて、
+    /// 参照しているスタイル（属性の <c>Style</c> または <c>&lt;Button.Style&gt;</c> の <c>BasedOn</c>）の塗りも含める。
+    /// </summary>
+    /// <remarks>
+    /// Issue #2142: 塗りの色をボタンの役割ごとのスタイルへ寄せたので、主要ボタンの多くは開始タグに色を持たない。
+    /// スタイルを辿らないと、それらは「塗りを持たないボタン」として hover の検査から静かに外れる（fail-open）。
+    /// </remarks>
+    private static IEnumerable<FillForegroundPairs.FillSpec> FillSpecsOf(
+        XamlElementInspection.XamlElement button,
+        IReadOnlyDictionary<string, IReadOnlyList<FillForegroundPairs.FillSpec>> styleFills)
+    {
+        var own = FillForegroundPairs.ExtractSameTagFills(button.StartTag)
+            .Concat(FillForegroundPairs.ExtractSetterFills(button.Body));
+
+        var referenced = new[] { XamlElementInspection.GetAttribute(button.StartTag, "Style") }
+            .Concat(XamlElementInspection.EnumerateElements(button.Body, "Style")
+                .Select(s => XamlElementInspection.GetAttribute(s.StartTag, "BasedOn")))
+            .Select(FillForegroundPairs.ResourceKeyOf)
+            .Where(key => key != null && styleFills.ContainsKey(key))
+            .SelectMany(key => styleFills[key!]);
+
+        return own.Concat(referenced);
+    }
+
+    /// <summary>
+    /// <c>AccessibilityStyles.xaml</c> のボタン用スタイルごとの塗り（<c>BasedOn</c> の連鎖を辿る）。
+    /// </summary>
+    /// <remarks>
+    /// 自分の直下の Setter が塗りを決めていればそれを、決めていなければ土台のスタイルの塗りを受け継ぐ
+    /// （WPF の Style の継承と同じ。直下の塗りが土台を上書きする）。
+    /// </remarks>
+    private static IReadOnlyDictionary<string, IReadOnlyList<FillForegroundPairs.FillSpec>> StyleFillSpecs()
+    {
+        var styles = XamlElementInspection.EnumerateElements(AccessibilityBrushes.ReadStyles(), "Style")
+            .Where(s => XamlElementInspection.GetAttribute(s.StartTag, "TargetType") == "Button")
+            .Select(s => new
+            {
+                Key = XamlElementInspection.GetAttribute(s.StartTag, "x:Key"),
+                BasedOn = FillForegroundPairs.ResourceKeyOf(XamlElementInspection.GetAttribute(s.StartTag, "BasedOn")),
+                Own = FillForegroundPairs.ExtractSetterFills(s.StartTag + s.Body + "</Style>").ToList(),
+            })
+            .Where(s => s.Key != null)
+            .ToDictionary(s => s.Key!, StringComparer.Ordinal);
+
+        IReadOnlyList<FillForegroundPairs.FillSpec> Resolve(string key, int depth)
+        {
+            if (!styles.TryGetValue(key, out var style) || depth > styles.Count)
+            {
+                return Array.Empty<FillForegroundPairs.FillSpec>();
+            }
+
+            return style.Own.Count > 0 || style.BasedOn == null ? style.Own : Resolve(style.BasedOn, depth + 1);
+        }
+
+        return styles.Keys.ToDictionary(k => k, k => Resolve(k, 0), StringComparer.Ordinal);
     }
 
     private static bool IsAttached(XamlElementInspection.XamlElement button, ISet<string> attached)
@@ -848,10 +922,11 @@ public class InteractiveStateContrastConventionTests
         var defaultText = Parse(DefaultDarkText);
         var result = new Dictionary<string, ButtonFillState>(StringComparer.Ordinal);
 
+        var styleFills = StyleFillSpecs();
+
         foreach (var button in FilledButtons())
         {
-            var specs = FillForegroundPairs.ExtractSameTagFills(button.Element.StartTag)
-                .Concat(FillForegroundPairs.ExtractSetterFills(button.Element.Body));
+            var specs = FillSpecsOf(button.Element, styleFills);
 
             foreach (var spec in specs)
             {

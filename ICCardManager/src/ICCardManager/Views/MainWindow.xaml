@@ -145,10 +145,12 @@
         <!-- 現在の状態（職員証タッチ待ち／交通系ICカードタッチ待ち／処理中）と次に行う操作を常設表示する。
              トースト通知（数秒で消える）を見逃しても画面上に誘導が残るようにするための常設バナー。
              アイコン＋状態名＋操作文言＋背景色の4要素で状態を伝達（色のみに依存しない）。 -->
+        <!-- Issue #2142: 枠に固定の Name と LiveSetting を置いても、通知すれば固定の Name が読まれるだけで
+             （しかも通知する箇所が無く一度も読まれていなかった）状態の変化は伝わらない。
+             固定のラベルは HelpText へ移し、ライブリージョンは文言そのものを Name に持つ TextBlock
+             （NextActionMessageText）へ置いて、コードビハインドが変化のたびに明示的に通知する -->
         <Border Grid.Row="1" Padding="15,10"
-                AutomationProperties.Name="次の操作ガイド"
-                AutomationProperties.HelpText="現在の状態と次に行う操作を常に表示します。"
-                AutomationProperties.LiveSetting="Polite">
+                AutomationProperties.HelpText="次の操作ガイド。現在の状態と次に行う操作を常に表示します。">
             <Border.Style>
                 <Style TargetType="Border">
                     <Setter Property="Background" Value="{DynamicResource WaitingBackgroundBrush}"/>
@@ -174,12 +176,14 @@
                            Foreground="{DynamicResource SecondaryTextBrush}"
                            VerticalAlignment="Center"
                            Margin="0,0,15,0"/>
-                <TextBlock Text="{Binding NextActionMessage}"
+                <TextBlock x:Name="NextActionMessageText"
+                           Text="{Binding NextActionMessage}"
                            FontSize="{DynamicResource LargeFontSize}"
                            FontWeight="Bold"
                            TextWrapping="Wrap"
                            VerticalAlignment="Center"
-                           AutomationProperties.Name="{Binding NextActionMessage}"/>
+                           AutomationProperties.Name="{Binding NextActionMessage}"
+                           AutomationProperties.LiveSetting="Polite"/>
             </StackPanel>
         </Border>
 
@@ -282,7 +286,7 @@
                                    Margin="0,0,0,30"/>
 
                         <!-- 使い方ガイド -->
-                        <Border Background="White" CornerRadius="8" Padding="25" Margin="0,0,0,20">
+                        <Border Background="{DynamicResource SurfaceBrush}" CornerRadius="8" Padding="25" Margin="0,0,0,20">
                             <StackPanel>
                                 <TextBlock Text="📖 使い方"
                                            FontSize="{DynamicResource LargeFontSize}"
@@ -351,7 +355,7 @@
 
                 <!-- 履歴表示エリア -->
                 <Border Padding="15"
-                        Background="White"
+                        Background="{DynamicResource SurfaceBrush}"
                         Visibility="{Binding IsHistoryVisible, Converter={StaticResource BoolToVisibilityConverter}}"
                         AutomationProperties.Name="利用履歴表示エリア"
                         PreviewKeyDown="HistoryArea_PreviewInput"
@@ -543,7 +547,7 @@
                                        AllowsTransparency="True"
                                        AutomationProperties.Name="月選択ポップアップ"
                                        AutomationProperties.HelpText="年と月を選んで「適用」を押すと、その月の履歴が表示されます">
-                                    <Border Background="White"
+                                    <Border Background="{DynamicResource SurfaceBrush}"
                                             BorderBrush="{DynamicResource SubtleBorderBrush}"
                                             BorderThickness="1"
                                             CornerRadius="4"
@@ -557,13 +561,15 @@
                                             <StackPanel Orientation="Horizontal" Margin="0,0,0,10">
                                                 <ComboBox ItemsSource="{Binding HistoryAvailableYears}"
                                                           SelectedItem="{Binding HistorySelectedYear}"
-                                                          Width="80"
+                                                          MinWidth="80"
+                                                          HorizontalAlignment="Left"
                                                           Padding="8"
                                                           AutomationProperties.Name="年の選択"/>
                                                 <TextBlock Text="年" VerticalAlignment="Center" Margin="5,0,15,0"/>
                                                 <ComboBox ItemsSource="{Binding HistoryAvailableMonths}"
                                                           SelectedItem="{Binding HistorySelectedMonth}"
-                                                          Width="60"
+                                                          MinWidth="60"
+                                                          HorizontalAlignment="Left"
                                                           Padding="8"
                                                           AutomationProperties.Name="月の選択"/>
                                                 <TextBlock Text="月" VerticalAlignment="Center" Margin="5,0,0,0"/>
@@ -574,12 +580,10 @@
                                                         Padding="10,5"
                                                         Margin="0,0,10,0"
                                                         AutomationProperties.Name="月選択をキャンセル"/>
-                                                <Button Style="{StaticResource FilledActionButtonStyle}"
+                                                <Button Style="{StaticResource SecondaryActionButtonStyle}"
                                                         Content="適用"
                                                         Command="{Binding HistoryApplySelectedMonthCommand}"
                                                         Padding="15,5"
-                                                        Background="{DynamicResource PrimaryBrush}"
-                                                        Foreground="{DynamicResource OnPrimaryBrush}"
                                                         AutomationProperties.Name="選択した月を適用"/>
                                             </StackPanel>
                                         </StackPanel>
@@ -809,7 +813,7 @@
                                     <TextBlock Text="ページ"
                                                VerticalAlignment="Center"
                                                Margin="15,0,5,0"/>
-                                    <Border Background="White"
+                                    <Border Background="{DynamicResource SurfaceBrush}"
                                             BorderBrush="{DynamicResource SubtleBorderBrush}"
                                             BorderThickness="1"
                                             CornerRadius="2"
@@ -886,7 +890,8 @@
                         <ComboBox SelectedValue="{Binding DashboardSortOrder}"
                                   SelectedValuePath="Tag"
                                   FontSize="{DynamicResource SmallFontSize}"
-                                  Width="130"
+                                  MinWidth="130"
+                                  HorizontalAlignment="Left"
                                   TabIndex="9"
                                   AutomationProperties.Name="ダッシュボードの並び順"
                                   ToolTip="カード一覧の並び順を変更">

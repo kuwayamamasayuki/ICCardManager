@@ -149,6 +149,10 @@ namespace ICCardManager
             // Issue #2141: 処理中のダイアログを ✕・Alt+F4・Esc で閉じさせない（全ウィンドウへ 1 度に掛ける）
             Views.Helpers.BusyCloseGuard.Register();
 
+            // Issue #2142: ハイコントラスト時は白いカード状の面（SurfaceBrush）をシステムの背景色へ差し替える
+            // （白地に白文字で読めなくなるのを防ぐ）
+            Views.Helpers.HighContrastSurface.Register(this);
+
             // 古いログファイルを削除
             ErrorDialogHelper.CleanupOldLogs();
 
