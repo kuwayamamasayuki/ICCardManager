@@ -8,6 +8,7 @@ using System.Windows.Media.Animation;
 using System.Windows.Threading;
 using ICCardManager.Common;
 using ICCardManager.Models;
+using ICCardManager.Views.Helpers;
 
 namespace ICCardManager.Views
 {
@@ -55,7 +56,38 @@ namespace ICCardManager.Views
     {
         private readonly DispatcherTimer _autoCloseTimer;
         private const int DefaultDisplayDurationMs = 3000;
+
+        /// <summary>
+        /// 警告の表示時間（Issue #2141）
+        /// </summary>
+        /// <remarks>
+        /// 貸出・返却の通知（3 秒）と同じでは、職員の判断を要する警告（共有 DB の切断・
+        /// 残額の食い違い・履歴の確認）を読み切る前に消える。記録済みの案内は自動では消さない
+        /// （<see cref="Show"/> の <c>autoClose: false</c>）。
+        /// </remarks>
+        internal const int WarningDisplayDurationMs = 10000;
+
+        /// <summary>
+        /// 自動では消えない通知の案内（Issue #2141）
+        /// </summary>
+        /// <remarks>
+        /// 閉じる手段を増やしたら、それを述べる文言も併せて直す（#2077 / #2078）。
+        /// トーストはフォーカスを受けない（<c>ShowActivated="False"</c>）ため、キーはメイン画面で受ける。
+        /// </remarks>
+        internal const string PersistentCloseHint = "クリックまたは Esc キーで閉じる";
+
         private bool _autoCloseEnabled = true;
+        private bool _isClosing;
+
+        /// <summary>
+        /// 自動では消えない通知の置き場（Issue #2141）。同時に 1 枚だけ置く。
+        /// </summary>
+        /// <remarks>
+        /// 旧実装は <c>ShowError</c> のたびに新しい窓を同じ画面隅へ重ね、1 枚ずつクリックしないと
+        /// 消えなかった。新しい通知を置いたら古い通知を閉じる。UI スレッドからのみ触る。
+        /// </remarks>
+        private static readonly ReplaceableSlot<ToastNotificationWindow> PersistentSlot =
+            new ReplaceableSlot<ToastNotificationWindow>(toast => toast.FadeOutAndClose());
 
         /// <summary>
         /// 現在のトースト表示位置
@@ -66,7 +98,7 @@ namespace ICCardManager.Views
         {
             InitializeComponent();
 
-            // 自動クローズタイマー
+            // 自動クローズタイマー（表示時間は Show が種類に応じて設定する）
             _autoCloseTimer = new DispatcherTimer
             {
                 Interval = TimeSpan.FromMilliseconds(DefaultDisplayDurationMs)
@@ -78,6 +110,31 @@ namespace ICCardManager.Views
 
             // クリックで閉じる（エラー通知など自動消去されない場合用）
             MouseLeftButtonDown += (s, e) => FadeOutAndClose();
+
+            // 自分で閉じた（クリック・自動消去）ときは置き場を空ける。
+            // 別の通知へ差し替わった後なら何もしない（ReplaceableSlot.Release）
+            Closed += (s, e) => PersistentSlot.Release(this);
+        }
+
+        /// <summary>
+        /// 通知の種類ごとの表示時間（Issue #2141）。自動では消えない通知には使わない。
+        /// </summary>
+        internal static TimeSpan GetDisplayDuration(ToastType type)
+            => TimeSpan.FromMilliseconds(type == ToastType.Warning ? WarningDisplayDurationMs : DefaultDisplayDurationMs);
+
+        /// <summary>
+        /// 自動では消えない通知（エラー・記録済みの案内）をすべて閉じる（Issue #2141）
+        /// </summary>
+        /// <returns>閉じた通知があれば true</returns>
+        /// <remarks>
+        /// 次の職員証タッチ（＝次の操作の開始）と、メイン画面の Esc キーから呼ばれる。
+        /// 前の職員宛ての案内を次の職員の操作の上に残さないため。
+        /// </remarks>
+        public static bool DismissPersistent()
+        {
+            var dismissed = false;
+            Application.Current?.Dispatcher.Invoke(() => dismissed = PersistentSlot.Dismiss());
+            return dismissed;
         }
 
         /// <summary>
@@ -140,6 +197,14 @@ namespace ICCardManager.Views
         /// </summary>
         private void FadeOutAndClose()
         {
+            // クリックと差し替え・一括クローズが重なっても、閉じる処理は 1 回だけ走らせる
+            if (_isClosing)
+            {
+                return;
+            }
+            _isClosing = true;
+            _autoCloseTimer.Stop();
+
             var storyboard = (Storyboard)FindResource("FadeOutAnimation");
             storyboard.Completed += (s, e) => Close();
             storyboard.Begin(this);
@@ -189,13 +254,17 @@ namespace ICCardManager.Views
         /// <param name="message">メッセージ</param>
         /// <param name="additionalInfo">追加情報</param>
         /// <param name="subMessage">サブメッセージ</param>
-        /// <param name="autoClose">自動消去するかどうか（デフォルト: true、エラー時はfalse推奨）</param>
+        /// <param name="autoClose">
+        /// 自動消去するかどうか（デフォルト: true）。false の通知は同時に 1 枚だけ置き（新しい通知が古い通知を閉じる）、
+        /// クリック・メイン画面の Esc キー・次の職員証タッチ（<see cref="DismissPersistent"/>）で閉じる（Issue #2141）
+        /// </param>
         public static void Show(ToastType type, string title, string message, string additionalInfo = null, string subMessage = null, bool autoClose = true)
         {
             Application.Current.Dispatcher.Invoke(() =>
             {
                 var toast = new ToastNotificationWindow();
                 toast._autoCloseEnabled = autoClose;
+                toast._autoCloseTimer.Interval = GetDisplayDuration(type);
                 toast.ApplyStyle(type);
                 toast.TitleText.Text = title;
                 toast.MessageText.Text = message;
@@ -211,16 +280,22 @@ namespace ICCardManager.Views
                     toast.SubMessageText.Visibility = Visibility.Visible;
                 }
 
-                // エラー時は自動消去しない場合、クリックで閉じるヒントを表示
+                // 自動消去しない場合は閉じ方を表示する
                 if (!autoClose)
                 {
                     toast.SubMessageText.Text = string.IsNullOrEmpty(subMessage)
-                        ? "クリックして閉じる"
-                        : $"{subMessage}\n（クリックして閉じる）";
+                        ? PersistentCloseHint
+                        : $"{subMessage}\n（{PersistentCloseHint}）";
                     toast.SubMessageText.Visibility = Visibility.Visible;
                 }
 
                 toast.Show();
+
+                // Issue #2141: 自動では消えない通知は 1 枚に差し替える（同じ画面隅へ重ねて積まない）
+                if (!autoClose)
+                {
+                    PersistentSlot.Put(toast);
+                }
             });
         }
 
@@ -229,47 +304,15 @@ namespace ICCardManager.Views
         /// </summary>
         private void ApplyStyle(ToastType type)
         {
-            string backgroundKey, borderKey, titleForegroundKey;
-            switch (type)
+            if (!Enum.IsDefined(typeof(ToastType), type))
             {
-                case ToastType.Lend:
-                    IconText.Text = "🚃";
-                    backgroundKey = "LendingBackgroundBrush";
-                    borderKey = "LendingBorderBrush";
-                    titleForegroundKey = "LendingForegroundBrush";
-                    break;
-
-                case ToastType.Return:
-                    IconText.Text = "🏠";
-                    backgroundKey = "ReturnBackgroundBrush";
-                    borderKey = "ReturnBorderBrush";
-                    titleForegroundKey = "ReturnForegroundBrush";
-                    break;
-
-                case ToastType.Info:
-                    IconText.Text = "ℹ️";
-                    backgroundKey = "ReturnBackgroundBrush";
-                    borderKey = "ReturnBorderBrush";
-                    titleForegroundKey = "ReturnForegroundBrush";
-                    break;
-
-                case ToastType.Warning:
-                    IconText.Text = "⚠️";
-                    backgroundKey = "LendingBackgroundBrush";
-                    borderKey = "LendingBorderBrush";
-                    titleForegroundKey = "LendingForegroundBrush";
-                    break;
-
-                case ToastType.Error:
-                    IconText.Text = "❌";
-                    backgroundKey = "ErrorBackgroundBrush";
-                    borderKey = "ErrorBorderBrush";
-                    titleForegroundKey = "ErrorForegroundBrush";
-                    break;
-
-                default:
-                    return;
+                return;
             }
+
+            IconText.Text = GetIconText(type);
+            var backgroundKey = GetBackgroundKey(type);
+            var borderKey = GetBorderKey(type);
+            var titleForegroundKey = GetTitleForegroundKey(type);
 
             ToastBorder.Background = ResolveBrush(backgroundKey);
             ToastBorder.BorderBrush = ResolveBrush(borderKey);
@@ -279,6 +322,64 @@ namespace ICCardManager.Views
             MessageText.Foreground = messageBrush;
             SubMessageText.Foreground = messageBrush;
         }
+
+        // Issue #2141: 種類ごとの見た目を純関数へ切り出した（Window は STA 依存で xUnit から実行できないため）。
+        // 警告は貸出のブラシ（Lending*）を流用していたため、「返却は記録済み・再タッチしないでください」が
+        // 貸出と同じ暖色で出ていた。Lending* は貸出のシグナル専用で、返却フローに使わない（#2079）。
+        // 警告には警告専用のブラシ（Warning*）を充てる。WarningForegroundBrush は貸出の文字色と明度差を
+        // 開いて色覚多様性でも分離できるよう選ばれている（#2074）。
+
+        /// <summary>
+        /// 通知の種類ごとのアイコン
+        /// </summary>
+        internal static string GetIconText(ToastType type) => type switch
+        {
+            ToastType.Lend => "🚃",
+            ToastType.Return => "🏠",
+            ToastType.Info => "ℹ️",
+            ToastType.Warning => "⚠️",
+            ToastType.Error => "❌",
+            _ => throw new ArgumentOutOfRangeException(nameof(type), type, "未知の通知種類です"),
+        };
+
+        /// <summary>
+        /// 通知の種類ごとの背景ブラシのリソースキー
+        /// </summary>
+        internal static string GetBackgroundKey(ToastType type) => type switch
+        {
+            ToastType.Lend => "LendingBackgroundBrush",
+            ToastType.Return => "ReturnBackgroundBrush",
+            ToastType.Info => "ReturnBackgroundBrush",
+            ToastType.Warning => "WarningBackgroundBrush",
+            ToastType.Error => "ErrorBackgroundBrush",
+            _ => throw new ArgumentOutOfRangeException(nameof(type), type, "未知の通知種類です"),
+        };
+
+        /// <summary>
+        /// 通知の種類ごとの枠線ブラシのリソースキー
+        /// </summary>
+        internal static string GetBorderKey(ToastType type) => type switch
+        {
+            ToastType.Lend => "LendingBorderBrush",
+            ToastType.Return => "ReturnBorderBrush",
+            ToastType.Info => "ReturnBorderBrush",
+            ToastType.Warning => "WarningBorderBrush",
+            ToastType.Error => "ErrorBorderBrush",
+            _ => throw new ArgumentOutOfRangeException(nameof(type), type, "未知の通知種類です"),
+        };
+
+        /// <summary>
+        /// 通知の種類ごとのタイトル文字色のリソースキー
+        /// </summary>
+        internal static string GetTitleForegroundKey(ToastType type) => type switch
+        {
+            ToastType.Lend => "LendingForegroundBrush",
+            ToastType.Return => "ReturnForegroundBrush",
+            ToastType.Info => "ReturnForegroundBrush",
+            ToastType.Warning => "WarningForegroundBrush",
+            ToastType.Error => "ErrorForegroundBrush",
+            _ => throw new ArgumentOutOfRangeException(nameof(type), type, "未知の通知種類です"),
+        };
 
         /// <summary>
         /// アプリケーションリソースからブラシを解決する。リソースが見つからない場合は <see cref="Brushes.Transparent"/> を返す。

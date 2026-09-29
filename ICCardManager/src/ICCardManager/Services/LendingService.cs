@@ -1800,15 +1800,17 @@ namespace ICCardManager.Services
             // ① この戻り値は LendingResult.ErrorMessage を経て
             //    MainViewModel の _toastNotificationService.ShowError へ渡る。
             //    error-messages.md は「トースト通知は文字数制約があるため、ToUserMessage の
-            //    フル文言ではなく簡潔な行動指示（「もう一度タッチしてください」等）を優先してよい」
-            //    と定めている。ToUserMessage 版は 58 文字で、文字サイズ「大」以上では末尾が切れる。
+            //    フル文言ではなく簡潔な行動指示を優先してよい」と定めている。
+            //    ToUserMessage 版は 58 文字で、文字サイズ「大」以上では末尾が切れる。
             // ② ToUserMessage の InvalidOperationException 分岐は「画面を最新の状態に更新してから
             //    再度実行してください」と案内するが、カードをタッチした職員に実行できる操作ではない。
             //    取れる行動が違う経路には専用の文言を置く（#1757）。
             // Success=false は「台帳へ記録されていない」ことだけを意味する（#1805。コミット後の
-            // 後処理の失敗は HasPostCommitFailure で別に伝える）ため、再タッチは安全。
-            // 文言は MainViewModel の null フォールバックと同一に揃える。
-            return $"{operationName}処理に失敗しました。もう一度タッチしてください。";
+            // 後処理の失敗は HasPostCommitFailure で別に伝える）ため、やり直しは安全。
+            // Issue #2141: やり直しは「職員証のタッチから」でなければならない（MainViewModel が
+            // 失敗後に職員証タッチ待ちへ戻すため、交通系ICカードだけのタッチは履歴表示になる）。
+            // 文言は MainViewModel の null フォールバックと同じ OperationRetryGuidance から作る。
+            return OperationRetryGuidance.BuildFailureMessage(operationName);
         }
 
         /// <summary>

@@ -463,6 +463,37 @@ private void Apply(bool isError)
     }
 
     [Fact]
+    public void 走査がswitch式のキーワードを辿って隣のメソッドのキーを拾わないこと()
+    {
+        // Issue #2141: トーストの見た目を switch 式の純関数へ切り出したところ、辿る識別子に
+        // C# のキーワード `switch` が入り、「型 switch {」の形に一致した隣のメソッド（背景色のキー）の
+        // 本体から LendingBackgroundBrush を文字色として拾っていた。キーワードは宣言を持たないので辿らない。
+        var brushKeys = AccessibilityBrushes.Load().Keys.ToList();
+
+        const string SwitchExpressionSource = @"
+private void ApplyStyle(ToastType type)
+{
+    var titleForegroundKey = GetTitleForegroundKey(type);
+    TitleText.Foreground = ResolveBrush(titleForegroundKey);
+}
+internal static string GetBackgroundKey(ToastType type) => type switch
+{
+    ToastType.Lend => ""LendingBackgroundBrush"",
+    _ => throw new ArgumentOutOfRangeException(nameof(type)),
+};
+internal static string GetTitleForegroundKey(ToastType type) => type switch
+{
+    ToastType.Lend => ""LendingForegroundBrush"",
+    _ => throw new ArgumentOutOfRangeException(nameof(type)),
+};";
+
+        var found = CollectFromCSharp(SwitchExpressionSource, brushKeys, new string[0]).ToList();
+
+        found.Should().Contain("LendingForegroundBrush", "対の表明: 文字色へ流れる switch 式の値は拾うこと");
+        found.Should().NotContain("LendingBackgroundBrush", "隣のメソッドの switch 式を巻き込まないこと");
+    }
+
+    [Fact]
     public void バインド経由のプロパティ名を抽出できること()
     {
         const string Xaml =
@@ -1038,6 +1069,18 @@ private void Apply(bool isError)
     private const int MaxResolutionDepth = 3;
 
     /// <summary>
+    /// 辿らない C# のキーワード（式・文の中に現れ得るもの）。
+    /// </summary>
+    private static readonly HashSet<string> CSharpKeywords = new(StringComparer.Ordinal)
+    {
+        "switch", "case", "default", "return", "throw", "new", "nameof", "typeof", "sizeof",
+        "is", "as", "in", "out", "ref", "var", "when", "and", "or", "not", "null", "true", "false",
+        "this", "base", "await", "async", "if", "else", "for", "foreach", "while", "do", "using",
+        "checked", "unchecked", "lock", "catch", "try", "finally", "yield", "static", "const",
+        "string", "int", "bool", "object", "double", "decimal", "long", "char", "void",
+    };
+
+    /// <summary>
     /// 本番ソース全体から、文字色として流れるブラシキーと、それが書かれているファイルを集める。
     /// </summary>
     internal static IEnumerable<(string Key, string File)> CollectFromCSharp(
@@ -1115,6 +1158,13 @@ private void Apply(bool isError)
             foreach (Match id in Regex.Matches(
                 text, "\\b(?<name>[a-z_][A-Za-z0-9_]*)\\b|\\b(?<name>[A-Za-z_][A-Za-z0-9_]*)\\s*\\("))
             {
+                // C# のキーワードは宣言を持たないので辿らない（Issue #2141）。`switch` を辿ると
+                // 「型 switch {」がメンバー宣言の形に一致し、無関係な switch 式の本体からリテラルを拾う
+                if (CSharpKeywords.Contains(id.Groups["name"].Value))
+                {
+                    continue;
+                }
+
                 pending.Enqueue((id.Groups["name"].Value, depth + 1));
             }
         }

@@ -89,9 +89,13 @@ public class LendingServiceErrorMessageTests
 
         // #1817 のコードレビュー指摘: この戻り値はトーストへ渡るため、
         // ExceptionMessageFormatter.ToUserMessage のフル文言（58文字）を返してはならない。
-        message.Should().Contain("もう一度タッチしてください",
-            "error-messages.md はトーストで簡潔な行動指示を優先すると定め、この文言を例示している。"
-            + "MainViewModel の null フォールバックとも揃える");
+        // Issue #2141: 失敗後は職員証タッチ待ちへ戻るため、交通系ICカードだけのタッチ（旧文言
+        // 「もう一度タッチしてください」が促した操作）は履歴表示になる。職員証から始めるよう案内する
+        message.Should().Contain("職員証のタッチからやり直してください",
+            "error-messages.md はトーストで簡潔な行動指示を優先すると定めている。"
+            + "失敗後は職員証タッチ待ちへ戻るので、やり直しは職員証のタッチからと案内する");
+        message.Should().NotContain("もう一度タッチ",
+            "交通系ICカードだけを再タッチさせる旧文言へ戻っていないこと（Issue #2141）");
         message.Should().NotContain("画面を最新の状態に更新",
             "カードをタッチした職員に実行できない行動指示を出さない（取れる行動が違う経路には専用の文言）");
         message.Length.Should().BeLessThan(40,

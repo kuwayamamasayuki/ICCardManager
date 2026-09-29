@@ -43,10 +43,18 @@ namespace ICCardManager.Views.Dialogs
             UndoButton.IsEnabled = HistoryListView.SelectedItem != null;
         }
 
-        private void HistoryListView_MouseDoubleClick(object sender, MouseButtonEventArgs e)
+        /// <summary>
+        /// 行のダブルクリック（Issue #2141: ListView 全体ではなく行に限る）
+        /// </summary>
+        /// <remarks>
+        /// 対象はダブルクリックした行そのもの（<c>sender</c> の DataContext）で決める。選択状態は
+        /// 操作対象の識別子に使わない（#1761）。取り消しの実行前には呼び出し元が対象を名指しして確認する。
+        /// </remarks>
+        private void HistoryItem_MouseDoubleClick(object sender, MouseButtonEventArgs e)
         {
-            if (HistoryListView.SelectedItem is MergeHistoryItem item)
+            if (sender is ListViewItem { DataContext: MergeHistoryItem item })
             {
+                e.Handled = true;
                 SelectedHistoryId = item.Id;
                 DialogResult = true;
                 Close();

@@ -1220,13 +1220,13 @@ public class MainViewModelIntegrationTests
         await _dispatcherService.WaitForPendingAsync();
 
         // Assert: 「記録済み」を伝える警告トーストが出る
-        _toastMock.Verify(t => t.ShowWarning(
+        _toastMock.Verify(t => t.ShowRecordedNotice(
             It.Is<string>(title => title.Contains("記録済み")),
             It.IsAny<string>()), Times.Once);
         // 再タッチを促す文言は出さない（逆処理で記録が取り消されるため）
         _toastMock.Verify(t => t.ShowError(
             It.IsAny<string>(),
-            It.Is<string>(m => m.Contains("もう一度タッチ"))), Times.Never);
+            It.Is<string>(m => m.Contains("職員証のタッチから"))), Times.Never);
         // 記録は成功しているのでエラー音は鳴らさない
         _soundPlayerMock.Verify(s => s.Play(SoundType.Error), Times.Never);
         _soundPlayerMock.Verify(s => s.Play(SoundType.Warning), Times.Once);
@@ -1259,8 +1259,8 @@ public class MainViewModelIntegrationTests
         // Assert: 記録前なのでエラー扱い・再タッチを促す
         _soundPlayerMock.Verify(s => s.Play(SoundType.Error), Times.Once);
         _toastMock.Verify(t => t.ShowError("エラー",
-            It.Is<string>(m => m.Contains("もう一度タッチ"))), Times.Once);
-        _toastMock.Verify(t => t.ShowWarning(
+            It.Is<string>(m => m.Contains("職員証のタッチから"))), Times.Once);
+        _toastMock.Verify(t => t.ShowRecordedNotice(
             It.Is<string>(title => title.Contains("記録済み")),
             It.IsAny<string>()), Times.Never);
         _viewModel.CurrentState.Should().Be(AppState.WaitingForStaffCard);
@@ -1325,6 +1325,232 @@ public class MainViewModelIntegrationTests
 
     #endregion
 
+    #region 失敗時のやり直し方の案内と、自動では消えない通知の閉じ方（Issue #2141）
+
+    /// <summary>
+    /// 失敗の案内が「職員証のタッチから」でなければならない理由そのものを固定する。
+    /// </summary>
+    /// <remarks>
+    /// 返却が記録されずに終わると <c>finally</c> の <c>ResetState()</c> で職員証タッチ待ちへ戻る。
+    /// 旧文言「カードを再度タッチしてください」に従って交通系ICカードだけをタッチし直すと
+    /// 履歴の表示になり、返却は記録されない（30秒ルールも記録が無いので発動しない）。
+    /// 職員証からやり直せば返却が記録される（対の表明。こちらが無いと、失敗後の状態遷移そのものを
+    /// 壊した実装でも「返却されない」側は緑になる）。
+    /// </remarks>
+    [Fact]
+    public async Task Issue2141_返却の失敗後は交通系ICカードだけの再タッチでは返却されず職員証からやり直すと返却されること()
+    {
+        ArrangeSuccessfulReturn();
+        // 1 回目だけ履歴の読み取りに失敗させる
+        _cardReaderMock.SetupSequence(r => r.TryReadHistoryAsync(CardIdmA))
+            .ReturnsAsync(CardReadResult<IReadOnlyList<LedgerDetail>>.Fail(CardReaderException.HistoryReadFailed("test")))
+            .ReturnsAsync(CardReadResult<IReadOnlyList<LedgerDetail>>.Ok(new List<LedgerDetail>
+            {
+                new LedgerDetail
+                {
+                    UseDate = DateTime.Now.AddHours(-1),
+                    Balance = 2500,
+                    Amount = 210,
+                    EntryStation = "博多",
+                    ExitStation = "天神",
+                },
+            }));
+
+        RaiseCardRead(StaffIdm);
+        await _dispatcherService.WaitForPendingAsync();
+        RaiseCardRead(CardIdmA);
+        await _dispatcherService.WaitForPendingAsync();
+
+        _toastMock.Verify(t => t.ShowError(
+            "カードリーダーエラー",
+            "履歴の読み取りに失敗しました。職員証のタッチからやり直してください。"), Times.Once);
+        _viewModel.CurrentState.Should().Be(AppState.WaitingForStaffCard, "前提: 失敗後は職員証が消える");
+
+        // Act-1: 交通系ICカードだけをタッチし直す（旧文言が促した操作）
+        RaiseCardRead(CardIdmA);
+        await _dispatcherService.WaitForPendingAsync();
+
+        _cardRepositoryMock.Verify(r => r.UpdateLentStatusAsync(CardIdmA, false, null, null), Times.Never,
+            "職員証タッチ待ちでの交通系ICカードのタッチは履歴の表示であり、返却ではない");
+        _viewModel.IsHistoryVisible.Should().BeTrue("交通系ICカードだけのタッチは履歴を開く");
+
+        // Act-2: 案内どおり職員証からやり直す
+        RaiseCardRead(StaffIdm);
+        await _dispatcherService.WaitForPendingAsync();
+        RaiseCardRead(CardIdmA);
+        await _dispatcherService.WaitForPendingAsync();
+
+        _cardRepositoryMock.Verify(r => r.UpdateLentStatusAsync(CardIdmA, false, null, null), Times.Once,
+            "職員証からやり直せば返却が記録される");
+    }
+
+    /// <summary>
+    /// 貸出が記録されずに終わったとき（LendingService が Success=false を返す）の案内。
+    /// </summary>
+    [Fact]
+    public async Task Issue2141_貸出の失敗は職員証のタッチからやり直すよう案内すること()
+    {
+        ArrangeSuccessfulLend();
+        // 貸出状態の更新が 0 行 → 競合として巻き戻る（Success=false）。既定分岐ではなく競合の文言になるため、
+        // ここでは例外で既定分岐（GetUserFriendlyErrorMessage の末尾）へ落とす
+        _cardRepositoryMock.Setup(r => r.UpdateLentStatusAsync(CardIdmA, true, It.IsAny<DateTime?>(), StaffIdm))
+            .ThrowsAsync(new InvalidOperationException("unexpected"));
+
+        RaiseCardRead(StaffIdm);
+        await _dispatcherService.WaitForPendingAsync();
+        RaiseCardRead(CardIdmA);
+        await _dispatcherService.WaitForPendingAsync();
+
+        _toastMock.Verify(t => t.ShowError(
+            "エラー",
+            "貸出処理に失敗しました。職員証のタッチからやり直してください。"), Times.Once);
+        _viewModel.CurrentState.Should().Be(AppState.WaitingForStaffCard);
+    }
+
+    /// <summary>
+    /// 自動では消えない通知（エラー・記録済みの案内）は、次の職員証タッチで閉じる。
+    /// </summary>
+    /// <remarks>
+    /// 前の職員宛ての「やり直してください」が次の職員の操作の上に残らないようにする。
+    /// 持ち替え（交通系ICカード待ちで別の職員証）も次の操作の開始なので閉じる。
+    /// </remarks>
+    [Fact]
+    public async Task Issue2141_職員証のタッチと持ち替えで自動では消えない通知を閉じること()
+    {
+        RaiseCardRead(StaffIdm);
+        await _dispatcherService.WaitForPendingAsync();
+        _toastMock.Verify(t => t.DismissPersistentNotifications(), Times.Once);
+
+        RaiseCardRead(StaffIdmB);
+        await _dispatcherService.WaitForPendingAsync();
+        _toastMock.Verify(t => t.DismissPersistentNotifications(), Times.Exactly(2));
+    }
+
+    /// <summary>
+    /// 失敗の案内は、案内を出した直後に自分で閉じない（交通系ICカードのタッチは閉じる契機ではない）。
+    /// </summary>
+    /// <remarks>
+    /// 閉じる契機を「タッチ全般」にすると、失敗の案内を出した処理の続き（状態リセット・画面更新）で
+    /// 案内が消える形を作り得る。閉じるのは職員証の認識と Esc だけ。
+    /// </remarks>
+    [Fact]
+    public async Task Issue2141_失敗の案内は交通系ICカードの処理では閉じないこと()
+    {
+        _cardRepositoryMock.Setup(r => r.GetByIdmAsync(CardIdmA, It.IsAny<bool>()))
+            .ReturnsAsync(BuildLentCard(CardIdmA));
+        _cardReaderMock.Setup(r => r.TryReadHistoryAsync(CardIdmA))
+            .ThrowsAsync(new InvalidOperationException("reader disconnected"));
+
+        RaiseCardRead(StaffIdm);
+        await _dispatcherService.WaitForPendingAsync();
+        RaiseCardRead(CardIdmA);
+        await _dispatcherService.WaitForPendingAsync();
+
+        _toastMock.Verify(t => t.ShowError("エラー", It.IsAny<string>()), Times.Once, "前提: 失敗の案内が出ている");
+        _toastMock.Verify(t => t.DismissPersistentNotifications(), Times.Once,
+            "閉じたのは職員証のタッチの 1 回だけ（失敗の案内を出した後には閉じていない）");
+    }
+
+    /// <summary>
+    /// Esc（メイン画面の CancelCommand）で自動では消えない通知を閉じる。職員証タッチ待ちでも効く。
+    /// </summary>
+    /// <remarks>
+    /// トーストはフォーカスを受けないため、クリック以外に閉じる手段が無かった（#2078）。
+    /// 対の表明: 職員証タッチ待ちでは状態を変えない（従来の Esc の意味＝交通系ICカード待ちの取り消しを広げない）。
+    /// </remarks>
+    [Fact]
+    public void Issue2141_Escで自動では消えない通知を閉じ職員証タッチ待ちの状態は変えないこと()
+    {
+        _viewModel.CurrentState.Should().Be(AppState.WaitingForStaffCard, "前提");
+
+        _viewModel.CancelCommand.Execute(null);
+
+        _toastMock.Verify(t => t.DismissPersistentNotifications(), Times.Once);
+        _viewModel.CurrentState.Should().Be(AppState.WaitingForStaffCard);
+    }
+
+    /// <summary>
+    /// 記録済みの案内は、自動で消える警告（ShowWarning）ではなく ShowRecordedNotice で出す。
+    /// </summary>
+    /// <remarks>
+    /// 3 秒で消えると、「再タッチしないでください」を見逃した職員の再タッチが逆の操作として記録される。
+    /// </remarks>
+    [Fact]
+    public async Task Issue2141_記録済みの案内は自動で消える警告として出さないこと()
+    {
+        ArrangeSuccessfulLend();
+
+        RaiseCardRead(StaffIdm);
+        await _dispatcherService.WaitForPendingAsync();
+
+        _cardRepositoryMock.Setup(r => r.GetLentAsync(It.IsAny<bool>()))
+            .ThrowsAsync(new InvalidOperationException("database is locked"));
+
+        RaiseCardRead(CardIdmA);
+        await _dispatcherService.WaitForPendingAsync();
+
+        _toastMock.Verify(t => t.ShowRecordedNotice(
+            "貸出は記録済み",
+            It.Is<string>(m => m.Contains("再タッチしないでください"))), Times.Once);
+        _toastMock.Verify(t => t.ShowWarning(It.IsAny<string>(), It.IsAny<string>()), Times.Never);
+    }
+
+    /// <summary>
+    /// 統合の取り消しは、対象を名指しした確認で「いいえ」なら何もしない。
+    /// </summary>
+    /// <remarks>
+    /// 統合履歴の一覧はダブルクリックでも閉じ、旧実装はそのまま取り消していた（6 年保存の台帳が書き換わる）。
+    /// 取り消しへ進んだかは、取り消しが最初に読む統合履歴（<c>GetMergeHistoriesAsync</c>）で観測する。
+    /// </remarks>
+    [Fact]
+    public async Task Issue2141_統合の取り消しは確認でいいえなら取り消さないこと()
+    {
+        var item = new ICCardManager.Views.Dialogs.MergeHistoryItem
+        {
+            Id = 42,
+            MergedAtDisplay = "2026/09/01 10:15",
+            Description = "9/1 鉄道（博多～天神）ほか2件を統合",
+        };
+        _navigationServiceMock.Setup(n => n.ShowWarningConfirmation(It.IsAny<string>(), It.IsAny<string>()))
+            .Returns(false);
+
+        var proceeded = await _viewModel.ConfirmAndExecuteUnmergeAsync(item);
+
+        proceeded.Should().BeFalse();
+        _navigationServiceMock.Verify(n => n.ShowWarningConfirmation(
+            It.Is<string>(m => m.Contains("2026/09/01 10:15") && m.Contains("9/1 鉄道（博多～天神）ほか2件を統合")),
+            "統合の取り消し"), Times.Once, "取り消す対象を統合日時と内容で名指しして確認すること");
+        _ledgerRepositoryMock.Verify(r => r.GetMergeHistoriesAsync(It.IsAny<bool>()), Times.Never,
+            "「いいえ」なら取り消しへ進まない");
+    }
+
+    /// <summary>
+    /// 確認で「はい」なら取り消しへ進む（対の表明。確認を常に拒否する実装を落とす）。
+    /// </summary>
+    [Fact]
+    public async Task Issue2141_統合の取り消しは確認ではいなら取り消しへ進むこと()
+    {
+        var item = new ICCardManager.Views.Dialogs.MergeHistoryItem
+        {
+            Id = 42,
+            MergedAtDisplay = "2026/09/01 10:15",
+            Description = "9/1 鉄道（博多～天神）ほか2件を統合",
+        };
+        _navigationServiceMock.Setup(n => n.ShowWarningConfirmation(It.IsAny<string>(), It.IsAny<string>()))
+            .Returns(true);
+        // 統合履歴が空 → UnmergeAsync は「統合履歴が見つかりません」で失敗する。取り消しへ進んだことの観測点
+        _ledgerRepositoryMock.Setup(r => r.GetMergeHistoriesAsync(It.IsAny<bool>()))
+            .ReturnsAsync(new List<(int Id, DateTime MergedAt, int TargetLedgerId, string Description, string UndoDataJson, bool IsUndone)>());
+
+        var proceeded = await _viewModel.ConfirmAndExecuteUnmergeAsync(item);
+
+        proceeded.Should().BeTrue();
+        _navigationServiceMock.Verify(n => n.ShowError(It.IsAny<string>(), "取り消しエラー"), Times.Once,
+            "確認に同意したので取り消しへ進んだ（履歴が無いので失敗として案内される）");
+    }
+
+    #endregion
+
     #region 返却のコミット確定後の後処理の失敗（Issue #1805）
 
     /// <summary>
@@ -1365,7 +1591,7 @@ public class MainViewModelIntegrationTests
         _ledgerRepositoryMock.Verify(r => r.DeleteAllLentRecordsAsync(CardIdmA), Times.Once);
 
         // 「記録済み」を伝える警告トーストが出て、再タッチを促す文言は出ない
-        _toastMock.Verify(t => t.ShowWarning(
+        _toastMock.Verify(t => t.ShowRecordedNotice(
             It.Is<string>(title => title.Contains("記録済み")),
             It.Is<string>(m => m.Contains("再タッチしないでください"))), Times.Once);
         _toastMock.Verify(t => t.ShowError(It.IsAny<string>(), It.IsAny<string>()), Times.Never,
@@ -1443,7 +1669,7 @@ public class MainViewModelIntegrationTests
         _ledgerRepositoryMock.Verify(r => r.DeleteAllLentRecordsAsync(CardIdmA), Times.Once);
 
         // 「記録済み・再タッチしない」の案内は 1 回だけ
-        _toastMock.Verify(t => t.ShowWarning(
+        _toastMock.Verify(t => t.ShowRecordedNotice(
             It.Is<string>(title => title.Contains("記録済み")),
             It.Is<string>(m => m.Contains("再タッチしないでください"))), Times.Once);
         _soundPlayerMock.Verify(s => s.Play(SoundType.Warning), Times.Once);
@@ -1473,7 +1699,7 @@ public class MainViewModelIntegrationTests
         _toastMock.Verify(t => t.ShowReturnNotification(
             It.IsAny<string>(), It.IsAny<string>(), 2500, It.IsAny<bool>(), It.IsAny<int>()), Times.Once);
         _soundPlayerMock.Verify(s => s.Play(SoundType.Return), Times.Once);
-        _toastMock.Verify(t => t.ShowWarning(
+        _toastMock.Verify(t => t.ShowRecordedNotice(
             It.Is<string>(title => title.Contains("記録済み")),
             It.IsAny<string>()), Times.Never);
     }
@@ -2029,7 +2255,7 @@ public class MainViewModelIntegrationTests
         RaiseCardRead(CardIdmA);
         await _dispatcherService.WaitForPendingAsync();
 
-        _toastMock.Verify(t => t.ShowWarning(
+        _toastMock.Verify(t => t.ShowRecordedNotice(
             It.Is<string>(title => title.Contains("記録済み")), It.IsAny<string>()), Times.Once, "前提: #1805 の経路");
         _viewModel.IsHistoryVisible.Should().BeTrue("記録は確定しているので確認させる");
         _viewModel.IsReturnHistoryReview.Should().BeTrue();

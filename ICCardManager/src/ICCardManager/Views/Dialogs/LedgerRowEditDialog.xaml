@@ -19,6 +19,12 @@
         AutomationProperties.Name="履歴行の追加・修正ダイアログ"
         AutomationProperties.HelpText="履歴の行を追加または全項目を修正できます。">
 
+    <Window.InputBindings>
+        <!-- Escape: 閉じる（Issue #2141: IsCancel は Click 後に無条件で DialogResult=false を設定し
+             OnClosing の破棄確認と両立しないため、KeyBinding 経由で Close() に通す。LedgerDetailDialog #1743 と同じ形） -->
+        <KeyBinding Key="Escape" Command="{Binding RequestCloseCommand}"/>
+    </Window.InputBindings>
+
     <Window.Resources>
         <BooleanToVisibilityConverter x:Key="BoolToVisibilityConverter"/>
         <common:StringToVisibilityConverter x:Key="StringToVisibilityConverter" xmlns:common="clr-namespace:ICCardManager.Common"/>
@@ -474,15 +480,15 @@
             <!-- 保存/キャンセルボタン（右下） -->
             <StackPanel Grid.Column="2"
                         Orientation="Horizontal">
+                <!-- IsCancel は付けない（Issue #2141: 未保存確認で「いいえ」を選んでも
+                     DialogResult=false が設定されて閉じてしまう。Escape は InputBindings が担う） -->
                 <Button Content="キャンセル(_C)"
-                        Command="{Binding CancelCommand}"
-                        Click="CancelButton_Click"
+                        Command="{Binding RequestCloseCommand}"
                         Padding="20,10"
                         Margin="0,0,10,0"
-                        IsCancel="True"
                         FontSize="{DynamicResource BaseFontSize}"
                         AutomationProperties.Name="キャンセル"
-                        ToolTip="変更を破棄してダイアログを閉じる (Escape / Alt+C)"/>
+                        ToolTip="ダイアログを閉じる。未保存の変更があれば破棄してよいか確認します (Escape / Alt+C)"/>
                 <!-- 戻る（Issue #1134） -->
                 <Button Content="◀ 戻る"
                         Command="{Binding BackCommand}"
