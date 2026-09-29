@@ -1,5 +1,6 @@
 using System.Windows;
 using System.Windows.Media;
+using System.Windows.Threading;
 using ICCardManager.Common;
 
 namespace ICCardManager.Views.Helpers
@@ -57,18 +58,14 @@ namespace ICCardManager.Views.Helpers
 
         private static void Reapply(Application application)
         {
-            // 通知は OS の設定変更のメッセージから届くので通常は UI スレッドだが、リソース辞書は UI スレッドでしか
-            // 触れないため、そうでないときは UI スレッドへ回す（例外は観測してログへ残す。Issue #1873）
-            if (application.Dispatcher.CheckAccess())
-            {
-                Apply(application.Resources, SystemParameters.HighContrast, SystemColors.WindowBrush);
-            }
-            else
-            {
-                application.Dispatcher.InvokeAsyncObserved(
-                    () => Apply(application.Resources, SystemParameters.HighContrast, SystemColors.WindowBrush),
-                    "ハイコントラスト表示への追随");
-            }
+            // 設定変更の通知（WM_SETTINGCHANGE）と色の変更の通知（WM_SYSCOLORCHANGE。SystemColors のキャッシュを
+            // 無効にする）の順序は保証されない。ハイコントラストのテーマ間（黒 ⇔ 白）の切り替えで古いブラシを
+            // 掴まないよう、同じ場で読まずに優先度 Background で後回しにしてから読む（コードレビューで検出）。
+            // 例外は観測してログへ残す（Issue #1873）
+            application.Dispatcher.InvokeAsyncObserved(
+                () => Apply(application.Resources, SystemParameters.HighContrast, SystemColors.WindowBrush),
+                "ハイコントラスト表示への追随",
+                DispatcherPriority.Background);
         }
 
         /// <summary>

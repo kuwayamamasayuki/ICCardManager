@@ -1030,6 +1030,33 @@ public class BusStopInputViewModelTests : IDisposable
     }
 
     [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task RequestCloseCommand_Escはスキップと同じ破棄の確認を通ること_Issue2142(bool confirm)
+    {
+        // Esc（Window の KeyBinding）は確認つきのスキップへ委譲する。確認を経ずに閉じる経路を作らない
+        var detail1 = new LedgerDetail { IsBus = true, BusStops = null, Amount = 200, SequenceNumber = 1 };
+        var ledger = new Ledger { Id = 1, Details = new List<LedgerDetail> { detail1 } };
+        _settingsRepoMock.Setup(s => s.GetAppSettingsAsync()).ReturnsAsync(new AppSettings());
+        _ledgerRepoMock.Setup(r => r.UpdateDetailBusStopsAsync(
+                It.IsAny<int>(), It.IsAny<List<(int, string)>>(), It.IsAny<SQLiteTransaction>()))
+            .ReturnsAsync(true);
+        _ledgerRepoMock.Setup(r => r.UpdateAsync(It.IsAny<Ledger>(), It.IsAny<SQLiteTransaction>()))
+            .ReturnsAsync(true);
+        _dialogServiceMock.Setup(d => d.ShowWarningConfirmation(It.IsAny<string>(), BusStopInputViewModel.SkipDiscardConfirmationTitle))
+            .Returns(confirm);
+        _viewModel.InitializeWithDetails(ledger, ledger.Details);
+        _viewModel.BusUsages[0].BusStops = "薬院大通～六本松三丁目";
+
+        await _viewModel.RequestCloseCommand.ExecuteAsync(null);
+
+        _dialogServiceMock.Verify(
+            d => d.ShowWarningConfirmation(It.IsAny<string>(), BusStopInputViewModel.SkipDiscardConfirmationTitle), Times.Once);
+        _viewModel.IsSaved.Should().Be(confirm, "「はい」ならスキップして閉じ、「いいえ」なら閉じない");
+        _viewModel.BusUsages[0].BusStops.Should().Be(confirm ? SummaryGenerator.BusPlaceholder : "薬院大通～六本松三丁目");
+    }
+
+    [Theory]
     [InlineData(null)]
     [InlineData("")]
     [InlineData("   ")]

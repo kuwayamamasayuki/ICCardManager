@@ -190,6 +190,28 @@ public class BusStopInputDialogSuggestionKeyboardLayoutTests
             "候補のキーボード操作（↓↑で選び Enter で確定）を画面上で案内すること");
     }
 
+    [Fact]
+    public void Escのスキップは確認で止められる経路で結線されていること_Issue2142()
+    {
+        // IsCancel は Click 処理の後に無条件で DialogResult=false を設定するため、スキップの破棄の確認で
+        // 「いいえ」を選んでもダイアログが閉じ、★も保存されないまま入力が失われる（コードレビューで検出）。
+        // 禁止された形（IsCancel）の不在と、正しい形（Escape → 確認つきのスキップ）の存在を対で見る
+        var xaml = ReadXaml();
+
+        XamlElementInspection.EnumerateStartTags(xaml)
+            .Where(t => XamlElementInspection.GetAttribute(t.StartTag, "IsCancel") == "True")
+            .Select(t => t.Line)
+            .Should().BeEmpty("スキップボタン（ほか全ボタン）に IsCancel=\"True\" を付けないこと");
+
+        var escape = XamlElementInspection.EnumerateStartTags(xaml)
+            .Where(t => t.StartTag.StartsWith("<KeyBinding", System.StringComparison.Ordinal)
+                        && XamlElementInspection.GetAttribute(t.StartTag, "Key") == "Escape")
+            .ToList();
+        escape.Should().ContainSingle("Esc は Window の KeyBinding で受けること");
+        XamlElementInspection.GetAttribute(escape[0].StartTag, "Command")
+            .Should().Be("{Binding RequestCloseCommand}", "確認つきのスキップ（SkipAsync へ委譲）を呼ぶこと");
+    }
+
     private static string ReadXaml() => XamlElementInspection.StripXmlComments(File.ReadAllText(DialogXamlPath));
 
     /// <summary><c>Text="{Binding BusStops…}"</c> を持つ入力欄の開始タグ。</summary>
