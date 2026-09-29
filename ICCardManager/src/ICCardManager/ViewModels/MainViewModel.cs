@@ -215,6 +215,15 @@ public partial class MainViewModel : ViewModelBase
     /// </summary>
     private readonly int _timeoutSeconds;
 
+    /// <summary>
+    /// 使い方ガイドの「操作を間違えたとき」の案内文（Issue #2143）
+    /// </summary>
+    /// <remarks>
+    /// 秒数は再タッチ判定（<c>LendingService</c>）と同じ <see cref="AppOptions.RetouchWindowSeconds"/> から採る。
+    /// XAML に「30秒」と直書きすると、設定を変えたときに案内だけが実際の判定と食い違う。
+    /// </remarks>
+    public string RetouchGuideText { get; }
+
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(NextActionStateText))]
     [NotifyPropertyChangedFor(nameof(NextActionIcon))]
@@ -606,6 +615,7 @@ public partial class MainViewModel : ViewModelBase
         _operationLogger = operationLogger;
         _ledgerConsistencyChecker = ledgerConsistencyChecker;
         _timeoutSeconds = appOptions.Value.StaffCardTimeoutSeconds;
+        RetouchGuideText = BuildRetouchGuideText(appOptions.Value.RetouchWindowSeconds);
         _timerFactory = timerFactory;
         _dispatcherService = dispatcherService;
         _databaseInfo = databaseInfo;
@@ -3878,13 +3888,73 @@ public partial class MainViewModel : ViewModelBase
     }
 
     /// <summary>
-    /// アプリケーションを終了
+    /// アプリケーションを終了（Issue #2143: 確認してから終了する）
     /// </summary>
     [RelayCommand]
     public void Exit()
     {
-        System.Windows.Application.Current.Shutdown();
+        if (!ConfirmExit())
+        {
+            return;
+        }
+
+        System.Windows.Application.Current?.Shutdown();
     }
+
+    /// <summary>
+    /// アプリケーションを終了してよいかを確認する（Issue #2143）
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// 共有 PC で「終了」を誤って押すと、誰かが起動し直すまで以後のタッチに何も反応しない（エラーも出ない）。
+    /// 「終了」ボタンとメイン画面の ✕・Alt+F4（<c>MainWindow</c> の <c>WM_SYSCOMMAND(SC_CLOSE)</c> フック）が
+    /// この 1 つを共有する。入口ごとに確認を書くと、片方だけ文言や条件が変わる日が来る（#1763）。
+    /// </para>
+    /// <para>
+    /// OS のサインアウト・シャットダウンは <c>SC_CLOSE</c> を通らないので確認しない（止めると OS の終了を妨げる）。
+    /// </para>
+    /// </remarks>
+    /// <returns>終了してよい場合 true</returns>
+    public bool ConfirmExit()
+    {
+        // 確認の表示中（入れ子のメッセージポンプ）に届いたタッチで、背後の貸出・返却を進めない（#1807）
+        using var suppression = BeginCardReadingSuppression(CardReadingSource.ExitConfirmation);
+        return _navigationService.ShowConfirmation(BuildExitConfirmationMessage(CurrentState), "ピッすいの終了");
+    }
+
+    /// <summary>
+    /// 終了確認の文言を組み立てる（Issue #2143）
+    /// </summary>
+    /// <remarks>
+    /// 操作の途中（職員証をタッチした後・貸出／返却の処理中）なら、その旨を先頭に置く。
+    /// 終了した後に何が起きるか（タッチに反応しなくなる）は状態によらず必ず述べる。
+    /// </remarks>
+    internal static string BuildExitConfirmationMessage(AppState state)
+    {
+        var inProgress = state switch
+        {
+            AppState.WaitingForIcCard =>
+                "職員証をタッチした方の操作が途中です（交通系ICカードのタッチ待ち）。\n",
+            AppState.Processing =>
+                "貸出・返却を処理している途中です。いま終了すると、記録が完了しないことがあります。" +
+                "「いいえ」を選び、処理が終わってから終了してください。\n",
+            _ => string.Empty,
+        };
+
+        return inProgress +
+               "ピッすいを終了すると、次に起動するまで職員証や交通系ICカードをタッチしても反応しません。\n\n" +
+               "終了してよろしいですか？";
+    }
+
+    /// <summary>
+    /// 使い方ガイドの「操作を間違えたとき」の案内文を組み立てる（Issue #2143）
+    /// </summary>
+    /// <remarks>
+    /// 再タッチは直前の記録を取り消すのではなく、逆の操作を新たに記録する（元の記録も履歴に残る）。
+    /// 旧文言の「誤操作の修正」は、誤った記録が消えると読まれた。
+    /// </remarks>
+    internal static string BuildRetouchGuideText(int retouchWindowSeconds)
+        => $"{retouchWindowSeconds}秒以内に同じカードをもう一度タッチすると、逆の操作（貸出⇔返却）を記録します（元の記録も履歴に残ります）";
 
     /// <summary>
     /// 設定画面を開く

@@ -348,31 +348,100 @@ public class EditFormKeyboardConventionTests
     /// <c>AcceptsReturn="False"</c>）に同じ但し書きを求めない。求めると、実際には起きない制限を
     /// 案内することになる。
     /// </para>
+    /// <para>
+    /// <b>走査対象は「編集フォームを持つダイアログ」ではなく「既定ボタンを持つウィンドウ」</b>（Issue #2143）。
+    /// Enter で保存されるかを決めるのは <c>IsDefault</c> であって、一覧＋編集フォームという画面の形ではない。
+    /// #2080 の初版は走査を <see cref="EnumerateEditFormDialogs"/> に載せていたため、
+    /// 行編集ダイアログ（<c>IsEditing</c> を持たず、「保存 (Enter)」と案内し、備考欄が最後の欄）が
+    /// 検査の外にあった — <b>導出した軸が、守りたい性質の軸と一致しているかを確かめる</b>（#2075 のコードレビューと同じ）。
+    /// </para>
     /// </remarks>
     [Fact]
     public void 複数行の入力欄がある画面だけがEnterの但し書きを持つこと()
     {
-        foreach (var dialog in EnumerateEditFormDialogs())
+        var windows = EnumerateDefaultButtonWindows();
+
+        // 空振り検出: 導出が縮んで対象を見失っていないこと（#1786）。
+        // 3 画面はいずれも備考欄（AcceptsReturn="True"）と既定ボタンを持つ
+        windows.Where(w => w.HasMultilineInput).Select(w => w.FileName).Should().Contain(new[]
         {
-            var hasMultilineInput = XamlElementInspection.EnumerateElements(dialog.Xaml, "TextBox")
-                .Any(t => string.Equals(
-                    XamlElementInspection.GetAttribute(t.StartTag, "AcceptsReturn"), "True", StringComparison.Ordinal));
+            "CardManageDialog.xaml", "StaffManageDialog.xaml", "LedgerRowEditDialog.xaml",
+        });
+        windows.Should().Contain(w => !w.HasMultilineInput, "対の表明が空振りしていないこと");
 
-            var helpText = XamlElementInspection.GetAttribute(
-                RootWindowStartTag(dialog.Xaml), "AutomationProperties.HelpText") ?? string.Empty;
-
-            if (hasMultilineInput)
+        foreach (var window in windows)
+        {
+            if (window.HasMultilineInput)
             {
-                helpText.Should().Contain("改行",
-                    $"{dialog.FileName}: AcceptsReturn=\"True\" の欄では Enter が改行になり保存されない。" +
+                window.HelpText.Should().Contain("改行",
+                    $"{window.FileName}: AcceptsReturn=\"True\" の欄では Enter が改行になり保存されない。" +
                     "「Enter キーで保存」とだけ案内すると、その欄にいる職員には実行できない指示になる");
+
+                // ボタン自身の案内（ツールチップ）が Enter を述べるなら、そこでも断る
+                foreach (var toolTip in window.DefaultButtonToolTips.Where(t => t.Contains("Enter")))
+                {
+                    toolTip.Should().Contain("改行",
+                        $"{window.FileName}: 既定ボタンのツールチップ「{toolTip}」が Enter で保存と述べているが、" +
+                        "備考欄では Enter が改行になる");
+                }
             }
             else
             {
-                helpText.Should().NotContain("改行",
-                    $"{dialog.FileName}: 複数行の入力欄が無い画面に但し書きを付けると、" +
+                window.HelpText.Should().NotContain("改行",
+                    $"{window.FileName}: 複数行の入力欄が無い画面に但し書きを付けると、" +
                     "実際には起きない制限を案内することになる（対の表明）");
             }
         }
+    }
+
+    private sealed record DefaultButtonWindow(
+        string FileName, bool HasMultilineInput, string HelpText, IReadOnlyList<string> DefaultButtonToolTips);
+
+    /// <summary>
+    /// 既定ボタン（<c>IsDefault</c> が <c>False</c> 以外）を持つウィンドウを <c>Views/</c> 配下の全 XAML から導出する。
+    /// </summary>
+    private static IReadOnlyList<DefaultButtonWindow> EnumerateDefaultButtonWindows()
+    {
+        var windows = new List<DefaultButtonWindow>();
+
+        foreach (var file in Directory
+                     .EnumerateFiles(ViewSourceLocator.ResolveDirectory("Views"), "*.xaml", SearchOption.AllDirectories)
+                     .OrderBy(f => f, StringComparer.Ordinal))
+        {
+            var xaml = XamlElementInspection.StripXmlComments(File.ReadAllText(file));
+            var root = XamlElementInspection.EnumerateElements(xaml, "Window").FirstOrDefault();
+            if (root == null)
+            {
+                continue;
+            }
+
+            var defaultButtons = XamlElementInspection.EnumerateElements(xaml, "Button")
+                .Where(b =>
+                {
+                    var isDefault = XamlElementInspection.GetAttribute(b.StartTag, "IsDefault");
+                    return isDefault != null && !string.Equals(isDefault, "False", StringComparison.Ordinal);
+                })
+                .ToList();
+            if (defaultButtons.Count == 0)
+            {
+                continue;
+            }
+
+            var hasMultilineInput = XamlElementInspection.EnumerateElements(xaml, "TextBox")
+                .Any(t => string.Equals(
+                    XamlElementInspection.GetAttribute(t.StartTag, "AcceptsReturn"), "True", StringComparison.Ordinal));
+
+            windows.Add(new DefaultButtonWindow(
+                Path.GetFileName(file),
+                hasMultilineInput,
+                XamlElementInspection.GetAttribute(root.StartTag, "AutomationProperties.HelpText") ?? string.Empty,
+                defaultButtons
+                    .Select(b => XamlElementInspection.GetAttribute(b.StartTag, "ToolTip"))
+                    .Where(t => t != null)
+                    .Select(t => t!)
+                    .ToList()));
+        }
+
+        return windows;
     }
 }

@@ -141,9 +141,15 @@ public class MainViewModelTests : IDisposable
         IDispatcherService dispatcherService = null,
         ICardReader cardReader = null,
         ILogger<MainViewModel> logger = null,
-        IMessenger messenger = null)
+        IMessenger messenger = null,
+        int? retouchWindowSeconds = null)
     {
         var databaseInfoMock = new Mock<IDatabaseInfo>();
+        var appOptions = new AppOptions { StaffCardTimeoutSeconds = timeoutSeconds };
+        if (retouchWindowSeconds.HasValue)
+        {
+            appOptions.RetouchWindowSeconds = retouchWindowSeconds.Value;
+        }
         return new MainViewModel(
             cardReader ?? _cardReaderMock.Object,
             _soundPlayerMock.Object,
@@ -159,7 +165,7 @@ public class MainViewModelTests : IDisposable
             _navigationServiceMock.Object,
             _operationLoggerMock.Object,
             _ledgerConsistencyChecker,
-            Options.Create(new AppOptions { StaffCardTimeoutSeconds = timeoutSeconds }),
+            Options.Create(appOptions),
             _timerFactory,
             dispatcherService ?? _dispatcherService,
             databaseInfoMock.Object,
@@ -5102,6 +5108,166 @@ public class MainViewModelTests : IDisposable
         await _viewModel.RefreshSharedDataAsync();
 
         _viewModel.WarningMessages.Should().NotContain(w => w.Type == WarningType.CardBalanceMismatch);
+    }
+
+    #endregion
+
+    #region Issue #2143: 使い方ガイドの再タッチ案内と終了確認
+
+    /// <summary>
+    /// 使い方ガイドの秒数は再タッチ判定と同じ設定値（RetouchWindowSeconds）から採ること。
+    /// </summary>
+    /// <remarks>
+    /// 既定値（30 秒）と異なる値で試す。既定値のままだと、設定を読まずに「30秒」を直書きした実装でも緑になる（#1818）。
+    /// </remarks>
+    [Fact]
+    public void RetouchGuideText_設定した再タッチ秒数で案内すること()
+    {
+        var viewModel = CreateViewModel(retouchWindowSeconds: 45);
+
+        viewModel.RetouchGuideText.Should().Be(
+            "45秒以内に同じカードをもう一度タッチすると、逆の操作（貸出⇔返却）を記録します（元の記録も履歴に残ります）");
+    }
+
+    /// <summary>
+    /// 再タッチは取り消しではないことを案内が述べ、取り消し・修正と読める語を含まないこと。
+    /// </summary>
+    /// <remarks>
+    /// 30 秒ルールは逆の操作を新たに記録するだけで、直前の記録は消えず両方が履歴に残る（business-logic.md）。
+    /// 旧文言「誤操作の修正」は誤った記録が消えると読まれた。
+    /// </remarks>
+    [Fact]
+    public void RetouchGuideText_元の記録が残ることを述べ取り消しと読める語を含まないこと()
+    {
+        var text = MainViewModel.BuildRetouchGuideText(ICCardManager.Common.AppConstants.DefaultCardRetouchTimeoutSeconds);
+
+        text.Should().Contain("元の記録も履歴に残ります");
+        text.Should().NotContain("取り消");
+        text.Should().NotContain("修正");
+    }
+
+    /// <summary>
+    /// 終了確認は状態によらず「終了後はタッチに反応しない」ことを述べ、操作の途中ならその旨を先頭に置くこと。
+    /// </summary>
+    [Theory]
+    [InlineData(AppState.WaitingForStaffCard, null)]
+    [InlineData(AppState.WaitingForIcCard, "職員証をタッチした方の操作が途中です")]
+    [InlineData(AppState.Processing, "貸出・返却を処理している途中です")]
+    public void BuildExitConfirmationMessage_状態に応じて操作の途中であることを述べること(AppState state, string expectedPrefix)
+    {
+        var message = MainViewModel.BuildExitConfirmationMessage(state);
+
+        message.Should().Contain("次に起動するまで職員証や交通系ICカードをタッチしても反応しません");
+        message.Should().EndWith("終了してよろしいですか？");
+        if (expectedPrefix == null)
+        {
+            message.Should().NotContain("途中", "待機中に操作の途中と述べると、実際には起きていない中断を案内することになる（対の表明）");
+        }
+        else
+        {
+            message.Should().StartWith(expectedPrefix);
+        }
+
+        if (state == AppState.Processing)
+        {
+            // 危険を述べるだけでなく「どうすれば」を示す（error-messages.md の 3 要素。コードレビューで検出）
+            message.Should().Contain("「いいえ」を選び、処理が終わってから終了してください");
+        }
+    }
+
+    /// <summary>
+    /// 「終了」ボタンは確認を経ること。「いいえ」なら終了しない。
+    /// </summary>
+    /// <remarks>
+    /// 「はい」の経路は <c>Application.Current.Shutdown()</c> を呼ぶため、テストプロセスでは踏まない
+    /// （同じプロセスに Application があると、以降のテストを巻き込んで終了させ得る）。
+    /// 確認が Shutdown より先にあることは <c>ExitConfirmationConventionTests</c> がソーステキストで固定する。
+    /// </remarks>
+    [Fact]
+    public void Exit_確認でいいえを選ぶと確認だけが表示されること()
+    {
+        _navigationServiceMock.Setup(n => n.ShowConfirmation(It.IsAny<string>(), It.IsAny<string>())).Returns(false);
+
+        _viewModel.Exit();
+
+        _navigationServiceMock.Verify(n => n.ShowConfirmation(
+            MainViewModel.BuildExitConfirmationMessage(AppState.WaitingForStaffCard), "ピッすいの終了"), Times.Once);
+    }
+
+    /// <summary>
+    /// 職員証をタッチした後（交通系ICカードのタッチ待ち）に閉じようとすると、操作の途中である旨の確認になること。
+    /// </summary>
+    /// <remarks>
+    /// 状態をリフレクションで作らず、実際に職員証のタッチを通してその状態へ遷移させる（testing.md #2103）。
+    /// </remarks>
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task ConfirmExit_職員証タッチ後は操作途中の確認を出し選択をそのまま返すこと(bool answer)
+    {
+        var staffIdm = "0102030405060708";
+        _staffRepositoryMock.Setup(r => r.GetByIdmAsync(staffIdm, It.IsAny<bool>()))
+            .ReturnsAsync(new Staff { StaffIdm = staffIdm, Name = "テスト職員" });
+        _cardReaderMock.Raise(r => r.CardRead += null,
+            _cardReaderMock.Object, new CardReadEventArgs { Idm = staffIdm });
+        await _dispatcherService.WaitForPendingAsync();
+        _viewModel.CurrentState.Should().Be(AppState.WaitingForIcCard);
+
+        string shownMessage = null;
+        _navigationServiceMock.Setup(n => n.ShowConfirmation(It.IsAny<string>(), It.IsAny<string>()))
+            .Callback<string, string>((m, _) => shownMessage = m)
+            .Returns(answer);
+
+        var result = _viewModel.ConfirmExit();
+
+        result.Should().Be(answer);
+        shownMessage.Should().StartWith("職員証をタッチした方の操作が途中です");
+    }
+
+    /// <summary>
+    /// 終了確認の表示中はカード読み取りを抑制し、確認を閉じたら解放すること（コードレビューで検出）。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// 確認の MessageBox は入れ子のメッセージポンプを回すため、抑制しないと確認の裏で交通系ICカードの
+    /// タッチが処理され、貸出・返却が台帳に確定する（#1807 と同じ形）。
+    /// </para>
+    /// <para>
+    /// 状態の値ではなく「確認の表示中に届いたタッチが何も起こさない」ことで表明する。職員証のタッチで
+    /// 交通系ICカードのタッチ待ちへ進むかを見れば、抑制が効いているかが結果から読める（testing.md #2103）。
+    /// 対の表明: 確認を閉じた後のタッチは通常どおり処理される（解放を落とした実装を落とす）。
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public async Task ConfirmExit_確認の表示中に届いたタッチを処理せず閉じた後は処理すること()
+    {
+        var staffIdm = "0102030405060708";
+        _staffRepositoryMock.Setup(r => r.GetByIdmAsync(staffIdm, It.IsAny<bool>()))
+            .ReturnsAsync(new Staff { StaffIdm = staffIdm, Name = "テスト職員" });
+
+        bool? suppressedWhileShown = null;
+        _navigationServiceMock.Setup(n => n.ShowConfirmation(It.IsAny<string>(), It.IsAny<string>()))
+            .Callback(() =>
+            {
+                suppressedWhileShown = _viewModel.IsCardReadingSuppressed;
+                // 確認の表示中に職員証がタッチされる
+                _cardReaderMock.Raise(r => r.CardRead += null,
+                    _cardReaderMock.Object, new CardReadEventArgs { Idm = staffIdm });
+            })
+            .Returns(false);
+
+        _viewModel.ConfirmExit();
+        await _dispatcherService.WaitForPendingAsync();
+
+        suppressedWhileShown.Should().BeTrue();
+        _viewModel.CurrentState.Should().Be(AppState.WaitingForStaffCard, "確認の裏でタッチを処理しない");
+        _viewModel.IsCardReadingSuppressed.Should().BeFalse("確認を閉じたら抑制を解放する");
+
+        _cardReaderMock.Raise(r => r.CardRead += null,
+            _cardReaderMock.Object, new CardReadEventArgs { Idm = staffIdm });
+        await _dispatcherService.WaitForPendingAsync();
+
+        _viewModel.CurrentState.Should().Be(AppState.WaitingForIcCard, "確認を閉じた後のタッチは処理される（対）");
     }
 
     #endregion

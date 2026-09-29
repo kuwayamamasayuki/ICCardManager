@@ -17,7 +17,7 @@
         FontSize="{DynamicResource BaseFontSize}"
         FocusManager.FocusedElement="{Binding ElementName=EditDatePicker}"
         AutomationProperties.Name="履歴行の追加・修正ダイアログ"
-        AutomationProperties.HelpText="履歴の行を追加または全項目を修正できます。">
+        AutomationProperties.HelpText="履歴の行を追加または全項目を修正できます。Enterキーで保存します（備考欄では改行になります）。Escキーで閉じます（保存していない変更があれば確認します）。">
 
     <Window.InputBindings>
         <!-- Escape: 閉じる（Issue #2141: IsCancel は Click 後に無条件で DialogResult=false を設定し
@@ -526,7 +526,7 @@
                         IsDefault="True"
                         FontSize="{DynamicResource BaseFontSize}"
                         AutomationProperties.Name="保存"
-                        ToolTip="保存 (Enter)"/>
+                        ToolTip="保存 (Enter。備考欄では改行になります)"/>
             </StackPanel>
         </Grid>
 
