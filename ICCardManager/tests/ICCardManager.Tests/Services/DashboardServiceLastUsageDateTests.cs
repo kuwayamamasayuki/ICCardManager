@@ -139,18 +139,6 @@ public class DashboardServiceLastUsageDateTests : IDisposable
     }
 
     [Fact]
-    public async Task 新規購入の後に利用1件_最終利用日は利用日()
-    {
-        await SeedMastersAsync();
-        await InsertLedgerAsync(CardA, new DateTime(2026, 5, 1), "新規購入", income: 5000, balance: 5000);
-        await InsertLedgerAsync(CardA, new DateTime(2026, 5, 10), "鉄道（天神～博多）", expense: 210, balance: 4790);
-
-        var item = await BuildItemAsync(CardA);
-
-        item.LastUsageDate.Should().Be(new DateTime(2026, 5, 10));
-    }
-
-    [Fact]
     public async Task 利用より新しい貸出中レコード_最終利用日は利用日のまま()
     {
         // 貸出中プレースホルダは date=貸出日時 で最新行になるため、旧実装では
@@ -164,9 +152,36 @@ public class DashboardServiceLastUsageDateTests : IDisposable
         item.LastUsageDate.Should().Be(new DateTime(2026, 5, 10), "貸出中レコードは利用実績ではない");
     }
 
+    [Fact]
+    public async Task 最終利用日順_利用実績の無いカードは導入日が新しくても末尾()
+    {
+        // 新規購入の日付（6/1）はカード B の利用日（5/10）より新しい。旧実装では
+        // 「最新レコード日」で並べるため、登録しただけのカード A が先頭に来ていた。
+        await SeedMastersAsync();
+        await InsertLedgerAsync(CardA, new DateTime(2026, 6, 1), "新規購入", income: 5000, balance: 5000);
+        await InsertLedgerAsync(CardB, new DateTime(2026, 5, 10), "鉄道（天神～博多）", expense: 210, balance: 790);
+
+        var result = await _service.BuildDashboardAsync(DashboardSortOrder.LastUsageDate);
+
+        result.Items.Select(i => i.CardIdm).Should().Equal(
+            new[] { CardB, CardA }, "利用実績の無いカードは空欄として末尾に並ぶ");
+    }
+
     #endregion
 
     #region 正当な挙動を塞いでいない側
+
+    [Fact]
+    public async Task 新規購入の後に利用1件_最終利用日は利用日()
+    {
+        await SeedMastersAsync();
+        await InsertLedgerAsync(CardA, new DateTime(2026, 5, 1), "新規購入", income: 5000, balance: 5000);
+        await InsertLedgerAsync(CardA, new DateTime(2026, 5, 10), "鉄道（天神～博多）", expense: 210, balance: 4790);
+
+        var item = await BuildItemAsync(CardA);
+
+        item.LastUsageDate.Should().Be(new DateTime(2026, 5, 10));
+    }
 
     [Fact]
     public async Task 利用の後にチャージのみ_最終利用日はチャージ日()
@@ -184,18 +199,37 @@ public class DashboardServiceLastUsageDateTests : IDisposable
     }
 
     [Fact]
-    public async Task 最終利用日順_利用実績の無いカードは導入日が新しくても末尾()
+    public async Task 利用の後に払い戻し_最終利用日は払戻日()
     {
-        // 新規購入の日付（6/1）はカード B の利用日（5/10）より新しい。旧実装では
-        // 「最新レコード日」で並べるため、登録しただけのカード A が先頭に来ていた。
+        // 払い戻しも実際の取引（残額を払い出す）なので利用実績に数える。
         await SeedMastersAsync();
-        await InsertLedgerAsync(CardA, new DateTime(2026, 6, 1), "新規購入", income: 5000, balance: 5000);
-        await InsertLedgerAsync(CardB, new DateTime(2026, 5, 10), "鉄道（天神～博多）", expense: 210, balance: 790);
+        await InsertLedgerAsync(CardA, new DateTime(2026, 5, 10), "鉄道（天神～博多）", expense: 210, balance: 790);
+        await InsertLedgerAsync(CardA, new DateTime(2026, 5, 31),
+            SummaryGenerator.GetRefundSummary(), expense: 790, balance: 0);
 
-        var result = await _service.BuildDashboardAsync(DashboardSortOrder.LastUsageDate);
+        var item = await BuildItemAsync(CardA);
 
-        result.Items.Select(i => i.CardIdm).Should().Equal(
-            new[] { CardB, CardA }, "利用実績の無いカードは空欄として末尾に並ぶ");
+        item.LastUsageDate.Should().Be(new DateTime(2026, 5, 31));
+    }
+
+    #endregion
+
+    #region 既知の制限（文書と挙動の対応を固定する）
+
+    [Fact]
+    public async Task 前年度より繰越だけのカード_既知の制限として導入日が最終利用日に出る()
+    {
+        // 3 月に登録したカードの導入行「前年度より繰越」は、利用実績の除外条件
+        // （新規購入・○月から繰越）に含まれていない。画面設計書 §3.1.4・CHANGELOG に
+        // 既知の制限として書いた挙動を固定し、将来この除外を足したときに文書の更新漏れを
+        // 気付けるようにする（この表明が赤になったら、文書側の「既知の制限」も消すこと）。
+        await SeedMastersAsync();
+        await InsertLedgerAsync(CardA, new DateTime(2026, 3, 15),
+            SummaryGenerator.GetCarryoverFromPreviousYearSummary(), income: 4000, balance: 4000);
+
+        var item = await BuildItemAsync(CardA);
+
+        item.LastUsageDate.Should().Be(new DateTime(2026, 3, 15));
     }
 
     #endregion
