@@ -128,7 +128,7 @@ namespace ICCardManager.Data.Repositories
             IEnumerable<string> cardIdms);
 
         /// <summary>
-        /// 全カードの最終利用日を一括取得（管理者ダッシュボードの運用状況用、Issue #1747）
+        /// 全カードの最終利用日を一括取得（管理者ダッシュボードの運用状況・メイン画面の残額ダッシュボード用、Issue #1747 / #2153）
         /// </summary>
         /// <remarks>
         /// 「利用実績」の定義は稼働状況の集計（<see cref="GetUsageStatsByCardAsync"/>）と同じ:
@@ -138,10 +138,8 @@ namespace ICCardManager.Data.Repositories
         /// 利用実績が 1 件も無いカードは辞書に含まれない（最終利用日は空欄扱い）。
         /// <see cref="GetAllLatestBalancesAsync"/> の LastUsageDate はこれらを除外しない
         /// 「最新レコード日」であり、登録しただけのカードが「使われている」ように見えるため、
-        /// 新しく「最終利用日」を表示する箇所ではこちらを使うこと。
-        /// なお既存のメイン画面カード残高ダッシュボード（DashboardService）は #1747 の
-        /// スコープ判断により従来どおり「最新レコード日」を表示している（挙動を揃える場合は
-        /// 別 Issue で扱う）。
+        /// 「最終利用日」を表示する箇所ではこちらを使うこと（メイン画面の残額ダッシュボード
+        /// <c>DashboardService</c> も Issue #2153 でこちらへ揃えた）。
         /// </remarks>
         Task<Dictionary<string, DateTime>> GetAllLastUsageDatesAsync();
 

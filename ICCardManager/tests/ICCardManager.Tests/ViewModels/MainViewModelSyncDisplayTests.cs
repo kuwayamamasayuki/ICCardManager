@@ -310,6 +310,8 @@ public class MainViewModelSyncDisplayTests
         cardRepositoryMock.Setup(r => r.GetAllAsync()).ReturnsAsync(new List<IcCard>());
         ledgerRepositoryMock.Setup(r => r.GetAllLatestBalancesAsync())
             .ReturnsAsync(new Dictionary<string, (int Balance, DateTime? LastUsageDate)>());
+        ledgerRepositoryMock.Setup(r => r.GetAllLastUsageDatesAsync())
+            .ReturnsAsync(new Dictionary<string, DateTime>());
         staffRepositoryMock.Setup(r => r.GetAllAsync()).ReturnsAsync(new List<Staff>());
         settingsRepositoryMock.Setup(r => r.GetAppSettingsAsync())
             .ReturnsAsync(new AppSettings());

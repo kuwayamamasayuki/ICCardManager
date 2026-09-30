@@ -48,6 +48,10 @@ namespace ICCardManager.Services
             var settings = await _settingsRepository.GetAppSettingsAsync().ConfigureAwait(false);
             var cards = await _cardRepository.GetAllAsync().ConfigureAwait(false);
             var balances = await _ledgerRepository.GetAllLatestBalancesAsync().ConfigureAwait(false);
+            // Issue #2153: 「最終利用日」は利用実績の最終日（新規購入・繰越・貸出中レコードを除く）。
+            // GetAllLatestBalancesAsync の LastUsageDate は「最新レコード日」で、登録しただけのカードが
+            // 使われたように見えるため使わない。管理者ダッシュボード（#1747）と同じ取得元に揃える。
+            var lastUsageDates = await _ledgerRepository.GetAllLastUsageDatesAsync().ConfigureAwait(false);
             var staffDict = (await _staffRepository.GetAllAsync().ConfigureAwait(false))
                 .ToDictionary(s => s.StaffIdm, s => s.Name);
 
@@ -61,9 +65,10 @@ namespace ICCardManager.Services
             // 判定は IcCard.IsInOperation へ寄せ、AdminDashboardService と食い違わせない。
             foreach (var card in cards.Where(c => c.IsInOperation))
             {
-                var (balance, lastUsageDate) = balances.TryGetValue(card.CardIdm, out var info)
-                    ? info
-                    : (0, (DateTime?)null);
+                var balance = balances.TryGetValue(card.CardIdm, out var info) ? info.Balance : 0;
+                DateTime? lastUsageDate = lastUsageDates.TryGetValue(card.CardIdm, out var usedAt)
+                    ? usedAt
+                    : null;
 
                 var staffName = card.IsLent && card.LastLentStaff != null && staffDict.TryGetValue(card.LastLentStaff, out var name)
                     ? name
