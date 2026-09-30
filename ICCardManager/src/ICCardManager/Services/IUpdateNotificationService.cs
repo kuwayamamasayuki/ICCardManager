@@ -11,6 +11,16 @@ namespace ICCardManager.Services
         /// </summary>
         /// <returns>新しいバージョンがある場合はその情報、ない場合・判定不能な場合はnull</returns>
         UpdateCheckResult CheckForNewerVersion();
+
+        /// <summary>
+        /// latest_version.txt に記載されたバージョンより自バージョンの方が新しいとき
+        /// （ファイルが無い・解釈できない場合を含む）、自バージョンで書き換える（Issue #2149）
+        /// </summary>
+        /// <remarks>
+        /// 記載値は単調増加で、自分より新しい・同じ値は書き換えない。
+        /// I/O エラーは Warning ログに留め、例外を投げない（起動を妨げないため）。
+        /// </remarks>
+        void PublishCurrentVersionIfNewer();
     }
 
     /// <summary>
