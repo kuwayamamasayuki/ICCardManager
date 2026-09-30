@@ -72,7 +72,9 @@
                      既定 Width=1650 は「大」まで 1 段に収める値。特大は WrapPanel の折り返しに委ねる
                      （特大を 1 段に収めるには 1900px 超が必要で、業務 PC の画面幅に収まらないため）。
                      MinWidth は据え置き。縮めたときに 2 段になるのは意図した挙動で、
-                     最小幅を上げると低解像度環境でウィンドウを画面内に収められなくなる（Issue #1692） -->
+                     最小幅を上げると低解像度環境でウィンドウを画面内に収められなくなる（Issue #1692）。
+                     MinWidth は 1400 と作業領域の幅の小さい方（WindowLayoutCalculator、Issue #2150）なので、
+                     1366px 幅の PC ではこのボタン列が 2 段になり、履歴一覧は横スクロールで受ける -->
                 <WrapPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center">
                     <Button Content="帳票 (F1)" Margin="5,3"
                             Style="{StaticResource AccessibleButtonStyle}"
@@ -597,6 +599,7 @@
                         <!-- 履歴一覧 -->
                         <DataGrid Grid.Row="3"
                                   x:Name="HistoryDataGrid"
+                                  HorizontalScrollBarVisibility="Auto"
                                   ItemsSource="{Binding HistoryLedgers}"
                                   AutoGenerateColumns="False"
                                   IsReadOnly="True"
