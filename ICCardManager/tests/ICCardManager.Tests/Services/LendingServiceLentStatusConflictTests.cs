@@ -291,6 +291,7 @@ public sealed class LendingServiceLentStatusConflictTests : IDisposable
             _staffRepository,
             ledgerRepository ?? _ledgerRepository,
             _settingsRepository,
+            new OperationLogger(Mock.Of<IOperationLogRepository>(), Mock.Of<ICurrentOperatorContext>()),
             new SummaryGenerator(DepartmentType.MayorOffice),
             new CardLockManager(NullLogger<CardLockManager>.Instance),
             Options.Create(new AppOptions { CardLockTimeoutSeconds = 5, RetouchWindowSeconds = 30 }),

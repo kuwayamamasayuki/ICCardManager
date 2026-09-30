@@ -71,6 +71,7 @@ public class LendingServiceTests : IDisposable
             _staffRepositoryMock.Object,
             _ledgerRepositoryMock.Object,
             _settingsRepositoryMock.Object,
+            new OperationLogger(Mock.Of<IOperationLogRepository>(), Mock.Of<ICurrentOperatorContext>()),
             _summaryGenerator,
             _lockManager,
             Options.Create(new AppOptions()),
@@ -1966,7 +1967,9 @@ public class LendingServiceTests : IDisposable
             CardLockManager lockManager,
             IOptions<AppOptions> appOptions,
             ILogger<LendingService> logger)
-            : base(dbContext, cardRepository, staffRepository, ledgerRepository, settingsRepository, summaryGenerator, lockManager, appOptions, logger)
+            : base(dbContext, cardRepository, staffRepository, ledgerRepository, settingsRepository,
+                new OperationLogger(Mock.Of<IOperationLogRepository>(), Mock.Of<ICurrentOperatorContext>()),
+                summaryGenerator, lockManager, appOptions, logger)
         {
         }
 
@@ -4716,6 +4719,7 @@ public class LendingServiceTests : IDisposable
             _staffRepositoryMock.Object,
             _ledgerRepositoryMock.Object,
             _settingsRepositoryMock.Object,
+            new OperationLogger(Mock.Of<IOperationLogRepository>(), Mock.Of<ICurrentOperatorContext>()),
             _summaryGenerator,
             _lockManager,
             Options.Create(new AppOptions()),

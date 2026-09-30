@@ -40,6 +40,7 @@ namespace ICCardManager.Tests.Services
                 _mockStaffRepo.Object,
                 _mockLedgerRepo.Object,
                 _mockSettingsRepo.Object,
+                new OperationLogger(Mock.Of<IOperationLogRepository>(), Mock.Of<ICurrentOperatorContext>()),
                 new SummaryGenerator(),
                 _lockManager,
                 Options.Create(new AppOptions()),

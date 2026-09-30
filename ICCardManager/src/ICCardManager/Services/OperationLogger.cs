@@ -561,6 +561,30 @@ namespace ICCardManager.Services
         }
 
         /// <summary>
+        /// ICカード更新のログを既存トランザクションで記録する (Issue #2151)。
+        /// </summary>
+        /// <remarks>
+        /// 払い戻し（払戻台帳の INSERT ＋ 払戻済への更新）と同じトランザクションで書く。
+        /// 別々に確定させると、監査ログの書き込みだけが失敗したときに「誰が払い戻したか分からない
+        /// 払い戻し」が 6 年保存の台帳に残る（Issue #1760 と同じ害）。
+        /// </remarks>
+        public async Task LogCardUpdateAsync(IcCard beforeCard, IcCard afterCard, SQLiteTransaction transaction)
+        {
+            var (idm, name) = ResolveOperator();
+            await _operationLogRepository.InsertAsync(new OperationLog
+            {
+                Timestamp = DateTime.Now,
+                OperatorIdm = idm,
+                OperatorName = name,
+                TargetTable = Tables.IcCard,
+                TargetId = afterCard.CardIdm,
+                Action = Actions.Update,
+                BeforeData = SerializeToJson(beforeCard),
+                AfterData = SerializeToJson(afterCard)
+            }, transaction).ConfigureAwait(false);
+        }
+
+        /// <summary>
         /// 履歴削除のログを既存トランザクションで記録する (Issue #1458)。
         /// </summary>
         public async Task LogLedgerDeleteAsync(Ledger ledger, SQLiteTransaction transaction)

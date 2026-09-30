@@ -77,6 +77,7 @@ public class LendingServiceSystemLendTests : IDisposable
             _staffRepositoryMock.Object,
             _ledgerRepositoryMock.Object,
             _settingsRepositoryMock.Object,
+            new OperationLogger(Mock.Of<IOperationLogRepository>(), Mock.Of<ICurrentOperatorContext>()),
             new SummaryGenerator(),
             _lockManager,
             Options.Create(new AppOptions()),
