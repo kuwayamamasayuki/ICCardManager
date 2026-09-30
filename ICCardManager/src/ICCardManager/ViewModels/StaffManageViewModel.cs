@@ -746,7 +746,8 @@ namespace ICCardManager.ViewModels
             }
             catch (Exception ex) when (restoreCommitted.Value)
             {
-                // Issue #1816: 復元は確定済み。ここでの失敗は後処理（操作ログ・一覧再読込）の
+                // Issue #1816: 復元は確定済み（操作ログも同じトランザクションで記録済み。Issue #2156）。
+                // ここでの失敗は後処理（一覧再読込）の
                 // 失敗であり、「もう一度タッチしてください」と案内すると、職員は既に復元済みの
                 // 職員証を再タッチして「既に登録されています」を見ることになる
                 // （.claude/rules/development-conventions.md「コミット確定後の後処理を、

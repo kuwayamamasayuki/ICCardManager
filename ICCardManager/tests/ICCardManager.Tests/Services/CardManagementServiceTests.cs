@@ -47,6 +47,12 @@ public sealed class CardManagementServiceTests : IDisposable
     private readonly RecordingRetryDelay _retryDelay;
     private readonly CardRepository _cardRepository;
     private readonly OperationLogRepository _realOperationLogRepository;
+    /// <summary>
+    /// キャッシュの破棄を観測する（Issue #2156: tx を渡した書き込みは破棄しないため、サービスの finally だけが破棄する）
+    /// </summary>
+    private readonly Mock<ICacheService> _cacheService;
+    /// <summary>キャッシュを破棄した時点でトランザクションが開いていたか（破棄ごとに記録）</summary>
+    private readonly List<bool> _invalidatedWhileTransactionOpen = new();
 
     public CardManagementServiceTests()
     {
@@ -56,9 +62,11 @@ public sealed class CardManagementServiceTests : IDisposable
         _retryDelay = RecordingRetryDelay.AttachTo(_dbContext);
 
         _cardRepository = new CardRepository(
-            _dbContext, CreatePassThroughCacheService(), Options.Create(new CacheOptions()),
+            _dbContext, (_cacheService = CreatePassThroughCacheService()).Object, Options.Create(new CacheOptions()),
             NullLogger<CardRepository>.Instance);
         _realOperationLogRepository = new OperationLogRepository(_dbContext);
+        _cacheService.Setup(c => c.InvalidateByPrefix(It.IsAny<string>()))
+            .Callback(() => _invalidatedWhileTransactionOpen.Add(_dbContext.HasActiveTransactionScope));
     }
 
     public void Dispose()
@@ -376,6 +384,53 @@ public sealed class CardManagementServiceTests : IDisposable
 
     #endregion
 
+    #region キャッシュの破棄 — コミット・ロールバックの後に破棄する
+
+    /// <summary>
+    /// 成功したら、トランザクションを閉じた後でキャッシュを破棄すること
+    /// </summary>
+    /// <remarks>
+    /// tx を渡したリポジトリの書き込みは成功してもキャッシュを破棄しない（ロールバックされれば根拠が消える）。
+    /// サービスの finally が破棄しないと、登録したカードが一覧のキャッシュ（既定 TTL 60 秒）に現れない。
+    /// </remarks>
+    [Fact]
+    public async Task RegisterAsync_成功_トランザクションを閉じた後でキャッシュを破棄すること()
+    {
+        // Arrange
+        var service = CreateService(PassThroughOperationLogRepository().Object);
+        _cacheService.Invocations.Clear();
+        _invalidatedWhileTransactionOpen.Clear();
+
+        // Act
+        (await service.RegisterAsync(NewCard(TestCardIdm, "H-001"))).Should().BeTrue();
+
+        // Assert
+        _invalidatedWhileTransactionOpen.Should().NotBeEmpty("登録後の一覧に新しいカードが出るよう破棄すること")
+            .And.OnlyContain(open => open == false, "コミット前に破棄すると、ロールバックされたとき破棄した根拠が消える");
+    }
+
+    /// <summary>
+    /// 監査ログの失敗で巻き戻したときも、ロールバックの後でキャッシュを破棄すること（対の表明）
+    /// </summary>
+    [Fact]
+    public async Task UpdateAsync_監査ログの失敗で巻き戻したときも_キャッシュを破棄すること()
+    {
+        // Arrange
+        await SeedCardAsync(TestCardIdm, "H-001");
+        var before = await _cardRepository.GetByIdmAsync(TestCardIdm);
+        var service = CreateService(FailingOperationLogRepository());
+        _invalidatedWhileTransactionOpen.Clear();
+
+        // Act
+        var act = () => service.UpdateAsync(before!, CopyWith(before!, note: "変更後のメモ"));
+
+        // Assert
+        await act.Should().ThrowAsync<InvalidOperationException>();
+        _invalidatedWhileTransactionOpen.Should().NotBeEmpty().And.OnlyContain(open => open == false);
+    }
+
+    #endregion
+
     #region ヘルパー
 
     private CardManagementService CreateService(IOperationLogRepository operationLogRepository)
@@ -492,13 +547,13 @@ FROM operation_log WHERE target_table = 'ic_card' AND target_id = @idm";
         return logs;
     }
 
-    private static ICacheService CreatePassThroughCacheService()
+    private static Mock<ICacheService> CreatePassThroughCacheService()
     {
         var mock = new Mock<ICacheService>();
         mock.Setup(c => c.GetOrCreateAsync(
                 It.IsAny<string>(), It.IsAny<Func<Task<IEnumerable<IcCard>>>>(), It.IsAny<TimeSpan>()))
             .Returns((string _, Func<Task<IEnumerable<IcCard>>> factory, TimeSpan _) => factory());
-        return mock.Object;
+        return mock;
     }
 
     #endregion

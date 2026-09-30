@@ -35,6 +35,12 @@ public sealed class StaffManagementServiceTests : IDisposable
     private readonly RecordingRetryDelay _retryDelay;
     private readonly StaffRepository _staffRepository;
     private readonly OperationLogRepository _realOperationLogRepository;
+    /// <summary>
+    /// キャッシュの破棄を観測する（Issue #2156: tx を渡した書き込みは破棄しないため、サービスの finally だけが破棄する）
+    /// </summary>
+    private readonly Mock<ICacheService> _cacheService;
+    /// <summary>キャッシュを破棄した時点でトランザクションが開いていたか（破棄ごとに記録）</summary>
+    private readonly List<bool> _invalidatedWhileTransactionOpen = new();
 
     public StaffManagementServiceTests()
     {
@@ -43,9 +49,11 @@ public sealed class StaffManagementServiceTests : IDisposable
         _retryDelay = RecordingRetryDelay.AttachTo(_dbContext);
 
         _staffRepository = new StaffRepository(
-            _dbContext, CreatePassThroughCacheService(), Options.Create(new CacheOptions()),
+            _dbContext, (_cacheService = CreatePassThroughCacheService()).Object, Options.Create(new CacheOptions()),
             NullLogger<StaffRepository>.Instance);
         _realOperationLogRepository = new OperationLogRepository(_dbContext);
+        _cacheService.Setup(c => c.InvalidateByPrefix(It.IsAny<string>()))
+            .Callback(() => _invalidatedWhileTransactionOpen.Add(_dbContext.HasActiveTransactionScope));
     }
 
     public void Dispose()
@@ -293,6 +301,52 @@ public sealed class StaffManagementServiceTests : IDisposable
 
     #endregion
 
+    #region キャッシュの破棄 — コミット・ロールバックの後に破棄する
+
+    /// <summary>
+    /// 成功したら、トランザクションを閉じた後でキャッシュを破棄すること
+    /// </summary>
+    /// <remarks>
+    /// tx を渡した論理削除はキャッシュを破棄しない。サービスの finally が破棄しないと、削除した職員が
+    /// 一覧のキャッシュ（既定 TTL 60 秒）に残る。
+    /// </remarks>
+    [Fact]
+    public async Task DeleteAsync_成功_トランザクションを閉じた後でキャッシュを破棄すること()
+    {
+        // Arrange
+        await SeedStaffAsync("博多 太郎");
+        var staff = await _staffRepository.GetByIdmAsync(TestStaffIdm);
+        var service = CreateService(PassThroughOperationLogRepository().Object);
+        _invalidatedWhileTransactionOpen.Clear();
+
+        // Act
+        (await service.DeleteAsync(staff!)).Should().BeTrue();
+
+        // Assert
+        _invalidatedWhileTransactionOpen.Should().NotBeEmpty("削除後の一覧から職員が消えるよう破棄すること")
+            .And.OnlyContain(open => open == false, "コミット前に破棄すると、ロールバックされたとき破棄した根拠が消える");
+    }
+
+    /// <summary>
+    /// 監査ログの失敗で巻き戻したときも、ロールバックの後でキャッシュを破棄すること（対の表明）
+    /// </summary>
+    [Fact]
+    public async Task RegisterAsync_監査ログの失敗で巻き戻したときも_キャッシュを破棄すること()
+    {
+        // Arrange
+        var service = CreateService(FailingOperationLogRepository());
+        _invalidatedWhileTransactionOpen.Clear();
+
+        // Act
+        var act = () => service.RegisterAsync(NewStaff("博多 太郎"));
+
+        // Assert
+        await act.Should().ThrowAsync<InvalidOperationException>();
+        _invalidatedWhileTransactionOpen.Should().NotBeEmpty().And.OnlyContain(open => open == false);
+    }
+
+    #endregion
+
     #region ヘルパー
 
     private StaffManagementService CreateService(IOperationLogRepository operationLogRepository)
@@ -372,13 +426,13 @@ FROM operation_log WHERE target_table = 'staff' AND target_id = @idm";
         return logs;
     }
 
-    private static ICacheService CreatePassThroughCacheService()
+    private static Mock<ICacheService> CreatePassThroughCacheService()
     {
         var mock = new Mock<ICacheService>();
         mock.Setup(c => c.GetOrCreateAsync(
                 It.IsAny<string>(), It.IsAny<Func<Task<IEnumerable<Staff>>>>(), It.IsAny<TimeSpan>()))
             .Returns((string _, Func<Task<IEnumerable<Staff>>> factory, TimeSpan _) => factory());
-        return mock.Object;
+        return mock;
     }
 
     #endregion
