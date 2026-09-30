@@ -26,6 +26,13 @@ namespace ICCardManager.Views
         {
             InitializeComponent();
 
+            // Issue #2150: 既定の Width（1650）は 1366px 幅の PC では画面からはみ出し、CenterScreen で
+            // 左右が切れる。保存済みの位置が無い初回起動でも画面に収まるよう、作業領域の幅で切り詰める。
+            // XAML の Width を上書きするため InitializeComponent() の後に置く（前に置くと XAML の 1650 に戻る）。
+            // WorkArea はプライマリモニターの作業領域。CenterScreen はマウスカーソルのあるモニターの中央に置くため、
+            // カーソルがプライマリより狭いモニターにあると切り詰めが足りない（既知の制限。03_画面設計書 §3.1.1a）。
+            Width = WindowLayoutCalculator.FitWidth(Width, SystemParameters.WorkArea.Width);
+
             _viewModel = viewModel;
             _settingsRepository = settingsRepository;
             DataContext = _viewModel;
@@ -264,7 +271,7 @@ namespace ICCardManager.Views
                 var height = windowSettings.Height!.Value;
 
                 // 画面外補正
-                var correctedBounds = EnsureWindowIsVisible(left, top, width, height);
+                var correctedBounds = EnsureWindowIsVisible(left, top, width, height, MinWidth, MinHeight);
                 left = correctedBounds.Left;
                 top = correctedBounds.Top;
                 width = correctedBounds.Width;
@@ -303,9 +310,11 @@ namespace ICCardManager.Views
         /// <param name="top">上端座標</param>
         /// <param name="width">幅</param>
         /// <param name="height">高さ</param>
+        /// <param name="minWidth">ウィンドウの最小幅（画面外補正で中央へ置くときに、WPF が引き上げる実際の幅を見込むため）</param>
+        /// <param name="minHeight">ウィンドウの最小高さ（同上）</param>
         /// <returns>補正後の座標・サイズ</returns>
         private static (double Left, double Top, double Width, double Height) EnsureWindowIsVisible(
-            double left, double top, double width, double height)
+            double left, double top, double width, double height, double minWidth, double minHeight)
         {
             // 仮想スクリーン領域（全モニターを含む）を取得
             var virtualLeft = SystemParameters.VirtualScreenLeft;
@@ -324,6 +333,11 @@ namespace ICCardManager.Views
 
             if (isVisible)
             {
+                // Issue #2150: 最小幅 1400 の時代に保存された幅は 1366px 幅の PC でも必ず 1400 以上なので、
+                // そのまま復元すると右端がはみ出す。仮想スクリーンの幅で切り詰める（プライマリの作業領域で
+                // 切り詰めると、より広いセカンダリモニターに置いていたウィンドウまで狭めてしまう）。
+                width = WindowLayoutCalculator.FitWidth(width, virtualWidth);
+
                 // ウィンドウが見える位置にあれば、そのまま返す
                 // ただし、ウィンドウが画面端からはみ出している場合は調整
                 if (left < virtualLeft)
@@ -346,25 +360,11 @@ namespace ICCardManager.Views
                 return (left, top, width, height);
             }
 
-            // 画面外の場合、プライマリモニターの中央に配置
-            var primaryWidth = SystemParameters.PrimaryScreenWidth;
-            var primaryHeight = SystemParameters.PrimaryScreenHeight;
-            var workAreaWidth = SystemParameters.WorkArea.Width;
-            var workAreaHeight = SystemParameters.WorkArea.Height;
-
-            // ウィンドウサイズがモニターより大きい場合は調整
-            if (width > workAreaWidth)
-            {
-                width = workAreaWidth * 0.9;
-            }
-            if (height > workAreaHeight)
-            {
-                height = workAreaHeight * 0.9;
-            }
-
-            // 作業領域の中央に配置
-            left = (workAreaWidth - width) / 2;
-            top = (workAreaHeight - height) / 2;
+            // 画面外の場合、プライマリモニターの作業領域の中央に配置
+            // Issue #2150: 9 割へ縮めた幅は最小幅で引き上げられ得るため、実際に適用される長さで中央を計算する
+            var workArea = SystemParameters.WorkArea;
+            (left, width) = WindowLayoutCalculator.FitAndCenter(width, minWidth, workArea.Left, workArea.Width);
+            (top, height) = WindowLayoutCalculator.FitAndCenter(height, minHeight, workArea.Top, workArea.Height);
 
 #if DEBUG
             System.Diagnostics.Debug.WriteLine($"[MainWindow] 画面外補正を適用: Left={left}, Top={top}");

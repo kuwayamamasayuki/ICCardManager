@@ -946,7 +946,9 @@ namespace ICCardManager
             // Small(12)→340, Medium(14)→350, Large(16)→360, ExtraLarge(20)→380
             var sidebarWidth = Math.Round(350 + (baseFontSize - 14) * 5);
             // Issue #663: ウィンドウ最小幅はフォントサイズに関係なく固定 愛称追加に伴い拡大（1400px）
-            const double windowMinWidth = 1400;
+            // Issue #2150: ただし作業領域より広くはしない（1366px 幅の PC でサイドバーが画面外に出るため）
+            var windowMinWidth = WindowLayoutCalculator.ComputeMinWidth(
+                WindowLayoutCalculator.PreferredMinWidth, SystemParameters.WorkArea.Width);
 
             // Issue #1273: トースト通知のサイズをフォントサイズに応じて動的計算。
             // 計算ロジックは ToastLayoutCalculator（純粋関数）に集約してテスト容易性を確保。
