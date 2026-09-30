@@ -44,7 +44,8 @@ public class DashboardServiceTests
         IEnumerable<IcCard> cards,
         Dictionary<string, (int Balance, DateTime? LastUsageDate)>? balances = null,
         IEnumerable<Staff>? staff = null,
-        int warningBalance = 1000)
+        int warningBalance = 1000,
+        Dictionary<string, DateTime>? lastUsageDates = null)
     {
         _settingsRepositoryMock
             .Setup(s => s.GetAppSettingsAsync())
@@ -53,6 +54,9 @@ public class DashboardServiceTests
         _ledgerRepositoryMock
             .Setup(l => l.GetAllLatestBalancesAsync())
             .ReturnsAsync(balances ?? new Dictionary<string, (int, DateTime?)>());
+        _ledgerRepositoryMock
+            .Setup(l => l.GetAllLastUsageDatesAsync())
+            .ReturnsAsync(lastUsageDates ?? new Dictionary<string, DateTime>());
         _staffRepositoryMock
             .Setup(s => s.GetAllAsync())
             .ReturnsAsync((staff ?? Enumerable.Empty<Staff>()).ToList());
@@ -68,13 +72,19 @@ public class DashboardServiceTests
         {
             new IcCard { CardIdm = "0102030405060708", CardType = "はやかけん", CardNumber = "H-001", IsLent = true, LastLentStaff = "STAFF00000000001" }
         };
+        // Issue #2153: 残高側の「最新レコード日」と最終利用日の取得元に別の日付を置き、
+        // 最終利用日が後者から採られることを結果から読めるようにする。
         var balances = new Dictionary<string, (int, DateTime?)>
         {
-            ["0102030405060708"] = (5000, new DateTime(2026, 3, 15))
+            ["0102030405060708"] = (5000, new DateTime(2026, 3, 20))
+        };
+        var lastUsageDates = new Dictionary<string, DateTime>
+        {
+            ["0102030405060708"] = new DateTime(2026, 3, 15)
         };
         var staff = new[] { new Staff { StaffIdm = "STAFF00000000001", Name = "山田太郎" } };
 
-        SetupRepositories(cards, balances, staff, warningBalance: 1000);
+        SetupRepositories(cards, balances, staff, warningBalance: 1000, lastUsageDates: lastUsageDates);
 
         // Act
         var result = await _service.BuildDashboardAsync(DashboardSortOrder.CardName);
@@ -86,21 +96,22 @@ public class DashboardServiceTests
         item.CardType.Should().Be("はやかけん");
         item.CardNumber.Should().Be("H-001");
         item.CurrentBalance.Should().Be(5000);
-        item.LastUsageDate.Should().Be(new DateTime(2026, 3, 15));
+        item.LastUsageDate.Should().Be(new DateTime(2026, 3, 15),
+            "最終利用日は利用実績の最終日（GetAllLastUsageDatesAsync）から採り、残高側の最新レコード日は使わない");
         item.IsLent.Should().BeTrue();
         item.LentStaffName.Should().Be("山田太郎", "貸出中の場合は職員名が解決される");
         result.WarningBalance.Should().Be(1000);
     }
 
     [Fact]
-    public async Task BuildDashboardAsync_balancesに該当キーがない場合は残高0最終利用日nullになること()
+    public async Task BuildDashboardAsync_残高と最終利用日の辞書に該当キーがない場合は残高0最終利用日nullになること()
     {
         // Arrange
         var cards = new[]
         {
             new IcCard { CardIdm = "MISSING_BALANCE_KEY", CardType = "nimoca", CardNumber = "N-001" }
         };
-        SetupRepositories(cards); // balances は空
+        SetupRepositories(cards); // balances・lastUsageDates とも空
 
         // Act
         var result = await _service.BuildDashboardAsync(DashboardSortOrder.CardName);
@@ -108,7 +119,7 @@ public class DashboardServiceTests
         // Assert
         result.Items.Should().HaveCount(1);
         result.Items[0].CurrentBalance.Should().Be(0, "balances辞書にキーがない場合は0にフォールバック");
-        result.Items[0].LastUsageDate.Should().BeNull("balances辞書にキーがない場合はnullにフォールバック");
+        result.Items[0].LastUsageDate.Should().BeNull("最終利用日の辞書にキーがない場合（利用実績なし）はnull");
     }
 
     [Fact]
@@ -409,8 +420,9 @@ public class DashboardServiceTests
     }
 
     /// <summary>
-    /// Issue #1261: LastUsageDate はカードごとに独立して balances 辞書から引き継がれること。
+    /// Issue #1261: LastUsageDate はカードごとに独立して引き継がれること。
     /// 他カードの日付が混入したり、最新一枚に集約されたりしない。
+    /// Issue #2153: 取得元は最終利用日の辞書（利用実績の最終日）。残高側の最新レコード日とは別の値を置く。
     /// </summary>
     [Fact]
     public async Task BuildDashboardAsync_LastUsageDate_カードごとに独立して反映される()
@@ -424,11 +436,16 @@ public class DashboardServiceTests
         };
         var balances = new Dictionary<string, (int, DateTime?)>
         {
-            ["CCCC000000000001"] = (1000, new DateTime(2026, 1, 15)),
-            ["CCCC000000000002"] = (2000, new DateTime(2026, 4, 1)),
-            ["CCCC000000000003"] = (3000, null), // 履歴なし
+            ["CCCC000000000001"] = (1000, new DateTime(2026, 1, 20)),
+            ["CCCC000000000002"] = (2000, new DateTime(2026, 4, 5)),
+            ["CCCC000000000003"] = (3000, new DateTime(2026, 5, 1)), // 新規購入だけのカード（利用実績なし）
         };
-        SetupRepositories(cards, balances);
+        var lastUsageDates = new Dictionary<string, DateTime>
+        {
+            ["CCCC000000000001"] = new DateTime(2026, 1, 15),
+            ["CCCC000000000002"] = new DateTime(2026, 4, 1),
+        };
+        SetupRepositories(cards, balances, lastUsageDates: lastUsageDates);
 
         // Act
         var result = await _service.BuildDashboardAsync(DashboardSortOrder.CardName);
@@ -437,7 +454,9 @@ public class DashboardServiceTests
         var byCard = result.Items.ToDictionary(i => i.CardIdm);
         byCard["CCCC000000000001"].LastUsageDate.Should().Be(new DateTime(2026, 1, 15));
         byCard["CCCC000000000002"].LastUsageDate.Should().Be(new DateTime(2026, 4, 1));
-        byCard["CCCC000000000003"].LastUsageDate.Should().BeNull("履歴なしのカードは null");
+        byCard["CCCC000000000003"].LastUsageDate.Should().BeNull(
+            "利用実績の無いカードは、残高側に最新レコード日があっても null");
+        byCard["CCCC000000000003"].CurrentBalance.Should().Be(3000, "残額は利用実績の有無と独立して表示する");
     }
 
     /// <summary>
@@ -534,6 +553,9 @@ public class DashboardServiceTests
             .Setup(l => l.GetAllLatestBalancesAsync())
             .Returns(() => probe.TrackAsync(
                 new Dictionary<string, (int Balance, DateTime? LastUsageDate)>()));
+        _ledgerRepositoryMock
+            .Setup(l => l.GetAllLastUsageDatesAsync())
+            .Returns(() => probe.TrackAsync(new Dictionary<string, DateTime>()));
         _staffRepositoryMock
             .Setup(s => s.GetAllAsync())
             .Returns(() => probe.TrackAsync<IEnumerable<Staff>>(new List<Staff>()));

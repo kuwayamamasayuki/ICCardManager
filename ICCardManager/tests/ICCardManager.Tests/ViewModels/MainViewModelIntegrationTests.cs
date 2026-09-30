@@ -140,6 +140,9 @@ public class MainViewModelIntegrationTests
         // 既定: 全カード最新残高マップは空（DashboardService 用）
         _ledgerRepositoryMock.Setup(r => r.GetAllLatestBalancesAsync())
             .ReturnsAsync(new Dictionary<string, (int Balance, DateTime? LastUsageDate)>());
+        // 既定: 最終利用日マップは空（DashboardService 用、Issue #2153）
+        _ledgerRepositoryMock.Setup(r => r.GetAllLastUsageDatesAsync())
+            .ReturnsAsync(new Dictionary<string, DateTime>());
         // 既定: 職員一覧は空（DashboardService 用）
         _staffRepositoryMock.Setup(r => r.GetAllAsync())
             .ReturnsAsync(new List<Staff>());

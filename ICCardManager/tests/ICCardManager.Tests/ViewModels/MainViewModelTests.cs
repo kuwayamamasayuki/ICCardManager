@@ -112,6 +112,11 @@ public class MainViewModelTests : IDisposable
         _ledgerRepositoryMock.Setup(r => r.GetDetailsByLedgerIdsAsync(It.IsAny<IEnumerable<int>>()))
             .ReturnsAsync(new Dictionary<int, List<LedgerDetail>>());
 
+        // Issue #2153: DashboardService は最終利用日を GetAllLastUsageDatesAsync から取る。
+        // 未設定だと loose モックが null を返し、ダッシュボード更新が NullReferenceException で落ちる
+        _ledgerRepositoryMock.Setup(r => r.GetAllLastUsageDatesAsync())
+            .ReturnsAsync(new Dictionary<string, DateTime>());
+
         // Issue #1907: 返却後処理（HandleReturnSuccessAsync）は返却確認として履歴を自動表示するため、
         // 履歴一覧の読み込みが通る既定値を置く（未設定だと GetPagedAsync は既定のタプル (null, 0)、
         // GetMergeHistoriesAsync は null を返し、返却後処理そのものが NullReferenceException で落ちる）。
