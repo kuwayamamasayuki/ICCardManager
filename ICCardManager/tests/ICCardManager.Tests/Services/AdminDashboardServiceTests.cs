@@ -446,6 +446,37 @@ public class AdminDashboardServiceTests
         captured.Single().CardNumber.Should().Be("N-7");
     }
 
+    /// <summary>
+    /// Issue #2154: 出力状況は払戻済みを含む全カードで判定する（帳票作成画面と同じ母集団）
+    /// </summary>
+    /// <remarks>
+    /// 払戻済みを除いて渡すと、払戻済みのカードとファイル名が衝突する稼働中カードが、帳票作成画面では
+    /// 「ファイル名が重複」、ダッシュボードでは「出力済み／未出力」と食い違う（コードレビューで検出）。
+    /// 一覧に並べるのは従来どおり稼働中のカードだけ。
+    /// </remarks>
+    [Fact]
+    public async Task GetOperationStatusAsync_出力状況は払戻済みを含む全カードで判定し一覧は稼働中のカードだけにすること()
+    {
+        SetupDefaults(cards: new[] { Card(CardA, number: "H001"), Card(CardB, number: "h001", isRefunded: true) });
+        IEnumerable<ReportExportTarget> captured = null;
+        _reportExportStatusService
+            .Setup(s => s.GetStatuses(It.IsAny<IEnumerable<ReportExportTarget>>(), It.IsAny<string>(), It.IsAny<int>(), It.IsAny<int>()))
+            .Callback<IEnumerable<ReportExportTarget>, string, int, int>((t, _, __, ___) => captured = t.ToList())
+            .Returns(new List<ReportExportStatus>
+            {
+                new ReportExportStatus { CardIdm = CardA, State = ReportExportState.Unknown, IsFileNameCollision = true },
+                new ReportExportStatus { CardIdm = CardB, State = ReportExportState.Unknown, IsFileNameCollision = true },
+            });
+
+        var status = await CreateService().GetOperationStatusAsync(AsOf, AppConstants.LongTermUnreturnedDays);
+
+        captured.Select(t => t.CardIdm).Should().BeEquivalentTo(new[] { CardA, CardB });
+        captured.Single(t => t.CardIdm == CardB).IsRefunded.Should().BeTrue("払戻日で母集団を絞るのは衝突判定の側");
+        var card = status.Cards.Should().ContainSingle().Subject;
+        card.CardIdm.Should().Be(CardA);
+        card.ReportStateText.Should().Be("判定不可（ファイル名が重複）");
+    }
+
     #endregion
 
     #region GetOperationStatusAsync — 職員名と注意フラグ

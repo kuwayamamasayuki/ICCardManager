@@ -49,6 +49,22 @@ namespace ICCardManager.Dtos
         /// 管理番号（ファイル名の構成要素）
         /// </summary>
         public string CardNumber { get; set; } = string.Empty;
+
+        /// <summary>
+        /// 払戻済みか（Issue #2154: 帳票ファイル名の衝突を調べる母集団の決定に使う）
+        /// </summary>
+        public bool IsRefunded { get; set; }
+
+        /// <summary>
+        /// 払戻日時（Issue #2154: 同上。払戻済みでなければ null）
+        /// </summary>
+        public DateTime? RefundedAt { get; set; }
+
+        /// <summary>
+        /// 表示用のカード名（例: "はやかけん 001"。<c>IcCard.DisplayName</c> と同じ書式）
+        /// </summary>
+        public string DisplayName =>
+            string.IsNullOrEmpty(CardNumber) ? CardType : $"{CardType} {CardNumber}";
     }
 
     /// <summary>
@@ -79,5 +95,14 @@ namespace ICCardManager.Dtos
         /// 「対象月を出力した日時」ではなく「そのカードの年度ファイルを最後に更新した日時」を表す。
         /// </remarks>
         public DateTime? LastWriteTime { get; set; }
+
+        /// <summary>
+        /// 他のカードと帳票のファイル名が同じになるため判定できないか（Issue #2154）
+        /// </summary>
+        /// <remarks>
+        /// <see cref="State"/> は <see cref="ReportExportState.Unknown"/> のまま（件数の集計は「確認できません」に含める）。
+        /// 原因が出力先フォルダではないことを表示側が区別し、「管理番号を変更する」と案内するために持つ。
+        /// </remarks>
+        public bool IsFileNameCollision { get; set; }
     }
 }

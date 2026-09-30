@@ -115,6 +115,36 @@ public class ReportExportStatusPresenterTests
         ReportExportStatusPresenter.FormatWarningAccessibilityText(warningCount).Should().BeEmpty();
     }
 
+    /// <summary>
+    /// Issue #2154: ファイル名の衝突が原因の「判定不能」は、出力先フォルダを指定し直すよう案内しない
+    /// </summary>
+    /// <remarks>
+    /// 原因が管理番号なのにフォルダの指定し直しを案内すると、実行しても解決しない指示になる（コードレビューで検出）。
+    /// </remarks>
+    [Fact]
+    public void Resolve_ファイル名の衝突は管理番号の変更へ案内すること()
+    {
+        var presentation = ReportExportStatusPresenter.Resolve(ReportExportState.Unknown, null, isFileNameCollision: true);
+
+        presentation.ShortText.Should().Be("ファイル名が重複");
+        presentation.AccessibilityText.Should().Contain("ファイル名が同じ")
+            .And.Contain("管理番号を変更してください")
+            .And.NotContain("フォルダ");
+        presentation.Icon.Should().Be(ReportExportStatusPresenter.UnknownIcon);
+    }
+
+    /// <summary>
+    /// Issue #2154 対: 衝突でない「判定不能」は従来どおり出力先フォルダを案内する
+    /// </summary>
+    [Fact]
+    public void Resolve_衝突でない判定不能は従来どおりフォルダを案内すること()
+    {
+        var presentation = ReportExportStatusPresenter.Resolve(ReportExportState.Unknown);
+
+        presentation.ShortText.Should().Be("確認できません");
+        presentation.AccessibilityText.Should().Contain("出力先フォルダ").And.NotContain("管理番号");
+    }
+
     [Fact]
     public void FormatWarningMarker_WithWarnings_ShouldShowIconAndCount()
     {

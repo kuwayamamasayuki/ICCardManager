@@ -69,7 +69,7 @@ public class ReportViewModelTests
             .ReturnsAsync((MonthlyReportData)null);
         _ledgerRepositoryMock.Setup(r => r.GetAllLentRecordsAsync()).ReturnsAsync(new List<Ledger>());
         var preflightChecker = new ReportPreflightChecker(
-            _preflightDataBuilderMock.Object, _ledgerRepositoryMock.Object);
+            _preflightDataBuilderMock.Object, _ledgerRepositoryMock.Object, new ReportFileNameFactory());
 
         // Issue #1691: 出力済み / 未出力チェックリスト。
         // 既定では出力先フォルダを走査できない状態（=判定不能）にし、
@@ -160,7 +160,7 @@ public class ReportViewModelTests
             _navigationServiceMock.Object,
             _settingsRepositoryMock.Object,
             _safeFileLauncherMock.Object,
-            new ReportPreflightChecker(_preflightDataBuilderMock.Object, _ledgerRepositoryMock.Object),
+            new ReportPreflightChecker(_preflightDataBuilderMock.Object, _ledgerRepositoryMock.Object, new ReportFileNameFactory()),
             _exportStatusServiceMock.Object,
             new FixedSystemClock(new DateTime(2026, 1, 15, 9, 0, 0)));
 

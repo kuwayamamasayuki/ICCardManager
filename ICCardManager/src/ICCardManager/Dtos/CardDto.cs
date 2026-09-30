@@ -154,7 +154,15 @@ namespace ICCardManager.Dtos
         [ObservableProperty]
         private int _preflightWarningCount;
 
+        /// <summary>
+        /// 他のカードと帳票のファイル名が同じになるため出力状況を判定できないか（Issue #2154）
+        /// </summary>
+        [ObservableProperty]
+        private bool _exportIsFileNameCollision;
+
         partial void OnExportStateChanged(ReportExportState value) => NotifyExportDisplayChanged();
+
+        partial void OnExportIsFileNameCollisionChanged(bool value) => NotifyExportDisplayChanged();
 
         partial void OnExportLastWriteTimeChanged(DateTime? value) => NotifyExportDisplayChanged();
 
@@ -177,19 +185,19 @@ namespace ICCardManager.Dtos
         /// 表示用: 出力状況のアイコン（Issue #1691）
         /// </summary>
         public string ExportStateIcon =>
-            ReportExportStatusPresenter.Resolve(ExportState, ExportLastWriteTime).Icon;
+            ReportExportStatusPresenter.Resolve(ExportState, ExportLastWriteTime, ExportIsFileNameCollision).Icon;
 
         /// <summary>
         /// 表示用: 出力状況のテキスト（Issue #1691）
         /// </summary>
         public string ExportStateText =>
-            ReportExportStatusPresenter.Resolve(ExportState, ExportLastWriteTime).ShortText;
+            ReportExportStatusPresenter.Resolve(ExportState, ExportLastWriteTime, ExportIsFileNameCollision).ShortText;
 
         /// <summary>
         /// スクリーンリーダー向けの出力状況説明文（Issue #1691）
         /// </summary>
         public string ExportStateAccessibilityText =>
-            ReportExportStatusPresenter.Resolve(ExportState, ExportLastWriteTime).AccessibilityText;
+            ReportExportStatusPresenter.Resolve(ExportState, ExportLastWriteTime, ExportIsFileNameCollision).AccessibilityText;
 
         /// <summary>
         /// 出力状況の文字色として使うリソースキー名（Issue #1691）
@@ -199,7 +207,7 @@ namespace ICCardManager.Dtos
         /// ブラシへ解決する（Issue #1392 / #1461）。
         /// </remarks>
         public string ExportStateBrushKey =>
-            ReportExportStatusPresenter.Resolve(ExportState, ExportLastWriteTime).BrushKey;
+            ReportExportStatusPresenter.Resolve(ExportState, ExportLastWriteTime, ExportIsFileNameCollision).BrushKey;
 
         /// <summary>
         /// プリフライト警告があるか（Issue #1691）

@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using ICCardManager.Common;
 using ICCardManager.Dtos;
 
@@ -52,8 +53,32 @@ namespace ICCardManager.Services
             var fiscalYear = ReportService.GetFiscalYear(year, month);
             var sheetName = ReportService.GetMonthSheetName(month);
 
-            foreach (var target in targets)
+            var targetList = targets.ToList();
+
+            // Issue #2154: 他のカードと同じ年度ファイル名になるカードは「確認できません」にする。
+            // そのファイルに対象月のシートがあっても、どちらのカードの帳票なのかをファイル名から
+            // 決められない。「出力済み」と表示すると、実際には上書きされて存在しない帳票を
+            // 出力済みとして扱わせる（一括作成もこれらのカードの帳票は作らない）。
+            // 母集団は呼び出し元が渡した一覧そのもの（払戻済みを含む未削除の全カードを渡すこと）。
+            // 年度ファイルを持ち得ないカードの除外は Find が行う
+            var collisions = ReportFileNameCollisions.Find(
+                targetList,
+                fiscalYear,
+                (cardType, cardNumber) => _fileNameFactory.GetFiscalYearFileName(cardType, cardNumber, fiscalYear));
+
+            foreach (var target in targetList)
             {
+                if (target != null && collisions.ContainsKey(target.CardIdm))
+                {
+                    statuses.Add(new ReportExportStatus
+                    {
+                        CardIdm = target.CardIdm,
+                        State = ReportExportState.Unknown,
+                        IsFileNameCollision = true,
+                    });
+                    continue;
+                }
+
                 statuses.Add(GetStatus(target, outputFolder, isFolderReadable, fiscalYear, sheetName));
             }
 

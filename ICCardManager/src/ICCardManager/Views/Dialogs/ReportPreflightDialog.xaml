@@ -100,7 +100,7 @@
 
         <!-- 警告0件時の案内（参照モードのみ到達する） -->
         <TextBlock Grid.Row="1"
-                   Text="繰越額・残額・未返却カードのいずれにも問題は見つかりませんでした。"
+                   Text="繰越額・残額・未返却カード・帳票のファイル名のいずれにも問題は見つかりませんでした。"
                    TextWrapping="Wrap"
                    VerticalAlignment="Top"
                    Margin="4,8,0,0"

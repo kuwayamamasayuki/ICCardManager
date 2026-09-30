@@ -4,6 +4,7 @@ using System.Linq;
 using System.Threading.Tasks;
 using FluentAssertions;
 using ICCardManager.Data.Repositories;
+using ICCardManager.Dtos;
 using ICCardManager.Models;
 using ICCardManager.Services;
 using Moq;
@@ -21,6 +22,9 @@ namespace ICCardManager.Tests.Services
     public class ReportPreflightCheckerTests
     {
         private const string TestCardIdm = "0123456789ABCDEF";
+
+        /// <summary>ファイル名の衝突を調べる母集団に、対象カード以外を含めない（Issue #2154 以前の検査だけを見るテスト用）</summary>
+        private static readonly IReadOnlyList<ReportExportTarget> NoOtherCards = Array.Empty<ReportExportTarget>();
 
         #region テストデータ構築ヘルパー
 
@@ -583,7 +587,17 @@ namespace ICCardManager.Tests.Services
             total.CumulativeTotal.Balance = 3400;
             warnings.AddRange(Check(total).Warnings.Where(w => w.IssueType == ReportPreflightIssueType.TotalMismatch));
 
-            warnings.Select(w => w.IssueType).Distinct().Should().HaveCount(5, "5種別すべてを網羅していること");
+            // Issue #2154: ファイル名の衝突（どの 2 枚でも同じ名前を返す生成関数で起こす）
+            var collision = new ReportPreflightResult();
+            CreateCheckerWithFileName(_ => "物品出納簿_同じ名前_2026年度.xlsx").CheckFileNameCollisions(
+                new[] { CreateCard() },
+                new[] { new ReportExportTarget { CardIdm = "FEDCBA9876543210", CardType = "nimoca", CardNumber = "002" } },
+                2026, 7, collision);
+            warnings.AddRange(collision.Warnings);
+
+            // 種別を足したのに文言を検証していない状態を検出する（error-messages.md「対象の網羅」）
+            warnings.Select(w => w.IssueType).Distinct().Should().HaveCount(
+                Enum.GetValues(typeof(ReportPreflightIssueType)).Length, "全種別を網羅していること");
 
             foreach (var warning in warnings)
             {
@@ -594,6 +608,137 @@ namespace ICCardManager.Tests.Services
                     $"「{warning.DetailText}」は行動指示で終わっていない");
                 warning.CardIdm.Should().Be(TestCardIdm);
             }
+        }
+
+        #endregion
+
+        #region ファイル名の衝突（Issue #2154）
+
+        /// <summary>
+        /// ファイル名の生成だけを差し替えたチェッカーを作る（帳票データ・貸出中レコードは使わない）
+        /// </summary>
+        private static ReportPreflightChecker CreateCheckerWithFileName(System.Func<string, string> fileNameOfCardNumber)
+        {
+            var factoryMock = new Mock<IReportFileNameFactory>();
+            factoryMock
+                .Setup(f => f.GetFiscalYearFileName(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<int>()))
+                .Returns((string _, string cardNumber, int _) => fileNameOfCardNumber(cardNumber));
+            return new ReportPreflightChecker(
+                new Mock<IReportDataBuilder>().Object, new Mock<ILedgerRepository>().Object, factoryMock.Object);
+        }
+
+        /// <summary>
+        /// 対象カードごとに、整合の取れた帳票データを返すチェッカーで CheckAsync を実行する
+        /// </summary>
+        private static async Task<ReportPreflightResult> CheckAsyncWithCards(
+            IEnumerable<IcCard> targetCards, IEnumerable<ReportExportTarget> population)
+        {
+            var targets = targetCards.ToList();
+            var builderMock = new Mock<IReportDataBuilder>();
+            foreach (var card in targets)
+            {
+                var data = CreateConsistentJulyData();
+                data.Card = card;
+                builderMock.Setup(b => b.BuildAsync(card.CardIdm, 2026, 7)).ReturnsAsync(data);
+            }
+
+            var ledgerRepositoryMock = new Mock<ILedgerRepository>();
+            ledgerRepositoryMock.Setup(r => r.GetAllLentRecordsAsync()).ReturnsAsync(new List<Ledger>());
+
+            var checker = new ReportPreflightChecker(
+                builderMock.Object, ledgerRepositoryMock.Object, new ReportFileNameFactory());
+            return await checker.CheckAsync(targets.Select(c => c.CardIdm), 2026, 7, population);
+        }
+
+        private static IcCard Card(string idm, string number) =>
+            new IcCard { CardIdm = idm, CardType = "はやかけん", CardNumber = number };
+
+        private static ReportExportTarget Target(string idm, string number) =>
+            new ReportExportTarget { CardIdm = idm, CardType = "はやかけん", CardNumber = number };
+
+        /// <summary>
+        /// 欠陥を突く側: 管理番号 A*B と A?B の 2 枚で作成すると、両方に衝突の警告が出る
+        /// </summary>
+        [Fact]
+        public async Task CheckAsync_記号が同じ置換文字に落ちる2枚_両方に衝突の警告が出ること()
+        {
+            var result = await CheckAsyncWithCards(
+                new[] { Card("0000000000000001", "A*B"), Card("0000000000000002", "A?B") },
+                NoOtherCards);
+
+            var collisions = result.Warnings
+                .Where(w => w.IssueType == ReportPreflightIssueType.FileNameCollision)
+                .ToList();
+            collisions.Select(w => w.CardIdm).Should().BeEquivalentTo(new[] { "0000000000000001", "0000000000000002" });
+
+            // 相手のカードを名指しし、書き込み先のファイル名を示すこと
+            var first = collisions.Single(w => w.CardIdm == "0000000000000001");
+            first.DisplayText.Should().Contain("はやかけん A*B").And.Contain("「はやかけん A?B」");
+            first.RowSummary.Should().Be(new ReportFileNameFactory().GetFiscalYearFileName(
+                "はやかけん", "A*B", ReportService.GetFiscalYear(2026, 7)));
+        }
+
+        /// <summary>
+        /// 欠陥を突く側: 大文字・小文字だけが違う管理番号（画面から登録できる形）も衝突として警告する
+        /// </summary>
+        [Fact]
+        public async Task CheckAsync_管理番号の大文字小文字だけが違う2枚_衝突の警告が出ること()
+        {
+            var result = await CheckAsyncWithCards(
+                new[] { Card("0000000000000001", "H001"), Card("0000000000000002", "h001") },
+                NoOtherCards);
+
+            result.Warnings.Where(w => w.IssueType == ReportPreflightIssueType.FileNameCollision)
+                .Should().HaveCount(2);
+        }
+
+        /// <summary>
+        /// 正当な挙動を塞いでいない側: 通常の管理番号では衝突の警告が出ない
+        /// </summary>
+        [Fact]
+        public async Task CheckAsync_通常の管理番号_衝突の警告が出ないこと()
+        {
+            var result = await CheckAsyncWithCards(
+                new[] { Card("0000000000000001", "H-001"), Card("0000000000000002", "H-002") },
+                new[] { Target("0000000000000003", "H-003") });
+
+            result.HasWarnings.Should().BeFalse();
+        }
+
+        /// <summary>
+        /// 欠陥を突く側: 今回選んでいないカードと同じファイル名でも警告する（その年度ファイルへ書き込むため）
+        /// </summary>
+        /// <remarks>
+        /// 母集団にしかいないカードは今回作成しないので、警告は作成対象のカードにだけ付く。
+        /// </remarks>
+        [Fact]
+        public async Task CheckAsync_選んでいないカードと衝突_作成対象にだけ警告が出ること()
+        {
+            var result = await CheckAsyncWithCards(
+                new[] { Card("0000000000000001", "H001") },
+                new[] { Target("0000000000000001", "H001"), Target("0000000000000002", "h001") });
+
+            var warning = result.Warnings.Should().ContainSingle().Subject;
+            warning.IssueType.Should().Be(ReportPreflightIssueType.FileNameCollision);
+            warning.CardIdm.Should().Be("0000000000000001");
+            warning.DisplayText.Should().Contain("「はやかけん h001」");
+        }
+
+        /// <summary>
+        /// 対象カードは帳票データを組み立てたときの値（DB の最新値）で比べ、母集団にある古い値とは比べない
+        /// </summary>
+        /// <remarks>
+        /// 画面を開いた後に管理番号を h001 から H-010 へ直した場合、画面の一覧（母集団）には古い h001 が
+        /// 残っている。古い値のまま比べると、直したのに自分の古い姿と相手の衝突を報告し続ける。
+        /// </remarks>
+        [Fact]
+        public async Task CheckAsync_母集団に対象カードの古い値があっても最新値で比べること()
+        {
+            var result = await CheckAsyncWithCards(
+                new[] { Card("0000000000000001", "H-010") },
+                new[] { Target("0000000000000001", "h001"), Target("0000000000000002", "H001") });
+
+            result.HasWarnings.Should().BeFalse();
         }
 
         #endregion
@@ -624,9 +769,9 @@ namespace ICCardManager.Tests.Services
             ledgerRepositoryMock.Setup(r => r.GetAllLentRecordsAsync())
                 .ReturnsAsync(new List<Ledger> { CreateLentRecord(new DateTime(2026, 6, 28)) });
 
-            var checker = new ReportPreflightChecker(builderMock.Object, ledgerRepositoryMock.Object);
+            var checker = new ReportPreflightChecker(builderMock.Object, ledgerRepositoryMock.Object, new ReportFileNameFactory());
 
-            var result = await checker.CheckAsync(new[] { TestCardIdm, secondIdm }, 2026, 7);
+            var result = await checker.CheckAsync(new[] { TestCardIdm, secondIdm }, 2026, 7, NoOtherCards);
 
             result.HasWarnings.Should().BeTrue();
             result.Warnings.Should().Contain(w => w.CardIdm == TestCardIdm && w.IssueType == ReportPreflightIssueType.UnreturnedAcrossMonth);
@@ -649,9 +794,9 @@ namespace ICCardManager.Tests.Services
             var ledgerRepositoryMock = new Mock<ILedgerRepository>();
             ledgerRepositoryMock.Setup(r => r.GetAllLentRecordsAsync()).ReturnsAsync(new List<Ledger>());
 
-            var checker = new ReportPreflightChecker(builderMock.Object, ledgerRepositoryMock.Object);
+            var checker = new ReportPreflightChecker(builderMock.Object, ledgerRepositoryMock.Object, new ReportFileNameFactory());
 
-            var result = await checker.CheckAsync(new[] { TestCardIdm }, 2026, 7);
+            var result = await checker.CheckAsync(new[] { TestCardIdm }, 2026, 7, NoOtherCards);
 
             result.HasWarnings.Should().BeFalse();
         }
@@ -665,9 +810,9 @@ namespace ICCardManager.Tests.Services
             var builderMock = new Mock<IReportDataBuilder>();
             var ledgerRepositoryMock = new Mock<ILedgerRepository>();
 
-            var checker = new ReportPreflightChecker(builderMock.Object, ledgerRepositoryMock.Object);
+            var checker = new ReportPreflightChecker(builderMock.Object, ledgerRepositoryMock.Object, new ReportFileNameFactory());
 
-            var result = await checker.CheckAsync(new string[0], 2026, 7);
+            var result = await checker.CheckAsync(new string[0], 2026, 7, NoOtherCards);
 
             result.HasWarnings.Should().BeFalse();
             ledgerRepositoryMock.Verify(r => r.GetAllLentRecordsAsync(), Times.Never);
@@ -687,9 +832,9 @@ namespace ICCardManager.Tests.Services
             var ledgerRepositoryMock = new Mock<ILedgerRepository>();
             ledgerRepositoryMock.Setup(r => r.GetAllLentRecordsAsync()).ReturnsAsync(new List<Ledger>());
 
-            var checker = new ReportPreflightChecker(builderMock.Object, ledgerRepositoryMock.Object);
+            var checker = new ReportPreflightChecker(builderMock.Object, ledgerRepositoryMock.Object, new ReportFileNameFactory());
 
-            await checker.CheckAsync(new[] { TestCardIdm, TestCardIdm }, 2026, 7);
+            await checker.CheckAsync(new[] { TestCardIdm, TestCardIdm }, 2026, 7, NoOtherCards);
 
             builderMock.Verify(b => b.BuildAsync(TestCardIdm, 2026, 7), Times.Once);
         }

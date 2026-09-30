@@ -75,7 +75,10 @@ namespace ICCardManager.Services
             // Issue #1452: 同一の SQLiteConnection 上で SQLiteCommand が並列実行されると
             // SQLITE_MISUSE 不定動作の原因となるため、リポジトリ呼び出しは直列化する。
             var settings = await _settingsRepository.GetAppSettingsAsync().ConfigureAwait(false);
-            var cards = FilterActiveCards(await _cardRepository.GetAllAsync().ConfigureAwait(false));
+            // Issue #2154: 帳票の出力状況は払戻済みを含む全カードで判定する（帳票ファイル名の衝突は
+            // 払戻済みのカードとの間でも起き、帳票作成画面と同じ母集団で判定しないと表示が食い違う）
+            var allCards = await _cardRepository.GetAllAsync().ConfigureAwait(false);
+            var cards = FilterActiveCards(allCards);
             var lentRecords = await _ledgerRepository.GetAllLentRecordsAsync().ConfigureAwait(false);
             var balances = await _ledgerRepository.GetAllLatestBalancesAsync().ConfigureAwait(false);
             var lastUsageDates = await _ledgerRepository.GetAllLastUsageDatesAsync().ConfigureAwait(false);
@@ -83,13 +86,23 @@ namespace ICCardManager.Services
 
             // Issue #1691: 帳票の出力状況は出力先フォルダのファイル走査（同期処理）で判定するため、
             // UI スレッドを塞がないよう Task.Run にオフロードする。
-            var targets = cards
-                .Select(c => new ReportExportTarget { CardIdm = c.CardIdm, CardType = c.CardType, CardNumber = c.CardNumber })
+            var targets = (allCards ?? Enumerable.Empty<IcCard>())
+                .Where(c => c != null)
+                .Select(c => new ReportExportTarget
+                {
+                    CardIdm = c.CardIdm,
+                    CardType = c.CardType,
+                    CardNumber = c.CardNumber,
+                    IsRefunded = c.IsRefunded,
+                    RefundedAt = c.RefundedAt,
+                })
                 .ToList();
             var reportStatuses = await Task.Run(
                 () => _reportExportStatusService.GetStatuses(targets, settings.ReportOutputFolder, asOf.Year, asOf.Month))
                 .ConfigureAwait(false);
-            var reportStateByCard = reportStatuses.ToDictionary(s => s.CardIdm, s => s.State);
+            var reportStatusByCard = reportStatuses
+                .GroupBy(s => s.CardIdm)
+                .ToDictionary(g => g.Key, g => g.First());
 
             var latestLentByCard = BuildLatestLentRecordMap(lentRecords);
 
@@ -134,9 +147,10 @@ namespace ICCardManager.Services
                     CurrentBalance = balance,
                     // 境界（「以下」）の判定は BalanceWarningPolicy に一本化する（Issue #1998）
                     IsBalanceWarning = BalanceWarningPolicy.IsLowBalance(balance, settings.WarningBalance),
-                    ReportState = reportStateByCard.TryGetValue(card.CardIdm, out var state)
-                        ? state
+                    ReportState = reportStatusByCard.TryGetValue(card.CardIdm, out var reportStatus)
+                        ? reportStatus.State
                         : ReportExportState.Unknown,
+                    IsReportFileNameCollision = reportStatus?.IsFileNameCollision ?? false,
                     LastUsageDate = lastUsageDate
                 });
             }

@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
 using ICCardManager.Data.Repositories;
+using ICCardManager.Dtos;
 using ICCardManager.Models;
 using System.Globalization;
 
@@ -33,13 +34,27 @@ namespace ICCardManager.Services
     {
         private readonly IReportDataBuilder _reportDataBuilder;
         private readonly ILedgerRepository _ledgerRepository;
+        private readonly IReportFileNameFactory _fileNameFactory;
 
+        /// <summary>
+        /// コンストラクタ
+        /// </summary>
+        /// <param name="reportDataBuilder">帳票データの組み立て</param>
+        /// <param name="ledgerRepository">貸出中レコードの取得</param>
+        /// <param name="fileNameFactory">
+        /// 帳票ファイル名の生成（Issue #2154: ファイル名の衝突検出に使う）。
+        /// <b>省略可能にしない</b> — 既定値で組み立てると組織設定の書式（<c>ReportLayout.FileNameFormat</c>）を
+        /// 無視した名前で衝突を判定することになり、実際に書かれるファイル名と食い違う（#1820）。
+        /// </param>
         public ReportPreflightChecker(
             IReportDataBuilder reportDataBuilder,
-            ILedgerRepository ledgerRepository)
+            ILedgerRepository ledgerRepository,
+            IReportFileNameFactory fileNameFactory)
         {
             _reportDataBuilder = reportDataBuilder;
             _ledgerRepository = ledgerRepository;
+            _fileNameFactory = fileNameFactory
+                ?? throw new ArgumentNullException(nameof(fileNameFactory));
         }
 
         /// <summary>
@@ -48,9 +63,15 @@ namespace ICCardManager.Services
         /// <param name="cardIdms">対象カードのIDm一覧</param>
         /// <param name="year">対象年</param>
         /// <param name="month">対象月（1-12）</param>
+        /// <param name="fileNamePopulation">
+        /// 帳票ファイル名の衝突を調べる母集団（Issue #2154）。帳票作成画面に並ぶ全カードを渡す。
+        /// 対象カードだけと比べると、今回選んでいないカードの年度ファイルへ書き込む衝突を見落とす
+        /// （<see cref="ReportFileNameCollisions"/>）。対象カードはここに含まれていなくても比較に加える。
+        /// </param>
         /// <returns>検出された警告を含むチェック結果</returns>
         public async Task<ReportPreflightResult> CheckAsync(
-            IEnumerable<string> cardIdms, int year, int month)
+            IEnumerable<string> cardIdms, int year, int month,
+            IEnumerable<ReportExportTarget> fileNamePopulation)
         {
             var result = new ReportPreflightResult();
             if (cardIdms == null) return result;
@@ -65,6 +86,7 @@ namespace ICCardManager.Services
                 .GroupBy(l => l.CardIdm)
                 .ToDictionary(g => g.Key, g => g.OrderBy(l => l.Date).First());
 
+            var checkedCards = new List<IcCard>();
             foreach (var cardIdm in targetIdms)
             {
                 var reportData = await _reportDataBuilder.BuildAsync(cardIdm, year, month).ConfigureAwait(false);
@@ -74,11 +96,92 @@ namespace ICCardManager.Services
                     continue;
                 }
 
+                checkedCards.Add(reportData.Card);
                 lentByCard.TryGetValue(cardIdm, out var lentRecord);
                 CheckReportData(reportData, lentRecord, result);
             }
 
+            CheckFileNameCollisions(checkedCards, fileNamePopulation, year, month, result);
+
             return result;
+        }
+
+        /// <summary>
+        /// 他のカードと同じ帳票ファイル名になるカードを検出する（Issue #2154）
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// ファイル名の組み立ては単射ではない（ファイル名に使えない文字は <c>_</c> に置き換わり、
+        /// Windows は英字の大文字・小文字を区別しない）。同じ名前になった 2 枚は同じ年度ファイルへ書かれ、
+        /// 後から書いた方が先の月シートを上書きする。出力状況の一覧はファイル名とシート名で判定するため
+        /// 両方とも「出力済み」に見え、欠落に気付けない。
+        /// </para>
+        /// <para>
+        /// 帳票データの検証（<see cref="CheckReportData"/>）と違い、帳票の中身ではなく<b>書き込み先</b>の
+        /// 問題なので、年月によらず同じ組が毎回報告される。一括作成は衝突するカードの帳票を作らない
+        /// （<c>ReportViewModel.CreateReportAsync</c>）ため、文言は「このまま作成するとどうなるか」まで述べる。
+        /// </para>
+        /// <para>
+        /// 対象カードは、帳票データを組み立てたときのカード（DB の最新値）で比べる。母集団側に同じ IDm が
+        /// あれば、それは画面を開いたときの値なので置き換える。
+        /// </para>
+        /// </remarks>
+        /// <param name="checkedCards">帳票データを組み立てられた対象カード</param>
+        /// <param name="population">比較の母集団（帳票作成画面に並ぶ全カード）</param>
+        /// <param name="year">対象年</param>
+        /// <param name="month">対象月</param>
+        /// <param name="result">検出結果の追加先</param>
+        internal void CheckFileNameCollisions(
+            IReadOnlyList<IcCard> checkedCards,
+            IEnumerable<ReportExportTarget> population,
+            int year,
+            int month,
+            ReportPreflightResult result)
+        {
+            if (checkedCards.Count == 0) return;
+
+            var targets = checkedCards
+                .Select(c => new ReportExportTarget
+                {
+                    CardIdm = c.CardIdm,
+                    CardType = c.CardType,
+                    CardNumber = c.CardNumber,
+                })
+                .ToList();
+            var targetIdms = new HashSet<string>(targets.Select(t => t.CardIdm));
+
+            var comparison = targets
+                .Concat((population ?? Enumerable.Empty<ReportExportTarget>())
+                    .Where(c => c != null && !targetIdms.Contains(c.CardIdm)))
+                .ToList();
+
+            var fiscalYear = ReportService.GetFiscalYear(year, month);
+            var collisions = ReportFileNameCollisions.Find(
+                comparison,
+                fiscalYear,
+                (cardType, cardNumber) => _fileNameFactory.GetFiscalYearFileName(cardType, cardNumber, fiscalYear),
+                targetIdms);
+
+            foreach (var target in targets)
+            {
+                if (!collisions.TryGetValue(target.CardIdm, out var others)) continue;
+
+                var fileName = _fileNameFactory.GetFiscalYearFileName(target.CardType, target.CardNumber, fiscalYear);
+                result.Warnings.Add(new ReportPreflightWarning
+                {
+                    CardIdm = target.CardIdm,
+                    CardDisplayName = target.DisplayName,
+                    IssueType = ReportPreflightIssueType.FileNameCollision,
+                    RowSummary = fileName,
+                    DisplayText =
+                        $"⚠️ {target.DisplayName}: {ReportFileNameCollisions.FormatCardNames(others)} と帳票のファイル名が同じになります",
+                    DetailText =
+                        $"{ReportFileNameCollisions.DescribeCause(target, others)}、" +
+                        $"別のカードの帳票と同じファイル（{fileName}）に書き込まれ、先に作った帳票を上書きします。" +
+                        "このまま作成しても、このカードの帳票は作成しません。" +
+                        "カード管理画面で、管理番号を他のカードと重ならない番号（大文字と小文字の違いだけにしない）に変更してください。"
+                });
+            }
         }
 
         /// <summary>
@@ -335,7 +438,10 @@ namespace ICCardManager.Services
         CarryoverMismatch,
 
         /// <summary>月計・累計で「受入 − 払出 = 残額」が不成立</summary>
-        TotalMismatch
+        TotalMismatch,
+
+        /// <summary>他のカードと帳票のファイル名が同じになる（Issue #2154）</summary>
+        FileNameCollision
     }
 
     /// <summary>

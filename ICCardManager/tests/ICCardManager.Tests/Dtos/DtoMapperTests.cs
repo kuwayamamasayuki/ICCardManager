@@ -655,6 +655,7 @@ public class DtoMapperTests
                 [nameof(CardDto.LentStaffName)] = "ToDto の引数 staffName で渡す（上の個別テストで検証）",
                 [nameof(CardDto.ExportState)] = "帳票の出力状況で、ReportExportStatusService が設定する",
                 [nameof(CardDto.ExportLastWriteTime)] = "帳票の出力状況で、ReportExportStatusService が設定する",
+                [nameof(CardDto.ExportIsFileNameCollision)] = "帳票の出力状況（ファイル名の衝突、Issue #2154）で、ReportExportStatusService が設定する",
                 [nameof(CardDto.PreflightWarningCount)] = "帳票の事前チェック結果で、帳票画面が設定する"
             });
     }

@@ -111,7 +111,7 @@ public class ReportViewModelBulkCreationTests : IDisposable
             _navigationServiceMock.Object,
             _settingsRepositoryMock.Object,
             _safeFileLauncherMock.Object,
-            new ReportPreflightChecker(_preflightDataBuilderMock.Object, _ledgerRepositoryMock.Object),
+            new ReportPreflightChecker(_preflightDataBuilderMock.Object, _ledgerRepositoryMock.Object, new ReportFileNameFactory()),
             _exportStatusServiceMock.Object);
 
         // 既存ファイルがないフォルダを使う（上書き確認ダイアログを挟まないため）
@@ -834,6 +834,177 @@ public class ReportViewModelBulkCreationTests : IDisposable
             .Should().Be("物品出納簿_はやかけん 001_はやかけん 003_2026年7月");
         ReportViewModel.BuildMultiplePreviewDocumentTitle(new[] { Card("001"), Card("002"), Card("003") }, 2026, 7)
             .Should().Be("物品出納簿_3件_2026年7月");
+    }
+
+    #endregion
+
+    #region ファイル名の衝突（Issue #2154）
+
+    /// <summary>
+    /// 欠陥を突く側: 同じ年度ファイル名になる 2 枚の帳票は作らず、失敗として名指しすること
+    /// </summary>
+    /// <remarks>
+    /// 作ると後から書いた方が先の帳票の月シートを上書きし、出力状況の一覧では両方とも「出力済み」に見える。
+    /// 事前チェックの警告は「このまま作成する」で無視できるため、書き込みの手前でも止める。
+    /// 本テストでは事前チェックの帳票データが組み立てられない（警告なし）状態で、書き込み側の止め方だけを見る。
+    /// </remarks>
+    [Fact]
+    public async Task CreateReportAsync_ファイル名が衝突する2枚は作成せず他のカードは作成すること()
+    {
+        SelectCard("0000000000000001", "A*B");
+        SelectCard("0000000000000002", "A?B");
+        SelectCard("0000000000000003", "003");
+
+        await _viewModel.CreateReportAsync();
+
+        _createdForCardIdms.Should().Equal(new[] { "0000000000000003" },
+            "衝突する 2 枚はどちらも書き込まない（どちらを残しても、もう一方の帳票が上書きで失われる）");
+        _viewModel.StatusMessage.Should().Be("1/3件の帳票を作成しました（一部失敗）");
+        _viewModel.IsStatusError.Should().BeTrue();
+        _navigationServiceMock.Verify(
+            n => n.ShowWarning(
+                It.Is<string>(m =>
+                    m.Contains("・はやかけん A*B: 「はやかけん A?B」 と帳票のファイル名が同じになるため、作成しませんでした")
+                    && m.Contains("・はやかけん A?B: 「はやかけん A*B」 と帳票のファイル名が同じになるため、作成しませんでした")),
+                It.IsAny<string>()),
+            Times.Once);
+    }
+
+    /// <summary>
+    /// 欠陥を突く側: 今回選んでいないカードと同じ年度ファイル名になるカードも作らない
+    /// </summary>
+    /// <remarks>
+    /// 年度ファイルは月シートを積み上げるため、選んでいないカードが以前に作った年度ファイルへ書き込むことになる。
+    /// 管理番号の大文字・小文字だけが違う 2 枚は画面から登録でき、Windows では同じファイルになる。
+    /// </remarks>
+    [Fact]
+    public async Task CreateReportAsync_選んでいないカードとファイル名が衝突するカードは作成しないこと()
+    {
+        SelectCard("0000000000000001", "H001");
+        SelectCard("0000000000000002", "H002");
+        _viewModel.Cards.Add(new CardDto
+        {
+            CardIdm = "0000000000000009",
+            CardType = "はやかけん",
+            CardNumber = "h001",
+            IsSelected = false
+        });
+
+        await _viewModel.CreateReportAsync();
+
+        _createdForCardIdms.Should().Equal(new[] { "0000000000000002" });
+        _viewModel.StatusMessage.Should().Be("1/2件の帳票を作成しました（一部失敗）");
+    }
+
+    /// <summary>
+    /// 作らないカードの既存ファイルは、上書き確認（「更新しますか」）に並べない
+    /// </summary>
+    /// <remarks>
+    /// 並べると、職員が「更新する」を選んでも更新されないファイルについて同意を求めることになる。
+    /// </remarks>
+    [Fact]
+    public async Task CreateReportAsync_衝突するカードの既存ファイルは上書き確認に並べないこと()
+    {
+        SelectCard("0000000000000001", "A*B");
+        SelectCard("0000000000000002", "A?B");
+        var fiscalYear = ReportService.GetFiscalYear(_viewModel.SelectedYear, _viewModel.SelectedMonth);
+        File.WriteAllText(
+            Path.Combine(_outputFolder, _reportServiceMock.Object.GetFiscalYearFileName("はやかけん", "A*B", fiscalYear)),
+            "既存");
+
+        await _viewModel.CreateReportAsync();
+
+        _navigationServiceMock.Verify(
+            n => n.ShowThreeWayConfirmation(It.IsAny<string>(), It.IsAny<string>()), Times.Never);
+        _createdForCardIdms.Should().BeEmpty();
+    }
+
+    /// <summary>
+    /// 対: 衝突しないカードの既存ファイルは、同じ一括作成に衝突があっても従来どおり上書き確認に並ぶ
+    /// </summary>
+    /// <remarks>
+    /// 衝突の除外を上書き確認のループ全体へ効かせる誤り（確認を丸ごと飛ばす）を検出する（コードレビューで検出）。
+    /// </remarks>
+    [Fact]
+    public async Task CreateReportAsync_衝突しないカードの既存ファイルは上書き確認に並ぶこと()
+    {
+        SelectCard("0000000000000001", "A*B");
+        SelectCard("0000000000000002", "A?B");
+        SelectCard("0000000000000003", "003");
+        var fiscalYear = ReportService.GetFiscalYear(_viewModel.SelectedYear, _viewModel.SelectedMonth);
+        var collidingFile = _reportServiceMock.Object.GetFiscalYearFileName("はやかけん", "A*B", fiscalYear);
+        var normalFile = _reportServiceMock.Object.GetFiscalYearFileName("はやかけん", "003", fiscalYear);
+        File.WriteAllText(Path.Combine(_outputFolder, collidingFile), "既存");
+        File.WriteAllText(Path.Combine(_outputFolder, normalFile), "既存");
+        _navigationServiceMock
+            .Setup(n => n.ShowThreeWayConfirmation(It.IsAny<string>(), It.IsAny<string>()))
+            .Returns((bool?)true);
+
+        await _viewModel.CreateReportAsync();
+
+        _navigationServiceMock.Verify(
+            n => n.ShowThreeWayConfirmation(
+                It.Is<string>(m => m.Contains(normalFile) && !m.Contains(collidingFile)), It.IsAny<string>()),
+            Times.Once);
+        _createdForCardIdms.Should().Equal("0000000000000003");
+    }
+
+    /// <summary>
+    /// 年度より前に払い戻したカードとは衝突に数えず、稼働中のカードの帳票を作る
+    /// </summary>
+    [Fact]
+    public async Task CreateReportAsync_年度より前に払い戻したカードとは衝突に数えず作成すること()
+    {
+        _viewModel.SelectedYear = 2026;
+        _viewModel.SelectedMonth = 5;
+        SelectCard("0000000000000001", "H001");
+        _viewModel.Cards.Add(new CardDto
+        {
+            CardIdm = "0000000000000009",
+            CardType = "はやかけん",
+            CardNumber = "h001",
+            IsRefunded = true,
+            RefundedAt = new DateTime(2023, 6, 1),
+            IsSelected = false
+        });
+
+        await _viewModel.CreateReportAsync();
+
+        _createdForCardIdms.Should().Equal("0000000000000001");
+        _viewModel.StatusMessage.Should().Be("1件の帳票を作成しました");
+    }
+
+    /// <summary>
+    /// 事前チェックは、画面に並ぶ全カード（選んでいないカードを含む）を母集団として衝突を調べる
+    /// </summary>
+    /// <remarks>
+    /// 帳票データが組み立てられる状態にして、事前チェック側の警告を確かめる。
+    /// 作成対象だけを母集団にすると、選んでいないカードとの衝突を見落とす。
+    /// </remarks>
+    [Fact]
+    public async Task RunPreflightCheckAsync_選んでいないカードとの衝突を警告すること()
+    {
+        SelectCard("0000000000000001", "H001");
+        _viewModel.Cards.Add(new CardDto
+        {
+            CardIdm = "0000000000000009",
+            CardType = "はやかけん",
+            CardNumber = "h001",
+            IsSelected = false
+        });
+        _preflightDataBuilderMock
+            .Setup(b => b.BuildAsync("0000000000000001", It.IsAny<int>(), It.IsAny<int>()))
+            .ReturnsAsync((string idm, int year, int month) => new MonthlyReportData
+            {
+                Card = new IcCard { CardIdm = idm, CardType = "はやかけん", CardNumber = "H001" },
+                Year = year,
+                Month = month,
+            });
+
+        await _viewModel.RunPreflightCheckAsync();
+
+        _viewModel.StatusMessage.Should().Be("事前チェック: 警告1件");
+        _viewModel.Cards.Single(c => c.CardIdm == "0000000000000001").PreflightWarningCount.Should().Be(1);
     }
 
     #endregion
