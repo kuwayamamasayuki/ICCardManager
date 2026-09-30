@@ -483,10 +483,6 @@ namespace ICCardManager.Services
                 var ledgerId = kvp.Key;
                 var detailRows = kvp.Value;
                 var firstLineNumber = detailRows.First().LineNumber;
-                // 明細の置換が確定したか（catch でどこまで進んだかを文言に反映するため）。
-                // ReplaceDetailsAsync は自前 tx で確定し、親 Ledger の UpdateAsync は別 tx のため、
-                // 後者の例外時は「明細は差し替わり、親の摘要・金額だけ旧値」の状態になる。
-                var detailsReplaced = false;
 
                 // 変更検出：既存データと同一ならスキップ
                 var newDetails = detailRows.Select(r => r.Detail).ToList();
@@ -499,58 +495,41 @@ namespace ICCardManager.Services
                     continue;
                 }
 
+                // Issue #2155: 1 件の利用履歴について「明細の置換」と「親の摘要・金額の更新」を
+                // 1 つのトランザクションで確定させる。旧実装は ReplaceDetailsAsync が自前 tx で確定し、
+                // 親の UpdateAsync が別 tx だったため、後者が失敗すると「明細は差し替わったが、
+                // 親の摘要・金額は旧値」という食い違いが 6 年保存の台帳に残った。しかも再インポートは
+                // 明細が一致するため「変更なし」でスキップされ、取り込み直しでは直せなかった。
+                //
+                // 単位は利用履歴 ID ごと（ループ全体ではない）。失敗した履歴だけを行番号付きの
+                // エラーとして報告し、他の履歴は取り込む従来の報告形を保つため。新規作成側
+                // （NewLedgerFromSegmentsBuilder）もグループ単位で確定するので、ループ全体を
+                // 1 tx にしても取り込み全体の「全か無か」にはならない。
+                //
+                // tx は scope.Transaction を明示的に引き渡す（db-write-conventions.md の「①」）。
+                // BeginTransactionAsync は SemaphoreSlim(1,1) を取るため、リポジトリ側で入れ子に
+                // 開くと自己デッドロックする（Issue #1575）。暗黙参加（②）は backstop（Issue #1737）。
+                TransactionScope scope = null;
                 try
                 {
-                    // Issue #1913: CSV の明細行は CsvExportService と同じ時系列昇順（古い→新しい）で
-                    // 並ぶ。ReplaceDetailsAsync は DELETE + INSERT で id を再採番するため、昇順のまま
-                    // 渡すと LedgerDetail.SequenceNumber の規約（FeliCa 互換で小さい id ＝ 新しい）が
-                    // 反転する。新しい順にしてから渡す（LedgerSplitService / LendingService と同じ）。
-                    // 摘要生成・金額再計算（下の Generate / CalculateGroupFinancials）は昇順のまま使う。
-                    var success = await _ledgerRepository.ReplaceDetailsAsync(
-                        ledgerId, newDetails.AsEnumerable().Reverse()).ConfigureAwait(false);
+                    scope = await _dbContext.BeginTransactionAsync().ConfigureAwait(false);
+                    var failureMessage = await ReplaceDetailsAndUpdateParentAsync(
+                        ledgerId, newDetails, summaryGenerator, scope.Transaction).ConfigureAwait(false);
 
-                    if (success)
+                    if (failureMessage == null)
                     {
-                        detailsReplaced = true;
-                        // Issue #918: 詳細置換後、親Ledgerの金額を再計算して更新
-                        // Issue #1808: 親 Ledger の再読取が null／UpdateAsync が 0 行（他 PC や別操作で
-                        // 履歴が削除された競合）のとき、旧実装は戻り値を捨てて「インポート完了」に
-                        // していた。明細だけ差し替わり親の摘要・金額が旧値のまま残る（または CASCADE で
-                        // 明細ごと消えている）ため、エラーとして報告しインポート件数に含めない。
-                        var ledger = await _ledgerRepository.GetByIdAsync(ledgerId).ConfigureAwait(false);
-                        var parentUpdated = false;
-                        if (ledger != null)
-                        {
-                            var summary = summaryGenerator.Generate(newDetails);
-                            var (income, expense, balance) = LedgerSplitService.CalculateGroupFinancials(newDetails);
-
-                            ledger.Summary = !string.IsNullOrEmpty(summary) ? summary : ledger.Summary;
-                            ledger.Income = income;
-                            ledger.Expense = expense;
-                            ledger.Balance = balance;
-                            parentUpdated = await _ledgerRepository.UpdateAsync(ledger).ConfigureAwait(false);
-                        }
-
-                        if (parentUpdated)
-                        {
-                            importedCount += detailRows.Count;
-                        }
-                        else
-                        {
-                            errors.Add(new CsvImportError
-                            {
-                                LineNumber = firstLineNumber,
-                                Message = BuildParentLedgerConflictMessage(ledgerId),
-                                Data = ledgerId.ToString()
-                            });
-                        }
+                        scope.Commit();
+                        importedCount += detailRows.Count;
                     }
                     else
                     {
+                        // 業務的な失敗（競合・0 行）での巻き戻し。tx は有効なので素の Rollback でも
+                        // 失敗しないが、手段は 1 つに寄せる（Issue #1831）
+                        TryRollbackImportTransaction(scope);
                         errors.Add(new CsvImportError
                         {
                             LineNumber = firstLineNumber,
-                            Message = $"利用履歴ID {ledgerId} の詳細の置換に失敗しました",
+                            Message = failureMessage,
                             Data = ledgerId.ToString()
                         });
                     }
@@ -558,18 +537,34 @@ namespace ICCardManager.Services
                 catch (Exception ex)
                 {
                     // 生の ex.Message は UI へ出さずログへ逃がす（Issue #1614）。
-                    // 親 Ledger が ReplaceDetailsAsync より前に削除されていると、明細 INSERT が
-                    // FOREIGN KEY 制約違反（SQLiteErrorCode.Constraint）で失敗してここへ来る
-                    // （foreign_keys=ON）。これは上の parentUpdated=false と同じ「親の履歴が消えた」競合。
-                    _logger?.LogError(ex,
-                        "Failed to import ledger details for ledger {LedgerId} (line {LineNumber}, detailsReplaced={DetailsReplaced})",
-                        ledgerId, firstLineNumber, detailsReplaced);
+                    // ログは巻き戻しより先に書く。ROLLBACK 自体が失敗すると二次例外が
+                    // 本来の失敗要因を置き換えて抜けるため（Issue #1745）。
+                    // トランザクションの開始自体が失敗した（scope == null）ときは巻き戻す対象が無いので、
+                    // ログでも「巻き戻した」と述べない。
+                    if (scope != null)
+                    {
+                        _logger?.LogError(ex,
+                            "Failed to import ledger details for ledger {LedgerId} (line {LineNumber}); rolling back the transaction",
+                            ledgerId, firstLineNumber);
+                        TryRollbackImportTransaction(scope);
+                    }
+                    else
+                    {
+                        _logger?.LogError(ex,
+                            "Failed to begin the transaction to import ledger details for ledger {LedgerId} (line {LineNumber})",
+                            ledgerId, firstLineNumber);
+                    }
                     errors.Add(new CsvImportError
                     {
                         LineNumber = firstLineNumber,
-                        Message = BuildDetailReplaceFailureMessage(ledgerId, ex, detailsReplaced),
+                        Message = BuildDetailReplaceFailureMessage(ledgerId, ex),
                         Data = ledgerId.ToString()
                     });
+                }
+                finally
+                {
+                    // 未コミットの tx は Dispose で必ず巻き戻る（TryRollbackImportTransaction の remarks）
+                    scope?.Dispose();
                 }
             }
 
@@ -584,20 +579,85 @@ namespace ICCardManager.Services
         }
 
         /// <summary>
-        /// 明細の置換後に親 Ledger を更新できなかった（再読取が null／UPDATE が 0 行）ときの
-        /// エラー文言を組み立てる（Issue #1808）。
+        /// 1 件の利用履歴について、明細の置換と親 Ledger（摘要・金額）の更新を
+        /// 呼び出し元のトランザクション上で行う（Issue #2155）。
+        /// </summary>
+        /// <returns>
+        /// 成功なら <c>null</c>。業務的な失敗（親が見つからない・影響行数 0）なら利用者向けの文言。
+        /// 失敗時の巻き戻しと、例外時の扱いは呼び出し元が持つ（commit/rollback には介入しない）。
+        /// </returns>
+        private async Task<string> ReplaceDetailsAndUpdateParentAsync(
+            int ledgerId,
+            List<LedgerDetail> newDetails,
+            SummaryGenerator summaryGenerator,
+            SQLiteTransaction transaction)
+        {
+            // 親を先に読む（#1760「読み取りが null なら、書き込みも行わない」）。
+            // DbContext は接続を 1 本しか持たないため、この読み取りは同じ接続上の tx の内側で行われる。
+            // Issue #1808: 他 PC や別操作で履歴が削除されていた競合は、エラーとして報告し
+            // インポート件数に含めない。
+            var ledger = await _ledgerRepository.GetByIdAsync(ledgerId).ConfigureAwait(false);
+            if (ledger == null)
+            {
+                return BuildParentLedgerConflictMessage(ledgerId);
+            }
+
+            // Issue #1913: CSV の明細行は CsvExportService と同じ時系列昇順（古い→新しい）で
+            // 並ぶ。ReplaceDetailsAsync は DELETE + INSERT で id を再採番するため、昇順のまま
+            // 渡すと LedgerDetail.SequenceNumber の規約（FeliCa 互換で小さい id ＝ 新しい）が
+            // 反転する。新しい順にしてから渡す（LedgerSplitService / LendingService と同じ）。
+            // 摘要生成・金額再計算（下の Generate / CalculateGroupFinancials）は昇順のまま使う。
+            var replaced = await _ledgerRepository.ReplaceDetailsAsync(
+                ledgerId, newDetails.AsEnumerable().Reverse(), transaction).ConfigureAwait(false);
+            if (!replaced)
+            {
+                return BuildDetailInsertShortfallMessage(ledgerId);
+            }
+
+            // Issue #918: 詳細置換後、親Ledgerの金額を再計算して更新
+            var summary = summaryGenerator.Generate(newDetails);
+            var (income, expense, balance) = LedgerSplitService.CalculateGroupFinancials(newDetails);
+
+            ledger.Summary = !string.IsNullOrEmpty(summary) ? summary : ledger.Summary;
+            ledger.Income = income;
+            ledger.Expense = expense;
+            ledger.Balance = balance;
+
+            // Issue #1753 / #1808: 0 行は「その id の行が無い」競合。戻り値を捨てない
+            var parentUpdated = await _ledgerRepository.UpdateAsync(ledger, transaction).ConfigureAwait(false);
+            return parentUpdated ? null : BuildParentLedgerConflictMessage(ledgerId);
+        }
+
+        /// <summary>
+        /// 親 Ledger が見つからない／UPDATE が 0 行だったときのエラー文言を組み立てる（Issue #1808）。
         /// </summary>
         /// <remarks>
         /// <c>LedgerRepository.UpdateAsync</c> の WHERE は <c>id = @id</c> だけなので、0 行は
         /// 「その id の行が無い」ことに特定できる（Issue #1759「影響行数 0 は競合 — 原因を名指しできる」）。
         /// ただし共有モードでもローカルモードでも起こり得るため、モード中立に「他のパソコンや別の操作」と
-        /// 「可能性があります」で述べる。<c>ledger_detail</c> は <c>ON DELETE CASCADE</c> なので、
-        /// 置き換えた明細も親と一緒に消えている。
+        /// 「可能性があります」で述べる。
+        /// <para>
+        /// Issue #2155: 明細の置換と親の更新は同じトランザクションで巻き戻るため、
+        /// 「置き換えた明細も履歴と一緒に削除されています」という途中状態の説明は不要になった。
+        /// </para>
         /// </remarks>
         private static string BuildParentLedgerConflictMessage(int ledgerId)
-            => $"利用履歴ID {ledgerId} の明細を置き換えたあと、親の履歴が見つからず摘要・金額を更新できませんでした。" +
-               "他のパソコンや別の操作でこの履歴が削除された可能性があります（その場合、置き換えた明細も履歴と一緒に削除されています）。" +
+            => $"利用履歴ID {ledgerId} の明細を取り込めませんでした。" +
+               "他のパソコンや別の操作でこの履歴が削除された可能性があります。" +
                "履歴画面でこの履歴の有無を確認し、必要な場合は利用履歴IDを空欄にした明細CSVを再度インポートして新規の履歴として登録してください。";
+
+        /// <summary>
+        /// 明細の INSERT が 0 行だった（<c>ReplaceDetailsAsync</c> が <c>false</c>）ときのエラー文言。
+        /// </summary>
+        /// <remarks>
+        /// 旧実装は「詳細の置換に失敗しました」の一文で、「なぜ」「どうすれば」を欠いていた
+        /// （error-messages.md の 3 要素）。原因は特定できないが、トランザクションごと巻き戻すので
+        /// 「何も変更されていない」ことは断定でき、取り込みのやり直しを案内できる。
+        /// </remarks>
+        private static string BuildDetailInsertShortfallMessage(int ledgerId)
+            => $"利用履歴ID {ledgerId} の明細を置き換えられませんでした。" +
+               "明細の一部を登録できなかったため、この履歴の明細・摘要・金額は変更されていません。" +
+               "しばらく待ってから、もう一度インポートしてください。";
 
         /// <summary>カード IDm の桁数（16進16文字）。</summary>
         private const int IdmLength = 16;
@@ -652,49 +712,43 @@ namespace ICCardManager.Services
         /// </summary>
         /// <param name="ledgerId">対象の利用履歴ID</param>
         /// <param name="ex">捕捉した例外</param>
-        /// <param name="detailsReplaced">
-        /// <c>ReplaceDetailsAsync</c> が確定した後の例外か。true なら明細は差し替わっており、
-        /// 親の摘要・金額だけが旧値のまま残っている（再インポートは変更なしとしてスキップされるため、
-        /// 履歴画面での確認を案内する）。
-        /// </param>
         /// <remarks>
         /// <c>SQLiteErrorCode.Constraint</c>（明細 INSERT の FOREIGN KEY 制約違反）は「親の履歴が消えた」
-        /// 競合と同じ原因なので、<see cref="BuildParentLedgerConflictMessage"/> と同じ「なぜ」を名指しする。
+        /// 競合と同じ原因なので、<see cref="BuildParentLedgerConflictMessage"/> と同じ文言にする。
+        /// ただし Issue #2155 以降は親を同じトランザクションの内側で先に読むため、この分岐へ来ることは
+        /// ほとんど無い（<c>DbContext.BeginTransactionAsync</c> は引数なしの <c>BeginTransaction()</c> ＝
+        /// System.Data.SQLite の既定で <c>BEGIN IMMEDIATE</c> を使い、書き込みロックを先に取るため、
+        /// 読み取りから置換までの間に他 PC が削除することはできない）。防御として分岐は残す。
+        /// 文言は「可能性があります」で述べており、他の原因の制約違反でも案内（履歴の有無を確認）は実行できる。
         /// それ以外は <see cref="ExceptionMessageFormatter.ToReason"/> へ寄せる。
         /// <para>
+        /// Issue #2155: 明細の置換と親の更新は同じトランザクションで巻き戻るため、どの段階で
+        /// 例外になっても<b>この履歴は何も変更されていない</b>。旧実装が持っていた「明細は置き換えたが
+        /// 親の摘要・金額は旧値」という分岐（#1991 の <c>detailsReplaced</c>）と、その分岐に必要だった
+        /// 「履歴画面で修正してください」という行動指示は、案内すべき状態ごと無くなった。
+        /// COMMIT 自体が失敗した場合も、SQLite は自動で巻き戻し、未確定の tx は Dispose で破棄される。
+        /// </para>
+        /// <para>
         /// Issue #1991: <b>埋め込むのは「なぜ」だけにする</b>。<c>ToUserMessage</c> の完全な文を
-        /// 埋め込むと「明細は置き換えました」の直後に「明細の取り込みに失敗しました」と述べて
-        /// <b>「何が」が矛盾</b>し、さらに「再度実行してください」と「履歴画面で修正してください」という
-        /// <b>両立しない行動指示</b>が並ぶ（コードレビューで検出）。「どうすれば」はこのメソッドが持つ。
+        /// 埋め込むと「何が」が二重になり、行動指示も重複する。「どうすれば」はこのメソッドが持つ。
         /// </para>
         /// <para>
         /// この経路は直前で <c>_logger?.LogError</c> を出しているため、ログの併設は行わない（#1817）。
         /// </para>
         /// </remarks>
-        private static string BuildDetailReplaceFailureMessage(int ledgerId, Exception ex, bool detailsReplaced)
+        private static string BuildDetailReplaceFailureMessage(int ledgerId, Exception ex)
         {
-            if (!detailsReplaced && ex is SQLiteException { ResultCode: SQLiteErrorCode.Constraint })
+            if (ex is SQLiteException { ResultCode: SQLiteErrorCode.Constraint })
             {
-                return $"利用履歴ID {ledgerId} の明細を置き換えられませんでした。" +
-                       "他のパソコンや別の操作でこの履歴が削除された可能性があります。" +
-                       "履歴画面でこの履歴の有無を確認し、必要な場合は利用履歴IDを空欄にした明細CSVを再度インポートして新規の履歴として登録してください。";
+                return BuildParentLedgerConflictMessage(ledgerId);
             }
 
-            // Issue #1991: SQLite かどうかで分けない。DatabaseException.QueryFailed の文言は
-            // 「再度お試しください」という行動指示を含み、この経路（明細は置き換え済み）では
-            // 再実行が明細の二重置換を招くため実行してはいけない指示になる。
-            // ToReason は「なぜ」だけを返し、SQLite の失敗も原因を名指しする（#1986 の分岐）。
+            // Issue #1991: SQLite かどうかで分けない。ToReason は「なぜ」だけを返し、
+            // SQLite の失敗も原因を名指しする（#1986 の分岐）。
             var reason = ExceptionMessageFormatter.ToReason(ex);
 
-            // 「どうすれば」は経路ごとに違う（error-messages.md の 3 要素）。
-            // 置換が確定している場合は再実行が二重置換を招くため履歴画面での確認を、
-            // 置換前に落ちた場合は何も書かれていないため取り込みのやり直しを案内する
-            // （置換前の分岐は是正時に行動指示が丸ごと落ちていた。コードレビューで検出）。
-            return detailsReplaced
-                ? $"利用履歴ID {ledgerId} の明細は置き換えましたが、親の履歴の摘要・金額を更新できませんでした。{reason}" +
-                  "履歴画面でこの履歴の摘要・金額を確認し、必要な場合は修正してください。"
-                : $"利用履歴ID {ledgerId} の明細を置き換えられませんでした。{reason}" +
-                  "この履歴の明細は変更されていません。しばらく待ってから、もう一度取り込んでください。";
+            return $"利用履歴ID {ledgerId} の明細を置き換えられませんでした。{reason}" +
+                   "この履歴の明細・摘要・金額は変更されていません。しばらく待ってから、もう一度インポートしてください。";
         }
 
         private static void DetectLedgerDetailChanges(

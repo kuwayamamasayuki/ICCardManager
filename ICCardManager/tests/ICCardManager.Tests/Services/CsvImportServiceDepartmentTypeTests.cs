@@ -1,7 +1,9 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Data.SQLite;
 using System.IO;
 using System.Text;
+using System.Threading;
 using System.Threading.Tasks;
 using FluentAssertions;
 using ICCardManager.Data;
@@ -46,14 +48,24 @@ public class CsvImportServiceDepartmentTypeTests : IDisposable
 
     private readonly string _testDirectory;
 
+    /// <summary>
+    /// Issue #2155: 既存履歴への明細取込は利用履歴 ID ごとにトランザクションを開くため、
+    /// <see cref="DbContext.BeginTransactionAsync"/> が実体のあるスコープを返す必要がある。
+    /// リポジトリはモックなので、tx は開いて閉じるだけの in-memory 接続で足りる。
+    /// </summary>
+    private readonly SQLiteConnection _connection;
+
     public CsvImportServiceDepartmentTypeTests()
     {
         _testDirectory = Path.Combine(Path.GetTempPath(), $"CsvImportDeptType_{Guid.NewGuid():N}");
         Directory.CreateDirectory(_testDirectory);
+        _connection = new SQLiteConnection("Data Source=:memory:");
+        _connection.Open();
     }
 
     public void Dispose()
     {
+        _connection.Dispose();
         if (Directory.Exists(_testDirectory))
         {
             Directory.Delete(_testDirectory, recursive: true);
@@ -85,12 +97,12 @@ public class CsvImportServiceDepartmentTypeTests : IDisposable
                 Details = new List<LedgerDetail>()
             });
         ledgerRepositoryMock
-            .Setup(x => x.ReplaceDetailsAsync(1, It.IsAny<IEnumerable<LedgerDetail>>()))
+            .Setup(x => x.ReplaceDetailsAsync(1, It.IsAny<IEnumerable<LedgerDetail>>(), It.IsAny<SQLiteTransaction>()))
             .ReturnsAsync(true);
 
         Ledger? updatedLedger = null;
-        ledgerRepositoryMock.Setup(x => x.UpdateAsync(It.IsAny<Ledger>()))
-            .Callback<Ledger>(l => updatedLedger = l)
+        ledgerRepositoryMock.Setup(x => x.UpdateAsync(It.IsAny<Ledger>(), It.IsAny<SQLiteTransaction>()))
+            .Callback<Ledger, SQLiteTransaction>((l, _) => updatedLedger = l)
             .ReturnsAsync(true);
 
         var service = CreateService(ledgerRepositoryMock, departmentType);
@@ -148,7 +160,7 @@ public class CsvImportServiceDepartmentTypeTests : IDisposable
         return path;
     }
 
-    private static CsvImportService CreateService(
+    private CsvImportService CreateService(
         Mock<ILedgerRepository> ledgerRepositoryMock, DepartmentType departmentType)
     {
         var cardRepositoryMock = new Mock<ICardRepository>();
@@ -159,12 +171,18 @@ public class CsvImportServiceDepartmentTypeTests : IDisposable
         settingsRepositoryMock.Setup(x => x.GetAppSettingsAsync())
             .ReturnsAsync(new AppSettings { DepartmentType = departmentType });
 
+        // 呼び出しごとに新しいスコープを返す（利用履歴 ID ごとに開いて閉じるため）
+        var dbContextMock = new Mock<DbContext>();
+        dbContextMock.Setup(x => x.BeginTransactionAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(() => new TransactionScope(
+                new ConnectionLease(_connection, () => { }), _connection.BeginTransaction()));
+
         return new CsvImportService(
             cardRepositoryMock.Object,
             new Mock<IStaffRepository>().Object,
             ledgerRepositoryMock.Object,
             new Mock<IValidationService>().Object,
-            new Mock<DbContext>().Object,
+            dbContextMock.Object,
             new Mock<ICacheService>().Object,
             settingsRepositoryMock.Object,
             // Issue #1991: ロガー未注入だと取込失敗が ErrorDialogHelper 経由で

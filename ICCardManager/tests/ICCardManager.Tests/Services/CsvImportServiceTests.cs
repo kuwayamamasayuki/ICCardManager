@@ -71,11 +71,12 @@ public class CsvImportServiceTests : IDisposable
         var connectionString = "Data Source=:memory:";
         _connection = new SQLiteConnection(connectionString);
         _connection.Open();
-        var noOpLease = new ConnectionLease(_connection, () => { });
-        var noOpTransaction = _connection.BeginTransaction();
-        var transactionScope = new ICCardManager.Data.TransactionScope(noOpLease, noOpTransaction);
+        // Issue #2155: 明細 CSV 取込は利用履歴 ID ごとにトランザクションを開いて閉じるため、
+        // 呼び出しごとに新しいスコープを返す（同じスコープを使い回すと 2 件目で Commit 済みの
+        // tx をもう一度使うことになる）
         _dbContextMock.Setup(x => x.BeginTransactionAsync(It.IsAny<System.Threading.CancellationToken>()))
-            .ReturnsAsync(transactionScope);
+            .ReturnsAsync(() => new ICCardManager.Data.TransactionScope(
+                new ConnectionLease(_connection, () => { }), _connection.BeginTransaction()));
 
         _service = new CsvImportService(
             _cardRepositoryMock.Object,
@@ -2737,10 +2738,10 @@ FEDCBA9876543210,鈴木花子,002,テスト2";
             Id = 1, CardIdm = "0123456789ABCDEF", Date = new DateTime(2024, 1, 15),
             Summary = "鉄道", Income = 0, Expense = 520, Balance = 9480
         });
-        _ledgerRepositoryMock.Setup(x => x.ReplaceDetailsAsync(1, It.IsAny<IEnumerable<LedgerDetail>>()))
+        _ledgerRepositoryMock.Setup(x => x.ReplaceDetailsAsync(1, It.IsAny<IEnumerable<LedgerDetail>>(), It.IsAny<SQLiteTransaction>()))
             .ReturnsAsync(true);
         // Issue #1808: 親 Ledger の UpdateAsync の戻り値を確認するようになったため、成功を明示する
-        _ledgerRepositoryMock.Setup(x => x.UpdateAsync(It.IsAny<Ledger>())).ReturnsAsync(true);
+        _ledgerRepositoryMock.Setup(x => x.UpdateAsync(It.IsAny<Ledger>(), It.IsAny<SQLiteTransaction>())).ReturnsAsync(true);
 
         // Act
         var result = await _service.ImportLedgerDetailsAsync(filePath);
@@ -2751,26 +2752,28 @@ FEDCBA9876543210,鈴木花子,002,テスト2";
 
         // ReplaceDetailsAsyncが1回呼ばれ、2件の詳細が渡される
         _ledgerRepositoryMock.Verify(x => x.ReplaceDetailsAsync(1,
-            It.Is<IEnumerable<LedgerDetail>>(d => d.Count() == 2)), Times.Once);
+            It.Is<IEnumerable<LedgerDetail>>(d => d.Count() == 2), It.IsAny<SQLiteTransaction>()), Times.Once);
     }
 
     /// <summary>
-    /// 明細を置き換えたあとの失敗で、埋め込む理由が「何が」を二重に述べないこと（Issue #1991）。
+    /// 明細の取り込みがトランザクションの途中で失敗したとき、埋め込む理由が「何が」を二重に述べないこと（Issue #1991 / #2155）。
     /// </summary>
     /// <remarks>
     /// <para>
     /// <c>ExceptionMessageFormatter.ToUserMessage</c> の完全な文を埋め込むと、
-    /// 「明細は置き換えましたが…更新できませんでした。<b>明細の取り込みに失敗しました。</b>…
-    /// しばらく待ってから<b>再度実行してください</b>。…<b>履歴画面で…修正してください</b>。」となり、
-    /// ①「何が」が矛盾し ②両立しない行動指示が並ぶ。埋め込むのは「なぜ」だけにする。
+    /// 「明細を置き換えられませんでした。<b>明細の取り込みに失敗しました。</b>…
+    /// しばらく待ってから<b>再度実行してください</b>。…」となり、
+    /// ①「何が」が二重になり ②行動指示が重複する。埋め込むのは「なぜ」だけにする。
     /// </para>
     /// <para>
-    /// 対の表明として、原因（データベースの読み書き）と、この経路が持つ行動指示
-    /// （履歴画面で確認）が<b>残っている</b>ことも見る。前者だけだと理由を丸ごと落とした実装でも緑になる。
+    /// 対の表明として、原因（データベースの読み書き）と、この経路が持つ「何も変更されていない」
+    /// 旨と行動指示が<b>残っている</b>ことも見る。前者だけだと理由を丸ごと落とした実装でも緑になる。
+    /// Issue #2155 で明細の置換と親の更新が 1 つのトランザクションになったため、#1991 当時の
+    /// 「明細は置き換えましたが…」という途中状態の文言は出なくなった。
     /// </para>
     /// </remarks>
     [Fact]
-    public async Task ImportLedgerDetailsAsync_明細置換後の失敗_埋め込む理由が何がを二重に述べないこと()
+    public async Task ImportLedgerDetailsAsync_トランザクション内の失敗_埋め込む理由が何がを二重に述べないこと()
     {
         // Arrange
         var csvContent = @"利用履歴ID,利用日時,カードIDm,管理番号,乗車駅,降車駅,バス停,金額,残額,チャージ,ポイント還元,バス利用,グループID
@@ -2779,11 +2782,11 @@ FEDCBA9876543210,鈴木花子,002,テスト2";
         var filePath = Path.Combine(_testDirectory, "details_embedded_reason.csv");
         await Task.Run(() => File.WriteAllText(filePath, csvContent, CsvEncoding));
 
-        _ledgerRepositoryMock.Setup(x => x.ReplaceDetailsAsync(1, It.IsAny<IEnumerable<LedgerDetail>>()))
+        _ledgerRepositoryMock.Setup(x => x.ReplaceDetailsAsync(1, It.IsAny<IEnumerable<LedgerDetail>>(), It.IsAny<SQLiteTransaction>()))
             .ReturnsAsync(true);
         // GetByIdAsync は事前パス（対象台帳の存在確認）でも呼ばれる。そこで落とすと
-        // 共通ハンドラーへ抜けてこの分岐へ到達しないため、2 回目（明細の置換が確定したあとの
-        // 再読取）だけを失敗させる（detailsReplaced = true の経路）。
+        // 共通ハンドラーへ抜けてこの分岐へ到達しないため、2 回目（トランザクション内の
+        // 親の再読取）だけを失敗させる。
         _ledgerRepositoryMock.SetupSequence(x => x.GetByIdAsync(1))
             .ReturnsAsync(new Ledger
             {
@@ -2797,13 +2800,16 @@ FEDCBA9876543210,鈴木花子,002,テスト2";
 
         // Assert
         var message = result.Errors.Should().ContainSingle().Subject.Message;
-        message.Should().Contain("明細は置き換えましたが");
+        message.Should().Contain("変更されていません",
+            "明細の置換と親の更新は同じトランザクションで巻き戻る（Issue #2155）");
+        message.Should().NotContain("明細は置き換えました",
+            "明細だけが差し替わった途中状態はもう起きない（Issue #2155）");
         message.Should().NotContain("に失敗しました。",
             "埋め込む理由に「何が」を含めない（この文は既に「何が」を述べている）");
         message.Should().NotContain("再度実行してください",
-            "この経路で再実行すると明細が二重に置き換わる。行動指示はこの文が持つ");
+            "ToUserMessage の行動指示を埋め込まない。行動指示はこの文が持つ");
         message.Should().NotContain("再度お試しください",
-            "DatabaseException.QueryFailed の行動指示も同じ理由でこの経路には合わない");
+            "DatabaseException.QueryFailed の既製の行動指示も埋め込まない");
         message.Should().NotContain("database is locked", "生の ex.Message を出さない（#1614）");
         // 対の表明: 理由とこの経路の行動指示は残っていること
         message.Should().Contain("データベースの読み書きができませんでした",
@@ -2844,13 +2850,13 @@ FEDCBA9876543210,鈴木花子,002,テスト2";
         });
 
         List<LedgerDetail> savedDetails = null;
-        _ledgerRepositoryMock.Setup(x => x.ReplaceDetailsAsync(1, It.IsAny<IEnumerable<LedgerDetail>>()))
-            .Callback<int, IEnumerable<LedgerDetail>>((_, details) => savedDetails = details.ToList())
+        _ledgerRepositoryMock.Setup(x => x.ReplaceDetailsAsync(1, It.IsAny<IEnumerable<LedgerDetail>>(), It.IsAny<SQLiteTransaction>()))
+            .Callback<int, IEnumerable<LedgerDetail>, SQLiteTransaction>((_, details, __) => savedDetails = details.ToList())
             .ReturnsAsync(true);
 
         Ledger savedLedger = null;
-        _ledgerRepositoryMock.Setup(x => x.UpdateAsync(It.IsAny<Ledger>()))
-            .Callback<Ledger>(l => savedLedger = l)
+        _ledgerRepositoryMock.Setup(x => x.UpdateAsync(It.IsAny<Ledger>(), It.IsAny<SQLiteTransaction>()))
+            .Callback<Ledger, SQLiteTransaction>((l, _) => savedLedger = l)
             .ReturnsAsync(true);
 
         // Act
@@ -2915,10 +2921,10 @@ FEDCBA9876543210,鈴木花子,002,テスト2";
             Id = 2, CardIdm = "0123456789ABCDEF", Date = new DateTime(2024, 1, 16),
             Summary = "鉄道", Income = 0, Expense = 260, Balance = 9220
         });
-        _ledgerRepositoryMock.Setup(x => x.ReplaceDetailsAsync(It.IsAny<int>(), It.IsAny<IEnumerable<LedgerDetail>>()))
+        _ledgerRepositoryMock.Setup(x => x.ReplaceDetailsAsync(It.IsAny<int>(), It.IsAny<IEnumerable<LedgerDetail>>(), It.IsAny<SQLiteTransaction>()))
             .ReturnsAsync(true);
         // Issue #1808: 親 Ledger の UpdateAsync の戻り値を確認するようになったため、成功を明示する
-        _ledgerRepositoryMock.Setup(x => x.UpdateAsync(It.IsAny<Ledger>())).ReturnsAsync(true);
+        _ledgerRepositoryMock.Setup(x => x.UpdateAsync(It.IsAny<Ledger>(), It.IsAny<SQLiteTransaction>())).ReturnsAsync(true);
 
         // Act
         var result = await _service.ImportLedgerDetailsAsync(filePath);
@@ -2929,9 +2935,9 @@ FEDCBA9876543210,鈴木花子,002,テスト2";
 
         // ledger_id=1に2件、ledger_id=2に1件
         _ledgerRepositoryMock.Verify(x => x.ReplaceDetailsAsync(1,
-            It.Is<IEnumerable<LedgerDetail>>(d => d.Count() == 2)), Times.Once);
+            It.Is<IEnumerable<LedgerDetail>>(d => d.Count() == 2), It.IsAny<SQLiteTransaction>()), Times.Once);
         _ledgerRepositoryMock.Verify(x => x.ReplaceDetailsAsync(2,
-            It.Is<IEnumerable<LedgerDetail>>(d => d.Count() == 1)), Times.Once);
+            It.Is<IEnumerable<LedgerDetail>>(d => d.Count() == 1), It.IsAny<SQLiteTransaction>()), Times.Once);
     }
 
     /// <summary>
@@ -2952,10 +2958,10 @@ FEDCBA9876543210,鈴木花子,002,テスト2";
             Id = 1, CardIdm = "0123456789ABCDEF", Date = new DateTime(2024, 1, 15),
             Summary = "テスト", Income = 0, Expense = 0, Balance = 0
         });
-        _ledgerRepositoryMock.Setup(x => x.ReplaceDetailsAsync(1, It.IsAny<IEnumerable<LedgerDetail>>()))
+        _ledgerRepositoryMock.Setup(x => x.ReplaceDetailsAsync(1, It.IsAny<IEnumerable<LedgerDetail>>(), It.IsAny<SQLiteTransaction>()))
             .ReturnsAsync(true);
         // Issue #1808: 親 Ledger の UpdateAsync の戻り値を確認するようになったため、成功を明示する
-        _ledgerRepositoryMock.Setup(x => x.UpdateAsync(It.IsAny<Ledger>())).ReturnsAsync(true);
+        _ledgerRepositoryMock.Setup(x => x.UpdateAsync(It.IsAny<Ledger>(), It.IsAny<SQLiteTransaction>())).ReturnsAsync(true);
 
         // Act
         var result = await _service.ImportLedgerDetailsAsync(filePath);
@@ -2974,7 +2980,7 @@ FEDCBA9876543210,鈴木花子,002,テスト2";
                 details.First().Amount == null &&
                 details.First().Balance == null &&
                 details.First().GroupId == null
-            )), Times.Once);
+            ), It.IsAny<SQLiteTransaction>()), Times.Once);
     }
 
     #endregion
@@ -3559,10 +3565,10 @@ FEDCBA9876543210,鈴木花子,002,テスト2";
             Id = 1, CardIdm = "0123456789ABCDEF", Date = new DateTime(2024, 1, 15),
             Summary = "鉄道", Income = 0, Expense = 260, Balance = 9740
         });
-        _ledgerRepositoryMock.Setup(x => x.ReplaceDetailsAsync(1, It.IsAny<IEnumerable<LedgerDetail>>()))
+        _ledgerRepositoryMock.Setup(x => x.ReplaceDetailsAsync(1, It.IsAny<IEnumerable<LedgerDetail>>(), It.IsAny<SQLiteTransaction>()))
             .ReturnsAsync(true);
         // Issue #1808: 親 Ledger の UpdateAsync の戻り値を確認するようになったため、成功を明示する
-        _ledgerRepositoryMock.Setup(x => x.UpdateAsync(It.IsAny<Ledger>())).ReturnsAsync(true);
+        _ledgerRepositoryMock.Setup(x => x.UpdateAsync(It.IsAny<Ledger>(), It.IsAny<SQLiteTransaction>())).ReturnsAsync(true);
 
         // 新規カード
         _cardRepositoryMock.Setup(x => x.GetByIdmAsync("AAAA456789ABCDEF", true))
@@ -3581,7 +3587,7 @@ FEDCBA9876543210,鈴木花子,002,テスト2";
 
         // 既存ledgerは置換
         _ledgerRepositoryMock.Verify(x => x.ReplaceDetailsAsync(1,
-            It.Is<IEnumerable<LedgerDetail>>(d => d.Count() == 1)), Times.Once);
+            It.Is<IEnumerable<LedgerDetail>>(d => d.Count() == 1), It.IsAny<SQLiteTransaction>()), Times.Once);
         // 新規ledgerは作成+挿入
         _ledgerRepositoryMock.Verify(x => x.InsertAsync(It.Is<Ledger>(l =>
             l.CardIdm == "AAAA456789ABCDEF")), Times.Once);
@@ -3690,9 +3696,9 @@ FEDCBA9876543210,鈴木花子,002,テスト2";
             Summary = "鉄道（博多～天神 往復）", Income = 0, Expense = 520, Balance = 9480
         };
         _ledgerRepositoryMock.Setup(x => x.GetByIdAsync(1)).ReturnsAsync(existingLedger);
-        _ledgerRepositoryMock.Setup(x => x.ReplaceDetailsAsync(1, It.IsAny<IEnumerable<LedgerDetail>>()))
+        _ledgerRepositoryMock.Setup(x => x.ReplaceDetailsAsync(1, It.IsAny<IEnumerable<LedgerDetail>>(), It.IsAny<SQLiteTransaction>()))
             .ReturnsAsync(true);
-        _ledgerRepositoryMock.Setup(x => x.UpdateAsync(It.IsAny<Ledger>()))
+        _ledgerRepositoryMock.Setup(x => x.UpdateAsync(It.IsAny<Ledger>(), It.IsAny<SQLiteTransaction>()))
             .ReturnsAsync(true);
 
         // Act
@@ -3706,7 +3712,7 @@ FEDCBA9876543210,鈴木花子,002,テスト2";
         _ledgerRepositoryMock.Verify(x => x.UpdateAsync(It.Is<Ledger>(l =>
             l.Id == 1 &&
             l.Expense == 600 &&
-            l.Balance == 9400)), Times.Once);
+            l.Balance == 9400), It.IsAny<SQLiteTransaction>()), Times.Once);
     }
 
     /// <summary>
@@ -4400,10 +4406,10 @@ FEDCBA9876543210,鈴木花子,002,テスト2";
             Summary = "鉄道", Income = 0, Expense = 0, Balance = 9220,
             Details = new List<LedgerDetail>()
         });
-        _ledgerRepositoryMock.Setup(x => x.ReplaceDetailsAsync(1, It.IsAny<IEnumerable<LedgerDetail>>()))
+        _ledgerRepositoryMock.Setup(x => x.ReplaceDetailsAsync(1, It.IsAny<IEnumerable<LedgerDetail>>(), It.IsAny<SQLiteTransaction>()))
             .ReturnsAsync(true);
         // Issue #1808: 親 Ledger の UpdateAsync の戻り値を確認するようになったため、成功を明示する
-        _ledgerRepositoryMock.Setup(x => x.UpdateAsync(It.IsAny<Ledger>())).ReturnsAsync(true);
+        _ledgerRepositoryMock.Setup(x => x.UpdateAsync(It.IsAny<Ledger>(), It.IsAny<SQLiteTransaction>())).ReturnsAsync(true);
 
         // Act
         var previewResult = await _service.PreviewLedgerDetailsAsync(filePath);
@@ -4518,10 +4524,10 @@ FEDCBA9876543210,鈴木花子,002,テスト2";
             Summary = "鉄道（博多～天神）", Income = 0, Expense = 260, Balance = 9740
         };
         _ledgerRepositoryMock.Setup(x => x.GetByIdAsync(1)).ReturnsAsync(existingLedger);
-        _ledgerRepositoryMock.Setup(x => x.ReplaceDetailsAsync(1, It.IsAny<IEnumerable<LedgerDetail>>()))
+        _ledgerRepositoryMock.Setup(x => x.ReplaceDetailsAsync(1, It.IsAny<IEnumerable<LedgerDetail>>(), It.IsAny<SQLiteTransaction>()))
             .ReturnsAsync(true);
         // 競合: WHERE id = 1 に一致する行が無い（Issue #1753 の影響行数検出）
-        _ledgerRepositoryMock.Setup(x => x.UpdateAsync(It.IsAny<Ledger>())).ReturnsAsync(false);
+        _ledgerRepositoryMock.Setup(x => x.UpdateAsync(It.IsAny<Ledger>(), It.IsAny<SQLiteTransaction>())).ReturnsAsync(false);
 
         // Act
         var result = await _service.ImportLedgerDetailsAsync(filePath);
@@ -4536,11 +4542,15 @@ FEDCBA9876543210,鈴木花子,002,テスト2";
     }
 
     /// <summary>
-    /// 明細を置き換えたあとの再読取で親 Ledger が見つからない（置換と読取の間に削除された）ときも、
-    /// 同じくエラーとして報告し、存在しない行への <c>UpdateAsync</c> は呼ばないこと。
+    /// トランザクション内の再読取で親 Ledger が見つからない（事前パスと取り込みの間に削除された）ときも、
+    /// 同じくエラーとして報告し、明細の置換も親の更新も行わないこと（Issue #1808 / #2155）。
     /// </summary>
+    /// <remarks>
+    /// Issue #2155 で親の再読取を明細の置換より前へ移した（#1760「読み取りが null なら、書き込みも行わない」）。
+    /// 旧実装は置換を確定させてから親を読んでいたため、この形では明細だけが書き込まれていた。
+    /// </remarks>
     [Fact]
-    public async Task ImportLedgerDetailsAsync_置換後に親Ledgerが見つからない_エラーとして報告しUpdateAsyncを呼ばない()
+    public async Task ImportLedgerDetailsAsync_取込時に親Ledgerが見つからない_何も書き込まずエラーとして報告()
     {
         // Arrange
         var csvContent = DetailCsvHeader + @"
@@ -4553,11 +4563,11 @@ FEDCBA9876543210,鈴木花子,002,テスト2";
             Id = 1, CardIdm = "0123456789ABCDEF", Date = new DateTime(2024, 1, 15),
             Summary = "鉄道（博多～天神）", Income = 0, Expense = 260, Balance = 9740
         };
-        // 1 回目（存在チェック）は見つかり、2 回目（置換後の再読取）は削除済み
+        // 1 回目（存在チェック）は見つかり、2 回目（トランザクション内の再読取）は削除済み
         _ledgerRepositoryMock.SetupSequence(x => x.GetByIdAsync(1))
             .ReturnsAsync(existingLedger)
             .ReturnsAsync((Ledger?)null);
-        _ledgerRepositoryMock.Setup(x => x.ReplaceDetailsAsync(1, It.IsAny<IEnumerable<LedgerDetail>>()))
+        _ledgerRepositoryMock.Setup(x => x.ReplaceDetailsAsync(1, It.IsAny<IEnumerable<LedgerDetail>>(), It.IsAny<SQLiteTransaction>()))
             .ReturnsAsync(true);
 
         // Act
@@ -4568,7 +4578,10 @@ FEDCBA9876543210,鈴木花子,002,テスト2";
         result.ImportedCount.Should().Be(0);
         result.ErrorCount.Should().Be(1);
         AssertParentLedgerConflictMessage(result.Errors.Single().Message, ledgerId: 1);
-        _ledgerRepositoryMock.Verify(x => x.UpdateAsync(It.IsAny<Ledger>()), Times.Never);
+        _ledgerRepositoryMock.Verify(x => x.ReplaceDetailsAsync(
+            It.IsAny<int>(), It.IsAny<IEnumerable<LedgerDetail>>(), It.IsAny<SQLiteTransaction>()), Times.Never,
+            "親が無いと分かった時点で明細を書き込まない");
+        _ledgerRepositoryMock.Verify(x => x.UpdateAsync(It.IsAny<Ledger>(), It.IsAny<SQLiteTransaction>()), Times.Never);
     }
 
     /// <summary>
@@ -4591,7 +4604,7 @@ FEDCBA9876543210,鈴木花子,002,テスト2";
             Summary = "鉄道（博多～天神）", Income = 0, Expense = 260, Balance = 9740
         };
         _ledgerRepositoryMock.Setup(x => x.GetByIdAsync(1)).ReturnsAsync(existingLedger);
-        _ledgerRepositoryMock.Setup(x => x.ReplaceDetailsAsync(1, It.IsAny<IEnumerable<LedgerDetail>>()))
+        _ledgerRepositoryMock.Setup(x => x.ReplaceDetailsAsync(1, It.IsAny<IEnumerable<LedgerDetail>>(), It.IsAny<SQLiteTransaction>()))
             .ThrowsAsync(new SQLiteException(SQLiteErrorCode.Constraint, "constraint failed\r\nFOREIGN KEY constraint failed"));
 
         // Act
@@ -4607,15 +4620,20 @@ FEDCBA9876543210,鈴木花子,002,テスト2";
         error.Message.Should().NotContain("FOREIGN KEY");
         error.Message.Should().NotContain("constraint");
         error.Message.Should().MatchRegex("してください。?$");
-        _ledgerRepositoryMock.Verify(x => x.UpdateAsync(It.IsAny<Ledger>()), Times.Never);
+        _ledgerRepositoryMock.Verify(x => x.UpdateAsync(It.IsAny<Ledger>(), It.IsAny<SQLiteTransaction>()), Times.Never);
     }
 
     /// <summary>
-    /// 明細の置換は確定したが親 Ledger の <c>UpdateAsync</c> が例外（共有モードの SQLITE_BUSY 等）のとき、
-    /// 「明細は置き換えた・親の摘要・金額は未更新」という実際の状態を案内し、生の <c>ex.Message</c> を出さないこと。
+    /// 明細の置換のあとで親 Ledger の <c>UpdateAsync</c> が例外（共有モードの SQLITE_BUSY 等）のとき、
+    /// 「この履歴は何も変更されていない」という実際の状態を案内し、生の <c>ex.Message</c> を出さないこと。
     /// </summary>
+    /// <remarks>
+    /// Issue #2155: 明細の置換と親の更新は同じトランザクションなので、置換のあとの失敗でも明細は巻き戻る。
+    /// 旧実装はここで「明細は置き換えました」と案内していた（実際に明細だけが確定していた）。
+    /// 巻き戻ったこと自体は実 DB で <c>CsvImportServiceLedgerDetailTransactionTests</c> が表明する。
+    /// </remarks>
     [Fact]
-    public async Task ImportLedgerDetailsAsync_親Ledger更新が例外_明細は置換済みと案内し生の例外メッセージを出さない()
+    public async Task ImportLedgerDetailsAsync_親Ledger更新が例外_何も変更されていないと案内し生の例外メッセージを出さない()
     {
         // Arrange
         var csvContent = DetailCsvHeader + @"
@@ -4629,9 +4647,9 @@ FEDCBA9876543210,鈴木花子,002,テスト2";
             Summary = "鉄道（博多～天神）", Income = 0, Expense = 260, Balance = 9740
         };
         _ledgerRepositoryMock.Setup(x => x.GetByIdAsync(1)).ReturnsAsync(existingLedger);
-        _ledgerRepositoryMock.Setup(x => x.ReplaceDetailsAsync(1, It.IsAny<IEnumerable<LedgerDetail>>()))
+        _ledgerRepositoryMock.Setup(x => x.ReplaceDetailsAsync(1, It.IsAny<IEnumerable<LedgerDetail>>(), It.IsAny<SQLiteTransaction>()))
             .ReturnsAsync(true);
-        _ledgerRepositoryMock.Setup(x => x.UpdateAsync(It.IsAny<Ledger>()))
+        _ledgerRepositoryMock.Setup(x => x.UpdateAsync(It.IsAny<Ledger>(), It.IsAny<SQLiteTransaction>()))
             .ThrowsAsync(new SQLiteException(SQLiteErrorCode.Busy, "database is locked"));
 
         // Act
@@ -4639,8 +4657,13 @@ FEDCBA9876543210,鈴木花子,002,テスト2";
 
         // Assert
         result.Success.Should().BeFalse();
+        result.ImportedCount.Should().Be(0);
+        _ledgerRepositoryMock.Verify(x => x.ReplaceDetailsAsync(
+            1, It.IsAny<IEnumerable<LedgerDetail>>(), It.IsAny<SQLiteTransaction>()), Times.Once,
+            "置換のあとの失敗であること（前提）");
         var error = result.Errors.Should().ContainSingle().Subject;
-        error.Message.Should().Contain("明細は置き換えました");
+        error.Message.Should().Contain("変更されていません");
+        error.Message.Should().NotContain("明細は置き換えました");
         error.Message.Should().NotContain("database is locked");
         error.Message.Should().MatchRegex("してください。?$");
     }
@@ -4911,10 +4934,10 @@ FEDCBA9876543210,鈴木花子,002,テスト2";
         };
         _ledgerRepositoryMock.Setup(x => x.GetByIdAsync(1)).ReturnsAsync(existingLedger);
         List<LedgerDetail>? captured = null;
-        _ledgerRepositoryMock.Setup(x => x.ReplaceDetailsAsync(1, It.IsAny<IEnumerable<LedgerDetail>>()))
-            .Callback<int, IEnumerable<LedgerDetail>>((_, d) => captured = d.ToList())
+        _ledgerRepositoryMock.Setup(x => x.ReplaceDetailsAsync(1, It.IsAny<IEnumerable<LedgerDetail>>(), It.IsAny<SQLiteTransaction>()))
+            .Callback<int, IEnumerable<LedgerDetail>, SQLiteTransaction>((_, d, __) => captured = d.ToList())
             .ReturnsAsync(true);
-        _ledgerRepositoryMock.Setup(x => x.UpdateAsync(It.IsAny<Ledger>())).ReturnsAsync(true);
+        _ledgerRepositoryMock.Setup(x => x.UpdateAsync(It.IsAny<Ledger>(), It.IsAny<SQLiteTransaction>())).ReturnsAsync(true);
 
         // Act
         var result = await _service.ImportLedgerDetailsAsync(filePath);
