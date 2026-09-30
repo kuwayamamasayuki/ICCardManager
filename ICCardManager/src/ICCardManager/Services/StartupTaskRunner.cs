@@ -11,7 +11,7 @@ namespace ICCardManager.Services
     /// </summary>
     /// <remarks>
     /// <para>
-    /// 実行順は「自動バックアップ → 6年経過データの削除 → 月次 VACUUM」。
+    /// 実行順は「更新通知ファイルの配置 → 自動バックアップ → 6年経過データの削除 → 月次 VACUUM」。
     /// <see cref="App"/> から切り出したのは、この順序と直列性が
     /// <see cref="DbContext"/> の単一接続制約に依存しており、単体テストで固定する必要があるため。
     /// </para>
@@ -31,6 +31,7 @@ namespace ICCardManager.Services
         private readonly BackupService _backupService;
         private readonly ISettingsRepository _settingsRepository;
         private readonly IBackupHealthService _backupHealthService;
+        private readonly IUpdateNotificationService _updateNotificationService;
         private readonly ILogger<StartupTaskRunner> _logger;
 
         public StartupTaskRunner(
@@ -38,12 +39,14 @@ namespace ICCardManager.Services
             BackupService backupService,
             ISettingsRepository settingsRepository,
             IBackupHealthService backupHealthService,
+            IUpdateNotificationService updateNotificationService,
             ILogger<StartupTaskRunner> logger)
         {
             _dbContext = dbContext;
             _backupService = backupService;
             _settingsRepository = settingsRepository;
             _backupHealthService = backupHealthService;
+            _updateNotificationService = updateNotificationService;
             _logger = logger;
         }
 
@@ -56,6 +59,25 @@ namespace ICCardManager.Services
         /// </remarks>
         public async Task RunAsync(DateTime today)
         {
+            // 更新通知ファイル（latest_version.txt）の配置（Issue #2149）
+            // 自分の方が新しいときだけ自バージョンを書く。メイン画面の更新チェック
+            // （MainViewModel.CheckUpdateNotificationAsync）は起動時タスクの完了後に走るため、
+            // 書き換えた PC 自身は「新しいバージョンがあります」を出さない。
+            // DB 接続を使わないので直列性（Issue #1737）には関与しないが、SMB 上の同期
+            // ファイル I/O なので UI スレッドから外す（起動時タスクはメイン画面の表示前に await されるため、
+            // SMB の往復数回分だけ表示は遅れる。バックアップのコピーに比べれば無視できる）。
+            // 失敗で後続の保守タスクを巻き添えにしない。
+            try
+            {
+                await Task.Run(() => _updateNotificationService.PublishCurrentVersionIfNewer()).ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                // PublishCurrentVersionIfNewer はファイル I/O の失敗を内部で Warning に畳む。
+                // ここへ来るのは想定外の例外だけ（backstop）
+                _logger.LogError(ex, "起動時の更新通知ファイルの配置でエラー");
+            }
+
             try
             {
                 // 自動バックアップ（Issue #1737: 必ず完了を待つ）

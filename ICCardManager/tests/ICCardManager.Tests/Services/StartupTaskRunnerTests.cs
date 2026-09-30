@@ -36,6 +36,7 @@ public class StartupTaskRunnerTests
     private readonly Mock<BackupService> _backupServiceMock;
     private readonly Mock<ISettingsRepository> _settingsRepositoryMock = new();
     private readonly Mock<IBackupHealthService> _backupHealthServiceMock = new();
+    private readonly Mock<IUpdateNotificationService> _updateNotificationServiceMock = new();
     private readonly Mock<ILogger<StartupTaskRunner>> _loggerMock = new();
     private readonly StartupTaskRunner _runner;
 
@@ -72,6 +73,7 @@ public class StartupTaskRunnerTests
             _backupServiceMock.Object,
             _settingsRepositoryMock.Object,
             _backupHealthServiceMock.Object,
+            _updateNotificationServiceMock.Object,
             _loggerMock.Object);
     }
 
@@ -159,6 +161,50 @@ public class StartupTaskRunnerTests
             "バックアップの失敗で古いデータ削除がスキップされてはならない");
         _dbContextMock.Verify(x => x.VacuumAsync(It.IsAny<CancellationToken>()), Times.Once,
             "バックアップの失敗で月次 VACUUM がスキップされてはならない");
+    }
+
+    #endregion
+
+    #region 更新通知ファイルの配置（Issue #2149）
+
+    [Fact]
+    public async Task RunAsync_更新通知ファイルの配置をバックアップより先に1回だけ実行すること()
+    {
+        // Arrange: 配置の呼び出しもバックアップと同じ順序記録へ載せる
+        var tracker = SetupTrackedTasks();
+        _updateNotificationServiceMock.Setup(x => x.PublishCurrentVersionIfNewer())
+            .Callback(() =>
+            {
+                tracker.Enter("publish");
+                tracker.Exit("publish");
+            });
+
+        // Act
+        await _runner.RunAsync(NonVacuumDay);
+
+        // Assert: 起動時タスクの先頭で走り、メイン画面の更新チェック（起動時タスクの完了後）より前に終わる
+        _updateNotificationServiceMock.Verify(x => x.PublishCurrentVersionIfNewer(), Times.Once);
+        tracker.Order.Should().ContainInOrder("publish:start", "publish:end", "backup:start");
+    }
+
+    [Fact]
+    public async Task RunAsync_更新通知ファイルの配置が例外でも後続タスクは実行されること()
+    {
+        // Arrange: PublishCurrentVersionIfNewer はファイル I/O の失敗を内部で畳むが、
+        // 想定外の例外でもバックアップ以降を巻き添えにしないこと（backstop）を固定する
+        _updateNotificationServiceMock.Setup(x => x.PublishCurrentVersionIfNewer())
+            .Throws(new InvalidOperationException("想定外"));
+
+        // Act
+        Func<Task> act = () => _runner.RunAsync(VacuumDay);
+
+        // Assert
+        await act.Should().NotThrowAsync();
+        VerifyLogged(LogLevel.Error, "更新通知ファイル");
+        _backupServiceMock.Verify(x => x.ExecuteAutoBackupAsync(), Times.Once,
+            "更新通知ファイルの配置の失敗で自動バックアップがスキップされてはならない");
+        _dbContextMock.Verify(x => x.CleanupOldDataAsync(It.IsAny<CancellationToken>()), Times.Once);
+        _dbContextMock.Verify(x => x.VacuumAsync(It.IsAny<CancellationToken>()), Times.Once);
     }
 
     #endregion
