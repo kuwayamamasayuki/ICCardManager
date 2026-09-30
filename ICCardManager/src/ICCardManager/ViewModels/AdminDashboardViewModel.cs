@@ -581,6 +581,7 @@ namespace ICCardManager.ViewModels
         /// </summary>
         /// <remarks>
         /// 設定の読み取りに失敗しても運用状況の集計は止めない（既定値のまま集計し、痕跡はログへ残す）。
+        /// 保存値が範囲外（DB の直接編集）のときも同じく既定値で集計する。
         /// 選択肢を先に差し替えてから値を入れる — 逆順だと、ComboBox の SelectedItem が
         /// 選択肢に無い値を受け取って選択が外れる。
         /// </remarks>
@@ -597,6 +598,21 @@ namespace ICCardManager.ViewModels
             catch (Exception ex)
             {
                 ErrorDialogHelper.LogException(ex, "長期未返却しきい値の設定の読み取り");
+                return;
+            }
+
+            if (configuredDays < AppConstants.MinLongTermUnreturnedDays
+                || configuredDays > AppConstants.MaxLongTermUnreturnedDays)
+            {
+                // 設定画面の保存は範囲を検証するので、ここへ来るのは DB を直接書き換えた場合だけ。
+                // 0 日を採用すると貸出中のカードがすべて長期未返却として督促対象になるため、
+                // 採用せず既定値で集計し、痕跡を残す（黙って別の値へ読み替えない）
+                ErrorDialogHelper.LogException(
+                    new InvalidOperationException(
+                        $"保存されている長期未返却のしきい値 {configuredDays} 日が範囲 "
+                        + $"{AppConstants.MinLongTermUnreturnedDays}〜{AppConstants.MaxLongTermUnreturnedDays} 日の外にあるため、"
+                        + $"既定の {AppConstants.LongTermUnreturnedDays} 日で集計します"),
+                    "長期未返却しきい値の設定の読み取り");
                 return;
             }
 

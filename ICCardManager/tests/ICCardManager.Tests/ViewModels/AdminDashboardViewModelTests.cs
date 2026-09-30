@@ -550,6 +550,50 @@ public class AdminDashboardViewModelTests
         _settingsRepository.Verify(r => r.GetAppSettingsAsync(), Times.Once, "設定値の採用は最初の読み込みだけ");
     }
 
+    [Theory]
+    [InlineData(0)]     // 貸出中の全カードが長期未返却になる
+    [InlineData(-5)]
+    [InlineData(366)]
+    public async Task 保存値が範囲外なら採用せず既定の14日で集計すること(int storedDays)
+    {
+        // 設定画面は範囲を検証するので、ここへ来るのは DB を直接書き換えた場合だけ（コードレビュー指摘）
+        SetupConfiguredDays(storedDays);
+        SetupStatusJudgedByThreshold();
+        var vm = CreateViewModel();
+
+        await vm.LoadOperationStatusAsync();
+
+        vm.LongTermUnreturnedDays.Should().Be(14);
+        vm.LongTermUnreturnedDayOptions.Should().Equal(7, 14, 30);
+        _service.Verify(s => s.GetOperationStatusAsync(It.IsAny<DateTime>(), storedDays), Times.Never);
+        vm.OperationStatus.LongTermUnreturnedCount.Should().Be(0, "0 日を採用すると A・B とも督促対象になる");
+    }
+
+    [Fact]
+    public async Task 設定値を採用するとき選択肢を先に差し替えてから日数を入れること()
+    {
+        // 逆順だと、ComboBox の SelectedItem が選択肢に無い値（10）を受け取って選択が外れる。
+        // 最終状態は同じになるため、状態の表明では順序を検出できない（コードレビュー指摘）
+        SetupConfiguredDays(ConfiguredDays);
+        SetupOperationStatus(CreateStatus(CreateCard()));
+        var vm = CreateViewModel();
+        var order = new List<string>();
+        vm.PropertyChanged += (_, e) =>
+        {
+            if (e.PropertyName == nameof(AdminDashboardViewModel.LongTermUnreturnedDayOptions)
+                || e.PropertyName == nameof(AdminDashboardViewModel.LongTermUnreturnedDays))
+            {
+                order.Add(e.PropertyName);
+            }
+        };
+
+        await vm.LoadOperationStatusAsync();
+
+        order.Should().Equal(
+            nameof(AdminDashboardViewModel.LongTermUnreturnedDayOptions),
+            nameof(AdminDashboardViewModel.LongTermUnreturnedDays));
+    }
+
     [Fact]
     public async Task 設定の読み取りに失敗しても既定の14日で集計を続けること()
     {
