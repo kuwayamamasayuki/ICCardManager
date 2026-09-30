@@ -126,6 +126,51 @@
                     </StackPanel>
                 </GroupBox>
 
+                <!-- 3b. 長期未返却（Issue #2152） -->
+                <GroupBox Header="長期未返却" Margin="0,0,0,20" Padding="15">
+                    <StackPanel>
+                        <Label Content="長期未返却とみなす日数(_L)"
+                               Target="{Binding ElementName=LongTermUnreturnedDaysTextBox}"
+                               FontWeight="Bold"
+                               Padding="0"
+                               Margin="0,0,0,5"/>
+                        <TextBlock Text="貸出からこの日数以上返却されていない交通系ICカードを、管理者ダッシュボードで長期未返却として表示します"
+                                   Foreground="{DynamicResource SecondaryTextBrush}"
+                                   TextWrapping="Wrap"
+                                   Margin="0,0,0,10"/>
+                        <StackPanel Orientation="Horizontal">
+                            <!-- Min/Max は AppConstants.Min/MaxLongTermUnreturnedDays と一致させる（静的検査で固定） -->
+                            <TextBox x:Name="LongTermUnreturnedDaysTextBox"
+                                     Width="80"
+                                     Padding="8,6"
+                                     TextAlignment="Right"
+                                     VerticalAlignment="Center"
+                                     AutomationProperties.Name="長期未返却とみなす日数"
+                                     AutomationProperties.HelpText="貸出からこの日数以上返却されていない交通系ICカードを長期未返却として表示します"
+                                     ToolTip="1～365日の範囲で設定（アクセスキー: Alt+L）">
+                                <TextBox.Text>
+                                    <Binding Path="LongTermUnreturnedDays" UpdateSourceTrigger="PropertyChanged">
+                                        <Binding.ValidationRules>
+                                            <validation:NumericRangeValidationRule
+                                                Min="1"
+                                                Max="365"
+                                                FieldName="長期未返却とみなす日数"/>
+                                        </Binding.ValidationRules>
+                                    </Binding>
+                                </TextBox.Text>
+                            </TextBox>
+                            <TextBlock Text="日"
+                                       VerticalAlignment="Center"
+                                       Margin="6,0,0,0"/>
+                        </StackPanel>
+                        <TextBlock Text="※ 1～365日の範囲で設定できます（既定は14日）。管理者ダッシュボードでは、この日数を初期値として表示し、画面上で別の日数へ一時的に切り替えて確認できます（切り替えは保存されません）"
+                                   FontSize="{DynamicResource SmallFontSize}"
+                                   Foreground="{DynamicResource SecondaryTextBrush}"
+                                   TextWrapping="Wrap"
+                                   Margin="0,5,0,0"/>
+                    </StackPanel>
+                </GroupBox>
+
                 <!-- 4. 音声設定 -->
                 <GroupBox Header="音声設定" Margin="0,0,0,20" Padding="15">
                     <StackPanel>

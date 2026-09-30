@@ -75,6 +75,7 @@ namespace ICCardManager.Views.Dialogs
             {
                 nameof(SettingsViewModel.WarningBalance) => WarningBalanceTextBox,
                 nameof(SettingsViewModel.CompanionCountInputTimeoutSeconds) => CompanionCountTimeoutTextBox,
+                nameof(SettingsViewModel.LongTermUnreturnedDays) => LongTermUnreturnedDaysTextBox,
                 nameof(SettingsViewModel.BackupPath) => BackupPathTextBox,
                 nameof(SettingsViewModel.DatabasePath) => DatabasePathTextBox,
                 _ => null

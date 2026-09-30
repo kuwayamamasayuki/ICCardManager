@@ -10,7 +10,9 @@ using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using ICCardManager.Common;
 using ICCardManager.Common.Charting;
+using ICCardManager.Data.Repositories;
 using ICCardManager.Dtos;
+using ICCardManager.Models;
 using ICCardManager.Services;
 using Microsoft.Win32;
 using System.Globalization;
@@ -170,6 +172,16 @@ namespace ICCardManager.ViewModels
         private readonly AdminDashboardExcelExportService _excelExportService;
         private readonly IDialogService _dialogService;
         private readonly ISafeFileLauncher _safeFileLauncher;
+        private readonly ISettingsRepository _settingsRepository;
+
+        /// <summary>
+        /// 設定画面で保存した長期未返却のしきい値を、画面の初期値として採用済みか（Issue #2152）
+        /// </summary>
+        /// <remarks>
+        /// 採用は最初の読み込みで 1 回だけ行う。「更新」ボタンのたびに採り直すと、
+        /// 職員が画面上で一時的に切り替えた日数が設定値へ戻されてしまう。
+        /// </remarks>
+        private bool _configuredThresholdApplied;
 
         #region グラフの描画領域（固定ピクセル）
 
@@ -347,11 +359,16 @@ namespace ICCardManager.ViewModels
         private AdminDashboardCardFilter selectedFilter = AdminDashboardCardFilter.All;
 
         /// <summary>長期未返却と判定する日数</summary>
+        /// <remarks>
+        /// 初期値は設定画面で保存した値（<see cref="AppSettings.LongTermUnreturnedDays"/>、Issue #2152）。
+        /// 画面上の切り替えは一時的な絞り込みで、設定へは保存しない。
+        /// </remarks>
         [ObservableProperty]
         private int longTermUnreturnedDays = AppConstants.LongTermUnreturnedDays;
 
-        /// <summary>長期未返却しきい値の選択肢</summary>
-        public IReadOnlyList<int> LongTermUnreturnedDayOptions => AppConstants.LongTermUnreturnedDayOptions;
+        /// <summary>長期未返却しきい値の選択肢（既定の選択肢 ∪ 設定値、昇順）</summary>
+        [ObservableProperty]
+        private IReadOnlyList<int> longTermUnreturnedDayOptions = AppConstants.LongTermUnreturnedDayOptions;
 
         /// <summary>利用分析の集計期間（か月）</summary>
         [ObservableProperty]
@@ -455,12 +472,14 @@ namespace ICCardManager.ViewModels
             IAdminDashboardService adminDashboardService,
             AdminDashboardExcelExportService excelExportService,
             IDialogService dialogService,
-            ISafeFileLauncher safeFileLauncher)
+            ISafeFileLauncher safeFileLauncher,
+            ISettingsRepository settingsRepository)
         {
             _adminDashboardService = adminDashboardService;
             _excelExportService = excelExportService;
             _dialogService = dialogService;
             _safeFileLauncher = safeFileLauncher;
+            _settingsRepository = settingsRepository;
         }
 
         #region 読み込み
@@ -478,6 +497,11 @@ namespace ICCardManager.ViewModels
             {
                 try
                 {
+                    if (!_configuredThresholdApplied)
+                    {
+                        await ApplyConfiguredThresholdAsync();
+                    }
+
                     AsOf = DateTime.Now;
                     OperationStatus = await _adminDashboardService.GetOperationStatusAsync(AsOf, LongTermUnreturnedDays);
                     ApplyFilter();
@@ -551,6 +575,44 @@ namespace ICCardManager.ViewModels
                 + $"長期未返却{status.LongTermUnreturnedCount}／残額不足{status.LowBalanceCount}／"
                 + $"帳票未出力{status.ReportNotExportedCount}";
         }
+
+        /// <summary>
+        /// 設定画面で保存した長期未返却のしきい値を、画面の初期値と選択肢へ反映する（Issue #2152）
+        /// </summary>
+        /// <remarks>
+        /// 設定の読み取りに失敗しても運用状況の集計は止めない（既定値のまま集計し、痕跡はログへ残す）。
+        /// 選択肢を先に差し替えてから値を入れる — 逆順だと、ComboBox の SelectedItem が
+        /// 選択肢に無い値を受け取って選択が外れる。
+        /// </remarks>
+        private async Task ApplyConfiguredThresholdAsync()
+        {
+            _configuredThresholdApplied = true;
+
+            int configuredDays;
+            try
+            {
+                var settings = await _settingsRepository.GetAppSettingsAsync();
+                configuredDays = settings.LongTermUnreturnedDays;
+            }
+            catch (Exception ex)
+            {
+                ErrorDialogHelper.LogException(ex, "長期未返却しきい値の設定の読み取り");
+                return;
+            }
+
+            LongTermUnreturnedDayOptions = BuildLongTermUnreturnedDayOptions(configuredDays);
+            LongTermUnreturnedDays = configuredDays;
+        }
+
+        /// <summary>
+        /// 長期未返却しきい値の選択肢を組み立てる。既定の選択肢に設定値を加え、重複を除いて昇順に並べる（Issue #2152）
+        /// </summary>
+        internal static IReadOnlyList<int> BuildLongTermUnreturnedDayOptions(int configuredDays)
+            => AppConstants.LongTermUnreturnedDayOptions
+                .Concat(new[] { configuredDays })
+                .Distinct()
+                .OrderBy(days => days)
+                .ToArray();
 
         partial void OnLongTermUnreturnedDaysChanged(int value)
         {

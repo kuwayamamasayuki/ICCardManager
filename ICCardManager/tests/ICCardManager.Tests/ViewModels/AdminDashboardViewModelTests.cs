@@ -6,7 +6,9 @@ using System.Threading.Tasks;
 using FluentAssertions;
 using ICCardManager.Common;
 using ICCardManager.Common.Charting;
+using ICCardManager.Data.Repositories;
 using ICCardManager.Dtos;
+using ICCardManager.Models;
 using ICCardManager.Services;
 using ICCardManager.ViewModels;
 using Moq;
@@ -28,6 +30,13 @@ public class AdminDashboardViewModelTests
     private readonly Mock<AdminDashboardExcelExportService> _exportService = new();
     private readonly Mock<IDialogService> _dialogService = new();
     private readonly Mock<ISafeFileLauncher> _safeFileLauncher = new();
+    private readonly Mock<ISettingsRepository> _settingsRepository = new();
+
+    public AdminDashboardViewModelTests()
+    {
+        // 既定は未設定の環境（長期未返却 14 日）。設定値を使うテストは個別に上書きする（Issue #2152）
+        _settingsRepository.Setup(r => r.GetAppSettingsAsync()).ReturnsAsync(new AppSettings());
+    }
 
     /// <summary>テストデータの「その他」系列が集約した人数（Issue #1858）</summary>
     private const int OtherAggregatedCount = 3;
@@ -54,7 +63,8 @@ public class AdminDashboardViewModelTests
     }
 
     private AdminDashboardViewModel CreateViewModel() => new AdminDashboardViewModel(
-        _service.Object, _exportService.Object, _dialogService.Object, _safeFileLauncher.Object);
+        _service.Object, _exportService.Object, _dialogService.Object, _safeFileLauncher.Object,
+        _settingsRepository.Object);
 
     #region テストデータ
 
@@ -413,6 +423,147 @@ public class AdminDashboardViewModelTests
 
         var finished = await Task.WhenAny(reloaded.Task, Task.Delay(TimeSpan.FromSeconds(5)));
         finished.Should().BeSameAs(reloaded.Task, "しきい値を変えたら新しい値で再集計されるべき");
+    }
+
+    #endregion
+
+    #region 長期未返却しきい値の設定値（Issue #2152）
+
+    private const int ConfiguredDays = 10;
+
+    private void SetupConfiguredDays(int days)
+        => _settingsRepository.Setup(r => r.GetAppSettingsAsync())
+            .ReturnsAsync(new AppSettings { LongTermUnreturnedDays = days });
+
+    /// <summary>
+    /// 本番の判定関数（<see cref="CardUtilizationCalculator.IsLongTermUnreturned"/>）で、
+    /// 渡されたしきい値に応じた集計結果を返す。貸出から 10 日のカード A と 9 日のカード B を持つ。
+    /// </summary>
+    /// <remarks>
+    /// 固定の結果を返すモックでは、ViewModel が設定値を渡したかどうかで結果が変わらない（#2106）。
+    /// </remarks>
+    private void SetupStatusJudgedByThreshold()
+        => _service.Setup(s => s.GetOperationStatusAsync(It.IsAny<DateTime>(), It.IsAny<int>()))
+            .ReturnsAsync((DateTime asOf, int thresholdDays) => CreateStatus(
+                CreateCard(idm: "A", displayName: "A", isLent: true,
+                    isLongTermUnreturned: CardUtilizationCalculator.IsLongTermUnreturned(asOf.AddDays(-10), asOf, thresholdDays)),
+                CreateCard(idm: "B", displayName: "B", isLent: true,
+                    isLongTermUnreturned: CardUtilizationCalculator.IsLongTermUnreturned(asOf.AddDays(-9), asOf, thresholdDays))));
+
+    [Fact]
+    public async Task LoadOperationStatusAsync_設定したしきい値で長期未返却を判定すること()
+    {
+        // 既定（14 日）なら A・B とも非該当になる入力。設定を読まない実装を落とす（#2106）
+        SetupConfiguredDays(ConfiguredDays);
+        SetupStatusJudgedByThreshold();
+        var vm = CreateViewModel();
+
+        await vm.LoadOperationStatusAsync();
+
+        vm.LongTermUnreturnedDays.Should().Be(10, "設定画面で保存した値が初期値になる");
+        _service.Verify(s => s.GetOperationStatusAsync(It.IsAny<DateTime>(), 10), Times.Once);
+        _service.Verify(s => s.GetOperationStatusAsync(It.IsAny<DateTime>(), 14), Times.Never,
+            "既定値で一度集計してから設定値で集計し直す形は、開いた直後に誤った件数を見せる");
+        vm.OperationStatus.Cards.Single(c => c.CardIdm == "A").IsLongTermUnreturned
+            .Should().BeTrue("貸出から 10 日＝しきい値ちょうどは長期未返却");
+        vm.OperationStatus.Cards.Single(c => c.CardIdm == "B").IsLongTermUnreturned
+            .Should().BeFalse("貸出から 9 日はしきい値未満");
+    }
+
+    [Fact]
+    public async Task LoadOperationStatusAsync_未設定なら既定の14日で判定すること()
+    {
+        // 対の表明: 上のテストと同じ入力でも、既定なら A・B とも非該当になる
+        SetupStatusJudgedByThreshold();
+        var vm = CreateViewModel();
+
+        await vm.LoadOperationStatusAsync();
+
+        vm.LongTermUnreturnedDays.Should().Be(14);
+        vm.LongTermUnreturnedDayOptions.Should().Equal(7, 14, 30);
+        vm.OperationStatus.LongTermUnreturnedCount.Should().Be(0);
+    }
+
+    [Fact]
+    public async Task LoadOperationStatusAsync_設定値を選択肢へ加えて昇順に並べること()
+    {
+        SetupConfiguredDays(ConfiguredDays);
+        SetupOperationStatus(CreateStatus(CreateCard()));
+        var vm = CreateViewModel();
+
+        await vm.LoadOperationStatusAsync();
+
+        vm.LongTermUnreturnedDayOptions.Should().Equal(new[] { 7, 10, 14, 30 },
+            "ComboBox の SelectedItem が選択肢に無い値を指すと選択が外れる");
+    }
+
+    [Theory]
+    [InlineData(10, new[] { 7, 10, 14, 30 })]
+    [InlineData(30, new[] { 7, 14, 30 })]          // 既定の選択肢と重なる値は重複させない
+    [InlineData(1, new[] { 1, 7, 14, 30 })]        // 下限
+    [InlineData(365, new[] { 7, 14, 30, 365 })]    // 上限
+    public void BuildLongTermUnreturnedDayOptions_既定の選択肢と設定値の和集合を昇順で返すこと(int configured, int[] expected)
+    {
+        AdminDashboardViewModel.BuildLongTermUnreturnedDayOptions(configured).Should().Equal(expected);
+    }
+
+    [Fact]
+    public async Task 画面上でしきい値を切り替えても設定を保存しないこと()
+    {
+        SetupConfiguredDays(ConfiguredDays);
+        SetupOperationStatus(CreateStatus(CreateCard()));
+        var vm = CreateViewModel();
+        await vm.LoadOperationStatusAsync();
+
+        var reloaded = new TaskCompletionSource<bool>();
+        _service.Setup(s => s.GetOperationStatusAsync(It.IsAny<DateTime>(), 30))
+            .Callback(() => reloaded.TrySetResult(true))
+            .ReturnsAsync(CreateStatus(CreateCard()));
+
+        vm.LongTermUnreturnedDays = 30;
+
+        var finished = await Task.WhenAny(reloaded.Task, Task.Delay(TimeSpan.FromSeconds(5)));
+        finished.Should().BeSameAs(reloaded.Task, "切り替えは再集計される（切り替え自体が効いていること）");
+        _settingsRepository.Verify(r => r.SaveAppSettingsAsync(It.IsAny<AppSettings>()), Times.Never,
+            "画面上の切り替えは一時的な絞り込み。保存すると画面が設定画面を兼ね、一括保存の経路に乗る（#1997）");
+    }
+
+    [Fact]
+    public async Task 更新しても画面上で切り替えたしきい値を設定値へ戻さないこと()
+    {
+        SetupConfiguredDays(ConfiguredDays);
+        SetupOperationStatus(CreateStatus(CreateCard()));
+        var vm = CreateViewModel();
+        await vm.LoadOperationStatusAsync();
+
+        // 切り替えに伴う再集計（fire-and-forget）の完了を待ってから「更新」を押す
+        var reloaded = new TaskCompletionSource<bool>();
+        _service.Setup(s => s.GetOperationStatusAsync(It.IsAny<DateTime>(), 30))
+            .Callback(() => reloaded.TrySetResult(true))
+            .ReturnsAsync(CreateStatus(CreateCard()));
+        vm.LongTermUnreturnedDays = 30;
+        (await Task.WhenAny(reloaded.Task, Task.Delay(TimeSpan.FromSeconds(5)))).Should().BeSameAs(reloaded.Task);
+
+        await vm.LoadOperationStatusAsync();
+
+        vm.LongTermUnreturnedDays.Should().Be(30, "「更新」ボタンのたびに設定値へ戻すと、職員の切り替えが失われる");
+        _settingsRepository.Verify(r => r.GetAppSettingsAsync(), Times.Once, "設定値の採用は最初の読み込みだけ");
+    }
+
+    [Fact]
+    public async Task 設定の読み取りに失敗しても既定の14日で集計を続けること()
+    {
+        _settingsRepository.Setup(r => r.GetAppSettingsAsync())
+            .ThrowsAsync(new InvalidOperationException("settings read failed"));
+        SetupOperationStatus(CreateStatus(CreateCard()));
+        var vm = CreateViewModel();
+
+        await vm.LoadOperationStatusAsync();
+
+        vm.LongTermUnreturnedDays.Should().Be(14);
+        vm.OperationStatus.Should().NotBeNull("しきい値の設定が読めないだけで運用状況の確認を止めない");
+        _service.Verify(s => s.GetOperationStatusAsync(It.IsAny<DateTime>(), 14), Times.Once);
+        vm.IsStatusError.Should().BeFalse();
     }
 
     #endregion

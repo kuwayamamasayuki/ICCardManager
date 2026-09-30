@@ -58,6 +58,8 @@ public class SettingsViewModelDatabasePathTests : IDisposable
             .Returns(ValidationResult.Success());
         validatorMock.Setup(v => v.ValidateWarningBalance(It.IsAny<int>()))
             .Returns(ValidationResult.Success());
+        validatorMock.Setup(v => v.ValidateLongTermUnreturnedDays(It.IsAny<int>()))
+            .Returns(ValidationResult.Success());
         return new SettingsViewModel(
             repoMock.Object,
             validatorMock.Object,

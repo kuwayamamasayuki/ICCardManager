@@ -153,4 +153,25 @@ public class ValidationServiceErrorMessageQualityTests
         result.ErrorMessage.Should().Contain("600秒", "実際の入力値");
         result.ErrorMessage.Should().Contain("300秒", "上限値");
     }
+
+    // Issue #2152: 長期未返却のしきい値
+
+    [Fact]
+    public void ValidateLongTermUnreturnedDays_TooSmall_MessageShowsActualAndLimit()
+    {
+        var result = _service.ValidateLongTermUnreturnedDays(0);
+        AssertQualityCriteria(result.ErrorMessage);
+        result.ErrorMessage.Should().Be(
+            "長期未返却のしきい値が0日で下限を下回っています。1日以上の値を設定してください。",
+            "何が（しきい値）・なぜ（0日で下限未満）・どうすれば（1日以上）の 3 要素");
+    }
+
+    [Fact]
+    public void ValidateLongTermUnreturnedDays_TooLarge_MessageShowsActualAndLimit()
+    {
+        var result = _service.ValidateLongTermUnreturnedDays(366);
+        AssertQualityCriteria(result.ErrorMessage);
+        result.ErrorMessage.Should().Be(
+            "長期未返却のしきい値が366日で上限を超えています。365日以下の値を設定してください。");
+    }
 }

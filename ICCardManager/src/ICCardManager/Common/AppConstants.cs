@@ -184,17 +184,30 @@ namespace ICCardManager.Common
         /// <remarks>
         /// 出張・研修などで数日間の貸出が常態のため 7 日では誤検知が多く督促リストとして機能しない。
         /// 2 週間を超える貸出は返し忘れがほぼ確実であるため 14 日を既定とする。
-        /// 運用差を吸収できるよう管理者ダッシュボード画面上で
-        /// <see cref="LongTermUnreturnedDayOptions"/> から切り替えられる。
+        /// 組織の運用に合わせた値は設定画面（F5）で保存できる（<c>AppSettings.LongTermUnreturnedDays</c>、Issue #2152）。
+        /// 管理者ダッシュボードはその値を初期値とし、画面上で
+        /// <see cref="LongTermUnreturnedDayOptions"/> へ一時的に切り替えられる（保存はしない）。
         /// </remarks>
         public const int LongTermUnreturnedDays = 14;
 
         /// <summary>
-        /// 長期未返却しきい値として画面上で選択できる日数の選択肢。
+        /// 長期未返却しきい値として設定できる日数の下限（Issue #2152）。
+        /// 0 日にすると貸出中のカードがすべて長期未返却になり、督促リストとして機能しない。
+        /// </summary>
+        public const int MinLongTermUnreturnedDays = 1;
+
+        /// <summary>
+        /// 長期未返却しきい値として設定できる日数の上限（1 年。Issue #2152）。
+        /// </summary>
+        public const int MaxLongTermUnreturnedDays = 365;
+
+        /// <summary>
+        /// 長期未返却しきい値として管理者ダッシュボード上で一時的に切り替えられる日数の選択肢。
         /// </summary>
         /// <remarks>
-        /// 恒久設定（<c>AppSettings</c>）には持たせず画面上の表示フィルタに留めている。
-        /// 設定項目化は settings テーブル・設定画面・移行処理へ波及するため別 Issue とする。
+        /// 画面上の切り替えは表示の絞り込みであって設定の変更ではない（閉じても保存しない）。
+        /// 設定値（<c>AppSettings.LongTermUnreturnedDays</c>）がこの中に無いときは、
+        /// 管理者ダッシュボードが選択肢へ加えて昇順に並べる（Issue #2152）。
         /// </remarks>
         public static readonly int[] LongTermUnreturnedDayOptions = { 7, 14, 30 };
 

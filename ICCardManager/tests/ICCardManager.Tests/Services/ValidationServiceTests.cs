@@ -1,4 +1,5 @@
 ﻿using FluentAssertions;
+using ICCardManager.Common;
 using ICCardManager.Services;
 using Xunit;
 
@@ -450,6 +451,44 @@ public class ValidationServiceTests
         var result = _service.ValidateCompanionCountInputTimeout(seconds);
         result.IsValid.Should().BeFalse();
         result.ErrorMessage.Should().NotBeNullOrWhiteSpace();
+    }
+
+    #endregion
+
+    #region ValidateLongTermUnreturnedDays（Issue #2152）
+
+    [Theory]
+    [InlineData(1)]     // 下限
+    [InlineData(14)]    // 既定
+    [InlineData(365)]   // 上限
+    public void ValidateLongTermUnreturnedDays_範囲内_許可されること(int days)
+    {
+        _service.ValidateLongTermUnreturnedDays(days).IsValid.Should().BeTrue();
+    }
+
+    [Theory]
+    [InlineData(0, "。1日以上の値を設定してください")]      // 下限の直下（貸出中の全カードが長期未返却になる）
+    [InlineData(-1, "。1日以上の値を設定してください")]     // 負値
+    [InlineData(366, "。365日以下の値を設定してください")]  // 上限の直上
+    public void ValidateLongTermUnreturnedDays_範囲外_拒否されること(int days, string expectedInstruction)
+    {
+        var result = _service.ValidateLongTermUnreturnedDays(days);
+
+        result.IsValid.Should().BeFalse();
+        result.ErrorMessage.Should().Contain(expectedInstruction, "下限・上限のどちらを外れたかで指示が変わる");
+    }
+
+    /// <summary>
+    /// 保存時の範囲と、設定画面の入力欄（NumericRangeValidationRule の Min/Max）が参照する定数が一致すること。
+    /// XAML 側の一致は <c>LongTermUnreturnedSettingLayoutTests</c> が固定する。
+    /// </summary>
+    [Fact]
+    public void ValidateLongTermUnreturnedDays_境界はAppConstantsの定数と一致すること()
+    {
+        _service.ValidateLongTermUnreturnedDays(AppConstants.MinLongTermUnreturnedDays).IsValid.Should().BeTrue();
+        _service.ValidateLongTermUnreturnedDays(AppConstants.MinLongTermUnreturnedDays - 1).IsValid.Should().BeFalse();
+        _service.ValidateLongTermUnreturnedDays(AppConstants.MaxLongTermUnreturnedDays).IsValid.Should().BeTrue();
+        _service.ValidateLongTermUnreturnedDays(AppConstants.MaxLongTermUnreturnedDays + 1).IsValid.Should().BeFalse();
     }
 
     #endregion

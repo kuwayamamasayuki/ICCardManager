@@ -39,6 +39,7 @@ public class SettingsViewModelTests
         // バリデーションはデフォルトで成功を返す
         _validationServiceMock.Setup(v => v.ValidateWarningBalance(It.IsAny<int>())).Returns(ValidationResult.Success());
         _validationServiceMock.Setup(v => v.ValidateCompanionCountInputTimeout(It.IsAny<int>())).Returns(ValidationResult.Success());
+        _validationServiceMock.Setup(v => v.ValidateLongTermUnreturnedDays(It.IsAny<int>())).Returns(ValidationResult.Success());
 
         // Issue #1975: 既定（市長事務部局）から始め、保存で企業会計部局へ切り替わることを表明できるようにする
         _summaryGenerator = new SummaryGenerator(DepartmentType.MayorOffice);
@@ -761,6 +762,57 @@ public class SettingsViewModelTests
         _settingsRepositoryMock.Verify(r => r.SaveAppSettingsAsync(It.IsAny<AppSettings>()), Times.Never);
         _viewModel.IsStatusError.Should().BeTrue();
         _viewModel.FirstErrorField.Should().Be(nameof(SettingsViewModel.CompanionCountInputTimeoutSeconds),
+            "エラーの入力欄へフォーカスを移せること（#1279）");
+    }
+
+    #endregion
+
+    #region 長期未返却のしきい値（Issue #2152）
+
+    [Fact]
+    public async Task LoadSettingsAsync_長期未返却のしきい値を読み込むこと()
+    {
+        // 既定（14 日）と異なる値で試す。既定値のまま読み飛ばす実装を落とすため（#2106）
+        _settingsRepositoryMock
+            .Setup(r => r.GetAppSettingsAsync())
+            .ReturnsAsync(new AppSettings { LongTermUnreturnedDays = 10 });
+
+        await _viewModel.LoadSettingsAsync();
+
+        _viewModel.LongTermUnreturnedDays.Should().Be(10);
+        _viewModel.HasChanges.Should().BeFalse("読み込んだだけでは未保存の変更にならない");
+    }
+
+    [Fact]
+    public async Task SaveAsync_長期未返却のしきい値を保存すること()
+    {
+        _settingsRepositoryMock
+            .Setup(r => r.SaveAppSettingsAsync(It.IsAny<AppSettings>()))
+            .ReturnsAsync(false); // WPF依存のApplyFontSizeを回避するためfalseを返す
+        _viewModel.LongTermUnreturnedDays = 10;
+
+        await _viewModel.SaveAsync();
+
+        _viewModel.HasChanges.Should().BeTrue("保存に失敗したので変更は残る（変更として検知されていること）");
+        _settingsRepositoryMock.Verify(
+            r => r.SaveAppSettingsAsync(It.Is<AppSettings>(s => s.LongTermUnreturnedDays == 10)),
+            Times.Once);
+    }
+
+    [Fact]
+    public async Task SaveAsync_長期未返却のしきい値が不正なら保存せずその欄へ誘導すること()
+    {
+        _validationServiceMock
+            .Setup(v => v.ValidateLongTermUnreturnedDays(0))
+            .Returns(ValidationResult.Failure("長期未返却のしきい値が0日で下限を下回っています。1日以上の値を設定してください。"));
+        _viewModel.LongTermUnreturnedDays = 0;
+
+        await _viewModel.SaveAsync();
+
+        _settingsRepositoryMock.Verify(r => r.SaveAppSettingsAsync(It.IsAny<AppSettings>()), Times.Never);
+        _viewModel.IsStatusError.Should().BeTrue();
+        _viewModel.StatusMessage.Should().Be("長期未返却のしきい値が0日で下限を下回っています。1日以上の値を設定してください。");
+        _viewModel.FirstErrorField.Should().Be(nameof(SettingsViewModel.LongTermUnreturnedDays),
             "エラーの入力欄へフォーカスを移せること（#1279）");
     }
 

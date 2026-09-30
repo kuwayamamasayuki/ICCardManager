@@ -94,5 +94,12 @@ namespace ICCardManager.Services
         /// <param name="seconds">自動クローズ秒数。0 は「自動的に閉じない」</param>
         /// <returns>バリデーション結果</returns>
         ValidationResult ValidateCompanionCountInputTimeout(int seconds);
+
+        /// <summary>
+        /// 長期未返却のしきい値（日数）を検証（Issue #2152）
+        /// </summary>
+        /// <param name="days">長期未返却とみなす日数</param>
+        /// <returns>バリデーション結果</returns>
+        ValidationResult ValidateLongTermUnreturnedDays(int days);
     }
 }
