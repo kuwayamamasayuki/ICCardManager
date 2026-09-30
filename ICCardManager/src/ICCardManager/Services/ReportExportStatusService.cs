@@ -59,8 +59,11 @@ namespace ICCardManager.Services
             // そのファイルに対象月のシートがあっても、どちらのカードの帳票なのかをファイル名から
             // 決められない。「出力済み」と表示すると、実際には上書きされて存在しない帳票を
             // 出力済みとして扱わせる（一括作成もこれらのカードの帳票は作らない）。
+            // 母集団は呼び出し元が渡した一覧そのもの（払戻済みを含む未削除の全カードを渡すこと）。
+            // 年度ファイルを持ち得ないカードの除外は Find が行う
             var collisions = ReportFileNameCollisions.Find(
                 targetList,
+                fiscalYear,
                 (cardType, cardNumber) => _fileNameFactory.GetFiscalYearFileName(cardType, cardNumber, fiscalYear));
 
             foreach (var target in targetList)
@@ -71,6 +74,7 @@ namespace ICCardManager.Services
                     {
                         CardIdm = target.CardIdm,
                         State = ReportExportState.Unknown,
+                        IsFileNameCollision = true,
                     });
                     continue;
                 }

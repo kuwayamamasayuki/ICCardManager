@@ -549,11 +549,13 @@ public partial class ReportViewModel : ViewModelBase
             {
                 card.ExportState = status.State;
                 card.ExportLastWriteTime = status.LastWriteTime;
+                card.ExportIsFileNameCollision = status.IsFileNameCollision;
             }
             else
             {
                 card.ExportState = ReportExportState.Unknown;
                 card.ExportLastWriteTime = null;
+                card.ExportIsFileNameCollision = false;
             }
         }
 
@@ -775,7 +777,9 @@ public partial class ReportViewModel : ViewModelBase
         // 選んでも上書きが起きないよう、書き込みの手前でも止める（警告は無視できるため）。
         var fileNameCollisions = ReportFileNameCollisions.Find(
             fileNamePopulation.Concat(ToExportTargets(targetCards)),
-            (cardType, cardNumber) => _reportService.GetFiscalYearFileName(cardType, cardNumber, fiscalYear));
+            fiscalYear,
+            (cardType, cardNumber) => _reportService.GetFiscalYearFileName(cardType, cardNumber, fiscalYear),
+            targetCards.Select(c => c.CardIdm));
 
         foreach (var card in targetCards)
         {
@@ -1100,6 +1104,8 @@ public partial class ReportViewModel : ViewModelBase
                 CardIdm = c.CardIdm,
                 CardType = c.CardType,
                 CardNumber = c.CardNumber,
+                IsRefunded = c.IsRefunded,
+                RefundedAt = c.RefundedAt,
             })
             .ToList();
     }

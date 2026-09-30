@@ -157,7 +157,10 @@ namespace ICCardManager.Services
 
             var fiscalYear = ReportService.GetFiscalYear(year, month);
             var collisions = ReportFileNameCollisions.Find(
-                comparison, (cardType, cardNumber) => _fileNameFactory.GetFiscalYearFileName(cardType, cardNumber, fiscalYear));
+                comparison,
+                fiscalYear,
+                (cardType, cardNumber) => _fileNameFactory.GetFiscalYearFileName(cardType, cardNumber, fiscalYear),
+                targetIdms);
 
             foreach (var target in targets)
             {
@@ -173,10 +176,10 @@ namespace ICCardManager.Services
                     DisplayText =
                         $"⚠️ {target.DisplayName}: {ReportFileNameCollisions.FormatCardNames(others)} と帳票のファイル名が同じになります",
                     DetailText =
-                        $"帳票のファイル名（{fileName}）では、ファイル名に使えない記号が「_」に置き換わり、" +
-                        "英字の大文字と小文字も区別されないため、別のカードの帳票と同じファイルになります。" +
-                        "このまま作成しても、これらのカードの帳票は作成しません。" +
-                        "カード管理画面で、他のカードと重ならない管理番号（英大文字・数字・ハイフン）に変更してください。"
+                        $"{ReportFileNameCollisions.DescribeCause(target, others)}、" +
+                        $"別のカードの帳票と同じファイル（{fileName}）に書き込まれ、先に作った帳票を上書きします。" +
+                        "このまま作成しても、このカードの帳票は作成しません。" +
+                        "カード管理画面で、管理番号を他のカードと重ならない番号（大文字と小文字の違いだけにしない）に変更してください。"
                 });
             }
         }

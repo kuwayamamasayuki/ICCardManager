@@ -95,6 +95,11 @@ namespace ICCardManager.Dtos
         public ReportExportState ReportState { get; set; }
 
         /// <summary>
+        /// 他のカードと帳票のファイル名が同じになるため出力状況を判定できないか（Issue #2154。<see cref="ReportState"/> は Unknown）
+        /// </summary>
+        public bool IsReportFileNameCollision { get; set; }
+
+        /// <summary>
         /// 最終利用日（全期間の利用実績のうち最新の日付。利用実績が無ければ null＝空欄）
         /// </summary>
         /// <remarks>
@@ -127,7 +132,8 @@ namespace ICCardManager.Dtos
                     case ReportExportState.NotExported:
                         return "未出力";
                     default:
-                        return "判定不可";
+                        // Issue #2154: 出力先フォルダの問題と区別する（対処が違う）
+                        return IsReportFileNameCollision ? "判定不可（ファイル名が重複）" : "判定不可";
                 }
             }
         }

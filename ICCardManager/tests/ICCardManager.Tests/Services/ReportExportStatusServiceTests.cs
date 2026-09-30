@@ -260,6 +260,8 @@ public class ReportExportStatusServiceTests : IDisposable
 
         // Assert
         statuses.Select(s => s.State).Should().Equal(ReportExportState.Unknown, ReportExportState.Unknown);
+        statuses.Should().OnlyContain(s => s.IsFileNameCollision,
+            "原因が出力先フォルダではないことを表示側が区別し、管理番号の変更へ案内するため");
     }
 
     /// <summary>
@@ -290,5 +292,6 @@ public class ReportExportStatusServiceTests : IDisposable
             ReportExportState.Unknown,
             ReportExportState.Unknown,
             ReportExportState.NotExported);
+        statuses.Select(s => s.IsFileNameCollision).Should().Equal(false, true, true, false);
     }
 }

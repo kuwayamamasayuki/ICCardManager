@@ -920,6 +920,61 @@ public class ReportViewModelBulkCreationTests : IDisposable
     }
 
     /// <summary>
+    /// 対: 衝突しないカードの既存ファイルは、同じ一括作成に衝突があっても従来どおり上書き確認に並ぶ
+    /// </summary>
+    /// <remarks>
+    /// 衝突の除外を上書き確認のループ全体へ効かせる誤り（確認を丸ごと飛ばす）を検出する（コードレビューで検出）。
+    /// </remarks>
+    [Fact]
+    public async Task CreateReportAsync_衝突しないカードの既存ファイルは上書き確認に並ぶこと()
+    {
+        SelectCard("0000000000000001", "A*B");
+        SelectCard("0000000000000002", "A?B");
+        SelectCard("0000000000000003", "003");
+        var fiscalYear = ReportService.GetFiscalYear(_viewModel.SelectedYear, _viewModel.SelectedMonth);
+        var collidingFile = _reportServiceMock.Object.GetFiscalYearFileName("はやかけん", "A*B", fiscalYear);
+        var normalFile = _reportServiceMock.Object.GetFiscalYearFileName("はやかけん", "003", fiscalYear);
+        File.WriteAllText(Path.Combine(_outputFolder, collidingFile), "既存");
+        File.WriteAllText(Path.Combine(_outputFolder, normalFile), "既存");
+        _navigationServiceMock
+            .Setup(n => n.ShowThreeWayConfirmation(It.IsAny<string>(), It.IsAny<string>()))
+            .Returns((bool?)true);
+
+        await _viewModel.CreateReportAsync();
+
+        _navigationServiceMock.Verify(
+            n => n.ShowThreeWayConfirmation(
+                It.Is<string>(m => m.Contains(normalFile) && !m.Contains(collidingFile)), It.IsAny<string>()),
+            Times.Once);
+        _createdForCardIdms.Should().Equal("0000000000000003");
+    }
+
+    /// <summary>
+    /// 年度より前に払い戻したカードとは衝突に数えず、稼働中のカードの帳票を作る
+    /// </summary>
+    [Fact]
+    public async Task CreateReportAsync_年度より前に払い戻したカードとは衝突に数えず作成すること()
+    {
+        _viewModel.SelectedYear = 2026;
+        _viewModel.SelectedMonth = 5;
+        SelectCard("0000000000000001", "H001");
+        _viewModel.Cards.Add(new CardDto
+        {
+            CardIdm = "0000000000000009",
+            CardType = "はやかけん",
+            CardNumber = "h001",
+            IsRefunded = true,
+            RefundedAt = new DateTime(2023, 6, 1),
+            IsSelected = false
+        });
+
+        await _viewModel.CreateReportAsync();
+
+        _createdForCardIdms.Should().Equal("0000000000000001");
+        _viewModel.StatusMessage.Should().Be("1件の帳票を作成しました");
+    }
+
+    /// <summary>
     /// 事前チェックは、画面に並ぶ全カード（選んでいないカードを含む）を母集団として衝突を調べる
     /// </summary>
     /// <remarks>

@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using FluentAssertions;
@@ -24,8 +25,18 @@ public class ReportFileNameCollisionsTests
         new() { CardIdm = idm, CardType = type, CardNumber = number };
 
     private static IReadOnlyDictionary<string, IReadOnlyList<ReportExportTarget>> Find(params ReportExportTarget[] cards) =>
+        FindWithTargets(null, cards);
+
+    private static IReadOnlyDictionary<string, IReadOnlyList<ReportExportTarget>> FindWithTargets(
+        IEnumerable<string> targetIdms, params ReportExportTarget[] cards) =>
         ReportFileNameCollisions.Find(
-            cards, (cardType, cardNumber) => Factory.GetFiscalYearFileName(cardType, cardNumber, FiscalYear));
+            cards,
+            FiscalYear,
+            (cardType, cardNumber) => Factory.GetFiscalYearFileName(cardType, cardNumber, FiscalYear),
+            targetIdms);
+
+    private static ReportExportTarget Refunded(string idm, string number, DateTime? refundedAt) =>
+        new() { CardIdm = idm, CardType = "はやかけん", CardNumber = number, IsRefunded = true, RefundedAt = refundedAt };
 
     /// <summary>
     /// 欠陥を突く側: ファイル名に使えない別々の記号は同じ「_」に落ちるため衝突とみなす
@@ -109,9 +120,65 @@ public class ReportFileNameCollisionsTests
     {
         var result = ReportFileNameCollisions.Find(
             new[] { Card("01", "A"), Card("02", "B") },
+            FiscalYear,
             (_, _) => null);
 
         result.Should().BeEmpty();
+    }
+
+    /// <summary>
+    /// 年度の初日より前に払い戻したカードは、その年度の年度ファイルを持たないので衝突に数えない
+    /// </summary>
+    /// <remarks>
+    /// 数えると、何年も前に払い戻したカードのために稼働中のカードの帳票が毎月作られなくなる（コードレビューで検出）。
+    /// </remarks>
+    [Fact]
+    public void 年度より前に払い戻したカードとは衝突しないこと()
+    {
+        Find(Card("01", "H001"), Refunded("02", "h001", new DateTime(FiscalYear, 3, 31, 23, 59, 0))).Should().BeEmpty();
+    }
+
+    /// <summary>
+    /// 対: その年度の中で払い戻したカードは、その年度の年度ファイルを持ち得るので衝突に数える
+    /// </summary>
+    [Fact]
+    public void 年度の中で払い戻したカードとは衝突すること()
+    {
+        Find(Card("01", "H001"), Refunded("02", "h001", new DateTime(FiscalYear, 4, 1))).Keys
+            .Should().BeEquivalentTo("01", "02");
+    }
+
+    /// <summary>
+    /// 払戻日が記録されていない払戻済みカードは、取りこぼすと上書きが黙って起きるので衝突に数える
+    /// </summary>
+    [Fact]
+    public void 払戻日が無い払戻済みカードとは衝突すること()
+    {
+        Find(Card("01", "H001"), Refunded("02", "h001", null)).Keys.Should().BeEquivalentTo("01", "02");
+    }
+
+    /// <summary>
+    /// 今回帳票を作るカードは、払戻日にかかわらず数える（作る以上、その年度ファイルへ書き込む）
+    /// </summary>
+    [Fact]
+    public void 作成対象なら年度より前に払い戻したカードでも衝突に数えること()
+    {
+        FindWithTargets(new[] { "02" }, Card("01", "H001"), Refunded("02", "h001", new DateTime(FiscalYear - 3, 5, 1)))
+            .Keys.Should().BeEquivalentTo("01", "02");
+    }
+
+    [Fact]
+    public void 原因_大文字小文字だけの違いならそう名指しすること()
+    {
+        ReportFileNameCollisions.DescribeCause(Card("01", "H001"), new[] { Card("02", "h001") })
+            .Should().Contain("大文字と小文字").And.NotContain("記号");
+    }
+
+    [Fact]
+    public void 原因_記号の違いなら置き換えを名指しすること()
+    {
+        ReportFileNameCollisions.DescribeCause(Card("01", "A*B"), new[] { Card("02", "a?b") })
+            .Should().Contain("「_」に置き換わる").And.NotContain("大文字と小文字");
     }
 
     [Fact]

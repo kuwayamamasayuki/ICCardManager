@@ -33,9 +33,12 @@ namespace ICCardManager.Common
         /// </summary>
         /// <param name="state">出力状況</param>
         /// <param name="lastWriteTime">年度ファイルの最終更新日時（出力済みの場合のみ意味を持つ）</param>
+        /// <param name="isFileNameCollision">
+        /// 判定できない理由が「他のカードと帳票のファイル名が同じ」か（Issue #2154。<see cref="ReportExportState.Unknown"/> のときだけ意味を持つ）
+        /// </param>
         /// <returns>アイコン・ラベル・説明文・色リソースキーを含む結果</returns>
         public static ReportExportStatusPresentation Resolve(
-            ReportExportState state, DateTime? lastWriteTime = null)
+            ReportExportState state, DateTime? lastWriteTime = null, bool isFileNameCollision = false)
         {
             switch (state)
             {
@@ -59,6 +62,20 @@ namespace ICCardManager.Common
                         brushKey: "SecondaryTextBrush");
 
                 default:
+                    if (isFileNameCollision)
+                    {
+                        // Issue #2154: 原因は出力先フォルダではないため、「フォルダを指定し直す」と案内しない
+                        //（実行しても解決しない指示になる。error-messages.md #1817）
+                        return new ReportExportStatusPresentation(
+                            state,
+                            icon: UnknownIcon,
+                            shortText: "ファイル名が重複",
+                            accessibilityText:
+                                "出力状況を確認できません。他のカードと帳票のファイル名が同じになるため、" +
+                                "どちらのカードの帳票か分かりません。カード管理画面で管理番号を変更してください",
+                            brushKey: "MutedTextBrush");
+                    }
+
                     return new ReportExportStatusPresentation(
                         state,
                         icon: UnknownIcon,
