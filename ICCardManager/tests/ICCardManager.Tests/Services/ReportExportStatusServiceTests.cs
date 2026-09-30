@@ -239,4 +239,56 @@ public class ReportExportStatusServiceTests : IDisposable
         // Assert
         statuses.Select(s => s.CardIdm).Should().Equal("AAA", "BBB", "CCC");
     }
+
+    /// <summary>
+    /// Issue #2154 欠陥を突く側: 他のカードと同じ年度ファイル名になるカードは、対象月のシートが
+    /// あっても「出力済み」にしない（どちらのカードの帳票なのかをファイル名から決められない）
+    /// </summary>
+    [Fact]
+    public void GetStatuses_ファイル名が衝突するカードは対象月のシートがあっても確認できませんとすること()
+    {
+        // Arrange - 「A?B」の年度ファイルに 6 月シートがある（「A*B」と同じ名前）
+        CreateFiscalYearFile("はやかけん", "A?B", 2026, 6, 6);
+        var targets = new List<ReportExportTarget>
+        {
+            CreateTarget("AAA", "はやかけん", "A*B"),
+            CreateTarget("BBB", "はやかけん", "A?B"),
+        };
+
+        // Act
+        var statuses = _service.GetStatuses(targets, _testDirectory, 2026, 6);
+
+        // Assert
+        statuses.Select(s => s.State).Should().Equal(ReportExportState.Unknown, ReportExportState.Unknown);
+    }
+
+    /// <summary>
+    /// Issue #2154 正当な挙動を塞いでいない側: 衝突しないカードは従来どおり判定する
+    /// </summary>
+    /// <remarks>
+    /// 衝突の判定を一覧全体へ掛けても、無関係なカードの「出力済み」「未出力」は変わらないこと。
+    /// </remarks>
+    [Fact]
+    public void GetStatuses_衝突しないカードは同じ一覧に衝突があっても従来どおり判定すること()
+    {
+        // Arrange
+        CreateFiscalYearFile(2026, 6, 6);
+        var targets = new List<ReportExportTarget>
+        {
+            CreateTarget(),
+            CreateTarget("AAA", "はやかけん", "h001"),
+            CreateTarget("BBB", "はやかけん", "H001"),
+            CreateTarget("CCC", "nimoca", "N-003"),
+        };
+
+        // Act
+        var statuses = _service.GetStatuses(targets, _testDirectory, 2026, 6);
+
+        // Assert
+        statuses.Select(s => s.State).Should().Equal(
+            ReportExportState.Exported,
+            ReportExportState.Unknown,
+            ReportExportState.Unknown,
+            ReportExportState.NotExported);
+    }
 }

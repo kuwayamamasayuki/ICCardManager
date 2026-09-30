@@ -484,14 +484,7 @@ public partial class ReportViewModel : ViewModelBase
             return;
         }
 
-        var targets = Cards
-            .Select(c => new ReportExportTarget
-            {
-                CardIdm = c.CardIdm,
-                CardType = c.CardType,
-                CardNumber = c.CardNumber,
-            })
-            .ToList();
+        var targets = ToExportTargets(Cards);
 
         var capturedFolder = OutputFolder;
         var capturedYear = SelectedYear;
@@ -746,6 +739,8 @@ public partial class ReportViewModel : ViewModelBase
         var outputFolder = OutputFolder;
         var targetYear = SelectedYear;
         var targetMonth = SelectedMonth;
+        // Issue #2154: ファイル名の衝突は、画面に並ぶ全カード（選んでいないカードを含む）と比べる
+        var fileNamePopulation = ToExportTargets(Cards);
 
         if (string.IsNullOrWhiteSpace(outputFolder))
         {
@@ -774,11 +769,25 @@ public partial class ReportViewModel : ViewModelBase
         var outputPaths = new Dictionary<string, string>(); // cardIdm -> outputPath
         var fiscalYear = ReportService.GetFiscalYear(targetYear, targetMonth);
 
+        // Issue #2154: 他のカードと同じ年度ファイル名になるカードの帳票は作らない。
+        // 作ると後から書いた方が先の帳票の月シートを上書きし、しかも出力状況の一覧では
+        // 両方とも「出力済み」に見える。事前チェックで警告済みだが、「このまま作成する」を
+        // 選んでも上書きが起きないよう、書き込みの手前でも止める（警告は無視できるため）。
+        var fileNameCollisions = ReportFileNameCollisions.Find(
+            fileNamePopulation.Concat(ToExportTargets(targetCards)),
+            (cardType, cardNumber) => _reportService.GetFiscalYearFileName(cardType, cardNumber, fiscalYear));
+
         foreach (var card in targetCards)
         {
             var fileName = _reportService.GetFiscalYearFileName(card.CardType, card.CardNumber, fiscalYear);
             var outputPath = Path.Combine(outputFolder, fileName);
             outputPaths[card.CardIdm] = outputPath;
+
+            // 作らないカードのファイルは上書き確認に並べない（「更新しますか」と尋ねても更新しない）
+            if (fileNameCollisions.ContainsKey(card.CardIdm))
+            {
+                continue;
+            }
 
             if (File.Exists(outputPath))
             {
@@ -840,6 +849,16 @@ public partial class ReportViewModel : ViewModelBase
                 var card = targetCards[i];
                 var cardIdm = card.CardIdm;
                 var outputPath = outputPaths[cardIdm];
+
+                // Issue #2154: 同じ年度ファイル名になる他のカードがあるなら書き込まない
+                if (fileNameCollisions.TryGetValue(cardIdm, out var collidingCards))
+                {
+                    failedCards.Add((
+                        $"{card.CardType} {card.CardNumber}",
+                        $"{ReportFileNameCollisions.FormatCardNames(collidingCards)} と帳票のファイル名が同じになるため、作成しませんでした。" +
+                        "カード管理画面で管理番号を変更してください"));
+                    continue;
+                }
 
                 // 別名保存の場合は日時を付加
                 if (useAlternativeNames && File.Exists(outputPath))
@@ -1050,15 +1069,39 @@ public partial class ReportViewModel : ViewModelBase
         IReadOnlyList<CardDto> targetCards, int targetYear, int targetMonth)
     {
         var cardIdms = targetCards.Select(c => c.CardIdm).ToList();
+
+        // Issue #2154: ファイル名の衝突は画面に並ぶ全カードと比べる。最初の await より前に
+        // 確定させる（待機中にカード一覧が読み直されても、検査する母集団を変えない。#1949）
+        var fileNamePopulation = ToExportTargets(Cards);
+
         using (BeginBusy($"帳票データを確認中... ({cardIdms.Count}件)"))
         {
-            var result = await _preflightChecker.CheckAsync(cardIdms, targetYear, targetMonth);
+            var result = await _preflightChecker.CheckAsync(cardIdms, targetYear, targetMonth, fileNamePopulation);
 
             // Issue #1691: 警告のあるカードを一覧上でマークする
             ApplyPreflightWarnings(result, targetYear, targetMonth);
 
             return result;
         }
+    }
+
+    /// <summary>
+    /// カード一覧を、帳票ファイル名の判定に使う形へ写す（Issue #2154）
+    /// </summary>
+    /// <remarks>
+    /// 出力状況の判定（<see cref="RefreshExportStatusAsync"/>）と同じ写し方。呼び出し元の
+    /// コレクションが後から変わっても影響を受けないよう、新しいリストを返す。
+    /// </remarks>
+    private static List<ReportExportTarget> ToExportTargets(IEnumerable<CardDto> cards)
+    {
+        return cards
+            .Select(c => new ReportExportTarget
+            {
+                CardIdm = c.CardIdm,
+                CardType = c.CardType,
+                CardNumber = c.CardNumber,
+            })
+            .ToList();
     }
 
     /// <summary>

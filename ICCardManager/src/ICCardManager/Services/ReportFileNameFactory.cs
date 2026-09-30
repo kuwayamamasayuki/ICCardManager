@@ -1,5 +1,7 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using ICCardManager.Infrastructure.Security;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -54,6 +56,58 @@ namespace ICCardManager.Services
         /// </para>
         /// </remarks>
         internal static readonly string[] AllowedExtensions = { ".xlsx" };
+
+        /// <summary>
+        /// 2 つの帳票ファイル名が「同じファイル」を指すかを判定する比較子（Issue #2154）
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// Windows のファイル名は大文字・小文字を区別しない。管理番号は英大文字・小文字の両方を許し
+        /// （<c>ValidationService.ValidateCardNumber</c>）、一意性を守る部分ユニークインデックス
+        /// <c>idx_card_type_number_active</c> は大文字・小文字を区別する（SQLite の BINARY 照合）ため、
+        /// <c>H001</c> と <c>h001</c> は別のカードとして登録でき、帳票は同じファイルへ書かれる。
+        /// 生成名の文字列一致（<see cref="StringComparer.Ordinal"/>）で判定すると、この日常的な経路を見落とす。
+        /// </para>
+        /// </remarks>
+        public static readonly StringComparer FileNameComparer = StringComparer.OrdinalIgnoreCase;
+
+        /// <summary>
+        /// 同じ帳票ファイル名に落ちる要素を組にして返す（Issue #2154）
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// ファイル名の組み立ては単射ではない。<see cref="FileNameSanitizer"/> は別々の文字を同じ
+        /// <c>_</c> へ置き換え（<c>A*B</c> と <c>A?B</c>）、Windows は大文字・小文字を区別しない
+        /// （<see cref="FileNameComparer"/>）。同じ名前に落ちた 2 枚のカードは、一括作成で
+        /// <b>後から書いた方が先の帳票の月シートを上書きする</b>。しかも出力状況の一覧は
+        /// ファイル名とシート名で判定するため、両方とも「出力済み」と表示され欠落に気付けない。
+        /// </para>
+        /// <para>
+        /// 事前チェック（<see cref="ReportPreflightChecker"/>）・一括作成（<c>ReportViewModel</c>）・
+        /// 出力状況（<see cref="ReportExportStatusService"/>）は、いずれもこのメソッドで衝突を判定する。
+        /// 判定を 3 か所へ書き写すと、比較子を変えたときに 1 か所だけ取り残される。
+        /// </para>
+        /// </remarks>
+        /// <typeparam name="T">要素の型（カード等）</typeparam>
+        /// <param name="items">判定対象</param>
+        /// <param name="fileNameSelector">要素から帳票ファイル名を得る関数（null / 空は判定から除く）</param>
+        /// <returns>2 件以上が同じファイル名に落ちた組の一覧（各組は入力順を保つ）</returns>
+        public static IReadOnlyList<IReadOnlyList<T>> FindCollidingGroups<T>(
+            IEnumerable<T> items, Func<T, string> fileNameSelector)
+        {
+            if (items == null)
+            {
+                return Array.Empty<IReadOnlyList<T>>();
+            }
+
+            return items
+                .Select(item => (Item: item, FileName: fileNameSelector(item)))
+                .Where(x => !string.IsNullOrEmpty(x.FileName))
+                .GroupBy(x => x.FileName, FileNameComparer)
+                .Where(g => g.Count() > 1)
+                .Select(g => (IReadOnlyList<T>)g.Select(x => x.Item).ToList())
+                .ToList();
+        }
 
         public ReportFileNameFactory(
             IOptions<OrganizationOptions> orgOptions = null,
@@ -207,7 +261,8 @@ namespace ICCardManager.Services
         /// カード種別は登録時に固定のマスターから選ぶため実運用では成立しないが、
         /// 単射性が要るなら区切り文字を必須にする必要がある。なお <see cref="FileNameSanitizer"/> が
         /// 別の文字を同じ <c>_</c> へ落とす（<c>A*B</c> と <c>A?B</c>）ことによる衝突は書式に依らず、
-        /// Issue #1703 から続く既知の性質である。
+        /// Issue #1703 から続く性質である。いずれの衝突も、生成した名前どうしを比べる
+        /// <see cref="ReportFileNameCollisions"/> が検出し、該当カードの帳票を作らせない（Issue #2154）。
         /// </para>
         /// </remarks>
         private static bool IsUsableFormat(string format)

@@ -49,6 +49,12 @@ namespace ICCardManager.Dtos
         /// 管理番号（ファイル名の構成要素）
         /// </summary>
         public string CardNumber { get; set; } = string.Empty;
+
+        /// <summary>
+        /// 表示用のカード名（例: "はやかけん 001"。<c>IcCard.DisplayName</c> と同じ書式）
+        /// </summary>
+        public string DisplayName =>
+            string.IsNullOrEmpty(CardNumber) ? CardType : $"{CardType} {CardNumber}";
     }
 
     /// <summary>
