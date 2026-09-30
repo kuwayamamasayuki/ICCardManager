@@ -80,6 +80,7 @@ public sealed class LendingServiceReturnDeadlockTests : IDisposable
             _staffRepo,
             ledgerRepo,
             settingsRepo,
+            new OperationLogger(Mock.Of<IOperationLogRepository>(), Mock.Of<ICurrentOperatorContext>()),
             summaryGenerator,
             lockManager,
             Options.Create(new AppOptions { CardLockTimeoutSeconds = 5, RetouchWindowSeconds = 30 }),

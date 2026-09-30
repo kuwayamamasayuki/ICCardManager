@@ -639,27 +639,39 @@ WHERE card_type = @cardType";
         }
 
         /// <inheritdoc/>
-        public async Task<CardOperationResult> SetRefundedAsync(string cardIdm)
+        public async Task<CardOperationResult> SetRefundedAsync(
+            string cardIdm, DateTime refundedAt, SQLiteTransaction? transaction)
         {
             using var lease = await _dbContext.LeaseConnectionAsync().ConfigureAwait(false);
             var connection = lease.Connection;
 
             // Issue #1109: check-then-act を排除し、WHERE句のDBガードに一元化。
+            // Issue #2151: refunded_at は呼び出し元が決めた日時を書く。払戻台帳の日付・操作ログの
+            // 変更後データと同じ値にするため（datetime('now') では 3 者が秒単位でずれ得る）。
             using var command = connection.CreateCommand();
+            command.Transaction = transaction;
             command.CommandText = @"UPDATE ic_card
-SET is_refunded = 1, refunded_at = datetime('now', 'localtime')
+SET is_refunded = 1, refunded_at = @refundedAt
 WHERE card_idm = @cardIdm AND is_deleted = 0 AND is_refunded = 0 AND is_lent = 0";
 
             command.Parameters.AddWithValue("@cardIdm", cardIdm);
+            command.Parameters.AddWithValue("@refundedAt", SqliteDateTimeFormat.ToText(refundedAt));
 
             var result = await command.ExecuteNonQueryAsync().ConfigureAwait(false);
             if (result > 0)
             {
-                InvalidateCardCache();
+                // トランザクション内ではキャッシュを破棄しない（UpdateAsyncInternal と同じ）。
+                // コミット前に破棄しても、ロールバックされれば破棄した根拠が消える。
+                // 破棄はコミット後に呼び出し元（LendingService.RefundAsync）が行う。
+                if (transaction == null)
+                {
+                    InvalidateCardCache();
+                }
                 return CardOperationResult.Success;
             }
 
-            // 失敗原因を特定するためDBから最新状態を取得（キャッシュバイパス）
+            // 失敗原因を特定するためDBから最新状態を取得（キャッシュバイパス）。
+            // 0 行は「手元の一覧が古い」と確定した瞬間なので、tx の有無によらず破棄する（Issue #1759）。
             return await DiagnoseFailureAsync(cardIdm).ConfigureAwait(false);
         }
     }

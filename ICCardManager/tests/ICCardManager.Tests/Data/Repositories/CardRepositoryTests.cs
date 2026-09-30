@@ -568,8 +568,12 @@ public class CardRepositoryTests : IDisposable
         result.Should().Be(ICCardManager.Data.Repositories.CardOperationResult.Conflict);
     }
 
+    #endregion
+
+    #region SetRefundedAsync テスト（Issue #530 / #2151）
+
     /// <summary>
-    /// 払戻済のカードを削除するとConflictを返すことを確認
+    /// 払戻対象のカードを払い戻すと Success を返し、払戻済になること
     /// </summary>
     [Fact]
     public async Task SetRefundedAsync_Success_ReturnsSuccess()
@@ -579,10 +583,11 @@ public class CardRepositoryTests : IDisposable
         await _repository.InsertAsync(card);
 
         // Act
-        var result = await _repository.SetRefundedAsync(card.CardIdm);
+        var result = await _repository.SetRefundedAsync(card.CardIdm, new DateTime(2025, 6, 15, 10, 0, 0), null);
 
         // Assert
         result.Should().Be(ICCardManager.Data.Repositories.CardOperationResult.Success);
+        (await _repository.GetByIdmAsync(card.CardIdm))!.IsRefunded.Should().BeTrue();
     }
 
     /// <summary>
@@ -597,7 +602,7 @@ public class CardRepositoryTests : IDisposable
         await _repository.UpdateLentStatusAsync(card.CardIdm, true, DateTime.Now, null);
 
         // Act
-        var result = await _repository.SetRefundedAsync(card.CardIdm);
+        var result = await _repository.SetRefundedAsync(card.CardIdm, new DateTime(2025, 6, 15, 10, 0, 0), null);
 
         // Assert
         result.Should().Be(ICCardManager.Data.Repositories.CardOperationResult.CardIsLent);
@@ -612,13 +617,138 @@ public class CardRepositoryTests : IDisposable
         // Arrange
         var card = CreateTestCard("0102030405060708", "はやかけん", "H001");
         await _repository.InsertAsync(card);
-        await _repository.SetRefundedAsync(card.CardIdm);
+        await _repository.SetRefundedAsync(card.CardIdm, new DateTime(2025, 6, 15, 10, 0, 0), null);
 
         // Act
-        var result = await _repository.SetRefundedAsync(card.CardIdm);
+        var result = await _repository.SetRefundedAsync(card.CardIdm, new DateTime(2025, 6, 15, 10, 5, 0), null);
 
         // Assert
         result.Should().Be(ICCardManager.Data.Repositories.CardOperationResult.Conflict);
+    }
+
+    /// <summary>
+    /// Issue #2151: refunded_at には DB の現在時刻ではなく、渡した日時がそのまま書かれること
+    /// </summary>
+    /// <remarks>
+    /// 払戻台帳の日付・操作ログの変更後データと同じ値にするため。過去の日時を渡すことで、
+    /// <c>datetime('now')</c> へ戻した実装を検出する。
+    /// </remarks>
+    [Fact]
+    public async Task SetRefundedAsync_WritesGivenRefundedAt()
+    {
+        // Arrange
+        var card = CreateTestCard("0102030405060708", "はやかけん", "H001");
+        await _repository.InsertAsync(card);
+        var refundedAt = new DateTime(2024, 3, 31, 17, 45, 12);
+
+        // Act
+        await _repository.SetRefundedAsync(card.CardIdm, refundedAt, null);
+
+        // Assert
+        (await _repository.GetByIdmAsync(card.CardIdm))!.RefundedAt.Should().Be(refundedAt);
+    }
+
+    /// <summary>
+    /// Issue #2151: 渡したトランザクションに参加し、ロールバックすれば払戻済にならないこと
+    /// </summary>
+    [Fact]
+    public async Task SetRefundedAsync_WithTransaction_RollbackLeavesCardUnrefunded()
+    {
+        // Arrange
+        var card = CreateTestCard("0102030405060708", "はやかけん", "H001");
+        await _repository.InsertAsync(card);
+
+        // Act
+        using (var scope = await _dbContext.BeginTransactionAsync())
+        {
+            var result = await _repository.SetRefundedAsync(
+                card.CardIdm, new DateTime(2025, 6, 15, 10, 0, 0), scope.Transaction);
+            result.Should().Be(ICCardManager.Data.Repositories.CardOperationResult.Success);
+            scope.Rollback();
+        }
+
+        // Assert
+        (await _repository.GetByIdmAsync(card.CardIdm))!.IsRefunded.Should().BeFalse(
+            "トランザクションに参加していれば、ロールバックで払戻済への更新も巻き戻る");
+    }
+
+    /// <summary>
+    /// Issue #2151: トランザクション内で成功したときはキャッシュを破棄しないこと（破棄はコミット後に呼び出し元が行う）
+    /// </summary>
+    [Fact]
+    public async Task SetRefundedAsync_WithTransaction_Success_DoesNotInvalidateCache()
+    {
+        // Arrange
+        var card = CreateTestCard("0102030405060708", "はやかけん", "H001");
+        await _repository.InsertAsync(card);
+        _cacheServiceMock.Invocations.Clear();
+
+        // Act
+        using (var scope = await _dbContext.BeginTransactionAsync())
+        {
+            await _repository.SetRefundedAsync(card.CardIdm, new DateTime(2025, 6, 15, 10, 0, 0), scope.Transaction);
+            scope.Commit();
+        }
+
+        // Assert
+        _cacheServiceMock.Verify(c => c.InvalidateByPrefix(It.IsAny<string>()), Times.Never);
+    }
+
+    /// <summary>
+    /// 対の表明: トランザクション外で成功したときはキャッシュを破棄すること
+    /// </summary>
+    [Fact]
+    public async Task SetRefundedAsync_WithoutTransaction_Success_InvalidatesCache()
+    {
+        // Arrange
+        var card = CreateTestCard("0102030405060708", "はやかけん", "H001");
+        await _repository.InsertAsync(card);
+        _cacheServiceMock.Invocations.Clear();
+
+        // Act
+        await _repository.SetRefundedAsync(card.CardIdm, new DateTime(2025, 6, 15, 10, 0, 0), null);
+
+        // Assert
+        _cacheServiceMock.Verify(c => c.InvalidateByPrefix(It.IsAny<string>()), Times.AtLeastOnce);
+    }
+
+    /// <summary>
+    /// Issue #1759: 競合（0 行）はトランザクション内でもキャッシュを破棄し、原因を診断して返すこと
+    /// </summary>
+    [Fact]
+    public async Task SetRefundedAsync_WithTransaction_LentCard_ReturnsCardIsLentAndInvalidatesCache()
+    {
+        // Arrange
+        var card = CreateTestCard("0102030405060708", "はやかけん", "H001");
+        await _repository.InsertAsync(card);
+        await _repository.UpdateLentStatusAsync(card.CardIdm, true, DateTime.Now, null);
+        _cacheServiceMock.Invocations.Clear();
+
+        // Act
+        ICCardManager.Data.Repositories.CardOperationResult result;
+        using (var scope = await _dbContext.BeginTransactionAsync())
+        {
+            result = await _repository.SetRefundedAsync(
+                card.CardIdm, new DateTime(2025, 6, 15, 10, 0, 0), scope.Transaction);
+            scope.Rollback();
+        }
+
+        // Assert
+        result.Should().Be(ICCardManager.Data.Repositories.CardOperationResult.CardIsLent);
+        _cacheServiceMock.Verify(c => c.InvalidateByPrefix(It.IsAny<string>()), Times.AtLeastOnce);
+    }
+
+    /// <summary>
+    /// 存在しないカードを払い戻すと NotFound を返すこと
+    /// </summary>
+    [Fact]
+    public async Task SetRefundedAsync_UnknownCard_ReturnsNotFound()
+    {
+        // Act
+        var result = await _repository.SetRefundedAsync("FFFFFFFFFFFFFFFF", new DateTime(2025, 6, 15, 10, 0, 0), null);
+
+        // Assert
+        result.Should().Be(ICCardManager.Data.Repositories.CardOperationResult.NotFound);
     }
 
     #endregion

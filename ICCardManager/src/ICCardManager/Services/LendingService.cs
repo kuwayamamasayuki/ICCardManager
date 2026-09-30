@@ -195,6 +195,7 @@ namespace ICCardManager.Services
         private readonly IStaffRepository _staffRepository;
         private readonly ILedgerRepository _ledgerRepository;
         private readonly ISettingsRepository _settingsRepository;
+        private readonly OperationLogger _operationLogger;
         private readonly SummaryGenerator _summaryGenerator;
         private readonly CardLockManager _lockManager;
         private readonly ISystemClock _clock;
@@ -231,6 +232,7 @@ namespace ICCardManager.Services
             IStaffRepository staffRepository,
             ILedgerRepository ledgerRepository,
             ISettingsRepository settingsRepository,
+            OperationLogger operationLogger,
             SummaryGenerator summaryGenerator,
             CardLockManager lockManager,
             IOptions<AppOptions> appOptions,
@@ -242,6 +244,10 @@ namespace ICCardManager.Services
             _staffRepository = staffRepository;
             _ledgerRepository = ledgerRepository;
             _settingsRepository = settingsRepository;
+            // Issue #2151: 払い戻しの監査ログを台帳・払戻済への更新と同じトランザクションで書くため。
+            // 既定値を持たない必須引数にする（省略可能にすると DI の配線漏れが
+            // 「払い戻しの監査ログだけが残らない」形で潜在化する。#1820）
+            _operationLogger = operationLogger ?? throw new ArgumentNullException(nameof(operationLogger));
             _summaryGenerator = summaryGenerator;
             _lockManager = lockManager;
             // 既定はシステム時計（DateTime.Now）。テストでは固定時計を注入して
@@ -692,6 +698,159 @@ namespace ICCardManager.Services
 
             result.CreatedLedgers.AddRange(createdLedgers);
             result.HasBusUsage = usageSinceLent.Any(d => d.IsBus);
+        }
+
+        /// <summary>
+        /// 交通系ICカードを払い戻す: 払戻台帳の作成＋払戻済への更新＋操作ログを 1 トランザクションで確定する（Issue #2151）
+        /// </summary>
+        /// <param name="beforeCard">
+        /// 払い戻し前に読み取ったカード。操作ログの変更前データになる。読み取れなかった（<c>null</c>）場合に
+        /// 払い戻しを行わない判断は呼び出し元の責務（Issue #1760。競合の案内は画面ごとに異なるため）。
+        /// </param>
+        /// <param name="refundAmount">払い戻す金額（払い戻し時点の残額）。払戻台帳の払出金額になる。</param>
+        /// <param name="refundedAt">払い戻しの日時。払戻台帳の日付・<c>refunded_at</c>・操作ログの変更後データに共通で使う。</param>
+        /// <returns>作成した払戻台帳</returns>
+        /// <exception cref="RefundConflictException">
+        /// 払戻済への更新が 0 行だった（他のパソコンや別の操作でカードが削除・貸出・払い戻しされた）。
+        /// <see cref="RefundConflictException.Result"/> に原因が入る。台帳も操作ログも残らない。
+        /// </exception>
+        /// <remarks>
+        /// <para>
+        /// 以前は <c>CardManageViewModel</c> が台帳の INSERT と払戻済への更新を別々のトランザクションで確定させており、
+        /// 間に他 PC がカードを削除・貸出すると<b>払戻台帳だけが 6 年保存の台帳に残り、カードは払戻済にならなかった</b>。
+        /// 「<c>ic_card</c> と <c>ledger</c> を 1 トランザクションで束ねる」責務は貸出・返却と同じなので、
+        /// 新しいサービスは作らず本クラスへ置く。補償削除（台帳を後から消す）は、その削除自体が同じ原因で
+        /// 失敗し得るため採らない（Issue #1745）。
+        /// </para>
+        /// <para>
+        /// 監査ログも同じトランザクションで書く。別々にすると、監査ログだけが失敗したとき
+        /// 「誰が払い戻したか分からない払い戻し」が確定する（Issue #1760 と同じ害）。
+        /// </para>
+        /// </remarks>
+        public async Task<Ledger> RefundAsync(IcCard beforeCard, int refundAmount, DateTime refundedAt)
+        {
+            if (beforeCard == null) throw new ArgumentNullException(nameof(beforeCard));
+
+            // DB の日時列は秒単位の文字列（SqliteDateTimeFormat）で保存される。秒未満を落としておかないと、
+            // 操作ログの変更後データ（JSON はミリ秒まで持つ）だけが refunded_at と食い違う
+            refundedAt = new DateTime(refundedAt.Ticks - refundedAt.Ticks % TimeSpan.TicksPerSecond, refundedAt.Kind);
+
+            var cardIdm = beforeCard.CardIdm;
+            Ledger createdLedger = null;
+
+            try
+            {
+                await _dbContext.ExecuteWithRetryAsync(async () =>
+                {
+                    using var scope = await _dbContext.BeginTransactionAsync().ConfigureAwait(false);
+
+                    try
+                    {
+                        // Issue #1737: 入れ子になる書き込みは tx を明示的に渡す（暗黙参加に頼らない）。
+                        // 台帳はリトライのたびに作り直す（前の試行で採番された Id を持ち越さない）。
+                        var ledger = CreateRefundLedger(cardIdm, refundAmount, refundedAt);
+                        ledger.Id = await _ledgerRepository
+                            .InsertAsync(ledger, scope.Transaction).ConfigureAwait(false);
+
+                        var refundResult = await _cardRepository
+                            .SetRefundedAsync(cardIdm, refundedAt, scope.Transaction).ConfigureAwait(false);
+                        if (refundResult != CardOperationResult.Success)
+                        {
+                            // 0 行のまま Commit() すると払戻台帳だけが確定する。例外で巻き戻す（Issue #1953 と同じ判断）。
+                            // 画面はダイアログを出すだけなので、痕跡はここで残す（UI 文言とログを対で数える #1817）
+                            _logger.LogWarning(
+                                "払い戻しを記録できませんでした（払戻済への更新が 0 行）: {CardIdm} 原因 {Result}",
+                                IdmMasker.Mask(cardIdm), refundResult);
+                            throw new RefundConflictException(cardIdm, refundResult);
+                        }
+
+                        // 変更後データは同じトランザクションの中で組み立てる。コミット後に読み直すと、
+                        // その間に他 PC が削除したとき読めずに記録を落とす経路が生まれる（Issue #1760）
+                        await _operationLogger.LogCardUpdateAsync(
+                            beforeCard, CreateRefundedSnapshot(beforeCard, refundedAt), scope.Transaction)
+                            .ConfigureAwait(false);
+
+                        scope.Commit();
+                        createdLedger = ledger;
+                    }
+                    catch
+                    {
+                        // Issue #1831: 素の Rollback() を呼ばない（二次例外が本来の SQLITE_BUSY を置き換えると
+                        // ExecuteWithRetryAsync のリトライが効かない）
+                        SafeRollback.TryRollback(() => scope.Rollback(), _logger, "払い戻しの記録");
+                        throw;
+                    }
+                }).ConfigureAwait(false);
+            }
+            finally
+            {
+                // 成功時: 払戻済になったカードが一覧に「払戻前」のまま残らないよう、コミット後に破棄する。
+                // 失敗時: 競合（0 行）は「手元の一覧が古い」と確定した瞬間であり、呼び出し元は一覧を
+                // 再読込して案内する（Issue #1759）。トランザクション内では破棄しない（SetRefundedAsync の契約）。
+                _cardRepository.InvalidateCache();
+            }
+
+            _logger.LogInformation(
+                "払い戻しを記録しました: {CardIdm} 払戻額 {RefundAmount}円",
+                IdmMasker.Mask(cardIdm), refundAmount);
+
+            return createdLedger;
+        }
+
+        /// <summary>
+        /// 払戻台帳（摘要「払戻しによる払出」、残額を払出して残額 0）を組み立てる（Issue #379 / #2151）
+        /// </summary>
+        internal static Ledger CreateRefundLedger(string cardIdm, int refundAmount, DateTime refundedAt)
+        {
+            return new Ledger
+            {
+                CardIdm = cardIdm,
+                LenderIdm = null,
+                Date = refundedAt,
+                Summary = SummaryGenerator.GetRefundSummary(),
+                Income = 0,
+                Expense = refundAmount,  // 残高を払出金額として計上
+                Balance = 0,             // 払い戻し後の残高は0
+                StaffName = null,
+                Note = null,
+                ReturnerIdm = null,
+                LentAt = null,
+                ReturnedAt = null,
+                IsLentRecord = false
+            };
+        }
+
+        /// <summary>
+        /// 払い戻し後のカードの状態を、払い戻し前のデータから組み立てる（操作ログの変更後データ）
+        /// </summary>
+        /// <param name="beforeCard">払い戻し前に読み取ったカード</param>
+        /// <param name="refundedAt">払い戻しの日時（<c>SetRefundedAsync</c> が <c>refunded_at</c> へ書く値と同じ）</param>
+        /// <remarks>
+        /// <c>SetRefundedAsync</c> が変えるのは <c>is_refunded</c> / <c>refunded_at</c> の 2 列だけなので、
+        /// それ以外は払い戻し前の値をそのまま引き継ぐ（引き継がないと「開始ページ番号 7 → 1」のような
+        /// 実際には起きていない変更が監査ログに残る。Issue #1726 / #1760 と同じ理由）。
+        /// Issue #2151 で <c>refunded_at</c> を呼び出し元の日時で書くようにしたため、この値は DB と一致する。
+        /// </remarks>
+        internal static IcCard CreateRefundedSnapshot(IcCard beforeCard, DateTime refundedAt)
+        {
+            return new IcCard
+            {
+                CardIdm = beforeCard.CardIdm,
+                CardType = beforeCard.CardType,
+                CardNumber = beforeCard.CardNumber,
+                Note = beforeCard.Note,
+                IsDeleted = beforeCard.IsDeleted,
+                DeletedAt = beforeCard.DeletedAt,
+                IsLent = beforeCard.IsLent,
+                LastLentAt = beforeCard.LastLentAt,
+                LastLentStaff = beforeCard.LastLentStaff,
+                StartingPageNumber = beforeCard.StartingPageNumber,
+                CarryoverIncomeTotal = beforeCard.CarryoverIncomeTotal,
+                CarryoverExpenseTotal = beforeCard.CarryoverExpenseTotal,
+                CarryoverFiscalYear = beforeCard.CarryoverFiscalYear,
+                IsRefunded = true,
+                RefundedAt = refundedAt
+            };
         }
 
         /// <summary>

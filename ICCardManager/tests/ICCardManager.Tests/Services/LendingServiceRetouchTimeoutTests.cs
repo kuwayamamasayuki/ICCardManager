@@ -85,6 +85,7 @@ public class LendingServiceRetouchTimeoutTests : IDisposable
             _staffRepositoryMock.Object,
             _ledgerRepositoryMock.Object,
             _settingsRepositoryMock.Object,
+            new OperationLogger(Mock.Of<IOperationLogRepository>(), Mock.Of<ICurrentOperatorContext>()),
             _summaryGenerator,
             _lockManager,
             Options.Create(new AppOptions { RetouchWindowSeconds = retouchWindowSeconds }),

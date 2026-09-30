@@ -184,9 +184,26 @@ namespace ICCardManager.Data.Repositories
         /// <remarks>
         /// 払戻済カードは論理削除と異なり、帳票作成時には引き続き選択可能。
         /// ただし、貸出対象からは除外される。
+        /// <para>
+        /// WHERE 句は <c>is_deleted = 0 AND is_refunded = 0 AND is_lent = 0</c>。0 行のときは
+        /// DB の最新状態から原因（未存在／貸出中／競合）を診断して返す（Issue #1109）。
+        /// </para>
+        /// <para>
+        /// Issue #2151: 払い戻しは払戻台帳の INSERT と本メソッドを<b>1 つのトランザクションで</b>行う
+        /// （<c>LendingService.RefundAsync</c>）。別々に確定させると、間に他 PC がカードを削除・貸出したとき
+        /// 払戻台帳だけが 6 年保存の台帳に残り、カードは払戻済にならない。
+        /// <paramref name="transaction"/> を渡したときはキャッシュを破棄しない（コミット／ロールバックは
+        /// 呼び出し元の責務で、破棄もコミット後に呼び出し元が行う）。<c>null</c> のときは影響行数に
+        /// かかわらず破棄する（Issue #1759）。
+        /// </para>
         /// </remarks>
         /// <param name="cardIdm">ICカードIDm</param>
+        /// <param name="refundedAt">
+        /// 払戻日時。<c>refunded_at</c> へそのまま書く。払戻台帳の日付・操作ログの変更後データと
+        /// 同じ値にするため、DB 側の現在時刻（<c>datetime('now')</c>）ではなく呼び出し元が決める。
+        /// </param>
+        /// <param name="transaction">参加するトランザクション。<c>null</c> なら単独で確定する。</param>
         /// <returns>操作結果（成功/未存在/貸出中/競合）</returns>
-        Task<CardOperationResult> SetRefundedAsync(string cardIdm);
+        Task<CardOperationResult> SetRefundedAsync(string cardIdm, DateTime refundedAt, SQLiteTransaction transaction);
     }
 }

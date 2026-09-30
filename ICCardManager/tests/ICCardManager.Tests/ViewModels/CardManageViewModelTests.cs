@@ -18,6 +18,7 @@ using IOperationLogRepository = ICCardManager.Data.Repositories.IOperationLogRep
 
 using System;
 using System.Collections.Generic;
+using System.Data.SQLite;
 using System.Linq;
 using System.Text.Json;
 using System.Threading.Tasks;
@@ -95,6 +96,7 @@ public class CardManageViewModelTests : IDisposable
             _staffRepositoryMock.Object,
             _ledgerRepositoryMock.Object,
             settingsRepositoryMock.Object,
+            _operationLoggerMock.Object,
             summaryGenerator,
             _lockManager,
             Options.Create(new AppOptions()),
@@ -975,8 +977,11 @@ public class CardManageViewModelTests : IDisposable
         // 最新残高 3,000 円
         _ledgerRepositoryMock.Setup(r => r.GetLatestLedgerAsync(idm))
             .ReturnsAsync(new Ledger { CardIdm = idm, Balance = 3000 });
+        // Issue #2151: 払戻台帳は tx 付きで書く。切り替え元（tx なし）も設定しておき、
+        // 旧経路へ戻った実装がモックの既定値（0）で素通りしないようにする（testing.md #1745）
         _ledgerRepositoryMock.Setup(r => r.InsertAsync(It.IsAny<Ledger>())).ReturnsAsync(1);
-        _cardRepositoryMock.Setup(r => r.SetRefundedAsync(idm))
+        _ledgerRepositoryMock.Setup(r => r.InsertAsync(It.IsAny<Ledger>(), It.IsAny<SQLiteTransaction>())).ReturnsAsync(1);
+        _cardRepositoryMock.Setup(r => r.SetRefundedAsync(idm, It.IsAny<DateTime>(), It.IsAny<SQLiteTransaction>()))
             .ReturnsAsync(ICCardManager.Data.Repositories.CardOperationResult.Success);
         _cardRepositoryMock.Setup(r => r.GetByIdmAsync(idm, It.IsAny<bool>()))
             .ReturnsAsync(new IcCard { CardIdm = idm, CardType = "はやかけん", CardNumber = "H-001" });
@@ -992,11 +997,14 @@ public class CardManageViewModelTests : IDisposable
             l.Expense == 3000 &&
             l.Balance == 0 &&
             l.Summary == SummaryGenerator.GetRefundSummary() &&
-            l.IsLentRecord == false)), Times.Once);
+            l.IsLentRecord == false &&
+            l.Date == _clock.Now), It.Is<SQLiteTransaction>(t => t != null)), Times.Once);
+        // Issue #2151: tx なし（autocommit）の旧経路では書かないこと
+        _ledgerRepositoryMock.Verify(r => r.InsertAsync(It.IsAny<Ledger>()), Times.Never);
         // 最新残高を取得していること
         _ledgerRepositoryMock.Verify(r => r.GetLatestLedgerAsync(idm), Times.Once);
         // カードが払戻済状態に更新されること
-        _cardRepositoryMock.Verify(r => r.SetRefundedAsync(idm), Times.Once);
+        _cardRepositoryMock.Verify(r => r.SetRefundedAsync(idm, _clock.Now, It.Is<SQLiteTransaction>(t => t != null)), Times.Once);
     }
 
     /// <summary>
@@ -1018,8 +1026,11 @@ public class CardManageViewModelTests : IDisposable
 
         // 履歴なし → 残高 0 とみなす
         _ledgerRepositoryMock.Setup(r => r.GetLatestLedgerAsync(idm)).ReturnsAsync((Ledger?)null);
+        // Issue #2151: 払戻台帳は tx 付きで書く。切り替え元（tx なし）も設定しておき、
+        // 旧経路へ戻った実装がモックの既定値（0）で素通りしないようにする（testing.md #1745）
         _ledgerRepositoryMock.Setup(r => r.InsertAsync(It.IsAny<Ledger>())).ReturnsAsync(1);
-        _cardRepositoryMock.Setup(r => r.SetRefundedAsync(idm))
+        _ledgerRepositoryMock.Setup(r => r.InsertAsync(It.IsAny<Ledger>(), It.IsAny<SQLiteTransaction>())).ReturnsAsync(1);
+        _cardRepositoryMock.Setup(r => r.SetRefundedAsync(idm, It.IsAny<DateTime>(), It.IsAny<SQLiteTransaction>()))
             .ReturnsAsync(ICCardManager.Data.Repositories.CardOperationResult.Success);
         _cardRepositoryMock.Setup(r => r.GetByIdmAsync(idm, It.IsAny<bool>()))
             .ReturnsAsync(new IcCard { CardIdm = idm, CardType = "nimoca", CardNumber = "N-001" });
@@ -1033,8 +1044,9 @@ public class CardManageViewModelTests : IDisposable
             l.Income == 0 &&
             l.Expense == 0 &&
             l.Balance == 0 &&
-            l.Summary == SummaryGenerator.GetRefundSummary())), Times.Once);
-        _cardRepositoryMock.Verify(r => r.SetRefundedAsync(idm), Times.Once);
+            l.Summary == SummaryGenerator.GetRefundSummary()), It.Is<SQLiteTransaction>(t => t != null)), Times.Once);
+        _ledgerRepositoryMock.Verify(r => r.InsertAsync(It.IsAny<Ledger>()), Times.Never);
+        _cardRepositoryMock.Verify(r => r.SetRefundedAsync(idm, _clock.Now, It.Is<SQLiteTransaction>(t => t != null)), Times.Once);
     }
 
     /// <summary>
@@ -1061,7 +1073,8 @@ public class CardManageViewModelTests : IDisposable
             It.Is<string>(s => s.Contains("貸出中")),
             It.IsAny<string>()), Times.Once);
         _ledgerRepositoryMock.Verify(r => r.InsertAsync(It.IsAny<Ledger>()), Times.Never);
-        _cardRepositoryMock.Verify(r => r.SetRefundedAsync(It.IsAny<string>()), Times.Never);
+        _ledgerRepositoryMock.Verify(r => r.InsertAsync(It.IsAny<Ledger>(), It.IsAny<SQLiteTransaction>()), Times.Never);
+        _cardRepositoryMock.Verify(r => r.SetRefundedAsync(It.IsAny<string>(), It.IsAny<DateTime>(), It.IsAny<SQLiteTransaction>()), Times.Never);
     }
 
     /// <summary>
@@ -1078,7 +1091,8 @@ public class CardManageViewModelTests : IDisposable
 
         // Assert
         _ledgerRepositoryMock.Verify(r => r.InsertAsync(It.IsAny<Ledger>()), Times.Never);
-        _cardRepositoryMock.Verify(r => r.SetRefundedAsync(It.IsAny<string>()), Times.Never);
+        _ledgerRepositoryMock.Verify(r => r.InsertAsync(It.IsAny<Ledger>(), It.IsAny<SQLiteTransaction>()), Times.Never);
+        _cardRepositoryMock.Verify(r => r.SetRefundedAsync(It.IsAny<string>(), It.IsAny<DateTime>(), It.IsAny<SQLiteTransaction>()), Times.Never);
     }
 
     /// <summary>
@@ -1108,7 +1122,8 @@ public class CardManageViewModelTests : IDisposable
 
         // Assert
         _ledgerRepositoryMock.Verify(r => r.InsertAsync(It.IsAny<Ledger>()), Times.Never);
-        _cardRepositoryMock.Verify(r => r.SetRefundedAsync(It.IsAny<string>()), Times.Never);
+        _ledgerRepositoryMock.Verify(r => r.InsertAsync(It.IsAny<Ledger>(), It.IsAny<SQLiteTransaction>()), Times.Never);
+        _cardRepositoryMock.Verify(r => r.SetRefundedAsync(It.IsAny<string>(), It.IsAny<DateTime>(), It.IsAny<SQLiteTransaction>()), Times.Never);
     }
 
     /// <summary>
@@ -1129,9 +1144,12 @@ public class CardManageViewModelTests : IDisposable
         };
         _ledgerRepositoryMock.Setup(r => r.GetLatestLedgerAsync(idm))
             .ReturnsAsync(new Ledger { CardIdm = idm, Balance = 500 });
+        // Issue #2151: 払戻台帳は tx 付きで書く。切り替え元（tx なし）も設定しておき、
+        // 旧経路へ戻った実装がモックの既定値（0）で素通りしないようにする（testing.md #1745）
         _ledgerRepositoryMock.Setup(r => r.InsertAsync(It.IsAny<Ledger>())).ReturnsAsync(1);
+        _ledgerRepositoryMock.Setup(r => r.InsertAsync(It.IsAny<Ledger>(), It.IsAny<SQLiteTransaction>())).ReturnsAsync(1);
         // 払戻状態への更新が失敗
-        _cardRepositoryMock.Setup(r => r.SetRefundedAsync(idm))
+        _cardRepositoryMock.Setup(r => r.SetRefundedAsync(idm, It.IsAny<DateTime>(), It.IsAny<SQLiteTransaction>()))
             .ReturnsAsync(ICCardManager.Data.Repositories.CardOperationResult.NotFound);
         _cardRepositoryMock.Setup(r => r.GetByIdmAsync(idm, It.IsAny<bool>()))
             .ReturnsAsync(new IcCard { CardIdm = idm, CardType = "はやかけん", CardNumber = "H-001" });
@@ -1140,10 +1158,17 @@ public class CardManageViewModelTests : IDisposable
         // Act
         await _viewModel.RefundAsync();
 
-        // Assert - 失敗時はエラーダイアログを表示
+        // Assert - 失敗時は原因を名指しするエラーダイアログを表示
+        // Issue #2151: 競合は LendingService から BusinessException で届く。VM が受けないと
+        // 「予期しないエラー（SYS999）」へ悪化するため、原因別の文言と完全一致で表明する
         _dialogServiceMock.Verify(d => d.ShowError(
-            It.IsAny<string>(),
-            It.Is<string>(title => title.Contains("払い戻し"))), Times.Once);
+            "払い戻し対象のカードが見つかりませんでした。画面を更新してください。",
+            "払い戻しできません"), Times.Once);
+        // 巻き戻された払い戻しの監査ログは残さない
+        _operationLogRepositoryMock.Verify(
+            r => r.InsertAsync(It.IsAny<OperationLog>(), It.IsAny<SQLiteTransaction>()), Times.Never);
+        _operationLogRepositoryMock.Verify(r => r.InsertAsync(It.IsAny<OperationLog>()), Times.Never);
+        _viewModel.StatusMessage.Should().NotStartWith("払い戻しが完了しました");
     }
 
     #endregion
@@ -2634,8 +2659,11 @@ public class CardManageViewModelTests : IDisposable
 
         _ledgerRepositoryMock.Setup(r => r.GetLatestLedgerAsync(idm))
             .ReturnsAsync(new Ledger { CardIdm = idm, Balance = 3000 });
+        // Issue #2151: 払戻台帳は tx 付きで書く。切り替え元（tx なし）も設定しておき、
+        // 旧経路へ戻った実装がモックの既定値（0）で素通りしないようにする（testing.md #1745）
         _ledgerRepositoryMock.Setup(r => r.InsertAsync(It.IsAny<Ledger>())).ReturnsAsync(1);
-        _cardRepositoryMock.Setup(r => r.SetRefundedAsync(idm))
+        _ledgerRepositoryMock.Setup(r => r.InsertAsync(It.IsAny<Ledger>(), It.IsAny<SQLiteTransaction>())).ReturnsAsync(1);
+        _cardRepositoryMock.Setup(r => r.SetRefundedAsync(idm, It.IsAny<DateTime>(), It.IsAny<SQLiteTransaction>()))
             .ReturnsAsync(ICCardManager.Data.Repositories.CardOperationResult.Success);
         _cardRepositoryMock.Setup(r => r.GetByIdmAsync(idm, It.IsAny<bool>()))
             .ReturnsAsync(new IcCard { CardIdm = idm, CardType = "はやかけん", CardNumber = "H-001" });
@@ -2771,11 +2799,14 @@ public class CardManageViewModelTests : IDisposable
 
         _ledgerRepositoryMock.Setup(r => r.GetLatestLedgerAsync(idm))
             .ReturnsAsync(new Ledger { CardIdm = idm, Balance = 3000 });
+        // Issue #2151: 払戻台帳は tx 付きで書く。切り替え元（tx なし）も設定しておき、
+        // 旧経路へ戻った実装がモックの既定値（0）で素通りしないようにする（testing.md #1745）
         _ledgerRepositoryMock.Setup(r => r.InsertAsync(It.IsAny<Ledger>())).ReturnsAsync(1);
+        _ledgerRepositoryMock.Setup(r => r.InsertAsync(It.IsAny<Ledger>(), It.IsAny<SQLiteTransaction>())).ReturnsAsync(1);
         // 読み取り時点では他 PC が論理削除済み
         _cardRepositoryMock.Setup(r => r.GetByIdmAsync(idm, false)).ReturnsAsync((IcCard?)null);
         // その直後に他 PC が復元した → 払戻済への更新は成功し得る
-        _cardRepositoryMock.Setup(r => r.SetRefundedAsync(idm))
+        _cardRepositoryMock.Setup(r => r.SetRefundedAsync(idm, It.IsAny<DateTime>(), It.IsAny<SQLiteTransaction>()))
             .ReturnsAsync(ICCardManager.Data.Repositories.CardOperationResult.Success);
         _cardRepositoryMock.Setup(r => r.GetAllAsync()).ReturnsAsync(new List<IcCard>());
 
@@ -2783,10 +2814,11 @@ public class CardManageViewModelTests : IDisposable
         await _viewModel.RefundAsync();
 
         // Assert
-        _cardRepositoryMock.Verify(r => r.SetRefundedAsync(idm), Times.Never,
+        _cardRepositoryMock.Verify(r => r.SetRefundedAsync(idm, It.IsAny<DateTime>(), It.IsAny<SQLiteTransaction>()), Times.Never,
             "払い戻し前データを読めていない状態で払戻済にすると、変更が監査記録に残らない");
         _ledgerRepositoryMock.Verify(r => r.InsertAsync(It.IsAny<Ledger>()), Times.Never,
             "払戻台帳だけが残る中途半端な状態を作らないこと");
+        _ledgerRepositoryMock.Verify(r => r.InsertAsync(It.IsAny<Ledger>(), It.IsAny<SQLiteTransaction>()), Times.Never);
         _operationLogRepositoryMock.Verify(r => r.InsertAsync(It.IsAny<OperationLog>()), Times.Never);
 
         _viewModel.IsStatusError.Should().BeTrue();
@@ -2797,15 +2829,23 @@ public class CardManageViewModelTests : IDisposable
     }
 
     /// <summary>
-    /// Issue #1760: 払い戻し直後に他 PC がカードを削除しても、操作ログは残ること
+    /// Issue #1760 / #2151: 操作ログは払戻台帳・払戻済への更新と同じトランザクションで書かれ、
+    /// 変更後データは払戻前の列を保ったまま払戻状態だけが変わること
     /// </summary>
     /// <remarks>
-    /// <c>SetRefundedAsync</c> の成功後に行う再読取が null になるのは、その直後に
-    /// 他 PC がカードを論理削除した場合だけ。払い戻しは既に確定しているため、
-    /// 再読取の失敗を理由に記録を落としてはならない。
+    /// <para>
+    /// 以前は払い戻しの確定後に再読取し、読めなければ（直後に他 PC が削除した）スナップショットで
+    /// 記録していた（Issue #1760）。Issue #2151 で払い戻しと操作ログを 1 トランザクションに束ねたため、
+    /// 確定後の再読取そのものが無くなり、変更後データは常にトランザクションの中で組み立てる。
+    /// </para>
+    /// <para>
+    /// 変更していない列（開始ページ番号・備考・繰越累計）が払戻前の値のままであることを表明する —
+    /// 全列を既定値で組み立てると「開始ページ番号 7 → 1」のような虚偽の差分が監査ログに残る（#1726）。
+    /// トランザクションは参照の同一性で比べる（null どうしの一致で素通りさせない。testing.md #2103）。
+    /// </para>
     /// </remarks>
     [Fact]
-    public async Task RefundAsync_WhenCardDeletedRightAfterRefund_ShouldStillWriteAuditLog()
+    public async Task RefundAsync_ShouldWriteAuditLogInSameTransactionWithOnlyRefundStateChanged()
     {
         // Arrange
         const string idm = "0102030405060708";
@@ -2820,31 +2860,44 @@ public class CardManageViewModelTests : IDisposable
 
         _ledgerRepositoryMock.Setup(r => r.GetLatestLedgerAsync(idm))
             .ReturnsAsync(new Ledger { CardIdm = idm, Balance = 3000 });
+        SQLiteTransaction? ledgerTransaction = null;
         _ledgerRepositoryMock.Setup(r => r.InsertAsync(It.IsAny<Ledger>())).ReturnsAsync(1);
-        _cardRepositoryMock.SetupSequence(r => r.GetByIdmAsync(idm, false))
+        _ledgerRepositoryMock.Setup(r => r.InsertAsync(It.IsAny<Ledger>(), It.IsAny<SQLiteTransaction>()))
+            .Callback<Ledger, SQLiteTransaction>((_, tx) => ledgerTransaction = tx)
+            .ReturnsAsync(1);
+        _cardRepositoryMock.Setup(r => r.GetByIdmAsync(idm, false))
             .ReturnsAsync(new IcCard
             {
                 CardIdm = idm,
                 CardType = "はやかけん",
                 CardNumber = "H-001",
+                Note = "予備カード",
                 StartingPageNumber = 7,
+                CarryoverIncomeTotal = 1200,
                 IsRefunded = false
-            })
-            .ReturnsAsync((IcCard?)null);   // 払戻の直後に他 PC が削除した
-        _cardRepositoryMock.Setup(r => r.SetRefundedAsync(idm))
+            });
+        SQLiteTransaction? refundTransaction = null;
+        _cardRepositoryMock.Setup(r => r.SetRefundedAsync(idm, It.IsAny<DateTime>(), It.IsAny<SQLiteTransaction>()))
+            .Callback<string, DateTime, SQLiteTransaction>((_, _, tx) => refundTransaction = tx)
             .ReturnsAsync(ICCardManager.Data.Repositories.CardOperationResult.Success);
         _cardRepositoryMock.Setup(r => r.GetAllAsync()).ReturnsAsync(new List<IcCard>());
 
         OperationLog? recorded = null;
-        _operationLogRepositoryMock.Setup(r => r.InsertAsync(It.IsAny<OperationLog>()))
-            .Callback<OperationLog>(log => recorded = log)
+        SQLiteTransaction? logTransaction = null;
+        _operationLogRepositoryMock.Setup(r => r.InsertAsync(It.IsAny<OperationLog>(), It.IsAny<SQLiteTransaction>()))
+            .Callback<OperationLog, SQLiteTransaction>((log, tx) => { recorded = log; logTransaction = tx; })
             .ReturnsAsync(1);
 
         // Act
         await _viewModel.RefundAsync();
 
-        // Assert
-        recorded.Should().NotBeNull("払い戻しが確定した以上、監査記録を落としてはならない");
+        // Assert - 3 つの書き込みが同じ（非 null の）トランザクションに載っている
+        ledgerTransaction.Should().NotBeNull();
+        refundTransaction.Should().BeSameAs(ledgerTransaction);
+        logTransaction.Should().BeSameAs(ledgerTransaction, "監査ログだけが別に確定すると、払い戻しと記録が食い違い得る");
+        _operationLogRepositoryMock.Verify(r => r.InsertAsync(It.IsAny<OperationLog>()), Times.Never);
+
+        recorded.Should().NotBeNull();
         recorded!.Action.Should().Be(OperationLogger.Actions.Update);
         recorded.TargetId.Should().Be(idm);
 
@@ -2852,8 +2905,12 @@ public class CardManageViewModelTests : IDisposable
         var after = JsonSerializer.Deserialize<IcCard>(recorded.AfterData!)!;
         before.IsRefunded.Should().BeFalse();
         after.IsRefunded.Should().BeTrue("この操作が変えたのは払戻状態であること");
-        after.RefundedAt.Should().NotBeNull();
+        after.RefundedAt.Should().Be(_clock.Now, "refunded_at へ書く日時・払戻台帳の日付と同じ値であること");
         after.StartingPageNumber.Should().Be(7, "この操作が変えていない列は払戻前の値を保つこと");
+        after.Note.Should().Be("予備カード");
+        after.CarryoverIncomeTotal.Should().Be(1200);
+        _cardRepositoryMock.Verify(r => r.GetByIdmAsync(idm, false), Times.Once,
+            "変更後データは確定後に読み直さない（読めない競合で記録を落とす経路を作らない）");
     }
 
     /// <summary>
@@ -3303,10 +3360,13 @@ public class CardManageViewModelTests : IDisposable
         _ledgerRepositoryMock.Setup(r => r.GetLatestLedgerAsync(idm))
             .Callback(() => _viewModel.SelectedCard = null)
             .ReturnsAsync(new Ledger { CardIdm = idm, Balance = 3000 });
+        // Issue #2151: 払戻台帳は tx 付きで書く。切り替え元（tx なし）も設定しておき、
+        // 旧経路へ戻った実装がモックの既定値（0）で素通りしないようにする（testing.md #1745）
         _ledgerRepositoryMock.Setup(r => r.InsertAsync(It.IsAny<Ledger>())).ReturnsAsync(1);
+        _ledgerRepositoryMock.Setup(r => r.InsertAsync(It.IsAny<Ledger>(), It.IsAny<SQLiteTransaction>())).ReturnsAsync(1);
         _cardRepositoryMock.Setup(r => r.GetByIdmAsync(idm, It.IsAny<bool>()))
             .ReturnsAsync(new IcCard { CardIdm = idm, CardType = "はやかけん", CardNumber = "H-001" });
-        _cardRepositoryMock.Setup(r => r.SetRefundedAsync(idm))
+        _cardRepositoryMock.Setup(r => r.SetRefundedAsync(idm, It.IsAny<DateTime>(), It.IsAny<SQLiteTransaction>()))
             .ReturnsAsync(ICCardManager.Data.Repositories.CardOperationResult.Success);
         _cardRepositoryMock.Setup(r => r.GetAllAsync()).ReturnsAsync(new List<IcCard>());
 
@@ -3319,8 +3379,8 @@ public class CardManageViewModelTests : IDisposable
             It.IsAny<string>()), Times.Once);
 
         _ledgerRepositoryMock.Verify(r => r.InsertAsync(It.Is<Ledger>(l =>
-            l.CardIdm == idm && l.Expense == 3000 && l.Balance == 0)), Times.Once);
-        _cardRepositoryMock.Verify(r => r.SetRefundedAsync(idm), Times.Once);
+            l.CardIdm == idm && l.Expense == 3000 && l.Balance == 0), It.Is<SQLiteTransaction>(t => t != null)), Times.Once);
+        _cardRepositoryMock.Verify(r => r.SetRefundedAsync(idm, _clock.Now, It.Is<SQLiteTransaction>(t => t != null)), Times.Once);
     }
 
     /// <summary>
@@ -3355,8 +3415,9 @@ public class CardManageViewModelTests : IDisposable
         await _viewModel.RefundAsync();
 
         // Assert
-        _cardRepositoryMock.Verify(r => r.SetRefundedAsync(It.IsAny<string>()), Times.Never);
+        _cardRepositoryMock.Verify(r => r.SetRefundedAsync(It.IsAny<string>(), It.IsAny<DateTime>(), It.IsAny<SQLiteTransaction>()), Times.Never);
         _ledgerRepositoryMock.Verify(r => r.InsertAsync(It.IsAny<Ledger>()), Times.Never);
+        _ledgerRepositoryMock.Verify(r => r.InsertAsync(It.IsAny<Ledger>(), It.IsAny<SQLiteTransaction>()), Times.Never);
 
         _viewModel.IsStatusError.Should().BeTrue();
         _viewModel.StatusMessage.Should().Contain("H-001", "選択が外れていても対象を名指しできること");

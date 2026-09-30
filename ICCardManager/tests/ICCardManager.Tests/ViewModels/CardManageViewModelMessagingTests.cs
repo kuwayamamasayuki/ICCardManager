@@ -58,6 +58,7 @@ public class CardManageViewModelMessagingTests : IDisposable
             _staffRepositoryMock.Object,
             _ledgerRepositoryMock.Object,
             settingsRepositoryMock.Object,
+            _operationLoggerMock.Object,
             summaryGenerator,
             _lockManager,
             Options.Create(new AppOptions()),

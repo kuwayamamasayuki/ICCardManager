@@ -96,6 +96,7 @@ public class MainViewModelIntegrationTests
             _staffRepositoryMock.Object,
             _ledgerRepositoryMock.Object,
             _settingsRepositoryMock.Object,
+            new OperationLogger(Mock.Of<IOperationLogRepository>(), Mock.Of<ICurrentOperatorContext>()),
             summaryGenerator,
             lockManager,
             Options.Create(new AppOptions()),

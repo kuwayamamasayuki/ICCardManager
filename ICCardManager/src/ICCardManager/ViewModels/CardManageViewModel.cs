@@ -1162,11 +1162,9 @@ namespace ICCardManager.ViewModels
                 // 従来の `if (beforeCard != null)` ガードでは、払戻済への変更だけが確定して
                 // operation_log には 1 行も残らなかった。
                 //
-                // 副次的に「読み取り時点で既に対象カードが無い」場合の払戻台帳の作成も避けられるが、
-                // **払戻台帳だけが残る状態を完全には防げない**。この読み取りと SetRefundedAsync の
-                // 間に他 PC が削除・貸出した場合、台帳の INSERT は既にコミット済みで
-                // SetRefundedAsync だけが失敗する（下の失敗分岐はダイアログを出すのみ）。
-                // 恒久対処には台帳と払戻済更新を 1 トランザクションに束ねるか補償削除が要る（別 Issue）。
+                // 副次的に「読み取り時点で既に対象カードが無い」場合の払戻台帳の作成も避けられる。
+                // この読み取りと書き込みの間に他 PC が削除・貸出した場合は、書き込み側
+                // （LendingService.RefundAsync）が台帳・払戻済・操作ログを 1 トランザクションで巻き戻す（Issue #2151）。
                 var beforeCard = await _cardRepository.GetByIdmAsync(refundCardIdm);
                 if (beforeCard == null)
                 {
@@ -1174,72 +1172,37 @@ namespace ICCardManager.ViewModels
                     return;
                 }
 
-                // 払い戻しのLedgerを作成
-                var now = _clock.Now;
-                var refundLedger = new Ledger
-                {
-                    CardIdm = refundCardIdm,
-                    LenderIdm = null,
-                    Date = now,
-                    Summary = SummaryGenerator.GetRefundSummary(),
-                    Income = 0,
-                    Expense = currentBalance,  // 残高を払出金額として計上
-                    Balance = 0,                // 払い戻し後の残高は0
-                    StaffName = null,
-                    Note = null,
-                    ReturnerIdm = null,
-                    LentAt = null,
-                    ReturnedAt = null,
-                    IsLentRecord = false
-                };
-
-                var ledgerId = await _ledgerRepository.InsertAsync(refundLedger);
-
-                if (ledgerId > 0)
+                try
                 {
                     // Issue #530: カードを「払戻済」状態に設定（論理削除ではない）
-                    var refundResult = await _cardRepository.SetRefundedAsync(refundCardIdm);
-
-                    if (refundResult == CardOperationResult.Success)
-                    {
-                        // 払い戻し後のデータを取得（操作ログ用）
-                        //
-                        // Issue #1760: 再読取が null になるのは、払い戻しが確定した直後に
-                        // 他 PC がこのカードを論理削除した場合だけ。払い戻しは既に確定しているため、
-                        // 再読取の失敗を理由に監査記録を落としてはならない。この操作が変えた列
-                        // （払戻状態）だけを払い戻し前のデータへ適用したスナップショットで記録する。
-                        var afterCard = await _cardRepository.GetByIdmAsync(refundCardIdm)
-                            ?? CreateRefundedSnapshot(beforeCard, now);
-
-                        // 操作ログを記録（払い戻しはカード更新として記録）
-                        await _operationLogger.LogCardUpdateAsync(beforeCard, afterCard);
-
-                        await LoadCardsAsync();
-                        CancelEdit();
-                        // Issue #1759: CancelEdit() は StatusMessage / IsStatusError をクリアするため、
-                        // 完了メッセージは必ず後処理のあとに設定する（先に設定すると一度も表示されない）。
-                        StatusMessage = currentBalance > 0
-                            ? $"払い戻しが完了しました（払戻額: ¥{currentBalance:N0}）"
-                            : "払い戻しが完了しました";
-                        IsStatusError = false;
-                    }
-                    else
-                    {
-                        // Issue #1109: 失敗原因に応じた具体的なメッセージをダイアログで表示
-                        var failureMessage = GetOperationFailureMessage(refundResult, "払い戻し");
-                        // Issue #1793: BeginBusy スコープ内のモーダル表示は SuspendBusy で囲む
-                        using (SuspendBusy())
-                        {
-                            _dialogService.ShowError(failureMessage, "払い戻しできません");
-                        }
-                        await LoadCardsAsync();
-                    }
+                    // Issue #2151: 払戻台帳の作成・払戻済への更新・操作ログを 1 トランザクションで確定する
+                    await _lendingService.RefundAsync(beforeCard, currentBalance, _clock.Now);
                 }
-                else
+                catch (RefundConflictException ex)
                 {
-                    StatusMessage = "払い戻し記録の作成に失敗しました";
-                    IsStatusError = true;
+                    // 払戻済への更新が 0 行だった（他 PC が削除・貸出・払い戻しした）。台帳も操作ログも残っていない。
+                    // Issue #1109: 失敗原因に応じた具体的なメッセージをダイアログで表示
+                    // Issue #1951: この catch を置かないと、原因を名指しできる競合が
+                    // 「予期しないエラー（SYS999）」のモーダルへ悪化する
+                    var failureMessage = GetOperationFailureMessage(ex.Result, "払い戻し");
+                    // Issue #1793: BeginBusy スコープ内のモーダル表示は SuspendBusy で囲む
+                    using (SuspendBusy())
+                    {
+                        _dialogService.ShowError(failureMessage, "払い戻しできません");
+                    }
+                    // キャッシュは RefundAsync が破棄済み（Issue #1759）
+                    await LoadCardsAsync();
+                    return;
                 }
+
+                await LoadCardsAsync();
+                CancelEdit();
+                // Issue #1759: CancelEdit() は StatusMessage / IsStatusError をクリアするため、
+                // 完了メッセージは必ず後処理のあとに設定する（先に設定すると一度も表示されない）。
+                StatusMessage = currentBalance > 0
+                    ? $"払い戻しが完了しました（払戻額: ¥{currentBalance:N0}）"
+                    : "払い戻しが完了しました";
+                IsStatusError = false;
             }
         }
 
@@ -1352,51 +1315,13 @@ namespace ICCardManager.ViewModels
         }
 
         /// <summary>
-        /// 払い戻し後のカードの状態を、払い戻し前のデータから組み立てる
-        /// </summary>
-        /// <param name="beforeCard">払い戻し前に読み取ったカード</param>
-        /// <param name="refundedAt">払い戻しを実施した日時</param>
-        /// <remarks>
-        /// Issue #1760: 払い戻し直後の再読取が失敗したときに、操作ログの <c>AfterData</c> として使う。
-        /// <c>SetRefundedAsync</c> が変えるのは <c>is_refunded</c> / <c>refunded_at</c> の 2 列だけなので、
-        /// それ以外は払い戻し前の値をそのまま引き継ぐ（引き継がないと「開始ページ番号 7 → 1」のような
-        /// 実際には起きていない変更が監査ログに残る。Issue #1726 と同じ理由）。
-        /// <para>
-        /// <paramref name="refundedAt"/> は呼び出し側が採った時刻であり、
-        /// <c>SetRefundedAsync</c> が書く <c>datetime('now','localtime')</c> とは厳密には一致しない。
-        /// 再読取が失敗した以上 DB の値は取得できず、記録を落とすより近似値で残す方が監査に資する。
-        /// </para>
-        /// </remarks>
-        private static IcCard CreateRefundedSnapshot(IcCard beforeCard, DateTime refundedAt)
-        {
-            return new IcCard
-            {
-                CardIdm = beforeCard.CardIdm,
-                CardType = beforeCard.CardType,
-                CardNumber = beforeCard.CardNumber,
-                Note = beforeCard.Note,
-                IsDeleted = beforeCard.IsDeleted,
-                DeletedAt = beforeCard.DeletedAt,
-                IsLent = beforeCard.IsLent,
-                LastLentAt = beforeCard.LastLentAt,
-                LastLentStaff = beforeCard.LastLentStaff,
-                StartingPageNumber = beforeCard.StartingPageNumber,
-                CarryoverIncomeTotal = beforeCard.CarryoverIncomeTotal,
-                CarryoverExpenseTotal = beforeCard.CarryoverExpenseTotal,
-                CarryoverFiscalYear = beforeCard.CarryoverFiscalYear,
-                IsRefunded = true,
-                RefundedAt = refundedAt
-            };
-        }
-
-        /// <summary>
         /// 復元後のカードの状態を、復元前に読み取ったデータから組み立てる
         /// </summary>
         /// <param name="deletedCard">復元前に読み取ったカード（<c>includeDeleted: true</c> で取得したもの）</param>
         /// <remarks>
         /// Issue #1760: 復元直後の再読取が失敗したときに、操作ログの <c>AfterData</c> として使う。
         /// <c>RestoreAsync</c> が変えるのは <c>is_deleted</c> / <c>deleted_at</c> の 2 列だけなので、
-        /// それ以外は復元前の値をそのまま引き継ぐ（<see cref="CreateRefundedSnapshot"/> と同じ理由）。
+        /// それ以外は復元前の値をそのまま引き継ぐ（<see cref="LendingService.CreateRefundedSnapshot"/> と同じ理由）。
         /// </remarks>
         private static IcCard CreateRestoredSnapshot(IcCard deletedCard)
         {
