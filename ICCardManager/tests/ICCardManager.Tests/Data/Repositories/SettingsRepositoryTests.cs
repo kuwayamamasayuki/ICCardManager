@@ -477,6 +477,34 @@ public class SettingsRepositoryTests : IDisposable
 
     #endregion
 
+    #region LongTermUnreturnedDays テスト（Issue #2152）
+
+    [Fact]
+    public async Task GetAppSettingsAsync_Default_LongTermUnreturnedDaysIs14()
+    {
+        var result = await _repository.GetAppSettingsAsync();
+
+        // 期待値は本番の定数から読まずリテラルで書く（定数ごと動かす変更を検出するため。#1884）
+        result.LongTermUnreturnedDays.Should().Be(14, "未設定の環境は従来どおり 14 日で判定する");
+        _repository.GetAppSettings().LongTermUnreturnedDays.Should().Be(14, "同期版の読み込みも同じ既定値");
+    }
+
+    [Fact]
+    public async Task SaveAndLoadAppSettings_LongTermUnreturnedDays_RoundTrip()
+    {
+        var settings = new AppSettings { WarningBalance = 10000, BackupPath = @"C:\Backup", LongTermUnreturnedDays = 10 };
+
+        await _repository.SaveAppSettingsAsync(settings);
+        var loaded = await _repository.GetAppSettingsAsync();
+
+        loaded.LongTermUnreturnedDays.Should().Be(10);
+        _repository.GetAppSettings().LongTermUnreturnedDays.Should().Be(10, "同期版の読み込みも同じキーを見る");
+        (await _repository.GetAsync(SettingsRepository.KeyLongTermUnreturnedDays)).Should().Be("10",
+            "settings テーブルには long_term_unreturned_days キーで保存される");
+    }
+
+    #endregion
+
     #region SkipBusStopInputOnReturn テスト
 
     /// <summary>

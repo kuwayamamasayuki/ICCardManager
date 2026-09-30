@@ -82,6 +82,16 @@ namespace ICCardManager.Models
         public int CompanionCountInputTimeoutSeconds { get; set; } = AppConstants.DefaultCompanionCountInputTimeoutSeconds;
 
         /// <summary>
+        /// 貸出からこの日数以上返却されていない交通系ICカードを「長期未返却」として扱うしきい値（日。Issue #2152）
+        /// </summary>
+        /// <remarks>
+        /// 既定は <see cref="AppConstants.LongTermUnreturnedDays"/>（14 日）。範囲は
+        /// <see cref="AppConstants.MinLongTermUnreturnedDays"/>〜<see cref="AppConstants.MaxLongTermUnreturnedDays"/>。
+        /// 管理者ダッシュボードの初期値になる。ダッシュボード上の切り替えは一時的な絞り込みで、この値は変わらない。
+        /// </remarks>
+        public int LongTermUnreturnedDays { get; set; } = AppConstants.LongTermUnreturnedDays;
+
+        /// <summary>
         /// 返却時に、返却した交通系ICカードの利用履歴をメイン画面に自動表示して確認を促すかどうか（Issue #1907）
         /// </summary>
         /// <remarks>

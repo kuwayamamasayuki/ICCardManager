@@ -63,6 +63,9 @@ namespace ICCardManager.Data.Repositories
         // 同行者数入力の自動クローズ秒数キー（Issue #2009。0 = 自動的に閉じない）
         public const string KeyCompanionCountInputTimeoutSeconds = "companion_count_input_timeout_seconds";
 
+        // 長期未返却のしきい値（日数）キー（Issue #2152）
+        public const string KeyLongTermUnreturnedDays = "long_term_unreturned_days";
+
         // 返却時の利用履歴自動表示（返却確認）設定キー（Issue #1907。未保存 = 有効）
         public const string KeyShowHistoryOnReturn = "show_history_on_return";
 
@@ -333,6 +336,12 @@ WHERE settings.value IS NULL OR substr(settings.value, 1, 7) <> @currentMonth";
                 settings.CompanionCountInputTimeoutSeconds = companionTimeout;
             }
 
+            // 長期未返却のしきい値（Issue #2152）
+            if (int.TryParse(Get(KeyLongTermUnreturnedDays), NumberStyles.Integer, CultureInfo.InvariantCulture, out var longTermDays))
+            {
+                settings.LongTermUnreturnedDays = longTermDays;
+            }
+
             // 返却時の利用履歴自動表示（Issue #1907）。既定は有効なので、未保存（null）は有効として読む
             settings.ShowHistoryOnReturn = ParseBool(Get(KeyShowHistoryOnReturn), defaultValue: true);
 
@@ -453,6 +462,12 @@ WHERE settings.value IS NULL OR substr(settings.value, 1, 7) <> @currentMonth";
                 settings.CompanionCountInputTimeoutSeconds = companionTimeout;
             }
 
+            // 長期未返却のしきい値（Issue #2152）
+            if (int.TryParse(await GetAsync(KeyLongTermUnreturnedDays).ConfigureAwait(false), NumberStyles.Integer, CultureInfo.InvariantCulture, out var longTermDays))
+            {
+                settings.LongTermUnreturnedDays = longTermDays;
+            }
+
             // 返却時の利用履歴自動表示（Issue #1907）。既定は有効なので、未保存（null）は有効として読む
             settings.ShowHistoryOnReturn = ParseBool(await GetAsync(KeyShowHistoryOnReturn).ConfigureAwait(false), defaultValue: true);
 
@@ -550,6 +565,9 @@ WHERE settings.value IS NULL OR substr(settings.value, 1, 7) <> @currentMonth";
 
                     // 同行者数入力の自動クローズ秒数を保存（Issue #2009）
                     success &= await SetAsync(KeyCompanionCountInputTimeoutSeconds, settings.CompanionCountInputTimeoutSeconds.ToString(CultureInfo.InvariantCulture), scope).ConfigureAwait(false);
+
+                    // 長期未返却のしきい値を保存（Issue #2152）
+                    success &= await SetAsync(KeyLongTermUnreturnedDays, settings.LongTermUnreturnedDays.ToString(CultureInfo.InvariantCulture), scope).ConfigureAwait(false);
 
                     // 返却時の利用履歴自動表示（返却確認）を保存（Issue #1907）
                     success &= await SetAsync(KeyShowHistoryOnReturn, settings.ShowHistoryOnReturn.ToString().ToLowerInvariant(), scope).ConfigureAwait(false);

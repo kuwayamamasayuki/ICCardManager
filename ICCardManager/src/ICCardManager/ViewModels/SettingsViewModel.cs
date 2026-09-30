@@ -159,6 +159,15 @@ public partial class SettingsViewModel : ViewModelBase
     private int _companionCountInputTimeoutSeconds;
 
     /// <summary>
+    /// 長期未返却とみなす日数（Issue #2152）
+    /// </summary>
+    /// <remarks>
+    /// 管理者ダッシュボードの初期値になる。ダッシュボード上の切り替えは一時的な絞り込みで、この値は変わらない。
+    /// </remarks>
+    [ObservableProperty]
+    private int _longTermUnreturnedDays = AppConstants.LongTermUnreturnedDays;
+
+    /// <summary>
     /// 返却時に利用履歴を自動表示して確認を促すかどうか（Issue #1907）
     /// </summary>
     [ObservableProperty]
@@ -289,6 +298,7 @@ public partial class SettingsViewModel : ViewModelBase
             SkipBusStopInputOnReturn = settings.SkipBusStopInputOnReturn;
             SkipCompanionCountInputOnReturn = settings.SkipCompanionCountInputOnReturn;
             CompanionCountInputTimeoutSeconds = settings.CompanionCountInputTimeoutSeconds;
+            LongTermUnreturnedDays = settings.LongTermUnreturnedDays;
             ShowHistoryOnReturn = settings.ShowHistoryOnReturn;
 
             // DBフォルダパス設定（appsettings.jsonから読み込み済み）
@@ -328,6 +338,15 @@ public partial class SettingsViewModel : ViewModelBase
             return;
         }
 
+        // 長期未返却のしきい値の検証（Issue #2152）
+        var longTermResult = _validationService.ValidateLongTermUnreturnedDays(LongTermUnreturnedDays);
+        if (!longTermResult)
+        {
+            SetStatus(longTermResult.ErrorMessage!, true);
+            FirstErrorField = nameof(LongTermUnreturnedDays);
+            return;
+        }
+
         // バックアップパスの検証（空の場合はデフォルトを使用するのでスキップ）
         // Issue #1269: UNC到達性チェックをUIブロックせず非同期実行
         var validatedBackupPath = BackupPath;
@@ -358,6 +377,7 @@ public partial class SettingsViewModel : ViewModelBase
                 SkipBusStopInputOnReturn = SkipBusStopInputOnReturn,
                 SkipCompanionCountInputOnReturn = SkipCompanionCountInputOnReturn,
                 CompanionCountInputTimeoutSeconds = CompanionCountInputTimeoutSeconds,
+                LongTermUnreturnedDays = LongTermUnreturnedDays,
                 ShowHistoryOnReturn = ShowHistoryOnReturn
             };
 
@@ -855,6 +875,11 @@ public partial class SettingsViewModel : ViewModelBase
     }
 
     partial void OnCompanionCountInputTimeoutSecondsChanged(int value)
+    {
+        HasChanges = true;
+    }
+
+    partial void OnLongTermUnreturnedDaysChanged(int value)
     {
         HasChanges = true;
     }

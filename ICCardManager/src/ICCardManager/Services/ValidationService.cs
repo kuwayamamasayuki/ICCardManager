@@ -219,6 +219,30 @@ namespace ICCardManager.Services
             return reason == null ? ValidationResult.Success() : ValidationResult.Failure(reason);
         }
 
+        /// <inheritdoc/>
+        /// <remarks>
+        /// 範囲は <see cref="AppConstants.MinLongTermUnreturnedDays"/>〜<see cref="AppConstants.MaxLongTermUnreturnedDays"/>。
+        /// 設定画面の入力欄（<c>NumericRangeValidationRule</c>）も同じ定数を使い、両者の一致は静的検査で固定する。
+        /// </remarks>
+        public ValidationResult ValidateLongTermUnreturnedDays(int days)
+        {
+            if (days < AppConstants.MinLongTermUnreturnedDays)
+            {
+                return ValidationResult.Failure(
+                    $"長期未返却のしきい値が{days}日で下限を下回っています。" +
+                    $"{AppConstants.MinLongTermUnreturnedDays}日以上の値を設定してください。");
+            }
+
+            if (days > AppConstants.MaxLongTermUnreturnedDays)
+            {
+                return ValidationResult.Failure(
+                    $"長期未返却のしきい値が{days}日で上限を超えています。" +
+                    $"{AppConstants.MaxLongTermUnreturnedDays}日以下の値を設定してください。");
+            }
+
+            return ValidationResult.Success();
+        }
+
         #endregion
     }
 }
