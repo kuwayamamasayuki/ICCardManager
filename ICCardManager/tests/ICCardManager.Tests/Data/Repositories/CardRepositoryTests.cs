@@ -753,6 +753,103 @@ public class CardRepositoryTests : IDisposable
 
     #endregion
 
+    #region DeleteAsync（トランザクション対応）テスト（Issue #2156）
+
+    /// <summary>
+    /// Issue #2156: 渡したトランザクションに参加し、ロールバックすれば論理削除も巻き戻ること
+    /// </summary>
+    /// <remarks>
+    /// 論理削除と監査ログを 1 トランザクションで確定させる（CardManagementService.DeleteAsync）前提。
+    /// command.Transaction を設定し忘れると、監査ログの失敗でロールバックしても削除だけが残る。
+    /// </remarks>
+    [Fact]
+    public async Task DeleteAsync_WithTransaction_RollbackLeavesCardUndeleted()
+    {
+        // Arrange
+        var card = CreateTestCard("0102030405060708", "はやかけん", "H001");
+        await _repository.InsertAsync(card);
+
+        // Act
+        using (var scope = await _dbContext.BeginTransactionAsync())
+        {
+            var result = await _repository.DeleteAsync(card.CardIdm, scope.Transaction);
+            result.Should().Be(ICCardManager.Data.Repositories.CardOperationResult.Success);
+            scope.Rollback();
+        }
+
+        // Assert
+        (await _repository.GetByIdmAsync(card.CardIdm)).Should().NotBeNull(
+            "トランザクションに参加していれば、ロールバックで論理削除も巻き戻る");
+    }
+
+    /// <summary>
+    /// Issue #2156: トランザクション内で成功したときはキャッシュを破棄しないこと（破棄はコミット後に呼び出し元が行う）
+    /// </summary>
+    [Fact]
+    public async Task DeleteAsync_WithTransaction_Success_DoesNotInvalidateCache()
+    {
+        // Arrange
+        var card = CreateTestCard("0102030405060708", "はやかけん", "H001");
+        await _repository.InsertAsync(card);
+        _cacheServiceMock.Invocations.Clear();
+
+        // Act
+        using (var scope = await _dbContext.BeginTransactionAsync())
+        {
+            await _repository.DeleteAsync(card.CardIdm, scope.Transaction);
+            scope.Commit();
+        }
+
+        // Assert
+        _cacheServiceMock.Verify(c => c.InvalidateByPrefix(It.IsAny<string>()), Times.Never);
+        (await _repository.GetByIdmAsync(card.CardIdm, includeDeleted: true))!.IsDeleted.Should().BeTrue();
+    }
+
+    /// <summary>
+    /// 対の表明: トランザクション外で成功したときは従来どおりキャッシュを破棄すること
+    /// </summary>
+    [Fact]
+    public async Task DeleteAsync_WithoutTransaction_Success_InvalidatesCache()
+    {
+        // Arrange
+        var card = CreateTestCard("0102030405060708", "はやかけん", "H001");
+        await _repository.InsertAsync(card);
+        _cacheServiceMock.Invocations.Clear();
+
+        // Act
+        await _repository.DeleteAsync(card.CardIdm);
+
+        // Assert
+        _cacheServiceMock.Verify(c => c.InvalidateByPrefix(It.IsAny<string>()), Times.AtLeastOnce);
+    }
+
+    /// <summary>
+    /// Issue #1109 / #1759: 貸出中（0 行）はトランザクション内でも原因を診断して返し、キャッシュを破棄すること
+    /// </summary>
+    [Fact]
+    public async Task DeleteAsync_WithTransaction_LentCard_ReturnsCardIsLentAndInvalidatesCache()
+    {
+        // Arrange
+        var card = CreateTestCard("0102030405060708", "はやかけん", "H001");
+        await _repository.InsertAsync(card);
+        await _repository.UpdateLentStatusAsync(card.CardIdm, true, DateTime.Now, null);
+        _cacheServiceMock.Invocations.Clear();
+
+        // Act
+        ICCardManager.Data.Repositories.CardOperationResult result;
+        using (var scope = await _dbContext.BeginTransactionAsync())
+        {
+            result = await _repository.DeleteAsync(card.CardIdm, scope.Transaction);
+            scope.Rollback();
+        }
+
+        // Assert
+        result.Should().Be(ICCardManager.Data.Repositories.CardOperationResult.CardIsLent);
+        _cacheServiceMock.Verify(c => c.InvalidateByPrefix(It.IsAny<string>()), Times.AtLeastOnce);
+    }
+
+    #endregion
+
     #region RestoreAsync テスト（Issue #2107）
 
     /// <summary>

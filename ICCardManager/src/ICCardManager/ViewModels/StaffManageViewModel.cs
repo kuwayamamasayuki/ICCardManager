@@ -27,7 +27,14 @@ namespace ICCardManager.ViewModels
         private readonly IStaffRepository _staffRepository;
         private readonly ICardReader _cardReader;
         private readonly IValidationService _validationService;
-        private readonly OperationLogger _operationLogger;
+        /// <summary>
+        /// 職員の登録・更新・削除・復元を監査ログと 1 トランザクションで確定させる（Issue #2156）
+        /// </summary>
+        /// <remarks>
+        /// 以前は本 ViewModel がリポジトリへ書き込んだ<b>後で</b> <c>OperationLogger</c> を呼んでおり、
+        /// 監査ログだけが失敗すると「操作は反映されたのに記録が残らない」状態が確定した。
+        /// </remarks>
+        private readonly StaffManagementService _staffManagementService;
         private readonly IDialogService _dialogService;
         private readonly IStaffAuthService _staffAuthService;
         private readonly IMessenger _messenger;
@@ -108,7 +115,7 @@ namespace ICCardManager.ViewModels
             IStaffRepository staffRepository,
             ICardReader cardReader,
             IValidationService validationService,
-            OperationLogger operationLogger,
+            StaffManagementService staffManagementService,
             IDialogService dialogService,
             IStaffAuthService staffAuthService,
             IMessenger messenger,
@@ -117,7 +124,9 @@ namespace ICCardManager.ViewModels
             _staffRepository = staffRepository;
             _cardReader = cardReader;
             _validationService = validationService;
-            _operationLogger = operationLogger;
+            // 省略可能にすると DI の配線漏れが「保存ボタンを押しても何も書かれない」形で潜在化する（#1820）
+            _staffManagementService = staffManagementService
+                ?? throw new ArgumentNullException(nameof(staffManagementService));
             _dialogService = dialogService;
             _staffAuthService = staffAuthService;
             _messenger = messenger;
@@ -261,16 +270,10 @@ namespace ICCardManager.ViewModels
 
                     if (confirmed)
                     {
-                        var restored = await _staffRepository.RestoreAsync(idm);
+                        // Issue #2156: 復元と監査ログを 1 トランザクションで確定させる
+                        var restored = await _staffManagementService.RestoreAsync(existing);
                         if (restored)
                         {
-                            // 操作ログを記録（復元後のデータを取得）
-                            // Issue #1760: 再読取が null になるのは復元の直後に他 PC が削除した場合だけ。
-                            // 復元は確定済みなので記録を落とさず、復元前のデータで補う。
-                            var restoredStaff = await _staffRepository.GetByIdmAsync(idm)
-                                ?? CreateRestoredSnapshot(existing);
-                            await _operationLogger.LogStaffRestoreAsync(restoredStaff);
-
                             _dialogService.ShowInformation(
                                 $"{identifier} を復元しました",
                                 "復元完了");
@@ -404,16 +407,10 @@ namespace ICCardManager.ViewModels
 
                                 if (confirmed)
                                 {
-                                    var restored = await _staffRepository.RestoreAsync(EditStaffIdm);
+                                    // Issue #2156: 復元と監査ログを 1 トランザクションで確定させる
+                                    var restored = await _staffManagementService.RestoreAsync(existing);
                                     if (restored)
                                     {
-                                        // 操作ログを記録（復元後のデータを取得）
-                                        // Issue #1760: 再読取が null になるのは復元の直後に他 PC が削除した場合だけ。
-                                        // 復元は確定済みなので記録を落とさず、復元前のデータで補う。
-                                        var restoredStaff = await _staffRepository.GetByIdmAsync(EditStaffIdm)
-                                            ?? CreateRestoredSnapshot(existing);
-                                        await _operationLogger.LogStaffRestoreAsync(restoredStaff);
-
                                         var restoredIdm = EditStaffIdm;
                                         await LoadStaffAsync();
                                         CancelEdit();
@@ -465,12 +462,10 @@ namespace ICCardManager.ViewModels
                             Note = string.IsNullOrWhiteSpace(sanitizedNote) ? null : sanitizedNote
                         };
 
-                        var success = await _staffRepository.InsertAsync(staff);
+                        // Issue #2156: 登録と監査ログを 1 トランザクションで確定させる
+                        var success = await _staffManagementService.RegisterAsync(staff);
                         if (success)
                         {
-                            // 操作ログを記録
-                            await _operationLogger.LogStaffInsertAsync(staff);
-
                             var savedIdm = EditStaffIdm;
                             await LoadStaffAsync();
                             CancelEdit();
@@ -512,12 +507,11 @@ namespace ICCardManager.ViewModels
                             Note = string.IsNullOrWhiteSpace(sanitizedNote) ? null : sanitizedNote
                         };
 
-                        var success = await _staffRepository.UpdateAsync(staff);
+                        // Issue #2156: 更新と監査ログを 1 トランザクションで確定させる
+                        // （beforeStaff は上のガードで非 null が確定している。Issue #1760）
+                        var success = await _staffManagementService.UpdateAsync(beforeStaff, staff);
                         if (success)
                         {
-                            // 操作ログを記録（beforeStaff は上のガードで非 null が確定している。Issue #1760）
-                            await _operationLogger.LogStaffUpdateAsync(beforeStaff, staff);
-
                             var updatedIdm = EditStaffIdm;
                             await LoadStaffAsync();
                             CancelEdit();
@@ -628,12 +622,11 @@ namespace ICCardManager.ViewModels
                         return;
                     }
 
-                    var success = await _staffRepository.DeleteAsync(targetIdm);
+                    // Issue #2156: 論理削除と監査ログを 1 トランザクションで確定させる
+                    // （操作者は Issue #429 の認証済み職員。OperationLogger が ICurrentOperatorContext から解決する）
+                    var success = await _staffManagementService.DeleteAsync(staff);
                     if (success)
                     {
-                        // 操作ログを記録（Issue #429: 認証済み職員のIDmを使用）
-                        await _operationLogger.LogStaffDeleteAsync(staff);
-
                         await LoadStaffAsync();
                         CancelEdit();
                         // Issue #1759: CancelEdit() は StatusMessage / IsStatusError をクリアするため、
@@ -677,28 +670,6 @@ namespace ICCardManager.ViewModels
             await LoadStaffAsync();
             StatusMessage = ConcurrencyConflictMessage.ForDelete($"職員「{targetLabel}」", "職員一覧");
             IsStatusError = true;
-        }
-
-        /// <summary>
-        /// 復元後の職員の状態を、復元前に読み取ったデータから組み立てる
-        /// </summary>
-        /// <param name="deletedStaff">復元前に読み取った職員（<c>includeDeleted: true</c> で取得したもの）</param>
-        /// <remarks>
-        /// Issue #1760: 復元直後の再読取が失敗したときに、操作ログの <c>AfterData</c> として使う。
-        /// <c>RestoreAsync</c> が変えるのは <c>is_deleted</c> / <c>deleted_at</c> の 2 列だけなので、
-        /// それ以外は復元前の値をそのまま引き継ぐ。
-        /// </remarks>
-        private static Staff CreateRestoredSnapshot(Staff deletedStaff)
-        {
-            return new Staff
-            {
-                StaffIdm = deletedStaff.StaffIdm,
-                Name = deletedStaff.Name,
-                Number = deletedStaff.Number,
-                Note = deletedStaff.Note,
-                IsDeleted = false,
-                DeletedAt = null
-            };
         }
 
         /// <summary>
@@ -840,19 +811,15 @@ namespace ICCardManager.ViewModels
 
                     if (confirmed)
                     {
-                        var restored = await _staffRepository.RestoreAsync(idm);
+                        // Issue #2156: 復元と監査ログを 1 トランザクションで確定させる。
+                        // 監査ログの失敗は復元ごと巻き戻るので、ここで例外になれば何も確定していない
+                        // （restoreCommitted を立てる前なので「読み取りに失敗」として案内してよい）
+                        var restored = await _staffManagementService.RestoreAsync(existing);
                         if (restored)
                         {
-                            // 操作ログを記録（復元後のデータを取得）
-                            // Issue #1760: 再読取が null になるのは復元の直後に他 PC が削除した場合だけ。
-                            // 復元は確定済みなので記録を落とさず、復元前のデータで補う。
                             // Issue #1816: ここから先は「復元が確定した後の後処理」。
                             // 失敗しても復元は取り消されないため、読み取り失敗と混同する案内を出さない
                             restoreCommitted.Value = true;
-
-                            var restoredStaff = await _staffRepository.GetByIdmAsync(idm)
-                                ?? CreateRestoredSnapshot(existing);
-                            await _operationLogger.LogStaffRestoreAsync(restoredStaff);
 
                             await LoadStaffAsync();
                             CancelEdit();

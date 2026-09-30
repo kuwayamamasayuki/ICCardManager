@@ -29,7 +29,15 @@ namespace ICCardManager.ViewModels
         private readonly ILedgerRepository _ledgerRepository;
         private readonly ICardReader _cardReader;
         private readonly IValidationService _validationService;
-        private readonly OperationLogger _operationLogger;
+        /// <summary>
+        /// カードの登録・更新・削除・復元を監査ログと 1 トランザクションで確定させる（Issue #2156）
+        /// </summary>
+        /// <remarks>
+        /// 以前は本 ViewModel がリポジトリへ書き込んだ<b>後で</b> <c>OperationLogger</c> を呼んでおり、
+        /// 監査ログだけが失敗すると「操作は反映されたのに記録が残らない」状態が確定した。
+        /// 書き込みはこのサービスを通し、本 ViewModel は <c>OperationLogger</c> を直接持たない。
+        /// </remarks>
+        private readonly CardManagementService _cardManagementService;
         private readonly IDialogService _dialogService;
         private readonly IStaffAuthService _staffAuthService;
         private readonly LendingService _lendingService;
@@ -183,7 +191,7 @@ namespace ICCardManager.ViewModels
             ILedgerRepository ledgerRepository,
             ICardReader cardReader,
             IValidationService validationService,
-            OperationLogger operationLogger,
+            CardManagementService cardManagementService,
             IDialogService dialogService,
             IStaffAuthService staffAuthService,
             LendingService lendingService,
@@ -198,7 +206,9 @@ namespace ICCardManager.ViewModels
             _ledgerRepository = ledgerRepository;
             _cardReader = cardReader;
             _validationService = validationService;
-            _operationLogger = operationLogger;
+            // 省略可能にすると DI の配線漏れが「保存ボタンを押しても何も書かれない」形で潜在化する（#1820）
+            _cardManagementService = cardManagementService
+                ?? throw new ArgumentNullException(nameof(cardManagementService));
             _dialogService = dialogService;
             _staffAuthService = staffAuthService;
             _lendingService = lendingService;
@@ -309,16 +319,10 @@ namespace ICCardManager.ViewModels
 
                     if (confirmed)
                     {
-                        var restored = await _cardRepository.RestoreAsync(idm);
+                        // Issue #2156: 復元と監査ログを 1 トランザクションで確定させる
+                        var restored = await _cardManagementService.RestoreAsync(existing);
                         if (restored)
                         {
-                            // 操作ログを記録（復元後のデータを取得）
-                            // Issue #1760: 再読取が null になるのは復元の直後に他 PC が削除した場合だけ。
-                            // 復元は確定済みなので記録を落とさず、復元前のデータで補う。
-                            var restoredCard = await _cardRepository.GetByIdmAsync(idm)
-                                ?? CreateRestoredSnapshot(existing);
-                            await _operationLogger.LogCardRestoreAsync(restoredCard);
-
                             _dialogService.ShowInformation(
                                 $"{existing.CardNumber} を復元しました",
                                 "復元完了");
@@ -529,16 +533,10 @@ namespace ICCardManager.ViewModels
 
                             if (confirmed)
                             {
-                                var restored = await _cardRepository.RestoreAsync(EditCardIdm);
+                                // Issue #2156: 復元と監査ログを 1 トランザクションで確定させる
+                                var restored = await _cardManagementService.RestoreAsync(existing);
                                 if (restored)
                                 {
-                                    // 操作ログを記録（復元後のデータを取得）
-                                    // Issue #1760: 再読取が null になるのは復元の直後に他 PC が
-                                    // 削除した場合だけ。復元は確定済みなので記録を落とさない。
-                                    var restoredCard = await _cardRepository.GetByIdmAsync(EditCardIdm)
-                                        ?? CreateRestoredSnapshot(existing);
-                                    await _operationLogger.LogCardRestoreAsync(restoredCard);
-
                                     var restoredIdm = EditCardIdm;
                                     var restoredNumber = existing.CardNumber;
                                     await LoadCardsAsync();
@@ -623,7 +621,8 @@ namespace ICCardManager.ViewModels
                     {
                         try
                         {
-                            success = await _cardRepository.InsertAsync(card);
+                            // Issue #2156: 登録と監査ログを 1 トランザクションで確定させる
+                            success = await _cardManagementService.RegisterAsync(card);
                         }
                         catch (DuplicateCardNumberException duplicate)
                         {
@@ -632,7 +631,7 @@ namespace ICCardManager.ViewModels
                                 // Issue #1106: 自動採番で番号が競合した場合、再採番してリトライ
                                 sanitizedCardNumber = await _cardRepository.GetNextCardNumberAsync(EditCardType);
                                 card.CardNumber = sanitizedCardNumber;
-                                success = await _cardRepository.InsertAsync(card);
+                                success = await _cardManagementService.RegisterAsync(card);
                             }
                             else
                             {
@@ -664,8 +663,7 @@ namespace ICCardManager.ViewModels
 
                     if (success)
                     {
-                        // 操作ログを記録
-                        await _operationLogger.LogCardInsertAsync(card);
+                        // 操作ログは RegisterAsync が登録と同じトランザクションで記録済み（Issue #2156）
 
                         // Issue #596: 履歴のインポート対象を決定
                         var history = _preReadHistory;
@@ -850,7 +848,9 @@ namespace ICCardManager.ViewModels
                     bool success;
                     try
                     {
-                        success = await _cardRepository.UpdateAsync(card);
+                        // Issue #2156: 更新と監査ログを 1 トランザクションで確定させる
+                        // （beforeCard は上のガードで非 null が確定している。Issue #1760）
+                        success = await _cardManagementService.UpdateAsync(beforeCard, card);
                     }
                     catch (DuplicateCardNumberException duplicate)
                     {
@@ -866,9 +866,6 @@ namespace ICCardManager.ViewModels
 
                     if (success)
                     {
-                        // 操作ログを記録（beforeCard は上のガードで非 null が確定している。Issue #1760）
-                        await _operationLogger.LogCardUpdateAsync(beforeCard, card);
-
                         var updatedIdm = EditCardIdm;
                         await LoadCardsAsync();
                         CancelEdit();
@@ -1031,12 +1028,11 @@ namespace ICCardManager.ViewModels
                     return;
                 }
 
-                var deleteResult = await _cardRepository.DeleteAsync(targetIdm);
+                // Issue #2156: 論理削除と監査ログを 1 トランザクションで確定させる
+                // （操作者は Issue #429 の認証済み職員。OperationLogger が ICurrentOperatorContext から解決する）
+                var deleteResult = await _cardManagementService.DeleteAsync(card);
                 if (deleteResult == CardOperationResult.Success)
                 {
-                    // 操作ログを記録（Issue #429: 認証済み職員のIDmを使用）
-                    await _operationLogger.LogCardDeleteAsync(card);
-
                     await LoadCardsAsync();
                     CancelEdit();
                     // Issue #1759: CancelEdit() は StatusMessage / IsStatusError をクリアするため、
@@ -1315,37 +1311,6 @@ namespace ICCardManager.ViewModels
         }
 
         /// <summary>
-        /// 復元後のカードの状態を、復元前に読み取ったデータから組み立てる
-        /// </summary>
-        /// <param name="deletedCard">復元前に読み取ったカード（<c>includeDeleted: true</c> で取得したもの）</param>
-        /// <remarks>
-        /// Issue #1760: 復元直後の再読取が失敗したときに、操作ログの <c>AfterData</c> として使う。
-        /// <c>RestoreAsync</c> が変えるのは <c>is_deleted</c> / <c>deleted_at</c> の 2 列だけなので、
-        /// それ以外は復元前の値をそのまま引き継ぐ（<see cref="LendingService.CreateRefundedSnapshot"/> と同じ理由）。
-        /// </remarks>
-        private static IcCard CreateRestoredSnapshot(IcCard deletedCard)
-        {
-            return new IcCard
-            {
-                CardIdm = deletedCard.CardIdm,
-                CardType = deletedCard.CardType,
-                CardNumber = deletedCard.CardNumber,
-                Note = deletedCard.Note,
-                IsLent = deletedCard.IsLent,
-                LastLentAt = deletedCard.LastLentAt,
-                LastLentStaff = deletedCard.LastLentStaff,
-                IsRefunded = deletedCard.IsRefunded,
-                RefundedAt = deletedCard.RefundedAt,
-                StartingPageNumber = deletedCard.StartingPageNumber,
-                CarryoverIncomeTotal = deletedCard.CarryoverIncomeTotal,
-                CarryoverExpenseTotal = deletedCard.CarryoverExpenseTotal,
-                CarryoverFiscalYear = deletedCard.CarryoverFiscalYear,
-                IsDeleted = false,
-                DeletedAt = null
-            };
-        }
-
-        /// <summary>
         /// カード操作の失敗原因に応じたエラーメッセージを返す
         /// </summary>
         /// <param name="result">操作結果</param>
@@ -1500,7 +1465,10 @@ namespace ICCardManager.ViewModels
 
                     if (confirmed)
                     {
-                        var restored = await _cardRepository.RestoreAsync(idm);
+                        // Issue #2156: 復元と監査ログを 1 トランザクションで確定させる。
+                        // 監査ログの失敗は復元ごと巻き戻るので、ここで例外になれば何も確定していない
+                        // （restoreCommitted を立てる前なので「読み取りに失敗」として案内してよい）
+                        var restored = await _cardManagementService.RestoreAsync(existing);
                         if (restored)
                         {
                             // Issue #1816: ここから先は「復元が確定した後の後処理」。
@@ -1508,13 +1476,6 @@ namespace ICCardManager.ViewModels
                             // （.claude/rules/development-conventions.md「コミット確定後の後処理を、
                             // 成否の判定に巻き込まない」#1727 / #1805）
                             restoreCommitted.Value = true;
-
-                            // 操作ログを記録（復元後のデータを取得）
-                            // Issue #1760: 再読取が null になるのは復元の直後に他 PC が
-                            // 削除した場合だけ。復元は確定済みなので記録を落とさない。
-                            var restoredCard = await _cardRepository.GetByIdmAsync(idm)
-                                ?? CreateRestoredSnapshot(existing);
-                            await _operationLogger.LogCardRestoreAsync(restoredCard);
 
                             var restoredIdm = idm;
                             var restoredNumber = existing.CardNumber;

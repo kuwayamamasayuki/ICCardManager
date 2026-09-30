@@ -461,6 +461,58 @@ public class StaffRepositoryTests : IDisposable
         result.Should().BeFalse();
     }
 
+    /// <summary>
+    /// Issue #2156: 渡したトランザクションに参加し、ロールバックすれば論理削除も巻き戻ること
+    /// </summary>
+    /// <remarks>
+    /// 論理削除と監査ログを 1 トランザクションで確定させる（StaffManagementService.DeleteAsync）前提。
+    /// </remarks>
+    [Fact]
+    public async Task DeleteAsync_WithTransaction_RollbackLeavesStaffUndeleted()
+    {
+        // Arrange
+        var staff = CreateTestStaff("STAFF00000000001", "山田太郎", "001");
+        await _repository.InsertAsync(staff);
+
+        // Act
+        using (var scope = await _dbContext.BeginTransactionAsync())
+        {
+            (await _repository.DeleteAsync(staff.StaffIdm, scope.Transaction)).Should().BeTrue();
+            scope.Rollback();
+        }
+
+        // Assert
+        (await _repository.GetByIdmAsync(staff.StaffIdm)).Should().NotBeNull(
+            "トランザクションに参加していれば、ロールバックで論理削除も巻き戻る");
+    }
+
+    /// <summary>
+    /// Issue #2156: トランザクション内ではキャッシュを破棄しないこと（破棄はコミット後に呼び出し元が行う）
+    /// </summary>
+    /// <remarks>
+    /// 対の表明（トランザクション外では 0 行でも破棄する）は
+    /// <see cref="DeleteAsync_ZeroRowsAffected_StillInvalidatesStaffCache"/>。
+    /// </remarks>
+    [Fact]
+    public async Task DeleteAsync_WithTransaction_DoesNotInvalidateCache()
+    {
+        // Arrange
+        var staff = CreateTestStaff("STAFF00000000001", "山田太郎", "001");
+        await _repository.InsertAsync(staff);
+        _cacheServiceMock.Invocations.Clear();
+
+        // Act
+        using (var scope = await _dbContext.BeginTransactionAsync())
+        {
+            (await _repository.DeleteAsync(staff.StaffIdm, scope.Transaction)).Should().BeTrue();
+            scope.Commit();
+        }
+
+        // Assert
+        _cacheServiceMock.Verify(c => c.InvalidateByPrefix(It.IsAny<string>()), Times.Never);
+        (await _repository.GetByIdmAsync(staff.StaffIdm, includeDeleted: true))!.IsDeleted.Should().BeTrue();
+    }
+
     #endregion
 
     #region RestoreAsync テスト（Issue #2107）

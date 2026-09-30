@@ -1,6 +1,7 @@
 using CommunityToolkit.Mvvm.Messaging;
 using FluentAssertions;
 using ICCardManager.Common.Messages;
+using ICCardManager.Data;
 using ICCardManager.Data.Repositories;
 using ICCardManager.Dtos;
 using ICCardManager.Infrastructure.CardReader;
@@ -9,11 +10,13 @@ using ICCardManager.Models;
 using ICCardManager.Services;
 using ICCardManager.Tests.Infrastructure.Timing;
 using ICCardManager.ViewModels;
+using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using Xunit;
 using IOperationLogRepository = ICCardManager.Data.Repositories.IOperationLogRepository;
 
 using System;
+using System.Data.SQLite;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
@@ -24,7 +27,7 @@ namespace ICCardManager.Tests.ViewModels;
 /// <summary>
 /// StaffManageViewModelの単体テスト
 /// </summary>
-public class StaffManageViewModelTests
+public class StaffManageViewModelTests : IDisposable
 {
     private readonly Mock<IStaffRepository> _staffRepositoryMock;
     private readonly Mock<ICardReader> _cardReaderMock;
@@ -49,6 +52,11 @@ public class StaffManageViewModelTests
     /// 本番の <c>WpfDispatcherService</c> と同じく「記録して再スローしない」代役を使う。
     /// </summary>
     private readonly RecordingDispatcherService _dispatcher = new();
+    /// <summary>
+    /// Issue #2156: 登録・更新・削除・復元は <see cref="StaffManagementService"/> が
+    /// トランザクションを開いて行う。リポジトリはモックのまま、トランザクションだけ実物（インメモリ）を使う。
+    /// </summary>
+    private readonly DbContext _dbContext;
     private readonly StaffManageViewModel _viewModel;
 
     public StaffManageViewModelTests()
@@ -62,6 +70,9 @@ public class StaffManageViewModelTests
         // OperationLoggerのモック（コンストラクタ引数が必要なためMock.Ofで作成）
         _operationLogRepositoryMock = new Mock<IOperationLogRepository>();
         _operationLoggerMock = new Mock<OperationLogger>(_operationLogRepositoryMock.Object, Mock.Of<ICurrentOperatorContext>());
+
+        _dbContext = new DbContext(":memory:");
+        _dbContext.InitializeDatabase();
 
         // バリデーションはデフォルトで成功を返す
         _validationServiceMock.Setup(v => v.ValidateStaffIdm(It.IsAny<string>())).Returns(ValidationResult.Success());
@@ -82,11 +93,19 @@ public class StaffManageViewModelTests
             _staffRepositoryMock.Object,
             _cardReaderMock.Object,
             _validationServiceMock.Object,
-            _operationLoggerMock.Object,
+            new StaffManagementService(
+                _dbContext, _staffRepositoryMock.Object, _operationLoggerMock.Object,
+                NullLogger<StaffManagementService>.Instance),
             _dialogServiceMock.Object,
             _staffAuthServiceMock.Object,
             messenger,
             _dispatcher);
+    }
+
+    public void Dispose()
+    {
+        _dbContext.Dispose();
+        GC.SuppressFinalize(this);
     }
 
     #region 職員一覧読み込みテスト
@@ -236,7 +255,7 @@ public class StaffManageViewModelTests
         _viewModel.EditNote = "新規職員";
 
         _staffRepositoryMock.Setup(r => r.GetByIdmAsync("FFFF000000000001", true)).ReturnsAsync((Staff?)null);
-        _staffRepositoryMock.Setup(r => r.InsertAsync(It.IsAny<Staff>())).ReturnsAsync(true);
+        _staffRepositoryMock.Setup(r => r.InsertAsync(It.IsAny<Staff>(), It.IsAny<SQLiteTransaction>())).ReturnsAsync(true);
         _staffRepositoryMock.Setup(r => r.GetAllAsync()).ReturnsAsync(new List<Staff>());
 
         // Act
@@ -248,7 +267,7 @@ public class StaffManageViewModelTests
             s.Name == "田中太郎" &&
             s.Number == "S-001" &&
             s.Note == "新規職員"
-        )), Times.Once);
+        ), It.IsAny<SQLiteTransaction>()), Times.Once);
         _viewModel.IsEditing.Should().BeFalse(); // CancelEdit()で編集モード終了
     }
 
@@ -272,7 +291,7 @@ public class StaffManageViewModelTests
         // Assert
         _viewModel.StatusMessage.Should().Contain("既に登録");
         _viewModel.StatusMessage.Should().Contain("既存職員");  // 氏名が表示されること
-        _staffRepositoryMock.Verify(r => r.InsertAsync(It.IsAny<Staff>()), Times.Never);
+        _staffRepositoryMock.Verify(r => r.InsertAsync(It.IsAny<Staff>(), It.IsAny<SQLiteTransaction>()), Times.Never);
     }
 
     /// <summary>
@@ -295,7 +314,7 @@ public class StaffManageViewModelTests
 
         // Assert
         _viewModel.StatusMessage.Should().Contain("IDm");
-        _staffRepositoryMock.Verify(r => r.InsertAsync(It.IsAny<Staff>()), Times.Never);
+        _staffRepositoryMock.Verify(r => r.InsertAsync(It.IsAny<Staff>(), It.IsAny<SQLiteTransaction>()), Times.Never);
     }
 
     /// <summary>
@@ -318,7 +337,7 @@ public class StaffManageViewModelTests
 
         // Assert
         _viewModel.StatusMessage.Should().Contain("氏名");
-        _staffRepositoryMock.Verify(r => r.InsertAsync(It.IsAny<Staff>()), Times.Never);
+        _staffRepositoryMock.Verify(r => r.InsertAsync(It.IsAny<Staff>(), It.IsAny<SQLiteTransaction>()), Times.Never);
     }
 
     /// <summary>
@@ -334,14 +353,14 @@ public class StaffManageViewModelTests
         _viewModel.EditNumber = "";
 
         _staffRepositoryMock.Setup(r => r.GetByIdmAsync("FFFF000000000001", true)).ReturnsAsync((Staff?)null);
-        _staffRepositoryMock.Setup(r => r.InsertAsync(It.IsAny<Staff>())).ReturnsAsync(true);
+        _staffRepositoryMock.Setup(r => r.InsertAsync(It.IsAny<Staff>(), It.IsAny<SQLiteTransaction>())).ReturnsAsync(true);
         _staffRepositoryMock.Setup(r => r.GetAllAsync()).ReturnsAsync(new List<Staff>());
 
         // Act
         await _viewModel.SaveAsync();
 
         // Assert
-        _staffRepositoryMock.Verify(r => r.InsertAsync(It.Is<Staff>(s => s.Number == null)), Times.Once);
+        _staffRepositoryMock.Verify(r => r.InsertAsync(It.Is<Staff>(s => s.Number == null), It.IsAny<SQLiteTransaction>()), Times.Once);
     }
 
     /// <summary>
@@ -371,7 +390,7 @@ public class StaffManageViewModelTests
         // 対象行が存在する（実 DB で成立する）状態を仕掛ける
         _staffRepositoryMock.Setup(r => r.GetByIdmAsync("FFFF000000000001", false))
             .ReturnsAsync(new Staff { StaffIdm = "FFFF000000000001", Name = "田中太郎", Number = "S-001" });
-        _staffRepositoryMock.Setup(r => r.UpdateAsync(It.IsAny<Staff>())).ReturnsAsync(true);
+        _staffRepositoryMock.Setup(r => r.UpdateAsync(It.IsAny<Staff>(), It.IsAny<SQLiteTransaction>())).ReturnsAsync(true);
         _staffRepositoryMock.Setup(r => r.GetAllAsync()).ReturnsAsync(new List<Staff>());
 
         // Act
@@ -382,7 +401,7 @@ public class StaffManageViewModelTests
             s.StaffIdm == "FFFF000000000001" &&
             s.Name == "田中花子" &&
             s.Note == "更新後のメモ"
-        )), Times.Once);
+        ), It.IsAny<SQLiteTransaction>()), Times.Once);
         _viewModel.IsEditing.Should().BeFalse(); // CancelEdit()で編集モード終了
     }
 
@@ -398,7 +417,7 @@ public class StaffManageViewModelTests
         _viewModel.EditName = "田中太郎";
 
         _staffRepositoryMock.Setup(r => r.GetByIdmAsync("FFFF000000000001", true)).ReturnsAsync((Staff?)null);
-        _staffRepositoryMock.Setup(r => r.InsertAsync(It.IsAny<Staff>())).ReturnsAsync(false);
+        _staffRepositoryMock.Setup(r => r.InsertAsync(It.IsAny<Staff>(), It.IsAny<SQLiteTransaction>())).ReturnsAsync(false);
 
         // Act
         await _viewModel.SaveAsync();
@@ -421,7 +440,7 @@ public class StaffManageViewModelTests
         _viewModel.EditName = "田中太郎";
 
         _staffRepositoryMock.Setup(r => r.GetByIdmAsync("FFFF000000000001", true)).ReturnsAsync((Staff?)null);
-        _staffRepositoryMock.Setup(r => r.InsertAsync(It.IsAny<Staff>()))
+        _staffRepositoryMock.Setup(r => r.InsertAsync(It.IsAny<Staff>(), It.IsAny<SQLiteTransaction>()))
             .ThrowsAsync(new Exception(rawTechnicalDetail));
 
         // Act
@@ -459,14 +478,14 @@ public class StaffManageViewModelTests
         // 対象行が存在する（実 DB で成立する）状態を仕掛ける
         _staffRepositoryMock.Setup(r => r.GetByIdmAsync("FFFF000000000001", false))
             .ReturnsAsync(new Staff { StaffIdm = "FFFF000000000001", Name = "田中太郎" });
-        _staffRepositoryMock.Setup(r => r.DeleteAsync("FFFF000000000001")).ReturnsAsync(true);
+        _staffRepositoryMock.Setup(r => r.DeleteAsync("FFFF000000000001", It.IsAny<SQLiteTransaction>())).ReturnsAsync(true);
         _staffRepositoryMock.Setup(r => r.GetAllAsync()).ReturnsAsync(new List<Staff>());
 
         // Act
         await _viewModel.DeleteAsync();
 
         // Assert - リポジトリが正しく呼ばれたことを検証
-        _staffRepositoryMock.Verify(r => r.DeleteAsync("FFFF000000000001"), Times.Once);
+        _staffRepositoryMock.Verify(r => r.DeleteAsync("FFFF000000000001", It.IsAny<SQLiteTransaction>()), Times.Once);
         // 削除後にLoadStaffAsyncが呼ばれて一覧が更新される
         _staffRepositoryMock.Verify(r => r.GetAllAsync(), Times.Once);
     }
@@ -484,7 +503,7 @@ public class StaffManageViewModelTests
         await _viewModel.DeleteAsync();
 
         // Assert
-        _staffRepositoryMock.Verify(r => r.DeleteAsync(It.IsAny<string>()), Times.Never);
+        _staffRepositoryMock.Verify(r => r.DeleteAsync(It.IsAny<string>(), It.IsAny<SQLiteTransaction>()), Times.Never);
     }
 
     // Issue #1759: 「削除に失敗した場合にエラーメッセージが表示されること」を検証していた
@@ -509,7 +528,7 @@ public class StaffManageViewModelTests
         // 対象行が存在する状態を仕掛けたうえで DeleteAsync に例外を注入する
         _staffRepositoryMock.Setup(r => r.GetByIdmAsync("FFFF000000000001", false))
             .ReturnsAsync(new Staff { StaffIdm = "FFFF000000000001", Name = "田中太郎" });
-        _staffRepositoryMock.Setup(r => r.DeleteAsync("FFFF000000000001"))
+        _staffRepositoryMock.Setup(r => r.DeleteAsync("FFFF000000000001", It.IsAny<SQLiteTransaction>()))
             .ThrowsAsync(new Exception(rawTechnicalDetail));
 
         // Act
@@ -539,7 +558,7 @@ public class StaffManageViewModelTests
         _viewModel.EditName = "田中太郎";
 
         _staffRepositoryMock.Setup(r => r.GetByIdmAsync(idm, true)).ReturnsAsync((Staff?)null);
-        _staffRepositoryMock.Setup(r => r.InsertAsync(It.IsAny<Staff>())).ReturnsAsync(true);
+        _staffRepositoryMock.Setup(r => r.InsertAsync(It.IsAny<Staff>(), It.IsAny<SQLiteTransaction>())).ReturnsAsync(true);
         _staffRepositoryMock.Setup(r => r.GetAllAsync()).ReturnsAsync(new List<Staff>
         {
             new() { StaffIdm = idm, Name = "田中太郎", Number = null }
@@ -574,7 +593,7 @@ public class StaffManageViewModelTests
         // 対象行が存在する（実 DB で成立する）状態を仕掛ける
         _staffRepositoryMock.Setup(r => r.GetByIdmAsync(idm, false))
             .ReturnsAsync(new Staff { StaffIdm = idm, Name = "田中太郎", Number = "S-001" });
-        _staffRepositoryMock.Setup(r => r.UpdateAsync(It.IsAny<Staff>())).ReturnsAsync(true);
+        _staffRepositoryMock.Setup(r => r.UpdateAsync(It.IsAny<Staff>(), It.IsAny<SQLiteTransaction>())).ReturnsAsync(true);
         _staffRepositoryMock.Setup(r => r.GetAllAsync()).ReturnsAsync(new List<Staff>
         {
             new() { StaffIdm = idm, Name = "田中花子", Number = "S-001" }
@@ -596,7 +615,7 @@ public class StaffManageViewModelTests
         // Arrange
         var idm = "FFFF000000000001";
         _staffRepositoryMock.Setup(r => r.GetByIdmAsync(idm, true)).ReturnsAsync((Staff?)null);
-        _staffRepositoryMock.Setup(r => r.InsertAsync(It.IsAny<Staff>())).ReturnsAsync(true);
+        _staffRepositoryMock.Setup(r => r.InsertAsync(It.IsAny<Staff>(), It.IsAny<SQLiteTransaction>())).ReturnsAsync(true);
         _staffRepositoryMock.Setup(r => r.GetAllAsync()).ReturnsAsync(new List<Staff>
         {
             new() { StaffIdm = idm, Name = "田中太郎", Number = null }
@@ -626,7 +645,7 @@ public class StaffManageViewModelTests
         // 対象行が存在する（実 DB で成立する）状態を仕掛ける
         _staffRepositoryMock.Setup(r => r.GetByIdmAsync(idm, false))
             .ReturnsAsync(new Staff { StaffIdm = idm, Name = "田中太郎" });
-        _staffRepositoryMock.Setup(r => r.UpdateAsync(It.IsAny<Staff>())).ReturnsAsync(true);
+        _staffRepositoryMock.Setup(r => r.UpdateAsync(It.IsAny<Staff>(), It.IsAny<SQLiteTransaction>())).ReturnsAsync(true);
         await _viewModel.SaveAsync();
 
         // Assert: 2回目でもPropertyChangedが発火していること
@@ -761,7 +780,7 @@ public class StaffManageViewModelTests
             Number = "001"
         });
         // 他PCがこの職員を論理削除した → WHERE is_deleted = 0 に 0 行 → false
-        _staffRepositoryMock.Setup(r => r.UpdateAsync(It.IsAny<Staff>())).ReturnsAsync(false);
+        _staffRepositoryMock.Setup(r => r.UpdateAsync(It.IsAny<Staff>(), It.IsAny<SQLiteTransaction>())).ReturnsAsync(false);
         _staffRepositoryMock.Setup(r => r.GetAllAsync()).ReturnsAsync(new List<Staff>());
 
         // Act
@@ -798,7 +817,7 @@ public class StaffManageViewModelTests
             IsDeleted = true
         });
         // 他PCが先に復元した → WHERE is_deleted = 1 に 0 行 → false
-        _staffRepositoryMock.Setup(r => r.RestoreAsync(idm)).ReturnsAsync(false);
+        _staffRepositoryMock.Setup(r => r.RestoreAsync(idm, It.IsAny<SQLiteTransaction>())).ReturnsAsync(false);
         _staffRepositoryMock.Setup(r => r.GetAllAsync()).ReturnsAsync(new List<Staff>());
 
         _viewModel.StartNewStaff();
@@ -847,7 +866,7 @@ public class StaffManageViewModelTests
             Name = "田中太郎",
             Number = "001"
         });
-        _staffRepositoryMock.Setup(r => r.DeleteAsync(idm)).ReturnsAsync(false);
+        _staffRepositoryMock.Setup(r => r.DeleteAsync(idm, It.IsAny<SQLiteTransaction>())).ReturnsAsync(false);
         _staffRepositoryMock.Setup(r => r.GetAllAsync()).ReturnsAsync(new List<Staff>());
 
         // Act
@@ -908,7 +927,7 @@ public class StaffManageViewModelTests
             Name = "田中太郎",
             Number = "001"
         });
-        _staffRepositoryMock.Setup(r => r.DeleteAsync(idm)).ReturnsAsync(false);
+        _staffRepositoryMock.Setup(r => r.DeleteAsync(idm, It.IsAny<SQLiteTransaction>())).ReturnsAsync(false);
         _staffRepositoryMock.Setup(r => r.GetAllAsync()).ReturnsAsync(new List<Staff>());
 
         // Act
@@ -947,7 +966,7 @@ public class StaffManageViewModelTests
         _viewModel.EditName = "田中花子";  // 改姓を入力した直後に他PCが削除した
 
         _staffRepositoryMock.Setup(r => r.GetByIdmAsync(idm, false)).ReturnsAsync((Staff?)null);
-        _staffRepositoryMock.Setup(r => r.UpdateAsync(It.IsAny<Staff>())).ReturnsAsync(false);
+        _staffRepositoryMock.Setup(r => r.UpdateAsync(It.IsAny<Staff>(), It.IsAny<SQLiteTransaction>())).ReturnsAsync(false);
         _staffRepositoryMock.Setup(r => r.GetAllAsync()).ReturnsAsync(new List<Staff>());
 
         // Act
@@ -980,7 +999,7 @@ public class StaffManageViewModelTests
         _viewModel.EditName = "田中太郎";
 
         _staffRepositoryMock.Setup(r => r.GetByIdmAsync("FFFF000000000001", true)).ReturnsAsync((Staff?)null);
-        _staffRepositoryMock.Setup(r => r.InsertAsync(It.IsAny<Staff>())).ReturnsAsync(true);
+        _staffRepositoryMock.Setup(r => r.InsertAsync(It.IsAny<Staff>(), It.IsAny<SQLiteTransaction>())).ReturnsAsync(true);
         _staffRepositoryMock.Setup(r => r.GetAllAsync()).ReturnsAsync(new List<Staff>());
 
         // Act
@@ -1010,7 +1029,7 @@ public class StaffManageViewModelTests
             Name = "田中太郎",
             Number = "001"
         });
-        _staffRepositoryMock.Setup(r => r.UpdateAsync(It.IsAny<Staff>())).ReturnsAsync(true);
+        _staffRepositoryMock.Setup(r => r.UpdateAsync(It.IsAny<Staff>(), It.IsAny<SQLiteTransaction>())).ReturnsAsync(true);
         _staffRepositoryMock.Setup(r => r.GetAllAsync()).ReturnsAsync(new List<Staff>());
 
         // Act
@@ -1041,7 +1060,7 @@ public class StaffManageViewModelTests
             Name = "田中太郎",
             Number = "001"
         });
-        _staffRepositoryMock.Setup(r => r.DeleteAsync(idm)).ReturnsAsync(true);
+        _staffRepositoryMock.Setup(r => r.DeleteAsync(idm, It.IsAny<SQLiteTransaction>())).ReturnsAsync(true);
         _staffRepositoryMock.Setup(r => r.GetAllAsync()).ReturnsAsync(new List<Staff>());
 
         // Act
@@ -1067,7 +1086,7 @@ public class StaffManageViewModelTests
             Number = "001",
             IsDeleted = true
         });
-        _staffRepositoryMock.Setup(r => r.RestoreAsync(idm)).ReturnsAsync(true);
+        _staffRepositoryMock.Setup(r => r.RestoreAsync(idm, It.IsAny<SQLiteTransaction>())).ReturnsAsync(true);
         _staffRepositoryMock.Setup(r => r.GetByIdmAsync(idm, false)).ReturnsAsync(new Staff
         {
             StaffIdm = idm,
@@ -1118,16 +1137,16 @@ public class StaffManageViewModelTests
         // 読み取り時点では他 PC が論理削除済み
         _staffRepositoryMock.Setup(r => r.GetByIdmAsync(idm, false)).ReturnsAsync((Staff?)null);
         // その直後に他 PC が復元した → UPDATE は 1 行に一致して成功し得る
-        _staffRepositoryMock.Setup(r => r.UpdateAsync(It.IsAny<Staff>())).ReturnsAsync(true);
+        _staffRepositoryMock.Setup(r => r.UpdateAsync(It.IsAny<Staff>(), It.IsAny<SQLiteTransaction>())).ReturnsAsync(true);
         _staffRepositoryMock.Setup(r => r.GetAllAsync()).ReturnsAsync(new List<Staff>());
 
         // Act
         await _viewModel.SaveAsync();
 
         // Assert
-        _staffRepositoryMock.Verify(r => r.UpdateAsync(It.IsAny<Staff>()), Times.Never,
+        _staffRepositoryMock.Verify(r => r.UpdateAsync(It.IsAny<Staff>(), It.IsAny<SQLiteTransaction>()), Times.Never,
             "更新前データを読めていない状態で書き込むと、変更が監査記録に残らない");
-        _operationLogRepositoryMock.Verify(r => r.InsertAsync(It.IsAny<OperationLog>()), Times.Never);
+        _operationLogRepositoryMock.Verify(r => r.InsertAsync(It.IsAny<OperationLog>(), It.IsAny<SQLiteTransaction>()), Times.Never);
 
         _viewModel.IsStatusError.Should().BeTrue();
         _viewModel.StatusMessage.Should().Contain("田中太郎");
@@ -1159,7 +1178,7 @@ public class StaffManageViewModelTests
             Name = "田中太郎",
             Number = "S-001"
         });
-        _staffRepositoryMock.Setup(r => r.UpdateAsync(It.IsAny<Staff>())).ReturnsAsync(true);
+        _staffRepositoryMock.Setup(r => r.UpdateAsync(It.IsAny<Staff>(), It.IsAny<SQLiteTransaction>())).ReturnsAsync(true);
         _staffRepositoryMock.Setup(r => r.GetAllAsync()).ReturnsAsync(new List<Staff>());
 
         // Act
@@ -1171,7 +1190,7 @@ public class StaffManageViewModelTests
             log.TargetId == idm &&
             log.Action == OperationLogger.Actions.Update &&
             log.BeforeData!.Contains("田中太郎") &&
-            log.AfterData!.Contains("田中花子"))), Times.Once);
+            log.AfterData!.Contains("田中花子")), It.IsAny<SQLiteTransaction>()), Times.Once);
     }
 
     /// <summary>
@@ -1196,16 +1215,16 @@ public class StaffManageViewModelTests
         // 読み取り時点では他 PC が論理削除済み
         _staffRepositoryMock.Setup(r => r.GetByIdmAsync(idm, false)).ReturnsAsync((Staff?)null);
         // その直後に他 PC が復元した → 論理削除は 1 行に一致して成功し得る
-        _staffRepositoryMock.Setup(r => r.DeleteAsync(idm)).ReturnsAsync(true);
+        _staffRepositoryMock.Setup(r => r.DeleteAsync(idm, It.IsAny<SQLiteTransaction>())).ReturnsAsync(true);
         _staffRepositoryMock.Setup(r => r.GetAllAsync()).ReturnsAsync(new List<Staff>());
 
         // Act
         await _viewModel.DeleteAsync();
 
         // Assert
-        _staffRepositoryMock.Verify(r => r.DeleteAsync(idm), Times.Never,
+        _staffRepositoryMock.Verify(r => r.DeleteAsync(idm, It.IsAny<SQLiteTransaction>()), Times.Never,
             "削除前データを読めていない状態で削除すると、変更が監査記録に残らない");
-        _operationLogRepositoryMock.Verify(r => r.InsertAsync(It.IsAny<OperationLog>()), Times.Never);
+        _operationLogRepositoryMock.Verify(r => r.InsertAsync(It.IsAny<OperationLog>(), It.IsAny<SQLiteTransaction>()), Times.Never);
 
         // 一覧を再読込し、キャッシュも破棄していること（書き込みを通らないため #1759 の破棄が働かない）
         _staffRepositoryMock.Verify(r => r.InvalidateCache(), Times.Once);
@@ -1232,7 +1251,7 @@ public class StaffManageViewModelTests
 
         _staffRepositoryMock.Setup(r => r.GetByIdmAsync(idm, false))
             .ReturnsAsync(new Staff { StaffIdm = idm, Name = "田中太郎", Number = "S-001" });
-        _staffRepositoryMock.Setup(r => r.DeleteAsync(idm)).ReturnsAsync(true);
+        _staffRepositoryMock.Setup(r => r.DeleteAsync(idm, It.IsAny<SQLiteTransaction>())).ReturnsAsync(true);
         _staffRepositoryMock.Setup(r => r.GetAllAsync()).ReturnsAsync(new List<Staff>());
 
         // Act
@@ -1242,14 +1261,19 @@ public class StaffManageViewModelTests
         _operationLogRepositoryMock.Verify(r => r.InsertAsync(It.Is<OperationLog>(log =>
             log.TargetTable == OperationLogger.Tables.Staff &&
             log.TargetId == idm &&
-            log.Action == OperationLogger.Actions.Delete)), Times.Once);
+            log.Action == OperationLogger.Actions.Delete), It.IsAny<SQLiteTransaction>()), Times.Once);
     }
 
     /// <summary>
-    /// Issue #1760: 復元の直後に他 PC が職員を削除しても、操作ログは残ること
+    /// Issue #2156: 復元の監査ログは、復元と同じトランザクションの中で復元前のデータから組み立てること
     /// </summary>
+    /// <remarks>
+    /// 以前（Issue #1760）は復元をコミットしてから読み直し、読み直しが null なら復元前のデータで補っていた。
+    /// 1 トランザクションにしたことで読み直しの窓そのものが無くなったので、読み直しが null を返す状態でも
+    /// 記録が残ることで、読み直しの結果に依存しないことを表明する。
+    /// </remarks>
     [Fact]
-    public async Task SaveAsync_WhenRestoredStaffCannotBeReRead_ShouldStillWriteAuditLog()
+    public async Task SaveAsync_WhenRestoring_ShouldWriteAuditLogBuiltFromPreRestoreDataInSameTransaction()
     {
         // Arrange
         const string idm = "FFFF000000000001";
@@ -1260,15 +1284,13 @@ public class StaffManageViewModelTests
             Number = "S-001",
             IsDeleted = true
         });
-        _staffRepositoryMock.Setup(r => r.RestoreAsync(idm)).ReturnsAsync(true);
-        // 復元の直後に他 PC が削除した → 再読取は null
+        SQLiteTransaction? restoreTransaction = null;
+        _staffRepositoryMock.Setup(r => r.RestoreAsync(idm, It.IsAny<SQLiteTransaction>()))
+            .Callback<string, SQLiteTransaction>((_, tx) => restoreTransaction = tx)
+            .ReturnsAsync(true);
         _staffRepositoryMock.Setup(r => r.GetByIdmAsync(idm, false)).ReturnsAsync((Staff?)null);
         _staffRepositoryMock.Setup(r => r.GetAllAsync()).ReturnsAsync(new List<Staff>());
-
-        OperationLog? recorded = null;
-        _operationLogRepositoryMock.Setup(r => r.InsertAsync(It.IsAny<OperationLog>()))
-            .Callback<OperationLog>(log => recorded = log)
-            .ReturnsAsync(1);
+        var (logs, logTransactions) = CaptureAuditLogs();
 
         _viewModel.StartNewStaff();
         _viewModel.EditStaffIdm = idm;
@@ -1278,10 +1300,197 @@ public class StaffManageViewModelTests
         await _viewModel.SaveAsync();
 
         // Assert
-        recorded.Should().NotBeNull("復元が確定した以上、監査記録を落としてはならない");
-        recorded!.Action.Should().Be(OperationLogger.Actions.Restore);
+        restoreTransaction.Should().NotBeNull();
+        logTransactions.Should().ContainSingle().Which.Should().BeSameAs(restoreTransaction,
+            "監査ログだけが別に確定すると、復元と記録が食い違い得る");
+        _staffRepositoryMock.Verify(r => r.RestoreAsync(It.IsAny<string>()), Times.Never);
+        _operationLogRepositoryMock.Verify(r => r.InsertAsync(It.IsAny<OperationLog>()), Times.Never);
+
+        var recorded = logs.Should().ContainSingle().Subject;
+        recorded.Action.Should().Be(OperationLogger.Actions.Restore);
         recorded.TargetId.Should().Be(idm);
         recorded.AfterData.Should().Contain("田中太郎", "復元前に読み取った値をそのまま記録すること");
+        recorded.AfterData.Should().Contain("S-001");
+    }
+
+    /// <summary>
+    /// Issue #2156: 新規登録は職員の INSERT と監査ログを同じ（非 null の）トランザクションで書くこと
+    /// </summary>
+    [Fact]
+    public async Task SaveAsync_NewStaff_ShouldWriteStaffAndAuditLogInSameTransaction()
+    {
+        // Arrange
+        const string idm = "FFFF000000000001";
+        _viewModel.StartNewStaff();
+        _viewModel.EditStaffIdm = idm;
+        _viewModel.EditName = "田中太郎";
+
+        _staffRepositoryMock.Setup(r => r.GetByIdmAsync(idm, true)).ReturnsAsync((Staff?)null);
+        SQLiteTransaction? insertTransaction = null;
+        _staffRepositoryMock.Setup(r => r.InsertAsync(It.IsAny<Staff>(), It.IsAny<SQLiteTransaction>()))
+            .Callback<Staff, SQLiteTransaction>((_, tx) => insertTransaction = tx)
+            .ReturnsAsync(true);
+        _staffRepositoryMock.Setup(r => r.GetAllAsync()).ReturnsAsync(new List<Staff>());
+        var (logs, logTransactions) = CaptureAuditLogs();
+
+        // Act
+        await _viewModel.SaveAsync();
+
+        // Assert
+        insertTransaction.Should().NotBeNull();
+        logs.Should().ContainSingle(l => l.Action == OperationLogger.Actions.Insert && l.TargetId == idm);
+        logTransactions.Should().ContainSingle().Which.Should().BeSameAs(insertTransaction);
+        _staffRepositoryMock.Verify(r => r.InsertAsync(It.IsAny<Staff>()), Times.Never);
+        _operationLogRepositoryMock.Verify(r => r.InsertAsync(It.IsAny<OperationLog>()), Times.Never);
+        _viewModel.StatusMessage.Should().Be("登録しました");
+    }
+
+    /// <summary>
+    /// Issue #2156: 更新は職員の UPDATE と監査ログを同じ（非 null の）トランザクションで書くこと
+    /// </summary>
+    [Fact]
+    public async Task SaveAsync_ExistingStaff_ShouldWriteUpdateAndAuditLogInSameTransaction()
+    {
+        // Arrange
+        const string idm = "FFFF000000000001";
+        _viewModel.SelectedStaff = new StaffDto { StaffIdm = idm, Name = "田中太郎", Number = "S-001" };
+        _viewModel.StartEdit();
+        _viewModel.EditName = "田中花子";
+
+        _staffRepositoryMock.Setup(r => r.GetByIdmAsync(idm, false))
+            .ReturnsAsync(new Staff { StaffIdm = idm, Name = "田中太郎", Number = "S-001" });
+        SQLiteTransaction? updateTransaction = null;
+        _staffRepositoryMock.Setup(r => r.UpdateAsync(It.IsAny<Staff>(), It.IsAny<SQLiteTransaction>()))
+            .Callback<Staff, SQLiteTransaction>((_, tx) => updateTransaction = tx)
+            .ReturnsAsync(true);
+        _staffRepositoryMock.Setup(r => r.GetAllAsync()).ReturnsAsync(new List<Staff>());
+        var (logs, logTransactions) = CaptureAuditLogs();
+
+        // Act
+        await _viewModel.SaveAsync();
+
+        // Assert
+        updateTransaction.Should().NotBeNull();
+        var log = logs.Should().ContainSingle(l => l.Action == OperationLogger.Actions.Update && l.TargetId == idm).Subject;
+        log.BeforeData.Should().Contain("田中太郎");
+        log.AfterData.Should().Contain("田中花子");
+        logTransactions.Should().ContainSingle().Which.Should().BeSameAs(updateTransaction);
+        _staffRepositoryMock.Verify(r => r.UpdateAsync(It.IsAny<Staff>()), Times.Never);
+        _operationLogRepositoryMock.Verify(r => r.InsertAsync(It.IsAny<OperationLog>()), Times.Never);
+        _viewModel.StatusMessage.Should().Be("更新しました");
+    }
+
+    /// <summary>
+    /// Issue #2156: 削除は職員の論理削除と監査ログを同じ（非 null の）トランザクションで書くこと
+    /// </summary>
+    [Fact]
+    public async Task DeleteAsync_ShouldWriteDeleteAndAuditLogInSameTransaction()
+    {
+        // Arrange
+        const string idm = "FFFF000000000001";
+        _viewModel.SelectedStaff = new StaffDto { StaffIdm = idm, Name = "田中太郎", Number = "S-001" };
+        _staffRepositoryMock.Setup(r => r.GetByIdmAsync(idm, false))
+            .ReturnsAsync(new Staff { StaffIdm = idm, Name = "田中太郎", Number = "S-001" });
+        SQLiteTransaction? deleteTransaction = null;
+        _staffRepositoryMock.Setup(r => r.DeleteAsync(idm, It.IsAny<SQLiteTransaction>()))
+            .Callback<string, SQLiteTransaction>((_, tx) => deleteTransaction = tx)
+            .ReturnsAsync(true);
+        _staffRepositoryMock.Setup(r => r.GetAllAsync()).ReturnsAsync(new List<Staff>());
+        var (logs, logTransactions) = CaptureAuditLogs();
+
+        // Act
+        await _viewModel.DeleteAsync();
+
+        // Assert
+        deleteTransaction.Should().NotBeNull();
+        logs.Should().ContainSingle(l => l.Action == OperationLogger.Actions.Delete && l.TargetId == idm);
+        logTransactions.Should().ContainSingle().Which.Should().BeSameAs(deleteTransaction);
+        _staffRepositoryMock.Verify(r => r.DeleteAsync(It.IsAny<string>()), Times.Never);
+        _operationLogRepositoryMock.Verify(r => r.InsertAsync(It.IsAny<OperationLog>()), Times.Never);
+        _viewModel.StatusMessage.Should().Be("削除しました");
+    }
+
+    /// <summary>
+    /// Issue #2156: 職員証のタッチ経由の復元も、復元と監査ログを同じトランザクションで書くこと
+    /// </summary>
+    [Fact]
+    public async Task HandleCardReadAsync_WhenRestoring_ShouldWriteRestoreAndAuditLogInSameTransaction()
+    {
+        // Arrange
+        const string idm = "FFFF000000000001";
+        _staffRepositoryMock.Setup(r => r.GetByIdmAsync(idm, true)).ReturnsAsync(new Staff
+        {
+            StaffIdm = idm,
+            Name = "田中太郎",
+            Number = "S-001",
+            IsDeleted = true
+        });
+        SQLiteTransaction? restoreTransaction = null;
+        _staffRepositoryMock.Setup(r => r.RestoreAsync(idm, It.IsAny<SQLiteTransaction>()))
+            .Callback<string, SQLiteTransaction>((_, tx) => restoreTransaction = tx)
+            .ReturnsAsync(true);
+        _staffRepositoryMock.Setup(r => r.GetAllAsync()).ReturnsAsync(new List<Staff>());
+        var (logs, logTransactions) = CaptureAuditLogs();
+        _viewModel.StartNewStaff();
+
+        // Act
+        await _viewModel.HandleCardReadAsync(idm);
+
+        // Assert
+        restoreTransaction.Should().NotBeNull();
+        logs.Should().ContainSingle(l => l.Action == OperationLogger.Actions.Restore && l.TargetId == idm);
+        logTransactions.Should().ContainSingle().Which.Should().BeSameAs(restoreTransaction);
+        _operationLogRepositoryMock.Verify(r => r.InsertAsync(It.IsAny<OperationLog>()), Times.Never);
+        _viewModel.StatusMessage.Should().Be("田中太郎（S-001） を復元しました");
+    }
+
+    /// <summary>
+    /// Issue #2156: タッチ経由の復元で監査ログが失敗したら、復元は確定していないので
+    /// 「記録済み・再タッチしないで」とは案内しないこと
+    /// </summary>
+    /// <remarks>
+    /// 対のテスト（一覧の再読込の失敗は「記録済み」と案内する）は
+    /// <see cref="HandleCardReadAsync_復元後の後処理で例外_復元は記録済みと案内し再タッチを促さないこと"/>。
+    /// </remarks>
+    [Fact]
+    public async Task HandleCardReadAsync_復元の監査ログが失敗_記録済みとは案内せず再タッチを待つこと()
+    {
+        // Arrange
+        const string idm = "FFFF000000000001";
+        _staffRepositoryMock.Setup(r => r.GetByIdmAsync(idm, true)).ReturnsAsync(new Staff
+        {
+            StaffIdm = idm,
+            Name = "田中太郎",
+            IsDeleted = true
+        });
+        _staffRepositoryMock.Setup(r => r.RestoreAsync(idm, It.IsAny<SQLiteTransaction>())).ReturnsAsync(true);
+        _staffRepositoryMock.Setup(r => r.GetAllAsync()).ReturnsAsync(new List<Staff>());
+        _operationLogRepositoryMock.Setup(r => r.InsertAsync(It.IsAny<OperationLog>(), It.IsAny<SQLiteTransaction>()))
+            .ThrowsAsync(new InvalidOperationException("disk I/O error"));
+        _viewModel.StartNewStaff();
+
+        // Act
+        Func<Task> act = () => _viewModel.HandleCardReadAsync(idm);
+
+        // Assert
+        await act.Should().NotThrowAsync();
+        _viewModel.StatusMessage.Should().NotContain("記録済み", "監査ログの失敗で復元は巻き戻っている");
+        _viewModel.StatusMessage.Should().NotContain("disk I/O error", "生の例外メッセージを職員へ出さないこと（Issue #1614）");
+        _viewModel.IsStatusError.Should().BeTrue();
+        _viewModel.IsWaitingForCard.Should().BeTrue("何も確定していないので、もう一度タッチすれば復元をやり直せる");
+    }
+
+    /// <summary>
+    /// 監査ログの書き込み（tx 付き）を記録する。記録した操作ログと、渡されたトランザクションを返す。
+    /// </summary>
+    private (List<OperationLog> Logs, List<SQLiteTransaction> Transactions) CaptureAuditLogs()
+    {
+        var logs = new List<OperationLog>();
+        var transactions = new List<SQLiteTransaction>();
+        _operationLogRepositoryMock.Setup(r => r.InsertAsync(It.IsAny<OperationLog>(), It.IsAny<SQLiteTransaction>()))
+            .Callback<OperationLog, SQLiteTransaction>((log, tx) => { logs.Add(log); transactions.Add(tx); })
+            .ReturnsAsync(1);
+        return (logs, transactions);
     }
 
     /// <summary>
@@ -1393,7 +1602,7 @@ public class StaffManageViewModelTests
             Number = "001",
             Note = "更新前のメモ"
         });
-        _staffRepositoryMock.Setup(r => r.UpdateAsync(It.IsAny<Staff>())).ReturnsAsync(true);
+        _staffRepositoryMock.Setup(r => r.UpdateAsync(It.IsAny<Staff>(), It.IsAny<SQLiteTransaction>())).ReturnsAsync(true);
         _staffRepositoryMock.Setup(r => r.GetAllAsync()).ReturnsAsync(new List<Staff>());
 
         // 保存を押す直前に一覧の選択が外れた
@@ -1404,13 +1613,13 @@ public class StaffManageViewModelTests
 
         // Assert
         _staffRepositoryMock.Verify(r => r.UpdateAsync(It.Is<Staff>(s =>
-            s.StaffIdm == idm && s.Note == "更新後のメモ")), Times.Once);
+            s.StaffIdm == idm && s.Note == "更新後のメモ"), It.IsAny<SQLiteTransaction>()), Times.Once);
 
         _operationLogRepositoryMock.Verify(r => r.InsertAsync(It.Is<OperationLog>(log =>
             log.TargetTable == OperationLogger.Tables.Staff &&
             log.TargetId == idm &&
             log.Action == OperationLogger.Actions.Update &&
-            log.AfterData!.Contains("更新後のメモ"))), Times.Once);
+            log.AfterData!.Contains("更新後のメモ")), It.IsAny<SQLiteTransaction>()), Times.Once);
 
         _viewModel.StatusMessage.Should().Be("更新しました");
         _viewModel.IsStatusError.Should().BeFalse();
@@ -1522,18 +1731,18 @@ public class StaffManageViewModelTests
 
         _staffRepositoryMock.Setup(r => r.GetByIdmAsync(idm, false))
             .ReturnsAsync(new Staff { StaffIdm = idm, Name = "田中太郎", Number = "001" });
-        _staffRepositoryMock.Setup(r => r.DeleteAsync(idm)).ReturnsAsync(true);
+        _staffRepositoryMock.Setup(r => r.DeleteAsync(idm, It.IsAny<SQLiteTransaction>())).ReturnsAsync(true);
         _staffRepositoryMock.Setup(r => r.GetAllAsync()).ReturnsAsync(new List<Staff>());
 
         // Act
         await _viewModel.DeleteAsync();
 
         // Assert
-        _staffRepositoryMock.Verify(r => r.DeleteAsync(idm), Times.Once);
+        _staffRepositoryMock.Verify(r => r.DeleteAsync(idm, It.IsAny<SQLiteTransaction>()), Times.Once);
         _operationLogRepositoryMock.Verify(r => r.InsertAsync(It.Is<OperationLog>(log =>
             log.TargetTable == OperationLogger.Tables.Staff &&
             log.TargetId == idm &&
-            log.Action == OperationLogger.Actions.Delete)), Times.Once);
+            log.Action == OperationLogger.Actions.Delete), It.IsAny<SQLiteTransaction>()), Times.Once);
         _viewModel.StatusMessage.Should().Be("削除しました");
     }
 
@@ -1732,7 +1941,7 @@ public class StaffManageViewModelTests
             Number = "001",
             IsDeleted = true
         });
-        _staffRepositoryMock.Setup(r => r.RestoreAsync(idm)).ReturnsAsync(true);
+        _staffRepositoryMock.Setup(r => r.RestoreAsync(idm, It.IsAny<SQLiteTransaction>())).ReturnsAsync(true);
         _staffRepositoryMock.Setup(r => r.GetByIdmAsync(idm, false)).ReturnsAsync(new Staff
         {
             StaffIdm = idm,

@@ -97,7 +97,10 @@ public class CardManageViewModelSystemLendTests : IDisposable
             _ledgerRepositoryMock.Object,
             _cardReaderMock.Object,
             _validationServiceMock.Object,
-            new OperationLogger(_operationLogRepositoryMock.Object, new CurrentOperatorContext(_clock)),
+            new CardManagementService(
+                _dbContext, _cardRepositoryMock.Object,
+                new OperationLogger(_operationLogRepositoryMock.Object, new CurrentOperatorContext(_clock)),
+                NullLogger<CardManagementService>.Instance),
             _dialogServiceMock.Object,
             _staffAuthServiceMock.Object,
             _lendingService,
