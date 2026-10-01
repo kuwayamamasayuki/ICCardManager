@@ -660,7 +660,7 @@ namespace ICCardManager.Data
         /// 値が null のとき既定検出（<see cref="DefaultIsOnUiThread"/>）を使用する。
         /// テストから差し替え可能（内部 API）。
         /// </summary>
-        private static readonly AsyncLocal<Func<bool>?> _isOnUiThreadOverride = new();
+        private static readonly AsyncLocal<Func<bool>?> IsOnUiThreadOverride = new();
 
         /// <summary>
         /// UI スレッド検出のオーバーライド用プロパティ（テスト専用）。
@@ -669,8 +669,8 @@ namespace ICCardManager.Data
         /// </summary>
         internal static Func<bool> IsOnUiThread
         {
-            get => _isOnUiThreadOverride.Value ?? DefaultIsOnUiThread;
-            set => _isOnUiThreadOverride.Value = value;
+            get => IsOnUiThreadOverride.Value ?? DefaultIsOnUiThread;
+            set => IsOnUiThreadOverride.Value = value;
         }
 
         /// <summary>

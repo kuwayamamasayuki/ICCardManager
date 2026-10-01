@@ -484,7 +484,7 @@ namespace ICCardManager.Common
         /// xUnit が並列実行する他テストや本番経路（sync 版 <see cref="ValidateBackupPath(string)"/> を含む）
         /// へ漏れない（<c>DbContext.IsOnUiThread</c> と同じ機構。Issue #1372 参照）。
         /// </summary>
-        private static readonly AsyncLocal<Func<string, int, bool>> _uncReachabilityCheckerOverride = new();
+        private static readonly AsyncLocal<Func<string, int, bool>> UncReachabilityCheckerOverride = new();
 
         /// <summary>
         /// 公開エントリポイント（<see cref="ValidateBackupPath(string)"/> /
@@ -503,8 +503,8 @@ namespace ICCardManager.Common
         /// </remarks>
         internal static Func<string, int, bool> UncReachabilityChecker
         {
-            get => _uncReachabilityCheckerOverride.Value ?? DefaultUncReachabilityChecker;
-            set => _uncReachabilityCheckerOverride.Value = value;
+            get => UncReachabilityCheckerOverride.Value ?? DefaultUncReachabilityChecker;
+            set => UncReachabilityCheckerOverride.Value = value;
         }
 
         /// <summary>
