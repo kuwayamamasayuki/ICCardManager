@@ -1,0 +1,1023 @@
+﻿using System;
+using System.Collections.Generic;
+using System.Collections.ObjectModel;
+using System.Linq;
+using System.Threading.Tasks;
+using System.Windows;
+using CommunityToolkit.Mvvm.ComponentModel;
+using CommunityToolkit.Mvvm.Input;
+using CommunityToolkit.Mvvm.Messaging;
+using ICCardManager.Common;
+using ICCardManager.Common.Exceptions;
+using ICCardManager.Common.Messages;
+using ICCardManager.Data;
+using ICCardManager.Data.Repositories;
+using ICCardManager.Dtos;
+using ICCardManager.Infrastructure.CardReader;
+using ICCardManager.Infrastructure.Sound;
+using ICCardManager.Infrastructure.Caching;
+using ICCardManager.Infrastructure.Security;
+using ICCardManager.Infrastructure.Timing;
+using ICCardManager.Models;
+using ICCardManager.Services;
+using ICCardManager.Views.Helpers;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
+using System.Globalization;
+
+namespace ICCardManager.ViewModels;
+
+public partial class MainViewModel
+{
+    // === 履歴パネル（プロパティ・表示・読込・期間・ページ・繰越行・不整合） ===
+
+    #region 履歴表示関連プロパティ
+
+    /// <summary>
+    /// 履歴表示中のカード
+    /// </summary>
+    [ObservableProperty]
+    private CardDto? _historyCard;
+
+    /// <summary>
+    /// 履歴一覧
+    /// </summary>
+    [ObservableProperty]
+    private ObservableCollection<LedgerDto> _historyLedgers = new();
+
+    /// <summary>
+    /// 履歴表示中かどうか
+    /// </summary>
+    [ObservableProperty]
+    private bool _isHistoryVisible;
+
+    /// <summary>
+    /// Issue #1907: 表示中の履歴が「返却直後に自動表示した返却確認」かどうか（案内バナーの表示条件）
+    /// </summary>
+    /// <remarks>
+    /// 返却確認の履歴は職員の操作で開いたものではないため、次の職員証タッチで自動的に閉じる
+    /// （<see cref="CloseReturnHistoryReviewIfUntouched"/>）。ただし職員が履歴パネルを操作した
+    /// （<see cref="MarkReturnHistoryReviewTouched"/>）あとは手動で開いたのと同じ扱いにし、閉じない。
+    /// 待機中のカードタッチ・警告クリックで開いた履歴（<see cref="ShowHistoryAsync"/>）では false に戻る。
+    /// </remarks>
+    [ObservableProperty]
+    private bool _isReturnHistoryReview;
+
+    /// <summary>
+    /// Issue #1907: 返却確認の履歴パネルを職員が操作したか（キー・クリック・ホイール）。
+    /// true なら次の職員証タッチでも閉じず、別カードの返却確認にも置き換えない。
+    /// </summary>
+    private bool _returnHistoryReviewTouched;
+
+    /// <summary>
+    /// Issue #1907: 直前の返却で台帳に記録された行の ID。一覧を作り直すたびに
+    /// <see cref="LedgerDto.IsRecentlyRecorded"/> を付け直すため、履歴を閉じるまで保持する。
+    /// </summary>
+    private readonly HashSet<int> _recentlyRecordedLedgerIds = new();
+
+    /// <summary>
+    /// Issue #1907: 返却確認バナーの見出し
+    /// </summary>
+    public string ReturnHistoryReviewMessage => "返却した利用履歴を確認してください";
+
+    /// <summary>
+    /// Issue #1907: 返却確認バナーの補足（今回の行の見分け方・直し方・閉じる契機）
+    /// </summary>
+    public string ReturnHistoryReviewNote =>
+        "「今回」列に ✔ の付いた行が今回の返却で記録された利用です。" +
+        "バス停名や駅名の入力漏れ・誤りがあれば、行の「変更」から修正できます。" +
+        "この表示は次の職員証タッチで自動的に閉じます（履歴を操作した場合は閉じません）。";
+
+    /// <summary>
+    /// 残高不整合のあるLedgerIdとその期待残高・実際残高のマップ（Issue #1052）
+    /// </summary>
+    /// <remarks>
+    /// Issue #2007: <c>IsInitialBalanceCorrection</c> は「導入時残高の訂正案として付け替えたマーカー」
+    /// であることを表す。このとき期待残高＝直後の記録から逆算した残高、実際残高＝導入行の記録。
+    /// 通常の不整合（前行から前方計算した期待値）とは意味が違うため、表示文言はこのフラグで分岐する。
+    /// 摘要文字列（「新規購入」等）で分岐すると、導入行の摘要を持つ行に通常経路でマーカーが付いたとき
+    /// （CSV 取込や編集で導入行が先頭でなくなった場合等）に、前方計算の値を「逆算した残高」と偽って
+    /// 案内してしまう（#1763「同じ判断を配らない」／#1883「食い違った状態を表現できなくする」）。
+    /// </remarks>
+    private Dictionary<int, (int ExpectedBalance, int ActualBalance, bool IsInitialBalanceCorrection)> _balanceInconsistencies = new();
+
+    /// <summary>
+    /// 履歴表示中のカードの現在残高
+    /// </summary>
+    [ObservableProperty]
+    private int _historyCurrentBalance;
+
+    /// <summary>
+    /// 履歴の表示期間開始日
+    /// </summary>
+    /// <remarks>
+    /// Issue #2030: 表示期間の左右の矢印（前の月／次の月）は開始月を基準に移動先を決めるため、
+    /// 開始日が変わるたびに実行可否を再評価する。
+    /// </remarks>
+    [ObservableProperty]
+    [NotifyCanExecuteChangedFor(nameof(HistoryGoToPreviousMonthCommand))]
+    [NotifyCanExecuteChangedFor(nameof(HistoryGoToNextMonthCommand))]
+    private DateTime _historyFromDate;
+
+    /// <summary>
+    /// 履歴の表示期間終了日
+    /// </summary>
+    [ObservableProperty]
+    private DateTime _historyToDate;
+
+    /// <summary>
+    /// 履歴の選択中期間表示
+    /// </summary>
+    [ObservableProperty]
+    private string _historyPeriodDisplay = string.Empty;
+
+    /// <summary>
+    /// 月選択ポップアップを表示中か
+    /// </summary>
+    [ObservableProperty]
+    private bool _isHistoryMonthSelectorOpen;
+
+    /// <summary>
+    /// 履歴の選択中の年
+    /// </summary>
+    [ObservableProperty]
+    private int _historySelectedYear;
+
+    /// <summary>
+    /// 履歴の選択中の月
+    /// </summary>
+    [ObservableProperty]
+    private int _historySelectedMonth;
+
+    /// <summary>
+    /// 履歴の現在ページ
+    /// </summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(HistoryCanGoToFirstPage))]
+    [NotifyPropertyChangedFor(nameof(HistoryCanGoToPrevPage))]
+    [NotifyPropertyChangedFor(nameof(HistoryCanGoToNextPage))]
+    [NotifyPropertyChangedFor(nameof(HistoryCanGoToLastPage))]
+    [NotifyPropertyChangedFor(nameof(HistoryPageDisplay))]
+    [NotifyCanExecuteChangedFor(nameof(HistoryGoToFirstPageCommand))]
+    [NotifyCanExecuteChangedFor(nameof(HistoryGoToPrevPageCommand))]
+    [NotifyCanExecuteChangedFor(nameof(HistoryGoToNextPageCommand))]
+    [NotifyCanExecuteChangedFor(nameof(HistoryGoToLastPageCommand))]
+    private int _historyCurrentPage = 1;
+
+    /// <summary>
+    /// 履歴の総ページ数
+    /// </summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(HistoryCanGoToFirstPage))]
+    [NotifyPropertyChangedFor(nameof(HistoryCanGoToPrevPage))]
+    [NotifyPropertyChangedFor(nameof(HistoryCanGoToNextPage))]
+    [NotifyPropertyChangedFor(nameof(HistoryCanGoToLastPage))]
+    [NotifyPropertyChangedFor(nameof(HistoryPageDisplay))]
+    [NotifyCanExecuteChangedFor(nameof(HistoryGoToFirstPageCommand))]
+    [NotifyCanExecuteChangedFor(nameof(HistoryGoToPrevPageCommand))]
+    [NotifyCanExecuteChangedFor(nameof(HistoryGoToNextPageCommand))]
+    [NotifyCanExecuteChangedFor(nameof(HistoryGoToLastPageCommand))]
+    private int _historyTotalPages = 1;
+
+    /// <summary>
+    /// 履歴の総件数
+    /// </summary>
+    [ObservableProperty]
+    private int _historyTotalCount;
+
+    /// <summary>
+    /// 履歴の1ページあたり表示件数
+    /// </summary>
+    [ObservableProperty]
+    private int _historyPageSize = 50;
+
+    /// <summary>
+    /// 履歴のステータスメッセージ
+    /// </summary>
+    [ObservableProperty]
+    private string _historyStatusMessage = string.Empty;
+
+    /// <summary>
+    /// 履歴ページ表示
+    /// </summary>
+    public string HistoryPageDisplay => $"{HistoryCurrentPage} / {HistoryTotalPages}";
+
+    /// <summary>
+    /// 履歴: 最初のページに移動可能か
+    /// </summary>
+    public bool HistoryCanGoToFirstPage => HistoryCurrentPage > 1;
+
+    /// <summary>
+    /// 履歴: 前のページに移動可能か
+    /// </summary>
+    public bool HistoryCanGoToPrevPage => HistoryCurrentPage > 1;
+
+    /// <summary>
+    /// 履歴: 次のページに移動可能か
+    /// </summary>
+    public bool HistoryCanGoToNextPage => HistoryCurrentPage < HistoryTotalPages;
+
+    /// <summary>
+    /// 履歴: 最後のページに移動可能か
+    /// </summary>
+    public bool HistoryCanGoToLastPage => HistoryCurrentPage < HistoryTotalPages;
+
+    /// <summary>
+    /// 選択可能な年のリスト（過去6年分）
+    /// </summary>
+    public ObservableCollection<int> HistoryAvailableYears { get; } = new();
+
+    /// <summary>
+    /// 月のリスト（1～12）
+    /// </summary>
+    public ObservableCollection<int> HistoryAvailableMonths { get; } = new()
+    {
+        1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12
+    };
+
+    #endregion
+
+    /// <summary>
+    /// 履歴表示（メイン画面に表示）
+    /// </summary>
+    /// <param name="card">表示するカード</param>
+    /// <param name="fromDate">
+    /// Issue #2007: 表示期間の開始日。省略時は当月 1 日。導入時残高の誤りを案内するときは
+    /// 導入行（何年も前になり得る）を画面に出すため、その日付から表示する。
+    /// </param>
+    /// <param name="recentlyRecordedLedgerIds">
+    /// Issue #1907: 直前の返却で記録された行の ID（返却確認の強調対象）。返却確認以外の経路では省略する。
+    /// 省略した経路で開いた履歴は返却確認ではない（<see cref="IsReturnHistoryReview"/> は false に戻る）。
+    /// </param>
+    private async Task ShowHistoryAsync(IcCard card, DateTime? fromDate = null, IEnumerable<int>? recentlyRecordedLedgerIds = null)
+    {
+        // Issue #1907: どの経路で開いても、前の返却確認の状態（バナー・強調・操作済みの印）は引き継がない
+        EndReturnHistoryReview();
+        if (recentlyRecordedLedgerIds != null)
+        {
+            _recentlyRecordedLedgerIds.UnionWith(recentlyRecordedLedgerIds);
+        }
+
+        HistoryCard = card.ToDto();
+        HistoryCurrentPage = 1;
+
+        // 期間を今月にリセット（fromDate 指定時はその日から今日まで）
+        var today = DateTime.Today;
+        var defaultFrom = new DateTime(today.Year, today.Month, 1);
+        HistoryFromDate = fromDate.HasValue && fromDate.Value.Date <= today
+            ? fromDate.Value.Date
+            : defaultFrom;
+        HistoryToDate = today;
+        EnsureHistoryYearAvailable(today.Year);
+        HistorySelectedYear = today.Year;
+        HistorySelectedMonth = today.Month;
+        UpdateHistoryPeriodDisplay();
+
+        // Issue #2030: 矢印の実行可否は「今日」にも依存するが、MVVM Toolkit の RelayCommand は
+        // CommandManager.RequerySuggested を購読しないため、開始日が前回と同じ値だと再評価されない
+        // （8/31 に開いた履歴を 9/1 に開き直しても ▶ が無効のまま残る）。開くたびに明示的に通知する
+        HistoryGoToPreviousMonthCommand.NotifyCanExecuteChanged();
+        HistoryGoToNextMonthCommand.NotifyCanExecuteChanged();
+
+        await LoadHistoryLedgersAsync();
+        IsHistoryVisible = true;
+    }
+
+    /// <summary>
+    /// 履歴を閉じる
+    /// </summary>
+    [RelayCommand]
+    public void CloseHistory()
+    {
+        IsHistoryVisible = false;
+        HistoryCard = null;
+        HistoryLedgers.Clear();
+        _balanceInconsistencies.Clear();
+        EndReturnHistoryReview();
+    }
+
+    /// <summary>
+    /// Issue #1814: 総件数から履歴の総ページ数を求める。
+    /// 0 件でも 1 ページ（＝空の 1 ページ目）として扱う。
+    /// ループ内の 2 箇所で同じ式を使うため、式の重複を避けて切り出している。
+    /// </summary>
+    private int CalculateHistoryTotalPages(int totalCount) =>
+        Math.Max(1, (int)Math.Ceiling((double)totalCount / HistoryPageSize));
+
+    /// <summary>
+    /// 履歴データを読み込み
+    /// </summary>
+    /// <param name="preserveCheckedRows">
+    /// true のとき、再読込の前後で同じ台帳 ID の行のチェック（統合対象の選択）を引き継ぐ。
+    /// 利用者の操作を契機としない再読込（共有モードの定期リフレッシュ・手動更新・再接続）でのみ true にする。
+    /// </param>
+    /// <remarks>
+    /// Issue #1814: ページ番号のクランプと再取得を検証するため internal で公開している。
+    ///
+    /// Issue #1923: 共有モードの定期リフレッシュ（ヘルスチェックと同じ 15 秒周期）が
+    /// 履歴一覧を作り直すため、統合対象として入れたチェックが利用者の操作と無関係に消えていた。
+    /// チェックは「隣接する 2 行以上」を選ぶ操作で、選び終える前に消えると統合が実行できない。
+    /// 利用者が起こした再読込（ページ送り・期間変更・統合や削除の直後）はチェックが無効に
+    /// なるのが正しいため、引き継ぎは呼び出し元が明示した経路に限る。
+    /// </remarks>
+    internal async Task LoadHistoryLedgersAsync(bool preserveCheckedRows = false)
+    {
+        if (HistoryCard == null) return;
+
+        using (BeginBusy("読み込み中..."))
+        {
+            // Issue #1923: 引き継ぐチェックを Clear の前に退避する。
+            // 繰越行（Issue #1155）はチェックボックス自体を表示しないため対象外。
+            var checkedLedgerIds = preserveCheckedRows
+                ? new HashSet<int>(HistoryLedgers
+                    .Where(d => d.IsChecked && !d.IsCarryoverRow)
+                    .Select(d => d.Id))
+                : new HashSet<int>();
+
+            HistoryLedgers.Clear();
+
+            // ページングされた履歴を取得
+            //
+            // Issue #1814: 総ページ数は取得結果（totalCount）からしか分からないため、
+            // ページ番号のクランプは取得の「後」にしかできない。クランプしただけで取り直さないと、
+            // 履歴の個別削除（Issue #635）や統合（Issue #1458）で総件数が減った直後に
+            // 「一覧は空（削除前のページ番号で問い合わせたため）なのに、件数表示とページ番号は
+            // クランプ後の有効値」という食い違いが残る。ページ送りボタンも CanExecute=false で
+            // 無効になるため、期間変更か履歴の開き直し以外に復旧手段が無い。
+            // → クランプが起きたら取り直す。通常は 1 回で収束する（有効なページ番号で問い合わせ直すため）が、
+            //    共有モードでは取り直しの最中にも他 PC の削除で総件数がさらに減り得るため上限を設ける。
+            //
+            // ループを抜けるときの不変条件:
+            //   「一覧（rawLedgers）・件数表示（totalCount）・ページ番号（HistoryCurrentPage）が
+            //     すべて同じ 1 回の取得に由来する」
+            // これは #1814 の欠陥そのものの否定であり、打ち切り経路でも必ず成立させる。
+            // **クランプしてから取り直さずに抜けると、この不変条件が破れる** — 一覧はクランプ前の
+            // 無効なページの結果（＝空）で、ページ番号だけがクランプ後になるため、クランプ先が
+            // 1 ページ目だとページ送りが全て CanExecute=false になり #1814 の状態に着地する。
+            // したがって打ち切り時は 1 ページ目へ落として最後に 1 回だけ取り直す。
+            // **1 ページ目は totalCount > 0 なら必ず行を返す（OFFSET 0）**ため、この 1 回で
+            // 決定的に整合した状態へ着地でき、以降の再取得は要らない。
+            IEnumerable<Ledger> rawLedgers;
+            int totalCount;
+            var clampCount = 0;
+            while (true)
+            {
+                // 注: 日付はyyyy-MM-dd形式で保存されているため、AddDays(1)は不要
+                (rawLedgers, totalCount) = await _ledgerRepository.GetPagedAsync(
+                    HistoryCard.CardIdm, HistoryFromDate, HistoryToDate, HistoryCurrentPage, HistoryPageSize);
+
+                // ページ情報を更新
+                HistoryTotalCount = totalCount;
+                HistoryTotalPages = CalculateHistoryTotalPages(totalCount);
+
+                // 現在のページが総ページ数以内なら、上記の不変条件が成立している
+                if (HistoryCurrentPage <= HistoryTotalPages) break;
+
+                if (++clampCount >= MaxHistoryPageClampAttempts)
+                {
+                    // IDm はログへ生で出さない（IdmMasker を通す）。
+                    // 障害調査で必要なのはカードの特定であり、管理番号があれば足りる。
+                    _logger?.LogWarning(
+                        "履歴ページのクランプが {ClampCount} 回連続で発生したため、1 ページ目へ戻して取得を確定します。" +
+                        // 日付は ILogger の書式指定子（CurrentCulture で整形される）ではなく
+                        // 整形済みの文字列を渡す。和暦カレンダーが既定の環境で年が和暦になり、
+                        // DB に入っている値と突き合わせられなくなるため（Issue #1985）。
+                        "カード={CardIdm}（管理番号={CardNumber}） 期間={From}～{To} 総件数={TotalCount}",
+                        clampCount, IdmMasker.Mask(HistoryCard.CardIdm), HistoryCard.CardNumber,
+                        SqliteDateTimeFormat.ToDateText(HistoryFromDate),
+                        SqliteDateTimeFormat.ToDateText(HistoryToDate), totalCount);
+
+                    HistoryCurrentPage = 1;
+                    (rawLedgers, totalCount) = await _ledgerRepository.GetPagedAsync(
+                        HistoryCard.CardIdm, HistoryFromDate, HistoryToDate, 1, HistoryPageSize);
+                    HistoryTotalCount = totalCount;
+                    HistoryTotalPages = CalculateHistoryTotalPages(totalCount);
+                    break;
+                }
+
+                HistoryCurrentPage = HistoryTotalPages;
+            }
+
+            // Issue #1740: 表示期間の直前残高をチェーン開始点のシードとして渡す。
+            // シードが無いと、同額のポイント還元と利用が同日にある形状（Issue #1004）で
+            // 残高チェーンが循環して開始点を特定できず id 順フォールバックへ落ちる。
+            // この並びは #1740 以降「自動計算の起点＝DB へ書き戻す残高」の根拠になったため、
+            // 表示上の見間違いでは済まなくなった。
+            // 2ページ目以降はページ先頭行の直前残高を特定できないため渡さない
+            // （誤ったシードは、シード無しより悪い並びを生む）。
+            int? precedingBalance = HistoryCurrentPage == 1
+                ? await GetPrecedingBalanceAsync(
+                    HistoryCard.CardIdm, HistoryFromDate.Year, HistoryFromDate.Month)
+                : null;
+
+            // Issue #784: 残高チェーンに基づいて同一日内の時系列順を復元
+            var ledgers = Services.LedgerOrderHelper.ReorderByBalanceChain(rawLedgers, precedingBalance);
+
+            // Issue #1155: 1ページ目の先頭に繰越行を挿入（帳票と同じ表示）
+            if (HistoryCurrentPage == 1)
+            {
+                var carryoverDto = BuildCarryoverRow(
+                    HistoryCard.CardIdm, HistoryFromDate.Year, HistoryFromDate.Month, precedingBalance);
+                if (carryoverDto != null)
+                {
+                    HistoryLedgers.Add(carryoverDto);
+                }
+            }
+
+            foreach (var ledger in ledgers)
+            {
+                var dto = ledger.ToDto();
+
+                // Issue #1907: 直前の返却で記録された行を強調する（一覧を作り直すたびに付け直す）
+                dto.IsRecentlyRecorded = _recentlyRecordedLedgerIds.Contains(dto.Id);
+
+                // Issue #1923: 退避したチェックを同じ台帳 ID の行へ戻す。
+                // 他 PC が削除・統合した行は再取得結果に現れないため、そのチェックは自然に消える
+                // （消えた行を選択対象として残しても統合は競合で失敗する）。
+                if (checkedLedgerIds.Contains(dto.Id))
+                {
+                    dto.IsChecked = true;
+                }
+
+                SubscribeLedgerCheckedChanged(dto);
+                HistoryLedgers.Add(dto);
+            }
+
+            // Issue #1923: 一覧を作り直すと選択の集合が変わり得る（引き継いだ／引き継がなかった／
+            // 引き継ぐ対象の行が他 PC の削除・統合で消えた）。にもかかわらず、
+            // 　・引き継ぎは SubscribeLedgerCheckedChanged より前に行うため個々の代入では通知されない
+            // 　・引き継がない再読込では、古い DTO ごと捨てるので PropertyChanged 自体が起きない
+            // ため、ここで通知しないと CanExecute が再評価されない（AsyncRelayCommand は
+            // CommandManager の再問い合わせに乗らず、CanExecuteChanged だけがボタンを更新する）。
+            // 結果、2 行チェック済みの時点で有効になった「統合」ボタンが、選択が消えた後も
+            // 押せるまま残り、押しても MergeHistoryLedgers 冒頭の `checkedDtos.Count < 2` で
+            // 無言のまま戻る（何も起きないボタン）。作り直しのたびに 1 回通知する。
+            MergeHistoryLedgersCommand.NotifyCanExecuteChanged();
+
+            // 最新の残高を取得
+            var latestLedger = await _ledgerRepository.GetLatestBeforeDateAsync(
+                HistoryCard.CardIdm, DateTime.Now.AddDays(1));
+            HistoryCurrentBalance = latestLedger?.Balance ?? 0;
+
+            // ステータスメッセージを更新
+            var startIndex = (HistoryCurrentPage - 1) * HistoryPageSize + 1;
+            var endIndex = Math.Min(HistoryCurrentPage * HistoryPageSize, totalCount);
+            HistoryStatusMessage = totalCount > 0
+                ? $"{startIndex}～{endIndex}件を表示（全{totalCount:N0}件）"
+                : "該当する履歴がありません";
+
+            // 統合取り消しボタンの有効/無効を更新
+            await RefreshUndoMergeAvailabilityAsync();
+
+            // Issue #1052: 残高不整合ハイライトの適用（ページ遷移時にも再適用される）
+            ApplyBalanceInconsistencyMarkers();
+        }
+    }
+
+    /// <summary>
+    /// Issue #1155: 繰越行のDTOを生成する
+    /// ReportDataBuilderと同じロジックで、4月は前年度繰越、それ以外は前月繰越を生成
+    /// </summary>
+    internal async Task<LedgerDto> BuildCarryoverRowAsync(string cardIdm, int year, int month)
+    {
+        var precedingBalance = await GetPrecedingBalanceAsync(cardIdm, year, month);
+        return BuildCarryoverRow(cardIdm, year, month, precedingBalance);
+    }
+
+    /// <summary>
+    /// 表示期間の直前の残高（＝繰越額）を取得する。null は「それ以前に履歴が無い」を表す。
+    /// </summary>
+    /// <remarks>
+    /// Issue #1740: 残高チェーンの並べ替えシードと繰越行の生成の双方が同じ値を必要とするため、
+    /// <see cref="BuildCarryoverRowAsync"/> から切り出した。呼び出し元は 1 回の取得で両方に使う。
+    /// </remarks>
+    internal async Task<int?> GetPrecedingBalanceAsync(string cardIdm, int year, int month)
+    {
+        if (month == 4)
+        {
+            return await _ledgerRepository.GetCarryoverBalanceAsync(cardIdm, year - 1);
+        }
+
+        // 前月末の最新残高を取得
+        var firstDayOfMonth = new DateTime(year, month, 1);
+        var lastLedger = await _ledgerRepository.GetLatestBeforeDateAsync(cardIdm, firstDayOfMonth);
+        return lastLedger?.Balance;
+    }
+
+    /// <summary>
+    /// Issue #1155: 取得済みの繰越額から繰越行のDTOを生成する（繰越額が無い場合は null）。
+    /// </summary>
+    internal LedgerDto BuildCarryoverRow(string cardIdm, int year, int month, int? precedingBalance)
+    {
+        if (!precedingBalance.HasValue)
+        {
+            return null;
+        }
+
+        string summary;
+        int income;
+        if (month == 4)
+        {
+            summary = SummaryGenerator.GetCarryoverFromPreviousYearSummary();
+            income = precedingBalance.Value;
+        }
+        else
+        {
+            int previousMonth = month == 1 ? 12 : month - 1;
+            summary = SummaryGenerator.GetCarryoverFromPreviousMonthSummary(previousMonth);
+            // 月次繰越の受入欄は空欄（受入金額を表示するのは4月の前年度繰越のみ）
+            income = 0;
+        }
+
+        return new LedgerDto
+        {
+            Id = 0,
+            CardIdm = cardIdm,
+            Date = new DateTime(year, month, 1),
+            DateDisplay = WarekiConverter.ToWareki(new DateTime(year, month, 1)),
+            Summary = summary,
+            Income = income,
+            Expense = 0,
+            Balance = precedingBalance.Value,
+            StaffName = null,
+            Note = null,
+            IsLentRecord = false,
+            IsCarryoverRow = true
+        };
+    }
+
+    /// <summary>
+    /// Issue #1052: 残高不整合のある行にハイライトマーカーを適用
+    /// </summary>
+    internal void ApplyBalanceInconsistencyMarkers()
+    {
+        foreach (var dto in HistoryLedgers)
+        {
+            if (_balanceInconsistencies.TryGetValue(dto.Id, out var info))
+            {
+                dto.HasBalanceInconsistency = true;
+                // Issue #2007: 「導入時残高の誤り」として BuildInconsistencyMarkers が導入行へ付け替えた
+                // マーカーは、期待値/実際ではなく、直すべき行と逆算した金額を案内する。
+                // 分岐は摘要ではなくマーカー自身のフラグで行う（_balanceInconsistencies の remarks）。
+                dto.BalanceInconsistencyMessage = info.IsInitialBalanceCorrection
+                    ? InitialBalanceCorrectionMessage.ForHistoryRow(
+                        recordedBalance: info.ActualBalance,
+                        suggestedBalance: info.ExpectedBalance,
+                        appliesToIncome: Ledger.InitialRecordCarriesIncome(dto.Summary))
+                    : $"残高不整合: 期待値 {info.ExpectedBalance:N0}円 / 実際 {info.ActualBalance:N0}円";
+            }
+            else
+            {
+                dto.HasBalanceInconsistency = false;
+                dto.BalanceInconsistencyMessage = string.Empty;
+            }
+        }
+    }
+
+    /// <summary>
+    /// 履歴期間表示を更新
+    /// </summary>
+    private void UpdateHistoryPeriodDisplay()
+    {
+        HistoryPeriodDisplay = FormatHistoryPeriod(HistoryFromDate, HistoryToDate);
+    }
+
+    /// <summary>
+    /// 履歴の期間ラベルを組み立てる。
+    /// </summary>
+    /// <remarks>
+    /// 通常の表示期間は暦月（年月ピッカー）なので開始月だけを出す。Issue #2007 の警告クリックは
+    /// 導入行の日付から今日までの複数月を表示するため、開始月と終了月が異なるときは範囲で出す
+    /// （開始月だけ出すと「その月を表示中」と読まれ、画面に並ぶ数年分の行と食い違う）。
+    /// </remarks>
+    internal static string FormatHistoryPeriod(DateTime from, DateTime to)
+    {
+        var fromText = from.ToString("yyyy年M月", CultureInfo.InvariantCulture);
+        if (from.Year == to.Year && from.Month == to.Month) return fromText;
+        return $"{fromText}～{to.ToString("yyyy年M月", CultureInfo.InvariantCulture)}";
+    }
+
+    #region 履歴期間選択コマンド
+
+    /// <summary>
+    /// 履歴を今月に設定
+    /// </summary>
+    [RelayCommand]
+    public async Task HistorySetThisMonth()
+    {
+        var today = DateTime.Today;
+        await SetHistoryMonth(today.Year, today.Month);
+    }
+
+    /// <summary>
+    /// 履歴を先月に設定
+    /// </summary>
+    [RelayCommand]
+    public async Task HistorySetLastMonth()
+    {
+        var today = DateTime.Today;
+        var lastMonth = today.AddMonths(-1);
+        await SetHistoryMonth(lastMonth.Year, lastMonth.Month);
+    }
+
+    /// <summary>
+    /// Issue #2030: 表示期間を 1 か月前へ移動する（表示期間の左の ◀）
+    /// </summary>
+    [RelayCommand(CanExecute = nameof(HistoryCanGoToPreviousMonth))]
+    public async Task HistoryGoToPreviousMonth()
+    {
+        await MoveHistoryMonthAsync(-1);
+    }
+
+    /// <summary>
+    /// Issue #2030: 表示期間を 1 か月後へ移動する（表示期間の右の ▶）
+    /// </summary>
+    [RelayCommand(CanExecute = nameof(HistoryCanGoToNextMonth))]
+    public async Task HistoryGoToNextMonth()
+    {
+        await MoveHistoryMonthAsync(1);
+    }
+
+    /// <summary>
+    /// 履歴: 前の月へ移動可能か
+    /// </summary>
+    public bool HistoryCanGoToPreviousMonth => ResolveAdjacentHistoryMonth(-1).HasValue;
+
+    /// <summary>
+    /// 履歴: 次の月へ移動可能か
+    /// </summary>
+    public bool HistoryCanGoToNextMonth => ResolveAdjacentHistoryMonth(1).HasValue;
+
+    private async Task MoveHistoryMonthAsync(int deltaMonths)
+    {
+        // CanExecute の評価から実行までに日付が変わり得るため、実行時にも境界を確かめる
+        var target = ResolveAdjacentHistoryMonth(deltaMonths);
+        if (!target.HasValue) return;
+
+        await SetHistoryMonth(target.Value.Year, target.Value.Month);
+    }
+
+    /// <summary>
+    /// Issue #2030: 月選択ポップアップの年リストに無い年を補う（降順を保つ）。
+    /// </summary>
+    /// <remarks>
+    /// 年リストは起動時に「今年から 6 年前まで」で作るだけなので、矢印で到達できる年がリストに無いことがある。
+    /// ①警告クリック（#2007）で下限より前の年を表示してから ▶ で進んだ場合 ②起動したまま年を越してから ▶ で
+    /// 新しい年へ進んだ場合。補わないと <see cref="HistorySelectedYear"/> がリスト外になり、ポップアップの年が空欄になる。
+    /// 矢印の導入前は、リスト外の年が <c>SetHistoryMonth</c> へ渡る経路は無かった。
+    /// </remarks>
+    private void EnsureHistoryYearAvailable(int year)
+    {
+        if (HistoryAvailableYears.Contains(year)) return;
+
+        var index = 0;
+        while (index < HistoryAvailableYears.Count && HistoryAvailableYears[index] > year) index++;
+        HistoryAvailableYears.Insert(index, year);
+    }
+
+    private DateTime? ResolveAdjacentHistoryMonth(int deltaMonths)
+    {
+        var oldestYear = HistoryAvailableYears.Count > 0 ? HistoryAvailableYears.Min() : DateTime.Today.Year;
+        return GetAdjacentHistoryMonth(HistoryFromDate, deltaMonths, DateTime.Today, oldestYear);
+    }
+
+    /// <summary>
+    /// Issue #2030: 表示期間の開始月から <paramref name="deltaMonths"/> か月ずらした月の 1 日を返す。
+    /// 移動できないときは null。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>基準は開始月</b>。警告クリック（#2007）で「2025年4月～2026年9月」のような範囲を表示しているときも、
+    /// ラベルの先頭の月から前後へ 1 か月ずつ移動する（範囲の表示は解除され暦月表示に戻る）。
+    /// </para>
+    /// <para>
+    /// <b>前へは月選択ポップアップで選べる最古の年の 1 月まで</b>（ポップアップと矢印で到達できる範囲を揃える。
+    /// 台帳の保存期間は 6 年）。<b>次へは今月まで</b> — <c>ledger.date</c> は利用日なので未来の月に行は無い。
+    /// 下限は後ろ向きの移動にだけ、上限は前向きの移動にだけ効かせる。警告クリックで下限より前の月を
+    /// 表示しているとき、次の月へ進む操作まで塞がないため。
+    /// </para>
+    /// </remarks>
+    internal static DateTime? GetAdjacentHistoryMonth(DateTime from, int deltaMonths, DateTime today, int oldestYear)
+    {
+        var target = new DateTime(from.Year, from.Month, 1).AddMonths(deltaMonths);
+
+        if (deltaMonths < 0 && target < new DateTime(oldestYear, 1, 1)) return null;
+        if (deltaMonths > 0 && target > new DateTime(today.Year, today.Month, 1)) return null;
+
+        return target;
+    }
+
+    /// <summary>
+    /// 月選択ポップアップを開く
+    /// </summary>
+    [RelayCommand]
+    public void HistoryOpenMonthSelector()
+    {
+        IsHistoryMonthSelectorOpen = true;
+    }
+
+    /// <summary>
+    /// 月選択ポップアップを閉じる
+    /// </summary>
+    [RelayCommand]
+    public void HistoryCloseMonthSelector()
+    {
+        IsHistoryMonthSelectorOpen = false;
+    }
+
+    /// <summary>
+    /// 選択した月を適用
+    /// </summary>
+    [RelayCommand]
+    public async Task HistoryApplySelectedMonth()
+    {
+        await SetHistoryMonth(HistorySelectedYear, HistorySelectedMonth);
+        IsHistoryMonthSelectorOpen = false;
+    }
+
+    /// <summary>
+    /// 指定した年月に履歴期間を設定
+    /// </summary>
+    private async Task SetHistoryMonth(int year, int month)
+    {
+        HistoryFromDate = new DateTime(year, month, 1);
+        HistoryToDate = new DateTime(year, month, DateTime.DaysInMonth(year, month));
+        EnsureHistoryYearAvailable(year);
+        HistorySelectedYear = year;
+        HistorySelectedMonth = month;
+        HistoryCurrentPage = 1;
+        _balanceInconsistencies.Clear(); // Issue #1052: 期間変更時にハイライトをクリア
+        UpdateHistoryPeriodDisplay();
+        await LoadHistoryLedgersAsync();
+    }
+
+    #endregion
+
+    #region 履歴ページナビゲーションコマンド
+
+    /// <summary>
+    /// 履歴: 最初のページへ移動
+    /// </summary>
+    [RelayCommand(CanExecute = nameof(HistoryCanGoToFirstPage))]
+    public async Task HistoryGoToFirstPage()
+    {
+        HistoryCurrentPage = 1;
+        await LoadHistoryLedgersAsync();
+    }
+
+    /// <summary>
+    /// 履歴: 前のページへ移動
+    /// </summary>
+    [RelayCommand(CanExecute = nameof(HistoryCanGoToPrevPage))]
+    public async Task HistoryGoToPrevPage()
+    {
+        if (HistoryCurrentPage > 1)
+        {
+            HistoryCurrentPage--;
+            await LoadHistoryLedgersAsync();
+        }
+    }
+
+    /// <summary>
+    /// 履歴: 次のページへ移動
+    /// </summary>
+    [RelayCommand(CanExecute = nameof(HistoryCanGoToNextPage))]
+    public async Task HistoryGoToNextPage()
+    {
+        if (HistoryCurrentPage < HistoryTotalPages)
+        {
+            HistoryCurrentPage++;
+            await LoadHistoryLedgersAsync();
+        }
+    }
+
+    /// <summary>
+    /// 履歴: 最後のページへ移動
+    /// </summary>
+    [RelayCommand(CanExecute = nameof(HistoryCanGoToLastPage))]
+    public async Task HistoryGoToLastPage()
+    {
+        HistoryCurrentPage = HistoryTotalPages;
+        await LoadHistoryLedgersAsync();
+    }
+
+    #endregion
+
+    #region 履歴詳細・変更コマンド
+
+    /// <summary>
+    /// 履歴詳細を表示
+    /// </summary>
+    [RelayCommand]
+    public async Task ShowLedgerDetail(LedgerDto ledger)
+    {
+        if (ledger == null || !ledger.HasDetails) return;
+
+        // 詳細データを取得
+        var ledgerWithDetails = await _ledgerRepository.GetByIdAsync(ledger.Id);
+        if (ledgerWithDetails == null) return;
+
+        var detailDto = ledgerWithDetails.ToDto();
+
+        // 詳細ダイアログを表示
+        var cardName = HistoryCard?.DisplayName;
+        Views.Dialogs.LedgerDetailDialog capturedDialog = null;
+        await _navigationService.ShowDialogAsync<Views.Dialogs.LedgerDetailDialog>(async d =>
+        {
+            await d.InitializeAsync(detailDto.Id, cardName: cardName);
+            capturedDialog = d;
+        });
+
+        // Issue #548: 保存が行われた場合は履歴を再読み込み
+        if (capturedDialog?.WasSaved == true)
+        {
+            await LoadHistoryLedgersAsync();
+            // Issue #660: 分割等で摘要が変わった場合に警告を更新
+            await CheckWarningsAsync();
+            // Issue #1739: 明細の金額編集は残高チェーンを変えるため、整合性も再判定する。
+            // 他の履歴編集経路（行の追加・編集・削除）は既にこの組で呼んでいたが、本経路だけ
+            // 抜けており、不整合を直しても古い件数の警告が残っていた。
+            await CheckAndNotifyConsistencyAsync();
+        }
+    }
+
+    #endregion
+
+    #region 残高整合性チェック（Issue #1739 / #2007）
+
+    /// <summary>
+    /// 残高整合性チェックで「全期間」を指す範囲（SQLite の date 型互換の範囲）。
+    /// </summary>
+    /// <remarks>
+    /// Issue #1739: 残高不整合警告は表示期間ではなくカード全体の状態を表すため、
+    /// <see cref="CheckAndNotifyConsistencyAsync"/> と <see cref="CheckAllCardsConsistencyAsync"/> の
+    /// どちらも同じ範囲で判定する。片方だけ範囲が違うと、一方が立てた警告をもう一方が黙って消す。
+    /// </remarks>
+    private static readonly DateTime FullPeriodStart = new DateTime(2000, 1, 1);
+    private static readonly DateTime FullPeriodEnd = new DateTime(2099, 12, 31);
+
+    /// <summary>
+    /// 残高不整合警告を組み立てる（表示文言を1か所に集約する）
+    /// </summary>
+    /// <remarks>
+    /// Issue #2007: 不整合が「導入時残高の誤り」の形状なら、件数ではなく原因を名指しする。
+    /// 件数の文言だと、ハイライトされる行（従来はチェーンが切れた側＝正しい行）を直す誘導になる。
+    /// </remarks>
+    private static WarningItem BuildBalanceInconsistencyWarning(
+        string cardType, string cardNumber, string cardIdm, ConsistencyResult result)
+    {
+        var totalCount = result.Inconsistencies.Count + result.DetailInconsistencies.Count;
+        return new WarningItem
+        {
+            DisplayText = result.InitialBalanceCorrection != null
+                ? InitialBalanceCorrectionMessage.ForWarningArea(cardType, cardNumber)
+                : $"⚠️ 残高の不整合が{totalCount}件あります（{cardType} {cardNumber}）",
+            Type = WarningType.BalanceInconsistency,
+            CardIdm = cardIdm
+        };
+    }
+
+    /// <summary>
+    /// Issue #2007: 整合性チェック結果から、履歴一覧でハイライトする行と表示値のマップを組み立てる。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// 通常は不整合の行（チェーンが切れた側）をそのまま対象にする。ただし「導入時残高の誤り」の形状
+    /// （<see cref="ConsistencyResult.InitialBalanceCorrection"/>）では、切れた側の 2 行目はカード由来の
+    /// 正しい行なので対象から外し、代わりに<b>導入行</b>を「期待値＝逆算した残高／実際＝記録されている残高」
+    /// で対象にする。2 行目を強調したままだと、利用者が正しい行を誤った導入行に合わせて書き換える誘導になる。
+    /// </para>
+    /// <para>
+    /// 詳細レベルの不整合の親 Ledger も対象に含める（Issue #1059）が、導入時残高の誤りではその詳細不整合も
+    /// 導入行の写像（先頭明細の起点が導入行の残高）なので、同様に導入行へ寄せる。
+    /// </para>
+    /// </remarks>
+    internal static Dictionary<int, (int ExpectedBalance, int ActualBalance, bool IsInitialBalanceCorrection)> BuildInconsistencyMarkers(
+        ConsistencyResult result)
+    {
+        var correction = result.InitialBalanceCorrection;
+        if (correction != null)
+        {
+            return new Dictionary<int, (int ExpectedBalance, int ActualBalance, bool IsInitialBalanceCorrection)>
+            {
+                { correction.LedgerId, (correction.SuggestedBalance, correction.RecordedBalance, true) }
+            };
+        }
+
+        // 親レコード不整合 + 詳細レベル不整合（詳細の親LedgerId単位で集約）
+        var markers = result.Inconsistencies
+            .ToDictionary(i => i.LedgerId, i => (i.ExpectedBalance, i.ActualBalance, false));
+
+        // Issue #1059: 詳細レベル不整合がある親Ledgerもハイライト対象に追加
+        foreach (var detailGroup in result.DetailInconsistencies.GroupBy(d => d.LedgerId))
+        {
+            if (!markers.ContainsKey(detailGroup.Key))
+            {
+                var first = detailGroup.First();
+                markers[detailGroup.Key] = (first.ExpectedBalance, first.ActualBalance, false);
+            }
+        }
+        return markers;
+    }
+
+    /// <summary>
+    /// Issue #2007: 行編集を開く前に、その行が導入行で「導入時残高の誤り」が検知されているなら訂正案を返す。
+    /// </summary>
+    /// <remarks>
+    /// 全期間の整合性チェック（6 年分の読み取り）は導入行を開くときだけ走らせる。利用行では null を返し、
+    /// 問い合わせない。訂正案の行 ID が編集対象と一致するときだけ返す（一致しなければ別の形状）。
+    /// </remarks>
+    internal async Task<InitialBalanceCorrection> ResolveInitialBalanceCorrectionForEditAsync(LedgerDto ledger)
+    {
+        if (ledger == null || !Ledger.IsInitialRecordSummary(ledger.Summary)) return null;
+
+        var result = await _ledgerConsistencyChecker.CheckBalanceConsistencyAsync(
+            ledger.CardIdm, FullPeriodStart, FullPeriodEnd);
+        var correction = result.InitialBalanceCorrection;
+        return correction != null && correction.LedgerId == ledger.Id ? correction : null;
+    }
+
+    /// <summary>
+    /// 残高整合性チェック＆警告表示
+    /// </summary>
+    /// <remarks>
+    /// 不整合を検出した場合、メイン画面右下の警告エリアに警告を表示します。
+    /// 交通系ICカード内の履歴に記録されている残高が正であるため、自動修正は行いません。
+    /// </remarks>
+    /// <param name="fullPeriodResult">
+    /// Issue #2007: 呼び出し元が直前に取った全期間の判定結果。渡されたときは再取得しない
+    /// （警告クリック経路は導入行の日付を決めるために全期間を先に読んでいる。6 年分を 2 度読まない）。
+    /// </param>
+    private async Task CheckAndNotifyConsistencyAsync(ConsistencyResult fullPeriodResult = null)
+    {
+        if (HistoryCard == null) return;
+
+        var checkResult = await _ledgerConsistencyChecker.CheckBalanceConsistencyAsync(
+            HistoryCard.CardIdm, HistoryFromDate, HistoryToDate);
+
+        // Issue #1739: 警告は「このカードに不整合があるか」を全期間で表す。表示期間だけで
+        // 判定して警告を消すと、CheckAllCardsConsistencyAsync が全期間で立てた期間外の不整合が、
+        // 警告をクリックして履歴（既定は当月）を開いた瞬間に黙って消える。履歴にハイライトも
+        // 出ないため「解消済み」と誤解され、不整合が放置される。
+        // 表示期間の結果を流用しないのは、チェーンの起点が範囲によって変わるため
+        // 部分範囲の判定が全期間の判定と一致する保証がないから。
+        var warningResult = fullPeriodResult ?? await _ledgerConsistencyChecker.CheckBalanceConsistencyAsync(
+            HistoryCard.CardIdm, FullPeriodStart, FullPeriodEnd);
+
+        ReplaceWarnings(
+            w => w.Type == WarningType.BalanceInconsistency && w.CardIdm == HistoryCard.CardIdm,
+            warningResult.IsConsistent
+                ? null
+                : new[] { BuildBalanceInconsistencyWarning(HistoryCard.CardType, HistoryCard.CardNumber, HistoryCard.CardIdm, warningResult) });
+
+        // Issue #1052: ハイライトデータを最新の整合性チェック結果で同期更新
+        // （ハイライトは画面に出ている行が対象のため、表示期間の結果を使う）
+        // レコード編集・削除後にもハイライトが正しく反映される
+        if (_balanceInconsistencies.Count > 0 || !checkResult.IsConsistent)
+        {
+            // Issue #2007: 導入時残高の誤りなら、切れた側ではなく導入行をハイライト対象にする
+            _balanceInconsistencies = BuildInconsistencyMarkers(checkResult);
+            ApplyBalanceInconsistencyMarkers();
+        }
+    }
+
+    /// <summary>
+    /// Issue #1058: 全カードの残高整合性をチェックし、不整合があれば警告を表示
+    /// </summary>
+    /// <remarks>
+    /// インポート後など、特定のカード・期間に限定できない場合に使用します。
+    /// CheckAndNotifyConsistencyAsyncはHistoryCard・HistoryFromDate/ToDateに依存するため、
+    /// 履歴画面が開いていない場合や、インポート対象が表示期間外の場合に対応できません。
+    /// </remarks>
+    internal async Task CheckAllCardsConsistencyAsync()
+    {
+        var cards = await _cardRepository.GetAllAsync();
+
+        foreach (var card in cards)
+        {
+            // Issue #1947: 母集団は「運用中のカード」（IcCard.IsInOperation）。
+            // 除去側（RefreshDashboardAsync）は残額ダッシュボードの母集団に居ないカードの
+            // BalanceInconsistency 警告を取り除くため、ここで払戻済みカードの警告を立てると
+            // 次のダッシュボード更新（貸出・返却／共有モードの定期更新）で黙って消える。
+            // 生成側と除去側の判定条件を揃える（.claude/rules/business-logic.md #1739）。
+            if (!card.IsInOperation) continue;
+
+            var checkResult = await _ledgerConsistencyChecker.CheckBalanceConsistencyAsync(
+                card.CardIdm, FullPeriodStart, FullPeriodEnd);
+
+            ReplaceWarnings(
+                w => w.Type == WarningType.BalanceInconsistency && w.CardIdm == card.CardIdm,
+                checkResult.IsConsistent
+                    ? null
+                    : new[] { BuildBalanceInconsistencyWarning(card.CardType, card.CardNumber, card.CardIdm, checkResult) });
+        }
+
+        // 現在表示中のカードのハイライトも更新
+        if (HistoryCard != null)
+        {
+            await CheckAndNotifyConsistencyAsync();
+        }
+    }
+
+    #endregion
+}

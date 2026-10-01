@@ -54,7 +54,10 @@ public class ScreenTransitionDiagramConsistencyTests
         ["CardManageViewModel.cs"] = "CARD",
         ["StaffManageViewModel.cs"] = "STAFF",
         ["LedgerDetailViewModel.cs"] = "LEDGERDETAIL",
-        ["MainViewModel.cs"] = "HISTORY",
+        // Issue #2158: MainViewModel は partial ファイルへ分割されており、認証を要求するのは
+        // 履歴行の追加・削除・変更（HistoryEdit）と履歴統合（HistoryMerge）。どちらも履歴表示エリアが起点
+        ["MainViewModel.HistoryEdit.cs"] = "HISTORY",
+        ["MainViewModel.HistoryMerge.cs"] = "HISTORY",
         ["SystemManageViewModel.cs"] = "SYSMGMT",
     };
 

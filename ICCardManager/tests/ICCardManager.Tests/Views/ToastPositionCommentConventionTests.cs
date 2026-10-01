@@ -34,8 +34,20 @@ public class ToastPositionCommentConventionTests
         [Path.Combine("Services", "ToastNotificationService.cs")] = true,
         [Path.Combine("Views", "ToastNotificationWindow.xaml.cs")] = true,
         [Path.Combine("Common", "ToastLayoutCalculator.cs")] = true,
-        [Path.Combine("ViewModels", "MainViewModel.cs")] = false,
     };
+
+    /// <summary>
+    /// 検査対象の全ソース。<see cref="ToastRelatedSources"/> に、<c>MainViewModel</c> を構成する
+    /// partial ファイルすべて（トースト専用ではない）を加える。
+    /// </summary>
+    /// <remarks>
+    /// Issue #2158: <c>MainViewModel</c> は責務ごとの partial ファイルへ分割されており、トーストを出す処理は
+    /// 本体以外（カードタッチ・返却後処理・起動 等）にある。<c>MainViewModel.cs</c> だけをファイル名で
+    /// 載せると、分割後の記述が検査から静かに漏れるため、宣言から導出する（<see cref="MainViewModelSourceFiles"/>）。
+    /// </remarks>
+    private static IEnumerable<KeyValuePair<string, bool>> EnumerateToastRelatedSources()
+        => ToastRelatedSources.Concat(MainViewModelSourceFiles.All
+            .Select(f => new KeyValuePair<string, bool>(f.RelativePath, false)));
 
     /// <summary>
     /// トースト専用ではないファイルで「トーストについての記述」と判定するためのキーワード。
@@ -72,7 +84,7 @@ public class ToastPositionCommentConventionTests
         var sourceRoot = GetSourceRoot();
         var violations = new List<string>();
 
-        foreach (var entry in ToastRelatedSources)
+        foreach (var entry in EnumerateToastRelatedSources())
         {
             var relativePath = entry.Key;
             var isToastDedicatedFile = entry.Value;

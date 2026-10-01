@@ -45,6 +45,7 @@
         "ICCardManager/src/ICCardManager/Views/MainWindow.xaml",
         "ICCardManager/src/ICCardManager/Views/MainWindow.xaml.cs",
         "ICCardManager/src/ICCardManager/ViewModels/MainViewModel.cs",
+        "ICCardManager/src/ICCardManager/ViewModels/Main/MainViewModel.*.cs",
         "ICCardManager/src/ICCardManager/Dtos/**",
         "ICCardManager/src/ICCardManager/Common/DisplayFormatters.cs",
         "ICCardManager/src/ICCardManager/Common/StaffNameFormatter.cs"
@@ -58,6 +59,7 @@
         "ICCardManager/src/ICCardManager/Views/MainWindow.xaml",
         "ICCardManager/src/ICCardManager/Views/MainWindow.xaml.cs",
         "ICCardManager/src/ICCardManager/ViewModels/MainViewModel.cs",
+        "ICCardManager/src/ICCardManager/ViewModels/Main/MainViewModel.*.cs",
         "ICCardManager/src/ICCardManager/Dtos/**",
         "ICCardManager/src/ICCardManager/Common/DisplayFormatters.cs",
         "ICCardManager/src/ICCardManager/Common/StaffNameFormatter.cs",
@@ -134,6 +136,7 @@
         "ICCardManager/src/ICCardManager/Views/ToastNotificationWindow.xaml",
         "ICCardManager/src/ICCardManager/Views/ToastNotificationWindow.xaml.cs",
         "ICCardManager/src/ICCardManager/ViewModels/MainViewModel.cs",
+        "ICCardManager/src/ICCardManager/ViewModels/Main/MainViewModel.*.cs",
         "ICCardManager/src/ICCardManager/Dtos/**",
         "ICCardManager/src/ICCardManager/Common/DisplayFormatters.cs",
         "ICCardManager/src/ICCardManager/Common/StaffNameFormatter.cs"
@@ -146,7 +149,8 @@
       "sources": [
         "ICCardManager/src/ICCardManager/Views/ToastNotificationWindow.xaml",
         "ICCardManager/src/ICCardManager/Views/ToastNotificationWindow.xaml.cs",
-        "ICCardManager/src/ICCardManager/ViewModels/MainViewModel.cs"
+        "ICCardManager/src/ICCardManager/ViewModels/MainViewModel.cs",
+        "ICCardManager/src/ICCardManager/ViewModels/Main/MainViewModel.*.cs"
       ]
     },
     {
@@ -159,6 +163,7 @@
         "ICCardManager/src/ICCardManager/Views/ToastNotificationWindow.xaml",
         "ICCardManager/src/ICCardManager/Views/ToastNotificationWindow.xaml.cs",
         "ICCardManager/src/ICCardManager/ViewModels/MainViewModel.cs",
+        "ICCardManager/src/ICCardManager/ViewModels/Main/MainViewModel.*.cs",
         "ICCardManager/src/ICCardManager/Dtos/**",
         "ICCardManager/src/ICCardManager/Common/DisplayFormatters.cs",
         "ICCardManager/src/ICCardManager/Common/StaffNameFormatter.cs"
@@ -171,7 +176,8 @@
       "sources": [
         "ICCardManager/src/ICCardManager/Views/ToastNotificationWindow.xaml",
         "ICCardManager/src/ICCardManager/Views/ToastNotificationWindow.xaml.cs",
-        "ICCardManager/src/ICCardManager/ViewModels/MainViewModel.cs"
+        "ICCardManager/src/ICCardManager/ViewModels/MainViewModel.cs",
+        "ICCardManager/src/ICCardManager/ViewModels/Main/MainViewModel.*.cs"
       ]
     },
     {
@@ -184,6 +190,7 @@
         "ICCardManager/src/ICCardManager/Views/ToastNotificationWindow.xaml",
         "ICCardManager/src/ICCardManager/Views/ToastNotificationWindow.xaml.cs",
         "ICCardManager/src/ICCardManager/ViewModels/MainViewModel.cs",
+        "ICCardManager/src/ICCardManager/ViewModels/Main/MainViewModel.*.cs",
         "ICCardManager/src/ICCardManager/Dtos/**",
         "ICCardManager/src/ICCardManager/Common/DisplayFormatters.cs",
         "ICCardManager/src/ICCardManager/Common/StaffNameFormatter.cs"
@@ -196,7 +203,8 @@
       "sources": [
         "ICCardManager/src/ICCardManager/Views/ToastNotificationWindow.xaml",
         "ICCardManager/src/ICCardManager/Views/ToastNotificationWindow.xaml.cs",
-        "ICCardManager/src/ICCardManager/ViewModels/MainViewModel.cs"
+        "ICCardManager/src/ICCardManager/ViewModels/MainViewModel.cs",
+        "ICCardManager/src/ICCardManager/ViewModels/Main/MainViewModel.*.cs"
       ]
     },
     {
@@ -218,6 +226,7 @@
         "ICCardManager/src/ICCardManager/Views/MainWindow.xaml",
         "ICCardManager/src/ICCardManager/Views/MainWindow.xaml.cs",
         "ICCardManager/src/ICCardManager/ViewModels/MainViewModel.cs",
+        "ICCardManager/src/ICCardManager/ViewModels/Main/MainViewModel.*.cs",
         "ICCardManager/src/ICCardManager/Dtos/**",
         "ICCardManager/src/ICCardManager/Common/DisplayFormatters.cs",
         "ICCardManager/src/ICCardManager/Common/StaffNameFormatter.cs",
@@ -232,6 +241,7 @@
         "ICCardManager/src/ICCardManager/Views/MainWindow.xaml",
         "ICCardManager/src/ICCardManager/Views/MainWindow.xaml.cs",
         "ICCardManager/src/ICCardManager/ViewModels/MainViewModel.cs",
+        "ICCardManager/src/ICCardManager/ViewModels/Main/MainViewModel.*.cs",
         "ICCardManager/src/ICCardManager/Dtos/**",
         "ICCardManager/src/ICCardManager/Common/DisplayFormatters.cs",
         "ICCardManager/src/ICCardManager/Common/StaffNameFormatter.cs",
@@ -245,7 +255,8 @@
       "sources": [
         "ICCardManager/src/ICCardManager/Views/MainWindow.xaml",
         "ICCardManager/src/ICCardManager/Views/MainWindow.xaml.cs",
-        "ICCardManager/src/ICCardManager/ViewModels/MainViewModel.cs"
+        "ICCardManager/src/ICCardManager/ViewModels/MainViewModel.cs",
+        "ICCardManager/src/ICCardManager/ViewModels/Main/MainViewModel.*.cs"
       ]
     },
     {
@@ -256,6 +267,7 @@
         "ICCardManager/src/ICCardManager/Views/MainWindow.xaml",
         "ICCardManager/src/ICCardManager/Views/MainWindow.xaml.cs",
         "ICCardManager/src/ICCardManager/ViewModels/MainViewModel.cs",
+        "ICCardManager/src/ICCardManager/ViewModels/Main/MainViewModel.*.cs",
         "ICCardManager/src/ICCardManager/Dtos/**",
         "ICCardManager/src/ICCardManager/Common/DisplayFormatters.cs",
         "ICCardManager/src/ICCardManager/Common/StaffNameFormatter.cs",

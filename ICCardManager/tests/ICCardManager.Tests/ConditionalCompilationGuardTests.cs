@@ -29,15 +29,13 @@ public class ConditionalCompilationGuardTests
     [Fact]
     public void MainViewModel_OpenVirtualCardAsync_IsInsideDebugGuard()
     {
-        var path = Path.Combine(ProjectRoot, "ViewModels", "MainViewModel.cs");
-        AssertIdentifierIsInsideDebugBlock(path, "public async Task OpenVirtualCardAsync(");
+        AssertIdentifierIsInsideDebugBlockInMainViewModel("public async Task OpenVirtualCardAsync(");
     }
 
     [Fact]
     public void MainViewModel_ProcessVirtualTouchAsync_IsInsideDebugGuard()
     {
-        var path = Path.Combine(ProjectRoot, "ViewModels", "MainViewModel.cs");
-        AssertIdentifierIsInsideDebugBlock(path, "private async Task ProcessVirtualTouchAsync(");
+        AssertIdentifierIsInsideDebugBlockInMainViewModel("private async Task ProcessVirtualTouchAsync(");
     }
 
     [Fact]
@@ -150,6 +148,35 @@ public class ConditionalCompilationGuardTests
     /// <summary>
     /// 指定識別子の<b>すべての出現</b>が <c>#if DEBUG</c> ブロック内にあることを表明する。
     /// </summary>
+    /// <summary>
+    /// <paramref name="identifier"/> の出現が、<c>MainViewModel</c> を構成する<b>すべての</b> partial ファイルで
+    /// <c>#if DEBUG</c> の内側にあることを表明する（Issue #2158）。
+    /// </summary>
+    /// <remarks>
+    /// 宣言しているファイル（<c>MainViewModel.Debug.cs</c>）だけを見ると、別の partial ファイルへガードなしで
+    /// 足した呼び出しを素通りする。分割前は 1 ファイルの全出現を見ていたので、その範囲を縮めない。
+    /// 構成ファイルは宣言から導出する（<see cref="MainViewModelSourceFiles"/>）。
+    /// </remarks>
+    private static void AssertIdentifierIsInsideDebugBlockInMainViewModel(string identifier)
+    {
+        var files = MainViewModelSourceFiles.All;
+        files.Should().HaveCountGreaterThan(1, "MainViewModel は partial ファイルへ分割されている");
+
+        var total = 0;
+        var outside = new List<string>();
+        foreach (var file in files)
+        {
+            var (occurrences, outsideLines) = FindOccurrencesOutsideDebugBlock(file.Text, identifier);
+            total += occurrences;
+            outside.AddRange(outsideLines.Select(line => $"{file.RelativePath}:{line}"));
+        }
+
+        total.Should().BeGreaterThan(0, $"対象識別子 '{identifier}' が MainViewModel に存在する必要がある");
+        outside.Should().BeEmpty(
+            $"'{identifier}' はすべての出現が #if DEBUG ガード内になければならない " +
+            $"({string.Join(", ", outside)}) — Release ビルドからの除外が崩れている可能性があります");
+    }
+
     private static void AssertIdentifierIsInsideDebugBlock(string filePath, string identifier)
     {
         File.Exists(filePath).Should().BeTrue($"対象ファイルが存在する: {filePath}");

@@ -59,7 +59,7 @@ namespace ICCardManager.Tests.Tools
   },
   ""screenshots"": [
     { ""name"": ""main.png"", ""pass"": ""Release"", ""filter"": ""FullyQualifiedName~ManualScreenshotTests.main_"",
-      ""sources"": [ ""ICCardManager/src/ICCardManager/Views/MainWindow.xaml"", ""ICCardManager/src/ICCardManager/ViewModels/MainViewModel.cs"" ] },
+      ""sources"": [ ""ICCardManager/src/ICCardManager/Views/MainWindow.xaml"", ""ICCardManager/src/ICCardManager/ViewModels/MainViewModel.cs"", ""ICCardManager/src/ICCardManager/ViewModels/Main/MainViewModel.*.cs"" ] },
     { ""name"": ""card.png"", ""pass"": ""Release"", ""filter"": ""DisplayName~card.png"",
       ""sources"": [ ""ICCardManager/src/ICCardManager/Views/Dialogs/CardManageDialog.xaml"" ] },
     { ""name"": ""lend.png"", ""pass"": ""Debug"", ""filter"": ""FullyQualifiedName~TouchScreenshotTests.lend_"",
@@ -85,6 +85,29 @@ namespace ICCardManager.Tests.Tools
 
             result.ExitCode.Should().Be(0, result.StdErr);
             AffectedNames(result).Should().BeEquivalentTo(new[] { "main.png", "lend.png" });
+        }
+
+        /// <summary>
+        /// Issue #2158: partial ファイル（<c>ViewModels/Main/MainViewModel.*.cs</c>）の変更も、本体と同じ画像へ届くこと。
+        /// glob の <c>*</c> がファイル名の途中（<c>MainViewModel.*.cs</c>）でも働くことを、対で固定する。
+        /// </summary>
+        [Fact]
+        public void Files_MainViewModelのpartialファイル変更_本体と同じ画像が影響を受ける()
+        {
+            var result = RunScript("-Json", "-Files", "ICCardManager/src/ICCardManager/ViewModels/Main/MainViewModel.History.cs");
+
+            result.ExitCode.Should().Be(0, result.StdErr);
+            AffectedNames(result).Should().Equal("main.png");
+        }
+
+        [Fact]
+        public void Files_Mainフォルダーの入れ子に置いた同名ファイル_partialのglobに一致しない()
+        {
+            // '*' が '/' を跨ぐ実装だと、Main/ の入れ子のフォルダーに置いたファイルまで main.png に届く
+            var result = RunScript("-Files", "ICCardManager/src/ICCardManager/ViewModels/Main/Sub/MainViewModel.X.cs");
+
+            result.ExitCode.Should().Be(0, result.StdErr);
+            result.StdOut.Trim().Should().BeEmpty();
         }
 
         [Fact]

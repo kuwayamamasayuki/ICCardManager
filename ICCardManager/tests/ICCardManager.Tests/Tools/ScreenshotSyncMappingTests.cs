@@ -69,6 +69,46 @@ namespace ICCardManager.Tests.Tools
             names.Should().OnlyHaveUniqueItems();
         }
 
+        /// <summary>
+        /// <c>MainViewModel</c> のソースを載せた画像は、<c>MainViewModel</c> を構成する partial ファイルすべてを覆うこと（Issue #2158）。
+        /// </summary>
+        /// <remarks>
+        /// <c>MainViewModel</c> は本体 <c>MainViewModel.cs</c> と <c>ViewModels/Main/MainViewModel.*.cs</c> へ分割されている。
+        /// 本体だけを載せると、履歴パネルや返却後処理（partial ファイル側）の変更で撮り直しが検知されない。
+        /// 構成ファイルは宣言から導出する（<see cref="MainViewModelSourceFiles"/>）ため、partial ファイルを足した日にも追随する。
+        /// </remarks>
+        [Fact]
+        public void 対応表_MainViewModelを載せた画像は構成ファイルすべてを覆う()
+        {
+            using var doc = LoadMapping();
+            var mainViewModelFiles = MainViewModelSourceFiles.All
+                .Select(f => f.FullPath.Substring(RepoRoot.Length)
+                    .TrimStart(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)
+                    .Replace(Path.DirectorySeparatorChar, '/'))
+                .ToList();
+            mainViewModelFiles.Should().HaveCountGreaterThan(1, "MainViewModel は partial ファイルへ分割されている");
+
+            var checkedImages = 0;
+            var problems = new List<string>();
+            foreach (var screenshot in doc.RootElement.GetProperty("screenshots").EnumerateArray())
+            {
+                var regexes = screenshot.GetProperty("sources").EnumerateArray()
+                    .Select(e => GlobToRegex(e.GetString()!))
+                    .ToList();
+                var covered = mainViewModelFiles.Where(f => regexes.Any(r => r.IsMatch(f))).ToList();
+                if (covered.Count == 0) continue;
+
+                checkedImages++;
+                problems.AddRange(mainViewModelFiles.Except(covered)
+                    .Select(f => $"{screenshot.GetProperty("name").GetString()}: {f}"));
+            }
+
+            checkedImages.Should().BeGreaterThan(0, "MainViewModel を載せた画像が 1 つも無いなら、本テストの前提を書き直す");
+            problems.Should().BeEmpty(
+                "MainViewModel の一部だけを載せると、残りのファイルの変更で撮り直しが検知されない。" +
+                "\"ICCardManager/src/ICCardManager/ViewModels/Main/MainViewModel.*.cs\" を併記すること");
+        }
+
         [Fact]
         public void 対応表_参照するパスはすべて定義されている()
         {
@@ -434,15 +474,22 @@ $b = Invoke-ManifestScript (@(""-Write"", ""-Json"") +
             var searchRoot = Path.Combine(RepoRoot, fixedPrefix.Replace('/', Path.DirectorySeparatorChar));
             if (!Directory.Exists(searchRoot)) return false;
 
-            var regex = new Regex("^" + Regex.Escape(pattern)
-                .Replace(@"\*\*/", "(?:.*/)?")
-                .Replace(@"\*\*", ".*")
-                .Replace(@"\*", "[^/]*")
-                .Replace(@"\?", "[^/]") + "$");
+            var regex = GlobToRegex(pattern);
             return Directory.EnumerateFiles(searchRoot, "*", SearchOption.AllDirectories)
                 .Select(f => f.Substring(RepoRoot.Length).TrimStart(Path.DirectorySeparatorChar).Replace(Path.DirectorySeparatorChar, '/'))
                 .Where(rel => !rel.Contains("/bin/") && !rel.Contains("/obj/"))
                 .Any(regex.IsMatch);
         }
+
+        /// <summary>
+        /// 対応表の glob（'*' は 1 階層、'**' は複数階層、'?' は 1 文字）を、リポジトリ相対パス（区切りは '/'）に
+        /// 一致させる正規表現へ変換する。大文字小文字は区別しない（<c>tools/screenshot-sync.ps1</c> の照合と揃える）。
+        /// </summary>
+        private static Regex GlobToRegex(string pattern) =>
+            new Regex("^" + Regex.Escape(pattern)
+                .Replace(@"\*\*/", "(?:.*/)?")
+                .Replace(@"\*\*", ".*")
+                .Replace(@"\*", "[^/]*")
+                .Replace(@"\?", "[^/]") + "$", RegexOptions.IgnoreCase);
     }
 }

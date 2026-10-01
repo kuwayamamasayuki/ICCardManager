@@ -36,7 +36,7 @@ public class ExitConfirmationConventionTests
     public void Exitは確認の結果で分岐してからShutdownすること()
     {
         var body = TestSourceInspection.ExtractMethodBody(
-            ReadCodeOnly("ViewModels/MainViewModel.cs"), "public void Exit()");
+            MainViewModelSourceFiles.FindDeclaringFile("public void Exit()").CodeOnly, "public void Exit()");
 
         var confirmIndex = body.IndexOf("if (!ConfirmExit())", StringComparison.Ordinal);
         var shutdownIndex = body.IndexOf("Shutdown()", StringComparison.Ordinal);

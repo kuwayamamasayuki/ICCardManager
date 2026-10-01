@@ -13,7 +13,7 @@ namespace ICCardManager.Tests.Infrastructure;
 ///
 /// 検証対象は 5 経路:
 /// 1. <c>ICCardManager.csproj</c> の Configuration='Release' 用 ItemGroup で Compile/Page Remove されているか
-/// 2. <c>MainViewModel.cs</c> の <c>OpenVirtualCardAsync</c> が <c>#if DEBUG</c> ガードの内側にあるか
+/// 2. <c>MainViewModel</c>（を構成する partial ファイル）の <c>OpenVirtualCardAsync</c> が <c>#if DEBUG</c> ガードの内側にあるか
 /// 3. <c>App.xaml.cs</c> の <c>VirtualCardDialog</c>/<c>VirtualCardViewModel</c> DI 登録が <c>#if DEBUG</c> ガードの内側にあるか
 /// 4. <c>MainWindow.xaml</c> の DEBUG ボタン群が <c>app:App.IsDebugBuild</c> による Visibility ガード配下にあるか
 /// 5. <c>VirtualCardDialog.xaml.cs</c> に Release 用引数なしコンストラクタ（<c>#else</c> ブランチ）が残っていないか
@@ -101,7 +101,8 @@ public class VirtualCardDialogDebugIsolationTests
     [Trait("Category", "Unit")]
     public void MainViewModel_OpenVirtualCardAsync_IsGuardedByDebug()
     {
-        var path = Path.Combine(GetSourceRoot(), "ViewModels", "MainViewModel.cs");
+        // Issue #2158: MainViewModel は partial ファイルへ分割されている。宣言しているファイルを導出する
+        var path = MainViewModelSourceFiles.FindDeclaringFile("Task OpenVirtualCardAsync").FullPath;
         var lines = File.ReadAllLines(path);
 
         var declarationIndex = FindLineIndex(

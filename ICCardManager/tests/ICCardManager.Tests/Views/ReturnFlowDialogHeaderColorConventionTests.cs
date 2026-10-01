@@ -48,12 +48,17 @@ public class ReturnFlowDialogHeaderColorConventionTests
 
     #region 走査対象の導出（MainViewModel の呼び出し関係から）
 
+    /// <remarks>
+    /// Issue #2158: <c>MainViewModel</c> は責務ごとの partial ファイルへ分割されており、起点
+    /// （<c>HandleReturnSuccessAsync</c>・返却後処理）と、そこから呼ぶヘルパー・ダイアログを開く処理は
+    /// 別々のファイルにあり得る。1 ファイルだけを読むと呼び出し関係が途中で切れ、到達するダイアログが
+    /// 検査から静かに漏れるため、構成ファイルすべてを連結して 1 つの本文として扱う。
+    /// </remarks>
     private static string ReadMainViewModelCodeOnly()
     {
-        var path = Path.Combine(
-            TestPaths.GetProductionSourceRoot(), "ViewModels", "MainViewModel.cs");
-        File.Exists(path).Should().BeTrue($"検査対象のソースが見つからない: {path}");
-        return TestSourceInspection.ToCodeOnly(File.ReadAllText(path));
+        var files = MainViewModelSourceFiles.All;
+        files.Should().NotBeEmpty("MainViewModel を構成するソースが見つからない");
+        return MainViewModelSourceFiles.ConcatenatedCodeOnly;
     }
 
     /// <remarks>
@@ -78,7 +83,7 @@ public class ReturnFlowDialogHeaderColorConventionTests
     /// <b>次のメソッドの波括弧</b>を掴んで無関係な本体を返す。宣言の括弧を数えて分岐する。
     /// </para>
     /// </remarks>
-    private static IReadOnlyDictionary<string, string> CollectMethodBodies(string codeOnly)
+    internal static IReadOnlyDictionary<string, string> CollectMethodBodies(string codeOnly)
         => CollectMethodBodies(codeOnly, out _);
 
     /// <param name="overloadedNames">
@@ -116,9 +121,11 @@ public class ReturnFlowDialogHeaderColorConventionTests
                 continue;
             }
 
-            // 末尾の "(" と直前の空白を落とした部分がマーカー（IndexOf でこの宣言に当たる）
+            // 末尾の "(" と直前の空白を落とした部分がマーカー。探索は<b>この宣言の位置から</b>始める。
+            // 先頭から IndexOf すると、名前が前方一致する先行の宣言（`OnCardRead` に対する `OnCardReaderError`）の
+            // 本体を取り違える。分割前は宣言順の偶然で当たっていたが、partial ファイルを連結すると順序が変わる（Issue #2158）
             var marker = match.Value.Substring(0, match.Value.Length - 1).TrimEnd().TrimStart();
-            bodies[name] = TestSourceInspection.ExtractMethodBody(codeOnly, marker);
+            bodies[name] = TestSourceInspection.ExtractMethodBody(codeOnly.Substring(match.Index), marker);
         }
 
         overloadedNames = overloaded;
@@ -364,6 +371,25 @@ public class ReturnFlowDialogHeaderColorConventionTests
             .Should().NotContain(
                 "CompanionCountInputDialog",
                 "直接の本体には現れない＝展開なしでは拾えないこと（この前提が変わったら対の表明を書き直す）");
+    }
+
+    [Fact]
+    public void 名前が前方一致する先行の宣言の本体を取り違えないこと()
+    {
+        // Issue #2158: partial ファイルを連結すると、`OnCardReaderError`（本体ファイル）が `OnCardRead`（CardTouch）より前に来る。
+        // 先頭からの前方一致で本体を引くと、OnCardRead の本体として OnCardReaderError の本体を返す
+        const string source =
+            "public partial class MainViewModel\n{\n" +
+            "    private void OnCardReaderError(object sender) { First(); }\n" +
+            "}\n" +
+            "public partial class MainViewModel\n{\n" +
+            "    private void OnCardRead(object sender) { Second(); }\n" +
+            "}\n";
+
+        var bodies = CollectMethodBodies(source);
+
+        bodies["OnCardRead"].Should().Contain("Second()").And.NotContain("First()");
+        bodies["OnCardReaderError"].Should().Contain("First()");
     }
 
     [Fact]
