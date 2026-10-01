@@ -898,6 +898,247 @@ jobs:
 
     #endregion
 
+    #region ⑥コード整形の検証（Issue #2161）
+
+    /// <summary>
+    /// 読み取りの前提（<c>continue-on-error</c> の値・整形検証の <c>run:</c> の許可形・.editorconfig と
+    /// .gitattributes の後勝ちの解決）をサンプル入力で固定する（#1786「空振り検出を実データの非空で書かない」）。
+    /// </summary>
+    [Fact]
+    public void 検出ロジックが整形検証の許可形とcontinue_on_errorと改行の設定を読めること()
+    {
+        AllowsFailure("    - name: x\n      continue-on-error: true\n").Should().BeTrue();
+        AllowsFailure("  job:\n    continue-on-error: true\n    steps:\n").Should().BeTrue("ジョブ単位の指定もステップの失敗を CI の失敗にしない");
+        AllowsFailure("      continue-on-error: ${{ matrix.experimental }}\n").Should().BeTrue("式は構成によって true になり得る");
+        AllowsFailure("      continue-on-error: 'true'\n").Should().BeTrue("引用符付きでも YAML では真");
+        AllowsFailure("      continue-on-error: false\n").Should().BeFalse("明示の false は失敗を CI の失敗にする");
+        AllowsFailure("      # continue-on-error: true\n").Should().BeFalse("コメントアウトした指定は効かない");
+
+        IsAllowedFormatVerificationRun("dotnet format --no-restore --verify-no-changes --verbosity diagnostic").Should().BeTrue();
+        IsAllowedFormatVerificationRun("dotnet format --verify-no-changes").Should().BeTrue();
+        IsAllowedFormatVerificationRun("dotnet format --no-restore").Should().BeFalse("--verify-no-changes が無いと違反を直して成功で終わる");
+        IsAllowedFormatVerificationRun("dotnet format --no-restore # --verify-no-changes").Should().BeFalse("シェルのコメントの中のフラグは効かない");
+        IsAllowedFormatVerificationRun("dotnet format --no-restore --verify-no-changes false").Should().BeFalse("bool オプションへの false は検証を外し得る");
+        IsAllowedFormatVerificationRun("|").Should().BeFalse("複数行の run: は 2 行目以降が終了コードを上書きし得る（pwsh は途中の失敗で止まらない）");
+        IsAllowedFormatVerificationRun("dotnet format --no-restore --verify-no-changes || true").Should().BeFalse();
+        IsAllowedFormatVerificationRun("dotnet format --no-restore --verify-no-changes; exit 0").Should().BeFalse();
+        IsAllowedFormatVerificationRun("dotnet format --no-restore --verify-no-changes; dotnet --version").Should().BeFalse(
+            "後ろのコマンドの終了コードがステップの結果になる");
+        IsAllowedFormatVerificationRun("dotnet format src/ICCardManager/ICCardManager.csproj --no-restore --verify-no-changes").Should().BeFalse(
+            "位置引数で対象を 1 プロジェクトに絞ると、テストとツールが検査から外れる");
+        IsAllowedFormatVerificationRun("dotnet format whitespace --no-restore --verify-no-changes").Should().BeFalse("サブコマンドは検査の種類を 1 つに絞る");
+        IsAllowedFormatVerificationRun("dotnet format --no-restore --verify-no-changes --exclude src/Foo").Should().BeFalse();
+        IsAllowedFormatVerificationRun("dotnet format --no-restore --verify-no-changes --severity error").Should().BeFalse(
+            "warning 扱いの規則（命名・波括弧）が検査から外れる");
+        IsAllowedFormatVerificationRun("dotnet format --no-restore --verify-no-changes --diagnostics IDE0055").Should().BeFalse();
+
+        const string editorConfig = "root = true\n\n[*]\nend_of_line = crlf\n\n[*.{xml,xaml}]\nend_of_line = lf\n\n[*.{cs,vb}]\n# end_of_line = lf\nindent_size = 4\n";
+        ResolveEditorConfigValueForCs(editorConfig, "end_of_line").Should().Be("crlf", "C# に当たらない節とコメントは読まない");
+        ResolveEditorConfigValueForCs(editorConfig + "\n[*.cs]\nend_of_line = lf\n", "end_of_line").Should().Be("lf", "後の節が勝つ");
+        ResolveEditorConfigValueForCs("[*]\ncharset = utf-8\n", "end_of_line").Should().BeNull();
+
+        ResolveGitAttributesForCs("*.json text eol=lf\n*.cs text eol=crlf\n").Should().Equal("text", "eol=crlf");
+        ResolveGitAttributesForCs("*.cs text eol=crlf\n* eol=lf\n").Should().Equal(new[] { "text", "eol=lf" }, "後に書いた * の指定が eol を上書きする");
+        ResolveGitAttributesForCs("# *.cs text eol=lf\n*.cs text eol=crlf\n").Should().Equal("text", "eol=crlf");
+        ResolveGitAttributesForCs("*.json text eol=lf\n").Should().BeEmpty();
+    }
+
+    /// <summary>
+    /// CI は <c>dotnet format --verify-no-changes</c> で整形の違反を検査する（Issue #2161）。
+    /// 下の「失敗を CI の失敗として扱う」の対の表明 — ステップごと消した実装でも、
+    /// <c>continue-on-error</c> が無いという表明だけなら緑になる。
+    /// </summary>
+    /// <remarks>
+    /// <c>run:</c> は禁止形の列挙ではなく許可形で固定する（コードレビューで検出）。windows-latest の既定のシェルは pwsh で、
+    /// ネイティブコマンドが失敗しても後続を実行し、最後のコマンドの終了コードでステップが終わる。禁止形（<c>|| true</c> 等）を
+    /// 数える形では、善意で 2 行目に足した診断用コマンドが整形の失敗を上書きする経路を塞げない。
+    /// </remarks>
+    [Fact]
+    public void コード整形の検証がci_ymlで範囲を絞らずに実行されること()
+    {
+        var steps = FormatVerificationSteps();
+        steps.Should().NotBeEmpty(
+            "--verify-no-changes 付きの dotnet format のステップが ci.yml から消えると、整形の違反が検査されない" +
+            "（--verify-no-changes が無い dotnet format は違反を直して成功で終わる）");
+
+        foreach (var (job, jobBlock, step) in steps)
+        {
+            var run = ExtractStepRunBlock(step, "")!;
+            IsAllowedFormatVerificationRun(run).Should().BeTrue(
+                $"ジョブ {job}: 整形検証の run: は 1 行の dotnet format だけにし、許可したオプション（--no-restore / --verify-no-changes / " +
+                $"--verbosity / --severity info|warn）以外を付けないこと。範囲を絞る・別のコマンドを続ける形は検査を無効化し得る: {run}");
+            Regex.IsMatch(step, @"^\s*(shell|working-directory):", RegexOptions.Multiline).Should().BeFalse(
+                $"ジョブ {job}: シェルや作業ディレクトリを差し替えると、終了コードの扱いや検査の対象（ソリューション全体）が変わる: {step}");
+
+            var workingDirectory = Regex.Match(jobBlock, @"^    defaults:\s*\n      run:\s*\n        working-directory:\s*(\S+)\s*$", RegexOptions.Multiline);
+            workingDirectory.Success.Should().BeTrue($"ジョブ {job} の既定の作業ディレクトリでソリューションを特定する");
+            File.Exists(Path.Combine(RepositoryRoot, workingDirectory.Groups[1].Value, "ICCardManager.sln")).Should().BeTrue(
+                $"ジョブ {job}: dotnet format は位置引数が無いとき作業ディレクトリのソリューションを検査する。" +
+                "ソリューションの無いディレクトリでは対象が変わる（または失敗する）");
+        }
+    }
+
+    /// <summary>
+    /// 整形の違反は CI の失敗として扱う（Issue #2161）。#2161 まで code-quality ジョブの検査ステップには
+    /// <c>continue-on-error: true</c> が付いており、違反があっても CI は緑のままだった（コードスタイルの検査が実質的に機能していなかった）。
+    /// ステップの指定だけでなく、ジョブ単位の指定と、ジョブ・ステップの <c>if:</c> も見る — スキップされたジョブは
+    /// 必須チェックでも合格扱いになる。<c>needs:</c> も持たせない（依存先がスキップ・失敗すると、このジョブもスキップされる）。
+    /// </summary>
+    [Fact]
+    public void コード整形の検証の失敗がCIの失敗として扱われること()
+    {
+        var steps = FormatVerificationSteps();
+        steps.Should().NotBeEmpty("導出が空振りすると無検査で緑になる");
+
+        foreach (var (job, jobBlock, step) in steps)
+        {
+            var jobLevel = string.Join("\n", SplitLines(jobBlock).Where(l => IndentOf(l) <= 4));
+            AllowsFailure(jobLevel).Should().BeFalse(
+                $"ジョブ {job} に continue-on-error があると、整形の違反でジョブが失敗しても CI は緑になる");
+            Regex.IsMatch(jobLevel, @"^    (if|needs):", RegexOptions.Multiline).Should().BeFalse(
+                $"ジョブ {job} に if: / needs: があると、条件次第でジョブがスキップされ、スキップは合格として扱われる");
+
+            AllowsFailure(step).Should().BeFalse(
+                $"ジョブ {job} の整形検証ステップに continue-on-error があると、違反があっても CI は緑になる（Issue #2161）: {step}");
+            Regex.IsMatch(step, @"^\s*(-\s+)?if:", RegexOptions.Multiline).Should().BeFalse(
+                $"ジョブ {job} の整形検証ステップを条件付きにすると、条件次第で検査されない: {step}");
+        }
+    }
+
+    /// <summary>
+    /// <c>.editorconfig</c> が C# に適用する <c>end_of_line</c> と、<c>.gitattributes</c> が <c>*.cs</c> に適用する <c>eol</c> が
+    /// 一致すること（Issue #2161）。dotnet format は作業ツリーの改行を検査するため、<c>.gitattributes</c> で作業ツリーの改行を
+    /// 決めていないと結果がランナーの <c>core.autocrlf</c> の既定値（Windows ランナーは true）に依存する。#2161 の時点で .cs は
+    /// index 上 LF と CRLF が混在しており、CI では Windows ランナーの変換で隠れていたが、WSL では 20 万行が違反になっていた。
+    /// どちらも後勝ちで解決する（後ろの節・行が前の指定を上書きする）。
+    /// </summary>
+    [Fact]
+    public void cs_の改行コードがgitattributesとeditorconfigで一致すること()
+    {
+        var solutionRoot = TestPaths.GetSolutionRoot();
+        var nested = Directory.GetFiles(solutionRoot, ".editorconfig", SearchOption.AllDirectories)
+            .Where(f => !Regex.IsMatch(f, @"[\\/](bin|obj|node_modules|TestResults)[\\/]"))
+            .Where(f => !string.Equals(Path.GetDirectoryName(f), solutionRoot, StringComparison.OrdinalIgnoreCase))
+            .Where(f => ResolveEditorConfigValueForCs(File.ReadAllText(f), "end_of_line") != null)
+            .ToList();
+        nested.Should().BeEmpty("下位の .editorconfig で end_of_line を上書きすると、ここで読む値と dotnet format が使う値が食い違う");
+
+        var endOfLine = ResolveEditorConfigValueForCs(File.ReadAllText(Path.Combine(solutionRoot, ".editorconfig")), "end_of_line");
+        endOfLine.Should().NotBeNull("ICCardManager/.editorconfig に end_of_line が無いと、dotnet format は改行を検査しない");
+
+        var attributes = ResolveGitAttributesForCs(File.ReadAllText(Path.Combine(RepositoryRoot, ".gitattributes")));
+        attributes.Should().Contain("text", ".gitattributes で *.cs に text を指定しないと、eol は変換に使われない");
+        attributes.Should().Contain($"eol={endOfLine}",
+            $".editorconfig の end_of_line = {endOfLine} と、作業ツリーへ展開される改行（.gitattributes の *.cs に効く最後の eol）を揃える");
+    }
+
+    /// <summary>ci.yml の、<c>--verify-no-changes</c> を含む dotnet format を実行するステップ（ジョブ名・ジョブのブロック・ステップのブロック）。</summary>
+    private static List<(string Job, string JobBlock, string Step)> FormatVerificationSteps()
+        => ExtractJobs(File.ReadAllText(CiWorkflowPath))
+            .SelectMany(j => ExtractStepsContaining(j.Value, "dotnet format")
+                .Where(s => ExtractDotnetCommands(s, "format").Any(c => Regex.IsMatch(RemoveExpressions(c), @"(^|\s)--verify-no-changes(\s|$)")))
+                .Select(s => (j.Key, j.Value, s)))
+            .ToList();
+
+    /// <summary>
+    /// ブロックに、失敗を CI の失敗にしない <c>continue-on-error</c> があるか。<c>false</c> 以外（<c>true</c>・式・引用符付き）は
+    /// 失敗を許すとみなす。コメント行は除く。
+    /// </summary>
+    private static bool AllowsFailure(string block)
+        => SplitLines(block)
+            .Where(l => !l.TrimStart().StartsWith("#", StringComparison.Ordinal))
+            .Select(l => Regex.Match(l, @"^\s*continue-on-error:\s*(.+?)\s*(#.*)?$"))
+            .Any(m => m.Success && m.Groups[1].Value.Trim('\'', '"') != "false");
+
+    /// <summary>
+    /// 整形検証の <c>run:</c> が許可形か — 1 行の <c>dotnet format</c> だけで、位置引数・サブコマンドを持たず、
+    /// オプションは <c>--no-restore</c> / <c>--verify-no-changes</c> / <c>--verbosity &lt;level&gt;</c> /
+    /// <c>--severity info|warn</c> に限り、<c>--verify-no-changes</c> を含む。許可形の外は、範囲の絞り込み・終了コードの
+    /// 上書き・新しいオプションのいずれであっても赤にする（新しいオプションを足すときは、検査を弱めないことを確かめてからここへ加える）。
+    /// </summary>
+    private static bool IsAllowedFormatVerificationRun(string run)
+    {
+        var trimmed = run.Trim();
+        return Regex.IsMatch(
+                   trimmed,
+                   @"^dotnet\s+format(\s+(--no-restore|--verify-no-changes|--verbosity\s+(q|quiet|m|minimal|n|normal|d|detailed|diag|diagnostic)|--severity\s+(info|warn)))*$")
+               && Regex.IsMatch(trimmed, @"(^|\s)--verify-no-changes(\s|$)");
+    }
+
+    /// <summary>
+    /// .editorconfig のうち、C# ソース（<c>*.cs</c>）に当たる節（<c>[*]</c>・<c>[*.cs]</c>・<c>[**.cs]</c>・<c>{…}</c> に cs を含む節）の
+    /// <paramref name="key"/> を後勝ちで解決する。当たらなければ null。
+    /// </summary>
+    private static string? ResolveEditorConfigValueForCs(string editorConfig, string key)
+    {
+        string? value = null;
+        var applies = false;
+        foreach (var raw in SplitLines(editorConfig))
+        {
+            var line = raw.Trim();
+            if (line.Length == 0 || line.StartsWith("#", StringComparison.Ordinal) || line.StartsWith(";", StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            var section = Regex.Match(line, @"^\[(.+)\]$");
+            if (section.Success)
+            {
+                var glob = section.Groups[1].Value;
+                applies = glob == "*" || Regex.IsMatch(glob, @"^\*{1,2}\.(cs|\{([^}]*,)?cs(,[^}]*)?\})$");
+                continue;
+            }
+
+            var pair = Regex.Match(line, @"^" + Regex.Escape(key) + @"\s*=\s*(\S+)$");
+            if (applies && pair.Success)
+            {
+                value = pair.Groups[1].Value;
+            }
+        }
+
+        return value;
+    }
+
+    /// <summary>
+    /// .gitattributes のうち、<c>*.cs</c> に当たる行（<c>*</c>・<c>*.cs</c>）の属性を後勝ちで解決する
+    /// （<c>text</c> と <c>eol=…</c> だけを見る）。
+    /// </summary>
+    private static List<string> ResolveGitAttributesForCs(string gitAttributes)
+    {
+        string? text = null;
+        string? eol = null;
+        foreach (var raw in SplitLines(gitAttributes))
+        {
+            var line = raw.Trim();
+            if (line.Length == 0 || line.StartsWith("#", StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            var parts = Regex.Split(line, @"\s+");
+            if (parts[0] != "*" && parts[0] != "*.cs" && parts[0] != "**/*.cs")
+            {
+                continue;
+            }
+
+            foreach (var attribute in parts.Skip(1))
+            {
+                if (attribute == "text" || attribute == "-text" || attribute.StartsWith("text=", StringComparison.Ordinal))
+                {
+                    text = attribute;
+                }
+                else if (attribute.StartsWith("eol=", StringComparison.Ordinal))
+                {
+                    eol = attribute;
+                }
+            }
+        }
+
+        return new[] { text, eol }.Where(a => a != null).Select(a => a!).ToList();
+    }
+
+    #endregion
+
     #region 読み取りヘルパー
 
     /// <summary>ソリューションに含まれ、ソリューション単位の <c>dotnet test</c> から自分を外している csproj（作業ディレクトリからの相対、<c>/</c> 区切り）。</summary>

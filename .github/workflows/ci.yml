@@ -136,9 +136,12 @@ jobs:
     - name: Restore dependencies
       run: dotnet restore --locked-mode
 
+    # 整形の違反（.editorconfig の規則）を CI の失敗として扱う（Issue #2161）。
+    # #2161 までは continue-on-error: true が付いており、違反があっても CI は緑のままだった。
+    # 違反が出たら手元で `dotnet format`（ICCardManager ディレクトリで実行）を走らせて直すこと。
+    # 失敗の握りつぶし・範囲の絞り込みは CiWorkflowConventionTests が見張る。
     - name: Check code format
       run: dotnet format --no-restore --verify-no-changes --verbosity diagnostic
-      continue-on-error: true
 
     # ビルド警告ゼロを維持する（.claude/rules/development-conventions.md、Issue #1786）。
     # 警告を消した「手段」（NoWarn / #pragma への逃げ）は BuildWarningSuppressionConventionTests が
