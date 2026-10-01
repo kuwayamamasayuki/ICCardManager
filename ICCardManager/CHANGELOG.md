@@ -384,6 +384,13 @@
 - **Stop フック `check-doc-sync.sh` のタイムアウトを 15 秒から 60 秒へ引き上げた**。OneDrive 上（`/mnt/d`、DrvFs）の `git status --porcelain` と `git log --name-only` が 15 秒に収まらず、直近の実行 3 回すべてがタイムアウトで打ち切られ、ドキュメント同期の確認が一度も機能していなかった
 
 **リファクタリング**
+- Issue #2158 **4,300 行を超えていた `MainViewModel` を、挙動を変えずに責務ごとの partial ファイルへ分割した（第 1 段）**
+  - 本体 `ViewModels/MainViewModel.cs`（フィールド・コンストラクタ・状態遷移・タイムアウト・終了）に骨格を残し、起動・カードタッチ・返却後処理・未登録カード・履歴パネル・履歴編集・履歴統合・ダイアログ起動・DEBUG 仮想タッチを `ViewModels/Main/MainViewModel.*.cs` の 9 ファイルへ移した。コードの移動のみで、ロジックの変更は含まない（`#if DEBUG` は `MainViewModel.Debug.cs` に閉じた）
+  - `MainViewModel.cs` をファイル名で読んでいた静的検査 8 件は、分割後に走査対象を失って緑のまま空振りする形だったため、テスト側に `MainViewModelSourceFiles`（`partial class MainViewModel` の宣言から構成ファイルを導出）を置いて追随させた
+  - 撮影対応表（`docs/screenshots/screenshot-sources.json`）に `ViewModels/Main/MainViewModel.*.cs` を併記し、`MainViewModel` を載せた画像が構成ファイルすべてを覆うことを静的検査で固定した
+  - 子 ViewModel への抽出（第 2 段）は Issue #2159 で扱う
+  - 追随の過程で、返却フローのダイアログ検査が名前の前方一致する別メソッドの本体を引き得た点（連結で宣言順が変わると顕在化する）を是正した
+  - テスト: 単体 8,225 → 8,244（+19）・合計 8,297 → 8,316
 - Issue #2115 **GitHub が読まない場所に残っていた設定ファイルの複製 `ICCardManager/.github/workflows/release.yml` と `ICCardManager/.github/dependabot.yml` を削除した**（`ICCardManager/.github/` ごと無くなった）。GitHub Actions も Dependabot もリポジトリ直下の `.github/` しか読まず、どちらも実物と内容が異なっていた（release.yml は別の版、dependabot.yml は `directory` の指定が違い、実物にある運用方針コメントが無い）。#2099 では `ci.yml` の複製だけを削除していた
   - 静的検査 `CiWorkflowConventionTests` の「ci.yml の複製が無いこと」を「ソリューション配下に `.github` ディレクトリ自体が無いこと」へ広げた。ファイル名で探していたため、同じ場所の release.yml / dependabot.yml を検出できていなかった。削除前のツリーに当てて赤になることを実測した
   - 検出ロジックを一時ディレクトリの既知の入力で固定するテストを 1 件足した（入れ子の `.github` を拾い、`node_modules`・`bin`・`obj`・`TestResults` は除外する。設計書の図の生成に使う mermaid-cli の `node_modules` には、パッケージ自身の `.github` が開発機で 20 個以上ある）

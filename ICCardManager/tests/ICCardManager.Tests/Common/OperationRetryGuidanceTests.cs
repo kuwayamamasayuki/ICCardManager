@@ -87,7 +87,7 @@ public class OperationRetryGuidanceConventionTests
 
     [Theory]
     [InlineData("Services/LendingService.cs")]
-    [InlineData("ViewModels/MainViewModel.cs")]
+    [InlineData("ViewModels/Main/MainViewModel.CardTouch.cs")]
     public void 貸出返却の失敗の案内がOperationRetryGuidanceへ委譲していること(string relativePath)
     {
         var file = ProductionSourceFiles.CSharp.Single(f =>
