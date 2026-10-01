@@ -58,6 +58,19 @@ namespace ICCardManager
         private SingleInstanceGuard _singleInstanceGuard;
 
         /// <summary>
+        /// Issue #2160: 起動時に <see cref="InitializeDatabaseAsync"/> が 1 回だけ読んだ設定。
+        /// <see cref="SummaryGenerator"/> の DI ファクトリと <see cref="ApplySavedSettings"/> が共有する。
+        /// </summary>
+        /// <remarks>
+        /// DI ファクトリは同期関数なので DB を await できない。以前はファクトリの中で
+        /// <c>Task.Run(...).GetAwaiter().GetResult()</c> により UI スレッドを止めて読んでいたが、
+        /// 既に async の <see cref="InitializeDatabaseAsync"/> で先に読み、ファクトリは読み済みの値を使う。
+        /// null のまま解決された場合に既定値へ倒すと、企業会計部局の組織でも部署種別が
+        /// 市長事務部局に固定される（#1955）ため、ファクトリは例外にする。
+        /// </remarks>
+        private AppSettings _startupSettings;
+
+        /// <summary>
         /// 現在のアプリケーションインスタンス
         /// </summary>
         public static new App Current => (App)Application.Current;
@@ -505,22 +518,18 @@ namespace ICCardManager
             services.AddSingleton<IValidationService, ValidationService>();
             services.AddSingleton<SummaryGenerator>(sp =>
             {
-                // Issue #1281: この DI 初期化は UI スレッド（OnStartup）で実行されるため、
-                // SettingsRepository.GetAppSettings() 内の DbContext.LeaseConnection() が
-                // UI スレッド検出で例外を投げる。Task.Run でバックグラウンドスレッドに
-                // オフロードしてから取得する。
-                var repo = sp.GetRequiredService<ISettingsRepository>();
-                var settings = Task.Run(() => repo.GetAppSettings()).GetAwaiter().GetResult();
+                // Issue #2160: 部署種別と同一視グループ（#1905）は InitializeDatabaseAsync が
+                // 非同期で読み済み。同期関数のファクトリで DB を読むと Task を同期で待つ形になり、
+                // 「いつ・何回読むか」も解決の順序に依存する
+                if (_startupSettings == null)
+                {
+                    // 既定値へ倒さない（#1955: 企業会計部局でも市長事務部局の摘要で台帳へ書き込まれる）
+                    throw new InvalidOperationException(
+                        "SummaryGenerator が起動時の設定読み込み（InitializeDatabaseAsync）より前に解決されました。");
+                }
+
                 var orgOptions = sp.GetRequiredService<IOptions<OrganizationOptions>>().Value;
-
-                // Issue #1905: 同一視グループはシステム管理画面から編集でき DB が正。
-                // SummaryGenerator の生成前に上書きすることで、「起動直後の返却だけ
-                // 古いグループで摘要が作られる」窓を作らない
-                var groupService = sp.GetRequiredService<ITransferStationGroupService>();
-                orgOptions.SummaryRules.TransferStationGroups =
-                    Task.Run(() => groupService.GetGroupsAsync()).GetAwaiter().GetResult();
-
-                return new SummaryGenerator(settings.DepartmentType, orgOptions);
+                return new SummaryGenerator(_startupSettings.DepartmentType, orgOptions);
             });
             services.AddSingleton<ITransferStationGroupService>(sp => new TransferStationGroupService(
                 sp.GetRequiredService<ISettingsRepository>(),
@@ -760,13 +769,28 @@ namespace ICCardManager
     #endif
 
             // 設定ファイルからの設定を適用（Issue #742）
-            ApplyDepartmentConfigFromFile();
-            ApplyReportOutputConfigFromFile();
+            await ApplyDepartmentConfigFromFileAsync();
+            await ApplyReportOutputConfigFromFileAsync();
+
+            // Issue #2160: 起動時の設定読みはここで 1 回だけ行い、SummaryGenerator の DI ファクトリと
+            // ApplySavedSettings で共有する。部署種別ファイルの適用（上）より後に読むこと
+            // （先に読むとファイルで指定した部署種別が摘要に反映されない）
+            var settingsRepository = ServiceProvider.GetRequiredService<ISettingsRepository>();
+            _startupSettings = await settingsRepository.GetAppSettingsAsync();
+
+            // Issue #1905: 同一視グループはシステム管理画面から編集でき DB が正。
+            // SummaryGenerator の生成前に上書きすることで、「起動直後の返却だけ
+            // 古いグループで摘要が作られる」窓を作らない。
+            // TransferStationGroupService は構築時に appsettings.json 由来の初期値を複製するため、
+            // 上書きより先に解決しておく
+            var groupService = ServiceProvider.GetRequiredService<ITransferStationGroupService>();
+            var orgOptions = ServiceProvider.GetRequiredService<IOptions<OrganizationOptions>>().Value;
+            orgOptions.SummaryRules.TransferStationGroups = await groupService.GetGroupsAsync();
 
             // 保存済み設定を適用
-            ApplySavedSettings();
+            ApplySavedSettings(_startupSettings);
 
-            // 起動時処理
+            // 起動時処理（DB へ書くのは last_* キーのみで、上で読んだ部署種別・同一視グループは変わらない）
             await PerformStartupTasksAsync();
         }
 
@@ -781,7 +805,7 @@ namespace ICCardManager
         /// ファイルが存在しない場合（手動インストール等）は department_type 設定が DB に存在せず、
         /// SettingsRepository.ParseDepartmentType の既定値（市長事務部局 / mayor_office）が使用される。
         /// </remarks>
-        private void ApplyDepartmentConfigFromFile()
+        private async Task ApplyDepartmentConfigFromFileAsync()
         {
             try
             {
@@ -792,11 +816,11 @@ namespace ICCardManager
                     return;
                 }
 
+                // Issue #2160: UI スレッドを同期で止めずに await する（View 層なので ConfigureAwait は付けない）
                 var settingsRepository = ServiceProvider.GetRequiredService<ISettingsRepository>();
-                Task.Run(() => settingsRepository.SetAsync(
+                await settingsRepository.SetAsync(
                     SettingsRepository.KeyDepartmentType,
-                    departmentValue
-                )).GetAwaiter().GetResult();
+                    departmentValue);
 
                 // キャッシュを無効化して再取得を強制
                 var cacheService = ServiceProvider.GetRequiredService<ICacheService>();
@@ -821,7 +845,7 @@ namespace ICCardManager
         /// 起動時にこのファイルを読み取り、DB設定に適用する。
         /// ファイルが存在しない場合は何もしない。
         /// </remarks>
-        private void ApplyReportOutputConfigFromFile()
+        private async Task ApplyReportOutputConfigFromFileAsync()
         {
             try
             {
@@ -832,11 +856,11 @@ namespace ICCardManager
                     return;
                 }
 
+                // Issue #2160: UI スレッドを同期で止めずに await する（View 層なので ConfigureAwait は付けない）
                 var settingsRepository = ServiceProvider.GetRequiredService<ISettingsRepository>();
-                Task.Run(() => settingsRepository.SetAsync(
+                await settingsRepository.SetAsync(
                     SettingsRepository.KeyReportOutputFolder,
-                    outputFolder
-                )).GetAwaiter().GetResult();
+                    outputFolder);
 
                 // キャッシュを無効化して再取得を強制
                 var cacheService = ServiceProvider.GetRequiredService<ICacheService>();
@@ -894,16 +918,14 @@ namespace ICCardManager
         /// <summary>
         /// 保存済み設定を適用
         /// </summary>
-        private void ApplySavedSettings()
+        /// <param name="settings">
+        /// <see cref="InitializeDatabaseAsync"/> が読んだ起動時の設定（Issue #2160。起動時の設定読みを 1 回にするため、
+        /// ここでは DB を読まない）
+        /// </param>
+        private void ApplySavedSettings(AppSettings settings)
         {
             try
             {
-                var settingsRepository = ServiceProvider.GetRequiredService<ISettingsRepository>();
-                // Issue #1281: UI スレッドから DbContext.LeaseConnection() を直接呼ぶと
-                // 例外になるため、Task.Run でバックグラウンドスレッドにオフロードしてから
-                // 同期取得する。起動時は競合する非同期操作がないため安全。
-                var settings = Task.Run(() => settingsRepository.GetAppSettings()).GetAwaiter().GetResult();
-
                 // 文字サイズを適用
                 ApplyFontSize(settings.FontSize);
 

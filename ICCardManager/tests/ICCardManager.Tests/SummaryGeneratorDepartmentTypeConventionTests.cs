@@ -191,6 +191,8 @@ public class SummaryGeneratorDepartmentTypeConventionTests
     [InlineData("var g = new SummaryGenerator(settings.DepartmentType);", false)]
     [InlineData("return new SummaryGenerator(settings.DepartmentType, orgOptions);", false)]
     [InlineData("SummaryGenerator g = new(settings.DepartmentType);", false)]
+    // App.xaml.cs の DI ファクトリ: 起動時に読み済みの設定をフィールドから渡す形（Issue #2160）
+    [InlineData("return new SummaryGenerator(_startupSettings.DepartmentType, orgOptions);", false)]
     // 違反: 引数なし（本 Issue の欠陥そのもの）
     [InlineData("var g = new SummaryGenerator();", true)]
     [InlineData("SummaryGenerator g = new();", true)]
