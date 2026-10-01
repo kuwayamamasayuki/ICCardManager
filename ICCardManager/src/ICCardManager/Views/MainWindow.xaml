@@ -273,7 +273,7 @@
                 <!-- 初期画面（使い方ガイド） -->
                 <Border Padding="40"
                         Background="{DynamicResource WaitingBackgroundBrush}"
-                        Visibility="{Binding IsHistoryVisible, Converter={StaticResource BoolToVisibilityConverter}, ConverterParameter=invert}"
+                        Visibility="{Binding History.IsHistoryVisible, Converter={StaticResource BoolToVisibilityConverter}, ConverterParameter=invert}"
                         AutomationProperties.Name="使い方ガイド"
                         AutomationProperties.HelpText="初期画面の使い方ガイドです。職員証を ICカードリーダー にタッチすると操作を開始できます。この領域は履歴表示時には非表示になります。">
                     <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center" MaxWidth="600">
@@ -358,7 +358,10 @@
                 </Border>
 
                 <!-- 履歴表示エリア -->
+                <!-- Issue #2159: 履歴パネルは子の ViewModel（MainViewModel.History）。DataContext をここで切り替えるため、
+                     このエリアの内側の束縛（自身の Visibility を含む）はすべて HistoryPanelViewModel のメンバーを指す -->
                 <Border Padding="15"
+                        DataContext="{Binding History}"
                         Background="{DynamicResource SurfaceBrush}"
                         Visibility="{Binding IsHistoryVisible, Converter={StaticResource BoolToVisibilityConverter}}"
                         AutomationProperties.Name="利用履歴表示エリア"

@@ -11,7 +11,7 @@ namespace ICCardManager.UITests.Infrastructure
     /// <remarks>
     /// <para>
     /// 職員 2 名・交通系ICカード 3 枚（通常／貸出中／残額不足）と、通常カードの当月分の利用履歴を作る。
-    /// 履歴画面は既定で「今月」を表示する（<c>MainViewModel.ShowHistoryAsync</c>）ため、
+    /// 履歴画面は既定で「今月」を表示する（<c>HistoryPanelViewModel.ShowHistoryAsync</c>）ため、
     /// 利用日は当月に収める。残高チェーン（前行の残額 ＋ 受入 − 払出 ＝ 当行の残額）を崩すと
     /// 不整合警告が写り込むので、残額は投入時に順に計算する。
     /// </para>

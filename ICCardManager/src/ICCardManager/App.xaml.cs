@@ -600,6 +600,8 @@ namespace ICCardManager
 
             // ViewModels
             services.AddTransient<MainViewModel>();
+            // Issue #2159: メイン画面の履歴パネル（MainViewModel のコンストラクタへ注入され、MainViewModel をホストにする）
+            services.AddTransient<HistoryPanelViewModel>();
             services.AddTransient<CardManageViewModel>();
             services.AddTransient<StaffManageViewModel>();
             services.AddTransient<SettingsViewModel>();

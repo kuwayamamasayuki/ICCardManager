@@ -117,7 +117,7 @@ public partial class MainViewModel
             // Issue #1907: 前の職員の返却確認（自動表示した履歴）は、次の職員証タッチ＝次の操作の開始で閉じる。
             // 職員が操作していた履歴は閉じない。#186（メイン画面を変更しない）の例外だが、
             // 閉じるのは本システム自身が自動で開いたパネルに限る。
-            CloseReturnHistoryReviewIfUntouched();
+            History.CloseReturnHistoryReviewIfUntouched();
 
             // Issue #2141: 前の職員宛てのエラー・記録済みの案内（自動では消えない通知）も、次の操作の開始で閉じる
             _toastNotificationService.DismissPersistentNotifications();
@@ -143,8 +143,7 @@ public partial class MainViewModel
             await CheckCardBalanceMismatchAsync(card);
 
             // 履歴表示画面を開く
-            _balanceInconsistencies.Clear();
-            await ShowHistoryAsync(card);
+            await History.ShowCardHistoryAsync(card);
             return;
         }
 
@@ -361,12 +360,12 @@ public partial class MainViewModel
                 await RefreshDashboardAsync();
 
                 // 履歴が開いていれば再読み込み（Issue #526）
-                if (IsHistoryVisible)
+                if (History.IsHistoryVisible)
                 {
                     // Issue #1923: 貸出は「カードをタッチした職員」の操作であり、履歴画面で行を選んでいる職員の操作ではない。
                     // 本システムは 1 台のカードリーダーを複数職員で共有するため、
                     // 定期リフレッシュ（RefreshSharedDataAsync）と同じ理由で統合対象のチェックを引き継ぐ。
-                    await LoadHistoryLedgersAsync(preserveCheckedRows: true);
+                    await History.LoadHistoryLedgersAsync(preserveCheckedRows: true);
                 }
             }
             else

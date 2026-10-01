@@ -66,3 +66,25 @@ internal static class MainViewModelSourceFiles
         return matches[0];
     }
 }
+
+/// <summary>
+/// 履歴パネル <c>HistoryPanelViewModel</c> を構成するファイル群（Issue #2159）。
+/// </summary>
+/// <remarks>
+/// 履歴パネルは <c>MainViewModel</c> の partial ファイルから子の ViewModel へ抽出された。抽出前は
+/// <see cref="MainViewModelSourceFiles"/> の走査範囲に入っていたため、<c>MainViewModel</c> を読む検査のうち
+/// 履歴パネルの記述も見るべきもの（トースト位置の断定表現・撮影対応表）は、こちらも併せて走査する。
+/// 構成ファイルは <see cref="MainViewModelSourceFiles"/> と同じく宣言から導出する。
+/// </remarks>
+internal static class HistoryPanelViewModelSourceFiles
+{
+    /// <summary><c>partial class HistoryPanelViewModel</c> の宣言（コメント・文字列を除いた本文で照合する）。</summary>
+    internal static readonly Regex PartialClassDeclarationPattern =
+        new Regex(@"\bpartial\s+class\s+HistoryPanelViewModel\b", RegexOptions.Compiled);
+
+    /// <summary><c>HistoryPanelViewModel</c> を構成する本番ソース（相対パスの順）。</summary>
+    public static IReadOnlyList<ProductionSourceFiles.SourceFile> All
+        => ProductionSourceFiles.CSharp
+            .Where(f => PartialClassDeclarationPattern.IsMatch(f.CodeOnly))
+            .ToList();
+}

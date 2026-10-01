@@ -109,6 +109,48 @@ namespace ICCardManager.Tests.Tools
                 "\"ICCardManager/src/ICCardManager/ViewModels/Main/MainViewModel.*.cs\" を併記すること");
         }
 
+        /// <summary>
+        /// メイン画面を写す画像は、履歴パネル（<c>HistoryPanelViewModel</c>）を構成するファイルすべてを覆うこと（Issue #2159）。
+        /// </summary>
+        /// <remarks>
+        /// 履歴パネルは <c>MainViewModel</c> の partial ファイル（<c>ViewModels/Main/MainViewModel.*.cs</c>）から
+        /// 子の ViewModel へ抽出された。抽出前は <c>MainViewModel.*.cs</c> の glob が覆っていたため、
+        /// 併記しないと履歴パネルの見た目を変える変更で撮り直しが検知されなくなる（抽出によって静かに検知範囲が縮む）。
+        /// 対象の画像は「<c>MainWindow.xaml</c> を載せている」こと、構成ファイルは <c>partial class HistoryPanelViewModel</c> の
+        /// 宣言から導出する（<see cref="HistoryPanelViewModelSourceFiles"/>。ファイル名で列挙しない。#1786）。
+        /// </remarks>
+        [Fact]
+        public void 対応表_メイン画面を載せた画像は履歴パネルの構成ファイルすべてを覆う()
+        {
+            using var doc = LoadMapping();
+            var historyPanelFiles = HistoryPanelViewModelSourceFiles.All
+                .Select(f => f.FullPath.Substring(RepoRoot.Length)
+                    .TrimStart(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)
+                    .Replace(Path.DirectorySeparatorChar, '/'))
+                .ToList();
+            historyPanelFiles.Should().HaveCountGreaterThan(1, "HistoryPanelViewModel は本体と partial ファイルに分かれている");
+
+            var checkedImages = 0;
+            var problems = new List<string>();
+            foreach (var screenshot in doc.RootElement.GetProperty("screenshots").EnumerateArray())
+            {
+                var sources = screenshot.GetProperty("sources").EnumerateArray().Select(e => e.GetString()!).ToList();
+                if (!sources.Contains("ICCardManager/src/ICCardManager/Views/MainWindow.xaml")) continue;
+
+                checkedImages++;
+                var regexes = sources.Select(GlobToRegex).ToList();
+                problems.AddRange(historyPanelFiles
+                    .Where(f => !regexes.Any(r => r.IsMatch(f)))
+                    .Select(f => $"{screenshot.GetProperty("name").GetString()}: {f}"));
+            }
+
+            checkedImages.Should().BeGreaterThan(0, "メイン画面を載せた画像が 1 つも無いなら、本テストの前提を書き直す");
+            problems.Should().BeEmpty(
+                "メイン画面の画像は履歴パネルも写す。" +
+                "\"ICCardManager/src/ICCardManager/ViewModels/HistoryPanelViewModel.cs\" と " +
+                "\"ICCardManager/src/ICCardManager/ViewModels/HistoryPanel/HistoryPanelViewModel.*.cs\" を併記すること");
+        }
+
         [Fact]
         public void 対応表_参照するパスはすべて定義されている()
         {

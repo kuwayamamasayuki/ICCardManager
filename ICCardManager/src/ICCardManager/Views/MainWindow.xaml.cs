@@ -40,6 +40,8 @@ namespace ICCardManager.Views
             Loaded += MainWindow_Loaded;
             Closing += MainWindow_Closing;
             _viewModel.PropertyChanged += ViewModel_PropertyChanged;
+            // Issue #2159: 返却確認（IsReturnHistoryReview）は子の履歴パネルが持つ
+            _viewModel.History.PropertyChanged += HistoryPanel_PropertyChanged;
         }
 
         /// <summary>
@@ -96,6 +98,14 @@ namespace ICCardManager.Views
         /// <summary>終了確認を表示している間 true（<see cref="ConfirmUserCloseHook"/> の再入ガード）</summary>
         private bool _isConfirmingExit;
 
+        private void ViewModel_PropertyChanged(object sender, System.ComponentModel.PropertyChangedEventArgs e)
+        {
+            if (ShouldAnnounceNextAction(e.PropertyName))
+            {
+                LiveRegionAnnouncer.Announce(NextActionMessageText, "次の操作ガイドのスクリーンリーダーへの読み上げ");
+            }
+        }
+
         /// <summary>
         /// Issue #1907: 返却確認の履歴が開いたら、今回の返却で記録された最初の行までスクロールする。
         /// </summary>
@@ -104,20 +114,15 @@ namespace ICCardManager.Views
         /// 1 ページに収まる場合でも DataGrid は先頭を表示するため、スクロールしないと ✔ の行が画面外に残る。
         /// ViewModel は「今回の行」を知っているが表示位置は知らない（View の責務）。
         /// </remarks>
-        private void ViewModel_PropertyChanged(object sender, System.ComponentModel.PropertyChangedEventArgs e)
+        private void HistoryPanel_PropertyChanged(object sender, System.ComponentModel.PropertyChangedEventArgs e)
         {
-            if (ShouldAnnounceNextAction(e.PropertyName))
-            {
-                LiveRegionAnnouncer.Announce(NextActionMessageText, "次の操作ガイドのスクリーンリーダーへの読み上げ");
-                return;
-            }
-
-            if (e.PropertyName != nameof(MainViewModel.IsReturnHistoryReview) || !_viewModel.IsReturnHistoryReview)
+            var history = _viewModel.History;
+            if (e.PropertyName != nameof(HistoryPanelViewModel.IsReturnHistoryReview) || !history.IsReturnHistoryReview)
             {
                 return;
             }
 
-            var firstRecorded = _viewModel.HistoryLedgers.FirstOrDefault(d => d.IsRecentlyRecorded);
+            var firstRecorded = history.HistoryLedgers.FirstOrDefault(d => d.IsRecentlyRecorded);
             if (firstRecorded != null)
             {
                 HistoryDataGrid.ScrollIntoView(firstRecorded);
@@ -163,7 +168,7 @@ namespace ICCardManager.Views
         /// </remarks>
         private void HistoryArea_PreviewInput(object sender, InputEventArgs e)
         {
-            _viewModel.MarkReturnHistoryReviewTouched();
+            _viewModel.History.MarkReturnHistoryReviewTouched();
         }
 
         /// <summary>
@@ -177,13 +182,13 @@ namespace ICCardManager.Views
         private void HistoryPeriodDisplay_MouseLeftButtonUp(object sender, MouseButtonEventArgs e)
         {
             HistoryMonthSelectorPopup.PlacementTarget = HistoryPeriodDisplayBorder;
-            _viewModel.HistoryOpenMonthSelector();
+            _viewModel.History.HistoryOpenMonthSelector();
         }
 
         private void HistoryOtherMonthButton_Click(object sender, RoutedEventArgs e)
         {
             HistoryMonthSelectorPopup.PlacementTarget = HistoryOtherMonthButton;
-            _viewModel.HistoryOpenMonthSelector();
+            _viewModel.History.HistoryOpenMonthSelector();
         }
 
         private async void MainWindow_Closing(object sender, System.ComponentModel.CancelEventArgs e)
