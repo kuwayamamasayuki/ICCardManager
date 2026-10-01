@@ -50,6 +50,14 @@
 - **`<Nullable>enable</Nullable>` を外して黙らせない**。Null 許容系の警告が一括で消え、個別に理由を書く規約ごと無効化される。MSBuild は後勝ち評価のため、既存行を残したまま後ろへ `disable` を足す形も同じ結果になる
 - ビルド警告を伴う変更をしたら、**Release / Debug 双方**でソリューションビルドし 0 警告を実測する（`"/mnt/c/Program Files/dotnet/dotnet.exe" build ICCardManager/ICCardManager.sln -c Release`）
 
+### コード整形は CI で検査される（Issue #2161）
+
+CI の code-quality ジョブは `dotnet format --verify-no-changes` の違反で fail する。.cs を書いたら、コミット前に `ICCardManager` ディレクトリで `dotnet format --verify-no-changes`（WSL2 では `"/mnt/c/Program Files/dotnet/dotnet.exe"`）を実行し、違反があれば `dotnet format` で直す。
+
+- **.cs は CRLF・BOM なしの UTF-8**。WSL のツール（Edit / Write・python のテキストモード書き戻し）は LF の行を混ぜやすく、手元の検査で ENDOFLINE になる（CI は `.gitattributes` の `*.cs text eol=crlf` で CRLF に展開されるが、手元の検査は作業ツリーをそのまま読む）
+- private の `const` / `static readonly` は PascalCase、その他の private フィールドと `[ObservableProperty]` のフィールドは `_camelCase`。1 文の `if` 等にも波括弧
+- 整形検証ステップは許可形（1 行の `dotnet format`・許可したオプションのみ）で `CiWorkflowConventionTests` が固定している。ステップを書き換えるときは同テストを先に読む
+
 ### ガードを書くときは「守りたい性質」ではなく「その性質を破れる全経路」を列挙する
 
 #1786 の初版は csproj の `<NoWarn>` だけを検査しており、**4 テストすべてが緑のまま規約を破れる経路が 5 通り**残っていた。ガード系のコードは経路の網羅で設計する。
