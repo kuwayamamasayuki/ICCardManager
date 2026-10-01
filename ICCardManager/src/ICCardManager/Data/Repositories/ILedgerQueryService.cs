@@ -155,6 +155,12 @@ namespace ICCardManager.Data.Repositories
         /// <summary>
         /// 指定期間の月別 × 貸出職員別の利用額を集計して取得（Issue #1692）
         /// </summary>
+        /// <remarks>
+        /// 貸出中レコード・繰越レコードに加え、払戻台帳（払い戻しで残高全額を払出に計上した行）も除外する
+        /// （Issue #2157）。払い戻しは職員の支出ではなく、残すと「（職員名なし）」系列に残高全額が積まれる。
+        /// 判定は摘要ではなく行の形で行う。<see cref="GetUsageStatsByCardAsync"/> はこの除外を行わない
+        /// （稼働状況は払戻済カードをカード単位で除外しているため）。
+        /// </remarks>
         Task<IReadOnlyList<MonthlyUsageRow>> GetMonthlyUsageByLenderAsync(DateTime fromDate, DateTime toDate);
 
         /// <summary>

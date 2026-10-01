@@ -930,6 +930,45 @@ ORDER BY l.card_idm ASC, l.date ASC, l.id ASC";
             @"AND summary <> '新規購入' AND summary NOT LIKE @midYearCarryoverPattern ESCAPE '\'";
 
         /// <summary>
+        /// 職員別の利用額（<see cref="GetMonthlyUsageByLenderAsync"/>）から除外する「払戻台帳」の条件（Issue #2157）。
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// 払い戻しの台帳行（<c>LendingService.CreateRefundLedger</c>）は残高全額を払出に計上するが、
+        /// 職員の支出ではない（カードの残額を返金した記録）。貸出者 IDm も氏名も持たないため、集計に残すと
+        /// 管理者ダッシュボードの月別利用額グラフで「（職員名なし）」系列に残高全額のスパイクとして積まれる。
+        /// </para>
+        /// <para>
+        /// <b>判定は摘要ではなく行の形で行う。</b>摘要「払戻しによる払出」は組織設定
+        /// （<c>SummaryText.RefundSummary</c>）から生成した文字列で、保存済みの行を現在の設定値で判定すると、
+        /// 設定を変えた後は変更前の払戻台帳を取りこぼす（Issue #2044 と同じ）。
+        /// <c>ic_card.refunded_at</c> と台帳の日付の一致も使えない。両者が同じ値になったのは Issue #2151 以降で、
+        /// それより前は <c>refunded_at</c> を DB の現在時刻で書いていたため既存のデータでは食い違う。
+        /// </para>
+        /// <para>
+        /// 形は「払戻済カードの行で、貸出者 IDm・氏名がともに無く、受入 0・残額 0」。
+        /// 通常の利用行は返却処理が貸出者 IDm と氏名を記録するため、この形に当たらない。
+        /// 例外は利用者が氏名を空にした行（行編集で職員を未選択にした・氏名が空欄の CSV を取り込んだ）で、
+        /// 残額 0 まで使い切ったその行のカードを後で払い戻すと除外される。条件が重ならないと起きないため許容する。
+        /// 貸出者 IDm は <c>staff</c> への外部キーで空文字を保存できないため NULL だけを見る。
+        /// 氏名は外部キーを持たず CSV の取り込み等で空文字になり得るため、NULL と空文字の両方を「無い」とする。
+        /// <c>income</c> は NULL を許す列なので <c>COALESCE</c> で包む（NULL のままだと <c>NOT (NULL)</c> で行が落ちる）。生成側との対応は <c>LedgerRepositoryAggregationTests</c> が
+        /// <c>CreateRefundLedger</c> の生成結果で固定し、条件を 1 つずつ外した行が集計に残ることも併せて表明している。
+        /// </para>
+        /// <para>
+        /// 稼働状況（<see cref="GetUsageStatsByCardAsync"/>）ではこの除外を行わない。稼働状況は払戻済カードを
+        /// カード単位で母集団から外している（<c>AdminDashboardService.FilterActiveCards</c>）ため、
+        /// 払戻台帳が稼働率・利用額に現れることはない。月別利用額は「職員ごとの支出」でありカードの状態を問わない
+        /// （後日払い戻したカードでも、その職員が使った額は事実）ので、行の単位で払戻台帳だけを外す。
+        /// </para>
+        /// </remarks>
+        private const string ExcludeRefundLedgerCondition =
+            @"AND NOT (lender_idm IS NULL
+           AND (staff_name IS NULL OR staff_name = '')
+           AND COALESCE(income, 0) = 0 AND balance = 0
+           AND EXISTS (SELECT 1 FROM ic_card c WHERE c.card_idm = ledger.card_idm AND c.is_refunded = 1))";
+
+        /// <summary>
         /// 繰越摘要の LIKE パターン（組織設定 <c>MidYearCarryoverFormat</c> 由来、Issue #1749）を
         /// コマンドへバインドする。
         /// </summary>
@@ -1049,6 +1088,7 @@ FROM ledger
 WHERE date BETWEEN @fromDate AND @toDate
   AND is_lent_record = 0
   {ExcludeCarryoverCondition}
+  {ExcludeRefundLedgerCondition}
 GROUP BY ym, lender, staff
 ORDER BY ym, staff";
 
