@@ -7,8 +7,8 @@
 # Windows 主戦場ファイルの現状 CRLF を保持するため。lock file / JSON / YAML /
 # dotfile / .sh のみを明示的に LF で正規化する。
 #
-# Windows 主戦場ファイル (.cs / .xaml / .csproj 等) の改行統一方針は
-# 将来別 Issue で議論する。
+# Windows 主戦場ファイルのうち .cs は Issue #2161 で下記のとおり統一した。
+# .xaml / .csproj 等の改行統一方針は将来別 Issue で議論する。
 
 # --- チェックインで強制 LF に正規化するファイル群 ---
 
@@ -29,6 +29,13 @@
 
 # シェルスクリプト（.claude/hooks 配下など）
 *.sh           text eol=lf
+
+# --- 作業ツリーで CRLF に揃えるファイル群 ---
+
+# C# ソース（Issue #2161）。index は LF、作業ツリーは OS を問わず CRLF。
+# ICCardManager/.editorconfig の end_of_line = crlf を CI の dotnet format が検査するため、
+# 作業ツリーの改行を Windows ランナーの core.autocrlf の既定値や WSL の設定に依存させない。
+*.cs           text eol=crlf
 
 # --- バイナリ（text 変換を明示的に禁止） ---
 *.db           binary
