@@ -801,7 +801,7 @@ public class LedgerRepositoryTests : IDisposable
     /// ヘッダー残高（GetLatestBeforeDateAsync）が同じ値になることを確認
     /// </summary>
     /// <remarks>
-    /// MainViewModel.LoadHistoryLedgersAsync はグリッドを ReorderByBalanceChain で
+    /// HistoryPanelViewModel.LoadHistoryLedgersAsync はグリッドを ReorderByBalanceChain で
     /// 並べ替える一方、ヘッダーの HistoryCurrentBalance は GetLatestBeforeDateAsync を使う。
     /// 修正前は同一画面内でグリッド最終行とヘッダーの残高が食い違っていた（故障シナリオ (a)）。
     /// 2つの実経路を同じ DB に接続して一致を表明する。
@@ -822,7 +822,7 @@ public class LedgerRepositoryTests : IDisposable
         usage.Balance = 1456;
         await _repository.InsertAsync(usage);
 
-        // Act - グリッド側: MainViewModel.LoadHistoryLedgersAsync と同じ経路
+        // Act - グリッド側: HistoryPanelViewModel.LoadHistoryLedgersAsync と同じ経路
         var (rawLedgers, _) = await _repository.GetPagedAsync(
             TestCardIdm, new DateTime(2026, 3, 1), new DateTime(2026, 3, 31), 1, 50);
         var gridLastBalance = LedgerOrderHelper.ReorderByBalanceChain(rawLedgers).Last().Balance;

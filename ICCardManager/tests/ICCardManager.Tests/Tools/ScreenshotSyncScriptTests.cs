@@ -94,7 +94,7 @@ namespace ICCardManager.Tests.Tools
         [Fact]
         public void Files_MainViewModelのpartialファイル変更_本体と同じ画像が影響を受ける()
         {
-            var result = RunScript("-Json", "-Files", "ICCardManager/src/ICCardManager/ViewModels/Main/MainViewModel.History.cs");
+            var result = RunScript("-Json", "-Files", "ICCardManager/src/ICCardManager/ViewModels/Main/MainViewModel.CardTouch.cs");
 
             result.ExitCode.Should().Be(0, result.StdErr);
             AffectedNames(result).Should().Equal("main.png");

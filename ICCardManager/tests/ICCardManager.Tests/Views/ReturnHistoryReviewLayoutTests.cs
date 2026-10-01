@@ -183,7 +183,7 @@ public class ReturnHistoryReviewLayoutTests
         var code = ReadMainWindowCode();
 
         // 一覧は日付昇順で今回の行は末尾。ページは ViewModel が合わせるが、1 ページ内の表示位置は View の責務
-        code.Should().Contain("nameof(MainViewModel.IsReturnHistoryReview)");
+        code.Should().Contain("nameof(HistoryPanelViewModel.IsReturnHistoryReview)");
         code.Should().Contain("HistoryDataGrid.ScrollIntoView(");
         code.Should().Contain("IsRecentlyRecorded");
     }

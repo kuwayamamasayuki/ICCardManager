@@ -37,7 +37,7 @@
 |----------|----------|------|
 | staff | 論理削除 | 履歴参照時に氏名を表示するため |
 | ic_card | 論理削除 | 履歴参照時にカード情報を表示するため |
-| ledger | 物理削除（6年後自動 ＋ 履歴画面からの個別削除） | 監査対応の保存期間経過後は不要。加えて、誤登録の訂正用に履歴画面から個別行を**職員認証＋確認のうえ物理削除**でき（`MainViewModel.DeleteLedgerRow` → `LedgerRepository.DeleteAsync`、Issue #635）、その操作は `operation_log` に記録される |
+| ledger | 物理削除（6年後自動 ＋ 履歴画面からの個別削除） | 監査対応の保存期間経過後は不要。加えて、誤登録の訂正用に履歴画面から個別行を**職員認証＋確認のうえ物理削除**でき（`HistoryPanelViewModel.DeleteLedgerRow` → `LedgerRepository.DeleteAsync`、Issue #635）、その操作は `operation_log` に記録される |
 | operation_log | 物理削除（6年後自動） | ledgerと同じ保存期間経過後に削除 |
 
 ## ビルド警告は「抑制」ではなく「是正」で消す（Issue #1786）

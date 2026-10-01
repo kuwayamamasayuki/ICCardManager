@@ -97,23 +97,18 @@ public enum DashboardSortOrder
 /// 常にICカード待ち状態から開始し、職員証タッチを省略できます。
 /// </para>
 /// </remarks>
-public partial class MainViewModel : ViewModelBase
+public partial class MainViewModel : ViewModelBase, IHistoryPanelHost
 {
     private readonly ICardReader _cardReader;
     private readonly ISoundPlayer _soundPlayer;
     private readonly IStaffRepository _staffRepository;
     private readonly ICardRepository _cardRepository;
     private readonly ILedgerRepository _ledgerRepository;
-    private readonly DbContext _dbContext;
     private readonly ISettingsRepository _settingsRepository;
     private readonly LendingService _lendingService;
     private readonly IToastNotificationService _toastNotificationService;
-    private readonly IStaffAuthService _staffAuthService;
-    private readonly LedgerMergeService _ledgerMergeService;
     private readonly IMessenger _messenger;
     private readonly INavigationService _navigationService;
-    private readonly OperationLogger _operationLogger;
-    private readonly LedgerConsistencyChecker _ledgerConsistencyChecker;
     private readonly ITimerFactory _timerFactory;
     private readonly IDispatcherService _dispatcherService;
     private readonly IDatabaseInfo _databaseInfo;
@@ -124,16 +119,6 @@ public partial class MainViewModel : ViewModelBase
     private readonly ISafeFileLauncher _safeFileLauncher;
     private readonly ILogger<MainViewModel>? _logger;
 
-    /// <summary>
-    /// Issue #1814: 履歴ページ番号を 1 回の読み込みでクランプできる上限回数。
-    /// 数えるのは「クランプした回数」であって再取得回数ではない。
-    /// クランプは通常 1 回で収束する（総件数から求めた有効ページで取り直すため）。
-    /// 共有モードで他 PC の削除が連続した場合に無限ループさせないための上限であり、
-    /// 到達すると 1 ページ目へ戻して取得を確定する（<see cref="LoadHistoryLedgersAsync"/> 参照）。
-    /// したがって 1 回の読み込みが発行する <c>GetPagedAsync</c> は最大
-    /// <c>MaxHistoryPageClampAttempts + 1</c>（=4）回。
-    /// </summary>
-    private const int MaxHistoryPageClampAttempts = 3;
     private readonly HashSet<CardReadingSource> _suppressionSources = new();
 
     /// <summary>
@@ -195,6 +180,11 @@ public partial class MainViewModel : ViewModelBase
     /// 共有モード（ネットワーク共有フォルダ上のDB）かどうか
     /// </summary>
     public bool IsSharedMode => _databaseInfo.IsSharedMode;
+
+    /// <summary>
+    /// 履歴パネル（Issue #2159）。<c>MainWindow.xaml</c> の履歴エリアはこれを <c>DataContext</c> にする。
+    /// </summary>
+    public HistoryPanelViewModel History { get; }
 
     private ITimer? _timeoutTimer;
     private string? _currentStaffIdm;
@@ -375,12 +365,8 @@ public partial class MainViewModel : ViewModelBase
         ISettingsRepository settingsRepository,
         LendingService lendingService,
         IToastNotificationService toastNotificationService,
-        IStaffAuthService staffAuthService,
-        LedgerMergeService ledgerMergeService,
         IMessenger messenger,
         INavigationService navigationService,
-        OperationLogger operationLogger,
-        LedgerConsistencyChecker ledgerConsistencyChecker,
         IOptions<AppOptions> appOptions,
         ITimerFactory timerFactory,
         IDispatcherService dispatcherService,
@@ -390,7 +376,7 @@ public partial class MainViewModel : ViewModelBase
         WarningService warningService,
         DashboardService dashboardService,
         ISafeFileLauncher safeFileLauncher,
-        DbContext dbContext,
+        HistoryPanelViewModel historyPanel,
         ILogger<MainViewModel>? logger = null)
     {
         _cardReader = cardReader;
@@ -398,16 +384,11 @@ public partial class MainViewModel : ViewModelBase
         _staffRepository = staffRepository;
         _cardRepository = cardRepository;
         _ledgerRepository = ledgerRepository;
-        _dbContext = dbContext;
         _settingsRepository = settingsRepository;
         _lendingService = lendingService;
         _toastNotificationService = toastNotificationService;
-        _staffAuthService = staffAuthService;
-        _ledgerMergeService = ledgerMergeService;
         _messenger = messenger;
         _navigationService = navigationService;
-        _operationLogger = operationLogger;
-        _ledgerConsistencyChecker = ledgerConsistencyChecker;
         _timeoutSeconds = appOptions.Value.StaffCardTimeoutSeconds;
         RetouchGuideText = BuildRetouchGuideText(appOptions.Value.RetouchWindowSeconds);
         _timerFactory = timerFactory;
@@ -419,6 +400,11 @@ public partial class MainViewModel : ViewModelBase
         _dashboardService = dashboardService;
         _safeFileLauncher = safeFileLauncher;
         _logger = logger;
+
+        // Issue #2159: 履歴パネルは子の ViewModel。警告エリア・ダッシュボード・貸出中一覧・処理中オーバーレイは
+        // この画面が持つため、履歴パネルからの要求を受ける窓口（IHistoryPanelHost）として自身を接続する
+        History = historyPanel;
+        History.AttachHost(this);
 
         // カード読み取り抑制メッセージの受信を登録（Issue #852）
         _messenger.Register<CardReadingSuppressedMessage>(this, (recipient, message) =>
@@ -438,22 +424,26 @@ public partial class MainViewModel : ViewModelBase
         _sharedModeMonitor.HealthCheckCompleted += OnSharedModeHealthCheckCompleted;
         _sharedModeMonitor.SyncDisplayUpdated += OnSyncDisplayUpdated;
         _sharedModeMonitor.ConnectionStateChanged += OnSharedDbConnectionStateChanged;
-
-        // 履歴表示用の年リストを初期化（今年度から過去6年分）
-        var currentYear = DateTime.Today.Year;
-        for (int year = currentYear; year >= currentYear - 6; year--)
-        {
-            HistoryAvailableYears.Add(year);
-        }
-
-        // 履歴期間のデフォルト設定（今月）
-        var today = DateTime.Today;
-        HistoryFromDate = new DateTime(today.Year, today.Month, 1);
-        HistoryToDate = today;
-        HistorySelectedYear = today.Year;
-        HistorySelectedMonth = today.Month;
-        UpdateHistoryPeriodDisplay();
     }
+
+    #region 履歴パネルからの要求（IHistoryPanelHost、Issue #2159）
+
+    // 明示的実装にして、MainViewModel の公開面（XAML の束縛対象）に履歴パネル専用の入口を増やさない
+
+    IDisposable IHistoryPanelHost.BeginBusy(string message) => BeginBusy(message);
+
+    void IHistoryPanelHost.ReplaceBalanceInconsistencyWarning(string cardIdm, WarningItem? warning)
+        => ReplaceWarnings(
+            w => w.Type == WarningType.BalanceInconsistency && w.CardIdm == cardIdm,
+            warning == null ? null : new[] { warning });
+
+    Task IHistoryPanelHost.RefreshDashboardAsync() => RefreshDashboardAsync();
+
+    Task IHistoryPanelHost.CheckWarningsAsync() => CheckWarningsAsync();
+
+    Task IHistoryPanelHost.RefreshLentCardsAsync() => RefreshLentCardsAsync();
+
+    #endregion
 
     /// <summary>
     /// 状態を設定

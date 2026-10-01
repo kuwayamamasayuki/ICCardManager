@@ -37,6 +37,31 @@ public class MainViewModelSourceFilesTests
         files.Should().Contain(partialFiles);
     }
 
+    /// <summary>
+    /// Issue #2159: 履歴パネル（<see cref="HistoryPanelViewModelSourceFiles"/>）の導出が本体と partial ファイルまで届き、
+    /// <c>MainViewModel</c> の構成からは外れていること。
+    /// </summary>
+    /// <remarks>
+    /// トースト位置の断定表現・撮影対応表の検査はこの導出から走査対象を取る。0 件に縮むと緑のまま空振りする（#1786）。
+    /// <c>MainViewModel</c> の構成と重なっていない表明は、抽出が実際に起きた（履歴パネルが子の ViewModel である）ことの確認。
+    /// </remarks>
+    [Fact]
+    public void 履歴パネルの構成ファイルは本体とHistoryPanelフォルダーのpartialファイルすべてであること()
+    {
+        var files = HistoryPanelViewModelSourceFiles.All.Select(f => Normalize(f.RelativePath)).ToList();
+
+        files.Should().Contain("ViewModels/HistoryPanelViewModel.cs");
+        var partialFiles = ProductionSourceFiles.CSharp
+            .Under(Path.Combine("ViewModels", "HistoryPanel"))
+            .Select(f => Normalize(f.RelativePath))
+            .ToList();
+        partialFiles.Should().NotBeEmpty();
+        files.Should().Contain(partialFiles);
+
+        MainViewModelSourceFiles.All.Select(f => Normalize(f.RelativePath))
+            .Should().NotIntersectWith(files, "履歴パネルは MainViewModel の partial ではなく子の ViewModel");
+    }
+
     [Fact]
     public void partialファイルはMainフォルダーにMainViewModel_責務名_csの名前で置くこと()
     {

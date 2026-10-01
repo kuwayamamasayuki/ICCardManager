@@ -338,9 +338,9 @@ public partial class MainViewModel
             // Issue #1923: この再読込は利用者の操作を契機としないため、統合対象として入れた
             // チェックを引き継ぐ。引き継がないと、15 秒周期のリフレッシュが利用者の選択操作を
             // 途中で消してしまい、隣接 2 行以上を選ぶ統合が事実上できなくなる。
-            if (IsHistoryVisible)
+            if (History.IsHistoryVisible)
             {
-                await LoadHistoryLedgersAsync(preserveCheckedRows: true);
+                await History.LoadHistoryLedgersAsync(preserveCheckedRows: true);
             }
 
             // Issue #1110, #1131: 最終同期時刻を記録
@@ -502,7 +502,7 @@ public partial class MainViewModel
         }
 
         // Issue #1739: 有効でなくなったカードの残高不整合警告を取り除く。
-        // 生成元（CheckAndNotifyConsistencyAsync / CheckAllCardsConsistencyAsync）はどちらも
+        // 生成元（履歴パネル HistoryPanelViewModel の CheckAndNotifyConsistencyAsync / CheckAllCardsConsistencyAsync）はどちらも
         // is_deleted = 0 のカードしか走査しないため、カードを論理削除すると除去経路が無くなり、
         // クリックしても履歴が開かない警告が再起動まで残る（旧実装では ApplyDataWarnings の
         // Clear() が巻き添えで消していた）。ダッシュボードは DashboardService が

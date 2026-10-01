@@ -108,12 +108,8 @@ public class MainViewModelSharedDbStateTests
             _settingsRepositoryMock.Object,
             _lendingService,
             _toastMock.Object,
-            _staffAuthServiceMock.Object,
-            _ledgerMergeService,
             _messengerMock.Object,
             _navigationServiceMock.Object,
-            _operationLoggerMock.Object,
-            _ledgerConsistencyChecker,
             Options.Create(new AppOptions { StaffCardTimeoutSeconds = 60 }),
             _timerFactory,
             _dispatcherService,
@@ -124,7 +120,7 @@ public class MainViewModelSharedDbStateTests
             new DashboardService(_cardRepositoryMock.Object, _ledgerRepositoryMock.Object,
                 _staffRepositoryMock.Object, _settingsRepositoryMock.Object),
             new Mock<ICCardManager.Services.ISafeFileLauncher>().Object,
-            dbContext);
+            new HistoryPanelViewModel(_ledgerRepositoryMock.Object, _cardRepositoryMock.Object, dbContext, _staffAuthServiceMock.Object, _ledgerMergeService, _navigationServiceMock.Object, _operationLoggerMock.Object, _ledgerConsistencyChecker, _toastMock.Object));
     }
 
     [Fact]

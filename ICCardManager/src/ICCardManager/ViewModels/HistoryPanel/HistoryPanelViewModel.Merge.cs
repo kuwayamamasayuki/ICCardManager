@@ -1,33 +1,18 @@
 ﻿using System;
 using System.Collections.Generic;
-using System.Collections.ObjectModel;
 using System.Linq;
 using System.Threading.Tasks;
 using System.Windows;
-using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
-using CommunityToolkit.Mvvm.Messaging;
 using ICCardManager.Common;
-using ICCardManager.Common.Exceptions;
-using ICCardManager.Common.Messages;
-using ICCardManager.Data;
-using ICCardManager.Data.Repositories;
 using ICCardManager.Dtos;
-using ICCardManager.Infrastructure.CardReader;
-using ICCardManager.Infrastructure.Sound;
-using ICCardManager.Infrastructure.Caching;
 using ICCardManager.Infrastructure.Security;
-using ICCardManager.Infrastructure.Timing;
 using ICCardManager.Models;
-using ICCardManager.Services;
-using ICCardManager.Views.Helpers;
 using Microsoft.Extensions.Logging;
-using Microsoft.Extensions.Options;
-using System.Globalization;
 
 namespace ICCardManager.ViewModels;
 
-public partial class MainViewModel
+public partial class HistoryPanelViewModel
 {
     // === 履歴統合・取り消し ===
 
@@ -129,7 +114,7 @@ public partial class MainViewModel
             try
             {
                 await LoadHistoryLedgersAsync();
-                await RefreshDashboardAsync();
+                await Host.RefreshDashboardAsync();
             }
             catch (Exception ex)
             {
@@ -141,7 +126,7 @@ public partial class MainViewModel
         else if (mergeResult.Success)
         {
             await LoadHistoryLedgersAsync();
-            await RefreshDashboardAsync();
+            await Host.RefreshDashboardAsync();
             UndoMergeHistoryLedgersCommand.NotifyCanExecuteChanged();
 
             _navigationService.ShowInformation(
@@ -299,7 +284,7 @@ public partial class MainViewModel
         if (undoResult.Success)
         {
             await LoadHistoryLedgersAsync();
-            await RefreshDashboardAsync();
+            await Host.RefreshDashboardAsync();
             UndoMergeHistoryLedgersCommand.NotifyCanExecuteChanged();
             _navigationService.ShowInformation("統合を元に戻しました。", "取り消し完了");
         }

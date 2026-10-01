@@ -1,33 +1,18 @@
 ﻿using System;
 using System.Collections.Generic;
-using System.Collections.ObjectModel;
 using System.Linq;
 using System.Threading.Tasks;
 using System.Windows;
-using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
-using CommunityToolkit.Mvvm.Messaging;
 using ICCardManager.Common;
-using ICCardManager.Common.Exceptions;
-using ICCardManager.Common.Messages;
-using ICCardManager.Data;
-using ICCardManager.Data.Repositories;
 using ICCardManager.Dtos;
-using ICCardManager.Infrastructure.CardReader;
-using ICCardManager.Infrastructure.Sound;
-using ICCardManager.Infrastructure.Caching;
 using ICCardManager.Infrastructure.Security;
-using ICCardManager.Infrastructure.Timing;
 using ICCardManager.Models;
-using ICCardManager.Services;
-using ICCardManager.Views.Helpers;
 using Microsoft.Extensions.Logging;
-using Microsoft.Extensions.Options;
-using System.Globalization;
 
 namespace ICCardManager.ViewModels;
 
-public partial class MainViewModel
+public partial class HistoryPanelViewModel
 {
     // === 履歴行の追加・削除・変更 ===
 
@@ -61,8 +46,8 @@ public partial class MainViewModel
         if (result == true)
         {
             await LoadHistoryLedgersAsync();
-            await RefreshDashboardAsync();
-            await CheckWarningsAsync();
+            await Host.RefreshDashboardAsync();
+            await Host.CheckWarningsAsync();
             await CheckAndNotifyConsistencyAsync();
         }
     }
@@ -174,8 +159,8 @@ public partial class MainViewModel
         // 成否によらず再読込するのは、競合＝他 PC が実際にデータを変えたということであり、
         // 一覧だけでなくダッシュボード・警告も古くなっているため。
         await LoadHistoryLedgersAsync();
-        await RefreshDashboardAsync();
-        await CheckWarningsAsync();
+        await Host.RefreshDashboardAsync();
+        await Host.CheckWarningsAsync();
         await CheckAndNotifyConsistencyAsync();
 
         if (!deleted)
@@ -214,7 +199,14 @@ public partial class MainViewModel
                     "Issue #1953: 履歴削除後の貸出状態リセットが競合しました。" +
                     "他のパソコンでこのカードが削除された可能性があります: CardIdm={CardIdm}",
                     IdmMasker.Mask(deletedLedger.CardIdm));
+                return;
             }
+
+            // Issue #2159: is_lent を戻したら、メイン画面の「貸出中」一覧も読み直す。
+            // 抽出前はここで読み直しておらず、次のカード操作か共有モードの定期更新まで
+            // 貸出中でなくなったカードが一覧に残っていた（境界を明示して表面化した）。
+            // 競合（影響行数 0）のときは何も変えていないので読み直さない。
+            await Host.RefreshLentCardsAsync();
         }
     }
 
@@ -333,8 +325,8 @@ public partial class MainViewModel
         else if (dialogResult == true)
         {
             await LoadHistoryLedgersAsync();
-            await RefreshDashboardAsync();
-            await CheckWarningsAsync();
+            await Host.RefreshDashboardAsync();
+            await Host.CheckWarningsAsync();
             await CheckAndNotifyConsistencyAsync();
 
             // Issue #1134: 「保存して次へ」が要求された場合、次の行を開く

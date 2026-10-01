@@ -1,35 +1,126 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
+using System.Globalization;
 using System.Linq;
 using System.Threading.Tasks;
-using System.Windows;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
-using CommunityToolkit.Mvvm.Messaging;
 using ICCardManager.Common;
-using ICCardManager.Common.Exceptions;
-using ICCardManager.Common.Messages;
 using ICCardManager.Data;
 using ICCardManager.Data.Repositories;
 using ICCardManager.Dtos;
-using ICCardManager.Infrastructure.CardReader;
-using ICCardManager.Infrastructure.Sound;
-using ICCardManager.Infrastructure.Caching;
 using ICCardManager.Infrastructure.Security;
-using ICCardManager.Infrastructure.Timing;
 using ICCardManager.Models;
 using ICCardManager.Services;
-using ICCardManager.Views.Helpers;
 using Microsoft.Extensions.Logging;
-using Microsoft.Extensions.Options;
-using System.Globalization;
 
 namespace ICCardManager.ViewModels;
 
-public partial class MainViewModel
+/// <summary>
+/// メイン画面の履歴パネルの ViewModel（Issue #2159 で <see cref="MainViewModel"/> から抽出）。
+/// </summary>
+/// <remarks>
+/// <para>
+/// 履歴の表示（期間・ページ送り・繰越行・残高不整合のハイライト）、行の追加・変更・削除、統合と取り消し、
+/// 返却確認（#1907）を受け持つ。メイン画面が持つもの（警告エリア・残高ダッシュボード・貸出中一覧・
+/// 処理中オーバーレイ）を変えるときは <see cref="IHistoryPanelHost"/> を通して頼む。
+/// 境界と連携の設計は <c>docs/superpowers/specs/2026-10-01-issue-2159-history-panel-viewmodel-design.md</c>。
+/// </para>
+/// <para>
+/// <see cref="ViewModelBase"/> ではなく <see cref="ObservableObject"/> を継承する。<see cref="ViewModelBase"/> を
+/// 継承すると誰も束縛していない 2 つ目の処理中状態（<c>IsBusy</c>）ができ、そちらの <c>BeginBusy</c> を呼んでも
+/// メイン画面のオーバーレイは出ない。処理中は必ず <see cref="IHistoryPanelHost.BeginBusy"/> へ寄せる。
+/// </para>
+/// </remarks>
+public partial class HistoryPanelViewModel : ObservableObject
 {
-    // === 履歴パネル（プロパティ・表示・読込・期間・ページ・繰越行・不整合） ===
+    private readonly ILedgerRepository _ledgerRepository;
+    private readonly ICardRepository _cardRepository;
+    private readonly DbContext _dbContext;
+    private readonly IStaffAuthService _staffAuthService;
+    private readonly LedgerMergeService _ledgerMergeService;
+    private readonly INavigationService _navigationService;
+    private readonly OperationLogger _operationLogger;
+    private readonly LedgerConsistencyChecker _ledgerConsistencyChecker;
+    private readonly IToastNotificationService _toastNotificationService;
+    private readonly ILogger<HistoryPanelViewModel>? _logger;
+
+    private IHistoryPanelHost? _host;
+
+    /// <summary>
+    /// Issue #1814: 履歴ページ番号を 1 回の読み込みでクランプできる上限回数。
+    /// 数えるのは「クランプした回数」であって再取得回数ではない。
+    /// クランプは通常 1 回で収束する（総件数から求めた有効ページで取り直すため）。
+    /// 共有モードで他 PC の削除が連続した場合に無限ループさせないための上限であり、
+    /// 到達すると 1 ページ目へ戻して取得を確定する（<see cref="LoadHistoryLedgersAsync"/> 参照）。
+    /// したがって 1 回の読み込みが発行する <c>GetPagedAsync</c> は最大
+    /// <c>MaxHistoryPageClampAttempts + 1</c>（=4）回。
+    /// </summary>
+    private const int MaxHistoryPageClampAttempts = 3;
+
+    public HistoryPanelViewModel(
+        ILedgerRepository ledgerRepository,
+        ICardRepository cardRepository,
+        DbContext dbContext,
+        IStaffAuthService staffAuthService,
+        LedgerMergeService ledgerMergeService,
+        INavigationService navigationService,
+        OperationLogger operationLogger,
+        LedgerConsistencyChecker ledgerConsistencyChecker,
+        IToastNotificationService toastNotificationService,
+        ILogger<HistoryPanelViewModel>? logger = null)
+    {
+        _ledgerRepository = ledgerRepository;
+        _cardRepository = cardRepository;
+        _dbContext = dbContext;
+        _staffAuthService = staffAuthService;
+        _ledgerMergeService = ledgerMergeService;
+        _navigationService = navigationService;
+        _operationLogger = operationLogger;
+        _ledgerConsistencyChecker = ledgerConsistencyChecker;
+        _toastNotificationService = toastNotificationService;
+        _logger = logger;
+
+        // 履歴表示用の年リストを初期化（今年度から過去6年分）
+        var currentYear = DateTime.Today.Year;
+        for (int year = currentYear; year >= currentYear - 6; year--)
+        {
+            HistoryAvailableYears.Add(year);
+        }
+
+        // 履歴期間のデフォルト設定（今月）
+        var today = DateTime.Today;
+        HistoryFromDate = new DateTime(today.Year, today.Month, 1);
+        HistoryToDate = today;
+        HistorySelectedYear = today.Year;
+        HistorySelectedMonth = today.Month;
+        UpdateHistoryPeriodDisplay();
+    }
+
+    /// <summary>
+    /// 履歴パネルを載せる画面を接続する（メイン画面のコンストラクタから 1 度だけ呼ぶ）。
+    /// </summary>
+    /// <remarks>
+    /// DI はメイン画面より先に履歴パネルを生成するため、コンストラクタでは受け取れない。
+    /// </remarks>
+    internal void AttachHost(IHistoryPanelHost host)
+    {
+        if (_host != null && !ReferenceEquals(_host, host))
+        {
+            throw new InvalidOperationException("履歴パネルは既に別の画面へ接続されています。");
+        }
+
+        _host = host ?? throw new ArgumentNullException(nameof(host));
+    }
+
+    /// <summary>
+    /// 接続された画面。未接続のまま要求したら例外にする（黙って何もしないと、配線漏れが
+    /// 「ダッシュボードが古いまま」の形で潜在化する。#1820）。
+    /// </summary>
+    private IHistoryPanelHost Host => _host
+        ?? throw new InvalidOperationException(
+            "履歴パネルが画面へ接続されていません（AttachHost を呼んでください）。");
 
     #region 履歴表示関連プロパティ
 
@@ -238,6 +329,22 @@ public partial class MainViewModel
     #endregion
 
     /// <summary>
+    /// 残高不整合のハイライトを消してから、カードの当月の履歴を開く（Issue #2159）。
+    /// </summary>
+    /// <remarks>
+    /// 待機中のカードタッチ・残高ダッシュボード・残額不足／残額の食い違い警告のクリックから呼ぶ。
+    /// 抽出前は 4 か所の呼び出し元がそれぞれ「ハイライトを消す → 開く」を書いていた。
+    /// <paramref name="card"/> が null（他 PC で削除された等）ならハイライトを消すだけで開かない（抽出前と同じ）。
+    /// </remarks>
+    public async Task ShowCardHistoryAsync(IcCard? card)
+    {
+        _balanceInconsistencies.Clear();
+        if (card == null) return;
+
+        await ShowHistoryAsync(card);
+    }
+
+    /// <summary>
     /// 履歴表示（メイン画面に表示）
     /// </summary>
     /// <param name="card">表示するカード</param>
@@ -324,7 +431,8 @@ public partial class MainViewModel
     {
         if (HistoryCard == null) return;
 
-        using (BeginBusy("読み込み中..."))
+        // Issue #2159: オーバーレイはメイン画面の IsBusy に束縛されているため、ホストのスコープを開く
+        using (Host.BeginBusy("読み込み中..."))
         {
             // Issue #1923: 引き継ぐチェックを Clear の前に退避する。
             // 繰越行（Issue #1155）はチェックボックス自体を表示しないため対象外。
@@ -833,188 +941,10 @@ public partial class MainViewModel
         {
             await LoadHistoryLedgersAsync();
             // Issue #660: 分割等で摘要が変わった場合に警告を更新
-            await CheckWarningsAsync();
+            await Host.CheckWarningsAsync();
             // Issue #1739: 明細の金額編集は残高チェーンを変えるため、整合性も再判定する。
             // 他の履歴編集経路（行の追加・編集・削除）は既にこの組で呼んでいたが、本経路だけ
             // 抜けており、不整合を直しても古い件数の警告が残っていた。
-            await CheckAndNotifyConsistencyAsync();
-        }
-    }
-
-    #endregion
-
-    #region 残高整合性チェック（Issue #1739 / #2007）
-
-    /// <summary>
-    /// 残高整合性チェックで「全期間」を指す範囲（SQLite の date 型互換の範囲）。
-    /// </summary>
-    /// <remarks>
-    /// Issue #1739: 残高不整合警告は表示期間ではなくカード全体の状態を表すため、
-    /// <see cref="CheckAndNotifyConsistencyAsync"/> と <see cref="CheckAllCardsConsistencyAsync"/> の
-    /// どちらも同じ範囲で判定する。片方だけ範囲が違うと、一方が立てた警告をもう一方が黙って消す。
-    /// </remarks>
-    private static readonly DateTime FullPeriodStart = new DateTime(2000, 1, 1);
-    private static readonly DateTime FullPeriodEnd = new DateTime(2099, 12, 31);
-
-    /// <summary>
-    /// 残高不整合警告を組み立てる（表示文言を1か所に集約する）
-    /// </summary>
-    /// <remarks>
-    /// Issue #2007: 不整合が「導入時残高の誤り」の形状なら、件数ではなく原因を名指しする。
-    /// 件数の文言だと、ハイライトされる行（従来はチェーンが切れた側＝正しい行）を直す誘導になる。
-    /// </remarks>
-    private static WarningItem BuildBalanceInconsistencyWarning(
-        string cardType, string cardNumber, string cardIdm, ConsistencyResult result)
-    {
-        var totalCount = result.Inconsistencies.Count + result.DetailInconsistencies.Count;
-        return new WarningItem
-        {
-            DisplayText = result.InitialBalanceCorrection != null
-                ? InitialBalanceCorrectionMessage.ForWarningArea(cardType, cardNumber)
-                : $"⚠️ 残高の不整合が{totalCount}件あります（{cardType} {cardNumber}）",
-            Type = WarningType.BalanceInconsistency,
-            CardIdm = cardIdm
-        };
-    }
-
-    /// <summary>
-    /// Issue #2007: 整合性チェック結果から、履歴一覧でハイライトする行と表示値のマップを組み立てる。
-    /// </summary>
-    /// <remarks>
-    /// <para>
-    /// 通常は不整合の行（チェーンが切れた側）をそのまま対象にする。ただし「導入時残高の誤り」の形状
-    /// （<see cref="ConsistencyResult.InitialBalanceCorrection"/>）では、切れた側の 2 行目はカード由来の
-    /// 正しい行なので対象から外し、代わりに<b>導入行</b>を「期待値＝逆算した残高／実際＝記録されている残高」
-    /// で対象にする。2 行目を強調したままだと、利用者が正しい行を誤った導入行に合わせて書き換える誘導になる。
-    /// </para>
-    /// <para>
-    /// 詳細レベルの不整合の親 Ledger も対象に含める（Issue #1059）が、導入時残高の誤りではその詳細不整合も
-    /// 導入行の写像（先頭明細の起点が導入行の残高）なので、同様に導入行へ寄せる。
-    /// </para>
-    /// </remarks>
-    internal static Dictionary<int, (int ExpectedBalance, int ActualBalance, bool IsInitialBalanceCorrection)> BuildInconsistencyMarkers(
-        ConsistencyResult result)
-    {
-        var correction = result.InitialBalanceCorrection;
-        if (correction != null)
-        {
-            return new Dictionary<int, (int ExpectedBalance, int ActualBalance, bool IsInitialBalanceCorrection)>
-            {
-                { correction.LedgerId, (correction.SuggestedBalance, correction.RecordedBalance, true) }
-            };
-        }
-
-        // 親レコード不整合 + 詳細レベル不整合（詳細の親LedgerId単位で集約）
-        var markers = result.Inconsistencies
-            .ToDictionary(i => i.LedgerId, i => (i.ExpectedBalance, i.ActualBalance, false));
-
-        // Issue #1059: 詳細レベル不整合がある親Ledgerもハイライト対象に追加
-        foreach (var detailGroup in result.DetailInconsistencies.GroupBy(d => d.LedgerId))
-        {
-            if (!markers.ContainsKey(detailGroup.Key))
-            {
-                var first = detailGroup.First();
-                markers[detailGroup.Key] = (first.ExpectedBalance, first.ActualBalance, false);
-            }
-        }
-        return markers;
-    }
-
-    /// <summary>
-    /// Issue #2007: 行編集を開く前に、その行が導入行で「導入時残高の誤り」が検知されているなら訂正案を返す。
-    /// </summary>
-    /// <remarks>
-    /// 全期間の整合性チェック（6 年分の読み取り）は導入行を開くときだけ走らせる。利用行では null を返し、
-    /// 問い合わせない。訂正案の行 ID が編集対象と一致するときだけ返す（一致しなければ別の形状）。
-    /// </remarks>
-    internal async Task<InitialBalanceCorrection> ResolveInitialBalanceCorrectionForEditAsync(LedgerDto ledger)
-    {
-        if (ledger == null || !Ledger.IsInitialRecordSummary(ledger.Summary)) return null;
-
-        var result = await _ledgerConsistencyChecker.CheckBalanceConsistencyAsync(
-            ledger.CardIdm, FullPeriodStart, FullPeriodEnd);
-        var correction = result.InitialBalanceCorrection;
-        return correction != null && correction.LedgerId == ledger.Id ? correction : null;
-    }
-
-    /// <summary>
-    /// 残高整合性チェック＆警告表示
-    /// </summary>
-    /// <remarks>
-    /// 不整合を検出した場合、メイン画面右下の警告エリアに警告を表示します。
-    /// 交通系ICカード内の履歴に記録されている残高が正であるため、自動修正は行いません。
-    /// </remarks>
-    /// <param name="fullPeriodResult">
-    /// Issue #2007: 呼び出し元が直前に取った全期間の判定結果。渡されたときは再取得しない
-    /// （警告クリック経路は導入行の日付を決めるために全期間を先に読んでいる。6 年分を 2 度読まない）。
-    /// </param>
-    private async Task CheckAndNotifyConsistencyAsync(ConsistencyResult fullPeriodResult = null)
-    {
-        if (HistoryCard == null) return;
-
-        var checkResult = await _ledgerConsistencyChecker.CheckBalanceConsistencyAsync(
-            HistoryCard.CardIdm, HistoryFromDate, HistoryToDate);
-
-        // Issue #1739: 警告は「このカードに不整合があるか」を全期間で表す。表示期間だけで
-        // 判定して警告を消すと、CheckAllCardsConsistencyAsync が全期間で立てた期間外の不整合が、
-        // 警告をクリックして履歴（既定は当月）を開いた瞬間に黙って消える。履歴にハイライトも
-        // 出ないため「解消済み」と誤解され、不整合が放置される。
-        // 表示期間の結果を流用しないのは、チェーンの起点が範囲によって変わるため
-        // 部分範囲の判定が全期間の判定と一致する保証がないから。
-        var warningResult = fullPeriodResult ?? await _ledgerConsistencyChecker.CheckBalanceConsistencyAsync(
-            HistoryCard.CardIdm, FullPeriodStart, FullPeriodEnd);
-
-        ReplaceWarnings(
-            w => w.Type == WarningType.BalanceInconsistency && w.CardIdm == HistoryCard.CardIdm,
-            warningResult.IsConsistent
-                ? null
-                : new[] { BuildBalanceInconsistencyWarning(HistoryCard.CardType, HistoryCard.CardNumber, HistoryCard.CardIdm, warningResult) });
-
-        // Issue #1052: ハイライトデータを最新の整合性チェック結果で同期更新
-        // （ハイライトは画面に出ている行が対象のため、表示期間の結果を使う）
-        // レコード編集・削除後にもハイライトが正しく反映される
-        if (_balanceInconsistencies.Count > 0 || !checkResult.IsConsistent)
-        {
-            // Issue #2007: 導入時残高の誤りなら、切れた側ではなく導入行をハイライト対象にする
-            _balanceInconsistencies = BuildInconsistencyMarkers(checkResult);
-            ApplyBalanceInconsistencyMarkers();
-        }
-    }
-
-    /// <summary>
-    /// Issue #1058: 全カードの残高整合性をチェックし、不整合があれば警告を表示
-    /// </summary>
-    /// <remarks>
-    /// インポート後など、特定のカード・期間に限定できない場合に使用します。
-    /// CheckAndNotifyConsistencyAsyncはHistoryCard・HistoryFromDate/ToDateに依存するため、
-    /// 履歴画面が開いていない場合や、インポート対象が表示期間外の場合に対応できません。
-    /// </remarks>
-    internal async Task CheckAllCardsConsistencyAsync()
-    {
-        var cards = await _cardRepository.GetAllAsync();
-
-        foreach (var card in cards)
-        {
-            // Issue #1947: 母集団は「運用中のカード」（IcCard.IsInOperation）。
-            // 除去側（RefreshDashboardAsync）は残額ダッシュボードの母集団に居ないカードの
-            // BalanceInconsistency 警告を取り除くため、ここで払戻済みカードの警告を立てると
-            // 次のダッシュボード更新（貸出・返却／共有モードの定期更新）で黙って消える。
-            // 生成側と除去側の判定条件を揃える（.claude/rules/business-logic.md #1739）。
-            if (!card.IsInOperation) continue;
-
-            var checkResult = await _ledgerConsistencyChecker.CheckBalanceConsistencyAsync(
-                card.CardIdm, FullPeriodStart, FullPeriodEnd);
-
-            ReplaceWarnings(
-                w => w.Type == WarningType.BalanceInconsistency && w.CardIdm == card.CardIdm,
-                checkResult.IsConsistent
-                    ? null
-                    : new[] { BuildBalanceInconsistencyWarning(card.CardType, card.CardNumber, card.CardIdm, checkResult) });
-        }
-
-        // 現在表示中のカードのハイライトも更新
-        if (HistoryCard != null)
-        {
             await CheckAndNotifyConsistencyAsync();
         }
     }

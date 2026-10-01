@@ -69,7 +69,7 @@ public class LiveRegionConventionTests
 
         // 対の表明: 関係の無いプロパティの変化で発火しない（読み上げが雑音で埋まり、本当の変化が聞き取れなくなる）
         MainWindow.ShouldAnnounceNextAction(nameof(MainViewModel.CurrentState)).Should().BeFalse();
-        MainWindow.ShouldAnnounceNextAction(nameof(MainViewModel.IsReturnHistoryReview)).Should().BeFalse();
+        MainWindow.ShouldAnnounceNextAction(nameof(HistoryPanelViewModel.IsReturnHistoryReview)).Should().BeFalse();
         MainWindow.ShouldAnnounceNextAction(null!).Should().BeFalse();
     }
 

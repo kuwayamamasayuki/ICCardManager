@@ -278,7 +278,7 @@ public class LedgerConsistencyCheckerTests
     /// <summary>
     /// Issue #2112: シードは「期間の開始日より前の最終残高」を、残高チェーンで確定済みの単票クエリ
     /// （<see cref="ILedgerRepository.GetLatestBeforeDateAsync"/>）から取ること。
-    /// 履歴画面（MainViewModel.GetPrecedingBalanceAsync）・帳票（ReportDataBuilder）と同じ根拠（#1763）。
+    /// 履歴画面（HistoryPanelViewModel.GetPrecedingBalanceAsync）・帳票（ReportDataBuilder）と同じ根拠（#1763）。
     /// </summary>
     [Fact]
     public async Task CheckBalanceConsistencyAsync_TakesSeedFromLatestLedgerBeforePeriodStart()

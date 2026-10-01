@@ -191,12 +191,8 @@ public class MainViewModelIntegrationTests
             _settingsRepositoryMock.Object,
             _lendingService,
             _toastMock.Object,
-            _staffAuthServiceMock.Object,
-            _ledgerMergeService,
             _messengerMock.Object,
             _navigationServiceMock.Object,
-            _operationLogger,
-            _ledgerConsistencyChecker,
             Options.Create(new AppOptions { StaffCardTimeoutSeconds = 60 }),
             _timerFactory,
             dispatcherService,
@@ -206,7 +202,7 @@ public class MainViewModelIntegrationTests
             _warningService,
             _dashboardService,
             new Mock<ICCardManager.Services.ISafeFileLauncher>().Object,
-            _dbContext);
+            new HistoryPanelViewModel(_ledgerRepositoryMock.Object, _cardRepositoryMock.Object, _dbContext, _staffAuthServiceMock.Object, _ledgerMergeService, _navigationServiceMock.Object, _operationLogger, _ledgerConsistencyChecker, _toastMock.Object));
     }
 
     private void RaiseCardRead(string idm)
@@ -1376,7 +1372,7 @@ public class MainViewModelIntegrationTests
 
         _cardRepositoryMock.Verify(r => r.UpdateLentStatusAsync(CardIdmA, false, null, null), Times.Never,
             "職員証タッチ待ちでの交通系ICカードのタッチは履歴の表示であり、返却ではない");
-        _viewModel.IsHistoryVisible.Should().BeTrue("交通系ICカードだけのタッチは履歴を開く");
+        _viewModel.History.IsHistoryVisible.Should().BeTrue("交通系ICカードだけのタッチは履歴を開く");
 
         // Act-2: 案内どおり職員証からやり直す
         RaiseCardRead(StaffIdm);
@@ -1518,7 +1514,7 @@ public class MainViewModelIntegrationTests
         _navigationServiceMock.Setup(n => n.ShowWarningConfirmation(It.IsAny<string>(), It.IsAny<string>()))
             .Returns(false);
 
-        var proceeded = await _viewModel.ConfirmAndExecuteUnmergeAsync(item);
+        var proceeded = await _viewModel.History.ConfirmAndExecuteUnmergeAsync(item);
 
         proceeded.Should().BeFalse();
         _navigationServiceMock.Verify(n => n.ShowWarningConfirmation(
@@ -1546,7 +1542,7 @@ public class MainViewModelIntegrationTests
         _ledgerRepositoryMock.Setup(r => r.GetMergeHistoriesAsync(It.IsAny<bool>()))
             .ReturnsAsync(new List<(int Id, DateTime MergedAt, int TargetLedgerId, string Description, string UndoDataJson, bool IsUndone)>());
 
-        var proceeded = await _viewModel.ConfirmAndExecuteUnmergeAsync(item);
+        var proceeded = await _viewModel.History.ConfirmAndExecuteUnmergeAsync(item);
 
         proceeded.Should().BeTrue();
         _navigationServiceMock.Verify(n => n.ShowError(It.IsAny<string>(), "取り消しエラー"), Times.Once,
@@ -1903,29 +1899,29 @@ public class MainViewModelIntegrationTests
 
         await RunReturnFlowAsync();
 
-        _viewModel.IsHistoryVisible.Should().BeTrue("返却したカードの記録をその場で確認させる");
-        _viewModel.IsReturnHistoryReview.Should().BeTrue("案内バナーの表示条件");
-        _viewModel.HistoryCard.Should().NotBeNull();
-        _viewModel.HistoryCard!.CardIdm.Should().Be(CardIdmA);
+        _viewModel.History.IsHistoryVisible.Should().BeTrue("返却したカードの記録をその場で確認させる");
+        _viewModel.History.IsReturnHistoryReview.Should().BeTrue("案内バナーの表示条件");
+        _viewModel.History.HistoryCard.Should().NotBeNull();
+        _viewModel.History.HistoryCard!.CardIdm.Should().Be(CardIdmA);
         inserted.Should().NotBeEmpty("返却で利用行が INSERT されている前提");
 
         var recordedIds = inserted.Select(l => l.Id).ToHashSet();
-        _viewModel.HistoryLedgers.Where(d => recordedIds.Contains(d.Id))
+        _viewModel.History.HistoryLedgers.Where(d => recordedIds.Contains(d.Id))
             .Should().NotBeEmpty().And.OnlyContain(d => d.IsRecentlyRecorded && d.RecentlyRecordedMark == "✔",
                 "今回の返却で記録された行を「今回」列の ✔ と行背景で示す");
-        _viewModel.HistoryLedgers.Where(d => d.Id == 999)
+        _viewModel.History.HistoryLedgers.Where(d => d.Id == 999)
             .Should().ContainSingle().Which.IsRecentlyRecorded.Should().BeFalse("無関係な既存行は強調しない");
-        _viewModel.HistoryLedgers.Where(d => d.Id == 999)
+        _viewModel.History.HistoryLedgers.Where(d => d.Id == 999)
             .Should().ContainSingle().Which.RecentlyRecordedMark.Should().BeEmpty();
 
         // 当月の利用なので表示期間は当月 1 日から
         // （利用日が月初の深夜で前月へ落ちる場合は、その利用があった月の 1 日から）
         var usageDate = inserted.Min(l => l.Date).Date;
         var firstOfMonth = new DateTime(DateTime.Today.Year, DateTime.Today.Month, 1);
-        _viewModel.HistoryFromDate.Should().Be(usageDate < firstOfMonth
+        _viewModel.History.HistoryFromDate.Should().Be(usageDate < firstOfMonth
             ? new DateTime(usageDate.Year, usageDate.Month, 1)
             : firstOfMonth);
-        _viewModel.HistoryToDate.Should().Be(DateTime.Today);
+        _viewModel.History.HistoryToDate.Should().Be(DateTime.Today);
         _viewModel.CurrentState.Should().Be(AppState.WaitingForStaffCard, "返却フロー自体は従来どおり完了する");
     }
 
@@ -1956,11 +1952,11 @@ public class MainViewModelIntegrationTests
 
         await RunReturnFlowAsync();
 
-        _viewModel.IsReturnHistoryReview.Should().BeTrue();
-        _viewModel.HistoryFromDate.Should().Be(new DateTime(usageDate.Year, usageDate.Month, 1),
+        _viewModel.History.IsReturnHistoryReview.Should().BeTrue();
+        _viewModel.History.HistoryFromDate.Should().Be(new DateTime(usageDate.Year, usageDate.Month, 1),
             "当月 1 日からでは記録した行が画面に出ず、月中の開始日では繰越行とチェーンのシードが狂う");
-        _viewModel.HistoryFromDate.Day.Should().Be(1, "表示期間の開始日は必ず月初（月単位の期間選択と揃える）");
-        _viewModel.HistoryToDate.Should().Be(DateTime.Today);
+        _viewModel.History.HistoryFromDate.Day.Should().Be(1, "表示期間の開始日は必ず月初（月単位の期間選択と揃える）");
+        _viewModel.History.HistoryToDate.Should().Be(DateTime.Today);
     }
 
     /// <summary>
@@ -1974,10 +1970,10 @@ public class MainViewModelIntegrationTests
 
         await RunReturnFlowAsync();
 
-        _viewModel.IsReturnHistoryReview.Should().BeTrue();
-        _viewModel.HistoryTotalPages.Should().Be(2, "前提: 55 行＋今回の行が 50 行のページ 2 つに分かれる");
-        _viewModel.HistoryCurrentPage.Should().Be(2, "今回の行がある最終ページを表示する");
-        _viewModel.HistoryLedgers.Where(d => d.IsRecentlyRecorded).Select(d => d.Id)
+        _viewModel.History.IsReturnHistoryReview.Should().BeTrue();
+        _viewModel.History.HistoryTotalPages.Should().Be(2, "前提: 55 行＋今回の行が 50 行のページ 2 つに分かれる");
+        _viewModel.History.HistoryCurrentPage.Should().Be(2, "今回の行がある最終ページを表示する");
+        _viewModel.History.HistoryLedgers.Where(d => d.IsRecentlyRecorded).Select(d => d.Id)
             .Should().BeEquivalentTo(inserted.Select(l => l.Id), "表示中のページに今回の行がすべて載っている");
     }
 
@@ -1992,9 +1988,9 @@ public class MainViewModelIntegrationTests
 
         await RunReturnFlowAsync();
 
-        _viewModel.HistoryTotalPages.Should().Be(1);
-        _viewModel.HistoryCurrentPage.Should().Be(1);
-        _viewModel.HistoryLedgers.Should().Contain(d => d.IsRecentlyRecorded);
+        _viewModel.History.HistoryTotalPages.Should().Be(1);
+        _viewModel.History.HistoryCurrentPage.Should().Be(1);
+        _viewModel.History.HistoryLedgers.Should().Contain(d => d.IsRecentlyRecorded);
     }
 
     /// <summary>
@@ -2010,8 +2006,8 @@ public class MainViewModelIntegrationTests
 
         _toastMock.Verify(t => t.ShowReturnNotification(
             "はやかけん", "5042", It.IsAny<int>(), It.IsAny<bool>(), It.IsAny<int>()), Times.Once, "前提: 返却は成立");
-        _viewModel.IsHistoryVisible.Should().BeFalse();
-        _viewModel.IsReturnHistoryReview.Should().BeFalse();
+        _viewModel.History.IsHistoryVisible.Should().BeFalse();
+        _viewModel.History.IsReturnHistoryReview.Should().BeFalse();
     }
 
     /// <summary>
@@ -2028,8 +2024,8 @@ public class MainViewModelIntegrationTests
 
         await RunReturnFlowAsync();
 
-        _viewModel.IsHistoryVisible.Should().BeFalse();
-        _viewModel.IsReturnHistoryReview.Should().BeFalse();
+        _viewModel.History.IsHistoryVisible.Should().BeFalse();
+        _viewModel.History.IsReturnHistoryReview.Should().BeFalse();
         _toastMock.Verify(t => t.ShowReturnNotification(
             "はやかけん", "5042", It.IsAny<int>(), It.IsAny<bool>(), It.IsAny<int>()), Times.Once,
             "返却そのものは従来どおり完了する");
@@ -2052,13 +2048,13 @@ public class MainViewModelIntegrationTests
         _navigationServiceMock
             .Setup(n => n.ShowDialogAsync<ICCardManager.Views.Dialogs.BusStopInputDialog>(
                 It.IsAny<Func<ICCardManager.Views.Dialogs.BusStopInputDialog, Task>>()))
-            .Callback(() => reviewVisibleWhenBusStopDialogShown = _viewModel.IsReturnHistoryReview)
+            .Callback(() => reviewVisibleWhenBusStopDialogShown = _viewModel.History.IsReturnHistoryReview)
             .ReturnsAsync(true);
 
         await RunReturnFlowAsync();
 
         reviewVisibleWhenBusStopDialogShown.Should().BeFalse("バス停名入力ダイアログが開いた時点では返却確認はまだ出ていない");
-        _viewModel.IsReturnHistoryReview.Should().BeTrue("バス停名入力の後に返却確認を出す");
+        _viewModel.History.IsReturnHistoryReview.Should().BeTrue("バス停名入力の後に返却確認を出す");
     }
 
     /// <summary>
@@ -2071,14 +2067,14 @@ public class MainViewModelIntegrationTests
     {
         ArrangeReturnWithHistoryReview();
         await RunReturnFlowAsync();
-        _viewModel.IsReturnHistoryReview.Should().BeTrue("前提: 返却確認が出ている");
+        _viewModel.History.IsReturnHistoryReview.Should().BeTrue("前提: 返却確認が出ている");
 
         RaiseCardRead(StaffIdmB);
         await _dispatcherService.WaitForPendingAsync();
 
-        _viewModel.IsHistoryVisible.Should().BeFalse("次の職員の操作の開始で閉じる");
-        _viewModel.IsReturnHistoryReview.Should().BeFalse();
-        _viewModel.HistoryCard.Should().BeNull();
+        _viewModel.History.IsHistoryVisible.Should().BeFalse("次の職員の操作の開始で閉じる");
+        _viewModel.History.IsReturnHistoryReview.Should().BeFalse();
+        _viewModel.History.HistoryCard.Should().BeNull();
         _viewModel.CurrentState.Should().Be(AppState.WaitingForIcCard, "職員証の認識自体は従来どおり");
     }
 
@@ -2092,14 +2088,14 @@ public class MainViewModelIntegrationTests
     {
         ArrangeReturnWithHistoryReview();
         await RunReturnFlowAsync();
-        _viewModel.MarkReturnHistoryReviewTouched();
+        _viewModel.History.MarkReturnHistoryReviewTouched();
 
         RaiseCardRead(StaffIdmB);
         await _dispatcherService.WaitForPendingAsync();
 
-        _viewModel.IsHistoryVisible.Should().BeTrue("操作中の履歴を職員の目の前で閉じない");
-        _viewModel.IsReturnHistoryReview.Should().BeTrue("バナーと強調も残す");
-        _viewModel.HistoryCard!.CardIdm.Should().Be(CardIdmA);
+        _viewModel.History.IsHistoryVisible.Should().BeTrue("操作中の履歴を職員の目の前で閉じない");
+        _viewModel.History.IsReturnHistoryReview.Should().BeTrue("バナーと強調も残す");
+        _viewModel.History.HistoryCard!.CardIdm.Should().Be(CardIdmA);
     }
 
     /// <summary>
@@ -2124,20 +2120,20 @@ public class MainViewModelIntegrationTests
             }, 1));
         RaiseCardRead(CardIdmB);
         await _dispatcherService.WaitForPendingAsync();
-        _viewModel.IsHistoryVisible.Should().BeTrue("前提: 手動で開いた履歴");
-        _viewModel.IsReturnHistoryReview.Should().BeFalse("手動で開いた履歴は返却確認ではない");
+        _viewModel.History.IsHistoryVisible.Should().BeTrue("前提: 手動で開いた履歴");
+        _viewModel.History.IsReturnHistoryReview.Should().BeFalse("手動で開いた履歴は返却確認ではない");
 
         // カード A を返却する
         ArrangeReturnWithHistoryReview();
         await RunReturnFlowAsync();
 
-        _viewModel.HistoryCard!.CardIdm.Should().Be(CardIdmB, "職員が使っている履歴を奪わない（#186）");
-        _viewModel.IsReturnHistoryReview.Should().BeFalse();
+        _viewModel.History.HistoryCard!.CardIdm.Should().Be(CardIdmB, "職員が使っている履歴を奪わない（#186）");
+        _viewModel.History.IsReturnHistoryReview.Should().BeFalse();
         _toastMock.Verify(t => t.ShowInfo(
             It.Is<string>(title => title.Contains("履歴")),
             It.Is<string>(m => m.Contains("利用履歴を確認してください"))), Times.Once);
         // 別のカードの一覧なので今回の行はそもそも並んでいない。印を付けるための再読込もしない
-        _viewModel.HistoryLedgers.Should().OnlyContain(d => !d.IsRecentlyRecorded,
+        _viewModel.History.HistoryLedgers.Should().OnlyContain(d => !d.IsRecentlyRecorded,
             "別カードの一覧に今回の行の印は付けない");
     }
 
@@ -2156,26 +2152,26 @@ public class MainViewModelIntegrationTests
         var inserted = ArrangeReturnWithHistoryReview();
         // 返却前にカード A（貸出中）の履歴を待機中のタッチで開く … 貸出中カードのタッチは返却になるため、
         // 履歴は直接開く（手動で開いた履歴と同じ状態: IsReturnHistoryReview = false）
-        _viewModel.HistoryCard = new IcCard { CardIdm = CardIdmA, CardType = "はやかけん", CardNumber = "5042" }.ToDto();
-        _viewModel.IsHistoryVisible = true;
-        await _viewModel.LoadHistoryLedgersAsync();
-        _viewModel.HistoryLedgers.Should().ContainSingle(d => d.Id == 999).Which.IsChecked = true;
+        _viewModel.History.HistoryCard = new IcCard { CardIdm = CardIdmA, CardType = "はやかけん", CardNumber = "5042" }.ToDto();
+        _viewModel.History.IsHistoryVisible = true;
+        await _viewModel.History.LoadHistoryLedgersAsync();
+        _viewModel.History.HistoryLedgers.Should().ContainSingle(d => d.Id == 999).Which.IsChecked = true;
 
         await RunReturnFlowAsync();
 
-        _viewModel.IsReturnHistoryReview.Should().BeFalse("職員が使っている履歴は返却確認へ置き換えない");
-        _viewModel.HistoryCard!.CardIdm.Should().Be(CardIdmA, "カードも表示期間も変えない");
-        _viewModel.HistoryLedgers.Where(d => d.IsChecked).Select(d => d.Id).Should().Equal(new[] { 999 },
+        _viewModel.History.IsReturnHistoryReview.Should().BeFalse("職員が使っている履歴は返却確認へ置き換えない");
+        _viewModel.History.HistoryCard!.CardIdm.Should().Be(CardIdmA, "カードも表示期間も変えない");
+        _viewModel.History.HistoryLedgers.Where(d => d.IsChecked).Select(d => d.Id).Should().Equal(new[] { 999 },
             "統合のためのチェックを消さない（#1923）");
         _toastMock.Verify(t => t.ShowInfo(
             It.Is<string>(title => title.Contains("履歴")), It.IsAny<string>()), Times.Once);
 
         // 画面を奪わなくても、今回の記録がどの行かは分かるようにする
         var recordedIds = inserted.Select(l => l.Id).ToHashSet();
-        _viewModel.HistoryLedgers.Where(d => recordedIds.Contains(d.Id))
+        _viewModel.History.HistoryLedgers.Where(d => recordedIds.Contains(d.Id))
             .Should().NotBeEmpty().And.OnlyContain(d => d.IsRecentlyRecorded && d.RecentlyRecordedMark == "✔",
                 "案内だけ出して画面に手掛かりが無い状態を残さない");
-        _viewModel.HistoryLedgers.Should().ContainSingle(d => d.Id == 999)
+        _viewModel.History.HistoryLedgers.Should().ContainSingle(d => d.Id == 999)
             .Which.IsRecentlyRecorded.Should().BeFalse("無関係な既存行には印を付けない");
     }
 
@@ -2188,7 +2184,7 @@ public class MainViewModelIntegrationTests
     {
         ArrangeReturnWithHistoryReview();
         await RunReturnFlowAsync();
-        _viewModel.HistoryCard!.CardIdm.Should().Be(CardIdmA, "前提");
+        _viewModel.History.HistoryCard!.CardIdm.Should().Be(CardIdmA, "前提");
 
         var cardB = new IcCard { CardIdm = CardIdmB, CardType = "nimoca", CardNumber = "0001" };
         var resultB = new LendingResult { Success = true, OperationType = LendingOperationType.Return, Balance = 500 };
@@ -2199,9 +2195,9 @@ public class MainViewModelIntegrationTests
 
         await _viewModel.HandleReturnSuccessAsync(cardB, resultB);
 
-        _viewModel.HistoryCard!.CardIdm.Should().Be(CardIdmB, "誰も使っていない返却確認は新しい返却の確認へ置き換える");
-        _viewModel.IsReturnHistoryReview.Should().BeTrue();
-        _viewModel.HistoryLedgers.Should().ContainSingle(d => d.Id == 201).Which.IsRecentlyRecorded.Should().BeTrue();
+        _viewModel.History.HistoryCard!.CardIdm.Should().Be(CardIdmB, "誰も使っていない返却確認は新しい返却の確認へ置き換える");
+        _viewModel.History.IsReturnHistoryReview.Should().BeTrue();
+        _viewModel.History.HistoryLedgers.Should().ContainSingle(d => d.Id == 201).Which.IsRecentlyRecorded.Should().BeTrue();
         _toastMock.Verify(t => t.ShowInfo(It.IsAny<string>(), It.IsAny<string>()), Times.Never);
     }
 
@@ -2213,7 +2209,7 @@ public class MainViewModelIntegrationTests
     {
         ArrangeReturnWithHistoryReview();
         await RunReturnFlowAsync();
-        _viewModel.IsReturnHistoryReview.Should().BeTrue("前提");
+        _viewModel.History.IsReturnHistoryReview.Should().BeTrue("前提");
 
         // 返却後のカード A は貸出中ではないので、待機中のタッチは履歴表示になる
         _cardRepositoryMock.Setup(r => r.GetByIdmAsync(CardIdmA, It.IsAny<bool>()))
@@ -2223,9 +2219,9 @@ public class MainViewModelIntegrationTests
         RaiseCardRead(CardIdmA);
         await _dispatcherService.WaitForPendingAsync();
 
-        _viewModel.IsHistoryVisible.Should().BeTrue();
-        _viewModel.IsReturnHistoryReview.Should().BeFalse("手動で開いた履歴は返却確認ではない");
-        _viewModel.HistoryLedgers.Should().OnlyContain(d => !d.IsRecentlyRecorded, "強調は返却確認の間だけ");
+        _viewModel.History.IsHistoryVisible.Should().BeTrue();
+        _viewModel.History.IsReturnHistoryReview.Should().BeFalse("手動で開いた履歴は返却確認ではない");
+        _viewModel.History.HistoryLedgers.Should().OnlyContain(d => !d.IsRecentlyRecorded, "強調は返却確認の間だけ");
     }
 
     /// <summary>
@@ -2236,12 +2232,12 @@ public class MainViewModelIntegrationTests
     {
         ArrangeReturnWithHistoryReview();
         await RunReturnFlowAsync();
-        _viewModel.MarkReturnHistoryReviewTouched();
+        _viewModel.History.MarkReturnHistoryReviewTouched();
 
-        _viewModel.CloseHistory();
+        _viewModel.History.CloseHistory();
 
-        _viewModel.IsHistoryVisible.Should().BeFalse();
-        _viewModel.IsReturnHistoryReview.Should().BeFalse();
+        _viewModel.History.IsHistoryVisible.Should().BeFalse();
+        _viewModel.History.IsReturnHistoryReview.Should().BeFalse();
     }
 
     /// <summary>
@@ -2261,9 +2257,9 @@ public class MainViewModelIntegrationTests
 
         _toastMock.Verify(t => t.ShowRecordedNotice(
             It.Is<string>(title => title.Contains("記録済み")), It.IsAny<string>()), Times.Once, "前提: #1805 の経路");
-        _viewModel.IsHistoryVisible.Should().BeTrue("記録は確定しているので確認させる");
-        _viewModel.IsReturnHistoryReview.Should().BeTrue();
-        _viewModel.HistoryCard!.CardIdm.Should().Be(CardIdmA);
+        _viewModel.History.IsHistoryVisible.Should().BeTrue("記録は確定しているので確認させる");
+        _viewModel.History.IsReturnHistoryReview.Should().BeTrue();
+        _viewModel.History.HistoryCard!.CardIdm.Should().Be(CardIdmA);
     }
 
     /// <summary>
@@ -2278,10 +2274,10 @@ public class MainViewModelIntegrationTests
         RaiseCardRead(CardIdmB);
         await _dispatcherService.WaitForPendingAsync();
 
-        _viewModel.MarkReturnHistoryReviewTouched();
+        _viewModel.History.MarkReturnHistoryReviewTouched();
 
-        _viewModel.IsReturnHistoryReview.Should().BeFalse();
-        _viewModel.IsHistoryVisible.Should().BeTrue();
+        _viewModel.History.IsReturnHistoryReview.Should().BeFalse();
+        _viewModel.History.IsHistoryVisible.Should().BeTrue();
     }
 
     #endregion

@@ -97,14 +97,14 @@ public partial class MainViewModel
         if (viewModel?.HasImported == true)
         {
             await RefreshDashboardAsync();
-            if (IsHistoryVisible)
+            if (History.IsHistoryVisible)
             {
-                await LoadHistoryLedgersAsync();
+                await History.LoadHistoryLedgersAsync();
             }
             // Issue #1058: インポート後に警告・残高整合性チェックを実行
             // CheckAndNotifyConsistencyAsyncはHistoryCard依存のため、全カード対象チェックを使用
             await CheckWarningsAsync();
-            await CheckAllCardsConsistencyAsync();
+            await History.CheckAllCardsConsistencyAsync();
         }
     }
 
@@ -175,12 +175,7 @@ public partial class MainViewModel
     {
         if (item == null) return;
 
-        _balanceInconsistencies.Clear();
-        var card = await _cardRepository.GetByIdmAsync(item.CardIdm);
-        if (card != null)
-        {
-            await ShowHistoryAsync(card);
-        }
+        await History.ShowCardHistoryAsync(await _cardRepository.GetByIdmAsync(item.CardIdm));
     }
 
     /// <summary>
@@ -195,12 +190,7 @@ public partial class MainViewModel
         {
             case WarningType.LowBalance:
                 // 残額警告: 直接カード履歴を表示
-                _balanceInconsistencies.Clear();
-                var lowBalanceCard = await _cardRepository.GetByIdmAsync(warning.CardIdm);
-                if (lowBalanceCard != null)
-                {
-                    await ShowHistoryAsync(lowBalanceCard);
-                }
+                await History.ShowCardHistoryAsync(await _cardRepository.GetByIdmAsync(warning.CardIdm));
                 break;
 
             case WarningType.CardBalanceMismatch:
@@ -208,12 +198,7 @@ public partial class MainViewModel
                 // 文言が「履歴を確認し」と案内する以上、クリックでその履歴へ到達できること。
                 // ここで再判定はしない（実残額はカードがリーダーに載っているときしか読めず、
                 // 読めないまま「解消した」と判断すると警告が黙って消える）。
-                _balanceInconsistencies.Clear();
-                var mismatchCard = await _cardRepository.GetByIdmAsync(warning.CardIdm);
-                if (mismatchCard != null)
-                {
-                    await ShowHistoryAsync(mismatchCard);
-                }
+                await History.ShowCardHistoryAsync(await _cardRepository.GetByIdmAsync(warning.CardIdm));
                 break;
 
             case WarningType.BalanceInconsistency:
@@ -221,15 +206,8 @@ public partial class MainViewModel
                 var card = await _cardRepository.GetByIdmAsync(warning.CardIdm);
                 if (card != null)
                 {
-                    // Issue #2007: 導入時残高の誤りなら、導入行（何年も前になり得る）を画面に出すため
-                    // その日付から表示する。当月だけ表示すると直すべき行が期間外で見えない。
-                    var fullPeriodResult = await _ledgerConsistencyChecker.CheckBalanceConsistencyAsync(
-                        card.CardIdm, FullPeriodStart, FullPeriodEnd);
-                    await ShowHistoryAsync(card, fullPeriodResult.InitialBalanceCorrection?.Date);
-                    // ShowHistoryAsync後に期間が確定するため、ここで整合性チェック＆ハイライト適用
-                    // CheckAndNotifyConsistencyAsync内で_balanceInconsistenciesの更新とマーキングを行う
-                    // （全期間の結果は直前に取ったものを渡して再取得しない）
-                    await CheckAndNotifyConsistencyAsync(fullPeriodResult);
+                    // Issue #2007: 導入時残高の誤りなら導入行の日付から表示する（期間の決定とハイライトは履歴パネル側）
+                    await History.ShowBalanceInconsistencyAsync(card);
                 }
                 break;
 
@@ -238,9 +216,9 @@ public partial class MainViewModel
                 _navigationService.ShowDialog<Views.Dialogs.IncompleteBusStopDialog>();
 
                 // Issue #1010: バス停名入力後に履歴画面を即時反映
-                if (IsHistoryVisible)
+                if (History.IsHistoryVisible)
                 {
-                    await LoadHistoryLedgersAsync();
+                    await History.LoadHistoryLedgersAsync();
                 }
 
                 // ダイアログ内でバス停名が入力された可能性があるため、警告を更新

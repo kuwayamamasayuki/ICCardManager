@@ -384,6 +384,14 @@
 - **Stop フック `check-doc-sync.sh` のタイムアウトを 15 秒から 60 秒へ引き上げた**。OneDrive 上（`/mnt/d`、DrvFs）の `git status --porcelain` と `git log --name-only` が 15 秒に収まらず、直近の実行 3 回すべてがタイムアウトで打ち切られ、ドキュメント同期の確認が一度も機能していなかった
 
 **リファクタリング**
+- Issue #2159 **メイン画面の履歴パネルを `MainViewModel` から子の ViewModel `HistoryPanelViewModel` へ抽出した（第 2 段）**
+  - 履歴の表示（期間・ページ送り・繰越行・残高不整合のハイライト）、行の追加・変更・削除、統合と取り消し、返却確認（返却直後の履歴自動表示）を `ViewModels/HistoryPanelViewModel.cs` と `ViewModels/HistoryPanel/HistoryPanelViewModel.*.cs` へ移した。`MainViewModel` は `History` として公開し、メイン画面の履歴エリアは `DataContext="{Binding History}"` で束縛する
+  - `MainViewModel` のコンストラクタ依存は 25 → 21 になった（`DbContext`・職員認証・履歴統合・操作ログ・整合性チェックが履歴パネル側へ移った）
+  - 警告エリア・残高ダッシュボード・貸出中一覧・処理中オーバーレイはメイン画面が持つため、履歴パネルは `IHistoryPanelHost` を通して頼む。履歴削除の「一覧の再読込 → ダッシュボード → 警告 → 競合の案内」のように親の処理の完了を待つ順序が仕様なので、`IMessenger` ではなくインターフェースにした
+  - 抽出で境界を数え直したところ、**貸出中レコードを履歴から削除して貸出状態を戻しても、メイン画面の「貸出中」一覧を読み直していなかった**（次のカード操作か共有モードの定期更新まで一覧に残っていた）。貸出状態を戻したときだけ読み直すようにした
+  - 履歴の単体テストを `MainViewModelTests` から `HistoryPanelViewModelTests` へ移した（メイン画面を組み立てず、記録用のホストで「親へ何を頼んだか」を表明する）。親との実配線（不整合警告が親の警告エリアに届く／貸出中一覧が読み直される）は `MainViewModelTests` に残した
+  - 履歴エリアの束縛がすべて `HistoryPanelViewModel`（または一覧の行）に実在するメンバーを指すことを静的検査で固定した（WPF は存在しないプロパティへの束縛を例外にせず無言で空にする）。トースト位置の断定表現の検査と撮影対応表は、抽出で走査範囲が縮まないよう履歴パネルのファイルも対象に加えた
+  - テスト: 単体 8,244 → 8,274（+30。移設した 68 件は件数に含まず、ホストとの境界 7・親との連携 3・履歴エリアの束縛検査 18・走査範囲の導出 1・撮影対応表 1）・合計 8,316 → 8,346
 - Issue #2158 **4,300 行を超えていた `MainViewModel` を、挙動を変えずに責務ごとの partial ファイルへ分割した（第 1 段）**
   - 本体 `ViewModels/MainViewModel.cs`（フィールド・コンストラクタ・状態遷移・タイムアウト・終了）に骨格を残し、起動・カードタッチ・返却後処理・未登録カード・履歴パネル・履歴編集・履歴統合・ダイアログ起動・DEBUG 仮想タッチを `ViewModels/Main/MainViewModel.*.cs` の 9 ファイルへ移した。コードの移動のみで、ロジックの変更は含まない（`#if DEBUG` は `MainViewModel.Debug.cs` に閉じた）
   - `MainViewModel.cs` をファイル名で読んでいた静的検査 8 件は、分割後に走査対象を失って緑のまま空振りする形だったため、テスト側に `MainViewModelSourceFiles`（`partial class MainViewModel` の宣言から構成ファイルを導出）を置いて追随させた

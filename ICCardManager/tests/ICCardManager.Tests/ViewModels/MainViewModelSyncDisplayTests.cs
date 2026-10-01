@@ -248,12 +248,8 @@ public class MainViewModelSyncDisplayTests
             settingsRepositoryMock.Object,
             lendingService,
             new Mock<IToastNotificationService>().Object,
-            new Mock<IStaffAuthService>().Object,
-            ledgerMergeService,
             new Mock<IMessenger>().Object,
             new Mock<INavigationService>().Object,
-            operationLoggerMock.Object,
-            ledgerConsistencyChecker,
             Options.Create(new AppOptions()),
             timerFactory,
             dispatcherService,
@@ -263,7 +259,7 @@ public class MainViewModelSyncDisplayTests
             warningService,
             dashboardService,
             new Mock<ICCardManager.Services.ISafeFileLauncher>().Object,
-            dbContext);
+            new HistoryPanelViewModel(ledgerRepositoryMock.Object, cardRepositoryMock.Object, dbContext, new Mock<IStaffAuthService>().Object, ledgerMergeService, new Mock<INavigationService>().Object, operationLoggerMock.Object, ledgerConsistencyChecker, new Mock<IToastNotificationService>().Object));
 
         vm.IsSharedMode.Should().BeTrue("テスト用DbContext(:memory:)は共有モード扱い");
 
@@ -358,12 +354,8 @@ public class MainViewModelSyncDisplayTests
             settingsRepositoryMock.Object,
             lendingService,
             new Mock<IToastNotificationService>().Object,
-            new Mock<IStaffAuthService>().Object,
-            ledgerMergeService,
             new Mock<IMessenger>().Object,
             new Mock<INavigationService>().Object,
-            operationLoggerMock.Object,
-            ledgerConsistencyChecker,
             Options.Create(new AppOptions()),
             timerFactory,
             dispatcherService,
@@ -373,7 +365,7 @@ public class MainViewModelSyncDisplayTests
             warningService,
             dashboardService,
             new Mock<ICCardManager.Services.ISafeFileLauncher>().Object,
-            dbContext);
+            new HistoryPanelViewModel(ledgerRepositoryMock.Object, cardRepositoryMock.Object, dbContext, new Mock<IStaffAuthService>().Object, ledgerMergeService, new Mock<INavigationService>().Object, operationLoggerMock.Object, ledgerConsistencyChecker, new Mock<IToastNotificationService>().Object));
 
         return (vm, ledgerRepositoryMock);
     }
@@ -394,8 +386,8 @@ public class MainViewModelSyncDisplayTests
         var (vm, ledgerRepositoryMock) = CreateSharedModeViewModel();
         vm.IsSharedMode.Should().BeTrue(":memory: DbContext は共有モード扱い（前提確認）");
 
-        vm.HistoryCard = new CardDto { CardIdm = HistoryCardIdm };
-        vm.IsHistoryVisible = true;
+        vm.History.HistoryCard = new CardDto { CardIdm = HistoryCardIdm };
+        vm.History.IsHistoryVisible = true;
 
         // Act
         await vm.ManualRefreshCommand.ExecuteAsync(null);
@@ -413,8 +405,8 @@ public class MainViewModelSyncDisplayTests
     {
         // Arrange
         var (vm, ledgerRepositoryMock) = CreateSharedModeViewModel();
-        vm.HistoryCard = new CardDto { CardIdm = HistoryCardIdm };
-        vm.IsHistoryVisible = false; // 履歴画面を閉じた状態
+        vm.History.HistoryCard = new CardDto { CardIdm = HistoryCardIdm };
+        vm.History.IsHistoryVisible = false; // 履歴画面を閉じた状態
 
         // Act
         await vm.ManualRefreshCommand.ExecuteAsync(null);
@@ -432,8 +424,8 @@ public class MainViewModelSyncDisplayTests
     {
         // Arrange
         var (vm, ledgerRepositoryMock) = CreateSharedModeViewModel();
-        vm.HistoryCard = new CardDto { CardIdm = HistoryCardIdm };
-        vm.IsHistoryVisible = true;
+        vm.History.HistoryCard = new CardDto { CardIdm = HistoryCardIdm };
+        vm.History.IsHistoryVisible = true;
         vm.CurrentState = AppState.Processing; // カードタッチ対応中を模擬
 
         // Act

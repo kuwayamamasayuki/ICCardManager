@@ -69,7 +69,7 @@ public class LedgerRowEditDialogCloseConventionTests
 /// <remarks>
 /// 旧実装は <c>MouseDoubleClick</c> を <c>ListView</c> 全体に付けていたため、行を選んだあとの
 /// スクロールバーや列見出しのダブルクリックでも取り消しへ進んだ（取り消しの確認は
-/// <c>MainViewModel.ConfirmAndExecuteUnmergeAsync</c> が持ち、<c>MainViewModelIntegrationTests</c> が固定する）。
+/// <c>HistoryPanelViewModel.ConfirmAndExecuteUnmergeAsync</c> が持ち、<c>MainViewModelIntegrationTests</c> が固定する）。
 /// 「内容」列は固定幅 320 で、省略記号もツールチップも無く、長い内容が黙って切れていた（#2076）。
 /// </remarks>
 public class MergeHistoryDialogConventionTests

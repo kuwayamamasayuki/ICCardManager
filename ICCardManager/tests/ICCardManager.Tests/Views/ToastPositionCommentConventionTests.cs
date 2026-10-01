@@ -44,9 +44,13 @@ public class ToastPositionCommentConventionTests
     /// Issue #2158: <c>MainViewModel</c> は責務ごとの partial ファイルへ分割されており、トーストを出す処理は
     /// 本体以外（カードタッチ・返却後処理・起動 等）にある。<c>MainViewModel.cs</c> だけをファイル名で
     /// 載せると、分割後の記述が検査から静かに漏れるため、宣言から導出する（<see cref="MainViewModelSourceFiles"/>）。
+    /// Issue #2159: 返却確認のトースト（「返却した履歴の確認」）を出す処理は、<c>MainViewModel</c> から抽出した
+    /// 履歴パネル（<c>HistoryPanelViewModel</c>）にある。<see cref="MainViewModelSourceFiles"/> だけでは
+    /// 抽出によって走査範囲が静かに縮むため、履歴パネルの構成ファイル（<see cref="HistoryPanelViewModelSourceFiles"/>）も加える。
     /// </remarks>
     private static IEnumerable<KeyValuePair<string, bool>> EnumerateToastRelatedSources()
         => ToastRelatedSources.Concat(MainViewModelSourceFiles.All
+            .Concat(HistoryPanelViewModelSourceFiles.All)
             .Select(f => new KeyValuePair<string, bool>(f.RelativePath, false)));
 
     /// <summary>
