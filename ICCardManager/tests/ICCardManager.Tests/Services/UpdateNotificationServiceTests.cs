@@ -39,7 +39,9 @@ public class UpdateNotificationServiceTests : IDisposable
         try
         {
             if (Directory.Exists(_testDirectory))
+            {
                 Directory.Delete(_testDirectory, recursive: true);
+            }
         }
         catch { }
         GC.SuppressFinalize(this);
@@ -298,7 +300,9 @@ public class UpdateNotificationServiceTests : IDisposable
         {
             File.WriteAllText(path, "x");
             if (path != fresh)
+            {
                 File.SetLastWriteTimeUtc(path, old);
+            }
         }
 
         // 記載が同じ（＝書き込みは起きない）起動でも回収は行う
@@ -312,7 +316,9 @@ public class UpdateNotificationServiceTests : IDisposable
         File.Exists(fresh).Should().BeTrue("他 PC が書き込み中の可能性がある新しい一時ファイルは消さない");
         File.Exists(unrelated).Should().BeTrue("形の違う .tmp（バックアップの一時ファイル等）は消さない");
         foreach (var path in lookalikes)
+        {
             File.Exists(path).Should().BeTrue($"一時名の形に一致しない {Path.GetFileName(path)} は消さない");
+        }
     }
 
     [Fact]
@@ -389,7 +395,10 @@ public class UpdateNotificationServiceTests : IDisposable
         internal override void ReplaceFile(string tempPath, string filePath)
         {
             if (_destinationLost)
+            {
                 File.Delete(filePath);
+            }
+
             throw new IOException("ReplaceFile に失敗しました（テストで再現）");
         }
     }

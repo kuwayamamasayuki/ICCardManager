@@ -1,18 +1,18 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Data;
-using System.Linq;
-using System.Threading;
-using System.Threading.Tasks;
+using System.Data.SQLite;
 using System.IO;
+using System.Linq;
 using System.Security.AccessControl;
 using System.Security.Principal;
+using System.Threading;
+using System.Threading.Tasks;
 using ICCardManager.Common;
 using ICCardManager.Common.Exceptions;
 using ICCardManager.Data.Migrations;
 using ICCardManager.Services;
 using Microsoft.Extensions.Logging;
-using System.Data.SQLite;
 
 namespace ICCardManager.Data
 {
@@ -115,7 +115,7 @@ namespace ICCardManager.Data
         }
     }
 
-/// <summary>
+    /// <summary>
     /// SQLiteデータベース接続管理クラス
     /// </summary>
     public class DbContext : IDisposable, IDatabaseInfo
@@ -411,7 +411,9 @@ namespace ICCardManager.Data
         internal static bool IsUncPath(string path)
         {
             if (string.IsNullOrEmpty(path))
+            {
                 return false;
+            }
 
             try
             {
@@ -453,17 +455,23 @@ namespace ICCardManager.Data
         internal static bool IsNetworkDrive(string path, Func<string, DriveType> driveTypeResolver)
         {
             if (string.IsNullOrWhiteSpace(path))
+            {
                 return false;
+            }
 
             try
             {
                 var root = Path.GetPathRoot(path);
                 if (string.IsNullOrEmpty(root))
+                {
                     return false;
+                }
 
                 // UNCはここで除外（IsUncPathで判定する責務分離）
                 if (root.StartsWith(@"\\", StringComparison.Ordinal))
+                {
                     return false;
+                }
 
                 return driveTypeResolver(root) == DriveType.Network;
             }
@@ -660,7 +668,7 @@ namespace ICCardManager.Data
         /// 値が null のとき既定検出（<see cref="DefaultIsOnUiThread"/>）を使用する。
         /// テストから差し替え可能（内部 API）。
         /// </summary>
-        private static readonly AsyncLocal<Func<bool>?> _isOnUiThreadOverride = new();
+        private static readonly AsyncLocal<Func<bool>?> IsOnUiThreadOverride = new();
 
         /// <summary>
         /// UI スレッド検出のオーバーライド用プロパティ（テスト専用）。
@@ -669,8 +677,8 @@ namespace ICCardManager.Data
         /// </summary>
         internal static Func<bool> IsOnUiThread
         {
-            get => _isOnUiThreadOverride.Value ?? DefaultIsOnUiThread;
-            set => _isOnUiThreadOverride.Value = value;
+            get => IsOnUiThreadOverride.Value ?? DefaultIsOnUiThread;
+            set => IsOnUiThreadOverride.Value = value;
         }
 
         /// <summary>
@@ -1134,7 +1142,9 @@ namespace ICCardManager.Data
             var appVersion = runner.GetLatestKnownVersion();
 
             if (databaseVersion <= appVersion)
+            {
                 return;
+            }
 
             // ブロックメッセージ用に、DBを更新した側のアプリバージョンを取得する。
             // settings テーブルやキーが存在しない場合は null（フォールバック文言になる）
@@ -1845,7 +1855,9 @@ ON CONFLICT(key) DO UPDATE SET value = excluded.value";
         public bool CheckConnection()
         {
             if (IsConnectionSuspended)
+            {
                 return true;
+            }
 
             Task<bool> check;
             lock (_connectionCheckLock)
@@ -1952,13 +1964,17 @@ ON CONFLICT(key) DO UPDATE SET value = excluded.value";
         private void LogConnectionCheckOutcome(string failedStage, long queryMs, long? probeMs, bool isConnected)
         {
             if (_logger == null)
+            {
                 return;
+            }
 
             var isSlow = queryMs >= SlowConnectionCheckThresholdMs
                          || (probeMs ?? 0) >= SlowConnectionCheckThresholdMs;
 
             if (isConnected && !isSlow)
+            {
                 return;
+            }
 
             _logger.LogInformation(
                 "DB接続疎通確認: 結果={IsConnected}{FailedStage}（クエリ {QueryMs}ms、ファイル到達確認 {ProbeMs}）{DatabasePath}",
@@ -2003,7 +2019,9 @@ ON CONFLICT(key) DO UPDATE SET value = excluded.value";
         protected virtual bool ProbeDatabaseFileReachable()
         {
             if (IsInMemoryDatabasePath(DatabasePath))
+            {
                 return true;
+            }
 
             return File.Exists(DatabasePath);
         }
@@ -2037,12 +2055,16 @@ ON CONFLICT(key) DO UPDATE SET value = excluded.value";
         public bool CheckWritable()
         {
             if (IsConnectionSuspended)
+            {
                 return true;
+            }
 
             // 別の書き込みトランザクションが進行中の場合、BEGIN が二重開始で失敗して
             // 誤って「書込不可」と報告してしまう。書き込みが現に機能している状況なので true を返す
             if (HasActiveTransactionScope)
+            {
                 return true;
+            }
 
             try
             {
@@ -2110,7 +2132,9 @@ ON CONFLICT(key) DO UPDATE SET value = excluded.value";
         private void LogWritableCheckFailure(Exception ex)
         {
             if (_logger == null)
+            {
                 return;
+            }
 
             var resultCode = ex is SQLiteException sqliteException
                 ? sqliteException.ResultCode.ToString()

@@ -1,10 +1,10 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
 namespace ICCardManager.Services
 {
-/// <summary>
+    /// <summary>
     /// バリデーション結果
     /// </summary>
     public class ValidationResult

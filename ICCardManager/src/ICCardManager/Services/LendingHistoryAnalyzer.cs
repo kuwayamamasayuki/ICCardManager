@@ -87,13 +87,23 @@ namespace ICCardManager.Services
 
             for (int i = 0; i < dailyDetails.Count; i++)
             {
-                if (processedIndices.Contains(i)) continue;
+                if (processedIndices.Contains(i))
+                {
+                    continue;
+                }
 
                 var current = dailyDetails[i];
 
                 // チャージレコードを探す
-                if (!current.IsCharge) continue;
-                if (!current.Balance.HasValue || !current.Amount.HasValue) continue;
+                if (!current.IsCharge)
+                {
+                    continue;
+                }
+
+                if (!current.Balance.HasValue || !current.Amount.HasValue)
+                {
+                    continue;
+                }
 
                 var chargeAfterBalance = current.Balance.Value;
                 var chargeAmount = current.Amount.Value;
@@ -102,13 +112,23 @@ namespace ICCardManager.Services
                 // 対応する利用レコードを探す
                 for (int j = 0; j < dailyDetails.Count; j++)
                 {
-                    if (i == j || processedIndices.Contains(j)) continue;
+                    if (i == j || processedIndices.Contains(j))
+                    {
+                        continue;
+                    }
 
                     var candidate = dailyDetails[j];
 
                     // 利用レコード（チャージでもポイント還元でもない）
-                    if (candidate.IsCharge || candidate.IsPointRedemption) continue;
-                    if (!candidate.Balance.HasValue || !candidate.Amount.HasValue) continue;
+                    if (candidate.IsCharge || candidate.IsPointRedemption)
+                    {
+                        continue;
+                    }
+
+                    if (!candidate.Balance.HasValue || !candidate.Amount.HasValue)
+                    {
+                        continue;
+                    }
 
                     var usageAmount = candidate.Amount.Value;
                     var usageAfterBalance = candidate.Balance.Value;
@@ -160,7 +180,9 @@ namespace ICCardManager.Services
         internal static List<DailySegment> SplitAtChargeBoundaries(List<LedgerDetail> dailyDetails)
         {
             if (dailyDetails.Count == 0)
+            {
                 return new List<DailySegment>();
+            }
 
             // 時系列順（古い順）に並べ替え
             var chronological = SortChronologically(dailyDetails);

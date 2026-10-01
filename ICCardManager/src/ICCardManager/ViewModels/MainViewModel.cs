@@ -1,6 +1,7 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
+using System.Globalization;
 using System.Linq;
 using System.Threading.Tasks;
 using System.Windows;
@@ -13,17 +14,16 @@ using ICCardManager.Common.Messages;
 using ICCardManager.Data;
 using ICCardManager.Data.Repositories;
 using ICCardManager.Dtos;
-using ICCardManager.Infrastructure.CardReader;
-using ICCardManager.Infrastructure.Sound;
 using ICCardManager.Infrastructure.Caching;
+using ICCardManager.Infrastructure.CardReader;
 using ICCardManager.Infrastructure.Security;
+using ICCardManager.Infrastructure.Sound;
 using ICCardManager.Infrastructure.Timing;
 using ICCardManager.Models;
 using ICCardManager.Services;
 using ICCardManager.Views.Helpers;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
-using System.Globalization;
 
 
 namespace ICCardManager.ViewModels;
@@ -167,7 +167,11 @@ public partial class MainViewModel : ViewModelBase, IHistoryPanelHost
 
         public void Dispose()
         {
-            if (_disposed) return;
+            if (_disposed)
+            {
+                return;
+            }
+
             _disposed = true;
             if (_acquired)
             {
@@ -410,9 +414,13 @@ public partial class MainViewModel : ViewModelBase, IHistoryPanelHost
         _messenger.Register<CardReadingSuppressedMessage>(this, (recipient, message) =>
         {
             if (message.Value)
+            {
                 _suppressionSources.Add(message.Source);
+            }
             else
+            {
                 _suppressionSources.Remove(message.Source);
+            }
         });
 
         // イベント登録

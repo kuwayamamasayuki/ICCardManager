@@ -1,14 +1,14 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
+using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
-using System.IO;
-using System.Text.RegularExpressions;
 
 namespace ICCardManager.Common
 {
-/// <summary>
+    /// <summary>
     /// ファイルパスの検証を行うユーティリティクラス
     /// </summary>
     public static partial class PathValidator
@@ -361,7 +361,10 @@ namespace ICCardManager.Common
         /// </remarks>
         internal static bool ContainsPathTraversal(string path)
         {
-            if (string.IsNullOrWhiteSpace(path)) return false;
+            if (string.IsNullOrWhiteSpace(path))
+            {
+                return false;
+            }
 
             try
             {
@@ -425,7 +428,10 @@ namespace ICCardManager.Common
         /// </remarks>
         internal static bool ContainsTraversalSegment(string path)
         {
-            if (string.IsNullOrEmpty(path)) return false;
+            if (string.IsNullOrEmpty(path))
+            {
+                return false;
+            }
 
             // 区切り文字は \ / の両方を対象にする（混合区切りへの防御）
             var segments = path.Split(new[] { '\\', '/' }, StringSplitOptions.RemoveEmptyEntries);
@@ -484,7 +490,7 @@ namespace ICCardManager.Common
         /// xUnit が並列実行する他テストや本番経路（sync 版 <see cref="ValidateBackupPath(string)"/> を含む）
         /// へ漏れない（<c>DbContext.IsOnUiThread</c> と同じ機構。Issue #1372 参照）。
         /// </summary>
-        private static readonly AsyncLocal<Func<string, int, bool>> _uncReachabilityCheckerOverride = new();
+        private static readonly AsyncLocal<Func<string, int, bool>> UncReachabilityCheckerOverride = new();
 
         /// <summary>
         /// 公開エントリポイント（<see cref="ValidateBackupPath(string)"/> /
@@ -503,8 +509,8 @@ namespace ICCardManager.Common
         /// </remarks>
         internal static Func<string, int, bool> UncReachabilityChecker
         {
-            get => _uncReachabilityCheckerOverride.Value ?? DefaultUncReachabilityChecker;
-            set => _uncReachabilityCheckerOverride.Value = value;
+            get => UncReachabilityCheckerOverride.Value ?? DefaultUncReachabilityChecker;
+            set => UncReachabilityCheckerOverride.Value = value;
         }
 
         /// <summary>
@@ -513,14 +519,20 @@ namespace ICCardManager.Common
         /// </summary>
         internal static string ExtractUncRoot(string path)
         {
-            if (!IsUncPath(path)) return null;
+            if (!IsUncPath(path))
+            {
+                return null;
+            }
 
             // プレフィクス `\\` または `//` を除去
             var withoutPrefix = path.Substring(2);
             var separators = new[] { '\\', '/' };
             var parts = withoutPrefix.Split(separators, StringSplitOptions.RemoveEmptyEntries);
 
-            if (parts.Length < 2) return null;
+            if (parts.Length < 2)
+            {
+                return null;
+            }
 
             // サーバー名と共有名を \\ 区切りで結合（正規化のため \ で統一）
             return @"\\" + parts[0] + @"\" + parts[1];

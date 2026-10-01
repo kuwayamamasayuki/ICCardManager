@@ -1,12 +1,11 @@
-using FluentAssertions;
-using ICCardManager.Data;
-using System.Data.SQLite;
-using Xunit;
-
 using System;
 using System.Collections.Generic;
+using System.Data.SQLite;
 using System.Linq;
 using System.Threading.Tasks;
+using FluentAssertions;
+using ICCardManager.Data;
+using Xunit;
 
 
 namespace ICCardManager.Tests.Data.Migrations;

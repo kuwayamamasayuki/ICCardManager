@@ -1,11 +1,17 @@
-﻿using CommunityToolkit.Mvvm.Messaging;
+using System;
+using System.Collections.Generic;
+using System.Data.SQLite;
+using System.Linq;
+using System.Text.Json;
+using System.Threading.Tasks;
+using CommunityToolkit.Mvvm.Messaging;
 using FluentAssertions;
+using ICCardManager.Data;
 using ICCardManager.Data.Repositories;
 using ICCardManager.Dtos;
 using ICCardManager.Infrastructure.CardReader;
 using ICCardManager.Infrastructure.Timing;
 using ICCardManager.Models;
-using ICCardManager.Data;
 using ICCardManager.Services;
 using ICCardManager.Tests.Infrastructure.Timing;
 using ICCardManager.ViewModels;
@@ -15,13 +21,6 @@ using Microsoft.Extensions.Options;
 using Moq;
 using Xunit;
 using IOperationLogRepository = ICCardManager.Data.Repositories.IOperationLogRepository;
-
-using System;
-using System.Collections.Generic;
-using System.Data.SQLite;
-using System.Linq;
-using System.Text.Json;
-using System.Threading.Tasks;
 
 
 namespace ICCardManager.Tests.ViewModels;
@@ -854,13 +853,18 @@ public class CardManageViewModelTests : IDisposable
         {
             if (e.PropertyName == nameof(CardManageViewModel.NewlyRegisteredIdm)
                 && _viewModel.NewlyRegisteredIdm != null)
+            {
                 propertyChangedCount++;
+            }
         };
 
         // Act: 2回目（同じIDm）— 更新として
         var existingCard = new CardDto
         {
-            CardIdm = idm, CardType = "はやかけん", CardNumber = "H-001", IsLent = false
+            CardIdm = idm,
+            CardType = "はやかけん",
+            CardNumber = "H-001",
+            IsLent = false
         };
         _viewModel.SelectedCard = existingCard;
         _viewModel.StartEdit();

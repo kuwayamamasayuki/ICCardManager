@@ -1,4 +1,8 @@
+using System;
+using System.Collections.Generic;
 using System.IO;
+using System.Linq;
+using System.Threading.Tasks;
 using ClosedXML.Excel;
 using FluentAssertions;
 using ICCardManager.Common;
@@ -7,11 +11,6 @@ using ICCardManager.Models;
 using ICCardManager.Services;
 using Moq;
 using Xunit;
-
-using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Threading.Tasks;
 
 
 namespace ICCardManager.Tests.Services;

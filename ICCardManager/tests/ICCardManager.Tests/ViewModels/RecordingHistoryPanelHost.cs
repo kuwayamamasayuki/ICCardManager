@@ -106,7 +106,11 @@ internal sealed class RecordingHistoryPanelHost : IHistoryPanelHost
 
         public void Dispose()
         {
-            if (_owner == null) return;
+            if (_owner == null)
+            {
+                return;
+            }
+
             _owner.OpenBusyScopes--;
             _owner = null;
         }

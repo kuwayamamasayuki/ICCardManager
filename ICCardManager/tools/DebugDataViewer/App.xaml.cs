@@ -1,11 +1,11 @@
 using System;
 using System.IO;
 using System.Windows;
-using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Logging;
 using ICCardManager.Data;
 using ICCardManager.Infrastructure.CardReader;
 using ICCardManager.Services;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
 namespace DebugDataViewer

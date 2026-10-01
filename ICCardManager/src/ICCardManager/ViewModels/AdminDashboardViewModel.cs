@@ -1,7 +1,8 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.ComponentModel;
+using System.Globalization;
 using System.Linq;
 using System.Threading.Tasks;
 using System.Windows;
@@ -15,7 +16,6 @@ using ICCardManager.Dtos;
 using ICCardManager.Models;
 using ICCardManager.Services;
 using Microsoft.Win32;
-using System.Globalization;
 
 namespace ICCardManager.ViewModels
 {
@@ -74,7 +74,7 @@ namespace ICCardManager.ViewModels
 
         /// <summary>グラフに描画するかどうか</summary>
         [ObservableProperty]
-        private bool isSelected;
+        private bool _isSelected;
     }
 
     /// <summary>
@@ -345,18 +345,18 @@ namespace ICCardManager.ViewModels
 
         /// <summary>集計の基準日時</summary>
         [ObservableProperty]
-        private DateTime asOf = DateTime.Now;
+        private DateTime _asOf = DateTime.Now;
 
         /// <summary>運用状況の集計結果</summary>
         [ObservableProperty]
-        private AdminDashboardOperationStatus operationStatus;
+        private AdminDashboardOperationStatus _operationStatus;
 
         /// <summary>絞り込み後のカード一覧</summary>
         public ObservableCollection<AdminDashboardCardStatus> FilteredCards { get; } = new();
 
         /// <summary>一覧に適用する絞り込み</summary>
         [ObservableProperty]
-        private AdminDashboardCardFilter selectedFilter = AdminDashboardCardFilter.All;
+        private AdminDashboardCardFilter _selectedFilter = AdminDashboardCardFilter.All;
 
         /// <summary>長期未返却と判定する日数</summary>
         /// <remarks>
@@ -364,38 +364,38 @@ namespace ICCardManager.ViewModels
         /// 画面上の切り替えは一時的な絞り込みで、設定へは保存しない。
         /// </remarks>
         [ObservableProperty]
-        private int longTermUnreturnedDays = AppConstants.LongTermUnreturnedDays;
+        private int _longTermUnreturnedDays = AppConstants.LongTermUnreturnedDays;
 
         /// <summary>長期未返却しきい値の選択肢（既定の選択肢 ∪ 設定値、昇順）</summary>
         [ObservableProperty]
-        private IReadOnlyList<int> longTermUnreturnedDayOptions = AppConstants.LongTermUnreturnedDayOptions;
+        private IReadOnlyList<int> _longTermUnreturnedDayOptions = AppConstants.LongTermUnreturnedDayOptions;
 
         /// <summary>利用分析の集計期間（か月）</summary>
         [ObservableProperty]
-        private int analysisMonths = AppConstants.AdminDashboardDefaultMonths;
+        private int _analysisMonths = AppConstants.AdminDashboardDefaultMonths;
 
         /// <summary>利用分析の集計期間の選択肢</summary>
         public IReadOnlyList<int> AnalysisMonthOptions { get; } = new[] { 3, 6, 12, 24, 36 };
 
         /// <summary>利用分析の集計結果</summary>
         [ObservableProperty]
-        private AdminDashboardAnalytics analytics;
+        private AdminDashboardAnalytics _analytics;
 
         /// <summary>利用分析を読み込み済みかどうか</summary>
         [ObservableProperty]
-        private bool isAnalyticsLoaded;
+        private bool _isAnalyticsLoaded;
 
         /// <summary>ステータス表示のメッセージ</summary>
         [ObservableProperty]
-        private string statusMessage = string.Empty;
+        private string _statusMessage = string.Empty;
 
         /// <summary>ステータスがエラーかどうか</summary>
         [ObservableProperty]
-        private bool isStatusError;
+        private bool _isStatusError;
 
         /// <summary>直近に出力した Excel ファイルのパス</summary>
         [ObservableProperty]
-        private string lastExportedFile = string.Empty;
+        private string _lastExportedFile = string.Empty;
 
         #endregion
 
@@ -412,7 +412,7 @@ namespace ICCardManager.ViewModels
 
         /// <summary>稼働状況グラフの高さ（カード数に比例）</summary>
         [ObservableProperty]
-        private double utilizationChartHeight = UtilizationRowHeight;
+        private double _utilizationChartHeight = UtilizationRowHeight;
 
         /// <summary>月別利用額グラフの積み上げ棒</summary>
         public ObservableCollection<ChartBar> UsageBars { get; } = new();

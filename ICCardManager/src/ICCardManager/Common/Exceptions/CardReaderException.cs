@@ -4,7 +4,7 @@ using System.Linq;
 using System.Threading.Tasks;
 namespace ICCardManager.Common.Exceptions
 {
-/// <summary>
+    /// <summary>
     /// カードリーダー関連の例外
     /// </summary>
     public class CardReaderException : AppException

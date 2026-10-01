@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
@@ -7,9 +7,9 @@ using ICCardManager.Data.Repositories;
 using ICCardManager.Dtos;
 using ICCardManager.Models;
 using ICCardManager.Services;
+using ICCardManager.Tests.Infrastructure;
 using ICCardManager.ViewModels;
 using Moq;
-using ICCardManager.Tests.Infrastructure;
 using Xunit;
 
 namespace ICCardManager.Tests.Services;
@@ -341,10 +341,10 @@ public class DashboardServiceTests
         };
         var balances = new Dictionary<string, (int, DateTime?)>
         {
-            ["BBBB000000000001"] = (500,  null),
+            ["BBBB000000000001"] = (500, null),
             ["BBBB000000000002"] = (1000, null),
             ["BBBB000000000003"] = (1500, null),
-            ["BBBB000000000004"] = (100,  null),
+            ["BBBB000000000004"] = (100, null),
             ["BBBB000000000005"] = (2000, null),
         };
         SetupRepositories(cards, balances, warningBalance: 1000);

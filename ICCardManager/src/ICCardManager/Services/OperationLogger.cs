@@ -1,8 +1,8 @@
 using System;
 using System.Collections.Generic;
 using System.Data.SQLite;
-using System.Threading.Tasks;
 using System.Text.Json;
+using System.Threading.Tasks;
 using ICCardManager.Data.Repositories;
 using ICCardManager.Models;
 
@@ -76,7 +76,7 @@ namespace ICCardManager.Services
         }
     }
 
-/// <summary>
+    /// <summary>
     /// 操作ログ記録サービス
     /// </summary>
     /// <remarks>

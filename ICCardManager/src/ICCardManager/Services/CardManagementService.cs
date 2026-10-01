@@ -60,7 +60,10 @@ namespace ICCardManager.Services
         /// </exception>
         public async Task<bool> RegisterAsync(IcCard card)
         {
-            if (card == null) throw new ArgumentNullException(nameof(card));
+            if (card == null)
+            {
+                throw new ArgumentNullException(nameof(card));
+            }
 
             try
             {
@@ -92,8 +95,15 @@ namespace ICCardManager.Services
         /// </exception>
         public async Task<bool> UpdateAsync(IcCard beforeCard, IcCard afterCard)
         {
-            if (beforeCard == null) throw new ArgumentNullException(nameof(beforeCard));
-            if (afterCard == null) throw new ArgumentNullException(nameof(afterCard));
+            if (beforeCard == null)
+            {
+                throw new ArgumentNullException(nameof(beforeCard));
+            }
+
+            if (afterCard == null)
+            {
+                throw new ArgumentNullException(nameof(afterCard));
+            }
 
             try
             {
@@ -119,7 +129,10 @@ namespace ICCardManager.Services
         /// </returns>
         public async Task<CardOperationResult> DeleteAsync(IcCard card)
         {
-            if (card == null) throw new ArgumentNullException(nameof(card));
+            if (card == null)
+            {
+                throw new ArgumentNullException(nameof(card));
+            }
 
             try
             {
@@ -156,7 +169,10 @@ namespace ICCardManager.Services
         /// </remarks>
         public async Task<bool> RestoreAsync(IcCard deletedCard)
         {
-            if (deletedCard == null) throw new ArgumentNullException(nameof(deletedCard));
+            if (deletedCard == null)
+            {
+                throw new ArgumentNullException(nameof(deletedCard));
+            }
 
             try
             {

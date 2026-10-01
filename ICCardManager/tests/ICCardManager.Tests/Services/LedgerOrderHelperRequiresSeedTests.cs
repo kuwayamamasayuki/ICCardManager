@@ -1,10 +1,9 @@
-﻿using FluentAssertions;
+using System;
+using System.Collections.Generic;
+using FluentAssertions;
 using ICCardManager.Models;
 using ICCardManager.Services;
 using Xunit;
-
-using System;
-using System.Collections.Generic;
 
 namespace ICCardManager.Tests.Services;
 

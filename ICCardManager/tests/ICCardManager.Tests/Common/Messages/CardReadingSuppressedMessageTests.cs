@@ -72,9 +72,13 @@ public class CardReadingSuppressedMessageTests
         messenger.Register<CardReadingSuppressedMessage>(recipient, (r, m) =>
         {
             if (m.Value)
+            {
                 suppressionSources.Add(m.Source);
+            }
             else
+            {
                 suppressionSources.Remove(m.Source);
+            }
         });
 
         // Act - 2つのソースから抑制を開始
@@ -104,9 +108,13 @@ public class CardReadingSuppressedMessageTests
         messenger.Register<CardReadingSuppressedMessage>(recipient, (r, m) =>
         {
             if (m.Value)
+            {
                 suppressionSources.Add(m.Source);
+            }
             else
+            {
                 suppressionSources.Remove(m.Source);
+            }
         });
 
         // Act - 抑制開始 → 全解除
@@ -136,9 +144,13 @@ public class CardReadingSuppressedMessageTests
         messenger.Register<CardReadingSuppressedMessage>(recipient, (r, m) =>
         {
             if (m.Value)
+            {
                 suppressionSources.Add(m.Source);
+            }
             else
+            {
                 suppressionSources.Remove(m.Source);
+            }
         });
 
         // Act - 同一ソースを複数回送信

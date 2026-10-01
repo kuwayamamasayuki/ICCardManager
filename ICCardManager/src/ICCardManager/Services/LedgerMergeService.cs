@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text.Json;
@@ -510,7 +510,10 @@ namespace ICCardManager.Services
 
             foreach (var (id, mergedAt, targetLedgerId, description, undoDataJson, isUndone) in rawEntries)
             {
-                if (isUndone) continue;
+                if (isUndone)
+                {
+                    continue;
+                }
 
                 result.Add(new MergeHistoryEntry
                 {
@@ -533,10 +536,16 @@ namespace ICCardManager.Services
             var rawEntries = await _ledgerRepository.GetMergeHistoriesAsync(undoneOnly: false).ConfigureAwait(false);
             var entry = rawEntries.FirstOrDefault(e => e.Id == historyId && !e.IsUndone);
 
-            if (entry.Id == 0) return null;
+            if (entry.Id == 0)
+            {
+                return null;
+            }
 
             var undoData = JsonSerializer.Deserialize<LedgerMergeUndoData>(entry.UndoDataJson, JsonOptions);
-            if (undoData == null) return null;
+            if (undoData == null)
+            {
+                return null;
+            }
 
             return new MergeHistoryEntry
             {
@@ -713,12 +722,18 @@ namespace ICCardManager.Services
                 // バス明細は生成側の出力順そのもの（GetBusStopEmissionOrder）で並べる
                 //（並び順の定義を消費側に書き写さない）
                 var busDetails = SummaryGenerator.GetBusStopEmissionOrder(ledger.Details);
-                if (busDetails.Count == 0) continue;
+                if (busDetails.Count == 0)
+                {
+                    continue;
+                }
 
                 // Issue #1818: 抽出パターンは組織設定 BusLabel から導出する
                 //（生成側だけが設定値を使い、抽出側がリテラルを直書きする乖離の防止）
                 var blocks = SummaryGenerator.ExtractBusStopBlocks(ledger.Summary);
-                if (blocks.Count == 0) continue;
+                if (blocks.Count == 0)
+                {
+                    continue;
+                }
 
                 if (busDetails.Count == 1)
                 {

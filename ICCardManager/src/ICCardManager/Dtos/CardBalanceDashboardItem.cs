@@ -5,7 +5,7 @@ using System.Threading.Tasks;
 using ICCardManager.Common;
 namespace ICCardManager.Dtos
 {
-/// <summary>
+    /// <summary>
     /// カード残高ダッシュボード表示用DTO
     /// メイン画面でカードの残高状況を一覧表示するために使用
     /// </summary>

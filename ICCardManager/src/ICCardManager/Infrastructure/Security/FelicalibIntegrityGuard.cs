@@ -59,7 +59,10 @@ namespace ICCardManager.Infrastructure.Security
         {
             _verifier = verifier ?? throw new ArgumentNullException(nameof(verifier));
             if (string.IsNullOrWhiteSpace(expectedSha256))
+            {
                 throw new ArgumentException("期待するハッシュ値が指定されていません。", nameof(expectedSha256));
+            }
+
             _expectedSha256 = expectedSha256;
         }
 
@@ -79,7 +82,9 @@ namespace ICCardManager.Infrastructure.Security
         public VerificationReport VerifyAt(string directory)
         {
             if (string.IsNullOrWhiteSpace(directory))
+            {
                 throw new ArgumentException("ディレクトリパスが指定されていません。", nameof(directory));
+            }
 
             var dllPath = Path.Combine(directory, FelicalibDllName);
             return _verifier.Verify(dllPath, _expectedSha256);

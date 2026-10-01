@@ -1,9 +1,9 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
-using System.Linq;
-using System.Threading.Tasks;
 using System.Globalization;
+using System.Linq;
 using System.Text.RegularExpressions;
+using System.Threading.Tasks;
 using ICCardManager.Common;
 using ICCardManager.Data.Repositories;
 using ICCardManager.Infrastructure.Security;

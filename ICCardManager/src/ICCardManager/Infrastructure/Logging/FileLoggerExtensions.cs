@@ -9,7 +9,7 @@ using Microsoft.Extensions.Logging.Configuration;
 
 namespace ICCardManager.Infrastructure.Logging
 {
-/// <summary>
+    /// <summary>
     /// ファイルロガーの拡張メソッド
     /// </summary>
     public static class FileLoggerExtensions

@@ -1,12 +1,12 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Linq;
 using System.Threading.Tasks;
-using System.Globalization;
 
 namespace ICCardManager.Common
 {
-/// <summary>
+    /// <summary>
     /// 西暦と和暦の変換を行うユーティリティクラス
     /// </summary>
     public static class WarekiConverter

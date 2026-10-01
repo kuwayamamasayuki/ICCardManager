@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 
 namespace ICCardManager.Dtos
 {
@@ -96,7 +96,9 @@ namespace ICCardManager.Dtos
         public int? GetDaysSinceLastSuccess(DateTime now)
         {
             if (LastSuccessAt == null)
+            {
                 return null;
+            }
 
             // 「日付単位」で数える。同日中の実行は 0 日、前日の実行は 1 日となる。
             var days = (int)(now.Date - LastSuccessAt.Value.Date).TotalDays;

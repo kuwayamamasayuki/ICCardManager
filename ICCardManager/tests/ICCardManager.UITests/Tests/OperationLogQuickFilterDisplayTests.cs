@@ -1,8 +1,8 @@
 using System;
 using System.Linq;
-using FluentAssertions;
 using FlaUI.Core.AutomationElements;
 using FlaUI.Core.Tools;
+using FluentAssertions;
 using ICCardManager.UITests.Infrastructure;
 using ICCardManager.UITests.PageObjects;
 using Xunit;
@@ -155,13 +155,17 @@ namespace ICCardManager.UITests.Tests
             var fromSystemManage = systemManageWindow.ModalWindows
                 .FirstOrDefault(w => w.Name == TestConstants.OperationLogDialogName);
             if (fromSystemManage != null)
+            {
                 return fromSystemManage;
+            }
 
             // (2) MainWindow 配下の ModalWindows
             var fromMainWindow = fixture.MainWindow.ModalWindows
                 .FirstOrDefault(w => w.Name == TestConstants.OperationLogDialogName);
             if (fromMainWindow != null)
+            {
                 return fromMainWindow;
+            }
 
             // (3) アプリ全体の Top-level Windows をフォールバックで走査
             var allWindows = fixture.App.GetAllTopLevelWindows(fixture.Automation);

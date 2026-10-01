@@ -1,8 +1,7 @@
+using System.IO;
 using FluentAssertions;
 using ICCardManager.Infrastructure.CardReader;
 using Xunit;
-
-using System.IO;
 
 namespace ICCardManager.Tests.Infrastructure.CardReader;
 

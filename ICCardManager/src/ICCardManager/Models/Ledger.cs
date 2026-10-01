@@ -5,7 +5,7 @@ using System.Threading.Tasks;
 using ICCardManager.Services;
 namespace ICCardManager.Models
 {
-/// <summary>
+    /// <summary>
     /// 利用履歴概要エンティティ（ledgerテーブル）
     /// 物品出納簿の1行に対応
     /// </summary>
@@ -153,7 +153,11 @@ namespace ICCardManager.Models
         /// </summary>
         public static bool IsInitialRecordSummary(string summary)
         {
-            if (string.IsNullOrEmpty(summary)) return false;
+            if (string.IsNullOrEmpty(summary))
+            {
+                return false;
+            }
+
             return summary == "新規購入"
                 || SummaryGenerator.IsMidYearCarryoverSummary(summary)
                 || summary == SummaryGenerator.GetCarryoverFromPreviousYearSummary();

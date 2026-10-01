@@ -30,9 +30,14 @@ namespace ICCardManager.Infrastructure.Security
         public VerificationReport Verify(string filePath, string expectedSha256)
         {
             if (string.IsNullOrWhiteSpace(filePath))
+            {
                 throw new ArgumentException("ファイルパスが指定されていません。", nameof(filePath));
+            }
+
             if (string.IsNullOrWhiteSpace(expectedSha256))
+            {
                 throw new ArgumentException("期待するハッシュ値が指定されていません。", nameof(expectedSha256));
+            }
 
             var normalizedExpected = NormalizeHash(expectedSha256);
 
@@ -100,7 +105,11 @@ namespace ICCardManager.Infrastructure.Security
         /// </summary>
         internal static string BytesToHex(byte[] bytes)
         {
-            if (bytes == null) throw new ArgumentNullException(nameof(bytes));
+            if (bytes == null)
+            {
+                throw new ArgumentNullException(nameof(bytes));
+            }
+
             var sb = new StringBuilder(bytes.Length * 2);
             foreach (var b in bytes)
             {
@@ -114,7 +123,11 @@ namespace ICCardManager.Infrastructure.Security
         /// </summary>
         internal static string NormalizeHash(string hash)
         {
-            if (hash == null) return string.Empty;
+            if (hash == null)
+            {
+                return string.Empty;
+            }
+
             return hash.Trim().Replace("-", "").Replace(":", "").Replace(" ", "").ToLowerInvariant();
         }
     }

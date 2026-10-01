@@ -1,13 +1,12 @@
-﻿using FluentAssertions;
-using ICCardManager.Data;
-using ICCardManager.Data.Repositories;
-using ICCardManager.Models;
-using Xunit;
-
 using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
+using FluentAssertions;
+using ICCardManager.Data;
+using ICCardManager.Data.Repositories;
+using ICCardManager.Models;
+using Xunit;
 
 
 namespace ICCardManager.Tests.Repositories;

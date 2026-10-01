@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Data.SQLite;
@@ -455,7 +455,10 @@ namespace ICCardManager.ViewModels
             // （共有モードで他PCが削除した）ケースで空ダイアログに「摘要が空です」という
             // 実際の原因と無関係なエラーが出る。
             var ledger = await _ledgerRepository.GetByIdAsync(ledgerDto.Id);
-            if (ledger == null) return;
+            if (ledger == null)
+            {
+                return;
+            }
 
             // Issue #1740: 金額の復元で誤った自動計算が走らないよう、値の代入より先に自動計算を止める。
             // （IsAutoBalance の既定値は true のため、Income/Expense の代入で RecalculateBalance が発火する）
@@ -648,7 +651,10 @@ namespace ICCardManager.ViewModels
         [RelayCommand(CanExecute = nameof(HasInitialBalanceSuggestion))]
         private void ApplyInitialBalanceSuggestion()
         {
-            if (_initialBalanceCorrection == null) return;
+            if (_initialBalanceCorrection == null)
+            {
+                return;
+            }
 
             // 自動計算が ON のままだと、Income の代入で Balance が「前行 + 受入」へ再計算され、
             // さらに OFF へ戻したときに適用前の残高（_balanceBeforeAutoBalance）が復元されて適用が消える。
@@ -742,7 +748,10 @@ namespace ICCardManager.ViewModels
                     : AutoBalanceUnavailableReason.EditDateChanged;
             }
 
-            if (reason == AutoBalanceUnavailableReason) return;
+            if (reason == AutoBalanceUnavailableReason)
+            {
+                return;
+            }
 
             AutoBalanceUnavailableReason = reason;
 
@@ -758,12 +767,18 @@ namespace ICCardManager.ViewModels
         /// </summary>
         private void RecalculateBalance()
         {
-            if (!IsAutoBalance) return;
+            if (!IsAutoBalance)
+            {
+                return;
+            }
 
             // Issue #1740: 直前行の残高が特定できていないときは残高に触れない。
             // Editモードで PreviousBalance が既定値 0 のまま計算され、DBの正しい残高を
             // 「0 + 受入 - 払出」で上書きしていた不具合への fail-safe。
-            if (!CanAutoBalance) return;
+            if (!CanAutoBalance)
+            {
+                return;
+            }
 
             if (Mode == LedgerRowEditMode.Add)
             {
@@ -920,7 +935,10 @@ namespace ICCardManager.ViewModels
         [RelayCommand]
         private async Task Save()
         {
-            if (!CanSave) return;
+            if (!CanSave)
+            {
+                return;
+            }
 
             IsBusy = true;
             BusyMessage = "保存中...";
@@ -1106,11 +1124,17 @@ namespace ICCardManager.ViewModels
             // 生成側の出力順（GetBusStopEmissionOrder）で並べて初めて成立する
             //（並び順の定義を消費側に書き写さない。LedgerMergeService.SyncBusStopsFromSummary と同じ）
             var busDetails = SummaryGenerator.GetBusStopEmissionOrder(ledger.Details);
-            if (busDetails.Count == 0) return true;
+            if (busDetails.Count == 0)
+            {
+                return true;
+            }
 
             // Issue #1818: 抽出パターンは組織設定 BusLabel から導出する
             var blocks = SummaryGenerator.ExtractBusStopBlocks(ledger.Summary);
-            if (blocks.Count == 0) return true;
+            if (blocks.Count == 0)
+            {
+                return true;
+            }
 
             var busStopUpdates = new List<(int SequenceNumber, string BusStops)>();
 
@@ -1166,7 +1190,10 @@ namespace ICCardManager.ViewModels
         [RelayCommand]
         private void RequestDelete()
         {
-            if (!CanDelete) return;
+            if (!CanDelete)
+            {
+                return;
+            }
 
             var message = IsLentRecord
                 ? "この履歴は「貸出中」状態のレコードです。\n" +
@@ -1177,7 +1204,10 @@ namespace ICCardManager.ViewModels
                   "削除した履歴は元に戻せません。"
                 : "この履歴を削除してよろしいですか？\n\n削除した履歴は元に戻せません。";
 
-            if (!_dialogService.ShowWarningConfirmation(message, "履歴の削除")) return;
+            if (!_dialogService.ShowWarningConfirmation(message, "履歴の削除"))
+            {
+                return;
+            }
 
             IsDeleteRequested = true;
         }
@@ -1252,7 +1282,10 @@ namespace ICCardManager.ViewModels
         [RelayCommand]
         private async Task SaveAndEditNext()
         {
-            if (!CanSave) return;
+            if (!CanSave)
+            {
+                return;
+            }
 
             IsBusy = true;
             BusyMessage = "保存中...";
@@ -1305,7 +1338,10 @@ namespace ICCardManager.ViewModels
             if (HasUnsavedChanges())
             {
                 if (!_dialogService.ShowWarningConfirmation(
-                    "変更が保存されていません。破棄して次へ進みますか？", "確認")) return;
+                    "変更が保存されていません。破棄して次へ進みますか？", "確認"))
+                {
+                    return;
+                }
             }
             IsSkipToNextRequested = true;
         }
@@ -1319,7 +1355,10 @@ namespace ICCardManager.ViewModels
             if (HasUnsavedChanges())
             {
                 if (!_dialogService.ShowWarningConfirmation(
-                    "変更が保存されていません。破棄して前へ戻りますか？", "確認")) return;
+                    "変更が保存されていません。破棄して前へ戻りますか？", "確認"))
+                {
+                    return;
+                }
             }
             IsBackRequested = true;
         }
@@ -1361,7 +1400,10 @@ namespace ICCardManager.ViewModels
         /// </summary>
         private void TrackFieldChange()
         {
-            if (_trackChanges) _hasFieldChanges = true;
+            if (_trackChanges)
+            {
+                _hasFieldChanges = true;
+            }
         }
     }
 }

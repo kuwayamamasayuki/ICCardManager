@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
@@ -9,7 +9,7 @@ using ICCardManager.ViewModels;
 
 namespace ICCardManager.Views.Dialogs
 {
-/// <summary>
+    /// <summary>
     /// 設定ダイアログ
     /// </summary>
     public partial class SettingsDialog : Window

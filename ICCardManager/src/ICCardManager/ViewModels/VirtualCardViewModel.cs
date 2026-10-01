@@ -246,9 +246,13 @@ public partial class VirtualCardViewModel : ObservableObject
 
             // 次のエントリ（1つ前の取引）の残高を逆算
             if (e.IsCharge)
+            {
                 balance -= e.Amount;
+            }
             else
+            {
                 balance += e.Amount;
+            }
         }
 
         // 結果を格納（実処理はMainViewModelが行う）

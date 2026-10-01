@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
@@ -24,11 +24,17 @@ public partial class HistoryPanelViewModel
     [RelayCommand]
     public async Task AddLedgerRow()
     {
-        if (HistoryCard == null) return;
+        if (HistoryCard == null)
+        {
+            return;
+        }
 
         // 認証
         var authResult = await _staffAuthService.RequestAuthenticationAsync("履歴の追加");
-        if (authResult == null) return;
+        if (authResult == null)
+        {
+            return;
+        }
 
         // ダイアログ表示
         var allLedgers = HistoryLedgers.ToList();
@@ -58,11 +64,17 @@ public partial class HistoryPanelViewModel
     [RelayCommand]
     public async Task DeleteLedgerRow(LedgerDto ledger)
     {
-        if (ledger == null) return;
+        if (ledger == null)
+        {
+            return;
+        }
 
         // 認証
         var authResult = await _staffAuthService.RequestAuthenticationAsync("履歴の削除");
-        if (authResult == null) return;
+        if (authResult == null)
+        {
+            return;
+        }
 
         // 確認（Issue #1574: 貸出中レコードの場合は専用の警告メッセージ）
         var confirmMessage = ledger.IsLentRecord
@@ -74,7 +86,10 @@ public partial class HistoryPanelViewModel
               "行うのが正しい復旧方法です。それでも削除しますか？"
             : $"以下の履歴を削除してよろしいですか？\n\n日付: {ledger.DateDisplay}\n摘要: {ledger.Summary}\n残高: {ledger.BalanceDisplay}円";
 
-        if (!_navigationService.ShowWarningConfirmation(confirmMessage, "履歴の削除")) return;
+        if (!_navigationService.ShowWarningConfirmation(confirmMessage, "履歴の削除"))
+        {
+            return;
+        }
 
         await DeleteLedgerRowCoreAsync(ledger);
     }
@@ -194,8 +209,15 @@ public partial class HistoryPanelViewModel
     /// </returns>
     private async Task<bool> ResetIsLentIfNoOtherLentRecordsAsync(Ledger deletedLedger)
     {
-        if (deletedLedger == null || !deletedLedger.IsLentRecord) return false;
-        if (string.IsNullOrEmpty(deletedLedger.CardIdm)) return false;
+        if (deletedLedger == null || !deletedLedger.IsLentRecord)
+        {
+            return false;
+        }
+
+        if (string.IsNullOrEmpty(deletedLedger.CardIdm))
+        {
+            return false;
+        }
 
         var hasOther = await _ledgerRepository.HasOtherLentRecordsAsync(deletedLedger.CardIdm, deletedLedger.Id);
         if (!hasOther)
@@ -228,11 +250,17 @@ public partial class HistoryPanelViewModel
     [RelayCommand]
     public async Task EditLedger(LedgerDto ledger)
     {
-        if (ledger == null) return;
+        if (ledger == null)
+        {
+            return;
+        }
 
         // 認証
         var authResult = await _staffAuthService.RequestAuthenticationAsync("履歴の変更");
-        if (authResult == null) return;
+        if (authResult == null)
+        {
+            return;
+        }
 
         await EditLedgerWithAuthAsync(ledger, authResult.Idm, showSaveAndNext: true);
     }
@@ -273,11 +301,17 @@ public partial class HistoryPanelViewModel
     /// </remarks>
     private int IndexOfHistoryLedger(LedgerDto ledger)
     {
-        if (ledger == null) return -1;
+        if (ledger == null)
+        {
+            return -1;
+        }
 
         for (int i = 0; i < HistoryLedgers.Count; i++)
         {
-            if (HistoryLedgers[i].Id == ledger.Id) return i;
+            if (HistoryLedgers[i].Id == ledger.Id)
+            {
+                return i;
+            }
         }
         return -1;
     }
@@ -292,7 +326,11 @@ public partial class HistoryPanelViewModel
     /// </remarks>
     private bool IsEditableHistoryLedger(int index)
     {
-        if (index < 0 || index >= HistoryLedgers.Count) return false;
+        if (index < 0 || index >= HistoryLedgers.Count)
+        {
+            return false;
+        }
+
         return !HistoryLedgers[index].IsCarryoverRow;
     }
 
@@ -369,10 +407,16 @@ public partial class HistoryPanelViewModel
     private async Task EditAdjacentLedgerAsync(LedgerDto ledger, string operatorIdm, int offset)
     {
         var currentIndex = IndexOfHistoryLedger(ledger);
-        if (currentIndex < 0) return;
+        if (currentIndex < 0)
+        {
+            return;
+        }
 
         var targetIndex = currentIndex + offset;
-        if (!IsEditableHistoryLedger(targetIndex)) return;
+        if (!IsEditableHistoryLedger(targetIndex))
+        {
+            return;
+        }
 
         await EditLedgerWithAuthAsync(HistoryLedgers[targetIndex], operatorIdm, showSaveAndNext: true);
     }

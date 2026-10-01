@@ -9,7 +9,33 @@ trim_trailing_whitespace = true
 insert_final_newline = true
 
 [*.{cs,vb}]
+# C# ソースは BOM なしの UTF-8（Issue #2161）。CI の dotnet format が検査する。
+# 既存ファイルの多数派（780 中 641）に合わせた。
+charset = utf-8
+
 # 名前付け規則
+# private の const / static readonly は .NET の慣例どおり PascalCase（Issue #2161）。
+# 下の「private フィールドは _camelCase」は修飾子を指定しないため、これらの規則が無いと
+# const / static readonly まで _ プレフィックスを要求していた。修飾子を指定した規則のほうが
+# 具体的なので優先される。
+dotnet_naming_rule.private_constants_should_be_pascal_case.severity = warning
+dotnet_naming_rule.private_constants_should_be_pascal_case.symbols = private_constants
+dotnet_naming_rule.private_constants_should_be_pascal_case.style = pascal_case
+
+dotnet_naming_rule.private_static_readonly_fields_should_be_pascal_case.severity = warning
+dotnet_naming_rule.private_static_readonly_fields_should_be_pascal_case.symbols = private_static_readonly_fields
+dotnet_naming_rule.private_static_readonly_fields_should_be_pascal_case.style = pascal_case
+
+dotnet_naming_symbols.private_constants.applicable_kinds = field
+dotnet_naming_symbols.private_constants.applicable_accessibilities = private
+dotnet_naming_symbols.private_constants.required_modifiers = const
+
+dotnet_naming_symbols.private_static_readonly_fields.applicable_kinds = field
+dotnet_naming_symbols.private_static_readonly_fields.applicable_accessibilities = private
+dotnet_naming_symbols.private_static_readonly_fields.required_modifiers = static, readonly
+
+dotnet_naming_style.pascal_case.capitalization = pascal_case
+
 dotnet_naming_rule.private_fields_should_be_camel_case.severity = warning
 dotnet_naming_rule.private_fields_should_be_camel_case.symbols = private_fields
 dotnet_naming_rule.private_fields_should_be_camel_case.style = camel_case_underscore

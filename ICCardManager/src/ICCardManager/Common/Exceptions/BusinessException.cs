@@ -1,11 +1,11 @@
-﻿using System;
-using ICCardManager.Infrastructure.Security;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
+using ICCardManager.Infrastructure.Security;
 namespace ICCardManager.Common.Exceptions
 {
-/// <summary>
+    /// <summary>
     /// ビジネスロジック関連の例外
     /// </summary>
     public class BusinessException : AppException

@@ -1,7 +1,7 @@
 using System;
 using System.Collections.Generic;
-using ICCardManager.Models;
 using ICCardManager.Common;
+using ICCardManager.Models;
 
 namespace ICCardManager.Services.Import.Parsers
 {

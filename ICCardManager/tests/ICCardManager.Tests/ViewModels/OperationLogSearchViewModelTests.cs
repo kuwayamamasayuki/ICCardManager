@@ -1,4 +1,8 @@
-﻿using FluentAssertions;
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Threading.Tasks;
+using FluentAssertions;
 using ICCardManager.Data.Repositories;
 using ICCardManager.Models;
 using ICCardManager.Services;
@@ -6,11 +10,6 @@ using ICCardManager.Tests.Infrastructure.Timing;
 using ICCardManager.ViewModels;
 using Moq;
 using Xunit;
-
-using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Threading.Tasks;
 
 
 namespace ICCardManager.Tests.ViewModels;

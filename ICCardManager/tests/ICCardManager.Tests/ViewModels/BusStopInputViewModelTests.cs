@@ -1,4 +1,10 @@
-﻿using FluentAssertions;
+using System;
+using System.Collections.Generic;
+using System.Data.SQLite;
+using System.Linq;
+using System.Threading.Tasks;
+using System.Windows.Input;
+using FluentAssertions;
 using ICCardManager.Data;
 using ICCardManager.Data.Repositories;
 using ICCardManager.Models;
@@ -7,13 +13,6 @@ using ICCardManager.Tests.Data;
 using ICCardManager.ViewModels;
 using Moq;
 using Xunit;
-
-using System;
-using System.Collections.Generic;
-using System.Data.SQLite;
-using System.Linq;
-using System.Threading.Tasks;
-using System.Windows.Input;
 
 
 namespace ICCardManager.Tests.ViewModels;
@@ -746,7 +745,10 @@ public class BusStopInputViewModelTests : IDisposable
         var details = busStops
             .Select((stops, i) => new LedgerDetail
             {
-                IsBus = true, BusStops = stops, Amount = 200, SequenceNumber = i + 1
+                IsBus = true,
+                BusStops = stops,
+                Amount = 200,
+                SequenceNumber = i + 1
             })
             .ToList();
         var ledger = new Ledger { Id = 1, Details = details };

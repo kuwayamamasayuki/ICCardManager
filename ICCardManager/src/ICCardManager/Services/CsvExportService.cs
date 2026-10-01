@@ -1,18 +1,18 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
-using System.Linq;
-using System.Threading.Tasks;
 using System.IO;
+using System.Linq;
 using System.Text;
+using System.Threading.Tasks;
 using ICCardManager.Common;
 using ICCardManager.Data.Repositories;
-using Microsoft.Extensions.Logging;
 using ICCardManager.Infrastructure.Security;
 using ICCardManager.Models;
+using Microsoft.Extensions.Logging;
 
 namespace ICCardManager.Services
 {
-/// <summary>
+    /// <summary>
     /// CSVエクスポート結果
     /// </summary>
     public class CsvExportResult
@@ -316,7 +316,10 @@ namespace ICCardManager.Services
                     {
                         if (ledgerCardMap.TryGetValue(x.Detail.LedgerId, out var idm) &&
                             cardSortKeyMap.TryGetValue(idm, out var key))
+                        {
                             return key;
+                        }
+
                         return "";
                     })
                     .ThenBy(x => x.Detail.UseDate)

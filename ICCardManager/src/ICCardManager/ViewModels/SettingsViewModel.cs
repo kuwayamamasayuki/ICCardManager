@@ -1,4 +1,9 @@
-﻿using System.Collections.ObjectModel;
+using System;
+using System.Collections.Generic;
+using System.Collections.ObjectModel;
+using System.IO;
+using System.Linq;
+using System.Threading.Tasks;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using ICCardManager.Common;
@@ -6,14 +11,8 @@ using ICCardManager.Data.Repositories;
 using ICCardManager.Infrastructure.Sound;
 using ICCardManager.Models;
 using ICCardManager.Services;
-using Microsoft.Win32;
-
-using System;
-using System.Collections.Generic;
-using System.IO;
-using System.Linq;
-using System.Threading.Tasks;
 using Microsoft.Extensions.Options;
+using Microsoft.Win32;
 
 
 namespace ICCardManager.ViewModels;
@@ -247,11 +246,15 @@ public partial class SettingsViewModel : ViewModelBase
     private static string ExtractDirectoryPath(string path)
     {
         if (string.IsNullOrEmpty(path))
+        {
             return string.Empty;
+        }
 
         // 既にフォルダパス（ファイル名なし）の場合はそのまま
         if (!Path.HasExtension(path))
+        {
             return path;
+        }
 
         return Path.GetDirectoryName(path) ?? string.Empty;
     }

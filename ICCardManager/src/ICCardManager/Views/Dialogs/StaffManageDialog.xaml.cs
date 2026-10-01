@@ -12,7 +12,7 @@ using ICCardManager.Views.Helpers;
 
 namespace ICCardManager.Views.Dialogs
 {
-/// <summary>
+    /// <summary>
     /// 職員管理ダイアログ
     /// </summary>
     public partial class StaffManageDialog : Window

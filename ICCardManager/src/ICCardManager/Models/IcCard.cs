@@ -1,10 +1,10 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
 namespace ICCardManager.Models
 {
-/// <summary>
+    /// <summary>
     /// 交通系ICカードエンティティ（ic_cardテーブル）
     /// </summary>
     public class IcCard

@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
@@ -99,7 +99,10 @@ public partial class HistoryPanelViewModel
     /// </remarks>
     internal async Task<InitialBalanceCorrection> ResolveInitialBalanceCorrectionForEditAsync(LedgerDto ledger)
     {
-        if (ledger == null || !Ledger.IsInitialRecordSummary(ledger.Summary)) return null;
+        if (ledger == null || !Ledger.IsInitialRecordSummary(ledger.Summary))
+        {
+            return null;
+        }
 
         var result = await _ledgerConsistencyChecker.CheckBalanceConsistencyAsync(
             ledger.CardIdm, FullPeriodStart, FullPeriodEnd);
@@ -141,7 +144,10 @@ public partial class HistoryPanelViewModel
     /// </param>
     private async Task CheckAndNotifyConsistencyAsync(ConsistencyResult fullPeriodResult = null)
     {
-        if (HistoryCard == null) return;
+        if (HistoryCard == null)
+        {
+            return;
+        }
 
         var checkResult = await _ledgerConsistencyChecker.CheckBalanceConsistencyAsync(
             HistoryCard.CardIdm, HistoryFromDate, HistoryToDate);
@@ -191,7 +197,10 @@ public partial class HistoryPanelViewModel
             // BalanceInconsistency 警告を取り除くため、ここで払戻済みカードの警告を立てると
             // 次のダッシュボード更新（貸出・返却／共有モードの定期更新）で黙って消える。
             // 生成側と除去側の判定条件を揃える（.claude/rules/business-logic.md #1739）。
-            if (!card.IsInOperation) continue;
+            if (!card.IsInOperation)
+            {
+                continue;
+            }
 
             var checkResult = await _ledgerConsistencyChecker.CheckBalanceConsistencyAsync(
                 card.CardIdm, FullPeriodStart, FullPeriodEnd);

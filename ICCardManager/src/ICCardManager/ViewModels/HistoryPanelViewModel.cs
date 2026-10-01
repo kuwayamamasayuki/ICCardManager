@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Globalization;
@@ -339,7 +339,10 @@ public partial class HistoryPanelViewModel : ObservableObject
     public async Task ShowCardHistoryAsync(IcCard? card)
     {
         _balanceInconsistencies.Clear();
-        if (card == null) return;
+        if (card == null)
+        {
+            return;
+        }
 
         await ShowHistoryAsync(card);
     }
@@ -429,7 +432,10 @@ public partial class HistoryPanelViewModel : ObservableObject
     /// </remarks>
     internal async Task LoadHistoryLedgersAsync(bool preserveCheckedRows = false)
     {
-        if (HistoryCard == null) return;
+        if (HistoryCard == null)
+        {
+            return;
+        }
 
         // Issue #2159: オーバーレイはメイン画面の IsBusy に束縛されているため、ホストのスコープを開く
         using (Host.BeginBusy("読み込み中..."))
@@ -479,7 +485,10 @@ public partial class HistoryPanelViewModel : ObservableObject
                 HistoryTotalPages = CalculateHistoryTotalPages(totalCount);
 
                 // 現在のページが総ページ数以内なら、上記の不変条件が成立している
-                if (HistoryCurrentPage <= HistoryTotalPages) break;
+                if (HistoryCurrentPage <= HistoryTotalPages)
+                {
+                    break;
+                }
 
                 if (++clampCount >= MaxHistoryPageClampAttempts)
                 {
@@ -701,7 +710,11 @@ public partial class HistoryPanelViewModel : ObservableObject
     internal static string FormatHistoryPeriod(DateTime from, DateTime to)
     {
         var fromText = from.ToString("yyyy年M月", CultureInfo.InvariantCulture);
-        if (from.Year == to.Year && from.Month == to.Month) return fromText;
+        if (from.Year == to.Year && from.Month == to.Month)
+        {
+            return fromText;
+        }
+
         return $"{fromText}～{to.ToString("yyyy年M月", CultureInfo.InvariantCulture)}";
     }
 
@@ -760,7 +773,10 @@ public partial class HistoryPanelViewModel : ObservableObject
     {
         // CanExecute の評価から実行までに日付が変わり得るため、実行時にも境界を確かめる
         var target = ResolveAdjacentHistoryMonth(deltaMonths);
-        if (!target.HasValue) return;
+        if (!target.HasValue)
+        {
+            return;
+        }
 
         await SetHistoryMonth(target.Value.Year, target.Value.Month);
     }
@@ -776,10 +792,17 @@ public partial class HistoryPanelViewModel : ObservableObject
     /// </remarks>
     private void EnsureHistoryYearAvailable(int year)
     {
-        if (HistoryAvailableYears.Contains(year)) return;
+        if (HistoryAvailableYears.Contains(year))
+        {
+            return;
+        }
 
         var index = 0;
-        while (index < HistoryAvailableYears.Count && HistoryAvailableYears[index] > year) index++;
+        while (index < HistoryAvailableYears.Count && HistoryAvailableYears[index] > year)
+        {
+            index++;
+        }
+
         HistoryAvailableYears.Insert(index, year);
     }
 
@@ -809,8 +832,15 @@ public partial class HistoryPanelViewModel : ObservableObject
     {
         var target = new DateTime(from.Year, from.Month, 1).AddMonths(deltaMonths);
 
-        if (deltaMonths < 0 && target < new DateTime(oldestYear, 1, 1)) return null;
-        if (deltaMonths > 0 && target > new DateTime(today.Year, today.Month, 1)) return null;
+        if (deltaMonths < 0 && target < new DateTime(oldestYear, 1, 1))
+        {
+            return null;
+        }
+
+        if (deltaMonths > 0 && target > new DateTime(today.Year, today.Month, 1))
+        {
+            return null;
+        }
 
         return target;
     }
@@ -919,11 +949,17 @@ public partial class HistoryPanelViewModel : ObservableObject
     [RelayCommand]
     public async Task ShowLedgerDetail(LedgerDto ledger)
     {
-        if (ledger == null || !ledger.HasDetails) return;
+        if (ledger == null || !ledger.HasDetails)
+        {
+            return;
+        }
 
         // 詳細データを取得
         var ledgerWithDetails = await _ledgerRepository.GetByIdAsync(ledger.Id);
-        if (ledgerWithDetails == null) return;
+        if (ledgerWithDetails == null)
+        {
+            return;
+        }
 
         var detailDto = ledgerWithDetails.ToDto();
 

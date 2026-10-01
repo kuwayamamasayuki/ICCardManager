@@ -1,20 +1,19 @@
-﻿using FluentAssertions;
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Text.Json;
+using System.Threading.Tasks;
+using FluentAssertions;
 using ICCardManager.Data;
 using ICCardManager.Data.Repositories;
-using ICCardManager.Tests.Data;
 using ICCardManager.Models;
 using ICCardManager.Services;
+using ICCardManager.Tests.Data;
 using ICCardManager.ViewModels;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using Xunit;
-using System.Text.Json;
-
-using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Threading.Tasks;
 
 namespace ICCardManager.Tests.ViewModels;
 
@@ -42,7 +41,7 @@ public class LedgerDetailViewModelTests : IDisposable
         _ledgerRepoMock = new Mock<ILedgerRepository>();
         _dbContext = TestDbContextFactory.Create();
         var summaryGenerator = new SummaryGenerator();
-var operationLogRepoMock = new Mock<IOperationLogRepository>();
+        var operationLogRepoMock = new Mock<IOperationLogRepository>();
         // Issue #1760: ログの中身はログ記録クラスのモックでは表明できないため、書き込み先で捕捉する
         operationLogRepoMock
             .Setup(r => r.InsertAsync(It.IsAny<OperationLog>(), It.IsAny<System.Data.SQLite.SQLiteTransaction>()))

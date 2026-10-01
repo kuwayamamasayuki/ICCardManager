@@ -1,13 +1,12 @@
-using FluentAssertions;
-using ICCardManager.Dtos;
-using ICCardManager.Models;
-using Xunit;
-
 using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
 using System.Threading.Tasks;
+using FluentAssertions;
+using ICCardManager.Dtos;
+using ICCardManager.Models;
+using Xunit;
 
 
 namespace ICCardManager.Tests.Dtos;

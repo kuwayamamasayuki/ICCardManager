@@ -1,13 +1,12 @@
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Printing;
 using FluentAssertions;
 using ICCardManager.Services;
 using ICCardManager.ViewModels;
 using Moq;
 using Xunit;
-
-using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Printing;
 
 
 namespace ICCardManager.Tests.ViewModels;

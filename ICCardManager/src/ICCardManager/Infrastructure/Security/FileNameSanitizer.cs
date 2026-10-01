@@ -61,7 +61,9 @@ namespace ICCardManager.Infrastructure.Security
         public static string SanitizeComponent(string value)
         {
             if (string.IsNullOrEmpty(value))
+            {
                 return value;
+            }
 
             char[] buffer = null;
             for (int i = 0; i < value.Length; i++)
@@ -70,7 +72,10 @@ namespace ICCardManager.Infrastructure.Security
                 if (System.Char.IsControl(c) || InvalidChars.Contains(c))
                 {
                     if (buffer == null)
+                    {
                         buffer = value.ToCharArray();
+                    }
+
                     buffer[i] = ReplacementChar;
                 }
             }

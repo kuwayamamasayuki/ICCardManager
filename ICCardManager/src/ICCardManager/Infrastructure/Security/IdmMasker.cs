@@ -59,12 +59,16 @@ namespace ICCardManager.Infrastructure.Security
         public static string Mask(string idm)
         {
             if (string.IsNullOrEmpty(idm))
+            {
                 return idm;
+            }
 
             // 想定より短い IDm は全体を伏せる（短いクレデンシャルを部分露出させない）。
             // 可視 8 文字に対しマスクが MinimumMaskedLength に満たない長さ（15文字以下）が対象。
             if (idm.Length < VisiblePrefixLength + VisibleSuffixLength + MinimumMaskedLength)
+            {
                 return new string('*', idm.Length);
+            }
 
             return idm.Substring(0, VisiblePrefixLength)
                    + new string('*', idm.Length - VisiblePrefixLength - VisibleSuffixLength)

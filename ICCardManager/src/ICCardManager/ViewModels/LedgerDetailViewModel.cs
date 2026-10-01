@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Linq;
@@ -405,7 +405,10 @@ namespace ICCardManager.ViewModels
         /// </remarks>
         private void RecalculateGroupsFromDividers()
         {
-            if (Items.Count == 0) return;
+            if (Items.Count == 0)
+            {
+                return;
+            }
 
             int currentGroupId = MergedGroupId;
             int groupStartIndex = 0;
@@ -687,7 +690,10 @@ namespace ICCardManager.ViewModels
         [RelayCommand]
         private async Task SaveWithFullSplitAsync()
         {
-            if (!HasChanges) return;
+            if (!HasChanges)
+            {
+                return;
+            }
 
             // 履歴分割は ledger を改変する監査対象の重要操作のため職員認証を要求する
             // （設計 06_シーケンス図 §11 / SEQ-AUTH-01。追加・削除・変更と同じゲート）

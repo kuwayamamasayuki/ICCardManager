@@ -11,7 +11,7 @@ using ICCardManager.ViewModels;
 
 namespace ICCardManager.Views.Dialogs
 {
-/// <summary>
+    /// <summary>
     /// バス停入力ダイアログ
     /// </summary>
     public partial class BusStopInputDialog : Window
@@ -157,10 +157,15 @@ namespace ICCardManager.Views.Dialogs
             {
                 var child = VisualTreeHelper.GetChild(parent, i);
                 if (child is T found)
+                {
                     return found;
+                }
+
                 var result = FindVisualChild<T>(child);
                 if (result != null)
+                {
                     return result;
+                }
             }
             return null;
         }

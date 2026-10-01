@@ -1,6 +1,7 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
+using System.Globalization;
 using System.Linq;
 using System.Threading.Tasks;
 using System.Windows;
@@ -13,17 +14,16 @@ using ICCardManager.Common.Messages;
 using ICCardManager.Data;
 using ICCardManager.Data.Repositories;
 using ICCardManager.Dtos;
-using ICCardManager.Infrastructure.CardReader;
-using ICCardManager.Infrastructure.Sound;
 using ICCardManager.Infrastructure.Caching;
+using ICCardManager.Infrastructure.CardReader;
 using ICCardManager.Infrastructure.Security;
+using ICCardManager.Infrastructure.Sound;
 using ICCardManager.Infrastructure.Timing;
 using ICCardManager.Models;
 using ICCardManager.Services;
 using ICCardManager.Views.Helpers;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
-using System.Globalization;
 
 namespace ICCardManager.ViewModels;
 
@@ -141,7 +141,10 @@ public partial class MainViewModel
     /// </remarks>
     internal async Task CheckCardBalanceMismatchAsync(IcCard card)
     {
-        if (card == null) return;
+        if (card == null)
+        {
+            return;
+        }
 
         // Issue #1947: 母集団は「運用中のカード」（IcCard.IsInOperation）。除去側の
         // RefreshDashboardAsync は残額ダッシュボードに居ないカードの警告を取り除くため、

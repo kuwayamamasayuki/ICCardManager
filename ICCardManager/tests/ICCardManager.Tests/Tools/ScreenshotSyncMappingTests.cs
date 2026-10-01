@@ -96,7 +96,10 @@ namespace ICCardManager.Tests.Tools
                     .Select(e => GlobToRegex(e.GetString()!))
                     .ToList();
                 var covered = mainViewModelFiles.Where(f => regexes.Any(r => r.IsMatch(f))).ToList();
-                if (covered.Count == 0) continue;
+                if (covered.Count == 0)
+                {
+                    continue;
+                }
 
                 checkedImages++;
                 problems.AddRange(mainViewModelFiles.Except(covered)
@@ -135,7 +138,10 @@ namespace ICCardManager.Tests.Tools
             foreach (var screenshot in doc.RootElement.GetProperty("screenshots").EnumerateArray())
             {
                 var sources = screenshot.GetProperty("sources").EnumerateArray().Select(e => e.GetString()!).ToList();
-                if (!sources.Contains("ICCardManager/src/ICCardManager/Views/MainWindow.xaml")) continue;
+                if (!sources.Contains("ICCardManager/src/ICCardManager/Views/MainWindow.xaml"))
+                {
+                    continue;
+                }
 
                 checkedImages++;
                 var regexes = sources.Select(GlobToRegex).ToList();
@@ -381,7 +387,10 @@ namespace ICCardManager.Tests.Tools
             var depth = 0;
             for (var i = open; i < code.Length; i++)
             {
-                if (code[i] == '{') depth++;
+                if (code[i] == '{')
+                {
+                    depth++;
+                }
                 else if (code[i] == '}' && --depth == 0)
                 {
                     return code.Substring(open + 1, i - open - 1);
@@ -414,14 +423,23 @@ namespace ICCardManager.Tests.Tools
             for (var i = code.IndexOf(marker, StringComparison.Ordinal); i >= 0; i = code.IndexOf(marker, i + marker.Length, StringComparison.Ordinal))
             {
                 var open = i + marker.Length;
-                while (open < code.Length && char.IsWhiteSpace(code[open])) open++;
+                while (open < code.Length && char.IsWhiteSpace(code[open]))
+                {
+                    open++;
+                }
                 // 関数定義（`function Invoke-ManifestScript {`）や引数を持たない参照は対象外
-                if (open >= code.Length || code[open] != '(') continue;
+                if (open >= code.Length || code[open] != '(')
+                {
+                    continue;
+                }
 
                 var depth = 0;
                 for (var j = open; j < code.Length; j++)
                 {
-                    if (code[j] == '(') depth++;
+                    if (code[j] == '(')
+                    {
+                        depth++;
+                    }
                     else if (code[j] == ')' && --depth == 0)
                     {
                         yield return code.Substring(open + 1, j - open - 1);
@@ -514,7 +532,10 @@ $b = Invoke-ManifestScript (@(""-Write"", ""-Json"") +
 
             var fixedPrefix = pattern.Substring(0, pattern.LastIndexOf('/', wildcardIndex) + 1);
             var searchRoot = Path.Combine(RepoRoot, fixedPrefix.Replace('/', Path.DirectorySeparatorChar));
-            if (!Directory.Exists(searchRoot)) return false;
+            if (!Directory.Exists(searchRoot))
+            {
+                return false;
+            }
 
             var regex = GlobToRegex(pattern);
             return Directory.EnumerateFiles(searchRoot, "*", SearchOption.AllDirectories)

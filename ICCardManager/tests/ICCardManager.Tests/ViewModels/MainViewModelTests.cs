@@ -1,10 +1,15 @@
-﻿using CommunityToolkit.Mvvm.Messaging;
+using System;
+using System.Collections.Generic;
+using System.Data.SQLite;
+using System.Linq;
+using System.Threading.Tasks;
+using CommunityToolkit.Mvvm.Messaging;
 using FluentAssertions;
 using ICCardManager.Common.Messages;
 using ICCardManager.Data;
 using ICCardManager.Data.Repositories;
-using ICCardManager.Infrastructure.Caching;
 using ICCardManager.Dtos;
+using ICCardManager.Infrastructure.Caching;
 using ICCardManager.Infrastructure.CardReader;
 using ICCardManager.Infrastructure.Sound;
 using ICCardManager.Infrastructure.Timing;
@@ -17,12 +22,6 @@ using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using Moq;
 using Xunit;
-
-using System;
-using System.Collections.Generic;
-using System.Data.SQLite;
-using System.Linq;
-using System.Threading.Tasks;
 
 
 namespace ICCardManager.Tests.ViewModels;
@@ -1848,7 +1847,11 @@ public class MainViewModelTests : IDisposable
             .Callback(() =>
             {
                 suppressedDuringDialog ??= _viewModel.IsCardReadingSuppressed;
-                if (raised) return; // 修正前のコードで無限に入れ子になるのを防ぐ
+                if (raised)
+                {
+                    return; // 修正前のコードで無限に入れ子になるのを防ぐ
+                }
+
                 raised = true;
                 _cardReaderMock.Raise(r => r.CardRead += null,
                     _cardReaderMock.Object, new CardReadEventArgs { Idm = idmTouchedDuringDialog });
@@ -2059,7 +2062,11 @@ public class MainViewModelTests : IDisposable
         _cardReaderMock.Setup(r => r.ReadBalanceAsync(firstIdm))
             .Callback(() =>
             {
-                if (raised) return;
+                if (raised)
+                {
+                    return;
+                }
+
                 raised = true;
                 _cardReaderMock.Raise(r => r.CardRead += null,
                     _cardReaderMock.Object, new CardReadEventArgs { Idm = secondIdm });
@@ -3354,7 +3361,11 @@ public class MainViewModelTests : IDisposable
         _cardReaderMock.Setup(r => r.ReadBalanceAsync(MismatchCardIdm))
             .Callback(() =>
             {
-                if (!raiseSecondTouchDuringRead || raised) return;
+                if (!raiseSecondTouchDuringRead || raised)
+                {
+                    return;
+                }
+
                 raised = true;
                 _cardReaderMock.Raise(r => r.CardRead += null,
                     _cardReaderMock.Object, new CardReadEventArgs { Idm = secondIdm });

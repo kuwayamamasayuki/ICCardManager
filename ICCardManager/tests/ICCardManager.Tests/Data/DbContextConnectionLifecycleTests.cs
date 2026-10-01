@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Data.SQLite;
 using System.IO;
 using System.Threading;
@@ -46,7 +46,9 @@ public class DbContextConnectionLifecycleTests : IDisposable
         try
         {
             if (Directory.Exists(_testDirectory))
+            {
                 Directory.Delete(_testDirectory, recursive: true);
+            }
         }
         catch { }
         GC.SuppressFinalize(this);

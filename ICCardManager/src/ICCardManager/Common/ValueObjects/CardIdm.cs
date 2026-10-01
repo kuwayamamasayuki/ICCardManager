@@ -35,7 +35,9 @@ namespace ICCardManager.Common.ValueObjects
 
             var upper = value.ToUpperInvariant();
             if (!HexPattern.IsMatch(upper))
+            {
                 throw new ArgumentException($"CardIdmは16進数16文字である必要があります: '{value}'", nameof(value));
+            }
 
             _value = upper;
         }
@@ -46,7 +48,10 @@ namespace ICCardManager.Common.ValueObjects
         internal static CardIdm FromTrusted(string value)
         {
             if (string.IsNullOrEmpty(value))
+            {
                 return default;
+            }
+
             return new CardIdm(value);
         }
 

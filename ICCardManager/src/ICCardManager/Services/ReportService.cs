@@ -1,8 +1,10 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
-using System.Linq;
-using System.Threading.Tasks;
+using System.Globalization;
 using System.IO;
+using System.Linq;
+using System.Text.RegularExpressions;
+using System.Threading.Tasks;
 using ClosedXML.Excel;
 using ICCardManager.Common;
 using ICCardManager.Data.Repositories;
@@ -10,12 +12,10 @@ using ICCardManager.Infrastructure.Security;
 using ICCardManager.Models;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
-using System.Globalization;
-using System.Text.RegularExpressions;
 
 namespace ICCardManager.Services
 {
-/// <summary>
+    /// <summary>
     /// 帳票作成の結末（Issue #2042）
     /// </summary>
     /// <remarks>
@@ -1377,10 +1377,14 @@ namespace ICCardManager.Services
         {
             var firstPageCell = worksheet.Cell(2, pageNumberColumn);  // 1ページ目のページ番号（既定: L2）
             if (firstPageCell.IsEmpty())
+            {
                 return 0;
+            }
 
             if (!firstPageCell.TryGetValue<int>(out var firstPageNumber))
+            {
                 return 0;
+            }
 
             var pageBreakCount = worksheet.PageSetup.RowBreaks.Count;
             return firstPageNumber + pageBreakCount;
@@ -1414,7 +1418,9 @@ namespace ICCardManager.Services
 
             // 4月（年度最初の月）または不正な月 → StartingPageNumber をそのまま使用
             if (currentIndex <= 0)
+            {
                 return card.StartingPageNumber;
+            }
 
             var nearestPreviousLastPage = FindNearestPreviousMonthLastPage(
                 workbook, FiscalMonthOrder, currentIndex, pageNumberColumn);
@@ -1451,15 +1457,22 @@ namespace ICCardManager.Services
         {
             var currentIndex = Array.IndexOf(FiscalMonthOrder, month);
             if (currentIndex < 0)
+            {
                 return;
+            }
 
             for (int i = currentIndex + 1; i < FiscalMonthOrder.Length; i++)
             {
                 var followingMonth = FiscalMonthOrder[i];
                 if (!workbook.Worksheets.TryGetWorksheet(GetMonthSheetName(followingMonth), out var sheet))
+                {
                     continue;
+                }
+
                 if (GetLastPageNumberFromWorksheet(sheet, pageNumberColumn) == 0)
+                {
                     continue;
+                }
 
                 var pageNumber = GetStartingPageNumberForMonth(workbook, card, followingMonth, pageNumberColumn);
                 SetPageNumber(sheet, 1, pageNumber, pageNumberColumn);
@@ -1515,7 +1528,9 @@ namespace ICCardManager.Services
                 {
                     var lastPage = GetLastPageNumberFromWorksheet(prevSheet, pageNumberColumn);
                     if (lastPage > 0)
+                    {
                         return lastPage;
+                    }
                 }
             }
             return 0;
@@ -1632,11 +1647,31 @@ namespace ICCardManager.Services
         {
             var length = summary?.Length ?? 0;
 
-            if (length < 15)  return 14;
-            if (length < 32)  return 12;
-            if (length < 38)  return 10;
-            if (length < 93)  return 8;
-            if (length < 108) return 7;
+            if (length < 15)
+            {
+                return 14;
+            }
+
+            if (length < 32)
+            {
+                return 12;
+            }
+
+            if (length < 38)
+            {
+                return 10;
+            }
+
+            if (length < 93)
+            {
+                return 8;
+            }
+
+            if (length < 108)
+            {
+                return 7;
+            }
+
             return 6;
         }
 
@@ -1654,11 +1689,31 @@ namespace ICCardManager.Services
         {
             var length = note?.Length ?? 0;
 
-            if (length < 20)  return 14;
-            if (length < 43)  return 12;
-            if (length < 51)  return 10;
-            if (length < 124) return 8;
-            if (length < 144) return 7;
+            if (length < 20)
+            {
+                return 14;
+            }
+
+            if (length < 43)
+            {
+                return 12;
+            }
+
+            if (length < 51)
+            {
+                return 10;
+            }
+
+            if (length < 124)
+            {
+                return 8;
+            }
+
+            if (length < 144)
+            {
+                return 7;
+            }
+
             return 6;
         }
 

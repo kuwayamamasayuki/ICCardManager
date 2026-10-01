@@ -1,10 +1,10 @@
-using FluentAssertions;
-using ICCardManager.Tests;
 using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Text.RegularExpressions;
+using FluentAssertions;
+using ICCardManager.Tests;
 using Xunit;
 
 namespace ICCardManager.Tests;

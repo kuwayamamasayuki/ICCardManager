@@ -85,7 +85,9 @@ namespace ICCardManager.Services
             {
                 var filePath = GetLatestVersionFilePath();
                 if (filePath == null || !File.Exists(filePath))
+                {
                     return null;
+                }
 
                 var firstLine = ReadFirstLine(filePath);
 
@@ -97,7 +99,9 @@ namespace ICCardManager.Services
                 }
 
                 if (latestVersion <= _currentVersion)
+                {
                     return null;
+                }
 
                 _logger?.LogInformation(
                     "新しいバージョンを検出: {Latest}（現在: {Current}）", latestVersion, _currentVersion);
@@ -142,7 +146,9 @@ namespace ICCardManager.Services
             {
                 var filePath = GetLatestVersionFilePath();
                 if (filePath == null)
+                {
                     return;
+                }
 
                 var directory = Path.GetDirectoryName(filePath);
                 if (!Directory.Exists(directory))
@@ -157,7 +163,9 @@ namespace ICCardManager.Services
                 var exists = File.Exists(filePath);
                 var firstLine = exists ? ReadFirstLine(filePath) : null;
                 if (!ShouldPublish(firstLine, _currentVersion))
+                {
                     return;
+                }
 
                 tempPath = Path.Combine(
                     directory,
@@ -190,7 +198,9 @@ namespace ICCardManager.Services
             finally
             {
                 if (tempPath != null)
+                {
                     TryDeleteTempFile(tempPath);
+                }
             }
         }
 
@@ -217,7 +227,10 @@ namespace ICCardManager.Services
                 _logger?.LogInformation(ex,
                     "latest_version.txt の置換（ReplaceFile）に失敗したため、削除して移動する方法で差し替えます");
                 if (File.Exists(filePath))
+                {
                     File.Delete(filePath);
+                }
+
                 File.Move(tempPath, filePath);
             }
         }
@@ -241,7 +254,9 @@ namespace ICCardManager.Services
         internal static bool ShouldPublish(string firstLine, Version current)
         {
             if (!AppVersionInfo.TryParseNormalized(firstLine, out var published))
+            {
                 return true;
+            }
 
             return published < current;
         }
@@ -282,9 +297,14 @@ namespace ICCardManager.Services
                 foreach (var path in Directory.EnumerateFiles(directory, LatestVersionFileName + ".*.tmp"))
                 {
                     if (!TempFileNamePattern.IsMatch(Path.GetFileName(path)))
+                    {
                         continue;
+                    }
+
                     if (File.GetLastWriteTimeUtc(path) >= threshold)
+                    {
                         continue;
+                    }
 
                     TryDeleteTempFile(path);
                 }
@@ -305,7 +325,10 @@ namespace ICCardManager.Services
                 try
                 {
                     if (File.Exists(path))
+                    {
                         File.Delete(path);
+                    }
+
                     return;
                 }
                 catch (IOException) when (attempt < TempFileDeleteAttempts)

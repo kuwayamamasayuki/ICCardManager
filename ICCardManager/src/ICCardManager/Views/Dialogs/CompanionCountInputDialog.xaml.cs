@@ -1,4 +1,4 @@
-﻿using System.Collections.Generic;
+using System.Collections.Generic;
 using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Controls;
@@ -71,10 +71,15 @@ namespace ICCardManager.Views.Dialogs
             {
                 var child = VisualTreeHelper.GetChild(parent, i);
                 if (child is T found)
+                {
                     return found;
+                }
+
                 var result = FindVisualChild<T>(child);
                 if (result != null)
+                {
                     return result;
+                }
             }
             return null;
         }

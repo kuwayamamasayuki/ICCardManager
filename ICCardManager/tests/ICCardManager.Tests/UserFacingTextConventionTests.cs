@@ -452,8 +452,15 @@ public class UserFacingTextConventionTests
         int p = start;
         while (p < content.Length && (content[p] == '@' || content[p] == '$'))
         {
-            if (content[p] == '@') verbatim = true;
-            else interpolated = true;
+            if (content[p] == '@')
+            {
+                verbatim = true;
+            }
+            else
+            {
+                interpolated = true;
+            }
+
             p++;
         }
         if (p >= content.Length || content[p] != '"')

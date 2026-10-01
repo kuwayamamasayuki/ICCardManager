@@ -2,8 +2,8 @@ using System;
 using FlaUI.Core.AutomationElements;
 using FlaUI.Core.Definitions;
 using FlaUI.Core.Input;
-using FlaUI.Core.WindowsAPI;
 using FlaUI.Core.Tools;
+using FlaUI.Core.WindowsAPI;
 using FlaUI.UIA3;
 using ICCardManager.UITests.Infrastructure;
 
@@ -99,7 +99,9 @@ namespace ICCardManager.UITests.PageObjects
                     foreach (var w in modalWindows)
                     {
                         if (w.Name == dialogAutomationName)
+                        {
                             return w;
+                        }
                     }
                     return null;
                 },

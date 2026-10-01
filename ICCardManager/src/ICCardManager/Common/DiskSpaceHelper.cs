@@ -41,7 +41,9 @@ namespace ICCardManager.Common
         public static long? TryGetAvailableFreeSpace(string folderPath)
         {
             if (string.IsNullOrWhiteSpace(folderPath))
+            {
                 return null;
+            }
 
             try
             {
@@ -50,7 +52,9 @@ namespace ICCardManager.Common
                                  + Path.DirectorySeparatorChar;
 
                 if (!GetDiskFreeSpaceEx(normalized, out var freeBytesAvailable, out _, out _))
+                {
                     return null;
+                }
 
                 // long の範囲を超える巨大ボリュームは現実的に存在しないが、
                 // ulong → long のオーバーフローで負値になるのを防ぐ。
@@ -71,15 +75,22 @@ namespace ICCardManager.Common
         public static string FormatBytes(long? bytes)
         {
             if (bytes == null)
+            {
                 return "不明";
+            }
 
             const double Gb = 1024d * 1024d * 1024d;
             const double Mb = 1024d * 1024d;
 
             if (bytes.Value >= Gb)
+            {
                 return $"{bytes.Value / Gb:N1} GB";
+            }
+
             if (bytes.Value >= Mb)
+            {
                 return $"{bytes.Value / Mb:N1} MB";
+            }
 
             return $"{bytes.Value:N0} バイト";
         }

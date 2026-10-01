@@ -1,4 +1,5 @@
 using System.Collections.ObjectModel;
+using System.Globalization;
 using System.Linq;
 using System.Threading.Tasks;
 using CommunityToolkit.Mvvm.ComponentModel;
@@ -6,7 +7,6 @@ using CommunityToolkit.Mvvm.Input;
 using ICCardManager.Common;
 using ICCardManager.Dtos;
 using ICCardManager.Services;
-using System.Globalization;
 
 namespace ICCardManager.ViewModels
 {
@@ -165,7 +165,9 @@ namespace ICCardManager.ViewModels
         private static string BuildResultStatusMessage(DiagnosticReport report)
         {
             if (report == null)
+            {
                 return "診断結果を取得できませんでした。もう一度「再診断」を押してください。";
+            }
 
             return report.ProblemCount > 0
                 ? $"対処が必要な項目が{report.ProblemCount}件あります。"

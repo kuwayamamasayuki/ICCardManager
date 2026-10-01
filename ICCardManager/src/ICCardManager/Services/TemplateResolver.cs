@@ -1,14 +1,14 @@
 using System;
 using System.Collections.Generic;
-using System.Linq;
-using System.Threading.Tasks;
 using System.IO;
+using System.Linq;
 using System.Reflection;
+using System.Threading.Tasks;
 using ICCardManager.Models;
 
 namespace ICCardManager.Services
 {
-/// <summary>
+    /// <summary>
     /// Excelテンプレートファイルのパス解決を行うヘルパークラス
     /// </summary>
     /// <remarks>
@@ -87,9 +87,9 @@ namespace ICCardManager.Services
             // 3. 実行アセンブリの場所からの相対パス
             // Single-file publish時はAssembly.Locationは空文字を返すが、
             // 既にnull/empty チェックを行っており、他のフォールバックも用意されているため安全
-    #pragma warning disable IL3000 // Single-file publish時にAssembly.Locationは空を返す（想定済み）
+#pragma warning disable IL3000 // Single-file publish時にAssembly.Locationは空を返す（想定済み）
             var assemblyLocation = Assembly.GetExecutingAssembly().Location;
-    #pragma warning restore IL3000
+#pragma warning restore IL3000
             if (!string.IsNullOrEmpty(assemblyLocation))
             {
                 var assemblyDir = Path.GetDirectoryName(assemblyLocation);

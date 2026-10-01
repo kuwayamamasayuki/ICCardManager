@@ -1,14 +1,13 @@
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Threading.Tasks;
 using FluentAssertions;
 using ICCardManager.Data.Repositories;
 using ICCardManager.Models;
 using ICCardManager.Services;
 using Moq;
 using Xunit;
-
-using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Threading.Tasks;
 
 namespace ICCardManager.Tests.Services;
 
@@ -200,8 +199,16 @@ public class LedgerConsistencyCheckerTests
     private const int Issue2112NextDayExpense = 200;
 
     private static Ledger Issue2112PrecedingLedger() =>
-        new Ledger { Id = 10, CardIdm = TestCardIdm, Date = new DateTime(2026, 2, 27),
-            Summary = "鉄道（天神～博多）", Income = 0, Expense = 260, Balance = Issue2112PrecedingBalance };
+        new Ledger
+        {
+            Id = 10,
+            CardIdm = TestCardIdm,
+            Date = new DateTime(2026, 2, 27),
+            Summary = "鉄道（天神～博多）",
+            Income = 0,
+            Expense = 260,
+            Balance = Issue2112PrecedingBalance
+        };
 
     private static List<Ledger> Issue2112PeriodLedgers(int nextDayBalance) => new List<Ledger>
     {

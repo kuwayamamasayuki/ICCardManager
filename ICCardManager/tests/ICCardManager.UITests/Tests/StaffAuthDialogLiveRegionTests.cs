@@ -1,9 +1,9 @@
 using System;
 using System.Linq;
-using FluentAssertions;
 using FlaUI.Core.AutomationElements;
 using FlaUI.Core.Definitions;
 using FlaUI.Core.Tools;
+using FluentAssertions;
 using ICCardManager.UITests.Infrastructure;
 using ICCardManager.UITests.PageObjects;
 using Xunit;

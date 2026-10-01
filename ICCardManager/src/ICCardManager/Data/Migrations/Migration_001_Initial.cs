@@ -1,12 +1,12 @@
 using System;
 using System.Collections.Generic;
+using System.Data.SQLite;
 using System.Linq;
 using System.Threading.Tasks;
-using System.Data.SQLite;
 
 namespace ICCardManager.Data.Migrations
 {
-/// <summary>
+    /// <summary>
     /// 初期スキーマのマイグレーション
     /// </summary>
     public class Migration_001_Initial : IMigration

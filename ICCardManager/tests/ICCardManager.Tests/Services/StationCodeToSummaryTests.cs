@@ -1,14 +1,13 @@
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Threading.Tasks;
 using FluentAssertions;
 using ICCardManager.Common;
 using ICCardManager.Models;
 using ICCardManager.Services;
 using Xunit;
 using Xunit.Abstractions;
-
-using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Threading.Tasks;
 
 
 namespace ICCardManager.Tests.Services;

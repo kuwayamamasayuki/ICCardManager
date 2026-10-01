@@ -1,6 +1,10 @@
-﻿using Microsoft.Extensions.Logging.Abstractions;
+using System;
+using System.Collections.Generic;
+using System.Data.SQLite;
 using System.IO;
+using System.Linq;
 using System.Text;
+using System.Threading.Tasks;
 using FluentAssertions;
 using ICCardManager.Common.Exceptions;
 using ICCardManager.Data;
@@ -10,14 +14,9 @@ using ICCardManager.Infrastructure.Security;
 using ICCardManager.Models;
 using ICCardManager.Services;
 using Microsoft.Extensions.Logging;
-using System.Data.SQLite;
+using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using Xunit;
-
-using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Threading.Tasks;
 
 
 namespace ICCardManager.Tests.Services;
@@ -2271,29 +2270,54 @@ FEDCBA9876543210,鈴木花子,002,テスト2";
         // 行2～4: 変更なし → スキップされる
         _ledgerRepositoryMock.Setup(x => x.GetByIdAsync(1)).ReturnsAsync(new Ledger
         {
-            Id = 1, CardIdm = "0123456789ABCDEF", Date = new DateTime(2025, 1, 1),
-            Summary = "1月から繰越", Income = 7336, Expense = 0, Balance = 7336
+            Id = 1,
+            CardIdm = "0123456789ABCDEF",
+            Date = new DateTime(2025, 1, 1),
+            Summary = "1月から繰越",
+            Income = 7336,
+            Expense = 0,
+            Balance = 7336
         });
         _ledgerRepositoryMock.Setup(x => x.GetByIdAsync(2)).ReturnsAsync(new Ledger
         {
-            Id = 2, CardIdm = "0123456789ABCDEF", Date = new DateTime(2025, 1, 10),
-            Summary = "鉄道（天神～博多）", Income = 0, Expense = 210, Balance = 7126
+            Id = 2,
+            CardIdm = "0123456789ABCDEF",
+            Date = new DateTime(2025, 1, 10),
+            Summary = "鉄道（天神～博多）",
+            Income = 0,
+            Expense = 210,
+            Balance = 7126
         });
         _ledgerRepositoryMock.Setup(x => x.GetByIdAsync(3)).ReturnsAsync(new Ledger
         {
-            Id = 3, CardIdm = "0123456789ABCDEF", Date = new DateTime(2025, 1, 10),
-            Summary = "鉄道（博多～天神）", Income = 0, Expense = 210, Balance = 6916
+            Id = 3,
+            CardIdm = "0123456789ABCDEF",
+            Date = new DateTime(2025, 1, 10),
+            Summary = "鉄道（博多～天神）",
+            Income = 0,
+            Expense = 210,
+            Balance = 6916
         });
         _ledgerRepositoryMock.Setup(x => x.GetByIdAsync(4)).ReturnsAsync(new Ledger
         {
-            Id = 4, CardIdm = "0123456789ABCDEF", Date = new DateTime(2025, 1, 15),
-            Summary = "鉄道（天神～六本松）", Income = 0, Expense = 420, Balance = 6496
+            Id = 4,
+            CardIdm = "0123456789ABCDEF",
+            Date = new DateTime(2025, 1, 15),
+            Summary = "鉄道（天神～六本松）",
+            Income = 0,
+            Expense = 420,
+            Balance = 6496
         });
         // 行5: 摘要が異なる → 更新対象
         _ledgerRepositoryMock.Setup(x => x.GetByIdAsync(5)).ReturnsAsync(new Ledger
         {
-            Id = 5, CardIdm = "0123456789ABCDEF", Date = new DateTime(2025, 1, 20),
-            Summary = "鉄道（六本松～天神）", Income = 0, Expense = 420, Balance = 6076,
+            Id = 5,
+            CardIdm = "0123456789ABCDEF",
+            Date = new DateTime(2025, 1, 20),
+            Summary = "鉄道（六本松～天神）",
+            Income = 0,
+            Expense = 420,
+            Balance = 6076,
             Note = null
         });
         _ledgerRepositoryMock.Setup(x => x.UpdateAsync(It.IsAny<Ledger>(), It.IsAny<SQLiteTransaction>())).ReturnsAsync(true);
@@ -2334,19 +2358,34 @@ FEDCBA9876543210,鈴木花子,002,テスト2";
         // 行2,3は変更なし、行3だけ変更あり
         _ledgerRepositoryMock.Setup(x => x.GetByIdAsync(1)).ReturnsAsync(new Ledger
         {
-            Id = 1, CardIdm = "0123456789ABCDEF", Date = new DateTime(2025, 1, 1),
-            Summary = "1月から繰越", Income = 7336, Expense = 0, Balance = 7336
+            Id = 1,
+            CardIdm = "0123456789ABCDEF",
+            Date = new DateTime(2025, 1, 1),
+            Summary = "1月から繰越",
+            Income = 7336,
+            Expense = 0,
+            Balance = 7336
         });
         _ledgerRepositoryMock.Setup(x => x.GetByIdAsync(2)).ReturnsAsync(new Ledger
         {
-            Id = 2, CardIdm = "0123456789ABCDEF", Date = new DateTime(2025, 1, 10),
-            Summary = "鉄道（天神～博多）", Income = 0, Expense = 210, Balance = 7126
+            Id = 2,
+            CardIdm = "0123456789ABCDEF",
+            Date = new DateTime(2025, 1, 10),
+            Summary = "鉄道（天神～博多）",
+            Income = 0,
+            Expense = 210,
+            Balance = 7126
         });
         // 行3: 摘要が異なる → 更新対象、かつ残高が不正
         _ledgerRepositoryMock.Setup(x => x.GetByIdAsync(3)).ReturnsAsync(new Ledger
         {
-            Id = 3, CardIdm = "0123456789ABCDEF", Date = new DateTime(2025, 1, 10),
-            Summary = "鉄道（博多～天神）", Income = 0, Expense = 210, Balance = 6916
+            Id = 3,
+            CardIdm = "0123456789ABCDEF",
+            Date = new DateTime(2025, 1, 10),
+            Summary = "鉄道（博多～天神）",
+            Income = 0,
+            Expense = 210,
+            Balance = 6916
         });
 
         // Act
@@ -2610,8 +2649,13 @@ FEDCBA9876543210,鈴木花子,002,テスト2";
         // ledger_id=1が存在するようにモック
         _ledgerRepositoryMock.Setup(x => x.GetByIdAsync(1)).ReturnsAsync(new Ledger
         {
-            Id = 1, CardIdm = "0123456789ABCDEF", Date = new DateTime(2024, 1, 15),
-            Summary = "鉄道（博多～天神 往復）", Income = 0, Expense = 520, Balance = 9480
+            Id = 1,
+            CardIdm = "0123456789ABCDEF",
+            Date = new DateTime(2024, 1, 15),
+            Summary = "鉄道（博多～天神 往復）",
+            Income = 0,
+            Expense = 520,
+            Balance = 9480
         });
 
         // Act
@@ -2645,13 +2689,23 @@ FEDCBA9876543210,鈴木花子,002,テスト2";
 
         _ledgerRepositoryMock.Setup(x => x.GetByIdAsync(1)).ReturnsAsync(new Ledger
         {
-            Id = 1, CardIdm = "AAAA456789ABCDEF", Date = new DateTime(2024, 1, 15),
-            Summary = "鉄道（博多～天神）", Income = 0, Expense = 260, Balance = 9740
+            Id = 1,
+            CardIdm = "AAAA456789ABCDEF",
+            Date = new DateTime(2024, 1, 15),
+            Summary = "鉄道（博多～天神）",
+            Income = 0,
+            Expense = 260,
+            Balance = 9740
         });
         _ledgerRepositoryMock.Setup(x => x.GetByIdAsync(2)).ReturnsAsync(new Ledger
         {
-            Id = 2, CardIdm = "BBBB456789ABCDEF", Date = new DateTime(2024, 1, 16),
-            Summary = "鉄道（天神～博多）", Income = 0, Expense = 260, Balance = 9480
+            Id = 2,
+            CardIdm = "BBBB456789ABCDEF",
+            Date = new DateTime(2024, 1, 16),
+            Summary = "鉄道（天神～博多）",
+            Income = 0,
+            Expense = 260,
+            Balance = 9480
         });
 
         // Act
@@ -2735,8 +2789,13 @@ FEDCBA9876543210,鈴木花子,002,テスト2";
 
         _ledgerRepositoryMock.Setup(x => x.GetByIdAsync(1)).ReturnsAsync(new Ledger
         {
-            Id = 1, CardIdm = "0123456789ABCDEF", Date = new DateTime(2024, 1, 15),
-            Summary = "鉄道", Income = 0, Expense = 520, Balance = 9480
+            Id = 1,
+            CardIdm = "0123456789ABCDEF",
+            Date = new DateTime(2024, 1, 15),
+            Summary = "鉄道",
+            Income = 0,
+            Expense = 520,
+            Balance = 9480
         });
         _ledgerRepositoryMock.Setup(x => x.ReplaceDetailsAsync(1, It.IsAny<IEnumerable<LedgerDetail>>(), It.IsAny<SQLiteTransaction>()))
             .ReturnsAsync(true);
@@ -2790,8 +2849,13 @@ FEDCBA9876543210,鈴木花子,002,テスト2";
         _ledgerRepositoryMock.SetupSequence(x => x.GetByIdAsync(1))
             .ReturnsAsync(new Ledger
             {
-                Id = 1, CardIdm = "0123456789ABCDEF", Date = new DateTime(2024, 1, 15),
-                Summary = "鉄道", Income = 0, Expense = 260, Balance = 9740
+                Id = 1,
+                CardIdm = "0123456789ABCDEF",
+                Date = new DateTime(2024, 1, 15),
+                Summary = "鉄道",
+                Income = 0,
+                Expense = 260,
+                Balance = 9740
             })
             .ThrowsAsync(new SQLiteException(SQLiteErrorCode.Busy, "database is locked"));
 
@@ -2845,8 +2909,13 @@ FEDCBA9876543210,鈴木花子,002,テスト2";
 
         _ledgerRepositoryMock.Setup(x => x.GetByIdAsync(1)).ReturnsAsync(new Ledger
         {
-            Id = 1, CardIdm = "0123456789ABCDEF", Date = new DateTime(2024, 1, 15),
-            Summary = "鉄道", Income = 0, Expense = 700, Balance = 9300
+            Id = 1,
+            CardIdm = "0123456789ABCDEF",
+            Date = new DateTime(2024, 1, 15),
+            Summary = "鉄道",
+            Income = 0,
+            Expense = 700,
+            Balance = 9300
         });
 
         List<LedgerDetail> savedDetails = null;
@@ -2913,13 +2982,23 @@ FEDCBA9876543210,鈴木花子,002,テスト2";
 
         _ledgerRepositoryMock.Setup(x => x.GetByIdAsync(1)).ReturnsAsync(new Ledger
         {
-            Id = 1, CardIdm = "0123456789ABCDEF", Date = new DateTime(2024, 1, 15),
-            Summary = "鉄道", Income = 0, Expense = 520, Balance = 9480
+            Id = 1,
+            CardIdm = "0123456789ABCDEF",
+            Date = new DateTime(2024, 1, 15),
+            Summary = "鉄道",
+            Income = 0,
+            Expense = 520,
+            Balance = 9480
         });
         _ledgerRepositoryMock.Setup(x => x.GetByIdAsync(2)).ReturnsAsync(new Ledger
         {
-            Id = 2, CardIdm = "0123456789ABCDEF", Date = new DateTime(2024, 1, 16),
-            Summary = "鉄道", Income = 0, Expense = 260, Balance = 9220
+            Id = 2,
+            CardIdm = "0123456789ABCDEF",
+            Date = new DateTime(2024, 1, 16),
+            Summary = "鉄道",
+            Income = 0,
+            Expense = 260,
+            Balance = 9220
         });
         _ledgerRepositoryMock.Setup(x => x.ReplaceDetailsAsync(It.IsAny<int>(), It.IsAny<IEnumerable<LedgerDetail>>(), It.IsAny<SQLiteTransaction>()))
             .ReturnsAsync(true);
@@ -2955,8 +3034,13 @@ FEDCBA9876543210,鈴木花子,002,テスト2";
 
         _ledgerRepositoryMock.Setup(x => x.GetByIdAsync(1)).ReturnsAsync(new Ledger
         {
-            Id = 1, CardIdm = "0123456789ABCDEF", Date = new DateTime(2024, 1, 15),
-            Summary = "テスト", Income = 0, Expense = 0, Balance = 0
+            Id = 1,
+            CardIdm = "0123456789ABCDEF",
+            Date = new DateTime(2024, 1, 15),
+            Summary = "テスト",
+            Income = 0,
+            Expense = 0,
+            Balance = 0
         });
         _ledgerRepositoryMock.Setup(x => x.ReplaceDetailsAsync(1, It.IsAny<IEnumerable<LedgerDetail>>(), It.IsAny<SQLiteTransaction>()))
             .ReturnsAsync(true);
@@ -3562,8 +3646,13 @@ FEDCBA9876543210,鈴木花子,002,テスト2";
         // 既存ledger
         _ledgerRepositoryMock.Setup(x => x.GetByIdAsync(1)).ReturnsAsync(new Ledger
         {
-            Id = 1, CardIdm = "0123456789ABCDEF", Date = new DateTime(2024, 1, 15),
-            Summary = "鉄道", Income = 0, Expense = 260, Balance = 9740
+            Id = 1,
+            CardIdm = "0123456789ABCDEF",
+            Date = new DateTime(2024, 1, 15),
+            Summary = "鉄道",
+            Income = 0,
+            Expense = 260,
+            Balance = 9740
         });
         _ledgerRepositoryMock.Setup(x => x.ReplaceDetailsAsync(1, It.IsAny<IEnumerable<LedgerDetail>>(), It.IsAny<SQLiteTransaction>()))
             .ReturnsAsync(true);
@@ -3692,8 +3781,13 @@ FEDCBA9876543210,鈴木花子,002,テスト2";
         // 既存Ledger（元は260円×2=520円）
         var existingLedger = new Ledger
         {
-            Id = 1, CardIdm = "0123456789ABCDEF", Date = new DateTime(2024, 1, 15),
-            Summary = "鉄道（博多～天神 往復）", Income = 0, Expense = 520, Balance = 9480
+            Id = 1,
+            CardIdm = "0123456789ABCDEF",
+            Date = new DateTime(2024, 1, 15),
+            Summary = "鉄道（博多～天神 往復）",
+            Income = 0,
+            Expense = 520,
+            Balance = 9480
         };
         _ledgerRepositoryMock.Setup(x => x.GetByIdAsync(1)).ReturnsAsync(existingLedger);
         _ledgerRepositoryMock.Setup(x => x.ReplaceDetailsAsync(1, It.IsAny<IEnumerable<LedgerDetail>>(), It.IsAny<SQLiteTransaction>()))
@@ -3962,8 +4056,13 @@ FEDCBA9876543210,鈴木花子,002,テスト2";
 
         _ledgerRepositoryMock.Setup(x => x.GetByIdAsync(1)).ReturnsAsync(new Ledger
         {
-            Id = 1, CardIdm = "0123456789ABCDEF", Date = new DateTime(2024, 1, 15),
-            Summary = "鉄道（博多～天神）", Income = 0, Expense = 260, Balance = 9740
+            Id = 1,
+            CardIdm = "0123456789ABCDEF",
+            Date = new DateTime(2024, 1, 15),
+            Summary = "鉄道（博多～天神）",
+            Income = 0,
+            Expense = 260,
+            Balance = 9740
         });
 
         // Act
@@ -4402,8 +4501,13 @@ FEDCBA9876543210,鈴木花子,002,テスト2";
         // 既存 Ledger は Details 空（＝差分あり、更新対象）
         _ledgerRepositoryMock.Setup(x => x.GetByIdAsync(1)).ReturnsAsync(new Ledger
         {
-            Id = 1, CardIdm = "0123456789ABCDEF", Date = new DateTime(2024, 1, 15),
-            Summary = "鉄道", Income = 0, Expense = 0, Balance = 9220,
+            Id = 1,
+            CardIdm = "0123456789ABCDEF",
+            Date = new DateTime(2024, 1, 15),
+            Summary = "鉄道",
+            Income = 0,
+            Expense = 0,
+            Balance = 9220,
             Details = new List<LedgerDetail>()
         });
         _ledgerRepositoryMock.Setup(x => x.ReplaceDetailsAsync(1, It.IsAny<IEnumerable<LedgerDetail>>(), It.IsAny<SQLiteTransaction>()))
@@ -4444,8 +4548,13 @@ FEDCBA9876543210,鈴木花子,002,テスト2";
         };
         _ledgerRepositoryMock.Setup(x => x.GetByIdAsync(1)).ReturnsAsync(new Ledger
         {
-            Id = 1, CardIdm = "0123456789ABCDEF", Date = new DateTime(2024, 1, 15),
-            Summary = "鉄道", Income = 0, Expense = 520, Balance = 9480,
+            Id = 1,
+            CardIdm = "0123456789ABCDEF",
+            Date = new DateTime(2024, 1, 15),
+            Summary = "鉄道",
+            Income = 0,
+            Expense = 520,
+            Balance = 9480,
             Details = existingDetails
         });
 
@@ -4520,8 +4629,13 @@ FEDCBA9876543210,鈴木花子,002,テスト2";
 
         var existingLedger = new Ledger
         {
-            Id = 1, CardIdm = "0123456789ABCDEF", Date = new DateTime(2024, 1, 15),
-            Summary = "鉄道（博多～天神）", Income = 0, Expense = 260, Balance = 9740
+            Id = 1,
+            CardIdm = "0123456789ABCDEF",
+            Date = new DateTime(2024, 1, 15),
+            Summary = "鉄道（博多～天神）",
+            Income = 0,
+            Expense = 260,
+            Balance = 9740
         };
         _ledgerRepositoryMock.Setup(x => x.GetByIdAsync(1)).ReturnsAsync(existingLedger);
         _ledgerRepositoryMock.Setup(x => x.ReplaceDetailsAsync(1, It.IsAny<IEnumerable<LedgerDetail>>(), It.IsAny<SQLiteTransaction>()))
@@ -4560,8 +4674,13 @@ FEDCBA9876543210,鈴木花子,002,テスト2";
 
         var existingLedger = new Ledger
         {
-            Id = 1, CardIdm = "0123456789ABCDEF", Date = new DateTime(2024, 1, 15),
-            Summary = "鉄道（博多～天神）", Income = 0, Expense = 260, Balance = 9740
+            Id = 1,
+            CardIdm = "0123456789ABCDEF",
+            Date = new DateTime(2024, 1, 15),
+            Summary = "鉄道（博多～天神）",
+            Income = 0,
+            Expense = 260,
+            Balance = 9740
         };
         // 1 回目（存在チェック）は見つかり、2 回目（トランザクション内の再読取）は削除済み
         _ledgerRepositoryMock.SetupSequence(x => x.GetByIdAsync(1))
@@ -4600,8 +4719,13 @@ FEDCBA9876543210,鈴木花子,002,テスト2";
 
         var existingLedger = new Ledger
         {
-            Id = 1, CardIdm = "0123456789ABCDEF", Date = new DateTime(2024, 1, 15),
-            Summary = "鉄道（博多～天神）", Income = 0, Expense = 260, Balance = 9740
+            Id = 1,
+            CardIdm = "0123456789ABCDEF",
+            Date = new DateTime(2024, 1, 15),
+            Summary = "鉄道（博多～天神）",
+            Income = 0,
+            Expense = 260,
+            Balance = 9740
         };
         _ledgerRepositoryMock.Setup(x => x.GetByIdAsync(1)).ReturnsAsync(existingLedger);
         _ledgerRepositoryMock.Setup(x => x.ReplaceDetailsAsync(1, It.IsAny<IEnumerable<LedgerDetail>>(), It.IsAny<SQLiteTransaction>()))
@@ -4643,8 +4767,13 @@ FEDCBA9876543210,鈴木花子,002,テスト2";
 
         var existingLedger = new Ledger
         {
-            Id = 1, CardIdm = "0123456789ABCDEF", Date = new DateTime(2024, 1, 15),
-            Summary = "鉄道（博多～天神）", Income = 0, Expense = 260, Balance = 9740
+            Id = 1,
+            CardIdm = "0123456789ABCDEF",
+            Date = new DateTime(2024, 1, 15),
+            Summary = "鉄道（博多～天神）",
+            Income = 0,
+            Expense = 260,
+            Balance = 9740
         };
         _ledgerRepositoryMock.Setup(x => x.GetByIdAsync(1)).ReturnsAsync(existingLedger);
         _ledgerRepositoryMock.Setup(x => x.ReplaceDetailsAsync(1, It.IsAny<IEnumerable<LedgerDetail>>(), It.IsAny<SQLiteTransaction>()))
@@ -4900,8 +5029,14 @@ FEDCBA9876543210,鈴木花子,002,テスト2";
         });
         var existingLedger = new Ledger
         {
-            Id = 1, CardIdm = "0123456789ABCDEF", Date = new DateTime(2025, 2, 1),
-            Summary = "12月から繰越", Income = 8806, Expense = 0, Balance = 8806, Note = "-立替"
+            Id = 1,
+            CardIdm = "0123456789ABCDEF",
+            Date = new DateTime(2025, 2, 1),
+            Summary = "12月から繰越",
+            Income = 8806,
+            Expense = 0,
+            Balance = 8806,
+            Note = "-立替"
         };
         _ledgerRepositoryMock.Setup(x => x.GetByIdAsync(1)).ReturnsAsync(existingLedger);
 
@@ -4929,8 +5064,13 @@ FEDCBA9876543210,鈴木花子,002,テスト2";
 
         var existingLedger = new Ledger
         {
-            Id = 1, CardIdm = "0123456789ABCDEF", Date = new DateTime(2024, 1, 15),
-            Summary = "鉄道（博多～天神）", Income = 0, Expense = 260, Balance = 9740
+            Id = 1,
+            CardIdm = "0123456789ABCDEF",
+            Date = new DateTime(2024, 1, 15),
+            Summary = "鉄道（博多～天神）",
+            Income = 0,
+            Expense = 260,
+            Balance = 9740
         };
         _ledgerRepositoryMock.Setup(x => x.GetByIdAsync(1)).ReturnsAsync(existingLedger);
         List<LedgerDetail>? captured = null;

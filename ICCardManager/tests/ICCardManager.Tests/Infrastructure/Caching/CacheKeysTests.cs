@@ -1,9 +1,8 @@
+using System.Linq;
+using System.Reflection;
 using FluentAssertions;
 using ICCardManager.Infrastructure.Caching;
 using Xunit;
-
-using System.Linq;
-using System.Reflection;
 
 namespace ICCardManager.Tests.Infrastructure.Caching;
 

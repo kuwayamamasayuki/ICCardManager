@@ -1,13 +1,13 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Linq;
 using System.Threading.Tasks;
 using Microsoft.Extensions.Logging;
-using System.Globalization;
 
 namespace ICCardManager.Infrastructure.Logging
 {
-/// <summary>
+    /// <summary>
     /// ファイル出力ロガー
     /// </summary>
     public class FileLogger : ILogger

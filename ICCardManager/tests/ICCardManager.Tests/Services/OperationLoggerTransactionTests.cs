@@ -1,12 +1,12 @@
+using System;
+using System.Collections.Generic;
+using System.Data.SQLite;
+using System.Threading.Tasks;
 using FluentAssertions;
 using ICCardManager.Data.Repositories;
 using ICCardManager.Models;
 using ICCardManager.Services;
 using Moq;
-using System;
-using System.Collections.Generic;
-using System.Data.SQLite;
-using System.Threading.Tasks;
 using Xunit;
 
 namespace ICCardManager.Tests.Services;

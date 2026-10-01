@@ -1,9 +1,9 @@
 using System;
 using System.Collections.Generic;
+using System.Collections.ObjectModel;
 using System.Linq;
 using System.Runtime.CompilerServices;
 using System.Threading.Tasks;
-using System.Collections.ObjectModel;
 using System.Windows;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
@@ -20,7 +20,7 @@ using Microsoft.Extensions.Logging;
 
 namespace ICCardManager.ViewModels
 {
-/// <summary>
+    /// <summary>
     /// カード管理画面のViewModel
     /// </summary>
     public partial class CardManageViewModel : ViewModelBase, IEditFormViewModel
@@ -449,7 +449,10 @@ namespace ICCardManager.ViewModels
         [RelayCommand(CanExecute = nameof(CanEdit))]
         public void StartEdit()
         {
-            if (SelectedCard == null) return;
+            if (SelectedCard == null)
+            {
+                return;
+            }
 
             IsEditing = true;
             IsNewCard = false;
@@ -970,7 +973,10 @@ namespace ICCardManager.ViewModels
         [RelayCommand(CanExecute = nameof(CanDelete))]
         public async Task DeleteAsync()
         {
-            if (SelectedCard == null) return;
+            if (SelectedCard == null)
+            {
+                return;
+            }
 
             if (SelectedCard.IsLent)
             {
@@ -1115,7 +1121,10 @@ namespace ICCardManager.ViewModels
         [RelayCommand(CanExecute = nameof(CanRefund))]
         public async Task RefundAsync()
         {
-            if (SelectedCard == null) return;
+            if (SelectedCard == null)
+            {
+                return;
+            }
 
             if (SelectedCard.IsLent)
             {
@@ -1240,7 +1249,10 @@ namespace ICCardManager.ViewModels
         [RelayCommand(CanExecute = nameof(CanCreateLendRecord))]
         public async Task CreateLendRecordAsync()
         {
-            if (SelectedCard == null) return;
+            if (SelectedCard == null)
+            {
+                return;
+            }
 
             if (SelectedCard.IsLent)
             {
@@ -1257,7 +1269,10 @@ namespace ICCardManager.ViewModels
             var targetLabel = FormatCardLabel(SelectedCard.CardType, SelectedCard.CardNumber);
 
             var authResult = await _staffAuthService.RequestAuthenticationAsync("貸出記録の作成");
-            if (authResult == null) return;
+            if (authResult == null)
+            {
+                return;
+            }
 
             // Issue #1760: 書き込みより前に最新の状態を読み、読めなければ何も書かずに戻る。
             // 認証の待機中に他 PC がこのカードを削除・貸出している可能性がある。
@@ -1298,7 +1313,10 @@ namespace ICCardManager.ViewModels
             var dialogResult = _navigationService.ShowDialog<Views.Dialogs.SystemLendDialog>(
                 d => d.Bind(viewModel));
 
-            if (dialogResult != true) return;
+            if (dialogResult != true)
+            {
+                return;
+            }
 
             await LoadCardsAsync();
             CancelEdit();
@@ -1353,7 +1371,10 @@ namespace ICCardManager.ViewModels
         /// </summary>
         private void OnCardRead(object sender, CardReadEventArgs e)
         {
-            if (!IsWaitingForCard) return;
+            if (!IsWaitingForCard)
+            {
+                return;
+            }
 
             // UIスレッドで非同期実行（登録済みチェックを即座に行うため）
             // Issue #1843: 生の Dispatcher.InvokeAsync は DispatcherOperation<Task> を返すため、
@@ -1448,7 +1469,10 @@ namespace ICCardManager.ViewModels
             // Issue #1816: 入口ゲート（OnCardRead）はカードリーダースレッドで判定され、
             // 解除は UI スレッドのここで初めて行われる。連続タッチでは 2 件目もゲートを
             // 通過済みで queue されているため、取得地点で再判定する（#1807 と同じ形）
-            if (!IsWaitingForCard) return;
+            if (!IsWaitingForCard)
+            {
+                return;
+            }
 
             EditCardIdm = idm;
             IsWaitingForCard = false;
@@ -1605,7 +1629,10 @@ namespace ICCardManager.ViewModels
         [RelayCommand]
         public void SimulateCardRead()
         {
-            if (!IsWaitingForCard) return;
+            if (!IsWaitingForCard)
+            {
+                return;
+            }
 
             if (_cardReader is MockCardReader mockReader)
             {
@@ -1780,12 +1807,19 @@ namespace ICCardManager.ViewModels
                 .ThenByDescending(d => d.Balance)
                 .FirstOrDefault();
 
-            if (oldest == null) return 0;
+            if (oldest == null)
+            {
+                return 0;
+            }
 
             if (oldest.IsCharge || oldest.IsPointRedemption)
+            {
                 return (oldest.Balance ?? 0) - (oldest.Amount ?? 0);
+            }
             else
+            {
                 return (oldest.Balance ?? 0) + (oldest.Amount ?? 0);
+            }
         }
 
         /// <summary>
@@ -1805,10 +1839,14 @@ namespace ICCardManager.ViewModels
             Views.Dialogs.CardRegistrationModeResult modeResult, DateTime registrationDate)
         {
             if (modeResult.IsNewPurchase)
+            {
                 return modeResult.PurchaseDate?.Date ?? registrationDate.Date;
+            }
             else
+            {
                 return SummaryGenerator.GetMidYearCarryoverDate(
                     modeResult.CarryoverMonth!.Value, registrationDate);
+            }
         }
 
         /// <summary>

@@ -1,11 +1,11 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Data.SQLite;
 using System.Globalization;
-using System.Linq;
-using System.Threading.Tasks;
 using System.IO;
+using System.Linq;
 using System.Security;
+using System.Threading.Tasks;
 using ICCardManager.Common;
 using ICCardManager.Common.Exceptions;
 using ICCardManager.Data;
@@ -16,7 +16,7 @@ using Microsoft.Extensions.Logging;
 
 namespace ICCardManager.Services
 {
-/// <summary>
+    /// <summary>
     /// バックアップサービス
     /// </summary>
     public class BackupService
@@ -804,14 +804,18 @@ namespace ICCardManager.Services
 
                 var header = new byte[SqliteHeaderLength];
                 if (!TryReadExactly(stream, header))
+                {
                     return false;
+                }
 
                 // "SQLite format 3\0" (ASCII)
                 var expected = System.Text.Encoding.ASCII.GetBytes("SQLite format 3\0");
                 for (int i = 0; i < expected.Length; i++)
                 {
                     if (header[i] != expected[i])
+                    {
                         return false;
+                    }
                 }
 
                 return !IsTruncatedSqliteFile(header, fileLength);
@@ -917,7 +921,9 @@ namespace ICCardManager.Services
         internal static bool CanAcquireExclusiveLock(string dbPath)
         {
             if (!File.Exists(dbPath))
+            {
                 return true;
+            }
 
             try
             {

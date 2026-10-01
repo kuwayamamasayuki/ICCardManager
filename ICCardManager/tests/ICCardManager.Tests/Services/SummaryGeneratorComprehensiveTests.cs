@@ -1,13 +1,12 @@
-﻿using FluentAssertions;
-using ICCardManager.Models;
-using ICCardManager.Services;
-using Xunit;
-using Xunit.Abstractions;
-
 using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
+using FluentAssertions;
+using ICCardManager.Models;
+using ICCardManager.Services;
+using Xunit;
+using Xunit.Abstractions;
 
 
 namespace ICCardManager.Tests.Services;
@@ -1316,37 +1315,49 @@ public class SummaryGeneratorComprehensiveTests : IDisposable
         // 暗黙のポイント還元: 金額が負、チャージでもポイント還元フラグでもない
         SummaryGenerator.IsImplicitPointRedemption(new LedgerDetail
         {
-            Amount = -240, IsCharge = false, IsPointRedemption = false
+            Amount = -240,
+            IsCharge = false,
+            IsPointRedemption = false
         }).Should().BeTrue();
 
         // 正の金額 → false
         SummaryGenerator.IsImplicitPointRedemption(new LedgerDetail
         {
-            Amount = 210, IsCharge = false, IsPointRedemption = false
+            Amount = 210,
+            IsCharge = false,
+            IsPointRedemption = false
         }).Should().BeFalse();
 
         // チャージ → false（チャージは別処理）
         SummaryGenerator.IsImplicitPointRedemption(new LedgerDetail
         {
-            Amount = -1000, IsCharge = true, IsPointRedemption = false
+            Amount = -1000,
+            IsCharge = true,
+            IsPointRedemption = false
         }).Should().BeFalse();
 
         // 既にポイント還元フラグあり → false（明示的なので暗黙ではない）
         SummaryGenerator.IsImplicitPointRedemption(new LedgerDetail
         {
-            Amount = -240, IsCharge = false, IsPointRedemption = true
+            Amount = -240,
+            IsCharge = false,
+            IsPointRedemption = true
         }).Should().BeFalse();
 
         // 金額がnull → false
         SummaryGenerator.IsImplicitPointRedemption(new LedgerDetail
         {
-            Amount = null, IsCharge = false, IsPointRedemption = false
+            Amount = null,
+            IsCharge = false,
+            IsPointRedemption = false
         }).Should().BeFalse();
 
         // 金額が0 → false
         SummaryGenerator.IsImplicitPointRedemption(new LedgerDetail
         {
-            Amount = 0, IsCharge = false, IsPointRedemption = false
+            Amount = 0,
+            IsCharge = false,
+            IsPointRedemption = false
         }).Should().BeFalse();
     }
 

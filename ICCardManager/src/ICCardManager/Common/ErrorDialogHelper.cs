@@ -1,17 +1,17 @@
 using System;
 using System.Collections.Generic;
-using System.Linq;
-using System.Threading.Tasks;
+using System.Globalization;
 using System.IO;
+using System.Linq;
 using System.Security.AccessControl;
 using System.Security.Principal;
+using System.Threading.Tasks;
 using System.Windows;
 using ICCardManager.Common.Exceptions;
-using System.Globalization;
 
 namespace ICCardManager.Common
 {
-/// <summary>
+    /// <summary>
     /// エラーダイアログ表示のヘルパークラス
     /// 例外の種類に応じて適切なエラーダイアログを表示する
     /// </summary>
@@ -152,14 +152,14 @@ namespace ICCardManager.Common
                 ? message
                 : $"{message}\n\nエラーコード: {errorCode}";
 
-    #if DEBUG
+#if DEBUG
             // デバッグビルドでは詳細情報を表示
             displayMessage += $"\n\n【デバッグ情報】\n{exception.GetType().Name}: {exception.Message}";
             if (exception.InnerException != null)
             {
                 displayMessage += $"\nInner: {exception.InnerException.Message}";
             }
-    #endif
+#endif
 
             OwnedMessageBox.Show(displayMessage, title, MessageBoxButton.OK, MessageBoxImage.Error);
         }

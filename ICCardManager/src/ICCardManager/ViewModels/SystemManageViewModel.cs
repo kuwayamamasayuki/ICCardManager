@@ -1,7 +1,8 @@
-﻿using System;
+using System;
 using System.Collections.ObjectModel;
 using System.Globalization;
 using System.IO;
+using System.Threading.Tasks;
 using System.Windows;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
@@ -10,7 +11,6 @@ using ICCardManager.Data.Repositories;
 using ICCardManager.Dtos;
 using ICCardManager.Services;
 using Microsoft.Win32;
-using System.Threading.Tasks;
 
 namespace ICCardManager.ViewModels;
 
@@ -99,7 +99,9 @@ public partial class SystemManageViewModel : ViewModelBase
         get
         {
             if (BackupHealth?.LastSuccessAt == null)
+            {
                 return "最終成功: 記録なし（次回の自動バックアップ成功後に表示されます）";
+            }
 
             var elapsed = BackupHealth.GetDaysSinceLastSuccess(DateTime.Now) ?? 0;
             var elapsedText = elapsed == 0 ? "本日" : elapsed == 1 ? "昨日" : $"{elapsed}日前";
@@ -191,7 +193,9 @@ public partial class SystemManageViewModel : ViewModelBase
             var date = BackupHealth?.LastVacuumDate;
             var machine = BackupHealth?.LastVacuumMachineName;
             if (date == null)
+            {
                 return "最終最適化(VACUUM): 未実行";
+            }
 
             var machineText = string.IsNullOrWhiteSpace(machine) ? string.Empty : $"（実施PC: {machine}）";
             return $"最終最適化(VACUUM): {DisplayFormatters.FormatDate(date)}{machineText}";

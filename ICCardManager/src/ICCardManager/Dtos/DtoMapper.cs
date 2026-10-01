@@ -7,7 +7,7 @@ using ICCardManager.Models;
 
 namespace ICCardManager.Dtos
 {
-/// <summary>
+    /// <summary>
     /// Entity ⇔ DTO マッピング用拡張メソッド
     /// </summary>
     public static class DtoMapper

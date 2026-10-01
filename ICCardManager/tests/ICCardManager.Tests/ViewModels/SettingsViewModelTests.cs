@@ -1,18 +1,17 @@
-﻿using System.Collections.Generic;
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Threading.Tasks;
 using FluentAssertions;
+using ICCardManager.Common;
 using ICCardManager.Data.Repositories;
 using ICCardManager.Infrastructure.Sound;
 using ICCardManager.Models;
 using ICCardManager.Services;
 using ICCardManager.ViewModels;
+using Microsoft.Extensions.Options;
 using Moq;
 using Xunit;
-
-using ICCardManager.Common;
-using Microsoft.Extensions.Options;
-using System;
-using System.Linq;
-using System.Threading.Tasks;
 
 
 namespace ICCardManager.Tests.ViewModels;

@@ -1,13 +1,12 @@
+using System;
+using System.Collections.Generic;
+using System.Linq;
 using System.Printing;
+using System.Threading.Tasks;
 using System.Windows.Documents;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using ICCardManager.Services;
-
-using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Threading.Tasks;
 
 
 namespace ICCardManager.ViewModels;
@@ -241,7 +240,7 @@ public partial class PrintPreviewViewModel : ViewModelBase
         OnPropertyChanged(nameof(IsFirstPage));
         OnPropertyChanged(nameof(IsLastPage));
 
-                // ページナビゲーションコマンドのCanExecuteを更新
+        // ページナビゲーションコマンドのCanExecuteを更新
         NextPageCommand.NotifyCanExecuteChanged();
         PreviousPageCommand.NotifyCanExecuteChanged();
         FirstPageCommand.NotifyCanExecuteChanged();

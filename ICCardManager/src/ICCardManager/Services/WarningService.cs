@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
@@ -115,7 +115,9 @@ namespace ICCardManager.Services
             bool isLent)
         {
             if (actualBalance == recordedBalance)
+            {
                 return null;
+            }
 
             var difference = Math.Abs(actualBalance - recordedBalance);
 
@@ -169,7 +171,9 @@ namespace ICCardManager.Services
         public WarningItem CheckJournalModeWarning()
         {
             if (!_databaseInfo.IsJournalModeDegraded)
+            {
                 return null;
+            }
 
             return new WarningItem
             {
@@ -192,7 +196,9 @@ namespace ICCardManager.Services
         {
             var result = _updateNotificationService?.CheckForNewerVersion();
             if (result == null)
+            {
                 return null;
+            }
 
             return new WarningItem
             {
@@ -226,12 +232,16 @@ namespace ICCardManager.Services
         public async Task<WarningItem> CheckBackupHealthWarningAsync(DateTime now)
         {
             if (_backupHealthService == null)
+            {
                 return null;
+            }
 
             var health = await _backupHealthService.GetHealthAsync().ConfigureAwait(false);
             var elapsedDays = health?.GetDaysSinceLastSuccess(now);
             if (elapsedDays == null || elapsedDays <= AppConstants.BackupStaleWarningDays)
+            {
                 return null;
+            }
 
             return new WarningItem
             {
@@ -262,11 +272,15 @@ namespace ICCardManager.Services
         public async Task<WarningItem> CheckCarryoverDataLossWarningAsync()
         {
             if (_carryoverDataLossDetector == null)
+            {
                 return null;
+            }
 
             var items = await _carryoverDataLossDetector.DetectAsync().ConfigureAwait(false);
             if (items == null || items.Count == 0)
+            {
                 return null;
+            }
 
             return new WarningItem
             {

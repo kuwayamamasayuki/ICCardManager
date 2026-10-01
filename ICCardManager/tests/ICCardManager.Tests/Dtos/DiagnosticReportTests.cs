@@ -29,7 +29,10 @@ public class DiagnosticReportTests
     {
         var items = new List<DiagnosticItem>();
         foreach (var s in statuses)
+        {
             items.Add(Item(s));
+        }
+
         return new DiagnosticReport { Items = items };
     }
 

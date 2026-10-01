@@ -13,7 +13,7 @@ using ICCardManager.Views.Helpers;
 
 namespace ICCardManager.Views.Dialogs
 {
-/// <summary>
+    /// <summary>
     /// カード管理ダイアログ
     /// </summary>
     public partial class CardManageDialog : Window

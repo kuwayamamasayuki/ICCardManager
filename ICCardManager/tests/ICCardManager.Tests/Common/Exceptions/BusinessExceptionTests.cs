@@ -1,11 +1,10 @@
-﻿using FluentAssertions;
-using ICCardManager.Infrastructure.Security;
-using ICCardManager.Common.Exceptions;
-using Xunit;
-
 using System;
 using System.IO;
 using System.Linq;
+using FluentAssertions;
+using ICCardManager.Common.Exceptions;
+using ICCardManager.Infrastructure.Security;
+using Xunit;
 
 
 namespace ICCardManager.Tests.Common.Exceptions;

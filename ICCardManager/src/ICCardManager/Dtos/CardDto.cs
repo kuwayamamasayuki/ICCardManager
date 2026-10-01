@@ -7,7 +7,7 @@ using ICCardManager.Common;
 
 namespace ICCardManager.Dtos
 {
-/// <summary>
+    /// <summary>
     /// カード情報DTO
     /// ViewModelで使用するカード情報の表示用オブジェクト
     /// </summary>

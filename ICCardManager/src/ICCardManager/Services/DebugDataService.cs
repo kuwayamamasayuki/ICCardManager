@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Data.SQLite;
 using System.Linq;
@@ -12,7 +12,7 @@ using ICCardManager.Models;
 
 namespace ICCardManager.Services
 {
-/// <summary>
+    /// <summary>
     /// DEBUGビルド時のテストデータ管理サービス
     /// </summary>
     public class DebugDataService
@@ -263,11 +263,15 @@ namespace ICCardManager.Services
 
                     // 土日はスキップ（平日のみ利用）
                     if (date.DayOfWeek == DayOfWeek.Saturday || date.DayOfWeek == DayOfWeek.Sunday)
+                    {
                         continue;
+                    }
 
                     // H-001: 特殊シナリオ日以降は生成停止（残高チェーン連続性のため）
                     if (cutoffDate.HasValue && date >= cutoffDate.Value)
+                    {
                         break;
+                    }
 
                     // N-002: 年度境界日（3/31, 4/1）をスキップ（繰越レコードとの重複回避）
                     if (isN002)
@@ -279,7 +283,9 @@ namespace ICCardManager.Services
                             boundaryBalanceCaptured = true;
                         }
                         if (date.Date == previousFiscalYearEnd.Date || date.Date == fiscalYearStart.Date)
+                        {
                             continue;
+                        }
                     }
 
                     // 残高が少ない場合はチャージ
@@ -811,7 +817,9 @@ namespace ICCardManager.Services
 
                 // 土日はスキップ
                 if (date.DayOfWeek == DayOfWeek.Saturday || date.DayOfWeek == DayOfWeek.Sunday)
+                {
                     continue;
+                }
 
                 // 残高が少ない場合はチャージ
                 if (balance < 3000)
@@ -902,7 +910,9 @@ namespace ICCardManager.Services
         internal static DateTime FindNthWeekendDayBefore(DateTime today, int n)
         {
             if (n <= 0)
+            {
                 throw new ArgumentOutOfRangeException(nameof(n), "n は1以上を指定してください");
+            }
 
             var count = 0;
             var date = today.Date.AddDays(-1); // today自体は含めない
@@ -912,7 +922,9 @@ namespace ICCardManager.Services
                 {
                     count++;
                     if (count == n)
+                    {
                         return date;
+                    }
                 }
                 date = date.AddDays(-1);
             }

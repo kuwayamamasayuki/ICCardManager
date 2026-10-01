@@ -1,14 +1,14 @@
 using System;
 using System.Collections.Generic;
-using System.Linq;
-using System.Threading.Tasks;
 using System.Globalization;
+using System.Linq;
 using System.Printing;
+using System.Threading.Tasks;
 using System.Windows.Data;
 
 namespace ICCardManager.Common
 {
-/// <summary>
+    /// <summary>
     /// PageOrientationを日本語表示名に変換するコンバーター
     /// </summary>
     public class OrientationToDisplayNameConverter : IValueConverter

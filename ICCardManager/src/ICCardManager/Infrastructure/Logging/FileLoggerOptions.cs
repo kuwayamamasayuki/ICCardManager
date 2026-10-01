@@ -4,7 +4,7 @@ using System.Linq;
 using System.Threading.Tasks;
 namespace ICCardManager.Infrastructure.Logging
 {
-/// <summary>
+    /// <summary>
     /// ファイルロガーの設定オプション
     /// </summary>
     public class FileLoggerOptions

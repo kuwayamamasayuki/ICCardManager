@@ -1,18 +1,18 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
+using System.Data.Common;
+using System.Data.SQLite;
 using System.Linq;
 using System.Threading.Tasks;
+using ICCardManager.Common;
 using ICCardManager.Infrastructure.Caching;
 using ICCardManager.Models;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
-using System.Data.Common;
-using System.Data.SQLite;
-using ICCardManager.Common;
 
 namespace ICCardManager.Data.Repositories
 {
-/// <summary>
+    /// <summary>
     /// 交通系ICカードリポジトリ実装
     /// </summary>
     public class CardRepository : ICardRepository
@@ -319,7 +319,9 @@ VALUES (@cardIdm, @cardType, @cardNumber, @note, 0, NULL, 0, NULL, NULL, @starti
             // SQLiteのUNIQUE制約違反はConstraintで報告される
             // メッセージに "ic_card.card_type, ic_card.card_number" が含まれるかで判別
             if (ex.ResultCode != SQLiteErrorCode.Constraint || ex.Message == null)
+            {
                 return false;
+            }
 
             return ex.Message.Contains("ic_card.card_type") &&
                    ex.Message.Contains("ic_card.card_number");
@@ -581,10 +583,14 @@ WHERE card_idm = @cardIdm AND is_deleted = 1";
             var currentCard = await GetByIdmAsync(cardIdm, includeDeleted: true).ConfigureAwait(false);
 
             if (currentCard == null)
+            {
                 return CardOperationResult.NotFound;
+            }
 
             if (currentCard.IsLent)
+            {
                 return CardOperationResult.CardIsLent;
+            }
 
             // カードは存在するが操作条件を満たさない（他PCで状態変更済み）
             return CardOperationResult.Conflict;

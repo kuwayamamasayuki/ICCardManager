@@ -1,15 +1,15 @@
 using System;
 using System.Collections.Generic;
-using System.Linq;
-using System.Threading.Tasks;
 using System.IO;
+using System.Linq;
 using System.Media;
-using ICCardManager.Models;
 using System.Threading;
+using System.Threading.Tasks;
+using ICCardManager.Models;
 
 namespace ICCardManager.Infrastructure.Sound
 {
-/// <summary>
+    /// <summary>
     /// 効果音再生サービス
     /// </summary>
     public class SoundPlayer : ISoundPlayer

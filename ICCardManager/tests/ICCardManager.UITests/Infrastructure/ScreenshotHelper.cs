@@ -64,7 +64,11 @@ namespace ICCardManager.UITests.Infrastructure
         /// </summary>
         public static void MoveToTopLeft(Window window)
         {
-            if (window == null) throw new ArgumentNullException(nameof(window));
+            if (window == null)
+            {
+                throw new ArgumentNullException(nameof(window));
+            }
+
             window.Move(0, 0);
             Thread.Sleep(SettleDelay);
         }
@@ -84,7 +88,11 @@ namespace ICCardManager.UITests.Infrastructure
         /// <returns>前面化できたら true。</returns>
         public static bool BringToForeground(Window window)
         {
-            if (window == null) throw new ArgumentNullException(nameof(window));
+            if (window == null)
+            {
+                throw new ArgumentNullException(nameof(window));
+            }
+
             var handle = window.Properties.NativeWindowHandle.ValueOrDefault;
 
             for (var attempt = 0; attempt < 3; attempt++)
@@ -187,9 +195,20 @@ namespace ICCardManager.UITests.Infrastructure
         /// </remarks>
         public static string CaptureElements(Window owner, string fileName, params AutomationElement[] elements)
         {
-            if (owner == null) throw new ArgumentNullException(nameof(owner));
-            if (elements == null || elements.Length == 0) throw new ArgumentException("撮影する要素を指定してください。", nameof(elements));
-            if (string.IsNullOrWhiteSpace(fileName)) throw new ArgumentException("ファイル名を指定してください。", nameof(fileName));
+            if (owner == null)
+            {
+                throw new ArgumentNullException(nameof(owner));
+            }
+
+            if (elements == null || elements.Length == 0)
+            {
+                throw new ArgumentException("撮影する要素を指定してください。", nameof(elements));
+            }
+
+            if (string.IsNullOrWhiteSpace(fileName))
+            {
+                throw new ArgumentException("ファイル名を指定してください。", nameof(fileName));
+            }
 
             BringToForeground(owner);  // 内側で SettleDelay ぶん待つ
 
@@ -225,9 +244,20 @@ namespace ICCardManager.UITests.Infrastructure
         /// </remarks>
         public static string CaptureWithToast(Window mainWindow, Window toast, string fileName)
         {
-            if (mainWindow == null) throw new ArgumentNullException(nameof(mainWindow));
-            if (toast == null) throw new ArgumentNullException(nameof(toast));
-            if (string.IsNullOrWhiteSpace(fileName)) throw new ArgumentException("ファイル名を指定してください。", nameof(fileName));
+            if (mainWindow == null)
+            {
+                throw new ArgumentNullException(nameof(mainWindow));
+            }
+
+            if (toast == null)
+            {
+                throw new ArgumentNullException(nameof(toast));
+            }
+
+            if (string.IsNullOrWhiteSpace(fileName))
+            {
+                throw new ArgumentException("ファイル名を指定してください。", nameof(fileName));
+            }
 
             // トーストは Topmost（ToastNotificationWindow.xaml）なので、メイン画面を前面化しても隠れない
             BringToForeground(mainWindow);
@@ -270,8 +300,15 @@ namespace ICCardManager.UITests.Infrastructure
         /// </param>
         public static string Capture(Window window, string fileName, bool bringToFront = true)
         {
-            if (window == null) throw new ArgumentNullException(nameof(window));
-            if (string.IsNullOrWhiteSpace(fileName)) throw new ArgumentException("ファイル名を指定してください。", nameof(fileName));
+            if (window == null)
+            {
+                throw new ArgumentNullException(nameof(window));
+            }
+
+            if (string.IsNullOrWhiteSpace(fileName))
+            {
+                throw new ArgumentException("ファイル名を指定してください。", nameof(fileName));
+            }
 
             if (bringToFront)
             {
@@ -408,12 +445,18 @@ namespace ICCardManager.UITests.Infrastructure
                     samples++;
                 }
             }
-            if (samples == 0) return 1.0;
+            if (samples == 0)
+            {
+                return 1.0;
+            }
 
             var max = 0;
             foreach (var n in counts.Values)
             {
-                if (n > max) max = n;
+                if (n > max)
+                {
+                    max = n;
+                }
             }
             return (double)max / samples;
         }

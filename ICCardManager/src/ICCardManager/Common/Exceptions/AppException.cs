@@ -4,7 +4,7 @@ using System.Linq;
 using System.Threading.Tasks;
 namespace ICCardManager.Common.Exceptions
 {
-/// <summary>
+    /// <summary>
     /// アプリケーション共通の基底例外クラス
     /// すべてのカスタム例外はこのクラスを継承する
     /// </summary>

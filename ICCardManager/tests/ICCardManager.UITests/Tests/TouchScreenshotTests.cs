@@ -275,8 +275,15 @@ namespace ICCardManager.UITests.Tests
                 grid.Should().NotBeNull($"仮想タッチダイアログに履歴一覧（\"{TestConstants.VirtualCardHistoryGrid}\"）が存在すること");
                 var row = Retry.WhileNull(() => grid!.Rows.FirstOrDefault(), TimeSpan.FromSeconds(5)).Result;
                 row.Should().NotBeNull("「履歴追加」で行が 1 件できること");
-                if (entryStation != null) row!.Cells[1].Patterns.Value.Pattern.SetValue(entryStation);
-                if (exitStation != null) row!.Cells[2].Patterns.Value.Pattern.SetValue(exitStation);
+                if (entryStation != null)
+                {
+                    row!.Cells[1].Patterns.Value.Pattern.SetValue(entryStation);
+                }
+
+                if (exitStation != null)
+                {
+                    row!.Cells[2].Patterns.Value.Pattern.SetValue(exitStation);
+                }
             }
 
             dialogPage.ClickButton(TestConstants.VirtualCardExecuteButton);

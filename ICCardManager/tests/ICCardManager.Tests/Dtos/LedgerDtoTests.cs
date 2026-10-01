@@ -193,7 +193,9 @@ public class LedgerDtoTests
         dto.PropertyChanged += (_, args) =>
         {
             if (args.PropertyName == nameof(LedgerDto.IsChecked))
+            {
                 propertyChanged = true;
+            }
         };
 
         dto.IsChecked = true;
@@ -225,7 +227,9 @@ public class LedgerDtoTests
         dto.PropertyChanged += (_, args) =>
         {
             if (args.PropertyName == nameof(LedgerDto.HasBalanceInconsistency))
+            {
                 propertyChanged = true;
+            }
         };
 
         dto.HasBalanceInconsistency = true;

@@ -1,6 +1,6 @@
 using System;
-using FluentAssertions;
 using FlaUI.Core.Tools;
+using FluentAssertions;
 using ICCardManager.UITests.Infrastructure;
 using ICCardManager.UITests.PageObjects;
 using Xunit;

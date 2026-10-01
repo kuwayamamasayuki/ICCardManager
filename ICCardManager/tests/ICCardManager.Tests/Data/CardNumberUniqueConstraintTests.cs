@@ -1,17 +1,17 @@
-using FluentAssertions;
-using ICCardManager.Data;
-using ICCardManager.Data.Repositories;
-using ICCardManager.Infrastructure.Caching;
-using ICCardManager.Models;
-using Microsoft.Extensions.Options;
-using Moq;
 using System;
 using System.Collections.Generic;
 using System.Data.SQLite;
 using System.Linq;
 using System.Threading.Tasks;
-using Xunit;
+using FluentAssertions;
+using ICCardManager.Data;
+using ICCardManager.Data.Repositories;
+using ICCardManager.Infrastructure.Caching;
+using ICCardManager.Models;
 using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Options;
+using Moq;
+using Xunit;
 
 namespace ICCardManager.Tests.Data;
 

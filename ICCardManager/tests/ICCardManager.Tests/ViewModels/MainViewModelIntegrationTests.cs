@@ -1,3 +1,7 @@
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Threading.Tasks;
 using CommunityToolkit.Mvvm.Messaging;
 using FluentAssertions;
 using ICCardManager.Common.Exceptions;
@@ -16,10 +20,6 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using Moq;
-using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Threading.Tasks;
 using Xunit;
 
 namespace ICCardManager.Tests.ViewModels;
@@ -1861,8 +1861,13 @@ public class MainViewModelIntegrationTests
         var unrelatedRows = Enumerable.Range(0, unrelatedRowCount)
             .Select(i => new Ledger
             {
-                Id = 999 - i, CardIdm = CardIdmA, Date = DateTime.Today.AddDays(-3 - i),
-                Summary = "鉄道（天神～博多）", Expense = 260, Balance = 3000, StaffName = StaffName,
+                Id = 999 - i,
+                CardIdm = CardIdmA,
+                Date = DateTime.Today.AddDays(-3 - i),
+                Summary = "鉄道（天神～博多）",
+                Expense = 260,
+                Balance = 3000,
+                StaffName = StaffName,
             })
             .OrderBy(l => l.Date)
             .ToList();

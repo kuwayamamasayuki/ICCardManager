@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Data;
 using System.Data.SQLite;
@@ -37,7 +37,9 @@ public class DbContextConcurrentAccessTests : IDisposable
         try
         {
             if (Directory.Exists(_testDirectory))
+            {
                 Directory.Delete(_testDirectory, recursive: true);
+            }
         }
         catch { }
         GC.SuppressFinalize(this);
@@ -108,7 +110,11 @@ public class DbContextConcurrentAccessTests : IDisposable
         selectCmd.CommandText = "SELECT card_idm FROM test_lending ORDER BY card_idm";
         using var reader = selectCmd.ExecuteReader();
         var cardIdms = new List<string>();
-        while (reader.Read()) cardIdms.Add(reader.GetString(0));
+        while (reader.Read())
+        {
+            cardIdms.Add(reader.GetString(0));
+        }
+
         cardIdms.Should().BeEquivalentTo(new[] { "CARD_A", "CARD_B" });
     }
 

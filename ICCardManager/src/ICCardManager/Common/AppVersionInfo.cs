@@ -47,14 +47,20 @@ namespace ICCardManager.Common
         {
             version = null;
             if (string.IsNullOrWhiteSpace(text))
+            {
                 return false;
+            }
 
             var trimmed = text.Trim();
             if (trimmed.StartsWith("v", StringComparison.OrdinalIgnoreCase))
+            {
                 trimmed = trimmed.Substring(1);
+            }
 
             if (!Version.TryParse(trimmed, out var parsed))
+            {
                 return false;
+            }
 
             // "2.11"（2要素）も許容し、Build は 0 とみなす
             version = new Version(parsed.Major, parsed.Minor, Math.Max(parsed.Build, 0));

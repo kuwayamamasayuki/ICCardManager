@@ -74,7 +74,11 @@ namespace ICCardManager.Common
         /// </summary>
         public static string FormatWithIcon(LendingStatusPresentation presentation)
         {
-            if (presentation == null) throw new ArgumentNullException(nameof(presentation));
+            if (presentation == null)
+            {
+                throw new ArgumentNullException(nameof(presentation));
+            }
+
             return $"{presentation.Icon} {presentation.ShortText}";
         }
     }

@@ -112,15 +112,21 @@ namespace ICCardManager.Services
             foreach (var log in orderedLogs)
             {
                 if (detectedIdms.Contains(log.TargetId))
+                {
                     continue;
+                }
 
                 if (!currentCards.TryGetValue(log.TargetId, out var current))
+                {
                     continue;
+                }
 
                 var before = TryDeserializeCard(log.BeforeData);
                 var after = TryDeserializeCard(log.AfterData);
                 if (before == null || after == null)
+                {
                     continue;
+                }
 
                 var item = BuildLossItem(log, before, after, current);
                 if (item != null)
@@ -182,9 +188,21 @@ namespace ICCardManager.Services
         /// </remarks>
         private static int? DetectLostInt(int before, int after, int current, int defaultValue)
         {
-            if (before == defaultValue) return null;    // 元から既定値＝消失ではない
-            if (after != defaultValue) return null;     // 既定値へ落ちていない
-            if (current != defaultValue) return null;   // 既に復旧済み
+            if (before == defaultValue)
+            {
+                return null;    // 元から既定値＝消失ではない
+            }
+
+            if (after != defaultValue)
+            {
+                return null;     // 既定値へ落ちていない
+            }
+
+            if (current != defaultValue)
+            {
+                return null;   // 既に復旧済み
+            }
+
             return before;
         }
 
@@ -193,9 +211,21 @@ namespace ICCardManager.Services
         /// </summary>
         private static int? DetectLostFiscalYear(int? before, int? after, int? current)
         {
-            if (before == null) return null;
-            if (after != null) return null;
-            if (current != null) return null;
+            if (before == null)
+            {
+                return null;
+            }
+
+            if (after != null)
+            {
+                return null;
+            }
+
+            if (current != null)
+            {
+                return null;
+            }
+
             return before;
         }
 
@@ -210,7 +240,9 @@ namespace ICCardManager.Services
         private static IcCard TryDeserializeCard(string json)
         {
             if (string.IsNullOrWhiteSpace(json))
+            {
                 return null;
+            }
 
             try
             {

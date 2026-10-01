@@ -196,16 +196,24 @@ namespace ICCardManager.Dtos
             {
                 var items = Items;
                 if (items == null || items.Count == 0)
+                {
                     return DiagnosticStatus.NotApplicable;
+                }
 
                 if (items.Any(i => i != null && i.Status == DiagnosticStatus.Error))
+                {
                     return DiagnosticStatus.Error;
+                }
 
                 if (items.Any(i => i != null && i.Status == DiagnosticStatus.Warning))
+                {
                     return DiagnosticStatus.Warning;
+                }
 
                 if (items.Any(i => i != null && i.Status == DiagnosticStatus.Ok))
+                {
                     return DiagnosticStatus.Ok;
+                }
 
                 return DiagnosticStatus.NotApplicable;
             }

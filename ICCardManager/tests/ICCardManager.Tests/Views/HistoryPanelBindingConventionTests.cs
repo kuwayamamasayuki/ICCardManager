@@ -68,15 +68,25 @@ public class HistoryPanelBindingConventionTests
     /// </remarks>
     internal static (string Root, bool ViaAncestorDataContext)? ParseBinding(string markup)
     {
-        if (Regex.IsMatch(markup, @"\bSource\s*=")) return null;
-        if (Regex.IsMatch(markup, @"\bAncestorType\s*=\s*(?:\{x:Type\s+)?Window\b")) return null;
+        if (Regex.IsMatch(markup, @"\bSource\s*="))
+        {
+            return null;
+        }
+
+        if (Regex.IsMatch(markup, @"\bAncestorType\s*=\s*(?:\{x:Type\s+)?Window\b"))
+        {
+            return null;
+        }
 
         var match = Regex.Match(markup, @"^\{\s*Binding\s+(?:Path\s*=\s*)?(?<path>[A-Za-z_][A-Za-z0-9_.]*)\s*(?=[,}])");
         if (!match.Success)
         {
             // 位置引数が無く Path= が後ろにある形（{Binding Converter=…, Path=X}）
             match = Regex.Match(markup, @"\bPath\s*=\s*(?<path>[A-Za-z_][A-Za-z0-9_.]*)");
-            if (!match.Success) return null;
+            if (!match.Success)
+            {
+                return null;
+            }
         }
 
         var path = match.Groups["path"].Value;
@@ -84,7 +94,11 @@ public class HistoryPanelBindingConventionTests
         if (isRelative)
         {
             const string prefix = "DataContext.";
-            if (!path.StartsWith(prefix, StringComparison.Ordinal)) return null;
+            if (!path.StartsWith(prefix, StringComparison.Ordinal))
+            {
+                return null;
+            }
+
             return (path.Substring(prefix.Length).Split('.')[0], true);
         }
 
@@ -100,7 +114,10 @@ public class HistoryPanelBindingConventionTests
         foreach (Match m in BindingMarkup.Matches(areaXaml))
         {
             var parsed = ParseBinding(m.Value);
-            if (parsed.HasValue) roots.Add(parsed.Value);
+            if (parsed.HasValue)
+            {
+                roots.Add(parsed.Value);
+            }
         }
 
         foreach (Match m in BindingElementPath.Matches(areaXaml))

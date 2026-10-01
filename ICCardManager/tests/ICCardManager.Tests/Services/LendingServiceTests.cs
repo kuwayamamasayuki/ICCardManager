@@ -1,23 +1,22 @@
-﻿using FluentAssertions;
-using ICCardManager.Data;
-using ICCardManager.Tests.Infrastructure.Timing;
-using ICCardManager.Data.Repositories;
-using ICCardManager.Infrastructure.Security;
-using ICCardManager.Models;
-using ICCardManager.Services;
-using ICCardManager.ViewModels;
-using Microsoft.Extensions.Logging;
-using Microsoft.Extensions.Logging.Abstractions;
-using Microsoft.Extensions.Options;
-using Moq;
-using Xunit;
-
 using System;
 using System.Collections.Generic;
 using System.Data.SQLite;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
+using FluentAssertions;
+using ICCardManager.Data;
+using ICCardManager.Data.Repositories;
+using ICCardManager.Infrastructure.Security;
+using ICCardManager.Models;
+using ICCardManager.Services;
+using ICCardManager.Tests.Infrastructure.Timing;
+using ICCardManager.ViewModels;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Options;
+using Moq;
+using Xunit;
 
 
 namespace ICCardManager.Tests.Services;
@@ -3168,9 +3167,14 @@ public class LendingServiceTests : IDisposable
 
         var lentRecordA = new Ledger
         {
-            Id = 10, CardIdm = "AAAA000000000001", LenderIdm = TestStaffIdm,
-            StaffName = TestStaffName, Date = DateTime.Today, IsLentRecord = true,
-            LentAt = DateTime.Today.AddHours(-2), Summary = "（貸出中）"
+            Id = 10,
+            CardIdm = "AAAA000000000001",
+            LenderIdm = TestStaffIdm,
+            StaffName = TestStaffName,
+            Date = DateTime.Today,
+            IsLentRecord = true,
+            LentAt = DateTime.Today.AddHours(-2),
+            Summary = "（貸出中）"
         };
 
         _cardRepositoryMock.Setup(x => x.GetAllAsync())
@@ -3552,7 +3556,7 @@ public class LendingServiceTests : IDisposable
 
         Ledger? updatedLedger = null;
         _ledgerRepositoryMock.Setup(x => x.UpdateAsync(It.IsAny<Ledger>()))
-            .Callback<Ledger>(l => { if (!l.IsLentRecord) updatedLedger = l; })
+            .Callback<Ledger>(l => { if (!l.IsLentRecord) { updatedLedger = l; } })
             .ReturnsAsync(true);
 
         // Act
@@ -3767,7 +3771,7 @@ public class LendingServiceTests : IDisposable
 
         Ledger? updatedLedger = null;
         _ledgerRepositoryMock.Setup(x => x.UpdateAsync(It.IsAny<Ledger>()))
-            .Callback<Ledger>(l => { if (!l.IsLentRecord) updatedLedger = l; })
+            .Callback<Ledger>(l => { if (!l.IsLentRecord) { updatedLedger = l; } })
             .ReturnsAsync(true);
 
         // Act

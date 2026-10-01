@@ -1,10 +1,10 @@
-﻿using FluentAssertions;
-using ICCardManager.Data;
 using System;
 using System.Data;
 using System.Data.SQLite;
 using System.IO;
 using System.Threading.Tasks;
+using FluentAssertions;
+using ICCardManager.Data;
 using Xunit;
 
 namespace ICCardManager.Tests.Data;
@@ -28,7 +28,9 @@ public class DbContextResilienceTests : IDisposable
         try
         {
             if (Directory.Exists(_testDirectory))
+            {
                 Directory.Delete(_testDirectory, recursive: true);
+            }
         }
         catch { }
         GC.SuppressFinalize(this);
@@ -417,10 +419,16 @@ public class DbContextResilienceTests : IDisposable
     public void SharedRetryDelays_合計がローカルより長いこと()
     {
         var localTotal = 0;
-        foreach (var d in DbContext.LocalRetryDelays) localTotal += d;
+        foreach (var d in DbContext.LocalRetryDelays)
+        {
+            localTotal += d;
+        }
 
         var sharedTotal = 0;
-        foreach (var d in DbContext.SharedRetryDelays) sharedTotal += d;
+        foreach (var d in DbContext.SharedRetryDelays)
+        {
+            sharedTotal += d;
+        }
 
         sharedTotal.Should().BeGreaterThan(localTotal);
     }

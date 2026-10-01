@@ -1,13 +1,13 @@
 using System;
 using System.Collections.Generic;
+using System.ComponentModel;
 using System.Linq;
 using System.Threading.Tasks;
-using System.ComponentModel;
 
 // ReSharper disable once CheckNamespace
 namespace System.Runtime.CompilerServices
 {
-/// <summary>
+    /// <summary>
     /// C# 9.0のinit accessorを.NET Framework 4.8で使用するためのPolyfill
     /// </summary>
     /// <remarks>

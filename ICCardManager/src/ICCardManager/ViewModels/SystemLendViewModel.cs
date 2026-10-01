@@ -120,7 +120,10 @@ public partial class SystemLendViewModel : ViewModelBase
     /// <param name="card">対象カード。呼び出し元が DB から読み直した最新の状態を渡すこと</param>
     public async Task InitializeAsync(IcCard card)
     {
-        if (card == null) throw new ArgumentNullException(nameof(card));
+        if (card == null)
+        {
+            throw new ArgumentNullException(nameof(card));
+        }
 
         _cardIdm = card.CardIdm;
         CardDisplayName = $"{card.CardType} {card.CardNumber}";
