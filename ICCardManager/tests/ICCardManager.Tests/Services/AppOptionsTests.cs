@@ -1,9 +1,9 @@
+using System.IO;
 using FluentAssertions;
 using ICCardManager.Services;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
-using System.IO;
 using Xunit;
 
 namespace ICCardManager.Tests.Services;

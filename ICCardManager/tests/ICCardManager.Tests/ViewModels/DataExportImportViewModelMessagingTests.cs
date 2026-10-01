@@ -1,4 +1,3 @@
-﻿using Microsoft.Extensions.Logging.Abstractions;
 using System;
 using System.Collections.Generic;
 using System.Data.SQLite;
@@ -13,6 +12,7 @@ using ICCardManager.Infrastructure.CardReader;
 using ICCardManager.Infrastructure.Timing;
 using ICCardManager.Services;
 using ICCardManager.ViewModels;
+using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using Xunit;
 
@@ -408,7 +408,11 @@ public class DataExportImportViewModelMessagingTests : IDisposable
             {
                 // モーダルは入れ子のメッセージポンプで回り続けるため、
                 // 表示中もカードリーダーのイベント購読は生きている（#1807）
-                if (raised) return;
+                if (raised)
+                {
+                    return;
+                }
+
                 raised = true;
                 _cardReaderMock.Raise(r => r.CardRead += null, new CardReadEventArgs { Idm = secondIdm });
             });

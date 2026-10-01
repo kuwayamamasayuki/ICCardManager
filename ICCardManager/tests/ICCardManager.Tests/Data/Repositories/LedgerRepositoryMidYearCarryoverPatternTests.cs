@@ -10,10 +10,10 @@ using ICCardManager.Models;
 using ICCardManager.Services;
 using ICCardManager.Tests.Data;
 using ICCardManager.Tests.Services;
+using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using Moq;
 using Xunit;
-using Microsoft.Extensions.Logging.Abstractions;
 
 namespace ICCardManager.Tests.Data.Repositories;
 

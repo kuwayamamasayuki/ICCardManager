@@ -4,7 +4,7 @@ using System.Linq;
 using System.Threading.Tasks;
 namespace ICCardManager.Models
 {
-/// <summary>
+    /// <summary>
     /// 操作ログエンティティ（operation_logテーブル）
     /// 監査証跡として全ての手動操作を記録
     /// </summary>

@@ -19,7 +19,10 @@ namespace ICCardManager.Common.ValueObjects
         public FiscalYear(int year)
         {
             if (year < 1 || year > 9999)
+            {
                 throw new ArgumentOutOfRangeException(nameof(year), year, "年度は1〜9999の範囲で指定してください");
+            }
+
             Year = year;
         }
 
@@ -56,7 +59,10 @@ namespace ICCardManager.Common.ValueObjects
         public static (int Year, int Month) GetPreviousMonth(int year, int month)
         {
             if (month == 1)
+            {
                 return (year - 1, 12);
+            }
+
             return (year, month - 1);
         }
 

@@ -71,7 +71,10 @@ namespace ICCardManager.Views.Dialogs
         /// </remarks>
         public void Initialize(LedgerDto ledger)
         {
-            if (ledger == null) return;
+            if (ledger == null)
+            {
+                return;
+            }
 
             // 新しいViewModel方式で初期化
             _ = InitializeAsync(ledger.Id);

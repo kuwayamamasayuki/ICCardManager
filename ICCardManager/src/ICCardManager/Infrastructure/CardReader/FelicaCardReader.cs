@@ -305,7 +305,10 @@ namespace ICCardManager.Infrastructure.CardReader
             CardReaderException capturedError = null;
             EventHandler<System.Exception> handler = (s, e) =>
             {
-                if (e is CardReaderException cre) capturedError = cre;
+                if (e is CardReaderException cre)
+                {
+                    capturedError = cre;
+                }
             };
             Error += handler;
             try

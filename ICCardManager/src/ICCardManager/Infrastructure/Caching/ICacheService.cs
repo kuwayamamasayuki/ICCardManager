@@ -4,7 +4,7 @@ using System.Linq;
 using System.Threading.Tasks;
 namespace ICCardManager.Infrastructure.Caching
 {
-/// <summary>
+    /// <summary>
     /// キャッシュサービスインターフェース
     /// </summary>
     public interface ICacheService

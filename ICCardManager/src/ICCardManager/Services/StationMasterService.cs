@@ -1,9 +1,9 @@
 using System;
 using System.Collections.Generic;
-using System.Linq;
-using System.Threading.Tasks;
 using System.IO;
+using System.Linq;
 using System.Reflection;
+using System.Threading.Tasks;
 using ICCardManager.Common;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -11,7 +11,7 @@ using Microsoft.Extensions.Options;
 
 namespace ICCardManager.Services
 {
-/// <summary>
+    /// <summary>
     /// 駅コードから駅名を解決するサービス
     /// </summary>
     /// <remarks>
@@ -135,11 +135,17 @@ namespace ICCardManager.Services
         /// </summary>
         public void EnsureLoaded()
         {
-            if (_isLoaded) return;
+            if (_isLoaded)
+            {
+                return;
+            }
 
             lock (_loadLock)
             {
-                if (_isLoaded) return;
+                if (_isLoaded)
+                {
+                    return;
+                }
 
                 try
                 {
@@ -347,25 +353,48 @@ namespace ICCardManager.Services
 
             // ヘッダー行をスキップ
             var header = reader.ReadLine();
-            if (header == null) return;
+            if (header == null)
+            {
+                return;
+            }
 
             while (!reader.EndOfStream)
             {
                 var line = reader.ReadLine();
-                if (string.IsNullOrWhiteSpace(line)) continue;
+                if (string.IsNullOrWhiteSpace(line))
+                {
+                    continue;
+                }
 
                 var fields = ParseCsvLine(line);
-                if (fields.Length < 6) continue;
+                if (fields.Length < 6)
+                {
+                    continue;
+                }
 
-                if (!int.TryParse(fields[0], out var areaCode)) continue;
-                if (!int.TryParse(fields[1], out var lineCode)) continue;
-                if (!int.TryParse(fields[2], out var stationCode)) continue;
+                if (!int.TryParse(fields[0], out var areaCode))
+                {
+                    continue;
+                }
+
+                if (!int.TryParse(fields[1], out var lineCode))
+                {
+                    continue;
+                }
+
+                if (!int.TryParse(fields[2], out var stationCode))
+                {
+                    continue;
+                }
 
                 var lineName = fields[4].Trim();
                 var stationName = fields[5].Trim();
 
                 // 空の駅名はスキップ
-                if (string.IsNullOrEmpty(stationName)) continue;
+                if (string.IsNullOrEmpty(stationName))
+                {
+                    continue;
+                }
 
                 // 路線コードが1バイトに収まる場合のみ登録
                 if (lineCode <= 255)

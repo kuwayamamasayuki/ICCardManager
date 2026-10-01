@@ -1,6 +1,11 @@
+using System;
+using System.Collections.Generic;
 using System.Collections.ObjectModel;
+using System.Globalization;
 using System.IO;
+using System.Linq;
 using System.Text.Json;
+using System.Threading.Tasks;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using ICCardManager.Common;
@@ -9,12 +14,6 @@ using ICCardManager.Infrastructure.Timing;
 using ICCardManager.Models;
 using ICCardManager.Services;
 using Microsoft.Win32;
-
-using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Threading.Tasks;
-using System.Globalization;
 
 
 namespace ICCardManager.ViewModels;
@@ -263,7 +262,10 @@ public partial class OperationLogSearchViewModel : ViewModelBase
     [RelayCommand]
     public async Task PreviousPageAsync()
     {
-        if (!HasPreviousPage || _firstCursor == null) return;
+        if (!HasPreviousPage || _firstCursor == null)
+        {
+            return;
+        }
 
         using (BeginBusy("検索中..."))
         {
@@ -281,7 +283,10 @@ public partial class OperationLogSearchViewModel : ViewModelBase
     [RelayCommand]
     public async Task NextPageAsync()
     {
-        if (!HasNextPage || _lastCursor == null) return;
+        if (!HasNextPage || _lastCursor == null)
+        {
+            return;
+        }
 
         using (BeginBusy("検索中..."))
         {
@@ -299,7 +304,10 @@ public partial class OperationLogSearchViewModel : ViewModelBase
     [RelayCommand]
     public async Task FirstPageAsync()
     {
-        if (CurrentPage == 1 && _firstCursor != null) return;
+        if (CurrentPage == 1 && _firstCursor != null)
+        {
+            return;
+        }
 
         using (BeginBusy("検索中..."))
         {
@@ -780,8 +788,15 @@ public partial class OperationLogSearchViewModel : ViewModelBase
                     var afterDisplay = string.IsNullOrEmpty(afterValue) ? "（なし）" : afterValue;
 
                     // 長すぎる値は省略
-                    if (beforeDisplay.Length > 30) beforeDisplay = beforeDisplay.Substring(0, 30) + "...";
-                    if (afterDisplay.Length > 30) afterDisplay = afterDisplay.Substring(0, 30) + "...";
+                    if (beforeDisplay.Length > 30)
+                    {
+                        beforeDisplay = beforeDisplay.Substring(0, 30) + "...";
+                    }
+
+                    if (afterDisplay.Length > 30)
+                    {
+                        afterDisplay = afterDisplay.Substring(0, 30) + "...";
+                    }
 
                     changes.Add($"{field.Value}: {beforeDisplay}→{afterDisplay}");
                 }

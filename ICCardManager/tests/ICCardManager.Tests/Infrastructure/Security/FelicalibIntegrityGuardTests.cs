@@ -30,7 +30,9 @@ public class FelicalibIntegrityGuardTests : IDisposable
         try
         {
             if (Directory.Exists(_testDirectory))
+            {
                 Directory.Delete(_testDirectory, recursive: true);
+            }
         }
         catch { /* ignore */ }
         GC.SuppressFinalize(this);

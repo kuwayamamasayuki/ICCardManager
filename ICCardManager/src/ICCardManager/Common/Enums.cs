@@ -4,7 +4,7 @@ using System.Linq;
 using System.Threading.Tasks;
 namespace ICCardManager.Common
 {
-/// <summary>
+    /// <summary>
     /// アプリケーションの状態
     /// </summary>
     public enum AppState

@@ -13,7 +13,7 @@ using ICCardManager.Views.Helpers;
 
 namespace ICCardManager.Views
 {
-/// <summary>
+    /// <summary>
     /// トースト通知の種類
     /// </summary>
     public enum ToastType

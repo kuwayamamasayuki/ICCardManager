@@ -1,5 +1,9 @@
 #if DEBUG
+using System;
+using System.Collections.Generic;
 using System.Data.SQLite;
+using System.Linq;
+using System.Threading.Tasks;
 using FluentAssertions;
 using ICCardManager.Common;
 using ICCardManager.Data;
@@ -9,11 +13,6 @@ using ICCardManager.Services;
 using ICCardManager.Tests.Infrastructure.Timing;
 using Moq;
 using Xunit;
-
-using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Threading.Tasks;
 
 namespace ICCardManager.Tests.Services;
 

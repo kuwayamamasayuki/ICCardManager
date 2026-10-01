@@ -129,7 +129,9 @@ FROM ic_card WHERE card_type = @cardType";
             while (reader.Read())
             {
                 if (reader.GetString(1) == columnName)
+                {
                     return true;
+                }
             }
             return false;
         }

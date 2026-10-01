@@ -8,7 +8,7 @@ using ICCardManager.Models;
 
 namespace ICCardManager.Infrastructure.CardReader
 {
-/// <summary>
+    /// <summary>
     /// テスト用のモックICカードリーダー（DEBUGビルド専用）
     /// </summary>
     public class MockCardReader : ICardReader

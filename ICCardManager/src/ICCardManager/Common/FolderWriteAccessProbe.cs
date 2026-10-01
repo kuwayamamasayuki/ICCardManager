@@ -55,12 +55,16 @@ namespace ICCardManager.Common
         public static FolderWriteAccess Probe(string folderPath)
         {
             if (string.IsNullOrWhiteSpace(folderPath))
+            {
                 return FolderWriteAccess.PathNotSpecified;
+            }
 
             try
             {
                 if (!Directory.Exists(folderPath))
+                {
                     return FolderWriteAccess.FolderNotFound;
+                }
 
                 var probePath = Path.Combine(
                     folderPath,

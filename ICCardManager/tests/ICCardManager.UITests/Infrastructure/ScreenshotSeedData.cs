@@ -216,7 +216,10 @@ namespace ICCardManager.UITests.Infrastructure
         /// </summary>
         public static void Seed(SQLiteConnection conn)
         {
-            if (conn == null) throw new ArgumentNullException(nameof(conn));
+            if (conn == null)
+            {
+                throw new ArgumentNullException(nameof(conn));
+            }
 
             var today = DateTime.Today;
             var now = DateTime.Now;

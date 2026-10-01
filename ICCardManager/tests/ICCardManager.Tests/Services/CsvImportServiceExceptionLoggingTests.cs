@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Data.SQLite;
 using System.IO;
@@ -95,7 +95,7 @@ public class CsvImportServiceExceptionLoggingTests : IDisposable
     public void Dispose()
     {
         try { _connection?.Dispose(); } catch { }
-        try { if (Directory.Exists(_testDirectory)) Directory.Delete(_testDirectory, recursive: true); } catch { }
+        try { if (Directory.Exists(_testDirectory)) { Directory.Delete(_testDirectory, recursive: true); } } catch { }
         GC.SuppressFinalize(this);
     }
 

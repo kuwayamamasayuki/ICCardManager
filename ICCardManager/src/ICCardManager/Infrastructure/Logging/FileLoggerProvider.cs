@@ -1,19 +1,19 @@
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
+using System.Globalization;
+using System.IO;
 using System.Linq;
+using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
-using System.Collections.Concurrent;
-using System.IO;
-using System.Text;
+using ICCardManager.Common;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
-using System.Globalization;
-using ICCardManager.Common;
 
 namespace ICCardManager.Infrastructure.Logging
 {
-/// <summary>
+    /// <summary>
     /// ファイルロガープロバイダー
     /// </summary>
     [ProviderAlias("File")]

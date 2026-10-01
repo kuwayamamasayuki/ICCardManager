@@ -142,7 +142,10 @@ namespace ICCardManager.ViewModels
         internal async Task<IncompleteBusStopItem> UpdateItemSummaryAsync(int ledgerId)
         {
             var ledger = await _ledgerRepository.GetByIdAsync(ledgerId);
-            if (ledger == null) return null;
+            if (ledger == null)
+            {
+                return null;
+            }
 
             // Items内の該当アイテムを検索
             var index = -1;
@@ -150,7 +153,10 @@ namespace ICCardManager.ViewModels
             {
                 if (Items[i].LedgerId == ledgerId) { index = i; break; }
             }
-            if (index < 0) return null;
+            if (index < 0)
+            {
+                return null;
+            }
 
             var oldItem = Items[index];
             var newItem = new IncompleteBusStopItem
@@ -169,7 +175,10 @@ namespace ICCardManager.ViewModels
 
             // _allItems も更新
             var allIndex = _allItems.FindIndex(i => i.LedgerId == ledgerId);
-            if (allIndex >= 0) _allItems[allIndex] = newItem;
+            if (allIndex >= 0)
+            {
+                _allItems[allIndex] = newItem;
+            }
 
             return newItem;
         }

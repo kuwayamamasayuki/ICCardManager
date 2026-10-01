@@ -41,7 +41,9 @@ namespace ICCardManager.Common
             var detailList = details.ToList();
 
             if (detailList.Count <= 1)
+            {
                 return new List<LedgerDetail>(detailList);
+            }
 
             return BuildChain(detailList, strict: false)
                 ?? Fallback(detailList, preserveOrderOnFailure);
@@ -74,7 +76,9 @@ namespace ICCardManager.Common
             var detailList = details.ToList();
 
             if (detailList.Count <= 1)
+            {
                 return new List<LedgerDetail>(detailList);
+            }
 
             return BuildChain(detailList, strict: true);
         }

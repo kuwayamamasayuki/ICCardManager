@@ -7,7 +7,7 @@ using ICCardManager.Models;
 
 namespace ICCardManager.Dtos
 {
-/// <summary>
+    /// <summary>
     /// 設定情報DTO
     /// ViewModelで使用する設定表示用オブジェクト
     /// </summary>

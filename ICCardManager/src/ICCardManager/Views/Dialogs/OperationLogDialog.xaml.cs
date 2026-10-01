@@ -11,7 +11,7 @@ using ICCardManager.Views.Helpers;
 
 namespace ICCardManager.Views.Dialogs
 {
-/// <summary>
+    /// <summary>
     /// 操作ログ検索ダイアログ
     /// </summary>
     public partial class OperationLogDialog : Window

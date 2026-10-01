@@ -27,7 +27,9 @@ public class DllIntegrityVerifierTests : IDisposable
         try
         {
             if (Directory.Exists(_testDirectory))
+            {
                 Directory.Delete(_testDirectory, recursive: true);
+            }
         }
         catch { /* cleanup failure ignored */ }
         GC.SuppressFinalize(this);

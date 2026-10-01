@@ -1,11 +1,11 @@
-using FluentAssertions;
-using ICCardManager.Common;
-using ICCardManager.Models;
 using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
 using System.Text.Json;
+using FluentAssertions;
+using ICCardManager.Common;
+using ICCardManager.Models;
 using Xunit;
 
 namespace ICCardManager.Tests.Common;

@@ -33,7 +33,9 @@ namespace ICCardManager.Common
         public static string Format(DiagnosticReport report)
         {
             if (report == null)
+            {
                 return "診断結果がありません。「再診断」を実行してから、もう一度コピーしてください。";
+            }
 
             var builder = new StringBuilder();
 
@@ -73,7 +75,9 @@ namespace ICCardManager.Common
             foreach (var item in report.Items)
             {
                 if (item == null)
+                {
                     continue;
+                }
 
                 builder.AppendLine(
                     "[" + DiagnosticStatusPresenter.GetLabel(item.Status) + "] " +
@@ -82,7 +86,9 @@ namespace ICCardManager.Common
                 // 正常項目の詳細まで載せると、対処すべき箇所が埋もれて報告の価値が下がる。
                 // 対処が必要な項目（警告・異常）に限って「なぜ・どうすれば」を続ける。
                 if (item.IsProblem && !string.IsNullOrWhiteSpace(item.DetailText))
+                {
                     AppendIndented(builder, item.DetailText);
+                }
             }
         }
 
@@ -93,7 +99,9 @@ namespace ICCardManager.Common
         {
             var lines = text.Replace("\r\n", "\n").Split('\n');
             foreach (var line in lines)
+            {
                 builder.AppendLine(DetailIndent + line);
+            }
         }
 
         /// <summary>

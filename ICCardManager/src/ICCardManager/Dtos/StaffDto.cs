@@ -4,7 +4,7 @@ using System.Linq;
 using System.Threading.Tasks;
 namespace ICCardManager.Dtos
 {
-/// <summary>
+    /// <summary>
     /// 職員情報DTO
     /// ViewModelで使用する職員情報の表示用オブジェクト
     /// </summary>

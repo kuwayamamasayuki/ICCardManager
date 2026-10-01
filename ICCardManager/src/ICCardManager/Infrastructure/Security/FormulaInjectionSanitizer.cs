@@ -54,13 +54,17 @@ namespace ICCardManager.Infrastructure.Security
         public static bool IsDangerous(string value)
         {
             if (string.IsNullOrEmpty(value))
+            {
                 return false;
+            }
 
             var first = value[0];
             foreach (var c in DangerousStartChars)
             {
                 if (first == c)
+                {
                     return true;
+                }
             }
             return false;
         }
@@ -80,7 +84,9 @@ namespace ICCardManager.Infrastructure.Security
         public static string Sanitize(string value)
         {
             if (string.IsNullOrEmpty(value))
+            {
                 return value;
+            }
 
             return IsDangerous(value) ? "'" + value : value;
         }
@@ -125,7 +131,9 @@ namespace ICCardManager.Infrastructure.Security
         public static string Unsanitize(string value)
         {
             if (string.IsNullOrEmpty(value) || value.Length < 2 || value[0] != '\'')
+            {
                 return value;
+            }
 
             // IsDangerous は先頭 1 文字しか見ないため、部分文字列を作らず 2 文字目だけで判定する
             //（CSV 取り込みでは全テキスト列×全行に対して呼ばれる）

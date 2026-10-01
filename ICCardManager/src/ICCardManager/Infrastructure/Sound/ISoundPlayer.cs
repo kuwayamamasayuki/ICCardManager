@@ -6,7 +6,7 @@ using ICCardManager.Models;
 
 namespace ICCardManager.Infrastructure.Sound
 {
-/// <summary>
+    /// <summary>
     /// 効果音種別
     /// </summary>
     public enum SoundType

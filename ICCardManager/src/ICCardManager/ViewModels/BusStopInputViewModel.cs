@@ -1,4 +1,9 @@
-﻿using System.Collections.ObjectModel;
+using System;
+using System.Collections.Generic;
+using System.Collections.ObjectModel;
+using System.Linq;
+using System.Threading.Tasks;
+using System.Windows.Input;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using ICCardManager.Common;
@@ -6,12 +11,6 @@ using ICCardManager.Data;
 using ICCardManager.Data.Repositories;
 using ICCardManager.Models;
 using ICCardManager.Services;
-
-using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Threading.Tasks;
-using System.Windows.Input;
 
 
 namespace ICCardManager.ViewModels;
@@ -293,7 +292,9 @@ public partial class BusStopInputViewModel : ViewModelBase
         foreach (var entry in newEntries)
         {
             if (string.IsNullOrWhiteSpace(entry) || SummaryGenerator.IsBusStopPlaceholder(entry))
+            {
                 continue;
+            }
 
             // 完全一致は除外（既存エントリと同じなら問題なし）
             // 完全な逆順（「A～B」⇔「B～A」）も除外する（Issue #1811）:
@@ -328,12 +329,16 @@ public partial class BusStopInputViewModel : ViewModelBase
     internal static bool IsRoundTripReversal(string a, string b)
     {
         if (string.IsNullOrEmpty(a) || string.IsNullOrEmpty(b))
+        {
             return false;
+        }
 
         var aParts = a.Split('～');
         var bParts = b.Split('～');
         if (aParts.Length != 2 || bParts.Length != 2)
+        {
             return false;
+        }
 
         return aParts[0].Trim() == bParts[1].Trim()
             && aParts[1].Trim() == bParts[0].Trim();
@@ -345,11 +350,15 @@ public partial class BusStopInputViewModel : ViewModelBase
     internal static bool IsSimilar(string a, string b)
     {
         if (string.IsNullOrEmpty(a) || string.IsNullOrEmpty(b))
+        {
             return false;
+        }
 
         // 一方が他方を含む場合（「天神」vs「天神南」、「博多駅」vs「博多駅前」等）
         if (a.Contains(b) || b.Contains(a))
+        {
             return true;
+        }
 
         // 「～」区切りの場合、乗車・降車バス停をそれぞれ比較
         var aParts = a.Split('～');
@@ -358,7 +367,9 @@ public partial class BusStopInputViewModel : ViewModelBase
         {
             // 乗車と降車が入れ替わっている場合（「天神～博多」vs「博多～天神」）
             if (aParts[0].Trim() == bParts[1].Trim() && aParts[1].Trim() == bParts[0].Trim())
+            {
                 return true;
+            }
         }
 
         return false;
@@ -443,7 +454,10 @@ public partial class BusStopInputViewModel : ViewModelBase
     [RelayCommand]
     public async Task SaveAsync()
     {
-        if (Ledger == null) return;
+        if (Ledger == null)
+        {
+            return;
+        }
 
         var warnings = CollectSaveWarnings();
         if (warnings.Count > 0)
@@ -513,7 +527,10 @@ public partial class BusStopInputViewModel : ViewModelBase
 
         var targetLedgers = GetTargetLedgers();
 
-        if (targetLedgers.Count == 0) return false;
+        if (targetLedgers.Count == 0)
+        {
+            return false;
+        }
 
         var itemsByLedgerId = BusUsages.GroupBy(i => i.Detail.LedgerId).ToDictionary(g => g.Key, g => g.ToList());
 
@@ -702,7 +719,10 @@ public partial class BusStopInputViewModel : ViewModelBase
     [RelayCommand]
     public async Task SkipAsync()
     {
-        if (Ledger == null) return;
+        if (Ledger == null)
+        {
+            return;
+        }
 
         if (HasInputDiscardedBySkip())
         {
@@ -1018,17 +1038,29 @@ public partial class BusStopInputItem : ObservableObject
     [RelayCommand]
     public void ApplyRoundTrip()
     {
-        if (PreviousItem == null) return;
+        if (PreviousItem == null)
+        {
+            return;
+        }
 
         var source = PreviousItem.BusStops;
-        if (string.IsNullOrWhiteSpace(source)) return;
+        if (string.IsNullOrWhiteSpace(source))
+        {
+            return;
+        }
 
         var parts = source.Split('～');
-        if (parts.Length != 2) return;
+        if (parts.Length != 2)
+        {
+            return;
+        }
 
         var from = parts[0].Trim();
         var to = parts[1].Trim();
-        if (string.IsNullOrEmpty(from) || string.IsNullOrEmpty(to)) return;
+        if (string.IsNullOrEmpty(from) || string.IsNullOrEmpty(to))
+        {
+            return;
+        }
 
         BusStops = $"{to}～{from}";
     }

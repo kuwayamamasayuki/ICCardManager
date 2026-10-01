@@ -24,7 +24,10 @@ namespace ICCardManager.Common.ValueObjects
         public Money(int amount)
         {
             if (amount < 0)
+            {
                 throw new ArgumentOutOfRangeException(nameof(amount), amount, "金額は0以上である必要があります");
+            }
+
             Amount = amount;
         }
 

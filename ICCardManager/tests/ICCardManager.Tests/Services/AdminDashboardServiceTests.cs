@@ -9,8 +9,8 @@ using ICCardManager.Data.Repositories;
 using ICCardManager.Dtos;
 using ICCardManager.Models;
 using ICCardManager.Services;
-using Moq;
 using ICCardManager.Tests.Infrastructure;
+using Moq;
 using Xunit;
 
 namespace ICCardManager.Tests.Services;

@@ -2,8 +2,8 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
-using ICCardManager.Models;
 using ICCardManager.Common;
+using ICCardManager.Models;
 
 namespace ICCardManager.Services
 {
@@ -138,7 +138,10 @@ namespace ICCardManager.Services
             List<CsvImportError> errors,
             Dictionary<string, int> previousBalanceByCard = null)
         {
-            if (records.Count == 0) return;
+            if (records.Count == 0)
+            {
+                return;
+            }
 
             // カードごとにグループ化して日時順にソート
             var groupedByCard = records
@@ -204,7 +207,10 @@ namespace ICCardManager.Services
             List<CsvImportError> errors,
             Dictionary<string, int> previousBalanceByCard = null)
         {
-            if (records.Count == 0) return;
+            if (records.Count == 0)
+            {
+                return;
+            }
 
             // カードごとにグループ化して日時順にソート
             var groupedByCard = records

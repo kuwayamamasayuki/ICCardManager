@@ -49,7 +49,10 @@ namespace ICCardManager.Services
         /// <returns>登録できたら <c>true</c>。<c>false</c> は一過性でない書き込み失敗（リポジトリが記録済み）</returns>
         public async Task<bool> RegisterAsync(Staff staff)
         {
-            if (staff == null) throw new ArgumentNullException(nameof(staff));
+            if (staff == null)
+            {
+                throw new ArgumentNullException(nameof(staff));
+            }
 
             try
             {
@@ -78,8 +81,15 @@ namespace ICCardManager.Services
         /// </returns>
         public async Task<bool> UpdateAsync(Staff beforeStaff, Staff afterStaff)
         {
-            if (beforeStaff == null) throw new ArgumentNullException(nameof(beforeStaff));
-            if (afterStaff == null) throw new ArgumentNullException(nameof(afterStaff));
+            if (beforeStaff == null)
+            {
+                throw new ArgumentNullException(nameof(beforeStaff));
+            }
+
+            if (afterStaff == null)
+            {
+                throw new ArgumentNullException(nameof(afterStaff));
+            }
 
             try
             {
@@ -105,7 +115,10 @@ namespace ICCardManager.Services
         /// </returns>
         public async Task<bool> DeleteAsync(Staff staff)
         {
-            if (staff == null) throw new ArgumentNullException(nameof(staff));
+            if (staff == null)
+            {
+                throw new ArgumentNullException(nameof(staff));
+            }
 
             try
             {
@@ -135,7 +148,10 @@ namespace ICCardManager.Services
         /// </remarks>
         public async Task<bool> RestoreAsync(Staff deletedStaff)
         {
-            if (deletedStaff == null) throw new ArgumentNullException(nameof(deletedStaff));
+            if (deletedStaff == null)
+            {
+                throw new ArgumentNullException(nameof(deletedStaff));
+            }
 
             try
             {

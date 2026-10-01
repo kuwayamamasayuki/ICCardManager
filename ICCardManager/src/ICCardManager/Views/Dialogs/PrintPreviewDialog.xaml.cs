@@ -1,8 +1,8 @@
 using System;
 using System.Collections.Generic;
+using System.ComponentModel;
 using System.Linq;
 using System.Threading.Tasks;
-using System.ComponentModel;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
@@ -14,7 +14,7 @@ using ICCardManager.ViewModels;
 
 namespace ICCardManager.Views.Dialogs
 {
-/// <summary>
+    /// <summary>
     /// 印刷プレビューダイアログ
     /// </summary>
     /// <remarks>
@@ -91,7 +91,10 @@ namespace ICCardManager.Views.Dialogs
         /// </summary>
         private void SubscribeToMasterPageNumberChanges()
         {
-            if (_masterPageNumberDescriptor != null) return; // 既に購読済み
+            if (_masterPageNumberDescriptor != null)
+            {
+                return; // 既に購読済み
+            }
 
             // FlowDocumentPageViewerのMasterPageNumberプロパティの変更を監視
             // これによりViewerのページ変更（組み込みナビゲーション含む）をViewModelに同期
@@ -106,7 +109,10 @@ namespace ICCardManager.Views.Dialogs
         /// </summary>
         private void OnMasterPageNumberChanged(object sender, EventArgs e)
         {
-            if (DocumentViewer.Document == null) return;
+            if (DocumentViewer.Document == null)
+            {
+                return;
+            }
 
             // ベースラインからの相対位置でページ番号を計算
             // MasterPageNumberが1から始まる場合でも、表示は1から始まるようにする

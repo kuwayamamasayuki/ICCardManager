@@ -1,19 +1,18 @@
+using System;
+using System.Collections.Generic;
+using System.Data.SQLite;
+using System.Linq;
+using System.Threading.Tasks;
 using FluentAssertions;
 using ICCardManager.Data;
 using ICCardManager.Data.Repositories;
 using ICCardManager.Infrastructure.Caching;
 using ICCardManager.Models;
 using ICCardManager.Tests.Data;
+using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using Moq;
 using Xunit;
-
-using System;
-using System.Collections.Generic;
-using System.Data.SQLite;
-using System.Linq;
-using System.Threading.Tasks;
-using Microsoft.Extensions.Logging.Abstractions;
 
 namespace ICCardManager.Tests.Data.Repositories;
 
@@ -165,7 +164,10 @@ public class LedgerRepositoryBatchInsertTests : IDisposable
         // detail.LedgerId に -1 を入れて呼び、引数の ledgerId で全行が書き換えられることを確認。
         var ledgerId = await _repository.InsertAsync(CreateLedger());
         var details = CreateDetails(5);
-        foreach (var d in details) d.LedgerId = -1;
+        foreach (var d in details)
+        {
+            d.LedgerId = -1;
+        }
 
         var result = await _repository.InsertDetailsAsync(ledgerId, details);
 

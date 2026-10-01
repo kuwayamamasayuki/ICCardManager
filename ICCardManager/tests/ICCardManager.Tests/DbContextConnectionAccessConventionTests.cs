@@ -129,8 +129,16 @@ public class DbContextConnectionAccessConventionTests
         foreach (var method in target.GetMethods(Surface))
         {
             // プロパティのアクセサは下のプロパティ側で報告する（二重計上しない）
-            if (method.IsSpecialName) continue;
-            if (method.IsPrivate) continue;
+            if (method.IsSpecialName)
+            {
+                continue;
+            }
+
+            if (method.IsPrivate)
+            {
+                continue;
+            }
+
             if (ExposesConnection(method.ReturnType))
             {
                 yield return $"{method.Name} (メソッドの戻り値)";
@@ -140,7 +148,11 @@ public class DbContextConnectionAccessConventionTests
             // 値渡しの引数（接続を受け取る ConfigureJournalMode など）は正当なので対象外。
             foreach (var parameter in method.GetParameters())
             {
-                if (!parameter.ParameterType.IsByRef) continue;
+                if (!parameter.ParameterType.IsByRef)
+                {
+                    continue;
+                }
+
                 if (ExposesConnection(parameter.ParameterType.GetElementType()!))
                 {
                     yield return $"{method.Name} (out/ref 引数 {parameter.Name})";
@@ -151,7 +163,11 @@ public class DbContextConnectionAccessConventionTests
         foreach (var property in target.GetProperties(Surface))
         {
             var getter = property.GetGetMethod(nonPublic: true);
-            if (getter == null || getter.IsPrivate) continue;
+            if (getter == null || getter.IsPrivate)
+            {
+                continue;
+            }
+
             if (ExposesConnection(property.PropertyType))
             {
                 yield return $"{property.Name} (プロパティ)";
@@ -160,7 +176,11 @@ public class DbContextConnectionAccessConventionTests
 
         foreach (var field in target.GetFields(Surface))
         {
-            if (field.IsPrivate) continue;
+            if (field.IsPrivate)
+            {
+                continue;
+            }
+
             if (ExposesConnection(field.FieldType))
             {
                 yield return $"{field.Name} (フィールド)";
@@ -181,7 +201,10 @@ public class DbContextConnectionAccessConventionTests
         // IDbConnection を基準にすることで基底型・インターフェース経由の公開も数えつつ、
         // object / IDisposable のような「接続とは限らない」型は対象外に保つ
         // （リースを IDisposable で返す正当な形を誤検出しない。#1786「誤検出はガードの寿命を縮める」）。
-        if (typeof(System.Data.IDbConnection).IsAssignableFrom(type)) return true;
+        if (typeof(System.Data.IDbConnection).IsAssignableFrom(type))
+        {
+            return true;
+        }
 
         // 配列・ジェネリック（Task<> / IReadOnlyList<> 等）に包んだ形も同じ資源の公開。
         if (type.IsArray)

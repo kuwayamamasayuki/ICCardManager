@@ -1,9 +1,9 @@
+using System;
+using System.Threading.Tasks;
 using FluentAssertions;
 using ICCardManager.Data;
 using ICCardManager.Data.Repositories;
 using ICCardManager.Models;
-using System;
-using System.Threading.Tasks;
 using Xunit;
 
 namespace ICCardManager.Tests.Repositories;

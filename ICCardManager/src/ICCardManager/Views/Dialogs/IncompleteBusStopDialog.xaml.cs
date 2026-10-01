@@ -107,7 +107,11 @@ namespace ICCardManager.Views.Dialogs
         /// </summary>
         private async void InputBusStopButton_Click(object sender, RoutedEventArgs e)
         {
-            if (_viewModel.SelectedItem == null) return;
+            if (_viewModel.SelectedItem == null)
+            {
+                return;
+            }
+
             await OpenBusStopInputAsync(_viewModel.SelectedItem.LedgerId);
         }
 

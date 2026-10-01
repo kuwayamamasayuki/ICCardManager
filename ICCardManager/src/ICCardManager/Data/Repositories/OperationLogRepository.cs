@@ -1,15 +1,15 @@
 using System;
 using System.Collections.Generic;
-using System.Linq;
-using System.Threading.Tasks;
-using ICCardManager.Models;
 using System.Data.Common;
 using System.Data.SQLite;
+using System.Linq;
+using System.Threading.Tasks;
 using ICCardManager.Common;
+using ICCardManager.Models;
 
 namespace ICCardManager.Data.Repositories
 {
-/// <summary>
+    /// <summary>
     /// 操作ログリポジトリ実装
     /// </summary>
     public class OperationLogRepository : IOperationLogRepository
@@ -42,7 +42,11 @@ namespace ICCardManager.Data.Repositories
                 }
 
                 using var command = connection.CreateCommand();
-                if (transaction != null) command.Transaction = transaction;
+                if (transaction != null)
+                {
+                    command.Transaction = transaction;
+                }
+
                 command.CommandText = @"INSERT INTO operation_log (timestamp, operator_idm, operator_name, target_table,
                            target_id, action, before_data, after_data)
 VALUES (@timestamp, @operatorIdm, @operatorName, @targetTable,
@@ -151,14 +155,22 @@ ORDER BY timestamp ASC";
         /// <inheritdoc/>
         public Task<OperationLogKeysetPage> SearchNextPageAsync(OperationLogSearchCriteria criteria, OperationLogCursor afterCursor, int pageSize)
         {
-            if (afterCursor == null) throw new ArgumentNullException(nameof(afterCursor));
+            if (afterCursor == null)
+            {
+                throw new ArgumentNullException(nameof(afterCursor));
+            }
+
             return FetchKeysetPageAsync(criteria, pageSize, KeysetDirection.Forward, afterCursor, isAnchoredAtEdge: false);
         }
 
         /// <inheritdoc/>
         public Task<OperationLogKeysetPage> SearchPreviousPageAsync(OperationLogSearchCriteria criteria, OperationLogCursor beforeCursor, int pageSize)
         {
-            if (beforeCursor == null) throw new ArgumentNullException(nameof(beforeCursor));
+            if (beforeCursor == null)
+            {
+                throw new ArgumentNullException(nameof(beforeCursor));
+            }
+
             return FetchKeysetPageAsync(criteria, pageSize, KeysetDirection.Backward, beforeCursor, isAnchoredAtEdge: false);
         }
 
@@ -182,7 +194,10 @@ ORDER BY timestamp ASC";
             OperationLogCursor cursor,
             bool isAnchoredAtEdge)
         {
-            if (pageSize <= 0) throw new ArgumentOutOfRangeException(nameof(pageSize), "pageSize must be positive");
+            if (pageSize <= 0)
+            {
+                throw new ArgumentOutOfRangeException(nameof(pageSize), "pageSize must be positive");
+            }
 
             using var lease = await _dbContext.LeaseConnectionAsync().ConfigureAwait(false);
             var connection = lease.Connection;
@@ -256,7 +271,10 @@ LIMIT @limit";
             }
 
             var hasExtra = raw.Count > requestedPageSize;
-            if (hasExtra) raw.RemoveAt(raw.Count - 1);
+            if (hasExtra)
+            {
+                raw.RemoveAt(raw.Count - 1);
+            }
 
             // DESC 方向は ASC 表示順に戻す
             if (direction == KeysetDirection.Backward)

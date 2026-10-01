@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.IO;
 using System.Threading.Tasks;
 using FluentAssertions;
@@ -57,7 +57,9 @@ public class BackupServiceHealthRecordingTests : IDisposable
         try
         {
             if (Directory.Exists(_testDirectory))
+            {
                 Directory.Delete(_testDirectory, recursive: true);
+            }
         }
         catch
         {

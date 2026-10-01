@@ -1,13 +1,13 @@
 using System;
 using System.Collections.Generic;
+using System.Data.SQLite;
 using System.Linq;
 using System.Threading.Tasks;
 using ICCardManager.Models;
-using System.Data.SQLite;
 
 namespace ICCardManager.Data.Repositories
 {
-/// <summary>
+    /// <summary>
     /// 職員リポジトリインターフェース
     /// </summary>
     public interface IStaffRepository

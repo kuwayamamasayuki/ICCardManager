@@ -1,7 +1,8 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 using FluentAssertions;
 using ICCardManager.Data.Repositories;
@@ -10,7 +11,6 @@ using ICCardManager.Models;
 using ICCardManager.Services;
 using ICCardManager.ViewModels;
 using ICCardManager.Views.Dialogs;
-using System.Text.RegularExpressions;
 using Microsoft.Extensions.Options;
 using Moq;
 using Xunit;

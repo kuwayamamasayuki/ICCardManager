@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Data;
 using System.Data.SQLite;
@@ -34,7 +34,9 @@ public class DbContextSharedModeTests : IDisposable
         try
         {
             if (Directory.Exists(_testDirectory))
+            {
                 Directory.Delete(_testDirectory, recursive: true);
+            }
         }
         catch { }
         GC.SuppressFinalize(this);

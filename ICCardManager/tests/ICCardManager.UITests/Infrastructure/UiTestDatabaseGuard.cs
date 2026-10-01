@@ -55,7 +55,10 @@ namespace ICCardManager.UITests.Infrastructure
         /// </exception>
         internal static UiTestDatabaseGuard Acquire(string directory)
         {
-            if (directory == null) throw new ArgumentNullException(nameof(directory));
+            if (directory == null)
+            {
+                throw new ArgumentNullException(nameof(directory));
+            }
 
             ThrowIfDatabaseLocationIsConfigured(directory);
             Directory.CreateDirectory(directory);
@@ -101,7 +104,11 @@ namespace ICCardManager.UITests.Infrastructure
         /// </remarks>
         internal void Restore()
         {
-            if (_restored) return;
+            if (_restored)
+            {
+                return;
+            }
+
             RestoreFromBackup();
             _restored = true;
         }
@@ -163,10 +170,16 @@ namespace ICCardManager.UITests.Infrastructure
         private static void ThrowIfDatabaseLocationIsConfigured(string directory)
         {
             var configPath = Path.Combine(directory, DatabaseConfigFileName);
-            if (!File.Exists(configPath)) return;
+            if (!File.Exists(configPath))
+            {
+                return;
+            }
 
             var configured = File.ReadAllText(configPath).Trim();
-            if (configured.Length == 0) return;
+            if (configured.Length == 0)
+            {
+                return;
+            }
 
             throw new InvalidOperationException(
                 $"{configPath} がデータベースの保存先「{configured}」を指定しているため、UI テストを中止しました。" +

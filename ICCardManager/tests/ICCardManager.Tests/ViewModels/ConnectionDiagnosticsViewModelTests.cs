@@ -152,7 +152,9 @@ public class ConnectionDiagnosticsViewModelTests
         vm.PropertyChanged += (_, e) =>
         {
             if (e.PropertyName == nameof(ConnectionDiagnosticsViewModel.IsBusy))
+            {
                 busyStates.Add(vm.IsBusy);
+            }
         };
 
         await vm.RunDiagnosticsAsync();
@@ -319,7 +321,9 @@ public class ConnectionDiagnosticsViewModelTests
         vm.PropertyChanged += (_, e) =>
         {
             if (e.PropertyName == nameof(ConnectionDiagnosticsViewModel.SelectedDetailText))
+            {
                 changed = true;
+            }
         };
 
         vm.SelectedItem = vm.Items.Last();

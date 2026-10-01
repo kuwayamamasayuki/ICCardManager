@@ -8,7 +8,7 @@ using ICCardManager.ViewModels;
 
 namespace ICCardManager.Views.Dialogs
 {
-/// <summary>
+    /// <summary>
     /// 帳票作成ダイアログ
     /// </summary>
     public partial class ReportDialog : Window

@@ -6,7 +6,7 @@ using ICCardManager.Views;
 
 namespace ICCardManager.Services
 {
-/// <summary>
+    /// <summary>
     /// トースト通知サービスの実装
     /// </summary>
     /// <remarks>

@@ -1,10 +1,9 @@
+using System;
 using FluentAssertions;
 using ICCardManager.Services;
 using Microsoft.Extensions.Logging;
 using Moq;
 using Xunit;
-
-using System;
 
 namespace ICCardManager.Tests.Services;
 

@@ -1,10 +1,10 @@
 using System;
+using System.Data.SQLite;
 using System.Diagnostics;
 using System.IO;
 using FlaUI.Core;
 using FlaUI.Core.AutomationElements;
 using FlaUI.UIA3;
-using System.Data.SQLite;
 
 namespace ICCardManager.UITests.Infrastructure
 {
@@ -116,7 +116,10 @@ namespace ICCardManager.UITests.Infrastructure
         /// </remarks>
         public static AppFixture LaunchWithSeed(Action<SQLiteConnection> seed)
         {
-            if (seed == null) throw new ArgumentNullException(nameof(seed));
+            if (seed == null)
+            {
+                throw new ArgumentNullException(nameof(seed));
+            }
 
             return LaunchWithSeedCore(
                 DbDirectory,
@@ -250,7 +253,7 @@ namespace ICCardManager.UITests.Infrastructure
             catch
             {
                 // 呼び出し元が DB を復元する前に、DB を掴み得るプロセスを止める
-                try { if (!dotnetProcess.HasExited) dotnetProcess.Kill(); } catch { /* 既に終了済み */ }
+                try { if (!dotnetProcess.HasExited) { dotnetProcess.Kill(); } } catch { /* 既に終了済み */ }
                 throw;
             }
 
@@ -280,7 +283,9 @@ namespace ICCardManager.UITests.Infrastructure
                     TimeSpan.FromSeconds(TestConstants.AppLaunchTimeoutSeconds));
 
                 if (window != null)
+                {
                     return window;
+                }
 
                 // タイムアウト時の診断情報
                 var exitInfo = _app.HasExited
@@ -304,7 +309,11 @@ namespace ICCardManager.UITests.Infrastructure
 
         public void Dispose()
         {
-            if (_disposed) return;
+            if (_disposed)
+            {
+                return;
+            }
+
             _disposed = true;
 
             // アプリケーションを終了
@@ -429,7 +438,9 @@ namespace ICCardManager.UITests.Infrastructure
             var (primaryPath, fallbackPath) = ResolveExePathCandidates(testAssemblyDir);
 
             if (File.Exists(primaryPath))
+            {
                 return primaryPath;
+            }
 
             return File.Exists(fallbackPath) ? fallbackPath : primaryPath;
         }

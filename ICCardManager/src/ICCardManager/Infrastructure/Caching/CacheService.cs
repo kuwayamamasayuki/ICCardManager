@@ -1,15 +1,15 @@
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
-using System.Collections.Concurrent;
 using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Logging;
 
 namespace ICCardManager.Infrastructure.Caching
 {
-/// <summary>
+    /// <summary>
     /// メモリキャッシュを使用したキャッシュサービス実装
     /// </summary>
     public class CacheService : ICacheService, IDisposable
@@ -248,7 +248,10 @@ namespace ICCardManager.Infrastructure.Caching
 
         protected virtual void Dispose(bool disposing)
         {
-            if (_disposed) return;
+            if (_disposed)
+            {
+                return;
+            }
 
             if (disposing)
             {

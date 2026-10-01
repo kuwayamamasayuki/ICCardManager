@@ -4,7 +4,7 @@ using System.Linq;
 using System.Threading.Tasks;
 namespace ICCardManager.Models
 {
-/// <summary>
+    /// <summary>
     /// 職員エンティティ（staffテーブル）
     /// </summary>
     public class Staff

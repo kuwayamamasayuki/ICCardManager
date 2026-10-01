@@ -1,18 +1,18 @@
 using System;
 using System.Collections.Generic;
+using System.Data.Common;
+using System.Data.SQLite;
 using System.Linq;
 using System.Threading.Tasks;
+using ICCardManager.Common;
 using ICCardManager.Infrastructure.Caching;
 using ICCardManager.Models;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
-using System.Data.Common;
-using System.Data.SQLite;
-using ICCardManager.Common;
 
 namespace ICCardManager.Data.Repositories
 {
-/// <summary>
+    /// <summary>
     /// 職員リポジトリ実装
     /// </summary>
     public class StaffRepository : IStaffRepository

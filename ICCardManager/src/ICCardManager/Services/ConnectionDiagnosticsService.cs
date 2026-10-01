@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.IO;
 using System.Threading.Tasks;
 using ICCardManager.Common;
@@ -7,7 +8,6 @@ using ICCardManager.Dtos;
 using ICCardManager.Infrastructure.CardReader;
 using ICCardManager.Infrastructure.Timing;
 using Microsoft.Extensions.Logging;
-using System.Globalization;
 
 namespace ICCardManager.Services
 {
@@ -146,7 +146,9 @@ namespace ICCardManager.Services
         protected virtual bool ProbeDatabaseFileReachable(string databasePath)
         {
             if (string.IsNullOrWhiteSpace(databasePath))
+            {
                 return false;
+            }
 
             // File.Exists は例外を投げず、到達不能・権限なしのいずれでも false を返す
             return File.Exists(databasePath);

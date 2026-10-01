@@ -1,12 +1,14 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
+using System.Data.SQLite;
 using System.Globalization;
-using System.Linq;
-using System.Threading.Tasks;
 using System.IO;
+using System.Linq;
 using System.Security;
 using System.Text;
 using System.Text.RegularExpressions;
+using System.Threading.Tasks;
+using ICCardManager.Common;
 using ICCardManager.Common.Exceptions;
 using ICCardManager.Data;
 using ICCardManager.Data.Repositories;
@@ -15,9 +17,7 @@ using ICCardManager.Infrastructure.Security;
 using ICCardManager.Models;
 using ICCardManager.Services.Import.Builders;
 using ICCardManager.Services.Import.Parsers;
-using System.Data.SQLite;
 using Microsoft.Extensions.Logging;
-using ICCardManager.Common;
 
 namespace ICCardManager.Services
 {
@@ -915,16 +915,31 @@ namespace ICCardManager.Services
                 new FieldChange { FieldName = "摘要", NewValue = summary, IsDisplayOnly = true }
             };
             if (income > 0)
+            {
                 changes.Add(new FieldChange { FieldName = "受入金額", NewValue = $"{income:#,0}円", IsDisplayOnly = true });
+            }
+
             if (expense > 0)
+            {
                 changes.Add(new FieldChange { FieldName = "払出金額", NewValue = $"{expense:#,0}円", IsDisplayOnly = true });
+            }
+
             changes.Add(new FieldChange { FieldName = "残高", NewValue = $"{balance:#,0}円", IsDisplayOnly = true });
             if (!string.IsNullOrEmpty(staffName))
+            {
                 changes.Add(new FieldChange { FieldName = "職員名", NewValue = staffName, IsDisplayOnly = true });
+            }
+
             if (!string.IsNullOrEmpty(note))
+            {
                 changes.Add(new FieldChange { FieldName = "備考", NewValue = note, IsDisplayOnly = true });
+            }
+
             if (companionCount.GetValueOrDefault() > 0)
+            {
                 changes.Add(new FieldChange { FieldName = "同行者数", NewValue = $"{companionCount.Value}名", IsDisplayOnly = true });
+            }
+
             return changes;
         }
 

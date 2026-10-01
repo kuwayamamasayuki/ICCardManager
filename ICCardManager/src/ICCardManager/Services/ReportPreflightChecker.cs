@@ -1,11 +1,11 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Linq;
 using System.Threading.Tasks;
 using ICCardManager.Data.Repositories;
 using ICCardManager.Dtos;
 using ICCardManager.Models;
-using System.Globalization;
 
 namespace ICCardManager.Services
 {
@@ -74,10 +74,16 @@ namespace ICCardManager.Services
             IEnumerable<ReportExportTarget> fileNamePopulation)
         {
             var result = new ReportPreflightResult();
-            if (cardIdms == null) return result;
+            if (cardIdms == null)
+            {
+                return result;
+            }
 
             var targetIdms = cardIdms.Where(idm => !string.IsNullOrEmpty(idm)).Distinct().ToList();
-            if (targetIdms.Count == 0) return result;
+            if (targetIdms.Count == 0)
+            {
+                return result;
+            }
 
             // 貸出中レコードは全カード分を1回で取得する（カード数ぶんのクエリを避ける）
             var lentRecords = await _ledgerRepository.GetAllLentRecordsAsync().ConfigureAwait(false);
@@ -138,7 +144,10 @@ namespace ICCardManager.Services
             int month,
             ReportPreflightResult result)
         {
-            if (checkedCards.Count == 0) return;
+            if (checkedCards.Count == 0)
+            {
+                return;
+            }
 
             var targets = checkedCards
                 .Select(c => new ReportExportTarget
@@ -164,7 +173,10 @@ namespace ICCardManager.Services
 
             foreach (var target in targets)
             {
-                if (!collisions.TryGetValue(target.CardIdm, out var others)) continue;
+                if (!collisions.TryGetValue(target.CardIdm, out var others))
+                {
+                    continue;
+                }
 
                 var fileName = _fileNameFactory.GetFiscalYearFileName(target.CardType, target.CardNumber, fiscalYear);
                 result.Warnings.Add(new ReportPreflightWarning
@@ -210,7 +222,10 @@ namespace ICCardManager.Services
         internal static void CheckUnreturned(
             MonthlyReportData data, Ledger lentRecord, ReportPreflightResult result)
         {
-            if (lentRecord == null) return;
+            if (lentRecord == null)
+            {
+                return;
+            }
 
             var monthStart = new DateTime(data.Year, data.Month, 1);
             var monthEnd = monthStart.AddMonths(1).AddDays(-1);
@@ -291,7 +306,10 @@ namespace ICCardManager.Services
         private static void AddNegativeTotalWarning(
             MonthlyReportData data, ReportTotalData total, ReportPreflightResult result)
         {
-            if (total?.Balance == null || total.Balance.Value >= 0) return;
+            if (total?.Balance == null || total.Balance.Value >= 0)
+            {
+                return;
+            }
 
             result.Warnings.Add(new ReportPreflightWarning
             {
@@ -321,13 +339,22 @@ namespace ICCardManager.Services
         internal static void CheckCarryoverMismatch(
             MonthlyReportData data, ReportPreflightResult result)
         {
-            if (data.Carryover == null || data.Ledgers.Count == 0) return;
+            if (data.Carryover == null || data.Ledgers.Count == 0)
+            {
+                return;
+            }
 
             var first = data.Ledgers[0];
-            if (SummaryGenerator.IsMidYearCarryoverSummary(first.Summary)) return;
+            if (SummaryGenerator.IsMidYearCarryoverSummary(first.Summary))
+            {
+                return;
+            }
 
             var expected = data.Carryover.Balance + first.Income - first.Expense;
-            if (first.Balance == expected) return;
+            if (first.Balance == expected)
+            {
+                return;
+            }
 
             result.Warnings.Add(new ReportPreflightWarning
             {
@@ -366,16 +393,33 @@ namespace ICCardManager.Services
             }
 
             // 5月以降の月計: 残額が null のため残高チェーンで検算する
-            if (data.MonthlyTotal == null) return;
-            if (!data.PrecedingBalance.HasValue) return;       // 新規購入カードで前月末残高なし
-            if (data.Ledgers.Count == 0) return;               // 月末残高が確定しない
+            if (data.MonthlyTotal == null)
+            {
+                return;
+            }
+
+            if (!data.PrecedingBalance.HasValue)
+            {
+                return;       // 新規購入カードで前月末残高なし
+            }
+
+            if (data.Ledgers.Count == 0)
+            {
+                return;               // 月末残高が確定しない
+            }
             // 紙出納簿移行月は「○月から繰越」の受入が集計から除外される一方で残高チェーンには寄与するため
             // 「受入 − 払出 = 残額」が成立しない（Issue #510 / #1494）
-            if (data.Ledgers.Any(l => SummaryGenerator.IsMidYearCarryoverSummary(l.Summary))) return;
+            if (data.Ledgers.Any(l => SummaryGenerator.IsMidYearCarryoverSummary(l.Summary)))
+            {
+                return;
+            }
 
             var monthEndBalance = data.Ledgers[data.Ledgers.Count - 1].Balance;
             var expected = data.PrecedingBalance.Value + data.MonthlyTotal.Income - data.MonthlyTotal.Expense;
-            if (expected == monthEndBalance) return;
+            if (expected == monthEndBalance)
+            {
+                return;
+            }
 
             result.Warnings.Add(new ReportPreflightWarning
             {
@@ -399,10 +443,16 @@ namespace ICCardManager.Services
         private static void AddTotalMismatchWarning(
             MonthlyReportData data, ReportTotalData total, ReportPreflightResult result)
         {
-            if (total?.Balance == null) return;
+            if (total?.Balance == null)
+            {
+                return;
+            }
 
             var expected = total.Income - total.Expense;
-            if (expected == total.Balance.Value) return;
+            if (expected == total.Balance.Value)
+            {
+                return;
+            }
 
             result.Warnings.Add(new ReportPreflightWarning
             {

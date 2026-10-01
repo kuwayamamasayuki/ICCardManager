@@ -5,7 +5,7 @@ using System.Threading.Tasks;
 using ICCardManager.Common;
 namespace ICCardManager.Dtos
 {
-/// <summary>
+    /// <summary>
     /// 利用履歴詳細DTO
     /// ViewModelで使用する履歴詳細表示用オブジェクト
     /// </summary>

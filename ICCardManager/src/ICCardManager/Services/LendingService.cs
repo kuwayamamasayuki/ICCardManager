@@ -1,6 +1,7 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Data.SQLite;
+using System.Globalization;
 using System.Linq;
 using System.Threading.Tasks;
 using ICCardManager.Common;
@@ -12,11 +13,10 @@ using ICCardManager.Infrastructure.Timing;
 using ICCardManager.Models;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
-using System.Globalization;
 
 namespace ICCardManager.Services
 {
-/// <summary>
+    /// <summary>
     /// 貸出・返却処理結果
     /// </summary>
     public class LendingResult
@@ -729,7 +729,10 @@ namespace ICCardManager.Services
         /// </remarks>
         public async Task<Ledger> RefundAsync(IcCard beforeCard, int refundAmount, DateTime refundedAt)
         {
-            if (beforeCard == null) throw new ArgumentNullException(nameof(beforeCard));
+            if (beforeCard == null)
+            {
+                throw new ArgumentNullException(nameof(beforeCard));
+            }
 
             // DB の日時列は秒単位の文字列（SqliteDateTimeFormat）で保存される。秒未満を落としておかないと、
             // 操作ログの変更後データ（JSON はミリ秒まで持つ）だけが refunded_at と食い違う
@@ -1415,7 +1418,10 @@ namespace ICCardManager.Services
                     {
                         // 利用グループLedger作成
                         var usageDetails = segment.Details;
-                        if (usageDetails.Count == 0) continue;
+                        if (usageDetails.Count == 0)
+                        {
+                            continue;
+                        }
 
                         // 最初の利用セグメントのみ既存レコードとの統合を試みる
                         var existingUsageLedger = isFirstUsageSegment
@@ -1457,7 +1463,10 @@ namespace ICCardManager.Services
                                     if (expense == 0)
                                     {
                                         expense = lastBalance - balance;
-                                        if (expense < 0) expense = 0;
+                                        if (expense < 0)
+                                        {
+                                            expense = 0;
+                                        }
                                     }
                                     lastBalance = balance;
                                 }
@@ -1516,7 +1525,10 @@ namespace ICCardManager.Services
                                     if (expense == 0)
                                     {
                                         expense = lastBalance - balance;
-                                        if (expense < 0) expense = 0;
+                                        if (expense < 0)
+                                        {
+                                            expense = 0;
+                                        }
                                     }
                                     lastBalance = balance;
                                 }

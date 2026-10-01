@@ -4,7 +4,7 @@ using System.Linq;
 using System.Threading.Tasks;
 namespace ICCardManager.Models
 {
-/// <summary>
+    /// <summary>
     /// 利用履歴詳細エンティティ（ledger_detailテーブル）
     /// ICカードの個別利用記録
     /// </summary>

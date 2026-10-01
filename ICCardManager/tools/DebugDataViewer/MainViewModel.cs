@@ -237,7 +237,10 @@ namespace DebugDataViewer
         /// </summary>
         private void OnCardRead(object sender, CardReadEventArgs e)
         {
-            if (!IsWaitingForCard) return;
+            if (!IsWaitingForCard)
+            {
+                return;
+            }
 
             IsWaitingForCard = false;
             OnPropertyChanged(nameof(IsNotWaitingForCard));

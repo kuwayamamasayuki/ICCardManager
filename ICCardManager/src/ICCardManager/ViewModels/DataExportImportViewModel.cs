@@ -1,6 +1,10 @@
+using System;
+using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Globalization;
 using System.IO;
+using System.Linq;
+using System.Threading.Tasks;
 using System.Windows.Data;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
@@ -14,11 +18,6 @@ using ICCardManager.Infrastructure.Timing;
 using ICCardManager.Models;
 using ICCardManager.Services;
 using Microsoft.Win32;
-
-using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Threading.Tasks;
 
 
 namespace ICCardManager.ViewModels;
@@ -582,10 +581,25 @@ public partial class DataExportImportViewModel : ViewModelBase
 
                 // プレビューサマリを設定
                 var summaryParts = new List<string>();
-                if (preview.NewCount > 0) summaryParts.Add($"新規 {preview.NewCount}件");
-                if (preview.UpdateCount > 0) summaryParts.Add($"更新 {preview.UpdateCount}件");
-                if (preview.SkipCount > 0) summaryParts.Add($"スキップ {preview.SkipCount}件");
-                if (preview.ErrorCount > 0) summaryParts.Add($"エラー {preview.ErrorCount}件");
+                if (preview.NewCount > 0)
+                {
+                    summaryParts.Add($"新規 {preview.NewCount}件");
+                }
+
+                if (preview.UpdateCount > 0)
+                {
+                    summaryParts.Add($"更新 {preview.UpdateCount}件");
+                }
+
+                if (preview.SkipCount > 0)
+                {
+                    summaryParts.Add($"スキップ {preview.SkipCount}件");
+                }
+
+                if (preview.ErrorCount > 0)
+                {
+                    summaryParts.Add($"エラー {preview.ErrorCount}件");
+                }
 
                 PreviewSummary = string.Join("、", summaryParts);
                 HasPreview = true;
@@ -1282,12 +1296,18 @@ public partial class DataExportImportViewModel : ViewModelBase
         // Issue #1816: 入口ゲート（OnCardRead）はカードリーダースレッドで判定され、
         // 解除は UI スレッドのここで初めて行われる。連続タッチでは 2 件目もゲートを
         // 通過済みで queue されているため、取得地点で再判定する（#1807 と同じ形）
-        if (!IsWaitingForCardTouch) return;
+        if (!IsWaitingForCardTouch)
+        {
+            return;
+        }
 
         // Issue #1952: 再入は専用フラグで塞ぐ。抑制の解放（IsWaitingForCardTouch = false）を
         // モーダルの表示範囲の外へ移した結果、入口ゲートは処理中も true のままになるため、
         // ゲートだけでは待機中・モーダル表示中の 2 件目を止められない。
-        if (_isHandlingCardRead) return;
+        if (_isHandlingCardRead)
+        {
+            return;
+        }
 
         _isHandlingCardRead = true;
         try
@@ -1303,7 +1323,10 @@ public partial class DataExportImportViewModel : ViewModelBase
             // 本 Issue が塞いだ欠陥（背後で貸出・返却が進む）がこの経路から再現する。
             // 副作用（TouchedCardIdm / TouchedCardInfo / モーダル）より前に再判定し、
             // 中止したタッチは通知せず捨てる（#1842「副作用を起こす前に判定を終える」）。
-            if (!IsWaitingForCardTouch) return;
+            if (!IsWaitingForCardTouch)
+            {
+                return;
+            }
 
             if (card != null)
             {

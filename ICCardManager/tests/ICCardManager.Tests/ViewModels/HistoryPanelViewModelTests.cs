@@ -1,4 +1,9 @@
-﻿using FluentAssertions;
+using System;
+using System.Collections.Generic;
+using System.Data.SQLite;
+using System.Linq;
+using System.Threading.Tasks;
+using FluentAssertions;
 using ICCardManager.Common;
 using ICCardManager.Data;
 using ICCardManager.Data.Repositories;
@@ -10,12 +15,6 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using Xunit;
-
-using System;
-using System.Collections.Generic;
-using System.Data.SQLite;
-using System.Linq;
-using System.Threading.Tasks;
 
 namespace ICCardManager.Tests.ViewModels;
 
@@ -878,8 +877,13 @@ public class HistoryPanelViewModelTests : IDisposable
     public void ApplyBalanceInconsistencyMarkers_不整合解消時にフラグがリセットされること()
     {
         // Arrange: 事前にハイライトが適用されている状態
-        _history.HistoryLedgers.Add(new LedgerDto { Id = 1, Balance = 1000, HasBalanceInconsistency = true,
-            BalanceInconsistencyMessage = "残高不整合: 期待値 1,100円 / 実際 1,000円" });
+        _history.HistoryLedgers.Add(new LedgerDto
+        {
+            Id = 1,
+            Balance = 1000,
+            HasBalanceInconsistency = true,
+            BalanceInconsistencyMessage = "残高不整合: 期待値 1,100円 / 実際 1,000円"
+        });
         _history.HistoryLedgers.Add(new LedgerDto { Id = 2, Balance = 800 });
 
         // _balanceInconsistenciesを空にして（不整合が解消された状態を模擬）

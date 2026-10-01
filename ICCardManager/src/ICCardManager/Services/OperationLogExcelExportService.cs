@@ -136,7 +136,9 @@ public class OperationLogExcelExportService
     private static void WriteHighlightedJsonCell(IXLWorksheet worksheet, IXLCell cell, string? targetTable, string? json, ISet<string>? changedFields, bool strikethrough)
     {
         if (string.IsNullOrEmpty(json))
+        {
             return;
+        }
 
         try
         {
@@ -145,7 +147,10 @@ public class OperationLogExcelExportService
             {
                 cell.Value = FormatJsonArrayToReadable(targetTable, json);
                 if (strikethrough)
+                {
                     cell.Style.Font.Strikethrough = true;
+                }
+
                 return;
             }
 
@@ -162,11 +167,15 @@ public class OperationLogExcelExportService
             foreach (var property in doc.RootElement.EnumerateObject())
             {
                 if (!fieldNameMap.TryGetValue(property.Name, out var displayName))
+                {
                     continue;
+                }
 
                 var value = FormatFieldValue(property.Name, property.Value, "  ");
                 if (value == null)
+                {
                     continue;
+                }
 
                 var isChanged = changedFields != null && changedFields.Contains(property.Name);
 
@@ -197,7 +206,9 @@ public class OperationLogExcelExportService
                     run.SetFontName(defaultFontName);
                     run.SetFontSize(defaultFontSize);
                     if (strikethrough)
+                    {
                         run.SetStrikethrough();
+                    }
                 }
             }
         }
@@ -205,7 +216,9 @@ public class OperationLogExcelExportService
         {
             cell.Value = json;
             if (strikethrough)
+            {
                 cell.Style.Font.Strikethrough = true;
+            }
         }
     }
 
@@ -217,7 +230,9 @@ public class OperationLogExcelExportService
         var result = new HashSet<string>();
 
         if (string.IsNullOrEmpty(beforeJson) || string.IsNullOrEmpty(afterJson))
+        {
             return result;
+        }
 
         try
         {
@@ -227,7 +242,9 @@ public class OperationLogExcelExportService
             // 配列JSONの場合は比較しない
             if (beforeDoc.RootElement.ValueKind == JsonValueKind.Array ||
                 afterDoc.RootElement.ValueKind == JsonValueKind.Array)
+            {
                 return result;
+            }
 
             var fieldNameMap = GetFieldNameMap(targetTable);
 
@@ -250,17 +267,27 @@ public class OperationLogExcelExportService
                         hasBeforeProp ? beforeProp : (JsonElement?)null,
                         hasAfterProp ? afterProp : (JsonElement?)null);
                     if (detailDiffs.Count > 0)
+                    {
                         result.Add(propertyName);
+                    }
+
                     continue;
                 }
 
                 if (hasBeforeProp)
+                {
                     beforeValue = FormatPropertyValue(beforeProp);
+                }
+
                 if (hasAfterProp)
+                {
                     afterValue = FormatPropertyValue(afterProp);
+                }
 
                 if (beforeValue != afterValue)
+                {
                     result.Add(propertyName);
+                }
             }
         }
         catch
@@ -344,7 +371,9 @@ public class OperationLogExcelExportService
     internal static string FormatJsonToReadable(string? targetTable, string? json)
     {
         if (string.IsNullOrEmpty(json))
+        {
             return "";
+        }
 
         try
         {
@@ -362,11 +391,15 @@ public class OperationLogExcelExportService
             foreach (var property in doc.RootElement.EnumerateObject())
             {
                 if (!fieldNameMap.TryGetValue(property.Name, out var displayName))
+                {
                     continue;
+                }
 
                 var value = FormatFieldValue(property.Name, property.Value, "  ");
                 if (value == null)
+                {
                     continue;
+                }
 
                 lines.Add($"{displayName}: {value}");
             }
@@ -405,12 +438,16 @@ public class OperationLogExcelExportService
                 foreach (var property in element.EnumerateObject())
                 {
                     if (!fieldNameMap.TryGetValue(property.Name, out var displayName))
+                    {
                         continue;
+                    }
 
                     // 配列の各要素は既に 2 文字字下げされているため、明細行はさらに 2 文字下げる
                     var value = FormatFieldValue(property.Name, property.Value, "    ");
                     if (value == null)
+                    {
                         continue;
+                    }
 
                     lines.Add($"  {displayName}: {value}");
                 }
@@ -433,7 +470,9 @@ public class OperationLogExcelExportService
     internal static string GetChangeSummary(string? targetTable, string? beforeJson, string? afterJson)
     {
         if (string.IsNullOrEmpty(beforeJson) || string.IsNullOrEmpty(afterJson))
+        {
             return "";
+        }
 
         try
         {
@@ -469,14 +508,22 @@ public class OperationLogExcelExportService
                         hasBefore ? beforeProp : (JsonElement?)null,
                         hasAfter ? afterProp : (JsonElement?)null);
                     if (!string.IsNullOrEmpty(detailChanges))
+                    {
                         changes.Add(detailChanges);
+                    }
+
                     continue;
                 }
 
                 if (hasBefore)
+                {
                     beforeValue = FormatPropertyValue(beforeProp);
+                }
+
                 if (hasAfter)
+                {
                     afterValue = FormatPropertyValue(afterProp);
+                }
 
                 if (beforeValue != afterValue)
                 {

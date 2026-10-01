@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Globalization;
 using System.Linq;
 using System.Threading.Tasks;
@@ -122,13 +122,17 @@ namespace ICCardManager.Services
         {
             var raw = await TryGetStringSettingAsync(key).ConfigureAwait(false);
             if (string.IsNullOrWhiteSpace(raw))
+            {
                 return null;
+            }
 
             // last_backup_success_at は "yyyy-MM-dd HH:mm:ss"、last_vacuum_date は "yyyy-MM-dd" と
             // 精度が異なるため、書式を固定せず一般的な解析に委ねる。
             // 解析できない値（手動編集・破損）は「記録なし」として扱い、例外にしない。
             if (DateTime.TryParse(raw, CultureInfo.InvariantCulture, DateTimeStyles.None, out var parsed))
+            {
                 return parsed;
+            }
 
             _logger.LogWarning("設定値を日時として解釈できませんでした: {Key}={Value}", key, raw);
             return null;

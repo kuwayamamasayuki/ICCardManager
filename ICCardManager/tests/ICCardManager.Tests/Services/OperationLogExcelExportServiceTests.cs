@@ -1,15 +1,14 @@
-﻿using System.IO;
+using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Linq;
+using System.Threading.Tasks;
 using ClosedXML.Excel;
 using FluentAssertions;
 using ICCardManager.Common;
 using ICCardManager.Models;
 using ICCardManager.Services;
 using Xunit;
-
-using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Threading.Tasks;
 
 
 namespace ICCardManager.Tests.Services;
@@ -34,7 +33,9 @@ public class OperationLogExcelExportServiceTests : IDisposable
         try
         {
             if (Directory.Exists(_testDirectory))
+            {
                 Directory.Delete(_testDirectory, true);
+            }
         }
         catch { /* テスト後のクリーンアップ失敗は無視 */ }
     }

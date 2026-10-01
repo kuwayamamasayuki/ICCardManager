@@ -39,7 +39,9 @@ public class DbContextUiThreadGuardTests : IDisposable
         try
         {
             if (Directory.Exists(_testDirectory))
+            {
                 Directory.Delete(_testDirectory, recursive: true);
+            }
         }
         catch { }
         GC.SuppressFinalize(this);

@@ -1,3 +1,8 @@
+using System;
+using System.Collections.Generic;
+using System.Data.SQLite;
+using System.Linq;
+using System.Threading.Tasks;
 using CommunityToolkit.Mvvm.Messaging;
 using FluentAssertions;
 using ICCardManager.Common.Messages;
@@ -14,12 +19,6 @@ using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using Xunit;
 using IOperationLogRepository = ICCardManager.Data.Repositories.IOperationLogRepository;
-
-using System;
-using System.Data.SQLite;
-using System.Collections.Generic;
-using System.Linq;
-using System.Threading.Tasks;
 
 
 namespace ICCardManager.Tests.ViewModels;
@@ -633,7 +632,9 @@ public class StaffManageViewModelTests : IDisposable
         {
             if (e.PropertyName == nameof(StaffManageViewModel.NewlyRegisteredIdm)
                 && _viewModel.NewlyRegisteredIdm != null)
+            {
                 propertyChangedCount++;
+            }
         };
 
         // Act: 2回目（同じIDm）— 更新として

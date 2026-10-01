@@ -78,7 +78,10 @@ namespace ICCardManager.Services
         {
             var result = new ConsistencyResult { IsConsistent = true };
 
-            if (ledgers.Count == 0) return result;
+            if (ledgers.Count == 0)
+            {
+                return result;
+            }
 
             // 親レコードレベルのチェック
             // 期間の直前のレコードから前残高を取得する処理は非同期なので、
@@ -133,24 +136,47 @@ namespace ICCardManager.Services
         internal static InitialBalanceCorrection DetectInitialBalanceCorrection(
             List<Ledger> ledgers, ConsistencyResult result)
         {
-            if (ledgers.Count < 2) return null;
+            if (ledgers.Count < 2)
+            {
+                return null;
+            }
 
             var initial = ledgers[0];
             var next = ledgers[1];
-            if (!initial.IsInitialRecord) return null;
+            if (!initial.IsInitialRecord)
+            {
+                return null;
+            }
 
-            if (result.Inconsistencies.Count != 1 || result.Inconsistencies[0].LedgerId != next.Id) return null;
+            if (result.Inconsistencies.Count != 1 || result.Inconsistencies[0].LedgerId != next.Id)
+            {
+                return null;
+            }
 
             var suggested = next.Balance - next.Income + next.Expense;
-            if (suggested < 0) return null;
+            if (suggested < 0)
+            {
+                return null;
+            }
 
             var delta = initial.Balance - suggested;
-            if (result.DetailInconsistencies.Count > 1) return null;
+            if (result.DetailInconsistencies.Count > 1)
+            {
+                return null;
+            }
+
             if (result.DetailInconsistencies.Count == 1)
             {
                 var detail = result.DetailInconsistencies[0];
-                if (detail.LedgerId != next.Id) return null;
-                if (detail.ExpectedBalance - detail.ActualBalance != delta) return null;
+                if (detail.LedgerId != next.Id)
+                {
+                    return null;
+                }
+
+                if (detail.ExpectedBalance - detail.ActualBalance != delta)
+                {
+                    return null;
+                }
             }
 
             return new InitialBalanceCorrection(
@@ -278,7 +304,11 @@ namespace ICCardManager.Services
     {
         public InitialBalanceCorrection(int ledgerId, DateTime date, int recordedBalance, int suggestedBalance, bool appliesToIncome)
         {
-            if (suggestedBalance < 0) throw new ArgumentOutOfRangeException(nameof(suggestedBalance), suggestedBalance, "逆算した残高は 0 以上でなければならない");
+            if (suggestedBalance < 0)
+            {
+                throw new ArgumentOutOfRangeException(nameof(suggestedBalance), suggestedBalance, "逆算した残高は 0 以上でなければならない");
+            }
+
             LedgerId = ledgerId;
             Date = date;
             RecordedBalance = recordedBalance;

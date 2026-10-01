@@ -1,10 +1,10 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Data.SQLite;
 using System.Globalization;
+using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
-using System.IO;
 using ICCardManager.Common;
 using ICCardManager.Infrastructure.Caching;
 using ICCardManager.Models;
@@ -12,7 +12,7 @@ using Microsoft.Extensions.Options;
 
 namespace ICCardManager.Data.Repositories
 {
-/// <summary>
+    /// <summary>
     /// 設定リポジトリ実装
     /// </summary>
     public class SettingsRepository : ISettingsRepository

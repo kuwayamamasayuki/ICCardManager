@@ -1,7 +1,8 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.ComponentModel;
+using System.Globalization;
 using System.Linq;
 using System.Threading.Tasks;
 using System.Windows;
@@ -15,7 +16,6 @@ using ICCardManager.Dtos;
 using ICCardManager.Models;
 using ICCardManager.Services;
 using Microsoft.Win32;
-using System.Globalization;
 
 namespace ICCardManager.ViewModels
 {

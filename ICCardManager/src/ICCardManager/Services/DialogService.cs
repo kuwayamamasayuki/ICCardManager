@@ -59,8 +59,15 @@ namespace ICCardManager.Services
         public bool? ShowThreeWayConfirmation(string message, string title)
         {
             var result = Show(message, title, MessageBoxButton.YesNoCancel, MessageBoxImage.Question);
-            if (result == MessageBoxResult.Yes) return true;
-            if (result == MessageBoxResult.No) return false;
+            if (result == MessageBoxResult.Yes)
+            {
+                return true;
+            }
+
+            if (result == MessageBoxResult.No)
+            {
+                return false;
+            }
 
             // Cancel および閉じるボタン（MessageBoxResult.None）はいずれも中止として扱う
             return null;

@@ -4,7 +4,7 @@ using System.Linq;
 using System.Threading.Tasks;
 namespace ICCardManager.Infrastructure.Caching
 {
-/// <summary>
+    /// <summary>
     /// キャッシュキー定数
     /// </summary>
     public static class CacheKeys

@@ -33,7 +33,9 @@ public class FolderWriteAccessProbeTests : IDisposable
         try
         {
             if (Directory.Exists(_tempFolder))
+            {
                 Directory.Delete(_tempFolder, recursive: true);
+            }
         }
         catch (IOException)
         {

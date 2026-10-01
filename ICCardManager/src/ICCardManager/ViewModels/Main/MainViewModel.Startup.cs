@@ -1,6 +1,7 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
+using System.Globalization;
 using System.Linq;
 using System.Threading.Tasks;
 using System.Windows;
@@ -13,17 +14,16 @@ using ICCardManager.Common.Messages;
 using ICCardManager.Data;
 using ICCardManager.Data.Repositories;
 using ICCardManager.Dtos;
-using ICCardManager.Infrastructure.CardReader;
-using ICCardManager.Infrastructure.Sound;
 using ICCardManager.Infrastructure.Caching;
+using ICCardManager.Infrastructure.CardReader;
 using ICCardManager.Infrastructure.Security;
+using ICCardManager.Infrastructure.Sound;
 using ICCardManager.Infrastructure.Timing;
 using ICCardManager.Models;
 using ICCardManager.Services;
 using ICCardManager.Views.Helpers;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
-using System.Globalization;
 
 namespace ICCardManager.ViewModels;
 
@@ -105,11 +105,15 @@ public partial class MainViewModel
     internal void CheckJournalModeWarning()
     {
         if (WarningMessages.Any(w => w.Type == WarningType.DatabaseJournalModeDegraded))
+        {
             return;
+        }
 
         var warning = _warningService.CheckJournalModeWarning();
         if (warning != null)
+        {
             WarningMessages.Add(warning);
+        }
     }
 
     /// <summary>
@@ -125,7 +129,9 @@ public partial class MainViewModel
     {
         var warning = await Task.Run(() => _warningService.CheckUpdateNotificationWarning());
         if (warning != null && !WarningMessages.Any(w => w.Type == WarningType.NewVersionAvailable))
+        {
             WarningMessages.Add(warning);
+        }
     }
 
     /// <summary>
@@ -145,7 +151,10 @@ public partial class MainViewModel
 
         // Issue #1739: より新しいチェックが始まっていれば、この結果は陳腐化している
         // （起動時の fire-and-forget が保留している間に、手動バックアップ後の再判定が走る経路がある）
-        if (sequence != _backupHealthCheckSequence) return;
+        if (sequence != _backupHealthCheckSequence)
+        {
+            return;
+        }
 
         ReplaceWarnings(
             w => w.Type == WarningType.BackupStale,
@@ -214,7 +223,10 @@ public partial class MainViewModel
         var warning = await Task.Run(() => _warningService.CheckCarryoverDataLossWarningAsync());
 
         // Issue #1739: より新しいチェックが始まっていれば、この結果は陳腐化している
-        if (sequence != _carryoverDataLossCheckSequence) return;
+        if (sequence != _carryoverDataLossCheckSequence)
+        {
+            return;
+        }
 
         ReplaceWarnings(
             w => w.Type == WarningType.CarryoverDataLoss,
@@ -238,7 +250,9 @@ public partial class MainViewModel
 
             // 接続断の場合はリフレッシュをスキップ
             if (!e.IsConnected)
+            {
                 return;
+            }
 
             // 共有モード: 他PCの変更を反映するためダッシュボードと貸出中カードを定期リフレッシュ
             await RefreshSharedDataAsync();
@@ -299,7 +313,9 @@ public partial class MainViewModel
             var existing = WarningMessages
                 .FirstOrDefault(w => w.Type == WarningType.DatabaseConnectionLost);
             if (existing != null)
+            {
                 WarningMessages.Remove(existing);
+            }
         }
         else
         {
@@ -327,7 +343,9 @@ public partial class MainViewModel
         {
             // 処理中（カードタッチ対応中）はリフレッシュをスキップ
             if (CurrentState == AppState.Processing)
+            {
                 return;
+            }
 
             await RefreshLentCardsAsync();
             await RefreshDashboardAsync();
@@ -365,7 +383,9 @@ public partial class MainViewModel
     private async Task ManualRefreshAsync()
     {
         if (!IsSharedMode || _sharedModeMonitor.IsHealthCheckRunning)
+        {
             return;
+        }
 
         _sharedModeMonitor.SetHealthCheckRunning(true);
         try
@@ -430,7 +450,10 @@ public partial class MainViewModel
             WarningMessages.Remove(stale);
         }
 
-        if (replacements == null) return;
+        if (replacements == null)
+        {
+            return;
+        }
 
         foreach (var warning in replacements)
         {
@@ -468,7 +491,10 @@ public partial class MainViewModel
         var warning = await _warningService.CheckIncompleteBusStopsAsync();
 
         // より新しいチェックが始まっていれば、この結果は陳腐化している（そちらが書き戻す）
-        if (sequence != _busStopCheckSequence) return;
+        if (sequence != _busStopCheckSequence)
+        {
+            return;
+        }
 
         ReplaceWarnings(
             w => w.Type == WarningType.IncompleteBusStop,

@@ -1,4 +1,10 @@
-﻿using FluentAssertions;
+using System;
+using System.Collections.Generic;
+using System.Data.SQLite;
+using System.Linq;
+using System.Text.Json;
+using System.Threading.Tasks;
+using FluentAssertions;
 using ICCardManager.Data;
 using ICCardManager.Data.Repositories;
 using ICCardManager.Dtos;
@@ -8,13 +14,6 @@ using ICCardManager.Tests.Data;
 using ICCardManager.ViewModels;
 using Moq;
 using Xunit;
-
-using System;
-using System.Collections.Generic;
-using System.Data.SQLite;
-using System.Text.Json;
-using System.Linq;
-using System.Threading.Tasks;
 
 namespace ICCardManager.Tests.ViewModels;
 
@@ -259,10 +258,13 @@ public class LedgerRowEditViewModelTests : IDisposable
         // Arrange
         var ledger = new Ledger
         {
-            Id = 1, CardIdm = TestCardIdm,
+            Id = 1,
+            CardIdm = TestCardIdm,
             Date = new DateTime(2026, 1, 10),
             Summary = "鉄道（天神～博多）",
-            Income = 0, Expense = 210, Balance = 2300,
+            Income = 0,
+            Expense = 210,
+            Balance = 2300,
             LenderIdm = _staffA.StaffIdm,
             StaffName = _staffA.Name,
             Note = "テスト備考"
@@ -271,11 +273,16 @@ public class LedgerRowEditViewModelTests : IDisposable
 
         var dto = new LedgerDto
         {
-            Id = 1, CardIdm = TestCardIdm,
-            Date = new DateTime(2026, 1, 10), DateDisplay = "R8.1.10",
+            Id = 1,
+            CardIdm = TestCardIdm,
+            Date = new DateTime(2026, 1, 10),
+            DateDisplay = "R8.1.10",
             Summary = "鉄道（天神～博多）",
-            Income = 0, Expense = 210, Balance = 2300,
-            StaffName = _staffA.Name, Note = "テスト備考"
+            Income = 0,
+            Expense = 210,
+            Balance = 2300,
+            StaffName = _staffA.Name,
+            Note = "テスト備考"
         };
 
         // Act
@@ -304,10 +311,13 @@ public class LedgerRowEditViewModelTests : IDisposable
         // Arrange
         var ledger = new Ledger
         {
-            Id = 1, CardIdm = TestCardIdm,
+            Id = 1,
+            CardIdm = TestCardIdm,
             Date = new DateTime(2026, 4, 17),
             Summary = "鉄道（薬院～博多 往復）",
-            Income = 0, Expense = 420, Balance = 596,
+            Income = 0,
+            Expense = 420,
+            Balance = 596,
             LenderIdm = null,             // バグで未設定
             StaffName = _staffA.Name,     // スナップショットには残っている
             Note = string.Empty
@@ -315,10 +325,14 @@ public class LedgerRowEditViewModelTests : IDisposable
         _ledgerRepoMock.Setup(r => r.GetByIdAsync(1)).ReturnsAsync(ledger);
         var dto = new LedgerDto
         {
-            Id = 1, CardIdm = TestCardIdm,
-            Date = ledger.Date, DateDisplay = "R8.4.17",
+            Id = 1,
+            CardIdm = TestCardIdm,
+            Date = ledger.Date,
+            DateDisplay = "R8.4.17",
             Summary = ledger.Summary,
-            Income = 0, Expense = 420, Balance = 596,
+            Income = 0,
+            Expense = 420,
+            Balance = 596,
             StaffName = _staffA.Name
         };
 
@@ -339,10 +353,13 @@ public class LedgerRowEditViewModelTests : IDisposable
         // Arrange
         var ledger = new Ledger
         {
-            Id = 2, CardIdm = TestCardIdm,
+            Id = 2,
+            CardIdm = TestCardIdm,
             Date = new DateTime(2026, 4, 17),
             Summary = "役務費によりチャージ",
-            Income = 1000, Expense = 0, Balance = 2000,
+            Income = 1000,
+            Expense = 0,
+            Balance = 2000,
             LenderIdm = null,
             StaffName = null,
             Note = string.Empty
@@ -350,10 +367,14 @@ public class LedgerRowEditViewModelTests : IDisposable
         _ledgerRepoMock.Setup(r => r.GetByIdAsync(2)).ReturnsAsync(ledger);
         var dto = new LedgerDto
         {
-            Id = 2, CardIdm = TestCardIdm,
-            Date = ledger.Date, DateDisplay = "R8.4.17",
+            Id = 2,
+            CardIdm = TestCardIdm,
+            Date = ledger.Date,
+            DateDisplay = "R8.4.17",
             Summary = ledger.Summary,
-            Income = 1000, Expense = 0, Balance = 2000
+            Income = 1000,
+            Expense = 0,
+            Balance = 2000
         };
 
         // Act
@@ -373,10 +394,13 @@ public class LedgerRowEditViewModelTests : IDisposable
         // Arrange
         var ledger = new Ledger
         {
-            Id = 3, CardIdm = TestCardIdm,
+            Id = 3,
+            CardIdm = TestCardIdm,
             Date = new DateTime(2026, 4, 17),
             Summary = "鉄道（薬院～博多）",
-            Income = 0, Expense = 210, Balance = 800,
+            Income = 0,
+            Expense = 210,
+            Balance = 800,
             LenderIdm = "DDDD000000000099",  // StaffList に存在しない IDm
             StaffName = _staffA.Name,         // 同名のアクティブ職員 A は存在
             Note = string.Empty
@@ -384,10 +408,14 @@ public class LedgerRowEditViewModelTests : IDisposable
         _ledgerRepoMock.Setup(r => r.GetByIdAsync(3)).ReturnsAsync(ledger);
         var dto = new LedgerDto
         {
-            Id = 3, CardIdm = TestCardIdm,
-            Date = ledger.Date, DateDisplay = "R8.4.17",
+            Id = 3,
+            CardIdm = TestCardIdm,
+            Date = ledger.Date,
+            DateDisplay = "R8.4.17",
             Summary = ledger.Summary,
-            Income = 0, Expense = 210, Balance = 800,
+            Income = 0,
+            Expense = 210,
+            Balance = 800,
             StaffName = _staffA.Name
         };
 
@@ -408,10 +436,13 @@ public class LedgerRowEditViewModelTests : IDisposable
         // Arrange
         var ledger = new Ledger
         {
-            Id = 4, CardIdm = TestCardIdm,
+            Id = 4,
+            CardIdm = TestCardIdm,
             Date = new DateTime(2026, 4, 17),
             Summary = "鉄道（博多～天神）",
-            Income = 0, Expense = 210, Balance = 800,
+            Income = 0,
+            Expense = 210,
+            Balance = 800,
             LenderIdm = null,
             StaffName = "存在しない人物",
             Note = string.Empty
@@ -419,10 +450,14 @@ public class LedgerRowEditViewModelTests : IDisposable
         _ledgerRepoMock.Setup(r => r.GetByIdAsync(4)).ReturnsAsync(ledger);
         var dto = new LedgerDto
         {
-            Id = 4, CardIdm = TestCardIdm,
-            Date = ledger.Date, DateDisplay = "R8.4.17",
+            Id = 4,
+            CardIdm = TestCardIdm,
+            Date = ledger.Date,
+            DateDisplay = "R8.4.17",
             Summary = ledger.Summary,
-            Income = 0, Expense = 210, Balance = 800,
+            Income = 0,
+            Expense = 210,
+            Balance = 800,
             StaffName = "存在しない人物"
         };
 
@@ -445,10 +480,13 @@ public class LedgerRowEditViewModelTests : IDisposable
     {
         var ledger = new Ledger
         {
-            Id = 10, CardIdm = TestCardIdm,
+            Id = 10,
+            CardIdm = TestCardIdm,
             Date = new DateTime(2026, 1, 12),
             Summary = "役務費によりチャージ",
-            Income = 3000, Expense = 0, Balance = 5000,
+            Income = 3000,
+            Expense = 0,
+            Balance = 5000,
             LenderIdm = _staffA.StaffIdm,
             StaffName = _staffA.Name,
             Note = string.Empty
@@ -457,10 +495,14 @@ public class LedgerRowEditViewModelTests : IDisposable
 
         return new LedgerDto
         {
-            Id = 10, CardIdm = TestCardIdm,
-            Date = ledger.Date, DateDisplay = "R8.1.12",
+            Id = 10,
+            CardIdm = TestCardIdm,
+            Date = ledger.Date,
+            DateDisplay = "R8.1.12",
             Summary = ledger.Summary,
-            Income = 3000, Expense = 0, Balance = 5000,
+            Income = 3000,
+            Expense = 0,
+            Balance = 5000,
             StaffName = _staffA.Name
         };
     }
@@ -719,9 +761,14 @@ public class LedgerRowEditViewModelTests : IDisposable
         // Arrange: GetByIdAsync が null（他PCが削除済み）
         var dto = new LedgerDto
         {
-            Id = 777, CardIdm = TestCardIdm,
-            Date = new DateTime(2026, 1, 12), DateDisplay = "R8.1.12",
-            Summary = "鉄道（天神～博多）", Income = 0, Expense = 210, Balance = 2090
+            Id = 777,
+            CardIdm = TestCardIdm,
+            Date = new DateTime(2026, 1, 12),
+            DateDisplay = "R8.1.12",
+            Summary = "鉄道（天神～博多）",
+            Income = 0,
+            Expense = 210,
+            Balance = 2090
         };
         _ledgerRepoMock.Setup(r => r.GetByIdAsync(777)).ReturnsAsync((Ledger)null);
 
@@ -1006,10 +1053,13 @@ public class LedgerRowEditViewModelTests : IDisposable
         // Arrange: 通常の履歴（IsLentRecord = false）
         var ledger = new Ledger
         {
-            Id = 1, CardIdm = TestCardIdm,
+            Id = 1,
+            CardIdm = TestCardIdm,
             Date = new DateTime(2026, 1, 10),
             Summary = "鉄道（天神～博多）",
-            Income = 0, Expense = 210, Balance = 2300,
+            Income = 0,
+            Expense = 210,
+            Balance = 2300,
             LenderIdm = _staffA.StaffIdm,
             StaffName = _staffA.Name,
             IsLentRecord = false
@@ -1018,10 +1068,14 @@ public class LedgerRowEditViewModelTests : IDisposable
 
         var dto = new LedgerDto
         {
-            Id = 1, CardIdm = TestCardIdm,
-            Date = new DateTime(2026, 1, 10), DateDisplay = "R8.1.10",
+            Id = 1,
+            CardIdm = TestCardIdm,
+            Date = new DateTime(2026, 1, 10),
+            DateDisplay = "R8.1.10",
             Summary = "鉄道（天神～博多）",
-            Income = 0, Expense = 210, Balance = 2300,
+            Income = 0,
+            Expense = 210,
+            Balance = 2300,
             StaffName = _staffA.Name,
             IsLentRecord = false
         };
@@ -1048,10 +1102,13 @@ public class LedgerRowEditViewModelTests : IDisposable
         // Arrange: 貸出中レコード（IsLentRecord = true）
         var ledger = new Ledger
         {
-            Id = 2, CardIdm = TestCardIdm,
+            Id = 2,
+            CardIdm = TestCardIdm,
             Date = new DateTime(2026, 1, 15),
             Summary = SummaryGenerator.GetLendingSummary(),
-            Income = 0, Expense = 0, Balance = 2300,
+            Income = 0,
+            Expense = 0,
+            Balance = 2300,
             LenderIdm = _staffA.StaffIdm,
             StaffName = _staffA.Name,
             IsLentRecord = true
@@ -1060,10 +1117,14 @@ public class LedgerRowEditViewModelTests : IDisposable
 
         var dto = new LedgerDto
         {
-            Id = 2, CardIdm = TestCardIdm,
-            Date = new DateTime(2026, 1, 15), DateDisplay = "R8.1.15",
+            Id = 2,
+            CardIdm = TestCardIdm,
+            Date = new DateTime(2026, 1, 15),
+            DateDisplay = "R8.1.15",
             Summary = SummaryGenerator.GetLendingSummary(),
-            Income = 0, Expense = 0, Balance = 2300,
+            Income = 0,
+            Expense = 0,
+            Balance = 2300,
             StaffName = _staffA.Name,
             IsLentRecord = true
         };
@@ -1142,10 +1203,13 @@ public class LedgerRowEditViewModelTests : IDisposable
         // Arrange
         var ledger = new Ledger
         {
-            Id = 1, CardIdm = TestCardIdm,
+            Id = 1,
+            CardIdm = TestCardIdm,
             Date = new DateTime(2026, 1, 10),
             Summary = "元の摘要",
-            Income = 0, Expense = 210, Balance = 2300,
+            Income = 0,
+            Expense = 210,
+            Balance = 2300,
             LenderIdm = _staffA.StaffIdm,
             StaffName = _staffA.Name
         };
@@ -1157,9 +1221,14 @@ public class LedgerRowEditViewModelTests : IDisposable
 
         var dto = new LedgerDto
         {
-            Id = 1, CardIdm = TestCardIdm,
-            Date = new DateTime(2026, 1, 10), DateDisplay = "R8.1.10",
-            Summary = "元の摘要", Income = 0, Expense = 210, Balance = 2300,
+            Id = 1,
+            CardIdm = TestCardIdm,
+            Date = new DateTime(2026, 1, 10),
+            DateDisplay = "R8.1.10",
+            Summary = "元の摘要",
+            Income = 0,
+            Expense = 210,
+            Balance = 2300,
             StaffName = _staffA.Name
         };
         await _viewModel.InitializeForEditAsync(dto, TestOperatorIdm);
@@ -1182,15 +1251,28 @@ public class LedgerRowEditViewModelTests : IDisposable
     {
         var ledger = new Ledger
         {
-            Id = 1, CardIdm = TestCardIdm, Date = new DateTime(2026, 1, 10),
-            Summary = "鉄道（天神～博多）", Expense = 210, Balance = 2300,
-            LenderIdm = _staffA.StaffIdm, StaffName = _staffA.Name, CompanionCount = 2
+            Id = 1,
+            CardIdm = TestCardIdm,
+            Date = new DateTime(2026, 1, 10),
+            Summary = "鉄道（天神～博多）",
+            Expense = 210,
+            Balance = 2300,
+            LenderIdm = _staffA.StaffIdm,
+            StaffName = _staffA.Name,
+            CompanionCount = 2
         };
         _ledgerRepoMock.Setup(r => r.GetByIdAsync(1)).ReturnsAsync(ledger);
         var dto = new LedgerDto
         {
-            Id = 1, CardIdm = TestCardIdm, Date = ledger.Date, DateDisplay = "R8.1.10",
-            Summary = ledger.Summary, Expense = 210, Balance = 2300, StaffName = _staffA.Name, CompanionCount = 2
+            Id = 1,
+            CardIdm = TestCardIdm,
+            Date = ledger.Date,
+            DateDisplay = "R8.1.10",
+            Summary = ledger.Summary,
+            Expense = 210,
+            Balance = 2300,
+            StaffName = _staffA.Name,
+            CompanionCount = 2
         };
 
         await _viewModel.InitializeForEditAsync(dto, TestOperatorIdm);
@@ -1204,9 +1286,14 @@ public class LedgerRowEditViewModelTests : IDisposable
     {
         var ledger = new Ledger
         {
-            Id = 1, CardIdm = TestCardIdm, Date = new DateTime(2026, 1, 10),
-            Summary = "鉄道（天神～博多）", Expense = 210, Balance = 2300,
-            LenderIdm = _staffA.StaffIdm, StaffName = _staffA.Name
+            Id = 1,
+            CardIdm = TestCardIdm,
+            Date = new DateTime(2026, 1, 10),
+            Summary = "鉄道（天神～博多）",
+            Expense = 210,
+            Balance = 2300,
+            LenderIdm = _staffA.StaffIdm,
+            StaffName = _staffA.Name
         };
         _ledgerRepoMock.Setup(r => r.GetByIdAsync(1)).ReturnsAsync(ledger);
         _ledgerRepoMock.Setup(r => r.UpdateAsync(It.IsAny<Ledger>(), It.IsAny<SQLiteTransaction>())).ReturnsAsync(true);
@@ -1214,8 +1301,14 @@ public class LedgerRowEditViewModelTests : IDisposable
             .ReturnsAsync(new Staff { StaffIdm = TestOperatorIdm, Name = "操作者" });
         var dto = new LedgerDto
         {
-            Id = 1, CardIdm = TestCardIdm, Date = ledger.Date, DateDisplay = "R8.1.10",
-            Summary = ledger.Summary, Expense = 210, Balance = 2300, StaffName = _staffA.Name
+            Id = 1,
+            CardIdm = TestCardIdm,
+            Date = ledger.Date,
+            DateDisplay = "R8.1.10",
+            Summary = ledger.Summary,
+            Expense = 210,
+            Balance = 2300,
+            StaffName = _staffA.Name
         };
         await _viewModel.InitializeForEditAsync(dto, TestOperatorIdm);
 
@@ -1254,9 +1347,15 @@ public class LedgerRowEditViewModelTests : IDisposable
         // 摘要だけ直した保存で「同行者数 0 → 2」という実際には起きていない変更が監査ログに残る
         var ledger = new Ledger
         {
-            Id = 1, CardIdm = TestCardIdm, Date = new DateTime(2026, 1, 10),
-            Summary = "元の摘要", Expense = 210, Balance = 2300,
-            LenderIdm = _staffA.StaffIdm, StaffName = _staffA.Name, CompanionCount = 2
+            Id = 1,
+            CardIdm = TestCardIdm,
+            Date = new DateTime(2026, 1, 10),
+            Summary = "元の摘要",
+            Expense = 210,
+            Balance = 2300,
+            LenderIdm = _staffA.StaffIdm,
+            StaffName = _staffA.Name,
+            CompanionCount = 2
         };
         _ledgerRepoMock.Setup(r => r.GetByIdAsync(1)).ReturnsAsync(ledger);
         _ledgerRepoMock.Setup(r => r.UpdateAsync(It.IsAny<Ledger>(), It.IsAny<SQLiteTransaction>())).ReturnsAsync(true);
@@ -1269,8 +1368,15 @@ public class LedgerRowEditViewModelTests : IDisposable
             .ReturnsAsync(1);
         var dto = new LedgerDto
         {
-            Id = 1, CardIdm = TestCardIdm, Date = ledger.Date, DateDisplay = "R8.1.10",
-            Summary = "元の摘要", Expense = 210, Balance = 2300, StaffName = _staffA.Name, CompanionCount = 2
+            Id = 1,
+            CardIdm = TestCardIdm,
+            Date = ledger.Date,
+            DateDisplay = "R8.1.10",
+            Summary = "元の摘要",
+            Expense = 210,
+            Balance = 2300,
+            StaffName = _staffA.Name,
+            CompanionCount = 2
         };
         await _viewModel.InitializeForEditAsync(dto, TestOperatorIdm);
 
@@ -1391,10 +1497,13 @@ public class LedgerRowEditViewModelTests : IDisposable
         // Arrange
         var existingLedger = new Ledger
         {
-            Id = 1, CardIdm = TestCardIdm,
+            Id = 1,
+            CardIdm = TestCardIdm,
             Date = new DateTime(2026, 1, 10),
             Summary = "鉄道（天神～博多）",
-            Income = 0, Expense = 210, Balance = 2300,
+            Income = 0,
+            Expense = 210,
+            Balance = 2300,
             Details = new List<LedgerDetail>()
         };
         _ledgerRepoMock.Setup(r => r.GetByIdAsync(1)).ReturnsAsync(existingLedger);
@@ -1404,10 +1513,13 @@ public class LedgerRowEditViewModelTests : IDisposable
 
         var dto = new LedgerDto
         {
-            Id = 1, CardIdm = TestCardIdm,
+            Id = 1,
+            CardIdm = TestCardIdm,
             Date = new DateTime(2026, 1, 10),
             Summary = "鉄道（天神～博多）",
-            Income = 0, Expense = 210, Balance = 2300
+            Income = 0,
+            Expense = 210,
+            Balance = 2300
         };
         await _viewModel.InitializeForEditAsync(dto, TestOperatorIdm);
 
@@ -1453,20 +1565,26 @@ public class LedgerRowEditViewModelTests : IDisposable
         // Arrange
         var existingLedger = new Ledger
         {
-            Id = 1, CardIdm = TestCardIdm,
+            Id = 1,
+            CardIdm = TestCardIdm,
             Date = new DateTime(2026, 1, 10),
             Summary = "鉄道（天神～博多）",
-            Income = 0, Expense = 210, Balance = 2300,
+            Income = 0,
+            Expense = 210,
+            Balance = 2300,
             Details = new List<LedgerDetail>()
         };
         _ledgerRepoMock.Setup(r => r.GetByIdAsync(1)).ReturnsAsync(existingLedger);
 
         var dto = new LedgerDto
         {
-            Id = 1, CardIdm = TestCardIdm,
+            Id = 1,
+            CardIdm = TestCardIdm,
             Date = new DateTime(2026, 1, 10),
             Summary = "鉄道（天神～博多）",
-            Income = 0, Expense = 210, Balance = 2300
+            Income = 0,
+            Expense = 210,
+            Balance = 2300
         };
         await _viewModel.InitializeForEditAsync(dto, TestOperatorIdm);
 
@@ -1498,14 +1616,24 @@ public class LedgerRowEditViewModelTests : IDisposable
     {
         _ledgerRepoMock.Setup(r => r.GetByIdAsync(1)).ReturnsAsync(new Ledger
         {
-            Id = 1, CardIdm = TestCardIdm, Date = new DateTime(2026, 1, 10),
-            Summary = "鉄道（天神～博多）", Income = 0, Expense = 210, Balance = 2300
+            Id = 1,
+            CardIdm = TestCardIdm,
+            Date = new DateTime(2026, 1, 10),
+            Summary = "鉄道（天神～博多）",
+            Income = 0,
+            Expense = 210,
+            Balance = 2300
         });
         await _viewModel.InitializeForEditAsync(
             new LedgerDto
             {
-                Id = 1, CardIdm = TestCardIdm, DateDisplay = "R8.1.10",
-                Summary = "鉄道（天神～博多）", Income = 0, Expense = 210, Balance = 2300,
+                Id = 1,
+                CardIdm = TestCardIdm,
+                DateDisplay = "R8.1.10",
+                Summary = "鉄道（天神～博多）",
+                Income = 0,
+                Expense = 210,
+                Balance = 2300,
                 StaffName = _staffA.Name
             },
             TestOperatorIdm);
@@ -1598,15 +1726,25 @@ public class LedgerRowEditViewModelTests : IDisposable
     {
         _ledgerRepoMock.Setup(r => r.GetByIdAsync(1)).ReturnsAsync(new Ledger
         {
-            Id = 1, CardIdm = TestCardIdm, Date = new DateTime(2026, 1, 10),
-            Summary = "鉄道（天神～博多）", Income = 0, Expense = 210, Balance = 2300,
+            Id = 1,
+            CardIdm = TestCardIdm,
+            Date = new DateTime(2026, 1, 10),
+            Summary = "鉄道（天神～博多）",
+            Income = 0,
+            Expense = 210,
+            Balance = 2300,
             Details = new List<LedgerDetail>()
         });
         await _viewModel.InitializeForEditAsync(
             new LedgerDto
             {
-                Id = 1, CardIdm = TestCardIdm, Date = new DateTime(2026, 1, 10),
-                Summary = "鉄道（天神～博多）", Income = 0, Expense = 210, Balance = 2300
+                Id = 1,
+                CardIdm = TestCardIdm,
+                Date = new DateTime(2026, 1, 10),
+                Summary = "鉄道（天神～博多）",
+                Income = 0,
+                Expense = 210,
+                Balance = 2300
             },
             TestOperatorIdm);
     }
@@ -1806,15 +1944,24 @@ public class LedgerRowEditViewModelTests : IDisposable
 
         return new LedgerDto
         {
-            Id = ledger.Id, CardIdm = TestCardIdm, Date = ledger.Date, DateDisplay = "R8.1.10",
-            Summary = ledger.Summary, Expense = ledger.Expense, Balance = ledger.Balance
+            Id = ledger.Id,
+            CardIdm = TestCardIdm,
+            Date = ledger.Date,
+            DateDisplay = "R8.1.10",
+            Summary = ledger.Summary,
+            Expense = ledger.Expense,
+            Balance = ledger.Balance
         };
     }
 
     private static Ledger CreateBusLedger(string summary) => new Ledger
     {
-        Id = 1, CardIdm = TestCardIdm, Date = new DateTime(2026, 1, 10),
-        Summary = summary, Expense = 200, Balance = 2300,
+        Id = 1,
+        CardIdm = TestCardIdm,
+        Date = new DateTime(2026, 1, 10),
+        Summary = summary,
+        Expense = 200,
+        Balance = 2300,
         Details = new List<LedgerDetail>
         {
             new LedgerDetail { LedgerId = 1, IsBus = true, BusStops = SummaryGenerator.BusPlaceholder, Amount = 200, Balance = 2300, SequenceNumber = 1 }
@@ -2066,14 +2213,25 @@ public class LedgerRowEditViewModelTests : IDisposable
     {
         var ledger = new Ledger
         {
-            Id = 1, CardIdm = TestCardIdm, Date = new DateTime(2025, 4, 1),
-            Summary = summary, Income = income, Expense = 0, Balance = balance
+            Id = 1,
+            CardIdm = TestCardIdm,
+            Date = new DateTime(2025, 4, 1),
+            Summary = summary,
+            Income = income,
+            Expense = 0,
+            Balance = balance
         };
         _ledgerRepoMock.Setup(r => r.GetByIdAsync(1)).ReturnsAsync(ledger);
         var dto = new LedgerDto
         {
-            Id = 1, CardIdm = TestCardIdm, Date = ledger.Date, DateDisplay = "R7.4.1",
-            Summary = summary, Income = income, Expense = 0, Balance = balance
+            Id = 1,
+            CardIdm = TestCardIdm,
+            Date = ledger.Date,
+            DateDisplay = "R7.4.1",
+            Summary = summary,
+            Income = income,
+            Expense = 0,
+            Balance = balance
         };
         await _viewModel.InitializeForEditAsync(dto, TestOperatorIdm, previousBalance: null, initialBalanceCorrection: correction);
     }
@@ -2144,8 +2302,13 @@ public class LedgerRowEditViewModelTests : IDisposable
     {
         var ledger = new Ledger
         {
-            Id = 1, CardIdm = TestCardIdm, Date = new DateTime(2025, 4, 1),
-            Summary = "新規購入", Income = 5000, Expense = 0, Balance = 5000
+            Id = 1,
+            CardIdm = TestCardIdm,
+            Date = new DateTime(2025, 4, 1),
+            Summary = "新規購入",
+            Income = 5000,
+            Expense = 0,
+            Balance = 5000
         };
         _ledgerRepoMock.Setup(r => r.GetByIdAsync(1)).ReturnsAsync(ledger);
         var dto = new LedgerDto { Id = 1, CardIdm = TestCardIdm, Date = ledger.Date, Summary = "新規購入", Income = 5000, Balance = 5000 };

@@ -1,15 +1,15 @@
 using System;
 using System.Collections.Generic;
-using System.Linq;
-using System.Threading.Tasks;
-using System.Reflection;
 using System.Data.SQLite;
+using System.Linq;
+using System.Reflection;
 using System.Text.Json;
+using System.Threading.Tasks;
 using ICCardManager.Common;
 
 namespace ICCardManager.Data.Migrations
 {
-/// <summary>
+    /// <summary>
     /// マイグレーション実行クラス
     /// </summary>
     public class MigrationRunner

@@ -8,7 +8,7 @@ using CommunityToolkit.Mvvm.Input;
 
 namespace ICCardManager.ViewModels
 {
-/// <summary>
+    /// <summary>
     /// ViewModelの基底クラス
     /// </summary>
     public abstract partial class ViewModelBase : ObservableObject, IBusyState

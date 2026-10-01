@@ -427,11 +427,17 @@ public class ReportRowBuilderTests
         };
         data.MonthlyTotal = new ReportTotalData
         {
-            Label = "3月計", Income = 2000, Expense = 300, Balance = null
+            Label = "3月計",
+            Income = 2000,
+            Expense = 300,
+            Balance = null
         };
         data.CumulativeTotal = new ReportTotalData
         {
-            Label = "累計", Income = 10000, Expense = 3300, Balance = 6700
+            Label = "累計",
+            Income = 10000,
+            Expense = 3300,
+            Balance = 6700
         };
         data.CarryoverToNextYear = 6700;
 
@@ -476,7 +482,10 @@ public class ReportRowBuilderTests
         };
         data.MonthlyTotal = new ReportTotalData
         {
-            Label = "4月計", Income = 0, Expense = 210, Balance = 4790
+            Label = "4月計",
+            Income = 0,
+            Expense = 210,
+            Balance = 4790
         };
         data.CumulativeTotal = null;
         data.CarryoverToNextYear = null;

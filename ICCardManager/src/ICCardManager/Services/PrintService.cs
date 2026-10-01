@@ -1,8 +1,8 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Linq;
-using System.Threading.Tasks;
 using System.Printing;
+using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Documents;
@@ -16,7 +16,7 @@ using Microsoft.Extensions.Options;
 
 namespace ICCardManager.Services
 {
-/// <summary>
+    /// <summary>
     /// 帳票印刷用データ（プレビュー画面で使用）
     /// </summary>
     /// <remarks>
@@ -167,8 +167,15 @@ namespace ICCardManager.Services
 
                 // 合計行の数を計算
                 var summaryRowCount = 1;
-                if (data.CumulativeTotal != null) summaryRowCount++;
-                if (data.CarryoverToNextYear.HasValue) summaryRowCount++;
+                if (data.CumulativeTotal != null)
+                {
+                    summaryRowCount++;
+                }
+
+                if (data.CarryoverToNextYear.HasValue)
+                {
+                    summaryRowCount++;
+                }
 
                 // コンテンツの高さに基づいてページをグループ化
                 var pageGroups = GroupRowsByPage(data.Rows, pageWidth, pageHeight, summaryRowCount);
@@ -474,8 +481,15 @@ namespace ICCardManager.Services
 
             // 合計行の数を計算
             var summaryRowCount = 1; // 月計
-            if (data.CumulativeTotal != null) summaryRowCount++;
-            if (data.CarryoverToNextYear.HasValue) summaryRowCount++;
+            if (data.CumulativeTotal != null)
+            {
+                summaryRowCount++;
+            }
+
+            if (data.CarryoverToNextYear.HasValue)
+            {
+                summaryRowCount++;
+            }
 
             // コンテンツの高さに基づいてページをグループ化
             var pageGroups = GroupRowsByPage(data.Rows, pageWidth, pageHeight, summaryRowCount);

@@ -8,10 +8,10 @@ using ICCardManager.Data.Repositories;
 using ICCardManager.Infrastructure.Caching;
 using ICCardManager.Models;
 using ICCardManager.Tests.Data;
+using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using Moq;
 using Xunit;
-using Microsoft.Extensions.Logging.Abstractions;
 
 namespace ICCardManager.Tests.Data.Repositories;
 
@@ -108,14 +108,18 @@ public class LedgerDetailOrderingIntegrationTests : IDisposable
         var newerDetail = new LedgerDetail
         {
             UseDate = DateTime.Today,
-            EntryStation = "博多", ExitStation = "天神",
-            Amount = 210, Balance = 580
+            EntryStation = "博多",
+            ExitStation = "天神",
+            Amount = 210,
+            Balance = 580
         };
         var olderDetail = new LedgerDetail
         {
             UseDate = DateTime.Today,
-            EntryStation = "天神", ExitStation = "博多",
-            Amount = 210, Balance = 790
+            EntryStation = "天神",
+            ExitStation = "博多",
+            Amount = 210,
+            Balance = 790
         };
 
         // 新しい方を先に挿入（FeliCa順）
@@ -145,14 +149,18 @@ public class LedgerDetailOrderingIntegrationTests : IDisposable
         var olderDetail = new LedgerDetail
         {
             UseDate = DateTime.Today,
-            EntryStation = "天神", ExitStation = "博多",
-            Amount = 210, Balance = 790
+            EntryStation = "天神",
+            ExitStation = "博多",
+            Amount = 210,
+            Balance = 790
         };
         var newerDetail = new LedgerDetail
         {
             UseDate = DateTime.Today,
-            EntryStation = "博多", ExitStation = "天神",
-            Amount = 210, Balance = 580
+            EntryStation = "博多",
+            ExitStation = "天神",
+            Amount = 210,
+            Balance = 580
         };
 
         // 古い方を先に挿入（時系列順＝FeliCaの逆）
@@ -182,20 +190,26 @@ public class LedgerDetailOrderingIntegrationTests : IDisposable
         var trip2 = new LedgerDetail
         {
             UseDate = DateTime.Today,
-            EntryStation = "B", ExitStation = "C",
-            Amount = 210, Balance = 580
+            EntryStation = "B",
+            ExitStation = "C",
+            Amount = 210,
+            Balance = 580
         };
         var trip3 = new LedgerDetail
         {
             UseDate = DateTime.Today,
-            EntryStation = "C", ExitStation = "D",
-            Amount = 210, Balance = 370
+            EntryStation = "C",
+            ExitStation = "D",
+            Amount = 210,
+            Balance = 370
         };
         var trip1 = new LedgerDetail
         {
             UseDate = DateTime.Today,
-            EntryStation = "A", ExitStation = "B",
-            Amount = 210, Balance = 790
+            EntryStation = "A",
+            ExitStation = "B",
+            Amount = 210,
+            Balance = 790
         };
 
         // ランダム順で挿入: trip2, trip3, trip1
@@ -232,20 +246,25 @@ public class LedgerDetailOrderingIntegrationTests : IDisposable
         var charge = new LedgerDetail
         {
             UseDate = DateTime.Today,
-            Amount = 1000, Balance = 1790,
+            Amount = 1000,
+            Balance = 1790,
             IsCharge = true
         };
         var trip1 = new LedgerDetail
         {
             UseDate = DateTime.Today,
-            EntryStation = "天神", ExitStation = "博多",
-            Amount = 210, Balance = 790
+            EntryStation = "天神",
+            ExitStation = "博多",
+            Amount = 210,
+            Balance = 790
         };
         var trip2 = new LedgerDetail
         {
             UseDate = DateTime.Today,
-            EntryStation = "博多", ExitStation = "天神",
-            Amount = 210, Balance = 1580
+            EntryStation = "博多",
+            ExitStation = "天神",
+            Amount = 210,
+            Balance = 1580
         };
 
         await _repository.InsertDetailsAsync(ledgerId, new[] { charge, trip2, trip1 });
@@ -276,14 +295,18 @@ public class LedgerDetailOrderingIntegrationTests : IDisposable
         var detail1 = new LedgerDetail
         {
             UseDate = DateTime.Today,
-            EntryStation = "博多", ExitStation = "天神",
-            Amount = 210, Balance = 580
+            EntryStation = "博多",
+            ExitStation = "天神",
+            Amount = 210,
+            Balance = 580
         };
         var detail2 = new LedgerDetail
         {
             UseDate = DateTime.Today,
-            EntryStation = "天神", ExitStation = "博多",
-            Amount = 210, Balance = 790
+            EntryStation = "天神",
+            ExitStation = "博多",
+            Amount = 210,
+            Balance = 790
         };
         await _repository.InsertDetailsAsync(ledgerId, new[] { detail1, detail2 });
 

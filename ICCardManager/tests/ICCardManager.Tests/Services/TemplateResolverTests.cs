@@ -1,13 +1,12 @@
+using System;
+using System.Collections.Generic;
 using System.IO;
+using System.Linq;
+using System.Threading.Tasks;
 using FluentAssertions;
 using ICCardManager.Models;
 using ICCardManager.Services;
 using Xunit;
-
-using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Threading.Tasks;
 
 
 namespace ICCardManager.Tests.Services;
@@ -309,7 +308,10 @@ public class TemplateResolverTests : IDisposable
             // Dispose() の CleanupTempFiles は無関係ファイルを消さないため明示的に後始末する
             foreach (var f in new[] { unrelatedOtherName, unrelatedOtherExt })
             {
-                if (File.Exists(f)) File.Delete(f);
+                if (File.Exists(f))
+                {
+                    File.Delete(f);
+                }
             }
         }
     }

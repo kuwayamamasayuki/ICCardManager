@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
@@ -52,7 +52,10 @@ public partial class HistoryPanelViewModel
     public async Task MergeHistoryLedgers()
     {
         var checkedDtos = GetCheckedLedgers();
-        if (checkedDtos.Count < 2) return;
+        if (checkedDtos.Count < 2)
+        {
+            return;
+        }
 
         // 隣接チェック: チェックされたアイテムがHistoryLedgers内で連続しているか
         var indices = checkedDtos
@@ -77,7 +80,10 @@ public partial class HistoryPanelViewModel
         // 履歴統合は ledger を改変する監査対象の重要操作のため職員認証を要求する
         // （設計 06_シーケンス図 §10 / SEQ-AUTH-01。追加・削除・変更と同じゲート）
         var authResult = await _staffAuthService.RequestAuthenticationAsync("履歴の統合");
-        if (authResult == null) return;
+        if (authResult == null)
+        {
+            return;
+        }
 
         // 確認ダイアログ
         var message = "以下の履歴を統合します。\n\n";
@@ -87,7 +93,10 @@ public partial class HistoryPanelViewModel
         }
         message += "\n統合してよろしいですか？（統合後に「元に戻す」ことができます）";
 
-        if (!_navigationService.ShowConfirmation(message, "履歴の統合")) return;
+        if (!_navigationService.ShowConfirmation(message, "履歴の統合"))
+        {
+            return;
+        }
 
         // 統合実行
         var ledgerIds = sortedDtos.Select(dto => dto.Id).ToList();
@@ -161,19 +170,27 @@ public partial class HistoryPanelViewModel
         var checkedDtos = GetCheckedLedgers();
 
         if (checkedDtos.Count < 2)
+        {
             return false;
+        }
 
         // 同一カードかチェック
         if (checkedDtos.Select(d => d.CardIdm).Distinct().Count() > 1)
+        {
             return false;
+        }
 
         // 貸出中レコードがないかチェック
         if (checkedDtos.Any(d => d.IsLentRecord))
+        {
             return false;
+        }
 
         // チャージと利用の混在チェック
         if (checkedDtos.Any(d => d.Income > 0) && checkedDtos.Any(d => d.Expense > 0))
+        {
             return false;
+        }
 
         return true;
     }

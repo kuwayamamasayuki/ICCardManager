@@ -6,7 +6,7 @@ using ICCardManager.Models;
 
 namespace ICCardManager.Data.Repositories
 {
-/// <summary>
+    /// <summary>
     /// 設定リポジトリインターフェース
     /// </summary>
     public interface ISettingsRepository

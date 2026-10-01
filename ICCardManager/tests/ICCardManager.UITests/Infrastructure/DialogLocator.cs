@@ -35,8 +35,15 @@ namespace ICCardManager.UITests.Infrastructure
         public static Window WaitForNestedDialog(
             AppFixture fixture, Window opener, string dialogName, TimeSpan? timeout = null)
         {
-            if (fixture == null) throw new ArgumentNullException(nameof(fixture));
-            if (opener == null) throw new ArgumentNullException(nameof(opener));
+            if (fixture == null)
+            {
+                throw new ArgumentNullException(nameof(fixture));
+            }
+
+            if (opener == null)
+            {
+                throw new ArgumentNullException(nameof(opener));
+            }
 
             var effective = timeout ?? TimeSpan.FromSeconds(TestConstants.OperationLogDialogOpenTimeoutSeconds);
             var found = Retry.WhileNull(() => Find(fixture, opener, dialogName), effective).Result;
@@ -56,11 +63,17 @@ namespace ICCardManager.UITests.Infrastructure
             {
                 // (1) 開いた側の配下
                 var fromOpener = opener.ModalWindows.FirstOrDefault(w => w.Name == dialogName);
-                if (fromOpener != null) return fromOpener;
+                if (fromOpener != null)
+                {
+                    return fromOpener;
+                }
 
                 // (2) メイン画面の配下（Owner がメイン画面になっている場合）
                 var fromMain = fixture.MainWindow.ModalWindows.FirstOrDefault(w => w.Name == dialogName);
-                if (fromMain != null) return fromMain;
+                if (fromMain != null)
+                {
+                    return fromMain;
+                }
 
                 // (3) トップレベルのウィンドウ（どちらの ModalWindows にも現れない場合）
                 return fixture.App.GetAllTopLevelWindows(fixture.Automation)

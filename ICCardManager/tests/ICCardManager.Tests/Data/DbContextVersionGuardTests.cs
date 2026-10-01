@@ -32,7 +32,9 @@ public class DbContextVersionGuardTests : IDisposable
         try
         {
             if (Directory.Exists(_testDirectory))
+            {
                 Directory.Delete(_testDirectory, recursive: true);
+            }
         }
         catch { }
         GC.SuppressFinalize(this);

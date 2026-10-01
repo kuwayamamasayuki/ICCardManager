@@ -202,7 +202,9 @@ namespace ICCardManager.Services
         internal async Task<bool> ExecuteHealthCheckAsync()
         {
             if (_isHealthCheckRunning)
+            {
                 return false;
+            }
 
             _isHealthCheckRunning = true;
             try
@@ -234,7 +236,9 @@ namespace ICCardManager.Services
         private void TransitionConnectionState(SharedDbConnectionState newState)
         {
             if (_currentConnectionState == newState)
+            {
                 return;
+            }
 
             var oldState = _currentConnectionState;
             _currentConnectionState = newState;

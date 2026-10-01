@@ -1,11 +1,11 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
 using ICCardManager.Common;
 namespace ICCardManager.Models
 {
-/// <summary>
+    /// <summary>
     /// アプリケーション設定モデル
     /// settingsテーブルのKVS形式を構造化して保持
     /// </summary>

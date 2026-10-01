@@ -1,9 +1,10 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Threading;
+using CommunityToolkit.Mvvm.Messaging;
 using ICCardManager.Common;
 using ICCardManager.Common.Exceptions;
 using ICCardManager.Data;
@@ -17,7 +18,6 @@ using ICCardManager.Services;
 using ICCardManager.ViewModels;
 using ICCardManager.Views;
 using ICCardManager.Views.Dialogs;
-using CommunityToolkit.Mvvm.Messaging;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
@@ -25,7 +25,7 @@ using Microsoft.Extensions.Options;
 
 namespace ICCardManager
 {
-/// <summary>
+    /// <summary>
     /// Interaction logic for App.xaml
     /// </summary>
     public partial class App : Application
@@ -258,7 +258,9 @@ namespace ICCardManager
                 {
                     var configPath = ViewModels.SettingsViewModel.LoadDatabasePathFromConfigFile();
                     if (!string.IsNullOrWhiteSpace(configPath))
+                    {
                         dbPathInfo = $"\n\nデータベースパス: {configPath}";
+                    }
                 }
                 catch (Exception configEx)
                 {
@@ -589,20 +591,20 @@ namespace ICCardManager
             services.AddSingleton<ISafeFileLauncher, SafeFileLauncher>();
 
             // Infrastructure層
-    #if DEBUG
+#if DEBUG
             // デバッグ時はテストデータサービスを登録
             services.AddSingleton<DebugDataService>();
-    #endif
+#endif
 
-    #if DEBUG
+#if DEBUG
             // Issue #640: HybridCardReader で物理カードリーダー（PaSoRi + felicalib）をラップし、
             // 仮想タッチ機能も利用可能にする
             services.AddSingleton<HybridCardReader>(sp => new HybridCardReader(CreateCardReader(sp)));
             services.AddSingleton<ICardReader>(sp => sp.GetRequiredService<HybridCardReader>());
-    #else
+#else
             // 物理カードリーダー（PaSoRi + felicalib）で FelicaCardReader を使用
             services.AddSingleton<ICardReader>(sp => CreateCardReader(sp));
-    #endif
+#endif
             services.AddSingleton<ISoundPlayer, SoundPlayer>();
             services.AddSingleton<Infrastructure.Timing.ITimerFactory, Infrastructure.Timing.DispatcherTimerFactory>();
             services.AddSingleton<Infrastructure.Timing.IDispatcherService, Infrastructure.Timing.WpfDispatcherService>();
@@ -636,10 +638,10 @@ namespace ICCardManager
             services.AddTransient<ConnectionDiagnosticsViewModel>();
             services.AddTransient<TransferStationGroupViewModel>();
             services.AddTransient<AdminDashboardViewModel>();
-    #if DEBUG
+#if DEBUG
             // Issue #640: 仮想タッチ設定ダイアログ
             services.AddTransient<VirtualCardViewModel>();
-    #endif
+#endif
 
             // Views
             services.AddTransient<MainWindow>();
@@ -664,9 +666,9 @@ namespace ICCardManager
             services.AddTransient<Views.Dialogs.CardTypeSelectionDialog>();
             services.AddTransient<Views.Dialogs.ConnectionDiagnosticsDialog>();
             services.AddTransient<Views.Dialogs.TransferStationGroupDialog>();
-    #if DEBUG
+#if DEBUG
             services.AddTransient<Views.Dialogs.VirtualCardDialog>();
-    #endif
+#endif
         }
 
         /// <summary>
@@ -760,13 +762,13 @@ namespace ICCardManager
 
             await dbContext.InitializeDatabaseAsync();
 
-    #if DEBUG
+#if DEBUG
             // デバッグ時はテストデータを登録（スクリーンショット撮影モードでは撮影側が投入したデータだけを見せる。Issue #2019）
             if (!IsScreenshotMode)
             {
                 await RegisterTestDataAsync();
             }
-    #endif
+#endif
 
             // 設定ファイルからの設定を適用（Issue #742）
             await ApplyDepartmentConfigFromFileAsync();
@@ -1008,7 +1010,7 @@ namespace ICCardManager
             Views.ToastNotificationWindow.CurrentPosition = position;
         }
 
-    #if DEBUG
+#if DEBUG
         /// <summary>
         /// テストデータを登録（デバッグ用）
         /// </summary>
@@ -1025,7 +1027,7 @@ namespace ICCardManager
                 _logger?.LogWarning(ex, "テストデータ登録エラー");
             }
         }
-    #endif
+#endif
 
         /// <summary>
         /// 起動時タスクを実行（Issue #1356 で async 化）

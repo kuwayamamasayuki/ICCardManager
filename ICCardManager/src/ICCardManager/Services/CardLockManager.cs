@@ -1,14 +1,14 @@
-﻿using System;
+using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
-using System.Collections.Concurrent;
 using Microsoft.Extensions.Logging;
 
 namespace ICCardManager.Services
 {
-/// <summary>
+    /// <summary>
     /// カードごとの排他制御ロックを管理するクラス
     /// </summary>
     /// <remarks>
@@ -131,7 +131,10 @@ namespace ICCardManager.Services
         /// </summary>
         private void CleanupCallback(object state)
         {
-            if (_disposed) return;
+            if (_disposed)
+            {
+                return;
+            }
 
             try
             {
@@ -300,7 +303,10 @@ namespace ICCardManager.Services
 
         protected virtual void Dispose(bool disposing)
         {
-            if (_disposed) return;
+            if (_disposed)
+            {
+                return;
+            }
 
             if (disposing)
             {

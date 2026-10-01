@@ -1,9 +1,9 @@
 using System;
 using System.Collections.Generic;
+using System.Collections.ObjectModel;
 using System.Linq;
 using System.Runtime.CompilerServices;
 using System.Threading.Tasks;
-using System.Collections.ObjectModel;
 using System.Windows;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
@@ -19,7 +19,7 @@ using ICCardManager.Services;
 
 namespace ICCardManager.ViewModels
 {
-/// <summary>
+    /// <summary>
     /// 職員管理画面のViewModel
     /// </summary>
     public partial class StaffManageViewModel : ViewModelBase, IEditFormViewModel
@@ -333,7 +333,10 @@ namespace ICCardManager.ViewModels
         [RelayCommand]
         public void StartEdit()
         {
-            if (SelectedStaff == null) return;
+            if (SelectedStaff == null)
+            {
+                return;
+            }
 
             IsEditing = true;
             IsNewStaff = false;
@@ -585,7 +588,10 @@ namespace ICCardManager.ViewModels
         [RelayCommand]
         public async Task DeleteAsync()
         {
-            if (SelectedStaff == null) return;
+            if (SelectedStaff == null)
+            {
+                return;
+            }
 
             // Issue #1759: 削除対象の識別情報は**ここで確定させる**。
             // 失敗時に呼ぶ LoadStaffAsync() は StaffList.Clear() を行い、DataGrid の
@@ -701,7 +707,10 @@ namespace ICCardManager.ViewModels
         /// </summary>
         private void OnCardRead(object sender, CardReadEventArgs e)
         {
-            if (!IsWaitingForCard) return;
+            if (!IsWaitingForCard)
+            {
+                return;
+            }
 
             // UIスレッドで非同期実行（登録済みチェックを即座に行うため）
             // Issue #1843: 生の Dispatcher.InvokeAsync は DispatcherOperation<Task> を返すため、
@@ -792,7 +801,10 @@ namespace ICCardManager.ViewModels
             // Issue #1816: 入口ゲート（OnCardRead）はカードリーダースレッドで判定され、
             // 解除は UI スレッドのここで初めて行われる。連続タッチでは 2 件目もゲートを
             // 通過済みで queue されているため、取得地点で再判定する（#1807 と同じ形）
-            if (!IsWaitingForCard) return;
+            if (!IsWaitingForCard)
+            {
+                return;
+            }
 
             EditStaffIdm = idm;
             IsWaitingForCard = false;
@@ -916,7 +928,10 @@ namespace ICCardManager.ViewModels
         [RelayCommand]
         public void SimulateCardRead()
         {
-            if (!IsWaitingForCard) return;
+            if (!IsWaitingForCard)
+            {
+                return;
+            }
 
             if (_cardReader is MockCardReader mockReader)
             {

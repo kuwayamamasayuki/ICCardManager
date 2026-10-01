@@ -1,15 +1,15 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Linq;
 using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 using ICCardManager.Common;
 using ICCardManager.Models;
-using System.Globalization;
 
 namespace ICCardManager.Services
 {
-/// <summary>
+    /// <summary>
     /// 日別摘要の結果
     /// </summary>
     public class DailySummary
@@ -403,7 +403,10 @@ namespace ICCardManager.Services
                 {
                     depth--;
                     // 閉じが先行した時点で対応は取れない（「）（」を通さない）
-                    if (depth < 0) return false;
+                    if (depth < 0)
+                    {
+                        return false;
+                    }
                 }
             }
 
@@ -469,7 +472,10 @@ namespace ICCardManager.Services
             var text = summary ?? string.Empty;
 
             // 対応が取れていない摘要は、どこがブロックの終端かを決められない
-            if (!HasBalancedFullWidthParentheses(text)) return blocks;
+            if (!HasBalancedFullWidthParentheses(text))
+            {
+                return blocks;
+            }
 
             var opener = BusLabel + FullWidthOpenParenthesis;
             var searchFrom = 0;
@@ -477,7 +483,10 @@ namespace ICCardManager.Services
             while (searchFrom < text.Length)
             {
                 var openerIndex = text.IndexOf(opener, searchFrom, StringComparison.Ordinal);
-                if (openerIndex < 0) break;
+                if (openerIndex < 0)
+                {
+                    break;
+                }
 
                 var contentStart = openerIndex + opener.Length;
                 var depth = 1;
@@ -492,12 +501,18 @@ namespace ICCardManager.Services
                     else if (text[index] == FullWidthCloseParenthesis)
                     {
                         depth--;
-                        if (depth == 0) break;
+                        if (depth == 0)
+                        {
+                            break;
+                        }
                     }
                 }
 
                 // 対応検証済みのため到達しないが、断片を返さない側へ倒す
-                if (depth != 0) break;
+                if (depth != 0)
+                {
+                    break;
+                }
 
                 var content = text.Substring(contentStart, index - contentStart);
                 searchFrom = index + 1;
@@ -509,7 +524,10 @@ namespace ICCardManager.Services
                 // LedgerDetail.BusStops を空文字で上書きし、6 年保存の台帳から
                 // 実際に乗降した場所が静かに失われる（従来の正規表現は本文を
                 // 1 文字以上要求していたため、この形には一致しなかった）。
-                if (string.IsNullOrWhiteSpace(content)) continue;
+                if (string.IsNullOrWhiteSpace(content))
+                {
+                    continue;
+                }
 
                 blocks.Add(content);
             }

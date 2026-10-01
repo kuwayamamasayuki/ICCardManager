@@ -244,7 +244,10 @@ public class VirtualCardDialogDebugIsolationTests
     {
         for (int i = 0; i < lines.Length; i++)
         {
-            if (predicate(lines[i])) return i;
+            if (predicate(lines[i]))
+            {
+                return i;
+            }
         }
         return -1;
     }

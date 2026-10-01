@@ -6,7 +6,7 @@ using ICCardManager.Models;
 
 namespace ICCardManager.Infrastructure.CardReader
 {
-/// <summary>
+    /// <summary>
     /// カードリーダーの接続状態
     /// </summary>
     public enum CardReaderConnectionState

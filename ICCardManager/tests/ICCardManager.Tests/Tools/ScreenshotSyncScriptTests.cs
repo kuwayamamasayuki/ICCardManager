@@ -542,7 +542,11 @@ namespace ICCardManager.Tests.Tools
         /// </summary>
         private static string Quote(string arg)
         {
-            if (arg.Length > 0 && arg.IndexOfAny(new[] { ' ', '\t', '"' }) < 0) return arg;
+            if (arg.Length > 0 && arg.IndexOfAny(new[] { ' ', '\t', '"' }) < 0)
+            {
+                return arg;
+            }
+
             return "\"" + arg.Replace("\"", "\\\"") + "\"";
         }
     }

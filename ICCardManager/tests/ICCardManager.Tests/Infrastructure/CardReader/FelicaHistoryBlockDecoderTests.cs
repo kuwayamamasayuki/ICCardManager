@@ -566,26 +566,34 @@ public class FelicaHistoryBlockDecoderTests
         var previous = BuildBlock(balance: 500);
 
         foreach (var usageType in usageTypes)
-        foreach (var entryCode in stationCodes)
-        foreach (var exitCode in stationCodes)
-        foreach (var balance in balances)
-        foreach (var (resolverName, resolver) in resolvers)
         {
-            var current = BuildBlock(
-                usageType: usageType,
-                entryStationCode: entryCode,
-                exitStationCode: exitCode,
-                balance: balance);
+            foreach (var entryCode in stationCodes)
+            {
+                foreach (var exitCode in stationCodes)
+                {
+                    foreach (var balance in balances)
+                    {
+                        foreach (var (resolverName, resolver) in resolvers)
+                        {
+                            var current = BuildBlock(
+                                usageType: usageType,
+                                entryStationCode: entryCode,
+                                exitStationCode: exitCode,
+                                balance: balance);
 
-            var result = FelicaHistoryBlockDecoder.Decode(current, previous, resolver, out _);
+                            var result = FelicaHistoryBlockDecoder.Decode(current, previous, resolver, out _);
 
-            var because =
-                $"利用種別=0x{usageType:X2}, 入場={entryCode}, 出場={exitCode}, 残額={balance}, リゾルバ={resolverName}";
+                            var because =
+                                $"利用種別=0x{usageType:X2}, 入場={entryCode}, 出場={exitCode}, 残額={balance}, リゾルバ={resolverName}";
 
-            (result.IsBus && result.IsPointRedemption).Should().BeFalse(
-                "バスとポイント還元は排他でなければならない（" + because + "）");
-            (result.IsBus && result.IsCharge).Should().BeFalse(
-                "バスとチャージは排他でなければならない（" + because + "）");
+                            (result.IsBus && result.IsPointRedemption).Should().BeFalse(
+                                "バスとポイント還元は排他でなければならない（" + because + "）");
+                            (result.IsBus && result.IsCharge).Should().BeFalse(
+                                "バスとチャージは排他でなければならない（" + because + "）");
+                        }
+                    }
+                }
+            }
         }
     }
 

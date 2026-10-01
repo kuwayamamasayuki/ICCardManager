@@ -38,7 +38,11 @@ namespace ICCardManager.Data.Migrations
             string table,
             string column)
         {
-            if (connection == null) throw new ArgumentNullException(nameof(connection));
+            if (connection == null)
+            {
+                throw new ArgumentNullException(nameof(connection));
+            }
+
             EnsureValidIdentifier(table, nameof(table));
             EnsureValidIdentifier(column, nameof(column));
 

@@ -1,13 +1,12 @@
-using FluentAssertions;
-using ICCardManager.Data.Migrations;
-using System.Data.SQLite;
-using Xunit;
-
 using System;
 using System.Collections.Generic;
+using System.Data.SQLite;
 using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
+using FluentAssertions;
+using ICCardManager.Data.Migrations;
+using Xunit;
 
 
 namespace ICCardManager.Tests.Data.Migrations;
@@ -139,7 +138,10 @@ public class MigrationRunnerTests : IDisposable
         };
         var runner = new MigrationRunner(_connection, migrations);
         runner.MigrateToLatest();
-        foreach (var m in migrations) m.ResetCalls();
+        foreach (var m in migrations)
+        {
+            m.ResetCalls();
+        }
 
         // Act
         var rollbackCount = runner.MigrateTo(1);
