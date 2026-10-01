@@ -512,6 +512,150 @@ public class LedgerRepositoryAggregationTests : IDisposable
 
     #endregion
 
+    #region GetMonthlyUsageByLenderAsync — 払戻台帳の除外（Issue #2157）
+
+    /// <summary>
+    /// 本番の払い戻しと同じ手順（払戻台帳の追加 → カードを払戻済へ）で台帳を作る。
+    /// </summary>
+    /// <remarks>
+    /// 払戻台帳は生成側（<see cref="LendingService.CreateRefundLedger"/>）から作り、
+    /// テスト側で行の形を組み立てない。除外の判定は「行の形」で行うため、
+    /// 生成側が形を変えたときに判定だけが取り残されると、このテストが赤になる。
+    /// </remarks>
+    /// <param name="refundedAtOffset">
+    /// <c>ic_card.refunded_at</c> を払戻台帳の日付からずらす量。#2151 より前の版は
+    /// <c>refunded_at</c> を DB の現在時刻で書いていたため、既存のデータでは両者が一致しない。
+    /// </param>
+    private async Task RefundCardAsync(string cardIdm, DateTime refundedAt, int refundAmount, TimeSpan refundedAtOffset = default)
+    {
+        await _ledgerRepository.InsertAsync(LendingService.CreateRefundLedger(cardIdm, refundAmount, refundedAt));
+        var result = await _cardRepository.SetRefundedAsync(cardIdm, refundedAt + refundedAtOffset, null);
+        result.Should().Be(CardOperationResult.Success, "テストの前提として払戻済へ更新できていること");
+    }
+
+    [Fact]
+    public async Task GetMonthlyUsageByLenderAsync_払戻台帳を職員別の利用額に含めないこと()
+    {
+        await SeedMastersAsync();
+        await InsertLedgerAsync(CardA, new DateTime(2026, 5, 10), expense: 210, balance: 4790);
+        await RefundCardAsync(CardA, new DateTime(2026, 5, 20, 14, 30, 0), refundAmount: 4790);
+
+        var result = await _ledgerRepository.GetMonthlyUsageByLenderAsync(
+            new DateTime(2026, 5, 1), new DateTime(2026, 5, 31));
+
+        // 払戻台帳は貸出者も氏名も持たないため、集計に残ると「（職員名なし）」系列へ
+        // 残高全額のスパイクとして積まれる。払い戻しは誰の支出でもない
+        result.Should().ContainSingle();
+        result[0].LenderIdm.Should().Be(StaffA);
+        result[0].TotalExpense.Should().Be(210, "払い戻し前の利用は職員の支出として残ること");
+        result[0].UsageCount.Should().Be(1);
+    }
+
+    [Fact]
+    public async Task GetMonthlyUsageByLenderAsync_払戻日時が台帳の日付と一致しない既存データでも払戻台帳を含めないこと()
+    {
+        // #2151 より前の版で払い戻したカード。refunded_at（DB の現在時刻）と
+        // 払戻台帳の日付（アプリの現在時刻）は秒単位でずれ得る。0 時をまたぐ形にして、
+        // 「日付単位の一致」で判定する退行も検出できるようにする
+        await SeedMastersAsync();
+        await RefundCardAsync(CardA, new DateTime(2026, 5, 20, 23, 59, 59), refundAmount: 4790,
+            refundedAtOffset: TimeSpan.FromSeconds(3));
+
+        var result = await _ledgerRepository.GetMonthlyUsageByLenderAsync(
+            new DateTime(2026, 5, 1), new DateTime(2026, 5, 31));
+
+        result.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task GetMonthlyUsageByLenderAsync_残額0円のカードの払戻台帳も含めないこと()
+    {
+        // 払戻額 0 円でも、残ると「（職員名なし）」系列が 0 円・利用 1 回で凡例に並ぶ
+        await SeedMastersAsync();
+        await RefundCardAsync(CardA, new DateTime(2026, 5, 20, 14, 30, 0), refundAmount: 0);
+
+        var result = await _ledgerRepository.GetMonthlyUsageByLenderAsync(
+            new DateTime(2026, 5, 1), new DateTime(2026, 5, 31));
+
+        result.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task GetMonthlyUsageByLenderAsync_氏名が空文字の払戻台帳も含めないこと()
+    {
+        // 氏名は外部キーを持たず、CSV の取り込み等で null ではなく空文字が入り得る。null と同じ「無い」として扱う
+        // （貸出者 IDm は staff への外部キーで空文字を保存できないため、この形は氏名にしか無い）
+        await SeedMastersAsync();
+        await RefundCardAsync(CardA, new DateTime(2026, 5, 20, 14, 30, 0), refundAmount: 0);
+        await InsertLedgerAsync(CardA, new DateTime(2026, 5, 20, 14, 30, 0), expense: 4790, balance: 0,
+            lenderIdm: null, staffName: "", summary: SummaryGenerator.GetRefundSummary());
+
+        var result = await _ledgerRepository.GetMonthlyUsageByLenderAsync(
+            new DateTime(2026, 5, 1), new DateTime(2026, 5, 31));
+
+        result.Should().BeEmpty();
+    }
+
+    /// <summary>
+    /// 払戻台帳の形から 1 か所だけ外れた行は、従来どおり集計すること。
+    /// </summary>
+    /// <remarks>
+    /// 判定の各条件が実際に効いていること（どれか 1 つを外した実装で赤になること）を表明する。
+    /// 職員を特定できない通常の利用（過去のインポート・職員の氏名が空の行など）は、
+    /// 払い戻しではないので従来どおり「（職員名なし）」へ積まれなければならない。
+    /// </remarks>
+    [Theory]
+    [InlineData("払戻済でないカード", false, null, null, 0, 0, "（職員名なし）の利用行")]
+    [InlineData("残額が 0 でない", true, null, null, 0, 500, "職員を特定できない払い戻し前の利用")]
+    [InlineData("受入がある", true, null, null, 1000, 0, "ちょうど使い切ったチャージ混在行")]
+    [InlineData("貸出者 IDm がある", true, StaffA, null, 0, 0, "残高を使い切った利用")]
+    [InlineData("氏名がある", true, null, "旧 職員", 0, 0, "lender_idm を持たない過去のインポート行")]
+    public async Task GetMonthlyUsageByLenderAsync_払戻台帳の形から外れた行は従来どおり集計すること(
+        string deviation, bool refundCard, string lenderIdm, string staffName, int income, int balance, string meaning)
+    {
+        await SeedMastersAsync();
+        if (refundCard)
+        {
+            // 払戻台帳そのものは別に置き、カードは払戻済にする（判定の EXISTS が成立する状態）
+            await RefundCardAsync(CardA, new DateTime(2026, 5, 25), refundAmount: 300);
+        }
+
+        await InsertLedgerAsync(CardA, new DateTime(2026, 5, 10), expense: 210, income: income, balance: balance,
+            lenderIdm: lenderIdm, staffName: staffName);
+
+        var result = await _ledgerRepository.GetMonthlyUsageByLenderAsync(
+            new DateTime(2026, 5, 1), new DateTime(2026, 5, 31));
+
+        result.Sum(r => r.TotalExpense).Should().Be(210, $"{deviation}行（{meaning}）は払い戻しではないため");
+    }
+
+    [Fact]
+    public async Task AdminDashboardService_職員名なし系列には払戻額を積まず職員を特定できない利用だけを積むこと()
+    {
+        // 系列名の解決（ResolveSeriesName）まで通さないと「（職員名なし）」の中身を表明できないため、
+        // サービスを実 DB に接続する（testing.md「サービスをまたぐ不変条件は、実際に接続して表明する」）
+        await SeedMastersAsync();
+        await InsertLedgerAsync(CardA, new DateTime(2026, 5, 10), expense: 210, balance: 4790);
+        await InsertLedgerAsync(CardA, new DateTime(2026, 5, 12), expense: 330, balance: 4460,
+            lenderIdm: null, staffName: null);
+        await RefundCardAsync(CardA, new DateTime(2026, 5, 20, 14, 30, 0), refundAmount: 4460);
+
+        var service = new AdminDashboardService(
+            _cardRepository, _ledgerRepository, _staffRepository,
+            new Mock<ISettingsRepository>().Object, new Mock<IReportExportStatusService>().Object);
+
+        var analytics = await service.GetAnalyticsAsync(
+            new DateTime(2026, 5, 1), new DateTime(2026, 5, 31), new DateTime(2026, 6, 1));
+
+        analytics.UsageSeries.Select(s => (s.Name, s.TotalExpense)).Should().BeEquivalentTo(new[]
+        {
+            ("福岡 太郎", 210),
+            (AdminDashboardService.UnknownStaffName, 330)
+        });
+    }
+
+    #endregion
+
     #region GetMonthEndBalancesByCardAsync
 
     [Fact]
