@@ -585,6 +585,144 @@ namespace ICCardManager.Services
         }
 
         /// <summary>
+        /// ICカード登録のログを既存トランザクションで記録する (Issue #2156)。
+        /// </summary>
+        /// <remarks>
+        /// カードの登録（<c>ic_card</c> への INSERT）と同じトランザクションで書く
+        /// （<c>CardManagementService.RegisterAsync</c>）。別々に確定させると、監査ログの書き込みだけが
+        /// 失敗したときに「誰が登録したか分からない登録」が残る。以下のカード・職員の tx 版も同じ理由。
+        /// </remarks>
+        public async Task LogCardInsertAsync(IcCard card, SQLiteTransaction transaction)
+        {
+            var (idm, name) = ResolveOperator();
+            await _operationLogRepository.InsertAsync(new OperationLog
+            {
+                Timestamp = DateTime.Now,
+                OperatorIdm = idm,
+                OperatorName = name,
+                TargetTable = Tables.IcCard,
+                TargetId = card.CardIdm,
+                Action = Actions.Insert,
+                BeforeData = null,
+                AfterData = SerializeToJson(card)
+            }, transaction).ConfigureAwait(false);
+        }
+
+        /// <summary>
+        /// ICカード削除のログを既存トランザクションで記録する (Issue #2156)。
+        /// </summary>
+        public async Task LogCardDeleteAsync(IcCard card, SQLiteTransaction transaction)
+        {
+            var (idm, name) = ResolveOperator();
+            await _operationLogRepository.InsertAsync(new OperationLog
+            {
+                Timestamp = DateTime.Now,
+                OperatorIdm = idm,
+                OperatorName = name,
+                TargetTable = Tables.IcCard,
+                TargetId = card.CardIdm,
+                Action = Actions.Delete,
+                BeforeData = SerializeToJson(card),
+                AfterData = null
+            }, transaction).ConfigureAwait(false);
+        }
+
+        /// <summary>
+        /// ICカード復元のログを既存トランザクションで記録する (Issue #2156)。
+        /// </summary>
+        public async Task LogCardRestoreAsync(IcCard card, SQLiteTransaction transaction)
+        {
+            var (idm, name) = ResolveOperator();
+            await _operationLogRepository.InsertAsync(new OperationLog
+            {
+                Timestamp = DateTime.Now,
+                OperatorIdm = idm,
+                OperatorName = name,
+                TargetTable = Tables.IcCard,
+                TargetId = card.CardIdm,
+                Action = Actions.Restore,
+                BeforeData = null,
+                AfterData = SerializeToJson(card)
+            }, transaction).ConfigureAwait(false);
+        }
+
+        /// <summary>
+        /// 職員登録のログを既存トランザクションで記録する (Issue #2156)。
+        /// </summary>
+        public async Task LogStaffInsertAsync(Staff staff, SQLiteTransaction transaction)
+        {
+            var (idm, name) = ResolveOperator();
+            await _operationLogRepository.InsertAsync(new OperationLog
+            {
+                Timestamp = DateTime.Now,
+                OperatorIdm = idm,
+                OperatorName = name,
+                TargetTable = Tables.Staff,
+                TargetId = staff.StaffIdm,
+                Action = Actions.Insert,
+                BeforeData = null,
+                AfterData = SerializeToJson(staff)
+            }, transaction).ConfigureAwait(false);
+        }
+
+        /// <summary>
+        /// 職員更新のログを既存トランザクションで記録する (Issue #2156)。
+        /// </summary>
+        public async Task LogStaffUpdateAsync(Staff beforeStaff, Staff afterStaff, SQLiteTransaction transaction)
+        {
+            var (idm, name) = ResolveOperator();
+            await _operationLogRepository.InsertAsync(new OperationLog
+            {
+                Timestamp = DateTime.Now,
+                OperatorIdm = idm,
+                OperatorName = name,
+                TargetTable = Tables.Staff,
+                TargetId = afterStaff.StaffIdm,
+                Action = Actions.Update,
+                BeforeData = SerializeToJson(beforeStaff),
+                AfterData = SerializeToJson(afterStaff)
+            }, transaction).ConfigureAwait(false);
+        }
+
+        /// <summary>
+        /// 職員削除のログを既存トランザクションで記録する (Issue #2156)。
+        /// </summary>
+        public async Task LogStaffDeleteAsync(Staff staff, SQLiteTransaction transaction)
+        {
+            var (idm, name) = ResolveOperator();
+            await _operationLogRepository.InsertAsync(new OperationLog
+            {
+                Timestamp = DateTime.Now,
+                OperatorIdm = idm,
+                OperatorName = name,
+                TargetTable = Tables.Staff,
+                TargetId = staff.StaffIdm,
+                Action = Actions.Delete,
+                BeforeData = SerializeToJson(staff),
+                AfterData = null
+            }, transaction).ConfigureAwait(false);
+        }
+
+        /// <summary>
+        /// 職員復元のログを既存トランザクションで記録する (Issue #2156)。
+        /// </summary>
+        public async Task LogStaffRestoreAsync(Staff staff, SQLiteTransaction transaction)
+        {
+            var (idm, name) = ResolveOperator();
+            await _operationLogRepository.InsertAsync(new OperationLog
+            {
+                Timestamp = DateTime.Now,
+                OperatorIdm = idm,
+                OperatorName = name,
+                TargetTable = Tables.Staff,
+                TargetId = staff.StaffIdm,
+                Action = Actions.Restore,
+                BeforeData = null,
+                AfterData = SerializeToJson(staff)
+            }, transaction).ConfigureAwait(false);
+        }
+
+        /// <summary>
         /// 履歴削除のログを既存トランザクションで記録する (Issue #1458)。
         /// </summary>
         public async Task LogLedgerDeleteAsync(Ledger ledger, SQLiteTransaction transaction)

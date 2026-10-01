@@ -1,10 +1,13 @@
+using System;
 using CommunityToolkit.Mvvm.Messaging;
 using FluentAssertions;
 using ICCardManager.Common.Messages;
+using ICCardManager.Data;
 using ICCardManager.Data.Repositories;
 using ICCardManager.Infrastructure.CardReader;
 using ICCardManager.Services;
 using ICCardManager.ViewModels;
+using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using Xunit;
 using IOperationLogRepository = ICCardManager.Data.Repositories.IOperationLogRepository;
@@ -14,7 +17,7 @@ namespace ICCardManager.Tests.ViewModels;
 /// <summary>
 /// StaffManageViewModelのメッセージング機能テスト（Issue #852）
 /// </summary>
-public class StaffManageViewModelMessagingTests
+public class StaffManageViewModelMessagingTests : IDisposable
 {
     private readonly Mock<IStaffRepository> _staffRepositoryMock;
     private readonly Mock<ICardReader> _cardReaderMock;
@@ -23,6 +26,7 @@ public class StaffManageViewModelMessagingTests
     private readonly Mock<IDialogService> _dialogServiceMock;
     private readonly Mock<IStaffAuthService> _staffAuthServiceMock;
     private readonly WeakReferenceMessenger _messenger;
+    private readonly DbContext _dbContext;
     private readonly StaffManageViewModel _viewModel;
 
     public StaffManageViewModelMessagingTests()
@@ -37,16 +41,26 @@ public class StaffManageViewModelMessagingTests
         _operationLoggerMock = new Mock<OperationLogger>(operationLogRepositoryMock.Object, Mock.Of<ICurrentOperatorContext>());
 
         _messenger = new WeakReferenceMessenger();
+        _dbContext = new DbContext(":memory:");
+        _dbContext.InitializeDatabase();
 
         _viewModel = new StaffManageViewModel(
             _staffRepositoryMock.Object,
             _cardReaderMock.Object,
             _validationServiceMock.Object,
-            _operationLoggerMock.Object,
+            new StaffManagementService(
+                _dbContext, _staffRepositoryMock.Object, _operationLoggerMock.Object,
+                NullLogger<StaffManagementService>.Instance),
             _dialogServiceMock.Object,
             _staffAuthServiceMock.Object,
             _messenger,
             new ICCardManager.Tests.Infrastructure.Timing.RecordingDispatcherService());
+    }
+
+    public void Dispose()
+    {
+        _dbContext.Dispose();
+        GC.SuppressFinalize(this);
     }
 
     /// <summary>

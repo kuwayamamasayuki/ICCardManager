@@ -70,6 +70,16 @@ namespace ICCardManager.Data.Repositories
         Task<bool> DeleteAsync(string staffIdm);
 
         /// <summary>
+        /// 職員を論理削除（トランザクション対応、Issue #2156）
+        /// </summary>
+        /// <remarks>
+        /// 論理削除と監査ログを 1 つのトランザクションで確定させるために使う
+        /// （<c>StaffManagementService.DeleteAsync</c>）。キャッシュは破棄しない
+        /// （コミット／ロールバックの後に呼び出し元が破棄する）。
+        /// </remarks>
+        Task<bool> DeleteAsync(string staffIdm, SQLiteTransaction transaction);
+
+        /// <summary>
         /// 論理削除された職員を復元
         /// </summary>
         /// <param name="staffIdm">職員証IDm</param>

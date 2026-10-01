@@ -71,7 +71,9 @@ public class CardManageViewModelMessagingTests : IDisposable
             _ledgerRepositoryMock.Object,
             _cardReaderMock.Object,
             _validationServiceMock.Object,
-            _operationLoggerMock.Object,
+            new CardManagementService(
+                _dbContext, _cardRepositoryMock.Object, _operationLoggerMock.Object,
+                NullLogger<CardManagementService>.Instance),
             _dialogServiceMock.Object,
             _staffAuthServiceMock.Object,
             _lendingService,

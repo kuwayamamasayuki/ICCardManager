@@ -46,6 +46,11 @@ public class CardManageViewModelTests : IDisposable
     private readonly Mock<IDialogService> _dialogServiceMock;
     private readonly Mock<IStaffAuthService> _staffAuthServiceMock;
     private readonly LendingService _lendingService;
+    /// <summary>
+    /// Issue #2156: 登録・更新・削除・復元は <see cref="CardManagementService"/> が
+    /// トランザクションを開いて行う（リポジトリはモック、トランザクションはインメモリ DB の実物）。
+    /// </summary>
+    private readonly CardManagementService _cardManagementService;
     private readonly DbContext _dbContext;
     private readonly CardLockManager _lockManager;
     /// <summary>
@@ -101,6 +106,9 @@ public class CardManageViewModelTests : IDisposable
             _lockManager,
             Options.Create(new AppOptions()),
             NullLogger<LendingService>.Instance);
+        _cardManagementService = new CardManagementService(
+            _dbContext, _cardRepositoryMock.Object, _operationLoggerMock.Object,
+            NullLogger<CardManagementService>.Instance);
 
         // バリデーションはデフォルトで成功を返す
         _validationServiceMock.Setup(v => v.ValidateCardIdm(It.IsAny<string>())).Returns(ValidationResult.Success());
@@ -133,7 +141,7 @@ public class CardManageViewModelTests : IDisposable
             _ledgerRepositoryMock.Object,
             _cardReaderMock.Object,
             _validationServiceMock.Object,
-            _operationLoggerMock.Object,
+            _cardManagementService,
             _dialogServiceMock.Object,
             _staffAuthServiceMock.Object,
             _lendingService,
@@ -383,7 +391,7 @@ public class CardManageViewModelTests : IDisposable
         _viewModel.EditNote = "新規カード";
 
         _cardRepositoryMock.Setup(r => r.GetByIdmAsync("0102030405060708", true)).ReturnsAsync((IcCard?)null);
-        _cardRepositoryMock.Setup(r => r.InsertAsync(It.IsAny<IcCard>())).ReturnsAsync(true);
+        _cardRepositoryMock.Setup(r => r.InsertAsync(It.IsAny<IcCard>(), It.IsAny<SQLiteTransaction>())).ReturnsAsync(true);
         _cardRepositoryMock.Setup(r => r.GetAllAsync()).ReturnsAsync(new List<IcCard>());
 
         // Act
@@ -395,7 +403,7 @@ public class CardManageViewModelTests : IDisposable
             c.CardType == "はやかけん" &&
             c.CardNumber == "H-001" &&
             c.Note == "新規カード"
-        )), Times.Once);
+        ), It.IsAny<SQLiteTransaction>()), Times.Once);
         _viewModel.IsEditing.Should().BeFalse(); // CancelEdit()で編集モード終了
     }
 
@@ -427,7 +435,7 @@ public class CardManageViewModelTests : IDisposable
         _viewModel.EditCardNumber = "H-001";
 
         _cardRepositoryMock.Setup(r => r.GetByIdmAsync("0102030405060708", true)).ReturnsAsync((IcCard?)null);
-        _cardRepositoryMock.Setup(r => r.InsertAsync(It.IsAny<IcCard>()))
+        _cardRepositoryMock.Setup(r => r.InsertAsync(It.IsAny<IcCard>(), It.IsAny<SQLiteTransaction>()))
             .ThrowsAsync(new System.Data.SQLite.SQLiteException(
                 System.Data.SQLite.SQLiteErrorCode.Busy, "database is locked"));
 
@@ -462,7 +470,7 @@ public class CardManageViewModelTests : IDisposable
         _viewModel.EditCardNumber = "H-001";
 
         _cardRepositoryMock.Setup(r => r.GetByIdmAsync("0102030405060708", true)).ReturnsAsync((IcCard?)null);
-        _cardRepositoryMock.Setup(r => r.InsertAsync(It.IsAny<IcCard>()))
+        _cardRepositoryMock.Setup(r => r.InsertAsync(It.IsAny<IcCard>(), It.IsAny<SQLiteTransaction>()))
             .ThrowsAsync(new System.Data.SQLite.SQLiteException(
                 System.Data.SQLite.SQLiteErrorCode.ReadOnly, "attempt to write a readonly database"));
 
@@ -494,7 +502,7 @@ public class CardManageViewModelTests : IDisposable
         // Assert
         _viewModel.StatusMessage.Should().Contain("既に登録");
         _viewModel.StatusMessage.Should().Contain("H-999");  // 管理番号が表示されること
-        _cardRepositoryMock.Verify(r => r.InsertAsync(It.IsAny<IcCard>()), Times.Never);
+        _cardRepositoryMock.Verify(r => r.InsertAsync(It.IsAny<IcCard>(), It.IsAny<SQLiteTransaction>()), Times.Never);
     }
 
     /// <summary>
@@ -517,7 +525,7 @@ public class CardManageViewModelTests : IDisposable
 
         // Assert
         _viewModel.StatusMessage.Should().Contain("IDm");
-        _cardRepositoryMock.Verify(r => r.InsertAsync(It.IsAny<IcCard>()), Times.Never);
+        _cardRepositoryMock.Verify(r => r.InsertAsync(It.IsAny<IcCard>(), It.IsAny<SQLiteTransaction>()), Times.Never);
     }
 
     /// <summary>
@@ -540,7 +548,7 @@ public class CardManageViewModelTests : IDisposable
 
         // Assert
         _viewModel.StatusMessage.Should().Contain("種別");
-        _cardRepositoryMock.Verify(r => r.InsertAsync(It.IsAny<IcCard>()), Times.Never);
+        _cardRepositoryMock.Verify(r => r.InsertAsync(It.IsAny<IcCard>(), It.IsAny<SQLiteTransaction>()), Times.Never);
     }
 
     /// <summary>
@@ -557,14 +565,14 @@ public class CardManageViewModelTests : IDisposable
 
         _cardRepositoryMock.Setup(r => r.GetByIdmAsync("0102030405060708", true)).ReturnsAsync((IcCard?)null);
         _cardRepositoryMock.Setup(r => r.GetNextCardNumberAsync("はやかけん")).ReturnsAsync("H-005");
-        _cardRepositoryMock.Setup(r => r.InsertAsync(It.IsAny<IcCard>())).ReturnsAsync(true);
+        _cardRepositoryMock.Setup(r => r.InsertAsync(It.IsAny<IcCard>(), It.IsAny<SQLiteTransaction>())).ReturnsAsync(true);
         _cardRepositoryMock.Setup(r => r.GetAllAsync()).ReturnsAsync(new List<IcCard>());
 
         // Act
         await _viewModel.SaveAsync();
 
         // Assert
-        _cardRepositoryMock.Verify(r => r.InsertAsync(It.Is<IcCard>(c => c.CardNumber == "H-005")), Times.Once);
+        _cardRepositoryMock.Verify(r => r.InsertAsync(It.Is<IcCard>(c => c.CardNumber == "H-005"), It.IsAny<SQLiteTransaction>()), Times.Once);
     }
 
     /// <summary>
@@ -602,7 +610,7 @@ public class CardManageViewModelTests : IDisposable
             LastLentAt = DateTime.Now,
             LastLentStaff = "staff123"
         });
-        _cardRepositoryMock.Setup(r => r.UpdateAsync(It.IsAny<IcCard>())).ReturnsAsync(true);
+        _cardRepositoryMock.Setup(r => r.UpdateAsync(It.IsAny<IcCard>(), It.IsAny<SQLiteTransaction>())).ReturnsAsync(true);
         _cardRepositoryMock.Setup(r => r.GetAllAsync()).ReturnsAsync(new List<IcCard>());
 
         // Act
@@ -612,7 +620,7 @@ public class CardManageViewModelTests : IDisposable
         _cardRepositoryMock.Verify(r => r.UpdateAsync(It.Is<IcCard>(c =>
             c.Note == "更新後のメモ" &&
             c.IsLent == true  // 貸出状態は維持される
-        )), Times.Once);
+        ), It.IsAny<SQLiteTransaction>()), Times.Once);
         _viewModel.IsEditing.Should().BeFalse(); // CancelEdit()で編集モード終了
     }
 
@@ -655,7 +663,7 @@ public class CardManageViewModelTests : IDisposable
             CardType = "nimoca",
             CardNumber = "N-002"
         });
-        _cardRepositoryMock.Setup(r => r.UpdateAsync(It.IsAny<IcCard>()))
+        _cardRepositoryMock.Setup(r => r.UpdateAsync(It.IsAny<IcCard>(), It.IsAny<SQLiteTransaction>()))
             .ThrowsAsync(new DuplicateCardNumberException(
                 "nimoca", "N-001", new InvalidOperationException("UNIQUE constraint failed")));
 
@@ -730,7 +738,7 @@ public class CardManageViewModelTests : IDisposable
             CarryoverExpenseTotal = 95000,
             CarryoverFiscalYear = 2025
         });
-        _cardRepositoryMock.Setup(r => r.UpdateAsync(It.IsAny<IcCard>())).ReturnsAsync(true);
+        _cardRepositoryMock.Setup(r => r.UpdateAsync(It.IsAny<IcCard>(), It.IsAny<SQLiteTransaction>())).ReturnsAsync(true);
         _cardRepositoryMock.Setup(r => r.GetAllAsync()).ReturnsAsync(new List<IcCard>());
 
         // Act
@@ -748,7 +756,7 @@ public class CardManageViewModelTests : IDisposable
             c.IsLent == true &&
             c.LastLentAt == lentAt &&
             c.LastLentStaff == "STAFF00000000001"
-        )), Times.Once);
+        ), It.IsAny<SQLiteTransaction>()), Times.Once);
     }
 
     #endregion
@@ -769,7 +777,7 @@ public class CardManageViewModelTests : IDisposable
         _viewModel.EditCardNumber = "H-001";
 
         _cardRepositoryMock.Setup(r => r.GetByIdmAsync(idm, true)).ReturnsAsync((IcCard?)null);
-        _cardRepositoryMock.Setup(r => r.InsertAsync(It.IsAny<IcCard>())).ReturnsAsync(true);
+        _cardRepositoryMock.Setup(r => r.InsertAsync(It.IsAny<IcCard>(), It.IsAny<SQLiteTransaction>())).ReturnsAsync(true);
         _cardRepositoryMock.Setup(r => r.GetAllAsync()).ReturnsAsync(new List<IcCard>
         {
             new() { CardIdm = idm, CardType = "はやかけん", CardNumber = "H-001" }
@@ -805,7 +813,7 @@ public class CardManageViewModelTests : IDisposable
         // 対象行が存在する（実 DB で成立する）状態を仕掛ける
         _cardRepositoryMock.Setup(r => r.GetByIdmAsync(idm, false))
             .ReturnsAsync(new IcCard { CardIdm = idm, CardType = "はやかけん", CardNumber = "H-001" });
-        _cardRepositoryMock.Setup(r => r.UpdateAsync(It.IsAny<IcCard>())).ReturnsAsync(true);
+        _cardRepositoryMock.Setup(r => r.UpdateAsync(It.IsAny<IcCard>(), It.IsAny<SQLiteTransaction>())).ReturnsAsync(true);
         _cardRepositoryMock.Setup(r => r.GetAllAsync()).ReturnsAsync(new List<IcCard>
         {
             new() { CardIdm = idm, CardType = "はやかけん", CardNumber = "H-001" }
@@ -827,7 +835,7 @@ public class CardManageViewModelTests : IDisposable
         // Arrange
         var idm = "0102030405060708";
         _cardRepositoryMock.Setup(r => r.GetByIdmAsync(idm, true)).ReturnsAsync((IcCard?)null);
-        _cardRepositoryMock.Setup(r => r.InsertAsync(It.IsAny<IcCard>())).ReturnsAsync(true);
+        _cardRepositoryMock.Setup(r => r.InsertAsync(It.IsAny<IcCard>(), It.IsAny<SQLiteTransaction>())).ReturnsAsync(true);
         _cardRepositoryMock.Setup(r => r.GetAllAsync()).ReturnsAsync(new List<IcCard>
         {
             new() { CardIdm = idm, CardType = "はやかけん", CardNumber = "H-001" }
@@ -861,7 +869,7 @@ public class CardManageViewModelTests : IDisposable
         // 対象行が存在する（実 DB で成立する）状態を仕掛ける
         _cardRepositoryMock.Setup(r => r.GetByIdmAsync(idm, false))
             .ReturnsAsync(new IcCard { CardIdm = idm, CardType = "はやかけん", CardNumber = "H-001" });
-        _cardRepositoryMock.Setup(r => r.UpdateAsync(It.IsAny<IcCard>())).ReturnsAsync(true);
+        _cardRepositoryMock.Setup(r => r.UpdateAsync(It.IsAny<IcCard>(), It.IsAny<SQLiteTransaction>())).ReturnsAsync(true);
         await _viewModel.SaveAsync();
 
         // Assert: 2回目でもPropertyChangedが発火していること
@@ -897,14 +905,14 @@ public class CardManageViewModelTests : IDisposable
         // 対象行が存在する（実 DB で成立する）状態を仕掛ける
         _cardRepositoryMock.Setup(r => r.GetByIdmAsync("0102030405060708", false))
             .ReturnsAsync(new IcCard { CardIdm = "0102030405060708", CardType = "はやかけん", CardNumber = "H-001" });
-        _cardRepositoryMock.Setup(r => r.DeleteAsync("0102030405060708")).ReturnsAsync(ICCardManager.Data.Repositories.CardOperationResult.Success);
+        _cardRepositoryMock.Setup(r => r.DeleteAsync("0102030405060708", It.IsAny<SQLiteTransaction>())).ReturnsAsync(ICCardManager.Data.Repositories.CardOperationResult.Success);
         _cardRepositoryMock.Setup(r => r.GetAllAsync()).ReturnsAsync(new List<IcCard>());
 
         // Act
         await _viewModel.DeleteAsync();
 
         // Assert - リポジトリが正しく呼ばれたことを検証
-        _cardRepositoryMock.Verify(r => r.DeleteAsync("0102030405060708"), Times.Once);
+        _cardRepositoryMock.Verify(r => r.DeleteAsync("0102030405060708", It.IsAny<SQLiteTransaction>()), Times.Once);
         // 削除後にLoadCardsAsyncが呼ばれて一覧が更新される
         _cardRepositoryMock.Verify(r => r.GetAllAsync(), Times.Once);
     }
@@ -932,7 +940,7 @@ public class CardManageViewModelTests : IDisposable
         _dialogServiceMock.Verify(d => d.ShowError(
             It.Is<string>(s => s.Contains("貸出中")),
             It.IsAny<string>()), Times.Once);
-        _cardRepositoryMock.Verify(r => r.DeleteAsync(It.IsAny<string>()), Times.Never);
+        _cardRepositoryMock.Verify(r => r.DeleteAsync(It.IsAny<string>(), It.IsAny<SQLiteTransaction>()), Times.Never);
     }
 
     /// <summary>
@@ -948,7 +956,7 @@ public class CardManageViewModelTests : IDisposable
         await _viewModel.DeleteAsync();
 
         // Assert
-        _cardRepositoryMock.Verify(r => r.DeleteAsync(It.IsAny<string>()), Times.Never);
+        _cardRepositoryMock.Verify(r => r.DeleteAsync(It.IsAny<string>(), It.IsAny<SQLiteTransaction>()), Times.Never);
     }
 
     #endregion
@@ -1240,7 +1248,7 @@ public class CardManageViewModelTests : IDisposable
         var reReadBalance = 3210;
 
         _cardRepositoryMock.Setup(r => r.GetByIdmAsync(idm, true)).ReturnsAsync((IcCard?)null);
-        _cardRepositoryMock.Setup(r => r.InsertAsync(It.IsAny<IcCard>())).ReturnsAsync(true);
+        _cardRepositoryMock.Setup(r => r.InsertAsync(It.IsAny<IcCard>(), It.IsAny<SQLiteTransaction>())).ReturnsAsync(true);
         _cardReaderMock.Setup(r => r.ReadBalanceAsync(idm)).ReturnsAsync(reReadBalance);
 
         // SetPreReadBalanceを使用して事前読み取り残高を設定（MainViewModelからの呼び出しをシミュレート）
@@ -1277,7 +1285,7 @@ public class CardManageViewModelTests : IDisposable
         var balance = 3000;
 
         _cardRepositoryMock.Setup(r => r.GetByIdmAsync(idm, true)).ReturnsAsync((IcCard?)null);
-        _cardRepositoryMock.Setup(r => r.InsertAsync(It.IsAny<IcCard>())).ReturnsAsync(true);
+        _cardRepositoryMock.Setup(r => r.InsertAsync(It.IsAny<IcCard>(), It.IsAny<SQLiteTransaction>())).ReturnsAsync(true);
         _cardReaderMock.Setup(r => r.ReadBalanceAsync(idm)).ReturnsAsync(balance);
 
         // 事前読み取り残高は設定しない（手動新規登録のフォールバックケース）
@@ -1313,7 +1321,7 @@ public class CardManageViewModelTests : IDisposable
         var idm = "0102030405060708";
 
         _cardRepositoryMock.Setup(r => r.GetByIdmAsync(idm, true)).ReturnsAsync((IcCard?)null);
-        _cardRepositoryMock.Setup(r => r.InsertAsync(It.IsAny<IcCard>())).ReturnsAsync(true);
+        _cardRepositoryMock.Setup(r => r.InsertAsync(It.IsAny<IcCard>(), It.IsAny<SQLiteTransaction>())).ReturnsAsync(true);
         _cardReaderMock.Setup(r => r.ReadBalanceAsync(idm)).ReturnsAsync((int?)null);  // 残高読み取り失敗
 
         _viewModel.StartNewCard();
@@ -1326,7 +1334,7 @@ public class CardManageViewModelTests : IDisposable
 
         // Assert
         // カード自体は登録される
-        _cardRepositoryMock.Verify(r => r.InsertAsync(It.IsAny<IcCard>()), Times.Once);
+        _cardRepositoryMock.Verify(r => r.InsertAsync(It.IsAny<IcCard>(), It.IsAny<SQLiteTransaction>()), Times.Once);
 
         // 残高が取得できないため新規購入レコードは作成されない
         _ledgerRepositoryMock.Verify(r => r.InsertAsync(It.Is<Ledger>(l =>
@@ -1460,7 +1468,7 @@ public class CardManageViewModelTests : IDisposable
         };
 
         _cardRepositoryMock.Setup(r => r.GetByIdmAsync(idm, true)).ReturnsAsync((IcCard?)null);
-        _cardRepositoryMock.Setup(r => r.InsertAsync(It.IsAny<IcCard>())).ReturnsAsync(true);
+        _cardRepositoryMock.Setup(r => r.InsertAsync(It.IsAny<IcCard>(), It.IsAny<SQLiteTransaction>())).ReturnsAsync(true);
         // 履歴の取り込みを最後まで通す（既定値の null では重複判定で止まり、利用行が記録されない）
         _ledgerRepositoryMock.Setup(r => r.GetExistingDetailKeysAsync(idm, It.IsAny<DateTime>()))
             .ReturnsAsync(new HashSet<(DateTime?, int?, bool)>());
@@ -1499,7 +1507,7 @@ public class CardManageViewModelTests : IDisposable
         var balance = 5000;
 
         _cardRepositoryMock.Setup(r => r.GetByIdmAsync(idm, true)).ReturnsAsync((IcCard?)null);
-        _cardRepositoryMock.Setup(r => r.InsertAsync(It.IsAny<IcCard>())).ReturnsAsync(true);
+        _cardRepositoryMock.Setup(r => r.InsertAsync(It.IsAny<IcCard>(), It.IsAny<SQLiteTransaction>())).ReturnsAsync(true);
         _cardReaderMock.Setup(r => r.ReadBalanceAsync(idm)).ReturnsAsync(balance);
         _cardReaderMock.Setup(r => r.ReadHistoryAsync(idm))
             .ReturnsAsync(new List<LedgerDetail>());
@@ -1536,7 +1544,7 @@ public class CardManageViewModelTests : IDisposable
         var userSpecifiedBalance = 5000; // ユーザーが入力した月初め残高
 
         _cardRepositoryMock.Setup(r => r.GetByIdmAsync(idm, true)).ReturnsAsync((IcCard?)null);
-        _cardRepositoryMock.Setup(r => r.InsertAsync(It.IsAny<IcCard>())).ReturnsAsync(true);
+        _cardRepositoryMock.Setup(r => r.InsertAsync(It.IsAny<IcCard>(), It.IsAny<SQLiteTransaction>())).ReturnsAsync(true);
 
         // 繰越モード + ユーザー指定の繰越額
         _dialogServiceMock.Setup(d => d.ShowCardRegistrationModeDialog(It.IsAny<int?>()))
@@ -1577,7 +1585,7 @@ public class CardManageViewModelTests : IDisposable
         var carryoverBalance = 6000;
 
         _cardRepositoryMock.Setup(r => r.GetByIdmAsync(idm, true)).ReturnsAsync((IcCard?)null);
-        _cardRepositoryMock.Setup(r => r.InsertAsync(It.IsAny<IcCard>())).ReturnsAsync(true);
+        _cardRepositoryMock.Setup(r => r.InsertAsync(It.IsAny<IcCard>(), It.IsAny<SQLiteTransaction>())).ReturnsAsync(true);
 
         // 繰越モード、3月を選択
         _dialogServiceMock.Setup(d => d.ShowCardRegistrationModeDialog(It.IsAny<int?>()))
@@ -1618,7 +1626,7 @@ public class CardManageViewModelTests : IDisposable
         var preReadBalance = 4780;
 
         _cardRepositoryMock.Setup(r => r.GetByIdmAsync(idm, true)).ReturnsAsync((IcCard?)null);
-        _cardRepositoryMock.Setup(r => r.InsertAsync(It.IsAny<IcCard>())).ReturnsAsync(true);
+        _cardRepositoryMock.Setup(r => r.InsertAsync(It.IsAny<IcCard>(), It.IsAny<SQLiteTransaction>())).ReturnsAsync(true);
 
         // 繰越モード、CarryoverBalance は null（未指定）
         _dialogServiceMock.Setup(d => d.ShowCardRegistrationModeDialog(It.IsAny<int?>()))
@@ -1659,7 +1667,7 @@ public class CardManageViewModelTests : IDisposable
         var preReadBalance = 3500;
 
         _cardRepositoryMock.Setup(r => r.GetByIdmAsync(idm, true)).ReturnsAsync((IcCard?)null);
-        _cardRepositoryMock.Setup(r => r.InsertAsync(It.IsAny<IcCard>())).ReturnsAsync(true);
+        _cardRepositoryMock.Setup(r => r.InsertAsync(It.IsAny<IcCard>(), It.IsAny<SQLiteTransaction>())).ReturnsAsync(true);
 
         _viewModel.SetPreReadBalance(preReadBalance);
 
@@ -1712,7 +1720,7 @@ public class CardManageViewModelTests : IDisposable
         };
 
         _cardRepositoryMock.Setup(r => r.GetByIdmAsync(idm, true)).ReturnsAsync((IcCard?)null);
-        _cardRepositoryMock.Setup(r => r.InsertAsync(It.IsAny<IcCard>())).ReturnsAsync(true);
+        _cardRepositoryMock.Setup(r => r.InsertAsync(It.IsAny<IcCard>(), It.IsAny<SQLiteTransaction>())).ReturnsAsync(true);
         // 履歴の取り込みを最後まで通す（既定値の null では重複判定で止まり、利用行が記録されない）
         _ledgerRepositoryMock.Setup(r => r.GetExistingDetailKeysAsync(idm, It.IsAny<DateTime>()))
             .ReturnsAsync(new HashSet<(DateTime?, int?, bool)>());
@@ -1860,7 +1868,7 @@ public class CardManageViewModelTests : IDisposable
             _ledgerRepositoryMock.Object,
             _cardReaderMock.Object,
             _validationServiceMock.Object,
-            _operationLoggerMock.Object,
+            _cardManagementService,
             _dialogServiceMock.Object,
             _staffAuthServiceMock.Object,
             _lendingService,
@@ -1872,8 +1880,8 @@ public class CardManageViewModelTests : IDisposable
 
         IcCard? insertedCard = null;
         _cardRepositoryMock.Setup(r => r.GetByIdmAsync(idm, true)).ReturnsAsync((IcCard?)null);
-        _cardRepositoryMock.Setup(r => r.InsertAsync(It.IsAny<IcCard>()))
-            .Callback<IcCard>(c => insertedCard = c)
+        _cardRepositoryMock.Setup(r => r.InsertAsync(It.IsAny<IcCard>(), It.IsAny<SQLiteTransaction>()))
+            .Callback<IcCard, SQLiteTransaction>((c, _) => insertedCard = c)
             .ReturnsAsync(true);
         _dialogServiceMock.Setup(d => d.ShowCardRegistrationModeDialog(It.IsAny<int?>()))
             .Returns(new ICCardManager.Views.Dialogs.CardRegistrationModeResult
@@ -1945,7 +1953,7 @@ public class CardManageViewModelTests : IDisposable
         };
 
         _cardRepositoryMock.Setup(r => r.GetByIdmAsync(idm, true)).ReturnsAsync((IcCard?)null);
-        _cardRepositoryMock.Setup(r => r.InsertAsync(It.IsAny<IcCard>())).ReturnsAsync(true);
+        _cardRepositoryMock.Setup(r => r.InsertAsync(It.IsAny<IcCard>(), It.IsAny<SQLiteTransaction>())).ReturnsAsync(true);
 
         _viewModel.SetPreReadBalance(4790);
         _viewModel.SetPreReadHistory(preReadHistory);
@@ -2192,7 +2200,7 @@ public class CardManageViewModelTests : IDisposable
     private void ArrangeNewCardWithoutHistory(string idm, string cardNumber, int balance = 5000)
     {
         _cardRepositoryMock.Setup(r => r.GetByIdmAsync(idm, true)).ReturnsAsync((IcCard?)null);
-        _cardRepositoryMock.Setup(r => r.InsertAsync(It.IsAny<IcCard>())).ReturnsAsync(true);
+        _cardRepositoryMock.Setup(r => r.InsertAsync(It.IsAny<IcCard>(), It.IsAny<SQLiteTransaction>())).ReturnsAsync(true);
         _cardReaderMock.Setup(r => r.ReadHistoryAsync(idm)).ReturnsAsync(new List<LedgerDetail>());
 
         _viewModel.SetPreReadBalance(balance);
@@ -2356,7 +2364,7 @@ public class CardManageViewModelTests : IDisposable
         // Arrange
         var idm = "0102030405060708";
         _cardRepositoryMock.Setup(r => r.GetByIdmAsync(idm, true)).ReturnsAsync((IcCard?)null);
-        _cardRepositoryMock.Setup(r => r.InsertAsync(It.IsAny<IcCard>())).ReturnsAsync(true);
+        _cardRepositoryMock.Setup(r => r.InsertAsync(It.IsAny<IcCard>(), It.IsAny<SQLiteTransaction>())).ReturnsAsync(true);
         _cardReaderMock.Setup(r => r.ReadHistoryAsync(idm)).ReturnsAsync(new List<LedgerDetail>());
         _cardReaderMock.Setup(r => r.ReadBalanceAsync(idm)).ReturnsAsync((int?)null);
 
@@ -2419,7 +2427,7 @@ public class CardManageViewModelTests : IDisposable
             CardNumber = "H-001"
         });
         // 他PCがこのカードを論理削除した → WHERE is_deleted = 0 に 0 行 → false
-        _cardRepositoryMock.Setup(r => r.UpdateAsync(It.IsAny<IcCard>())).ReturnsAsync(false);
+        _cardRepositoryMock.Setup(r => r.UpdateAsync(It.IsAny<IcCard>(), It.IsAny<SQLiteTransaction>())).ReturnsAsync(false);
         _cardRepositoryMock.Setup(r => r.GetAllAsync()).ReturnsAsync(new List<IcCard>());
 
         // Act
@@ -2463,7 +2471,7 @@ public class CardManageViewModelTests : IDisposable
             IsDeleted = true
         });
         // 他PCが先に復元した → WHERE is_deleted = 1 に 0 行 → false
-        _cardRepositoryMock.Setup(r => r.RestoreAsync(idm)).ReturnsAsync(false);
+        _cardRepositoryMock.Setup(r => r.RestoreAsync(idm, It.IsAny<SQLiteTransaction>())).ReturnsAsync(false);
         _cardRepositoryMock.Setup(r => r.GetAllAsync()).ReturnsAsync(new List<IcCard>());
 
         _viewModel.StartNewCard();
@@ -2509,7 +2517,7 @@ public class CardManageViewModelTests : IDisposable
         _viewModel.EditCardNumber = "H-777";  // 番号を打ち直した直後に他PCが削除した
 
         _cardRepositoryMock.Setup(r => r.GetByIdmAsync(idm, false)).ReturnsAsync((IcCard?)null);
-        _cardRepositoryMock.Setup(r => r.UpdateAsync(It.IsAny<IcCard>())).ReturnsAsync(false);
+        _cardRepositoryMock.Setup(r => r.UpdateAsync(It.IsAny<IcCard>(), It.IsAny<SQLiteTransaction>())).ReturnsAsync(false);
         _cardRepositoryMock.Setup(r => r.GetAllAsync()).ReturnsAsync(new List<IcCard>());
 
         // Act
@@ -2560,7 +2568,7 @@ public class CardManageViewModelTests : IDisposable
             CardType = "はやかけん",
             CardNumber = "H-001"
         });
-        _cardRepositoryMock.Setup(r => r.UpdateAsync(It.IsAny<IcCard>())).ReturnsAsync(true);
+        _cardRepositoryMock.Setup(r => r.UpdateAsync(It.IsAny<IcCard>(), It.IsAny<SQLiteTransaction>())).ReturnsAsync(true);
         _cardRepositoryMock.Setup(r => r.GetAllAsync()).ReturnsAsync(new List<IcCard>());
 
         // Act
@@ -2592,7 +2600,7 @@ public class CardManageViewModelTests : IDisposable
         // 対象行が存在する（実 DB で成立する）状態を仕掛ける
         _cardRepositoryMock.Setup(r => r.GetByIdmAsync(idm, false))
             .ReturnsAsync(new IcCard { CardIdm = idm, CardType = "はやかけん", CardNumber = "H-001" });
-        _cardRepositoryMock.Setup(r => r.DeleteAsync(idm))
+        _cardRepositoryMock.Setup(r => r.DeleteAsync(idm, It.IsAny<SQLiteTransaction>()))
             .ReturnsAsync(ICCardManager.Data.Repositories.CardOperationResult.Success);
         _cardRepositoryMock.Setup(r => r.GetAllAsync()).ReturnsAsync(new List<IcCard>());
 
@@ -2619,7 +2627,7 @@ public class CardManageViewModelTests : IDisposable
             CardNumber = "H-001",
             IsDeleted = true
         });
-        _cardRepositoryMock.Setup(r => r.RestoreAsync(idm)).ReturnsAsync(true);
+        _cardRepositoryMock.Setup(r => r.RestoreAsync(idm, It.IsAny<SQLiteTransaction>())).ReturnsAsync(true);
         _cardRepositoryMock.Setup(r => r.GetByIdmAsync(idm, false)).ReturnsAsync(new IcCard
         {
             CardIdm = idm,
@@ -2714,16 +2722,16 @@ public class CardManageViewModelTests : IDisposable
         // 読み取り時点では他 PC が論理削除済み
         _cardRepositoryMock.Setup(r => r.GetByIdmAsync(idm, false)).ReturnsAsync((IcCard?)null);
         // その直後に他 PC が復元した → UPDATE は 1 行に一致して成功し得る
-        _cardRepositoryMock.Setup(r => r.UpdateAsync(It.IsAny<IcCard>())).ReturnsAsync(true);
+        _cardRepositoryMock.Setup(r => r.UpdateAsync(It.IsAny<IcCard>(), It.IsAny<SQLiteTransaction>())).ReturnsAsync(true);
         _cardRepositoryMock.Setup(r => r.GetAllAsync()).ReturnsAsync(new List<IcCard>());
 
         // Act
         await _viewModel.SaveAsync();
 
         // Assert - 監査ログを残せない更新は行わない
-        _cardRepositoryMock.Verify(r => r.UpdateAsync(It.IsAny<IcCard>()), Times.Never,
+        _cardRepositoryMock.Verify(r => r.UpdateAsync(It.IsAny<IcCard>(), It.IsAny<SQLiteTransaction>()), Times.Never,
             "更新前データを読めていない状態で書き込むと、変更が監査記録に残らない");
-        _operationLogRepositoryMock.Verify(r => r.InsertAsync(It.IsAny<OperationLog>()), Times.Never);
+        _operationLogRepositoryMock.Verify(r => r.InsertAsync(It.IsAny<OperationLog>(), It.IsAny<SQLiteTransaction>()), Times.Never);
 
         // 競合として案内し、一覧を再読込していること
         _viewModel.IsStatusError.Should().BeTrue();
@@ -2760,7 +2768,7 @@ public class CardManageViewModelTests : IDisposable
             CardNumber = "H-001",
             Note = "更新前のメモ"
         });
-        _cardRepositoryMock.Setup(r => r.UpdateAsync(It.IsAny<IcCard>())).ReturnsAsync(true);
+        _cardRepositoryMock.Setup(r => r.UpdateAsync(It.IsAny<IcCard>(), It.IsAny<SQLiteTransaction>())).ReturnsAsync(true);
         _cardRepositoryMock.Setup(r => r.GetAllAsync()).ReturnsAsync(new List<IcCard>());
 
         // Act
@@ -2772,7 +2780,7 @@ public class CardManageViewModelTests : IDisposable
             log.TargetId == idm &&
             log.Action == OperationLogger.Actions.Update &&
             log.BeforeData!.Contains("更新前のメモ") &&
-            log.AfterData!.Contains("更新後のメモ"))), Times.Once);
+            log.AfterData!.Contains("更新後のメモ")), It.IsAny<SQLiteTransaction>()), Times.Once);
     }
 
     /// <summary>
@@ -2819,7 +2827,7 @@ public class CardManageViewModelTests : IDisposable
         _ledgerRepositoryMock.Verify(r => r.InsertAsync(It.IsAny<Ledger>()), Times.Never,
             "払戻台帳だけが残る中途半端な状態を作らないこと");
         _ledgerRepositoryMock.Verify(r => r.InsertAsync(It.IsAny<Ledger>(), It.IsAny<SQLiteTransaction>()), Times.Never);
-        _operationLogRepositoryMock.Verify(r => r.InsertAsync(It.IsAny<OperationLog>()), Times.Never);
+        _operationLogRepositoryMock.Verify(r => r.InsertAsync(It.IsAny<OperationLog>(), It.IsAny<SQLiteTransaction>()), Times.Never);
 
         _viewModel.IsStatusError.Should().BeTrue();
         _viewModel.StatusMessage.Should().Contain("H-001");
@@ -2937,7 +2945,7 @@ public class CardManageViewModelTests : IDisposable
         // 読み取り時点では他 PC が論理削除済み
         _cardRepositoryMock.Setup(r => r.GetByIdmAsync(idm, false)).ReturnsAsync((IcCard?)null);
         // その直後に他 PC が復元した → 論理削除は 1 行に一致して成功し得る
-        _cardRepositoryMock.Setup(r => r.DeleteAsync(idm))
+        _cardRepositoryMock.Setup(r => r.DeleteAsync(idm, It.IsAny<SQLiteTransaction>()))
             .ReturnsAsync(ICCardManager.Data.Repositories.CardOperationResult.Success);
         _cardRepositoryMock.Setup(r => r.GetAllAsync()).ReturnsAsync(new List<IcCard>());
 
@@ -2945,9 +2953,9 @@ public class CardManageViewModelTests : IDisposable
         await _viewModel.DeleteAsync();
 
         // Assert
-        _cardRepositoryMock.Verify(r => r.DeleteAsync(idm), Times.Never,
+        _cardRepositoryMock.Verify(r => r.DeleteAsync(idm, It.IsAny<SQLiteTransaction>()), Times.Never,
             "削除前データを読めていない状態で削除すると、変更が監査記録に残らない");
-        _operationLogRepositoryMock.Verify(r => r.InsertAsync(It.IsAny<OperationLog>()), Times.Never);
+        _operationLogRepositoryMock.Verify(r => r.InsertAsync(It.IsAny<OperationLog>(), It.IsAny<SQLiteTransaction>()), Times.Never);
 
         // 一覧を再読込し、キャッシュも破棄していること（書き込みを通らないため #1759 の破棄が働かない）
         _cardRepositoryMock.Verify(r => r.InvalidateCache(), Times.Once);
@@ -2979,7 +2987,7 @@ public class CardManageViewModelTests : IDisposable
             CardType = "はやかけん",
             CardNumber = "H-001"
         });
-        _cardRepositoryMock.Setup(r => r.DeleteAsync(idm))
+        _cardRepositoryMock.Setup(r => r.DeleteAsync(idm, It.IsAny<SQLiteTransaction>()))
             .ReturnsAsync(ICCardManager.Data.Repositories.CardOperationResult.Success);
         _cardRepositoryMock.Setup(r => r.GetAllAsync()).ReturnsAsync(new List<IcCard>());
 
@@ -2990,19 +2998,25 @@ public class CardManageViewModelTests : IDisposable
         _operationLogRepositoryMock.Verify(r => r.InsertAsync(It.Is<OperationLog>(log =>
             log.TargetTable == OperationLogger.Tables.IcCard &&
             log.TargetId == idm &&
-            log.Action == OperationLogger.Actions.Delete)), Times.Once);
+            log.Action == OperationLogger.Actions.Delete), It.IsAny<SQLiteTransaction>()), Times.Once);
     }
 
     /// <summary>
-    /// Issue #1760: 復元の直後に他 PC がカードを削除しても、操作ログは残ること
+    /// Issue #2156: 復元の監査ログは、復元と同じトランザクションの中で復元前のデータから組み立てること
     /// </summary>
     /// <remarks>
-    /// <c>RestoreAsync</c> の成功後に行う再読取が null になるのは、その直後に
-    /// 他 PC がカードを論理削除した場合だけ。復元は既に確定しているため、
-    /// 再読取の失敗を理由に記録を落としてはならない（払い戻しと同じ判断）。
+    /// <para>
+    /// 以前（Issue #1760）は復元をコミットしてから読み直し、読み直しが null（直後に他 PC が削除）なら
+    /// 復元前のデータで補って記録していた。復元と監査ログを 1 トランザクションにしたことで、
+    /// 読み直しの窓そのものが無くなった。
+    /// </para>
+    /// <para>
+    /// 読み直しの結果に依存しないことを、読み直しが null を返す状態でも記録が残ることで表明する。
+    /// この操作が変えていない列（開始ページ番号）が既定値に落ちないこと（#1726 の虚偽の差分）も併せて固定する。
+    /// </para>
     /// </remarks>
     [Fact]
-    public async Task SaveAsync_WhenRestoredCardCannotBeReRead_ShouldStillWriteAuditLog()
+    public async Task SaveAsync_WhenRestoring_ShouldWriteAuditLogBuiltFromPreRestoreDataInSameTransaction()
     {
         // Arrange
         const string idm = "0102030405060708";
@@ -3014,14 +3028,17 @@ public class CardManageViewModelTests : IDisposable
             StartingPageNumber = 7,
             IsDeleted = true
         });
-        _cardRepositoryMock.Setup(r => r.RestoreAsync(idm)).ReturnsAsync(true);
-        // 復元の直後に他 PC が削除した → 再読取は null
+        SQLiteTransaction? restoreTransaction = null;
+        _cardRepositoryMock.Setup(r => r.RestoreAsync(idm, It.IsAny<SQLiteTransaction>()))
+            .Callback<string, SQLiteTransaction>((_, tx) => restoreTransaction = tx)
+            .ReturnsAsync(true);
         _cardRepositoryMock.Setup(r => r.GetByIdmAsync(idm, false)).ReturnsAsync((IcCard?)null);
         _cardRepositoryMock.Setup(r => r.GetAllAsync()).ReturnsAsync(new List<IcCard>());
 
         OperationLog? recorded = null;
-        _operationLogRepositoryMock.Setup(r => r.InsertAsync(It.IsAny<OperationLog>()))
-            .Callback<OperationLog>(log => recorded = log)
+        SQLiteTransaction? logTransaction = null;
+        _operationLogRepositoryMock.Setup(r => r.InsertAsync(It.IsAny<OperationLog>(), It.IsAny<SQLiteTransaction>()))
+            .Callback<OperationLog, SQLiteTransaction>((log, tx) => { recorded = log; logTransaction = tx; })
             .ReturnsAsync(1);
 
         _viewModel.StartNewCard();
@@ -3032,14 +3049,218 @@ public class CardManageViewModelTests : IDisposable
         await _viewModel.SaveAsync();
 
         // Assert
-        recorded.Should().NotBeNull("復元が確定した以上、監査記録を落としてはならない");
+        restoreTransaction.Should().NotBeNull();
+        logTransaction.Should().BeSameAs(restoreTransaction, "監査ログだけが別に確定すると、復元と記録が食い違い得る");
+        _cardRepositoryMock.Verify(r => r.RestoreAsync(It.IsAny<string>()), Times.Never);
+        _operationLogRepositoryMock.Verify(r => r.InsertAsync(It.IsAny<OperationLog>()), Times.Never);
+
+        recorded.Should().NotBeNull();
         recorded!.Action.Should().Be(OperationLogger.Actions.Restore);
         recorded.TargetId.Should().Be(idm);
-
         var after = JsonSerializer.Deserialize<IcCard>(recorded.AfterData!)!;
         after.IsDeleted.Should().BeFalse("この操作が変えたのは削除状態であること");
         after.DeletedAt.Should().BeNull();
         after.StartingPageNumber.Should().Be(7, "この操作が変えていない列は復元前の値を保つこと");
+    }
+
+    /// <summary>
+    /// Issue #2156: 新規登録はカードの INSERT と監査ログを同じ（非 null の）トランザクションで書くこと
+    /// </summary>
+    /// <remarks>
+    /// 修正前は INSERT を tx なしで確定させてから監査ログを別に書いていた。tx なしの旧オーバーロードを
+    /// 呼んでいないことも併せて表明する（testing.md #1745）。
+    /// </remarks>
+    [Fact]
+    public async Task SaveAsync_NewCard_ShouldWriteCardAndAuditLogInSameTransaction()
+    {
+        // Arrange
+        const string idm = "0102030405060708";
+        _viewModel.StartNewCard();
+        _viewModel.EditCardIdm = idm;
+        _viewModel.EditCardType = "はやかけん";
+        _viewModel.EditCardNumber = "H-001";
+
+        _cardRepositoryMock.Setup(r => r.GetByIdmAsync(idm, true)).ReturnsAsync((IcCard?)null);
+        SQLiteTransaction? insertTransaction = null;
+        _cardRepositoryMock.Setup(r => r.InsertAsync(It.IsAny<IcCard>(), It.IsAny<SQLiteTransaction>()))
+            .Callback<IcCard, SQLiteTransaction>((_, tx) => insertTransaction = tx)
+            .ReturnsAsync(true);
+        _cardRepositoryMock.Setup(r => r.GetAllAsync()).ReturnsAsync(new List<IcCard>());
+        var (logs, logTransactions) = CaptureAuditLogs();
+
+        // Act
+        await _viewModel.SaveAsync();
+
+        // Assert
+        insertTransaction.Should().NotBeNull();
+        logs.Should().ContainSingle(l => l.Action == OperationLogger.Actions.Insert && l.TargetId == idm);
+        logTransactions.Should().ContainSingle().Which.Should().BeSameAs(insertTransaction);
+        _cardRepositoryMock.Verify(r => r.InsertAsync(It.IsAny<IcCard>()), Times.Never);
+        _operationLogRepositoryMock.Verify(r => r.InsertAsync(It.IsAny<OperationLog>()), Times.Never);
+        _viewModel.StatusMessage.Should().Be("登録しました");
+    }
+
+    /// <summary>
+    /// Issue #2156: 更新はカードの UPDATE と監査ログを同じ（非 null の）トランザクションで書くこと
+    /// </summary>
+    [Fact]
+    public async Task SaveAsync_ExistingCard_ShouldWriteUpdateAndAuditLogInSameTransaction()
+    {
+        // Arrange
+        const string idm = "0102030405060708";
+        _viewModel.SelectedCard = new CardDto { CardIdm = idm, CardType = "はやかけん", CardNumber = "H-001" };
+        _viewModel.StartEdit();
+        _viewModel.EditNote = "更新後のメモ";
+
+        _cardRepositoryMock.Setup(r => r.GetByIdmAsync(idm, false)).ReturnsAsync(new IcCard
+        {
+            CardIdm = idm,
+            CardType = "はやかけん",
+            CardNumber = "H-001",
+            Note = "更新前のメモ"
+        });
+        SQLiteTransaction? updateTransaction = null;
+        _cardRepositoryMock.Setup(r => r.UpdateAsync(It.IsAny<IcCard>(), It.IsAny<SQLiteTransaction>()))
+            .Callback<IcCard, SQLiteTransaction>((_, tx) => updateTransaction = tx)
+            .ReturnsAsync(true);
+        _cardRepositoryMock.Setup(r => r.GetAllAsync()).ReturnsAsync(new List<IcCard>());
+        var (logs, logTransactions) = CaptureAuditLogs();
+
+        // Act
+        await _viewModel.SaveAsync();
+
+        // Assert
+        updateTransaction.Should().NotBeNull();
+        logs.Should().ContainSingle(l => l.Action == OperationLogger.Actions.Update && l.TargetId == idm);
+        logTransactions.Should().ContainSingle().Which.Should().BeSameAs(updateTransaction);
+        _cardRepositoryMock.Verify(r => r.UpdateAsync(It.IsAny<IcCard>()), Times.Never);
+        _operationLogRepositoryMock.Verify(r => r.InsertAsync(It.IsAny<OperationLog>()), Times.Never);
+        _viewModel.StatusMessage.Should().Be("更新しました");
+    }
+
+    /// <summary>
+    /// Issue #2156: 削除はカードの論理削除と監査ログを同じ（非 null の）トランザクションで書くこと
+    /// </summary>
+    [Fact]
+    public async Task DeleteAsync_ShouldWriteDeleteAndAuditLogInSameTransaction()
+    {
+        // Arrange
+        const string idm = "0102030405060708";
+        _viewModel.SelectedCard = new CardDto { CardIdm = idm, CardType = "はやかけん", CardNumber = "H-001" };
+        _cardRepositoryMock.Setup(r => r.GetByIdmAsync(idm, false)).ReturnsAsync(new IcCard
+        {
+            CardIdm = idm,
+            CardType = "はやかけん",
+            CardNumber = "H-001"
+        });
+        SQLiteTransaction? deleteTransaction = null;
+        _cardRepositoryMock.Setup(r => r.DeleteAsync(idm, It.IsAny<SQLiteTransaction>()))
+            .Callback<string, SQLiteTransaction>((_, tx) => deleteTransaction = tx)
+            .ReturnsAsync(ICCardManager.Data.Repositories.CardOperationResult.Success);
+        _cardRepositoryMock.Setup(r => r.GetAllAsync()).ReturnsAsync(new List<IcCard>());
+        var (logs, logTransactions) = CaptureAuditLogs();
+
+        // Act
+        await _viewModel.DeleteAsync();
+
+        // Assert
+        deleteTransaction.Should().NotBeNull();
+        logs.Should().ContainSingle(l => l.Action == OperationLogger.Actions.Delete && l.TargetId == idm);
+        logTransactions.Should().ContainSingle().Which.Should().BeSameAs(deleteTransaction);
+        _cardRepositoryMock.Verify(r => r.DeleteAsync(It.IsAny<string>()), Times.Never);
+        _operationLogRepositoryMock.Verify(r => r.InsertAsync(It.IsAny<OperationLog>()), Times.Never);
+        _viewModel.StatusMessage.Should().Be("削除しました");
+    }
+
+    /// <summary>
+    /// Issue #2156: カードのタッチ経由の復元も、復元と監査ログを同じトランザクションで書くこと
+    /// </summary>
+    /// <remarks>
+    /// 復元の入口は 3 つ（未登録カード検出・保存・登録モード中のタッチ）あり、「画面の動詞」で数えると
+    /// 取りこぼす（#1760）。保存経路は上のテストが押さえるので、ここではタッチ経路を固定する。
+    /// </remarks>
+    [Fact]
+    public async Task HandleCardReadAsync_WhenRestoring_ShouldWriteRestoreAndAuditLogInSameTransaction()
+    {
+        // Arrange
+        const string idm = "0102030405060708";
+        _cardRepositoryMock.Setup(r => r.GetByIdmAsync(idm, true)).ReturnsAsync(new IcCard
+        {
+            CardIdm = idm,
+            CardType = "はやかけん",
+            CardNumber = "H-001",
+            IsDeleted = true
+        });
+        SQLiteTransaction? restoreTransaction = null;
+        _cardRepositoryMock.Setup(r => r.RestoreAsync(idm, It.IsAny<SQLiteTransaction>()))
+            .Callback<string, SQLiteTransaction>((_, tx) => restoreTransaction = tx)
+            .ReturnsAsync(true);
+        _cardRepositoryMock.Setup(r => r.GetAllAsync()).ReturnsAsync(new List<IcCard>());
+        var (logs, logTransactions) = CaptureAuditLogs();
+        _viewModel.StartNewCard();
+
+        // Act
+        await _viewModel.HandleCardReadAsync(idm);
+
+        // Assert
+        restoreTransaction.Should().NotBeNull();
+        logs.Should().ContainSingle(l => l.Action == OperationLogger.Actions.Restore && l.TargetId == idm);
+        logTransactions.Should().ContainSingle().Which.Should().BeSameAs(restoreTransaction);
+        _operationLogRepositoryMock.Verify(r => r.InsertAsync(It.IsAny<OperationLog>()), Times.Never);
+        _viewModel.StatusMessage.Should().Be("H-001 を復元しました");
+    }
+
+    /// <summary>
+    /// Issue #2156: タッチ経由の復元で監査ログが失敗したら、復元は確定していないので
+    /// 「記録済み・再タッチしないで」とは案内しないこと
+    /// </summary>
+    /// <remarks>
+    /// 以前は監査ログを復元のコミット後に書いていたため、その失敗は「復元は記録済み」（Issue #1816）として
+    /// 案内するのが正しかった。1 トランザクションにしたことで監査ログの失敗は復元ごと巻き戻るので、
+    /// 同じ案内を出すと、復元されていないカードを「記録済み」と伝えることになる。
+    /// 対のテスト（一覧の再読込の失敗は「記録済み」と案内する）は
+    /// <see cref="HandleCardReadAsync_復元後の後処理で例外_復元は記録済みと案内し再タッチを促さないこと"/>。
+    /// </remarks>
+    [Fact]
+    public async Task HandleCardReadAsync_復元の監査ログが失敗_記録済みとは案内せず再タッチを待つこと()
+    {
+        // Arrange
+        const string idm = "0102030405060708";
+        _cardRepositoryMock.Setup(r => r.GetByIdmAsync(idm, true)).ReturnsAsync(new IcCard
+        {
+            CardIdm = idm,
+            CardType = "はやかけん",
+            CardNumber = "H-001",
+            IsDeleted = true
+        });
+        _cardRepositoryMock.Setup(r => r.RestoreAsync(idm, It.IsAny<SQLiteTransaction>())).ReturnsAsync(true);
+        _cardRepositoryMock.Setup(r => r.GetAllAsync()).ReturnsAsync(new List<IcCard>());
+        _operationLogRepositoryMock.Setup(r => r.InsertAsync(It.IsAny<OperationLog>(), It.IsAny<SQLiteTransaction>()))
+            .ThrowsAsync(new InvalidOperationException("disk I/O error"));
+        _viewModel.StartNewCard();
+
+        // Act
+        Func<Task> act = () => _viewModel.HandleCardReadAsync(idm);
+
+        // Assert
+        await act.Should().NotThrowAsync();
+        _viewModel.StatusMessage.Should().NotContain("記録済み", "監査ログの失敗で復元は巻き戻っている");
+        _viewModel.StatusMessage.Should().NotContain("disk I/O error", "生の例外メッセージを職員へ出さないこと（Issue #1614）");
+        _viewModel.IsStatusError.Should().BeTrue();
+        _viewModel.IsWaitingForCard.Should().BeTrue("何も確定していないので、もう一度タッチすれば復元をやり直せる");
+    }
+
+    /// <summary>
+    /// 監査ログの書き込み（tx 付き）を記録する。記録した操作ログと、渡されたトランザクションを返す。
+    /// </summary>
+    private (List<OperationLog> Logs, List<SQLiteTransaction> Transactions) CaptureAuditLogs()
+    {
+        var logs = new List<OperationLog>();
+        var transactions = new List<SQLiteTransaction>();
+        _operationLogRepositoryMock.Setup(r => r.InsertAsync(It.IsAny<OperationLog>(), It.IsAny<SQLiteTransaction>()))
+            .Callback<OperationLog, SQLiteTransaction>((log, tx) => { logs.Add(log); transactions.Add(tx); })
+            .ReturnsAsync(1);
+        return (logs, transactions);
     }
 
     /// <summary>
@@ -3167,7 +3388,7 @@ public class CardManageViewModelTests : IDisposable
             CardNumber = "H-001",
             Note = "更新前のメモ"
         });
-        _cardRepositoryMock.Setup(r => r.UpdateAsync(It.IsAny<IcCard>())).ReturnsAsync(true);
+        _cardRepositoryMock.Setup(r => r.UpdateAsync(It.IsAny<IcCard>(), It.IsAny<SQLiteTransaction>())).ReturnsAsync(true);
         _cardRepositoryMock.Setup(r => r.GetAllAsync()).ReturnsAsync(new List<IcCard>());
 
         // 保存を押す直前に一覧の選択が外れた
@@ -3178,14 +3399,14 @@ public class CardManageViewModelTests : IDisposable
 
         // Assert - EditCardIdm のカードが更新される
         _cardRepositoryMock.Verify(r => r.UpdateAsync(It.Is<IcCard>(c =>
-            c.CardIdm == idm && c.Note == "更新後のメモ")), Times.Once);
+            c.CardIdm == idm && c.Note == "更新後のメモ"), It.IsAny<SQLiteTransaction>()), Times.Once);
 
         // 監査ログも欠けない
         _operationLogRepositoryMock.Verify(r => r.InsertAsync(It.Is<OperationLog>(log =>
             log.TargetTable == OperationLogger.Tables.IcCard &&
             log.TargetId == idm &&
             log.Action == OperationLogger.Actions.Update &&
-            log.AfterData!.Contains("更新後のメモ"))), Times.Once);
+            log.AfterData!.Contains("更新後のメモ")), It.IsAny<SQLiteTransaction>()), Times.Once);
 
         _viewModel.StatusMessage.Should().Be("更新しました");
         _viewModel.IsStatusError.Should().BeFalse();
@@ -3315,7 +3536,7 @@ public class CardManageViewModelTests : IDisposable
 
         _cardRepositoryMock.Setup(r => r.GetByIdmAsync(idm, false))
             .ReturnsAsync(new IcCard { CardIdm = idm, CardType = "はやかけん", CardNumber = "H-001" });
-        _cardRepositoryMock.Setup(r => r.DeleteAsync(idm))
+        _cardRepositoryMock.Setup(r => r.DeleteAsync(idm, It.IsAny<SQLiteTransaction>()))
             .ReturnsAsync(ICCardManager.Data.Repositories.CardOperationResult.Success);
         _cardRepositoryMock.Setup(r => r.GetAllAsync()).ReturnsAsync(new List<IcCard>());
 
@@ -3327,11 +3548,11 @@ public class CardManageViewModelTests : IDisposable
             It.Is<string>(s => s.Contains("はやかけん") && s.Contains("H-001")),
             It.IsAny<string>()), Times.Once);
 
-        _cardRepositoryMock.Verify(r => r.DeleteAsync(idm), Times.Once);
+        _cardRepositoryMock.Verify(r => r.DeleteAsync(idm, It.IsAny<SQLiteTransaction>()), Times.Once);
         _operationLogRepositoryMock.Verify(r => r.InsertAsync(It.Is<OperationLog>(log =>
             log.TargetTable == OperationLogger.Tables.IcCard &&
             log.TargetId == idm &&
-            log.Action == OperationLogger.Actions.Delete)), Times.Once);
+            log.Action == OperationLogger.Actions.Delete), It.IsAny<SQLiteTransaction>()), Times.Once);
     }
 
     /// <summary>
@@ -3583,7 +3804,7 @@ public class CardManageViewModelTests : IDisposable
             CardNumber = "H-001",
             IsDeleted = true
         });
-        _cardRepositoryMock.Setup(r => r.RestoreAsync(idm))
+        _cardRepositoryMock.Setup(r => r.RestoreAsync(idm, It.IsAny<SQLiteTransaction>()))
             .Callback(() => isBusyAfterDialog = _viewModel.IsBusy)
             .ReturnsAsync(true);
         _cardRepositoryMock.Setup(r => r.GetByIdmAsync(idm, false)).ReturnsAsync(new IcCard
@@ -3666,7 +3887,7 @@ public class CardManageViewModelTests : IDisposable
             CardNumber = "H-001",
             IsDeleted = true
         });
-        _cardRepositoryMock.Setup(r => r.RestoreAsync(idm)).ReturnsAsync(true);
+        _cardRepositoryMock.Setup(r => r.RestoreAsync(idm, It.IsAny<SQLiteTransaction>())).ReturnsAsync(true);
         // 復元は確定済み。その後の一覧再読込が共有モードのロックで失敗する
         _cardRepositoryMock.Setup(r => r.GetByIdmAsync(idm, false)).ReturnsAsync(new IcCard
         {

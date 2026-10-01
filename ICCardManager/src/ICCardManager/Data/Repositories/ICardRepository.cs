@@ -96,7 +96,7 @@ namespace ICCardManager.Data.Repositories
         /// これらを引数の <paramref name="card"/> に設定しても DB へは反映されない。
         /// 同様に <see cref="IcCard.IsLent"/> 系は <see cref="UpdateLentStatusAsync"/>、
         /// <see cref="IcCard.IsRefunded"/> 系は <see cref="SetRefundedAsync"/>、
-        /// <see cref="IcCard.IsDeleted"/> 系は <see cref="DeleteAsync"/> / <see cref="RestoreAsync(string)"/>
+        /// <see cref="IcCard.IsDeleted"/> 系は <see cref="DeleteAsync(string)"/> / <see cref="RestoreAsync(string)"/>
         /// が担当する専用列で、本メソッドの更新対象ではない。
         /// 詳細は <c>.claude/rules/development-conventions.md</c> の
         /// 「UPDATE の SET 句は『その経路で本当に編集する列』に限る」および
@@ -141,6 +141,20 @@ namespace ICCardManager.Data.Repositories
         /// <param name="cardIdm">ICカードIDm</param>
         /// <returns>操作結果（成功/未存在/貸出中/競合）</returns>
         Task<CardOperationResult> DeleteAsync(string cardIdm);
+
+        /// <summary>
+        /// ICカードを論理削除（トランザクション対応、Issue #2156）
+        /// </summary>
+        /// <remarks>
+        /// 論理削除と監査ログを 1 つのトランザクションで確定させるために使う
+        /// （<c>CardManagementService.DeleteAsync</c>）。成功時はキャッシュを破棄しない
+        /// （破棄はコミット後に呼び出し元が行う）。0 行のときは DB の最新状態から原因を診断して返し、
+        /// その際はキャッシュを破棄する（Issue #1759。<see cref="SetRefundedAsync"/> と同じ）。
+        /// </remarks>
+        /// <param name="cardIdm">ICカードIDm</param>
+        /// <param name="transaction">参加するトランザクション</param>
+        /// <returns>操作結果（成功/未存在/貸出中/競合）</returns>
+        Task<CardOperationResult> DeleteAsync(string cardIdm, SQLiteTransaction transaction);
 
         /// <summary>
         /// 論理削除されたICカードを復元

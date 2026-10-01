@@ -426,12 +426,27 @@ WHERE card_idm = @cardIdm AND is_deleted = 0";
         /// <inheritdoc/>
         public async Task<CardOperationResult> DeleteAsync(string cardIdm)
         {
+            return await DeleteAsyncInternal(cardIdm, null).ConfigureAwait(false);
+        }
+
+        /// <inheritdoc/>
+        public async Task<CardOperationResult> DeleteAsync(string cardIdm, SQLiteTransaction transaction)
+        {
+            return await DeleteAsyncInternal(cardIdm, transaction).ConfigureAwait(false);
+        }
+
+        /// <summary>
+        /// カード論理削除の内部実装
+        /// </summary>
+        private async Task<CardOperationResult> DeleteAsyncInternal(string cardIdm, SQLiteTransaction? transaction)
+        {
             using var lease = await _dbContext.LeaseConnectionAsync().ConfigureAwait(false);
             var connection = lease.Connection;
 
             // Issue #1109: check-then-act を排除し、WHERE句のDBガードに一元化。
             // affected rows = 0 の場合は事後診断で原因を特定する。
             using var command = connection.CreateCommand();
+            command.Transaction = transaction;
             command.CommandText = @"UPDATE ic_card
 SET is_deleted = 1, deleted_at = datetime('now', 'localtime')
 WHERE card_idm = @cardIdm AND is_deleted = 0 AND is_lent = 0";
@@ -441,7 +456,13 @@ WHERE card_idm = @cardIdm AND is_deleted = 0 AND is_lent = 0";
             var result = await command.ExecuteNonQueryAsync().ConfigureAwait(false);
             if (result > 0)
             {
-                InvalidateCardCache();
+                // トランザクション内ではキャッシュを破棄しない（SetRefundedAsync と同じ）。
+                // コミット前に破棄しても、ロールバックされれば破棄した根拠が消える。
+                // 破棄はコミット後に呼び出し元（CardManagementService.DeleteAsync）が行う（Issue #2156）。
+                if (transaction == null)
+                {
+                    InvalidateCardCache();
+                }
                 return CardOperationResult.Success;
             }
 

@@ -240,10 +240,25 @@ WHERE staff_idm = @staffIdm AND is_deleted = 0";
         /// <inheritdoc/>
         public async Task<bool> DeleteAsync(string staffIdm)
         {
+            return await DeleteAsyncInternal(staffIdm, null).ConfigureAwait(false);
+        }
+
+        /// <inheritdoc/>
+        public async Task<bool> DeleteAsync(string staffIdm, SQLiteTransaction transaction)
+        {
+            return await DeleteAsyncInternal(staffIdm, transaction).ConfigureAwait(false);
+        }
+
+        /// <summary>
+        /// 職員論理削除の内部実装
+        /// </summary>
+        private async Task<bool> DeleteAsyncInternal(string staffIdm, SQLiteTransaction? transaction)
+        {
             using var lease = await _dbContext.LeaseConnectionAsync().ConfigureAwait(false);
             var connection = lease.Connection;
 
             using var command = connection.CreateCommand();
+            command.Transaction = transaction;
             command.CommandText = @"UPDATE staff
 SET is_deleted = 1, deleted_at = datetime('now', 'localtime')
 WHERE staff_idm = @staffIdm AND is_deleted = 0";
@@ -251,10 +266,15 @@ WHERE staff_idm = @staffIdm AND is_deleted = 0";
             command.Parameters.AddWithValue("@staffIdm", staffIdm);
 
             var result = await command.ExecuteNonQueryAsync().ConfigureAwait(false);
-            // Issue #1759: 影響行数 0（＝他 PC が先に削除した）のときも無効化する。
-            // 古い職員一覧を返すと、競合を案内された利用者が一覧を確認しても
-            // 削除済みの職員が並んだままになる。
-            InvalidateStaffCache();
+            if (transaction == null)
+            {
+                // トランザクション外の場合のみキャッシュ無効化（UpdateAsyncInternal と同じ）。
+                // トランザクション内の破棄はコミット後に呼び出し元（StaffManagementService）が行う（Issue #2156）。
+                // Issue #1759: 影響行数 0（＝他 PC が先に削除した）のときも無効化する。
+                // 古い職員一覧を返すと、競合を案内された利用者が一覧を確認しても
+                // 削除済みの職員が並んだままになる。
+                InvalidateStaffCache();
+            }
             return result > 0;
         }
 

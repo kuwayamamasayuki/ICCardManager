@@ -535,6 +535,9 @@ namespace ICCardManager
             services.AddSingleton<OperationLogger>();
             services.AddSingleton<LedgerMergeService>();
             services.AddSingleton<LedgerSplitService>();
+            // Issue #2156: カード・職員の登録・更新・削除・復元を監査ログと 1 トランザクションで確定させる
+            services.AddSingleton<CardManagementService>();
+            services.AddSingleton<StaffManagementService>();
             services.AddSingleton<LedgerConsistencyChecker>();
             // Issue #1688: 帳票出力前プリフライトチェック
             services.AddSingleton<ReportPreflightChecker>();
