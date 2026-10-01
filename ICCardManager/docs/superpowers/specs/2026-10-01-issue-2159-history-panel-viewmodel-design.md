@@ -20,7 +20,7 @@ Issue 起票時（2026-09-30）の確認では「跨ぐのは 3 点のみ」だ�
 | 1 | 子 → 親 | 残高不整合警告（`BalanceInconsistency`）の生成・除去（`ReplaceWarnings`、#1739） | `IHistoryPanelHost.ReplaceBalanceInconsistencyWarning(cardIdm, warning)` |
 | 2 | 子 → 親 | 履歴の追加・変更・削除・統合・明細編集の後のダッシュボード更新・警告再チェック（**起票時の確認から漏れていた**） | `IHistoryPanelHost.RefreshDashboardAsync()` / `CheckWarningsAsync()` |
 | 3 | 子 → 親 | 読み込み中オーバーレイ（`MainWindow.xaml` の全面オーバーレイは**親の** `IsBusy` に束縛。**起票時の確認から漏れていた**） | `IHistoryPanelHost.BeginBusy(message)` |
-| 4 | 子 → 親 | 貸出中レコードを削除して `is_lent` を戻したあとの貸出中一覧（**現行コードは再読込していなかった**） | `IHistoryPanelHost.RefreshLentCardsAsync()` |
+| 4 | 子 → 親 | 貸出中レコードを削除して `is_lent` を戻したあとの貸出中一覧（**現行コードは再読込していなかった**） | `IHistoryPanelHost.RefreshLentCardsAsync()`（一覧の再読込・ダッシュボード更新の後ろで頼む） |
 | 5 | 親 → 子 | カードタッチ・警告クリック・ダッシュボードからの履歴表示、返却確認（#1907）の開閉、各操作後の再読込 | 子の公開メソッド（§3） |
 
 - カードタッチの操作者 `_currentStaffIdm` は跨がない（履歴編集は都度 `RequestAuthenticationAsync` で認証する）。起票時の確認どおり。

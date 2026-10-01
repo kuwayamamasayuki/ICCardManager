@@ -53,13 +53,28 @@ public class ReturnFlowDialogHeaderColorConventionTests
     /// （<c>HandleReturnSuccessAsync</c>・返却後処理）と、そこから呼ぶヘルパー・ダイアログを開く処理は
     /// 別々のファイルにあり得る。1 ファイルだけを読むと呼び出し関係が途中で切れ、到達するダイアログが
     /// 検査から静かに漏れるため、構成ファイルすべてを連結して 1 つの本文として扱う。
+    /// <para>
+    /// Issue #2159: 返却確認（<c>ShowReturnHistoryReviewAsync</c>）は子の履歴パネル <c>HistoryPanelViewModel</c> へ抽出され、
+    /// 返却後処理から <c>History.ShowReturnHistoryReviewAsync(...)</c> で呼ばれる。履歴パネルの構成ファイルも連結し、
+    /// <c>History.</c> で修飾した呼び出しも辿る（<see cref="CallPattern"/>）。抽出前はこの経路も走査されていたため、
+    /// 連結しないと返却確認の経路で開くダイアログが検査から静かに外れる（コードレビューで検出）。
+    /// </para>
     /// </remarks>
     private static string ReadMainViewModelCodeOnly()
     {
         var files = MainViewModelSourceFiles.All;
         files.Should().NotBeEmpty("MainViewModel を構成するソースが見つからない");
-        return MainViewModelSourceFiles.ConcatenatedCodeOnly;
+        HistoryPanelViewModelSourceFiles.All.Should().NotBeEmpty("HistoryPanelViewModel を構成するソースが見つからない");
+        return MainViewModelSourceFiles.ConcatenatedCodeOnly + Environment.NewLine
+            + string.Join(Environment.NewLine, HistoryPanelViewModelSourceFiles.All.Select(f => f.CodeOnly));
     }
+
+    /// <summary>
+    /// <paramref name="methodName"/> の呼び出し。素の呼び出しと、子の履歴パネルを経由する <c>History.</c> 修飾の呼び出し（Issue #2159）。
+    /// それ以外の修飾（<c>_navigationService.Foo(</c> 等）は、同名の自クラスのメソッドとして辿らない。
+    /// </summary>
+    internal static Regex CallPattern(string methodName)
+        => new($@"(?<![\w.])(?:History\s*\.\s*)?{Regex.Escape(methodName)}\s*\(");
 
     /// <remarks>
     /// アクセス修飾子だけを起点にすると <c>partial void On…Changed</c>（`[ObservableProperty]` の
@@ -173,6 +188,10 @@ public class ReturnFlowDialogHeaderColorConventionTests
     /// <paramref name="entryPoint"/> から到達するメソッドを推移的に辿り、開かれるダイアログ名を集める。
     /// </summary>
     private static IReadOnlyList<string> CollectReachableDialogs(string codeOnly, string entryPoint)
+        => CollectReachableDialogs(codeOnly, entryPoint, out _);
+
+    private static IReadOnlyList<string> CollectReachableDialogs(
+        string codeOnly, string entryPoint, out IReadOnlyCollection<string> reachedMethods)
     {
         var methods = CollectMethodBodies(codeOnly, out var overloadedNames);
         methods.Should().ContainKey(
@@ -199,7 +218,7 @@ public class ReturnFlowDialogHeaderColorConventionTests
             foreach (var candidate in methods.Keys)
             {
                 if (!visited.Contains(candidate)
-                    && Regex.IsMatch(body, $@"(?<![\w.]){Regex.Escape(candidate)}\s*\("))
+                    && CallPattern(candidate).IsMatch(body))
                 {
                     queue.Enqueue(candidate);
                 }
@@ -212,6 +231,7 @@ public class ReturnFlowDialogHeaderColorConventionTests
             "到達するメソッドに同名のオーバーロードが無いこと。"
                 + "増えた場合は引き当てを引数の数まで見る形へ広げること");
 
+        reachedMethods = visited;
         return dialogs.ToList();
     }
 
@@ -371,6 +391,24 @@ public class ReturnFlowDialogHeaderColorConventionTests
             .Should().NotContain(
                 "CompanionCountInputDialog",
                 "直接の本体には現れない＝展開なしでは拾えないこと（この前提が変わったら対の表明を書き直す）");
+    }
+
+    /// <summary>
+    /// Issue #2159: 返却後処理から子の履歴パネルの返却確認（<c>History.ShowReturnHistoryReviewAsync</c>）へ、
+    /// さらにその内側（<c>ShowHistoryAsync</c> → <c>LoadHistoryLedgersAsync</c>）へ辿れていること。
+    /// </summary>
+    [Fact]
+    public void 走査が子の履歴パネルの返却確認まで届いていること()
+    {
+        CollectReachableDialogs(ReadMainViewModelCodeOnly(), ReturnFlowEntryPoint, out var reached);
+
+        reached.Should().Contain(new[] { "ShowReturnHistoryReviewAsync", "ShowHistoryAsync", "LoadHistoryLedgersAsync" });
+
+        // 修飾の扱いを既知の入力で固定する: History. は辿り、他の受け手の同名呼び出しは辿らない
+        CallPattern("Foo").IsMatch("await History.Foo(x);").Should().BeTrue();
+        CallPattern("Foo").IsMatch("Foo(x);").Should().BeTrue();
+        CallPattern("Foo").IsMatch("_navigationService.Foo(x);").Should().BeFalse();
+        CallPattern("Foo").IsMatch("BarFoo(x);").Should().BeFalse();
     }
 
     [Fact]

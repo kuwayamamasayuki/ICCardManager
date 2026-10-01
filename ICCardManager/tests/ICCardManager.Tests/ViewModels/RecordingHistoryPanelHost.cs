@@ -22,6 +22,11 @@ namespace ICCardManager.Tests.ViewModels;
 /// （種別とカードで絞って取り除き、あれば追加する）。親との実配線は <c>MainViewModelTests</c> の
 /// 「履歴パネルとの連携」で別に表明する。
 /// </para>
+/// <para>
+/// 本番と違う点: 本番の <c>RefreshDashboardAsync</c> は、ダッシュボードから消えたカードの残高不整合警告も取り除く（#1739）が、
+/// ここでは再現しない（呼ばれたことを記録するだけ）。ダッシュボード更新と警告の入れ替えの<b>相互作用</b>
+/// （呼び出し順を入れ替えると警告が消える等）は、本物の <c>MainViewModel</c> を使う連携テストでしか検出できない。
+/// </para>
 /// </remarks>
 internal sealed class RecordingHistoryPanelHost : IHistoryPanelHost
 {

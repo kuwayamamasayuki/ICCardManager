@@ -1101,8 +1101,10 @@ internal static class TestSourceInspection
         }
 
         var scopes = new List<(int Start, int End)>();
+        // Issue #2159: 受け手で修飾した呼び出し（`using (Host.BeginBusy(...))`。履歴パネルが親の処理中スコープを開く形）も
+        // 同じスコープとして拾う。修飾を許さないと、スコープを別のオブジェクト経由で開いただけで検査から静かに外れる
         var pattern = new Regex(
-            @"using\s*\(\s*(?:var\s+\w+\s*=\s*)?" + Regex.Escape(factoryName) + @"\w*\s*\(");
+            @"using\s*\(\s*(?:var\s+\w+\s*=\s*)?(?:\w+\s*\.\s*)?" + Regex.Escape(factoryName) + @"\w*\s*\(");
 
         foreach (Match match in pattern.Matches(codeOnlySource))
         {

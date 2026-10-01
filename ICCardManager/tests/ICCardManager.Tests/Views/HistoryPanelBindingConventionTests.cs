@@ -53,13 +53,23 @@ public class HistoryPanelBindingConventionTests
     private static readonly Regex BindingElementPath = new(@"<Binding\b[^>]*?\bPath\s*=\s*""(?<path>[^""]+)""", RegexOptions.Compiled);
 
     /// <summary>
-    /// 束縛のパス（先頭の要素名）を取り出す。<c>ElementName</c> で別の要素を指すもの、<c>RelativeSource</c> で
-    /// <c>DataContext.</c> 以外を指すもの、パスを持たないもの（<c>{Binding}</c>）は対象外として null を返す。
-    /// <c>RelativeSource</c> の <c>DataContext.X</c> は、祖先の DataContext（＝履歴パネル）の <c>X</c> として扱う。
+    /// 束縛のパス（先頭の要素名）を取り出す。対象外のときは null を返す。
     /// </summary>
+    /// <remarks>
+    /// <list type="bullet">
+    /// <item><description><c>ElementName</c> / <c>RelativeSource</c> で別の要素を指す束縛は、パスが <c>DataContext.X</c> のときだけ
+    /// 「履歴エリア内の要素の DataContext（＝履歴パネル）の <c>X</c>」として扱い、それ以外（要素自身のプロパティ）は対象外</description></item>
+    /// <item><description><c>AncestorType=Window</c>・<c>Source=</c> はエリアの外（メイン画面・リソース）を指すので対象外</description></item>
+    /// <item><description>パスを持たない <c>{Binding}</c> は対象外</description></item>
+    /// </list>
+    /// 既知の限界: 一覧の行の内側か外側かを区別せず、履歴パネルと行（<see cref="LedgerDto"/>）の和集合で照合する。
+    /// 行の外に行のプロパティ名を書いた誤り（ヘッダーに <c>{Binding Summary}</c>）は検出しない。
+    /// 本検査の目的（親にしか無いプロパティへの束縛の残存）は、親と行に同名のプロパティが無い限り損なわれない（コードレビューで確認）。
+    /// </remarks>
     internal static (string Root, bool ViaAncestorDataContext)? ParseBinding(string markup)
     {
-        if (Regex.IsMatch(markup, @"\bElementName\s*=")) return null;
+        if (Regex.IsMatch(markup, @"\bSource\s*=")) return null;
+        if (Regex.IsMatch(markup, @"\bAncestorType\s*=\s*(?:\{x:Type\s+)?Window\b")) return null;
 
         var match = Regex.Match(markup, @"^\{\s*Binding\s+(?:Path\s*=\s*)?(?<path>[A-Za-z_][A-Za-z0-9_.]*)\s*(?=[,}])");
         if (!match.Success)
@@ -70,7 +80,7 @@ public class HistoryPanelBindingConventionTests
         }
 
         var path = match.Groups["path"].Value;
-        var isRelative = Regex.IsMatch(markup, @"\bRelativeSource\s*=");
+        var isRelative = Regex.IsMatch(markup, @"\b(?:RelativeSource|ElementName)\s*=");
         if (isRelative)
         {
             const string prefix = "DataContext.";
@@ -176,6 +186,10 @@ public class HistoryPanelBindingConventionTests
     [InlineData("{Binding DateDisplay}", null)]
     [InlineData("{Binding DataContext.EditLedgerCommand, RelativeSource={RelativeSource AncestorType=DataGrid}}", null)]
     [InlineData("{Binding Text, ElementName=SomeElement}", null)]
+    [InlineData("{Binding ElementName=HistoryDataGrid, Path=DataContext.HistoryLedgers}", null)]
+    [InlineData("{Binding ElementName=HistoryDataGrid, Path=DataContext.WarningMessages}", "DataContext.WarningMessages")]
+    [InlineData("{Binding DataContext.OpenSettingsCommand, RelativeSource={RelativeSource AncestorType=Window}}", null)]
+    [InlineData("{Binding Source={StaticResource Foo}, Path=Bar}", null)]
     [InlineData("{Binding}", null)]
     [InlineData("{Binding RelativeSource={RelativeSource Self}, Path=ActualWidth}", null)]
     [InlineData("{Binding Converter={StaticResource X}, Path=LentCards}", "LentCards")]

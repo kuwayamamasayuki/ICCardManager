@@ -124,6 +124,7 @@ public partial class HistoryPanelViewModel
 
         var fullLedger = await _ledgerRepository.GetByIdAsync(ledger.Id);
         var deleted = false;
+        var lentStatusReset = false;
 
         // Issue #1760: 読み取りが null なら書き込みも行わない。
         // これは DELETE が 0 行になるのと同じ競合（他 PC が先に削除した）なので、
@@ -151,7 +152,7 @@ public partial class HistoryPanelViewModel
             {
                 // Issue #1574: 貸出中レコードを削除した場合、ic_card.is_lent を整合性リセット。
                 // Issue #1760: 書き込みをやめたら、書き込みに紐付いた副作用もやめる。
-                await ResetIsLentIfNoOtherLentRecordsAsync(fullLedger);
+                lentStatusReset = await ResetIsLentIfNoOtherLentRecordsAsync(fullLedger);
             }
         }
 
@@ -160,6 +161,15 @@ public partial class HistoryPanelViewModel
         // 一覧だけでなくダッシュボード・警告も古くなっているため。
         await LoadHistoryLedgersAsync();
         await Host.RefreshDashboardAsync();
+        if (lentStatusReset)
+        {
+            // Issue #2159: is_lent を戻したら、メイン画面の「貸出中」一覧も読み直す。
+            // 抽出前は読み直しておらず、次のカード操作か共有モードの定期更新まで、貸出中でなくなった
+            // カードが一覧に残っていた（境界を明示して表面化した）。
+            // 位置は一覧の再読込・ダッシュボード更新の後ろ（コードレビューで検出）。コミット直後に置くと、
+            // これだけが失敗したときに一覧の再読込・ダッシュボード・警告・整合性の再判定がすべて飛ぶ。
+            await Host.RefreshLentCardsAsync();
+        }
         await Host.CheckWarningsAsync();
         await CheckAndNotifyConsistencyAsync();
 
@@ -178,10 +188,14 @@ public partial class HistoryPanelViewModel
     /// 多重貸出中の異常状態（複数の貸出中レコードが残っている場合）では <c>is_lent=true</c> を維持し、
     /// 段階的な復旧を可能にする。
     /// </remarks>
-    private async Task ResetIsLentIfNoOtherLentRecordsAsync(Ledger deletedLedger)
+    /// <returns>
+    /// <c>is_lent</c> を実際に false へ戻したら true（Issue #2159。呼び出し元が貸出中一覧を読み直す判断に使う）。
+    /// 貸出中レコードでない・他の貸出中レコードが残る・競合で 0 行だった場合は false。
+    /// </returns>
+    private async Task<bool> ResetIsLentIfNoOtherLentRecordsAsync(Ledger deletedLedger)
     {
-        if (deletedLedger == null || !deletedLedger.IsLentRecord) return;
-        if (string.IsNullOrEmpty(deletedLedger.CardIdm)) return;
+        if (deletedLedger == null || !deletedLedger.IsLentRecord) return false;
+        if (string.IsNullOrEmpty(deletedLedger.CardIdm)) return false;
 
         var hasOther = await _ledgerRepository.HasOtherLentRecordsAsync(deletedLedger.CardIdm, deletedLedger.Id);
         if (!hasOther)
@@ -199,15 +213,13 @@ public partial class HistoryPanelViewModel
                     "Issue #1953: 履歴削除後の貸出状態リセットが競合しました。" +
                     "他のパソコンでこのカードが削除された可能性があります: CardIdm={CardIdm}",
                     IdmMasker.Mask(deletedLedger.CardIdm));
-                return;
             }
 
-            // Issue #2159: is_lent を戻したら、メイン画面の「貸出中」一覧も読み直す。
-            // 抽出前はここで読み直しておらず、次のカード操作か共有モードの定期更新まで
-            // 貸出中でなくなったカードが一覧に残っていた（境界を明示して表面化した）。
-            // 競合（影響行数 0）のときは何も変えていないので読み直さない。
-            await Host.RefreshLentCardsAsync();
+            // 競合（影響行数 0）のときは何も変えていないので、貸出中一覧は読み直さない
+            return updated;
         }
+
+        return false;
     }
 
     /// <summary>

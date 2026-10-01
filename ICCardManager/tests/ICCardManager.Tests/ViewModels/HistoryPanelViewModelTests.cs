@@ -1893,7 +1893,7 @@ public class HistoryPanelViewModelTests : IDisposable
 
     /// <summary>
     /// 貸出中レコードを削除して <c>is_lent</c> を戻したら、メイン画面へ貸出中一覧の再読込を頼むこと。
-    /// 頼むのは一覧の再読込・ダッシュボード更新・警告再チェックより前（is_lent を戻した直後）。
+    /// 頼むのは一覧の再読込・ダッシュボード更新の後ろ（コミット直後に置くと、これだけが失敗したときに後段がすべて飛ぶ）。
     /// </summary>
     [Fact]
     public async Task 貸出状態を戻したら貸出中一覧の再読込を親へ頼むこと()
@@ -1909,12 +1909,13 @@ public class HistoryPanelViewModelTests : IDisposable
         _host.Calls.Should().Equal(
             new[]
             {
-                RecordingHistoryPanelHost.RefreshLentCardsCall,
                 RecordingHistoryPanelHost.BeginBusyCall,
                 RecordingHistoryPanelHost.RefreshDashboardCall,
+                RecordingHistoryPanelHost.RefreshLentCardsCall,
                 RecordingHistoryPanelHost.CheckWarningsCall,
             },
-            "is_lent を戻した直後に貸出中一覧、続いて一覧の再読込・ダッシュボード・警告の順（#1753）");
+            "一覧の再読込・ダッシュボードの後に貸出中一覧、続いて警告の順（#1753）。" +
+            "貸出中一覧の読み直しだけが失敗しても、一覧とダッシュボードは更新済みであること（コードレビューで検出）");
     }
 
     /// <summary>

@@ -201,6 +201,25 @@ public class BusyScopeDialogConventionTests
             .Should().BeGreaterThan(0, "BeginCancellableBusy のスコープが 0 件なのは抽出の不具合");
     }
 
+    /// <summary>
+    /// Issue #2159: 履歴パネルは親（メイン画面）の処理中スコープを <c>using (Host.BeginBusy(...))</c> で開く。
+    /// 修飾付きの呼び出しも処理中スコープとして拾い、履歴パネルが検査対象に入っていること。
+    /// </summary>
+    /// <remarks>
+    /// 抽出前の履歴コードは <c>using (BeginBusy(...))</c> で、この検査の対象だった。修飾を許さない抽出のままだと、
+    /// 抽出しただけで検査から静かに外れる（fail-open。コードレビューで検出）。
+    /// </remarks>
+    [Fact]
+    public void 受け手で修飾した処理中スコープも検査対象に入ること()
+    {
+        const string sample = "void M() { using (Host.BeginBusy(\"x\")) { _navigationService.ShowError(\"a\", \"b\"); } }";
+        var scope = TestSourceInspection.ExtractUsingScopeBodies(sample, "BeginBusy").Should().ContainSingle().Which;
+        sample.Substring(scope.Start, scope.End - scope.Start).Should().Contain("ShowError");
+
+        GetFilesWithBusyScopes().Select(f => Path.GetFileName(f.Path))
+            .Should().Contain("HistoryPanelViewModel.cs", "履歴パネルの読み込み中スコープも検査すること");
+    }
+
     [Fact]
     public void 是正済みの3画面がSuspendBusyを実際に使っていること()
     {
