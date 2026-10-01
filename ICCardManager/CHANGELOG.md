@@ -2,6 +2,14 @@
 
 ### Unreleased
 
+**開発基盤**
+- Issue #2161 **CI の `dotnet format` 検証を失敗扱いにした**（静的解析の段階導入の第 1 段）
+  - code-quality ジョブの `dotnet format --verify-no-changes` に `continue-on-error: true` が付いており、整形の違反があっても CI は緑のままだった。origin/main の実測で約 2,000 件（CI 上）の違反があった
+  - 前段の PR #2184 で違反を 0 件にした（整形のみ・ロジック変更なし）: `.cs` の改行を `.gitattributes`（`*.cs text eol=crlf`）で作業ツリー CRLF に統一、`.editorconfig` の C# ソースの文字コードを BOM なしの UTF-8 へ変更、private の `const` / `static readonly` を PascalCase とする命名規則を追加（修飾子を指定しない `_camelCase` 規則が約 700 件を誤って違反としていた）、残る命名違反 15 件のリネームと `dotnet format` の自動整形
+  - `continue-on-error` を外し、`CiWorkflowConventionTests` に 4 件を追加: 整形検証のステップが許可形（1 行の `dotnet format`・位置引数なし・許可したオプションのみ）でソリューションに対して実行されること・ジョブとステップに `continue-on-error` / `if:`、ジョブに `needs:` が無いこと（対の表明）・`.gitattributes` と `.editorconfig` の改行の一致（後勝ちで解決）・検出ロジックのサンプル固定。禁止形の列挙では、pwsh が最後のコマンドの終了コードで終わるため 2 行目に足したコマンドで失敗が消える経路を塞げず、許可形へ切り替えた（コードレビューで検出）。14 通りの変異で検出力を実測
+  - 開発者ガイド §4.7a・00a 技術スタック用語集・07_テスト設計書を更新
+  - テスト: 単体 8,302 → 8,306（+4）・合計 8,374 → 8,378
+
 **機能改善**
 - Issue #2152 **長期未返却とみなす日数を設定画面（F5）で保存できるようにした**
   - これまでは管理者ダッシュボードの画面上で 7／14／30 日から一時的に切り替えられるだけで、開くたびに 14 日へ戻っていた。設定画面に「長期未返却とみなす日数」（1〜365 日、既定 14 日）を追加し、管理者ダッシュボードの初期値にした（`AppSettings.LongTermUnreturnedDays`、settings キー `long_term_unreturned_days`）
