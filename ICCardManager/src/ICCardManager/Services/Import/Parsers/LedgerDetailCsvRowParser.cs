@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using ICCardManager.Common;
 using ICCardManager.Models;
 
@@ -48,7 +49,7 @@ namespace ICCardManager.Services.Import.Parsers
             int ledgerId = 0;
             if (!string.IsNullOrWhiteSpace(ledgerIdStr))
             {
-                if (!int.TryParse(ledgerIdStr, out ledgerId))
+                if (!int.TryParse(ledgerIdStr, NumberStyles.Integer, CultureInfo.InvariantCulture, out ledgerId))
                 {
                     errors.Add(new CsvImportError
                     {
@@ -81,7 +82,7 @@ namespace ICCardManager.Services.Import.Parsers
             int? amount = null;
             if (!string.IsNullOrWhiteSpace(amountStr))
             {
-                if (!int.TryParse(amountStr, out var parsedAmount))
+                if (!int.TryParse(amountStr, NumberStyles.Integer, CultureInfo.InvariantCulture, out var parsedAmount))
                 {
                     errors.Add(new CsvImportError
                     {
@@ -98,7 +99,7 @@ namespace ICCardManager.Services.Import.Parsers
             int? balance = null;
             if (!string.IsNullOrWhiteSpace(balanceStr))
             {
-                if (!int.TryParse(balanceStr, out var parsedBalance))
+                if (!int.TryParse(balanceStr, NumberStyles.Integer, CultureInfo.InvariantCulture, out var parsedBalance))
                 {
                     errors.Add(new CsvImportError
                     {
@@ -133,7 +134,7 @@ namespace ICCardManager.Services.Import.Parsers
             int? groupId = null;
             if (!string.IsNullOrWhiteSpace(groupIdStr))
             {
-                if (!int.TryParse(groupIdStr, out var parsedGroupId))
+                if (!int.TryParse(groupIdStr, NumberStyles.Integer, CultureInfo.InvariantCulture, out var parsedGroupId))
                 {
                     errors.Add(new CsvImportError
                     {

@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Linq;
 using System.Threading.Tasks;
 using ICCardManager.Common;
@@ -122,8 +123,8 @@ namespace ICCardManager.Services
                 changes.Add(new FieldChange
                 {
                     FieldName = "同行者数",
-                    OldValue = existingLedger.CompanionCount.ToString(),
-                    NewValue = newCompanionCount.Value.ToString()
+                    OldValue = existingLedger.CompanionCount.ToString(CultureInfo.InvariantCulture),
+                    NewValue = newCompanionCount.Value.ToString(CultureInfo.InvariantCulture)
                 });
             }
         }

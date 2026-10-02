@@ -50,7 +50,7 @@ namespace ICCardManager.Dtos
         public int ReportStatusUnknownCount { get; set; }
 
         /// <summary>カードごとの明細</summary>
-        public IReadOnlyList<AdminDashboardCardStatus> Cards { get; set; } = new AdminDashboardCardStatus[0];
+        public IReadOnlyList<AdminDashboardCardStatus> Cards { get; set; } = Array.Empty<AdminDashboardCardStatus>();
     }
 
     /// <summary>

@@ -1,4 +1,5 @@
 using System.Data.SQLite;
+using System.Globalization;
 
 namespace ICCardManager.Data.Migrations
 {
@@ -105,12 +106,12 @@ LIMIT -1 OFFSET 1";
 FROM ic_card WHERE card_type = @cardType";
                     maxCmd.Parameters.AddWithValue("@cardType", cardType);
                     var maxResult = maxCmd.ExecuteScalar();
-                    var nextNumber = (maxResult == System.DBNull.Value ? 0 : System.Convert.ToInt32(maxResult)) + 1;
+                    var nextNumber = (maxResult == System.DBNull.Value ? 0 : System.Convert.ToInt32(maxResult, CultureInfo.InvariantCulture)) + 1;
 
                     using var updateCmd = connection.CreateCommand();
                     updateCmd.Transaction = transaction;
                     updateCmd.CommandText = "UPDATE ic_card SET card_number = @newNumber WHERE card_idm = @cardIdm";
-                    updateCmd.Parameters.AddWithValue("@newNumber", nextNumber.ToString());
+                    updateCmd.Parameters.AddWithValue("@newNumber", nextNumber.ToString(CultureInfo.InvariantCulture));
                     updateCmd.Parameters.AddWithValue("@cardIdm", idm);
                     updateCmd.ExecuteNonQuery();
                 }

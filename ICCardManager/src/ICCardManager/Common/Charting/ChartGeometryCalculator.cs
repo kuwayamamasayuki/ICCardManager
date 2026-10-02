@@ -21,10 +21,10 @@ namespace ICCardManager.Common.Charting
         /// <summary>棒の隙間比率の上限。これを超えると棒が視認できないほど細くなる。</summary>
         private const double MaxGapRatio = 0.9;
 
-        private static readonly ChartPoint[] EmptyPoints = new ChartPoint[0];
-        private static readonly ChartBar[] EmptyBars = new ChartBar[0];
-        private static readonly ChartAxisTick[] EmptyTicks = new ChartAxisTick[0];
-        private static readonly IReadOnlyList<ChartPoint>[] EmptySegments = new IReadOnlyList<ChartPoint>[0];
+        private static readonly ChartPoint[] EmptyPoints = Array.Empty<ChartPoint>();
+        private static readonly ChartBar[] EmptyBars = Array.Empty<ChartBar>();
+        private static readonly ChartAxisTick[] EmptyTicks = Array.Empty<ChartAxisTick>();
+        private static readonly IReadOnlyList<ChartPoint>[] EmptySegments = Array.Empty<IReadOnlyList<ChartPoint>>();
 
         /// <summary>
         /// カテゴリ（月・カード等）を等間隔に並べたときの各スロット中心の X 座標を返す。
@@ -33,7 +33,7 @@ namespace ICCardManager.Common.Charting
         {
             if (count <= 0 || area == null || !area.IsValid)
             {
-                return new double[0];
+                return Array.Empty<double>();
             }
 
             var slotWidth = area.Width / count;
@@ -53,7 +53,7 @@ namespace ICCardManager.Common.Charting
         {
             if (count <= 0 || area == null || !area.IsValid)
             {
-                return new double[0];
+                return Array.Empty<double>();
             }
 
             var slotHeight = area.Height / count;

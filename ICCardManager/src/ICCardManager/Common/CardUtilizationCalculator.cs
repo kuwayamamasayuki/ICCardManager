@@ -115,7 +115,7 @@ namespace ICCardManager.Common
         {
             if (monthlyValues == null || monthlyValues.Count == 0)
             {
-                return new double?[0];
+                return Array.Empty<double?>();
             }
 
             var result = new double?[monthlyValues.Count];

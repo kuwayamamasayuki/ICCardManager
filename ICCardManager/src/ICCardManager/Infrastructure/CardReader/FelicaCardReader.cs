@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Linq;
 using System.Threading.Tasks;
 using System.Timers;
@@ -631,7 +632,7 @@ namespace ICCardManager.Infrastructure.CardReader
                 CardRead?.Invoke(this, new CardReadEventArgs
                 {
                     Idm = idm,
-                    SystemCode = FelicaSystemCode.Suica.ToString("X4")
+                    SystemCode = FelicaSystemCode.Suica.ToString("X4", CultureInfo.InvariantCulture)
                 });
             }
             catch (Exception ex)

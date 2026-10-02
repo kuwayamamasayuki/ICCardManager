@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Windows;
 using System.Windows.Automation;
 using System.Windows.Controls;
@@ -109,7 +110,7 @@ namespace ICCardManager.Views.Dialogs
         {
             if (_currentCardBalance.HasValue)
             {
-                CarryoverBalanceTextBox.Text = _currentCardBalance.Value.ToString();
+                CarryoverBalanceTextBox.Text = _currentCardBalance.Value.ToString(CultureInfo.CurrentCulture);
             }
         }
 

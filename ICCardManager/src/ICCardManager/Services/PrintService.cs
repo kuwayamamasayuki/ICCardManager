@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Linq;
 using System.Printing;
 using System.Threading.Tasks;
@@ -612,7 +613,7 @@ namespace ICCardManager.Services
         /// <summary>
         /// ヘッダセルを作成
         /// </summary>
-        private TableCell CreateHeaderCell(string text, bool isBold)
+        private static TableCell CreateHeaderCell(string text, bool isBold)
         {
             var cell = new TableCell(new Paragraph(new Run(text))
             {
@@ -630,7 +631,7 @@ namespace ICCardManager.Services
         /// <summary>
         /// データテーブルを作成
         /// </summary>
-        private Table CreateDataTable(ReportPrintData data)
+        private static Table CreateDataTable(ReportPrintData data)
         {
             return CreateDataTableInternal(data, includeSummary: true);
         }
@@ -638,7 +639,7 @@ namespace ICCardManager.Services
         /// <summary>
         /// 合計行を含まないデータテーブルを作成（複数ページの途中ページ用）
         /// </summary>
-        private Table CreateDataTableWithoutSummary(ReportPrintData data)
+        private static Table CreateDataTableWithoutSummary(ReportPrintData data)
         {
             return CreateDataTableInternal(data, includeSummary: false);
         }
@@ -682,6 +683,13 @@ namespace ICCardManager.Services
         }
 
         /// <summary>
+        /// ヘッダ行のセル。呼び出しごとに配列を作らないよう共有する（CA1861）。
+        /// 共有するので、受け手が書き換えられない読み取り専用の包みで持つ。
+        /// </summary>
+        private static readonly IReadOnlyList<string> HeaderCells =
+            Array.AsReadOnly(new[] { "出納日", "摘要", "受入金額", "払出金額", "残額", "氏名", "備考" });
+
+        /// <summary>
         /// 帳票テーブルの行データを純粋関数として組み立てる。
         /// </summary>
         /// <remarks>
@@ -696,7 +704,7 @@ namespace ICCardManager.Services
 
             // ヘッダ行
             rows.Add(new PrintTableRowDescriptor(
-                new[] { "出納日", "摘要", "受入金額", "払出金額", "残額", "氏名", "備考" },
+                HeaderCells,
                 isBold: true,
                 kind: PrintRowKind.Header));
 
@@ -708,9 +716,9 @@ namespace ICCardManager.Services
                     {
                         row.DateDisplay,
                         row.Summary,
-                        row.Income?.ToString("N0") ?? "",
-                        row.Expense?.ToString("N0") ?? "",
-                        row.Balance?.ToString("N0") ?? "",
+                        row.Income?.ToString("N0", CultureInfo.CurrentCulture) ?? "",
+                        row.Expense?.ToString("N0", CultureInfo.CurrentCulture) ?? "",
+                        row.Balance?.ToString("N0", CultureInfo.CurrentCulture) ?? "",
                         row.StaffName ?? "",
                         row.Note ?? "",
                     },
@@ -729,9 +737,9 @@ namespace ICCardManager.Services
                 {
                     "",
                     data.MonthlyTotal.Label,
-                    data.MonthlyTotal.Income.ToString("N0"),
-                    data.MonthlyTotal.Expense.ToString("N0"),
-                    data.MonthlyTotal.Balance?.ToString("N0") ?? "",
+                    data.MonthlyTotal.Income.ToString("N0", CultureInfo.CurrentCulture),
+                    data.MonthlyTotal.Expense.ToString("N0", CultureInfo.CurrentCulture),
+                    data.MonthlyTotal.Balance?.ToString("N0", CultureInfo.CurrentCulture) ?? "",
                     "",
                     "",
                 },
@@ -746,9 +754,9 @@ namespace ICCardManager.Services
                     {
                         "",
                         data.CumulativeTotal.Label,
-                        data.CumulativeTotal.Income.ToString("N0"),
-                        data.CumulativeTotal.Expense.ToString("N0"),
-                        data.CumulativeTotal.Balance?.ToString("N0") ?? "",
+                        data.CumulativeTotal.Income.ToString("N0", CultureInfo.CurrentCulture),
+                        data.CumulativeTotal.Expense.ToString("N0", CultureInfo.CurrentCulture),
+                        data.CumulativeTotal.Balance?.ToString("N0", CultureInfo.CurrentCulture) ?? "",
                         "",
                         "",
                     },
@@ -765,7 +773,7 @@ namespace ICCardManager.Services
                         "",
                         SummaryGenerator.GetCarryoverToNextYearSummary(),
                         "",
-                        data.CarryoverToNextYear.Value.ToString("N0"),
+                        data.CarryoverToNextYear.Value.ToString("N0", CultureInfo.CurrentCulture),
                         "0",
                         "",
                         "",
@@ -817,7 +825,7 @@ namespace ICCardManager.Services
         /// 純粋データ構築は <see cref="BuildPrintTableRows"/> に委譲し、
         /// このメソッドは WPF <see cref="Table"/> オブジェクトの組み立てに専念する。
         /// </remarks>
-        private Table CreateDataTableInternal(ReportPrintData data, bool includeSummary)
+        private static Table CreateDataTableInternal(ReportPrintData data, bool includeSummary)
         {
             var table = new Table
             {
@@ -859,7 +867,7 @@ namespace ICCardManager.Services
         /// <summary>
         /// データセルを作成
         /// </summary>
-        private TableCell CreateDataCell(string text, bool isBold, TextAlignment alignment)
+        private static TableCell CreateDataCell(string text, bool isBold, TextAlignment alignment)
         {
             var para = new Paragraph(new Run(text))
             {

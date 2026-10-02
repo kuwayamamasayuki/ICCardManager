@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Data;
 using System.Data.SQLite;
+using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Security.AccessControl;
@@ -853,13 +854,13 @@ namespace ICCardManager.Data
                 cmd.CommandText = $"PRAGMA journal_mode = {mode};";
                 var result = cmd.ExecuteScalar()?.ToString()?.ToLowerInvariant();
 
-                if (result == mode.ToLowerInvariant())
+                if (string.Equals(result, mode, StringComparison.OrdinalIgnoreCase))
                 {
                     if (mode != "DELETE")
                     {
                         // DELETE以外にフォールバックした場合は警告
                         var message = $"journal_modeをDELETEに設定できなかったため、{mode}を使用します";
-                        _logger?.LogWarning(message);
+                        _logger?.LogWarning("{Message}", message);
 #if DEBUG
                         System.Diagnostics.Debug.WriteLine($"[DbContext] 警告: {message}");
 #endif
@@ -877,7 +878,7 @@ namespace ICCardManager.Data
 
             var warningMessage = $"journal_modeの設定に失敗しました（現在: {currentMode}）。" +
                                  "データベースのクラッシュ耐性が低下している可能性があります。";
-            _logger?.LogWarning(warningMessage);
+            _logger?.LogWarning("{Message}", warningMessage);
 #if DEBUG
             System.Diagnostics.Debug.WriteLine($"[DbContext] 警告: {warningMessage}");
 #endif
@@ -1218,7 +1219,7 @@ ON CONFLICT(key) DO UPDATE SET value = excluded.value";
         /// staffテーブルが存在するがschema_migrationsテーブルが存在しない場合、
         /// 既存DBとみなしてバージョン1として記録する
         /// </remarks>
-        private void HandleLegacyDatabase(SQLiteConnection connection)
+        private static void HandleLegacyDatabase(SQLiteConnection connection)
         {
             // staffテーブルの存在確認（既存DBの判定）
             using var checkStaffCmd = connection.CreateCommand();
@@ -2072,7 +2073,7 @@ ON CONFLICT(key) DO UPDATE SET value = excluded.value";
                 using var command = lease.Connection.CreateCommand();
 
                 command.CommandText = "PRAGMA user_version;";
-                var currentVersion = Convert.ToInt64(command.ExecuteScalar());
+                var currentVersion = Convert.ToInt64(command.ExecuteScalar(), CultureInfo.InvariantCulture);
 
                 command.CommandText = "BEGIN IMMEDIATE;";
                 command.ExecuteNonQuery();

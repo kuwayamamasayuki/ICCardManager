@@ -36,6 +36,12 @@
         "resolved": "1.2.67",
         "contentHash": "g3XRxNzgRPPjGUVN24+qtZN5fK8GucHznI/Fx+aD2+premTjdFz9jhUCcHQ8YJSERnqx632rT8uNgDL0wFPQdQ=="
       },
+      "Microsoft.CodeAnalysis.NetAnalyzers": {
+        "type": "Direct",
+        "requested": "[8.0.0, )",
+        "resolved": "8.0.0",
+        "contentHash": "DxiTgkCl3CGq1rYmBX2wjY7XGbxiBdL4J+/AJIAFLKy5z70NxhnVRnPghnicXZ8oF6JKVXlW3xwznRbI3ioEKg=="
+      },
       "Microsoft.Extensions.Caching.Memory": {
         "type": "Direct",
         "requested": "[8.0.1, )",

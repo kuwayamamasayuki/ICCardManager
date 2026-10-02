@@ -21,16 +21,16 @@ namespace ICCardManager.Dtos
         public int PeriodDayCount { get; set; }
 
         /// <summary>集計期間に含まれる年月のラベル（"yyyy/MM" 形式、昇順）</summary>
-        public IReadOnlyList<string> MonthLabels { get; set; } = new string[0];
+        public IReadOnlyList<string> MonthLabels { get; set; } = Array.Empty<string>();
 
         /// <summary>カード別の稼働状況（稼働率の低い順）</summary>
-        public IReadOnlyList<CardUtilizationItem> Utilizations { get; set; } = new CardUtilizationItem[0];
+        public IReadOnlyList<CardUtilizationItem> Utilizations { get; set; } = Array.Empty<CardUtilizationItem>();
 
         /// <summary>職員別の月次利用額系列（利用額の多い順、上位以外は「その他」に集約）</summary>
-        public IReadOnlyList<MonthlyUsageSeries> UsageSeries { get; set; } = new MonthlyUsageSeries[0];
+        public IReadOnlyList<MonthlyUsageSeries> UsageSeries { get; set; } = Array.Empty<MonthlyUsageSeries>();
 
         /// <summary>カード別の月末残高系列</summary>
-        public IReadOnlyList<MonthlyBalanceSeries> BalanceSeries { get; set; } = new MonthlyBalanceSeries[0];
+        public IReadOnlyList<MonthlyBalanceSeries> BalanceSeries { get; set; } = Array.Empty<MonthlyBalanceSeries>();
     }
 
     /// <summary>
@@ -187,7 +187,7 @@ namespace ICCardManager.Dtos
         }
 
         /// <summary>月ごとの払出金額（<see cref="AdminDashboardAnalytics.MonthLabels"/> と同じ並び・長さ）</summary>
-        public IReadOnlyList<int> MonthlyExpenses { get; set; } = new int[0];
+        public IReadOnlyList<int> MonthlyExpenses { get; set; } = Array.Empty<int>();
 
         /// <summary>期間内の払出金額の合計</summary>
         public int TotalExpense { get; set; }
@@ -208,6 +208,6 @@ namespace ICCardManager.Dtos
         /// 月ごとの月末残高。取引の無い月は前月の残高を引き継ぐ。
         /// 取引開始前の月は null（折れ線を描き始めない）。
         /// </summary>
-        public IReadOnlyList<double?> MonthlyBalances { get; set; } = new double?[0];
+        public IReadOnlyList<double?> MonthlyBalances { get; set; } = Array.Empty<double?>();
     }
 }

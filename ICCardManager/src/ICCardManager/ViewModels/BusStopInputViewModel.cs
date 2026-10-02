@@ -893,15 +893,14 @@ public partial class BusStopInputItem : ObservableObject
         else
         {
             // 入力文字列を含む候補を抽出（先頭一致優先、次に部分一致）
-            var inputLower = input.ToLowerInvariant();
-
+            // 大文字小文字は区別しない。比較は文化圏に依存させない（CA1310 / CA1862）。
             var startsWithMatches = _allSuggestions
-                .Where(s => s.ToLowerInvariant().StartsWith(inputLower))
+                .Where(s => s.StartsWith(input, StringComparison.OrdinalIgnoreCase))
                 .Take(5);
 
             var containsMatches = _allSuggestions
-                .Where(s => !s.ToLowerInvariant().StartsWith(inputLower) &&
-                            s.ToLowerInvariant().Contains(inputLower))
+                .Where(s => !s.StartsWith(input, StringComparison.OrdinalIgnoreCase) &&
+                            s.IndexOf(input, StringComparison.OrdinalIgnoreCase) >= 0)
                 .Take(5);
 
             matches = startsWithMatches.Concat(containsMatches).Take(8).ToList();

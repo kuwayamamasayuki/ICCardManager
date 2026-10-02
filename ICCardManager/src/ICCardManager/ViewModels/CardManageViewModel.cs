@@ -1637,7 +1637,7 @@ namespace ICCardManager.ViewModels
             if (_cardReader is MockCardReader mockReader)
             {
                 // 未使用のIDmを生成
-                var newIdm = $"07FE{Guid.NewGuid().ToString("N").Substring(0, 12).ToUpper()}";
+                var newIdm = $"07FE{Guid.NewGuid().ToString("N").Substring(0, 12).ToUpperInvariant()}";
                 mockReader.SimulateCardRead(newIdm);
             }
         }

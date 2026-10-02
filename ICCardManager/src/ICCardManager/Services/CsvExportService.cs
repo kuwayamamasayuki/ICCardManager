@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Text;
@@ -221,18 +222,18 @@ namespace ICCardManager.Services
                     var cardNumber = cardNumberMap.TryGetValue(ledger.CardIdm, out var num) ? num : "";
 
                     lines.Add(string.Join(",",
-                        ledger.Id.ToString(),
+                        ledger.Id.ToString(CultureInfo.InvariantCulture),
                         SqliteDateTimeFormat.ToText(ledger.Date),
                         EscapeCsvField(ledger.CardIdm),
                         EscapeCsvField(cardNumber),
                         EscapeCsvField(ledger.Summary),
-                        ledger.Income > 0 ? ledger.Income.ToString() : "",
-                        ledger.Expense > 0 ? ledger.Expense.ToString() : "",
-                        ledger.Balance.ToString(),
+                        ledger.Income > 0 ? ledger.Income.ToString(CultureInfo.InvariantCulture) : "",
+                        ledger.Expense > 0 ? ledger.Expense.ToString(CultureInfo.InvariantCulture) : "",
+                        ledger.Balance.ToString(CultureInfo.InvariantCulture),
                         EscapeCsvField(ledger.StaffName ?? ""),
                         EscapeCsvField(ledger.Note ?? ""),
                         // Issue #1906: 同行者数は利用者列とは別列に出す（「外N名」を氏名へ混ぜると取込で往復しない、#1808）
-                        ledger.CompanionCount > 0 ? ledger.CompanionCount.ToString() : ""
+                        ledger.CompanionCount > 0 ? ledger.CompanionCount.ToString(CultureInfo.InvariantCulture) : ""
                     ));
                 }
 
@@ -334,19 +335,19 @@ namespace ICCardManager.Services
                     var cardNumber = !string.IsNullOrEmpty(cardIdm) && cardNumberMap.TryGetValue(cardIdm, out var num) ? num : "";
 
                     lines.Add(string.Join(",",
-                        detail.LedgerId.ToString(),
+                        detail.LedgerId.ToString(CultureInfo.InvariantCulture),
                         detail.UseDate.HasValue ? SqliteDateTimeFormat.ToText(detail.UseDate.Value) : "",
                         EscapeCsvField(cardIdm),
                         EscapeCsvField(cardNumber),
                         EscapeCsvField(detail.EntryStation ?? ""),
                         EscapeCsvField(detail.ExitStation ?? ""),
                         EscapeCsvField(detail.BusStops ?? ""),
-                        detail.Amount.HasValue ? detail.Amount.Value.ToString() : "",
-                        detail.Balance.HasValue ? detail.Balance.Value.ToString() : "",
+                        detail.Amount.HasValue ? detail.Amount.Value.ToString(CultureInfo.InvariantCulture) : "",
+                        detail.Balance.HasValue ? detail.Balance.Value.ToString(CultureInfo.InvariantCulture) : "",
                         detail.IsCharge ? "1" : "0",
                         detail.IsPointRedemption ? "1" : "0",
                         detail.IsBus ? "1" : "0",
-                        detail.GroupId.HasValue ? detail.GroupId.Value.ToString() : ""
+                        detail.GroupId.HasValue ? detail.GroupId.Value.ToString(CultureInfo.InvariantCulture) : ""
                     ));
                 }
 

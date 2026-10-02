@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
+using System.Globalization;
 using System.Threading.Tasks;
 using CommunityToolkit.Mvvm.ComponentModel;
 using ICCardManager.Common;
@@ -137,7 +138,7 @@ namespace ICCardManager.ViewModels
         public static CarryoverDataLossRow From(CarryoverDataLossItem item) => new CarryoverDataLossRow
         {
             CardDisplayName = item.CardDisplayName,
-            LostStartingPageNumberText = item.LostStartingPageNumber?.ToString() ?? CarryoverDataLossViewModel.NotLostText,
+            LostStartingPageNumberText = item.LostStartingPageNumber?.ToString(CultureInfo.CurrentCulture) ?? CarryoverDataLossViewModel.NotLostText,
             LostCarryoverIncomeTotalText = FormatAmount(item.LostCarryoverIncomeTotal),
             LostCarryoverExpenseTotalText = FormatAmount(item.LostCarryoverExpenseTotal),
 

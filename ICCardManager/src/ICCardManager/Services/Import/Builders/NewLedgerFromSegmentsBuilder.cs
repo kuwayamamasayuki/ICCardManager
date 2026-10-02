@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics.CodeAnalysis;
 using System.Globalization;
 using System.Linq;
 using System.Text.RegularExpressions;
@@ -211,6 +212,11 @@ namespace ICCardManager.Services.Import.Builders
         /// <c>ILogger</c> を持たない層の受け皿が <c>ErrorDialogHelper.LogException</c> であることも
         /// 同節が定めている）。
         /// </remarks>
+        [SuppressMessage(
+            "Usage",
+            "CA2254:Template should be a static expression",
+            Justification = "テンプレートを転送するだけのヘルパー。呼び出し元 2 か所はいずれも定数のテンプレートを渡しており、"
+                + "ILogger が無いときにプレースホルダを値で埋めるため、テンプレートと引数を分けたまま受け取る必要がある。")]
         private void LogFailure(Exception ex, string messageTemplate, params object[] args)
         {
             if (_logger != null)

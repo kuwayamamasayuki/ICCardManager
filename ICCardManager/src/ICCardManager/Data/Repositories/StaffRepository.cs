@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Data.Common;
 using System.Data.SQLite;
+using System.Globalization;
 using System.Linq;
 using System.Threading.Tasks;
 using ICCardManager.Common;
@@ -340,7 +341,7 @@ WHERE staff_idm = @staffIdm AND is_deleted = 1";
             command.Parameters.AddWithValue("@staffIdm", staffIdm);
 
             var result = await command.ExecuteScalarAsync().ConfigureAwait(false);
-            return Convert.ToInt32(result) > 0;
+            return Convert.ToInt32(result, CultureInfo.InvariantCulture) > 0;
         }
 
         /// <summary>

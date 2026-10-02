@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using ICCardManager.Common;
 using ICCardManager.Models;
 
@@ -71,7 +72,7 @@ namespace ICCardManager.Services.Import.Parsers
             int? ledgerId = null;
             if (hasIdColumn && !string.IsNullOrWhiteSpace(idStr))
             {
-                if (!int.TryParse(idStr, out var parsedId))
+                if (!int.TryParse(idStr, NumberStyles.Integer, CultureInfo.InvariantCulture, out var parsedId))
                 {
                     errors.Add(new CsvImportError
                     {
@@ -135,7 +136,7 @@ namespace ICCardManager.Services.Import.Parsers
                 return null;
             }
 
-            if (!int.TryParse(balanceStr, out var balance))
+            if (!int.TryParse(balanceStr, NumberStyles.Integer, CultureInfo.InvariantCulture, out var balance))
             {
                 errors.Add(new CsvImportError
                 {
@@ -147,7 +148,7 @@ namespace ICCardManager.Services.Import.Parsers
             }
 
             var income = 0;
-            if (!string.IsNullOrWhiteSpace(incomeStr) && !int.TryParse(incomeStr, out income))
+            if (!string.IsNullOrWhiteSpace(incomeStr) && !int.TryParse(incomeStr, NumberStyles.Integer, CultureInfo.InvariantCulture, out income))
             {
                 errors.Add(new CsvImportError
                 {
@@ -159,7 +160,7 @@ namespace ICCardManager.Services.Import.Parsers
             }
 
             var expense = 0;
-            if (!string.IsNullOrWhiteSpace(expenseStr) && !int.TryParse(expenseStr, out expense))
+            if (!string.IsNullOrWhiteSpace(expenseStr) && !int.TryParse(expenseStr, NumberStyles.Integer, CultureInfo.InvariantCulture, out expense))
             {
                 errors.Add(new CsvImportError
                 {
@@ -174,7 +175,7 @@ namespace ICCardManager.Services.Import.Parsers
             var hasCompanionCountColumn = fields.Count > 9 + offset;
             var companionCount = 0;
             if (!string.IsNullOrWhiteSpace(companionCountStr) &&
-                (!int.TryParse(companionCountStr, out companionCount) ||
+                (!int.TryParse(companionCountStr, NumberStyles.Integer, CultureInfo.InvariantCulture, out companionCount) ||
                  companionCount < 0 || companionCount > Common.StaffNameFormatter.MaxCompanionCount))
             {
                 errors.Add(new CsvImportError

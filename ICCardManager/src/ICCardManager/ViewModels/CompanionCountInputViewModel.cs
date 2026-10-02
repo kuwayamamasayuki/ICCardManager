@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
+using System.Globalization;
 using System.Linq;
 using System.Threading.Tasks;
 using CommunityToolkit.Mvvm.ComponentModel;
@@ -280,7 +281,7 @@ public partial class CompanionCountInputItem : ObservableObject
     public CompanionCountInputItem(Ledger ledger)
     {
         Ledger = ledger ?? throw new ArgumentNullException(nameof(ledger));
-        _companionCountText = ledger.CompanionCount.ToString();
+        _companionCountText = ledger.CompanionCount.ToString(CultureInfo.CurrentCulture);
     }
 
     public string UseDateDisplay => DisplayFormatters.FormatDate(Ledger.Date);

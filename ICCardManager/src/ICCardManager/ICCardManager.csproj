@@ -27,6 +27,14 @@
     <!-- CS1591: XMLコメント欠落, CS8632: Nullable注釈警告（.NET Fx 4.8ではNullable無効のため） -->
     <NoWarn>$(NoWarn);CS1591;CS8632</NoWarn>
 
+    <!-- Issue #2162: .NET アナライザー（CA ルール）を有効化する。net48 では SDK 組み込みのアナライザーが既定で無効のため明示する。
+         Recommended は「既定で有効なルール」より広い推奨セット。是正しないルールは ICCardManager/.editorconfig で
+         ID ごとに重大度を下げ、理由を直前のコメントに書く（BuildWarningSuppressionConventionTests が検査する）。
+         アナライザーは下の PackageReference で版を固定する（SDK の更新でルールが黙って増減しないように）。 -->
+    <EnableNETAnalyzers>true</EnableNETAnalyzers>
+    <AnalysisLevel>latest</AnalysisLevel>
+    <AnalysisMode>Recommended</AnalysisMode>
+
     <!-- テストプロジェクトからinternalメンバーへのアクセスを許可 -->
     <InternalsVisibleTo>ICCardManager.Tests</InternalsVisibleTo>
     <!-- Issue #2012: 開発者向けツール DebugDataViewer が
@@ -86,6 +94,12 @@
 
     <!-- FeliCa Library - Sony PaSoRi 用 -->
     <PackageReference Include="FelicaLib.DotNet" Version="1.2.67" />
+
+    <!-- Issue #2162: .NET アナライザー（ビルド時のみ。配布物には含まれない）。
+         版は global.json の SDK（8.0）に揃える。SDK に同梱のアナライザーではなくパッケージで固定するのは、
+         SDK の機能帯が上がる（rollForward = latestFeature）だけで同梱のアナライザーの版が変わり得て、開発機と CI で結果が分かれないようにするため。
+         版を上げるとルールが増えるので、上げる PR で Release・Debug の警告 0 を実測する。 -->
+    <PackageReference Include="Microsoft.CodeAnalysis.NetAnalyzers" Version="8.0.0" PrivateAssets="all" IncludeAssets="runtime; build; native; contentfiles; analyzers; buildtransitive" />
   </ItemGroup>
 
   <ItemGroup>

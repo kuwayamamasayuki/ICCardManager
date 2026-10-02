@@ -104,7 +104,7 @@ namespace ICCardManager.Common
             if (value is bool boolValue)
             {
                 // parameterが指定されている場合は反転
-                var invert = parameter?.ToString()?.ToLower() == "invert";
+                var invert = string.Equals(parameter?.ToString(), "invert", StringComparison.OrdinalIgnoreCase);
                 var isVisible = invert ? !boolValue : boolValue;
                 return isVisible ? Visibility.Visible : Visibility.Collapsed;
             }
