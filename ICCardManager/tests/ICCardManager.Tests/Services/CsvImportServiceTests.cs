@@ -3606,9 +3606,9 @@ FEDCBA9876543210,鈴木花子,002,テスト2";
             .ReturnsAsync(new IcCard { CardIdm = "0123456789ABCDEF", CardType = "はやかけん" });
 
         // InsertAsyncで新しいledger IDとして100を返す
-        _ledgerRepositoryMock.Setup(x => x.InsertAsync(It.IsAny<Ledger>()))
+        _ledgerRepositoryMock.Setup(x => x.InsertAsync(It.IsAny<Ledger>(), It.IsAny<SQLiteTransaction>()))
             .ReturnsAsync(100);
-        _ledgerRepositoryMock.Setup(x => x.InsertDetailsAsync(100, It.IsAny<IEnumerable<LedgerDetail>>()))
+        _ledgerRepositoryMock.Setup(x => x.InsertDetailsAsync(100, It.IsAny<IEnumerable<LedgerDetail>>(), It.IsAny<SQLiteTransaction>()))
             .ReturnsAsync(true);
 
         // Act
@@ -3622,11 +3622,11 @@ FEDCBA9876543210,鈴木花子,002,テスト2";
         _ledgerRepositoryMock.Verify(x => x.InsertAsync(It.Is<Ledger>(l =>
             l.CardIdm == "0123456789ABCDEF" &&
             l.Expense == 520 &&
-            l.Balance == 9480)), Times.Once);
+            l.Balance == 9480), It.IsAny<SQLiteTransaction>()), Times.Once);
 
         // 詳細が新しいledger IDで挿入されること
         _ledgerRepositoryMock.Verify(x => x.InsertDetailsAsync(100,
-            It.Is<IEnumerable<LedgerDetail>>(d => d.Count() == 2)), Times.Once);
+            It.Is<IEnumerable<LedgerDetail>>(d => d.Count() == 2), It.IsAny<SQLiteTransaction>()), Times.Once);
     }
 
     /// <summary>
@@ -3662,9 +3662,9 @@ FEDCBA9876543210,鈴木花子,002,テスト2";
         // 新規カード
         _cardRepositoryMock.Setup(x => x.GetByIdmAsync("AAAA456789ABCDEF", true))
             .ReturnsAsync(new IcCard { CardIdm = "AAAA456789ABCDEF", CardType = "nimoca" });
-        _ledgerRepositoryMock.Setup(x => x.InsertAsync(It.IsAny<Ledger>()))
+        _ledgerRepositoryMock.Setup(x => x.InsertAsync(It.IsAny<Ledger>(), It.IsAny<SQLiteTransaction>()))
             .ReturnsAsync(200);
-        _ledgerRepositoryMock.Setup(x => x.InsertDetailsAsync(200, It.IsAny<IEnumerable<LedgerDetail>>()))
+        _ledgerRepositoryMock.Setup(x => x.InsertDetailsAsync(200, It.IsAny<IEnumerable<LedgerDetail>>(), It.IsAny<SQLiteTransaction>()))
             .ReturnsAsync(true);
 
         // Act
@@ -3679,9 +3679,9 @@ FEDCBA9876543210,鈴木花子,002,テスト2";
             It.Is<IEnumerable<LedgerDetail>>(d => d.Count() == 1), It.IsAny<SQLiteTransaction>()), Times.Once);
         // 新規ledgerは作成+挿入
         _ledgerRepositoryMock.Verify(x => x.InsertAsync(It.Is<Ledger>(l =>
-            l.CardIdm == "AAAA456789ABCDEF")), Times.Once);
+            l.CardIdm == "AAAA456789ABCDEF"), It.IsAny<SQLiteTransaction>()), Times.Once);
         _ledgerRepositoryMock.Verify(x => x.InsertDetailsAsync(200,
-            It.Is<IEnumerable<LedgerDetail>>(d => d.Count() == 1)), Times.Once);
+            It.Is<IEnumerable<LedgerDetail>>(d => d.Count() == 1), It.IsAny<SQLiteTransaction>()), Times.Once);
     }
 
     /// <summary>
@@ -3701,10 +3701,10 @@ FEDCBA9876543210,鈴木花子,002,テスト2";
             .ReturnsAsync(new IcCard { CardIdm = "0123456789ABCDEF", CardType = "はやかけん" });
 
         Ledger? capturedLedger = null;
-        _ledgerRepositoryMock.Setup(x => x.InsertAsync(It.IsAny<Ledger>()))
-            .Callback<Ledger>(l => capturedLedger = l)
+        _ledgerRepositoryMock.Setup(x => x.InsertAsync(It.IsAny<Ledger>(), It.IsAny<SQLiteTransaction>()))
+            .Callback<Ledger, SQLiteTransaction>((l, _) => capturedLedger = l)
             .ReturnsAsync(100);
-        _ledgerRepositoryMock.Setup(x => x.InsertDetailsAsync(100, It.IsAny<IEnumerable<LedgerDetail>>()))
+        _ledgerRepositoryMock.Setup(x => x.InsertDetailsAsync(100, It.IsAny<IEnumerable<LedgerDetail>>(), It.IsAny<SQLiteTransaction>()))
             .ReturnsAsync(true);
 
         // Act
@@ -3741,10 +3741,10 @@ FEDCBA9876543210,鈴木花子,002,テスト2";
             .ReturnsAsync(new IcCard { CardIdm = "0123456789ABCDEF", CardType = "はやかけん" });
 
         Ledger? capturedLedger = null;
-        _ledgerRepositoryMock.Setup(x => x.InsertAsync(It.IsAny<Ledger>()))
-            .Callback<Ledger>(l => capturedLedger = l)
+        _ledgerRepositoryMock.Setup(x => x.InsertAsync(It.IsAny<Ledger>(), It.IsAny<SQLiteTransaction>()))
+            .Callback<Ledger, SQLiteTransaction>((l, _) => capturedLedger = l)
             .ReturnsAsync(100);
-        _ledgerRepositoryMock.Setup(x => x.InsertDetailsAsync(100, It.IsAny<IEnumerable<LedgerDetail>>()))
+        _ledgerRepositoryMock.Setup(x => x.InsertDetailsAsync(100, It.IsAny<IEnumerable<LedgerDetail>>(), It.IsAny<SQLiteTransaction>()))
             .ReturnsAsync(true);
 
         // Act
@@ -3864,10 +3864,10 @@ FEDCBA9876543210,鈴木花子,002,テスト2";
 
         var capturedLedgers = new List<Ledger>();
         var ledgerIdCounter = 100;
-        _ledgerRepositoryMock.Setup(x => x.InsertAsync(It.IsAny<Ledger>()))
-            .Callback<Ledger>(l => capturedLedgers.Add(l))
+        _ledgerRepositoryMock.Setup(x => x.InsertAsync(It.IsAny<Ledger>(), It.IsAny<SQLiteTransaction>()))
+            .Callback<Ledger, SQLiteTransaction>((l, _) => capturedLedgers.Add(l))
             .ReturnsAsync(() => ledgerIdCounter++);
-        _ledgerRepositoryMock.Setup(x => x.InsertDetailsAsync(It.IsAny<int>(), It.IsAny<IEnumerable<LedgerDetail>>()))
+        _ledgerRepositoryMock.Setup(x => x.InsertDetailsAsync(It.IsAny<int>(), It.IsAny<IEnumerable<LedgerDetail>>(), It.IsAny<SQLiteTransaction>()))
             .ReturnsAsync(true);
 
         // Act
@@ -3892,7 +3892,7 @@ FEDCBA9876543210,鈴木花子,002,テスト2";
 
         // InsertDetailsAsyncが2回呼ばれること（日付ごとに1回）
         _ledgerRepositoryMock.Verify(x => x.InsertDetailsAsync(It.IsAny<int>(),
-            It.IsAny<IEnumerable<LedgerDetail>>()), Times.Exactly(2));
+            It.IsAny<IEnumerable<LedgerDetail>>(), It.IsAny<SQLiteTransaction>()), Times.Exactly(2));
     }
 
     /// <summary>
@@ -3916,10 +3916,10 @@ FEDCBA9876543210,鈴木花子,002,テスト2";
 
         var capturedLedgers = new List<Ledger>();
         var ledgerIdCounter = 100;
-        _ledgerRepositoryMock.Setup(x => x.InsertAsync(It.IsAny<Ledger>()))
-            .Callback<Ledger>(l => capturedLedgers.Add(l))
+        _ledgerRepositoryMock.Setup(x => x.InsertAsync(It.IsAny<Ledger>(), It.IsAny<SQLiteTransaction>()))
+            .Callback<Ledger, SQLiteTransaction>((l, _) => capturedLedgers.Add(l))
             .ReturnsAsync(() => ledgerIdCounter++);
-        _ledgerRepositoryMock.Setup(x => x.InsertDetailsAsync(It.IsAny<int>(), It.IsAny<IEnumerable<LedgerDetail>>()))
+        _ledgerRepositoryMock.Setup(x => x.InsertDetailsAsync(It.IsAny<int>(), It.IsAny<IEnumerable<LedgerDetail>>(), It.IsAny<SQLiteTransaction>()))
             .ReturnsAsync(true);
 
         // Act
@@ -4590,9 +4590,9 @@ FEDCBA9876543210,鈴木花子,002,テスト2";
             .ReturnsAsync(new IcCard { CardIdm = "0123456789ABCDEF", CardType = "はやかけん", CardNumber = "001" });
 
         var ledgerIdCounter = 100;
-        _ledgerRepositoryMock.Setup(x => x.InsertAsync(It.IsAny<Ledger>()))
+        _ledgerRepositoryMock.Setup(x => x.InsertAsync(It.IsAny<Ledger>(), It.IsAny<SQLiteTransaction>()))
             .ReturnsAsync(() => ledgerIdCounter++);
-        _ledgerRepositoryMock.Setup(x => x.InsertDetailsAsync(It.IsAny<int>(), It.IsAny<IEnumerable<LedgerDetail>>()))
+        _ledgerRepositoryMock.Setup(x => x.InsertDetailsAsync(It.IsAny<int>(), It.IsAny<IEnumerable<LedgerDetail>>(), It.IsAny<SQLiteTransaction>()))
             .ReturnsAsync(true);
 
         // Act

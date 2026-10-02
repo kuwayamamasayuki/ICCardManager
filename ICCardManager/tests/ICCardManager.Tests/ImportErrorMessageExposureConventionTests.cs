@@ -207,7 +207,9 @@ public class ImportErrorMessageExposureConventionTests
             // 直接 ToUserMessage を呼ぶ形と、集約したヘルパー（ToUserFacingErrorMessage）を
             // 経由する形の両方を数える。後者を数えないと、対応表を 1 か所へ寄せた実装
             // （#1744 が推奨する形）で対の表明が空振りする。
+            // Issue #2176: 範囲を名指しする文へ「なぜ」だけを埋め込む形（ToReason。#1991）も同じく寄せた形として数える。
             if (expression.Contains("ExceptionMessageFormatter.ToUserMessage(")
+                || expression.Contains("ExceptionMessageFormatter.ToReason(")
                 || expression.Contains("ToUserFacingErrorMessage"))
             {
                 routed.Add($"{relative}:{lineNumber}");

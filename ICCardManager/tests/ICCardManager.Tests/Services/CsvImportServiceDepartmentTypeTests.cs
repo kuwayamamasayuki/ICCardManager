@@ -133,11 +133,12 @@ public class CsvImportServiceDepartmentTypeTests : IDisposable
         var ledgerRepositoryMock = new Mock<ILedgerRepository>();
 
         Ledger? insertedLedger = null;
-        ledgerRepositoryMock.Setup(x => x.InsertAsync(It.IsAny<Ledger>()))
-            .Callback<Ledger>(l => insertedLedger = l)
+        // Issue #2176: 新規作成はグループごとのトランザクションの中で書く（tx ありオーバーロード）
+        ledgerRepositoryMock.Setup(x => x.InsertAsync(It.IsAny<Ledger>(), It.IsAny<SQLiteTransaction>()))
+            .Callback<Ledger, SQLiteTransaction>((l, _) => insertedLedger = l)
             .ReturnsAsync(42);
         ledgerRepositoryMock
-            .Setup(x => x.InsertDetailsAsync(42, It.IsAny<IEnumerable<LedgerDetail>>()))
+            .Setup(x => x.InsertDetailsAsync(42, It.IsAny<IEnumerable<LedgerDetail>>(), It.IsAny<SQLiteTransaction>()))
             .ReturnsAsync(true);
 
         var service = CreateService(ledgerRepositoryMock, departmentType);

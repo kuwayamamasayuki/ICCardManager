@@ -282,7 +282,9 @@ public class CsvImportServiceLedgerDetailTransactionTests : IDisposable
         // Assert
         result.Success.Should().BeFalse();
         result.ImportedCount.Should().Be(0);
-        result.Errors.Should().ContainSingle().Which.Message.Should().Contain("削除された可能性");
+        result.Errors.Should().ContainSingle().Which.Message.Should().Contain("削除された可能性")
+            // Issue #2176: 空欄にして取り込み直す範囲を名指しする（CSV 全体だと取り込めた ID 空欄の行が二重になる。#1781）
+            .And.Contain("この利用履歴IDの行だけを残して");
         await AssertUnchangedAsync(ledgerId, "0 行の競合でも置換を確定させない（Issue #2155）");
     }
 
@@ -382,6 +384,8 @@ public class CsvImportServiceLedgerDetailTransactionTests : IDisposable
         message.Should().Contain($"利用履歴ID {ledgerId}", "何が");
         message.Should().Contain("変更されていません", "なぜ／状態");
         message.Should().MatchRegex("してください。$", "どうすれば: 行動指示で終わる");
+        // Issue #2176: CSV 全体を取り込み直すと、取り込めた利用履歴 ID 空欄の行（#1781）が二重になるため、範囲を名指しする
+        message.Should().Contain("この利用履歴IDの行だけを残したCSV");
         ledgerRepositoryMock.Verify(r => r.UpdateAsync(It.IsAny<Ledger>(), It.IsAny<SQLiteTransaction>()), Times.Never,
             "置換に失敗したら親を更新しない");
         await AssertUnchangedAsync(ledgerId, "置換の件数不足でも途中まで書いた明細を確定させない");
