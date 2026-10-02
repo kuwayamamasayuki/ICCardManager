@@ -44,6 +44,12 @@
 
 アプリケーション本体と共通のライブラリ（System.Data.SQLite.Core、CommunityToolkit.Mvvm、FelicaLib.DotNet、Microsoft.Extensions.*）を使用しています。詳細は「1. アプリケーション本体の依存ライブラリ」を参照してください。
 
+以下はアプリケーション本体のビルド時にのみ使用され、配布されるアプリケーションには含まれません。
+
+| ライブラリ名 | バージョン | ライセンス | 用途 |
+|---|---|---|---|
+| [Microsoft.CodeAnalysis.NetAnalyzers](https://github.com/dotnet/roslyn-analyzers) | 8.0.0 | MIT | .NET アナライザー（CA ルール）によるビルド時の静的解析 |
+
 ## 4. 音声素材
 
 | 素材 | キャラクター | ライセンス・利用規約 | 用途 |
@@ -71,6 +77,7 @@
 
 | 日付 | 内容 |
 |---|---|
+| 2026-10-02 | ビルド時のみ使用する Microsoft.CodeAnalysis.NetAnalyzers を追加（Issue #2162） |
 | 2026-04-16 | パッケージバージョンを最新に同期、VOICEVOX音声素材のセクションを追加 |
 | 2026-03-23 | 初版作成 |
 

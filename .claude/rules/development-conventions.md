@@ -50,6 +50,17 @@
 - **`<Nullable>enable</Nullable>` を外して黙らせない**。Null 許容系の警告が一括で消え、個別に理由を書く規約ごと無効化される。MSBuild は後勝ち評価のため、既存行を残したまま後ろへ `disable` を足す形も同じ結果になる
 - ビルド警告を伴う変更をしたら、**Release / Debug 双方**でソリューションビルドし 0 警告を実測する（`"/mnt/c/Program Files/dotnet/dotnet.exe" build ICCardManager/ICCardManager.sln -c Release`）
 
+### .NET アナライザー（CA ルール）は本体で有効（Issue #2162）
+
+本体（`src/ICCardManager`）の csproj で `EnableNETAnalyzers=true`・`AnalysisLevel=latest`・`AnalysisMode=Recommended` とし、`Microsoft.CodeAnalysis.NetAnalyzers` をパッケージで版固定している（net48 では既定で無効）。CA ルールの警告も上の「警告ゼロ」の対象。テストプロジェクト・DebugDataViewer は対象外。
+
+- **是正しないルールは `ICCardManager/.editorconfig` で ID ごとに重大度を下げ、設定行の直前のコメントに ID と理由を書く**。ファイルのどこかに ID があるだけでは理由と認めない（理由の一覧と抑制が離れると対応が読めない）。1 つのコメントで続く複数の設定行に理由を書くのはよい。現在の抑制は CA1848（LoggerMessage）・CA1716（他言語の予約語）・CA1000（ジェネリック型の静的ファクトリ）・CA1859（具象型の提案）・CA1707（マイグレーションの命名）と、CA1822 の対象を private に限る `dotnet_code_quality.CA1822.api_surface`
+- **`dotnet_code_quality.<ID>.<オプション>`（`api_surface` 等）も抑制として扱う**。重大度を変えずに検出範囲を狭めるため。ID を書かない指定（全体・カテゴリ単位）は一括の格下げと同じく禁止
+- **特定のメンバーだけを抑制するなら `[SuppressMessage]` に `Justification` を書く**（.editorconfig は行単位でしか抑制できない）
+- **アナライザーを止める・弱める設定は置かない**（`RunAnalyzers` / `RunAnalyzersDuringBuild` / `EnableNETAnalyzers` = false、`AnalysisMode` / `AnalysisLevel` を Recommended より弱める・`AnalysisLevel` を 8.0 より古い版へ下げる）。これらは共有設定・csproj・コマンドライン・環境変数のどこに書いても `BuildWarningSuppressionConventionTests` が検出する。**`.ruleset`（`CodeAnalysisRuleSet`）・`GlobalAnalyzerConfigFiles` での任意名の設定ファイル・`ExcludeAssets="analyzers"` は検出対象外**なので使わない（抑制は `.editorconfig` の ID ごとの格下げか `[SuppressMessage]` に限る）
+- **書式の文化圏（CA1305）は「誰が読むか」で決める**。DB・CSV・操作ログ・ファイル名など機械が読み直す値は `CultureInfo.InvariantCulture`、画面・印刷の表示は `CultureInfo.CurrentCulture` を明示する（`db-write-conventions.md`「日付の整形・解析は文化圏から独立させる」の数値版）。**保存側を直したら読み取り側（`TryParse`）も同じカルチャにそろえる** — CA1305 は `TryParse(string, out)` を検出しないため、保存側だけ直すと読めなくなる（Issue #2162 の設定のウィンドウ位置）
+- `ConfigureAwait`（CA2007）の扱いは `async-configureawait.md` の「アナライザ」を参照
+
 ### コード整形は CI で検査される（Issue #2161）
 
 CI の code-quality ジョブは `dotnet format --verify-no-changes` の違反で fail する。.cs を書いたら、コミット前に `ICCardManager` ディレクトリで `dotnet format --verify-no-changes`（WSL2 では `"/mnt/c/Program Files/dotnet/dotnet.exe"`）を実行し、違反があれば `dotnet format` で直す。
