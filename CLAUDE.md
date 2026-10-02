@@ -11,9 +11,9 @@
 
 ## ディレクトリ構成の注意点
 
-ツリー構成は `ls` で確認できるが、**同名ディレクトリが2組あり混同しやすい**ので注意:
+ツリー構成は `ls` で確認できるが、**混同しやすい置き場所がある**ので注意:
 
-- `docs/`（ルート直下） = superpowers ワークフロー成果物（プラグインキャッシュ・plans）。**本プロジェクトの設計書は `ICCardManager/docs/` 配下**。設計 spec は `ICCardManager/docs/superpowers/specs/` に集約済み
+- **本プロジェクトの設計書は `ICCardManager/docs/` 配下**。superpowers ワークフローの成果物も、設計 spec は `ICCardManager/docs/superpowers/specs/`、実装プランは `ICCardManager/docs/superpowers/plans/` に集約済み（plans は #2167 でルート `docs/superpowers/plans/` から統合）。**新しい spec・plan もここへ置き、ルート直下に `docs/` を作らない**（superpowers のスキルが既定で提案する `docs/superpowers/...` はルート直下を指すので、保存先を読み替えること）
 - `tools/`（ルート直下） = 補助スクリプト群。`ICCardManager/tools/`（開発支援ツール）とは別物
 
 ## 最重要ルール

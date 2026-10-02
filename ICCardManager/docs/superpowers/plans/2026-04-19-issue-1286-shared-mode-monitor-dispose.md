@@ -393,7 +393,7 @@ Expected: 失敗 0、合格は 3012 + 新規 5 = 3017 件程度
 - [ ] **Step 4: コミット + push + PR 作成**
 
 ```bash
-git add ICCardManager/CHANGELOG.md ICCardManager/docs/design/07_テスト設計書.md docs/superpowers/plans/2026-04-19-issue-1286-shared-mode-monitor-dispose.md
+git add ICCardManager/CHANGELOG.md ICCardManager/docs/design/07_テスト設計書.md ICCardManager/docs/superpowers/plans/2026-04-19-issue-1286-shared-mode-monitor-dispose.md
 git commit -m "$(cat <<'EOF'
 docs: CHANGELOG / テスト設計書 / 実装計画を Issue #1286 で更新
 
