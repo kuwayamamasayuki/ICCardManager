@@ -3,6 +3,12 @@
 ### Unreleased
 
 **開発基盤**
+- Issue #2165 **未使用の `Microsoft.Extensions.Hosting` 参照を削除した**
+  - ソースに Host（`IHost`・`Host.CreateDefaultBuilder` 等）の使用は無く、DI・設定・ロギングは `App.xaml.cs` で個別に組み立てている。外したことで配布物から Hosting 関連の DLL が 10 個減る（Hosting・Hosting.Abstractions・Configuration.CommandLine / EnvironmentVariables / UserSecrets・Diagnostics / Diagnostics.Abstractions・Logging.Console / EventLog / EventSource）
+  - Hosting 経由で推移的に入っていた `Microsoft.Extensions.Logging.Configuration`（`AddConfiguration`）と `Microsoft.Extensions.Options.ConfigurationExtensions`（`services.Configure<T>(IConfiguration)`）は実際に使っているため、直接参照へ昇格した。残るパッケージの解決版は変わらない
+  - `dotnet publish` の出力を前後で比べ、消えたのが上記 10 DLL だけで、ほかのファイルはバイト単位で同一であることを確かめた
+  - `THIRD_PARTY_LICENSES.md` を同期。あわせて版がずれていた ClosedXML（0.105.0 → 0.105.1）・CommunityToolkit.Mvvm（8.2.2 → 8.4.2）を csproj に揃え、一覧と csproj の直接参照を名前・版で突き合わせる静的検査 `ThirdPartyLicensesConsistencyTests` を追加（07_テスト設計書 UT-135）。00a_技術スタック用語集・開発者ガイド §1.3 を同期
+  - テスト: 単体 8,376 → 8,380（+4）・合計 8,489 → 8,493
 - Issue #2164 **`OperationLogger` の `[Obsolete]` 旧シグネチャ 13 件を削除した**
   - 操作者 IDm を先頭引数に取る旧オーバーロード（#1265 以降、渡された値は無視されていた）を削除。本番コードからの呼び出しは 0 件だった
   - テスト側の CS0618 の抑制（`#pragma warning disable CS0618` 5 か所と csproj の `NoWarn`）を外した。抑制の理由そのものが無くなったため

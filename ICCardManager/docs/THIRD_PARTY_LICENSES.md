@@ -11,14 +11,15 @@
 | ライブラリ名 | バージョン | ライセンス | 用途 |
 |---|---|---|---|
 | [System.Data.SQLite.Core](https://system.data.sqlite.org/) | 1.0.119 | Public Domain | SQLiteデータベースアクセス |
-| [ClosedXML](https://github.com/ClosedXML/ClosedXML) | 0.105.0 | MIT | Excel帳票（物品出納簿）の生成 |
-| [CommunityToolkit.Mvvm](https://github.com/CommunityToolkit/dotnet) | 8.2.2 | MIT | MVVMパターン実装（ObservableProperty、RelayCommand等） |
+| [ClosedXML](https://github.com/ClosedXML/ClosedXML) | 0.105.1 | MIT | Excel帳票（物品出納簿）の生成 |
+| [CommunityToolkit.Mvvm](https://github.com/CommunityToolkit/dotnet) | 8.4.2 | MIT | MVVMパターン実装（ObservableProperty、RelayCommand等） |
 | [FelicaLib.DotNet](https://github.com/sakapon/felicalib-remodeled) | 1.2.67 | MIT + BSD-3-Clause | FeliCa（Sony PaSoRi）カード読み取り ※1 |
 | [Microsoft.Extensions.DependencyInjection](https://github.com/dotnet/runtime) | 8.0.1 | Apache-2.0 | 依存性注入（DIコンテナ） |
-| [Microsoft.Extensions.Hosting](https://github.com/dotnet/runtime) | 8.0.1 | Apache-2.0 | アプリケーションホスティング |
 | [Microsoft.Extensions.Logging](https://github.com/dotnet/runtime) | 8.0.1 | Apache-2.0 | ログ記録フレームワーク |
 | [Microsoft.Extensions.Logging.Debug](https://github.com/dotnet/runtime) | 8.0.1 | Apache-2.0 | デバッグ出力へのログ記録 |
 | [Microsoft.Extensions.Configuration.Json](https://github.com/dotnet/runtime) | 8.0.1 | Apache-2.0 | JSON設定ファイル読み込み |
+| [Microsoft.Extensions.Logging.Configuration](https://github.com/dotnet/runtime) | 8.0.1 | Apache-2.0 | 設定ファイルからのログ設定の読み込み |
+| [Microsoft.Extensions.Options.ConfigurationExtensions](https://github.com/dotnet/runtime) | 8.0.0 | Apache-2.0 | 設定ファイルの値を型付きオプションへ割り当て |
 | [Microsoft.Extensions.Caching.Memory](https://github.com/dotnet/runtime) | 8.0.1 | Apache-2.0 | インメモリキャッシュ |
 
 > **※1** FelicaLib.DotNet は、felicalib Remodeled 部分が MIT License（Copyright © Keiho Sakapon）、オリジナルの felicalib 部分が BSD-3-Clause License（Copyright © 2007 Takuya Murakami）のデュアルライセンスです。
@@ -77,6 +78,7 @@
 
 | 日付 | 内容 |
 |---|---|
+| 2026-10-02 | 未使用の Microsoft.Extensions.Hosting を削除し、Microsoft.Extensions.Logging.Configuration / Options.ConfigurationExtensions を直接参照として追加。ClosedXML・CommunityToolkit.Mvvm の版を csproj に同期（Issue #2165） |
 | 2026-10-02 | ビルド時のみ使用する Microsoft.CodeAnalysis.NetAnalyzers を追加（Issue #2162） |
 | 2026-04-16 | パッケージバージョンを最新に同期、VOICEVOX音声素材のセクションを追加 |
 | 2026-03-23 | 初版作成 |
