@@ -81,9 +81,9 @@ public class LedgerDetailSaveOrderingIntegrationTests : IDisposable
         _viewModel = new LedgerDetailViewModel(
             _repository,
             _summaryGenerator,
-            operationLogger,
+            new LedgerDetailSaveService(
+                _dbContext, _repository, operationLogger, NullLogger<LedgerDetailSaveService>.Instance),
             splitService,
-            _dbContext,
             Mock.Of<IStaffAuthService>(),
             NullLogger<LedgerDetailViewModel>.Instance);
     }
