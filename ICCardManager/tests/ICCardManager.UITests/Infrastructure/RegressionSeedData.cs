@@ -98,6 +98,76 @@ namespace ICCardManager.UITests.Infrastructure
             tx.Commit();
         }
 
+        /// <summary>
+        /// 仮想タッチ用のカードを削除済み（論理削除）にした投入データ（Issue #2196。UT-083）。
+        /// </summary>
+        /// <remarks>
+        /// 交通系ICカード管理の新規登録で削除済みのカードを読み取ると、復元を提案する（#284）。
+        /// 読み取りは DEBUG パネルの「交通系ICカード」で起こすので、模擬する IDm のカードを削除済みにする。
+        /// </remarks>
+        public static void SeedWithDeletedVirtualTouchCard(SQLiteConnection conn)
+        {
+            ScreenshotSeedData.SeedForVirtualTouch(conn);
+            ExecuteSingleRow(conn,
+                "UPDATE ic_card SET is_deleted = 1, deleted_at = @at WHERE card_idm = @card",
+                ("@at", Now()), ("@card", ScreenshotSeedData.VirtualTouchCardIdm));
+        }
+
+        /// <summary>
+        /// 仮想タッチの職員（DEBUG パネルの「職員証」が模擬する IDm）を削除済み（論理削除）にした投入データ（Issue #2196。UT-083）。
+        /// </summary>
+        /// <remarks>職員管理の新規登録で削除済みの職員証を読み取ると、復元を提案する（#284）。</remarks>
+        public static void SeedWithDeletedVirtualTouchStaff(SQLiteConnection conn)
+        {
+            ScreenshotSeedData.Seed(conn);
+            ExecuteSingleRow(conn,
+                "UPDATE staff SET is_deleted = 1, deleted_at = @at WHERE staff_idm = @staff",
+                ("@at", Now()), ("@staff", AppFixture.SeededStaffIdm));
+        }
+
+        /// <summary>貸出中カードを貸し出してからの日数（<see cref="SeedWithCardLentDaysAgo"/>）。</summary>
+        public const int LentDaysAgo = 20;
+
+        /// <summary>
+        /// 貸出中カードの貸出日を <see cref="LentDaysAgo"/> 日前へ遡らせた投入データ（Issue #2196。UT-073）。
+        /// </summary>
+        /// <remarks>
+        /// 管理者ダッシュボードの長期未返却の日数は 7・14・30 から選ぶ。20 日前なら 14 日では長期未返却、30 日では対象外になり、
+        /// 日数を変えたときに絞り込みの結果が変わることを確かめられる。貸出中レコードと <c>ic_card</c> の両方を遡らせる
+        /// （片方だけだと起動時の整合性修復で貸出中の表示が消える。<see cref="ScreenshotSeedData.SeedWithUnreturnedCard"/> と同じ）。
+        /// </remarks>
+        public static void SeedWithCardLentDaysAgo(SQLiteConnection conn)
+        {
+            ScreenshotSeedData.Seed(conn);
+            var lentAt = DateTime.Today.AddDays(-LentDaysAgo).ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture);
+            using var tx = conn.BeginTransaction();
+            ExecuteSingleRow(conn,
+                "UPDATE ledger SET date = @date, lent_at = @date WHERE card_idm = @card AND is_lent_record = 1",
+                ("@date", lentAt), ("@card", ScreenshotSeedData.LentCardIdm));
+            ExecuteSingleRow(conn,
+                "UPDATE ic_card SET last_lent_at = @date WHERE card_idm = @card",
+                ("@date", lentAt), ("@card", ScreenshotSeedData.LentCardIdm));
+            tx.Commit();
+        }
+
+        private static string Now() => DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture);
+
+        /// <summary>1 行だけを更新する SQL を実行する。0 行なら投入データの前提が崩れているので例外にする。</summary>
+        private static void ExecuteSingleRow(SQLiteConnection conn, string sql, params (string name, object value)[] parameters)
+        {
+            using var cmd = conn.CreateCommand();
+            cmd.CommandText = sql;
+            foreach (var (name, value) in parameters)
+            {
+                cmd.Parameters.AddWithValue(name, value);
+            }
+
+            if (cmd.ExecuteNonQuery() != 1)
+            {
+                throw new InvalidOperationException($"投入データの前提が崩れています（1 行も更新されませんでした）: {sql}");
+            }
+        }
+
         private static void InsertDetail(
             SQLiteConnection conn, long ledgerId, string date, string entry, string exit, int amount, int balance)
         {
