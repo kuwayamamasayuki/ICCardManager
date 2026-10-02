@@ -27,7 +27,7 @@ namespace ICCardManager.Common
         /// <param name="companionCount">同行者数（本人を含まない。0 以上）</param>
         /// <returns>同行者数が 0 なら氏名そのもの（null は空文字）、1 以上なら「氏名 外N名」。氏名が空なら「外N名」</returns>
         /// <exception cref="ArgumentOutOfRangeException">同行者数が負の場合</exception>
-        public static string Format(string staffName, int companionCount)
+        public static string Format(string? staffName, int companionCount)
         {
             if (companionCount < 0)
             {
@@ -35,7 +35,7 @@ namespace ICCardManager.Common
                 throw new ArgumentOutOfRangeException(nameof(companionCount), companionCount, "同行者数は0以上で指定してください。");
             }
 
-            var name = string.IsNullOrWhiteSpace(staffName) ? string.Empty : staffName;
+            var name = staffName is null || string.IsNullOrWhiteSpace(staffName) ? string.Empty : staffName;
             if (companionCount == 0)
             {
                 return name;

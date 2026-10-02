@@ -218,6 +218,12 @@ namespace ICCardManager.Data
         private readonly SemaphoreSlim _maintenanceTransactionGate = new SemaphoreSlim(1, 1);
 
         /// <summary>
+        /// Issue #2202: UI スレッドから始まった DB の処理（リース・トランザクション・<see cref="RunOffUiThreadAsync{T}"/> の本体）を
+        /// 1 つずつ通すゲート。<see cref="EnterFromUiThreadAsync"/> の remarks を参照。
+        /// </summary>
+        private readonly SemaphoreSlim _uiOriginGate = new SemaphoreSlim(1, 1);
+
+        /// <summary>
         /// Issue #1984: 保守トランザクション（<see cref="CleanupOldData"/>）が開かれている間 true。
         /// <see cref="HasActiveTransactionScope"/> とは別の計数であることが重要（理由は
         /// <see cref="_maintenanceTransactionGate"/> の remarks）。
@@ -577,9 +583,26 @@ namespace ICCardManager.Data
         {
             ct.ThrowIfCancellationRequested();
 
-            // Issue #2202: UI スレッドから呼ばれたら、スレッドプールへ移ってから続ける（LeaveUiThread の remarks）
-            await LeaveUiThread().ConfigureAwait(false);
+            // Issue #2202: UI スレッドから呼ばれたら、スレッドプールへ移り UI 起点のゲートを取ってから続ける
+            // （EnterFromUiThreadAsync の remarks）。ゲートはリースの破棄で返す
+            var heldUiGate = await EnterFromUiThreadAsync(ct).ConfigureAwait(false);
+            try
+            {
+                return await AcquireLeaseAsync(heldUiGate, ct).ConfigureAwait(false);
+            }
+            catch
+            {
+                if (heldUiGate)
+                {
+                    ExitUiOriginGate();
+                }
 
+                throw;
+            }
+        }
+
+        private async Task<ConnectionLease> AcquireLeaseAsync(bool heldUiGate, CancellationToken ct)
+        {
             // Issue #1984: 保守トランザクション（CleanupOldData）が開いている間は新規リースを通さない。
             // ゲートを保持したまま計数を増やすことで、保守側が「ゲートを閉じてから進行中リースの
             // ドレインを待つ」だけで「もう誰も同一接続へ文を発行しない」ことを保証できる
@@ -607,7 +630,14 @@ namespace ICCardManager.Data
                 throw;
             }
 
-            return new ConnectionLease(connection, () => Interlocked.Decrement(ref _activeAsyncLeaseCount));
+            return new ConnectionLease(connection, () =>
+            {
+                Interlocked.Decrement(ref _activeAsyncLeaseCount);
+                if (heldUiGate)
+                {
+                    ExitUiOriginGate();
+                }
+            });
         }
 
         /// <summary>
@@ -698,8 +728,9 @@ namespace ICCardManager.Data
         }
 
         /// <summary>
-        /// UI スレッドから呼ばれていたら、続きをスレッドプールへ移す（Issue #2202）。
+        /// UI スレッドから呼ばれていたら、続きをスレッドプールへ移し、UI 起点のゲート（<see cref="_uiOriginGate"/>）を取る（Issue #2202）。
         /// </summary>
+        /// <returns>ゲートを取ったら true（呼び出し元が <see cref="ExitUiOriginGate"/> で返す）。UI スレッド以外からなら何もせず false。</returns>
         /// <remarks>
         /// <para>
         /// <see cref="LeaseConnectionAsync"/> と <see cref="BeginTransactionAsync"/> は <c>async</c> だが、内部の待機
@@ -712,16 +743,75 @@ namespace ICCardManager.Data
         /// </para>
         /// <para>
         /// 全経路が通る入口（接続のリース・トランザクションの開始）で移すので、ViewModel ごとに <c>Task.Run</c> で包む必要は無く、
-        /// 包み忘れも起きない（#1843「ガードは綴りではなく資源で書く」）。移った後の続きは Data 層の
-        /// <c>ConfigureAwait(false)</c> によりスレッドプールで走り、ViewModel の <c>await</c> の後だけが UI スレッドへ戻る。
-        /// UI スレッド以外（サービスのバックグラウンド処理・テスト）からの呼び出しでは移らない（余計なスレッドの移動をしない）。
+        /// 包み忘れも起きない（#1843「ガードは綴りではなく資源で書く」）。移った後の続きは Data 層の <c>ConfigureAwait(false)</c> により
+        /// スレッドプールで走り、ViewModel の <c>await</c> の後だけが UI スレッドへ戻る。UI スレッド以外（サービスのバックグラウンド処理・
+        /// 移った後の入れ子の呼び出し・テスト）からの呼び出しでは何もしない。
+        /// </para>
+        /// <para>
+        /// <b>ゲートを取る理由</b>: UI スレッドの上で走っていた頃、UI 起点の DB の処理は 1 つずつ走っていた（UI スレッドが 1 本なので、
+        /// 1 つの処理が走り切るまで次は始まらない）。スレッドプールへ移すだけだと、起動時の点検と画面の読み込み・続けて押されたボタンの
+        /// 読み込みが並走し、セマフォを取らないリースどうしが 1 本の接続を同時に使う（独立レビューで検出）。ゲートはリース・スコープの
+        /// 破棄まで保持し、その性質を保つ。走るスレッドを 1 本に固定する形（専用スレッドへ続きを投げる）は採らない —
+        /// 完了した <c>Task</c> の続きは、登録と完了が競合するとスレッドプールへ回り（実測）、固定は保証にならない。
+        /// </para>
+        /// <para>
+        /// ゲートは UI スレッドから入ったときにしか取らないので、移った後の入れ子の呼び出し（リースの中で別のリポジトリを呼ぶ・
+        /// トランザクションの中でリースを取る）は待たない。取る順は「ゲート → <see cref="_semaphore"/>」に固定する。
+        /// UI スレッドへ戻った後にゲートを持ったまま次の DB 呼び出しをすると自分を待つので、ViewModel がトランザクションを
+        /// 自分で開くときは <see cref="RunOffUiThreadAsync{T}"/> で本体ごと移す（スコープを UI スレッドへ持ち帰らない）。
         /// </para>
         /// <para>
         /// 同期 API（<see cref="LeaseConnection"/> 等）の UI スレッド拒否（#1281）とは独立している。
         /// UI 判定は同じ <see cref="IsOnUiThread"/> を使う。
         /// </para>
         /// </remarks>
-        private static ThreadPoolSwitch LeaveUiThread() => ThreadPoolSwitch.When(IsOnUiThread());
+        private async Task<bool> EnterFromUiThreadAsync(CancellationToken ct)
+        {
+            if (!IsOnUiThread())
+            {
+                return false;
+            }
+
+            await ThreadPoolSwitch.When(true).ConfigureAwait(false);
+            await _uiOriginGate.WaitAsync(ct).ConfigureAwait(false);
+            return true;
+        }
+
+        /// <summary>
+        /// <see cref="EnterFromUiThreadAsync"/> で取ったゲートを返す。
+        /// </summary>
+        private void ExitUiOriginGate()
+        {
+            try { _uiOriginGate.Release(); }
+            catch (ObjectDisposedException) { /* DbContext.Dispose()後のリース解放 */ }
+        }
+
+        /// <summary>
+        /// UI スレッドから呼ばれたら <paramref name="body"/> をスレッドプールで、UI 起点の処理を 1 つずつ通すゲートを持ったまま走らせる。
+        /// UI スレッド以外からなら、そのまま走らせる（Issue #2202）。
+        /// </summary>
+        /// <remarks>
+        /// ViewModel が自分でトランザクションを開く経路のためにある。リポジトリへトランザクションを渡すと、SQL は
+        /// <see cref="DbContext"/> の入口を通らず渡した接続で直接走る。<see cref="BeginTransactionAsync"/> の入口で移っても、
+        /// ViewModel の続きは UI スレッドへ戻ってからトランザクション内の SQL を走らせるので、UI スレッドが止まるうえ、
+        /// 開いたトランザクションの途中でほかの UI 起点の処理が割り込める。本体ごと移せば、トランザクションの全体が
+        /// 以前と同じく 1 つの処理として走る。本体の中では画面に結び付いたプロパティを変えないこと（UI スレッドの外で走る）。
+        /// </remarks>
+        public async Task<T> RunOffUiThreadAsync<T>(Func<Task<T>> body)
+        {
+            var heldUiGate = await EnterFromUiThreadAsync(CancellationToken.None).ConfigureAwait(false);
+            try
+            {
+                return await body().ConfigureAwait(false);
+            }
+            finally
+            {
+                if (heldUiGate)
+                {
+                    ExitUiOriginGate();
+                }
+            }
+        }
 
         /// <summary>
         /// UI スレッドから呼び出されていた場合に <see cref="InvalidOperationException"/> をスローする。
@@ -750,10 +840,23 @@ namespace ICCardManager.Data
         /// </remarks>
         public virtual async Task<TransactionScope> BeginTransactionAsync(CancellationToken ct = default)
         {
-            // Issue #2202: UI スレッドから呼ばれたら、スレッドプールへ移ってからセマフォを待ち、接続を取る
-            await LeaveUiThread().ConfigureAwait(false);
+            // Issue #2202: UI スレッドから呼ばれたら、スレッドプールへ移り UI 起点のゲートを取ってからセマフォを待つ
+            // （EnterFromUiThreadAsync の remarks。取る順はゲート → セマフォ）。ゲートはスコープの破棄で返す
+            var heldUiGate = await EnterFromUiThreadAsync(ct).ConfigureAwait(false);
+            try
+            {
+                await _semaphore.WaitAsync(ct).ConfigureAwait(false);
+            }
+            catch
+            {
+                if (heldUiGate)
+                {
+                    ExitUiOriginGate();
+                }
 
-            await _semaphore.WaitAsync(ct).ConfigureAwait(false);
+                throw;
+            }
+
             try
             {
                 var connection = GetConnectionInternal();
@@ -764,6 +867,10 @@ namespace ICCardManager.Data
                     _activeTransactionCount = Math.Max(0, _activeTransactionCount - 1);
                     try { _semaphore.Release(); }
                     catch (ObjectDisposedException) { /* DbContext.Dispose()後のリース解放 */ }
+                    if (heldUiGate)
+                    {
+                        ExitUiOriginGate();
+                    }
                 });
                 var transaction = connection.BeginTransaction();
                 return new TransactionScope(lease, transaction);
@@ -773,6 +880,11 @@ namespace ICCardManager.Data
                 // 例外時はカウンタも戻す（実体は 0 or 1 だが防御的に Max でガード）
                 _activeTransactionCount = Math.Max(0, _activeTransactionCount - 1);
                 _semaphore.Release();
+                if (heldUiGate)
+                {
+                    ExitUiOriginGate();
+                }
+
                 throw;
             }
         }
@@ -2203,6 +2315,7 @@ ON CONFLICT(key) DO UPDATE SET value = excluded.value";
                     _connection?.Dispose();
                     _semaphore?.Dispose();
                     _maintenanceTransactionGate?.Dispose();
+                    _uiOriginGate?.Dispose();
                 }
                 _disposed = true;
             }

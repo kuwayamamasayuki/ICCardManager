@@ -390,6 +390,9 @@ public partial class SettingsViewModel : ViewModelBase
             // 同期的に完了するため、BEGIN IMMEDIATE と各 INSERT は呼び出し元のスレッドで実行される。
             // ほかの接続（共有モードの他 PC 等）が書き込み中だと、その待ち（busy_timeout と ADO 層の再試行）の間
             // UI スレッドが止まり、アプリ全体が固まって処理中オーバーレイも描画されなかった。
+            // Issue #2202 で DbContext の入口が UI スレッドから移すようになったため、この Task.Run は二重の備えになる
+            // （外しても固まらない）。Task.Run の中からの呼び出しは UI 起点のゲートを取らないが、書き込みは
+            // トランザクション（セマフォ）でほかの書き込みと直列化される（#2197 から変わらない）。
             var success = await Task.Run(() => _settingsRepository.SaveAppSettingsAsync(settings));
 
             if (success)

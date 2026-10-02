@@ -49,15 +49,17 @@ namespace ICCardManager.UITests.Tests
             previous!.Click();
 
             // 月送りの読み込みが DB のロックで待たされている間も、UI スレッドは UIA の問い合わせに応答する。
-            // 問い合わせはロックを保持したまま行う（外してから問い合わせると、固まっていた実装でも応答が戻って緑になる）
+            // 問い合わせはロックを保持したまま行う（外してから問い合わせると、固まっていた実装でも応答が戻って緑になる）。
+            // 問い合わせる対象は処理中オーバーレイの「読み込み中...」。見つかる＝UI スレッドが応答できた、かつ
+            // 読み込みがまだ終わっていない（ロックで待たされている最中に応答した）ことの両方を 1 回で表す。
+            // 期間表示は読み込みの前に切り替わるので、読み込みの最中かどうかの目印にはならない。
             Exception? uiaFailure = null;
             var responded = Retry.WhileFalse(
                 () =>
                 {
                     try
                     {
-                        // ツールバーのボタンは常に表示されている。見つかる＝UI スレッドが UIA の問い合わせを処理できた
-                        return fixture.MainWindow.FindFirstDescendant(cf => cf.ByName(TestConstants.OpenSettingsButton)) != null;
+                        return fixture.MainWindow.FindFirstDescendant(cf => cf.ByName(TestConstants.HistoryLoadingBusyMessage)) != null;
                     }
                     catch (Exception ex)
                     {
@@ -66,13 +68,22 @@ namespace ICCardManager.UITests.Tests
                         return false;
                     }
                 },
-                TimeSpan.FromSeconds(10)).Success;
+                // 窓は busy_timeout（ローカル 5 秒）より十分短く取る。窓が長いと、遅い機械では問い合わせ中に
+                // 読み込みがロック待ちの上限に達して失敗し、ロックを外した後の表明（読み込みが成功すること）が成り立たない
+                TimeSpan.FromSeconds(3)).Success;
             responded.Should().BeTrue(
-                "DB がロックされている間も、履歴の月送りの読み込み中にメイン画面が応答すること" +
+                $"DB がロックされている間も、履歴の月送りの読み込み中（「{TestConstants.HistoryLoadingBusyMessage}」の表示中）にメイン画面が応答すること" +
                 (uiaFailure == null ? "。" : $"（UIA の問い合わせが失敗した: {uiaFailure.GetType().Name} — UI スレッドが止まっている）。"));
 
-            // 対: ロックを外すと読み込みが終わり、前の月が表示される（待たされた読み込みが失われない）
+            // 対: ロックを外すと、待たされていた読み込みが成功して前の月の内容が表示される（読み込みが失われない）。
+            // シードデータの行はすべて今月にあるので、前の月は「該当する履歴がありません」になる。この状態表示は
+            // 読み込みが成功して初めて設定される（期間表示や処理中表示の消滅は、読み込みが失敗しても成り立つ）
             dbLock.Release();
+            var loaded = Retry.WhileNull(
+                () => fixture.MainWindow.FindFirstDescendant(cf => cf.ByName(TestConstants.HistoryNoLedgersStatusMessage)),
+                TimeSpan.FromSeconds(TestConstants.DialogOpenTimeoutSeconds + 30)).Result;
+            loaded.Should().NotBeNull(
+                $"ロックを外すと、待たされていた前の月の読み込みが成功し「{TestConstants.HistoryNoLedgersStatusMessage}」が表示されること");
             WaitForPeriod(page, PeriodLabel(DateTime.Today.AddMonths(-1)));
         }
 

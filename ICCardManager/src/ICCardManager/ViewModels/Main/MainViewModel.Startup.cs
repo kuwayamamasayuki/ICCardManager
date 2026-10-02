@@ -1,3 +1,4 @@
+#nullable enable
 using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
@@ -356,7 +357,11 @@ public partial class MainViewModel
             // Issue #1923: この再読込は利用者の操作を契機としないため、統合対象として入れた
             // チェックを引き継ぐ。引き継がないと、15 秒周期のリフレッシュが利用者の選択操作を
             // 途中で消してしまい、隣接 2 行以上を選ぶ統合が事実上できなくなる。
-            if (History.IsHistoryVisible)
+            //
+            // Issue #2202: 処理中かどうかはここでも確かめ直す。上の 2 つの再読込が DB を待つ間に UI スレッドが空き、
+            // その間にカードのタッチ（返却フロー）が始まり得る（以前は同期的に走り切るので割り込まれなかった）。
+            // 返却フローは自分で履歴を読み直すので、定期リフレッシュの読み込みを重ねない
+            if (History.IsHistoryVisible && CurrentState != AppState.Processing)
             {
                 await History.LoadHistoryLedgersAsync(preserveCheckedRows: true);
             }
@@ -443,7 +448,7 @@ public partial class MainViewModel
     /// <param name="replacements">追加し直す警告（null・空なら除去のみ行う）</param>
     private void ReplaceWarnings(
         Func<WarningItem, bool> selector,
-        IEnumerable<WarningItem> replacements = null)
+        IEnumerable<WarningItem>? replacements = null)
     {
         foreach (var stale in WarningMessages.Where(selector).ToList())
         {

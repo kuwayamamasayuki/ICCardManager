@@ -1,3 +1,4 @@
+#nullable enable
 using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
@@ -543,37 +544,44 @@ public partial class BusStopInputViewModel : ViewModelBase
         // 設定の読み取り（GetAppSettingsAsync）はスコープを開く前に済ませてある。
         // スコープ内で別のリポジトリが LeaseConnectionAsync を呼ぶと、DbContext のセマフォを
         // 二重に取って自己デッドロックするため（Issue #1575）。
-        using var scope = await _dbContext.BeginTransactionAsync();
-
-        foreach (var ledger in targetLedgers)
+        //
+        // Issue #2202: トランザクションの本体ごと UI スレッドの外へ移す（DbContext.RunOffUiThreadAsync の remarks）。
+        // トランザクションを渡したリポジトリの SQL は DbContext の入口を通らないため、ここで移さないと
+        // UI スレッドの上で走り、開いたトランザクションの途中でほかの UI 起点の処理が割り込み得る。
+        return await _dbContext.RunOffUiThreadAsync(async () =>
         {
-            if (itemsByLedgerId.TryGetValue(ledger.Id, out var items))
-            {
-                var updates = items
-                    .Select(item => (item.Detail.SequenceNumber, item.Detail.BusStops))
-                    .ToList();
+            using var scope = await _dbContext.BeginTransactionAsync();
 
-                // Issue #1945: 戻り値を握りつぶさない。履歴詳細の全置換（ReplaceDetailsAsync の
-                // DELETE + INSERT）で id が振り直されていると 0 行になる。
-                var detailsOk = await _ledgerRepository.UpdateDetailBusStopsAsync(
-                    ledger.Id, updates, scope.Transaction);
-                if (!detailsOk)
+            foreach (var ledger in targetLedgers)
+            {
+                if (itemsByLedgerId.TryGetValue(ledger.Id, out var items))
                 {
-                    // commit せずに抜ける（scope の Dispose で巻き戻る）
-                    HasBusStopUpdateConflict = true;
+                    var updates = items
+                        .Select(item => (item.Detail.SequenceNumber, item.Detail.BusStops))
+                        .ToList();
+
+                    // Issue #1945: 戻り値を握りつぶさない。履歴詳細の全置換（ReplaceDetailsAsync の
+                    // DELETE + INSERT）で id が振り直されていると 0 行になる。
+                    var detailsOk = await _ledgerRepository.UpdateDetailBusStopsAsync(
+                        ledger.Id, updates, scope.Transaction);
+                    if (!detailsOk)
+                    {
+                        // commit せずに抜ける（scope の Dispose で巻き戻る）
+                        HasBusStopUpdateConflict = true;
+                        return false;
+                    }
+                }
+
+                ledger.Summary = summaryGenerator.Generate(ledger.Details);
+                if (!await _ledgerRepository.UpdateAsync(ledger, scope.Transaction))
+                {
                     return false;
                 }
             }
 
-            ledger.Summary = summaryGenerator.Generate(ledger.Details);
-            if (!await _ledgerRepository.UpdateAsync(ledger, scope.Transaction))
-            {
-                return false;
-            }
-        }
-
-        scope.Commit();
-        return true;
+            scope.Commit();
+            return true;
+        });
     }
 
     /// <summary>
@@ -592,7 +600,7 @@ public partial class BusStopInputViewModel : ViewModelBase
     /// Issue #2103: DB に保存されているのと同じメモリ上の値（明細のバス停名・摘要）。
     /// 初期化時と保存成功時に取り直す。
     /// </summary>
-    private InMemoryStateSnapshot _persistedState;
+    private InMemoryStateSnapshot? _persistedState;
 
     /// <summary>
     /// Issue #2103: 現在のメモリ上の値を「DB と同じ値」として退避する。
