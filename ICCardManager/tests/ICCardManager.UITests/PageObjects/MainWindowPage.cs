@@ -1,4 +1,5 @@
 using System;
+using System.Linq;
 using FlaUI.Core.AutomationElements;
 using FlaUI.Core.Definitions;
 using FlaUI.Core.Input;
@@ -166,6 +167,26 @@ namespace ICCardManager.UITests.PageObjects
 
             throw new TimeoutException(
                 $"履歴表示エリアが表示されませんでした（\"{TestConstants.CloseHistoryButton}\" ボタンが現れない。クリック＋Enter を {maxAttempts} 回試行）");
+        }
+
+        /// <summary>
+        /// 開いている履歴の一覧から、摘要が <paramref name="summary"/> の行を探し、その行のボタン（「詳細」「変更」）を押す（Issue #2194）。
+        /// </summary>
+        /// <remarks>
+        /// 行のボタンは AutomationProperties.Name を持たず Content の文字列が Name になり、すべての行が同じ名前のボタンを持つ。
+        /// 一覧全体から名前で探すと別の行のボタンを押すので、先に行を摘要で絞る。
+        /// </remarks>
+        public void InvokeHistoryRowButton(string summary, string buttonName)
+        {
+            var grid = FindByNameWithRetry(TestConstants.HistoryLedgerGrid)
+                ?? throw new InvalidOperationException($"履歴の一覧が見つかりません: \"{TestConstants.HistoryLedgerGrid}\"");
+            var button = Retry.WhileNull(
+                () => grid.AsGrid().Rows
+                    .FirstOrDefault(r => r.FindFirstDescendant(cf => cf.ByName(summary)) != null)
+                    ?.FindFirstDescendant(cf => cf.ByName(buttonName).And(cf.ByControlType(ControlType.Button))),
+                TimeSpan.FromSeconds(TestConstants.DialogOpenTimeoutSeconds)).Result
+                ?? throw new TimeoutException($"履歴の一覧に摘要「{summary}」の行の「{buttonName}」ボタンが見つかりません");
+            button.AsButton().Invoke();
         }
 
         /// <summary>

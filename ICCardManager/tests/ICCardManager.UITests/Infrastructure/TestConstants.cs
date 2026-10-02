@@ -448,5 +448,58 @@ namespace ICCardManager.UITests.Infrastructure
         /// <summary>設定ダイアログの残額警告しきい値の入力欄（IsCancel のダイアログで TextBox にフォーカスがある状態を作る）。</summary>
         [UiaName]
         public const string SettingsWarningBalanceInput = "残額警告しきい値";
+
+        // ── メイン画面とダイアログの基本操作の回帰テスト（Issue #2194） ────────
+
+        /// <summary>設定ダイアログの「保存」ボタン。保存に成功するとダイアログは閉じる。</summary>
+        [UiaName]
+        public const string SettingsSaveButton = "設定を保存";
+
+        // 初期フォーカスの期待値（UT-054。静的検査 DialogInitialFocusTests が XAML の FocusManager.FocusedElement を固定する）
+        /// <summary>設定ダイアログの初期フォーカス（<c>ToastPositionComboBox</c>）。</summary>
+        [UiaName]
+        public const string SettingsToastPositionComboBox = "トースト通知位置選択";
+
+        /// <summary>データ入出力ダイアログの初期フォーカス（<c>ExportDataTypeComboBox</c>）。</summary>
+        [UiaName]
+        public const string ExportDataTypeComboBox = "エクスポートするデータ種別";
+
+        /// <summary>履歴行の追加・修正ダイアログの初期フォーカス（<c>EditDatePicker</c>）。</summary>
+        [UiaName]
+        public const string LedgerRowEditDateInput = "出納日付";
+
+        /// <summary>履歴行の追加・修正ダイアログの摘要の入力欄（追加モードでは最初の入力エラーとして初期フォーカスが来る。#1279）。</summary>
+        [UiaName]
+        public const string LedgerRowEditSummaryInput = "摘要";
+
+        /// <summary>履歴行の追加・修正ダイアログの「削除」ボタン（Issue #750）。</summary>
+        [UiaName]
+        public const string LedgerRowEditDeleteButton = "この履歴を削除";
+
+        /// <summary>メイン画面の利用履歴の一覧（DataGrid）。</summary>
+        [UiaName]
+        public const string HistoryLedgerGrid = "利用履歴一覧";
+
+        // 履歴一覧の各行の「変更」ボタンは AutomationProperties.Name を持たず、Content の文字列が UIA Name になる。
+        /// <summary>履歴一覧の行の「変更」ボタン（職員証認証の後、履歴行の追加・修正ダイアログを開く）。</summary>
+        [NotUiaName]
+        public const string HistoryRowEditButton = "変更";
+
+        // 以下は XAML の AutomationProperties ではなく、本体のコードが表示する文字列そのもの。
+        /// <summary>貸出中レコードの摘要（<c>SummaryGenerator.GetLendingSummary</c> の既定）。</summary>
+        [NotUiaName]
+        public const string LentRecordSummary = "（貸出中）";
+
+        /// <summary>払戻済カードをタッチしたときのエラートーストのタイトル（<c>MainViewModel</c>。Issue #530）。</summary>
+        [NotUiaName]
+        public const string RefundedCardToastTitle = "払戻済カード";
+
+        /// <summary>履歴の削除の確認 MessageBox のタイトル（<c>LedgerRowEditViewModel.RequestDelete</c>）。</summary>
+        [NotUiaName]
+        public const string LedgerDeleteConfirmationTitle = "履歴の削除";
+
+        /// <summary>操作ログダイアログの期間の終了日（UT-058c。最小幅で見切れないこと）。</summary>
+        [UiaName]
+        public const string OperationLogToDate = "終了日";
     }
 }

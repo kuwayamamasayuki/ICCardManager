@@ -99,36 +99,9 @@ namespace ICCardManager.UITests.Tests
         {
             ScreenshotHelper.RequireForeground(dialog.Window);
             element.Focus();
-            var focused = Retry.WhileFalse(() => HasFocusWithin(element), TimeSpan.FromSeconds(5)).Success;
+            var focused = FocusInspection.WaitForFocusWithin(element);
             focused.Should().BeTrue($"前提: 「{element.Name}」（またはその中の要素）にフォーカスがあること");
             Keyboard.Type(VirtualKeyShort.ESCAPE);
-        }
-
-        /// <summary>
-        /// フォーカスのある要素が <paramref name="element"/> 自身かその子孫か。DataGrid は行やセルがフォーカスを持つため、
-        /// 要素そのものの HasKeyboardFocus だけでは判定できない。
-        /// </summary>
-        private static bool HasFocusWithin(AutomationElement element)
-        {
-            try
-            {
-                var current = element.Automation.FocusedElement();
-                for (var depth = 0; current != null && depth < 32; depth++)
-                {
-                    if (current.Equals(element))
-                    {
-                        return true;
-                    }
-
-                    current = current.Parent;
-                }
-
-                return false;
-            }
-            catch
-            {
-                return false;
-            }
         }
 
         /// <summary>
