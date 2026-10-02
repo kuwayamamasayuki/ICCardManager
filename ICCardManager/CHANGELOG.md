@@ -97,6 +97,13 @@
   - テスト: 単体 8,093 → 8,125（+32）・合計 8,165 → 8,197
 
 **不具合修正**
+- Issue #2202 **DB がほかの接続にロックされていると、DB を読み書きする画面の操作でアプリ全体が固まる形を、DbContext の入口でまとめて是正した**
+  - ViewModel が UI スレッドからリポジトリを `await` すると、DB の処理（SQLite のロック待ちを含む）が UI スレッドの上で同期的に走り、ロック待ち（busy_timeout。共有モードで最大 15 秒・ローカル 5 秒、加えて ADO 層の再試行）の間、画面の描画もカードのタッチも止まっていた。#2197 で設定の保存だけを `Task.Run` で直したが、同じ形が ViewModel 16 クラス・約 60 か所に残っていた
+  - 全経路が通る 2 つの入口（`DbContext.LeaseConnectionAsync` / `BeginTransactionAsync`）で、UI スレッドから呼ばれたときだけスレッドプールへ移るようにした（`Common/ThreadPoolSwitch`）。移った後の続きは Data 層の `ConfigureAwait(false)` によりスレッドプールで走り、ViewModel の `await` の後だけが UI スレッドへ戻る。UI スレッド以外からの呼び出しでは移らない。`await Task.Run(() => { })` の形は、完了済みなら続きが UI スレッドで同期的に走るので使わない
+  - リポジトリ・Service の中に UI スレッドで走ることを前提にしたコードが無いことを確かめた。改修した `DbContext.cs` に `#nullable enable` を付け、出た警告を是正した（`AppVersionInfo.TryParseNormalized` は null を受ける）
+  - 単体テスト `DbContextUiThreadOffloadTests`（4 件。SQL の実行スレッドを `SQLiteConnection.Trace` で記録し、UI スレッドの模擬から呼ぶと UI の外で走ること／UI 以外からは移らないこと）と UI テスト `DatabaseLockResponsivenessTests`（DB を排他ロックしたまま履歴の月送りをしてもメイン画面が応答すること）を追加。入口で移る処理を外す変異で単体 2 件・UI 1 件が赤になる（UI は「UI スレッドが止まっている」で失敗）。UI テスト全件（114 件）を実行し失敗 0
+  - 05_クラス設計書 §5.5b・07_テスト設計書 UT-136・`.claude/rules/async-configureawait.md` を同期
+  - テスト: 単体 8,403 → 8,407（+4）・UI 113 → 114（+1）・合計 8,516 → 8,521
 - Issue #2177 **履歴詳細ダイアログの保存で、明細の置換と摘要の更新が別のトランザクションだったのを是正した**
   - 明細の置換（`ReplaceDetailsAsync`）が自前のトランザクションで先に確定し、摘要の更新が別のトランザクションだったため、摘要の更新が失敗すると「明細は新しいのに摘要は古い」食い違いが 6 年保存の台帳に残った（摘要は物品出納簿にそのまま印字される）。画面は「保存に失敗」と表示しながら明細は保存済みで、閉じても「未保存の変更」の確認が出なかった
   - 保存（明細の置換・摘要の更新・監査ログ）を新設の `LedgerDetailSaveService` が 1 つのトランザクションで確定するようにした（カード・職員の操作 #2156 と同じ `AuditedWriteTransaction` に乗せた）。ViewModel から `DbContext` と `OperationLogger` を外した
