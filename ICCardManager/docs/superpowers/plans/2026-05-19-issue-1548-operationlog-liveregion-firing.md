@@ -736,7 +736,7 @@ WPF の `TextBlock.Text` バインド更新だけでは `LiveRegionChanged` イ�
 ## 設計書
 
 - `ICCardManager/docs/superpowers/specs/2026-05-19-issue-1548-operationlog-liveregion-firing-design.md`
-- 実装プラン: `docs/superpowers/plans/2026-05-19-issue-1548-operationlog-liveregion-firing.md`
+- 実装プラン: `ICCardManager/docs/superpowers/plans/2026-05-19-issue-1548-operationlog-liveregion-firing.md`
 
 ## 関連
 

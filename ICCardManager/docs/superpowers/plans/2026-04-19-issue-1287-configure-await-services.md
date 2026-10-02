@@ -385,7 +385,7 @@ Expected: Issue URL
 - [ ] **Step 5: コミット + push + PR 作成**
 
 ```bash
-git add ICCardManager/CHANGELOG.md docs/superpowers/plans/2026-04-19-issue-1287-configure-await-services.md
+git add ICCardManager/CHANGELOG.md ICCardManager/docs/superpowers/plans/2026-04-19-issue-1287-configure-await-services.md
 git commit -m "docs: CHANGELOG と実装計画を Issue #1287 で更新
 
 Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>"

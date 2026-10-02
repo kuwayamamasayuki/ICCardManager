@@ -63,7 +63,7 @@ Expected: §3.3 と §6.1 が両方ヒットすること（補足ブロックの
 ```bash
 git add ICCardManager/docs/manual/管理者マニュアル.md \
         ICCardManager/docs/superpowers/specs/2026-04-26-issue-1407-backup-frequency-fix-design.md \
-        docs/superpowers/plans/2026-04-26-issue-1407-backup-frequency-fix.md
+        ICCardManager/docs/superpowers/plans/2026-04-26-issue-1407-backup-frequency-fix.md
 git commit -m "$(cat <<'EOF'
 docs: 管理者マニュアル §9.1 自動バックアップ頻度を実装に合わせて修正 (Issue #1407)
 
