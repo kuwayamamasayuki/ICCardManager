@@ -568,7 +568,8 @@ public class BuildWarningSuppressionConventionTests
     /// 実データに正当な使用は 1 件も無く（Issue #2101 の時点）、CS8618 の抑制は理由があっても認めない規約のため、
     /// <c>#pragma</c> のように「理由付きなら可」とはせず一律に禁じる。
     /// <c>disable warnings</c> は警告を、<c>disable annotations</c> は型を oblivious にして警告の発生源を消すため、どちらも対象。
-    /// <c>#nullable restore</c> はプロジェクト設定（テストでは enable）へ戻すだけなので対象外。
+    /// <c>#nullable restore</c> はプロジェクト設定へ戻すだけなので対象外。テストでは enable へ戻るが、本体（プロジェクト設定は無効）では
+    /// 無効へ戻る — 本体の移行済みファイルでの使用は <see cref="NullableContextConventionTests"/> が「有効でない」と数える（Issue #2163）。
     /// </remarks>
     [Fact]
     public void ソースコードでnullable_disableを使っていないこと()

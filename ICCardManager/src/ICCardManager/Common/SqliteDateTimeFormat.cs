@@ -1,3 +1,5 @@
+#nullable enable
+
 using System;
 using System.Data.SQLite;
 using System.Globalization;
@@ -47,7 +49,7 @@ namespace ICCardManager.Common
         /// <c>null</c> のときは <c>null</c> を返す（テキスト列の値として使う場合は
         /// <see cref="ToTextOrDbNull(DateTime?)"/> を使うこと）。
         /// </summary>
-        public static string ToText(DateTime? value)
+        public static string? ToText(DateTime? value)
             => value.HasValue ? ToText(value.Value) : null;
 
         /// <summary>
@@ -66,7 +68,7 @@ namespace ICCardManager.Common
         /// <summary>
         /// 日付を <c>yyyy-MM-dd</c> のテキストへ整形する。<c>null</c> のときは <c>null</c> を返す。
         /// </summary>
-        public static string ToDateText(DateTime? value)
+        public static string? ToDateText(DateTime? value)
             => value.HasValue ? ToDateText(value.Value) : null;
 
         /// <summary>

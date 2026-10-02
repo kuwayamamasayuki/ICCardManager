@@ -1,3 +1,5 @@
+#nullable enable
+
 using System;
 using System.Linq;
 
@@ -77,7 +79,7 @@ namespace ICCardManager.Common
             Func<bool> isUiAvailable,
             Action<Action> postToUi,
             Action<Exception> notifyError,
-            Func<DateTime> utcNow = null)
+            Func<DateTime>? utcNow = null)
         {
             _logError = logError ?? throw new ArgumentNullException(nameof(logError));
             _isUiAvailable = isUiAvailable ?? throw new ArgumentNullException(nameof(isUiAvailable));
@@ -95,7 +97,7 @@ namespace ICCardManager.Common
         /// UnobservedTaskExceptionEventArgs.SetObserved() を済ませておくこと。
         /// 本メソッドはいかなる例外も外へ伝播させない。
         /// </remarks>
-        public void Handle(AggregateException exception)
+        public void Handle(AggregateException? exception)
         {
             if (exception == null)
             {

@@ -1,3 +1,5 @@
+#nullable enable
+
 using System;
 using System.Threading;
 
@@ -38,7 +40,7 @@ namespace ICCardManager.Common
         private static int _seedCounter = Environment.TickCount;
 
         [ThreadStatic]
-        private static Random _threadRandom;
+        private static Random? _threadRandom;
 
         /// <summary>
         /// 基本待機時間に加算するジッター（0 以上、基本待機時間の 50% 未満）を返す

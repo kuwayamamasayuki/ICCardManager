@@ -1,3 +1,5 @@
+#nullable enable
+
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -67,7 +69,7 @@ namespace ICCardManager.Common
         /// </para>
         /// </remarks>
         public static InstanceWindowCandidate? SelectActivationTarget(
-            IReadOnlyList<InstanceWindowCandidate> candidates,
+            IReadOnlyList<InstanceWindowCandidate>? candidates,
             int currentProcessId,
             int currentSessionId)
         {

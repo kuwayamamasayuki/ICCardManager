@@ -1,3 +1,5 @@
+#nullable enable
+
 using System;
 
 namespace ICCardManager.Common
@@ -34,7 +36,7 @@ namespace ICCardManager.Common
         /// <param name="isRefunded">払戻済か（払戻済は他より優先）</param>
         /// <param name="lentStaffName">貸出中の場合の貸出者名（null/空でも可）</param>
         /// <returns>アイコン・ラベル・説明文を含む結果</returns>
-        public static LendingStatusPresentation Resolve(bool isLent, bool isRefunded, string lentStaffName = null)
+        public static LendingStatusPresentation Resolve(bool isLent, bool isRefunded, string? lentStaffName = null)
         {
             // Issue #530: 払戻済は貸出状態より優先して表示
             if (isRefunded)

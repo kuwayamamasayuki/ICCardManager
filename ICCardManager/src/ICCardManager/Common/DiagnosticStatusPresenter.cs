@@ -1,3 +1,5 @@
+#nullable enable
+
 using ICCardManager.Dtos;
 
 namespace ICCardManager.Common

@@ -1,3 +1,5 @@
+#nullable enable
+
 using System;
 using System.Text.RegularExpressions;
 
@@ -14,7 +16,7 @@ namespace ICCardManager.Common.ValueObjects
     {
         private static readonly Regex HexPattern = new Regex(@"^[0-9A-Fa-f]{16}$", RegexOptions.Compiled);
 
-        private readonly string _value;
+        private readonly string? _value;
 
         /// <summary>
         /// 生の文字列値
