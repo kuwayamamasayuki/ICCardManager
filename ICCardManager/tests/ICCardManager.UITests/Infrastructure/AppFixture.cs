@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Data.SQLite;
 using System.Diagnostics;
 using System.IO;
@@ -114,7 +115,22 @@ namespace ICCardManager.UITests.Infrastructure
         /// 再起動、という手順を取る。退避は入口で 1 回だけ行い、返したフィクスチャの Dispose で元の DB を復元する。
         /// 途中で失敗した場合も復元してから例外を投げる（Issue #2062）。
         /// </remarks>
-        public static AppFixture LaunchWithSeed(Action<SQLiteConnection> seed)
+        public static AppFixture LaunchWithSeed(Action<SQLiteConnection> seed) =>
+            LaunchWithSeed(seed, environment: null);
+
+        /// <summary>
+        /// 任意のデータを事前投入し、アプリへ環境変数を渡して起動する（Issue #2190）。
+        /// </summary>
+        /// <param name="seed"><see cref="LaunchWithSeed(Action{SQLiteConnection})"/> と同じ。</param>
+        /// <param name="environment">
+        /// 起動するアプリ（<c>dotnet run</c> とその子プロセス）へ渡す環境変数。null なら渡さない。
+        /// マイグレーションのための起動にも同じ値を渡す（起動のたびに挙動が変わらないように）。
+        /// </param>
+        /// <remarks>
+        /// テストプロセスの環境変数を書き換えずに済むよう、<see cref="ProcessStartInfo.EnvironmentVariables"/> で渡す。
+        /// 書き換えると同じプロセスで後から走る別のテストへ漏れる。
+        /// </remarks>
+        public static AppFixture LaunchWithSeed(Action<SQLiteConnection> seed, IReadOnlyDictionary<string, string>? environment)
         {
             if (seed == null)
             {
@@ -125,7 +141,7 @@ namespace ICCardManager.UITests.Infrastructure
                 DbDirectory,
                 launchForMigration: () =>
                 {
-                    var initialFixture = StartApplication(ownedDatabaseGuard: null);
+                    var initialFixture = StartApplication(ownedDatabaseGuard: null, environment);
                     try
                     {
                         // メインウィンドウを取得することでアプリが完全初期化（DB マイグレーション完了）を保証
@@ -144,8 +160,30 @@ namespace ICCardManager.UITests.Infrastructure
                     conn.Open();
                     seed(conn);
                 },
-                launchOwningGuard: StartApplication);
+                launchOwningGuard: guard => StartApplication(guard, environment));
         }
+
+        /// <summary>
+        /// 起動時のテストデータ自動登録（DEBUG ビルドの <c>RegisterTestDataAsync</c>）を止める環境変数（Issue #2190）。
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// 本体の撮影モード（<c>App.ScreenshotModeEnvironmentVariable</c>。Issue #2019）を流用する。撮影モードの効果は
+        /// ①DEBUG パネルを透明にする（UIA の Invoke は効く）②テストデータ登録を止める、の 2 つで、
+        /// 回帰テストが必要とするのは②だけだが、①は UIA 経由の操作を妨げないので害は無い。
+        /// </para>
+        /// <para>
+        /// テストデータ登録を止めないと、仮想タッチ用のカード（<see cref="ScreenshotSeedData.VirtualTouchCardIdm"/>）に
+        /// デバッグ用の履歴が足され、DB を読んで表明する値が投入データだけで決まらなくなる。
+        /// </para>
+        /// </remarks>
+        public static readonly IReadOnlyDictionary<string, string> SuppressDebugTestData =
+            new Dictionary<string, string> { ["ICCARDMANAGER_SCREENSHOT_MODE"] = "1" };
+
+        /// <summary>
+        /// アプリが開くデータベースファイルのパス（Issue #2190）。テストが投入結果・操作結果を読み返すために使う。
+        /// </summary>
+        public static string DatabasePath => Path.Combine(DbDirectory, UiTestDatabaseGuard.DatabaseFileName);
 
         /// <summary>
         /// <see cref="LaunchWithSeed"/> の手順（退避・マイグレーション・投入・本起動・失敗時の復元）。
@@ -197,7 +235,7 @@ namespace ICCardManager.UITests.Infrastructure
             var guard = UiTestDatabaseGuard.Acquire(DbDirectory);
             try
             {
-                return StartApplication(guard);
+                return StartApplication(guard, environment: null);
             }
             catch
             {
@@ -210,7 +248,8 @@ namespace ICCardManager.UITests.Infrastructure
         /// アプリケーションを起動する。DB の退避は行わない（呼び出し元が <see cref="UiTestDatabaseGuard"/> を取得済み）。
         /// </summary>
         /// <param name="ownedDatabaseGuard">Dispose 時に復元するガード。復元の責任を持たない起動では null。</param>
-        private static AppFixture StartApplication(UiTestDatabaseGuard? ownedDatabaseGuard)
+        /// <param name="environment">アプリへ渡す環境変数。null なら渡さない。</param>
+        private static AppFixture StartApplication(UiTestDatabaseGuard? ownedDatabaseGuard, IReadOnlyDictionary<string, string>? environment)
         {
             // dotnet run --no-build でアプリを起動する。
             // SDK-style の .NET Framework 4.8 プロジェクトでは exe の直接起動だと
@@ -230,13 +269,22 @@ namespace ICCardManager.UITests.Infrastructure
             // WPF ウィンドウは子プロセスに属するため GetMainWindow で見つからない。
             // そのため Process.Start で起動し、子プロセスを Application.Attach で接続する。
             var startTime = DateTime.Now;
-            var dotnetProcess = Process.Start(new ProcessStartInfo
+            var startInfo = new ProcessStartInfo
             {
                 FileName = "dotnet",
                 Arguments = $"run --no-build --configuration {LaunchConfiguration} --project \"{csprojPath}\"",
                 WorkingDirectory = projectRoot,
                 UseShellExecute = false
-            });
+            };
+            if (environment != null)
+            {
+                foreach (var pair in environment)
+                {
+                    startInfo.EnvironmentVariables[pair.Key] = pair.Value;
+                }
+            }
+
+            var dotnetProcess = Process.Start(startInfo);
 
             if (dotnetProcess == null)
             {
