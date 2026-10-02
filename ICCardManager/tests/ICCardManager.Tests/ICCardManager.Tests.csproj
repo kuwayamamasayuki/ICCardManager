@@ -34,6 +34,9 @@
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
       <PrivateAssets>all</PrivateAssets>
     </PackageReference>
+    <!-- Issue #2166: 6.0.4 へ上げると net48 のアセンブリの計装が効かず（OperationLoggerTests だけを走らせた実測で対象行 349 行・被覆 0 行）、
+         CI の Report coverage が実測値を出せなくなるため 3.2.0 に据え置く。上げるときは Release を
+         -p:DebugType=portable でビルドし、coverage.cobertura.xml の lines-covered が 0 でないことを確かめる。 -->
     <PackageReference Include="coverlet.collector" Version="3.2.0">
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
       <PrivateAssets>all</PrivateAssets>

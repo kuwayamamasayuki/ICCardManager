@@ -25,10 +25,15 @@ namespace ICCardManager.Tests.Infrastructure;
 /// 照合は「csproj にあるのに一覧に無い」「一覧にあるのに csproj に無い」「版が違う」の 3 方向で行う。
 /// 抽出が 0 件に縮んでも緑にならないよう、既知の参照が実際に拾えることを対で表明する（#1786）。
 /// </para>
+/// <para>
+/// Issue #2166: テスト用（§2）も同じ形で照合し、あわせて 2 つのテストプロジェクトで共通するパッケージの版が
+/// そろっていることを固定する（UI テストだけが Test.Sdk 17.5.0・runner 2.4.5・FluentAssertions 6.12.0 のまま取り残されていた）。
+/// </para>
 /// </remarks>
 public class ThirdPartyLicensesConsistencyTests
 {
     private const string RuntimeSectionHeading = "## 1.";
+    private const string TestSectionHeading = "## 2.";
     private const string BuildOnlySectionHeading = "## 3.";
 
     [Fact]
@@ -57,6 +62,52 @@ public class ThirdPartyLicensesConsistencyTests
 
         listed.Should().BeEquivalentTo(expected,
             "PrivateAssets=\"all\" の参照は配布物に入らないため §3（ビルド時にのみ使用）に載せる");
+    }
+
+    [Fact]
+    public void テスト用の直接参照が第2節に同じ版で載っていること()
+    {
+        var licenses = ReadLicenses();
+        var runtime = ParseSection(licenses, RuntimeSectionHeading);
+        var testReferences = TestProjectFiles().SelectMany(ReadPackageReferences).ToList();
+
+        // プロジェクト間で版がずれていても、ここでは名前ごとに 1 つ（sln で先に来るプロジェクトの版）しか照合しない。
+        // 版のずれは「テストプロジェクト間で同じパッケージの版がそろっていること」が受け持つ。
+        // 本体と同じ版を使う参照（UI テストのシード投入に使う System.Data.SQLite.Core）は §1 に載っているので §2 には重ねない。
+        // テスト側だけ版がずれて「§2 に行が無い」と赤になったら、§2 へ行を足すのではなく本体の版へそろえる
+        var expected = testReferences
+            .Where(p => !(runtime.TryGetValue(p.Name, out var v) && v == p.Version))
+            .GroupBy(p => p.Name)
+            .ToDictionary(g => g.Key, g => g.First().Version);
+        var listed = ParseSection(licenses, TestSectionHeading);
+
+        // FlaUI.Core は UI テストだけ、Moq は単体テストだけが参照する（共通の xunit では片方しか読めていなくても通る）
+        expected.Should().ContainKeys(new[] { "FlaUI.Core", "Moq" }, "両方のテストプロジェクトの参照を読めていること（空振り防止）");
+
+        listed.Should().BeEquivalentTo(expected,
+            "THIRD_PARTY_LICENSES.md §2 はテストプロジェクトの直接参照と名前・版が一致していること（Issue #2166）");
+    }
+
+    [Fact]
+    public void テストプロジェクト間で同じパッケージの版がそろっていること()
+    {
+        var projects = TestProjectFiles();
+        projects.Should().HaveCountGreaterThan(1, "テストプロジェクトを sln から 2 つ以上導出できていること");
+
+        var references = projects
+            .SelectMany(project => ReadPackageReferences(project)
+                .Select(p => (Project: Path.GetFileNameWithoutExtension(project), p.Name, p.Version)))
+            .ToList();
+        var shared = references.GroupBy(r => r.Name).Where(g => g.Select(r => r.Project).Distinct().Count() > 1).ToList();
+
+        shared.Select(g => g.Key).Should().Contain("xunit", "共通の参照を検出できていること（空振り防止）");
+
+        var mismatched = shared
+            .Where(g => g.Select(r => r.Version).Distinct().Count() > 1)
+            .Select(g => $"{g.Key}: " + string.Join(" / ", g.Select(r => $"{r.Project}={r.Version}")))
+            .ToList();
+        mismatched.Should().BeEmpty(
+            "同じテスト基盤パッケージを 2 つのテストプロジェクトで別の版にすると、片方だけ古い版が取り残される（Issue #2166）");
     }
 
     [Fact]
@@ -99,14 +150,29 @@ public class ThirdPartyLicensesConsistencyTests
     private sealed record PackageReference(string Name, string Version, bool BuildOnly);
 
     private static IReadOnlyList<PackageReference> ReadPackageReferences()
+        => ReadPackageReferences(Path.Combine(TestPaths.GetProductionSourceRoot(), "ICCardManager.csproj"));
+
+    private static IReadOnlyList<PackageReference> ReadPackageReferences(string csproj)
     {
-        var csproj = Path.Combine(TestPaths.GetProductionSourceRoot(), "ICCardManager.csproj");
         var doc = XDocument.Load(csproj);
         return doc.Descendants("PackageReference")
             .Select(e => new PackageReference(
                 (string?)e.Attribute("Include") ?? string.Empty,
                 (string?)e.Attribute("Version") ?? string.Empty,
                 string.Equals((string?)e.Attribute("PrivateAssets"), "all", StringComparison.OrdinalIgnoreCase)))
+            .ToList();
+    }
+
+    /// <summary>
+    /// sln に載っている <c>tests\</c> 配下の csproj。ファイル名で列挙すると、テストプロジェクトが増えたときに検査から漏れる（#1786）。
+    /// </summary>
+    private static IReadOnlyList<string> TestProjectFiles()
+    {
+        var root = TestPaths.GetSolutionRoot();
+        var sln = File.ReadAllText(Path.Combine(root, "ICCardManager.sln"));
+        return Regex.Matches(sln, @"""(?<path>tests\\[^""]+\.csproj)""")
+            .Cast<Match>()
+            .Select(m => Path.Combine(root, m.Groups["path"].Value.Replace('\\', Path.DirectorySeparatorChar)))
             .ToList();
     }
 

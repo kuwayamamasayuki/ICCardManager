@@ -30,14 +30,17 @@
 
 | ライブラリ名 | バージョン | ライセンス | 用途 |
 |---|---|---|---|
-| [Microsoft.NET.Test.Sdk](https://github.com/microsoft/vstest) | 17.5.0 | MIT | テストフレームワーク基盤 |
-| [xunit](https://github.com/xunit/xunit) | 2.4.2 | Apache-2.0 | ユニットテストフレームワーク |
-| [xunit.runner.visualstudio](https://github.com/xunit/visualstudio.xunit) | 2.4.5 | MIT | Visual Studio テストランナー |
+| [Microsoft.NET.Test.Sdk](https://github.com/microsoft/vstest) | 17.14.1 | MIT | テストフレームワーク基盤 |
+| [xunit](https://github.com/xunit/xunit) | 2.9.3 | Apache-2.0 | ユニットテストフレームワーク |
+| [xunit.runner.visualstudio](https://github.com/xunit/visualstudio.xunit) | 2.8.2 | Apache-2.0 | Visual Studio テストランナー |
 | [coverlet.collector](https://github.com/coverlet-coverage/coverlet) | 3.2.0 | MIT | コードカバレッジ収集 |
-| [FluentAssertions](https://github.com/fluentassertions/fluentassertions) | 6.12.0 | Apache-2.0 | テストアサーションライブラリ |
-| [Moq](https://github.com/moq/moq) | 4.20.70 | BSD-3-Clause | モックフレームワーク |
+| [FluentAssertions](https://github.com/fluentassertions/fluentassertions) | 6.12.2 | Apache-2.0 | テストアサーションライブラリ |
+| [Moq](https://github.com/moq/moq) | 4.21.0 | BSD-3-Clause | モックフレームワーク |
+| [Xunit.SkippableFact](https://github.com/AArnott/Xunit.SkippableFact) | 1.5.85 | MS-PL | 実行時の条件による UI テストのスキップ |
 | [FlaUI.Core](https://github.com/FlaUI/FlaUI) | 5.0.0 | MIT | UIオートメーションテスト基盤 |
 | [FlaUI.UIA3](https://github.com/FlaUI/FlaUI) | 5.0.0 | MIT | UIA3による画面操作自動化 |
+
+UI テストは本体と同じ System.Data.SQLite.Core（§1）も使います。2 つのテストプロジェクトで共通するパッケージは同じ版にそろえています。
 
 ## 3. 開発ツール用ライブラリ
 
@@ -64,7 +67,7 @@
 
 ## 5. ライセンス種別の概要
 
-本システムで使用しているライセンスはすべて**寛容型（permissive）ライセンス**であり、商用利用・再配布が許可されています。コピーレフト型ライセンス（GPL等）は含まれていません。
+配布されるアプリケーション（§1）が使用しているライセンスはすべて**寛容型（permissive）ライセンス**であり、商用利用・再配布が許可されています。コピーレフト型ライセンス（GPL等）は含まれていません。テスト用ライブラリ（§2）の Xunit.SkippableFact は MS-PL（弱いコピーレフト）ですが、開発・テスト時にのみ使い、配布物には含まれません。
 
 | ライセンス | 種別 | 主な条件 |
 |---|---|---|
@@ -72,12 +75,14 @@
 | Apache-2.0 | 寛容型 | 著作権表示、ライセンス文の保持、変更の明示 |
 | BSD-2-Clause | 寛容型 | 著作権表示とライセンス文の保持 |
 | BSD-3-Clause | 寛容型 | 著作権表示とライセンス文の保持、著作者名の無断使用禁止 |
+| MS-PL | 弱いコピーレフト（OSI 承認） | 著作権・特許・商標の表示の保持。ソースコードは同じライセンスで、コンパイル済みの形は MS-PL に適合するライセンスで配布する。特許訴訟を起こすとライセンスが終了する（テスト用のみ・配布物に含まれない） |
 | Public Domain | パブリックドメイン | 制約なし |
 
 ## 6. 更新履歴
 
 | 日付 | 内容 |
 |---|---|
+| 2026-10-02 | テスト用ライブラリ（§2）の版を csproj に同期し、Xunit.SkippableFact を追加。UI テストのテスト基盤パッケージを単体テストと同じ版へ更新。xunit.runner.visualstudio は 2.8.2 でライセンスが MIT から Apache-2.0 に変わった（Issue #2166） |
 | 2026-10-02 | 未使用の Microsoft.Extensions.Hosting を削除し、Microsoft.Extensions.Logging.Configuration / Options.ConfigurationExtensions を直接参照として追加。ClosedXML・CommunityToolkit.Mvvm の版を csproj に同期（Issue #2165） |
 | 2026-10-02 | ビルド時のみ使用する Microsoft.CodeAnalysis.NetAnalyzers を追加（Issue #2162） |
 | 2026-04-16 | パッケージバージョンを最新に同期、VOICEVOX音声素材のセクションを追加 |

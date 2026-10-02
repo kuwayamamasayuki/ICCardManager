@@ -137,7 +137,7 @@
 | アーキテクチャ | MVVM | - |
 | データベース | SQLite | 3.x |
 | ICカード | FelicaLib.DotNet | 1.2.x |
-| Excel出力 | ClosedXML | 0.102.x |
+| Excel出力 | ClosedXML | 0.105.x |
 | MVVMツールキット | CommunityToolkit.Mvvm | 8.x |
 
 ### ディレクトリ構成
