@@ -13,9 +13,9 @@
 
   <ItemGroup>
     <!-- xUnit テストフレームワーク (.NET Framework対応版) -->
-    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.5.0" />
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.14.1" />
     <PackageReference Include="xunit" Version="2.9.3" />
-    <PackageReference Include="xunit.runner.visualstudio" Version="2.4.5">
+    <PackageReference Include="xunit.runner.visualstudio" Version="2.8.2">
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
       <PrivateAssets>all</PrivateAssets>
     </PackageReference>
@@ -24,7 +24,7 @@
     <PackageReference Include="Xunit.SkippableFact" Version="1.5.85" />
 
     <!-- テストヘルパー -->
-    <PackageReference Include="FluentAssertions" Version="6.12.0" />
+    <PackageReference Include="FluentAssertions" Version="6.12.2" />
 
     <!-- FlaUI - WPF UIテスト自動化 -->
     <PackageReference Include="FlaUI.Core" Version="5.0.0" />
