@@ -124,6 +124,36 @@ namespace ICCardManager.UITests.Tests
                 "摘要がバス停名で作り直されること（入力前は「バス（★）」）");
         }
 
+        /// <summary>
+        /// 払戻済カードをタッチすると、エラートーストが出て貸出は記録されないこと（Issue #2194。ST-007 M5 を置き換える）。
+        /// </summary>
+        /// <remarks>
+        /// 対になる「払戻済でなければ貸し出される」は M1 が表明している（同じカード・同じ操作で、払戻済かどうかだけが違う）。
+        /// </remarks>
+        [SkippableFact]
+        public void M5_払戻済カードをタッチするとエラーが出て貸出は記録されないこと()
+        {
+            SkipUnlessDebug();
+
+            using var fixture = AppFixture.LaunchWithSeed(RegressionSeedData.SeedWithRefundedVirtualTouchCard, AppFixture.SuppressDebugTestData);
+            var page = new MainWindowPage(fixture.MainWindow, fixture.Automation);
+
+            InvokeDebugPanelButton(page, TestConstants.DebugPanelStaffButton);
+            WaitForToastWithTitle(fixture, $"{ScreenshotSeedData.PrimaryStaffName} さん");
+            WaitForToastGone(fixture);
+
+            InvokeDebugPanelButton(page, TestConstants.DebugPanelIcCardButton);
+            var toast = WaitForToastWithTitle(fixture, TestConstants.RefundedCardToastTitle);
+            ReadToastText(toast, TestConstants.ToastMessageHelpText).Should().Contain(
+                ScreenshotSeedData.VirtualTouchCardDisplayName, "エラーの本文はタッチしたカードを名指しすること");
+            WaitForNextAction(page, TestConstants.NextActionWaitingForStaffCard);
+
+            LentStatusOf(ScreenshotSeedData.VirtualTouchCardIdm).Should().Be(0L, "払戻済カードは貸出中にならないこと");
+            DatabaseProbe.Count(
+                "SELECT COUNT(*) FROM ledger WHERE card_idm = @card AND is_lent_record = 1",
+                ("@card", ScreenshotSeedData.VirtualTouchCardIdm)).Should().Be(0L, "貸出中レコードが作られないこと");
+        }
+
         // ── ヘルパー ─────────────────────────────────
 
         private static void SkipUnlessDebug() =>

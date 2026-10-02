@@ -85,7 +85,56 @@ namespace ICCardManager.UITests.Tests
             AssertNoIntersection(lastMonth, TestConstants.OperationLogQuickFilterLastMonth, actionTypeRect);
         }
 
+        /// <summary>
+        /// ダイアログを最小幅（MinWidth=800）まで縮めても、終了日の DatePicker とクイックフィルタがダイアログの内側に収まること
+        /// （Issue #2194。UT-058c の手動確認「ウィンドウ最小幅でも見切れない」を置き換える。Issue #1523）。
+        /// </summary>
+        /// <remarks>
+        /// 既定の幅（1000）では収まっていても、最小幅では星共有列が縮んで右端の終了日が押し出される（#1523 の故障）。
+        /// 最小幅より細く縮めるよう Win32 で指示すると、WPF は MinWidth で止める（UIA の Transform パターンの Resize は効かなかった）。
+        /// 実際に縮んだこと（幅が既定より小さいこと）を前提として表明する — 縮んでいなければこのテストは何も検査しない。
+        /// </remarks>
+        [SkippableFact]
+        public void 最小幅まで縮めても終了日とクイックフィルタがダイアログ内に収まる()
+        {
+            Skip.If(TestConstants.ShouldSkipQuickFilterFlaUiTest,
+                "Issue #1522: SKIP_QUICK_FILTER_UITEST=1 または WSL_DISTRO_NAME 設定により Skip。" +
+                "Windows ローカル / CI で実行してください。");
+
+            using var fixture = AppFixture.Launch();
+            var page = new MainWindowPage(fixture.MainWindow, fixture.Automation);
+            using var operationLog = OpenOperationLogDialog(page, fixture);
+            var window = operationLog.Page.Window;
+
+            var before = window.BoundingRectangle;
+            NativeWindows.Resize(NativeWindows.HandleOf(window), 400, before.Height);
+            var shrunk = Retry.WhileFalse(
+                () => window.BoundingRectangle.Width < before.Width,
+                TimeSpan.FromSeconds(5)).Success;
+            shrunk.Should().BeTrue($"前提: ダイアログが既定の幅（{before.Width}）より縮むこと");
+            var bounds = window.BoundingRectangle;
+
+            var toDate = operationLog.FindByNameWithRetry(TestConstants.OperationLogToDate, TimeSpan.FromSeconds(5));
+            toDate.Should().NotBeNull($"終了日（{TestConstants.OperationLogToDate}）が見つかること");
+            AssertInside(toDate!, TestConstants.OperationLogToDate, bounds);
+
+            var (today, thisMonth, lastMonth) = operationLog.RequireQuickFilterButtons();
+            AssertButtonVisible(today, TestConstants.OperationLogQuickFilterToday);
+            AssertInside(today, TestConstants.OperationLogQuickFilterToday, bounds);
+            AssertInside(thisMonth, TestConstants.OperationLogQuickFilterThisMonth, bounds);
+            AssertInside(lastMonth, TestConstants.OperationLogQuickFilterLastMonth, bounds);
+        }
+
         // ── 検証ヘルパー ─────────────────────────────────
+
+        /// <summary>要素の矩形がダイアログの矩形の内側にある（右端・下端が押し出されていない）ことを表明する。</summary>
+        private static void AssertInside(AutomationElement element, string name, System.Drawing.Rectangle bounds)
+        {
+            var rect = element.BoundingRectangle;
+            rect.Width.Should().BeGreaterThan(0, $"「{name}」の描画幅が 0（見切れている）");
+            bounds.Contains(rect).Should().BeTrue(
+                $"「{name}」(rect={rect}) が最小幅のダイアログ (rect={bounds}) の内側に収まること（右端が押し出されていない）");
+        }
 
         private static void AssertButtonVisible(AutomationElement button, string buttonName)
         {

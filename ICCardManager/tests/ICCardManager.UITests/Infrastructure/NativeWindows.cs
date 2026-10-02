@@ -43,6 +43,24 @@ namespace ICCardManager.UITests.Infrastructure
         [DllImport("user32.dll")]
         private static extern bool SetForegroundWindow(IntPtr hWnd);
 
+        /// <summary>
+        /// ウィンドウの大きさを変える（<c>SetWindowPos</c>。位置と Z 順は変えない）。
+        /// </summary>
+        /// <remarks>
+        /// UIA の Transform パターンの Resize は WPF のダイアログで効かなかった（実測: 幅が変わらない）。Win32 で直接変えると、
+        /// WPF は <c>WM_GETMINMAXINFO</c> で <c>MinWidth</c> / <c>MinHeight</c> に止める。
+        /// </remarks>
+        public static void Resize(IntPtr handle, int width, int height)
+        {
+            const uint noMove = 0x0002;
+            const uint noZOrder = 0x0004;
+            const uint noActivate = 0x0010;
+            _ = SetWindowPos(handle, IntPtr.Zero, 0, 0, width, height, noMove | noZOrder | noActivate);
+        }
+
+        [DllImport("user32.dll")]
+        private static extern bool SetWindowPos(IntPtr hWnd, IntPtr hWndInsertAfter, int x, int y, int cx, int cy, uint flags);
+
         /// <summary>ウィンドウを所有するプロセスの ID。</summary>
         public static int ProcessIdOf(IntPtr handle)
         {

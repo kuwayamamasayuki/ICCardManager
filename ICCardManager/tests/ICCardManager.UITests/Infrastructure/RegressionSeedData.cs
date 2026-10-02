@@ -72,6 +72,32 @@ namespace ICCardManager.UITests.Infrastructure
             tx.Commit();
         }
 
+        /// <summary>
+        /// 仮想タッチ用のカード（DEBUG パネルの「交通系ICカード」が模擬する IDm）を払戻済にした投入データ（Issue #2194。ST-007 M5）。
+        /// </summary>
+        /// <remarks>
+        /// 払い戻しは <c>is_deleted</c> を 0 のまま <c>is_refunded</c> を立てる（#530）。払戻済カードは貸出対象外で、
+        /// タッチするとエラートーストが出る。
+        /// </remarks>
+        public static void SeedWithRefundedVirtualTouchCard(SQLiteConnection conn)
+        {
+            ScreenshotSeedData.SeedForVirtualTouch(conn);
+
+            using var tx = conn.BeginTransaction();
+            using (var cmd = conn.CreateCommand())
+            {
+                cmd.CommandText = "UPDATE ic_card SET is_refunded = 1, refunded_at = @at WHERE card_idm = @card";
+                cmd.Parameters.AddWithValue("@at", DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture));
+                cmd.Parameters.AddWithValue("@card", ScreenshotSeedData.VirtualTouchCardIdm);
+                if (cmd.ExecuteNonQuery() != 1)
+                {
+                    throw new InvalidOperationException("仮想タッチ用のカードが投入データにありません（ScreenshotSeedData.SeedForVirtualTouch を確認すること）。");
+                }
+            }
+
+            tx.Commit();
+        }
+
         private static void InsertDetail(
             SQLiteConnection conn, long ledgerId, string date, string entry, string exit, int amount, int balance)
         {
