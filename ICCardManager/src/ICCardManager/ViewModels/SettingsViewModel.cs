@@ -1,3 +1,4 @@
+#nullable enable
 using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
@@ -384,7 +385,12 @@ public partial class SettingsViewModel : ViewModelBase
                 ShowHistoryOnReturn = ShowHistoryOnReturn
             };
 
-            var success = await _settingsRepository.SaveAppSettingsAsync(settings);
+            // Issue #2197: DB への書き込みは Task.Run で UI スレッドから退避する（接続診断・バックアップと同じ方針）。
+            // SaveAppSettingsAsync は名前こそ非同期だが、BeginTransactionAsync の最初の await（セマフォの取得）が
+            // 同期的に完了するため、BEGIN IMMEDIATE と各 INSERT は呼び出し元のスレッドで実行される。
+            // ほかの接続（共有モードの他 PC 等）が書き込み中だと、その待ち（busy_timeout と ADO 層の再試行）の間
+            // UI スレッドが止まり、アプリ全体が固まって処理中オーバーレイも描画されなかった。
+            var success = await Task.Run(() => _settingsRepository.SaveAppSettingsAsync(settings));
 
             if (success)
             {

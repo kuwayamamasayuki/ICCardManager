@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Threading;
 using System.Threading.Tasks;
 using FluentAssertions;
 using ICCardManager.Common;
@@ -176,6 +177,65 @@ public class SettingsViewModelTests
 
         // Assert - リポジトリが正しいパラメータで呼ばれたことを検証
         _settingsRepositoryMock.Verify(r => r.SaveAppSettingsAsync(It.Is<AppSettings>(s => s.WarningBalance == 0)), Times.Once);
+    }
+
+    /// <summary>
+    /// Issue #2197: 設定の DB への書き込みは、呼び出し元（UI スレッド）の同期コンテキストの外で実行されること。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <c>SaveAppSettingsAsync</c> は名前こそ非同期だが、最初の <c>await</c> が同期的に完了するため、そのまま呼ぶと
+    /// DB の待ち（他の接続のロック）の間 UI スレッドが止まり、アプリ全体が固まった。
+    /// </para>
+    /// <para>
+    /// UI スレッドの代わりに、目印の同期コンテキストを入れたスレッドから呼ぶ。リポジトリが呼ばれた時点の
+    /// 同期コンテキストが目印のままなら、UI スレッドの上で DB を待っていることになる。スレッド ID の一致で判定すると、
+    /// テスト自身がスレッドプールで走るため再利用で取り違える（testing.md #1961）ので、同期コンテキストで見る。
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public async Task SaveAsync_DBへの書き込みを呼び出し元の同期コンテキストの外で実行すること_Issue2197()
+    {
+        // Arrange
+        _viewModel.BackupPath = "";
+        var marker = new InlineMarkerSynchronizationContext();
+        var called = false;
+        SynchronizationContext? contextInRepository = marker;
+        _settingsRepositoryMock
+            .Setup(r => r.SaveAppSettingsAsync(It.IsAny<AppSettings>()))
+            .Callback(() =>
+            {
+                called = true;
+                contextInRepository = SynchronizationContext.Current;
+            })
+            .ReturnsAsync(false); // WPF 依存の ApplyFontSize を回避するため false を返す
+
+        // Act: 同期部分（最初の await まで）を目印の同期コンテキストの上で走らせる
+        var previous = SynchronizationContext.Current;
+        Task saveTask;
+        SynchronizationContext.SetSynchronizationContext(marker);
+        try
+        {
+            saveTask = _viewModel.SaveAsync();
+        }
+        finally
+        {
+            SynchronizationContext.SetSynchronizationContext(previous);
+        }
+
+        await saveTask;
+
+        // Assert
+        called.Should().BeTrue("前提: 保存でリポジトリが呼ばれること（呼ばれないと何も検査しない）");
+        contextInRepository.Should().NotBeSameAs(marker,
+            "DB への書き込みは UI スレッド（呼び出し元の同期コンテキスト）の外で実行すること。" +
+            "そのまま呼ぶと、他の接続が DB をロックしている間 UI スレッドが止まりアプリ全体が固まる");
+    }
+
+    /// <summary>投稿された継続をその場で実行する同期コンテキスト（UI スレッドの目印として使う）。</summary>
+    private sealed class InlineMarkerSynchronizationContext : SynchronizationContext
+    {
+        public override void Post(SendOrPostCallback d, object? state) => d(state);
     }
 
     /// <summary>
