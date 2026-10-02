@@ -1,3 +1,5 @@
+#nullable enable
+
 using System;
 using System.Globalization;
 using System.Text;
@@ -30,7 +32,7 @@ namespace ICCardManager.Common
         /// </summary>
         /// <param name="report">診断結果。null の場合は説明文のみを返す</param>
         /// <returns>クリップボードへ設定するテキスト</returns>
-        public static string Format(DiagnosticReport report)
+        public static string Format(DiagnosticReport? report)
         {
             if (report == null)
             {

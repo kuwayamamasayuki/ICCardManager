@@ -1,3 +1,5 @@
+#nullable enable
+
 using System;
 using System.Threading;
 
@@ -53,9 +55,9 @@ namespace ICCardManager.Common
     /// </remarks>
     public sealed class SingleInstanceGuard : IDisposable
     {
-        private Mutex _mutex;
+        private Mutex? _mutex;
 
-        private SingleInstanceGuard(SingleInstanceStatus status, Mutex mutex, Exception acquisitionError)
+        private SingleInstanceGuard(SingleInstanceStatus status, Mutex? mutex, Exception? acquisitionError)
         {
             Status = status;
             _mutex = mutex;
@@ -70,7 +72,7 @@ namespace ICCardManager.Common
         /// <see cref="SingleInstanceStatus.AlreadyRunningInOtherSession"/> のときのみ非 null）。
         /// 呼び出し元がログへ残すために公開している。
         /// </summary>
-        public Exception AcquisitionError { get; }
+        public Exception? AcquisitionError { get; }
 
         /// <summary>
         /// 起動を継続してよいか。判定不能（<see cref="SingleInstanceStatus.GuardUnavailable"/>）も

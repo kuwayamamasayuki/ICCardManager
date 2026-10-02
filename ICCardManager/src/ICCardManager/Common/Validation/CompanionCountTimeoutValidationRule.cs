@@ -1,3 +1,5 @@
+#nullable enable
+
 using System.Globalization;
 using System.Windows.Controls;
 
@@ -19,7 +21,7 @@ namespace ICCardManager.Common.Validation
     {
         public override ValidationResult Validate(object value, CultureInfo cultureInfo)
         {
-            var text = value?.ToString();
+            var text = value?.ToString() ?? string.Empty;
 
             if (string.IsNullOrWhiteSpace(text))
             {

@@ -1,3 +1,5 @@
+#nullable enable
+
 using System;
 using System.Collections.Generic;
 using System.IO;
@@ -42,7 +44,7 @@ namespace ICCardManager.Common
             /// <summary>
             /// エラーメッセージ（失敗時のみ）
             /// </summary>
-            public string ErrorMessage { get; set; }
+            public string? ErrorMessage { get; set; }
 
             /// <summary>
             /// 成功結果を作成
@@ -522,7 +524,7 @@ namespace ICCardManager.Common
         /// UNC パスから <c>\\server\share</c> 形式のルート部分を抽出する。
         /// UNC でない場合やパスが短すぎる場合は null を返す。
         /// </summary>
-        internal static string ExtractUncRoot(string path)
+        internal static string? ExtractUncRoot(string path)
         {
             if (!IsUncPath(path))
             {
@@ -596,7 +598,7 @@ namespace ICCardManager.Common
         /// （検査できないことを理由に正当な設定を弾かない。実際の書き込み時にエラーになる）。
         /// </para>
         /// </remarks>
-        internal static string FindNearestExistingAncestor(string path)
+        internal static string? FindNearestExistingAncestor(string path)
         {
             var current = Path.GetDirectoryName(path);
 
@@ -705,7 +707,7 @@ namespace ICCardManager.Common
         /// </summary>
         /// <param name="path">正規化するパス</param>
         /// <returns>正規化されたパス（不正なパスの場合はnull）</returns>
-        public static string NormalizePath(string path)
+        public static string? NormalizePath(string path)
         {
             if (string.IsNullOrWhiteSpace(path))
             {

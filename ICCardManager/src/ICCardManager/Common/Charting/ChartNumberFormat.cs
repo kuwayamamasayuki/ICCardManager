@@ -1,3 +1,5 @@
+#nullable enable
+
 using System.Globalization;
 
 namespace ICCardManager.Common.Charting

@@ -1,3 +1,5 @@
+#nullable enable
+
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -133,7 +135,7 @@ namespace ICCardManager.Common.Exceptions
         /// <summary>
         /// バックアップ失敗
         /// </summary>
-        public static BusinessException BackupFailed(Exception innerException = null)
+        public static BusinessException BackupFailed(Exception? innerException = null)
         {
             const string message = "Backup operation failed";
             const string userMessage = "バックアップに失敗しました。バックアップ先のフォルダを確認してください。";
@@ -147,7 +149,7 @@ namespace ICCardManager.Common.Exceptions
         /// <summary>
         /// 復元失敗
         /// </summary>
-        public static BusinessException RestoreFailed(Exception innerException = null)
+        public static BusinessException RestoreFailed(Exception? innerException = null)
         {
             const string message = "Restore operation failed";
             const string userMessage = "データの復元に失敗しました。バックアップファイルが破損している可能性があります。";
@@ -161,7 +163,7 @@ namespace ICCardManager.Common.Exceptions
         /// <summary>
         /// レポート生成失敗
         /// </summary>
-        public static BusinessException ReportGenerationFailed(Exception innerException = null)
+        public static BusinessException ReportGenerationFailed(Exception? innerException = null)
         {
             const string message = "Report generation failed";
             const string userMessage = "帳票の生成に失敗しました。テンプレートファイルを確認してください。";
@@ -223,7 +225,7 @@ namespace ICCardManager.Common.Exceptions
         /// <summary>
         /// ファイル書き込み権限なし
         /// </summary>
-        public static BusinessException FileWriteAccessDenied(string path = null)
+        public static BusinessException FileWriteAccessDenied(string? path = null)
         {
             var message = string.IsNullOrEmpty(path)
                 ? "File write access denied"

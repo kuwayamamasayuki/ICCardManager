@@ -1,4 +1,7 @@
+#nullable enable
+
 using System;
+using System.Diagnostics.CodeAnalysis;
 using System.Reflection;
 
 namespace ICCardManager.Common
@@ -43,7 +46,7 @@ namespace ICCardManager.Common
         /// <param name="text">バージョン文字列（先頭の "v"/"V" と前後空白は無視。例: "v2.11.0"）</param>
         /// <param name="version">パース結果（3要素に正規化済み）</param>
         /// <returns>パースに成功した場合true</returns>
-        public static bool TryParseNormalized(string text, out Version version)
+        public static bool TryParseNormalized(string text, [NotNullWhen(true)] out Version? version)
         {
             version = null;
             if (string.IsNullOrWhiteSpace(text))

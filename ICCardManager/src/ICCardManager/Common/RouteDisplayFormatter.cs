@@ -1,3 +1,5 @@
+#nullable enable
+
 using ICCardManager.Services;
 
 namespace ICCardManager.Common
@@ -29,9 +31,9 @@ namespace ICCardManager.Common
             bool isCharge,
             bool isPointRedemption,
             bool isBus,
-            string busStops,
-            string entryStation,
-            string exitStation,
+            string? busStops,
+            string? entryStation,
+            string? exitStation,
             string stationSeparator = "～",
             bool showPartialStations = true,
             string fallback = "不明")

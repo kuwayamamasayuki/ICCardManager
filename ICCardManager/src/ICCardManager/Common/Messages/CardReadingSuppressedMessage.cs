@@ -1,3 +1,5 @@
+#nullable enable
+
 using CommunityToolkit.Mvvm.Messaging.Messages;
 
 namespace ICCardManager.Common.Messages

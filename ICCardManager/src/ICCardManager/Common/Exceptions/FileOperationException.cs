@@ -1,3 +1,5 @@
+#nullable enable
+
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -12,12 +14,12 @@ namespace ICCardManager.Common.Exceptions
         /// <summary>
         /// 操作対象のファイルパス
         /// </summary>
-        public string FilePath { get; }
+        public string? FilePath { get; }
 
         /// <summary>
         /// ファイルが見つからない
         /// </summary>
-        public static FileOperationException FileNotFound(string filePath, Exception innerException = null)
+        public static FileOperationException FileNotFound(string filePath, Exception? innerException = null)
         {
             var message = $"File not found: {filePath}";
             const string userMessage = "指定されたファイルが見つかりません。";
@@ -31,7 +33,7 @@ namespace ICCardManager.Common.Exceptions
         /// <summary>
         /// ファイル読み込み失敗
         /// </summary>
-        public static FileOperationException ReadFailed(string filePath = null, Exception innerException = null)
+        public static FileOperationException ReadFailed(string? filePath = null, Exception? innerException = null)
         {
             var message = string.IsNullOrEmpty(filePath)
                 ? "Failed to read file"
@@ -47,7 +49,7 @@ namespace ICCardManager.Common.Exceptions
         /// <summary>
         /// ファイル書き込み失敗
         /// </summary>
-        public static FileOperationException WriteFailed(string filePath = null, Exception innerException = null)
+        public static FileOperationException WriteFailed(string? filePath = null, Exception? innerException = null)
         {
             var message = string.IsNullOrEmpty(filePath)
                 ? "Failed to write file"
@@ -63,7 +65,7 @@ namespace ICCardManager.Common.Exceptions
         /// <summary>
         /// ファイルアクセス権限なし
         /// </summary>
-        public static FileOperationException AccessDenied(string filePath = null, Exception innerException = null)
+        public static FileOperationException AccessDenied(string? filePath = null, Exception? innerException = null)
         {
             var message = string.IsNullOrEmpty(filePath)
                 ? "File access denied"
@@ -79,7 +81,7 @@ namespace ICCardManager.Common.Exceptions
         /// <summary>
         /// ファイルが使用中
         /// </summary>
-        public static FileOperationException FileInUse(string filePath = null, Exception innerException = null)
+        public static FileOperationException FileInUse(string? filePath = null, Exception? innerException = null)
         {
             var message = string.IsNullOrEmpty(filePath)
                 ? "File is in use by another process"
@@ -95,7 +97,7 @@ namespace ICCardManager.Common.Exceptions
         /// <summary>
         /// 無効なファイル形式
         /// </summary>
-        public static FileOperationException InvalidFormat(string filePath = null, string expectedFormat = null, Exception innerException = null)
+        public static FileOperationException InvalidFormat(string? filePath = null, string? expectedFormat = null, Exception? innerException = null)
         {
             var message = string.IsNullOrEmpty(filePath)
                 ? "Invalid file format"
@@ -119,7 +121,7 @@ namespace ICCardManager.Common.Exceptions
         /// バリデーション（IDm・金額・日付はすべて ASCII のため素通りする）で検出できず、
         /// 読み取りの時点で止めるほかに手段がない。
         /// </remarks>
-        public static FileOperationException UndecidableEncoding(string filePath = null, Exception innerException = null)
+        public static FileOperationException UndecidableEncoding(string? filePath = null, Exception? innerException = null)
         {
             var message = string.IsNullOrEmpty(filePath)
                 ? "Failed to detect text encoding"
@@ -148,7 +150,7 @@ namespace ICCardManager.Common.Exceptions
         /// <param name="filePath">対象ファイルパス</param>
         /// <param name="innerException">内部例外</param>
         public static FileOperationException UnreadableDeclaredEncoding(
-            string encodingName, string filePath = null, Exception innerException = null)
+            string encodingName, string? filePath = null, Exception? innerException = null)
         {
             var message = string.IsNullOrEmpty(filePath)
                 ? $"Declared encoding {encodingName} could not decode the file"
@@ -168,7 +170,7 @@ namespace ICCardManager.Common.Exceptions
         /// <summary>
         /// ディレクトリ作成失敗
         /// </summary>
-        public static FileOperationException DirectoryCreationFailed(string path = null, Exception innerException = null)
+        public static FileOperationException DirectoryCreationFailed(string? path = null, Exception? innerException = null)
         {
             var message = string.IsNullOrEmpty(path)
                 ? "Failed to create directory"
@@ -181,13 +183,13 @@ namespace ICCardManager.Common.Exceptions
                 : new FileOperationException(message, userMessage, errorCode, path);
         }
 
-        private FileOperationException(string message, string userFriendlyMessage, string errorCode, string filePath)
+        private FileOperationException(string message, string userFriendlyMessage, string errorCode, string? filePath)
             : base(message, userFriendlyMessage, errorCode)
         {
             FilePath = filePath;
         }
 
-        private FileOperationException(string message, string userFriendlyMessage, string errorCode, string filePath, Exception innerException)
+        private FileOperationException(string message, string userFriendlyMessage, string errorCode, string? filePath, Exception innerException)
             : base(message, userFriendlyMessage, errorCode, innerException)
         {
             FilePath = filePath;

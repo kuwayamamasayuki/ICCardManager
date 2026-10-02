@@ -1,3 +1,5 @@
+#nullable enable
+
 using System;
 using System.Collections.Generic;
 
@@ -29,7 +31,7 @@ namespace ICCardManager.Common.Charting
         /// <summary>
         /// カテゴリ（月・カード等）を等間隔に並べたときの各スロット中心の X 座標を返す。
         /// </summary>
-        internal static IReadOnlyList<double> CalculateCategoryCentersX(int count, ChartPlotArea area)
+        internal static IReadOnlyList<double> CalculateCategoryCentersX(int count, ChartPlotArea? area)
         {
             if (count <= 0 || area == null || !area.IsValid)
             {
@@ -49,7 +51,7 @@ namespace ICCardManager.Common.Charting
         /// <summary>
         /// カテゴリを縦に並べたときの各スロット中心の Y 座標を返す（横棒グラフ用）。
         /// </summary>
-        internal static IReadOnlyList<double> CalculateCategoryCentersY(int count, ChartPlotArea area)
+        internal static IReadOnlyList<double> CalculateCategoryCentersY(int count, ChartPlotArea? area)
         {
             if (count <= 0 || area == null || !area.IsValid)
             {
@@ -74,7 +76,7 @@ namespace ICCardManager.Common.Charting
         /// null の位置で線を切る。セグメントは点が 1 個だけの場合も返す（View 側でマーカーのみ描く）。
         /// </remarks>
         internal static IReadOnlyList<IReadOnlyList<ChartPoint>> CalculateLineSegments(
-            IReadOnlyList<double?> values, ChartPlotArea area, AxisScale yScale, double markerSize)
+            IReadOnlyList<double?>? values, ChartPlotArea? area, AxisScale? yScale, double markerSize)
         {
             if (values == null || values.Count == 0 || area == null || !area.IsValid || yScale == null)
             {
@@ -87,7 +89,8 @@ namespace ICCardManager.Common.Charting
 
             for (var i = 0; i < values.Count; i++)
             {
-                if (!values[i].HasValue)
+                var nullableValue = values[i];
+                if (!nullableValue.HasValue)
                 {
                     if (current.Count > 0)
                     {
@@ -98,7 +101,7 @@ namespace ICCardManager.Common.Charting
                     continue;
                 }
 
-                var value = values[i].Value;
+                var value = nullableValue.Value;
                 var y = ChartScale.MapToPixel(value, yScale.Min, yScale.Max, area.Bottom, area.Top);
                 current.Add(new ChartPoint(i, centers[i], y, value, markerSize));
             }
@@ -120,7 +123,7 @@ namespace ICCardManager.Common.Charting
         /// <param name="gapRatio">スロット幅に対する隙間の比率（0.2 なら棒はスロットの 80%）</param>
         /// <param name="brushKey">塗り色のリソースキー名</param>
         internal static IReadOnlyList<ChartBar> CalculateVerticalBars(
-            IReadOnlyList<double> values, ChartPlotArea area, AxisScale yScale, double gapRatio, string brushKey)
+            IReadOnlyList<double>? values, ChartPlotArea? area, AxisScale? yScale, double gapRatio, string brushKey)
         {
             if (values == null || values.Count == 0 || area == null || !area.IsValid || yScale == null)
             {
@@ -158,11 +161,11 @@ namespace ICCardManager.Common.Charting
         /// スクリーンリーダーにも空要素として読まれるため）。累積は 0 以下の値を加算しない。
         /// </remarks>
         internal static IReadOnlyList<ChartBar> CalculateStackedVerticalBars(
-            IReadOnlyList<IReadOnlyList<double>> valuesByCategory,
-            ChartPlotArea area,
-            AxisScale yScale,
+            IReadOnlyList<IReadOnlyList<double>>? valuesByCategory,
+            ChartPlotArea? area,
+            AxisScale? yScale,
             double gapRatio,
-            IReadOnlyList<string> brushKeys)
+            IReadOnlyList<string>? brushKeys)
         {
             if (valuesByCategory == null || valuesByCategory.Count == 0
                 || area == null || !area.IsValid || yScale == null
@@ -217,7 +220,7 @@ namespace ICCardManager.Common.Charting
         /// 横棒グラフの各棒の矩形を返す（カード別稼働率など、ラベルが長い場合に使う）。
         /// </summary>
         internal static IReadOnlyList<ChartBar> CalculateHorizontalBars(
-            IReadOnlyList<double> values, ChartPlotArea area, AxisScale xScale, double gapRatio, string brushKey)
+            IReadOnlyList<double>? values, ChartPlotArea? area, AxisScale? xScale, double gapRatio, string brushKey)
         {
             if (values == null || values.Count == 0 || area == null || !area.IsValid || xScale == null)
             {
@@ -249,7 +252,7 @@ namespace ICCardManager.Common.Charting
         /// <param name="area">描画領域</param>
         /// <param name="labelFormatter">目盛り値をラベル文字列へ変換する関数（null なら金額として整形する）</param>
         internal static IReadOnlyList<ChartAxisTick> CalculateYAxisTicks(
-            AxisScale scale, ChartPlotArea area, Func<double, string> labelFormatter)
+            AxisScale? scale, ChartPlotArea? area, Func<double, string>? labelFormatter)
         {
             if (scale == null || area == null || !area.IsValid || scale.TickCount <= 0)
             {
@@ -281,7 +284,7 @@ namespace ICCardManager.Common.Charting
         /// 期間の終端は「いつまでの集計か」を示す情報量が大きいので必ず残す。
         /// </remarks>
         internal static IReadOnlyList<ChartAxisTick> CalculateXAxisLabels(
-            IReadOnlyList<string> labels, ChartPlotArea area, int maxLabelCount)
+            IReadOnlyList<string>? labels, ChartPlotArea? area, int maxLabelCount)
         {
             if (labels == null || labels.Count == 0 || area == null || !area.IsValid || maxLabelCount <= 0)
             {

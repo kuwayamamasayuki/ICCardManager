@@ -6,6 +6,13 @@
 - Issue #2188 **画面操作が必要な手動確認を棚卸しし、FlaUI テストへの置き換え計画を立てた**
   - 07_テスト設計書の「手動確認・手動検証・実機」の記述を、A（FlaUI で状態を判定）・B（撮影した画像で見た目を判定）・C（人・実機環境が必要）に分類した spec を追加（`docs/superpowers/specs/2026-10-02-issue-2188-manual-check-inventory.md`）
   - ST-007 の「仮想NFCタッチの再現は不可能」を訂正（Debug 構成では仮想タッチを FlaUI から駆動でき、ST-006b 以降の撮影テストが貸出・返却まで操作している）。M6 の注記も、KeyBinding が F1〜F8 とも整備済みである現状に合わせた
+- Issue #2163 **本体の Null 許容参照型をファイル単位で段階的に有効化する仕組みを入れた**（静的解析の段階導入の第 3 段）
+  - 本体は csproj で `<Nullable>` を宣言しておらず（C# 10 の既定で無効）、null 参照の誤りをコンパイラが一切検出していなかった。一括で有効にすると数千件の警告になり警告ゼロと両立しないため、**新規ファイルと改修したファイルの先頭に `#nullable enable` を付ける**方式にした
+  - net48 に無いフロー解析用の属性（`NotNullWhen` / `MaybeNullWhen` / `NotNullIfNotNull` / `MemberNotNull(When)` / `DoesNotReturn(If)` / `AllowNull` / `DisallowNull` / `MaybeNull` / `NotNull`）を `Common/Polyfills/NullableAttributes.cs` に internal で定義した
+  - **`Common/` 配下（72 ファイル）を移行した**。有効にした直後の警告約 90 件（是正に伴って連鎖したものを含め約 115 件）は `?` の付与（null を既定値に持つ引数・null を返す戻り値・null のまま残り得るフィールド）と属性（`TryParseNormalized` の `out` に `NotNullWhen`、`TextDecodeResult.IsDecoded` に `MemberNotNullWhen`、`LedgerCloner.Clone` に `NotNullIfNotNull`）で是正した。null を受けて既定値を返す・何もしない引数（`SafeRollback.TryRollback` の `logger` など 9 ファイル）にも `?` を付けた（null なら例外を投げる防御ガードの引数は非 null のまま）。挙動の変更は無い（net48 の BCL が注釈を持たないため `string.IsNullOrWhiteSpace` の後でも非 null と推論されない 2 か所は、`?? string.Empty` / `is not null` を前置する形にした）。注釈の変更でテスト側に出た CS8604（`PathValidator` の `ErrorMessage` が `string?` になった）は、テストの検証ヘルパーの引数を `string?` にして是正した
+  - **静的検査 `NullableContextConventionTests`**: `#nullable enable` の無いファイル数を上限値（235）で固定し、超過（付けずに足した）と下げ忘れ（移行したのに上限が残った）の両方で赤くする。移行済みの `Common` 配下は全件有効であることを層単位でも固定する。未移行ファイルの一覧を許可リストにする形は、移行のたびに赤くなる誤検出になるため採らなかった（#1786）。本体の `#nullable restore` は既定（無効）へ戻すので「付いていない」と数える
+  - Release・Debug ともソリューションのビルド警告 0。`development-conventions.md`・開発者ガイド §4.7c・00a 技術スタック用語集・07_テスト設計書を更新
+  - テスト: 単体 8,341 → 8,375（+34）・合計 8,413 → 8,447
 - Issue #2162 **本体で .NET アナライザー（CA ルール）を有効にした**（静的解析の段階導入の第 2 段）
   - .NET Framework 4.8 では既定で無効のため、本体の csproj で `EnableNETAnalyzers`・`AnalysisLevel=latest`・`AnalysisMode=Recommended` を明示し、`Microsoft.CodeAnalysis.NetAnalyzers` 8.0.0 をパッケージで版固定した（ビルド時のみ・配布物に含まれない。`THIRD_PARTY_LICENSES.md`・`packages.lock.json` を同期）。有効化直後の警告は約 440 件（Release・重複除く）
   - **是正**: CA2007（`ConfigureAwait(false)` の付け忘れ。静的検査の除外にしていた `LedgerRepository` / `SettingsRepository` / `OperationLogRepository` の 101 か所）、CA1305（書式の文化圏。DB・CSV・操作ログ・ファイル名は `InvariantCulture`、画面・印刷は `CurrentCulture` を明示）、CA1310 / CA1862 / CA1304 / CA1311（文字列比較）、CA1825 / CA1861 / CA1869（配列・`JsonSerializerOptions` の都度生成。操作ログの JSON の書式は `Common/OperationLogJson` に一本化）、CA1822（private メンバーの static 化）、CA2254（ログのテンプレート）ほか

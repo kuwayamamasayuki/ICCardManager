@@ -1,3 +1,5 @@
+#nullable enable
+
 using System.Globalization;
 
 namespace ICCardManager.Common
@@ -40,7 +42,7 @@ namespace ICCardManager.Common
         /// 文言は数値のみを埋め込むため、書式は <see cref="CultureInfo.CurrentCulture"/> でよい
         /// （日付ではないので `db-write-conventions.md` の InvariantCulture 規約の対象外）。
         /// </remarks>
-        public static string Describe(int seconds)
+        public static string? Describe(int seconds)
         {
             if (seconds == NoAutoClose)
             {

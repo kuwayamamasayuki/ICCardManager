@@ -1,3 +1,5 @@
+#nullable enable
+
 using System.Text.Encodings.Web;
 using System.Text.Json;
 

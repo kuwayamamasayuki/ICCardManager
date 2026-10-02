@@ -1,3 +1,5 @@
+#nullable enable
+
 using System;
 using Microsoft.Extensions.Logging;
 
@@ -54,7 +56,7 @@ namespace ICCardManager.Common
         /// ログに載せる操作名（「返却の記録」「マイグレーションの適用」等）。
         /// 障害調査を先に進める値を載せること（development-conventions.md #1730）
         /// </param>
-        public static void TryRollback(Action rollback, ILogger logger, string operationName)
+        public static void TryRollback(Action rollback, ILogger? logger, string operationName)
         {
             if (rollback == null)
             {

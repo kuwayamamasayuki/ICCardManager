@@ -1,3 +1,5 @@
+#nullable enable
+
 namespace ICCardManager.Common.Charting
 {
     /// <summary>
@@ -22,6 +24,6 @@ namespace ICCardManager.Common.Charting
         /// 画面・Excel へ部分的にでも露出させたくないため（ログに関する Issue #1852 と同じ判断）。
         /// 職員番号は業務上の識別子であり、同姓同名を見分ける手掛かりとしても自然。
         /// </remarks>
-        public string Qualifier { get; set; }
+        public string? Qualifier { get; set; }
     }
 }
