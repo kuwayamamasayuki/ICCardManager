@@ -119,11 +119,25 @@ namespace ICCardManager.ViewModels
     {
         private readonly ILedgerRepository _ledgerRepository;
         private readonly SummaryGenerator _summaryGenerator;
-        private readonly OperationLogger _operationLogger;
-        private readonly DbContext _dbContext;
+        private readonly LedgerDetailSaveService _saveService;
         private readonly ILogger<LedgerDetailViewModel> _logger;
 
         private Ledger _ledger = null!;
+
+        /// <summary>
+        /// DB に確定している状態の複製（読み込み時と、保存が確定したときに採る）。監査ログの「変更前」に使う（Issue #2177）。
+        /// </summary>
+        /// <remarks>
+        /// 画面の明細（<c>item.Detail</c>）は <c>_ledger.Details</c> と同じインスタンスで、保存のたびに GroupId を書き換える。
+        /// 保存が失敗したあとの再保存で <c>_ledger</c> から「変更前」を採ると、書き換え済みの GroupId を写して
+        /// 監査ログの変更前と変更後が同じになる（#1979 の再発。コードレビューで検出）。
+        /// </remarks>
+        private Ledger _committedLedger = null!;
+
+        /// <summary>
+        /// 保存で競合（他 PC による削除・統合）を検出したか（Issue #2177）。
+        /// </summary>
+        private bool _conflictDetected;
 
         /// <summary>
         /// カード名（パンくず表示用）
@@ -215,22 +229,27 @@ namespace ICCardManager.ViewModels
         /// このダイアログで 1 件でも DB へ書き込みが確定したか（Issue #1743）
         /// </summary>
         /// <remarks>
-        /// 明細の置換（<c>ReplaceDetailsAsync</c>）は摘要 UPDATE とは別トランザクションで先に確定するため、
-        /// 摘要 UPDATE だけが競合で失敗しても明細の変更は DB に残る。呼び出し元がこのフラグを見て
-        /// 一覧を再読込しないと、画面の旧グループと DB の新 GroupId が食い違ったままになる。
+        /// 呼び出し元はこのフラグを見て一覧を再読込する（画面の旧グループと DB の新 GroupId を食い違わせない）。
+        /// Issue #2177 以降、保存（明細の置換・摘要の更新・監査ログ）は 1 つのトランザクションで確定するため、
+        /// 保存に失敗したときは何も確定しておらず、このフラグも立たない（立つのは保存・分割が確定したときだけ）。
         /// </remarks>
         public bool HasPersistedChanges { get; private set; }
+
+        /// <summary>
+        /// ダイアログを閉じたあと、呼び出し元が履歴一覧を読み込み直す必要があるか（Issue #2177）
+        /// </summary>
+        /// <remarks>
+        /// 保存・分割が確定したとき（<see cref="HasPersistedChanges"/>）に加え、保存で競合を検出したとき（この履歴が
+        /// 他 PC で削除・統合された）も true。競合では何も保存していないが、一覧に残っている行はもう DB と一致しないため、
+        /// 閉じたら読み込み直す（#1759「一覧を確認するよう案内するなら、案内する側が先に再読込する」）。
+        /// </remarks>
+        public bool NeedsHistoryReload => HasPersistedChanges || _conflictDetected;
 
         /// <summary>
         /// 複数グループがあるかどうか（Issue #634: ボタン切り替え用）
         /// </summary>
         [ObservableProperty]
         private bool _hasMultipleGroups;
-
-        /// <summary>
-        /// 操作者IDm（ログ記録用）
-        /// </summary>
-        private string? _operatorIdm;
 
         /// <summary>
         /// パンくずテキスト（Issue #1134）
@@ -244,17 +263,15 @@ namespace ICCardManager.ViewModels
         public LedgerDetailViewModel(
             ILedgerRepository ledgerRepository,
             SummaryGenerator summaryGenerator,
-            OperationLogger operationLogger,
+            LedgerDetailSaveService saveService,
             LedgerSplitService ledgerSplitService,
-            DbContext dbContext,
             IStaffAuthService staffAuthService,
             ILogger<LedgerDetailViewModel> logger)
         {
             _ledgerRepository = ledgerRepository;
             _summaryGenerator = summaryGenerator;
-            _operationLogger = operationLogger;
+            _saveService = saveService;
             _ledgerSplitService = ledgerSplitService;
-            _dbContext = dbContext;
             _staffAuthService = staffAuthService;
             _logger = logger;
         }
@@ -263,11 +280,14 @@ namespace ICCardManager.ViewModels
         /// 初期化
         /// </summary>
         /// <param name="ledgerId">利用履歴ID</param>
-        /// <param name="operatorIdm">操作者IDm（ログ記録用、オプション）</param>
         /// <param name="cardName">カード名（パンくず表示用、オプション）Issue #1134</param>
-        public async Task InitializeAsync(int ledgerId, string? operatorIdm = null, string? cardName = null)
+        /// <remarks>
+        /// Issue #2177: 以前は操作者 IDm を受け取り、渡されたときだけ監査ログを記録していたが、画面は渡しておらず
+        /// 明細の保存は監査ログに一度も残っていなかった。操作者は <c>ICurrentOperatorContext</c> から解決される（#1265）
+        /// ため引数を外し、保存は常に監査ログを記録する（<see cref="LedgerDetailSaveService"/>）。
+        /// </remarks>
+        public async Task InitializeAsync(int ledgerId, string? cardName = null)
         {
-            _operatorIdm = operatorIdm;
             if (cardName != null)
             {
                 _cardName = cardName;
@@ -278,6 +298,8 @@ namespace ICCardManager.ViewModels
             {
                 throw new InvalidOperationException($"Ledger ID {ledgerId} が見つかりません");
             }
+
+            _committedLedger = LedgerCloner.Clone(_ledger)!;
 
             // パンくず設定（Issue #1134）
             BreadcrumbText = !string.IsNullOrEmpty(_cardName)
@@ -596,7 +618,8 @@ namespace ICCardManager.ViewModels
                 // 採る（#1959）。下の Select は item.Detail（＝ _ledger.Details と同一インスタンス）を
                 // そのまま返して GroupId を書き換えるため、あとから採ると「変更前」が変更後の値を写す。
                 // 同じ理由で _ledger.Details は差し替え不要（同一インスタンスが編集結果を持つ）。
-                var beforeLedger = LedgerCloner.Clone(_ledger);
+                // Issue #2177: 失敗後の再保存でも DB に確定している状態を「変更前」にする（_committedLedger の remarks）
+                var beforeLedger = LedgerCloner.Clone(_committedLedger)!;
 
                 // 詳細のGroupIdを更新
                 var updatedDetails = Items.Select(item =>
@@ -606,69 +629,60 @@ namespace ICCardManager.ViewModels
                     return detail;
                 }).ToList();
 
-                // 詳細を置き換え
-                // Issue #1913: ReplaceDetailsAsync は DELETE + INSERT で id を再採番するため、
-                // 挿入順がそのまま SequenceNumber の並びになる。LedgerDetail.SequenceNumber の規約は
-                // FeliCa 互換で「小さい id ＝ 新しい」なので、時系列昇順（古い順）の Items を
-                // そのまま渡すと規約が反転する。新しい順にしてから渡す（LedgerSplitService と同じ）。
-                // 摘要生成（下の Generate）には昇順のまま渡すため、Reverse は DB 呼び出しにだけ適用する。
-                var success = await _ledgerRepository.ReplaceDetailsAsync(
-                    _ledger.Id, updatedDetails.AsEnumerable().Reverse());
-                if (!success)
-                {
-                    StatusMessage = "保存に失敗しました";
-                    return;
-                }
-
-                // Issue #1743: ここで明細は別トランザクションとして確定済み。以降の摘要 UPDATE が
-                // 失敗しても DB には残るため、呼び出し元が一覧を再読込できるよう記録する
-                HasPersistedChanges = true;
-
-                // 摘要を再生成
+                // 摘要を再生成（時系列昇順のまま渡す。DB へは LedgerDetailSaveService が新しい順で渡す。#1913）
                 var newSummary = _summaryGenerator.Generate(updatedDetails);
-                if (!string.IsNullOrEmpty(newSummary) && newSummary != _ledger.Summary)
+                var summaryChanged = !string.IsNullOrEmpty(newSummary) && newSummary != _ledger.Summary;
+                if (summaryChanged)
                 {
                     _ledger.Summary = newSummary;
+                }
 
-                    // Issue #1458: 操作ログを記録する場合は Ledger UPDATE と監査ログ INSERT を同一トランザクションで実行
-                    // Issue #1753: UpdateAsync は影響行数 0 で false を返す。共有モードでは他 PC が
-                    // この履歴を統合・削除し得るため、戻り値を破棄すると「更新できていないのに保存完了」と表示される。
-                    bool summaryUpdated;
-                    if (!string.IsNullOrEmpty(_operatorIdm))
+                // Issue #2177: 明細の置換・摘要の更新・監査ログを 1 つのトランザクションで確定する。
+                // 以前は明細の置換だけが先に確定し、摘要の更新が失敗すると「明細は新しいのに摘要は古い」
+                // 食い違いが台帳に残った（摘要は物品出納簿にそのまま印字される）。
+                LedgerDetailSaveResult result;
+                try
+                {
+                    result = await _saveService.SaveAsync(beforeLedger, _ledger, updatedDetails, summaryChanged);
+                }
+                catch
+                {
+                    // 何も確定していないので、インメモリの摘要も元へ戻す（画面と DB を食い違わせない）
+                    _ledger.Summary = beforeLedger.Summary;
+                    throw;
+                }
+
+                if (result != LedgerDetailSaveResult.Saved)
+                {
+                    _ledger.Summary = beforeLedger.Summary;
+                    // Issue #2177: 何も保存されていないので、編集内容は「未保存の変更」として残す（HasChanges は true のまま）。
+                    // 閉じようとすれば破棄の確認が出て、保存し直せば反映される。
+                    // このダイアログには再読込の手段が無いので、「更新してから」ではなく閉じて開き直すよう案内する
+                    // （閉じるときは破棄の確認が出る。#1759「案内するなら案内する側が再読込できること」）
+                    if (result == LedgerDetailSaveResult.Conflict)
                     {
-                        using var scope = await _dbContext.BeginTransactionAsync();
-                        summaryUpdated = await _ledgerRepository.UpdateAsync(_ledger, scope.Transaction);
-                        if (summaryUpdated)
-                        {
-                            await _operationLogger.LogLedgerUpdateAsync(beforeLedger, _ledger, scope.Transaction);
-                            scope.Commit();
-                        }
-                        else
-                        {
-                            scope.Rollback();
-                        }
+                        // この履歴の行がもう無い（他 PC が削除した、または他の履歴へ統合した）。
+                        // 閉じたら呼び出し元が一覧を読み込み直す（NeedsHistoryReload）。
+                        // 何度保存しても同じ失敗になるので、編集内容を「未保存の変更」として残さない —
+                        // 残すと閉じるときに破棄の確認が出て、「いいえ」で保存し直しても必ず失敗する（コードレビューで検出）
+                        _conflictDetected = true;
+                        HasChanges = false;
+                        StatusMessage = "この履歴は他のパソコンや別の操作で削除されたか、他の履歴へ統合された可能性があるため保存できませんでした" +
+                                        "（この画面の編集内容は保存できません）。このダイアログを閉じると履歴の一覧を読み込み直すので、" +
+                                        "最新の履歴を確認してください。";
                     }
                     else
                     {
-                        summaryUpdated = await _ledgerRepository.UpdateAsync(_ledger);
+                        StatusMessage = "利用明細を保存できませんでした（明細・摘要とも変更されていません）。" +
+                                        "しばらく待ってから再度保存してください。";
                     }
+                    return;
+                }
 
-                    if (!summaryUpdated)
-                    {
-                        // 更新できなかったので、インメモリの摘要も元へ戻して画面と DB の食い違いを残さない
-                        _ledger.Summary = beforeLedger.Summary;
-                        _logger.LogWarning(
-                            "Summary update affected no row for ledger {LedgerId} (likely changed by another PC)",
-                            _ledger.Id);
-                        StatusMessage = "この履歴は他の操作で変更されたため摘要を更新できませんでした。" +
-                                        "画面を最新の状態に更新してから再度お試しください。";
-
-                        // Issue #1743: 明細は確定済みなので「未保存の変更」ではない。true のままだと
-                        // 閉じるときに「破棄してよろしいですか？」と事実に反する確認が出る
-                        HasChanges = false;
-                        return;
-                    }
-
+                HasPersistedChanges = true;
+                _committedLedger = LedgerCloner.Clone(_ledger)!;
+                if (summaryChanged)
+                {
                     SummaryDisplay = newSummary;
                 }
 
@@ -680,6 +694,8 @@ namespace ICCardManager.ViewModels
             }
             catch (Exception ex)
             {
+                // Issue #2177: 保存は 1 つのトランザクションなので、失敗したら何も変更されていない。
+                // 編集内容は「未保存の変更」として残る（HasChanges は true のまま）。
                 _logger.LogError(ex, "Failed to save ledger detail changes");
                 StatusMessage = ExceptionMessageFormatter.ToUserMessage(ex, "台帳の保存");
             }

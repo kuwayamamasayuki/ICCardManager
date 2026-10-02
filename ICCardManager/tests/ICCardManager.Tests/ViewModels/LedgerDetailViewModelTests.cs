@@ -64,9 +64,9 @@ public class LedgerDetailViewModelTests : IDisposable
         _viewModel = new LedgerDetailViewModel(
             _ledgerRepoMock.Object,
             summaryGenerator,
-            operationLogger,
+            new LedgerDetailSaveService(
+                _dbContext, _ledgerRepoMock.Object, operationLogger, NullLogger<LedgerDetailSaveService>.Instance),
             ledgerSplitService,
-            _dbContext,
             _staffAuthServiceMock.Object,
             logger);
     }
@@ -480,14 +480,14 @@ public class LedgerDetailViewModelTests : IDisposable
         var replaceEntered = new TaskCompletionSource<bool>();
         var releaseReplace = new TaskCompletionSource<bool>();
         _ledgerRepoMock
-            .Setup(r => r.ReplaceDetailsAsync(It.IsAny<int>(), It.IsAny<IEnumerable<LedgerDetail>>()))
+            .Setup(r => r.ReplaceDetailsAsync(It.IsAny<int>(), It.IsAny<IEnumerable<LedgerDetail>>(), It.IsAny<System.Data.SQLite.SQLiteTransaction>()))
             .Returns(async () =>
             {
                 replaceEntered.TrySetResult(true);
                 await releaseReplace.Task;
                 return true;
             });
-        _ledgerRepoMock.Setup(r => r.UpdateAsync(It.IsAny<Ledger>())).ReturnsAsync(true);
+        _ledgerRepoMock.Setup(r => r.UpdateAsync(It.IsAny<Ledger>(), It.IsAny<System.Data.SQLite.SQLiteTransaction>())).ReturnsAsync(true);
 
         var saveTask = _viewModel.SaveCommand.ExecuteAsync(null);
         await WaitForAsync(replaceEntered, "ReplaceDetailsAsync の開始");
@@ -513,30 +513,188 @@ public class LedgerDetailViewModelTests : IDisposable
         }
     }
 
+    /// <summary>
+    /// Issue #2177: 保存で競合（この履歴が他 PC で削除・統合された）を検出したら、何も保存されない。
+    /// 保存し直しても必ず失敗するので未保存の変更として残さず、閉じたら一覧を読み込み直す（#1743 の扱いの変更）。
+    /// </summary>
+    /// <remarks>
+    /// 以前は明細の置換だけが先に確定していたため、この状況を「明細は保存済み」として HasChanges を下ろしていた。
+    /// 巻き戻り自体（DB の明細が元のまま）は実 DB の <c>LedgerDetailSaveServiceTests</c> が表明する。
+    /// </remarks>
     [Fact]
-    public async Task SaveAsync_摘要更新のみ競合したとき_明細は保存済みとして扱う()
+    public async Task SaveAsync_競合したとき_何も保存されず閉じたら一覧を読み込み直すこと()
     {
-        // Arrange: 明細の置換は成功、摘要 UPDATE だけが競合で 0 行（共有モードで他 PC が変更）
+        // Arrange: 摘要 UPDATE が競合で 0 行（共有モードで他 PC が統合・削除）
         await InitializeWithTestLedgerAsync();
         AddItems(3);
         _viewModel.SplitAllCommand.Execute(null);
 
         _ledgerRepoMock
-            .Setup(r => r.ReplaceDetailsAsync(It.IsAny<int>(), It.IsAny<IEnumerable<LedgerDetail>>()))
+            .Setup(r => r.ReplaceDetailsAsync(It.IsAny<int>(), It.IsAny<IEnumerable<LedgerDetail>>(), It.IsAny<System.Data.SQLite.SQLiteTransaction>()))
             .ReturnsAsync(true);
-        _ledgerRepoMock.Setup(r => r.UpdateAsync(It.IsAny<Ledger>())).ReturnsAsync(false);
+        _ledgerRepoMock.Setup(r => r.UpdateAsync(It.IsAny<Ledger>(), It.IsAny<System.Data.SQLite.SQLiteTransaction>())).ReturnsAsync(false);
+        var confirmCalls = 0;
 
         // Act
         await _viewModel.SaveCommand.ExecuteAsync(null);
 
-        // Assert: 明細の GroupId は別トランザクションで既にコミット済みのため、
-        // 「未保存の変更がある」と表示して破棄確認を出すのは事実に反する
-        _viewModel.HasChanges.Should().BeFalse(
-            "明細は DB へ確定済みで、閉じても破棄されるものは無い");
-        _viewModel.HasPersistedChanges.Should().BeTrue(
-            "呼び出し元が履歴一覧を再読込しないと、画面の旧グループと DB の新 GroupId が食い違う");
-        _viewModel.StatusMessage.Should().Contain("摘要を更新できませんでした",
-            "摘要だけ更新できなかったことは利用者へ伝える");
+        // Assert
+        // この履歴の行はもう無く、何度保存しても同じ失敗になるので、編集内容を「未保存の変更」として残さない
+        // （残すと閉じるときに破棄の確認が出て、「いいえ」で保存し直しても必ず失敗する。コードレビューで検出）
+        _viewModel.HasChanges.Should().BeFalse("保存できない編集内容を未保存の変更として残さない");
+        _viewModel.HasPersistedChanges.Should().BeFalse("何も確定していない");
+        _viewModel.CanClose(() => { confirmCalls++; return false; }).Should().BeTrue(
+            "破棄の確認を出さずに閉じられる（閉じたら一覧を読み込み直す）");
+        confirmCalls.Should().Be(0);
+        _viewModel.StatusMessage.Should().Contain("保存できませんでした")
+            .And.Contain("編集内容は保存できません")
+            .And.Contain("削除されたか、他の履歴へ統合された可能性");
+        _viewModel.NeedsHistoryReload.Should().BeTrue(
+            "一覧に残っている行はもう DB と一致しないので、閉じたら一覧を読み込み直す（#1759）");
+        _operationLogs.Should().BeEmpty("起きていない変更を監査ログに残さない");
+    }
+
+    /// <summary>
+    /// Issue #2177（コードレビューで検出）: 保存に失敗したら、ViewModel はインメモリの摘要を元へ戻すこと。
+    /// 戻さないと、もう一度保存したときに「摘要が変わった」と判定されず、明細だけが置き換わって
+    /// 摘要の UPDATE が行われない（本 Issue の食い違いが再保存の経路で再発する）。
+    /// 再保存できる失敗（摘要の更新の例外／明細の置換が反映されない）の両方で固定する。
+    /// </summary>
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task SaveAsync_保存に失敗したあと再保存すると新しい摘要でUPDATEされること(bool failByUpdateException)
+    {
+        // Arrange: 摘要が変わる保存（テスト用の台帳の摘要「テスト」→ 分割後の生成値）
+        await InitializeWithTestLedgerAsync();
+        AddItems(3);
+        _viewModel.SplitAllCommand.Execute(null);
+        var replaceAttempt = 0;
+        _ledgerRepoMock
+            .Setup(r => r.ReplaceDetailsAsync(It.IsAny<int>(), It.IsAny<IEnumerable<LedgerDetail>>(), It.IsAny<System.Data.SQLite.SQLiteTransaction>()))
+            .Returns(() => Task.FromResult(!(++replaceAttempt == 1 && !failByUpdateException)));
+        var updatedSummaries = new List<string>();
+        var updateAttempt = 0;
+        _ledgerRepoMock
+            .Setup(r => r.UpdateAsync(It.IsAny<Ledger>(), It.IsAny<System.Data.SQLite.SQLiteTransaction>()))
+            .Returns<Ledger, System.Data.SQLite.SQLiteTransaction>((l, _) =>
+            {
+                updatedSummaries.Add(l.Summary);
+                return ++updateAttempt == 1 && failByUpdateException
+                    ? Task.FromException<bool>(new InvalidOperationException("injected"))
+                    : Task.FromResult(true);
+            });
+
+        // Act 1: 1 回目は失敗する
+        await _viewModel.SaveCommand.ExecuteAsync(null);
+
+        // Assert 1: 何も保存されず、未保存の変更として残る（閉じようとすれば破棄の確認が出る）
+        _viewModel.HasChanges.Should().BeTrue(_viewModel.StatusMessage);
+        _viewModel.HasPersistedChanges.Should().BeFalse();
+        _viewModel.NeedsHistoryReload.Should().BeFalse("一過性の失敗では DB は変わっておらず、一覧の再読込は要らない");
+        var confirmCalls = 0;
+        _viewModel.CanClose(() => { confirmCalls++; return false; }).Should().BeFalse();
+        confirmCalls.Should().Be(1);
+        _viewModel.SummaryDisplay.Should().Be("テスト", "失敗したので画面の摘要も元のまま");
+
+        // Act 2: もう一度保存する
+        await _viewModel.SaveCommand.ExecuteAsync(null);
+
+        // Assert 2: 再保存でも摘要の UPDATE が行われ、新しい摘要が書かれる
+        updatedSummaries.Should().NotBeEmpty("再保存でも「摘要が変わった」と判定され、摘要の UPDATE が行われること");
+        updatedSummaries.Last().Should().NotBe("テスト");
+        updatedSummaries.Distinct().Should().ContainSingle("1 回目と 2 回目で同じ新しい摘要を書く");
+        _viewModel.HasChanges.Should().BeFalse(_viewModel.StatusMessage);
+    }
+
+    /// <summary>
+    /// Issue #2177（コードレビューで検出）: 保存に失敗したあとの再保存でも、監査ログの「変更前」は DB に確定している
+    /// 状態（編集前の明細）を写すこと。画面の明細は _ledger.Details と同じインスタンスで保存のたびに GroupId を
+    /// 書き換えるため、再保存で _ledger から「変更前」を採ると変更前と変更後が同じになる（#1979 の再発）。
+    /// </summary>
+    [Fact]
+    public async Task SaveAsync_失敗のあとの再保存でも監査ログの変更前は編集前の明細を記録すること()
+    {
+        // Arrange: グループ未設定（自動判定）の 2 明細。全統合すると摘要が変わる
+        var ledger = new Ledger
+        {
+            Id = 23,
+            CardIdm = "0102030405060708",
+            Date = new DateTime(2026, 2, 10),
+            Summary = "鉄道（博多～天神、薬院～大橋）",
+            Expense = 470,
+            Balance = 530,
+            Details = new List<LedgerDetail>
+            {
+                new() { LedgerId = 23, SequenceNumber = 1, EntryStation = "薬院", ExitStation = "大橋", Amount = 210, UseDate = new DateTime(2026, 2, 10), Balance = 530 },
+                new() { LedgerId = 23, SequenceNumber = 2, EntryStation = "博多", ExitStation = "天神", Amount = 260, UseDate = new DateTime(2026, 2, 10), Balance = 740 }
+            }
+        };
+        _ledgerRepoMock.Setup(r => r.GetByIdAsync(23)).ReturnsAsync(ledger);
+        _ledgerRepoMock
+            .Setup(r => r.ReplaceDetailsAsync(23, It.IsAny<IEnumerable<LedgerDetail>>(), It.IsAny<System.Data.SQLite.SQLiteTransaction>()))
+            .ReturnsAsync(true);
+        var attempt = 0;
+        _ledgerRepoMock
+            .Setup(r => r.UpdateAsync(It.IsAny<Ledger>(), It.IsAny<System.Data.SQLite.SQLiteTransaction>()))
+            .Returns(() => ++attempt == 1
+                ? Task.FromException<bool>(new InvalidOperationException("injected"))
+                : Task.FromResult(true));
+        await _viewModel.InitializeAsync(23);
+        _viewModel.MergeAllCommand.Execute(null);
+
+        // Act: 1 回目は失敗し、2 回目で保存が確定する
+        await _viewModel.SaveCommand.ExecuteAsync(null);
+        _operationLogs.Should().BeEmpty("前提: 1 回目は何も記録されていない");
+        await _viewModel.SaveCommand.ExecuteAsync(null);
+
+        // Assert: 2 回目の監査ログの変更前は編集前（グループ未設定）、変更後は統合後のグループ
+        var log = _operationLogs.Should().ContainSingle(l => l.Action == "UPDATE").Subject;
+        ParseDetails(log.BeforeData).EnumerateArray().Should().OnlyContain(
+            d => d.GetProperty("GroupId").ValueKind == JsonValueKind.Null,
+            "変更前は DB に確定している状態（1 回目の保存で書き換えた GroupId を写さない）");
+        ParseDetails(log.AfterData).EnumerateArray().Should().OnlyContain(
+            d => d.GetProperty("GroupId").GetInt32() == LedgerDetailViewModel.MergedGroupId);
+    }
+
+    /// <summary>
+    /// Issue #2177: 摘要が変わらない保存（グループ分けだけの変更）でも、監査ログを記録すること。
+    /// 以前は摘要が変わったとき、かつ操作者 IDm が渡されたときだけ記録しており、画面は操作者を渡していなかったため
+    /// 明細の保存は監査ログに一度も残っていなかった。
+    /// </summary>
+    [Fact]
+    public async Task SaveAsync_摘要が変わらない保存でも監査ログを記録すること()
+    {
+        // Arrange: つながらない 2 区間。分割しても摘要は「鉄道（博多～天神、薬院～大橋）」のまま変わらない
+        var ledger = new Ledger
+        {
+            Id = 22,
+            CardIdm = "0102030405060708",
+            Date = new DateTime(2026, 2, 10),
+            Summary = "鉄道（博多～天神、薬院～大橋）",
+            Expense = 470,
+            Balance = 530,
+            Details = new List<LedgerDetail>
+            {
+                new() { LedgerId = 22, SequenceNumber = 1, EntryStation = "薬院", ExitStation = "大橋", Amount = 210, UseDate = new DateTime(2026, 2, 10), Balance = 530 },
+                new() { LedgerId = 22, SequenceNumber = 2, EntryStation = "博多", ExitStation = "天神", Amount = 260, UseDate = new DateTime(2026, 2, 10), Balance = 740 }
+            }
+        };
+        _ledgerRepoMock.Setup(r => r.GetByIdAsync(22)).ReturnsAsync(ledger);
+        _ledgerRepoMock
+            .Setup(r => r.ReplaceDetailsAsync(22, It.IsAny<IEnumerable<LedgerDetail>>(), It.IsAny<System.Data.SQLite.SQLiteTransaction>()))
+            .ReturnsAsync(true);
+        await _viewModel.InitializeAsync(22);
+        _viewModel.ToggleDividerAt(0);
+
+        // Act
+        await _viewModel.SaveCommand.ExecuteAsync(null);
+
+        // Assert
+        _viewModel.HasChanges.Should().BeFalse(_viewModel.StatusMessage);
+        _ledgerRepoMock.Verify(r => r.UpdateAsync(It.IsAny<Ledger>(), It.IsAny<System.Data.SQLite.SQLiteTransaction>()), Times.Never,
+            "前提: 摘要が変わらない保存であること（摘要の UPDATE を行わない）");
+        _operationLogs.Should().ContainSingle(l => l.Action == "UPDATE", "明細の保存は摘要が変わらなくても監査ログに残す");
     }
 
     [Fact]
@@ -548,7 +706,7 @@ public class LedgerDetailViewModelTests : IDisposable
         _viewModel.SplitAllCommand.Execute(null);
 
         _ledgerRepoMock
-            .Setup(r => r.ReplaceDetailsAsync(It.IsAny<int>(), It.IsAny<IEnumerable<LedgerDetail>>()))
+            .Setup(r => r.ReplaceDetailsAsync(It.IsAny<int>(), It.IsAny<IEnumerable<LedgerDetail>>(), It.IsAny<System.Data.SQLite.SQLiteTransaction>()))
             .ReturnsAsync(false);
 
         // Act
@@ -576,9 +734,9 @@ public class LedgerDetailViewModelTests : IDisposable
         _viewModel.HasMultipleGroups.Should().BeTrue("前提: View が保存後に自動で閉じる複数グループの保存であること");
 
         _ledgerRepoMock
-            .Setup(r => r.ReplaceDetailsAsync(It.IsAny<int>(), It.IsAny<IEnumerable<LedgerDetail>>()))
+            .Setup(r => r.ReplaceDetailsAsync(It.IsAny<int>(), It.IsAny<IEnumerable<LedgerDetail>>(), It.IsAny<System.Data.SQLite.SQLiteTransaction>()))
             .ReturnsAsync(true);
-        _ledgerRepoMock.Setup(r => r.UpdateAsync(It.IsAny<Ledger>())).ReturnsAsync(true);
+        _ledgerRepoMock.Setup(r => r.UpdateAsync(It.IsAny<Ledger>(), It.IsAny<System.Data.SQLite.SQLiteTransaction>())).ReturnsAsync(true);
 
         var notified = 0;
         bool? busyAtNotification = null;
@@ -612,7 +770,7 @@ public class LedgerDetailViewModelTests : IDisposable
         AddItems(3);
         _viewModel.SplitAllCommand.Execute(null);
         _ledgerRepoMock
-            .Setup(r => r.ReplaceDetailsAsync(It.IsAny<int>(), It.IsAny<IEnumerable<LedgerDetail>>()))
+            .Setup(r => r.ReplaceDetailsAsync(It.IsAny<int>(), It.IsAny<IEnumerable<LedgerDetail>>(), It.IsAny<System.Data.SQLite.SQLiteTransaction>()))
             .ReturnsAsync(false);
         var notified = 0;
         _viewModel.OnSaveCompleted = () => notified++;
@@ -699,14 +857,14 @@ public class LedgerDetailViewModelTests : IDisposable
 
         List<LedgerDetail>? savedDetails = null;
         _ledgerRepoMock
-            .Setup(r => r.ReplaceDetailsAsync(7, It.IsAny<IEnumerable<LedgerDetail>>()))
-            .Callback<int, IEnumerable<LedgerDetail>>((_, details) => savedDetails = details.ToList())
+            .Setup(r => r.ReplaceDetailsAsync(7, It.IsAny<IEnumerable<LedgerDetail>>(), It.IsAny<System.Data.SQLite.SQLiteTransaction>()))
+            .Callback<int, IEnumerable<LedgerDetail>, System.Data.SQLite.SQLiteTransaction>((_, details, _) => savedDetails = details.ToList())
             .ReturnsAsync(true);
 
         Ledger? savedLedger = null;
         _ledgerRepoMock
-            .Setup(r => r.UpdateAsync(It.IsAny<Ledger>()))
-            .Callback<Ledger>(l => savedLedger = l)
+            .Setup(r => r.UpdateAsync(It.IsAny<Ledger>(), It.IsAny<System.Data.SQLite.SQLiteTransaction>()))
+            .Callback<Ledger, System.Data.SQLite.SQLiteTransaction>((l, _) => savedLedger = l)
             .ReturnsAsync(true);
 
         await _viewModel.InitializeAsync(7);
@@ -771,14 +929,14 @@ public class LedgerDetailViewModelTests : IDisposable
 
         List<LedgerDetail>? savedDetails = null;
         _ledgerRepoMock
-            .Setup(r => r.ReplaceDetailsAsync(11, It.IsAny<IEnumerable<LedgerDetail>>()))
-            .Callback<int, IEnumerable<LedgerDetail>>((_, details) => savedDetails = details.ToList())
+            .Setup(r => r.ReplaceDetailsAsync(11, It.IsAny<IEnumerable<LedgerDetail>>(), It.IsAny<System.Data.SQLite.SQLiteTransaction>()))
+            .Callback<int, IEnumerable<LedgerDetail>, System.Data.SQLite.SQLiteTransaction>((_, details, _) => savedDetails = details.ToList())
             .ReturnsAsync(true);
 
         Ledger? savedLedger = null;
         _ledgerRepoMock
-            .Setup(r => r.UpdateAsync(It.IsAny<Ledger>()))
-            .Callback<Ledger>(l => savedLedger = l)
+            .Setup(r => r.UpdateAsync(It.IsAny<Ledger>(), It.IsAny<System.Data.SQLite.SQLiteTransaction>()))
+            .Callback<Ledger, System.Data.SQLite.SQLiteTransaction>((l, _) => savedLedger = l)
             .ReturnsAsync(true);
 
         await _viewModel.InitializeAsync(11);
@@ -840,13 +998,13 @@ public class LedgerDetailViewModelTests : IDisposable
         };
         _ledgerRepoMock.Setup(r => r.GetByIdAsync(21)).ReturnsAsync(ledger);
         _ledgerRepoMock
-            .Setup(r => r.ReplaceDetailsAsync(21, It.IsAny<IEnumerable<LedgerDetail>>()))
+            .Setup(r => r.ReplaceDetailsAsync(21, It.IsAny<IEnumerable<LedgerDetail>>(), It.IsAny<System.Data.SQLite.SQLiteTransaction>()))
             .ReturnsAsync(true);
         _ledgerRepoMock
             .Setup(r => r.UpdateAsync(It.IsAny<Ledger>(), It.IsAny<System.Data.SQLite.SQLiteTransaction>()))
             .ReturnsAsync(true);
 
-        await _viewModel.InitializeAsync(21, operatorIdm: "FFFF000000000001");
+        await _viewModel.InitializeAsync(21);
 
         // Act: 全明細を 1 グループへまとめて保存する（摘要が変わるので監査ログが記録される）
         _viewModel.MergeAllCommand.Execute(null);

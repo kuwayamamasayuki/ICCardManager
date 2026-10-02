@@ -1,3 +1,4 @@
+#nullable enable
 using System;
 using System.Collections.Generic;
 using System.ComponentModel;
@@ -35,9 +36,8 @@ namespace ICCardManager.Views.Dialogs
         /// 利用履歴詳細を表示（新しいViewModel使用）
         /// </summary>
         /// <param name="ledgerId">利用履歴ID</param>
-        /// <param name="operatorIdm">操作者IDm（ログ記録用、オプション）</param>
         /// <param name="cardName">カード名（パンくず表示用、オプション）Issue #1134</param>
-        public async Task InitializeAsync(int ledgerId, string? operatorIdm = null, string? cardName = null)
+        public async Task InitializeAsync(int ledgerId, string? cardName = null)
         {
             _viewModel = App.Current.ServiceProvider.GetRequiredService<LedgerDetailViewModel>();
             DataContext = _viewModel;
@@ -58,7 +58,7 @@ namespace ICCardManager.Views.Dialogs
             // Close() を経由するため OnClosing の破棄確認を通る
             _viewModel.OnCloseRequested = Close;
 
-            await _viewModel.InitializeAsync(ledgerId, operatorIdm, cardName);
+            await _viewModel.InitializeAsync(ledgerId, cardName);
         }
 
         /// <summary>
@@ -123,10 +123,9 @@ namespace ICCardManager.Views.Dialogs
                 return;
             }
 
-            // Issue #1743: 摘要 UPDATE だけが競合で失敗した場合、明細は別トランザクションで
-            // 確定済みなのに OnSaveCompleted は呼ばれない。DB へ書き込みが残っている以上、
-            // 呼び出し元には履歴一覧の再読込が必要だと伝える
-            if (_viewModel?.HasPersistedChanges == true)
+            // Issue #2177: 保存・分割が確定したとき、または保存で競合（この履歴が他 PC で削除・統合された）を
+            // 検出したときは、呼び出し元に履歴一覧の再読込が必要だと伝える（OnSaveCompleted を経ない経路でも）
+            if (_viewModel?.NeedsHistoryReload == true)
             {
                 WasSaved = true;
             }

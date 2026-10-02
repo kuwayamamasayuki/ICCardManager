@@ -1,3 +1,4 @@
+#nullable enable
 using System;
 using System.Collections.Generic;
 using System.Diagnostics.CodeAnalysis;
@@ -44,19 +45,19 @@ namespace ICCardManager
         /// <summary>
         /// アプリケーションロガー
         /// </summary>
-        private ILogger<App> _logger;
+        private ILogger<App>? _logger;
 
         /// <summary>
         /// Issue #1599: database_config.txt のパスが形式不正でデフォルトへフォールバック
         /// した場合に、起動完了後ユーザーへ警告するための退避領域（不正だった生のパス）。
         /// </summary>
-        private string _rejectedDatabaseConfigPath;
+        private string? _rejectedDatabaseConfigPath;
 
         /// <summary>
         /// Issue #1910: 二重起動防止のガード。プロセスが生きている間ミューテックスのハンドルを
         /// 保持し続ける必要があるため、フィールドで保持して <see cref="OnExit"/> で破棄する。
         /// </summary>
-        private SingleInstanceGuard _singleInstanceGuard;
+        private SingleInstanceGuard? _singleInstanceGuard;
 
         /// <summary>
         /// Issue #2160: 起動時に <see cref="InitializeDatabaseAsync"/> が 1 回だけ読んだ設定。
@@ -69,7 +70,7 @@ namespace ICCardManager
         /// null のまま解決された場合に既定値へ倒すと、企業会計部局の組織でも部署種別が
         /// 市長事務部局に固定される（#1955）ため、ファクトリは例外にする。
         /// </remarks>
-        private AppSettings _startupSettings;
+        private AppSettings? _startupSettings;
 
         /// <summary>
         /// 現在のアプリケーションインスタンス
@@ -327,7 +328,7 @@ namespace ICCardManager
             if (_singleInstanceGuard.Status == SingleInstanceStatus.GuardUnavailable)
             {
                 // 予防機構の不調で業務を止めない。理由は残す（なぜ二重起動できたのかを後から追うため）。
-                _logger.LogWarning(
+                _logger?.LogWarning(
                     _singleInstanceGuard.AcquisitionError,
                     "二重起動の判定に失敗したため、判定せずに起動を継続します");
                 return true;
@@ -348,7 +349,7 @@ namespace ICCardManager
 
             // 判定の根拠（別セッション判定の元になったアクセス拒否の例外）を必ず載せる。
             // 残さないと「起動できないのに理由が分からない」問い合わせを切り分けられない。
-            _logger.LogInformation(
+            _logger?.LogInformation(
                 _singleInstanceGuard.AcquisitionError,
                 "二重起動を検出したため起動を中止しました（Status={Status}、前面化={Outcome}）",
                 _singleInstanceGuard.Status,
@@ -396,7 +397,7 @@ namespace ICCardManager
         /// で 1 度だけユーザーへ警告する。複数回呼ばれても同じ値で冪等。
         /// </para>
         /// </remarks>
-        private string GetValidatedDatabaseConfigPath()
+        private string? GetValidatedDatabaseConfigPath()
         {
             var raw = ViewModels.SettingsViewModel.LoadDatabasePathFromConfigFile();
 
@@ -463,7 +464,7 @@ namespace ICCardManager
             {
                 // Issue #1599: 形式不正なパスはここで弾き、デフォルトへフォールバックさせる
                 var configPath = GetValidatedDatabaseConfigPath();
-                if (!string.IsNullOrWhiteSpace(configPath))
+                if (configPath is not null && !string.IsNullOrWhiteSpace(configPath))
                 {
                     dbOptions.Path = configPath;
                 }
@@ -549,6 +550,8 @@ namespace ICCardManager
             services.AddSingleton<LedgerSplitService>();
             // Issue #2156: カード・職員の登録・更新・削除・復元を監査ログと 1 トランザクションで確定させる
             services.AddSingleton<CardManagementService>();
+            // Issue #2177: 利用履歴詳細の保存（明細の置換・摘要の更新・監査ログを 1 トランザクションで）
+            services.AddSingleton<LedgerDetailSaveService>();
             services.AddSingleton<StaffManagementService>();
             services.AddSingleton<LedgerConsistencyChecker>();
             // Issue #1688: 帳票出力前プリフライトチェック
@@ -756,7 +759,7 @@ namespace ICCardManager
             // Issue #1716: 障害調査でまず必要になる「どのDBを、どのモードで開いているか」を残す。
             // 共有モードかどうかで接続監視の有無も切断時の挙動も変わるため、
             // ログだけを見て前提を確認できるようにする
-            _logger.LogInformation(
+            _logger?.LogInformation(
                 "データベース: {DatabasePath}（共有モード={IsSharedMode}、接続監視={MonitorEnabled}）",
                 dbContext.DatabasePath, dbContext.IsSharedMode,
                 dbContext.IsSharedMode ? "有効（15秒間隔）" : "無効");
@@ -889,7 +892,7 @@ namespace ICCardManager
         /// <param name="filePath">削除対象のファイルパス</param>
         /// <param name="logger">ロガー（省略可能）</param>
         /// <returns>削除またはクリアに成功した場合true、両方失敗した場合false</returns>
-        internal static bool DeleteOrClearFile(string filePath, ILogger logger = null)
+        internal static bool DeleteOrClearFile(string filePath, ILogger? logger = null)
         {
             try
             {
@@ -1116,7 +1119,7 @@ namespace ICCardManager
         /// 未観測 Task 例外のハンドラ本体（Issue #1742）。
         /// SetupGlobalExceptionHandlers で生成し、OnUnobservedTaskException から委譲する。
         /// </summary>
-        private UnobservedTaskExceptionHandler _unobservedTaskExceptionHandler;
+        private UnobservedTaskExceptionHandler? _unobservedTaskExceptionHandler;
 
         /// <summary>
         /// <see cref="UnobservedTaskExceptionHandler"/> を App の実行環境へ配線して生成
