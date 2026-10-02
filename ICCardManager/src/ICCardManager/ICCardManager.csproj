@@ -80,12 +80,17 @@
 
     <!-- DI Container (netstandard2.0対応、.NET Framework 4.8で動作) -->
     <PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="8.0.1" />
-    <PackageReference Include="Microsoft.Extensions.Hosting" Version="8.0.1" />
 
     <!-- Logging (netstandard2.0対応、.NET Framework 4.8で動作) -->
     <PackageReference Include="Microsoft.Extensions.Logging" Version="8.0.1" />
     <PackageReference Include="Microsoft.Extensions.Logging.Debug" Version="8.0.1" />
     <PackageReference Include="Microsoft.Extensions.Configuration.Json" Version="8.0.1" />
+    <!-- Issue #2165: Microsoft.Extensions.Hosting（未使用）を外した際、それ経由で推移的に入っていた
+         実使用パッケージを直接参照へ昇格した。
+         Logging.Configuration       : ILoggingBuilder.AddConfiguration（App.xaml.cs / FileLoggerExtensions）
+         Options.ConfigurationExtensions : services.Configure<T>(IConfiguration)（App.xaml.cs） -->
+    <PackageReference Include="Microsoft.Extensions.Logging.Configuration" Version="8.0.1" />
+    <PackageReference Include="Microsoft.Extensions.Options.ConfigurationExtensions" Version="8.0.0" />
 
     <!-- Memory Cache (netstandard2.0対応、CVE-2024-43485修正済み) -->
     <PackageReference Include="Microsoft.Extensions.Caching.Memory" Version="8.0.1" />
