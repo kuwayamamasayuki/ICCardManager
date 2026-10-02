@@ -76,7 +76,7 @@ PR の手動確認手順（画面操作を伴うもの）は、毎回人が Wind
 
 2.59（撮影スクリプトの `-Changed`）と 2.60（`StaffAuthDialogLiveRegionTests` の実機実行）は、自動テストはあるが**Windows デスクトップで誰かが実行しなければ走らない**項目である。UI テストは CI で走らない（`Category=UI` を除外、UITests の csproj はソリューション単位の実行から外れている）。
 
-- PR を作る側（Claude）が WSL から `"/mnt/c/Program Files/dotnet/dotnet.exe" test ICCardManager/tests/ICCardManager.UITests/ICCardManager.UITests.csproj --filter Category=UI` を実行し、結果を PR 本文に書く。この実行が Windows のデスクトップセッションで GUI を操作できるかは、A の最初の Issue で確かめる
+- PR を作る側（Claude）が WSL から `"/mnt/c/Program Files/dotnet/dotnet.exe" test ICCardManager/tests/ICCardManager.UITests/ICCardManager.UITests.csproj --filter Category=UI` を実行し、結果を PR 本文に書く。WSL から起動した `dotnet.exe` が Windows のデスクトップセッションで GUI を操作できることは 2026-10-02 に実測で確かめた（`AppLaunchTests` 6 件成功・18 秒。開発機の DB は `UiTestDatabaseGuard` が元に戻した）。テストは `dotnet run --no-build` でアプリを起動するため、UITests に加えて本体も同じ構成でビルドしておく
 - 定期実行（`/loop`・スケジュール）は、上が成立してから検討する
 
 ## 7. 進め方
