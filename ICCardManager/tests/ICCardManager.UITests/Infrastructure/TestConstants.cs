@@ -262,6 +262,12 @@ namespace ICCardManager.UITests.Infrastructure
         [UiaName]
         public const string BusStopSaveButton = "バス停名を保存";
 
+        // 終了の確認（Issue #2143）は Win32 の MessageBox で、タイトルは XAML ではなく
+        // MainViewModel.ConfirmExit が DialogService.ShowConfirmation へ渡す文字列そのもの。
+        /// <summary>終了の確認 MessageBox のタイトル。</summary>
+        [NotUiaName]
+        public const string ExitConfirmationTitle = "ピッすいの終了";
+
         /// <summary>交通系ICカード管理ダイアログの「削除」ボタン（MessageBox のオーナーの回帰テストで確認ダイアログを出すために使う）。</summary>
         [UiaName]
         public const string CardDeleteButton = "カード削除";

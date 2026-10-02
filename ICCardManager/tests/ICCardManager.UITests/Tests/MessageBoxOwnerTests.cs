@@ -1,7 +1,5 @@
 using System;
-using System.Linq;
 using FlaUI.Core.AutomationElements;
-using FlaUI.Core.Definitions;
 using FlaUI.Core.Tools;
 using FluentAssertions;
 using ICCardManager.UITests.Infrastructure;
@@ -40,9 +38,6 @@ namespace ICCardManager.UITests.Tests
         private const string SkipReason =
             "Issue #2190: 削除確認の前に職員証認証があり、仮想タッチ（DEBUG ビルド限定）でしか通せないため、Debug 起動のときだけ実行する。";
 
-        /// <summary>Win32 の MessageBox のウィンドウクラス名。</summary>
-        private const string MessageBoxClassName = "#32770";
-
         /// <summary>カード削除の確認 MessageBox のタイトル（<c>CardManageViewModel</c> の <c>ShowWarningConfirmation</c>）。</summary>
         private const string DeleteConfirmationTitle = "削除確認";
 
@@ -75,7 +70,7 @@ namespace ICCardManager.UITests.Tests
                 TimeSpan.FromSeconds(2));
             decoy.BringToFront();
 
-            var messageBox = WaitForMessageBox(fixture, cardManage.Window, DeleteConfirmationTitle);
+            var messageBox = MessageBoxOperations.WaitFor(fixture, cardManage.Window, DeleteConfirmationTitle);
             var messageBoxHandle = NativeWindows.HandleOf(messageBox);
 
             decoy.IsForeground.Should().BeTrue(
@@ -87,12 +82,7 @@ namespace ICCardManager.UITests.Tests
                 "MessageBox を出している間、下のダイアログは Win32 レベルで無効になり、削除などのボタンを押せないこと");
 
             // 対: 「いいえ」で閉じるとダイアログは再び操作でき、カードは削除されていない
-            var no = Retry.WhileNull(
-                () => messageBox.FindAllDescendants(cf => cf.ByControlType(ControlType.Button))
-                    .FirstOrDefault(b => b.Name.StartsWith("いいえ", StringComparison.Ordinal)),
-                TimeSpan.FromSeconds(TestConstants.DialogOpenTimeoutSeconds)).Result;
-            no.Should().NotBeNull("確認の MessageBox に「いいえ」ボタンがあること");
-            no!.AsButton().Invoke();
+            MessageBoxOperations.Answer(messageBox, MessageBoxOperations.NoPrefix);
 
             var enabledAgain = Retry.WhileFalse(
                 () => NativeWindows.IsEnabled(dialogHandle),
@@ -101,45 +91,6 @@ namespace ICCardManager.UITests.Tests
             DatabaseProbe.Count(
                 "SELECT is_deleted FROM ic_card WHERE card_idm = @card",
                 ("@card", ScreenshotSeedData.NormalCardIdm)).Should().Be(0L, "「いいえ」を選んだのでカードは削除されないこと");
-        }
-
-        /// <summary>
-        /// 確認の MessageBox を、タイトルで待つ。
-        /// </summary>
-        /// <remarks>
-        /// UIA ツリー上の MessageBox の位置は一定しない（実測ではトップレベルではなくメイン画面の ModalWindows に現れた）。
-        /// 探し方は <see cref="DialogLocator"/> の 1 か所に寄せ、Win32 の MessageBox であること（クラス名）は別に表明する。
-        /// UIA ツリーの親子は表示の都合で、オーナーの判定には使わない（オーナーは Win32 の <c>GW_OWNER</c> で見る）。
-        /// </remarks>
-        private static Window WaitForMessageBox(AppFixture fixture, Window opener, string title)
-        {
-            Window found;
-            try
-            {
-                found = DialogLocator.WaitForNestedDialog(
-                    fixture, opener, title, TimeSpan.FromSeconds(TestConstants.DialogOpenTimeoutSeconds));
-            }
-            catch (TimeoutException ex)
-            {
-                throw new TimeoutException($"{ex.Message} 見えていたウィンドウ: {DescribeWindows(fixture)}", ex);
-            }
-
-            found.ClassName.Should().Be(MessageBoxClassName, $"「{title}」は Win32 の MessageBox であること");
-            return found;
-        }
-
-        /// <summary>待機に失敗したときに、アプリのトップレベルのウィンドウとそのモーダルを列挙する（原因の切り分け用）。</summary>
-        private static string DescribeWindows(AppFixture fixture)
-        {
-            try
-            {
-                return string.Join(" / ", fixture.App.GetAllTopLevelWindows(fixture.Automation).Select(w =>
-                    $"「{w.Name}」({w.ClassName}) モーダル[{string.Join(", ", w.ModalWindows.Select(m => $"「{m.Name}」({m.ClassName})"))}]"));
-            }
-            catch (Exception ex)
-            {
-                return $"（列挙に失敗: {ex.GetType().Name}）";
-            }
         }
 
         /// <summary>ボタンが有効になるまで待つ（有効・無効は選択行にバインドされている）。</summary>
