@@ -501,5 +501,61 @@ namespace ICCardManager.UITests.Infrastructure
         /// <summary>操作ログダイアログの期間の終了日（UT-058c。最小幅で見切れないこと）。</summary>
         [UiaName]
         public const string OperationLogToDate = "終了日";
+
+        // ── 処理中のガード・カード読み取りからの復元・接続診断のコピー・管理者ダッシュボード（Issue #2196） ────────
+
+        // 処理中オーバーレイの文言は BusyMessage へのバインドで、XAML にリテラルとしては現れない
+        // （ConnectionDiagnosticsViewModel.RunDiagnosticsAsync）。
+        /// <summary>接続診断の実行中に処理中オーバーレイへ出る文言（UT-130 の処理中の状態を作るのに使う）。</summary>
+        [NotUiaName]
+        public const string ConnectionDiagnosticsBusyMessage = "接続診断を実行中...";
+
+        /// <summary>交通系ICカード管理ダイアログの「新規カード登録」ボタン（押すと交通系ICカードのタッチ待ちになる）。</summary>
+        [UiaName]
+        public const string CardNewRegistrationButton = "新規カード登録";
+
+        // 削除済みカードの復元の確認は Win32 の MessageBox で、タイトルは CardManageViewModel が渡す文字列そのもの。
+        /// <summary>削除済みのカードを読み取ったときの復元の確認 MessageBox のタイトル（#284）。</summary>
+        [NotUiaName]
+        public const string DeletedCardRestoreTitle = "削除済みカード";
+
+        /// <summary>職員管理ダイアログの「新規職員登録」ボタン（押すと職員証のタッチ待ちになる）。</summary>
+        [UiaName]
+        public const string StaffNewRegistrationButton = "新規職員登録";
+
+        // 削除済み職員の復元の確認も Win32 の MessageBox で、タイトルは StaffManageViewModel が渡す文字列そのもの。
+        /// <summary>削除済みの職員証を読み取ったときの復元の確認 MessageBox のタイトル（#284）。</summary>
+        [NotUiaName]
+        public const string DeletedStaffRestoreTitle = "削除済み職員";
+
+        /// <summary>接続診断ダイアログの「結果をコピー」ボタン。</summary>
+        [UiaName]
+        public const string ConnectionDiagnosticsCopyButton = "診断結果をコピー";
+
+        /// <summary>管理者ダッシュボードのサマリータイル（押すと「カードごとの運用状況一覧」を絞り込む）。</summary>
+        [UiaName]
+        public const string AdminDashboardLentTile = "貸出中のカード枚数。押すと一覧を貸出中に絞り込みます。";
+        [UiaName]
+        public const string AdminDashboardLongTermTile = "長期未返却のカード枚数。押すと一覧を督促対象に絞り込みます。";
+        [UiaName]
+        public const string AdminDashboardLowBalanceTile = "残額不足のカード枚数。押すと一覧を残額不足に絞り込みます。";
+        [UiaName]
+        public const string AdminDashboardAllTile = "集計対象のカード枚数。押すと絞り込みを解除します。";
+
+        /// <summary>長期未返却とみなす日数（7・14・30 から選ぶ）と、選んだ日数で再集計するボタン。</summary>
+        [UiaName]
+        public const string AdminDashboardLongTermDaysComboBox = "長期未返却とみなす日数";
+        [UiaName]
+        public const string AdminDashboardRefreshButton = "運用状況を更新";
+
+        /// <summary>管理者ダッシュボードの「稼働状況」「利用推移」タブと、各タブの一覧。</summary>
+        [UiaName]
+        public const string AdminDashboardUtilizationTab = "稼働状況タブ";
+        [UiaName]
+        public const string AdminDashboardUtilizationList = "カード別の稼働率一覧";
+        [UiaName]
+        public const string AdminDashboardTrendTab = "利用推移タブ";
+        [UiaName]
+        public const string AdminDashboardStaffUsageList = "職員別の月次利用額一覧";
     }
 }
