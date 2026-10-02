@@ -28,7 +28,7 @@ namespace ICCardManager.Data.Repositories
         /// <inheritdoc/>
         public async Task<IEnumerable<Ledger>> GetByDateRangeAsync(string cardIdm, DateTime fromDate, DateTime toDate)
         {
-            using var lease = await _dbContext.LeaseConnectionAsync();
+            using var lease = await _dbContext.LeaseConnectionAsync().ConfigureAwait(false);
             var connection = lease.Connection;
             var ledgerList = new List<Ledger>();
 
@@ -58,8 +58,8 @@ ORDER BY DATE(date) ASC,
             command.Parameters.AddWithValue("@fromDate", SqliteDateTimeFormat.ToDayStartText(fromDate));
             command.Parameters.AddWithValue("@toDate", SqliteDateTimeFormat.ToDayEndText(toDate));
 
-            using var reader = await command.ExecuteReaderAsync();
-            while (await reader.ReadAsync())
+            using var reader = await command.ExecuteReaderAsync().ConfigureAwait(false);
+            while (await reader.ReadAsync().ConfigureAwait(false))
             {
                 ledgerList.Add(MapToLedger(reader));
             }
@@ -73,14 +73,14 @@ ORDER BY DATE(date) ASC,
             var fromDate = new DateTime(year, month, 1);
             var toDate = fromDate.AddMonths(1).AddDays(-1);
 
-            return await GetByDateRangeAsync(cardIdm, fromDate, toDate);
+            return await GetByDateRangeAsync(cardIdm, fromDate, toDate).ConfigureAwait(false);
         }
 
         /// <inheritdoc/>
         public async Task<Ledger> GetByIdAsync(int id)
         {
             // Issue #1478: 本体と詳細を 1 ラウンドトリップで取得（複数結果セット）
-            using var lease = await _dbContext.LeaseConnectionAsync();
+            using var lease = await _dbContext.LeaseConnectionAsync().ConfigureAwait(false);
             var connection = lease.Connection;
 
             using var command = connection.CreateCommand();
@@ -97,14 +97,14 @@ ORDER BY use_date ASC, is_charge DESC, is_point_redemption DESC, id DESC";
 
             command.Parameters.AddWithValue("@id", id);
 
-            using var reader = await command.ExecuteReaderAsync();
-            if (!await reader.ReadAsync())
+            using var reader = await command.ExecuteReaderAsync().ConfigureAwait(false);
+            if (!await reader.ReadAsync().ConfigureAwait(false))
             {
                 return null;
             }
 
             var ledger = MapToLedger(reader);
-            ledger.Details = await ReadAndSortDetailsAsync(reader);
+            ledger.Details = await ReadAndSortDetailsAsync(reader).ConfigureAwait(false);
             return ledger;
         }
 
@@ -113,7 +113,7 @@ ORDER BY use_date ASC, is_charge DESC, is_point_redemption DESC, id DESC";
         {
             // Issue #1478: 本体と詳細を 1 ラウンドトリップで取得（複数結果セット）。
             // 詳細側はサブクエリで本体と同じ id を解決する。
-            using var lease = await _dbContext.LeaseConnectionAsync();
+            using var lease = await _dbContext.LeaseConnectionAsync().ConfigureAwait(false);
             var connection = lease.Connection;
 
             using var command = connection.CreateCommand();
@@ -137,21 +137,21 @@ ORDER BY use_date ASC, is_charge DESC, is_point_redemption DESC, id DESC";
 
             command.Parameters.AddWithValue("@cardIdm", cardIdm);
 
-            using var reader = await command.ExecuteReaderAsync();
-            if (!await reader.ReadAsync())
+            using var reader = await command.ExecuteReaderAsync().ConfigureAwait(false);
+            if (!await reader.ReadAsync().ConfigureAwait(false))
             {
                 return null;
             }
 
             var ledger = MapToLedger(reader);
-            ledger.Details = await ReadAndSortDetailsAsync(reader);
+            ledger.Details = await ReadAndSortDetailsAsync(reader).ConfigureAwait(false);
             return ledger;
         }
 
         /// <inheritdoc/>
         public async Task<List<Ledger>> GetAllLentRecordsAsync()
         {
-            using var lease = await _dbContext.LeaseConnectionAsync();
+            using var lease = await _dbContext.LeaseConnectionAsync().ConfigureAwait(false);
             var connection = lease.Connection;
             var result = new List<Ledger>();
 
@@ -162,8 +162,8 @@ FROM ledger
 WHERE is_lent_record = 1
 ORDER BY lent_at DESC";
 
-            using var reader = await command.ExecuteReaderAsync();
-            while (await reader.ReadAsync())
+            using var reader = await command.ExecuteReaderAsync().ConfigureAwait(false);
+            while (await reader.ReadAsync().ConfigureAwait(false))
             {
                 result.Add(MapToLedger(reader));
             }
@@ -185,7 +185,7 @@ ORDER BY lent_at DESC";
             }
             else
             {
-                lease = await _dbContext.LeaseConnectionAsync();
+                lease = await _dbContext.LeaseConnectionAsync().ConfigureAwait(false);
                 connection = lease.Connection;
             }
 
@@ -217,8 +217,8 @@ SELECT last_insert_rowid();";
                 command.Parameters.AddWithValue("@isLentRecord", ledger.IsLentRecord ? 1 : 0);
                 command.Parameters.AddWithValue("@companionCount", ledger.CompanionCount);
 
-                var result = await command.ExecuteScalarAsync();
-                return Convert.ToInt32(result);
+                var result = await command.ExecuteScalarAsync().ConfigureAwait(false);
+                return Convert.ToInt32(result, CultureInfo.InvariantCulture);
             }
             finally
             {
@@ -240,7 +240,7 @@ SELECT last_insert_rowid();";
             }
             else
             {
-                lease = await _dbContext.LeaseConnectionAsync();
+                lease = await _dbContext.LeaseConnectionAsync().ConfigureAwait(false);
                 connection = lease.Connection;
             }
 
@@ -274,7 +274,7 @@ WHERE id = @id";
                 command.Parameters.AddWithValue("@isLentRecord", ledger.IsLentRecord ? 1 : 0);
                 command.Parameters.AddWithValue("@companionCount", ledger.CompanionCount);
 
-                var result = await command.ExecuteNonQueryAsync();
+                var result = await command.ExecuteNonQueryAsync().ConfigureAwait(false);
                 return result > 0;
             }
             finally
@@ -419,7 +419,7 @@ WHERE card_idm = @cardIdm
             command.Parameters.AddWithValue("@cardIdm", cardIdm);
             command.Parameters.AddWithValue("@excludeLedgerId", excludeLedgerId);
 
-            var count = Convert.ToInt32(await command.ExecuteScalarAsync().ConfigureAwait(false));
+            var count = Convert.ToInt32(await command.ExecuteScalarAsync().ConfigureAwait(false), CultureInfo.InvariantCulture);
             return count > 0;
         }
 
@@ -437,7 +437,7 @@ WHERE card_idm = @cardIdm
             }
             else
             {
-                lease = await _dbContext.LeaseConnectionAsync();
+                lease = await _dbContext.LeaseConnectionAsync().ConfigureAwait(false);
                 connection = lease.Connection;
             }
 
@@ -465,7 +465,7 @@ VALUES (@ledgerId, @useDate, @entryStation, @exitStation,
                 command.Parameters.AddWithValue("@isBus", detail.IsBus ? 1 : 0);
                 command.Parameters.AddWithValue("@groupId", detail.GroupId.HasValue ? detail.GroupId.Value : DBNull.Value);
 
-                var result = await command.ExecuteNonQueryAsync();
+                var result = await command.ExecuteNonQueryAsync().ConfigureAwait(false);
                 return result > 0;
             }
             finally
@@ -830,7 +830,7 @@ ORDER BY date ASC, id ASC";
         {
             // 年度末（3月31日）時点の最新残高を取得
             var fiscalYearEnd = new DateTime(fiscalYear + 1, 3, 31);
-            var ledger = await GetLatestBeforeDateAsync(cardIdm, fiscalYearEnd.AddDays(1));
+            var ledger = await GetLatestBeforeDateAsync(cardIdm, fiscalYearEnd.AddDays(1)).ConfigureAwait(false);
 
             return ledger?.Balance;
         }
@@ -1267,7 +1267,7 @@ ORDER BY l.card_idm, l.date, l.id";
                     nameof(busStopPlaceholder));
             }
 
-            using var lease = await _dbContext.LeaseConnectionAsync();
+            using var lease = await _dbContext.LeaseConnectionAsync().ConfigureAwait(false);
             var connection = lease.Connection;
             var result = new List<(string BusStops, int UsageCount, DateTime? LastUsedDate)>();
 
@@ -1293,8 +1293,8 @@ ORDER BY score DESC, usage_count DESC, bus_stops
 LIMIT 100";
             command.Parameters.AddWithValue("@busStopPlaceholder", busStopPlaceholder);
 
-            using var reader = await command.ExecuteReaderAsync();
-            while (await reader.ReadAsync())
+            using var reader = await command.ExecuteReaderAsync().ConfigureAwait(false);
+            while (await reader.ReadAsync().ConfigureAwait(false))
             {
                 var busStops = reader.GetString(0);
                 var usageCount = reader.GetInt32(1);
@@ -1443,7 +1443,7 @@ WHERE ledger_id = @ledgerId AND id = @id";
             int page,
             int pageSize)
         {
-            using var lease = await _dbContext.LeaseConnectionAsync();
+            using var lease = await _dbContext.LeaseConnectionAsync().ConfigureAwait(false);
             var connection = lease.Connection;
 
             var whereClause = cardIdm != null
@@ -1464,7 +1464,7 @@ FROM ledger
             countCommand.Parameters.AddWithValue("@fromDate", SqliteDateTimeFormat.ToDayStartText(fromDate));
             countCommand.Parameters.AddWithValue("@toDate", SqliteDateTimeFormat.ToDayEndText(toDate));
 
-            var totalCount = Convert.ToInt32(await countCommand.ExecuteScalarAsync());
+            var totalCount = Convert.ToInt32(await countCommand.ExecuteScalarAsync().ConfigureAwait(false), CultureInfo.InvariantCulture);
 
             // ページングされたデータを取得
             var ledgerList = new List<Ledger>();
@@ -1510,8 +1510,8 @@ ORDER BY DATE(l.date) ASC,
             command.Parameters.AddWithValue("@pageSize", pageSize);
             command.Parameters.AddWithValue("@offset", offset);
 
-            using var reader = await command.ExecuteReaderAsync();
-            while (await reader.ReadAsync())
+            using var reader = await command.ExecuteReaderAsync().ConfigureAwait(false);
+            while (await reader.ReadAsync().ConfigureAwait(false))
             {
                 ledgerList.Add(MapToLedgerWithDetailCount(reader));
             }
@@ -1530,7 +1530,7 @@ ORDER BY DATE(l.date) ASC,
         /// </remarks>
         private async Task<IEnumerable<LedgerDetail>> GetDetailsAsync(int ledgerId)
         {
-            using var lease = await _dbContext.LeaseConnectionAsync();
+            using var lease = await _dbContext.LeaseConnectionAsync().ConfigureAwait(false);
             var connection = lease.Connection;
             var details = new List<LedgerDetail>();
 
@@ -1546,8 +1546,8 @@ ORDER BY use_date ASC, is_charge DESC, is_point_redemption DESC, id DESC";
 
             command.Parameters.AddWithValue("@ledgerId", ledgerId);
 
-            using var reader = await command.ExecuteReaderAsync();
-            while (await reader.ReadAsync())
+            using var reader = await command.ExecuteReaderAsync().ConfigureAwait(false);
+            while (await reader.ReadAsync().ConfigureAwait(false))
             {
                 details.Add(MapToLedgerDetail(reader));
             }
@@ -1567,9 +1567,9 @@ ORDER BY use_date ASC, is_charge DESC, is_point_redemption DESC, id DESC";
         /// </remarks>
         private static async Task<List<LedgerDetail>> ReadAndSortDetailsAsync(DbDataReader reader)
         {
-            await reader.NextResultAsync();
+            await reader.NextResultAsync().ConfigureAwait(false);
             var details = new List<LedgerDetail>();
-            while (await reader.ReadAsync())
+            while (await reader.ReadAsync().ConfigureAwait(false))
             {
                 details.Add(MapToLedgerDetail(reader));
             }
@@ -1588,7 +1588,7 @@ ORDER BY use_date ASC, is_charge DESC, is_point_redemption DESC, id DESC";
                 return result;
             }
 
-            using var lease = await _dbContext.LeaseConnectionAsync();
+            using var lease = await _dbContext.LeaseConnectionAsync().ConfigureAwait(false);
             var connection = lease.Connection;
 
             using var command = connection.CreateCommand();
@@ -1606,8 +1606,8 @@ ORDER BY ledger_id, use_date ASC, is_charge DESC, is_point_redemption DESC, id D
             }
 
             var allDetails = new List<LedgerDetail>();
-            using var reader = await command.ExecuteReaderAsync();
-            while (await reader.ReadAsync())
+            using var reader = await command.ExecuteReaderAsync().ConfigureAwait(false);
+            while (await reader.ReadAsync().ConfigureAwait(false))
             {
                 allDetails.Add(MapToLedgerDetail(reader));
             }
@@ -1705,7 +1705,7 @@ ORDER BY ledger_id, use_date ASC, is_charge DESC, is_point_redemption DESC, id D
         public async Task<HashSet<(DateTime? UseDate, int? Balance, bool IsCharge)>> GetExistingDetailKeysAsync(
             string cardIdm, DateTime fromDate)
         {
-            using var lease = await _dbContext.LeaseConnectionAsync();
+            using var lease = await _dbContext.LeaseConnectionAsync().ConfigureAwait(false);
             var connection = lease.Connection;
             var result = new HashSet<(DateTime? UseDate, int? Balance, bool IsCharge)>();
 
@@ -1720,8 +1720,8 @@ WHERE l.card_idm = @cardIdm AND l.date >= @fromDate";
             command.Parameters.AddWithValue("@cardIdm", cardIdm);
             command.Parameters.AddWithValue("@fromDate", SqliteDateTimeFormat.ToDayStartText(fromDate));
 
-            using var reader = await command.ExecuteReaderAsync();
-            while (await reader.ReadAsync())
+            using var reader = await command.ExecuteReaderAsync().ConfigureAwait(false);
+            while (await reader.ReadAsync().ConfigureAwait(false))
             {
                 var useDate = reader.IsDBNull(0) ? (DateTime?)null : SqliteDateTimeFormat.ParseStored(reader.GetString(0));
                 var balance = reader.IsDBNull(1) ? (int?)null : reader.GetInt32(1);
@@ -1744,7 +1744,7 @@ WHERE l.card_idm = @cardIdm AND l.date >= @fromDate";
                 return result;
             }
 
-            using var lease = await _dbContext.LeaseConnectionAsync();
+            using var lease = await _dbContext.LeaseConnectionAsync().ConfigureAwait(false);
             var connection = lease.Connection;
 
             using var command = connection.CreateCommand();
@@ -1763,8 +1763,8 @@ WHERE l.card_idm = @cardIdm AND l.date >= @fromDate";
 FROM ledger
 WHERE card_idm IN ({string.Join(", ", parameters)})";
 
-            using var reader = await command.ExecuteReaderAsync();
-            while (await reader.ReadAsync())
+            using var reader = await command.ExecuteReaderAsync().ConfigureAwait(false);
+            while (await reader.ReadAsync().ConfigureAwait(false))
             {
                 var cardIdm = reader.GetString(0);
                 var date = SqliteDateTimeFormat.ParseStored(reader.GetString(1));
@@ -2060,14 +2060,14 @@ SELECT last_insert_rowid();";
                 insertCommand.Parameters.AddWithValue("@isLentRecord", source.IsLentRecord ? 1 : 0);
                 insertCommand.Parameters.AddWithValue("@companionCount", source.CompanionCount);
 
-                var newId = Convert.ToInt32(await insertCommand.ExecuteScalarAsync().ConfigureAwait(false));
+                var newId = Convert.ToInt32(await insertCommand.ExecuteScalarAsync().ConfigureAwait(false), CultureInfo.InvariantCulture);
                 idMapping[source.Id] = newId;
             }
 
             // 2. Detailを元のLedgerに戻す（SequenceNumber=ledger_detail.id でマッピング）
             foreach (var entry in undoData.DetailOriginalLedgerMap)
             {
-                var sequenceNumber = int.Parse(entry.Key);
+                var sequenceNumber = int.Parse(entry.Key, CultureInfo.InvariantCulture);
                 var originalLedgerId = entry.Value;
 
                 // ターゲットLedgerに属するDetailのうち、ソースに属していたものを移動
@@ -2138,7 +2138,7 @@ WHERE id = @id";
         /// <inheritdoc/>
         public async Task SaveMergeHistoryAsync(int targetLedgerId, string description, string undoDataJson)
         {
-            using var lease = await _dbContext.LeaseConnectionAsync();
+            using var lease = await _dbContext.LeaseConnectionAsync().ConfigureAwait(false);
             var connection = lease.Connection;
 
             using var command = connection.CreateCommand();
@@ -2150,13 +2150,13 @@ VALUES (@mergedAt, @targetLedgerId, @description, @undoData)";
             command.Parameters.AddWithValue("@description", description);
             command.Parameters.AddWithValue("@undoData", undoDataJson);
 
-            await command.ExecuteNonQueryAsync();
+            await command.ExecuteNonQueryAsync().ConfigureAwait(false);
         }
 
         /// <inheritdoc/>
         public async Task<List<(int Id, DateTime MergedAt, int TargetLedgerId, string Description, string UndoDataJson, bool IsUndone)>> GetMergeHistoriesAsync(bool undoneOnly)
         {
-            using var lease = await _dbContext.LeaseConnectionAsync();
+            using var lease = await _dbContext.LeaseConnectionAsync().ConfigureAwait(false);
             var connection = lease.Connection;
             var result = new List<(int, DateTime, int, string, string, bool)>();
 
@@ -2165,8 +2165,8 @@ VALUES (@mergedAt, @targetLedgerId, @description, @undoData)";
                 ? "SELECT id, merged_at, target_ledger_id, description, undo_data, is_undone FROM ledger_merge_history WHERE is_undone = 1 ORDER BY merged_at DESC"
                 : "SELECT id, merged_at, target_ledger_id, description, undo_data, is_undone FROM ledger_merge_history ORDER BY merged_at DESC";
 
-            using var reader = await command.ExecuteReaderAsync();
-            while (await reader.ReadAsync())
+            using var reader = await command.ExecuteReaderAsync().ConfigureAwait(false);
+            while (await reader.ReadAsync().ConfigureAwait(false))
             {
                 result.Add((
                     reader.GetInt32(0),
@@ -2218,7 +2218,7 @@ VALUES (@mergedAt, @targetLedgerId, @description, @undoData)";
         /// <inheritdoc/>
         public async Task<List<LedgerDetail>> GetAllDetailsInDateRangeAsync(DateTime fromDate, DateTime toDate)
         {
-            using var lease = await _dbContext.LeaseConnectionAsync();
+            using var lease = await _dbContext.LeaseConnectionAsync().ConfigureAwait(false);
             var connection = lease.Connection;
             var details = new List<LedgerDetail>();
 
@@ -2241,8 +2241,8 @@ ORDER BY l.card_idm, l.date, l.id,
             command.Parameters.AddWithValue("@fromDate", SqliteDateTimeFormat.ToDayStartText(fromDate));
             command.Parameters.AddWithValue("@toDate", SqliteDateTimeFormat.ToDayEndText(toDate));
 
-            using var reader = await command.ExecuteReaderAsync();
-            while (await reader.ReadAsync())
+            using var reader = await command.ExecuteReaderAsync().ConfigureAwait(false);
+            while (await reader.ReadAsync().ConfigureAwait(false))
             {
                 details.Add(MapToLedgerDetail(reader));
             }
@@ -2253,7 +2253,7 @@ ORDER BY l.card_idm, l.date, l.id,
         /// <inheritdoc/>
         public async Task<DateTime?> GetPurchaseDateAsync(string cardIdm)
         {
-            using var lease = await _dbContext.LeaseConnectionAsync();
+            using var lease = await _dbContext.LeaseConnectionAsync().ConfigureAwait(false);
             var connection = lease.Connection;
 
             using var command = connection.CreateCommand();
@@ -2269,8 +2269,8 @@ ORDER BY date ASC, id ASC";
 
             command.Parameters.AddWithValue("@cardIdm", cardIdm);
 
-            using var reader = await command.ExecuteReaderAsync();
-            while (await reader.ReadAsync())
+            using var reader = await command.ExecuteReaderAsync().ConfigureAwait(false);
+            while (await reader.ReadAsync().ConfigureAwait(false))
             {
                 var summary = reader.IsDBNull(1) ? null : reader.GetString(1);
                 if (Ledger.IsInitialRecordSummary(summary))

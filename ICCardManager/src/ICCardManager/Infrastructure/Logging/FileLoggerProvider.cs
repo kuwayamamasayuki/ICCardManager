@@ -351,6 +351,9 @@ namespace ICCardManager.Infrastructure.Logging
 
             _cancellationTokenSource.Dispose();
             _logQueue.Dispose();
+
+            // 派生型がファイナライザーを持っても二重に後始末しないよう、標準の Dispose パターンに揃える（CA1816）
+            GC.SuppressFinalize(this);
         }
     }
 }

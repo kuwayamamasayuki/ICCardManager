@@ -78,6 +78,56 @@ csharp_new_line_before_else = true
 csharp_new_line_before_catch = true
 csharp_new_line_before_finally = true
 
+# ---------------------------------------------------------------------------
+# .NET アナライザー（CA ルール）の重大度（Issue #2162）
+# 本体（src/ICCardManager）の csproj で AnalysisMode=Recommended を有効にしている。
+# 是正しないルールは ID ごとに重大度を下げ、直前のコメントに理由を書く
+# （BuildWarningSuppressionConventionTests が、直前のコメントに ID が無い格下げを検出する）。
+# ---------------------------------------------------------------------------
+[src/ICCardManager/**.cs]
+# CA1848（LoggerMessage デリゲートを使う）: 高頻度ログの割り当てを減らす性能ルール。
+# 本システムのログは操作単位（貸出・返却・保存）で毎秒何件も出ないため効果が無く、
+# 252 か所をデリゲート定義へ書き換えると読みにくさだけが増える。
+dotnet_diagnostic.CA1848.severity = none
+
+# CA1716（識別子が他言語の予約語と一致する）: Get / Set / Stop / Error が VB の予約語に当たるという指摘。
+# 本体は単一の C# アプリで、他言語から実装・継承されるライブラリではない。
+# インターフェースのメンバー名を変えると実装・モック・テストへ波及するだけで、得るものが無い。
+dotnet_diagnostic.CA1716.severity = none
+
+# CA1000（ジェネリック型に静的メンバーを宣言しない）: ServiceResult<T>.Ok / Fail、CardReadResult<T> の
+# 静的ファクトリが対象。型引数を推論させる生成手段として意図した形で、呼び出し側の可読性が高い。
+dotnet_diagnostic.CA1000.severity = none
+
+# CA1859（性能のために具象型を使う）: private メソッドの戻り値・引数をインターフェースから具象型へ変える提案。
+# 本システムでの性能差は観測できず、IReadOnlyList 等で「書き換えない」意図を表した宣言や、
+# App.CreateCardReader のように ICardReader（抽象）として生成する意図が失われる。
+dotnet_diagnostic.CA1859.severity = none
+
+# CA1822（インスタンスデータを参照しないメンバーを static にする）は private に限る。
+# public メンバーは XAML のバインディング（ViewModel のプロパティ）や DI で注入したインスタンス越しに、
+# internal メンバーはテストからインスタンス越しに呼ばれるため、static にすると呼び出し側の形が変わる
+# （インスタンス越しに static メンバーは呼べない）。private は是正する。
+dotnet_code_quality.CA1822.api_surface = private
+
+# ConfigureAwait（CA2007）は async-configureawait.md の層別規約に合わせる（Issue #1287 / #2162）。
+# まず本体全体で CA2007 を無効にし、下の節で Service 層等だけを warning へ上げる。
+# ViewModels / Views / App.xaml.cs は継続を UI スレッドへ戻す必要があり、付けてはならないため。
+dotnet_diagnostic.CA2007.severity = none
+
+[src/ICCardManager/{Common,Data,Dtos,Infrastructure,Models,Services}/**.cs]
+dotnet_diagnostic.CA2007.severity = warning
+
+[src/ICCardManager/Data/Migrations/Migration_*.cs]
+# CA1707（識別子にアンダースコアを含めない）: マイグレーションのクラス名は Migration_0NN_<説明> の命名規約
+# （migrations.md「新規マイグレーション追加手順」）で、版の番号を名前で読めるようにしている。
+dotnet_diagnostic.CA1707.severity = none
+
+[src/ICCardManager/Services/DialogService.cs]
+# CA2007: DialogService は内部で MessageBox 等の UI API を呼ぶため、継続が UI スレッドへ戻る必要がある
+# （async-configureawait.md「例外: UI 依存サービス」。ConfigureAwaitConventionTests の除外と同じ）。
+dotnet_diagnostic.CA2007.severity = none
+
 [*.{xml,xaml,props,targets}]
 indent_size = 2
 

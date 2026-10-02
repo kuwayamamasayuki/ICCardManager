@@ -59,7 +59,7 @@ namespace ICCardManager.Models
         /// <summary>
         /// 返却時にバス停名入力ダイアログを自動的にスキップするかどうか
         /// </summary>
-        public bool SkipBusStopInputOnReturn { get; set; } = false;
+        public bool SkipBusStopInputOnReturn { get; set; }
 
         /// <summary>
         /// 返却時に同行者数入力ダイアログを自動的にスキップするかどうか（Issue #1906）
@@ -68,7 +68,7 @@ namespace ICCardManager.Models
         /// 複数名で同一交通系ICカードを利用する運用が無い組織向け。
         /// スキップしても履歴編集ダイアログから後で入力できる。
         /// </remarks>
-        public bool SkipCompanionCountInputOnReturn { get; set; } = false;
+        public bool SkipCompanionCountInputOnReturn { get; set; }
 
         /// <summary>
         /// 返却時の同行者数入力ダイアログを「外0名」として自動的に閉じるまでの秒数（Issue #2009）

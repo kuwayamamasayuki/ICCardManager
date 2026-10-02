@@ -114,7 +114,7 @@ namespace ICCardManager.ViewModels
         /// 書式の適用有無を WPF のバインディングの挙動に委ねず、ここで確定させる。
         /// 数値としての並べ替えは <see cref="Value"/> を <c>SortMemberPath</c> に指定して保つ。
         /// </remarks>
-        public string ValueText => Value.HasValue ? Value.Value.ToString("N0") + "円" : string.Empty;
+        public string ValueText => Value.HasValue ? Value.Value.ToString("N0", CultureInfo.CurrentCulture) + "円" : string.Empty;
     }
 
     /// <summary>
@@ -135,7 +135,7 @@ namespace ICCardManager.ViewModels
         public PointCollection Points { get; set; } = new PointCollection();
 
         /// <summary>頂点に置くマーカー</summary>
-        public IReadOnlyList<ChartPoint> Markers { get; set; } = new ChartPoint[0];
+        public IReadOnlyList<ChartPoint> Markers { get; set; } = Array.Empty<ChartPoint>();
     }
 
     /// <summary>
@@ -274,7 +274,7 @@ namespace ICCardManager.ViewModels
         /// <c>StrokeDashArray</c> へ null を流すと既定値へ戻る挙動が WPF のバージョンに依存するため、
         /// 「実線」を明示的な値として持つ。
         /// </remarks>
-        internal static readonly DoubleCollection SolidDashPattern = CreateFrozenDashPattern(new double[0]);
+        internal static readonly DoubleCollection SolidDashPattern = CreateFrozenDashPattern(Array.Empty<double>());
 
         /// <summary>
         /// 系列の線種（Issue #1857）。色が一巡するたびに次の線種へ進む。
@@ -702,7 +702,7 @@ namespace ICCardManager.ViewModels
             UtilizationCategoryLabels.Clear();
             UtilizationAxisTicks.Clear();
 
-            var items = (source?.Utilizations ?? new CardUtilizationItem[0])
+            var items = (source?.Utilizations ?? Array.Empty<CardUtilizationItem>())
                 .Take(AppConstants.AdminDashboardUtilizationChartMaxCards)
                 .ToList();
 
@@ -749,8 +749,8 @@ namespace ICCardManager.ViewModels
             UsageLegend.Clear();
             UsageTableRows.Clear();
 
-            var series = source?.UsageSeries ?? new MonthlyUsageSeries[0];
-            var labels = source?.MonthLabels ?? new string[0];
+            var series = source?.UsageSeries ?? Array.Empty<MonthlyUsageSeries>();
+            var labels = source?.MonthLabels ?? Array.Empty<string>();
             if (series.Count == 0 || labels.Count == 0)
             {
                 return;
@@ -825,7 +825,7 @@ namespace ICCardManager.ViewModels
         /// </remarks>
         internal static IReadOnlyList<string> BuildUsageSeriesBrushKeys(IReadOnlyList<MonthlyUsageSeries> series)
         {
-            var items = series ?? new MonthlyUsageSeries[0];
+            var items = series ?? Array.Empty<MonthlyUsageSeries>();
             var keys = new List<string>(items.Count);
             var topSeriesIndex = 0;
 
@@ -851,12 +851,12 @@ namespace ICCardManager.ViewModels
             BalanceMonthLabels.Clear();
             BalanceTableRows.Clear();
 
-            var labels = source?.MonthLabels ?? new string[0];
+            var labels = source?.MonthLabels ?? Array.Empty<string>();
 
             // 色・線種は選択肢（＝カード）側に確定済みなので、描画も選択肢を起点に並べる。
             // 系列側の添字から色を選ぶと、選択の増減でカードと色の対応が動く（Issue #1857）
             var seriesByIdm = new Dictionary<string, MonthlyBalanceSeries>(StringComparer.OrdinalIgnoreCase);
-            foreach (var s in source?.BalanceSeries ?? new MonthlyBalanceSeries[0])
+            foreach (var s in source?.BalanceSeries ?? Array.Empty<MonthlyBalanceSeries>())
             {
                 if (s != null && !string.IsNullOrEmpty(s.CardIdm))
                 {
@@ -959,7 +959,7 @@ namespace ICCardManager.ViewModels
 
             BalanceSeriesOptions.Clear();
 
-            var series = source?.BalanceSeries ?? new MonthlyBalanceSeries[0];
+            var series = source?.BalanceSeries ?? Array.Empty<MonthlyBalanceSeries>();
             var defaultSelection = series
                 .OrderBy(s => s.MonthlyBalances.LastOrDefault(v => v.HasValue) ?? double.MaxValue)
                 .Take(AppConstants.AdminDashboardMaxSeries)

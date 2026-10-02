@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Data.Common;
 using System.Data.SQLite;
+using System.Globalization;
 using System.Linq;
 using System.Threading.Tasks;
 using ICCardManager.Common;
@@ -618,7 +619,7 @@ WHERE card_idm = @cardIdm AND is_deleted = 1";
             command.Parameters.AddWithValue("@cardIdm", cardIdm);
 
             var result = await command.ExecuteScalarAsync().ConfigureAwait(false);
-            return Convert.ToInt32(result) > 0;
+            return Convert.ToInt32(result, CultureInfo.InvariantCulture) > 0;
         }
 
         /// <inheritdoc/>
@@ -635,9 +636,9 @@ WHERE card_type = @cardType";
             command.Parameters.AddWithValue("@cardType", cardType);
 
             var result = await command.ExecuteScalarAsync().ConfigureAwait(false);
-            var maxNumber = result == DBNull.Value ? 0 : Convert.ToInt32(result);
+            var maxNumber = result == DBNull.Value ? 0 : Convert.ToInt32(result, CultureInfo.InvariantCulture);
 
-            return (maxNumber + 1).ToString();
+            return (maxNumber + 1).ToString(CultureInfo.InvariantCulture);
         }
 
         /// <summary>

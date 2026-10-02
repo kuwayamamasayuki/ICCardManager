@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics.CodeAnalysis;
 using System.Linq;
 using System.Threading.Tasks;
 using System.Windows;
@@ -1134,7 +1135,9 @@ namespace ICCardManager
                     var logger = _logger;
                     if (logger != null)
                     {
-                        logger.LogError(exception, message);
+                        // message は組み立て済みの文で、テンプレートではない。テンプレートは定数にし、
+                        // 値は引数で渡す（CA2254）。
+                        logger.LogError(exception, "{Message}", message);
                     }
                     else
                     {
@@ -1192,6 +1195,12 @@ namespace ICCardManager
         /// <summary>
         /// 非UIスレッドの未処理例外ハンドラー
         /// </summary>
+        [SuppressMessage(
+            "Usage",
+            "CA2201:Do not raise reserved exception types",
+            Justification = "ExceptionObject が Exception でない（原因を特定できない）ときの代わりの例外。"
+                + "ErrorDialogHelper.GetErrorInfo は型で分類するため、具体的な型にすると原因不明の例外に"
+                + "誤った分類（InvalidOperationException なら SYS004）が付く。SYS999 に落とすため Exception のままにする。")]
         private void OnUnhandledException(object sender, UnhandledExceptionEventArgs e)
         {
             var exception = e.ExceptionObject as Exception ?? new Exception("Unknown error");

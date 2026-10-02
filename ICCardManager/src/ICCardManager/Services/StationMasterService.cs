@@ -408,11 +408,12 @@ namespace ICCardManager.Services
                     }
 
                     // エリアごとの路線コードを記録
-                    if (!_areaLineCodes.ContainsKey(areaCode))
+                    if (!_areaLineCodes.TryGetValue(areaCode, out var lineCodes))
                     {
-                        _areaLineCodes[areaCode] = new HashSet<int>();
+                        lineCodes = new HashSet<int>();
+                        _areaLineCodes[areaCode] = lineCodes;
                     }
-                    _areaLineCodes[areaCode].Add(lineCode);
+                    lineCodes.Add(lineCode);
                 }
 
                 // 路線名も登録

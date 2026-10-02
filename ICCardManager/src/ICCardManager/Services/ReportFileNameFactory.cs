@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.IO;
 using System.Linq;
 using ICCardManager.Infrastructure.Security;
@@ -214,7 +215,7 @@ namespace ICCardManager.Services
         {
             try
             {
-                return string.Format(format, cardType, cardNumber, fiscalYear);
+                return string.Format(CultureInfo.InvariantCulture, format, cardType, cardNumber, fiscalYear);
             }
             catch (FormatException)
             {

@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Linq;
 using System.Text.Json;
 using System.Text.RegularExpressions;
@@ -262,7 +263,7 @@ namespace ICCardManager.Services
                 {
                     if (detail.SequenceNumber > 0)
                     {
-                        undoData.DetailOriginalLedgerMap[detail.SequenceNumber.ToString()] = ledger.Id;
+                        undoData.DetailOriginalLedgerMap[detail.SequenceNumber.ToString(CultureInfo.InvariantCulture)] = ledger.Id;
                     }
                 }
             }

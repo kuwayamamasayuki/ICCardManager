@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Data.Common;
 using System.Data.SQLite;
+using System.Globalization;
 using System.Linq;
 using System.Threading.Tasks;
 using ICCardManager.Common;
@@ -63,7 +64,7 @@ SELECT last_insert_rowid();";
                 command.Parameters.AddWithValue("@afterData", (object)log.AfterData ?? DBNull.Value);
 
                 var result = await command.ExecuteScalarAsync().ConfigureAwait(false);
-                return Convert.ToInt32(result);
+                return Convert.ToInt32(result, CultureInfo.InvariantCulture);
             }
             finally
             {
@@ -74,7 +75,7 @@ SELECT last_insert_rowid();";
         /// <inheritdoc/>
         public async Task<IEnumerable<OperationLog>> GetByDateRangeAsync(DateTime fromDate, DateTime toDate)
         {
-            using var lease = await _dbContext.LeaseConnectionAsync();
+            using var lease = await _dbContext.LeaseConnectionAsync().ConfigureAwait(false);
             var connection = lease.Connection;
             var logs = new List<OperationLog>();
 
@@ -88,8 +89,8 @@ ORDER BY timestamp ASC";
             command.Parameters.AddWithValue("@fromDate", SqliteDateTimeFormat.ToDateText(fromDate));
             command.Parameters.AddWithValue("@toDate", SqliteDateTimeFormat.ToDateText(toDate));
 
-            using var reader = await command.ExecuteReaderAsync();
-            while (await reader.ReadAsync())
+            using var reader = await command.ExecuteReaderAsync().ConfigureAwait(false);
+            while (await reader.ReadAsync().ConfigureAwait(false))
             {
                 logs.Add(MapToOperationLog(reader));
             }
@@ -100,7 +101,7 @@ ORDER BY timestamp ASC";
         /// <inheritdoc/>
         public async Task<IEnumerable<OperationLog>> GetByOperatorAsync(string operatorIdm)
         {
-            using var lease = await _dbContext.LeaseConnectionAsync();
+            using var lease = await _dbContext.LeaseConnectionAsync().ConfigureAwait(false);
             var connection = lease.Connection;
             var logs = new List<OperationLog>();
 
@@ -113,8 +114,8 @@ ORDER BY timestamp ASC";
 
             command.Parameters.AddWithValue("@operatorIdm", operatorIdm);
 
-            using var reader = await command.ExecuteReaderAsync();
-            while (await reader.ReadAsync())
+            using var reader = await command.ExecuteReaderAsync().ConfigureAwait(false);
+            while (await reader.ReadAsync().ConfigureAwait(false))
             {
                 logs.Add(MapToOperationLog(reader));
             }
@@ -125,7 +126,7 @@ ORDER BY timestamp ASC";
         /// <inheritdoc/>
         public async Task<IEnumerable<OperationLog>> GetByTargetAsync(string targetTable, string targetId)
         {
-            using var lease = await _dbContext.LeaseConnectionAsync();
+            using var lease = await _dbContext.LeaseConnectionAsync().ConfigureAwait(false);
             var connection = lease.Connection;
             var logs = new List<OperationLog>();
 
@@ -139,8 +140,8 @@ ORDER BY timestamp ASC";
             command.Parameters.AddWithValue("@targetTable", targetTable);
             command.Parameters.AddWithValue("@targetId", targetId);
 
-            using var reader = await command.ExecuteReaderAsync();
-            while (await reader.ReadAsync())
+            using var reader = await command.ExecuteReaderAsync().ConfigureAwait(false);
+            while (await reader.ReadAsync().ConfigureAwait(false))
             {
                 logs.Add(MapToOperationLog(reader));
             }
@@ -213,7 +214,7 @@ ORDER BY timestamp ASC";
                 {
                     countCommand.Parameters.AddWithValue(param.Key, param.Value);
                 }
-                totalCount = Convert.ToInt32(await countCommand.ExecuteScalarAsync().ConfigureAwait(false));
+                totalCount = Convert.ToInt32(await countCommand.ExecuteScalarAsync().ConfigureAwait(false), CultureInfo.InvariantCulture);
             }
 
             // ページ取得クエリ構築
@@ -324,7 +325,7 @@ LIMIT @limit";
         /// <inheritdoc/>
         public async Task<IEnumerable<OperationLog>> SearchAllAsync(OperationLogSearchCriteria criteria)
         {
-            using var lease = await _dbContext.LeaseConnectionAsync();
+            using var lease = await _dbContext.LeaseConnectionAsync().ConfigureAwait(false);
             var connection = lease.Connection;
             var logs = new List<OperationLog>();
 
@@ -342,8 +343,8 @@ ORDER BY timestamp ASC, id ASC";
                 command.Parameters.AddWithValue(param.Key, param.Value);
             }
 
-            using var reader = await command.ExecuteReaderAsync();
-            while (await reader.ReadAsync())
+            using var reader = await command.ExecuteReaderAsync().ConfigureAwait(false);
+            while (await reader.ReadAsync().ConfigureAwait(false))
             {
                 logs.Add(MapToOperationLog(reader));
             }

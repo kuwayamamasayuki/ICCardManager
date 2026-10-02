@@ -19,6 +19,11 @@ namespace ICCardManager.Common
         private const int MaxPathLength = 260;
 
         /// <summary>
+        /// パスの区切り文字（\ と /）。呼び出しごとに配列を作らないよう共有する（CA1861）。
+        /// </summary>
+        private static readonly char[] PathSeparators = { '\\', '/' };
+
+        /// <summary>
         /// Issue #1269: UNC パス到達性チェックのデフォルトタイムアウト（ミリ秒）。
         /// SMB ハンドシェイクが通常 1-3 秒、ネットワーク不安定時でも 5 秒以内に結論を出す。
         /// </summary>
@@ -303,7 +308,7 @@ namespace ICCardManager.Common
         internal static bool IsUncPath(string path)
         {
             // UNCパス: \\server\share または //server/share
-            return path.StartsWith(@"\\") || path.StartsWith("//");
+            return path.StartsWith(@"\\", StringComparison.Ordinal) || path.StartsWith("//", StringComparison.Ordinal);
         }
 
         /// <summary>
@@ -434,7 +439,7 @@ namespace ICCardManager.Common
             }
 
             // 区切り文字は \ / の両方を対象にする（混合区切りへの防御）
-            var segments = path.Split(new[] { '\\', '/' }, StringSplitOptions.RemoveEmptyEntries);
+            var segments = path.Split(PathSeparators, StringSplitOptions.RemoveEmptyEntries);
 
             foreach (var segment in segments)
             {

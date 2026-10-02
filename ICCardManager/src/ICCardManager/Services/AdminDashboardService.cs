@@ -315,7 +315,7 @@ namespace ICCardManager.Services
             IReadOnlyList<IcCard> cards, IReadOnlyList<CardUsageStatsRow> usageStats, int periodDayCount, DateTime asOf)
         {
             var statsByCard = new Dictionary<string, CardUsageStatsRow>();
-            foreach (var row in usageStats ?? new CardUsageStatsRow[0])
+            foreach (var row in usageStats ?? Array.Empty<CardUsageStatsRow>())
             {
                 statsByCard[row.CardIdm] = row;
             }
@@ -364,7 +364,7 @@ namespace ICCardManager.Services
             var buckets = new Dictionary<string, int[]>();
             var displayNames = new Dictionary<string, string>();
 
-            foreach (var row in monthlyUsage ?? new MonthlyUsageRow[0])
+            foreach (var row in monthlyUsage ?? Array.Empty<MonthlyUsageRow>())
             {
                 if (!monthIndex.TryGetValue(row.YearMonth, out var index))
                 {
@@ -510,7 +510,7 @@ namespace ICCardManager.Services
             }
 
             var byCard = new Dictionary<string, double?[]>();
-            foreach (var row in monthEndBalances ?? new MonthEndBalanceRow[0])
+            foreach (var row in monthEndBalances ?? Array.Empty<MonthEndBalanceRow>())
             {
                 if (!monthIndex.TryGetValue(row.YearMonth, out var index))
                 {

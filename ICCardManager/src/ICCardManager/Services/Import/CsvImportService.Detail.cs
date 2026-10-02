@@ -141,11 +141,12 @@ namespace ICCardManager.Services
                     // Issue #918: 日付でもグループ化（日付がない場合はDateTime.MinValueをキーにする）
                     var dateKey = detail.UseDate?.Date ?? DateTime.MinValue;
                     var groupKey = (cardIdm, dateKey);
-                    if (!newDetailsByCardIdmAndDate.ContainsKey(groupKey))
+                    if (!newDetailsByCardIdmAndDate.TryGetValue(groupKey, out var dateGroup))
                     {
-                        newDetailsByCardIdmAndDate[groupKey] = new List<(int, LedgerDetail)>();
+                        dateGroup = new List<(int, LedgerDetail)>();
+                        newDetailsByCardIdmAndDate[groupKey] = dateGroup;
                     }
-                    newDetailsByCardIdmAndDate[groupKey].Add((lineNumber, detail));
+                    dateGroup.Add((lineNumber, detail));
                     continue;
                 }
 
@@ -159,7 +160,7 @@ namespace ICCardManager.Services
                         {
                             LineNumber = lineNumber,
                             Message = $"利用履歴ID {detail.LedgerId} が存在しません",
-                            Data = detail.LedgerId.ToString()
+                            Data = detail.LedgerId.ToString(CultureInfo.InvariantCulture)
                         });
                         continue;
                     }
@@ -167,11 +168,12 @@ namespace ICCardManager.Services
                     ledgerCardIdmMap[detail.LedgerId] = ledger.CardIdm ?? "";
                 }
 
-                if (!detailsByLedgerId.ContainsKey(detail.LedgerId))
+                if (!detailsByLedgerId.TryGetValue(detail.LedgerId, out var ledgerGroup))
                 {
-                    detailsByLedgerId[detail.LedgerId] = new List<(int, LedgerDetail)>();
+                    ledgerGroup = new List<(int, LedgerDetail)>();
+                    detailsByLedgerId[detail.LedgerId] = ledgerGroup;
                 }
-                detailsByLedgerId[detail.LedgerId].Add((lineNumber, detail));
+                ledgerGroup.Add((lineNumber, detail));
             }
 
             // Issue #906: 新規詳細（利用履歴ID空欄）のプレビューアイテム生成
@@ -274,7 +276,7 @@ namespace ICCardManager.Services
                 items.Add(new CsvImportPreviewItem
                 {
                     LineNumber = detailRows.First().LineNumber,
-                    Idm = ledgerId.ToString(),
+                    Idm = ledgerId.ToString(CultureInfo.InvariantCulture),
                     Name = existingCardDisplayName,
                     AdditionalInfo = $"{detailRows.Count}件",
                     Action = action,
@@ -405,11 +407,12 @@ namespace ICCardManager.Services
                     // Issue #918: 日付でもグループ化（日付がない場合はDateTime.MinValueをキーにする）
                     var dateKey = detail.UseDate?.Date ?? DateTime.MinValue;
                     var groupKey = (cardIdm, dateKey);
-                    if (!newDetailsByCardIdmAndDate.ContainsKey(groupKey))
+                    if (!newDetailsByCardIdmAndDate.TryGetValue(groupKey, out var dateGroup))
                     {
-                        newDetailsByCardIdmAndDate[groupKey] = new List<(int, LedgerDetail)>();
+                        dateGroup = new List<(int, LedgerDetail)>();
+                        newDetailsByCardIdmAndDate[groupKey] = dateGroup;
                     }
-                    newDetailsByCardIdmAndDate[groupKey].Add((lineNumber, detail));
+                    dateGroup.Add((lineNumber, detail));
                     continue;
                 }
 
@@ -423,18 +426,19 @@ namespace ICCardManager.Services
                         {
                             LineNumber = lineNumber,
                             Message = $"利用履歴ID {detail.LedgerId} が存在しません",
-                            Data = detail.LedgerId.ToString()
+                            Data = detail.LedgerId.ToString(CultureInfo.InvariantCulture)
                         });
                         continue;
                     }
                     existingDetailsByLedgerId[detail.LedgerId] = ledger.Details ?? new List<LedgerDetail>();
                 }
 
-                if (!detailsByLedgerId.ContainsKey(detail.LedgerId))
+                if (!detailsByLedgerId.TryGetValue(detail.LedgerId, out var ledgerGroup))
                 {
-                    detailsByLedgerId[detail.LedgerId] = new List<(int, LedgerDetail)>();
+                    ledgerGroup = new List<(int, LedgerDetail)>();
+                    detailsByLedgerId[detail.LedgerId] = ledgerGroup;
                 }
-                detailsByLedgerId[detail.LedgerId].Add((lineNumber, detail));
+                ledgerGroup.Add((lineNumber, detail));
             }
 
             // バリデーションエラーがあれば中断
@@ -530,7 +534,7 @@ namespace ICCardManager.Services
                         {
                             LineNumber = firstLineNumber,
                             Message = failureMessage,
-                            Data = ledgerId.ToString()
+                            Data = ledgerId.ToString(CultureInfo.InvariantCulture)
                         });
                     }
                 }
@@ -558,7 +562,7 @@ namespace ICCardManager.Services
                     {
                         LineNumber = firstLineNumber,
                         Message = BuildDetailReplaceFailureMessage(ledgerId, ex),
-                        Data = ledgerId.ToString()
+                        Data = ledgerId.ToString(CultureInfo.InvariantCulture)
                     });
                 }
                 finally
@@ -751,6 +755,8 @@ namespace ICCardManager.Services
                    "この履歴の明細・摘要・金額は変更されていません。しばらく待ってから、もう一度インポートしてください。";
         }
 
+        // 差分の値（OldValue / NewValue）はプレビューに表示するが、CSV のセルと同じ書式で見せるため
+        // CSV の出力・取込と同じ InvariantCulture で整形する（Issue #2162。表示用の CurrentCulture ではない）。
         private static void DetectLedgerDetailChanges(
             List<LedgerDetail> existingDetails,
             List<LedgerDetail> newDetails,
@@ -818,8 +824,8 @@ namespace ICCardManager.Services
                     changes.Add(new FieldChange
                     {
                         FieldName = $"{rowLabel} 金額",
-                        OldValue = existing.Amount?.ToString() ?? "(なし)",
-                        NewValue = imported.Amount?.ToString() ?? "(なし)"
+                        OldValue = existing.Amount?.ToString(CultureInfo.InvariantCulture) ?? "(なし)",
+                        NewValue = imported.Amount?.ToString(CultureInfo.InvariantCulture) ?? "(なし)"
                     });
                 }
 
@@ -828,8 +834,8 @@ namespace ICCardManager.Services
                     changes.Add(new FieldChange
                     {
                         FieldName = $"{rowLabel} 残額",
-                        OldValue = existing.Balance?.ToString() ?? "(なし)",
-                        NewValue = imported.Balance?.ToString() ?? "(なし)"
+                        OldValue = existing.Balance?.ToString(CultureInfo.InvariantCulture) ?? "(なし)",
+                        NewValue = imported.Balance?.ToString(CultureInfo.InvariantCulture) ?? "(なし)"
                     });
                 }
 
@@ -868,8 +874,8 @@ namespace ICCardManager.Services
                     changes.Add(new FieldChange
                     {
                         FieldName = $"{rowLabel} グループID",
-                        OldValue = existing.GroupId?.ToString() ?? "(なし)",
-                        NewValue = imported.GroupId?.ToString() ?? "(なし)"
+                        OldValue = existing.GroupId?.ToString(CultureInfo.InvariantCulture) ?? "(なし)",
+                        NewValue = imported.GroupId?.ToString(CultureInfo.InvariantCulture) ?? "(なし)"
                     });
                 }
             }

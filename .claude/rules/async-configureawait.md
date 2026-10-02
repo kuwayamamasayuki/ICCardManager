@@ -56,9 +56,21 @@ ViewModel と同じ理由で付けない。
 > `CardRepository` 0/51・`StaffRepository` 0/27・`Infrastructure/` 配下 0 件・
 > `CsvExportService` の三項演算子 2 か所の付与漏れが蓄積していた。
 
-## アナライザ
+## アナライザ（Issue #2162）
 
-`.editorconfig` で `CA2007` を `severity=suggestion` として設定。`src/ICCardManager` 配下全体が対象（Common / Data / Dtos / Infrastructure / Models / Services 等）で、ViewModels / Views / tests のみ `none` で無効化。
+本体で .NET アナライザーを有効にし（`development-conventions.md`「.NET アナライザー（CA ルール）は本体で有効」）、`ICCardManager/.editorconfig` で CA2007 を次の 3 段で設定している。付け忘れは**ビルド警告**になり、CI の「ビルド警告ゼロ検証」で止まる。
+
+| 節 | 重大度 | 理由 |
+|---|---|---|
+| `src/ICCardManager/**.cs` | none | ViewModels / Views / `App.xaml.cs` は継続を UI スレッドへ戻す必要がある |
+| `src/ICCardManager/{Common,Data,Dtos,Infrastructure,Models,Services}/**.cs` | **warning** | 本規約の対象 |
+| `src/ICCardManager/Services/DialogService.cs` | none | 下の「例外: UI 依存サービス」 |
+
+テストプロジェクトではアナライザー自体を有効にしていない（テストは付けない規約）。
+
+> Issue #2162 以前は、リポジトリ直下の `.editorconfig` に「Service 層は suggestion」と書いていたが、`ICCardManager/.editorconfig` が `root = true` のため**一度も読まれておらず**、そもそもアナライザーも動いていなかった。設定が書いてあることは、それが効いていることを意味しない。
+
+**アナライザーと静的検査（`ConfigureAwaitConventionTests`）の関係**: 意味解析で判定するアナライザーを主たる検出手段とし、静的検査は残す。アナライザーはビルド設定（`EnableNETAnalyzers` や重大度の格下げ）で止められるが、静的検査はそれと独立に働くため。2 つの対象範囲（warning のディレクトリ ↔ `TargetDirectories`、none に戻すファイル ↔ `KnownUnfixedFiles`）は同テストの `CA2007の設定がこの検査と同じ範囲を対象にしていること` が一致を固定する。対象ディレクトリや除外を変えるときは両方を同時に直すこと。Issue #2162 で warning にしたのに伴い、除外していた `LedgerRepository` / `SettingsRepository` / `OperationLogRepository` は是正し、除外は `DialogService` だけになった。
 
 ## 例外: UI 依存サービス
 

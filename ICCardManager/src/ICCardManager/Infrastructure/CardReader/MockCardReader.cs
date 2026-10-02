@@ -97,7 +97,7 @@ namespace ICCardManager.Infrastructure.CardReader
         /// <param name="message">エラーメッセージ</param>
         public void SimulateError(string message)
         {
-            Error?.Invoke(this, new Exception(message));
+            Error?.Invoke(this, new InvalidOperationException(message));
         }
 
         /// <inheritdoc/>

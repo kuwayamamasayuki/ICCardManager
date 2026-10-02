@@ -29,6 +29,14 @@ namespace ICCardManager.Tests;
 /// サービスの 2 種類。除外は「ファイルごと」であり、除外ファイルへ新たな await を足しても
 /// 検出されない点に注意すること（除外を減らす方向にのみ変更する）。
 /// </para>
+/// <para>
+/// Issue #2162 で .NET アナライザーを有効にし、同じ規約を CA2007 が<b>ビルド時に</b>検出するようになった
+/// （<c>ICCardManager/.editorconfig</c> で対象ディレクトリを warning、除外ファイルを none にしている）。
+/// 意味解析に基づくアナライザーを主たる検出手段とし、本テストは残す。アナライザーはビルド設定
+/// （<c>EnableNETAnalyzers</c> や重大度の格下げ）で止められるが、本テストはそれと独立に働くため。
+/// 2 つの検出手段の対象範囲が食い違うと、片方では違反・片方では適合という状態になるので、
+/// <see cref="CA2007の設定がこの検査と同じ範囲を対象にしていること"/> で一致を固定する。
+/// </para>
 /// </remarks>
 public class ConfigureAwaitConventionTests
 {
@@ -56,11 +64,8 @@ public class ConfigureAwaitConventionTests
     private static readonly IReadOnlyDictionary<string, string> KnownUnfixedFiles =
         new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
         {
-            // Issue #1823 のスコープ外。付与漏れは機械的に是正できるが、
-            // 1 PR あたりの差分を抑えるため別途対応する。
-            ["Data/Repositories/LedgerRepository.cs"] = "Issue #1823 スコープ外（段階的に是正）",
-            ["Data/Repositories/SettingsRepository.cs"] = "Issue #1823 スコープ外（段階的に是正）",
-            ["Data/Repositories/OperationLogRepository.cs"] = "Issue #1823 スコープ外（段階的に是正）",
+            // Issue #1823 のスコープ外だった LedgerRepository / SettingsRepository / OperationLogRepository は
+            // Issue #2162 で CA2007 を warning にしたのに伴い是正した。
 
             // async-configureawait.md「例外: UI 依存サービス」。内部で MessageBox 等の
             // UI API を呼ぶため、継続が UI スレッドへ戻る必要がある。
@@ -119,6 +124,122 @@ public class ConfigureAwaitConventionTests
             FindAwaitsWithoutConfigureAwait(source).Should().NotBeEmpty(
                 $"除外リストの {entry.Key} は既に規約を満たしている。除外を削除して検査対象へ戻すこと");
         }
+    }
+
+    /// <summary>
+    /// CA2007（アナライザー）の重大度の設定が、この静的検査と同じ範囲を対象にしていることを確認（Issue #2162）
+    /// </summary>
+    /// <remarks>
+    /// 本体全体で none → 対象ディレクトリだけ warning → 除外ファイルを none、の 3 段で書く。
+    /// 対象ディレクトリを足した・除外を外したのに片方だけを直すと、ビルドとテストで判定が食い違う。
+    /// </remarks>
+    [Fact]
+    public void CA2007の設定がこの検査と同じ範囲を対象にしていること()
+    {
+        var editorConfig = File.ReadAllText(Path.Combine(TestPaths.GetSolutionRoot(), ".editorconfig"));
+        var sections = ExtractSeveritySections(editorConfig, "CA2007");
+
+        sections.Should().Contain(("src/ICCardManager/**.cs", "none"),
+            "本体全体の既定を none にし、ViewModels / Views / App.xaml.cs で ConfigureAwait(false) を求めないこと");
+
+        var warningSections = sections.Where(s => s.Severity == "warning").ToList();
+        warningSections.Should().ContainSingle("CA2007 を warning にする節は 1 つにまとめる（対象ディレクトリの一覧を 1 か所に置く）");
+        ParseDirectoryAlternation(warningSections[0].Glob).Should().BeEquivalentTo(TargetDirectories,
+            "CA2007 を warning にするディレクトリは、この静的検査の走査対象と一致すること");
+
+        sections
+            .Where(s => s.Severity == "none" && s.Glob != "src/ICCardManager/**.cs")
+            .Select(s => s.Glob)
+            .Should().BeEquivalentTo(KnownUnfixedFiles.Keys.Select(k => "src/ICCardManager/" + k),
+                "CA2007 を none に戻すファイルは、この静的検査の除外リストと一致すること");
+
+        sections.Select(s => s.Severity).Should().OnlyContain(s => s == "none" || s == "warning",
+            "CA2007 の重大度は none（規約の対象外）か warning（規約の対象）のどちらかで書くこと");
+
+        // .editorconfig は後に書いた節が勝つ。全体の none を warning の節より後ろへ移すと、
+        // 集合としては同じでも CA2007 がすべて止まる（コードレビューで検出）。
+        var baselineIndex = sections.ToList().FindLastIndex(s => s.Glob == "src/ICCardManager/**.cs");
+        var warningIndex = sections.ToList().FindIndex(s => s.Severity == "warning");
+        baselineIndex.Should().BeLessThan(warningIndex,
+            "本体全体を none にする節は、対象ディレクトリを warning にする節より前に書くこと（後勝ち）");
+        sections
+            .Select((s, i) => (s, i))
+            .Where(x => x.s.Severity == "none" && x.s.Glob != "src/ICCardManager/**.cs")
+            .Should().OnlyContain(x => x.i > warningIndex,
+                "除外ファイルを none に戻す節は、warning の節より後ろに書くこと（後勝ち）");
+    }
+
+    /// <summary>
+    /// 設定の読み取り自体が働くことをサンプル入力で固定する（実ファイルが変わっても空振りを検出できるように）
+    /// </summary>
+    [Fact]
+    public void CA2007の設定の読み取りがサンプル入力で正しく働くこと()
+    {
+        const string sample = "root = true\n"
+            + "[*.cs]\n"
+            + "dotnet_diagnostic.CA1848.severity = none\n"
+            + "[src/A/**.cs]\n"
+            + "# CA2007 の理由\n"
+            + "dotnet_diagnostic.CA2007.severity = none\n"
+            + "[src/A/{B,C}/**.cs]\n"
+            + "dotnet_diagnostic.ca2007.severity=warning\n"
+            + "[src/A/B/X.cs]\n"
+            + "; dotnet_diagnostic.CA2007.severity = warning\n"
+            + "dotnet_diagnostic.CA2007.severity = none\n";
+
+        ExtractSeveritySections(sample, "CA2007").Should().Equal(
+            ("src/A/**.cs", "none"),
+            ("src/A/{B,C}/**.cs", "warning"),
+            ("src/A/B/X.cs", "none"));
+        ParseDirectoryAlternation("src/A/{B,C}/**.cs").Should().Equal("B", "C");
+        ParseDirectoryAlternation("src/A/B/**.cs").Should().BeEmpty("選択肢の無い節はディレクトリの一覧として読まない");
+    }
+
+    /// <summary>
+    /// <c>.editorconfig</c> から、指定した ID の重大度を設定している節（グロブ）と重大度を出現順に返す。
+    /// コメント行（<c>#</c> / <c>;</c>）は読まない。
+    /// </summary>
+    internal static IReadOnlyList<(string Glob, string Severity)> ExtractSeveritySections(string editorConfig, string diagnosticId)
+    {
+        var result = new List<(string Glob, string Severity)>();
+        string? currentGlob = null;
+        foreach (var rawLine in editorConfig.Replace("\r\n", "\n").Split('\n'))
+        {
+            var line = rawLine.Trim();
+            if (line.StartsWith("#", StringComparison.Ordinal) || line.StartsWith(";", StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            var header = Regex.Match(line, @"^\[(?<glob>.+)\]$");
+            if (header.Success)
+            {
+                currentGlob = header.Groups["glob"].Value;
+                continue;
+            }
+
+            var setting = Regex.Match(
+                line,
+                $@"^dotnet_diagnostic\.{Regex.Escape(diagnosticId)}\.severity\s*=\s*(?<severity>\w+)",
+                RegexOptions.IgnoreCase);
+            if (setting.Success && currentGlob != null)
+            {
+                result.Add((currentGlob, setting.Groups["severity"].Value.ToLowerInvariant()));
+            }
+        }
+
+        return result;
+    }
+
+    /// <summary>
+    /// <c>src/ICCardManager/{A,B}/**.cs</c> 形式のグロブから、選択肢（ディレクトリ名）を返す。
+    /// </summary>
+    private static IReadOnlyList<string> ParseDirectoryAlternation(string glob)
+    {
+        var match = Regex.Match(glob, @"\{(?<names>[^}]+)\}/\*\*\.cs$");
+        return match.Success
+            ? match.Groups["names"].Value.Split(',').Select(n => n.Trim()).ToList()
+            : new List<string>();
     }
 
     /// <summary>

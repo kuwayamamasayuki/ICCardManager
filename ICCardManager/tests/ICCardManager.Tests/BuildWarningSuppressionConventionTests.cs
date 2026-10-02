@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Text;
@@ -38,6 +39,14 @@ namespace ICCardManager.Tests;
 /// <c>WarningLevel</c> の引き下げ。
 /// 走査対象は固定の列挙をやめ、ソリューションルート配下（と、設定が継承されるその祖先）から導出する。
 /// </para>
+/// <para>
+/// Issue #2162 で本体の .NET アナライザー（CA ルール）を有効にしたのに伴い、CA ルールを消せる経路を追加で塞いだ。
+/// ⑪アナライザー設定の理由は、ファイルのどこかではなく<b>設定行の直前のコメント</b>に求める
+/// ⑫<c>dotnet_code_quality</c>（<c>api_surface</c> 等）による適用範囲の絞り込み
+/// ⑬<c>[SuppressMessage]</c> 属性（<c>Justification</c> を必須にする）
+/// ⑭アナライザーそのものを止める・弱める設定（<c>RunAnalyzers</c> / <c>EnableNETAnalyzers</c> = false、
+/// <c>AnalysisMode</c> / <c>AnalysisLevel</c> を Recommended より弱める）と、本体での有効化の宣言の削除。
+/// </para>
 /// </remarks>
 public class BuildWarningSuppressionConventionTests
 {
@@ -51,6 +60,12 @@ public class BuildWarningSuppressionConventionTests
     /// C# コンパイラの既定の警告レベル。これより小さい <c>WarningLevel</c> は警告をまとめて消す。
     /// </summary>
     private const int DefaultWarningLevel = 4;
+
+    /// <summary>
+    /// アナライザーのルールセットの版の下限（Issue #2162）。本体が固定している Microsoft.CodeAnalysis.NetAnalyzers の版（8.0）。
+    /// これより古い <c>AnalysisLevel</c> は、以降に追加されたルールをまとめて消す。
+    /// </summary>
+    private const double MinimumAnalysisLevel = 8.0;
 
     /// <summary>
     /// 「その ID は抑制しない」と述べるコメント行を理由付けとして数えないための否定語。
@@ -146,11 +161,20 @@ public class BuildWarningSuppressionConventionTests
             inspected.Should().Contain(path, $"走査対象から漏れている: {path}");
         }
 
-        // ソリューションルートの祖先（リポジトリ直下）の .editorconfig も継承されるため走査対象に入る
+        // ソリューションルートの祖先（リポジトリ直下）の設定ファイルも継承され得るため走査対象に入る。
+        // Issue #2162 で、ICCardManager/.editorconfig が root = true のため一度も効いていなかった
+        // リポジトリ直下の .editorconfig を削除した。特定のファイルの存在ではなく「直下にある設定ファイルは
+        // すべて走査対象に入ること」を表明する（新設されたときに漏れないこと自体は
+        // 「走査対象の導出_新設された設定ファイルを拾い…」が一時ディレクトリで固定している）。
         var repositoryRoot = TestPaths.FindRepositoryRoot(solutionRoot);
         repositoryRoot.Should().NotBeNull("リポジトリのルート（.git のある階層）を解決できること");
-        inspected.Should().Contain(NormalizePath(Path.Combine(repositoryRoot!, ".editorconfig")),
-            "リポジトリ直下の .editorconfig はソリューション配下のファイルへも継承され得る");
+        foreach (var rootConfigFile in Directory.GetFiles(repositoryRoot!)
+            .Where(f => ClassifyFile(f) != InspectedFileKind.None)
+            .Select(NormalizePath))
+        {
+            inspected.Should().Contain(rootConfigFile,
+                "リポジトリ直下の設定ファイルはソリューション配下のファイルへも継承され得る");
+        }
 
         inspected.Count(p => ClassifyFile(p) == InspectedFileKind.CSharp).Should().BeGreaterThan(100,
             "C# ソースの走査が空振りしていないこと（パス解決が壊れると pragma / #nullable の検査が無条件 green になる）");
@@ -178,6 +202,22 @@ public class BuildWarningSuppressionConventionTests
         {
             var kind = ClassifyFile(file);
             var text = File.ReadAllText(file);
+
+            if (kind == InspectedFileKind.AnalyzerConfig)
+            {
+                // Issue #2162: アナライザー設定は ID ごとに抑制が並ぶため、ファイルのどこかに ID があるだけでは
+                // 「理由の一覧」と「抑制」が離れて対応が読めなくなる。直前のコメントに理由を求める。
+                foreach (var entry in ExtractAnalyzerConfigSuppressions(text))
+                {
+                    if (!ContainsWholeWord(ExtractPrecedingCommentText(text, entry.Line), entry.WarningId))
+                    {
+                        violations.Add($"  - {DisplayPath(file)}:{entry.Line}: {entry.WarningId}（{entry.Mechanism}。直前のコメントに理由が無い）");
+                    }
+                }
+
+                continue;
+            }
+
             var justification = ExtractJustificationText(text, kind);
 
             foreach (var entry in ExtractSuppressions(text, kind, IsYaml(file)))
@@ -190,7 +230,9 @@ public class BuildWarningSuppressionConventionTests
         }
 
         violations.Should().BeEmpty(
-            "NoWarn / 重大度の格下げ / コマンドラインで抑制した警告 ID は、同じファイルのコメントに理由を明記すること。" +
+            "NoWarn / コマンドラインで抑制した警告 ID は同じファイルのコメントに、" +
+            ".editorconfig / .globalconfig の重大度の格下げ・適用範囲の絞り込み（dotnet_code_quality）は" +
+            "その設定行の直前のコメントに、理由を明記すること。" +
             "理由の無い抑制が積み上がると「ビルド警告ゼロ」が実態を伴わなくなる。" +
             "コメントでは ID を省略形（CS8600/8602 等）ではなく完全な形で列挙すること" +
             "（照合は前方一致ではなく語境界で行うため）。\n" +
@@ -255,6 +297,122 @@ public class BuildWarningSuppressionConventionTests
             "dotnet_analyzer_diagnostic.severity（カテゴリ指定を含む）で重大度を一括して下げないこと。" +
             "抑制が必要な場合は dotnet_diagnostic.<ID>.severity で ID を特定し、同じファイルのコメントに理由を書くこと。\n" +
             string.Join("\n", violations));
+    }
+
+    /// <summary>
+    /// <c>dotnet_code_quality.api_surface = private</c> のように ID を書かずに適用範囲を狭める設定は、
+    /// 全ルール（カテゴリ指定ならそのカテゴリ全体）の検出範囲をまとめて縮める（Issue #2162）。
+    /// 重大度の一括の格下げと同じ扱いにする。
+    /// </summary>
+    [Fact]
+    public void アナライザー設定で適用範囲を一括で狭めていないこと()
+    {
+        var violations = EnumerateConfigFiles()
+            .Where(f => ClassifyFile(f) == InspectedFileKind.AnalyzerConfig)
+            .SelectMany(f => ExtractCodeQualityOptions(File.ReadAllText(f))
+                .Where(o => o.WarningId == null)
+                .Select(o => $"  - {DisplayPath(f)}:{o.Line}（dotnet_code_quality.{o.Scope}{o.Option}）"))
+            .ToList();
+
+        violations.Should().BeEmpty(
+            "dotnet_code_quality の適用範囲（api_surface 等）は dotnet_code_quality.<ID>.<オプション> で ID を特定し、" +
+            "直前のコメントに理由を書くこと。ID を書かない指定（全体・カテゴリ単位）は、どのルールの検出をどれだけ" +
+            "狭めたのかを特定できない。\n" +
+            string.Join("\n", violations));
+    }
+
+    /// <summary>
+    /// <c>[SuppressMessage]</c> 属性（<c>[assembly: SuppressMessage]</c> を含む）も抑制の手段である（Issue #2162）。
+    /// 理由は属性の <c>Justification</c> に書く。
+    /// </summary>
+    /// <remarks>
+    /// .editorconfig は行単位でしか抑制できないため、特定のメンバーだけを抑制するには属性が要る
+    /// （例: テンプレートを転送するだけのログヘルパーの CA2254）。手段そのものは禁じず、理由を必須にする。
+    /// </remarks>
+    [Fact]
+    public void SuppressMessage属性には理由を書いていること()
+    {
+        var root = TestPaths.GetSolutionRoot();
+        var files = EnumerateInspectedFiles(root)
+            .Where(f => ClassifyFile(f) == InspectedFileKind.CSharp)
+            .ToList();
+        files.Should().HaveCountGreaterThan(100, "C# ソースの走査が空振りしていないこと");
+
+        var found = new List<SuppressMessageUsage>();
+        foreach (var file in files)
+        {
+            found.AddRange(ExtractSuppressMessageUsages(File.ReadAllText(file))
+                .Select(u => u with { Location = $"{DisplayPath(file)}:{u.Line}" }));
+        }
+
+        found.Should().Contain(u => u.Location.Contains("NewLedgerFromSegmentsBuilder.cs"),
+            "既知の使用箇所を拾えていること（抽出が 0 件に縮むと本検査は無条件 green になる）");
+
+        var violations = found
+            .Where(u => !u.HasJustification)
+            .Select(u => $"  - {u.Location}（{u.WarningId ?? "ID 不明"}）")
+            .ToList();
+
+        violations.Should().BeEmpty(
+            "[SuppressMessage] には Justification = \"…\" で抑制の理由を書くこと（Issue #2162）。" +
+            "理由の無い抑制が積み上がると「ビルド警告ゼロ」が実態を伴わなくなる。\n" +
+            string.Join("\n", violations));
+    }
+
+    /// <summary>
+    /// アナライザーを止めると、CA ルールの警告がまとめて消える（Issue #2162）。
+    /// <c>RunAnalyzers</c> / <c>RunAnalyzersDuringBuild</c> / <c>EnableNETAnalyzers</c> を false にする設定と、
+    /// <c>AnalysisMode</c> / <c>AnalysisLevel</c> を Recommended より下げる設定を、共有設定・csproj・コマンドラインの全経路で禁じる。
+    /// </summary>
+    [Fact]
+    public void アナライザーを止めたり既定より弱めたりする設定が無いこと()
+    {
+        var violations = new List<string>();
+
+        foreach (var file in EnumerateConfigFiles())
+        {
+            var kind = ClassifyFile(file);
+            IEnumerable<(string Name, string Value)> properties = kind switch
+            {
+                InspectedFileKind.MsBuild => ExtractAnalyzerProperties(File.ReadAllText(file)),
+                InspectedFileKind.CommandLine => ExtractCommandLineProperties(File.ReadAllText(file), IsYaml(file)),
+                _ => Enumerable.Empty<(string, string)>(),
+            };
+
+            violations.AddRange(properties
+                .Where(p => WeakensAnalyzers(p.Name, p.Value))
+                .Select(p => $"  - {DisplayPath(file)}: {p.Name} = {p.Value.Trim()}"));
+        }
+
+        violations.Should().BeEmpty(
+            "アナライザーを止める（RunAnalyzers / RunAnalyzersDuringBuild / EnableNETAnalyzers = false）設定や、" +
+            "AnalysisMode / AnalysisLevel を Recommended より弱める設定を置かないこと。CA ルールの警告が ID を特定しないまま" +
+            "まとめて消える。是正しないルールは .editorconfig で ID ごとに重大度を下げ、直前のコメントに理由を書くこと（Issue #2162）。\n" +
+            string.Join("\n", violations));
+    }
+
+    /// <summary>
+    /// 本体（src/ICCardManager）でアナライザーが実際に有効になっていることを表明する（Issue #2162）。
+    /// </summary>
+    /// <remarks>
+    /// 「止める設定が無い」だけでは、有効化の宣言ごと削除した状態（net48 の既定ではアナライザーは動かない）を検出できない。
+    /// 版を固定するパッケージ参照も併せて見る（無いと SDK に同梱の版へ戻り、SDK の更新でルールが増減し得る）。
+    /// </remarks>
+    [Fact]
+    public void 本体のcsprojでアナライザーを有効にしていること()
+    {
+        var csproj = File.ReadAllText(Path.Combine(TestPaths.GetProductionSourceRoot(), "ICCardManager.csproj"));
+
+        var enable = ExtractElementValues(csproj, "EnableNETAnalyzers");
+        enable.Should().NotBeEmpty("net48 では .NET アナライザーが既定で無効のため、EnableNETAnalyzers を明示すること");
+        enable[enable.Count - 1].Trim().Should().BeEquivalentTo("true", "MSBuild は後勝ち評価のため最後の値を見る");
+
+        var mode = ExtractElementValues(csproj, "AnalysisMode");
+        mode.Should().NotBeEmpty("AnalysisMode を宣言しないと既定（Default）の狭いルールセットになる");
+        mode[mode.Count - 1].Trim().Should().BeOneOf("Recommended", "All");
+
+        Regex.IsMatch(csproj, @"<PackageReference\s+Include=""Microsoft\.CodeAnalysis\.NetAnalyzers""\s+Version=""[^""]+""")
+            .Should().BeTrue("アナライザーの版をパッケージで固定すること");
     }
 
     /// <summary>
@@ -592,6 +750,150 @@ public class BuildWarningSuppressionConventionTests
         {
             downgrades.Should().BeEmpty();
         }
+    }
+
+    /// <summary>
+    /// <c>dotnet_code_quality</c> の行を読み、ID を特定した指定と、全体・カテゴリ単位の指定を分ける（Issue #2162）。
+    /// </summary>
+    [Theory]
+    [InlineData("dotnet_code_quality.CA1822.api_surface = private", "CA1822", "api_surface")]
+    [InlineData("  dotnet_code_quality.ca1062.excluded_symbol_names = M:Foo", "CA1062", "excluded_symbol_names")]
+    [InlineData("dotnet_code_quality.api_surface = private", null, "api_surface")]
+    [InlineData("dotnet_code_quality.Performance.api_surface = private", null, "api_surface")]
+    public void アナライザー設定の判定_dotnet_code_qualityの指定を読むこと(string line, string? expectedId, string expectedOption)
+    {
+        var options = ExtractCodeQualityOptions("root = true\n[*.cs]\n" + line + "\n# dotnet_code_quality.CA9999.api_surface = all\n");
+
+        options.Should().ContainSingle("コメント行は読まない");
+        options[0].WarningId.Should().Be(expectedId);
+        options[0].Option.Should().Be(expectedOption);
+        options[0].Line.Should().Be(3);
+    }
+
+    /// <summary>
+    /// アナライザー設定の抑制は、直前のコメント（同じ組の設定行をまたいでよい）に理由を求める（Issue #2162）。
+    /// ファイルの別の場所に ID が書いてあるだけでは理由に数えない。
+    /// </summary>
+    [Fact]
+    public void 理由コメントの抽出_アナライザー設定は直前のコメントだけを読むこと()
+    {
+        const string config =
+            "root = true\n" +                                   // 1
+            "# CA1001: 別の節の理由\n" +                         // 2
+            "[*.cs]\n" +                                        // 3
+            "# CA1848 と CA1716: まとめて理由を書く\n" +          // 4
+            "dotnet_diagnostic.CA1848.severity = none\n" +      // 5
+            "dotnet_diagnostic.CA1716.severity = none\n" +      // 6
+            "\n" +                                              // 7
+            "dotnet_diagnostic.CA1001.severity = none\n" +      // 8
+            "# CA1822 は抑制しない\n" +                          // 9
+            "dotnet_code_quality.CA1822.api_surface = private\n" + // 10
+            "# CA1859: 理由\n" +                                 // 11
+            "indent_size = 4\n" +                               // 12
+            "dotnet_diagnostic.CA1859.severity = none\n";       // 13
+
+        var suppressions = ExtractAnalyzerConfigSuppressions(config);
+        suppressions.Select(s => (s.Line, s.WarningId)).Should().Equal(
+            (5, "CA1848"), (6, "CA1716"), (8, "CA1001"), (10, "CA1822"), (13, "CA1859"));
+
+        bool Justified(int line, string id) => ContainsWholeWord(ExtractPrecedingCommentText(config, line), id);
+
+        Justified(5, "CA1848").Should().BeTrue("直前のコメント");
+        Justified(6, "CA1716").Should().BeTrue("同じ組の設定行をまたいだ直前のコメント");
+        Justified(8, "CA1001").Should().BeFalse("空行で組が切れる。離れた場所（別の節）の記述は理由に数えない");
+        Justified(10, "CA1822").Should().BeFalse("抑制を戒めるコメントは理由に数えない（極性の反転）");
+        Justified(13, "CA1859").Should().BeFalse("間に設定以外の行があれば組が切れる");
+    }
+
+    /// <summary>
+    /// <c>[SuppressMessage]</c> の抽出。理由（Justification）の有無と、文字列・コメントの中の記述を拾わないことを固定する（Issue #2162）。
+    /// </summary>
+    [Fact]
+    public void SuppressMessageの抽出_理由の有無を判定し文字列とコメントの中は拾わないこと()
+    {
+        const string source =
+            "using System.Diagnostics.CodeAnalysis;\n" +                                                        // 1
+            "[assembly: SuppressMessage(\"Usage\", \"CA2254:Template\", Justification = \"転送するだけのため\")]\n" + // 2
+            "class C\n" +                                                                                       // 3
+            "{\n" +                                                                                             // 4
+            "    [SuppressMessage(\"Design\", \"CA1031\")]\n" +                                                 // 5
+            "    void A() { }\n" +                                                                              // 6
+            "    [System.Diagnostics.CodeAnalysis.SuppressMessageAttribute(\n" +                                // 7
+            "        \"Design\", \"CA1062\",\n" +                                                               // 8
+            "        Justification = \"\")]\n" +                                                                // 9
+            "    void B() { }\n" +                                                                              // 10
+            "    const string S = \"[SuppressMessage(\\\"x\\\", \\\"CA1000\\\")]\";\n" +                         // 11
+            "    // [SuppressMessage(\"x\", \"CA1001\")]\n" +                                                    // 12
+            "    [SuppressMessage(\"a\", \"CA1002\"), SuppressMessage(\"a\", \"CA1003\", Justification = \"理由\")]\n" + // 13
+            "    [SuppressMessage(\"a\", \"CA1004\") ]\n" +                                                     // 14
+            "    [UnconditionalSuppressMessage(\"a\", \"CA1005\")]\n" +                                         // 15
+            "    [SuppressMessage(\"a\", \"CA1006\", Justification = \"括弧 ) を含む理由\")]\n" +                  // 16
+            "    [SuppressMessage(\"a\", \"CA1007\", Justification = Reasons.Text)]\n" +                         // 17
+            "    void D() { }\n" +                                                                              // 18
+            "    [SuppressMessage(\"a\", \"CA1008\", Justification = \"後方にある別の属性の理由\")]\n" +            // 19
+            "}\n";
+
+        var usages = ExtractSuppressMessageUsages(source).ToList();
+
+        usages.Select(u => (u.Line, u.WarningId, u.HasJustification)).Should().Equal(
+            (2, "CA2254", true),
+            (5, "CA1031", false),
+            (7, "CA1062", false),
+            (13, "CA1002", false), // 同じ行の 2 つ目の属性の理由を 1 つ目の理由として数えない
+            (13, "CA1003", true),
+            (14, "CA1004", false), // ") ]" でも終わりを見失って後方の Justification を拾わない
+            (15, "CA1005", false), // UnconditionalSuppressMessage も抑制の手段
+            (16, "CA1006", true),  // 文字列の中の閉じ括弧で引数リストを打ち切らない
+            (17, "CA1007", false), // 定数名で書いた理由は中身を検査できないため認めない
+            (19, "CA1008", true));
+    }
+
+    /// <summary>
+    /// アナライザーを止める・弱める設定の判定（Issue #2162）。
+    /// </summary>
+    [Theory]
+    [InlineData("RunAnalyzers", "false", true)]
+    [InlineData("RunAnalyzersDuringBuild", " FALSE ", true)]
+    [InlineData("EnableNETAnalyzers", "false", true)]
+    [InlineData("EnableNETAnalyzers", "true", false)]
+    [InlineData("AnalysisMode", "Recommended", false)]
+    [InlineData("AnalysisMode", "All", false)]
+    [InlineData("AnalysisMode", "Default", true)]
+    [InlineData("AnalysisMode", "Minimum", true)]
+    [InlineData("AnalysisModeReliability", "None", true)]
+    [InlineData("AnalysisLevel", "latest", false)]
+    [InlineData("AnalysisLevel", "8.0", false)]
+    [InlineData("AnalysisLevel", "5.0", true)]
+    [InlineData("AnalysisLevel", "7-recommended", true)]
+    [InlineData("AnalysisLevel", "preview", false)]
+    [InlineData("AnalysisLevel", "latest-recommended", false)]
+    [InlineData("AnalysisLevel", "latest-minimum", true)]
+    [InlineData("AnalysisLevel", "none", true)]
+    [InlineData("AnalysisLevelDesign", "8.0-none", true)]
+    [InlineData("TreatWarningsAsErrors", "false", false)]
+    public void アナライザー設定の判定_止める設定と弱める設定を検出すること(string name, string value, bool expected)
+    {
+        WeakensAnalyzers(name, value).Should().Be(expected);
+    }
+
+    /// <summary>
+    /// MSBuild ファイルからアナライザーの強さを決めるプロパティを読む。属性付き・大文字小文字違い・カテゴリ指定も読み、
+    /// コメントアウトされた要素は読まない（Issue #2162）。
+    /// </summary>
+    [Fact]
+    public void アナライザー設定の抽出_MSBuildのプロパティを読むこと()
+    {
+        const string msbuild = "<Project><PropertyGroup>" +
+            "<EnableNETAnalyzers>true</EnableNETAnalyzers>" +
+            "<runanalyzers Condition=\"'$(CI)' == ''\">false</runanalyzers>" +
+            "<AnalysisModeDesign>None</AnalysisModeDesign>" +
+            "<!-- <AnalysisLevel>none</AnalysisLevel> -->" +
+            "</PropertyGroup></Project>";
+
+        ExtractAnalyzerProperties(msbuild).Should().Equal(
+            ("EnableNETAnalyzers", "true"),
+            ("runanalyzers", "false"),
+            ("AnalysisModeDesign", "None"));
     }
 
     /// <summary>
@@ -1007,9 +1309,8 @@ public class BuildWarningSuppressionConventionTests
                     .Select(id => new SuppressionEntry(id, $"<{name}>")))
                 .Distinct()
                 .ToList(),
-            InspectedFileKind.AnalyzerConfig => ExtractDowngradedSeverities(text)
-                .Where(d => d.WarningId != null)
-                .Select(d => new SuppressionEntry(d.WarningId!, $"severity = {d.Severity}"))
+            InspectedFileKind.AnalyzerConfig => ExtractAnalyzerConfigSuppressions(text)
+                .Select(s => new SuppressionEntry(s.WarningId, s.Mechanism))
                 .Distinct()
                 .ToList(),
             InspectedFileKind.CommandLine => ExtractCommandLineProperties(text, isYaml)
@@ -1107,6 +1408,274 @@ public class BuildWarningSuppressionConventionTests
         return result;
     }
 
+    /// <summary><c>dotnet_code_quality</c> の 1 行。<see cref="WarningId"/> が null のものは全体・カテゴリ単位の指定。</summary>
+    internal sealed record CodeQualityOption(int Line, string? WarningId, string Scope, string Option);
+
+    /// <summary>アナライザー設定の中で、ID を特定した抑制（重大度の格下げ・適用範囲の絞り込み）の 1 行。</summary>
+    internal sealed record AnalyzerConfigSuppression(int Line, string WarningId, string Mechanism);
+
+    /// <summary>
+    /// <c>dotnet_code_quality.[&lt;ID&gt;|&lt;カテゴリ&gt;.]&lt;オプション&gt;</c> の行を返す（Issue #2162）。
+    /// </summary>
+    /// <remarks>
+    /// <c>api_surface</c> や <c>excluded_symbol_names</c> 等のオプションは、重大度を変えずに
+    /// <b>ルールが検出する範囲</b>を狭める。重大度の格下げと同じく警告を出さなくする手段なので、
+    /// ID を特定した指定は理由を求め、ID の無い指定（全体・カテゴリ単位）は一括の格下げと同じ扱いにする。
+    /// ID は「英字の接頭辞＋数字」（CA1822 / IDE0011）の形で判定し、それ以外の区切り（Performance 等）はカテゴリとみなす。
+    /// </remarks>
+    internal static IReadOnlyList<CodeQualityOption> ExtractCodeQualityOptions(string configText)
+    {
+        var result = new List<CodeQualityOption>();
+        var lines = SplitLines(configText);
+
+        for (var i = 0; i < lines.Length; i++)
+        {
+            var match = Regex.Match(
+                lines[i].Trim(),
+                @"^dotnet_code_quality\.(?:(?<scope>[A-Za-z0-9_-]+)\.)?(?<option>[A-Za-z_]+)\s*[=:]",
+                RegexOptions.IgnoreCase);
+            if (!match.Success)
+            {
+                continue;
+            }
+
+            var scope = match.Groups["scope"].Success ? match.Groups["scope"].Value : string.Empty;
+            var id = Regex.IsMatch(scope, @"^[A-Za-z]+\d+$") ? NormalizeWarningId(scope.ToUpperInvariant()) : null;
+            result.Add(new CodeQualityOption(i + 1, id, scope.Length > 0 ? scope + "." : string.Empty, match.Groups["option"].Value));
+        }
+
+        return result;
+    }
+
+    /// <summary>
+    /// アナライザー設定から、ID を特定した抑制（重大度の格下げと <c>dotnet_code_quality</c> による適用範囲の絞り込み）を行番号付きで返す。
+    /// </summary>
+    internal static IReadOnlyList<AnalyzerConfigSuppression> ExtractAnalyzerConfigSuppressions(string configText)
+        => ExtractDowngradedSeverities(configText)
+            .Where(d => d.WarningId != null)
+            .Select(d => new AnalyzerConfigSuppression(d.Line, d.WarningId!, $"severity = {d.Severity}"))
+            .Concat(ExtractCodeQualityOptions(configText)
+                .Where(o => o.WarningId != null)
+                .Select(o => new AnalyzerConfigSuppression(o.Line, o.WarningId!, $"dotnet_code_quality.{o.Scope}{o.Option}")))
+            .OrderBy(s => s.Line)
+            .ToList();
+
+    /// <summary>
+    /// 指定した行（1 始まり）の直前にあるコメントを連結して返す（Issue #2162）。
+    /// </summary>
+    /// <remarks>
+    /// 上へ向かって、コメント行と、同じ組に並ぶ他の設定行（<c>dotnet_diagnostic.*</c> / <c>dotnet_code_quality.*</c>）を
+    /// たどる。空行・節の見出し・それ以外の行で止まる。1 つのコメントで複数の設定行に理由を書く形
+    /// （コメント → 設定 → 設定）を許すため。抑制を戒める行（否定語を含む行）は理由に数えない。
+    /// </remarks>
+    internal static string ExtractPrecedingCommentText(string configText, int line)
+    {
+        var lines = SplitLines(configText);
+        var comments = new List<string>();
+
+        for (var i = line - 2; i >= 0; i--)
+        {
+            var trimmed = lines[i].Trim();
+            if (trimmed.StartsWith("#", StringComparison.Ordinal) || trimmed.StartsWith(";", StringComparison.Ordinal))
+            {
+                if (!NegationMarkers.Any(marker => trimmed.Contains(marker)))
+                {
+                    comments.Add(trimmed);
+                }
+
+                continue;
+            }
+
+            if (Regex.IsMatch(trimmed, @"^(?:dotnet_diagnostic|dotnet_code_quality)\.", RegexOptions.IgnoreCase))
+            {
+                continue;
+            }
+
+            break;
+        }
+
+        comments.Reverse();
+        return string.Join("\n", comments);
+    }
+
+    /// <summary>C# ソース中の <c>[SuppressMessage]</c> 属性の 1 件。</summary>
+    internal sealed record SuppressMessageUsage(int Line, string? WarningId, bool HasJustification, string Location);
+
+    /// <summary>
+    /// C# ソースから <c>[SuppressMessage(...)]</c> / <c>[assembly: SuppressMessage(...)]</c> を拾い、
+    /// 空でない <c>Justification</c> を持つかを返す（Issue #2162）。
+    /// </summary>
+    /// <remarks>
+    /// 位置の特定は文字列とコメントを剥がしたソース（<see cref="TestSourceInspection.ToCodeOnlyPreservingLines"/>）で行い、
+    /// 文字列リテラルの中に書かれた <c>SuppressMessage(</c>（このテスト自身のサンプル入力など）を拾わない。
+    /// <c>Justification</c> の中身は文字列リテラルなので、コメントだけを剥がしたソースから同じ行を起点に読む。
+    /// 引数リストの終わりは文字列リテラルを読み飛ばしながら丸括弧の対応で求める（<c>")]"</c> の検索では、
+    /// <c>) ]</c> と書いた属性で終わりを見失い、後方にある別の属性の <c>Justification</c> を拾う。コードレビューで検出）。
+    /// 1 行に複数の属性があればそれぞれを数える。<c>Justification</c> は文字列リテラルで書いたものだけを理由と認める
+    /// （定数名で書くと理由の中身を検査できないため、理由なしとして扱う）。
+    /// </remarks>
+    internal static IEnumerable<SuppressMessageUsage> ExtractSuppressMessageUsages(string source)
+    {
+        var codeLines = SplitLines(TestSourceInspection.ToCodeOnlyPreservingLines(source));
+        var commentFreeLines = SplitLines(TestSourceInspection.RemoveCommentsPreservingLines(source));
+        var attribute = new Regex(@"(?<![A-Za-z0-9_])(?:Unconditional)?SuppressMessage(?:Attribute)?\s*\(");
+
+        for (var i = 0; i < codeLines.Length && i < commentFreeLines.Length; i++)
+        {
+            var count = attribute.Matches(codeLines[i]).Count;
+            if (count == 0)
+            {
+                continue;
+            }
+
+            // 属性は複数行にまたがり得るので、この行を起点に読む。この行の照合だけを数える
+            var tail = string.Join("\n", commentFreeLines.Skip(i));
+            var firstLineLength = commentFreeLines[i].Length;
+            foreach (var start in attribute.Matches(tail).Cast<Match>().Where(m => m.Index < firstLineLength).Take(count))
+            {
+                var open = start.Index + start.Length - 1;
+                var close = FindClosingParenthesis(tail, open);
+                var arguments = close < 0 ? tail.Substring(open) : tail.Substring(open, close - open + 1);
+
+                var id = Regex.Match(arguments, @"""(?<id>[A-Za-z]+\d+)\b");
+                var justification = Regex.Match(
+                    arguments,
+                    @"\bJustification\s*=\s*(?:\$@|@\$|\$|@)?""(?<text>(?:[^""\\]|\\.|"""")*)""");
+                var hasJustification = justification.Success && justification.Groups["text"].Value.Trim().Length > 0;
+
+                yield return new SuppressMessageUsage(i + 1, id.Success ? id.Groups["id"].Value : null, hasJustification, string.Empty);
+            }
+        }
+    }
+
+    /// <summary>
+    /// <paramref name="open"/> の丸括弧に対応する閉じ括弧の位置を返す（見つからなければ -1）。
+    /// 文字列リテラル（通常・逐語的）と文字リテラルの中の括弧は数えない。
+    /// </summary>
+    private static int FindClosingParenthesis(string text, int open)
+    {
+        var depth = 0;
+        for (var i = open; i < text.Length; i++)
+        {
+            var c = text[i];
+            if (c == '"')
+            {
+                var verbatim = i > 0 && (text[i - 1] == '@' || (text[i - 1] == '$' && i > 1 && text[i - 2] == '@'));
+                for (i++; i < text.Length; i++)
+                {
+                    if (verbatim)
+                    {
+                        if (text[i] == '"')
+                        {
+                            if (i + 1 < text.Length && text[i + 1] == '"')
+                            {
+                                i++;
+                                continue;
+                            }
+
+                            break;
+                        }
+                    }
+                    else if (text[i] == '\\')
+                    {
+                        i++;
+                    }
+                    else if (text[i] == '"')
+                    {
+                        break;
+                    }
+                }
+            }
+            else if (c == '\'')
+            {
+                for (i++; i < text.Length && text[i] != '\''; i++)
+                {
+                    if (text[i] == '\\')
+                    {
+                        i++;
+                    }
+                }
+            }
+            else if (c == '(')
+            {
+                depth++;
+            }
+            else if (c == ')')
+            {
+                depth--;
+                if (depth == 0)
+                {
+                    return i;
+                }
+            }
+        }
+
+        return -1;
+    }
+
+    /// <summary>
+    /// MSBuild ファイルから、アナライザーの実行・強さを決めるプロパティを出現順に返す（Issue #2162）。
+    /// </summary>
+    /// <remarks>
+    /// <c>AnalysisMode&lt;カテゴリ&gt;</c>（AnalysisModeDesign 等）・<c>AnalysisLevel&lt;カテゴリ&gt;</c> もカテゴリ単位で強さを変えられるため、
+    /// 接頭辞で照合する。要素名の大文字小文字は区別しない（MSBuild のプロパティ名と同じ）。
+    /// </remarks>
+    internal static IReadOnlyList<(string Name, string Value)> ExtractAnalyzerProperties(string msbuildText)
+        => Regex.Matches(
+                RemoveXmlComments(msbuildText),
+                @"<(?<name>RunAnalyzers(?:DuringBuild)?|EnableNETAnalyzers|AnalysisMode\w*|AnalysisLevel\w*)(?:\s[^>]*)?>(?<value>.*?)</\k<name>\s*>",
+                RegexOptions.Singleline | RegexOptions.IgnoreCase)
+            .Cast<Match>()
+            .Select(m => (m.Groups["name"].Value, m.Groups["value"].Value))
+            .ToList();
+
+    /// <summary>
+    /// そのプロパティ設定がアナライザーを止める・Recommended より弱めるかを判定する（Issue #2162）。
+    /// </summary>
+    /// <remarks>
+    /// <c>AnalysisMode</c> は None / Minimum / Default が Recommended より弱い。<c>AnalysisLevel</c> は
+    /// <c>none</c> と、モードを接尾辞で指定する形（<c>latest-minimum</c> 等）の弱い側を禁じる。
+    /// 解釈できない値は弱める側へ倒す（ID を特定しない一括の抑制になり得るため）。
+    /// </remarks>
+    internal static bool WeakensAnalyzers(string name, string value)
+    {
+        var v = value.Trim();
+
+        if (name.Equals("RunAnalyzers", StringComparison.OrdinalIgnoreCase)
+            || name.Equals("RunAnalyzersDuringBuild", StringComparison.OrdinalIgnoreCase)
+            || name.Equals("EnableNETAnalyzers", StringComparison.OrdinalIgnoreCase))
+        {
+            return v.Equals("false", StringComparison.OrdinalIgnoreCase);
+        }
+
+        if (name.StartsWith("AnalysisMode", StringComparison.OrdinalIgnoreCase))
+        {
+            return !(v.Equals("Recommended", StringComparison.OrdinalIgnoreCase) || v.Equals("All", StringComparison.OrdinalIgnoreCase));
+        }
+
+        if (name.StartsWith("AnalysisLevel", StringComparison.OrdinalIgnoreCase))
+        {
+            var parts = v.Split('-');
+            if (parts[0].Equals("none", StringComparison.OrdinalIgnoreCase) || parts.Length > 2)
+            {
+                return true;
+            }
+
+            // 版を古いもの（5.0 等）へ下げると、それ以降に追加されたルールがまとめて消える（コードレビューで検出）。
+            // latest / preview 等の名前は版の数値ではないので対象外
+            if (double.TryParse(parts[0], NumberStyles.Float, CultureInfo.InvariantCulture, out var level)
+                && level < MinimumAnalysisLevel)
+            {
+                return true;
+            }
+
+            return parts.Length == 2
+                && !(parts[1].Equals("recommended", StringComparison.OrdinalIgnoreCase) || parts[1].Equals("all", StringComparison.OrdinalIgnoreCase));
+        }
+
+        return false;
+    }
+
     /// <summary>
     /// コマンドライン（<c>-p:</c> / <c>-property:</c> / <c>-nowarn:</c> / <c>-warnAsMessage:</c>）と、
     /// YAML のときは環境変数（MSBuild は環境変数をプロパティとして読む）から、プロパティの代入を取り出す。
@@ -1196,10 +1765,11 @@ public class BuildWarningSuppressionConventionTests
     }
 
     /// <summary>
-    /// 環境変数として設定されたときに警告の抑制・Nullable の無効化・警告レベルの引き下げになるプロパティ名。
+    /// 環境変数として設定されたときに警告の抑制・Nullable の無効化・警告レベルの引き下げ・アナライザーの停止になるプロパティ名。
     /// </summary>
     private const string EnvironmentPropertyNamePattern =
-        "NoWarn|MSBuildWarningsAsMessages|WarningsAsMessages|WarningLevel|Nullable";
+        "NoWarn|MSBuildWarningsAsMessages|WarningsAsMessages|WarningLevel|Nullable"
+        + "|RunAnalyzers|RunAnalyzersDuringBuild|EnableNETAnalyzers|AnalysisMode\\w*|AnalysisLevel\\w*";
 
     /// <summary>
     /// スクリプトでの環境変数の設定。行頭（字下げ可）の代入だけを読み、値の参照（<c>echo $env:NoWarn</c>）や

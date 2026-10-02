@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Data.SQLite;
+using System.Globalization;
 using System.Linq;
 using System.Reflection;
 using System.Text.Json;
@@ -49,7 +50,7 @@ namespace ICCardManager.Data.Migrations
             command.CommandText = "SELECT MAX(version) FROM schema_migrations";
             var result = command.ExecuteScalar();
 
-            return result == DBNull.Value || result == null ? 0 : Convert.ToInt32(result);
+            return result == DBNull.Value || result == null ? 0 : Convert.ToInt32(result, CultureInfo.InvariantCulture);
         }
 
         /// <summary>
@@ -362,7 +363,7 @@ namespace ICCardManager.Data.Migrations
             command.Transaction = transaction;
             command.CommandText = "SELECT COUNT(*) FROM schema_migrations WHERE version = @version";
             command.Parameters.AddWithValue("@version", version);
-            return Convert.ToInt32(command.ExecuteScalar()) > 0;
+            return Convert.ToInt32(command.ExecuteScalar(), CultureInfo.InvariantCulture) > 0;
         }
 
         /// <summary>
@@ -399,7 +400,8 @@ namespace ICCardManager.Data.Migrations
 
                 // 手組みの JSON は " しかエスケープしておらず、SQLiteException.Message に含まれる
                 // 改行（"SQL logic error\r\n…"）やパスの \ で after_data が不正な JSON になっていた。
-                // OperationLogger.SerializeToJson と同じ設定でシリアライズする（日本語は \u エスケープしない）。
+                // OperationLogger と同じ設定（OperationLogJson.Options）でシリアライズする（日本語は \u エスケープしない）。
+                // 設定を書き写すと、次にエスケープ規則を変える人が片方を取りこぼす（#1996 / CA1869）。
                 var afterDataFields = new Dictionary<string, object>
                 {
                     ["version"] = migration.Version,
@@ -410,13 +412,7 @@ namespace ICCardManager.Data.Migrations
                 {
                     afterDataFields["error"] = errorMessage ?? "";
                 }
-                var afterData = JsonSerializer.Serialize(
-                    afterDataFields,
-                    new JsonSerializerOptions
-                    {
-                        WriteIndented = false,
-                        Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping
-                    });
+                var afterData = JsonSerializer.Serialize(afterDataFields, OperationLogJson.Options);
 
                 using var command = _connection.CreateCommand();
                 // Issue #1014: CURRENT_TIMESTAMPはUTCのため、ローカル時刻を明示的に保存する
@@ -426,7 +422,7 @@ VALUES (@timestamp, @operator_idm, @operator_name, @target_table, @target_id, @a
                 command.Parameters.AddWithValue("@operator_idm", "SYSTEM");
                 command.Parameters.AddWithValue("@operator_name", "MigrationRunner");
                 command.Parameters.AddWithValue("@target_table", "schema_migrations");
-                command.Parameters.AddWithValue("@target_id", migration.Version.ToString());
+                command.Parameters.AddWithValue("@target_id", migration.Version.ToString(CultureInfo.InvariantCulture));
                 command.Parameters.AddWithValue("@action", action);
                 command.Parameters.AddWithValue("@after_data", afterData);
                 command.ExecuteNonQuery();

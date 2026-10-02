@@ -92,14 +92,14 @@ namespace ICCardManager.Data.Repositories
         /// <inheritdoc/>
         public async Task<string> GetAsync(string key)
         {
-            using var lease = await _dbContext.LeaseConnectionAsync();
+            using var lease = await _dbContext.LeaseConnectionAsync().ConfigureAwait(false);
             var connection = lease.Connection;
 
             using var command = connection.CreateCommand();
             command.CommandText = "SELECT value FROM settings WHERE key = @key";
             command.Parameters.AddWithValue("@key", key);
 
-            var result = await command.ExecuteScalarAsync();
+            var result = await command.ExecuteScalarAsync().ConfigureAwait(false);
             return result == DBNull.Value ? null : result?.ToString();
         }
 
@@ -259,8 +259,8 @@ WHERE settings.value IS NULL OR substr(settings.value, 1, 7) <> @currentMonth";
         {
             return await _cacheService.GetOrCreateAsync(
                 CacheKeys.AppSettings,
-                async () => await GetAppSettingsFromDbAsync(),
-                TimeSpan.FromMinutes(_cacheOptions.SettingsMinutes));
+                async () => await GetAppSettingsFromDbAsync().ConfigureAwait(false),
+                TimeSpan.FromMinutes(_cacheOptions.SettingsMinutes)).ConfigureAwait(false);
         }
 
         /// <inheritdoc/>
@@ -288,7 +288,7 @@ WHERE settings.value IS NULL OR substr(settings.value, 1, 7) <> @currentMonth";
 
             // 残額警告閾値
             var warningBalance = Get(KeyWarningBalance);
-            if (int.TryParse(warningBalance, out var balance))
+            if (int.TryParse(warningBalance, NumberStyles.Integer, CultureInfo.InvariantCulture, out var balance))
             {
                 settings.WarningBalance = balance;
             }
@@ -376,25 +376,25 @@ WHERE settings.value IS NULL OR substr(settings.value, 1, 7) <> @currentMonth";
             var windowSettings = new WindowSettings();
 
             var left = Get(KeyWindowLeft);
-            if (double.TryParse(left, out var leftValue))
+            if (double.TryParse(left, NumberStyles.Float, CultureInfo.InvariantCulture, out var leftValue))
             {
                 windowSettings.Left = leftValue;
             }
 
             var top = Get(KeyWindowTop);
-            if (double.TryParse(top, out var topValue))
+            if (double.TryParse(top, NumberStyles.Float, CultureInfo.InvariantCulture, out var topValue))
             {
                 windowSettings.Top = topValue;
             }
 
             var width = Get(KeyWindowWidth);
-            if (double.TryParse(width, out var widthValue))
+            if (double.TryParse(width, NumberStyles.Float, CultureInfo.InvariantCulture, out var widthValue))
             {
                 windowSettings.Width = widthValue;
             }
 
             var height = Get(KeyWindowHeight);
-            if (double.TryParse(height, out var heightValue))
+            if (double.TryParse(height, NumberStyles.Float, CultureInfo.InvariantCulture, out var heightValue))
             {
                 windowSettings.Height = heightValue;
             }
@@ -413,44 +413,44 @@ WHERE settings.value IS NULL OR substr(settings.value, 1, 7) <> @currentMonth";
             var settings = new AppSettings();
 
             // 残額警告閾値
-            var warningBalance = await GetAsync(KeyWarningBalance);
-            if (int.TryParse(warningBalance, out var balance))
+            var warningBalance = await GetAsync(KeyWarningBalance).ConfigureAwait(false);
+            if (int.TryParse(warningBalance, NumberStyles.Integer, CultureInfo.InvariantCulture, out var balance))
             {
                 settings.WarningBalance = balance;
             }
 
             // バックアップパス
-            var backupPath = await GetAsync(KeyBackupPath);
+            var backupPath = await GetAsync(KeyBackupPath).ConfigureAwait(false);
             settings.BackupPath = backupPath ?? GetDefaultBackupPath();
 
             // 文字サイズ
-            var fontSize = await GetAsync(KeyFontSize);
+            var fontSize = await GetAsync(KeyFontSize).ConfigureAwait(false);
             settings.FontSize = ParseFontSize(fontSize);
 
             // 最終VACUUM実行日
-            var lastVacuumDate = await GetAsync(KeyLastVacuumDate);
+            var lastVacuumDate = await GetAsync(KeyLastVacuumDate).ConfigureAwait(false);
             if (SqliteDateTimeFormat.TryParseStored(lastVacuumDate, out var date))
             {
                 settings.LastVacuumDate = date;
             }
 
             // ウィンドウ設定
-            settings.MainWindowSettings = await GetWindowSettingsFromDbAsync();
+            settings.MainWindowSettings = await GetWindowSettingsFromDbAsync().ConfigureAwait(false);
 
             // 音声モード設定
-            var soundMode = await GetAsync(KeySoundMode);
+            var soundMode = await GetAsync(KeySoundMode).ConfigureAwait(false);
             settings.SoundMode = ParseSoundMode(soundMode);
 
             // トースト位置設定
-            var toastPosition = await GetAsync(KeyToastPosition);
+            var toastPosition = await GetAsync(KeyToastPosition).ConfigureAwait(false);
             settings.ToastPosition = ParseToastPosition(toastPosition);
 
             // 部署種別設定
-            var departmentType = await GetAsync(KeyDepartmentType);
+            var departmentType = await GetAsync(KeyDepartmentType).ConfigureAwait(false);
             settings.DepartmentType = ParseDepartmentType(departmentType);
 
             // バス停入力スキップ設定
-            var skipBusStopInput = await GetAsync(KeySkipBusStopInputOnReturn);
+            var skipBusStopInput = await GetAsync(KeySkipBusStopInputOnReturn).ConfigureAwait(false);
             settings.SkipBusStopInputOnReturn = skipBusStopInput?.ToLowerInvariant() == "true";
 
             // 同行者数入力スキップ設定（Issue #1906）
@@ -472,7 +472,7 @@ WHERE settings.value IS NULL OR substr(settings.value, 1, 7) <> @currentMonth";
             settings.ShowHistoryOnReturn = ParseBool(await GetAsync(KeyShowHistoryOnReturn).ConfigureAwait(false), defaultValue: true);
 
             // 帳票出力先フォルダ設定
-            var reportOutputFolder = await GetAsync(KeyReportOutputFolder);
+            var reportOutputFolder = await GetAsync(KeyReportOutputFolder).ConfigureAwait(false);
             settings.ReportOutputFolder = reportOutputFolder ?? string.Empty;
 
             return settings;
@@ -485,31 +485,31 @@ WHERE settings.value IS NULL OR substr(settings.value, 1, 7) <> @currentMonth";
         {
             var windowSettings = new WindowSettings();
 
-            var left = await GetAsync(KeyWindowLeft);
-            if (double.TryParse(left, out var leftValue))
+            var left = await GetAsync(KeyWindowLeft).ConfigureAwait(false);
+            if (double.TryParse(left, NumberStyles.Float, CultureInfo.InvariantCulture, out var leftValue))
             {
                 windowSettings.Left = leftValue;
             }
 
-            var top = await GetAsync(KeyWindowTop);
-            if (double.TryParse(top, out var topValue))
+            var top = await GetAsync(KeyWindowTop).ConfigureAwait(false);
+            if (double.TryParse(top, NumberStyles.Float, CultureInfo.InvariantCulture, out var topValue))
             {
                 windowSettings.Top = topValue;
             }
 
-            var width = await GetAsync(KeyWindowWidth);
-            if (double.TryParse(width, out var widthValue))
+            var width = await GetAsync(KeyWindowWidth).ConfigureAwait(false);
+            if (double.TryParse(width, NumberStyles.Float, CultureInfo.InvariantCulture, out var widthValue))
             {
                 windowSettings.Width = widthValue;
             }
 
-            var height = await GetAsync(KeyWindowHeight);
-            if (double.TryParse(height, out var heightValue))
+            var height = await GetAsync(KeyWindowHeight).ConfigureAwait(false);
+            if (double.TryParse(height, NumberStyles.Float, CultureInfo.InvariantCulture, out var heightValue))
             {
                 windowSettings.Height = heightValue;
             }
 
-            var maximized = await GetAsync(KeyWindowMaximized);
+            var maximized = await GetAsync(KeyWindowMaximized).ConfigureAwait(false);
             windowSettings.IsMaximized = maximized?.ToLowerInvariant() == "true";
 
             return windowSettings;
@@ -524,7 +524,7 @@ WHERE settings.value IS NULL OR substr(settings.value, 1, 7) <> @currentMonth";
 
             await _dbContext.ExecuteWithRetryAsync(async () =>
             {
-                using var scope = await _dbContext.BeginTransactionAsync();
+                using var scope = await _dbContext.BeginTransactionAsync().ConfigureAwait(false);
 
                 try
                 {
@@ -533,9 +533,9 @@ WHERE settings.value IS NULL OR substr(settings.value, 1, 7) <> @currentMonth";
                     // Issue #1737: 外側スコープの内側から書くため、トランザクションを明示的に引き渡す（分岐①）。
                     // 引数なし版に頼ると HasActiveTransactionScope（プロセス全体のカウンタ）経由の
                     // 暗黙参加になり、「自分のスコープか他フローのスコープか」を区別できない。
-                    success &= await SetAsync(KeyWarningBalance, settings.WarningBalance.ToString(), scope);
-                    success &= await SetAsync(KeyBackupPath, settings.BackupPath, scope);
-                    success &= await SetAsync(KeyFontSize, FontSizeToString(settings.FontSize), scope);
+                    success &= await SetAsync(KeyWarningBalance, settings.WarningBalance.ToString(CultureInfo.InvariantCulture), scope).ConfigureAwait(false);
+                    success &= await SetAsync(KeyBackupPath, settings.BackupPath, scope).ConfigureAwait(false);
+                    success &= await SetAsync(KeyFontSize, FontSizeToString(settings.FontSize), scope).ConfigureAwait(false);
 
                     // Issue #1997: last_vacuum_date はここで書かない。
                     // この値は TryAcquireMonthlyVacuumLockAsync の CAS（月ガード付き UPSERT）でしか
@@ -546,19 +546,19 @@ WHERE settings.value IS NULL OR substr(settings.value, 1, 7) <> @currentMonth";
                     // 同じ理由で一括保存に載せない。集合は SettingsMaintenanceKeyConventionTests が固定する。
 
                     // ウィンドウ設定を保存
-                    success &= await SaveWindowSettingsToDbAsync(settings.MainWindowSettings, scope);
+                    success &= await SaveWindowSettingsToDbAsync(settings.MainWindowSettings, scope).ConfigureAwait(false);
 
                     // 音声モード設定を保存
-                    success &= await SetAsync(KeySoundMode, SoundModeToString(settings.SoundMode), scope);
+                    success &= await SetAsync(KeySoundMode, SoundModeToString(settings.SoundMode), scope).ConfigureAwait(false);
 
                     // トースト位置設定を保存
-                    success &= await SetAsync(KeyToastPosition, ToastPositionToString(settings.ToastPosition), scope);
+                    success &= await SetAsync(KeyToastPosition, ToastPositionToString(settings.ToastPosition), scope).ConfigureAwait(false);
 
                     // 部署種別設定を保存
-                    success &= await SetAsync(KeyDepartmentType, DepartmentTypeToString(settings.DepartmentType), scope);
+                    success &= await SetAsync(KeyDepartmentType, DepartmentTypeToString(settings.DepartmentType), scope).ConfigureAwait(false);
 
                     // バス停入力スキップ設定を保存
-                    success &= await SetAsync(KeySkipBusStopInputOnReturn, settings.SkipBusStopInputOnReturn.ToString().ToLowerInvariant(), scope);
+                    success &= await SetAsync(KeySkipBusStopInputOnReturn, settings.SkipBusStopInputOnReturn.ToString().ToLowerInvariant(), scope).ConfigureAwait(false);
 
                     // 同行者数入力スキップ設定を保存（Issue #1906）
                     success &= await SetAsync(KeySkipCompanionCountInputOnReturn, settings.SkipCompanionCountInputOnReturn.ToString().ToLowerInvariant(), scope).ConfigureAwait(false);
@@ -573,7 +573,7 @@ WHERE settings.value IS NULL OR substr(settings.value, 1, 7) <> @currentMonth";
                     success &= await SetAsync(KeyShowHistoryOnReturn, settings.ShowHistoryOnReturn.ToString().ToLowerInvariant(), scope).ConfigureAwait(false);
 
                     // 帳票出力先フォルダ設定を保存
-                    success &= await SetAsync(KeyReportOutputFolder, settings.ReportOutputFolder ?? string.Empty, scope);
+                    success &= await SetAsync(KeyReportOutputFolder, settings.ReportOutputFolder ?? string.Empty, scope).ConfigureAwait(false);
 
                     scope.Commit();
                 }
@@ -583,7 +583,7 @@ WHERE settings.value IS NULL OR substr(settings.value, 1, 7) <> @currentMonth";
                     SafeRollback.TryRollback(() => scope.Rollback(), logger: null, "アプリ設定の保存");
                     throw;
                 }
-            });
+            }).ConfigureAwait(false);
 
             // トランザクション完了後にキャッシュを無効化
             _cacheService.Invalidate(CacheKeys.AppSettings);
@@ -602,25 +602,25 @@ WHERE settings.value IS NULL OR substr(settings.value, 1, 7) <> @currentMonth";
 
             if (windowSettings.Left.HasValue)
             {
-                success &= await SetAsync(KeyWindowLeft, windowSettings.Left.Value.ToString("F0"), scope);
+                success &= await SetAsync(KeyWindowLeft, windowSettings.Left.Value.ToString("F0", CultureInfo.InvariantCulture), scope).ConfigureAwait(false);
             }
 
             if (windowSettings.Top.HasValue)
             {
-                success &= await SetAsync(KeyWindowTop, windowSettings.Top.Value.ToString("F0"), scope);
+                success &= await SetAsync(KeyWindowTop, windowSettings.Top.Value.ToString("F0", CultureInfo.InvariantCulture), scope).ConfigureAwait(false);
             }
 
             if (windowSettings.Width.HasValue)
             {
-                success &= await SetAsync(KeyWindowWidth, windowSettings.Width.Value.ToString("F0"), scope);
+                success &= await SetAsync(KeyWindowWidth, windowSettings.Width.Value.ToString("F0", CultureInfo.InvariantCulture), scope).ConfigureAwait(false);
             }
 
             if (windowSettings.Height.HasValue)
             {
-                success &= await SetAsync(KeyWindowHeight, windowSettings.Height.Value.ToString("F0"), scope);
+                success &= await SetAsync(KeyWindowHeight, windowSettings.Height.Value.ToString("F0", CultureInfo.InvariantCulture), scope).ConfigureAwait(false);
             }
 
-            success &= await SetAsync(KeyWindowMaximized, windowSettings.IsMaximized.ToString().ToLowerInvariant(), scope);
+            success &= await SetAsync(KeyWindowMaximized, windowSettings.IsMaximized.ToString().ToLowerInvariant(), scope).ConfigureAwait(false);
 
             return success;
         }

@@ -827,7 +827,7 @@ public partial class SettingsViewModel : ViewModelBase
     /// <summary>
     /// 文字サイズをアプリケーションに適用
     /// </summary>
-    private void ApplyFontSize(FontSizeOption fontSize)
+    private static void ApplyFontSize(FontSizeOption fontSize)
     {
         // App.ApplyFontSizeを呼び出して、関連するすべてのフォントサイズを更新
         App.ApplyFontSize(fontSize);

@@ -143,7 +143,7 @@ public class OperationLogExcelExportService
         try
         {
             var trimmed = json.TrimStart();
-            if (trimmed.StartsWith("["))
+            if (trimmed.StartsWith("[", StringComparison.Ordinal))
             {
                 cell.Value = FormatJsonArrayToReadable(targetTable, json);
                 if (strikethrough)
@@ -379,7 +379,7 @@ public class OperationLogExcelExportService
         {
             // JSON配列の場合
             var trimmed = json.TrimStart();
-            if (trimmed.StartsWith("["))
+            if (trimmed.StartsWith("[", StringComparison.Ordinal))
             {
                 return FormatJsonArrayToReadable(targetTable, json);
             }

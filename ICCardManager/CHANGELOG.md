@@ -3,6 +3,15 @@
 ### Unreleased
 
 **開発基盤**
+- Issue #2162 **本体で .NET アナライザー（CA ルール）を有効にした**（静的解析の段階導入の第 2 段）
+  - .NET Framework 4.8 では既定で無効のため、本体の csproj で `EnableNETAnalyzers`・`AnalysisLevel=latest`・`AnalysisMode=Recommended` を明示し、`Microsoft.CodeAnalysis.NetAnalyzers` 8.0.0 をパッケージで版固定した（ビルド時のみ・配布物に含まれない。`THIRD_PARTY_LICENSES.md`・`packages.lock.json` を同期）。有効化直後の警告は約 440 件（Release・重複除く）
+  - **是正**: CA2007（`ConfigureAwait(false)` の付け忘れ。静的検査の除外にしていた `LedgerRepository` / `SettingsRepository` / `OperationLogRepository` の 101 か所）、CA1305（書式の文化圏。DB・CSV・操作ログ・ファイル名は `InvariantCulture`、画面・印刷は `CurrentCulture` を明示）、CA1310 / CA1862 / CA1304 / CA1311（文字列比較）、CA1825 / CA1861 / CA1869（配列・`JsonSerializerOptions` の都度生成。操作ログの JSON の書式は `Common/OperationLogJson` に一本化）、CA1822（private メンバーの static 化）、CA2254（ログのテンプレート）ほか
+  - **不具合**: 設定のウィンドウ位置を現在の地域設定で保存・解釈していたため、負号の表記が異なる地域設定（共有モードで地域設定の違う PC、地域設定の変更後）ではマルチモニターの負の座標を読めず、ウィンドウが既定の位置へ戻っていた。保存と読み取りの両方を不変の書式にした（CA1305 は `TryParse(string, out)` を検出しないため、読み取り側は検出結果に頼らずそろえた）。同じ理由で、CSV 取込の整数の解析（`LedgerCsvRowParser` / `LedgerDetailCsvRowParser`）もエクスポートと同じ InvariantCulture にそろえた
+  - **抑制**: CA1848（LoggerMessage）・CA1716（他言語の予約語）・CA1000（ジェネリック型の静的ファクトリ）・CA1859（具象型の提案）・CA1707（マイグレーションのクラス名のみ）を `ICCardManager/.editorconfig` で ID ごとに下げ、CA1822 は対象を private に限った（public は XAML バインディング・DI、internal はテストからインスタンス越しに呼ばれるため）。テンプレートを転送するログヘルパー 1 か所だけ `[SuppressMessage]` で CA2254 を抑制した
+  - **CA2007 は層別規約に合わせた**: Common / Data / Dtos / Infrastructure / Models / Services を warning、それ以外と `DialogService` を none。静的検査 `ConfigureAwaitConventionTests` は、アナライザーがビルド設定で止められても働く独立した網として残し、両者の対象範囲の一致をテストで固定した。リポジトリ直下の `.editorconfig`（CA2007 の設定）は `ICCardManager/.editorconfig` が `root = true` のため一度も読まれていなかったので削除した
+  - **抑制のガード（`BuildWarningSuppressionConventionTests`）を広げた**: アナライザー設定の理由は設定行の**直前のコメント**に求める・`dotnet_code_quality`（`api_surface` 等）の絞り込みも抑制として扱う（ID の無い指定は禁止）・`[SuppressMessage]` は `Justification` 必須・アナライザーを止める／Recommended より弱める設定（`RunAnalyzers` / `EnableNETAnalyzers` = false、`AnalysisMode` / `AnalysisLevel`）の禁止と本体での有効化の宣言
+  - Release・Debug ともソリューションのビルド警告 0。`development-conventions.md`・`async-configureawait.md`・開発者ガイド §4.7b / §2.5.10・00a 技術スタック用語集・04_機能設計書・07_テスト設計書を更新
+  - テスト: 単体 8,306 → 8,341（+35）・合計 8,378 → 8,413
 - Issue #2161 **CI の `dotnet format` 検証を失敗扱いにした**（静的解析の段階導入の第 1 段）
   - code-quality ジョブの `dotnet format --verify-no-changes` に `continue-on-error: true` が付いており、整形の違反があっても CI は緑のままだった。origin/main の実測で約 2,000 件（CI 上）の違反があった
   - 前段の PR #2184 で違反を 0 件にした（整形のみ・ロジック変更なし）: `.cs` の改行を `.gitattributes`（`*.cs text eol=crlf`）で作業ツリー CRLF に統一、`.editorconfig` の C# ソースの文字コードを BOM なしの UTF-8 へ変更、private の `const` / `static readonly` を PascalCase とする命名規則を追加（修飾子を指定しない `_camelCase` 規則が約 700 件を誤って違反としていた）、残る命名違反 15 件のリネームと `dotnet format` の自動整形

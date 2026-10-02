@@ -1543,7 +1543,7 @@ namespace ICCardManager.Services
         /// 物品分類～単位：円までのヘッダ部分（2行目）を1行に収めるため、
         /// フォントサイズを小さくして調整します。
         /// </remarks>
-        private void AdjustHeaderRowFontSize(IXLWorksheet worksheet)
+        private static void AdjustHeaderRowFontSize(IXLWorksheet worksheet)
         {
             // 2行目（物品分類～単位：円）のフォントサイズを9ptに設定
             const double headerFontSize = 9;
@@ -1564,7 +1564,7 @@ namespace ICCardManager.Services
         /// 行種別（繰越/データ）に関わらず、ReportRow の値をそのまま出力する。
         /// データ差異（4月の受入金額あり/なし等）は ReportRowBuilder が解決済み。
         /// </remarks>
-        private int WriteReportRow(IXLWorksheet worksheet, int row, ReportRow reportRow)
+        private static int WriteReportRow(IXLWorksheet worksheet, int row, ReportRow reportRow)
         {
             // 列配置: A=出納年月日, B-D=摘要(結合), E=受入金額, F=払出金額, G=残額, H=氏名, I-L=備考(結合)
             // Issue #1267: 式インジェクション対策として、ユーザー入力由来のテキスト列は
@@ -1727,7 +1727,7 @@ namespace ICCardManager.Services
         /// Issue #2051: 月計用と累計用に同一内容のメソッドが 2 つあったため 1 つにした
         /// （片方だけが直される日が来る。#1763）。行の種類は <see cref="ReportTotal.Label"/> が表す。
         /// </remarks>
-        private int WriteTotalRow(IXLWorksheet worksheet, int row, ReportTotal total)
+        private static int WriteTotalRow(IXLWorksheet worksheet, int row, ReportTotal total)
         {
             // 列配置: A=出納年月日, B-D=摘要(結合), E=受入金額, F=払出金額, G=残額, H=氏名, I-L=備考(結合)
             worksheet.Cell(row, 1).Value = "";           // 出納年月日（空欄）(A列)
@@ -1768,7 +1768,7 @@ namespace ICCardManager.Services
         /// <summary>
         /// 次年度繰越行を出力
         /// </summary>
-        private int WriteCarryoverToNextYearRow(IXLWorksheet worksheet, int row, int balance)
+        private static int WriteCarryoverToNextYearRow(IXLWorksheet worksheet, int row, int balance)
         {
             // 列配置: A=出納年月日, B-D=摘要(結合), E=受入金額, F=払出金額, G=残額, H=氏名, I-L=備考(結合)
             worksheet.Cell(row, 1).Value = "";  // 出納年月日（空欄）(A列)
@@ -1796,7 +1796,7 @@ namespace ICCardManager.Services
         /// <summary>
         /// データ行に罫線を適用し、セルを結合
         /// </summary>
-        private void ApplyDataRowBorder(IXLWorksheet worksheet, int row)
+        private static void ApplyDataRowBorder(IXLWorksheet worksheet, int row)
             => ExcelStyleFormatter.ApplyDataRowBorder(worksheet, row);
 
         /// <summary>
@@ -1807,7 +1807,7 @@ namespace ICCardManager.Services
         /// 月計・累計行の上下罫線を太線（Medium）にして視覚的に区切りを明確化。
         /// 会計マニュアルの「月計・累計欄の上下線は朱線又は太線を用いること」に対応。
         /// </remarks>
-        private void ApplySummaryRowBorder(IXLWorksheet worksheet, int row)
+        private static void ApplySummaryRowBorder(IXLWorksheet worksheet, int row)
             => ExcelStyleFormatter.ApplySummaryRowBorder(worksheet, row);
 
         /// <summary>

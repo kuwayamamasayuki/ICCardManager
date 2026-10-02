@@ -936,7 +936,7 @@ namespace ICCardManager.ViewModels
             if (_cardReader is MockCardReader mockReader)
             {
                 // 未使用のIDmを生成（職員証はFFFFで始まる）
-                var newIdm = $"FFFF{Guid.NewGuid().ToString("N").Substring(0, 12).ToUpper()}";
+                var newIdm = $"FFFF{Guid.NewGuid().ToString("N").Substring(0, 12).ToUpperInvariant()}";
                 mockReader.SimulateCardRead(newIdm);
             }
         }

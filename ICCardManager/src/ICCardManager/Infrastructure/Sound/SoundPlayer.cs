@@ -21,7 +21,7 @@ namespace ICCardManager.Infrastructure.Sound
         /// <summary>
         /// 効果音ファイルのベースパス
         /// </summary>
-        private string SoundsBasePath => Path.Combine(
+        private static string SoundsBasePath => Path.Combine(
             AppDomain.CurrentDomain.BaseDirectory,
             "Resources", "Sounds");
 
@@ -204,7 +204,7 @@ namespace ICCardManager.Infrastructure.Sound
         /// <summary>
         /// システムビープ音を再生（フォールバック用）
         /// </summary>
-        private void PlaySystemBeep(SoundType soundType)
+        private static void PlaySystemBeep(SoundType soundType)
         {
             try
             {

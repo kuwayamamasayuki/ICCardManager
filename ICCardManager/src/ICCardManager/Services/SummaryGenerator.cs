@@ -1287,7 +1287,7 @@ namespace ICCardManager.Services
         /// 統合候補に往復検出を通し、選択に使う指標を算出する（Issue #1916）。
         /// <b>交通系固有</b>（往復・乗継判定。domain-boundaries.md の分類）
         /// </summary>
-        private RouteCandidate EvaluateCandidate(
+        private static RouteCandidate EvaluateCandidate(
             List<ConsolidatedRoute> consolidatedRoutes, SummaryGenerationContext context)
         {
             var asPairs = consolidatedRoutes
@@ -1378,7 +1378,7 @@ namespace ICCardManager.Services
         /// 先に来る形（薬院～天神 → 天神～博多 往復）では移動順と食い違っていた。
         /// 鉄道／バスのブロックを利用順に並べる #1904 と同じ考え方をブロック内にも適用する。
         /// </remarks>
-        private string FormatRouteBlocks(
+        private static string FormatRouteBlocks(
             RouteCandidate candidate, SummaryGenerationContext context)
         {
             var blocks = candidate.RoundTrips
@@ -1410,7 +1410,7 @@ namespace ICCardManager.Services
         /// 名前が完全に一致する通常の往復では括弧を付けない（「A～B 往復」のまま）。
         /// </para>
         /// </remarks>
-        private string FormatRoundTrip(RoundTrip roundTrip, SummaryGenerationContext context)
+        private static string FormatRoundTrip(RoundTrip roundTrip, SummaryGenerationContext context)
         {
             var start = FormatEndpoint(roundTrip.Start, roundTrip.ReturnExit);
             var end = FormatEndpoint(roundTrip.End, roundTrip.ReturnEntry);
@@ -1581,7 +1581,7 @@ namespace ICCardManager.Services
         /// </para>
         /// </remarks>
         /// <param name="context">この生成が参照する設定の世代（Issue #1919）</param>
-        private string CollapseExplicitGroupSummary(
+        private static string CollapseExplicitGroupSummary(
             List<LedgerDetail> groupTrips, string automaticSummary, SummaryGenerationContext context)
         {
             if (!automaticSummary.Contains(RouteSeparator))
@@ -1722,7 +1722,7 @@ namespace ICCardManager.Services
         /// </para>
         /// </remarks>
         /// <param name="context">この生成が参照する設定の世代（Issue #1919）</param>
-        private List<RoundTrip> DetectRoundTrips(
+        private static List<RoundTrip> DetectRoundTrips(
             List<(string Entry, string Exit)> routes, SummaryGenerationContext context)
         {
             var roundTrips = new List<RoundTrip>();
@@ -1783,7 +1783,7 @@ namespace ICCardManager.Services
         /// reverse 1 件だけが消費され、残り <c>2(N-1)</c> 件が余りに残る不具合があった
         /// （Issue #1579）。
         /// </remarks>
-        private List<(int Index, string Entry, string Exit)> GetRemainingRoutes(
+        private static List<(int Index, string Entry, string Exit)> GetRemainingRoutes(
             List<(string Entry, string Exit)> allRoutes,
             List<RoundTrip> roundTrips,
             SummaryGenerationContext context)
@@ -2372,7 +2372,7 @@ namespace ICCardManager.Services
         /// <returns>備考テキスト</returns>
         public static string GetInsufficientBalanceNote(int totalFare, int shortfall)
         {
-            return string.Format(CurrentOptions.SummaryText.InsufficientBalanceNoteFormat, totalFare, shortfall);
+            return string.Format(CultureInfo.InvariantCulture, CurrentOptions.SummaryText.InsufficientBalanceNoteFormat, totalFare, shortfall);
         }
 
         /// <summary>
@@ -2389,7 +2389,7 @@ namespace ICCardManager.Services
         /// <param name="previousMonth">前月の月番号（1-12）</param>
         public static string GetCarryoverFromPreviousMonthSummary(int previousMonth)
         {
-            return string.Format(CurrentOptions.SummaryText.CarryoverFromMonthFormat, previousMonth);
+            return string.Format(CultureInfo.InvariantCulture, CurrentOptions.SummaryText.CarryoverFromMonthFormat, previousMonth);
         }
 
         /// <summary>
@@ -2411,7 +2411,7 @@ namespace ICCardManager.Services
         /// </remarks>
         public static string GetMidYearCarryoverSummary(int carryoverMonth)
         {
-            return string.Format(CurrentOptions.SummaryText.MidYearCarryoverFormat, carryoverMonth);
+            return string.Format(CultureInfo.InvariantCulture, CurrentOptions.SummaryText.MidYearCarryoverFormat, carryoverMonth);
         }
 
         /// <summary>
@@ -2547,7 +2547,7 @@ namespace ICCardManager.Services
             string formatted;
             try
             {
-                formatted = string.Format(CurrentOptions.SummaryText.MidYearCarryoverFormat, placeholder);
+                formatted = string.Format(CultureInfo.InvariantCulture, CurrentOptions.SummaryText.MidYearCarryoverFormat, placeholder);
             }
             catch (Exception ex) when (ex is FormatException or ArgumentNullException)
             {
@@ -2555,7 +2555,7 @@ namespace ICCardManager.Services
                 // 既定書式へフォールバック（既定値は SummaryTextOptions と同期）。
                 // FormatException だけを catch すると、設定バインドで null が入った場合に
                 // ArgumentNullException が漏れて全 ledger クエリが失敗する（Issue #1749 レビュー指摘）
-                formatted = string.Format(new SummaryTextOptions().MidYearCarryoverFormat, placeholder);
+                formatted = string.Format(CultureInfo.InvariantCulture, new SummaryTextOptions().MidYearCarryoverFormat, placeholder);
             }
 
             return formatted
@@ -2570,7 +2570,7 @@ namespace ICCardManager.Services
         /// </summary>
         public static string GetMonthlySummary(int month)
         {
-            return string.Format(CurrentOptions.SummaryText.MonthlySummaryFormat, month);
+            return string.Format(CultureInfo.InvariantCulture, CurrentOptions.SummaryText.MonthlySummaryFormat, month);
         }
 
         /// <summary>

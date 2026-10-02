@@ -1,8 +1,10 @@
 using System;
 using System.Collections.Generic;
 using System.Data.SQLite;
+using System.Globalization;
 using System.Text.Json;
 using System.Threading.Tasks;
+using ICCardManager.Common;
 using ICCardManager.Data.Repositories;
 using ICCardManager.Models;
 
@@ -311,7 +313,7 @@ namespace ICCardManager.Services
                 OperatorIdm = idm,
                 OperatorName = name,
                 TargetTable = Tables.Ledger,
-                TargetId = afterLedger.Id.ToString(),
+                TargetId = afterLedger.Id.ToString(CultureInfo.InvariantCulture),
                 Action = Actions.Update,
                 BeforeData = SerializeToJson(beforeLedger),
                 AfterData = SerializeToJson(afterLedger)
@@ -330,7 +332,7 @@ namespace ICCardManager.Services
                 OperatorIdm = idm,
                 OperatorName = name,
                 TargetTable = Tables.Ledger,
-                TargetId = ledger.Id.ToString(),
+                TargetId = ledger.Id.ToString(CultureInfo.InvariantCulture),
                 Action = Actions.Insert,
                 BeforeData = null,
                 AfterData = SerializeToJson(ledger)
@@ -349,7 +351,7 @@ namespace ICCardManager.Services
                 OperatorIdm = idm,
                 OperatorName = name,
                 TargetTable = Tables.Ledger,
-                TargetId = ledger.Id.ToString(),
+                TargetId = ledger.Id.ToString(CultureInfo.InvariantCulture),
                 Action = Actions.Delete,
                 BeforeData = SerializeToJson(ledger),
                 AfterData = null
@@ -368,7 +370,7 @@ namespace ICCardManager.Services
                 OperatorIdm = idm,
                 OperatorName = name,
                 TargetTable = Tables.Ledger,
-                TargetId = mergedLedger.Id.ToString(),
+                TargetId = mergedLedger.Id.ToString(CultureInfo.InvariantCulture),
                 Action = Actions.Merge,
                 BeforeData = SerializeToJson(sourceLedgers),
                 AfterData = SerializeToJson(mergedLedger)
@@ -387,7 +389,7 @@ namespace ICCardManager.Services
                 OperatorIdm = idm,
                 OperatorName = name,
                 TargetTable = Tables.Ledger,
-                TargetId = originalLedger.Id.ToString(),
+                TargetId = originalLedger.Id.ToString(CultureInfo.InvariantCulture),
                 Action = Actions.Split,
                 BeforeData = SerializeToJson(originalLedger),
                 AfterData = SerializeToJson(splitLedgers)
@@ -534,7 +536,7 @@ namespace ICCardManager.Services
                 OperatorIdm = idm,
                 OperatorName = name,
                 TargetTable = Tables.Ledger,
-                TargetId = ledger.Id.ToString(),
+                TargetId = ledger.Id.ToString(CultureInfo.InvariantCulture),
                 Action = Actions.Insert,
                 BeforeData = null,
                 AfterData = SerializeToJson(ledger)
@@ -553,7 +555,7 @@ namespace ICCardManager.Services
                 OperatorIdm = idm,
                 OperatorName = name,
                 TargetTable = Tables.Ledger,
-                TargetId = afterLedger.Id.ToString(),
+                TargetId = afterLedger.Id.ToString(CultureInfo.InvariantCulture),
                 Action = Actions.Update,
                 BeforeData = SerializeToJson(beforeLedger),
                 AfterData = SerializeToJson(afterLedger)
@@ -734,7 +736,7 @@ namespace ICCardManager.Services
                 OperatorIdm = idm,
                 OperatorName = name,
                 TargetTable = Tables.Ledger,
-                TargetId = ledger.Id.ToString(),
+                TargetId = ledger.Id.ToString(CultureInfo.InvariantCulture),
                 Action = Actions.Delete,
                 BeforeData = SerializeToJson(ledger),
                 AfterData = null
@@ -753,7 +755,7 @@ namespace ICCardManager.Services
                 OperatorIdm = idm,
                 OperatorName = name,
                 TargetTable = Tables.Ledger,
-                TargetId = mergedLedger.Id.ToString(),
+                TargetId = mergedLedger.Id.ToString(CultureInfo.InvariantCulture),
                 Action = Actions.Merge,
                 BeforeData = SerializeToJson(sourceLedgers),
                 AfterData = SerializeToJson(mergedLedger)
@@ -772,7 +774,7 @@ namespace ICCardManager.Services
                 OperatorIdm = idm,
                 OperatorName = name,
                 TargetTable = Tables.Ledger,
-                TargetId = originalLedger.Id.ToString(),
+                TargetId = originalLedger.Id.ToString(CultureInfo.InvariantCulture),
                 Action = Actions.Split,
                 BeforeData = SerializeToJson(originalLedger),
                 AfterData = SerializeToJson(splitLedgers)
@@ -865,11 +867,7 @@ namespace ICCardManager.Services
         /// </summary>
         private static string SerializeToJson<T>(T obj)
         {
-            return JsonSerializer.Serialize(obj, new JsonSerializerOptions
-            {
-                WriteIndented = false,
-                Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping
-            });
+            return JsonSerializer.Serialize(obj, OperationLogJson.Options);
         }
     }
 }

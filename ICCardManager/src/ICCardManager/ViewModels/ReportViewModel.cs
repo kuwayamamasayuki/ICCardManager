@@ -445,11 +445,8 @@ public partial class ReportViewModel : ViewModelBase
     [RelayCommand]
     public void ToggleCardSelection(CardDto card)
     {
-        if (SelectedCards.Contains(card))
-        {
-            SelectedCards.Remove(card);
-        }
-        else
+        // Remove は「含まれていたか」を返すため、Contains で先に調べない（CA1868）
+        if (!SelectedCards.Remove(card))
         {
             SelectedCards.Add(card);
         }
