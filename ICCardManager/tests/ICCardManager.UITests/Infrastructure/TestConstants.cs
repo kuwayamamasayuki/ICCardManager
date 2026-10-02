@@ -562,5 +562,15 @@ namespace ICCardManager.UITests.Infrastructure
         public const string AdminDashboardTrendTab = "利用推移タブ";
         [UiaName]
         public const string AdminDashboardStaffUsageList = "職員別の月次利用額一覧";
+
+        /// <summary>管理者ダッシュボードの分析の集計期間（3・6・12・24・36 か月）と再集計ボタン（Issue #2199）。</summary>
+        [UiaName]
+        public const string AdminDashboardAnalysisMonthsComboBox = "分析の集計期間（か月）";
+        [UiaName]
+        public const string AdminDashboardAnalysisRefreshButton = "指定した期間で再集計";
+
+        /// <summary>「利用推移」タブの残高推移の一覧（年月 × 描画するカード）。カードの選択はカード名を Name に持つチェックボックス。</summary>
+        [UiaName]
+        public const string AdminDashboardBalanceTable = "カード別の残高推移一覧";
     }
 }
