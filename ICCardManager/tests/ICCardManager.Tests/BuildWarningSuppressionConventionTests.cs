@@ -522,7 +522,7 @@ public class BuildWarningSuppressionConventionTests
 
     /// <summary>
     /// csproj だけを見張っても、ソース側の <c>#pragma warning disable</c> で同じ規約を破れる。
-    /// このリポジトリでは <c>#pragma warning disable CS0618</c> が既に使われており、
+    /// このリポジトリでは <c>#pragma warning disable</c> が本体（<c>IL3000</c>）で使われており、
     /// CS8618 に直面した開発者が同じ手段を選ぶ動線が実在する。
     /// </summary>
     /// <remarks>

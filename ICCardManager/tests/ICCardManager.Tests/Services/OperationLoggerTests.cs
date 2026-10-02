@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Reflection;
 using System.Threading.Tasks;
 using FluentAssertions;
 using ICCardManager.Data;
@@ -17,7 +18,7 @@ namespace ICCardManager.Tests.Services;
 /// <summary>
 /// OperationLoggerの単体テスト
 /// Issue #1265: 操作者情報は ICurrentOperatorContext から一元的に解決される。
-/// 旧シグネチャに渡された operatorIdm は無視される（監査ログなりすまし防止）。
+/// 操作者を引数で受け取るオーバーロードは持たない（監査ログなりすまし防止。Issue #2164）。
 /// </summary>
 public class OperationLoggerTests : IDisposable
 {
@@ -141,65 +142,36 @@ public class OperationLoggerTests : IDisposable
     #region Issue #1265: 監査ログなりすまし防止
 
     /// <summary>
-    /// 旧 API に操作者 IDm を渡しても、context が設定されている場合は
-    /// context の値が優先される（呼び出し側は他人の IDm でなりすますことができない）。
+    /// 操作者を引数で受け取る公開メソッドが無いこと（Issue #2164）。
+    /// 旧シグネチャ（先頭に operatorIdm）は渡された値を無視する互換用として残っていたが、
+    /// 削除したことで「引数で他人の IDm を渡す」経路そのものが無くなった。
+    /// 同じ形のオーバーロードが再び足されたら、この表明が止める。
     /// </summary>
     [Fact]
-    public async Task ObsoleteApi_WithContext_IgnoresPassedOperatorIdm_AntiSpoofing()
+    public void PublicLogMethods_DoNotAcceptOperatorIdentityParameter()
     {
-        // Arrange: 実際の認証操作者は AAAA...
-        const string authenticatedIdm = "AAAA000000000001";
-        const string authenticatedName = "認証済み職員";
-        _operatorContext.BeginSession(authenticatedIdm, authenticatedName);
+        var logMethods = typeof(OperationLogger)
+            .GetMethods(BindingFlags.Public | BindingFlags.Instance | BindingFlags.DeclaredOnly)
+            .Where(m => m.Name.StartsWith("Log", StringComparison.Ordinal))
+            .ToList();
 
-        // 攻撃者が悪意を持って他の職員の IDm を渡す
-        const string spoofedIdm = "FFFF000000000002";
-        var ledger = CreateTestLedger(id: 50, summary: "なりすましターゲット");
+        // 対の表明: 走査対象が空に縮んでいないこと（空なら下の表明は無条件に緑になる）
+        logMethods.Select(m => m.Name).Should().Contain(
+            new[] { "LogStaffInsertAsync", "LogCardUpdateAsync", "LogLedgerDeleteAsync", "LogLedgerSplitAsync" });
 
-        // Act: [Obsolete] な旧 API に偽の IDm を渡す
-#pragma warning disable CS0618 // Obsolete 警告を抑制（このテストこそが非推奨 API の振る舞いを検証）
-        await _logger.LogLedgerDeleteAsync(spoofedIdm, ledger);
-#pragma warning restore CS0618
-
-        // Assert: 記録は context の認証済み操作者で行われ、偽IDm は記録されない
-        var spoofedLogs = await _operationLogRepository.GetByOperatorAsync(spoofedIdm);
-        spoofedLogs.Should().BeEmpty("なりすまし IDm でのログは一切記録されてはならない");
-
-        var authenticatedLogs = await _operationLogRepository.GetByOperatorAsync(authenticatedIdm);
-        authenticatedLogs.Should().HaveCount(1);
-        authenticatedLogs.Single().OperatorName.Should().Be(authenticatedName);
+        var offending = logMethods
+            .Where(m => m.GetParameters().Any(p =>
+                p.Name != null && p.Name.StartsWith("operator", StringComparison.OrdinalIgnoreCase)))
+            .Select(m => m.ToString())
+            .ToList();
+        offending.Should().BeEmpty("操作者は ICurrentOperatorContext からのみ解決し、引数では受け取らない");
     }
 
     /// <summary>
-    /// context が未設定のときに旧 API に操作者 IDm を渡しても、
-    /// それは無視され GUI 操作としてフォールバックする（引数経由でのなりすましを防ぐ）。
+    /// セッション失効後は、失効前の操作者ではなく GUI 操作として記録される。
     /// </summary>
     [Fact]
-    public async Task ObsoleteApi_WithoutContext_IgnoresPassedOperatorIdm_FallsBackToGui()
-    {
-        // Arrange: context 未設定
-        const string spoofedIdm = "FFFF000000000003";
-        var ledger = CreateTestLedger(id: 51, summary: "context未設定の偽称ターゲット");
-
-        // Act: 悪意ある呼び出し側が他の職員の IDm を渡す
-#pragma warning disable CS0618
-        await _logger.LogLedgerDeleteAsync(spoofedIdm, ledger);
-#pragma warning restore CS0618
-
-        // Assert: 偽 IDm のログは一切作られず、GUI 操作として記録される
-        var spoofedLogs = await _operationLogRepository.GetByOperatorAsync(spoofedIdm);
-        spoofedLogs.Should().BeEmpty();
-
-        var guiLogs = await _operationLogRepository.GetByOperatorAsync(OperationLogger.GuiOperator.Idm);
-        guiLogs.Should().HaveCount(1);
-        guiLogs.Single().OperatorName.Should().Be(OperationLogger.GuiOperator.Name);
-    }
-
-    /// <summary>
-    /// セッション失効後は、旧 API 経由の操作者 IDm も context も使われず GUI 操作扱い。
-    /// </summary>
-    [Fact]
-    public async Task ObsoleteApi_AfterContextExpiration_UsesGuiIdentifier()
+    public async Task AfterContextExpiration_UsesGuiIdentifier()
     {
         // Arrange: 短い有効期間の context
         var shortLived = new CurrentOperatorContext(_clockMock.Object, TimeSpan.FromSeconds(10));
@@ -212,52 +184,13 @@ public class OperationLoggerTests : IDisposable
         var ledger = CreateTestLedger(id: 52, summary: "失効後ターゲット");
 
         // Act
-#pragma warning disable CS0618
-        await logger.LogLedgerDeleteAsync("FFFF000000000004", ledger);
-#pragma warning restore CS0618
+        await logger.LogLedgerDeleteAsync(ledger);
 
         // Assert: GUI 操作としてフォールバック
         var logs = await _operationLogRepository.GetByTargetAsync(OperationLogger.Tables.Ledger, "52");
         var log = logs.Single();
         log.OperatorIdm.Should().Be(OperationLogger.GuiOperator.Idm);
         log.OperatorName.Should().Be(OperationLogger.GuiOperator.Name);
-    }
-
-    #endregion
-
-    #region 後方互換: 旧 API は新 API と同じ結果を返す
-
-    [Fact]
-    public async Task ObsoleteLogStaffInsertAsync_DelegatesToNewApi()
-    {
-        var staff = CreateTestStaff();
-
-#pragma warning disable CS0618
-        await _logger.LogStaffInsertAsync(null, staff);
-#pragma warning restore CS0618
-
-        var log = (await _operationLogRepository.GetByTargetAsync(OperationLogger.Tables.Staff, staff.StaffIdm)).Single();
-        log.Action.Should().Be(OperationLogger.Actions.Insert);
-        log.OperatorIdm.Should().Be(OperationLogger.GuiOperator.Idm);
-        log.BeforeData.Should().BeNull();
-        log.AfterData.Should().NotBeNullOrEmpty();
-    }
-
-    [Fact]
-    public async Task ObsoleteLogLedgerMergeAsync_DelegatesToNewApi()
-    {
-        var src1 = CreateTestLedger(id: 1, summary: "元1");
-        var src2 = CreateTestLedger(id: 2, summary: "元2");
-        var merged = CreateTestLedger(id: 3, summary: "統合後");
-
-#pragma warning disable CS0618
-        await _logger.LogLedgerMergeAsync(null, new List<Ledger> { src1, src2 }, merged);
-#pragma warning restore CS0618
-
-        var log = (await _operationLogRepository.GetByTargetAsync(OperationLogger.Tables.Ledger, "3")).Single();
-        log.Action.Should().Be(OperationLogger.Actions.Merge);
-        log.BeforeData.Should().Contain("元1").And.Contain("元2");
-        log.AfterData.Should().Contain("統合後");
     }
 
     #endregion
