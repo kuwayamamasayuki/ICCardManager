@@ -65,6 +65,79 @@ namespace ICCardManager.UITests.Tests
             SelectTabAndExpectVisible(dashboard, TestConstants.AdminDashboardTrendTab, TestConstants.AdminDashboardStaffUsageList);
         }
 
+        /// <summary>
+        /// 分析期間を変えて再集計すると集計の範囲が変わり、残高推移のカード選択で一覧の対象が変わること（Issue #2199）。
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// 残高推移の一覧は「分析期間の月数 × 描画するカード」の行を持つ（<c>AdminDashboardViewModel</c> が月ごと・選択中のカードごとに
+        /// 1 行を作る）。投入データの 3 枚はどれも当月に台帳があるので、既定の 12 か月なら 36 行、3 か月に変えると 9 行、
+        /// そこからカードを 1 枚外すと 6 行、付け直すと 9 行に戻る。
+        /// </para>
+        /// <para>
+        /// 一覧は月数ぶん長くなり DataGrid の仮想化で見えている行しか UIA の子要素に現れないため、行数は Grid パターンの総数
+        /// （<c>RowCount</c>）で数える。
+        /// </para>
+        /// </remarks>
+        [Fact]
+        public void 分析期間を変えると集計の範囲が変わり残高推移のカード選択で一覧の対象が変わること()
+        {
+            using var fixture = AppFixture.LaunchWithSeed(ScreenshotSeedData.Seed, AppFixture.SuppressDebugTestData);
+            var page = new MainWindowPage(fixture.MainWindow, fixture.Automation);
+            var dashboard = page.ClickToolbarButtonAndWaitForDialog(
+                TestConstants.OpenAdminDashboardButton, TestConstants.AdminDashboardDialogName);
+            WaitForRowCount(dashboard, 3, "前提: 集計が終わり、3 枚のカードが運用状況の一覧に並ぶこと");
+            SelectTabAndExpectVisible(dashboard, TestConstants.AdminDashboardTrendTab, TestConstants.AdminDashboardBalanceTable);
+
+            // 前提: 既定の 12 か月 × 3 枚
+            WaitForBalanceRowCount(dashboard, 12 * 3, "既定の分析期間（12 か月）では、12 か月 × 3 枚の行が並ぶこと");
+
+            // 1. 分析期間を 3 か月にして再集計すると、範囲が 3 か月になる。期間の選択は「稼働状況」タブにあり、
+            //    再集計は両タブの分析をまとめて作り直す（タブを切り替えた後の一覧で確かめる）
+            SelectTabAndExpectVisible(dashboard, TestConstants.AdminDashboardUtilizationTab, TestConstants.AdminDashboardUtilizationList);
+            var months = dashboard.FindByNameWithRetry(TestConstants.AdminDashboardAnalysisMonthsComboBox);
+            months.Should().NotBeNull($"「{TestConstants.AdminDashboardAnalysisMonthsComboBox}」の選択肢があること");
+            months!.AsComboBox().Select("3");
+            dashboard.ClickButton(TestConstants.AdminDashboardAnalysisRefreshButton);
+            SelectTabAndExpectVisible(dashboard, TestConstants.AdminDashboardTrendTab, TestConstants.AdminDashboardBalanceTable);
+            WaitForBalanceRowCount(dashboard, 3 * 3, "分析期間を 3 か月にして再集計したら、3 か月 × 3 枚の行になること");
+
+            // 2. カードを 1 枚外すと、そのカードの行が一覧から消える（ほかのカードは残る）
+            var card = dashboard.FindByNameWithRetry(ScreenshotSeedData.NormalCardDisplayName);
+            card.Should().NotBeNull($"残高推移のカード選択に「{ScreenshotSeedData.NormalCardDisplayName}」があること");
+            var checkBox = card!.AsCheckBox();
+            checkBox.IsChecked.Should().BeTrue("前提: 3 枚とも描画する状態で始まること");
+            checkBox.Toggle();
+            WaitForBalanceRowCount(dashboard, 3 * 2, "カードを 1 枚外したら、そのカードの行が消えて 3 か月 × 2 枚になること");
+
+            // 3. 対: 付け直すと戻る
+            checkBox.Toggle();
+            WaitForBalanceRowCount(dashboard, 3 * 3, "外したカードを付け直したら、3 か月 × 3 枚に戻ること");
+        }
+
+        /// <summary>残高推移の一覧の総行数（Grid パターンの <c>RowCount</c>）が期待どおりになるのを待つ。</summary>
+        private static void WaitForBalanceRowCount(DialogPageBase dashboard, int expected, string because)
+        {
+            var actual = -1;
+            var matched = Retry.WhileFalse(
+                () =>
+                {
+                    try
+                    {
+                        var grid = dashboard.FindByName(TestConstants.AdminDashboardBalanceTable)?.AsGrid();
+                        actual = grid?.RowCount ?? -1;
+                        return actual == expected;
+                    }
+                    catch
+                    {
+                        // 再集計で一覧が作り直される途中
+                        return false;
+                    }
+                },
+                TimeSpan.FromSeconds(TestConstants.OperationLogDialogOpenTimeoutSeconds)).Success;
+            matched.Should().BeTrue($"{because}（一覧の行数: 期待 {expected}・実際 {actual}）");
+        }
+
         /// <summary>運用状況の一覧の行数が期待どおりになるのを待つ（集計・絞り込みは非同期）。</summary>
         private static void WaitForRowCount(DialogPageBase dashboard, int expected, string because)
         {
