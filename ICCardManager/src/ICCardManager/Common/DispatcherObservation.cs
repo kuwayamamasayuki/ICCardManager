@@ -1,4 +1,7 @@
+#nullable enable
+
 using System;
+using System.Diagnostics.CodeAnalysis;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Windows.Threading;
@@ -181,7 +184,8 @@ namespace ICCardManager.Common
         /// <see cref="AggregateException.Flatten"/> した集約のまま渡す。
         /// </para>
         /// </remarks>
-        private static Exception UnwrapAggregate(AggregateException aggregate)
+        [return: NotNullIfNotNull("aggregate")]
+        private static Exception? UnwrapAggregate(AggregateException? aggregate)
         {
             if (aggregate == null)
             {

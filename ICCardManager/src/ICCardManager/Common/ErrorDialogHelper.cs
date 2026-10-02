@@ -1,3 +1,5 @@
+#nullable enable
+
 using System;
 using System.Collections.Generic;
 using System.Globalization;
@@ -32,7 +34,7 @@ namespace ICCardManager.Common
         /// </summary>
         /// <param name="exception">例外</param>
         /// <param name="title">ダイアログタイトル（省略時は「エラー」）</param>
-        public static void ShowError(Exception exception, string title = null)
+        public static void ShowError(Exception exception, string? title = null)
         {
             var (message, errorCode) = GetErrorInfo(exception);
             var dialogTitle = title ?? "エラー";
@@ -59,7 +61,7 @@ namespace ICCardManager.Common
         /// </summary>
         /// <param name="message">メッセージ</param>
         /// <param name="title">タイトル（省略時は「警告」）</param>
-        public static void ShowWarning(string message, string title = null)
+        public static void ShowWarning(string message, string? title = null)
         {
             var dialogTitle = title ?? "警告";
 
@@ -109,7 +111,7 @@ namespace ICCardManager.Common
         /// </remarks>
         /// <param name="exception">記録する例外。<c>null</c> の場合は何もしない。</param>
         /// <param name="context">発生コンテキスト（操作名やメソッド名など。省略可）。</param>
-        public static void LogException(Exception exception, string context = null)
+        public static void LogException(Exception exception, string? context = null)
         {
             if (exception == null)
             {
@@ -202,7 +204,7 @@ namespace ICCardManager.Common
         /// <summary>
         /// エラーをログファイルに出力
         /// </summary>
-        private static void LogError(Exception exception, string errorCode, bool isFatal = false, string context = null)
+        private static void LogError(Exception exception, string errorCode, bool isFatal = false, string? context = null)
         {
             try
             {

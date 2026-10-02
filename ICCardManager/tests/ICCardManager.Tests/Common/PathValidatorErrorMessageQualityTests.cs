@@ -48,10 +48,10 @@ public class PathValidatorErrorMessageQualityTests : IDisposable
     /// エラーメッセージの最小品質基準: 一定の長さがあり、句点を含み、
     /// 最後に「してください」相当の行動指示を持つ。
     /// </summary>
-    private static void AssertQualityCriteria(string message)
+    private static void AssertQualityCriteria(string? message)
     {
         message.Should().NotBeNullOrWhiteSpace("エラーメッセージは空であってはならない");
-        message.Length.Should().BeGreaterThanOrEqualTo(20,
+        message!.Length.Should().BeGreaterThanOrEqualTo(20,
             "エラーメッセージは十分な説明を含むべき（最低20文字）");
         message.Should().Contain("。",
             "メッセージは句点で複数の要素を分離すべき");

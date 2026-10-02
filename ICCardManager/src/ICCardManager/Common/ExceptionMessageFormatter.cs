@@ -1,3 +1,5 @@
+#nullable enable
+
 using System;
 using System.Data.SQLite;
 using System.IO;

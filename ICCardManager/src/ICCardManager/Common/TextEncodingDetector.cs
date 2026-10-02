@@ -1,4 +1,7 @@
+#nullable enable
+
 using System;
+using System.Diagnostics.CodeAnalysis;
 using System.Text;
 
 namespace ICCardManager.Common
@@ -62,15 +65,16 @@ namespace ICCardManager.Common
         public DetectedTextEncoding Encoding { get; }
 
         /// <summary>復号されたテキスト（復号できなかった場合は null）</summary>
-        public string Text { get; }
+        public string? Text { get; }
 
         /// <summary>復号に失敗した理由（成功時は <see cref="TextDecodeFailure.None"/>）</summary>
         public TextDecodeFailure Failure { get; }
 
         /// <summary>復号できたか</summary>
+        [MemberNotNullWhen(true, nameof(Text))]
         public bool IsDecoded => Text != null;
 
-        internal TextDecodeResult(DetectedTextEncoding encoding, string text, TextDecodeFailure failure = TextDecodeFailure.None)
+        internal TextDecodeResult(DetectedTextEncoding encoding, string? text, TextDecodeFailure failure = TextDecodeFailure.None)
         {
             Encoding = encoding;
             Text = text;
@@ -249,7 +253,7 @@ namespace ICCardManager.Common
                 : new TextDecodeResult(detected, null, TextDecodeFailure.DeclaredEncodingUnreadable);
         }
 
-        private static bool TryDecode(byte[] bytes, int offset, Encoding encoding, out string text)
+        private static bool TryDecode(byte[] bytes, int offset, Encoding encoding, [NotNullWhen(true)] out string? text)
         {
             try
             {

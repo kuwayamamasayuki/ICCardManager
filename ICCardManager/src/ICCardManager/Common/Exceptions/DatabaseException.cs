@@ -1,3 +1,5 @@
+#nullable enable
+
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -12,7 +14,7 @@ namespace ICCardManager.Common.Exceptions
         /// <summary>
         /// 接続エラー
         /// </summary>
-        public static DatabaseException ConnectionFailed(Exception innerException = null)
+        public static DatabaseException ConnectionFailed(Exception? innerException = null)
         {
             const string message = "Failed to connect to database";
             const string userMessage = "データベースへの接続に失敗しました。管理者に連絡してください。";
@@ -26,7 +28,7 @@ namespace ICCardManager.Common.Exceptions
         /// <summary>
         /// クエリ実行エラー
         /// </summary>
-        public static DatabaseException QueryFailed(string operation = null, Exception innerException = null)
+        public static DatabaseException QueryFailed(string? operation = null, Exception? innerException = null)
         {
             var message = string.IsNullOrEmpty(operation)
                 ? "Database query failed"
@@ -66,7 +68,7 @@ namespace ICCardManager.Common.Exceptions
         /// <summary>
         /// 外部キー制約違反
         /// </summary>
-        public static DatabaseException ForeignKeyViolation(Exception innerException = null)
+        public static DatabaseException ForeignKeyViolation(Exception? innerException = null)
         {
             const string message = "Foreign key constraint violation";
             const string userMessage = "関連するデータが存在するため、操作を完了できませんでした。";
@@ -80,7 +82,7 @@ namespace ICCardManager.Common.Exceptions
         /// <summary>
         /// トランザクションエラー
         /// </summary>
-        public static DatabaseException TransactionFailed(Exception innerException = null)
+        public static DatabaseException TransactionFailed(Exception? innerException = null)
         {
             const string message = "Database transaction failed";
             const string userMessage = "データベースの更新処理に失敗しました。再度お試しください。";
@@ -94,7 +96,7 @@ namespace ICCardManager.Common.Exceptions
         /// <summary>
         /// ファイルアクセスエラー（DBファイルへの書き込み権限なし等）
         /// </summary>
-        public static DatabaseException FileAccessDenied(string path = null, Exception innerException = null)
+        public static DatabaseException FileAccessDenied(string? path = null, Exception? innerException = null)
         {
             var message = string.IsNullOrEmpty(path)
                 ? "Database file access denied"
@@ -123,7 +125,7 @@ namespace ICCardManager.Common.Exceptions
         /// （development-conventions.md #1744「フォールバックが働いたことを呼び出し元が知れるか」）。
         /// </para>
         /// </remarks>
-        public static DatabaseException InvalidStoredDate(string storedText, Exception innerException = null)
+        public static DatabaseException InvalidStoredDate(string storedText, Exception? innerException = null)
         {
             var message = $"Stored date is not in ISO 8601 Gregorian form: {storedText}";
             var userMessage =

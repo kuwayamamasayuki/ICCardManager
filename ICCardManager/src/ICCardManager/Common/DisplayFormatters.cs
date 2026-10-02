@@ -1,4 +1,7 @@
+#nullable enable
+
 using System;
+using System.Diagnostics.CodeAnalysis;
 using System.Globalization;
 
 namespace ICCardManager.Common
@@ -111,7 +114,8 @@ namespace ICCardManager.Common
         /// <param name="date">日時（nullの場合はfallbackを返す）</param>
         /// <param name="fallback">null時の代替文字列（デフォルト: "-"）</param>
         /// <returns>フォーマット済み日時文字列</returns>
-        public static string FormatDateTime(DateTime? date, string fallback = "-")
+        [return: NotNullIfNotNull("fallback")]
+        public static string? FormatDateTime(DateTime? date, string? fallback = "-")
         {
             return date?.ToString("yyyy/MM/dd HH:mm", CultureInfo.InvariantCulture) ?? fallback;
         }

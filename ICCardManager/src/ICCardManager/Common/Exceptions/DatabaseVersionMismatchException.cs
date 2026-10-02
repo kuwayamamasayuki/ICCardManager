@@ -1,3 +1,5 @@
+#nullable enable
+
 using System;
 
 namespace ICCardManager.Common.Exceptions
@@ -27,12 +29,12 @@ namespace ICCardManager.Common.Exceptions
         /// <summary>
         /// 要求されるアプリバージョン（settings の min_app_version。未記録の場合null）
         /// </summary>
-        public string RequiredAppVersion { get; }
+        public string? RequiredAppVersion { get; }
 
         public DatabaseVersionMismatchException(
             int databaseSchemaVersion,
             int appSchemaVersion,
-            string requiredAppVersion)
+            string? requiredAppVersion)
             : base(
                 $"Database schema version {databaseSchemaVersion} is newer than app schema version {appSchemaVersion} (required app version: {requiredAppVersion ?? "unknown"})",
                 BuildUserFriendlyMessage(databaseSchemaVersion, appSchemaVersion, requiredAppVersion),
@@ -46,7 +48,7 @@ namespace ICCardManager.Common.Exceptions
         private static string BuildUserFriendlyMessage(
             int databaseSchemaVersion,
             int appSchemaVersion,
-            string requiredAppVersion)
+            string? requiredAppVersion)
         {
             // 「何が/なぜ/どうすれば」の3要素（.claude/rules/error-messages.md）
             var what =

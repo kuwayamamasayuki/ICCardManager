@@ -24,7 +24,8 @@
 
     <!-- XMLドキュメント生成 -->
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
-    <!-- CS1591: XMLコメント欠落, CS8632: Nullable注釈警告（.NET Fx 4.8ではNullable無効のため） -->
+    <!-- CS1591: XMLコメント欠落, CS8632: Nullable注釈警告（Nullable はプロジェクト単位では無効で、#nullable enable を付けたファイルから
+         段階的に移行中のため。未移行のファイルに残る ? 注釈が出す。全ファイルの移行後に <Nullable>enable</Nullable> と共に外す。Issue #2163） -->
     <NoWarn>$(NoWarn);CS1591;CS8632</NoWarn>
 
     <!-- Issue #2162: .NET アナライザー（CA ルール）を有効化する。net48 では SDK 組み込みのアナライザーが既定で無効のため明示する。

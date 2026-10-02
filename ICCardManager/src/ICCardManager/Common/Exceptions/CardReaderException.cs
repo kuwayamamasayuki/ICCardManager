@@ -1,3 +1,5 @@
+#nullable enable
+
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -12,7 +14,7 @@ namespace ICCardManager.Common.Exceptions
         /// <summary>
         /// カードリーダー未接続
         /// </summary>
-        public static CardReaderException NotConnected(Exception innerException = null)
+        public static CardReaderException NotConnected(Exception? innerException = null)
         {
             const string message = "Card reader is not connected or not found";
             const string userMessage = "カードリーダーが接続されていません。接続を確認してください。";
@@ -26,7 +28,7 @@ namespace ICCardManager.Common.Exceptions
         /// <summary>
         /// カード読み取り失敗
         /// </summary>
-        public static CardReaderException ReadFailed(string detail = null, Exception innerException = null)
+        public static CardReaderException ReadFailed(string? detail = null, Exception? innerException = null)
         {
             var message = string.IsNullOrEmpty(detail)
                 ? "Failed to read card"
@@ -42,7 +44,7 @@ namespace ICCardManager.Common.Exceptions
         /// <summary>
         /// カード履歴読み取り失敗
         /// </summary>
-        public static CardReaderException HistoryReadFailed(string detail = null, Exception innerException = null)
+        public static CardReaderException HistoryReadFailed(string? detail = null, Exception? innerException = null)
         {
             var message = string.IsNullOrEmpty(detail)
                 ? "Failed to read card history"
@@ -58,7 +60,7 @@ namespace ICCardManager.Common.Exceptions
         /// <summary>
         /// カード残高読み取り失敗
         /// </summary>
-        public static CardReaderException BalanceReadFailed(string detail = null, Exception innerException = null)
+        public static CardReaderException BalanceReadFailed(string? detail = null, Exception? innerException = null)
         {
             var message = string.IsNullOrEmpty(detail)
                 ? "Failed to read card balance"
@@ -74,7 +76,7 @@ namespace ICCardManager.Common.Exceptions
         /// <summary>
         /// 通信タイムアウト
         /// </summary>
-        public static CardReaderException Timeout(Exception innerException = null)
+        public static CardReaderException Timeout(Exception? innerException = null)
         {
             const string message = "Card reader communication timeout";
             const string userMessage = "カードリーダーとの通信がタイムアウトしました。再度お試しください。";
@@ -88,7 +90,7 @@ namespace ICCardManager.Common.Exceptions
         /// <summary>
         /// スマートカードサービスが起動していない
         /// </summary>
-        public static CardReaderException ServiceNotAvailable(Exception innerException = null)
+        public static CardReaderException ServiceNotAvailable(Exception? innerException = null)
         {
             const string message = "Smart card service is not running";
             const string userMessage = "スマートカードサービスが起動していません。Windowsの設定を確認してください。";
@@ -102,7 +104,7 @@ namespace ICCardManager.Common.Exceptions
         /// <summary>
         /// 監視エラー（モニター例外）
         /// </summary>
-        public static CardReaderException MonitorError(string detail = null, Exception innerException = null)
+        public static CardReaderException MonitorError(string? detail = null, Exception? innerException = null)
         {
             var message = string.IsNullOrEmpty(detail)
                 ? "Card reader monitor error"
@@ -118,7 +120,7 @@ namespace ICCardManager.Common.Exceptions
         /// <summary>
         /// 再接続失敗
         /// </summary>
-        public static CardReaderException ReconnectFailed(int attemptCount, Exception innerException = null)
+        public static CardReaderException ReconnectFailed(int attemptCount, Exception? innerException = null)
         {
             var message = $"Failed to reconnect to card reader after {attemptCount} attempts";
             var userMessage = $"カードリーダーへの再接続に失敗しました（{attemptCount}回試行）。接続を確認して手動で再接続してください。";
@@ -132,7 +134,7 @@ namespace ICCardManager.Common.Exceptions
         /// <summary>
         /// カード取り外し（読み取り中にカードが離された）
         /// </summary>
-        public static CardReaderException CardRemoved(Exception innerException = null)
+        public static CardReaderException CardRemoved(Exception? innerException = null)
         {
             const string message = "Card was removed during read operation";
             const string userMessage = "カードの読み取り中にカードが離されました。カードをリーダーに置いたままお待ちください。";

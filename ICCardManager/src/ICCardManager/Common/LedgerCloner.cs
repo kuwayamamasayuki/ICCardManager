@@ -1,3 +1,6 @@
+#nullable enable
+
+using System.Diagnostics.CodeAnalysis;
 using System.Linq;
 using ICCardManager.Models;
 
@@ -35,7 +38,8 @@ namespace ICCardManager.Common
         /// <see cref="Ledger"/> を明細ごと複製する。
         /// </summary>
         /// <param name="source">複製元。<c>null</c> のときは <c>null</c> を返す。</param>
-        public static Ledger Clone(Ledger source)
+        [return: NotNullIfNotNull("source")]
+        public static Ledger? Clone(Ledger? source)
         {
             if (source == null)
             {
@@ -75,7 +79,8 @@ namespace ICCardManager.Common
         /// 親 → 明細 → 親 の循環参照になる。親の情報は <see cref="LedgerDetail.LedgerId"/> で足りる。
         /// </remarks>
         /// <param name="source">複製元。<c>null</c> のときは <c>null</c> を返す。</param>
-        public static LedgerDetail CloneDetail(LedgerDetail source)
+        [return: NotNullIfNotNull("source")]
+        public static LedgerDetail? CloneDetail(LedgerDetail? source)
         {
             if (source == null)
             {

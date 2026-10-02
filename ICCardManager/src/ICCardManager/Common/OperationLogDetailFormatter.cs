@@ -1,3 +1,5 @@
+#nullable enable
+
 using System;
 using System.Collections.Generic;
 using System.Globalization;
@@ -63,7 +65,7 @@ namespace ICCardManager.Common
         /// （＝行を出さない）。明細を持たない台帳の監査記録に「利用明細: 0件」という
         /// 情報量ゼロの行が全件へ付くのを避けるため。
         /// </returns>
-        public static string FormatDetailsBlock(JsonElement details, string indent)
+        public static string? FormatDetailsBlock(JsonElement details, string indent)
         {
             if (details.ValueKind != JsonValueKind.Array)
             {
@@ -348,7 +350,7 @@ namespace ICCardManager.Common
             return value.Substring(0, MaxSummarizedValueLength) + "...";
         }
 
-        private static string GetString(JsonElement element, string propertyName)
+        private static string? GetString(JsonElement element, string propertyName)
         {
             if (!element.TryGetProperty(propertyName, out var prop) ||
                 prop.ValueKind != JsonValueKind.String)

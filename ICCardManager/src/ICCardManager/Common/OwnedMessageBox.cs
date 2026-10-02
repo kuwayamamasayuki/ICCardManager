@@ -1,3 +1,5 @@
+#nullable enable
+
 using System.Windows;
 
 namespace ICCardManager.Common
@@ -50,7 +52,7 @@ namespace ICCardManager.Common
         /// <param name="image">アイコン</param>
         /// <returns>ユーザーの選択結果</returns>
         public static MessageBoxResult Show(
-            Window owner, string message, string title, MessageBoxButton button, MessageBoxImage image)
+            Window? owner, string message, string title, MessageBoxButton button, MessageBoxImage image)
         {
             return owner != null
                 ? MessageBox.Show(owner, message, title, button, image)

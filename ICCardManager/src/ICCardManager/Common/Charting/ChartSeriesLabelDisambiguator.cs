@@ -1,3 +1,5 @@
+#nullable enable
+
 using System;
 using System.Collections.Generic;
 
@@ -71,7 +73,7 @@ namespace ICCardManager.Common.Charting
             for (var i = 0; i < sources.Count; i++)
             {
                 var qualifier = sources[i].Qualifier;
-                qualified[i] = baseCounts[baseNames[i]] > 1 && !string.IsNullOrWhiteSpace(qualifier)
+                qualified[i] = baseCounts[baseNames[i]] > 1 && qualifier is not null && !string.IsNullOrWhiteSpace(qualifier)
                     ? $"{baseNames[i]}（職員番号 {qualifier.Trim()}）"
                     : baseNames[i];
             }

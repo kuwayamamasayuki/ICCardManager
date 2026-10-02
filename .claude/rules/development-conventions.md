@@ -61,6 +61,19 @@
 - **書式の文化圏（CA1305）は「誰が読むか」で決める**。DB・CSV・操作ログ・ファイル名など機械が読み直す値は `CultureInfo.InvariantCulture`、画面・印刷の表示は `CultureInfo.CurrentCulture` を明示する（`db-write-conventions.md`「日付の整形・解析は文化圏から独立させる」の数値版）。**保存側を直したら読み取り側（`TryParse`）も同じカルチャにそろえる** — CA1305 は `TryParse(string, out)` を検出しないため、保存側だけ直すと読めなくなる（Issue #2162 の設定のウィンドウ位置）
 - `ConfigureAwait`（CA2007）の扱いは `async-configureawait.md` の「アナライザ」を参照
 
+### Null 許容参照型はファイル単位で有効にする — 新規 .cs は `#nullable enable` 必須（Issue #2163）
+
+本体の csproj は `<Nullable>` を宣言しておらず（C# 10 の既定で無効）、一括で有効にすると数千件の警告になって警告ゼロと両立しない。**新規ファイルと改修したファイルの先頭に `#nullable enable` を付けて**、移行を日常の改修に乗せる（テスト 2 プロジェクトは csproj で有効）。
+
+- **新しく追加する .cs は、1 行目（コメント・空行の後でもよいが、コードより前）に `#nullable enable` を置く**。`enable warnings` / `enable annotations` の片方だけ、途中での `#nullable restore`（本体ではプロジェクト既定＝無効へ戻る）・`disable` は「付いていない」と数える。改修したファイルにも付け、出た警告はその PR で是正する
+- **移行が済んだ層**（現在は `Common/` 配下すべて）へファイルを足すときは例外なく付ける
+- **`#nullable enable` の無いファイル数**は `NullableContextConventionTests.MaxFilesWithoutNullableEnable` で上限を固定している。付けずに足すと上限を超えて赤、移行したのに上限を下げないと実数との差で赤になる — **上限は下げる方向にだけ動かす**（下げ忘れの余裕は、その分だけ付けずに足せる穴になる）。未移行ファイルの一覧を許可リストにする形は、移行のたびに赤くなる誤検出になるので採らない（#1786）
+- **net48 には Null 許容のフロー解析用の属性（`NotNullWhen` / `MaybeNullWhen` / `NotNullIfNotNull` / `MemberNotNullWhen` 等）が無い**ので、`Common/Polyfills/NullableAttributes.cs` に internal で定義している。`TryGet…` 形の `out` 引数は `[NotNullWhen(true)] out T? value`、フラグで非 null を約束するプロパティは `[MemberNotNullWhen(true, nameof(X))]` を付ける（C# 10 のため属性引数に引数名の `nameof` は書けず、`NotNullIfNotNull("source")` のように文字列で書く）
+- **net48 の BCL は Null 許容の注釈を持たない**。`string.IsNullOrEmpty(s)` / `IsNullOrWhiteSpace(s)` で調べた後も `s` は非 null と推論されないので、`s is not null && !string.IsNullOrWhiteSpace(s)` と前置するか、入口で `?? string.Empty` に寄せる（`!` で黙らせない）
+- **`?` を付けるのは「実際に null になり得る」箇所だけ**。null を返す・null を既定値に持つ・null チェックしている — このどれかに当たるなら `?`。`= null!` は「必ず非 null」という宣言で、null チェックしているフィールドには付けない（#1786）
+- **注釈の変更はテストプロジェクト（Nullable 有効）の警告として現れる**。戻り値を `string?` にすると、それを非 null の引数へ渡すテストで CS8604 が出る。本体だけでなくソリューション全体を Release・Debug でビルドして 0 警告を確かめる
+- 全ファイルの移行が終わったら、csproj に `<Nullable>enable</Nullable>` を置き、各ファイルの `#nullable enable` と `NoWarn` の CS8632 を外す
+
 ### コード整形は CI で検査される（Issue #2161）
 
 CI の code-quality ジョブは `dotnet format --verify-no-changes` の違反で fail する。.cs を書いたら、コミット前に `ICCardManager` ディレクトリで `dotnet format --verify-no-changes`（WSL2 では `"/mnt/c/Program Files/dotnet/dotnet.exe"`）を実行し、違反があれば `dotnet format` で直す。

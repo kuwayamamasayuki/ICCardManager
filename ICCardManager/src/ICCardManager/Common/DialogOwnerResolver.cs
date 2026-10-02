@@ -1,3 +1,5 @@
+#nullable enable
+
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -70,7 +72,7 @@ namespace ICCardManager.Common
         /// この委譲は本クラスの選択規則を妨げない。
         /// </para>
         /// </remarks>
-        public static Window Resolve()
+        public static Window? Resolve()
         {
             var app = Application.Current;
             if (app == null || !app.CheckAccess())
@@ -162,8 +164,8 @@ namespace ICCardManager.Common
         /// 入力を受け付けるか（Win32 の <c>IsWindowEnabled</c>。false はモーダル子ウィンドウに
         /// 塞がれている。<b>WPF の <c>Window.IsEnabled</c> ではない</b>）
         /// </param>
-        internal static T SelectOwner<T>(
-            IEnumerable<T> windows,
+        internal static T? SelectOwner<T>(
+            IEnumerable<T?>? windows,
             Func<T, bool> isUsable,
             Func<T, bool> isActive,
             Func<T, bool> isEnabled) where T : class
@@ -173,7 +175,7 @@ namespace ICCardManager.Common
                 return null;
             }
 
-            var usable = windows.Where(w => w != null && isUsable(w)).ToList();
+            var usable = windows.OfType<T>().Where(isUsable).ToList();
             if (usable.Count == 0)
             {
                 return null;

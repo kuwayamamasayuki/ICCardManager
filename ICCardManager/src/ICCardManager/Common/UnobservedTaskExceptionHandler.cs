@@ -1,3 +1,5 @@
+#nullable enable
+
 using System;
 using System.Linq;
 
@@ -77,7 +79,7 @@ namespace ICCardManager.Common
             Func<bool> isUiAvailable,
             Action<Action> postToUi,
             Action<Exception> notifyError,
-            Func<DateTime> utcNow = null)
+            Func<DateTime>? utcNow = null)
         {
             _logError = logError ?? throw new ArgumentNullException(nameof(logError));
             _isUiAvailable = isUiAvailable ?? throw new ArgumentNullException(nameof(isUiAvailable));

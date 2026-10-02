@@ -1,3 +1,5 @@
+#nullable enable
+
 using System;
 using System.IO;
 
@@ -29,7 +31,7 @@ namespace ICCardManager.Common
         /// </summary>
         public const string ApplicationFolderName = "ICCardManager";
 
-        private static volatile string _redirectedRootDirectory;
+        private static volatile string? _redirectedRootDirectory;
 
         /// <summary>
         /// 本番の置き場所（<c>C:\ProgramData\ICCardManager</c>）。差し替えの影響を受けない。

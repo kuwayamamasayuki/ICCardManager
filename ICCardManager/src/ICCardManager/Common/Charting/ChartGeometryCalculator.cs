@@ -1,3 +1,5 @@
+#nullable enable
+
 using System;
 using System.Collections.Generic;
 
@@ -87,7 +89,8 @@ namespace ICCardManager.Common.Charting
 
             for (var i = 0; i < values.Count; i++)
             {
-                if (!values[i].HasValue)
+                var nullableValue = values[i];
+                if (!nullableValue.HasValue)
                 {
                     if (current.Count > 0)
                     {
@@ -98,7 +101,7 @@ namespace ICCardManager.Common.Charting
                     continue;
                 }
 
-                var value = values[i].Value;
+                var value = nullableValue.Value;
                 var y = ChartScale.MapToPixel(value, yScale.Min, yScale.Max, area.Bottom, area.Top);
                 current.Add(new ChartPoint(i, centers[i], y, value, markerSize));
             }

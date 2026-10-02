@@ -1,3 +1,5 @@
+#nullable enable
+
 using ICCardManager.Services;
 
 namespace ICCardManager.Common
