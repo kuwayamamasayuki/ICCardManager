@@ -3,6 +3,9 @@
 ### Unreleased
 
 **開発基盤**
+- Issue #2188 **画面操作が必要な手動確認を棚卸しし、FlaUI テストへの置き換え計画を立てた**
+  - 07_テスト設計書の「手動確認・手動検証・実機」の記述を、A（FlaUI で状態を判定）・B（撮影した画像で見た目を判定）・C（人・実機環境が必要）に分類した spec を追加（`docs/superpowers/specs/2026-10-02-issue-2188-manual-check-inventory.md`）
+  - ST-007 の「仮想NFCタッチの再現は不可能」を訂正（Debug 構成では仮想タッチを FlaUI から駆動でき、ST-006b 以降の撮影テストが貸出・返却まで操作している）。M6 の注記も、KeyBinding が F1〜F8 とも整備済みである現状に合わせた
 - Issue #2163 **本体の Null 許容参照型をファイル単位で段階的に有効化する仕組みを入れた**（静的解析の段階導入の第 3 段）
   - 本体は csproj で `<Nullable>` を宣言しておらず（C# 10 の既定で無効）、null 参照の誤りをコンパイラが一切検出していなかった。一括で有効にすると数千件の警告になり警告ゼロと両立しないため、**新規ファイルと改修したファイルの先頭に `#nullable enable` を付ける**方式にした
   - net48 に無いフロー解析用の属性（`NotNullWhen` / `MaybeNullWhen` / `NotNullIfNotNull` / `MemberNotNull(When)` / `DoesNotReturn(If)` / `AllowNull` / `DisallowNull` / `MaybeNull` / `NotNull`）を `Common/Polyfills/NullableAttributes.cs` に internal で定義した
