@@ -510,6 +510,11 @@ namespace ICCardManager.UITests.Infrastructure
         [NotUiaName]
         public const string ConnectionDiagnosticsBusyMessage = "接続診断を実行中...";
 
+        // 処理中オーバーレイの文言（SettingsViewModel.SaveAsync の BeginBusy）。XAML にリテラルとしては現れない。
+        /// <summary>設定の保存中に処理中オーバーレイへ出る文言（Issue #2197。保存中も UI が応答することの目印）。</summary>
+        [NotUiaName]
+        public const string SettingsSavingBusyMessage = "保存中...";
+
         /// <summary>交通系ICカード管理ダイアログの「新規カード登録」ボタン（押すと交通系ICカードのタッチ待ちになる）。</summary>
         [UiaName]
         public const string CardNewRegistrationButton = "新規カード登録";
