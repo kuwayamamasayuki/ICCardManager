@@ -52,6 +52,18 @@ namespace ICCardManager.UITests.PageObjects
         }
 
         /// <summary>
+        /// ボタンが有効になるまで待つ。有効になれば true（Issue #2192）。
+        /// </summary>
+        /// <remarks>
+        /// 有効・無効がバインディング（選択行など）で決まるボタンは、「見つかった」ではなく「有効になった」まで待ってから押す。
+        /// 待たずに Invoke すると <c>ElementNotEnabledException</c> になり、本当の原因（手前の操作が効いていない）が読み取れない。
+        /// </remarks>
+        public bool WaitUntilEnabled(string automationName, TimeSpan? timeout = null) =>
+            Retry.WhileFalse(
+                () => FindByName(automationName)?.IsEnabled == true,
+                timeout ?? TimeSpan.FromSeconds(TestConstants.DialogOpenTimeoutSeconds)).Success;
+
+        /// <summary>
         /// AutomationProperties.Name で要素を検索する。
         /// </summary>
         public AutomationElement? FindByName(string automationName)

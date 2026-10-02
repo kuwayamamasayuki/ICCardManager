@@ -52,7 +52,7 @@ namespace ICCardManager.UITests.Tests
             var cardManage = page.ClickToolbarButtonAndWaitForDialog(
                 TestConstants.OpenCardManageButton, TestConstants.CardManageDialogName);
             SelectCardRow(cardManage, ScreenshotSeedData.NormalCardNumber);
-            WaitUntilEnabled(cardManage, TestConstants.CardDeleteButton);
+            cardManage.WaitUntilEnabled(TestConstants.CardDeleteButton).Should().BeTrue("行を選んだら「削除」ボタンが有効になること");
             cardManage.ClickButton(TestConstants.CardDeleteButton);
 
             // 削除は職員証認証を要する（#429）。認証ダイアログの仮想タッチを押すと、続けて削除確認が出る
@@ -91,15 +91,6 @@ namespace ICCardManager.UITests.Tests
             DatabaseProbe.Count(
                 "SELECT is_deleted FROM ic_card WHERE card_idm = @card",
                 ("@card", ScreenshotSeedData.NormalCardIdm)).Should().Be(0L, "「いいえ」を選んだのでカードは削除されないこと");
-        }
-
-        /// <summary>ボタンが有効になるまで待つ（有効・無効は選択行にバインドされている）。</summary>
-        private static void WaitUntilEnabled(DialogPageBase dialog, string buttonName)
-        {
-            var enabled = Retry.WhileFalse(
-                () => dialog.FindByName(buttonName)?.IsEnabled == true,
-                TimeSpan.FromSeconds(TestConstants.DialogOpenTimeoutSeconds)).Success;
-            enabled.Should().BeTrue($"行を選んだら「{buttonName}」ボタンが有効になること");
         }
     }
 }

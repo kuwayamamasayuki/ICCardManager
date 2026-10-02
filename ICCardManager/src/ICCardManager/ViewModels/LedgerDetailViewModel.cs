@@ -1,3 +1,4 @@
+#nullable enable
 using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
@@ -585,6 +586,10 @@ namespace ICCardManager.ViewModels
             IsBusy = true;
             StatusMessage = "保存中...";
 
+            // Issue #2192: 完了の通知は処理中を解除してから行う（下の finally の後）。通知を受けた View は
+            // 複数グループの保存なら Close() を呼び（#634）、OnClosing の CanClose は処理中なら閉じない（#1743）。
+            // try の中で通知すると、保存は成功しているのにダイアログが開いたまま残る。
+            var completed = false;
             try
             {
                 // Issue #1979: 監査ログ用の「変更前」は、明細の書き換えより前に別インスタンスとして
@@ -671,7 +676,7 @@ namespace ICCardManager.ViewModels
                 StatusMessage = "保存しました";
                 _logger.LogInformation("Saved ledger detail changes for ledger {LedgerId}", _ledger.Id);
 
-                OnSaveCompleted?.Invoke();
+                completed = true;
             }
             catch (Exception ex)
             {
@@ -681,6 +686,11 @@ namespace ICCardManager.ViewModels
             finally
             {
                 IsBusy = false;
+            }
+
+            if (completed)
+            {
+                OnSaveCompleted?.Invoke();
             }
         }
 
@@ -707,6 +717,8 @@ namespace ICCardManager.ViewModels
             IsBusy = true;
             StatusMessage = "分割中...";
 
+            // Issue #2192: 完了の通知は処理中を解除してから行う（SaveAsync と同じ理由）
+            var completed = false;
             try
             {
                 var updatedDetails = Items.Select(item =>
@@ -732,7 +744,7 @@ namespace ICCardManager.ViewModels
                     "Split ledger {LedgerId} into separate ledgers",
                     _ledger.Id);
 
-                OnSaveCompleted?.Invoke();
+                completed = true;
             }
             catch (Exception ex)
             {
@@ -742,6 +754,11 @@ namespace ICCardManager.ViewModels
             finally
             {
                 IsBusy = false;
+            }
+
+            if (completed)
+            {
+                OnSaveCompleted?.Invoke();
             }
         }
 
