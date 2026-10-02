@@ -3,6 +3,9 @@
 ### Unreleased
 
 **開発基盤**
+- Issue #2188 **画面操作が必要な手動確認を棚卸しし、FlaUI テストへの置き換え計画を立てた**
+  - 07_テスト設計書の「手動確認・手動検証・実機」の記述を、A（FlaUI で状態を判定）・B（撮影した画像で見た目を判定）・C（人・実機環境が必要）に分類した spec を追加（`docs/superpowers/specs/2026-10-02-issue-2188-manual-check-inventory.md`）
+  - ST-007 の「仮想NFCタッチの再現は不可能」を訂正（Debug 構成では仮想タッチを FlaUI から駆動でき、ST-006b 以降の撮影テストが貸出・返却まで操作している）。M6 の注記も、KeyBinding が F1〜F8 とも整備済みである現状に合わせた
 - Issue #2162 **本体で .NET アナライザー（CA ルール）を有効にした**（静的解析の段階導入の第 2 段）
   - .NET Framework 4.8 では既定で無効のため、本体の csproj で `EnableNETAnalyzers`・`AnalysisLevel=latest`・`AnalysisMode=Recommended` を明示し、`Microsoft.CodeAnalysis.NetAnalyzers` 8.0.0 をパッケージで版固定した（ビルド時のみ・配布物に含まれない。`THIRD_PARTY_LICENSES.md`・`packages.lock.json` を同期）。有効化直後の警告は約 440 件（Release・重複除く）
   - **是正**: CA2007（`ConfigureAwait(false)` の付け忘れ。静的検査の除外にしていた `LedgerRepository` / `SettingsRepository` / `OperationLogRepository` の 101 か所）、CA1305（書式の文化圏。DB・CSV・操作ログ・ファイル名は `InvariantCulture`、画面・印刷は `CurrentCulture` を明示）、CA1310 / CA1862 / CA1304 / CA1311（文字列比較）、CA1825 / CA1861 / CA1869（配列・`JsonSerializerOptions` の都度生成。操作ログの JSON の書式は `Common/OperationLogJson` に一本化）、CA1822（private メンバーの static 化）、CA2254（ログのテンプレート）ほか
