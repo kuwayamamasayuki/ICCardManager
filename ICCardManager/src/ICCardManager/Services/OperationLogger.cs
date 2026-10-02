@@ -84,7 +84,7 @@ namespace ICCardManager.Services
     /// <remarks>
     /// Issue #1265: 操作者 IDm / 氏名は、呼び出し元引数ではなく
     /// <see cref="ICurrentOperatorContext"/> からのみ解決される。
-    /// 旧シグネチャ (operatorIdm 付き) は [Obsolete] で残存するが、渡された値は無視される。
+    /// 操作者を引数で受け取るオーバーロードは持たない（引数経由のなりすましを構造的に防ぐ。Issue #2164 で旧シグネチャを削除）。
     /// </remarks>
     public class OperationLogger
     {
@@ -780,72 +780,6 @@ namespace ICCardManager.Services
                 AfterData = SerializeToJson(splitLedgers)
             }, transaction).ConfigureAwait(false);
         }
-
-        #endregion
-
-        #region 旧 API (operatorIdm 引数付き) — 後方互換のため残存。引数は無視される (Issue #1265)
-
-        private const string ObsoleteMessage =
-            "Issue #1265: operatorIdm パラメータは監査ログなりすまし防止のため無視されます。" +
-            " ICurrentOperatorContext（StaffAuthService が職員証タッチ成功時に自動設定）経由で操作者を解決します。" +
-            " operatorIdm 引数を取らないオーバーロードに移行してください。";
-
-        /// <inheritdoc cref="LogStaffInsertAsync(Staff)"/>
-        [Obsolete(ObsoleteMessage)]
-        public Task LogStaffInsertAsync(string? operatorIdm, Staff staff) => LogStaffInsertAsync(staff);
-
-        /// <inheritdoc cref="LogStaffUpdateAsync(Staff, Staff)"/>
-        [Obsolete(ObsoleteMessage)]
-        public Task LogStaffUpdateAsync(string? operatorIdm, Staff beforeStaff, Staff afterStaff) =>
-            LogStaffUpdateAsync(beforeStaff, afterStaff);
-
-        /// <inheritdoc cref="LogStaffDeleteAsync(Staff)"/>
-        [Obsolete(ObsoleteMessage)]
-        public Task LogStaffDeleteAsync(string? operatorIdm, Staff staff) => LogStaffDeleteAsync(staff);
-
-        /// <inheritdoc cref="LogStaffRestoreAsync(Staff)"/>
-        [Obsolete(ObsoleteMessage)]
-        public Task LogStaffRestoreAsync(string? operatorIdm, Staff staff) => LogStaffRestoreAsync(staff);
-
-        /// <inheritdoc cref="LogCardInsertAsync(IcCard)"/>
-        [Obsolete(ObsoleteMessage)]
-        public Task LogCardInsertAsync(string? operatorIdm, IcCard card) => LogCardInsertAsync(card);
-
-        /// <inheritdoc cref="LogCardUpdateAsync(IcCard, IcCard)"/>
-        [Obsolete(ObsoleteMessage)]
-        public Task LogCardUpdateAsync(string? operatorIdm, IcCard beforeCard, IcCard afterCard) =>
-            LogCardUpdateAsync(beforeCard, afterCard);
-
-        /// <inheritdoc cref="LogCardDeleteAsync(IcCard)"/>
-        [Obsolete(ObsoleteMessage)]
-        public Task LogCardDeleteAsync(string? operatorIdm, IcCard card) => LogCardDeleteAsync(card);
-
-        /// <inheritdoc cref="LogCardRestoreAsync(IcCard)"/>
-        [Obsolete(ObsoleteMessage)]
-        public Task LogCardRestoreAsync(string? operatorIdm, IcCard card) => LogCardRestoreAsync(card);
-
-        /// <inheritdoc cref="LogLedgerUpdateAsync(Ledger, Ledger)"/>
-        [Obsolete(ObsoleteMessage)]
-        public Task LogLedgerUpdateAsync(string? operatorIdm, Ledger beforeLedger, Ledger afterLedger) =>
-            LogLedgerUpdateAsync(beforeLedger, afterLedger);
-
-        /// <inheritdoc cref="LogLedgerInsertAsync(Ledger)"/>
-        [Obsolete(ObsoleteMessage)]
-        public Task LogLedgerInsertAsync(string? operatorIdm, Ledger ledger) => LogLedgerInsertAsync(ledger);
-
-        /// <inheritdoc cref="LogLedgerDeleteAsync(Ledger)"/>
-        [Obsolete(ObsoleteMessage)]
-        public Task LogLedgerDeleteAsync(string? operatorIdm, Ledger ledger) => LogLedgerDeleteAsync(ledger);
-
-        /// <inheritdoc cref="LogLedgerMergeAsync(IReadOnlyList{Ledger}, Ledger)"/>
-        [Obsolete(ObsoleteMessage)]
-        public Task LogLedgerMergeAsync(string? operatorIdm, IReadOnlyList<Ledger> sourceLedgers, Ledger mergedLedger) =>
-            LogLedgerMergeAsync(sourceLedgers, mergedLedger);
-
-        /// <inheritdoc cref="LogLedgerSplitAsync(Ledger, IReadOnlyList{Ledger})"/>
-        [Obsolete(ObsoleteMessage)]
-        public Task LogLedgerSplitAsync(string? operatorIdm, Ledger originalLedger, IReadOnlyList<Ledger> splitLedgers) =>
-            LogLedgerSplitAsync(originalLedger, splitLedgers);
 
         #endregion
 
