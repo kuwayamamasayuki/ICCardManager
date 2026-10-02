@@ -191,7 +191,7 @@ namespace ICCardManager.UITests.Infrastructure
         // そのまま UIA Name になる（MainWindow.xaml の <Button Content="…"/>）。撮影は開発時にしか
         // 使わないパネルで、読み上げ対象でもないため属性を足していない。Content 由来の Name は
         // 内側の Text 要素とも一致し得るので、探索側は ControlType.Button に限定すること
-        // （TouchScreenshotTests.InvokeDebugPanelButton）。
+        // （TouchOperations.InvokeDebugPanelButton）。
         /// <summary>メイン画面下部の DEBUG パネルの「職員証」ボタン（IDm FFFF000000000001 のタッチを模擬）。</summary>
         [NotUiaName]
         public const string DebugPanelStaffButton = "職員証";
@@ -227,6 +227,44 @@ namespace ICCardManager.UITests.Infrastructure
         /// <summary>返却後に開くバス停名入力ダイアログ。</summary>
         [UiaName]
         public const string BusStopInputDialogName = "バス停名入力ダイアログ";
+
+        // ── 貸出・返却フローと MessageBox のオーナーの回帰テスト（Issue #2190） ────────
+
+        /// <summary>トーストのタイトル・本文の TextBlock の AutomationProperties.HelpText（ToastNotificationWindow.xaml）。</summary>
+        [UiaHelpText]
+        public const string ToastTitleHelpText = "通知タイトル";
+        [UiaHelpText]
+        public const string ToastMessageHelpText = "通知メッセージ";
+
+        // トーストのタイトルは AutomationProperties ではなく、表示のたびに ToastNotificationWindow.ShowLend / ShowReturn が
+        // 設定する文字列そのもの（Name は TextBlock の Text へフォールバックする）。
+        /// <summary>貸出完了トーストのタイトル（<c>ToastNotificationWindow.ShowLend</c>）。</summary>
+        [NotUiaName]
+        public const string LendToastTitle = "いってらっしゃい！";
+
+        /// <summary>返却完了トーストのタイトル（<c>ToastNotificationWindow.ShowReturn</c>）。</summary>
+        [NotUiaName]
+        public const string ReturnToastTitle = "おかえりなさい！";
+
+        // 次の操作ガイドの文言は AutomationProperties.Name="{Binding NextActionMessage}" のバインディングで、
+        // XAML にリテラルとしては現れない（値は MainViewModel.NextActionMessage）。
+        /// <summary>職員証タッチ待ちの「次の操作ガイド」（<c>MainViewModel.NextActionMessage</c> の既定分岐）。</summary>
+        [NotUiaName]
+        public const string NextActionWaitingForStaffCard = "貸出・返却は職員証を、履歴の確認は交通系ICカードをタッチしてください";
+
+        /// <summary>交通系ICカードタッチ待ちの「次の操作ガイド」の末尾（前に「○○さん、」が付く）。</summary>
+        [NotUiaName]
+        public const string NextActionWaitingForIcCardSuffix = "さん、交通系ICカードをタッチしてください";
+
+        /// <summary>バス停名入力ダイアログの入力欄・保存ボタン。</summary>
+        [UiaName]
+        public const string BusStopNameInput = "バス停名";
+        [UiaName]
+        public const string BusStopSaveButton = "バス停名を保存";
+
+        /// <summary>交通系ICカード管理ダイアログの「削除」ボタン（MessageBox のオーナーの回帰テストで確認ダイアログを出すために使う）。</summary>
+        [UiaName]
+        public const string CardDeleteButton = "カード削除";
 
         // ── マニュアル用スクリーンショット 第 3 段階（Issue #2011） ──────
 

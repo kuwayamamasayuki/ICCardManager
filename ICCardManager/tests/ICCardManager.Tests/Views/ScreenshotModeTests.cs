@@ -98,6 +98,29 @@ public class ScreenshotModeTests
             "撮影側が投入する職員の IDm は DebugDataService.TestStaffList の先頭と一致すること");
     }
 
+    /// <summary>
+    /// Issue #2190: UI テストの回帰テスト（貸出・返却フロー等）は、起動時のテストデータ登録を止めるために
+    /// 撮影モードの環境変数をアプリへ渡す（<c>AppFixture.SuppressDebugTestData</c>）。UITests は本体を参照しないので
+    /// 変数名と値はリテラルで持つ。本体側の名前や判定が変わると、テストデータが登録されたまま回帰テストが走り、
+    /// DB を読んで表明する値が投入データだけで決まらなくなる（失敗の原因がテストからは分からない）。
+    /// </summary>
+    [Fact]
+    public void UIテストが渡すテストデータ抑止の環境変数は本体の撮影モードの変数と値に一致する()
+    {
+        var appFixture = TestSourceInspection.RemoveCommentsPreservingLines(ReadUiTestFile("AppFixture.cs"));
+
+        var entry = Regex.Match(
+            appFixture,
+            @"SuppressDebugTestData\s*=.*?\[\s*""(?<name>[^""]+)""\s*\]\s*=\s*""(?<value>[^""]*)""",
+            RegexOptions.Singleline);
+        entry.Success.Should().BeTrue("AppFixture.SuppressDebugTestData に環境変数の初期化子があること");
+
+        entry.Groups["name"].Value.Should().Be(App.ScreenshotModeEnvironmentVariable,
+            "UI テストが渡す変数名は本体が読む撮影モードの変数名と一致すること");
+        App.ResolveScreenshotMode(entry.Groups["value"].Value).Should().BeTrue(
+            "UI テストが渡す値で、本体が撮影モード（＝テストデータ登録を止める）と判定すること");
+    }
+
     [Fact]
     public void App_起動時のテストデータ登録は撮影モードでは行わない()
     {
