@@ -384,18 +384,42 @@ public class SettingsRepositoryTests : IDisposable
 
     #endregion
 
-    #region SkipCompanionCountInputOnReturn テスト（Issue #1906）
+    #region SkipCompanionCountInputOnReturn テスト（Issue #1906 / #2178）
 
+    /// <summary>
+    /// Issue #2178: 未設定（新規導入・設定を一度も保存していない環境）なら、既定で入力を求めない（スキップする）。
+    /// 同期版・非同期版の両方で同じ既定になること。
+    /// </summary>
     [Fact]
-    public async Task GetAppSettingsAsync_Default_SkipCompanionCountInputOnReturnIsFalse()
+    public async Task GetAppSettingsAsync_未設定なら同行者数入力をスキップすること()
     {
         var result = await _repository.GetAppSettingsAsync();
-        result.SkipCompanionCountInputOnReturn.Should().BeFalse();
+        result.SkipCompanionCountInputOnReturn.Should().BeTrue("Issue #2178: 返却時の同行者数入力は既定では求めない");
+        _repository.GetAppSettings().SkipCompanionCountInputOnReturn.Should().BeTrue("同期版の読み込みも同じ既定");
+        new AppSettings().SkipCompanionCountInputOnReturn.Should().BeTrue("モデルの既定もそろえる（設定画面の初期値）");
+    }
+
+    /// <summary>
+    /// Issue #2178 の対: 保存済みの false（既存の環境・複数名利用の部署が無効にした値）は既定で上書きしない。
+    /// 意図して無効にしたのか既定のまま保存されたのかは区別できないため、保存済みの値は尊重する。
+    /// </summary>
+    [Fact]
+    public async Task SaveAndLoadAppSettings_保存済みのfalseは既定で上書きしないこと()
+    {
+        var settings = new AppSettings { WarningBalance = 10000, BackupPath = @"C:\Backup", SkipCompanionCountInputOnReturn = false };
+
+        await _repository.SaveAppSettingsAsync(settings);
+        var loaded = await _repository.GetAppSettingsAsync();
+
+        loaded.SkipCompanionCountInputOnReturn.Should().BeFalse();
+        _repository.GetAppSettings().SkipCompanionCountInputOnReturn.Should().BeFalse("同期版の読み込みも同じキーを見る");
     }
 
     [Fact]
     public async Task SaveAndLoadAppSettings_SkipCompanionCountInputOnReturn_RoundTrip()
     {
+        // 既定（true）と異なる値から保存し直して、true が実際に書かれて読めることを確かめる
+        await _repository.SaveAppSettingsAsync(new AppSettings { WarningBalance = 10000, BackupPath = @"C:\Backup", SkipCompanionCountInputOnReturn = false });
         var settings = new AppSettings { WarningBalance = 10000, BackupPath = @"C:\Backup", SkipCompanionCountInputOnReturn = true };
 
         await _repository.SaveAppSettingsAsync(settings);

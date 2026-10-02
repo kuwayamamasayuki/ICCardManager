@@ -147,7 +147,7 @@ public partial class SettingsViewModel : ViewModelBase
     /// 返却時に同行者数入力ダイアログを自動スキップするかどうか（Issue #1906）
     /// </summary>
     [ObservableProperty]
-    private bool _skipCompanionCountInputOnReturn;
+    private bool _skipCompanionCountInputOnReturn = true; // Issue #2178: モデル（AppSettings）・読み込みの既定とそろえる
 
     /// <summary>
     /// 返却時の同行者数入力を「外0名」として自動的に閉じるまでの秒数（Issue #2009）

@@ -2716,6 +2716,8 @@ public class MainViewModelTests : IDisposable
             .Setup(s => s.GetAppSettingsAsync())
             .ReturnsAsync(new AppSettings
             {
+                // Issue #2178: 既定はスキップ（ダイアログを出さない）になったので、ダイアログの経路を検査するテストは明示的に無効にする
+                SkipCompanionCountInputOnReturn = false,
                 CompanionCountInputTimeoutSeconds = timeoutSeconds,
                 ShowHistoryOnReturn = false,
                 WarningBalance = 500
@@ -2800,6 +2802,8 @@ public class MainViewModelTests : IDisposable
             .ReturnsAsync(() => new AppSettings
             {
                 // 何回目の読み取りかを秒数に刻む（1 回目 = 101）
+                // Issue #2178: 既定はスキップ（ダイアログを出さない）になったので、ダイアログの経路を検査するテストは明示的に無効にする
+                SkipCompanionCountInputOnReturn = false,
                 CompanionCountInputTimeoutSeconds = secondsBase + ++reads,
                 ShowHistoryOnReturn = true,
                 WarningBalance = 500
