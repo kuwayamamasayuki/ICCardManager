@@ -561,6 +561,69 @@ public class LedgerDetailViewModelTests : IDisposable
     }
 
     /// <summary>
+    /// Issue #2192: 保存完了の通知（<see cref="LedgerDetailViewModel.OnSaveCompleted"/>）を受けた View は、
+    /// 複数グループの保存なら <c>Close()</c> を呼ぶ（#634）。その時点で <see cref="LedgerDetailViewModel.IsBusy"/> が
+    /// true のままだと、<see cref="LedgerDetailViewModel.CanClose"/>（#1743）が閉じるのを止め、保存は成功しているのに
+    /// ダイアログが開いたまま残っていた（UI テストで検出）。通知の時点で「閉じてよい状態」になっていることを固定する。
+    /// </summary>
+    [Fact]
+    public async Task SaveAsync_保存完了の通知時点では処理中が解除され確認なしに閉じられること()
+    {
+        // Arrange: 複数グループに分けて保存する（View が自動で閉じる経路）
+        await InitializeWithTestLedgerAsync();
+        AddItems(3);
+        _viewModel.SplitAllCommand.Execute(null);
+        _viewModel.HasMultipleGroups.Should().BeTrue("前提: View が保存後に自動で閉じる複数グループの保存であること");
+
+        _ledgerRepoMock
+            .Setup(r => r.ReplaceDetailsAsync(It.IsAny<int>(), It.IsAny<IEnumerable<LedgerDetail>>()))
+            .ReturnsAsync(true);
+        _ledgerRepoMock.Setup(r => r.UpdateAsync(It.IsAny<Ledger>())).ReturnsAsync(true);
+
+        var notified = 0;
+        bool? busyAtNotification = null;
+        bool? canCloseAtNotification = null;
+        var confirmCalls = 0;
+        _viewModel.OnSaveCompleted = () =>
+        {
+            notified++;
+            busyAtNotification = _viewModel.IsBusy;
+            // View の OnSaveCompleted は Close() を呼び、OnClosing が CanClose で判定する。同じ判定をここで行う
+            canCloseAtNotification = _viewModel.CanClose(() => { confirmCalls++; return false; });
+        };
+
+        // Act
+        await _viewModel.SaveCommand.ExecuteAsync(null);
+
+        // Assert
+        notified.Should().Be(1, "保存が成功したら完了を 1 回通知すること");
+        busyAtNotification.Should().BeFalse("完了を通知する時点で処理中は解除されていること");
+        canCloseAtNotification.Should().BeTrue("完了の通知を受けて閉じようとしたら、閉じられること（#634 の自動クローズ）");
+        confirmCalls.Should().Be(0, "保存した変更を「破棄しますか」と尋ねないこと（#1743）");
+    }
+
+    /// <summary>
+    /// 対: 保存に失敗したら完了を通知しない（失敗したのにダイアログが閉じて、利用者が結果を確かめられなくなる）。
+    /// </summary>
+    [Fact]
+    public async Task SaveAsync_保存に失敗したら完了を通知しないこと()
+    {
+        await InitializeWithTestLedgerAsync();
+        AddItems(3);
+        _viewModel.SplitAllCommand.Execute(null);
+        _ledgerRepoMock
+            .Setup(r => r.ReplaceDetailsAsync(It.IsAny<int>(), It.IsAny<IEnumerable<LedgerDetail>>()))
+            .ReturnsAsync(false);
+        var notified = 0;
+        _viewModel.OnSaveCompleted = () => notified++;
+
+        await _viewModel.SaveCommand.ExecuteAsync(null);
+
+        notified.Should().Be(0, "保存に失敗したら完了を通知しないこと");
+        _viewModel.IsBusy.Should().BeFalse("失敗しても処理中は解除されること");
+    }
+
+    /// <summary>
     /// SaveAsync を走らせるための最小の台帳で ViewModel を初期化する。
     /// </summary>
     private async Task InitializeWithTestLedgerAsync()

@@ -37,7 +37,7 @@ namespace ICCardManager.UITests.Infrastructure
             }
             catch (TimeoutException ex)
             {
-                throw new TimeoutException($"{ex.Message} 見えていたウィンドウ: {DescribeWindows(fixture)}", ex);
+                throw new TimeoutException($"{ex.Message} 見えていたウィンドウ: {DialogLocator.DescribeOpenWindows(fixture)}", ex);
             }
 
             found.ClassName.Should().Be(ClassName, $"「{title}」は Win32 の MessageBox であること");
@@ -53,20 +53,6 @@ namespace ICCardManager.UITests.Infrastructure
                 TimeSpan.FromSeconds(TestConstants.DialogOpenTimeoutSeconds)).Result;
             button.Should().NotBeNull($"MessageBox「{messageBox.Name}」に「{buttonPrefix}」ボタンがあること");
             button!.AsButton().Invoke();
-        }
-
-        /// <summary>待機に失敗したときに、アプリのトップレベルのウィンドウとそのモーダルを列挙する（原因の切り分け用）。</summary>
-        private static string DescribeWindows(AppFixture fixture)
-        {
-            try
-            {
-                return string.Join(" / ", fixture.App.GetAllTopLevelWindows(fixture.Automation).Select(w =>
-                    $"「{w.Name}」({w.ClassName}) モーダル[{string.Join(", ", w.ModalWindows.Select(m => $"「{m.Name}」({m.ClassName})"))}]"));
-            }
-            catch (Exception ex)
-            {
-                return $"（列挙に失敗: {ex.GetType().Name}）";
-            }
         }
     }
 }

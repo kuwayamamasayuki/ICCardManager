@@ -386,5 +386,67 @@ namespace ICCardManager.UITests.Infrastructure
         /// 二段モーダルの取得には長めの待ち時間を確保する（Issue #1522）。
         /// </summary>
         public const int OperationLogDialogOpenTimeoutSeconds = 30;
+
+        // ── ダイアログの閉じる前の確認・Esc・履歴の月送りの回帰テスト（Issue #2192） ────────
+
+        /// <summary>利用履歴詳細ダイアログ（#1743 の閉じる前の確認の対象）。</summary>
+        [UiaName]
+        public const string LedgerDetailDialogName = "利用履歴詳細ダイアログ";
+        [UiaName]
+        public const string LedgerDetailMergeAllButton = "すべて統合";
+        [UiaName]
+        public const string LedgerDetailSaveButton = "保存";
+        [UiaName]
+        public const string LedgerDetailCloseButton = "閉じる";
+        [UiaName]
+        public const string LedgerDetailSplitAllButton = "すべて分割";
+        [UiaName]
+        public const string LedgerDetailSummaryOnlyButton = "摘要のみ更新";
+        [UiaName]
+        public const string LedgerDetailFullSplitButton = "別々の履歴に分割";
+
+        // 保存完了の表示は StatusMessage へのバインドで、XAML にリテラルとしては現れない（LedgerDetailViewModel.SaveAsync）。
+        /// <summary>利用履歴詳細ダイアログで保存が終わったときの表示。</summary>
+        [NotUiaName]
+        public const string LedgerDetailSavedMessage = "保存しました";
+
+        // 履歴一覧の各行の「詳細」ボタンは AutomationProperties.Name を持たず、Content の文字列が UIA Name になる。
+        // 明細を持つ行でだけ有効（IsEnabled="{Binding HasDetails}"）。
+        /// <summary>履歴一覧の行の「詳細」ボタン。</summary>
+        [NotUiaName]
+        public const string HistoryRowDetailButton = "詳細";
+
+        // 未保存の変更の破棄確認（LedgerDetailDialog.ConfirmDiscardChanges）は Win32 の MessageBox で、
+        // タイトルは XAML ではなくコードビハインドが MessageBox.Show へ渡す文字列そのもの。
+        /// <summary>未保存の変更を破棄してよいかの確認 MessageBox のタイトル。</summary>
+        [NotUiaName]
+        public const string DiscardConfirmationTitle = "確認";
+
+        /// <summary>履歴の表示期間を前後の月へ動かす矢印（#2030）。</summary>
+        [UiaName]
+        public const string HistoryPreviousMonthButton = "前の月";
+        [UiaName]
+        public const string HistoryNextMonthButton = "次の月";
+
+        /// <summary>
+        /// 月選択ポップアップの「適用」ボタン。ポップアップが開いていることの目印に使う。
+        /// </summary>
+        /// <remarks>
+        /// ポップアップ自体の名前（XAML の <c>Popup</c> に付いた「月選択ポップアップ」）では探せない。<c>Popup</c> は
+        /// UIA ツリーに現れず、現れるのは中身だけなので、開いていても見つからない（実測。この名前で探した初版は、
+        /// 「開かないこと」の表明が常に緑になっていた）。中身にある要素で判定する。
+        /// </remarks>
+        [UiaName]
+        public const string HistoryMonthSelectorApplyButton = "選択した月を適用";
+
+        /// <summary>交通系ICカード管理ダイアログの「編集」ボタンと、編集フォームの管理番号の入力欄。</summary>
+        [UiaName]
+        public const string CardEditButton = "カード情報編集";
+        [UiaName]
+        public const string CardNumberInput = "管理番号";
+
+        /// <summary>設定ダイアログの残額警告しきい値の入力欄（IsCancel のダイアログで TextBox にフォーカスがある状態を作る）。</summary>
+        [UiaName]
+        public const string SettingsWarningBalanceInput = "残額警告しきい値";
     }
 }

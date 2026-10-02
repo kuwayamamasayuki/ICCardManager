@@ -57,6 +57,48 @@ namespace ICCardManager.UITests.Infrastructure
             return found;
         }
 
+        /// <summary>
+        /// ダイアログが開いているか（Issue #2192）。<see cref="WaitForNestedDialog"/> と同じ 3 か所を探す。
+        /// </summary>
+        /// <remarks>
+        /// 「閉じたこと」を開いた側の ModalWindows だけで判定すると、メイン画面の配下やトップレベルに見えている
+        /// ダイアログを「閉じた」と取り違える。探す場所は開くのを待つときと同じでなければならない。
+        /// </remarks>
+        public static bool IsOpen(AppFixture fixture, Window opener, string dialogName) =>
+            Find(fixture, opener, dialogName) != null;
+
+        /// <summary>
+        /// モーダルのダイアログが閉じるのを待つ（Issue #2192）。閉じたら true。
+        /// </summary>
+        /// <remarks>
+        /// UIA から見つからないことだけで判定すると、一時的な取得失敗（<see cref="Find"/> は例外を「見つからない」へ畳む）を
+        /// 「閉じた」と取り違える。モーダルのダイアログが開いている間はメイン画面が Win32 レベルで無効なので、
+        /// メイン画面が有効に戻ったことを合わせて見る（時間に依存しない別の観測で裏を取る）。
+        /// </remarks>
+        public static bool WaitUntilClosed(AppFixture fixture, Window opener, string dialogName)
+        {
+            var mainHandle = NativeWindows.HandleOf(fixture.MainWindow);
+            return Retry.WhileFalse(
+                () => !IsOpen(fixture, opener, dialogName) && NativeWindows.IsEnabled(mainHandle),
+                TimeSpan.FromSeconds(TestConstants.DialogOpenTimeoutSeconds)).Success;
+        }
+
+        /// <summary>
+        /// アプリのトップレベルのウィンドウとそのモーダルを列挙する（待機に失敗したときの原因の切り分け用。Issue #2190 / #2192）。
+        /// </summary>
+        public static string DescribeOpenWindows(AppFixture fixture)
+        {
+            try
+            {
+                return string.Join(" / ", fixture.App.GetAllTopLevelWindows(fixture.Automation).Select(w =>
+                    $"「{w.Name}」({w.ClassName}) モーダル[{string.Join(", ", w.ModalWindows.Select(m => $"「{m.Name}」({m.ClassName})"))}]"));
+            }
+            catch (Exception ex)
+            {
+                return $"（列挙に失敗: {ex.GetType().Name}）";
+            }
+        }
+
         private static Window? Find(AppFixture fixture, Window opener, string dialogName)
         {
             try
