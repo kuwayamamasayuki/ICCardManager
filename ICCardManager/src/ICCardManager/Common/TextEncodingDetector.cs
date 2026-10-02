@@ -142,7 +142,7 @@ namespace ICCardManager.Common
         /// 復号結果。どの候補でも復号できなかった場合は
         /// <see cref="TextDecodeResult.IsDecoded"/> が false になる
         /// </returns>
-        public static TextDecodeResult Decode(byte[] bytes)
+        public static TextDecodeResult Decode(byte[]? bytes)
         {
             if (bytes == null || bytes.Length == 0)
             {

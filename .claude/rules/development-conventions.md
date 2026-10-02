@@ -65,12 +65,14 @@
 
 本体の csproj は `<Nullable>` を宣言しておらず（C# 10 の既定で無効）、一括で有効にすると数千件の警告になって警告ゼロと両立しない。**新規ファイルと改修したファイルの先頭に `#nullable enable` を付けて**、移行を日常の改修に乗せる（テスト 2 プロジェクトは csproj で有効）。
 
-- **新しく追加する .cs は、1 行目（コメント・空行の後でもよいが、コードより前）に `#nullable enable` を置く**。`enable warnings` / `enable annotations` の片方だけ、途中での `#nullable restore`（本体ではプロジェクト既定＝無効へ戻る）・`disable` は「付いていない」と数える。改修したファイルにも付け、出た警告はその PR で是正する
+- **新しく追加する .cs は、1 行目（コメント・空行の後でもよいが、コードと他のディレクティブ（`#region` / `#if`）より前）に `#nullable enable` を置く**。`enable warnings` / `enable annotations` の片方だけ、途中での `#nullable restore`（本体ではプロジェクト既定＝無効へ戻る）・`disable` は「付いていない」と数える。改修したファイルにも付け、出た警告はその PR で是正する
 - **移行が済んだ層**（現在は `Common/` 配下すべて）へファイルを足すときは例外なく付ける
 - **`#nullable enable` の無いファイル数**は `NullableContextConventionTests.MaxFilesWithoutNullableEnable` で上限を固定している。付けずに足すと上限を超えて赤、移行したのに上限を下げないと実数との差で赤になる — **上限は下げる方向にだけ動かす**（下げ忘れの余裕は、その分だけ付けずに足せる穴になる）。未移行ファイルの一覧を許可リストにする形は、移行のたびに赤くなる誤検出になるので採らない（#1786）
 - **net48 には Null 許容のフロー解析用の属性（`NotNullWhen` / `MaybeNullWhen` / `NotNullIfNotNull` / `MemberNotNullWhen` 等）が無い**ので、`Common/Polyfills/NullableAttributes.cs` に internal で定義している。`TryGet…` 形の `out` 引数は `[NotNullWhen(true)] out T? value`、フラグで非 null を約束するプロパティは `[MemberNotNullWhen(true, nameof(X))]` を付ける（C# 10 のため属性引数に引数名の `nameof` は書けず、`NotNullIfNotNull("source")` のように文字列で書く）
 - **net48 の BCL は Null 許容の注釈を持たない**。`string.IsNullOrEmpty(s)` / `IsNullOrWhiteSpace(s)` で調べた後も `s` は非 null と推論されないので、`s is not null && !string.IsNullOrWhiteSpace(s)` と前置するか、入口で `?? string.Empty` に寄せる（`!` で黙らせない）
 - **`?` を付けるのは「実際に null になり得る」箇所だけ**。null を返す・null を既定値に持つ・null チェックしている — このどれかに当たるなら `?`。`= null!` は「必ず非 null」という宣言で、null チェックしているフィールドには付けない（#1786）
+  - **引数の null チェックは 2 種類ある**。null を受けて既定値を返す・何もしない（**許容**。XML doc に「null の場合は〜」と書いてある形）なら `?` を付ける。null なら例外を投げる（**防御ガード**。`?? throw new ArgumentNullException` 等）なら非 null のままにする。許容なのに非 null 型のままにすると、呼び出し元のファイルを移行した時点で `logger: null` のような正当な呼び出しが CS8625 になり、`null!` で黙らせる方向へ誘導される（#2163 のコードレビューで検出。`SafeRollback.TryRollback` の `logger` は本番の 9 か所で null を渡される）
+  - WPF のインターフェース実装（`IValueConverter.Convert` 等の `object` 引数）は、注釈を持たない元の宣言に合わせてそのままでよい
 - **注釈の変更はテストプロジェクト（Nullable 有効）の警告として現れる**。戻り値を `string?` にすると、それを非 null の引数へ渡すテストで CS8604 が出る。本体だけでなくソリューション全体を Release・Debug でビルドして 0 警告を確かめる
 - 全ファイルの移行が終わったら、csproj に `<Nullable>enable</Nullable>` を置き、各ファイルの `#nullable enable` と `NoWarn` の CS8632 を外す
 

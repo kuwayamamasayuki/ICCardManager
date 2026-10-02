@@ -7,8 +7,10 @@ namespace System.Diagnostics.CodeAnalysis
     //
     // .NET Core 3.0 以降は標準で提供されるが、.NET Framework 4.8 には無い。コンパイラは名前空間と型名で
     // 属性を認識するため、同じ名前の internal 型を 1 度だけ定義すれば net48 でも同じ解析が働く。
-    // internal にするのは、参照する別アセンブリ（テストは InternalsVisibleTo で見える）が自前で同名の型を
-    // 定義したときに公開型どうしの衝突を起こさないため。
+    // internal にするのは、本体を参照する一般のアセンブリへ型を公開しないため（公開すると、参照側が持つ同名の型と衝突する）。
+    // ただし InternalsVisibleTo の相手（ICCardManager.Tests・DebugDataViewer）には internal でも見えるので、
+    // そちらで同名の型を定義したり、同種の Polyfill を含むパッケージ（PolySharp 等）を入れたりすると CS0436 の警告になる。
+    // それらのプロジェクトで属性が必要になったら、自前で定義せず本体のこの定義を使うこと。
 
     /// <summary>入力として null を許す（出力は非 null）。</summary>
     [AttributeUsage(AttributeTargets.Field | AttributeTargets.Parameter | AttributeTargets.Property, Inherited = false)]

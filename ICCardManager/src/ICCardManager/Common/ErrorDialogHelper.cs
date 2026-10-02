@@ -111,7 +111,7 @@ namespace ICCardManager.Common
         /// </remarks>
         /// <param name="exception">記録する例外。<c>null</c> の場合は何もしない。</param>
         /// <param name="context">発生コンテキスト（操作名やメソッド名など。省略可）。</param>
-        public static void LogException(Exception exception, string? context = null)
+        public static void LogException(Exception? exception, string? context = null)
         {
             if (exception == null)
             {

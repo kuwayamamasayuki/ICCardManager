@@ -113,7 +113,7 @@ namespace ICCardManager.Common
         /// 補完する根拠が無いため null のまま残し、折れ線を描き始めない。
         /// </remarks>
         internal static IReadOnlyList<double?> CarryForward(
-            IReadOnlyList<double?> monthlyValues, double? initialValue = null)
+            IReadOnlyList<double?>? monthlyValues, double? initialValue = null)
         {
             if (monthlyValues == null || monthlyValues.Count == 0)
             {

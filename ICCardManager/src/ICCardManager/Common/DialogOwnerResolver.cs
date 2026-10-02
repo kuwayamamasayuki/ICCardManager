@@ -114,7 +114,7 @@ namespace ICCardManager.Common
         /// </param>
         /// <param name="windowHandles">候補（<c>Application.Windows</c> 全体）のウィンドウハンドル</param>
         /// <returns>true なら呼び出し側は null を返し、ownerless で表示する</returns>
-        internal static bool ShouldDeferToNativeActiveWindow(IntPtr activeHandle, IEnumerable<IntPtr> windowHandles)
+        internal static bool ShouldDeferToNativeActiveWindow(IntPtr activeHandle, IEnumerable<IntPtr>? windowHandles)
         {
             if (activeHandle == IntPtr.Zero)
             {

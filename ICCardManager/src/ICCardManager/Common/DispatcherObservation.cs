@@ -110,7 +110,7 @@ namespace ICCardManager.Common
         /// （<see cref="ErrorDialogHelper.LogException"/>）を再利用する。ダイアログは出さない
         /// （error-messages.md Issue #1817「ILogger を持たない層では ErrorDialogHelper.LogException」）。
         /// </remarks>
-        internal static void Observe(Task task, string operationName)
+        internal static void Observe(Task? task, string operationName)
         {
             Observe(task, operationName, ErrorDialogHelper.LogException);
         }
@@ -135,7 +135,7 @@ namespace ICCardManager.Common
         /// （<see cref="SafeRollback"/> と同じ判断）。
         /// </para>
         /// </remarks>
-        internal static void Observe(Task task, string operationName, Action<Exception, string> logException)
+        internal static void Observe(Task? task, string operationName, Action<Exception, string> logException)
         {
             if (logException == null)
             {

@@ -106,7 +106,7 @@ public class NullableContextConventionTests
             files.Should().NotBeEmpty($"移行済みディレクトリ {directory} が実在し、走査できていること");
 
             var violations = files
-                .Where(f => !HasFileWideNullableEnable(f.Text))
+                .Where(f => !HasFileWideNullableEnableInCodeOnly(f.CodeOnlyPreservingLines))
                 .Select(f => $"  - {f.RelativePath}")
                 .ToList();
 
@@ -126,9 +126,9 @@ public class NullableContextConventionTests
         var files = ProductionSourceFiles.CSharp;
         files.Should().HaveCountGreaterThan(100, "本番ソースの走査が空振りしていないこと");
 
-        files.Should().Contain(f => HasFileWideNullableEnable(f.Text),
+        files.Should().Contain(f => HasFileWideNullableEnableInCodeOnly(f.CodeOnlyPreservingLines),
             "移行済みのファイル（Common 配下）を enable と判定できていること");
-        files.Should().Contain(f => !HasFileWideNullableEnable(f.Text),
+        files.Should().Contain(f => !HasFileWideNullableEnableInCodeOnly(f.CodeOnlyPreservingLines),
             "未移行のファイルを enable でないと判定できていること（全件 true になる判定は上限値の検査を無力化する）");
     }
 
@@ -141,8 +141,9 @@ public class NullableContextConventionTests
     /// </summary>
     /// <remarks>
     /// コンパイラは名前空間と型名で属性を認識するため、net48 でも同名の型があれば解析が働く。
-    /// <b>internal</b> であることも表明する — public にすると、本体を参照するアセンブリが自前で同じ型を
-    /// 定義したとき（.NET Core 以降の BCL を含む）に型の衝突（CS0433）を起こす。
+    /// <b>internal</b> であることも表明する — public にすると、本体を参照する一般のアセンブリへ型が公開され、
+    /// 参照側の同名の型と衝突する。InternalsVisibleTo の相手（本テスト・DebugDataViewer）には internal でも見えるため、
+    /// そちらで同名の型を定義すると CS0436 になる（自前で定義せず本体の定義を使う）。
     /// </remarks>
     [Theory]
     [MemberData(nameof(PolyfilledAttributeNames))]
@@ -203,6 +204,8 @@ public class NullableContextConventionTests
     [InlineData("#nullable enable annotations\r\nusing System;\r\n", "annotations だけでは警告が出ない")]
     [InlineData("#nullable enable\r\nclass A { }\r\n#nullable restore\r\nclass B { }\r\n", "本体の restore はプロジェクト既定（無効）へ戻す")]
     [InlineData("#nullable enable\r\nclass A { }\r\n#nullable disable warnings\r\nclass B { }\r\n", "途中で一部を無効にしている")]
+    [InlineData("#region R\r\n#nullable enable\r\n#endregion\r\nusing System;\r\n", "他のディレクティブより後ろ（規約は最初の行に置く）")]
+    [InlineData("#if DEBUG\r\n#nullable enable\r\n#endif\r\nusing System;\r\n", "#if の中は構成によって効かない")]
     [InlineData("// #nullable enable\r\nusing System;\r\n", "コメントの中は数えない")]
     [InlineData("class C { const string S = @\"\r\n#nullable enable\r\n\"; }\r\n", "文字列リテラルの中は数えない")]
     public void 判定_ファイル全体へ効いていない形をenableと判定しないこと(string source, string reason)
@@ -224,8 +227,19 @@ public class NullableContextConventionTests
     /// コメント・文字列リテラルの中のディレクティブは数えない。
     /// </remarks>
     internal static bool HasFileWideNullableEnable(string source)
+        => HasFileWideNullableEnableInCodeOnly(TestSourceInspection.ToCodeOnlyPreservingLines(source.TrimStart('﻿')));
+
+    /// <summary>
+    /// <see cref="HasFileWideNullableEnable"/> の、コメントと文字列リテラルを剥がし済みの入力版
+    /// （実データは <see cref="ProductionSourceFiles.SourceFile.CodeOnlyPreservingLines"/> のキャッシュを使う）。
+    /// </summary>
+    /// <remarks>
+    /// <c>#region</c> / <c>#if</c> など他のディレクティブが <c>#nullable enable</c> より前にある形も「有効でない」と数える
+    /// （<c>#if</c> の中に置くと構成によって効かなくなるため。安全側に倒し、規約も「最初の行」に置くことにしている）。
+    /// </remarks>
+    private static bool HasFileWideNullableEnableInCodeOnly(string codeOnly)
     {
-        var codeLines = TestSourceInspection.ToCodeOnlyPreservingLines(source.TrimStart('﻿'))
+        var codeLines = codeOnly
             .Split('\n')
             .Select(line => line.Trim())
             .Where(line => line.Length > 0)
@@ -247,7 +261,7 @@ public class NullableContextConventionTests
 
     private static List<string> FilesWithoutFileWideNullableEnable()
         => ProductionSourceFiles.CSharp
-            .Where(f => !HasFileWideNullableEnable(f.Text))
+            .Where(f => !HasFileWideNullableEnableInCodeOnly(f.CodeOnlyPreservingLines))
             .Select(f => f.RelativePath)
             .ToList();
 }

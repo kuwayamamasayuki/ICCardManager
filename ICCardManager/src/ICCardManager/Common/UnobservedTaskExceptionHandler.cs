@@ -97,7 +97,7 @@ namespace ICCardManager.Common
         /// UnobservedTaskExceptionEventArgs.SetObserved() を済ませておくこと。
         /// 本メソッドはいかなる例外も外へ伝播させない。
         /// </remarks>
-        public void Handle(AggregateException exception)
+        public void Handle(AggregateException? exception)
         {
             if (exception == null)
             {
