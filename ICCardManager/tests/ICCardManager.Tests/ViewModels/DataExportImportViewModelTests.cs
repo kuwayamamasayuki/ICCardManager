@@ -330,6 +330,36 @@ public class DataExportImportViewModelTests : IDisposable
             Times.Once);
     }
 
+    #region 部分成功の案内（Issue #1781 / #2176）
+
+    /// <summary>
+    /// Issue #2176: 利用履歴詳細の取り込みは利用履歴 ID ごと・カードと日付ごとに巻き戻すため、エラー一覧に出る行
+    /// （巻き戻した範囲の先頭の 1 行）より巻き戻った範囲が広いことがある。「エラー一覧の行だけ」を取り込み直すと
+    /// 残りの行が欠けるので、範囲はエラーの文言が名指しすると案内すること。
+    /// </summary>
+    [Fact]
+    public void BuildPartialImportGuidance_登録済みがあるとき_取り込み直す範囲はエラーの文言が名指しすると案内すること()
+    {
+        var guidance = DataExportImportViewModel.BuildPartialImportGuidance(3);
+
+        guidance.Should().Contain("登録された3件は取り込みが確定済み");
+        guidance.Should().Contain("二重登録");
+        guidance.Should().Contain("エラーの文言が取り込み直す範囲を示している場合は、その範囲の行");
+        guidance.Should().EndWith("インポートしてください。");
+    }
+
+    /// <summary>対: 登録済みが無いときは二重登録に触れない（#1781）。</summary>
+    [Fact]
+    public void BuildPartialImportGuidance_登録済みが無いとき_二重登録に触れないこと()
+    {
+        var guidance = DataExportImportViewModel.BuildPartialImportGuidance(0);
+
+        guidance.Should().Contain("登録が確定した行はありません");
+        guidance.Should().NotContain("二重登録");
+    }
+
+    #endregion
+
     #region HasImported フラグ（Issue #744）
 
     /// <summary>

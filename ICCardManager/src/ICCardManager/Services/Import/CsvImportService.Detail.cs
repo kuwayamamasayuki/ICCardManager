@@ -470,7 +470,8 @@ namespace ICCardManager.Services
             // Issue #1955: 摘要の再生成は DB に保存された部署種別に従う（新規作成・既存更新で同じ
             // インスタンスを使い、「経路によって設定が効いたり効かなかったり」する形を残さない）
             var summaryGenerator = await CreateSummaryGeneratorAsync().ConfigureAwait(false);
-            var newLedgerBuilder = new NewLedgerFromSegmentsBuilder(_ledgerRepository, summaryGenerator, _logger);
+            // Issue #2176: 新規作成もグループ（カード IDm＋日付）ごとに 1 トランザクションで確定する
+            var newLedgerBuilder = new NewLedgerFromSegmentsBuilder(_ledgerRepository, _dbContext, summaryGenerator, _logger);
             foreach (var kvp in newDetailsByCardIdmAndDate)
             {
                 importedCount += await newLedgerBuilder.BuildAndInsertAsync(
@@ -648,7 +649,7 @@ namespace ICCardManager.Services
         private static string BuildParentLedgerConflictMessage(int ledgerId)
             => $"利用履歴ID {ledgerId} の明細を取り込めませんでした。" +
                "他のパソコンや別の操作でこの履歴が削除された可能性があります。" +
-               "履歴画面でこの履歴の有無を確認し、必要な場合は利用履歴IDを空欄にした明細CSVを再度インポートして新規の履歴として登録してください。";
+               "履歴画面でこの履歴の有無を確認し、必要な場合は、この利用履歴IDの行だけを残して利用履歴IDを空欄にした明細CSVを再度インポートし、新規の履歴として登録してください。";
 
         /// <summary>
         /// 明細の INSERT が 0 行だった（<c>ReplaceDetailsAsync</c> が <c>false</c>）ときのエラー文言。
@@ -661,7 +662,8 @@ namespace ICCardManager.Services
         private static string BuildDetailInsertShortfallMessage(int ledgerId)
             => $"利用履歴ID {ledgerId} の明細を置き換えられませんでした。" +
                "明細の一部を登録できなかったため、この履歴の明細・摘要・金額は変更されていません。" +
-               "しばらく待ってから、もう一度インポートしてください。";
+               // Issue #2176: CSV 全体を取り込み直すと、取り込めた利用履歴 ID 空欄の行（重複を判定しない。#1781）が二重になる
+               "しばらく待ってから、この利用履歴IDの行だけを残したCSVで、もう一度インポートしてください。";
 
         /// <summary>カード IDm の桁数（16進16文字）。</summary>
         private const int IdmLength = 16;
@@ -752,7 +754,9 @@ namespace ICCardManager.Services
             var reason = ExceptionMessageFormatter.ToReason(ex);
 
             return $"利用履歴ID {ledgerId} の明細を置き換えられませんでした。{reason}" +
-                   "この履歴の明細・摘要・金額は変更されていません。しばらく待ってから、もう一度インポートしてください。";
+                   "この履歴の明細・摘要・金額は変更されていません。" +
+                   // Issue #2176: CSV 全体を取り込み直すと、取り込めた利用履歴 ID 空欄の行（#1781）が二重になる
+                   "しばらく待ってから、この利用履歴IDの行だけを残したCSVで、もう一度インポートしてください。";
         }
 
         // 差分の値（OldValue / NewValue）はプレビューに表示するが、CSV のセルと同じ書式で見せるため

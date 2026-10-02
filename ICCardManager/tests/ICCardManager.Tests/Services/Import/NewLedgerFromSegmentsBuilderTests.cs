@@ -4,12 +4,15 @@ using System.Data.SQLite;
 using System.Linq;
 using System.Threading.Tasks;
 using FluentAssertions;
+using ICCardManager.Common;
 using ICCardManager.Common.Exceptions;
+using ICCardManager.Data;
 using ICCardManager.Data.Repositories;
 using ICCardManager.Infrastructure.Security;
 using ICCardManager.Models;
 using ICCardManager.Services;
 using ICCardManager.Services.Import.Builders;
+using ICCardManager.Tests.Data;
 using ICCardManager.Tests.Infrastructure;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -22,9 +25,22 @@ namespace ICCardManager.Tests.Services.Import;
 /// <see cref="NewLedgerFromSegmentsBuilder"/> の単体テスト（Issue #1284 Task 8）。
 /// 利用履歴 ID 空欄の詳細行から segment 分割を伴って新規 Ledger を作成する責務を検証する。
 /// </summary>
-public class NewLedgerFromSegmentsBuilderTests
+/// <remarks>
+/// Issue #2176: Builder はグループごとにトランザクションを開くため、実体のあるスコープを返す
+/// in-memory の <see cref="DbContext"/> を渡す（リポジトリはモック）。巻き戻ったかは DB を読んで確かめる
+/// 必要があるため、実リポジトリでの検証は <c>CsvImportServiceNewLedgerTransactionTests</c> が受け持つ。
+/// </remarks>
+public class NewLedgerFromSegmentsBuilderTests : IDisposable
 {
     private const string CardIdm = "0102030405060708";
+
+    private readonly DbContext _dbContext = TestDbContextFactory.Create();
+
+    public void Dispose()
+    {
+        _dbContext.Dispose();
+        GC.SuppressFinalize(this);
+    }
 
     private static LedgerDetail Usage(DateTime useDate, int amount, int balance) =>
         new LedgerDetail
@@ -44,7 +60,7 @@ public class NewLedgerFromSegmentsBuilderTests
     {
         // Arrange - 空リスト
         var repoMock = new Mock<ILedgerRepository>();
-        var builder = new NewLedgerFromSegmentsBuilder(repoMock.Object, new SummaryGenerator(), NullLogger.Instance);
+        var builder = new NewLedgerFromSegmentsBuilder(repoMock.Object, _dbContext, new SummaryGenerator(), NullLogger.Instance);
         var errors = new List<CsvImportError>();
 
         // Act
@@ -57,9 +73,9 @@ public class NewLedgerFromSegmentsBuilderTests
         // Assert
         count.Should().Be(0);
         errors.Should().BeEmpty();
-        repoMock.Verify(r => r.InsertAsync(It.IsAny<Ledger>()), Times.Never);
+        repoMock.Verify(r => r.InsertAsync(It.IsAny<Ledger>(), It.IsAny<SQLiteTransaction>()), Times.Never);
         repoMock.Verify(
-            r => r.InsertDetailsAsync(It.IsAny<int>(), It.IsAny<IEnumerable<LedgerDetail>>()),
+            r => r.InsertDetailsAsync(It.IsAny<int>(), It.IsAny<IEnumerable<LedgerDetail>>(), It.IsAny<SQLiteTransaction>()),
             Times.Never);
     }
 
@@ -68,11 +84,11 @@ public class NewLedgerFromSegmentsBuilderTests
     {
         // Arrange - 通常利用 1 件
         var repoMock = new Mock<ILedgerRepository>();
-        repoMock.Setup(r => r.InsertAsync(It.IsAny<Ledger>())).ReturnsAsync(100);
-        repoMock.Setup(r => r.InsertDetailsAsync(It.IsAny<int>(), It.IsAny<IEnumerable<LedgerDetail>>()))
+        repoMock.Setup(r => r.InsertAsync(It.IsAny<Ledger>(), It.IsAny<SQLiteTransaction>())).ReturnsAsync(100);
+        repoMock.Setup(r => r.InsertDetailsAsync(It.IsAny<int>(), It.IsAny<IEnumerable<LedgerDetail>>(), It.IsAny<SQLiteTransaction>()))
             .ReturnsAsync(true);
 
-        var builder = new NewLedgerFromSegmentsBuilder(repoMock.Object, new SummaryGenerator(), NullLogger.Instance);
+        var builder = new NewLedgerFromSegmentsBuilder(repoMock.Object, _dbContext, new SummaryGenerator(), NullLogger.Instance);
         var errors = new List<CsvImportError>();
         var detail = Usage(new DateTime(2024, 3, 1, 8, 0, 0), amount: 260, balance: 9740);
 
@@ -90,10 +106,10 @@ public class NewLedgerFromSegmentsBuilderTests
         repoMock.Verify(r => r.InsertAsync(It.Is<Ledger>(
             l => l.CardIdm == CardIdm && l.Date == new DateTime(2024, 3, 1)
                  && l.Summary == "鉄道（博多～天神）"
-                 && l.Income == 0 && l.Expense == 260 && l.Balance == 9740)),
+                 && l.Income == 0 && l.Expense == 260 && l.Balance == 9740), It.IsAny<SQLiteTransaction>()),
             Times.Once);
         repoMock.Verify(
-            r => r.InsertDetailsAsync(100, It.IsAny<IEnumerable<LedgerDetail>>()),
+            r => r.InsertDetailsAsync(100, It.IsAny<IEnumerable<LedgerDetail>>(), It.IsAny<SQLiteTransaction>()),
             Times.Once);
     }
 
@@ -114,12 +130,12 @@ public class NewLedgerFromSegmentsBuilderTests
         var repoMock = new Mock<ILedgerRepository>();
         var insertedLedgers = new List<Ledger>();
         var nextId = 500;
-        repoMock.Setup(r => r.InsertAsync(It.IsAny<Ledger>()))
-            .Callback<Ledger>(l => insertedLedgers.Add(l))
+        repoMock.Setup(r => r.InsertAsync(It.IsAny<Ledger>(), It.IsAny<SQLiteTransaction>()))
+            .Callback<Ledger, SQLiteTransaction>((l, _) => insertedLedgers.Add(l))
             .ReturnsAsync(() => nextId++);
         var insertedDetails = new Dictionary<int, List<LedgerDetail>>();
-        repoMock.Setup(r => r.InsertDetailsAsync(It.IsAny<int>(), It.IsAny<IEnumerable<LedgerDetail>>()))
-            .Callback<int, IEnumerable<LedgerDetail>>((id, details) => insertedDetails[id] = details.ToList())
+        repoMock.Setup(r => r.InsertDetailsAsync(It.IsAny<int>(), It.IsAny<IEnumerable<LedgerDetail>>(), It.IsAny<SQLiteTransaction>()))
+            .Callback<int, IEnumerable<LedgerDetail>, SQLiteTransaction>((id, details, _) => insertedDetails[id] = details.ToList())
             .ReturnsAsync(true);
 
         var useDate = new DateTime(2024, 3, 1);
@@ -135,7 +151,7 @@ public class NewLedgerFromSegmentsBuilderTests
         evening.EntryStation = "薬院";
         evening.ExitStation = "大橋";
 
-        var builder = new NewLedgerFromSegmentsBuilder(repoMock.Object, new SummaryGenerator(), NullLogger.Instance);
+        var builder = new NewLedgerFromSegmentsBuilder(repoMock.Object, _dbContext, new SummaryGenerator(), NullLogger.Instance);
         var errors = new List<CsvImportError>();
 
         // Act - CSV の並び（新しい順）で渡す
@@ -190,11 +206,11 @@ public class NewLedgerFromSegmentsBuilderTests
     {
         // Arrange - 同一日の利用 3 件（時系列昇順。残高は減っていく）
         var repoMock = new Mock<ILedgerRepository>();
-        repoMock.Setup(r => r.InsertAsync(It.IsAny<Ledger>())).ReturnsAsync(300);
+        repoMock.Setup(r => r.InsertAsync(It.IsAny<Ledger>(), It.IsAny<SQLiteTransaction>())).ReturnsAsync(300);
 
         List<LedgerDetail> insertedDetails = null;
-        repoMock.Setup(r => r.InsertDetailsAsync(It.IsAny<int>(), It.IsAny<IEnumerable<LedgerDetail>>()))
-            .Callback<int, IEnumerable<LedgerDetail>>((_, details) => insertedDetails = details.ToList())
+        repoMock.Setup(r => r.InsertDetailsAsync(It.IsAny<int>(), It.IsAny<IEnumerable<LedgerDetail>>(), It.IsAny<SQLiteTransaction>()))
+            .Callback<int, IEnumerable<LedgerDetail>, SQLiteTransaction>((_, details, _) => insertedDetails = details.ToList())
             .ReturnsAsync(true);
 
         var useDate = new DateTime(2024, 3, 1);
@@ -208,7 +224,7 @@ public class NewLedgerFromSegmentsBuilderTests
         third.EntryStation = "姪浜";
         third.ExitStation = "西新";
 
-        var builder = new NewLedgerFromSegmentsBuilder(repoMock.Object, new SummaryGenerator(), NullLogger.Instance);
+        var builder = new NewLedgerFromSegmentsBuilder(repoMock.Object, _dbContext, new SummaryGenerator(), NullLogger.Instance);
         var errors = new List<CsvImportError>();
 
         // Act
@@ -238,13 +254,13 @@ public class NewLedgerFromSegmentsBuilderTests
         // Arrange - groupDate が MinValue のときは detail.UseDate（最古）を Ledger.Date に採用
         var repoMock = new Mock<ILedgerRepository>();
         Ledger insertedLedger = null;
-        repoMock.Setup(r => r.InsertAsync(It.IsAny<Ledger>()))
-            .Callback<Ledger>(l => insertedLedger = l)
+        repoMock.Setup(r => r.InsertAsync(It.IsAny<Ledger>(), It.IsAny<SQLiteTransaction>()))
+            .Callback<Ledger, SQLiteTransaction>((l, _) => insertedLedger = l)
             .ReturnsAsync(200);
-        repoMock.Setup(r => r.InsertDetailsAsync(It.IsAny<int>(), It.IsAny<IEnumerable<LedgerDetail>>()))
+        repoMock.Setup(r => r.InsertDetailsAsync(It.IsAny<int>(), It.IsAny<IEnumerable<LedgerDetail>>(), It.IsAny<SQLiteTransaction>()))
             .ReturnsAsync(true);
 
-        var builder = new NewLedgerFromSegmentsBuilder(repoMock.Object, new SummaryGenerator(), NullLogger.Instance);
+        var builder = new NewLedgerFromSegmentsBuilder(repoMock.Object, _dbContext, new SummaryGenerator(), NullLogger.Instance);
         var errors = new List<CsvImportError>();
 
         var earlier = Usage(new DateTime(2024, 5, 10, 8, 0, 0), amount: 260, balance: 9740);
@@ -273,11 +289,11 @@ public class NewLedgerFromSegmentsBuilderTests
     {
         // Arrange - InsertDetailsAsync が false を返す
         var repoMock = new Mock<ILedgerRepository>();
-        repoMock.Setup(r => r.InsertAsync(It.IsAny<Ledger>())).ReturnsAsync(300);
-        repoMock.Setup(r => r.InsertDetailsAsync(It.IsAny<int>(), It.IsAny<IEnumerable<LedgerDetail>>()))
+        repoMock.Setup(r => r.InsertAsync(It.IsAny<Ledger>(), It.IsAny<SQLiteTransaction>())).ReturnsAsync(300);
+        repoMock.Setup(r => r.InsertDetailsAsync(It.IsAny<int>(), It.IsAny<IEnumerable<LedgerDetail>>(), It.IsAny<SQLiteTransaction>()))
             .ReturnsAsync(false);
 
-        var builder = new NewLedgerFromSegmentsBuilder(repoMock.Object, new SummaryGenerator(), NullLogger.Instance);
+        var builder = new NewLedgerFromSegmentsBuilder(repoMock.Object, _dbContext, new SummaryGenerator(), NullLogger.Instance);
         var errors = new List<CsvImportError>();
         var detail = Usage(new DateTime(2024, 6, 1, 8, 0, 0), amount: 260, balance: 9740);
 
@@ -297,18 +313,53 @@ public class NewLedgerFromSegmentsBuilderTests
         errors[0].Message.Should().Contain(IdmMasker.Mask(CardIdm));
         errors[0].Message.Should().NotContain(CardIdm, "生の IDm を画面へ出さないこと（#1852）");
         // 3 要素（何が／なぜ／どうすれば）を満たし、行動指示で終わること。
-        errors[0].Message.Should().Contain("登録できませんでした");
-        errors[0].Message.Should().EndWith("取り込んでください。");
-        // Issue #1986（コードレビューで検出）: この分岐は InsertAsync がコミット済みの状態で
-        // 到達し、明細を持たない台帳の行が残る。そのまま再取込すると CSV の利用履歴 ID は
-        // 空欄のままなので 2 つ目の台帳が作られ、6 年保存の台帳が二重計上になる。
-        // 「そのまま取り込み直せ」と読める案内を出さないことを表明する。
+        // Issue #2176: 台帳の行と明細は同じトランザクションで巻き戻るので、この日の行は何も登録されていない。
+        // 文言は Builder の 1 か所で組み立てる（完全一致で比べ、旧文言へ戻る退行を検出する）。
+        errors[0].Message.Should().Be(
+            NewLedgerFromSegmentsBuilder.BuildNotRegisteredMessage(IdmMasker.Mask(CardIdm), new DateTime(2024, 6, 1), reason: null));
+        errors[0].Message.Should().Contain("2024/06/01", "どの日の行を取り込み直すかを名指しすること");
+        errors[0].Message.Should().Contain("このカードのこの日の行は台帳に登録されていません");
+        errors[0].Message.Should().EndWith("取り込み直してください。");
+        // #1986 の旧文言は「台帳の行だけが残っている」前提で後始末を頼んでいた。その状態はもう起きない
+        errors[0].Message.Should().NotContain("不要な行を削除");
+        // CSV 全体を取り込み直すと、成功した他の日（利用履歴 ID が空欄）が二重に登録される（#1781）
         errors[0].Message.Should().Contain("二重に登録される");
-        errors[0].Message.Should().Contain("不要な行を削除");
         // 原因を断定しない（台帳 ID はこの取込がミリ秒前に採番したもので、他 PC の競合ではない）
         errors[0].Message.Should().NotContain("他のパソコン");
         // Data は突き合わせ用の内部キーであり、画面にもログにも出ないため生のまま保持する。
         errors[0].Data.Should().Be(CardIdm);
+    }
+
+    /// <summary>
+    /// Issue #2176: 全行に利用日時が無いグループでは、台帳の日付を「今日」で補っている。
+    /// その日付を名指しすると CSV の行と対応しないため、日付を出さずに「利用日時の無い行」と案内すること。
+    /// </summary>
+    [Fact]
+    public async Task BuildAndInsertAsync_InsertDetailsFails_日付不明のグループでは日付を名指ししないこと()
+    {
+        // Arrange - groupDate=MinValue かつ UseDate も無い
+        var repoMock = new Mock<ILedgerRepository>();
+        repoMock.Setup(r => r.InsertAsync(It.IsAny<Ledger>(), It.IsAny<SQLiteTransaction>())).ReturnsAsync(301);
+        repoMock.Setup(r => r.InsertDetailsAsync(It.IsAny<int>(), It.IsAny<IEnumerable<LedgerDetail>>(), It.IsAny<SQLiteTransaction>()))
+            .ReturnsAsync(false);
+
+        var builder = new NewLedgerFromSegmentsBuilder(repoMock.Object, _dbContext, new SummaryGenerator(), NullLogger.Instance);
+        var errors = new List<CsvImportError>();
+        var detail = Usage(new DateTime(2024, 6, 1), amount: 260, balance: 9740);
+        detail.UseDate = null;
+
+        // Act
+        await builder.BuildAndInsertAsync(
+            CardIdm,
+            DateTime.MinValue,
+            new List<(int LineNumber, LedgerDetail Detail)> { (LineNumber: 21, Detail: detail) },
+            errors);
+
+        // Assert
+        var message = errors.Should().ContainSingle().Subject.Message;
+        message.Should().Be(NewLedgerFromSegmentsBuilder.BuildNotRegisteredMessage(IdmMasker.Mask(CardIdm), null, reason: null));
+        message.Should().Contain("利用日時の無い行");
+        message.Should().NotContain(DisplayFormatters.FormatDate(DateTime.Now), "補った「今日」の日付を名指ししない");
     }
 
     [Fact]
@@ -317,10 +368,10 @@ public class NewLedgerFromSegmentsBuilderTests
         // Arrange - InsertAsync が例外を投げる
         var repoMock = new Mock<ILedgerRepository>();
         var boomMessage = "DB connection lost";
-        repoMock.Setup(r => r.InsertAsync(It.IsAny<Ledger>()))
+        repoMock.Setup(r => r.InsertAsync(It.IsAny<Ledger>(), It.IsAny<SQLiteTransaction>()))
             .ThrowsAsync(new InvalidOperationException(boomMessage));
 
-        var builder = new NewLedgerFromSegmentsBuilder(repoMock.Object, new SummaryGenerator(), NullLogger.Instance);
+        var builder = new NewLedgerFromSegmentsBuilder(repoMock.Object, _dbContext, new SummaryGenerator(), NullLogger.Instance);
         var errors = new List<CsvImportError>();
         var detail = Usage(new DateTime(2024, 7, 1, 8, 0, 0), amount: 260, balance: 9740);
 
@@ -339,9 +390,15 @@ public class NewLedgerFromSegmentsBuilderTests
         errors[0].Message.Should().NotContain(CardIdm, "生の IDm を画面へ出さないこと（#1852）");
         errors[0].Message.Should().NotContain(
             boomMessage, "生の ex.Message を画面へ出さないこと（#1614）");
-        // ExceptionMessageFormatter.ToUserMessage が組み立てる 3 要素の文言であること。
-        errors[0].Message.Should().Contain("利用履歴の自動作成に失敗しました。");
-        errors[0].Message.Should().EndWith("してください。");
+        // Issue #2176: 巻き戻したのでこの日の行は何も残っていない。取り込み直す範囲を名指しし、
+        // 例外からは「なぜ」だけを埋め込む（ToUserMessage の「再度実行してください」に従って CSV 全体を
+        // 取り込み直すと、取り込めていた他の日が二重に登録されるため）。
+        errors[0].Message.Should().Be(NewLedgerFromSegmentsBuilder.BuildNotRegisteredMessage(
+            IdmMasker.Mask(CardIdm), new DateTime(2024, 7, 1),
+            ExceptionMessageFormatter.ToReason(new InvalidOperationException(boomMessage))));
+        errors[0].Message.Should().Contain("このカードのこの日の行は台帳に登録されていません");
+        errors[0].Message.Should().Contain("このカードのこの日の行だけ");
+        errors[0].Message.Should().NotContain("再度実行してください", "CSV 全体の取り込み直しへ誘導しない");
         errors[0].Data.Should().Be(CardIdm);
     }
 
@@ -355,11 +412,11 @@ public class NewLedgerFromSegmentsBuilderTests
     {
         // Arrange
         var repoMock = new Mock<ILedgerRepository>();
-        repoMock.Setup(r => r.InsertAsync(It.IsAny<Ledger>()))
+        repoMock.Setup(r => r.InsertAsync(It.IsAny<Ledger>(), It.IsAny<SQLiteTransaction>()))
             .ThrowsAsync(DatabaseException.QueryFailed("ledger insert"));
 
         var builder = new NewLedgerFromSegmentsBuilder(
-            repoMock.Object, new SummaryGenerator(), NullLogger.Instance);
+            repoMock.Object, _dbContext, new SummaryGenerator(), NullLogger.Instance);
         var errors = new List<CsvImportError>();
         var detail = Usage(new DateTime(2024, 9, 1, 8, 0, 0), amount: 260, balance: 9740);
 
@@ -370,12 +427,16 @@ public class NewLedgerFromSegmentsBuilderTests
             new List<(int LineNumber, LedgerDetail Detail)> { (LineNumber: 50, Detail: detail) },
             errors);
 
-        // Assert - AppException の整備済み文言が「について、」で自然につながること
+        // Assert - AppException の整備済み文言が「なぜ」として文の間に収まること
+        // （既知の制約: ToReason は AppException の UserFriendlyMessage をそのまま返すため、その中の行動指示
+        // （「再度お試しください」）が範囲を名指しする行動指示と並ぶ。ExceptionMessageFormatter.ToReason の remarks を参照。
+        // この経路へ AppException が届くのは、リポジトリが例外を AppException へ包む場合に限られる）
+        // （「カード … の データの操作中に…」という壊れた連結にならないこと。#1986）
         errors.Should().ContainSingle();
-        errors[0].Message.Should().StartWith($"カード {IdmMasker.Mask(CardIdm)} について、");
+        errors[0].Message.Should().StartWith($"カード {IdmMasker.Mask(CardIdm)} の 2024/09/01 の利用明細を");
         errors[0].Message.Should().Contain("データの操作中にエラーが発生しました。");
-        // 「カード … の データの操作中に…」という壊れた連結にならないこと
         errors[0].Message.Should().NotContain($"{IdmMasker.Mask(CardIdm)} のデータの操作中");
+        errors[0].Message.Should().EndWith("取り込み直してください。");
     }
 
     /// <summary>
@@ -388,11 +449,11 @@ public class NewLedgerFromSegmentsBuilderTests
     {
         // Arrange
         var repoMock = new Mock<ILedgerRepository>();
-        repoMock.Setup(r => r.InsertAsync(It.IsAny<Ledger>()))
+        repoMock.Setup(r => r.InsertAsync(It.IsAny<Ledger>(), It.IsAny<SQLiteTransaction>()))
             .ThrowsAsync(new SQLiteException(SQLiteErrorCode.Busy, "database is locked"));
 
         var builder = new NewLedgerFromSegmentsBuilder(
-            repoMock.Object, new SummaryGenerator(), NullLogger.Instance);
+            repoMock.Object, _dbContext, new SummaryGenerator(), NullLogger.Instance);
         var errors = new List<CsvImportError>();
         var detail = Usage(new DateTime(2024, 10, 1, 8, 0, 0), amount: 260, balance: 9740);
 
@@ -408,6 +469,10 @@ public class NewLedgerFromSegmentsBuilderTests
         errors[0].Message.Should().Contain("データベースの読み書きができませんでした。");
         errors[0].Message.Should().NotContain(
             "予期しない問題", "SQLite の失敗は既定分岐へ落とさない（原因を名指しする）");
+        // Issue #2176: 共有モードの SQLITE_BUSY は最も起きやすい失敗。ToUserMessage の「しばらく待ってから
+        // 再度実行してください」に従って CSV 全体を取り込み直すと、取り込めた他の日が二重に登録される
+        errors[0].Message.Should().NotContain("再度実行してください");
+        errors[0].Message.Should().Contain("このカードのこの日の行だけ");
         errors[0].Message.Should().NotContain("SQLite", "技術用語を職員へ出さない");
     }
 
@@ -423,10 +488,10 @@ public class NewLedgerFromSegmentsBuilderTests
         var repoMock = new Mock<ILedgerRepository>();
         var boomMessage = "DB connection lost";
         var boom = new InvalidOperationException(boomMessage);
-        repoMock.Setup(r => r.InsertAsync(It.IsAny<Ledger>())).ThrowsAsync(boom);
+        repoMock.Setup(r => r.InsertAsync(It.IsAny<Ledger>(), It.IsAny<SQLiteTransaction>())).ThrowsAsync(boom);
 
         var logger = new RecordingLogger<NewLedgerFromSegmentsBuilderTests>();
-        var builder = new NewLedgerFromSegmentsBuilder(repoMock.Object, new SummaryGenerator(), logger);
+        var builder = new NewLedgerFromSegmentsBuilder(repoMock.Object, _dbContext, new SummaryGenerator(), logger);
         var errors = new List<CsvImportError>();
         var detail = Usage(new DateTime(2024, 7, 1, 8, 0, 0), amount: 260, balance: 9740);
 
@@ -456,12 +521,12 @@ public class NewLedgerFromSegmentsBuilderTests
     {
         // Arrange
         var repoMock = new Mock<ILedgerRepository>();
-        repoMock.Setup(r => r.InsertAsync(It.IsAny<Ledger>())).ReturnsAsync(300);
-        repoMock.Setup(r => r.InsertDetailsAsync(It.IsAny<int>(), It.IsAny<IEnumerable<LedgerDetail>>()))
+        repoMock.Setup(r => r.InsertAsync(It.IsAny<Ledger>(), It.IsAny<SQLiteTransaction>())).ReturnsAsync(300);
+        repoMock.Setup(r => r.InsertDetailsAsync(It.IsAny<int>(), It.IsAny<IEnumerable<LedgerDetail>>(), It.IsAny<SQLiteTransaction>()))
             .ReturnsAsync(false);
 
         var logger = new RecordingLogger<NewLedgerFromSegmentsBuilderTests>();
-        var builder = new NewLedgerFromSegmentsBuilder(repoMock.Object, new SummaryGenerator(), logger);
+        var builder = new NewLedgerFromSegmentsBuilder(repoMock.Object, _dbContext, new SummaryGenerator(), logger);
         var errors = new List<CsvImportError>();
         var detail = Usage(new DateTime(2024, 6, 1, 8, 0, 0), amount: 260, balance: 9740);
 
@@ -488,12 +553,12 @@ public class NewLedgerFromSegmentsBuilderTests
     {
         // Arrange
         var repoMock = new Mock<ILedgerRepository>();
-        repoMock.Setup(r => r.InsertAsync(It.IsAny<Ledger>())).ReturnsAsync(400);
-        repoMock.Setup(r => r.InsertDetailsAsync(It.IsAny<int>(), It.IsAny<IEnumerable<LedgerDetail>>()))
+        repoMock.Setup(r => r.InsertAsync(It.IsAny<Ledger>(), It.IsAny<SQLiteTransaction>())).ReturnsAsync(400);
+        repoMock.Setup(r => r.InsertDetailsAsync(It.IsAny<int>(), It.IsAny<IEnumerable<LedgerDetail>>(), It.IsAny<SQLiteTransaction>()))
             .ReturnsAsync(true);
 
         var logger = new RecordingLogger<NewLedgerFromSegmentsBuilderTests>();
-        var builder = new NewLedgerFromSegmentsBuilder(repoMock.Object, new SummaryGenerator(), logger);
+        var builder = new NewLedgerFromSegmentsBuilder(repoMock.Object, _dbContext, new SummaryGenerator(), logger);
         var errors = new List<CsvImportError>();
         var detail = Usage(new DateTime(2024, 8, 1, 8, 0, 0), amount: 260, balance: 9740);
 
