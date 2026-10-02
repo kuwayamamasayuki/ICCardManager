@@ -921,6 +921,267 @@ public class HistoryPanelViewModelTests : IDisposable
 
     #endregion
 
+    #region 読み込みの再入（Issue #2202）
+
+    // Issue #2202: DB の待ちの間に UI スレッドが空くようになったため、読み込みの途中で別の読み込み
+    // （共有モードの 15 秒ごとの再読込・返却後の再読込・月送りの連打）が始まり得る。
+    // 以前は SQL が UI スレッドの上で同期的に終わるので、読み込みは割り込まれずに走り切っていた。
+
+    private static List<Ledger> CreateLoadLedgers(string cardIdm, params int[] ids) =>
+        ids.Select(id => new Ledger
+        {
+            Id = id,
+            CardIdm = cardIdm,
+            Date = DateTime.Today,
+            Summary = $"鉄道（博多～天神）#{id}",
+            Expense = 210,
+            Balance = 10000 - id * 210,
+        }).ToList();
+
+    /// <summary>
+    /// 先に始めた読み込みが後から終わっても、後に始めた読み込みの結果だけが一覧に残る（古い結果で上書きしない）。
+    /// </summary>
+    [Fact]
+    public async Task LoadHistoryLedgersAsync_先に始めた読み込みが後から終わっても_後の読み込みの結果だけが残ること()
+    {
+        const string cardIdm = "0102030405060708";
+        _history.HistoryCard = new CardDto { CardIdm = cardIdm, CardNumber = "5042" };
+        var first = new TaskCompletionSource<(IEnumerable<Ledger>, int)>();
+        _ledgerRepositoryMock.SetupSequence(r => r.GetPagedAsync(
+                It.IsAny<string>(), It.IsAny<DateTime>(), It.IsAny<DateTime>(), It.IsAny<int>(), It.IsAny<int>()))
+            .Returns(first.Task)
+            .ReturnsAsync((CreateLoadLedgers(cardIdm, 11, 12), 2));
+
+        var older = _history.LoadHistoryLedgersAsync();
+        await _history.LoadHistoryLedgersAsync();
+        first.SetResult((CreateLoadLedgers(cardIdm, 1, 2, 3), 3));
+        await older;
+
+        _history.HistoryLedgers.Select(d => d.Id).Should().BeEquivalentTo(new[] { 11, 12 },
+            "後に始めた読み込みの結果だけが残る（先に始めた読み込みの古い結果で上書きしない）");
+        _history.HistoryTotalCount.Should().Be(2, "件数表示も後の読み込みに由来する");
+    }
+
+    /// <summary>
+    /// 先に始めた読み込みが待っている間に後の読み込みも始まり、先に始めた方が先に終わっても、行が二重に並ばない。
+    /// </summary>
+    /// <remarks>
+    /// 取得の前に一覧を空にする形だと、2 つの読み込みがそれぞれ空にしてから待ち、両方が行を足して二重に並ぶ。
+    /// </remarks>
+    [Fact]
+    public async Task LoadHistoryLedgersAsync_2つの読み込みが重なっても_行が二重に並ばないこと()
+    {
+        const string cardIdm = "0102030405060708";
+        _history.HistoryCard = new CardDto { CardIdm = cardIdm, CardNumber = "5042" };
+        var first = new TaskCompletionSource<(IEnumerable<Ledger>, int)>();
+        var second = new TaskCompletionSource<(IEnumerable<Ledger>, int)>();
+        _ledgerRepositoryMock.SetupSequence(r => r.GetPagedAsync(
+                It.IsAny<string>(), It.IsAny<DateTime>(), It.IsAny<DateTime>(), It.IsAny<int>(), It.IsAny<int>()))
+            .Returns(first.Task)
+            .Returns(second.Task);
+
+        var older = _history.LoadHistoryLedgersAsync();
+        var newer = _history.LoadHistoryLedgersAsync();
+        // 先に始めた方から終える（追い越された読み込みは最新の読み込みが終わるまで戻らないので、
+        // 両方の取得を終えてから待つ）
+        first.SetResult((CreateLoadLedgers(cardIdm, 1, 2), 2));
+        second.SetResult((CreateLoadLedgers(cardIdm, 1, 2), 2));
+        await older;
+        await newer;
+
+        _history.HistoryLedgers.Should().HaveCount(2, "同じ行が二重に並ばない");
+        _history.HistoryLedgers.Select(d => d.Id).Should().BeEquivalentTo(new[] { 1, 2 });
+    }
+
+    /// <summary>
+    /// 対の表明: 読み込みが重ならなければ、毎回の結果がそのまま一覧に反映される（世代の判定で正当な読み込みを捨てない）。
+    /// </summary>
+    [Fact]
+    public async Task LoadHistoryLedgersAsync_読み込みが重ならなければ_毎回の結果が反映されること()
+    {
+        const string cardIdm = "0102030405060708";
+        _history.HistoryCard = new CardDto { CardIdm = cardIdm, CardNumber = "5042" };
+        _ledgerRepositoryMock.SetupSequence(r => r.GetPagedAsync(
+                It.IsAny<string>(), It.IsAny<DateTime>(), It.IsAny<DateTime>(), It.IsAny<int>(), It.IsAny<int>()))
+            .ReturnsAsync((CreateLoadLedgers(cardIdm, 1, 2), 2))
+            .ReturnsAsync((CreateLoadLedgers(cardIdm, 21), 1));
+
+        await _history.LoadHistoryLedgersAsync();
+        _history.HistoryLedgers.Select(d => d.Id).Should().BeEquivalentTo(new[] { 1, 2 });
+
+        await _history.LoadHistoryLedgersAsync();
+        _history.HistoryLedgers.Select(d => d.Id).Should().BeEquivalentTo(new[] { 21 });
+        _history.HistoryTotalCount.Should().Be(1);
+    }
+
+    /// <summary>
+    /// 追い越された読み込みの呼び出し元は、最新の読み込みが終わるまで戻らない。
+    /// </summary>
+    /// <remarks>
+    /// 呼び出し元は「await が戻ったら一覧は読み込み済み」を前提にしている（返却確認の最終ページへの移動・
+    /// 「保存して次へ」の隣の行の選択）。追い越された読み込みが何も反映せずにすぐ戻ると、古い一覧を見て進む。
+    /// </remarks>
+    [Fact]
+    public async Task LoadHistoryLedgersAsync_追い越された読み込みは_最新の読み込みが終わるまで戻らないこと()
+    {
+        const string cardIdm = "0102030405060708";
+        _history.HistoryCard = new CardDto { CardIdm = cardIdm, CardNumber = "5042" };
+        var first = new TaskCompletionSource<(IEnumerable<Ledger>, int)>();
+        var second = new TaskCompletionSource<(IEnumerable<Ledger>, int)>();
+        _ledgerRepositoryMock.SetupSequence(r => r.GetPagedAsync(
+                It.IsAny<string>(), It.IsAny<DateTime>(), It.IsAny<DateTime>(), It.IsAny<int>(), It.IsAny<int>()))
+            .Returns(first.Task)
+            .Returns(second.Task);
+
+        var older = _history.LoadHistoryLedgersAsync();
+        var newer = _history.LoadHistoryLedgersAsync();
+        first.SetResult((CreateLoadLedgers(cardIdm, 1), 1));
+
+        older.IsCompleted.Should().BeFalse("追い越された読み込みは、最新の読み込みが終わるまで呼び出し元へ戻らない");
+
+        second.SetResult((CreateLoadLedgers(cardIdm, 31, 32), 2));
+        await older;
+        await newer;
+        _history.HistoryLedgers.Select(d => d.Id).Should().BeEquivalentTo(new[] { 31, 32 },
+            "呼び出し元へ戻った時点で、一覧は最新の読み込みの結果になっている");
+    }
+
+    /// <summary>
+    /// 最初の取得より後の待ち（最新の残額の取得）で追い越されても、古い残額で上書きしない。
+    /// </summary>
+    [Fact]
+    public async Task LoadHistoryLedgersAsync_残額の取得で追い越されても_古い残額で上書きしないこと()
+    {
+        const string cardIdm = "0102030405060708";
+        _history.HistoryCard = new CardDto { CardIdm = cardIdm, CardNumber = "5042" };
+        var olderBalance = new TaskCompletionSource<Ledger>();
+        // 最新の残額は「明日より前」で取る（直前残高のシードは当月 1 日より前で取るので、日付で見分ける）
+        _ledgerRepositoryMock.SetupSequence(r => r.GetLatestBeforeDateAsync(
+                cardIdm, It.Is<DateTime>(d => d > DateTime.Today)))
+            .Returns(olderBalance.Task)
+            .ReturnsAsync(new Ledger { CardIdm = cardIdm, Balance = 500 });
+
+        var older = _history.LoadHistoryLedgersAsync();
+        await _history.LoadHistoryLedgersAsync();
+        _history.HistoryCurrentBalance.Should().Be(500, "前提: 後の読み込みの残額が反映されていること");
+
+        olderBalance.SetResult(new Ledger { CardIdm = cardIdm, Balance = 9999 });
+        await older;
+
+        _history.HistoryCurrentBalance.Should().Be(500, "先に始めた読み込みの古い残額で上書きしない");
+    }
+
+    /// <summary>
+    /// 読み込みを待つ間に履歴を閉じたら、閉じた一覧へ行を詰め直さず、表示し直さない。
+    /// </summary>
+    [Fact]
+    public async Task ShowCardHistoryAsync_読み込みを待つ間に閉じられたら_行を詰め直さず表示し直さないこと()
+    {
+        const string cardIdm = "0102030405060708";
+        var pending = new TaskCompletionSource<(IEnumerable<Ledger>, int)>();
+        _ledgerRepositoryMock.Setup(r => r.GetPagedAsync(
+                It.IsAny<string>(), It.IsAny<DateTime>(), It.IsAny<DateTime>(), It.IsAny<int>(), It.IsAny<int>()))
+            .Returns(pending.Task);
+
+        var show = _history.ShowCardHistoryAsync(new IcCard { CardIdm = cardIdm, CardType = "はやかけん", CardNumber = "5042" });
+        _history.CloseHistory();
+        pending.SetResult((CreateLoadLedgers(cardIdm, 1, 2), 2));
+        await show;
+
+        _history.HistoryLedgers.Should().BeEmpty("閉じた一覧へ前のカードの行を詰め直さない");
+        _history.IsHistoryVisible.Should().BeFalse("閉じた履歴を表示し直さない");
+    }
+
+    /// <summary>
+    /// チェックを引き継がない読み込み（統合・削除の直後）を、引き継ぐ読み込み（定期の再読込）が追い越しても、
+    /// チェックを戻さない。
+    /// </summary>
+    [Fact]
+    public async Task LoadHistoryLedgersAsync_引き継がない読み込みを追い越した読み込みは_チェックを戻さないこと()
+    {
+        const string cardIdm = "0102030405060708";
+        _history.HistoryCard = new CardDto { CardIdm = cardIdm, CardNumber = "5042" };
+        var afterMerge = new TaskCompletionSource<(IEnumerable<Ledger>, int)>();
+        _ledgerRepositoryMock.SetupSequence(r => r.GetPagedAsync(
+                It.IsAny<string>(), It.IsAny<DateTime>(), It.IsAny<DateTime>(), It.IsAny<int>(), It.IsAny<int>()))
+            .ReturnsAsync((CreateLoadLedgers(cardIdm, 1, 2), 2))
+            .Returns(afterMerge.Task)
+            .ReturnsAsync((CreateLoadLedgers(cardIdm, 1, 2), 2));
+
+        await _history.LoadHistoryLedgersAsync();
+        _history.HistoryLedgers[0].IsChecked = true;
+        _history.HistoryLedgers[1].IsChecked = true;
+
+        var nonPreserving = _history.LoadHistoryLedgersAsync(preserveCheckedRows: false);
+        await _history.LoadHistoryLedgersAsync(preserveCheckedRows: true);
+        afterMerge.SetResult((CreateLoadLedgers(cardIdm, 1, 2), 2));
+        await nonPreserving;
+
+        _history.HistoryLedgers.Should().HaveCount(2);
+        _history.HistoryLedgers.Should().OnlyContain(d => !d.IsChecked,
+            "チェックを引き継がない読み込みが始まった後は、それを追い越した読み込みもチェックを戻さない");
+    }
+
+    /// <summary>
+    /// 対の表明: 引き継ぐ読み込みどうしなら、追い越しがあってもチェックは残る（引き継ぎを一律に止めていないこと）。
+    /// </summary>
+    [Fact]
+    public async Task LoadHistoryLedgersAsync_引き継ぐ読み込みどうしなら_チェックが残ること()
+    {
+        const string cardIdm = "0102030405060708";
+        _history.HistoryCard = new CardDto { CardIdm = cardIdm, CardNumber = "5042" };
+        var pendingRefresh = new TaskCompletionSource<(IEnumerable<Ledger>, int)>();
+        _ledgerRepositoryMock.SetupSequence(r => r.GetPagedAsync(
+                It.IsAny<string>(), It.IsAny<DateTime>(), It.IsAny<DateTime>(), It.IsAny<int>(), It.IsAny<int>()))
+            .ReturnsAsync((CreateLoadLedgers(cardIdm, 1, 2), 2))
+            .Returns(pendingRefresh.Task)
+            .ReturnsAsync((CreateLoadLedgers(cardIdm, 1, 2), 2));
+
+        await _history.LoadHistoryLedgersAsync();
+        _history.HistoryLedgers[0].IsChecked = true;
+
+        var older = _history.LoadHistoryLedgersAsync(preserveCheckedRows: true);
+        await _history.LoadHistoryLedgersAsync(preserveCheckedRows: true);
+        pendingRefresh.SetResult((CreateLoadLedgers(cardIdm, 1, 2), 2));
+        await older;
+
+        _history.HistoryLedgers.Where(d => d.IsChecked).Select(d => d.Id).Should().Equal(new[] { 1 });
+    }
+
+    /// <summary>
+    /// 整合性チェックが DB を待つ間に別のカードの履歴へ切り替わっても、検査したカードの警告として出す
+    /// （表示中のカードの警告を、別のカードの検査結果で立てない）。
+    /// </summary>
+    [Fact]
+    public async Task ShowBalanceInconsistencyAsync_検査を待つ間に別のカードへ切り替わっても_検査したカードの警告として出すこと()
+    {
+        const string cardA = "0A0A0A0A0A0A0A0A";
+        const string cardB = "0B0B0B0B0B0B0B0B";
+        var displayPeriodCheck = new TaskCompletionSource<IEnumerable<Ledger>>();
+        var brokenChain = new List<Ledger>
+        {
+            new Ledger { Id = 1, CardIdm = cardA, Date = DateTime.Today.AddDays(-2), Summary = "役務費によりチャージ", Income = 1000, Balance = 1000 },
+            new Ledger { Id = 2, CardIdm = cardA, Date = DateTime.Today.AddDays(-1), Summary = "鉄道（博多～天神）", Expense = 100, Balance = 500 },
+        };
+        _ledgerRepositoryMock.SetupSequence(r => r.GetByDateRangeAsync(cardA, It.IsAny<DateTime>(), It.IsAny<DateTime>()))
+            .ReturnsAsync(brokenChain)
+            .Returns(displayPeriodCheck.Task);
+
+        var show = _history.ShowBalanceInconsistencyAsync(new IcCard { CardIdm = cardA, CardType = "はやかけん", CardNumber = "001" });
+
+        // 表示期間の検査を待っている間に、別のカードの履歴が開かれる（待機中のカードタッチ等）
+        _history.HistoryCard = new CardDto { CardIdm = cardB, CardType = "nimoca", CardNumber = "002" };
+        displayPeriodCheck.SetResult(brokenChain);
+        await show;
+
+        _host.WarningMessages.Should().NotContain(w => w.CardIdm == cardB,
+            "カード A の検査結果でカード B の警告を立てない");
+        _host.WarningMessages.Should().Contain(w => w.CardIdm == cardA && w.Type == WarningType.BalanceInconsistency,
+            "検査したカード A の警告として出す");
+    }
+
+    #endregion
+
     #region 全カード残高整合性チェック（Issue #1058）
 
     [Fact]

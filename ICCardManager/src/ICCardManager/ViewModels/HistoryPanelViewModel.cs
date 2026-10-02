@@ -1,3 +1,4 @@
+#nullable enable
 using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
@@ -165,6 +166,28 @@ public partial class HistoryPanelViewModel : ObservableObject
     /// <see cref="LedgerDto.IsRecentlyRecorded"/> を付け直すため、履歴を閉じるまで保持する。
     /// </summary>
     private readonly HashSet<int> _recentlyRecordedLedgerIds = new();
+
+    /// <summary>
+    /// Issue #2202: 履歴一覧の読み込みの世代（<see cref="LoadHistoryLedgersAsync"/> の冒頭のコメント）。
+    /// UI スレッドでだけ読み書きする。
+    /// </summary>
+    private int _historyLoadGeneration;
+
+    /// <summary>
+    /// Issue #2202: 最後に始めた履歴一覧の読み込み。追い越された読み込みの呼び出し元は、これが終わるまで待つ
+    /// （<see cref="LoadHistoryLedgersAsync"/> の remarks）。
+    /// </summary>
+    private Task? _latestHistoryLoad;
+
+    /// <summary>
+    /// Issue #2202: チェックを引き継がない読み込み（統合・削除の直後など）を最後に始めた世代。
+    /// </summary>
+    private int _lastNonPreservingLoadGeneration;
+
+    /// <summary>
+    /// Issue #2202: いま一覧に並んでいる行を作った読み込みの世代。
+    /// </summary>
+    private int _historyRowsGeneration;
 
     /// <summary>
     /// Issue #1907: 返却確認バナーの見出し
@@ -369,6 +392,7 @@ public partial class HistoryPanelViewModel : ObservableObject
         }
 
         HistoryCard = card.ToDto();
+        var shownCard = HistoryCard;
         HistoryCurrentPage = 1;
 
         // 期間を今月にリセット（fromDate 指定時はその日から今日まで）
@@ -390,7 +414,12 @@ public partial class HistoryPanelViewModel : ObservableObject
         HistoryGoToNextMonthCommand.NotifyCanExecuteChanged();
 
         await LoadHistoryLedgersAsync();
-        IsHistoryVisible = true;
+
+        // Issue #2202: 読み込みを待つ間に閉じられた・別のカードの履歴が開かれたなら、表示し直さない
+        if (ReferenceEquals(HistoryCard, shownCard))
+        {
+            IsHistoryVisible = true;
+        }
     }
 
     /// <summary>
@@ -399,6 +428,8 @@ public partial class HistoryPanelViewModel : ObservableObject
     [RelayCommand]
     public void CloseHistory()
     {
+        // Issue #2202: 進行中の読み込みを古い世代にする（閉じた一覧へ前のカードの行を詰め直させない）
+        _historyLoadGeneration++;
         IsHistoryVisible = false;
         HistoryCard = null;
         HistoryLedgers.Clear();
@@ -432,24 +463,43 @@ public partial class HistoryPanelViewModel : ObservableObject
     /// </remarks>
     internal async Task LoadHistoryLedgersAsync(bool preserveCheckedRows = false)
     {
-        if (HistoryCard == null)
+        var card = HistoryCard;
+        if (card == null)
         {
             return;
         }
 
+        // Issue #2202: 読み込みの世代。DB の待ちの間に UI スレッドが空くようになったため、待っている間に
+        // 別の読み込み（共有モードの 15 秒ごとの再読込・返却後の再読込・月送りの連打）が始まり得る。
+        // 以前は SQL が UI スレッドの上で同期的に終わるので、読み込みは途中で割り込まれずに走り切っていた。
+        // 本体は各 await の後で自分が最新の読み込みかを確かめ、古ければ画面へ何も反映せずに抜ける
+        // （古い結果が新しい結果を上書きしない・2 つの読み込みの行が混ざらない）。
+        var generation = ++_historyLoadGeneration;
+        if (!preserveCheckedRows)
+        {
+            _lastNonPreservingLoadGeneration = generation;
+        }
+
+        var load = LoadHistoryLedgersCoreAsync(card, generation, preserveCheckedRows);
+        _latestHistoryLoad = load;
+        await load;
+
+        // 追い越された読み込みは何も反映せずに終わるが、呼び出し元は「await が戻ったら一覧は読み込み済み」を
+        // 前提にしている（返却確認の最終ページへの移動・「保存して次へ」の隣の行の選択）。最新の読み込みが
+        // 終わるまで待ってから返す。最新の読み込みの失敗はその呼び出し元が受け取るので、ここでは観測しない
+        var awaited = load;
+        while (_latestHistoryLoad is { } latest && !ReferenceEquals(latest, awaited))
+        {
+            awaited = latest;
+            await Task.WhenAny(latest);
+        }
+    }
+
+    private async Task LoadHistoryLedgersCoreAsync(CardDto card, int generation, bool preserveCheckedRows)
+    {
         // Issue #2159: オーバーレイはメイン画面の IsBusy に束縛されているため、ホストのスコープを開く
         using (Host.BeginBusy("読み込み中..."))
         {
-            // Issue #1923: 引き継ぐチェックを Clear の前に退避する。
-            // 繰越行（Issue #1155）はチェックボックス自体を表示しないため対象外。
-            var checkedLedgerIds = preserveCheckedRows
-                ? new HashSet<int>(HistoryLedgers
-                    .Where(d => d.IsChecked && !d.IsCarryoverRow)
-                    .Select(d => d.Id))
-                : new HashSet<int>();
-
-            HistoryLedgers.Clear();
-
             // ページングされた履歴を取得
             //
             // Issue #1814: 総ページ数は取得結果（totalCount）からしか分からないため、
@@ -478,7 +528,11 @@ public partial class HistoryPanelViewModel : ObservableObject
             {
                 // 注: 日付はyyyy-MM-dd形式で保存されているため、AddDays(1)は不要
                 (rawLedgers, totalCount) = await _ledgerRepository.GetPagedAsync(
-                    HistoryCard.CardIdm, HistoryFromDate, HistoryToDate, HistoryCurrentPage, HistoryPageSize);
+                    card.CardIdm, HistoryFromDate, HistoryToDate, HistoryCurrentPage, HistoryPageSize);
+                if (generation != _historyLoadGeneration)
+                {
+                    return;
+                }
 
                 // ページ情報を更新
                 HistoryTotalCount = totalCount;
@@ -500,13 +554,18 @@ public partial class HistoryPanelViewModel : ObservableObject
                         // 整形済みの文字列を渡す。和暦カレンダーが既定の環境で年が和暦になり、
                         // DB に入っている値と突き合わせられなくなるため（Issue #1985）。
                         "カード={CardIdm}（管理番号={CardNumber}） 期間={From}～{To} 総件数={TotalCount}",
-                        clampCount, IdmMasker.Mask(HistoryCard.CardIdm), HistoryCard.CardNumber,
+                        clampCount, IdmMasker.Mask(card.CardIdm), card.CardNumber,
                         SqliteDateTimeFormat.ToDateText(HistoryFromDate),
                         SqliteDateTimeFormat.ToDateText(HistoryToDate), totalCount);
 
                     HistoryCurrentPage = 1;
                     (rawLedgers, totalCount) = await _ledgerRepository.GetPagedAsync(
-                        HistoryCard.CardIdm, HistoryFromDate, HistoryToDate, 1, HistoryPageSize);
+                        card.CardIdm, HistoryFromDate, HistoryToDate, 1, HistoryPageSize);
+                    if (generation != _historyLoadGeneration)
+                    {
+                        return;
+                    }
+
                     HistoryTotalCount = totalCount;
                     HistoryTotalPages = CalculateHistoryTotalPages(totalCount);
                     break;
@@ -524,17 +583,37 @@ public partial class HistoryPanelViewModel : ObservableObject
             // （誤ったシードは、シード無しより悪い並びを生む）。
             int? precedingBalance = HistoryCurrentPage == 1
                 ? await GetPrecedingBalanceAsync(
-                    HistoryCard.CardIdm, HistoryFromDate.Year, HistoryFromDate.Month)
+                    card.CardIdm, HistoryFromDate.Year, HistoryFromDate.Month)
                 : null;
+            if (generation != _historyLoadGeneration)
+            {
+                return;
+            }
 
             // Issue #784: 残高チェーンに基づいて同一日内の時系列順を復元
             var ledgers = Services.LedgerOrderHelper.ReorderByBalanceChain(rawLedgers, precedingBalance);
+
+            // Issue #1923: 引き継ぐチェックを Clear の前に退避する。
+            // 繰越行（Issue #1155）はチェックボックス自体を表示しないため対象外。
+            // Issue #2202: いまの行を作った後にチェックを引き継がない読み込み（統合・削除の直後）が始まっていたら、
+            // その読み込みを追い越したこの読み込みも引き継がない（統合前のチェックを統合先の行へ戻さない）
+            var checkedLedgerIds = preserveCheckedRows && _lastNonPreservingLoadGeneration <= _historyRowsGeneration
+                ? new HashSet<int>(HistoryLedgers
+                    .Where(d => d.IsChecked && !d.IsCarryoverRow)
+                    .Select(d => d.Id))
+                : new HashSet<int>();
+
+            // Issue #2202: Clear は取得の後に置き、Clear から Add までを await を挟まない区間にする。
+            // 取得の前に Clear すると、待っている間に始まった別の読み込みも Clear してから待ち、
+            // 両方が Add して行が二重に並ぶ
+            HistoryLedgers.Clear();
+            _historyRowsGeneration = generation;
 
             // Issue #1155: 1ページ目の先頭に繰越行を挿入（帳票と同じ表示）
             if (HistoryCurrentPage == 1)
             {
                 var carryoverDto = BuildCarryoverRow(
-                    HistoryCard.CardIdm, HistoryFromDate.Year, HistoryFromDate.Month, precedingBalance);
+                    card.CardIdm, HistoryFromDate.Year, HistoryFromDate.Month, precedingBalance);
                 if (carryoverDto != null)
                 {
                     HistoryLedgers.Add(carryoverDto);
@@ -573,7 +652,12 @@ public partial class HistoryPanelViewModel : ObservableObject
 
             // 最新の残高を取得
             var latestLedger = await _ledgerRepository.GetLatestBeforeDateAsync(
-                HistoryCard.CardIdm, DateTime.Now.AddDays(1));
+                card.CardIdm, DateTime.Now.AddDays(1));
+            if (generation != _historyLoadGeneration)
+            {
+                return;
+            }
+
             HistoryCurrentBalance = latestLedger?.Balance ?? 0;
 
             // ステータスメッセージを更新
@@ -585,6 +669,10 @@ public partial class HistoryPanelViewModel : ObservableObject
 
             // 統合取り消しボタンの有効/無効を更新
             await RefreshUndoMergeAvailabilityAsync();
+            if (generation != _historyLoadGeneration)
+            {
+                return;
+            }
 
             // Issue #1052: 残高不整合ハイライトの適用（ページ遷移時にも再適用される）
             ApplyBalanceInconsistencyMarkers();
@@ -595,7 +683,7 @@ public partial class HistoryPanelViewModel : ObservableObject
     /// Issue #1155: 繰越行のDTOを生成する
     /// ReportDataBuilderと同じロジックで、4月は前年度繰越、それ以外は前月繰越を生成
     /// </summary>
-    internal async Task<LedgerDto> BuildCarryoverRowAsync(string cardIdm, int year, int month)
+    internal async Task<LedgerDto?> BuildCarryoverRowAsync(string cardIdm, int year, int month)
     {
         var precedingBalance = await GetPrecedingBalanceAsync(cardIdm, year, month);
         return BuildCarryoverRow(cardIdm, year, month, precedingBalance);
@@ -624,7 +712,7 @@ public partial class HistoryPanelViewModel : ObservableObject
     /// <summary>
     /// Issue #1155: 取得済みの繰越額から繰越行のDTOを生成する（繰越額が無い場合は null）。
     /// </summary>
-    internal LedgerDto BuildCarryoverRow(string cardIdm, int year, int month, int? precedingBalance)
+    internal LedgerDto? BuildCarryoverRow(string cardIdm, int year, int month, int? precedingBalance)
     {
         if (!precedingBalance.HasValue)
         {
@@ -965,7 +1053,7 @@ public partial class HistoryPanelViewModel : ObservableObject
 
         // 詳細ダイアログを表示
         var cardName = HistoryCard?.DisplayName;
-        Views.Dialogs.LedgerDetailDialog capturedDialog = null;
+        Views.Dialogs.LedgerDetailDialog? capturedDialog = null;
         await _navigationService.ShowDialogAsync<Views.Dialogs.LedgerDetailDialog>(async d =>
         {
             await d.InitializeAsync(detailDto.Id, cardName: cardName);

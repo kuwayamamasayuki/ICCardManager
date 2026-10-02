@@ -1,3 +1,4 @@
+#nullable enable
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -147,10 +148,12 @@ public partial class HistoryPanelViewModel
         if (fullLedger != null)
         {
             // Issue #1458: Ledger DELETE と監査ログ INSERT を同一トランザクションで実行
-            using (var scope = await _dbContext.BeginTransactionAsync())
+            // Issue #2202: トランザクションの本体ごと UI スレッドの外へ移す（DbContext.RunOffUiThreadAsync の remarks）
+            deleted = await _dbContext.RunOffUiThreadAsync(async () =>
             {
-                deleted = await _ledgerRepository.DeleteAsync(ledger.Id, scope.Transaction);
-                if (deleted)
+                using var scope = await _dbContext.BeginTransactionAsync();
+                var rowDeleted = await _ledgerRepository.DeleteAsync(ledger.Id, scope.Transaction);
+                if (rowDeleted)
                 {
                     await _operationLogger.LogLedgerDeleteAsync(fullLedger, scope.Transaction);
                     scope.Commit();
@@ -161,7 +164,9 @@ public partial class HistoryPanelViewModel
                     // 素の Rollback() でよい（Issue #1831 の対象は catch 内の巻き戻し）。
                     scope.Rollback();
                 }
-            }
+
+                return rowDeleted;
+            });
 
             if (deleted)
             {
@@ -348,7 +353,7 @@ public partial class HistoryPanelViewModel
         var initialBalanceCorrection = await ResolveInitialBalanceCorrectionForEditAsync(ledger);
 
         // 全項目編集ダイアログ表示
-        Views.Dialogs.LedgerRowEditDialog capturedEditDialog = null;
+        Views.Dialogs.LedgerRowEditDialog? capturedEditDialog = null;
         var dialogResult = await _navigationService.ShowDialogAsync<Views.Dialogs.LedgerRowEditDialog>(
             async d =>
             {

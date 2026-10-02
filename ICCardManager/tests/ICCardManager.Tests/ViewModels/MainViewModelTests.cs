@@ -3077,6 +3077,46 @@ public class MainViewModelTests : IDisposable
     }
 
     /// <summary>
+    /// Issue #2202: 定期リフレッシュが貸出中カード・ダッシュボードの読み込みを待つ間にカードのタッチ（返却フロー）が
+    /// 始まったら、履歴の再読込を重ねない（返却フローが自分で履歴を読み直す）。
+    /// </summary>
+    /// <remarks>
+    /// DB の待ちの間に UI スレッドが空くようになったため、入口で 1 回だけ「処理中か」を確かめる形では、
+    /// 待っている間に始まった処理と履歴の読み込みが重なる。
+    /// </remarks>
+    [Fact]
+    public async Task RefreshSharedDataAsync_待つ間に処理中になったら_履歴を再読込しないこと()
+    {
+        // Arrange
+        var lentCards = new TaskCompletionSource<IEnumerable<IcCard>>();
+        _cardRepositoryMock.Setup(r => r.GetLentAsync(It.IsAny<bool>()))
+            .Returns(lentCards.Task);
+        _cardRepositoryMock.Setup(r => r.GetAllAsync())
+            .ReturnsAsync(new List<IcCard>());
+        _staffRepositoryMock.Setup(r => r.GetAllAsync())
+            .ReturnsAsync(new List<Staff>());
+        _ledgerRepositoryMock.Setup(r => r.GetAllLatestBalancesAsync())
+            .ReturnsAsync(new Dictionary<string, (int Balance, DateTime? LastUsageDate)>());
+        _settingsRepositoryMock.Setup(r => r.GetAppSettingsAsync())
+            .ReturnsAsync(new AppSettings());
+
+        var requestedPages = ArrangeHistoryPaging(_ => 3, pageSize: 30);
+        _viewModel.History.HistoryCurrentPage = 1;
+        await _viewModel.History.LoadHistoryLedgersAsync();
+        _viewModel.History.IsHistoryVisible = true;
+        requestedPages.Should().HaveCount(1, "前提: 最初の読み込みが 1 回だけ取得していること");
+
+        // Act: 貸出中カードの読み込みを待っている間に、カードのタッチで処理中になる
+        var refresh = _viewModel.RefreshSharedDataAsync();
+        _viewModel.CurrentState = AppState.Processing;
+        lentCards.SetResult(new List<IcCard>());
+        await refresh;
+
+        // Assert
+        requestedPages.Should().HaveCount(1, "待つ間に処理中になったら、定期リフレッシュは履歴を再読込しない");
+    }
+
+    /// <summary>
     /// 一覧を作り直したら「統合」ボタンの可否を必ず再評価すること。
     /// AsyncRelayCommand は CommandManager の再問い合わせに乗らないため、
     /// NotifyCanExecuteChanged を呼ばないと「2 行チェック済み」で有効になったボタンが

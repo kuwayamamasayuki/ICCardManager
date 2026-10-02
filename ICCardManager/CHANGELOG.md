@@ -97,6 +97,17 @@
   - テスト: 単体 8,093 → 8,125（+32）・合計 8,165 → 8,197
 
 **不具合修正**
+- Issue #2202 **DB がほかの接続にロックされていると、DB を読み書きする画面の操作でアプリ全体が固まる形を、DbContext の入口でまとめて是正した**
+  - ViewModel が UI スレッドからリポジトリを `await` すると、DB の処理（SQLite のロック待ちを含む）が UI スレッドの上で同期的に走り、ロック待ち（busy_timeout。共有モードで最大 15 秒・ローカル 5 秒、加えて ADO 層の再試行）の間、画面の描画もカードのタッチも止まっていた。#2197 で設定の保存だけを `Task.Run` で直したが、同じ形が ViewModel 16 クラス・約 60 か所に残っていた
+  - 全経路が通る 2 つの入口（`DbContext.LeaseConnectionAsync` / `BeginTransactionAsync`）で、UI スレッドから呼ばれたときだけスレッドプールへ移るようにした（`Common/ThreadPoolSwitch`）。移った後の続きは Data 層の `ConfigureAwait(false)` によりスレッドプールで走り、ViewModel の `await` の後だけが UI スレッドへ戻る。UI スレッド以外からの呼び出しでは移らない。`await Task.Run(() => { })` の形は、完了済みなら続きが UI スレッドで同期的に走るので使わない
+  - 移るときに **UI 起点の処理を 1 つずつ通すゲート**を取り、リース・スコープの破棄で返す。UI スレッドの上で走っていた頃は UI 起点の DB の処理が 1 つずつ走っていたが、スレッドプールへ移すだけだと起動時の点検と画面の読み込みなどが並走し、セマフォを取らないリースどうしが 1 本の接続を同時に使う（独立レビューで検出）。専用スレッドへ続きを投げて走るスレッドを固定する形は、完了した Task の続きが登録との競合でスレッドプールへ回る（実測）ため採らなかった
+  - ViewModel が自分で開くトランザクション（履歴の行の追加・編集・削除、バス停名の保存）は、新設の `DbContext.RunOffUiThreadAsync` で本体ごと UI スレッドの外へ移した。トランザクションを渡した SQL は入口を通らないので、移さないと UI スレッドへ戻ってから走るうえ、スコープ（ゲート）を持ったまま UI からリースを取ると自分を待って止まる。UI 層の `BeginTransactionAsync` がこの本体の中にあることを静的検査 `UiTransactionOffUiThreadConventionTests` で固定した
+  - DB を待つ間に UI スレッドが空くようになったため、履歴一覧の読み込み（`HistoryPanelViewModel.LoadHistoryLedgersAsync`）が待っている間に共有モードの 15 秒ごとの再読込や返却後の再読込が始まると、行が二重に並び、古い結果が新しい結果を上書きし得た（独立レビューで検出）。読み込みごとに世代番号を取り、`await` の後で古い世代なら何も反映せずに抜けるようにし、一覧を空にするのを取得の後へ移した。追い越された読み込みの呼び出し元へは最新の読み込みが終わってから戻し、履歴を閉じたら世代を進め、チェックを引き継がない読み込みを追い越した再読込はチェックを戻さないようにした。整合性チェックは対象のカードを最初に確定させ（待つ間に別のカードの履歴へ切り替わると、そのカードの警告を立てていた）、定期リフレッシュは履歴の再読込の直前にも処理中かを確かめ直すようにした
+  - ゲートを持つトランザクションの中でキャッシュ経由の取得をすると、UI 起点のキャッシュミスと互いを待ち得る。現状は起動時の貸出状態の修復 1 件だけで、ほかの処理と並走しないため起きないことを確かめ、制約として 05_クラス設計書に記載した
+  - リポジトリ・Service の中に UI スレッドで走ることを前提にしたコードが無いことを確かめた。改修した `DbContext.cs`・`LedgerRowEditViewModel.cs`・`BusStopInputViewModel.cs`・`HistoryPanelViewModel.Edit.cs`・`HistoryPanelViewModel.cs`・`HistoryPanelViewModel.Consistency.cs`・`MainViewModel.Startup.cs` に `#nullable enable` を付け、出た警告を是正した（`AppVersionInfo.TryParseNormalized`・`StaffNameFormatter.Format` は null を受ける）
+  - 単体テスト `DbContextUiThreadOffloadTests`（10 件。SQL の実行スレッドを `SQLiteConnection.Trace` で記録し、UI スレッドの模擬から呼ぶと UI の外で走ること／UI 起点のリースは 1 つずつ通り、入れ子は待たず、失敗してもゲートが漏れないこと／`RunOffUiThreadAsync` の本体が UI の外で走り終わるまで UI 起点の処理を待たせること）・`UiTransactionOffUiThreadConventionTests`（10 件）・`HistoryPanelViewModelTests` の読み込みの再入 9 件・`MainViewModelTests` の定期リフレッシュ 1 件と UI テスト `DatabaseLockResponsivenessTests`（DB を排他ロックしたまま履歴の月送りをしても、読み込み中の表示のままメイン画面が応答し、ロックを外すと読み込みが成功すること）を追加。ゲート・ゲートの返却・本体の移動・入口の移動を外す各変異と、ViewModel を包む前へ戻す変異で、それぞれ対応するテストが赤になることを確かめた
+  - 05_クラス設計書 §5.5b・07_テスト設計書 UT-136・`.claude/rules/async-configureawait.md`・`.claude/rules/viewmodel-conventions.md`（「クリアして再生成」の間に `await` を挟まない）を同期
+  - テスト: 単体 8,403 → 8,433（+30）・UI 113 → 114（+1）・合計 8,516 → 8,547
 - Issue #2177 **履歴詳細ダイアログの保存で、明細の置換と摘要の更新が別のトランザクションだったのを是正した**
   - 明細の置換（`ReplaceDetailsAsync`）が自前のトランザクションで先に確定し、摘要の更新が別のトランザクションだったため、摘要の更新が失敗すると「明細は新しいのに摘要は古い」食い違いが 6 年保存の台帳に残った（摘要は物品出納簿にそのまま印字される）。画面は「保存に失敗」と表示しながら明細は保存済みで、閉じても「未保存の変更」の確認が出なかった
   - 保存（明細の置換・摘要の更新・監査ログ）を新設の `LedgerDetailSaveService` が 1 つのトランザクションで確定するようにした（カード・職員の操作 #2156 と同じ `AuditedWriteTransaction` に乗せた）。ViewModel から `DbContext` と `OperationLogger` を外した

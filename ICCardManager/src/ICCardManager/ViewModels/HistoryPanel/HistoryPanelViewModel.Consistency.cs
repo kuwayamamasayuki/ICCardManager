@@ -1,3 +1,4 @@
+#nullable enable
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -97,7 +98,7 @@ public partial class HistoryPanelViewModel
     /// 全期間の整合性チェック（6 年分の読み取り）は導入行を開くときだけ走らせる。利用行では null を返し、
     /// 問い合わせない。訂正案の行 ID が編集対象と一致するときだけ返す（一致しなければ別の形状）。
     /// </remarks>
-    internal async Task<InitialBalanceCorrection> ResolveInitialBalanceCorrectionForEditAsync(LedgerDto ledger)
+    internal async Task<InitialBalanceCorrection?> ResolveInitialBalanceCorrectionForEditAsync(LedgerDto ledger)
     {
         if (ledger == null || !Ledger.IsInitialRecordSummary(ledger.Summary))
         {
@@ -142,15 +143,23 @@ public partial class HistoryPanelViewModel
     /// Issue #2007: 呼び出し元が直前に取った全期間の判定結果。渡されたときは再取得しない
     /// （警告クリック経路は導入行の日付を決めるために全期間を先に読んでいる。6 年分を 2 度読まない）。
     /// </param>
-    private async Task CheckAndNotifyConsistencyAsync(ConsistencyResult fullPeriodResult = null)
+    private async Task CheckAndNotifyConsistencyAsync(ConsistencyResult? fullPeriodResult = null)
     {
-        if (HistoryCard == null)
+        // Issue #2202: 対象のカードと期間は最初に確定させ、await の後で読み直さない。
+        // DB の待ちの間に UI スレッドが空くため、待っている間に別のカードの履歴が開かれる・閉じられることがある
+        // （以前は SQL が同期的に終わるので割り込まれなかった）。読み直すと、カード A の検査結果でカード B の
+        // 警告を立てる・消す、閉じた後なら NullReferenceException になる
+        var card = HistoryCard;
+        if (card == null)
         {
             return;
         }
 
+        var fromDate = HistoryFromDate;
+        var toDate = HistoryToDate;
+
         var checkResult = await _ledgerConsistencyChecker.CheckBalanceConsistencyAsync(
-            HistoryCard.CardIdm, HistoryFromDate, HistoryToDate);
+            card.CardIdm, fromDate, toDate);
 
         // Issue #1739: 警告は「このカードに不整合があるか」を全期間で表す。表示期間だけで
         // 判定して警告を消すと、CheckAllCardsConsistencyAsync が全期間で立てた期間外の不整合が、
@@ -159,13 +168,21 @@ public partial class HistoryPanelViewModel
         // 表示期間の結果を流用しないのは、チェーンの起点が範囲によって変わるため
         // 部分範囲の判定が全期間の判定と一致する保証がないから。
         var warningResult = fullPeriodResult ?? await _ledgerConsistencyChecker.CheckBalanceConsistencyAsync(
-            HistoryCard.CardIdm, FullPeriodStart, FullPeriodEnd);
+            card.CardIdm, FullPeriodStart, FullPeriodEnd);
 
+        // 警告はカード単位なので、検査したカードの IDm へ出す（表示中のカードが変わっていても、検査結果自体は正しい）
         Host.ReplaceBalanceInconsistencyWarning(
-            HistoryCard.CardIdm,
+            card.CardIdm,
             warningResult.IsConsistent
                 ? null
-                : BuildBalanceInconsistencyWarning(HistoryCard.CardType, HistoryCard.CardNumber, HistoryCard.CardIdm, warningResult));
+                : BuildBalanceInconsistencyWarning(card.CardType, card.CardNumber, card.CardIdm, warningResult));
+
+        // ハイライトは画面に出ている行が対象。待つ間に表示中のカード・期間が変わっていたら付けない
+        // （次の読み込みが自分の行に対して付け直す）
+        if (HistoryCard?.CardIdm != card.CardIdm || HistoryFromDate != fromDate || HistoryToDate != toDate)
+        {
+            return;
+        }
 
         // Issue #1052: ハイライトデータを最新の整合性チェック結果で同期更新
         // （ハイライトは画面に出ている行が対象のため、表示期間の結果を使う）

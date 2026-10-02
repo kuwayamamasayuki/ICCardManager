@@ -515,6 +515,16 @@ namespace ICCardManager.UITests.Infrastructure
         [NotUiaName]
         public const string SettingsSavingBusyMessage = "保存中...";
 
+        // 処理中オーバーレイの文言（HistoryPanelViewModel.LoadHistoryLedgersAsync の BeginBusy）。XAML にリテラルとしては現れない。
+        /// <summary>履歴の読み込み中に処理中オーバーレイへ出る文言（Issue #2202。読み込みの最中に UI が応答することの目印）。</summary>
+        [NotUiaName]
+        public const string HistoryLoadingBusyMessage = "読み込み中...";
+
+        // 履歴の状態表示の文言（HistoryPanelViewModel.LoadHistoryLedgersAsync の HistoryStatusMessage）。XAML にリテラルとしては現れない。
+        /// <summary>履歴の読み込みが終わり、表示期間に行が無いときの状態表示（Issue #2202。待たされた読み込みが成功したことの目印）。</summary>
+        [NotUiaName]
+        public const string HistoryNoLedgersStatusMessage = "該当する履歴がありません";
+
         /// <summary>交通系ICカード管理ダイアログの「新規カード登録」ボタン（押すと交通系ICカードのタッチ待ちになる）。</summary>
         [UiaName]
         public const string CardNewRegistrationButton = "新規カード登録";

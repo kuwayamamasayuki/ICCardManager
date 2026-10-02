@@ -1,3 +1,4 @@
+#nullable enable
 using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
@@ -298,7 +299,7 @@ namespace ICCardManager.ViewModels
         /// Issue #2007: 呼び出し元（MainViewModel）が全期間の残高整合性チェックで検知した
         /// 導入時残高の訂正案。無ければ null。
         /// </summary>
-        private InitialBalanceCorrection _initialBalanceCorrection;
+        private InitialBalanceCorrection? _initialBalanceCorrection;
 
         /// <summary>
         /// Issue #2007: 導入時残高の訂正案があるか（提案エリアの表示条件・適用コマンドの実行可否）
@@ -440,7 +441,7 @@ namespace ICCardManager.ViewModels
         /// </param>
         public async Task InitializeForEditAsync(
             LedgerDto ledgerDto, string operatorIdm, int? previousBalance = null,
-            InitialBalanceCorrection initialBalanceCorrection = null)
+            InitialBalanceCorrection? initialBalanceCorrection = null)
         {
             _operatorIdm = operatorIdm;
             _cardIdm = ledgerDto.CardIdm;
@@ -988,13 +989,24 @@ namespace ICCardManager.ViewModels
             };
 
             // Issue #1458: Ledger INSERT と監査ログ INSERT を同一トランザクションで実行
-            using var scope = await _dbContext.BeginTransactionAsync();
-            var newId = await _ledgerRepository.InsertAsync(newLedger, scope.Transaction);
-            if (newId > 0)
+            // Issue #2202: トランザクションの本体ごと UI スレッドの外へ移す（DbContext.RunOffUiThreadAsync の remarks）。
+            // 本体の中では画面に結び付いたプロパティを変えない（IsSaved は戻ってから立てる）。
+            var inserted = await _dbContext.RunOffUiThreadAsync(async () =>
             {
+                using var scope = await _dbContext.BeginTransactionAsync();
+                var newId = await _ledgerRepository.InsertAsync(newLedger, scope.Transaction);
+                if (newId <= 0)
+                {
+                    return false;
+                }
+
                 newLedger.Id = newId;
                 await _operationLogger.LogLedgerInsertAsync(newLedger, scope.Transaction);
                 scope.Commit();
+                return true;
+            });
+            if (inserted)
+            {
                 IsSaved = true;
             }
             else
@@ -1048,45 +1060,52 @@ namespace ICCardManager.ViewModels
             }
 
             // Issue #1458: Ledger UPDATE と監査ログ INSERT を同一トランザクションで実行
-            bool result;
-            var busStopConflict = false;
-            using (var scope = await _dbContext.BeginTransactionAsync())
+            // Issue #2202: トランザクションの本体ごと UI スレッドの外へ移す（DbContext.RunOffUiThreadAsync の remarks）。
+            // 本体の中では画面に結び付いたプロパティを変えない（結果を返し、IsSaved・StatusMessage は戻ってから設定する）。
+            var (result, busStopConflict) = await _dbContext.RunOffUiThreadAsync(async () =>
             {
-                result = await _ledgerRepository.UpdateAsync(ledger, scope.Transaction);
-                if (result)
+                bool updated;
+                var conflict = false;
+                using (var scope = await _dbContext.BeginTransactionAsync())
                 {
-                    // Issue #983: 摘要編集時にバス停名をDetailに同期
-                    // 摘要を直接編集するとLedger.Summaryは更新されるがDetail.BusStopsは更新されない。
-                    // この不整合を放置すると、統合時にSummaryGenerator.Generate()が
-                    // Detail.BusStopsから摘要を再生成し、修正前のバス停名に戻ってしまう。
-                    //
-                    // Issue #1945: 同期は摘要の UPDATE と「同じ論理操作」なので同一 tx に束ねる（#1806）。
-                    // 旧実装は commit のあと tx の外で実行し、しかも戻り値を見ていなかったため、
-                    // 履歴詳細の全置換（ReplaceDetailsAsync の DELETE + INSERT）で ledger_detail.id が振り直されていると
-                    // 同期が 0 行で素通りし、摘要だけが新しいバス停名で確定して
-                    // 6 年保存の台帳が「摘要はバス停名入り・明細は★のまま」と自己矛盾した。
-                    if (beforeLedger.Summary != ledger.Summary)
+                    updated = await _ledgerRepository.UpdateAsync(ledger, scope.Transaction);
+                    if (updated)
                     {
-                        var syncOk = await SyncBusStopsFromSummaryAsync(ledger, scope.Transaction);
-                        if (!syncOk)
+                        // Issue #983: 摘要編集時にバス停名をDetailに同期
+                        // 摘要を直接編集するとLedger.Summaryは更新されるがDetail.BusStopsは更新されない。
+                        // この不整合を放置すると、統合時にSummaryGenerator.Generate()が
+                        // Detail.BusStopsから摘要を再生成し、修正前のバス停名に戻ってしまう。
+                        //
+                        // Issue #1945: 同期は摘要の UPDATE と「同じ論理操作」なので同一 tx に束ねる（#1806）。
+                        // 旧実装は commit のあと tx の外で実行し、しかも戻り値を見ていなかったため、
+                        // 履歴詳細の全置換（ReplaceDetailsAsync の DELETE + INSERT）で ledger_detail.id が振り直されていると
+                        // 同期が 0 行で素通りし、摘要だけが新しいバス停名で確定して
+                        // 6 年保存の台帳が「摘要はバス停名入り・明細は★のまま」と自己矛盾した。
+                        if (beforeLedger.Summary != ledger.Summary)
                         {
-                            // commit せずに抜ける（scope の Dispose で巻き戻る）
-                            result = false;
-                            busStopConflict = true;
+                            var syncOk = await SyncBusStopsFromSummaryAsync(ledger, scope.Transaction);
+                            if (!syncOk)
+                            {
+                                // commit せずに抜ける（scope の Dispose で巻き戻る）
+                                updated = false;
+                                conflict = true;
+                            }
+                        }
+
+                        // Issue #1979: 監査ログは同期のあとに記録する。OperationLogger は
+                        // SerializeToJson が呼ばれた時点の状態を写すため（#1959）、先に記録すると
+                        // AfterData のバス停名が同期前のまま残り、この Issue が可視化しようとした
+                        // 「バス停名の書き戻し」がまさに監査から抜け落ちる。
+                        if (updated)
+                        {
+                            await _operationLogger.LogLedgerUpdateAsync(beforeLedger, ledger, scope.Transaction);
+                            scope.Commit();
                         }
                     }
-
-                    // Issue #1979: 監査ログは同期のあとに記録する。OperationLogger は
-                    // SerializeToJson が呼ばれた時点の状態を写すため（#1959）、先に記録すると
-                    // AfterData のバス停名が同期前のまま残り、この Issue が可視化しようとした
-                    // 「バス停名の書き戻し」がまさに監査から抜け落ちる。
-                    if (result)
-                    {
-                        await _operationLogger.LogLedgerUpdateAsync(beforeLedger, ledger, scope.Transaction);
-                        scope.Commit();
-                    }
                 }
-            }
+
+                return (updated, conflict);
+            });
 
             if (result)
             {
@@ -1220,7 +1239,7 @@ namespace ICCardManager.ViewModels
         /// View は <c>Window.Close()</c> を設定し、閉じる経路をすべて <c>OnClosing</c> の
         /// 破棄確認（<see cref="CanClose"/>）へ通す（<c>LedgerDetailViewModel</c> #1743 と同じ形）。
         /// </remarks>
-        public Action OnCloseRequested { get; set; }
+        public Action? OnCloseRequested { get; set; }
 
         /// <summary>
         /// ダイアログのクローズを要求する（Issue #2141）
