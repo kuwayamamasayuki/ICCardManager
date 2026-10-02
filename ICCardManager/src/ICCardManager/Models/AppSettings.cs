@@ -67,8 +67,12 @@ namespace ICCardManager.Models
         /// <remarks>
         /// 複数名で同一交通系ICカードを利用する運用が無い組織向け。
         /// スキップしても履歴編集ダイアログから後で入力できる。
+        /// Issue #2178: 既定は true（入力を求めない）。ほとんどの利用は単独乗車で、毎回のダイアログが返却の手間になるため。
+        /// 複数名で利用する部署は設定画面（F5）で無効にする。DB に保存済みの値（false を含む）はそのまま尊重する —
+        /// 意図して無効にしたのか既定のまま保存されたのかは区別できないため、保存済みの値は書き換えない
+        /// （この設定はリリース前に既定が変わったため、リリース版から更新した環境には値が無く、既定が効く）。
         /// </remarks>
-        public bool SkipCompanionCountInputOnReturn { get; set; }
+        public bool SkipCompanionCountInputOnReturn { get; set; } = true;
 
         /// <summary>
         /// 返却時の同行者数入力ダイアログを「外0名」として自動的に閉じるまでの秒数（Issue #2009）

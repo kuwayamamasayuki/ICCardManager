@@ -93,7 +93,8 @@ namespace ICCardManager.UITests.Infrastructure
             // 残額警告のしきい値（既定 10,000 円）を十分に上回る残高にし、トーストに「残額不足」が出ないようにする
             _ = InsertLedger(conn, VirtualTouchCardIdm, DayOfMonth(DateTime.Today, 1), "新規購入", 20000, 0, 0, PrimaryStaffName);
 
-            // settings は key/value。キーは SettingsRepository.KeySkipCompanionCountInputOnReturn、値は "true" 判定
+            // settings は key/value。キーは SettingsRepository.KeySkipCompanionCountInputOnReturn。
+            // 値は明示的に書く（Issue #2178 で未設定の既定が true〈スキップ〉になったため、書かないとダイアログが出ない）
             SetSetting(conn, "skip_companion_count_input_on_return", skipCompanionCountInput ? "true" : "false");
             SetSetting(conn, "skip_bus_stop_input_on_return", skipBusStopInput ? "true" : "false");
             if (!skipCompanionCountInput)

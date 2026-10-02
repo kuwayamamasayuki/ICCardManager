@@ -327,8 +327,8 @@ WHERE settings.value IS NULL OR substr(settings.value, 1, 7) <> @currentMonth";
             var skipBusStopInput = Get(KeySkipBusStopInputOnReturn);
             settings.SkipBusStopInputOnReturn = skipBusStopInput?.ToLowerInvariant() == "true";
 
-            // 同行者数入力スキップ設定（Issue #1906）
-            settings.SkipCompanionCountInputOnReturn = Get(KeySkipCompanionCountInputOnReturn)?.ToLowerInvariant() == "true";
+            // 同行者数入力スキップ設定（Issue #1906）。Issue #2178: 未設定なら既定で スキップする（保存済みの値は尊重する）
+            settings.SkipCompanionCountInputOnReturn = ParseBool(Get(KeySkipCompanionCountInputOnReturn), defaultValue: true);
 
             // 同行者数入力の自動クローズ秒数（Issue #2009）
             if (int.TryParse(Get(KeyCompanionCountInputTimeoutSeconds), NumberStyles.Integer, CultureInfo.InvariantCulture, out var companionTimeout))
@@ -453,8 +453,9 @@ WHERE settings.value IS NULL OR substr(settings.value, 1, 7) <> @currentMonth";
             var skipBusStopInput = await GetAsync(KeySkipBusStopInputOnReturn).ConfigureAwait(false);
             settings.SkipBusStopInputOnReturn = skipBusStopInput?.ToLowerInvariant() == "true";
 
-            // 同行者数入力スキップ設定（Issue #1906）
-            settings.SkipCompanionCountInputOnReturn = (await GetAsync(KeySkipCompanionCountInputOnReturn).ConfigureAwait(false))?.ToLowerInvariant() == "true";
+            // 同行者数入力スキップ設定（Issue #1906）。Issue #2178: 未設定なら既定で スキップする（保存済みの値は尊重する）
+            settings.SkipCompanionCountInputOnReturn = ParseBool(
+                await GetAsync(KeySkipCompanionCountInputOnReturn).ConfigureAwait(false), defaultValue: true);
 
             // 同行者数入力の自動クローズ秒数（Issue #2009）
             if (int.TryParse(await GetAsync(KeyCompanionCountInputTimeoutSeconds).ConfigureAwait(false), NumberStyles.Integer, CultureInfo.InvariantCulture, out var companionTimeout))
@@ -638,7 +639,7 @@ WHERE settings.value IS NULL OR substr(settings.value, 1, 7) <> @currentMonth";
         /// 保存された文字列（"true" / "false"）を bool に変換する。認識できない値（未保存の null を含む）は既定値
         /// </summary>
         /// <remarks>
-        /// 既定が true の設定（<see cref="KeyShowHistoryOnReturn"/>、Issue #1907）で使う。
+        /// 既定が true の設定（<see cref="KeyShowHistoryOnReturn"/>、Issue #1907／<see cref="KeySkipCompanionCountInputOnReturn"/>、Issue #2178）で使う。
         /// <c>?.ToLowerInvariant() != "false"</c> の形は、既定が false の兄弟キー（<c>== "true"</c>）と
         /// 極性が逆の手組みの判定になり、認識できない値の扱いがキーごとに変わる（コードレビュー指摘）。
         /// </remarks>
