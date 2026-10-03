@@ -20,7 +20,7 @@ var card = await _cardRepository.GetByIdmAsync(idm).ConfigureAwait(false);
 var card = await _cardRepository.GetByIdmAsync(idm);
 ```
 
-> **`ConfigureAwait(false)` は UI スレッドから「逃がす」手段ではない**（Issue #2197 / #2202）。一度も本当に非同期にならない待ち（空いているセマフォ・同期的に走る System.Data.SQLite の `…Async`）では続きは同じスレッドで走るので、UI スレッドから呼ばれた DB の処理は UI スレッドの上で走り切る。UI スレッドから逃がすのは `DbContext` の入口（`LeaseConnectionAsync` / `BeginTransactionAsync` が `IsOnUiThread` のときだけ `ThreadPoolSwitch` でスレッドプールへ移り、UI 起点の処理を 1 つずつ通すゲートを取る）の責務で、ViewModel ごとに `Task.Run` で包む必要は無い。**ViewModel が自分でトランザクションを開くときは `DbContext.RunOffUiThreadAsync` の本体の中で開く**（スコープを UI スレッドへ持ち帰ると、トランザクション内の SQL が UI スレッドで走るうえ、自分の持つゲートを待って UI 起点の DB の処理が止まる。`UiTransactionOffUiThreadConventionTests`）。移す処理を書くときは `await Task.Run(() => { })` の形を使わない（完了済みなら続きが元のスレッドで同期的に走る）
+> **`ConfigureAwait(false)` は UI スレッドから「逃がす」手段ではない**（Issue #2197 / #2202）。一度も本当に非同期にならない待ち（空いているセマフォ・同期的に走る System.Data.SQLite の `…Async`）では続きは同じスレッドで走るので、UI スレッドから呼ばれた DB の処理は UI スレッドの上で走り切る。UI スレッドから逃がすのは `DbContext` の入口（`LeaseConnectionAsync` / `BeginTransactionAsync` が `IsOnUiThread` のときだけ `ThreadPoolSwitch` でスレッドプールへ移り、UI 起点の処理を 1 つずつ通すゲートを取る）の責務で、ViewModel ごとに `Task.Run` で包む必要は無い。入口は、UI スレッドから呼ばれたとき完了の通知を UI スレッドの今の処理の後へ回す（`CompleteAfterCurrentUiTurn`。移った先が速く終わると、呼び出し元の `await` が完了済みの `Task` を見て続き＝SQL を UI スレッドで走らせるため）。**ViewModel が自分でトランザクションを開くときは `DbContext.RunOffUiThreadAsync` の本体の中で開く**（スコープを UI スレッドへ持ち帰ると、トランザクション内の SQL が UI スレッドで走るうえ、自分の持つゲートを待って UI 起点の DB の処理が止まる。`UiTransactionOffUiThreadConventionTests`）。移す処理を書くときは `await Task.Run(() => { })` の形を使わない（完了済みなら続きが元のスレッドで同期的に走る）
 
 ## ViewModel 層（ViewModels/ 配下）
 

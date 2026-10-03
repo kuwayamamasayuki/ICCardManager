@@ -136,19 +136,21 @@ public sealed class DbContextUiThreadOffloadTests : IDisposable
 
     #region UI スレッドから移ること
 
+    /// <summary>UI スレッドが OS に中断された状態を模す時間（入口の先の処理が終わるのに十分な長さ）。</summary>
+    private static readonly TimeSpan UiThreadPreemption = TimeSpan.FromMilliseconds(200);
+
     [Fact]
     public async Task LeaseConnectionAsync_UIスレッドから呼ぶと_リポジトリのSQLがUIスレッドの外で走ること()
     {
         // Arrange
         var repository = new LedgerRepository(_dbContext);
         ClearRecorded();
-        var uiThreadId = 0;
 
-        // Act: UI スレッド（の模擬）から、ViewModel と同じくリポジトリを直接 await する
-        await SimulatedUiThread.InvokeAsync(async () =>
+        // Act: UI スレッドから、ViewModel と同じくリポジトリを直接 await する
+        var uiThreadId = await RunOnDispatcherAsync(async ui =>
         {
-            uiThreadId = Thread.CurrentThread.ManagedThreadId;
-            return await repository.GetByIdAsync(1);
+            await repository.GetByIdAsync(1);
+            return ui;
         });
 
         // Assert
@@ -159,31 +161,63 @@ public sealed class DbContextUiThreadOffloadTests : IDisposable
             + DescribeRecorded());
     }
 
+    /// <summary>
+    /// UI スレッドから取ったリースの <c>Task</c> は、UI スレッドが中断されて入口の先の処理が先に終わっても、
+    /// UI スレッドの今の処理の中では完了しない。完了済みの <c>Task</c> を <c>await</c> すると続き（リポジトリの SQL）が
+    /// UI スレッドで同期的に走るため（全件実行の負荷の下で間欠的に起きていた競合）。
+    /// </summary>
     [Fact]
-    public async Task BeginTransactionAsync_UIスレッドから呼ぶと_トランザクション内のSQLがUIスレッドの外で走ること()
+    public async Task LeaseConnectionAsync_UIスレッドが中断されても_awaitの続きはUIスレッドの外で走ること()
     {
         // Arrange
         ClearRecorded();
-        var uiThreadId = 0;
 
-        // Act: UI スレッド（の模擬）からトランザクションを開き、リポジトリと同じ形で書き込む
-        await SimulatedUiThread.InvokeAsync(async () =>
+        // Act: リポジトリと同じく ConfigureAwait(false) で待つ。await の前に UI スレッドを止め、入口の先の処理に先に終わらせる
+        var (uiThreadId, completedBeforeAwait) = await RunOnDispatcherAsync(async ui =>
         {
-            uiThreadId = Thread.CurrentThread.ManagedThreadId;
-            using var scope = await _dbContext.BeginTransactionAsync();
-            using var command = scope.Transaction.Connection.CreateCommand();
-            command.Transaction = scope.Transaction;
-            command.CommandText = "INSERT OR REPLACE INTO settings (key, value) VALUES ('issue_2202_probe', 'x')";
-            await command.ExecuteNonQueryAsync().ConfigureAwait(false);
-            scope.Commit();
-            return true;
+            var leaseTask = _dbContext.LeaseConnectionAsync();
+            Thread.Sleep(UiThreadPreemption);
+            var completed = leaseTask.IsCompleted;
+            using var lease = await leaseTask.ConfigureAwait(false);
+            using var command = lease.Connection.CreateCommand();
+            command.CommandText = "SELECT 'issue_2202_lease_probe'";
+            command.ExecuteScalar();
+            return (ui, completed);
         });
 
         // Assert
+        completedBeforeAwait.Should().BeFalse("UI スレッドの今の処理の中では、リースの Task は完了しない（完了は UI スレッドへ Post してから伝える）");
+        var probe = _executedStatements.Single(s => s.Statement.Contains("issue_2202_lease_probe"));
+        probe.ThreadId.Should().NotBe(uiThreadId, "await の続き（リポジトリの SQL）はスレッドプールで走る");
+    }
+
+    [Fact]
+    public async Task BeginTransactionAsync_UIスレッドが中断されても_awaitの続きのトランザクション内のSQLはUIスレッドの外で走ること()
+    {
+        // Arrange
+        ClearRecorded();
+
+        // Act: サービスと同じく ConfigureAwait(false) で待つ。await の前に UI スレッドを止める
+        var (uiThreadId, completedBeforeAwait) = await RunOnDispatcherAsync(async ui =>
+        {
+            var scopeTask = _dbContext.BeginTransactionAsync();
+            Thread.Sleep(UiThreadPreemption);
+            var completed = scopeTask.IsCompleted;
+            using var scope = await scopeTask.ConfigureAwait(false);
+            using var command = scope.Transaction.Connection.CreateCommand();
+            command.Transaction = scope.Transaction;
+            command.CommandText = "INSERT OR REPLACE INTO settings (key, value) VALUES ('issue_2202_probe', 'x')";
+            command.ExecuteNonQuery();
+            scope.Commit();
+            return (ui, completed);
+        });
+
+        // Assert
+        completedBeforeAwait.Should().BeFalse("UI スレッドの今の処理の中では、スコープの Task は完了しない");
         var statements = _executedStatements.Where(s => s.Statement.Contains("issue_2202_probe")).ToList();
         statements.Should().ContainSingle("前提: トランザクション内の書き込みが実行されていること（空振り防止）");
         statements.Single().ThreadId.Should().NotBe(uiThreadId,
-            "トランザクションの開始（セマフォの待機・BEGIN）の入口で UI スレッドから移る（Issue #2202）");
+            "トランザクションの開始の入口で UI スレッドから移り、await の続きもスレッドプールで走る（Issue #2202）");
     }
 
     /// <summary>

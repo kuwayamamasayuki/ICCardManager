@@ -579,10 +579,16 @@ namespace ICCardManager.Data
         ///     よって ViewModel 経路でも <c>Task.WhenAll</c> での並列起動は同様にリスクがある。
         /// </para>
         /// </remarks>
-        public virtual async Task<ConnectionLease> LeaseConnectionAsync(CancellationToken ct = default)
+        public virtual Task<ConnectionLease> LeaseConnectionAsync(CancellationToken ct = default)
         {
             ct.ThrowIfCancellationRequested();
 
+            // Issue #2202: UI スレッドから呼ばれたら、完了の通知を UI スレッドの今の処理の後へ回す（CompleteAfterCurrentUiTurn の remarks）
+            return CompleteAfterCurrentUiTurn(LeaseConnectionCoreAsync(ct));
+        }
+
+        private async Task<ConnectionLease> LeaseConnectionCoreAsync(CancellationToken ct)
+        {
             // Issue #2202: UI スレッドから呼ばれたら、スレッドプールへ移り UI 起点のゲートを取ってから続ける
             // （EnterFromUiThreadAsync の remarks）。ゲートはリースの破棄で返す
             var heldUiGate = await EnterFromUiThreadAsync(ct).ConfigureAwait(false);
@@ -787,6 +793,61 @@ namespace ICCardManager.Data
         }
 
         /// <summary>
+        /// UI スレッドから呼ばれたとき、<paramref name="work"/> の完了を呼び出し元へ伝えるのを、UI スレッドの今の処理の後へ回す（Issue #2202）。
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// 入口でスレッドプールへ移っても、移った先の処理（ゲート・接続の取得）は速いので、呼び出し元（リポジトリ）が
+        /// 返された <c>Task</c> を <c>await</c> するより先に完了し得る（UI スレッドが OS にちょうど中断されたとき等）。
+        /// 完了済みの <c>Task</c> を <c>await</c> すると続きは呼び出したスレッドで同期的に走るので、リポジトリの SQL
+        /// （SQLite のロック待ちを含む）が UI スレッドで走り、#2202 の「UI を止めない」がまれに破れていた
+        /// （全件実行の負荷の下でテストが間欠的に失敗して見つかった）。
+        /// </para>
+        /// <para>
+        /// 完了を UI スレッドの同期コンテキストへ <c>Post</c> してから伝えれば、呼び出し元が <c>await</c> する時点
+        /// （UI スレッドの今の処理の中）では必ず未完了になる。<c>RunContinuationsAsynchronously</c> により、完了を伝える
+        /// UI スレッドでは続きを走らせず、続き（リポジトリの SQL）はスレッドプールで走る。
+        /// UI スレッド以外から呼ばれたとき、または同期コンテキストが無いとき（UI 判定を差し替えたテスト）は、そのまま返す。
+        /// </para>
+        /// <para>
+        /// UI スレッドがこの <c>Task</c> を同期的に待つ（<c>.Result</c> 等）と、Post した完了が処理されずに止まる。
+        /// UI スレッドから DB を同期的に待たないこと（同期 API の UI スレッド拒否 #1281 と同じ前提）。
+        /// </para>
+        /// </remarks>
+        private static Task<T> CompleteAfterCurrentUiTurn<T>(Task<T> work)
+        {
+            var context = SynchronizationContext.Current;
+            if (context == null || !IsOnUiThread())
+            {
+                return work;
+            }
+
+            var completion = new TaskCompletionSource<T>(TaskCreationOptions.RunContinuationsAsynchronously);
+            work.ContinueWith(
+                finished => context.Post(_ => TransferCompletion(finished, completion), null),
+                CancellationToken.None,
+                TaskContinuationOptions.ExecuteSynchronously,
+                TaskScheduler.Default);
+            return completion.Task;
+        }
+
+        private static void TransferCompletion<T>(Task<T> finished, TaskCompletionSource<T> completion)
+        {
+            if (finished.IsCanceled)
+            {
+                completion.TrySetCanceled();
+            }
+            else if (finished.IsFaulted)
+            {
+                completion.TrySetException(finished.Exception!.InnerExceptions);
+            }
+            else
+            {
+                completion.TrySetResult(finished.Result);
+            }
+        }
+
+        /// <summary>
         /// UI スレッドから呼ばれたら <paramref name="body"/> をスレッドプールで、UI 起点の処理を 1 つずつ通すゲートを持ったまま走らせる。
         /// UI スレッド以外からなら、そのまま走らせる（Issue #2202）。
         /// </summary>
@@ -838,7 +899,13 @@ namespace ICCardManager.Data
         /// TransactionScope.Dispose時にトランザクション→リースの順で解放される。
         /// Commit/Rollbackを呼ばずにDisposeした場合、トランザクションは自動ロールバックされる。
         /// </remarks>
-        public virtual async Task<TransactionScope> BeginTransactionAsync(CancellationToken ct = default)
+        public virtual Task<TransactionScope> BeginTransactionAsync(CancellationToken ct = default)
+        {
+            // Issue #2202: UI スレッドから呼ばれたら、完了の通知を UI スレッドの今の処理の後へ回す（CompleteAfterCurrentUiTurn の remarks）
+            return CompleteAfterCurrentUiTurn(BeginTransactionCoreAsync(ct));
+        }
+
+        private async Task<TransactionScope> BeginTransactionCoreAsync(CancellationToken ct)
         {
             // Issue #2202: UI スレッドから呼ばれたら、スレッドプールへ移り UI 起点のゲートを取ってからセマフォを待つ
             // （EnterFromUiThreadAsync の remarks。取る順はゲート → セマフォ）。ゲートはスコープの破棄で返す
