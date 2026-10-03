@@ -2095,12 +2095,24 @@ ON CONFLICT(key) DO UPDATE SET value = excluded.value";
                 // さらに接続セマフォ待ちの行列を作って本来のDB操作まで巻き添えにする
                 if (_pendingConnectionCheck == null || _pendingConnectionCheck.IsCompleted)
                 {
-                    _pendingConnectionCheck = Task.Run(() =>
-                    {
-                        // 想定外の例外は「接続なし」に丸め、Task を faulted にしない
-                        try { return ExecuteConnectionCheck(); }
-                        catch { return false; }
-                    });
+                    // Issue #2213: スレッドプールではなく専用スレッドで走らせる（LongRunning）。
+                    // プールのスレッドが同期的な待ちで塞がっていると、Task.Run の確認は空きが出るまで
+                    // 始まらず（.NET Framework のスレッド追加は数百 ms に 1 本）、ネットワークが正常でも
+                    // 上限に達して「接続なし」と誤報する。全件テストの実行中に、解放済みの確認が
+                    // 5 秒の上限に達して失敗していたのはこの形（実測: プールを塞ぐと開始が約 5 秒遅れる）。
+                    // 打ち切った確認は SMB のタイムアウトまで戻らないが、進行中の確認は 1 本に限るので
+                    // 専用スレッドが積み上がることはない（打ち切った確認がプールのスレッドを塞ぐこともない。
+                    // 上限までの待ちは呼び出し元のスレッドで行う）。
+                    _pendingConnectionCheck = Task.Factory.StartNew(
+                        () =>
+                        {
+                            // 想定外の例外は「接続なし」に丸め、Task を faulted にしない
+                            try { return ExecuteConnectionCheck(); }
+                            catch { return false; }
+                        },
+                        CancellationToken.None,
+                        TaskCreationOptions.LongRunning,
+                        TaskScheduler.Default);
                 }
 
                 check = _pendingConnectionCheck;
