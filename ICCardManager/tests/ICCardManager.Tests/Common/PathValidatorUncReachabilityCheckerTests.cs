@@ -23,11 +23,14 @@ public sealed class PathValidatorUncReachabilityCheckerTests : IDisposable
     /// <summary>応答の無い共有を模した probe を止めておくゲート。</summary>
     private readonly ManualResetEventSlim _release = new(false);
 
+    /// <summary>probe が始まったことの合図（専用スレッドの起動を待ってから呼び出し回数を数えるため）。</summary>
+    private readonly ManualResetEventSlim _probeStarted = new(false);
+
     private int _probeCallCount;
 
     public void Dispose()
     {
-        // 止めたままの probe（専用スレッド）を解放する
+        // 止めたままの probe（専用スレッド）を解放する（待機ハンドルは破棄しない。解放後に probe が Set を呼ぶため）
         _release.Set();
     }
 
@@ -37,8 +40,16 @@ public sealed class PathValidatorUncReachabilityCheckerTests : IDisposable
     private bool HangingProbe(string path)
     {
         Interlocked.Increment(ref _probeCallCount);
+        _probeStarted.Set();
         return _release.Wait(TimeSpan.FromSeconds(30));
     }
+
+    /// <summary>
+    /// probe が始まるまで待つ。上限（50〜100 ms）で打ち切られた呼び出しの後では、専用スレッドがまだ始まって
+    /// いないことがある（CPU が混んでいるとき）。始まる前に回数を数えると 0 になる。
+    /// </summary>
+    private void WaitUntilProbeStarted()
+        => _probeStarted.Wait(TimeSpan.FromSeconds(10)).Should().BeTrue("前提: probe が始まること");
 
     [Fact]
     public void 応答の無い共有へ続けて確認しても確認は1本に限られること()
@@ -53,6 +64,7 @@ public sealed class PathValidatorUncReachabilityCheckerTests : IDisposable
         // Assert
         first.Should().BeFalse("上限内に応答が無ければ到達できないと判定する");
         second.Should().BeFalse();
+        WaitUntilProbeStarted();
         ProbeCallCount.Should().Be(1, "進行中の確認があれば新しい確認を始めない（専用スレッドを積み上げない）");
     }
 
@@ -87,18 +99,20 @@ public sealed class PathValidatorUncReachabilityCheckerTests : IDisposable
         var checker = PathValidator.CreateUncReachabilityChecker(HangingProbe);
         checker(SharePath, 50).Should().BeFalse();
 
-        // 共有が復旧し、進行中だった確認が終わる。直後の呼び出しは進行中の確認に相乗りし得るので、
-        // まずその結果を受け取って 1 本目の完了を確定させる（Wait が true を返せばタスクは完了済み）
+        // 共有が復旧する。直後の呼び出しは、進行中だった 1 本目に相乗りするか、1 本目が先に終わっていれば
+        // 新しい確認を始める（どちらになるかはスケジューリング次第）。どちらでも、この呼び出しが true を返せば
+        // 待った確認は完了済みで、進行中の確認は残っていない
         _release.Set();
         checker(SharePath, 10_000).Should().BeTrue();
-        ProbeCallCount.Should().Be(1, "前提: ここまでは 1 本目の確認だけ");
+        var before = ProbeCallCount;
 
-        // Act: 1 本目が終わった後の呼び出し
+        // Act: 進行中の確認が無い状態での呼び出し
         var afterRecovery = checker(SharePath, 10_000);
 
         // Assert: 終わった確認を使い回さず、新しい確認で判定する
+        // （使い回す実装では 1 本目を返し続けるので、回数は増えない）
         afterRecovery.Should().BeTrue();
-        ProbeCallCount.Should().Be(2);
+        ProbeCallCount.Should().Be(before + 1);
     }
 
     [Fact]
@@ -125,6 +139,7 @@ public sealed class PathValidatorUncReachabilityCheckerTests : IDisposable
         checker(SharePath, 50).Should().BeFalse();
         checker(SharePath.ToUpperInvariant(), 50).Should().BeFalse();
 
+        WaitUntilProbeStarted();
         ProbeCallCount.Should().Be(1);
     }
 
