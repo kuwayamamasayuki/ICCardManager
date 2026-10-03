@@ -205,12 +205,12 @@ namespace ICCardManager.Views
         /// 先に進み、保存が走らないまま終わる（UI スレッドから呼んだ DB の完了は UI スレッドへ Post してから伝えるため、終了処理より
         /// 後ろに並ぶ）。終了ボタンの経路（<c>Application.Shutdown</c>）では <c>Closing</c> を取り消せないので、取り消して待つ形も使えない。
         /// 位置は UI スレッドで読み取り、保存はスレッドプールで始めて上限付きで待つ（<see cref="UiThreadBlockingWait"/>）。
+        /// 待つ間も Dispatcher のメッセージを処理するので、閉じる前に UI から始めた DB の処理（起動直後の点検など）の完了の通知が
+        /// 配られ、その処理が持つセマフォ・キャッシュのキーのロックが返る（UI スレッドを止めて待つと、それを待って上限まで止まる）。
         /// #2202 以前も、終了時の保存は UI スレッドの上で同期的に走り切っていた。
         /// <para>
-        /// 限界: 閉じる時点で、UI から始めた DB の処理の完了通知がまだ配られていない（UI スレッドへ Post された通知を処理する前に
-        /// 閉じた）と、その処理が持つゲート・セマフォ・キャッシュのキーのロックが返らず、保存はそれを待って上限に達し、保存されずに
-        /// 終わる。✕・Alt+F4・終了ボタンは確認の MessageBox の間にメッセージを処理するので通常は起きず、確認を挟まない OS の
-        /// サインアウトの短い時間帯に限られる。位置が保存されないだけで、台帳のデータには影響しない。
+        /// 保存はスレッドプールで始まるので UI 起点のゲートを取らず、まだ走っている UI 起点の読み取りと 1 本の接続を同時に使い得る
+        /// （バックグラウンドの処理と UI 起点の処理の関係と同じ。05_クラス設計書 §5.5b）。
         /// </para>
         /// </remarks>
         private void MainWindow_Closing(object sender, System.ComponentModel.CancelEventArgs e)
@@ -224,7 +224,7 @@ namespace ICCardManager.Views
                 {
                     // Release でも痕跡を残す（終了を止めないため、待たずに終了する）
                     ErrorDialogHelper.LogException(
-                        new TimeoutException($"終了時のウィンドウ位置の保存が {WindowPositionSaveTimeout.TotalSeconds:0} 秒以内に終わらなかったため、待たずに終了しました。"),
+                        new TimeoutException($"終了時のウィンドウ位置の保存が {WindowPositionSaveTimeout.TotalSeconds:0} 秒以内に終わらなかったため、待たずに終了しました（共有モードで他の PC が DB をロックしている間などに起こり得る想定内の事象で、位置が保存されないだけ）。"),
                         "終了時のウィンドウ位置の保存");
                 }
             }

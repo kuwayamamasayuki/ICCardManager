@@ -248,6 +248,42 @@ public sealed class DbContextUiThreadOffloadTests : IDisposable
     }
 
     /// <summary>
+    /// UI から始めた DB の処理の完了の通知が保留中（UI スレッドへ Post されたまま配られていない）でも、
+    /// <see cref="UiThreadBlockingWait"/> は待つ間に Dispatcher のメッセージを処理して通知を配るので、その処理が持つ
+    /// トランザクションのセマフォが返り、本体が進む。UI スレッドを止めて待つ形だと、本体はセマフォを待って上限まで止まる
+    /// （起動直後に終了すると終了時の保存が 10 秒止まる形。全件の UI テストで間欠的に見つかった）。
+    /// </summary>
+    [Fact]
+    public async Task UiThreadBlockingWait_UIから始めたトランザクションの完了の通知が保留中でも_本体が進むこと()
+    {
+        var completed = await RunOnDispatcherAsync(async _ =>
+        {
+            // UI から始めたトランザクション（サービスと同じ形: 待ってからスコープを破棄する）
+            var pending = HoldTransactionAsync();
+
+            // UI スレッドを止め、スレッドプール側がセマフォを取って完了の通知を Post し終えるまで待つ（通知はまだ配られない）
+            Thread.Sleep(UiThreadPreemption);
+
+            var done = UiThreadBlockingWait.RunOnThreadPoolAndWait(async () =>
+            {
+                using var scope = await _dbContext.BeginTransactionAsync();
+                scope.Commit();
+            }, TimeSpan.FromSeconds(5));
+
+            await pending;
+            return done;
+        });
+
+        completed.Should().BeTrue("待つ間に Post された通知が配られ、先のトランザクションがセマフォを返すので、本体が上限より前に終わる");
+    }
+
+    private async Task HoldTransactionAsync()
+    {
+        using var scope = await _dbContext.BeginTransactionAsync().ConfigureAwait(false);
+        scope.Commit();
+    }
+
+    /// <summary>
     /// 対の表明: UI スレッドから呼んだ入口の <c>Task</c> を UI スレッドで同期的に待つと、完了の通知（UI へ Post される）が
     /// 処理されないので終わらない。終了時の保存を <c>async void</c> の <c>await</c> にも同期的な待ちにもできず、
     /// <see cref="UiThreadBlockingWait"/> が要る理由を固定する。
