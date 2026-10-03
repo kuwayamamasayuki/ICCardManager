@@ -11,6 +11,12 @@
   - 01_システム概要設計書 §2 の注記に、ヘルプ（F7）を機能一覧に載せない理由を書いた
   - CHANGELOG の過去のエントリー（#1793 前後）にある「カード管理（F2）・職員管理（F3）・帳票作成（F4）」「ダッシュボード（F7/F8）」は、書いた当時からの誤記（キーの割り当ては当時も現在と同じ F1=帳票作成・F2=職員管理・F3=交通系ICカード管理・F7=ヘルプ・F8=管理者ダッシュボード）。履歴なので書き換えない
   - 画面に出る文言と 07_テスト設計書に残る「カード管理画面（F2）」は、コードの修正を伴うため Issue #2211 で直す
+- Issue #2164（再レビュー） **`OperationLogger` から消した操作者の引数が、1 つ上の層に「受け取って捨てる」形で残っていたのを削除した**
+  - 独立サブエージェントによる再レビューで検出。`LedgerMergeService.MergeAsync` / `UnmergeAsync`・`LedgerSplitService.SplitAsync`・`LedgerRowEditViewModel.InitializeForAddAsync` / `InitializeForEditAsync`（と `LedgerRowEditDialog`・履歴パネルの受け渡し）が操作者 IDm を受け取り、どこにも使わずに捨てていた。読んだ人は「渡した IDm が監査ログに記録される」と受け取り、記録を正しくしようとこの引数を使い始めると #1265 が塞いだ「引数経由のなりすまし」の形が復活する。監査ログに記録される操作者は変わらない（以前から `ICurrentOperatorContext` から解決していた）
+  - リフレクションテストを強めた。`OperationLogger` の `Log*` は `string` 型の引数を許可した名前（`tableName` / `filePath`）に限る許可形にした（`operator` で始まる名前だけを禁じる形は `staffIdm` 等の別名で素通りする）。上位の層（Service・ViewModel・View）に `operator` で始まる `string` 型の引数が無いことを固定するテストを追加した（統合の引数を戻す変異・`LogBackupAsync` に `staffIdm` を足す変異でそれぞれ赤になることを確かめた）
+  - 旧 API を前提にした用語（`OperationLogger` の region 名「新 API」、テストのコメント「旧 API」）を直した。改修したファイルに `#nullable enable` を付け、出た警告を是正した
+  - 05_クラス設計書 §5.15・§5.17 系のクラス図、06_シーケンス図（統合・分割）、07_テスト設計書 UT-AUDIT-002 を同期
+  - テスト: 単体 8,433 → 8,434（+1）・合計 8,547 → 8,548
 - Issue #2166 **テストプロジェクト間でテスト基盤パッケージの版をそろえた**
   - UI テスト（ICCardManager.UITests）だけが古い版のまま取り残されていたので、単体テストと同じ版へ上げた: Microsoft.NET.Test.Sdk 17.5.0 → 17.14.1、xunit.runner.visualstudio 2.4.5 → 2.8.2、FluentAssertions 6.12.0 → 6.12.2。xunit.runner 3 系（対応する xunit の系統が変わる）・FluentAssertions 7 以降（破壊的変更。8 以降は商用ライセンス）は上げない
   - 単体テストの coverlet.collector は 3.2.0 に据え置いた。6.0.4 を試したところ、手元で Release を `-p:DebugType=portable` でビルドしても net48 のアセンブリの計装が効かず、被覆行が 0 行となり、CI のカバレッジ報告（現在 3.2.0 で行 61% 前後）を保てる確認ができなかったため。理由と上げるときの確認方法を csproj に書いた

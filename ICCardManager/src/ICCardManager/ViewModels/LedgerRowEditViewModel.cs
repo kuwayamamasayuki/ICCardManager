@@ -72,7 +72,6 @@ namespace ICCardManager.ViewModels
         private readonly IDialogService _dialogService;
 
         private string _cardIdm = string.Empty;
-        private string? _operatorIdm;
         private int _editLedgerId;
 
         /// <summary>
@@ -389,7 +388,6 @@ namespace ICCardManager.ViewModels
         /// </summary>
         /// <param name="cardIdm">対象カードIDm</param>
         /// <param name="allLedgers">表示中の全履歴（挿入位置プレビュー用）</param>
-        /// <param name="operatorIdm">認証済み職員IDm</param>
         /// <param name="historyStartsAtCardBeginning">
         /// <paramref name="allLedgers"/> の先頭が、そのカードの履歴の先頭でもあるか（Issue #1740）。
         /// true のときに限り、先頭への挿入（<c>InsertIndex == 0</c>）で直前残高 0 を起点にしてよい。
@@ -400,11 +398,9 @@ namespace ICCardManager.ViewModels
         public async Task InitializeForAddAsync(
             string cardIdm,
             List<LedgerDto> allLedgers,
-            string operatorIdm,
             bool historyStartsAtCardBeginning = false)
         {
             _cardIdm = cardIdm;
-            _operatorIdm = operatorIdm;
             _allLedgers = allLedgers;
             _historyStartsAtCardBeginning = historyStartsAtCardBeginning;
 
@@ -428,7 +424,6 @@ namespace ICCardManager.ViewModels
         /// Editモードで初期化
         /// </summary>
         /// <param name="ledgerDto">編集対象</param>
-        /// <param name="operatorIdm">認証済み職員IDm</param>
         /// <param name="previousBalance">
         /// 履歴一覧の表示順で編集対象の直前にある行の残高（Issue #1740）。
         /// 自動計算の起点として使う。直前行が表示範囲に無い場合（ページ先頭行など）は null を渡すこと。
@@ -440,10 +435,9 @@ namespace ICCardManager.ViewModels
         /// 「導入時残高の誤り」の形状の導入行だと検知したときだけ渡す。無ければ null。
         /// </param>
         public async Task InitializeForEditAsync(
-            LedgerDto ledgerDto, string operatorIdm, int? previousBalance = null,
+            LedgerDto ledgerDto, int? previousBalance = null,
             InitialBalanceCorrection? initialBalanceCorrection = null)
         {
-            _operatorIdm = operatorIdm;
             _cardIdm = ledgerDto.CardIdm;
             _editLedgerId = ledgerDto.Id;
 
