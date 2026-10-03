@@ -118,12 +118,15 @@ namespace ICCardManager.Services
                 var detailsReplaced = await _ledgerRepository.ReplaceDetailsAsync(
                     originalLedger.Id, firstGroup.AsEnumerable().Reverse(), scope.Transaction).ConfigureAwait(false);
 
-                // Issue #1753: UpdateAsync は影響行数 0 で false を返す。共有モードでは読み取り（上の
+                // Issue #1753: UpdateSummaryAndAmountsAsync は影響行数 0 で false を返す。共有モードでは読み取り（上の
                 // GetByIdAsync）と本トランザクションの間に他 PC が同じ履歴を統合・削除し得るため、
                 // 戻り値を破棄すると「元 Ledger を更新できていないのに新 Ledger だけ作られる」状態になる。
                 // 早期 return で scope は Dispose 時に自動ロールバックされる。
-                var targetUpdated = await _ledgerRepository.UpdateAsync(
-                    originalLedger, scope.Transaction).ConfigureAwait(false);
+                // Issue #2212: 分割が再計算する列（摘要・金額）だけを SET する。originalLedger はトランザクションの
+                // 外で読んだ値なので、全列を SET すると読み取りの後に他 PC が直した備考・同行者数を巻き戻す。
+                var targetUpdated = await _ledgerRepository.UpdateSummaryAndAmountsAsync(
+                    originalLedger.Id, originalLedger.Summary, originalLedger.Income, originalLedger.Expense,
+                    originalLedger.Balance, scope.Transaction).ConfigureAwait(false);
 
                 if (!detailsReplaced || !targetUpdated)
                 {

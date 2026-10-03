@@ -1,3 +1,4 @@
+#nullable enable
 using System;
 using System.Collections.Generic;
 using System.Data.SQLite;
@@ -514,7 +515,7 @@ namespace ICCardManager.Services
                 // tx は scope.Transaction を明示的に引き渡す（db-write-conventions.md の「①」）。
                 // BeginTransactionAsync は SemaphoreSlim(1,1) を取るため、リポジトリ側で入れ子に
                 // 開くと自己デッドロックする（Issue #1575）。暗黙参加（②）は backstop（Issue #1737）。
-                TransactionScope scope = null;
+                TransactionScope? scope = null;
                 try
                 {
                     scope = await _dbContext.BeginTransactionAsync().ConfigureAwait(false);
@@ -591,7 +592,7 @@ namespace ICCardManager.Services
         /// 成功なら <c>null</c>。業務的な失敗（親が見つからない・影響行数 0）なら利用者向けの文言。
         /// 失敗時の巻き戻しと、例外時の扱いは呼び出し元が持つ（commit/rollback には介入しない）。
         /// </returns>
-        private async Task<string> ReplaceDetailsAndUpdateParentAsync(
+        private async Task<string?> ReplaceDetailsAndUpdateParentAsync(
             int ledgerId,
             List<LedgerDetail> newDetails,
             SummaryGenerator summaryGenerator,
@@ -629,7 +630,9 @@ namespace ICCardManager.Services
             ledger.Balance = balance;
 
             // Issue #1753 / #1808: 0 行は「その id の行が無い」競合。戻り値を捨てない
-            var parentUpdated = await _ledgerRepository.UpdateAsync(ledger, transaction).ConfigureAwait(false);
+            // Issue #2212: 明細から再計算した列（摘要・金額）だけを SET する（#1726）
+            var parentUpdated = await _ledgerRepository.UpdateSummaryAndAmountsAsync(
+                ledger.Id, ledger.Summary, ledger.Income, ledger.Expense, ledger.Balance, transaction).ConfigureAwait(false);
             return parentUpdated ? null : BuildParentLedgerConflictMessage(ledgerId);
         }
 
@@ -637,7 +640,7 @@ namespace ICCardManager.Services
         /// 親 Ledger が見つからない／UPDATE が 0 行だったときのエラー文言を組み立てる（Issue #1808）。
         /// </summary>
         /// <remarks>
-        /// <c>LedgerRepository.UpdateAsync</c> の WHERE は <c>id = @id</c> だけなので、0 行は
+        /// <c>LedgerRepository.UpdateSummaryAndAmountsAsync</c> の WHERE は <c>id = @id</c> だけなので、0 行は
         /// 「その id の行が無い」ことに特定できる（Issue #1759「影響行数 0 は競合 — 原因を名指しできる」）。
         /// ただし共有モードでもローカルモードでも起こり得るため、モード中立に「他のパソコンや別の操作」と
         /// 「可能性があります」で述べる。
@@ -944,9 +947,9 @@ namespace ICCardManager.Services
                 changes.Add(new FieldChange { FieldName = "備考", NewValue = note, IsDisplayOnly = true });
             }
 
-            if (companionCount.GetValueOrDefault() > 0)
+            if (companionCount is int count && count > 0)
             {
-                changes.Add(new FieldChange { FieldName = "同行者数", NewValue = $"{companionCount.Value}名", IsDisplayOnly = true });
+                changes.Add(new FieldChange { FieldName = "同行者数", NewValue = $"{count}名", IsDisplayOnly = true });
             }
 
             return changes;

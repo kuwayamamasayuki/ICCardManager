@@ -81,7 +81,9 @@ public class CsvImportServiceLedgerDetailTransactionTests : IDisposable
     #region ヘルパー
 
     /// <summary>
-    /// 親の更新（<c>UpdateAsync</c>）の差し替え。引数は（対象 Ledger, トランザクション。tx なし経路では null）。
+    /// 親の更新（<c>UpdateSummaryAndAmountsAsync</c>。全列の <c>UpdateAsync</c> にも同じ差し替えを掛ける）の差し替え。
+    /// 引数は（対象 Ledger, トランザクション。tx なし経路では null）。<c>UpdateSummaryAndAmountsAsync</c> 経由では、
+    /// 対象 Ledger は引数（ID・摘要・受入・払出・残額）だけを詰めたものになる。
     /// </summary>
     private delegate Task<bool> UpdateBehavior(Ledger ledger, SQLiteTransaction? transaction);
 
@@ -146,6 +148,23 @@ public class CsvImportServiceLedgerDetailTransactionTests : IDisposable
             });
         ledgerRepositoryMock.Setup(r => r.UpdateAsync(It.IsAny<Ledger>()))
             .Returns<Ledger>(ledger => RunUpdate(ledger, null));
+
+        // Issue #2212: 親の更新は明細から再計算した列だけを SET する UpdateSummaryAndAmountsAsync。
+        // 全列の UpdateAsync（上）も実リポジトリへ委譲し失敗も注入するのは、全列の更新へ退行したときに
+        // 注入が効かず成功してしまわないため（testing.md #1745）
+        ledgerRepositoryMock
+            .Setup(r => r.UpdateSummaryAndAmountsAsync(
+                It.IsAny<int>(), It.IsAny<string>(), It.IsAny<int>(), It.IsAny<int>(), It.IsAny<int>(),
+                It.IsAny<SQLiteTransaction>()))
+            .Returns<int, string, int, int, int, SQLiteTransaction>((id, summary, income, expense, balance, transaction) =>
+            {
+                receivedTransactions?.Add(transaction);
+                return updateBehavior != null
+                    ? updateBehavior(
+                        new Ledger { Id = id, Summary = summary, Income = income, Expense = expense, Balance = balance },
+                        transaction)
+                    : _realLedgerRepository.UpdateSummaryAndAmountsAsync(id, summary, income, expense, balance, transaction);
+            });
 
         var settingsRepositoryMock = new Mock<ISettingsRepository>();
         settingsRepositoryMock.Setup(x => x.GetAppSettingsAsync()).ReturnsAsync(new AppSettings());
@@ -332,6 +351,8 @@ public class CsvImportServiceLedgerDetailTransactionTests : IDisposable
             "トランザクションを引き渡さない置換は自前の tx で確定してしまう");
         ledgerRepositoryMock.Verify(r => r.UpdateAsync(It.IsAny<Ledger>()), Times.Never,
             "トランザクションを引き渡さない更新は autocommit で確定してしまう");
+        ledgerRepositoryMock.Verify(r => r.UpdateAsync(It.IsAny<Ledger>(), It.IsAny<SQLiteTransaction>()), Times.Never,
+            "親の更新は明細から再計算した列だけを SET する（Issue #2212）");
     }
 
     /// <summary>
@@ -354,6 +375,9 @@ public class CsvImportServiceLedgerDetailTransactionTests : IDisposable
         result.SkippedCount.Should().Be(1);
         ledgerRepositoryMock.Verify(r => r.ReplaceDetailsAsync(
                 It.IsAny<int>(), It.IsAny<IEnumerable<LedgerDetail>>(), It.IsAny<SQLiteTransaction>()), Times.Never);
+        ledgerRepositoryMock.Verify(r => r.UpdateSummaryAndAmountsAsync(
+                It.IsAny<int>(), It.IsAny<string>(), It.IsAny<int>(), It.IsAny<int>(), It.IsAny<int>(),
+                It.IsAny<SQLiteTransaction>()), Times.Never);
         ledgerRepositoryMock.Verify(r => r.UpdateAsync(It.IsAny<Ledger>(), It.IsAny<SQLiteTransaction>()), Times.Never);
         await AssertUnchangedAsync(ledgerId, "変更が無ければ書き込まない");
     }
@@ -386,6 +410,10 @@ public class CsvImportServiceLedgerDetailTransactionTests : IDisposable
         message.Should().MatchRegex("してください。$", "どうすれば: 行動指示で終わる");
         // Issue #2176: CSV 全体を取り込み直すと、取り込めた利用履歴 ID 空欄の行（#1781）が二重になるため、範囲を名指しする
         message.Should().Contain("この利用履歴IDの行だけを残したCSV");
+        ledgerRepositoryMock.Verify(r => r.UpdateSummaryAndAmountsAsync(
+                It.IsAny<int>(), It.IsAny<string>(), It.IsAny<int>(), It.IsAny<int>(), It.IsAny<int>(),
+                It.IsAny<SQLiteTransaction>()), Times.Never,
+            "置換に失敗したら親を更新しない");
         ledgerRepositoryMock.Verify(r => r.UpdateAsync(It.IsAny<Ledger>(), It.IsAny<SQLiteTransaction>()), Times.Never,
             "置換に失敗したら親を更新しない");
         await AssertUnchangedAsync(ledgerId, "置換の件数不足でも途中まで書いた明細を確定させない");
@@ -413,7 +441,8 @@ public class CsvImportServiceLedgerDetailTransactionTests : IDisposable
             ledger.Id == failingId
                 ? throw new InvalidOperationException("injected parent update failure")
                 : transaction != null
-                    ? _realLedgerRepository.UpdateAsync(ledger, transaction)
+                    ? _realLedgerRepository.UpdateSummaryAndAmountsAsync(
+                        ledger.Id, ledger.Summary, ledger.Income, ledger.Expense, ledger.Balance, transaction)
                     : _realLedgerRepository.UpdateAsync(ledger));
 
         // Act

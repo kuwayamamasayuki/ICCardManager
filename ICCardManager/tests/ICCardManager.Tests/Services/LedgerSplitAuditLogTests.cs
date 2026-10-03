@@ -101,8 +101,9 @@ public class LedgerSplitAuditLogTests : IDisposable
         _ledgerRepositoryMock.Setup(x => x.GetByIdAsync(1)).ReturnsAsync(originalLedger);
         _ledgerRepositoryMock.Setup(x => x.ReplaceDetailsAsync(
             It.IsAny<int>(), It.IsAny<IEnumerable<LedgerDetail>>(), It.IsAny<SQLiteTransaction>())).ReturnsAsync(true);
-        _ledgerRepositoryMock.Setup(x => x.UpdateAsync(
-            It.IsAny<Ledger>(), It.IsAny<SQLiteTransaction>())).ReturnsAsync(true);
+        _ledgerRepositoryMock.Setup(x => x.UpdateSummaryAndAmountsAsync(
+            It.IsAny<int>(), It.IsAny<string>(), It.IsAny<int>(), It.IsAny<int>(), It.IsAny<int>(),
+            It.IsAny<SQLiteTransaction>())).ReturnsAsync(true);
         _ledgerRepositoryMock.Setup(x => x.InsertAsync(
             It.IsAny<Ledger>(), It.IsAny<SQLiteTransaction>())).ReturnsAsync(100);
         _ledgerRepositoryMock.Setup(x => x.InsertDetailsAsync(

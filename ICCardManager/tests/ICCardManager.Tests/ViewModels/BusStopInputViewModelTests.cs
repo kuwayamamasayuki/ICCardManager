@@ -243,6 +243,8 @@ public class BusStopInputViewModelTests : IDisposable
 
         // Assert: リポジトリは呼ばれない
         _ledgerRepoMock.Verify(
+            r => r.UpdateSummaryAsync(It.IsAny<int>(), It.IsAny<string>(), It.IsAny<SQLiteTransaction>()), Times.Never);
+        _ledgerRepoMock.Verify(
             r => r.UpdateAsync(It.IsAny<Ledger>(), It.IsAny<SQLiteTransaction>()), Times.Never);
     }
 
@@ -265,7 +267,7 @@ public class BusStopInputViewModelTests : IDisposable
                 It.IsAny<int>(), It.IsAny<List<(int, string)>>(), It.IsAny<SQLiteTransaction>()))
             .ReturnsAsync(true);
 
-        _ledgerRepoMock.Setup(r => r.UpdateAsync(It.IsAny<Ledger>(), It.IsAny<SQLiteTransaction>()))
+        _ledgerRepoMock.Setup(r => r.UpdateSummaryAsync(It.IsAny<int>(), It.IsAny<string>(), It.IsAny<SQLiteTransaction>()))
             .ReturnsAsync(true);
 
         _viewModel.InitializeWithDetails(ledger, ledger.Details);
@@ -300,7 +302,7 @@ public class BusStopInputViewModelTests : IDisposable
         _ledgerRepoMock.Setup(r => r.UpdateDetailBusStopsAsync(
                 It.IsAny<int>(), It.IsAny<IEnumerable<(int, string)>>(), It.IsAny<SQLiteTransaction>()))
             .ReturnsAsync(false); // 競合
-        _ledgerRepoMock.Setup(r => r.UpdateAsync(It.IsAny<Ledger>(), It.IsAny<SQLiteTransaction>())).ReturnsAsync(true);
+        _ledgerRepoMock.Setup(r => r.UpdateSummaryAsync(It.IsAny<int>(), It.IsAny<string>(), It.IsAny<SQLiteTransaction>())).ReturnsAsync(true);
 
         _viewModel.InitializeWithDetails(ledger, details);
         _viewModel.BusUsages[0].BusStops = "天神～博多";
@@ -309,6 +311,7 @@ public class BusStopInputViewModelTests : IDisposable
         await _viewModel.SaveAsync();
 
         // Assert: 摘要の UPDATE へ到達しない／保存済みにしない／原因を名指しした案内を出す
+        _ledgerRepoMock.Verify(r => r.UpdateSummaryAsync(It.IsAny<int>(), It.IsAny<string>(), It.IsAny<SQLiteTransaction>()), Times.Never);
         _ledgerRepoMock.Verify(r => r.UpdateAsync(It.IsAny<Ledger>(), It.IsAny<SQLiteTransaction>()), Times.Never);
         _viewModel.IsSaved.Should().BeFalse();
         _viewModel.StatusMessage.Should().Be(BusStopInputViewModel.BusStopConflictMessage);
@@ -332,7 +335,7 @@ public class BusStopInputViewModelTests : IDisposable
         _ledgerRepoMock.Setup(r => r.UpdateDetailBusStopsAsync(
                 It.IsAny<int>(), It.IsAny<IEnumerable<(int, string)>>(), It.IsAny<SQLiteTransaction>()))
             .ReturnsAsync(true);
-        _ledgerRepoMock.Setup(r => r.UpdateAsync(It.IsAny<Ledger>(), It.IsAny<SQLiteTransaction>())).ReturnsAsync(true);
+        _ledgerRepoMock.Setup(r => r.UpdateSummaryAsync(It.IsAny<int>(), It.IsAny<string>(), It.IsAny<SQLiteTransaction>())).ReturnsAsync(true);
 
         _viewModel.InitializeWithDetails(ledger, details);
         _viewModel.BusUsages[0].BusStops = "天神～博多";
@@ -341,7 +344,9 @@ public class BusStopInputViewModelTests : IDisposable
         await _viewModel.SaveAsync();
 
         // Assert
-        _ledgerRepoMock.Verify(r => r.UpdateAsync(It.IsAny<Ledger>(), It.IsAny<SQLiteTransaction>()), Times.Once);
+        _ledgerRepoMock.Verify(r => r.UpdateSummaryAsync(It.IsAny<int>(), It.IsAny<string>(), It.IsAny<SQLiteTransaction>()), Times.Once);
+        _ledgerRepoMock.Verify(r => r.UpdateAsync(It.IsAny<Ledger>(), It.IsAny<SQLiteTransaction>()), Times.Never);
+        _ledgerRepoMock.Verify(r => r.UpdateAsync(It.IsAny<Ledger>()), Times.Never);
         _viewModel.IsSaved.Should().BeTrue();
     }
 
@@ -363,7 +368,7 @@ public class BusStopInputViewModelTests : IDisposable
         _ledgerRepoMock.Setup(r => r.UpdateDetailBusStopsAsync(
                 It.IsAny<int>(), It.IsAny<IEnumerable<(int, string)>>(), It.IsAny<SQLiteTransaction>()))
             .ReturnsAsync(false);
-        _ledgerRepoMock.Setup(r => r.UpdateAsync(It.IsAny<Ledger>(), It.IsAny<SQLiteTransaction>())).ReturnsAsync(true);
+        _ledgerRepoMock.Setup(r => r.UpdateSummaryAsync(It.IsAny<int>(), It.IsAny<string>(), It.IsAny<SQLiteTransaction>())).ReturnsAsync(true);
 
         _viewModel.InitializeWithDetails(ledger, details);
 
@@ -371,6 +376,7 @@ public class BusStopInputViewModelTests : IDisposable
         await _viewModel.SkipAsync();
 
         // Assert
+        _ledgerRepoMock.Verify(r => r.UpdateSummaryAsync(It.IsAny<int>(), It.IsAny<string>(), It.IsAny<SQLiteTransaction>()), Times.Never);
         _ledgerRepoMock.Verify(r => r.UpdateAsync(It.IsAny<Ledger>(), It.IsAny<SQLiteTransaction>()), Times.Never);
         _viewModel.IsSaved.Should().BeFalse();
         _viewModel.StatusMessage.Should().Be(BusStopInputViewModel.BusStopConflictMessage);
@@ -399,8 +405,8 @@ public class BusStopInputViewModelTests : IDisposable
                 It.IsAny<int>(), It.IsAny<IEnumerable<(int, string)>>(), It.IsAny<SQLiteTransaction>()))
             .Callback<int, IEnumerable<(int, string)>, SQLiteTransaction>((_, __, tx) => detailTransaction = tx)
             .ReturnsAsync(true);
-        _ledgerRepoMock.Setup(r => r.UpdateAsync(It.IsAny<Ledger>(), It.IsAny<SQLiteTransaction>()))
-            .Callback<Ledger, SQLiteTransaction>((_, tx) => summaryTransaction = tx)
+        _ledgerRepoMock.Setup(r => r.UpdateSummaryAsync(It.IsAny<int>(), It.IsAny<string>(), It.IsAny<SQLiteTransaction>()))
+            .Callback<int, string, SQLiteTransaction>((_, _, tx) => summaryTransaction = tx)
             .ReturnsAsync(true);
 
         _viewModel.InitializeWithDetails(ledger, details);
@@ -441,6 +447,8 @@ public class BusStopInputViewModelTests : IDisposable
             .Returns<int, IEnumerable<(int SequenceNumber, string BusStops)>, SQLiteTransaction>(
                 (id, updates, tx) => realRepository.UpdateDetailBusStopsAsync(id, updates, tx));
         _ledgerRepoMock.Setup(r => r.UpdateAsync(It.IsAny<Ledger>(), It.IsAny<SQLiteTransaction>()))
+            .ReturnsAsync(false); // 台帳が他 PC で削除された等
+        _ledgerRepoMock.Setup(r => r.UpdateSummaryAsync(It.IsAny<int>(), It.IsAny<string>(), It.IsAny<SQLiteTransaction>()))
             .ReturnsAsync(false); // 台帳が他 PC で削除された等
 
         _viewModel.InitializeWithDetails(ledger, details);
@@ -516,6 +524,8 @@ public class BusStopInputViewModelTests : IDisposable
             .ReturnsAsync(true);
         _ledgerRepoMock.Setup(r => r.UpdateAsync(It.IsAny<Ledger>(), It.IsAny<SQLiteTransaction>()))
             .ReturnsAsync(false);
+        _ledgerRepoMock.Setup(r => r.UpdateSummaryAsync(It.IsAny<int>(), It.IsAny<string>(), It.IsAny<SQLiteTransaction>()))
+            .ReturnsAsync(false);
 
         _viewModel.InitializeWithDetails(ledger, details);
 
@@ -554,9 +564,9 @@ public class BusStopInputViewModelTests : IDisposable
         _ledgerRepoMock.Setup(r => r.UpdateDetailBusStopsAsync(
                 It.IsAny<int>(), It.IsAny<IEnumerable<(int, string)>>(), It.IsAny<SQLiteTransaction>()))
             .ReturnsAsync(true);
-        _ledgerRepoMock.Setup(r => r.UpdateAsync(It.Is<Ledger>(l => l.Id == 11), It.IsAny<SQLiteTransaction>()))
+        _ledgerRepoMock.Setup(r => r.UpdateSummaryAsync(11, It.IsAny<string>(), It.IsAny<SQLiteTransaction>()))
             .ReturnsAsync(true);
-        _ledgerRepoMock.Setup(r => r.UpdateAsync(It.Is<Ledger>(l => l.Id == 12), It.IsAny<SQLiteTransaction>()))
+        _ledgerRepoMock.Setup(r => r.UpdateSummaryAsync(12, It.IsAny<string>(), It.IsAny<SQLiteTransaction>()))
             .ReturnsAsync(false); // 2 件目は他のパソコンで削除された
 
         await _viewModel.InitializeWithLedgersAsync(new[] { ledger1, ledger2 });
@@ -569,7 +579,7 @@ public class BusStopInputViewModelTests : IDisposable
 
         // Assert: 1 件目は摘要の更新まで進んでいたが、トランザクションごと巻き戻るのでメモリも戻す
         _viewModel.IsSaved.Should().BeFalse();
-        _ledgerRepoMock.Verify(r => r.UpdateAsync(It.Is<Ledger>(l => l.Id == 11), It.IsAny<SQLiteTransaction>()), Times.Once,
+        _ledgerRepoMock.Verify(r => r.UpdateSummaryAsync(11, It.IsAny<string>(), It.IsAny<SQLiteTransaction>()), Times.Once,
             "前提: 1 件目の摘要は更新まで進んでいる");
         ledger1.Summary.Should().Be(PlaceholderSummary);
         ledger2.Summary.Should().Be(PlaceholderSummary);
@@ -595,6 +605,9 @@ public class BusStopInputViewModelTests : IDisposable
                 (id, updates, tx) => realRepository.UpdateDetailBusStopsAsync(id, updates, tx));
         _ledgerRepoMock.Setup(r => r.UpdateAsync(It.IsAny<Ledger>(), It.IsAny<SQLiteTransaction>()))
             .Returns<Ledger, SQLiteTransaction>((l, tx) => realRepository.UpdateAsync(l, tx));
+        // Issue #2212: 摘要の更新は摘要だけを SET する UpdateSummaryAsync。全列の UpdateAsync（上）の委譲も残す（testing.md #1745）
+        _ledgerRepoMock.Setup(r => r.UpdateSummaryAsync(It.IsAny<int>(), It.IsAny<string>(), It.IsAny<SQLiteTransaction>()))
+            .Returns<int, string, SQLiteTransaction>((id, summary, tx) => realRepository.UpdateSummaryAsync(id, summary, tx));
 
         _viewModel.InitializeWithDetails(ledger, details);
         _viewModel.BusUsages[0].BusStops = "天神～博多";
@@ -692,7 +705,7 @@ public class BusStopInputViewModelTests : IDisposable
         _ledgerRepoMock.Setup(r => r.UpdateDetailBusStopsAsync(
                 It.IsAny<int>(), It.IsAny<List<(int, string)>>(), It.IsAny<SQLiteTransaction>()))
             .ReturnsAsync(true);
-        _ledgerRepoMock.Setup(r => r.UpdateAsync(It.IsAny<Ledger>(), It.IsAny<SQLiteTransaction>()))
+        _ledgerRepoMock.Setup(r => r.UpdateSummaryAsync(It.IsAny<int>(), It.IsAny<string>(), It.IsAny<SQLiteTransaction>()))
             .ReturnsAsync(true);
 
         _viewModel.InitializeWithDetails(ledger, details);
@@ -721,6 +734,8 @@ public class BusStopInputViewModelTests : IDisposable
                 It.IsAny<int>(), It.IsAny<List<(int, string)>>(), It.IsAny<SQLiteTransaction>()))
             .ReturnsAsync(true);
         _ledgerRepoMock.Setup(r => r.UpdateAsync(It.IsAny<Ledger>(), It.IsAny<SQLiteTransaction>()))
+            .ReturnsAsync(false);
+        _ledgerRepoMock.Setup(r => r.UpdateSummaryAsync(It.IsAny<int>(), It.IsAny<string>(), It.IsAny<SQLiteTransaction>()))
             .ReturnsAsync(false);
 
         _viewModel.InitializeWithDetails(ledger, details);
@@ -757,7 +772,7 @@ public class BusStopInputViewModelTests : IDisposable
         _ledgerRepoMock.Setup(r => r.UpdateDetailBusStopsAsync(
                 It.IsAny<int>(), It.IsAny<List<(int, string)>>(), It.IsAny<SQLiteTransaction>()))
             .ReturnsAsync(true);
-        _ledgerRepoMock.Setup(r => r.UpdateAsync(It.IsAny<Ledger>(), It.IsAny<SQLiteTransaction>())).ReturnsAsync(true);
+        _ledgerRepoMock.Setup(r => r.UpdateSummaryAsync(It.IsAny<int>(), It.IsAny<string>(), It.IsAny<SQLiteTransaction>())).ReturnsAsync(true);
 
         _viewModel.InitializeWithDetails(ledger, details);
         return ledger;
@@ -813,6 +828,7 @@ public class BusStopInputViewModelTests : IDisposable
         // Assert: 保存されない（ダイアログは閉じない）
         _viewModel.IsSaved.Should().BeFalse();
         _ledgerRepoMock.Verify(r => r.UpdateDetailBusStopsAsync(It.IsAny<int>(), It.IsAny<List<(int, string)>>(), It.IsAny<SQLiteTransaction>()), Times.Never);
+        _ledgerRepoMock.Verify(r => r.UpdateSummaryAsync(It.IsAny<int>(), It.IsAny<string>(), It.IsAny<SQLiteTransaction>()), Times.Never);
         _ledgerRepoMock.Verify(r => r.UpdateAsync(It.IsAny<Ledger>(), It.IsAny<SQLiteTransaction>()), Times.Never);
         ledger.Details[0].BusStops.Should().Be("", "「いいえ」では★への変換も行わない");
 
@@ -948,7 +964,7 @@ public class BusStopInputViewModelTests : IDisposable
         _ledgerRepoMock.Setup(r => r.UpdateDetailBusStopsAsync(
                 It.IsAny<int>(), It.IsAny<List<(int, string)>>(), It.IsAny<SQLiteTransaction>()))
             .ReturnsAsync(true);
-        _ledgerRepoMock.Setup(r => r.UpdateAsync(It.IsAny<Ledger>(), It.IsAny<SQLiteTransaction>()))
+        _ledgerRepoMock.Setup(r => r.UpdateSummaryAsync(It.IsAny<int>(), It.IsAny<string>(), It.IsAny<SQLiteTransaction>()))
             .ReturnsAsync(true);
 
         _viewModel.InitializeWithDetails(ledger, ledger.Details);
@@ -978,7 +994,7 @@ public class BusStopInputViewModelTests : IDisposable
         _ledgerRepoMock.Setup(r => r.UpdateDetailBusStopsAsync(
                 It.IsAny<int>(), It.IsAny<List<(int, string)>>(), It.IsAny<SQLiteTransaction>()))
             .ReturnsAsync(true);
-        _ledgerRepoMock.Setup(r => r.UpdateAsync(It.IsAny<Ledger>(), It.IsAny<SQLiteTransaction>()))
+        _ledgerRepoMock.Setup(r => r.UpdateSummaryAsync(It.IsAny<int>(), It.IsAny<string>(), It.IsAny<SQLiteTransaction>()))
             .ReturnsAsync(true);
 
         _viewModel.InitializeWithDetails(ledger, ledger.Details);
@@ -1025,6 +1041,7 @@ public class BusStopInputViewModelTests : IDisposable
         _viewModel.IsSaved.Should().BeFalse();
         _ledgerRepoMock.Verify(r => r.UpdateDetailBusStopsAsync(
             It.IsAny<int>(), It.IsAny<List<(int, string)>>(), It.IsAny<SQLiteTransaction>()), Times.Never);
+        _ledgerRepoMock.Verify(r => r.UpdateSummaryAsync(It.IsAny<int>(), It.IsAny<string>(), It.IsAny<SQLiteTransaction>()), Times.Never);
         _ledgerRepoMock.Verify(r => r.UpdateAsync(It.IsAny<Ledger>(), It.IsAny<SQLiteTransaction>()), Times.Never);
         // 確認文は何が失われるか（★になる）と、残す方法（保存）を述べる
         shownMessage.Should().Contain($"「{SummaryGenerator.BusPlaceholder}」");
@@ -1043,7 +1060,7 @@ public class BusStopInputViewModelTests : IDisposable
         _ledgerRepoMock.Setup(r => r.UpdateDetailBusStopsAsync(
                 It.IsAny<int>(), It.IsAny<List<(int, string)>>(), It.IsAny<SQLiteTransaction>()))
             .ReturnsAsync(true);
-        _ledgerRepoMock.Setup(r => r.UpdateAsync(It.IsAny<Ledger>(), It.IsAny<SQLiteTransaction>()))
+        _ledgerRepoMock.Setup(r => r.UpdateSummaryAsync(It.IsAny<int>(), It.IsAny<string>(), It.IsAny<SQLiteTransaction>()))
             .ReturnsAsync(true);
         _dialogServiceMock.Setup(d => d.ShowWarningConfirmation(It.IsAny<string>(), BusStopInputViewModel.SkipDiscardConfirmationTitle))
             .Returns(confirm);
@@ -1075,7 +1092,7 @@ public class BusStopInputViewModelTests : IDisposable
         _ledgerRepoMock.Setup(r => r.UpdateDetailBusStopsAsync(
                 It.IsAny<int>(), It.IsAny<List<(int, string)>>(), It.IsAny<SQLiteTransaction>()))
             .ReturnsAsync(true);
-        _ledgerRepoMock.Setup(r => r.UpdateAsync(It.IsAny<Ledger>(), It.IsAny<SQLiteTransaction>()))
+        _ledgerRepoMock.Setup(r => r.UpdateSummaryAsync(It.IsAny<int>(), It.IsAny<string>(), It.IsAny<SQLiteTransaction>()))
             .ReturnsAsync(true);
         // 確認が出たら「いいえ」— 出てしまう実装ではスキップされず IsSaved が false のまま赤になる
         _dialogServiceMock.Setup(d => d.ShowWarningConfirmation(It.IsAny<string>(), It.IsAny<string>()))
@@ -1099,6 +1116,8 @@ public class BusStopInputViewModelTests : IDisposable
         await _viewModel.SkipAsync();
 
         // Assert: リポジトリは呼ばれない
+        _ledgerRepoMock.Verify(
+            r => r.UpdateSummaryAsync(It.IsAny<int>(), It.IsAny<string>(), It.IsAny<SQLiteTransaction>()), Times.Never);
         _ledgerRepoMock.Verify(
             r => r.UpdateAsync(It.IsAny<Ledger>(), It.IsAny<SQLiteTransaction>()), Times.Never);
     }
@@ -1218,7 +1237,7 @@ public class BusStopInputViewModelTests : IDisposable
         _settingsRepoMock.Setup(s => s.GetAppSettingsAsync()).ReturnsAsync(new AppSettings());
         _ledgerRepoMock.Setup(r => r.UpdateDetailBusStopsAsync(It.IsAny<int>(), It.IsAny<IEnumerable<(int, string)>>(), It.IsAny<SQLiteTransaction>()))
             .ReturnsAsync(true);
-        _ledgerRepoMock.Setup(r => r.UpdateAsync(It.IsAny<Ledger>(), It.IsAny<SQLiteTransaction>())).ReturnsAsync(true);
+        _ledgerRepoMock.Setup(r => r.UpdateSummaryAsync(It.IsAny<int>(), It.IsAny<string>(), It.IsAny<SQLiteTransaction>())).ReturnsAsync(true);
 
         await _viewModel.InitializeWithLedgersAsync(new[] { ledger1, ledger2 });
 
@@ -1230,15 +1249,17 @@ public class BusStopInputViewModelTests : IDisposable
         // Act
         await _viewModel.SaveAsync();
 
-        // Assert: 両 Ledger に対して UpdateDetailBusStopsAsync と UpdateAsync が1回ずつ呼ばれる
+        // Assert: 両 Ledger に対して UpdateDetailBusStopsAsync と UpdateSummaryAsync が1回ずつ呼ばれる
         _ledgerRepoMock.Verify(
             r => r.UpdateDetailBusStopsAsync(10, It.Is<IEnumerable<(int, string)>>(u => u.Count() == 1), It.IsAny<SQLiteTransaction>()),
             Times.Once);
         _ledgerRepoMock.Verify(
             r => r.UpdateDetailBusStopsAsync(11, It.Is<IEnumerable<(int, string)>>(u => u.Count() == 2), It.IsAny<SQLiteTransaction>()),
             Times.Once);
-        _ledgerRepoMock.Verify(r => r.UpdateAsync(ledger1, It.IsAny<SQLiteTransaction>()), Times.Once);
-        _ledgerRepoMock.Verify(r => r.UpdateAsync(ledger2, It.IsAny<SQLiteTransaction>()), Times.Once);
+        _ledgerRepoMock.Verify(r => r.UpdateSummaryAsync(ledger1.Id, It.IsAny<string>(), It.IsAny<SQLiteTransaction>()), Times.Once);
+        _ledgerRepoMock.Verify(r => r.UpdateSummaryAsync(ledger2.Id, It.IsAny<string>(), It.IsAny<SQLiteTransaction>()), Times.Once);
+        _ledgerRepoMock.Verify(r => r.UpdateAsync(It.IsAny<Ledger>(), It.IsAny<SQLiteTransaction>()), Times.Never);
+        _ledgerRepoMock.Verify(r => r.UpdateAsync(It.IsAny<Ledger>()), Times.Never);
         _viewModel.IsSaved.Should().BeTrue();
     }
 
@@ -1265,7 +1286,7 @@ public class BusStopInputViewModelTests : IDisposable
         _settingsRepoMock.Setup(s => s.GetAppSettingsAsync()).ReturnsAsync(new AppSettings());
         _ledgerRepoMock.Setup(r => r.UpdateDetailBusStopsAsync(It.IsAny<int>(), It.IsAny<IEnumerable<(int, string)>>(), It.IsAny<SQLiteTransaction>()))
             .ReturnsAsync(true);
-        _ledgerRepoMock.Setup(r => r.UpdateAsync(It.IsAny<Ledger>(), It.IsAny<SQLiteTransaction>())).ReturnsAsync(true);
+        _ledgerRepoMock.Setup(r => r.UpdateSummaryAsync(It.IsAny<int>(), It.IsAny<string>(), It.IsAny<SQLiteTransaction>())).ReturnsAsync(true);
 
         await _viewModel.InitializeWithLedgersAsync(new[] { ledger1, ledger2 });
 
@@ -1273,8 +1294,10 @@ public class BusStopInputViewModelTests : IDisposable
 
         ledger1.Details[0].BusStops.Should().Be(SummaryGenerator.BusPlaceholder);
         ledger2.Details[0].BusStops.Should().Be(SummaryGenerator.BusPlaceholder);
-        _ledgerRepoMock.Verify(r => r.UpdateAsync(ledger1, It.IsAny<SQLiteTransaction>()), Times.Once);
-        _ledgerRepoMock.Verify(r => r.UpdateAsync(ledger2, It.IsAny<SQLiteTransaction>()), Times.Once);
+        _ledgerRepoMock.Verify(r => r.UpdateSummaryAsync(ledger1.Id, It.IsAny<string>(), It.IsAny<SQLiteTransaction>()), Times.Once);
+        _ledgerRepoMock.Verify(r => r.UpdateSummaryAsync(ledger2.Id, It.IsAny<string>(), It.IsAny<SQLiteTransaction>()), Times.Once);
+        _ledgerRepoMock.Verify(r => r.UpdateAsync(It.IsAny<Ledger>(), It.IsAny<SQLiteTransaction>()), Times.Never);
+        _ledgerRepoMock.Verify(r => r.UpdateAsync(It.IsAny<Ledger>()), Times.Never);
         _viewModel.IsSaved.Should().BeTrue();
     }
 

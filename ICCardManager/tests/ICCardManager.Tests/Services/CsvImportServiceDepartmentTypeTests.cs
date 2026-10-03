@@ -100,9 +100,11 @@ public class CsvImportServiceDepartmentTypeTests : IDisposable
             .Setup(x => x.ReplaceDetailsAsync(1, It.IsAny<IEnumerable<LedgerDetail>>(), It.IsAny<SQLiteTransaction>()))
             .ReturnsAsync(true);
 
-        Ledger? updatedLedger = null;
-        ledgerRepositoryMock.Setup(x => x.UpdateAsync(It.IsAny<Ledger>(), It.IsAny<SQLiteTransaction>()))
-            .Callback<Ledger, SQLiteTransaction>((l, _) => updatedLedger = l)
+        string? updatedSummary = null;
+        ledgerRepositoryMock.Setup(x => x.UpdateSummaryAndAmountsAsync(
+                It.IsAny<int>(), It.IsAny<string>(), It.IsAny<int>(), It.IsAny<int>(), It.IsAny<int>(),
+                It.IsAny<SQLiteTransaction>()))
+            .Callback<int, string, int, int, int, SQLiteTransaction>((_, summary, _, _, _, _) => updatedSummary = summary)
             .ReturnsAsync(true);
 
         var service = CreateService(ledgerRepositoryMock, departmentType);
@@ -113,8 +115,8 @@ public class CsvImportServiceDepartmentTypeTests : IDisposable
         // Assert
         result.Success.Should().BeTrue(
             string.Join(" / ", result.Errors.ConvertAll(e => e.Message)));
-        updatedLedger.Should().NotBeNull();
-        updatedLedger!.Summary.Should().Be(expectedSummary,
+        updatedSummary.Should().NotBeNull();
+        updatedSummary.Should().Be(expectedSummary,
             "摘要の再生成は DB に保存された部署種別に従う（Issue #1955）");
     }
 
