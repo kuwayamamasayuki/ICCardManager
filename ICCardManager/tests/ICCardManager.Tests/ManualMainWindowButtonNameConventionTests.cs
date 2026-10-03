@@ -31,7 +31,8 @@ namespace ICCardManager.Tests;
 /// <para>
 /// F キーを添えない案内は、ダイアログのボタン（「<b>保存</b> ボタン」等）と区別できないため、
 /// 直前が「メイン画面の」のときだけ照合し、メイン画面のいずれかのボタン（F キーの無い「仮想タッチ」等も含む）の
-/// 名前であることを求める。ボタン以外（「設定画面（<b>F5</b>）」のような画面名の案内）は照合しない — 画面名は
+/// 名前であることを求める（メイン画面のボタンは F キーの無いものも含めて照合するので、「交通系ICカード」「職員証」の
+/// ような実在するボタンの名前と書き誤ったときは検出できない）。ボタン以外（「設定画面（<b>F5</b>）」のような画面名の案内）は照合しない — 画面名は
 /// 語尾（「画面」）の付け方が文脈で揺れ、機械的に決められないため。
 /// </para>
 /// <para>
@@ -57,8 +58,8 @@ public class ManualMainWindowButtonNameConventionTests
     /// <summary>F キーを添えない案内を照合する条件（直前の語。「メイン画面の」「メイン画面で」等）。</summary>
     private static readonly Regex MainWindowPrefix = new(@"メイン画面(?:の|で|から|にある)\s?$", RegexOptions.Compiled);
 
-    /// <summary>「交通系IC」の付かない「カード管理」（画面名の旧い呼び方）。</summary>
-    private static readonly Regex OldScreenName = new(@"(?<!交通系IC)カード管理", RegexOptions.Compiled);
+    /// <summary>「交通系IC」の付かない「カード管理」（画面名の旧い呼び方。画面名ではない「カード管理番号」は除く）。</summary>
+    private static readonly Regex OldScreenName = new(@"(?<!交通系IC)カード管理(?!番号)", RegexOptions.Compiled);
 
     private static readonly Regex ButtonContent = new(
         @"<Button\b[^>]*?\bContent=""(?<content>[^""]+)""", RegexOptions.Compiled | RegexOptions.Singleline);
@@ -143,6 +144,7 @@ public class ManualMainWindowButtonNameConventionTests
     [InlineData("\"先にカード管理で登録してください。\"", 1)]
     [InlineData("\"交通系ICカード管理画面で管理番号を変更してください\"", 0)]
     [InlineData("<Window Title=\"交通系ICカード管理\">", 0)]
+    [InlineData("\"カード管理番号が重複しています\"", 0)]
     public void 旧い画面名の検出ロジックが既知のサンプルで期待どおり動くこと(string text, int expectedViolations)
     {
         FindOldScreenNames(text).Should().HaveCount(expectedViolations);
