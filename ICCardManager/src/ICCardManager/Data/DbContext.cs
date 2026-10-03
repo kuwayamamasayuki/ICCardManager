@@ -581,14 +581,15 @@ namespace ICCardManager.Data
         /// </remarks>
         public virtual Task<ConnectionLease> LeaseConnectionAsync(CancellationToken ct = default)
         {
-            ct.ThrowIfCancellationRequested();
-
             // Issue #2202: UI スレッドから呼ばれたら、完了の通知を UI スレッドの今の処理の後へ回す（CompleteAfterCurrentUiTurn の remarks）
             return CompleteAfterCurrentUiTurn(LeaseConnectionCoreAsync(ct));
         }
 
         private async Task<ConnectionLease> LeaseConnectionCoreAsync(CancellationToken ct)
         {
+            // キャンセル済みなら、例外を同期的に投げずにキャンセル済みの Task を返す（async メソッドの中で投げる）
+            ct.ThrowIfCancellationRequested();
+
             // Issue #2202: UI スレッドから呼ばれたら、スレッドプールへ移り UI 起点のゲートを取ってから続ける
             // （EnterFromUiThreadAsync の remarks）。ゲートはリースの破棄で返す
             var heldUiGate = await EnterFromUiThreadAsync(ct).ConfigureAwait(false);
@@ -726,12 +727,7 @@ namespace ICCardManager.Data
         /// 既定の UI スレッド検出: <see cref="SynchronizationContext.Current"/> の型名で判定する。
         /// System.Windows を直接参照せずに WPF Dispatcher スレッドを検出できる。
         /// </summary>
-        private static bool DefaultIsOnUiThread()
-        {
-            var context = SynchronizationContext.Current;
-            return context != null &&
-                   context.GetType().FullName == "System.Windows.Threading.DispatcherSynchronizationContext";
-        }
+        private static bool DefaultIsOnUiThread() => IsDispatcherContext(SynchronizationContext.Current);
 
         /// <summary>
         /// UI スレッドから呼ばれていたら、続きをスレッドプールへ移し、UI 起点のゲート（<see cref="_uiOriginGate"/>）を取る（Issue #2202）。
@@ -807,7 +803,8 @@ namespace ICCardManager.Data
         /// 完了を UI スレッドの同期コンテキストへ <c>Post</c> してから伝えれば、呼び出し元が <c>await</c> する時点
         /// （UI スレッドの今の処理の中）では必ず未完了になる。<c>RunContinuationsAsynchronously</c> により、完了を伝える
         /// UI スレッドでは続きを走らせず、続き（リポジトリの SQL）はスレッドプールで走る。
-        /// UI スレッド以外から呼ばれたとき、または同期コンテキストが無いとき（UI 判定を差し替えたテスト）は、そのまま返す。
+        /// UI スレッド以外から呼ばれたとき、または同期コンテキストが WPF の Dispatcher のものでないとき（UI 判定だけを差し替えた
+        /// テストでは xUnit の同期コンテキストが付いている）は、そのまま返す。完了を伝える先は本物の UI スレッドに限る。
         /// </para>
         /// <para>
         /// UI スレッドがこの <c>Task</c> を同期的に待つ（<c>.Result</c> 等）と、Post した完了が処理されずに止まる。
@@ -817,33 +814,50 @@ namespace ICCardManager.Data
         private static Task<T> CompleteAfterCurrentUiTurn<T>(Task<T> work)
         {
             var context = SynchronizationContext.Current;
-            if (context == null || !IsOnUiThread())
+            if (!IsDispatcherContext(context) || !IsOnUiThread())
             {
                 return work;
             }
 
             var completion = new TaskCompletionSource<T>(TaskCreationOptions.RunContinuationsAsynchronously);
             work.ContinueWith(
-                finished => context.Post(_ => TransferCompletion(finished, completion), null),
+                finished =>
+                {
+                    try
+                    {
+                        context!.Post(_ => TransferCompletion(finished, completion), null);
+                    }
+                    catch (Exception)
+                    {
+                        // Post できなければ（Dispatcher が止まっている等）、その場で伝える。伝えないと呼び出し元が永久に待ち、
+                        // 取ったゲート・リースも返らない
+                        TransferCompletion(finished, completion);
+                    }
+                },
                 CancellationToken.None,
                 TaskContinuationOptions.ExecuteSynchronously,
                 TaskScheduler.Default);
             return completion.Task;
         }
 
+        private static bool IsDispatcherContext(SynchronizationContext? context) =>
+            context != null &&
+            context.GetType().FullName == "System.Windows.Threading.DispatcherSynchronizationContext";
+
         private static void TransferCompletion<T>(Task<T> finished, TaskCompletionSource<T> completion)
         {
-            if (finished.IsCanceled)
+            try
             {
-                completion.TrySetCanceled();
+                completion.TrySetResult(finished.GetAwaiter().GetResult());
             }
-            else if (finished.IsFaulted)
+            catch (OperationCanceledException canceled)
+            {
+                // キャンセルの元のトークンを保つ（TrySetCanceled() だと CancellationToken.None になる）
+                completion.TrySetCanceled(canceled.CancellationToken);
+            }
+            catch (Exception)
             {
                 completion.TrySetException(finished.Exception!.InnerExceptions);
-            }
-            else
-            {
-                completion.TrySetResult(finished.Result);
             }
         }
 

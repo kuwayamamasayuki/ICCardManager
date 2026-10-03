@@ -1,3 +1,4 @@
+#nullable enable
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -191,12 +192,36 @@ namespace ICCardManager.Views
             _viewModel.History.HistoryOpenMonthSelector();
         }
 
-        private async void MainWindow_Closing(object sender, System.ComponentModel.CancelEventArgs e)
+        /// <summary>
+        /// 終了時にウィンドウ位置・サイズの保存を待つ上限（共有モードの busy_timeout 15 秒より短く、終了を長く止めない）。
+        /// </summary>
+        private static readonly TimeSpan WindowPositionSaveTimeout = TimeSpan.FromSeconds(10);
+
+        /// <summary>
+        /// 終了時にウィンドウ位置・サイズを保存する。
+        /// </summary>
+        /// <remarks>
+        /// Issue #2202: <c>async void</c> で保存を <c>await</c> すると、最初の <c>await</c> でハンドラーが戻った後にアプリの終了処理が
+        /// 先に進み、保存が走らないまま終わる（UI スレッドから呼んだ DB の完了は UI スレッドへ Post してから伝えるため、終了処理より
+        /// 後ろに並ぶ）。終了ボタンの経路（<c>Application.Shutdown</c>）では <c>Closing</c> を取り消せないので、取り消して待つ形も使えない。
+        /// 位置は UI スレッドで読み取り、保存はスレッドプールで始めて上限付きで待つ（<see cref="UiThreadBlockingWait"/>）。
+        /// #2202 以前も、終了時の保存は UI スレッドの上で同期的に走り切っていた。
+        /// </remarks>
+        private void MainWindow_Closing(object sender, System.ComponentModel.CancelEventArgs e)
         {
             try
             {
-                // ウィンドウ位置・サイズを保存
-                await SaveWindowPositionAsync();
+                var position = CaptureWindowPosition();
+                var completed = UiThreadBlockingWait.RunOnThreadPoolAndWait(
+                    () => SaveWindowPositionAsync(position), WindowPositionSaveTimeout);
+#if DEBUG
+                if (!completed)
+                {
+                    System.Diagnostics.Debug.WriteLine("[MainWindow] ウィンドウ位置の保存が時間内に終わらなかったため、待たずに終了します");
+                }
+#else
+                _ = completed;
+#endif
             }
             catch (Exception ex)
             {
@@ -209,33 +234,54 @@ namespace ICCardManager.Views
         }
 
         /// <summary>
-        /// ウィンドウ位置・サイズを保存
+        /// 保存するウィンドウ位置・サイズ（UI スレッドで読み取った値）。
         /// </summary>
-        private async Task SaveWindowPositionAsync()
+        private readonly struct WindowPosition
+        {
+            public WindowPosition(bool isMaximized, double left, double top, double width, double height)
+            {
+                IsMaximized = isMaximized;
+                Left = left;
+                Top = top;
+                Width = width;
+                Height = height;
+            }
+
+            public bool IsMaximized { get; }
+
+            public double Left { get; }
+
+            public double Top { get; }
+
+            public double Width { get; }
+
+            public double Height { get; }
+        }
+
+        /// <summary>
+        /// 現在のウィンドウ位置・サイズを読み取る（UI スレッドで呼ぶ）。最大化中は通常時の位置・サイズ（RestoreBounds）を返す。
+        /// </summary>
+        private WindowPosition CaptureWindowPosition()
+        {
+            var isMaximized = WindowState == WindowState.Maximized;
+            return isMaximized
+                ? new WindowPosition(true, RestoreBounds.Left, RestoreBounds.Top, RestoreBounds.Width, RestoreBounds.Height)
+                : new WindowPosition(false, Left, Top, Width, Height);
+        }
+
+        /// <summary>
+        /// ウィンドウ位置・サイズを保存（画面の値を読まないので、スレッドプールで走らせてよい）
+        /// </summary>
+        private async Task SaveWindowPositionAsync(WindowPosition position)
         {
             try
             {
                 var settings = await _settingsRepository.GetAppSettingsAsync();
-
-                // 最大化状態を保存
-                settings.MainWindowSettings.IsMaximized = WindowState == WindowState.Maximized;
-
-                // 通常状態の位置・サイズを保存（最大化中でもRestoreBoundsから取得可能）
-                if (WindowState == WindowState.Maximized)
-                {
-                    // 最大化中は RestoreBounds から通常時のサイズを取得
-                    settings.MainWindowSettings.Left = RestoreBounds.Left;
-                    settings.MainWindowSettings.Top = RestoreBounds.Top;
-                    settings.MainWindowSettings.Width = RestoreBounds.Width;
-                    settings.MainWindowSettings.Height = RestoreBounds.Height;
-                }
-                else
-                {
-                    settings.MainWindowSettings.Left = Left;
-                    settings.MainWindowSettings.Top = Top;
-                    settings.MainWindowSettings.Width = Width;
-                    settings.MainWindowSettings.Height = Height;
-                }
+                settings.MainWindowSettings.IsMaximized = position.IsMaximized;
+                settings.MainWindowSettings.Left = position.Left;
+                settings.MainWindowSettings.Top = position.Top;
+                settings.MainWindowSettings.Width = position.Width;
+                settings.MainWindowSettings.Height = position.Height;
 
                 await _settingsRepository.SaveAppSettingsAsync(settings);
 #if DEBUG
