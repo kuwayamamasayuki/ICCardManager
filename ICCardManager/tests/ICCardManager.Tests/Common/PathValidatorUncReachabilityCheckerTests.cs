@@ -76,10 +76,11 @@ public sealed class PathValidatorUncReachabilityCheckerTests : IDisposable
         checker(SharePath, 50).Should().BeFalse("前提: 最初の確認は上限で打ち切られ、進行中のまま残る");
 
         // Act: 進行中の確認を待っている間に共有が応答する
-        // （解放役はプールに依存させない。全件実行中にプールが詰まっても 200 ms 後に解放する）
+        // （解放役はプールに依存させない。解放までの 1 秒は、テストのスレッドが次の呼び出しで進行中の確認に
+        //  相乗りするまでの余裕。これより長く止まると、確認が先に終わって新しい確認が始まり、回数が 2 になる）
         var releaser = new Thread(() =>
         {
-            Thread.Sleep(200);
+            Thread.Sleep(1000);
             _release.Set();
         })
         { IsBackground = true };

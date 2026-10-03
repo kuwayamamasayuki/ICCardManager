@@ -41,7 +41,7 @@ namespace ICCardManager.Common
     /// </para>
     /// <para>
     /// 呼ぶたびにスレッドを 1 本作るので、<b>短い CPU 処理や頻繁に呼ぶ処理には使わない</b>。応答の無い相手へ
-    /// 何度も呼び直す経路では、進行中の呼び出しを 1 本に限る仕組みと組み合わせる（<c>DbContext.CheckConnection</c>）。
+    /// 何度も呼び直す経路では、進行中の呼び出しを 1 本に限る仕組みと組み合わせる（<c>DbContext.CheckConnection</c>・<c>PathValidator.CreateUncReachabilityChecker</c>）。
     /// </para>
     /// </remarks>
     public static class DedicatedThread
