@@ -24,6 +24,10 @@ namespace ICCardManager.Tests.Infrastructure;
 /// コレクション名を文字列で書いた正当な形（<c>[Collection("Thread Pool Saturation")]</c>）を誤検出する。
 /// 所属は <see cref="CollectionAttribute"/> の引数の値で判定するので、どちらの書き方も同じに扱う。
 /// </para>
+/// <para>
+/// 対象外: 基底クラスのテストメソッドが塞ぎ、派生クラスがそれを継承して走る形（報告されるのは基底クラスで、
+/// 派生クラスの所属は見ない）。現在そうした形は無い。作るなら派生クラスにも所属を付けること。
+/// </para>
 /// </remarks>
 public class ThreadPoolSaturationCollectionConventionTests
 {
@@ -62,12 +66,12 @@ public class ThreadPoolSaturationCollectionConventionTests
     }
 
     [Fact]
-    public void 導出がasyncメソッドとラムダの中の呼び出しを拾うこと()
+    public void 導出がasyncメソッドとラムダの中の呼び出しとメソッド参照を拾うこと()
     {
         // 検出ロジック自体を既知のサンプルで固定する（#1786）。サンプルは本クラスの入れ子で、上の検査の対象からは外す
         var found = FindClassesCallingSaturate(typeof(ThreadPoolSaturationCollectionConventionTests).Assembly);
 
-        found.Should().Contain(new[] { typeof(SyncSample), typeof(AsyncSample), typeof(LambdaSample) });
+        found.Should().Contain(new[] { typeof(SyncSample), typeof(AsyncSample), typeof(LambdaSample), typeof(MethodGroupSample) });
         found.Should().NotContain(typeof(NonCallingSample));
     }
 
@@ -111,16 +115,26 @@ public class ThreadPoolSaturationCollectionConventionTests
             return false;
         }
 
-        // call（0x28）の後ろの 4 バイトがメソッドトークン。オペランドの途中の 0x28 を拾っても、
-        // 解決できないか別のメソッドに解決されるだけなので、Saturate と一致したときだけ真にする
+        // call（0x28）とメソッド・グループの参照 ldftn（0xFE 0x06）の後ろの 4 バイトがメソッドトークン。
+        // オペランドの途中の値を拾っても、解決できないか別のメソッドに解決されるだけなので、
+        // Saturate と一致したときだけ真にする
         for (var i = 0; i + 4 < il.Length; i++)
         {
-            if (il[i] != 0x28)
+            int tokenOffset;
+            if (il[i] == 0x28)
+            {
+                tokenOffset = i + 1;
+            }
+            else if (il[i] == 0xFE && il[i + 1] == 0x06 && i + 5 < il.Length)
+            {
+                tokenOffset = i + 2;
+            }
+            else
             {
                 continue;
             }
 
-            var token = BitConverter.ToInt32(il, i + 1);
+            var token = BitConverter.ToInt32(il, tokenOffset);
             try
             {
                 var target = method.Module.ResolveMethod(
@@ -194,6 +208,11 @@ public class ThreadPoolSaturationCollectionConventionTests
         {
             using var saturator = ThreadPoolSaturator.Saturate(1);
         };
+    }
+
+    private sealed class MethodGroupSample
+    {
+        public static Func<int, ThreadPoolSaturator> Use() => ThreadPoolSaturator.Saturate;
     }
 
     private sealed class NonCallingSample
