@@ -673,6 +673,23 @@ public class LedgerRepositoryTests : IDisposable
     }
 
     /// <summary>
+    /// Issue #2220: 台帳が 1 件も無いカードの最新レコードは null であること
+    /// （最新日のレコードが空のときの判定を、チェーン解決の手前へ移したことの回帰）
+    /// </summary>
+    [Fact]
+    public async Task GetLatestLedgerAsync_NoData_ReturnsNull()
+    {
+        // Arrange: 別のカードにだけ台帳がある
+        await _repository.InsertAsync(CreateTestLedger(TestCardIdm, DateTime.Today, "他のカード", expense: 300));
+
+        // Act: 台帳の無いカードを問い合わせる
+        var result = await _repository.GetLatestLedgerAsync("FFFFFFFFFFFFFFFF");
+
+        // Assert
+        result.Should().BeNull();
+    }
+
+    /// <summary>
     /// 該当データがない場合はnullを返すことを確認
     /// </summary>
     [Fact]

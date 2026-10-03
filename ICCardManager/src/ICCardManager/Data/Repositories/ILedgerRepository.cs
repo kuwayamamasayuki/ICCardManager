@@ -1,3 +1,4 @@
+#nullable enable
 using System;
 using System.Collections.Generic;
 using System.Data.SQLite;
@@ -22,7 +23,7 @@ namespace ICCardManager.Data.Repositories
         /// <summary>
         /// ICカードの貸出中レコードを取得
         /// </summary>
-        Task<Ledger> GetLentRecordAsync(string cardIdm);
+        Task<Ledger?> GetLentRecordAsync(string cardIdm);
 
         /// <summary>
         /// 全カードの貸出中レコードを一括取得（整合性チェック用）
@@ -43,7 +44,7 @@ namespace ICCardManager.Data.Repositories
         /// SMB 共有モードでヘッダ＋詳細＋関連書込みを単一トランザクションに束ねるため、
         /// 呼び出し元から <see cref="SQLiteTransaction"/> を渡せるオーバーロード。
         /// </remarks>
-        Task<int> InsertAsync(Ledger ledger, SQLiteTransaction transaction);
+        Task<int> InsertAsync(Ledger ledger, SQLiteTransaction? transaction);
 
         /// <summary>
         /// 利用履歴を更新する（<b>全列</b>を SET する）。
@@ -61,7 +62,7 @@ namespace ICCardManager.Data.Repositories
         /// <summary>
         /// 利用履歴を更新（既存トランザクション参加版・Issue #1481）。
         /// </summary>
-        Task<bool> UpdateAsync(Ledger ledger, SQLiteTransaction transaction);
+        Task<bool> UpdateAsync(Ledger ledger, SQLiteTransaction? transaction);
 
         /// <summary>
         /// 摘要だけを更新する（Issue #2212）。
@@ -100,7 +101,7 @@ namespace ICCardManager.Data.Repositories
         /// </summary>
         /// <param name="id">履歴ID</param>
         /// <param name="transaction">既存トランザクション</param>
-        Task<bool> DeleteAsync(int id, SQLiteTransaction transaction);
+        Task<bool> DeleteAsync(int id, SQLiteTransaction? transaction);
 
         /// <summary>
         /// 指定カードの貸出中レコードをすべて削除
@@ -123,7 +124,7 @@ namespace ICCardManager.Data.Repositories
         /// <summary>
         /// 利用履歴詳細を登録（既存トランザクション参加版・Issue #1481）。
         /// </summary>
-        Task<bool> InsertDetailAsync(LedgerDetail detail, SQLiteTransaction transaction);
+        Task<bool> InsertDetailAsync(LedgerDetail detail, SQLiteTransaction? transaction);
 
         /// <summary>
         /// 利用履歴詳細を一括登録
@@ -133,7 +134,7 @@ namespace ICCardManager.Data.Repositories
         /// <summary>
         /// 利用履歴詳細を一括登録（既存トランザクション参加版・Issue #1481）。
         /// </summary>
-        Task<bool> InsertDetailsAsync(int ledgerId, IEnumerable<LedgerDetail> details, SQLiteTransaction transaction);
+        Task<bool> InsertDetailsAsync(int ledgerId, IEnumerable<LedgerDetail> details, SQLiteTransaction? transaction);
 
         /// <summary>
         /// バス利用詳細のバス停名を更新する（Issue #1945）。
@@ -171,7 +172,7 @@ namespace ICCardManager.Data.Repositories
         /// 呼び出し元は commit せずに巻き戻すこと（commit すると部分更新が確定する）。
         /// </returns>
         Task<bool> UpdateDetailBusStopsAsync(
-            int ledgerId, IEnumerable<(int SequenceNumber, string BusStops)> updates, SQLiteTransaction transaction);
+            int ledgerId, IEnumerable<(int SequenceNumber, string BusStops)> updates, SQLiteTransaction? transaction);
 
         /// <summary>
         /// 同行者数だけを更新する（Issue #1906、返却時の同行者数入力ダイアログ用）

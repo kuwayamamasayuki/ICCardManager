@@ -1,3 +1,4 @@
+#nullable enable
 using System;
 using System.Collections.Generic;
 using System.Threading.Tasks;
@@ -19,7 +20,10 @@ namespace ICCardManager.Data.Repositories
         /// <summary>
         /// 指定期間の利用履歴を取得
         /// </summary>
-        Task<IEnumerable<Ledger>> GetByDateRangeAsync(string cardIdm, DateTime fromDate, DateTime toDate);
+        /// <param name="cardIdm">対象カードの IDm。null の場合は全カード</param>
+        /// <param name="fromDate">期間の開始日</param>
+        /// <param name="toDate">期間の終了日</param>
+        Task<IEnumerable<Ledger>> GetByDateRangeAsync(string? cardIdm, DateTime fromDate, DateTime toDate);
 
         /// <summary>
         /// 指定月の利用履歴を取得（帳票用）
@@ -29,7 +33,7 @@ namespace ICCardManager.Data.Repositories
         /// <summary>
         /// IDで利用履歴を取得（詳細含む）
         /// </summary>
-        Task<Ledger> GetByIdAsync(int id);
+        Task<Ledger?> GetByIdAsync(int id);
 
         /// <summary>
         /// 指定日以前の利用履歴を取得（残額計算用）
@@ -40,7 +44,7 @@ namespace ICCardManager.Data.Repositories
         /// 確定した最終レコードを返す。貸出中レコード（is_lent_record = 1）も対象に含む
         /// （返却処理の残高起点として使われるため）。
         /// </remarks>
-        Task<Ledger> GetLatestBeforeDateAsync(string cardIdm, DateTime beforeDate);
+        Task<Ledger?> GetLatestBeforeDateAsync(string cardIdm, DateTime beforeDate);
 
         /// <summary>
         /// 年度繰越残高を取得
@@ -58,7 +62,7 @@ namespace ICCardManager.Data.Repositories
         /// Issue #1731: 同一日に複数レコードがある場合は残高チェーン順の最終レコードを返す
         /// （<see cref="GetLatestBeforeDateAsync"/> と同じ規則）。
         /// </remarks>
-        Task<Ledger> GetLatestLedgerAsync(string cardIdm);
+        Task<Ledger?> GetLatestLedgerAsync(string cardIdm);
 
         /// <summary>
         /// 全カードの最新残高情報を一括取得（ダッシュボード用）
@@ -90,8 +94,13 @@ namespace ICCardManager.Data.Repositories
         /// <summary>
         /// 指定期間の利用履歴をページング付きで取得
         /// </summary>
+        /// <param name="cardIdm">対象カードの IDm。null の場合は全カード</param>
+        /// <param name="fromDate">期間の開始日</param>
+        /// <param name="toDate">期間の終了日</param>
+        /// <param name="page">ページ番号（1 始まり）</param>
+        /// <param name="pageSize">1 ページの件数</param>
         Task<(IEnumerable<Ledger> Items, int TotalCount)> GetPagedAsync(
-            string cardIdm, DateTime fromDate, DateTime toDate, int page, int pageSize);
+            string? cardIdm, DateTime fromDate, DateTime toDate, int page, int pageSize);
 
         /// <summary>
         /// 指定期間のledgerに紐づく全詳細を取得（CSVエクスポート用）

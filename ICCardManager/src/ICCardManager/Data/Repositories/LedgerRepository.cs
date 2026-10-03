@@ -1,3 +1,4 @@
+#nullable enable
 using System;
 using System.Collections.Generic;
 using System.Data;
@@ -26,7 +27,7 @@ namespace ICCardManager.Data.Repositories
         }
 
         /// <inheritdoc/>
-        public async Task<IEnumerable<Ledger>> GetByDateRangeAsync(string cardIdm, DateTime fromDate, DateTime toDate)
+        public async Task<IEnumerable<Ledger>> GetByDateRangeAsync(string? cardIdm, DateTime fromDate, DateTime toDate)
         {
             using var lease = await _dbContext.LeaseConnectionAsync().ConfigureAwait(false);
             var connection = lease.Connection;
@@ -77,7 +78,7 @@ ORDER BY DATE(date) ASC,
         }
 
         /// <inheritdoc/>
-        public async Task<Ledger> GetByIdAsync(int id)
+        public async Task<Ledger?> GetByIdAsync(int id)
         {
             // Issue #1478: 本体と詳細を 1 ラウンドトリップで取得（複数結果セット）
             using var lease = await _dbContext.LeaseConnectionAsync().ConfigureAwait(false);
@@ -109,7 +110,7 @@ ORDER BY use_date ASC, is_charge DESC, is_point_redemption DESC, id DESC";
         }
 
         /// <inheritdoc/>
-        public async Task<Ledger> GetLentRecordAsync(string cardIdm)
+        public async Task<Ledger?> GetLentRecordAsync(string cardIdm)
         {
             // Issue #1478: 本体と詳細を 1 ラウンドトリップで取得（複数結果セット）。
             // 詳細側はサブクエリで本体と同じ id を解決する。
@@ -175,9 +176,9 @@ ORDER BY lent_at DESC";
         public Task<int> InsertAsync(Ledger ledger) => InsertAsync(ledger, transaction: null);
 
         /// <inheritdoc/>
-        public async Task<int> InsertAsync(Ledger ledger, SQLiteTransaction transaction)
+        public async Task<int> InsertAsync(Ledger ledger, SQLiteTransaction? transaction)
         {
-            ConnectionLease lease = null;
+            ConnectionLease? lease = null;
             SQLiteConnection connection;
             if (transaction != null)
             {
@@ -203,15 +204,15 @@ VALUES (@cardIdm, @lenderIdm, @date, @summary, @income, @expense, @balance,
 SELECT last_insert_rowid();";
 
                 command.Parameters.AddWithValue("@cardIdm", ledger.CardIdm);
-                command.Parameters.AddWithValue("@lenderIdm", (object)ledger.LenderIdm ?? DBNull.Value);
+                command.Parameters.AddWithValue("@lenderIdm", (object?)ledger.LenderIdm ?? DBNull.Value);
                 command.Parameters.AddWithValue("@date", SqliteDateTimeFormat.ToText(ledger.Date));
                 command.Parameters.AddWithValue("@summary", ledger.Summary);
                 command.Parameters.AddWithValue("@income", ledger.Income);
                 command.Parameters.AddWithValue("@expense", ledger.Expense);
                 command.Parameters.AddWithValue("@balance", ledger.Balance);
-                command.Parameters.AddWithValue("@staffName", (object)ledger.StaffName ?? DBNull.Value);
-                command.Parameters.AddWithValue("@note", (object)ledger.Note ?? DBNull.Value);
-                command.Parameters.AddWithValue("@returnerIdm", (object)ledger.ReturnerIdm ?? DBNull.Value);
+                command.Parameters.AddWithValue("@staffName", (object?)ledger.StaffName ?? DBNull.Value);
+                command.Parameters.AddWithValue("@note", (object?)ledger.Note ?? DBNull.Value);
+                command.Parameters.AddWithValue("@returnerIdm", (object?)ledger.ReturnerIdm ?? DBNull.Value);
                 command.Parameters.AddWithValue("@lentAt", SqliteDateTimeFormat.ToTextOrDbNull(ledger.LentAt));
                 command.Parameters.AddWithValue("@returnedAt", SqliteDateTimeFormat.ToTextOrDbNull(ledger.ReturnedAt));
                 command.Parameters.AddWithValue("@isLentRecord", ledger.IsLentRecord ? 1 : 0);
@@ -230,9 +231,9 @@ SELECT last_insert_rowid();";
         public Task<bool> UpdateAsync(Ledger ledger) => UpdateAsync(ledger, transaction: null);
 
         /// <inheritdoc/>
-        public async Task<bool> UpdateAsync(Ledger ledger, SQLiteTransaction transaction)
+        public async Task<bool> UpdateAsync(Ledger ledger, SQLiteTransaction? transaction)
         {
-            ConnectionLease lease = null;
+            ConnectionLease? lease = null;
             SQLiteConnection connection;
             if (transaction != null)
             {
@@ -260,15 +261,15 @@ SET lender_idm = @lenderIdm, date = @date, summary = @summary,
 WHERE id = @id";
 
                 command.Parameters.AddWithValue("@id", ledger.Id);
-                command.Parameters.AddWithValue("@lenderIdm", (object)ledger.LenderIdm ?? DBNull.Value);
+                command.Parameters.AddWithValue("@lenderIdm", (object?)ledger.LenderIdm ?? DBNull.Value);
                 command.Parameters.AddWithValue("@date", SqliteDateTimeFormat.ToText(ledger.Date));
                 command.Parameters.AddWithValue("@summary", ledger.Summary);
                 command.Parameters.AddWithValue("@income", ledger.Income);
                 command.Parameters.AddWithValue("@expense", ledger.Expense);
                 command.Parameters.AddWithValue("@balance", ledger.Balance);
-                command.Parameters.AddWithValue("@staffName", (object)ledger.StaffName ?? DBNull.Value);
-                command.Parameters.AddWithValue("@note", (object)ledger.Note ?? DBNull.Value);
-                command.Parameters.AddWithValue("@returnerIdm", (object)ledger.ReturnerIdm ?? DBNull.Value);
+                command.Parameters.AddWithValue("@staffName", (object?)ledger.StaffName ?? DBNull.Value);
+                command.Parameters.AddWithValue("@note", (object?)ledger.Note ?? DBNull.Value);
+                command.Parameters.AddWithValue("@returnerIdm", (object?)ledger.ReturnerIdm ?? DBNull.Value);
                 command.Parameters.AddWithValue("@lentAt", SqliteDateTimeFormat.ToTextOrDbNull(ledger.LentAt));
                 command.Parameters.AddWithValue("@returnedAt", SqliteDateTimeFormat.ToTextOrDbNull(ledger.ReturnedAt));
                 command.Parameters.AddWithValue("@isLentRecord", ledger.IsLentRecord ? 1 : 0);
@@ -341,7 +342,7 @@ WHERE id = @id";
         public Task<bool> DeleteAsync(int id) => DeleteAsync(id, transaction: null);
 
         /// <inheritdoc/>
-        public async Task<bool> DeleteAsync(int id, SQLiteTransaction transaction)
+        public async Task<bool> DeleteAsync(int id, SQLiteTransaction? transaction)
         {
             // Issue #1753: ledger_detail と ledger の DELETE を必ず同一トランザクションで実行する。
             // 旧実装は tx=null 経路で明細の DELETE を autocommit で確定させていたため、
@@ -384,7 +385,7 @@ WHERE id = @id";
         /// Issue #1753: ledger 1 件の削除本体（明細 → 本体の順）。
         /// 呼び出し元が用意した単一の接続・トランザクション上で実行し、commit/rollback には介入しない。
         /// </summary>
-        private static async Task<bool> DeleteCore(int id, SQLiteConnection connection, SQLiteTransaction transaction)
+        private static async Task<bool> DeleteCore(int id, SQLiteConnection connection, SQLiteTransaction? transaction)
         {
             // 詳細レコードを先に削除
             using (var deleteDetailCommand = connection.CreateCommand())
@@ -438,7 +439,7 @@ WHERE id = @id";
         /// 対象 0 件（<c>deleted == 0</c>）は競合ではなく正常な結果のため、commit する。
         /// </remarks>
         private static async Task<int> DeleteAllLentRecordsCore(
-            string cardIdm, SQLiteConnection connection, SQLiteTransaction transaction)
+            string cardIdm, SQLiteConnection connection, SQLiteTransaction? transaction)
         {
             // 貸出中レコードに紐づく詳細レコードを先に削除
             using (var deleteDetailCommand = connection.CreateCommand())
@@ -481,9 +482,9 @@ WHERE card_idm = @cardIdm
         public Task<bool> InsertDetailAsync(LedgerDetail detail) => InsertDetailAsync(detail, transaction: null);
 
         /// <inheritdoc/>
-        public async Task<bool> InsertDetailAsync(LedgerDetail detail, SQLiteTransaction transaction)
+        public async Task<bool> InsertDetailAsync(LedgerDetail detail, SQLiteTransaction? transaction)
         {
-            ConnectionLease lease = null;
+            ConnectionLease? lease = null;
             SQLiteConnection connection;
             if (transaction != null)
             {
@@ -509,9 +510,9 @@ VALUES (@ledgerId, @useDate, @entryStation, @exitStation,
 
                 command.Parameters.AddWithValue("@ledgerId", detail.LedgerId);
                 command.Parameters.AddWithValue("@useDate", SqliteDateTimeFormat.ToTextOrDbNull(detail.UseDate));
-                command.Parameters.AddWithValue("@entryStation", (object)detail.EntryStation ?? DBNull.Value);
-                command.Parameters.AddWithValue("@exitStation", (object)detail.ExitStation ?? DBNull.Value);
-                command.Parameters.AddWithValue("@busStops", (object)detail.BusStops ?? DBNull.Value);
+                command.Parameters.AddWithValue("@entryStation", (object?)detail.EntryStation ?? DBNull.Value);
+                command.Parameters.AddWithValue("@exitStation", (object?)detail.ExitStation ?? DBNull.Value);
+                command.Parameters.AddWithValue("@busStops", (object?)detail.BusStops ?? DBNull.Value);
                 command.Parameters.AddWithValue("@amount", detail.Amount.HasValue ? detail.Amount.Value : DBNull.Value);
                 command.Parameters.AddWithValue("@balance", detail.Balance.HasValue ? detail.Balance.Value : DBNull.Value);
                 command.Parameters.AddWithValue("@isCharge", detail.IsCharge ? 1 : 0);
@@ -533,7 +534,7 @@ VALUES (@ledgerId, @useDate, @entryStation, @exitStation,
             => InsertDetailsAsync(ledgerId, details, transaction: null);
 
         /// <inheritdoc/>
-        public async Task<bool> InsertDetailsAsync(int ledgerId, IEnumerable<LedgerDetail> details, SQLiteTransaction transaction)
+        public async Task<bool> InsertDetailsAsync(int ledgerId, IEnumerable<LedgerDetail> details, SQLiteTransaction? transaction)
         {
             // Issue #1456: 単一 SQLiteCommand を再利用してループ内 ExecuteNonQuery する。
             // tx=null 経路では内部で BeginTransactionAsync して commit/rollback まで責任を持つ。
@@ -595,7 +596,7 @@ VALUES (@ledgerId, @useDate, @entryStation, @exitStation,
         /// 渡すこと。`IEnumerable` の遅延列挙を渡すと、上位での `Count==0` 早期 return 等との二度走査になる。
         /// </remarks>
         private static async Task<bool> InsertDetailsCore(
-            int ledgerId, IList<LedgerDetail> details, SQLiteConnection connection, SQLiteTransaction transaction)
+            int ledgerId, IList<LedgerDetail> details, SQLiteConnection connection, SQLiteTransaction? transaction)
         {
             using var command = connection.CreateCommand();
             command.Transaction = transaction;
@@ -622,9 +623,9 @@ VALUES (@ledgerId, @useDate, @entryStation, @exitStation,
 
                 pLedgerId.Value = detail.LedgerId;
                 pUseDate.Value = SqliteDateTimeFormat.ToTextOrDbNull(detail.UseDate);
-                pEntryStation.Value = (object)detail.EntryStation ?? DBNull.Value;
-                pExitStation.Value = (object)detail.ExitStation ?? DBNull.Value;
-                pBusStops.Value = (object)detail.BusStops ?? DBNull.Value;
+                pEntryStation.Value = (object?)detail.EntryStation ?? DBNull.Value;
+                pExitStation.Value = (object?)detail.ExitStation ?? DBNull.Value;
+                pBusStops.Value = (object?)detail.BusStops ?? DBNull.Value;
                 pAmount.Value = detail.Amount.HasValue ? (object)detail.Amount.Value : DBNull.Value;
                 pBalance.Value = detail.Balance.HasValue ? (object)detail.Balance.Value : DBNull.Value;
                 pIsCharge.Value = detail.IsCharge ? 1 : 0;
@@ -641,7 +642,7 @@ VALUES (@ledgerId, @useDate, @entryStation, @exitStation,
         }
 
         /// <inheritdoc/>
-        public async Task<Ledger> GetLatestBeforeDateAsync(string cardIdm, DateTime beforeDate)
+        public async Task<Ledger?> GetLatestBeforeDateAsync(string cardIdm, DateTime beforeDate)
         {
             using var lease = await _dbContext.LeaseConnectionAsync().ConfigureAwait(false);
             return await GetChainFinalLedgerAsync(
@@ -673,8 +674,8 @@ VALUES (@ledgerId, @useDate, @entryStation, @exitStation,
         /// <param name="connection">リース済みの接続</param>
         /// <param name="cardIdm">カードIDm</param>
         /// <param name="beforeDate">この日付（"yyyy-MM-dd"）より前に限定する場合に指定。null なら全期間</param>
-        private static async Task<Ledger> GetChainFinalLedgerAsync(
-            SQLiteConnection connection, string cardIdm, string beforeDate)
+        private static async Task<Ledger?> GetChainFinalLedgerAsync(
+            SQLiteConnection connection, string cardIdm, string? beforeDate)
         {
             // 最新日（DATE(date) が最大の日）の全レコードを取得する。
             // date は "yyyy-MM-dd HH:mm:ss" の TEXT のため MAX(date) が最新日時、その DATE() が最新日
@@ -705,6 +706,11 @@ ORDER BY date ASC, id ASC";
                 }
             }
 
+            if (latestDayLedgers.Count == 0)
+            {
+                return null;
+            }
+
             return await ResolveChainFinalLedgerAsync(
                 connection, latestDayLedgers, excludeLentRecordsFromSeed: false).ConfigureAwait(false);
         }
@@ -726,19 +732,21 @@ ORDER BY date ASC, id ASC";
         /// </para>
         /// </remarks>
         /// <param name="connection">リース済みの接続</param>
-        /// <param name="sameDayLedgers">同一カード・同一日のレコード（日付・id 昇順）</param>
+        /// <param name="sameDayLedgers">同一カード・同一日のレコード（日付・id 昇順。1 件以上）</param>
         /// <param name="excludeLentRecordsFromSeed">
         /// チェーン開始点のシードから貸出中レコードを除外するか。**呼び出し元の本体クエリと母集団を揃える**こと。
         /// 「最新残高」の単票クエリ（Issue #1731）は貸出中レコードを含める（返却処理
         /// <c>LendingService.GetLastBalanceAsync</c> が貸出中プレースホルダの残高を残高チェーンの
         /// 起点として使うため）ので false。グラフ用集計（Issue #1770）は貸出中を除外するので true。
         /// </param>
+        /// <exception cref="ArgumentException"><paramref name="sameDayLedgers"/> が空のとき（呼び出し元は空の日を渡さない）。</exception>
         private static async Task<Ledger> ResolveChainFinalLedgerAsync(
             SQLiteConnection connection, List<Ledger> sameDayLedgers, bool excludeLentRecordsFromSeed)
         {
             if (sameDayLedgers.Count == 0)
             {
-                return null;
+                // 呼び出し元はレコードのある日（GroupBy の各グループ・空でない最新日）だけを渡す
+                throw new ArgumentException("同一日のレコードが 1 件もありません。", nameof(sameDayLedgers));
             }
 
             if (sameDayLedgers.Count == 1)
@@ -890,7 +898,7 @@ ORDER BY date ASC, id ASC";
         }
 
         /// <inheritdoc/>
-        public async Task<Ledger> GetLatestLedgerAsync(string cardIdm)
+        public async Task<Ledger?> GetLatestLedgerAsync(string cardIdm)
         {
             using var lease = await _dbContext.LeaseConnectionAsync().ConfigureAwait(false);
             return await GetChainFinalLedgerAsync(lease.Connection, cardIdm, beforeDate: null).ConfigureAwait(false);
@@ -1372,7 +1380,7 @@ LIMIT 100";
 
         /// <inheritdoc/>
         public async Task<bool> UpdateDetailBusStopsAsync(
-            int ledgerId, IEnumerable<(int SequenceNumber, string BusStops)> updates, SQLiteTransaction transaction)
+            int ledgerId, IEnumerable<(int SequenceNumber, string BusStops)> updates, SQLiteTransaction? transaction)
         {
             // Issue #1945: 旧実装は command.Transaction を設定せず N 回 autocommit しており、
             // 途中で失敗すると一部の明細だけが書き換わって確定していた（Issue #1724 と同じ形）。
@@ -1441,7 +1449,7 @@ LIMIT 100";
             int ledgerId,
             IList<(int SequenceNumber, string BusStops)> updates,
             SQLiteConnection connection,
-            SQLiteTransaction transaction)
+            SQLiteTransaction? transaction)
         {
             foreach (var (sequenceNumber, busStops) in updates)
             {
@@ -1450,7 +1458,8 @@ LIMIT 100";
                 command.CommandText = @"UPDATE ledger_detail SET bus_stops = @busStops
 WHERE ledger_id = @ledgerId AND id = @id";
 
-                command.Parameters.AddWithValue("@busStops", (object)busStops ?? DBNull.Value);
+                // バス停名は非 null（呼び出し元は未入力をプレースホルダへ置き換えてから渡す。Issue #2220）
+                command.Parameters.AddWithValue("@busStops", busStops);
                 command.Parameters.AddWithValue("@ledgerId", ledgerId);
                 command.Parameters.AddWithValue("@id", sequenceNumber);
 
@@ -1491,7 +1500,7 @@ WHERE ledger_id = @ledgerId AND id = @id";
 
         /// <inheritdoc/>
         public async Task<(IEnumerable<Ledger> Items, int TotalCount)> GetPagedAsync(
-            string cardIdm,
+            string? cardIdm,
             DateTime fromDate,
             DateTime toDate,
             int page,
@@ -1837,7 +1846,7 @@ WHERE card_idm IN ({string.Join(", ", parameters)})";
             => ReplaceDetailsAsync(ledgerId, details, transaction: null);
 
         /// <inheritdoc/>
-        public async Task<bool> ReplaceDetailsAsync(int ledgerId, IEnumerable<LedgerDetail> details, SQLiteTransaction transaction)
+        public async Task<bool> ReplaceDetailsAsync(int ledgerId, IEnumerable<LedgerDetail> details, SQLiteTransaction? transaction)
         {
             // Issue #1724: DELETE と INSERT は必ず同一トランザクションで実行する。
             // 旧実装は tx=null のとき DELETE を autocommit で確定させたあと InsertDetailsAsync が
@@ -1893,7 +1902,7 @@ WHERE card_idm IN ({string.Join(", ", parameters)})";
         /// （<see cref="InsertDetailsCore"/> と同じ理由）。
         /// </remarks>
         private static async Task<bool> ReplaceDetailsCore(
-            int ledgerId, IList<LedgerDetail> details, SQLiteConnection connection, SQLiteTransaction transaction)
+            int ledgerId, IList<LedgerDetail> details, SQLiteConnection connection, SQLiteTransaction? transaction)
         {
             // 既存の詳細をすべて削除
             using (var deleteCommand = connection.CreateCommand())
@@ -1993,7 +2002,7 @@ WHERE id = @id";
                 updateCommand.Parameters.AddWithValue("@income", updatedTarget.Income);
                 updateCommand.Parameters.AddWithValue("@expense", updatedTarget.Expense);
                 updateCommand.Parameters.AddWithValue("@balance", updatedTarget.Balance);
-                updateCommand.Parameters.AddWithValue("@note", (object)updatedTarget.Note ?? DBNull.Value);
+                updateCommand.Parameters.AddWithValue("@note", (object?)updatedTarget.Note ?? DBNull.Value);
                 updateCommand.Parameters.AddWithValue("@companionCount", updatedTarget.CompanionCount);
                 updateCommand.Parameters.AddWithValue("@id", targetLedgerId);
 
@@ -2030,7 +2039,7 @@ WHERE id = @id";
             => UnmergeLedgersAsync(undoData, transaction: null);
 
         /// <inheritdoc/>
-        public async Task<bool> UnmergeLedgersAsync(Services.LedgerMergeUndoData undoData, SQLiteTransaction transaction)
+        public async Task<bool> UnmergeLedgersAsync(Services.LedgerMergeUndoData undoData, SQLiteTransaction? transaction)
         {
             // Issue #1806: 統合元の INSERT・明細の移動・統合先の UPDATE は必ず同一トランザクションで実行し、
             // 呼び出し元（LedgerMergeService.UnmergeAsync）が「取り消し済み」マークと同じ tx に束ねられるよう
@@ -2085,7 +2094,7 @@ WHERE id = @id";
         /// false の場合、途中まで書き込んだ内容は呼び出し元のロールバックで巻き戻る前提。
         /// </returns>
         private static async Task<bool> UnmergeLedgersCore(
-            Services.LedgerMergeUndoData undoData, SQLiteConnection connection, SQLiteTransaction transaction)
+            Services.LedgerMergeUndoData undoData, SQLiteConnection connection, SQLiteTransaction? transaction)
         {
             // 1. ソースLedgerを再作成し、新IDを取得
             var idMapping = new Dictionary<int, int>();
@@ -2100,17 +2109,17 @@ VALUES (@cardIdm, @lenderIdm, @date, @summary, @income, @expense, @balance,
 SELECT last_insert_rowid();";
 
                 insertCommand.Parameters.AddWithValue("@cardIdm", source.CardIdm);
-                insertCommand.Parameters.AddWithValue("@lenderIdm", (object)source.LenderIdm ?? DBNull.Value);
+                insertCommand.Parameters.AddWithValue("@lenderIdm", (object?)source.LenderIdm ?? DBNull.Value);
                 insertCommand.Parameters.AddWithValue("@date", source.DateText);
                 insertCommand.Parameters.AddWithValue("@summary", source.Summary);
                 insertCommand.Parameters.AddWithValue("@income", source.Income);
                 insertCommand.Parameters.AddWithValue("@expense", source.Expense);
                 insertCommand.Parameters.AddWithValue("@balance", source.Balance);
-                insertCommand.Parameters.AddWithValue("@staffName", (object)source.StaffName ?? DBNull.Value);
-                insertCommand.Parameters.AddWithValue("@note", (object)source.Note ?? DBNull.Value);
-                insertCommand.Parameters.AddWithValue("@returnerIdm", (object)source.ReturnerIdm ?? DBNull.Value);
-                insertCommand.Parameters.AddWithValue("@lentAt", (object)source.LentAtText ?? DBNull.Value);
-                insertCommand.Parameters.AddWithValue("@returnedAt", (object)source.ReturnedAtText ?? DBNull.Value);
+                insertCommand.Parameters.AddWithValue("@staffName", (object?)source.StaffName ?? DBNull.Value);
+                insertCommand.Parameters.AddWithValue("@note", (object?)source.Note ?? DBNull.Value);
+                insertCommand.Parameters.AddWithValue("@returnerIdm", (object?)source.ReturnerIdm ?? DBNull.Value);
+                insertCommand.Parameters.AddWithValue("@lentAt", (object?)source.LentAtText ?? DBNull.Value);
+                insertCommand.Parameters.AddWithValue("@returnedAt", (object?)source.ReturnedAtText ?? DBNull.Value);
                 insertCommand.Parameters.AddWithValue("@isLentRecord", source.IsLentRecord ? 1 : 0);
                 insertCommand.Parameters.AddWithValue("@companionCount", source.CompanionCount);
 
@@ -2179,7 +2188,7 @@ WHERE id = @id";
             updateCommand.Parameters.AddWithValue("@income", original.Income);
             updateCommand.Parameters.AddWithValue("@expense", original.Expense);
             updateCommand.Parameters.AddWithValue("@balance", original.Balance);
-            updateCommand.Parameters.AddWithValue("@note", (object)original.Note ?? DBNull.Value);
+            updateCommand.Parameters.AddWithValue("@note", (object?)original.Note ?? DBNull.Value);
             updateCommand.Parameters.AddWithValue("@companionCount", original.CompanionCount);
             updateCommand.Parameters.AddWithValue("@id", original.Id);
 
@@ -2240,7 +2249,7 @@ VALUES (@mergedAt, @targetLedgerId, @description, @undoData)";
             => MarkMergeHistoryUndoneAsync(historyId, transaction: null);
 
         /// <inheritdoc/>
-        public async Task<bool> MarkMergeHistoryUndoneAsync(int historyId, SQLiteTransaction transaction)
+        public async Task<bool> MarkMergeHistoryUndoneAsync(int historyId, SQLiteTransaction? transaction)
         {
             // 単文のため 3 分岐は不要（tx があればそれに参加、無ければ接続を借りて autocommit）。
             // tx=null で外側スコープが活性でも、借りた接続の活性トランザクションへ暗黙参加するだけで
@@ -2254,7 +2263,7 @@ VALUES (@mergedAt, @targetLedgerId, @description, @undoData)";
             return await MarkMergeHistoryUndoneCore(historyId, lease.Connection, transaction: null).ConfigureAwait(false);
         }
 
-        private static async Task<bool> MarkMergeHistoryUndoneCore(int historyId, SQLiteConnection connection, SQLiteTransaction transaction)
+        private static async Task<bool> MarkMergeHistoryUndoneCore(int historyId, SQLiteConnection connection, SQLiteTransaction? transaction)
         {
             using var command = connection.CreateCommand();
             command.Transaction = transaction;

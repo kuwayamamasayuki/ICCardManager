@@ -48,7 +48,7 @@ internal static class PrecedingLedgerBalanceFake
                 ResolveAsync(ledgerRepositoryMock.Object, idm, beforeDate));
     }
 
-    private static async Task<Ledger> ResolveAsync(
+    private static async Task<Ledger?> ResolveAsync(
         ILedgerRepository repository, string cardIdm, DateTime beforeDate)
     {
         // 直前日が属する年度の「前年度繰越」をチェーン開始点のシードにする
