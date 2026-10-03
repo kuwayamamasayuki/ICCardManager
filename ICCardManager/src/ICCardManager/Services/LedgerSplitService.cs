@@ -1,3 +1,4 @@
+#nullable enable
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -50,12 +51,10 @@ namespace ICCardManager.Services
         /// </summary>
         /// <param name="ledgerId">分割対象のLedger ID</param>
         /// <param name="groupedDetails">GroupId付きの詳細リスト</param>
-        /// <param name="operatorIdm">操作者IDm</param>
         /// <returns>分割結果</returns>
         public async Task<LedgerSplitResult> SplitAsync(
             int ledgerId,
-            IReadOnlyList<LedgerDetail> groupedDetails,
-            string? operatorIdm = null)
+            IReadOnlyList<LedgerDetail> groupedDetails)
         {
             // バリデーション: GroupIdが2種類以上あること
             var groups = groupedDetails

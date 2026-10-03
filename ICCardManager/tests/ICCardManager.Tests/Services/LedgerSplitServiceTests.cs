@@ -727,7 +727,7 @@ public class LedgerSplitServiceTests : IDisposable
         };
 
         // Act
-        await _service.SplitAsync(1, details, operatorIdm: TestLenderIdm);
+        await _service.SplitAsync(1, details);
 
         // Assert: 操作ログが記録される (Issue #1458: tx 受入版)
         _operationLogRepositoryMock.Verify(

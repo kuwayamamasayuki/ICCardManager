@@ -109,7 +109,7 @@ public class LedgerRowEditViewModelTests : IDisposable
         var allLedgers = CreateTestLedgers();
 
         // Act
-        await _viewModel.InitializeForAddAsync(TestCardIdm, allLedgers, TestOperatorIdm);
+        await _viewModel.InitializeForAddAsync(TestCardIdm, allLedgers);
 
         // Assert
         _viewModel.Mode.Should().Be(LedgerRowEditMode.Add);
@@ -124,7 +124,7 @@ public class LedgerRowEditViewModelTests : IDisposable
         var allLedgers = CreateTestLedgers();
 
         // Act
-        await _viewModel.InitializeForAddAsync(TestCardIdm, allLedgers, TestOperatorIdm);
+        await _viewModel.InitializeForAddAsync(TestCardIdm, allLedgers);
 
         // Assert
         _viewModel.StaffList.Should().HaveCount(2);
@@ -137,7 +137,7 @@ public class LedgerRowEditViewModelTests : IDisposable
         var allLedgers = CreateTestLedgers();
 
         // Act
-        await _viewModel.InitializeForAddAsync(TestCardIdm, allLedgers, TestOperatorIdm);
+        await _viewModel.InitializeForAddAsync(TestCardIdm, allLedgers);
 
         // Assert
         _viewModel.InsertIndex.Should().Be(3, "末尾に挿入");
@@ -152,7 +152,7 @@ public class LedgerRowEditViewModelTests : IDisposable
     {
         // Arrange
         var allLedgers = CreateTestLedgers();
-        await _viewModel.InitializeForAddAsync(TestCardIdm, allLedgers, TestOperatorIdm);
+        await _viewModel.InitializeForAddAsync(TestCardIdm, allLedgers);
 
         // Act: 受入3000円を設定
         _viewModel.Income = 3000;
@@ -168,7 +168,7 @@ public class LedgerRowEditViewModelTests : IDisposable
     {
         // Arrange
         var allLedgers = CreateTestLedgers();
-        await _viewModel.InitializeForAddAsync(TestCardIdm, allLedgers, TestOperatorIdm);
+        await _viewModel.InitializeForAddAsync(TestCardIdm, allLedgers);
 
         // Act: 払出200円を設定
         _viewModel.Income = 0;
@@ -183,7 +183,7 @@ public class LedgerRowEditViewModelTests : IDisposable
     {
         // Arrange
         var allLedgers = CreateTestLedgers();
-        await _viewModel.InitializeForAddAsync(TestCardIdm, allLedgers, TestOperatorIdm);
+        await _viewModel.InitializeForAddAsync(TestCardIdm, allLedgers);
 
         // Act: 自動計算をOFF → 手動入力
         _viewModel.IsAutoBalance = false;
@@ -203,7 +203,7 @@ public class LedgerRowEditViewModelTests : IDisposable
     {
         // Arrange
         var allLedgers = CreateTestLedgers();
-        await _viewModel.InitializeForAddAsync(TestCardIdm, allLedgers, TestOperatorIdm);
+        await _viewModel.InitializeForAddAsync(TestCardIdm, allLedgers);
         _viewModel.InsertIndex.Should().Be(3);
 
         // Act
@@ -218,7 +218,7 @@ public class LedgerRowEditViewModelTests : IDisposable
     {
         // Arrange
         var allLedgers = CreateTestLedgers();
-        await _viewModel.InitializeForAddAsync(TestCardIdm, allLedgers, TestOperatorIdm);
+        await _viewModel.InitializeForAddAsync(TestCardIdm, allLedgers);
         _viewModel.InsertIndex.Should().Be(3);
 
         // Act: 既に末尾なので下に移動しても変わらない
@@ -233,7 +233,7 @@ public class LedgerRowEditViewModelTests : IDisposable
     {
         // Arrange
         var allLedgers = CreateTestLedgers();
-        await _viewModel.InitializeForAddAsync(TestCardIdm, allLedgers, TestOperatorIdm);
+        await _viewModel.InitializeForAddAsync(TestCardIdm, allLedgers);
         _viewModel.Expense = 100;
 
         // 初期状態: InsertIndex=3, PreviousBalance=1890, Balance=1790
@@ -286,7 +286,7 @@ public class LedgerRowEditViewModelTests : IDisposable
         };
 
         // Act
-        await _viewModel.InitializeForEditAsync(dto, TestOperatorIdm);
+        await _viewModel.InitializeForEditAsync(dto);
 
         // Assert
         _viewModel.Mode.Should().Be(LedgerRowEditMode.Edit);
@@ -337,7 +337,7 @@ public class LedgerRowEditViewModelTests : IDisposable
         };
 
         // Act
-        await _viewModel.InitializeForEditAsync(dto, TestOperatorIdm);
+        await _viewModel.InitializeForEditAsync(dto);
 
         // Assert: 氏名フォールバックで職員 A が選択される
         _viewModel.SelectedStaff.Should().NotBeNull();
@@ -378,7 +378,7 @@ public class LedgerRowEditViewModelTests : IDisposable
         };
 
         // Act
-        await _viewModel.InitializeForEditAsync(dto, TestOperatorIdm);
+        await _viewModel.InitializeForEditAsync(dto);
 
         // Assert
         _viewModel.SelectedStaff.Should().BeNull();
@@ -420,7 +420,7 @@ public class LedgerRowEditViewModelTests : IDisposable
         };
 
         // Act
-        await _viewModel.InitializeForEditAsync(dto, TestOperatorIdm);
+        await _viewModel.InitializeForEditAsync(dto);
 
         // Assert
         _viewModel.SelectedStaff.Should().NotBeNull();
@@ -462,7 +462,7 @@ public class LedgerRowEditViewModelTests : IDisposable
         };
 
         // Act
-        await _viewModel.InitializeForEditAsync(dto, TestOperatorIdm);
+        await _viewModel.InitializeForEditAsync(dto);
 
         // Assert
         _viewModel.SelectedStaff.Should().BeNull();
@@ -518,7 +518,7 @@ public class LedgerRowEditViewModelTests : IDisposable
         // Arrange: Issue #2104 — 前行残高 + 受入 − 払出 が DB の残高（5,000 円）と一致しない起点を渡す。
         // 一致する起点（2,000 円）だと、ON にしても再計算しない実装でも 5,000 円のままで緑になる。
         var dto = SetupChargeRowForEdit();
-        await _viewModel.InitializeForEditAsync(dto, TestOperatorIdm, previousBalance: 1500);
+        await _viewModel.InitializeForEditAsync(dto, previousBalance: 1500);
 
         // Act
         _viewModel.IsAutoBalance = true;
@@ -537,7 +537,7 @@ public class LedgerRowEditViewModelTests : IDisposable
         // Arrange: Issue #2104 — DB の残高と食い違う起点にする。起点が 2,000 円（DB と整合）だと、
         // 前行残高ではなく「DB の残高 + 金額の差分」で追随する実装（5000 + 2000）でも 7,000 円になり区別できない。
         var dto = SetupChargeRowForEdit();
-        await _viewModel.InitializeForEditAsync(dto, TestOperatorIdm, previousBalance: 1500);
+        await _viewModel.InitializeForEditAsync(dto, previousBalance: 1500);
         _viewModel.IsAutoBalance = true;
 
         // Act: チャージ額を 3,000 → 5,000 に訂正
@@ -555,7 +555,7 @@ public class LedgerRowEditViewModelTests : IDisposable
     {
         // Arrange & Act
         var dto = SetupChargeRowForEdit();
-        await _viewModel.InitializeForEditAsync(dto, TestOperatorIdm, previousBalance: null);
+        await _viewModel.InitializeForEditAsync(dto, previousBalance: null);
 
         // Assert
         _viewModel.CanAutoBalance.Should().BeFalse();
@@ -570,7 +570,7 @@ public class LedgerRowEditViewModelTests : IDisposable
     {
         // Arrange
         var dto = SetupChargeRowForEdit();
-        await _viewModel.InitializeForEditAsync(dto, TestOperatorIdm, previousBalance: null);
+        await _viewModel.InitializeForEditAsync(dto, previousBalance: null);
 
         // Act
         _viewModel.IsAutoBalance = true;
@@ -590,7 +590,7 @@ public class LedgerRowEditViewModelTests : IDisposable
         var dto = SetupChargeRowForEdit();
 
         // Act
-        await _viewModel.InitializeForEditAsync(dto, TestOperatorIdm);
+        await _viewModel.InitializeForEditAsync(dto);
         _viewModel.IsAutoBalance = true;
 
         // Assert
@@ -607,7 +607,7 @@ public class LedgerRowEditViewModelTests : IDisposable
     {
         // Arrange & Act
         var dto = SetupChargeRowForEdit();
-        await _viewModel.InitializeForEditAsync(dto, TestOperatorIdm, previousBalance: 2000);
+        await _viewModel.InitializeForEditAsync(dto, previousBalance: 2000);
 
         // Assert
         _viewModel.Balance.Should().Be(5000);
@@ -622,7 +622,7 @@ public class LedgerRowEditViewModelTests : IDisposable
     {
         // Arrange & Act
         var allLedgers = CreateTestLedgers();
-        await _viewModel.InitializeForAddAsync(TestCardIdm, allLedgers, TestOperatorIdm);
+        await _viewModel.InitializeForAddAsync(TestCardIdm, allLedgers);
 
         // Assert
         _viewModel.CanAutoBalance.Should().BeTrue();
@@ -641,7 +641,7 @@ public class LedgerRowEditViewModelTests : IDisposable
         var enabledTooltip = _viewModel.AutoBalanceToolTip;
 
         // Act
-        await _viewModel.InitializeForEditAsync(dto, TestOperatorIdm, previousBalance: null);
+        await _viewModel.InitializeForEditAsync(dto, previousBalance: null);
 
         // Assert
         _viewModel.AutoBalanceUnavailableReason.Should()
@@ -660,7 +660,7 @@ public class LedgerRowEditViewModelTests : IDisposable
     {
         // Arrange & Act
         var dto = SetupChargeRowForEdit();
-        await _viewModel.InitializeForEditAsync(dto, TestOperatorIdm, previousBalance: null);
+        await _viewModel.InitializeForEditAsync(dto, previousBalance: null);
 
         // Assert
         _viewModel.AutoBalanceToolTip.Should().NotContain("表示期間",
@@ -676,7 +676,7 @@ public class LedgerRowEditViewModelTests : IDisposable
     {
         // Arrange
         var dto = SetupChargeRowForEdit();
-        await _viewModel.InitializeForEditAsync(dto, TestOperatorIdm, previousBalance: 2000);
+        await _viewModel.InitializeForEditAsync(dto, previousBalance: 2000);
         _viewModel.CanAutoBalance.Should().BeTrue();
 
         // Act: 利用日を後ろの日付へ訂正
@@ -698,7 +698,7 @@ public class LedgerRowEditViewModelTests : IDisposable
         // Arrange: Issue #2104 — 自動計算の値（1000 + 3000 = 4000）を DB の残高（5000）と異ならせる。
         // 同じ値だと、自動計算を解除せず古い起点の値を残す実装でも「DB 値へ戻る」の表明が緑になる。
         var dto = SetupChargeRowForEdit();
-        await _viewModel.InitializeForEditAsync(dto, TestOperatorIdm, previousBalance: 1000);
+        await _viewModel.InitializeForEditAsync(dto, previousBalance: 1000);
         _viewModel.IsAutoBalance = true;
         _viewModel.Balance.Should().Be(4000);
 
@@ -718,7 +718,7 @@ public class LedgerRowEditViewModelTests : IDisposable
     {
         // Arrange
         var dto = SetupChargeRowForEdit();
-        await _viewModel.InitializeForEditAsync(dto, TestOperatorIdm, previousBalance: 2000);
+        await _viewModel.InitializeForEditAsync(dto, previousBalance: 2000);
         var originalDate = _viewModel.EditDate;
         _viewModel.EditDate = new DateTime(2026, 1, 26);
         _viewModel.CanAutoBalance.Should().BeFalse();
@@ -740,7 +740,7 @@ public class LedgerRowEditViewModelTests : IDisposable
     {
         // Arrange: 前行残高が不整合で、自動計算値が DB 値と食い違うケース
         var dto = SetupChargeRowForEdit();
-        await _viewModel.InitializeForEditAsync(dto, TestOperatorIdm, previousBalance: 1000);
+        await _viewModel.InitializeForEditAsync(dto, previousBalance: 1000);
 
         // Act: ON にすると 1000+3000-0=4000 で上書きされる → OFF に戻す
         _viewModel.IsAutoBalance = true;
@@ -773,7 +773,7 @@ public class LedgerRowEditViewModelTests : IDisposable
         _ledgerRepoMock.Setup(r => r.GetByIdAsync(777)).ReturnsAsync((Ledger)null);
 
         // Act
-        await _viewModel.InitializeForEditAsync(dto, TestOperatorIdm, previousBalance: 2300);
+        await _viewModel.InitializeForEditAsync(dto, previousBalance: 2300);
 
         // Assert: 摘要未入力を理由にしたエラーは、行が存在しないという実際の原因と無関係
         _viewModel.ValidationMessage.Should().BeEmpty();
@@ -794,7 +794,7 @@ public class LedgerRowEditViewModelTests : IDisposable
         // Arrange: ページ2以降を想定（先頭より前に履歴がある）
         var allLedgers = CreateTestLedgers();
         await _viewModel.InitializeForAddAsync(
-            TestCardIdm, allLedgers, TestOperatorIdm, historyStartsAtCardBeginning: false);
+            TestCardIdm, allLedgers, historyStartsAtCardBeginning: false);
 
         // Act: 先頭まで挿入位置を上げる
         for (int i = 0; i < 3; i++)
@@ -819,7 +819,7 @@ public class LedgerRowEditViewModelTests : IDisposable
         // ここまでは直前行（残高2300）が特定できるので 2300+3000=5300 が入る。
         var allLedgers = CreateTestLedgers();
         await _viewModel.InitializeForAddAsync(
-            TestCardIdm, allLedgers, TestOperatorIdm, historyStartsAtCardBeginning: false);
+            TestCardIdm, allLedgers, historyStartsAtCardBeginning: false);
         _viewModel.Income = 3000;
         _viewModel.MoveInsertPositionUpCommand.Execute(null);
         _viewModel.MoveInsertPositionUpCommand.Execute(null);
@@ -845,7 +845,7 @@ public class LedgerRowEditViewModelTests : IDisposable
         // Arrange
         var allLedgers = CreateTestLedgers();
         await _viewModel.InitializeForAddAsync(
-            TestCardIdm, allLedgers, TestOperatorIdm, historyStartsAtCardBeginning: true);
+            TestCardIdm, allLedgers, historyStartsAtCardBeginning: true);
         _viewModel.Income = 3000;
 
         // Act
@@ -870,7 +870,7 @@ public class LedgerRowEditViewModelTests : IDisposable
     {
         // Arrange
         var allLedgers = CreateTestLedgers();
-        await _viewModel.InitializeForAddAsync(TestCardIdm, allLedgers, TestOperatorIdm);
+        await _viewModel.InitializeForAddAsync(TestCardIdm, allLedgers);
 
         // Act: 摘要を空にする
         _viewModel.Summary = "";
@@ -888,7 +888,7 @@ public class LedgerRowEditViewModelTests : IDisposable
         {
             new LedgerDto { Id = 1, Date = new DateTime(2026, 1, 1), Balance = 100 }
         };
-        await _viewModel.InitializeForAddAsync(TestCardIdm, allLedgers, TestOperatorIdm);
+        await _viewModel.InitializeForAddAsync(TestCardIdm, allLedgers);
 
         // Act: PreviousBalance=100, Expense=200 → Balance=-100
         _viewModel.Summary = "テスト";
@@ -905,7 +905,7 @@ public class LedgerRowEditViewModelTests : IDisposable
     {
         // Arrange
         var allLedgers = CreateTestLedgers();
-        await _viewModel.InitializeForAddAsync(TestCardIdm, allLedgers, TestOperatorIdm);
+        await _viewModel.InitializeForAddAsync(TestCardIdm, allLedgers);
 
         // Act
         _viewModel.Summary = "テスト";
@@ -921,7 +921,7 @@ public class LedgerRowEditViewModelTests : IDisposable
     {
         // Arrange
         var allLedgers = CreateTestLedgers();
-        await _viewModel.InitializeForAddAsync(TestCardIdm, allLedgers, TestOperatorIdm);
+        await _viewModel.InitializeForAddAsync(TestCardIdm, allLedgers);
 
         // Act: 受入・払出ともに0
         _viewModel.Summary = "テスト";
@@ -938,7 +938,7 @@ public class LedgerRowEditViewModelTests : IDisposable
     {
         // Arrange
         var allLedgers = CreateTestLedgers();
-        await _viewModel.InitializeForAddAsync(TestCardIdm, allLedgers, TestOperatorIdm);
+        await _viewModel.InitializeForAddAsync(TestCardIdm, allLedgers);
 
         // Act: 繰越は受入・払出0でもOK
         _viewModel.Summary = "3月から繰越";
@@ -958,7 +958,7 @@ public class LedgerRowEditViewModelTests : IDisposable
     public async Task Validation_摘要空_FirstErrorFieldにSummaryが設定されること()
     {
         var allLedgers = CreateTestLedgers();
-        await _viewModel.InitializeForAddAsync(TestCardIdm, allLedgers, TestOperatorIdm);
+        await _viewModel.InitializeForAddAsync(TestCardIdm, allLedgers);
 
         _viewModel.Summary = "";
 
@@ -974,7 +974,7 @@ public class LedgerRowEditViewModelTests : IDisposable
         {
             new LedgerDto { Id = 1, Date = new DateTime(2026, 1, 1), Balance = 100 }
         };
-        await _viewModel.InitializeForAddAsync(TestCardIdm, allLedgers, TestOperatorIdm);
+        await _viewModel.InitializeForAddAsync(TestCardIdm, allLedgers);
 
         _viewModel.Summary = "テスト";
         _viewModel.Income = 0;
@@ -988,7 +988,7 @@ public class LedgerRowEditViewModelTests : IDisposable
     public async Task Validation_受入金額負_FirstErrorFieldにIncomeが設定されること()
     {
         var allLedgers = CreateTestLedgers();
-        await _viewModel.InitializeForAddAsync(TestCardIdm, allLedgers, TestOperatorIdm);
+        await _viewModel.InitializeForAddAsync(TestCardIdm, allLedgers);
 
         _viewModel.Summary = "テスト";
         _viewModel.Income = -100;
@@ -1001,7 +1001,7 @@ public class LedgerRowEditViewModelTests : IDisposable
     public async Task Validation_払出金額負_FirstErrorFieldにExpenseが設定されること()
     {
         var allLedgers = CreateTestLedgers();
-        await _viewModel.InitializeForAddAsync(TestCardIdm, allLedgers, TestOperatorIdm);
+        await _viewModel.InitializeForAddAsync(TestCardIdm, allLedgers);
 
         _viewModel.Summary = "テスト";
         _viewModel.Income = 1000;  // 残高をプラスに保つ
@@ -1015,7 +1015,7 @@ public class LedgerRowEditViewModelTests : IDisposable
     public async Task Validation_エラー解消後_FirstErrorFieldがnullに戻ること()
     {
         var allLedgers = CreateTestLedgers();
-        await _viewModel.InitializeForAddAsync(TestCardIdm, allLedgers, TestOperatorIdm);
+        await _viewModel.InitializeForAddAsync(TestCardIdm, allLedgers);
 
         _viewModel.Summary = "";
         _viewModel.FirstErrorField.Should().Be(nameof(LedgerRowEditViewModel.Summary));
@@ -1040,7 +1040,7 @@ public class LedgerRowEditViewModelTests : IDisposable
         var allLedgers = CreateTestLedgers();
 
         // Act
-        await _viewModel.InitializeForAddAsync(TestCardIdm, allLedgers, TestOperatorIdm);
+        await _viewModel.InitializeForAddAsync(TestCardIdm, allLedgers);
 
         // Assert: 追加モードでは削除できない
         _viewModel.CanDelete.Should().BeFalse();
@@ -1081,7 +1081,7 @@ public class LedgerRowEditViewModelTests : IDisposable
         };
 
         // Act
-        await _viewModel.InitializeForEditAsync(dto, TestOperatorIdm);
+        await _viewModel.InitializeForEditAsync(dto);
 
         // Assert: 通常レコードは削除可能
         _viewModel.CanDelete.Should().BeTrue();
@@ -1130,7 +1130,7 @@ public class LedgerRowEditViewModelTests : IDisposable
         };
 
         // Act
-        await _viewModel.InitializeForEditAsync(dto, TestOperatorIdm);
+        await _viewModel.InitializeForEditAsync(dto);
 
         // Assert: 貸出中レコードも Edit モードでは削除可能（Issue #1574）
         _viewModel.CanDelete.Should().BeTrue(
@@ -1150,7 +1150,7 @@ public class LedgerRowEditViewModelTests : IDisposable
     {
         // Arrange
         var allLedgers = CreateTestLedgers();
-        await _viewModel.InitializeForAddAsync(TestCardIdm, allLedgers, TestOperatorIdm);
+        await _viewModel.InitializeForAddAsync(TestCardIdm, allLedgers);
 
         _viewModel.Summary = "鉄道（博多～天神）";
         _viewModel.Income = 0;
@@ -1176,7 +1176,7 @@ public class LedgerRowEditViewModelTests : IDisposable
     {
         // Arrange
         var allLedgers = CreateTestLedgers();
-        await _viewModel.InitializeForAddAsync(TestCardIdm, allLedgers, TestOperatorIdm);
+        await _viewModel.InitializeForAddAsync(TestCardIdm, allLedgers);
 
         _viewModel.Summary = "テスト摘要";
         _viewModel.Income = 500;
@@ -1231,7 +1231,7 @@ public class LedgerRowEditViewModelTests : IDisposable
             Balance = 2300,
             StaffName = _staffA.Name
         };
-        await _viewModel.InitializeForEditAsync(dto, TestOperatorIdm);
+        await _viewModel.InitializeForEditAsync(dto);
 
         // Act: 摘要を変更して保存
         _viewModel.Summary = "変更後の摘要";
@@ -1275,7 +1275,7 @@ public class LedgerRowEditViewModelTests : IDisposable
             CompanionCount = 2
         };
 
-        await _viewModel.InitializeForEditAsync(dto, TestOperatorIdm);
+        await _viewModel.InitializeForEditAsync(dto);
 
         _viewModel.CompanionCount.Should().Be(2);
         _viewModel.DisplayStaffNamePreview.Should().Be("田中太郎 外2名");
@@ -1310,7 +1310,7 @@ public class LedgerRowEditViewModelTests : IDisposable
             Balance = 2300,
             StaffName = _staffA.Name
         };
-        await _viewModel.InitializeForEditAsync(dto, TestOperatorIdm);
+        await _viewModel.InitializeForEditAsync(dto);
 
         _viewModel.CompanionCount = 1;
         await _viewModel.SaveCommand.ExecuteAsync(null);
@@ -1328,7 +1328,7 @@ public class LedgerRowEditViewModelTests : IDisposable
         _ledgerRepoMock.Setup(r => r.InsertAsync(It.IsAny<Ledger>(), It.IsAny<SQLiteTransaction>())).ReturnsAsync(99);
         _staffRepoMock.Setup(r => r.GetByIdmAsync(TestOperatorIdm, It.IsAny<bool>()))
             .ReturnsAsync(new Staff { StaffIdm = TestOperatorIdm, Name = "操作者" });
-        await _viewModel.InitializeForAddAsync(TestCardIdm, allLedgers, TestOperatorIdm);
+        await _viewModel.InitializeForAddAsync(TestCardIdm, allLedgers);
         _viewModel.Summary = "鉄道（天神～博多）";
         _viewModel.Expense = 210;
         _viewModel.SelectedStaff = _staffA;
@@ -1378,7 +1378,7 @@ public class LedgerRowEditViewModelTests : IDisposable
             StaffName = _staffA.Name,
             CompanionCount = 2
         };
-        await _viewModel.InitializeForEditAsync(dto, TestOperatorIdm);
+        await _viewModel.InitializeForEditAsync(dto);
 
         _viewModel.Summary = "変更後の摘要";
         await _viewModel.SaveCommand.ExecuteAsync(null);
@@ -1394,7 +1394,7 @@ public class LedgerRowEditViewModelTests : IDisposable
     public async Task Validate_CompanionCountOutOfRange_BlocksSaveWithThreeElementMessage(int value)
     {
         var allLedgers = CreateTestLedgers();
-        await _viewModel.InitializeForAddAsync(TestCardIdm, allLedgers, TestOperatorIdm);
+        await _viewModel.InitializeForAddAsync(TestCardIdm, allLedgers);
         _viewModel.Summary = "鉄道（天神～博多）";
         _viewModel.Expense = 210;
 
@@ -1411,7 +1411,7 @@ public class LedgerRowEditViewModelTests : IDisposable
     public async Task Validate_CompanionCountInRange_AllowsSave()
     {
         var allLedgers = CreateTestLedgers();
-        await _viewModel.InitializeForAddAsync(TestCardIdm, allLedgers, TestOperatorIdm);
+        await _viewModel.InitializeForAddAsync(TestCardIdm, allLedgers);
         _viewModel.Summary = "鉄道（天神～博多）";
         _viewModel.Expense = 210;
 
@@ -1427,7 +1427,7 @@ public class LedgerRowEditViewModelTests : IDisposable
     {
         // Arrange
         var allLedgers = CreateTestLedgers();
-        await _viewModel.InitializeForAddAsync(TestCardIdm, allLedgers, TestOperatorIdm);
+        await _viewModel.InitializeForAddAsync(TestCardIdm, allLedgers);
 
         _viewModel.Summary = "テスト";
         _viewModel.Income = 500;
@@ -1479,7 +1479,7 @@ public class LedgerRowEditViewModelTests : IDisposable
         _operationLogRepoMock.Setup(r => r.InsertAsync(It.IsAny<OperationLog>()))
             .ReturnsAsync(1);
 
-        await _viewModel.InitializeForAddAsync(TestCardIdm, CreateTestLedgers(), TestOperatorIdm);
+        await _viewModel.InitializeForAddAsync(TestCardIdm, CreateTestLedgers());
         _viewModel.Summary = "テスト摘要";
         _viewModel.Expense = 210;
 
@@ -1521,7 +1521,7 @@ public class LedgerRowEditViewModelTests : IDisposable
             Expense = 210,
             Balance = 2300
         };
-        await _viewModel.InitializeForEditAsync(dto, TestOperatorIdm);
+        await _viewModel.InitializeForEditAsync(dto);
 
         // Act
         await _viewModel.SaveAndEditNextCommand.ExecuteAsync(null);
@@ -1535,7 +1535,7 @@ public class LedgerRowEditViewModelTests : IDisposable
     public async Task SaveAndEditNext_CanSaveがfalseの場合何もしないこと()
     {
         // Arrange: 摘要を空にしてCanSave=falseにする
-        await _viewModel.InitializeForAddAsync(TestCardIdm, CreateTestLedgers(), TestOperatorIdm);
+        await _viewModel.InitializeForAddAsync(TestCardIdm, CreateTestLedgers());
         _viewModel.Summary = string.Empty; // バリデーションエラー
         _viewModel.CanSave.Should().BeFalse();
 
@@ -1586,7 +1586,7 @@ public class LedgerRowEditViewModelTests : IDisposable
             Expense = 210,
             Balance = 2300
         };
-        await _viewModel.InitializeForEditAsync(dto, TestOperatorIdm);
+        await _viewModel.InitializeForEditAsync(dto);
 
         // ShowSaveAndNextButton を有効にして「次へ」ボタンを使えるようにする
         _viewModel.ShowSaveAndNextButton = true;
@@ -1635,8 +1635,7 @@ public class LedgerRowEditViewModelTests : IDisposable
                 Expense = 210,
                 Balance = 2300,
                 StaffName = _staffA.Name
-            },
-            TestOperatorIdm);
+            });
         _viewModel.CanDelete.Should().BeTrue("編集モードの初期化が成立していること（前提の表明）");
         _dialogServiceMock
             .Setup(d => d.ShowWarningConfirmation(It.IsAny<string>(), "履歴の削除"))
@@ -1745,8 +1744,7 @@ public class LedgerRowEditViewModelTests : IDisposable
                 Income = 0,
                 Expense = 210,
                 Balance = 2300
-            },
-            TestOperatorIdm);
+            });
     }
 
     [Theory]
@@ -1993,7 +1991,7 @@ public class LedgerRowEditViewModelTests : IDisposable
                 It.IsAny<int>(), It.IsAny<IEnumerable<(int, string)>>(), It.IsAny<SQLiteTransaction>()))
             .ReturnsAsync(false);
 
-        await _viewModel.InitializeForEditAsync(dto, TestOperatorIdm);
+        await _viewModel.InitializeForEditAsync(dto);
         _viewModel.Summary = "バス（天神～博多）";
 
         // Act
@@ -2054,7 +2052,7 @@ public class LedgerRowEditViewModelTests : IDisposable
                 It.IsAny<int>(), It.IsAny<IEnumerable<(int, string)>>(), It.IsAny<SQLiteTransaction>()))
             .ReturnsAsync(true);
 
-        await _viewModel.InitializeForEditAsync(dto, TestOperatorIdm);
+        await _viewModel.InitializeForEditAsync(dto);
         _viewModel.Summary = "バス（天神～博多）";
 
         // Act
@@ -2081,7 +2079,7 @@ public class LedgerRowEditViewModelTests : IDisposable
         var ledger = CreateBusLedger("バス（★）");
         var dto = ArrangeBusLedgerForEdit(ledger);
 
-        await _viewModel.InitializeForEditAsync(dto, TestOperatorIdm);
+        await _viewModel.InitializeForEditAsync(dto);
         _viewModel.Note = "備考だけ変更";
 
         // Act
@@ -2135,7 +2133,7 @@ public class LedgerRowEditViewModelTests : IDisposable
             .ReturnsAsync(true);
         var logs = CaptureOperationLogs();
 
-        await _viewModel.InitializeForEditAsync(dto, TestOperatorIdm);
+        await _viewModel.InitializeForEditAsync(dto);
         _viewModel.Summary = "バス（天神）";
 
         await _viewModel.SaveCommand.ExecuteAsync(null);
@@ -2165,7 +2163,7 @@ public class LedgerRowEditViewModelTests : IDisposable
             .ReturnsAsync(true);
         var logs = CaptureOperationLogs();
 
-        await _viewModel.InitializeForEditAsync(dto, TestOperatorIdm);
+        await _viewModel.InitializeForEditAsync(dto);
         _viewModel.Summary = "バス（天神）";
 
         await _viewModel.SaveCommand.ExecuteAsync(null);
@@ -2189,7 +2187,7 @@ public class LedgerRowEditViewModelTests : IDisposable
         var dto = ArrangeBusLedgerForEdit(ledger);
         var logs = CaptureOperationLogs();
 
-        await _viewModel.InitializeForEditAsync(dto, TestOperatorIdm);
+        await _viewModel.InitializeForEditAsync(dto);
         _viewModel.Note = "備考だけ変更";
 
         await _viewModel.SaveCommand.ExecuteAsync(null);
@@ -2233,7 +2231,7 @@ public class LedgerRowEditViewModelTests : IDisposable
             Expense = 0,
             Balance = balance
         };
-        await _viewModel.InitializeForEditAsync(dto, TestOperatorIdm, previousBalance: null, initialBalanceCorrection: correction);
+        await _viewModel.InitializeForEditAsync(dto, previousBalance: null, initialBalanceCorrection: correction);
     }
 
     /// <summary>
@@ -2312,7 +2310,7 @@ public class LedgerRowEditViewModelTests : IDisposable
         };
         _ledgerRepoMock.Setup(r => r.GetByIdAsync(1)).ReturnsAsync(ledger);
         var dto = new LedgerDto { Id = 1, CardIdm = TestCardIdm, Date = ledger.Date, Summary = "新規購入", Income = 5000, Balance = 5000 };
-        await _viewModel.InitializeForEditAsync(dto, TestOperatorIdm, previousBalance: 0,
+        await _viewModel.InitializeForEditAsync(dto, previousBalance: 0,
             initialBalanceCorrection: CreateCorrection(3000, appliesToIncome: true));
         _viewModel.IsAutoBalance = true;
         _viewModel.CanAutoBalance.Should().BeTrue("前提: 直前残高を渡したので自動計算を ON にできる");
