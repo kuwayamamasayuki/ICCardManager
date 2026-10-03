@@ -13,7 +13,7 @@
 - Issue #2166 **テストプロジェクト間でテスト基盤パッケージの版をそろえた**
   - UI テスト（ICCardManager.UITests）だけが古い版のまま取り残されていたので、単体テストと同じ版へ上げた: Microsoft.NET.Test.Sdk 17.5.0 → 17.14.1、xunit.runner.visualstudio 2.4.5 → 2.8.2、FluentAssertions 6.12.0 → 6.12.2。xunit.runner 3 系（対応する xunit の系統が変わる）・FluentAssertions 7 以降（破壊的変更。8 以降は商用ライセンス）は上げない
   - 単体テストの coverlet.collector は 3.2.0 に据え置いた。6.0.4 を試したところ、手元で Release を `-p:DebugType=portable` でビルドしても net48 のアセンブリの計装が効かず、被覆行が 0 行となり、CI のカバレッジ報告（現在 3.2.0 で行 61% 前後）を保てる確認ができなかったため。理由と上げるときの確認方法を csproj に書いた
-  - `THIRD_PARTY_LICENSES.md` §2（テスト用ライブラリ）を同期した（5 行の版が古く、Xunit.SkippableFact（MS-PL）が載っていなかった）。MS-PL を §5 に追記（テスト用のみで配布物には含まれない）
+  - `THIRD_PARTY_LICENSES.md` §2（テスト用ライブラリ）を同期した（5 行の版が古く、Xunit.SkippableFact（MS-PL）が載っていなかった）。MS-PL を「ライセンス種別の概要」（当時 §5。#2165 の再レビューで §6）に追記（テスト用のみで配布物には含まれない）
   - #2165 で入れた `ThirdPartyLicensesConsistencyTests` を §2 とテストプロジェクト間の版の一致まで広げた（+2 件。テストプロジェクトは sln から導出）。UI テストの csproj を origin/main の版へ戻すと No.6 が赤になることを確かめた（07_テスト設計書 UT-135 No.5・No.6）。00a_技術スタック用語集のテスト基盤の版も同期し、#2165 から取り残されていた CommunityToolkit.Mvvm・ClosedXML の版（00a、README・01 の技術スタック表の「0.102.x」）も直した。xunit.runner.visualstudio は 2.8.2 でライセンスが MIT から Apache-2.0 に変わったので一覧を直した（名前と版しか照合しない検査では検出できないため nuspec で確かめた）
   - テスト: 単体 8,380 → 8,382（+2）・合計 8,493 → 8,495
 - Issue #2165 **未使用の `Microsoft.Extensions.Hosting` 参照を削除した**

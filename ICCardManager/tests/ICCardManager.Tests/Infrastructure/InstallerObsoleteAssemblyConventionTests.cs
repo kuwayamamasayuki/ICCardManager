@@ -24,6 +24,12 @@ namespace ICCardManager.Tests.Infrastructure;
 /// （今も配布しているパッケージを載せると、読んだ人に「外した」と誤解させる。消しても直後の <c>[Files]</c> で入れ直されるので
 /// 動作は壊れないが、一覧の意味が崩れる）。
 /// </para>
+/// <para>
+/// 照合は「DLL のファイル名＝パッケージ ID」を前提にする（外した 10 件はいずれもそう）。ファイル名と ID が違うもの
+/// （例: <c>System.Data.SQLite.dll</c> のパッケージは <c>System.Data.SQLite.Core</c>）を載せる場合はこの照合が効かないので、
+/// 載せる前に、その DLL が publish フォルダーに無いことを確かめる。行の形は 1 行に 1 つの DLL を名指しする形
+/// （ワイルドカードや <c>Check:</c> などの条件を付けない）に限り、合わない行は報告させる。
+/// </para>
 /// </remarks>
 public class InstallerObsoleteAssemblyConventionTests
 {
@@ -43,7 +49,7 @@ public class InstallerObsoleteAssemblyConventionTests
     };
 
     private static readonly Regex InstallDeleteFile =
-        new(@"^Type:\s*files;\s*Name:\s*""\{app\}\\(?<dir>Tools\\)?(?<name>[^""\\]+)\.dll""", RegexOptions.Compiled);
+        new(@"^Type:\s*files;\s*Name:\s*""\{app\}\\(?<dir>Tools\\)?(?<name>[^""\\*?]+)\.dll""\s*$", RegexOptions.Compiled);
 
     private static readonly Regex LockPackageEntry =
         new(@"""(?<name>[A-Za-z0-9_.\-]+)"":\s*\{\s*""type""", RegexOptions.Compiled);
@@ -105,6 +111,8 @@ public class InstallerObsoleteAssemblyConventionTests
             @"Type: files; Name: ""{app}\Foo.dll""",
             @"Type: filesandordirs; Name: ""{app}\Bar""",
             @"Type: files; Name: ""{app}\x86\Baz.dll""",
+            @"Type: files; Name: ""{app}\Microsoft.Extensions.*.dll""",
+            @"Type: files; Name: ""{app}\Qux.dll""; Check: IsUpgrade",
             "[Files]",
             @"Source: ""..\publish\*.dll""; DestDir: ""{app}""",
         };
@@ -112,7 +120,7 @@ public class InstallerObsoleteAssemblyConventionTests
         var (entries, unparsed) = ParseInstallDelete(script);
 
         entries.Should().Equal(new[] { (false, "Foo") });
-        unparsed.Should().HaveCount(2, "filesandordirs と x86 の行は形に合わないので報告する（[Files] の行は対象外）");
+        unparsed.Should().HaveCount(4, "filesandordirs・x86 配下・ワイルドカード・条件付きの行は形に合わないので報告する（[Files] の行は対象外）");
     }
 
     [Theory]
