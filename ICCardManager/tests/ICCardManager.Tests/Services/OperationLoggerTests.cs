@@ -62,7 +62,7 @@ public class OperationLoggerTests : IDisposable
 
     #endregion
 
-    #region 新API: context なし → GuiOperator フォールバック
+    #region context なし → GuiOperator フォールバック
 
     [Fact]
     public async Task LogLedgerUpdateAsync_WithoutContext_UsesGuiIdentifier()
@@ -71,7 +71,7 @@ public class OperationLoggerTests : IDisposable
         var beforeLedger = CreateTestLedger(summary: "変更前");
         var afterLedger = CreateTestLedger(summary: "変更後");
 
-        // Act: 新 API（operator 引数なし）
+        // Act: 操作者を引数で渡さない（context から解決する）
         await _logger.LogLedgerUpdateAsync(beforeLedger, afterLedger);
 
         // Assert
@@ -101,7 +101,7 @@ public class OperationLoggerTests : IDisposable
 
     #endregion
 
-    #region 新API: context あり → context 値を使用
+    #region context あり → context 値を使用
 
     [Fact]
     public async Task LogLedgerDeleteAsync_WithContext_RecordsContextOperator()
@@ -159,12 +159,49 @@ public class OperationLoggerTests : IDisposable
         logMethods.Select(m => m.Name).Should().Contain(
             new[] { "LogStaffInsertAsync", "LogCardUpdateAsync", "LogLedgerDeleteAsync", "LogLedgerSplitAsync" });
 
+        // 許可形で判定する（禁止する名前の列挙は、staffIdm / idm / actorIdm のような別名で素通りする）。
+        // 操作者の識別子は文字列でしか渡せないので、string 型の引数は既知の用途（対象テーブル名・ファイルパス）に限る
+        var allowedStringParameters = new[] { "tableName", "filePath" };
         var offending = logMethods
-            .Where(m => m.GetParameters().Any(p =>
-                p.Name != null && p.Name.StartsWith("operator", StringComparison.OrdinalIgnoreCase)))
-            .Select(m => m.ToString())
+            .SelectMany(m => m.GetParameters()
+                .Where(p => p.ParameterType == typeof(string) && !allowedStringParameters.Contains(p.Name))
+                .Select(p => $"{m.Name}({p.Name})"))
             .ToList();
-        offending.Should().BeEmpty("操作者は ICurrentOperatorContext からのみ解決し、引数では受け取らない");
+        offending.Should().BeEmpty(
+            "操作者は ICurrentOperatorContext からのみ解決し、引数では受け取らない（string 型の引数は対象テーブル名・ファイルパスだけ）");
+    }
+
+    /// <summary>
+    /// 監査ログを記録する上位の層（Service・ViewModel・View）にも、操作者の識別子を受け取る引数が無いこと（Issue #2164）。
+    /// </summary>
+    /// <remarks>
+    /// OperationLogger から操作者の引数を消しても、1 つ上の層（統合・分割・行編集）に「受け取って捨てる」引数が残っていた。
+    /// 読んだ人は「渡した IDm が記録される」と受け取り、記録を正しくしようとこの引数を使い始めると、#1265 が塞いだ
+    /// 「引数経由のなりすまし」の形が復活する。リポジトリの検索条件（<c>GetByOperatorAsync</c>）は Data 層なので対象外。
+    /// 判定は名前の前方一致（<c>operator…</c>）に留まり、<c>authIdm</c> のような別名には効かない。上位の層には <c>cardIdm</c> /
+    /// <c>staffIdm</c>（貸出者などの業務データ）という正当な引数があるため、<c>OperationLogger</c> のような許可形にはできない。
+    /// 識別子は文字列でしか渡せないので string 型の引数を見る（<c>ICurrentOperatorContext</c> の注入は操作者の正しい情報源なので対象外）。
+    /// </remarks>
+    [Fact]
+    public void UpperLayers_DoNotAcceptOperatorIdentityParameter()
+    {
+        var assembly = typeof(OperationLogger).Assembly;
+        var upperLayerNamespaces = new[] { "ICCardManager.Services", "ICCardManager.ViewModels", "ICCardManager.Views" };
+        var types = assembly.GetTypes()
+            .Where(t => t.Namespace != null && upperLayerNamespaces.Any(ns => t.Namespace == ns || t.Namespace.StartsWith(ns + ".", StringComparison.Ordinal)))
+            .ToList();
+
+        // 対の表明: 走査対象に、かつて引数が残っていた型が含まれていること（空振り防止）
+        types.Select(t => t.Name).Should().Contain(new[] { "LedgerMergeService", "LedgerSplitService", "LedgerRowEditViewModel" });
+
+        const BindingFlags All = BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.Static | BindingFlags.DeclaredOnly;
+        var offending = types
+            .SelectMany(t => t.GetMethods(All).Cast<MethodBase>().Concat(t.GetConstructors(All))
+                .SelectMany(m => m.GetParameters()
+                    .Where(p => p.ParameterType == typeof(string) && p.Name != null && p.Name.StartsWith("operator", StringComparison.OrdinalIgnoreCase))
+                    .Select(p => $"{t.FullName}.{m.Name}({p.Name})")))
+            .ToList();
+        offending.Should().BeEmpty("操作者は ICurrentOperatorContext からのみ解決し、上位の層も引数では受け取らない");
     }
 
     /// <summary>
@@ -195,7 +232,7 @@ public class OperationLoggerTests : IDisposable
 
     #endregion
 
-    #region 各テーブルのログ記録 (新 API)
+    #region 各テーブルのログ記録
 
     [Fact]
     public async Task LogStaffUpdateAsync_RecordsBeforeAndAfter()
