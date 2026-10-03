@@ -246,6 +246,15 @@ public class DbContextCheckConnectionReachabilityTests : IDisposable
         blocking.CheckConnection().Should().BeFalse();
 
         // Assert
+        // Issue #2213: プローブは接続・クエリの後に呼ばれるので、CPU が混んでいると 3 回のチェック（約 300 ms）の
+        // 間にまだ届いていないことがある。届くのを上限付きで待ってから、1 回だけであることを表明する
+        // （「多重起動しない」の検査であって、プローブへ届く速さの検査ではない）
+        SpinWait.SpinUntil(() => blocking.ProbeCallCount >= 1, TimeSpan.FromSeconds(10)).Should().BeTrue(
+            "前提: 進行中の疎通確認がプローブへ届いていること");
+        // 多重起動していれば 2 本目以降も遅れて届くので、猶予を置いて 2 本目が来ないことを確かめる
+        // （1 本目が届いた瞬間に表明すると、負荷で遅れた 2 本目を見逃す）
+        SpinWait.SpinUntil(() => blocking.ProbeCallCount >= 2, TimeSpan.FromSeconds(1)).Should().BeFalse(
+            "進行中の疎通確認があるうちは新しい確認を開始しない");
         blocking.ProbeCallCount.Should().Be(1,
             "進行中の疎通確認があるうちは新しい確認を開始しない（スレッドの累積防止）");
 
