@@ -166,7 +166,8 @@ public class LedgerMergeAuditLogBeforeDataTests : IDisposable
             summary: "バス（博多駅前）", expense: 190, balance: 1996, note: "復路", companionCount: 2);
 
         // 統合前の状態を DB から確定させる（期待値をテスト側で作り直さない）
-        var preMergeTarget = await _ledgerRepository.GetByIdAsync(targetId);
+        var preMergeTarget = await _ledgerRepository.GetByIdAsync(targetId)
+            ?? throw new InvalidOperationException("前提: 統合先の行が DB にあること");
 
         var result = await _service.MergeAsync(new List<int> { targetId, sourceId });
         result.Success.Should().BeTrue($"前提の統合は成功するべき: {result.ErrorMessage}");

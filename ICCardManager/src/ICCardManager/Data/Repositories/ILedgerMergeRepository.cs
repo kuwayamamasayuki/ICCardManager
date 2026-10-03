@@ -1,3 +1,4 @@
+#nullable enable
 using System;
 using System.Collections.Generic;
 using System.Data.SQLite;
@@ -24,7 +25,7 @@ namespace ICCardManager.Data.Repositories
         /// <summary>
         /// 利用履歴詳細を既存トランザクション内で置き換える (Issue #1458)。
         /// </summary>
-        Task<bool> ReplaceDetailsAsync(int ledgerId, IEnumerable<LedgerDetail> details, SQLiteTransaction transaction);
+        Task<bool> ReplaceDetailsAsync(int ledgerId, IEnumerable<LedgerDetail> details, SQLiteTransaction? transaction);
 
         /// <summary>
         /// 複数のLedgerレコードを1つに統合する
@@ -75,7 +76,7 @@ namespace ICCardManager.Data.Repositories
         /// 同一トランザクションで確定させるために使う。commit / rollback は呼び出し元の責務。
         /// </summary>
         /// <returns><see cref="UnmergeLedgersAsync(Services.LedgerMergeUndoData)"/> と同じ</returns>
-        Task<bool> UnmergeLedgersAsync(Services.LedgerMergeUndoData undoData, SQLiteTransaction transaction);
+        Task<bool> UnmergeLedgersAsync(Services.LedgerMergeUndoData undoData, SQLiteTransaction? transaction);
 
         /// <summary>
         /// 統合履歴をDBに保存
@@ -101,6 +102,6 @@ namespace ICCardManager.Data.Repositories
         /// 同一トランザクションで確定させるために使う。commit / rollback は呼び出し元の責務。
         /// </summary>
         /// <returns><see cref="MarkMergeHistoryUndoneAsync(int)"/> と同じ</returns>
-        Task<bool> MarkMergeHistoryUndoneAsync(int historyId, SQLiteTransaction transaction);
+        Task<bool> MarkMergeHistoryUndoneAsync(int historyId, SQLiteTransaction? transaction);
     }
 }

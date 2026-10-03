@@ -58,7 +58,7 @@ public class LedgerMergeUpdateColumnConventionTests
         new object[]
         {
             "Task<bool> UnmergeLedgersCore(Services.LedgerMergeUndoData undoData, " +
-            "SQLiteConnection connection, SQLiteTransaction transaction)"
+            "SQLiteConnection connection, SQLiteTransaction? transaction)"
         }
     };
 

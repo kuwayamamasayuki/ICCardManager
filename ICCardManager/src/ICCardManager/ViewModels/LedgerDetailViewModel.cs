@@ -292,12 +292,8 @@ namespace ICCardManager.ViewModels
             {
                 _cardName = cardName;
             }
-            _ledger = await _ledgerRepository.GetByIdAsync(ledgerId);
-
-            if (_ledger == null)
-            {
-                throw new InvalidOperationException($"Ledger ID {ledgerId} が見つかりません");
-            }
+            _ledger = await _ledgerRepository.GetByIdAsync(ledgerId)
+                ?? throw new InvalidOperationException($"Ledger ID {ledgerId} が見つかりません");
 
             _committedLedger = LedgerCloner.Clone(_ledger)!;
 
