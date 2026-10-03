@@ -195,7 +195,9 @@ namespace ICCardManager.Common.Exceptions
         /// （<c>.claude/rules/error-messages.md</c>「取れる行動が違う経路には専用の文言を置く」）。
         /// </para>
         /// <para>
-        /// <b>長さは 44 文字に抑えている。</b>戻り先は
+        /// <b>長さは 47 文字に抑えている</b>（「貸出」「返却」のとき）。Issue #2211 で案内先を「カード管理画面（F2）」から
+        /// 「交通系ICカード管理（F3）」へ直した（F2 は職員管理）。「画面」を付けないのはメイン画面のボタンの表記に合わせ、
+        /// トーストの上限（<c>LendingServiceLentStatusConflictTests</c> が固定する 48 文字）に収めるため。戻り先は
         /// <c>LendingResult.ErrorMessage</c> → <c>MainViewModel</c> の
         /// <c>IToastNotificationService.ShowError</c> で、トーストは幅上限
         /// （<c>ToastLayoutCalculator.MaxWidth</c>＝520px、文字サイズによらず固定）で折り返しつつ
@@ -204,7 +206,7 @@ namespace ICCardManager.Common.Exceptions
         /// <c>ExceptionMessageFormatter.ToUserMessage</c> の <b>58 文字</b>の文言を退けており、
         /// ここで 58 文字の文言を新設すると同じ判断と矛盾する（コードレビューで検出）。
         /// 「なぜ」は独立した文にせず「削除されていないか確認してください」という形で
-        /// 「どうすれば」と一体にまとめた。同ファイルの Busy 分岐（38 文字）と同水準。
+        /// 「どうすれば」と一体にまとめた。
         /// </para>
         /// </remarks>
         public static BusinessException LentStatusUpdateConflict(string cardIdm, string operationName)
@@ -216,7 +218,7 @@ namespace ICCardManager.Common.Exceptions
             var message = $"Lent status update affected 0 rows: {IdmMasker.Mask(cardIdm)} ({operationName})";
             var userMessage =
                 $"{operationName}を記録できませんでした。" +
-                "カード管理画面（F2）で削除されていないか確認してください。";
+                "交通系ICカード管理（F3）で削除されていないか確認してください。";
             const string errorCode = "BIZ015";
 
             return new BusinessException(message, userMessage, errorCode);

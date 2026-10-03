@@ -260,4 +260,19 @@ public class BusinessExceptionTests
         ex.UserFriendlyMessage.Should().NotContain(cardIdm);
         ex.ErrorCode.Should().Be("BIZ015");
     }
+
+    /// <summary>
+    /// Issue #2211: 交通系ICカードの管理画面は F3（F2 は職員管理）。案内どおりに押した F キーで
+    /// 目的の画面が開くことを固定する（長さの上限は LendingServiceLentStatusConflictTests が固定する）。
+    /// </summary>
+    [Theory]
+    [InlineData("貸出")]
+    [InlineData("返却")]
+    public void LentStatusUpdateConflict_交通系ICカード管理画面F3へ案内すること(string operationName)
+    {
+        var ex = BusinessException.LentStatusUpdateConflict("0102030405060708", operationName);
+
+        ex.UserFriendlyMessage.Should().Be(
+            $"{operationName}を記録できませんでした。交通系ICカード管理（F3）で削除されていないか確認してください。");
+    }
 }
