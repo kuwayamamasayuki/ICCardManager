@@ -35,6 +35,7 @@ public class ThirdPartyLicensesConsistencyTests
     private const string RuntimeSectionHeading = "## 1.";
     private const string TestSectionHeading = "## 2.";
     private const string BuildOnlySectionHeading = "## 3.";
+    private const string DevelopmentToolSectionHeading = "## 4.";
 
     [Fact]
     public void 配布物に入る直接参照が第1節に同じ版で載っていること()
@@ -62,6 +63,38 @@ public class ThirdPartyLicensesConsistencyTests
 
         listed.Should().BeEquivalentTo(expected,
             "PrivateAssets=\"all\" の参照は配布物に入らないため §3（ビルド時にのみ使用）に載せる");
+    }
+
+    /// <summary>
+    /// 開発ツール（DebugDataViewer）の直接参照が、本体と同じ版で第1節に載っているか、第4節の表に載っていること。
+    /// </summary>
+    /// <remarks>
+    /// DebugDataViewer はインストーラーで <c>Tools</c> に同梱される（配布物に入る）。以前は §3 が「配布されない」と書き、
+    /// ツールの csproj はどこからも照合されていなかったため、ツールだけに参照を足しても一覧から漏れたまま緑になった
+    /// （#2165 の再レビューで検出）。
+    /// </remarks>
+    [Fact]
+    public void 開発ツールの直接参照が第1節か第4節に同じ版で載っていること()
+    {
+        var licenses = ReadLicenses();
+        licenses.Split('\n').Select(l => l.TrimEnd('\r'))
+            .Should().Contain(l => l.StartsWith(DevelopmentToolSectionHeading, StringComparison.Ordinal),
+                "開発ツールの節（## 4.）があること（見出しが消えると照合先が空になり、表に載せる先が無くなる）");
+
+        var runtime = ParseSection(licenses, RuntimeSectionHeading);
+        var tool = ParseSection(licenses, DevelopmentToolSectionHeading);
+        var toolReferences = ReadPackageReferences(DevelopmentToolProjectFile());
+
+        toolReferences.Select(p => p.Name).Should().Contain("System.Data.SQLite.Core", "ツールの csproj の抽出が空振りしていないこと");
+
+        var unlisted = toolReferences
+            .Where(p => !p.BuildOnly)
+            .Where(p => !(runtime.TryGetValue(p.Name, out var v) && v == p.Version)
+                        && !(tool.TryGetValue(p.Name, out var w) && w == p.Version))
+            .Select(p => $"{p.Name} {p.Version}")
+            .ToList();
+        unlisted.Should().BeEmpty(
+            "DebugDataViewer は配布物に入るため、その参照は本体と同じ版で §1 に載っているか、§4 の表に載っていること");
     }
 
     [Fact]
@@ -148,6 +181,10 @@ public class ThirdPartyLicensesConsistencyTests
     }
 
     private sealed record PackageReference(string Name, string Version, bool BuildOnly);
+
+    /// <summary>インストーラーに同梱される開発ツール（DebugDataViewer）の csproj。</summary>
+    private static string DevelopmentToolProjectFile()
+        => Path.Combine(TestPaths.GetSolutionRoot(), "tools", "DebugDataViewer", "DebugDataViewer.csproj");
 
     private static IReadOnlyList<PackageReference> ReadPackageReferences()
         => ReadPackageReferences(Path.Combine(TestPaths.GetProductionSourceRoot(), "ICCardManager.csproj"));
