@@ -8,7 +8,7 @@
   - 同期的にブロックし得る処理を専用スレッド（`TaskCreationOptions.LongRunning`・既定のスケジューラー）で走らせる部品 `Common/DedicatedThread` を新設し、帳票作成画面と管理者ダッシュボードの出力状況の判定、DB の疎通確認（#2213）をこれに寄せた（子タスクの扱いも `Task.Run` と同じ `DenyChildAttach`。async デリゲートは中の処理を待てないため、渡すとコンパイルエラーになる）。判定は出力先フォルダ（共有フォルダーのこともある）の同期的な走査なので、本番でも応答しない共有でプールのスレッドを塞がなくなる
   - プールを塞ぐテストの塞ぎ方を `ThreadPoolSaturator`（テスト基盤）へ共有化し、#2213 の疎通確認のテストもこれに移した。プールを塞いだ状態で判定が始まることを固定する回帰テスト（修正前の `Task.Run` に戻すと赤）、管理者ダッシュボードの判定が専用スレッドで走ることのテスト、プールを塞ぐテストクラスがすべて並列に走らないコレクションに属することの検査（IL からクラス単位で導出）を追加した
   - 改修した `AdminDashboardService` に `#nullable enable` を付け、出た警告を是正した（null を受ける引数・null を返すメソッドに `?`）。`NullableContextConventionTests` の上限を 212 → 211
-  - 04_機能設計書（出力済み判定の判断表・管理者ダッシュボード・疎通確認）、07_テスト設計書 UT-REPORT-EXPORT-STATUS-003 No.74・UT-072-24〜27 を更新
+  - 04_機能設計書（出力済み判定の判断表・管理者ダッシュボード・疎通確認）、05_クラス設計書（管理者ダッシュボード・疎通確認。疎通確認の記述は #2213 から `Task.Run` のまま残っていた）、07_テスト設計書 UT-REPORT-EXPORT-STATUS-003 No.74・UT-072-24〜27 を更新
   - テスト: 単体 8,552 → 8,564（+12）・合計 8,667 → 8,679
 - Issue #2215 **推移的に配布されるライブラリのライセンスを一覧に載せ、ライセンス欄をパッケージの宣言と照合するようにした。Microsoft.Extensions.* のライセンスの誤記（Apache-2.0 → MIT）を直した**
   - `THIRD_PARTY_LICENSES.md` とその整合テストは csproj の直接参照しか扱っていなかったが、インストーラーに同梱される配布物には直接参照が連れてくる推移的な依存（ClosedXML の DocumentFormat.OpenXml・SixLabors.Fonts、Microsoft.Extensions.* の Abstractions 系、System.* など 31 個）も入り、MIT・Apache-2.0 の表示の義務が掛かる
