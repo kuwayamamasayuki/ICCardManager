@@ -1,3 +1,4 @@
+#nullable enable
 using System;
 using System.Collections.Generic;
 using System.Globalization;
@@ -85,7 +86,8 @@ namespace ICCardManager.Services
             var staffNames = await BuildStaffNameMapAsync().ConfigureAwait(false);
 
             // Issue #1691: 帳票の出力状況は出力先フォルダのファイル走査（同期処理）で判定するため、
-            // UI スレッドを塞がないよう Task.Run にオフロードする。
+            // UI スレッドを塞がないよう別スレッドで走らせる。Issue #2221: 共有フォルダーでは応答が無いと
+            // 戻らないので、スレッドプールではなく専用スレッドで走らせる（帳票作成画面と同じ。理由は DedicatedThread）。
             var targets = (allCards ?? Enumerable.Empty<IcCard>())
                 .Where(c => c != null)
                 .Select(c => new ReportExportTarget
@@ -97,7 +99,7 @@ namespace ICCardManager.Services
                     RefundedAt = c.RefundedAt,
                 })
                 .ToList();
-            var reportStatuses = await Task.Run(
+            var reportStatuses = await DedicatedThread.Run(
                 () => _reportExportStatusService.GetStatuses(targets, settings.ReportOutputFolder, asOf.Year, asOf.Month))
                 .ConfigureAwait(false);
             var reportStatusByCard = reportStatuses
@@ -283,7 +285,7 @@ namespace ICCardManager.Services
         /// <summary>
         /// 貸出職員名を解決する（職員マスタ優先、無ければ台帳に記録された氏名）。
         /// </summary>
-        private static string ResolveLentStaffName(IcCard card, Ledger lentRecord, Dictionary<string, string> staffNames)
+        private static string ResolveLentStaffName(IcCard card, Ledger? lentRecord, Dictionary<string, string> staffNames)
         {
             if (!card.IsLent)
             {
@@ -476,7 +478,7 @@ namespace ICCardManager.Services
         /// IDm 自体を表示に使わないのは、職員証の IDm が本システム唯一の認証要素であるため
         /// （ログに関する Issue #1852 と同じ判断）。
         /// </remarks>
-        private static string ResolveSeriesQualifier(string bucketKey, Dictionary<string, string> staffNumbers)
+        private static string? ResolveSeriesQualifier(string bucketKey, Dictionary<string, string>? staffNumbers)
         {
             if (staffNumbers == null || !bucketKey.StartsWith(IdmBucketKeyPrefix, StringComparison.Ordinal))
             {
@@ -500,7 +502,7 @@ namespace ICCardManager.Services
         private static IReadOnlyList<MonthlyBalanceSeries> BuildBalanceSeries(
             IReadOnlyList<IcCard> cards,
             IReadOnlyList<MonthEndBalanceRow> monthEndBalances,
-            Dictionary<string, int> balancesBeforePeriod,
+            Dictionary<string, int>? balancesBeforePeriod,
             IReadOnlyList<string> months)
         {
             var monthIndex = new Dictionary<string, int>();
@@ -529,9 +531,10 @@ namespace ICCardManager.Services
             var series = new List<MonthlyBalanceSeries>(cards.Count);
             foreach (var card in cards)
             {
+                var initial = 0;
                 var hasInitial = balancesBeforePeriod != null
-                    && balancesBeforePeriod.TryGetValue(card.CardIdm, out var initial);
-                var initialValue = hasInitial ? (double?)balancesBeforePeriod[card.CardIdm] : null;
+                    && balancesBeforePeriod.TryGetValue(card.CardIdm, out initial);
+                var initialValue = hasInitial ? (double?)initial : null;
 
                 if (!byCard.TryGetValue(card.CardIdm, out var values))
                 {

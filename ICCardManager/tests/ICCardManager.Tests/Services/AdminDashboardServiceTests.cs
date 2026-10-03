@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Threading;
 using System.Threading.Tasks;
 using FluentAssertions;
 using ICCardManager.Common;
@@ -192,6 +193,36 @@ public class AdminDashboardServiceTests
         var result = await CreateService().GetOperationStatusAsync(AsOf, AppConstants.LongTermUnreturnedDays);
 
         result.LentCardCount.Should().Be(1);
+    }
+
+    #endregion
+
+    #region GetOperationStatusAsync — 出力状況の判定の起動スレッド（Issue #2221）
+
+    /// <summary>
+    /// 帳票の出力状況の判定は、スレッドプールではなく専用スレッドで走ること（帳票作成画面と同じ）。
+    /// 判定は出力先フォルダ（共有フォルダーのこともある）の同期的な走査で、プールで起動すると、
+    /// プールが詰まっているときに判定が始まらず、応答の無い共有ではプールのスレッドを塞ぐ。
+    /// </summary>
+    [Fact]
+    public async Task GetOperationStatusAsync_出力状況の判定はスレッドプールではなく専用スレッドで走ること()
+    {
+        // Arrange
+        SetupDefaults(cards: new[] { new IcCard { CardIdm = "01", CardType = "nimoca", CardNumber = "N-001" } });
+        bool? ranOnPoolThread = null;
+        _reportExportStatusService
+            .Setup(s => s.GetStatuses(It.IsAny<IEnumerable<ReportExportTarget>>(), It.IsAny<string>(), It.IsAny<int>(), It.IsAny<int>()))
+            .Returns(() =>
+            {
+                ranOnPoolThread = Thread.CurrentThread.IsThreadPoolThread;
+                return new List<ReportExportStatus>();
+            });
+
+        // Act
+        await CreateService().GetOperationStatusAsync(new DateTime(2026, 6, 15), 7);
+
+        // Assert
+        ranOnPoolThread.Should().BeFalse("判定は DedicatedThread（LongRunning）で起動する");
     }
 
     #endregion
