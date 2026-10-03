@@ -462,8 +462,8 @@ public partial class ReportViewModel : ViewModelBase
     /// 対象年月・出力先フォルダに対する「出力済み / 未出力」を再判定する（Issue #1691）
     /// </summary>
     /// <remarks>
-    /// 判定は出力先フォルダの実ファイル走査。カード枚数ぶんのファイルを開くため
-    /// <c>Task.Run</c> でバックグラウンドスレッドへオフロードする（Excel 生成と同じ方針）。
+    /// 判定は出力先フォルダの実ファイル走査。カード枚数ぶんのファイルを開くため、
+    /// 専用スレッド（<see cref="DedicatedThread"/>）で走らせる（Issue #2221。以前は <c>Task.Run</c>）。
     /// </remarks>
     [RelayCommand]
     public async Task RefreshExportStatusAsync()
@@ -492,8 +492,14 @@ public partial class ReportViewModel : ViewModelBase
         IReadOnlyList<ReportExportStatus> statuses;
         try
         {
-            statuses = await Task.Run(() =>
-                _exportStatusService.GetStatuses(targets, capturedFolder, capturedYear, capturedMonth));
+            // Issue #2221: スレッドプールではなく専用スレッドで走らせる（理由は DedicatedThread）。
+            // 判定は出力先フォルダ（共有フォルダーのこともある）の同期的なファイル走査で、Task.Run だと
+            // プールが詰まっているときに判定自体が始まらなかった（実測: プールを塞ぐと 30 秒たっても始まらない）。
+            // 判定は年月・出力先の変更ごとに 1 本で、古い判定の結果は世代番号で捨てるため、専用スレッドが
+            // 積み上がるのは応答しない共有で年月を連続して変えたときに限られる（Task.Run でも同じ本数の
+            // プールのスレッドを塞いでいた）。
+            statuses = await DedicatedThread.Run(
+                () => _exportStatusService.GetStatuses(targets, capturedFolder, capturedYear, capturedMonth));
         }
         catch (Exception ex)
         {
