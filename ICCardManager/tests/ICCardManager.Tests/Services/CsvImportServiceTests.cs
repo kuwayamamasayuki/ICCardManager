@@ -3552,6 +3552,33 @@ FEDCBA9876543210,鈴木花子,002,テスト2";
     }
 
     /// <summary>
+    /// Issue #2211: 未登録カードの案内先は交通系ICカード管理画面（F3）。F2 は職員管理で、
+    /// 案内どおりに押すと目的の画面にたどり着けなかった。
+    /// </summary>
+    [Fact]
+    public async Task PreviewLedgerDetailsAsync_利用履歴ID空欄_未登録カード_交通系ICカード管理画面F3へ案内すること()
+    {
+        // Arrange
+        var csvContent = @"利用履歴ID,利用日時,カードIDm,管理番号,乗車駅,降車駅,バス停,金額,残額,チャージ,ポイント還元,バス利用,グループID
+,2024-01-15 10:30:00,FFFF456789ABCDEF,001,博多,天神,,260,9740,0,0,0,";
+
+        var filePath = Path.Combine(_testDirectory, "details_auto_id_unknown_card_fkey.csv");
+        await Task.Run(() => File.WriteAllText(filePath, csvContent, CsvEncoding));
+
+        _cardRepositoryMock.Setup(x => x.GetByIdmAsync("FFFF456789ABCDEF", true))
+            .ReturnsAsync((IcCard?)null);
+
+        // Act
+        var result = await _service.PreviewLedgerDetailsAsync(filePath);
+
+        // Assert
+        var error = result.Errors.Should().ContainSingle().Subject;
+        error.Message.Should().Be(
+            $"カードIDm {IdmMasker.Mask("FFFF456789ABCDEF")} が登録されていません。"
+            + "交通系ICカード管理画面（F3）でカードを登録してから、もう一度取り込んでください。");
+    }
+
+    /// <summary>
     /// Issue #1986（コードレビューで検出）: <c>IdmMasker.Mask</c> は 16 文字未満の入力を全部
     /// <c>*</c> に置き換えるため、Excel で先頭の 0 が失われた IDm を「登録されていません」と
     /// 案内すると、職員には値が一切見えず案内も実際の原因と食い違う。
@@ -3581,7 +3608,7 @@ FEDCBA9876543210,鈴木花子,002,テスト2";
         error.Message.Should().Contain("15文字", "実際の入力値の情報を含めて調査できるようにする");
         error.Message.Should().EndWith("取り込んでください。");
         // 「カードを登録してください」という実行できない指示を出さないこと
-        error.Message.Should().NotContain("カード管理画面（F2）でカードを登録");
+        error.Message.Should().NotContain("交通系ICカード管理画面（F3）でカードを登録");
         // 全マスクの意味のない文字列を出さないこと
         error.Message.Should().NotContain("***");
         // 生の値も出さない

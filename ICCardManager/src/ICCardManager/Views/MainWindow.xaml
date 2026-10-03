@@ -345,7 +345,7 @@
                                 <WrapPanel>
                                     <TextBlock Text="F1: 帳票" FontSize="{DynamicResource SmallFontSize}" Margin="0,0,20,5"/>
                                     <TextBlock Text="F2: 職員管理" FontSize="{DynamicResource SmallFontSize}" Margin="0,0,20,5"/>
-                                    <TextBlock Text="F3: カード管理" FontSize="{DynamicResource SmallFontSize}" Margin="0,0,20,5"/>
+                                    <TextBlock Text="F3: 交通系ICカード管理" FontSize="{DynamicResource SmallFontSize}" Margin="0,0,20,5"/>
                                     <TextBlock Text="F4: データ入出力" FontSize="{DynamicResource SmallFontSize}" Margin="0,0,20,5"/>
                                     <TextBlock Text="F5: 設定" FontSize="{DynamicResource SmallFontSize}" Margin="0,0,20,5"/>
                                     <TextBlock Text="F6: システム管理" FontSize="{DynamicResource SmallFontSize}" Margin="0,0,20,5"/>

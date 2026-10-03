@@ -686,8 +686,7 @@ namespace ICCardManager.Services
         /// </param>
         private static string BuildUnregisteredCardMessage(string maskedIdm)
             => $"カードIDm {maskedIdm} が登録されていません。"
-               + "この IDm のカードはカード管理に存在しません。"
-               + "カード管理画面（F2）でカードを登録してから、もう一度取り込んでください。";
+               + "交通系ICカード管理画面（F3）でカードを登録してから、もう一度取り込んでください。";
 
         /// <summary>
         /// 明細 CSV のカード IDm が 16 進 <see cref="IdmLength"/> 文字でないときのエラー文言。
