@@ -1,3 +1,4 @@
+#nullable enable
 using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
@@ -122,7 +123,7 @@ public partial class ReportViewModel : ViewModelBase
         _settingsRepository = settingsRepository;
         _safeFileLauncher = safeFileLauncher;
         _preflightChecker = preflightChecker;
-        _exportStatusService = exportStatusService;
+        _exportStatusService = exportStatusService ?? throw new ArgumentNullException(nameof(exportStatusService));
         _clock = clock ?? new SystemClock();
 
         // CreatedFiles の中身が変化したときに HasCreatedFiles の通知を発火する
@@ -474,7 +475,7 @@ public partial class ReportViewModel : ViewModelBase
         // 早期 return の経路でも採番し、保留中の古い更新を無効にする。
         var generation = ++_exportStatusGeneration;
 
-        if (_exportStatusService == null || Cards.Count == 0)
+        if (Cards.Count == 0)
         {
             ExportStatusSummary = string.Empty;
             return;
@@ -532,7 +533,7 @@ public partial class ReportViewModel : ViewModelBase
     /// <param name="statuses">判定結果</param>
     /// <param name="year">判定に使った年（画面の現在値ではない。Issue #2058）</param>
     /// <param name="month">判定に使った月（同上）</param>
-    internal void ApplyExportStatuses(IReadOnlyList<ReportExportStatus> statuses, int year, int month)
+    internal void ApplyExportStatuses(IReadOnlyList<ReportExportStatus>? statuses, int year, int month)
     {
         var byCardIdm = (statuses ?? new List<ReportExportStatus>())
             .Where(s => s != null && !string.IsNullOrEmpty(s.CardIdm))
@@ -652,7 +653,7 @@ public partial class ReportViewModel : ViewModelBase
     /// <param name="result">チェック結果</param>
     /// <param name="checkedYear">検査した年（画面の現在値ではない。Issue #2059）</param>
     /// <param name="checkedMonth">検査した月（同上）</param>
-    internal void ApplyPreflightWarnings(ReportPreflightResult result, int checkedYear, int checkedMonth)
+    internal void ApplyPreflightWarnings(ReportPreflightResult? result, int checkedYear, int checkedMonth)
     {
         // Issue #2059: 検査の待機中に年月が変わっていたら、結果を書き戻さない。
         // 年月の変更で一度消したマークを、検査していない年月の画面へ古い結果で復活させることになる。
@@ -856,7 +857,7 @@ public partial class ReportViewModel : ViewModelBase
                     failedCards.Add((
                         $"{card.CardType} {card.CardNumber}",
                         $"{ReportFileNameCollisions.FormatCardNames(collidingCards)} と帳票のファイル名が同じになるため、作成しませんでした。" +
-                        "カード管理画面で管理番号を変更してください"));
+                        "交通系ICカード管理画面で管理番号を変更してください"));
                     continue;
                 }
 
@@ -1157,7 +1158,7 @@ public partial class ReportViewModel : ViewModelBase
     /// 印刷プレビューを表示
     /// </summary>
     [RelayCommand]
-    public async Task PreviewReportAsync(CardDto card)
+    public async Task PreviewReportAsync(CardDto? card)
     {
         if (card == null)
         {

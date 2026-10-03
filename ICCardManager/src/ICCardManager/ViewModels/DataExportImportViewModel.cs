@@ -1,3 +1,4 @@
+#nullable enable
 using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
@@ -420,7 +421,7 @@ public partial class DataExportImportViewModel : ViewModelBase
         // データ種別のコンボボックスは処理中オーバーレイがあってもキーボードで操作できるため、
         // 出力後にプロパティを読み直すと、監査ログへ実際とは異なる対象テーブルが記録される（インポート側の Issue #1741 と同じ罠）。
         var exportType = SelectedExportType;
-        CsvExportResult result = null;
+        CsvExportResult? result = null;
         using (BeginBusy("エクスポート中..."))
         {
             // Issue #1062: UIスレッドにプログレスバー描画の機会を与える
@@ -687,7 +688,7 @@ public partial class DataExportImportViewModel : ViewModelBase
         // 分岐ごとに組み立てた文言をその場に残したまま、ダイアログを出す地点を1か所へ集約できる。
         // 分岐が増えても「文言の組み立て」と「表示のタイミング」が離れないため、
         // 新しい分岐だけスコープ内で表示する形の再発を構造的に防ぐ。
-        Action pendingResultDialog = null;
+        Action? pendingResultDialog = null;
 
         using (BeginBusy("インポート中..."))
         {
@@ -1345,9 +1346,9 @@ public partial class DataExportImportViewModel : ViewModelBase
                 // 未登録カード
                 TouchedCardIdm = string.Empty;
                 TouchedCardInfo = "未登録のカードです";
-                SetStatus("このカードはシステムに登録されていません。先にカード管理で登録してください。", true);
+                SetStatus("このカードはシステムに登録されていません。先に交通系ICカード管理画面で登録してください。", true);
                 _dialogService.ShowWarning(
-                    "タッチされたカードはシステムに登録されていません。\n\n利用履歴をインポートするには、先にカード管理で対象の交通系ICカードを登録してください。",
+                    "タッチされたカードはシステムに登録されていません。\n\n利用履歴をインポートするには、先に交通系ICカード管理画面で対象の交通系ICカードを登録してください。",
                     "未登録カード");
             }
 
