@@ -123,7 +123,7 @@ public partial class ReportViewModel : ViewModelBase
         _settingsRepository = settingsRepository;
         _safeFileLauncher = safeFileLauncher;
         _preflightChecker = preflightChecker;
-        _exportStatusService = exportStatusService;
+        _exportStatusService = exportStatusService ?? throw new ArgumentNullException(nameof(exportStatusService));
         _clock = clock ?? new SystemClock();
 
         // CreatedFiles の中身が変化したときに HasCreatedFiles の通知を発火する
