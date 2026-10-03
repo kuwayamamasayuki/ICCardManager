@@ -1,3 +1,4 @@
+#nullable enable
 using System;
 using System.Collections.Generic;
 using System.Data.SQLite;
@@ -147,7 +148,7 @@ namespace ICCardManager.Services
             _operatorContext = operatorContext;
         }
 
-        #region 新 API (operatorIdm 引数なし) — Issue #1265
+        #region 操作ログの記録（操作者は ICurrentOperatorContext から解決する） — Issue #1265 / #2164
 
         /// <summary>
         /// 職員登録のログを記録。操作者情報は <see cref="ICurrentOperatorContext"/> から自動取得する。

@@ -1,3 +1,4 @@
+#nullable enable
 using System;
 using System.Collections.Generic;
 using System.Globalization;
@@ -126,8 +127,8 @@ namespace ICCardManager.Services
                 StaffName = StaffName,
                 Note = Note,
                 ReturnerIdm = ReturnerIdm,
-                LentAt = string.IsNullOrEmpty(LentAtText) ? null : SqliteDateTimeFormat.ParseStored(LentAtText),
-                ReturnedAt = string.IsNullOrEmpty(ReturnedAtText) ? null : SqliteDateTimeFormat.ParseStored(ReturnedAtText),
+                LentAt = LentAtText is { Length: > 0 } lentAt ? SqliteDateTimeFormat.ParseStored(lentAt) : null,
+                ReturnedAt = ReturnedAtText is { Length: > 0 } returnedAt ? SqliteDateTimeFormat.ParseStored(returnedAt) : null,
                 IsLentRecord = IsLentRecord,
                 CompanionCount = CompanionCount
             };
@@ -186,9 +187,8 @@ namespace ICCardManager.Services
         /// 複数のLedgerを統合する
         /// </summary>
         /// <param name="ledgerIds">統合するLedger IDのリスト（表示順＝古い順）</param>
-        /// <param name="operatorIdm">操作者IDm（GUI操作の場合はnull）</param>
         /// <returns>統合結果</returns>
-        public async Task<LedgerMergeResult> MergeAsync(IReadOnlyList<int> ledgerIds, string? operatorIdm = null)
+        public async Task<LedgerMergeResult> MergeAsync(IReadOnlyList<int> ledgerIds)
         {
             if (ledgerIds.Count < 2)
             {
@@ -244,7 +244,7 @@ namespace ICCardManager.Services
             // Note / CompanionCount と、共有 LedgerDetail の BusStops・SequenceNumber）が
             // そのまま監査ログの BeforeData に載る。統合先だけ「変更前」と「変更後」が同一になり、
             // 6 年保存の operation_log から「何から何へ変わったのか」が失われるため、明細まで複製する。
-            var beforeLedgers = ledgers.Select(LedgerCloner.Clone).ToList();
+            var beforeLedgers = ledgers.Select(l => LedgerCloner.Clone(l)).ToList();
             // 説明テキスト用に元の摘要を保存（targetの変更前に取得）
             var originalSummaryTexts = ledgers.Select(l => l.Summary).ToList();
 
@@ -416,9 +416,8 @@ namespace ICCardManager.Services
         /// 統合を元に戻す（履歴IDで指定）
         /// </summary>
         /// <param name="mergeHistoryId">統合履歴のID</param>
-        /// <param name="operatorIdm">操作者IDm</param>
         /// <returns>統合取り消し結果</returns>
-        public async Task<LedgerMergeResult> UnmergeAsync(int mergeHistoryId, string? operatorIdm = null)
+        public async Task<LedgerMergeResult> UnmergeAsync(int mergeHistoryId)
         {
             try
             {

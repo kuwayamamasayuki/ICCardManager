@@ -1,3 +1,4 @@
+#nullable enable
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -100,7 +101,7 @@ public partial class HistoryPanelViewModel
 
         // 統合実行
         var ledgerIds = sortedDtos.Select(dto => dto.Id).ToList();
-        var mergeResult = await _ledgerMergeService.MergeAsync(ledgerIds, authResult.Idm);
+        var mergeResult = await _ledgerMergeService.MergeAsync(ledgerIds);
 
         if (mergeResult.Success && mergeResult.HasPostCommitFailure)
         {

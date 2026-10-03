@@ -289,7 +289,7 @@ public class IdmLoggingMaskConventionTests
     [InlineData("var level = LogLevel.Information; Repair(card.CardIdm);", false)]
     // 準拠: 語尾が Log に一致するだけのメソッド
     [InlineData("Catalog(card.CardIdm);", false)]
-    // 準拠: Log… で始まるメソッドの「定義」（呼び出しではない。OperationLogger の旧 API）
+    // 準拠: Log… で始まるメソッドの「定義」（呼び出しではない。#2164 で削除した OperationLogger の旧 API の形を例に使う）
     [InlineData("public Task LogStaffInsertAsync(string? operatorIdm, Staff staff) => LogStaffInsertAsync(staff);", false)]
     // 準拠: 既定値付きの仮引数を持つ「定義」（呼び出しではない）
     [InlineData("private void LogTouch(string cardIdm = null, bool ok = false) { }", false)]
