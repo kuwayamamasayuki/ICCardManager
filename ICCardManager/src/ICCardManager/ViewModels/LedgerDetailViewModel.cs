@@ -745,7 +745,7 @@ namespace ICCardManager.ViewModels
                 }).ToList();
 
                 var result = await _ledgerSplitService.SplitAsync(
-                    _ledger.Id, updatedDetails, authResult.Idm);
+                    _ledger.Id, updatedDetails);
 
                 if (!result.Success)
                 {

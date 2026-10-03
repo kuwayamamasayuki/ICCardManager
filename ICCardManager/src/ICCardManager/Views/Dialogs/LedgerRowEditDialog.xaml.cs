@@ -1,3 +1,4 @@
+#nullable enable
 using System;
 using System.Collections.Generic;
 using System.ComponentModel;
@@ -124,7 +125,6 @@ namespace ICCardManager.Views.Dialogs
         /// </summary>
         /// <param name="cardIdm">対象カードIDm</param>
         /// <param name="allLedgers">表示中の全履歴</param>
-        /// <param name="operatorIdm">認証済み職員IDm</param>
         /// <param name="historyStartsAtCardBeginning">
         /// <paramref name="allLedgers"/> の先頭がカードの履歴の先頭でもあるか（Issue #1740）。
         /// false のとき、先頭への挿入では残高の自動計算が無効化される。
@@ -132,17 +132,15 @@ namespace ICCardManager.Views.Dialogs
         public async Task InitializeForAddAsync(
             string cardIdm,
             List<LedgerDto> allLedgers,
-            string operatorIdm,
             bool historyStartsAtCardBeginning = false)
         {
-            await _viewModel.InitializeForAddAsync(cardIdm, allLedgers, operatorIdm, historyStartsAtCardBeginning);
+            await _viewModel.InitializeForAddAsync(cardIdm, allLedgers, historyStartsAtCardBeginning);
         }
 
         /// <summary>
         /// 編集モードで初期化
         /// </summary>
         /// <param name="ledgerDto">編集対象</param>
-        /// <param name="operatorIdm">認証済み職員IDm</param>
         /// <param name="previousBalance">
         /// 履歴一覧の表示順で編集対象の直前にある行の残高（Issue #1740）。残高自動計算の起点。
         /// 直前行が表示範囲に無い場合は null を渡すと自動計算が無効化される。
@@ -151,10 +149,10 @@ namespace ICCardManager.Views.Dialogs
         /// Issue #2007: 導入時残高の訂正案（全期間の残高整合性チェックで検知された導入行の編集時のみ）。無ければ null。
         /// </param>
         public async Task InitializeForEditAsync(
-            LedgerDto ledgerDto, string operatorIdm, int? previousBalance = null,
-            Services.InitialBalanceCorrection initialBalanceCorrection = null)
+            LedgerDto ledgerDto, int? previousBalance = null,
+            Services.InitialBalanceCorrection? initialBalanceCorrection = null)
         {
-            await _viewModel.InitializeForEditAsync(ledgerDto, operatorIdm, previousBalance, initialBalanceCorrection);
+            await _viewModel.InitializeForEditAsync(ledgerDto, previousBalance, initialBalanceCorrection);
         }
 
         /// <summary>

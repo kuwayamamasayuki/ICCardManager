@@ -48,7 +48,7 @@ public partial class HistoryPanelViewModel
 
         var result = await _navigationService.ShowDialogAsync<Views.Dialogs.LedgerRowEditDialog>(
             async d => await d.InitializeForAddAsync(
-                HistoryCard.CardIdm, allLedgers, authResult.Idm, historyStartsAtCardBeginning));
+                HistoryCard.CardIdm, allLedgers, historyStartsAtCardBeginning));
 
         if (result == true)
         {
@@ -267,7 +267,7 @@ public partial class HistoryPanelViewModel
             return;
         }
 
-        await EditLedgerWithAuthAsync(ledger, authResult.Idm, showSaveAndNext: true);
+        await EditLedgerWithAuthAsync(ledger, showSaveAndNext: true);
     }
 
     /// <summary>
@@ -342,7 +342,7 @@ public partial class HistoryPanelViewModel
     /// <summary>
     /// 認証済みの状態で履歴を編集（Issue #1134: 「保存して次へ」ループ対応）
     /// </summary>
-    private async Task EditLedgerWithAuthAsync(LedgerDto ledger, string operatorIdm, bool showSaveAndNext = false)
+    private async Task EditLedgerWithAuthAsync(LedgerDto ledger, bool showSaveAndNext = false)
     {
         var cardName = HistoryCard?.DisplayName;
 
@@ -357,7 +357,7 @@ public partial class HistoryPanelViewModel
         var dialogResult = await _navigationService.ShowDialogAsync<Views.Dialogs.LedgerRowEditDialog>(
             async d =>
             {
-                await d.InitializeForEditAsync(ledger, operatorIdm, previousBalance, initialBalanceCorrection);
+                await d.InitializeForEditAsync(ledger, previousBalance, initialBalanceCorrection);
                 if (showSaveAndNext)
                 {
                     d.SetShowSaveAndNextButton(true);
@@ -387,18 +387,18 @@ public partial class HistoryPanelViewModel
             // Issue #1134: 「保存して次へ」が要求された場合、次の行を開く
             if (capturedEditDialog?.IsSaveAndEditNextRequested == true)
             {
-                await EditAdjacentLedgerAsync(ledger, operatorIdm, offset: 1);
+                await EditAdjacentLedgerAsync(ledger, offset: 1);
             }
         }
         // Issue #1134: 「次へ（保存しない）」が要求された場合
         else if (capturedEditDialog?.IsSkipToNextRequested == true)
         {
-            await EditAdjacentLedgerAsync(ledger, operatorIdm, offset: 1);
+            await EditAdjacentLedgerAsync(ledger, offset: 1);
         }
         // Issue #1134: 「戻る」が要求された場合
         else if (capturedEditDialog?.IsBackRequested == true)
         {
-            await EditAdjacentLedgerAsync(ledger, operatorIdm, offset: -1);
+            await EditAdjacentLedgerAsync(ledger, offset: -1);
         }
     }
 
@@ -409,7 +409,7 @@ public partial class HistoryPanelViewModel
     /// Issue #1740: 隣が繰越行（DB に実体を持たない合成行）の場合は何もしない。
     /// ガードが無いと全項目空欄のダイアログが開く。
     /// </remarks>
-    private async Task EditAdjacentLedgerAsync(LedgerDto ledger, string operatorIdm, int offset)
+    private async Task EditAdjacentLedgerAsync(LedgerDto ledger, int offset)
     {
         var currentIndex = IndexOfHistoryLedger(ledger);
         if (currentIndex < 0)
@@ -423,7 +423,7 @@ public partial class HistoryPanelViewModel
             return;
         }
 
-        await EditLedgerWithAuthAsync(HistoryLedgers[targetIndex], operatorIdm, showSaveAndNext: true);
+        await EditLedgerWithAuthAsync(HistoryLedgers[targetIndex], showSaveAndNext: true);
     }
 
     #endregion
