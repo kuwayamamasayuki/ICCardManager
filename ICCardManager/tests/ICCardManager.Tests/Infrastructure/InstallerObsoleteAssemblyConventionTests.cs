@@ -77,6 +77,44 @@ public class InstallerObsoleteAssemblyConventionTests
             .Should().BeEmpty("[InstallDelete] には、いまのロックファイルに無い（配布物から外した）DLL だけを載せる");
     }
 
+    /// <summary>
+    /// <c>[InstallDelete]</c> の行（コメント・空行以外）がすべて検査の形（<c>{app}</c> か <c>{app}\Tools</c> 直下の DLL）に合うこと。
+    /// </summary>
+    /// <remarks>
+    /// 合わない行（別のフォルダー・<c>filesandordirs</c>・大文字の <c>.DLL</c> 等）を黙って読み飛ばすと、
+    /// 上の「今は配布していないパッケージであること」の照合に届かず緑のまま通る（#2165 の再レビュー 2 回目で検出）。
+    /// 形を広げるときは、この検査と照合の両方を広げる。
+    /// </remarks>
+    [Fact]
+    public void InstallDeleteの行はすべて検査の形に合うこと()
+    {
+        var (entries, unparsed) = ParseInstallDelete(ReadInstallerScript());
+
+        entries.Should().NotBeEmpty("[InstallDelete] の行を読めていること（空振り防止）");
+        unparsed.Should().BeEmpty("[InstallDelete] には {app} か {app}\\Tools 直下の .dll を Type: files で載せる（読み飛ばされる行を作らない）");
+    }
+
+    [Fact]
+    public void 検査ロジック_形に合わない行を読み飛ばさずに報告すること()
+    {
+        var script = new[]
+        {
+            "[InstallDelete]",
+            "; コメント",
+            "",
+            @"Type: files; Name: ""{app}\Foo.dll""",
+            @"Type: filesandordirs; Name: ""{app}\Bar""",
+            @"Type: files; Name: ""{app}\x86\Baz.dll""",
+            "[Files]",
+            @"Source: ""..\publish\*.dll""; DestDir: ""{app}""",
+        };
+
+        var (entries, unparsed) = ParseInstallDelete(script);
+
+        entries.Should().Equal(new[] { (false, "Foo") });
+        unparsed.Should().HaveCount(2, "filesandordirs と x86 の行は形に合わないので報告する（[Files] の行は対象外）");
+    }
+
     [Theory]
     [InlineData(@"Type: files; Name: ""{app}\Foo.Bar.dll""", false, "Foo.Bar")]
     [InlineData(@"Type: files; Name: ""{app}\Tools\Foo.Bar.dll""", true, "Foo.Bar")]
@@ -90,9 +128,18 @@ public class InstallerObsoleteAssemblyConventionTests
     }
 
     private static List<(bool InTools, string Name)> ReadInstallDeleteEntries()
+        => ParseInstallDelete(ReadInstallerScript()).Entries;
+
+    private static string[] ReadInstallerScript()
+        => File.ReadAllLines(Path.Combine(TestPaths.GetSolutionRoot(), "installer", "ICCardManager.iss"));
+
+    /// <summary>
+    /// <c>[InstallDelete]</c> の行を読み、検査の形に合う行（配置先と DLL 名）と、合わない行を分けて返す。
+    /// </summary>
+    private static (List<(bool InTools, string Name)> Entries, List<string> Unparsed) ParseInstallDelete(IEnumerable<string> script)
     {
-        var script = File.ReadAllLines(Path.Combine(TestPaths.GetSolutionRoot(), "installer", "ICCardManager.iss"));
         var result = new List<(bool, string)>();
+        var unparsed = new List<string>();
         var inSection = false;
         foreach (var raw in script)
         {
@@ -108,14 +155,23 @@ public class InstallerObsoleteAssemblyConventionTests
                 continue;
             }
 
+            if (line.Length == 0 || line.StartsWith(";", StringComparison.Ordinal))
+            {
+                continue;
+            }
+
             var m = InstallDeleteFile.Match(line);
             if (m.Success)
             {
                 result.Add((m.Groups["dir"].Success, m.Groups["name"].Value));
             }
+            else
+            {
+                unparsed.Add(line);
+            }
         }
 
-        return result;
+        return (result, unparsed);
     }
 
     private static IEnumerable<string> ReadLockedPackages(string lockFile)
