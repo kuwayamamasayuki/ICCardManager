@@ -279,10 +279,13 @@ public class BusTextConfigurationConsumerTests : IDisposable
                     updates.SequenceEqual(expectedUpdates)),
                 It.IsNotNull<SQLiteTransaction>()),
             Times.Once);
-        ledgerRepo.Verify(r => r.UpdateAsync(
-                It.Is<Ledger>(l => l.Id == 1 && l.Summary == expectedSummary),
+        ledgerRepo.Verify(r => r.UpdateSummaryAsync(
+                1,
+                expectedSummary,
                 It.IsNotNull<SQLiteTransaction>()),
             Times.Once);
+        ledgerRepo.Verify(r => r.UpdateAsync(It.IsAny<Ledger>(), It.IsAny<SQLiteTransaction>()), Times.Never);
+        ledgerRepo.Verify(r => r.UpdateAsync(It.IsAny<Ledger>()), Times.Never);
     }
 
     [Fact]
@@ -326,8 +329,8 @@ public class BusTextConfigurationConsumerTests : IDisposable
             .Callback<int, IEnumerable<(int SequenceNumber, string BusStops)>, SQLiteTransaction>(
                 (_, _, tx) => _persistTransactions.Add(tx))
             .ReturnsAsync(true);
-        ledgerRepo.Setup(r => r.UpdateAsync(It.IsAny<Ledger>(), It.IsAny<SQLiteTransaction>()))
-            .Callback<Ledger, SQLiteTransaction>((_, tx) => _persistTransactions.Add(tx))
+        ledgerRepo.Setup(r => r.UpdateSummaryAsync(It.IsAny<int>(), It.IsAny<string>(), It.IsAny<SQLiteTransaction>()))
+            .Callback<int, string, SQLiteTransaction>((_, _, tx) => _persistTransactions.Add(tx))
             .ReturnsAsync(true);
         ledgerRepo.Setup(r => r.GetByIdAsync(It.IsAny<int>()))
             .ReturnsAsync((Ledger)null);

@@ -573,7 +573,9 @@ public partial class BusStopInputViewModel : ViewModelBase
                 }
 
                 ledger.Summary = summaryGenerator.Generate(ledger.Details);
-                if (!await _ledgerRepository.UpdateAsync(ledger, scope.Transaction))
+                // Issue #2212: 摘要だけを SET する。履歴から開いたときの ledger は画面を開いた時点の値なので、
+                // 全列を SET する UpdateAsync を使うと、その間に他 PC が直した備考・同行者数を巻き戻す。
+                if (!await _ledgerRepository.UpdateSummaryAsync(ledger.Id, ledger.Summary, scope.Transaction))
                 {
                     return false;
                 }

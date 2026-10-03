@@ -94,6 +94,15 @@ public sealed class LedgerDetailSaveServiceTests : IDisposable
             return updateBehavior != null ? updateBehavior(updated) : updated;
         }
 
+        // Issue #2212: 摘要の更新は摘要だけを SET する UpdateSummaryAsync。全列の UpdateAsync（上）も実リポジトリへ
+        // 委譲し失敗も注入するのは、全列の更新へ退行したときに注入が効かず成功してしまわないため（#1745）
+        async Task<bool> RunUpdateSummary(int id, string summary, SQLiteTransaction tx)
+        {
+            recorded.UpdateTransactions.Add(tx);
+            var updated = await _realLedgerRepository.UpdateSummaryAsync(id, summary, tx);
+            return updateBehavior != null ? updateBehavior(updated) : updated;
+        }
+
         ledgerMock.Setup(r => r.ReplaceDetailsAsync(It.IsAny<int>(), It.IsAny<IEnumerable<LedgerDetail>>(), It.IsAny<SQLiteTransaction>()))
             .Returns<int, IEnumerable<LedgerDetail>, SQLiteTransaction>((id, d, tx) => RunReplace(id, d, tx));
         ledgerMock.Setup(r => r.ReplaceDetailsAsync(It.IsAny<int>(), It.IsAny<IEnumerable<LedgerDetail>>()))
@@ -102,6 +111,8 @@ public sealed class LedgerDetailSaveServiceTests : IDisposable
             .Returns<Ledger, SQLiteTransaction>((l, tx) => RunUpdate(l, tx));
         ledgerMock.Setup(r => r.UpdateAsync(It.IsAny<Ledger>()))
             .Returns<Ledger>(l => RunUpdate(l, null));
+        ledgerMock.Setup(r => r.UpdateSummaryAsync(It.IsAny<int>(), It.IsAny<string>(), It.IsAny<SQLiteTransaction>()))
+            .Returns<int, string, SQLiteTransaction>((id, s, tx) => RunUpdateSummary(id, s, tx));
 
         async Task<int> RunAudit(OperationLog log, SQLiteTransaction? tx)
         {
@@ -251,7 +262,7 @@ public sealed class LedgerDetailSaveServiceTests : IDisposable
 
         // Assert
         result.Should().Be(LedgerDetailSaveResult.DetailsNotReplaced);
-        ledgerMock.Verify(r => r.UpdateAsync(It.IsAny<Ledger>(), It.IsAny<SQLiteTransaction>()), Times.Never);
+        ledgerMock.Verify(r => r.UpdateSummaryAsync(It.IsAny<int>(), It.IsAny<string>(), It.IsAny<SQLiteTransaction>()), Times.Never);
         await AssertUnchangedAsync(ledgerId, "置換を実際に書いたうえで false を返しても確定させない");
         (await CountAuditLogsAsync(ledgerId)).Should().Be(0);
     }
@@ -348,12 +359,51 @@ public sealed class LedgerDetailSaveServiceTests : IDisposable
 
         // Assert
         result.Should().Be(LedgerDetailSaveResult.Saved);
-        ledgerMock.Verify(r => r.UpdateAsync(It.IsAny<Ledger>(), It.IsAny<SQLiteTransaction>()), Times.Never,
+        ledgerMock.Verify(r => r.UpdateSummaryAsync(It.IsAny<int>(), It.IsAny<string>(), It.IsAny<SQLiteTransaction>()), Times.Never,
             "摘要が変わらないなら摘要の UPDATE は行わない");
         var saved = (await _realLedgerRepository.GetByIdAsync(ledgerId))!;
         saved.Details.Select(d => d.GroupId).OrderBy(g => g).Should().Equal(1, 2);
         (await CountAuditLogsAsync(ledgerId)).Should().Be(1,
             "明細のグループ分けは台帳の一部なので、摘要が変わらなくても監査ログに残す（Issue #2177）");
+    }
+
+    #endregion
+
+    #region Issue #2212 — 画面を開いている間に他 PC が直した列を巻き戻さない
+
+    /// <summary>
+    /// 他 PC がダイアログを開いた後に備考・同行者数を直す（共有モードの別 PC からの書き込みに相当）。
+    /// </summary>
+    private async Task EditNoteAndCompanionCountElsewhereAsync(int ledgerId)
+    {
+        using var lease = await _dbContext.LeaseConnectionAsync();
+        using var command = lease.Connection.CreateCommand();
+        command.CommandText = "UPDATE ledger SET note = '領収書あり', companion_count = 2 WHERE id = @id";
+        command.Parameters.AddWithValue("@id", ledgerId);
+        (await command.ExecuteNonQueryAsync()).Should().Be(1, "前提: 他 PC の書き込みが届いていること");
+    }
+
+    [Fact]
+    public async Task 摘要を変えて保存_開いた後に他PCが直した備考と同行者数を巻き戻さないこと()
+    {
+        // Arrange: ダイアログを開いた時点（備考なし・同行者 0）のスナップショットを作ってから、他 PC が直す
+        var ledgerId = await SeedLedgerAsync();
+        var (before, after, details) = await PrepareSplitAsync(ledgerId, "鉄道（博多～天神）、鉄道（天神～博多）");
+        after.Note.Should().BeNull("前提: 開いた時点の備考は空");
+        await EditNoteAndCompanionCountElsewhereAsync(ledgerId);
+        var (service, ledgerMock, _) = CreateService();
+
+        // Act
+        var result = await service.SaveAsync(before, after, details, summaryChanged: true);
+
+        // Assert — 「巻き戻さない」と「摘要は更新される」を対で表明する
+        result.Should().Be(LedgerDetailSaveResult.Saved);
+        var stored = (await _realLedgerRepository.GetByIdAsync(ledgerId))!;
+        stored.Note.Should().Be("領収書あり", "開いた時点の空の備考で上書きしない（Issue #2212）");
+        stored.CompanionCount.Should().Be(2, "開いた時点の同行者数 0 で上書きしない");
+        stored.Summary.Should().Be("鉄道（博多～天神）、鉄道（天神～博多）", "摘要は保存した値になる");
+        ledgerMock.Verify(r => r.UpdateAsync(It.IsAny<Ledger>(), It.IsAny<SQLiteTransaction>()), Times.Never);
+        ledgerMock.Verify(r => r.UpdateAsync(It.IsAny<Ledger>()), Times.Never);
     }
 
     #endregion

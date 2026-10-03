@@ -284,6 +284,60 @@ WHERE id = @id";
         }
 
         /// <inheritdoc/>
+        public async Task<bool> UpdateSummaryAsync(int ledgerId, string summary, SQLiteTransaction transaction)
+        {
+            if (summary == null)
+            {
+                throw new ArgumentNullException(nameof(summary));
+            }
+
+            if (transaction == null)
+            {
+                throw new ArgumentNullException(nameof(transaction));
+            }
+
+            using var command = transaction.Connection.CreateCommand();
+            command.Transaction = transaction;
+            command.CommandText = "UPDATE ledger SET summary = @summary WHERE id = @id";
+            command.Parameters.AddWithValue("@summary", summary);
+            command.Parameters.AddWithValue("@id", ledgerId);
+
+            // Issue #1753: 影響行数 0 は「行が存在しない」＝競合
+            var rows = await command.ExecuteNonQueryAsync().ConfigureAwait(false);
+            return rows > 0;
+        }
+
+        /// <inheritdoc/>
+        public async Task<bool> UpdateSummaryAndAmountsAsync(
+            int ledgerId, string summary, int income, int expense, int balance, SQLiteTransaction transaction)
+        {
+            if (summary == null)
+            {
+                throw new ArgumentNullException(nameof(summary));
+            }
+
+            if (transaction == null)
+            {
+                throw new ArgumentNullException(nameof(transaction));
+            }
+
+            using var command = transaction.Connection.CreateCommand();
+            command.Transaction = transaction;
+            command.CommandText = @"UPDATE ledger
+SET summary = @summary, income = @income, expense = @expense, balance = @balance
+WHERE id = @id";
+            command.Parameters.AddWithValue("@summary", summary);
+            command.Parameters.AddWithValue("@income", income);
+            command.Parameters.AddWithValue("@expense", expense);
+            command.Parameters.AddWithValue("@balance", balance);
+            command.Parameters.AddWithValue("@id", ledgerId);
+
+            // Issue #1753: 影響行数 0 は「行が存在しない」＝競合
+            var rows = await command.ExecuteNonQueryAsync().ConfigureAwait(false);
+            return rows > 0;
+        }
+
+        /// <inheritdoc/>
         public Task<bool> DeleteAsync(int id) => DeleteAsync(id, transaction: null);
 
         /// <inheritdoc/>

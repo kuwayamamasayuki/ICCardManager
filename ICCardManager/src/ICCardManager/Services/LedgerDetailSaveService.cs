@@ -141,8 +141,10 @@ namespace ICCardManager.Services
 
                     if (summaryChanged)
                     {
-                        // Issue #1753: UpdateAsync は影響行数 0 で false を返す（他 PC がこの履歴を統合・削除した）
-                        var updated = await _ledgerRepository.UpdateAsync(ledger, tx).ConfigureAwait(false);
+                        // Issue #2212: 摘要だけを SET する。ledger はダイアログを開いた時点のスナップショットなので、
+                        // 全列を SET する UpdateAsync を使うと、開いている間に他 PC が直した備考・同行者数を巻き戻す。
+                        // Issue #1753: 影響行数 0 で false を返す（他 PC がこの履歴を統合・削除した）
+                        var updated = await _ledgerRepository.UpdateSummaryAsync(ledger.Id, ledger.Summary, tx).ConfigureAwait(false);
                         if (!updated)
                         {
                             _logger.LogWarning(

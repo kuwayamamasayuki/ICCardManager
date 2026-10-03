@@ -487,7 +487,7 @@ public class LedgerDetailViewModelTests : IDisposable
                 await releaseReplace.Task;
                 return true;
             });
-        _ledgerRepoMock.Setup(r => r.UpdateAsync(It.IsAny<Ledger>(), It.IsAny<System.Data.SQLite.SQLiteTransaction>())).ReturnsAsync(true);
+        _ledgerRepoMock.Setup(r => r.UpdateSummaryAsync(It.IsAny<int>(), It.IsAny<string>(), It.IsAny<System.Data.SQLite.SQLiteTransaction>())).ReturnsAsync(true);
 
         var saveTask = _viewModel.SaveCommand.ExecuteAsync(null);
         await WaitForAsync(replaceEntered, "ReplaceDetailsAsync の開始");
@@ -532,7 +532,7 @@ public class LedgerDetailViewModelTests : IDisposable
         _ledgerRepoMock
             .Setup(r => r.ReplaceDetailsAsync(It.IsAny<int>(), It.IsAny<IEnumerable<LedgerDetail>>(), It.IsAny<System.Data.SQLite.SQLiteTransaction>()))
             .ReturnsAsync(true);
-        _ledgerRepoMock.Setup(r => r.UpdateAsync(It.IsAny<Ledger>(), It.IsAny<System.Data.SQLite.SQLiteTransaction>())).ReturnsAsync(false);
+        _ledgerRepoMock.Setup(r => r.UpdateSummaryAsync(It.IsAny<int>(), It.IsAny<string>(), It.IsAny<System.Data.SQLite.SQLiteTransaction>())).ReturnsAsync(false);
         var confirmCalls = 0;
 
         // Act
@@ -576,10 +576,10 @@ public class LedgerDetailViewModelTests : IDisposable
         var updatedSummaries = new List<string>();
         var updateAttempt = 0;
         _ledgerRepoMock
-            .Setup(r => r.UpdateAsync(It.IsAny<Ledger>(), It.IsAny<System.Data.SQLite.SQLiteTransaction>()))
-            .Returns<Ledger, System.Data.SQLite.SQLiteTransaction>((l, _) =>
+            .Setup(r => r.UpdateSummaryAsync(It.IsAny<int>(), It.IsAny<string>(), It.IsAny<System.Data.SQLite.SQLiteTransaction>()))
+            .Returns<int, string, System.Data.SQLite.SQLiteTransaction>((_, summary, _) =>
             {
-                updatedSummaries.Add(l.Summary);
+                updatedSummaries.Add(summary);
                 return ++updateAttempt == 1 && failByUpdateException
                     ? Task.FromException<bool>(new InvalidOperationException("injected"))
                     : Task.FromResult(true);
@@ -636,7 +636,7 @@ public class LedgerDetailViewModelTests : IDisposable
             .ReturnsAsync(true);
         var attempt = 0;
         _ledgerRepoMock
-            .Setup(r => r.UpdateAsync(It.IsAny<Ledger>(), It.IsAny<System.Data.SQLite.SQLiteTransaction>()))
+            .Setup(r => r.UpdateSummaryAsync(It.IsAny<int>(), It.IsAny<string>(), It.IsAny<System.Data.SQLite.SQLiteTransaction>()))
             .Returns(() => ++attempt == 1
                 ? Task.FromException<bool>(new InvalidOperationException("injected"))
                 : Task.FromResult(true));
@@ -692,8 +692,9 @@ public class LedgerDetailViewModelTests : IDisposable
 
         // Assert
         _viewModel.HasChanges.Should().BeFalse(_viewModel.StatusMessage);
-        _ledgerRepoMock.Verify(r => r.UpdateAsync(It.IsAny<Ledger>(), It.IsAny<System.Data.SQLite.SQLiteTransaction>()), Times.Never,
+        _ledgerRepoMock.Verify(r => r.UpdateSummaryAsync(It.IsAny<int>(), It.IsAny<string>(), It.IsAny<System.Data.SQLite.SQLiteTransaction>()), Times.Never,
             "前提: 摘要が変わらない保存であること（摘要の UPDATE を行わない）");
+        _ledgerRepoMock.Verify(r => r.UpdateAsync(It.IsAny<Ledger>(), It.IsAny<System.Data.SQLite.SQLiteTransaction>()), Times.Never);
         _operationLogs.Should().ContainSingle(l => l.Action == "UPDATE", "明細の保存は摘要が変わらなくても監査ログに残す");
     }
 
@@ -736,7 +737,7 @@ public class LedgerDetailViewModelTests : IDisposable
         _ledgerRepoMock
             .Setup(r => r.ReplaceDetailsAsync(It.IsAny<int>(), It.IsAny<IEnumerable<LedgerDetail>>(), It.IsAny<System.Data.SQLite.SQLiteTransaction>()))
             .ReturnsAsync(true);
-        _ledgerRepoMock.Setup(r => r.UpdateAsync(It.IsAny<Ledger>(), It.IsAny<System.Data.SQLite.SQLiteTransaction>())).ReturnsAsync(true);
+        _ledgerRepoMock.Setup(r => r.UpdateSummaryAsync(It.IsAny<int>(), It.IsAny<string>(), It.IsAny<System.Data.SQLite.SQLiteTransaction>())).ReturnsAsync(true);
 
         var notified = 0;
         bool? busyAtNotification = null;
@@ -861,10 +862,10 @@ public class LedgerDetailViewModelTests : IDisposable
             .Callback<int, IEnumerable<LedgerDetail>, System.Data.SQLite.SQLiteTransaction>((_, details, _) => savedDetails = details.ToList())
             .ReturnsAsync(true);
 
-        Ledger? savedLedger = null;
+        string? savedSummary = null;
         _ledgerRepoMock
-            .Setup(r => r.UpdateAsync(It.IsAny<Ledger>(), It.IsAny<System.Data.SQLite.SQLiteTransaction>()))
-            .Callback<Ledger, System.Data.SQLite.SQLiteTransaction>((l, _) => savedLedger = l)
+            .Setup(r => r.UpdateSummaryAsync(It.IsAny<int>(), It.IsAny<string>(), It.IsAny<System.Data.SQLite.SQLiteTransaction>()))
+            .Callback<int, string, System.Data.SQLite.SQLiteTransaction>((_, summary, _) => savedSummary = summary)
             .ReturnsAsync(true);
 
         await _viewModel.InitializeAsync(7);
@@ -878,8 +879,8 @@ public class LedgerDetailViewModelTests : IDisposable
         savedDetails!.Should().OnlyContain(
             d => d.GroupId == LedgerDetailViewModel.MergedGroupId,
             "画面で指定した単一グループが DB まで届くこと");
-        savedLedger.Should().NotBeNull();
-        savedLedger!.Summary.Should().Be(
+        savedSummary.Should().NotBeNull();
+        savedSummary.Should().Be(
             "鉄道（博多～大橋）",
             "明示グループの摘要は 1 区間へ畳まれること");
     }
@@ -914,7 +915,7 @@ public class LedgerDetailViewModelTests : IDisposable
             Id = 11,
             CardIdm = "0102030405060708",
             Date = sameDay,
-            // 保存で摘要が再生成される（＝UpdateAsync が呼ばれる）よう、生成結果と異なる値にしておく
+            // 保存で摘要が再生成される（＝UpdateSummaryAsync が呼ばれる）よう、生成結果と異なる値にしておく
             Summary = "鉄道",
             Details = new List<LedgerDetail>
             {
@@ -933,10 +934,10 @@ public class LedgerDetailViewModelTests : IDisposable
             .Callback<int, IEnumerable<LedgerDetail>, System.Data.SQLite.SQLiteTransaction>((_, details, _) => savedDetails = details.ToList())
             .ReturnsAsync(true);
 
-        Ledger? savedLedger = null;
+        string? savedSummary = null;
         _ledgerRepoMock
-            .Setup(r => r.UpdateAsync(It.IsAny<Ledger>(), It.IsAny<System.Data.SQLite.SQLiteTransaction>()))
-            .Callback<Ledger, System.Data.SQLite.SQLiteTransaction>((l, _) => savedLedger = l)
+            .Setup(r => r.UpdateSummaryAsync(It.IsAny<int>(), It.IsAny<string>(), It.IsAny<System.Data.SQLite.SQLiteTransaction>()))
+            .Callback<int, string, System.Data.SQLite.SQLiteTransaction>((_, summary, _) => savedSummary = summary)
             .ReturnsAsync(true);
 
         await _viewModel.InitializeAsync(11);
@@ -953,8 +954,8 @@ public class LedgerDetailViewModelTests : IDisposable
 
         // 対の表明: Reverse は DB 呼び出しにだけ適用し、摘要は時系列昇順のまま生成すること。
         // 両方を見ないと「摘要ごと逆順にした」実装でも緑になる。
-        savedLedger.Should().NotBeNull();
-        savedLedger!.Summary.Should().Be(
+        savedSummary.Should().NotBeNull();
+        savedSummary.Should().Be(
             "鉄道（博多～天神、薬院～大橋、姪浜～西新）",
             "摘要のブロック順は時系列昇順のままであること");
     }
@@ -1001,7 +1002,7 @@ public class LedgerDetailViewModelTests : IDisposable
             .Setup(r => r.ReplaceDetailsAsync(21, It.IsAny<IEnumerable<LedgerDetail>>(), It.IsAny<System.Data.SQLite.SQLiteTransaction>()))
             .ReturnsAsync(true);
         _ledgerRepoMock
-            .Setup(r => r.UpdateAsync(It.IsAny<Ledger>(), It.IsAny<System.Data.SQLite.SQLiteTransaction>()))
+            .Setup(r => r.UpdateSummaryAsync(It.IsAny<int>(), It.IsAny<string>(), It.IsAny<System.Data.SQLite.SQLiteTransaction>()))
             .ReturnsAsync(true);
 
         await _viewModel.InitializeAsync(21);

@@ -46,14 +46,48 @@ namespace ICCardManager.Data.Repositories
         Task<int> InsertAsync(Ledger ledger, SQLiteTransaction transaction);
 
         /// <summary>
-        /// 利用履歴を更新
+        /// 利用履歴を更新する（<b>全列</b>を SET する）。
         /// </summary>
+        /// <remarks>
+        /// 貸出者・日付・摘要・金額・氏名・備考・返却者・貸出/返却日時・貸出中フラグ・同行者数のすべてを、
+        /// 渡した <paramref name="ledger"/> の値で上書きする。<b>画面を開いた時点に読んだ Ledger の一部の列だけを
+        /// 変えて渡すと、その間に他の PC が直した列を黙って巻き戻す</b>（Issue #2212。#1726「SET 句はその経路で
+        /// 本当に編集する列に限る」）。摘要だけを変える経路は <see cref="UpdateSummaryAsync"/>、明細から摘要と金額を
+        /// 再計算する経路は <see cref="UpdateSummaryAndAmountsAsync"/> を使う。呼び出してよい経路は
+        /// <c>LedgerUpdateColumnConventionTests</c> が固定している。
+        /// </remarks>
         Task<bool> UpdateAsync(Ledger ledger);
 
         /// <summary>
         /// 利用履歴を更新（既存トランザクション参加版・Issue #1481）。
         /// </summary>
         Task<bool> UpdateAsync(Ledger ledger, SQLiteTransaction transaction);
+
+        /// <summary>
+        /// 摘要だけを更新する（Issue #2212）。
+        /// </summary>
+        /// <remarks>
+        /// 履歴詳細ダイアログの保存・バス停名の保存のように、画面を開いた時点の Ledger を持ち続けて摘要だけを
+        /// 変える経路のためにある。<see cref="UpdateAsync(Ledger, SQLiteTransaction)"/>（全列）を使うと、
+        /// 画面を開いている間に他の PC が直した備考・同行者数などを開いた時点の値へ巻き戻す。
+        /// 明細の置換と同じトランザクションで確定させるため、<paramref name="transaction"/> は必須。
+        /// </remarks>
+        /// <returns>更新できた場合 true。対象行が無い（削除・統合された競合、Issue #1753）場合 false</returns>
+        /// <exception cref="ArgumentNullException"><paramref name="summary"/> または <paramref name="transaction"/> が null のとき。</exception>
+        Task<bool> UpdateSummaryAsync(int ledgerId, string summary, SQLiteTransaction transaction);
+
+        /// <summary>
+        /// 明細から再計算した摘要と金額（受入・払出・残額）だけを更新する（Issue #2212）。
+        /// </summary>
+        /// <remarks>
+        /// 履歴の分割・明細 CSV の取込のように、明細を置き換えて親の履歴を明細から再計算する経路のためにある。
+        /// 貸出者・氏名・備考・同行者数などは明細から決まらないので書き戻さない（読み取りから書き込みまでの間に
+        /// 他の PC が直した値を巻き戻さない。#1726）。<paramref name="transaction"/> は必須。
+        /// </remarks>
+        /// <returns>更新できた場合 true。対象行が無い（削除・統合された競合、Issue #1753）場合 false</returns>
+        /// <exception cref="ArgumentNullException"><paramref name="summary"/> または <paramref name="transaction"/> が null のとき。</exception>
+        Task<bool> UpdateSummaryAndAmountsAsync(
+            int ledgerId, string summary, int income, int expense, int balance, SQLiteTransaction transaction);
 
         /// <summary>
         /// 利用履歴を削除

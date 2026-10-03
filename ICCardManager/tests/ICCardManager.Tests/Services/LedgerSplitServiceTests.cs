@@ -174,7 +174,9 @@ public class LedgerSplitServiceTests : IDisposable
             .ReturnsAsync(true);
 
         _ledgerRepositoryMock
-            .Setup(x => x.UpdateAsync(It.IsAny<Ledger>(), It.IsAny<SQLiteTransaction>()))
+            .Setup(x => x.UpdateSummaryAndAmountsAsync(
+                It.IsAny<int>(), It.IsAny<string>(), It.IsAny<int>(), It.IsAny<int>(), It.IsAny<int>(),
+                It.IsAny<SQLiteTransaction>()))
             .ReturnsAsync(true);
 
         _ledgerRepositoryMock
@@ -287,8 +289,18 @@ public class LedgerSplitServiceTests : IDisposable
             x => x.ReplaceDetailsAsync(1, It.IsAny<IEnumerable<LedgerDetail>>(), It.IsAny<SQLiteTransaction>()),
             Times.Once);
         _ledgerRepositoryMock.Verify(
-            x => x.UpdateAsync(It.Is<Ledger>(l => l.Id == 1), It.IsAny<SQLiteTransaction>()),
+            x => x.UpdateSummaryAndAmountsAsync(
+                1, It.IsAny<string>(), It.IsAny<int>(), It.IsAny<int>(), It.IsAny<int>(), It.IsAny<SQLiteTransaction>()),
             Times.Once);
+        // Issue #2212: 新メソッドは int が 3 つ並ぶので、受入・払出・残額の取り違えはコンパイラが検出しない。
+        // グループ1（博多→天神 260 円、残額 740 円）の値を具体値で表明する
+        _ledgerRepositoryMock.Verify(
+            x => x.UpdateSummaryAndAmountsAsync(
+                1, "鉄道（博多～天神）", 0, 260, 740, It.Is<SQLiteTransaction>(tx => tx != null)),
+            Times.Once);
+        _ledgerRepositoryMock.Verify(
+            x => x.UpdateAsync(It.IsAny<Ledger>(), It.IsAny<SQLiteTransaction>()), Times.Never);
+        _ledgerRepositoryMock.Verify(x => x.UpdateAsync(It.IsAny<Ledger>()), Times.Never);
 
         // 新しいLedgerが挿入されたことを検証
         _ledgerRepositoryMock.Verify(
@@ -323,7 +335,9 @@ public class LedgerSplitServiceTests : IDisposable
             .Setup(x => x.ReplaceDetailsAsync(It.IsAny<int>(), It.IsAny<IEnumerable<LedgerDetail>>(), It.IsAny<SQLiteTransaction>()))
             .ReturnsAsync(true);
         _ledgerRepositoryMock
-            .Setup(x => x.UpdateAsync(It.IsAny<Ledger>(), It.IsAny<SQLiteTransaction>()))
+            .Setup(x => x.UpdateSummaryAndAmountsAsync(
+                It.IsAny<int>(), It.IsAny<string>(), It.IsAny<int>(), It.IsAny<int>(), It.IsAny<int>(),
+                It.IsAny<SQLiteTransaction>()))
             .ReturnsAsync(true);
         _ledgerRepositoryMock
             .Setup(x => x.InsertAsync(It.IsAny<Ledger>(), It.IsAny<SQLiteTransaction>()))
@@ -923,7 +937,9 @@ public class LedgerSplitServiceTests : IDisposable
             .Setup(x => x.GetByIdAsync(1))
             .ReturnsAsync(originalLedger);
         _ledgerRepositoryMock
-            .Setup(x => x.UpdateAsync(It.IsAny<Ledger>(), It.IsAny<SQLiteTransaction>()))
+            .Setup(x => x.UpdateSummaryAndAmountsAsync(
+                It.IsAny<int>(), It.IsAny<string>(), It.IsAny<int>(), It.IsAny<int>(), It.IsAny<int>(),
+                It.IsAny<SQLiteTransaction>()))
             .ReturnsAsync(true);
 
         var insertCallCount = 0;
@@ -989,7 +1005,9 @@ public class LedgerSplitServiceTests : IDisposable
             .Setup(x => x.GetByIdAsync(1))
             .ReturnsAsync(originalLedger);
         _ledgerRepositoryMock
-            .Setup(x => x.UpdateAsync(It.IsAny<Ledger>(), It.IsAny<SQLiteTransaction>()))
+            .Setup(x => x.UpdateSummaryAndAmountsAsync(
+                It.IsAny<int>(), It.IsAny<string>(), It.IsAny<int>(), It.IsAny<int>(), It.IsAny<int>(),
+                It.IsAny<SQLiteTransaction>()))
             .ReturnsAsync(true);
         _ledgerRepositoryMock
             .Setup(x => x.InsertAsync(It.IsAny<Ledger>(), It.IsAny<SQLiteTransaction>()))
@@ -1034,7 +1052,7 @@ public class LedgerSplitServiceTests : IDisposable
     #region 競合検出 (Issue #1753)
 
     /// <summary>
-    /// Issue #1753: 分割対象が他 PC に削除されていた場合（UpdateAsync が 0 行＝false）、
+    /// Issue #1753: 分割対象が他 PC に削除されていた場合（UpdateSummaryAndAmountsAsync が 0 行＝false）、
     /// 分割を続行せず競合として失敗を返すこと。
     /// </summary>
     /// <remarks>
@@ -1056,7 +1074,9 @@ public class LedgerSplitServiceTests : IDisposable
 
         // 他 PC が分割対象を削除した状況: UPDATE が 1 行も一致しない
         _ledgerRepositoryMock
-            .Setup(x => x.UpdateAsync(It.IsAny<Ledger>(), It.IsAny<SQLiteTransaction>()))
+            .Setup(x => x.UpdateSummaryAndAmountsAsync(
+                It.IsAny<int>(), It.IsAny<string>(), It.IsAny<int>(), It.IsAny<int>(), It.IsAny<int>(),
+                It.IsAny<SQLiteTransaction>()))
             .ReturnsAsync(false);
 
         var details = new List<LedgerDetail>
