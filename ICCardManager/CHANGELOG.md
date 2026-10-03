@@ -3,6 +3,12 @@
 ### Unreleased
 
 **開発基盤**
+- Issue #2215 **推移的に配布されるライブラリのライセンスを一覧に載せ、ライセンス欄をパッケージの宣言と照合するようにした。Microsoft.Extensions.* のライセンスの誤記（Apache-2.0 → MIT）を直した**
+  - `THIRD_PARTY_LICENSES.md` とその整合テストは csproj の直接参照しか扱っていなかったが、インストーラーに同梱される配布物には直接参照が連れてくる推移的な依存（ClosedXML の DocumentFormat.OpenXml・SixLabors.Fonts、Microsoft.Extensions.* の Abstractions 系、System.* など 31 個）も入り、MIT・Apache-2.0 の表示の義務が掛かる
+  - §1a「推移的に配布されるライブラリ」を新設した。本体と DebugDataViewer のロックファイルの依存グラフから、ビルド時にのみ使う参照（`PrivateAssets="all"`）を除いた直接参照とプロジェクト参照の依存から辿れるものを導出し、テストで名前・版を照合する
+  - 全節のライセンス欄を、各パッケージの宣言（`.nuspec` のライセンス式）と照合するテストを追加した。§1 は Microsoft.Extensions.* 7 件を Apache-2.0 と書いていたが、8.0 系の宣言は MIT だった（Apache-2.0 は 3.x 系まで）。ライセンス式（SPDX）を持たない宣言（URL・ファイル。FelicaLib.DotNet・System.Data.SQLite.Core・FlaUI など 6 個）は名前・版ごとに宣言と記載を固定し、固定していないものは失敗させる。版を上げてライセンスが変わった場合（SixLabors.Fonts は 2.x から SPDX で書けない Six Labors Split License）も、式の食い違いか「式を持たない宣言」として検出される
+  - 開発者ガイド §5.7 のパッケージ更新の手順に、一覧の更新を加えた。07_テスト設計書 UT-135（No.8〜16）を同期した
+  - テスト: 単体 8,502 → 8,511（+9）・合計 8,617 → 8,626
 - Issue #2165（再レビュー） **上書きインストールで、配布物から外した DLL を既存のフォルダーから消すようにした。ライセンス一覧の開発ツールの節を実態に合わせた**
   - 独立サブエージェントによる再レビューで検出。インストーラーの `[Files]` はワイルドカードで追加・上書きするだけなので、#2165 で外した `Microsoft.Extensions.Hosting` ほか 10 個の DLL が、既存の PC へ上書きインストールするとアプリのフォルダー（と `Tools`）に残っていた。`installer/ICCardManager.iss` に `[InstallDelete]` を設けて消すようにした（動作には影響しないが、脆弱性スキャンや棚卸しで「外したはずの DLL」が検出されるのを防ぐ）
   - `THIRD_PARTY_LICENSES.md` §3 は見出し（開発ツール用ライブラリ）と中身（ビルド時のみのアナライザー）が食い違い、DebugDataViewer を「配布されない」と書いていた（実際はインストーラーで `Tools` に同梱される）。§3（ビルド時のみ）と §4（開発ツール）に分け、以降の節番号を繰り下げた
