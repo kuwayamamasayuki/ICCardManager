@@ -65,6 +65,31 @@ Name: "{commonappdata}\ICCardManager"; Permissions: users-full
 Name: "{commonappdata}\ICCardManager\backup"; Permissions: users-full
 Name: "{commonappdata}\ICCardManager\Logs"; Permissions: users-full
 
+[InstallDelete]
+; 配布物から外した DLL を、上書きインストール時に既存のフォルダーから消す（[Files] のワイルドカードは追加・上書きしかしない）。
+; Issue #2165 で未使用の Microsoft.Extensions.Hosting と、それだけが使っていた依存を外した。
+; ここに載せるのは「今は配布されない」DLL だけ（InstallerObsoleteAssemblyConventionTests がロックファイルと照合する）。
+Type: files; Name: "{app}\Microsoft.Extensions.Hosting.dll"
+Type: files; Name: "{app}\Microsoft.Extensions.Hosting.Abstractions.dll"
+Type: files; Name: "{app}\Microsoft.Extensions.Configuration.CommandLine.dll"
+Type: files; Name: "{app}\Microsoft.Extensions.Configuration.EnvironmentVariables.dll"
+Type: files; Name: "{app}\Microsoft.Extensions.Configuration.UserSecrets.dll"
+Type: files; Name: "{app}\Microsoft.Extensions.Diagnostics.dll"
+Type: files; Name: "{app}\Microsoft.Extensions.Diagnostics.Abstractions.dll"
+Type: files; Name: "{app}\Microsoft.Extensions.Logging.Console.dll"
+Type: files; Name: "{app}\Microsoft.Extensions.Logging.EventLog.dll"
+Type: files; Name: "{app}\Microsoft.Extensions.Logging.EventSource.dll"
+Type: files; Name: "{app}\Tools\Microsoft.Extensions.Hosting.dll"
+Type: files; Name: "{app}\Tools\Microsoft.Extensions.Hosting.Abstractions.dll"
+Type: files; Name: "{app}\Tools\Microsoft.Extensions.Configuration.CommandLine.dll"
+Type: files; Name: "{app}\Tools\Microsoft.Extensions.Configuration.EnvironmentVariables.dll"
+Type: files; Name: "{app}\Tools\Microsoft.Extensions.Configuration.UserSecrets.dll"
+Type: files; Name: "{app}\Tools\Microsoft.Extensions.Diagnostics.dll"
+Type: files; Name: "{app}\Tools\Microsoft.Extensions.Diagnostics.Abstractions.dll"
+Type: files; Name: "{app}\Tools\Microsoft.Extensions.Logging.Console.dll"
+Type: files; Name: "{app}\Tools\Microsoft.Extensions.Logging.EventLog.dll"
+Type: files; Name: "{app}\Tools\Microsoft.Extensions.Logging.EventSource.dll"
+
 [Files]
 ; メインアプリケーションと依存DLL（すべてのDLL/EXE/config/pdbを含める）
 Source: "..\publish\*.exe"; DestDir: "{app}"; Flags: ignoreversion

@@ -42,19 +42,21 @@
 
 UI テストは本体と同じ System.Data.SQLite.Core（§1）も使います。2 つのテストプロジェクトで共通するパッケージは同じ版にそろえています。
 
-## 3. 開発ツール用ライブラリ
+## 3. ビルド時にのみ使用するライブラリ
 
-以下のライブラリはデバッグ用ツール（DebugDataViewer）で使用され、配布されるアプリケーションには含まれません。
-
-アプリケーション本体と共通のライブラリ（System.Data.SQLite.Core、CommunityToolkit.Mvvm、FelicaLib.DotNet、Microsoft.Extensions.*）を使用しています。詳細は「1. アプリケーション本体の依存ライブラリ」を参照してください。
-
-以下はアプリケーション本体のビルド時にのみ使用され、配布されるアプリケーションには含まれません。
+以下はアプリケーション本体のビルド時にのみ使用され、配布されるアプリケーションには含まれません（csproj で `PrivateAssets="all"`）。
 
 | ライブラリ名 | バージョン | ライセンス | 用途 |
 |---|---|---|---|
 | [Microsoft.CodeAnalysis.NetAnalyzers](https://github.com/dotnet/roslyn-analyzers) | 8.0.0 | MIT | .NET アナライザー（CA ルール）によるビルド時の静的解析 |
 
-## 4. 音声素材
+## 4. 開発ツール（DebugDataViewer）の依存ライブラリ
+
+デバッグ用ツール（DebugDataViewer）は、インストーラーでアプリケーションのフォルダーの `Tools` に同梱され、スタートメニューの「デバッグツール」から起動できます（配布物に含まれます）。
+
+DebugDataViewer はアプリケーション本体と共通のライブラリ（System.Data.SQLite.Core、CommunityToolkit.Mvvm、FelicaLib.DotNet、Microsoft.Extensions.*）だけを、本体と同じ版で使用しています。ライセンスは「1. アプリケーション本体の依存ライブラリ」を参照してください。本体と異なるライブラリや版を使う場合は、この節に表を設けて記載します。
+
+## 5. 音声素材
 
 | 素材 | キャラクター | ライセンス・利用規約 | 用途 |
 |---|---|---|---|
@@ -65,7 +67,7 @@ UI テストは本体と同じ System.Data.SQLite.Core（§1）も使います�
 >
 > アプリケーション内では設定ダイアログに上記クレジットを表示しています。
 
-## 5. ライセンス種別の概要
+## 6. ライセンス種別の概要
 
 配布されるアプリケーション（§1）が使用しているライセンスはすべて**寛容型（permissive）ライセンス**であり、商用利用・再配布が許可されています。コピーレフト型ライセンス（GPL等）は含まれていません。テスト用ライブラリ（§2）の Xunit.SkippableFact は MS-PL（弱いコピーレフト）ですが、開発・テスト時にのみ使い、配布物には含まれません。
 
@@ -78,10 +80,11 @@ UI テストは本体と同じ System.Data.SQLite.Core（§1）も使います�
 | MS-PL | 弱いコピーレフト（OSI 承認） | 著作権・特許・商標の表示の保持。ソースコードは同じライセンスで、コンパイル済みの形は MS-PL に適合するライセンスで配布する。特許訴訟を起こすとライセンスが終了する（テスト用のみ・配布物に含まれない） |
 | Public Domain | パブリックドメイン | 制約なし |
 
-## 6. 更新履歴
+## 7. 更新履歴
 
 | 日付 | 内容 |
 |---|---|
+| 2026-10-03 | §3 の見出しと中身の食い違いを解消し、ビルド時のみ使用するライブラリ（§3）と開発ツール（DebugDataViewer）の依存ライブラリ（§4）に分けた。DebugDataViewer はインストーラーに同梱されるため、「配布されない」とした記述を改めた。以降の節番号を 1 つずつ繰り下げた |
 | 2026-10-02 | テスト用ライブラリ（§2）の版を csproj に同期し、Xunit.SkippableFact を追加。UI テストのテスト基盤パッケージを単体テストと同じ版へ更新。xunit.runner.visualstudio は 2.8.2 でライセンスが MIT から Apache-2.0 に変わった（Issue #2166） |
 | 2026-10-02 | 未使用の Microsoft.Extensions.Hosting を削除し、Microsoft.Extensions.Logging.Configuration / Options.ConfigurationExtensions を直接参照として追加。ClosedXML・CommunityToolkit.Mvvm の版を csproj に同期（Issue #2165） |
 | 2026-10-02 | ビルド時のみ使用する Microsoft.CodeAnalysis.NetAnalyzers を追加（Issue #2162） |
