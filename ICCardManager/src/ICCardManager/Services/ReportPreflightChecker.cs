@@ -1,3 +1,4 @@
+#nullable enable
 using System;
 using System.Collections.Generic;
 using System.Globalization;
@@ -191,7 +192,7 @@ namespace ICCardManager.Services
                         $"{ReportFileNameCollisions.DescribeCause(target, others)}、" +
                         $"別のカードの帳票と同じファイル（{fileName}）に書き込まれ、先に作った帳票を上書きします。" +
                         "このまま作成しても、このカードの帳票は作成しません。" +
-                        "カード管理画面で、管理番号を他のカードと重ならない番号（大文字と小文字の違いだけにしない）に変更してください。"
+                        "交通系ICカード管理画面で、管理番号を他のカードと重ならない番号（大文字と小文字の違いだけにしない）に変更してください。"
                 });
             }
         }

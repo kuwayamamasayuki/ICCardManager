@@ -1,3 +1,4 @@
+#nullable enable
 using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
@@ -135,7 +136,7 @@ namespace ICCardManager.ViewModels
         /// 未登録カード検出時にMainViewModelで履歴を読み取り、この値に設定する。
         /// カード登録後にImportHistoryForRegistrationAsyncで当月分の履歴をインポートする。
         /// </remarks>
-        private List<LedgerDetail> _preReadHistory;
+        private List<LedgerDetail>? _preReadHistory;
 
         /// <summary>
         /// カード登録モードの選択結果（Issue #510対応）
@@ -685,7 +686,7 @@ namespace ICCardManager.ViewModels
                             .ToList();
 
                         // Issue #1727 / #1763: 登録直後の台帳書き込みに失敗した場合の通知内容（成功時は null）
-                        RegistrationLedgerFailureMessage ledgerFailure = null;
+                        RegistrationLedgerFailureMessage? ledgerFailure = null;
 
                         if (filteredHistory != null && filteredHistory.Count > 0)
                         {
@@ -1437,7 +1438,7 @@ namespace ICCardManager.ViewModels
                 // Issue #1759: CancelEdit() は StatusMessage / IsStatusError をクリアするため、
                 // 完了・案内メッセージは必ず後処理のあとに設定する。
                 StatusMessage = "交通系ICカードの復元は記録済みですが、その後の画面の更新に失敗しました。" +
-                    "もう一度タッチせず、カード管理画面を開き直して一覧を確認してください。";
+                    "もう一度タッチせず、交通系ICカード管理画面を開き直して一覧を確認してください。";
                 IsStatusError = true;
             }
             catch (Exception ex)
@@ -1679,7 +1680,7 @@ namespace ICCardManager.ViewModels
         /// <param name="overrideDate">日付の上書き（Issue #596: 履歴がある場合、インポート開始日を使用）</param>
         /// <param name="overrideBalance">残高の上書き（Issue #596: 履歴がある場合、逆算した初期残高を使用）</param>
         /// <returns>組み立てた初期レコード。残額が取得できない場合や組み立てに失敗した場合は null</returns>
-        private async Task<Ledger> BuildInitialLedgerAsync(
+        private async Task<Ledger?> BuildInitialLedgerAsync(
             string cardIdm,
             Views.Dialogs.CardRegistrationModeResult modeResult,
             DateTime registeredAt,

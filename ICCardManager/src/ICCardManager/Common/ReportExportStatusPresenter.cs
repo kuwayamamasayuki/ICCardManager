@@ -74,7 +74,7 @@ namespace ICCardManager.Common
                             shortText: "ファイル名が重複",
                             accessibilityText:
                                 "出力状況を確認できません。他のカードと帳票のファイル名が同じになるため、" +
-                                "どちらのカードの帳票か分かりません。カード管理画面で管理番号を変更してください",
+                                "どちらのカードの帳票か分かりません。交通系ICカード管理画面で管理番号を変更してください",
                             brushKey: "MutedTextBrush");
                     }
 

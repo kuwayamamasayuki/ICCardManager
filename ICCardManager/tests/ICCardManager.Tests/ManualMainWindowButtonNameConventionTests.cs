@@ -40,13 +40,13 @@ namespace ICCardManager.Tests;
 /// </remarks>
 public class ManualMainWindowButtonNameConventionTests
 {
-    /// <summary>「<b>名前</b> ボタン」（後ろに「（<b>F3</b>）」「、<b>F3</b>」が付くことがある）。</summary>
+    /// <summary>「<b>名前</b> ボタン」（後ろに「（<b>F3</b>）」「、<b>F3</b>」「（F3）」「 (F3)」が付くことがある。太字の有無を問わない）。</summary>
     private static readonly Regex BoldButton = new(
-        @"\*\*(?<name>[^*\r\n]+)\*\*\s?ボタン(?:[（、]\*\*F(?<key>\d{1,2})\*\*)?", RegexOptions.Compiled);
+        @"\*\*(?<name>[^*\r\n]+)\*\*\s?ボタン(?:\s?[（(、]\s?(?:\*\*)?F(?<key>\d{1,2})(?:\*\*)?(?![\d]))?", RegexOptions.Compiled);
 
-    /// <summary>「「名前」ボタン」「「名前」「名前」ボタン」（後ろに「（F3）」が付くことがある）。</summary>
+    /// <summary>「「名前」ボタン」「「名前」「名前」ボタン」（後ろの F キーの書き方は太字の形と同じ）。</summary>
     private static readonly Regex QuotedButton = new(
-        @"(?<names>(?:「[^」\r\n]+」)+)ボタン(?:[（(]F(?<key>\d{1,2})[）)])?", RegexOptions.Compiled);
+        @"(?<names>(?:「[^」\r\n]+」)+)ボタン(?:\s?[（(、]\s?(?:\*\*)?F(?<key>\d{1,2})(?:\*\*)?(?![\d]))?", RegexOptions.Compiled);
 
     private static readonly Regex QuotedName = new(@"「(?<name>[^」\r\n]+)」", RegexOptions.Compiled);
 
@@ -54,8 +54,11 @@ public class ManualMainWindowButtonNameConventionTests
     private static readonly Regex NameWithKey = new(
         @"^(?<name>.+?)\s?[（(]F(?<key>\d{1,2})[）)]$", RegexOptions.Compiled);
 
-    /// <summary>F キーを添えない案内を照合する条件（直前の語）。</summary>
-    private static readonly Regex MainWindowPrefix = new(@"メイン画面の\s?$", RegexOptions.Compiled);
+    /// <summary>F キーを添えない案内を照合する条件（直前の語。「メイン画面の」「メイン画面で」等）。</summary>
+    private static readonly Regex MainWindowPrefix = new(@"メイン画面(?:の|で|から|にある)\s?$", RegexOptions.Compiled);
+
+    /// <summary>「交通系IC」の付かない「カード管理」（画面名の旧い呼び方）。</summary>
+    private static readonly Regex OldScreenName = new(@"(?<!交通系IC)カード管理", RegexOptions.Compiled);
 
     private static readonly Regex ButtonContent = new(
         @"<Button\b[^>]*?\bContent=""(?<content>[^""]+)""", RegexOptions.Compiled | RegexOptions.Singleline);
@@ -106,7 +109,43 @@ public class ManualMainWindowButtonNameConventionTests
 
         counts.Should().ContainKey("docs/manual/管理者マニュアル.md").WhoseValue.Should().BeGreaterThanOrEqualTo(20);
         counts.Should().ContainKey("docs/manual/ユーザーマニュアル.md").WhoseValue.Should().BeGreaterThanOrEqualTo(2);
+        counts.Should().ContainKey("docs/manual/かんたん導入ガイド.md").WhoseValue.Should().BeGreaterThanOrEqualTo(1);
         counts.Should().ContainKey("README.md").WhoseValue.Should().BeGreaterThanOrEqualTo(1);
+    }
+
+    [Fact]
+    public void 本番ソースの文言が交通系ICカードの管理画面を画面の表記で呼んでいること()
+    {
+        // マニュアルの呼び方（交通系ICカード管理画面）と、画面に出る案内の呼び方を食い違わせない。
+        // 事前チェックの警告など、マニュアルが画面の文言をそのまま説明している箇所がある。
+        // コメントは走査しない（以前の呼び方を由来として書いたコメントが違反になる極性の反転を避ける）
+        var violations = new List<string>();
+
+        foreach (var file in ProductionSourceFiles.CSharp)
+        {
+            violations.AddRange(FindOldScreenNames(file.CommentsRemovedPreservingLines)
+                .Select(v => $"{file.RelativePath}{v}"));
+        }
+
+        foreach (var file in ProductionSourceFiles.Xaml)
+        {
+            violations.AddRange(FindOldScreenNames(XamlElementInspection.StripXmlComments(file.Text))
+                .Select(v => $"{file.RelativePath}{v}"));
+        }
+
+        violations.Should().BeEmpty(
+            "交通系ICカードの管理画面は、ウィンドウのタイトル・メイン画面のボタンと同じ「交通系ICカード管理」で呼ぶ（Issue #2226）。\n" +
+            string.Join("\n", violations));
+    }
+
+    [Theory]
+    [InlineData("\"カード管理画面で管理番号を変更してください\"", 1)]
+    [InlineData("\"先にカード管理で登録してください。\"", 1)]
+    [InlineData("\"交通系ICカード管理画面で管理番号を変更してください\"", 0)]
+    [InlineData("<Window Title=\"交通系ICカード管理\">", 0)]
+    public void 旧い画面名の検出ロジックが既知のサンプルで期待どおり動くこと(string text, int expectedViolations)
+    {
+        FindOldScreenNames(text).Should().HaveCount(expectedViolations);
     }
 
     [Theory]
@@ -134,6 +173,14 @@ public class ManualMainWindowButtonNameConventionTests
     [InlineData("**ダッシュボード (F7)** ボタン", 1)]
     [InlineData("**ダッシュボード（F7）** ボタン", 1)]
     [InlineData("「設定 (F6)」ボタン", 1)]
+    // F キーの書き方の揺れ（太字の有無・括弧の全角半角）
+    [InlineData("メイン画面の **職員管理** ボタン（F3）を押します。", 1)]
+    [InlineData("「職員管理」ボタン（**F3**）を押します。", 1)]
+    [InlineData("**職員管理** ボタン (**F2**) を押します。", 0)]
+    [InlineData("**職員管理** ボタン (F3) を押します。", 1)]
+    // 「メイン画面の」以外の助詞
+    [InlineData("メイン画面で **カード管理** ボタンを押します。", 1)]
+    [InlineData("メイン画面から「カード管理」ボタンを押します。", 1)]
     // 同じ行の 2 件はそれぞれ報告する
     [InlineData("メイン画面の **カード管理** ボタン（**F3**）と、メイン画面の **データ管理** ボタン", 2)]
     // ボタン以外の案内、F キーを添えないメイン画面以外のボタンは対象外
@@ -158,6 +205,12 @@ public class ManualMainWindowButtonNameConventionTests
 
         FindViolations(text, buttons).Should().HaveCount(expectedViolations);
     }
+
+    private static IReadOnlyList<string> FindOldScreenNames(string text)
+        => OldScreenName.Matches(text)
+            .Cast<Match>()
+            .Select(m => $"({LineOf(text, m.Index)}): 「{text.Substring(m.Index, Math.Min(20, text.Length - m.Index))}」")
+            .ToList();
 
     private static IReadOnlyList<string> FindViolations(string text, MainWindowButtons buttons)
         => ExtractMentions(text, buttons)
