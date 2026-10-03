@@ -62,7 +62,7 @@ public class OperationLoggerTests : IDisposable
 
     #endregion
 
-    #region 新API: context なし → GuiOperator フォールバック
+    #region context なし → GuiOperator フォールバック
 
     [Fact]
     public async Task LogLedgerUpdateAsync_WithoutContext_UsesGuiIdentifier()
@@ -71,7 +71,7 @@ public class OperationLoggerTests : IDisposable
         var beforeLedger = CreateTestLedger(summary: "変更前");
         var afterLedger = CreateTestLedger(summary: "変更後");
 
-        // Act: 新 API（operator 引数なし）
+        // Act: 操作者を引数で渡さない（context から解決する）
         await _logger.LogLedgerUpdateAsync(beforeLedger, afterLedger);
 
         // Assert
@@ -101,7 +101,7 @@ public class OperationLoggerTests : IDisposable
 
     #endregion
 
-    #region 新API: context あり → context 値を使用
+    #region context あり → context 値を使用
 
     [Fact]
     public async Task LogLedgerDeleteAsync_WithContext_RecordsContextOperator()
@@ -178,6 +178,8 @@ public class OperationLoggerTests : IDisposable
     /// OperationLogger から操作者の引数を消しても、1 つ上の層（統合・分割・行編集）に「受け取って捨てる」引数が残っていた。
     /// 読んだ人は「渡した IDm が記録される」と受け取り、記録を正しくしようとこの引数を使い始めると、#1265 が塞いだ
     /// 「引数経由のなりすまし」の形が復活する。リポジトリの検索条件（<c>GetByOperatorAsync</c>）は Data 層なので対象外。
+    /// 判定は名前の前方一致（<c>operator…</c>）に留まり、<c>authIdm</c> のような別名には効かない。上位の層には <c>cardIdm</c> /
+    /// <c>staffIdm</c>（貸出者などの業務データ）という正当な引数があるため、<c>OperationLogger</c> のような許可形にはできない。
     /// 識別子は文字列でしか渡せないので string 型の引数を見る（<c>ICurrentOperatorContext</c> の注入は操作者の正しい情報源なので対象外）。
     /// </remarks>
     [Fact]
@@ -230,7 +232,7 @@ public class OperationLoggerTests : IDisposable
 
     #endregion
 
-    #region 各テーブルのログ記録 (新 API)
+    #region 各テーブルのログ記録
 
     [Fact]
     public async Task LogStaffUpdateAsync_RecordsBeforeAndAfter()

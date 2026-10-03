@@ -37,7 +37,6 @@ public class LedgerRowEditViewModelTests : IDisposable
     private readonly Mock<IDialogService> _dialogServiceMock;
 
     private const string TestCardIdm = "0102030405060708";
-    private const string TestOperatorIdm = "FFFF000000000001";
 
     private readonly Staff _staffA = new Staff { StaffIdm = "AAAA000000000001", Name = "田中太郎" };
     private readonly Staff _staffB = new Staff { StaffIdm = "BBBB000000000002", Name = "山田花子" };
@@ -1184,8 +1183,6 @@ public class LedgerRowEditViewModelTests : IDisposable
         _ledgerRepoMock.Setup(r => r.InsertAsync(It.IsAny<Ledger>(), It.IsAny<SQLiteTransaction>()))
             .ReturnsAsync(100);
 
-        _staffRepoMock.Setup(r => r.GetByIdmAsync(TestOperatorIdm, It.IsAny<bool>()))
-            .ReturnsAsync(new Staff { StaffIdm = TestOperatorIdm, Name = "操作者" });
 
         // Act
         await _viewModel.SaveCommand.ExecuteAsync(null);
@@ -1216,8 +1213,6 @@ public class LedgerRowEditViewModelTests : IDisposable
         _ledgerRepoMock.Setup(r => r.GetByIdAsync(1)).ReturnsAsync(ledger);
         _ledgerRepoMock.Setup(r => r.UpdateAsync(It.IsAny<Ledger>(), It.IsAny<SQLiteTransaction>())).ReturnsAsync(true);
 
-        _staffRepoMock.Setup(r => r.GetByIdmAsync(TestOperatorIdm, It.IsAny<bool>()))
-            .ReturnsAsync(new Staff { StaffIdm = TestOperatorIdm, Name = "操作者" });
 
         var dto = new LedgerDto
         {
@@ -1297,8 +1292,6 @@ public class LedgerRowEditViewModelTests : IDisposable
         };
         _ledgerRepoMock.Setup(r => r.GetByIdAsync(1)).ReturnsAsync(ledger);
         _ledgerRepoMock.Setup(r => r.UpdateAsync(It.IsAny<Ledger>(), It.IsAny<SQLiteTransaction>())).ReturnsAsync(true);
-        _staffRepoMock.Setup(r => r.GetByIdmAsync(TestOperatorIdm, It.IsAny<bool>()))
-            .ReturnsAsync(new Staff { StaffIdm = TestOperatorIdm, Name = "操作者" });
         var dto = new LedgerDto
         {
             Id = 1,
@@ -1326,8 +1319,6 @@ public class LedgerRowEditViewModelTests : IDisposable
     {
         var allLedgers = CreateTestLedgers();
         _ledgerRepoMock.Setup(r => r.InsertAsync(It.IsAny<Ledger>(), It.IsAny<SQLiteTransaction>())).ReturnsAsync(99);
-        _staffRepoMock.Setup(r => r.GetByIdmAsync(TestOperatorIdm, It.IsAny<bool>()))
-            .ReturnsAsync(new Staff { StaffIdm = TestOperatorIdm, Name = "操作者" });
         await _viewModel.InitializeForAddAsync(TestCardIdm, allLedgers);
         _viewModel.Summary = "鉄道（天神～博多）";
         _viewModel.Expense = 210;
@@ -1359,8 +1350,6 @@ public class LedgerRowEditViewModelTests : IDisposable
         };
         _ledgerRepoMock.Setup(r => r.GetByIdAsync(1)).ReturnsAsync(ledger);
         _ledgerRepoMock.Setup(r => r.UpdateAsync(It.IsAny<Ledger>(), It.IsAny<SQLiteTransaction>())).ReturnsAsync(true);
-        _staffRepoMock.Setup(r => r.GetByIdmAsync(TestOperatorIdm, It.IsAny<bool>()))
-            .ReturnsAsync(new Staff { StaffIdm = TestOperatorIdm, Name = "操作者" });
         OperationLog? recorded = null;
         _operationLogRepoMock
             .Setup(r => r.InsertAsync(It.IsAny<OperationLog>(), It.IsAny<SQLiteTransaction>()))
@@ -1937,8 +1926,6 @@ public class LedgerRowEditViewModelTests : IDisposable
     {
         _ledgerRepoMock.Setup(r => r.GetByIdAsync(ledger.Id)).ReturnsAsync(ledger);
         _ledgerRepoMock.Setup(r => r.UpdateAsync(It.IsAny<Ledger>(), It.IsAny<SQLiteTransaction>())).ReturnsAsync(true);
-        _staffRepoMock.Setup(r => r.GetByIdmAsync(TestOperatorIdm, It.IsAny<bool>()))
-            .ReturnsAsync(new Staff { StaffIdm = TestOperatorIdm, Name = "操作者" });
 
         return new LedgerDto
         {
