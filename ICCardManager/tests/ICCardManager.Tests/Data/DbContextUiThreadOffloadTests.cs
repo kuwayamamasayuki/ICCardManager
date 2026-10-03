@@ -136,19 +136,21 @@ public sealed class DbContextUiThreadOffloadTests : IDisposable
 
     #region UI スレッドから移ること
 
+    /// <summary>UI スレッドが OS に中断された状態を模す時間（入口の先の処理が終わるのに十分な長さ）。</summary>
+    private static readonly TimeSpan UiThreadPreemption = TimeSpan.FromMilliseconds(200);
+
     [Fact]
     public async Task LeaseConnectionAsync_UIスレッドから呼ぶと_リポジトリのSQLがUIスレッドの外で走ること()
     {
         // Arrange
         var repository = new LedgerRepository(_dbContext);
         ClearRecorded();
-        var uiThreadId = 0;
 
-        // Act: UI スレッド（の模擬）から、ViewModel と同じくリポジトリを直接 await する
-        await SimulatedUiThread.InvokeAsync(async () =>
+        // Act: UI スレッドから、ViewModel と同じくリポジトリを直接 await する
+        var uiThreadId = await RunOnDispatcherAsync(async ui =>
         {
-            uiThreadId = Thread.CurrentThread.ManagedThreadId;
-            return await repository.GetByIdAsync(1);
+            await repository.GetByIdAsync(1);
+            return ui;
         });
 
         // Assert
@@ -159,31 +161,187 @@ public sealed class DbContextUiThreadOffloadTests : IDisposable
             + DescribeRecorded());
     }
 
+    /// <summary>
+    /// UI スレッドから取ったリースの <c>Task</c> は、UI スレッドが中断されて入口の先の処理が先に終わっても、
+    /// UI スレッドの今の処理の中では完了しない。完了済みの <c>Task</c> を <c>await</c> すると続き（リポジトリの SQL）が
+    /// UI スレッドで同期的に走るため（全件実行の負荷の下で間欠的に起きていた競合）。
+    /// </summary>
     [Fact]
-    public async Task BeginTransactionAsync_UIスレッドから呼ぶと_トランザクション内のSQLがUIスレッドの外で走ること()
+    public async Task LeaseConnectionAsync_UIスレッドが中断されても_awaitの続きはUIスレッドの外で走ること()
     {
         // Arrange
         ClearRecorded();
-        var uiThreadId = 0;
 
-        // Act: UI スレッド（の模擬）からトランザクションを開き、リポジトリと同じ形で書き込む
-        await SimulatedUiThread.InvokeAsync(async () =>
+        // Act: リポジトリと同じく ConfigureAwait(false) で待つ。await の前に UI スレッドを止め、入口の先の処理に先に終わらせる
+        var (uiThreadId, completedBeforeAwait) = await RunOnDispatcherAsync(async ui =>
         {
-            uiThreadId = Thread.CurrentThread.ManagedThreadId;
-            using var scope = await _dbContext.BeginTransactionAsync();
-            using var command = scope.Transaction.Connection.CreateCommand();
-            command.Transaction = scope.Transaction;
-            command.CommandText = "INSERT OR REPLACE INTO settings (key, value) VALUES ('issue_2202_probe', 'x')";
-            await command.ExecuteNonQueryAsync().ConfigureAwait(false);
-            scope.Commit();
-            return true;
+            var leaseTask = _dbContext.LeaseConnectionAsync();
+            Thread.Sleep(UiThreadPreemption);
+            var completed = leaseTask.IsCompleted;
+            using var lease = await leaseTask.ConfigureAwait(false);
+            using var command = lease.Connection.CreateCommand();
+            command.CommandText = "SELECT 'issue_2202_lease_probe'";
+            command.ExecuteScalar();
+            return (ui, completed);
         });
 
         // Assert
+        completedBeforeAwait.Should().BeFalse("UI スレッドの今の処理の中では、リースの Task は完了しない（完了は UI スレッドへ Post してから伝える）");
+        var probe = _executedStatements.Single(s => s.Statement.Contains("issue_2202_lease_probe"));
+        probe.ThreadId.Should().NotBe(uiThreadId, "await の続き（リポジトリの SQL）はスレッドプールで走る");
+    }
+
+    [Fact]
+    public async Task BeginTransactionAsync_UIスレッドが中断されても_awaitの続きのトランザクション内のSQLはUIスレッドの外で走ること()
+    {
+        // Arrange
+        ClearRecorded();
+
+        // Act: サービスと同じく ConfigureAwait(false) で待つ。await の前に UI スレッドを止める
+        var (uiThreadId, completedBeforeAwait) = await RunOnDispatcherAsync(async ui =>
+        {
+            var scopeTask = _dbContext.BeginTransactionAsync();
+            Thread.Sleep(UiThreadPreemption);
+            var completed = scopeTask.IsCompleted;
+            using var scope = await scopeTask.ConfigureAwait(false);
+            using var command = scope.Transaction.Connection.CreateCommand();
+            command.Transaction = scope.Transaction;
+            command.CommandText = "INSERT OR REPLACE INTO settings (key, value) VALUES ('issue_2202_probe', 'x')";
+            command.ExecuteNonQuery();
+            scope.Commit();
+            return (ui, completed);
+        });
+
+        // Assert
+        completedBeforeAwait.Should().BeFalse("UI スレッドの今の処理の中では、スコープの Task は完了しない");
         var statements = _executedStatements.Where(s => s.Statement.Contains("issue_2202_probe")).ToList();
         statements.Should().ContainSingle("前提: トランザクション内の書き込みが実行されていること（空振り防止）");
         statements.Single().ThreadId.Should().NotBe(uiThreadId,
-            "トランザクションの開始（セマフォの待機・BEGIN）の入口で UI スレッドから移る（Issue #2202）");
+            "トランザクションの開始の入口で UI スレッドから移り、await の続きもスレッドプールで走る（Issue #2202）");
+    }
+
+    /// <summary>
+    /// UI スレッドから DB の処理を同期的に待つ場面（ウィンドウの終了時）では、本体をスレッドプールで始めれば止まらず、
+    /// SQL も UI スレッドの外で走る（<see cref="UiThreadBlockingWait"/>）。
+    /// </summary>
+    [Fact]
+    public async Task UiThreadBlockingWait_UIスレッドから同期的に待っても止まらずSQLはUIスレッドの外で走ること()
+    {
+        // Arrange
+        ClearRecorded();
+
+        // Act
+        var (uiThreadId, completed) = await RunOnDispatcherAsync(ui =>
+        {
+            var done = UiThreadBlockingWait.RunOnThreadPoolAndWait(async () =>
+            {
+                using var scope = await _dbContext.BeginTransactionAsync();
+                await ExecuteInTransactionAsync(scope, "INSERT OR REPLACE INTO settings (key, value) VALUES ('issue_2202_blocking', 'x')");
+                scope.Commit();
+            }, CompletionTimeout);
+            return Task.FromResult((ui, done));
+        });
+
+        // Assert
+        completed.Should().BeTrue("本体をスレッドプールで始めれば、入口は UI からの呼び出しと判定せず完了を UI へ Post しないので、UI で待っても止まらない");
+        _executedStatements.Single(s => s.Statement.Contains("issue_2202_blocking")).ThreadId.Should().NotBe(uiThreadId);
+    }
+
+    /// <summary>
+    /// UI から始めた DB の処理の完了の通知が保留中（UI スレッドへ Post されたまま配られていない）でも、
+    /// <see cref="UiThreadBlockingWait"/> は待つ間に Dispatcher のメッセージを処理して通知を配るので、その処理が持つ
+    /// トランザクションのセマフォが返り、本体が進む。UI スレッドを止めて待つ形だと、本体はセマフォを待って上限まで止まる
+    /// （起動直後に終了すると終了時の保存が 10 秒止まる形。全件の UI テストで間欠的に見つかった）。
+    /// </summary>
+    [Fact]
+    public async Task UiThreadBlockingWait_UIから始めたトランザクションの完了の通知が保留中でも_本体が進むこと()
+    {
+        var completed = await RunOnDispatcherAsync(async _ =>
+        {
+            // UI から始めたトランザクション（サービスと同じ形: 待ってからスコープを破棄する）
+            var pending = HoldTransactionAsync();
+
+            // UI スレッドを止め、スレッドプール側がセマフォを取って完了の通知を Post し終えるまで待つ（通知はまだ配られない）
+            Thread.Sleep(UiThreadPreemption);
+
+            var done = UiThreadBlockingWait.RunOnThreadPoolAndWait(async () =>
+            {
+                using var scope = await _dbContext.BeginTransactionAsync();
+                scope.Commit();
+            }, TimeSpan.FromSeconds(5));
+
+            await pending;
+            return done;
+        });
+
+        completed.Should().BeTrue("待つ間に Post された通知が配られ、先のトランザクションがセマフォを返すので、本体が上限より前に終わる");
+    }
+
+    private async Task HoldTransactionAsync()
+    {
+        using var scope = await _dbContext.BeginTransactionAsync().ConfigureAwait(false);
+        scope.Commit();
+    }
+
+    /// <summary>
+    /// 対の表明: UI スレッドから呼んだ入口の <c>Task</c> を UI スレッドで同期的に待つと、完了の通知（UI へ Post される）が
+    /// 処理されないので終わらない。終了時の保存を <c>async void</c> の <c>await</c> にも同期的な待ちにもできず、
+    /// <see cref="UiThreadBlockingWait"/> が要る理由を固定する。
+    /// </summary>
+    [Fact]
+    public async Task BeginTransactionAsync_UIスレッドで同期的に待つと_完了の通知が処理されず時間内に終わらないこと()
+    {
+        var completedWhileBlocking = await RunOnDispatcherAsync(async _ =>
+        {
+            var scopeTask = _dbContext.BeginTransactionAsync();
+            var completed = scopeTask.Wait(BlockedProbe);
+
+            // UI スレッドを返すと Post された通知が処理されて完了する。取ったゲート・セマフォを返す
+            using (await scopeTask)
+            {
+            }
+
+            return completed;
+        });
+
+        completedWhileBlocking.Should().BeFalse("UI スレッドが同期的に待つ間、Post された完了の通知は処理されない");
+    }
+
+    /// <summary>
+    /// キャンセル済みのトークンで UI スレッドから呼ぶと、例外を同期的に投げずにキャンセル済みの <c>Task</c> を返し、
+    /// 元のトークンを保つ（完了の通知を後ろへ回しても、キャンセルの情報を落とさない）。
+    /// </summary>
+    [Fact]
+    public async Task LeaseConnectionAsync_キャンセル済みのトークンでUIスレッドから呼ぶと_元のトークンを保ってキャンセルされること()
+    {
+        using var cts = new CancellationTokenSource();
+        cts.Cancel();
+
+        var (threwSynchronously, canceledToken) = await RunOnDispatcherAsync(async _ =>
+        {
+            Task<ConnectionLease> leaseTask;
+            try
+            {
+                leaseTask = _dbContext.LeaseConnectionAsync(cts.Token);
+            }
+            catch (OperationCanceledException)
+            {
+                return (true, CancellationToken.None);
+            }
+
+            try
+            {
+                using var lease = await leaseTask;
+                return (false, CancellationToken.None);
+            }
+            catch (OperationCanceledException ex)
+            {
+                return (false, ex.CancellationToken);
+            }
+        });
+
+        threwSynchronously.Should().BeFalse("キャンセル済みでも、例外を同期的に投げずにキャンセル済みの Task を返す");
+        canceledToken.Should().Be(cts.Token, "キャンセルの元のトークンを保つ");
     }
 
     /// <summary>
