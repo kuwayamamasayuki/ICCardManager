@@ -829,8 +829,9 @@ namespace ICCardManager.Data
                     }
                     catch (Exception)
                     {
-                        // Post できなければ（Dispatcher が止まっている等）、その場で伝える。伝えないと呼び出し元が永久に待ち、
-                        // 取ったゲート・リースも返らない
+                        // Post が例外を投げたら、その場で伝える（伝えないと呼び出し元が永久に待ち、取ったゲート・リースも返らない）。
+                        // WPF の Post（BeginInvoke）は Dispatcher の終了後も例外を投げず、操作を中止扱いにするだけなので、
+                        // 終了後に Post した通知はここを通らずに失われる（プロセスの終了と同時なので実害は無い）
                         TransferCompletion(finished, completion);
                     }
                 },

@@ -206,6 +206,12 @@ namespace ICCardManager.Views
         /// 後ろに並ぶ）。終了ボタンの経路（<c>Application.Shutdown</c>）では <c>Closing</c> を取り消せないので、取り消して待つ形も使えない。
         /// 位置は UI スレッドで読み取り、保存はスレッドプールで始めて上限付きで待つ（<see cref="UiThreadBlockingWait"/>）。
         /// #2202 以前も、終了時の保存は UI スレッドの上で同期的に走り切っていた。
+        /// <para>
+        /// 限界: 閉じる時点で、UI から始めた DB の処理の完了通知がまだ配られていない（UI スレッドへ Post された通知を処理する前に
+        /// 閉じた）と、その処理が持つゲート・セマフォ・キャッシュのキーのロックが返らず、保存はそれを待って上限に達し、保存されずに
+        /// 終わる。✕・Alt+F4・終了ボタンは確認の MessageBox の間にメッセージを処理するので通常は起きず、確認を挟まない OS の
+        /// サインアウトの短い時間帯に限られる。位置が保存されないだけで、台帳のデータには影響しない。
+        /// </para>
         /// </remarks>
         private void MainWindow_Closing(object sender, System.ComponentModel.CancelEventArgs e)
         {
@@ -214,22 +220,18 @@ namespace ICCardManager.Views
                 var position = CaptureWindowPosition();
                 var completed = UiThreadBlockingWait.RunOnThreadPoolAndWait(
                     () => SaveWindowPositionAsync(position), WindowPositionSaveTimeout);
-#if DEBUG
                 if (!completed)
                 {
-                    System.Diagnostics.Debug.WriteLine("[MainWindow] ウィンドウ位置の保存が時間内に終わらなかったため、待たずに終了します");
+                    // Release でも痕跡を残す（終了を止めないため、待たずに終了する）
+                    ErrorDialogHelper.LogException(
+                        new TimeoutException($"終了時のウィンドウ位置の保存が {WindowPositionSaveTimeout.TotalSeconds:0} 秒以内に終わらなかったため、待たずに終了しました。"),
+                        "終了時のウィンドウ位置の保存");
                 }
-#else
-                _ = completed;
-#endif
             }
             catch (Exception ex)
             {
-                _ = ex; // 警告抑制（DEBUGビルドでのみ使用）
-                // 終了時のエラーは警告のみ（アプリ終了を妨げない）
-#if DEBUG
-                System.Diagnostics.Debug.WriteLine($"[MainWindow] 終了時エラー: {ex.Message}");
-#endif
+                // 終了時のエラーはログのみ（アプリ終了を妨げない）
+                ErrorDialogHelper.LogException(ex, "終了時のウィンドウ位置の保存");
             }
         }
 
@@ -290,10 +292,8 @@ namespace ICCardManager.Views
             }
             catch (Exception ex)
             {
-                _ = ex; // 警告抑制（DEBUGビルドでのみ使用）
-#if DEBUG
-                System.Diagnostics.Debug.WriteLine($"[MainWindow] ウィンドウ位置の保存に失敗: {ex.Message}");
-#endif
+                // Release でも痕跡を残す（終了時の保存の失敗は画面に出さない）
+                ErrorDialogHelper.LogException(ex, "終了時のウィンドウ位置の保存");
             }
         }
 
