@@ -108,6 +108,7 @@
   - UI スレッドから呼ばれたときは、完了の通知を UI スレッドの同期コンテキストへ `Post` してから `RunContinuationsAsynchronously` の `TaskCompletionSource` で伝えるようにした（`CompleteAfterCurrentUiTurn`）。呼び出し元が `await` する時点では必ず未完了になり、続きはスレッドプールで走る
   - 単体テストを、同期コンテキストを持たない「UI スレッドの模擬」から本物の WPF Dispatcher を回すスレッドへ移し、`await` の前に UI スレッドを止めて（OS に中断された状態を模す）競合を確定的に突く形にした。完了の通知を後ろへ回す処理を外す変異で 2 件が確定的に赤になることを確かめた
   - 05_クラス設計書 §5.5b・07_テスト設計書 UT-136・`.claude/rules/async-configureawait.md` を同期
+  - テスト: 単体 8,434 → 8,435（+1）・合計 8,548 → 8,549
 - Issue #2202 **DB がほかの接続にロックされていると、DB を読み書きする画面の操作でアプリ全体が固まる形を、DbContext の入口でまとめて是正した**
   - ViewModel が UI スレッドからリポジトリを `await` すると、DB の処理（SQLite のロック待ちを含む）が UI スレッドの上で同期的に走り、ロック待ち（busy_timeout。共有モードで最大 15 秒・ローカル 5 秒、加えて ADO 層の再試行）の間、画面の描画もカードのタッチも止まっていた。#2197 で設定の保存だけを `Task.Run` で直したが、同じ形が ViewModel 16 クラス・約 60 か所に残っていた
   - 全経路が通る 2 つの入口（`DbContext.LeaseConnectionAsync` / `BeginTransactionAsync`）で、UI スレッドから呼ばれたときだけスレッドプールへ移るようにした（`Common/ThreadPoolSwitch`）。移った後の続きは Data 層の `ConfigureAwait(false)` によりスレッドプールで走り、ViewModel の `await` の後だけが UI スレッドへ戻る。UI スレッド以外からの呼び出しでは移らない。`await Task.Run(() => { })` の形は、完了済みなら続きが UI スレッドで同期的に走るので使わない
