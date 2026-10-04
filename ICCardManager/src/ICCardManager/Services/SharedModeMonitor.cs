@@ -1,5 +1,7 @@
+#nullable enable
 using System;
 using System.Threading.Tasks;
+using ICCardManager.Common;
 using ICCardManager.Infrastructure.Timing;
 
 namespace ICCardManager.Services
@@ -17,8 +19,8 @@ namespace ICCardManager.Services
         private readonly ITimerFactory _timerFactory;
         private readonly ISystemClock _clock;
 
-        private ITimer _healthCheckTimer;
-        private ITimer _syncDisplayTimer;
+        private ITimer? _healthCheckTimer;
+        private ITimer? _syncDisplayTimer;
         private DateTime? _lastRefreshTime;
         private bool _isHealthCheckRunning;
         private bool _disposed;
@@ -40,17 +42,17 @@ namespace ICCardManager.Services
         /// <summary>
         /// DB接続チェック結果のイベント
         /// </summary>
-        public event EventHandler<DatabaseHealthEventArgs> HealthCheckCompleted;
+        public event EventHandler<DatabaseHealthEventArgs>? HealthCheckCompleted;
 
         /// <summary>
         /// 同期表示テキストが更新されたときのイベント
         /// </summary>
-        public event EventHandler<SyncDisplayEventArgs> SyncDisplayUpdated;
+        public event EventHandler<SyncDisplayEventArgs>? SyncDisplayUpdated;
 
         /// <summary>
         /// DB接続状態が遷移したときのイベント（Issue #1470）。
         /// </summary>
-        public event EventHandler<SharedDbConnectionStateChangedEventArgs> ConnectionStateChanged;
+        public event EventHandler<SharedDbConnectionStateChangedEventArgs>? ConnectionStateChanged;
 
         /// <summary>
         /// 現在のDB接続状態（Issue #1470）。
@@ -159,9 +161,19 @@ namespace ICCardManager.Services
         /// <summary>
         /// DB接続の疎通確認をバックグラウンドで実行する
         /// </summary>
+        /// <remarks>
+        /// Issue #2232: 疎通確認は共有フォルダーが応答しない間、上限（<c>DbContext.ConnectionCheckTimeout</c>）まで
+        /// 呼び出しスレッドを同期的に塞ぐ。<c>Task.Run</c>（スレッドプール）で起動すると、切断が続く限り
+        /// 15 秒ごとにプールのスレッドを 1 本塞ぎ続け、プールが詰まっているとヘルスチェック自体の開始が遅れて
+        /// 切断警告と「再接続中」の表示も遅れる。呼び出しは 15 秒ごとのヘルスチェックと、切断警告のクリックによる
+        /// 手動再接続（<c>MainViewModel.RetryDatabaseConnectionAsync</c>。実行中フラグを見ない）だけで、
+        /// 実際の確認は <c>DbContext.CheckConnection</c> が進行中の 1 本に限り、後から来た呼び出しはその結果を上限まで待つ。
+        /// 待つスレッドは呼び出しごとに上限（最大 10 秒）で終わるので、呼ぶたびにスレッドを作る専用スレッドでよい
+        /// （service-conventions.md「ブロックし得る同期処理を Task.Run で起動して待たない」）。
+        /// </remarks>
         public async Task<bool> CheckConnectionAsync()
         {
-            return await Task.Run(() => _databaseInfo.CheckConnection()).ConfigureAwait(false);
+            return await DedicatedThread.Run(() => _databaseInfo.CheckConnection()).ConfigureAwait(false);
         }
 
         /// <summary>
@@ -248,13 +260,13 @@ namespace ICCardManager.Services
             ConnectionStateChanged?.Invoke(this, new SharedDbConnectionStateChangedEventArgs(oldState, newState));
         }
 
-        private async void OnHealthCheckTick(object sender, EventArgs e)
+        private async void OnHealthCheckTick(object? sender, EventArgs e)
         {
             // async void は例外が伝播しないため、排他制御ロジックは ExecuteHealthCheckAsync に集約
             await ExecuteHealthCheckAsync().ConfigureAwait(false);
         }
 
-        private void OnSyncDisplayTick(object sender, EventArgs e)
+        private void OnSyncDisplayTick(object? sender, EventArgs e)
         {
             UpdateSyncDisplayText();
         }
