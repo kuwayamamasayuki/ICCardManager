@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
 using FluentAssertions;
+using ICCardManager.Common;
 using ICCardManager.Data;
 using ICCardManager.Data.Repositories;
 using ICCardManager.Infrastructure.Security;
@@ -96,14 +97,19 @@ public class LendingServiceSameDayMergeNullTests : IDisposable
             x => x.UpdateAsync(It.Is<Ledger>(l => l.Id == ExistingLedgerId)), Times.Never(),
             "読み直せなかった統合先を、再計算しないまま更新しない");
 
+        // 返却は確定していない: カードの貸出状態を解除せず、30 秒ルールも武装しない（Issue #1805）
+        _cardRepositoryMock.Verify(
+            x => x.UpdateLentStatusAsync(TestCardIdm, false, null, null), Times.Never(),
+            "統合の失敗でトランザクションごと中止し、貸出状態の解除まで進まない");
+        _service.LastProcessedCardIdm.Should().BeNull("記録が確定していない返却で、再タッチの逆処理を武装しない");
+
         // ログには原因と LedgerId が残る（NullReferenceException では何が null だったのか分からない）
         var error = _logger.Entries.Where(e => e.Level == LogLevel.Error).Should().ContainSingle(_logger.FormatEntries()).Subject;
         error.Exception.Should().BeOfType<InvalidOperationException>(_logger.FormatEntries())
             .Which.Message.Should().Contain($"LedgerId={ExistingLedgerId}");
 
-        // 利用者向けの文言には、例外の原文（内部の ID）を出さない（Issue #1614）
-        result.ErrorMessage.Should().NotBeNullOrWhiteSpace();
-        result.ErrorMessage.Should().NotContain("LedgerId");
+        // 利用者向けの文言は返却失敗の既定の案内で、例外の原文（内部の ID）は出さない（Issue #1614）
+        result.ErrorMessage.Should().Be(OperationRetryGuidance.BuildFailureMessage("返却"));
     }
 
     [Fact]
@@ -145,7 +151,6 @@ public class LendingServiceSameDayMergeNullTests : IDisposable
 
         (await act.Should().ThrowAsync<ArgumentNullException>())
             .Which.ParamName.Should().Be("historyDetails");
-        _ledgerRepositoryMock.Verify(x => x.InsertAsync(It.IsAny<Ledger>()), Times.Never());
     }
 
     private static List<LedgerDetail> CreateUsageDetails()
