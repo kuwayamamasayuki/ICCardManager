@@ -118,14 +118,14 @@ public sealed class LendingServiceReturnLoggingTests : IDisposable
         returnResult.CreatedLedgers.Should().BeEmpty("利用履歴が無いため台帳行は作られない");
 
         // Issue #1819: LogDebug は本番のログファイルに出ないため、切り分けに必要な値を
-        // Information 1 行に集約する（受け取った履歴件数・導入日以降の抽出件数・重複チェック省略）
+        // Information 1 行に集約する（受け取った履歴件数・下限以降の抽出件数・重複チェック省略）
         _loggerMock.Verify(
             x => x.Log(
                 LogLevel.Information,
                 It.IsAny<EventId>(),
                 It.Is<It.IsAnyType>((v, t) => v.ToString().Contains("台帳行は作成されませんでした")
                                               && v.ToString().Contains("受け取った履歴件数=0")
-                                              && v.ToString().Contains("導入日以降の抽出件数=0")),
+                                              && v.ToString().Contains("下限以降の抽出件数=0")),
                 It.IsAny<Exception>(),
                 It.IsAny<Func<It.IsAnyType, Exception, string>>()),
             Times.Once,

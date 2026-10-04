@@ -1775,12 +1775,23 @@ ORDER BY ledger_id, use_date ASC, is_charge DESC, is_point_redemption DESC, id D
             using var command = connection.CreateCommand();
             // ledger と ledger_detail を JOIN して、指定カードの指定日以降の履歴詳細を取得
             // Issue #2237: 台帳行の日付だけで絞ると、日付をまたいで統合した台帳行（古い日付の行が新しい利用日の明細を持つ）の
-            // 明細を読まず、その利用を返却時に二重に記録する。明細の利用日でも拾う（従来の集合はそのまま含む）
+            // 明細を読まず、その利用を返却時に二重に記録する。明細の利用日でも拾う（従来の集合はそのまま含む）。
+            // 2 つの条件は別のテーブルの列なので OR で書くと idx_ledger_card_date の date の範囲を使えず、
+            // そのカードの全台帳行を走査する。台帳行の日付で分けた UNION ALL にし、どちらの枝も
+            // idx_ledger_card_date の範囲（card_idm の等値 ＋ date の範囲）で台帳行を引いてから
+            // idx_detail_ledger で明細を引く（#1834 / #1996「WHERE で列を関数に包まない」と同じ探索キーの考え方）。
+            // 2 つ目の枝は日付をまたぐ統合の明細だけを拾うためのもので、ledger_detail.use_date に索引は無いので
+            // 古い台帳行の明細を読んでから利用日で絞る。結果は集合（HashSet）に入れるので重複は問題にならない
             // Issue #326: 重複チェック用のキー（use_date + balance + is_charge）を取得
             command.CommandText = @"SELECT d.use_date, d.balance, d.is_charge
-FROM ledger_detail d
-INNER JOIN ledger l ON d.ledger_id = l.id
-WHERE l.card_idm = @cardIdm AND (l.date >= @fromDate OR d.use_date >= @fromDate)";
+FROM ledger l
+INNER JOIN ledger_detail d ON d.ledger_id = l.id
+WHERE l.card_idm = @cardIdm AND l.date >= @fromDate
+UNION ALL
+SELECT d.use_date, d.balance, d.is_charge
+FROM ledger l
+INNER JOIN ledger_detail d ON d.ledger_id = l.id
+WHERE l.card_idm = @cardIdm AND l.date < @fromDate AND d.use_date >= @fromDate";
 
             command.Parameters.AddWithValue("@cardIdm", cardIdm);
             command.Parameters.AddWithValue("@fromDate", SqliteDateTimeFormat.ToDayStartText(fromDate));
@@ -2356,6 +2367,9 @@ ORDER BY date ASC, id ASC";
             using var command = connection.CreateCommand();
             // Issue #2237: 導入行の判定は SQL に書かず Ledger.IsInitialRecordSummary の 1 か所へ寄せる（#2046 と同じ）。
             // 日付の降順に流し、導入行でない最初の行で読み取りを打ち切る（＝導入行を除いた MAX(date)）
+            // 台帳行は idx_ledger_card_date（card_idm の等値）で引き、明細の有無は idx_detail_ledger で確かめる。
+            // 該当する行が無いカード（明細なしの行を持たない通常のカード）では、そのカードの台帳行をすべて読む
+            // （読むのは日付と摘要の 2 列で、カード 1 枚分。返却のたびに 1 回）
             command.CommandText = @"SELECT l.date, l.summary FROM ledger l
 WHERE l.card_idm = @cardIdm AND l.is_lent_record = 0
   AND NOT EXISTS (SELECT 1 FROM ledger_detail d WHERE d.ledger_id = l.id)

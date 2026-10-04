@@ -918,17 +918,10 @@ namespace ICCardManager.Services
         /// </para>
         /// </remarks>
         /// <param name="detailList">カードから読み取った履歴</param>
-        /// <param name="lentRecord">貸出レコード（導入行が無いときの下限の基準）</param>
-        /// <param name="now">現在時刻（貸出時刻が無いときの基準）</param>
-        /// <param name="introductionDate">導入行の日付（<see cref="Data.Repositories.ILedgerQueryService.GetPurchaseDateAsync"/>）。無ければ null</param>
-        /// <param name="latestLedgerDateWithoutDetails">
-        /// 明細を持たない台帳行の最新日（<see cref="Data.Repositories.ILedgerQueryService.GetLatestLedgerDateWithoutDetailsAsync"/>）。無ければ null
-        /// </param>
-        internal static List<LedgerDetail> FilterUsageToRecordOnReturn(
-            List<LedgerDetail> detailList, Ledger lentRecord, DateTime now,
-            DateTime? introductionDate, DateTime? latestLedgerDateWithoutDetails)
+        /// <param name="lowerBound">下限（<see cref="ResolveUsageLowerBound"/> の結果。この日付以降を記録する）</param>
+        internal static List<LedgerDetail> FilterUsageToRecordOnReturn(List<LedgerDetail> detailList, DateTime lowerBound)
         {
-            var filterStartDate = ResolveUsageLowerBound(lentRecord, now, introductionDate, latestLedgerDateWithoutDetails);
+            var filterStartDate = lowerBound.Date;
             return detailList
                 .Where(d => d.UseDate == null || d.UseDate.Value.Date >= filterStartDate)
                 .ToList();
@@ -952,6 +945,9 @@ namespace ICCardManager.Services
         /// 手で追加した行・明細なしで CSV から取り込んだ行は照合のキー（利用日＋残高）を持たないため、
         /// その利用がカードに残っていると照合で除けず、二重に記録する（旧実装の 7 日の下限で漏れた利用を
         /// 手で補った行が典型）。同じ日の他の利用も記録済みとみなす（手入力の行がその日をまとめて記録していることがある）。
+        /// ただし<b>この下限は貸出日を超えない</b>。手入力の行が貸出当日（朝の利用を補った）や未来の日付（入力の誤り）だと、
+        /// 翌日以降へ寄せると今回の貸出中の利用をすべて捨ててしまう。貸出日当日の利用は旧実装と同じく取り込む
+        /// （当日の手入力の行と同じ利用は二重になり得るが、貸出中の利用を失うより害が小さい）。
         /// </para>
         /// <para>
         /// 貸出日には寄せない。旧実装（貸出日の 7 日前）は、7 日より前の未記録の利用を捨てる一方で、
@@ -969,9 +965,17 @@ namespace ICCardManager.Services
         /// （履歴の読み取りは登録の直前にも行うため、通常は起きない。04_機能設計書 §2.4.1）。
         /// </para>
         /// </remarks>
+        /// <param name="lentRecord">貸出レコード（貸出日の基準）</param>
+        /// <param name="now">現在時刻（貸出時刻が無いときの基準）</param>
+        /// <param name="introductionDate">導入行の日付（<see cref="Data.Repositories.ILedgerQueryService.GetPurchaseDateAsync"/>）。無ければ null</param>
+        /// <param name="latestLedgerDateWithoutDetails">
+        /// 明細を持たない台帳行の最新日（<see cref="Data.Repositories.ILedgerQueryService.GetLatestLedgerDateWithoutDetailsAsync"/>）。無ければ null
+        /// </param>
         internal static DateTime ResolveUsageLowerBound(
             Ledger lentRecord, DateTime now, DateTime? introductionDate, DateTime? latestLedgerDateWithoutDetails)
         {
+            var lentDate = (lentRecord.LentAt ?? now.AddDays(-1)).Date;
+
             DateTime lowerBound;
             if (introductionDate.HasValue)
             {
@@ -979,13 +983,17 @@ namespace ICCardManager.Services
             }
             else
             {
-                var lentAt = lentRecord.LentAt ?? now.AddDays(-1);
-                lowerBound = lentAt.Date.AddDays(-FallbackLookbackDaysWithoutIntroduction);
+                lowerBound = lentDate.AddDays(-FallbackLookbackDaysWithoutIntroduction);
             }
 
             if (latestLedgerDateWithoutDetails.HasValue)
             {
                 var afterRowWithoutDetails = latestLedgerDateWithoutDetails.Value.Date.AddDays(1);
+                if (afterRowWithoutDetails > lentDate)
+                {
+                    afterRowWithoutDetails = lentDate;
+                }
+
                 if (afterRowWithoutDetails > lowerBound)
                 {
                     lowerBound = afterRowWithoutDetails;
@@ -1144,14 +1152,14 @@ namespace ICCardManager.Services
                 var introductionDate = await _ledgerRepository.GetPurchaseDateAsync(cardIdm).ConfigureAwait(false);
                 // 明細を持たない行（手で追加した行など）は照合で除けないので、その最新日以前は記録しない
                 var latestLedgerDateWithoutDetails = await _ledgerRepository.GetLatestLedgerDateWithoutDetailsAsync(cardIdm).ConfigureAwait(false);
-                var usageToRecord = FilterUsageToRecordOnReturn(
-                    detailList, lentRecord, now, introductionDate, latestLedgerDateWithoutDetails);
+                var lowerBound = ResolveUsageLowerBound(lentRecord, now, introductionDate, latestLedgerDateWithoutDetails);
+                var usageToRecord = FilterUsageToRecordOnReturn(detailList, lowerBound);
 
                 var lentAt = lentRecord.LentAt ?? now.AddDays(-1);
                 _logger.LogDebug("LendingService: 貸出時刻={LentAt}, 導入日={IntroductionDate}, 明細なしの最新日={LatestWithoutDetails}, フィルタ開始日={FilterStart}, 抽出後の履歴件数={Count}",
                     SqliteDateTimeFormat.ToText(lentAt), SqliteDateTimeFormat.ToDateText(introductionDate),
                     SqliteDateTimeFormat.ToDateText(latestLedgerDateWithoutDetails),
-                    SqliteDateTimeFormat.ToDateText(ResolveUsageLowerBound(lentRecord, now, introductionDate, latestLedgerDateWithoutDetails)),
+                    SqliteDateTimeFormat.ToDateText(lowerBound),
                     usageToRecord.Count);
 
                 // 履歴データの詳細をログ出力
@@ -1182,13 +1190,13 @@ namespace ICCardManager.Services
                 result.Success = true;
 
                 // Issue #1819: 返却は記録されたのに台帳行が 1 行も作られなかったことを本番ログへ残す。
-                // 内訳（重複除外・導入日による抽出）は LogDebug で本番に出ないため、
+                // 内訳（重複除外・下限による抽出）は LogDebug で本番に出ないため、
                 // 「返却したのに履歴が増えない」という問い合わせの切り分けに必要な値をここへ集約する。
                 if (result.CreatedLedgers.Count == 0)
                 {
                     _logger.LogInformation(
                         "LendingService: 返却を記録しましたが台帳行は作成されませんでした" +
-                        "（CardIdm={CardIdm}, 受け取った履歴件数={ReceivedCount}, 導入日以降の抽出件数={FilteredCount}, 重複チェック省略={SkipDuplicateCheck}）",
+                        "（CardIdm={CardIdm}, 受け取った履歴件数={ReceivedCount}, 下限以降の抽出件数={FilteredCount}, 重複チェック省略={SkipDuplicateCheck}）",
                         IdmMasker.Mask(cardIdm), detailList.Count, usageToRecord.Count, skipDuplicateCheck);
                 }
 

@@ -274,6 +274,26 @@ public sealed class LendingServiceReturnUsageLowerBoundTests : IDisposable
             "明細を持たない行より後の利用は記録する（対の表明）");
     }
 
+    [Theory]
+    [InlineData(2026, 9, 20)]  // 貸出当日の朝の利用を手入力で補った
+    [InlineData(2027, 3, 1)]   // 日付を誤って未来で入力した
+    public async Task ReturnAsync_明細を持たない行が貸出当日や未来の日付でも_貸出後の利用は記録すること(int year, int month, int day)
+    {
+        // 対の表明: 明細なしの行による下限は貸出日を超えない。翌日以降へ寄せると、今回の貸出中の利用をすべて捨ててしまう
+        await InsertIntroductionAsync(new DateTime(2026, 9, 1), balance: 5000);
+        await InsertLedgerWithoutDetailsAsync(new DateTime(year, month, day), balanceAfter: 4790);
+        await LendAsync();
+
+        var result = await _service.ReturnAsync(TestStaffIdm, TestCardIdm, new List<LedgerDetail>
+        {
+            Usage(new DateTime(2026, 9, 20), balanceAfter: 4580),
+        });
+
+        result.Success.Should().BeTrue(_logger.FormatEntries());
+        result.CreatedLedgers.Should().ContainSingle(l => l.Date.Date == new DateTime(2026, 9, 20) && l.Expense == 210,
+            "貸出日の利用は、明細なしの行の日付にかかわらず記録する");
+    }
+
     [Fact]
     public async Task ReturnAsync_日付をまたいで統合した行の明細は_照合で除いて二重に記録しないこと()
     {
