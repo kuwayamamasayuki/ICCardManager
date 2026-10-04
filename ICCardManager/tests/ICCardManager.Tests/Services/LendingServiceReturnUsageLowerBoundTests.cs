@@ -221,14 +221,15 @@ public sealed class LendingServiceReturnUsageLowerBoundTests : IDisposable
         {
             Usage(new DateTime(2026, 9, 20), balanceAfter: 4370),
             Usage(new DateTime(2026, 9, 8), balanceAfter: 4580),
-            Usage(new DateTime(2026, 9, 5), balanceAfter: 4790),
+            new() { UseDate = new DateTime(2026, 9, 6), Amount = 1000, Balance = 4790, IsCharge = true },  // 数えない
+            Usage(new DateTime(2026, 9, 5), balanceAfter: 3790),
         });
 
         var entry = _logger.Entries
             .Where(e => e.Level == LogLevel.Information && e.Message.Contains("貸出日より前の利用"))
             .Should().ContainSingle(_logger.FormatEntries()).Subject;
         entry.Message.Should().Contain("貸出日=2026-09-20")
-            .And.Contain("該当する台帳行=2件", "9/5 と 9/8 の 2 日分")
+            .And.Contain("該当する台帳行=2件", "9/5 と 9/8 の利用の 2 行。9/6 のチャージ行は返却者の利用ではないので数えない")
             .And.Contain("最も古い利用日=2026-09-05")
             .And.NotContain(TestCardIdm, "カード IDm はログへ生のまま残さない（IdmMasker.Mask）");
     }

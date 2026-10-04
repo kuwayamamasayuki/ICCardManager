@@ -131,6 +131,7 @@ namespace ICCardManager.Data.Repositories
         /// 導入行（<see cref="Models.Ledger.IsInitialRecordSummary"/>）と貸出中レコードは除く。
         /// 手で追加した行・明細なしで CSV から取り込んだ行が該当する。これらは既存明細との照合（Issue #326）の
         /// キーを持たないため、返却時はこの日付より後の履歴だけを記録する（照合できない記録済みの利用を二重に記録しない）。
+        /// ただし返却時の下限は貸出日を超えない（<see cref="Services.LendingService.ResolveUsageLowerBound"/>）。
         /// 該当する行が無ければ null。
         /// </remarks>
         Task<DateTime?> GetLatestLedgerDateWithoutDetailsAsync(string cardIdm);

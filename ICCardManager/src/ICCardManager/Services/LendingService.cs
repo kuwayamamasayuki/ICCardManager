@@ -1004,10 +1004,11 @@ namespace ICCardManager.Services
         }
 
         /// <summary>
-        /// 返却で記録した台帳行のうち、貸出日より前の利用を Information で残す（Issue #2237）。
+        /// 返却で記録した台帳行のうち、貸出日より前の利用（払出のある行）を Information で残す（Issue #2237）。
         /// </summary>
         /// <remarks>
         /// 該当する行が無い（貸出後の利用だけを記録した）通常の返却では何も出さない。
+        /// チャージ・ポイント還元の行は数えない（利用者の名前で記録されないので、「返却者の利用として記録した」に当たらない）。
         /// 貸出時刻が無い貸出レコードでは「貸出日より前」を決められないので出さない。
         /// IDm はマスク済みの値を受け取る（生の IDm をログ用のヘルパーへ渡さない。Issue #1852）。
         /// </remarks>
@@ -1020,7 +1021,7 @@ namespace ICCardManager.Services
 
             var lentDate = lentAt.Value.Date;
             var beforeLending = createdLedgers
-                .Where(l => !l.IsLentRecord && l.Date.Date < lentDate)
+                .Where(l => !l.IsLentRecord && l.Expense > 0 && l.Date.Date < lentDate)
                 .ToList();
             if (beforeLending.Count == 0)
             {
@@ -1151,6 +1152,7 @@ namespace ICCardManager.Services
                 // 重複チェックは CreateUsageLedgersAsync 内の既存履歴照合（Issue #326）で行う
                 var introductionDate = await _ledgerRepository.GetPurchaseDateAsync(cardIdm).ConfigureAwait(false);
                 // 明細を持たない行（手で追加した行など）は照合で除けないので、その最新日以前は記録しない
+                // （ただし貸出日を超えない。ResolveUsageLowerBound）
                 var latestLedgerDateWithoutDetails = await _ledgerRepository.GetLatestLedgerDateWithoutDetailsAsync(cardIdm).ConfigureAwait(false);
                 var lowerBound = ResolveUsageLowerBound(lentRecord, now, introductionDate, latestLedgerDateWithoutDetails);
                 var usageToRecord = FilterUsageToRecordOnReturn(detailList, lowerBound);
