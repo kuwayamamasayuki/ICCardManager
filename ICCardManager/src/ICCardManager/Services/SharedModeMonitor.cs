@@ -168,7 +168,7 @@ namespace ICCardManager.Services
         /// 切断警告と「再接続中」の表示も遅れる。呼び出しは 15 秒ごとのヘルスチェックと、切断警告のクリックによる
         /// 手動再接続（<c>MainViewModel.RetryDatabaseConnectionAsync</c>。実行中フラグを見ない）だけで、
         /// 実際の確認は <c>DbContext.CheckConnection</c> が進行中の 1 本に限り、後から来た呼び出しはその結果を上限まで待つ。
-        /// 待つスレッドの数は呼び出しの頻度で決まり少ないので、呼ぶたびにスレッドを作る専用スレッドでよい
+        /// 待つスレッドは呼び出しごとに上限（最大 10 秒）で終わるので、呼ぶたびにスレッドを作る専用スレッドでよい
         /// （service-conventions.md「ブロックし得る同期処理を Task.Run で起動して待たない」）。
         /// </remarks>
         public async Task<bool> CheckConnectionAsync()
