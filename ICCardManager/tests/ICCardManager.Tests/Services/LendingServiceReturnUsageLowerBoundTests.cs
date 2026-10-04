@@ -250,20 +250,129 @@ public sealed class LendingServiceReturnUsageLowerBoundTests : IDisposable
             "通常の返却では出さない（正常運用でのログ肥大化を防ぐ）");
     }
 
+    [Fact]
+    public async Task ReturnAsync_明細を持たない行で補った利用は_カードに残っていても二重に記録しないこと()
+    {
+        // Arrange: 旧実装の 7 日の下限で漏れた 9/5 の利用を、職員が履歴の「追加」で手入力していた（明細なし）
+        await InsertIntroductionAsync(new DateTime(2026, 9, 1), balance: 5000);
+        await InsertLedgerWithoutDetailsAsync(new DateTime(2026, 9, 5), balanceAfter: 4790);
+        await LendAsync();
+
+        // Act: カードには 9/5 の利用が残ったまま
+        var result = await _service.ReturnAsync(TestStaffIdm, TestCardIdm, new List<LedgerDetail>
+        {
+            Usage(new DateTime(2026, 9, 20), balanceAfter: 4580),
+            Usage(new DateTime(2026, 9, 5), balanceAfter: 4790),
+        });
+
+        // Assert
+        result.Success.Should().BeTrue(_logger.FormatEntries());
+        var usageLedgers = await GetUsageLedgersAsync();
+        usageLedgers.Count(l => l.Date.Date == new DateTime(2026, 9, 5)).Should().Be(1,
+            "明細を持たない行は照合（#326）で除けないので、その日以前の履歴は記録しない");
+        usageLedgers.Should().ContainSingle(l => l.Date.Date == new DateTime(2026, 9, 20),
+            "明細を持たない行より後の利用は記録する（対の表明）");
+    }
+
+    [Fact]
+    public async Task ReturnAsync_日付をまたいで統合した行の明細は_照合で除いて二重に記録しないこと()
+    {
+        // Arrange: 9/3 の台帳行に 9/3 と 9/6 の明細が統合されている（統合は日付をまたいで行える）。
+        // カードの履歴は 9/6 以降しか残っていないので、照合の起点は 9/6 になる
+        await InsertIntroductionAsync(new DateTime(2026, 9, 1), balance: 5000);
+        var mergedId = await _ledgerRepository.InsertAsync(new Ledger
+        {
+            CardIdm = TestCardIdm,
+            Date = new DateTime(2026, 9, 3),
+            Summary = "鉄道（博多～天神 往復）",
+            Expense = 420,
+            Balance = 4580,
+            LenderIdm = TestStaffIdm,
+            StaffName = TestStaffName,
+        });
+        await _ledgerRepository.InsertDetailsAsync(mergedId, new[]
+        {
+            Usage(new DateTime(2026, 9, 6), balanceAfter: 4580),
+            Usage(new DateTime(2026, 9, 3), balanceAfter: 4790),
+        });
+        await LendAsync();
+
+        // Act
+        var result = await _service.ReturnAsync(TestStaffIdm, TestCardIdm, new List<LedgerDetail>
+        {
+            Usage(new DateTime(2026, 9, 20), balanceAfter: 4370),
+            Usage(new DateTime(2026, 9, 6), balanceAfter: 4580),
+        });
+
+        // Assert
+        result.Success.Should().BeTrue(_logger.FormatEntries());
+        var usageLedgers = await GetUsageLedgersAsync();
+        usageLedgers.Select(l => l.Date.Date).Should().Equal(
+            new[] { new DateTime(2026, 9, 3), new DateTime(2026, 9, 20) },
+            "9/6 の利用は 9/3 の台帳行が持っているので、台帳行の日付ではなく明細の利用日で照合する");
+    }
+
+    [Fact]
+    public async Task ReturnAsync_導入日が登録日より後のカードでは_導入日の前日までの利用を記録しないこと()
+    {
+        // Arrange: 9/20 に「9月から繰越」で登録（導入行は 10/1。9 月末までの利用は紙の出納簿に載る扱い）
+        await InsertIntroductionAsync(new DateTime(2026, 10, 1), balance: 4790,
+            summary: SummaryGenerator.GetMidYearCarryoverSummary(9));
+        await LendAsync();
+
+        // Act
+        var result = await _service.ReturnAsync(TestStaffIdm, TestCardIdm, new List<LedgerDetail>
+        {
+            Usage(new DateTime(2026, 9, 20), balanceAfter: 4580),
+        });
+
+        // Assert
+        result.Success.Should().BeTrue(_logger.FormatEntries());
+        result.CreatedLedgers.Should().BeEmpty("導入日（10/1）より前の利用は記録しない");
+        (await GetUsageLedgersAsync()).Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task GetLatestLedgerDateWithoutDetailsAsync_導入行と貸出中と明細を持つ行を除いた最新日を返すこと()
+    {
+        // 明細なしの利用行（9/5・9/8）、明細ありの利用行（9/12）、導入行（9/1）、貸出中レコード（9/20）
+        await InsertIntroductionAsync(new DateTime(2026, 9, 1), balance: 5000);
+        await InsertLedgerWithoutDetailsAsync(new DateTime(2026, 9, 5), balanceAfter: 4790);
+        await InsertLedgerWithoutDetailsAsync(new DateTime(2026, 9, 8), balanceAfter: 4580);
+        await InsertRecordedUsageAsync(new DateTime(2026, 9, 12), balanceAfter: 4370);
+        await LendAsync();
+
+        var result = await _ledgerRepository.GetLatestLedgerDateWithoutDetailsAsync(TestCardIdm);
+
+        result.Should().Be(new DateTime(2026, 9, 8),
+            "明細を持つ行（9/12）・貸出中レコード（9/20）・導入行は除く");
+    }
+
+    [Fact]
+    public async Task GetLatestLedgerDateWithoutDetailsAsync_明細を持たない利用行が無ければnullを返すこと()
+    {
+        await InsertIntroductionAsync(new DateTime(2026, 9, 1), balance: 5000);
+        await InsertRecordedUsageAsync(new DateTime(2026, 9, 5), balanceAfter: 4790);
+
+        var result = await _ledgerRepository.GetLatestLedgerDateWithoutDetailsAsync(TestCardIdm);
+
+        result.Should().BeNull("導入行は明細を持たないが対象外");
+    }
+
     private async Task LendAsync()
     {
         var lendResult = await _service.LendAsync(TestStaffIdm, TestCardIdm);
         lendResult.Success.Should().BeTrue($"貸出が失敗（{lendResult.ErrorMessage}）");
     }
 
-    private async Task InsertIntroductionAsync(DateTime date, int balance)
+    private async Task InsertIntroductionAsync(DateTime date, int balance, string summary = "新規購入")
     {
         await _ledgerRepository.InsertAsync(new Ledger
         {
             CardIdm = TestCardIdm,
             Date = date,
-            Summary = "新規購入",
-            Income = balance,
+            Summary = summary,
+            Income = Ledger.InitialRecordCarriesIncome(summary) ? balance : 0,
             Expense = 0,
             Balance = balance,
         });
@@ -282,6 +391,24 @@ public sealed class LendingServiceReturnUsageLowerBoundTests : IDisposable
             StaffName = TestStaffName,
         });
         await _ledgerRepository.InsertDetailsAsync(id, new[] { Usage(date, balanceAfter) });
+    }
+
+    /// <summary>
+    /// 履歴の「追加」で手入力した行と同じ形（明細を持たない利用行）。
+    /// 利用者は返却者と別の職員にする — 同じだと同日統合（#837）が新しい明細をこの行へ取り込み、
+    /// 二重に記録しても行数が増えないため、下限の効果を行数で観測できない
+    /// </summary>
+    private async Task InsertLedgerWithoutDetailsAsync(DateTime date, int balanceAfter)
+    {
+        await _ledgerRepository.InsertAsync(new Ledger
+        {
+            CardIdm = TestCardIdm,
+            Date = date,
+            Summary = "鉄道（博多～天神）",
+            Expense = 210,
+            Balance = balanceAfter,
+            StaffName = "別の職員",
+        });
     }
 
     /// <summary>導入行・貸出中レコードを除いた、利用の台帳行（日付昇順）</summary>
