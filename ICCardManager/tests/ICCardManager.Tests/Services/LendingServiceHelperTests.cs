@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Threading.Tasks;
 using FluentAssertions;
 using ICCardManager.Data;
@@ -251,11 +252,11 @@ namespace ICCardManager.Tests.Services
         }
 
         // ============================================================
-        // FilterUsageSinceLent
+        // FilterUsageToRecordOnReturn（Issue #2237: 下限は導入行の日付。導入行が無ければ貸出日の 7 日前）
         // ============================================================
 
         [Fact]
-        public void FilterUsageSinceLent_DetailsBeforeSevenDays_Excluded()
+        public void FilterUsageToRecordOnReturn_導入行なし_DetailsBeforeSevenDays_Excluded()
         {
             var now = new DateTime(2026, 4, 19, 10, 0, 0);
             var lentRecord = new Ledger { LentAt = new DateTime(2026, 4, 15) };
@@ -268,14 +269,14 @@ namespace ICCardManager.Tests.Services
                 new() { UseDate = new DateTime(2026, 4, 18) },  // 含まれる
             };
 
-            var result = LendingService.FilterUsageSinceLent(details, lentRecord, now);
+            var result = LendingService.FilterUsageToRecordOnReturn(details, lentRecord, now, introductionDate: null);
 
             result.Should().HaveCount(3);
             result.Should().NotContain(d => d.UseDate == new DateTime(2026, 4, 7));
         }
 
         [Fact]
-        public void FilterUsageSinceLent_NullUseDate_Included()
+        public void FilterUsageToRecordOnReturn_導入行なし_NullUseDate_Included()
         {
             var now = new DateTime(2026, 4, 19);
             var lentRecord = new Ledger { LentAt = new DateTime(2026, 4, 15) };
@@ -285,14 +286,14 @@ namespace ICCardManager.Tests.Services
                 new() { UseDate = new DateTime(2026, 4, 1) },  // 除外
             };
 
-            var result = LendingService.FilterUsageSinceLent(details, lentRecord, now);
+            var result = LendingService.FilterUsageToRecordOnReturn(details, lentRecord, now, introductionDate: null);
 
             result.Should().HaveCount(1);
             result[0].UseDate.Should().BeNull();
         }
 
         [Fact]
-        public void FilterUsageSinceLent_LentAtNull_UsesYesterday()
+        public void FilterUsageToRecordOnReturn_導入行なし_LentAtNull_UsesYesterday()
         {
             var now = new DateTime(2026, 4, 19);
             var lentRecord = new Ledger { LentAt = null };  // fallback: now - 1 day = 2026-04-18
@@ -303,10 +304,62 @@ namespace ICCardManager.Tests.Services
                 new() { UseDate = new DateTime(2026, 4, 11) },  // 境界値（含む）
             };
 
-            var result = LendingService.FilterUsageSinceLent(details, lentRecord, now);
+            var result = LendingService.FilterUsageToRecordOnReturn(details, lentRecord, now, introductionDate: null);
 
             result.Should().HaveCount(1);
             result[0].UseDate.Should().Be(new DateTime(2026, 4, 11));
+        }
+
+        [Fact]
+        public void FilterUsageToRecordOnReturn_導入行あり_貸出日の7日より前でも導入日以降の利用を含むこと()
+        {
+            // 欠陥側: 修正前は貸出日（4/20）の 7 日前＝4/13 より古い 4/5 を捨てていた
+            var now = new DateTime(2026, 4, 20, 10, 0, 0);
+            var lentRecord = new Ledger { LentAt = new DateTime(2026, 4, 20, 9, 0, 0) };
+            var details = new List<LedgerDetail>
+            {
+                new() { UseDate = new DateTime(2026, 4, 20) },
+                new() { UseDate = new DateTime(2026, 4, 5) },
+                new() { UseDate = new DateTime(2026, 4, 1) },   // 導入日当日（境界・含む）
+                new() { UseDate = new DateTime(2026, 3, 31) },  // 導入前（含まない）
+            };
+
+            var result = LendingService.FilterUsageToRecordOnReturn(
+                details, lentRecord, now, introductionDate: new DateTime(2026, 4, 1));
+
+            result.Select(d => d.UseDate).Should().Equal(
+                new DateTime(2026, 4, 20), new DateTime(2026, 4, 5), new DateTime(2026, 4, 1));
+        }
+
+        [Fact]
+        public void FilterUsageToRecordOnReturn_導入行が貸出日の7日以内なら導入前の利用は含まないこと()
+        {
+            // 修正前は貸出日の 7 日前（4/13）以降をすべて含め、導入行（4/18）の残高に含まれる 4/15 を二重に取り込んでいた
+            var now = new DateTime(2026, 4, 20, 10, 0, 0);
+            var lentRecord = new Ledger { LentAt = new DateTime(2026, 4, 20, 9, 0, 0) };
+            var details = new List<LedgerDetail>
+            {
+                new() { UseDate = new DateTime(2026, 4, 18) },
+                new() { UseDate = new DateTime(2026, 4, 15) },
+                new() { UseDate = null },                        // 日付なしは下限で判定できないので含める
+            };
+
+            var result = LendingService.FilterUsageToRecordOnReturn(
+                details, lentRecord, now, introductionDate: new DateTime(2026, 4, 18, 13, 30, 0));
+
+            result.Select(d => d.UseDate).Should().Equal(new DateTime(2026, 4, 18), null);
+        }
+
+        [Fact]
+        public void ResolveUsageLowerBound_導入行の有無で下限の根拠が切り替わること()
+        {
+            var now = new DateTime(2026, 4, 20, 10, 0, 0);
+            var lentRecord = new Ledger { LentAt = new DateTime(2026, 4, 20, 9, 0, 0) };
+
+            LendingService.ResolveUsageLowerBound(lentRecord, now, new DateTime(2026, 1, 10, 15, 0, 0))
+                .Should().Be(new DateTime(2026, 1, 10), "導入行があればその日付（時刻は切り捨て）。貸出日には寄せない");
+            LendingService.ResolveUsageLowerBound(lentRecord, now, introductionDate: null)
+                .Should().Be(new DateTime(2026, 4, 13), "導入行が無ければ従来どおり貸出日の 7 日前");
         }
 
         // ============================================================

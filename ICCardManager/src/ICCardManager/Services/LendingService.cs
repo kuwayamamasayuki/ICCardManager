@@ -647,7 +647,7 @@ namespace ICCardManager.Services
         internal async Task PersistReturnAsync(
             string cardIdm,
             Ledger lentRecord,
-            List<LedgerDetail> usageSinceLent,
+            List<LedgerDetail> usageToRecord,
             bool skipDuplicateCheck,
             LendingResult result)
         {
@@ -667,7 +667,7 @@ namespace ICCardManager.Services
                     // 自己検知する設計（DbContext.HasActiveTransactionScope）に変更されたため、ここで明示的に
                     // transaction を伝搬しなくてもデッドロックしない。
                     var ledgers = await CreateUsageLedgersAsync(
-                        cardIdm, lentRecord.LenderIdm, lentRecord.StaffName ?? string.Empty, usageSinceLent, skipDuplicateCheck).ConfigureAwait(false);
+                        cardIdm, lentRecord.LenderIdm, lentRecord.StaffName ?? string.Empty, usageToRecord, skipDuplicateCheck).ConfigureAwait(false);
 
                     // 貸出レコードをすべて削除（履歴に「（貸出中）」が残らないようにする）
                     // 共有モードで重複した貸出中レコードがある場合にも対応
@@ -696,7 +696,7 @@ namespace ICCardManager.Services
             }).ConfigureAwait(false);
 
             result.CreatedLedgers.AddRange(createdLedgers);
-            result.HasBusUsage = usageSinceLent.Any(d => d.IsBus);
+            result.HasBusUsage = usageToRecord.Any(d => d.IsBus);
         }
 
         /// <summary>
@@ -899,18 +899,98 @@ namespace ICCardManager.Services
         }
 
         /// <summary>
-        /// 貸出日以降の履歴を抽出する。貸出タッチ忘れに備え貸出日の1週間前から遡る。
+        /// 導入行が無いカードで、貸出日から遡って取り込む日数（Issue #2237 より前の下限をそのまま残したもの）
+        /// </summary>
+        internal const int FallbackLookbackDaysWithoutIntroduction = 7;
+
+        /// <summary>
+        /// 返却時に記録の対象とする利用履歴を、カードから読み取った履歴から抽出する（Issue #2237）。
         /// 注意: FeliCa履歴の日付は時刻を含まないため、日付部分のみで比較する。
         /// </summary>
-        internal static List<LedgerDetail> FilterUsageSinceLent(
-            List<LedgerDetail> detailList, Ledger lentRecord, DateTime now)
+        /// <remarks>
+        /// <para>
+        /// 下限は<b>そのカードの導入行の日付</b>（<see cref="ResolveUsageLowerBound"/>）。カードに残る直近 20 件の
+        /// うち、ピッすいを通さずに使われた利用も貸出日の前後を問わず記録する。記録済みの利用を二重に記録しないのは
+        /// この抽出ではなく、<see cref="CreateUsageLedgersAsync"/> の既存明細との照合（Issue #326）の役目。
+        /// </para>
+        /// <para>
+        /// 日付の無い履歴（<see cref="LedgerDetail.UseDate"/> が null）は下限で判定できないので従来どおり含める。
+        /// </para>
+        /// </remarks>
+        /// <param name="detailList">カードから読み取った履歴</param>
+        /// <param name="lentRecord">貸出レコード（導入行が無いときの下限の基準）</param>
+        /// <param name="now">現在時刻（貸出時刻が無いときの基準）</param>
+        /// <param name="introductionDate">導入行の日付（<see cref="Data.Repositories.ILedgerQueryService.GetPurchaseDateAsync"/>）。無ければ null</param>
+        internal static List<LedgerDetail> FilterUsageToRecordOnReturn(
+            List<LedgerDetail> detailList, Ledger lentRecord, DateTime now, DateTime? introductionDate)
         {
-            var lentAt = lentRecord.LentAt ?? now.AddDays(-1);
-            var lentDate = lentAt.Date;
-            var filterStartDate = lentDate.AddDays(-7);
+            var filterStartDate = ResolveUsageLowerBound(lentRecord, now, introductionDate);
             return detailList
                 .Where(d => d.UseDate == null || d.UseDate.Value.Date >= filterStartDate)
                 .ToList();
+        }
+
+        /// <summary>
+        /// 返却時に記録する利用履歴の下限（この日付以降を記録する）を決める（Issue #2237）。
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// <b>導入行があれば、その日付</b>。カード登録時は導入行の日付（＝取り込み開始日 <c>importFromDate</c>）以降の
+        /// 履歴だけを台帳へ取り込み、それより前の利用は導入行の残高に含めている。それより前の利用は
+        /// <c>ledger_detail</c> に無いので #326 の照合では除けず、取り込むと導入行の残高と二重に計上する
+        /// （紙出納簿から移行したカードでは、紙の出納簿に載っている利用が台帳にも載る）。
+        /// 導入行の日付「当日」の利用は、登録時に取り込まれている（照合で除ける）か、登録より後の利用なので含める。
+        /// </para>
+        /// <para>
+        /// 貸出日には寄せない。旧実装（貸出日の 7 日前）は、7 日より前の未記録の利用を捨てる一方で、
+        /// 登録の 7 日以内に貸し出すと導入行より前の利用まで取り込んでいた。
+        /// </para>
+        /// <para>
+        /// <b>導入行が無ければ、従来どおり貸出日の 7 日前</b>（<see cref="FallbackLookbackDaysWithoutIntroduction"/>）。
+        /// 導入前のデータ・登録時に残額を読めなかったカード・導入行を削除したカード・摘要の組織設定を登録後に
+        /// 変えたカード（旧文言の導入行は認識されない）が該当し、どこまでが既に計上済みかを決める根拠が無い。
+        /// 下限を外すと計上済みの利用を二重に取り込み得るので、挙動を変えない側へ倒す。
+        /// </para>
+        /// </remarks>
+        internal static DateTime ResolveUsageLowerBound(Ledger lentRecord, DateTime now, DateTime? introductionDate)
+        {
+            if (introductionDate.HasValue)
+            {
+                return introductionDate.Value.Date;
+            }
+
+            var lentAt = lentRecord.LentAt ?? now.AddDays(-1);
+            return lentAt.Date.AddDays(-FallbackLookbackDaysWithoutIntroduction);
+        }
+
+        /// <summary>
+        /// 返却で記録した台帳行のうち、貸出日より前の利用を Information で残す（Issue #2237）。
+        /// </summary>
+        /// <remarks>
+        /// 該当する行が無い（貸出後の利用だけを記録した）通常の返却では何も出さない。
+        /// 貸出時刻が無い貸出レコードでは「貸出日より前」を決められないので出さない。
+        /// </remarks>
+        private void LogUsageRecordedBeforeLending(string cardIdm, DateTime? lentAt, IReadOnlyCollection<Ledger> createdLedgers)
+        {
+            if (!lentAt.HasValue)
+            {
+                return;
+            }
+
+            var lentDate = lentAt.Value.Date;
+            var beforeLending = createdLedgers
+                .Where(l => !l.IsLentRecord && l.Date.Date < lentDate)
+                .ToList();
+            if (beforeLending.Count == 0)
+            {
+                return;
+            }
+
+            _logger.LogInformation(
+                "LendingService: 貸出日より前の利用を返却者の利用として記録しました" +
+                "（CardIdm={CardIdm}, 貸出日={LentDate}, 該当する台帳行={Count}件, 最も古い利用日={OldestDate}）",
+                IdmMasker.Mask(cardIdm), SqliteDateTimeFormat.ToDateText(lentDate), beforeLending.Count,
+                SqliteDateTimeFormat.ToDateText(beforeLending.Min(l => l.Date).Date));
         }
 
         /// <summary>
@@ -1025,16 +1105,19 @@ namespace ICCardManager.Services
 
                 _logger.LogDebug("LendingService: 返却処理 - 受け取った履歴件数={Count}", detailList.Count);
 
-                // 貸出タッチを忘れた場合でも履歴が正しく記録されるよう、日付フィルタを緩和
+                // Issue #2237: カードに残る履歴のうち、導入行の日付以降を記録の対象にする（貸出日の前後を問わない）。
+                // ピッすいを通さずに使われた利用も、カードに残っている限り返却時に記録する。
                 // 重複チェックは CreateUsageLedgersAsync 内の既存履歴照合（Issue #326）で行う
-                var usageSinceLent = FilterUsageSinceLent(detailList, lentRecord, now);
+                var introductionDate = await _ledgerRepository.GetPurchaseDateAsync(cardIdm).ConfigureAwait(false);
+                var usageToRecord = FilterUsageToRecordOnReturn(detailList, lentRecord, now, introductionDate);
 
                 var lentAt = lentRecord.LentAt ?? now.AddDays(-1);
-                _logger.LogDebug("LendingService: 貸出時刻={LentAt}, フィルタ開始日={FilterStart}, 抽出後の履歴件数={Count}",
-                    SqliteDateTimeFormat.ToText(lentAt), SqliteDateTimeFormat.ToDateText(lentAt.Date.AddDays(-7)), usageSinceLent.Count);
+                _logger.LogDebug("LendingService: 貸出時刻={LentAt}, 導入日={IntroductionDate}, フィルタ開始日={FilterStart}, 抽出後の履歴件数={Count}",
+                    SqliteDateTimeFormat.ToText(lentAt), SqliteDateTimeFormat.ToDateText(introductionDate),
+                    SqliteDateTimeFormat.ToDateText(ResolveUsageLowerBound(lentRecord, now, introductionDate)), usageToRecord.Count);
 
                 // 履歴データの詳細をログ出力
-                foreach (var detail in usageSinceLent.Take(5))
+                foreach (var detail in usageToRecord.Take(5))
                 {
                     _logger.LogDebug("LendingService: 履歴詳細 - 日付={Date}, 残高={Balance}, 金額={Amount}, チャージ={IsCharge}",
                         SqliteDateTimeFormat.ToDateText(detail.UseDate), detail.Balance, detail.Amount, detail.IsCharge);
@@ -1047,7 +1130,7 @@ namespace ICCardManager.Services
                     .Any(l => !l.IsLentRecord);
 
                 // トランザクション内で履歴作成 + 貸出レコード削除 + カード状態更新
-                await PersistReturnAsync(cardIdm, lentRecord, usageSinceLent, skipDuplicateCheck, result).ConfigureAwait(false);
+                await PersistReturnAsync(cardIdm, lentRecord, usageToRecord, skipDuplicateCheck, result).ConfigureAwait(false);
 
                 // Issue #1805: ここから先は台帳への記録が確定している。
                 // 30秒ルール用の処理情報と Success は後処理（残高解決・残額警告の DB I/O）より前に確定させる。
@@ -1061,15 +1144,21 @@ namespace ICCardManager.Services
                 result.Success = true;
 
                 // Issue #1819: 返却は記録されたのに台帳行が 1 行も作られなかったことを本番ログへ残す。
-                // 内訳（重複除外・貸出後フィルタ）は LogDebug で本番に出ないため、
+                // 内訳（重複除外・導入日による抽出）は LogDebug で本番に出ないため、
                 // 「返却したのに履歴が増えない」という問い合わせの切り分けに必要な値をここへ集約する。
                 if (result.CreatedLedgers.Count == 0)
                 {
                     _logger.LogInformation(
                         "LendingService: 返却を記録しましたが台帳行は作成されませんでした" +
-                        "（CardIdm={CardIdm}, 受け取った履歴件数={ReceivedCount}, 貸出後の抽出件数={FilteredCount}, 重複チェック省略={SkipDuplicateCheck}）",
-                        IdmMasker.Mask(cardIdm), detailList.Count, usageSinceLent.Count, skipDuplicateCheck);
+                        "（CardIdm={CardIdm}, 受け取った履歴件数={ReceivedCount}, 導入日以降の抽出件数={FilteredCount}, 重複チェック省略={SkipDuplicateCheck}）",
+                        IdmMasker.Mask(cardIdm), detailList.Count, usageToRecord.Count, skipDuplicateCheck);
                 }
+
+                // Issue #2237: 貸出日より前の利用（ピッすいを通さずに使われた利用）を記録したことを本番ログへ残す。
+                // 台帳上は今回の返却者の利用として記録される（貸出日より前の利用を誰が使ったかはカードから分からない）。
+                // 後から「使っていない利用が自分の名前で載っている」と問い合わせがあったときに、
+                // 返却時に取り込んだ行であることをログから辿れるようにする。正常な返却（貸出後の利用だけ）では出さない。
+                LogUsageRecordedBeforeLending(cardIdm, lentRecord.LentAt, result.CreatedLedgers);
 
                 // Issue #596: 今月の履歴が不完全な可能性をチェック（純粋計算。DB I/O なし）
                 if (!hadExistingCurrentMonthRecords)
