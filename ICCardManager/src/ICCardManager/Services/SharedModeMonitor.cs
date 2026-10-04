@@ -165,9 +165,11 @@ namespace ICCardManager.Services
         /// Issue #2232: 疎通確認は共有フォルダーが応答しない間、上限（<c>DbContext.ConnectionCheckTimeout</c>）まで
         /// 呼び出しスレッドを同期的に塞ぐ。<c>Task.Run</c>（スレッドプール）で起動すると、切断が続く限り
         /// 15 秒ごとにプールのスレッドを 1 本塞ぎ続け、プールが詰まっているとヘルスチェック自体の開始が遅れて
-        /// 切断警告と「再接続中」の表示も遅れる。15 秒に 1 回の呼び出しで、実行中フラグにより同時に走るのは
-        /// 1 本に限られるので、呼ぶたびにスレッドを作る専用スレッドでよい（service-conventions.md
-        /// 「ブロックし得る同期処理を Task.Run で起動して待たない」）。
+        /// 切断警告と「再接続中」の表示も遅れる。呼び出しは 15 秒ごとのヘルスチェックと、切断警告のクリックによる
+        /// 手動再接続（<c>MainViewModel.RetryDatabaseConnectionAsync</c>。実行中フラグを見ない）だけで、
+        /// 実際の確認は <c>DbContext.CheckConnection</c> が進行中の 1 本に限り、後から来た呼び出しはその結果を上限まで待つ。
+        /// 待つスレッドの数は呼び出しの頻度で決まり少ないので、呼ぶたびにスレッドを作る専用スレッドでよい
+        /// （service-conventions.md「ブロックし得る同期処理を Task.Run で起動して待たない」）。
         /// </remarks>
         public async Task<bool> CheckConnectionAsync()
         {
