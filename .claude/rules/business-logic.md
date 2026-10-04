@@ -33,6 +33,15 @@
 - **30秒ルールの武装（`LastProcessedCardIdm` / `LastProcessedTime` / `LastOperationType`）は台帳への記録が確定した直後に行う**（Issue #1805）。`ReturnAsync` はコミット後に残額の解決・残額警告の DB I/O を持つため、その後ろに置くと後処理の失敗で「返却は記録済みなのに未武装・`Success=false`」になり、「返却失敗・もう一度タッチ」の案内どおりに再タッチした職員の操作が貸出として新規に記録される。`Success` は「記録が確定した」ことだけを表し、付帯情報（残額・残額警告）の欠落は `LendingResult.HasPostCommitFailure` で別途伝える（詳細は `db-write-conventions.md` の「コミット確定後の後処理を、成否の判定に巻き込まない」）
 - **操作者の帰属はテストで表明する**。`CurrentState` や「例外が出ない」ではなく、**台帳に記録された IDm・氏名**（`ledger.LenderIdm` / `StaffName`）と `UpdateLentStatusAsync` の第4引数を具体値で検証する（`MainViewModelIntegrationTests` の `Retouch30Sec_*` 3件が参考実装）
 
+### 返却時に記録する利用履歴の下限は「導入行の日付」（Issue #2237）
+
+返却時は、交通系ICカードに残る直近 20 件のうち**カードの導入行（`Ledger.IsInitialRecordSummary`）の日付以降**を記録する（`LendingService.ResolveUsageLowerBound`）。貸出日の前後は問わない。導入行が無いカードだけ、従来どおり貸出日の 7 日前まで。
+
+- **下限は「台帳が計上済みである境界」から決める。時間の幅で決めない**。旧実装の「貸出日の 7 日前」は根拠が無く、7 日より古い未記録の利用を捨てる一方、登録から 7 日以内に貸し出すと導入行より前（＝導入行の残高に含まれる）利用を取り込んで二重に計上していた
+- **二重記録の防止は下限ではなく既存明細との照合（#326）の役目**。照合の取得範囲は抽出した履歴の最古日から決まるので、下限を広げても追随する。下限で照合を兼ねようとしない
+- **導入行が認識できないときは、挙動を変えない側へ倒す**。どこまでが計上済みかの根拠が無いまま下限を外すと、計上済みの利用を取り込み得る
+- 詳細（帰属・削除した行・締めた月の扱い）は 04_機能設計書 §2.4.1
+
 ### 返却確認 — 返却直後の履歴自動表示（Issue #1907）
 
 返却後処理（バス停名入力 → 同行者数入力）の**後**に、返却したカードの履歴をメイン画面へ自動表示し、今回記録した行を強調して確認を促す（`HistoryPanelViewModel.ShowReturnHistoryReviewAsync`。設定 `AppSettings.ShowHistoryOnReturn`、既定 有効）。
