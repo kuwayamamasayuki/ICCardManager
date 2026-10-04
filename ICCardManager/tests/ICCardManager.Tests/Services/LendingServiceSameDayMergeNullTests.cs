@@ -9,6 +9,7 @@ using ICCardManager.Infrastructure.Security;
 using ICCardManager.Models;
 using ICCardManager.Services;
 using ICCardManager.Tests.Infrastructure;
+using ICCardManager.Tests.Infrastructure.Timing;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Moq;
@@ -34,6 +35,11 @@ public class LendingServiceSameDayMergeNullTests : IDisposable
     private const string TestStaffIdm = "1112131415161718";
     private const string TestStaffName = "テスト太郎";
     private const int ExistingLedgerId = 42;
+
+    /// <summary>本体が読む現在時刻（固定。testing.md「現在時刻に依存する本体は、時計を注入して固定日時で検証する」）</summary>
+    private static readonly DateTime Now = new(2026, 6, 15, 10, 0, 0);
+
+    private static readonly DateTime Today = Now.Date;
 
     private readonly DbContext _dbContext;
     private readonly Mock<ICardRepository> _cardRepositoryMock = new();
@@ -64,7 +70,8 @@ public class LendingServiceSameDayMergeNullTests : IDisposable
             new SummaryGenerator(),
             _lockManager,
             Options.Create(new AppOptions()),
-            _logger);
+            _logger,
+            new FixedSystemClock(Now));
     }
 
     public void Dispose()
@@ -108,7 +115,7 @@ public class LendingServiceSameDayMergeNullTests : IDisposable
         {
             Id = ExistingLedgerId,
             CardIdm = TestCardIdm,
-            Date = DateTime.Today,
+            Date = Today,
             Summary = "鉄道（博多～天神）",
             Expense = 420,
             Balance = 1580,
@@ -116,8 +123,8 @@ public class LendingServiceSameDayMergeNullTests : IDisposable
             StaffName = TestStaffName,
             Details = new List<LedgerDetail>
             {
-                new() { UseDate = DateTime.Today, EntryStation = "博多", ExitStation = "天神", Amount = 210, Balance = 1790 },
-                new() { UseDate = DateTime.Today, EntryStation = "天神", ExitStation = "博多", Amount = 210, Balance = 1580 },
+                new() { UseDate = Today, EntryStation = "博多", ExitStation = "天神", Amount = 210, Balance = 1790 },
+                new() { UseDate = Today, EntryStation = "天神", ExitStation = "博多", Amount = 210, Balance = 1580 },
             },
         };
         SetupSameDayMerge(reloaded);
@@ -134,7 +141,7 @@ public class LendingServiceSameDayMergeNullTests : IDisposable
     public async Task ImportHistoryForRegistrationAsync_履歴にnullを渡すとArgumentNullExceptionになること()
     {
         // 呼び出し元は履歴が無いときも空リストを渡す（Issue #1763）。null は契約違反として入口で止める
-        var act = () => _service.ImportHistoryForRegistrationAsync(TestCardIdm, null!, DateTime.Today);
+        var act = () => _service.ImportHistoryForRegistrationAsync(TestCardIdm, null!, Today);
 
         (await act.Should().ThrowAsync<ArgumentNullException>())
             .Which.ParamName.Should().Be("historyDetails");
@@ -146,7 +153,7 @@ public class LendingServiceSameDayMergeNullTests : IDisposable
         {
             new()
             {
-                UseDate = DateTime.Today,
+                UseDate = Today,
                 EntryStation = "天神",
                 ExitStation = "博多",
                 Amount = 210,
@@ -170,9 +177,9 @@ public class LendingServiceSameDayMergeNullTests : IDisposable
                 CardIdm = TestCardIdm,
                 LenderIdm = TestStaffIdm,
                 StaffName = TestStaffName,
-                Date = DateTime.Today,
+                Date = Today,
                 IsLentRecord = true,
-                LentAt = DateTime.Now.AddHours(-1),
+                LentAt = Now.AddHours(-1),
                 Summary = SummaryGenerator.GetLendingSummary(),
             });
         _ledgerRepositoryMock.Setup(x => x.InsertAsync(It.IsAny<Ledger>())).ReturnsAsync(100);
@@ -195,7 +202,7 @@ public class LendingServiceSameDayMergeNullTests : IDisposable
                 {
                     Id = ExistingLedgerId,
                     CardIdm = TestCardIdm,
-                    Date = DateTime.Today,
+                    Date = Today,
                     Summary = "鉄道（博多～天神）",
                     Expense = 210,
                     Balance = 1790,

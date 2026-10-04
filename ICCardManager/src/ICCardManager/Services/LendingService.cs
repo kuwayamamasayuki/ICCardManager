@@ -653,9 +653,8 @@ namespace ICCardManager.Services
         {
             // Issue #1733: ExecuteWithRetryAsync はラムダ全体を SQLITE_BUSY/LOCKED で再実行するため、
             // ラムダ内で result へ AddRange するとロールバック済みの試行分が累積する（バス停入力ダイアログの
-            // 二重表示につながる）。ローカル変数は試行ごとに代入で上書きされる（冪等）ため、
+            // 二重表示につながる）。作成した行はラムダの戻り値で受け取り（ロールバックした試行の行は返らない）、
             // result への反映はリトライ境界の外で成功した最終試行の分だけを行う（LendAsync と同じ配置）。
-            // 作成した行はラムダの戻り値で受け取る（ロールバックした試行の行は返らない）。
             var createdLedgers = await _dbContext.ExecuteWithRetryAsync(async () =>
             {
                 using var scope = await _dbContext.BeginTransactionAsync().ConfigureAwait(false);
@@ -1709,6 +1708,7 @@ namespace ICCardManager.Services
         /// 呼び出し元は必ず <see cref="HistoryImportResult.Success"/> を確認し、
         /// 失敗をユーザーへ通知すること。
         /// </returns>
+        /// <exception cref="ArgumentNullException"><paramref name="historyDetails"/> が null のとき（履歴が無いときは空リストを渡す）。</exception>
         public async Task<HistoryImportResult> ImportHistoryForRegistrationAsync(
             string cardIdm, List<LedgerDetail> historyDetails, DateTime importFromDate,
             Ledger? initialLedger = null)
@@ -1737,12 +1737,11 @@ namespace ICCardManager.Services
                     return result;
                 }
 
-                var importedCount = 0;
-
                 // Issue #1727: 他の書込み経路（貸出・返却・整合性修復）と同様にリトライで包む。
                 // 共有モードでは他PCの書込みと競合して SQLITE_BUSY になり得るが、
                 // ここは busy_timeout でカバーできない接続レベルのロックも起こり得る。
-                await _dbContext.ExecuteWithRetryAsync(async () =>
+                // 取り込んだ件数はラムダの戻り値で受け取る（確定した試行の件数だけが返る）。
+                var importedCount = await _dbContext.ExecuteWithRetryAsync(async () =>
                 {
                     // トランザクション開始
                     using var scope = await _dbContext.BeginTransactionAsync().ConfigureAwait(false);
@@ -1767,7 +1766,7 @@ namespace ICCardManager.Services
 
                         scope.Commit();
 
-                        importedCount = createdLedgers.Count;
+                        return createdLedgers.Count;
                     }
                     catch
                     {

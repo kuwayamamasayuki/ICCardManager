@@ -5,8 +5,8 @@
 **開発基盤**
 - Issue #2233 **貸出・返却サービス（`LendingService`）を Null 許容参照型へ移行し、返却時の同日統合で統合先を読み直せないときに原因を名指しして止めるようにした**
   - 同日統合（#837）は、既存の利用レコードへ明細を追加した直後に `GetByIdAsync` で全明細を読み直すが、#2220 で null を返し得ると注釈された戻り値を null チェックせずに参照していた。現状の経路（同じ書き込みトランザクションで明細を INSERT した直後）では到達しないが、前提が崩れると `NullReferenceException` が返却の catch へ落ち、何が起きたか分からない失敗になる。LedgerId を名指しした `InvalidOperationException` で返却を失敗させる（ログに原因と LedgerId が残る。利用者向けの文言は従来の既定文言で、内部の ID は出さない）
-  - 出た警告 32 件を `!` を使わずに是正した。失敗時だけ値を持つ `LendingResult.ErrorMessage` / `HistoryImportResult.FailureReason`、`LastProcessedCardIdm`、事前検証の戻り値のタプルを `?` で宣言し、呼び出し側は「文言が無い・カードか職員が null」をまとめて失敗として扱う（契約違反は文言の代わりに例外）。作成した台帳行は外側の変数へ代入せず `ExecuteWithRetryAsync` のラムダの戻り値で受け取る形にした（貸出・返却・払い戻し。挙動は同じ）
-  - `ImportHistoryForRegistrationAsync` の履歴に null を渡すと、以前は中で `NullReferenceException` になって失敗の結果を返していたのを、入口で `ArgumentNullException` にした（呼び出し元は履歴が無いときも空リストを渡す。#1763）
+  - 出た警告 32 件を `!` を使わずに是正した。失敗時だけ値を持つ `LendingResult.ErrorMessage` / `HistoryImportResult.FailureReason`、`LastProcessedCardIdm`、事前検証の戻り値のタプルを `?` で宣言し、呼び出し側は「文言が無い・カードか職員が null」をまとめて失敗として扱う（契約違反は文言の代わりに例外）。作成した台帳行は外側の変数へ代入せず `ExecuteWithRetryAsync` のラムダの戻り値で受け取る形にした（貸出・返却・払い戻し・カード登録時の台帳書き込み。挙動は同じ）
+  - `ImportHistoryForRegistrationAsync` の履歴に null を渡すと、以前は中の LINQ（`Enumerable.Where`）が投げる例外を catch して失敗の結果（`Success=false`）を返していたのを、入口で `ArgumentNullException` を投げるようにした（呼び出し元は履歴が無いときも空リストを渡す。#1763）
   - `FailureReason` を `string?` にしたことで、受け取り側の `RegistrationLedgerFailureMessage.ForHistoryImport` / `ForInitialBalance` の `reason`（null・空白なら既定の文言へ置き換える許容の引数）も `string?` にした
   - 回帰テスト `LendingServiceSameDayMergeNullTests`（3 件）を追加した。読み直しが null のときの失敗（ガードを外すと `NullReferenceException` になって赤を実測）と、同じ準備で読み直せれば統合を最後まで通る対の表明、null の履歴の拒否。`NullableContextConventionTests` の上限を 206 → 205。05_クラス設計書・07_テスト設計書 §2.18（UT-017a9）を更新
   - テスト: 単体 8,601 → 8,604（+3）・合計 8,716 → 8,719
