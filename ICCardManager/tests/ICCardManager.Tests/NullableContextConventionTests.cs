@@ -42,7 +42,7 @@ public class NullableContextConventionTests
     /// 0 になったら csproj に <c>&lt;Nullable&gt;enable&lt;/Nullable&gt;</c> を置き、各ファイルの
     /// <c>#nullable enable</c> と <c>NoWarn</c> の CS8632 を外す（Issue #2163 の手順 4）。
     /// </remarks>
-    private const int MaxFilesWithoutNullableEnable = 206;
+    private const int MaxFilesWithoutNullableEnable = 205;
 
     /// <summary>
     /// 移行を終えたディレクトリ（本番ソースのルートからの相対パス。入れ子を含む）。
