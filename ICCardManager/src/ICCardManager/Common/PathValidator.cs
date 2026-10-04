@@ -68,8 +68,8 @@ namespace ICCardManager.Common
         /// <returns>検証結果</returns>
         /// <remarks>
         /// UNC パスの場合、<see cref="DefaultUncTimeoutMs"/> の内部タイムアウトで到達性を
-        /// 確認する。ハングを防ぐため <c>Task.Run</c> 内で <see cref="Directory.Exists"/>
-        /// を実行し、タイムアウト超過時は到達不可として扱う。UI スレッドから呼ぶ場合は
+        /// 確認する。ハングを防ぐため専用スレッドで <see cref="Directory.Exists"/>
+        /// を実行し、タイムアウト超過時は到達不可として扱う（Issue #2225）。UI スレッドから呼ぶ場合は
         /// <see cref="ValidateBackupPathAsync"/> の利用を検討すること。
         /// </remarks>
         public static ValidationResult ValidateBackupPath(string path)
@@ -157,7 +157,7 @@ namespace ICCardManager.Common
             // 7. UNCパスの到達性チェック（Issue #1269）
             //    CheckWritePermission より前に実行することで、到達不可時に素早く失敗させる。
             //    Directory.Exists が SMB ハンドシェイクで長時間ハングするのを防ぐため、
-            //    5秒タイムアウトの Task.Run で包んで検査する。
+            //    5秒タイムアウトの専用スレッドで検査する（Issue #2225: 以前は Task.Run）。
             //
             //    Issue #1924: 検査対象は「保存先フォルダーそのもの」ではなく共有ルート
             //    （\\server\share）。既定チェッカーの実体が Directory.Exists であるため、
@@ -465,31 +465,91 @@ namespace ICCardManager.Common
         /// <remarks>
         /// <para>
         /// <see cref="Directory.Exists"/> はネットワーク不安定時に数十秒ハングし得るため、
-        /// <c>Task.Run</c> + <see cref="Task.Wait(int)"/> で明示的なタイムアウトを設ける。
+        /// 確認を別スレッドで走らせ、呼び出し元は上限付きで待つ。
         /// </para>
         /// <para>
         /// 戻り値 <c>true</c> は「指定されたUNCパスまで到達できて、かつディレクトリが存在する」を意味する。
         /// タイムアウト・例外・ディレクトリ非存在のいずれかなら <c>false</c>。
         /// </para>
+        /// <para>
+        /// Issue #2225: 確認はスレッドプールではなく専用スレッドで走らせ、同じパスへの確認は 1 本に限る
+        /// （<see cref="CreateUncReachabilityChecker"/>）。
+        /// </para>
         /// </remarks>
         internal static readonly Func<string, int, bool> DefaultUncReachabilityChecker =
-            (path, timeoutMs) =>
+            CreateUncReachabilityChecker(path =>
             {
+                try { return Directory.Exists(path); }
+                catch { return false; }
+            });
+
+        /// <summary>
+        /// UNC パスの到達性をタイムアウト付きで検査する関数を作る（Issue #2225）。
+        /// </summary>
+        /// <param name="probe">
+        /// 到達性を確かめる本体（既定は <see cref="Directory.Exists"/>）。応答の無い共有では戻るまで
+        /// 数十秒ブロックし得る。例外を投げた場合は到達不可として扱う。
+        /// </param>
+        /// <remarks>
+        /// <para>
+        /// 確認はスレッドプールではなく専用スレッド（<see cref="DedicatedThread"/>）で走らせる。
+        /// 以前は <c>Task.Run</c> で起動して上限付きで同期的に待っていたため、プールのスレッドが同期的な待ちで
+        /// 塞がっていると、確認は空きが出るまで始まらず（.NET Framework のスレッド追加は数百 ms に 1 本）、
+        /// 到達できる共有でも上限に達して「到達できない」と誤報し得た。<see cref="ValidateBackupPathAsync"/> は
+        /// 検証全体をプールで走らせるため、プールのスレッドがプールの確認を待つ入れ子にもなっていた
+        /// （DB の疎通確認で同じ形を直した Issue #2213 と同じ）。
+        /// </para>
+        /// <para>
+        /// 上限で打ち切っても下位の呼び出しは中断できない。打ち切るたびに新しい確認を始めると、応答の無い共有へ
+        /// 確認し直すたびに専用スレッドが積み上がるため、<b>同じパスへの確認は進行中のものが終わるまで 1 本に限り</b>、
+        /// 後から来た呼び出しは進行中の確認の結果を（自分の上限まで）待つ。終わった確認の結果は使い回さない
+        /// （次の呼び出しで確認し直す）ので、共有が復旧すれば次の呼び出しで到達できると判定される。
+        /// ただし、障害中に始まった確認が SMB のタイムアウトで戻るまでの間は、復旧後の呼び出しもその確認に相乗りし、
+        /// 「到達できない」と判定され得る（呼び出しは設定の保存、バックアップ先の解決を通る経路＝自動バックアップ・リストア画面の一覧・F6 のバックアップ状況・
+        /// バックアップ健全性チェック・接続診断、バックアップの作成＝手動バックアップ・リストア前のバックアップで、
+        /// いずれも利用者の操作か起動時に限られ頻度が低い。DB の疎通確認と同じ方針）。
+        /// </para>
+        /// </remarks>
+        internal static Func<string, int, bool> CreateUncReachabilityChecker(Func<string, bool> probe)
+        {
+            var pendingChecks = new Dictionary<string, Task<bool>>(StringComparer.OrdinalIgnoreCase);
+            var pendingChecksLock = new object();
+
+            return (path, timeoutMs) =>
+            {
+                Task<bool> check;
+                lock (pendingChecksLock)
+                {
+                    if (!pendingChecks.TryGetValue(path, out var pending) || pending.IsCompleted)
+                    {
+                        // 終わった確認を辞書から外す（使ったパスの数だけ残り続けないように）
+                        foreach (var completedPath in pendingChecks.Where(p => p.Value.IsCompleted).Select(p => p.Key).ToList())
+                        {
+                            pendingChecks.Remove(completedPath);
+                        }
+
+                        pending = DedicatedThread.Run(() =>
+                        {
+                            try { return probe(path); }
+                            catch { return false; }
+                        });
+                        pendingChecks[path] = pending;
+                    }
+
+                    check = pending;
+                }
+
                 try
                 {
-                    var existsTask = Task.Run(() =>
-                    {
-                        try { return Directory.Exists(path); }
-                        catch { return false; }
-                    });
-                    return existsTask.Wait(timeoutMs) && existsTask.Result;
+                    return check.Wait(timeoutMs) && check.Result;
                 }
                 catch
                 {
-                    // Wait 中の AggregateException や TaskCanceledException は到達不可として扱う
+                    // Wait 中の AggregateException 等は到達不可として扱う
                     return false;
                 }
             };
+        }
 
         /// <summary>
         /// <see cref="UncReachabilityChecker"/> の AsyncLocal バッキングストア。
