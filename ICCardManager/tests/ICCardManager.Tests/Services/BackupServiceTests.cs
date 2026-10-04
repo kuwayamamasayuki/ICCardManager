@@ -710,25 +710,32 @@ public class BackupServiceTests : IDisposable
     /// <summary>
     /// BackupFileInfoに正しい情報が設定されることを確認
     /// </summary>
+    /// <remarks>
+    /// Issue #2231: 旧版はファイル名の時刻と比較用の時刻を別々に <c>DateTime.Now</c> で取り、間に
+    /// <c>Task.Run</c> でのファイル書き込みを挟んでいたため、スレッドプールが詰まると両者の差が
+    /// 許容の 2 秒を超えて赤くなった。<c>CreatedAt</c> はファイル名由来（Issue #1950）なので、
+    /// 固定のファイル名時刻と完全一致で比べる。作成日時は別の値にしておき、
+    /// <c>CreationTime</c> を返す実装へ戻ったときに赤くなるようにする。
+    /// </remarks>
     [Fact]
     public async Task GetBackupFilesAsync_BackupFileInfo_ContainsCorrectData()
     {
         // Arrange
-        var timestamp = DateTime.Now.ToString("yyyyMMdd_HHmmss");
-        var backupPath = Path.Combine(_backupDirectory, $"backup_{timestamp}.db");
+        const string Timestamp = "20260801_093015";
+        var backupPath = Path.Combine(_backupDirectory, $"backup_{Timestamp}.db");
         var content = "test backup content";
-        await Task.Run(() => File.WriteAllText(backupPath, content));
-        var creationTime = DateTime.Now;
-        File.SetCreationTime(backupPath, creationTime);
+        File.WriteAllText(backupPath, content);
+        File.SetCreationTime(backupPath, new DateTime(2026, 9, 15, 18, 0, 0));
 
         // Act
-        var result = (await _service.GetBackupFilesAsync()).First();
+        var result = (await _service.GetBackupFilesAsync()).Single();
 
         // Assert
-        result.FileName.Should().Be($"backup_{timestamp}.db");
+        result.FileName.Should().Be($"backup_{Timestamp}.db");
         result.FilePath.Should().Be(backupPath);
         result.FileSize.Should().Be(content.Length);
-        result.CreatedAt.Should().BeCloseTo(creationTime, TimeSpan.FromSeconds(2));
+        result.CreatedAt.Should().Be(new DateTime(2026, 8, 1, 9, 30, 15),
+            "表示日時はファイル名のタイムスタンプであり、作成日時ではない（Issue #1950）");
     }
 
     #endregion
