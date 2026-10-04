@@ -2075,8 +2075,8 @@ ON CONFLICT(key) DO UPDATE SET value = excluded.value";
         /// <para>
         /// 呼び出し元は UI スレッド以外から呼ぶこと。上限までの待機（最大
         /// <see cref="ConnectionCheckTimeout"/>）が呼び出しスレッドをブロックする。
-        /// 既存の呼び出し元（<c>SharedModeMonitor</c> / <c>ConnectionDiagnosticsService</c>）は
-        /// いずれも <c>Task.Run</c> で退避済み。
+        /// <c>SharedModeMonitor</c> のヘルスチェックは <c>DedicatedThread.Run</c>（Issue #2232）、
+        /// <c>ConnectionDiagnosticsService</c> は呼び出し元の ViewModel が診断全体を <c>Task.Run</c> で起動している。
         /// </para>
         /// </remarks>
         /// <returns>接続可能な場合true</returns>
