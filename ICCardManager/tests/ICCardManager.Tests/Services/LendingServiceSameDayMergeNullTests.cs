@@ -141,6 +141,10 @@ public class LendingServiceSameDayMergeNullTests : IDisposable
         _ledgerRepositoryMock.Verify(
             x => x.UpdateAsync(It.Is<Ledger>(l => l.Id == ExistingLedgerId)), Times.Once());
         _logger.Entries.Should().NotContain(e => e.Level == LogLevel.Error, _logger.FormatEntries());
+
+        // 失敗側が「起きない」と表明している 2 点が、成功時には実際に起きること（失敗側の表明が空振りしないことの確認）
+        _cardRepositoryMock.Verify(x => x.UpdateLentStatusAsync(TestCardIdm, false, null, null), Times.Once());
+        _service.LastProcessedCardIdm.Should().Be(TestCardIdm);
     }
 
     [Fact]
