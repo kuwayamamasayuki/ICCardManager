@@ -1,3 +1,4 @@
+#nullable enable
 using System;
 using System.Collections.Generic;
 using System.Data.SQLite;
@@ -34,7 +35,7 @@ namespace ICCardManager.Services
         /// <summary>
         /// エラーメッセージ
         /// </summary>
-        public string ErrorMessage { get; set; }
+        public string? ErrorMessage { get; set; }
 
         /// <summary>
         /// 残額
@@ -139,7 +140,7 @@ namespace ICCardManager.Services
         /// 生の <see cref="Exception.Message"/> は含めない（Issue #1614）。
         /// </para>
         /// </remarks>
-        public string FailureReason { get; set; }
+        public string? FailureReason { get; set; }
     }
 
     /// <summary>
@@ -204,7 +205,7 @@ namespace ICCardManager.Services
         /// <summary>
         /// 最後に処理したカードのIDm
         /// </summary>
-        public string LastProcessedCardIdm { get; private set; }
+        public string? LastProcessedCardIdm { get; private set; }
 
         /// <summary>
         /// 最後に処理した時刻
@@ -237,7 +238,7 @@ namespace ICCardManager.Services
             CardLockManager lockManager,
             IOptions<AppOptions> appOptions,
             ILogger<LendingService> logger,
-            ISystemClock clock = null)
+            ISystemClock? clock = null)
         {
             _dbContext = dbContext;
             _cardRepository = cardRepository;
@@ -418,9 +419,11 @@ namespace ICCardManager.Services
                 }
 
                 var (card, staff, validationError) = await ValidateLendPreconditionsAsync(staffIdm, cardIdm).ConfigureAwait(false);
-                if (validationError != null)
+                // 検証は失敗なら文言を、成功ならカードと職員の両方を返す（null の判定はその契約の裏返し）
+                if (validationError != null || card is null || staff is null)
                 {
-                    result.ErrorMessage = validationError;
+                    result.ErrorMessage = validationError ?? throw new InvalidOperationException(
+                        "貸出の事前検証が、文言を返さずにカードか職員を null で返しました。");
                     return result;
                 }
 
@@ -430,7 +433,7 @@ namespace ICCardManager.Services
                 // 物理タッチ経路（lentAt = null）は現在時刻がそのまま使われるため検証不要で、
                 // 直近履歴の追加クエリもここでは発行しない。
                 var effectiveLentAt = lentAt ?? now;
-                Ledger latestLedger = null;
+                Ledger? latestLedger = null;
                 if (lentAt.HasValue)
                 {
                     latestLedger = await _ledgerRepository.GetLatestLedgerAsync(cardIdm).ConfigureAwait(false);
@@ -492,9 +495,8 @@ namespace ICCardManager.Services
         internal async Task<Ledger> InsertLendLedgerAsync(
             string cardIdm, string staffIdm, string staffName, int balance, DateTime now)
         {
-            Ledger createdLedger = null;
-
-            await _dbContext.ExecuteWithRetryAsync(async () =>
+            // 作成した行はラムダの戻り値で受け取る（リトライのたびに作り直し、確定した試行の行だけが返る）
+            return await _dbContext.ExecuteWithRetryAsync(async () =>
             {
                 using var scope = await _dbContext.BeginTransactionAsync().ConfigureAwait(false);
 
@@ -535,7 +537,7 @@ namespace ICCardManager.Services
                     }
 
                     scope.Commit();
-                    createdLedger = ledger;
+                    return ledger;
                 }
                 catch
                 {
@@ -546,15 +548,13 @@ namespace ICCardManager.Services
                     throw;
                 }
             }).ConfigureAwait(false);
-
-            return createdLedger;
         }
 
         /// <summary>
         /// Issue #656: カードから残高を読み取れなかった場合、直近の ledger 残高を fallback として使用。
         /// </summary>
         internal async Task<int> ResolveInitialBalanceAsync(
-            string cardIdm, int? balance, Ledger prefetchedLatestLedger = null)
+            string cardIdm, int? balance, Ledger? prefetchedLatestLedger = null)
         {
             if (balance.HasValue)
             {
@@ -579,7 +579,7 @@ namespace ICCardManager.Services
         /// 貸出処理の事前検証。カード・貸出状態・職員の存在を順次チェックする。
         /// </summary>
         /// <returns>(Card, Staff, ErrorMessage)。ErrorMessage が非 null の場合は検証失敗。</returns>
-        internal async Task<(IcCard Card, Staff Staff, string ErrorMessage)> ValidateLendPreconditionsAsync(
+        internal async Task<(IcCard? Card, Staff? Staff, string? ErrorMessage)> ValidateLendPreconditionsAsync(
             string staffIdm, string cardIdm)
         {
             var card = await _cardRepository.GetByIdmAsync(cardIdm).ConfigureAwait(false);
@@ -620,7 +620,7 @@ namespace ICCardManager.Services
         /// 決定論的に固定するため（<c>development-conventions.md</c>「判断を純関数へ切り出す」）。
         /// </para>
         /// </remarks>
-        internal static string ValidateSystemLendDateTime(DateTime lentAt, DateTime now, DateTime? latestLedgerDate)
+        internal static string? ValidateSystemLendDateTime(DateTime lentAt, DateTime now, DateTime? latestLedgerDate)
         {
             if (lentAt > now)
             {
@@ -653,11 +653,9 @@ namespace ICCardManager.Services
         {
             // Issue #1733: ExecuteWithRetryAsync はラムダ全体を SQLITE_BUSY/LOCKED で再実行するため、
             // ラムダ内で result へ AddRange するとロールバック済みの試行分が累積する（バス停入力ダイアログの
-            // 二重表示につながる）。ローカル変数は試行ごとに代入で上書きされる（冪等）ため、
+            // 二重表示につながる）。作成した行はラムダの戻り値で受け取り（ロールバックした試行の行は返らない）、
             // result への反映はリトライ境界の外で成功した最終試行の分だけを行う（LendAsync と同じ配置）。
-            List<Ledger> createdLedgers = null;
-
-            await _dbContext.ExecuteWithRetryAsync(async () =>
+            var createdLedgers = await _dbContext.ExecuteWithRetryAsync(async () =>
             {
                 using var scope = await _dbContext.BeginTransactionAsync().ConfigureAwait(false);
 
@@ -668,7 +666,7 @@ namespace ICCardManager.Services
                     // 注意: Issue #1575 で LedgerRepository.InsertDetailsAsync(1 引数版) が外側 tx 中の再入を
                     // 自己検知する設計（DbContext.HasActiveTransactionScope）に変更されたため、ここで明示的に
                     // transaction を伝搬しなくてもデッドロックしない。
-                    createdLedgers = await CreateUsageLedgersAsync(
+                    var ledgers = await CreateUsageLedgersAsync(
                         cardIdm, lentRecord.LenderIdm, lentRecord.StaffName ?? string.Empty, usageSinceLent, skipDuplicateCheck).ConfigureAwait(false);
 
                     // 貸出レコードをすべて削除（履歴に「（貸出中）」が残らないようにする）
@@ -685,6 +683,7 @@ namespace ICCardManager.Services
                     }
 
                     scope.Commit();
+                    return ledgers;
                 }
                 catch
                 {
@@ -739,11 +738,12 @@ namespace ICCardManager.Services
             refundedAt = new DateTime(refundedAt.Ticks - refundedAt.Ticks % TimeSpan.TicksPerSecond, refundedAt.Kind);
 
             var cardIdm = beforeCard.CardIdm;
-            Ledger createdLedger = null;
+            Ledger createdLedger;
 
             try
             {
-                await _dbContext.ExecuteWithRetryAsync(async () =>
+                // 作成した行はラムダの戻り値で受け取る（リトライのたびに作り直し、確定した試行の行だけが返る）
+                createdLedger = await _dbContext.ExecuteWithRetryAsync(async () =>
                 {
                     using var scope = await _dbContext.BeginTransactionAsync().ConfigureAwait(false);
 
@@ -774,7 +774,7 @@ namespace ICCardManager.Services
                             .ConfigureAwait(false);
 
                         scope.Commit();
-                        createdLedger = ledger;
+                        return ledger;
                     }
                     catch
                     {
@@ -917,7 +917,7 @@ namespace ICCardManager.Services
         /// 貸出レコードを取得。見つからない場合はエラーメッセージを返す。
         /// </summary>
         /// <returns>(LentRecord, ErrorMessage)。ErrorMessage が非 null の場合は失敗。</returns>
-        internal async Task<(Ledger LentRecord, string ErrorMessage)> ResolveLentRecordAsync(string cardIdm)
+        internal async Task<(Ledger? LentRecord, string? ErrorMessage)> ResolveLentRecordAsync(string cardIdm)
         {
             var lentRecord = await _ledgerRepository.GetLentRecordAsync(cardIdm).ConfigureAwait(false);
             if (lentRecord == null)
@@ -931,7 +931,7 @@ namespace ICCardManager.Services
         /// 返却処理の事前検証。カード・貸出状態・職員の存在を順次チェックする。
         /// </summary>
         /// <returns>(Card, Returner, ErrorMessage)。ErrorMessage が非 null の場合は検証失敗。</returns>
-        internal async Task<(IcCard Card, Staff Returner, string ErrorMessage)> ValidateReturnPreconditionsAsync(
+        internal async Task<(IcCard? Card, Staff? Returner, string? ErrorMessage)> ValidateReturnPreconditionsAsync(
             string staffIdm, string cardIdm)
         {
             var card = await _cardRepository.GetByIdmAsync(cardIdm).ConfigureAwait(false);
@@ -1004,16 +1004,19 @@ namespace ICCardManager.Services
                 }
 
                 var (card, returner, validationError) = await ValidateReturnPreconditionsAsync(staffIdm, cardIdm).ConfigureAwait(false);
-                if (validationError != null)
+                // 検証は失敗なら文言を、成功ならカードと返却者の両方を返す（null の判定はその契約の裏返し）
+                if (validationError != null || card is null || returner is null)
                 {
-                    result.ErrorMessage = validationError;
+                    result.ErrorMessage = validationError ?? throw new InvalidOperationException(
+                        "返却の事前検証が、文言を返さずにカードか返却者を null で返しました。");
                     return result;
                 }
 
                 var (lentRecord, lentRecordError) = await ResolveLentRecordAsync(cardIdm).ConfigureAwait(false);
-                if (lentRecordError != null)
+                if (lentRecordError != null || lentRecord is null)
                 {
-                    result.ErrorMessage = lentRecordError;
+                    result.ErrorMessage = lentRecordError ?? throw new InvalidOperationException(
+                        "貸出レコードの解決が、文言を返さずに null を返しました。");
                     return result;
                 }
 
@@ -1134,21 +1137,21 @@ namespace ICCardManager.Services
         /// 既存テストの <c>Mock&lt;ILedgerRepository&gt;</c> は引数1版のみ <c>Setup</c> 済みのため、
         /// テスト経路（tx=null 想定）では引数1版を呼んで Setup と一致させる。
         /// </remarks>
-        private Task<int> InsertLedgerInTransactionAsync(Ledger ledger, SQLiteTransaction transaction)
+        private Task<int> InsertLedgerInTransactionAsync(Ledger ledger, SQLiteTransaction? transaction)
             => transaction != null ? _ledgerRepository.InsertAsync(ledger, transaction) : _ledgerRepository.InsertAsync(ledger);
 
-        private Task<bool> UpdateLedgerInTransactionAsync(Ledger ledger, SQLiteTransaction transaction)
+        private Task<bool> UpdateLedgerInTransactionAsync(Ledger ledger, SQLiteTransaction? transaction)
             => transaction != null ? _ledgerRepository.UpdateAsync(ledger, transaction) : _ledgerRepository.UpdateAsync(ledger);
 
-        private Task<bool> InsertDetailInTransactionAsync(LedgerDetail detail, SQLiteTransaction transaction)
+        private Task<bool> InsertDetailInTransactionAsync(LedgerDetail detail, SQLiteTransaction? transaction)
             => transaction != null ? _ledgerRepository.InsertDetailAsync(detail, transaction) : _ledgerRepository.InsertDetailAsync(detail);
 
-        private Task<bool> InsertDetailsInTransactionAsync(int ledgerId, IEnumerable<LedgerDetail> details, SQLiteTransaction transaction)
+        private Task<bool> InsertDetailsInTransactionAsync(int ledgerId, IEnumerable<LedgerDetail> details, SQLiteTransaction? transaction)
             => transaction != null ? _ledgerRepository.InsertDetailsAsync(ledgerId, details, transaction) : _ledgerRepository.InsertDetailsAsync(ledgerId, details);
 
         private async Task<List<Ledger>> CreateUsageLedgersAsync(
-            string cardIdm, string staffIdm, string staffName, List<LedgerDetail> details, bool skipDuplicateCheck = false,
-            SQLiteTransaction transaction = null)
+            string cardIdm, string? staffIdm, string? staffName, List<LedgerDetail> details, bool skipDuplicateCheck = false,
+            SQLiteTransaction? transaction = null)
         {
             // Issue #1481: transaction を内部 Repository 呼び出し全てに伝搬してトランザクション境界を明示。
             // tx=null の経路（テスト等）では引数1版にフォールバックする。
@@ -1315,7 +1318,7 @@ namespace ICCardManager.Services
                 //   年度途中繰越の繰越行は Income=0・Note=null・StaffName=null で importFromDate と
                 //   同日に作成されるため、登録時インポート（staffName=null）で他条件を全て満たして
                 //   しまい、統合すると期首残高行が利用行に上書きされて消滅する
-                List<Ledger> existingUsageLedgers = null;
+                List<Ledger>? existingUsageLedgers = null;
                 var hasUsageSegment = segments.Any(s => !s.IsCharge);
                 if (hasUsageSegment)
                 {
@@ -1439,7 +1442,14 @@ namespace ICCardManager.Services
                             await InsertDetails(existingUsageLedger.Id, usageDetails.AsEnumerable().Reverse()).ConfigureAwait(false);
 
                             // 2. 全詳細を再読み込み
-                            var fullLedger = await _ledgerRepository.GetByIdAsync(existingUsageLedger.Id).ConfigureAwait(false);
+                            // Issue #2233: 統合先は同じトランザクションで明細を INSERT した直後なので通常は必ず読める
+                            // （親の行が無ければ外部キー制約違反で INSERT が先に失敗する）。この前提はコードから読み取れない
+                            // 呼び出し元の構造（書き込みトランザクションの内側で呼ぶこと）に頼っているため、崩れたときに
+                            // NullReferenceException ではなく原因を名指しする例外で止める（ログに LedgerId が残る）
+                            var fullLedger = await _ledgerRepository.GetByIdAsync(existingUsageLedger.Id).ConfigureAwait(false)
+                                ?? throw new InvalidOperationException(
+                                    $"同日統合の対象とした利用レコード（LedgerId={existingUsageLedger.Id}）を、明細を追加した直後に読み直せませんでした。" +
+                                    "同じトランザクションの中で行が消えることは想定していないため、統合を中止します。");
                             var allUsageDetails = fullLedger.Details.Where(d => !d.IsCharge).ToList();
 
                             // 3. 摘要を再生成（往復検出・乗継統合が全詳細に対して実行される）
@@ -1698,10 +1708,17 @@ namespace ICCardManager.Services
         /// 呼び出し元は必ず <see cref="HistoryImportResult.Success"/> を確認し、
         /// 失敗をユーザーへ通知すること。
         /// </returns>
+        /// <exception cref="ArgumentNullException"><paramref name="historyDetails"/> が null のとき（履歴が無いときは空リストを渡す）。</exception>
         public async Task<HistoryImportResult> ImportHistoryForRegistrationAsync(
             string cardIdm, List<LedgerDetail> historyDetails, DateTime importFromDate,
-            Ledger initialLedger = null)
+            Ledger? initialLedger = null)
         {
+            // 呼び出し元は履歴が無いときも空リストを渡す（Issue #1763）。null は契約違反として入口で止める
+            if (historyDetails == null)
+            {
+                throw new ArgumentNullException(nameof(historyDetails));
+            }
+
             var result = new HistoryImportResult();
 
             try
@@ -1720,12 +1737,11 @@ namespace ICCardManager.Services
                     return result;
                 }
 
-                var importedCount = 0;
-
                 // Issue #1727: 他の書込み経路（貸出・返却・整合性修復）と同様にリトライで包む。
                 // 共有モードでは他PCの書込みと競合して SQLITE_BUSY になり得るが、
                 // ここは busy_timeout でカバーできない接続レベルのロックも起こり得る。
-                await _dbContext.ExecuteWithRetryAsync(async () =>
+                // 取り込んだ件数はラムダの戻り値で受け取る（確定した試行の件数だけが返る）。
+                var importedCount = await _dbContext.ExecuteWithRetryAsync(async () =>
                 {
                     // トランザクション開始
                     using var scope = await _dbContext.BeginTransactionAsync().ConfigureAwait(false);
@@ -1750,7 +1766,7 @@ namespace ICCardManager.Services
 
                         scope.Commit();
 
-                        importedCount = createdLedgers.Count;
+                        return createdLedgers.Count;
                     }
                     catch
                     {
@@ -1777,7 +1793,7 @@ namespace ICCardManager.Services
                 // （ログは調査を先に進める値を載せる。development-conventions.md 参照）
                 _logger.LogError(ex,
                     "カード登録時の台帳書き込みでエラーが発生しました（CardIdm={CardIdm}, 履歴件数={HistoryCount}, 初期残高行={HasInitialLedger}）",
-                    IdmMasker.Mask(cardIdm), historyDetails?.Count ?? 0, initialLedger != null);
+                    IdmMasker.Mask(cardIdm), historyDetails.Count, initialLedger != null);
                 result.Success = false;
                 // ロールバック済みなので、途中まで作られた行数は残さない
                 result.ImportedCount = 0;

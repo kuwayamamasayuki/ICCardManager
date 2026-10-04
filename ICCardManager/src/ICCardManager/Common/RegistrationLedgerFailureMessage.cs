@@ -71,8 +71,8 @@ namespace ICCardManager.Common
         /// カード内の利用履歴と初期残高行をまとめて取り込む経路の失敗（Issue #1727）。
         /// </summary>
         /// <param name="cardNumber">登録した交通系ICカードの管理番号。「何が」の特定に使う</param>
-        /// <param name="reason">失敗の「なぜ」（<c>LendingService.GetHistoryImportFailureReason</c> の戻り値）</param>
-        public static RegistrationLedgerFailureMessage ForHistoryImport(string cardNumber, string reason)
+        /// <param name="reason">失敗の「なぜ」（<c>LendingService.GetHistoryImportFailureReason</c> の戻り値）。null・空白なら既定の文言（<see cref="UnknownReason"/>）を使う</param>
+        public static RegistrationLedgerFailureMessage ForHistoryImport(string cardNumber, string? reason)
             => new(
                 "利用履歴の取込に失敗",
                 Build(
@@ -93,13 +93,13 @@ namespace ICCardManager.Common
         /// カード内に取り込む履歴が無く、初期残高行だけを登録する経路の失敗（Issue #1763）。
         /// </summary>
         /// <param name="cardNumber">登録した交通系ICカードの管理番号。「何が」の特定に使う</param>
-        /// <param name="reason">失敗の「なぜ」（<c>LendingService.GetHistoryImportFailureReason</c> の戻り値）</param>
+        /// <param name="reason">失敗の「なぜ」（<c>LendingService.GetHistoryImportFailureReason</c> の戻り値）。null・空白なら既定の文言（<see cref="UnknownReason"/>）を使う</param>
         /// <remarks>
         /// ここで失われるのは「新規購入」または「○月から繰越」＝<b>そのカード唯一の受入行</b>で、
         /// 台帳が 0 行のまま払出だけが積み上がる。影響は「残額が合わない」に留まらず、
         /// 年度を通して「受入 − 払出 = 残額」が成立しなくなるため、文言でもそこまで述べる。
         /// </remarks>
-        public static RegistrationLedgerFailureMessage ForInitialBalance(string cardNumber, string reason)
+        public static RegistrationLedgerFailureMessage ForInitialBalance(string cardNumber, string? reason)
             => new(
                 "登録時の残高の記録に失敗",
                 Build(
@@ -123,13 +123,13 @@ namespace ICCardManager.Common
         /// 呼び出し側は<b>成功時と同じ後処理（一覧の再読込・編集モードの終了）を済ませてから</b>
         /// 本文言を表示すること（Issue #1727）。
         /// </remarks>
-        private static string Build(string cardNumber, string what, string reason, string consequence, string howTo)
+        private static string Build(string cardNumber, string what, string? reason, string consequence, string howTo)
             => $"交通系ICカード（管理番号 {cardNumber}）の登録は完了しました。\n\n" +
                $"ただし、{what}{NormalizeReason(reason)}\n\n" +
                $"{consequence}\n\n" +
                howTo;
 
-        private static string NormalizeReason(string reason)
-            => string.IsNullOrWhiteSpace(reason) ? UnknownReason : reason;
+        private static string NormalizeReason(string? reason)
+            => reason is null || string.IsNullOrWhiteSpace(reason) ? UnknownReason : reason;
     }
 }
