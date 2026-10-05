@@ -151,7 +151,7 @@
     {
       "name": "toast_staff_recognized.png",
       "pass": "Debug",
-      "filter": "FullyQualifiedName~TouchScreenshotTests.staff_recognized_and_lend",
+      "filter": "FullyQualifiedName~TouchScreenshotTests.toast_staff_recognized",
       "sources": [
         "ICCardManager/src/ICCardManager/Views/ToastNotificationWindow.xaml",
         "ICCardManager/src/ICCardManager/Views/ToastNotificationWindow.xaml.cs",

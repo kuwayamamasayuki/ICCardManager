@@ -57,7 +57,7 @@ cd D:\OneDrive\交通系\src\ICCardManager
 | Release | リストア用バックアップ一覧（1 件選択した状態） | `restore_list.png` |
 | Release | 画面の一部だけを撮るもの（要素の矩形で撮影） | `card_list_status_mixed.png`（カード一覧）`error_no_reader.png`（ステータスバーの接続状態と再接続ボタン） |
 | Debug | 職員証認識・貸出完了・返却完了（メイン画面と画面隅のトーストの両方を含む矩形で撮る） | `staff_recognized.png` `lend.png` `return.png` |
-| Debug | トースト単体（概要版マニュアル用） | `toast_staff_recognized.png` `toast_lend.png` `toast_return.png` |
+| Debug | トースト単体（概要版マニュアル用。職員証認識は写真の職員証の氏名で撮る） | `toast_staff_recognized.png` `toast_lend.png` `toast_return.png` |
 | Debug | 返却後に開くダイアログ | `busstop.png` `companion_count.png` |
 | Debug | 仮想タッチ（DEBUG 限定の機能そのもの） | `virtual_touch.png` |
 | Debug | 職員証認証を経る画面 | `system_lend.png` `ledger_row_edit.png` |
@@ -77,6 +77,7 @@ cd D:\OneDrive\交通系\src\ICCardManager
 - **投入データで作れない外部状態に依存する画像は自動撮影の対象外**。`error_no_reader.png` は撮影機に PaSoRi が繋がっていると「接続済み」の画像ができてしまうため、切断でなければ撮らずに Skip する。共有モードのネットワーク切断（`warning_network_disconnected.png`）と、OS 標準の保存ダイアログを経る手動バックアップ（`backup_completed_status.png`）は対話式スクリプトに残している
 - **職員証認証（`StaffAuthDialog`）を経る画面は Debug パスでしか撮れない**。履歴行の追加・貸出記録の作成は監査対象の操作で職員証のタッチを要求し、実カードリーダーの無い環境では DEBUG 限定の仮想タッチでしか通せない
 - 撮影中はアプリのウィンドウが画面左上へ移動して前面に出る。マウス・キーボードに触れないこと
+- **トースト単体の画像（`toast_*.png`）は角が透けて、撮影時の背後のデスクトップが写る**。トーストは角の丸いウィンドウで、矩形で撮ると角の外側に背後の画面がそのまま入る。`-Publish` の前に `auto\` の画像の四隅を確かめ、別のウィンドウ（ブラウザー・アイコン等）が写っていれば、既存の画像を下地に文字の領域だけを差し替えて公開する（Issue #2243 の `toast_staff_recognized.png` はこの方法で公開した）。撮影前にほかのウィンドウを最小化しておけば壁紙だけが写る
 - **管理者権限で動いているウィンドウを前面にしたまま実行しない**。Windows が前面化と入力注入を拒否するため、クリック・キー入力を要する撮影（履歴照会）が「アプリのウィンドウを前面にできません」で失敗する。そのウィンドウを閉じるか最小化してからやり直す
 - テストプロセスを DPI 対応にして物理ピクセルで撮るため、表示スケール 150% では 100% の 1.5 倍の寸法になる。既存画像と寸法を揃えたいときは表示スケールを 100% にして実行する
 

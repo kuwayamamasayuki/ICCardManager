@@ -60,7 +60,6 @@ namespace ICCardManager.UITests.Tests
             InvokeDebugPanelButton(page, TestConstants.DebugPanelStaffButton);
             var toast = WaitForToast(fixture);
             File.Exists(ScreenshotHelper.CaptureWithToast(fixture.MainWindow, toast, "staff_recognized.png")).Should().BeTrue();
-            File.Exists(ScreenshotHelper.Capture(toast, "toast_staff_recognized.png", bringToFront: false)).Should().BeTrue();
 
             // 認識トーストが消えるのを待ってから次のタッチへ（貸出トーストと見分けるため）
             WaitForToastGone(fixture);
@@ -70,6 +69,30 @@ namespace ICCardManager.UITests.Tests
             toast = WaitForToast(fixture);
             File.Exists(ScreenshotHelper.CaptureWithToast(fixture.MainWindow, toast, "lend.png")).Should().BeTrue();
             File.Exists(ScreenshotHelper.Capture(toast, "toast_lend.png", bringToFront: false)).Should().BeTrue();
+        }
+
+        /// <summary>
+        /// 概要版マニュアルの職員証認識トースト（Issue #2243）。
+        /// </summary>
+        /// <remarks>
+        /// 概要版はこのトーストを職員証の写真（<c>touch_syokuinsho.jpg</c>）と並べるので、写真の職員証の氏名
+        /// （<see cref="ScreenshotSeedData.PhotographedStaffName"/>）で撮る。本編の <c>staff_recognized.png</c> と同じ
+        /// 撮影で取ると氏名が架空の <see cref="ScreenshotSeedData.PrimaryStaffName"/> になり、写真と食い違う。
+        /// 氏名を置き換えたデータは台帳の氏名と食い違うので、このメソッドではトースト単体だけを撮る。
+        /// トーストの角には撮影時の背後のデスクトップが写るので、公開前に四隅を確かめること（docs/screenshots/README.md）。
+        /// </remarks>
+        [SkippableFact]
+        public void toast_staff_recognized_概要版の職員証認識トースト()
+        {
+            SkipUnlessDebugCapture();
+
+            using var fixture = AppFixture.LaunchWithSeed(ScreenshotSeedData.SeedForPhotographedStaffTouch);
+            ScreenshotHelper.MoveToTopLeft(fixture.MainWindow);
+            var page = new MainWindowPage(fixture.MainWindow, fixture.Automation);
+
+            InvokeDebugPanelButton(page, TestConstants.DebugPanelStaffButton);
+            var toast = WaitForToast(fixture);
+            File.Exists(ScreenshotHelper.Capture(toast, "toast_staff_recognized.png", bringToFront: false)).Should().BeTrue();
         }
 
         [SkippableFact]

@@ -202,7 +202,7 @@ namespace ICCardManager.Tests.Tools
                     var classText = testSources.Select(File.ReadAllText)
                         .FirstOrDefault(t => Regex.IsMatch(t, $@"class\s+{Regex.Escape(fqn.Groups["class"].Value)}\b"));
                     classText.Should().NotBeNull($"{filter}: クラス {fqn.Groups["class"].Value} が撮影テストに存在すること");
-                    Regex.IsMatch(classText!, $@"public\s+void\s+{Regex.Escape(fqn.Groups["prefix"].Value)}\w*\s*\(")
+                    Regex.IsMatch(classText!, $@"public\s+(?:async\s+)?(?:void|Task)\s+{Regex.Escape(fqn.Groups["prefix"].Value)}\w*\s*\(")
                         .Should().BeTrue($"{filter}: 接頭辞 {fqn.Groups["prefix"].Value} で始まるテストメソッドが存在すること");
                 }
                 else if (display.Success)
@@ -492,7 +492,183 @@ $b = Invoke-ManifestScript (@(""-Write"", ""-Json"") +
             ExtractCapturedFileNames(sample).Should().BeEquivalentTo(new[] { "main.png", "card.png", "lend.png" });
         }
 
+        // ── 概要版の写真と並べる画像（Issue #2243） ─────────────────────────────────
+
+        /// <summary>
+        /// 概要版マニュアルで職員証の写真（<c>touch_syokuinsho.jpg</c>）と同じ行に並ぶ画像は、
+        /// 写真の職員証の氏名で撮る撮影テストが保存する。
+        /// </summary>
+        /// <remarks>
+        /// 本編用の <c>staff_recognized.png</c> と同じ撮影でトースト単体を撮っていた頃は、トーストの氏名が架空の
+        /// 「博多 花子」になり、写真に写る職員証の氏名と食い違っていた。
+        /// </remarks>
+        [Fact]
+        public void 概要版_職員証の写真と並べる画像は写真の氏名の投入データで撮る()
+        {
+            var paired = StaffCardPhotoPairedImageNames();
+            paired.Should().Contain("toast_staff_recognized.png", "概要版の抽出が空振りしていないこと（既知の対）");
+
+            var methods = ScreenshotTestMethods();
+            foreach (var name in paired)
+            {
+                var capturing = methods.Where(m => m.Captured.Contains(name)).ToList();
+                capturing.Should().ContainSingle($"{name} を保存する撮影テストは 1 つであること");
+                UsesPhotographedStaffSeed(capturing[0].Body).Should().BeTrue(
+                    $"{name} は職員証の写真と並ぶので、写真の氏名の投入データ（{PhotographedStaffSeedName}）で撮ること（{capturing[0].Name}）");
+            }
+        }
+
+        /// <summary>
+        /// 写真の氏名の投入データで撮る撮影テストは、写真と並べる画像だけを保存する（上の表明の対）。
+        /// </summary>
+        /// <remarks>
+        /// この投入データは職員マスタの氏名だけを置き換え、台帳の氏名は架空のまま残す。本編用の画面
+        /// （<c>staff_recognized.png</c> など、メイン画面の履歴が写るもの）まで同じ撮影で撮ると、
+        /// 写真と並ばない画像の氏名まで変わり、履歴の氏名とも食い違う。
+        /// </remarks>
+        [Fact]
+        public void 概要版_写真の氏名の投入データで撮る撮影は写真と並べる画像だけを保存する()
+        {
+            var paired = StaffCardPhotoPairedImageNames();
+            var users = ScreenshotTestMethods().Where(m => UsesPhotographedStaffSeed(m.Body)).ToList();
+
+            users.Should().NotBeEmpty("写真の氏名の投入データを使う撮影テストが存在すること");
+            foreach (var method in users)
+            {
+                method.Captured.Should().NotBeEmpty($"{method.Name} が画像を保存していること");
+                method.Captured.Should().BeSubsetOf(paired,
+                    $"{method.Name} は写真の氏名で撮るので、概要版で職員証の写真と並ぶ画像だけを保存すること");
+            }
+        }
+
+        /// <summary>
+        /// 写真の氏名の投入データは、仮想タッチの職員の氏名を職員マスタで写真の氏名へ置き換える。
+        /// </summary>
+        /// <remarks>
+        /// 写真の中身はコードから読めないため、写真に写る氏名（「桑山 雅行」）をここで固定する。
+        /// 写真を撮り直したときは、定数とあわせてこの期待値も直すこと。
+        /// </remarks>
+        [Fact]
+        public void 撮影用データ_写真の氏名は本編の氏名と別の値で_仮想タッチの職員の氏名を置き換える()
+        {
+            var source = File.ReadAllText(Path.Combine(
+                RepoRoot, "ICCardManager", "tests", "ICCardManager.UITests", "Infrastructure", "ScreenshotSeedData.cs"));
+
+            ConstValue(source, "PhotographedStaffName").Should().Be("桑山 雅行", "touch_syokuinsho.jpg に写る職員証の氏名");
+            ConstValue(source, "PrimaryStaffName").Should().NotBe(ConstValue(source, "PhotographedStaffName"),
+                "本編の画面は架空の氏名のまま撮ること（写真の氏名にすると置き換えの意味が無くなる）");
+
+            var body = TestSourceInspection.ExtractMethodBodyPreservingLiterals(
+                source, "public static void SeedForPhotographedStaffTouch(SQLiteConnection conn)");
+            body.Should().Contain("SeedForVirtualTouch(conn)", "仮想タッチの撮影と同じ投入データを土台にすること");
+            Regex.IsMatch(body, @"UPDATE\s+staff\s+SET\s+name\s*=\s*@name\s+WHERE\s+staff_idm\s*=\s*@idm")
+                .Should().BeTrue("職員マスタの氏名を置き換えること");
+            body.Should().Contain("(\"@name\", PhotographedStaffName)").And.Contain("(\"@idm\", AppFixture.SeededStaffIdm)",
+                "DEBUG パネルの「職員証」が模擬する職員の氏名を写真の氏名にすること");
+        }
+
+        [Fact]
+        public void 抽出_概要版で職員証の写真と同じ行に並ぶ画像だけを拾う()
+        {
+            const string sample = @"
+| ![職員証をタッチ](../screenshots/touch_syokuinsho.jpg){width=5cm} | ![認識画面](../screenshots/toast_staff_recognized.png){width=6cm} |
+| ![交通系ICカードをタッチ](../screenshots/touch_koutsuukeiIC.jpg){width=5cm} | ![貸出完了](../screenshots/toast_lend.png){width=6cm} |
+";
+            ExtractStaffCardPhotoPairedImageNames(sample).Should().Equal("toast_staff_recognized.png");
+        }
+
+        [Fact]
+        public void 抽出_撮影テストのメソッドは戻り値の型によらず拾い_コンストラクタは拾わない()
+        {
+            const string sample = @"
+                public TouchScreenshotTests() { }
+                [SkippableFact]
+                public void staff_recognized_and_lend_職員証認識と貸出完了() { }
+                [SkippableFact]
+                public async Task toast_async_非同期の撮影() { await Task.Yield(); }
+                [SkippableFact]
+                public Task toast_task_Taskを返す撮影() { return Task.CompletedTask; }
+            ";
+            ExtractPublicMethodSignatures(sample).Select(d => d.Name).Should().Equal(
+                "staff_recognized_and_lend_職員証認識と貸出完了", "toast_async_非同期の撮影", "toast_task_Taskを返す撮影");
+        }
+
         // ── ヘルパー ─────────────────────────────────
+
+        private const string PhotographedStaffSeedName = "SeedForPhotographedStaffTouch";
+
+        /// <summary>
+        /// メソッド本体が写真の氏名の投入データを使っているか。<c>using static</c> で修飾を省いた呼び出しも拾うよう、
+        /// 型名ではなくメソッド名の語境界一致で見る（コードレビューで検出）。
+        /// 見るのはテストメソッドの本体に直接現れる呼び出しだけで、補助メソッド経由の呼び出しは辿らない。
+        /// 撮影テストからは直接呼ぶこと。
+        /// </summary>
+        private static bool UsesPhotographedStaffSeed(string body) =>
+            Regex.IsMatch(body, $@"\b{PhotographedStaffSeedName}\b");
+
+        private static IReadOnlyList<string> StaffCardPhotoPairedImageNames() =>
+            ExtractStaffCardPhotoPairedImageNames(File.ReadAllText(Path.Combine(
+                RepoRoot, "ICCardManager", "docs", "manual", "ユーザーマニュアル概要版.md")));
+
+        /// <summary>
+        /// 概要版マニュアルの本文から、職員証の写真（<c>touch_syokuinsho.jpg</c>）と同じ行に並ぶ画像名を抽出する。
+        /// </summary>
+        internal static IReadOnlyList<string> ExtractStaffCardPhotoPairedImageNames(string markdown) =>
+            markdown.Split('\n')
+                .Where(line => line.Contains("touch_syokuinsho.jpg"))
+                .SelectMany(line => Regex.Matches(line, @"screenshots/(?<name>[A-Za-z0-9_]+\.png)").Cast<Match>())
+                .Select(m => m.Groups["name"].Value)
+                .Distinct()
+                .ToList();
+
+        /// <summary>
+        /// コメントを除いたソースから public メソッド（<c>void</c> / <c>Task</c>、<c>async</c> の有無を問わない）の名前と、
+        /// <see cref="TestSourceInspection.ExtractMethodBodyPreservingLiterals"/> へ渡すシグネチャの先頭を抽出する。
+        /// </summary>
+        /// <remarks>
+        /// 本体の取り出しはブロック本体（<c>{ }</c>）を持つメソッドに限る。撮影テストを式本体（<c>=&gt; …;</c>）で書くと、
+        /// <see cref="TestSourceInspection.ExtractMethodBodyPreservingLiterals"/> が例外にする。
+        /// </remarks>
+        internal static IReadOnlyList<(string Name, string Signature)> ExtractPublicMethodSignatures(string code) =>
+            Regex.Matches(code, @"public\s+(?:async\s+)?(?:void|Task)\s+(?<name>\w+)\s*\(")
+                .Cast<Match>()
+                .Select(m => (m.Groups["name"].Value, m.Value))
+                .ToList();
+
+        /// <summary>撮影テスト（<c>*ScreenshotTests.cs</c>）の各テストメソッドの名前・本体・保存する画像名。</summary>
+        /// <remarks>
+        /// 戻り値の型（<c>void</c> / <c>async Task</c>）で絞ると、別の形で書いた撮影テストが対の表明から静かに漏れる
+        /// （コードレビューで検出）。抽出したメソッドの数がテスト属性の数と一致することをファイルごとに表明する。
+        /// </remarks>
+        private static List<(string Name, string Body, IReadOnlyList<string> Captured)> ScreenshotTestMethods()
+        {
+            var methods = new List<(string Name, string Body, IReadOnlyList<string> Captured)>();
+            foreach (var path in ScreenshotTestSources())
+            {
+                var source = File.ReadAllText(path);
+                var code = TestSourceInspection.RemoveCommentsPreservingLines(source);
+                var attributes = Regex.Matches(code, @"\[(?:Skippable)?(?:Fact|Theory)\b").Count;
+                var declarations = ExtractPublicMethodSignatures(code);
+                declarations.Should().HaveCount(attributes,
+                    $"{Path.GetFileName(path)} のテストメソッドをすべて抽出していること（属性 {attributes} 件）");
+
+                foreach (var (name, signature) in declarations)
+                {
+                    var body = TestSourceInspection.ExtractMethodBodyPreservingLiterals(source, signature);
+                    methods.Add((name, body, ExtractCapturedFileNames(body).ToList()));
+                }
+            }
+
+            methods.Should().NotBeEmpty("撮影テストのメソッド抽出が空振りしていないこと");
+            return methods;
+        }
+
+        private static string ConstValue(string source, string name)
+        {
+            var m = Regex.Match(source, $@"const\s+string\s+{Regex.Escape(name)}\s*=\s*""(?<value>[^""]*)""");
+            m.Success.Should().BeTrue($"定数 {name} が宣言されていること");
+            return m.Groups["value"].Value;
+        }
 
         private static List<string> ScreenshotNames(JsonDocument doc) =>
             doc.RootElement.GetProperty("screenshots").EnumerateArray().Select(s => s.GetProperty("name").GetString()!).ToList();
