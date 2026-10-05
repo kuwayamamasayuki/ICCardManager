@@ -155,13 +155,21 @@ namespace ICCardManager.ViewModels
         private Staff? _selectedStaff;
 
         /// <summary>
-        /// 挿入位置前後の行（Addモード用）
+        /// 挿入位置の直前の行（最大 2 行、Addモード用。挿入位置プレビューでマーカーの上に描く）
         /// </summary>
-        [ObservableProperty]
-        private ObservableCollection<LedgerDto> _contextRows = new();
+        /// <remarks>
+        /// Issue #2239: 前後の行を 1 つの一覧にまとめてマーカーをその下に描くと、マーカーが実際の
+        /// 挿入位置より最大 2 行下に見える。前の行と後の行を分けて持ち、マーカーを両者の間に描く。
+        /// </remarks>
+        public ObservableCollection<LedgerDto> RowsBeforeInsert { get; } = new();
 
         /// <summary>
-        /// 挿入位置（ContextRows内のインデックス）
+        /// 挿入位置の直後の行（最大 2 行、Addモード用。挿入位置プレビューでマーカーの下に描く）
+        /// </summary>
+        public ObservableCollection<LedgerDto> RowsAfterInsert { get; } = new();
+
+        /// <summary>
+        /// 挿入位置（<see cref="_allLedgers"/> 内のインデックス。この位置の行の直前に挿入する）
         /// </summary>
         [ObservableProperty]
         private int _insertIndex;
@@ -699,15 +707,16 @@ namespace ICCardManager.ViewModels
         /// </summary>
         private void UpdateContextRows()
         {
-            ContextRows.Clear();
+            RowsBeforeInsert.Clear();
+            RowsAfterInsert.Clear();
 
-            // 挿入位置の前後2行ずつを表示
+            // 挿入位置の前後2行ずつを、マーカーの上（前の行）と下（後の行）に分けて表示する（Issue #2239）
             var startIdx = Math.Max(0, InsertIndex - 2);
             var endIdx = Math.Min(_allLedgers.Count, InsertIndex + 2);
 
             for (int i = startIdx; i < endIdx; i++)
             {
-                ContextRows.Add(_allLedgers[i]);
+                (i < InsertIndex ? RowsBeforeInsert : RowsAfterInsert).Add(_allLedgers[i]);
             }
         }
 
@@ -903,12 +912,14 @@ namespace ICCardManager.ViewModels
             // Addモードの場合の日付チェック
             if (Mode == LedgerRowEditMode.Add && _allLedgers.Count > 0)
             {
-                // 挿入位置の前後と日付の整合性をチェック
-                if (InsertIndex > 0 && _allLedgers[InsertIndex - 1].Date > EditDate)
+                // 挿入位置の前後と日付の整合性をチェック。
+                // Issue #2239: 日単位で比べる。貸出中レコードは日付に貸出時刻を持ち（利用日の入力は 0 時）、
+                // 時刻まで比べると同じ日の行の下へ入れただけで「前の行より古い」と警告していた
+                if (InsertIndex > 0 && _allLedgers[InsertIndex - 1].Date.Date > EditDate.Date)
                 {
                     AddWarning("日付が前の行より古くなっています。挿入位置を確認してください。");
                 }
-                if (InsertIndex < _allLedgers.Count && _allLedgers[InsertIndex].Date < EditDate)
+                if (InsertIndex < _allLedgers.Count && _allLedgers[InsertIndex].Date.Date < EditDate.Date)
                 {
                     AddWarning("日付が次の行より新しくなっています。挿入位置を確認してください。");
                 }

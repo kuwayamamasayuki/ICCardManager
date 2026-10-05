@@ -249,6 +249,187 @@ public class LedgerRowEditViewModelTests : IDisposable
 
     #endregion
 
+    #region Addモード: 挿入位置プレビュー（Issue #2239）
+
+    /// <summary>
+    /// 1 ページ目の先頭に繰越行（Issue #1155）を持つ履歴一覧を作る。
+    /// 繰越行の日付は表示月の 1 日（<c>HistoryPanelViewModel.BuildCarryoverRow</c> と同じ）。
+    /// </summary>
+    private List<LedgerDto> CreateTestLedgersWithCarryoverRow()
+    {
+        var ledgers = CreateTestLedgers();
+        ledgers.Insert(0, new LedgerDto
+        {
+            Id = 0,
+            CardIdm = TestCardIdm,
+            Date = new DateTime(2026, 1, 1),
+            DateDisplay = "R8.1.1",
+            Summary = "12月から繰越",
+            Income = 0,
+            Expense = 0,
+            Balance = 2510,
+            IsCarryoverRow = true
+        });
+        return ledgers;
+    }
+
+    /// <summary>
+    /// Issue #2239: プレビューは挿入位置の「前の行」と「後の行」を分けて持つこと。
+    /// 1 つの一覧に前後 2 行ずつを並べ、その下にマーカーを描いていたため、
+    /// マーカーは実際の挿入位置より最大 2 行下に見えていた。
+    /// </summary>
+    [Fact]
+    public async Task AddMode_挿入位置プレビュー_前の行と後の行が挿入位置で分かれていること()
+    {
+        // Arrange: 末尾（InsertIndex=3）から始まる
+        await _viewModel.InitializeForAddAsync(TestCardIdm, CreateTestLedgers());
+        _viewModel.InsertIndex.Should().Be(3);
+
+        // Assert: 末尾では後の行は無い
+        _viewModel.RowsBeforeInsert.Select(r => r.Id).Should().Equal(2, 3);
+        _viewModel.RowsAfterInsert.Should().BeEmpty();
+
+        // Act: 1 つ上へ（Id=2 と Id=3 の間）
+        _viewModel.MoveInsertPositionUpCommand.Execute(null);
+
+        // Assert: 直前の行は Id=2、直後の行は Id=3
+        _viewModel.InsertIndex.Should().Be(2);
+        _viewModel.RowsBeforeInsert.Select(r => r.Id).Should().Equal(1, 2);
+        _viewModel.RowsAfterInsert.Select(r => r.Id).Should().Equal(3);
+
+        // Act: 先頭へ
+        _viewModel.MoveInsertPositionUpCommand.Execute(null);
+        _viewModel.MoveInsertPositionUpCommand.Execute(null);
+
+        // Assert: 先頭では前の行は無く、後の行は先頭から 2 行
+        _viewModel.InsertIndex.Should().Be(0);
+        _viewModel.RowsBeforeInsert.Should().BeEmpty();
+        _viewModel.RowsAfterInsert.Select(r => r.Id).Should().Equal(1, 2);
+    }
+
+    /// <summary>
+    /// Issue #2239: 前月からの繰越行のすぐ下を挿入位置にでき、プレビューでも
+    /// 繰越行が直前・その月の最初の行が直後に表示されること。
+    /// </summary>
+    [Fact]
+    public async Task AddMode_繰越行のすぐ下を挿入位置にでき_プレビューの直前の行が繰越行であること()
+    {
+        // Arrange
+        await _viewModel.InitializeForAddAsync(TestCardIdm, CreateTestLedgersWithCarryoverRow());
+
+        // Act: 繰越行（1/1）とその月の最初の行（1/10）の間の日付を入れる
+        _viewModel.Summary = "鉄道（天神～博多）";
+        _viewModel.Expense = 210;
+        _viewModel.EditDate = new DateTime(2026, 1, 5);
+
+        // Assert: 挿入位置は繰越行のすぐ下
+        _viewModel.InsertIndex.Should().Be(1);
+        _viewModel.RowsBeforeInsert.Should().ContainSingle()
+            .Which.IsCarryoverRow.Should().BeTrue();
+        _viewModel.RowsAfterInsert.Select(r => r.Id).Should().Equal(1, 2);
+
+        // 残高は繰越額を起点に計算され、日付の警告も出ない
+        _viewModel.PreviousBalance.Should().Be(2510);
+        _viewModel.Balance.Should().Be(2300);
+        _viewModel.WarningMessage.Should().BeEmpty();
+    }
+
+    /// <summary>
+    /// Issue #2239: 挿入位置を上下に動かして繰越行のすぐ下へ合わせられること
+    /// （日付の自動調整に頼らない経路）。
+    /// </summary>
+    [Fact]
+    public async Task AddMode_上下の移動で繰越行のすぐ下へ合わせられること()
+    {
+        // Arrange: 末尾（InsertIndex=4）から始まる
+        await _viewModel.InitializeForAddAsync(TestCardIdm, CreateTestLedgersWithCarryoverRow());
+        _viewModel.InsertIndex.Should().Be(4);
+
+        // Act
+        for (int i = 0; i < 3; i++)
+        {
+            _viewModel.MoveInsertPositionUpCommand.Execute(null);
+        }
+
+        // Assert
+        _viewModel.InsertIndex.Should().Be(1);
+        _viewModel.RowsBeforeInsert.Last().IsCarryoverRow.Should().BeTrue();
+        _viewModel.RowsAfterInsert.First().Id.Should().Be(1);
+        _viewModel.PreviousBalance.Should().Be(2510);
+    }
+
+    /// <summary>
+    /// Issue #2239: 前後の行と同じ日なら、時刻の違いで日付の警告を出さないこと。
+    /// 貸出中レコードは日付に貸出時刻を持つ（<c>Date = now</c>）一方、利用日の入力は 0 時なので、
+    /// 時刻まで比べると同じ日の行の下に入れただけで「日付が前の行より古くなっています」と出ていた。
+    /// </summary>
+    [Fact]
+    public async Task AddMode_前の行と同じ日なら時刻が違っても日付の警告を出さないこと()
+    {
+        // Arrange: 末尾に 1/11 09:30 の貸出中レコードがある
+        var ledgers = CreateTestLedgers();
+        ledgers.Add(new LedgerDto
+        {
+            Id = 4,
+            CardIdm = TestCardIdm,
+            Date = new DateTime(2026, 1, 11, 9, 30, 0),
+            DateDisplay = "R8.1.11",
+            Summary = "（貸出中）",
+            Income = 0,
+            Expense = 0,
+            Balance = 1890,
+            IsLentRecord = true
+        });
+        await _viewModel.InitializeForAddAsync(TestCardIdm, ledgers);
+        _viewModel.Summary = "鉄道（六本松～天神）";
+        _viewModel.Expense = 200;
+        _viewModel.EditDate = new DateTime(2026, 1, 11);
+
+        // Act: 貸出中レコードの下（末尾）へ
+        while (_viewModel.InsertIndex < ledgers.Count)
+        {
+            _viewModel.MoveInsertPositionDownCommand.Execute(null);
+        }
+
+        // Assert
+        _viewModel.InsertIndex.Should().Be(4);
+        _viewModel.WarningMessage.Should().BeEmpty();
+    }
+
+    /// <summary>
+    /// Issue #2239: 日単位で比べても、前後の行と日付が前後する位置では従来どおり警告すること
+    /// （警告を丸ごと止めた実装を通さないための対の表明）。
+    /// </summary>
+    [Fact]
+    public async Task AddMode_日付が前後の行と食い違う位置では日付の警告を出すこと()
+    {
+        // Arrange
+        await _viewModel.InitializeForAddAsync(TestCardIdm, CreateTestLedgersWithCarryoverRow());
+        _viewModel.Summary = "鉄道（天神～博多）";
+        _viewModel.Expense = 210;
+        _viewModel.EditDate = new DateTime(2026, 1, 10);
+
+        // Act: 1/10 の行を、1/11 の行の下（末尾）へ動かす
+        while (_viewModel.InsertIndex < 4)
+        {
+            _viewModel.MoveInsertPositionDownCommand.Execute(null);
+        }
+
+        // Assert: 前の行（1/11）より古い
+        _viewModel.WarningMessage.Should().Be("日付が前の行より古くなっています。挿入位置を確認してください。");
+
+        // Act: 繰越行（1/1）の上（先頭）へ動かす
+        while (_viewModel.InsertIndex > 0)
+        {
+            _viewModel.MoveInsertPositionUpCommand.Execute(null);
+        }
+
+        // Assert: 次の行（繰越行 1/1）より新しい
+        _viewModel.WarningMessage.Should().Be("日付が次の行より新しくなっています。挿入位置を確認してください。");
+    }
+
+    #endregion
+
     #region Editモード初期化
 
     [Fact]
