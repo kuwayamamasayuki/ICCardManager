@@ -99,7 +99,8 @@ pwsh.exe -ExecutionPolicy Bypass -File ./installer/build-installer.ps1 -Version 
 
 ### 3. GitHub Release
 ```bash
-gh release edit vX.Y.Z --notes "Release notes from CHANGELOG"
+gh release edit vX.Y.Z --notes-file <本文のファイル>   # stdin（--notes-file -）では渡さない
+gh release view vX.Y.Z --json body -q '.body | length'   # 0 でないことを確かめる
 gh release upload vX.Y.Z "installer/output/ICCardManager_Setup_X.Y.Z.exe" --clobber
 ```
 
@@ -146,6 +147,9 @@ gh release upload vX.Y.Z "installer/output/ICCardManager_Setup_X.Y.Z.exe" --clob
 - **WSL2 パス**: スクリプト呼び出しは `./tools/release.ps1` 形式で。bare path だと Windows 側で解決できない
 - **タグ重複**: 失敗リトライ時、タグ `vX.Y.Z` が既に存在する場合は `-SkipTag` で既存タグをスキップ
 - **ISCC.exe パス**: `settings.local.json` の許可パスと実際のインストール先が一致していること
+- **リリースノートの本文（Issue #2246）**: `publish-release.ps1` は本文を一時ファイルで `gh release edit --notes-file` へ渡し、`gh release view --json body` で読み戻して内容を照合する（本文を組み立てられるかはタグを打つ前に確かめる）。**終了コードは成功の根拠にしない**（stdin で渡していた頃は本文が届かず、gh は空の本文を終了コード 0 で受け付けて v2.9.5〜v2.11.0 の本文が空のまま残った）。照合に失敗したら一時ファイル（`installer/output/release-notes-X.Y.Z.md`）が残るので、原因を直して `-SkipTag -SkipBuild` で再実行する。手作業で直す場合も、本文を設定したら `gh release view vX.Y.Z --json body -q '.body | length'` で 0 でないことを確かめる
+- **本文の上限は 125,000 文字**: 超えると `release-notes.ps1` が分類行と各項目の見出し行（行頭の `- `）だけに絞り、タグ時点の CHANGELOG へのリンクを添える。見出しだけでも超えるときは収まる分だけ載せて「ほか N 件」と示す。組み立ては `release-notes.ps1` の 1 か所にあるので、雛形（動作環境など）を変えるときはそこを直す
+- **GitHub Release の作成待ち**: `release.yml` は 3〜6 分かかる。`publish-release.ps1` は既定で最大 900 秒待つ（`-ReleaseWaitSeconds` で変更可）。待ち切れずに止まったら、Release の作成を確かめてから `-SkipTag -SkipBuild` で再開する
 - **CHANGELOG.md の `### Unreleased`**: `bump-version.ps1` は既存 `### Unreleased` セクションを検出すると、見出しを `### vX.Y.Z (date)` にリネームする。Unreleased に本文があればそれを正典として採用し、コミットメッセージからの自動生成エントリは破棄する（本文が空のときだけ自動生成を採用）。Unreleased が存在しない場合は「# 更新履歴」直後に新規セクションを挿入する従来挙動。
 
 ## CHANGELOG.md `### Unreleased` 運用ルール
