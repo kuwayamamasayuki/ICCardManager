@@ -50,6 +50,17 @@ namespace ICCardManager.UITests.Infrastructure
         public const string SecondaryStaffName = "天神 太郎";
 
         /// <summary>
+        /// 概要版マニュアルの写真 <c>docs/screenshots/touch_syokuinsho.jpg</c> に写っている職員証の氏名（Issue #2243）。
+        /// </summary>
+        /// <remarks>
+        /// 概要版は写真（実物の職員証をタッチする手元）と認識トースト（<c>toast_staff_recognized.png</c>）を
+        /// 1 行に並べるので、トーストの氏名が写真の職員証と違うと「別の人の職員証で認識された」と読める。
+        /// 写真の中身はコードから読めないため、写真を撮り直したらこの値も合わせて直すこと。
+        /// 本編の画面（<see cref="PrimaryStaffName"/>）は架空の氏名のまま変えない。
+        /// </remarks>
+        public const string PhotographedStaffName = "桑山 雅行";
+
+        /// <summary>
         /// DEBUG パネルの「交通系ICカード」ボタンが模擬する IDm（<c>MainViewModel.SimulateIcCard</c> と一致させる）。
         /// 第 2 段階（Issue #2019）の貸出・返却撮影で使う。
         /// </summary>
@@ -103,6 +114,32 @@ namespace ICCardManager.UITests.Infrastructure
                 SetSetting(conn, "companion_count_input_timeout_seconds", "0");
             }
             tx.Commit();
+        }
+
+        /// <summary>
+        /// 概要版マニュアルの写真と並べる職員証認識トースト用のサンプルデータ（Issue #2243）。
+        /// <see cref="SeedForVirtualTouch(SQLiteConnection)"/> の主担当の職員（仮想タッチの IDm）の氏名を
+        /// <see cref="PhotographedStaffName"/> へ置き換える。
+        /// </summary>
+        /// <remarks>
+        /// 置き換えは職員マスタだけで、台帳の氏名（<c>ledger.staff_name</c>）は <see cref="PrimaryStaffName"/> のまま残る。
+        /// トーストは職員マスタの氏名しか表示しないので、このデータで撮るのはトースト単体に限ること
+        /// （メイン画面の履歴まで写すと、台帳と職員マスタで氏名が食い違った画面になる）。
+        /// </remarks>
+        public static void SeedForPhotographedStaffTouch(SQLiteConnection conn)
+        {
+            SeedForVirtualTouch(conn);
+            var updated = Execute(conn,
+                "UPDATE staff SET name = @name WHERE staff_idm = @idm",
+                ("@name", PhotographedStaffName), ("@idm", AppFixture.SeededStaffIdm));
+
+            // 0 行のまま進むと、トーストは架空の氏名のまま撮られ、写真との食い違いが黙って戻る
+            if (updated != 1)
+            {
+                throw new InvalidOperationException(
+                    $"写真の氏名へ置き換える職員（IDm {AppFixture.SeededStaffIdm}）が {updated} 行でした。" +
+                    "Seed が投入する主担当の職員の IDm と AppFixture.SeededStaffIdm を揃えてください。");
+            }
         }
 
         /// <summary>
@@ -297,7 +334,8 @@ namespace ICCardManager.UITests.Infrastructure
         private static string ToText(DateTime value) =>
             value.ToString(DateTimePattern, CultureInfo.InvariantCulture);
 
-        private static void Execute(SQLiteConnection conn, string sql, params (string name, object value)[] parameters)
+        /// <returns>影響行数。</returns>
+        private static int Execute(SQLiteConnection conn, string sql, params (string name, object value)[] parameters)
         {
             using var cmd = conn.CreateCommand();
             cmd.CommandText = sql;
@@ -305,7 +343,7 @@ namespace ICCardManager.UITests.Infrastructure
             {
                 cmd.Parameters.AddWithValue(name, value);
             }
-            cmd.ExecuteNonQuery();
+            return cmd.ExecuteNonQuery();
         }
     }
 }
