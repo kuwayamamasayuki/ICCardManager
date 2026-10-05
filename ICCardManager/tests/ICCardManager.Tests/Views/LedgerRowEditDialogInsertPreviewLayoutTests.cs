@@ -1,7 +1,5 @@
-using System.Collections.Generic;
 using System.IO;
 using System.Linq;
-using System.Text.RegularExpressions;
 using FluentAssertions;
 using ICCardManager.Tests.Views.Helpers;
 using ICCardManager.ViewModels;
@@ -118,27 +116,10 @@ public class LedgerRowEditDialogInsertPreviewLayoutTests
 
     private static XamlElementInspection.XamlElementSpan InnermostStackPanel(
         string xaml, XamlElementInspection.XamlElementSpan inner)
-        => AllStackPanels(xaml)
+        => XamlElementInspection.EnumerateElementsIncludingNested(xaml, "StackPanel")
             .Where(p => Contains(p, inner))
             .OrderBy(p => p.Length)
             .First();
-
-    /// <summary>
-    /// 入れ子のものも含めて、すべての <c>StackPanel</c> 要素を列挙する。
-    /// </summary>
-    /// <remarks>
-    /// <see cref="XamlElementInspection.EnumerateElementSpans"/> は外側の要素の終わりから走査を続けるため、
-    /// 同名の入れ子（縦並びのパネルの内側の横並びのパネル）を返さない。それでは「最も内側」が常に外側になり、
-    /// 一覧を内側のパネルへ移した形を検出できない（コードレビューで検出）。開始タグの位置ごとに要素を切り出す。
-    /// </remarks>
-    private static IEnumerable<XamlElementInspection.XamlElementSpan> AllStackPanels(string xaml)
-        => XamlElementInspection.EnumerateStartTags(xaml)
-            .Where(t => Regex.IsMatch(t.StartTag, @"^<StackPanel[\s/>]"))
-            .Select(t =>
-            {
-                var span = XamlElementInspection.EnumerateElementSpans(xaml.Substring(t.Start), "StackPanel").First();
-                return span with { Start = span.Start + t.Start };
-            });
 
     private static bool Contains(
         XamlElementInspection.XamlElementSpan outer, XamlElementInspection.XamlElementSpan inner)
