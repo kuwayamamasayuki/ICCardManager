@@ -617,7 +617,9 @@ namespace ICCardManager.ViewModels
             TrackFieldChange();
             if (Mode == LedgerRowEditMode.Add && _allLedgers.Count > 0)
             {
-                // 日付に基づいて挿入位置を自動調整
+                // 日付に基づいて挿入位置を自動調整。
+                // Issue #2239: ここは時刻込みで比べ、Validate の日付の警告は日単位で比べる。利用日の入力は常に 0 時なので、
+                // 同じ日の行のうち時刻を持つもの（貸出中レコード）の手前へ入り、日単位の警告とは食い違わない
                 var newIndex = _allLedgers.Count;
                 for (int i = 0; i < _allLedgers.Count; i++)
                 {
