@@ -4,6 +4,7 @@
 #   .\convert-to-docx.ps1 -Force       # 全マニュアルを強制変換
 #   .\convert-to-docx.ps1 -Target user # ユーザーマニュアルのみ変換
 #   .\convert-to-docx.ps1 -Target it   # IT担当者ガイドのみ変換
+#   .\convert-to-docx.ps1 -Target user-summary # ユーザーマニュアル概要版のみ変換
 #   .\convert-to-docx.ps1 -NoMermaid   # Mermaidフィルターを使用しない
 #   .\convert-to-docx.ps1 -Version 1.13.0  # バージョン文字列を注入して変換
 # 前提条件:
@@ -15,7 +16,7 @@
 #      作成: .\create-reference-doc.ps1 を実行
 
 param(
-    [ValidateSet("all", "intro", "user", "user-summary", "admin", "it", "dev")]
+    [ValidateSet("all", "intro", "user", "user-summary", "admin", "quickstart", "it", "dev")]
     [string]$Target = "all",
     [switch]$Force,
     [switch]$NoMermaid,
@@ -65,7 +66,8 @@ function Set-TableCellVerticalCenter {
                 $vAlign = $xml.CreateElement("w", "vAlign", $ns)
                 $tcPr.AppendChild($vAlign) | Out-Null
             }
-            $vAlign.SetAttribute("val", $ns, "center")
+            # 3 引数の SetAttribute は設定した値を返すので捨てる（捨てないと関数の戻り値＝件数に混ざる。Issue #2241）
+            [void]$vAlign.SetAttribute("val", $ns, "center")
             $cellCount++
         }
 
@@ -121,10 +123,10 @@ function Add-TableBordersToDocx {
 
             foreach ($side in @("top", "left", "bottom", "right", "insideH", "insideV")) {
                 $border = $xml.CreateElement("w", $side, $ns)
-                $border.SetAttribute("val", $ns, "single")
-                $border.SetAttribute("sz", $ns, "4")      # 0.5pt
-                $border.SetAttribute("space", $ns, "0")
-                $border.SetAttribute("color", $ns, "000000")  # 黒
+                [void]$border.SetAttribute("val", $ns, "single")
+                [void]$border.SetAttribute("sz", $ns, "4")      # 0.5pt
+                [void]$border.SetAttribute("space", $ns, "0")
+                [void]$border.SetAttribute("color", $ns, "000000")  # 黒
                 $tblBorders.AppendChild($border) | Out-Null
             }
 
@@ -158,59 +160,9 @@ function Add-TableBordersToDocx {
 # スクリプトのディレクトリを取得
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 
-# マニュアル定義
-$Manuals = @(
-    @{
-        Name = "はじめに"
-        Key = "intro"
-        Input = "はじめに.md"
-        Output = "はじめに.docx"
-        Title = "交通系ICカード管理システム：ピッすい はじめに"
-        VersionTracked = $false  # 固定バージョン（1.0）
-    },
-    @{
-        Name = "ユーザーマニュアル"
-        Key = "user"
-        Input = "ユーザーマニュアル.md"
-        Output = "ユーザーマニュアル.docx"
-        Title = "交通系ICカード管理システム：ピッすい ユーザーマニュアル"
-        VersionTracked = $true   # アプリバージョンに追従
-    },
-    @{
-        Name = "ユーザーマニュアル概要版"
-        Key = "user-summary"
-        Input = "ユーザーマニュアル概要版.md"
-        Output = "ユーザーマニュアル概要版.docx"
-        Title = "交通系ICカード管理システム：ピッすい 操作ガイド（概要版）"
-        VersionTracked = $false  # Markdown にバージョン行がないため注入不要
-        ReferenceDoc = "reference-summary.docx"  # 概要版専用（縦向き・ヘッダーフッターなし）
-        TableCellVAlign = $true  # テーブルセルの上下中央揃え（後処理）
-    },
-    @{
-        Name = "管理者マニュアル"
-        Key = "admin"
-        Input = "管理者マニュアル.md"
-        Output = "管理者マニュアル.docx"
-        Title = "交通系ICカード管理システム：ピッすい 管理者マニュアル"
-        VersionTracked = $true   # アプリバージョンに追従
-    },
-    @{
-        Name = "IT担当者ガイド"
-        Key = "it"
-        Input = "IT担当者ガイド.md"
-        Output = "IT担当者ガイド.docx"
-        Title = "交通系ICカード管理システム：ピッすい IT担当者ガイド"
-        VersionTracked = $true   # アプリバージョンに追従
-    },
-    @{
-        Name = "開発者ガイド"
-        Key = "dev"
-        Input = "開発者ガイド.md"
-        Output = "開発者ガイド.docx"
-        Title = "交通系ICカード管理システム：ピッすい 開発者ガイド"
-        VersionTracked = $false  # 独自バージョン体系（1.1）
-    }
-)
+# マニュアル定義（対象一覧は manual-targets.ps1 に一元化。PDF 側と同じ一覧を使う。Issue #2241）
+. (Join-Path $ScriptDir "manual-targets.ps1")
+$Manuals = @(Get-ManualTargets)
 
 # 対象マニュアルをフィルタ
 if ($Target -ne "all") {
@@ -296,8 +248,8 @@ $ErrorCount = 0
 
 # 各マニュアルを処理
 foreach ($Manual in $Manuals) {
-    $InputPath = Join-Path $ScriptDir $Manual.Input
-    $OutputPath = Join-Path $ScriptDir $Manual.Output
+    $InputPath = Join-Path $ScriptDir $Manual.Markdown
+    $OutputPath = Join-Path $ScriptDir $Manual.Docx
 
     Write-Host "--------------------------------------" -ForegroundColor Gray
     Write-Host "[$($Manual.Name)]" -ForegroundColor Cyan
@@ -406,7 +358,7 @@ foreach ($Manual in $Manuals) {
         }
 
         $FileInfo = Get-Item $OutputPath
-        Write-Host "  完了: $($Manual.Output)" -ForegroundColor Green
+        Write-Host "  完了: $($Manual.Docx)" -ForegroundColor Green
         Write-Host "    サイズ: $([math]::Round($FileInfo.Length / 1KB, 2)) KB" -ForegroundColor Gray
         $ConvertedCount++
     }

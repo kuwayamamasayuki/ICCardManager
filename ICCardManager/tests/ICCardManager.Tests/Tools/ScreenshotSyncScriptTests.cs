@@ -537,6 +537,41 @@ namespace ICCardManager.Tests.Tools
         }
 
         /// <summary>
+        /// PowerShell のコマンド文字列を実行する（<c>-EncodedCommand</c> で渡すので、日本語のパスや引用符をそのまま書ける）。
+        /// 標準出力は UTF-8 で読むよう <c>[Console]::OutputEncoding</c> を先に設定する（既定のままだと
+        /// <c>Write-Host</c> の日本語がシステムのコードページで出力され、文字化けして照合できない）。
+        /// </summary>
+        public static ScriptResult RunCommand(string command)
+        {
+            var script = "[Console]::OutputEncoding = [System.Text.Encoding]::UTF8\n" + command;
+            var encoded = Convert.ToBase64String(Encoding.Unicode.GetBytes(script));
+
+            var psi = new ProcessStartInfo
+            {
+                FileName = "powershell.exe",
+                Arguments = "-NoProfile -NonInteractive -ExecutionPolicy Bypass -EncodedCommand " + encoded,
+                UseShellExecute = false,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                RedirectStandardInput = true,
+                StandardOutputEncoding = Encoding.UTF8,
+                StandardErrorEncoding = Encoding.UTF8,
+                CreateNoWindow = true,
+                WorkingDirectory = RepositoryRoot,
+            };
+
+            using var process = Process.Start(psi)!;
+            var stdoutTask = process.StandardOutput.ReadToEndAsync();
+            var stderrTask = process.StandardError.ReadToEndAsync();
+            process.StandardInput.Close();
+            process.WaitForExit((int)TimeSpan.FromSeconds(60).TotalMilliseconds).Should().BeTrue("コマンドが 60 秒以内に終了すること");
+            return new ScriptResult(process.ExitCode, stdoutTask.Result, stderrTask.Result);
+        }
+
+        /// <summary>PowerShell の単一引用符文字列リテラルにする（内部の単一引用符は二重にする）。</summary>
+        public static string SingleQuote(string value) => "'" + value.Replace("'", "''") + "'";
+
+        /// <summary>
         /// 引数を powershell.exe -File 向けに引用する。-File 経由の引数は PowerShell の構文解析を通らず
         /// そのまま渡されるので、空白を含む値だけ二重引用符で囲めばよい（内部の二重引用符は \" に逃がす）。
         /// </summary>
