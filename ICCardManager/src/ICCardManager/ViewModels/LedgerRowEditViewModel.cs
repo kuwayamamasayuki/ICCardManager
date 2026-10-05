@@ -420,7 +420,7 @@ namespace ICCardManager.ViewModels
 
             // 挿入位置を末尾に設定
             InsertIndex = _allLedgers.Count;
-            UpdateContextRows();
+            UpdateInsertPreviewRows();
             UpdateAutoBalanceAvailability();
             RecalculateBalance();
             Validate();
@@ -630,7 +630,7 @@ namespace ICCardManager.ViewModels
                     }
                 }
                 InsertIndex = newIndex;
-                UpdateContextRows();
+                UpdateInsertPreviewRows();
                 UpdateAutoBalanceAvailability();
                 RecalculateBalance();
             }
@@ -681,7 +681,7 @@ namespace ICCardManager.ViewModels
             if (InsertIndex > 0)
             {
                 InsertIndex--;
-                UpdateContextRows();
+                UpdateInsertPreviewRows();
                 UpdateAutoBalanceAvailability();
                 RecalculateBalance();
                 Validate();
@@ -697,7 +697,7 @@ namespace ICCardManager.ViewModels
             if (InsertIndex < _allLedgers.Count)
             {
                 InsertIndex++;
-                UpdateContextRows();
+                UpdateInsertPreviewRows();
                 UpdateAutoBalanceAvailability();
                 RecalculateBalance();
                 Validate();
@@ -705,9 +705,9 @@ namespace ICCardManager.ViewModels
         }
 
         /// <summary>
-        /// 挿入位置前後のコンテキスト行を更新
+        /// 挿入位置プレビューの直前の行・直後の行を更新
         /// </summary>
-        private void UpdateContextRows()
+        private void UpdateInsertPreviewRows()
         {
             RowsBeforeInsert.Clear();
             RowsAfterInsert.Clear();

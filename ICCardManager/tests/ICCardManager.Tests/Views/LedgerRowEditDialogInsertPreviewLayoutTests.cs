@@ -1,5 +1,7 @@
+using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Text.RegularExpressions;
 using FluentAssertions;
 using ICCardManager.Tests.Views.Helpers;
 using ICCardManager.ViewModels;
@@ -49,11 +51,13 @@ public class LedgerRowEditDialogInsertPreviewLayoutTests
     }
 
     /// <summary>
-    /// 前の行・マーカー・後の行が同じ縦並びのパネルの直接の子であること。
+    /// 前の行・マーカー・後の行を囲む最も内側の <c>StackPanel</c> が同じ 1 つで、縦並びであること。
     /// </summary>
     /// <remarks>
     /// 並び順の検査だけでは、片方の一覧を別のパネル（横並び・別の行）へ移した形を通してしまう。
-    /// マーカーを囲む最も内側の <c>StackPanel</c> が両方の一覧も含み、縦並びであることを表明する。
+    /// 「マーカーを囲むパネルが両方の一覧を含む」だけでは、縦並びのパネルの内側に横並びの
+    /// <c>StackPanel</c> を挟んで一覧を入れた形も通るので、3 つそれぞれを囲む最も内側の
+    /// <c>StackPanel</c> が同じであることを見る。
     /// </remarks>
     [Fact]
     public void 前の行とマーカーと後の行が同じ縦並びのパネルに置かれること()
@@ -63,13 +67,10 @@ public class LedgerRowEditDialogInsertPreviewLayoutTests
         var after = FindItemsControlBoundTo(xaml, nameof(LedgerRowEditViewModel.RowsAfterInsert));
         var marker = FindMarker(xaml);
 
-        var panel = XamlElementInspection.EnumerateElementSpans(xaml, "StackPanel")
-            .Where(p => Contains(p, marker))
-            .OrderBy(p => p.Length)
-            .First();
+        var panel = InnermostStackPanel(xaml, marker);
 
-        Contains(panel, before).Should().BeTrue("前の行の一覧はマーカーと同じパネルに置く");
-        Contains(panel, after).Should().BeTrue("後の行の一覧はマーカーと同じパネルに置く");
+        InnermostStackPanel(xaml, before).Start.Should().Be(panel.Start, "前の行の一覧はマーカーと同じパネルに置く");
+        InnermostStackPanel(xaml, after).Start.Should().Be(panel.Start, "後の行の一覧はマーカーと同じパネルに置く");
         (XamlElementInspection.GetAttribute(panel.StartTag, "Orientation") ?? "Vertical")
             .Should().Be("Vertical", "前の行・マーカー・後の行は上から順に並べる");
     }
@@ -79,6 +80,8 @@ public class LedgerRowEditDialogInsertPreviewLayoutTests
     /// </summary>
     /// <remarks>
     /// 残っていると、前後の行を二重に描くか、旧来の一覧の下にマーカーが出る形へ戻る。
+    /// この検査が見るのは旧名の不在だけで、別名で同じ形へ戻した場合は捕まえない
+    /// （その形は前後の一覧がちょうど 1 つずつであることと並び順の検査が捕まえる）。
     /// </remarks>
     [Fact]
     public void 前後の行をまとめた旧来の一覧が残っていないこと()
@@ -112,6 +115,30 @@ public class LedgerRowEditDialogInsertPreviewLayoutTests
         matches.Should().ContainSingle($"「{MarkerText}」マーカーはちょうど 1 つ");
         return matches[0];
     }
+
+    private static XamlElementInspection.XamlElementSpan InnermostStackPanel(
+        string xaml, XamlElementInspection.XamlElementSpan inner)
+        => AllStackPanels(xaml)
+            .Where(p => Contains(p, inner))
+            .OrderBy(p => p.Length)
+            .First();
+
+    /// <summary>
+    /// 入れ子のものも含めて、すべての <c>StackPanel</c> 要素を列挙する。
+    /// </summary>
+    /// <remarks>
+    /// <see cref="XamlElementInspection.EnumerateElementSpans"/> は外側の要素の終わりから走査を続けるため、
+    /// 同名の入れ子（縦並びのパネルの内側の横並びのパネル）を返さない。それでは「最も内側」が常に外側になり、
+    /// 一覧を内側のパネルへ移した形を検出できない（コードレビューで検出）。開始タグの位置ごとに要素を切り出す。
+    /// </remarks>
+    private static IEnumerable<XamlElementInspection.XamlElementSpan> AllStackPanels(string xaml)
+        => XamlElementInspection.EnumerateStartTags(xaml)
+            .Where(t => Regex.IsMatch(t.StartTag, @"^<StackPanel[\s/>]"))
+            .Select(t =>
+            {
+                var span = XamlElementInspection.EnumerateElementSpans(xaml.Substring(t.Start), "StackPanel").First();
+                return span with { Start = span.Start + t.Start };
+            });
 
     private static bool Contains(
         XamlElementInspection.XamlElementSpan outer, XamlElementInspection.XamlElementSpan inner)
