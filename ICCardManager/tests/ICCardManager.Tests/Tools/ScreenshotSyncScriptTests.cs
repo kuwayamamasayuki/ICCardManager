@@ -564,7 +564,12 @@ namespace ICCardManager.Tests.Tools
             var stdoutTask = process.StandardOutput.ReadToEndAsync();
             var stderrTask = process.StandardError.ReadToEndAsync();
             process.StandardInput.Close();
-            process.WaitForExit((int)TimeSpan.FromSeconds(60).TotalMilliseconds).Should().BeTrue("コマンドが 60 秒以内に終了すること");
+            if (!process.WaitForExit((int)TimeSpan.FromSeconds(60).TotalMilliseconds))
+            {
+                // 残すと powershell.exe（とそこから起動した Word 等）が居座り、後続のテストや開発機の作業を妨げる
+                try { process.Kill(); } catch (InvalidOperationException) { /* 既に終了した */ }
+                throw new TimeoutException("PowerShell のコマンドが 60 秒以内に終了しなかったため打ち切った。");
+            }
             return new ScriptResult(process.ExitCode, stdoutTask.Result, stderrTask.Result);
         }
 

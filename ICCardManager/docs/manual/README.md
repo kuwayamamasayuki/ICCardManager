@@ -80,7 +80,7 @@ npm install -g mermaid-filter
 .\convert-to-docx.ps1 -NoMermaid
 ```
 
-バッチファイルを使用する場合（中身は `convert-to-docx.ps1` の呼び出しで、対象の名前も同じ）:
+バッチファイルを使用する場合（中身は `convert-to-docx.ps1` の呼び出しで、対象の名前も同じ。対象は 1 つだけ指定できます。終了後にウィンドウを止めないので、コマンドプロンプトから実行してください）:
 
 ```batch
 rem 全マニュアルを変換（更新があるもののみ、Mermaid図もレンダリング）

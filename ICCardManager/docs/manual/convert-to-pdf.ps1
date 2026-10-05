@@ -176,3 +176,7 @@ Write-Host ""
 if ($ErrorCount -gt 0) {
     exit 1
 }
+
+# 成功時も終了コードを明示する。exit を通らないと、& で呼んだ側の $LASTEXITCODE に直前のコマンドの値が残る
+# （build-installer.ps1 で docx 変換が失敗した直後だと、PDF 変換が成功しても失敗と表示される。Issue #2241）
+exit 0

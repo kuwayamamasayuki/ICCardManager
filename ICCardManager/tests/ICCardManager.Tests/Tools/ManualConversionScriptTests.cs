@@ -38,6 +38,9 @@ namespace ICCardManager.Tests.Tools
 
         private static readonly string[] ConversionScripts = { "convert-to-docx.ps1", "convert-to-pdf.ps1" };
 
+        /// <summary>convert-to-pdf.ps1 が Word を起動する直前に出す行の先頭。これが出ていなければ Word を起動していない。</summary>
+        private const string WordLaunchMarker = "[準備] Microsoft Word";
+
         private readonly string _tempDir;
 
         public ManualConversionScriptTests()
@@ -213,7 +216,7 @@ namespace ICCardManager.Tests.Tools
             result.ExitCode.Should().Be(0, result.StdOut + result.StdErr);
             result.StdOut.Should().Contain("変更なし", "入力の docx を見つけたうえで、PDF が最新なのでスキップすること");
             result.StdOut.Should().NotContain("見つかりません");
-            result.StdOut.Should().NotContain("Microsoft Word", "変換対象が無いときは Word を起動しない");
+            result.StdOut.Should().NotContain(WordLaunchMarker, "変換対象が無いときは Word を起動しない");
         }
 
         [Fact]
@@ -231,7 +234,7 @@ namespace ICCardManager.Tests.Tools
 
             result.ExitCode.Should().Be(0, result.StdOut + result.StdErr);
             result.StdOut.Should().Contain($"スキップ: {targets.Count} 件");
-            result.StdOut.Should().NotContain("Microsoft Word");
+            result.StdOut.Should().NotContain(WordLaunchMarker);
         }
 
         [Fact]
@@ -245,7 +248,28 @@ namespace ICCardManager.Tests.Tools
             result.StdOut.Should().Contain("ユーザーマニュアル概要版.docx");
             result.StdOut.Should().Contain(@".\convert-to-docx.ps1 -Target user-summary");
             result.StdOut.Should().Contain("エラー: 1 件");
-            result.StdOut.Should().NotContain("Microsoft Word", "変換できるものが無いときは Word を起動しない");
+            result.StdOut.Should().NotContain(WordLaunchMarker, "変換できるものが無いときは Word を起動しない");
+        }
+
+        /// <summary>
+        /// 成功しても終了コードを明示すること。<c>&amp;</c> で呼んだ側の <c>$LASTEXITCODE</c> に直前のコマンドの値が残ると、
+        /// build-installer.ps1 は docx 変換の失敗の直後に、成功した PDF 変換を失敗と表示する（コードレビューで検出）。
+        /// </summary>
+        [Fact]
+        public void PDF変換_直前のコマンドが失敗していても_成功したら終了コード0を返す()
+        {
+            CopyPdfScriptToTemp();
+            Touch("ユーザーマニュアル概要版.docx", new DateTime(2026, 10, 1, 9, 0, 0));
+            Touch("ユーザーマニュアル概要版.pdf", new DateTime(2026, 10, 1, 10, 0, 0));
+
+            var script = PowerShellScriptRunner.SingleQuote(Path.Combine(_tempDir, "convert-to-pdf.ps1"));
+            var result = PowerShellScriptRunner.RunCommand(
+                "cmd /c exit 1\n" +
+                "& " + script + " -Target user-summary\n" +
+                "exit $LASTEXITCODE");
+
+            result.ExitCode.Should().Be(0, result.StdOut + result.StdErr);
+            result.StdOut.Should().Contain("変更なし");
         }
 
         [Fact]
