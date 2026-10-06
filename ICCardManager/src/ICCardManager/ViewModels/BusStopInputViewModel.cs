@@ -349,8 +349,9 @@ public partial class BusStopInputViewModel : ViewModelBase
         var autoFilledCount = BusUsages.Count(b => b.IsAutoFilled);
         if (autoFilledCount > 0)
         {
+            // 開いた時点の件数として述べる（以後の書き換え・往復の入れ直しでは数え直さない。注記は欄ごとに出ている）
             StatusMessage += Environment.NewLine +
-                             $"自動で入れた欄が{autoFilledCount}件あります。内容を確かめ、違う場合は書き換えてください。";
+                             $"開いた時点で{autoFilledCount}件の欄に自動で入れました（欄の下に「自動入力」と表示）。内容を確かめ、違う場合は書き換えてください。";
         }
     }
 
@@ -808,7 +809,9 @@ public partial class BusStopInputViewModel : ViewModelBase
     /// <para>
     /// 入力欄（<see cref="BusStopInputItem.BusStops"/>）は戻さないので、職員はそのまま保存をやり直せる
     /// （保存のたびに入力欄の値を明細へ書き直すため）。保存せずに閉じた場合の明細の書き込み
-    /// （入力のたびに書き込まれる）は、この復元の対象外である。
+    /// （入力のたびに書き込まれる）は、この復元の対象外である。Issue #2251 の自動入力（既定値・往復の復路）も
+    /// 開いた時点で明細へ書き込まれるので同じ扱いになる（読み直せなかった Ledger では呼び出し元のインスタンスに残る。
+    /// 後続の同行者数入力は <c>companion_count</c> しか書かないため、現状は台帳へは届かない）。
     /// </para>
     /// </remarks>
     private void RestorePersistedState()

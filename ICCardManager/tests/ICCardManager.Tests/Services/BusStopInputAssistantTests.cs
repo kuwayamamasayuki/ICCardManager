@@ -174,6 +174,27 @@ public class BusStopInputAssistantTests
         BusStopInputAssistant.SelectDefault(stats, amount: 200).Should().BeNull();
     }
 
+    [Theory]
+    [InlineData("天神周辺")]          // 「～」が無い
+    [InlineData("天神～博多～薬院")]  // 「～」が複数
+    [InlineData("天神）西口～博多")]  // 全角括弧の対応が取れない
+    public void SelectDefault_形式の確認に掛かる値は入れないこと(string busStops)
+    {
+        // 入れると、職員が何も入力していないのに保存前の確認（形式・括弧）が返却のたびに出る
+        var stats = new[] { Row(busStops, 200, sameStaff: true, count: 5) };
+
+        BusStopInputAssistant.SelectDefault(stats, amount: 200).Should().BeNull();
+    }
+
+    [Fact]
+    public void SelectDefault_対応の取れた全角括弧を含む値は入れること()
+    {
+        // 対の表明: 括弧を含むだけで入れなくなる（広すぎる）実装を落とす
+        var stats = new[] { Row("天神（日銀前）～下原", 200, sameStaff: true, count: 2) };
+
+        BusStopInputAssistant.SelectDefault(stats, amount: 200).Should().Be("天神（日銀前）～下原");
+    }
+
     [Fact]
     public void SelectDefault_逆向きが1回だけなら1位を入れること()
     {

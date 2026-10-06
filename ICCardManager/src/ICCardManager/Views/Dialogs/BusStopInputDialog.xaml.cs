@@ -1,3 +1,4 @@
+#nullable enable
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -91,6 +92,14 @@ namespace ICCardManager.Views.Dialogs
         {
             if (sender is System.Windows.Controls.TextBox textBox && textBox.DataContext is BusStopInputItem item)
             {
+                // Issue #2251: 自動で入れた値（職員がまだ触っていない）は全体を選択しておく。キャレットが先頭にあると、
+                // 別の区間を入力しようと打ち始めた文字が値の前に挿入され（「薬院天神～博多」）、その値が次の行の復路にも伝わる。
+                // 選択しておけば打ち始めた文字で置き換わる（View の操作なので ViewModel のテストでは検証できない。
+                // BusStopInputDialogAutoFillLayoutTests が結線を静的に固定する）
+                if (item.IsAutoFilled && !item.IsTouchedByUser)
+                {
+                    textBox.SelectAll();
+                }
                 item.OnTextBoxGotFocus();
             }
         }
@@ -146,12 +155,12 @@ namespace ICCardManager.Views.Dialogs
         /// <summary>
         /// VisualTree を走査して最初のバス停名テキストボックスを取得
         /// </summary>
-        private TextBox FindFirstBusStopTextBox()
+        private TextBox? FindFirstBusStopTextBox()
         {
             return FindVisualChild<TextBox>(this);
         }
 
-        private static T FindVisualChild<T>(DependencyObject parent) where T : DependencyObject
+        private static T? FindVisualChild<T>(DependencyObject parent) where T : DependencyObject
         {
             for (int i = 0; i < VisualTreeHelper.GetChildrenCount(parent); i++)
             {

@@ -74,6 +74,7 @@ namespace ICCardManager.Services
         /// <remarks>
         /// 同数なら入れない。往復（A～B と B～A）は同じ回数になりやすく、同数のまま片方を入れると向きが逆の値が入り得る。
         /// 同じ理由で、1 位の逆向きも 2 回以上あるときは回数に差があっても入れない。
+        /// 1 位が「A～B」の形でない・全角括弧の対応が取れないときも入れない（保存前の確認を自分で起こさない）。
         /// 往復は 1 行目を職員が入力すれば 2 行目は復路の補完（<see cref="IsRoundTripContinuation"/>）で埋まる。
         /// </remarks>
         public static string? SelectDefault(IEnumerable<BusStopUsageStatRow> stats, int? amount)
@@ -90,12 +91,18 @@ namespace ICCardManager.Services
                 return null;
             }
 
+            // 「A～B」の形でない値・全角括弧の対応が取れない値は入れない。入れると、職員が何も入力していないのに
+            // 保存前の確認（形式・括弧の警告）が返却のたびに出る（アプリ自身が生成した入力を自分で警告しない。#1811）
+            if (ReverseRoute(top.BusStops) is null || !SummaryGenerator.HasBalancedFullWidthParentheses(top.BusStops))
+            {
+                return null;
+            }
+
             // 逆向き（B～A）も同じ職員×同じ金額で 2 回以上使っているなら、その職員は両方向に乗っている。
             // 回数の差（帰りだけ一度鉄道にした等）で向きを決めると、往復の 1 行目に逆向きが入り、
             // 2 行目の復路も一緒に逆になる。向きが決まらないので入れない（1 行目を入力すれば 2 行目は復路で埋まる）
             var reversed = ReverseRoute(top.BusStops);
-            if (reversed != null
-                && ranked.Any(r => r.UsageCount >= MinUsageCountForDefault
+            if (ranked.Any(r => r.UsageCount >= MinUsageCountForDefault
                                    && string.Equals(r.BusStops, reversed, StringComparison.Ordinal)))
             {
                 return null;

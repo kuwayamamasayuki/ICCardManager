@@ -196,7 +196,7 @@ public class BusStopInputViewModelAutoFillTests : IDisposable
         item.AutoFillNote.Should().Be(BusStopInputItem.SuggestedAutoFillNote);
         item.IsTouchedByUser.Should().BeFalse();
         item.ShowSuggestions.Should().BeFalse("自動で入れた欄の候補は開かない（職員が入力している欄ではない）");
-        _viewModel.StatusMessage.Should().Contain("自動で入れた欄が1件あります");
+        _viewModel.StatusMessage.Should().Contain("開いた時点で1件の欄に自動で入れました");
     }
 
     [Fact]
@@ -395,7 +395,7 @@ public class BusStopInputViewModelAutoFillTests : IDisposable
         _viewModel.BusUsages[0].AutoFillKind.Should().Be(BusStopAutoFillKind.Suggested);
         _viewModel.BusUsages[1].BusStops.Should().Be("博多～天神");
         _viewModel.BusUsages[1].AutoFillKind.Should().Be(BusStopAutoFillKind.RoundTrip);
-        _viewModel.StatusMessage.Should().Contain("自動で入れた欄が2件あります");
+        _viewModel.StatusMessage.Should().Contain("開いた時点で2件の欄に自動で入れました");
     }
 
     [Fact]
