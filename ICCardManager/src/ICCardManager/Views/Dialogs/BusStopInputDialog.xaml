@@ -57,6 +57,8 @@
                     <Run Text="バス停名は「乗車バス停～降車バス停」の形式で入力してください。"/>
                     <LineBreak/>
                     <Run Text="💡 入力中に過去の履歴から候補が表示されます。候補はクリックするか、↓↑キーで選んで Enter キーで確定できます（Esc キーで候補を閉じます）。"/>
+                    <LineBreak/>
+                    <Run Text="💡 よく使うバス停名や往復の帰りは、自動で入ることがあります（欄の下に「自動入力」と表示）。違う場合は書き換えてください。"/>
                 </TextBlock>
             </StackPanel>
         </Border>
@@ -109,7 +111,26 @@
                                          GotFocus="BusStopTextBox_GotFocus"
                                          PreviewKeyDown="BusStopTextBox_PreviewKeyDown"
                                          LostKeyboardFocus="BusStopTextBox_LostKeyboardFocus"/>
-                                <TextBlock Text="入力例: ○○バス停～△△バス停" Foreground="{DynamicResource SecondaryTextBrush}" FontSize="{DynamicResource SmallFontSize}" Margin="0,2,0,0"/>
+                                <!-- Issue #2251: 本システムが自動で入れた値（既定値・往復の復路）は、入力例の代わりに理由の注記を出して
+                                     職員の入力と区別する（色だけに頼らず文言と太字で示す。Issue #1274）。
+                                     職員が欄を書き換えると注記は入力例へ戻る -->
+                                <TextBlock FontSize="{DynamicResource SmallFontSize}"
+                                           TextWrapping="Wrap"
+                                           Margin="0,2,0,0">
+                                    <TextBlock.Style>
+                                        <Style TargetType="TextBlock">
+                                            <Setter Property="Text" Value="入力例: ○○バス停～△△バス停"/>
+                                            <Setter Property="Foreground" Value="{DynamicResource SecondaryTextBrush}"/>
+                                            <Style.Triggers>
+                                                <DataTrigger Binding="{Binding IsAutoFilled}" Value="True">
+                                                    <Setter Property="Text" Value="{Binding AutoFillNote}"/>
+                                                    <Setter Property="Foreground" Value="{DynamicResource HintForegroundBrush}"/>
+                                                    <Setter Property="FontWeight" Value="Bold"/>
+                                                </DataTrigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </TextBlock.Style>
+                                </TextBlock>
                             </StackPanel>
 
                             <!-- サジェストポップアップ -->

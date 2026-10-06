@@ -92,6 +92,24 @@ namespace ICCardManager.Data.Repositories
             string busStopPlaceholder);
 
         /// <summary>
+        /// Issue #2251: 過去に入力されたバス停名の利用実績を「バス停名 × 金額 × 指定した職員の利用か」ごとに集計する。
+        /// 返却時のバス停名入力で、候補の並びと既定値を明細（職員・金額）ごとに決めるために使う。
+        /// </summary>
+        /// <param name="busStopPlaceholder">
+        /// 除外する未入力プレースホルダ（<see cref="GetBusStopSuggestionsAsync"/> と同じ。null／空文字は
+        /// <see cref="System.ArgumentException"/>）。
+        /// </param>
+        /// <param name="lenderIdm">
+        /// 「同じ職員」とみなす貸出者の IDm（<c>ledger.lender_idm</c>）。null／空文字なら全行の
+        /// <see cref="Dtos.BusStopUsageStatRow.IsSameStaff"/> が false になる。
+        /// </param>
+        /// <exception cref="System.ArgumentException">
+        /// <paramref name="busStopPlaceholder"/> が null または空文字の場合。
+        /// </exception>
+        Task<IEnumerable<Dtos.BusStopUsageStatRow>> GetBusStopUsageStatsAsync(
+            string busStopPlaceholder, string? lenderIdm);
+
+        /// <summary>
         /// 指定期間の利用履歴をページング付きで取得
         /// </summary>
         /// <param name="cardIdm">対象カードの IDm。null の場合は全カード</param>
