@@ -1,3 +1,4 @@
+#nullable enable
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -91,7 +92,39 @@ namespace ICCardManager.Views.Dialogs
         {
             if (sender is System.Windows.Controls.TextBox textBox && textBox.DataContext is BusStopInputItem item)
             {
+                // Issue #2251: 自動で入れた値（職員がまだ触っていない）は全体を選択しておく。キャレットが先頭にあると、
+                // 別の区間を入力しようと打ち始めた文字が値の前に挿入され（「薬院天神～博多」）、その値が次の行の復路にも伝わる。
+                // 選択しておけば打ち始めた文字で置き換わる（View の操作なので ViewModel のテストでは検証できない。
+                // BusStopInputDialogAutoFillLayoutTests が結線を静的に固定する）
+                if (item.IsAutoFilled && !item.IsTouchedByUser)
+                {
+                    textBox.SelectAll();
+                }
                 item.OnTextBoxGotFocus();
+            }
+        }
+
+        /// <summary>
+        /// Issue #2251: マウスのクリックで自動で入れた欄へ入ったときも、値の全体を選択した状態にする。
+        /// </summary>
+        /// <remarks>
+        /// クリックでは <c>GotFocus</c> が TextBox 自身のマウス処理の途中で発生し、その後でクリック位置にキャレットが置かれるため、
+        /// <see cref="BusStopTextBox_GotFocus"/> の全選択が取り消される。まだフォーカスを持っていない欄への最初のクリックだけを
+        /// ここで受け、フォーカスを移して（全選択は GotFocus が行う）クリックを処理済みにする。
+        /// フォーカスを持った後のクリックは従来どおりキャレットを置く。
+        /// 最初のクリックでのドラッグ選択・ダブルクリックの単語選択は効かない（クリックで全選択する入力欄の一般的な代償）。
+        /// フォーカスを移せなかったときはクリックを処理済みにしない（クリックが黙って捨てられないように）。
+        /// </remarks>
+        private void BusStopTextBox_PreviewMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
+        {
+            if (sender is TextBox textBox && !textBox.IsKeyboardFocusWithin
+                && textBox.DataContext is BusStopInputItem item
+                && item.IsAutoFilled && !item.IsTouchedByUser)
+            {
+                if (textBox.Focus())
+                {
+                    e.Handled = true;
+                }
             }
         }
 
@@ -146,12 +179,12 @@ namespace ICCardManager.Views.Dialogs
         /// <summary>
         /// VisualTree を走査して最初のバス停名テキストボックスを取得
         /// </summary>
-        private TextBox FindFirstBusStopTextBox()
+        private TextBox? FindFirstBusStopTextBox()
         {
             return FindVisualChild<TextBox>(this);
         }
 
-        private static T FindVisualChild<T>(DependencyObject parent) where T : DependencyObject
+        private static T? FindVisualChild<T>(DependencyObject parent) where T : DependencyObject
         {
             for (int i = 0; i < VisualTreeHelper.GetChildrenCount(parent); i++)
             {

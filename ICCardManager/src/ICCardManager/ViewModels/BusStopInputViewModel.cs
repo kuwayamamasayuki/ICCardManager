@@ -10,6 +10,7 @@ using CommunityToolkit.Mvvm.Input;
 using ICCardManager.Common;
 using ICCardManager.Data;
 using ICCardManager.Data.Repositories;
+using ICCardManager.Dtos;
 using ICCardManager.Models;
 using ICCardManager.Services;
 
@@ -64,6 +65,18 @@ public partial class BusStopInputViewModel : ViewModelBase
     private List<string> _busStopSuggestions = new();
 
     /// <summary>
+    /// Issue #2251: バス停名 × 金額 × 「この返却の貸出者の利用か」の利用実績。
+    /// 明細ごとの候補の並び（<see cref="BusStopInputAssistant.Rank"/>）と既定値（<see cref="BusStopInputAssistant.SelectDefault"/>）に使う。
+    /// 読み込みに失敗したら空（候補は従来の全体の並びになり、既定値は入らない）。
+    /// </summary>
+    private List<BusStopUsageStatRow> _usageStats = new();
+
+    /// <summary>
+    /// Issue #2251: 往復の復路の自動補完を止めているか（スキップで全欄を「★」へ置き換える間と、その失敗時の復元の間）。
+    /// </summary>
+    private bool _suppressRoundTripAutoFill;
+
+    /// <summary>
     /// 保存完了フラグ（ダイアログ結果用）
     /// </summary>
     [ObservableProperty]
@@ -88,9 +101,6 @@ public partial class BusStopInputViewModel : ViewModelBase
     {
         using (BeginBusy("読み込み中..."))
         {
-            // サジェスト候補を読み込み
-            await LoadBusStopSuggestionsAsync();
-
             // 履歴詳細を取得
             Ledger = await _ledgerRepository.GetByIdAsync(ledgerId);
             if (Ledger == null)
@@ -99,13 +109,15 @@ public partial class BusStopInputViewModel : ViewModelBase
                 return;
             }
 
+            // サジェスト候補を読み込み
+            // Issue #2251: 未入力一覧から開いた場合も、その行の貸出者を「同じ職員」とする
+            await LoadBusStopSuggestionsAsync(Ledger.LenderIdm);
+
             // バス利用のみを抽出
-            BusUsages.Clear();
+            ClearBusUsages();
             foreach (var detail in Ledger.Details.Where(d => d.IsBus))
             {
-                var item = new BusStopInputItem(detail);
-                item.SetSuggestions(BusStopSuggestions);
-                BusUsages.Add(item);
+                AddBusUsage(detail);
             }
             LinkPreviousItems();
 
@@ -115,11 +127,12 @@ public partial class BusStopInputViewModel : ViewModelBase
             }
             else
             {
-                StatusMessage = $"{BusUsages.Count}件のバス利用があります";
+                StatusMessage = $"{BusUsages.Count}件のバス利用があります。";
             }
 
             CapturePersistedState();
             HasUnsavedChanges = false;
+            ApplyInitialAutoFill();
         }
     }
 
@@ -129,16 +142,14 @@ public partial class BusStopInputViewModel : ViewModelBase
     public async Task InitializeWithDetailsAsync(Ledger ledger, IEnumerable<LedgerDetail> busDetails)
     {
         // サジェスト候補を読み込み
-        await LoadBusStopSuggestionsAsync();
+        await LoadBusStopSuggestionsAsync(ledger.LenderIdm);
 
         Ledger = ledger;
 
-        BusUsages.Clear();
+        ClearBusUsages();
         foreach (var detail in busDetails.Where(d => d.IsBus))
         {
-            var item = new BusStopInputItem(detail);
-            item.SetSuggestions(BusStopSuggestions);
-            BusUsages.Add(item);
+            AddBusUsage(detail);
         }
         LinkPreviousItems();
 
@@ -155,6 +166,7 @@ public partial class BusStopInputViewModel : ViewModelBase
 
         CapturePersistedState();
         HasUnsavedChanges = false;
+        ApplyInitialAutoFill();
     }
 
     /// <summary>
@@ -163,8 +175,6 @@ public partial class BusStopInputViewModel : ViewModelBase
     /// </summary>
     public async Task InitializeWithLedgersAsync(IEnumerable<Ledger> ledgers)
     {
-        await LoadBusStopSuggestionsAsync();
-
         // 入力された Ledger は LendingService から返される in-memory インスタンスで
         // Details コレクションが populate されていない場合があるため、ID で DB から再取得する。
         // Id が 0（永続化前）または GetByIdAsync が null を返す場合は入力インスタンスをそのまま使う。
@@ -183,7 +193,9 @@ public partial class BusStopInputViewModel : ViewModelBase
         // UI 表示互換のため Ledger プロパティには先頭を設定
         Ledger = _ledgers.FirstOrDefault();
 
-        BusUsages.Clear();
+        await LoadBusStopSuggestionsAsync(ResolveSingleLenderIdm(_ledgers));
+
+        ClearBusUsages();
         foreach (var ledger in _ledgers)
         {
             foreach (var detail in ledger.Details.Where(d => d.IsBus))
@@ -193,9 +205,7 @@ public partial class BusStopInputViewModel : ViewModelBase
                 {
                     detail.LedgerId = ledger.Id;
                 }
-                var item = new BusStopInputItem(detail);
-                item.SetSuggestions(BusStopSuggestions);
-                BusUsages.Add(item);
+                AddBusUsage(detail);
             }
         }
         LinkPreviousItems();
@@ -213,6 +223,7 @@ public partial class BusStopInputViewModel : ViewModelBase
 
         CapturePersistedState();
         HasUnsavedChanges = false;
+        ApplyInitialAutoFill();
     }
 
     /// <summary>
@@ -220,14 +231,14 @@ public partial class BusStopInputViewModel : ViewModelBase
     /// </summary>
     public void InitializeWithDetails(Ledger ledger, IEnumerable<LedgerDetail> busDetails)
     {
+        // Issue #2251: この経路は利用実績を読み込まない。前回の初期化で読んだ別の職員の実績で既定値を入れないよう捨てる
+        _usageStats = new List<BusStopUsageStatRow>();
         Ledger = ledger;
 
-        BusUsages.Clear();
+        ClearBusUsages();
         foreach (var detail in busDetails.Where(d => d.IsBus))
         {
-            var item = new BusStopInputItem(detail);
-            item.SetSuggestions(BusStopSuggestions);
-            BusUsages.Add(item);
+            AddBusUsage(detail);
         }
         LinkPreviousItems();
 
@@ -242,6 +253,7 @@ public partial class BusStopInputViewModel : ViewModelBase
 
         CapturePersistedState();
         HasUnsavedChanges = false;
+        ApplyInitialAutoFill();
     }
 
     /// <summary>
@@ -257,9 +269,148 @@ public partial class BusStopInputViewModel : ViewModelBase
     }
 
     /// <summary>
+    /// Issue #2251: 明細 1 件分の入力欄を作って <see cref="BusUsages"/> へ加える。
+    /// 候補はその明細の金額で並べ（同じ職員×同じ金額 → 同じ金額 → 同じ職員 → 全体）、
+    /// 欄の値の変化を往復の復路の自動補完へつなぐ。
+    /// </summary>
+    private void AddBusUsage(LedgerDetail detail)
+    {
+        var item = new BusStopInputItem(detail);
+        item.SetSuggestions(BusStopInputAssistant.Rank(_usageStats, BusStopSuggestions, detail.Amount));
+        item.PropertyChanged += OnBusUsagePropertyChanged;
+        BusUsages.Add(item);
+    }
+
+    /// <summary>
+    /// Issue #2251: 入力欄をすべて取り除く。作り直す前の欄の値の変化を、往復の自動補完へ流さないよう購読を外す。
+    /// </summary>
+    private void ClearBusUsages()
+    {
+        foreach (var item in BusUsages)
+        {
+            item.PropertyChanged -= OnBusUsagePropertyChanged;
+        }
+        BusUsages.Clear();
+    }
+
+    /// <summary>
+    /// Issue #2251: 複数の台帳をまとめて開いたときの「同じ職員」。貸出者が 1 人に決まるときだけその IDm、
+    /// 決まらない（貸出者が無い・複数いる）ときは null（職員で並べず、既定値も入れない）。
+    /// </summary>
+    /// <remarks>
+    /// 1 回の返却で作られる台帳の貸出者は同じ職員なので、通常は 1 人に決まる。
+    /// 比較は SQL（<c>l.lender_idm = @lenderIdm</c>）と同じく大文字小文字を区別する（「同じ職員」の判断を 2 通りにしない）。
+    /// </remarks>
+    internal static string? ResolveSingleLenderIdm(IEnumerable<Ledger> ledgers)
+    {
+        var lenders = ledgers
+            .Select(l => l.LenderIdm)
+            .Where(idm => !string.IsNullOrEmpty(idm))
+            .Distinct(StringComparer.Ordinal)
+            .Take(2)
+            .ToList();
+        return lenders.Count == 1 ? lenders[0] : null;
+    }
+
+    /// <summary>
+    /// Issue #2251: 開いた時点の自動入力。上から順に、往復の続き（同じ金額・同じ利用日）の行には上の行の復路を、
+    /// それ以外の未入力の行には既定値（同じ職員×同じ金額の単独 1 位が 2 回以上）を入れる。
+    /// 自動で入れた欄があればステータス欄で知らせる。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// 保存済みの値（履歴から開いた行）と職員が触った欄には入れない。往復の続きの行には既定値を入れない
+    /// （上の行を職員が入力したときに復路で入れ直せるよう、行の役割を 1 つに決める）。
+    /// </para>
+    /// <para>
+    /// <see cref="CapturePersistedState"/> の後で呼ぶこと。自動で入れた値は明細（<see cref="LedgerDetail.BusStops"/>）にも
+    /// 書き込まれるため、先に入れると「DB と同じ値」として退避され、保存に失敗したときの復元（#2103）が自動入力の値へ戻してしまう。
+    /// </para>
+    /// </remarks>
+    internal void ApplyInitialAutoFill()
+    {
+        foreach (var item in BusUsages)
+        {
+            var previous = item.PreviousItem;
+            if (previous != null && IsRoundTripContinuation(previous, item))
+            {
+                ApplyRoundTripAutoFill(previous, item);
+            }
+            else if (item.CanReceiveDefault)
+            {
+                var value = BusStopInputAssistant.SelectDefault(_usageStats, item.Amount);
+                if (value != null)
+                {
+                    item.ApplyAutoFill(value, BusStopAutoFillKind.Suggested);
+                }
+            }
+        }
+
+        var autoFilledCount = BusUsages.Count(b => b.IsAutoFilled);
+        if (autoFilledCount > 0)
+        {
+            // 開いた時点の件数として述べる（以後の書き換え・往復の入れ直しでは数え直さない。注記は欄ごとに出ている）
+            StatusMessage += Environment.NewLine +
+                             $"開いた時点で{autoFilledCount}件の欄に自動で入れました（欄の下に「自動入力」と表示）。内容を確かめ、違う場合は書き換えてください。";
+        }
+    }
+
+    private static bool IsRoundTripContinuation(BusStopInputItem previous, BusStopInputItem item)
+        => BusStopInputAssistant.IsRoundTripContinuation(previous.Amount, previous.UseDate, item.Amount, item.UseDate);
+
+    /// <summary>
+    /// Issue #2251: 上の行の値から、下の行へ往復の復路を入れる（入れ直す）。下の行を職員が触っていたら何もしない。
+    /// 上の行が「A～B」の形でなくなったら、以前に入れた復路を取り除く。
+    /// </summary>
+    private static void ApplyRoundTripAutoFill(BusStopInputItem previous, BusStopInputItem item)
+    {
+        if (!item.CanReceiveRoundTrip)
+        {
+            return;
+        }
+
+        var reversed = BusStopInputAssistant.ReverseRoute(previous.BusStops);
+        if (reversed != null)
+        {
+            item.ApplyAutoFill(reversed, BusStopAutoFillKind.RoundTrip);
+        }
+        else if (item.AutoFillKind == BusStopAutoFillKind.RoundTrip)
+        {
+            item.ClearAutoFill();
+        }
+    }
+
+    /// <summary>
+    /// Issue #2251: ある行の値が変わったら、往復の続きの次の行へ復路を入れ直す。
+    /// 次の行の値が変わればさらに次の行へ伝わる（A～B, B～A, A～B …）。
+    /// </summary>
+    private void OnBusUsagePropertyChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
+    {
+        if (_suppressRoundTripAutoFill
+            || e.PropertyName != nameof(BusStopInputItem.BusStops)
+            || sender is not BusStopInputItem item)
+        {
+            return;
+        }
+
+        var index = BusUsages.IndexOf(item);
+        if (index < 0 || index + 1 >= BusUsages.Count)
+        {
+            return;
+        }
+
+        var next = BusUsages[index + 1];
+        if (IsRoundTripContinuation(item, next))
+        {
+            ApplyRoundTripAutoFill(item, next);
+        }
+    }
+
+    /// <summary>
     /// バス停名サジェスト候補を読み込み
     /// </summary>
-    private async Task LoadBusStopSuggestionsAsync()
+    /// <param name="lenderIdm">Issue #2251: 「同じ職員」とみなす貸出者の IDm（決まらなければ null）</param>
+    private async Task LoadBusStopSuggestionsAsync(string? lenderIdm)
     {
         try
         {
@@ -279,6 +430,19 @@ public partial class BusStopInputViewModel : ViewModelBase
             System.Diagnostics.Debug.WriteLine($"[BusStopInput] サジェスト候補の読み込みに失敗: {ex.Message}");
 #endif
             BusStopSuggestions = new List<string>();
+        }
+
+        // Issue #2251: 失敗しても入力は続けられるよう、全体の候補とは別に受け止める（候補は全体の並びになり、既定値は入らない）
+        try
+        {
+            var stats = await _ledgerRepository.GetBusStopUsageStatsAsync(
+                SummaryGenerator.BusPlaceholder, lenderIdm);
+            _usageStats = stats?.ToList() ?? new List<BusStopUsageStatRow>();
+        }
+        catch (Exception ex)
+        {
+            ErrorDialogHelper.LogException(ex, "バス停名の利用実績の読み込み");
+            _usageStats = new List<BusStopUsageStatRow>();
         }
     }
 
@@ -422,7 +586,11 @@ public partial class BusStopInputViewModel : ViewModelBase
         }
 
         // Issue #1133: 類似バス停名の検出（取り違え・表記ゆれの疑い）
+        // Issue #2251: 本システムが自動で入れた値（既定値＝過去の入力そのもの／往復の復路＝上の行の乗降の入れ替え）は
+        // 類似の確認から外す。復路の元になった上の行（職員の入力）は引き続き確認されるので、取り違えの検出は失われない。外さないと、過去に「天神～博多駅」と「天神～博多駅前」の両方がある職員は、
+        // 何も入力していなくても返却のたびに保存前の確認が出る（アプリ自身が生成した入力を自分で警告しない。#1811）
         var newEntries = BusUsages
+            .Where(b => !b.IsAutoFilled)
             .Where(b => !string.IsNullOrWhiteSpace(b.BusStops)
                 && !SummaryGenerator.IsBusStopPlaceholder(b.BusStops))
             .Select(b => b.BusStops)
@@ -641,7 +809,9 @@ public partial class BusStopInputViewModel : ViewModelBase
     /// <para>
     /// 入力欄（<see cref="BusStopInputItem.BusStops"/>）は戻さないので、職員はそのまま保存をやり直せる
     /// （保存のたびに入力欄の値を明細へ書き直すため）。保存せずに閉じた場合の明細の書き込み
-    /// （入力のたびに書き込まれる）は、この復元の対象外である。
+    /// （入力のたびに書き込まれる）は、この復元の対象外である。Issue #2251 の自動入力（既定値・往復の復路）も
+    /// 開いた時点で明細へ書き込まれるので同じ扱いになる（読み直せなかった Ledger では呼び出し元のインスタンスに残る。
+    /// 後続の同行者数入力は <c>companion_count</c> しか書かないため、現状は台帳へは届かない）。
     /// </para>
     /// </remarks>
     private void RestorePersistedState()
@@ -700,8 +870,13 @@ public partial class BusStopInputViewModel : ViewModelBase
     /// <summary>
     /// Issue #2142: スキップすると失われる入力（空欄でも「★」でもないバス停名）が 1 つ以上あるか。
     /// </summary>
+    /// <remarks>
+    /// Issue #2251: 本システムが自動で入れた値（既定値・往復の復路）は職員の入力ではないので数えない。
+    /// 数えると、何も入力していないのに Esc（スキップ）のたびに破棄の確認が出る。保存済みの値（履歴から開いた行）は数える。
+    /// </remarks>
     internal bool HasInputDiscardedBySkip()
-        => BusUsages.Any(b => !string.IsNullOrWhiteSpace(b.BusStops)
+        => BusUsages.Any(b => !b.IsAutoFilled
+                              && !string.IsNullOrWhiteSpace(b.BusStops)
                               && !SummaryGenerator.IsBusStopPlaceholder(b.BusStops));
 
     /// <summary>
@@ -750,8 +925,11 @@ public partial class BusStopInputViewModel : ViewModelBase
         {
             // Issue #2103: スキップが失敗したら入力欄も元へ戻す（★で上書きしたまま残すと、
             // 職員の入力が失われ、そのまま「保存」をやり直すと★で保存される）
-            var inputsBeforeSkip = BusUsages.Select(item => (item, item.BusStops)).ToList();
+            // Issue #2251: 自動入力の理由・操作の有無も一緒に退避する（値だけ戻すと、自動で入れた欄が職員の入力に化ける）
+            var inputsBeforeSkip = BusUsages.Select(item => (item, item.CaptureInputState())).ToList();
             var success = false;
+            // Issue #2251: 全欄を「★」へ置き換える間とその復元の間は、往復の復路の自動補完を止める
+            _suppressRoundTripAutoFill = true;
             try
             {
                 // Issue #1156: スキップ時は入力済みの内容も破棄し、すべてプレースホルダにする
@@ -769,12 +947,13 @@ public partial class BusStopInputViewModel : ViewModelBase
                 // 入力欄の復元は明細へも書き込む（OnBusStopsChanged）ため、明細の復元より先に行う
                 if (!success)
                 {
-                    foreach (var (item, busStops) in inputsBeforeSkip)
+                    foreach (var (item, state) in inputsBeforeSkip)
                     {
-                        item.BusStops = busStops;
+                        item.RestoreInputState(state);
                     }
                     RestorePersistedState();
                 }
+                _suppressRoundTripAutoFill = false;
             }
 
             if (success)
@@ -843,6 +1022,129 @@ public partial class BusStopInputItem : ObservableObject
     /// </summary>
     public bool HasPreviousItem => PreviousItem != null;
 
+    /// <summary>
+    /// Issue #2251: この欄の値を本システムが自動で入れたか（入れた理由）。職員が欄を書き換えたら <see cref="BusStopAutoFillKind.None"/> へ戻る。
+    /// </summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(IsAutoFilled))]
+    [NotifyPropertyChangedFor(nameof(AutoFillNote))]
+    private BusStopAutoFillKind _autoFillKind;
+
+    /// <summary>
+    /// Issue #2251: 自動で入れた値か。入力欄の下の注記の表示に使う（色だけに頼らず文言で区別する）。
+    /// </summary>
+    public bool IsAutoFilled => AutoFillKind != BusStopAutoFillKind.None;
+
+    /// <summary>
+    /// Issue #2251: 自動で入れた理由の注記。自動で入れていなければ空文字。
+    /// </summary>
+    public string AutoFillNote => AutoFillKind switch
+    {
+        BusStopAutoFillKind.Suggested => SuggestedAutoFillNote,
+        BusStopAutoFillKind.RoundTrip => RoundTripAutoFillNote,
+        _ => string.Empty,
+    };
+
+    /// <summary>Issue #2251: 既定値（同じ職員×同じ金額の実績）で入れた欄の注記。</summary>
+    internal const string SuggestedAutoFillNote =
+        "自動入力：これまでの入力（同じ職員・同じ金額）から入れました。違う場合は書き換えてください";
+
+    /// <summary>Issue #2251: 往復の復路として入れた欄の注記。</summary>
+    internal const string RoundTripAutoFillNote =
+        "自動入力：上の行の帰り（往復）として入れました。違う場合は書き換えてください";
+
+    /// <summary>
+    /// Issue #2251: 職員がこの欄を操作したか（入力・候補の選択・「↑往復」ボタン）。
+    /// 一度でも操作した欄には、空に戻した後も自動で値を入れない（#1729「無い値の補完」と「有る値の上書き」を分ける）。
+    /// </summary>
+    public bool IsTouchedByUser { get; private set; }
+
+    /// <summary>
+    /// Issue #2251: 自動入力の最中か。<c>OnBusStopsChanged</c> が職員の操作と区別するために見る。
+    /// </summary>
+    private bool _isApplyingAutoFill;
+
+    /// <summary>
+    /// Issue #2251: 既定値を入れてよいか（未入力で、職員がまだ触っていない）。
+    /// </summary>
+    internal bool CanReceiveDefault
+        => !IsTouchedByUser && AutoFillKind == BusStopAutoFillKind.None && string.IsNullOrWhiteSpace(BusStops);
+
+    /// <summary>
+    /// Issue #2251: 往復の復路を入れてよいか（未入力で職員がまだ触っていない、または前回の復路の補完のまま）。
+    /// 復路の補完のままの欄は、上の行が変わったら入れ直す。
+    /// </summary>
+    internal bool CanReceiveRoundTrip
+        => !IsTouchedByUser
+           && (AutoFillKind == BusStopAutoFillKind.RoundTrip
+               || (AutoFillKind == BusStopAutoFillKind.None && string.IsNullOrWhiteSpace(BusStops)));
+
+    /// <summary>
+    /// Issue #2251: 値を自動で入れる。職員の操作としては数えない（<see cref="IsTouchedByUser"/> を立てない）。
+    /// 候補も開かない（入れる先は、職員が今入力している欄ではない）。
+    /// </summary>
+    internal void ApplyAutoFill(string value, BusStopAutoFillKind kind)
+    {
+        SetBusStopsWithoutUserInput(value);
+        AutoFillKind = kind;
+    }
+
+    /// <summary>
+    /// Issue #2251: 自動で入れた値を取り除き、未入力・未操作の状態へ戻す。
+    /// </summary>
+    internal void ClearAutoFill()
+    {
+        SetBusStopsWithoutUserInput(string.Empty);
+        AutoFillKind = BusStopAutoFillKind.None;
+    }
+
+    /// <summary>
+    /// Issue #2251: 入力欄の状態（値・自動入力の理由・操作の有無）を退避する。スキップの失敗時に戻すため。
+    /// </summary>
+    internal (string BusStops, BusStopAutoFillKind AutoFillKind, bool IsTouchedByUser) CaptureInputState()
+        => (BusStops, AutoFillKind, IsTouchedByUser);
+
+    /// <summary>
+    /// Issue #2251: <see cref="CaptureInputState"/> で退避した状態へ戻す。
+    /// </summary>
+    internal void RestoreInputState((string BusStops, BusStopAutoFillKind AutoFillKind, bool IsTouchedByUser) state)
+    {
+        SetBusStopsWithoutUserInput(state.BusStops);
+        AutoFillKind = state.AutoFillKind;
+        IsTouchedByUser = state.IsTouchedByUser;
+    }
+
+    /// <summary>
+    /// Issue #2251: フォーカス・↓キーで候補を開くときの絞り込みの入力。自動で入れた値（未操作）では空として扱い、
+    /// その行の並び（同じ職員×同じ金額 → …）の先頭 8 件を出す。自動の値で絞ると、その値を含む候補しか出ず
+    /// （同じ値だけなら候補が開かない）、別の区間を選ぶには値を消してからでないと候補が見えない。
+    /// </summary>
+    /// <remarks>職員が書き換えると <see cref="AutoFillKind"/> は None へ戻る（<see cref="MarkAsUserInput"/>）ので、以後は入力値で絞る。</remarks>
+    private string SuggestionFilterInput
+        => IsAutoFilled ? string.Empty : BusStops;
+
+    private void SetBusStopsWithoutUserInput(string value)
+    {
+        _isApplyingAutoFill = true;
+        try
+        {
+            BusStops = value;
+        }
+        finally
+        {
+            _isApplyingAutoFill = false;
+        }
+    }
+
+    /// <summary>
+    /// Issue #2251: 職員がこの欄の値を決めたことを記録する。自動で入れた値と同じ値を選び直した場合も、確認済みとして扱う。
+    /// </summary>
+    private void MarkAsUserInput()
+    {
+        IsTouchedByUser = true;
+        AutoFillKind = BusStopAutoFillKind.None;
+    }
+
     public DateTime? UseDate => Detail.UseDate;
     public string UseDateDisplay => Detail.UseDate.HasValue
         ? WarekiConverter.ToWareki(Detail.UseDate.Value)
@@ -873,6 +1175,15 @@ public partial class BusStopInputItem : ObservableObject
     partial void OnBusStopsChanged(string value)
     {
         Detail.BusStops = value;
+
+        // Issue #2251: 自動入力・状態の復元は職員の操作ではないので、操作済みの印を付けず候補も開かない
+        if (_isApplyingAutoFill)
+        {
+            ShowSuggestions = false;
+            return;
+        }
+
+        MarkAsUserInput();
         UpdateFilteredSuggestions(value);
     }
 
@@ -944,6 +1255,8 @@ public partial class BusStopInputItem : ObservableObject
     public void SelectSuggestion(string suggestion)
     {
         BusStops = suggestion;
+        // Issue #2251: 自動で入れた値と同じ候補を選んだときは値が変わらず OnBusStopsChanged が走らないので、ここでも記録する
+        MarkAsUserInput();
         ShowSuggestions = false;
     }
 
@@ -990,7 +1303,7 @@ public partial class BusStopInputItem : ObservableObject
             case Key.Down:
                 if (!ShowSuggestions)
                 {
-                    UpdateFilteredSuggestions(BusStops);
+                    UpdateFilteredSuggestions(SuggestionFilterInput);
                     if (!ShowSuggestions)
                     {
                         return false;
@@ -1052,26 +1365,16 @@ public partial class BusStopInputItem : ObservableObject
             return;
         }
 
-        var source = PreviousItem.BusStops;
-        if (string.IsNullOrWhiteSpace(source))
+        // Issue #2251: 入れ替えの判断は往復の自動補完と共有する（同じ判断を 2 か所に書かない。#1763）
+        var reversed = BusStopInputAssistant.ReverseRoute(PreviousItem.BusStops);
+        if (reversed is null)
         {
             return;
         }
 
-        var parts = source.Split('～');
-        if (parts.Length != 2)
-        {
-            return;
-        }
-
-        var from = parts[0].Trim();
-        var to = parts[1].Trim();
-        if (string.IsNullOrEmpty(from) || string.IsNullOrEmpty(to))
-        {
-            return;
-        }
-
-        BusStops = $"{to}～{from}";
+        BusStops = reversed;
+        // 自動で入れた復路と同じ値なら OnBusStopsChanged が走らないので、ボタンを押したことをここでも記録する
+        MarkAsUserInput();
     }
 
     /// <summary>
@@ -1079,6 +1382,21 @@ public partial class BusStopInputItem : ObservableObject
     /// </summary>
     public void OnTextBoxGotFocus()
     {
-        UpdateFilteredSuggestions(BusStops);
+        UpdateFilteredSuggestions(SuggestionFilterInput);
     }
+}
+
+/// <summary>
+/// Issue #2251: バス停名の入力欄に本システムが自動で値を入れた理由。
+/// </summary>
+public enum BusStopAutoFillKind
+{
+    /// <summary>自動で入れていない（未入力・職員の入力・保存済みの値）</summary>
+    None,
+
+    /// <summary>同じ職員×同じ金額の実績から既定値として入れた</summary>
+    Suggested,
+
+    /// <summary>上の行の往復の復路として入れた</summary>
+    RoundTrip,
 }

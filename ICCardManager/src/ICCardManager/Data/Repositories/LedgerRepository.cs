@@ -1375,6 +1375,68 @@ LIMIT 100";
         }
 
         /// <inheritdoc/>
+        public async Task<IEnumerable<BusStopUsageStatRow>> GetBusStopUsageStatsAsync(
+            string busStopPlaceholder, string? lenderIdm)
+        {
+            // GetBusStopSuggestionsAsync と同じ理由（Issue #1818）で、渡し忘れはその場の失敗にする
+            if (string.IsNullOrEmpty(busStopPlaceholder))
+            {
+                throw new ArgumentException(
+                    "除外する未入力プレースホルダが未指定です。" +
+                    "組織設定から解決した記号を渡してください。",
+                    nameof(busStopPlaceholder));
+            }
+
+            using var lease = await _dbContext.LeaseConnectionAsync().ConfigureAwait(false);
+            var connection = lease.Connection;
+            var result = new List<BusStopUsageStatRow>();
+
+            using var command = connection.CreateCommand();
+            // Issue #2251: 候補の並び（同じ職員×同じ金額 → 同じ金額 → 同じ職員 → 全体）を明細ごとに決めるため、
+            // バス停名 × 金額 × 「指定した職員の利用か」で集計する。職員は 1 人分だけを 0/1 に畳むので、
+            // 行数は「バス停名 × 金額」の 2 倍で頭打ちになる（全職員分を読み出さない）。
+            // 除外条件は GetBusStopSuggestionsAsync と同じ（未入力プレースホルダと空文字）。
+            // lender_idm が NULL の行・@lenderIdm が NULL のときは比較が NULL になり 0（同じ職員ではない）へ倒れる。
+            command.CommandText = @"SELECT d.bus_stops,
+  d.amount,
+  CASE WHEN l.lender_idm = @lenderIdm THEN 1 ELSE 0 END AS is_same_staff,
+  COUNT(*) AS usage_count,
+  MAX(d.use_date) AS last_used_date
+FROM ledger_detail d
+INNER JOIN ledger l ON l.id = d.ledger_id
+WHERE d.is_bus = 1
+  AND d.bus_stops IS NOT NULL
+  AND d.bus_stops != ''
+  AND d.bus_stops != @busStopPlaceholder
+GROUP BY d.bus_stops, d.amount, is_same_staff";
+            command.Parameters.AddWithValue("@busStopPlaceholder", busStopPlaceholder);
+            command.Parameters.AddWithValue(
+                "@lenderIdm", lenderIdm is { Length: > 0 } idm ? idm : DBNull.Value);
+
+            using var reader = await command.ExecuteReaderAsync().ConfigureAwait(false);
+            while (await reader.ReadAsync().ConfigureAwait(false))
+            {
+                DateTime? lastUsedDate = null;
+                if (!reader.IsDBNull(4)
+                    && SqliteDateTimeFormat.TryParseStored(reader.GetString(4), out var parsed))
+                {
+                    lastUsedDate = parsed;
+                }
+
+                result.Add(new BusStopUsageStatRow
+                {
+                    BusStops = reader.GetString(0),
+                    Amount = reader.IsDBNull(1) ? null : reader.GetInt32(1),
+                    IsSameStaff = reader.GetInt32(2) == 1,
+                    UsageCount = reader.GetInt32(3),
+                    LastUsedDate = lastUsedDate,
+                });
+            }
+
+            return result;
+        }
+
+        /// <inheritdoc/>
         public Task<bool> UpdateDetailBusStopsAsync(int ledgerId, IEnumerable<(int SequenceNumber, string BusStops)> updates)
             => UpdateDetailBusStopsAsync(ledgerId, updates, transaction: null);
 
