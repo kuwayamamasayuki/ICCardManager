@@ -108,6 +108,7 @@
                                          AutomationProperties.Name="バス停名"
                                          ToolTip="乗車バス停～降車バス停（例: 天神～博多駅）"
                                          GotFocus="BusStopTextBox_GotFocus"
+                                         PreviewMouseLeftButtonDown="BusStopTextBox_PreviewMouseLeftButtonDown"
                                          PreviewKeyDown="BusStopTextBox_PreviewKeyDown"
                                          LostKeyboardFocus="BusStopTextBox_LostKeyboardFocus">
                                     <!-- Issue #2251: 自動で入れた値なら、読み上げの補足にも注記を載せる（見た目の注記だけでは、

@@ -586,8 +586,8 @@ public partial class BusStopInputViewModel : ViewModelBase
         }
 
         // Issue #1133: 類似バス停名の検出（取り違え・表記ゆれの疑い）
-        // Issue #2251: 本システムが自動で入れた値（既定値・往復の復路）は過去の入力そのもの（またはその乗降の入れ替え）なので、
-        // 類似の確認から外す。外さないと、過去に「天神～博多駅」と「天神～博多駅前」の両方がある職員は、
+        // Issue #2251: 本システムが自動で入れた値（既定値＝過去の入力そのもの／往復の復路＝上の行の乗降の入れ替え）は
+        // 類似の確認から外す。復路の元になった上の行（職員の入力）は引き続き確認されるので、取り違えの検出は失われない。外さないと、過去に「天神～博多駅」と「天神～博多駅前」の両方がある職員は、
         // 何も入力していなくても返却のたびに保存前の確認が出る（アプリ自身が生成した入力を自分で警告しない。#1811）
         var newEntries = BusUsages
             .Where(b => !b.IsAutoFilled)
@@ -1114,6 +1114,14 @@ public partial class BusStopInputItem : ObservableObject
         IsTouchedByUser = state.IsTouchedByUser;
     }
 
+    /// <summary>
+    /// Issue #2251: フォーカス・↓キーで候補を開くときの絞り込みの入力。自動で入れた値（未操作）では空として扱い、
+    /// その行の並び（同じ職員×同じ金額 → …）の先頭 8 件を出す。自動の値で絞ると、その値を含む候補しか出ず
+    /// （同じ値だけなら候補が開かない）、別の区間を選ぶには値を消してからでないと候補が見えない。
+    /// </summary>
+    private string SuggestionFilterInput
+        => IsAutoFilled && !IsTouchedByUser ? string.Empty : BusStops;
+
     private void SetBusStopsWithoutUserInput(string value)
     {
         _isApplyingAutoFill = true;
@@ -1294,7 +1302,7 @@ public partial class BusStopInputItem : ObservableObject
             case Key.Down:
                 if (!ShowSuggestions)
                 {
-                    UpdateFilteredSuggestions(BusStops);
+                    UpdateFilteredSuggestions(SuggestionFilterInput);
                     if (!ShowSuggestions)
                     {
                         return false;
@@ -1373,7 +1381,7 @@ public partial class BusStopInputItem : ObservableObject
     /// </summary>
     public void OnTextBoxGotFocus()
     {
-        UpdateFilteredSuggestions(BusStops);
+        UpdateFilteredSuggestions(SuggestionFilterInput);
     }
 }
 

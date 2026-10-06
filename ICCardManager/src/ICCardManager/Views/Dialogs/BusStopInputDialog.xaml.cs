@@ -105,6 +105,26 @@ namespace ICCardManager.Views.Dialogs
         }
 
         /// <summary>
+        /// Issue #2251: マウスのクリックで自動で入れた欄へ入ったときも、値の全体を選択した状態にする。
+        /// </summary>
+        /// <remarks>
+        /// クリックでは <c>GotFocus</c> が TextBox 自身のマウス処理の途中で発生し、その後でクリック位置にキャレットが置かれるため、
+        /// <see cref="BusStopTextBox_GotFocus"/> の全選択が取り消される。まだフォーカスを持っていない欄への最初のクリックだけを
+        /// ここで受け、フォーカスを移して（全選択は GotFocus が行う）クリックを処理済みにする。
+        /// フォーカスを持った後のクリックは従来どおりキャレットを置く。
+        /// </remarks>
+        private void BusStopTextBox_PreviewMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
+        {
+            if (sender is TextBox textBox && !textBox.IsKeyboardFocusWithin
+                && textBox.DataContext is BusStopInputItem item
+                && item.IsAutoFilled && !item.IsTouchedByUser)
+            {
+                textBox.Focus();
+                e.Handled = true;
+            }
+        }
+
+        /// <summary>
         /// Issue #2072: 入力欄のキーを候補リストの操作（↓↑ で選択、Enter で確定、Esc で閉じる）として処理する。
         /// </summary>
         /// <remarks>

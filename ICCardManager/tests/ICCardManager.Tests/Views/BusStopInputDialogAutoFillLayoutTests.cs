@@ -73,5 +73,24 @@ public class BusStopInputDialogAutoFillLayoutTests
             "キャレットが先頭のままだと、打ち始めた文字が自動の値の前に挿入される");
     }
 
+    [Fact]
+    public void 自動で入れた欄への最初のクリックはフォーカスだけを移し全選択を保つこと()
+    {
+        // クリックでは GotFocus の後にクリック位置へキャレットが置かれ、全選択が取り消される
+        var textBox = XamlElementInspection.EnumerateElements(Xaml, "TextBox")
+            .Single(t => XamlElementInspection.GetBindingPropertyName(
+                XamlElementInspection.GetAttribute(t.StartTag, "Text")) == "BusStops");
+        XamlElementInspection.GetAttribute(textBox.StartTag, "PreviewMouseLeftButtonDown")
+            .Should().Be("BusStopTextBox_PreviewMouseLeftButtonDown");
+
+        var code = TestSourceInspection.ToCodeOnly(File.ReadAllText(DialogCodeBehindPath));
+        var body = Normalize(TestSourceInspection.ExtractMethodBody(
+            code, "private void BusStopTextBox_PreviewMouseLeftButtonDown("));
+        body.Should().Contain("!textBox.IsKeyboardFocusWithin",
+            "フォーカスを持った後のクリックは従来どおりキャレットを置く");
+        body.Should().Contain("item.IsAutoFilled&&!item.IsTouchedByUser");
+        body.Should().Contain("textBox.Focus();e.Handled=true;");
+    }
+
     private static string Normalize(string text) => Regex.Replace(text, @"\s+", string.Empty);
 }

@@ -417,6 +417,51 @@ public class BusStopInputViewModelAutoFillTests : IDisposable
     }
 
     [Fact]
+    public async Task 自動で入れた欄にフォーカスするとその行の並びの先頭を出すこと()
+    {
+        // 自動の値で絞ると、その値だけなら候補が開かず、別の区間を選ぶには値を消すしかない
+        _overall = new List<string> { "全体～Z" };
+        _stats = new List<BusStopUsageStatRow>
+        {
+            Stat("天神～博多", 200, sameStaff: true, count: 3),
+            Stat("薬院～大橋", 200, sameStaff: true, count: 1),
+        };
+        await InitializeAsync(Bus(200, Day));
+        var item = _viewModel.BusUsages[0];
+        item.BusStops.Should().Be("天神～博多", "前提: 既定値が入っている");
+
+        item.OnTextBoxGotFocus();
+
+        item.ShowSuggestions.Should().BeTrue();
+        item.FilteredSuggestions.Should().Equal("天神～博多", "薬院～大橋", "全体～Z");
+
+        // ↓キーで開き直しても同じ
+        item.HideSuggestions();
+        item.HandleSuggestionKey(System.Windows.Input.Key.Down).Should().BeTrue();
+        item.FilteredSuggestions.Should().Equal("天神～博多", "薬院～大橋", "全体～Z");
+    }
+
+    [Fact]
+    public async Task 職員が入力した欄はフォーカス時に入力値で絞ること()
+    {
+        // 対の表明: 常に空として扱う実装を落とす
+        _overall = new List<string> { "全体～Z" };
+        _stats = new List<BusStopUsageStatRow>
+        {
+            Stat("天神～博多", 200, sameStaff: true, count: 1),
+            Stat("薬院～大橋", 200, sameStaff: true, count: 1),
+        };
+        await InitializeAsync(Bus(200, Day));
+        var item = _viewModel.BusUsages[0];
+        item.BusStops = "薬院";
+        item.HideSuggestions();
+
+        item.OnTextBoxGotFocus();
+
+        item.FilteredSuggestions.Should().Equal("薬院～大橋");
+    }
+
+    [Fact]
     public async Task 自動で入れた値は保存前の類似の確認に載せないこと()
     {
         // 過去に「天神～博多駅」と「天神～博多駅前」の両方がある職員は、自動入力のたびに類似の確認が出てしまう
