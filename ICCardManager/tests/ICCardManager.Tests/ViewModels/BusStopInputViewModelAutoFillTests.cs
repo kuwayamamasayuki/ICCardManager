@@ -442,17 +442,18 @@ public class BusStopInputViewModelAutoFillTests : IDisposable
     }
 
     [Fact]
-    public async Task 職員が入力した欄はフォーカス時に入力値で絞ること()
+    public async Task 自動の値を書き換えた欄はフォーカス時に入力値で絞ること()
     {
-        // 対の表明: 常に空として扱う実装を落とす
+        // 対の表明: 自動の欄を書き換えた後も空として扱い続ける実装を落とす
         _overall = new List<string> { "全体～Z" };
         _stats = new List<BusStopUsageStatRow>
         {
-            Stat("天神～博多", 200, sameStaff: true, count: 1),
+            Stat("天神～博多", 200, sameStaff: true, count: 3),
             Stat("薬院～大橋", 200, sameStaff: true, count: 1),
         };
         await InitializeAsync(Bus(200, Day));
         var item = _viewModel.BusUsages[0];
+        item.IsAutoFilled.Should().BeTrue("前提: 既定値から始める");
         item.BusStops = "薬院";
         item.HideSuggestions();
 

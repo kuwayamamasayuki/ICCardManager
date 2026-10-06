@@ -89,7 +89,8 @@ public class BusStopInputDialogAutoFillLayoutTests
         body.Should().Contain("!textBox.IsKeyboardFocusWithin",
             "フォーカスを持った後のクリックは従来どおりキャレットを置く");
         body.Should().Contain("item.IsAutoFilled&&!item.IsTouchedByUser");
-        body.Should().Contain("textBox.Focus();e.Handled=true;");
+        body.Should().Contain("if(textBox.Focus()){e.Handled=true;}",
+            "フォーカスを移せたときだけクリックを処理済みにする（移せないのに捨てるとクリックが無反応になる）");
     }
 
     private static string Normalize(string text) => Regex.Replace(text, @"\s+", string.Empty);

@@ -112,6 +112,8 @@ namespace ICCardManager.Views.Dialogs
         /// <see cref="BusStopTextBox_GotFocus"/> の全選択が取り消される。まだフォーカスを持っていない欄への最初のクリックだけを
         /// ここで受け、フォーカスを移して（全選択は GotFocus が行う）クリックを処理済みにする。
         /// フォーカスを持った後のクリックは従来どおりキャレットを置く。
+        /// 最初のクリックでのドラッグ選択・ダブルクリックの単語選択は効かない（クリックで全選択する入力欄の一般的な代償）。
+        /// フォーカスを移せなかったときはクリックを処理済みにしない（クリックが黙って捨てられないように）。
         /// </remarks>
         private void BusStopTextBox_PreviewMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
         {
@@ -119,8 +121,10 @@ namespace ICCardManager.Views.Dialogs
                 && textBox.DataContext is BusStopInputItem item
                 && item.IsAutoFilled && !item.IsTouchedByUser)
             {
-                textBox.Focus();
-                e.Handled = true;
+                if (textBox.Focus())
+                {
+                    e.Handled = true;
+                }
             }
         }
 

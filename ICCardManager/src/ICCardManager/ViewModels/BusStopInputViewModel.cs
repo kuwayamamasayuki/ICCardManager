@@ -1119,8 +1119,9 @@ public partial class BusStopInputItem : ObservableObject
     /// その行の並び（同じ職員×同じ金額 → …）の先頭 8 件を出す。自動の値で絞ると、その値を含む候補しか出ず
     /// （同じ値だけなら候補が開かない）、別の区間を選ぶには値を消してからでないと候補が見えない。
     /// </summary>
+    /// <remarks>職員が書き換えると <see cref="AutoFillKind"/> は None へ戻る（<see cref="MarkAsUserInput"/>）ので、以後は入力値で絞る。</remarks>
     private string SuggestionFilterInput
-        => IsAutoFilled && !IsTouchedByUser ? string.Empty : BusStops;
+        => IsAutoFilled ? string.Empty : BusStops;
 
     private void SetBusStopsWithoutUserInput(string value)
     {
