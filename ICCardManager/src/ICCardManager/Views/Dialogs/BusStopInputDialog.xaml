@@ -106,11 +106,23 @@
                                          VerticalAlignment="Center"
                                          FontSize="{DynamicResource BaseFontSize}"
                                          AutomationProperties.Name="バス停名"
-                                         AutomationProperties.HelpText="乗車バス停～降車バス停の形式で入力。過去の履歴から候補が表示されます。フォーカス時に直近利用のバス停が表示されます。"
                                          ToolTip="乗車バス停～降車バス停（例: 天神～博多駅）"
                                          GotFocus="BusStopTextBox_GotFocus"
                                          PreviewKeyDown="BusStopTextBox_PreviewKeyDown"
-                                         LostKeyboardFocus="BusStopTextBox_LostKeyboardFocus"/>
+                                         LostKeyboardFocus="BusStopTextBox_LostKeyboardFocus">
+                                    <!-- Issue #2251: 自動で入れた値なら、読み上げの補足にも注記を載せる（見た目の注記だけでは、
+                                         Tab で欄へ入ったスクリーンリーダーの利用者に自動入力であることが伝わらない） -->
+                                    <TextBox.Style>
+                                        <Style TargetType="TextBox" BasedOn="{StaticResource {x:Type TextBox}}">
+                                            <Setter Property="AutomationProperties.HelpText" Value="乗車バス停～降車バス停の形式で入力。過去の履歴から候補が表示されます。フォーカス時に直近利用のバス停が表示されます。"/>
+                                            <Style.Triggers>
+                                                <DataTrigger Binding="{Binding IsAutoFilled}" Value="True">
+                                                    <Setter Property="AutomationProperties.HelpText" Value="{Binding AutoFillNote}"/>
+                                                </DataTrigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </TextBox.Style>
+                                </TextBox>
                                 <!-- Issue #2251: 本システムが自動で入れた値（既定値・往復の復路）は、入力例の代わりに理由の注記を出して
                                      職員の入力と区別する（色だけに頼らず文言と太字で示す。Issue #1274）。
                                      職員が欄を書き換えると注記は入力例へ戻る -->

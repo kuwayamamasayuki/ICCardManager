@@ -161,6 +161,33 @@ public class BusStopInputAssistantTests
     }
 
     [Fact]
+    public void SelectDefault_逆向きも2回以上使っていれば回数に差があっても入れないこと()
+    {
+        // 帰りだけ一度鉄道にした等で回数に差が出ても、その職員は両方向に乗っている。向きを回数で決めると
+        // 往復の 1 行目に逆向きが入り、2 行目の復路も一緒に逆になる
+        var stats = new[]
+        {
+            Row("博多～天神", 200, sameStaff: true, count: 3),
+            Row("天神～博多", 200, sameStaff: true, count: 2),
+        };
+
+        BusStopInputAssistant.SelectDefault(stats, amount: 200).Should().BeNull();
+    }
+
+    [Fact]
+    public void SelectDefault_逆向きが1回だけなら1位を入れること()
+    {
+        // 対の表明: 逆向きの実績があるだけで入れなくなる（広すぎる）実装を落とす
+        var stats = new[]
+        {
+            Row("博多～天神", 200, sameStaff: true, count: 3),
+            Row("天神～博多", 200, sameStaff: true, count: 1),
+        };
+
+        BusStopInputAssistant.SelectDefault(stats, amount: 200).Should().Be("博多～天神");
+    }
+
+    [Fact]
     public void SelectDefault_別の職員や別の金額の実績では入れないこと()
     {
         // 対の表明: ②③④ の段の回数がいくら多くても既定値にはしない（① だけで決める）

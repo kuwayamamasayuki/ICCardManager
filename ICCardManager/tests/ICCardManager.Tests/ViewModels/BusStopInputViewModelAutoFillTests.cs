@@ -146,12 +146,12 @@ public class BusStopInputViewModelAutoFillTests : IDisposable
     }
 
     [Fact]
-    public void ResolveSingleLenderIdm_同じ貸出者だけなら大文字小文字を問わずその職員になること()
+    public void ResolveSingleLenderIdm_貸出者が1人ならその職員で無ければnullになること()
     {
         var ledgers = new[]
         {
             new Ledger { LenderIdm = "ABCD000000000001" },
-            new Ledger { LenderIdm = "abcd000000000001" },
+            new Ledger { LenderIdm = "ABCD000000000001" },
             new Ledger { LenderIdm = null },
         };
 
@@ -162,7 +162,12 @@ public class BusStopInputViewModelAutoFillTests : IDisposable
     [Fact]
     public async Task 利用実績の読み込みに失敗しても従来の全体の並びで入力できること()
     {
+        // 前回の初期化で別の実績を読んでおく。失敗時に捨てなければ、その実績の並び・既定値が残る
         _overall = new List<string> { "全体1～A", "全体2～B" };
+        _stats = new List<BusStopUsageStatRow> { Stat("前回～X", 200, sameStaff: true, count: 5) };
+        await InitializeAsync(Bus(200, Day));
+        _viewModel.BusUsages[0].BusStops.Should().Be("前回～X", "前提: 前回の初期化では既定値が入る");
+
         _ledgerRepoMock.Setup(r => r.GetBusStopUsageStatsAsync(It.IsAny<string>(), It.IsAny<string?>()))
             .ThrowsAsync(new InvalidOperationException("集計の失敗"));
 
@@ -409,6 +414,24 @@ public class BusStopInputViewModelAutoFillTests : IDisposable
         // 確認済みになった欄は、上の行が変わっても入れ直さない
         _viewModel.BusUsages[0].BusStops = "薬院～大橋";
         next.BusStops.Should().Be("博多～天神");
+    }
+
+    [Fact]
+    public async Task 自動で入れた値は保存前の類似の確認に載せないこと()
+    {
+        // 過去に「天神～博多駅」と「天神～博多駅前」の両方がある職員は、自動入力のたびに類似の確認が出てしまう
+        _overall = new List<string> { "天神～博多駅", "天神～博多駅前" };
+        _stats = new List<BusStopUsageStatRow> { Stat("天神～博多駅", 200, sameStaff: true, count: 2) };
+        await InitializeAsync(Bus(200, Day));
+        _viewModel.BusUsages[0].IsAutoFilled.Should().BeTrue("前提: 既定値が入っている");
+
+        _viewModel.CollectSaveWarnings().Should().BeEmpty();
+
+        // 対の表明: 職員が同じ値を入力し直したら従来どおり類似を確認する
+        _viewModel.BusUsages[0].BusStops = string.Empty;
+        _viewModel.BusUsages[0].BusStops = "天神～博多駅";
+        _viewModel.CollectSaveWarnings().Should().ContainSingle()
+            .Which.Should().Be("「天神～博多駅」は既存の「天神～博多駅前」と類似しています");
     }
 
     #endregion

@@ -28,7 +28,10 @@ public class LedgerRepositoryBusStopUsageStatTests : IDisposable
     private const string CardA = "AAAA000000000001";
     private const string StaffX = "1111000000000001";
     private const string StaffY = "2222000000000002";
-    private const string Placeholder = "★";
+    /// <summary>
+    /// 既定（「★」）と異なる記号にする。既定のままだと、SQL が「★」を直書きしても除外のテストが緑になる（#1818 / #2106）。
+    /// </summary>
+    private const string Placeholder = "※";
 
     public LedgerRepositoryBusStopUsageStatTests()
     {
@@ -180,6 +183,18 @@ public class LedgerRepositoryBusStopUsageStatTests : IDisposable
         var rows = (await _ledgerRepository.GetBusStopUsageStatsAsync(Placeholder, StaffX)).ToList();
 
         rows.Select(r => r.BusStops).Should().Equal("天神～博多");
+    }
+
+    [Fact]
+    public async Task 渡していない記号は利用実績として残ること()
+    {
+        // 対の表明: 除外は呼び出し元が渡した記号に従い、既定の「★」を常に落とすわけではない
+        await SeedAsync();
+        await AddBusAsync(StaffX, "★", 200, new DateTime(2026, 9, 1));
+
+        var rows = (await _ledgerRepository.GetBusStopUsageStatsAsync(Placeholder, StaffX)).ToList();
+
+        rows.Select(r => r.BusStops).Should().Equal("★");
     }
 
     [Fact]

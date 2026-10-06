@@ -231,6 +231,8 @@ public partial class BusStopInputViewModel : ViewModelBase
     /// </summary>
     public void InitializeWithDetails(Ledger ledger, IEnumerable<LedgerDetail> busDetails)
     {
+        // Issue #2251: この経路は利用実績を読み込まない。前回の初期化で読んだ別の職員の実績で既定値を入れないよう捨てる
+        _usageStats = new List<BusStopUsageStatRow>();
         Ledger = ledger;
 
         ClearBusUsages();
@@ -297,13 +299,14 @@ public partial class BusStopInputViewModel : ViewModelBase
     /// </summary>
     /// <remarks>
     /// 1 回の返却で作られる台帳の貸出者は同じ職員なので、通常は 1 人に決まる。
+    /// 比較は SQL（<c>l.lender_idm = @lenderIdm</c>）と同じく大文字小文字を区別する（「同じ職員」の判断を 2 通りにしない）。
     /// </remarks>
     internal static string? ResolveSingleLenderIdm(IEnumerable<Ledger> ledgers)
     {
         var lenders = ledgers
             .Select(l => l.LenderIdm)
             .Where(idm => !string.IsNullOrEmpty(idm))
-            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Distinct(StringComparer.Ordinal)
             .Take(2)
             .ToList();
         return lenders.Count == 1 ? lenders[0] : null;
@@ -346,7 +349,8 @@ public partial class BusStopInputViewModel : ViewModelBase
         var autoFilledCount = BusUsages.Count(b => b.IsAutoFilled);
         if (autoFilledCount > 0)
         {
-            StatusMessage += $"自動で入れた欄が{autoFilledCount}件あります。内容を確かめ、違う場合は書き換えてください。";
+            StatusMessage += Environment.NewLine +
+                             $"自動で入れた欄が{autoFilledCount}件あります。内容を確かめ、違う場合は書き換えてください。";
         }
     }
 
@@ -581,7 +585,11 @@ public partial class BusStopInputViewModel : ViewModelBase
         }
 
         // Issue #1133: 類似バス停名の検出（取り違え・表記ゆれの疑い）
+        // Issue #2251: 本システムが自動で入れた値（既定値・往復の復路）は過去の入力そのもの（またはその乗降の入れ替え）なので、
+        // 類似の確認から外す。外さないと、過去に「天神～博多駅」と「天神～博多駅前」の両方がある職員は、
+        // 何も入力していなくても返却のたびに保存前の確認が出る（アプリ自身が生成した入力を自分で警告しない。#1811）
         var newEntries = BusUsages
+            .Where(b => !b.IsAutoFilled)
             .Where(b => !string.IsNullOrWhiteSpace(b.BusStops)
                 && !SummaryGenerator.IsBusStopPlaceholder(b.BusStops))
             .Select(b => b.BusStops)
