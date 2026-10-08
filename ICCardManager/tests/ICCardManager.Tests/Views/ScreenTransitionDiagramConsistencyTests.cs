@@ -59,6 +59,8 @@ public class ScreenTransitionDiagramConsistencyTests
         ["HistoryPanelViewModel.Edit.cs"] = "HISTORY",
         ["HistoryPanelViewModel.Merge.cs"] = "HISTORY",
         ["SystemManageViewModel.cs"] = "SYSMGMT",
+        // Issue #2255: 繰越情報の復旧は、復旧ダイアログの「保存」で認証する
+        ["CarryoverRecoveryViewModel.cs"] = "CARRYRECOVER",
     };
 
     /// <summary>
@@ -77,6 +79,7 @@ public class ScreenTransitionDiagramConsistencyTests
         "履歴の変更",
         "履歴の統合",
         "データベースのリストア",
+        "繰越情報の復旧",
     };
 
     /// <summary>ノード定義行（例: <c>MAIN[メイン画面]</c>）。</summary>
@@ -330,6 +333,41 @@ public class ScreenTransitionDiagramConsistencyTests
             "職員認証が必要な操作を増減させたら、§1 画面遷移図のエッジラベルと「図の読み方」注記、" +
             "および §3.17 職員認証ダイアログの記述を併せて更新する必要がある（Issue #1715）。" +
             "更新後、本テストの ExpectedStaffAuthOperations も更新すること。");
+    }
+
+    [Fact]
+    public void 職員認証の操作名はリテラルで書かれている()
+    {
+        // 操作名を定数や変数で渡すと StaffAuthCallPattern に一致せず、認証を要求する画面・操作が
+        // 上の 3 つの検査から黙って漏れる（Issue #2255 の初版が定数で渡しており、検査は緑のままだった）
+        var nonLiteral = Directory
+            .GetFiles(Path.Combine(GetSourceRoot(), "ViewModels"), "*.cs", SearchOption.AllDirectories)
+            .SelectMany(f =>
+            {
+                var code = ReadCodeKeepingLiterals(f);
+                var calls = Regex.Matches(code, @"\.RequestAuthenticationAsync\(").Count;
+                var literalCalls = StaffAuthCallPattern.Matches(code).Count;
+                return calls == literalCalls
+                    ? Enumerable.Empty<string>()
+                    : new[] { $"  - {Path.GetFileName(f)}: 呼び出し {calls} 件のうちリテラル {literalCalls} 件" };
+            })
+            .ToList();
+
+        nonLiteral.Should().BeEmpty(
+            "RequestAuthenticationAsync の操作名は文字列リテラルで渡すこと（検査が操作を数えられるように）。\n" +
+            string.Join("\n", nonLiteral));
+    }
+
+    [Fact]
+    public void 職員認証の呼び出し数は_非リテラルの呼び出しを数えられること()
+    {
+        // 上の検査が空振りしていないことを、既知のサンプル入力で固定する
+        const string sample =
+            "var a = await _staffAuthService.RequestAuthenticationAsync(\"履歴の分割\");\n" +
+            "var b = await _staffAuthService.RequestAuthenticationAsync(OperationName);\n";
+
+        Regex.Matches(sample, @"\.RequestAuthenticationAsync\(").Count.Should().Be(2);
+        StaffAuthCallPattern.Matches(sample).Count.Should().Be(1);
     }
 
     [Fact]

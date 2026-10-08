@@ -1,3 +1,4 @@
+#nullable enable
 using System;
 using System.Collections.Generic;
 using System.Data.Common;
@@ -197,7 +198,7 @@ ORDER BY last_lent_at DESC";
         }
 
         /// <inheritdoc/>
-        public async Task<IcCard> GetByIdmAsync(string cardIdm, bool includeDeleted = false)
+        public async Task<IcCard?> GetByIdmAsync(string cardIdm, bool includeDeleted = false)
         {
             using var lease = await _dbContext.LeaseConnectionAsync().ConfigureAwait(false);
             var connection = lease.Connection;
@@ -399,7 +400,62 @@ WHERE card_idm = @cardIdm AND is_deleted = 0";
         }
 
         /// <inheritdoc/>
-        public async Task<bool> UpdateLentStatusAsync(string cardIdm, bool isLent, DateTime? lentAt, string staffIdm)
+        public async Task<bool> UpdateCarryoverInfoAsync(
+            string cardIdm, CarryoverInfo expected, CarryoverInfo replacement, SQLiteTransaction transaction)
+        {
+            if (expected == null)
+            {
+                throw new ArgumentNullException(nameof(expected));
+            }
+
+            if (replacement == null)
+            {
+                throw new ArgumentNullException(nameof(replacement));
+            }
+
+            using var lease = await _dbContext.LeaseConnectionAsync().ConfigureAwait(false);
+            var connection = lease.Connection;
+
+            // SET 句は繰越情報の 4 列だけ（Issue #1726 の「その経路で本当に編集する列に限る」）。
+            // WHERE 句の carryover_fiscal_year は NULL を取り得るので「=」ではなく「IS」で比べる
+            // （「= NULL」は常に偽になり、年度が未設定のカードを一度も復旧できなくなる）。
+            // 他の 3 列は NOT NULL ではない（マイグレーションが DEFAULT 付きで追加した列）。読み取り（MapToIcCard）は
+            // NULL を既定値（1 / 0）として読むので、比較も同じ解釈で行う。素の「=」だと NULL の行に一致せず、
+            // 一覧には毎回出るのに保存は毎回「他のパソコンで変更された」と失敗し、二度と復旧できなくなる。
+            using var command = connection.CreateCommand();
+            command.Transaction = transaction;
+            command.CommandText = @"UPDATE ic_card
+SET starting_page_number = @startingPageNumber,
+    carryover_income_total = @carryoverIncomeTotal,
+    carryover_expense_total = @carryoverExpenseTotal,
+    carryover_fiscal_year = @carryoverFiscalYear
+WHERE card_idm = @cardIdm AND is_deleted = 0
+  AND IFNULL(starting_page_number, 1) = @expectedStartingPageNumber
+  AND IFNULL(carryover_income_total, 0) = @expectedCarryoverIncomeTotal
+  AND IFNULL(carryover_expense_total, 0) = @expectedCarryoverExpenseTotal
+  AND carryover_fiscal_year IS @expectedCarryoverFiscalYear";
+
+            command.Parameters.AddWithValue("@cardIdm", cardIdm);
+            command.Parameters.AddWithValue("@startingPageNumber", replacement.StartingPageNumber);
+            command.Parameters.AddWithValue("@carryoverIncomeTotal", replacement.CarryoverIncomeTotal);
+            command.Parameters.AddWithValue("@carryoverExpenseTotal", replacement.CarryoverExpenseTotal);
+            command.Parameters.AddWithValue("@carryoverFiscalYear", ToDbValue(replacement.CarryoverFiscalYear));
+            command.Parameters.AddWithValue("@expectedStartingPageNumber", expected.StartingPageNumber);
+            command.Parameters.AddWithValue("@expectedCarryoverIncomeTotal", expected.CarryoverIncomeTotal);
+            command.Parameters.AddWithValue("@expectedCarryoverExpenseTotal", expected.CarryoverExpenseTotal);
+            command.Parameters.AddWithValue("@expectedCarryoverFiscalYear", ToDbValue(expected.CarryoverFiscalYear));
+
+            var result = await command.ExecuteNonQueryAsync().ConfigureAwait(false);
+
+            // キャッシュはトランザクションの外（呼び出し元の finally）で破棄する。
+            // tx の内側で破棄すると、コミット前の値で一覧が作り直され得る（CardManagementService と同じ判断）。
+            return result > 0;
+
+            static object ToDbValue(int? value) => value.HasValue ? (object)value.Value : DBNull.Value;
+        }
+
+        /// <inheritdoc/>
+        public async Task<bool> UpdateLentStatusAsync(string cardIdm, bool isLent, DateTime? lentAt, string? staffIdm)
         {
             using var lease = await _dbContext.LeaseConnectionAsync().ConfigureAwait(false);
             var connection = lease.Connection;
@@ -412,7 +468,7 @@ WHERE card_idm = @cardIdm AND is_deleted = 0";
             command.Parameters.AddWithValue("@cardIdm", cardIdm);
             command.Parameters.AddWithValue("@isLent", isLent ? 1 : 0);
             command.Parameters.AddWithValue("@lentAt", SqliteDateTimeFormat.ToTextOrDbNull(lentAt));
-            command.Parameters.AddWithValue("@staffIdm", (object)staffIdm ?? DBNull.Value);
+            command.Parameters.AddWithValue("@staffIdm", (object?)staffIdm ?? DBNull.Value);
 
             var result = await command.ExecuteNonQueryAsync().ConfigureAwait(false);
 

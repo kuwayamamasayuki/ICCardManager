@@ -637,6 +637,7 @@ namespace ICCardManager
             services.AddTransient<SystemManageViewModel>();
             services.AddTransient<IncompleteBusStopViewModel>();
             services.AddTransient<CarryoverDataLossViewModel>();
+            services.AddTransient<CarryoverRecoveryViewModel>();
             services.AddTransient<LedgerRowEditViewModel>();
             services.AddTransient<ReportPreflightViewModel>();
             services.AddTransient<ConnectionDiagnosticsViewModel>();
@@ -666,6 +667,7 @@ namespace ICCardManager
             services.AddTransient<Views.Dialogs.AdminDashboardDialog>();
             services.AddTransient<Views.Dialogs.IncompleteBusStopDialog>();
             services.AddTransient<Views.Dialogs.CarryoverDataLossDialog>();
+            services.AddTransient<Views.Dialogs.CarryoverRecoveryDialog>();
             services.AddTransient<Views.Dialogs.LedgerRowEditDialog>();
             services.AddTransient<Views.Dialogs.CardTypeSelectionDialog>();
             services.AddTransient<Views.Dialogs.ConnectionDiagnosticsDialog>();

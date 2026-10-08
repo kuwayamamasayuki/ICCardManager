@@ -492,9 +492,9 @@ public class DataExportImportViewModelMessagingTests : IDisposable
             {
                 attempt++;
                 return attempt == 1
-                    ? Task.FromException<ICCardManager.Models.IcCard>(
+                    ? Task.FromException<ICCardManager.Models.IcCard?>(
                         new InvalidOperationException("database is locked"))
-                    : Task.FromResult(card);
+                    : Task.FromResult<ICCardManager.Models.IcCard?>(card);
             });
 
         await _viewModel.StartCardTouchAsync();

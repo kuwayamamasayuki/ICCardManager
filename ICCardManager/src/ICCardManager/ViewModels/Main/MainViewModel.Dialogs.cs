@@ -1,3 +1,4 @@
+#nullable enable
 using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
@@ -88,7 +89,7 @@ public partial class MainViewModel
     [RelayCommand]
     public async Task OpenDataExportImportAsync()
     {
-        Views.Dialogs.DataExportImportDialog capturedExportDialog = null;
+        Views.Dialogs.DataExportImportDialog? capturedExportDialog = null;
         _navigationService.ShowDialog<Views.Dialogs.DataExportImportDialog>(
             d => capturedExportDialog = d);
 
@@ -238,10 +239,10 @@ public partial class MainViewModel
 
             case WarningType.CarryoverDataLoss:
                 // Issue #1758: 繰越情報消失警告クリックで、失われた元の値の一覧を表示する。
-                // 復旧は DB の直接修正でしか行えないため、ここでは値を確認できることが目的。
+                // Issue #2255: 一覧の行の「復旧...」から、その場で書き戻せる。
                 _navigationService.ShowDialog<Views.Dialogs.CarryoverDataLossDialog>();
 
-                // ダイアログを開いている間に他PCで復旧された場合に備えて再判定する
+                // 一覧から復旧した結果と、開いている間に他PCで復旧された場合を警告へ反映するため再判定する
                 await CheckCarryoverDataLossAsync();
                 break;
 

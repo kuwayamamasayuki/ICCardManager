@@ -1,3 +1,4 @@
+#nullable enable
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -19,9 +20,9 @@ namespace ICCardManager.Services
     {
         private readonly ILedgerRepository _ledgerRepository;
         private readonly IDatabaseInfo _databaseInfo;
-        private readonly IUpdateNotificationService _updateNotificationService;
-        private readonly IBackupHealthService _backupHealthService;
-        private readonly ICarryoverDataLossDetector _carryoverDataLossDetector;
+        private readonly IUpdateNotificationService? _updateNotificationService;
+        private readonly IBackupHealthService? _backupHealthService;
+        private readonly ICarryoverDataLossDetector? _carryoverDataLossDetector;
 
         /// <param name="ledgerRepository">台帳リポジトリ</param>
         /// <param name="databaseInfo">DB接続情報</param>
@@ -40,9 +41,9 @@ namespace ICCardManager.Services
         public WarningService(
             ILedgerRepository ledgerRepository,
             IDatabaseInfo databaseInfo,
-            IUpdateNotificationService updateNotificationService = null,
-            IBackupHealthService backupHealthService = null,
-            ICarryoverDataLossDetector carryoverDataLossDetector = null)
+            IUpdateNotificationService? updateNotificationService = null,
+            IBackupHealthService? backupHealthService = null,
+            ICarryoverDataLossDetector? carryoverDataLossDetector = null)
         {
             _ledgerRepository = ledgerRepository;
             _databaseInfo = databaseInfo;
@@ -106,7 +107,7 @@ namespace ICCardManager.Services
         /// <param name="recordedBalance">台帳の最新行に記録されている残額（円）</param>
         /// <param name="isLent">対象カードが貸出中か</param>
         /// <returns>差異がある場合は WarningItem、一致する場合は null</returns>
-        public WarningItem CheckCardBalanceMismatchWarning(
+        public WarningItem? CheckCardBalanceMismatchWarning(
             string cardIdm,
             string cardType,
             string cardNumber,
@@ -146,7 +147,7 @@ namespace ICCardManager.Services
         /// バス停名未入力の件数をチェック
         /// </summary>
         /// <returns>未入力件数がある場合はWarningItem、ない場合はnull</returns>
-        public async Task<WarningItem> CheckIncompleteBusStopsAsync()
+        public async Task<WarningItem?> CheckIncompleteBusStopsAsync()
         {
             var ledgers = await _ledgerRepository.GetByDateRangeAsync(
                 null, DateTime.Now.AddYears(-1), DateTime.Now).ConfigureAwait(false);
@@ -168,7 +169,7 @@ namespace ICCardManager.Services
         /// ジャーナルモード警告を生成
         /// </summary>
         /// <returns>ジャーナルモードが低下している場合はWarningItem、正常な場合はnull</returns>
-        public WarningItem CheckJournalModeWarning()
+        public WarningItem? CheckJournalModeWarning()
         {
             if (!_databaseInfo.IsJournalModeDegraded)
             {
@@ -192,7 +193,7 @@ namespace ICCardManager.Services
         /// UI スレッドから呼ぶ場合は Task.Run 経由を推奨（SMB遅延対策）。
         /// </remarks>
         /// <returns>新しいバージョンがある場合はWarningItem、ない場合はnull</returns>
-        public WarningItem CheckUpdateNotificationWarning()
+        public WarningItem? CheckUpdateNotificationWarning()
         {
             var result = _updateNotificationService?.CheckForNewerVersion();
             if (result == null)
@@ -229,7 +230,7 @@ namespace ICCardManager.Services
         /// </remarks>
         /// <param name="now">現在日時（テスト容易性のため引数で受け取る）</param>
         /// <returns>しきい値を超えて成功していない場合は WarningItem、正常な場合は null</returns>
-        public async Task<WarningItem> CheckBackupHealthWarningAsync(DateTime now)
+        public async Task<WarningItem?> CheckBackupHealthWarningAsync(DateTime now)
         {
             if (_backupHealthService == null)
             {
@@ -237,7 +238,12 @@ namespace ICCardManager.Services
             }
 
             var health = await _backupHealthService.GetHealthAsync().ConfigureAwait(false);
-            var elapsedDays = health?.GetDaysSinceLastSuccess(now);
+            if (health == null)
+            {
+                return null;
+            }
+
+            var elapsedDays = health.GetDaysSinceLastSuccess(now);
             if (elapsedDays == null || elapsedDays <= AppConstants.BackupStaleWarningDays)
             {
                 return null;
@@ -269,7 +275,7 @@ namespace ICCardManager.Services
         /// </para>
         /// </remarks>
         /// <returns>被害があれば WarningItem、なければ null</returns>
-        public async Task<WarningItem> CheckCarryoverDataLossWarningAsync()
+        public async Task<WarningItem?> CheckCarryoverDataLossWarningAsync()
         {
             if (_carryoverDataLossDetector == null)
             {
@@ -290,8 +296,7 @@ namespace ICCardManager.Services
                     "繰越累計・開始ページ番号が失われています。" +
                     "過去のバージョンでカード情報を編集した際に消去されたため、" +
                     "月次帳票（物品出納簿）の年度累計とページ番号が正しく出力されません。" +
-                    "この警告をクリックして失われた値を確認し、" +
-                    "システム管理者にデータベースの修正を依頼してください。"
+                    "この警告をクリックし、一覧の「復旧...」から失われた値を書き戻してください。"
             };
         }
 

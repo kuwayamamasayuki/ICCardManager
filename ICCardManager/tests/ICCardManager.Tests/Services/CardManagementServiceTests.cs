@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Data.SQLite;
+using System.Linq;
 using System.Text.Json;
 using System.Threading.Tasks;
 using FluentAssertions;
@@ -427,6 +428,142 @@ public sealed class CardManagementServiceTests : IDisposable
         // Assert
         await act.Should().ThrowAsync<InvalidOperationException>();
         _invalidatedWhileTransactionOpen.Should().NotBeEmpty().And.OnlyContain(open => open == false);
+    }
+
+    #endregion
+
+    #region 繰越情報の復旧（Issue #2255）
+
+    [Fact]
+    public async Task RecoverCarryoverInfoAsync_通常の復旧_4項目が戻り監査ログに変更前後が残ること()
+    {
+        // Arrange: 消失した状態（既定値）。貸出中・備考ありで、この操作が変えない列を持たせる
+        await SeedCardAsync(TestCardIdm, "H-001", note: "引き出し2段目");
+        (await _cardRepository.UpdateLentStatusAsync(TestCardIdm, true, new DateTime(2026, 9, 1), null)).Should().BeTrue();
+        var before = (await _cardRepository.GetByIdmAsync(TestCardIdm))!;
+        var replacement = new CarryoverInfo(7, 45000, 37500, 2025);
+        var service = CreateService(PassThroughOperationLogRepository().Object);
+
+        // Act
+        var result = await service.RecoverCarryoverInfoAsync(before, replacement);
+
+        // Assert
+        result.Should().BeTrue();
+        CarryoverInfo.From((await _cardRepository.GetByIdmAsync(TestCardIdm))!).Should().Be(replacement);
+
+        var log = (await ReadLogsAsync(TestCardIdm)).Should().ContainSingle().Subject;
+        log.Action.Should().Be(OperationLogger.Actions.Update);
+        log.OperatorIdm.Should().Be(OperatorIdm, "認証した職員を操作者として残す");
+        var loggedBefore = JsonSerializer.Deserialize<IcCard>(log.BeforeData!)!;
+        var loggedAfter = JsonSerializer.Deserialize<IcCard>(log.AfterData!)!;
+        CarryoverInfo.From(loggedBefore).Should().Be(new CarryoverInfo(1, 0, 0, null));
+        CarryoverInfo.From(loggedAfter).Should().Be(replacement);
+        loggedAfter.IsLent.Should().BeTrue("この操作が変えていない列は変更前の値を保つ（虚偽の差分を残さない。#1726）");
+        loggedAfter.Note.Should().Be("引き出し2段目");
+    }
+
+    [Fact]
+    public async Task RecoverCarryoverInfoAsync_監査ログの書き込みに失敗したら_繰越情報も書き換わらないこと()
+    {
+        // Arrange
+        await SeedCardAsync(TestCardIdm, "H-001");
+        var before = (await _cardRepository.GetByIdmAsync(TestCardIdm))!;
+        var service = CreateService(FailingOperationLogRepository());
+
+        // Act
+        var act = () => service.RecoverCarryoverInfoAsync(before, new CarryoverInfo(7, 45000, 37500, 2025));
+
+        // Assert
+        await act.Should().ThrowAsync<InvalidOperationException>();
+        CarryoverInfo.From((await _cardRepository.GetByIdmAsync(TestCardIdm))!)
+            .Should().Be(new CarryoverInfo(1, 0, 0, null), "誰が戻したか分からない書き換えを確定させない");
+        (await CountLogsAsync(TestCardIdm)).Should().Be(0);
+    }
+
+    [Fact]
+    public async Task RecoverCarryoverInfoAsync_読み取った後に他のパソコンが先に復旧していたら_falseを返し監査ログを書かないこと()
+    {
+        // Arrange: 読み取った時点は既定値。その後に別の PC が 5 ページ目で復旧した
+        await SeedCardAsync(TestCardIdm, "H-001");
+        var before = (await _cardRepository.GetByIdmAsync(TestCardIdm))!;
+        await RecoverDirectlyAsync(new CarryoverInfo(1, 0, 0, null), new CarryoverInfo(5, 0, 0, null));
+        var service = CreateService(PassThroughOperationLogRepository().Object);
+
+        // Act
+        var result = await service.RecoverCarryoverInfoAsync(before, new CarryoverInfo(7, 45000, 37500, 2025));
+
+        // Assert
+        result.Should().BeFalse("見ていない値を黙って上書きしない");
+        (await _cardRepository.GetByIdmAsync(TestCardIdm))!.StartingPageNumber.Should().Be(5);
+        (await CountLogsAsync(TestCardIdm)).Should().Be(0, "起きていない復旧の記録を残さない");
+    }
+
+    [Fact]
+    public async Task RecoverCarryoverInfoAsync_成功_トランザクションを閉じた後でキャッシュを破棄すること()
+    {
+        // Arrange
+        await SeedCardAsync(TestCardIdm, "H-001");
+        var before = (await _cardRepository.GetByIdmAsync(TestCardIdm))!;
+        var service = CreateService(PassThroughOperationLogRepository().Object);
+        _invalidatedWhileTransactionOpen.Clear();
+
+        // Act
+        (await service.RecoverCarryoverInfoAsync(before, new CarryoverInfo(7, 0, 0, null))).Should().BeTrue();
+
+        // Assert: 復旧後の一覧（交通系ICカード管理画面など）がキャッシュの古い値を返さないこと
+        _invalidatedWhileTransactionOpen.Should().NotBeEmpty().And.OnlyContain(open => open == false);
+    }
+
+    [Fact]
+    public void CreateCarryoverRecoveredSnapshot_繰越情報以外のすべての列を変更前から引き継ぐこと()
+    {
+        // 列を IcCard に足してスナップショットへ書き足し忘れても、コンパイルも既存テストも通る。
+        // 書き込み可能なプロパティをリフレクションで走査し、引き継ぎ漏れを検出する（LedgerClonerCoverageTests と同じ作法）。
+        var carryoverProperties = new HashSet<string>
+        {
+            nameof(IcCard.StartingPageNumber), nameof(IcCard.CarryoverIncomeTotal),
+            nameof(IcCard.CarryoverExpenseTotal), nameof(IcCard.CarryoverFiscalYear),
+        };
+        var before = new IcCard
+        {
+            CardIdm = TestCardIdm,
+            CardType = "nimoca",
+            CardNumber = "N-009",
+            Note = "メモ",
+            IsDeleted = true,
+            DeletedAt = new DateTime(2026, 1, 2, 3, 4, 5),
+            IsLent = true,
+            LastLentAt = new DateTime(2026, 2, 3, 4, 5, 6),
+            LastLentStaff = "FFFF000000000002",
+            IsRefunded = true,
+            RefundedAt = new DateTime(2026, 3, 4, 5, 6, 7),
+            StartingPageNumber = 1,
+            CarryoverIncomeTotal = 0,
+            CarryoverExpenseTotal = 0,
+            CarryoverFiscalYear = null,
+        };
+        var replacement = new CarryoverInfo(7, 45000, 37500, 2025);
+
+        var after = CardManagementService.CreateCarryoverRecoveredSnapshot(before, replacement);
+
+        CarryoverInfo.From(after).Should().Be(replacement);
+        var writable = typeof(IcCard).GetProperties().Where(p => p.CanRead && p.CanWrite).ToList();
+        writable.Should().Contain(p => p.Name == nameof(IcCard.Note), "走査の対象が空振りしていないこと");
+        foreach (var property in writable.Where(p => !carryoverProperties.Contains(p.Name)))
+        {
+            property.GetValue(after).Should().Be(property.GetValue(before), $"{property.Name} は変更前の値を引き継ぐこと");
+        }
+    }
+
+    /// <summary>
+    /// 他の PC の復旧を模して、サービスを通さずに繰越情報を書き換える
+    /// </summary>
+    private async Task RecoverDirectlyAsync(CarryoverInfo expected, CarryoverInfo replacement)
+    {
+        using var scope = await _dbContext.BeginTransactionAsync();
+        (await _cardRepository.UpdateCarryoverInfoAsync(TestCardIdm, expected, replacement, scope.Transaction))
+            .Should().BeTrue();
+        scope.Commit();
     }
 
     #endregion

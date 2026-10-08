@@ -1,3 +1,4 @@
+#nullable enable
 using System;
 using System.Collections.Generic;
 using System.Data.SQLite;
@@ -59,7 +60,7 @@ namespace ICCardManager.Data.Repositories
         /// </summary>
         /// <param name="cardIdm">ICカードIDm</param>
         /// <param name="includeDeleted">論理削除されたものも含めるか</param>
-        Task<IcCard> GetByIdmAsync(string cardIdm, bool includeDeleted = false);
+        Task<IcCard?> GetByIdmAsync(string cardIdm, bool includeDeleted = false);
 
         /// <summary>
         /// ICカードを登録
@@ -92,8 +93,9 @@ namespace ICCardManager.Data.Repositories
         /// <see cref="IcCard.Note"/> の 3 項目のみ。
         /// <see cref="IcCard.StartingPageNumber"/> / <see cref="IcCard.CarryoverIncomeTotal"/> /
         /// <see cref="IcCard.CarryoverExpenseTotal"/> / <see cref="IcCard.CarryoverFiscalYear"/> は
-        /// 登録時にのみ確定する値（編集 UI を持たない）ため、本メソッドでは**更新しない**。
+        /// 登録時にのみ確定する値（通常の編集 UI を持たない）ため、本メソッドでは**更新しない**。
         /// これらを引数の <paramref name="card"/> に設定しても DB へは反映されない。
+        /// 失われた繰越情報の復旧は専用の <see cref="UpdateCarryoverInfoAsync"/> が担う（Issue #2255）。
         /// 同様に <see cref="IcCard.IsLent"/> 系は <see cref="UpdateLentStatusAsync"/>、
         /// <see cref="IcCard.IsRefunded"/> 系は <see cref="SetRefundedAsync"/>、
         /// <see cref="IcCard.IsDeleted"/> 系は <see cref="DeleteAsync(string)"/> / <see cref="RestoreAsync(string)"/>
@@ -119,6 +121,35 @@ namespace ICCardManager.Data.Repositories
         Task<bool> UpdateAsync(IcCard card, SQLiteTransaction transaction);
 
         /// <summary>
+        /// 繰越情報（開始ページ番号・繰越累計受入・繰越累計払出・対象年度）だけを書き換える（Issue #2255）
+        /// </summary>
+        /// <param name="cardIdm">対象カードの IDm</param>
+        /// <param name="expected">
+        /// 呼び出し元が直前に読んだ繰越情報。DB の現在値がこれと一致するときだけ書き換える
+        /// </param>
+        /// <param name="replacement">書き込む繰越情報</param>
+        /// <param name="transaction">監査ログと同じトランザクション</param>
+        /// <returns>
+        /// 書き換えたら <c>true</c>。<c>false</c> は競合（カードが削除された、または読んだ後に
+        /// 他のパソコンや別の操作で繰越情報が変わった）で、何も書き換えていない
+        /// </returns>
+        /// <remarks>
+        /// <para>
+        /// 繰越情報の消失（Issue #1726 以前の版の <see cref="UpdateAsync(IcCard)"/> が既定値で上書きした）を
+        /// 画面から復旧するための専用の経路。<see cref="UpdateAsync(IcCard)"/> の SET 句へ 4 項目を戻すことは
+        /// しない（戻すと、画面の入力だけから組んだ <see cref="IcCard"/> の既定値で再び消える）。
+        /// SET 句はこの 4 項目だけで、種別・管理番号・備考・貸出状態には触れない。
+        /// </para>
+        /// <para>
+        /// WHERE 句に <paramref name="expected"/> を含めるのは、2 台のパソコンが同じカードを続けて復旧したとき、
+        /// 後の書き込みが先の書き込みを黙って上書きしないため。上書きを許すと、監査ログの「変更前」が
+        /// 実際に上書きされた値と食い違う。
+        /// </para>
+        /// </remarks>
+        Task<bool> UpdateCarryoverInfoAsync(
+            string cardIdm, CarryoverInfo expected, CarryoverInfo replacement, SQLiteTransaction transaction);
+
+        /// <summary>
         /// 貸出状態を更新
         /// </summary>
         /// <param name="cardIdm">ICカードIDm</param>
@@ -133,7 +164,7 @@ namespace ICCardManager.Data.Repositories
         /// <c>ic_card.is_lent</c> が恒久的に食い違う。
         /// なお <c>false</c> のときもカードキャッシュは破棄される（Issue #1759）。
         /// </returns>
-        Task<bool> UpdateLentStatusAsync(string cardIdm, bool isLent, DateTime? lentAt, string staffIdm);
+        Task<bool> UpdateLentStatusAsync(string cardIdm, bool isLent, DateTime? lentAt, string? staffIdm);
 
         /// <summary>
         /// ICカードを論理削除

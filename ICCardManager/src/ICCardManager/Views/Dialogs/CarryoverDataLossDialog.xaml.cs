@@ -1,3 +1,4 @@
+#nullable enable
 using System;
 using System.Windows;
 using ICCardManager.Common;
@@ -9,7 +10,7 @@ namespace ICCardManager.Views.Dialogs
     /// 繰越情報が失われたカードの一覧ダイアログ（Issue #1758）
     /// </summary>
     /// <remarks>
-    /// 表示専用。復旧は行わない（Issue #1758 の案A）。
+    /// 失われた元の値を表示し（Issue #1758）、行ごとの「復旧...」から復旧ダイアログを開く（Issue #2255）。
     /// </remarks>
     public partial class CarryoverDataLossDialog : Window
     {
