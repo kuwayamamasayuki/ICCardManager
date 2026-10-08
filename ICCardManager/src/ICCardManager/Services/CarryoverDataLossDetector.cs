@@ -47,10 +47,10 @@ namespace ICCardManager.Services
     public class CarryoverDataLossDetector : ICarryoverDataLossDetector
     {
         /// <summary>開始ページ番号の既定値（<see cref="IcCard.StartingPageNumber"/> の初期値と一致させる）</summary>
-        private const int DefaultStartingPageNumber = 1;
+        private const int DefaultStartingPageNumber = CarryoverInfo.DefaultStartingPageNumber;
 
         /// <summary>繰越累計金額の既定値</summary>
-        private const int DefaultCarryoverTotal = 0;
+        private const int DefaultCarryoverTotal = CarryoverInfo.DefaultCarryoverTotal;
 
         private readonly IOperationLogRepository _operationLogRepository;
         private readonly ICardRepository _cardRepository;

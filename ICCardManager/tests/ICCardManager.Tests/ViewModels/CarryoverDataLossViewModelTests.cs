@@ -246,6 +246,34 @@ public class CarryoverDataLossViewModelTests
     }
 
     [Fact]
+    public async Task RecoverAsync_別のカードのダイアログを保存せずに閉じても_前の完了の案内を消さないこと()
+    {
+        // カード A を復旧した後、カード B の復旧ダイアログをキャンセルしただけで「A を復旧しました」が消えると、
+        // 職員は A の復旧が取り消されたと誤解し得る
+        var other = FullLossItem();
+        other.CardIdm = "FEDCBA9876543210";
+        other.CardDisplayName = "nimoca 003";
+        var detector = new Mock<ICarryoverDataLossDetector>();
+        detector.SetupSequence(d => d.DetectAsync())
+            .ReturnsAsync(new List<CarryoverDataLossItem> { FullLossItem(), other })
+            .ReturnsAsync(new List<CarryoverDataLossItem> { other })
+            .ReturnsAsync(new List<CarryoverDataLossItem> { other });
+        var navigation = new Mock<INavigationService>();
+        navigation.SetupSequence(n => n.ShowDialogAsync(It.IsAny<Func<ICCardManager.Views.Dialogs.CarryoverRecoveryDialog, Task>>()))
+            .ReturnsAsync(true)
+            .ReturnsAsync(false);
+        var vm = new CarryoverDataLossViewModel(detector.Object, navigation.Object);
+        await vm.InitializeAsync();
+
+        await vm.RecoverAsync(vm.Items[0]);
+        await vm.RecoverAsync(vm.Items[0]);
+
+        detector.Verify(d => d.DetectAsync(), Times.Exactly(3));
+        vm.StatusMessage.Should().StartWith("はやかけん 001の繰越情報を復旧しました。");
+        vm.IsStatusError.Should().BeFalse();
+    }
+
+    [Fact]
     public async Task RecoverAsync_復旧の後で一覧の作り直しに失敗したら_復旧済みであることと失敗を併せて伝えること()
     {
         // 復旧はコミット済みで取り消されていない。作り直しの失敗だけを伝えると、職員はもう一度復旧しようとする

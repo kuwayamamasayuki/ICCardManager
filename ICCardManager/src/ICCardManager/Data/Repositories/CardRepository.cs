@@ -419,6 +419,9 @@ WHERE card_idm = @cardIdm AND is_deleted = 0";
             // SET 句は繰越情報の 4 列だけ（Issue #1726 の「その経路で本当に編集する列に限る」）。
             // WHERE 句の carryover_fiscal_year は NULL を取り得るので「=」ではなく「IS」で比べる
             // （「= NULL」は常に偽になり、年度が未設定のカードを一度も復旧できなくなる）。
+            // 他の 3 列は NOT NULL ではない（マイグレーションが DEFAULT 付きで追加した列）。読み取り（MapToIcCard）は
+            // NULL を既定値（1 / 0）として読むので、比較も同じ解釈で行う。素の「=」だと NULL の行に一致せず、
+            // 一覧には毎回出るのに保存は毎回「他のパソコンで変更された」と失敗し、二度と復旧できなくなる。
             using var command = connection.CreateCommand();
             command.Transaction = transaction;
             command.CommandText = @"UPDATE ic_card
@@ -427,9 +430,9 @@ SET starting_page_number = @startingPageNumber,
     carryover_expense_total = @carryoverExpenseTotal,
     carryover_fiscal_year = @carryoverFiscalYear
 WHERE card_idm = @cardIdm AND is_deleted = 0
-  AND starting_page_number = @expectedStartingPageNumber
-  AND carryover_income_total = @expectedCarryoverIncomeTotal
-  AND carryover_expense_total = @expectedCarryoverExpenseTotal
+  AND IFNULL(starting_page_number, 1) = @expectedStartingPageNumber
+  AND IFNULL(carryover_income_total, 0) = @expectedCarryoverIncomeTotal
+  AND IFNULL(carryover_expense_total, 0) = @expectedCarryoverExpenseTotal
   AND carryover_fiscal_year IS @expectedCarryoverFiscalYear";
 
             command.Parameters.AddWithValue("@cardIdm", cardIdm);

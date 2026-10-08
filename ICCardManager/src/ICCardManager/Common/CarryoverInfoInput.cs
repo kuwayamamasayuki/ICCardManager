@@ -133,7 +133,7 @@ namespace ICCardManager.Common
                     $"開始ページ番号が{startingPageNumber}です。ページ番号は1から始まるため、1以上の整数を入力してください。");
             }
 
-            if (lost.LostStartingPageNumber.HasValue && startingPageNumber == 1)
+            if (lost.LostStartingPageNumber.HasValue && startingPageNumber == CarryoverInfo.DefaultStartingPageNumber)
             {
                 return CarryoverInputParseResult.Failure(
                     CarryoverInputField.StartingPageNumber,
@@ -141,7 +141,8 @@ namespace ICCardManager.Common
                     "紙の出納簿の続きのページ番号（2以上）を入力してください。");
             }
 
-            if (startingPageNumber == 1 && current.StartingPageNumber != 1)
+            if (startingPageNumber == CarryoverInfo.DefaultStartingPageNumber
+                && current.StartingPageNumber != CarryoverInfo.DefaultStartingPageNumber)
             {
                 return CarryoverInputParseResult.Failure(
                     CarryoverInputField.StartingPageNumber,
@@ -249,7 +250,7 @@ namespace ICCardManager.Common
                     "0以上の整数を入力してください。");
             }
 
-            if (isLost && amount == 0)
+            if (isLost && amount == CarryoverInfo.DefaultCarryoverTotal)
             {
                 return CarryoverInputParseResult.Failure(
                     field,
@@ -257,7 +258,7 @@ namespace ICCardManager.Common
                     "紙の出納簿の累計の金額（1円以上）を入力してください。");
             }
 
-            if (amount == 0 && currentAmount != 0)
+            if (amount == CarryoverInfo.DefaultCarryoverTotal && currentAmount != CarryoverInfo.DefaultCarryoverTotal)
             {
                 return CarryoverInputParseResult.Failure(
                     field,

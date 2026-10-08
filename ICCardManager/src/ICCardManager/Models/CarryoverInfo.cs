@@ -19,6 +19,18 @@ namespace ICCardManager.Models
     /// </remarks>
     public sealed class CarryoverInfo : IEquatable<CarryoverInfo>
     {
+        /// <summary>
+        /// 開始ページ番号の既定値（登録時・消失時の値。<see cref="IcCard.StartingPageNumber"/> の初期値と一致させる）
+        /// </summary>
+        /// <remarks>
+        /// 消失の検知（<c>CarryoverDataLossDetector</c>）・復旧の入力検証（<c>CarryoverInfoInput</c>）・
+        /// 一覧が古いことの判定（<c>CarryoverRecoveryViewModel.IsAlreadyRecovered</c>）が同じ値で判断するため、ここへ寄せる。
+        /// </remarks>
+        public const int DefaultStartingPageNumber = 1;
+
+        /// <summary>繰越累計（受入・払出）の既定値。対象年度の既定値は null</summary>
+        public const int DefaultCarryoverTotal = 0;
+
         public CarryoverInfo(
             int startingPageNumber,
             int carryoverIncomeTotal,

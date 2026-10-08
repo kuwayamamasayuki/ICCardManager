@@ -101,6 +101,30 @@ public sealed class CardRepositoryCarryoverInfoTests : IDisposable
     }
 
     [Fact]
+    public async Task 繰越情報の列がNULLのカードも_既定値として読んだ値と一致すれば書き換えること()
+    {
+        // 3 列は NOT NULL ではなく、読み取りは NULL を既定値（1 / 0）として読む。DB を直接修正した等で
+        // NULL が入ったカードは一覧に既定値で出るので、比較も同じ解釈でないと二度と復旧できない
+        await SeedCardAsync(new CarryoverInfo(1, 0, 0, null));
+        using (var lease = await _dbContext.LeaseConnectionAsync())
+        using (var command = lease.Connection.CreateCommand())
+        {
+            command.CommandText = @"UPDATE ic_card SET starting_page_number = NULL, carryover_income_total = NULL,
+carryover_expense_total = NULL WHERE card_idm = @idm";
+            command.Parameters.AddWithValue("@idm", TestCardIdm);
+            (await command.ExecuteNonQueryAsync()).Should().Be(1);
+        }
+
+        var current = CarryoverInfo.From((await _repository.GetByIdmAsync(TestCardIdm))!);
+        current.Should().Be(new CarryoverInfo(1, 0, 0, null), "前提: NULL は既定値として読まれる");
+
+        var updated = await UpdateInTransactionAsync(current, new CarryoverInfo(7, 45000, 37500, 2025));
+
+        updated.Should().BeTrue();
+        CarryoverInfo.From((await _repository.GetByIdmAsync(TestCardIdm))!).Should().Be(new CarryoverInfo(7, 45000, 37500, 2025));
+    }
+
+    [Fact]
     public async Task 対象年度をNULLへ書き換えられること()
     {
         await SeedCardAsync(new CarryoverInfo(3, 0, 0, 2024));

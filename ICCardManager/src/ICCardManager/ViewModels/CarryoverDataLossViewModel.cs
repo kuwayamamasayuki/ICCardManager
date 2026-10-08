@@ -143,8 +143,13 @@ namespace ICCardManager.ViewModels
                 return;
             }
 
-            StatusMessage = recoveredMessage;
-            IsStatusError = false;
+            // 保存せずに閉じたときは文言を触らない。前のカードの「復旧しました」を、別のカードのダイアログを
+            // キャンセルしただけで消さないため（作り直しの失敗で出した文言は、作り直せたので消す）
+            if (recovered || IsStatusError)
+            {
+                StatusMessage = recoveredMessage;
+                IsStatusError = false;
+            }
         }
 
         /// <summary>

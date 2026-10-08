@@ -227,9 +227,9 @@ namespace ICCardManager.ViewModels
         /// 失われた項目のいずれかが、もう既定値でないか（一覧を作った後に書き戻された）
         /// </summary>
         internal static bool IsAlreadyRecovered(CarryoverDataLossItem target, CarryoverInfo current) =>
-            (target.LostStartingPageNumber.HasValue && current.StartingPageNumber != 1)
-            || (target.LostCarryoverIncomeTotal.HasValue && current.CarryoverIncomeTotal != 0)
-            || (target.LostCarryoverExpenseTotal.HasValue && current.CarryoverExpenseTotal != 0)
+            (target.LostStartingPageNumber.HasValue && current.StartingPageNumber != CarryoverInfo.DefaultStartingPageNumber)
+            || (target.LostCarryoverIncomeTotal.HasValue && current.CarryoverIncomeTotal != CarryoverInfo.DefaultCarryoverTotal)
+            || (target.LostCarryoverExpenseTotal.HasValue && current.CarryoverExpenseTotal != CarryoverInfo.DefaultCarryoverTotal)
             || (target.LostCarryoverFiscalYear.HasValue && current.CarryoverFiscalYear.HasValue);
 
         /// <summary>
