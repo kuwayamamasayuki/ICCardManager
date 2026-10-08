@@ -129,6 +129,22 @@ public class CarryoverInfoInputTests
         result.ErrorMessage.Should().Be($"繰越累計受入「{income}」は金額として読めません。0以上の整数を円単位で入力してください。");
     }
 
+    [Theory]
+    [InlineData("9999", "99999999", true)]      // 上限ちょうどは受け付ける
+    [InlineData("10000", "45000", false)]       // 開始ページ番号が上限超え
+    [InlineData("7", "100000000", false)]       // 繰越累計が上限超え
+    public void 開始ページ番号と繰越累計の上限(string page, string income, bool expectedValid)
+    {
+        // 桁の打ち間違いを保存の前に止める。帳票は年度累計へ int で足し込むので、上限近くの値は桁あふれし得る
+        var result = Parse(page, income, "37500", "2025");
+
+        result.IsValid.Should().Be(expectedValid, result.ErrorMessage);
+        if (!expectedValid)
+        {
+            result.ErrorMessage.Should().Contain("桁の打ち間違い");
+        }
+    }
+
     [Fact]
     public void 桁区切りが3桁ごとなら受け付けること()
     {
@@ -327,6 +343,8 @@ public class CarryoverInfoInputTests
         new object[] { "7", "45000", "37500", "" },
         new object[] { "7", "45000", "37500", "R7" },
         new object[] { "7", "45000", "37500", "1999" },
+        new object[] { "10000", "45000", "37500", "2025" },
+        new object[] { "7", "100000000", "37500", "2025" },
     };
 
     [Theory]

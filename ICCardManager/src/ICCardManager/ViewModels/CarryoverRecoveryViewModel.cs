@@ -151,9 +151,9 @@ namespace ICCardManager.ViewModels
         /// </summary>
         /// <param name="target">一覧で選んだ行の検出結果</param>
         /// <remarks>
-        /// 読み取りの失敗は例外にせず画面に案内して保存できない状態にする。ダイアログを開く経路
-        /// （<c>INavigationService.ShowDialogAsync</c> の初期化）で例外を投げると、画面を開けないまま
-        /// 一覧へ戻り、職員には何が起きたか分からない。
+        /// 読み取りの失敗は例外にせず画面に案内して保存できない状態にする。呼び出し元はダイアログの
+        /// <c>Loaded</c>（async void）で、例外を投げると案内の無い空の画面が残るだけになる。
+        /// 読み込みの間は処理中の表示を出す（共有モードでは秒単位かかり得て、空の入力欄が壊れて見えるため）。
         /// </remarks>
         public async Task InitializeAsync(CarryoverDataLossItem target)
         {
@@ -172,7 +172,10 @@ namespace ICCardManager.ViewModels
             IcCard? card;
             try
             {
-                card = await _cardRepository.GetByIdmAsync(target.CardIdm);
+                using (BeginBusy("読み込み中..."))
+                {
+                    card = await _cardRepository.GetByIdmAsync(target.CardIdm);
+                }
             }
             catch (Exception ex)
             {

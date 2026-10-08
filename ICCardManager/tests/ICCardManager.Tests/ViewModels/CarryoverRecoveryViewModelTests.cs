@@ -364,6 +364,47 @@ public sealed class CarryoverRecoveryViewModelTests : IDisposable
     }
 
     [Fact]
+    public async Task SaveAsync_読み直しの後で書き込む前に先を越されたら_上書きせず保存できなくすること()
+    {
+        // 読み直した値は開いたときと一致したが、UPDATE の WHERE 句（読んだ値との比較）で負けた経路。
+        // 読み取りだけを古い値を返す代役にし、書き込みは実 DB の行（他の PC が 5 ページ目で復旧済み）へ届ける
+        await SeedCardAsync(new CarryoverInfo(1, 0, 0, null));
+        var staleCard = (await _cardRepository.GetByIdmAsync(TestCardIdm))!;
+        await RecoverDirectlyAsync(new CarryoverInfo(1, 0, 0, null), new CarryoverInfo(5, 0, 0, null));
+        var staleReads = new Mock<ICardRepository>();
+        staleReads.Setup(r => r.GetByIdmAsync(TestCardIdm, false)).ReturnsAsync(staleCard);
+        var vm = CreateViewModel(staleReads.Object);
+        await vm.InitializeAsync(Item(lostPage: 7));
+
+        await vm.SaveAsync();
+
+        vm.IsSaved.Should().BeFalse();
+        vm.CanSave.Should().BeFalse();
+        vm.StatusMessage.Should().Be(CarryoverRecoveryViewModel.BuildConflictMessage("はやかけん 001"));
+        (await _cardRepository.GetByIdmAsync(TestCardIdm))!.StartingPageNumber.Should().Be(5, "見ていない値を上書きしない");
+        staleReads.Verify(r => r.InvalidateCache(), Times.Once, "一覧で確認させる前に古いキャッシュを捨てる");
+    }
+
+    [Fact]
+    public async Task InitializeAsync_読み込みの間は処理中を表示すること()
+    {
+        // 共有モードでは読み込みに秒単位かかり得る。空の入力欄のまま何も出ないと壊れて見える
+        var pending = new TaskCompletionSource<IcCard?>();
+        var repository = new Mock<ICardRepository>();
+        repository.Setup(r => r.GetByIdmAsync(TestCardIdm, false)).Returns(pending.Task);
+        var vm = CreateViewModel(repository.Object);
+
+        var loading = vm.InitializeAsync(Item(lostPage: 7));
+        var busyWhileLoading = vm.IsBusy;
+        pending.SetResult(new IcCard { CardIdm = TestCardIdm, CardType = "はやかけん", CardNumber = "001" });
+        await loading;
+
+        busyWhileLoading.Should().BeTrue();
+        vm.IsBusy.Should().BeFalse("読み込みが終わったら処理中を解く");
+        vm.CanSave.Should().BeTrue();
+    }
+
+    [Fact]
     public async Task SaveAsync_開いた後にカードが削除されていたら_書かずに案内すること()
     {
         await SeedCardAsync(new CarryoverInfo(1, 0, 0, null));

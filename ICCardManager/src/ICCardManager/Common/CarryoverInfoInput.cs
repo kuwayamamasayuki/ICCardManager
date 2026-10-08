@@ -82,6 +82,21 @@ namespace ICCardManager.Common
         public const int MinFiscalYear = 2000;
 
         /// <summary>
+        /// 開始ページ番号として受け付ける上限
+        /// </summary>
+        /// <remarks>桁の打ち間違い（「70」のつもりの「7000000」）を保存の前に止める。紙の出納簿の頁数として十分大きい値</remarks>
+        public const int MaxStartingPageNumber = 9999;
+
+        /// <summary>
+        /// 繰越累計（受入・払出）として受け付ける上限（円）
+        /// </summary>
+        /// <remarks>
+        /// 帳票は年度の累計へこの値を足し込む（int）。桁の打ち間違いで上限近くの値を入れると、累計が桁あふれして
+        /// 負の値で印字され得るため、交通系ICカード 1 枚の年度累計として十分大きい値で止める。
+        /// </remarks>
+        public const int MaxCarryoverTotal = 99_999_999;
+
+        /// <summary>
         /// 入力欄の文字列を繰越情報へ解釈する
         /// </summary>
         /// <param name="startingPageNumberText">開始ページ番号の入力</param>
@@ -131,6 +146,14 @@ namespace ICCardManager.Common
                 return CarryoverInputParseResult.Failure(
                     CarryoverInputField.StartingPageNumber,
                     $"開始ページ番号が{startingPageNumber}です。ページ番号は1から始まるため、1以上の整数を入力してください。");
+            }
+
+            if (startingPageNumber > MaxStartingPageNumber)
+            {
+                return CarryoverInputParseResult.Failure(
+                    CarryoverInputField.StartingPageNumber,
+                    $"開始ページ番号が{FormatAmount(startingPageNumber)}です。{MaxStartingPageNumber}ページを超える頁番号は" +
+                    "桁の打ち間違いと考えられるため、紙の出納簿の頁番号を確かめて入力してください。");
             }
 
             if (lost.LostStartingPageNumber.HasValue && startingPageNumber == CarryoverInfo.DefaultStartingPageNumber)
@@ -248,6 +271,14 @@ namespace ICCardManager.Common
                     field,
                     $"{label}が{FormatAmount(amount)}円（マイナス）です。累計の金額はマイナスにならないため、" +
                     "0以上の整数を入力してください。");
+            }
+
+            if (amount > MaxCarryoverTotal)
+            {
+                return CarryoverInputParseResult.Failure(
+                    field,
+                    $"{label}が{FormatAmount(amount)}円です。{FormatAmount(MaxCarryoverTotal)}円を超える累計は" +
+                    "桁の打ち間違いと考えられるため、紙の出納簿の累計を確かめて入力してください。");
             }
 
             if (isLost && amount == CarryoverInfo.DefaultCarryoverTotal)
