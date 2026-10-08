@@ -42,9 +42,13 @@ public class CarryoverInfoInputTests
         LostStartingPageNumber = 7,
     };
 
+    /// <summary>消失した状態（すべて既定値）</summary>
+    private static readonly CarryoverInfo AllDefault = new(1, 0, 0, null);
+
     private static CarryoverInputParseResult Parse(
-        string page, string income, string expense, string year, CarryoverDataLossItem? lost = null) =>
-        CarryoverInfoInput.Parse(page, income, expense, year, lost ?? AllLost(), CurrentFiscalYear);
+        string page, string income, string expense, string year,
+        CarryoverDataLossItem? lost = null, CarryoverInfo? current = null) =>
+        CarryoverInfoInput.Parse(page, income, expense, year, lost ?? AllLost(), current ?? AllDefault, CurrentFiscalYear);
 
     #region 受け付ける入力
 
@@ -75,6 +79,60 @@ public class CarryoverInfoInputTests
         var result = Parse("7", "0", "0", "", PageOnlyLost());
 
         result.Value.Should().Be(new CarryoverInfo(7, 0, 0, null));
+    }
+
+    [Fact]
+    public void 失われていない項目でも_今は既定値でない値を既定値へ書き換えることは拒むこと()
+    {
+        // 書き換えると、この復旧の操作ログ（非既定値 → 既定値）が新たな消失として検知され、
+        // 復旧した直後に同じカードが一覧へ戻ってくる
+        var current = new CarryoverInfo(5, 12000, 3000, 2024);
+
+        var page = Parse("1", "12000", "3000", "2024", PageAndIncomeLostExceptPage(), current);
+        page.ErrorField.Should().Be(CarryoverInputField.StartingPageNumber);
+        page.ErrorMessage.Should().Be(
+            "開始ページ番号が1です。今の値（5）を1にすると、繰越情報が失われたものとして再び警告が出ます。" +
+            "今の値のままにするか、2以上の整数を入力してください。");
+
+        var income = Parse("7", "0", "3000", "2024", PageOnlyLost(), current);
+        income.ErrorField.Should().Be(CarryoverInputField.CarryoverIncomeTotal);
+        income.ErrorMessage.Should().StartWith("繰越累計受入が0円です。今の値（12,000円）を0円にすると");
+
+        var expense = Parse("7", "12000", "0", "2024", PageOnlyLost(), current);
+        expense.ErrorField.Should().Be(CarryoverInputField.CarryoverExpenseTotal);
+
+        var year = Parse("7", "0", "0", "", PageOnlyLost(), new CarryoverInfo(1, 0, 0, 2024));
+        year.ErrorField.Should().Be(CarryoverInputField.CarryoverFiscalYear);
+        year.ErrorMessage.Should().StartWith("対象年度が空欄です。今の値（2024年度）を空欄にすると");
+    }
+
+    [Fact]
+    public void 失われていない項目は_今の値のままなら既定値でない値でもよいこと()
+    {
+        // 上の対。今の値を変えない保存（失われた項目だけを直す）を塞いでいないこと
+        var current = new CarryoverInfo(1, 12000, 3000, 2024);
+
+        Parse("7", "12000", "3000", "2024", PageOnlyLost(), current).Value
+            .Should().Be(new CarryoverInfo(7, 12000, 3000, 2024));
+    }
+
+    [Theory]
+    [InlineData("1,5")]
+    [InlineData("4,5000")]
+    [InlineData("45,00")]
+    public void 桁区切りのカンマが3桁ごとの位置になければ拒むこと(string income)
+    {
+        // 「1,5」は小数点の打ち間違いであり得る。15 と読むと、誤った累計が帳票へ入る
+        var result = Parse("7", income, "37500", "2025");
+
+        result.ErrorField.Should().Be(CarryoverInputField.CarryoverIncomeTotal);
+        result.ErrorMessage.Should().Be($"繰越累計受入「{income}」は金額として読めません。0以上の整数を円単位で入力してください。");
+    }
+
+    [Fact]
+    public void 桁区切りが3桁ごとなら受け付けること()
+    {
+        Parse("7", "1,234,567", "37,500", "2025").Value!.CarryoverIncomeTotal.Should().Be(1234567);
     }
 
     [Fact]
@@ -253,6 +311,9 @@ public class CarryoverInfoInputTests
 
     public static IEnumerable<object[]> FailingInputs() => new[]
     {
+        // 失われていない項目を、今の値（既定値でない）から既定値へ書き換える
+        new object[] { "7", "0", "3000", "2024", "currentNonDefault" },
+        new object[] { "7", "12000", "3000", "", "currentNonDefault" },
         new object[] { "", "45000", "37500", "2025" },
         new object[] { "abc", "45000", "37500", "2025" },
         new object[] { "0", "45000", "37500", "2025" },
@@ -270,9 +331,9 @@ public class CarryoverInfoInputTests
     [Theory]
     [MemberData(nameof(FailingInputs))]
     public void 誤りの案内は何が_なぜ_どうすればを含み行動指示で終わること(
-        string page, string income, string expense, string year)
+        string page, string income, string expense, string year, string scenario = "allLost")
     {
-        var message = Parse(page, income, expense, year).ErrorMessage;
+        var message = ParseScenario(page, income, expense, year, scenario).ErrorMessage;
 
         message.Should().NotBeNull();
         message!.Length.Should().BeGreaterThanOrEqualTo(20);
@@ -287,7 +348,9 @@ public class CarryoverInfoInputTests
     {
         // 入力欄を足したのに品質の検査へ載せていない状態を検出する
         var fields = FailingInputs()
-            .Select(args => Parse((string)args[0], (string)args[1], (string)args[2], (string)args[3]).ErrorField)
+            .Select(args => ParseScenario(
+                (string)args[0], (string)args[1], (string)args[2], (string)args[3],
+                args.Length > 4 ? (string)args[4] : "allLost").ErrorField)
             .ToHashSet();
 
         fields.Should().BeEquivalentTo(
@@ -295,6 +358,23 @@ public class CarryoverInfoInputTests
     }
 
     #endregion
+
+    /// <summary>
+    /// 品質検査の入力の場面。<c>currentNonDefault</c> は「開始ページ番号だけが失われ、他の項目は今も値を持つ」カード
+    /// </summary>
+    private static CarryoverInputParseResult ParseScenario(
+        string page, string income, string expense, string year, string scenario) =>
+        scenario == "currentNonDefault"
+            ? Parse(page, income, expense, year, PageOnlyLost(), new CarryoverInfo(1, 12000, 3000, 2024))
+            : Parse(page, income, expense, year);
+
+    /// <summary>繰越累計受入だけが失われ、開始ページ番号は失われていないカード</summary>
+    private static CarryoverDataLossItem PageAndIncomeLostExceptPage()
+    {
+        var lost = AllLost();
+        lost.LostStartingPageNumber = null;
+        return lost;
+    }
 
     private static CarryoverDataLossItem PageAndIncomeLost()
     {

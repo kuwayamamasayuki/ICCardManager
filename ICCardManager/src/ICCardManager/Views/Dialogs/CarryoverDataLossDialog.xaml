@@ -15,7 +15,7 @@
         ResizeMode="CanResize"
         FontSize="{DynamicResource BaseFontSize}"
         AutomationProperties.Name="繰越情報が失われたカードの一覧ダイアログ"
-        AutomationProperties.HelpText="紙の出納簿から移行したカードの繰越累計・開始ページ番号が失われている場合に、失われた元の値を確認し、行ごとの「復旧」から書き戻せます。">
+        AutomationProperties.HelpText="紙の出納簿から移行したカードの繰越累計・開始ページ番号が失われている場合に、失われた元の値を確認し、行ごとの「復旧...」から書き戻せます。">
 
     <Window.Resources>
         <BooleanToVisibilityConverter x:Key="BoolToVisibilityConverter"/>
@@ -51,7 +51,7 @@
             <TextBlock TextWrapping="Wrap"
                        FontSize="{DynamicResource SmallFontSize}"
                        Foreground="{DynamicResource HintForegroundBrush}"
-                       Text="💡 復旧するには、行の右端の「復旧」を押してください。失われた値が入った入力欄が開くので、紙の出納簿と突き合わせて確かめてから保存します（職員証の認証が必要です）。復旧したカードは一覧から消え、この画面を閉じるとメイン画面の警告も更新されます。"/>
+                       Text="💡 復旧するには、行の右端の「復旧...」を押してください。失われた値が入った入力欄が開くので、紙の出納簿と突き合わせて確かめてから保存します（職員証の認証が必要です）。復旧したカードは一覧から消え、この画面を閉じるとメイン画面の警告も更新されます。"/>
         </Border>
 
         <!-- 一覧 -->

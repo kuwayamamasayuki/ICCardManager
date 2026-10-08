@@ -2,6 +2,7 @@
 using System;
 using System.Globalization;
 using System.Text;
+using System.Text.RegularExpressions;
 using ICCardManager.Dtos;
 using ICCardManager.Models;
 
@@ -66,7 +67,10 @@ namespace ICCardManager.Common
     /// 保存の前に理由を添えて止める。
     /// </para>
     /// <para>
-    /// 失われていない項目は既定値でもよい（もともと既定値だった項目を、復旧のついでに書き換えさせない）。
+    /// 失われていない項目は、<b>今も既定値なら</b>既定値のままでよい（もともと既定値だった項目を、復旧のついでに
+    /// 書き換えさせない）。今は既定値でない項目を既定値へ書き換えることは拒む。書き換えると検知は
+    /// 「非既定値 → 既定値へ落ちた」操作ログ（＝この復旧の記録）を新たな消失として拾い、復旧した直後に
+    /// 同じカードが一覧へ戻ってくる。
     /// </para>
     /// <para>
     /// 判断を画面から切り離した純関数にしているのは、<c>Window</c> を実体化せずに境界を網羅して検査するため。
@@ -85,6 +89,7 @@ namespace ICCardManager.Common
         /// <param name="expenseTotalText">繰越累計払出の入力（円）</param>
         /// <param name="fiscalYearText">対象年度の入力（西暦。空欄は「年度なし」）</param>
         /// <param name="lost">どの項目が失われたか（<c>Lost*</c> が null でない項目が失われた項目）</param>
+        /// <param name="current">カードが今持っている繰越情報（失われていない項目を既定値へ落とさせないため）</param>
         /// <param name="currentFiscalYear">今年度（西暦）。これより先の年度は受け付けない</param>
         public static CarryoverInputParseResult Parse(
             string? startingPageNumberText,
@@ -92,11 +97,17 @@ namespace ICCardManager.Common
             string? expenseTotalText,
             string? fiscalYearText,
             CarryoverDataLossItem lost,
+            CarryoverInfo current,
             int currentFiscalYear)
         {
             if (lost == null)
             {
                 throw new ArgumentNullException(nameof(lost));
+            }
+
+            if (current == null)
+            {
+                throw new ArgumentNullException(nameof(current));
             }
 
             // 開始ページ番号
@@ -130,10 +141,18 @@ namespace ICCardManager.Common
                     "紙の出納簿の続きのページ番号（2以上）を入力してください。");
             }
 
+            if (startingPageNumber == 1 && current.StartingPageNumber != 1)
+            {
+                return CarryoverInputParseResult.Failure(
+                    CarryoverInputField.StartingPageNumber,
+                    $"開始ページ番号が1です。今の値（{current.StartingPageNumber}）を1にすると、繰越情報が失われたものとして" +
+                    "再び警告が出ます。今の値のままにするか、2以上の整数を入力してください。");
+            }
+
             // 繰越累計受入・払出
             var incomeFailure = ParseAmount(
                 incomeTotalText, "繰越累計受入", CarryoverInputField.CarryoverIncomeTotal,
-                lost.LostCarryoverIncomeTotal.HasValue, out var incomeTotal);
+                lost.LostCarryoverIncomeTotal.HasValue, current.CarryoverIncomeTotal, out var incomeTotal);
             if (incomeFailure is not null)
             {
                 return incomeFailure;
@@ -141,7 +160,7 @@ namespace ICCardManager.Common
 
             var expenseFailure = ParseAmount(
                 expenseTotalText, "繰越累計払出", CarryoverInputField.CarryoverExpenseTotal,
-                lost.LostCarryoverExpenseTotal.HasValue, out var expenseTotal);
+                lost.LostCarryoverExpenseTotal.HasValue, current.CarryoverExpenseTotal, out var expenseTotal);
             if (expenseFailure is not null)
             {
                 return expenseFailure;
@@ -158,6 +177,14 @@ namespace ICCardManager.Common
                         CarryoverInputField.CarryoverFiscalYear,
                         "対象年度が空欄です。空欄は登録時の既定値のため、失われた値が戻らず警告も消えません。" +
                         "繰越累計を加算する年度を西暦4桁（例: 2025）で入力してください。");
+                }
+
+                if (current.CarryoverFiscalYear.HasValue)
+                {
+                    return CarryoverInputParseResult.Failure(
+                        CarryoverInputField.CarryoverFiscalYear,
+                        $"対象年度が空欄です。今の値（{current.CarryoverFiscalYear.Value}年度）を空欄にすると、" +
+                        "繰越情報が失われたものとして再び警告が出ます。繰越累計を加算する年度を西暦4桁（例: 2025）で入力してください。");
                 }
 
                 if (incomeTotal > 0 || expenseTotal > 0)
@@ -196,7 +223,7 @@ namespace ICCardManager.Common
         /// 繰越累計の金額を解釈する。誤りがあれば失敗の結果を、無ければ null を返す
         /// </summary>
         private static CarryoverInputParseResult? ParseAmount(
-            string? text, string label, CarryoverInputField field, bool isLost, out int amount)
+            string? text, string label, CarryoverInputField field, bool isLost, int currentAmount, out int amount)
         {
             var normalized = Normalize(text);
             if (normalized.Length == 0)
@@ -230,6 +257,14 @@ namespace ICCardManager.Common
                     "紙の出納簿の累計の金額（1円以上）を入力してください。");
             }
 
+            if (amount == 0 && currentAmount != 0)
+            {
+                return CarryoverInputParseResult.Failure(
+                    field,
+                    $"{label}が0円です。今の値（{FormatAmount(currentAmount)}円）を0円にすると、繰越情報が失われたものとして" +
+                    "再び警告が出ます。今の値のままにするか、1円以上の金額を入力してください。");
+            }
+
             return null;
         }
 
@@ -242,15 +277,30 @@ namespace ICCardManager.Common
         private static string Normalize(string? text) =>
             (text ?? string.Empty).Normalize(NormalizationForm.FormKC).Trim();
 
+        /// <summary>3 桁ごとの桁区切り（「45,000」「1,234,567」）</summary>
+        private static readonly Regex ThousandsSeparated = new(@"^-?\d{1,3}(,\d{3})+$", RegexOptions.CultureInvariant);
+
         /// <summary>
         /// 整数として解釈する。桁区切りのカンマ（一覧の表示「45,000円」を写した入力）は受け付ける
         /// </summary>
-        private static bool TryParseInteger(string text, out int value) =>
-            int.TryParse(
+        /// <remarks>
+        /// カンマは 3 桁ごとの位置にあるときだけ受け付ける。<c>NumberStyles.AllowThousands</c> は位置を検証しないため、
+        /// 「1,5」（小数点の打ち間違い）が 15 として通ってしまう。
+        /// </remarks>
+        private static bool TryParseInteger(string text, out int value)
+        {
+            if (text.IndexOf(',') >= 0 && !ThousandsSeparated.IsMatch(text))
+            {
+                value = 0;
+                return false;
+            }
+
+            return int.TryParse(
                 text,
                 NumberStyles.AllowLeadingSign | NumberStyles.AllowThousands,
                 CultureInfo.InvariantCulture,
                 out value);
+        }
 
         private static string FormatAmount(int amount) => amount.ToString("N0", CultureInfo.CurrentCulture);
     }

@@ -12,7 +12,7 @@ namespace ICCardManager.Views.Dialogs
     /// 繰越情報の復旧ダイアログ（Issue #2255）
     /// </summary>
     /// <remarks>
-    /// 繰越情報消失一覧ダイアログの行の「復旧」から開く。保存すると <c>DialogResult = true</c> で閉じ、
+    /// 繰越情報消失一覧ダイアログの行の「復旧...」から開く。保存すると <c>DialogResult = true</c> で閉じ、
     /// 一覧が作り直される。
     /// </remarks>
     public partial class CarryoverRecoveryDialog : Window

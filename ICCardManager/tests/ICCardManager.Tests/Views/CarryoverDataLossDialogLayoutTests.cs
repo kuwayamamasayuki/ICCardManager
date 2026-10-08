@@ -98,7 +98,7 @@ public class CarryoverDataLossDialogLayoutTests
         guidanceBorder.Success.Should().BeTrue("復旧手順を示す Border が存在すべき");
         guidanceBorder.Value.Should().NotContain("HasItems");
         // Issue #2255: 復旧は画面から行う。IT担当者へ DB の修正を依頼させる案内を残さない
-        guidanceBorder.Value.Should().Contain("「復旧」を押して", "画面上の復旧の操作を案内すること");
+        guidanceBorder.Value.Should().Contain("「復旧...」を押して", "画面上の復旧の操作を案内すること");
         guidanceBorder.Value.Should().NotContain("ic_card").And.NotContain("依頼");
     }
 

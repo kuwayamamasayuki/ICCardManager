@@ -25,6 +25,7 @@
         <Grid.RowDefinitions>
             <RowDefinition Height="*"/>
             <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
         </Grid.RowDefinitions>
 
         <!-- 内容はスクロール領域に入れ、ボタン行を外に置く（文字サイズ「特大」でもボタンを押せるように。03_画面設計書 §5.6） -->
@@ -178,30 +179,32 @@
                         <Run Text="{Binding CurrentCarryoverFiscalYearText, Mode=OneWay}"/>
                     </TextBlock>
                 </Grid>
-
-                <!-- 入力の誤り・競合・認証の案内。複数行になり得るため折り返す -->
-                <TextBlock Text="{Binding StatusMessage}"
-                           FontWeight="Bold"
-                           TextWrapping="Wrap"
-                           Margin="0,10,0,0"
-                           AutomationProperties.LiveSetting="Assertive"
-                           AutomationProperties.Name="{Binding StatusMessage}">
-                    <TextBlock.Style>
-                        <Style TargetType="TextBlock">
-                            <Setter Property="Foreground" Value="{DynamicResource InfoTextBrush}"/>
-                            <Style.Triggers>
-                                <DataTrigger Binding="{Binding IsStatusError}" Value="True">
-                                    <Setter Property="Foreground" Value="{DynamicResource DangerTextBrush}"/>
-                                </DataTrigger>
-                            </Style.Triggers>
-                        </Style>
-                    </TextBlock.Style>
-                </TextBlock>
             </StackPanel>
         </ScrollViewer>
 
+        <!-- 入力の誤り・競合・認証の案内。複数行になり得るため折り返す。
+             スクロール領域の外に置き、文字サイズ「特大」でもスクロールせずに読めるようにする -->
+        <TextBlock Grid.Row="1"
+                   Text="{Binding StatusMessage}"
+                   FontWeight="Bold"
+                   TextWrapping="Wrap"
+                   Margin="0,10,0,0"
+                   AutomationProperties.LiveSetting="Assertive"
+                   AutomationProperties.Name="{Binding StatusMessage}">
+            <TextBlock.Style>
+                <Style TargetType="TextBlock">
+                    <Setter Property="Foreground" Value="{DynamicResource InfoTextBrush}"/>
+                    <Style.Triggers>
+                        <DataTrigger Binding="{Binding IsStatusError}" Value="True">
+                            <Setter Property="Foreground" Value="{DynamicResource DangerTextBrush}"/>
+                        </DataTrigger>
+                    </Style.Triggers>
+                </Style>
+            </TextBlock.Style>
+        </TextBlock>
+
         <!-- ボタン（右端が主操作、その左にキャンセル） -->
-        <StackPanel Grid.Row="1"
+        <StackPanel Grid.Row="2"
                     Orientation="Horizontal"
                     HorizontalAlignment="Right"
                     VerticalAlignment="Center"
@@ -224,7 +227,7 @@
         </StackPanel>
 
         <!-- 処理中オーバーレイ -->
-        <Border Grid.RowSpan="2"
+        <Border Grid.RowSpan="3"
                 Background="{DynamicResource OverlayBrush}"
                 Visibility="{Binding IsBusy, Converter={StaticResource BoolToVisibilityConverter}}">
             <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center">

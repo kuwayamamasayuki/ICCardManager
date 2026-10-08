@@ -190,7 +190,6 @@ namespace ICCardManager.ViewModels
             }
 
             var current = CarryoverInfo.From(card);
-            _loadedCurrent = current;
 
             CurrentStartingPageNumberText = current.StartingPageNumber.ToString(CultureInfo.CurrentCulture);
             CurrentCarryoverIncomeTotalText = DisplayFormatters.FormatAmountWithUnit(current.CarryoverIncomeTotal);
@@ -207,10 +206,31 @@ namespace ICCardManager.ViewModels
             var initialYear = target.LostCarryoverFiscalYear ?? current.CarryoverFiscalYear;
             CarryoverFiscalYearText = initialYear.HasValue ? ToInputText(initialYear.Value) : string.Empty;
 
+            // 一覧を作った後（このダイアログを開く前）に、他のパソコンや別の操作で既に書き戻されていないか。
+            // 検知は「現在も既定値のまま」の項目だけを失われた項目として返すので、失われた項目の現在値が
+            // 既定値でなければ、一覧が古い。そのまま保存させると、先に書き戻された値（紙の出納簿と突き合わせて
+            // 直したかもしれない値）を、操作ログに残っていた古い値で上書きする。
+            if (IsAlreadyRecovered(target, current))
+            {
+                SetError(BuildAlreadyRecoveredMessage(CardDisplayName));
+                CanSave = false;
+                return;
+            }
+
+            _loadedCurrent = current;
             StatusMessage = string.Empty;
             IsStatusError = false;
             CanSave = true;
         }
+
+        /// <summary>
+        /// 失われた項目のいずれかが、もう既定値でないか（一覧を作った後に書き戻された）
+        /// </summary>
+        internal static bool IsAlreadyRecovered(CarryoverDataLossItem target, CarryoverInfo current) =>
+            (target.LostStartingPageNumber.HasValue && current.StartingPageNumber != 1)
+            || (target.LostCarryoverIncomeTotal.HasValue && current.CarryoverIncomeTotal != 0)
+            || (target.LostCarryoverExpenseTotal.HasValue && current.CarryoverExpenseTotal != 0)
+            || (target.LostCarryoverFiscalYear.HasValue && current.CarryoverFiscalYear.HasValue);
 
         /// <summary>
         /// 入力を検証し、職員証の認証を経て繰越情報を書き戻す
@@ -232,6 +252,7 @@ namespace ICCardManager.ViewModels
                 CarryoverExpenseTotalText,
                 CarryoverFiscalYearText,
                 target,
+                loadedCurrent,
                 FiscalYearHelper.GetFiscalYear(_clock.Now));
 
             if (parsed.Value is null)
@@ -295,6 +316,13 @@ namespace ICCardManager.ViewModels
         internal static string BuildConflictMessage(string cardName) =>
             $"{cardName}の繰越情報を復旧できませんでした。この画面を開いた後に、他のパソコンや別の操作でカードが削除されたか、" +
             "繰越情報が変更された可能性があります。この画面を閉じ、一覧で状態を確認してからやり直してください。";
+
+        /// <summary>
+        /// 一覧を作った後に、失われた項目が既に書き戻されていたときの案内を組み立てる
+        /// </summary>
+        internal static string BuildAlreadyRecoveredMessage(string cardName) =>
+            $"{cardName}の繰越情報は、一覧を開いた後に他のパソコンや別の操作で既に書き戻された可能性があります。" +
+            "この画面を閉じ、一覧で状態を確認してください。";
 
         /// <summary>
         /// 画面を開いたときにカードが見つからなかったときの案内を組み立てる

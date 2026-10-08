@@ -116,6 +116,41 @@ public sealed class CarryoverRecoveryViewModelTests : IDisposable
     }
 
     [Fact]
+    public async Task InitializeAsync_一覧を作った後に他のパソコンが既に書き戻していたら_上書きさせないこと()
+    {
+        // 一覧（検出結果）は古いまま、別の PC が紙の出納簿と突き合わせて 8 ページ目で復旧した。
+        // ここで保存させると、操作ログの古い値 7 で 8 を上書きする（開いた後の競合判定では、
+        // 開いた時点の値 8 が基準になるため検出できない）
+        await SeedCardAsync(new CarryoverInfo(8, 0, 0, null));
+        var vm = CreateViewModel();
+
+        await vm.InitializeAsync(Item(lostPage: 7));
+
+        vm.CanSave.Should().BeFalse();
+        vm.SaveCommand.CanExecute(null).Should().BeFalse();
+        vm.StatusMessage.Should().Be(CarryoverRecoveryViewModel.BuildAlreadyRecoveredMessage("はやかけん 001"));
+        await vm.SaveAsync();
+        (await _cardRepository.GetByIdmAsync(TestCardIdm))!.StartingPageNumber.Should().Be(8);
+        _staffAuthService.Verify(s => s.RequestAuthenticationAsync(It.IsAny<string>()), Times.Never);
+    }
+
+    [Theory]
+    [InlineData(7, null, null, null, 1, 0, 0, null, false)]   // 失われたページはまだ既定値
+    [InlineData(7, null, null, null, 1, 5000, 0, 2024, false)] // 失われていない項目が値を持つのはよい
+    [InlineData(7, null, null, null, 8, 0, 0, null, true)]
+    [InlineData(null, 45000, null, null, 1, 100, 0, null, true)]
+    [InlineData(null, null, 37500, null, 1, 0, 100, null, true)]
+    [InlineData(null, null, null, 2025, 1, 0, 0, 2024, true)]
+    public void IsAlreadyRecovered_失われた項目のいずれかがもう既定値でなければ真であること(
+        int? lostPage, int? lostIncome, int? lostExpense, int? lostYear,
+        int page, int income, int expense, int? year, bool expected)
+    {
+        CarryoverRecoveryViewModel.IsAlreadyRecovered(
+                Item(lostPage, lostIncome, lostExpense, lostYear), new CarryoverInfo(page, income, expense, year))
+            .Should().Be(expected);
+    }
+
+    [Fact]
     public async Task InitializeAsync_カードが削除されていたら_案内して保存できなくすること()
     {
         await SeedCardAsync(new CarryoverInfo(1, 0, 0, null));

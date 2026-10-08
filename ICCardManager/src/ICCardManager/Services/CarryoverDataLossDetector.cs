@@ -1,3 +1,4 @@
+#nullable enable
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -104,6 +105,11 @@ namespace ICCardManager.Services
             // ic_card の UPDATE ログを書く経路を増やすときは、この前提が崩れていないか確認すること
             // （崩れる場合は複数ログの消失項目をマージする必要があり、LostAt / OperatorName を
             // どの操作のものにするかという別の判断も伴う）。
+            //
+            // Issue #2255 で繰越情報の復旧（CardManagementService.RecoverCarryoverInfoAsync）が UPDATE ログを
+            // 書く経路に加わった。復旧のログは変更前が既定値（失われた状態）なので消失とは判定されない。
+            // 復旧で既定値でない項目を既定値へ落とすことは入力の検証（Common/CarryoverInfoInput）が拒むため、
+            // 復旧のログが新たな消失として拾われることもない。
             var orderedLogs = (logs ?? Enumerable.Empty<OperationLog>())
                 .Where(l => l != null && !string.IsNullOrEmpty(l.TargetId))
                 .OrderBy(l => l.Timestamp)
@@ -142,7 +148,7 @@ namespace ICCardManager.Services
         /// <summary>
         /// 1件のログから消失項目を組み立てる。消失が1項目も無ければ null を返す。
         /// </summary>
-        private static CarryoverDataLossItem BuildLossItem(
+        private static CarryoverDataLossItem? BuildLossItem(
             OperationLog log, IcCard before, IcCard after, IcCard current)
         {
             var lostStartingPage = DetectLostInt(
@@ -237,9 +243,9 @@ namespace ICCardManager.Services
         /// 1行の破損で検出全体を止めないため、例外は握りつぶさずに「この行は判定材料にしない」へ畳む。
         /// 握りつぶしても失われるのは1行分の判定材料だけで、他の行の検出は継続する。
         /// </remarks>
-        private static IcCard TryDeserializeCard(string json)
+        private static IcCard? TryDeserializeCard(string? json)
         {
-            if (string.IsNullOrWhiteSpace(json))
+            if (json is null || string.IsNullOrWhiteSpace(json))
             {
                 return null;
             }

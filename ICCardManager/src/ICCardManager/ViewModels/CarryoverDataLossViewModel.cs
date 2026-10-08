@@ -16,7 +16,7 @@ namespace ICCardManager.ViewModels
     /// 繰越情報消失一覧ダイアログの ViewModel（Issue #1758）
     /// </summary>
     /// <remarks>
-    /// 失われた元の値を正確に見せ（Issue #1758）、行ごとの「復旧」から繰越情報の復旧ダイアログを開く
+    /// 失われた元の値を正確に見せ（Issue #1758）、行ごとの「復旧...」から繰越情報の復旧ダイアログを開く
     /// （Issue #2255）。以前は表示専用で、復旧は IT担当者による DB の直接修正に頼っていた。
     /// </remarks>
     public partial class CarryoverDataLossViewModel : ObservableObject
@@ -87,7 +87,7 @@ namespace ICCardManager.ViewModels
         private bool _isStatusError;
 
         /// <summary>
-        /// 行の「復旧」から繰越情報の復旧ダイアログを開き、閉じたら一覧を作り直す（Issue #2255）
+        /// 行の「復旧...」から繰越情報の復旧ダイアログを開き、閉じたら一覧を作り直す（Issue #2255）
         /// </summary>
         /// <param name="row">復旧する行</param>
         [RelayCommand]
