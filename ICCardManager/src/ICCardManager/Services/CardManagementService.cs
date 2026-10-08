@@ -1,3 +1,4 @@
+#nullable enable
 using System;
 using System.Threading.Tasks;
 using ICCardManager.Data;
@@ -187,6 +188,90 @@ namespace ICCardManager.Services
             {
                 _cardRepository.InvalidateCache();
             }
+        }
+
+        /// <summary>
+        /// 失われた繰越情報を書き戻し、監査ログ（UPDATE）を同じトランザクションで記録する（Issue #2255）
+        /// </summary>
+        /// <param name="beforeCard">
+        /// 書き戻す直前に読み取ったカード。監査ログの変更前データになり、その繰越情報が DB の現在値と
+        /// 一致するときだけ書き換える
+        /// </param>
+        /// <param name="replacement">書き込む繰越情報</param>
+        /// <returns>
+        /// 書き戻せたら <c>true</c>。<c>false</c> は競合（カードが削除された、または読み取った後に
+        /// 他のパソコンや別の操作で繰越情報が変わった）で、監査ログは書かれない
+        /// </returns>
+        /// <remarks>
+        /// <para>
+        /// 監査ログの操作は通常の更新と同じ <c>UPDATE</c> にする。操作ログ画面・Excel は
+        /// 繰越情報の 4 項目を既に読める（<c>OperationLogExcelExportService.GetFieldNameMap</c>）ので、
+        /// 「開始ページ番号: 1 → 7」のように何をいくつからいくつへ戻したかがそのまま読める。
+        /// </para>
+        /// <para>
+        /// 監査ログの変更後データは書き込む値から組み立てる（<see cref="CreateCarryoverRecoveredSnapshot"/>）。
+        /// 書き換えるのは繰越情報の 4 列だけなので、それ以外は変更前の値を引き継ぐ。
+        /// </para>
+        /// </remarks>
+        public async Task<bool> RecoverCarryoverInfoAsync(IcCard beforeCard, CarryoverInfo replacement)
+        {
+            if (beforeCard == null)
+            {
+                throw new ArgumentNullException(nameof(beforeCard));
+            }
+
+            if (replacement == null)
+            {
+                throw new ArgumentNullException(nameof(replacement));
+            }
+
+            var expected = CarryoverInfo.From(beforeCard);
+            var afterCard = CreateCarryoverRecoveredSnapshot(beforeCard, replacement);
+
+            try
+            {
+                return await AuditedWriteTransaction.RunAsync(
+                    _dbContext, _logger, "繰越情報の復旧",
+                    tx => _cardRepository.UpdateCarryoverInfoAsync(beforeCard.CardIdm, expected, replacement, tx),
+                    updated => updated,
+                    tx => _operationLogger.LogCardUpdateAsync(beforeCard, afterCard, tx)).ConfigureAwait(false);
+            }
+            finally
+            {
+                _cardRepository.InvalidateCache();
+            }
+        }
+
+        /// <summary>
+        /// 繰越情報を書き戻した後のカードの状態を組み立てる（操作ログの変更後データ）
+        /// </summary>
+        /// <param name="beforeCard">書き戻す直前に読み取ったカード</param>
+        /// <param name="replacement">書き込む繰越情報</param>
+        /// <remarks>
+        /// <c>UpdateCarryoverInfoAsync</c> が変えるのは繰越情報の 4 列だけなので、それ以外は変更前の値を
+        /// そのまま引き継ぐ（引き継がないと「貸出中: はい → いいえ」のような実際には起きていない変更が
+        /// 監査ログに残る。Issue #1726 / #1760）。
+        /// </remarks>
+        internal static IcCard CreateCarryoverRecoveredSnapshot(IcCard beforeCard, CarryoverInfo replacement)
+        {
+            return new IcCard
+            {
+                CardIdm = beforeCard.CardIdm,
+                CardType = beforeCard.CardType,
+                CardNumber = beforeCard.CardNumber,
+                Note = beforeCard.Note,
+                IsDeleted = beforeCard.IsDeleted,
+                DeletedAt = beforeCard.DeletedAt,
+                IsLent = beforeCard.IsLent,
+                LastLentAt = beforeCard.LastLentAt,
+                LastLentStaff = beforeCard.LastLentStaff,
+                IsRefunded = beforeCard.IsRefunded,
+                RefundedAt = beforeCard.RefundedAt,
+                StartingPageNumber = replacement.StartingPageNumber,
+                CarryoverIncomeTotal = replacement.CarryoverIncomeTotal,
+                CarryoverExpenseTotal = replacement.CarryoverExpenseTotal,
+                CarryoverFiscalYear = replacement.CarryoverFiscalYear
+            };
         }
 
         /// <summary>

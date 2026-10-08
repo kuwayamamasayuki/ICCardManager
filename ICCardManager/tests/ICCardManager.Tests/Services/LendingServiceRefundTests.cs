@@ -96,7 +96,7 @@ public sealed class LendingServiceRefundTests : IDisposable
     public async Task RefundAsync_CardLentAfterRead_ThrowsAndLeavesNoLedgerNorLog()
     {
         // Arrange
-        var before = await _realCardRepository.GetByIdmAsync(TestCardIdm);
+        var before = (await _realCardRepository.GetByIdmAsync(TestCardIdm))!;
         await _realCardRepository.UpdateLentStatusAsync(TestCardIdm, true, RefundedAt.AddMinutes(-5), null);
         var (cardRepository, _) = CreateCardRepositoryMock();
         var logger = new RecordingLogger<LendingService>();
@@ -126,7 +126,7 @@ public sealed class LendingServiceRefundTests : IDisposable
     public async Task RefundAsync_CardDeletedAfterRead_ThrowsAndLeavesNoLedgerNorLog()
     {
         // Arrange
-        var before = await _realCardRepository.GetByIdmAsync(TestCardIdm);
+        var before = (await _realCardRepository.GetByIdmAsync(TestCardIdm))!;
         (await _realCardRepository.DeleteAsync(TestCardIdm)).Should().Be(CardOperationResult.Success);
         var (cardRepository, _) = CreateCardRepositoryMock();
         var service = CreateService(cardRepository.Object);
@@ -152,7 +152,7 @@ public sealed class LendingServiceRefundTests : IDisposable
     public async Task RefundAsync_AuditLogInsertFails_RollsBackLedgerAndRefundedFlag()
     {
         // Arrange
-        var before = await _realCardRepository.GetByIdmAsync(TestCardIdm);
+        var before = (await _realCardRepository.GetByIdmAsync(TestCardIdm))!;
         var (cardRepository, _) = CreateCardRepositoryMock();
         var operationLogRepository = CreateOperationLogRepositoryMock();
         operationLogRepository
@@ -181,7 +181,7 @@ public sealed class LendingServiceRefundTests : IDisposable
     public async Task RefundAsync_SetRefundedThrows_LeavesNoLedger()
     {
         // Arrange
-        var before = await _realCardRepository.GetByIdmAsync(TestCardIdm);
+        var before = (await _realCardRepository.GetByIdmAsync(TestCardIdm))!;
         var (cardRepository, _) = CreateCardRepositoryMock(
             setRefunded: (_, _, _) => throw new InvalidOperationException("connection lost"));
         var service = CreateService(cardRepository.Object);
@@ -207,7 +207,7 @@ public sealed class LendingServiceRefundTests : IDisposable
     public async Task RefundAsync_Normal_CommitsLedgerRefundedFlagAndAuditLogTogether()
     {
         // Arrange
-        var before = await _realCardRepository.GetByIdmAsync(TestCardIdm);
+        var before = (await _realCardRepository.GetByIdmAsync(TestCardIdm))!;
         var (cardRepository, _) = CreateCardRepositoryMock();
         var ledgerRepository = CreateLedgerRepositoryMock();
         var operationLogRepository = CreateOperationLogRepositoryMock();
@@ -273,7 +273,7 @@ public sealed class LendingServiceRefundTests : IDisposable
     public async Task RefundAsync_ZeroBalance_Succeeds()
     {
         // Arrange
-        var before = await _realCardRepository.GetByIdmAsync(TestCardIdm);
+        var before = (await _realCardRepository.GetByIdmAsync(TestCardIdm))!;
         var (cardRepository, _) = CreateCardRepositoryMock();
         var service = CreateService(cardRepository.Object);
 
@@ -299,7 +299,7 @@ public sealed class LendingServiceRefundTests : IDisposable
     public async Task RefundAsync_TransientBusy_RetriesAndCommitsOnce()
     {
         // Arrange
-        var before = await _realCardRepository.GetByIdmAsync(TestCardIdm);
+        var before = (await _realCardRepository.GetByIdmAsync(TestCardIdm))!;
         var attempts = 0;
         var (cardRepository, _) = CreateCardRepositoryMock(setRefunded: (idm, at, tx) =>
         {
@@ -335,7 +335,7 @@ public sealed class LendingServiceRefundTests : IDisposable
     public async Task RefundAsync_SubSecondTime_KeepsDbLedgerAndAuditLogConsistent()
     {
         // Arrange
-        var before = await _realCardRepository.GetByIdmAsync(TestCardIdm);
+        var before = (await _realCardRepository.GetByIdmAsync(TestCardIdm))!;
         var (cardRepository, _) = CreateCardRepositoryMock();
         var service = CreateService(cardRepository.Object);
         var withMilliseconds = RefundedAt.AddMilliseconds(789);

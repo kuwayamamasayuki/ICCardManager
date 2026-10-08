@@ -1,9 +1,11 @@
+#nullable enable
 using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Globalization;
 using System.Threading.Tasks;
 using CommunityToolkit.Mvvm.ComponentModel;
+using CommunityToolkit.Mvvm.Input;
 using ICCardManager.Common;
 using ICCardManager.Dtos;
 using ICCardManager.Services;
@@ -14,8 +16,8 @@ namespace ICCardManager.ViewModels
     /// 繰越情報消失一覧ダイアログの ViewModel（Issue #1758）
     /// </summary>
     /// <remarks>
-    /// 表示専用。復旧操作は持たない（Issue #1758 の案A）。
-    /// 唯一の役割は「失われた元の値を、復旧を依頼する相手へ正確に伝えられる形で見せる」こと。
+    /// 失われた元の値を正確に見せ（Issue #1758）、行ごとの「復旧」から繰越情報の復旧ダイアログを開く
+    /// （Issue #2255）。以前は表示専用で、復旧は IT担当者による DB の直接修正に頼っていた。
     /// </remarks>
     public partial class CarryoverDataLossViewModel : ObservableObject
     {
@@ -44,10 +46,12 @@ namespace ICCardManager.ViewModels
             "データベースへの接続状態を確認したうえで、もう一度この画面を開いてください。";
 
         private readonly ICarryoverDataLossDetector _detector;
+        private readonly INavigationService _navigationService;
 
-        public CarryoverDataLossViewModel(ICarryoverDataLossDetector detector)
+        public CarryoverDataLossViewModel(ICarryoverDataLossDetector detector, INavigationService navigationService)
         {
             _detector = detector;
+            _navigationService = navigationService ?? throw new ArgumentNullException(nameof(navigationService));
         }
 
         /// <summary>繰越情報を失ったカードの一覧</summary>
@@ -67,6 +71,81 @@ namespace ICCardManager.ViewModels
         /// </remarks>
         [ObservableProperty]
         private string _emptyStateMessage = NoLossMessage;
+
+        /// <summary>
+        /// 復旧の結果を伝える文言（Issue #2255）
+        /// </summary>
+        /// <remarks>
+        /// 一覧の表示条件（<see cref="HasItems"/>）に紐付けない位置に出す。最後の 1 枚を復旧すると一覧は
+        /// 空になるため、一覧の中に出すと完了の案内がその完了で消える（Issue #1727 の「所在」）。
+        /// </remarks>
+        [ObservableProperty]
+        private string _statusMessage = string.Empty;
+
+        /// <summary><see cref="StatusMessage"/> がエラーか</summary>
+        [ObservableProperty]
+        private bool _isStatusError;
+
+        /// <summary>
+        /// 行の「復旧」から繰越情報の復旧ダイアログを開き、閉じたら一覧を作り直す（Issue #2255）
+        /// </summary>
+        /// <param name="row">復旧する行</param>
+        [RelayCommand]
+        public async Task RecoverAsync(CarryoverDataLossRow? row)
+        {
+            if (row?.Item == null)
+            {
+                return;
+            }
+
+            // 最初の await より前に確定させる（ダイアログを開いている間に一覧が作り直されても、
+            // 案内に載せるのは押した行のカード。#1761）
+            var item = row.Item;
+            var cardName = row.CardDisplayName;
+
+            var result = await _navigationService.ShowDialogAsync<Views.Dialogs.CarryoverRecoveryDialog>(
+                dialog => dialog.InitializeAsync(item));
+
+            await ApplyRecoveryResultAsync(result == true, cardName);
+        }
+
+        /// <summary>
+        /// 復旧ダイアログを閉じた後に一覧を作り直し、結果を案内する（Issue #2255）
+        /// </summary>
+        /// <param name="recovered">復旧を保存したか</param>
+        /// <param name="cardName">復旧したカードの表示名</param>
+        /// <remarks>
+        /// <para>
+        /// 保存しなかったときも作り直す。ダイアログの中で競合（他のパソコンで先に復旧・削除）を検出した場合、
+        /// 案内は「一覧で状態を確認して」と述べるため、一覧が古いままでは案内が事実にならない（Issue #1753）。
+        /// </para>
+        /// <para>
+        /// 完了の案内は作り直しの<b>後</b>で設定する（先に設定して作り直しが文言を戻すと一度も見えない。Issue #1727）。
+        /// 作り直しの失敗は、復旧の成否とは別に伝える（復旧はコミット済みで、取り消されていない）。
+        /// </para>
+        /// </remarks>
+        internal async Task ApplyRecoveryResultAsync(bool recovered, string cardName)
+        {
+            var recoveredMessage = recovered
+                ? $"{cardName}の繰越情報を復旧しました。メイン画面の警告は、この画面を閉じると更新されます。"
+                : string.Empty;
+
+            try
+            {
+                await InitializeAsync();
+            }
+            catch (Exception ex)
+            {
+                ErrorDialogHelper.LogException(ex, "繰越情報消失一覧の再読み込み");
+                var reloadFailure = ExceptionMessageFormatter.ToUserMessage(ex, "繰越情報消失一覧の再読み込み");
+                StatusMessage = recovered ? $"{recoveredMessage}{Environment.NewLine}{reloadFailure}" : reloadFailure;
+                IsStatusError = true;
+                return;
+            }
+
+            StatusMessage = recoveredMessage;
+            IsStatusError = false;
+        }
 
         /// <summary>
         /// 検出をやり直して一覧を作り直す
@@ -114,29 +193,33 @@ namespace ICCardManager.ViewModels
     /// </summary>
     public class CarryoverDataLossRow
     {
+        /// <summary>この行の検出結果（復旧ダイアログへ渡す。Issue #2255）</summary>
+        public CarryoverDataLossItem? Item { get; set; }
+
         /// <summary>カード名（例: "はやかけん 001"）</summary>
-        public string CardDisplayName { get; set; }
+        public string CardDisplayName { get; set; } = string.Empty;
 
         /// <summary>失われた開始ページ番号</summary>
-        public string LostStartingPageNumberText { get; set; }
+        public string LostStartingPageNumberText { get; set; } = string.Empty;
 
         /// <summary>失われた繰越累計受入金額</summary>
-        public string LostCarryoverIncomeTotalText { get; set; }
+        public string LostCarryoverIncomeTotalText { get; set; } = string.Empty;
 
         /// <summary>失われた繰越累計払出金額</summary>
-        public string LostCarryoverExpenseTotalText { get; set; }
+        public string LostCarryoverExpenseTotalText { get; set; } = string.Empty;
 
         /// <summary>失われた繰越累計の対象年度</summary>
-        public string LostCarryoverFiscalYearText { get; set; }
+        public string LostCarryoverFiscalYearText { get; set; } = string.Empty;
 
         /// <summary>値が失われた操作の日時</summary>
-        public string LostAtText { get; set; }
+        public string LostAtText { get; set; } = string.Empty;
 
         /// <summary>値を失わせた操作の操作者名</summary>
-        public string OperatorName { get; set; }
+        public string OperatorName { get; set; } = string.Empty;
 
         public static CarryoverDataLossRow From(CarryoverDataLossItem item) => new CarryoverDataLossRow
         {
+            Item = item,
             CardDisplayName = item.CardDisplayName,
             LostStartingPageNumberText = item.LostStartingPageNumber?.ToString(CultureInfo.CurrentCulture) ?? CarryoverDataLossViewModel.NotLostText,
             LostCarryoverIncomeTotalText = FormatAmount(item.LostCarryoverIncomeTotal),

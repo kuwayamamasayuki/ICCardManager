@@ -15,7 +15,7 @@
         ResizeMode="CanResize"
         FontSize="{DynamicResource BaseFontSize}"
         AutomationProperties.Name="繰越情報が失われたカードの一覧ダイアログ"
-        AutomationProperties.HelpText="紙の出納簿から移行したカードの繰越累計・開始ページ番号が失われている場合に、失われた元の値を確認できます。復旧はシステム管理者によるデータベースの修正が必要です。">
+        AutomationProperties.HelpText="紙の出納簿から移行したカードの繰越累計・開始ページ番号が失われている場合に、失われた元の値を確認し、行ごとの「復旧」から書き戻せます。">
 
     <Window.Resources>
         <BooleanToVisibilityConverter x:Key="BoolToVisibilityConverter"/>
@@ -36,7 +36,7 @@
                        FontWeight="Bold"/>
             <!-- 長文は幅ではなく折り返しで担保する（.claude/rules/development-conventions.md UI/UX原則）。
                  親が縦 StackPanel なので幅制約があり TextWrapping が機能する。 -->
-            <TextBlock Text="過去のバージョンでカード情報を編集した際に、紙の出納簿から移行したカードの繰越累計・開始ページ番号が消去されました。この画面は失われた元の値を表示するだけで、復旧は行いません。"
+            <TextBlock Text="過去のバージョンでカード情報を編集した際に、紙の出納簿から移行したカードの繰越累計・開始ページ番号が消去されました。下の一覧で失われた元の値を確認し、この画面から書き戻せます。"
                        FontSize="{DynamicResource SmallFontSize}"
                        Foreground="{DynamicResource SecondaryTextBrush}"
                        TextWrapping="Wrap"
@@ -51,7 +51,7 @@
             <TextBlock TextWrapping="Wrap"
                        FontSize="{DynamicResource SmallFontSize}"
                        Foreground="{DynamicResource HintForegroundBrush}"
-                       Text="💡 復旧するには、以下の値をシステム管理者に伝えてデータベース（ic_card テーブルの starting_page_number / carryover_income_total / carryover_expense_total / carryover_fiscal_year）の修正を依頼してください。修正が反映されると、次回起動時にメイン画面の警告が消えます。"/>
+                       Text="💡 復旧するには、行の右端の「復旧」を押してください。失われた値が入った入力欄が開くので、紙の出納簿と突き合わせて確かめてから保存します（職員証の認証が必要です）。復旧したカードは一覧から消え、この画面を閉じるとメイン画面の警告も更新されます。"/>
         </Border>
 
         <!-- 一覧 -->
@@ -98,6 +98,24 @@
                 <DataGridTextColumn Header="操作者"
                                     Binding="{Binding OperatorName}"
                                     Width="*"/>
+                <!-- Issue #2255: 行ごとの復旧。ボタンなので Tab で辿って Enter / スペースでも押せる（#2078） -->
+                <DataGridTemplateColumn Header="復旧"
+                                        Width="Auto"
+                                        CanUserSort="False">
+                    <DataGridTemplateColumn.CellTemplate>
+                        <DataTemplate>
+                            <Button Content="復旧..."
+                                    Style="{StaticResource SecondaryActionButtonStyle}"
+                                    Command="{Binding DataContext.RecoverCommand, RelativeSource={RelativeSource AncestorType=DataGrid}}"
+                                    CommandParameter="{Binding}"
+                                    Padding="12,4"
+                                    Margin="4,2"
+                                    AutomationProperties.Name="{Binding CardDisplayName, StringFormat={}{0} の繰越情報を復旧}"
+                                    AutomationProperties.HelpText="失われた値を入れた入力欄を開き、確かめてから書き戻します"
+                                    ToolTip="このカードの繰越情報を復旧する"/>
+                        </DataTemplate>
+                    </DataGridTemplateColumn.CellTemplate>
+                </DataGridTemplateColumn>
             </DataGrid.Columns>
         </DataGrid>
 
@@ -130,14 +148,35 @@
                 <ColumnDefinition Width="Auto"/>
             </Grid.ColumnDefinitions>
 
-            <TextBlock Grid.Column="0"
-                       VerticalAlignment="Center"
-                       TextWrapping="Wrap"
-                       Margin="0,0,10,0"
-                       FontSize="{DynamicResource SmallFontSize}"
-                       Foreground="{DynamicResource SecondaryTextBrush}">
-                <Run Text="{Binding Items.Count, Mode=OneWay, StringFormat={}{0}件}"/>
-            </TextBlock>
+            <StackPanel Grid.Column="0" VerticalAlignment="Center" Margin="0,0,10,0">
+                <TextBlock TextWrapping="Wrap"
+                           FontSize="{DynamicResource SmallFontSize}"
+                           Foreground="{DynamicResource SecondaryTextBrush}">
+                    <Run Text="{Binding Items.Count, Mode=OneWay, StringFormat={}{0}件}"/>
+                </TextBlock>
+                <!-- Issue #2255: 復旧の結果。最後の 1 枚を復旧すると一覧が空になるため、
+                     一覧の表示条件（HasItems）に紐付かないここへ置く（#1727 の「所在」） -->
+                <TextBlock Text="{Binding StatusMessage}"
+                           TextWrapping="Wrap"
+                           FontWeight="Bold"
+                           Margin="0,4,0,0"
+                           AutomationProperties.LiveSetting="Polite"
+                           AutomationProperties.Name="{Binding StatusMessage}">
+                    <TextBlock.Style>
+                        <Style TargetType="TextBlock">
+                            <Setter Property="Foreground" Value="{DynamicResource InfoTextBrush}"/>
+                            <Style.Triggers>
+                                <DataTrigger Binding="{Binding IsStatusError}" Value="True">
+                                    <Setter Property="Foreground" Value="{DynamicResource DangerTextBrush}"/>
+                                </DataTrigger>
+                                <DataTrigger Binding="{Binding StatusMessage}" Value="">
+                                    <Setter Property="Visibility" Value="Collapsed"/>
+                                </DataTrigger>
+                            </Style.Triggers>
+                        </Style>
+                    </TextBlock.Style>
+                </TextBlock>
+            </StackPanel>
 
             <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
                 <Button Content="閉じる"

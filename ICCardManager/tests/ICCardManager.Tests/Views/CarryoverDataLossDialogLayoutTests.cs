@@ -2,6 +2,7 @@ using System.IO;
 using System.Linq;
 using System.Text.RegularExpressions;
 using FluentAssertions;
+using ICCardManager.Tests.Views.Helpers;
 using Xunit;
 
 namespace ICCardManager.Tests.Views;
@@ -11,9 +12,9 @@ namespace ICCardManager.Tests.Views;
 /// </summary>
 /// <remarks>
 /// <para>
-/// このダイアログの唯一の役割は「失われた元の値を、復旧を依頼する相手へ正確に伝えられる形で見せる」こと。
-/// したがって①説明文が文字サイズ4段階のどれでも読めること、②値をコピーして伝えられること、
-/// ③被害0件のときも画面が空白にならないこと、の3点が機能要件になる。
+/// このダイアログの役割は「失われた元の値を正確に見せ（Issue #1758）、行ごとの『復旧』から書き戻せる
+/// ようにする（Issue #2255）」こと。したがって①説明文が文字サイズ4段階のどれでも読めること、②値をコピーできること、
+/// ③被害0件のときも画面が空白にならないこと、④復旧の操作と結果が一覧の状態に左右されないこと、が機能要件になる。
 /// </para>
 /// <para>
 /// 実際の描画検証には UI オートメーションが必要なため、ここでは XAML テキスト上で静的に固定する。
@@ -52,8 +53,8 @@ public class CarryoverDataLossDialogLayoutTests
     [Fact]
     public void 一覧はヘッダー付きのクリップボードコピーを許可していること()
     {
-        // 復旧は IT 担当者への値の伝達で行う。コピーできないと目視で書き写すことになり、
-        // 6年保存の台帳へ入る金額を人手で転記させることになる。
+        // 画面から復旧できるようになった後も（Issue #2255）、紙の出納簿との突き合わせや記録のために
+        // 値を写し取る用途は残る。コピーできないと目視で書き写すことになる。
         var xaml = ReadXaml();
 
         xaml.Should().Contain(@"ClipboardCopyMode=""IncludeHeader""");
@@ -96,6 +97,48 @@ public class CarryoverDataLossDialogLayoutTests
 
         guidanceBorder.Success.Should().BeTrue("復旧手順を示す Border が存在すべき");
         guidanceBorder.Value.Should().NotContain("HasItems");
-        guidanceBorder.Value.Should().Contain("ic_card", "修正対象のテーブル・列名を示すこと");
+        // Issue #2255: 復旧は画面から行う。IT担当者へ DB の修正を依頼させる案内を残さない
+        guidanceBorder.Value.Should().Contain("「復旧」を押して", "画面上の復旧の操作を案内すること");
+        guidanceBorder.Value.Should().NotContain("ic_card").And.NotContain("依頼");
+    }
+
+    [Fact]
+    public void 一覧の各行に_押した行を渡す復旧ボタンがあること()
+    {
+        // Issue #2255: クリックでしか実行できない形（Border + MouseBinding）にしない。Button なら
+        // Tab で辿って Enter / スペースでも押せる（#2078）
+        var xaml = XamlElementInspection.StripXmlComments(ReadXaml());
+
+        var buttons = XamlElementInspection.EnumerateElementSpans(xaml, "Button")
+            .Where(b => (XamlElementInspection.GetAttribute(b.StartTag, "Command") ?? string.Empty).Contains("RecoverCommand"))
+            .ToList();
+
+        var button = buttons.Should().ContainSingle("復旧ボタンは 1 つ（行のテンプレート）").Subject;
+        XamlElementInspection.GetAttribute(button.StartTag, "Command")
+            .Should().Be("{Binding DataContext.RecoverCommand, RelativeSource={RelativeSource AncestorType=DataGrid}}");
+        XamlElementInspection.GetAttribute(button.StartTag, "CommandParameter")
+            .Should().Be("{Binding}", "押した行を渡す（選択状態を操作対象にしない。#1761）");
+        XamlElementInspection.EnumerateEnclosingElements(xaml, button.Start)
+            .Should().Contain(e => e.StartTag.StartsWith("<DataGridTemplateColumn", System.StringComparison.Ordinal),
+                "一覧の各行に置く");
+    }
+
+    [Fact]
+    public void 復旧の結果は一覧の表示条件に紐付かない位置に折り返して出すこと()
+    {
+        // 最後の 1 枚を復旧すると一覧は空になり HasItems=False になる。一覧の中や同じ表示条件の下に
+        // 置くと、完了の案内がその完了で消える（Issue #1727 の「所在」）
+        var xaml = XamlElementInspection.StripXmlComments(ReadXaml());
+
+        var status = XamlElementInspection.EnumerateElementSpans(xaml, "TextBlock")
+            .Where(t => XamlElementInspection.GetAttribute(t.StartTag, "Text") == "{Binding StatusMessage}")
+            .Should().ContainSingle().Subject;
+
+        XamlElementInspection.GetAttribute(status.StartTag, "TextWrapping").Should().Be("Wrap");
+        foreach (var enclosing in XamlElementInspection.EnumerateEnclosingElements(xaml, status.Start))
+        {
+            enclosing.StartTag.Should().NotStartWith("<DataGrid", "一覧の中に置かない");
+            enclosing.StartTag.Should().NotContain("HasItems", "一覧の表示条件に紐付けない");
+        }
     }
 }

@@ -140,6 +140,8 @@ public class WarningServiceCarryoverDataLossTests
 
         // 「どうすれば」: 具体的な操作を示し、行動指示で終わる
         text.Should().Contain("クリック");
+        // Issue #2255: 復旧は画面から行う。IT担当者へ DB の修正を依頼させる案内を出さない
+        text.Should().Contain("一覧の「復旧」から").And.NotContain("データベースの修正");
         Regex.IsMatch(text, "してください。?$").Should().BeTrue("行動指示型で終わること");
 
         // 曖昧な定型文で終わらせない
