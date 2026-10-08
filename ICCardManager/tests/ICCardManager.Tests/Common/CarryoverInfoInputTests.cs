@@ -133,6 +133,7 @@ public class CarryoverInfoInputTests
     public void 桁区切りが3桁ごとなら受け付けること()
     {
         Parse("7", "1,234,567", "37,500", "2025").Value!.CarryoverIncomeTotal.Should().Be(1234567);
+        Parse("7", "+1,000", "37,500", "2025").Value!.CarryoverIncomeTotal.Should().Be(1000, "符号付きの「+1000」と扱いをそろえる");
     }
 
     [Fact]

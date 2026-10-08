@@ -176,18 +176,18 @@ public class CarryoverDataLossViewModelTests
     }
 
     [Fact]
-    public async Task RecoverAsync_押した行の検出結果で復旧ダイアログを初期化すること()
+    public async Task RecoverAsync_押した行の検出結果で復旧ダイアログを初期化し_読み込みは表示した後に行うこと()
     {
-        // Arrange: ダイアログの初期化処理（Func）を捕まえ、Window を実体化せずに ViewModel だけ差し込んで実行する
-        // （モックの ShowDialogAsync は Func を実行しないので、渡す引数を変えても緑になる。testing.md #2104）
+        // Arrange: ダイアログの初期化処理（Action）を捕まえ、Window を実体化せずに ViewModel だけ差し込んで実行する
+        // （モックの ShowDialog は Action を実行しないので、渡す引数を変えても緑になる。testing.md #2104）
         var item = FullLossItem();
         var detector = new Mock<ICarryoverDataLossDetector>();
         detector.Setup(d => d.DetectAsync()).ReturnsAsync(new List<CarryoverDataLossItem> { item });
-        Func<ICCardManager.Views.Dialogs.CarryoverRecoveryDialog, Task>? configure = null;
+        Action<ICCardManager.Views.Dialogs.CarryoverRecoveryDialog>? configure = null;
         var navigation = new Mock<INavigationService>();
-        navigation.Setup(n => n.ShowDialogAsync(It.IsAny<Func<ICCardManager.Views.Dialogs.CarryoverRecoveryDialog, Task>>()))
-            .Callback<Func<ICCardManager.Views.Dialogs.CarryoverRecoveryDialog, Task>>(f => configure = f)
-            .ReturnsAsync(false);
+        navigation.Setup(n => n.ShowDialog(It.IsAny<Action<ICCardManager.Views.Dialogs.CarryoverRecoveryDialog>>()))
+            .Callback<Action<ICCardManager.Views.Dialogs.CarryoverRecoveryDialog>>(f => configure = f)
+            .Returns(false);
         var vm = new CarryoverDataLossViewModel(detector.Object, navigation.Object);
         await vm.InitializeAsync();
 
@@ -196,8 +196,15 @@ public class CarryoverDataLossViewModelTests
 
         // Assert
         configure.Should().NotBeNull("押した行で復旧ダイアログを開くこと");
-        var (dialog, recoveryViewModel) = CreateRecoveryDialogWithoutWindow();
-        await configure!(dialog);
+        var (dialog, recoveryViewModel, cardRepository) = CreateRecoveryDialogWithoutWindow();
+        configure!(dialog);
+
+        // 表示前の初期化ではカードを読まない。表示前に待つと、その間はまだモーダルが無く一覧を閉じられ、
+        // 警告の再判定が復旧より先に終わる（表示後＝Loaded で読み込む）
+        cardRepository.Verify(r => r.GetByIdmAsync(It.IsAny<string>(), It.IsAny<bool>()), Times.Never);
+        navigation.Verify(n => n.ShowDialogAsync(It.IsAny<Func<ICCardManager.Views.Dialogs.CarryoverRecoveryDialog, Task>>()), Times.Never);
+
+        await dialog.LoadTargetAsync();
         recoveryViewModel.CardDisplayName.Should().Be("はやかけん 001");
         recoveryViewModel.StartingPageNumberText.Should().Be("7", "押した行の失われた値が入力欄の初期値になる");
         recoveryViewModel.CarryoverIncomeTotalText.Should().Be("45000");
@@ -259,9 +266,9 @@ public class CarryoverDataLossViewModelTests
             .ReturnsAsync(new List<CarryoverDataLossItem> { other })
             .ReturnsAsync(new List<CarryoverDataLossItem> { other });
         var navigation = new Mock<INavigationService>();
-        navigation.SetupSequence(n => n.ShowDialogAsync(It.IsAny<Func<ICCardManager.Views.Dialogs.CarryoverRecoveryDialog, Task>>()))
-            .ReturnsAsync(true)
-            .ReturnsAsync(false);
+        navigation.SetupSequence(n => n.ShowDialog(It.IsAny<Action<ICCardManager.Views.Dialogs.CarryoverRecoveryDialog>>()))
+            .Returns(true)
+            .Returns(false);
         var vm = new CarryoverDataLossViewModel(detector.Object, navigation.Object);
         await vm.InitializeAsync();
 
@@ -302,21 +309,22 @@ public class CarryoverDataLossViewModelTests
         await vm.RecoverAsync(null);
         await vm.RecoverAsync(new CarryoverDataLossRow());
 
-        navigation.Verify(n => n.ShowDialogAsync(It.IsAny<Func<ICCardManager.Views.Dialogs.CarryoverRecoveryDialog, Task>>()), Times.Never);
+        navigation.Verify(n => n.ShowDialog(It.IsAny<Action<ICCardManager.Views.Dialogs.CarryoverRecoveryDialog>>()), Times.Never);
     }
 
     private static Mock<INavigationService> RecoveryDialogReturns(bool? result)
     {
         var navigation = new Mock<INavigationService>();
-        navigation.Setup(n => n.ShowDialogAsync(It.IsAny<Func<ICCardManager.Views.Dialogs.CarryoverRecoveryDialog, Task>>()))
-            .ReturnsAsync(result);
+        navigation.Setup(n => n.ShowDialog(It.IsAny<Action<ICCardManager.Views.Dialogs.CarryoverRecoveryDialog>>()))
+            .Returns(result);
         return navigation;
     }
 
     /// <summary>
     /// Window を実体化せず（STA 不要）、復旧ダイアログへ ViewModel だけを差し込む
     /// </summary>
-    private static (ICCardManager.Views.Dialogs.CarryoverRecoveryDialog Dialog, CarryoverRecoveryViewModel ViewModel)
+    private static (ICCardManager.Views.Dialogs.CarryoverRecoveryDialog Dialog, CarryoverRecoveryViewModel ViewModel,
+        Mock<ICCardManager.Data.Repositories.ICardRepository> CardRepository)
         CreateRecoveryDialogWithoutWindow()
     {
         var cardRepository = new Mock<ICCardManager.Data.Repositories.ICardRepository>();
@@ -337,7 +345,7 @@ public class CarryoverDataLossViewModelTests
         typeof(ICCardManager.Views.Dialogs.CarryoverRecoveryDialog)
             .GetField("_viewModel", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!
             .SetValue(dialog, recoveryViewModel);
-        return (dialog, recoveryViewModel);
+        return (dialog, recoveryViewModel, cardRepository);
     }
 
     #endregion

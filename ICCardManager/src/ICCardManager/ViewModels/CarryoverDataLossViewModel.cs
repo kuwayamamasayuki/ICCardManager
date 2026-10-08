@@ -103,8 +103,10 @@ namespace ICCardManager.ViewModels
             var item = row.Item;
             var cardName = row.CardDisplayName;
 
-            var result = await _navigationService.ShowDialogAsync<Views.Dialogs.CarryoverRecoveryDialog>(
-                dialog => dialog.InitializeAsync(item));
+            // 対象だけを渡し、カードの読み込みはダイアログを表示した後に行う（表示前に待つと、その間に
+            // この一覧を閉じられ、警告の再判定が復旧より先に終わる）
+            var result = _navigationService.ShowDialog<Views.Dialogs.CarryoverRecoveryDialog>(
+                dialog => dialog.SetTarget(item));
 
             await ApplyRecoveryResultAsync(result == true, cardName);
         }

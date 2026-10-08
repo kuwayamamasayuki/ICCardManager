@@ -134,6 +134,46 @@ public sealed class CarryoverRecoveryViewModelTests : IDisposable
         _staffAuthService.Verify(s => s.RequestAuthenticationAsync(It.IsAny<string>()), Times.Never);
     }
 
+    [Fact]
+    public async Task InitializeAsync_既に書き戻されていたら_一覧の作り直しが古いキャッシュを返さないよう捨てること()
+    {
+        // 一覧の検知はキャッシュ付きのカード一覧を使う（共有モードの TTL は最大 15 秒）。捨てないと、
+        // 「一覧で確認して」と案内した直後の作り直しに同じ行がまた出る
+        var repository = new Mock<ICardRepository>();
+        repository.Setup(r => r.GetByIdmAsync(TestCardIdm, false)).ReturnsAsync(new IcCard
+        {
+            CardIdm = TestCardIdm,
+            CardType = "はやかけん",
+            CardNumber = "001",
+            StartingPageNumber = 8,
+        });
+        var vm = CreateViewModel(repository.Object);
+
+        await vm.InitializeAsync(Item(lostPage: 7));
+
+        vm.CanSave.Should().BeFalse();
+        repository.Verify(r => r.InvalidateCache(), Times.Once);
+    }
+
+    [Fact]
+    public async Task InitializeAsync_書き戻されていなければ_キャッシュを捨てないこと()
+    {
+        // 上の対。開くたびに捨てると、共有モードで一覧の読み込みが毎回 DB へ行く
+        var repository = new Mock<ICardRepository>();
+        repository.Setup(r => r.GetByIdmAsync(TestCardIdm, false)).ReturnsAsync(new IcCard
+        {
+            CardIdm = TestCardIdm,
+            CardType = "はやかけん",
+            CardNumber = "001",
+        });
+        var vm = CreateViewModel(repository.Object);
+
+        await vm.InitializeAsync(Item(lostPage: 7));
+
+        vm.CanSave.Should().BeTrue();
+        repository.Verify(r => r.InvalidateCache(), Times.Never);
+    }
+
     [Theory]
     [InlineData(7, null, null, null, 1, 0, 0, null, false)]   // 失われたページはまだ既定値
     [InlineData(7, null, null, null, 1, 5000, 0, 2024, false)] // 失われていない項目が値を持つのはよい

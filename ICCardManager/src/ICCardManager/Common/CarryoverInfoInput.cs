@@ -279,7 +279,7 @@ namespace ICCardManager.Common
             (text ?? string.Empty).Normalize(NormalizationForm.FormKC).Trim();
 
         /// <summary>3 桁ごとの桁区切り（「45,000」「1,234,567」）</summary>
-        private static readonly Regex ThousandsSeparated = new(@"^-?\d{1,3}(,\d{3})+$", RegexOptions.CultureInvariant);
+        private static readonly Regex ThousandsSeparated = new(@"^[-+]?\d{1,3}(,\d{3})+$", RegexOptions.CultureInvariant);
 
         /// <summary>
         /// 整数として解釈する。桁区切りのカンマ（一覧の表示「45,000円」を写した入力）は受け付ける

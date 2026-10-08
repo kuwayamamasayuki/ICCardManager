@@ -186,6 +186,8 @@ namespace ICCardManager.ViewModels
             {
                 SetError(BuildCardNotFoundMessage(CardDisplayName));
                 CanSave = false;
+                // 一覧の検知はキャッシュ付きのカード一覧を使う。閉じた後の作り直しで古い一覧が出ないよう捨てる（#1759）
+                _cardRepository.InvalidateCache();
                 return;
             }
 
@@ -214,6 +216,7 @@ namespace ICCardManager.ViewModels
             {
                 SetError(BuildAlreadyRecoveredMessage(CardDisplayName));
                 CanSave = false;
+                _cardRepository.InvalidateCache();
                 return;
             }
 
@@ -335,6 +338,9 @@ namespace ICCardManager.ViewModels
         {
             SetError(BuildConflictMessage(cardName));
             CanSave = false;
+
+            // 「一覧で状態を確認して」と案内する以上、閉じた後の作り直しが古いキャッシュを返さないようにする（#1759）
+            _cardRepository.InvalidateCache();
         }
 
         private void SetError(string message)
