@@ -305,18 +305,18 @@ public sealed class CarryoverRecoveryViewModelTests : IDisposable
     }
 
     [Fact]
-    public async Task SaveAsync_対象年度の上限は注入した時計の今年度であること()
+    public async Task SaveAsync_対象年度の上限は注入した時計の来年度であること()
     {
-        // 2026 年 10 月は 2026 年度。2027 年度は受け付けない（実時計を読む実装なら境界が食い違う）
+        // 2026 年 10 月は 2026 年度。来年度の 2027 までは受け付け、2028 年度は受け付けない（実時計を読む実装なら境界が食い違う）
         await SeedCardAsync(new CarryoverInfo(1, 0, 0, null));
         var vm = CreateViewModel();
         await vm.InitializeAsync(Item(lostPage: 7, lostIncome: 45000, lostYear: 2025));
-        vm.CarryoverFiscalYearText = "2027";
+        vm.CarryoverFiscalYearText = "2028";
 
         await vm.SaveAsync();
 
         vm.IsSaved.Should().BeFalse();
-        vm.StatusMessage.Should().Contain("今年度（2026年度）");
+        vm.StatusMessage.Should().Contain("来年度（2027年度）");
     }
 
     [Fact]

@@ -146,6 +146,26 @@ public class CarryoverInfoInputTests
     }
 
     [Fact]
+    public void 上限を超えていても_失われた値や今の値と同じなら受け付けること()
+    {
+        // 登録画面は上限を持たない。登録時の値をそのまま戻す入力まで止めると、そのカードは元の値に戻せなくなる
+        var lost = AllLost();
+        lost.LostStartingPageNumber = 12000;
+        lost.LostCarryoverIncomeTotal = 150_000_000;
+
+        Parse("12000", "150000000", "37500", "2025", lost).Value
+            .Should().Be(new CarryoverInfo(12000, 150_000_000, 37500, 2025));
+
+        var pageOnly = PageOnlyLost();
+        Parse("7", "0", "120000000", "2025", pageOnly, new CarryoverInfo(1, 0, 120_000_000, 2025)).Value
+            .Should().Be(new CarryoverInfo(7, 0, 120_000_000, 2025), "今の値と同じ払出は受け付ける");
+
+        // 対: 失われた値とも今の値とも違う、上限を超える入力は止める
+        Parse("12001", "150000000", "37500", "2025", lost).ErrorField.Should().Be(CarryoverInputField.StartingPageNumber);
+        Parse("12000", "150000001", "37500", "2025", lost).ErrorField.Should().Be(CarryoverInputField.CarryoverIncomeTotal);
+    }
+
+    [Fact]
     public void 桁区切りが3桁ごとなら受け付けること()
     {
         Parse("7", "1,234,567", "37,500", "2025").Value!.CarryoverIncomeTotal.Should().Be(1234567);
@@ -166,7 +186,8 @@ public class CarryoverInfoInputTests
     [Theory]
     [InlineData("2000", 2000)]   // 下限
     [InlineData("2026", 2026)]   // 今年度
-    public void 対象年度は2000年度から今年度までを受け付けること(string year, int expected)
+    [InlineData("2027", 2027)]   // 来年度（3 月に「3 月から繰越」で登録したカードは翌年度を持つ）
+    public void 対象年度は2000年度から来年度までを受け付けること(string year, int expected)
     {
         Parse("7", "45000", "37500", year).Value!.CarryoverFiscalYear.Should().Be(expected);
     }
@@ -290,14 +311,14 @@ public class CarryoverInfoInputTests
 
     [Theory]
     [InlineData("1999")]
-    [InlineData("2027")]   // 今年度の翌年度
+    [InlineData("2028")]   // 来年度の翌年度
     public void 対象年度が範囲外なら拒むこと(string year)
     {
         var result = Parse("7", "45000", "37500", year);
 
         result.ErrorField.Should().Be(CarryoverInputField.CarryoverFiscalYear);
         result.ErrorMessage.Should().Be(
-            $"対象年度が{year}年度です。繰越累計を加算できるのは2000年度から今年度（2026年度）までのため、" +
+            $"対象年度が{year}年度です。繰越累計を加算できるのは2000年度から来年度（2027年度）までのため、" +
             "この範囲の年度を西暦4桁で入力してください。");
     }
 

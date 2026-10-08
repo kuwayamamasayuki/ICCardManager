@@ -105,7 +105,10 @@ namespace ICCardManager.Common
         /// <param name="fiscalYearText">対象年度の入力（西暦。空欄は「年度なし」）</param>
         /// <param name="lost">どの項目が失われたか（<c>Lost*</c> が null でない項目が失われた項目）</param>
         /// <param name="current">カードが今持っている繰越情報（失われていない項目を既定値へ落とさせないため）</param>
-        /// <param name="currentFiscalYear">今年度（西暦）。これより先の年度は受け付けない</param>
+        /// <param name="currentFiscalYear">
+        /// 今年度（西暦）。翌年度までを受け付ける — 登録時の年度は「繰越月の翌月 1 日」の年度で決まり
+        /// （<c>SummaryGenerator.GetMidYearCarryoverDate</c>）、3 月に「3 月から繰越」で登録したカードは正当に翌年度を持つ
+        /// </param>
         public static CarryoverInputParseResult Parse(
             string? startingPageNumberText,
             string? incomeTotalText,
@@ -148,7 +151,11 @@ namespace ICCardManager.Common
                     $"開始ページ番号が{startingPageNumber}です。ページ番号は1から始まるため、1以上の整数を入力してください。");
             }
 
-            if (startingPageNumber > MaxStartingPageNumber)
+            // 上限は桁の打ち間違いを止めるためのもの。失われた値・今の値と同じ入力は、登録画面（上限を持たない）が
+            // 保存した値を戻すだけなので止めない（止めると、そのカードは元の値に戻せなくなる）
+            if (startingPageNumber > MaxStartingPageNumber
+                && startingPageNumber != lost.LostStartingPageNumber
+                && startingPageNumber != current.StartingPageNumber)
             {
                 return CarryoverInputParseResult.Failure(
                     CarryoverInputField.StartingPageNumber,
@@ -176,7 +183,7 @@ namespace ICCardManager.Common
             // 繰越累計受入・払出
             var incomeFailure = ParseAmount(
                 incomeTotalText, "繰越累計受入", CarryoverInputField.CarryoverIncomeTotal,
-                lost.LostCarryoverIncomeTotal.HasValue, current.CarryoverIncomeTotal, out var incomeTotal);
+                lost.LostCarryoverIncomeTotal, current.CarryoverIncomeTotal, out var incomeTotal);
             if (incomeFailure is not null)
             {
                 return incomeFailure;
@@ -184,7 +191,7 @@ namespace ICCardManager.Common
 
             var expenseFailure = ParseAmount(
                 expenseTotalText, "繰越累計払出", CarryoverInputField.CarryoverExpenseTotal,
-                lost.LostCarryoverExpenseTotal.HasValue, current.CarryoverExpenseTotal, out var expenseTotal);
+                lost.LostCarryoverExpenseTotal, current.CarryoverExpenseTotal, out var expenseTotal);
             if (expenseFailure is not null)
             {
                 return expenseFailure;
@@ -228,12 +235,13 @@ namespace ICCardManager.Common
                         $"対象年度「{yearText}」は年として読めません。西暦4桁（例: 2025）で入力してください。");
                 }
 
-                if (parsedYear < MinFiscalYear || parsedYear > currentFiscalYear)
+                var maxFiscalYear = currentFiscalYear + 1;
+                if (parsedYear < MinFiscalYear || parsedYear > maxFiscalYear)
                 {
                     return CarryoverInputParseResult.Failure(
                         CarryoverInputField.CarryoverFiscalYear,
                         $"対象年度が{parsedYear}年度です。繰越累計を加算できるのは{MinFiscalYear}年度から" +
-                        $"今年度（{currentFiscalYear}年度）までのため、この範囲の年度を西暦4桁で入力してください。");
+                        $"来年度（{maxFiscalYear}年度）までのため、この範囲の年度を西暦4桁で入力してください。");
                 }
 
                 fiscalYear = parsedYear;
@@ -247,7 +255,7 @@ namespace ICCardManager.Common
         /// 繰越累計の金額を解釈する。誤りがあれば失敗の結果を、無ければ null を返す
         /// </summary>
         private static CarryoverInputParseResult? ParseAmount(
-            string? text, string label, CarryoverInputField field, bool isLost, int currentAmount, out int amount)
+            string? text, string label, CarryoverInputField field, int? lostAmount, int currentAmount, out int amount)
         {
             var normalized = Normalize(text);
             if (normalized.Length == 0)
@@ -273,7 +281,8 @@ namespace ICCardManager.Common
                     "0以上の整数を入力してください。");
             }
 
-            if (amount > MaxCarryoverTotal)
+            var isLost = lostAmount.HasValue;
+            if (amount > MaxCarryoverTotal && amount != lostAmount && amount != currentAmount)
             {
                 return CarryoverInputParseResult.Failure(
                     field,
