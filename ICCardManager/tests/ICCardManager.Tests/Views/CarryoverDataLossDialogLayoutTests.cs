@@ -141,4 +141,54 @@ public class CarryoverDataLossDialogLayoutTests
             enclosing.StartTag.Should().NotContain("HasItems", "一覧の表示条件に紐付けない");
         }
     }
+    [Fact]
+    public void 一覧の列幅はピクセルで固定せず_見出しと値に合わせること()
+    {
+        // Issue #2258: 固定幅（150 / 120 …、残りを * の列）は文字サイズを大きくすると見出し・値が切れ、
+        // * の列（操作者）には幅がほとんど残らなかった。Auto なら列は内容に合わせて広がる
+        var xaml = XamlElementInspection.StripXmlComments(ReadXaml());
+
+        var columns = XamlElementInspection.EnumerateElementSpans(xaml, "DataGridTextColumn")
+            .Concat(XamlElementInspection.EnumerateElementSpans(xaml, "DataGridTemplateColumn"))
+            .ToList();
+
+        columns.Should().HaveCount(8, "抽出が空振りしていないこと（カード・復旧と値の 6 列）");
+        foreach (var column in columns)
+        {
+            XamlElementInspection.GetAttribute(column.StartTag, "Width").Should().Be("Auto",
+                $"列幅を固定しない: {XamlElementInspection.GetAttribute(column.StartTag, "Header")}");
+        }
+    }
+
+    [Fact]
+    public void 収まらないときは横スクロールにし_カードと復旧の列は左に固定すること()
+    {
+        // 列を内容に合わせると、文字サイズ「特大」や長いカード名で一覧の幅を超え得る。値を切らずに横へスクロールさせ、
+        // そのときも「どのカードか」と「復旧...」が見えるよう、この 2 列を左端に固定する
+        var xaml = XamlElementInspection.StripXmlComments(ReadXaml());
+
+        var grid = XamlElementInspection.EnumerateElementSpans(xaml, "DataGrid").Should().ContainSingle().Subject;
+        XamlElementInspection.GetAttribute(grid.StartTag, "HorizontalScrollBarVisibility").Should().Be("Auto");
+        XamlElementInspection.GetAttribute(grid.StartTag, "FrozenColumnCount").Should().Be("2");
+
+        // 列の並び: 先頭 2 列（固定される列）が「カード」と「復旧」
+        var headers = System.Text.RegularExpressions.Regex
+            .Matches(grid.Body, @"<DataGrid(?:Text|Template)Column\b[^>]*?Header=""(?<h>[^""]*)""")
+            .Cast<System.Text.RegularExpressions.Match>()
+            .Select(m => m.Groups["h"].Value)
+            .ToList();
+        headers.Should().HaveCount(8);
+        headers.Take(2).Should().Equal("カード", "復旧");
+    }
+
+    [Fact]
+    public void 既定のウィンドウ幅は文字サイズ特大で横スクロールせずに収まる幅であること()
+    {
+        // 1150 は Yu Gothic UI で特大（20）の見出し・値の幅を実測して決めた値（XAML のコメントと 03 §3.24.2）。
+        // 下げると、特大では最初から横スクロールが出る
+        var root = XamlElementInspection.GetRootStartTag(XamlElementInspection.StripXmlComments(ReadXaml()));
+
+        int.Parse(XamlElementInspection.GetAttribute(root!, "Width")!, System.Globalization.CultureInfo.InvariantCulture)
+            .Should().BeGreaterThanOrEqualTo(1150);
+    }
 }
