@@ -8,7 +8,7 @@
         d:DataContext="{d:DesignInstance Type=vm:CarryoverDataLossViewModel}"
         Title="繰越情報が失われたカード"
         Height="500"
-        Width="950"
+        Width="1150"
         MinHeight="350"
         MinWidth="600"
         WindowStartupLocation="CenterOwner"
@@ -51,7 +51,7 @@
             <TextBlock TextWrapping="Wrap"
                        FontSize="{DynamicResource SmallFontSize}"
                        Foreground="{DynamicResource HintForegroundBrush}"
-                       Text="💡 復旧するには、行の右端の「復旧...」を押してください。失われた値が入った入力欄が開くので、紙の出納簿と突き合わせて確かめてから保存します（職員証の認証が必要です）。復旧したカードは一覧から消え、この画面を閉じるとメイン画面の警告も更新されます。"/>
+                       Text="💡 復旧するには、カード名の右にある「復旧...」を押してください。失われた値が入った入力欄が開くので、紙の出納簿と突き合わせて確かめてから保存します（職員証の認証が必要です）。復旧したカードは一覧から消え、この画面を閉じるとメイン画面の警告も更新されます。"/>
         </Border>
 
         <!-- 一覧 -->
@@ -69,6 +69,9 @@
                   CanUserResizeColumns="True"
                   HeadersVisibility="Column"
                   RowHeaderWidth="0"
+                  FrozenColumnCount="2"
+                  CopyingRowClipboardContent="CarryoverDataLossDataGrid_CopyingRowClipboardContent"
+                  HorizontalScrollBarVisibility="Auto"
                   GridLinesVisibility="Horizontal"
                   BorderBrush="{DynamicResource NeutralBorderBrush}"
                   BorderThickness="1"
@@ -76,30 +79,22 @@
                   AutomationProperties.Name="繰越情報が失われたカードの一覧"
                   AutomationProperties.HelpText="セルを選択して Ctrl+C を押すと、失われた値をコピーできます。">
 
+            <!-- Issue #2258: 列幅はピクセルで固定せず、見出しと値に合わせる（Auto）。固定幅は文字サイズを大きくすると
+                 見出し・値が切れ、残りを受け持つ列（以前の「操作者」の *）は幅がほとんど残らなかった。
+                 収まらないときは横スクロールにし（値を切らない）、操作に要る「カード」と「復旧」は左に固定して
+                 スクロールしても見えるようにする（FrozenColumnCount="2"）。
+                 ウィンドウの既定幅 1150 は、Yu Gothic UI で文字サイズ「特大」（20）の見出し・値の幅を FormattedText で
+                 実測し（各列の最大の文字幅の合計 922px。「大」（16）は 735px）、列の余白・ボタン・枠・余白を足して
+                 横スクロールせずに収まる幅にした。作業領域がこれより狭い PC（1366 幅で表示倍率 125% 等）では、
+                 コードビハインドが作業領域の幅で切り詰め、収まらない分は横スクロールになる。 -->
             <DataGrid.Columns>
                 <DataGridTextColumn Header="カード"
                                     Binding="{Binding CardDisplayName}"
-                                    Width="150"/>
-                <DataGridTextColumn Header="開始ページ番号"
-                                    Binding="{Binding LostStartingPageNumberText}"
-                                    Width="120"/>
-                <DataGridTextColumn Header="繰越累計受入"
-                                    Binding="{Binding LostCarryoverIncomeTotalText}"
-                                    Width="130"/>
-                <DataGridTextColumn Header="繰越累計払出"
-                                    Binding="{Binding LostCarryoverExpenseTotalText}"
-                                    Width="130"/>
-                <DataGridTextColumn Header="対象年度"
-                                    Binding="{Binding LostCarryoverFiscalYearText}"
-                                    Width="100"/>
-                <DataGridTextColumn Header="消去された日時"
-                                    Binding="{Binding LostAtText}"
-                                    Width="150"/>
-                <DataGridTextColumn Header="操作者"
-                                    Binding="{Binding OperatorName}"
-                                    Width="*"/>
+                                    Width="Auto"/>
                 <!-- Issue #2255: 行ごとの復旧。ボタンなので Tab で辿って Enter / スペースでも押せる（#2078） -->
-                <DataGridTemplateColumn Header="復旧"
+                <!-- コピー（Ctrl+C）では、この列を除く（ボタンだけの列が値の列の間に空の列として出るため。Issue #2258） -->
+                <DataGridTemplateColumn x:Name="RecoverColumn"
+                                        Header="復旧"
                                         Width="Auto"
                                         CanUserSort="False">
                     <DataGridTemplateColumn.CellTemplate>
@@ -116,6 +111,24 @@
                         </DataTemplate>
                     </DataGridTemplateColumn.CellTemplate>
                 </DataGridTemplateColumn>
+                <DataGridTextColumn Header="開始ページ番号"
+                                    Binding="{Binding LostStartingPageNumberText}"
+                                    Width="Auto"/>
+                <DataGridTextColumn Header="繰越累計受入"
+                                    Binding="{Binding LostCarryoverIncomeTotalText}"
+                                    Width="Auto"/>
+                <DataGridTextColumn Header="繰越累計払出"
+                                    Binding="{Binding LostCarryoverExpenseTotalText}"
+                                    Width="Auto"/>
+                <DataGridTextColumn Header="対象年度"
+                                    Binding="{Binding LostCarryoverFiscalYearText}"
+                                    Width="Auto"/>
+                <DataGridTextColumn Header="消去された日時"
+                                    Binding="{Binding LostAtText}"
+                                    Width="Auto"/>
+                <DataGridTextColumn Header="操作者"
+                                    Binding="{Binding OperatorName}"
+                                    Width="Auto"/>
             </DataGrid.Columns>
         </DataGrid>
 

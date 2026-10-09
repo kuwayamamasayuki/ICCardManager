@@ -141,4 +141,109 @@ public class CarryoverDataLossDialogLayoutTests
             enclosing.StartTag.Should().NotContain("HasItems", "一覧の表示条件に紐付けない");
         }
     }
+
+    [Fact]
+    public void 一覧の列幅はピクセルで固定せず_見出しと値に合わせること()
+    {
+        // Issue #2258: 固定幅（150 / 120 …、残りを * の列）は文字サイズを大きくすると見出し・値が切れ、
+        // * の列（操作者）には幅がほとんど残らなかった。Auto なら列は内容に合わせて広がる
+        var xaml = XamlElementInspection.StripXmlComments(ReadXaml());
+
+        var columns = XamlElementInspection.EnumerateElementSpans(xaml, "DataGridTextColumn")
+            .Concat(XamlElementInspection.EnumerateElementSpans(xaml, "DataGridTemplateColumn"))
+            .ToList();
+
+        columns.Should().HaveCount(8, "抽出が空振りしていないこと（カード・復旧と値の 6 列）");
+        foreach (var column in columns)
+        {
+            XamlElementInspection.GetAttribute(column.StartTag, "Width").Should().Be("Auto",
+                $"列幅を固定しない: {XamlElementInspection.GetAttribute(column.StartTag, "Header")}");
+        }
+    }
+
+    [Fact]
+    public void 収まらないときは横スクロールにし_カードと復旧の列は左に固定すること()
+    {
+        // 列を内容に合わせると、文字サイズ「特大」や長いカード名で一覧の幅を超え得る。値を切らずに横へスクロールさせ、
+        // そのときも「どのカードか」と「復旧...」が見えるよう、この 2 列を左端に固定する
+        var xaml = XamlElementInspection.StripXmlComments(ReadXaml());
+
+        var grid = XamlElementInspection.EnumerateElementSpans(xaml, "DataGrid").Should().ContainSingle().Subject;
+        XamlElementInspection.GetAttribute(grid.StartTag, "HorizontalScrollBarVisibility").Should().Be("Auto");
+        XamlElementInspection.GetAttribute(grid.StartTag, "FrozenColumnCount").Should().Be("2");
+
+        // 列の並び: 先頭 2 列（固定される列）が「カード」と「復旧」
+        var headers = XamlElementInspection.EnumerateElementSpans(xaml, "DataGridTextColumn")
+            .Concat(XamlElementInspection.EnumerateElementSpans(xaml, "DataGridTemplateColumn"))
+            .OrderBy(c => c.Start)
+            .Select(c => XamlElementInspection.GetAttribute(c.StartTag, "Header"))
+            .ToList();
+        headers.Should().HaveCount(8);
+        headers.Take(2).Should().Equal("カード", "復旧");
+    }
+
+    [Fact]
+    public void 既定のウィンドウ幅は文字サイズ特大で横スクロールせずに収まる幅であること()
+    {
+        // 1150 は Yu Gothic UI で特大（20）の見出し・値の幅を実測して決めた値（XAML のコメントと 03 §3.24.2）。
+        // 下げると、特大では最初から横スクロールが出る
+        var root = XamlElementInspection.GetRootStartTag(XamlElementInspection.StripXmlComments(ReadXaml()));
+
+        int.Parse(XamlElementInspection.GetAttribute(root!, "Width")!, System.Globalization.CultureInfo.InvariantCulture)
+            .Should().BeGreaterThanOrEqualTo(1150);
+    }
+
+    [Fact]
+    public void コピーから復旧の列を除くよう結線されていること()
+    {
+        // Issue #2258: 「復旧」は左から 2 列目に固定した。値を持たないボタンの列がコピー（Ctrl+C）に
+        // 空の列として出ると、Excel 等へ貼り付けたときに値の列が 1 つずつ右へずれる
+        var xaml = XamlElementInspection.StripXmlComments(ReadXaml());
+
+        var grid = XamlElementInspection.EnumerateElementSpans(xaml, "DataGrid").Should().ContainSingle().Subject;
+        var handler = XamlElementInspection.GetAttribute(grid.StartTag, "CopyingRowClipboardContent");
+        handler.Should().NotBeNullOrEmpty();
+
+        var recoverColumn = XamlElementInspection.EnumerateElementSpans(xaml, "DataGridTemplateColumn")
+            .Should().ContainSingle().Subject;
+        XamlElementInspection.GetAttribute(recoverColumn.StartTag, "x:Name").Should().Be("RecoverColumn");
+        recoverColumn.Body.Should().Contain("RecoverCommand", "除く列が復旧ボタンの列であること");
+
+        var codeBehind = TestSourceInspection.RemoveCommentsPreservingLines(File.ReadAllText(XamlPath + ".cs"));
+        codeBehind.Should().MatchRegex(
+            $@"void\s+{handler}\s*\([^)]*DataGridRowClipboardEventArgs\s+e\)\s*(=>|\{{[^}}]*?)\s*" +
+            @"DataGridClipboardColumnFilter\.RemoveColumn\(\s*e\.ClipboardRowContent\s*,\s*RecoverColumn\s*\)",
+            "ハンドラーが復旧の列をコピーから取り除くこと");
+    }
+
+    [Fact]
+    public void 既定のウィンドウ幅は作業領域の幅で切り詰めること()
+    {
+        // 1150 は 1366 幅・表示倍率 125% の PC（作業領域 約 1093）でははみ出す。CenterOwner は画面内へ補正しないので、
+        // 切り詰めないと左右が切れて閉じるボタンが画面外に出る（メイン画面の Issue #2150 と同じ扱い）
+        var codeBehind = TestSourceInspection.RemoveCommentsPreservingLines(File.ReadAllText(XamlPath + ".cs"));
+
+        var initialize = codeBehind.IndexOf("InitializeComponent();", System.StringComparison.Ordinal);
+        var fit = codeBehind.IndexOf(
+            "Width = WindowLayoutCalculator.FitWidth(Width, SystemParameters.WorkArea.Width);", System.StringComparison.Ordinal);
+        initialize.Should().BeGreaterThanOrEqualTo(0);
+        fit.Should().BeGreaterThan(initialize, "XAML の Width を上書きするため InitializeComponent() の後で切り詰める");
+    }
+
+    [Fact]
+    public void 表示した位置を作業領域の中へ寄せること()
+    {
+        // CenterOwner はオーナーの中心に置くだけで画面内へ寄せない。オーナーが右寄りにあると、幅を詰めても
+        // 右端がはみ出して閉じるボタンが画面外に出る（Issue #2258 のコードレビューで検出）
+        var codeBehind = TestSourceInspection.RemoveCommentsPreservingLines(File.ReadAllText(XamlPath + ".cs"));
+
+        codeBehind.Should().Contain("if (MonitorWorkArea.Of(this) is Rect workArea)",
+            "寄せる先はダイアログが載っているモニターの作業領域（プライマリーの SystemParameters.WorkArea で寄せると、" +
+            "メイン画面をサブモニターで使っているときダイアログだけがプライマリーへ移る）");
+        codeBehind.Should().Contain("Left = WindowLayoutCalculator.ClampStart(Left, ActualWidth, workArea.Left, workArea.Width);");
+        codeBehind.Should().Contain("Top = WindowLayoutCalculator.ClampStart(Top, ActualHeight, workArea.Top, workArea.Height);");
+        codeBehind.IndexOf("Loaded +=", System.StringComparison.Ordinal)
+            .Should().BeLessThan(codeBehind.IndexOf("Left = WindowLayoutCalculator.ClampStart", System.StringComparison.Ordinal),
+                "位置と実際の幅が決まった後（Loaded）で寄せる");
+    }
 }

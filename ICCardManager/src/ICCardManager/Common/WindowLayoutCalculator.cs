@@ -62,6 +62,39 @@ namespace ICCardManager.Common
         }
 
         /// <summary>
+        /// ウィンドウの開始位置を、作業領域の中へ収まるよう動かす（幅・高さのどちらにも使う）。
+        /// </summary>
+        /// <param name="start">今の開始位置（<c>Left</c> / <c>Top</c>）</param>
+        /// <param name="length">今の長さ（<c>ActualWidth</c> / <c>ActualHeight</c>）</param>
+        /// <param name="areaStart">作業領域の開始位置</param>
+        /// <param name="areaLength">作業領域の長さ</param>
+        /// <returns>
+        /// 作業領域の中に収まる開始位置。収まっていればそのまま返す。長さが作業領域より長いときは
+        /// 作業領域の開始位置（右端・下端より、タイトルバーと左端が見えるほうを残す）。
+        /// 作業領域の長さが 0 以下・NaN・無限大のときは画面の情報が取れていないとみなし、そのまま返す。
+        /// </returns>
+        /// <remarks>
+        /// <c>WindowStartupLocation="CenterOwner"</c> はオーナーの中心に置くだけで、画面内へ寄せない（Issue #2258）。
+        /// オーナーが右寄りにあると、幅を作業領域に収めても右端がはみ出し、閉じるボタンが画面外に出る。
+        /// </remarks>
+        public static double ClampStart(double start, double length, double areaStart, double areaLength)
+        {
+            if (double.IsNaN(areaLength) || double.IsInfinity(areaLength) || areaLength <= 0
+                || double.IsNaN(start) || double.IsNaN(length))
+            {
+                return start;
+            }
+
+            var maxStart = areaStart + areaLength - length;
+            if (maxStart < areaStart)
+            {
+                return areaStart;
+            }
+
+            return Math.Max(areaStart, Math.Min(start, maxStart));
+        }
+
+        /// <summary>
         /// 画面外にあった保存位置を捨てて、作業領域の中央へ置き直すときの位置と長さを算出する（幅・高さのどちらにも使う）。
         /// </summary>
         /// <param name="length">保存されていた長さ</param>
