@@ -237,6 +237,9 @@ public class CarryoverDataLossDialogLayoutTests
         // 右端がはみ出して閉じるボタンが画面外に出る（Issue #2258 のコードレビューで検出）
         var codeBehind = TestSourceInspection.RemoveCommentsPreservingLines(File.ReadAllText(XamlPath + ".cs"));
 
+        codeBehind.Should().Contain("if (MonitorWorkArea.Of(this) is Rect workArea)",
+            "寄せる先はダイアログが載っているモニターの作業領域（プライマリーの SystemParameters.WorkArea で寄せると、" +
+            "メイン画面をサブモニターで使っているときダイアログだけがプライマリーへ移る）");
         codeBehind.Should().Contain("Left = WindowLayoutCalculator.ClampStart(Left, ActualWidth, workArea.Left, workArea.Width);");
         codeBehind.Should().Contain("Top = WindowLayoutCalculator.ClampStart(Top, ActualHeight, workArea.Top, workArea.Height);");
         codeBehind.IndexOf("Loaded +=", System.StringComparison.Ordinal)

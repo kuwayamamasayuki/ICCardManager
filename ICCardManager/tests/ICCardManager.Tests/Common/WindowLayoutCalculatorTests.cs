@@ -140,6 +140,9 @@ public class WindowLayoutCalculatorTests
     [InlineData(-50, 800, 0, 1093, 0)]       // 左へはみ出す → 作業領域の左端
     [InlineData(10, 800, 40, 1093, 40)]      // 作業領域が 0 から始まらない（左にタスクバー）
     [InlineData(100, 1200, 0, 1093, 0)]      // 長さが作業領域より長い → 左端（タイトルバーと左端を残す）
+    [InlineData(-1500, 800, -1920, 1920, -1500)]  // 左側のサブモニター（負の座標）に収まっていれば動かさない
+    [InlineData(2500, 800, 1920, 1920, 2500)]     // 右側のサブモニターに収まっていれば動かさない
+    [InlineData(-500, 800, -1920, 1920, -800)]    // 左側のサブモニターから右へはみ出す分だけ戻す（-1920 + 1920 - 800）
     public void ClampStart_作業領域の中へ寄せること(double start, double length, double areaStart, double areaLength, double expected)
     {
         WindowLayoutCalculator.ClampStart(start, length, areaStart, areaLength).Should().Be(expected);
