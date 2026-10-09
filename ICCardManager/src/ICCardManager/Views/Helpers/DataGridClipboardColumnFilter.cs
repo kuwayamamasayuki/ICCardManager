@@ -13,6 +13,8 @@ namespace ICCardManager.Views.Helpers
     /// その列が値の列の間にあると、Excel 等へ貼り付けたときに値の列が 1 つずつ右へずれ、見出しと値の対応を
     /// 読み違えさせる。<c>CopyingRowClipboardContent</c>（見出し行と各行のそれぞれで発生する）から呼び、
     /// その列のセルを取り除く。
+    /// その列のセルだけを選んでコピーした場合は、見出し行・データ行ともセルが 0 件になり、何もコピーされない
+    /// （空の文字列になる。値の無い列を写しても意味が無いので、これを意図した動作とする）。
     /// </remarks>
     public static class DataGridClipboardColumnFilter
     {

@@ -192,6 +192,7 @@ public class CarryoverDataLossDialogLayoutTests
         int.Parse(XamlElementInspection.GetAttribute(root!, "Width")!, System.Globalization.CultureInfo.InvariantCulture)
             .Should().BeGreaterThanOrEqualTo(1150);
     }
+
     [Fact]
     public void コピーから復旧の列を除くよう結線されていること()
     {
