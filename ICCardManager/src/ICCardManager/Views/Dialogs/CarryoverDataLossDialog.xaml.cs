@@ -26,6 +26,7 @@ namespace ICCardManager.Views.Dialogs
             // 表示倍率 125% のノート PC（作業領域 約 1093）でははみ出し、CenterOwner は画面内へ補正しないため
             // 左右が切れて閉じるボタンが画面外に出る。メイン画面（Issue #2150）と同じく作業領域の幅で切り詰める
             // （収まらない分は一覧の横スクロールに任せる）。XAML の Width を上書きするため InitializeComponent() の後に置く。
+            // WorkArea はプライマリモニターの作業領域。メイン画面がより狭い別のモニターにあると足りない（#2150 と同じ既知の制限）。
             Width = WindowLayoutCalculator.FitWidth(Width, SystemParameters.WorkArea.Width);
 
             _viewModel = viewModel;
@@ -33,6 +34,12 @@ namespace ICCardManager.Views.Dialogs
 
             Loaded += async (s, e) =>
             {
+                // CenterOwner はオーナーの中心に置くだけで画面内へ寄せない。オーナー（メイン画面）が右寄りにあると、
+                // 幅を詰めても右端がはみ出して閉じるボタンが画面外に出るので、表示した位置を作業領域の中へ寄せる
+                var workArea = SystemParameters.WorkArea;
+                Left = WindowLayoutCalculator.ClampStart(Left, ActualWidth, workArea.Left, workArea.Width);
+                Top = WindowLayoutCalculator.ClampStart(Top, ActualHeight, workArea.Top, workArea.Height);
+
                 try
                 {
                     await _viewModel.InitializeAsync();

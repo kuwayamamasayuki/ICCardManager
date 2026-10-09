@@ -229,4 +229,18 @@ public class CarryoverDataLossDialogLayoutTests
         initialize.Should().BeGreaterThanOrEqualTo(0);
         fit.Should().BeGreaterThan(initialize, "XAML の Width を上書きするため InitializeComponent() の後で切り詰める");
     }
+
+    [Fact]
+    public void 表示した位置を作業領域の中へ寄せること()
+    {
+        // CenterOwner はオーナーの中心に置くだけで画面内へ寄せない。オーナーが右寄りにあると、幅を詰めても
+        // 右端がはみ出して閉じるボタンが画面外に出る（Issue #2258 のコードレビューで検出）
+        var codeBehind = TestSourceInspection.RemoveCommentsPreservingLines(File.ReadAllText(XamlPath + ".cs"));
+
+        codeBehind.Should().Contain("Left = WindowLayoutCalculator.ClampStart(Left, ActualWidth, workArea.Left, workArea.Width);");
+        codeBehind.Should().Contain("Top = WindowLayoutCalculator.ClampStart(Top, ActualHeight, workArea.Top, workArea.Height);");
+        codeBehind.IndexOf("Loaded +=", System.StringComparison.Ordinal)
+            .Should().BeLessThan(codeBehind.IndexOf("Left = WindowLayoutCalculator.ClampStart", System.StringComparison.Ordinal),
+                "位置と実際の幅が決まった後（Loaded）で寄せる");
+    }
 }
