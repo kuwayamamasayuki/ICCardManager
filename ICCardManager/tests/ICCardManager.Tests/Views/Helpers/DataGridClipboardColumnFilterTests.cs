@@ -42,6 +42,27 @@ public class DataGridClipboardColumnFilterTests
     }
 
     [Fact]
+    public void RemoveColumn_同じ列のセルが続けて並んでいても_すべて取り除くこと()
+    {
+        // 前から走査して RemoveAt すると、続けて並んだ 2 つ目を飛ばす。後ろから走査していることを固定する
+        StaTestRunner.Run(() =>
+        {
+            var card = new DataGridTextColumn { Header = "カード" };
+            var recover = new DataGridTemplateColumn { Header = "復旧" };
+            var cells = new List<DataGridClipboardCellContent>
+            {
+                new DataGridClipboardCellContent(null, recover, string.Empty),
+                new DataGridClipboardCellContent(null, recover, string.Empty),
+                new DataGridClipboardCellContent(null, card, "はやかけん 001"),
+            };
+
+            DataGridClipboardColumnFilter.RemoveColumn(cells, recover);
+
+            cells.Select(c => c.Column).Should().Equal(card);
+        });
+    }
+
+    [Fact]
     public void RemoveColumn_その列のセルが無ければ何も変えないこと()
     {
         // 見出し行・データ行のどちらでも呼ばれる。選択範囲に復旧の列が入っていない行は、そのまま残す

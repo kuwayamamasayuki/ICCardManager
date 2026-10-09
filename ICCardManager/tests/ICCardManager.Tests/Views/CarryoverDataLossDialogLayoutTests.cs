@@ -211,8 +211,22 @@ public class CarryoverDataLossDialogLayoutTests
 
         var codeBehind = TestSourceInspection.RemoveCommentsPreservingLines(File.ReadAllText(XamlPath + ".cs"));
         codeBehind.Should().MatchRegex(
-            $@"void\s+{handler}\s*\([^)]*DataGridRowClipboardEventArgs\s+e\)\s*=>\s*" +
+            $@"void\s+{handler}\s*\([^)]*DataGridRowClipboardEventArgs\s+e\)\s*(=>|\{{[^}}]*?)\s*" +
             @"DataGridClipboardColumnFilter\.RemoveColumn\(\s*e\.ClipboardRowContent\s*,\s*RecoverColumn\s*\)",
             "ハンドラーが復旧の列をコピーから取り除くこと");
+    }
+
+    [Fact]
+    public void 既定のウィンドウ幅は作業領域の幅で切り詰めること()
+    {
+        // 1150 は 1366 幅・表示倍率 125% の PC（作業領域 約 1093）でははみ出す。CenterOwner は画面内へ補正しないので、
+        // 切り詰めないと左右が切れて閉じるボタンが画面外に出る（メイン画面の Issue #2150 と同じ扱い）
+        var codeBehind = TestSourceInspection.RemoveCommentsPreservingLines(File.ReadAllText(XamlPath + ".cs"));
+
+        var initialize = codeBehind.IndexOf("InitializeComponent();", System.StringComparison.Ordinal);
+        var fit = codeBehind.IndexOf(
+            "Width = WindowLayoutCalculator.FitWidth(Width, SystemParameters.WorkArea.Width);", System.StringComparison.Ordinal);
+        initialize.Should().BeGreaterThanOrEqualTo(0);
+        fit.Should().BeGreaterThan(initialize, "XAML の Width を上書きするため InitializeComponent() の後で切り詰める");
     }
 }

@@ -22,6 +22,12 @@ namespace ICCardManager.Views.Dialogs
         {
             InitializeComponent();
 
+            // Issue #2258: 既定の Width（1150）は文字サイズ「特大」でも横スクロールせずに収まる幅だが、1366 幅で
+            // 表示倍率 125% のノート PC（作業領域 約 1093）でははみ出し、CenterOwner は画面内へ補正しないため
+            // 左右が切れて閉じるボタンが画面外に出る。メイン画面（Issue #2150）と同じく作業領域の幅で切り詰める
+            // （収まらない分は一覧の横スクロールに任せる）。XAML の Width を上書きするため InitializeComponent() の後に置く。
+            Width = WindowLayoutCalculator.FitWidth(Width, SystemParameters.WorkArea.Width);
+
             _viewModel = viewModel;
             DataContext = _viewModel;
 
