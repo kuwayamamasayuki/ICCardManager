@@ -70,6 +70,7 @@
                   HeadersVisibility="Column"
                   RowHeaderWidth="0"
                   FrozenColumnCount="2"
+                  CopyingRowClipboardContent="CarryoverDataLossDataGrid_CopyingRowClipboardContent"
                   HorizontalScrollBarVisibility="Auto"
                   GridLinesVisibility="Horizontal"
                   BorderBrush="{DynamicResource NeutralBorderBrush}"
@@ -84,13 +85,15 @@
                  スクロールしても見えるようにする（FrozenColumnCount="2"）。
                  ウィンドウの既定幅 1150 は、Yu Gothic UI で文字サイズ「特大」（20）の見出し・値の幅を FormattedText で
                  実測し（各列の最大の文字幅の合計 922px。「大」（16）は 735px）、列の余白・ボタン・枠・余白を足して
-                 横スクロールせずに収まる幅にした。1366 幅のノート PC にも収まる。 -->
+                 横スクロールせずに収まる幅にした。1366 幅のノート PC でも表示倍率 100% なら収まる。 -->
             <DataGrid.Columns>
                 <DataGridTextColumn Header="カード"
                                     Binding="{Binding CardDisplayName}"
                                     Width="Auto"/>
                 <!-- Issue #2255: 行ごとの復旧。ボタンなので Tab で辿って Enter / スペースでも押せる（#2078） -->
-                <DataGridTemplateColumn Header="復旧"
+                <!-- コピー（Ctrl+C）では、この列を除く（ボタンだけの列が値の列の間に空の列として出るため。Issue #2258） -->
+                <DataGridTemplateColumn x:Name="RecoverColumn"
+                                        Header="復旧"
                                         Width="Auto"
                                         CanUserSort="False">
                     <DataGridTemplateColumn.CellTemplate>

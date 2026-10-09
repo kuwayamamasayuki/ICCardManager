@@ -141,6 +141,7 @@ public class CarryoverDataLossDialogLayoutTests
             enclosing.StartTag.Should().NotContain("HasItems", "一覧の表示条件に紐付けない");
         }
     }
+
     [Fact]
     public void 一覧の列幅はピクセルで固定せず_見出しと値に合わせること()
     {
@@ -172,10 +173,10 @@ public class CarryoverDataLossDialogLayoutTests
         XamlElementInspection.GetAttribute(grid.StartTag, "FrozenColumnCount").Should().Be("2");
 
         // 列の並び: 先頭 2 列（固定される列）が「カード」と「復旧」
-        var headers = System.Text.RegularExpressions.Regex
-            .Matches(grid.Body, @"<DataGrid(?:Text|Template)Column\b[^>]*?Header=""(?<h>[^""]*)""")
-            .Cast<System.Text.RegularExpressions.Match>()
-            .Select(m => m.Groups["h"].Value)
+        var headers = XamlElementInspection.EnumerateElementSpans(xaml, "DataGridTextColumn")
+            .Concat(XamlElementInspection.EnumerateElementSpans(xaml, "DataGridTemplateColumn"))
+            .OrderBy(c => c.Start)
+            .Select(c => XamlElementInspection.GetAttribute(c.StartTag, "Header"))
             .ToList();
         headers.Should().HaveCount(8);
         headers.Take(2).Should().Equal("カード", "復旧");
@@ -190,5 +191,27 @@ public class CarryoverDataLossDialogLayoutTests
 
         int.Parse(XamlElementInspection.GetAttribute(root!, "Width")!, System.Globalization.CultureInfo.InvariantCulture)
             .Should().BeGreaterThanOrEqualTo(1150);
+    }
+    [Fact]
+    public void コピーから復旧の列を除くよう結線されていること()
+    {
+        // Issue #2258: 「復旧」は左から 2 列目に固定した。値を持たないボタンの列がコピー（Ctrl+C）に
+        // 空の列として出ると、Excel 等へ貼り付けたときに値の列が 1 つずつ右へずれる
+        var xaml = XamlElementInspection.StripXmlComments(ReadXaml());
+
+        var grid = XamlElementInspection.EnumerateElementSpans(xaml, "DataGrid").Should().ContainSingle().Subject;
+        var handler = XamlElementInspection.GetAttribute(grid.StartTag, "CopyingRowClipboardContent");
+        handler.Should().NotBeNullOrEmpty();
+
+        var recoverColumn = XamlElementInspection.EnumerateElementSpans(xaml, "DataGridTemplateColumn")
+            .Should().ContainSingle().Subject;
+        XamlElementInspection.GetAttribute(recoverColumn.StartTag, "x:Name").Should().Be("RecoverColumn");
+        recoverColumn.Body.Should().Contain("RecoverCommand", "除く列が復旧ボタンの列であること");
+
+        var codeBehind = TestSourceInspection.RemoveCommentsPreservingLines(File.ReadAllText(XamlPath + ".cs"));
+        codeBehind.Should().MatchRegex(
+            $@"void\s+{handler}\s*\([^)]*DataGridRowClipboardEventArgs\s+e\)\s*=>\s*" +
+            @"DataGridClipboardColumnFilter\.RemoveColumn\(\s*e\.ClipboardRowContent\s*,\s*RecoverColumn\s*\)",
+            "ハンドラーが復旧の列をコピーから取り除くこと");
     }
 }

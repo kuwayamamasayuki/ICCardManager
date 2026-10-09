@@ -1,8 +1,10 @@
 #nullable enable
 using System;
 using System.Windows;
+using System.Windows.Controls;
 using ICCardManager.Common;
 using ICCardManager.ViewModels;
+using ICCardManager.Views.Helpers;
 
 namespace ICCardManager.Views.Dialogs
 {
@@ -44,6 +46,16 @@ namespace ICCardManager.Views.Dialogs
                 }
             };
         }
+
+        /// <summary>
+        /// コピー（Ctrl+C）から「復旧」の列を除く（Issue #2258）
+        /// </summary>
+        /// <remarks>
+        /// 「復旧」は横スクロールしても見えるよう左から 2 列目に固定している。値を持たないボタンの列が
+        /// 値の列の間に空の列として出ると、貼り付けた先で値の列がずれる。
+        /// </remarks>
+        private void CarryoverDataLossDataGrid_CopyingRowClipboardContent(object sender, DataGridRowClipboardEventArgs e)
+            => DataGridClipboardColumnFilter.RemoveColumn(e.ClipboardRowContent, RecoverColumn);
 
         private void CloseButton_Click(object sender, RoutedEventArgs e)
         {
