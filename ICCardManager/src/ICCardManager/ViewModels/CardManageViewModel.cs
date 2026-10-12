@@ -1002,7 +1002,7 @@ namespace ICCardManager.ViewModels
             var targetLabel = FormatCardLabel(targetCardType, targetCardNumber);
 
             // Issue #429: ICカードの削除は認証が必要
-            var authResult = await _staffAuthService.RequestAuthenticationAsync("交通系ICカードの削除");
+            using var authResult = (await _staffAuthService.RequestAuthenticationAsync("交通系ICカードの削除"))?.Enter();
             if (authResult == null)
             {
                 // 認証キャンセルまたはタイムアウト
@@ -1269,7 +1269,7 @@ namespace ICCardManager.ViewModels
             var targetIdm = SelectedCard.CardIdm;
             var targetLabel = FormatCardLabel(SelectedCard.CardType, SelectedCard.CardNumber);
 
-            var authResult = await _staffAuthService.RequestAuthenticationAsync("貸出記録の作成");
+            using var authResult = (await _staffAuthService.RequestAuthenticationAsync("貸出記録の作成"))?.Enter();
             if (authResult == null)
             {
                 return;

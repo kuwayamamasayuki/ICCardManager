@@ -790,11 +790,10 @@ namespace ICCardManager.Services
         /// </summary>
         private (string idm, string name) ResolveOperator()
         {
-            if (_operatorContext.HasSession)
-            {
-                return (_operatorContext.CurrentIdm!, _operatorContext.CurrentName!);
-            }
-            return (GuiOperator.Idm, GuiOperator.Name);
+            // Issue #2260: 有効性の判定と IDm・氏名の取り出しを 1 回で行う（別々に読むと、その間に失効し得る）
+            return _operatorContext.TryGetOperator(out var idm, out var name)
+                ? (idm, name)
+                : (GuiOperator.Idm, GuiOperator.Name);
         }
 
         /// <summary>

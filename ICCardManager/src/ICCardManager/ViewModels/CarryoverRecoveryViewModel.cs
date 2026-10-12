@@ -277,7 +277,7 @@ namespace ICCardManager.ViewModels
 
             // 操作名はリテラルで書く。認証を要求する操作の一覧は画面遷移図と突き合わせて静的に検査しており
             // （ScreenTransitionDiagramConsistencyTests）、定数経由だとその検査から漏れる
-            var auth = await _staffAuthService.RequestAuthenticationAsync("繰越情報の復旧");
+            using var auth = (await _staffAuthService.RequestAuthenticationAsync("繰越情報の復旧"))?.Enter();
             if (auth == null)
             {
                 StatusMessage = AuthenticationCancelledMessage;

@@ -719,7 +719,7 @@ namespace ICCardManager.ViewModels
 
             // 履歴分割は ledger を改変する監査対象の重要操作のため職員認証を要求する
             // （設計 06_シーケンス図 §11 / SEQ-AUTH-01。追加・削除・変更と同じゲート）
-            var authResult = await _staffAuthService.RequestAuthenticationAsync("履歴の分割");
+            using var authResult = (await _staffAuthService.RequestAuthenticationAsync("履歴の分割"))?.Enter();
             if (authResult == null)
             {
                 StatusMessage = "認証がキャンセルされたため分割を中止しました";

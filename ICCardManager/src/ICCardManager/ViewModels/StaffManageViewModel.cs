@@ -1,3 +1,4 @@
+#nullable enable
 using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
@@ -603,7 +604,7 @@ namespace ICCardManager.ViewModels
             var targetLabel = FormatStaffLabel(SelectedStaff.Name, SelectedStaff.Number);
 
             // Issue #429: 職員の削除は認証が必要
-            var authResult = await _staffAuthService.RequestAuthenticationAsync("職員の削除");
+            using var authResult = (await _staffAuthService.RequestAuthenticationAsync("職員の削除"))?.Enter();
             if (authResult == null)
             {
                 // 認証キャンセルまたはタイムアウト

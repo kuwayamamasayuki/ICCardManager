@@ -33,9 +33,10 @@ public class OperationLoggerTransactionTests : IDisposable
     {
         _repoMock = new Mock<IOperationLogRepository>();
         _ctxMock = new Mock<ICurrentOperatorContext>();
-        _ctxMock.SetupGet(c => c.HasSession).Returns(true);
-        _ctxMock.SetupGet(c => c.CurrentIdm).Returns("1111111111111111");
-        _ctxMock.SetupGet(c => c.CurrentName).Returns("テスト操作者");
+        // Issue #2260: OperationLogger は操作者を TryGetOperator で 1 回の判定で取り出す
+        string? operatorIdm = "1111111111111111";
+        string? operatorName = "テスト操作者";
+        _ctxMock.Setup(c => c.TryGetOperator(out operatorIdm, out operatorName)).Returns(true);
         _logger = new OperationLogger(_repoMock.Object, _ctxMock.Object);
 
         _connection = new SQLiteConnection("Data Source=:memory:");

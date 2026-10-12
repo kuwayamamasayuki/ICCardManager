@@ -80,7 +80,7 @@ public partial class HistoryPanelViewModel
 
         // 履歴統合は ledger を改変する監査対象の重要操作のため職員認証を要求する
         // （設計 06_シーケンス図 §10 / SEQ-AUTH-01。追加・削除・変更と同じゲート）
-        var authResult = await _staffAuthService.RequestAuthenticationAsync("履歴の統合");
+        using var authResult = (await _staffAuthService.RequestAuthenticationAsync("履歴の統合"))?.Enter();
         if (authResult == null)
         {
             return;

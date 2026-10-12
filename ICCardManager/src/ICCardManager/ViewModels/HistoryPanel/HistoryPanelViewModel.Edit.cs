@@ -31,7 +31,7 @@ public partial class HistoryPanelViewModel
         }
 
         // 認証
-        var authResult = await _staffAuthService.RequestAuthenticationAsync("履歴の追加");
+        using var authResult = (await _staffAuthService.RequestAuthenticationAsync("履歴の追加"))?.Enter();
         if (authResult == null)
         {
             return;
@@ -71,7 +71,7 @@ public partial class HistoryPanelViewModel
         }
 
         // 認証
-        var authResult = await _staffAuthService.RequestAuthenticationAsync("履歴の削除");
+        using var authResult = (await _staffAuthService.RequestAuthenticationAsync("履歴の削除"))?.Enter();
         if (authResult == null)
         {
             return;
@@ -261,7 +261,7 @@ public partial class HistoryPanelViewModel
         }
 
         // 認証
-        var authResult = await _staffAuthService.RequestAuthenticationAsync("履歴の変更");
+        using var authResult = (await _staffAuthService.RequestAuthenticationAsync("履歴の変更"))?.Enter();
         if (authResult == null)
         {
             return;

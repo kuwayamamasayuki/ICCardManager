@@ -55,9 +55,10 @@ public class LedgerLogAtomicityTests : IDisposable
         _staffRepo = new StaffRepository(_dbContext, cacheServiceMock.Object, Options.Create(new CacheOptions()), NullLogger<StaffRepository>.Instance);
 
         var ctxMock = new Mock<ICurrentOperatorContext>();
-        ctxMock.SetupGet(c => c.HasSession).Returns(true);
-        ctxMock.SetupGet(c => c.CurrentIdm).Returns(TestOperatorIdm);
-        ctxMock.SetupGet(c => c.CurrentName).Returns(TestOperatorName);
+        // Issue #2260: OperationLogger は操作者を TryGetOperator で 1 回の判定で取り出す
+        string? operatorIdmOut = TestOperatorIdm;
+        string? operatorNameOut = TestOperatorName;
+        ctxMock.Setup(c => c.TryGetOperator(out operatorIdmOut, out operatorNameOut)).Returns(true);
         _logger = new OperationLogger(_logRepo, ctxMock.Object);
 
         SetupTestData().GetAwaiter().GetResult();
