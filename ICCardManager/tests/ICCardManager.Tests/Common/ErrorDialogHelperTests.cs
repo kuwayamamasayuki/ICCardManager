@@ -357,4 +357,106 @@ public class ErrorDialogHelperTests
     }
 
     #endregion
+
+    #region エラーログの改行の無害化（Issue #2270）
+
+    /// <summary>
+    /// Issue #2270: 例外メッセージに含まれる改行で、偽のレコード先頭（<c>[日時] ERROR</c>）や
+    /// 区切り線を行頭へ差し込めないこと。<c>FileLogger</c> と同じ判断（継続行の接頭辞）。
+    /// </summary>
+    [Fact]
+    public void LogException_例外メッセージの改行で偽のレコードを行頭に差し込めないこと()
+    {
+        var marker = Guid.NewGuid().ToString("N");
+        var forgedMarker = Guid.NewGuid().ToString("N");
+        var separator = new string('-', 80);
+        var message = $"technical detail {marker}\n{separator}\n[2026-01-01 00:00:00] ERROR [SYS001] 偽の行 {forgedMarker}";
+
+        string[]? following = null;
+        for (var attempt = 0; attempt < 5 && following == null; attempt++)
+        {
+            ErrorDialogHelper.LogException(new InvalidOperationException(message), "リストア");
+            following = FindLinesFollowing(ErrorDialogHelper.LogDirectory, marker, count: 2);
+        }
+
+        following.Should().NotBeNull("LogException はエラーログへ書き込むこと");
+
+        // レコードの 1 行目（marker を含む行）に続く 2 行が、差し込もうとした区切り線と偽のレコード先頭
+        following![0].Should().Be("  | " + separator,
+            "区切り線は行頭に現れてはならない（継続行として残し、情報は失わない）");
+        following[1].Should().Be($"  | [2026-01-01 00:00:00] ERROR [SYS001] 偽の行 {forgedMarker}",
+            "偽のレコード先頭は行頭に現れてはならない");
+    }
+
+    [Fact]
+    public void BuildErrorLogEntry_改行を含まない例外は従来どおりの書式で組み立てること()
+    {
+        var entry = ErrorDialogHelper.BuildErrorLogEntry(
+            new DateTime(2026, 10, 13, 9, 8, 7),
+            new InvalidOperationException("失敗", new IOException("内部の失敗")),
+            "SYS004",
+            isFatal: false,
+            context: "リストア");
+
+        entry.Should().Be(
+            "[2026-10-13 09:08:07] ERROR [SYS004] (リストア) InvalidOperationException: 失敗\n" +
+            "StackTrace: \n" +
+            "InnerException: IOException: 内部の失敗\n" +
+            new string('-', 80) + "\n");
+    }
+
+    [Fact]
+    public void BuildErrorLogEntry_内部例外とコンテキストの改行も継続行にすること()
+    {
+        var entry = ErrorDialogHelper.BuildErrorLogEntry(
+            new DateTime(2026, 10, 13, 9, 8, 7),
+            new InvalidOperationException("失敗", new IOException("内部\r\n[2026-01-01 00:00:00] FATAL 偽")),
+            "SYS004",
+            isFatal: true,
+            context: "操作\u2028偽");
+
+        entry.Should().Be(
+            "[2026-10-13 09:08:07] FATAL [SYS004] (操作\n  | 偽) InvalidOperationException: 失敗\n" +
+            "StackTrace: \n" +
+            "InnerException: IOException: 内部\n  | [2026-01-01 00:00:00] FATAL 偽\n" +
+            new string('-', 80) + "\n");
+    }
+
+    /// <summary>
+    /// <paramref name="marker"/> を含む最初の行に続く <paramref name="count"/> 行を返す（見つからなければ null）。
+    /// </summary>
+    private static string[]? FindLinesFollowing(string logDirectory, string marker, int count)
+    {
+        if (!Directory.Exists(logDirectory))
+        {
+            return null;
+        }
+
+        foreach (var file in Directory.GetFiles(logDirectory, "error_*.log"))
+        {
+            // 並列に走る他のテストが追記中でも読めるよう、書き込み共有を許して開く
+            using var stream = new FileStream(file, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+            using var reader = new StreamReader(stream);
+            string? line;
+            while ((line = reader.ReadLine()) != null)
+            {
+                if (!line.Contains(marker))
+                {
+                    continue;
+                }
+
+                var following = new string[count];
+                for (var i = 0; i < count; i++)
+                {
+                    following[i] = reader.ReadLine() ?? string.Empty;
+                }
+
+                return following;
+            }
+        }
+
+        return null;
+    }
+
+    #endregion
 }

@@ -43,7 +43,7 @@ WSL2では "/mnt/c/Program Files/dotnet/dotnet.exe" を使用すること。
 | `service-conventions.md` | 条件付き（同上） | サービス層規約（明細の保存順、残額の選び方、SQLite 接続文字列、バックアップ先の到達性・一時ファイル、ブロックし得る同期処理の起動、巡回する値、設定値で生成したものの判定） |
 | `viewmodel-conventions.md` | 条件付き（`ViewModels/**`、`Views/**`、`Resources/**`、03_画面設計書、04_機能設計書） | ViewModel 規約（Dispatcher の受け皿、処理中フラグとカード読み取り抑制、丸め込み後の取り直し、警告エリアの生成・除去、ブロックし得る同期処理の起動） |
 | `ui-conventions.md` | 条件付き（同上） | UI/UX 原則（選択状態のスナップショット、完了メッセージの順序と所在、Busy スコープとモーダル、MessageBox のオーナー、色・折り返し・系列色） |
-| `logging.md` | 条件付き（`src/**`） | ロギング規約（LogDebug は本番で出ない、AggregateException の平坦化、IDm のマスク、Information 併設） |
+| `logging.md` | 条件付き（`src/**`） | ロギング規約（LogDebug は本番で出ない、AggregateException の平坦化、IDm のマスク、Information 併設、埋め込む値の改行の継続行化） |
 | `business-logic.md` | 常時 | 状態遷移、貸出/返却フロー、バス判別、摘要生成、共有モード、残高不足処理、月次帳票 |
 | `git-workflow.md` | 常時 | ブランチルール、ステージング規約 |
 | `error-messages.md` | 常時 | エラーメッセージ品質（「何が/なぜ/どうすれば」3要素、禁止パターン、Issue #1275） |

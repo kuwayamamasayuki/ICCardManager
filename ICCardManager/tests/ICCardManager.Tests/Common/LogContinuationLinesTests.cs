@@ -1,0 +1,123 @@
+using FluentAssertions;
+using ICCardManager.Common;
+using Xunit;
+
+namespace ICCardManager.Tests.Common;
+
+/// <summary>
+/// <see cref="LogContinuationLines"/> の単体テスト（Issue #2270）
+/// </summary>
+/// <remarks>
+/// ログファイルへ書き出す値の中の改行を「改行 ＋ 継続行の接頭辞」へ置き換え、
+/// 埋め込まれた値が偽のレコードを行頭に差し込めないことを検証する。
+/// </remarks>
+public class LogContinuationLinesTests
+{
+    private const string NewLine = "\r\n";
+    private const string Prefix = "  | ";
+
+    [Theory]
+    [InlineData("\n")]
+    [InlineData("\r")]
+    [InlineData("\r\n")]
+    [InlineData("\u0085")]
+    [InlineData("\u2028")]
+    [InlineData("\u2029")]
+    [InlineData("\u000B")]
+    [InlineData("\u000C")]
+    public void Indent_改行の種類を問わず継続行へ置き換えること(string lineBreak)
+    {
+        var result = LogContinuationLines.Indent($"前半{lineBreak}[2026-01-01 00:00:00.000] [INF] 偽", NewLine, Prefix);
+
+        result.Should().Be("前半\r\n  | [2026-01-01 00:00:00.000] [INF] 偽");
+    }
+
+    [Fact]
+    public void Indent_CRLFは1つの改行として扱い空の継続行を作らないこと()
+    {
+        LogContinuationLines.Indent("a\r\nb", "\n", Prefix).Should().Be("a\n  | b");
+    }
+
+    [Fact]
+    public void Indent_連続する改行はそれぞれ継続行になること()
+    {
+        // LF CR の順は CRLF ではないため 2 つの改行として扱う
+        LogContinuationLines.Indent("a\n\rb", "\n", Prefix).Should().Be("a\n  | \n  | b");
+    }
+
+    [Fact]
+    public void Indent_改行を含まない値はそのまま返すこと()
+    {
+        const string text = "設定値を日時として解釈できませんでした: last_backup_success_at=abc";
+
+        LogContinuationLines.Indent(text, NewLine, Prefix).Should().BeSameAs(text);
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    public void Indent_nullと空文字は空文字を返すこと(string? text)
+    {
+        LogContinuationLines.Indent(text, NewLine, Prefix).Should().BeEmpty();
+    }
+
+    /// <summary>
+    /// 改行以外の C0 制御文字（タブを除く）と DEL は \uXXXX 表記へ置き換えること。
+    /// ESC は端末の表示を書き換え、U+001C〜U+001E は Python の str.splitlines 等が改行として扱う。
+    /// </summary>
+    [Theory]
+    [InlineData(0x00, @"a\u0000b")]
+    [InlineData(0x01, @"a\u0001b")]
+    [InlineData(0x1B, @"a\u001Bb")]
+    [InlineData(0x1C, @"a\u001Cb")]
+    [InlineData(0x1D, @"a\u001Db")]
+    [InlineData(0x1E, @"a\u001Eb")]
+    [InlineData(0x1F, @"a\u001Fb")]
+    [InlineData(0x7F, @"a\u007Fb")]
+    [InlineData(0x80, @"a\u0080b")]
+    [InlineData(0x9B, @"a\u009Bb")]
+    [InlineData(0x9F, @"a\u009Fb")]
+    [InlineData(0x202A, @"a\u202Ab")]
+    [InlineData(0x202E, @"a\u202Eb")]
+    [InlineData(0x2066, @"a\u2066b")]
+    [InlineData(0x2069, @"a\u2069b")]
+    [InlineData(0x200E, @"a\u200Eb")]
+    [InlineData(0x200F, @"a\u200Fb")]
+    [InlineData(0x061C, @"a\u061Cb")]
+    public void Indent_改行以外の制御文字はエスケープ表記にすること(int code, string expected)
+    {
+        var text = "a" + (char)code + "b";
+
+        LogContinuationLines.Indent(text, NewLine, Prefix).Should().Be(expected);
+    }
+
+    /// <summary>
+    /// 対の側: 置き換える範囲の外側の文字（範囲の境界の隣）はそのまま残すこと。
+    /// </summary>
+    [Theory]
+    [InlineData(0x20)]
+    [InlineData(0x7E)]
+    [InlineData(0xA0)]
+    [InlineData(0x2027)]
+    [InlineData(0x202F)]
+    [InlineData(0x2065)]
+    [InlineData(0x206A)]
+    [InlineData(0x200D)]
+    [InlineData(0x2010)]
+    [InlineData(0x061B)]
+    [InlineData(0x061D)]
+    public void Indent_制御文字の範囲外の文字はそのまま返すこと(int code)
+    {
+        var text = "a" + (char)code + "b";
+
+        LogContinuationLines.Indent(text, NewLine, Prefix).Should().BeSameAs(text);
+    }
+
+    [Fact]
+    public void Indent_タブは置き換えずそのまま返すこと()
+    {
+        const string text = "列1\t列2";
+
+        LogContinuationLines.Indent(text, NewLine, Prefix).Should().BeSameAs(text);
+    }
+}
