@@ -451,9 +451,10 @@ public sealed class CarryoverRecoveryViewModelTests : IDisposable
         ICardRepository? cardRepository = null, IOperationLogRepository? operationLogRepository = null)
     {
         var operatorContext = new Mock<ICurrentOperatorContext>();
-        operatorContext.SetupGet(c => c.HasSession).Returns(true);
-        operatorContext.SetupGet(c => c.CurrentIdm).Returns(OperatorIdm);
-        operatorContext.SetupGet(c => c.CurrentName).Returns(OperatorName);
+        // Issue #2260: OperationLogger は操作者を TryGetOperator で 1 回の判定で取り出す
+        string? operatorIdmOut = OperatorIdm;
+        string? operatorNameOut = OperatorName;
+        operatorContext.Setup(c => c.TryGetOperator(out operatorIdmOut, out operatorNameOut)).Returns(true);
 
         var service = new CardManagementService(
             _dbContext,

@@ -1,3 +1,4 @@
+#nullable enable
 using System;
 using System.Collections.ObjectModel;
 using System.Globalization;
@@ -422,7 +423,7 @@ public partial class SystemManageViewModel : ViewModelBase
         // Issue #1705: DB リストアは全レコード（台帳・残高・職員・カード）を置換する破壊的操作のため、
         // 単一台帳行の削除（#635）と同様に職員認証を必須とする。認可の非対称性
         // （1 行削除には認証を課すのに DB 全体置換は無認証）を解消する。
-        var authResult = await _staffAuthService.RequestAuthenticationAsync("データベースのリストア");
+        using var authResult = (await _staffAuthService.RequestAuthenticationAsync("データベースのリストア"))?.Enter();
         if (authResult == null)
         {
             SetStatus("リストアには職員認証が必要です。認証がキャンセルされたため、リストアを中止しました。", false);
@@ -513,7 +514,7 @@ public partial class SystemManageViewModel : ViewModelBase
     {
         // Issue #1705: 外部ファイルからのリストアも DB 全体を置換する破壊的操作のため、
         // 選択バックアップからのリストアと同様に職員認証を必須とする。
-        var authResult = await _staffAuthService.RequestAuthenticationAsync("データベースのリストア");
+        using var authResult = (await _staffAuthService.RequestAuthenticationAsync("データベースのリストア"))?.Enter();
         if (authResult == null)
         {
             SetStatus("リストアには職員認証が必要です。認証がキャンセルされたため、リストアを中止しました。", false);

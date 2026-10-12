@@ -10,6 +10,7 @@ using ICCardManager.Data.Repositories;
 using ICCardManager.Dtos;
 using ICCardManager.Models;
 using ICCardManager.Services;
+using ICCardManager.Tests.Infrastructure.Timing;
 using ICCardManager.ViewModels;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -52,6 +53,7 @@ public class HistoryPanelViewModelTests : IDisposable
     /// （<c>.claude/rules/development-conventions.md</c> Issue #1760）。
     /// </remarks>
     private readonly Mock<IOperationLogRepository> _operationLogRepositoryMock;
+    private readonly CurrentOperatorContext _operatorContext;
     private readonly LedgerMergeService _ledgerMergeService;
     private readonly LedgerConsistencyChecker _ledgerConsistencyChecker;
     private readonly DbContext _dbContext;
@@ -73,8 +75,11 @@ public class HistoryPanelViewModelTests : IDisposable
         _navigationServiceMock = new Mock<INavigationService>();
 
         _operationLogRepositoryMock = new Mock<IOperationLogRepository>();
+        // Issue #2260: 操作者セッションの開始・終了を観測できるよう本物のコンテキストを使う。
+        // セッションが無い間は GUI 操作として記録され、従来の Mock.Of（常にセッション無し）と同じに振る舞う
+        _operatorContext = new CurrentOperatorContext(new FixedSystemClock(new DateTime(2026, 1, 10, 9, 0, 0)));
         _operationLoggerMock = new Mock<OperationLogger>(
-            _operationLogRepositoryMock.Object, Mock.Of<ICurrentOperatorContext>());
+            _operationLogRepositoryMock.Object, _operatorContext);
 
         _dbContext = new DbContext(":memory:");
         _dbContext.InitializeDatabase();
@@ -1868,6 +1873,204 @@ public class HistoryPanelViewModelTests : IDisposable
         Summary = "鉄道（天神～博多）",
         Balance = 2300,
     };
+
+    #region 認証は 1 操作に限るスコープ（Issue #2260）
+
+    private const string AuthenticatedStaffIdm = "AABBCCDDEEFF0011";
+    private const string AuthenticatedStaffName = "田中太郎";
+
+    /// <summary>
+    /// 認証サービスの代役を、本物の <see cref="StaffAuthService"/> と同じ結果（<c>Enter()</c> で操作者セッションを
+    /// 開始する認証結果）で応答させる。認証ダイアログ（モーダル）の部分だけを差し替える。
+    /// </summary>
+    /// <remarks>
+    /// 応答はあえて非同期に完了させる。セッションは非同期の流れ（<c>AsyncLocal</c>）に結び付くため、
+    /// 認証サービスの内側で開始する実装だと画面のメソッドの流れに残らず、この代役で赤になる。
+    /// </remarks>
+    private void ArrangeAuthenticationStartingSession()
+    {
+        _staffAuthServiceMock
+            .Setup(a => a.RequestAuthenticationAsync(It.IsAny<string>()))
+            .Returns(async () =>
+            {
+                await Task.Yield();
+                return StaffAuthService.CreateAuthenticatedResult(
+                    _operatorContext, AuthenticatedStaffIdm, AuthenticatedStaffName);
+            });
+    }
+
+    /// <summary>
+    /// 監査ログへ記録された行を集める（トランザクション付き・無しの両方）。
+    /// </summary>
+    private List<OperationLog> CaptureOperationLogs()
+    {
+        var logs = new List<OperationLog>();
+        _operationLogRepositoryMock
+            .Setup(r => r.InsertAsync(It.IsAny<OperationLog>(), It.IsAny<SQLiteTransaction>()))
+            .Callback<OperationLog, SQLiteTransaction>((log, _) => logs.Add(log))
+            .ReturnsAsync(1);
+        _operationLogRepositoryMock
+            .Setup(r => r.InsertAsync(It.IsAny<OperationLog>()))
+            .Callback<OperationLog>(log => logs.Add(log))
+            .ReturnsAsync(1);
+        return logs;
+    }
+
+    /// <summary>
+    /// Issue #2260 の対の表明: 認証した操作そのものは、認証した職員の操作として記録される。
+    /// これが無いと「認証してもセッションを開始しない（常に GUI 操作）」実装でも下のテストが緑になる。
+    /// </summary>
+    [Fact]
+    public async Task DeleteLedgerRow_認証した削除は認証した職員の操作として記録されること()
+    {
+        ArrangeLedgerDelete(new Ledger { Id = 42, CardIdm = DeleteConflictCardIdm }, deleted: true);
+        ArrangeAuthenticationStartingSession();
+        var logs = CaptureOperationLogs();
+
+        await _history.DeleteLedgerRow(DeleteTargetDto());
+
+        logs.Should().ContainSingle(l => l.Action == OperationLogger.Actions.Delete)
+            .Which.Should().Match<OperationLog>(l =>
+                l.OperatorIdm == AuthenticatedStaffIdm && l.OperatorName == AuthenticatedStaffName);
+    }
+
+    /// <summary>
+    /// 認証した操作の流れの中から、ゲートを待ってから監査ログを書く派生処理（<c>Task.Run</c>）を起動する。
+    /// 起動は削除の確認の時点（認証の後で、どの出口も必ず通る）で行う。
+    /// </summary>
+    /// <remarks>
+    /// セッションは非同期の流れ（<c>AsyncLocal</c>）に持つため、テストの流れからは操作中でも常に「セッションなし」に見え、
+    /// 終了の検証にならない。操作の流れから派生した処理は操作のセッションを共有するので、操作が戻った後にゲートを開けば、
+    /// 「操作の終了でセッションが終わったか」（<c>using</c> による破棄）を観測できる。
+    /// </remarks>
+    /// <returns>ゲートを開いて派生処理の記録を待つ関数。</returns>
+    private Func<Task<OperationLog>> StartProbeInOperationFlowAtConfirmation(bool confirmed, List<OperationLog> logs)
+    {
+        var gate = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        Task<OperationLog>? probe = null;
+        _navigationServiceMock
+            .Setup(d => d.ShowWarningConfirmation(It.IsAny<string>(), "履歴の削除"))
+            .Returns(() =>
+            {
+                probe ??= Task.Run(async () =>
+                {
+                    await gate.Task;
+                    var card = new IcCard { CardIdm = DeleteConflictCardIdm, CardType = "はやかけん", CardNumber = "H-001" };
+                    await _operationLoggerMock.Object.LogCardUpdateAsync(card, card);
+                    return logs.Last(l => l.Action == OperationLogger.Actions.Update);
+                });
+                return confirmed;
+            });
+
+        return async () =>
+        {
+            probe.Should().NotBeNull("削除の確認まで進んでいること");
+            gate.SetResult(true);
+            return await probe!;
+        };
+    }
+
+    /// <summary>
+    /// Issue #2260 の中核: 認証した操作の後に、認証の無い操作（カードの編集など）を行うと
+    /// GUI 操作として記録される。旧実装は認証のセッションが 5 分間残り、別の職員が行った
+    /// 認証の無い操作が、直前に認証した職員の名前で 6 年保存の操作ログに記録されていた。
+    /// </summary>
+    /// <remarks>
+    /// 操作の流れから派生し、操作が戻った後に走る処理で観測する（テストの流れからは常にセッションなしに見えるため）。
+    /// <c>using</c> を外す・破棄を無効にする変異で赤になる。
+    /// </remarks>
+    [Fact]
+    public async Task DeleteLedgerRow_認証した削除の後の認証の無い操作はGUI操作として記録されること()
+    {
+        ArrangeLedgerDelete(new Ledger { Id = 42, CardIdm = DeleteConflictCardIdm }, deleted: true);
+        ArrangeAuthenticationStartingSession();
+        var logs = CaptureOperationLogs();
+        var openGateAndLog = StartProbeInOperationFlowAtConfirmation(confirmed: true, logs);
+
+        await _history.DeleteLedgerRow(DeleteTargetDto());
+        var afterOperation = await openGateAndLog();
+
+        afterOperation.Should().Match<OperationLog>(l =>
+            l.OperatorIdm == OperationLogger.GuiOperator.Idm && l.OperatorName == OperationLogger.GuiOperator.Name);
+    }
+
+    /// <summary>
+    /// Issue #2260（レビュー 3 回目）: 認証した削除が DB を待っている間に、別の流れ（メイン画面の新しい入力に相当）で
+    /// 始めた認証の無い操作は「GUI操作」として記録され、削除そのものは認証した職員で記録される。
+    /// 旧実装（シングルトンのフィールド）では、待ち時間中の認証の無い操作が認証した職員の名前で記録された。
+    /// </summary>
+    [Fact]
+    public async Task DeleteLedgerRow_削除の待ち時間中に別の流れで始めた認証の無い操作はGUI操作として記録されること()
+    {
+        ArrangeLedgerDelete(new Ledger { Id = 42, CardIdm = DeleteConflictCardIdm }, deleted: true);
+        ArrangeAuthenticationStartingSession();
+        var logs = CaptureOperationLogs();
+
+        var reading = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var release = new TaskCompletionSource<Ledger?>(TaskCreationOptions.RunContinuationsAsynchronously);
+        _ledgerRepositoryMock
+            .Setup(r => r.GetByIdAsync(It.IsAny<int>()))
+            .Returns(() =>
+            {
+                reading.TrySetResult(true);
+                return release.Task;
+            });
+
+        var deleting = _history.DeleteLedgerRow(DeleteTargetDto());
+        await reading.Task;
+
+        var card = new IcCard { CardIdm = DeleteConflictCardIdm, CardType = "はやかけん", CardNumber = "H-001" };
+        await _operationLoggerMock.Object.LogCardUpdateAsync(card, card);
+
+        release.SetResult(new Ledger { Id = 42, CardIdm = DeleteConflictCardIdm });
+        await deleting;
+
+        logs.Should().ContainSingle(l => l.Action == OperationLogger.Actions.Update)
+            .Which.Should().Match<OperationLog>(l =>
+                l.OperatorIdm == OperationLogger.GuiOperator.Idm && l.OperatorName == OperationLogger.GuiOperator.Name);
+        logs.Should().ContainSingle(l => l.Action == OperationLogger.Actions.Delete)
+            .Which.Should().Match<OperationLog>(l =>
+                l.OperatorIdm == AuthenticatedStaffIdm && l.OperatorName == AuthenticatedStaffName);
+    }
+
+    /// <summary>
+    /// 書き込みまで進まなかった出口（確認で「いいえ」・対象行が他 PC で削除済み）と、
+    /// 書き込みの失敗（例外）でも、認証のセッションを残さない。
+    /// </summary>
+    /// <remarks>
+    /// 操作の流れから派生し、操作が戻った後に走る処理で観測する（テストの流れからは常にセッションなしに見えるため）。
+    /// </remarks>
+    [Theory]
+    [InlineData("確認でいいえ")]
+    [InlineData("対象行が無い")]
+    [InlineData("例外")]
+    public async Task DeleteLedgerRow_どの出口でも認証のセッションを残さないこと(string exit)
+    {
+        ArrangeLedgerDelete(new Ledger { Id = 42, CardIdm = DeleteConflictCardIdm }, deleted: true);
+        ArrangeAuthenticationStartingSession();
+        var logs = CaptureOperationLogs();
+        var openGateAndLog = StartProbeInOperationFlowAtConfirmation(confirmed: exit != "確認でいいえ", logs);
+        switch (exit)
+        {
+            case "対象行が無い":
+                _ledgerRepositoryMock.Setup(r => r.GetByIdAsync(It.IsAny<int>())).ReturnsAsync((Ledger?)null);
+                break;
+            case "例外":
+                _ledgerRepositoryMock
+                    .Setup(r => r.GetByIdAsync(It.IsAny<int>()))
+                    .ThrowsAsync(new InvalidOperationException("読み取りに失敗"));
+                break;
+        }
+
+        await Record.ExceptionAsync(() => _history.DeleteLedgerRow(DeleteTargetDto()));
+        var afterOperation = await openGateAndLog();
+
+        _staffAuthServiceMock.Verify(a => a.RequestAuthenticationAsync("履歴の削除"), Times.Once);
+        afterOperation.OperatorIdm.Should().Be(OperationLogger.GuiOperator.Idm,
+            "認証した操作を終えたら（成功・中止・失敗を問わず）、操作から派生した処理にも認証を残さない");
+    }
+
+    #endregion
 
     /// <summary>
     /// Issue #1953: 貸出中レコードを削除したあとの <c>is_lent</c> リセットが 0 行（＝競合）でも、
