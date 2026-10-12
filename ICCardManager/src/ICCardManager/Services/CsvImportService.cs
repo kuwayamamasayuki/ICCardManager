@@ -310,7 +310,7 @@ namespace ICCardManager.Services
         /// </remarks>
         internal static async Task<List<string>> ReadCsvFileAsync(string filePath, ILogger logger, long maxFileSizeBytes)
         {
-            var bytes = await ReadAllBytesAsync(filePath, maxFileSizeBytes, logger).ConfigureAwait(false);
+            var bytes = await ReadAllBytesAsync(filePath, maxFileSizeBytes).ConfigureAwait(false);
 
             var decoded = TextEncodingDetector.Decode(bytes);
             if (!decoded.IsDecoded)
@@ -360,8 +360,14 @@ namespace ICCardManager.Services
         /// バッファは開いた時点の長さで確保するため、読み取り中に他プロセスがファイルを伸ばしても
         /// 上限を超えて読むことはない。
         /// </para>
+        /// <para>
+        /// ここではログを書かない。実寸・上限・パスは例外の <c>Message</c> に入っており、
+        /// インポート共通のハンドラー（<see cref="LogImportFailure"/>）が例外ごと Warning で 1 回だけ記録する。
+        /// 文字コードの失敗（<see cref="CreateEncodingFailureException"/>）と違い、ここで書き足せる情報が無いため
+        /// 二重に記録しない。
+        /// </para>
         /// </remarks>
-        private static async Task<byte[]> ReadAllBytesAsync(string filePath, long maxFileSizeBytes, ILogger logger)
+        private static async Task<byte[]> ReadAllBytesAsync(string filePath, long maxFileSizeBytes)
         {
             using (var fileStream = new FileStream(
                 filePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite, 4096, useAsync: true))
@@ -369,11 +375,6 @@ namespace ICCardManager.Services
                 var length = fileStream.Length;
                 if (length > maxFileSizeBytes)
                 {
-                    // 共通ハンドラー（LogImportFailure）は「どの取り込みだったか」を記録する。
-                    // ここでは実寸と上限を残す（文字コードの失敗と同じ分担。CreateEncodingFailureException の remarks）
-                    logger?.LogWarning(
-                        "CSVインポートを中断: ファイルの大きさ {ActualBytes} バイトが上限 {MaxBytes} バイトを超えています。File={FilePath}",
-                        length, maxFileSizeBytes, filePath);
                     throw FileOperationException.FileTooLarge(length, maxFileSizeBytes, filePath);
                 }
 

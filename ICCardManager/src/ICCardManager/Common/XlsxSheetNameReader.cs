@@ -42,15 +42,15 @@ namespace ICCardManager.Common
         internal const long MaxWorkbookPartBytes = 4L * 1024 * 1024;
 
         /// <summary>
-        /// 開く xlsx ファイル自体の大きさの上限（32MB。Issue #2272）
+        /// 開く xlsx ファイル自体の大きさの上限（8MB。Issue #2272）
         /// </summary>
         /// <remarks>
         /// <see cref="ZipArchive"/> は開いた時点で中央ディレクトリを全件読み込むため、エントリ数を
         /// 膨らませた巨大な ZIP では workbook.xml にたどり着く前にメモリを使う。ファイルの大きさで先に断る。
         /// 本システムの年度ファイルはテンプレートが約 15KB、1 か月のシートが数十KB で、
-        /// 12 か月ぶんを追記しても 1MB 前後にとどまるため、正当なファイルには 30 倍前後の余裕がある。
+        /// 12 か月ぶんを追記しても 1MB 前後にとどまるため、正当なファイルには 8 倍前後の余裕がある。
         /// </remarks>
-        internal const long MaxXlsxFileBytes = 32L * 1024 * 1024;
+        internal const long MaxXlsxFileBytes = 8L * 1024 * 1024;
 
         /// <summary>
         /// SpreadsheetML の名前空間

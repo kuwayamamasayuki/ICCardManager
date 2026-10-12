@@ -188,7 +188,8 @@ namespace ICCardManager.Common.Exceptions
             var userMessage =
                 $"ファイルの大きさ（{FormatFileSize(actualBytes)}）が、インポートできる上限（{FormatFileSize(maxBytes)}）を超えています。" +
                 "大きすぎるファイルを読み込むとメモリが不足し、アプリが応答しなくなるおそれがあるため読み込みを中止しました。" +
-                "エクスポートの期間を短く区切ってファイルを分け、1つずつインポートしてください。";
+                "利用履歴・利用履歴詳細は、エクスポートの期間を短く区切るとファイルを分けられます。" +
+                "ファイルを分けて、1つずつインポートしてください。";
             const string errorCode = "FILE010";
 
             return new FileOperationException(message, userMessage, errorCode, filePath);

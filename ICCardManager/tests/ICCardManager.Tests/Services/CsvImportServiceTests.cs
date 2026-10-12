@@ -3415,6 +3415,53 @@ FEDCBA9876543210,鈴木花子,002,テスト2";
     }
 
     [Fact]
+    public async Task ImportStaffAsync_上限を超えるCSVの失敗はログへ1回だけ記録すること()
+    {
+        // Arrange: 実寸・上限・パスは例外の Message に入っており、共通ハンドラーが例外ごと記録する。
+        // 読み込み側でも書くと同じ失敗が二重に残る
+        var filePath = Path.Combine(_testDirectory, "huge_logged.csv");
+        using (var stream = new FileStream(filePath, FileMode.Create, FileAccess.Write))
+        {
+            stream.SetLength(CsvImportService.MaxImportFileSizeBytes + 1);
+        }
+
+        var loggerMock = new Mock<ILogger<CsvImportService>>();
+        var service = new CsvImportService(
+            _cardRepositoryMock.Object,
+            _staffRepositoryMock.Object,
+            _ledgerRepositoryMock.Object,
+            _validationServiceMock.Object,
+            _dbContextMock.Object,
+            _cacheServiceMock.Object,
+            _settingsRepositoryMock.Object,
+            loggerMock.Object);
+
+        // Act
+        var result = await service.ImportStaffAsync(filePath);
+
+        // Assert
+        result.Success.Should().BeFalse();
+        loggerMock.Verify(
+            x => x.Log(
+                It.IsAny<LogLevel>(),
+                It.IsAny<EventId>(),
+                It.IsAny<It.IsAnyType>(),
+                It.IsAny<Exception>(),
+                It.IsAny<Func<It.IsAnyType, Exception, string>>()),
+            Times.Once,
+            "同じ失敗を読み込み側と共通ハンドラーで二重に記録しない");
+        loggerMock.Verify(
+            x => x.Log(
+                LogLevel.Warning,
+                It.IsAny<EventId>(),
+                It.IsAny<It.IsAnyType>(),
+                It.Is<Exception>(e => e is FileOperationException),
+                It.IsAny<Func<It.IsAnyType, Exception, string>>()),
+            Times.Once,
+            "利用者の入力の問題なので Warning で、例外ごと（実寸・上限・パス入り）記録する");
+    }
+
+    [Fact]
     public void ファイルが大きすぎるエラー文言がエラーメッセージ品質基準を満たすこと()
     {
         var message = FileOperationException
@@ -3426,7 +3473,8 @@ FEDCBA9876543210,鈴木花子,002,テスト2";
         message.Should().Contain("64.1MB");                    // 実際の値（上限をわずかに超えた値は切り上げて上限と区別する）
         message.Should().Contain("上限（64MB）");               // なぜ（ルール）
         message.Should().Contain("メモリが不足");               // なぜ（理由）
-        message.Should().Contain("エクスポートの期間");         // どうすれば
+        message.Should().EndWith("ファイルを分けて、1つずつインポートしてください。"); // どうすれば（職員・カードでも実行できる）
+        message.Should().Contain("エクスポートの期間");         // 利用履歴の分け方の補足
         message.Should().EndWith("してください。");
         message.Length.Should().BeGreaterOrEqualTo(20);
         message.Should().NotContain("エラーが発生しました");
