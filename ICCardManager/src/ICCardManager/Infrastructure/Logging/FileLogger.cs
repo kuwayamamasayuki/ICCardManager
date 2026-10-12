@@ -1,8 +1,8 @@
+#nullable enable
+
 using System;
-using System.Collections.Generic;
 using System.Globalization;
-using System.Linq;
-using System.Threading.Tasks;
+using ICCardManager.Common;
 using Microsoft.Extensions.Logging;
 
 namespace ICCardManager.Infrastructure.Logging
@@ -12,6 +12,16 @@ namespace ICCardManager.Infrastructure.Logging
     /// </summary>
     public class FileLogger : ILogger
     {
+        /// <summary>
+        /// メッセージの 2 行目以降の行頭に置く接頭辞（Issue #2270）
+        /// </summary>
+        internal const string MessageContinuationPrefix = "  | ";
+
+        /// <summary>
+        /// 例外メッセージの 2 行目以降の行頭に置く接頭辞（<c>  Exception:</c> 行の下へ字下げする。Issue #2270）
+        /// </summary>
+        internal const string ExceptionMessageContinuationPrefix = "    | ";
+
         private readonly string _categoryName;
         private readonly FileLoggerProvider _provider;
 
@@ -22,6 +32,7 @@ namespace ICCardManager.Infrastructure.Logging
         }
 
         public IDisposable? BeginScope<TState>(TState state)
+            where TState : notnull
         {
             return null;
         }
@@ -35,8 +46,8 @@ namespace ICCardManager.Infrastructure.Logging
             LogLevel logLevel,
             EventId eventId,
             TState state,
-            Exception exception,
-            Func<TState, Exception, string> formatter)
+            Exception? exception,
+            Func<TState, Exception?, string> formatter)
         {
             if (!IsEnabled(logLevel))
             {
@@ -49,21 +60,44 @@ namespace ICCardManager.Infrastructure.Logging
                 return;
             }
 
-            var logEntry = FormatLogEntry(logLevel, message, exception);
+            var logEntry = FormatLogEntry(DateTime.Now, logLevel, _categoryName, message, exception);
             _provider.WriteLog(logEntry);
         }
 
-        private string FormatLogEntry(LogLevel logLevel, string message, Exception exception)
+        /// <summary>
+        /// 1 件のログレコードを組み立てる。
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// レコードの先頭行だけが <c>[日時] [レベル] [カテゴリ]</c> で始まる。メッセージと例外メッセージに
+        /// 含まれる改行は <see cref="LogContinuationLines"/> で継続行（行頭が <see cref="MessageContinuationPrefix"/> /
+        /// <see cref="ExceptionMessageContinuationPrefix"/>）へ置き換え、埋め込まれた値が偽のレコードを
+        /// 行頭に差し込めないようにする（Issue #2270）。
+        /// </para>
+        /// <para>
+        /// スタックトレースは従来どおり行ごとに字下げする。スタックトレースはコードの位置情報で、
+        /// 外部から与えた値は入らない。
+        /// </para>
+        /// </remarks>
+        internal static string FormatLogEntry(
+            DateTime timestamp,
+            LogLevel logLevel,
+            string categoryName,
+            string? message,
+            Exception? exception)
         {
-            var timestamp = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss.fff", CultureInfo.InvariantCulture);
+            var timestampText = timestamp.ToString("yyyy-MM-dd HH:mm:ss.fff", CultureInfo.InvariantCulture);
             var level = GetLogLevelString(logLevel);
-            var category = GetShortCategoryName(_categoryName);
+            var category = GetShortCategoryName(categoryName);
+            var safeMessage = LogContinuationLines.Indent(message, Environment.NewLine, MessageContinuationPrefix);
 
-            var logLine = $"[{timestamp}] [{level}] [{category}] {message}";
+            var logLine = $"[{timestampText}] [{level}] [{category}] {safeMessage}";
 
             if (exception != null)
             {
-                logLine += Environment.NewLine + $"  Exception: {exception.GetType().Name}: {exception.Message}";
+                var safeExceptionMessage = LogContinuationLines.Indent(
+                    exception.Message, Environment.NewLine, ExceptionMessageContinuationPrefix);
+                logLine += Environment.NewLine + $"  Exception: {exception.GetType().Name}: {safeExceptionMessage}";
                 if (exception.StackTrace != null)
                 {
                     logLine += Environment.NewLine + "  StackTrace: " + exception.StackTrace.Replace(Environment.NewLine, Environment.NewLine + "    ");

@@ -202,6 +202,44 @@ namespace ICCardManager.Common
         }
 
         /// <summary>
+        /// エラーログの継続行の接頭辞（Issue #2270）
+        /// </summary>
+        internal const string ErrorLogContinuationPrefix = "  | ";
+
+        /// <summary>
+        /// エラーログ（error_yyyyMMdd.log）の 1 件分を組み立てる。
+        /// </summary>
+        /// <remarks>
+        /// レコードは行頭の <c>[日時] ERROR</c>（または <c>FATAL</c>）で始まり、80 文字の <c>-</c> の行で終わる。
+        /// 例外メッセージ・内部例外のメッセージ・コンテキストに含まれる改行は
+        /// <see cref="LogContinuationLines"/> で継続行へ置き換え、偽のレコードの先頭や区切り線を
+        /// 行頭に差し込めないようにする（<c>FileLogger</c> と同じ判断。Issue #2270）。
+        /// </remarks>
+        internal static string BuildErrorLogEntry(
+            DateTime timestamp, Exception exception, string errorCode, bool isFatal, string? context)
+        {
+            const string NewLine = "\n";
+            var safeContext = LogContinuationLines.Indent(context, NewLine, ErrorLogContinuationPrefix);
+            var contextPart = string.IsNullOrWhiteSpace(safeContext) ? string.Empty : $"({safeContext}) ";
+            var safeMessage = LogContinuationLines.Indent(exception.Message, NewLine, ErrorLogContinuationPrefix);
+            var logEntry = $"[{timestamp.ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture)}] " +
+                          $"{(isFatal ? "FATAL" : "ERROR")} [{errorCode}] " +
+                          contextPart +
+                          $"{exception.GetType().Name}: {safeMessage}{NewLine}" +
+                          $"StackTrace: {exception.StackTrace}{NewLine}";
+
+            if (exception.InnerException != null)
+            {
+                var innerMessage = LogContinuationLines.Indent(
+                    exception.InnerException.Message, NewLine, ErrorLogContinuationPrefix);
+                logEntry += $"InnerException: {exception.InnerException.GetType().Name}: {innerMessage}{NewLine}";
+            }
+
+            logEntry += new string('-', 80) + NewLine;
+            return logEntry;
+        }
+
+        /// <summary>
         /// エラーをログファイルに出力
         /// </summary>
         private static void LogError(Exception exception, string errorCode, bool isFatal = false, string? context = null)
@@ -213,19 +251,7 @@ namespace ICCardManager.Common
                 var logFileName = $"error_{DateTime.Now.ToString("yyyyMMdd", CultureInfo.InvariantCulture)}.log";
                 var logFilePath = Path.Combine(LogDirectory, logFileName);
 
-                var contextPart = string.IsNullOrWhiteSpace(context) ? string.Empty : $"({context}) ";
-                var logEntry = $"[{DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture)}] " +
-                              $"{(isFatal ? "FATAL" : "ERROR")} [{errorCode}] " +
-                              contextPart +
-                              $"{exception.GetType().Name}: {exception.Message}\n" +
-                              $"StackTrace: {exception.StackTrace}\n";
-
-                if (exception.InnerException != null)
-                {
-                    logEntry += $"InnerException: {exception.InnerException.GetType().Name}: {exception.InnerException.Message}\n";
-                }
-
-                logEntry += new string('-', 80) + "\n";
+                var logEntry = BuildErrorLogEntry(DateTime.Now, exception, errorCode, isFatal, context);
 
                 File.AppendAllText(logFilePath, logEntry);
 
