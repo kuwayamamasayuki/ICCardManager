@@ -42,6 +42,17 @@ namespace ICCardManager.Common
         internal const long MaxWorkbookPartBytes = 4L * 1024 * 1024;
 
         /// <summary>
+        /// 開く xlsx ファイル自体の大きさの上限（32MB。Issue #2272）
+        /// </summary>
+        /// <remarks>
+        /// <see cref="ZipArchive"/> は開いた時点で中央ディレクトリを全件読み込むため、エントリ数を
+        /// 膨らませた巨大な ZIP では workbook.xml にたどり着く前にメモリを使う。ファイルの大きさで先に断る。
+        /// 本システムの年度ファイルはテンプレートが約 15KB、1 か月のシートが数十KB で、
+        /// 12 か月ぶんを追記しても 1MB 前後にとどまるため、正当なファイルには 30 倍前後の余裕がある。
+        /// </remarks>
+        internal const long MaxXlsxFileBytes = 32L * 1024 * 1024;
+
+        /// <summary>
         /// SpreadsheetML の名前空間
         /// </summary>
         private static readonly XNamespace SpreadsheetMlNamespace =
@@ -76,7 +87,8 @@ namespace ICCardManager.Common
         /// 上限の境界を、実際に数MBの xlsx を作らずに単体テストで固定するためのオーバーロード。
         /// </para>
         /// <para>
-        /// <b>上限は 2 段で守る</b>。ZIP の中央ディレクトリが宣言する展開後サイズ
+        /// <b>上限は 2 段で守る</b>（その手前で、ファイル自体の大きさも <see cref="MaxXlsxFileBytes"/> で確かめる）。
+        /// ZIP の中央ディレクトリが宣言する展開後サイズ
         /// （<see cref="ZipArchiveEntry.Length"/>）で読む前に断り、宣言を偽った ZIP に備えて
         /// 読み込み側でも上限バイトを超えた時点で打ち切る。いずれも「判定不能」（false）として扱う。
         /// </para>
@@ -87,6 +99,19 @@ namespace ICCardManager.Common
         /// </para>
         /// </remarks>
         internal static bool TryReadSheetNames(string filePath, long maxWorkbookPartBytes, out IReadOnlyList<string> sheetNames)
+        {
+            return TryReadSheetNames(filePath, MaxXlsxFileBytes, maxWorkbookPartBytes, out sheetNames);
+        }
+
+        /// <summary>
+        /// xlsx ファイルからワークシート名の一覧を読み取る（ファイル自体と workbook.xml の上限を指定する版。Issue #2272）
+        /// </summary>
+        /// <remarks>
+        /// ファイルの大きさは <see cref="ZipArchive"/> を開く前（中央ディレクトリを読む前）に確かめる。
+        /// 開いたストリームの長さで判定するため、確かめてから開くまでの間に差し替えられても上限を素通りしない。
+        /// </remarks>
+        internal static bool TryReadSheetNames(
+            string filePath, long maxFileBytes, long maxWorkbookPartBytes, out IReadOnlyList<string> sheetNames)
         {
             sheetNames = new List<string>();
 
@@ -99,32 +124,14 @@ namespace ICCardManager.Common
             {
                 using (var stream = new FileStream(
                     filePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite))
-                using (var archive = new ZipArchive(stream, ZipArchiveMode.Read))
                 {
-                    var workbookEntry = archive.GetEntry(WorkbookPartPath);
-                    if (workbookEntry == null)
+                    if (stream.Length > maxFileBytes)
                     {
-                        // xlsx ではない ZIP（xls を拡張子だけ変えた等）
+                        // 中央ディレクトリを読む前に断る（ZIP 爆弾対策の 0 段目）
                         return false;
                     }
 
-                    if (workbookEntry.Length > maxWorkbookPartBytes)
-                    {
-                        // 展開後サイズの宣言が上限を超える。展開せずに判定不能とする（ZIP 爆弾対策）
-                        return false;
-                    }
-
-                    using (var entryStream = new LengthLimitedReadStream(workbookEntry.Open(), maxWorkbookPartBytes))
-                    using (var xmlReader = XmlReader.Create(entryStream, SafeXmlReaderSettings))
-                    {
-                        var document = XDocument.Load(xmlReader);
-                        sheetNames = document
-                            .Descendants(SpreadsheetMlNamespace + "sheet")
-                            .Select(element => (string)element.Attribute("name"))
-                            .Where(name => !string.IsNullOrEmpty(name))
-                            .ToList();
-                        return true;
-                    }
+                    return TryReadSheetNamesFromPackage(stream, maxWorkbookPartBytes, out sheetNames);
                 }
             }
             catch (Exception)
@@ -133,6 +140,42 @@ namespace ICCardManager.Common
                 // 呼び出し側（ReportExportStatusService）が Unknown 状態としてユーザーに提示する。
                 sheetNames = new List<string>();
                 return false;
+            }
+        }
+
+        /// <summary>
+        /// 開いた xlsx パッケージから workbook.xml のシート名を読む（例外は呼び出し元が判定不能へ畳む）
+        /// </summary>
+        private static bool TryReadSheetNamesFromPackage(
+            Stream stream, long maxWorkbookPartBytes, out IReadOnlyList<string> sheetNames)
+        {
+            sheetNames = new List<string>();
+            using (var archive = new ZipArchive(stream, ZipArchiveMode.Read, leaveOpen: true))
+            {
+                var workbookEntry = archive.GetEntry(WorkbookPartPath);
+                if (workbookEntry == null)
+                {
+                    // xlsx ではない ZIP（xls を拡張子だけ変えた等）
+                    return false;
+                }
+
+                if (workbookEntry.Length > maxWorkbookPartBytes)
+                {
+                    // 展開後サイズの宣言が上限を超える。展開せずに判定不能とする（ZIP 爆弾対策）
+                    return false;
+                }
+
+                using (var entryStream = new LengthLimitedReadStream(workbookEntry.Open(), maxWorkbookPartBytes))
+                using (var xmlReader = XmlReader.Create(entryStream, SafeXmlReaderSettings))
+                {
+                    var document = XDocument.Load(xmlReader);
+                    sheetNames = document
+                        .Descendants(SpreadsheetMlNamespace + "sheet")
+                        .Select(element => (string)element.Attribute("name"))
+                        .Where(name => !string.IsNullOrEmpty(name))
+                        .ToList();
+                    return true;
+                }
             }
         }
 

@@ -300,6 +300,40 @@ public class XlsxSheetNameReaderTests : IDisposable
         actual.Should().Equal(sheetNames);
         GetWorkbookPartLength(path).Should().BeLessThan(XlsxSheetNameReader.MaxWorkbookPartBytes / 10,
             "正当な workbook.xml に対して上限は十分な余裕を持つ");
+        new FileInfo(path).Length.Should().BeLessThan(XlsxSheetNameReader.MaxXlsxFileBytes / 10,
+            "正当な年度ファイルに対してファイルの上限も十分な余裕を持つ");
+    }
+
+    [Fact]
+    public void TryReadSheetNames_WhenFileExceedsLimit_ShouldReportUndetermined()
+    {
+        // Arrange: ファイル自体を、その大きさより 1 バイト小さい上限で読ませる（workbook.xml は上限内）
+        var path = CreateWorkbook("book.xlsx", "4月", "5月");
+        var fileLength = new FileInfo(path).Length;
+
+        // Act
+        var succeeded = XlsxSheetNameReader.TryReadSheetNames(
+            path, fileLength - 1, XlsxSheetNameReader.MaxWorkbookPartBytes, out var sheetNames);
+
+        // Assert: ZipArchive を開く（中央ディレクトリを読む）前に「判定不能」とする
+        succeeded.Should().BeFalse();
+        sheetNames.Should().BeEmpty();
+    }
+
+    [Fact]
+    public void TryReadSheetNames_WhenFileIsExactlyAtLimit_ShouldSucceed()
+    {
+        // Arrange: 上限ちょうどのファイルは従来どおり読める
+        var path = CreateWorkbook("book.xlsx", "4月", "5月");
+        var fileLength = new FileInfo(path).Length;
+
+        // Act
+        var succeeded = XlsxSheetNameReader.TryReadSheetNames(
+            path, fileLength, XlsxSheetNameReader.MaxWorkbookPartBytes, out var sheetNames);
+
+        // Assert
+        succeeded.Should().BeTrue();
+        sheetNames.Should().Equal("4月", "5月");
     }
 
     [Fact]
