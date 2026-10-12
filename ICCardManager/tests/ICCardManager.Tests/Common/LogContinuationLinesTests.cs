@@ -74,11 +74,36 @@ public class LogContinuationLinesTests
     [InlineData(0x1E, @"a\u001Eb")]
     [InlineData(0x1F, @"a\u001Fb")]
     [InlineData(0x7F, @"a\u007Fb")]
+    [InlineData(0x80, @"a\u0080b")]
+    [InlineData(0x9B, @"a\u009Bb")]
+    [InlineData(0x9F, @"a\u009Fb")]
+    [InlineData(0x202A, @"a\u202Ab")]
+    [InlineData(0x202E, @"a\u202Eb")]
+    [InlineData(0x2066, @"a\u2066b")]
+    [InlineData(0x2069, @"a\u2069b")]
     public void Indent_改行以外の制御文字はエスケープ表記にすること(int code, string expected)
     {
         var text = "a" + (char)code + "b";
 
         LogContinuationLines.Indent(text, NewLine, Prefix).Should().Be(expected);
+    }
+
+    /// <summary>
+    /// 対の側: 置き換える範囲の外側の文字（範囲の境界の隣）はそのまま残すこと。
+    /// </summary>
+    [Theory]
+    [InlineData(0x20)]
+    [InlineData(0x7E)]
+    [InlineData(0xA0)]
+    [InlineData(0x2027)]
+    [InlineData(0x202F)]
+    [InlineData(0x2065)]
+    [InlineData(0x206A)]
+    public void Indent_制御文字の範囲外の文字はそのまま返すこと(int code)
+    {
+        var text = "a" + (char)code + "b";
+
+        LogContinuationLines.Indent(text, NewLine, Prefix).Should().BeSameAs(text);
     }
 
     [Fact]

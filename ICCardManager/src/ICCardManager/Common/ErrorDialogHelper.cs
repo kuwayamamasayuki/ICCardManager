@@ -202,11 +202,6 @@ namespace ICCardManager.Common
         }
 
         /// <summary>
-        /// エラーログの継続行の接頭辞（Issue #2270）
-        /// </summary>
-        internal const string ErrorLogContinuationPrefix = "  | ";
-
-        /// <summary>
         /// エラーログ（error_yyyyMMdd.log）の 1 件分を組み立てる。
         /// </summary>
         /// <remarks>
@@ -219,9 +214,9 @@ namespace ICCardManager.Common
             DateTime timestamp, Exception exception, string errorCode, bool isFatal, string? context)
         {
             const string NewLine = "\n";
-            var safeContext = LogContinuationLines.Indent(context, NewLine, ErrorLogContinuationPrefix);
+            var safeContext = LogContinuationLines.Indent(context, NewLine, LogContinuationLines.Prefix);
             var contextPart = string.IsNullOrWhiteSpace(safeContext) ? string.Empty : $"({safeContext}) ";
-            var safeMessage = LogContinuationLines.Indent(exception.Message, NewLine, ErrorLogContinuationPrefix);
+            var safeMessage = LogContinuationLines.Indent(exception.Message, NewLine, LogContinuationLines.Prefix);
             var logEntry = $"[{timestamp.ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture)}] " +
                           $"{(isFatal ? "FATAL" : "ERROR")} [{errorCode}] " +
                           contextPart +
@@ -231,7 +226,7 @@ namespace ICCardManager.Common
             if (exception.InnerException != null)
             {
                 var innerMessage = LogContinuationLines.Indent(
-                    exception.InnerException.Message, NewLine, ErrorLogContinuationPrefix);
+                    exception.InnerException.Message, NewLine, LogContinuationLines.Prefix);
                 logEntry += $"InnerException: {exception.InnerException.GetType().Name}: {innerMessage}{NewLine}";
             }
 

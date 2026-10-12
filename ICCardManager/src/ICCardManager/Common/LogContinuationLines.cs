@@ -30,13 +30,24 @@ namespace ICCardManager.Common
     /// 垂直タブ（U+000B）・改ページ（U+000C）。
     /// </para>
     /// <para>
-    /// それ以外の C0 制御文字（タブを除く）と DEL は <c>\uXXXX</c> 表記へ置き換える
-    /// （<see cref="IsEscapedControl"/>）。ESC による端末表示の書き換えや、
-    /// U+001C〜U+001E を改行として扱うツールでの行分割を防ぐ。
+    /// それ以外の制御文字（C0 のうちタブを除くもの・DEL・NEL 以外の C1・双方向テキストの制御文字）は
+    /// <c>\uXXXX</c> 表記へ置き換える（<see cref="IsEscapedControl"/>）。ESC・CSI による端末表示の書き換え、
+    /// U+001C〜U+001E を改行として扱うツールでの行分割、表示順の入れ替えを防ぐ。
+    /// 表記は元から値にある <c>\u001B</c> という 6 文字と区別できず、可逆ではない（ログは人が読むためのもので、読み戻さない）。
     /// </para>
     /// </remarks>
     public static class LogContinuationLines
     {
+        /// <summary>
+        /// 継続行の行頭に置く接頭辞（レコード直下の値。FileLogger のメッセージ・エラーログの全項目）
+        /// </summary>
+        public const string Prefix = "  | ";
+
+        /// <summary>
+        /// 1 段字下げした行（FileLogger の <c>  Exception:</c> 行）の値の継続行に置く接頭辞
+        /// </summary>
+        public const string NestedPrefix = "    | ";
+
         private const string EscapePrefix = "\\u";
 
         private static readonly char[] LineBreakChars =
@@ -96,19 +107,31 @@ namespace ICCardManager.Common
         /// 改行以外で \uXXXX 表記へ置き換える制御文字か（Issue #2270）。
         /// </summary>
         /// <remarks>
-        /// C0 制御文字（U+0000〜U+001F）のうち、タブ（U+0009）と改行として扱う文字（CR・LF・垂直タブ・改ページ）を除いたものと、
-        /// DEL（U+007F）。ESC（U+001B）は端末で表示を書き換えるエスケープシーケンスを作れ、
-        /// U+001C〜U+001E は Python の <c>str.splitlines</c> 等が改行として扱う。
-        /// U+001C〜U+001E はテキストエディターでは改行として表示されないため、継続行ではなく \uXXXX 表記にする。
+        /// <list type="bullet">
+        /// <item>C0 制御文字（U+0000〜U+001F）のうち、タブ（U+0009）と改行として扱う文字（CR・LF・垂直タブ・改ページ）を除いたもの。
+        /// ESC（U+001B）は端末で表示を書き換えるエスケープシーケンスを作れ、U+001C〜U+001E は Python の <c>str.splitlines</c> 等が
+        /// 改行として扱う（エディターでは改行として表示されないため、継続行ではなく表記にする）</item>
+        /// <item>DEL（U+007F）</item>
+        /// <item>C1 制御文字（U+0080〜U+009F）のうち NEL（改行として扱う）を除いたもの。U+009B（CSI）は ESC [ と同じく
+        /// 端末のエスケープシーケンスを始める</item>
+        /// <item>双方向テキストの埋め込み・上書き・分離（U+202A〜U+202E、U+2066〜U+2069）。表示順を入れ替え、
+        /// 書かれている内容と違う行に見せられる</item>
+        /// </list>
         /// </remarks>
         internal static bool IsEscapedControl(char c)
         {
-            if (c == '\u007F')
+            var code = (int)c;
+            if (code < 0x20)
             {
-                return true;
+                return c != '\t' && Array.IndexOf(LineBreakChars, c) < 0;
             }
 
-            return c < ' ' && c != '\t' && Array.IndexOf(LineBreakChars, c) < 0;
+            if (code >= 0x7F && code <= 0x9F)
+            {
+                return Array.IndexOf(LineBreakChars, c) < 0;
+            }
+
+            return (code >= 0x202A && code <= 0x202E) || (code >= 0x2066 && code <= 0x2069);
         }
 
         private static bool RequiresRewrite(string text)

@@ -15,12 +15,12 @@ namespace ICCardManager.Infrastructure.Logging
         /// <summary>
         /// メッセージの 2 行目以降の行頭に置く接頭辞（Issue #2270）
         /// </summary>
-        internal const string MessageContinuationPrefix = "  | ";
+        internal const string MessageContinuationPrefix = LogContinuationLines.Prefix;
 
         /// <summary>
         /// 例外メッセージの 2 行目以降の行頭に置く接頭辞（<c>  Exception:</c> 行の下へ字下げする。Issue #2270）
         /// </summary>
-        internal const string ExceptionMessageContinuationPrefix = "    | ";
+        internal const string ExceptionMessageContinuationPrefix = LogContinuationLines.NestedPrefix;
 
         private readonly string _categoryName;
         private readonly FileLoggerProvider _provider;
