@@ -1,6 +1,7 @@
 #nullable enable
 
 using System;
+using System.Globalization;
 using System.Text;
 
 namespace ICCardManager.Common
@@ -28,9 +29,16 @@ namespace ICCardManager.Common
     /// 改行として表示し得る NEL（U+0085）・LINE SEPARATOR（U+2028）・PARAGRAPH SEPARATOR（U+2029）・
     /// 垂直タブ（U+000B）・改ページ（U+000C）。
     /// </para>
+    /// <para>
+    /// それ以外の C0 制御文字（タブを除く）と DEL は <c>\uXXXX</c> 表記へ置き換える
+    /// （<see cref="IsEscapedControl"/>）。ESC による端末表示の書き換えや、
+    /// U+001C〜U+001E を改行として扱うツールでの行分割を防ぐ。
+    /// </para>
     /// </remarks>
     public static class LogContinuationLines
     {
+        private const string EscapePrefix = "\\u";
+
         private static readonly char[] LineBreakChars =
         {
             '\r', '\n', '\u0085', '\u2028', '\u2029', '\u000B', '\u000C',
@@ -50,7 +58,7 @@ namespace ICCardManager.Common
                 return string.Empty;
             }
 
-            if (text.IndexOfAny(LineBreakChars) < 0)
+            if (!RequiresRewrite(text))
             {
                 return text;
             }
@@ -59,6 +67,13 @@ namespace ICCardManager.Common
             for (var i = 0; i < text.Length; i++)
             {
                 var c = text[i];
+                if (IsEscapedControl(c))
+                {
+                    // 改行以外の制御文字は \uXXXX 表記にして、値を失わずに無害化する
+                    builder.Append(EscapePrefix).Append(((int)c).ToString("X4", CultureInfo.InvariantCulture));
+                    continue;
+                }
+
                 if (Array.IndexOf(LineBreakChars, c) < 0)
                 {
                     builder.Append(c);
@@ -75,6 +90,38 @@ namespace ICCardManager.Common
             }
 
             return builder.ToString();
+        }
+
+        /// <summary>
+        /// 改行以外で \uXXXX 表記へ置き換える制御文字か（Issue #2270）。
+        /// </summary>
+        /// <remarks>
+        /// C0 制御文字（U+0000〜U+001F）のうち、タブ（U+0009）と改行として扱う文字（CR・LF・垂直タブ・改ページ）を除いたものと、
+        /// DEL（U+007F）。ESC（U+001B）は端末で表示を書き換えるエスケープシーケンスを作れ、
+        /// U+001C〜U+001E は Python の <c>str.splitlines</c> 等が改行として扱う。
+        /// U+001C〜U+001E はテキストエディターでは改行として表示されないため、継続行ではなく \uXXXX 表記にする。
+        /// </remarks>
+        internal static bool IsEscapedControl(char c)
+        {
+            if (c == '\u007F')
+            {
+                return true;
+            }
+
+            return c < ' ' && c != '\t' && Array.IndexOf(LineBreakChars, c) < 0;
+        }
+
+        private static bool RequiresRewrite(string text)
+        {
+            foreach (var c in text)
+            {
+                if (IsEscapedControl(c) || Array.IndexOf(LineBreakChars, c) >= 0)
+                {
+                    return true;
+                }
+            }
+
+            return false;
         }
     }
 }

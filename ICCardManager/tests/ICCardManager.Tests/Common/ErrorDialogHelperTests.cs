@@ -372,15 +372,19 @@ public class ErrorDialogHelperTests
         var separator = new string('-', 80);
         var message = $"technical detail {marker}\n{separator}\n[2026-01-01 00:00:00] ERROR [SYS001] 偽の行 {forgedMarker}";
 
-        string[]? forgedLines = null;
-        for (var attempt = 0; attempt < 5 && (forgedLines == null || forgedLines.Length == 0); attempt++)
+        string[]? following = null;
+        for (var attempt = 0; attempt < 5 && following == null; attempt++)
         {
             ErrorDialogHelper.LogException(new InvalidOperationException(message), "リストア");
-            forgedLines = FindLogLines(ErrorDialogHelper.LogDirectory, forgedMarker);
+            following = FindLinesFollowing(ErrorDialogHelper.LogDirectory, marker, count: 2);
         }
 
-        forgedLines.Should().NotBeNullOrEmpty("改行の後ろも継続行として残し、情報は失わない");
-        forgedLines.Should().OnlyContain(line => line.StartsWith("  | [2026-01-01 00:00:00] ERROR"),
+        following.Should().NotBeNull("LogException はエラーログへ書き込むこと");
+
+        // レコードの 1 行目（marker を含む行）に続く 2 行が、差し込もうとした区切り線と偽のレコード先頭
+        following![0].Should().Be("  | " + separator,
+            "区切り線は行頭に現れてはならない（継続行として残し、情報は失わない）");
+        following[1].Should().Be($"  | [2026-01-01 00:00:00] ERROR [SYS001] 偽の行 {forgedMarker}",
             "偽のレコード先頭は行頭に現れてはならない");
     }
 
@@ -418,14 +422,16 @@ public class ErrorDialogHelperTests
             new string('-', 80) + "\n");
     }
 
-    private static string[] FindLogLines(string logDirectory, string marker)
+    /// <summary>
+    /// <paramref name="marker"/> を含む最初の行に続く <paramref name="count"/> 行を返す（見つからなければ null）。
+    /// </summary>
+    private static string[]? FindLinesFollowing(string logDirectory, string marker, int count)
     {
         if (!Directory.Exists(logDirectory))
         {
-            return Array.Empty<string>();
+            return null;
         }
 
-        var found = new System.Collections.Generic.List<string>();
         foreach (var file in Directory.GetFiles(logDirectory, "error_*.log"))
         {
             // 並列に走る他のテストが追記中でも読めるよう、書き込み共有を許して開く
@@ -434,14 +440,22 @@ public class ErrorDialogHelperTests
             string? line;
             while ((line = reader.ReadLine()) != null)
             {
-                if (line.Contains(marker))
+                if (!line.Contains(marker))
                 {
-                    found.Add(line);
+                    continue;
                 }
+
+                var following = new string[count];
+                for (var i = 0; i < count; i++)
+                {
+                    following[i] = reader.ReadLine() ?? string.Empty;
+                }
+
+                return following;
             }
         }
 
-        return found.ToArray();
+        return null;
     }
 
     #endregion

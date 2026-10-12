@@ -60,4 +60,32 @@ public class LogContinuationLinesTests
     {
         LogContinuationLines.Indent(text, NewLine, Prefix).Should().BeEmpty();
     }
+
+    /// <summary>
+    /// 改行以外の C0 制御文字（タブを除く）と DEL は \uXXXX 表記へ置き換えること。
+    /// ESC は端末の表示を書き換え、U+001C〜U+001E は Python の str.splitlines 等が改行として扱う。
+    /// </summary>
+    [Theory]
+    [InlineData(0x00, @"a\u0000b")]
+    [InlineData(0x01, @"a\u0001b")]
+    [InlineData(0x1B, @"a\u001Bb")]
+    [InlineData(0x1C, @"a\u001Cb")]
+    [InlineData(0x1D, @"a\u001Db")]
+    [InlineData(0x1E, @"a\u001Eb")]
+    [InlineData(0x1F, @"a\u001Fb")]
+    [InlineData(0x7F, @"a\u007Fb")]
+    public void Indent_改行以外の制御文字はエスケープ表記にすること(int code, string expected)
+    {
+        var text = "a" + (char)code + "b";
+
+        LogContinuationLines.Indent(text, NewLine, Prefix).Should().Be(expected);
+    }
+
+    [Fact]
+    public void Indent_タブは置き換えずそのまま返すこと()
+    {
+        const string text = "列1\t列2";
+
+        LogContinuationLines.Indent(text, NewLine, Prefix).Should().BeSameAs(text);
+    }
 }

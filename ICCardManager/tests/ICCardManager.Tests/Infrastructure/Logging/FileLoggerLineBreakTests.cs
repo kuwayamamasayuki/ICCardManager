@@ -105,6 +105,20 @@ public class FileLoggerLineBreakTests : IDisposable
             "    | " + "[2026-01-01 00:00:00.000] [CRT] [DbContext] 偽の行");
     }
 
+    [Fact]
+    public void Log_改行以外の制御文字はエスケープ表記で書くこと()
+    {
+        // ESC[2J は端末で画面を消去するエスケープシーケンス、U+001E は str.splitlines が改行として扱う
+        var value = "x" + (char)0x1B + "[2J" + (char)0x1E + "[2026-01-01 00:00:00.000] [INF] 偽";
+
+        var lines = WriteAndReadLines(logger =>
+            logger.LogWarning("設定値を日時として解釈できませんでした: {Key}={Value}", "last_backup_success_at", value));
+
+        lines.Should().ContainSingle();
+        lines[0].Should().EndWith(@"last_backup_success_at=x\u001B[2J\u001E[2026-01-01 00:00:00.000] [INF] 偽");
+        lines[0].Any(c => c < ' ' && c != '\t').Should().BeFalse("制御文字をそのまま書き出さない");
+    }
+
     #endregion
 
     #region 正当な出力を変えていない側
