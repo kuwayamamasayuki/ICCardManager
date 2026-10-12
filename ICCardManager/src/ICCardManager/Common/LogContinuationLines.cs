@@ -61,7 +61,7 @@ namespace ICCardManager.Common
         /// <param name="text">ログへ書き出す値。<c>null</c> の場合は空文字を返す。</param>
         /// <param name="newLine">ログファイルの改行（書き出し側が使っている改行に合わせる）。</param>
         /// <param name="continuationPrefix">継続行の行頭に置く接頭辞。空白で始め、行頭が <c>[</c> にならない値を渡す。</param>
-        /// <returns>改行を含まない場合は <paramref name="text"/> そのもの。</returns>
+        /// <returns>書き換える文字（改行・制御文字）を含まない場合は <paramref name="text"/> そのもの。</returns>
         public static string Indent(string? text, string newLine, string continuationPrefix)
         {
             if (text is null || text.Length == 0)
@@ -114,8 +114,8 @@ namespace ICCardManager.Common
         /// <item>DEL（U+007F）</item>
         /// <item>C1 制御文字（U+0080〜U+009F）のうち NEL（改行として扱う）を除いたもの。U+009B（CSI）は ESC [ と同じく
         /// 端末のエスケープシーケンスを始める</item>
-        /// <item>双方向テキストの埋め込み・上書き・分離（U+202A〜U+202E、U+2066〜U+2069）。表示順を入れ替え、
-        /// 書かれている内容と違う行に見せられる</item>
+        /// <item>双方向テキストの制御文字: 埋め込み・上書き・分離（U+202A〜U+202E、U+2066〜U+2069）と
+        /// 方向マーク（LRM U+200E・RLM U+200F・ALM U+061C）。表示順を入れ替え、書かれている内容と違う行に見せられる</item>
         /// </list>
         /// </remarks>
         internal static bool IsEscapedControl(char c)
@@ -131,7 +131,9 @@ namespace ICCardManager.Common
                 return Array.IndexOf(LineBreakChars, c) < 0;
             }
 
-            return (code >= 0x202A && code <= 0x202E) || (code >= 0x2066 && code <= 0x2069);
+            return (code >= 0x202A && code <= 0x202E)
+                || (code >= 0x2066 && code <= 0x2069)
+                || code == 0x200E || code == 0x200F || code == 0x061C;
         }
 
         private static bool RequiresRewrite(string text)

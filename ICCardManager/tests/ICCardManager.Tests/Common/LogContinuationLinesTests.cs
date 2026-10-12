@@ -81,6 +81,9 @@ public class LogContinuationLinesTests
     [InlineData(0x202E, @"a\u202Eb")]
     [InlineData(0x2066, @"a\u2066b")]
     [InlineData(0x2069, @"a\u2069b")]
+    [InlineData(0x200E, @"a\u200Eb")]
+    [InlineData(0x200F, @"a\u200Fb")]
+    [InlineData(0x061C, @"a\u061Cb")]
     public void Indent_改行以外の制御文字はエスケープ表記にすること(int code, string expected)
     {
         var text = "a" + (char)code + "b";
@@ -99,6 +102,10 @@ public class LogContinuationLinesTests
     [InlineData(0x202F)]
     [InlineData(0x2065)]
     [InlineData(0x206A)]
+    [InlineData(0x200D)]
+    [InlineData(0x2010)]
+    [InlineData(0x061B)]
+    [InlineData(0x061D)]
     public void Indent_制御文字の範囲外の文字はそのまま返すこと(int code)
     {
         var text = "a" + (char)code + "b";
