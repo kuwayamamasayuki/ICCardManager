@@ -5,6 +5,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.IO.Compression;
 using System.Linq;
+using System.Xml;
 using System.Xml.Linq;
 
 namespace ICCardManager.Common
@@ -30,10 +31,31 @@ namespace ICCardManager.Common
         private const string WorkbookPartPath = "xl/workbook.xml";
 
         /// <summary>
+        /// 読み込む <c>xl/workbook.xml</c> の大きさの上限（展開後 4MB。Issue #2272）
+        /// </summary>
+        /// <remarks>
+        /// workbook.xml はシート名・定義名・ブックの設定だけを持つパートで、本システムの帳票
+        /// （最大 12 か月ぶん＋累計のシート）では数KB、名前定義を大量に持つ一般のブックでも数百KB にとどまる。
+        /// 出力先フォルダーに書き込める者が同じ名前の ZIP 爆弾を置いた場合に、展開してメモリを
+        /// 圧迫させないための上限であり、正当なファイルには 10 倍以上の余裕を取っている。
+        /// </remarks>
+        internal const long MaxWorkbookPartBytes = 4L * 1024 * 1024;
+
+        /// <summary>
         /// SpreadsheetML の名前空間
         /// </summary>
         private static readonly XNamespace SpreadsheetMlNamespace =
             "http://schemas.openxmlformats.org/spreadsheetml/2006/main";
+
+        /// <summary>
+        /// workbook.xml を読むときの XML リーダー設定（DTD 禁止・外部リソース解決なし。Issue #2272）
+        /// </summary>
+        private static readonly XmlReaderSettings SafeXmlReaderSettings = new XmlReaderSettings
+        {
+            DtdProcessing = DtdProcessing.Prohibit,
+            XmlResolver = null,
+            CloseInput = false,
+        };
 
         /// <summary>
         /// xlsx ファイルからワークシート名の一覧を読み取る
@@ -42,6 +64,29 @@ namespace ICCardManager.Common
         /// <param name="sheetNames">読み取れたシート名（失敗時は空）</param>
         /// <returns>読み取れた場合true。ファイルが無い/壊れている/読めない場合はfalse</returns>
         public static bool TryReadSheetNames(string filePath, out IReadOnlyList<string> sheetNames)
+        {
+            return TryReadSheetNames(filePath, MaxWorkbookPartBytes, out sheetNames);
+        }
+
+        /// <summary>
+        /// xlsx ファイルからワークシート名の一覧を読み取る（workbook.xml の上限を指定する版。Issue #2272）
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// 上限の境界を、実際に数MBの xlsx を作らずに単体テストで固定するためのオーバーロード。
+        /// </para>
+        /// <para>
+        /// <b>上限は 2 段で守る</b>。ZIP の中央ディレクトリが宣言する展開後サイズ
+        /// （<see cref="ZipArchiveEntry.Length"/>）で読む前に断り、宣言を偽った ZIP に備えて
+        /// 読み込み側でも上限バイトを超えた時点で打ち切る。いずれも「判定不能」（false）として扱う。
+        /// </para>
+        /// <para>
+        /// <b>DTD は禁止する</b>。正当な workbook.xml は DTD を持たない。内部サブセットの実体を許すと、
+        /// 小さなファイルから巨大な文字列を展開できる（billion laughs）ため、バイト数の上限を素通りする。
+        /// 外部実体も解決しない（<see cref="XmlReaderSettings.XmlResolver"/> = null）。
+        /// </para>
+        /// </remarks>
+        internal static bool TryReadSheetNames(string filePath, long maxWorkbookPartBytes, out IReadOnlyList<string> sheetNames)
         {
             sheetNames = new List<string>();
 
@@ -63,9 +108,16 @@ namespace ICCardManager.Common
                         return false;
                     }
 
-                    using (var entryStream = workbookEntry.Open())
+                    if (workbookEntry.Length > maxWorkbookPartBytes)
                     {
-                        var document = XDocument.Load(entryStream);
+                        // 展開後サイズの宣言が上限を超える。展開せずに判定不能とする（ZIP 爆弾対策）
+                        return false;
+                    }
+
+                    using (var entryStream = new LengthLimitedReadStream(workbookEntry.Open(), maxWorkbookPartBytes))
+                    using (var xmlReader = XmlReader.Create(entryStream, SafeXmlReaderSettings))
+                    {
+                        var document = XDocument.Load(xmlReader);
                         sheetNames = document
                             .Descendants(SpreadsheetMlNamespace + "sheet")
                             .Select(element => (string)element.Attribute("name"))
@@ -102,6 +154,76 @@ namespace ICCardManager.Common
 
             contains = sheetNames.Any(name => string.Equals(name, sheetName, StringComparison.Ordinal));
             return true;
+        }
+
+        /// <summary>
+        /// 上限バイト数を超えて読もうとした時点で例外を投げる読み取り専用ストリーム（Issue #2272）
+        /// </summary>
+        /// <remarks>
+        /// ZIP の展開後サイズは中央ディレクトリの宣言にすぎず、偽ることができる。
+        /// 宣言を信じて読み始めた後も、実際に読んだバイト数で打ち切る。
+        /// 上限ちょうどのデータは読み切れる（上限を超える 1 バイト目を読んだときに初めて失敗する）。
+        /// </remarks>
+        private sealed class LengthLimitedReadStream : Stream
+        {
+            private readonly Stream _inner;
+            private readonly long _maxBytes;
+            private long _totalRead;
+
+            public LengthLimitedReadStream(Stream inner, long maxBytes)
+            {
+                _inner = inner;
+                _maxBytes = maxBytes;
+            }
+
+            public override bool CanRead => true;
+
+            public override bool CanSeek => false;
+
+            public override bool CanWrite => false;
+
+            public override long Length => throw new NotSupportedException();
+
+            public override long Position
+            {
+                get => _totalRead;
+                set => throw new NotSupportedException();
+            }
+
+            public override int Read(byte[] buffer, int offset, int count)
+            {
+                // 上限より 1 バイト多く読めるかを試し、読めたら超過と判定する
+                var allowed = (int)Math.Min(count, _maxBytes - _totalRead + 1);
+                var read = _inner.Read(buffer, offset, allowed);
+                _totalRead += read;
+                if (_totalRead > _maxBytes)
+                {
+                    throw new InvalidDataException(
+                        $"The part exceeds the size limit of {_maxBytes} bytes.");
+                }
+
+                return read;
+            }
+
+            public override void Flush()
+            {
+            }
+
+            public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+
+            public override void SetLength(long value) => throw new NotSupportedException();
+
+            public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+
+            protected override void Dispose(bool disposing)
+            {
+                if (disposing)
+                {
+                    _inner.Dispose();
+                }
+
+                base.Dispose(disposing);
+            }
         }
     }
 }

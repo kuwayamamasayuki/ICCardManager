@@ -3356,6 +3356,96 @@ FEDCBA9876543210,鈴木花子,002,テスト2";
 
     #endregion
 
+    #region Issue #2272: インポートできるファイルの大きさの上限
+
+    [Fact]
+    public async Task ReadCsvFileAsync_上限を超えるファイルは読み込まずに例外を投げること()
+    {
+        // Arrange: 上限を 1 バイト下回るよう注入する（実際に数十MBのファイルを作らない）
+        var filePath = Path.Combine(_testDirectory, "too_large.csv");
+        File.WriteAllText(filePath, "職員IDm,氏名,職員番号,備考\n0123456789ABCDEF,山田太郎,001,\n", CsvEncoding);
+        var length = new FileInfo(filePath).Length;
+
+        // Act
+        var act = async () => await CsvImportService.ReadCsvFileAsync(filePath, NullLogger.Instance, length - 1);
+
+        // Assert: 生の OverflowException / OutOfMemoryException ではなく、整備済みの文言を持つ例外
+        var exception = await act.Should().ThrowAsync<FileOperationException>();
+        exception.Which.ErrorCode.Should().Be("FILE010");
+        exception.Which.UserFriendlyMessage.Should().Be(
+            FileOperationException.FileTooLarge(length, length - 1, filePath).UserFriendlyMessage);
+    }
+
+    [Fact]
+    public async Task ReadCsvFileAsync_上限ちょうどのファイルは従来どおり読み込めること()
+    {
+        // Arrange
+        var filePath = Path.Combine(_testDirectory, "at_limit.csv");
+        File.WriteAllText(filePath, "職員IDm,氏名,職員番号,備考\n0123456789ABCDEF,山田太郎,001,\n", CsvEncoding);
+        var length = new FileInfo(filePath).Length;
+
+        // Act
+        var lines = await CsvImportService.ReadCsvFileAsync(filePath, NullLogger.Instance, length);
+
+        // Assert
+        lines.Should().Equal("職員IDm,氏名,職員番号,備考", "0123456789ABCDEF,山田太郎,001,");
+    }
+
+    [Fact]
+    public async Task ImportStaffAsync_上限を超えるCSVは3要素の文言で中止を案内すること()
+    {
+        // Arrange: 既定の上限を 1 バイト超えるファイル（SetLength は中身を書かないため速い）。
+        // インポート共通の例外→文言の変換（ToUserFacingErrorMessage）を通ることを公開の入口から確かめる
+        var filePath = Path.Combine(_testDirectory, "huge.csv");
+        var size = CsvImportService.MaxImportFileSizeBytes + 1;
+        using (var stream = new FileStream(filePath, FileMode.Create, FileAccess.Write))
+        {
+            stream.SetLength(size);
+        }
+
+        // Act
+        var result = await _service.ImportStaffAsync(filePath);
+
+        // Assert
+        result.Success.Should().BeFalse();
+        result.ErrorMessage.Should().Be(
+            FileOperationException.FileTooLarge(size, CsvImportService.MaxImportFileSizeBytes).UserFriendlyMessage);
+        _staffRepositoryMock.Verify(
+            x => x.InsertAsync(It.IsAny<Staff>(), It.IsAny<SQLiteTransaction>()), Times.Never);
+    }
+
+    [Fact]
+    public void ファイルが大きすぎるエラー文言がエラーメッセージ品質基準を満たすこと()
+    {
+        var message = FileOperationException
+            .FileTooLarge(CsvImportService.MaxImportFileSizeBytes + 1, CsvImportService.MaxImportFileSizeBytes,
+                @"C:\work\ledger_details_20200101_20260812.csv")
+            .UserFriendlyMessage;
+
+        message.Should().Contain("ファイルの大きさ");          // 何が
+        message.Should().Contain("64.1MB");                    // 実際の値（上限をわずかに超えた値は切り上げて上限と区別する）
+        message.Should().Contain("上限（64MB）");               // なぜ（ルール）
+        message.Should().Contain("メモリが不足");               // なぜ（理由）
+        message.Should().Contain("エクスポートの期間");         // どうすれば
+        message.Should().EndWith("してください。");
+        message.Length.Should().BeGreaterOrEqualTo(20);
+        message.Should().NotContain("エラーが発生しました");
+        message.Should().NotContain(@"C:\work");
+    }
+
+    [Theory]
+    [InlineData(512L, "512バイト")]
+    [InlineData(1024L, "1KB")]
+    [InlineData(64L * 1024 * 1024, "64MB")]
+    [InlineData(64L * 1024 * 1024 + 1, "64.1MB")]
+    [InlineData(100L * 1024 * 1024 + 512L * 1024, "100.5MB")]
+    public void FormatFileSize_端数は切り上げて表記すること(long bytes, string expected)
+    {
+        FileOperationException.FormatFileSize(bytes).Should().Be(expected);
+    }
+
+    #endregion
+
     #region Issue #1744: 文字コード判別のログ
 
     private static void VerifyLogged(Mock<ILogger> loggerMock, LogLevel level, string expectedFragment)

@@ -171,6 +171,23 @@ namespace ICCardManager.Services
     /// </summary>
     public partial class CsvImportService
     {
+        /// <summary>
+        /// インポートできる CSV ファイルの大きさの上限（64MB。Issue #2272）
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// 本システムが書き出す CSV で行数が最も多くなるのは利用履歴・利用履歴詳細で、1 行は長くても 200 バイト前後。
+        /// 最大 20 枚のカードを保存期間の 6 年ぶんまとめて書き出しても 10 万行前後・20MB 程度にとどまるため、
+        /// 正当なファイルに対して 3 倍以上の余裕がある。
+        /// </para>
+        /// <para>
+        /// 上限を大きくしすぎない理由: 読み込みはファイル全体のバイト列に加えて、復号した文字列（UTF-16 で
+        /// およそ 2 倍）と行のリスト（さらに 2 倍）を同時に持つため、ピークはファイルの 5 倍前後になる。
+        /// x86 で動く本アプリの 2GB のアドレス空間では、64MB でも 300MB 強を一時的に使う。
+        /// </para>
+        /// </remarks>
+        internal const long MaxImportFileSizeBytes = 64L * 1024 * 1024;
+
         private readonly ICardRepository _cardRepository;
         private readonly IStaffRepository _staffRepository;
         private readonly ILedgerRepository _ledgerRepository;
@@ -272,9 +289,22 @@ namespace ICCardManager.Services
         /// </para>
         /// </remarks>
         /// <exception cref="FileOperationException">文字コードを判別できない、または宣言された文字コードとして読めない場合</exception>
-        internal static async Task<List<string>> ReadCsvFileAsync(string filePath, ILogger logger = null)
+        /// <exception cref="FileOperationException">ファイルが <see cref="MaxImportFileSizeBytes"/> を超えている場合（Issue #2272）</exception>
+        internal static Task<List<string>> ReadCsvFileAsync(string filePath, ILogger logger = null)
         {
-            var bytes = await ReadAllBytesAsync(filePath).ConfigureAwait(false);
+            return ReadCsvFileAsync(filePath, logger, MaxImportFileSizeBytes);
+        }
+
+        /// <summary>
+        /// CSVファイルを読み込む（読み込める大きさの上限を指定する版。Issue #2272）
+        /// </summary>
+        /// <remarks>
+        /// 上限の境界を、実際に数十MBのファイルを作らずに単体テストで固定するためのオーバーロード。
+        /// 本番の経路は上の版から <see cref="MaxImportFileSizeBytes"/> を渡す。
+        /// </remarks>
+        internal static async Task<List<string>> ReadCsvFileAsync(string filePath, ILogger logger, long maxFileSizeBytes)
+        {
+            var bytes = await ReadAllBytesAsync(filePath, maxFileSizeBytes, logger).ConfigureAwait(false);
 
             var decoded = TextEncodingDetector.Decode(bytes);
             if (!decoded.IsDecoded)
@@ -316,13 +346,32 @@ namespace ICCardManager.Services
         /// 連続配列の二重確保になり、x86（`PlatformTarget`）の 2GB 空間で数十MB の台帳CSVを
         /// 取り込む際に不要なピークを生む（Issue #1744 コードレビュー指摘）。
         /// 他プロセスが読み取り中にファイルを縮めた場合に備え、実際に読めた長さへ切り詰める。
+        /// <para>
+        /// <b>大きさは確保する前に確かめる</b>（Issue #2272）。<paramref name="maxFileSizeBytes"/> を超える
+        /// ファイルは 1 バイトも読まずに <see cref="FileOperationException.FileTooLarge"/> で断る。
+        /// 上限が無いと 2GB 超で <see cref="OverflowException"/>、それ未満でも x86 では
+        /// <see cref="OutOfMemoryException"/> になるまでアプリ全体のメモリを圧迫する。
+        /// バッファは開いた時点の長さで確保するため、読み取り中に他プロセスがファイルを伸ばしても
+        /// 上限を超えて読むことはない。
+        /// </para>
         /// </remarks>
-        private static async Task<byte[]> ReadAllBytesAsync(string filePath)
+        private static async Task<byte[]> ReadAllBytesAsync(string filePath, long maxFileSizeBytes, ILogger logger)
         {
             using (var fileStream = new FileStream(
                 filePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite, 4096, useAsync: true))
             {
-                var buffer = new byte[fileStream.Length];
+                var length = fileStream.Length;
+                if (length > maxFileSizeBytes)
+                {
+                    // 共通ハンドラー（LogImportFailure）は「どの取り込みだったか」を記録する。
+                    // ここでは実寸と上限を残す（文字コードの失敗と同じ分担。CreateEncodingFailureException の remarks）
+                    logger?.LogWarning(
+                        "CSVインポートを中断: ファイルの大きさ {ActualBytes} バイトが上限 {MaxBytes} バイトを超えています。File={FilePath}",
+                        length, maxFileSizeBytes, filePath);
+                    throw FileOperationException.FileTooLarge(length, maxFileSizeBytes, filePath);
+                }
+
+                var buffer = new byte[length];
                 var offset = 0;
                 while (offset < buffer.Length)
                 {

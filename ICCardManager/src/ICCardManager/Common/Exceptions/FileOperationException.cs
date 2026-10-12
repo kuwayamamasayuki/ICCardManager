@@ -2,6 +2,7 @@
 
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Linq;
 using System.Threading.Tasks;
 namespace ICCardManager.Common.Exceptions
@@ -166,6 +167,60 @@ namespace ICCardManager.Common.Exceptions
                 ? new FileOperationException(message, userMessage, errorCode, filePath, innerException)
                 : new FileOperationException(message, userMessage, errorCode, filePath);
         }
+
+        /// <summary>
+        /// ファイルが大きすぎて読み込めない（Issue #2272）
+        /// </summary>
+        /// <remarks>
+        /// CSV インポートはファイル全体を 1 つのバッファへ読み込んでから復号する。
+        /// 上限を設けないと、2GB を超えるファイルで <see cref="OverflowException"/> /
+        /// <see cref="OutOfMemoryException"/> になり、x86 プロセスでは確保に失敗するまでに
+        /// アプリ全体のメモリを圧迫する。<b>読み込む前に</b>大きさで断り、原因と回避手段を案内する。
+        /// </remarks>
+        /// <param name="actualBytes">ファイルの大きさ（バイト）</param>
+        /// <param name="maxBytes">読み込める上限（バイト）</param>
+        /// <param name="filePath">対象ファイルパス（ログ用。ユーザー向け文言には出さない）</param>
+        public static FileOperationException FileTooLarge(long actualBytes, long maxBytes, string? filePath = null)
+        {
+            var message = string.IsNullOrEmpty(filePath)
+                ? $"File is too large to import: {actualBytes} bytes (limit {maxBytes} bytes)"
+                : $"File is too large to import: {actualBytes} bytes (limit {maxBytes} bytes): {filePath}";
+            var userMessage =
+                $"ファイルの大きさ（{FormatFileSize(actualBytes)}）が、インポートできる上限（{FormatFileSize(maxBytes)}）を超えています。" +
+                "大きすぎるファイルを読み込むとメモリが不足し、アプリが応答しなくなるおそれがあるため読み込みを中止しました。" +
+                "エクスポートの期間を短く区切ってファイルを分け、1つずつインポートしてください。";
+            const string errorCode = "FILE010";
+
+            return new FileOperationException(message, userMessage, errorCode, filePath);
+        }
+
+        /// <summary>
+        /// ファイルの大きさを利用者向けに表記する（MB / KB / バイト）
+        /// </summary>
+        /// <remarks>
+        /// 小数点以下は 1 桁まで、端数が無ければ付けない（「64MB」「64.1MB」）。
+        /// 端数は<b>切り上げる</b> — 四捨五入だと上限をわずかに超えたファイルが上限と同じ表記になり、
+        /// 「64MB が上限 64MB を超えています」という矛盾した文言になる。
+        /// 画面に出す値なので <see cref="CultureInfo.CurrentCulture"/> で整形する（CA1305）。
+        /// </remarks>
+        internal static string FormatFileSize(long bytes)
+        {
+            const double Kilo = 1024d;
+            const double Mega = 1024d * 1024d;
+            if (bytes >= Mega)
+            {
+                return RoundUpToTenth(bytes / Mega).ToString("#,0.#", CultureInfo.CurrentCulture) + "MB";
+            }
+
+            if (bytes >= Kilo)
+            {
+                return RoundUpToTenth(bytes / Kilo).ToString("#,0.#", CultureInfo.CurrentCulture) + "KB";
+            }
+
+            return bytes.ToString("#,0", CultureInfo.CurrentCulture) + "バイト";
+        }
+
+        private static double RoundUpToTenth(double value) => Math.Ceiling(value * 10d) / 10d;
 
         /// <summary>
         /// ディレクトリ作成失敗

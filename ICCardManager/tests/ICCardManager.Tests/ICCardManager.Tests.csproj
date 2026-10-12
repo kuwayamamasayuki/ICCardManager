@@ -55,6 +55,8 @@
   <ItemGroup>
     <Reference Include="System.Printing" />
     <Reference Include="ReachFramework" />
+    <!-- Issue #2272: XlsxSheetNameReader のテストで ZIP を組み立てる・書き換える -->
+    <Reference Include="System.IO.Compression" />
   </ItemGroup>
 
 </Project>
