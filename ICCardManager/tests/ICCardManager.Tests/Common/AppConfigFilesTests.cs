@@ -115,7 +115,7 @@ public class AppConfigFilesTests
         var filePath = Path.Combine(dir, "database_config.txt");
         try
         {
-            AppConfigFiles.Write(filePath, null!);
+            AppConfigFiles.Write(filePath, null);
 
             File.Exists(filePath).Should().BeTrue("null 値でも空ファイルとして保存される");
             File.ReadAllText(filePath, Encoding.UTF8).Should().BeEmpty();

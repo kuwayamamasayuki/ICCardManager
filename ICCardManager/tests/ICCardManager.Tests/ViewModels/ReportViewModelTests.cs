@@ -859,6 +859,11 @@ public class ReportViewModelTests
     /// Issue #2266: この PC の設定が無く共有 DB にだけ出力先があるとき、共有 DB の値を既定値に採用せず、
     /// そのフォルダーを走査しないこと（画面を開いただけで別ホストへ SMB 接続しない）
     /// </summary>
+    /// <remarks>
+    /// <see cref="ReportViewModel"/> は共有 DB を受け取る口を持たない（出力先は <c>IReportOutputFolderStore</c> だけから読む）ため、
+    /// このテストは構造上「共有 DB の値で走査する」形へは退行し得ない。その退行（共有 DB の値を読む形）の防止は
+    /// 静的検査 <c>ReportOutputFolderSourceConventionTests</c> が担い、このテストは<b>手元の設定の値で走査されること</b>を固定する。
+    /// </remarks>
     [Fact]
     public async Task InitializeAsync_共有DBにだけ出力先があるとき_既定値に採用せず走査もしないこと()
     {
@@ -891,6 +896,11 @@ public class ReportViewModelTests
     /// Issue #2266: 共有 DB の出力先がこの PC の設定と食い違うとき、この PC の設定のフォルダーだけを
     /// 従来どおり走査すること（共有 DB のフォルダーへはアクセスしない）
     /// </summary>
+    /// <remarks>
+    /// <see cref="ReportViewModel"/> は共有 DB を受け取る口を持たない（出力先は <c>IReportOutputFolderStore</c> だけから読む）ため、
+    /// このテストは構造上「共有 DB の値で走査する」形へは退行し得ない。その退行（共有 DB の値を読む形）の防止は
+    /// 静的検査 <c>ReportOutputFolderSourceConventionTests</c> が担い、このテストは<b>手元の設定の値で走査されること</b>を固定する。
+    /// </remarks>
     [Fact]
     public async Task InitializeAsync_共有DBの出力先と手元の設定が食い違うとき_手元の設定のフォルダーだけを走査すること()
     {
