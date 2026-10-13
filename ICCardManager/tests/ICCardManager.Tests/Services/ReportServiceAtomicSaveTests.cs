@@ -151,7 +151,7 @@ public class ReportServiceAtomicSaveTests : IDisposable
         public Action<string>? WriteHook { get; set; }
         public Action<string, string>? ReplaceHook { get; set; }
         public Action<string, string>? MoveHook { get; set; }
-        public Func<string, XLWorkbook>? OpenHook { get; set; }
+        public Func<Stream, XLWorkbook>? OpenHook { get; set; }
 
         internal override void WriteWorkbookTo(XLWorkbook workbook, string path)
         {
@@ -172,9 +172,9 @@ public class ReportServiceAtomicSaveTests : IDisposable
             base.MoveTempFile(tempPath, outputPath);
         }
 
-        internal override XLWorkbook OpenExistingWorkbook(string path)
+        internal override XLWorkbook OpenExistingWorkbook(Stream stream)
         {
-            return OpenHook != null ? OpenHook(path) : base.OpenExistingWorkbook(path);
+            return OpenHook != null ? OpenHook(stream) : base.OpenExistingWorkbook(stream);
         }
     }
 
@@ -465,6 +465,11 @@ public class ReportServiceAtomicSaveTests : IDisposable
         result.DetailedErrorMessage.Should().Be(
             ReportService.BuildOversizedExistingFileMessage(Path.GetFileName(_outputPath)));
         File.ReadAllBytes(_outputPath).Should().Equal(bytesBefore, "大きすぎるファイルを黙って作り直さない");
+        var expandedTotal = XlsxPackageSizeGuard.Check(_outputPath).DeclaredExpandedBytes;
+        _logger.Entries.Should().ContainSingle(e => e.Level == LogLevel.Warning && e.Message.Contains("大きすぎる"))
+            .Which.Message.Should().Contain(bytesBefore.Length.ToString(System.Globalization.CultureInfo.InvariantCulture))
+            .And.Contain(expandedTotal!.Value.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                "障害調査で、ファイルの実寸と展開後の宣言値の合計が分かること");
     }
 
     [Fact]
@@ -485,6 +490,37 @@ public class ReportServiceAtomicSaveTests : IDisposable
         result.DetailedErrorMessage.Should().Be(
             ReportService.BuildOversizedExistingFileMessage(Path.GetFileName(_outputPath)));
         new FileInfo(_outputPath).Length.Should().Be(XlsxPackageSizeGuard.MaxFileBytes + 1);
+    }
+
+    [Fact]
+    public async Task 大きさを検査してから読み込むまでの間に_既存の年度ファイルを差し替えられない()
+    {
+        // Arrange: 検査に使ったストリームを開いたまま読み込みに渡すので、その間は削除・名前の変更ができない
+        // （パスで検査してからパスで開き直すと、その間に ZIP 爆弾へ差し替えて検査を素通りできる）
+        (await CreateService().CreateMonthlyReportAsync(CardIdm, Year, 4, _outputPath)).Success.Should().BeTrue();
+        var service = CreateSeamService();
+        Exception? swapFailure = null;
+        service.OpenHook = stream =>
+        {
+            try
+            {
+                File.Move(_outputPath, _outputPath + ".swapped");
+            }
+            catch (IOException ex)
+            {
+                swapFailure = ex;
+            }
+
+            return new XLWorkbook(stream);
+        };
+
+        // Act
+        var result = await service.CreateMonthlyReportAsync(CardIdm, Year, 5, _outputPath);
+
+        // Assert: 差し替えは拒まれ、検査した内容から作成が続く
+        swapFailure.Should().NotBeNull("検査に使ったファイルは読み込み中に名前を変えられない");
+        result.Success.Should().BeTrue(result.DetailedErrorMessage);
+        ReadSheetNames(_outputPath).Should().Equal("4月", "5月");
     }
 
     [Fact]

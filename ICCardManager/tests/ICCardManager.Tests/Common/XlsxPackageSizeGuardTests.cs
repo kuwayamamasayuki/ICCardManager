@@ -74,7 +74,7 @@ public class XlsxPackageSizeGuardTests : IDisposable
             "book.xlsx", "4月", "5月", "6月", "7月", "8月", "9月", "10月", "11月", "12月", "1月", "2月", "3月", "累計");
 
         // Act & Assert
-        XlsxPackageSizeGuard.Check(path).Should().Be(XlsxPackageSizeCheck.WithinLimit);
+        XlsxPackageSizeGuard.Check(path).Status.Should().Be(XlsxPackageSizeCheck.WithinLimit);
         GetExpandedTotal(path).Should().BeLessThan(XlsxPackageSizeGuard.MaxExpandedBytes / 10,
             "正当な年度ファイルの展開後に対して上限は十分な余裕を持つ");
     }
@@ -85,7 +85,7 @@ public class XlsxPackageSizeGuardTests : IDisposable
         var path = CreateWorkbook("book.xlsx", "4月");
         var length = new FileInfo(path).Length;
 
-        XlsxPackageSizeGuard.Check(path, length - 1, long.MaxValue)
+        XlsxPackageSizeGuard.Check(path, length - 1, long.MaxValue).Status
             .Should().Be(XlsxPackageSizeCheck.FileTooLarge);
     }
 
@@ -97,7 +97,7 @@ public class XlsxPackageSizeGuardTests : IDisposable
         var expanded = GetExpandedTotal(path);
 
         // Act & Assert
-        XlsxPackageSizeGuard.Check(path, long.MaxValue, expanded - 1)
+        XlsxPackageSizeGuard.Check(path, long.MaxValue, expanded - 1).Status
             .Should().Be(XlsxPackageSizeCheck.ExpandedTooLarge);
     }
 
@@ -106,7 +106,7 @@ public class XlsxPackageSizeGuardTests : IDisposable
     {
         var path = CreateWorkbook("book.xlsx", "4月");
 
-        XlsxPackageSizeGuard.Check(path, new FileInfo(path).Length, GetExpandedTotal(path))
+        XlsxPackageSizeGuard.Check(path, new FileInfo(path).Length, GetExpandedTotal(path)).Status
             .Should().Be(XlsxPackageSizeCheck.WithinLimit);
     }
 
@@ -117,9 +117,42 @@ public class XlsxPackageSizeGuardTests : IDisposable
         var broken = Path.Combine(_testDirectory, "broken.xlsx");
         File.WriteAllBytes(broken, new byte[] { 0x50, 0x4B, 0x03, 0x04, 0x14, 0x00 });
 
-        XlsxPackageSizeGuard.Check(Path.Combine(_testDirectory, "missing.xlsx"))
+        XlsxPackageSizeGuard.Check(Path.Combine(_testDirectory, "missing.xlsx")).Status
             .Should().Be(XlsxPackageSizeCheck.Undetermined);
-        XlsxPackageSizeGuard.Check(broken).Should().Be(XlsxPackageSizeCheck.Undetermined);
+        XlsxPackageSizeGuard.Check(broken).Status.Should().Be(XlsxPackageSizeCheck.Undetermined);
+    }
+
+    [Fact]
+    public void Check_WithStream_ShouldReportActualSizesAndRewind()
+    {
+        // Arrange: ログに残すため、検査で得た実寸を返す。読み込みに同じストリームを使うので先頭へ戻す
+        var path = CreateWorkbook("book.xlsx", "4月");
+        using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read);
+
+        // Act
+        var result = XlsxPackageSizeGuard.Check(stream);
+
+        // Assert
+        result.Status.Should().Be(XlsxPackageSizeCheck.WithinLimit);
+        result.IsTooLarge.Should().BeFalse();
+        result.FileBytes.Should().Be(new FileInfo(path).Length);
+        result.DeclaredExpandedBytes.Should().Be(GetExpandedTotal(path));
+        stream.Position.Should().Be(0);
+        using var workbook = new XLWorkbook(stream);
+        workbook.Worksheets.Select(w => w.Name).Should().Equal("4月");
+    }
+
+    [Fact]
+    public void Check_WhenExpandedTooLarge_ShouldReportBothSizes()
+    {
+        var path = CreateWorkbook("book.xlsx", "4月");
+        var expanded = GetExpandedTotal(path);
+
+        var result = XlsxPackageSizeGuard.Check(path, long.MaxValue, expanded - 1);
+
+        result.IsTooLarge.Should().BeTrue();
+        result.FileBytes.Should().Be(new FileInfo(path).Length);
+        result.DeclaredExpandedBytes.Should().Be(expanded);
     }
 
     [Fact]

@@ -66,10 +66,10 @@ namespace ICCardManager.Common
         public const long MaxExpandedBytes = 64L * 1024 * 1024;
 
         /// <summary>
-        /// 既定の上限でファイルと展開後の大きさを確かめる
+        /// 既定の上限でファイルと展開後の大きさを確かめる（パスから開いて閉じる版。シート名の読み取り・テスト用）
         /// </summary>
         /// <param name="filePath">xlsx ファイルのパス</param>
-        public static XlsxPackageSizeCheck Check(string filePath)
+        public static XlsxPackageSizeResult Check(string filePath)
         {
             return Check(filePath, MaxFileBytes, MaxExpandedBytes);
         }
@@ -78,39 +78,85 @@ namespace ICCardManager.Common
         /// 上限を指定してファイルと展開後の大きさを確かめる（境界を単体テストで固定するための版）
         /// </summary>
         /// <remarks>
-        /// ファイルの大きさは開いたストリームの長さで判定し、<see cref="ZipArchive"/> を開く（中央ディレクトリを読む）前に断る。
         /// 例外は投げない。調べられなかったときは <see cref="XlsxPackageSizeCheck.Undetermined"/> を返す。
         /// </remarks>
-        internal static XlsxPackageSizeCheck Check(string filePath, long maxFileBytes, long maxExpandedBytes)
+        internal static XlsxPackageSizeResult Check(string filePath, long maxFileBytes, long maxExpandedBytes)
         {
             if (string.IsNullOrWhiteSpace(filePath))
             {
-                return XlsxPackageSizeCheck.Undetermined;
+                return XlsxPackageSizeResult.Undetermined(null);
             }
 
             try
             {
                 using (var stream = new FileStream(filePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite))
                 {
-                    if (stream.Length > maxFileBytes)
-                    {
-                        return XlsxPackageSizeCheck.FileTooLarge;
-                    }
-
-                    return CheckExpandedSize(stream, maxExpandedBytes);
+                    return Check(stream, maxFileBytes, maxExpandedBytes);
                 }
             }
             catch (Exception)
             {
-                // 無い・読めない・壊れているは、開く側の従来の処理（破損の案内・ロックの案内）に任せる
-                return XlsxPackageSizeCheck.Undetermined;
+                // 無い・読めない（ロック・権限）は、開く側の従来の処理に任せる
+                return XlsxPackageSizeResult.Undetermined(null);
             }
         }
 
         /// <summary>
-        /// 開いた ZIP の全エントリの宣言された展開後サイズの合計を上限と比べる
+        /// 既定の上限で、開いているストリームの大きさと展開後の大きさを確かめる
         /// </summary>
-        internal static XlsxPackageSizeCheck CheckExpandedSize(Stream stream, long maxExpandedBytes)
+        /// <remarks>
+        /// <b>検査したストリームをそのまま読み込みに使う</b>ための版。パスで検査してからパスで開き直すと、
+        /// その間にファイルを差し替えられて検査を素通りできる。呼び出し元は削除・書き込みを共有しない
+        /// （<see cref="FileShare.Read"/>）で開いたストリームを渡し、同じストリームから読み込む。
+        /// 戻る時点でストリームの位置は先頭に戻す。
+        /// </remarks>
+        /// <param name="stream">シーク可能な読み取りストリーム</param>
+        public static XlsxPackageSizeResult Check(Stream stream)
+        {
+            return Check(stream, MaxFileBytes, MaxExpandedBytes);
+        }
+
+        /// <summary>
+        /// 上限を指定して、開いているストリームの大きさと展開後の大きさを確かめる
+        /// </summary>
+        /// <remarks>
+        /// ファイルの大きさはストリームの長さで判定し、<see cref="ZipArchive"/> を開く（中央ディレクトリを読む）前に断る。
+        /// 展開後サイズは全エントリの宣言値を最後まで合計する（ログに実寸を残すため。エントリ数はファイルの大きさで抑えられている）。
+        /// 例外は投げない。ZIP として読めないときは <see cref="XlsxPackageSizeCheck.Undetermined"/> を返す。
+        /// </remarks>
+        internal static XlsxPackageSizeResult Check(Stream stream, long maxFileBytes, long maxExpandedBytes)
+        {
+            long? fileBytes = null;
+            try
+            {
+                fileBytes = stream.Length;
+                if (fileBytes.Value > maxFileBytes)
+                {
+                    return new XlsxPackageSizeResult(XlsxPackageSizeCheck.FileTooLarge, fileBytes, null);
+                }
+
+                stream.Position = 0;
+                var expandedBytes = SumDeclaredExpandedBytes(stream);
+                var status = expandedBytes > maxExpandedBytes
+                    ? XlsxPackageSizeCheck.ExpandedTooLarge
+                    : XlsxPackageSizeCheck.WithinLimit;
+                return new XlsxPackageSizeResult(status, fileBytes, expandedBytes);
+            }
+            catch (Exception)
+            {
+                // 壊れている（ZIP として読めない）は、開く側の従来の処理（破損の案内）に任せる
+                return XlsxPackageSizeResult.Undetermined(fileBytes);
+            }
+            finally
+            {
+                TryRewind(stream);
+            }
+        }
+
+        /// <summary>
+        /// ZIP の全エントリの宣言された展開後サイズを合計する（桁あふれ・負の宣言は <see cref="long.MaxValue"/> に飽和させる）
+        /// </summary>
+        private static long SumDeclaredExpandedBytes(Stream stream)
         {
             using (var archive = new ZipArchive(stream, ZipArchiveMode.Read, leaveOpen: true))
             {
@@ -118,16 +164,60 @@ namespace ICCardManager.Common
                 foreach (var entry in archive.Entries)
                 {
                     // 足してから比べると、ZIP64 の巨大な宣言値で桁あふれし得るため、残りの枠と比べる
-                    if (entry.Length < 0 || entry.Length > maxExpandedBytes - total)
+                    if (entry.Length < 0 || entry.Length > long.MaxValue - total)
                     {
-                        return XlsxPackageSizeCheck.ExpandedTooLarge;
+                        return long.MaxValue;
                     }
 
                     total += entry.Length;
                 }
 
-                return XlsxPackageSizeCheck.WithinLimit;
+                return total;
             }
         }
+
+        private static void TryRewind(Stream stream)
+        {
+            try
+            {
+                if (stream.CanSeek)
+                {
+                    stream.Position = 0;
+                }
+            }
+            catch (Exception)
+            {
+                // 巻き戻せないストリームは読み込む側の例外に任せる
+            }
+        }
+    }
+
+    /// <summary>
+    /// xlsx の大きさの検査結果と、検査で得た実寸（Issue #2272。ログに残すため）
+    /// </summary>
+    public sealed class XlsxPackageSizeResult
+    {
+        internal XlsxPackageSizeResult(XlsxPackageSizeCheck status, long? fileBytes, long? declaredExpandedBytes)
+        {
+            Status = status;
+            FileBytes = fileBytes;
+            DeclaredExpandedBytes = declaredExpandedBytes;
+        }
+
+        /// <summary>検査結果</summary>
+        public XlsxPackageSizeCheck Status { get; }
+
+        /// <summary>ファイルの大きさ（バイト。調べられなかったときは null）</summary>
+        public long? FileBytes { get; }
+
+        /// <summary>全パートの展開後サイズの宣言値の合計（バイト。ファイルが大きすぎて ZIP を開かなかった・読めなかったときは null）</summary>
+        public long? DeclaredExpandedBytes { get; }
+
+        /// <summary>上限を超えた（開いてはならない）</summary>
+        public bool IsTooLarge =>
+            Status == XlsxPackageSizeCheck.FileTooLarge || Status == XlsxPackageSizeCheck.ExpandedTooLarge;
+
+        internal static XlsxPackageSizeResult Undetermined(long? fileBytes) =>
+            new XlsxPackageSizeResult(XlsxPackageSizeCheck.Undetermined, fileBytes, null);
     }
 }
