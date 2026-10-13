@@ -25,7 +25,7 @@ namespace ICCardManager.Tests.Services;
 /// <para>
 /// <c>RepairLentStatusConsistencyAsync</c> は<b>起動時に毎回</b>実行され、共有モードでは
 /// 他 PC の返却が反映されていない状態で不整合が起きやすい。ログファイルは業務 PC 上の
-/// 平文ファイルであり（インストーラが <c>users-full</c> ACL を付与）、IDm を生で残すことは
+/// 平文ファイルであり（インストーラが Users の「変更」を付与）、IDm を生で残すことは
 /// CWE-532 に当たる（Issue #1704 で <c>IdmMasker</c> を導入した理由）。
 /// </para>
 /// <para>

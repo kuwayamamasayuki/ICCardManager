@@ -1,6 +1,14 @@
 ﻿; ICCardManager インストーラースクリプト
-; Inno Setup 6.x 用
+; Inno Setup 6.7.0 以降用
 ; バージョンはコマンドラインから /DMyAppVersion=x.y.z で指定可能
+
+; Issue #2261: Inno Setup 6.7.0 より古い版ではビルドしない。
+; データフォルダー（C:\ProgramData\ICCardManager）の保護は、6.7.0 の DelTree がジャンクションの中へ降りないこと（実測）と、
+; 6.7.0 から Setup / Uninstall が既定で Windows の RedirectionGuard（一般ユーザーが作ったジャンクション・シンボリックリンクを
+; 辿らない）を有効にすることを前提にしている（開発者ガイド §5.4）。
+#if VER < EncodeVer(6, 7, 0)
+  #error Inno Setup 6.7.0 以降でビルドしてください（Issue #2261: データフォルダーの保護が 6.7.0 の DelTree と RedirectionGuard に依存するため）。https://jrsoftware.org/isdl.php から最新版を入れてください。
+#endif
 
 #define MyAppName "交通系ICカード管理システム：ピッすい"
 #define MyAppNameEn "ICCardManager"
@@ -59,11 +67,18 @@ Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{
 Name: "autostart"; Description: "Auto-start at Windows login"; GroupDescription: "{cm:AdditionalIcons}"
 
 [Dirs]
-; データディレクトリ（C:\ProgramData\ICCardManager）にUsersフルコントロールを設定
-; 複数の職員（Windowsユーザー）が同一PCで利用するため全ユーザーにアクセスを許可
-Name: "{commonappdata}\ICCardManager"; Permissions: users-full
-Name: "{commonappdata}\ICCardManager\backup"; Permissions: users-full
-Name: "{commonappdata}\ICCardManager\Logs"; Permissions: users-full
+; データディレクトリ（C:\ProgramData\ICCardManager）とその backup・Logs（Issue #2261）
+; アクセス権はここ（Permissions）では指定せず、PrepareToInstall（HardenDataDirectory）が icacls で設定する。
+; - 複数の職員（Windowsユーザー）が同一PCで利用するため、配下には Users の「変更」を継承で与える。
+; - 「フルコントロール」（users-full）にはしない。「変更」との差はアクセス許可の変更（WRITE_DAC）と所有権の取得で、
+;   どちらもアプリの動作には要らない。付与すると一般ユーザーがフォルダーの ACL や所有者を握れる。
+; - users-modify も使わない。フォルダー自体へ削除（DELETE）が付き、一般ユーザーがフォルダーを改名して同名の
+;   ジャンクションを作り、昇格したインストーラー／アンインストーラーの書き込み・削除を任意の場所へ向け得る。
+;   Inno は既存のフォルダーにも Permissions を足す（足すだけで、旧版が付けた Users:F も外さない）ため、
+;   ここで指定すると HardenDataDirectory が外した DELETE を足し戻してしまう。
+Name: "{commonappdata}\ICCardManager"
+Name: "{commonappdata}\ICCardManager\backup"
+Name: "{commonappdata}\ICCardManager\Logs"
 
 [InstallDelete]
 ; 配布物から外した DLL を、上書きインストール時に既存のフォルダーから消す（[Files] のワイルドカードは追加・上書きしかしない）。
@@ -187,6 +202,281 @@ var
   MappedDriveLetters: TArrayOfString;
   MappedDriveRemotePaths: TArrayOfString;
   MappedDriveCount: Integer;
+
+// =============================================
+// Issue #2261: データフォルダー（{commonappdata}\ICCardManager）の保護
+// =============================================
+// 一般ユーザーはこのフォルダーの中身を作成・書き換え・削除できる（HardenDataDirectory が配下へ「変更」を継承で与える）。
+// 中のフォルダー（backup・Logs）やファイルをジャンクション（＋オブジェクトマネージャーのシンボリックリンク）・
+// ハードリンクへ差し替えられると、
+// 昇格したインストーラー／アンインストーラーの書き込み・削除（設定ファイル・DelTree）が任意の場所へ向く。
+// 昇格中に書き込み・削除する前に、ProgramData から対象までの各段が再解析ポイントでないことを確かめる。
+const
+  IccmFileAttributeDirectory = $10;      // FILE_ATTRIBUTE_DIRECTORY
+  IccmFileAttributeReparsePoint = $400;  // FILE_ATTRIBUTE_REPARSE_POINT
+
+// 戻り値は INVALID_FILE_ATTRIBUTES（$FFFFFFFF）を -1 として比べられるよう Integer で受ける
+function IccmGetFileAttributes(lpFileName: string): Integer;
+  external 'GetFileAttributesW@kernel32.dll stdcall';
+
+// パス自体（最後の要素）が再解析ポイントか。存在しないパスは False。
+// FileExists / DirExists はリンク先を辿るため、リンク先の無いジャンクションを「存在しない」と見誤る。
+// GetFileAttributes は最後の要素を辿らずにリンク自身の属性を返すので、存在確認を前置しない。
+function IsReparsePoint(const Path: string): Boolean;
+var
+  Attr: Integer;
+begin
+  Attr := IccmGetFileAttributes(Path);
+  Result := (Attr <> -1) and ((Attr and IccmFileAttributeReparsePoint) <> 0);
+end;
+
+// ProgramData から Path までの各段（ProgramData・データフォルダー・その下の各要素）のどれかが再解析ポイントか。
+// Path が ProgramData の配下でなければ判定できないので True（危険）へ倒す。
+function DataPathHasReparsePoint(const Path: string): Boolean;
+var
+  Base, Rest, Current: string;
+  P: Integer;
+begin
+  Base := ExpandConstant('{commonappdata}');
+  Result := IsReparsePoint(Base);
+  if Result then
+    Exit;
+
+  if CompareText(Copy(Path, 1, Length(Base) + 1), AddBackslash(Base)) <> 0 then
+  begin
+    Result := True;
+    Exit;
+  end;
+
+  Rest := Copy(Path, Length(Base) + 2, Length(Path));
+  Current := Base;
+  while Rest <> '' do
+  begin
+    P := Pos('\', Rest);
+    if P = 0 then
+    begin
+      Current := Current + '\' + Rest;
+      Rest := '';
+    end
+    else
+    begin
+      Current := Current + '\' + Copy(Rest, 1, P - 1);
+      Rest := Copy(Rest, P + 1, Length(Rest));
+    end;
+
+    if IsReparsePoint(Current) then
+    begin
+      Result := True;
+      Exit;
+    end;
+  end;
+end;
+
+// TreeReparseState の結果
+const
+  IccmTreeClean = 0;       // 再解析ポイントは無く、すべて列挙できた
+  IccmTreeReparse = 1;     // 再解析ポイントがある
+  IccmTreeUnreadable = 2;  // 再解析ポイントは見つからないが、列挙できないフォルダーがある
+
+// Dir 自身とその配下（ファイル・サブフォルダーを再帰的に）を調べる。再解析ポイントの中へは入らない。
+// 再解析ポイントを見つけたら IccmTreeReparse。見つからないが、存在するフォルダーの中身を列挙できない
+// （管理者の一覧取得を拒否する ACL 等）ところがあれば IccmTreeUnreadable。
+function TreeReparseState(const Dir: string): Integer;
+var
+  FindRec: TFindRec;
+  Found: Boolean;
+  Child: Integer;
+begin
+  Result := IccmTreeClean;
+  if IsReparsePoint(Dir) then
+  begin
+    Result := IccmTreeReparse;
+    Exit;
+  end;
+
+  // 存在しないパスは検査するものが無い
+  if IccmGetFileAttributes(Dir) = -1 then
+    Exit;
+
+  // 空のフォルダーでも「.」と「..」が見つかるので、見つからないのは列挙できないとき
+  Found := FindFirst(AddBackslash(Dir) + '*', FindRec);
+  if not Found then
+  begin
+    Log('フォルダーの中身を確認できません: ' + Dir);
+    Result := IccmTreeUnreadable;
+    Exit;
+  end;
+  try
+    while Found and (Result <> IccmTreeReparse) do
+    begin
+      if (FindRec.Name <> '.') and (FindRec.Name <> '..') then
+      begin
+        if (FindRec.Attributes and IccmFileAttributeReparsePoint) <> 0 then
+          Result := IccmTreeReparse
+        else if (FindRec.Attributes and IccmFileAttributeDirectory) <> 0 then
+        begin
+          Child := TreeReparseState(AddBackslash(Dir) + FindRec.Name);
+          if Child <> IccmTreeClean then
+            Result := Child;
+        end;
+      end;
+      if Result <> IccmTreeReparse then
+        Found := FindNext(FindRec);
+    end;
+  finally
+    FindClose(FindRec);
+  end;
+end;
+
+// Dir 自身とその配下に再解析ポイントがあるか。
+// 列挙できないフォルダーがあるときも True（危険）へ倒す（fail-closed）。列挙できない中に置かれたジャンクションを
+// 「リンクなし」と見誤ると、アンインストールの DelTree や、その後の書き込みがリンク先へ向き得る。
+function TreeHasReparsePoint(const Dir: string): Boolean;
+begin
+  Result := TreeReparseState(Dir) <> IccmTreeClean;
+end;
+
+// 昇格中に Path（データフォルダー配下のファイル・フォルダー）へ書き込み・削除してよいか。
+// 再解析ポイントが立っていれば書き込みを見送り、ログに残す（インストール自体は PrepareToInstall が先に止める。
+// ここは検査から書き込みまでの間に差し替えられた場合の多重防御）。
+function IsDataPathSafe(const Path: string): Boolean;
+begin
+  Result := not DataPathHasReparsePoint(Path);
+  if not Result then
+    Log('データフォルダーの経路にジャンクションまたはシンボリックリンクがあるため、書き込み・削除を見送りました: ' + Path);
+end;
+
+// データフォルダー配下のファイルを消す。経路に再解析ポイントがあれば消さない。
+// 戻り値: 消した、または元から無ければ True。
+function DeleteDataFile(const Path: string): Boolean;
+begin
+  Result := False;
+  if not IsDataPathSafe(Path) then
+    Exit;
+  if FileExists(Path) then
+    Result := DeleteFile(Path)
+  else
+    Result := True;
+end;
+
+// データフォルダー配下のファイルへ書き込む。
+// 既存のファイルは消してから新しく作る。SaveStringToFile は既存のファイルを開いて書くため、
+// 一般ユーザーが置いたハードリンクならリンク先のファイルを書き換えてしまう（DeleteFile はリンクだけを消す）。
+function WriteDataFile(const Path, Value: string): Boolean;
+begin
+  Result := False;
+  if not DeleteDataFile(Path) then
+  begin
+    Log('既存のファイルを消せないため、書き込みを見送りました: ' + Path);
+    Exit;
+  end;
+  if not IsDataPathSafe(Path) then
+    Exit;
+  Result := SaveStringToFile(Path, Value, False);
+end;
+
+// icacls を実行し、終了コード 0 なら True
+function RunIcacls(const Params: string): Boolean;
+var
+  ResultCode: Integer;
+begin
+  Result := Exec(ExpandConstant('{sys}\icacls.exe'), Params, '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  if Result then
+  begin
+    Log('icacls ' + Params + ' → exit code=' + IntToStr(ResultCode));
+    Result := (ResultCode = 0);
+  end
+  else
+    Log('icacls の起動に失敗しました: ' + Params);
+end;
+
+// データフォルダーの所有者を Administrators に固定し、ACL を作り直す（Issue #2261）。
+// - 旧版の [Dirs] users-full と、旧版のアプリ（ErrorDialogHelper）が Logs へ付けた Users:F は、
+//   [Dirs] の Permissions（追加しかしない）では外れない。/reset で明示的な ACE を消して継承だけに戻す。
+// - ProgramData は一般ユーザーもフォルダーを作れるため、初回インストール前に作られたフォルダーは
+//   所有者が作った本人のまま残る（所有者は ACL を戻されても書き換えられる）。/setowner で取り上げる。
+// - フォルダー自体には Users の削除（DELETE）を与えない。与えると一般ユーザーがフォルダーを改名して
+//   同名のジャンクションを作れ、安全性の確認から書き込み・削除までの間に差し替えられ得る。
+//   フォルダー自体へは「読み取り・実行＋ファイルの作成＋フォルダーの作成」（このフォルダーのみ）、
+//   配下へは「変更」を継承だけで与える（DB・ジャーナル・設定ファイル・backup・Logs は自身の DELETE で消せる）。
+//   このため [Dirs] では Permissions を指定しない（Inno は既存のフォルダーにも Permissions を足し、
+//   users-modify はフォルダー自体へ DELETE を足し戻す）。新規インストールでもここでフォルダーを作る。
+// 戻り値: 空文字なら続行、空でなければインストールを中止してその文言を表示する。
+function HardenDataDirectory(): String;
+var
+  Root: string;
+begin
+  Result := '';
+  Root := ExpandConstant('{commonappdata}\ICCardManager');
+
+  if not IsDataPathSafe(Root) then
+  begin
+    Result := 'データフォルダー（' + Root + '）がジャンクションまたはシンボリックリンクになっています。' + #13#10 +
+              'このままでは管理者の権限で意図しない場所のファイルを書き換え・削除するおそれがあるため、インストールを中止しました。' + #13#10 +
+              'エクスプローラーでこのリンクを削除してから（データを残す場合は通常のフォルダーへ移してから）、もう一度インストールしてください。';
+    Exit;
+  end;
+
+  // 新規インストール: 昇格したインストーラー（所有者 Administrators）で作る
+  if not DirExists(Root) then
+    CreateDir(Root);
+  if (not DirExists(Root)) or DataPathHasReparsePoint(Root) then
+  begin
+    Result := 'データフォルダー（' + Root + '）を作成できませんでした。' + #13#10 +
+              '同じ名前のファイルやリンクがあるか、C:\ProgramData へ書き込めない可能性があります。' + #13#10 +
+              'エクスプローラーで C:\ProgramData の中を確認し、同じ名前のファイルやリンクを削除してから、もう一度インストールしてください。';
+    Exit;
+  end;
+
+  // 0) 配下を、フォルダー自体の ACL を変える前にも検査する。リンクがあれば何も変えずに中止する。
+  //    列挙できないだけなら、フォルダー自体の所有者を固定して ACL を作り直した後で 2) が改めて検査する
+  //    （所有者の固定前は、管理者が列挙できない ACL にされ得る）。
+  //    なお、フォルダー自体へ継承できる ACE を設定しても、直下のジャンクションのリンク先の ACL は変わらない
+  //    （継承はジャンクション自体で止まる。非昇格で実測）。ここで止めるのはそれに頼らないための多重防御。
+  if TreeReparseState(Root) = IccmTreeReparse then
+  begin
+    Result := 'データフォルダー（' + Root + '）の中に、ジャンクションまたはシンボリックリンクがあります。' + #13#10 +
+              'このままでは管理者の権限で意図しない場所のファイルを書き換え・削除するおそれがあるため、インストールを中止しました。' + #13#10 +
+              'エクスプローラーでフォルダーの中のリンクを削除してから、もう一度インストールしてください。';
+    Exit;
+  end;
+
+  // 1) フォルダー自体: 所有者を固定 → 明示的な ACE を消して継承へ戻す
+  //    → 配下へ「変更」を継承だけで付与 → フォルダー自体へ「読み取り・実行＋ファイル／フォルダーの作成」を付与
+  //    （所有者を先に固定するのは、ACL で管理者が締め出されていても所有者として ACL を書き換えられるようにするため）
+  if not (RunIcacls('"' + Root + '" /setowner *S-1-5-32-544 /L /Q') and
+          RunIcacls('"' + Root + '" /reset /L /Q') and
+          RunIcacls('"' + Root + '" /grant:r *S-1-5-32-545:(OI)(CI)(IO)M /L /Q') and
+          RunIcacls('"' + Root + '" /grant *S-1-5-32-545:(RX,WD,AD) /L /Q')) then
+  begin
+    Result := 'データフォルダー（' + Root + '）のアクセス権を設定し直せませんでした。' + #13#10 +
+              '一般ユーザーにフルコントロールが残るおそれがあるため、インストールを中止しました。' + #13#10 +
+              '管理者としてインストーラーを実行しているか確認し、ピッすいを終了してから、もう一度インストールしてください。';
+    Exit;
+  end;
+
+  // 2) 配下: フォルダー自体の所有者を固定した後で改めて検査する（固定前は列挙できない ACL にされ得る）
+  if TreeHasReparsePoint(Root) then
+  begin
+    Result := 'データフォルダー（' + Root + '）の中に、ジャンクション・シンボリックリンク、または中身を確認できないフォルダーがあります。' + #13#10 +
+              'このままでは管理者の権限で意図しない場所のファイルを書き換え・削除するおそれがあるため、インストールを中止しました。' + #13#10 +
+              'エクスプローラーでフォルダーの中のリンクを削除し、開けないフォルダーは所有権を取得して中身を確認してから、もう一度インストールしてください。';
+    Exit;
+  end;
+
+  // 3) 直下（backup・Logs・データベース・設定ファイル）: 所有者の固定と継承への戻し。
+  //    再帰（/T）は使わない。icacls の /T は /L を付けてもジャンクションの中へ降りる（実測）ため、2) の検査の後に
+  //    一般ユーザーが backup や Logs を（継承した「変更」の DELETE で）改名してジャンクションへ差し替えると、
+  //    リンク先のツリーへ管理者権限で /setowner・/reset が掛かる。/T を付けなければ直下の各要素だけを処理し、
+  //    直下がジャンクションでも /L によりリンク自体を処理する（リンク先には及ばない）。
+  //    旧版が明示的な ACE を付けたのはデータフォルダー・backup・Logs のフォルダー自体と、ごく古い版の DB ファイル
+  //    （いずれもデータフォルダーの直下まで）なので、直下までで足りる。その下のファイルは継承だけを持つ。
+  //    使用中のファイル等で一部が失敗しても続行し（/C）、ログに残す（フォルダー自体の ACL は 1) で確定済み）
+  if not RunIcacls('"' + Root + '\*" /setowner *S-1-5-32-544 /C /L /Q') then
+    Log('データフォルダー配下の所有者の固定に一部失敗しました（続行）');
+  if not RunIcacls('"' + Root + '\*" /reset /C /L /Q') then
+    Log('データフォルダー配下のアクセス権の作り直しに一部失敗しました（続行）');
+end;
 
 // 既存の設定ファイルを読み込む（アップグレード時のデフォルト値として使用）
 // LoadStringsFromFile（TArrayOfString版）は内部でTStringList.LoadFromFileを使い、
@@ -573,7 +863,6 @@ var
   DepartmentValue: string;
 begin
   ConfigDir := ExpandConstant('{commonappdata}\ICCardManager');
-  ForceDirectories(ConfigDir);
   ConfigFile := ConfigDir + '\department_config.txt';
 
   if DepartmentPage.SelectedValueIndex = 1 then
@@ -581,7 +870,11 @@ begin
   else
     DepartmentValue := 'mayor_office';
 
-  SaveStringToFile(ConfigFile, DepartmentValue, False);
+  // Issue #2261: 経路に再解析ポイントがあれば、フォルダーの作成も書き込みもしない
+  if not IsDataPathSafe(ConfigDir) then
+    Exit;
+  ForceDirectories(ConfigDir);
+  WriteDataFile(ConfigFile, DepartmentValue);
 end;
 
 // DB保存先選択結果を設定ファイルに書き出す
@@ -611,17 +904,20 @@ begin
   // 残った共有フォルダ設定を確実に削除する。削除せず Exit するだけだと、旧パス（例: V:\...）が
   // database_config.txt に残存し、ローカル運用を選んだのに起動時へ伝播して共有モードのまま
   // アクセスエラーになる（database_config.txt が無い＝ローカル既定、が正しい挙動）。
+  // Issue #2261: 削除・書き込みの前に、経路に再解析ポイントが無いことを確かめる
+  // （ここが昇格中の任意ファイル削除に使われ得る経路だった）
   if (not IsShared) or (SharedPath = '') then
   begin
-    if FileExists(ConfigFile) then
-      DeleteFile(ConfigFile);
+    DeleteDataFile(ConfigFile);
     Exit;
   end;
 
   // 共有フォルダ: フォルダパス + ファイル名 を書き出す
   FullDbPath := AddBackslash(SharedPath) + 'iccard.db';
+  if not IsDataPathSafe(ConfigDir) then
+    Exit;
   ForceDirectories(ConfigDir);
-  SaveStringToFile(ConfigFile, FullDbPath, False);
+  WriteDataFile(ConfigFile, FullDbPath);
 end;
 
 // 帳票出力先選択結果を設定ファイルに書き出す
@@ -639,10 +935,13 @@ begin
     Exit;
 
   ConfigDir := ExpandConstant('{commonappdata}\ICCardManager');
-  ForceDirectories(ConfigDir);
   ConfigFile := ConfigDir + '\report_output_config.txt';
 
-  SaveStringToFile(ConfigFile, OutputPath, False);
+  // Issue #2261: 経路に再解析ポイントがあれば、フォルダーの作成も書き込みもしない
+  if not IsDataPathSafe(ConfigDir) then
+    Exit;
+  ForceDirectories(ConfigDir);
+  WriteDataFile(ConfigFile, OutputPath);
 end;
 
 // DB保存先・帳票出力先ページのバリデーション（「次へ」ボタン押下時に呼ばれる）
@@ -750,6 +1049,14 @@ begin
   end;
 end;
 
+// インストール開始前（ファイルのコピー・[Dirs] の処理より前）に呼ばれる。
+// 空でない文字列を返すとインストールを中止し、その文言を表示する。
+// Issue #2261: 既存のデータフォルダーの所有者を固定して ACL を作り直し、再解析ポイントがあれば中止する
+function PrepareToInstall(var NeedsRestart: Boolean): String;
+begin
+  Result := HardenDataDirectory();
+end;
+
 procedure CurStepChanged(CurStep: TSetupStep);
 begin
   if CurStep = ssPostInstall then
@@ -768,6 +1075,24 @@ begin
     end;
     WriteDatabaseConfig();
     WriteReportOutputConfig();
+  end;
+end;
+
+// アンインストール時に Dir を DelTree してよいか（Issue #2261）。
+// ProgramData から Dir までの経路と、Dir の配下すべてに再解析ポイントが無く、配下をすべて列挙できたときだけ True。
+// 見つけたら削除せず、残したフォルダーを案内する。
+function IsDataTreeSafeToDelete(const Dir: string): Boolean;
+begin
+  Result := not (DataPathHasReparsePoint(Dir) or TreeHasReparsePoint(Dir));
+  if not Result then
+  begin
+    Log('ジャンクション・シンボリックリンク、または中身を確認できないフォルダーがあるため削除しませんでした: ' + Dir);
+    if not UninstallSilent then
+      MsgBox('次のフォルダーの中に、ジャンクション・シンボリックリンク、または中身を確認できないフォルダーがあるため、削除しませんでした。' + #13#10 +
+             Dir + #13#10 + #13#10 +
+             '管理者の権限でリンク先のファイルまで削除するおそれがあるためです。' + #13#10 +
+             'エクスプローラーでリンクを削除し、開けないフォルダーは中身を確認してから、このフォルダーを手動で削除してください。',
+             mbInformation, MB_OK);
   end;
 end;
 
@@ -830,18 +1155,21 @@ begin
       ButtonLabels,
       0);
 
+    // Issue #2261: 昇格したアンインストーラーの DelTree がジャンクションを辿って任意の場所を消さないよう、
+    // 削除する範囲（ProgramData からの経路と配下すべて）に再解析ポイントがあれば削除しない
     case ButtonResult of
       IDYES:
         begin
           // すべて削除
-          DelTree(AppDataPath, True, True, True);
+          if IsDataTreeSafeToDelete(AppDataPath) then
+            DelTree(AppDataPath, True, True, True);
         end;
       IDNO:
         begin
           // バックアップとログのみ削除（ユーザーデータは残す）
-          if BackupExists then
+          if BackupExists and IsDataTreeSafeToDelete(BackupPath) then
             DelTree(BackupPath, True, True, True);
-          if LogsExists then
+          if LogsExists and IsDataTreeSafeToDelete(LogsPath) then
             DelTree(LogsPath, True, True, True);
         end;
       // IDCANCEL: 何も削除しない

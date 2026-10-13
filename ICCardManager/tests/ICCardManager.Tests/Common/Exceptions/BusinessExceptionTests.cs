@@ -240,7 +240,7 @@ public class BusinessExceptionTests
 
     /// <summary>
     /// Issue #1986（コードレビューで検出）: 例外の <c>Message</c> は <c>FileLogger</c> が
-    /// 平文のログファイル（users-full ACL）へ書き出すため、IDm はマスクを通す（#1852 / CWE-532）。
+    /// 平文のログファイル（全ユーザーが読める ACL）へ書き出すため、IDm はマスクを通す（#1852 / CWE-532）。
     /// 呼び出し元の <c>LogError</c> がテンプレート引数側でマスクしていても、
     /// 同じ行に生の値が並べば意味がない。
     /// </summary>
