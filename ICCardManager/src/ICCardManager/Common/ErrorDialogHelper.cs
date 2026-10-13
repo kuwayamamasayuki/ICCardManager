@@ -5,8 +5,6 @@ using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
 using System.Linq;
-using System.Security.AccessControl;
-using System.Security.Principal;
 using System.Threading.Tasks;
 using System.Windows;
 using ICCardManager.Common.Exceptions;
@@ -241,7 +239,7 @@ namespace ICCardManager.Common
         {
             try
             {
-                EnsureLogDirectoryWithPermissions();
+                EnsureLogDirectoryExists();
 
                 var logFileName = $"error_{DateTime.Now.ToString("yyyyMMdd", CultureInfo.InvariantCulture)}.log";
                 var logFilePath = Path.Combine(LogDirectory, logFileName);
@@ -291,31 +289,21 @@ namespace ICCardManager.Common
         }
 
         /// <summary>
-        /// ログディレクトリを作成し、全ユーザーがアクセスできるように権限を設定
+        /// ログディレクトリが存在することを保証する（なければ作成する）。アクセス権は変更しない。
         /// </summary>
-        private static void EnsureLogDirectoryWithPermissions()
+        /// <remarks>
+        /// Issue #2261: 旧名は <c>EnsureLogDirectoryWithPermissions</c> で、エラーを記録するたびに
+        /// <c>BUILTIN\Users : FullControl</c>（継承あり）を <c>AddAccessRule</c> で付与していた。
+        /// <c>Data/DbContext.cs</c> の同じ付与は Issue #1455 で撤廃済みで、こちらだけが残っていた。
+        /// フルコントロールはアクセス許可の変更と所有権の取得を含むため、一般ユーザーがフォルダーの ACL を
+        /// 握り、昇格したインストーラー／アンインストーラーの書き込み・削除をジャンクションで任意の場所へ
+        /// 向ける足掛かりになる。全ユーザーが書き込めるための権限（Users の「変更」）はインストーラー
+        /// （<c>installer/ICCardManager.iss</c> の <c>Permissions: users-modify</c>）が付与する。
+        /// </remarks>
+        private static void EnsureLogDirectoryExists()
         {
-            try
-            {
-                Directory.CreateDirectory(LogDirectory);
-
-                var directoryInfo = new DirectoryInfo(LogDirectory);
-                var directorySecurity = directoryInfo.GetAccessControl();
-                var usersIdentity = new SecurityIdentifier(WellKnownSidType.BuiltinUsersSid, null);
-                var accessRule = new FileSystemAccessRule(
-                    usersIdentity,
-                    FileSystemRights.FullControl,
-                    InheritanceFlags.ContainerInherit | InheritanceFlags.ObjectInherit,
-                    PropagationFlags.None,
-                    AccessControlType.Allow);
-                directorySecurity.AddAccessRule(accessRule);
-                directoryInfo.SetAccessControl(directorySecurity);
-            }
-            catch
-            {
-                // 権限設定に失敗してもディレクトリ作成は試みる
-                Directory.CreateDirectory(LogDirectory);
-            }
+            // Directory.CreateDirectory は既存のディレクトリに対しても安全（冪等）
+            Directory.CreateDirectory(LogDirectory);
         }
     }
 }

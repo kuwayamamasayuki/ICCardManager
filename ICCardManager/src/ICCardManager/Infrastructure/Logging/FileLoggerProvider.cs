@@ -1,3 +1,5 @@
+#nullable enable
+
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
@@ -296,7 +298,7 @@ namespace ICCardManager.Infrastructure.Logging
         /// 旧名は <c>EnsureDirectoryWithPermissions</c>。Issue #1455 でランタイム ACL 設定を撤廃した結果、
         /// 実体が <c>Directory.CreateDirectory</c> の薄いラッパーとなったため、Issue #1499 で
         /// 命名と挙動の乖離を解消するためにリネームした。インストーラーが
-        /// <c>{commonappdata}\ICCardManager\Logs</c> に <c>Permissions: users-full</c> を
+        /// <c>{commonappdata}\ICCardManager\Logs</c> に <c>Permissions: users-modify</c> を
         /// 設定済みのため、ランタイムでの権限再付与は不要。
         /// 詳細は <see cref="ICCardManager.Data.DbContext.EnsureDirectoryExists"/> 参照。
         /// </remarks>
