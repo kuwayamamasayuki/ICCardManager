@@ -1139,6 +1139,341 @@ jobs:
 
     #endregion
 
+    #region ⑦トークンの権限と run への式の展開（Issue #2271）
+
+    /// <summary>
+    /// ジョブ単位で書き込み権限を与えてよい組（ワークフロー・ジョブ・スコープ）と、その理由。
+    /// 最上位は読み取りだけを宣言し、書き込みが要るジョブだけがここに載せたうえで広げる（Issue #2271）。
+    /// </summary>
+    private static readonly (string Workflow, string Job, string Scope, string Reason)[] AllowedWritePermissions =
+    {
+        ("release.yml", "build-release", "contents", "GitHub Release の作成と ZIP の添付（softprops/action-gh-release）"),
+    };
+
+    /// <summary>
+    /// <c>run:</c> の中の式で参照してよいコンテキスト。値がワークフローのファイルかランナー自身で決まり、
+    /// push した人やイベントの内容が入り込まないものに限る（Issue #2271）。
+    /// </summary>
+    /// <remarks>
+    /// <c>env</c> と <c>steps</c> も載せない。<c>env: REF_NAME: ${{ github.ref_name }}</c> の値を
+    /// <c>${{ env.REF_NAME }}</c> で run へ展開すれば、環境変数で渡した意味が無くなる（<c>steps.*.outputs</c> も同じ）。
+    /// 外から来る値は <c>env:</c> で渡し、スクリプトの中では <c>$env:NAME</c>（pwsh）／<c>"$NAME"</c>（bash）で読む。
+    /// </remarks>
+    private static readonly HashSet<string> ContextsAllowedInRun = new(StringComparer.Ordinal) { "matrix", "strategy", "runner" };
+
+    /// <summary>
+    /// 検出ロジックを既知の入力で固定する（#1786）。実データは是正後にすべて適合するため、それだけでは
+    /// 「宣言を読めていない」「run を 1 つも取り出せていない」誤りと区別できない。
+    /// </summary>
+    [Fact]
+    public void 検出ロジックがpermissionsの宣言を読めること()
+    {
+        const string workflow =
+            "name: X\n" +
+            "\n" +
+            "# permissions: write-all はコメントでは数えない\n" +
+            "permissions:\n" +
+            "  contents: read\n" +
+            "  # pull-requests: write\n" +
+            "  actions: none # 理由\n" +
+            "\n" +
+            "jobs:\n" +
+            "  build:\n" +
+            "    runs-on: windows-latest\n" +
+            "    permissions:\n" +
+            "      contents: write\n" +
+            "\n" +
+            "    steps:\n" +
+            "    - name: Checkout\n" +
+            "      uses: x\n" +
+            "  other:\n" +
+            "    permissions: write-all\n" +
+            "    steps:\n" +
+            "    - run: echo\n";
+
+        var topLevel = ExtractPermissions(workflow, 0);
+        topLevel.Should().NotBeNull();
+        topLevel!.Should().BeEquivalentTo(new Dictionary<string, string> { ["contents"] = "read", ["actions"] = "none" },
+            "コメント行・行末コメントは権限として数えず、次の最上位のキー（jobs:）で止まる");
+        IsReadOnly(topLevel!).Should().BeTrue();
+
+        var jobs = ExtractJobs(workflow);
+        ExtractPermissions(jobs["build"], 4).Should().BeEquivalentTo(new Dictionary<string, string> { ["contents"] = "write" });
+        ExtractPermissions(jobs["other"], 4).Should().BeEquivalentTo(new Dictionary<string, string> { ["*"] = "write-all" },
+            "1 行の形（write-all / read-all）はスコープ「*」として返す");
+        ExtractPermissions(jobs["build"], 0).Should().BeNull("ジョブの宣言を最上位の宣言と取り違えない");
+        ExtractPermissions("name: X\njobs:\n  a:\n    permissions:\n      contents: read\n", 0).Should().BeNull(
+            "最上位に宣言が無いワークフローを、ジョブの宣言で「ある」とみなさない");
+
+        IsReadOnly(new Dictionary<string, string> { ["contents"] = "read", ["checks"] = "write" }).Should().BeFalse();
+        IsReadOnly(new Dictionary<string, string> { ["*"] = "read-all" }).Should().BeFalse(
+            "read-all は使わないスコープまで読めるようにする。必要なスコープを列挙して宣言する");
+        IsReadOnly(new Dictionary<string, string>()).Should().BeFalse("何も宣言しない形は、contents: read を欠いて checkout が失敗し得る");
+    }
+
+    [Fact]
+    public void 検出ロジックがrunへの式の直接展開を検出できること()
+    {
+        const string workflow =
+            "jobs:\n" +
+            "  a:\n" +
+            "    env:\n" +
+            "      REF_NAME: ${{ github.ref_name }}\n" +
+            "    defaults:\n" +
+            "      run:\n" +
+            "        working-directory: ${{ github.workspace }}\n" +
+            "    steps:\n" +
+            "    - name: One line\n" +
+            "      run: echo ${{ github.ref_name }}\n" +
+            "    - name: Block\n" +
+            "      if: startsWith(github.ref_name, 'v')\n" +
+            "      run: |\n" +
+            "        $v = \"${{ github.head_ref }}\"\n" +
+            "        Write-Host ${{ matrix.configuration }}\n" +
+            "      shell: pwsh\n" +
+            "    - run: >-\n" +
+            "        echo ${{ inputs.tag }}\n" +
+            "    # - run: echo ${{ github.event.pull_request.title }}\n" +
+            "    - name: Safe\n" +
+            "      run: dotnet build ${{ matrix.configuration == 'Release' && '--collect:\"github.ref\"' || '' }} \"$env:REF_NAME\"\n" +
+            "    - name: Release\n" +
+            "      uses: x\n" +
+            "      with:\n" +
+            "        name: ${{ github.ref_name }}\n";
+
+        var scripts = ExtractRunScripts(workflow);
+        scripts.Should().HaveCount(4, "1 行の run・run: |・run: >-（- run: の形も）を拾い、コメント行と defaults: の run: は数えない");
+        scripts[1].Should().Contain("Write-Host").And.NotContain("shell: pwsh", "ブロックは run: より深い字下げの行までで、同じ字下げの shell: で止まる");
+
+        string[] Roots(string expression) => ExtractContextRoots(expression).ToArray();
+
+        Roots("${{ github.ref_name }}").Should().Equal("github");
+        Roots("${{ github.event.pull_request.title }}").Should().Equal("github");
+        Roots("${{ github['head_ref'] }}").Should().Equal(new[] { "github" }, "添字の形も根のコンテキストで判定する");
+        Roots("${{ inputs.tag }}").Should().Equal("inputs");
+        Roots("${{ env.REF_NAME }}").Should().Equal("env");
+        Roots("${{ steps.version.outputs.VERSION }}").Should().Equal("steps");
+        Roots("${{ format('{0}-{1}', github.ref_name, matrix.os) }}").Should().Equal(new[] { "github", "matrix" },
+            "関数名は数えず、引数の中のコンテキストを数える");
+        Roots("${{ matrix.configuration == 'Release' && '--collect:\"github.ref\"' || '' }}").Should().Equal(new[] { "matrix" },
+            "文字列リテラルの中の語はコンテキストではない");
+        Roots("${{ true && matrix.my-key }}").Should().Equal(new[] { "matrix" }, "true / false / null はリテラル");
+
+        UntrustedExpansions(workflow).Should().Equal(
+            "echo ${{ github.ref_name }}",
+            "$v = \"${{ github.head_ref }}\"",
+            "echo ${{ inputs.tag }}");
+    }
+
+    /// <summary>
+    /// すべてのワークフローが最上位で <c>GITHUB_TOKEN</c> の権限を読み取りに限ること（Issue #2271）。
+    /// 宣言が無いと、トークンはリポジトリ設定の既定の権限（設定によっては write）で動く。
+    /// フォークからの PR のトークンは常に読み取り専用だが、push・schedule・手動実行のトークンは既定に従う。
+    /// </summary>
+    [Fact]
+    public void すべてのワークフローの最上位でGITHUB_TOKENの権限が読み取りに限られていること()
+    {
+        var checkedWorkflows = new List<string>();
+        foreach (var (file, content) in AllWorkflows())
+        {
+            checkedWorkflows.Add(file);
+            var permissions = ExtractPermissions(content, 0);
+            permissions.Should().NotBeNull(
+                $"{file} に最上位の permissions: が無いと、既定のトークン権限（設定によっては write）で動く。" +
+                "「permissions:」の下に「contents: read」を宣言すること（Issue #2271）");
+            IsReadOnly(permissions!).Should().BeTrue(
+                $"{file} の最上位の permissions: は read / none だけにし、contents: read を含める。" +
+                $"書き込みが要るジョブだけジョブ単位で広げる（現在: {string.Join(", ", permissions!.Select(p => $"{p.Key}: {p.Value}"))}）");
+        }
+
+        checkedWorkflows.Should().Contain(new[] { "ci.yml", "release.yml" }, "導出が空振りすると無検査で緑になる");
+    }
+
+    /// <summary>
+    /// 書き込み権限はジョブ単位で、理由を <see cref="AllowedWritePermissions"/> に書いたものだけに与える（Issue #2271）。
+    /// 対の表明として、載せた権限が実際に宣言されていることも見る — release.yml の <c>contents: write</c> が消えると
+    /// GitHub Release を作れなくなるが、その失敗はタグを push するまで現れない。
+    /// </summary>
+    [Fact]
+    public void 書き込み権限はジョブ単位で理由のあるものだけに与えられていること()
+    {
+        var granted = new List<(string Workflow, string Job, string Scope, string Value)>();
+        foreach (var (file, content) in AllWorkflows())
+        {
+            foreach (var (job, block) in ExtractJobs(content).Select(j => (j.Key, j.Value)))
+            {
+                var permissions = ExtractPermissions(block, 4);
+                if (permissions == null)
+                {
+                    continue;
+                }
+
+                granted.AddRange(permissions.Select(p => (file, job, p.Key, p.Value)));
+            }
+        }
+
+        granted.Where(g => g.Value.Contains("write")
+                           && !AllowedWritePermissions.Any(a => a.Workflow == g.Workflow && a.Job == g.Job && a.Scope == g.Scope))
+            .Select(g => $"{g.Workflow}:{g.Job} {g.Scope}: {g.Value}")
+            .Should().BeEmpty(
+                "書き込み権限は必要なジョブにスコープを限って与え、理由を AllowedWritePermissions に書くこと" +
+                "（write-all は使わない。Issue #2271）");
+
+        foreach (var allowed in AllowedWritePermissions)
+        {
+            granted.Should().Contain(g => g.Workflow == allowed.Workflow && g.Job == allowed.Job && g.Scope == allowed.Scope && g.Value == "write",
+                $"{allowed.Workflow} のジョブ {allowed.Job} は {allowed.Scope}: write を必要とする（{allowed.Reason}）。" +
+                "最上位の read のままだと、その操作がトークンの権限不足で失敗する。不要になったなら AllowedWritePermissions から外すこと");
+        }
+    }
+
+    /// <summary>
+    /// <c>run:</c> の中で、push した人やイベントが決める値を <c>${{ }}</c> で直接展開しないこと（Issue #2271）。
+    /// 式はシェルが読む前にスクリプトの文字列へ埋め込まれるため、ref 名（<c>$ ( ) ; ' " `</c> を使える）や
+    /// PR のタイトル・入力値がそのままコマンドとして解釈され得る。<c>env:</c> で渡せば、シェルからは値としてしか見えない。
+    /// </summary>
+    /// <remarks>
+    /// 禁止する名前（<c>github.ref_name</c> / <c>github.head_ref</c> / <c>github.event.*</c> / <c>inputs.*</c> …）を
+    /// 列挙するのではなく、参照してよいコンテキストを列挙する。禁止側の列挙は、<c>env</c> や <c>steps.*.outputs</c> を
+    /// 経由して同じ値を持ち込む経路を取りこぼす（#1786「その性質を破れる全経路を列挙する」）。
+    /// </remarks>
+    [Fact]
+    public void runの中で外から決まる値を式で直接展開しないこと()
+    {
+        var scripts = AllWorkflows()
+            .SelectMany(w => ExtractRunScripts(w.Content).Select(s => (w.Name, Script: s)))
+            .ToList();
+
+        scripts.Select(s => s.Script).Should().Contain(s => s.Contains("dotnet restore --locked-mode"), "run を 1 つも取り出せないと無検査で緑になる");
+        scripts.SelectMany(s => ExtractExpressions(s.Script)).Should().Contain(e => e.Contains("matrix.configuration"),
+            "run の中の式を読めていないと無検査で緑になる（ci.yml は matrix.configuration を run で展開している）");
+
+        AllWorkflows().SelectMany(w => UntrustedExpansions(w.Content).Select(line => $"{w.Name}: {line}"))
+            .Should().BeEmpty(
+                $"run の中の式で参照してよいのは {string.Join(" / ", ContextsAllowedInRun.OrderBy(c => c, StringComparer.Ordinal))} だけ。" +
+                "github.* / inputs.* などはステップかジョブの env: で渡し、スクリプトでは $env:NAME で読むこと（Issue #2271）");
+    }
+
+    /// <summary>
+    /// 字下げ <paramref name="indent"/> の <c>permissions:</c> の宣言（スコープ → 値）。無ければ null。
+    /// 1 行の形（<c>permissions: write-all</c>）はスコープ <c>*</c> として返す。
+    /// </summary>
+    private static Dictionary<string, string>? ExtractPermissions(string text, int indent)
+    {
+        var lines = SplitLines(text);
+        var header = new Regex($@"^ {{{indent}}}permissions:\s*([^#\s]*)\s*(#.*)?$");
+        for (var i = 0; i < lines.Length; i++)
+        {
+            var match = header.Match(lines[i]);
+            if (!match.Success)
+            {
+                continue;
+            }
+
+            var result = new Dictionary<string, string>(StringComparer.Ordinal);
+            if (match.Groups[1].Value.Length > 0)
+            {
+                result["*"] = match.Groups[1].Value;
+                return result;
+            }
+
+            for (var j = i + 1; j < lines.Length; j++)
+            {
+                var trimmed = lines[j].Trim();
+                if (trimmed.Length == 0 || trimmed.StartsWith("#", StringComparison.Ordinal))
+                {
+                    continue;
+                }
+
+                if (IndentOf(lines[j]) <= indent)
+                {
+                    break;
+                }
+
+                var scope = Regex.Match(trimmed, @"^([A-Za-z-]+):\s*([A-Za-z-]+)\s*(#.*)?$");
+                result[scope.Success ? scope.Groups[1].Value : trimmed] = scope.Success ? scope.Groups[2].Value : "?";
+            }
+
+            return result;
+        }
+
+        return null;
+    }
+
+    /// <summary>すべての値が read / none で、checkout に要る <c>contents: read</c> を含むか。</summary>
+    private static bool IsReadOnly(IReadOnlyDictionary<string, string> permissions)
+        => permissions.TryGetValue("contents", out var contents) && contents == "read"
+           && permissions.Values.All(v => v == "read" || v == "none");
+
+    /// <summary>
+    /// すべての <c>run:</c> のスクリプト（1 行の値、または <c>|</c> / <c>&gt;</c> のブロックの本体）。
+    /// コメント行と、値を持たない <c>run:</c>（<c>defaults:</c> の下の対応表）は数えない。
+    /// </summary>
+    private static List<string> ExtractRunScripts(string workflow)
+    {
+        var result = new List<string>();
+        var lines = SplitLines(workflow);
+        for (var i = 0; i < lines.Length; i++)
+        {
+            var run = Regex.Match(lines[i], @"^(\s*)(?:- )?run:\s*(.*)$");
+            if (!run.Success)
+            {
+                continue;
+            }
+
+            var value = run.Groups[2].Value.Trim();
+            if (value.Length == 0)
+            {
+                continue;
+            }
+
+            if (!Regex.IsMatch(value, @"^[|>][+-]?\d*\s*(#.*)?$"))
+            {
+                result.Add(value);
+                continue;
+            }
+
+            var runIndent = run.Groups[1].Value.Length;
+            var body = lines.Skip(i + 1)
+                .TakeWhile(l => l.Trim().Length == 0 || IndentOf(l) > runIndent)
+                .Select(l => l.Trim())
+                .Where(l => l.Length > 0);
+            result.Add(string.Join("\n", body));
+        }
+
+        return result;
+    }
+
+    /// <summary>
+    /// 式が参照するコンテキストの根（<c>github.event.x</c> → <c>github</c>）。文字列リテラル・関数名・
+    /// <c>true</c> / <c>false</c> / <c>null</c> は数えない。
+    /// </summary>
+    private static IEnumerable<string> ExtractContextRoots(string expression)
+    {
+        var inner = expression.Substring(3, expression.Length - 5);
+        inner = Regex.Replace(inner, @"'(?:[^']|'')*'", "''");
+        foreach (Match match in Regex.Matches(inner, @"(?<![\w.\-])[A-Za-z_][A-Za-z0-9_\-]*"))
+        {
+            var rest = inner.Substring(match.Index + match.Length).TrimStart();
+            if (rest.StartsWith("(", StringComparison.Ordinal) || match.Value is "true" or "false" or "null")
+            {
+                continue;
+            }
+
+            yield return match.Value;
+        }
+    }
+
+    /// <summary>run の中で、<see cref="ContextsAllowedInRun"/> 以外のコンテキストを式で展開している行。</summary>
+    private static List<string> UntrustedExpansions(string workflow)
+        => ExtractRunScripts(workflow)
+            .SelectMany(script => SplitLines(script))
+            .Where(line => ExtractExpressions(line).SelectMany(ExtractContextRoots).Any(root => !ContextsAllowedInRun.Contains(root)))
+            .Select(line => line.Trim())
+            .ToList();
+
+    #endregion
+
     #region 読み取りヘルパー
 
     /// <summary>ソリューションに含まれ、ソリューション単位の <c>dotnet test</c> から自分を外している csproj（作業ディレクトリからの相対、<c>/</c> 区切り）。</summary>

@@ -11,6 +11,11 @@ on:
   # 試走は main で行う（ZIP 名に github.ref_name を使うため、/ を含むブランチ名では ZIP 作成が失敗する）。
   workflow_dispatch:
 
+# GITHUB_TOKEN の権限は読み取りだけを最上位で宣言する（Issue #2271）。宣言が無いと既定の権限（リポジトリの設定
+# によっては write）で動く。書き込みが要るジョブだけが、ジョブ単位で理由を添えて広げる（CiWorkflowConventionTests が検査する）。
+permissions:
+  contents: read
+
 env:
   DOTNET_VERSION: '8.0.x'
   DOTNET_NOLOGO: true
@@ -23,8 +28,15 @@ jobs:
   build-release:
     runs-on: windows-latest
     timeout-minutes: 45
+    # GitHub Release の作成と ZIP の添付（Create Release）に contents: write が要る。最上位の read をこのジョブだけ広げる（Issue #2271）。
     permissions:
       contents: write
+
+    # タグ名は run: の中へ ${{ }} で直接書かず、環境変数で渡す（Issue #2271）。式はシェルが読む前にスクリプトの
+    # 文字列へ埋め込まれるため、ref 名に使える $ ( ) ; ' " ` を含むタグ名が pwsh の式として実行され得る。
+    # 環境変数ならシェルからは値としてしか見えない。with: の中（アクションの入力）は展開してよい。
+    env:
+      REF_NAME: ${{ github.ref_name }}
 
     defaults:
       run:
@@ -57,12 +69,12 @@ jobs:
 
     - name: Create ZIP
       run: |
-        Compress-Archive -Path ./publish/* -DestinationPath ICCardManager-${{ github.ref_name }}.zip
+        Compress-Archive -Path ./publish/* -DestinationPath "ICCardManager-$env:REF_NAME.zip"
 
     - name: Extract version info
       id: version
       run: |
-        $version = "${{ github.ref_name }}" -replace '^v', ''
+        $version = $env:REF_NAME -replace '^v', ''
         echo "VERSION=$version" >> $env:GITHUB_OUTPUT
       shell: pwsh
 

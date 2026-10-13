@@ -111,6 +111,12 @@
   - Q2 を「同じカードを複数人で使えますか？」に改め、複数名が同じ経路を 1 枚のカードで利用した場合は代表の 1 名が借りて同行者数を記録すること、別々の用件で移動する職員が同じカードをそれぞれ借りることはできない（同時に貸し出せるのは 1 人だけ。貸出中のカードをタッチすると返却として処理される）ことを分けて書いた。同じ内容を扱っていた Q7a は Q2 へ統合して削除した
 
 **開発基盤**
+- Issue #2271 **GitHub Actions のトークン権限を読み取りに限り、release.yml がタグ名をスクリプトへ直接埋め込んでいたのを環境変数で渡すようにした**（セキュリティ）
+  - ci.yml・screenshot-sync-check.yml・test-count-sync-check.yml・vulnerability-scan.yml には `permissions:` の宣言が無く、push・schedule・手動実行の `GITHUB_TOKEN` はリポジトリ設定の既定の権限（設定によっては write）で動いていた。全ワークフローの最上位に `permissions: contents: read` を置き、書き込みは release.yml の `build-release` ジョブの `contents: write`（GitHub Release の作成）だけに限った
+  - release.yml は `run:` の中に `${{ github.ref_name }}` を直接書いており、式はシェルが読む前にスクリプトへ埋め込まれるため、`$` や `(` `)` を含むタグ名が pwsh の式として実行され得た（タグを push できるのは書き込み権限者だけなので権限の上昇にはならない）。ジョブの `env: REF_NAME` で渡し、スクリプトでは `$env:REF_NAME` で読む
+  - 静的検査 `CiWorkflowConventionTests` に 5 件を追加: 全ワークフローの最上位の権限が read / none だけであること、書き込み権限が理由付きの許可リストにあるジョブだけであり許可リストの権限が実際に宣言されていること、`run:` の中の式が参照するコンテキストが `matrix` / `strategy` / `runner` に限られること（禁止する名前ではなく許すコンテキストを列挙し、`env` / `steps.*.outputs` を経由して戻す経路も塞ぐ）、検出ロジック 2 件
+  - 開発者ガイド §5.9 にワークフローを書くときの規約を追加した
+  - 単体テスト +5（`CiWorkflowConventionTests` 29→34）で 9,216→9,221、合計 9,333→9,338
 - Issue #2246 **リリース公開スクリプトがリリースノートを空のまま「更新完了」と表示していたのを直した**
   - `tools/publish-release.ps1` は本文を stdin で `wsl.exe gh release edit --notes-file -` へ渡していたが、pwsh → wsl.exe → gh のあいだで本文が届かず、gh は空の本文を正常に処理して終了コード 0 を返していた。終了コードだけを見ていたため、v2.9.5・v2.10.0・v2.11.0 の本文は空のまま残った
   - 本文は BOM なしの一時ファイルへ書き、WSL のパスへ変換して `--notes-file` に渡す（インストーラーのアップロードと同じ方式）。書き込んだあとに `gh release view --json body` で読み戻し、空か内容が食い違えば失敗として止める。本文を組み立てられるか（見出しに絞っても収まらない等）は、タグを打つ前に確かめる
