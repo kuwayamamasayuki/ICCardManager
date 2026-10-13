@@ -3359,7 +3359,7 @@ FEDCBA9876543210,鈴木花子,002,テスト2";
     #region Issue #2272: インポートできるファイルの大きさの上限
 
     [Fact]
-    public async Task ReadCsvFileAsync_上限を超えるファイルは読み込まずに例外を投げること()
+    public async Task ReadCsvFileAsync_上限を超えるファイルは上限超過の例外を投げること()
     {
         // Arrange: 上限を 1 バイト下回るよう注入する（実際に数十MBのファイルを作らない）
         var filePath = Path.Combine(_testDirectory, "too_large.csv");

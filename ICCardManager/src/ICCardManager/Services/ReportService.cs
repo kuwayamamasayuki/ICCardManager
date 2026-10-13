@@ -7,6 +7,7 @@ using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 using ClosedXML.Excel;
 using ICCardManager.Common;
+using ICCardManager.Common.Exceptions;
 using ICCardManager.Data.Repositories;
 using ICCardManager.Infrastructure.Security;
 using ICCardManager.Models;
@@ -430,6 +431,18 @@ namespace ICCardManager.Services
                 {
                     try
                     {
+                        // Issue #2272: ClosedXML は全パートを展開する。年度ファイルの名前で置かれた ZIP 爆弾を
+                        // 開く前に、ファイルと展開後（宣言値）の大きさで止める。調べられないときは従来どおり開く側に任せる
+                        var sizeCheck = XlsxPackageSizeGuard.Check(outputPath);
+                        if (sizeCheck == XlsxPackageSizeCheck.FileTooLarge || sizeCheck == XlsxPackageSizeCheck.ExpandedTooLarge)
+                        {
+                            _logger.LogWarning(
+                                "既存の帳票ファイルが大きすぎるため開きませんでした: {Path} ({SizeCheck})", outputPath, sizeCheck);
+                            return ReportGenerationResult.FailureResult(
+                                "既存の帳票ファイルを開けません",
+                                BuildOversizedExistingFileMessage(Path.GetFileName(outputPath)));
+                        }
+
                         workbook = OpenExistingWorkbook(outputPath);
                     }
                     catch (Exception ex) when (IsCorruptedPackageException(ex))
@@ -684,6 +697,25 @@ namespace ICCardManager.Services
             return $"出力先の年度ファイル「{fileName}」が壊れているため開けません（以前の保存が途中で中断された可能性があります）。" +
                 "このファイルを別のフォルダーへ移動するか名前を変えてから、もう一度作成してください。" +
                 "移動したファイルに含まれていた他の月の帳票も、あらためて作成してください。\n\n詳細はログファイルを確認してください。";
+        }
+
+        /// <summary>
+        /// 既存の年度ファイルが帳票の年度ファイルとしては大きすぎて開かないときの案内文言（Issue #2272）
+        /// </summary>
+        /// <remarks>
+        /// 本システムが作る年度ファイルは 1MB 前後で、上限（<see cref="XlsxPackageSizeGuard"/>）を超えるのは
+        /// 別のファイルが同じ名前で置かれた場合に限られる。回復手段は破損時（<see cref="BuildUnreadableExistingFileMessage"/>）と同じく
+        /// 退避してから作り直すことなので、「どうすれば」は揃える。
+        /// </remarks>
+        /// <param name="fileName">年度ファイルのファイル名（フォルダーを含まない）</param>
+        internal static string BuildOversizedExistingFileMessage(string fileName)
+        {
+            return $"出力先の年度ファイル「{fileName}」は、帳票の年度ファイルとしては大きすぎるため開けません" +
+                $"（ファイルは{FileOperationException.FormatFileSize(XlsxPackageSizeGuard.MaxFileBytes)}、" +
+                $"展開後は{FileOperationException.FormatFileSize(XlsxPackageSizeGuard.MaxExpandedBytes)}までです。" +
+                "別のファイルが同じ名前で置かれている可能性があります）。" +
+                "このファイルを別のフォルダーへ移動するか名前を変えてから、もう一度作成してください。" +
+                "移動したファイルが本来の年度ファイルだった場合は、含まれていた他の月の帳票も、あらためて作成してください。\n\n詳細はログファイルを確認してください。";
         }
 
         /// <summary>
