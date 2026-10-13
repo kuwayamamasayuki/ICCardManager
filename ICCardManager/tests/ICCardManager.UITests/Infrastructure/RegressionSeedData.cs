@@ -125,6 +125,27 @@ namespace ICCardManager.UITests.Infrastructure
                 ("@at", Now()), ("@staff", AppFixture.SeededStaffIdm));
         }
 
+        /// <summary>
+        /// 仮想タッチの職員を含め、すべての職員を削除済み（論理削除）にした投入データ（Issue #2263）。
+        /// </summary>
+        /// <remarks>
+        /// 職員の復元は職員証の認証を求めるが、登録済みの職員が 0 人のときだけ免除する。認証ダイアログの仮想タッチは
+        /// 仮想タッチの職員（<see cref="AppFixture.SeededStaffIdm"/>）を模擬するため、その職員を削除済みにした
+        /// <see cref="SeedWithDeletedVirtualTouchStaff"/> では認証を通せない。復元そのものを確かめるときはこの投入データで免除の経路を通す。
+        /// </remarks>
+        public static void SeedWithAllStaffDeleted(SQLiteConnection conn)
+        {
+            ScreenshotSeedData.Seed(conn);
+            using var command = conn.CreateCommand();
+            command.CommandText = "UPDATE staff SET is_deleted = 1, deleted_at = @at WHERE is_deleted = 0";
+            command.Parameters.AddWithValue("@at", Now());
+            if (command.ExecuteNonQuery() < 2)
+            {
+                throw new InvalidOperationException(
+                    "投入データの前提が崩れています（仮想タッチの職員のほかに、削除済みにする職員がいません）");
+            }
+        }
+
         /// <summary>貸出中カードを貸し出してからの日数（<see cref="SeedWithCardLentDaysAgo"/>）。</summary>
         public const int LentDaysAgo = 20;
 

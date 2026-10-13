@@ -407,6 +407,11 @@ public class StaffManageViewModelTests : IDisposable
     /// <summary>
     /// 保存に失敗した場合、エラーメッセージが表示されること
     /// </summary>
+    /// <remarks>
+    /// Issue #2263: InsertAsync は一過性でない SQLite の失敗（重複・ディスク満杯・読み取り専用・破損等）をすべて false に畳む。
+    /// このテストは読み直しても行が無い（＝重複ではない）形なので、原因を断定しない「書き込めなかった」案内になる
+    /// （旧期待値は「失敗」を含むこと。重複の形は StaffManageViewModelAuthenticationTests が固定する）。
+    /// </remarks>
     [Fact]
     public async Task SaveAsync_WhenInsertFails_ShouldShowError()
     {
@@ -422,7 +427,9 @@ public class StaffManageViewModelTests : IDisposable
         await _viewModel.SaveAsync();
 
         // Assert
-        _viewModel.StatusMessage.Should().Contain("失敗");
+        _viewModel.StatusMessage.Should().Be(StaffManageViewModel.BuildRegisterWriteFailedMessage("職員「田中太郎」"));
+        _viewModel.IsStatusError.Should().BeTrue();
+        _viewModel.IsEditing.Should().BeTrue("入力内容を消さない（Issue #1757）");
     }
 
     /// <summary>
