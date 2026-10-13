@@ -642,7 +642,8 @@ public class LedgerRepositoryAggregationTests : IDisposable
 
         var service = new AdminDashboardService(
             _cardRepository, _ledgerRepository, _staffRepository,
-            new Mock<ISettingsRepository>().Object, new Mock<IReportExportStatusService>().Object);
+            new Mock<ISettingsRepository>().Object, new Mock<IReportExportStatusService>().Object,
+            new Mock<IReportOutputFolderStore>().Object);
 
         var analytics = await service.GetAnalyticsAsync(
             new DateTime(2026, 5, 1), new DateTime(2026, 5, 31), new DateTime(2026, 6, 1));

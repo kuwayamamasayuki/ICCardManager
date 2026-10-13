@@ -144,7 +144,7 @@ public class SettingsViewModelDatabasePathTests : IDisposable
     /// <remarks>
     /// 書き込みは保存成功後の <c>App.ApplyFontSize</c>（WPF の <c>Application.Current</c> が必要）より
     /// 後ろにあり、単体テストからは到達しない。挙動で表明できないため、本体が静的な置き場所
-    /// （<c>GetDatabaseConfigPath()</c> 等 ＝ テストプロセスでは共有、本番では同じ）ではなく
+    /// （<c>AppConfigFiles.DatabaseConfigPath</c> 等 ＝ テストプロセスでは共有、本番では同じ）ではなく
     /// インスタンスの置き場所へ書いていることをソーステキストで固定する。
     /// 「禁止形の不在」と「正しい形の存在」を対で見る（書き込みごと消した実装でも緑にならないように）。
     /// </remarks>
@@ -156,11 +156,11 @@ public class SettingsViewModelDatabasePathTests : IDisposable
         var body = TestSourceInspection.ExtractMethodBody(
             TestSourceInspection.ToCodeOnly(source), "public async Task SaveAsync()");
 
-        body.Should().Contain("SaveConfigFile(DatabaseConfigPath,",
+        body.Should().Contain("AppConfigFiles.Write(DatabaseConfigPath,",
             "DB 保存先は注入された置き場所の database_config.txt へ保存する");
         body.Should().Contain("DepartmentConfigPath,",
             "部署種別は注入された置き場所の department_config.txt へ保存する");
-        body.Should().NotContain("GetDatabaseConfigPath()");
-        body.Should().NotContain("GetDepartmentConfigPath()");
+        body.Should().NotContain("AppConfigFiles.DatabaseConfigPath");
+        body.Should().NotContain("AppConfigFiles.DepartmentConfigPath");
     }
 }

@@ -258,7 +258,7 @@ namespace ICCardManager
                 var dbPathInfo = "";
                 try
                 {
-                    var configPath = ViewModels.SettingsViewModel.LoadDatabasePathFromConfigFile();
+                    var configPath = AppConfigFiles.Read(AppConfigFiles.DatabaseConfigPath);
                     if (!string.IsNullOrWhiteSpace(configPath))
                     {
                         dbPathInfo = $"\n\nデータベースパス: {configPath}";
@@ -399,7 +399,7 @@ namespace ICCardManager
         /// </remarks>
         private string? GetValidatedDatabaseConfigPath()
         {
-            var raw = ViewModels.SettingsViewModel.LoadDatabasePathFromConfigFile();
+            var raw = AppConfigFiles.Read(AppConfigFiles.DatabaseConfigPath);
 
             // 空（未設定）はデフォルトパス利用の正常系。検証対象外。
             if (string.IsNullOrWhiteSpace(raw))
@@ -559,6 +559,8 @@ namespace ICCardManager
             // Issue #1691: 帳票の出力済み / 未出力チェックリスト
             services.AddSingleton<IReportFileNameFactory, ReportFileNameFactory>();
             services.AddSingleton<IReportExportStatusService, ReportExportStatusService>();
+            // Issue #2266: 帳票の出力先はこの PC の設定ファイルが正（共有 DB には持たない）
+            services.AddSingleton<IReportOutputFolderStore, ReportOutputFolderStore>();
             services.AddSingleton<CsvExportService>();
             services.AddSingleton<OperationLogExcelExportService>();
             services.AddSingleton<CsvImportService>();
@@ -778,7 +780,9 @@ namespace ICCardManager
 
             // 設定ファイルからの設定を適用（Issue #742）
             await ApplyDepartmentConfigFromFileAsync();
-            await ApplyReportOutputConfigFromFileAsync();
+            // 帳票出力先ファイル（report_output_config.txt）は DB へ写さない。帳票作成画面・管理者ダッシュボードが
+            // ファイルから直接読む（Issue #2266。共有 DB に写すと PC 間で後勝ちに上書きし合い、
+            // DB を書き換えた者が指定したフォルダーを各 PC が既定値として走査していた）
 
             // Issue #2160: 起動時の設定読みはここで 1 回だけ行い、SummaryGenerator の DI ファクトリと
             // ApplySavedSettings で共有する。部署種別ファイルの適用（上）より後に読むこと
@@ -817,7 +821,7 @@ namespace ICCardManager
         {
             try
             {
-                var departmentValue = ViewModels.SettingsViewModel.LoadDepartmentConfigFromFile();
+                var departmentValue = AppConfigFiles.Read(AppConfigFiles.DepartmentConfigPath);
 
                 if (string.IsNullOrEmpty(departmentValue))
                 {
@@ -841,44 +845,6 @@ namespace ICCardManager
             {
                 _logger?.LogWarning(ex, "部署設定ファイルの適用でエラー");
                 // エラーが発生してもアプリは起動させる（department_type 未設定時は市長事務部局が既定値）
-            }
-        }
-
-        /// <summary>
-        /// 帳票出力先設定ファイルを読み取り、DBに適用する
-        /// </summary>
-        /// <remarks>
-        /// インストーラーまたは帳票作成画面が %PROGRAMDATA%\ICCardManager\report_output_config.txt に
-        /// 帳票出力先フォルダパスを書き出す。
-        /// 起動時にこのファイルを読み取り、DB設定に適用する。
-        /// ファイルが存在しない場合は何もしない。
-        /// </remarks>
-        private async Task ApplyReportOutputConfigFromFileAsync()
-        {
-            try
-            {
-                var outputFolder = ViewModels.SettingsViewModel.LoadReportOutputConfigFromFile();
-
-                if (string.IsNullOrEmpty(outputFolder))
-                {
-                    return;
-                }
-
-                // Issue #2160: UI スレッドを同期で止めずに await する（View 層なので ConfigureAwait は付けない）
-                var settingsRepository = ServiceProvider.GetRequiredService<ISettingsRepository>();
-                await settingsRepository.SetAsync(
-                    SettingsRepository.KeyReportOutputFolder,
-                    outputFolder);
-
-                // キャッシュを無効化して再取得を強制
-                var cacheService = ServiceProvider.GetRequiredService<ICacheService>();
-                cacheService.Invalidate(CacheKeys.AppSettings);
-
-                _logger?.LogInformation("設定ファイル: 帳票出力先を適用 OutputFolder={OutputFolder}", outputFolder);
-            }
-            catch (Exception ex)
-            {
-                _logger?.LogWarning(ex, "帳票出力先設定ファイルの適用でエラー");
             }
         }
 

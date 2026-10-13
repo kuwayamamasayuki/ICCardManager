@@ -45,6 +45,9 @@ public class ReportViewModelBulkCreationTests : IDisposable
     private readonly Mock<ISafeFileLauncher> _safeFileLauncherMock = new();
     private readonly Mock<IReportDataBuilder> _preflightDataBuilderMock = new();
     private readonly Mock<IReportExportStatusService> _exportStatusServiceMock = new();
+
+    /// <summary>この PC の帳票出力先（Issue #2266）。既定は未設定（設定ファイルが無い PC）</summary>
+    private readonly Mock<IReportOutputFolderStore> _outputFolderStoreMock = new();
     private readonly Mock<ReportService> _reportServiceMock;
     private readonly Mock<PrintService> _printServiceMock;
     private readonly ReportViewModel _viewModel;
@@ -63,6 +66,7 @@ public class ReportViewModelBulkCreationTests : IDisposable
     {
         _settingsRepositoryMock.Setup(s => s.GetAppSettings()).Returns(new AppSettings());
         _settingsRepositoryMock.Setup(s => s.GetAppSettingsAsync()).ReturnsAsync(new AppSettings());
+        _outputFolderStoreMock.Setup(s => s.Load()).Returns(string.Empty);
 
         var reportDataBuilder = new ReportDataBuilder(
             _cardRepositoryMock.Object, _ledgerRepositoryMock.Object);
@@ -109,7 +113,7 @@ public class ReportViewModelBulkCreationTests : IDisposable
             _printServiceMock.Object,
             _cardRepositoryMock.Object,
             _navigationServiceMock.Object,
-            _settingsRepositoryMock.Object,
+            _outputFolderStoreMock.Object,
             _safeFileLauncherMock.Object,
             new ReportPreflightChecker(_preflightDataBuilderMock.Object, _ledgerRepositoryMock.Object, new ReportFileNameFactory()),
             _exportStatusServiceMock.Object);
@@ -1005,6 +1009,120 @@ public class ReportViewModelBulkCreationTests : IDisposable
 
         _viewModel.StatusMessage.Should().Be("事前チェック: 警告1件");
         _viewModel.Cards.Single(c => c.CardIdm == "0000000000000001").PreflightWarningCount.Should().Be(1);
+    }
+
+    #endregion
+
+    #region Issue #2266: 作成できた出力先をこの PC の設定へ確定させる
+
+    /// <summary>
+    /// 欠陥を突く側: 設定ファイルが無い PC で、初期値のまま帳票を作成できたら、その出力先をこの PC の設定へ保存すること
+    /// </summary>
+    /// <remarks>
+    /// 初期値（マイドキュメント）は画面に出ているだけで保存されておらず、値を変えずに作成しても
+    /// OnOutputFolderChanged が起きない。保存しないと管理者ダッシュボードは恒久的に「判定不可」になる。
+    /// </remarks>
+    [Fact]
+    public async Task CreateReportAsync_設定ファイルが無いPCで作成できたら使った出力先を保存すること()
+    {
+        SelectCard("0000000000000001", "001");
+        SelectCard("0000000000000002", "002");
+
+        await _viewModel.CreateReportAsync();
+
+        _outputFolderStoreMock.Verify(s => s.Save(_outputFolder), Times.Once, "2 枚作成しても保存は 1 回");
+        _viewModel.StatusMessage.Should().Be("2件の帳票を作成しました");
+        _viewModel.IsStatusError.Should().BeFalse();
+    }
+
+    /// <summary>
+    /// 対の表明: 1 枚も作成できなかった（作成対象外・失敗のみ）ときは保存しないこと
+    /// </summary>
+    [Fact]
+    public async Task CreateReportAsync_1枚も作成できなかったときは出力先を保存しないこと()
+    {
+        SelectCard("0000000000000001", "001");
+        SelectCard("0000000000000002", "002");
+        SetupReportCreation(cardIdm => cardIdm == "0000000000000001"
+            ? ReportGenerationResult.SkippedResult("対象期間外")
+            : ReportGenerationResult.FailureResult("帳票データを取得できませんでした"));
+
+        await _viewModel.CreateReportAsync();
+
+        _outputFolderStoreMock.Verify(s => s.Save(It.IsAny<string>()), Times.Never);
+    }
+
+    /// <summary>
+    /// 対の表明: 同じ出力先が既に保存されていれば書かないこと
+    /// </summary>
+    [Fact]
+    public async Task CreateReportAsync_同じ出力先が保存済みなら書かないこと()
+    {
+        _outputFolderStoreMock.Setup(s => s.Load()).Returns(_outputFolder);
+        SelectCard("0000000000000001", "001");
+
+        await _viewModel.CreateReportAsync();
+
+        _outputFolderStoreMock.Verify(s => s.Save(It.IsAny<string>()), Times.Never);
+    }
+
+    /// <summary>
+    /// 保存に失敗しても、作成の結果を消さずに保存できなかったことを併記すること
+    /// </summary>
+    [Fact]
+    public async Task CreateReportAsync_出力先の保存に失敗したら作成結果と併記すること()
+    {
+        _outputFolderStoreMock.Setup(s => s.Save(It.IsAny<string>()))
+            .Throws(new IOException("The process cannot access the file 'report_output_config.txt'."));
+        SelectCard("0000000000000001", "001");
+
+        await _viewModel.CreateReportAsync();
+
+        _viewModel.CreatedFiles.Should().HaveCount(1);
+        _viewModel.StatusMessage.Should().StartWith("1件の帳票を作成しました");
+        _viewModel.StatusMessage.Should().EndWith(ReportViewModel.OutputFolderSaveFailedMessage);
+        _viewModel.StatusMessage.Should().NotContain("cannot access", "生の例外メッセージを画面に出さない（#1614）");
+        _viewModel.IsStatusError.Should().BeFalse(
+            "作成は成功している。保存の失敗で色を変えると「1件の帳票を作成しました」まで失敗に見える");
+    }
+
+    /// <summary>
+    /// 対の表明: 一部失敗の結果の色（エラー）は、保存の失敗を併記しても保たれること
+    /// （色を常に通常へ戻す実装を検出する）
+    /// </summary>
+    [Fact]
+    public async Task CreateReportAsync_一部失敗のときは保存の失敗を併記してもエラー表示のままであること()
+    {
+        _outputFolderStoreMock.Setup(s => s.Save(It.IsAny<string>()))
+            .Throws(new IOException("The process cannot access the file 'report_output_config.txt'."));
+        SelectCard("0000000000000001", "001");
+        SelectCard("0000000000000002", "002");
+        SetupReportCreation(cardIdm => cardIdm == "0000000000000002"
+            ? ReportGenerationResult.FailureResult("帳票データを取得できませんでした")
+            : ReportGenerationResult.SuccessResult(cardIdm));
+
+        await _viewModel.CreateReportAsync();
+
+        _viewModel.StatusMessage.Should().StartWith("1/2件の帳票を作成しました（一部失敗）");
+        _viewModel.StatusMessage.Should().EndWith(ReportViewModel.OutputFolderSaveFailedMessage);
+        _viewModel.IsStatusError.Should().BeTrue();
+    }
+
+    /// <summary>
+    /// 保存済みの値と大文字小文字・前後の空白・末尾の区切りだけが違うときは、同じフォルダとして書き直さないこと
+    /// （比較の規則を 1 つに揃えた。設定ファイルの読み込みは空白を取り除くため、規則が違うと毎回書き直す）
+    /// </summary>
+    [Fact]
+    public async Task CreateReportAsync_保存済みと表記だけが違う出力先なら書き直さないこと()
+    {
+        _outputFolderStoreMock.Setup(s => s.Load()).Returns(_outputFolder.ToUpperInvariant() + "\\");
+        _viewModel.OutputFolder = _outputFolder + "  ";
+        SelectCard("0000000000000001", "001");
+
+        await _viewModel.CreateReportAsync();
+
+        _viewModel.CreatedFiles.Should().HaveCount(1);
+        _outputFolderStoreMock.Verify(s => s.Save(It.IsAny<string>()), Times.Never);
     }
 
     #endregion

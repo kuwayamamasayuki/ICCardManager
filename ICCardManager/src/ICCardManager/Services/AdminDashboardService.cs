@@ -46,6 +46,7 @@ namespace ICCardManager.Services
         private readonly IStaffRepository _staffRepository;
         private readonly ISettingsRepository _settingsRepository;
         private readonly IReportExportStatusService _reportExportStatusService;
+        private readonly IReportOutputFolderStore _reportOutputFolderStore;
 
         /// <summary>職員名を特定できない台帳行の表示名</summary>
         internal const string UnknownStaffName = "（職員名なし）";
@@ -61,13 +62,15 @@ namespace ICCardManager.Services
             ILedgerRepository ledgerRepository,
             IStaffRepository staffRepository,
             ISettingsRepository settingsRepository,
-            IReportExportStatusService reportExportStatusService)
+            IReportExportStatusService reportExportStatusService,
+            IReportOutputFolderStore reportOutputFolderStore)
         {
             _cardRepository = cardRepository;
             _ledgerRepository = ledgerRepository;
             _staffRepository = staffRepository;
             _settingsRepository = settingsRepository;
             _reportExportStatusService = reportExportStatusService;
+            _reportOutputFolderStore = reportOutputFolderStore ?? throw new ArgumentNullException(nameof(reportOutputFolderStore));
         }
 
         /// <inheritdoc/>
@@ -99,8 +102,13 @@ namespace ICCardManager.Services
                     RefundedAt = c.RefundedAt,
                 })
                 .ToList();
+            // Issue #2266: 走査するのはこの PC の帳票出力先（report_output_config.txt）だけ。共有 DB の
+            // report_output_folder は共有フォルダーモードでは全 PC が書けるため、運用状況を開くたびに
+            // DB を書き換えた者が指定したフォルダー（UNC なら別ホスト）へ接続することになる。
+            // 未設定なら空のまま渡し、全カードを「判定不可」とする（帳票作成画面で出力先を決めれば解消する）。
+            var outputFolder = _reportOutputFolderStore.Load();
             var reportStatuses = await DedicatedThread.Run(
-                () => _reportExportStatusService.GetStatuses(targets, settings.ReportOutputFolder, asOf.Year, asOf.Month))
+                () => _reportExportStatusService.GetStatuses(targets, outputFolder, asOf.Year, asOf.Month))
                 .ConfigureAwait(false);
             var reportStatusByCard = reportStatuses
                 .GroupBy(s => s.CardIdm)
@@ -170,9 +178,45 @@ namespace ICCardManager.Services
                 LowBalanceCount = items.Count(i => i.IsBalanceWarning),
                 ReportNotExportedCount = items.Count(i => i.ReportState == ReportExportState.NotExported),
                 ReportStatusUnknownCount = items.Count(i => i.ReportState == ReportExportState.Unknown),
+                ReportStatusGuidance = BuildReportStatusGuidance(outputFolder, items),
                 Cards = items
             };
         }
+
+        /// <summary>
+        /// 当月帳票を判定できなかったカードがあるとき、その解消方法の案内を返す（Issue #2266）
+        /// </summary>
+        /// <remarks>
+        /// 出力先はこの PC の設定だけから読むため、設定ファイルが無い PC では全カードが「判定不可」になる。
+        /// 一覧の「判定不可」だけでは、どの画面で何をすれば解消するのかが分からない。
+        /// ファイル名の重複による判定不可は一覧の文言（「判定不可（ファイル名が重複）」）が原因を名指しするので数えない。
+        /// </remarks>
+        /// <returns>案内。判定できなかったカードが無ければ空文字</returns>
+        internal static string BuildReportStatusGuidance(string? outputFolder, IEnumerable<AdminDashboardCardStatus> cards)
+        {
+            var hasUnknown = cards.Any(c => c.ReportState == ReportExportState.Unknown && !c.IsReportFileNameCollision);
+            if (!hasUnknown)
+            {
+                return string.Empty;
+            }
+
+            if (outputFolder is null || string.IsNullOrWhiteSpace(outputFolder))
+            {
+                return ReportOutputFolderNotSetGuidance;
+            }
+
+            return ReportOutputFolderUnreadableGuidance;
+        }
+
+        /// <summary>この PC で帳票の出力先がまだ決まっていないときの案内（Issue #2266）</summary>
+        internal const string ReportOutputFolderNotSetGuidance =
+            "当月帳票の出力状況を判定できません。このパソコンでは帳票の出力先フォルダがまだ決まっていません。" +
+            "帳票作成画面（F1）で出力先フォルダを選ぶか、帳票を作成してください。";
+
+        /// <summary>この PC の出力先フォルダや帳票ファイルを読めなかったときの案内（Issue #2266）</summary>
+        internal const string ReportOutputFolderUnreadableGuidance =
+            "当月帳票の出力状況を判定できないカードがあります。このパソコンの出力先フォルダが見つからないか、帳票ファイルを開けませんでした。" +
+            "帳票作成画面（F1）で出力先フォルダを確認してください。";
 
         /// <inheritdoc/>
         public async Task<AdminDashboardAnalytics> GetAnalyticsAsync(DateTime fromDate, DateTime toDate, DateTime asOf)

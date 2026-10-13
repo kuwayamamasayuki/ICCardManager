@@ -1,3 +1,4 @@
+#nullable enable
 using System;
 using System.Collections.Generic;
 
@@ -48,6 +49,12 @@ namespace ICCardManager.Dtos
         /// 「出していないのか、確認できないだけなのか」が区別できなくなるため別に数える。
         /// </remarks>
         public int ReportStatusUnknownCount { get; set; }
+
+        /// <summary>
+        /// 当月帳票を判定できなかったときに、どこで何をすれば解消するかの案内。案内が不要なら空文字
+        /// （Issue #2266。<c>AdminDashboardService.BuildReportStatusGuidance</c>）
+        /// </summary>
+        public string ReportStatusGuidance { get; set; } = string.Empty;
 
         /// <summary>カードごとの明細</summary>
         public IReadOnlyList<AdminDashboardCardStatus> Cards { get; set; } = Array.Empty<AdminDashboardCardStatus>();

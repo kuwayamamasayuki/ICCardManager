@@ -45,9 +45,8 @@ public partial class SettingsViewModel : ViewModelBase
     /// </summary>
     /// <remarks>
     /// 本番では <see cref="AppDataPaths.RootDirectory"/>（<c>C:\ProgramData\ICCardManager</c>）。
-    /// テストはテストごとの一時フォルダーを注入する。静的メソッド
-    /// （<see cref="GetDatabaseConfigPath"/> 等）は起動処理・帳票画面から呼ばれるため
-    /// 常に <see cref="AppDataPaths.RootDirectory"/> を見る。
+    /// テストはテストごとの一時フォルダーを注入する。起動処理・帳票の出力先が読む既定の置き場所
+    /// （<see cref="AppConfigFiles.DatabaseConfigPath"/> 等）は常に <see cref="AppDataPaths.RootDirectory"/> を見る。
     /// </remarks>
     private readonly string _configDirectory;
 
@@ -236,7 +235,7 @@ public partial class SettingsViewModel : ViewModelBase
         _configDirectory = configDirectory;
         // database_config.txtから直接読む（設定ファイルが正。DI経由のDatabaseOptionsは
         // アプリ起動時に固定されるため、同一セッション中に設定変更しても反映されない）
-        var fullPath = LoadConfigFile(DatabaseConfigPath);
+        var fullPath = AppConfigFiles.Read(DatabaseConfigPath);
         _originalDatabasePath = ExtractDirectoryPath(fullPath);
         _databasePath = _originalDatabasePath;
     }
@@ -429,7 +428,7 @@ public partial class SettingsViewModel : ViewModelBase
                 // 部署種別を設定ファイルに保存（インストーラーがアップグレード時に読み込む）
                 try
                 {
-                    SaveConfigFile(
+                    AppConfigFiles.Write(
                         DepartmentConfigPath,
                         SettingsRepository.DepartmentTypeToString(settings.DepartmentType));
                 }
@@ -491,7 +490,7 @@ public partial class SettingsViewModel : ViewModelBase
 
                     try
                     {
-                        SaveConfigFile(DatabaseConfigPath, fullDbPath);
+                        AppConfigFiles.Write(DatabaseConfigPath, fullDbPath);
                         DatabasePath = validatedFolderPath;
                         _originalDatabasePath = validatedFolderPath;
                         IsDatabasePathChanged = false;
@@ -659,179 +658,18 @@ public partial class SettingsViewModel : ViewModelBase
     }
 
     // =========================================================================
-    // 設定ファイル共通ヘルパー
+    // 設定ファイル（C:\ProgramData\ICCardManager\*_config.txt）
     // =========================================================================
-    // C:\ProgramData\ICCardManager\ 配下のテキストファイルを読み書きする共通処理。
-    // インストーラー（Inno Setup）はShift_JIS、アプリはUTF-8 BOMで書き込むため、
-    // 読み取り時はBOMで自動判定する。
-
-    private const string DatabaseConfigFileName = "database_config.txt";
-    private const string DepartmentConfigFileName = "department_config.txt";
-    private const string ReportOutputConfigFileName = "report_output_config.txt";
-
-    /// <summary>
-    /// ProgramData配下の設定ファイルのフルパスを取得
-    /// </summary>
-    private static string GetConfigFilePath(string fileName)
-    {
-        return Path.Combine(AppDataPaths.RootDirectory, fileName);
-    }
+    // 置き場所の既定値・文字コード判定・アトミック書き込みは Common/AppConfigFiles に集約した（Issue #2266）。
+    // この画面は注入された置き場所（_configDirectory）の配下を読み書きする（Issue #2098）。
+    // appsettings.jsonはProgram Files内にあり一般ユーザーには書き込めないため、
+    // データベースの保存先は database_config.txt に保存する。
 
     /// <summary>この画面が読み書きする database_config.txt（Issue #2098）</summary>
-    private string DatabaseConfigPath => Path.Combine(_configDirectory, DatabaseConfigFileName);
+    private string DatabaseConfigPath => Path.Combine(_configDirectory, AppConfigFiles.DatabaseConfigFileName);
 
     /// <summary>この画面が書き込む department_config.txt（Issue #2098）</summary>
-    private string DepartmentConfigPath => Path.Combine(_configDirectory, DepartmentConfigFileName);
-
-    /// <summary>
-    /// 設定ファイルからテキストを読み込む（BOM自動判定）
-    /// </summary>
-    /// <remarks>
-    /// Inno SetupのSaveStringToFileはShift_JIS（ANSI）で書き込むが、
-    /// アプリのFile.WriteAllTextはUTF-8 BOM付きで書き込む。
-    /// どちらでも正しく読めるよう、BOMで判定する。
-    /// </remarks>
-    private static string LoadConfigFile(string filePath)
-    {
-        if (!File.Exists(filePath))
-        {
-            return string.Empty;
-        }
-
-        try
-        {
-            var bytes = File.ReadAllBytes(filePath);
-            string value;
-            if (bytes.Length >= 3 && bytes[0] == 0xEF && bytes[1] == 0xBB && bytes[2] == 0xBF)
-            {
-                // UTF-8 BOM
-                value = System.Text.Encoding.UTF8.GetString(bytes, 3, bytes.Length - 3);
-            }
-            else if (bytes.Length >= 2 && bytes[0] == 0xFF && bytes[1] == 0xFE)
-            {
-                // UTF-16 LE BOM
-                value = System.Text.Encoding.Unicode.GetString(bytes, 2, bytes.Length - 2);
-            }
-            else
-            {
-                // BOMなし: Shift_JIS（Inno Setupが書いた場合）として読む
-                value = System.Text.Encoding.GetEncoding(932).GetString(bytes);
-            }
-            return value.Trim();
-        }
-        catch
-        {
-            return string.Empty;
-        }
-    }
-
-    /// <summary>
-    /// 設定ファイルにテキストを書き込む（アトミック書き込み）
-    /// </summary>
-    /// <remarks>
-    /// 一時ファイルに書き出してから <see cref="File.Replace(string, string, string)"/> で
-    /// 原子的に置換することで、書き込み途中のクラッシュによるファイル破損・消失を防止する。
-    /// File.Replace は対象ファイルが存在しないと例外を投げるため、初回作成時のみ
-    /// File.Move へフォールバックする（Issue #1598）。
-    ///
-    /// 旧実装は File.Delete → File.Move の2段階で、その間にクラッシュすると
-    /// database_config.txt が消失し、共有モード運用中の PC が警告なくローカル DB へ
-    /// フォールバックして台帳が分裂する実害があった。
-    /// </remarks>
-    internal static void SaveConfigFile(string filePath, string value)
-    {
-        var directory = Path.GetDirectoryName(filePath);
-        if (!string.IsNullOrEmpty(directory))
-        {
-            Directory.CreateDirectory(directory);
-        }
-
-        var tempPath = filePath + ".tmp";
-        File.WriteAllText(tempPath, value ?? string.Empty, System.Text.Encoding.UTF8);
-        if (File.Exists(filePath))
-        {
-            // 原子的置換: Delete→Move の「対象ファイルが存在しない窓」を排除する。
-            // 第3引数（バックアップファイル名）は null = バックアップを作らない。
-            File.Replace(tempPath, filePath, null);
-        }
-        else
-        {
-            // 初回作成時は対象が存在しないため File.Replace が使えない
-            File.Move(tempPath, filePath);
-        }
-    }
-
-    // =========================================================================
-    // データベース設定ファイル
-    // =========================================================================
-
-    // 保存は SaveAsync が DatabaseConfigPath（注入された置き場所）へ直接行う。
-    // appsettings.jsonはProgram Files内にあり一般ユーザーには書き込めないため、
-    // C:\ProgramData\ICCardManager\database_config.txt に保存する（Issue #2098 で静的な保存口を廃止）。
-
-    /// <summary>
-    /// データベース設定ファイルのパスを取得
-    /// </summary>
-    internal static string GetDatabaseConfigPath()
-    {
-        return GetConfigFilePath(DatabaseConfigFileName);
-    }
-
-    /// <summary>
-    /// データベース設定ファイルからパスを読み込み
-    /// </summary>
-    internal static string LoadDatabasePathFromConfigFile()
-    {
-        return LoadConfigFile(GetDatabaseConfigPath());
-    }
-
-    // =========================================================================
-    // 部署種別設定ファイル
-    // =========================================================================
-
-    /// <summary>
-    /// 部署種別設定ファイルのパスを取得
-    /// </summary>
-    internal static string GetDepartmentConfigPath()
-    {
-        return GetConfigFilePath(DepartmentConfigFileName);
-    }
-
-    /// <summary>
-    /// 部署種別設定ファイルから値を読み込み
-    /// </summary>
-    internal static string LoadDepartmentConfigFromFile()
-    {
-        return LoadConfigFile(GetDepartmentConfigPath());
-    }
-
-    // =========================================================================
-    // 帳票出力先設定ファイル
-    // =========================================================================
-
-    /// <summary>
-    /// 帳票出力先設定ファイルのパスを取得
-    /// </summary>
-    internal static string GetReportOutputConfigPath()
-    {
-        return GetConfigFilePath(ReportOutputConfigFileName);
-    }
-
-    /// <summary>
-    /// 帳票出力先設定ファイルから値を読み込み
-    /// </summary>
-    internal static string LoadReportOutputConfigFromFile()
-    {
-        return LoadConfigFile(GetReportOutputConfigPath());
-    }
-
-    /// <summary>
-    /// 帳票出力先を設定ファイルに保存（インストーラーがアップグレード時に読み込む）
-    /// </summary>
-    internal static void SaveReportOutputConfigToFile(string outputFolder)
-    {
-        SaveConfigFile(GetReportOutputConfigPath(), outputFolder);
-    }
+    private string DepartmentConfigPath => Path.Combine(_configDirectory, AppConfigFiles.DepartmentConfigFileName);
 
     /// <summary>
     /// 文字サイズをアプリケーションに適用

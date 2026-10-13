@@ -93,7 +93,7 @@ namespace DebugDataViewer
             var resolution = DatabasePathResolver.Resolve(
                 Environment.GetCommandLineArgs(),
                 AppDomain.CurrentDomain.BaseDirectory,
-                ICCardManager.ViewModels.SettingsViewModel.LoadDatabasePathFromConfigFile);
+                () => ICCardManager.Common.AppConfigFiles.Read(ICCardManager.Common.AppConfigFiles.DatabaseConfigPath));
 
             services.AddSingleton(resolution);
             services.AddSingleton(sp => new DbContext(resolution.Path));

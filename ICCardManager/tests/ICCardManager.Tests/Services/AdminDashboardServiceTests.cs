@@ -37,6 +37,7 @@ public class AdminDashboardServiceTests
     private readonly Mock<IStaffRepository> _staffRepository = new();
     private readonly Mock<ISettingsRepository> _settingsRepository = new();
     private readonly Mock<IReportExportStatusService> _reportExportStatusService = new();
+    private readonly Mock<IReportOutputFolderStore> _reportOutputFolderStore = new();
 
     private static readonly DateTime AsOf = new DateTime(2026, 8, 3, 9, 0, 0);
 
@@ -60,7 +61,8 @@ public class AdminDashboardServiceTests
         _ledgerRepository.Object,
         _staffRepository.Object,
         _settingsRepository.Object,
-        _reportExportStatusService.Object);
+        _reportExportStatusService.Object,
+        _reportOutputFolderStore.Object);
 
     #region セットアップ用ヘルパー
 
@@ -75,6 +77,8 @@ public class AdminDashboardServiceTests
     {
         _settingsRepository.Setup(r => r.GetAppSettingsAsync())
             .ReturnsAsync(settings ?? new AppSettings { WarningBalance = NonDefaultWarningBalance, ReportOutputFolder = @"C:\reports" });
+        // Issue #2266: 出力状況を判定する出力先はこの PC の設定から読む
+        _reportOutputFolderStore.Setup(s => s.Load()).Returns(@"C:\reports");
         _cardRepository.Setup(r => r.GetAllAsync())
             .ReturnsAsync(cards ?? new List<IcCard>());
         _ledgerRepository.Setup(r => r.GetAllLentRecordsAsync())
@@ -506,6 +510,92 @@ public class AdminDashboardServiceTests
         var card = status.Cards.Should().ContainSingle().Subject;
         card.CardIdm.Should().Be(CardA);
         card.ReportStateText.Should().Be("判定不可（ファイル名が重複）");
+    }
+
+    /// <summary>
+    /// Issue #2266: 共有 DB の出力先がこの PC の設定と食い違うとき、この PC の設定のフォルダーだけで判定し、
+    /// 共有 DB のフォルダーへはアクセスしないこと（稼働状況を開くたびに別ホストへ SMB 接続しない）
+    /// </summary>
+    [Fact]
+    public async Task GetOperationStatusAsync_共有DBの出力先と手元の設定が食い違うとき_手元の設定のフォルダーだけで判定すること()
+    {
+        const string sharedDbFolder = @"\\203.0.113.5\share\reports";
+        const string localFolder = @"D:\Local\Reports";
+        SetupDefaults(
+            cards: new[] { Card(CardA) },
+            settings: new AppSettings { WarningBalance = NonDefaultWarningBalance, ReportOutputFolder = sharedDbFolder });
+        _reportOutputFolderStore.Setup(s => s.Load()).Returns(localFolder);
+
+        await CreateService().GetOperationStatusAsync(AsOf, AppConstants.LongTermUnreturnedDays);
+
+        _reportExportStatusService.Verify(
+            s => s.GetStatuses(It.IsAny<IEnumerable<ReportExportTarget>>(), localFolder, 2026, 8), Times.Once);
+        _reportExportStatusService.Verify(
+            s => s.GetStatuses(It.IsAny<IEnumerable<ReportExportTarget>>(), sharedDbFolder, It.IsAny<int>(), It.IsAny<int>()),
+            Times.Never);
+    }
+
+    /// <summary>
+    /// Issue #2266: この PC の設定が無いときは、共有 DB にだけある出力先を走査しないこと
+    /// （空の出力先で判定し、全カードが「判定不可」になる。帳票作成画面で出力先を決めれば解消すると案内する）
+    /// </summary>
+    [Fact]
+    public async Task GetOperationStatusAsync_手元の設定が無いとき_共有DBにだけある出力先を走査しないこと()
+    {
+        const string sharedDbFolder = @"\\203.0.113.5\share\reports";
+        SetupDefaults(
+            cards: new[] { Card(CardA) },
+            settings: new AppSettings { WarningBalance = NonDefaultWarningBalance, ReportOutputFolder = sharedDbFolder },
+            reportStatuses: new[] { new ReportExportStatus { CardIdm = CardA, State = ReportExportState.Unknown } });
+        _reportOutputFolderStore.Setup(s => s.Load()).Returns(string.Empty);
+
+        var result = await CreateService().GetOperationStatusAsync(AsOf, AppConstants.LongTermUnreturnedDays);
+
+        _reportExportStatusService.Verify(
+            s => s.GetStatuses(It.IsAny<IEnumerable<ReportExportTarget>>(), string.Empty, 2026, 8), Times.Once);
+        _reportExportStatusService.Verify(
+            s => s.GetStatuses(It.IsAny<IEnumerable<ReportExportTarget>>(), sharedDbFolder, It.IsAny<int>(), It.IsAny<int>()),
+            Times.Never);
+        result.ReportNotExportedCount.Should().Be(0, "出力先が決まっていないカードを未出力として督促しない");
+        result.ReportStatusUnknownCount.Should().Be(1);
+        result.ReportStatusGuidance.Should().Be(AdminDashboardService.ReportOutputFolderNotSetGuidance,
+            "「判定不可」だけでは、どの画面で何をすれば解消するのかが分からない");
+    }
+
+    /// <summary>
+    /// Issue #2266: 判定不可の案内は原因（出力先が未設定／読めない）で分け、判定不可が無ければ出さないこと
+    /// </summary>
+    [Theory]
+    [InlineData("", ReportExportState.Unknown, false, AdminDashboardService.ReportOutputFolderNotSetGuidance)]
+    [InlineData("   ", ReportExportState.Unknown, false, AdminDashboardService.ReportOutputFolderNotSetGuidance)]
+    [InlineData(@"D:\Reports", ReportExportState.Unknown, false, AdminDashboardService.ReportOutputFolderUnreadableGuidance)]
+    // ファイル名の重複は一覧の文言が原因を名指しする（出力先を案内すると誤った作業を誘発する）
+    [InlineData(@"D:\Reports", ReportExportState.Unknown, true, "")]
+    [InlineData("", ReportExportState.NotExported, false, "")]
+    [InlineData("", ReportExportState.Exported, false, "")]
+    public void BuildReportStatusGuidance_原因ごとの案内を返し判定不可が無ければ空であること(
+        string outputFolder, ReportExportState state, bool isCollision, string expected)
+    {
+        var cards = new[]
+        {
+            new AdminDashboardCardStatus { CardIdm = CardA, ReportState = state, IsReportFileNameCollision = isCollision },
+        };
+
+        AdminDashboardService.BuildReportStatusGuidance(outputFolder, cards).Should().Be(expected);
+    }
+
+    /// <summary>
+    /// Issue #2266: 判定不可の案内は「何が／なぜ／どうすれば」を含み、行動指示で終わること
+    /// </summary>
+    [Theory]
+    [InlineData(AdminDashboardService.ReportOutputFolderNotSetGuidance)]
+    [InlineData(AdminDashboardService.ReportOutputFolderUnreadableGuidance)]
+    public void 判定不可の案内は解消する画面と操作を示すこと(string guidance)
+    {
+        guidance.Should().Contain("当月帳票", "何が");
+        guidance.Should().Contain("出力先フォルダ", "なぜ");
+        guidance.Should().Contain("帳票作成画面（F1）", "どの画面で解消するか");
+        guidance.Should().EndWith("してください。");
     }
 
     #endregion

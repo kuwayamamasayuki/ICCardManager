@@ -53,8 +53,11 @@ public class AppStartupSequenceConventionTests
     private static readonly Regex DepartmentConfigPattern = new Regex(
         @"await\s+ApplyDepartmentConfigFromFileAsync\s*\(\s*\)", RegexOptions.Compiled);
 
+    /// <summary>
+    /// 帳票出力先ファイルを共有 DB へ写す処理の呼び出し（Issue #2266 で廃止。復活させない）
+    /// </summary>
     private static readonly Regex ReportOutputConfigPattern = new Regex(
-        @"await\s+ApplyReportOutputConfigFromFileAsync\s*\(\s*\)", RegexOptions.Compiled);
+        @"\bApplyReportOutputConfigFromFileAsync\s*\(", RegexOptions.Compiled);
 
     private static string ReadCodeOnlyAppSource()
         => TestSourceInspection.ToCodeOnly(
@@ -106,10 +109,11 @@ public class AppStartupSequenceConventionTests
             return "起動時の設定を部署種別ファイルの適用より前に読んでいる（ファイルの部署種別が摘要に反映されない）";
         }
 
-        var reportOutputApply = ReportOutputConfigPattern.Match(initializeBody);
-        if (!reportOutputApply.Success || settingsRead.Index < reportOutputApply.Index)
+        // Issue #2266: 帳票出力先ファイルを共有 DB へ写さない。写すと PC 間で後勝ちに上書きし合い、
+        // 帳票の出力先はこの PC の設定ファイルから直接読む（IReportOutputFolderStore）
+        if (ReportOutputConfigPattern.IsMatch(initializeBody))
         {
-            return "起動時の設定を帳票出力先ファイルの適用より前に読んでいる、または適用の await が見つからない";
+            return "起動時に帳票出力先ファイルを共有 DB へ写している（出力先はこの PC の設定ファイルから直接読む）";
         }
 
         return null;
@@ -172,7 +176,6 @@ public class AppStartupSequenceConventionTests
         foreach (var signature in new[]
                  {
                      "private async Task ApplyDepartmentConfigFromFileAsync",
-                     "private async Task ApplyReportOutputConfigFromFileAsync",
                  })
         {
             var body = TestSourceInspection.ExtractMethodBody(code, signature);
@@ -224,37 +227,37 @@ public class AppStartupSequenceConventionTests
     /// </summary>
     [Theory]
     [InlineData(
-        "{ await ApplyDepartmentConfigFromFileAsync(); await ApplyReportOutputConfigFromFileAsync(); _startupSettings = await repo.GetAppSettingsAsync(); " +
+        "{ await ApplyDepartmentConfigFromFileAsync(); _startupSettings = await repo.GetAppSettingsAsync(); " +
         "o.SummaryRules.TransferStationGroups = await g.GetGroupsAsync(); await PerformStartupTasksAsync(); }",
         null)]
     // 読みを消した（ファクトリが未読の設定で例外になる／同一視グループが既定値のまま）
     [InlineData(
-        "{ await ApplyDepartmentConfigFromFileAsync(); await ApplyReportOutputConfigFromFileAsync(); o.SummaryRules.TransferStationGroups = await g.GetGroupsAsync(); " +
+        "{ await ApplyDepartmentConfigFromFileAsync(); o.SummaryRules.TransferStationGroups = await g.GetGroupsAsync(); " +
         "await PerformStartupTasksAsync(); }",
         "GetAppSettingsAsync")]
     [InlineData(
-        "{ await ApplyDepartmentConfigFromFileAsync(); await ApplyReportOutputConfigFromFileAsync(); _startupSettings = await repo.GetAppSettingsAsync(); " +
+        "{ await ApplyDepartmentConfigFromFileAsync(); _startupSettings = await repo.GetAppSettingsAsync(); " +
         "await PerformStartupTasksAsync(); }",
         "GetGroupsAsync")]
     // 起動時タスクの後へ回した
     [InlineData(
-        "{ await ApplyDepartmentConfigFromFileAsync(); await ApplyReportOutputConfigFromFileAsync(); await PerformStartupTasksAsync(); " +
+        "{ await ApplyDepartmentConfigFromFileAsync(); await PerformStartupTasksAsync(); " +
         "_startupSettings = await repo.GetAppSettingsAsync(); o.SummaryRules.TransferStationGroups = await g.GetGroupsAsync(); }",
         "PerformStartupTasksAsync より後")]
     // 部署種別ファイルの適用より前に読んだ
     [InlineData(
-        "{ _startupSettings = await repo.GetAppSettingsAsync(); await ApplyDepartmentConfigFromFileAsync(); await ApplyReportOutputConfigFromFileAsync(); " +
+        "{ _startupSettings = await repo.GetAppSettingsAsync(); await ApplyDepartmentConfigFromFileAsync(); " +
         "o.SummaryRules.TransferStationGroups = await g.GetGroupsAsync(); await PerformStartupTasksAsync(); }",
         "部署種別ファイルの適用より前")]
-    // 帳票出力先ファイルの適用より前に読んだ
+    // 帳票出力先ファイルを共有 DB へ写す処理を戻した（Issue #2266）
     [InlineData(
         "{ await ApplyDepartmentConfigFromFileAsync(); _startupSettings = await repo.GetAppSettingsAsync(); " +
         "await ApplyReportOutputConfigFromFileAsync(); o.SummaryRules.TransferStationGroups = await g.GetGroupsAsync(); " +
         "await PerformStartupTasksAsync(); }",
-        "帳票出力先ファイルの適用より前")]
+        "帳票出力先ファイルを共有 DB へ写している")]
     // 同期で待つ形は await の形に一致しない
     [InlineData(
-        "{ await ApplyDepartmentConfigFromFileAsync(); await ApplyReportOutputConfigFromFileAsync(); _startupSettings = Task.Run(() => repo.GetAppSettings()).GetAwaiter().GetResult(); " +
+        "{ await ApplyDepartmentConfigFromFileAsync(); _startupSettings = Task.Run(() => repo.GetAppSettings()).GetAwaiter().GetResult(); " +
         "o.SummaryRules.TransferStationGroups = await g.GetGroupsAsync(); await PerformStartupTasksAsync(); }",
         "GetAppSettingsAsync")]
     public void 起動時の読みの順序判定は読みの欠落と順序の崩れを検出すること(string body, string expectedReasonFragment)

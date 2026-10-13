@@ -71,7 +71,7 @@ namespace DebugDataViewer
     /// </para>
     /// <para>
     /// 設定ファイルの読み取りは本体の
-    /// <c>SettingsViewModel.LoadDatabasePathFromConfigFile()</c> をそのまま呼ぶ
+    /// <c>AppConfigFiles.Read(AppConfigFiles.DatabaseConfigPath)</c> をそのまま呼ぶ
     /// （<c>App.xaml.cs</c> で注入する）。ツール側へ書き写すと、次に設定ファイルの
     /// 扱いを変えた人が片方を取りこぼす（#1744）。
     /// </para>

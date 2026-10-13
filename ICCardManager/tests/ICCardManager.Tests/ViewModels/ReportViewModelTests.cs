@@ -32,6 +32,10 @@ public class ReportViewModelTests
     private readonly Mock<IReportDataBuilder> _preflightDataBuilderMock;
     private readonly Mock<IReportExportStatusService> _exportStatusServiceMock;
     /// <summary>
+    /// この PC の帳票出力先（Issue #2266）。既定は未設定（空文字）で、出力先を指定したいテストで上書きする。
+    /// </summary>
+    private readonly Mock<IReportOutputFolderStore> _outputFolderStoreMock = new();
+    /// <summary>
     /// ViewModel が読む現在時刻（Issue #2100）。「先月」「今月」は実行した月で値が決まるため、
     /// 実時計のままだと年をまたぐ誤りを 1 月にしか検出できない。既定は年の途中に固定し、
     /// 境界を検証するテストは個別に書き換える。
@@ -52,6 +56,7 @@ public class ReportViewModelTests
         _navigationServiceMock = new Mock<INavigationService>();
 
         _settingsRepositoryMock.Setup(s => s.GetAppSettingsAsync()).ReturnsAsync(new AppSettings());
+        _outputFolderStoreMock.Setup(s => s.Load()).Returns(string.Empty);
 
         _safeFileLauncherMock = new Mock<ICCardManager.Services.ISafeFileLauncher>();
         // 既定で成功を返す。失敗テストで個別に上書きする。
@@ -87,7 +92,7 @@ public class ReportViewModelTests
             _printService,
             _cardRepositoryMock.Object,
             _navigationServiceMock.Object,
-            _settingsRepositoryMock.Object,
+            _outputFolderStoreMock.Object,
             _safeFileLauncherMock.Object,
             preflightChecker,
             _exportStatusServiceMock.Object,
@@ -157,7 +162,7 @@ public class ReportViewModelTests
             _printService,
             _cardRepositoryMock.Object,
             _navigationServiceMock.Object,
-            _settingsRepositoryMock.Object,
+            _outputFolderStoreMock.Object,
             _safeFileLauncherMock.Object,
             new ReportPreflightChecker(_preflightDataBuilderMock.Object, _ledgerRepositoryMock.Object, new ReportFileNameFactory()),
             _exportStatusServiceMock.Object,
@@ -796,18 +801,33 @@ public class ReportViewModelTests
 
     #endregion
 
-    #region Issue #1029: 出力先フォルダ永続化テスト
+    #region Issue #1029 / #2266: 出力先フォルダ永続化テスト（この PC の設定が正）
 
     /// <summary>
-    /// InitializeAsync時に保存済みの出力先フォルダが読み込まれること
+    /// 共有 DB に書かれた出力先（Issue #2266 の攻撃形: 別ホストの UNC）
+    /// </summary>
+    private const string SharedDbOutputFolder = @"\\203.0.113.5\share\reports";
+
+    /// <summary>
+    /// 共有 DB の settings.report_output_folder に値が入っている状態にする（Issue #2266）
+    /// </summary>
+    private void SetupSharedDbOutputFolder(string folder)
+    {
+        _settingsRepositoryMock.Setup(s => s.GetAppSettingsAsync())
+            .ReturnsAsync(new AppSettings { ReportOutputFolder = folder });
+        _settingsRepositoryMock.Setup(s => s.GetAppSettings())
+            .Returns(new AppSettings { ReportOutputFolder = folder });
+    }
+
+    /// <summary>
+    /// InitializeAsync時にこの PC に保存済みの出力先フォルダが読み込まれること
     /// </summary>
     [Fact]
     public async Task InitializeAsync_WithSavedOutputFolder_ShouldLoadSavedFolder()
     {
         // Arrange
         var savedFolder = @"D:\Reports\Monthly";
-        _settingsRepositoryMock.Setup(s => s.GetAppSettingsAsync())
-            .ReturnsAsync(new AppSettings { ReportOutputFolder = savedFolder });
+        _outputFolderStoreMock.Setup(s => s.Load()).Returns(savedFolder);
         _cardRepositoryMock.Setup(r => r.GetAllAsync()).ReturnsAsync(new List<IcCard>());
 
         // Act
@@ -818,14 +838,13 @@ public class ReportViewModelTests
     }
 
     /// <summary>
-    /// 保存済みフォルダが空の場合はデフォルト値（マイドキュメント）のままであること
+    /// この PC に保存済みの出力先が無い場合はデフォルト値（マイドキュメント）のままであること
     /// </summary>
     [Fact]
     public async Task InitializeAsync_WithEmptyOutputFolder_ShouldKeepDefault()
     {
         // Arrange
-        _settingsRepositoryMock.Setup(s => s.GetAppSettingsAsync())
-            .ReturnsAsync(new AppSettings { ReportOutputFolder = string.Empty });
+        _outputFolderStoreMock.Setup(s => s.Load()).Returns(string.Empty);
         _cardRepositoryMock.Setup(r => r.GetAllAsync()).ReturnsAsync(new List<IcCard>());
 
         // Act
@@ -837,15 +856,25 @@ public class ReportViewModelTests
     }
 
     /// <summary>
-    /// 保存済みフォルダがnull（未設定）の場合はデフォルト値のままであること
+    /// Issue #2266: この PC の設定が無く共有 DB にだけ出力先があるとき、共有 DB の値を既定値に採用せず、
+    /// そのフォルダーを走査しないこと（画面を開いただけで別ホストへ SMB 接続しない）
     /// </summary>
+    /// <remarks>
+    /// <see cref="ReportViewModel"/> は共有 DB を受け取る口を持たない（出力先は <c>IReportOutputFolderStore</c> だけから読む）ため、
+    /// このテストは構造上「共有 DB の値で走査する」形へは退行し得ない。その退行（共有 DB の値を読む形）の防止は
+    /// 静的検査 <c>ReportOutputFolderSourceConventionTests</c> が担い、このテストは<b>手元の設定の値で走査されること</b>を固定する。
+    /// </remarks>
     [Fact]
-    public async Task InitializeAsync_WithNullOutputFolder_ShouldKeepDefault()
+    public async Task InitializeAsync_共有DBにだけ出力先があるとき_既定値に採用せず走査もしないこと()
     {
-        // Arrange - ReportOutputFolderのデフォルトはstring.Empty
-        _settingsRepositoryMock.Setup(s => s.GetAppSettingsAsync())
-            .ReturnsAsync(new AppSettings());
-        _cardRepositoryMock.Setup(r => r.GetAllAsync()).ReturnsAsync(new List<IcCard>());
+        // Arrange
+        SetupSharedDbOutputFolder(SharedDbOutputFolder);
+        _outputFolderStoreMock.Setup(s => s.Load()).Returns(string.Empty);
+        // カードが 0 枚だと出力状況の判定そのものが走らず、「走査しない」の表明が自明に真になる
+        _cardRepositoryMock.Setup(r => r.GetAllAsync()).ReturnsAsync(new List<IcCard>
+        {
+            new IcCard { CardIdm = "0123456789ABCDEF", CardType = "はやかけん", CardNumber = "001" },
+        });
 
         // Act
         await _viewModel.InitializeAsync();
@@ -853,36 +882,75 @@ public class ReportViewModelTests
         // Assert
         var myDocuments = Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments);
         _viewModel.OutputFolder.Should().Be(myDocuments);
+        _exportStatusServiceMock.Verify(
+            s => s.GetStatuses(It.IsAny<IEnumerable<ReportExportTarget>>(), myDocuments, It.IsAny<int>(), It.IsAny<int>()),
+            Times.Once,
+            "出力状況の判定は初期値（マイドキュメント）で 1 回走る（判定が走っていることの表明）");
+        _exportStatusServiceMock.Verify(
+            s => s.GetStatuses(It.IsAny<IEnumerable<ReportExportTarget>>(), SharedDbOutputFolder, It.IsAny<int>(), It.IsAny<int>()),
+            Times.Never,
+            "共有 DB の出力先は走査しない（出力状況の判定はそのフォルダーへ Directory.Exists とファイル読み込みを行う）");
+    }
+
+    /// <summary>
+    /// Issue #2266: 共有 DB の出力先がこの PC の設定と食い違うとき、この PC の設定のフォルダーだけを
+    /// 従来どおり走査すること（共有 DB のフォルダーへはアクセスしない）
+    /// </summary>
+    /// <remarks>
+    /// <see cref="ReportViewModel"/> は共有 DB を受け取る口を持たない（出力先は <c>IReportOutputFolderStore</c> だけから読む）ため、
+    /// このテストは構造上「共有 DB の値で走査する」形へは退行し得ない。その退行（共有 DB の値を読む形）の防止は
+    /// 静的検査 <c>ReportOutputFolderSourceConventionTests</c> が担い、このテストは<b>手元の設定の値で走査されること</b>を固定する。
+    /// </remarks>
+    [Fact]
+    public async Task InitializeAsync_共有DBの出力先と手元の設定が食い違うとき_手元の設定のフォルダーだけを走査すること()
+    {
+        // Arrange
+        const string localFolder = @"D:\Local\Reports";
+        SetupSharedDbOutputFolder(SharedDbOutputFolder);
+        _outputFolderStoreMock.Setup(s => s.Load()).Returns(localFolder);
+        _cardRepositoryMock.Setup(r => r.GetAllAsync()).ReturnsAsync(new List<IcCard>
+        {
+            new IcCard { CardIdm = "0123456789ABCDEF", CardType = "はやかけん", CardNumber = "001" },
+        });
+
+        // Act
+        await _viewModel.InitializeAsync();
+
+        // Assert
+        _viewModel.OutputFolder.Should().Be(localFolder);
+        _exportStatusServiceMock.Verify(
+            s => s.GetStatuses(It.IsAny<IEnumerable<ReportExportTarget>>(), localFolder, It.IsAny<int>(), It.IsAny<int>()),
+            Times.AtLeastOnce,
+            "この PC の設定のフォルダーは従来どおり画面を開いた時点で走査する");
+        _exportStatusServiceMock.Verify(
+            s => s.GetStatuses(It.IsAny<IEnumerable<ReportExportTarget>>(), SharedDbOutputFolder, It.IsAny<int>(), It.IsAny<int>()),
+            Times.Never);
     }
 
     #endregion
 
-    #region Issue #1026: 出力先フォルダ直接入力テスト
+    #region Issue #1026 / #2266: 出力先フォルダ直接入力テスト
 
     /// <summary>
-    /// 初期化完了後にOutputFolderを変更すると設定が保存されること
+    /// 初期化完了後にOutputFolderを変更するとこの PC の設定へ保存され、共有 DB へは書かないこと
     /// </summary>
     [Fact]
     public async Task OutputFolder_AfterInitialize_WhenChanged_ShouldSaveToSettings()
     {
         // Arrange
-        const string expectedFolder = @"\\server\share\reports";
+        const string expectedFolder = @"D:\Reports\Changed";
         _cardRepositoryMock.Setup(r => r.GetAllAsync()).ReturnsAsync(new List<IcCard>());
-        _settingsRepositoryMock.Setup(s => s.SaveAppSettingsAsync(It.IsAny<AppSettings>())).ReturnsAsync(true);
         await _viewModel.InitializeAsync();
-
-        // Issue #1821: fire-and-forget の完了は固定時間ではなく Callback のシグナルで待つ
-        var saved = CreateSaveSignal(expectedFolder);
 
         // Act - ユーザーがテキストボックスに直接入力した場合をシミュレート
         _viewModel.OutputFolder = expectedFolder;
 
-        // Assert - 設定が保存されること
-        (await WaitForSignalAsync(saved)).Should().BeTrue(
-            "OutputFolder の変更は SaveOutputFolderAsync により設定へ保存されるべき");
-        _settingsRepositoryMock.Verify(
-            s => s.SaveAppSettingsAsync(It.Is<AppSettings>(a => a.ReportOutputFolder == expectedFolder)),
-            Times.AtLeastOnce);
+        // Assert - この PC の設定へ保存されること
+        _outputFolderStoreMock.Verify(s => s.Save(expectedFolder), Times.Once);
+
+        // Issue #2266: 共有 DB へ書くと、ほかの PC の既定値を後勝ちで上書きし合う
+        _settingsRepositoryMock.Verify(s => s.SaveAppSettingsAsync(It.IsAny<AppSettings>()), Times.Never);
+        _settingsRepositoryMock.Verify(s => s.SetAsync(It.IsAny<string>(), It.IsAny<string>()), Times.Never);
     }
 
     /// <summary>
@@ -894,14 +962,12 @@ public class ReportViewModelTests
         // Act - コンストラクタ後（InitializeAsync前）にフォルダを変更
         _viewModel.OutputFolder = @"D:\SomeFolder";
 
-        // Assert - SaveAppSettingsAsyncが呼ばれないこと
-        _settingsRepositoryMock.Verify(
-            s => s.SaveAppSettingsAsync(It.IsAny<AppSettings>()),
-            Times.Never);
+        // Assert - 保存されないこと
+        _outputFolderStoreMock.Verify(s => s.Save(It.IsAny<string>()), Times.Never);
     }
 
     /// <summary>
-    /// UNCパスを出力先フォルダに設定できること
+    /// UNCパスを出力先フォルダに設定できること（職員が自分で選んだ共有フォルダーは従来どおり使える）
     /// </summary>
     [Fact]
     public async Task OutputFolder_WithUncPath_ShouldAcceptAndSave()
@@ -909,22 +975,113 @@ public class ReportViewModelTests
         // Arrange
         const string expectedFolder = @"\\192.168.1.100\共有フォルダ\帳票";
         _cardRepositoryMock.Setup(r => r.GetAllAsync()).ReturnsAsync(new List<IcCard>());
-        _settingsRepositoryMock.Setup(s => s.SaveAppSettingsAsync(It.IsAny<AppSettings>())).ReturnsAsync(true);
         await _viewModel.InitializeAsync();
-
-        // Issue #1821: fire-and-forget の完了は固定時間ではなく Callback のシグナルで待つ
-        var saved = CreateSaveSignal(expectedFolder);
 
         // Act
         _viewModel.OutputFolder = expectedFolder;
 
         // Assert
         _viewModel.OutputFolder.Should().Be(expectedFolder);
-        (await WaitForSignalAsync(saved)).Should().BeTrue(
-            "UNC パスも SaveOutputFolderAsync により設定へ保存されるべき");
-        _settingsRepositoryMock.Verify(
-            s => s.SaveAppSettingsAsync(It.Is<AppSettings>(a => a.ReportOutputFolder == expectedFolder)),
-            Times.AtLeastOnce);
+        _outputFolderStoreMock.Verify(s => s.Save(expectedFolder), Times.Once);
+    }
+
+    /// <summary>
+    /// Issue #2266: 「参照」で表示中と同じフォルダを選び直したら、値が変わらなくてもこの PC の設定へ保存すること
+    /// （設定ファイルが無い PC で、初期値のマイドキュメントを確定させる操作。値が変わらないと
+    /// OnOutputFolderChanged が起きず保存されなかった）
+    /// </summary>
+    [Fact]
+    public async Task ApplyBrowsedOutputFolder_表示中と同じフォルダを選び直したら保存すること()
+    {
+        // Arrange
+        _cardRepositoryMock.Setup(r => r.GetAllAsync()).ReturnsAsync(new List<IcCard>());
+        await _viewModel.InitializeAsync();
+        var current = _viewModel.OutputFolder;
+
+        // Act
+        _viewModel.ApplyBrowsedOutputFolder(current);
+
+        // Assert
+        _outputFolderStoreMock.Verify(s => s.Save(current), Times.Once);
+    }
+
+    /// <summary>
+    /// Issue #2266: 「参照」で表記だけが違う（大文字小文字・末尾の区切り）同じフォルダを選んだら、選び直しとして表示中の値を保存すること
+    /// </summary>
+    [Fact]
+    public async Task ApplyBrowsedOutputFolder_表記だけが違う同じフォルダなら選び直しとして保存すること()
+    {
+        // Arrange
+        _outputFolderStoreMock.Setup(s => s.Load()).Returns(@"D:\Reports\Monthly");
+        _cardRepositoryMock.Setup(r => r.GetAllAsync()).ReturnsAsync(new List<IcCard>());
+        await _viewModel.InitializeAsync();
+
+        // Act
+        _viewModel.ApplyBrowsedOutputFolder(@"d:\reports\monthly\");
+
+        // Assert
+        _viewModel.OutputFolder.Should().Be(@"D:\Reports\Monthly");
+        _outputFolderStoreMock.Verify(s => s.Save(@"D:\Reports\Monthly"), Times.Once);
+    }
+
+    /// <summary>
+    /// Issue #2266: 出力先の同一判定は、大文字小文字・前後の空白・末尾の区切りを無視し、別のフォルダは区別すること
+    /// </summary>
+    [Theory]
+    [InlineData(@"D:\Reports", @"d:\reports", true)]
+    [InlineData(@"D:\Reports", @"D:\Reports  ", true)]
+    [InlineData(@"D:\Reports\", @"D:\Reports", true)]
+    [InlineData(@"\\server\share\帳票", @"\\SERVER\share\帳票\", true)]
+    [InlineData(@"C:\", @"c:\", true)]
+    [InlineData(@"D:\Reports", @"D:\Reports2", false)]
+    [InlineData(@"D:\Reports", "", false)]
+    [InlineData(null, "", true)]
+    public void IsSameOutputFolder_表記の揺れを同じフォルダとして扱い別のフォルダは区別すること(string? left, string? right, bool expected)
+    {
+        ReportViewModel.IsSameOutputFolder(left, right).Should().Be(expected);
+    }
+
+    /// <summary>
+    /// Issue #2266 対の表明: 「参照」で別のフォルダを選んだら、従来どおり 1 回だけ保存して表示を変えること
+    /// （同じ値の分岐を足したことで二重に保存する・表示を変えない実装を検出する）
+    /// </summary>
+    [Fact]
+    public async Task ApplyBrowsedOutputFolder_別のフォルダを選んだら表示を変えて1回だけ保存すること()
+    {
+        // Arrange
+        const string selected = @"D:\Reports\Selected";
+        _cardRepositoryMock.Setup(r => r.GetAllAsync()).ReturnsAsync(new List<IcCard>());
+        await _viewModel.InitializeAsync();
+
+        // Act
+        _viewModel.ApplyBrowsedOutputFolder(selected);
+
+        // Assert
+        _viewModel.OutputFolder.Should().Be(selected);
+        _outputFolderStoreMock.Verify(s => s.Save(selected), Times.Once);
+        _outputFolderStoreMock.Verify(s => s.Save(It.Is<string>(f => f != selected)), Times.Never);
+    }
+
+    /// <summary>
+    /// Issue #2266: この PC の設定へ保存できなかったとき、黙らずに画面へ案内すること
+    /// </summary>
+    [Fact]
+    public async Task OutputFolder_保存に失敗したとき_次回は以前のフォルダに戻ることを案内すること()
+    {
+        // Arrange
+        _cardRepositoryMock.Setup(r => r.GetAllAsync()).ReturnsAsync(new List<IcCard>());
+        await _viewModel.InitializeAsync();
+        _outputFolderStoreMock.Setup(s => s.Save(It.IsAny<string>()))
+            .Throws(new UnauthorizedAccessException("Access to the path 'report_output_config.txt' is denied."));
+
+        // Act
+        _viewModel.OutputFolder = @"D:\Reports\Changed";
+
+        // Assert
+        _viewModel.IsStatusError.Should().BeTrue();
+        _viewModel.StatusMessage.Should().Be(ReportViewModel.OutputFolderSaveFailedMessage);
+        _viewModel.StatusMessage.Should().NotContain("Access to the path", "生の例外メッセージを画面に出さない（#1614）");
+        _viewModel.StatusMessage.Should().EndWith("してください。");
     }
 
     #endregion
@@ -1980,49 +2137,6 @@ public class ReportViewModelTests
 
         // Assert
         _viewModel.Cards.Should().OnlyContain(c => c.PreflightWarningCount == 0);
-    }
-
-    #endregion
-
-    #region ヘルパーメソッド（Issue #1821）
-
-    /// <summary>
-    /// fire-and-forget の完了待ちに使うタイムアウト。
-    /// 遅い CI ランナーでも余裕を持って完了できる長さを取る（正常時はシグナルで即座に抜ける）。
-    /// </summary>
-    private static readonly TimeSpan SignalTimeout = TimeSpan.FromSeconds(5);
-
-    /// <summary>
-    /// 指定した出力先フォルダーで <see cref="ISettingsRepository.SaveAppSettingsAsync"/> が
-    /// 呼ばれたことを知らせるシグナルを仕込む。
-    /// </summary>
-    /// <remarks>
-    /// Issue #1821: <c>OnOutputFolderChanged</c> は <c>SaveOutputFolderAsync</c> を
-    /// fire-and-forget で起動するため、呼び出し側は完了を await できない。
-    /// 固定時間の <c>Task.Delay</c> で待つと遅いマシンで散発的に赤くなり、
-    /// かつ常にその時間だけ待つので実行時間も無駄になる（.claude/rules/testing.md）。
-    /// </remarks>
-    private TaskCompletionSource<bool> CreateSaveSignal(string expectedFolder)
-    {
-        var signal = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
-        _settingsRepositoryMock
-            .Setup(s => s.SaveAppSettingsAsync(It.Is<AppSettings>(a => a.ReportOutputFolder == expectedFolder)))
-            .Callback(() => signal.TrySetResult(true))
-            .ReturnsAsync(true);
-        return signal;
-    }
-
-    /// <summary>
-    /// シグナルが立つまで待つ。タイムアウトした場合は false を返す。
-    /// </summary>
-    private static async Task<bool> WaitForSignalAsync(TaskCompletionSource<bool> signal)
-    {
-        using var timeoutCts = new CancellationTokenSource();
-        var timeout = Task.Delay(SignalTimeout, timeoutCts.Token);
-        var completed = await Task.WhenAny(signal.Task, timeout);
-        // シグナルが先に立ったらタイマーを畳む（5 秒ぶんのタイマーを残さない）
-        timeoutCts.Cancel();
-        return completed == signal.Task && await signal.Task;
     }
 
     #endregion

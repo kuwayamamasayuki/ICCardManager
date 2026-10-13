@@ -1,13 +1,16 @@
 using System.IO;
+using System.Linq;
 using System.Text;
 using FluentAssertions;
-using ICCardManager.ViewModels;
+using ICCardManager.Common;
 using Xunit;
 
-namespace ICCardManager.Tests.ViewModels;
+namespace ICCardManager.Tests.Common;
 
 /// <summary>
-/// Issue #1598: 設定ファイル保存（<see cref="SettingsViewModel.SaveConfigFile"/>）のアトミック書き込みテスト。
+/// Issue #1598: 設定ファイル保存（<see cref="AppConfigFiles.Write"/>）のアトミック書き込みテスト。
+/// Issue #2266 で <c>SettingsViewModel</c> の静的メソッドから <c>Common/AppConfigFiles</c> へ移した（挙動は同じ）。
+/// 読み取り（<see cref="AppConfigFiles.Read"/>）の文字コード判定もここで固定する。
 ///
 /// 旧実装は <c>File.Delete</c> → <c>File.Move</c> の2段階で、その間にクラッシュすると
 /// 設定ファイルが消失していた。新実装は <c>File.Replace</c> による原子的置換に変更し、
@@ -18,7 +21,7 @@ namespace ICCardManager.Tests.ViewModels;
 /// という観測可能な契約を固定する。アトミック性そのものは <c>File.Replace</c> の
 /// セマンティクスに依存し、コードレビューで担保する。
 /// </summary>
-public class SettingsViewModelConfigFileSaveTests
+public class AppConfigFilesTests
 {
     private static string CreateTempDir()
     {
@@ -37,7 +40,7 @@ public class SettingsViewModelConfigFileSaveTests
         {
             const string value = @"\\server\share\iccard.db";
 
-            SettingsViewModel.SaveConfigFile(filePath, value);
+            AppConfigFiles.Write(filePath, value);
 
             File.Exists(filePath).Should().BeTrue("初回作成では File.Move フォールバックでファイルが作られる");
             File.ReadAllText(filePath, Encoding.UTF8).Should().Be(value);
@@ -58,7 +61,7 @@ public class SettingsViewModelConfigFileSaveTests
             File.WriteAllText(filePath, @"C:\old\local\iccard.db", Encoding.UTF8);
             const string newValue = @"\\server\share\iccard.db";
 
-            SettingsViewModel.SaveConfigFile(filePath, newValue);
+            AppConfigFiles.Write(filePath, newValue);
 
             File.Exists(filePath).Should().BeTrue("置換後も対象ファイルは常に存在する（Delete→Move の消失窓がない）");
             File.ReadAllText(filePath, Encoding.UTF8).Should().Be(newValue, "既存ファイルが新しい値で置換される");
@@ -76,7 +79,7 @@ public class SettingsViewModelConfigFileSaveTests
         var filePath = Path.Combine(dir, "database_config.txt");
         try
         {
-            SettingsViewModel.SaveConfigFile(filePath, @"\\server\share\iccard.db");
+            AppConfigFiles.Write(filePath, @"\\server\share\iccard.db");
 
             File.Exists(filePath + ".tmp").Should().BeFalse("初回作成後に一時ファイルが残らない");
         }
@@ -95,7 +98,7 @@ public class SettingsViewModelConfigFileSaveTests
         {
             File.WriteAllText(filePath, "old", Encoding.UTF8);
 
-            SettingsViewModel.SaveConfigFile(filePath, @"\\server\share\iccard.db");
+            AppConfigFiles.Write(filePath, @"\\server\share\iccard.db");
 
             File.Exists(filePath + ".tmp").Should().BeFalse("置換後に一時ファイルが残らない");
         }
@@ -112,7 +115,7 @@ public class SettingsViewModelConfigFileSaveTests
         var filePath = Path.Combine(dir, "database_config.txt");
         try
         {
-            SettingsViewModel.SaveConfigFile(filePath, null!);
+            AppConfigFiles.Write(filePath, null);
 
             File.Exists(filePath).Should().BeTrue("null 値でも空ファイルとして保存される");
             File.ReadAllText(filePath, Encoding.UTF8).Should().BeEmpty();
@@ -132,9 +135,79 @@ public class SettingsViewModelConfigFileSaveTests
         {
             const string value = "市長事務部局";
 
-            SettingsViewModel.SaveConfigFile(filePath, value);
+            AppConfigFiles.Write(filePath, value);
 
             File.ReadAllText(filePath, Encoding.UTF8).Should().Be(value, "日本語が UTF-8 で正しく往復する");
+        }
+        finally
+        {
+            Directory.Delete(dir, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void Read_FileDoesNotExist_ReturnsEmpty()
+    {
+        var dir = CreateTempDir();
+        try
+        {
+            AppConfigFiles.Read(Path.Combine(dir, "missing.txt")).Should().BeEmpty();
+        }
+        finally
+        {
+            Directory.Delete(dir, recursive: true);
+        }
+    }
+
+    /// <summary>
+    /// Issue #2266: 移設後も、インストーラー（BOM なし Shift_JIS）・本アプリ（UTF-8 BOM）・UTF-16 LE BOM の
+    /// いずれで書かれた設定ファイルも読め、前後の空白を取り除くこと
+    /// </summary>
+    [Theory]
+    [InlineData("shift_jis")]
+    [InlineData("utf-8-bom")]
+    [InlineData("utf-16le-bom")]
+    public void Read_DecodesByBom_AndTrims(string encodingName)
+    {
+        const string value = @"\\サーバー\共有\帳票";
+        byte[] bytes;
+        switch (encodingName)
+        {
+            case "shift_jis":
+                bytes = Encoding.GetEncoding(932).GetBytes("  " + value + "\r\n");
+                break;
+            case "utf-8-bom":
+                bytes = new byte[] { 0xEF, 0xBB, 0xBF }.Concat(Encoding.UTF8.GetBytes(value + "\r\n")).ToArray();
+                break;
+            default:
+                bytes = new byte[] { 0xFF, 0xFE }.Concat(Encoding.Unicode.GetBytes(value + "  ")).ToArray();
+                break;
+        }
+
+        var dir = CreateTempDir();
+        try
+        {
+            var filePath = Path.Combine(dir, "config.txt");
+            File.WriteAllBytes(filePath, bytes);
+
+            AppConfigFiles.Read(filePath).Should().Be(value);
+        }
+        finally
+        {
+            Directory.Delete(dir, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void Write_ThenRead_RoundTrips()
+    {
+        var dir = CreateTempDir();
+        try
+        {
+            var filePath = Path.Combine(dir, "report_output_config.txt");
+            AppConfigFiles.Write(filePath, @"D:\物品出納簿");
+
+            AppConfigFiles.Read(filePath).Should().Be(@"D:\物品出納簿");
         }
         finally
         {

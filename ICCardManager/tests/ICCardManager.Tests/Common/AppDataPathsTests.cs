@@ -63,9 +63,9 @@ public class AppDataPathsTests
             ("既定の DB", dbContext.DatabasePath),
             ("既定のバックアップ先", PathValidator.GetDefaultBackupPath()),
             ("エラーログ", ErrorDialogHelper.LogDirectory),
-            ("database_config.txt", SettingsViewModel.GetDatabaseConfigPath()),
-            ("department_config.txt", SettingsViewModel.GetDepartmentConfigPath()),
-            ("report_output_config.txt", SettingsViewModel.GetReportOutputConfigPath()),
+            ("database_config.txt", AppConfigFiles.DatabaseConfigPath),
+            ("department_config.txt", AppConfigFiles.DepartmentConfigPath),
+            ("report_output_config.txt", AppConfigFiles.ReportOutputConfigPath),
             ("既定の DB フォルダ", SettingsViewModel.GetDefaultDatabaseFolder()),
         };
 
