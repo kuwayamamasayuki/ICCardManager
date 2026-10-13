@@ -835,6 +835,37 @@ public class OperationLogExcelExportServiceTests : IDisposable
         worksheet.Cell(2, 8).Value.ToString().Should().Contain("天神日銀前");
     }
 
+    /// <summary>
+    /// Issue #2265: 統合の取り消し（UNMERGE）も、統合・分割と同じく操作種別を青の太字で表示し、
+    /// 変更後（統合先と挿入し直した統合元の配列）を台帳ごとに展開すること。
+    /// </summary>
+    [Fact]
+    public async Task ExportAsync_統合の取り消しのログは統合と同じ色で台帳ごとに展開されること()
+    {
+        var filePath = Path.Combine(_testDirectory, "unmerge.xlsx");
+        var log = new OperationLog
+        {
+            Id = 1,
+            Timestamp = new DateTime(2026, 10, 13, 10, 0, 0),
+            Action = "UNMERGE",
+            TargetTable = "ledger",
+            TargetId = "42",
+            OperatorName = "テスト管理者",
+            BeforeData = LedgerJson($"[{RailDetailJson},{BusDetailJson}]"),
+            AfterData = $"[{LedgerJson($"[{RailDetailJson}]")},{LedgerJson($"[{BusDetailJson}]")}]"
+        };
+
+        await _service.ExportAsync(new[] { log }, filePath);
+
+        using var workbook = new XLWorkbook(filePath);
+        var worksheet = workbook.Worksheet(1);
+        worksheet.Cell(2, 2).Value.ToString().Should().Be("統合の取り消し");
+        worksheet.Cell(2, 2).Style.Font.Bold.Should().BeTrue();
+        worksheet.Cell(2, 2).Style.Font.FontColor.Should().Be(XLColor.FromHtml("#1565C0"), "統合・分割と同じ青");
+        worksheet.Cell(2, 7).Value.ToString().Should().Contain("利用明細: 2件");
+        worksheet.Cell(2, 8).Value.ToString().Should().Contain("天神日銀前", "変更後の配列も明細まで展開する");
+    }
+
     #endregion
 
     #region ヘルパーメソッド

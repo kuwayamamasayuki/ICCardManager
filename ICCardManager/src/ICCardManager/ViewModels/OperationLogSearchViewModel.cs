@@ -1,3 +1,4 @@
+#nullable enable
 using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
@@ -202,8 +203,8 @@ public partial class OperationLogSearchViewModel : ViewModelBase
     }
 
     // keyset pagination カーソル（Issue #1479）。null は「カーソル未設定（空ページ or 初回前）」。
-    private OperationLogCursor _firstCursor;
-    private OperationLogCursor _lastCursor;
+    private OperationLogCursor? _firstCursor;
+    private OperationLogCursor? _lastCursor;
 
     /// <summary>
     /// 初期化
@@ -429,7 +430,7 @@ public partial class OperationLogSearchViewModel : ViewModelBase
     internal async Task ExportToExcelFileAsync(string filePath)
     {
         int? exportedCount = null;
-        string errorMessage = null;
+        string? errorMessage = null;
         using (BeginBusy("エクスポート中..."))
         {
             try
@@ -552,8 +553,8 @@ public partial class OperationLogSearchViewModel : ViewModelBase
         {
             FromDate = FromDate,
             ToDate = ToDate,
-            Action = string.IsNullOrEmpty(SelectedAction?.Value) ? null : SelectedAction.Value,
-            TargetTable = string.IsNullOrEmpty(SelectedTargetTable?.Value) ? null : SelectedTargetTable.Value,
+            Action = SelectedAction?.Value is string action && !string.IsNullOrEmpty(action) ? action : null,
+            TargetTable = SelectedTargetTable?.Value is string table && !string.IsNullOrEmpty(table) ? table : null,
             TargetId = string.IsNullOrWhiteSpace(TargetIdFilter) ? null : TargetIdFilter.Trim(),
             OperatorName = string.IsNullOrWhiteSpace(OperatorNameFilter) ? null : OperatorNameFilter.Trim()
         };
@@ -633,7 +634,7 @@ public partial class OperationLogSearchViewModel : ViewModelBase
         var name = GetJsonPropertyValue(doc, "Name");
         var number = GetJsonPropertyValue(doc, "Number");
 
-        if (string.IsNullOrEmpty(name))
+        if (name is null || string.IsNullOrEmpty(name))
         {
             return GetJsonPropertyValue(doc, "StaffIdm") ?? "";
         }
@@ -673,13 +674,13 @@ public partial class OperationLogSearchViewModel : ViewModelBase
         var parts = new List<string>();
 
         // 日付を和暦に変換
-        if (!string.IsNullOrEmpty(dateStr) && SqliteDateTimeFormat.TryParse(dateStr, out var date))
+        if (dateStr is not null && !string.IsNullOrEmpty(dateStr) && SqliteDateTimeFormat.TryParse(dateStr, out var date))
         {
             parts.Add(WarekiConverter.ToWareki(date));
         }
 
         // 摘要（長すぎる場合は省略）
-        if (!string.IsNullOrEmpty(summary))
+        if (summary is not null && !string.IsNullOrEmpty(summary))
         {
             var displaySummary = summary.Length > 25 ? summary.Substring(0, 25) + "..." : summary;
             parts.Add(displaySummary);
@@ -712,9 +713,9 @@ public partial class OperationLogSearchViewModel : ViewModelBase
             }
         }
 
-        // Issue #1979: 統合・分割は明細の振り分けが操作の本体なので件数の推移を示す。
+        // Issue #1979: 統合・分割（と、その逆の統合の取り消し。#2265）は明細の振り分けが操作の本体なので件数の推移を示す。
         // 明細の内容そのものは列幅が足りないため Excel エクスポートが担う（04_機能設計書 §10.4a）。
-        if (log.Action == "MERGE" || log.Action == "SPLIT")
+        if (log.Action == "MERGE" || log.Action == "SPLIT" || log.Action == "UNMERGE")
         {
             var counts = OperationLogDetailFormatter.SummarizeDetailCountTransition(
                 log.BeforeData, log.AfterData);
@@ -784,8 +785,8 @@ public partial class OperationLogSearchViewModel : ViewModelBase
 
                 if (beforeValue != afterValue)
                 {
-                    var beforeDisplay = string.IsNullOrEmpty(beforeValue) ? "（なし）" : beforeValue;
-                    var afterDisplay = string.IsNullOrEmpty(afterValue) ? "（なし）" : afterValue;
+                    var beforeDisplay = beforeValue is null || string.IsNullOrEmpty(beforeValue) ? "（なし）" : beforeValue;
+                    var afterDisplay = afterValue is null || string.IsNullOrEmpty(afterValue) ? "（なし）" : afterValue;
 
                     // 長すぎる値は省略
                     if (beforeDisplay.Length > 30)

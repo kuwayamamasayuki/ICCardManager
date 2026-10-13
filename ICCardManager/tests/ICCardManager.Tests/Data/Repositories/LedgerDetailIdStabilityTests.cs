@@ -321,7 +321,8 @@ public class LedgerDetailIdStabilityTests : IDisposable
     private async Task<bool> UnmergeWithScopeAsync(LedgerMergeUndoData undoData)
     {
         using var scope = await _dbContext.BeginTransactionAsync();
-        var result = await _repository.UnmergeLedgersAsync(undoData, scope.Transaction);
+        // Issue #2265: tx 版は成功時に挿入し直した統合元の ID の対応を、競合時に null を返す
+        var result = await _repository.UnmergeLedgersAsync(undoData, scope.Transaction) != null;
         if (result)
         {
             scope.Commit();

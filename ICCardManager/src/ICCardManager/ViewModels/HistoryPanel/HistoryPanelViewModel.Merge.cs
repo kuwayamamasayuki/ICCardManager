@@ -258,7 +258,7 @@ public partial class HistoryPanelViewModel
     /// <summary>
     /// 取り消す統合を名指しして確認し、同意されたときだけ取り消す（Issue #2141）
     /// </summary>
-    /// <returns>取り消しへ進んだ場合 true（取り消しの成否は問わない）</returns>
+    /// <returns>取り消しへ進んだ場合 true（取り消しの成否は問わない）。確認で「いいえ」・認証が完了しなかった場合 false</returns>
     /// <remarks>
     /// <para>
     /// 統合履歴の一覧はダブルクリックでも閉じる（「選択した統合を元に戻す」と同じ結果になる）。
@@ -271,6 +271,12 @@ public partial class HistoryPanelViewModel
     /// <see cref="Views.Dialogs.MergeHistoryDialog"/> は <c>Window</c> を直接生成するため単体テストから踏めず、
     /// 確認と実行をこのメソッドへ切り出して検査できるようにしている。
     /// </para>
+    /// <para>
+    /// Issue #2265: 統合の取り消しは統合先を書き戻し統合元を挿入し直す、統合と同じ重さで台帳を改変する操作のため、
+    /// 統合と同じく職員証の認証を求める（SEQ-AUTH-01）。認証は取り消す対象を確かめた<b>後</b>に求める
+    /// （対象を選んで同意してから職員証をタッチする。職員の復元 #2263 と同じ順序）。取り消しは
+    /// 認証した 1 操作のスコープ（#2260）の内側で行う。
+    /// </para>
     /// </remarks>
     internal async Task<bool> ConfirmAndExecuteUnmergeAsync(Views.Dialogs.MergeHistoryItem item)
     {
@@ -279,9 +285,24 @@ public partial class HistoryPanelViewModel
             return false;
         }
 
+        using var authResult = (await _staffAuthService.RequestAuthenticationAsync("統合の取り消し"))?.Enter();
+        if (authResult == null)
+        {
+            // 同意した直後に何も起きないと、取り消されたのかどうかが分からない（認証のタイムアウトは自動で閉じる）
+            _navigationService.ShowInformation(UnmergeAuthenticationCancelledMessage, "統合の取り消し");
+            return false;
+        }
+
         await ExecuteUnmergeAsync(item.Id);
         return true;
     }
+
+    /// <summary>
+    /// 統合の取り消しで職員証の認証が完了しなかったときの案内（Issue #2265）
+    /// </summary>
+    internal const string UnmergeAuthenticationCancelledMessage =
+        "職員証の認証が完了しなかったため、統合を取り消していません。" +
+        "取り消すには、もう一度「統合を元に戻す」から取り消す統合を選び、職員証で認証してください。";
 
     /// <summary>
     /// 統合の取り消し確認の文言（Issue #2141）。取り消す対象を統合日時と内容で名指しする。

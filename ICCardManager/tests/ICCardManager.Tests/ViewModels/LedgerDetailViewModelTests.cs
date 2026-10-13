@@ -29,6 +29,35 @@ public class LedgerDetailViewModelTests : IDisposable
     private readonly DbContext _dbContext;
     private readonly Mock<IStaffAuthService> _staffAuthServiceMock;
     private readonly List<OperationLog> _operationLogs = new();
+    private readonly CurrentOperatorContext _operatorContext =
+        new(new ICCardManager.Tests.Infrastructure.Timing.FixedSystemClock(new DateTime(2026, 10, 13, 9, 0, 0)));
+
+    private const string AuthenticatedStaffIdm = "FFFF0000000000BB";
+    private const string AuthenticatedStaffName = "認証 花子";
+
+    /// <summary>
+    /// 認証の代役を、本物と同じ（<c>Enter()</c> で操作者セッションを開始する）認証結果で成功させる。
+    /// 応答は非同期に完了させる（セッションを認証サービスの内側で開始する実装だと画面の流れに残らず赤になる）。
+    /// </summary>
+    private void ArrangeAuthenticationSucceeds()
+    {
+        _staffAuthServiceMock
+            .Setup(a => a.RequestAuthenticationAsync(It.IsAny<string>()))
+            .Returns(async () =>
+            {
+                await Task.Yield();
+                return StaffAuthService.CreateAuthenticatedResult(
+                    _operatorContext, AuthenticatedStaffIdm, AuthenticatedStaffName);
+            });
+    }
+
+    /// <summary>認証のキャンセル・タイムアウト（認証サービスは null を返す）。</summary>
+    private void ArrangeAuthenticationCancelled()
+    {
+        _staffAuthServiceMock
+            .Setup(a => a.RequestAuthenticationAsync(It.IsAny<string>()))
+            .ReturnsAsync((StaffAuthResult?)null);
+    }
 
     public void Dispose()
     {
@@ -48,9 +77,10 @@ public class LedgerDetailViewModelTests : IDisposable
             .ReturnsAsync(1)
             .Callback((OperationLog log, System.Data.SQLite.SQLiteTransaction _) => _operationLogs.Add(log));
         var staffRepoMock = new Mock<IStaffRepository>();
+        // Issue #2265: 操作ログの操作者を表明できるよう本物のコンテキストを使う（セッションが無ければ GUI 操作）
         var operationLogger = new OperationLogger(
             operationLogRepoMock.Object,
-            Mock.Of<ICurrentOperatorContext>());
+            _operatorContext);
         var splitServiceLogger = NullLogger<LedgerSplitService>.Instance;
         var ledgerSplitService = new LedgerSplitService(
             _ledgerRepoMock.Object,
@@ -60,6 +90,9 @@ public class LedgerDetailViewModelTests : IDisposable
             splitServiceLogger);
         var logger = NullLogger<LedgerDetailViewModel>.Instance;
         _staffAuthServiceMock = new Mock<IStaffAuthService>();
+        // Issue #2265: 明細の保存は職員証の認証を求める。既定は認証が通る（認証以外を検査するテストのため）。
+        // 認証が完了しない経路を検査するテストは ArrangeAuthenticationCancelled で上書きする
+        ArrangeAuthenticationSucceeds();
 
         _viewModel = new LedgerDetailViewModel(
             _ledgerRepoMock.Object,
@@ -403,7 +436,7 @@ public class LedgerDetailViewModelTests : IDisposable
         AddItems(3);
         _viewModel.SplitAllCommand.Execute(null);
         _viewModel.HasChanges.Should().BeTrue();
-        // _staffAuthServiceMock は未設定 → RequestAuthenticationAsync は既定で null（=認証キャンセル）を返す
+        ArrangeAuthenticationCancelled();
 
         // Act
         await _viewModel.SaveWithFullSplitCommand.ExecuteAsync(null);
@@ -414,6 +447,140 @@ public class LedgerDetailViewModelTests : IDisposable
         _viewModel.HasChanges.Should().BeTrue(
             "認証キャンセル時は分割を実行しないため変更フラグは保持される");
         _viewModel.StatusMessage.Should().Be("認証がキャンセルされたため分割を中止しました");
+    }
+
+    /// <summary>
+    /// Issue #2265: 分割と明細の保存は別々の操作。分割で明細の保存の認証まで重ねて求めない（1 回の操作で認証は 1 回）。
+    /// </summary>
+    /// <remarks>
+    /// 認証を通し、分割が最後まで成功する状態で表明する。認証をキャンセルさせると分割は最初の認証で戻るため、
+    /// 分割の成功後に明細の保存（または 2 回目の認証）を重ねる実装でも緑になる（レビューで検出）。
+    /// </remarks>
+    [Fact]
+    public async Task SaveWithFullSplit_認証は分割の1回だけで明細の保存の認証を重ねて求めないこと()
+    {
+        await InitializeWithTestLedgerAsync();
+        AddItems(3);
+        _viewModel.SplitAllCommand.Execute(null);
+        _ledgerRepoMock
+            .Setup(r => r.ReplaceDetailsAsync(It.IsAny<int>(), It.IsAny<IEnumerable<LedgerDetail>>(), It.IsAny<System.Data.SQLite.SQLiteTransaction>()))
+            .ReturnsAsync(true);
+        _ledgerRepoMock
+            .Setup(r => r.UpdateSummaryAndAmountsAsync(
+                It.IsAny<int>(), It.IsAny<string>(), It.IsAny<int>(), It.IsAny<int>(), It.IsAny<int>(),
+                It.IsAny<System.Data.SQLite.SQLiteTransaction>()))
+            .ReturnsAsync(true);
+        var nextId = 100;
+        _ledgerRepoMock
+            .Setup(r => r.InsertAsync(It.IsAny<Ledger>(), It.IsAny<System.Data.SQLite.SQLiteTransaction>()))
+            .ReturnsAsync(() => nextId++);
+        _ledgerRepoMock
+            .Setup(r => r.InsertDetailsAsync(It.IsAny<int>(), It.IsAny<IEnumerable<LedgerDetail>>(), It.IsAny<System.Data.SQLite.SQLiteTransaction>()))
+            .ReturnsAsync(true);
+
+        await _viewModel.SaveWithFullSplitCommand.ExecuteAsync(null);
+
+        _viewModel.HasPersistedChanges.Should().BeTrue($"前提: 分割が成功していること（{_viewModel.StatusMessage}）");
+        _staffAuthServiceMock.Verify(s => s.RequestAuthenticationAsync("履歴の分割"), Times.Once);
+        _staffAuthServiceMock.Verify(s => s.RequestAuthenticationAsync("明細の保存"), Times.Never);
+        _staffAuthServiceMock.Verify(s => s.RequestAuthenticationAsync(It.IsAny<string>()), Times.Once,
+            "1 回の分割で認証を求めるのは 1 回だけ");
+    }
+
+    #endregion
+
+    #region 明細の保存の職員認証ゲート（Issue #2265）
+
+    /// <summary>
+    /// Issue #2265: 明細の保存（分割を伴わない）は、職員証の認証が完了しなければ何も書き込まない。
+    /// 編集内容（分割線・グループ）は未保存の変更として残り、認証し直せばそのまま保存できる。
+    /// </summary>
+    /// <remarks>
+    /// 修正前は認証を求めずに保存し、操作ログの操作者は「GUI操作」だった。
+    /// 対の表明は <see cref="SaveAsync_認証が通れば認証した職員で操作ログを記録すること"/>。
+    /// </remarks>
+    [Fact]
+    public async Task SaveAsync_認証が完了しなければ保存せず編集内容が残ること()
+    {
+        // Arrange: 認証以外は保存が最後まで成功する状態にしてから、認証だけを完了させない
+        await InitializeWithTestLedgerAsync();
+        AddItems(3);
+        _viewModel.ToggleDividerAt(0);
+        var groupsBefore = _viewModel.Items.Select(i => i.GroupId).ToList();
+        var dividersBefore = _viewModel.Items.Select(i => i.ShowDividerBelow).ToList();
+        ArrangeSaveSucceeds();
+        ArrangeAuthenticationCancelled();
+        var notified = 0;
+        _viewModel.OnSaveCompleted = () => notified++;
+
+        // Act
+        await _viewModel.SaveCommand.ExecuteAsync(null);
+
+        // Assert
+        _staffAuthServiceMock.Verify(s => s.RequestAuthenticationAsync("明細の保存"), Times.Once);
+        _ledgerRepoMock.Verify(r => r.ReplaceDetailsAsync(
+            It.IsAny<int>(), It.IsAny<IEnumerable<LedgerDetail>>(), It.IsAny<System.Data.SQLite.SQLiteTransaction>()), Times.Never,
+            "認証が完了しなければ明細を置き換えない");
+        _ledgerRepoMock.Verify(r => r.UpdateSummaryAsync(
+            It.IsAny<int>(), It.IsAny<string>(), It.IsAny<System.Data.SQLite.SQLiteTransaction>()), Times.Never,
+            "認証が完了しなければ摘要を書き換えない");
+        _operationLogs.Should().BeEmpty("起きていない変更を操作ログに残さない");
+        notified.Should().Be(0, "保存していないので完了を通知しない（ダイアログが閉じない）");
+
+        _viewModel.HasChanges.Should().BeTrue("編集内容は未保存の変更として残る");
+        _viewModel.HasPersistedChanges.Should().BeFalse();
+        _viewModel.IsBusy.Should().BeFalse();
+        _viewModel.Items.Select(i => i.GroupId).Should().Equal(groupsBefore, "分割線で分けたグループはそのまま残る");
+        _viewModel.Items.Select(i => i.ShowDividerBelow).Should().Equal(dividersBefore);
+        _viewModel.SummaryDisplay.Should().Be("テスト", "摘要の表示も元のまま");
+        _viewModel.StatusMessage.Should().Be(LedgerDetailViewModel.SaveAuthenticationCancelledMessage);
+    }
+
+    /// <summary>
+    /// 対: 同じ準備で認証が通れば保存し、操作ログの操作者は認証した職員になる（Issue #1729「操作者の帰属はテストで表明する」）。
+    /// 保存が終わったら操作者セッションも終わる（#2260。後の認証の無い操作が、この職員の名前で記録されない）。
+    /// </summary>
+    [Fact]
+    public async Task SaveAsync_認証が通れば認証した職員で操作ログを記録すること()
+    {
+        await InitializeWithTestLedgerAsync();
+        AddItems(3);
+        _viewModel.ToggleDividerAt(0);
+        ArrangeSaveSucceeds();
+
+        await _viewModel.SaveCommand.ExecuteAsync(null);
+
+        _staffAuthServiceMock.Verify(s => s.RequestAuthenticationAsync("明細の保存"), Times.Once,
+            "1 回の保存で認証を求めるのは 1 回だけ");
+        _viewModel.HasChanges.Should().BeFalse(_viewModel.StatusMessage);
+        var log = _operationLogs.Should().ContainSingle(l => l.Action == "UPDATE").Subject;
+        log.OperatorIdm.Should().Be(AuthenticatedStaffIdm);
+        log.OperatorName.Should().Be(AuthenticatedStaffName);
+        _operatorContext.HasSession.Should().BeFalse("保存が終わったら操作者セッションも終わる");
+    }
+
+    /// <summary>
+    /// 変更が無ければ保存しないので、認証も求めない（Ctrl+S を押しただけで職員証を求めない）。
+    /// </summary>
+    [Fact]
+    public async Task SaveAsync_変更が無ければ認証を求めないこと()
+    {
+        await InitializeWithTestLedgerAsync();
+        _viewModel.HasChanges.Should().BeFalse("前提");
+
+        await _viewModel.SaveCommand.ExecuteAsync(null);
+
+        _staffAuthServiceMock.Verify(s => s.RequestAuthenticationAsync(It.IsAny<string>()), Times.Never);
+    }
+
+    private void ArrangeSaveSucceeds()
+    {
+        _ledgerRepoMock
+            .Setup(r => r.ReplaceDetailsAsync(It.IsAny<int>(), It.IsAny<IEnumerable<LedgerDetail>>(), It.IsAny<System.Data.SQLite.SQLiteTransaction>()))
+            .ReturnsAsync(true);
+        _ledgerRepoMock
+            .Setup(r => r.UpdateSummaryAsync(It.IsAny<int>(), It.IsAny<string>(), It.IsAny<System.Data.SQLite.SQLiteTransaction>()))
+            .ReturnsAsync(true);
     }
 
     #endregion

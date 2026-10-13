@@ -78,13 +78,20 @@ public class LedgerDetailSaveOrderingIntegrationTests : IDisposable
             _dbContext,
             NullLogger<LedgerSplitService>.Instance);
 
+        // Issue #2265: 明細の保存は職員証の認証を経る。未設定のモックは null（＝認証キャンセル）を返し、
+        // 保存が何も書かずに戻るため、下の表明が未変更のデータで満たされて空振りしていた（レビューで検出）
+        var staffAuthServiceMock = new Mock<IStaffAuthService>();
+        staffAuthServiceMock
+            .Setup(a => a.RequestAuthenticationAsync(It.IsAny<string>()))
+            .ReturnsAsync(new StaffAuthResult { Idm = "AABBCCDDEEFF0011", StaffName = "田中太郎" });
+
         _viewModel = new LedgerDetailViewModel(
             _repository,
             _summaryGenerator,
             new LedgerDetailSaveService(
                 _dbContext, _repository, operationLogger, NullLogger<LedgerDetailSaveService>.Instance),
             splitService,
-            Mock.Of<IStaffAuthService>(),
+            staffAuthServiceMock.Object,
             NullLogger<LedgerDetailViewModel>.Instance);
     }
 
@@ -115,6 +122,10 @@ public class LedgerDetailSaveOrderingIntegrationTests : IDisposable
         // Act: 分割線を入れて（＝変更を発生させて）保存する
         _viewModel.SplitAllCommand.Execute(null);
         await _viewModel.SaveCommand.ExecuteAsync(null);
+
+        // 前提: 保存が実際に行われたこと（行われないと、下の表明は未変更のデータで満たされて空振りする）
+        _viewModel.HasPersistedChanges.Should().BeTrue(_viewModel.StatusMessage);
+        _viewModel.HasChanges.Should().BeFalse(_viewModel.StatusMessage);
 
         // Assert: rowid が再採番されたあとも、再読込 → 摘要再生成でブロック順が保たれる
         var reloaded = await _repository.GetByIdAsync(ledgerId);

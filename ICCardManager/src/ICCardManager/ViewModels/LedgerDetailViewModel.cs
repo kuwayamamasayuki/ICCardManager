@@ -593,11 +593,26 @@ namespace ICCardManager.ViewModels
         /// <summary>
         /// 変更を保存
         /// </summary>
+        /// <remarks>
+        /// Issue #2265: 明細の保存は明細のグループ分けと摘要（物品出納簿に印字される）を書き換える、履歴の変更に当たる
+        /// 操作のため、分割（<see cref="SaveWithFullSplitAsync"/>）と同じく職員証の認証を求め、認証した職員で
+        /// 操作ログを記録する（SEQ-AUTH-01）。保存と分割は別々のボタンで、1 回の保存操作で認証を求めるのは 1 回だけ。
+        /// 認証は処理中（<see cref="IsBusy"/>）にする前に求める。認証ダイアログの間は処理中オーバーレイを出さない。
+        /// </remarks>
         [RelayCommand]
         private async Task SaveAsync()
         {
             if (!HasChanges)
             {
+                return;
+            }
+
+            using var authResult = (await _staffAuthService.RequestAuthenticationAsync("明細の保存"))?.Enter();
+            if (authResult == null)
+            {
+                // 何も書き込んでいない。編集内容は「未保存の変更」として残し（HasChanges は true のまま）、
+                // 認証し直せばそのまま保存できるようにする
+                StatusMessage = SaveAuthenticationCancelledMessage;
                 return;
             }
 
@@ -705,6 +720,13 @@ namespace ICCardManager.ViewModels
                 OnSaveCompleted?.Invoke();
             }
         }
+
+        /// <summary>
+        /// 明細の保存で職員証の認証が完了しなかったときの案内（Issue #2265）
+        /// </summary>
+        internal const string SaveAuthenticationCancelledMessage =
+            "職員証の認証が完了しなかったため、明細を保存していません（編集内容はそのまま残っています）。" +
+            "保存するには、もう一度「保存」または「摘要のみ更新」を押して職員証で認証してください。";
 
         /// <summary>
         /// 台帳分割による保存（Issue #634）

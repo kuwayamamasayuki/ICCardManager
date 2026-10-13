@@ -1156,6 +1156,32 @@ public class LedgerMergeServiceTests : IDisposable
     }
 
     /// <summary>
+    /// Issue #2265: 取り消す前の統合先を読み直せない（統合後に削除された）ときは、台帳を書き戻さず競合として失敗すること。
+    /// 監査ログの「変更前」が採れないまま書き戻すと、記録の無い取り消しが確定する。
+    /// </summary>
+    [Fact]
+    [Trait("Category", "Unit")]
+    public async Task UnmergeAsync_統合先を読み直せなければ書き戻さず失敗すること()
+    {
+        // Arrange: 統合履歴（統合先 ID=1）はあるが、統合先の行がもう無い
+        SetupUnmergeHistoryMock(historyId: 1);
+        SetupUnmergeMockSuccess(historyId: 1);
+        _ledgerRepositoryMock.Setup(x => x.GetByIdAsync(1)).ReturnsAsync((Ledger?)null);
+
+        // Act
+        var result = await _service.UnmergeAsync(1);
+
+        // Assert
+        result.Success.Should().BeFalse();
+        result.ErrorMessage.Should().Contain("統合の取り消しに失敗しました");
+        _ledgerRepositoryMock.Verify(
+            x => x.UnmergeLedgersAsync(It.IsAny<LedgerMergeUndoData>(), It.IsAny<SQLiteTransaction>()), Times.Never,
+            "統合先を読み直せなければ台帳を書き戻さない");
+        _ledgerRepositoryMock.Verify(
+            x => x.MarkMergeHistoryUndoneAsync(It.IsAny<int>(), It.IsAny<SQLiteTransaction>()), Times.Never);
+    }
+
+    /// <summary>
     /// Issue #1806: 復元と「取り消し済み」マークが同じ <see cref="SQLiteTransaction"/> 上で呼ばれること。
     /// </summary>
     [Fact]
@@ -1166,10 +1192,11 @@ public class LedgerMergeServiceTests : IDisposable
         SetupUnmergeHistoryMock(historyId: 1);
         SQLiteTransaction? restoreTx = null;
         SQLiteTransaction? markTx = null;
+        SetupUnmergeReadBack();
         _ledgerRepositoryMock
             .Setup(x => x.UnmergeLedgersAsync(It.IsAny<LedgerMergeUndoData>(), It.IsAny<SQLiteTransaction>()))
             .Callback<LedgerMergeUndoData, SQLiteTransaction>((_, tx) => restoreTx = tx)
-            .ReturnsAsync(true);
+            .ReturnsAsync((LedgerMergeUndoData d, SQLiteTransaction _) => ReinsertedIds(d));
         _ledgerRepositoryMock
             .Setup(x => x.MarkMergeHistoryUndoneAsync(1, It.IsAny<SQLiteTransaction>()))
             .Callback<int, SQLiteTransaction>((_, tx) => markTx = tx)
@@ -1194,9 +1221,10 @@ public class LedgerMergeServiceTests : IDisposable
     {
         // Arrange
         SetupUnmergeHistoryMock(historyId: 1);
+        SetupUnmergeReadBack();
         _ledgerRepositoryMock
             .Setup(x => x.UnmergeLedgersAsync(It.IsAny<LedgerMergeUndoData>(), It.IsAny<SQLiteTransaction>()))
-            .ReturnsAsync(true);
+            .ReturnsAsync((LedgerMergeUndoData d, SQLiteTransaction _) => ReinsertedIds(d));
         _ledgerRepositoryMock
             .Setup(x => x.MarkMergeHistoryUndoneAsync(1, It.IsAny<SQLiteTransaction>()))
             .ReturnsAsync(false);
@@ -1220,6 +1248,7 @@ public class LedgerMergeServiceTests : IDisposable
     {
         // Arrange
         SetupUnmergeHistoryMock(historyId: 1);
+        SetupUnmergeReadBack();
         _ledgerRepositoryMock
             .Setup(x => x.UnmergeLedgersAsync(It.IsAny<LedgerMergeUndoData>(), It.IsAny<SQLiteTransaction>()))
             .ThrowsAsync(new InvalidOperationException("database is locked"));
@@ -1243,9 +1272,10 @@ public class LedgerMergeServiceTests : IDisposable
     {
         // Arrange
         SetupUnmergeHistoryMock(historyId: 1);
+        SetupUnmergeReadBack();
         _ledgerRepositoryMock
             .Setup(x => x.UnmergeLedgersAsync(It.IsAny<LedgerMergeUndoData>(), It.IsAny<SQLiteTransaction>()))
-            .ReturnsAsync(false);
+            .ReturnsAsync((IReadOnlyDictionary<int, int>?)null);
 
         // Act
         var result = await _service.UnmergeAsync(1);
@@ -1259,10 +1289,28 @@ public class LedgerMergeServiceTests : IDisposable
     }
 
     /// <summary>
+    /// Issue #2265: 取り消しの監査ログのため、サービスは統合先（取り消す前）と、書き戻した統合先・挿入し直した統合元を
+    /// 同じトランザクションの中で読み直す。どの ID でも、その ID の台帳を返す（明細は持たない）。
+    /// </summary>
+    private void SetupUnmergeReadBack()
+    {
+        _ledgerRepositoryMock
+            .Setup(x => x.GetByIdAsync(It.IsAny<int>()))
+            .ReturnsAsync((int id) => new Ledger { Id = id, CardIdm = TestCardIdm });
+    }
+
+    /// <summary>
+    /// Issue #2265: 復元が成功したときの「元の ID → 挿入し直した新しい ID」（新しい ID は元の ID + 1000）。
+    /// </summary>
+    private static IReadOnlyDictionary<int, int>? ReinsertedIds(LedgerMergeUndoData undoData)
+        => undoData.DeletedSources.ToDictionary(s => s.Id, s => s.Id + 1000);
+
+    /// <summary>
     /// UnmergeAsync 用: 取り消し可能な統合履歴 1 件（統合元 1 行・明細 2 行）をモックに用意する。
     /// </summary>
     private void SetupUnmergeHistoryMock(int historyId)
     {
+        SetupUnmergeReadBack();
         var undoData = new LedgerMergeUndoData
         {
             OriginalTarget = new LedgerSnapshot
@@ -1301,9 +1349,10 @@ public class LedgerMergeServiceTests : IDisposable
     /// </summary>
     private void SetupUnmergeMockSuccess(int historyId)
     {
+        SetupUnmergeReadBack();
         _ledgerRepositoryMock
             .Setup(x => x.UnmergeLedgersAsync(It.IsAny<LedgerMergeUndoData>(), It.IsAny<SQLiteTransaction>()))
-            .ReturnsAsync(true);
+            .ReturnsAsync((LedgerMergeUndoData d, SQLiteTransaction _) => ReinsertedIds(d));
         _ledgerRepositoryMock
             .Setup(x => x.MarkMergeHistoryUndoneAsync(historyId, It.IsAny<SQLiteTransaction>()))
             .ReturnsAsync(true);
@@ -1379,9 +1428,10 @@ public class LedgerMergeServiceTests : IDisposable
                 (1, DateTime.Now, 1, "テスト", JsonSerializer.Serialize(undoData, JsonOptions), false)
             });
 
+        SetupUnmergeReadBack();
         _ledgerRepositoryMock
             .Setup(x => x.UnmergeLedgersAsync(It.IsAny<LedgerMergeUndoData>(), It.IsAny<SQLiteTransaction>()))
-            .ReturnsAsync(false);
+            .ReturnsAsync((IReadOnlyDictionary<int, int>?)null);
 
         // Act
         var result = await _service.UnmergeAsync(1);
@@ -1412,6 +1462,7 @@ public class LedgerMergeServiceTests : IDisposable
                 (1, DateTime.Now, 1, "テスト", JsonSerializer.Serialize(undoData, JsonOptions), false)
             });
 
+        SetupUnmergeReadBack();
         _ledgerRepositoryMock
             .Setup(x => x.UnmergeLedgersAsync(It.IsAny<LedgerMergeUndoData>(), It.IsAny<SQLiteTransaction>()))
             .ThrowsAsync(new Exception("DB failure"));
@@ -2453,9 +2504,10 @@ public class LedgerMergeServiceTests : IDisposable
             {
                 (1, DateTime.Now, 1, "テスト", JsonSerializer.Serialize(undoData, JsonOptions), false)
             });
+        SetupUnmergeReadBack();
         _ledgerRepositoryMock
             .Setup(x => x.UnmergeLedgersAsync(It.IsAny<LedgerMergeUndoData>(), It.IsAny<SQLiteTransaction>()))
-            .ReturnsAsync(false);
+            .ReturnsAsync((IReadOnlyDictionary<int, int>?)null);
 
         // Act
         var result = await _service.UnmergeAsync(1);
@@ -2491,6 +2543,7 @@ public class LedgerMergeServiceTests : IDisposable
             {
                 (1, DateTime.Now, 1, "テスト", JsonSerializer.Serialize(undoData, JsonOptions), false)
             });
+        SetupUnmergeReadBack();
         _ledgerRepositoryMock
             .Setup(x => x.UnmergeLedgersAsync(It.IsAny<LedgerMergeUndoData>(), It.IsAny<SQLiteTransaction>()))
             .ThrowsAsync(new Exception("Transaction rollback"));
@@ -2560,10 +2613,11 @@ public class LedgerMergeServiceTests : IDisposable
             });
 
         LedgerMergeUndoData? receivedUndoData = null;
+        SetupUnmergeReadBack();
         _ledgerRepositoryMock
             .Setup(x => x.UnmergeLedgersAsync(It.IsAny<LedgerMergeUndoData>(), It.IsAny<SQLiteTransaction>()))
             .Callback<LedgerMergeUndoData, SQLiteTransaction>((d, _) => receivedUndoData = d)
-            .ReturnsAsync(true);
+            .ReturnsAsync((LedgerMergeUndoData d, SQLiteTransaction _) => ReinsertedIds(d));
         _ledgerRepositoryMock
             .Setup(x => x.MarkMergeHistoryUndoneAsync(1, It.IsAny<SQLiteTransaction>()))
             .ReturnsAsync(true);
