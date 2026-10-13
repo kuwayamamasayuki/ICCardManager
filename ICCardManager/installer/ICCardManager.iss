@@ -264,18 +264,27 @@ begin
   end;
 end;
 
-// Dir 自身とその配下（ファイル・サブフォルダーを再帰的に）に再解析ポイントがあるか。
-// 再解析ポイントの中へは入らない（見つけた時点で True）。
-// 存在するフォルダーの中身を列挙できないとき（管理者の一覧取得を拒否する ACL 等）も True（危険）へ倒す。
-// 列挙できない中にジャンクションが置かれていても「リンクなし」と見誤らないため（fail-closed）。
-function TreeHasReparsePoint(const Dir: string): Boolean;
+// TreeReparseState の結果
+const
+  IccmTreeClean = 0;       // 再解析ポイントは無く、すべて列挙できた
+  IccmTreeReparse = 1;     // 再解析ポイントがある
+  IccmTreeUnreadable = 2;  // 再解析ポイントは見つからないが、列挙できないフォルダーがある
+
+// Dir 自身とその配下（ファイル・サブフォルダーを再帰的に）を調べる。再解析ポイントの中へは入らない。
+// 再解析ポイントを見つけたら IccmTreeReparse。見つからないが、存在するフォルダーの中身を列挙できない
+// （管理者の一覧取得を拒否する ACL 等）ところがあれば IccmTreeUnreadable。
+function TreeReparseState(const Dir: string): Integer;
 var
   FindRec: TFindRec;
   Found: Boolean;
+  Child: Integer;
 begin
-  Result := IsReparsePoint(Dir);
-  if Result then
+  Result := IccmTreeClean;
+  if IsReparsePoint(Dir) then
+  begin
+    Result := IccmTreeReparse;
     Exit;
+  end;
 
   // 存在しないパスは検査するものが無い
   if IccmGetFileAttributes(Dir) = -1 then
@@ -285,26 +294,38 @@ begin
   Found := FindFirst(AddBackslash(Dir) + '*', FindRec);
   if not Found then
   begin
-    Log('フォルダーの中身を確認できないため、ジャンクション等があるものとして扱います: ' + Dir);
-    Result := True;
+    Log('フォルダーの中身を確認できません: ' + Dir);
+    Result := IccmTreeUnreadable;
     Exit;
   end;
   try
-    while Found and (not Result) do
+    while Found and (Result <> IccmTreeReparse) do
     begin
       if (FindRec.Name <> '.') and (FindRec.Name <> '..') then
       begin
         if (FindRec.Attributes and IccmFileAttributeReparsePoint) <> 0 then
-          Result := True
+          Result := IccmTreeReparse
         else if (FindRec.Attributes and IccmFileAttributeDirectory) <> 0 then
-          Result := TreeHasReparsePoint(AddBackslash(Dir) + FindRec.Name);
+        begin
+          Child := TreeReparseState(AddBackslash(Dir) + FindRec.Name);
+          if Child <> IccmTreeClean then
+            Result := Child;
+        end;
       end;
-      if not Result then
+      if Result <> IccmTreeReparse then
         Found := FindNext(FindRec);
     end;
   finally
     FindClose(FindRec);
   end;
+end;
+
+// Dir 自身とその配下に再解析ポイントがあるか。
+// 列挙できないフォルダーがあるときも True（危険）へ倒す（fail-closed）。列挙できない中に置かれたジャンクションを
+// 「リンクなし」と見誤ると、アンインストールの DelTree や、その後の書き込みがリンク先へ向き得る。
+function TreeHasReparsePoint(const Dir: string): Boolean;
+begin
+  Result := TreeReparseState(Dir) <> IccmTreeClean;
 end;
 
 // 昇格中に Path（データフォルダー配下のファイル・フォルダー）へ書き込み・削除してよいか。
@@ -396,6 +417,19 @@ begin
     Result := 'データフォルダー（' + Root + '）を作成できませんでした。' + #13#10 +
               '同じ名前のファイルやリンクがあるか、C:\ProgramData へ書き込めない可能性があります。' + #13#10 +
               'エクスプローラーで C:\ProgramData の中を確認し、同じ名前のファイルやリンクを削除してから、もう一度インストールしてください。';
+    Exit;
+  end;
+
+  // 0) 配下を、フォルダー自体の ACL を変える前にも検査する。リンクがあれば何も変えずに中止する。
+  //    列挙できないだけなら、フォルダー自体の所有者を固定して ACL を作り直した後で 2) が改めて検査する
+  //    （所有者の固定前は、管理者が列挙できない ACL にされ得る）。
+  //    なお、フォルダー自体へ継承できる ACE を設定しても、直下のジャンクションのリンク先の ACL は変わらない
+  //    （継承はジャンクション自体で止まる。非昇格で実測）。ここで止めるのはそれに頼らないための多重防御。
+  if TreeReparseState(Root) = IccmTreeReparse then
+  begin
+    Result := 'データフォルダー（' + Root + '）の中に、ジャンクションまたはシンボリックリンクがあります。' + #13#10 +
+              'このままでは管理者の権限で意図しない場所のファイルを書き換え・削除するおそれがあるため、インストールを中止しました。' + #13#10 +
+              'エクスプローラーでフォルダーの中のリンクを削除してから、もう一度インストールしてください。';
     Exit;
   end;
 

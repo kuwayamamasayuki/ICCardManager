@@ -167,6 +167,17 @@ public class InstallerDataDirectoryAclConventionTests
         var children = body.IndexOf("\\*\" /setowner", StringComparison.Ordinal);
         pathCheck.Should().BeGreaterThan(-1).And.BeLessThan(setOwner, "フォルダー自体の再解析ポイントを icacls より前に確かめる");
         treeCheck.Should().BeGreaterThan(-1).And.BeLessThan(children, "配下の再解析ポイントを直下への icacls より前に確かめる");
+
+        // フォルダー自体の ACL を変える前にも配下を検査し、リンクがあれば何も変えずに中止する
+        // （旧版の Users:F で事前に Logs 等をジャンクションへ差し替えられていた場合）
+        var preCheck = Regex.Match(
+            StripPascalComments(ReadCodeSection(ReadInstallerLines()), keepLiterals: false),
+            @"\bif\s+TreeReparseState\s*\(\s*Root\s*\)\s*=\s*IccmTreeReparse\s+then\s+begin\b(?:(?!\bend\b)[\s\S])*?\bExit\b");
+        preCheck.Success.Should().BeTrue("ACL を変える前の検査で、リンクを見つけたら中止する");
+        var blankedBody = SplitRoutines(StripPascalComments(ReadCodeSection(ReadInstallerLines()), keepLiterals: false))["HardenDataDirectory"].Body;
+        var preIndex = Regex.Match(blankedBody, @"\bif\s+TreeReparseState\s*\(\s*Root\s*\)\s*=\s*IccmTreeReparse").Index;
+        var ownerIndex = blankedBody.IndexOf("RunIcacls(", StringComparison.Ordinal);
+        preIndex.Should().BeGreaterThan(0).And.BeLessThan(ownerIndex, "最初の icacls（所有者の固定）より前に配下を検査する");
     }
 
     [Fact]
@@ -174,12 +185,70 @@ public class InstallerDataDirectoryAclConventionTests
     {
         var routines = SplitRoutines(StripPascalComments(ReadCodeSection(ReadInstallerLines()), keepLiterals: false));
 
-        routines.Should().ContainKey("TreeHasReparsePoint");
-        var body = routines["TreeHasReparsePoint"].Body;
+        routines.Should().ContainKey("TreeReparseState");
+        var state = routines["TreeReparseState"].Body;
 
-        // FindFirst の失敗（列挙できない）で True を返して抜けること（fail-closed）
-        Regex.IsMatch(body, @"if\s+not\s+Found\s+then\s+begin\b(?:(?!\bend\b)[\s\S])*?Result\s*:=\s*True\s*;(?:(?!\bend\b)[\s\S])*?\bExit\b")
+        // FindFirst の失敗（列挙できない）で「列挙できない」を返して抜けること
+        Regex.IsMatch(state, @"if\s+not\s+Found\s+then\s+begin\b(?:(?!\bend\b)[\s\S])*?Result\s*:=\s*IccmTreeUnreadable\s*;(?:(?!\bend\b)[\s\S])*?\bExit\b")
             .Should().BeTrue("存在するフォルダーを列挙できないときは「リンクなし」として通さない");
+
+        // TreeHasReparsePoint は「列挙できない」も危険として扱うこと（fail-closed）
+        routines.Should().ContainKey("TreeHasReparsePoint");
+        Regex.IsMatch(routines["TreeHasReparsePoint"].Body, @"Result\s*:=\s*TreeReparseState\s*\(\s*Dir\s*\)\s*<>\s*IccmTreeClean\s*;")
+            .Should().BeTrue("リンクがあるときだけでなく、列挙できないときも True を返す");
+    }
+
+    [Fact]
+    public void インストーラーの削除系の節はProgramDataを対象にしないこと()
+    {
+        FindProgramDataDeleteEntries(ReadInstallerLines())
+            .Should().BeEmpty("[InstallDelete] / [UninstallDelete] は再解析ポイントを確かめずに消すので、ProgramData を対象にしない（[Code] で確認してから消す）");
+    }
+
+    [Fact]
+    public void 検査ロジック_削除系の節のProgramDataを対象にした行を検出すること()
+    {
+        var script = new[]
+        {
+            "[InstallDelete]",
+            "; Type: filesandordirs; Name: \"{commonappdata}\\ICCardManager\\Logs\"",
+            @"Type: files; Name: ""{app}\Foo.dll""",
+            @"Type: files; Name: ""{commonappdata}\ICCardManager\x.txt""",
+            "[UninstallDelete]",
+            @"Type: filesandordirs; Name: ""{COMMONAPPDATA}\ICCardManager""",
+            @"Type: files; Name: ""{app}\Bar.txt""",
+            "[Dirs]",
+            @"Name: ""{commonappdata}\ICCardManager""",
+        };
+
+        FindProgramDataDeleteEntries(script).Should().Equal(
+            @"Type: files; Name: ""{commonappdata}\ICCardManager\x.txt""",
+            @"Type: filesandordirs; Name: ""{COMMONAPPDATA}\ICCardManager""");
+    }
+
+    /// <summary>削除系の節（<c>[InstallDelete]</c> / <c>[UninstallDelete]</c>）のうち、ProgramData を対象にした行（コメント行を除く）。</summary>
+    private static List<string> FindProgramDataDeleteEntries(IEnumerable<string> lines)
+    {
+        var result = new List<string>();
+        var inSection = false;
+        foreach (var raw in lines)
+        {
+            var line = raw.Trim();
+            if (line.StartsWith("[", StringComparison.Ordinal) && line.EndsWith("]", StringComparison.Ordinal))
+            {
+                inSection = line.Equals("[InstallDelete]", StringComparison.OrdinalIgnoreCase)
+                            || line.Equals("[UninstallDelete]", StringComparison.OrdinalIgnoreCase);
+                continue;
+            }
+
+            if (inSection && !line.StartsWith(";", StringComparison.Ordinal)
+                && line.IndexOf("{commonappdata}", StringComparison.OrdinalIgnoreCase) >= 0)
+            {
+                result.Add(line);
+            }
+        }
+
+        return result;
     }
 
     [Fact]
