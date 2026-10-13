@@ -596,6 +596,18 @@ public partial class SystemManageViewModel : ViewModelBase
         {
             try
             {
+                // Issue #2269: リストア元を一時コピーへ取り込んで検証してから、リストア前バックアップを作る。
+                // 検証に合格しないファイルでは何も書き換えない（リストア前バックアップも作らない）。
+                // ヘッダだけでなく、整合性・トリガー／ビュー等の有無・スキーマの版まで見る（BackupService.PrepareRestoreSource）。
+                // 置き換えは検証に合格した一時コピーから行う（検証後にリストア元を差し替えられても、検証していない内容で置き換えない）。
+                // 一時コピーはこのメソッドを抜けるときに削除する。
+                using var prepared = await _backupService.PrepareRestoreSourceAsync(sourcePath);
+                if (!prepared.IsValid)
+                {
+                    SetStatus(prepared.UserMessage, true);
+                    return RestoreOutcome.NotRestored;
+                }
+
                 // リストア前バックアップの保存先を設定から取得
                 var preRestoreBackupPath = await GetPreRestoreBackupPathAsync();
 
@@ -632,7 +644,7 @@ public partial class SystemManageViewModel : ViewModelBase
                 // Issue #1809: 同期版は内部で DbContext.SuspendConnections（接続セマフォの同期取得）を呼び、
                 // UI スレッドから呼ぶと #1281 のガードで常に失敗する。CreateBackupAsync と同じく
                 // Task.Run で委譲する非同期版を使う
-                var restoreSuccess = await _backupService.RestoreFromBackupAsync(sourcePath);
+                var restoreSuccess = await _backupService.RestoreFromPreparedSourceAsync(prepared);
                 if (!restoreSuccess)
                 {
                     // Issue #1108: 共有モード時は他PC接続が原因の可能性を示唆

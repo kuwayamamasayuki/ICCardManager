@@ -77,6 +77,34 @@ public class StartupTaskRunnerTests
             _loggerMock.Object);
     }
 
+    #region リストア元の検証用一時コピーの回収（Issue #2269）
+
+    [Fact]
+    public async Task RunAsync_取り残されたリストア検証用の一時コピーを回収すること()
+    {
+        // Act
+        await _runner.RunAsync(NonVacuumDay);
+
+        // Assert
+        _backupServiceMock.Verify(x => x.CleanupStaleRestoreInspectionFiles(), Times.Once);
+    }
+
+    [Fact]
+    public async Task RunAsync_一時コピーの回収が例外を投げても自動バックアップは実行されること()
+    {
+        // Arrange
+        _backupServiceMock.Setup(x => x.CleanupStaleRestoreInspectionFiles())
+            .Throws(new InvalidOperationException("想定外の失敗"));
+
+        // Act
+        await _runner.RunAsync(NonVacuumDay);
+
+        // Assert: 回収の失敗で後続の保守タスクを巻き添えにしない
+        _backupServiceMock.Verify(x => x.ExecuteAutoBackupAsync(), Times.Once);
+    }
+
+    #endregion
+
     #region 直列性（Issue #1737 の本丸）
 
     [Fact]

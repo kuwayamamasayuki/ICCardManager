@@ -1,3 +1,4 @@
+#nullable enable
 using System;
 using System.Collections.Generic;
 using System.Data.SQLite;
@@ -9,6 +10,7 @@ using System.Threading.Tasks;
 using ICCardManager.Common;
 using ICCardManager.Common.Exceptions;
 using ICCardManager.Data;
+using ICCardManager.Data.Migrations;
 using ICCardManager.Data.Repositories;
 using ICCardManager.Dtos;
 using ICCardManager.Infrastructure.Timing;
@@ -105,12 +107,50 @@ namespace ICCardManager.Services
             ISettingsRepository settingsRepository,
             ILogger<BackupService> logger,
             ISystemClock clock)
+            : this(dbContext, settingsRepository, logger, clock, Path.GetTempPath())
+        {
+        }
+
+        /// <summary>
+        /// 時計とリストア元の検証用の一時フォルダーを差し替えるコンストラクタ（Issue #2269）
+        /// </summary>
+        /// <remarks>
+        /// 一時コピーとそのジャーナルが後に残らないこと・古い残骸を回収することを、テストがフォルダーの中身で表明するため。
+        /// 本番は <see cref="Path.GetTempPath"/>（利用者ごとの一時フォルダー）。
+        /// </remarks>
+        internal BackupService(
+            DbContext dbContext,
+            ISettingsRepository settingsRepository,
+            ILogger<BackupService> logger,
+            ISystemClock clock,
+            string restoreInspectionFolder)
         {
             _dbContext = dbContext;
             _settingsRepository = settingsRepository;
             _logger = logger;
             _clock = clock ?? throw new ArgumentNullException(nameof(clock));
+            _restoreInspectionFolder = restoreInspectionFolder
+                ?? throw new ArgumentNullException(nameof(restoreInspectionFolder));
         }
+
+        /// <summary>
+        /// リストア元の検証用の一時コピーを置くフォルダー（Issue #2269）
+        /// </summary>
+        private readonly string _restoreInspectionFolder;
+
+        /// <summary>
+        /// リストア元の検証用の一時コピーの名前の接頭辞（Issue #2269）。回収（<see cref="CleanupStaleRestoreInspectionFiles"/>）もこれで探す
+        /// </summary>
+        internal const string RestoreInspectionFilePrefix = "ICCardManager_restore_check_";
+
+        /// <summary>
+        /// これより古い一時コピーは、強制終了・電源断で取り残されたものとみなして起動時に回収する（Issue #2269）
+        /// </summary>
+        /// <remarks>
+        /// 一時コピーは検証からリストアの完了まで（リストア前バックアップの作成を挟む）しか使わない。
+        /// 一時フォルダーは利用者ごとで、ピッすいは二重起動しない（Issue #1910）ため、使用中のものを消すことはない。
+        /// </remarks>
+        internal static readonly TimeSpan StaleRestoreInspectionAge = TimeSpan.FromHours(1);
 
         /// <summary>
         /// 共有モードかどうか（DbContextの状態を公開）
@@ -124,9 +164,9 @@ namespace ICCardManager.Services
         /// 自動バックアップを実行
         /// </summary>
         /// <returns>作成されたバックアップファイルのパス（失敗時はnull）</returns>
-        public virtual async Task<string> ExecuteAutoBackupAsync()
+        public virtual async Task<string?> ExecuteAutoBackupAsync()
         {
-            string backupPath = null;
+            string? backupPath = null;
 
             try
             {
@@ -265,8 +305,8 @@ namespace ICCardManager.Services
         {
             var settings = await _settingsRepository.GetAppSettingsAsync().ConfigureAwait(false);
             var configuredPath = settings?.BackupPath;
-            var backupPath = configuredPath;
-            string fallbackReason = null;
+            var backupPath = configuredPath ?? string.Empty;
+            string? fallbackReason = null;
 
             if (string.IsNullOrWhiteSpace(backupPath))
             {
@@ -435,29 +475,52 @@ namespace ICCardManager.Services
         /// </remarks>
         public virtual bool RestoreFromBackup(string backupFilePath)
         {
+            // Issue #2269: ヘッダだけでなく、整合性・トリガー／ビュー等の有無・スキーマの版まで検証し、
+            // 検証に合格した一時コピーから置き換える。検証は接続の一時停止と既存 DB の退避より前に行い、
+            // 不合格なら何も書き換えない（理由はログに残る）。
+            using var prepared = PrepareRestoreSource(backupFilePath);
+            return prepared.IsValid && RestoreFromStagedCopy(prepared, backupFilePath);
+        }
+
+        /// <summary>
+        /// 検証に合格した一時コピーで本番 DB を置き換える（Issue #2269）
+        /// </summary>
+        /// <param name="prepared"><see cref="PrepareRestoreSource"/> が返した合格の結果（一時コピーを持つもの）</param>
+        /// <returns>成功時は true</returns>
+        /// <remarks>
+        /// UI スレッドから呼ぶ場合は <see cref="RestoreFromPreparedSourceAsync"/> を使うこと（<see cref="RestoreFromBackup"/> と同じ理由）。
+        /// </remarks>
+        public virtual bool RestoreFromPreparedSource(RestoreSourceValidationResult prepared)
+        {
+            return RestoreFromStagedCopy(prepared, prepared?.SourcePath ?? prepared?.StagedCopyPath ?? string.Empty);
+        }
+
+        /// <summary>
+        /// 検証に合格した一時コピーで本番 DB を置き換える（非同期版、Issue #2269）
+        /// </summary>
+        /// <remarks>
+        /// <see cref="RestoreFromBackupAsync"/>（Issue #1809）と同じく <c>Task.Run</c> でバックグラウンドへ委譲する。
+        /// </remarks>
+        public virtual Task<bool> RestoreFromPreparedSourceAsync(RestoreSourceValidationResult prepared)
+        {
+            return Task.Run(() => RestoreFromPreparedSource(prepared));
+        }
+
+        private bool RestoreFromStagedCopy(RestoreSourceValidationResult? prepared, string backupFilePath)
+        {
+            if (prepared == null || !prepared.IsValid || prepared.StagedCopyPath == null)
+            {
+                throw new ArgumentException(
+                    "検証に合格し一時コピーを持つ結果（PrepareRestoreSource の戻り値）を渡してください。",
+                    nameof(prepared));
+            }
+
+            var stagedCopyPath = prepared.StagedCopyPath;
             var targetPath = _dbContext.DatabasePath;
             var tempPath = targetPath + ".temp";
 
             try
             {
-                if (!File.Exists(backupFilePath))
-                {
-                    _logger.LogWarning(
-                        "リストア対象のバックアップファイルが存在しません: {Path}",
-                        backupFilePath);
-                    return false;
-                }
-
-                // バックアップファイルがSQLiteデータベースとして有効か簡易検証
-                // SQLiteファイルの先頭16バイトは "SQLite format 3\0" というマジックヘッダ
-                if (!IsValidSqliteFile(backupFilePath))
-                {
-                    _logger.LogWarning(
-                        "リストア対象のファイルはSQLiteデータベースではありません: {Path}",
-                        backupFilePath);
-                    return false;
-                }
-
                 // Issue #1166: 接続を一時停止し、バックグラウンドタスクによる再オープンを防止
                 // SuspendConnections()は接続を閉じた上で、スコープ終了まで新規接続を拒否する。
                 // これにより、ヘルスチェック等がFile.Move中に接続を再オープンしてDBファイルを
@@ -488,7 +551,8 @@ namespace ICCardManager.Services
 
                     try
                     {
-                        File.Copy(backupFilePath, targetPath, overwrite: true);
+                        // Issue #2269: リストア元ではなく、検証に合格した一時コピーから置き換える（TOCTOU）
+                        CopyRestoreSourceTo(stagedCopyPath, targetPath);
 
                         // Issue #1108: ジャーナルファイルを清掃
                         // リストア前のジャーナルが残っていると、次回接続時にジャーナルリカバリが
@@ -574,6 +638,369 @@ namespace ICCardManager.Services
         public virtual Task<bool> RestoreFromBackupAsync(string backupFilePath)
         {
             return Task.Run(() => RestoreFromBackup(backupFilePath));
+        }
+
+        /// <summary>
+        /// 検証に合格した一時コピーを本番 DB の位置へコピーする（置き換えの段）
+        /// </summary>
+        /// <remarks>
+        /// Issue #2269: 置き換えの段でコピーが失敗したとき、退避した元の DB を戻す経路（Issue #2106）は、
+        /// 実機では共有の切断やロックでしか起きない。リストア元の検証（<see cref="PrepareRestoreSource"/>）も
+        /// ファイル全体を読むため、検証より前から失敗する入力ではこの経路へ届かない。
+        /// 単体テストがこの段にだけ失敗を注入できるよう <c>internal virtual</c> にしている
+        /// （<see cref="CopyDatabaseTo"/> と同じ理由）。
+        /// </remarks>
+        internal virtual void CopyRestoreSourceTo(string sourcePath, string targetPath)
+        {
+            File.Copy(sourcePath, targetPath, overwrite: true);
+        }
+
+        /// <summary>
+        /// リストア元のファイルを一時コピーへ取り込んで検証する（非同期版、Issue #2269）
+        /// </summary>
+        /// <remarks>
+        /// リストア元は共有フォルダー上にもあり得て、検証はファイル全体を読む（一時コピーと整合性検査）。
+        /// 応答の無い共有で数十秒戻らない同期処理なので、スレッドプールではなく専用スレッドで走らせる
+        /// （<c>.claude/rules/service-conventions.md</c>「ブロックし得る同期処理を Task.Run で起動して待たない」）。
+        /// 戻り値は <c>using</c> で持ち、合格なら <see cref="RestoreFromPreparedSourceAsync"/> へ渡すこと。
+        /// </remarks>
+        /// <param name="sourcePath">リストア元のファイルのパス</param>
+        public virtual Task<RestoreSourceValidationResult> PrepareRestoreSourceAsync(string sourcePath)
+        {
+            return DedicatedThread.Run(() => PrepareRestoreSource(sourcePath));
+        }
+
+        /// <summary>
+        /// リストア元のファイルを一時コピーへ取り込み、本システムのデータベースとして置き換えてよいものかを検証する（Issue #2269）
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// 検証の順序は、軽いものから重いものへ。
+        /// </para>
+        /// <list type="number">
+        /// <item>存在する・読み取れる</item>
+        /// <item>SQLite のヘッダが正しく、切り詰められていない（<see cref="IsValidSqliteFile"/>、Issue #1748）。
+        /// 一時コピーを作る前にリストア元で確かめる（SQLite でない大きなファイルを丸ごとコピーしないため）</item>
+        /// <item>リストア元を一時フォルダーへコピーする。元の読み取りの失敗（<see cref="RestoreSourceValidationFailure.Unreadable"/>）と
+        /// 一時コピーへの書き込みの失敗（<see cref="RestoreSourceValidationFailure.StagingFailed"/>）は、取れる行動が違うので分ける。
+        /// 以降の検査はすべて一時コピーに対して行う</item>
+        /// <item>一時コピーのヘッダを再確認し、<c>PRAGMA quick_check</c> が <c>ok</c> を返す</item>
+        /// <item>本システムの DB の印になる表（<c>staff</c> か <c>schema_migrations</c>）がある。無関係な SQLite ファイルで置き換えない</item>
+        /// <item>本システムが作成しないトリガー・ビュー・制約の衝突解決句等を含まない（<see cref="SchemaObjectInspector"/>。種類は定義文で判定する）</item>
+        /// <item><c>schema_migrations</c> の最大版が整数として読め、このアプリの把握する最新版以下である。
+        /// 新しい版の DB に置き換えると、起動時の版の検査（Issue #1687）でアプリが起動できなくなる。
+        /// <c>schema_migrations</c> の無い DB はマイグレーション機構の導入前のバックアップとして通す
+        /// （起動時に版 1 として扱われる。<c>DbContext.HandleLegacyDatabase</c>）</item>
+        /// </list>
+        /// <para>
+        /// 合格した結果は一時コピーを持ち、置き換えはそのコピーから行う（<see cref="RestoreFromPreparedSource(RestoreSourceValidationResult)"/>）。
+        /// 検証した後にリストア元を差し替えられても検証していない内容で置き換えず、共有フォルダー上のリストア元を読むのも 1 回で済む。
+        /// 元のファイルを SQLite で開かないのは、ジャーナルの扱いによってはファイルへ書き込みが起き得るため。
+        /// 不合格のときは一時コピーをこの場で削除する。合格のときは戻り値の <see cref="RestoreSourceValidationResult.Dispose"/> で削除する。
+        /// 強制終了・電源断で残ったものは、起動時に <see cref="CleanupStaleRestoreInspectionFiles"/> が回収する。
+        /// </para>
+        /// <para>
+        /// 不合格のときは理由を Warning ログへ残す（どのファイルを・なぜ拒否したかが障害調査と監査で要る）。
+        /// </para>
+        /// </remarks>
+        /// <param name="sourcePath">リストア元のファイルのパス</param>
+        /// <returns>検証結果。不合格なら利用者向けの案内を含む。合格なら一時コピーを持つ（呼び出し元が Dispose する）</returns>
+        internal RestoreSourceValidationResult PrepareRestoreSource(string sourcePath)
+        {
+            var token = Guid.NewGuid().ToString("N").Substring(0, TempFileTokenLength);
+            var stagedCopyPath = Path.Combine(
+                _restoreInspectionFolder,
+                $"{RestoreInspectionFilePrefix}{token}{BackupFileExtension}");
+
+            void DeleteStagedCopy()
+            {
+                TryDeleteFile(stagedCopyPath, "リストア元の検証用の一時コピー");
+                CleanupJournalFiles(stagedCopyPath);
+            }
+
+            RestoreSourceValidationResult result;
+            string detail;
+            try
+            {
+                result = PrepareRestoreSourceCore(sourcePath, stagedCopyPath, out detail);
+            }
+            catch
+            {
+                DeleteStagedCopy();
+                throw;
+            }
+
+            if (result.IsValid)
+            {
+                return RestoreSourceValidationResult.ValidWithStagedCopy(stagedCopyPath, DeleteStagedCopy, sourcePath);
+            }
+
+            DeleteStagedCopy();
+            _logger.LogWarning(
+                "リストア元のファイルを検証で拒否しました（{Reason}）: {Path} {Detail}",
+                result.Failure,
+                sourcePath,
+                detail);
+            return result;
+        }
+
+        private static RestoreSourceValidationResult PrepareRestoreSourceCore(
+            string sourcePath, string stagedCopyPath, out string detail)
+        {
+            detail = string.Empty;
+
+            if (!File.Exists(sourcePath))
+            {
+                return RestoreSourceValidationResult.FileNotFound();
+            }
+
+            try
+            {
+                using var probe = new FileStream(sourcePath, FileMode.Open, FileAccess.Read, FileShare.Read);
+            }
+            catch (Exception ex) when (IsFileAccessException(ex))
+            {
+                detail = ex.GetType().Name;
+                return RestoreSourceValidationResult.Unreadable();
+            }
+
+            if (!IsValidSqliteFile(sourcePath))
+            {
+                return RestoreSourceValidationResult.NotSqliteDatabase();
+            }
+
+            var stagingFailure = CopyToStaging(sourcePath, stagedCopyPath, out detail);
+            if (stagingFailure != null)
+            {
+                return stagingFailure;
+            }
+
+            // 一時コピーが置き換えに使う実体。ヘッダもこちらで確かめ直す
+            if (!IsValidSqliteFile(stagedCopyPath))
+            {
+                return RestoreSourceValidationResult.NotSqliteDatabase();
+            }
+
+            return InspectDatabaseCopy(stagedCopyPath, out detail);
+        }
+
+        /// <summary>
+        /// リストア元を一時コピーへ写す。元の読み取りの失敗と、一時コピーへの書き込みの失敗を分けて返す（Issue #2269）
+        /// </summary>
+        /// <returns>成功なら null、失敗ならその理由の結果</returns>
+        private static RestoreSourceValidationResult? CopyToStaging(string sourcePath, string stagedCopyPath, out string detail)
+        {
+            detail = string.Empty;
+
+            FileStream source;
+            try
+            {
+                source = new FileStream(sourcePath, FileMode.Open, FileAccess.Read, FileShare.Read);
+            }
+            catch (Exception ex) when (IsFileAccessException(ex))
+            {
+                detail = "source open: " + ex.GetType().Name;
+                return RestoreSourceValidationResult.Unreadable();
+            }
+
+            using (source)
+            {
+                FileStream staged;
+                try
+                {
+                    staged = new FileStream(stagedCopyPath, FileMode.CreateNew, FileAccess.Write, FileShare.None);
+                }
+                catch (Exception ex) when (IsFileAccessException(ex))
+                {
+                    detail = "staging create: " + ex.GetType().Name;
+                    return RestoreSourceValidationResult.StagingFailed();
+                }
+
+                using (staged)
+                {
+                    var buffer = new byte[81920];
+                    while (true)
+                    {
+                        int read;
+                        try
+                        {
+                            read = source.Read(buffer, 0, buffer.Length);
+                        }
+                        catch (Exception ex) when (IsFileAccessException(ex))
+                        {
+                            detail = "source read: " + ex.GetType().Name;
+                            return RestoreSourceValidationResult.Unreadable();
+                        }
+
+                        if (read <= 0)
+                        {
+                            break;
+                        }
+
+                        try
+                        {
+                            staged.Write(buffer, 0, read);
+                        }
+                        catch (Exception ex) when (IsFileAccessException(ex))
+                        {
+                            detail = "staging write: " + ex.GetType().Name;
+                            return RestoreSourceValidationResult.StagingFailed();
+                        }
+                    }
+
+                    try
+                    {
+                        staged.Flush(flushToDisk: true);
+                    }
+                    catch (Exception ex) when (IsFileAccessException(ex))
+                    {
+                        detail = "staging flush: " + ex.GetType().Name;
+                        return RestoreSourceValidationResult.StagingFailed();
+                    }
+                }
+            }
+
+            return null;
+        }
+
+        private static bool IsFileAccessException(Exception ex)
+            => ex is IOException || ex is UnauthorizedAccessException || ex is SecurityException;
+
+        /// <summary>
+        /// 一時コピーを SQLite で開き、整合性・トリガー／ビュー等・スキーマの版を検査する（Issue #2269）
+        /// </summary>
+        private static RestoreSourceValidationResult InspectDatabaseCopy(string inspectionPath, out string detail)
+        {
+            detail = string.Empty;
+            try
+            {
+                using var connection = new SQLiteConnection(DbContext.BuildConnectionString(inspectionPath));
+                connection.Open();
+
+                string? quickCheck;
+                using (var command = connection.CreateCommand())
+                {
+                    command.CommandText = "PRAGMA quick_check";
+                    quickCheck = command.ExecuteScalar() as string;
+                }
+
+                if (!string.Equals(quickCheck, "ok", StringComparison.Ordinal))
+                {
+                    detail = quickCheck ?? "(結果なし)";
+                    return RestoreSourceValidationResult.Corrupted();
+                }
+
+                var schema = SchemaObjectInspector.InspectSchema(connection);
+                if (!schema.HasApplicationTables)
+                {
+                    // SQLite として正しくても、本システムの DB の印（staff か schema_migrations）が無ければ別物
+                    detail = "staff / schema_migrations が無い";
+                    return RestoreSourceValidationResult.NotApplicationDatabase();
+                }
+
+                if (schema.UnexpectedObjects.Count > 0)
+                {
+                    detail = string.Join(", ", schema.UnexpectedObjects);
+                    return RestoreSourceValidationResult.UnexpectedSchemaObject();
+                }
+
+                if (!TryReadSchemaVersion(connection, schema.TableNames, out var fileVersion, out var rawVersion))
+                {
+                    detail = "schema_migrations max(version)=" + rawVersion;
+                    return RestoreSourceValidationResult.UnrecognizedSchemaVersion();
+                }
+
+                var appVersion = new MigrationRunner(connection).GetLatestKnownVersion();
+                if (fileVersion > appVersion)
+                {
+                    detail = string.Format(CultureInfo.InvariantCulture, "schema={0} app={1}", fileVersion, appVersion);
+                    return RestoreSourceValidationResult.NewerSchemaVersion(fileVersion, appVersion);
+                }
+
+                return RestoreSourceValidationResult.Valid;
+            }
+            catch (SQLiteException ex)
+            {
+                // 開けない・読めない（SQLITE_NOTADB / SQLITE_CORRUPT 等）は整合性検査の不合格として扱う。
+                // 検査対象は自分で作った一時コピーなので、他の接続によるロックは原因になり得ない
+                detail = string.Format(CultureInfo.InvariantCulture, "{0}: {1}", ex.ResultCode, ex.Message);
+                return RestoreSourceValidationResult.Corrupted();
+            }
+        }
+
+        /// <summary>
+        /// <c>schema_migrations</c> の最大版を読む。テーブルが無いか空なら 0（マイグレーション機構の導入前の DB）
+        /// </summary>
+        /// <remarks>
+        /// <c>MigrationRunner.GetCurrentVersion</c> は読む前にテーブルを作成する（書き込みを伴う）ため使わない。
+        /// 本システムは版を 0 以上の <c>int</c> の整数でしか書かない。それ以外（文字列・実数・<c>int</c> を超える値・負の値）は
+        /// 起動時の <c>Convert.ToInt32</c> で例外になるので、読めない版として不合格にする（例外のまま漏らさない）。
+        /// </remarks>
+        /// <returns>版を読めたら true</returns>
+        private static bool TryReadSchemaVersion(
+            SQLiteConnection connection, IReadOnlyCollection<string> tableNames, out int version, out string rawValue)
+        {
+            version = 0;
+            rawValue = string.Empty;
+
+            // 表の有無は sqlite_master の type 列ではなく、SQLite が実際に持っている表（PRAGMA table_list）で判定する
+            // （コードレビューで検出）。type を 'TABLE' へ書き換えると type = 'table' の存在確認が外れ、
+            // 版 999 の DB が版 0（導入前）として合格し、起動時の版の検査（Issue #1687）で起動できなくなっていた
+            if (!tableNames.Contains("schema_migrations"))
+            {
+                return true;
+            }
+
+            using var command = connection.CreateCommand();
+            command.CommandText = "SELECT MAX(version) FROM schema_migrations";
+            var result = command.ExecuteScalar();
+            if (result == null || result == DBNull.Value)
+            {
+                return true;
+            }
+
+            rawValue = Convert.ToString(result, CultureInfo.InvariantCulture) ?? string.Empty;
+            if (result is long value && value >= 0 && value <= int.MaxValue)
+            {
+                version = (int)value;
+                return true;
+            }
+
+            return false;
+        }
+
+        /// <summary>
+        /// 強制終了・電源断で取り残された、リストア元の検証用の一時コピー（とジャーナル）を回収する（Issue #2269）
+        /// </summary>
+        /// <remarks>
+        /// 起動時に 1 回呼ぶ（<c>StartupTaskRunner</c>）。<see cref="StaleRestoreInspectionAge"/> より古いものだけを消す。
+        /// 失敗は Warning ログに留め、起動を妨げない。
+        /// </remarks>
+        public virtual void CleanupStaleRestoreInspectionFiles()
+        {
+            try
+            {
+                if (!Directory.Exists(_restoreInspectionFolder))
+                {
+                    return;
+                }
+
+                var threshold = _clock.Now - StaleRestoreInspectionAge;
+                foreach (var file in new DirectoryInfo(_restoreInspectionFolder)
+                    .EnumerateFiles(RestoreInspectionFilePrefix + "*"))
+                {
+                    if (file.LastWriteTime < threshold)
+                    {
+                        TryDeleteFile(file.FullName, "取り残されたリストア元の検証用の一時コピー");
+                    }
+                }
+            }
+            catch (Exception ex) when (IsFileAccessException(ex))
+            {
+                _logger.LogWarning(ex,
+                    "取り残されたリストア元の検証用の一時コピーを回収できませんでした: {Folder}",
+                    _restoreInspectionFolder);
+            }
         }
 
         /// <summary>
@@ -788,9 +1215,13 @@ namespace ICCardManager.Services
         /// 読み取り側でもヘッダが宣言するサイズと実ファイルサイズの整合を確認する。
         /// </para>
         /// <para>
-        /// 判定はヘッダ 100 バイトの読み取りだけで完結し、ファイル全長の読み取り
-        /// （<c>PRAGMA integrity_check</c> 等）は行わない。本メソッドはリストア実行中に
-        /// UI スレッド上で呼ばれるため、DB 全体の読み込みを挟むと保存先が UNC のとき画面が固まる。
+        /// 判定はヘッダ 100 バイトの読み取りだけで完結し、ファイル全長の読み取りは行わない。
+        /// </para>
+        /// <para>
+        /// Issue #2269: ヘッダの検査だけでは、トリガー等を書き加えた DB を受け入れてしまう。
+        /// リストアは本メソッドを第一段とする <see cref="PrepareRestoreSource"/> を通し、
+        /// 一時コピーへの <c>PRAGMA quick_check</c>・トリガー／ビューの有無・スキーマの版まで検証する
+        /// （リストアと検証は Issue #1809 以降 UI スレッドの外で走るので、全長を読む検査で画面は固まらない）。
         /// </para>
         /// </remarks>
         /// <param name="filePath">検証するファイルのパス</param>

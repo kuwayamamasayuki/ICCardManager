@@ -437,6 +437,12 @@ public class BackupServiceTests : IDisposable
     /// ここでは有効な SQLite ファイルの先頭ページ（ヘッダを含む 4096 バイト）より後ろだけをバイト範囲ロックし、
     /// ヘッダ検査は通るがコピーが失敗する状態を作る。経路はログ（I/O エラーとして記録されたこと）で確かめる。
     /// 対のテスト <see cref="RestoreFromBackup_SameValidFileWithoutLock_ReturnsTrue"/> を参照。
+    /// <para>
+    /// Issue #2269: リストア元の検証が一時コピー（ファイル全体の読み取り）を行うようになったため、
+    /// 最初からロックしておくと検証の段で「読み取れない」として弾かれ、置き換えの段へ届かない。
+    /// ロックは置き換えのコピー（<c>CopyRestoreSourceTo</c>）の直前に掛ける（<see cref="LockBeforeReplaceBackupService"/>）。
+    /// 失敗そのものは従来どおり実ファイルのロックによる本物の I/O エラーである。
+    /// </para>
     /// </remarks>
     [Fact]
     public async Task RestoreFromBackup_BackupFileLocked_ReturnsFalse()
@@ -451,18 +457,11 @@ public class BackupServiceTests : IDisposable
 
         using var restoreDbContext = new DbContext(restoreTargetPath);
         var logger = new RecordingLogger<BackupService>();
-        var testService = new BackupService(restoreDbContext, _settingsRepositoryMock.Object, logger);
-
-        // ヘッダより後ろをバイト範囲ロックする（ヘッダの読み取りは妨げない）。
-        // ハンドル自体は読み取り専用・読み取り共有で開く。書き込みアクセスで開くと、
-        // FileShare.Read で開くヘッダ検査が共有違反で失敗し、ロックの経路へ届かない
-        // ロック範囲は FileStream の既定バッファ（4096 バイト）より後ろから始める。ヘッダ検査は 100 バイトしか
-        // 読まないが、FileStream はバッファ単位で先読みするため、それより手前をロックすると検査側で読み取りが失敗する
-        using var lockedStream = new FileStream(backupFilePath, FileMode.Open, FileAccess.Read, FileShare.Read);
-        lockedStream.Lock(LockedRangeStart, lockedStream.Length - LockedRangeStart);
+        var testService = new LockBeforeReplaceBackupService(restoreDbContext, _settingsRepositoryMock.Object, logger);
 
         // Act
         var result = testService.RestoreFromBackup(backupFilePath);
+        testService.LockedBeforeReplace.Should().BeTrue("前提: 検証を通過し、置き換えの段でロックが掛かっている");
 
         // Assert
         result.Should().BeFalse(logger.FormatEntries());
@@ -528,6 +527,38 @@ public class BackupServiceTests : IDisposable
 
     /// <summary>ロックの開始位置（FileStream の既定バッファ長）。</summary>
     private const int LockedRangeStart = 4096;
+
+    /// <summary>
+    /// 置き換えのコピーの直前に、リストア元のヘッダより後ろをバイト範囲ロックする BackupService（Issue #2269）
+    /// </summary>
+    /// <remarks>
+    /// ハンドル自体は読み取り専用・読み取り共有で開く（書き込みアクセスで開くと共有違反で別の失敗になる）。
+    /// ロック範囲は FileStream の既定バッファ（4096 バイト）より後ろから始める。
+    /// </remarks>
+    private sealed class LockBeforeReplaceBackupService : BackupService
+    {
+        public LockBeforeReplaceBackupService(DbContext dbContext, ISettingsRepository settingsRepository, ILogger<BackupService> logger)
+            : base(dbContext, settingsRepository, logger)
+        {
+        }
+
+        public bool LockedBeforeReplace { get; private set; }
+
+        internal override void CopyRestoreSourceTo(string sourcePath, string targetPath)
+        {
+            using var lockedStream = new FileStream(sourcePath, FileMode.Open, FileAccess.Read, FileShare.Read);
+            lockedStream.Lock(LockedRangeStart, lockedStream.Length - LockedRangeStart);
+            LockedBeforeReplace = true;
+            try
+            {
+                base.CopyRestoreSourceTo(sourcePath, targetPath);
+            }
+            finally
+            {
+                lockedStream.Unlock(LockedRangeStart, lockedStream.Length - LockedRangeStart);
+            }
+        }
+    }
 
     /// <summary>
     /// リストア時に元のDBファイルが退避・復元されることを確認
