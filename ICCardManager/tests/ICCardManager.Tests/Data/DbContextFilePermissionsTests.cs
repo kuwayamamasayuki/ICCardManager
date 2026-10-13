@@ -194,7 +194,7 @@ public class DbContextFilePermissionsTests : IDisposable
 
     /// <summary>
     /// Issue #1455: ランタイムでの ACL 拡張は撤廃された。
-    /// インストーラーが親ディレクトリに <c>users-modify</c> を設定済みであり、
+    /// インストーラーが親ディレクトリに Users の「変更」（配下へ継承）を設定済みであり、
     /// ランタイムで <c>BUILTIN\Users : FullControl</c> を <c>AddAccessRule</c> すると
     /// (1) 削除権限を含む過剰権限となり、
     /// (2) 起動の度に新規 ACE が追加され ACL が累積する。

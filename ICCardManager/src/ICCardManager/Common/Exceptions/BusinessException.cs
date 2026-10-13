@@ -212,7 +212,7 @@ namespace ICCardManager.Common.Exceptions
         public static BusinessException LentStatusUpdateConflict(string cardIdm, string operationName)
         {
             // Issue #1986: 例外の Message は FileLogger が平文のログファイル
-            // （users-modify ACL）へ書き出すため、IDm はマスクを通す（#1852 / CWE-532）。
+            // （全ユーザーが読める ACL）へ書き出すため、IDm はマスクを通す（#1852 / CWE-532）。
             // 呼び出し元の LogError がテンプレート引数側でマスクしていても、
             // 同じ行に生の値が並べば意味がない。
             var message = $"Lent status update affected 0 rows: {IdmMasker.Mask(cardIdm)} ({operationName})";

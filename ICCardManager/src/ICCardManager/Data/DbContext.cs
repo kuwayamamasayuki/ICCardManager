@@ -526,7 +526,7 @@ namespace ICCardManager.Data
         ///     削除・差替え可能な過剰権限となっていた（PII 置換攻撃の足掛かり）。
         /// (2) <c>AddAccessRule</c> は冪等ではなく、起動の度に新規 ACE が追加され ACL が累積する。
         /// (3) インストーラー (<c>installer/ICCardManager.iss</c>) が
-        ///     <c>{commonappdata}\ICCardManager</c> 配下に <c>Permissions: users-modify</c> を
+        ///     <c>{commonappdata}\ICCardManager</c> 配下に Users の「変更」（継承）を
         ///     設定済みのため、ランタイムでの再付与は機能的に冗長。
         /// 共有モード（UNC パス）等インストーラーの管理外パスを使う場合の権限は管理者責任とする。
         /// 実体が <c>Directory.CreateDirectory</c> の薄いラッパーとなったため、Issue #1499 で
@@ -1540,7 +1540,7 @@ ON CONFLICT(key) DO UPDATE SET value = excluded.value";
         /// 他のWindowsユーザーがDBにアクセスできなかった。
         /// 本メソッドは継承を再有効化し、明示的ACLを削除することで、
         /// 親ディレクトリ（インストーラー <c>ICCardManager.iss</c> が
-        /// <c>{commonappdata}\ICCardManager</c> に <c>users-modify</c> を設定済み）
+        /// <c>{commonappdata}\ICCardManager</c> に Users の「変更」（配下へ継承）を設定済み）
         /// からの権限継承によりアクセス制御を行う。
         ///
         /// SQLiteの関連ファイル（-wal, -shm, -journal）も同様に処理する。

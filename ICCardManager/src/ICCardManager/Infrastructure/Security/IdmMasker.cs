@@ -9,7 +9,7 @@ namespace ICCardManager.Infrastructure.Security
     /// <para>
     /// 本システムでは職員証の IDm が唯一の認証要素（パスワード機構は存在しない）である。
     /// その IDm を平文でアプリログに出力すると、ログファイル（<c>C:\ProgramData\ICCardManager\Logs</c>、
-    /// インストーラが <c>users-modify</c> ACL を付与）を読める任意のローカルユーザーが
+    /// インストーラが Users の「変更」を付与）を読める任意のローカルユーザーが
     /// 職員の認証クレデンシャルを収集でき、IDm エミュレーションによるなりすましに繋がる（CWE-532）。
     /// </para>
     /// <para>

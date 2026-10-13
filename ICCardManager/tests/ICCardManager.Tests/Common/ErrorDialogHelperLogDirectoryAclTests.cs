@@ -48,7 +48,7 @@ public class ErrorDialogHelperLogDirectoryAclTests
         var users = ExplicitAllowRulesForUsers(ErrorDialogHelper.LogDirectory);
         users.Where(r => (r.FileSystemRights & DangerousRights) != 0)
             .Select(r => r.FileSystemRights.ToString())
-            .Should().BeEmpty("Users にフルコントロール（WRITE_DAC・所有権の取得）を付与しない。書き込み権限はインストーラーの users-modify が与える");
+            .Should().BeEmpty("Users にフルコントロール（WRITE_DAC・所有権の取得）を付与しない。書き込み権限はインストーラーが Users の「変更」（継承）で与える");
     }
 
     [Fact]

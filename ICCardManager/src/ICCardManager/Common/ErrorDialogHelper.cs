@@ -298,7 +298,7 @@ namespace ICCardManager.Common
         /// フルコントロールはアクセス許可の変更と所有権の取得を含むため、一般ユーザーがフォルダーの ACL を
         /// 握り、昇格したインストーラー／アンインストーラーの書き込み・削除をジャンクションで任意の場所へ
         /// 向ける足掛かりになる。全ユーザーが書き込めるための権限（Users の「変更」）はインストーラー
-        /// （<c>installer/ICCardManager.iss</c> の <c>Permissions: users-modify</c>）が付与する。
+        /// （<c>installer/ICCardManager.iss</c> の <c>HardenDataDirectory</c>。配下へ継承する「変更」）が付与する。
         /// </remarks>
         private static void EnsureLogDirectoryExists()
         {
