@@ -64,7 +64,7 @@ public sealed class ReportViewModelExportStatusThreadPoolTests
             new PrintService(reportDataBuilder, NullLogger<PrintService>.Instance),
             _cardRepositoryMock.Object,
             new Mock<INavigationService>().Object,
-            settingsRepositoryMock.Object,
+            new Mock<IReportOutputFolderStore>().Object,
             new Mock<ISafeFileLauncher>().Object,
             new ReportPreflightChecker(new Mock<IReportDataBuilder>().Object, ledgerRepositoryMock.Object, new ReportFileNameFactory()),
             _exportStatusServiceMock.Object,

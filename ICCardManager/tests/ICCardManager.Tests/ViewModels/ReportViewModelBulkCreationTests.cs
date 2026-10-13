@@ -109,7 +109,7 @@ public class ReportViewModelBulkCreationTests : IDisposable
             _printServiceMock.Object,
             _cardRepositoryMock.Object,
             _navigationServiceMock.Object,
-            _settingsRepositoryMock.Object,
+            new Mock<IReportOutputFolderStore>().Object,
             _safeFileLauncherMock.Object,
             new ReportPreflightChecker(_preflightDataBuilderMock.Object, _ledgerRepositoryMock.Object, new ReportFileNameFactory()),
             _exportStatusServiceMock.Object);

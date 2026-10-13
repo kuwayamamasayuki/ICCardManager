@@ -1,3 +1,4 @@
+#nullable enable
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -106,8 +107,16 @@ namespace ICCardManager.Models
         public bool ShowHistoryOnReturn { get; set; } = true;
 
         /// <summary>
-        /// 帳票出力先フォルダパス
+        /// 共有 DB に残る帳票出力先フォルダパス（旧版との互換のためだけに読み書きする）
         /// </summary>
+        /// <remarks>
+        /// <b>帳票の出力先として読まないこと</b>（Issue #2266）。出力先はこの PC の設定ファイルが正で、
+        /// <c>Services.IReportOutputFolderStore</c> から読む。共有フォルダーモードでは共有 DB を全 PC が書けるため、
+        /// この値を帳票作成画面の既定値や出力状況の自動走査に使うと、DB を書き換えた者が指定したフォルダー
+        /// （UNC なら別ホスト）へ画面を開いただけで接続する。帳票作成画面も起動時の処理も
+        /// この値へ出力先を書かない（一括保存が書き戻す値に意味は無い）。静的検査 <c>ReportOutputFolderSourceConventionTests</c> が
+        /// 設定の入出力以外からの参照を禁じる。
+        /// </remarks>
         public string ReportOutputFolder { get; set; } = string.Empty;
     }
 

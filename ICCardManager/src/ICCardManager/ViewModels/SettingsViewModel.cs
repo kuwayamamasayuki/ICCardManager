@@ -691,7 +691,7 @@ public partial class SettingsViewModel : ViewModelBase
     /// アプリのFile.WriteAllTextはUTF-8 BOM付きで書き込む。
     /// どちらでも正しく読めるよう、BOMで判定する。
     /// </remarks>
-    private static string LoadConfigFile(string filePath)
+    internal static string LoadConfigFile(string filePath)
     {
         if (!File.Exists(filePath))
         {
@@ -812,25 +812,13 @@ public partial class SettingsViewModel : ViewModelBase
     /// <summary>
     /// 帳票出力先設定ファイルのパスを取得
     /// </summary>
+    /// <remarks>
+    /// 読み書きは <see cref="Services.ReportOutputFolderStore"/> が担う。帳票の出力先は
+    /// この PC ごとの設定が正で、共有 DB には持たない（Issue #2266）。
+    /// </remarks>
     internal static string GetReportOutputConfigPath()
     {
         return GetConfigFilePath(ReportOutputConfigFileName);
-    }
-
-    /// <summary>
-    /// 帳票出力先設定ファイルから値を読み込み
-    /// </summary>
-    internal static string LoadReportOutputConfigFromFile()
-    {
-        return LoadConfigFile(GetReportOutputConfigPath());
-    }
-
-    /// <summary>
-    /// 帳票出力先を設定ファイルに保存（インストーラーがアップグレード時に読み込む）
-    /// </summary>
-    internal static void SaveReportOutputConfigToFile(string outputFolder)
-    {
-        SaveConfigFile(GetReportOutputConfigPath(), outputFolder);
     }
 
     /// <summary>

@@ -30,7 +30,7 @@ public partial class ReportViewModel : ViewModelBase
     private readonly PrintService _printService;
     private readonly ICardRepository _cardRepository;
     private readonly INavigationService _navigationService;
-    private readonly ISettingsRepository _settingsRepository;
+    private readonly IReportOutputFolderStore _outputFolderStore;
     private readonly ISafeFileLauncher _safeFileLauncher;
     private readonly ReportPreflightChecker _preflightChecker;
     private readonly IReportExportStatusService _exportStatusService;
@@ -110,7 +110,7 @@ public partial class ReportViewModel : ViewModelBase
         PrintService printService,
         ICardRepository cardRepository,
         INavigationService navigationService,
-        ISettingsRepository settingsRepository,
+        IReportOutputFolderStore outputFolderStore,
         ISafeFileLauncher safeFileLauncher,
         ReportPreflightChecker preflightChecker,
         IReportExportStatusService exportStatusService,
@@ -120,7 +120,7 @@ public partial class ReportViewModel : ViewModelBase
         _printService = printService;
         _cardRepository = cardRepository;
         _navigationService = navigationService;
-        _settingsRepository = settingsRepository;
+        _outputFolderStore = outputFolderStore ?? throw new ArgumentNullException(nameof(outputFolderStore));
         _safeFileLauncher = safeFileLauncher;
         _preflightChecker = preflightChecker;
         _exportStatusService = exportStatusService ?? throw new ArgumentNullException(nameof(exportStatusService));
@@ -154,7 +154,7 @@ public partial class ReportViewModel : ViewModelBase
     public async Task InitializeAsync()
     {
         await LoadCardsAsync();
-        await LoadOutputFolderAsync();
+        LoadOutputFolder();
         _isInitialized = true;
 
         // Issue #1691: 出力先フォルダが確定してから出力済み / 未出力を判定する
@@ -166,57 +166,63 @@ public partial class ReportViewModel : ViewModelBase
     /// </summary>
     partial void OnOutputFolderChanged(string value)
     {
-        // 初期化完了前（コンストラクタやLoadOutputFolderAsyncでの設定）は保存しない
+        // 初期化完了前（コンストラクタやLoadOutputFolderでの設定）は保存しない
         if (!_isInitialized) return;
-        _ = SaveOutputFolderAsync();
+        SaveOutputFolder();
 
         // Issue #1691: 出力先が変われば出力済み判定もやり直す
         _ = RefreshExportStatusAsync();
     }
 
     /// <summary>
-    /// 保存された出力先フォルダを読み込み
+    /// この PC に保存された出力先フォルダを読み込み
     /// </summary>
-    private async Task LoadOutputFolderAsync()
+    /// <remarks>
+    /// Issue #2266: 読むのはこの PC の設定（<c>report_output_config.txt</c>）だけで、共有 DB の
+    /// <c>report_output_folder</c> は読まない。共有 DB は共有フォルダーモードでは全 PC が書けるため、
+    /// その値を既定値にすると、直後の出力状況の自動走査（<see cref="RefreshExportStatusAsync"/>）で
+    /// 画面を開いただけで DB を書き換えた者が指定したフォルダー（UNC なら別ホスト）へ接続してしまう。
+    /// 未設定ならコンストラクタで入れたマイドキュメントのまま。
+    /// </remarks>
+    private void LoadOutputFolder()
     {
-        var settings = await _settingsRepository.GetAppSettingsAsync();
-        if (!string.IsNullOrEmpty(settings.ReportOutputFolder))
+        var folder = _outputFolderStore.Load();
+        if (!string.IsNullOrEmpty(folder))
         {
-            OutputFolder = settings.ReportOutputFolder;
+            OutputFolder = folder;
         }
     }
 
     /// <summary>
-    /// 出力先フォルダを保存
+    /// 出力先フォルダをこの PC の設定へ保存
     /// </summary>
-    private async Task SaveOutputFolderAsync()
+    /// <remarks>
+    /// Issue #2266: 共有 DB へは書かない。書くとほかの PC の既定値を後勝ちで上書きし合う。
+    /// 保存の失敗は画面に示す — 示さないと、画面は新しいフォルダを示したまま次に開いたとき旧フォルダへ戻る。
+    /// </remarks>
+    private void SaveOutputFolder()
     {
-        // 呼び出し元（OnOutputFolderChanged）は戻り値を捨てるため、本体が最後の受け皿になる
-        //（`.claude/rules/viewmodel-conventions.md` #1816）。ここで受けないと DB 保存の失敗は
-        // 誰にも観測されず、画面は新しいフォルダを示したまま次回起動で旧フォルダへ戻る。
         try
         {
-            var settings = await _settingsRepository.GetAppSettingsAsync();
-            settings.ReportOutputFolder = OutputFolder;
-            await _settingsRepository.SaveAppSettingsAsync(settings);
+            _outputFolderStore.Save(OutputFolder);
         }
         catch (Exception ex)
         {
             ErrorDialogHelper.LogException(ex, "帳票の出力先フォルダの保存");
-            SetStatus(ExceptionMessageFormatter.ToUserMessage(ex, "出力先フォルダの保存"), isError: true);
-            return;
-        }
-
-        // 設定ファイルにも保存（インストーラーがアップグレード時に読み込む）
-        try
-        {
-            SettingsViewModel.SaveReportOutputConfigToFile(OutputFolder);
-        }
-        catch
-        {
-            // 非致命的: DBが正なので設定ファイルの書き込み失敗は無視
+            SetStatus(OutputFolderSaveFailedMessage, isError: true);
         }
     }
+
+    /// <summary>
+    /// 出力先フォルダの保存に失敗したときの案内（Issue #2266）
+    /// </summary>
+    /// <remarks>
+    /// 保存先は <c>C:\ProgramData\ICCardManager</c> の設定ファイルで、職員が画面から直せる原因は無い。
+    /// 帳票自体は表示中の出力先へ作成できるので、作業は止めずに管理者への連絡を案内する
+    /// （近くの既存文言の語彙「管理者に連絡してください」に揃える。#1817）。
+    /// </remarks>
+    internal const string OutputFolderSaveFailedMessage =
+        "出力先フォルダの指定をこのパソコンに保存できませんでした（帳票は表示中のフォルダへ作成できますが、次に開いたときは以前のフォルダに戻ります）。続けて表示される場合は管理者に連絡してください。";
 
     /// <summary>
     /// 今月を選択

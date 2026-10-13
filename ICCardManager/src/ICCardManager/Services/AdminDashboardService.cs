@@ -46,6 +46,7 @@ namespace ICCardManager.Services
         private readonly IStaffRepository _staffRepository;
         private readonly ISettingsRepository _settingsRepository;
         private readonly IReportExportStatusService _reportExportStatusService;
+        private readonly IReportOutputFolderStore _reportOutputFolderStore;
 
         /// <summary>職員名を特定できない台帳行の表示名</summary>
         internal const string UnknownStaffName = "（職員名なし）";
@@ -61,13 +62,15 @@ namespace ICCardManager.Services
             ILedgerRepository ledgerRepository,
             IStaffRepository staffRepository,
             ISettingsRepository settingsRepository,
-            IReportExportStatusService reportExportStatusService)
+            IReportExportStatusService reportExportStatusService,
+            IReportOutputFolderStore reportOutputFolderStore)
         {
             _cardRepository = cardRepository;
             _ledgerRepository = ledgerRepository;
             _staffRepository = staffRepository;
             _settingsRepository = settingsRepository;
             _reportExportStatusService = reportExportStatusService;
+            _reportOutputFolderStore = reportOutputFolderStore ?? throw new ArgumentNullException(nameof(reportOutputFolderStore));
         }
 
         /// <inheritdoc/>
@@ -99,8 +102,13 @@ namespace ICCardManager.Services
                     RefundedAt = c.RefundedAt,
                 })
                 .ToList();
+            // Issue #2266: 走査するのはこの PC の帳票出力先（report_output_config.txt）だけ。共有 DB の
+            // report_output_folder は共有フォルダーモードでは全 PC が書けるため、稼働状況を開くたびに
+            // DB を書き換えた者が指定したフォルダー（UNC なら別ホスト）へ接続することになる。
+            // 未設定なら空のまま渡し、全カードを「判定不可」とする（帳票作成画面で出力先を決めれば解消する）。
+            var outputFolder = _reportOutputFolderStore.Load();
             var reportStatuses = await DedicatedThread.Run(
-                () => _reportExportStatusService.GetStatuses(targets, settings.ReportOutputFolder, asOf.Year, asOf.Month))
+                () => _reportExportStatusService.GetStatuses(targets, outputFolder, asOf.Year, asOf.Month))
                 .ConfigureAwait(false);
             var reportStatusByCard = reportStatuses
                 .GroupBy(s => s.CardIdm)
