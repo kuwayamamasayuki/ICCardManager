@@ -98,10 +98,34 @@ public class InstallerDataDirectoryAclConventionTests
 
         // [Code] の icacls の付与（文字列リテラルに書かれる）
         var code = StripPascalComments(ReadCodeSection(lines), keepLiterals: true);
-        Regex.Matches(code, @"/grant(?::r)?\s+[^'\s]*:(?:\((?:OI|CI|IO|NP)\))*\(?F\b")
-            .Cast<Match>().Select(m => m.Value)
-            .Should().BeEmpty("icacls でフルコントロール（F）を付与しない");
+        FindFullControlGrants(code).Should().BeEmpty("icacls でフルコントロール（F・GA）やアクセス許可の変更・所有権の取得（WDAC・WO）を付与しない");
     }
+
+    [Theory]
+    [InlineData("'/grant *S-1-5-32-545:(OI)(CI)F /Q'", true)]
+    [InlineData("'/grant:r *S-1-5-32-545:F'", true)]
+    [InlineData("'/grant *S-1-5-32-545:(OI)(CI)(GA)'", true)]
+    [InlineData("'/grant *S-1-5-32-545:(RX,WDAC)'", true)]
+    [InlineData("'/grant *S-1-5-32-545:(WO)'", true)]
+    [InlineData("'/grant:r *S-1-5-32-545:(OI)(CI)(IO)M /L /Q'", false)]
+    [InlineData("'/grant *S-1-5-32-545:(RX,WD,AD) /L /Q'", false)]
+    public void 検査ロジック_フルコントロール相当の付与を検出すること(string code, bool expected)
+    {
+        FindFullControlGrants(code).Any().Should().Be(expected);
+    }
+
+    /// <summary>
+    /// icacls の <c>/grant</c> のうち、フルコントロール（<c>F</c>・<c>GA</c>）、アクセス許可の変更（<c>WDAC</c>）、
+    /// 所有権の取得（<c>WO</c>）を含む指定を返す。継承の指定（<c>OI</c>・<c>CI</c>・<c>IO</c>・<c>NP</c>・<c>I</c>）は権限として数えない。
+    /// </summary>
+    private static List<string> FindFullControlGrants(string code)
+        => Regex.Matches(code, @"/grant(?::r)?\s+[^'\s]*?:(?<spec>(?:\([A-Z,]+\))*[A-Z]*)")
+            .Cast<Match>()
+            .Where(m => m.Groups["spec"].Value
+                .Split(new[] { '(', ')', ',' }, StringSplitOptions.RemoveEmptyEntries)
+                .Any(r => r is "F" or "GA" or "WDAC" or "WO"))
+            .Select(m => m.Value)
+            .ToList();
 
     [Fact]
     public void PrepareToInstallで所有者を固定しフォルダー自体へ削除を与えずにACLを作り直すこと()
@@ -130,16 +154,19 @@ public class InstallerDataDirectoryAclConventionTests
         // Users へフォルダー自体に効く「変更」（IO の無い (OI)(CI)M）を与えない
         Regex.IsMatch(body, @"S-1-5-32-545:\(OI\)\(CI\)M\b").Should().BeFalse("(OI)(CI)M はフォルダー自体へ DELETE を与える");
 
-        // 配下まで（backup・Logs・DB・設定ファイル）作り直す
-        Regex.IsMatch(body, @"\\\*"" /setowner \*S-1-5-32-544 /T").Should().BeTrue("配下の所有者も固定する");
-        Regex.IsMatch(body, @"\\\*"" /reset /T").Should().BeTrue("配下の ACL も継承へ戻す（Logs に付いた Users:F を外す）");
+        // 直下（backup・Logs・DB・設定ファイル）も作り直す。再帰（/T）は使わない:
+        // icacls の /T は /L を付けてもジャンクションの中へ降りる（実測）ため、検査の後に差し替えられた
+        // backup・Logs のリンク先へ管理者権限で /setowner・/reset が掛かり得る
+        Regex.IsMatch(body, @"\\\*"" /setowner \*S-1-5-32-544 /C /L ").Should().BeTrue("直下の所有者も固定する（リンク自体を処理する /L 付き）");
+        Regex.IsMatch(body, @"\\\*"" /reset /C /L ").Should().BeTrue("直下の ACL も継承へ戻す（Logs に付いた Users:F を外す）");
+        Regex.IsMatch(body, @"/T\b").Should().BeFalse("再帰（/T）はジャンクションの中へ降りるので使わない");
 
         // icacls より前に再解析ポイントを確かめる（ジャンクションの先の ACL を書き換えない）
         var pathCheck = body.IndexOf("IsDataPathSafe(Root)", StringComparison.Ordinal);
         var treeCheck = body.IndexOf("TreeHasReparsePoint(", StringComparison.Ordinal);
-        var recursive = body.IndexOf(" /T ", StringComparison.Ordinal);
+        var children = body.IndexOf("\\*\" /setowner", StringComparison.Ordinal);
         pathCheck.Should().BeGreaterThan(-1).And.BeLessThan(setOwner, "フォルダー自体の再解析ポイントを icacls より前に確かめる");
-        treeCheck.Should().BeGreaterThan(-1).And.BeLessThan(recursive, "配下の再解析ポイントを再帰の icacls より前に確かめる");
+        treeCheck.Should().BeGreaterThan(-1).And.BeLessThan(children, "配下の再解析ポイントを直下への icacls より前に確かめる");
     }
 
     [Fact]

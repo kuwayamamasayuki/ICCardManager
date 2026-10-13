@@ -214,4 +214,59 @@ public class AppConfigFilesTests
             Directory.Delete(dir, recursive: true);
         }
     }
+
+    /// <summary>
+    /// Issue #2261: 別の職員が残した一時ファイル（<c>*.tmp</c>）があっても置き換えられること。
+    /// </summary>
+    /// <remarks>
+    /// データフォルダーの中身には Users の「変更」しか無く、別の職員が作ったファイルに対してはアクセス許可の変更
+    /// （WRITE_DAC）を持たない。その一時ファイルを書き直して使い回すと、<c>File.Replace</c>（置換先の ACL を写す）が
+    /// 失敗する。別のユーザーを用意できないので、OWNER RIGHTS に「変更」だけを与えて所有者の暗黙の WRITE_DAC を消し、
+    /// 「自分にはアクセス許可の変更が無い一時ファイル」を作って再現する。
+    /// </remarks>
+    [Fact]
+    public void Write_アクセス許可を変更できない一時ファイルが残っていても置き換えられること()
+    {
+        var dir = CreateTempDir();
+        var filePath = Path.Combine(dir, "database_config.txt");
+        var tempPath = filePath + ".tmp";
+        try
+        {
+            File.WriteAllText(filePath, "old", Encoding.UTF8);
+            File.WriteAllText(tempPath, "stale", Encoding.UTF8);
+            RemoveWriteDacFromOwner(tempPath);
+
+            AppConfigFiles.Write(filePath, @"\\server\share\iccard.db");
+
+            File.ReadAllText(filePath, Encoding.UTF8).Should().Be(@"\\server\share\iccard.db");
+            File.Exists(tempPath).Should().BeFalse("置換後に一時ファイルが残らない");
+        }
+        finally
+        {
+            Directory.Delete(dir, recursive: true);
+        }
+    }
+
+    /// <summary>ファイルの ACL を「OWNER RIGHTS と Users に変更だけ」にし、所有者の暗黙の WRITE_DAC を消す。</summary>
+    private static void RemoveWriteDacFromOwner(string path)
+    {
+        var info = new FileInfo(path);
+        var security = info.GetAccessControl();
+        security.SetAccessRuleProtection(isProtected: true, preserveInheritance: false);
+        foreach (System.Security.AccessControl.FileSystemAccessRule rule in
+                 security.GetAccessRules(true, true, typeof(System.Security.Principal.SecurityIdentifier)))
+        {
+            security.RemoveAccessRuleSpecific(rule);
+        }
+
+        foreach (var sid in new[] { "S-1-3-4", "S-1-5-32-545" })
+        {
+            security.AddAccessRule(new System.Security.AccessControl.FileSystemAccessRule(
+                new System.Security.Principal.SecurityIdentifier(sid),
+                System.Security.AccessControl.FileSystemRights.Modify,
+                System.Security.AccessControl.AccessControlType.Allow));
+        }
+
+        info.SetAccessControl(security);
+    }
 }

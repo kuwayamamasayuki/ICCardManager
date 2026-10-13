@@ -113,12 +113,24 @@ namespace ICCardManager.Common
             }
 
             var tempPath = filePath + ".tmp";
+
+            // Issue #2261: 別の職員が残した一時ファイルを書き直して使い回さない。所有者がその職員のままだと
+            // この職員にはアクセス許可の変更（WRITE_DAC）が無く、File.Replace（置換先の ACL を写す）が失敗する。
+            // データフォルダーの中身には Users の「変更」があるので、消して自分で作り直せる。
+            if (File.Exists(tempPath))
+            {
+                File.Delete(tempPath);
+            }
+
             File.WriteAllText(tempPath, value ?? string.Empty, Encoding.UTF8);
             if (File.Exists(filePath))
             {
                 // 原子的置換: Delete→Move の「対象ファイルが存在しない窓」を排除する。
                 // 第3引数（バックアップファイル名）は null = バックアップを作らない。
-                File.Replace(tempPath, filePath, null);
+                // Issue #2261: ACL の引き継ぎの失敗は無視する（ignoreMetadataErrors）。インストーラーが書いた設定ファイルは
+                // 所有者が Administrators で、職員はフルコントロールを持たないため、写せないことがある。
+                // 置き換えた後のファイルはデータフォルダーからの継承で同じアクセス権になる。
+                File.Replace(tempPath, filePath, null, ignoreMetadataErrors: true);
             }
             else
             {
