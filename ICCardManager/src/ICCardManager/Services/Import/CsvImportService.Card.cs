@@ -335,7 +335,7 @@ namespace ICCardManager.Services
             };
         }
 
-        public async Task<CsvImportPreviewResult> PreviewCardsAsync(string filePath, bool skipExisting = true)
+        public virtual async Task<CsvImportPreviewResult> PreviewCardsAsync(string filePath, bool skipExisting = true)
         {
             var errors = new List<CsvImportError>();
             return await ExecutePreviewWithErrorHandlingAsync(

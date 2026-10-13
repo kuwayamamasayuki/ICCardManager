@@ -343,7 +343,7 @@ namespace ICCardManager.Services
         /// <param name="filePath">CSVファイルパス</param>
         /// <param name="skipExisting">既存データをスキップするか（falseの場合は更新）</param>
 
-        public async Task<CsvImportPreviewResult> PreviewStaffAsync(string filePath, bool skipExisting = true)
+        public virtual async Task<CsvImportPreviewResult> PreviewStaffAsync(string filePath, bool skipExisting = true)
         {
             var errors = new List<CsvImportError>();
             return await ExecutePreviewWithErrorHandlingAsync(

@@ -26,7 +26,7 @@ namespace ICCardManager.Services
     {
         // === 利用履歴詳細CSVインポート・プレビュー ===
 
-        public async Task<CsvImportPreviewResult> PreviewLedgerDetailsAsync(string filePath)
+        public virtual async Task<CsvImportPreviewResult> PreviewLedgerDetailsAsync(string filePath)
         {
             var errors = new List<CsvImportError>();
             return await ExecutePreviewWithErrorHandlingAsync(
