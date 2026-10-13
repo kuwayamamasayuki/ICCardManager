@@ -9,7 +9,7 @@
 ### 開発マシン
 - Windows 10/11 (64-bit)
 - .NET SDK（.NET Framework 4.8対応版）または Visual Studio 2022
-- [Inno Setup 6](https://jrsoftware.org/isinfo.php)（インストーラー作成用）
+- [Inno Setup 6](https://jrsoftware.org/isinfo.php)（インストーラー作成用。**6.7.0 以降**。古い版では `.iss` の版の検査でコンパイルが止まる。Issue #2261）
 
 ### ビルドコマンド
 
@@ -65,7 +65,7 @@ publish/
 
 ### 前提条件
 
-- [Inno Setup 6](https://jrsoftware.org/isinfo.php) がインストールされていること
+- [Inno Setup 6](https://jrsoftware.org/isinfo.php)（**6.7.0 以降**。古い版では `.iss` の版の検査でコンパイルが止まる。Issue #2261）がインストールされていること
 - Inno Setup のパスが環境変数に登録されていること（通常はインストール時に自動設定）
 
 ### 作成手順

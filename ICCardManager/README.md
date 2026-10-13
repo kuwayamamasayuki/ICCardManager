@@ -175,7 +175,7 @@ dotnet publish src/ICCardManager/ICCardManager.csproj -c Release
 
 #### 前提条件
 
-- [Inno Setup 6](https://jrsoftware.org/isinfo.php) がインストールされていること
+- [Inno Setup 6](https://jrsoftware.org/isinfo.php)（**6.7.0 以降**。古い版では `.iss` の版の検査でコンパイルが止まる。Issue #2261）がインストールされていること
 
 #### ビルド手順
 

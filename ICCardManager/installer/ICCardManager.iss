@@ -1,6 +1,14 @@
 ﻿; ICCardManager インストーラースクリプト
-; Inno Setup 6.x 用
+; Inno Setup 6.7.0 以降用
 ; バージョンはコマンドラインから /DMyAppVersion=x.y.z で指定可能
+
+; Issue #2261: Inno Setup 6.7.0 より古い版ではビルドしない。
+; データフォルダー（C:\ProgramData\ICCardManager）の保護は、6.7.0 の DelTree がジャンクションの中へ降りないこと（実測）と、
+; 6.7.0 から Setup / Uninstall が既定で Windows の RedirectionGuard（一般ユーザーが作ったジャンクション・シンボリックリンクを
+; 辿らない）を有効にすることを前提にしている（開発者ガイド §5.4）。
+#if VER < EncodeVer(6, 7, 0)
+  #error Inno Setup 6.7.0 以降でビルドしてください（Issue #2261: データフォルダーの保護が 6.7.0 の DelTree と RedirectionGuard に依存するため）。https://jrsoftware.org/isdl.php から最新版を入れてください。
+#endif
 
 #define MyAppName "交通系ICカード管理システム：ピッすい"
 #define MyAppNameEn "ICCardManager"

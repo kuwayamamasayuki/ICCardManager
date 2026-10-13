@@ -72,6 +72,69 @@ public class InstallerDataDirectoryAclConventionTests
         @"^Name:\s*""(?<name>[^""]+)""(?<rest>.*)$",
         RegexOptions.Compiled);
 
+    /// <summary>
+    /// Inno Setup 6.7.0 より古い版でビルドすると、コンパイルが <c>#error</c> で止まること。
+    /// </summary>
+    /// <remarks>
+    /// データフォルダーの保護は、6.7.0 の <c>DelTree</c> がジャンクションの中へ降りないこと（実測）と、6.7.0 から
+    /// Setup / Uninstall が既定で RedirectionGuard を有効にすることに依存する。ビルド手順は「Inno Setup 6」のフォルダーしか
+    /// 見ないので、古い版で黙ってビルドされないよう、スクリプト自身が版を検査する。
+    /// </remarks>
+    [Fact]
+    public void Inno_Setup_670より古い版ではビルドを止めること()
+    {
+        HasMinimumInnoVersionGuard(ReadInstallerLines(), new Version(6, 7, 0))
+            .Should().BeTrue("先頭付近に #if VER < EncodeVer(6, 7, 0) / #error … / #endif を置く");
+    }
+
+    [Theory]
+    [InlineData(true, "#if VER < EncodeVer(6, 7, 0)", "  #error Inno Setup 6.7.0 以降でビルドしてください", "#endif")]
+    [InlineData(true, "#if VER < EncodeVer(6,8,1)", "#error 新しい版でビルドしてください", "#endif")]
+    [InlineData(false, "#if VER < EncodeVer(6, 6, 0)", "#error 古い版の検査", "#endif")]
+    [InlineData(false, "#if VER < EncodeVer(6, 7, 0)", "; #error コメントにしただけ", "#endif")]
+    [InlineData(false, "; #if VER < EncodeVer(6, 7, 0)", "; #error コメントにしただけ", "; #endif")]
+    [InlineData(false, "#if VER < EncodeVer(6, 7, 0)", "#error 閉じていない", "")]
+    [InlineData(false, "#define Foo", "", "")]
+    public void 検査ロジック_版の検査を判定すること(bool expected, string line1, string line2, string line3)
+    {
+        var script = new[] { "; ICCardManager インストーラースクリプト", line1, line2, line3, "[Setup]", "AppId=x" };
+
+        HasMinimumInnoVersionGuard(script, new Version(6, 7, 0)).Should().Be(expected);
+    }
+
+    /// <summary>
+    /// <c>[Setup]</c> より前に、<paramref name="minimum"/> 以上の版を求める <c>#if VER &lt; EncodeVer(a, b, c)</c>・
+    /// その直後の <c>#error</c>・<c>#endif</c> があるか（コメント行は数えない）。
+    /// </summary>
+    private static bool HasMinimumInnoVersionGuard(IReadOnlyList<string> lines, Version minimum)
+    {
+        for (var i = 0; i < lines.Count; i++)
+        {
+            var line = lines[i].Trim();
+            if (line.StartsWith("[", StringComparison.Ordinal))
+            {
+                return false;
+            }
+
+            var m = Regex.Match(line, @"^#if\s+VER\s*<\s*EncodeVer\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*\)\s*$");
+            if (!m.Success)
+            {
+                continue;
+            }
+
+            var version = new Version(int.Parse(m.Groups[1].Value), int.Parse(m.Groups[2].Value), int.Parse(m.Groups[3].Value));
+            var hasError = i + 1 < lines.Count && Regex.IsMatch(lines[i + 1].Trim(), @"^#error\s+\S");
+            var hasEndif = lines.Skip(i + 2).TakeWhile(l => !l.Trim().StartsWith("[", StringComparison.Ordinal))
+                .Any(l => Regex.IsMatch(l.Trim(), @"^#endif\b"));
+            if (version >= minimum && hasError && hasEndif)
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
     [Fact]
     public void データフォルダーの3つはDirsでPermissionsを指定しないこと()
     {
