@@ -1,6 +1,6 @@
 #nullable enable
 using System;
-using ICCardManager.ViewModels;
+using ICCardManager.Common;
 
 namespace ICCardManager.Services
 {
@@ -10,7 +10,7 @@ namespace ICCardManager.Services
     /// </summary>
     /// <remarks>
     /// 読み書きの形式（BOM による文字コード判定・一時ファイル経由の置換）は、インストーラーと共有する
-    /// ほかの設定ファイルと同じ <see cref="SettingsViewModel"/> の共通処理に委ねる。
+    /// ほかの設定ファイルと同じ <see cref="AppConfigFiles"/> に委ねる。
     /// </remarks>
     public sealed class ReportOutputFolderStore : IReportOutputFolderStore
     {
@@ -18,7 +18,7 @@ namespace ICCardManager.Services
 
         /// <summary>本番の置き場所（<c>AppDataPaths.RootDirectory</c> 配下）を使う</summary>
         public ReportOutputFolderStore()
-            : this(SettingsViewModel.GetReportOutputConfigPath())
+            : this(AppConfigFiles.ReportOutputConfigPath)
         {
         }
 
@@ -29,9 +29,9 @@ namespace ICCardManager.Services
         }
 
         /// <inheritdoc/>
-        public string Load() => SettingsViewModel.LoadConfigFile(_configFilePath);
+        public string Load() => AppConfigFiles.Read(_configFilePath);
 
         /// <inheritdoc/>
-        public void Save(string folder) => SettingsViewModel.SaveConfigFile(_configFilePath, folder ?? string.Empty);
+        public void Save(string folder) => AppConfigFiles.Write(_configFilePath, folder ?? string.Empty);
     }
 }

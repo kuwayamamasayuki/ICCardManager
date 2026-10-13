@@ -258,7 +258,7 @@ namespace ICCardManager
                 var dbPathInfo = "";
                 try
                 {
-                    var configPath = ViewModels.SettingsViewModel.LoadDatabasePathFromConfigFile();
+                    var configPath = AppConfigFiles.Read(AppConfigFiles.DatabaseConfigPath);
                     if (!string.IsNullOrWhiteSpace(configPath))
                     {
                         dbPathInfo = $"\n\nデータベースパス: {configPath}";
@@ -399,7 +399,7 @@ namespace ICCardManager
         /// </remarks>
         private string? GetValidatedDatabaseConfigPath()
         {
-            var raw = ViewModels.SettingsViewModel.LoadDatabasePathFromConfigFile();
+            var raw = AppConfigFiles.Read(AppConfigFiles.DatabaseConfigPath);
 
             // 空（未設定）はデフォルトパス利用の正常系。検証対象外。
             if (string.IsNullOrWhiteSpace(raw))
@@ -821,7 +821,7 @@ namespace ICCardManager
         {
             try
             {
-                var departmentValue = ViewModels.SettingsViewModel.LoadDepartmentConfigFromFile();
+                var departmentValue = AppConfigFiles.Read(AppConfigFiles.DepartmentConfigPath);
 
                 if (string.IsNullOrEmpty(departmentValue))
                 {

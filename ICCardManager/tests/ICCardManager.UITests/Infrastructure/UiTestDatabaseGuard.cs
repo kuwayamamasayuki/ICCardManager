@@ -29,7 +29,7 @@ namespace ICCardManager.UITests.Infrastructure
         /// <summary>元の DB が無かったことを示す印。中断後の回復で、テストが作った DB を消すために使う。</summary>
         internal const string AbsentMarkerFileName = DatabaseFileName + ".uitest-absent";
 
-        /// <summary>本体が DB の保存先を読む設定ファイル（<c>SettingsViewModel.GetDatabaseConfigPath</c> と同じ名前）。</summary>
+        /// <summary>本体が DB の保存先を読む設定ファイル（<c>AppConfigFiles.DatabaseConfigPath</c> と同じ名前）。</summary>
         internal const string DatabaseConfigFileName = "database_config.txt";
 
         /// <summary>旧実装（#2062 以前）の <c>LaunchWithSeed</c> が中断時に残し得た退避ファイル。</summary>

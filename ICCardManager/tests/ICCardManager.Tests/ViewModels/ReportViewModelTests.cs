@@ -865,7 +865,11 @@ public class ReportViewModelTests
         // Arrange
         SetupSharedDbOutputFolder(SharedDbOutputFolder);
         _outputFolderStoreMock.Setup(s => s.Load()).Returns(string.Empty);
-        _cardRepositoryMock.Setup(r => r.GetAllAsync()).ReturnsAsync(new List<IcCard>());
+        // カードが 0 枚だと出力状況の判定そのものが走らず、「走査しない」の表明が自明に真になる
+        _cardRepositoryMock.Setup(r => r.GetAllAsync()).ReturnsAsync(new List<IcCard>
+        {
+            new IcCard { CardIdm = "0123456789ABCDEF", CardType = "はやかけん", CardNumber = "001" },
+        });
 
         // Act
         await _viewModel.InitializeAsync();
@@ -873,6 +877,10 @@ public class ReportViewModelTests
         // Assert
         var myDocuments = Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments);
         _viewModel.OutputFolder.Should().Be(myDocuments);
+        _exportStatusServiceMock.Verify(
+            s => s.GetStatuses(It.IsAny<IEnumerable<ReportExportTarget>>(), myDocuments, It.IsAny<int>(), It.IsAny<int>()),
+            Times.Once,
+            "出力状況の判定は初期値（マイドキュメント）で 1 回走る（判定が走っていることの表明）");
         _exportStatusServiceMock.Verify(
             s => s.GetStatuses(It.IsAny<IEnumerable<ReportExportTarget>>(), SharedDbOutputFolder, It.IsAny<int>(), It.IsAny<int>()),
             Times.Never,
