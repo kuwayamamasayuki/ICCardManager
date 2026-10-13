@@ -859,7 +859,7 @@ public class OperationLogExcelExportServiceTests : IDisposable
 
         using var workbook = new XLWorkbook(filePath);
         var worksheet = workbook.Worksheet(1);
-        worksheet.Cell(2, 2).Value.ToString().Should().Be("統合の取り消し");
+        worksheet.Cell(2, 2).Value.ToString().Should().Be("統合取消");
         worksheet.Cell(2, 2).Style.Font.Bold.Should().BeTrue();
         worksheet.Cell(2, 2).Style.Font.FontColor.Should().Be(XLColor.FromHtml("#1565C0"), "統合・分割と同じ青");
         worksheet.Cell(2, 7).Value.ToString().Should().Contain("利用明細: 2件");

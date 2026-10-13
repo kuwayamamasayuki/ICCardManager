@@ -690,6 +690,21 @@ public partial class OperationLogSearchViewModel : ViewModelBase
     }
 
     /// <summary>
+    /// 「何を・どうした」の部分（例: 「利用履歴（42）を統合」）
+    /// </summary>
+    /// <remarks>
+    /// Issue #2265: 統合の取り消しの表示名「統合取消」は列幅に収める略記で（#1787）、「を統合取消」とつなぐと
+    /// 文として読めない。統合・分割と並べて読めるよう「利用履歴（42）の統合を取り消し」と書く。
+    /// </remarks>
+    private static string DescribeOperation(OperationLog log, string target, string action)
+    {
+        var subject = string.IsNullOrEmpty(log.TargetId) ? target : $"{target}（{log.TargetId}）";
+        return log.Action == OperationLogger.Actions.Unmerge
+            ? $"{subject}の統合を取り消し"
+            : $"{subject}を{action}";
+    }
+
+    /// <summary>
     /// 詳細サマリーを生成
     /// </summary>
     private static string GenerateDetailSummary(OperationLog log)
@@ -721,18 +736,11 @@ public partial class OperationLogSearchViewModel : ViewModelBase
                 log.BeforeData, log.AfterData);
             if (!string.IsNullOrEmpty(counts))
             {
-                return string.IsNullOrEmpty(log.TargetId)
-                    ? $"{target}を{action}: {counts}"
-                    : $"{target}（{log.TargetId}）を{action}: {counts}";
+                return $"{DescribeOperation(log, target, action)}: {counts}";
             }
         }
 
-        if (string.IsNullOrEmpty(log.TargetId))
-        {
-            return $"{target}を{action}";
-        }
-
-        return $"{target}（{log.TargetId}）を{action}";
+        return DescribeOperation(log, target, action);
     }
 
     /// <summary>

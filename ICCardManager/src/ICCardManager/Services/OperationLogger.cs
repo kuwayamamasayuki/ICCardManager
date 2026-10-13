@@ -33,7 +33,7 @@ namespace ICCardManager.Services
                 new KeyValuePair<string, string>(OperationLogger.Actions.Restore, "復元"),
                 new KeyValuePair<string, string>(OperationLogger.Actions.Merge, "統合"),
                 new KeyValuePair<string, string>(OperationLogger.Actions.Split, "分割"),
-                new KeyValuePair<string, string>(OperationLogger.Actions.Unmerge, "統合の取り消し"),
+                new KeyValuePair<string, string>(OperationLogger.Actions.Unmerge, "統合取消"),
                 new KeyValuePair<string, string>(OperationLogger.Actions.Import, "インポート"),
                 new KeyValuePair<string, string>(OperationLogger.Actions.Export, "エクスポート"),
                 new KeyValuePair<string, string>(OperationLogger.Actions.Backup, "バックアップ"),
@@ -104,7 +104,8 @@ namespace ICCardManager.Services
             public const string Restore = "RESTORE";
             public const string Merge = "MERGE";
             public const string Split = "SPLIT";
-            // Issue #2265: 統合の取り消し（統合先を書き戻し、統合元を挿入し直す）
+            // Issue #2265: 統合の取り消し（統合先を書き戻し、統合元を挿入し直す）。表示名は「統合取消」
+            // （Excel の B 列・画面の「操作」列は全角 6 文字までを折り返さない幅にしている。#1787）
             public const string Unmerge = "UNMERGE";
             // Issue #1302: 一括操作 (監査証跡)
             public const string Import = "IMPORT";

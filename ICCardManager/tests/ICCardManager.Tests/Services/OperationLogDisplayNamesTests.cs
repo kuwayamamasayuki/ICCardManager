@@ -123,7 +123,7 @@ public class OperationLogDisplayNamesTests
     [InlineData("RESTORE", "復元")]
     [InlineData("MERGE", "統合")]
     [InlineData("SPLIT", "分割")]
-    [InlineData("UNMERGE", "統合の取り消し")]
+    [InlineData("UNMERGE", "統合取消")]
     [InlineData("IMPORT", "インポート")]
     [InlineData("EXPORT", "エクスポート")]
     [InlineData("BACKUP", "バックアップ")]
