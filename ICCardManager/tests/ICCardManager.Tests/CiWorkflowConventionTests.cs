@@ -1177,7 +1177,7 @@ jobs:
             "  # pull-requests: write\n" +
             "  actions: none # 理由\n" +
             "\n" +
-            "jobs:\n" +
+            "jobs:  # ジョブの一覧（行末コメント付きの見出しも読む）\n" +
             "  build:\n" +
             "    runs-on: windows-latest\n" +
             "    permissions:\n" +
@@ -1189,7 +1189,18 @@ jobs:
             "  other:\n" +
             "    permissions: write-all\n" +
             "    steps:\n" +
-            "    - run: echo\n";
+            "    - run: echo\n" +
+            "  flow:\n" +
+            "    permissions: { contents: write, checks: 'read' } # フロー形式\n" +
+            "  quoted:\n" +
+            "    permissions:\n" +
+            "      \"contents\": \"write\"\n" +
+            "      pull-requests: [write]\n" +
+            "  readonly:\n" +
+            "    permissions:\n" +
+            "      contents: read\n" +
+            "  inherits:\n" +
+            "    runs-on: windows-latest\n";
 
         var topLevel = ExtractPermissions(workflow, 0);
         topLevel.Should().NotBeNull();
@@ -1198,10 +1209,25 @@ jobs:
         IsReadOnly(topLevel!).Should().BeTrue();
 
         var jobs = ExtractJobs(workflow);
+        jobs.Keys.Should().Equal(new[] { "build", "other", "flow", "quoted", "readonly", "inherits" },
+            "行末コメント付きの jobs: を読めないと、ジョブが 0 件になり無検査で緑になる");
         ExtractPermissions(jobs["build"], 4).Should().BeEquivalentTo(new Dictionary<string, string> { ["contents"] = "write" });
         ExtractPermissions(jobs["other"], 4).Should().BeEquivalentTo(new Dictionary<string, string> { ["*"] = "write-all" },
             "1 行の形（write-all / read-all）はスコープ「*」として返す");
+        ExtractPermissions(jobs["flow"], 4).Should().BeEquivalentTo(new Dictionary<string, string> { ["contents"] = "write", ["checks"] = "read" },
+            "フロー形式を読めないと、その宣言は「無い」ことになり書き込みの検査を素通りする");
+        ExtractPermissions(jobs["quoted"], 4).Should().BeEquivalentTo(new Dictionary<string, string> { ["contents"] = "write", ["pull-requests: [write]"] = "?" },
+            "引用符は剥がして照合し、読めない形は「?」として残す（読み飛ばさない）");
+        ExtractPermissions(jobs["inherits"], 4).Should().BeNull();
         ExtractPermissions(jobs["build"], 0).Should().BeNull("ジョブの宣言を最上位の宣言と取り違えない");
+
+        JobPermissions("sample.yml", workflow).Where(g => !IsAllowedJobPermission(g))
+            .Select(g => $"{g.Job} {g.Scope}: {g.Value}")
+            .Should().Equal(
+                new[] { "build contents: write", "other *: write-all", "flow contents: write", "quoted contents: write", "quoted pull-requests: [write]: ?" },
+                "許可リストに無い write・write-all・読めない宣言を違反とし、read はそのまま通す（fail-closed）");
+        IsAllowedJobPermission(("release.yml", "build-release", "contents", "write")).Should().BeTrue("許可リストに載せた書き込みは通す");
+        IsAllowedJobPermission(("release.yml", "build-release", "checks", "write")).Should().BeFalse("許可はスコープ単位");
         ExtractPermissions("name: X\njobs:\n  a:\n    permissions:\n      contents: read\n", 0).Should().BeNull(
             "最上位に宣言が無いワークフローを、ジョブの宣言で「ある」とみなさない");
 
@@ -1234,6 +1260,13 @@ jobs:
             "    - run: >-\n" +
             "        echo ${{ inputs.tag }}\n" +
             "    # - run: echo ${{ github.event.pull_request.title }}\n" +
+            "    - run: |\n" +
+            "        echo \"$env:PR_TITLE\"\n" +
+            "      env:\n" +
+            "        PR_TITLE: ${{ github.event.pull_request.title }}\n" +
+            "    - name: Folded plain scalar\n" +
+            "      run: echo start\n" +
+            "        ${{ github.event.head_commit.message }}\n" +
             "    - name: Safe\n" +
             "      run: dotnet build ${{ matrix.configuration == 'Release' && '--collect:\"github.ref\"' || '' }} \"$env:REF_NAME\"\n" +
             "    - name: Release\n" +
@@ -1242,8 +1275,11 @@ jobs:
             "        name: ${{ github.ref_name }}\n";
 
         var scripts = ExtractRunScripts(workflow);
-        scripts.Should().HaveCount(4, "1 行の run・run: |・run: >-（- run: の形も）を拾い、コメント行と defaults: の run: は数えない");
+        scripts.Should().HaveCount(6, "1 行の run・run: |・run: >-（- run: の形も）を拾い、コメント行と defaults: の run: は数えない");
         scripts[1].Should().Contain("Write-Host").And.NotContain("shell: pwsh", "ブロックは run: より深い字下げの行までで、同じ字下げの shell: で止まる");
+        scripts[3].Should().Be("echo \"$env:PR_TITLE\"",
+            "- run: | の本文は「- 」の後ろのキーより深い行まで。同じステップの env: を本文に含めると、env: で渡す推奨の形を誤検出する");
+        scripts[4].Should().Be("echo start\n${{ github.event.head_commit.message }}", "次の行へ折り返したスカラーも run の値として読む");
 
         string[] Roots(string expression) => ExtractContextRoots(expression).ToArray();
 
@@ -1262,7 +1298,8 @@ jobs:
         UntrustedExpansions(workflow).Should().Equal(
             "echo ${{ github.ref_name }}",
             "$v = \"${{ github.head_ref }}\"",
-            "echo ${{ inputs.tag }}");
+            "echo ${{ inputs.tag }}",
+            "${{ github.event.head_commit.message }}");
     }
 
     /// <summary>
@@ -1300,24 +1337,16 @@ jobs:
         var granted = new List<(string Workflow, string Job, string Scope, string Value)>();
         foreach (var (file, content) in AllWorkflows())
         {
-            foreach (var (job, block) in ExtractJobs(content).Select(j => (j.Key, j.Value)))
-            {
-                var permissions = ExtractPermissions(block, 4);
-                if (permissions == null)
-                {
-                    continue;
-                }
-
-                granted.AddRange(permissions.Select(p => (file, job, p.Key, p.Value)));
-            }
+            ExtractJobs(content).Should().NotBeEmpty(
+                $"{file} からジョブを 1 つも読めないと、ジョブ単位の権限を無検査で緑にする（jobs: 直下の字下げ 2 を前提に読む）");
+            granted.AddRange(JobPermissions(file, content));
         }
 
-        granted.Where(g => g.Value.Contains("write")
-                           && !AllowedWritePermissions.Any(a => a.Workflow == g.Workflow && a.Job == g.Job && a.Scope == g.Scope))
+        granted.Where(g => !IsAllowedJobPermission(g))
             .Select(g => $"{g.Workflow}:{g.Job} {g.Scope}: {g.Value}")
             .Should().BeEmpty(
-                "書き込み権限は必要なジョブにスコープを限って与え、理由を AllowedWritePermissions に書くこと" +
-                "（write-all は使わない。Issue #2271）");
+                "ジョブ単位の権限は read / none にし、書き込みは必要なジョブにスコープを限って与え、理由を AllowedWritePermissions に書くこと" +
+                "（write-all / read-all は使わない。値が「?」なら検査が読めない書き方なので、scope: value の形で書く。Issue #2271）");
 
         foreach (var allowed in AllowedWritePermissions)
         {
@@ -1356,12 +1385,18 @@ jobs:
 
     /// <summary>
     /// 字下げ <paramref name="indent"/> の <c>permissions:</c> の宣言（スコープ → 値）。無ければ null。
-    /// 1 行の形（<c>permissions: write-all</c>）はスコープ <c>*</c> として返す。
+    /// 1 行の形（<c>permissions: write-all</c>）はスコープ <c>*</c> として返す。フロー形式
+    /// （<c>permissions: { contents: write }</c>）も読み、引用符（<c>"write"</c> / <c>'write'</c>）は剥がす。
     /// </summary>
+    /// <remarks>
+    /// 読めない形は値を <c>?</c> として返す（読み飛ばさない）。検査側は read / none 以外を許可リストと照合するため、
+    /// 読めない宣言は違反として赤へ倒れる（fail-closed）。読めない形を null や空として返すと、その宣言は
+    /// 「無い」ことになり、書き込みの検査を素通りする（Issue #2271 のコードレビューで検出）。
+    /// </remarks>
     private static Dictionary<string, string>? ExtractPermissions(string text, int indent)
     {
         var lines = SplitLines(text);
-        var header = new Regex($@"^ {{{indent}}}permissions:\s*([^#\s]*)\s*(#.*)?$");
+        var header = new Regex($@"^ {{{indent}}}permissions\s*:(.*)$");
         for (var i = 0; i < lines.Length; i++)
         {
             var match = header.Match(lines[i]);
@@ -1371,16 +1406,33 @@ jobs:
             }
 
             var result = new Dictionary<string, string>(StringComparer.Ordinal);
-            if (match.Groups[1].Value.Length > 0)
+            var inline = StripYamlComment(match.Groups[1].Value).Trim();
+            if (inline.StartsWith("{", StringComparison.Ordinal))
             {
-                result["*"] = match.Groups[1].Value;
+                if (!inline.EndsWith("}", StringComparison.Ordinal))
+                {
+                    result["*"] = "?"; // 複数行に折り返したフロー形式は読まない
+                    return result;
+                }
+
+                foreach (var item in inline.Substring(1, inline.Length - 2).Split(',').Select(s => s.Trim()).Where(s => s.Length > 0))
+                {
+                    AddPermissionEntry(result, item);
+                }
+
+                return result;
+            }
+
+            if (inline.Length > 0)
+            {
+                result["*"] = Unquote(inline);
                 return result;
             }
 
             for (var j = i + 1; j < lines.Length; j++)
             {
-                var trimmed = lines[j].Trim();
-                if (trimmed.Length == 0 || trimmed.StartsWith("#", StringComparison.Ordinal))
+                var trimmed = StripYamlComment(lines[j]).Trim();
+                if (trimmed.Length == 0)
                 {
                     continue;
                 }
@@ -1390,8 +1442,7 @@ jobs:
                     break;
                 }
 
-                var scope = Regex.Match(trimmed, @"^([A-Za-z-]+):\s*([A-Za-z-]+)\s*(#.*)?$");
-                result[scope.Success ? scope.Groups[1].Value : trimmed] = scope.Success ? scope.Groups[2].Value : "?";
+                AddPermissionEntry(result, trimmed);
             }
 
             return result;
@@ -1400,45 +1451,84 @@ jobs:
         return null;
     }
 
+    /// <summary><c>scope: value</c> を 1 件読む。読めない形は、その文字列をスコープ・値を <c>?</c> として加える。</summary>
+    private static void AddPermissionEntry(Dictionary<string, string> result, string entry)
+    {
+        var scope = Regex.Match(entry, @"^([""']?)([A-Za-z-]+)\1\s*:\s*([""']?)([A-Za-z-]+)\3$");
+        if (scope.Success)
+        {
+            result[scope.Groups[2].Value] = scope.Groups[4].Value;
+        }
+        else
+        {
+            result[entry] = "?";
+        }
+    }
+
+    /// <summary>行末のコメント（空白に続く <c>#</c> 以降、または行頭の <c>#</c>）を取り除く。</summary>
+    private static string StripYamlComment(string line)
+        => Regex.Replace(line, @"(^|\s)#.*$", string.Empty);
+
+    private static string Unquote(string value)
+        => Regex.Match(value, @"^([""'])(.*)\1$") is { Success: true } quoted ? quoted.Groups[2].Value : value;
+
+    /// <summary>ワークフローのジョブ単位の権限（ジョブ・スコープ・値）。宣言の無いジョブは最上位を引き継ぐので含めない。</summary>
+    private static List<(string Workflow, string Job, string Scope, string Value)> JobPermissions(string file, string workflow)
+        => ExtractJobs(workflow)
+            .SelectMany(j => (ExtractPermissions(j.Value, 4) ?? new Dictionary<string, string>())
+                .Select(p => (file, j.Key, p.Key, p.Value)))
+            .ToList();
+
+    /// <summary>
+    /// read / none か、<see cref="AllowedWritePermissions"/> に載った write か。それ以外（許可リストに無い write・
+    /// <c>write-all</c>・<c>read-all</c>・読めない <c>?</c>）は違反とする（fail-closed）。
+    /// </summary>
+    private static bool IsAllowedJobPermission((string Workflow, string Job, string Scope, string Value) granted)
+        => granted.Value is "read" or "none"
+           || (granted.Value == "write"
+               && AllowedWritePermissions.Any(a => a.Workflow == granted.Workflow && a.Job == granted.Job && a.Scope == granted.Scope));
+
     /// <summary>すべての値が read / none で、checkout に要る <c>contents: read</c> を含むか。</summary>
     private static bool IsReadOnly(IReadOnlyDictionary<string, string> permissions)
         => permissions.TryGetValue("contents", out var contents) && contents == "read"
            && permissions.Values.All(v => v == "read" || v == "none");
 
     /// <summary>
-    /// すべての <c>run:</c> のスクリプト（1 行の値、または <c>|</c> / <c>&gt;</c> のブロックの本体）。
+    /// すべての <c>run:</c> のスクリプト（1 行の値とその継続行、または <c>|</c> / <c>&gt;</c> のブロックの本体）。
     /// コメント行と、値を持たない <c>run:</c>（<c>defaults:</c> の下の対応表）は数えない。
     /// </summary>
+    /// <remarks>
+    /// 本文の終わりは「<c>run</c> のキーより深い字下げの行が続く間」で決める。<c>- run: |</c> の形では
+    /// キーの位置は <c>- </c> の後ろなので、基準を <c>- </c> の分だけ深くする。そうしないと、同じステップの
+    /// 兄弟キー（<c>env:</c> 等）が本文に入り、推奨どおり <c>env:</c> で渡した式を run の中の展開として誤検出する
+    /// （Issue #2271 のコードレビューで検出）。プレーン・引用符付きのスカラーが次の行へ折り返す形も、
+    /// 同じ規則（キーより深い字下げの行）で継続行として読む。
+    /// </remarks>
     private static List<string> ExtractRunScripts(string workflow)
     {
         var result = new List<string>();
         var lines = SplitLines(workflow);
         for (var i = 0; i < lines.Length; i++)
         {
-            var run = Regex.Match(lines[i], @"^(\s*)(?:- )?run:\s*(.*)$");
+            var run = Regex.Match(lines[i], @"^(\s*)(- )?run:\s*(.*)$");
             if (!run.Success)
             {
                 continue;
             }
 
-            var value = run.Groups[2].Value.Trim();
+            var value = run.Groups[3].Value.Trim();
             if (value.Length == 0)
             {
                 continue;
             }
 
-            if (!Regex.IsMatch(value, @"^[|>][+-]?\d*\s*(#.*)?$"))
-            {
-                result.Add(value);
-                continue;
-            }
-
-            var runIndent = run.Groups[1].Value.Length;
+            var keyIndent = run.Groups[1].Value.Length + run.Groups[2].Value.Length;
             var body = lines.Skip(i + 1)
-                .TakeWhile(l => l.Trim().Length == 0 || IndentOf(l) > runIndent)
+                .TakeWhile(l => l.Trim().Length == 0 || IndentOf(l) > keyIndent)
                 .Select(l => l.Trim())
                 .Where(l => l.Length > 0);
-            result.Add(string.Join("\n", body));
+            var isBlock = Regex.IsMatch(value, @"^[|>][+-]?\d*\s*(#.*)?$");
+            result.Add(string.Join("\n", isBlock ? body : new[] { value }.Concat(body)));
         }
 
         return result;
@@ -1495,7 +1585,7 @@ jobs:
     private static Dictionary<string, string> ExtractJobs(string workflow)
     {
         var lines = SplitLines(workflow);
-        var jobsIndex = Array.FindIndex(lines, l => Regex.IsMatch(l, @"^jobs:\s*$"));
+        var jobsIndex = Array.FindIndex(lines, l => Regex.IsMatch(l, @"^jobs:\s*(#.*)?$"));
         var result = new Dictionary<string, string>();
         if (jobsIndex < 0)
         {
