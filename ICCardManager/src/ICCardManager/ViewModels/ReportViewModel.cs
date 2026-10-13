@@ -202,15 +202,71 @@ public partial class ReportViewModel : ViewModelBase
     /// </remarks>
     private void SaveOutputFolder()
     {
+        if (!TrySaveOutputFolder(OutputFolder))
+        {
+            SetStatus(OutputFolderSaveFailedMessage, isError: true);
+        }
+    }
+
+    /// <summary>
+    /// 出力先をこの PC の設定へ保存する。失敗したら記録して false を返す（画面への表示は呼び出し側）。
+    /// </summary>
+    private bool TrySaveOutputFolder(string folder)
+    {
         try
         {
-            _outputFolderStore.Save(OutputFolder);
+            _outputFolderStore.Save(folder);
+            return true;
         }
         catch (Exception ex)
         {
             ErrorDialogHelper.LogException(ex, "帳票の出力先フォルダの保存");
-            SetStatus(OutputFolderSaveFailedMessage, isError: true);
+            return false;
         }
+    }
+
+    /// <summary>
+    /// 帳票の作成に実際に使った出力先を、この PC の設定へ確定させる（Issue #2266）
+    /// </summary>
+    /// <remarks>
+    /// 設定ファイルが無い PC では、初期値のマイドキュメントは画面に出ているだけで保存されていない。
+    /// そのまま帳票を作成しても値が変わらないので <c>OnOutputFolderChanged</c> が起きず、
+    /// 管理者ダッシュボード（この PC の設定だけを走査する）は恒久的に「判定不可」のままになる。
+    /// 帳票を作成できたフォルダは職員が確定した出力先とみなし、ここで保存する。
+    /// 既に同じ値が保存されていれば書かない。
+    /// </remarks>
+    /// <returns>保存に失敗したら false（既に保存済みなら true）</returns>
+    private bool RememberUsedOutputFolder(string folder)
+    {
+        if (string.Equals(_outputFolderStore.Load(), folder, StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        return TrySaveOutputFolder(folder);
+    }
+
+    /// <summary>
+    /// 「参照」で選んだフォルダを反映する（Issue #2266）
+    /// </summary>
+    /// <remarks>
+    /// 選んだフォルダが表示中の値と同じだと <c>OnOutputFolderChanged</c> が起きず保存されない。
+    /// 職員が選び直したことは確定の意思表示なので、同じ値でも保存する（設定ファイルが無い PC で、
+    /// 初期値のマイドキュメントを選び直して確定させる操作を成り立たせる）。
+    /// </remarks>
+    internal void ApplyBrowsedOutputFolder(string selectedPath)
+    {
+        if (string.Equals(OutputFolder, selectedPath, StringComparison.Ordinal))
+        {
+            if (_isInitialized)
+            {
+                SaveOutputFolder();
+            }
+
+            return;
+        }
+
+        OutputFolder = selectedPath;
     }
 
     /// <summary>
@@ -717,7 +773,7 @@ public partial class ReportViewModel : ViewModelBase
         {
             if (dialog.ShowDialog() == System.Windows.Forms.DialogResult.OK)
             {
-                OutputFolder = dialog.SelectedPath;
+                ApplyBrowsedOutputFolder(dialog.SelectedPath);
             }
         }
     }
@@ -840,6 +896,10 @@ public partial class ReportViewModel : ViewModelBase
         // キャンセル可能な処理として開始
         using var busyScope = BeginCancellableBusy($"帳票を作成中... (0/{targetCards.Count})");
 
+        // Issue #2266: 作成できたフォルダを、この PC の出力先として確定させる（最初に作成できたときに 1 回）
+        var outputFolderRemembered = false;
+        var outputFolderSaveFailed = false;
+
         try
         {
             // Issue #2042: 「作成した」「作成対象外だった」「失敗した」を別々に数える。
@@ -893,6 +953,12 @@ public partial class ReportViewModel : ViewModelBase
                 {
                     CreatedFiles.Add(outputPath);
                     createdCount++;
+
+                    if (!outputFolderRemembered)
+                    {
+                        outputFolderRemembered = true;
+                        outputFolderSaveFailed = !RememberUsedOutputFolder(outputFolder);
+                    }
                 }
                 else if (result.Skipped)
                 {
@@ -990,6 +1056,16 @@ public partial class ReportViewModel : ViewModelBase
         }
         finally
         {
+            // Issue #2266: 保存の失敗は完了・中断の文言を消さずに併記する（作成の結果は確定している）
+            if (outputFolderSaveFailed)
+            {
+                SetStatus(
+                    string.IsNullOrEmpty(StatusMessage)
+                        ? OutputFolderSaveFailedMessage
+                        : StatusMessage + "\n" + OutputFolderSaveFailedMessage,
+                    true);
+            }
+
             // Issue #1691: 途中で失敗・中断しても「どこまで出力できたか」を一覧へ反映する。
             // 中断時こそチェックリストの価値が高いため、成功時のみの更新にはしない。
             await RefreshExportStatusAsync();

@@ -968,6 +968,47 @@ public class ReportViewModelTests
     }
 
     /// <summary>
+    /// Issue #2266: 「参照」で表示中と同じフォルダを選び直したら、値が変わらなくてもこの PC の設定へ保存すること
+    /// （設定ファイルが無い PC で、初期値のマイドキュメントを確定させる操作。値が変わらないと
+    /// OnOutputFolderChanged が起きず保存されなかった）
+    /// </summary>
+    [Fact]
+    public async Task ApplyBrowsedOutputFolder_表示中と同じフォルダを選び直したら保存すること()
+    {
+        // Arrange
+        _cardRepositoryMock.Setup(r => r.GetAllAsync()).ReturnsAsync(new List<IcCard>());
+        await _viewModel.InitializeAsync();
+        var current = _viewModel.OutputFolder;
+
+        // Act
+        _viewModel.ApplyBrowsedOutputFolder(current);
+
+        // Assert
+        _outputFolderStoreMock.Verify(s => s.Save(current), Times.Once);
+    }
+
+    /// <summary>
+    /// Issue #2266 対の表明: 「参照」で別のフォルダを選んだら、従来どおり 1 回だけ保存して表示を変えること
+    /// （同じ値の分岐を足したことで二重に保存する・表示を変えない実装を検出する）
+    /// </summary>
+    [Fact]
+    public async Task ApplyBrowsedOutputFolder_別のフォルダを選んだら表示を変えて1回だけ保存すること()
+    {
+        // Arrange
+        const string selected = @"D:\Reports\Selected";
+        _cardRepositoryMock.Setup(r => r.GetAllAsync()).ReturnsAsync(new List<IcCard>());
+        await _viewModel.InitializeAsync();
+
+        // Act
+        _viewModel.ApplyBrowsedOutputFolder(selected);
+
+        // Assert
+        _viewModel.OutputFolder.Should().Be(selected);
+        _outputFolderStoreMock.Verify(s => s.Save(selected), Times.Once);
+        _outputFolderStoreMock.Verify(s => s.Save(It.Is<string>(f => f != selected)), Times.Never);
+    }
+
+    /// <summary>
     /// Issue #2266: この PC の設定へ保存できなかったとき、黙らずに画面へ案内すること
     /// </summary>
     [Fact]

@@ -47,6 +47,20 @@ public class ReportOutputFolderSourceConventionTests
     internal static IReadOnlyList<string> FindSharedDbReferences(string codeOnlySource)
         => SharedDbReferencePattern.Matches(codeOnlySource).Cast<Match>().Select(m => m.Value).ToList();
 
+    /// <summary>
+    /// 共有 DB のキー名（<c>report_output_folder</c>）。識別子の参照を避けてキー名を直に書く形
+    /// （<c>GetAsync("report_output_folder")</c>）は文字列リテラルの中にあり、<see cref="ProductionSourceFiles.SourceFile.CodeOnly"/>
+    /// （リテラルを除く）では見えないため、コメントだけを除いたソースで別に探す（レビューで検出）。
+    /// </summary>
+    private static readonly Regex SharedDbKeyLiteralPattern = new Regex(
+        @"\breport_output_folder\b", RegexOptions.Compiled);
+
+    /// <summary>
+    /// コメントだけを除いたソース（文字列リテラルは残す）から、共有 DB のキー名を書いた箇所を返す。
+    /// </summary>
+    internal static IReadOnlyList<string> FindSharedDbKeyLiterals(string commentsRemovedSource)
+        => SharedDbKeyLiteralPattern.Matches(commentsRemovedSource).Cast<Match>().Select(m => m.Value).ToList();
+
     private static string Normalize(string relativePath) => relativePath.Replace('\\', '/');
 
     [Fact]
@@ -54,7 +68,8 @@ public class ReportOutputFolderSourceConventionTests
     {
         var violations = ProductionSourceFiles.CSharp
             .Where(f => !AllowedRelativePaths.Contains(Normalize(f.RelativePath)))
-            .Where(f => FindSharedDbReferences(f.CodeOnly).Count > 0)
+            .Where(f => FindSharedDbReferences(f.CodeOnly).Count > 0
+                        || FindSharedDbKeyLiterals(f.CommentsRemovedPreservingLines).Count > 0)
             .Select(f => Normalize(f.RelativePath))
             .ToList();
 
@@ -84,6 +99,12 @@ public class ReportOutputFolderSourceConventionTests
             FindSharedDbReferences(byPath[allowed]).Should().NotBeEmpty(
                 $"{allowed} は互換のため共有 DB の値を読み書きしている（許可リストの根拠）");
         }
+
+        // キー名の検出がリテラルを実際に見ていること（コメントを除いた後もキーの定義が拾える）
+        var settingsRepository = ProductionSourceFiles.CSharp
+            .Single(f => Normalize(f.RelativePath) == "Data/Repositories/SettingsRepository.cs");
+        FindSharedDbKeyLiterals(settingsRepository.CommentsRemovedPreservingLines).Should().NotBeEmpty(
+            "SettingsRepository はキー名 report_output_folder を定義している（キー名の検出の空振り検出）");
     }
 
     [Theory]
@@ -95,5 +116,18 @@ public class ReportOutputFolderSourceConventionTests
     public void FindSharedDbReferences_共有DBの出力先の参照だけを拾うこと(string code, int expected)
     {
         FindSharedDbReferences(code).Should().HaveCount(expected);
+    }
+
+    [Theory]
+    [InlineData("var folder = await repo.GetAsync(\"report_output_folder\");", 1)]
+    [InlineData("await repo.SetAsync(@\"report_output_folder\", value);", 1)]
+    // 規約の理由を書いたコメントは数えない（極性の反転を避ける。#1692）
+    [InlineData("// 共有 DB の report_output_folder は読まない\nvar folder = _outputFolderStore.Load();", 0)]
+    [InlineData("/* settings.report_output_folder */ var x = 1;", 0)]
+    // 別のキー名の一部には一致しない
+    [InlineData("var v = await repo.GetAsync(\"report_output_folder_v2\");", 0)]
+    public void FindSharedDbKeyLiterals_コメントを除いたコードの共有DBのキー名だけを拾うこと(string code, int expected)
+    {
+        FindSharedDbKeyLiterals(TestSourceInspection.RemoveCommentsPreservingLines(code)).Should().HaveCount(expected);
     }
 }

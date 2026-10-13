@@ -178,9 +178,45 @@ namespace ICCardManager.Services
                 LowBalanceCount = items.Count(i => i.IsBalanceWarning),
                 ReportNotExportedCount = items.Count(i => i.ReportState == ReportExportState.NotExported),
                 ReportStatusUnknownCount = items.Count(i => i.ReportState == ReportExportState.Unknown),
+                ReportStatusGuidance = BuildReportStatusGuidance(outputFolder, items),
                 Cards = items
             };
         }
+
+        /// <summary>
+        /// 当月帳票を判定できなかったカードがあるとき、その解消方法の案内を返す（Issue #2266）
+        /// </summary>
+        /// <remarks>
+        /// 出力先はこの PC の設定だけから読むため、設定ファイルが無い PC では全カードが「判定不可」になる。
+        /// 一覧の「判定不可」だけでは、どの画面で何をすれば解消するのかが分からない。
+        /// ファイル名の重複による判定不可は一覧の文言（「判定不可（ファイル名が重複）」）が原因を名指しするので数えない。
+        /// </remarks>
+        /// <returns>案内。判定できなかったカードが無ければ空文字</returns>
+        internal static string BuildReportStatusGuidance(string? outputFolder, IEnumerable<AdminDashboardCardStatus> cards)
+        {
+            var hasUnknown = cards.Any(c => c.ReportState == ReportExportState.Unknown && !c.IsReportFileNameCollision);
+            if (!hasUnknown)
+            {
+                return string.Empty;
+            }
+
+            if (outputFolder is null || string.IsNullOrWhiteSpace(outputFolder))
+            {
+                return ReportOutputFolderNotSetGuidance;
+            }
+
+            return ReportOutputFolderUnreadableGuidance;
+        }
+
+        /// <summary>この PC で帳票の出力先がまだ決まっていないときの案内（Issue #2266）</summary>
+        internal const string ReportOutputFolderNotSetGuidance =
+            "当月帳票の出力状況を判定できません。このパソコンでは帳票の出力先フォルダがまだ決まっていません。" +
+            "帳票作成画面（F1）で出力先フォルダを選ぶか、帳票を作成してください。";
+
+        /// <summary>この PC の出力先フォルダや帳票ファイルを読めなかったときの案内（Issue #2266）</summary>
+        internal const string ReportOutputFolderUnreadableGuidance =
+            "当月帳票の出力状況を判定できないカードがあります。このパソコンの出力先フォルダが見つからないか、帳票ファイルを開けませんでした。" +
+            "帳票作成画面（F1）で出力先フォルダを確認してください。";
 
         /// <inheritdoc/>
         public async Task<AdminDashboardAnalytics> GetAnalyticsAsync(DateTime fromDate, DateTime toDate, DateTime asOf)
