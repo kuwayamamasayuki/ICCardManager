@@ -1,3 +1,4 @@
+#nullable enable
 using System;
 using System.Threading.Tasks;
 using ICCardManager.Data;
@@ -76,6 +77,18 @@ namespace ICCardManager.Services
                 // PublishCurrentVersionIfNewer はファイル I/O の失敗を内部で Warning に畳む。
                 // ここへ来るのは想定外の例外だけ（backstop）
                 _logger.LogError(ex, "起動時の更新通知ファイルの配置でエラー");
+            }
+
+            // 強制終了・電源断で取り残された、リストア元の検証用の一時コピーの回収（Issue #2269）。
+            // この PC の一時フォルダー（ローカル）の列挙だけなので軽い。失敗で後続の保守タスクを巻き添えにしない
+            try
+            {
+                _backupService.CleanupStaleRestoreInspectionFiles();
+            }
+            catch (Exception ex)
+            {
+                // CleanupStaleRestoreInspectionFiles はファイル I/O の失敗を内部で Warning に畳む（backstop）
+                _logger.LogError(ex, "起動時のリストア検証用一時コピーの回収でエラー");
             }
 
             try

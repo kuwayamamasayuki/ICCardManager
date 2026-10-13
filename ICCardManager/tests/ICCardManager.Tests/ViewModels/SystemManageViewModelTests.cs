@@ -54,6 +54,11 @@ public class SystemManageViewModelTests : IDisposable
             _dbContext,
             _settingsRepositoryMock.Object,
             loggerMock.Object);
+        // Issue #2269: リストア元の検証（一時コピーへの取り込み）。既定は合格を返す（不合格のケースは個別テストで上書きする）。
+        // 合格の結果はリストア元ごとに別のインスタンスにし、置き換えに渡されたのがどのリストア元の結果かを表明できるようにする
+        _backupServiceMock
+            .Setup(s => s.PrepareRestoreSourceAsync(It.IsAny<string>()))
+            .ReturnsAsync((string path) => PreparedFor(path));
         _navigationServiceMock = new Mock<INavigationService>();
 
         // OperationLogger (Issue #1302): 実DB + 実Context でログ書き込みを副作用として許容
@@ -207,19 +212,21 @@ public class SystemManageViewModelTests : IDisposable
         await _viewModel.RestoreAsync();
 
         // Assert: 認証がなければ DB は一切上書きされない（破壊的操作の認可ゲート）
-        _backupServiceMock.Verify(b => b.RestoreFromBackupAsync(It.IsAny<string>()), Times.Never);
+        _backupServiceMock.Verify(b => b.RestoreFromPreparedSourceAsync(It.IsAny<RestoreSourceValidationResult>()), Times.Never);
+        _backupServiceMock.Verify(b => b.RestoreFromPreparedSource(It.IsAny<RestoreSourceValidationResult>()), Times.Never);
         _backupServiceMock.Verify(b => b.RestoreFromBackup(It.IsAny<string>()), Times.Never);
         _viewModel.StatusMessage.Should().Contain("職員認証");
     }
 
     /// <summary>
-    /// Issue #1809: リストアの実行は <c>RestoreFromBackupAsync</c>（Task.Run でバックグラウンドへ
-    /// オフロード）経由で行うこと。同期版 <c>RestoreFromBackup</c> を UI スレッドから呼ぶと、
-    /// 内部の <c>DbContext.SuspendConnections()</c>（セマフォ同期取得）が UI スレッドガードで
-    /// 拒否され、リストアが常に「失敗」になる。
+    /// Issue #1809: リストアの実行は非同期版（Task.Run でバックグラウンドへオフロード）経由で行うこと。
+    /// 同期版を UI スレッドから呼ぶと、内部の <c>DbContext.SuspendConnections()</c>（セマフォ同期取得）が
+    /// UI スレッドガードで拒否され、リストアが常に「失敗」になる。
+    /// Issue #2269 で置き換えの API が <c>RestoreFromBackupAsync</c> から、検証に合格した一時コピーを受け取る
+    /// <c>RestoreFromPreparedSourceAsync</c> へ変わった（同期版 2 つをどちらも呼ばないことを表明する）。
     /// </summary>
     [Fact]
-    public async Task RestoreAsync_リストアの実行は非同期版RestoreFromBackupAsync経由で行うこと()
+    public async Task RestoreAsync_リストアの実行は非同期版RestoreFromPreparedSourceAsync経由で行うこと()
     {
         // Arrange: 認証成功（既定）・確認ダイアログ承諾・リストア前バックアップ成功で実行まで到達させる
         const string backupPath = "/backups/backup_20260601_090000.db";
@@ -239,14 +246,16 @@ public class SystemManageViewModelTests : IDisposable
             .Setup(d => d.ShowWarningConfirmation(It.IsAny<string>(), It.Is<string>(t => t == "リストアの確認")))
             .Returns(true);
         // 成功にすると完了 MessageBox（実モーダル）へ進むため、失敗を返して呼び出し経路だけを検証する
-        _backupServiceMock.Setup(s => s.RestoreFromBackupAsync(backupPath)).ReturnsAsync(false);
+        _backupServiceMock.Setup(s => s.RestoreFromPreparedSourceAsync(It.IsAny<RestoreSourceValidationResult>())).ReturnsAsync(false);
 
         // Act
         await _viewModel.RestoreAsync();
 
         // Assert
-        _backupServiceMock.Verify(b => b.RestoreFromBackupAsync(backupPath), Times.Once,
+        _backupServiceMock.Verify(b => b.RestoreFromPreparedSourceAsync(It.Is<RestoreSourceValidationResult>(r => r.StagedCopyPath == StagedPathFor(backupPath))), Times.Once,
             "UI スレッドからのリストアは Task.Run でオフロードする非同期版を使うべき");
+        _backupServiceMock.Verify(b => b.RestoreFromPreparedSource(It.IsAny<RestoreSourceValidationResult>()), Times.Never,
+            "同期版は UI スレッドガードに抵触するため ViewModel から直接呼ばない");
         _backupServiceMock.Verify(b => b.RestoreFromBackup(It.IsAny<string>()), Times.Never,
             "同期版は UI スレッドガードに抵触するため ViewModel から直接呼ばない");
         _viewModel.StatusMessage.Should().Contain("リストアに失敗しました");
@@ -1066,6 +1075,22 @@ public class SystemManageViewModelTests : IDisposable
     }
 
     /// <summary>
+    /// リストア元ごとの一時コピーのパス（モックが返す合格の結果を見分けるための値。実ファイルは作らない）
+    /// </summary>
+    private static string StagedPathFor(string sourcePath) => "staged:" + sourcePath;
+
+    /// <summary>リストア元ごとの、一時コピーを破棄した回数（Issue #2269）</summary>
+    private readonly Dictionary<string, int> _stagedCopyDisposals = new();
+
+    /// <summary>
+    /// 検証に合格した結果（一時コピーを持つ）を作る。破棄の回数を <see cref="_stagedCopyDisposals"/> に数える
+    /// </summary>
+    private RestoreSourceValidationResult PreparedFor(string sourcePath)
+        => RestoreSourceValidationResult.ValidWithStagedCopy(
+            StagedPathFor(sourcePath),
+            () => _stagedCopyDisposals[sourcePath] = _stagedCopyDisposals.TryGetValue(sourcePath, out var n) ? n + 1 : 1);
+
+    /// <summary>
     /// リストアが最後まで成功する準備（認証・確認の承諾・リストア前バックアップ成功・置き換え成功）
     /// </summary>
     private void SetupSuccessfulRestore(string sourcePath)
@@ -1076,7 +1101,7 @@ public class SystemManageViewModelTests : IDisposable
         _backupServiceMock.Setup(s => s.CreateBackupAsync(It.IsAny<string>())).ReturnsAsync(true);
         _backupServiceMock.Setup(s => s.GetBackupFilesAsync())
             .ReturnsAsync(Enumerable.Empty<BackupFileInfo>());
-        _backupServiceMock.Setup(s => s.RestoreFromBackupAsync(sourcePath)).ReturnsAsync(true);
+        _backupServiceMock.Setup(s => s.RestoreFromPreparedSourceAsync(It.Is<RestoreSourceValidationResult>(r => r.StagedCopyPath == StagedPathFor(sourcePath)))).ReturnsAsync(true);
         _dialogServiceMock
             .Setup(d => d.ShowWarningConfirmation(It.IsAny<string>(), It.Is<string>(t => t == "リストアの確認")))
             .Returns(true);
@@ -1230,7 +1255,7 @@ public class SystemManageViewModelTests : IDisposable
             CreatedAt = new DateTime(2026, 9, 3, 9, 0, 0)
         };
         SetupSuccessfulRestore(sourcePath);
-        _backupServiceMock.Setup(s => s.RestoreFromBackupAsync(sourcePath)).ReturnsAsync(false);
+        _backupServiceMock.Setup(s => s.RestoreFromPreparedSourceAsync(It.IsAny<RestoreSourceValidationResult>())).ReturnsAsync(false);
 
         // Act
         await _viewModel.RestoreAsync();
@@ -1282,7 +1307,7 @@ public class SystemManageViewModelTests : IDisposable
         await _viewModel.RestoreFromFileCoreAsync(sourcePath);
 
         // Assert
-        _backupServiceMock.Verify(s => s.RestoreFromBackupAsync(sourcePath), Times.Once);
+        _backupServiceMock.Verify(s => s.RestoreFromPreparedSourceAsync(It.Is<RestoreSourceValidationResult>(r => r.StagedCopyPath == StagedPathFor(sourcePath))), Times.Once);
         var log = await GetSingleDatabaseLogAsync("iccard_20260905.db");
         log.Action.Should().Be(OperationLogger.Actions.Restore);
         ReadLoggedFilePath(log).Should().Be(sourcePath);
@@ -1310,7 +1335,7 @@ public class SystemManageViewModelTests : IDisposable
         await _viewModel.RestoreFromFileCoreAsync(sourcePath);
 
         // Assert
-        _backupServiceMock.Verify(b => b.RestoreFromBackupAsync(It.IsAny<string>()), Times.Never);
+        _backupServiceMock.Verify(b => b.RestoreFromPreparedSourceAsync(It.IsAny<RestoreSourceValidationResult>()), Times.Never);
         _dialogServiceMock.Verify(
             d => d.ShowWarningConfirmation(It.IsAny<string>(), It.IsAny<string>()), Times.Never);
         _viewModel.StatusMessage.Should().Contain("職員認証");
@@ -1322,7 +1347,7 @@ public class SystemManageViewModelTests : IDisposable
         // Arrange: 置き換えだけが失敗する。一覧の再読込はリストアした場合に限る（修正前も成功時のみ）
         const string sourcePath = "/external/iccard_20260907.db";
         SetupSuccessfulRestore(sourcePath);
-        _backupServiceMock.Setup(s => s.RestoreFromBackupAsync(sourcePath)).ReturnsAsync(false);
+        _backupServiceMock.Setup(s => s.RestoreFromPreparedSourceAsync(It.IsAny<RestoreSourceValidationResult>())).ReturnsAsync(false);
 
         // Act
         await _viewModel.RestoreFromFileCoreAsync(sourcePath);
@@ -1334,6 +1359,119 @@ public class SystemManageViewModelTests : IDisposable
         _viewModel.IsStatusError.Should().BeTrue();
         _navigationServiceMock.Verify(n => n.ShowInformation(It.IsAny<string>(), It.IsAny<string>()), Times.Never);
         _navigationServiceMock.Verify(n => n.ShowWarning(It.IsAny<string>(), It.IsAny<string>()), Times.Never);
+    }
+
+    // Issue #2269: リストア元の検証に不合格なら、リストア前バックアップ（退避）も置き換えも行わない。
+    // 後続（確認の承諾・リストア前バックアップ・置き換え）はすべて成功する準備をしたうえで、検証だけを崩す
+    // （testing.md #2104「ガードで止まったことは、後続を成功する側に設定してから表明する」）。
+
+    [Fact]
+    public async Task RestoreFromFileCoreAsync_検証に不合格なら退避もリストアもせず理由を表示すること()
+    {
+        // Arrange
+        const string sourcePath = "/external/tampered.db";
+        SetupSuccessfulRestore(sourcePath);
+        var rejection = RestoreSourceValidationResult.UnexpectedSchemaObject();
+        _backupServiceMock.Setup(s => s.PrepareRestoreSourceAsync(sourcePath)).ReturnsAsync(rejection);
+
+        // Act
+        await _viewModel.RestoreFromFileCoreAsync(sourcePath);
+
+        // Assert: 既存のフロー（職員認証 → 確認）は保ったまま、検証で止まる
+        _staffAuthServiceMock.Verify(a => a.RequestAuthenticationAsync(It.IsAny<string>()), Times.Once);
+        _dialogServiceMock.Verify(d => d.ShowWarningConfirmation(It.IsAny<string>(), "リストアの確認"), Times.Once);
+        _backupServiceMock.Verify(s => s.PrepareRestoreSourceAsync(sourcePath), Times.Once);
+        _backupServiceMock.Verify(s => s.CreateBackupAsync(It.IsAny<string>()), Times.Never,
+            "不合格のファイルのためにリストア前バックアップ（退避）を作らない");
+        _backupServiceMock.Verify(s => s.RestoreFromPreparedSourceAsync(It.IsAny<RestoreSourceValidationResult>()), Times.Never);
+        _viewModel.StatusMessage.Should().Be(rejection.UserMessage);
+        _viewModel.IsStatusError.Should().BeTrue();
+        _backupServiceMock.Verify(s => s.GetBackupFilesAsync(), Times.Never);
+        _navigationServiceMock.Verify(n => n.ShowInformation(It.IsAny<string>(), It.IsAny<string>()), Times.Never);
+        (await new OperationLogRepository(_dbContext).GetByTargetAsync(OperationLogger.Tables.Database, "tampered.db"))
+            .Should().BeEmpty("リストアしていないので記録しない");
+    }
+
+    [Fact]
+    public async Task RestoreAsync_選択したバックアップが検証に不合格なら退避もリストアもしないこと()
+    {
+        // Arrange
+        const string backupPath = "/backups/backup_20260601_090000.db";
+        _viewModel.SelectedBackup = new BackupFileInfo
+        {
+            FileName = "backup_20260601_090000.db",
+            FilePath = backupPath,
+            CreatedAt = DateTime.Now
+        };
+        SetupSuccessfulRestore(backupPath);
+        var rejection = RestoreSourceValidationResult.NewerSchemaVersion(99, 11);
+        _backupServiceMock.Setup(s => s.PrepareRestoreSourceAsync(backupPath)).ReturnsAsync(rejection);
+
+        // Act
+        await _viewModel.RestoreAsync();
+
+        // Assert
+        _backupServiceMock.Verify(s => s.CreateBackupAsync(It.IsAny<string>()), Times.Never);
+        _backupServiceMock.Verify(s => s.RestoreFromPreparedSourceAsync(It.IsAny<RestoreSourceValidationResult>()), Times.Never);
+        _viewModel.StatusMessage.Should().Be(rejection.UserMessage);
+        _viewModel.IsStatusError.Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task RestoreFromFileCoreAsync_検証に合格したら検証の後にリストア前バックアップを作ること()
+    {
+        // Arrange: 呼び出し順を記録する（検証より先に退避を作ると、不合格でも退避が残る）
+        const string sourcePath = "/external/valid.db";
+        SetupSuccessfulRestore(sourcePath);
+        var calls = new List<string>();
+        _backupServiceMock.Setup(s => s.PrepareRestoreSourceAsync(sourcePath))
+            .Callback(() => calls.Add("validate"))
+            .ReturnsAsync(PreparedFor(sourcePath));
+        _backupServiceMock.Setup(s => s.CreateBackupAsync(It.IsAny<string>()))
+            .Callback(() => calls.Add("pre-restore-backup"))
+            .ReturnsAsync(true);
+        _backupServiceMock.Setup(s => s.RestoreFromPreparedSourceAsync(It.IsAny<RestoreSourceValidationResult>()))
+            .Callback(() => calls.Add("restore"))
+            .ReturnsAsync(true);
+
+        // Act
+        await _viewModel.RestoreFromFileCoreAsync(sourcePath);
+
+        // Assert
+        calls.Should().Equal("validate", "pre-restore-backup", "restore");
+        _viewModel.StatusMessage.Should().Be(RestoreCompletedStatus);
+    }
+
+    [Fact]
+    public async Task RestoreFromFileCoreAsync_置き換えに使った一時コピーを最後に一度だけ破棄すること()
+    {
+        // Arrange
+        const string sourcePath = "/external/dispose_after_restore.db";
+        SetupSuccessfulRestore(sourcePath);
+
+        // Act
+        await _viewModel.RestoreFromFileCoreAsync(sourcePath);
+
+        // Assert: 置き換えは検証した一時コピーで行い、その後に一時コピーを破棄する
+        _backupServiceMock.Verify(s => s.RestoreFromPreparedSourceAsync(It.Is<RestoreSourceValidationResult>(r => r.StagedCopyPath == StagedPathFor(sourcePath))), Times.Once);
+        _stagedCopyDisposals.Should().ContainKey(sourcePath).WhoseValue.Should().Be(1);
+    }
+
+    [Fact]
+    public async Task RestoreFromFileCoreAsync_リストア前バックアップの失敗で中止しても一時コピーを破棄すること()
+    {
+        // Arrange: リストア前バックアップが失敗し、続行確認で「いいえ」を選ぶ
+        const string sourcePath = "/external/dispose_on_cancel.db";
+        SetupSuccessfulRestore(sourcePath);
+        _backupServiceMock.Setup(s => s.CreateBackupAsync(It.IsAny<string>())).ReturnsAsync(false);
+        _dialogServiceMock.Setup(d => d.ShowWarningConfirmation(It.IsAny<string>(), "警告")).Returns(false);
+
+        // Act
+        await _viewModel.RestoreFromFileCoreAsync(sourcePath);
+
+        // Assert
+        _backupServiceMock.Verify(s => s.RestoreFromPreparedSourceAsync(It.IsAny<RestoreSourceValidationResult>()), Times.Never);
+        _stagedCopyDisposals.Should().ContainKey(sourcePath).WhoseValue.Should().Be(1, "中止した経路でも一時コピーを残さない");
     }
 
     [Fact]

@@ -1349,6 +1349,40 @@ namespace ICCardManager.Data
             // 旧バージョンのアプリをブロックした際、「どのバージョン以上に更新すべきか」を
             // メッセージに表示するために使用する（引き上げのみで、下げることはない）
             RecordMinimumAppVersion(connection);
+
+            // Issue #2269: 本システムが作成しない「書き込みを黙って捨てる・消す」仕組みが DB にあれば警告ログへ残す
+            WarnUnexpectedSchemaObjects(connection);
+        }
+
+        /// <summary>
+        /// 本システムが作成しない「書き込みを黙って捨てる・消す」仕組みが DB にあれば Warning ログへ残す（Issue #2269）
+        /// </summary>
+        /// <remarks>
+        /// 対象はリストアの検証と同じ（<see cref="SchemaObjectInspector.InspectSchema"/>）: トリガー・ビュー・仮想表、
+        /// 制約の衝突解決句（<c>ON CONFLICT IGNORE</c> / <c>REPLACE</c>）、生成列、本システムが作らない外部キーの参照動作、
+        /// <c>pragma_</c> / <c>sqlite_</c> で始まる名前（pragma の結果を偽装する影の表）。たとえばトリガーで
+        /// <c>operation_log</c> への INSERT を捨てたり、参照動作で台帳の削除に合わせて消したりすると、監査ログが痕跡なく欠落する。
+        /// リストアでは拒否するが、DB ファイルを直接書き換えられた場合はリストアを通らないため、起動のたびに 1 回確かめて痕跡を残す。
+        /// 検査は <c>sqlite_master</c> の全行と、表ごとの <c>PRAGMA table_xinfo</c> / <c>foreign_key_list</c>（本システムでは表は十数個）を
+        /// 読むだけで、起動を目に見えて遅くはしない。
+        /// 起動は止めない（業務を止めるほうが害が大きく、判断は管理者に委ねる）。検査自体の失敗も起動を阻害しない。
+        /// </remarks>
+        private void WarnUnexpectedSchemaObjects(SQLiteConnection connection)
+        {
+            try
+            {
+                var unexpectedObjects = SchemaObjectInspector.FindUnexpectedObjects(connection);
+                if (unexpectedObjects.Count > 0)
+                {
+                    _logger?.LogWarning(
+                        "データベースに本システムが作成しない仕組み（トリガー・ビュー・衝突解決句・生成列・外部キーの参照動作・予約名の表など、書き込みを黙って捨てる・消し得るもの）があります。外部の手段で書き換えられた可能性があります: {Objects}",
+                        string.Join(", ", unexpectedObjects));
+                }
+            }
+            catch (SQLiteException ex)
+            {
+                _logger?.LogWarning(ex, "本システムが作成しない仕組み（トリガー・生成列・外部キーの参照動作等）の有無を確認できませんでした（起動は継続します）");
+            }
         }
 
         /// <summary>
