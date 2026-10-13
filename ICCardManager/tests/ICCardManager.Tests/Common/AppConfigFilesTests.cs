@@ -225,7 +225,7 @@ public class AppConfigFilesTests
     /// 「自分にはアクセス許可の変更が無い一時ファイル」を作って再現する。
     /// </remarks>
     [Fact]
-    public void Write_アクセス許可を変更できない一時ファイルが残っていても置き換えられること()
+    public void SaveConfigFile_アクセス許可を変更できない一時ファイルが残っていても置き換えられること()
     {
         var dir = CreateTempDir();
         var filePath = Path.Combine(dir, "database_config.txt");
