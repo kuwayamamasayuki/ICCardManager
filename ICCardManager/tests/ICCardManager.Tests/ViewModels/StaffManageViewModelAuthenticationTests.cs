@@ -339,7 +339,8 @@ public class StaffManageViewModelAuthenticationTests : IDisposable
         _viewModel.IsEditing.Should().BeTrue();
         _viewModel.EditName.Should().Be("新人 花子");
         _viewModel.StatusMessage.Should().Contain("復元していません");
-        _viewModel.StatusMessage.Should().EndWith("してください（復元する職員証では認証できません）。");
+        _viewModel.StatusMessage.Should().Contain("復元する職員証では認証できません。");
+        _viewModel.StatusMessage.Should().EndWith("登録済みの職員の職員証で認証してください。", "行動指示で終わる");
         _viewModel.IsStatusError.Should().BeTrue();
     }
 

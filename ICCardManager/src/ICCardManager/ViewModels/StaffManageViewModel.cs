@@ -34,7 +34,7 @@ namespace ICCardManager.ViewModels
         /// </remarks>
         internal const string RegisterAuthenticationCancelledMessage =
             "職員証の認証が完了しなかったため、職員を登録していません。入力内容はそのままです。" +
-            "登録するには、もう一度「保存」を押し、登録済みの職員の職員証で認証してください（これから登録する職員証では認証できません）。";
+            "これから登録する職員証では認証できません。登録するには、もう一度「保存」を押し、登録済みの職員の職員証で認証してください。";
 
         /// <summary>
         /// 職員情報の変更で認証が完了しなかったときの案内（Issue #2263）
@@ -187,7 +187,7 @@ namespace ICCardManager.ViewModels
         /// <summary>
         /// 氏名・職員番号がともに空の職員を名指しするときの表記（Issue #2263）
         /// </summary>
-        internal const string UnnamedStaffLabel = "この職員証の職員";
+        internal const string UnnamedStaffLabel = "氏名未登録の職員";
 
         /// <summary>
         /// 編集中の対象を、編集開始時に一覧へ載っていた表記で名指しする（Issue #1761）
@@ -790,8 +790,8 @@ namespace ICCardManager.ViewModels
         /// <param name="identifier">復元しようとした職員の表示名</param>
         /// <param name="retryAction">やり直すための操作（「もう一度「保存」を押し」等。読点の前まで）</param>
         internal static string BuildRestoreAuthenticationCancelledMessage(string identifier, string retryAction)
-            => $"職員証の認証が完了しなかったため、{identifier} を復元していません。" +
-               $"復元するには、{retryAction}、登録済みの職員の職員証で認証してください（復元する職員証では認証できません）。";
+            => $"職員証の認証が完了しなかったため、{identifier} を復元していません。復元する職員証では認証できません。" +
+               $"復元するには、{retryAction}、登録済みの職員の職員証で認証してください。";
 
         /// <summary>
         /// 登録の書き込みが重複以外の理由で失敗したときの案内を組み立てる（Issue #2263）
