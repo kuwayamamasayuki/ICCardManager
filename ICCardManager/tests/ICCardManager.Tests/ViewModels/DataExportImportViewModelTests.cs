@@ -45,6 +45,14 @@ public class DataExportImportViewModelTests : IDisposable
     /// 「記録して再スローしない」代役を使う。
     /// </summary>
     private readonly RecordingDispatcherService _dispatcher = new();
+    /// <summary>
+    /// Issue #2262: 職員・利用履歴・利用履歴詳細の取り込みは職員証の認証を経て行う。既定では認証が成功する
+    /// （<c>Mock.Of</c> の既定値 null のままだと「認証が完了しなかった」扱いになり、書き込みが黙って行われない）。
+    /// </summary>
+    private readonly Mock<IStaffAuthService> _staffAuthServiceMock;
+    /// <summary>操作者の文脈（実物）。認証した職員の操作として取り込まれたかを確かめるために共有する</summary>
+    private readonly CurrentOperatorContext _operatorContext;
+    private readonly StaffManagementService _staffManagementService;
     private readonly DataExportImportViewModel _viewModel;
 
     public DataExportImportViewModelTests()
@@ -79,14 +87,23 @@ public class DataExportImportViewModelTests : IDisposable
             _dbContextMock.Object,
             _cacheServiceMock.Object,
             // Issue #1955: 摘要の再生成が参照する部署種別の供給元
-            new Mock<ISettingsRepository>().Object);
+            new Mock<ISettingsRepository>().Object,
+            new ICCardManager.Services.OperationLogger(new Mock<ICCardManager.Data.Repositories.IOperationLogRepository>().Object, Mock.Of<ICCardManager.Services.ICurrentOperatorContext>()));
 
         // OperationLogger (Issue #1302): 実DB + 実Contextを使う。
         // Issue #1741: 書き込まれた operation_log 行そのものを検証対象にするため、
         // リポジトリをフィールドで保持して読み返せるようにする。
         _operationLogRepository = new OperationLogRepository(_realDbContext);
-        var operatorContext = new CurrentOperatorContext(new SystemClock());
-        var operationLogger = new OperationLogger(_operationLogRepository, operatorContext);
+        _operatorContext = new CurrentOperatorContext(new SystemClock());
+        var operationLogger = new OperationLogger(_operationLogRepository, _operatorContext);
+
+        // Issue #2262: 認証は既定で成功させる（登録済みの職員がいる＝職員の取り込みも認証を求める）
+        _staffAuthServiceMock = new Mock<IStaffAuthService>();
+        _staffAuthServiceMock.Setup(s => s.RequestAuthenticationAsync(It.IsAny<string>()))
+            .ReturnsAsync(() => new StaffAuthResult { Idm = "TEST_OPERATOR_IDM", StaffName = "テスト操作者" });
+        _staffRepositoryMock.Setup(r => r.HasActiveStaffAsync()).ReturnsAsync(true);
+        _staffManagementService = new StaffManagementService(
+            _realDbContext, _staffRepositoryMock.Object, operationLogger, NullLogger<StaffManagementService>.Instance);
 
         _safeFileLauncherMock = new Mock<ICCardManager.Services.ISafeFileLauncher>();
         _safeFileLauncherMock.Setup(l => l.LaunchFile(It.IsAny<string>()))
@@ -102,7 +119,9 @@ public class DataExportImportViewModelTests : IDisposable
             operationLogger,
             new WeakReferenceMessenger(),
             _safeFileLauncherMock.Object,
-            _dispatcher);
+            _dispatcher,
+            _staffAuthServiceMock.Object,
+            _staffManagementService);
     }
 
     public void Dispose()
@@ -1124,7 +1143,9 @@ public class DataExportImportViewModelTests : IDisposable
             operationLogger,
             new WeakReferenceMessenger(),
             _safeFileLauncherMock.Object,
-            _dispatcher);
+            _dispatcher,
+            _staffAuthServiceMock.Object,
+            _staffManagementService);
     }
 
     /// <summary>
@@ -2324,6 +2345,257 @@ public class DataExportImportViewModelTests : IDisposable
         // Assert
         _viewModel.TouchedCardIdm.Should().Be(firstIdm, "2 件目が 1 件目の読み取り結果を上書きしないこと");
         _cardRepositoryMock.Verify(r => r.GetByIdmAsync("0807060504030201", false), Times.Never);
+    }
+
+    #endregion
+
+    #region Issue #2262: 職員・利用履歴・利用履歴詳細の取り込みは職員証の認証を経て行うこと
+
+    private const string AuthenticatedStaffIdm = "ABCDEF0123456789";
+    private const string AuthenticatedStaffName = "認証 職員";
+
+    /// <summary>
+    /// 認証した職員の操作者セッションを伴う認証結果（本物の <see cref="CurrentOperatorContext"/> に結び付ける）
+    /// </summary>
+    private void SetupAuthenticationAs(string idm, string name)
+    {
+        _staffAuthServiceMock.Setup(s => s.RequestAuthenticationAsync(It.IsAny<string>()))
+            .ReturnsAsync(() => new StaffAuthResult(idm, name, _operatorContext));
+    }
+
+    private void SetupAuthenticationCancelled()
+    {
+        _staffAuthServiceMock.Setup(s => s.RequestAuthenticationAsync(It.IsAny<string>()))
+            .ReturnsAsync((StaffAuthResult?)null);
+    }
+
+    /// <summary>
+    /// 欠陥を突く側: 職員の取り込みは「職員のインポート」で認証し、取り込みと取り込み全体の操作ログを
+    /// 認証した職員の操作として行うこと
+    /// </summary>
+    [Fact]
+    public async Task RunImportAsync_職員の取り込みは認証した職員の操作として行うこと()
+    {
+        SetupValidPreview(DataType.Staff);
+        SetupAuthenticationAs(AuthenticatedStaffIdm, AuthenticatedStaffName);
+        string? operatorDuringImport = null;
+        _importServiceMock
+            .Setup(s => s.ImportStaffAsync(It.IsAny<string>(), It.IsAny<bool>()))
+            .Callback(() => operatorDuringImport = _operatorContext.CurrentIdm)
+            .ReturnsAsync(new CsvImportResult { Success = true, ImportedCount = 2, UpdatedCount = 1 });
+
+        await _viewModel.ExecuteImportAsync();
+
+        _staffAuthServiceMock.Verify(s => s.RequestAuthenticationAsync("職員のインポート"), Times.Once);
+        operatorDuringImport.Should().Be(AuthenticatedStaffIdm,
+            "取り込み（1 行ごとの操作ログ）は認証した職員のスコープの内側で行う");
+        var importLog = await GetSingleImportLogAsync();
+        importLog.OperatorIdm.Should().Be(AuthenticatedStaffIdm, "取り込み全体の記録も認証した職員の操作");
+        importLog.OperatorName.Should().Be(AuthenticatedStaffName);
+        _operatorContext.HasSession.Should().BeFalse("取り込みが終わったらセッションも終わる（#2260）");
+    }
+
+    /// <summary>
+    /// 欠陥を突く側: 認証が完了しなければ取り込まず、プレビューを残して案内すること
+    /// </summary>
+    [Theory]
+    [InlineData(DataType.Staff)]
+    [InlineData(DataType.Ledgers)]
+    [InlineData(DataType.LedgerDetails)]
+    public async Task RunImportAsync_認証が完了しなければ取り込まずプレビューを残すこと(DataType dataType)
+    {
+        SetupValidPreview(dataType);
+        SetupAuthenticationCancelled();
+
+        await _viewModel.ExecuteImportAsync();
+
+        _importServiceMock.Verify(s => s.ImportStaffAsync(It.IsAny<string>(), It.IsAny<bool>()), Times.Never);
+        _importServiceMock.Verify(s => s.ImportLedgersAsync(It.IsAny<string>(), It.IsAny<bool>(), It.IsAny<string?>()), Times.Never);
+        _importServiceMock.Verify(s => s.ImportLedgerDetailsAsync(It.IsAny<string>()), Times.Never);
+        _viewModel.StatusMessage.Should().Be(DataExportImportViewModel.BuildImportAuthenticationCancelledMessage(dataType));
+        _viewModel.IsStatusError.Should().BeTrue();
+        _viewModel.HasPreview.Should().BeTrue("もう一度「インポート実行」を押せばやり直せる");
+        await AssertNoImportLogAsync();
+    }
+
+    /// <summary>
+    /// 利用履歴・利用履歴詳細の取り込みも、それぞれの操作名で認証してから取り込むこと
+    /// </summary>
+    [Theory]
+    [InlineData(DataType.Ledgers, "利用履歴のインポート")]
+    [InlineData(DataType.LedgerDetails, "利用履歴詳細のインポート")]
+    public async Task RunImportAsync_利用履歴と利用履歴詳細は認証してから取り込むこと(DataType dataType, string operationName)
+    {
+        SetupValidPreview(dataType);
+        SetupAuthenticationAs(AuthenticatedStaffIdm, AuthenticatedStaffName);
+        string? operatorDuringImport = null;
+        var success = new CsvImportResult { Success = true, ImportedCount = 1 };
+        _importServiceMock
+            .Setup(s => s.ImportLedgersAsync(It.IsAny<string>(), It.IsAny<bool>(), It.IsAny<string?>()))
+            .Callback(() => operatorDuringImport = _operatorContext.CurrentIdm)
+            .ReturnsAsync(success);
+        _importServiceMock
+            .Setup(s => s.ImportLedgerDetailsAsync(It.IsAny<string>()))
+            .Callback(() => operatorDuringImport = _operatorContext.CurrentIdm)
+            .ReturnsAsync(success);
+
+        await _viewModel.ExecuteImportAsync();
+
+        _staffAuthServiceMock.Verify(s => s.RequestAuthenticationAsync(operationName), Times.Once);
+        operatorDuringImport.Should().Be(AuthenticatedStaffIdm, "取り込みは認証した職員の操作として行う");
+    }
+
+    /// <summary>
+    /// 正当な挙動を塞いでいない側: 登録済みの職員が 0 人なら、職員の取り込みは認証を求めずに行う
+    /// （初回セットアップで認証できる職員証がまだ無い。職員管理画面と同じ免除。#2263）
+    /// </summary>
+    [Fact]
+    public async Task RunImportAsync_職員が0人なら職員の取り込みは認証を求めないこと()
+    {
+        SetupValidPreview(DataType.Staff);
+        _staffRepositoryMock.Setup(r => r.HasActiveStaffAsync()).ReturnsAsync(false);
+        _importServiceMock
+            .Setup(s => s.ImportStaffAsync(It.IsAny<string>(), It.IsAny<bool>()))
+            .ReturnsAsync(new CsvImportResult { Success = true, ImportedCount = 3 });
+
+        await _viewModel.ExecuteImportAsync();
+
+        _staffAuthServiceMock.Verify(s => s.RequestAuthenticationAsync(It.IsAny<string>()), Times.Never);
+        _importServiceMock.Verify(s => s.ImportStaffAsync("test.csv", It.IsAny<bool>()), Times.Once);
+    }
+
+    /// <summary>
+    /// 正当な挙動を塞いでいない側: 交通系ICカードの取り込みは認証を求めない（カード管理画面の登録・編集と同じ）
+    /// </summary>
+    [Fact]
+    public async Task RunImportAsync_カードの取り込みは認証を求めないこと()
+    {
+        SetupValidPreview(DataType.Cards);
+        _importServiceMock
+            .Setup(s => s.ImportCardsAsync(It.IsAny<string>(), It.IsAny<bool>()))
+            .ReturnsAsync(new CsvImportResult { Success = true, ImportedCount = 1 });
+
+        await _viewModel.ExecuteImportAsync();
+
+        _staffAuthServiceMock.Verify(s => s.RequestAuthenticationAsync(It.IsAny<string>()), Times.Never);
+        _importServiceMock.Verify(s => s.ImportCardsAsync("test.csv", It.IsAny<bool>()), Times.Once);
+    }
+
+    /// <summary>
+    /// 取り込みの条件は認証の前に確定させ、認証を待つ間にデータ種別を変えても取り込む内容は変わらないこと
+    /// </summary>
+    [Fact]
+    public async Task RunImportAsync_認証を待つ間にデータ種別を変えても認証前の種別で取り込むこと()
+    {
+        SetupValidPreview(DataType.Staff);
+        _staffAuthServiceMock.Setup(s => s.RequestAuthenticationAsync(It.IsAny<string>()))
+            .Callback(() => _viewModel.SelectedImportType = DataType.Cards)
+            .ReturnsAsync(() => new StaffAuthResult(AuthenticatedStaffIdm, AuthenticatedStaffName, _operatorContext));
+        _importServiceMock
+            .Setup(s => s.ImportStaffAsync(It.IsAny<string>(), It.IsAny<bool>()))
+            .ReturnsAsync(new CsvImportResult { Success = true, ImportedCount = 1 });
+
+        await _viewModel.ExecuteImportAsync();
+
+        _importServiceMock.Verify(s => s.ImportStaffAsync("test.csv", It.IsAny<bool>()), Times.Once);
+        _importServiceMock.Verify(s => s.ImportCardsAsync(It.IsAny<string>(), It.IsAny<bool>()), Times.Never);
+        (await GetSingleImportLogAsync()).TargetTable.Should().Be(OperationLogger.Tables.Staff);
+    }
+
+    /// <summary>
+    /// 取り込み全体の記録は、追加件数と更新件数を分けて記録すること（以前は合計を「登録件数」に入れていた）
+    /// </summary>
+    [Fact]
+    public async Task RunImportAsync_取り込み全体の記録は追加件数と更新件数を分けること()
+    {
+        SetupValidPreview(DataType.Ledgers);
+        _importServiceMock
+            .Setup(s => s.ImportLedgersAsync(It.IsAny<string>(), It.IsAny<bool>(), It.IsAny<string?>()))
+            .ReturnsAsync(new CsvImportResult { Success = true, ImportedCount = 5, UpdatedCount = 2 });
+
+        await _viewModel.ExecuteImportAsync();
+
+        var log = await GetSingleImportLogAsync();
+        using var document = System.Text.Json.JsonDocument.Parse(log.AfterData!);
+        document.RootElement.GetProperty("InsertedCount").GetInt32().Should().Be(3);
+        document.RootElement.GetProperty("UpdatedCount").GetInt32().Should().Be(2);
+        _viewModel.StatusMessage.Should().Contain("うち既存データの更新 2件");
+    }
+
+    /// <summary>
+    /// 「直接インポート」はカード一覧のときだけ実行でき、他のデータ種別ではコマンドが無効になること
+    /// </summary>
+    [Theory]
+    [InlineData(DataType.Cards, true)]
+    [InlineData(DataType.Staff, false)]
+    [InlineData(DataType.Ledgers, false)]
+    [InlineData(DataType.LedgerDetails, false)]
+    public void ImportCommand_直接インポートはカード一覧のときだけ実行できること(DataType dataType, bool expected)
+    {
+        _viewModel.SelectedImportType = dataType;
+
+        _viewModel.CanImportDirectly.Should().Be(expected);
+        _viewModel.ImportCommand.CanExecute(null).Should().Be(expected);
+    }
+
+    /// <summary>
+    /// データ種別を変えたら「直接インポート」の実行可否の変化を通知すること（通知が無いとボタンの有効・無効が変わらない）
+    /// </summary>
+    [Fact]
+    public void ImportCommand_データ種別を変えたら実行可否の変化を通知すること()
+    {
+        var raised = 0;
+        _viewModel.ImportCommand.CanExecuteChanged += (_, _) => raised++;
+
+        _viewModel.SelectedImportType = DataType.Ledgers;
+
+        raised.Should().BeGreaterThan(0);
+    }
+
+    /// <summary>
+    /// 欠陥を突く側: 職員・利用履歴・利用履歴詳細は、直接インポートの経路から呼ばれても取り込まないこと
+    /// （アクセスキー等でコマンドが実行された場合の受け皿）
+    /// </summary>
+    [Theory]
+    [InlineData(DataType.Staff)]
+    [InlineData(DataType.Ledgers)]
+    [InlineData(DataType.LedgerDetails)]
+    public async Task RunImportAsync_直接インポートでは職員と利用履歴を取り込まないこと(DataType dataType)
+    {
+        _viewModel.SelectedImportType = dataType;
+
+        await _viewModel.RunImportAsync("direct.csv", directImport: true);
+
+        _staffAuthServiceMock.Verify(s => s.RequestAuthenticationAsync(It.IsAny<string>()), Times.Never);
+        _importServiceMock.Verify(s => s.ImportStaffAsync(It.IsAny<string>(), It.IsAny<bool>()), Times.Never);
+        _importServiceMock.Verify(s => s.ImportLedgersAsync(It.IsAny<string>(), It.IsAny<bool>(), It.IsAny<string?>()), Times.Never);
+        _importServiceMock.Verify(s => s.ImportLedgerDetailsAsync(It.IsAny<string>()), Times.Never);
+        _viewModel.StatusMessage.Should().Be(DataExportImportViewModel.DirectImportRequiresPreviewMessage);
+    }
+
+    /// <summary>
+    /// 直接インポートのカード一覧は、新しいカードの登録だけを行う取り込み（ImportNewCardsAsync）を使うこと。
+    /// プレビュー経由は従来どおり登録済みのカードも更新する取り込み（ImportCardsAsync）を使う
+    /// </summary>
+    [Fact]
+    public async Task RunImportAsync_直接インポートのカード一覧は新しいカードの登録だけを行うこと()
+    {
+        _viewModel.SelectedImportType = DataType.Cards;
+        _importServiceMock
+            .Setup(s => s.ImportNewCardsAsync(It.IsAny<string>()))
+            .ReturnsAsync(new CsvImportResult { Success = true, ImportedCount = 1 });
+
+        await _viewModel.RunImportAsync("direct.csv", directImport: true);
+
+        _importServiceMock.Verify(s => s.ImportNewCardsAsync("direct.csv"), Times.Once);
+        _importServiceMock.Verify(s => s.ImportCardsAsync(It.IsAny<string>(), It.IsAny<bool>()), Times.Never);
+    }
+
+    /// <summary>取り込み全体の記録（IMPORT）が 1 件も無いことを表明する</summary>
+    private async Task AssertNoImportLogAsync()
+    {
+        var logs = await _operationLogRepository.GetByDateRangeAsync(DateTime.Today.AddDays(-1), DateTime.Today.AddDays(1));
+        logs.Should().NotContain(l => l.Action == OperationLogger.Actions.Import);
     }
 
     #endregion

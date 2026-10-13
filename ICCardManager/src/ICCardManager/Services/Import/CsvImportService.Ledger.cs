@@ -1,3 +1,4 @@
+#nullable enable
 using System;
 using System.Collections.Generic;
 using System.Data.SQLite;
@@ -81,7 +82,7 @@ namespace ICCardManager.Services
 
                     // 既存レコードの確認（IDがある場合）
                     var isUpdate = false;
-                    Ledger existingLedgerForUpdate = null;
+                    Ledger? existingLedgerForUpdate = null;
                     if (parsed.LedgerId.HasValue)
                     {
                         var existingLedger = await _ledgerRepository.GetByIdAsync(parsed.LedgerId.Value).ConfigureAwait(false);
@@ -220,8 +221,8 @@ namespace ICCardManager.Services
                     {
                         if (isUpdate)
                         {
-                            // 既存レコードを更新
-                            var success = await _ledgerRepository.UpdateAsync(ledger, scope.Transaction).ConfigureAwait(false);
+                            // 既存レコードを更新し、変更前・変更後を同じトランザクションで操作ログへ記録する（Issue #2262）
+                            var success = await UpdateLedgerWithAuditLogAsync(ledger, scope.Transaction).ConfigureAwait(false);
                             if (success)
                             {
                                 updatedCount++;
@@ -305,6 +306,8 @@ namespace ICCardManager.Services
                 {
                     Success = errors.Count == 0,
                     ImportedCount = importedCount + updatedCount,
+                    // Issue #2262: 操作ログが追加と更新を分けて記録できるよう、更新件数を別に返す
+                    UpdatedCount = updatedCount,
                     SkippedCount = skippedCount,
                     ErrorCount = errors.Count,
                     Errors = errors
@@ -322,6 +325,54 @@ namespace ICCardManager.Services
                     Errors = errors
                 };
             }
+        }
+
+        /// <summary>
+        /// 既存の利用履歴 1 行を CSV の内容で更新し、変更前・変更後を同じトランザクションで操作ログへ記録する（Issue #2262）
+        /// </summary>
+        /// <param name="ledger">更新後の内容（CSV の行から組み立てたもの）</param>
+        /// <param name="transaction">取り込み全体のトランザクション</param>
+        /// <returns>更新したら <c>true</c>。対象の行が無かった（他 PC や別の操作で削除された）ら <c>false</c></returns>
+        /// <remarks>
+        /// <para>
+        /// 以前は更新しても操作ログを 1 行も残さず、取り込み全体についてファイル名と件数だけを記録していた。
+        /// 履歴画面の「変更」（認証あり・変更前後を記録）と同じ台帳の書き換えが、変更前の値も残らない形で行えた。
+        /// </para>
+        /// <para>
+        /// 変更前は<b>このトランザクションの中で読み直した</b>行を使う。検証の段階で読んだ行（<c>existingLedgerForUpdate</c>）は
+        /// トランザクションの外で読んだもので、共有モードでは書き込むまでの間に他 PC が書き換え得る。読み直した行は
+        /// 更新後の <paramref name="ledger"/> とは別のインスタンスなので、記録する時点で変更後の値を写すこともない
+        /// （db-write-conventions.md「監査ログへ渡す『変更前』は、変更対象と別のインスタンスにする」#1959）。
+        /// </para>
+        /// <para>
+        /// 利用履歴 CSV は明細を持たず、この更新は明細に触れない。変更後の記録に明細が無いと、操作ログの画面・Excel が
+        /// 「明細 N 件 → なし」という起きていない変更として表示するため、変更後には変更前の明細の複製を載せる。
+        /// </para>
+        /// <para>
+        /// 操作ログの書き込みが失敗したら例外がそのまま抜け、呼び出し元が取り込み全体を巻き戻す
+        /// （記録の無い書き換えを残さない。AuditedWriteTransaction と同じ考え方）。
+        /// </para>
+        /// </remarks>
+        private async Task<bool> UpdateLedgerWithAuditLogAsync(Ledger ledger, SQLiteTransaction transaction)
+        {
+            // DbContext は接続を 1 本しか持たないため、この読み取りは同じ接続上のトランザクションの内側で行われる
+            // （CsvImportService.Detail.cs の ReplaceDetailsAndUpdateParentAsync と同じ）
+            var before = await _ledgerRepository.GetByIdAsync(ledger.Id).ConfigureAwait(false);
+            if (before == null)
+            {
+                // 読み取りが null なら書き込みも行わない（#1760）。UPDATE も同じ WHERE で 0 行になる
+                return false;
+            }
+
+            var updated = await _ledgerRepository.UpdateAsync(ledger, transaction).ConfigureAwait(false);
+            if (!updated)
+            {
+                return false;
+            }
+
+            ledger.Details = LedgerCloner.Clone(before).Details;
+            await _operationLogger.LogLedgerUpdateAsync(before, ledger, transaction).ConfigureAwait(false);
+            return true;
         }
 
         /// <summary>

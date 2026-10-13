@@ -1,3 +1,4 @@
+#nullable enable
 using System;
 using System.Collections.Generic;
 using System.Data.SQLite;
@@ -39,6 +40,7 @@ namespace ICCardManager.Services
         {
             var importedCount = 0;
             var skippedCount = 0;
+            var updatedCount = 0;
 
             var lines = await ReadCsvFileAsync(filePath, _logger).ConfigureAwait(false);
             if (lines.Count < 2)
@@ -90,6 +92,17 @@ namespace ICCardManager.Services
                     continue;
                 }
 
+                // 書き込む内容（取り込み後の職員）。Issue #2262: 既存の職員（検証で読んだインスタンス）は書き換えない。
+                // 書き換えると、操作ログの「変更前」に使う値と「変更後」の値が同じインスタンスを指し得る（#1959）。
+                // 取り込み後の職員は is_deleted = 0（削除済みなら復元する）で、Staff の列はこれですべて。
+                var importedStaff = new Staff
+                {
+                    StaffIdm = staffIdm,
+                    Name = name,
+                    Number = NormalizeOptionalText(number),
+                    Note = NormalizeOptionalText(note)
+                };
+
                 // 既存チェック（削除済みも含めて検索）
                 var existingStaff = await _staffRepository.GetByIdmAsync(staffIdm, includeDeleted: true).ConfigureAwait(false);
                 if (existingStaff != null)
@@ -98,10 +111,7 @@ namespace ICCardManager.Services
                     if (existingStaff.IsDeleted)
                     {
                         // 削除済み職員は復元して更新する（skipExistingでもスキップしない）
-                        existingStaff.Name = name;
-                        existingStaff.Number = NormalizeOptionalText(number);
-                        existingStaff.Note = NormalizeOptionalText(note);
-                        validRecords.Add((lineNumber, existingStaff, true, true)); // isRestore = true
+                        validRecords.Add((lineNumber, importedStaff, true, true)); // isRestore = true
                     }
                     else
                     {
@@ -114,23 +124,13 @@ namespace ICCardManager.Services
                             skippedCount++;
                             continue;
                         }
-                        existingStaff.Name = name;
-                        existingStaff.Number = NormalizeOptionalText(number);
-                        existingStaff.Note = NormalizeOptionalText(note);
-                        validRecords.Add((lineNumber, existingStaff, true, false)); // isRestore = false
+                        validRecords.Add((lineNumber, importedStaff, true, false)); // isRestore = false
                     }
                 }
                 else
                 {
                     // 新規登録用の職員
-                    var staff = new Staff
-                    {
-                        StaffIdm = staffIdm,
-                        Name = name,
-                        Number = NormalizeOptionalText(number),
-                        Note = NormalizeOptionalText(note)
-                    };
-                    validRecords.Add((lineNumber, staff, false, false));
+                    validRecords.Add((lineNumber, importedStaff, false, false));
                 }
             }
 
@@ -153,28 +153,34 @@ namespace ICCardManager.Services
             {
                 foreach (var (lineNumber, staff, isUpdate, isRestore) in validRecords)
                 {
+                    // Issue #2262: 書き込みと同じトランザクションで、1 行ずつ操作ログを記録する（変更前・変更後）。
+                    // 以前は取り込み全体についてファイル名と件数だけを記録しており、誰をどう登録・変更・復元したかが残らなかった
                     bool success;
                     if (isRestore)
                     {
-                        // 削除済み職員を復元してから更新（トランザクション内）
-                        success = await _staffRepository.RestoreAsync(staff.StaffIdm, scope.Transaction).ConfigureAwait(false);
-                        if (success)
-                        {
-                            success = await _staffRepository.UpdateAsync(staff, scope.Transaction).ConfigureAwait(false);
-                        }
+                        success = await RestoreStaffWithAuditLogAsync(staff, scope.Transaction).ConfigureAwait(false);
                     }
                     else if (isUpdate)
                     {
-                        success = await _staffRepository.UpdateAsync(staff, scope.Transaction).ConfigureAwait(false);
+                        success = await UpdateStaffWithAuditLogAsync(staff, scope.Transaction).ConfigureAwait(false);
                     }
                     else
                     {
                         success = await _staffRepository.InsertAsync(staff, scope.Transaction).ConfigureAwait(false);
+                        if (success)
+                        {
+                            await _operationLogger.LogStaffInsertAsync(staff, scope.Transaction).ConfigureAwait(false);
+                        }
                     }
 
                     if (success)
                     {
                         importedCount++;
+                        if (isUpdate)
+                        {
+                            // 更新・復元（既存の職員を書き換えた行）。isRestore の行も isUpdate = true
+                            updatedCount++;
+                        }
                     }
                     else
                     {
@@ -201,6 +207,7 @@ namespace ICCardManager.Services
                 {
                     TryRollbackImportTransaction(scope);
                     importedCount = 0;
+                    updatedCount = 0;
                 }
             }
             catch (SQLiteException ex)
@@ -228,11 +235,99 @@ namespace ICCardManager.Services
             {
                 Success = errors.Count == 0,
                 ImportedCount = importedCount,
+                UpdatedCount = updatedCount,
                 SkippedCount = skippedCount,
                 ErrorCount = errors.Count,
                 Errors = errors
             };
         }
+
+        /// <summary>
+        /// 登録済みの職員を CSV の内容で更新し、変更前・変更後を同じトランザクションで操作ログへ記録する（Issue #2262）
+        /// </summary>
+        /// <param name="staff">更新後の職員（CSV の行から組み立てたもの）</param>
+        /// <param name="transaction">取り込み全体のトランザクション</param>
+        /// <returns>更新したら <c>true</c>。対象の職員がいなかった（他 PC や別の操作で削除された）ら <c>false</c></returns>
+        /// <remarks>
+        /// 変更前は<b>このトランザクションの中で読み直した</b>職員を使う（検証の段階で読んだ値は、書き込むまでの間に
+        /// 他 PC が書き換え得る）。操作ログの書き込みが失敗したら例外がそのまま抜け、呼び出し元が取り込み全体を巻き戻す。
+        /// </remarks>
+        private async Task<bool> UpdateStaffWithAuditLogAsync(Staff staff, SQLiteTransaction transaction)
+        {
+            // DbContext は接続を 1 本しか持たないため、この読み取りは同じ接続上のトランザクションの内側で行われる
+            var before = await _staffRepository.GetByIdmAsync(staff.StaffIdm, includeDeleted: true).ConfigureAwait(false);
+            if (before == null || before.IsDeleted)
+            {
+                // 読み取りが null（削除済み）なら書き込みも行わない（#1760）。UPDATE も同じ条件（is_deleted = 0）で 0 行になる
+                return false;
+            }
+
+            var updated = await _staffRepository.UpdateAsync(staff, transaction).ConfigureAwait(false);
+            if (!updated)
+            {
+                return false;
+            }
+
+            await _operationLogger.LogStaffUpdateAsync(before, staff, transaction).ConfigureAwait(false);
+            return true;
+        }
+
+        /// <summary>
+        /// 削除済みの職員を復元して CSV の内容で更新し、同じトランザクションで操作ログへ記録する（Issue #2262）
+        /// </summary>
+        /// <param name="staff">復元・更新後の職員（CSV の行から組み立てたもの）</param>
+        /// <param name="transaction">取り込み全体のトランザクション</param>
+        /// <returns>
+        /// 復元・更新したら <c>true</c>。対象が削除済みでなくなっていた（他 PC が先に復元した）・見つからなかったら <c>false</c>
+        /// </returns>
+        /// <remarks>
+        /// <para>
+        /// 記録は 2 行になり得る。復元（<c>RESTORE</c>。職員管理画面の復元と同じ操作種別）と、氏名・職員番号・備考が
+        /// 削除前と違っていればその変更（<c>UPDATE</c>。変更前は削除済みの状態）。復元の記録は変更前を持たないため、
+        /// 変更の記録を分けないと「削除前は誰として登録されていた職員証か」が操作ログから読めない。
+        /// </para>
+        /// <para>
+        /// 削除済みの職員の復元は、職員管理画面では職員証の認証を経て行う（Issue #2263）。CSV の取り込みも
+        /// 呼び出し元（データ入出力画面）が認証してから呼ぶため、記録の操作者は認証した職員になる。
+        /// </para>
+        /// </remarks>
+        private async Task<bool> RestoreStaffWithAuditLogAsync(Staff staff, SQLiteTransaction transaction)
+        {
+            var before = await _staffRepository.GetByIdmAsync(staff.StaffIdm, includeDeleted: true).ConfigureAwait(false);
+            if (before == null)
+            {
+                return false;
+            }
+
+            // 削除済みでなくなっていれば（他 PC が先に復元した）、RestoreAsync の WHERE（is_deleted = 1）が 0 行で false を返す
+            var restored = await _staffRepository.RestoreAsync(staff.StaffIdm, transaction).ConfigureAwait(false);
+            if (!restored)
+            {
+                return false;
+            }
+
+            var updated = await _staffRepository.UpdateAsync(staff, transaction).ConfigureAwait(false);
+            if (!updated)
+            {
+                return false;
+            }
+
+            await _operationLogger.LogStaffRestoreAsync(staff, transaction).ConfigureAwait(false);
+            if (!HasSameStaffAttributes(before, staff))
+            {
+                await _operationLogger.LogStaffUpdateAsync(before, staff, transaction).ConfigureAwait(false);
+            }
+
+            return true;
+        }
+
+        /// <summary>
+        /// 氏名・職員番号・備考が同じか（職員番号・備考の空欄と null は同じ未設定として比べる。#1808）
+        /// </summary>
+        private static bool HasSameStaffAttributes(Staff before, Staff after)
+            => before.Name == after.Name
+               && NormalizeOptionalText(before.Number) == NormalizeOptionalText(after.Number)
+               && NormalizeOptionalText(before.Note) == NormalizeOptionalText(after.Note);
 
         /// <summary>
         /// カードCSVのインポートプレビューを取得

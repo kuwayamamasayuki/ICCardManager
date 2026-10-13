@@ -61,6 +61,8 @@ public class ScreenTransitionDiagramConsistencyTests
         ["SystemManageViewModel.cs"] = "SYSMGMT",
         // Issue #2255: 繰越情報の復旧は、復旧ダイアログの「保存」で認証する
         ["CarryoverRecoveryViewModel.cs"] = "CARRYRECOVER",
+        // Issue #2262: 職員・利用履歴・利用履歴詳細の CSV インポートは、データ入出力ダイアログの「インポート実行」で認証する
+        ["DataExportImportViewModel.cs"] = "DATAEXIMP",
     };
 
     /// <summary>
@@ -85,6 +87,9 @@ public class ScreenTransitionDiagramConsistencyTests
         "統合の取り消し",
         "データベースのリストア",
         "繰越情報の復旧",
+        "職員のインポート",
+        "利用履歴のインポート",
+        "利用履歴詳細のインポート",
     };
 
     /// <summary>ノード定義行（例: <c>MAIN[メイン画面]</c>）。</summary>

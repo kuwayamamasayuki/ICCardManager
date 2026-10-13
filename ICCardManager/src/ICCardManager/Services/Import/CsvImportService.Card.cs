@@ -1,3 +1,4 @@
+#nullable enable
 using System;
 using System.Collections.Generic;
 using System.Data.SQLite;
@@ -24,21 +25,65 @@ namespace ICCardManager.Services
         {
             var errors = new List<CsvImportError>();
             return await ExecuteImportWithErrorHandlingAsync(
-                () => ImportCardsInternalAsync(filePath, skipExisting, errors),
+                () => ImportCardsInternalAsync(filePath, skipExisting, allowChangesToRegisteredCards: true, errors),
                 errors,
                 "カードCSVの取り込み").ConfigureAwait(false);
         }
 
         /// <summary>
+        /// カードCSVを、新しいカードの登録だけに限って取り込む（データ入出力画面の「直接インポート」。Issue #2262）
+        /// </summary>
+        /// <param name="filePath">CSVファイルパス</param>
+        /// <remarks>
+        /// <para>
+        /// 「直接インポート」はプレビューを経ずに書き込むため、登録済みのデータを書き換える取り込みには使わせない。
+        /// 登録済みのカードと内容が異なる行（更新）・削除済みのカードの行（復元）があれば、その行をエラーとして報告し、
+        /// 何も書き込まずに中断する（他の検証エラーと同じく取り込み全体を行わない）。内容が同じ登録済みのカードの行は
+        /// スキップする（書き換えではないため）。
+        /// </para>
+        /// <para>
+        /// 職員・利用履歴・利用履歴詳細の取り込みは、画面側で「直接インポート」自体を使えなくしている
+        /// （職員証の認証を求める取り込みで、内容をプレビューで確かめてから認証させるため）。
+        /// </para>
+        /// </remarks>
+        public virtual async Task<CsvImportResult> ImportNewCardsAsync(string filePath)
+        {
+            var errors = new List<CsvImportError>();
+            return await ExecuteImportWithErrorHandlingAsync(
+                () => ImportCardsInternalAsync(filePath, skipExisting: true, allowChangesToRegisteredCards: false, errors),
+                errors,
+                "カードCSVの取り込み").ConfigureAwait(false);
+        }
+
+        /// <summary>
+        /// 「直接インポート」で登録済みのカードを書き換える行を拒んだときの案内のうち、「なぜ」「どうすれば」（Issue #2262）
+        /// </summary>
+        internal const string DirectImportCannotChangeRegisteredCardGuidance =
+            "「直接インポート」では登録済みのカードを変更・復元できません。" +
+            "「プレビュー」で変更内容を確認してから「インポート実行」を押してください。";
+
+        /// <summary>
+        /// 登録済みのカードをエラーの文言で名指しする表記（カード種別と管理番号。IDm は画面に出さない。#1986）
+        /// </summary>
+        private static string FormatRegisteredCardLabel(IcCard card)
+            => $"{card.CardType} {card.CardNumber}".Trim();
+
+        /// <summary>
         /// カードCSVインポートの内部処理
         /// </summary>
+        /// <remarks>
+        /// <c>allowChangesToRegisteredCards</c>: 登録済みのカードの更新・削除済みのカードの復元を許すか。
+        /// <c>false</c>（直接インポート。Issue #2262）なら、その行をエラーにして取り込み全体を行わない
+        /// </remarks>
         private async Task<CsvImportResult> ImportCardsInternalAsync(
             string filePath,
             bool skipExisting,
+            bool allowChangesToRegisteredCards,
             List<CsvImportError> errors)
         {
             var importedCount = 0;
             var skippedCount = 0;
+            var updatedCount = 0;
 
             var lines = await ReadCsvFileAsync(filePath, _logger).ConfigureAwait(false);
             if (lines.Count < 2)
@@ -102,6 +147,19 @@ namespace ICCardManager.Services
                     // 削除済みカードの場合は復元対象として扱う
                     if (existingCard.IsDeleted)
                     {
+                        if (!allowChangesToRegisteredCards)
+                        {
+                            // Issue #2262: 直接インポートでは復元しない（プレビューで確かめてから取り込ませる）
+                            errors.Add(new CsvImportError
+                            {
+                                LineNumber = lineNumber,
+                                Message = $"削除済みの交通系ICカード（{FormatRegisteredCardLabel(existingCard)}）を復元する行です。" +
+                                          DirectImportCannotChangeRegisteredCardGuidance,
+                                Data = cardIdm
+                            });
+                            continue;
+                        }
+
                         // 削除済みカードは復元して更新する（skipExistingでもスキップしない）
                         existingCard.CardType = cardType;
                         existingCard.CardNumber = cardNumber;
@@ -120,6 +178,21 @@ namespace ICCardManager.Services
                             skippedCount++;
                             continue;
                         }
+
+                        if (!allowChangesToRegisteredCards)
+                        {
+                            // Issue #2262: 直接インポートでは登録済みのカードを書き換えない
+                            errors.Add(new CsvImportError
+                            {
+                                LineNumber = lineNumber,
+                                Message = $"登録済みの交通系ICカード（{FormatRegisteredCardLabel(existingCard)}）の" +
+                                          $"{string.Join("・", changes.Select(c => c.FieldName))}を変更する行です。" +
+                                          DirectImportCannotChangeRegisteredCardGuidance,
+                                Data = cardIdm
+                            });
+                            continue;
+                        }
+
                         existingCard.CardType = cardType;
                         existingCard.CardNumber = cardNumber;
                         existingCard.Note = NormalizeOptionalText(note);
@@ -198,6 +271,11 @@ namespace ICCardManager.Services
                     if (success)
                     {
                         importedCount++;
+                        if (isUpdate)
+                        {
+                            // 更新・復元（登録済みのカードを書き換えた行。isRestore の行も isUpdate = true）
+                            updatedCount++;
+                        }
                     }
                     else
                     {
@@ -224,6 +302,7 @@ namespace ICCardManager.Services
                 {
                     TryRollbackImportTransaction(scope);
                     importedCount = 0;
+                    updatedCount = 0;
                 }
             }
             catch (SQLiteException ex)
@@ -249,6 +328,7 @@ namespace ICCardManager.Services
             {
                 Success = errors.Count == 0,
                 ImportedCount = importedCount,
+                UpdatedCount = updatedCount,
                 SkippedCount = skippedCount,
                 ErrorCount = errors.Count,
                 Errors = errors

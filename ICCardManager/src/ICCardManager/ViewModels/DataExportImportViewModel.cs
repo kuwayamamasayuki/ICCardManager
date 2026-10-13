@@ -107,11 +107,22 @@ public partial class DataExportImportViewModel : ViewModelBase
     /// </summary>
     private readonly IDispatcherService _dispatcherService;
     private readonly ISafeFileLauncher _safeFileLauncher;
+    private readonly IStaffAuthService _staffAuthService;
+    private readonly StaffManagementService _staffManagementService;
 
     [ObservableProperty]
     private DataType _selectedExportType = DataType.Cards;
 
+    /// <summary>
+    /// インポートするデータ種別
+    /// </summary>
+    /// <remarks>
+    /// Issue #2262: 「直接インポート」を使えるかはこの種別で決まる（<see cref="CanImportDirectly"/>）ため、
+    /// 変わったらコマンドの実行可否を通知する。
+    /// </remarks>
     [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(CanImportDirectly))]
+    [NotifyCanExecuteChangedFor(nameof(ImportCommand))]
     private DataType _selectedImportType = DataType.Cards;
 
     [ObservableProperty]
@@ -240,6 +251,40 @@ public partial class DataExportImportViewModel : ViewModelBase
     public bool IsLedgerImportSelected => SelectedImportType == DataType.Ledgers;
 
     /// <summary>
+    /// 「直接インポート」（プレビューを経ない取り込み）を使えるか（Issue #2262）
+    /// </summary>
+    /// <remarks>
+    /// <see cref="ImportCommand"/> の実行可否と、ボタンの有効・無効を兼ねる。判定は <see cref="IsDirectImportAllowed"/>。
+    /// </remarks>
+    public bool CanImportDirectly => IsDirectImportAllowed(SelectedImportType);
+
+    /// <summary>
+    /// そのデータ種別を「直接インポート」で取り込めるか（Issue #2262）
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// 直接インポートできるのは交通系ICカード（カード一覧）だけで、しかも新しいカードの登録に限る
+    /// （<see cref="CsvImportService.ImportNewCardsAsync"/>。登録済みのカードを変更・復元する行があれば取り込まない）。
+    /// </para>
+    /// <para>
+    /// 職員・利用履歴・利用履歴詳細の取り込みは、職員の登録・変更・復元や、6 年保存の台帳の追加・変更・明細の置き換えを
+    /// 行い得る。どれも職員管理画面・履歴画面では職員証の認証を求める操作で、取り込みも認証を経て行う。認証する前に
+    /// 「何が変わるか」をプレビューで確かめさせるため、直接インポートを使えなくする（以前はプレビューを経ずに書き換えられた）。
+    /// </para>
+    /// </remarks>
+    internal static bool IsDirectImportAllowed(DataType dataType) => dataType == DataType.Cards;
+
+    /// <summary>
+    /// 直接インポートを使えないデータ種別で、直接インポートが要求されたときの案内（Issue #2262）
+    /// </summary>
+    /// <remarks>
+    /// ボタンはコマンドの実行可否で無効になるため、通常は表示されない（アクセスキー等でコマンドが実行された場合の受け皿）。
+    /// </remarks>
+    internal const string DirectImportRequiresPreviewMessage =
+        "職員一覧・利用履歴・利用履歴詳細は「直接インポート」では取り込めません。取り込みには職員証の認証が必要なため、" +
+        "「プレビュー」で内容を確認してから「インポート実行」を押してください。";
+
+    /// <summary>
     /// プレビューDataGridの列1ヘッダー（データ種別に応じて変化）
     /// </summary>
     public string PreviewColumn1Header => SelectedImportType switch
@@ -315,6 +360,8 @@ public partial class DataExportImportViewModel : ViewModelBase
         IMessenger messenger,
         ISafeFileLauncher safeFileLauncher,
         IDispatcherService dispatcherService,
+        IStaffAuthService staffAuthService,
+        StaffManagementService staffManagementService,
         ICardReader? cardReader = null)
     {
         _exportService = exportService;
@@ -325,6 +372,9 @@ public partial class DataExportImportViewModel : ViewModelBase
         _messenger = messenger;
         _safeFileLauncher = safeFileLauncher;
         _dispatcherService = dispatcherService;
+        // Issue #2262: 職員・利用履歴・利用履歴詳細の取り込みは職員証の認証を経て行う。既定値を持たない必須引数にする
+        _staffAuthService = staffAuthService ?? throw new ArgumentNullException(nameof(staffAuthService));
+        _staffManagementService = staffManagementService ?? throw new ArgumentNullException(nameof(staffManagementService));
         _cardReader = cardReader;
 
         // カードリーダーイベント購読
@@ -665,9 +715,28 @@ public partial class DataExportImportViewModel : ViewModelBase
     /// インポートの分岐を増やすときは必ずここへ書き、コマンド側へ複製しないこと。
     /// テストから直接呼べるよう internal にしている（<see cref="ImportAsync"/> は
     /// <see cref="OpenFileDialog"/> をコマンド内で生成するため単体テストから起動できない）。
+    /// <para>
+    /// Issue #2262: 職員・利用履歴・利用履歴詳細の取り込みは、職員証の認証を経て行う（職員一覧は登録済みの職員が
+    /// 0 人なら免除）。認証が完了しなければ何も書き込まず、プレビューを残したまま案内する。
+    /// 処理中の表示・サービスの呼び分け・結果の通知は <see cref="ImportAndReportAsync"/> が持つ。
+    /// </para>
     /// </remarks>
-    internal async Task RunImportAsync(string sourceFilePath)
+    /// <param name="directImport">
+    /// 直接インポート（<see cref="ImportAsync"/>。プレビューを経ない）なら <c>true</c>。交通系ICカードの
+    /// 新しいカードの登録だけに限る（<see cref="IsDirectImportAllowed"/>。Issue #2262）
+    /// </param>
+    internal async Task RunImportAsync(string sourceFilePath, bool directImport = false)
     {
+        // Issue #2262: 取り込みの条件は認証より前に確定させる。認証ダイアログ（職員証タッチ待ち）の間も
+        // UI スレッドは入力を処理するため、認証の後で画面のプロパティを読み直さない（ui-conventions「選択状態のスナップショット」）。
+        // Issue #1741: 対象データ種別も同じ理由でここで確定させる（監査ログの対象テーブルが実際と食い違わないように）。
+        var request = new ImportRequest(
+            sourceFilePath,
+            SelectedImportType,
+            SkipExistingOnImport,
+            GetTargetCardIdm(),
+            directImport);
+
         ImportErrors.Clear();
 
         // Issue #1783: 「インポート完了: <ファイル名>」（DataExportImportDialog.xaml の LastImportedFile 表示）は
@@ -678,6 +747,197 @@ public partial class DataExportImportViewModel : ViewModelBase
         // 例外で中断する経路（共有フォルダーの切断等）も同じ経路でまとめて塞げる。
         LastImportedFile = string.Empty;
 
+        if (directImport && !IsDirectImportAllowed(request.DataType))
+        {
+            SetStatus(DirectImportRequiresPreviewMessage, true);
+            return;
+        }
+
+        // Issue #2262: 職員・利用履歴・利用履歴詳細の取り込みは、職員証の認証を経て、認証した職員の操作として行う。
+        // 認証ダイアログは処理中（BeginBusy）の外で出す（背後に処理中の表示を出さない）。取り込み全体
+        // （1 行ごとの操作ログ・取り込み全体の操作ログを含む）が認証した職員のスコープの内側で行われる。
+        bool authorized;
+        switch (request.DataType)
+        {
+            case DataType.Staff:
+                var requiresAuthentication = await TryDetermineStaffImportRequiresAuthenticationAsync();
+                if (requiresAuthentication == null)
+                {
+                    // 判定に失敗した（案内は表示済み）。何も書き込まない
+                    return;
+                }
+
+                authorized = await RunStaffImportWithAuthenticationAsync(
+                    requiresAuthentication.Value, () => ImportAndReportAsync(request));
+                break;
+
+            case DataType.Ledgers:
+                authorized = await RunLedgerImportWithAuthenticationAsync(() => ImportAndReportAsync(request));
+                break;
+
+            case DataType.LedgerDetails:
+                authorized = await RunLedgerDetailImportWithAuthenticationAsync(() => ImportAndReportAsync(request));
+                break;
+
+            default:
+                // 交通系ICカードは認証を求めない（交通系ICカード管理画面の登録・編集・復元と同じ。04 §9）
+                await ImportAndReportAsync(request);
+                authorized = true;
+                break;
+        }
+
+        if (!authorized)
+        {
+            // 何も書き込んでいない。プレビューは残すので、もう一度「インポート実行」を押せば取り込める
+            SetStatus(BuildImportAuthenticationCancelledMessage(request.DataType), true);
+        }
+    }
+
+    /// <summary>
+    /// 取り込みの条件（認証の前に確定させた値。Issue #2262）
+    /// </summary>
+    private sealed class ImportRequest
+    {
+        public ImportRequest(string sourceFilePath, DataType dataType, bool skipExisting, string? targetCardIdm, bool directImport)
+        {
+            SourceFilePath = sourceFilePath;
+            DataType = dataType;
+            SkipExisting = skipExisting;
+            TargetCardIdm = targetCardIdm;
+            DirectImport = directImport;
+        }
+
+        /// <summary>取り込む CSV のパス（呼び出し元で確定済み。Issue #1741）</summary>
+        public string SourceFilePath { get; }
+
+        /// <summary>取り込むデータ種別</summary>
+        public DataType DataType { get; }
+
+        /// <summary>既存データをスキップするか</summary>
+        public bool SkipExisting { get; }
+
+        /// <summary>利用履歴の取り込み先カード（Issue #511。利用履歴以外は null）</summary>
+        public string? TargetCardIdm { get; }
+
+        /// <summary>直接インポート（プレビューを経ない）か</summary>
+        public bool DirectImport { get; }
+    }
+
+    /// <summary>
+    /// 職員の取り込みに職員証の認証を求めるかを判定する（Issue #2262）
+    /// </summary>
+    /// <returns>求めるなら <c>true</c>、登録済みの職員が 0 人なら <c>false</c>、判定に失敗したら <c>null</c>（案内は表示済み）</returns>
+    /// <remarks>
+    /// 免除の判定は職員管理画面と同じ <see cref="StaffManagementService.RequiresOperatorAuthenticationAsync"/> に寄せる
+    /// （Issue #2263。初回セットアップで職員一覧の CSV を取り込むとき、認証できる職員証がまだ無い）。
+    /// DB を待つ間は処理中にする（処理中の外で DB を待つと、その間に画面を操作できてしまう）。
+    /// </remarks>
+    private async Task<bool?> TryDetermineStaffImportRequiresAuthenticationAsync()
+    {
+        using (BeginBusy("確認中..."))
+        {
+            try
+            {
+                return await _staffManagementService.RequiresOperatorAuthenticationAsync();
+            }
+            catch (Exception ex)
+            {
+                // 技術的詳細はログへ。UI には 3 要素のユーザー向け文言を表示（Issue #1614）。
+                ErrorDialogHelper.LogException(ex, "インポート");
+                SetStatus(ExceptionMessageFormatter.ToUserMessage(ex, "インポート"), true);
+                return null;
+            }
+        }
+    }
+
+    /// <summary>
+    /// 職員の取り込みを、操作者の職員証認証を経て行う（Issue #2262）
+    /// </summary>
+    /// <param name="requiresAuthentication">認証を求めるか（登録済みの職員が 0 人なら <c>false</c>）</param>
+    /// <param name="import">認証した操作の中で行う取り込みと結果の表示</param>
+    /// <returns><paramref name="import"/> を実行したら <c>true</c>。認証が完了しなかったら <c>false</c></returns>
+    /// <remarks>
+    /// <para>
+    /// 認証結果の <c>Enter()</c> はこのメソッドの流れで操作者セッションを開始し、<paramref name="import"/> は
+    /// その流れの内側で実行されるため、取り込みの操作ログには認証した職員が記録される（Issue #2260）。
+    /// </para>
+    /// <para>
+    /// データ種別ごとに 3 つに分けているのは、操作名を <c>RequestAuthenticationAsync</c> へ文字列リテラルで渡すため
+    /// （静的検査がリテラルを数える。Issue #2255）。
+    /// </para>
+    /// </remarks>
+    private async Task<bool> RunStaffImportWithAuthenticationAsync(bool requiresAuthentication, Func<Task> import)
+    {
+        if (!requiresAuthentication)
+        {
+            // 初回セットアップ（登録済みの職員が 0 人）。認証できる職員証がまだ無いため免除し、
+            // 操作ログは「GUI操作」として記録される（職員管理画面の登録と同じ。Issue #2263）
+            await import();
+            return true;
+        }
+
+        using var authResult = (await _staffAuthService.RequestAuthenticationAsync("職員のインポート"))?.Enter();
+        if (authResult == null)
+        {
+            return false;
+        }
+
+        await import();
+        return true;
+    }
+
+    /// <summary>
+    /// 利用履歴の取り込みを、操作者の職員証認証を経て行う（Issue #2262。
+    /// 詳細は <see cref="RunStaffImportWithAuthenticationAsync"/>）
+    /// </summary>
+    /// <remarks>
+    /// 新しい行を追加するだけの取り込みでも認証を求める。履歴画面の「追加」が認証を求める操作だから（SEQ-AUTH-01）。
+    /// </remarks>
+    private async Task<bool> RunLedgerImportWithAuthenticationAsync(Func<Task> import)
+    {
+        using var authResult = (await _staffAuthService.RequestAuthenticationAsync("利用履歴のインポート"))?.Enter();
+        if (authResult == null)
+        {
+            return false;
+        }
+
+        await import();
+        return true;
+    }
+
+    /// <summary>
+    /// 利用履歴詳細の取り込みを、操作者の職員証認証を経て行う（Issue #2262。
+    /// 詳細は <see cref="RunStaffImportWithAuthenticationAsync"/>）
+    /// </summary>
+    /// <remarks>
+    /// 利用履歴詳細の取り込みは、既存の履歴の明細を置き換えて摘要・金額を作り直すか、新しい履歴を作る。
+    /// どちらも履歴画面では認証を求める操作（明細の保存・履歴の追加）に当たる。
+    /// </remarks>
+    private async Task<bool> RunLedgerDetailImportWithAuthenticationAsync(Func<Task> import)
+    {
+        using var authResult = (await _staffAuthService.RequestAuthenticationAsync("利用履歴詳細のインポート"))?.Enter();
+        if (authResult == null)
+        {
+            return false;
+        }
+
+        await import();
+        return true;
+    }
+
+    /// <summary>
+    /// 取り込みで職員証の認証が完了しなかったときの案内を組み立てる（Issue #2262）
+    /// </summary>
+    internal static string BuildImportAuthenticationCancelledMessage(DataType dataType)
+        => $"職員証の認証が完了しなかったため、{GetDataTypeDisplayName(dataType)}を取り込んでいません。プレビューはそのままです。" +
+           "取り込むには、もう一度「インポート実行」を押し、登録済みの職員の職員証で認証してください。";
+
+    /// <summary>
+    /// 取り込みの本体（処理中の表示・サービスの呼び分け・結果の反映と通知）
+    /// </summary>
+    /// <param name="request">認証の前に確定させた取り込みの条件</param>
+    private async Task ImportAndReportAsync(ImportRequest request)
+    {
         // Issue #1784: 結果ダイアログは BeginBusy スコープを抜けて IsBusy=false が確定した後に表示する。
         // スコープ内で表示すると MessageBox がモーダルで待機する間、
         // DataExportImportDialog.xaml の全面オーバーレイ（Grid.RowSpan=6・不透明）と不確定 ProgressBar が
@@ -697,26 +957,29 @@ public partial class DataExportImportViewModel : ViewModelBase
             try
             {
                 CsvImportResult result;
+                var sourceFilePath = request.SourceFilePath;
 
-                // Issue #1741: 対象データ種別をここでローカル変数へ確定させる。
+                // Issue #1741: 対象データ種別は呼び出し元（RunImportAsync）が最初の await より前に確定させている。
                 // SelectedImportType は await 中のキー操作（データ種別コンボのアクセスキー）で変わり得るため、
                 // 監査ログ記録時にプロパティを読み直すと実際とは異なる対象テーブルが記録される。
-                var importDataType = SelectedImportType;
-                var importTargetTable = MapDataTypeToTableName(importDataType);
+                var importTargetTable = MapDataTypeToTableName(request.DataType);
 
-                switch (importDataType)
+                switch (request.DataType)
                 {
                     case DataType.Cards:
-                        result = await _importService.ImportCardsAsync(sourceFilePath, SkipExistingOnImport);
+                        // Issue #2262: 直接インポートは新しいカードの登録だけ（登録済みのカードの変更・復元はプレビュー経由に限る）
+                        result = request.DirectImport
+                            ? await _importService.ImportNewCardsAsync(sourceFilePath)
+                            : await _importService.ImportCardsAsync(sourceFilePath, request.SkipExisting);
                         break;
 
                     case DataType.Staff:
-                        result = await _importService.ImportStaffAsync(sourceFilePath, SkipExistingOnImport);
+                        result = await _importService.ImportStaffAsync(sourceFilePath, request.SkipExisting);
                         break;
 
                     case DataType.Ledgers:
                         // Issue #511: ターゲットカードIDmを渡す
-                        result = await _importService.ImportLedgersAsync(sourceFilePath, SkipExistingOnImport, GetTargetCardIdm());
+                        result = await _importService.ImportLedgersAsync(sourceFilePath, request.SkipExisting, request.TargetCardIdm);
                         break;
 
                     case DataType.LedgerDetails:
@@ -833,7 +1096,7 @@ public partial class DataExportImportViewModel : ViewModelBase
 
         if (result.Success)
         {
-            var message = $"インポート完了: {result.ImportedCount}件を登録しました";
+            var message = $"インポート完了: {result.ImportedCount}件を登録しました" + FormatUpdatedCountNote(result);
             if (result.SkippedCount > 0)
             {
                 message += $"（{result.SkippedCount}件はスキップ）";
@@ -847,7 +1110,7 @@ public partial class DataExportImportViewModel : ViewModelBase
             var auditLogged = await TryLogImportAsync(targetTable, sourceFilePath, result);
 
             var completionMessage =
-                $"インポートが完了しました。\n\n登録件数: {result.ImportedCount}件"
+                $"インポートが完了しました。\n\n登録件数: {result.ImportedCount}件" + FormatUpdatedCountNote(result)
                 + (result.SkippedCount > 0 ? $"\nスキップ: {result.SkippedCount}件" : "");
 
             if (auditLogged)
@@ -919,6 +1182,12 @@ public partial class DataExportImportViewModel : ViewModelBase
             partialWarningMessage,
             importCommitted ? "インポート完了（一部エラー）" : "インポートを中断しました");
     }
+
+    /// <summary>
+    /// 登録件数のうち既存データを書き換えた件数の注記（Issue #2262。書き換えが無ければ空文字）
+    /// </summary>
+    internal static string FormatUpdatedCountNote(CsvImportResult result)
+        => result.UpdatedCount > 0 ? $"（うち既存データの更新 {result.UpdatedCount}件）" : string.Empty;
 
     /// <summary>
     /// 部分成功（一部エラー）時の復旧手順を組み立てる（Issue #1781）
@@ -1022,10 +1291,12 @@ public partial class DataExportImportViewModel : ViewModelBase
     {
         try
         {
+            // Issue #2262: 追加と更新を分けて記録する（以前は利用履歴の取り込みが合計を「登録件数」として記録していた）
             await _operationLogger.LogImportAsync(
                 targetTable,
                 sourceFilePath,
-                result.ImportedCount,
+                result.ImportedCount - result.UpdatedCount,
+                result.UpdatedCount,
                 result.SkippedCount,
                 result.ErrorCount);
             return true;
@@ -1090,9 +1361,18 @@ public partial class DataExportImportViewModel : ViewModelBase
     /// <summary>
     /// インポートを実行（旧API互換 - 直接インポート）
     /// </summary>
-    [RelayCommand]
+    /// <remarks>
+    /// Issue #2262: 交通系ICカードの新しいカードの登録だけに使える（<see cref="IsDirectImportAllowed"/>）。
+    /// </remarks>
+    [RelayCommand(CanExecute = nameof(CanImportDirectly))]
     public async Task ImportAsync()
     {
+        if (!CanImportDirectly)
+        {
+            SetStatus(DirectImportRequiresPreviewMessage, true);
+            return;
+        }
+
         var dialog = new OpenFileDialog
         {
             Filter = "CSV ファイル (*.csv)|*.csv|すべてのファイル (*.*)|*.*",
@@ -1107,7 +1387,7 @@ public partial class DataExportImportViewModel : ViewModelBase
         // Issue #1782: この経路のインポート元はプレビューではなくファイルダイアログの選択結果だが、
         // 取り込みが確定したらプレビュー表示も畳む。残すと別ファイルのプレビューに対して
         // 「インポート実行」ボタンが有効なまま残り、古いファイルを取り込み直せてしまう。
-        await RunImportAsync(dialog.FileName);
+        await RunImportAsync(dialog.FileName, directImport: true);
     }
 
     /// <summary>

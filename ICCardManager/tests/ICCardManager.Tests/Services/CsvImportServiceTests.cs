@@ -85,7 +85,8 @@ public class CsvImportServiceTests : IDisposable
             _dbContextMock.Object,
             _cacheServiceMock.Object,
             _settingsRepositoryMock.Object,
-            // Issue #1991: ロガーを渡さない 7 引数版だと、取込失敗のたびに
+            new OperationLogger(new Mock<IOperationLogRepository>().Object, Mock.Of<ICurrentOperatorContext>()),
+            // Issue #1991: ロガーを渡さない 8 引数版だと、取込失敗のたびに
             // ErrorDialogHelper.LogException が**本番のログディレクトリ**（ACL 設定つき）へ
             // 追記する。意図的に例外を投げるテストが数百件あるため、実運用の障害ログが
             // テスト実行のたびに汚染される。no-op のロガーを明示的に渡す。
@@ -3261,7 +3262,7 @@ FEDCBA9876543210,鈴木花子,002,テスト2";
     };
 
     /// <summary>指定した経路を実行し、（成功したか, エラーメッセージ）を返す</summary>
-    private async Task<(bool Succeeded, string ErrorMessage)> InvokeImportRouteAsync(string route, string filePath)
+    private async Task<(bool Succeeded, string? ErrorMessage)> InvokeImportRouteAsync(string route, string filePath)
     {
         switch (route)
         {
@@ -3434,6 +3435,7 @@ FEDCBA9876543210,鈴木花子,002,テスト2";
             _dbContextMock.Object,
             _cacheServiceMock.Object,
             _settingsRepositoryMock.Object,
+            new OperationLogger(new Mock<IOperationLogRepository>().Object, Mock.Of<ICurrentOperatorContext>()),
             loggerMock.Object);
 
         // Act

@@ -124,7 +124,8 @@ public class DataExportImportViewModelImportPathSharingTests
     // 直接 ShowXxx を呼んでも、テストは全て緑のまま通り現象がその分岐でだけ再発する。
     // 検出したいのは「新しい分岐が規約から外れたこと」なので、ソーステキストを検査する。
 
-    private const string RunImportSignature = "internal async Task RunImportAsync(string sourceFilePath)";
+    // Issue #2262: 処理中の表示と結果ダイアログは、認証を挟むため RunImportAsync から ImportAndReportAsync へ移した
+    private const string RunImportSignature = "private async Task ImportAndReportAsync(ImportRequest request)";
     private const string HandleImportResultSignature = "private async Task<Action> HandleImportResultAsync(";
     private const string DialogInvocation = "_dialogService.Show";
     private const string DeferredDialogInvoke = "pendingResultDialog?.Invoke()";

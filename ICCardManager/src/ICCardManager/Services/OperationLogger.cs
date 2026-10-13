@@ -407,12 +407,22 @@ namespace ICCardManager.Services
         /// <param name="tableName">対象テーブル名 (<see cref="Tables"/> 定数)</param>
         /// <param name="filePath">インポート元ファイルのフルパス</param>
         /// <param name="insertedCount">新規挿入件数</param>
+        /// <param name="updatedCount">
+        /// 既存データを書き換えた件数（更新・復元・利用履歴詳細の置き換え。Issue #2262）。
+        /// 以前は利用履歴の取り込みが追加と更新を合計して <paramref name="insertedCount"/> に入れており、
+        /// 既存の履歴を書き換えた取り込みかどうかを操作ログから区別できなかった
+        /// </param>
         /// <param name="skippedCount">スキップ件数</param>
         /// <param name="errorCount">エラー件数</param>
+        /// <remarks>
+        /// 取り込み全体についての 1 行。書き換えた行ごとの変更前・変更後は、取り込みと同じトランザクションで
+        /// <c>CsvImportService</c> が別に記録する（Issue #2262）。
+        /// </remarks>
         public async Task LogImportAsync(
             string tableName,
             string filePath,
             int insertedCount,
+            int updatedCount,
             int skippedCount,
             int errorCount)
         {
@@ -423,6 +433,7 @@ namespace ICCardManager.Services
                 FilePath = filePath,
                 FileName = fileName,
                 InsertedCount = insertedCount,
+                UpdatedCount = updatedCount,
                 SkippedCount = skippedCount,
                 ErrorCount = errorCount
             };

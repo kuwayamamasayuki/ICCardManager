@@ -558,6 +558,8 @@ public class OperationLogExcelExportService
             { "FilePath", "ファイルパス" },
             { "FileName", "ファイル名" },
             { "InsertedCount", "登録件数" },
+            // Issue #2262: 取り込みで既存データを書き換えた件数（登録件数とは別に記録する）
+            { "UpdatedCount", "更新件数" },
             { "SkippedCount", "スキップ件数" },
             { "ErrorCount", "エラー件数" },
             { "RecordCount", "出力件数" },
