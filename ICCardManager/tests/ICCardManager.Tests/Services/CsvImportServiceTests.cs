@@ -1025,10 +1025,39 @@ FEDCBA9876543210,鈴木花子,002,テスト2";
         result.ImportedCount.Should().Be(0);
         var error = result.Errors.Should().ContainSingle().Subject;
         error.LineNumber.Should().Be(2, "CSV の 2 行目（ヘッダーの次）の復元に失敗した");
-        error.Message.Should().Be("職員の復元・更新に失敗しました", "通常の更新失敗と区別できる文言で報告するべき");
+        // Issue #2262: 復元の false は「先に復元された」競合。原因を名指しし、通常の更新の競合とは別の文言で報告する
+        error.Message.Should().Be(
+            ICCardManager.Common.ConcurrencyConflictMessage.ForImportRestore("職員「山田太郎」", "職員管理画面（F2）"),
+            "通常の更新失敗と区別できる文言で報告するべき");
         AssertRolledBack(probe);
         _staffRepositoryMock.Verify(x => x.UpdateAsync(It.IsAny<Staff>(), It.IsAny<SQLiteTransaction>()), Times.Never,
             "復元できなかった職員を更新しない（更新は WHERE is_deleted = 0 なので、呼んでも成功しない）");
+    }
+
+    /// <summary>
+    /// Issue #2262: 登録済みの職員の更新が 0 行（他の PC や別の操作で削除された）なら、原因を名指しする行エラーにすること
+    /// </summary>
+    [Fact]
+    public async Task ImportStaffAsync_UpdateAffectsNoRow_ReportsConcurrencyConflict()
+    {
+        var csvContent = @"職員IDm,氏名,職員番号,備考
+0123456789ABCDEF,山田太郎,001,更新";
+        var filePath = Path.Combine(_testDirectory, "staff_update_conflict.csv");
+        await Task.Run(() => File.WriteAllText(filePath, csvContent, CsvEncoding));
+
+        _staffRepositoryMock.Setup(x => x.GetByIdmAsync("0123456789ABCDEF", true))
+            .ReturnsAsync(new Staff { StaffIdm = "0123456789ABCDEF", Name = "山田太郎", Number = "001" });
+        _staffRepositoryMock.Setup(x => x.UpdateAsync(It.IsAny<Staff>(), It.IsAny<SQLiteTransaction>())).ReturnsAsync(false);
+        using var probe = UseObservableTransaction();
+
+        var result = await _service.ImportStaffAsync(filePath);
+
+        result.Success.Should().BeFalse();
+        var error = result.Errors.Should().ContainSingle().Subject;
+        error.LineNumber.Should().Be(2);
+        error.Message.Should().Be(
+            ICCardManager.Common.ConcurrencyConflictMessage.ForImportUpdate("職員「山田太郎」", "職員管理画面（F2）"));
+        AssertRolledBack(probe);
     }
 
     /// <summary>
@@ -1055,7 +1084,8 @@ FEDCBA9876543210,鈴木花子,002,テスト2";
 
         result.Success.Should().BeFalse();
         result.ImportedCount.Should().Be(0);
-        result.Errors.Should().ContainSingle().Which.Message.Should().Be("職員の復元・更新に失敗しました");
+        result.Errors.Should().ContainSingle().Which.Message.Should().Be(
+            ICCardManager.Common.ConcurrencyConflictMessage.ForImportRestore("職員「山田太郎」", "職員管理画面（F2）"));
         AssertRolledBack(probe);
     }
 

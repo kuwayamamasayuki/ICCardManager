@@ -2,6 +2,7 @@
 using System;
 using System.Collections.Generic;
 using System.Data.SQLite;
+using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Security;
@@ -55,7 +56,7 @@ namespace ICCardManager.Services
                 var existingCardIdms = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
                 // 全カードのIDmをキャッシュ（パフォーマンス向上）
-                var allCards = await _cardRepository.GetAllIncludingDeletedAsync().ConfigureAwait(false);
+                var allCards = (await _cardRepository.GetAllIncludingDeletedAsync().ConfigureAwait(false)).ToList();
                 foreach (var card in allCards)
                 {
                     existingCardIdms.Add(card.CardIdm);
@@ -88,6 +89,14 @@ namespace ICCardManager.Services
                         var existingLedger = await _ledgerRepository.GetByIdAsync(parsed.LedgerId.Value).ConfigureAwait(false);
                         if (existingLedger != null)
                         {
+                            // Issue #2262: ID が指す履歴と行のカードが食い違う行は取り込まない（下記 BuildLedgerCardMismatchError）
+                            var cardMismatch = BuildLedgerCardMismatchError(lineNumber, parsed.LedgerId.Value, existingLedger, parsed.CardIdm, allCards);
+                            if (cardMismatch != null)
+                            {
+                                errors.Add(cardMismatch);
+                                continue;
+                            }
+
                             var hasChanges = existingLedger.Summary != parsed.Summary ||
                                             (existingLedger.StaffName ?? "") != parsed.StaffName ||
                                             (existingLedger.Note ?? "") != parsed.Note ||
@@ -370,9 +379,43 @@ namespace ICCardManager.Services
                 return false;
             }
 
+            // 履歴のカード（card_idm）は UpdateAsync が SET しない列。検証で一致を確かめているが、
+            // 変更後の記録には実際に DB にある値を載せる（書いていない値を「変更後」として記録しない）
+            ledger.CardIdm = before.CardIdm;
             ledger.Details = LedgerCloner.Clone(before).Details;
             await _operationLogger.LogLedgerUpdateAsync(before, ledger, transaction).ConfigureAwait(false);
             return true;
+        }
+
+        /// <summary>
+        /// 利用履歴 ID が指す既存の履歴と、行のカード（カードIDm列、空欄なら取り込み先カード）が食い違うときのエラー（Issue #2262）
+        /// </summary>
+        /// <returns>一致すれば <c>null</c></returns>
+        /// <remarks>
+        /// 履歴の更新（<c>LedgerRepository.UpdateAsync</c>）はカード（<c>card_idm</c>）を書き換えない。食い違う行を
+        /// 更新として受け付けると、別のカードの履歴の摘要・金額・残額を、そのカードの残高チェーンの検証を経ないまま
+        /// 書き換え、操作ログの「変更後」には実際には書いていないカードが載る。カードを付け替える取り込みは
+        /// 想定していないため、検証エラーにする（プレビューにも同じエラーを出す）。
+        /// IDm は画面に出さない（#1986）。登録済みのカードはカード種別と管理番号で名指しする。
+        /// </remarks>
+        private static CsvImportError? BuildLedgerCardMismatchError(
+            int lineNumber, int ledgerId, Ledger existingLedger, string rowCardIdm, IEnumerable<IcCard> cards)
+        {
+            if (string.Equals(existingLedger.CardIdm, rowCardIdm, StringComparison.OrdinalIgnoreCase))
+            {
+                return null;
+            }
+
+            var owner = cards.FirstOrDefault(c => string.Equals(c.CardIdm, existingLedger.CardIdm, StringComparison.OrdinalIgnoreCase));
+            var ownerLabel = owner != null ? $"「{$"{owner.CardType} {owner.CardNumber}".Trim()}」" : "（登録されていないカード）";
+            return new CsvImportError
+            {
+                LineNumber = lineNumber,
+                Message = $"利用履歴ID {ledgerId.ToString(CultureInfo.InvariantCulture)} は別の交通系ICカード{ownerLabel}の履歴で、" +
+                          "この行のカードと一致しないため取り込めません。利用履歴IDとカードIDm列（または取り込み先カード）を確認し、" +
+                          "新しい履歴として取り込む場合は利用履歴IDを空欄にしてください。",
+                Data = ledgerId.ToString(CultureInfo.InvariantCulture)
+            };
         }
 
         /// <summary>
@@ -477,6 +520,14 @@ namespace ICCardManager.Services
                         var existingLedger = await _ledgerRepository.GetByIdAsync(ledgerId.Value).ConfigureAwait(false);
                         if (existingLedger != null)
                         {
+                            // Issue #2262: 取り込みと同じ検証（ID が指す履歴と行のカードの食い違い）をプレビューでも行う
+                            var cardMismatch = BuildLedgerCardMismatchError(lineNumber, ledgerId.Value, existingLedger, cardIdm, allCards);
+                            if (cardMismatch != null)
+                            {
+                                errors.Add(cardMismatch);
+                                continue;
+                            }
+
                             // Issue #639: 金額・日付を含む全フィールドで変更点を検出
                             DetectLedgerChanges(existingLedger, date, summary, income, expense, balance, staffName, note, companionCount, changes);
                             if (changes.Count > 0)

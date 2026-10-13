@@ -438,6 +438,55 @@ public partial class DataExportImportViewModel : ViewModelBase
             TouchedCardInfo = string.Empty;
             IsWaitingForCardTouch = false;
         }
+
+        DiscardPreviewBecauseImportConditionsChanged();
+    }
+
+    // Issue #2262: 取り込みの条件（データ種別・既存データのスキップ・取り込み先カード）が変わったらプレビューを破棄する。
+    // 取り込み先カードは GetTargetCardIdm が UseCardListSelection / SelectedTargetCard / TouchedCardIdm から決める。
+    partial void OnSkipExistingOnImportChanged(bool value) => DiscardPreviewBecauseImportConditionsChanged();
+
+    partial void OnSelectedTargetCardChanged(CardDto? value) => DiscardPreviewBecauseImportConditionsChanged();
+
+    partial void OnTouchedCardIdmChanged(string value) => DiscardPreviewBecauseImportConditionsChanged();
+
+    partial void OnUseCardListSelectionChanged(bool value) => DiscardPreviewBecauseImportConditionsChanged();
+
+    /// <summary>
+    /// 取り込みの条件を変えたためにプレビューを破棄したときの案内（Issue #2262）
+    /// </summary>
+    internal const string PreviewDiscardedByConditionChangeMessage =
+        "取り込みの条件（データ種別・既存データのスキップ・取り込み先カード）を変えたため、表示していたプレビューをクリアしました。" +
+        "この条件で取り込む場合は、あらためて「プレビュー」で内容を確認してから「インポート実行」を押してください。";
+
+    /// <summary>
+    /// 取り込みの条件が変わったら、表示中のプレビューを破棄する（Issue #2262）
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// 「インポート実行」（<see cref="ExecuteImportAsync"/>）は、実行した時点の画面の条件で取り込む。プレビューを残したまま
+    /// 条件だけを変えられると、カード A 宛てにプレビューしてカード B に変えて実行する・「既存データをスキップする」を
+    /// 外して実行する、といった<b>プレビューと違う内容</b>を、認証した職員の操作として取り込めてしまう
+    /// （直接インポートを禁じて「確かめてから認証させる」とした理由が空になる）。
+    /// </para>
+    /// <para>
+    /// プレビュー時の条件を保存して実行時にそれを使う方式は採らない。画面の表示（変えた後の条件）と実際に取り込む条件
+    /// （プレビュー時の条件）が食い違い、職員は画面で見ている条件で取り込まれたと思い込む。条件を変えたら破棄して
+    /// プレビューからやり直させれば、画面に出ている条件・プレビュー・取り込む内容の 3 つが常に一致する。
+    /// 取り込むファイルはプレビュー時に <see cref="ImportPreviewFile"/> として確定しており、別のファイルを選んで
+    /// プレビューすると読み込む前にプレビューを破棄する（<see cref="PreviewImportAsync"/>）ため、ファイルの食い違いは起きない。
+    /// </para>
+    /// </remarks>
+    private void DiscardPreviewBecauseImportConditionsChanged()
+    {
+        if (!HasPreview && ImportPreview == null)
+        {
+            return;
+        }
+
+        ClearPreview();
+        ImportErrors.Clear();
+        SetStatus(PreviewDiscardedByConditionChangeMessage, false);
     }
 
     /// <summary>

@@ -7,6 +7,7 @@ using CommunityToolkit.Mvvm.Messaging;
 using FluentAssertions;
 using ICCardManager.Data;
 using ICCardManager.Data.Repositories;
+using ICCardManager.Dtos;
 using ICCardManager.Infrastructure.Caching;
 using ICCardManager.Infrastructure.Timing;
 using ICCardManager.Services;
@@ -2596,6 +2597,74 @@ public class DataExportImportViewModelTests : IDisposable
     {
         var logs = await _operationLogRepository.GetByDateRangeAsync(DateTime.Today.AddDays(-1), DateTime.Today.AddDays(1));
         logs.Should().NotContain(l => l.Action == OperationLogger.Actions.Import);
+    }
+
+    #endregion
+
+    #region Issue #2262: プレビューと取り込みの条件を結び付けること（レビュー指摘）
+
+    /// <summary>
+    /// 欠陥を突く側: プレビューの後で取り込みの条件を変えたら、プレビューを破棄し、
+    /// 「インポート実行」で変えた後の条件の取り込みを行わないこと
+    /// （カード A 宛てにプレビューしてカード B に変えて実行すると、プレビューと違う内容を取り込めた）
+    /// </summary>
+    [Theory]
+    [InlineData("取り込み先カード")]
+    [InlineData("既存データのスキップ")]
+    [InlineData("データ種別")]
+    [InlineData("カードの指定方法")]
+    [InlineData("タッチしたカード")]
+    public async Task 取り込みの条件を変えたらプレビューを破棄し古いプレビューで取り込まないこと(string condition)
+    {
+        SetupValidPreview(DataType.Ledgers);
+        _viewModel.SelectedTargetCard = new CardDto { CardIdm = "0000000000000001", CardType = "はやかけん", CardNumber = "001" };
+        SetupValidPreview(DataType.Ledgers);
+
+        switch (condition)
+        {
+            case "取り込み先カード":
+                _viewModel.SelectedTargetCard = new CardDto { CardIdm = "0000000000000002", CardType = "nimoca", CardNumber = "002" };
+                break;
+            case "既存データのスキップ":
+                _viewModel.SkipExistingOnImport = !_viewModel.SkipExistingOnImport;
+                break;
+            case "データ種別":
+                _viewModel.SelectedImportType = DataType.LedgerDetails;
+                break;
+            case "カードの指定方法":
+                _viewModel.UseCardListSelection = !_viewModel.UseCardListSelection;
+                break;
+            case "タッチしたカード":
+                _viewModel.TouchedCardIdm = "0000000000000003";
+                break;
+        }
+
+        _viewModel.HasPreview.Should().BeFalse("条件を変えたプレビューは、取り込む内容を示していない");
+        _viewModel.StatusMessage.Should().Be(DataExportImportViewModel.PreviewDiscardedByConditionChangeMessage);
+
+        await _viewModel.ExecuteImportAsync();
+
+        _staffAuthServiceMock.Verify(s => s.RequestAuthenticationAsync(It.IsAny<string>()), Times.Never);
+        _importServiceMock.Verify(s => s.ImportLedgersAsync(It.IsAny<string>(), It.IsAny<bool>(), It.IsAny<string?>()), Times.Never);
+        _importServiceMock.Verify(s => s.ImportLedgerDetailsAsync(It.IsAny<string>()), Times.Never);
+    }
+
+    /// <summary>
+    /// 正当な挙動を塞いでいない側: 条件を変えずに「インポート実行」を押せば、プレビューした条件で取り込むこと
+    /// </summary>
+    [Fact]
+    public async Task 条件を変えなければプレビューした条件で取り込むこと()
+    {
+        _viewModel.SelectedImportType = DataType.Ledgers;
+        _viewModel.SelectedTargetCard = new CardDto { CardIdm = "0000000000000001", CardType = "はやかけん", CardNumber = "001" };
+        SetupValidPreview(DataType.Ledgers);
+        _importServiceMock
+            .Setup(s => s.ImportLedgersAsync(It.IsAny<string>(), It.IsAny<bool>(), It.IsAny<string?>()))
+            .ReturnsAsync(new CsvImportResult { Success = true, ImportedCount = 1 });
+
+        await _viewModel.ExecuteImportAsync();
+
+        _importServiceMock.Verify(s => s.ImportLedgersAsync("test.csv", true, "0000000000000001"), Times.Once);
     }
 
     #endregion

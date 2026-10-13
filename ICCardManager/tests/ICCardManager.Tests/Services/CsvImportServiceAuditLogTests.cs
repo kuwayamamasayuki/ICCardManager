@@ -319,6 +319,33 @@ FROM operation_log WHERE target_table = @table AND action <> 'IMPORT' ORDER BY i
 
     #endregion
 
+    /// <summary>
+    /// 欠陥を突く側: 利用履歴 ID が別のカードの履歴を指す行は、更新せず検証エラーにすること（プレビューにも出す）。
+    /// 更新はカードを書き換えないため、受け付けると別のカードの履歴を書き換え、操作ログの変更後に書いていないカードが載る
+    /// </summary>
+    [Fact]
+    public async Task ImportLedgersAsync_利用履歴IDが別のカードの履歴を指す行は取り込まずプレビューにも出すこと()
+    {
+        var ledgerId = await SeedLedgerAsync();
+        await ExecuteAsync("INSERT INTO ic_card (card_idm, card_type, card_number) VALUES ('1111111111111111', 'nimoca', '002')");
+        var line = $"{ledgerId},2025-01-10 00:00:00,1111111111111111,002,役務費によりチャージ,10000,,10000,,変更後の備考,0";
+        var csv = WriteCsv(LedgerHeader, line);
+        var service = CreateService();
+
+        var preview = await service.PreviewLedgersAsync(csv);
+        var result = await service.ImportLedgersAsync(csv);
+
+        preview.IsValid.Should().BeFalse();
+        preview.Errors.Should().ContainSingle().Which.LineNumber.Should().Be(2);
+        result.Success.Should().BeFalse();
+        var error = result.Errors.Should().ContainSingle().Subject;
+        error.LineNumber.Should().Be(2);
+        error.Message.Should().Contain("別の交通系ICカード「はやかけん 001」").And.EndWith("してください。");
+        error.Message.Should().NotContain(TestCardIdm).And.NotContain("1111111111111111", "IDm は画面に出さない（#1986）");
+        (await _ledgerRepository.GetByIdAsync(ledgerId))!.Note.Should().Be("変更前の備考");
+        (await GetRowLogsAsync(OperationLogger.Tables.Ledger)).Should().BeEmpty();
+    }
+
     #region 職員の登録・変更・復元
 
     /// <summary>

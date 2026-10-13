@@ -8,6 +8,7 @@ using System.Security;
 using System.Text;
 using System.Text.RegularExpressions;
 using System.Threading.Tasks;
+using ICCardManager.Common;
 using ICCardManager.Common.Exceptions;
 using ICCardManager.Data;
 using ICCardManager.Data.Repositories;
@@ -184,8 +185,12 @@ namespace ICCardManager.Services
                     }
                     else
                     {
-                        var message = isRestore ? "職員の復元・更新に失敗しました"
-                            : isUpdate ? "職員の更新に失敗しました"
+                        // Issue #2262 / #1759: 更新・復元の false は「対象が削除された」「先に復元された」競合
+                        // （影響行数 0。WHERE の is_deleted で決まる）。原因を名指しする。登録の false は
+                        // InsertAsync が一過性でない SQLite の失敗をすべて畳むため原因を断定できず、従来の文言のまま
+                        var target = $"職員「{staff.Name}」";
+                        var message = isRestore ? ConcurrencyConflictMessage.ForImportRestore(target, StaffManagementScreenName)
+                            : isUpdate ? ConcurrencyConflictMessage.ForImportUpdate(target, StaffManagementScreenName)
                             : "職員の登録に失敗しました";
                         errors.Add(new CsvImportError
                         {
@@ -320,6 +325,9 @@ namespace ICCardManager.Services
 
             return true;
         }
+
+        /// <summary>職員の状態を確かめる画面（取り込みの競合の案内に使う）</summary>
+        private const string StaffManagementScreenName = "職員管理画面（F2）";
 
         /// <summary>
         /// 氏名・職員番号・備考が同じか（職員番号・備考の空欄と null は同じ未設定として比べる。#1808）
