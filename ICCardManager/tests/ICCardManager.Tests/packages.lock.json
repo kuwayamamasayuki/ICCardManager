@@ -65,6 +65,12 @@
           "Microsoft.TestPlatform.ObjectModel": "17.10.0"
         }
       },
+      "YamlDotNet": {
+        "type": "Direct",
+        "requested": "[16.3.0, )",
+        "resolved": "16.3.0",
+        "contentHash": "SgMOdxbz8X65z8hraIs6hOEdnkH6hESTAIUa7viEngHOYaH+6q5XJmwr1+yb9vJpNQ19hCQY69xbFsLtXpobQA=="
+      },
       "Castle.Core": {
         "type": "Transitive",
         "resolved": "5.2.1",
@@ -514,7 +520,7 @@
         "dependencies": {
           "CommunityToolkit.Mvvm": "[8.4.2, )",
           "FelicaLib.DotNet": "[1.2.67, )",
-          "ICCardManager": "[2.10.0, )",
+          "ICCardManager": "[2.11.1, )",
           "Microsoft.Extensions.DependencyInjection": "[8.0.1, )",
           "Microsoft.Extensions.Logging": "[8.0.1, )",
           "Microsoft.Extensions.Logging.Debug": "[8.0.1, )",

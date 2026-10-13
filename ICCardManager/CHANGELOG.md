@@ -114,8 +114,9 @@
 - Issue #2271 **GitHub Actions のトークン権限を読み取りに限り、release.yml がタグ名をスクリプトへ直接埋め込んでいたのを環境変数で渡すようにした**（セキュリティ）
   - ci.yml・screenshot-sync-check.yml・test-count-sync-check.yml・vulnerability-scan.yml には `permissions:` の宣言が無く、push・schedule・手動実行の `GITHUB_TOKEN` はリポジトリ設定の既定の権限（設定によっては write）で動いていた。全ワークフローの最上位に `permissions: contents: read` を置き、書き込みは release.yml の `build-release` ジョブの `contents: write`（GitHub Release の作成）だけに限った
   - release.yml は `run:` の中に `${{ github.ref_name }}` を直接書いており、式はシェルが読む前にスクリプトへ埋め込まれるため、`$` や `(` `)` を含むタグ名が pwsh の式として実行され得た（タグを push できるのは書き込み権限者だけなので権限の上昇にはならない）。ジョブの `env: REF_NAME` で渡し、スクリプトでは `$env:REF_NAME` で読む
-  - 静的検査 `CiWorkflowConventionTests` に 5 件を追加: 全ワークフローの最上位の権限が read / none だけであること、書き込み権限が理由付きの許可リストにあるジョブだけであり許可リストの権限が実際に宣言されていること、`run:` の中の式が参照するコンテキストが `matrix` / `strategy` / `runner` に限られること（禁止する名前ではなく許すコンテキストを列挙し、`env` / `steps.*.outputs` を経由して戻す経路も塞ぐ）、検出ロジック 2 件
-  - 開発者ガイド §5.9 にワークフローを書くときの規約を追加した
+  - 静的検査 `CiWorkflowConventionTests` に 5 件を追加: 全ワークフローの最上位の権限が read / none だけであること、書き込み権限が理由付きの許可リストにあるジョブだけであり許可リストの権限が実際に宣言されていること、`run:` の中の式が参照するコンテキストが `matrix` / `strategy` / `runner` に限られること（禁止する名前ではなく許すコンテキストを列挙し、`env` / `steps.*.outputs` を経由して戻す経路も塞ぐ）、検出ロジック 2 件。あわせて `strategy:`（matrix）の定義に式が無いこと（matrix を許す前提）と、入力をコードとして実行する `actions/github-script` を使っていないことを同じテストで表明する
+  - 検査はワークフローを YAML パーサー（テストプロジェクトに追加した YamlDotNet 16.3.0、MIT）で構文木として読む。行単位の正規表現で読む実装は、レビューのたびに読めない書き方（引用符付きのキーやジョブ名・1 行のジョブ・値を次の行に書いた `run:`・エイリアス等）を「無い」と読んで素通りさせていた。読めないファイル・想定の形でない節は例外で赤にする。式の範囲は文字列リテラルの中の `}}` で切らない
+  - 開発者ガイド §5.9 にワークフローを書くときの規約を追加した（`actions/github-script` の `with: script:` は「`with:` はシェルを通らない」の例外であることも注記）。THIRD_PARTY_LICENSES.md §2 に YamlDotNet を追加した
   - 単体テスト +5（`CiWorkflowConventionTests` 29→34）で 9,216→9,221、合計 9,333→9,338
 - Issue #2246 **リリース公開スクリプトがリリースノートを空のまま「更新完了」と表示していたのを直した**
   - `tools/publish-release.ps1` は本文を stdin で `wsl.exe gh release edit --notes-file -` へ渡していたが、pwsh → wsl.exe → gh のあいだで本文が届かず、gh は空の本文を正常に処理して終了コード 0 を返していた。終了コードだけを見ていたため、v2.9.5・v2.10.0・v2.11.0 の本文は空のまま残った

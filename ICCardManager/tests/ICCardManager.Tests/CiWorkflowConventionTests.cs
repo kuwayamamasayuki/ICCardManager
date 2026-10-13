@@ -5,6 +5,7 @@ using System.Linq;
 using System.Text.RegularExpressions;
 using FluentAssertions;
 using Xunit;
+using YamlDotNet.RepresentationModel;
 
 namespace ICCardManager.Tests;
 
@@ -30,7 +31,7 @@ namespace ICCardManager.Tests;
 /// <c>${{ }}</c> の式の中にだけあるフラグ（片方の構成でしか付かない）は「付いている」とみなさないようにした。
 /// </para>
 /// <para>
-/// ワークフローは YAML だが、テストプロジェクトに YAML パーサーは無いため行単位で読む。
+/// ワークフローは YAML だが、①〜⑥の節は行単位で読む（⑦の節は Issue #2271 で入れた YamlDotNet で構文木として読む）。
 /// 読み取りの前提（字下げ・1 行 1 コマンド）が崩れたときは<b>赤へ倒れる</b>よう書いている
 /// （例: <c>dotnet test</c> を複数行へ折り返すと、フラグの無い行として検出される）。
 /// 検出ロジック自体は既知のサンプル入力で固定する（#1786「空振り検出を実データの非空で書かない」）。
@@ -1141,6 +1142,12 @@ jobs:
 
     #region ⑦トークンの権限と run への式の展開（Issue #2271）
 
+    // この節はワークフローを YamlDotNet で構文木として読む（他の節は行単位で読む）。
+    // 行単位の正規表現で読む実装は、レビューのたびに新しい読み落とし（フロー形式・引用符付きのキーやジョブ名・
+    // 1 行のジョブ・字下げの違い・値を次の行に書いた run:・エイリアス *cmd）が見つかった。読めない書き方は
+    // 「宣言が無い」「run が無い」と読まれて検査を素通りする。パーサーなら YAML として有効な書き方はすべて
+    // 同じ構文木になり、エイリアスも解決される。パーサーが読めないファイル・想定の形でない節は例外として赤にする（fail-closed）。
+
     /// <summary>
     /// ジョブ単位で書き込み権限を与えてよい組（ワークフロー・ジョブ・スコープ）と、その理由。
     /// 最上位は読み取りだけを宣言し、書き込みが要るジョブだけがここに載せたうえで広げる（Issue #2271）。
@@ -1158,6 +1165,7 @@ jobs:
     /// <c>env</c> と <c>steps</c> も載せない。<c>env: REF_NAME: ${{ github.ref_name }}</c> の値を
     /// <c>${{ env.REF_NAME }}</c> で run へ展開すれば、環境変数で渡した意味が無くなる（<c>steps.*.outputs</c> も同じ）。
     /// 外から来る値は <c>env:</c> で渡し、スクリプトの中では <c>$env:NAME</c>（pwsh）／<c>"$NAME"</c>（bash）で読む。
+    /// <c>matrix</c> / <c>strategy</c> を許す前提（値がファイルに固定されている）は、<c>strategy:</c> に式が無いことで併せて表明する。
     /// </remarks>
     private static readonly HashSet<string> ContextsAllowedInRun = new(StringComparer.Ordinal) { "matrix", "strategy", "runner" };
 
@@ -1177,7 +1185,7 @@ jobs:
             "  # pull-requests: write\n" +
             "  actions: none # 理由\n" +
             "\n" +
-            "jobs:  # ジョブの一覧（行末コメント付きの見出しも読む）\n" +
+            "jobs:  # ジョブの一覧\n" +
             "  build:\n" +
             "    runs-on: windows-latest\n" +
             "    permissions:\n" +
@@ -1206,53 +1214,53 @@ jobs:
             "  six:\n" +
             "        runs-on: windows-latest\n" +
             "        permissions:\n" +
-            "          contents: write\n";
-        const string oneLineJob = "  oneline: { runs-on: windows-latest, permissions: write-all }\n";
+            "          contents: write\n" +
+            "  oneline: { runs-on: windows-latest, permissions: write-all }\n";
 
-        var topLevel = ExtractPermissions(workflow, 0);
-        topLevel.Should().NotBeNull();
-        topLevel!.Should().BeEquivalentTo(new Dictionary<string, string> { ["contents"] = "read", ["actions"] = "none" },
-            "コメント行・行末コメントは権限として数えず、次の最上位のキー（jobs:）で止まる");
-        IsReadOnly(topLevel!).Should().BeTrue();
+        var root = LoadWorkflow(workflow);
+        ReadPermissions(root).Should().BeEquivalentTo(new Dictionary<string, string> { ["contents"] = "read", ["actions"] = "none" },
+            "コメントは権限として数えない");
+        IsReadOnly(ReadPermissions(root)!).Should().BeTrue();
 
-        var jobs = ExtractJobs(workflow);
-        jobs.Keys.Should().Equal(new[] { "build", "other", "flow", "quoted", "readonly", "inherits", "publish-docs", "six" },
-            "行末コメント付きの jobs: を読めないとジョブが 0 件になり、引用符付きのジョブ名を読めないと直前のジョブ（inherits）の本文に混ざる");
-        jobs["inherits"].Should().NotContain("write-all", "引用符付きのジョブ名を見出しとして読めないと、後ろのジョブの宣言が前のジョブの本文に入る");
-        ExtractPermissions(jobs["build"], 4).Should().BeEquivalentTo(new Dictionary<string, string> { ["contents"] = "write" });
-        ExtractPermissions(jobs["other"], 4).Should().BeEquivalentTo(new Dictionary<string, string> { ["*"] = "write-all" },
+        WorkflowJobs(root).Select(j => j.Name).Should().Equal(
+            new[] { "build", "other", "flow", "quoted", "readonly", "inherits", "publish-docs", "six", "oneline" },
+            "引用符付きのジョブ名・1 行のジョブ・字下げの違うジョブも、同じジョブとして読む");
+
+        YamlMappingNode Job(string name) => (YamlMappingNode)WorkflowJobs(root).Single(j => j.Name == name).Node;
+        ReadPermissions(Job("build")).Should().BeEquivalentTo(new Dictionary<string, string> { ["contents"] = "write" });
+        ReadPermissions(Job("other")).Should().BeEquivalentTo(new Dictionary<string, string> { ["*"] = "write-all" },
             "1 行の形（write-all / read-all）はスコープ「*」として返す");
-        ExtractPermissions(jobs["flow"], 4).Should().BeEquivalentTo(new Dictionary<string, string> { ["contents"] = "write", ["checks"] = "read" },
-            "フロー形式を読めないと、その宣言は「無い」ことになり書き込みの検査を素通りする");
-        ExtractPermissions(jobs["quoted"], 4).Should().BeEquivalentTo(new Dictionary<string, string> { ["contents"] = "write", ["pull-requests: [write]"] = "?" },
-            "引用符は剥がして照合し、読めない形は「?」として残す（読み飛ばさない）");
-        ExtractPermissions(jobs["inherits"], 4).Should().BeNull();
-        ExtractPermissions(jobs["build"], 0).Should().BeNull("ジョブの宣言を最上位の宣言と取り違えない");
+        ReadPermissions(Job("flow")).Should().BeEquivalentTo(new Dictionary<string, string> { ["contents"] = "write", ["checks"] = "read" });
+        ReadPermissions(Job("quoted")).Should().BeEquivalentTo(new Dictionary<string, string> { ["contents"] = "write", ["pull-requests"] = "?" },
+            "引用符は値として解決し、スカラーでない値は「?」として残す（読み飛ばさない）");
+        ReadPermissions(Job("inherits")).Should().BeNull("宣言の無いジョブは最上位を引き継ぐ");
 
-        JobPermissions("sample.yml", workflow).Where(g => !IsAllowedJobPermission(g))
+        JobPermissions("sample.yml", root).Where(g => !IsAllowedJobPermission(g))
             .Select(g => $"{g.Job} {g.Scope}: {g.Value}")
             .Should().Equal(
                 new[]
                 {
                     "build contents: write", "other *: write-all", "flow contents: write", "quoted contents: write",
-                    "quoted pull-requests: [write]: ?", "publish-docs *: write-all", "six contents: write",
+                    "quoted pull-requests: ?", "publish-docs *: write-all", "six contents: write", "oneline *: write-all",
                 },
-                "許可リストに無い write・write-all・読めない宣言を違反とし、read はそのまま通す（fail-closed）。" +
-                "ジョブ本文の字下げは決め打ちせず、本文の最初の行から読む（six は字下げ 8）");
-
-        PermissionsKeyCount(workflow).Should().Be(ReadPermissionsDeclarationCount(workflow),
-            "読める書き方だけなら、permissions: のキーの数と読めた宣言の数は一致する（コメントの permissions: は数えない）");
-        PermissionsKeyCount(workflow + oneLineJob).Should().Be(ReadPermissionsDeclarationCount(workflow + oneLineJob) + 1,
-            "1 行で書いたジョブの permissions: は読めない。読めない宣言は件数の食い違いとして赤にする（fail-closed）");
+                "許可リストに無い write・write-all・読めない宣言を違反とし、read はそのまま通す（fail-closed）");
         IsAllowedJobPermission(("release.yml", "build-release", "contents", "write")).Should().BeTrue("許可リストに載せた書き込みは通す");
         IsAllowedJobPermission(("release.yml", "build-release", "checks", "write")).Should().BeFalse("許可はスコープ単位");
-        ExtractPermissions("name: X\njobs:\n  a:\n    permissions:\n      contents: read\n", 0).Should().BeNull(
+
+        ReadPermissions(LoadWorkflow("name: X\njobs:\n  a:\n    permissions:\n      contents: read\n")).Should().BeNull(
             "最上位に宣言が無いワークフローを、ジョブの宣言で「ある」とみなさない");
+        IsReadOnly(ReadPermissions(LoadWorkflow("permissions:\njobs: {}\n"))!).Should().BeFalse("値の無い permissions: は読み取りの宣言ではない");
 
         IsReadOnly(new Dictionary<string, string> { ["contents"] = "read", ["checks"] = "write" }).Should().BeFalse();
         IsReadOnly(new Dictionary<string, string> { ["*"] = "read-all" }).Should().BeFalse(
             "read-all は使わないスコープまで読めるようにする。必要なスコープを列挙して宣言する");
         IsReadOnly(new Dictionary<string, string>()).Should().BeFalse("何も宣言しない形は、contents: read を欠いて checkout が失敗し得る");
+
+        // パーサーが読めないファイル・想定の形でない節は、読み飛ばさず例外にする（fail-closed）
+        FluentActions.Invoking(() => LoadWorkflow("jobs: [\n")).Should().Throw<Exception>("YAML として読めないファイル");
+        FluentActions.Invoking(() => LoadWorkflow("- a\n")).Should().Throw<InvalidDataException>("最上位が対応表でない");
+        FluentActions.Invoking(() => LoadWorkflow("jobs:\n  a: {}\n  a: {}\n")).Should().Throw<Exception>("重複したキーは後勝ちで片方を読み落とす");
+        FluentActions.Invoking(() => WorkflowJobs(LoadWorkflow("jobs: [ a ]\n"))).Should().Throw<InvalidDataException>("jobs: が対応表でない");
     }
 
     [Fact]
@@ -1263,6 +1271,7 @@ jobs:
             "  a:\n" +
             "    env:\n" +
             "      REF_NAME: ${{ github.ref_name }}\n" +
+            "      CMD: &cmd echo ${{ github.head_ref }} via alias\n" +
             "    defaults:\n" +
             "      run:\n" +
             "        working-directory: ${{ github.workspace }}\n" +
@@ -1285,6 +1294,15 @@ jobs:
             "    - name: Folded plain scalar\n" +
             "      run: echo start\n" +
             "        ${{ github.event.head_commit.message }}\n" +
+            "    - name: Value on the next line\n" +
+            "      run:\n" +
+            "        echo ${{ github.base_ref }}\n" +
+            "    - name: Alias\n" +
+            "      run: *cmd\n" +
+            "    - name: Closing braces in a string literal\n" +
+            "      run: echo ${{ format('}}', github.ref_name) }}\n" +
+            "    -   run: echo ${{ inputs.spaced }}\n" +
+            "    - { name: Flow, run: \"echo ${{ github.actor }}\" }\n" +
             "    - name: Safe\n" +
             "      run: dotnet build ${{ matrix.configuration == 'Release' && '--collect:\"github.ref\"' || '' }} \"$env:REF_NAME\"\n" +
             "    - name: Release\n" +
@@ -1292,12 +1310,15 @@ jobs:
             "      with:\n" +
             "        name: ${{ github.ref_name }}\n";
 
-        var scripts = ExtractRunScripts(workflow);
-        scripts.Should().HaveCount(6, "1 行の run・run: |・run: >-（- run: の形も）を拾い、コメント行と defaults: の run: は数えない");
-        scripts[1].Should().Contain("Write-Host").And.NotContain("shell: pwsh", "ブロックは run: より深い字下げの行までで、同じ字下げの shell: で止まる");
-        scripts[3].Should().Be("echo \"$env:PR_TITLE\"",
-            "- run: | の本文は「- 」の後ろのキーより深い行まで。同じステップの env: を本文に含めると、env: で渡す推奨の形を誤検出する");
-        scripts[4].Should().Be("echo start\n${{ github.event.head_commit.message }}", "次の行へ折り返したスカラーも run の値として読む");
+        var root = LoadWorkflow(workflow);
+        var scripts = RunScripts(root);
+        scripts.Should().HaveCount(11, "steps の run だけを読む（defaults: の run: は対応表で、スクリプトではない。コメントは数えない）");
+        scripts[1].Should().Be("$v = \"${{ github.head_ref }}\"\nWrite-Host ${{ matrix.configuration }}\n",
+            "ブロックの本文は同じステップの shell: を含まない");
+        scripts[3].Should().Be("echo \"$env:PR_TITLE\"\n", "同じステップの env: は本文に含まない（env: で渡す推奨の形を誤検出しない）");
+        scripts[4].Should().Be("echo start ${{ github.event.head_commit.message }}", "次の行へ折り返したスカラーも 1 つの値として読む");
+        scripts[5].Should().Be("echo ${{ github.base_ref }}", "値を次の行に書いた run: も読む");
+        scripts[6].Should().Be("echo ${{ github.head_ref }} via alias", "エイリアスは参照先の値として読む");
 
         string[] Roots(string expression) => ExtractContextRoots(expression).ToArray();
 
@@ -1313,23 +1334,26 @@ jobs:
             "文字列リテラルの中の語はコンテキストではない");
         Roots("${{ true && matrix.my-key }}").Should().Equal(new[] { "matrix" }, "true / false / null はリテラル");
 
-        UntrustedExpansions(workflow).Should().Equal(
+        ExtractExpressions("echo ${{ format('}}', github.ref_name) }} done").Should().Equal(
+            new[] { "${{ format('}}', github.ref_name) }}" },
+            "文字列リテラル（'' でエスケープ）の中の }} は式の終わりではない");
+        ExtractExpressions("a ${{ 'it''s }}' }} b ${{ x }}").Should().Equal(new[] { "${{ 'it''s }}' }}", "${{ x }}" });
+
+        UntrustedExpansions(root).Should().Equal(
             "echo ${{ github.ref_name }}",
             "$v = \"${{ github.head_ref }}\"",
             "echo ${{ inputs.tag }}",
-            "${{ github.event.head_commit.message }}");
+            "echo start ${{ github.event.head_commit.message }}",
+            "echo ${{ github.base_ref }}",
+            "echo ${{ github.head_ref }} via alias",
+            "echo ${{ format('}}', github.ref_name) }}",
+            "echo ${{ inputs.spaced }}",
+            "echo ${{ github.actor }}");
 
-        // 読めない形の run は件数の食い違いで赤にする（fail-closed）。書き方を数え上げて読む方式は、読めない形を「無い」と読む
-        RunKeyCount(workflow).Should().Be(RecognizedRunKeyCount(workflow), "読める書き方だけなら一致する（コメントの run: は数えない）");
-        const string unreadableRuns =
-            "    steps:\n" +
-            "    -   run: echo ${{ github.ref_name }}\n" +
-            "    - { name: Flow, run: echo x }\n";
-        RunKeyCount(unreadableRuns).Should().Be(2);
-        RecognizedRunKeyCount(unreadableRuns).Should().Be(0, "-   run: とフロー形式のステップは見出しとして読めない");
-
-        UntrustedExpansions("    - run: |\n        echo ${{ github\n          .ref_name }}\n        echo ${{ matrix.os }}\n").Should().Equal(
-            new[] { "echo ${{ github" }, "行をまたぐ式は中身を読めないので違反とし、行内で閉じた許可済みの式は通す");
+        UntrustedExpansions(LoadWorkflow(
+                "jobs:\n  a:\n    steps:\n    - run: |\n        echo ${{ github\n          .ref_name }}\n        echo ${{ matrix.os }}\n        echo ${{ github.ref_name\n"))
+            .Should().Equal(new[] { "echo ${{ github", "echo ${{ github.ref_name" },
+                "行をまたぐ式も中身で判定し、閉じていない式は読めないので違反とする。閉じた許可済みの式は通す");
 
         const string strategies =
             "jobs:\n" +
@@ -1345,14 +1369,24 @@ jobs:
             "      matrix:\n" +
             "        tag: ${{ fromJSON(inputs.tags) }}\n" +
             "  whole:\n" +
-            "    strategy:\n" +
+            "    'strategy':\n" +
             "      matrix: ${{ fromJSON(needs.a.outputs.m) }} # 1 行で\n";
-        StrategyLinesWithExpressions(strategies).Should().Equal(
-            new[] { "tag: ${{ fromJSON(inputs.tags) }}", "matrix: ${{ fromJSON(needs.a.outputs.m) }} # 1 行で" },
-            "matrix を外から決めると、run で matrix を許す前提が崩れる。固定値の matrix と、strategy の外（steps）の式は数えない");
+        StrategyExpressions(LoadWorkflow(strategies)).Should().Equal(
+            new[] { "dynamic: ${{ fromJSON(inputs.tags) }}", "whole: ${{ fromJSON(needs.a.outputs.m) }}" },
+            "matrix を外から決めると、run で matrix を許す前提が崩れる。引用符付きのキーも読み、固定値の matrix と strategy の外（steps）の式は数えない");
 
-        ExecutesInputAsCode("actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7.0.1").Should().BeTrue();
-        ExecutesInputAsCode("actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1").Should().BeFalse();
+        UsesReferences(LoadWorkflow(
+                "jobs:\n  a:\n    steps:\n    - uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7.0.1\n      with:\n        script: x\n    - { uses: actions/checkout@v7 }\n  b:\n    uses: ./.github/workflows/reusable.yml\n"))
+            .Should().Equal(
+                new[] { "./.github/workflows/reusable.yml", "actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea", "actions/checkout@v7" },
+                "ジョブ単位（再利用可能なワークフロー）とステップの uses を、フロー形式のステップも含めて読む（行末のコメントは値に含めない）");
+        ExecutesInputAsCode("actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea").Should().BeTrue();
+        ExecutesInputAsCode("actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1").Should().BeFalse();
+
+        FluentActions.Invoking(() => RunScripts(LoadWorkflow("jobs:\n  a:\n    steps:\n    - run: [ echo ]\n"))).Should().Throw<InvalidDataException>(
+            "スカラーでない run は読めないので例外にする（読み飛ばさない）");
+        FluentActions.Invoking(() => RunScripts(LoadWorkflow("jobs:\n  a:\n    steps: { run: echo }\n"))).Should().Throw<InvalidDataException>(
+            "steps: が列でない");
     }
 
     /// <summary>
@@ -1367,7 +1401,7 @@ jobs:
         foreach (var (file, content) in AllWorkflows())
         {
             checkedWorkflows.Add(file);
-            var permissions = ExtractPermissions(content, 0);
+            var permissions = ReadPermissions(LoadWorkflow(content));
             permissions.Should().NotBeNull(
                 $"{file} に最上位の permissions: が無いと、既定のトークン権限（設定によっては write）で動く。" +
                 "「permissions:」の下に「contents: read」を宣言すること（Issue #2271）");
@@ -1390,12 +1424,9 @@ jobs:
         var granted = new List<(string Workflow, string Job, string Scope, string Value)>();
         foreach (var (file, content) in AllWorkflows())
         {
-            ExtractJobs(content).Should().NotBeEmpty(
-                $"{file} からジョブを 1 つも読めないと、ジョブ単位の権限を無検査で緑にする（jobs: 直下の字下げ 2 を前提に読む）");
-            PermissionsKeyCount(content).Should().Be(ReadPermissionsDeclarationCount(content),
-                $"{file} に検査が読めない permissions: の書き方がある（1 行のジョブ・最上位とジョブ以外の場所など）。" +
-                "読めない宣言は「無い」と読まれて検査を素通りするため、最上位かジョブの直下に scope: value の形で書くこと");
-            granted.AddRange(JobPermissions(file, content));
+            var root = LoadWorkflow(content);
+            WorkflowJobs(root).Should().NotBeEmpty($"{file} からジョブを 1 つも読めないと、ジョブ単位の権限を無検査で緑にする");
+            granted.AddRange(JobPermissions(file, root));
         }
 
         granted.Where(g => !IsAllowedJobPermission(g))
@@ -1421,163 +1452,115 @@ jobs:
     /// 禁止する名前（<c>github.ref_name</c> / <c>github.head_ref</c> / <c>github.event.*</c> / <c>inputs.*</c> …）を
     /// 列挙するのではなく、参照してよいコンテキストを列挙する。禁止側の列挙は、<c>env</c> や <c>steps.*.outputs</c> を
     /// 経由して同じ値を持ち込む経路を取りこぼす（#1786「その性質を破れる全経路を列挙する」）。
+    /// あわせて、許す前提（matrix の値がファイルに固定）と、<c>with:</c> がシェルを通らないという前提の例外
+    /// （入力をコードとして実行する <c>actions/github-script</c>）を表明する。
     /// </remarks>
     [Fact]
     public void runの中で外から決まる値を式で直接展開しないこと()
     {
-        var scripts = AllWorkflows()
-            .SelectMany(w => ExtractRunScripts(w.Content).Select(s => (w.Name, Script: s)))
-            .ToList();
+        var workflows = AllWorkflows().Select(w => (w.Name, Root: LoadWorkflow(w.Content))).ToList();
+        var scripts = workflows.SelectMany(w => RunScripts(w.Root)).ToList();
 
-        scripts.Select(s => s.Script).Should().Contain(s => s.Contains("dotnet restore --locked-mode"), "run を 1 つも取り出せないと無検査で緑になる");
-        scripts.SelectMany(s => ExtractExpressions(s.Script)).Should().Contain(e => e.Contains("matrix.configuration"),
+        scripts.Should().Contain(s => s.Contains("dotnet restore --locked-mode"), "run を 1 つも取り出せないと無検査で緑になる");
+        scripts.SelectMany(ExtractExpressions).Should().Contain(e => e.Contains("matrix.configuration"),
             "run の中の式を読めていないと無検査で緑になる（ci.yml は matrix.configuration を run で展開している）");
 
-        foreach (var (file, content) in AllWorkflows())
-        {
-            RunKeyCount(content).Should().Be(RecognizedRunKeyCount(content),
-                $"{file} に検査が読めない run: の書き方（-   run:・フロー形式のステップ等）がある。読めない run は検査を素通りするため、" +
-                "「- name: …」の下に「run:」を書く形にすること");
-        }
-
-        AllWorkflows().SelectMany(w => UntrustedExpansions(w.Content).Select(line => $"{w.Name}: {line}"))
+        workflows.SelectMany(w => UntrustedExpansions(w.Root).Select(line => $"{w.Name}: {line}"))
             .Should().BeEmpty(
                 $"run の中の式で参照してよいのは {string.Join(" / ", ContextsAllowedInRun.OrderBy(c => c, StringComparer.Ordinal))} だけ。" +
-                "github.* / inputs.* などはステップかジョブの env: で渡し、スクリプトでは $env:NAME で読むこと。式は 1 行で閉じること（Issue #2271）");
+                "github.* / inputs.* などはステップかジョブの env: で渡し、スクリプトでは $env:NAME で読むこと。式は閉じること（Issue #2271）");
 
-        AllWorkflows().SelectMany(w => StrategyLinesWithExpressions(w.Content).Select(line => $"{w.Name}: {line}"))
+        workflows.SelectMany(w => StrategyExpressions(w.Root).Select(line => $"{w.Name}: {line}"))
             .Should().BeEmpty("run で matrix / strategy を許すのは値がワークフローのファイルに固定されているから。matrix を式で外から決めないこと");
 
-        AllWorkflows().SelectMany(w => ExtractUsesReferences(w.Content).Where(ExecutesInputAsCode).Select(r => $"{w.Name}: {r}"))
+        workflows.SelectMany(w => UsesReferences(w.Root).Where(ExecutesInputAsCode).Select(r => $"{w.Name}: {r}"))
             .Should().BeEmpty(
                 "actions/github-script は with: script: の入力をコードとして実行するため、式の展開が run と同じ危険を持つ。" +
                 "使うなら外から来る値を env: で渡して process.env で読み、この検査を run と同じ許可リストで script: も見るように広げること");
     }
 
     /// <summary>
-    /// 字下げ <paramref name="indent"/> の <c>permissions:</c> の宣言（スコープ → 値）。無ければ null。
-    /// 1 行の形（<c>permissions: write-all</c>）はスコープ <c>*</c> として返す。フロー形式
-    /// （<c>permissions: { contents: write }</c>）も読み、引用符（<c>"write"</c> / <c>'write'</c>）は剥がす。
+    /// ワークフローを構文木として読む。YAML として読めない・文書が 1 つでない・最上位が対応表でないときは例外にする（fail-closed）。
+    /// エイリアス（<c>*name</c>）は参照先のノードへ解決される。重複したキーも例外になる。
     /// </summary>
-    /// <remarks>
-    /// 読めない形は値を <c>?</c> として返す（読み飛ばさない）。検査側は read / none 以外を許可リストと照合するため、
-    /// 読めない宣言は違反として赤へ倒れる（fail-closed）。読めない形を null や空として返すと、その宣言は
-    /// 「無い」ことになり、書き込みの検査を素通りする（Issue #2271 のコードレビューで検出）。
-    /// </remarks>
-    private static Dictionary<string, string>? ExtractPermissions(string text, int indent)
+    private static YamlMappingNode LoadWorkflow(string content)
     {
-        var lines = SplitLines(text);
-        var header = new Regex($@"^ {{{indent}}}permissions\s*:(.*)$");
-        for (var i = 0; i < lines.Length; i++)
+        var stream = new YamlStream();
+        stream.Load(new StringReader(content));
+        if (stream.Documents.Count != 1 || stream.Documents[0].RootNode is not YamlMappingNode root)
         {
-            var match = header.Match(lines[i]);
-            if (!match.Success)
-            {
-                continue;
-            }
-
-            var result = new Dictionary<string, string>(StringComparer.Ordinal);
-            var inline = StripYamlComment(match.Groups[1].Value).Trim();
-            if (inline.StartsWith("{", StringComparison.Ordinal))
-            {
-                if (!inline.EndsWith("}", StringComparison.Ordinal))
-                {
-                    result["*"] = "?"; // 複数行に折り返したフロー形式は読まない
-                    return result;
-                }
-
-                foreach (var item in inline.Substring(1, inline.Length - 2).Split(',').Select(s => s.Trim()).Where(s => s.Length > 0))
-                {
-                    AddPermissionEntry(result, item);
-                }
-
-                return result;
-            }
-
-            if (inline.Length > 0)
-            {
-                result["*"] = Unquote(inline);
-                return result;
-            }
-
-            for (var j = i + 1; j < lines.Length; j++)
-            {
-                var trimmed = StripYamlComment(lines[j]).Trim();
-                if (trimmed.Length == 0)
-                {
-                    continue;
-                }
-
-                if (IndentOf(lines[j]) <= indent)
-                {
-                    break;
-                }
-
-                AddPermissionEntry(result, trimmed);
-            }
-
-            return result;
+            throw new InvalidDataException("ワークフローの最上位が 1 つの対応表（mapping）ではないため、検査が読めない");
         }
 
-        return null;
+        return root;
     }
 
-    /// <summary><c>scope: value</c> を 1 件読む。読めない形は、その文字列をスコープ・値を <c>?</c> として加える。</summary>
-    private static void AddPermissionEntry(Dictionary<string, string> result, string entry)
+    /// <summary>対応表から、キー（引用符の有無を問わない値）が <paramref name="key"/> の値を返す。無ければ null。</summary>
+    private static YamlNode? Child(YamlMappingNode map, string key)
+        => map.Children.Where(c => c.Key is YamlScalarNode k && k.Value == key).Select(c => c.Value).FirstOrDefault();
+
+    private static string KeyText(YamlNode key) => key is YamlScalarNode s ? s.Value ?? string.Empty : key.ToString();
+
+    /// <summary><c>jobs:</c> のジョブ（名前・ノード）。<c>jobs:</c> が無ければ空、対応表でなければ例外。</summary>
+    private static List<(string Name, YamlNode Node)> WorkflowJobs(YamlMappingNode root)
     {
-        var scope = Regex.Match(entry, @"^([""']?)([A-Za-z-]+)\1\s*:\s*([""']?)([A-Za-z-]+)\3$");
-        if (scope.Success)
+        var jobs = Child(root, "jobs");
+        if (jobs == null)
         {
-            result[scope.Groups[2].Value] = scope.Groups[4].Value;
+            return new List<(string, YamlNode)>();
         }
-        else
+
+        if (jobs is not YamlMappingNode map)
         {
-            result[entry] = "?";
+            throw new InvalidDataException("jobs: が対応表（mapping）でないため、検査が読めない");
         }
+
+        return map.Children.Select(c => (KeyText(c.Key), c.Value)).ToList();
     }
 
-    /// <summary>行末のコメント（空白に続く <c>#</c> 以降、または行頭の <c>#</c>）を取り除く。</summary>
-    private static string StripYamlComment(string line)
-        => Regex.Replace(line, @"(^|\s)#.*$", string.Empty);
+    /// <summary>
+    /// <paramref name="owner"/>（最上位またはジョブ）の <c>permissions:</c>（スコープ → 値）。無ければ null。
+    /// 1 行の形（<c>write-all</c>）はスコープ <c>*</c>、スカラーでない値は <c>?</c> として返す（読み飛ばさない）。
+    /// </summary>
+    private static Dictionary<string, string>? ReadPermissions(YamlMappingNode owner)
+    {
+        var node = Child(owner, "permissions");
+        if (node == null)
+        {
+            return null;
+        }
 
-    private static string Unquote(string value)
-        => Regex.Match(value, @"^([""'])(.*)\1$") is { Success: true } quoted ? quoted.Groups[2].Value : value;
+        var result = new Dictionary<string, string>(StringComparer.Ordinal);
+        switch (node)
+        {
+            case YamlScalarNode scalar:
+                result["*"] = scalar.Value ?? string.Empty;
+                break;
+            case YamlMappingNode map:
+                foreach (var entry in map.Children)
+                {
+                    result[KeyText(entry.Key)] = entry.Value is YamlScalarNode value ? value.Value ?? string.Empty : "?";
+                }
 
-    /// <summary>ワークフローのジョブ単位の権限（ジョブ・スコープ・値）。宣言の無いジョブは最上位を引き継ぐので含めない。</summary>
-    private static List<(string Workflow, string Job, string Scope, string Value)> JobPermissions(string file, string workflow)
-        => ExtractJobs(workflow)
-            .SelectMany(j => (ExtractPermissions(j.Value, JobBodyIndent(j.Value)) ?? new Dictionary<string, string>())
-                .Select(p => (file, j.Key, p.Key, p.Value)))
+                break;
+            default:
+                result["*"] = "?";
+                break;
+        }
+
+        return result;
+    }
+
+    /// <summary>
+    /// ワークフローのジョブ単位の権限（ジョブ・スコープ・値）。宣言の無いジョブは最上位を引き継ぐので含めない。
+    /// 対応表でないジョブは読めないので、値「?」の宣言として返す（fail-closed）。
+    /// </summary>
+    private static List<(string Workflow, string Job, string Scope, string Value)> JobPermissions(string file, YamlMappingNode root)
+        => WorkflowJobs(root)
+            .SelectMany(job => job.Node is YamlMappingNode map
+                ? (ReadPermissions(map) ?? new Dictionary<string, string>()).Select(p => (file, job.Name, p.Key, p.Value))
+                : new[] { (file, job.Name, "*", "?") })
             .ToList();
-
-    /// <summary>
-    /// ジョブ本文の字下げ（コメント・空行を除く最初の行）。字下げを決め打ちすると、正しい YAML でも
-    /// 字下げの違うジョブの宣言を「無い」と読む（Issue #2271 のコードレビューで検出）。
-    /// </summary>
-    private static int JobBodyIndent(string jobBlock)
-        => SplitLines(jobBlock)
-            .Where(l => StripYamlComment(l).Trim().Length > 0)
-            .Select(IndentOf)
-            .DefaultIfEmpty(0)
-            .First();
-
-    /// <summary>
-    /// <c>permissions:</c> のキーが書かれた箇所の数（コメントを除く。ブロック形式・フロー形式・引用符付きのキーを含む）。
-    /// </summary>
-    /// <remarks>
-    /// 書き方を 1 つずつ数え上げて読む方式は、読めない書き方を「宣言が無い」と読んで素通りさせる。
-    /// キーの出現数と、実際に読めた宣言の数（<see cref="ReadPermissionsDeclarationCount"/>）を照合し、
-    /// 食い違えば赤にする（fail-closed）。スクリプトの本文やアクションの入力に「permissions:」という文字列が
-    /// あっても数えるため、その場合は誤検出側（赤）に倒れる。
-    /// </remarks>
-    private static int PermissionsKeyCount(string workflow)
-        => SplitLines(workflow)
-            .Sum(l => Regex.Matches(StripYamlComment(l), @"(?:^|[\s{,])[""']?permissions[""']?\s*:").Count);
-
-    /// <summary>読めた <c>permissions:</c> の宣言の数（最上位 1 件まで＋ジョブごとに 1 件まで）。</summary>
-    private static int ReadPermissionsDeclarationCount(string workflow)
-        => (ExtractPermissions(workflow, 0) != null ? 1 : 0)
-           + ExtractJobs(workflow).Values.Count(block => ExtractPermissions(block, JobBodyIndent(block)) != null);
 
     /// <summary>
     /// read / none か、<see cref="AllowedWritePermissions"/> に載った write か。それ以外（許可リストに無い write・
@@ -1593,46 +1576,92 @@ jobs:
         => permissions.TryGetValue("contents", out var contents) && contents == "read"
            && permissions.Values.All(v => v == "read" || v == "none");
 
+    /// <summary>すべてのジョブのステップ（対応表）。<c>steps:</c> が列でない・ステップが対応表でないときは例外。</summary>
+    private static IEnumerable<YamlMappingNode> WorkflowSteps(YamlMappingNode root)
+    {
+        foreach (var (name, node) in WorkflowJobs(root))
+        {
+            if (node is not YamlMappingNode job)
+            {
+                throw new InvalidDataException($"ジョブ {name} が対応表（mapping）でないため、検査が読めない");
+            }
+
+            var steps = Child(job, "steps");
+            if (steps == null)
+            {
+                continue;
+            }
+
+            if (steps is not YamlSequenceNode sequence)
+            {
+                throw new InvalidDataException($"ジョブ {name} の steps: が列（sequence）でないため、検査が読めない");
+            }
+
+            foreach (var step in sequence.Children)
+            {
+                yield return step as YamlMappingNode
+                             ?? throw new InvalidDataException($"ジョブ {name} のステップが対応表（mapping）でないため、検査が読めない");
+            }
+        }
+    }
+
     /// <summary>
-    /// すべての <c>run:</c> のスクリプト（1 行の値とその継続行、または <c>|</c> / <c>&gt;</c> のブロックの本体）。
-    /// コメント行と、値を持たない <c>run:</c>（<c>defaults:</c> の下の対応表）は数えない。
+    /// すべてのステップの <c>run:</c> の値（パーサーが解決したスカラー。ブロック・折り返し・次行の値・エイリアスを含む）。
+    /// <c>defaults:</c> の <c>run:</c> はシェルの設定の対応表でスクリプトではないので読まない。スカラーでない run は例外。
     /// </summary>
-    /// <remarks>
-    /// 本文の終わりは「<c>run</c> のキーより深い字下げの行が続く間」で決める。<c>- run: |</c> の形では
-    /// キーの位置は <c>- </c> の後ろなので、基準を <c>- </c> の分だけ深くする。そうしないと、同じステップの
-    /// 兄弟キー（<c>env:</c> 等）が本文に入り、推奨どおり <c>env:</c> で渡した式を run の中の展開として誤検出する
-    /// （Issue #2271 のコードレビューで検出）。プレーン・引用符付きのスカラーが次の行へ折り返す形も、
-    /// 同じ規則（キーより深い字下げの行）で継続行として読む。
-    /// </remarks>
-    private static List<string> ExtractRunScripts(string workflow)
+    private static List<string> RunScripts(YamlMappingNode root)
     {
         var result = new List<string>();
-        var lines = SplitLines(workflow);
-        for (var i = 0; i < lines.Length; i++)
+        foreach (var step in WorkflowSteps(root))
         {
-            var run = Regex.Match(lines[i], @"^(\s*)(- )?run:\s*(.*)$");
-            if (!run.Success)
+            foreach (var entry in step.Children.Where(c => KeyText(c.Key) == "run"))
             {
-                continue;
+                result.Add(entry.Value is YamlScalarNode script
+                    ? script.Value ?? string.Empty
+                    : throw new InvalidDataException("run: の値がスカラーでないため、検査が読めない"));
             }
-
-            var value = run.Groups[3].Value.Trim();
-            if (value.Length == 0)
-            {
-                continue;
-            }
-
-            var keyIndent = run.Groups[1].Value.Length + run.Groups[2].Value.Length;
-            var body = lines.Skip(i + 1)
-                .TakeWhile(l => l.Trim().Length == 0 || IndentOf(l) > keyIndent)
-                .Select(l => l.Trim())
-                .Where(l => l.Length > 0);
-            var isBlock = Regex.IsMatch(value, @"^[|>][+-]?\d*\s*(#.*)?$");
-            result.Add(string.Join("\n", isBlock ? body : new[] { value }.Concat(body)));
         }
 
         return result;
     }
+
+    /// <summary>ステップとジョブ（再利用可能なワークフロー）の <c>uses:</c> の値。</summary>
+    private static List<string> UsesReferences(YamlMappingNode root)
+        => WorkflowJobs(root).Select(j => j.Node).OfType<YamlMappingNode>().Select(job => Child(job, "uses"))
+            .Concat(WorkflowSteps(root).Select(step => Child(step, "uses")))
+            .OfType<YamlScalarNode>()
+            .Select(s => s.Value ?? string.Empty)
+            .ToList();
+
+    /// <summary>
+    /// <c>strategy:</c>（<c>matrix</c> を含む）の定義の中で式を使っている値（「ジョブ名: 値」）。<see cref="ContextsAllowedInRun"/> が
+    /// <c>matrix</c> / <c>strategy</c> を許すのは、値がワークフローのファイルに固定されているからで、
+    /// <c>matrix: ${{ fromJSON(inputs.x) }}</c> のように外から入れると、その前提が崩れる。
+    /// </summary>
+    private static List<string> StrategyExpressions(YamlMappingNode root)
+        => WorkflowJobs(root)
+            .Where(j => j.Node is YamlMappingNode)
+            .SelectMany(j => Child((YamlMappingNode)j.Node, "strategy") is { } strategy
+                ? AllScalars(strategy).Where(v => v.Contains("${{")).Select(v => $"{j.Name}: {v}")
+                : Enumerable.Empty<string>())
+            .ToList();
+
+    /// <summary>ノード配下のすべてのスカラー（対応表のキーと値・列の要素）。</summary>
+    private static IEnumerable<string> AllScalars(YamlNode node)
+        => node switch
+        {
+            YamlScalarNode scalar => new[] { scalar.Value ?? string.Empty },
+            YamlMappingNode map => map.Children.SelectMany(c => AllScalars(c.Key).Concat(AllScalars(c.Value))),
+            YamlSequenceNode sequence => sequence.Children.SelectMany(AllScalars),
+            _ => Enumerable.Empty<string>(),
+        };
+
+    /// <summary>
+    /// 入力をコードとして実行するアクションか（<c>actions/github-script</c> の <c>with: script:</c>）。
+    /// その入力の中の式は <c>run:</c> と同じくコードへ埋め込まれるため、「<c>with:</c> はシェルを通らない」の例外になる。
+    /// </summary>
+    private static bool ExecutesInputAsCode(string reference)
+        => string.Equals(ActionName(reference), "actions/github-script", StringComparison.OrdinalIgnoreCase);
 
     /// <summary>
     /// 式が参照するコンテキストの根（<c>github.event.x</c> → <c>github</c>）。文字列リテラル・関数名・
@@ -1655,61 +1684,61 @@ jobs:
     }
 
     /// <summary>
-    /// run の中で、<see cref="ContextsAllowedInRun"/> 以外のコンテキストを式で展開している行。
-    /// 行内で閉じていない式（<c>${{</c> が行をまたぐ形）は中身を読めないので、違反として返す（fail-closed）。
+    /// run の中で、<see cref="ContextsAllowedInRun"/> 以外のコンテキストを式で展開している箇所（式が始まる行）。
+    /// 式は行をまたいでも 1 つとして読み、閉じていない式（<c>${{</c> だけがある）は中身を読めないので違反として返す（fail-closed）。
     /// </summary>
-    private static List<string> UntrustedExpansions(string workflow)
-        => ExtractRunScripts(workflow)
-            .SelectMany(script => SplitLines(script))
-            .Where(line => ExtractExpressions(line).SelectMany(ExtractContextRoots).Any(root => !ContextsAllowedInRun.Contains(root))
-                           || RemoveExpressions(line).Contains("${{"))
-            .Select(line => line.Trim())
-            .ToList();
-
-    /// <summary><c>run:</c> のキーが書かれた行の数（コメントを除く。<c>-   run:</c>・<c>- { run: … }</c> 等の形も数える）。</summary>
-    /// <remarks>
-    /// <see cref="ExtractRunScripts"/> が見出しとして読めた行の数（<see cref="RecognizedRunKeyCount"/>）と照合する。
-    /// 書き方を数え上げて読む方式は、読めない形の run を「無い」と読んで素通りさせるため、件数で fail-closed にする。
-    /// スクリプトの本文に「run:」という文字列があると数えるが、読めた側も同じ行を数える限り食い違わない。
-    /// </remarks>
-    private static int RunKeyCount(string workflow)
-        => SplitLines(workflow).Count(l => Regex.IsMatch(StripYamlComment(l), @"(?:^|[\s{,])[""']?run[""']?\s*:"));
-
-    /// <summary><see cref="ExtractRunScripts"/> が見出しとして読む行の数（値を持たない <c>defaults:</c> の <c>run:</c> を含む）。</summary>
-    private static int RecognizedRunKeyCount(string workflow)
-        => SplitLines(workflow).Count(l => Regex.IsMatch(l, @"^(\s*)(- )?run:\s*(.*)$"));
-
-    /// <summary>
-    /// <c>strategy:</c>（<c>matrix</c> を含む）の定義で式を使っている行。<see cref="ContextsAllowedInRun"/> が
-    /// <c>matrix</c> / <c>strategy</c> を許すのは、値がワークフローのファイルに固定されているからで、
-    /// <c>matrix: ${{ fromJSON(inputs.x) }}</c> のように外から入れると、その前提が崩れる。
-    /// </summary>
-    private static List<string> StrategyLinesWithExpressions(string workflow)
+    private static List<string> UntrustedExpansions(YamlMappingNode root)
     {
         var result = new List<string>();
-        var lines = SplitLines(workflow);
-        for (var i = 0; i < lines.Length; i++)
+        foreach (var script in RunScripts(root))
         {
-            var strategy = Regex.Match(StripYamlComment(lines[i]), @"^(\s*)strategy\s*:");
-            if (!strategy.Success)
+            var offending = new SortedSet<int>();
+            var covered = new bool[script.Length];
+            foreach (Match match in ActionsExpression.Matches(script))
             {
-                continue;
+                for (var i = match.Index; i < match.Index + match.Length; i++)
+                {
+                    covered[i] = true;
+                }
+
+                if (ExtractContextRoots(match.Value).Any(r => !ContextsAllowedInRun.Contains(r)))
+                {
+                    offending.Add(match.Index);
+                }
             }
 
-            var indent = strategy.Groups[1].Value.Length;
-            var block = new[] { lines[i] }.Concat(lines.Skip(i + 1).TakeWhile(l => l.Trim().Length == 0 || IndentOf(l) > indent));
-            result.AddRange(block.Where(l => StripYamlComment(l).Contains("${{")).Select(l => l.Trim()));
+            for (var start = script.IndexOf("${{", StringComparison.Ordinal); start >= 0; start = script.IndexOf("${{", start + 1, StringComparison.Ordinal))
+            {
+                if (!covered[start])
+                {
+                    offending.Add(start);
+                }
+            }
+
+            result.AddRange(offending.Select(index => LineAt(script, index)));
         }
 
         return result;
     }
 
+    /// <summary><paramref name="index"/> を含む行（前後の空白を除く）。</summary>
+    private static string LineAt(string text, int index)
+    {
+        var start = text.LastIndexOf('\n', Math.Max(0, index - 1)) + 1;
+        if (index == 0)
+        {
+            start = 0;
+        }
+
+        var end = text.IndexOf('\n', index);
+        return text.Substring(start, (end < 0 ? text.Length : end) - start).Trim();
+    }
+
     /// <summary>
-    /// 入力をコードとして実行するアクションか（<c>actions/github-script</c> の <c>with: script:</c>）。
-    /// その入力の中の式は <c>run:</c> と同じくコードへ埋め込まれるため、「<c>with:</c> はシェルを通らない」の例外になる。
+    /// 行末のコメント（空白に続く <c>#</c> 以降、または行頭の <c>#</c>）を取り除く（行単位で読む <see cref="ExtractJobs"/> が使う）。
     /// </summary>
-    private static bool ExecutesInputAsCode(string reference)
-        => string.Equals(ActionName(reference), "actions/github-script", StringComparison.OrdinalIgnoreCase);
+    private static string StripYamlComment(string line)
+        => Regex.Replace(line, @"(^|\s)#.*$", string.Empty);
 
     #endregion
 
@@ -1871,8 +1900,11 @@ jobs:
             .ToList();
     }
 
-    /// <summary>GitHub Actions の式（<c>${{ … }}</c>）。</summary>
-    private static readonly Regex ActionsExpression = new(@"\$\{\{.*?\}\}", RegexOptions.Compiled);
+    /// <summary>
+    /// GitHub Actions の式（<c>${{ … }}</c>）。式の文字列リテラル（単引用符、<c>''</c> でエスケープ）の中の <c>}}</c> は
+    /// 式の終わりと見なさない（<c>${{ format('}}', github.ref_name) }}</c> を途中で切ると、後半の参照を読み落とす。Issue #2271）。
+    /// </summary>
+    private static readonly Regex ActionsExpression = new(@"\$\{\{(?:'(?:[^']|'')*'|[^'}]|\}(?!\}))*\}\}", RegexOptions.Compiled);
 
     /// <summary>行に含まれる <c>${{ … }}</c> の式を、出現順に返す。</summary>
     private static List<string> ExtractExpressions(string command)
