@@ -1082,7 +1082,47 @@ public class ReportViewModelBulkCreationTests : IDisposable
         _viewModel.StatusMessage.Should().StartWith("1件の帳票を作成しました");
         _viewModel.StatusMessage.Should().EndWith(ReportViewModel.OutputFolderSaveFailedMessage);
         _viewModel.StatusMessage.Should().NotContain("cannot access", "生の例外メッセージを画面に出さない（#1614）");
+        _viewModel.IsStatusError.Should().BeFalse(
+            "作成は成功している。保存の失敗で色を変えると「1件の帳票を作成しました」まで失敗に見える");
+    }
+
+    /// <summary>
+    /// 対の表明: 一部失敗の結果の色（エラー）は、保存の失敗を併記しても保たれること
+    /// （色を常に通常へ戻す実装を検出する）
+    /// </summary>
+    [Fact]
+    public async Task CreateReportAsync_一部失敗のときは保存の失敗を併記してもエラー表示のままであること()
+    {
+        _outputFolderStoreMock.Setup(s => s.Save(It.IsAny<string>()))
+            .Throws(new IOException("The process cannot access the file 'report_output_config.txt'."));
+        SelectCard("0000000000000001", "001");
+        SelectCard("0000000000000002", "002");
+        SetupReportCreation(cardIdm => cardIdm == "0000000000000002"
+            ? ReportGenerationResult.FailureResult("帳票データを取得できませんでした")
+            : ReportGenerationResult.SuccessResult(cardIdm));
+
+        await _viewModel.CreateReportAsync();
+
+        _viewModel.StatusMessage.Should().StartWith("1/2件の帳票を作成しました（一部失敗）");
+        _viewModel.StatusMessage.Should().EndWith(ReportViewModel.OutputFolderSaveFailedMessage);
         _viewModel.IsStatusError.Should().BeTrue();
+    }
+
+    /// <summary>
+    /// 保存済みの値と大文字小文字・前後の空白・末尾の区切りだけが違うときは、同じフォルダとして書き直さないこと
+    /// （比較の規則を 1 つに揃えた。設定ファイルの読み込みは空白を取り除くため、規則が違うと毎回書き直す）
+    /// </summary>
+    [Fact]
+    public async Task CreateReportAsync_保存済みと表記だけが違う出力先なら書き直さないこと()
+    {
+        _outputFolderStoreMock.Setup(s => s.Load()).Returns(_outputFolder.ToUpperInvariant() + "\\");
+        _viewModel.OutputFolder = _outputFolder + "  ";
+        SelectCard("0000000000000001", "001");
+
+        await _viewModel.CreateReportAsync();
+
+        _viewModel.CreatedFiles.Should().HaveCount(1);
+        _outputFolderStoreMock.Verify(s => s.Save(It.IsAny<string>()), Times.Never);
     }
 
     #endregion

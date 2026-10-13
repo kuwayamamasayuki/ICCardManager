@@ -207,13 +207,23 @@
                         </Button>
                     </WrapPanel>
 
-                    <!-- Issue #2266: 当月帳票が「判定不可」のとき、どこで何をすれば解消するかを示す（不要なら非表示） -->
-                    <TextBlock Grid.Row="1"
-                               Margin="0,0,0,8"
-                               Text="{Binding OperationStatus.ReportStatusGuidance, Mode=OneWay}"
-                               Visibility="{Binding OperationStatus.ReportStatusGuidance, Mode=OneWay, Converter={StaticResource StringToVisibilityConverter}, FallbackValue=Collapsed}"
-                               TextWrapping="Wrap"
-                               AutomationProperties.Name="{Binding OperationStatus.ReportStatusGuidance, Mode=OneWay}"/>
+                    <!-- Issue #2266: 当月帳票が「判定不可」のとき、どこで何をすれば解消するかを示す（不要なら非表示）。
+                         既存の案内枠（WarningBackgroundBrush ＋ HintForegroundBrush ＋ アイコン）に倣い、色だけに頼らず ⚠ と文言で伝える。
+                         読み上げは表示中の文言（アイコンを除く）を Name に持たせる（固定の Name は読み上げを妨げる。#2142） -->
+                    <Border Grid.Row="1"
+                            Background="{DynamicResource WarningBackgroundBrush}"
+                            CornerRadius="4"
+                            Padding="10"
+                            Margin="0,0,0,8"
+                            Visibility="{Binding OperationStatus.ReportStatusGuidance, Mode=OneWay, Converter={StaticResource StringToVisibilityConverter}, FallbackValue=Collapsed}">
+                        <TextBlock TextWrapping="Wrap"
+                                   Foreground="{DynamicResource HintForegroundBrush}"
+                                   AutomationProperties.LiveSetting="Polite"
+                                   AutomationProperties.Name="{Binding OperationStatus.ReportStatusGuidance, Mode=OneWay}">
+                            <Run Text="⚠ " FontWeight="Bold"/>
+                            <Run Text="{Binding OperationStatus.ReportStatusGuidance, Mode=OneWay}"/>
+                        </TextBlock>
+                    </Border>
 
                     <DataGrid Grid.Row="2"
                               ItemsSource="{Binding FilteredCards}"

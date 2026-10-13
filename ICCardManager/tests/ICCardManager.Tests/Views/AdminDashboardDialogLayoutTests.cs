@@ -218,6 +218,28 @@ public class AdminDashboardDialogLayoutTests
             "集計完了やエラーをスクリーンリーダーへ通知するため");
     }
 
+    /// <summary>
+    /// Issue #2266: 当月帳票の「判定不可」の案内は、既存の案内枠に倣って色だけに頼らず（⚠ と文言）強調し、
+    /// 表示中の文言を Name に持たせて丁寧に読み上げ、折り返して全文を出すこと
+    /// </summary>
+    [Fact]
+    public void Report_status_guidance_should_be_emphasized_wrapped_and_announced()
+    {
+        var block = ExtractBlock(
+            @"<Border\s+Grid\.Row=""1""[^>]*ReportStatusGuidance.*?</Border>");
+
+        block.Should().Contain(@"Background=""{DynamicResource WarningBackgroundBrush}""", "既存の案内枠と同じ背景");
+        block.Should().Contain("StringToVisibilityConverter", "案内が不要なら枠ごと隠す");
+        block.Should().MatchRegex(@"<TextBlock[^>]*TextWrapping\s*=\s*""Wrap""", "特大文字でも全文を折り返して出す");
+        block.Should().MatchRegex(@"<TextBlock[^>]*Foreground\s*=\s*""\{DynamicResource HintForegroundBrush\}""",
+            "WarningBackgroundBrush と対で検証済みの文字色");
+        block.Should().MatchRegex(@"<TextBlock[^>]*AutomationProperties\.LiveSetting\s*=\s*""Polite""");
+        block.Should().MatchRegex(
+            @"<TextBlock[^>]*AutomationProperties\.Name\s*=\s*""\{Binding\s+OperationStatus\.ReportStatusGuidance",
+            "読み上げる Name は表示中の文言（固定の Name は読み上げを妨げる。#2142）");
+        block.Should().Contain(@"<Run Text=""⚠ """, "色だけに頼らずアイコンでも伝える");
+    }
+
     [Fact]
     public void Close_button_should_be_cancel()
     {

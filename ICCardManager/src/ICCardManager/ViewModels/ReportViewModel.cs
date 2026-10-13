@@ -238,12 +238,31 @@ public partial class ReportViewModel : ViewModelBase
     /// <returns>保存に失敗したら false（既に保存済みなら true）</returns>
     private bool RememberUsedOutputFolder(string folder)
     {
-        if (string.Equals(_outputFolderStore.Load(), folder, StringComparison.OrdinalIgnoreCase))
+        if (IsSameOutputFolder(_outputFolderStore.Load(), folder))
         {
             return true;
         }
 
         return TrySaveOutputFolder(folder);
+    }
+
+    /// <summary>
+    /// 2 つの出力先が同じフォルダを指すか（Issue #2266）
+    /// </summary>
+    /// <remarks>
+    /// 「保存済みと同じなら書かない」「表示中と同じなら選び直しとして扱う」の判定をこの 1 つに揃える。
+    /// Windows のパスは大文字小文字を区別せず、設定ファイルの読み込み（<c>LoadConfigFile</c>）は前後の空白を
+    /// 取り除くため、比較も前後の空白と末尾の区切り文字を除いて大文字小文字を区別せずに行う。
+    /// 規則が箇所ごとに違うと、入力欄の末尾の空白だけで毎回書き直す・選び直しを別のフォルダと扱う、といった食い違いになる。
+    /// </remarks>
+    internal static bool IsSameOutputFolder(string? left, string? right)
+        => string.Equals(NormalizeOutputFolder(left), NormalizeOutputFolder(right), StringComparison.OrdinalIgnoreCase);
+
+    private static string NormalizeOutputFolder(string? folder)
+    {
+        var trimmed = (folder ?? string.Empty).Trim();
+        // ドライブのルート（C:\）は区切りを除くと別の意味（ドライブの現在フォルダ）になるため残す
+        return trimmed.Length > 3 ? trimmed.TrimEnd('\\', '/') : trimmed;
     }
 
     /// <summary>
@@ -256,7 +275,7 @@ public partial class ReportViewModel : ViewModelBase
     /// </remarks>
     internal void ApplyBrowsedOutputFolder(string selectedPath)
     {
-        if (string.Equals(OutputFolder, selectedPath, StringComparison.Ordinal))
+        if (IsSameOutputFolder(OutputFolder, selectedPath))
         {
             if (_isInitialized)
             {
@@ -1056,14 +1075,16 @@ public partial class ReportViewModel : ViewModelBase
         }
         finally
         {
-            // Issue #2266: 保存の失敗は完了・中断の文言を消さずに併記する（作成の結果は確定している）
+            // Issue #2266: 保存の失敗は完了・中断の文言を消さずに併記する（作成の結果は確定している）。
+            // 色は作成の結果のまま変えない — 赤にすると「N件の帳票を作成しました」まで失敗に見える。
+            // 保存の失敗は文言そのもの（「保存できませんでした」）で伝わる
             if (outputFolderSaveFailed)
             {
                 SetStatus(
                     string.IsNullOrEmpty(StatusMessage)
                         ? OutputFolderSaveFailedMessage
                         : StatusMessage + "\n" + OutputFolderSaveFailedMessage,
-                    true);
+                    IsStatusError);
             }
 
             // Issue #1691: 途中で失敗・中断しても「どこまで出力できたか」を一覧へ反映する。

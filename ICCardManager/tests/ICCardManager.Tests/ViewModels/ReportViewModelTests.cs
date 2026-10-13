@@ -988,6 +988,42 @@ public class ReportViewModelTests
     }
 
     /// <summary>
+    /// Issue #2266: 「参照」で表記だけが違う（大文字小文字・末尾の区切り）同じフォルダを選んだら、選び直しとして表示中の値を保存すること
+    /// </summary>
+    [Fact]
+    public async Task ApplyBrowsedOutputFolder_表記だけが違う同じフォルダなら選び直しとして保存すること()
+    {
+        // Arrange
+        _outputFolderStoreMock.Setup(s => s.Load()).Returns(@"D:\Reports\Monthly");
+        _cardRepositoryMock.Setup(r => r.GetAllAsync()).ReturnsAsync(new List<IcCard>());
+        await _viewModel.InitializeAsync();
+
+        // Act
+        _viewModel.ApplyBrowsedOutputFolder(@"d:\reports\monthly\");
+
+        // Assert
+        _viewModel.OutputFolder.Should().Be(@"D:\Reports\Monthly");
+        _outputFolderStoreMock.Verify(s => s.Save(@"D:\Reports\Monthly"), Times.Once);
+    }
+
+    /// <summary>
+    /// Issue #2266: 出力先の同一判定は、大文字小文字・前後の空白・末尾の区切りを無視し、別のフォルダは区別すること
+    /// </summary>
+    [Theory]
+    [InlineData(@"D:\Reports", @"d:\reports", true)]
+    [InlineData(@"D:\Reports", @"D:\Reports  ", true)]
+    [InlineData(@"D:\Reports\", @"D:\Reports", true)]
+    [InlineData(@"\\server\share\帳票", @"\\SERVER\share\帳票\", true)]
+    [InlineData(@"C:\", @"c:\", true)]
+    [InlineData(@"D:\Reports", @"D:\Reports2", false)]
+    [InlineData(@"D:\Reports", "", false)]
+    [InlineData(null, "", true)]
+    public void IsSameOutputFolder_表記の揺れを同じフォルダとして扱い別のフォルダは区別すること(string? left, string? right, bool expected)
+    {
+        ReportViewModel.IsSameOutputFolder(left, right).Should().Be(expected);
+    }
+
+    /// <summary>
     /// Issue #2266 対の表明: 「参照」で別のフォルダを選んだら、従来どおり 1 回だけ保存して表示を変えること
     /// （同じ値の分岐を足したことで二重に保存する・表示を変えない実装を検出する）
     /// </summary>
