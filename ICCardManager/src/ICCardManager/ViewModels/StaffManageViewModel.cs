@@ -25,6 +25,24 @@ namespace ICCardManager.ViewModels
     /// </summary>
     public partial class StaffManageViewModel : ViewModelBase, IEditFormViewModel
     {
+        /// <summary>
+        /// 職員の登録で認証が完了しなかったときの案内（Issue #2263）
+        /// </summary>
+        /// <remarks>
+        /// 認証は登録済みの職員証でしか通らないため、これから登録する職員証では認証できないことを併せて示す
+        /// （新しく着任した職員が自分の職員証をタッチして失敗し続けないように）。
+        /// </remarks>
+        internal const string RegisterAuthenticationCancelledMessage =
+            "職員証の認証が完了しなかったため、職員を登録していません。入力内容はそのままです。" +
+            "登録するには、もう一度「保存」を押し、登録済みの職員の職員証で認証してください（これから登録する職員証では認証できません）。";
+
+        /// <summary>
+        /// 職員情報の変更で認証が完了しなかったときの案内（Issue #2263）
+        /// </summary>
+        internal const string UpdateAuthenticationCancelledMessage =
+            "職員証の認証が完了しなかったため、職員情報を変更していません。入力内容はそのままです。" +
+            "変更するには、もう一度「保存」を押して職員証をタッチしてください。";
+
         private readonly IStaffRepository _staffRepository;
         private readonly ICardReader _cardReader;
         private readonly IValidationService _validationService;
@@ -151,9 +169,25 @@ namespace ICCardManager.ViewModels
         /// <remarks>
         /// Issue #1759: 復元提案のダイアログと競合エラーの文言で同じ表記を使うため 1 か所に集約する。
         /// 職員番号は任意入力のため、空のときは氏名だけにする。
+        /// Issue #2263: 案内のすべての経路がこの 1 か所で表示名を作る。氏名が空なら職員番号で、
+        /// どちらも空なら <see cref="UnnamedStaffLabel"/> で名指しする（空の名前を文言へ埋め込まない。
+        /// IDm は利用者が読み取れる識別子ではないため表示しない）。
         /// </remarks>
-        private static string FormatStaffLabel(string name, string number)
-            => string.IsNullOrWhiteSpace(number) ? name : $"{name}（{number}）";
+        internal static string FormatStaffLabel(string? name, string? number)
+        {
+            var hasNumber = number is not null && !string.IsNullOrWhiteSpace(number);
+            if (name is not null && !string.IsNullOrWhiteSpace(name))
+            {
+                return hasNumber ? $"{name}（{number}）" : name;
+            }
+
+            return hasNumber ? $"職員番号 {number}" : UnnamedStaffLabel;
+        }
+
+        /// <summary>
+        /// 氏名・職員番号がともに空の職員を名指しするときの表記（Issue #2263）
+        /// </summary>
+        internal const string UnnamedStaffLabel = "この職員証の職員";
 
         /// <summary>
         /// 編集中の対象を、編集開始時に一覧へ載っていた表記で名指しする（Issue #1761）
@@ -256,11 +290,20 @@ namespace ICCardManager.ViewModels
         private async Task<bool> StartNewStaffWithIdmCoreAsync(string idm)
         {
             // Issue #284対応: タッチ時点で削除済み職員チェックを行う
-            var existing = await _staffRepository.GetByIdmAsync(idm, includeDeleted: true);
+            // Issue #2263: 復元に認証を求めるかの判定も、同じ処理中スコープの中で行う（DB を待つ間に画面を操作させない）
+            Staff? existing;
+            bool requiresAuthentication;
+            using (BeginBusy("確認中..."))
+            {
+                existing = await _staffRepository.GetByIdmAsync(idm, includeDeleted: true);
+                requiresAuthentication = existing?.IsDeleted == true
+                    && await _staffManagementService.RequiresOperatorAuthenticationAsync();
+            }
+
             if (existing != null)
             {
                 // 識別子を決定（名前優先、なければ職員番号）
-                var identifier = !string.IsNullOrEmpty(existing.Name) ? existing.Name : existing.Number;
+                var identifier = FormatStaffLabel(existing.Name, existing.Number);
 
                 if (existing.IsDeleted)
                 {
@@ -271,8 +314,26 @@ namespace ICCardManager.ViewModels
 
                     if (confirmed)
                     {
-                        // Issue #2156: 復元と監査ログを 1 トランザクションで確定させる
-                        var restored = await _staffManagementService.RestoreAsync(existing);
+                        // Issue #2263: 復元は職員証の認証を経て行う（登録済みの職員が 0 人なら免除）
+                        var restored = false;
+                        var authorized = await RunRestoreWithAuthenticationAsync(requiresAuthentication, async () =>
+                        {
+                            using (BeginBusy("復元中..."))
+                            {
+                                // Issue #2156: 復元と監査ログを 1 トランザクションで確定させる
+                                restored = await _staffManagementService.RestoreAsync(existing);
+                            }
+                        });
+
+                        if (!authorized)
+                        {
+                            _dialogService.ShowInformation(
+                                BuildRestoreAuthenticationCancelledMessage(
+                                    identifier, "もう一度この職員証をタッチし"),
+                                "ご案内");
+                            return true; // ダイアログを閉じる
+                        }
+
                         if (restored)
                         {
                             _dialogService.ShowInformation(
@@ -282,10 +343,14 @@ namespace ICCardManager.ViewModels
                         }
                         else
                         {
-                            _dialogService.ShowError(
-                                "復元に失敗しました",
-                                "エラー");
-                            return true; // ダイアログを閉じる
+                            // Issue #1759 / #2263: false は「他 PC が先に復元した」ことを意味する（認証を待つ間にも起こり得る）。
+                            // 保存経路・タッチ経路と同じ案内にそろえ、案内どおり一覧で確かめられるよう、
+                            // 再読込してからダイアログを開いたままにする（閉じると「一覧を再読み込みしました」が事実にならない）
+                            await LoadStaffAsync();
+                            StatusMessage = ConcurrencyConflictMessage.ForRestore(
+                                $"職員「{identifier}」", "職員一覧");
+                            IsStatusError = true;
+                            return false; // ダイアログは開いたまま（一覧で状態を確かめてもらう）
                         }
                     }
                     else
@@ -356,6 +421,12 @@ namespace ICCardManager.ViewModels
         /// <summary>
         /// 保存
         /// </summary>
+        /// <remarks>
+        /// Issue #2263: 登録・更新（および登録しようとした職員証が削除済みだった場合の復元）は、入力の検証を
+        /// 通った後、書き込む前に職員証の認証を求める（登録済みの職員が 0 人の初回セットアップだけ免除。
+        /// <see cref="StaffManagementService.RequiresOperatorAuthenticationAsync"/>）。認証が完了しなかったときは
+        /// 何も書かず、入力内容を残したまま案内する（Issue #1757）。
+        /// </remarks>
         [RelayCommand]
         public async Task SaveAsync()
         {
@@ -383,157 +454,23 @@ namespace ICCardManager.ViewModels
                     return;
                 }
 
-                using (BeginBusy("保存中..."))
+                // 保存する内容はここで確定させる。認証ダイアログ（職員証タッチ待ち）の間も UI スレッドは
+                // 入力を処理するため、await の後で編集欄を読み直さない（ui-conventions「選択状態のスナップショット」）
+                var staff = new Staff
                 {
-                    if (IsNewStaff)
-                    {
-                        // 重複チェック
-                        var existing = await _staffRepository.GetByIdmAsync(EditStaffIdm, includeDeleted: true);
-                        if (existing != null)
-                        {
-                            var identifier = FormatStaffLabel(existing.Name, existing.Number);
+                    StaffIdm = EditStaffIdm,
+                    Name = sanitizedName,
+                    Number = string.IsNullOrWhiteSpace(sanitizedNumber) ? null : sanitizedNumber,
+                    Note = string.IsNullOrWhiteSpace(sanitizedNote) ? null : sanitizedNote
+                };
 
-                            if (existing.IsDeleted)
-                            {
-                                // 削除済み職員の場合は復元を提案
-                                //
-                                // Issue #1793: BeginBusy スコープの内側でモーダルを出すと、
-                                // 全面オーバーレイと「保存中...」の不確定プログレスバーが
-                                // ダイアログの背後で回り続ける。確認ダイアログは職員の判断を待つ設計であり、
-                                // 背後の「処理中」表示はその判断を妨げる。
-                                bool confirmed;
-                                using (SuspendBusy())
-                                {
-                                    confirmed = _dialogService.ShowConfirmation(
-                                        $"この職員証は以前 {identifier} として登録されていましたが、削除されています。\n\n復元しますか？",
-                                        "削除済み職員");
-                                }
-
-                                if (confirmed)
-                                {
-                                    // Issue #2156: 復元と監査ログを 1 トランザクションで確定させる
-                                    var restored = await _staffManagementService.RestoreAsync(existing);
-                                    if (restored)
-                                    {
-                                        var restoredIdm = EditStaffIdm;
-                                        await LoadStaffAsync();
-                                        CancelEdit();
-                                        SelectAndHighlight(restoredIdm);
-                                        // Issue #1759: CancelEdit() は StatusMessage / IsStatusError をクリアするため、
-                                        // 完了メッセージは必ず後処理のあとに設定する（先に設定すると一度も表示されない）。
-                                        StatusMessage = $"{identifier} を復元しました";
-                                        IsStatusError = false;
-                                    }
-                                    else
-                                    {
-                                        // Issue #1759: RestoreAsync が false を返すのは
-                                        // UPDATE ... WHERE staff_idm = @staffIdm AND is_deleted = 1 が
-                                        // 0 行に一致した場合だけ。つまり他 PC が先に復元したことを意味する。
-                                        await LoadStaffAsync();
-                                        StatusMessage = ConcurrencyConflictMessage.ForRestore(
-                                            $"職員「{identifier}」", "職員一覧");
-                                        IsStatusError = true;
-                                    }
-                                }
-                                else
-                                {
-                                    // Issue #314: 復元しない場合は案内メッセージを表示
-                                    // Issue #1793: BeginBusy スコープ内のモーダル表示は SuspendBusy で囲む
-                                    using (SuspendBusy())
-                                    {
-                                        _dialogService.ShowInformation(
-                                            $"この職員証は以前 {identifier} として登録されていたため、新規登録はできません。\n\n" +
-                                            "異なる名前等で登録したい場合は、先に復元を行い、その後に編集してください。",
-                                            "ご案内");
-                                    }
-                                    CancelEdit();
-                                }
-                                return;
-                            }
-                            else
-                            {
-                                StatusMessage = $"この職員証は {identifier} として既に登録されています";
-                                IsStatusError = true;
-                                return;
-                            }
-                        }
-
-                        var staff = new Staff
-                        {
-                            StaffIdm = EditStaffIdm,
-                            Name = sanitizedName,
-                            Number = string.IsNullOrWhiteSpace(sanitizedNumber) ? null : sanitizedNumber,
-                            Note = string.IsNullOrWhiteSpace(sanitizedNote) ? null : sanitizedNote
-                        };
-
-                        // Issue #2156: 登録と監査ログを 1 トランザクションで確定させる
-                        var success = await _staffManagementService.RegisterAsync(staff);
-                        if (success)
-                        {
-                            var savedIdm = EditStaffIdm;
-                            await LoadStaffAsync();
-                            CancelEdit();
-                            SelectAndHighlight(savedIdm);
-                            // Issue #1759: CancelEdit() は StatusMessage / IsStatusError をクリアするため、
-                            // 完了メッセージは必ず後処理のあとに設定する（先に設定すると一度も表示されない）。
-                            StatusMessage = "登録しました";
-                            IsStatusError = false;
-                        }
-                        else
-                        {
-                            StatusMessage = "登録に失敗しました";
-                            IsStatusError = true;
-                        }
-                    }
-                    else
-                    {
-                        // 更新前のデータを取得（操作ログ用）
-                        var beforeStaff = await _staffRepository.GetByIdmAsync(EditStaffIdm);
-
-                        // Issue #1760: 読み取れなかった時点で「対象の職員は現在 is_deleted = 0 として
-                        // 存在しない」ことが確定しているため、UpdateAsync を呼ばずに競合として扱う。
-                        // 通常は UpdateAsync の WHERE（同じ is_deleted = 0）も 0 行になるが、
-                        // 読み取りと書き込みの間に他 PC が職員を復元すると 1 行に一致して成功し、
-                        // 更新だけが通って operation_log には 1 行も残らない。カード側
-                        // （CardManageViewModel）と同型の欠陥のため同じ扱いにする。
-                        if (beforeStaff == null)
-                        {
-                            await NotifyUpdateConflictAsync(EditTargetLabel);
-                            return;
-                        }
-
-                        // 更新
-                        var staff = new Staff
-                        {
-                            StaffIdm = EditStaffIdm,
-                            Name = sanitizedName,
-                            Number = string.IsNullOrWhiteSpace(sanitizedNumber) ? null : sanitizedNumber,
-                            Note = string.IsNullOrWhiteSpace(sanitizedNote) ? null : sanitizedNote
-                        };
-
-                        // Issue #2156: 更新と監査ログを 1 トランザクションで確定させる
-                        // （beforeStaff は上のガードで非 null が確定している。Issue #1760）
-                        var success = await _staffManagementService.UpdateAsync(beforeStaff, staff);
-                        if (success)
-                        {
-                            var updatedIdm = EditStaffIdm;
-                            await LoadStaffAsync();
-                            CancelEdit();
-                            SelectAndHighlight(updatedIdm);
-                            // Issue #1759: CancelEdit() は StatusMessage / IsStatusError をクリアするため、
-                            // 完了メッセージは必ず後処理のあとに設定する（先に設定すると一度も表示されない）。
-                            StatusMessage = "更新しました";
-                            IsStatusError = false;
-                        }
-                        else
-                        {
-                            // Issue #1759: UpdateAsync が false を返すのは
-                            // UPDATE ... WHERE staff_idm = @staffIdm AND is_deleted = 0 が
-                            // 0 行に一致した場合だけ（Issue #1753）。つまり編集中に対象の職員が
-                            // 論理削除されたことを意味する。カード側（CardManageViewModel）と同じ扱いにする。
-                            await NotifyUpdateConflictAsync(EditTargetLabel);
-                        }
-                    }
+                if (IsNewStaff)
+                {
+                    await SaveNewStaffAsync(staff);
+                }
+                else
+                {
+                    await SaveStaffChangesAsync(staff, EditTargetLabel);
                 }
             }
             catch (Exception ex)
@@ -544,6 +481,331 @@ namespace ICCardManager.ViewModels
                 IsStatusError = true;
             }
         }
+
+        /// <summary>
+        /// 新規登録の保存（登録しようとした職員証が登録済み・削除済みなら、その案内・復元）
+        /// </summary>
+        private async Task SaveNewStaffAsync(Staff staff)
+        {
+            // 重複チェック
+            // Issue #2263: 認証を求めるかの判定も、同じ処理中スコープの中で行う。処理中の外で DB を待つと、
+            // その間 Esc（CancelEdit）やキャンセルボタンが効き、取り消したフォームの内容が認証の後に書き込まれ得る
+            Staff? existing;
+            bool requiresAuthentication;
+            using (BeginBusy("確認中..."))
+            {
+                existing = await _staffRepository.GetByIdmAsync(staff.StaffIdm, includeDeleted: true);
+                requiresAuthentication = (existing == null || existing.IsDeleted)
+                    && await _staffManagementService.RequiresOperatorAuthenticationAsync();
+            }
+
+            if (existing != null)
+            {
+                var identifier = FormatStaffLabel(existing.Name, existing.Number);
+
+                if (existing.IsDeleted)
+                {
+                    // 削除済み職員の場合は復元を提案
+                    // （Issue #1793: 確認ダイアログは処理中スコープの外で出す。職員の判断を待つ設計であり、
+                    // 背後の「処理中」表示はその判断を妨げる）
+                    var confirmed = _dialogService.ShowConfirmation(
+                        $"この職員証は以前 {identifier} として登録されていましたが、削除されています。\n\n復元しますか？",
+                        "削除済み職員");
+
+                    if (confirmed)
+                    {
+                        await RestoreFromSaveAsync(existing, identifier, requiresAuthentication);
+                    }
+                    else
+                    {
+                        // Issue #314: 復元しない場合は案内メッセージを表示
+                        _dialogService.ShowInformation(
+                            $"この職員証は以前 {identifier} として登録されていたため、新規登録はできません。\n\n" +
+                            "異なる名前等で登録したい場合は、先に復元を行い、その後に編集してください。",
+                            "ご案内");
+                        CancelEdit();
+                    }
+
+                    return;
+                }
+
+                StatusMessage = $"この職員証は {identifier} として既に登録されています";
+                IsStatusError = true;
+                return;
+            }
+
+            var authorized = await RunRegisterWithAuthenticationAsync(requiresAuthentication, async () =>
+            {
+                using (BeginBusy("保存中..."))
+                {
+                    // Issue #2156: 登録と監査ログを 1 トランザクションで確定させる
+                    var success = await _staffManagementService.RegisterAsync(staff);
+                    if (success)
+                    {
+                        await LoadStaffAsync();
+                        CancelEdit();
+                        SelectAndHighlight(staff.StaffIdm);
+                        // Issue #1759: CancelEdit() は StatusMessage / IsStatusError をクリアするため、
+                        // 完了メッセージは必ず後処理のあとに設定する（先に設定すると一度も表示されない）。
+                        StatusMessage = "登録しました";
+                        IsStatusError = false;
+                    }
+                    else
+                    {
+                        // Issue #2263: InsertAsync は一過性でない SQLite の失敗をすべて false に畳む（#1951 / #2001）。
+                        // 主キーの重複（認証を待つ間に他 PC が同じ職員証を登録した）のほか、ディスク満杯・
+                        // 読み取り専用・破損・I/O エラーも同じ false になるため、読み直して原因を分ける。
+                        // 入力内容はどちらでも消さない（#1757）。キャッシュは RegisterAsync の finally が破棄済み
+                        var label = $"職員「{FormatStaffLabel(staff.Name, staff.Number)}」";
+                        var registeredMeanwhile = await _staffRepository.GetByIdmAsync(staff.StaffIdm, includeDeleted: true);
+                        if (registeredMeanwhile != null)
+                        {
+                            // 案内が「再読み込みしました」と述べるので、先に一覧を再読込する（#1759）
+                            await LoadStaffAsync();
+                            StatusMessage = ConcurrencyConflictMessage.ForRegister(label, "職員一覧");
+                        }
+                        else
+                        {
+                            // 行が無い＝重複ではない。原因（書き込めなかった理由）はリポジトリがログに残している
+                            StatusMessage = BuildRegisterWriteFailedMessage(label);
+                        }
+
+                        IsStatusError = true;
+                    }
+                }
+            });
+
+            if (!authorized)
+            {
+                // Issue #2263: 何も書いていない。入力内容は消さない（Issue #1757）
+                StatusMessage = RegisterAuthenticationCancelledMessage;
+                IsStatusError = true;
+            }
+        }
+
+        /// <summary>
+        /// 新規登録の保存で、登録しようとした職員証が削除済みだった職員を復元する
+        /// </summary>
+        private async Task RestoreFromSaveAsync(Staff deletedStaff, string identifier, bool requiresAuthentication)
+        {
+            var authorized = await RunRestoreWithAuthenticationAsync(requiresAuthentication, async () =>
+            {
+                using (BeginBusy("復元中..."))
+                {
+                    // Issue #2156: 復元と監査ログを 1 トランザクションで確定させる
+                    var restored = await _staffManagementService.RestoreAsync(deletedStaff);
+                    if (restored)
+                    {
+                        await LoadStaffAsync();
+                        CancelEdit();
+                        SelectAndHighlight(deletedStaff.StaffIdm);
+                        // Issue #1759: CancelEdit() は StatusMessage / IsStatusError をクリアするため、
+                        // 完了メッセージは必ず後処理のあとに設定する（先に設定すると一度も表示されない）。
+                        StatusMessage = $"{identifier} を復元しました";
+                        IsStatusError = false;
+                    }
+                    else
+                    {
+                        // Issue #1759: RestoreAsync が false を返すのは
+                        // UPDATE ... WHERE staff_idm = @staffIdm AND is_deleted = 1 が
+                        // 0 行に一致した場合だけ。つまり他 PC が先に復元したことを意味する。
+                        await LoadStaffAsync();
+                        StatusMessage = ConcurrencyConflictMessage.ForRestore(
+                            $"職員「{identifier}」", "職員一覧");
+                        IsStatusError = true;
+                    }
+                }
+            });
+
+            if (!authorized)
+            {
+                // Issue #2263: 何も書いていない。入力内容は消さない（Issue #1757）
+                StatusMessage = BuildRestoreAuthenticationCancelledMessage(
+                    identifier, "もう一度「保存」を押し");
+                IsStatusError = true;
+            }
+        }
+
+        /// <summary>
+        /// 既存の職員情報の変更を保存する
+        /// </summary>
+        /// <param name="staff">変更後の職員情報</param>
+        /// <param name="targetLabel">編集対象を一覧に載っていた表記で名指しするラベル（Issue #1761）</param>
+        private async Task SaveStaffChangesAsync(Staff staff, string targetLabel)
+        {
+            // Issue #2263: 認証を求めるかの判定は処理中スコープの中で行う（SaveNewStaffAsync と同じ理由）
+            bool requiresAuthentication;
+            using (BeginBusy("確認中..."))
+            {
+                requiresAuthentication = await _staffManagementService.RequiresOperatorAuthenticationAsync();
+            }
+
+            var authorized = await RunUpdateWithAuthenticationAsync(requiresAuthentication, async () =>
+            {
+                using (BeginBusy("保存中..."))
+                {
+                    // 更新前のデータを取得（操作ログ用）
+                    //
+                    // Issue #2263: 認証の後で読む。認証を待つ間に他 PC が職員を削除・変更していることがある。
+                    var beforeStaff = await _staffRepository.GetByIdmAsync(staff.StaffIdm);
+
+                    // Issue #1760: 読み取れなかった時点で「対象の職員は現在 is_deleted = 0 として
+                    // 存在しない」ことが確定しているため、UpdateAsync を呼ばずに競合として扱う。
+                    // 通常は UpdateAsync の WHERE（同じ is_deleted = 0）も 0 行になるが、
+                    // 読み取りと書き込みの間に他 PC が職員を復元すると 1 行に一致して成功し、
+                    // 更新だけが通って operation_log には 1 行も残らない。カード側
+                    // （CardManageViewModel）と同型の欠陥のため同じ扱いにする。
+                    if (beforeStaff == null)
+                    {
+                        await NotifyUpdateConflictAsync(targetLabel);
+                        return;
+                    }
+
+                    // Issue #2156: 更新と監査ログを 1 トランザクションで確定させる
+                    // （beforeStaff は上のガードで非 null が確定している。Issue #1760）
+                    var success = await _staffManagementService.UpdateAsync(beforeStaff, staff);
+                    if (success)
+                    {
+                        await LoadStaffAsync();
+                        CancelEdit();
+                        SelectAndHighlight(staff.StaffIdm);
+                        // Issue #1759: CancelEdit() は StatusMessage / IsStatusError をクリアするため、
+                        // 完了メッセージは必ず後処理のあとに設定する（先に設定すると一度も表示されない）。
+                        StatusMessage = "更新しました";
+                        IsStatusError = false;
+                    }
+                    else
+                    {
+                        // Issue #1759: UpdateAsync が false を返すのは
+                        // UPDATE ... WHERE staff_idm = @staffIdm AND is_deleted = 0 が
+                        // 0 行に一致した場合だけ（Issue #1753）。つまり編集中に対象の職員が
+                        // 論理削除されたことを意味する。カード側（CardManageViewModel）と同じ扱いにする。
+                        await NotifyUpdateConflictAsync(targetLabel);
+                    }
+                }
+            });
+
+            if (!authorized)
+            {
+                // Issue #2263: 何も書いていない。入力内容は消さない（Issue #1757）
+                StatusMessage = UpdateAuthenticationCancelledMessage;
+                IsStatusError = true;
+            }
+        }
+
+        /// <summary>
+        /// 職員の登録を、操作者の職員証認証を経て行う（Issue #2263）
+        /// </summary>
+        /// <param name="requiresAuthentication">
+        /// 認証を求めるか（<see cref="StaffManagementService.RequiresOperatorAuthenticationAsync"/> の結果）。
+        /// 呼び出し側が<b>処理中スコープの中で</b>判定して渡す。ここで DB を待つと、その間は処理中ではないため
+        /// Esc（<c>CancelEdit</c>）やキャンセルボタンが効き、取り消したフォームの内容が認証の後に書き込まれ得る
+        /// </param>
+        /// <param name="write">認証した操作の中で行う書き込みと後処理</param>
+        /// <returns>
+        /// <paramref name="write"/> を実行したら <c>true</c>。認証が完了しなかった（キャンセル・タイムアウト）ため
+        /// 実行しなかったら <c>false</c>
+        /// </returns>
+        /// <remarks>
+        /// <para>
+        /// 認証結果の <c>Enter()</c> はこのメソッドの流れで操作者セッションを開始し、<paramref name="write"/> は
+        /// その流れの内側で実行されるため、書き込みの操作ログには認証した職員が記録される（Issue #2260）。
+        /// </para>
+        /// <para>
+        /// 登録・更新・復元で 3 つに分けているのは、操作名を <c>RequestAuthenticationAsync</c> へ
+        /// 文字列リテラルで渡すため（静的検査がリテラルを数える。Issue #2255）。
+        /// </para>
+        /// </remarks>
+        private async Task<bool> RunRegisterWithAuthenticationAsync(bool requiresAuthentication, Func<Task> write)
+        {
+            if (!requiresAuthentication)
+            {
+                // 初回セットアップ（登録済みの職員が 0 人）。認証できる職員証がまだ無いため免除し、
+                // 操作ログは「GUI操作」として記録される
+                await write();
+                return true;
+            }
+
+            using var authResult = (await _staffAuthService.RequestAuthenticationAsync("職員の登録"))?.Enter();
+            if (authResult == null)
+            {
+                return false;
+            }
+
+            await write();
+            return true;
+        }
+
+        /// <summary>
+        /// 職員情報の変更を、操作者の職員証認証を経て行う（Issue #2263。
+        /// 詳細は <see cref="RunRegisterWithAuthenticationAsync"/>）
+        /// </summary>
+        private async Task<bool> RunUpdateWithAuthenticationAsync(bool requiresAuthentication, Func<Task> write)
+        {
+            if (!requiresAuthentication)
+            {
+                await write();
+                return true;
+            }
+
+            using var authResult = (await _staffAuthService.RequestAuthenticationAsync("職員情報の変更"))?.Enter();
+            if (authResult == null)
+            {
+                return false;
+            }
+
+            await write();
+            return true;
+        }
+
+        /// <summary>
+        /// 削除済み職員の復元を、操作者の職員証認証を経て行う（Issue #2263。
+        /// 詳細は <see cref="RunRegisterWithAuthenticationAsync"/>）
+        /// </summary>
+        /// <remarks>
+        /// 復元する職員証は削除済みのため、認証には使えない（<c>StaffAuthDialog</c> は削除済みの職員を認証しない）。
+        /// 登録済みの職員が 0 人なら、登録と同じく免除する（免除しないと、全員を削除した後に誰も復元できない）。
+        /// </remarks>
+        private async Task<bool> RunRestoreWithAuthenticationAsync(bool requiresAuthentication, Func<Task> write)
+        {
+            if (!requiresAuthentication)
+            {
+                await write();
+                return true;
+            }
+
+            using var authResult = (await _staffAuthService.RequestAuthenticationAsync("職員の復元"))?.Enter();
+            if (authResult == null)
+            {
+                return false;
+            }
+
+            await write();
+            return true;
+        }
+
+        /// <summary>
+        /// 復元の認証が完了しなかったときの案内を組み立てる（Issue #2263）
+        /// </summary>
+        /// <param name="identifier">復元しようとした職員の表示名</param>
+        /// <param name="retryAction">やり直すための操作（「もう一度「保存」を押し」等。読点の前まで）</param>
+        internal static string BuildRestoreAuthenticationCancelledMessage(string identifier, string retryAction)
+            => $"職員証の認証が完了しなかったため、{identifier} を復元していません。" +
+               $"復元するには、{retryAction}、登録済みの職員の職員証で認証してください（復元する職員証では認証できません）。";
+
+        /// <summary>
+        /// 登録の書き込みが重複以外の理由で失敗したときの案内を組み立てる（Issue #2263）
+        /// </summary>
+        /// <param name="target">登録しようとした職員の説明（「職員「…」」）</param>
+        /// <remarks>
+        /// 原因（ディスク満杯・読み取り専用・破損・I/O エラー等）は断定しない。語彙は
+        /// <c>ExceptionMessageFormatter</c> の SQLite の文言（「データベースの読み書きができませんでした」）にそろえる。
+        /// 技術的な詳細はリポジトリ（<c>DbContext.LogNonTransientWriteFailure</c>）がログへ残している。
+        /// </remarks>
+        internal static string BuildRegisterWriteFailedMessage(string target)
+            => $"{target}を登録できませんでした。データベースへの書き込みに失敗しました" +
+               "（保存先の空き容量・書き込み権限・共有フォルダーの接続が原因の可能性があります）。" +
+               "これらを確認してから、もう一度「保存」を押してください。詳細はログファイルを確認してください。";
 
         /// <summary>
         /// 更新対象の職員が見つからなかった（競合）ことを案内し、職員一覧を再読込する
@@ -811,7 +1073,17 @@ namespace ICCardManager.ViewModels
             IsWaitingForCard = false;
 
             // 即座に登録済みチェックを実行（Issue #284）
-            var existing = await _staffRepository.GetByIdmAsync(idm, includeDeleted: true);
+            // Issue #2263: 復元に認証を求めるかの判定も、同じ処理中スコープの中で行う。処理中の外で DB を待つと、
+            // その間 Esc（CancelEdit）やキャンセルボタンが効き、閉じたフォームについて復元の確認・認証が続く
+            Staff? existing;
+            bool requiresAuthentication;
+            using (BeginBusy("確認中..."))
+            {
+                existing = await _staffRepository.GetByIdmAsync(idm, includeDeleted: true);
+                requiresAuthentication = existing?.IsDeleted == true
+                    && await _staffManagementService.RequiresOperatorAuthenticationAsync();
+            }
+
             if (existing != null)
             {
                 var identifier = FormatStaffLabel(existing.Name, existing.Number);
@@ -825,31 +1097,48 @@ namespace ICCardManager.ViewModels
 
                     if (confirmed)
                     {
-                        // Issue #2156: 復元と監査ログを 1 トランザクションで確定させる。
-                        // 監査ログの失敗は復元ごと巻き戻るので、ここで例外になれば何も確定していない
-                        // （restoreCommitted を立てる前なので「読み取りに失敗」として案内してよい）
-                        var restored = await _staffManagementService.RestoreAsync(existing);
-                        if (restored)
+                        // Issue #2263: 復元は職員証の認証を経て行う（登録済みの職員が 0 人なら免除）
+                        var authorized = await RunRestoreWithAuthenticationAsync(requiresAuthentication, async () =>
                         {
-                            // Issue #1816: ここから先は「復元が確定した後の後処理」。
-                            // 失敗しても復元は取り消されないため、読み取り失敗と混同する案内を出さない
-                            restoreCommitted.Value = true;
+                            using var busy = BeginBusy("復元中...");
 
-                            await LoadStaffAsync();
-                            CancelEdit();
-                            SelectAndHighlight(idm);
-                            // Issue #1759: CancelEdit() は StatusMessage / IsStatusError をクリアするため、
-                            // 完了メッセージは必ず後処理のあとに設定する（先に設定すると一度も表示されない）。
-                            StatusMessage = $"{identifier} を復元しました";
-                            IsStatusError = false;
-                        }
-                        else
+                            // Issue #2156: 復元と監査ログを 1 トランザクションで確定させる。
+                            // 監査ログの失敗は復元ごと巻き戻るので、ここで例外になれば何も確定していない
+                            // （restoreCommitted を立てる前なので「読み取りに失敗」として案内してよい）
+                            var restored = await _staffManagementService.RestoreAsync(existing);
+                            if (restored)
+                            {
+                                // Issue #1816: ここから先は「復元が確定した後の後処理」。
+                                // 失敗しても復元は取り消されないため、読み取り失敗と混同する案内を出さない
+                                restoreCommitted.Value = true;
+
+                                await LoadStaffAsync();
+                                CancelEdit();
+                                SelectAndHighlight(idm);
+                                // Issue #1759: CancelEdit() は StatusMessage / IsStatusError をクリアするため、
+                                // 完了メッセージは必ず後処理のあとに設定する（先に設定すると一度も表示されない）。
+                                StatusMessage = $"{identifier} を復元しました";
+                                IsStatusError = false;
+                            }
+                            else
+                            {
+                                // Issue #1759: 保存経路（SaveAsync）の復元分岐と同じ扱い。
+                                // false は「他 PC が先に復元した」ことを意味する。
+                                await LoadStaffAsync();
+                                StatusMessage = ConcurrencyConflictMessage.ForRestore(
+                                    $"職員「{identifier}」", "職員一覧");
+                                IsStatusError = true;
+                            }
+                        });
+
+                        if (!authorized)
                         {
-                            // Issue #1759: 保存経路（SaveAsync）の復元分岐と同じ扱い。
-                            // false は「他 PC が先に復元した」ことを意味する。
-                            await LoadStaffAsync();
-                            StatusMessage = ConcurrencyConflictMessage.ForRestore(
-                                $"職員「{identifier}」", "職員一覧");
+                            // Issue #2263: 何も書いていない。もう一度タッチすれば復元をやり直せるよう、
+                            // 確認の済んでいない IDm をフォームから外してタッチ待ちへ戻す
+                            EditStaffIdm = string.Empty;
+                            IsWaitingForCard = true;
+                            StatusMessage = BuildRestoreAuthenticationCancelledMessage(
+                                identifier, "もう一度この職員証をタッチし");
                             IsStatusError = true;
                         }
                     }

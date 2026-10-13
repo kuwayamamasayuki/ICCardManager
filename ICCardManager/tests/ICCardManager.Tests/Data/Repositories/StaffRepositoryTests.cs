@@ -728,6 +728,73 @@ public class StaffRepositoryTests : IDisposable
 
     #endregion
 
+    #region HasActiveStaffAsync テスト（Issue #2263: 職員の登録に認証を求めるかの判定）
+
+    /// <summary>
+    /// 職員が 1 人もいなければ false（初回セットアップ。認証を免除する根拠）
+    /// </summary>
+    [Fact]
+    public async Task HasActiveStaffAsync_EmptyDatabase_ReturnsFalse()
+    {
+        var result = await _repository.HasActiveStaffAsync();
+
+        result.Should().BeFalse();
+    }
+
+    /// <summary>
+    /// 削除済みの職員しかいなければ false。削除済みの職員証は認証を通らないため、
+    /// 認証を求めると誰も登録・復元できなくなる
+    /// </summary>
+    [Fact]
+    public async Task HasActiveStaffAsync_OnlyDeletedStaff_ReturnsFalse()
+    {
+        var staff = CreateTestStaff("STAFF00000000001", "山田太郎", "001");
+        await _repository.InsertAsync(staff);
+        await _repository.DeleteAsync(staff.StaffIdm);
+
+        var result = await _repository.HasActiveStaffAsync();
+
+        result.Should().BeFalse();
+    }
+
+    /// <summary>
+    /// 登録済みの職員が 1 人でもいれば true（認証を免除しない）
+    /// </summary>
+    [Fact]
+    public async Task HasActiveStaffAsync_WithActiveStaff_ReturnsTrue()
+    {
+        await _repository.InsertAsync(CreateTestStaff("STAFF00000000001", "山田太郎", "001"));
+        var deleted = CreateTestStaff("STAFF00000000002", "鈴木花子", "002");
+        await _repository.InsertAsync(deleted);
+        await _repository.DeleteAsync(deleted.StaffIdm);
+
+        var result = await _repository.HasActiveStaffAsync();
+
+        result.Should().BeTrue();
+    }
+
+    /// <summary>
+    /// 一覧のキャッシュを経由しないこと。共有モードで他の PC が 1 人目を登録した直後に、
+    /// 古いキャッシュの「0 人」を根拠に認証を免除しないため
+    /// </summary>
+    [Fact]
+    public async Task HasActiveStaffAsync_DoesNotReadStaffListCache()
+    {
+        await _repository.InsertAsync(CreateTestStaff("STAFF00000000001", "山田太郎", "001"));
+        // キャッシュが空の一覧を返す状態にする
+        _cacheServiceMock.Setup(c => c.GetOrCreateAsync(
+            It.IsAny<string>(),
+            It.IsAny<Func<Task<IEnumerable<Staff>>>>(),
+            It.IsAny<TimeSpan>()))
+            .ReturnsAsync(Enumerable.Empty<Staff>());
+
+        var result = await _repository.HasActiveStaffAsync();
+
+        result.Should().BeTrue("DB には登録済みの職員がいる");
+    }
+
+    #endregion
+
     #region ヘルパーメソッド
 
     private static Staff CreateTestStaff(string staffIdm, string name, string? number)

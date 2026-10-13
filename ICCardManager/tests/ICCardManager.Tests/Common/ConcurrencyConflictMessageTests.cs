@@ -135,4 +135,18 @@ public class ConcurrencyConflictMessageTests
         refund.Should().Contain("削除された可能性");
         refund.Should().NotBe(ConcurrencyConflictMessage.ForUpdate(Target, ListName));
     }
+
+    /// <summary>
+    /// Issue #2263: 登録の競合は「先に登録された」ことを理由に挙げ、ほかの操作の理由を含まないこと。
+    /// </summary>
+    [Fact]
+    public void ForRegister_NamesTheRegisterOperationAndItsCause()
+    {
+        var register = ConcurrencyConflictMessage.ForRegister(Target, ListName);
+
+        register.Should().Contain("登録できませんでした");
+        register.Should().Contain("先に登録された可能性");
+        register.Should().NotContain("削除された");
+        register.Should().NotContain("復元された");
+    }
 }

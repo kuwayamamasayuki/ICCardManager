@@ -1,3 +1,4 @@
+#nullable enable
 using System;
 using System.Collections.Generic;
 using System.Data.SQLite;
@@ -41,7 +42,7 @@ namespace ICCardManager.Data.Repositories
         /// </summary>
         /// <param name="staffIdm">職員証IDm</param>
         /// <param name="includeDeleted">論理削除されたものも含めるか</param>
-        Task<Staff> GetByIdmAsync(string staffIdm, bool includeDeleted = false);
+        Task<Staff?> GetByIdmAsync(string staffIdm, bool includeDeleted = false);
 
         /// <summary>
         /// 職員を登録
@@ -96,5 +97,16 @@ namespace ICCardManager.Data.Repositories
         /// IDmが存在するか確認
         /// </summary>
         Task<bool> ExistsAsync(string staffIdm);
+
+        /// <summary>
+        /// 登録済み（論理削除されていない）職員が 1 人以上いるか
+        /// </summary>
+        /// <remarks>
+        /// Issue #2263: 職員の登録・更新・復元に職員証の認証を求めるかの判定に使う
+        /// （<c>StaffManagementService.RequiresOperatorAuthenticationAsync</c>）。
+        /// 一覧のキャッシュ（<see cref="GetAllAsync"/>）を経由せず DB を読む。共有モードで他の PC が
+        /// 1 人目を登録した直後に、古いキャッシュの「0 人」を根拠に認証を免除しないため。
+        /// </remarks>
+        Task<bool> HasActiveStaffAsync();
     }
 }

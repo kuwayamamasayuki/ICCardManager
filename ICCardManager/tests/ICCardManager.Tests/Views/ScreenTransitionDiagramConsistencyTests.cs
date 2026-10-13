@@ -72,6 +72,9 @@ public class ScreenTransitionDiagramConsistencyTests
     {
         "交通系ICカードの削除",
         "貸出記録の作成",
+        "職員の登録",
+        "職員情報の変更",
+        "職員の復元",
         "職員の削除",
         "履歴の分割",
         "履歴の追加",

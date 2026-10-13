@@ -40,8 +40,25 @@ namespace ICCardManager.UITests.Tests
             TestConstants.DebugPanelIcCardButton, TestConstants.DeletedCardRestoreTitle,
             "SELECT is_deleted FROM ic_card WHERE card_idm = @id", ScreenshotSeedData.VirtualTouchCardIdm);
 
+        /// <summary>
+        /// 仮想タッチの職員だけを削除済みにした投入データ（ほかの職員は登録済み）。職員の復元は職員証の認証を求める（Issue #2263）。
+        /// </summary>
         private static readonly Target Staff = new Target(
             RegressionSeedData.SeedWithDeletedVirtualTouchStaff,
+            TestConstants.OpenStaffManageButton, TestConstants.StaffManageDialogName, TestConstants.StaffNewRegistrationButton,
+            TestConstants.DebugPanelStaffButton, TestConstants.DeletedStaffRestoreTitle,
+            "SELECT is_deleted FROM staff WHERE staff_idm = @id", AppFixture.SeededStaffIdm);
+
+        /// <summary>
+        /// すべての職員を削除済みにした投入データ。登録済みの職員が 0 人なので、復元の認証は免除される（Issue #2263）。
+        /// </summary>
+        /// <remarks>
+        /// 認証ダイアログの仮想タッチは仮想タッチの職員（＝復元する削除済みの職員）を模擬するため、認証を通せない。
+        /// 「はい」で復元されることは免除の経路で確かめ、認証を求めることは
+        /// <see cref="職員管理で削除済みの職員証を読み取りはいを選ぶと職員証の認証を求めキャンセルすると復元されないこと"/> で確かめる。
+        /// </remarks>
+        private static readonly Target StaffWithNoActiveStaff = new Target(
+            RegressionSeedData.SeedWithAllStaffDeleted,
             TestConstants.OpenStaffManageButton, TestConstants.StaffManageDialogName, TestConstants.StaffNewRegistrationButton,
             TestConstants.DebugPanelStaffButton, TestConstants.DeletedStaffRestoreTitle,
             "SELECT is_deleted FROM staff WHERE staff_idm = @id", AppFixture.SeededStaffIdm);
@@ -53,10 +70,34 @@ namespace ICCardManager.UITests.Tests
         public void 交通系ICカード管理で復元の確認にいいえと答えると復元されないこと() => AssertNotRestored(Card);
 
         [SkippableFact]
-        public void 職員管理で削除済みの職員証を読み取りはいを選ぶと復元されること() => AssertRestored(Staff);
+        public void 職員管理で削除済みの職員証を読み取りはいを選ぶと復元されること() => AssertRestored(StaffWithNoActiveStaff);
 
         [SkippableFact]
         public void 職員管理で復元の確認にいいえと答えると復元されないこと() => AssertNotRestored(Staff);
+
+        /// <summary>
+        /// Issue #2263: 登録済みの職員がいるときの復元は、職員証の認証を経て行う。認証をキャンセルしたら復元しない。
+        /// </summary>
+        [SkippableFact]
+        public void 職員管理で削除済みの職員証を読み取りはいを選ぶと職員証の認証を求めキャンセルすると復元されないこと()
+        {
+            Skip.If(!IsDebug, SkipReason);
+            using var fixture = AppFixture.LaunchWithSeed(Staff.Seed, AppFixture.SuppressDebugTestData);
+
+            ReadInNewRegistration(fixture, Staff, MessageBoxOperations.YesPrefix);
+
+            var auth = DialogLocator.WaitForNestedDialog(fixture, fixture.MainWindow, TestConstants.StaffAuthDialogName);
+            Staff.IsDeleted().Should().Be(1L, "認証が済むまで復元しないこと");
+            new DialogPageBase(auth).ClickButton(TestConstants.StaffAuthCancelButtonName);
+
+            Retry.WhileTrue(
+                () => DialogLocator.IsOpen(fixture, fixture.MainWindow, TestConstants.StaffAuthDialogName),
+                TimeSpan.FromSeconds(TestConstants.DialogOpenTimeoutSeconds));
+            DialogLocator.IsOpen(fixture, fixture.MainWindow, Staff.DialogName)
+                .Should().BeTrue("認証をキャンセルした後も職員管理ダイアログは開いたままであること");
+            Staff.IsDeleted().Should().Be(1L, "認証をキャンセルしたら、削除済みのままであること");
+            AssertNoLending();
+        }
 
         private static void AssertRestored(Target target)
         {

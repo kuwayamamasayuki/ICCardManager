@@ -221,15 +221,16 @@ public class BusyScopeDialogConventionTests
     }
 
     [Fact]
-    public void 是正済みの3画面がSuspendBusyを実際に使っていること()
+    public void 是正済みの画面がSuspendBusyを実際に使っていること()
     {
         // Issue #1793 の対象画面。SuspendBusy の呼び出しが消えた（＝別の形へ戻された）ことを検出する。
         // 上の違反検査は「BeginBusy スコープ内のモーダルが無くなった」場合も緑になるため、
         // 正しい置き換えが残っていることを別途表明する。
+        // Issue #2263: StaffManageViewModel は保存経路を組み直し、確認ダイアログと認証ダイアログを処理中スコープの
+        // 外で出す形にしたため SuspendBusy を使わなくなった（スコープ内のモーダルは上の違反検査が引き続き検出する）。
         var expected = new[]
         {
             "CardManageViewModel.cs",
-            "StaffManageViewModel.cs",
             "SystemManageViewModel.cs"
         };
 

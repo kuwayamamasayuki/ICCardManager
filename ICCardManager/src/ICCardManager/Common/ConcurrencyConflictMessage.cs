@@ -57,6 +57,19 @@ namespace ICCardManager.Common
             => Build(target, "復元", "他のパソコンや別の操作で先に復元された可能性があります。", listName);
 
         /// <summary>
+        /// 登録が書き込めなかった（同じ識別子の行が既にある）ときの文言を組み立てる（Issue #2263）。
+        /// </summary>
+        /// <param name="target">対象の説明。「何が」に相当する</param>
+        /// <param name="listName">再読込した一覧の名称</param>
+        /// <remarks>
+        /// 登録の前に重複を確かめていても、職員証の認証を待つ間に他のパソコンが同じ職員証を登録し得る。
+        /// リポジトリの <c>InsertAsync</c> は一過性でない SQLite の失敗（重複のほか、ディスク満杯・読み取り専用・破損等）を
+        /// すべて <c>false</c> に畳むため、呼び出し側は読み直して行があることを確かめてから、この文言で案内すること。
+        /// </remarks>
+        public static string ForRegister(string target, string listName)
+            => Build(target, "登録", "他のパソコンや別の操作で先に登録された可能性があります。", listName);
+
+        /// <summary>
         /// 削除対象の行が見つからなかったときの文言を組み立てる。
         /// </summary>
         /// <param name="target">対象の説明。「何が」に相当する</param>

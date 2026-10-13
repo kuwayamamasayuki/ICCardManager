@@ -1,3 +1,4 @@
+#nullable enable
 using System;
 using System.Collections.Generic;
 using System.Data.Common;
@@ -98,7 +99,7 @@ ORDER BY name";
         }
 
         /// <inheritdoc/>
-        public async Task<Staff> GetByIdmAsync(string staffIdm, bool includeDeleted = false)
+        public async Task<Staff?> GetByIdmAsync(string staffIdm, bool includeDeleted = false)
         {
             using var lease = await _dbContext.LeaseConnectionAsync().ConfigureAwait(false);
             var connection = lease.Connection;
@@ -342,6 +343,19 @@ WHERE staff_idm = @staffIdm AND is_deleted = 1";
 
             var result = await command.ExecuteScalarAsync().ConfigureAwait(false);
             return Convert.ToInt32(result, CultureInfo.InvariantCulture) > 0;
+        }
+
+        /// <inheritdoc/>
+        public async Task<bool> HasActiveStaffAsync()
+        {
+            using var lease = await _dbContext.LeaseConnectionAsync().ConfigureAwait(false);
+            var connection = lease.Connection;
+
+            using var command = connection.CreateCommand();
+            command.CommandText = "SELECT EXISTS(SELECT 1 FROM staff WHERE is_deleted = 0)";
+
+            var result = await command.ExecuteScalarAsync().ConfigureAwait(false);
+            return Convert.ToInt32(result, CultureInfo.InvariantCulture) == 1;
         }
 
         /// <summary>

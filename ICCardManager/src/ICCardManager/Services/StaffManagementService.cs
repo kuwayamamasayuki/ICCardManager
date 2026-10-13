@@ -1,3 +1,4 @@
+#nullable enable
 using System;
 using System.Threading.Tasks;
 using ICCardManager.Data;
@@ -40,6 +41,34 @@ namespace ICCardManager.Services
             // 既定値を持たない必須引数にする（#1820 / #2151 と同じ判断）
             _operationLogger = operationLogger ?? throw new ArgumentNullException(nameof(operationLogger));
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        }
+
+        /// <summary>
+        /// 職員の登録・更新・復元に、操作者の職員証認証を求めるか（Issue #2263）
+        /// </summary>
+        /// <returns>
+        /// 登録済み（論理削除されていない）職員が 1 人以上いれば <c>true</c>。
+        /// 0 人（初回セットアップ）なら <c>false</c> で、認証を免除する
+        /// </returns>
+        /// <remarks>
+        /// <para>
+        /// 職員証の認証は登録済みの職員証でしか通らない（<c>StaffAuthDialog</c>）。職員が 0 人のときに認証を
+        /// 求めると誰も認証できず、1 人目を登録する手段が無くなるため、この場合だけ免除する。
+        /// 免除して行った登録・復元は、操作ログ上「GUI操作」として記録される（認証した職員がいないため）。
+        /// </para>
+        /// <para>
+        /// 免除の判定は本メソッドの 1 か所に置く。画面ごとに「一覧が空か」で判定すると、経路によって
+        /// 判定の根拠（一覧のキャッシュ・削除済みを含むか）が食い違う。判定は操作を行う時点（保存を押した時点）
+        /// の DB の状態で行い、画面を開いた時点の状態は使わない。
+        /// </para>
+        /// <para>
+        /// 認証の目的は操作者の記録であって権限制御ではない（ロールの区別は無い）。登録済みの職員なら
+        /// 誰でも認証を通る。
+        /// </para>
+        /// </remarks>
+        public async Task<bool> RequiresOperatorAuthenticationAsync()
+        {
+            return await _staffRepository.HasActiveStaffAsync().ConfigureAwait(false);
         }
 
         /// <summary>
