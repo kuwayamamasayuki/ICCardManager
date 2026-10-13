@@ -123,10 +123,11 @@ public class OperationLogDisplayNamesTests
     [InlineData("RESTORE", "復元")]
     [InlineData("MERGE", "統合")]
     [InlineData("SPLIT", "分割")]
+    [InlineData("UNMERGE", "統合取消")]
     [InlineData("IMPORT", "インポート")]
     [InlineData("EXPORT", "エクスポート")]
     [InlineData("BACKUP", "バックアップ")]
-    public void GetActionDisplayName_全9種別を正しく変換すること(string action, string expected)
+    public void GetActionDisplayName_全10種別を正しく変換すること(string action, string expected)
     {
         OperationLogDisplayNames.GetActionDisplayName(action).Should().Be(expected);
     }

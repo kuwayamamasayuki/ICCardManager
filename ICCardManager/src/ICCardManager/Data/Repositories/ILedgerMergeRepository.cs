@@ -75,8 +75,13 @@ namespace ICCardManager.Data.Repositories
         /// 「取り消し済み」マーク（<see cref="MarkMergeHistoryUndoneAsync(int, SQLiteTransaction)"/>）と
         /// 同一トランザクションで確定させるために使う。commit / rollback は呼び出し元の責務。
         /// </summary>
-        /// <returns><see cref="UnmergeLedgersAsync(Services.LedgerMergeUndoData)"/> と同じ</returns>
-        Task<bool> UnmergeLedgersAsync(Services.LedgerMergeUndoData undoData, SQLiteTransaction? transaction);
+        /// <returns>
+        /// 復元が確定したら、挿入し直した統合元の「元の ID → 新しい ID」の対応（統合元が無ければ空）。
+        /// 競合の場合は null（条件は <see cref="UnmergeLedgersAsync(Services.LedgerMergeUndoData)"/> と同じ）。
+        /// 統合元は INSERT し直すため ID が変わる。取り消しの監査ログ（Issue #2265）が挿入し直した行を新しい ID で
+        /// 記録するために返す
+        /// </returns>
+        Task<IReadOnlyDictionary<int, int>?> UnmergeLedgersAsync(Services.LedgerMergeUndoData undoData, SQLiteTransaction? transaction);
 
         /// <summary>
         /// 統合履歴をDBに保存

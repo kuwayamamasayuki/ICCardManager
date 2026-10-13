@@ -1538,6 +1538,9 @@ public class MainViewModelIntegrationTests
         };
         _navigationServiceMock.Setup(n => n.ShowWarningConfirmation(It.IsAny<string>(), It.IsAny<string>()))
             .Returns(true);
+        // Issue #2265: 統合の取り消しは確認の後に職員証の認証を求める。ここでは確認の効き目だけを見るので認証は通す
+        _staffAuthServiceMock.Setup(a => a.RequestAuthenticationAsync(It.IsAny<string>()))
+            .ReturnsAsync(new StaffAuthResult());
         // 統合履歴が空 → UnmergeAsync は「統合履歴が見つかりません」で失敗する。取り消しへ進んだことの観測点
         _ledgerRepositoryMock.Setup(r => r.GetMergeHistoriesAsync(It.IsAny<bool>()))
             .ReturnsAsync(new List<(int Id, DateTime MergedAt, int TargetLedgerId, string Description, string UndoDataJson, bool IsUndone)>());

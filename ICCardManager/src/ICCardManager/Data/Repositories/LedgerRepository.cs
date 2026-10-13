@@ -2110,11 +2110,11 @@ WHERE id = @id";
         }
 
         /// <inheritdoc/>
-        public Task<bool> UnmergeLedgersAsync(Services.LedgerMergeUndoData undoData)
-            => UnmergeLedgersAsync(undoData, transaction: null);
+        public async Task<bool> UnmergeLedgersAsync(Services.LedgerMergeUndoData undoData)
+            => await UnmergeLedgersAsync(undoData, transaction: null).ConfigureAwait(false) != null;
 
         /// <inheritdoc/>
-        public async Task<bool> UnmergeLedgersAsync(Services.LedgerMergeUndoData undoData, SQLiteTransaction? transaction)
+        public async Task<IReadOnlyDictionary<int, int>?> UnmergeLedgersAsync(Services.LedgerMergeUndoData undoData, SQLiteTransaction? transaction)
         {
             // Issue #1806: 統合元の INSERT・明細の移動・統合先の UPDATE は必ず同一トランザクションで実行し、
             // 呼び出し元（LedgerMergeService.UnmergeAsync）が「取り消し済み」マークと同じ tx に束ねられるよう
@@ -2139,8 +2139,8 @@ WHERE id = @id";
             using var scope = await _dbContext.BeginTransactionAsync().ConfigureAwait(false);
             try
             {
-                var ok = await UnmergeLedgersCore(undoData, scope.Lease.Connection, scope.Transaction).ConfigureAwait(false);
-                if (ok)
+                var idMapping = await UnmergeLedgersCore(undoData, scope.Lease.Connection, scope.Transaction).ConfigureAwait(false);
+                if (idMapping != null)
                 {
                     scope.Commit();
                 }
@@ -2148,7 +2148,7 @@ WHERE id = @id";
                 {
                     scope.Rollback();
                 }
-                return ok;
+                return idMapping;
             }
             catch
             {
@@ -2165,10 +2165,11 @@ WHERE id = @id";
         /// 統合の取り消し本体。呼び出し元が用意した単一の接続・トランザクション上で実行し、commit/rollback には介入しない。
         /// </summary>
         /// <returns>
-        /// 3 段階すべてが想定どおりの行数で完了したら true。競合（Undo データが指す行が既に無い）を検出したら false。
-        /// false の場合、途中まで書き込んだ内容は呼び出し元のロールバックで巻き戻る前提。
+        /// 3 段階すべてが想定どおりの行数で完了したら、挿入し直した統合元の「元の ID → 新しい ID」。
+        /// 競合（Undo データが指す行が既に無い）を検出したら null。
+        /// null の場合、途中まで書き込んだ内容は呼び出し元のロールバックで巻き戻る前提。
         /// </returns>
-        private static async Task<bool> UnmergeLedgersCore(
+        private static async Task<IReadOnlyDictionary<int, int>?> UnmergeLedgersCore(
             Services.LedgerMergeUndoData undoData, SQLiteConnection connection, SQLiteTransaction? transaction)
         {
             // 1. ソースLedgerを再作成し、新IDを取得
@@ -2217,7 +2218,7 @@ SELECT last_insert_rowid();";
                         // Undo データが指す元台帳が DeletedSources に無い（保存された JSON が欠損・破損している）。
                         // 読み飛ばすと明細は統合先に残ったまま統合元だけが明細ゼロで復活し、
                         // 「取り消し済み」まで確定してやり直せなくなる。他の 2 つのガードと同じく fail-closed にする。
-                        return false;
+                        return null;
                     }
 
                     using var moveCommand = connection.CreateCommand();
@@ -2242,7 +2243,7 @@ SELECT last_insert_rowid();";
                     var moved = await moveCommand.ExecuteNonQueryAsync().ConfigureAwait(false);
                     if (moved != 1)
                     {
-                        return false;
+                        return null;
                     }
                 }
             }
@@ -2270,7 +2271,7 @@ WHERE id = @id";
             // 0 行は「統合先が統合後に削除された」＝競合。統合元だけを復活させると
             // 残高チェーンの起点を持たない行になるため、ここで打ち切る（呼び出し元がロールバック）。
             var updated = await updateCommand.ExecuteNonQueryAsync().ConfigureAwait(false);
-            return updated == 1;
+            return updated == 1 ? idMapping : null;
         }
 
         /// <inheritdoc/>

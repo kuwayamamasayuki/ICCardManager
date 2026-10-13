@@ -699,7 +699,8 @@ END";
     private async Task<bool> UnmergeWithScopeAsync(LedgerMergeUndoData undoData)
     {
         using var scope = await _dbContext.BeginTransactionAsync();
-        var result = await _repository.UnmergeLedgersAsync(undoData, scope.Transaction);
+        // Issue #2265: tx 版は成功時に挿入し直した統合元の ID の対応を、競合時に null を返す
+        var result = await _repository.UnmergeLedgersAsync(undoData, scope.Transaction) != null;
         if (result)
         {
             scope.Commit();
@@ -736,6 +737,27 @@ END";
         restored!.Summary.Should().Be("鉄道（博多～薬院）");
         restored.Balance.Should().Be(1976);
         restored.Details.Should().ContainSingle().Which.Balance.Should().Be(1976, "統合元の明細が rowid で戻ってくるべき");
+    }
+
+    /// <summary>
+    /// Issue #2265: tx 版は、挿入し直した統合元の「元の ID → 新しい ID」を返すこと（取り消しの監査ログが新しい ID で記録するため）。
+    /// </summary>
+    [Fact]
+    public async Task UnmergeLedgersAsync_WithTransaction_ReturnsNewIdsOfReinsertedSources()
+    {
+        var (targetId, _, undoData) = await MergeForUndoAsync();
+        var originalSourceId = undoData.DeletedSources.Should().ContainSingle().Subject.Id;
+
+        IReadOnlyDictionary<int, int>? idMapping;
+        using (var scope = await _dbContext.BeginTransactionAsync())
+        {
+            idMapping = await _repository.UnmergeLedgersAsync(undoData, scope.Transaction);
+            scope.Commit();
+        }
+
+        idMapping.Should().NotBeNull();
+        idMapping!.Should().ContainKey(originalSourceId).WhoseValue.Should().Be(await FindRestoredSourceIdAsync(targetId),
+            "挿入し直した行の実際の ID を返すこと");
     }
 
     /// <summary>
@@ -884,7 +906,7 @@ END";
 
         using (var scope = await _dbContext.BeginTransactionAsync())
         {
-            (await _repository.UnmergeLedgersAsync(undoData, scope.Transaction)).Should().BeTrue();
+            (await _repository.UnmergeLedgersAsync(undoData, scope.Transaction)).Should().NotBeNull();
             scope.Rollback();
         }
 

@@ -1170,6 +1170,39 @@ public class OperationLogSearchViewModelTests
         _viewModel.Logs[0].DetailSummary.Should().Be("利用履歴（42）を分割: 明細 3件 → 2件・1件");
     }
 
+    /// <summary>
+    /// Issue #2265: 統合の取り消しも、統合・分割と同じく明細件数の推移を詳細に出す（統合先 1 件 → 統合先・統合元）。
+    /// </summary>
+    [Fact]
+    public async Task UNMERGE_明細件数の推移が詳細に出ること()
+    {
+        var testLog = MakeLog(1, action: "UNMERGE", targetTable: "ledger", targetId: "42",
+            beforeData: LedgerJson($"[{RailDetailJson},{BusDetailJson},{RailDetailJson}]"),
+            afterData: $"[{LedgerJson($"[{RailDetailJson},{BusDetailJson}]")},{LedgerJson($"[{RailDetailJson}]")}]");
+        SetupKeysetReturning(new[] { testLog });
+
+        await _viewModel.SearchAsync();
+
+        _viewModel.Logs[0].DetailSummary.Should().Be("利用履歴（42）の統合を取り消し: 明細 3件 → 2件・1件",
+            "表示名「統合取消」は列幅に収める略記なので、詳細は文として読める形にする");
+    }
+
+    /// <summary>
+    /// Issue #2265: 明細を持たない台帳の取り消しでも、詳細は「〜の統合を取り消し」と読める（件数の推移は付けない）。
+    /// </summary>
+    [Fact]
+    public async Task UNMERGE_明細を持たない台帳では件数を付けずに読める文で出ること()
+    {
+        var testLog = MakeLog(1, action: "UNMERGE", targetTable: "ledger", targetId: "42",
+            beforeData: LedgerJson("[]"),
+            afterData: $"[{LedgerJson("[]")},{LedgerJson("[]")}]");
+        SetupKeysetReturning(new[] { testLog });
+
+        await _viewModel.SearchAsync();
+
+        _viewModel.Logs[0].DetailSummary.Should().Be("利用履歴（42）の統合を取り消し");
+    }
+
     [Fact]
     public async Task MERGE_明細を持たない台帳では従来どおりの詳細になること()
     {

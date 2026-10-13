@@ -441,8 +441,14 @@ namespace ICCardManager.Services
                 // 案内どおりの再実行で統合元が二重に INSERT された（月次帳票の二重計上）。
                 using (var scope = await _dbContext.BeginTransactionAsync().ConfigureAwait(false))
                 {
-                    var restored = await _ledgerRepository.UnmergeLedgersAsync(entry.UndoData, scope.Transaction).ConfigureAwait(false);
-                    if (!restored)
+                    // Issue #2265: 監査ログの「変更前」は、取り消す直前の統合先（明細を含む）を同じトランザクションの中で
+                    // DB から読み直した別インスタンスにする（#1959。書き換えと同じインスタンスを写すと変更前が変更後になる）。
+                    // 読めない＝統合先が統合後に削除された競合で、復元も 0 行になるため同じ失敗として扱う
+                    var mergedBefore = await _ledgerRepository.GetByIdAsync(entry.TargetLedgerId).ConfigureAwait(false);
+                    var reinsertedIds = mergedBefore == null
+                        ? null
+                        : await _ledgerRepository.UnmergeLedgersAsync(entry.UndoData, scope.Transaction).ConfigureAwait(false);
+                    if (mergedBefore == null || reinsertedIds == null)
                     {
                         // ログはロールバックより先に書く（Rollback が失敗しても診断の手掛かりを残す。#1745）
                         _logger.LogWarning(
@@ -475,6 +481,24 @@ namespace ICCardManager.Services
                                            "画面を最新の状態に更新して履歴を確認してください。"
                         };
                     }
+
+                    // Issue #2265: 取り消しを監査ログに残す（以前は何も記録せず、誰が取り消したかが残らなかった）。
+                    // 統合と同じく、台帳の書き戻し・取り消し済みのマークと同じトランザクションで記録する
+                    // （記録に失敗したら取り消しごと巻き戻る。マークが競合したときはここへ来ないのでログも残らない）。
+                    // 「変更後」は書き戻した統合先と挿入し直した統合元を、同じトランザクションの中で読み直したもの
+                    var restoredTarget = await ReadLedgerAfterUnmergeAsync(entry.TargetLedgerId).ConfigureAwait(false);
+                    var reinsertedSources = new List<Ledger>();
+                    foreach (var source in entry.UndoData.DeletedSources)
+                    {
+                        if (!reinsertedIds.TryGetValue(source.Id, out var newId))
+                        {
+                            throw new InvalidOperationException(
+                                $"統合の取り消しで挿入し直した統合元（元の LedgerId={source.Id}）の新しい ID が分からないため、監査ログを記録できません。");
+                        }
+                        reinsertedSources.Add(await ReadLedgerAfterUnmergeAsync(newId).ConfigureAwait(false));
+                    }
+                    await _operationLogger.LogLedgerUnmergeAsync(mergedBefore, restoredTarget, reinsertedSources, scope.Transaction)
+                        .ConfigureAwait(false);
 
                     scope.Commit();
                 }
@@ -527,6 +551,18 @@ namespace ICCardManager.Services
 
             return result;
         }
+
+        /// <summary>
+        /// 統合の取り消しで書き戻した・挿入し直した台帳を、同じトランザクションの中で読み直す（Issue #2265。監査ログの「変更後」）
+        /// </summary>
+        /// <remarks>
+        /// 書き戻し・挿入の直後なので通常は必ず読める。読めないのは呼び出し元の構造（書き込みトランザクションの内側で呼ぶこと）が
+        /// 崩れたときだけで、そのときは原因を名指しする例外で止め、取り消しごと巻き戻す（記録の無い取り消しを確定させない）
+        /// </remarks>
+        private async Task<Ledger> ReadLedgerAfterUnmergeAsync(int ledgerId)
+            => await _ledgerRepository.GetByIdAsync(ledgerId).ConfigureAwait(false)
+               ?? throw new InvalidOperationException(
+                   $"統合の取り消しで書き戻した利用履歴（LedgerId={ledgerId}）を読み直せなかったため、監査ログを記録できません。");
 
         /// <summary>
         /// 指定IDの統合履歴をUndoデータ付きで取得

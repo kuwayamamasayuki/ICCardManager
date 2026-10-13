@@ -33,6 +33,7 @@ namespace ICCardManager.Services
                 new KeyValuePair<string, string>(OperationLogger.Actions.Restore, "復元"),
                 new KeyValuePair<string, string>(OperationLogger.Actions.Merge, "統合"),
                 new KeyValuePair<string, string>(OperationLogger.Actions.Split, "分割"),
+                new KeyValuePair<string, string>(OperationLogger.Actions.Unmerge, "統合取消"),
                 new KeyValuePair<string, string>(OperationLogger.Actions.Import, "インポート"),
                 new KeyValuePair<string, string>(OperationLogger.Actions.Export, "エクスポート"),
                 new KeyValuePair<string, string>(OperationLogger.Actions.Backup, "バックアップ"),
@@ -103,6 +104,9 @@ namespace ICCardManager.Services
             public const string Restore = "RESTORE";
             public const string Merge = "MERGE";
             public const string Split = "SPLIT";
+            // Issue #2265: 統合の取り消し（統合先を書き戻し、統合元を挿入し直す）。表示名は「統合取消」
+            // （Excel の B 列・画面の「操作」列は全角 6 文字までを折り返さない幅にしている。#1787）
+            public const string Unmerge = "UNMERGE";
             // Issue #1302: 一括操作 (監査証跡)
             public const string Import = "IMPORT";
             public const string Export = "EXPORT";
@@ -779,6 +783,37 @@ namespace ICCardManager.Services
                 Action = Actions.Split,
                 BeforeData = SerializeToJson(originalLedger),
                 AfterData = SerializeToJson(splitLedgers)
+            }, transaction).ConfigureAwait(false);
+        }
+
+        /// <summary>
+        /// 統合の取り消しのログを既存トランザクションで記録する（Issue #2265）。
+        /// </summary>
+        /// <param name="mergedBefore">取り消す直前の統合先（明細を含む。DB から読み直した、書き換えと別のインスタンス。#1959）</param>
+        /// <param name="restoredTarget">統合前の状態へ戻した統合先</param>
+        /// <param name="reinsertedSources">挿入し直した統合元（新しい ID）</param>
+        /// <param name="transaction">台帳の書き戻し・取り消し済みのマークと同じトランザクション</param>
+        /// <remarks>
+        /// 統合（<see cref="LogLedgerMergeAsync(IReadOnlyList{Ledger}, Ledger, SQLiteTransaction)"/>）の逆向き。
+        /// 変更前は統合先 1 件、変更後は「統合先 → 統合元」の順の配列で、分割（1 件 → 複数件）と同じ形になる。
+        /// 対象 ID は統合先（統合のログと同じ行を指す）。
+        /// </remarks>
+        public async Task LogLedgerUnmergeAsync(
+            Ledger mergedBefore, Ledger restoredTarget, IReadOnlyList<Ledger> reinsertedSources, SQLiteTransaction transaction)
+        {
+            var (idm, name) = ResolveOperator();
+            var after = new List<Ledger> { restoredTarget };
+            after.AddRange(reinsertedSources);
+            await _operationLogRepository.InsertAsync(new OperationLog
+            {
+                Timestamp = DateTime.Now,
+                OperatorIdm = idm,
+                OperatorName = name,
+                TargetTable = Tables.Ledger,
+                TargetId = restoredTarget.Id.ToString(CultureInfo.InvariantCulture),
+                Action = Actions.Unmerge,
+                BeforeData = SerializeToJson(mergedBefore),
+                AfterData = SerializeToJson(after)
             }, transaction).ConfigureAwait(false);
         }
 

@@ -692,6 +692,137 @@ public class HistoryPanelViewModelTests : IDisposable
             Times.Once);
     }
 
+    #region 統合の取り消しの職員認証ゲート（Issue #2265）
+
+    private const int UnmergeHistoryId = 42;
+    private const int UnmergeTargetLedgerId = 10;
+
+    private static ICCardManager.Views.Dialogs.MergeHistoryItem UnmergeItem() => new()
+    {
+        Id = UnmergeHistoryId,
+        MergedAtDisplay = "2026/09/01 10:15",
+        Description = "9/1 鉄道（博多～天神）ほか1件を統合",
+    };
+
+    /// <summary>
+    /// 認証以外は取り消しが最後まで成功する状態にする（取り消せる統合履歴があり、復元・取り消し済みのマークが通る）。
+    /// 認証ゲートの有無を区別できるよう、確認ダイアログも「はい」にしておく（#2104 と同じ準備の作法）。
+    /// </summary>
+    /// <returns>台帳の復元が呼ばれた時点の操作者 IDm（呼ばれなければ空）</returns>
+    private List<string?> ArrangeUndoableMerge()
+    {
+        var undoData = new LedgerMergeUndoData
+        {
+            OriginalTarget = new LedgerSnapshot { Id = UnmergeTargetLedgerId, CardIdm = "0102030405060708" },
+            DeletedSources = new List<LedgerSnapshot> { new() { Id = 11, CardIdm = "0102030405060708" } },
+        };
+        _ledgerRepositoryMock.Setup(r => r.GetMergeHistoriesAsync(It.IsAny<bool>()))
+            .ReturnsAsync(new List<(int, DateTime, int, string, string, bool)>
+            {
+                (UnmergeHistoryId, new DateTime(2026, 9, 1, 10, 15, 0), UnmergeTargetLedgerId,
+                    "9/1 鉄道（博多～天神）ほか1件を統合", System.Text.Json.JsonSerializer.Serialize(undoData), false),
+            });
+
+        var operatorsAtRestore = new List<string?>();
+        _ledgerRepositoryMock
+            .Setup(r => r.UnmergeLedgersAsync(It.IsAny<LedgerMergeUndoData>(), It.IsAny<SQLiteTransaction>()))
+            .Callback(() => operatorsAtRestore.Add(_operatorContext.CurrentIdm))
+            .ReturnsAsync(new Dictionary<int, int> { [11] = 21 });
+        // 取り消しの監査ログのため、取り消す前の統合先と書き戻した台帳を読み直す（Issue #2265）
+        _ledgerRepositoryMock
+            .Setup(r => r.GetByIdAsync(It.IsAny<int>()))
+            .ReturnsAsync((int id) => new Ledger { Id = id, CardIdm = "0102030405060708" });
+        _ledgerRepositoryMock
+            .Setup(r => r.MarkMergeHistoryUndoneAsync(UnmergeHistoryId, It.IsAny<SQLiteTransaction>()))
+            .ReturnsAsync(true);
+        _navigationServiceMock
+            .Setup(n => n.ShowWarningConfirmation(It.IsAny<string>(), "統合の取り消し"))
+            .Returns(true);
+        return operatorsAtRestore;
+    }
+
+    /// <summary>
+    /// Issue #2265: 統合の取り消しは、職員証の認証が完了しなければ台帳を書き戻さない。
+    /// </summary>
+    /// <remarks>
+    /// 修正前は認証が無く、他の職員が行った統合も誰でも取り消せた（統合と同じ重さで台帳を改変するのに）。
+    /// 対の表明は <see cref="UnmergeAsync_認証が通れば認証した職員の操作として取り消すこと"/>。
+    /// </remarks>
+    [Fact]
+    public async Task UnmergeAsync_認証が完了しなければ取り消さず案内すること()
+    {
+        var operatorsAtRestore = ArrangeUndoableMerge();
+        _staffAuthServiceMock
+            .Setup(a => a.RequestAuthenticationAsync(It.IsAny<string>()))
+            .ReturnsAsync((StaffAuthResult?)null);
+
+        var proceeded = await _history.ConfirmAndExecuteUnmergeAsync(UnmergeItem());
+
+        proceeded.Should().BeFalse();
+        _staffAuthServiceMock.Verify(s => s.RequestAuthenticationAsync("統合の取り消し"), Times.Once);
+        _ledgerRepositoryMock.Verify(r => r.UnmergeLedgersAsync(
+            It.IsAny<LedgerMergeUndoData>(), It.IsAny<SQLiteTransaction>()), Times.Never,
+            "認証が完了しなければ台帳を書き戻さない");
+        _ledgerRepositoryMock.Verify(r => r.MarkMergeHistoryUndoneAsync(
+            It.IsAny<int>(), It.IsAny<SQLiteTransaction>()), Times.Never);
+        operatorsAtRestore.Should().BeEmpty();
+        _operationLogRepositoryMock.Verify(r => r.InsertAsync(It.IsAny<OperationLog>(), It.IsAny<SQLiteTransaction>()), Times.Never,
+            "取り消していないので監査ログも残さない");
+        _navigationServiceMock.Verify(n => n.ShowInformation(
+            HistoryPanelViewModel.UnmergeAuthenticationCancelledMessage, "統合の取り消し"), Times.Once,
+            "同意した直後に何も起きないと、取り消されたのか分からない");
+        _navigationServiceMock.Verify(n => n.ShowInformation(It.IsAny<string>(), "取り消し完了"), Times.Never);
+    }
+
+    /// <summary>
+    /// 対: 同じ準備で認証が通れば取り消し、台帳の書き戻しは認証した職員の操作者セッションの中で行われる
+    /// （書き戻しの時点の操作者で表明する。#2260）。取り消しが終わったらセッションも終わる。
+    /// </summary>
+    [Fact]
+    public async Task UnmergeAsync_認証が通れば認証した職員の操作として取り消すこと()
+    {
+        var operatorsAtRestore = ArrangeUndoableMerge();
+        ArrangeAuthenticationStartingSession();
+        var logs = CaptureOperationLogs();
+
+        var proceeded = await _history.ConfirmAndExecuteUnmergeAsync(UnmergeItem());
+
+        proceeded.Should().BeTrue();
+        logs.Should().ContainSingle(l => l.Action == OperationLogger.Actions.Unmerge)
+            .Which.Should().Match<OperationLog>(l =>
+                l.OperatorIdm == AuthenticatedStaffIdm && l.OperatorName == AuthenticatedStaffName,
+                "取り消しの監査ログの操作者は認証した職員");
+        _staffAuthServiceMock.Verify(s => s.RequestAuthenticationAsync(It.IsAny<string>()), Times.Once,
+            "1 回の取り消しで認証を求めるのは 1 回だけ");
+        operatorsAtRestore.Should().Equal(new[] { AuthenticatedStaffIdm },
+            "台帳の書き戻しは認証した職員の操作として行う");
+        _ledgerRepositoryMock.Verify(r => r.MarkMergeHistoryUndoneAsync(UnmergeHistoryId, It.IsAny<SQLiteTransaction>()), Times.Once);
+        _navigationServiceMock.Verify(n => n.ShowInformation("統合を元に戻しました。", "取り消し完了"), Times.Once);
+        _operatorContext.HasSession.Should().BeFalse("取り消しが終わったら操作者セッションも終わる");
+    }
+
+    /// <summary>
+    /// 認証は取り消す対象の確認に同意した後に求める。「いいえ」なら職員証を求めない。
+    /// </summary>
+    [Fact]
+    public async Task UnmergeAsync_確認でいいえなら認証を求めないこと()
+    {
+        ArrangeUndoableMerge();
+        ArrangeAuthenticationStartingSession();
+        _navigationServiceMock
+            .Setup(n => n.ShowWarningConfirmation(It.IsAny<string>(), "統合の取り消し"))
+            .Returns(false);
+
+        var proceeded = await _history.ConfirmAndExecuteUnmergeAsync(UnmergeItem());
+
+        proceeded.Should().BeFalse();
+        _staffAuthServiceMock.Verify(s => s.RequestAuthenticationAsync(It.IsAny<string>()), Times.Never);
+        _ledgerRepositoryMock.Verify(r => r.UnmergeLedgersAsync(
+            It.IsAny<LedgerMergeUndoData>(), It.IsAny<SQLiteTransaction>()), Times.Never);
+    }
+
+    #endregion
+
     /// <summary>
     /// Issue #1954: 統合は確定したが取り消し情報を保存できなかったとき、
     /// 「取り消せない」ことを警告として案内し、<b>再実行を促さない</b>こと（Issue #1725）。

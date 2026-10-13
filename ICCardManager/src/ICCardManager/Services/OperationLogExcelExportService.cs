@@ -1,3 +1,4 @@
+#nullable enable
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -135,7 +136,7 @@ public class OperationLogExcelExportService
     /// </summary>
     private static void WriteHighlightedJsonCell(IXLWorksheet worksheet, IXLCell cell, string? targetTable, string? json, ISet<string>? changedFields, bool strikethrough)
     {
-        if (string.IsNullOrEmpty(json))
+        if (json is null || string.IsNullOrEmpty(json))
         {
             return;
         }
@@ -229,7 +230,7 @@ public class OperationLogExcelExportService
     {
         var result = new HashSet<string>();
 
-        if (string.IsNullOrEmpty(beforeJson) || string.IsNullOrEmpty(afterJson))
+        if (beforeJson is null || afterJson is null || string.IsNullOrEmpty(beforeJson) || string.IsNullOrEmpty(afterJson))
         {
             return result;
         }
@@ -344,7 +345,7 @@ public class OperationLogExcelExportService
             "INSERT" or "RESTORE" => ColorGreen,
             "UPDATE" => ColorOrange,
             "DELETE" => ColorRed,
-            "MERGE" or "SPLIT" => ColorBlue,
+            "MERGE" or "SPLIT" or "UNMERGE" => ColorBlue,
             _ => null
         };
     }
@@ -370,7 +371,7 @@ public class OperationLogExcelExportService
     /// </summary>
     internal static string FormatJsonToReadable(string? targetTable, string? json)
     {
-        if (string.IsNullOrEmpty(json))
+        if (json is null || string.IsNullOrEmpty(json))
         {
             return "";
         }
@@ -414,7 +415,7 @@ public class OperationLogExcelExportService
     }
 
     /// <summary>
-    /// JSON配列を人間が読める形式に整形（MERGE/SPLIT用）
+    /// JSON配列を人間が読める形式に整形（MERGE/SPLIT/UNMERGE用）
     /// </summary>
     internal static string FormatJsonArrayToReadable(string? targetTable, string jsonArray)
     {
@@ -469,7 +470,7 @@ public class OperationLogExcelExportService
     /// </summary>
     internal static string GetChangeSummary(string? targetTable, string? beforeJson, string? afterJson)
     {
-        if (string.IsNullOrEmpty(beforeJson) || string.IsNullOrEmpty(afterJson))
+        if (beforeJson is null || afterJson is null || string.IsNullOrEmpty(beforeJson) || string.IsNullOrEmpty(afterJson))
         {
             return "";
         }
