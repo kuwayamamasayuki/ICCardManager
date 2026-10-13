@@ -1,3 +1,5 @@
+#nullable enable
+
 using System;
 using System.Collections.Generic;
 using System.Globalization;
@@ -7,6 +9,7 @@ using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 using ClosedXML.Excel;
 using ICCardManager.Common;
+using ICCardManager.Common.Exceptions;
 using ICCardManager.Data.Repositories;
 using ICCardManager.Infrastructure.Security;
 using ICCardManager.Models;
@@ -88,17 +91,17 @@ namespace ICCardManager.Services
         /// <summary>
         /// エラーメッセージ（失敗時）／作成対象外とした理由（スキップ時）
         /// </summary>
-        public string ErrorMessage { get; private set; }
+        public string? ErrorMessage { get; private set; }
 
         /// <summary>
         /// 詳細エラーメッセージ（失敗時）
         /// </summary>
-        public string DetailedErrorMessage { get; private set; }
+        public string? DetailedErrorMessage { get; private set; }
 
         /// <summary>
         /// 出力ファイルパス（作成時）
         /// </summary>
-        public string OutputPath { get; private set; }
+        public string? OutputPath { get; private set; }
 
         /// <summary>
         /// 作成結果を作成
@@ -112,7 +115,7 @@ namespace ICCardManager.Services
         /// <summary>
         /// 失敗結果を作成（そのカードに固有の失敗）
         /// </summary>
-        public static ReportGenerationResult FailureResult(string message, string detailedMessage = null) => new()
+        public static ReportGenerationResult FailureResult(string message, string? detailedMessage = null) => new()
         {
             Outcome = ReportGenerationOutcome.Failed,
             ErrorMessage = message,
@@ -125,7 +128,7 @@ namespace ICCardManager.Services
         /// <remarks>
         /// 一括作成を中断させる。<see cref="IsCommonFailure"/> を参照。
         /// </remarks>
-        public static ReportGenerationResult CommonFailureResult(string message, string detailedMessage = null) => new()
+        public static ReportGenerationResult CommonFailureResult(string message, string? detailedMessage = null) => new()
         {
             Outcome = ReportGenerationOutcome.Failed,
             IsCommonFailure = true,
@@ -156,12 +159,12 @@ namespace ICCardManager.Services
         /// <summary>
         /// テンプレートエラーメッセージ（テンプレートが見つからない場合）
         /// </summary>
-        public string TemplateErrorMessage { get; set; }
+        public string? TemplateErrorMessage { get; set; }
 
         /// <summary>
         /// ディレクトリエラーメッセージ（出力先フォルダの作成に失敗した場合）
         /// </summary>
-        public string DirectoryErrorMessage { get; set; }
+        public string? DirectoryErrorMessage { get; set; }
 
         /// <summary>
         /// テンプレートが見つからなかった
@@ -205,19 +208,19 @@ namespace ICCardManager.Services
         /// ステータス欄のように幅の限られた表示へ出す簡潔な見出し。「なぜ／どうすれば」は
         /// <see cref="AbortDetail"/> をダイアログで示す（`.claude/rules/error-messages.md` #1688）。
         /// </remarks>
-        public string AbortReason => AbortedResult?.ErrorMessage;
+        public string? AbortReason => AbortedResult?.ErrorMessage;
 
         /// <summary>
         /// 中断の原因の詳細（Issue #2042。中断していなければ <c>null</c>）
         /// </summary>
-        public string AbortDetail => AbortedResult is ReportGenerationResult aborted
+        public string? AbortDetail => AbortedResult is ReportGenerationResult aborted
             ? aborted.DetailedErrorMessage ?? aborted.ErrorMessage
             : null;
 
         /// <summary>
         /// 中断の原因となった結果（Issue #2042。中断していなければ <c>null</c>）
         /// </summary>
-        private ReportGenerationResult AbortedResult => Results
+        private ReportGenerationResult? AbortedResult => Results
             .Where(r => r.Result.IsCommonFailure)
             .Select(r => r.Result)
             .FirstOrDefault();
@@ -332,8 +335,8 @@ namespace ICCardManager.Services
             ISettingsRepository settingsRepository,
             IReportDataBuilder reportDataBuilder,
             ILogger<ReportService> logger,
-            IOptions<OrganizationOptions> orgOptions = null,
-            IReportFileNameFactory fileNameFactory = null)
+            IOptions<OrganizationOptions>? orgOptions = null,
+            IReportFileNameFactory? fileNameFactory = null)
         {
             _cardRepository = cardRepository;
             _ledgerRepository = ledgerRepository;
@@ -366,7 +369,7 @@ namespace ICCardManager.Services
         /// </remarks>
         public virtual async Task<ReportGenerationResult> CreateMonthlyReportAsync(string cardIdm, int year, int month, string outputPath)
         {
-            string templatePath = null;
+            string templatePath;
 
             try
             {
@@ -424,16 +427,37 @@ namespace ICCardManager.Services
 
                 // Issue #477: 既存ファイルがあれば開く、なければテンプレートから新規作成
                 XLWorkbook workbook;
+                FileStream? existingStream = null;
                 bool isExistingFile = File.Exists(outputPath);
 
                 if (isExistingFile)
                 {
                     try
                     {
-                        workbook = OpenExistingWorkbook(outputPath);
+                        // Issue #2272: ClosedXML は全パートを展開する。年度ファイルの名前で置かれた ZIP 爆弾を
+                        // 開く前に、ファイルと展開後（宣言値）の大きさで止める。調べられないときは従来どおり開く側に任せる。
+                        // 検査したストリームをそのまま ClosedXML に渡す。パスで検査してからパスで開き直すと、その間の
+                        // 差し替えで検査を素通りできる。削除・書き込みを共有しないので、保存（ClosedXML は SaveAs の際に
+                        // 読み込み元から未対応のパートを写す）まで同じ内容が保たれる。閉じるのはワークブックを閉じた後
+                        existingStream = OpenExistingFileStream(outputPath);
+                        var size = XlsxPackageSizeGuard.Check(existingStream);
+                        if (size.IsTooLarge)
+                        {
+                            existingStream.Dispose();
+                            _logger.LogWarning(
+                                "既存の帳票ファイルが大きすぎるため開きませんでした: {Path} ({SizeCheck}, ファイル {FileBytes} バイト, 展開後の宣言値の合計 {DeclaredExpandedBytes} バイト, 上限 {MaxFileBytes} / {MaxExpandedBytes} バイト)",
+                                outputPath, size.Status, size.FileBytes, size.DeclaredExpandedBytes,
+                                XlsxPackageSizeGuard.MaxFileBytes, XlsxPackageSizeGuard.MaxExpandedBytes);
+                            return ReportGenerationResult.FailureResult(
+                                "既存の帳票ファイルを開けません",
+                                BuildOversizedExistingFileMessage(Path.GetFileName(outputPath)));
+                        }
+
+                        workbook = OpenExistingWorkbook(existingStream);
                     }
                     catch (Exception ex) when (IsCorruptedPackageException(ex))
                     {
+                        existingStream?.Dispose();
                         // Issue #2040: 修正前の版は年度ファイルへ直接上書き保存していたため、保存の中断で
                         // zip が途中で切れたファイルが最終名のまま残り得る。汎用の「帳票の作成に失敗しました」では
                         // 原因（ファイルが壊れている）も回復手段も分からず、作成が失敗し続ける。
@@ -447,6 +471,12 @@ namespace ICCardManager.Services
                             "既存の帳票ファイルを開けません",
                             BuildUnreadableExistingFileMessage(Path.GetFileName(outputPath)));
                     }
+                    catch
+                    {
+                        // 破損以外（ロック・権限・非対応の要素）は従来どおり外側の catch に任せる。ハンドルは残さない
+                        existingStream?.Dispose();
+                        throw;
+                    }
                 }
                 else
                 {
@@ -454,13 +484,14 @@ namespace ICCardManager.Services
                 }
 
                 string tempPath;
+                using (existingStream)
                 using (workbook)
                 {
                     // シート名を決定（月名）
                     var sheetName = GetMonthSheetName(month);
 
                     // Issue #477: 該当月のシートを取得または作成
-                    IXLWorksheet worksheet;
+                    IXLWorksheet? worksheet;
 
                     if (workbook.Worksheets.TryGetWorksheet(sheetName, out worksheet))
                     {
@@ -687,6 +718,25 @@ namespace ICCardManager.Services
         }
 
         /// <summary>
+        /// 既存の年度ファイルが帳票の年度ファイルとしては大きすぎて開かないときの案内文言（Issue #2272）
+        /// </summary>
+        /// <remarks>
+        /// 本システムが作る年度ファイルは 1MB 前後で、上限（<see cref="XlsxPackageSizeGuard"/>）を超えるのは
+        /// 別のファイルが同じ名前で置かれた場合に限られる。回復手段は破損時（<see cref="BuildUnreadableExistingFileMessage"/>）と同じく
+        /// 退避してから作り直すことなので、「どうすれば」は揃える。
+        /// </remarks>
+        /// <param name="fileName">年度ファイルのファイル名（フォルダーを含まない）</param>
+        internal static string BuildOversizedExistingFileMessage(string fileName)
+        {
+            return $"出力先の年度ファイル「{fileName}」は、帳票の年度ファイルとしては大きすぎるため開けません" +
+                $"（ファイルは{FileOperationException.FormatFileSize(XlsxPackageSizeGuard.MaxFileBytes)}、" +
+                $"展開後は{FileOperationException.FormatFileSize(XlsxPackageSizeGuard.MaxExpandedBytes)}までです。" +
+                "別のファイルが同じ名前で置かれている可能性があります）。" +
+                "このファイルを別のフォルダーへ移動するか名前を変えてから、もう一度作成してください。" +
+                "移動したファイルが本来の年度ファイルだった場合は、含まれていた他の月の帳票も、あらためて作成してください。\n\n詳細はログファイルを確認してください。";
+        }
+
+        /// <summary>
         /// 年度ファイルの一時ファイルパスを組み立てる（Issue #2040）
         /// </summary>
         /// <remarks>
@@ -857,9 +907,22 @@ namespace ICCardManager.Services
         /// <summary>
         /// 既存の年度ファイルを開く（テストの継ぎ目。ClosedXML が読めない正常なファイルを再現するため）
         /// </summary>
-        internal virtual XLWorkbook OpenExistingWorkbook(string path)
+        internal virtual XLWorkbook OpenExistingWorkbook(Stream stream)
         {
-            return new XLWorkbook(path);
+            return new XLWorkbook(stream);
+        }
+
+        /// <summary>
+        /// 既存の年度ファイルを、大きさの検査と読み込みに使うストリームとして開く（Issue #2272）
+        /// </summary>
+        /// <remarks>
+        /// 読み取りだけを共有する（<see cref="FileShare.Read"/>）。削除・名前の変更・書き込みを許さないので、
+        /// 検査してから保存し終えるまでに中身を差し替えられない。従来のパス指定の読み込み（Open XML SDK の既定）と同じ共有で、
+        /// 他のアプリケーションが読み取りで開いているファイルも従来どおり開ける。
+        /// </remarks>
+        private static FileStream OpenExistingFileStream(string path)
+        {
+            return new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read);
         }
 
         /// <summary>
@@ -1273,7 +1336,7 @@ namespace ICCardManager.Services
         /// 半端な状態がヘッダー行の中に残る（#1820「設定が効く範囲は、その設定だけで完結する単位で切る」）。
         /// </para>
         /// </remarks>
-        internal string ValidateHeaderColumns()
+        internal string? ValidateHeaderColumns()
         {
             var mapping = _orgOptions.TemplateMapping;
             var invalid = new List<string>();

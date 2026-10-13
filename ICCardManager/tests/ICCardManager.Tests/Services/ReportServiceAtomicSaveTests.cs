@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.IO.Compression;
 using System.Linq;
 using System.Threading.Tasks;
 using ClosedXML.Excel;
@@ -150,7 +151,7 @@ public class ReportServiceAtomicSaveTests : IDisposable
         public Action<string>? WriteHook { get; set; }
         public Action<string, string>? ReplaceHook { get; set; }
         public Action<string, string>? MoveHook { get; set; }
-        public Func<string, XLWorkbook>? OpenHook { get; set; }
+        public Func<Stream, XLWorkbook>? OpenHook { get; set; }
 
         internal override void WriteWorkbookTo(XLWorkbook workbook, string path)
         {
@@ -171,9 +172,9 @@ public class ReportServiceAtomicSaveTests : IDisposable
             base.MoveTempFile(tempPath, outputPath);
         }
 
-        internal override XLWorkbook OpenExistingWorkbook(string path)
+        internal override XLWorkbook OpenExistingWorkbook(Stream stream)
         {
-            return OpenHook != null ? OpenHook(path) : base.OpenExistingWorkbook(path);
+            return OpenHook != null ? OpenHook(stream) : base.OpenExistingWorkbook(stream);
         }
     }
 
@@ -425,6 +426,112 @@ public class ReportServiceAtomicSaveTests : IDisposable
         result.ErrorMessage.Should().Be("ファイルの保存に失敗しました");
         result.DetailedErrorMessage.Should().NotContain("壊れている");
         ReadSheetNames(_outputPath).Should().Equal("4月");
+    }
+
+    #endregion
+
+    #region 大きすぎる年度ファイル（Issue #2272）
+
+    [Fact]
+    public async Task 既存の年度ファイルの展開後が上限を超えるとき_開かずに原因と回復手段を示し_ファイルを書き換えない()
+    {
+        // Arrange: 正当な年度ファイルに、よく圧縮されるパートを足して ZIP 爆弾の形にする
+        // （ファイル自体は小さいまま、展開後の合計だけが上限を超える）
+        (await CreateService().CreateMonthlyReportAsync(CardIdm, Year, 4, _outputPath)).Success.Should().BeTrue();
+        using (var file = new FileStream(_outputPath, FileMode.Open, FileAccess.ReadWrite))
+        using (var archive = new ZipArchive(file, ZipArchiveMode.Update))
+        {
+            var entry = archive.CreateEntry("xl/media/padding.bin", CompressionLevel.Fastest);
+            using var stream = entry.Open();
+            var chunk = new byte[1024 * 1024];
+            var remaining = XlsxPackageSizeGuard.MaxExpandedBytes + 1;
+            while (remaining > 0)
+            {
+                var count = (int)Math.Min(chunk.Length, remaining);
+                stream.Write(chunk, 0, count);
+                remaining -= count;
+            }
+        }
+
+        new FileInfo(_outputPath).Length.Should().BeLessThan(XlsxPackageSizeGuard.MaxFileBytes, "前提: ファイル自体は上限内");
+        var bytesBefore = File.ReadAllBytes(_outputPath);
+
+        // Act
+        var result = await CreateService().CreateMonthlyReportAsync(CardIdm, Year, 5, _outputPath);
+
+        // Assert
+        result.Success.Should().BeFalse();
+        result.ErrorMessage.Should().Be("既存の帳票ファイルを開けません");
+        result.DetailedErrorMessage.Should().Be(
+            ReportService.BuildOversizedExistingFileMessage(Path.GetFileName(_outputPath)));
+        File.ReadAllBytes(_outputPath).Should().Equal(bytesBefore, "大きすぎるファイルを黙って作り直さない");
+        var expandedTotal = XlsxPackageSizeGuard.Check(_outputPath).DeclaredExpandedBytes;
+        _logger.Entries.Should().ContainSingle(e => e.Level == LogLevel.Warning && e.Message.Contains("大きすぎる"))
+            .Which.Message.Should().Contain(bytesBefore.Length.ToString(System.Globalization.CultureInfo.InvariantCulture))
+            .And.Contain(expandedTotal!.Value.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                "障害調査で、ファイルの実寸と展開後の宣言値の合計が分かること");
+    }
+
+    [Fact]
+    public async Task 既存の年度ファイル自体が上限を超えるとき_壊れているではなく大きすぎると案内する()
+    {
+        // Arrange: 中身を書かずに上限 + 1 バイトのファイルを置く（SetLength は速い）
+        using (var stream = new FileStream(_outputPath, FileMode.Create, FileAccess.Write))
+        {
+            stream.SetLength(XlsxPackageSizeGuard.MaxFileBytes + 1);
+        }
+
+        // Act
+        var result = await CreateService().CreateMonthlyReportAsync(CardIdm, Year, 5, _outputPath);
+
+        // Assert
+        result.Success.Should().BeFalse();
+        result.ErrorMessage.Should().Be("既存の帳票ファイルを開けません");
+        result.DetailedErrorMessage.Should().Be(
+            ReportService.BuildOversizedExistingFileMessage(Path.GetFileName(_outputPath)));
+        new FileInfo(_outputPath).Length.Should().Be(XlsxPackageSizeGuard.MaxFileBytes + 1);
+    }
+
+    [Fact]
+    public async Task 大きさを検査してから読み込むまでの間に_既存の年度ファイルを差し替えられない()
+    {
+        // Arrange: 検査に使ったストリームを開いたまま読み込みに渡すので、その間は削除・名前の変更ができない
+        // （パスで検査してからパスで開き直すと、その間に ZIP 爆弾へ差し替えて検査を素通りできる）
+        (await CreateService().CreateMonthlyReportAsync(CardIdm, Year, 4, _outputPath)).Success.Should().BeTrue();
+        var service = CreateSeamService();
+        Exception? swapFailure = null;
+        service.OpenHook = stream =>
+        {
+            try
+            {
+                File.Move(_outputPath, _outputPath + ".swapped");
+            }
+            catch (IOException ex)
+            {
+                swapFailure = ex;
+            }
+
+            return new XLWorkbook(stream);
+        };
+
+        // Act
+        var result = await service.CreateMonthlyReportAsync(CardIdm, Year, 5, _outputPath);
+
+        // Assert: 差し替えは拒まれ、検査した内容から作成が続く
+        swapFailure.Should().NotBeNull("検査に使ったファイルは読み込み中に名前を変えられない");
+        result.Success.Should().BeTrue(result.DetailedErrorMessage);
+        ReadSheetNames(_outputPath).Should().Equal("4月", "5月");
+    }
+
+    [Fact]
+    public void 大きすぎる年度ファイルの案内がエラーメッセージ品質基準を満たすこと()
+    {
+        var message = ReportService.BuildOversizedExistingFileMessage("物品出納簿_はやかけん_H001_2024年度.xlsx");
+
+        message.Should().Contain("物品出納簿_はやかけん_H001_2024年度.xlsx");   // 何が
+        message.Should().Contain("大きすぎる").And.Contain("8MB").And.Contain("64MB"); // なぜ
+        message.Should().Contain("移動するか名前を変えてから、もう一度作成してください"); // どうすれば
+        message.Should().NotContain("壊れている", "破損ではないので、破損の案内と取り違えない");
     }
 
     #endregion
