@@ -32,7 +32,8 @@ namespace ICCardManager.Common
     /// </summary>
     /// <remarks>
     /// <para>
-    /// 帳票作成は出力先の既存の年度ファイルを ClosedXML（<c>new XLWorkbook(path)</c>）で開き、全パートを展開する。
+    /// 帳票作成は出力先の既存の年度ファイルをストリームで開き、ClosedXML（<c>new XLWorkbook(stream)</c>）で全パートを展開する。
+    /// 検査には同じストリームを渡す（<see cref="Check(Stream)"/>。パスで検査してから開き直すと、その間に差し替えられる）。
     /// 出力先フォルダーに書き込める者が年度ファイルと同じ名前で ZIP 爆弾を置くと、「帳票作成」を押した時点で
     /// メモリを圧迫させられる。ZIP 爆弾はファイル自体が小さいため、ファイルの大きさだけでは止められない。
     /// 中央ディレクトリが宣言する展開後サイズの合計も併せて見る。
@@ -66,7 +67,7 @@ namespace ICCardManager.Common
         public const long MaxExpandedBytes = 64L * 1024 * 1024;
 
         /// <summary>
-        /// 既定の上限でファイルと展開後の大きさを確かめる（パスから開いて閉じる版。シート名の読み取り・テスト用）
+        /// 既定の上限でファイルと展開後の大きさを確かめる（パスから開いて閉じる版。本番の経路はストリーム版を使い、こちらは単体テストが実ファイルの検査に使う）
         /// </summary>
         /// <param name="filePath">xlsx ファイルのパス</param>
         public static XlsxPackageSizeResult Check(string filePath)
