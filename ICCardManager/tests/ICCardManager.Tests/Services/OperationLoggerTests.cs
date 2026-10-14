@@ -162,11 +162,21 @@ public class OperationLoggerTests : IDisposable
         // 許可形で判定する（禁止する名前の列挙は、staffIdm / idm / actorIdm のような別名で素通りする）。
         // 操作者の識別子は文字列でしか渡せないので、string 型の引数は既知の用途（対象テーブル名・ファイルパス）に限る
         var allowedStringParameters = new[] { "tableName", "filePath" };
+        // Issue #2264: 設定の変更（LogSettingChangeAsync）だけは設定項目名と変更前後の値を受け取る（操作者ではない）。
+        // 許可はこのメソッドに限る（全メソッドへ広げると、他のメソッドに beforeValue という名の操作者引数を足せてしまう）
+        var allowedPerMethod = new Dictionary<string, string[]>
+        {
+            ["LogSettingChangeAsync"] = new[] { "settingName", "beforeValue", "afterValue" },
+        };
         var offending = logMethods
             .SelectMany(m => m.GetParameters()
-                .Where(p => p.ParameterType == typeof(string) && !allowedStringParameters.Contains(p.Name))
+                .Where(p => p.ParameterType == typeof(string)
+                    && !allowedStringParameters.Contains(p.Name)
+                    && !(allowedPerMethod.TryGetValue(m.Name, out var extra) && extra.Contains(p.Name)))
                 .Select(p => $"{m.Name}({p.Name})"))
             .ToList();
+        logMethods.Select(m => m.Name).Should().Contain("LogSettingChangeAsync",
+            "個別の許可が実在するメソッドを指していること（名前が変わって許可が空振りしていないこと）");
         offending.Should().BeEmpty(
             "操作者は ICurrentOperatorContext からのみ解決し、引数では受け取らない（string 型の引数は対象テーブル名・ファイルパスだけ）");
     }

@@ -1,3 +1,4 @@
+#nullable enable
 using System;
 using System.Globalization;
 using System.Linq;
@@ -59,6 +60,11 @@ namespace ICCardManager.Services
                 .ConfigureAwait(false);
             info.LastVacuumMachineName = await TryGetStringSettingAsync(SettingsRepository.KeyLastVacuumMachine)
                 .ConfigureAwait(false);
+            // Issue #2264: バックアップ先を最後に変更した日時・PC 名（設定画面での変更時に記録）
+            info.BackupPathChangedAt = await TryGetDateTimeSettingAsync(SettingsRepository.KeyBackupPathChangedAt)
+                .ConfigureAwait(false);
+            info.BackupPathChangedMachineName = await TryGetStringSettingAsync(SettingsRepository.KeyBackupPathChangedMachine)
+                .ConfigureAwait(false);
 
             try
             {
@@ -105,7 +111,7 @@ namespace ICCardManager.Services
             }
         }
 
-        private async Task<string> TryGetStringSettingAsync(string key)
+        private async Task<string?> TryGetStringSettingAsync(string key)
         {
             try
             {
@@ -121,7 +127,7 @@ namespace ICCardManager.Services
         private async Task<DateTime?> TryGetDateTimeSettingAsync(string key)
         {
             var raw = await TryGetStringSettingAsync(key).ConfigureAwait(false);
-            if (string.IsNullOrWhiteSpace(raw))
+            if (raw is null || string.IsNullOrWhiteSpace(raw))
             {
                 return null;
             }

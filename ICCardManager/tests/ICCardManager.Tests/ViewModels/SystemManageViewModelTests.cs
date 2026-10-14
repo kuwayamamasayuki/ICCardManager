@@ -933,6 +933,50 @@ public class SystemManageViewModelTests : IDisposable
         _viewModel.LastBackupMachineText.Should().Be("最終実施PC: PC-KEIRI-01");
     }
 
+    // Issue #2264: バックアップ先は共有 DB に保存され全 PC に効くため、いつ・どの PC で変わったかを F6 に示す
+
+    [Fact]
+    public async Task バックアップ状況_バックアップ先の最終変更が記録なしなら記録なしと表示されること()
+    {
+        SetupHealth(new BackupHealthInfo { BackupPathChangedAt = null });
+
+        await _viewModel.LoadBackupHealthAsync();
+
+        _viewModel.BackupPathChangeText.Should().Be(
+            "バックアップ先の最終変更: 記録なし（設定画面（F5）で変更すると表示されます）");
+    }
+
+    [Fact]
+    public async Task バックアップ状況_ローカルモードではバックアップ先の最終変更日時だけを表示すること()
+    {
+        SetupHealth(new BackupHealthInfo
+        {
+            BackupPathChangedAt = new DateTime(2026, 10, 13, 14, 5, 0),
+            BackupPathChangedMachineName = "PC-KEIRI-02"
+        });
+
+        await _viewModel.LoadBackupHealthAsync();
+
+        _viewModel.BackupPathChangeText.Should().Be("バックアップ先の最終変更: 2026/10/13 14:05",
+            "ローカルモードでは自 PC しか変更し得ないため PC 名を出さない（最終実施PC と同じ扱い。#1689）");
+    }
+
+    [Fact]
+    public async Task バックアップ状況_共有モードではバックアップ先を変更したPC名も表示すること()
+    {
+        SetupHealth(new BackupHealthInfo
+        {
+            BackupPathChangedAt = new DateTime(2026, 10, 13, 14, 5, 0),
+            BackupPathChangedMachineName = "PC-KEIRI-02"
+        });
+        var sharedViewModel = CreateViewModelWithSharedMode(@"\\server\share\iccard.db");
+
+        await sharedViewModel.LoadBackupHealthAsync();
+
+        sharedViewModel.BackupPathChangeText.Should().Be(
+            "バックアップ先の最終変更: 2026/10/13 14:05（変更したPC: PC-KEIRI-02）");
+    }
+
     [Fact]
     public async Task バックアップ状況_VACUUM実施日と実施PCが表示されること()
     {

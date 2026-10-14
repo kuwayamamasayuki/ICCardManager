@@ -27,6 +27,9 @@ public class SettingsViewModelTests
     private readonly Mock<ISoundPlayer> _soundPlayerMock;
     private readonly Mock<IDialogService> _dialogServiceMock;
     private readonly SummaryGenerator _summaryGenerator;
+    // Issue #2264: バックアップ先・データベース保存先の変更は職員証の認証と専用サービスを通る
+    private readonly Mock<IStaffAuthService> _staffAuthServiceMock = new();
+    private readonly Mock<ISettingsChangeService> _settingsChangeServiceMock = new();
     private readonly SettingsViewModel _viewModel;
 
     public SettingsViewModelTests()
@@ -50,7 +53,9 @@ public class SettingsViewModelTests
             _soundPlayerMock.Object,
             Options.Create(new DatabaseOptions()),
             _dialogServiceMock.Object,
-            _summaryGenerator);
+            _summaryGenerator,
+            _staffAuthServiceMock.Object,
+            _settingsChangeServiceMock.Object);
     }
 
     #region 設定読み込みテスト
@@ -372,6 +377,14 @@ public class SettingsViewModelTests
         _viewModel.WarningBalance = 3000;
         _viewModel.BackupPath = @"D:\Backup";
         _viewModel.SelectedFontSizeItem = _viewModel.FontSizeOptions.First(x => x.Value == FontSizeOption.Large);
+        // Issue #2264: バックアップ先の変更には職員証の認証が要る
+        _staffAuthServiceMock
+            .Setup(a => a.RequestAuthenticationAsync(It.IsAny<string>()))
+            .ReturnsAsync(new StaffAuthResult { Idm = "FFFF0000000000AA", StaffName = "認証 太郎" });
+        _settingsChangeServiceMock
+            .Setup(s => s.ChangeBackupPathAsync(It.IsAny<string>()))
+            .ReturnsAsync(true);
+        _settingsChangeServiceMock.Setup(s => s.RequiresOperatorAuthenticationAsync()).ReturnsAsync(true);
 
         _settingsRepositoryMock
             .Setup(r => r.SaveAppSettingsAsync(It.IsAny<AppSettings>()))
@@ -381,9 +394,10 @@ public class SettingsViewModelTests
         await _viewModel.SaveAsync();
 
         // Assert - リポジトリが正しいパラメータで呼ばれたことを検証
+        // Issue #2264: バックアップ先は一括保存に載らず、認証のうえ専用サービスで変更する
+        _settingsChangeServiceMock.Verify(s => s.ChangeBackupPathAsync(@"D:\Backup"), Times.Once);
         _settingsRepositoryMock.Verify(r => r.SaveAppSettingsAsync(It.Is<AppSettings>(s =>
             s.WarningBalance == 3000 &&
-            s.BackupPath == @"D:\Backup" &&
             s.FontSize == FontSizeOption.Large
         )), Times.Once);
     }

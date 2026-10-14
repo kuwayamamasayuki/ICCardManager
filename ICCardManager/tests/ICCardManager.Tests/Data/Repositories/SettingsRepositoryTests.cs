@@ -284,7 +284,9 @@ public class SettingsRepositoryTests : IDisposable
         var loaded = await _repository.GetAppSettingsAsync();
         loaded.WarningBalance.Should().Be(3000);
         loaded.FontSize.Should().Be(FontSizeOption.Large);
-        loaded.BackupPath.Should().Be(@"D:\MyBackup");
+
+        // Issue #2264: BackupPath も一括保存の対象外（認証と操作ログを伴う ChangeBackupPathAsync だけが書く）
+        (await _repository.GetAsync(SettingsRepository.KeyBackupPath)).Should().BeNull();
 
         // Issue #1997: LastVacuumDate は一括保存の対象外（CAS 経路だけが書く）
         loaded.LastVacuumDate.Should().BeNull();
@@ -324,7 +326,34 @@ public class SettingsRepositoryTests : IDisposable
 
         // 対の表明: ほかの設定は従来どおり保存されている（書き込みを丸ごと止めた実装では緑にならない）
         (await _repository.GetAsync(SettingsRepository.KeyWarningBalance)).Should().Be("5000");
-        (await _repository.GetAsync(SettingsRepository.KeyBackupPath)).Should().Be(@"C:\Backup");
+    }
+
+    /// <summary>
+    /// Issue #2264: キャッシュ由来の古い設定を丸ごと一括保存しても、認証して変更したバックアップ先を巻き戻さないこと。
+    /// </summary>
+    /// <remarks>
+    /// 終了時のウィンドウ位置の保存（MainWindow）は <c>GetAppSettingsAsync</c>（TTL キャッシュ）→ 位置だけ変更 →
+    /// <c>SaveAppSettingsAsync</c> の形で、触っていない値を全部書き戻す。backup_path が一括保存に載っていると、
+    /// 他 PC で認証して変更したバックアップ先が、認証も記録も無いまま古い値へ戻る（#1997 と同じ形）。
+    /// 対の表明として、専用経路は実際に値・変更日時・PC 名を書くことを置く。
+    /// </remarks>
+    [Fact]
+    public async Task SaveAppSettingsAsync_古い設定の一括保存は_専用経路で変更したバックアップ先を巻き戻さないこと()
+    {
+        var stale = new AppSettings { WarningBalance = 10000, BackupPath = @"C:\OldBackup" };
+
+        using (var scope = await _dbContext.BeginTransactionAsync())
+        {
+            await _repository.ChangeBackupPathAsync(
+                @"\\fileserver\backup", "PC-KEIRI-02", new DateTime(2026, 10, 13, 14, 5, 0), scope.Transaction);
+            scope.Commit();
+        }
+
+        await _repository.SaveAppSettingsAsync(stale);
+
+        (await _repository.GetAsync(SettingsRepository.KeyBackupPath)).Should().Be(@"\\fileserver\backup");
+        (await _repository.GetAsync(SettingsRepository.KeyBackupPathChangedAt)).Should().Be("2026-10-13 14:05:00");
+        (await _repository.GetAsync(SettingsRepository.KeyBackupPathChangedMachine)).Should().Be("PC-KEIRI-02");
     }
 
     /// <summary>
@@ -375,7 +404,8 @@ public class SettingsRepositoryTests : IDisposable
         // Assert
         loaded.WarningBalance.Should().Be(original.WarningBalance);
         loaded.FontSize.Should().Be(original.FontSize);
-        loaded.BackupPath.Should().Be(original.BackupPath);
+        // Issue #2264: BackupPath はラウンドトリップしない（一括保存の対象外）
+        (await _repository.GetAsync(SettingsRepository.KeyBackupPath)).Should().BeNull();
 
         // Issue #1997: LastVacuumDate はラウンドトリップしない（一括保存の対象外）。
         // 読み取り側は CAS が書いた値をそのまま返す（GetAppSettingsAsync_WithCustomValues_… が固定）。

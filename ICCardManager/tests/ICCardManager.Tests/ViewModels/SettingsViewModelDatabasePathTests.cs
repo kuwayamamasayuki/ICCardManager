@@ -1,11 +1,17 @@
 using System;
 using System.IO;
+using System.Threading.Tasks;
 using FluentAssertions;
+using ICCardManager.Data;
 using ICCardManager.Data.Repositories;
+using ICCardManager.Infrastructure.Caching;
 using ICCardManager.Infrastructure.Sound;
+using ICCardManager.Infrastructure.Timing;
 using ICCardManager.Models;
 using ICCardManager.Services;
 using ICCardManager.ViewModels;
+using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Options;
 using Moq;
 using Xunit;
 
@@ -27,15 +33,32 @@ public class SettingsViewModelDatabasePathTests : IDisposable
 
     private readonly string _configDirectory;
 
+    /// <summary>
+    /// Issue #2264: 「デフォルトに戻す」は職員証の認証を求め、操作ログ（現在の DB）に記録する。
+    /// 記録は本物のサービスでインメモリ DB へ書く
+    /// </summary>
+    private readonly DbContext _dbContext;
+
+    private readonly Mock<IStaffAuthService> _staffAuthServiceMock = new();
+
     public SettingsViewModelDatabasePathTests()
     {
         _configDirectory = Path.Combine(
             Path.GetTempPath(), "ICCardManagerTest_" + Path.GetRandomFileName());
         Directory.CreateDirectory(_configDirectory);
+
+        _dbContext = new DbContext(":memory:");
+        _dbContext.InitializeDatabase();
+
+        // 既定: 認証は成功する（操作者の帰属は SettingsViewModelSecuritySettingsTests が表明する）
+        _staffAuthServiceMock
+            .Setup(a => a.RequestAuthenticationAsync(It.IsAny<string>()))
+            .ReturnsAsync(new StaffAuthResult { Idm = "FFFF0000000000AA", StaffName = "認証 太郎" });
     }
 
     public void Dispose()
     {
+        _dbContext.Dispose();
         try
         {
             Directory.Delete(_configDirectory, recursive: true);
@@ -60,17 +83,33 @@ public class SettingsViewModelDatabasePathTests : IDisposable
             .Returns(ValidationResult.Success());
         validatorMock.Setup(v => v.ValidateLongTermUnreturnedDays(It.IsAny<int>()))
             .Returns(ValidationResult.Success());
+        var settingsRepository = new SettingsRepository(
+            _dbContext, new Mock<ICacheService>().Object, Options.Create(new CacheOptions()));
+        var settingsChangeService = new SettingsChangeService(
+            _dbContext,
+            settingsRepository,
+            new OperationLogger(new OperationLogRepository(_dbContext), new Mock<ICurrentOperatorContext>().Object),
+            // 職員の登録状況（既定: 登録済みの職員がいる＝認証を求める。認証の代役は成功を返す）
+            new StaffManagementService(
+                _dbContext,
+                Mock.Of<IStaffRepository>(r => r.HasActiveStaffAsync() == Task.FromResult(true)),
+                new OperationLogger(new OperationLogRepository(_dbContext), new Mock<ICurrentOperatorContext>().Object),
+                NullLogger<StaffManagementService>.Instance),
+            new SystemClock(),
+            NullLogger<SettingsChangeService>.Instance);
         return new SettingsViewModel(
             repoMock.Object,
             validatorMock.Object,
             new Mock<ISoundPlayer>().Object,
             dialogMock.Object,
             new SummaryGenerator(DepartmentType.MayorOffice),
+            _staffAuthServiceMock.Object,
+            settingsChangeService,
             _configDirectory);
     }
 
     [Fact]
-    public void ResetDatabasePathToDefault_UserConfirms_DeletesConfigAndShowsDefaultFolder()
+    public async Task ResetDatabasePathToDefault_UserConfirms_DeletesConfigAndShowsDefaultFolder()
     {
         File.WriteAllText(ConfigPath, @"C:\some\local\db\iccard.db");
 
@@ -79,7 +118,7 @@ public class SettingsViewModelDatabasePathTests : IDisposable
 
         var vm = CreateVm(dialogMock);
 
-        vm.ResetDatabasePathToDefaultCommand.Execute(null);
+        await vm.ResetDatabasePathToDefaultAsync();
 
         File.Exists(ConfigPath).Should().BeFalse("確認後に config ファイルが削除される");
         vm.DatabasePath.Should().Be(SettingsViewModel.GetDefaultDatabaseFolder(),
@@ -90,7 +129,7 @@ public class SettingsViewModelDatabasePathTests : IDisposable
     }
 
     [Fact]
-    public void ResetDatabasePathToDefault_UserCancels_KeepsConfig()
+    public async Task ResetDatabasePathToDefault_UserCancels_KeepsConfig()
     {
         File.WriteAllText(ConfigPath, @"C:\some\local\db\iccard.db");
 
@@ -98,14 +137,14 @@ public class SettingsViewModelDatabasePathTests : IDisposable
         dialogMock.Setup(d => d.ShowConfirmation(It.IsAny<string>(), It.IsAny<string>())).Returns(false);
 
         var vm = CreateVm(dialogMock);
-        vm.ResetDatabasePathToDefaultCommand.Execute(null);
+        await vm.ResetDatabasePathToDefaultAsync();
 
         File.Exists(ConfigPath).Should().BeTrue("ユーザーがキャンセルした場合は削除しない");
         vm.IsDatabasePathChanged.Should().BeFalse("キャンセル時はフラグも立てない");
     }
 
     [Fact]
-    public void ResetDatabasePathToDefault_ConfigFileNotExists_StillShowsDefaultFolder()
+    public async Task ResetDatabasePathToDefault_ConfigFileNotExists_StillShowsDefaultFolder()
     {
         // 既に config ファイルが無い状態でも安全にコマンド実行できる
         File.Exists(ConfigPath).Should().BeFalse("前提: 一時フォルダーには config ファイルが無い");
@@ -114,10 +153,12 @@ public class SettingsViewModelDatabasePathTests : IDisposable
         dialogMock.Setup(d => d.ShowConfirmation(It.IsAny<string>(), It.IsAny<string>())).Returns(true);
 
         var vm = CreateVm(dialogMock);
-        vm.ResetDatabasePathToDefaultCommand.Execute(null);
+        await vm.ResetDatabasePathToDefaultAsync();
 
         vm.DatabasePath.Should().Be(SettingsViewModel.GetDefaultDatabaseFolder());
         vm.IsDatabasePathChanged.Should().BeFalse();
+        // Issue #2264: 何も変わらない（既にデフォルト）ので認証を求めない
+        _staffAuthServiceMock.Verify(a => a.RequestAuthenticationAsync(It.IsAny<string>()), Times.Never);
     }
 
     /// <summary>
@@ -140,6 +181,8 @@ public class SettingsViewModelDatabasePathTests : IDisposable
 
     /// <summary>
     /// Issue #2098: 保存（SaveAsync）が、注入された置き場所へ設定ファイルを書き込むこと（静的検査）。
+    /// Issue #2264 で書き込みは保存の本体（SaveCoreAsync）へ移り、database_config.txt は操作ログとともに
+    /// SettingsChangeService が書く（置き場所は画面が渡す）。
     /// </summary>
     /// <remarks>
     /// 書き込みは保存成功後の <c>App.ApplyFontSize</c>（WPF の <c>Application.Current</c> が必要）より
@@ -154,9 +197,9 @@ public class SettingsViewModelDatabasePathTests : IDisposable
         var source = File.ReadAllText(Path.Combine(
             TestPaths.GetProductionSourceRoot(), "ViewModels", "SettingsViewModel.cs"));
         var body = TestSourceInspection.ExtractMethodBody(
-            TestSourceInspection.ToCodeOnly(source), "public async Task SaveAsync()");
+            TestSourceInspection.ToCodeOnly(source), "private async Task SaveCoreAsync(SavePlan plan)");
 
-        body.Should().Contain("AppConfigFiles.Write(DatabaseConfigPath,",
+        body.Should().Contain("ChangeDatabaseConfigAsync(DatabaseConfigPath,",
             "DB 保存先は注入された置き場所の database_config.txt へ保存する");
         body.Should().Contain("DepartmentConfigPath,",
             "部署種別は注入された置き場所の department_config.txt へ保存する");

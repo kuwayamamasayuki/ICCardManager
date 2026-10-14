@@ -581,6 +581,8 @@ namespace ICCardManager
             // Issue #1687: 共有フォルダの latest_version.txt による更新通知
             services.AddSingleton<IUpdateNotificationService, UpdateNotificationService>();
             services.AddSingleton<IBackupHealthService, BackupHealthService>();
+            // Issue #2264: バックアップ先・データベース保存先の変更と操作ログ（認証は設定画面が行う）
+            services.AddSingleton<ISettingsChangeService, SettingsChangeService>();
             // Issue #1758: Issue #1726 以前の UPDATE で失われた繰越情報の検出（検知のみ・復旧はしない）
             services.AddSingleton<ICarryoverDataLossDetector, CarryoverDataLossDetector>();
             // Issue #1737: 起動時タスク（バックアップ→古いデータ削除→月次VACUUM）の直列実行

@@ -146,7 +146,7 @@ namespace ICCardManager.Common
         /// DB の TEXT 列の値を <see cref="DateTime"/> へ復元する（厳格版）。
         /// 解析できない場合は <c>false</c>。
         /// </summary>
-        public static bool TryParseStored(string text, out DateTime value)
+        public static bool TryParseStored(string? text, out DateTime value)
             => DateTime.TryParseExact(
                 text, StoredPatterns, CultureInfo.InvariantCulture, DateTimeStyles.None, out value);
 

@@ -161,6 +161,13 @@
                                    FontSize="{DynamicResource SmallFontSize}"
                                    AutomationProperties.Name="{Binding BackupFolderText}"/>
 
+                        <!-- Issue #2264: バックアップ先は共有 DB に保存され全 PC に効くため、いつ（共有モードではどの PC で）変わったかを常に示す -->
+                        <TextBlock Text="{Binding BackupPathChangeText, Mode=OneWay}"
+                                   TextWrapping="Wrap"
+                                   Foreground="{DynamicResource SecondaryTextBrush}"
+                                   FontSize="{DynamicResource SmallFontSize}"
+                                   AutomationProperties.Name="{Binding BackupPathChangeText}"/>
+
                         <!-- Issue #1924: 設定した保存先が使えず既定パスへ退避しているときだけ表示する。
                              バックアップ自体は既定パスへ成功するため長期未成功の警告（Issue #1689）には
                              掛からず、この行が「共有フォルダーに世代が増えない」ことの唯一の手掛かりになる。 -->

@@ -615,6 +615,13 @@ public class OperationLogExcelExportService
                 // 載せないと統合・分割の監査で「どの明細がどう動いたか」を追跡できない。
                 { OperationLogDetailFormatter.DetailsPropertyName, OperationLogDetailFormatter.DetailsDisplayName },
             },
+            // Issue #2264: 設定の変更（バックアップ先・データベース保存先）。PC 名は変更後にだけ載る
+            "settings" => new Dictionary<string, string>
+            {
+                { "Setting", "設定項目" },
+                { "Value", "値" },
+                { "MachineName", "変更したPC" },
+            },
             _ => new Dictionary<string, string>()
         };
 

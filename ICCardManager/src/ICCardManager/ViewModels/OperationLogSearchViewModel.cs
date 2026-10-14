@@ -724,7 +724,10 @@ public partial class OperationLogSearchViewModel : ViewModelBase
                 .Where(s => !string.IsNullOrEmpty(s)));
             if (!string.IsNullOrEmpty(combined))
             {
-                return $"{target}を{action}: {combined}";
+                // Issue #2264: 設定の変更は、どの設定かを対象 ID（設定項目名）が示すため併記する
+                return log.TargetTable == OperationLogger.Tables.Settings
+                    ? $"{DescribeOperation(log, target, action)}: {combined}"
+                    : $"{target}を{action}: {combined}";
             }
         }
 
@@ -776,6 +779,11 @@ public partial class OperationLogSearchViewModel : ViewModelBase
                     { "CardType", "カード種別" },
                     { "CardNumber", "カード番号" },
                     { "Note", "備考" }
+                },
+                // Issue #2264: 設定の変更（バックアップ先・データベース保存先）。どの設定かは対象 ID が示す
+                "settings" => new Dictionary<string, string>
+                {
+                    { "Value", "値" }
                 },
                 _ => new Dictionary<string, string>()
             };

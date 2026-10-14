@@ -122,7 +122,8 @@ public class SettingsRepositorySaveTransactionTests : IDisposable
 
         (await _repository.GetAsync(SettingsRepository.KeyWarningBalance)).Should().Be("3000");
         (await _repository.GetAsync(SettingsRepository.KeyFontSize)).Should().Be("large");
-        (await _repository.GetAsync(SettingsRepository.KeyBackupPath)).Should().Be(@"D:\Backup");
+        // Issue #2264: backup_path は一括保存の対象外（認証と操作ログを伴う ChangeBackupPathAsync だけが書く）
+        (await _repository.GetAsync(SettingsRepository.KeyBackupPath)).Should().BeNull();
         // Issue #1997: last_vacuum_date は月次 VACUUM の先勝ちロックそのもの。
         // 一括保存は月ガードを持たないため、入力に値があっても書き込まない。
         (await _repository.GetAsync(SettingsRepository.KeyLastVacuumDate)).Should().BeNull(

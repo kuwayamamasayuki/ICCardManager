@@ -40,9 +40,9 @@ namespace ICCardManager.Common
         /// 呼び出し側は null を「不明」として扱い、例外にしないこと（空き容量は補助情報であり、
         /// 取得できなくてもバックアップ自体は継続できるため）。
         /// </returns>
-        public static long? TryGetAvailableFreeSpace(string folderPath)
+        public static long? TryGetAvailableFreeSpace(string? folderPath)
         {
-            if (string.IsNullOrWhiteSpace(folderPath))
+            if (folderPath is null || string.IsNullOrWhiteSpace(folderPath))
             {
                 return null;
             }
