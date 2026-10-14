@@ -241,7 +241,10 @@ namespace ICCardManager.Services
                                 errors.Add(new CsvImportError
                                 {
                                     LineNumber = lineNumber,
-                                    Message = "履歴の更新に失敗しました",
+                                    // Issue #2262 / #1759: false は「対象の行が無い（他の PC や別の操作で削除された）」競合だけ
+                                    // （UpdateLedgerWithAuditLogAsync の読み直しが null、または UPDATE が 0 行）。原因を名指しする
+                                    Message = ConcurrencyConflictMessage.ForImportUpdate(
+                                        $"利用履歴ID {ledger.Id.ToString(CultureInfo.InvariantCulture)} の履歴", "履歴画面"),
                                     Data = ledger.CardIdm
                                 });
                             }

@@ -461,9 +461,6 @@ public partial class DataExportImportViewModel : ViewModelBase
         "プレビューを表示しませんでした。いまの条件で、もう一度「プレビュー」を押してください。";
 
     /// <summary>
-    /// プレビューした後で CSV ファイルが書き換えられたため、取り込まなかったときの案内（Issue #2262）
-    /// </summary>
-    /// <summary>
     /// CSV ファイルを読み取れず、プレビュー・取り込みの前に内容を確かめられなかったときの案内（Issue #2262）
     /// </summary>
     internal static string BuildPreviewFileUnreadableMessage(string filePath)

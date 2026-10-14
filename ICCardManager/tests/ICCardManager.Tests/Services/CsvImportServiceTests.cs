@@ -2118,6 +2118,45 @@ FEDCBA9876543210,鈴木花子,002,テスト2";
     }
 
     /// <summary>
+    /// Issue #2262: 既存の利用履歴の更新が 0 行（他の PC や別の操作で削除された）なら、原因を名指しする行エラーで巻き戻すこと
+    /// </summary>
+    [Fact]
+    public async Task ImportLedgersAsync_UpdateAffectsNoRow_ReportsConcurrencyConflict()
+    {
+        var csvContent = @"ID,日時,カードIDm,管理番号,摘要,受入金額,払出金額,残額,利用者,備考
+1,2025-02-01 00:00:00,0123456789ABCDEF,001,12月から繰越,10000,,10000,,";
+        var filePath = Path.Combine(_testDirectory, "ledgers_update_conflict.csv");
+        await Task.Run(() => File.WriteAllText(filePath, csvContent, CsvEncoding));
+
+        _cardRepositoryMock.Setup(x => x.GetAllIncludingDeletedAsync()).ReturnsAsync(new List<IcCard>
+        {
+            new IcCard { CardIdm = "0123456789ABCDEF", CardType = "はやかけん", CardNumber = "001" }
+        });
+        _ledgerRepositoryMock.Setup(x => x.GetByIdAsync(1)).ReturnsAsync(new Ledger
+        {
+            Id = 1,
+            CardIdm = "0123456789ABCDEF",
+            Date = new DateTime(2025, 2, 1),
+            Summary = "12月から繰越",
+            Income = 8806,
+            Balance = 8806
+        });
+        _ledgerRepositoryMock.Setup(x => x.UpdateAsync(It.IsAny<Ledger>(), It.IsAny<SQLiteTransaction>())).ReturnsAsync(false);
+        _ledgerRepositoryMock.Setup(x => x.GetExistingLedgerKeysAsync(It.IsAny<IEnumerable<string>>()))
+            .ReturnsAsync(new HashSet<(string, DateTime, string, int, int, int)>());
+
+        var result = await _service.ImportLedgersAsync(filePath);
+
+        result.Success.Should().BeFalse();
+        result.ImportedCount.Should().Be(0);
+        var error = result.Errors.Should().ContainSingle().Subject;
+        error.LineNumber.Should().Be(2);
+        error.Message.Should().Be(
+            ICCardManager.Common.ConcurrencyConflictMessage.ForImportUpdate("利用履歴ID 1 の履歴", "履歴画面"));
+        error.Message.Should().Contain("可能性があります").And.EndWith("してください。");
+    }
+
+    /// <summary>
     /// 更新時にCSVに含まれないフィールド（LenderIdm等）が既存レコードから引き継がれることを確認（Issue #639）
     /// </summary>
     [Fact]
