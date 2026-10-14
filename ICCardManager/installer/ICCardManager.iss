@@ -118,6 +118,10 @@ Source: "..\publish\x86\*"; DestDir: "{app}\x86"; Flags: ignoreversion recursesu
 ; アイコンファイル（「設定」→「アプリ」で表示されるアイコン）
 Source: "app.ico"; DestDir: "{app}"; Flags: ignoreversion
 
+; マップトドライブ検出の受け渡しファイルを昇格したまま読むスクリプト（Issue #2267）。
+; インストール先へは置かず、ExtractTemporaryFile で {tmp} へ取り出して使う
+Source: "read-mapped-drives-handoff.ps1"; Flags: dontcopy
+
 ; サウンドファイル
 Source: "..\publish\Resources\Sounds\*"; DestDir: "{app}\Resources\Sounds"; Flags: ignoreversion recursesubdirs createallsubdirs
 
@@ -545,6 +549,171 @@ begin
   end;
 end;
 
+// =============================================
+// Issue #2267: マップトドライブの検出結果の検証
+// =============================================
+// 検出したドライブは昇格したインストーラーが net use へ渡す（RemapDrivesForElevatedSession）。
+// net use の引数は「"…"」で囲むだけでエスケープできないため、二重引用符を含む値は引数を追加できてしまう（/user: 等）。
+// 検出元（HKCU\Network・受け渡しファイル）の値は、ここで形を確かめたものだけを使う。
+const
+  IccmMaxRemotePathLength = 260;
+
+// ドライブ文字は「A:」〜「Z:」だけ
+function IsValidMappedDriveLetter(const DriveLetter: string): Boolean;
+begin
+  Result := (Length(DriveLetter) = 2) and (DriveLetter[1] >= 'A') and (DriveLetter[1] <= 'Z') and
+            (DriveLetter[2] = ':');
+end;
+
+// 接続先は「\\サーバー名\共有名[\…]」の UNC だけ。
+// - 二重引用符・制御文字・「/」を含まない（net use の引数を閉じたり、新しい引数を足したりできない）
+// - 末尾が「\」でない（「\"」は閉じ引用符のエスケープと解釈され、後ろの /persistent:no が接続先に入る）
+// - サーバー名・各要素が空でない（「\\\」「\\srv\\share」を通さない）。長さは IccmMaxRemotePathLength 文字まで
+function IsValidMappedRemotePath(const RemotePath: string): Boolean;
+var
+  I: Integer;
+  C: Char;
+  Rest: string;
+begin
+  Result := False;
+  if (Length(RemotePath) < 5) or (Length(RemotePath) > IccmMaxRemotePathLength) then
+    Exit;
+  if Copy(RemotePath, 1, 2) <> '\\' then
+    Exit;
+  if RemotePath[Length(RemotePath)] = '\' then
+    Exit;
+
+  for I := 1 to Length(RemotePath) do
+  begin
+    C := RemotePath[I];
+    if (Ord(C) < 32) or (Ord(C) = 127) or (C = '"') or (C = '/') then
+      Exit;
+  end;
+
+  // 先頭の「\\」より後ろ: 空の要素（連続する「\」）が無く、サーバー名の後に共有名が続く
+  Rest := Copy(RemotePath, 3, Length(RemotePath));
+  if Pos('\\', Rest) > 0 then
+    Exit;
+  Result := Pos('\', Rest) > 1;
+end;
+
+function IsValidMappedDrive(const DriveLetter, RemotePath: string): Boolean;
+begin
+  Result := IsValidMappedDriveLetter(DriveLetter) and IsValidMappedRemotePath(RemotePath);
+end;
+
+// 検出したドライブを登録する。形が正しくないものは捨ててログに残す（値そのものは残さない。
+// 改行等を含む値でログの行を偽装させないため）。MappedDriveLetters / MappedDriveRemotePaths へはここからだけ書く。
+// 呼び出し側は配列の長さを候補の数以上に確保しておく。
+procedure AddMappedDrive(const DriveLetter, RemotePath, Source: string);
+begin
+  if not IsValidMappedDrive(DriveLetter, RemotePath) then
+  begin
+    Log('マップトドライブ検出(' + Source + '): ドライブ文字または接続先の形式が正しくないため除外しました' +
+        '（ドライブ文字の長さ ' + IntToStr(Length(DriveLetter)) + '、接続先の長さ ' + IntToStr(Length(RemotePath)) +
+        '。接続先は \\サーバー名\共有名 の形で、二重引用符・制御文字・/ を含まず ' +
+        IntToStr(IccmMaxRemotePathLength) + ' 文字以内）');
+    Exit;
+  end;
+
+  MappedDriveLetters[MappedDriveCount] := DriveLetter;
+  MappedDriveRemotePaths[MappedDriveCount] := RemotePath;
+  MappedDriveCount := MappedDriveCount + 1;
+end;
+
+// RtlGenRandom（advapi32 の SystemFunction036）。暗号論的な乱数で RandomBufferLength バイトを埋める
+function IccmRtlGenRandom(var RandomBuffer: Cardinal; RandomBufferLength: Cardinal): Boolean;
+  external 'SystemFunction036@advapi32.dll stdcall';
+
+// 受け渡しファイルの名前に使う、推測できない 128 ビットの 16 進文字列。
+// Random は乱数の種（Randomize）の初期化に依存し、予測できないことを保証しない。
+function NewUnpredictableToken(var Token: string): Boolean;
+var
+  I: Integer;
+  Value: Cardinal;
+begin
+  Result := False;
+  Token := '';
+  for I := 1 to 4 do
+  begin
+    Value := 0;
+    if not IccmRtlGenRandom(Value, 4) then
+      Exit;
+    Token := Token + Format('%.8x', [Value]);
+  end;
+  Result := True;
+end;
+
+// 受け渡しファイルを、昇格したままの 1 回の PowerShell（read-mapped-drives-handoff.ps1）で照合してから読む（Issue #2267）。
+// 照合と読み取りは同じハンドルで行う（照合した後に別の手段で読むと、その間に差し替えられ得る）:
+//   まず対話セッションのユーザー（WTS）が昇格したユーザーと同じことを確かめ（違えば何も読まない＝肩越しの昇格を除外）、
+//   リンクを辿らずに（読み取りの共有だけを許して）開き、再解析ポイントでないこと・ハードリンクが 1 つだけであること・
+//   所有者が昇格したユーザー（元のユーザーと同じアカウント）であること・所有者・SYSTEM・Administrators 以外に書き込み等を許す
+//   ACE が無いことを確かめてから、同じハンドルで内容を読む。
+// スクリプトは {tmp}（Setup が保護 ACL で作る。元のユーザーは書き換えられない）へ取り出して実行する。
+// 照合を通った内容は {tmp} の写しへ UTF-8 で書かせて読む（標準出力は ASCII の結果だけにし、コンソールのコードページに左右されない）。
+// 戻り値: 照合を通って読めたら True（Lines に内容）。False なら Reason に理由（OWNER_ADMINISTRATORS 等）。
+function ReadOwnedHandoffFile(const Path: string; var Lines: TArrayOfString; var Reason: string): Boolean;
+var
+  Script, Verified, Line, QuotedScript, QuotedPath, QuotedVerified: string;
+  ResultCode, I: Integer;
+  Output: TExecOutput;
+begin
+  Result := False;
+  Reason := 'ERROR';
+  SetArrayLength(Lines, 0);
+  try
+    ExtractTemporaryFile('read-mapped-drives-handoff.ps1');
+  except
+    Exit;
+  end;
+  Script := ExpandConstant('{tmp}\read-mapped-drives-handoff.ps1');
+  // 照合を通った内容の写し。{tmp} は Setup が保護 ACL で作り、元のユーザーは書き込めない
+  Verified := ExpandConstant('{tmp}\iccm_mapped_drives_verified.txt');
+  DeleteFile(Verified);
+  // -File では実行しない。グループ ポリシーの実行ポリシー（AllSigned・Restricted）はスクリプト ファイルに対して
+  // -ExecutionPolicy Bypass より優先され、未署名の .ps1 が動かない（従来の -Command のインラインは影響を受けなかった）。
+  // {tmp} のスクリプトの本文を読んでスクリプト ブロックとして実行する（実行ポリシーはスクリプト ブロックに掛からない）。
+  // 単一引用符の文字列へ埋めるパスは ' を '' にする
+  QuotedScript := Script;
+  StringChangeEx(QuotedScript, '''', '''''', True);
+  QuotedPath := Path;
+  StringChangeEx(QuotedPath, '''', '''''', True);
+  QuotedVerified := Verified;
+  StringChangeEx(QuotedVerified, '''', '''''', True);
+  if not ExecAndCaptureOutput(ExpandConstant('{sys}\WindowsPowerShell\v1.0\powershell.exe'),
+       '-NoProfile -NonInteractive -Command "& ([ScriptBlock]::Create([System.IO.File]::ReadAllText(''' + QuotedScript + '''))) ' +
+       '-Path ''' + QuotedPath + ''' -OutPath ''' + QuotedVerified + '''"',
+       '', SW_HIDE, ewWaitUntilTerminated, ResultCode, Output) then
+    Exit;
+
+  // 最初の RESULT= 行が理由。OK で、終了コードが 0 のときだけ写しを読む
+  for I := 0 to GetArrayLength(Output.StdOut) - 1 do
+  begin
+    Line := Trim(Output.StdOut[I]);
+    if Pos('RESULT=', Line) = 1 then
+    begin
+      Reason := Copy(Line, Length('RESULT=') + 1, Length(Line));
+      Break;
+    end;
+  end;
+  if (Reason <> 'OK') or (ResultCode <> 0) then
+  begin
+    if Reason = 'OK' then
+      Reason := 'ERROR';
+    DeleteFile(Verified);
+    Exit;
+  end;
+
+  Result := LoadStringsFromFile(Verified, Lines);
+  DeleteFile(Verified);
+  if not Result then
+  begin
+    Reason := 'ERROR';
+    SetArrayLength(Lines, 0);
+  end;
+end;
+
 // マップトドライブをレジストリ（HKCU\Network）から検出（Issue #1584）
 procedure DetectMappedDrives();
 var
@@ -563,11 +732,7 @@ begin
   begin
     DriveLetter := Uppercase(SubKeys[I]);
     if RegQueryStringValue(HKCU, 'Network\' + SubKeys[I], 'RemotePath', RemotePath) then
-    begin
-      MappedDriveLetters[MappedDriveCount] := DriveLetter + ':';
-      MappedDriveRemotePaths[MappedDriveCount] := RemotePath;
-      MappedDriveCount := MappedDriveCount + 1;
-    end;
+      AddMappedDrive(DriveLetter + ':', RemotePath, 'Method 1');
   end;
 
   SetArrayLength(MappedDriveLetters, MappedDriveCount);
@@ -584,17 +749,36 @@ end;
 // 昇格中のインストーラーが読める」ディレクトリが必要。{tmp} は昇格実行時に
 // 保護 ACL 付きで作成され（現在ユーザーには読み取り＋実行のみ許可）、
 // ExecAsOriginalUser で起動した PowerShell からの書き込みが Access Denied になる
-// （v2.9.3-rc1 で検出が常に失敗していた根本原因）。そのため
-// C:\Users\Public（INTERACTIVE が書き込み可）→ C:\ProgramData（Users が
-// ファイル作成可）の順に試行する。
+// （v2.9.3-rc1 で検出が常に失敗していた根本原因）。
+// 標準出力で受け取れれば受け渡しファイルは要らないが、出力を取れる ExecAndCaptureOutput は昇格したまま実行し、
+// 元のユーザーのセッションのマップトドライブを読めない（元のユーザーで実行して出力を取る関数は Inno Setup 6.7 に無い）。
+//
+// Issue #2267: 受け渡しファイルを他のユーザーに差し替えさせない。
+// - 置き場所は C:\ProgramData（{commonappdata}）直下だけ。Users はファイルを作れるが、作ったファイルは
+//   CREATOR OWNER の権限で作った本人（と管理者・SYSTEM）しか書き換え・削除・改名できない。
+//   C:\Users\Public（%PUBLIC%）は使わない（同時にログオンしている別のユーザーの書き換えを ACL で止められる保証が無い）
+// - 書き出しは -NoClobber（CreateNew）。同じ名前のファイル・リンクが既にあれば書かずに失敗し、終了コードが 0 にならない。
+//   終了コード 0 でなければ読まない（先回りして作られたファイルを読まない）
+// - 名前は RtlGenRandom による推測できない値（先回りによる検出の妨害を防ぐ）
+// - 読む前・消す前に、ProgramData とファイル自体が再解析ポイントでないことを確かめる（IsDataPathSafe）
+// - 読んだ値は AddMappedDrive で形を確かめてから使う（net use の引数の注入を防ぐ）
+// - 元のユーザーと昇格したユーザーが違う（別の管理者アカウントで昇格した＝肩越しの昇格）ときは、検出結果を使わない。
+//   net use は昇格したユーザー（管理者）の資格情報で接続するため、元のユーザーが選んだ接続先（\\攻撃者のPC\share 等）へ
+//   管理者の NTLM 認証を送ってしまう。ReadOwnedHandoffFile が、受け渡しファイルの NTFS 上の所有者（作った元のユーザーになる）が
+//   昇格したユーザーと同じこと・ハードリンクが 1 つだけで再解析ポイントでないことを、内容を読むのと同じハンドルで確かめる。
+//   確かめられないときは読まない（fail-closed）。ファイルの内容に書いた SID は照合に使わない（内容は元のユーザーが自由に
+//   決められ、SID は秘密ではない）。所有者は、標準ユーザーが他人の SID へ変えられない（SeRestorePrivilege 等が要る）。
+//   ハードリンクを拒否するのは、元のユーザーが自分のファイルを消して、同じ名前で「管理者が所有し自分が書けるファイル」への
+//   ハードリンクを置けるため（IsDataPathSafe は再解析ポイントしか見ない）。
+//   Method 1（HKCU\Network）は昇格したユーザー自身のレジストリなので照合は要らない
 procedure DetectMappedDrivesFromSession();
 var
-  ExchangeDirs: TArrayOfString;
-  OutFile: string;
+  Token, OutFile: string;
+  Reason: string;
   ResultCode: Integer;
-  ExecOk, Found: Boolean;
+  ExecOk: Boolean;
   Lines: TArrayOfString;
-  I, D: Integer;
+  I: Integer;
   Line: string;
   PendingDriveLetter: string;
   DeviceIdPrefix, ProviderPrefix: string;
@@ -603,55 +787,70 @@ begin
   DeviceIdPrefix := 'DeviceID=';
   ProviderPrefix := 'ProviderName=';
 
-  SetArrayLength(ExchangeDirs, 2);
-  ExchangeDirs[0] := GetEnv('PUBLIC');                  // 通常 C:\Users\Public
-  ExchangeDirs[1] := ExpandConstant('{commonappdata}'); // 通常 C:\ProgramData
-
-  Found := False;
-  for D := 0 to GetArrayLength(ExchangeDirs) - 1 do
+  if not NewUnpredictableToken(Token) then
   begin
-    if Trim(ExchangeDirs[D]) = '' then Continue;
+    Log('マップトドライブ検出(Method 2): 受け渡しファイルの名前に使う乱数を作れないため検出をスキップしました');
+    Exit;
+  end;
+  OutFile := AddBackslash(ExpandConstant('{commonappdata}')) + 'iccm_mapped_drives_' + Token + '.txt';
 
-    // 共用ディレクトリに置くため、固定名ファイルの先回り作成（squatting）への
-    // 緩和策としてランダムなファイル名を使い、実行前に同名ファイルを削除する
-    OutFile := AddBackslash(ExchangeDirs[D]) +
-      'iccm_mapped_drives_' + IntToStr(Random(2147483647)) + '.txt';
-    DeleteFile(OutFile);
+  ExecOk := ExecAsOriginalUser(ExpandConstant('{sys}\WindowsPowerShell\v1.0\powershell.exe'),
+    // -Encoding UTF8: PowerShell 5.1 は BOM 付き UTF-8 で書き出す。Inno Setup の
+    // 読み取り側（read-mapped-drives-handoff.ps1 の StreamReader）は BOM を検出して Unicode にデコードするため、
+    // 日本語を含む共有名（例: \\server\道路_建設推進課）も正しく扱える。
+    // ASCII を指定すると non-ASCII 文字が ? に lossy 置換され、後段の net use が
+    // 不正なパスで失敗する（Issue #1584）。
+    // -NoClobber: 既にある名前には書かない（Issue #2267）。失敗は catch で終了コード 1 にする。
+    '-NoProfile -ExecutionPolicy Bypass -Command "$ErrorActionPreference = ''Stop''; try { Get-CimInstance Win32_MappedLogicalDisk | ForEach-Object { ''DeviceID='' + $_.DeviceID; ''ProviderName='' + $_.ProviderName; '''' } | Out-File -LiteralPath ''' + OutFile + ''' -Encoding UTF8 -NoClobber; exit 0 } catch { exit 1 }"',
+    '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
 
-    ExecOk := ExecAsOriginalUser(ExpandConstant('{sys}\WindowsPowerShell\v1.0\powershell.exe'),
-      // -Encoding UTF8: PowerShell 5.1 は BOM 付き UTF-8 で書き出す。Inno Setup の
-      // LoadStringsFromFile は BOM を自動検出して Unicode にデコードするため、
-      // 日本語を含む共有名（例: \\server\道路_建設推進課）も正しく扱える。
-      // ASCII を指定すると non-ASCII 文字が ? に lossy 置換され、後段の net use が
-      // 不正なパスで失敗する（Issue #1584）。
-      '-NoProfile -ExecutionPolicy Bypass -Command "Get-CimInstance Win32_MappedLogicalDisk | ForEach-Object { ''DeviceID='' + $_.DeviceID; ''ProviderName='' + $_.ProviderName; '''' } | Out-File -FilePath ''' + OutFile + ''' -Encoding UTF8"',
-      '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  if not ExecOk then
+  begin
+    Log('マップトドライブ検出(Method 2): PowerShell の起動に失敗したため検出をスキップしました');
+    Exit;
+  end;
+  Log('マップトドライブ検出(Method 2): PowerShell exit code=' + IntToStr(ResultCode));
 
-    if not ExecOk then
-      Log('マップトドライブ検出(Method 2): PowerShell の起動に失敗 (dir=' + ExchangeDirs[D] + ')')
+  // 元のユーザーの PowerShell が新しく作れなかった（同じ名前が既にあった等）ときは、そこにあるファイルを読まない
+  if ResultCode <> 0 then
+  begin
+    Log('マップトドライブ検出(Method 2): 受け渡しファイルの作成またはマップトドライブの検出に失敗したため、検出をスキップしました');
+    DeleteDataFile(OutFile);
+    Exit;
+  end;
+
+  // 再解析ポイントがあれば読まず、消しもしない（DeleteDataFile も消さない）。残したファイルの場所をログに残す
+  if not IsDataPathSafe(OutFile) then
+  begin
+    Log('マップトドライブ検出(Method 2): 受け渡しファイルを読まずに残しました。リンクでないことを確認してから削除してください: ' + OutFile);
+    Exit;
+  end;
+
+  // 該当が無いと Out-File がファイルを作らないことがある
+  if not FileExists(OutFile) then
+  begin
+    Log('マップトドライブ検出(Method 2): 0 件');
+    Exit;
+  end;
+
+  // 肩越しの昇格（ファイルを作った元のユーザーと、昇格したユーザーが違う）・ハードリンクなら読まない。照合できないときも読まない
+  if not ReadOwnedHandoffFile(OutFile, Lines, Reason) then
+  begin
+    if Reason = 'OWNER_ADMINISTRATORS' then
+      // 既に昇格した状態から起動した・UAC が無効のときは、元のユーザーの PowerShell も昇格していて所有者が Administrators になる。
+      // その場合のマップトドライブは昇格したセッションのものなので、接続し直さなくても実害は無い
+      Log('マップトドライブ検出(Method 2): 受け渡しファイルの所有者が Administrators のため照合できず、接続し直しません' +
+          '（インストーラーを既に管理者として実行中の画面から起動したか、UAC が無効の場合。昇格したセッションのドライブはそのまま使えるため実害はありません）')
+    else if (Reason = 'SESSION_USER') or (Reason = 'OWNER_MISMATCH') or (Reason = 'LINKS') or (Reason = 'REPARSE') or (Reason = 'DACL') then
+      Log('マップトドライブ検出(Method 2): 元のユーザーとインストーラーを昇格したユーザーが同じと確認できないため、' +
+          '元のユーザーのネットワークドライブを接続し直しません（昇格したユーザーの資格情報を、元のユーザーが選んだ接続先へ送らないため。理由: ' + Reason + '）')
     else
-      Log('マップトドライブ検出(Method 2): PowerShell exit code=' + IntToStr(ResultCode) +
-          ' (dir=' + ExchangeDirs[D] + ')');
-
-    if FileExists(OutFile) then
-    begin
-      Found := True;
-      Break;
-    end;
-  end;
-
-  if not Found then
-  begin
-    Log('マップトドライブ検出(Method 2): 受け渡しファイルが作成されず検出をスキップしました');
+      Log('マップトドライブ検出(Method 2): 受け渡しファイルを確認して読むことができなかったため、検出をスキップしました' +
+          '（PowerShell の実行が制限されている等。理由: ' + Reason + '）');
+    DeleteDataFile(OutFile);
     Exit;
   end;
-
-  if not LoadStringsFromFile(OutFile, Lines) then
-  begin
-    Log('マップトドライブ検出(Method 2): 受け渡しファイルの読み込みに失敗しました');
-    DeleteFile(OutFile);
-    Exit;
-  end;
+  DeleteDataFile(OutFile);
 
   SetArrayLength(MappedDriveLetters, GetArrayLength(Lines));
   SetArrayLength(MappedDriveRemotePaths, GetArrayLength(Lines));
@@ -664,9 +863,7 @@ begin
       PendingDriveLetter := Trim(Copy(Line, Length(DeviceIdPrefix) + 1, Length(Line)))
     else if (Pos(ProviderPrefix, Line) = 1) and (PendingDriveLetter <> '') then
     begin
-      MappedDriveLetters[MappedDriveCount] := Uppercase(PendingDriveLetter);
-      MappedDriveRemotePaths[MappedDriveCount] := Trim(Copy(Line, Length(ProviderPrefix) + 1, Length(Line)));
-      MappedDriveCount := MappedDriveCount + 1;
+      AddMappedDrive(Uppercase(PendingDriveLetter), Trim(Copy(Line, Length(ProviderPrefix) + 1, Length(Line))), 'Method 2');
       PendingDriveLetter := '';
     end;
   end;
@@ -674,7 +871,6 @@ begin
   SetArrayLength(MappedDriveLetters, MappedDriveCount);
   SetArrayLength(MappedDriveRemotePaths, MappedDriveCount);
 
-  DeleteFile(OutFile);
   Log('マップトドライブ検出(Method 2): ' + IntToStr(MappedDriveCount) + ' 件');
 end;
 
@@ -696,7 +892,10 @@ begin
 
   for I := 0 to MappedDriveCount - 1 do
   begin
-    if DirExists(MappedDriveLetters[I] + '\') then
+    // 引数をエスケープできないので、形を確かめた値だけを net use へ渡す（Issue #2267。AddMappedDrive でも確かめている）
+    if not IsValidMappedDrive(MappedDriveLetters[I], MappedDriveRemotePaths[I]) then
+      Log('再マッピング: ドライブ文字または接続先の形式が正しくないため見送りました')
+    else if DirExists(MappedDriveLetters[I] + '\') then
       Log('再マッピング不要（昇格セッションで既にアクセス可能）: ' + MappedDriveLetters[I])
     else
     begin

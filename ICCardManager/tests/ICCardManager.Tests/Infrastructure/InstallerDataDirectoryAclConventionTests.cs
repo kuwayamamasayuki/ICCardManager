@@ -29,6 +29,11 @@ namespace ICCardManager.Tests.Infrastructure;
 /// （<c>IsDataPathSafe(F);</c> 単独・<c>if IsDataPathSafe(F) then Exit;</c>・<c>or</c> でつないだ条件）は確認と数えない。
 /// 検査ロジック自体はサンプル入力で固定する（#1786）。
 /// </para>
+/// <para>
+/// データフォルダーの外の ProgramData 直下（マップドドライブ検出の受け渡しファイル）も対象にする。#2261 の時点では
+/// 例外としていたが、Issue #2267 で受け渡しファイルの削除も <c>DeleteDataFile</c>（再解析ポイントを確かめてから消す）へ寄せ、
+/// 例外を外した。受け渡しファイルそのものの検査は <see cref="InstallerMappedDriveHandoffConventionTests"/> にある。
+/// </para>
 /// </remarks>
 public class InstallerDataDirectoryAclConventionTests
 {
@@ -37,18 +42,6 @@ public class InstallerDataDirectoryAclConventionTests
         @"{commonappdata}\ICCardManager",
         @"{commonappdata}\ICCardManager\backup",
         @"{commonappdata}\ICCardManager\Logs",
-    };
-
-    /// <summary>
-    /// ProgramData 配下を対象にしていても、本 Issue の確認の対象外とする手続きと、その理由。
-    /// </summary>
-    /// <remarks>
-    /// マップドドライブ検出の受け渡しファイル（ProgramData 直下のランダムな名前のファイル）は Issue #2267 で扱う。
-    /// 例外が実際に該当していること（陳腐化していないこと）も表明する。
-    /// </remarks>
-    private static readonly Dictionary<string, string> Exceptions = new(StringComparer.OrdinalIgnoreCase)
-    {
-        ["DetectMappedDrivesFromSession"] = "ProgramData 直下の受け渡しファイル（Issue #2267 で扱う）",
     };
 
     /// <summary>昇格中にファイル・フォルダーを作成・書き換え・削除する Inno Setup のサポート関数。</summary>
@@ -326,9 +319,6 @@ public class InstallerDataDirectoryAclConventionTests
             "WriteDepartmentConfig", "WriteDatabaseConfig", "WriteReportOutputConfig", "CurUninstallStepChanged",
         });
 
-        // 例外が陳腐化していないこと
-        result.ExceptedHits.Should().BeEquivalentTo(Exceptions.Keys, "対象外とした手続きが実際に ProgramData 配下へ書いていること");
-
         result.Violations.Should().BeEmpty(
             "昇格中の書き込み・削除は、IsDataPathSafe / IsDataTreeSafeToDelete で同じパスを確かめ、危険なら呼ばない形で行う");
     }
@@ -406,9 +396,8 @@ public class InstallerDataDirectoryAclConventionTests
 
         var result = Analyze(code);
 
-        result.Targeted.Should().BeEquivalentTo(new[] { "Guarded", "Assembled", "Helper", "Unused", "Reused" },
-            "ProgramData 配下を指す呼び出し（組み立てた形・手続きの引数を含む）を持つ手続きを対象にし、{tmp}・{app} だけの手続きは対象にしない");
-        result.ExceptedHits.Should().BeEquivalentTo(new[] { "DetectMappedDrivesFromSession" });
+        result.Targeted.Should().BeEquivalentTo(new[] { "Guarded", "Assembled", "Helper", "Unused", "Reused", "DetectMappedDrivesFromSession" },
+            "ProgramData 配下を指す呼び出し（組み立てた形・手続きの引数・データフォルダーの外の ProgramData 直下を含む）を持つ手続きを対象にし、{tmp}・{app} だけの手続きは対象にしない");
         result.Violations.Should().BeEquivalentTo(new[]
         {
             "Assembled: SaveStringToFile(F",   // 組み立てたパスも対象
@@ -418,12 +407,13 @@ public class InstallerDataDirectoryAclConventionTests
             "Unused: DelTree(F",               // or でつないだ条件は確認と数えない
             "Unused: RenameFile(F",            // 別のパスの確認は数えない
             "Reused: DeleteFile(F",            // 1 つの確認を 2 つの呼び出しで使い回さない
+            "DetectMappedDrivesFromSession: DeleteFile(OutFile", // ProgramData 直下の受け渡しファイルも対象（#2267）
         });
     }
 
-    private sealed record Routine(string Name, IReadOnlyList<string> Parameters, string Body);
+    internal sealed record Routine(string Name, IReadOnlyList<string> Parameters, string Body);
 
-    private sealed record AnalysisResult(List<string> Targeted, List<string> ExceptedHits, List<string> Violations);
+    private sealed record AnalysisResult(List<string> Targeted, List<string> Violations);
 
     /// <summary>
     /// 書き込み・削除の各呼び出しの第 1 引数を解決し、ProgramData 配下（または手続きの引数）を指すものについて、
@@ -435,7 +425,6 @@ public class InstallerDataDirectoryAclConventionTests
         var blanked = SplitRoutines(StripPascalComments(codeSection, keepLiterals: false));
 
         var targeted = new List<string>();
-        var excepted = new List<string>();
         var violations = new List<string>();
         foreach (var name in blanked.Keys)
         {
@@ -458,16 +447,6 @@ public class InstallerDataDirectoryAclConventionTests
                     continue;
                 }
 
-                if (Exceptions.ContainsKey(name))
-                {
-                    if (!excepted.Contains(name))
-                    {
-                        excepted.Add(name);
-                    }
-
-                    continue;
-                }
-
                 isTargeted = true;
                 var window = body.Substring(windowStart, call.Index - windowStart);
                 if (!IsGuardedByExit(window, arg) && !IsGuardedByCondition(window, arg))
@@ -484,7 +463,7 @@ public class InstallerDataDirectoryAclConventionTests
             }
         }
 
-        return new AnalysisResult(targeted, excepted, violations);
+        return new AnalysisResult(targeted, violations);
     }
 
     /// <summary><c>if not Guard(P) then Exit;</c>（または <c>begin … Exit; end;</c>）が窓の中にあるか。</summary>
@@ -579,7 +558,7 @@ public class InstallerDataDirectoryAclConventionTests
     private static string Normalize(string expr)
         => Regex.Replace(expr, @"ExpandConstant|AddBackslash|['()+\s]", string.Empty, RegexOptions.IgnoreCase);
 
-    private static string[] ReadInstallerLines()
+    internal static string[] ReadInstallerLines()
         => File.ReadAllLines(Path.Combine(TestPaths.GetSolutionRoot(), "installer", "ICCardManager.iss"));
 
     /// <summary><c>[Dirs]</c> の行を、名前 → 名前より後ろの指定（Permissions 等）で返す。</summary>
@@ -613,7 +592,7 @@ public class InstallerDataDirectoryAclConventionTests
     }
 
     /// <summary><c>[Code]</c> 行の次から末尾まで（<c>[Code]</c> はスクリプトの最後の節）。</summary>
-    private static string ReadCodeSection(string[] lines)
+    internal static string ReadCodeSection(string[] lines)
     {
         var start = Array.FindIndex(lines, l => string.Equals(l.Trim(), "[Code]", StringComparison.OrdinalIgnoreCase));
         start.Should().BeGreaterThan(-1, "[Code] 節を読めていること");
@@ -623,7 +602,7 @@ public class InstallerDataDirectoryAclConventionTests
     /// <summary>
     /// トップレベルの <c>procedure</c> / <c>function</c> の見出し行で区切り、名前 → 引数名と本体（次の見出しまで）を返す。
     /// </summary>
-    private static Dictionary<string, Routine> SplitRoutines(string code)
+    internal static Dictionary<string, Routine> SplitRoutines(string code)
     {
         var result = new Dictionary<string, Routine>(StringComparer.OrdinalIgnoreCase);
         string? current = null;
@@ -670,7 +649,7 @@ public class InstallerDataDirectoryAclConventionTests
     /// <c>''</c> でエスケープ）の中は除かない。<paramref name="keepLiterals"/> が false ならリテラルの中身を同じ長さの空白にする
     /// （2 つの形で同じ位置が対応するようにする。<c>'{commonappdata}'</c> の波括弧をコメントと読み違えないよう、リテラルを先に認識する）。
     /// </summary>
-    private static string StripPascalComments(string code, bool keepLiterals)
+    internal static string StripPascalComments(string code, bool keepLiterals)
     {
         var sb = new StringBuilder(code.Length);
         var i = 0;
