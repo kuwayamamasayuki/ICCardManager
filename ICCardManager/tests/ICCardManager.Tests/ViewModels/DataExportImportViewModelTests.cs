@@ -2700,8 +2700,18 @@ public class DataExportImportViewModelTests : IDisposable
             .Callback(() => _viewModel.SelectedImportType = DataType.Staff)
             .ReturnsAsync(new CsvImportPreviewResult { IsValid = true });
 
-        await _viewModel.PreviewFileAsync("loading.csv");
+        // 本物のファイルを読ませる（読めないファイルはプレビューの読み込み自体を行わない）
+        var path = WriteTempCsv("カードIDm,カード種別,管理番号,備考\n0102030405060708,はやかけん,001,\n");
+        try
+        {
+            await _viewModel.PreviewFileAsync(path);
+        }
+        finally
+        {
+            System.IO.File.Delete(path);
+        }
 
+        _importServiceMock.Verify(s => s.PreviewCardsAsync(It.IsAny<string>(), It.IsAny<bool>()), Times.Once, "前提: 読み込みが行われたこと");
         _viewModel.HasPreview.Should().BeFalse();
         _viewModel.ImportPreview.Should().BeNull();
         _viewModel.StatusMessage.Should().Be(DataExportImportViewModel.PreviewConditionsChangedWhileLoadingMessage);
@@ -2726,10 +2736,18 @@ public class DataExportImportViewModelTests : IDisposable
             .Callback(() => _viewModel.TouchedCardIdm = "000000000000000B")
             .ReturnsAsync(new CsvImportPreviewResult { IsValid = true });
 
-        await _viewModel.PreviewFileAsync("loading.csv");
+        var path = WriteTempCsv("ID,日時,カードIDm,管理番号,摘要,受入金額,払出金額,残額,利用者,備考\n");
+        try
+        {
+            await _viewModel.PreviewFileAsync(path);
+        }
+        finally
+        {
+            System.IO.File.Delete(path);
+        }
 
         _viewModel.HasPreview.Should().BeFalse();
-        _importServiceMock.Verify(s => s.PreviewLedgersAsync("loading.csv", It.IsAny<bool>(), null), Times.Once,
+        _importServiceMock.Verify(s => s.PreviewLedgersAsync(path, It.IsAny<bool>(), null), Times.Once,
             "読み込みは開始時に確定させた条件（取り込み先カード未指定）で行う");
 
         await _viewModel.ExecuteImportAsync();
@@ -2898,6 +2916,7 @@ public class DataExportImportViewModelTests : IDisposable
         _viewModel.SelectedImportType = DataType.Ledgers;
         _viewModel.UseCardListSelection = false;
         _viewModel.IsWaitingForCardTouch = true;
+        _viewModel.TouchedCardInfo = "カードをタッチしてください...";
         SetupValidPreview(DataType.Ledgers);
         bool? waitingDuringAuthentication = null;
         _staffAuthServiceMock.Setup(s => s.RequestAuthenticationAsync(It.IsAny<string>()))
@@ -2910,6 +2929,7 @@ public class DataExportImportViewModelTests : IDisposable
         await _viewModel.ExecuteImportAsync();
 
         waitingDuringAuthentication.Should().BeFalse("認証ダイアログが職員証を読む間、この画面はカードの読み取りを処理しない");
+        _viewModel.TouchedCardInfo.Should().BeEmpty("タッチ待ちを終えたら、「キャンセル」と同じく案内の表示も消す（タッチしていないため）");
         _importServiceMock.Verify(s => s.ImportLedgersAsync("test.csv", It.IsAny<bool>(), null), Times.Once,
             "タッチ待ちを終えても取り込み先カード（未タッチ＝CSV の IDm 列）とプレビューは変わらない");
     }
@@ -2934,6 +2954,79 @@ public class DataExportImportViewModelTests : IDisposable
         _importServiceMock.Verify(s => s.ImportLedgersAsync(It.IsAny<string>(), It.IsAny<bool>(), It.IsAny<string?>()), Times.Never);
         _viewModel.HasPreview.Should().BeFalse();
         _viewModel.StatusMessage.Should().Be(DataExportImportViewModel.PreviewDiscardedByConditionChangeMessage);
+    }
+
+    #endregion
+
+    #region Issue #2262: レビュー 4 回目（ファイルを読めないときは確かめられないとして扱う）
+
+    /// <summary>
+    /// 欠陥を突く側: プレビューするファイルを読めないときは、内容を確かめられないとしてプレビューを表示しないこと
+    /// </summary>
+    [Fact]
+    public async Task 読めないファイルはプレビューしないこと()
+    {
+        var path = WriteTempCsv("カードIDm,カード種別,管理番号,備考\n0102030405060708,はやかけん,001,\n");
+        try
+        {
+            _viewModel.SelectedImportType = DataType.Cards;
+            using (new System.IO.FileStream(path, System.IO.FileMode.Open, System.IO.FileAccess.ReadWrite, System.IO.FileShare.None))
+            {
+                await _viewModel.PreviewFileAsync(path);
+            }
+
+            _viewModel.HasPreview.Should().BeFalse();
+            _viewModel.StatusMessage.Should().Be(DataExportImportViewModel.BuildPreviewFileUnreadableMessage(path));
+            _importServiceMock.Verify(s => s.PreviewCardsAsync(It.IsAny<string>(), It.IsAny<bool>()), Times.Never);
+        }
+        finally
+        {
+            System.IO.File.Delete(path);
+        }
+    }
+
+    /// <summary>
+    /// 欠陥を突く側: プレビューした後で取り込む直前にファイルを読めなくなったら、「書き換えられた」ではなく
+    /// 「確かめられない」と案内して取り込まないこと
+    /// </summary>
+    [Fact]
+    public async Task 取り込む直前にファイルを読めなければ確かめられないとして取り込まないこと()
+    {
+        var path = WriteTempCsv("カードIDm,カード種別,管理番号,備考\n0102030405060708,はやかけん,001,\n");
+        try
+        {
+            _viewModel.SelectedImportType = DataType.Cards;
+            _importServiceMock
+                .Setup(s => s.PreviewCardsAsync(It.IsAny<string>(), It.IsAny<bool>()))
+                .ReturnsAsync(new CsvImportPreviewResult { IsValid = true });
+            await _viewModel.PreviewFileAsync(path);
+            _viewModel.HasPreview.Should().BeTrue("前提: プレビューが表示されていること");
+
+            using (new System.IO.FileStream(path, System.IO.FileMode.Open, System.IO.FileAccess.ReadWrite, System.IO.FileShare.None))
+            {
+                await _viewModel.ExecuteImportAsync();
+            }
+
+            _importServiceMock.Verify(s => s.ImportCardsAsync(It.IsAny<string>(), It.IsAny<bool>()), Times.Never);
+            _viewModel.HasPreview.Should().BeFalse();
+            _viewModel.StatusMessage.Should().Be(DataExportImportViewModel.BuildPreviewFileUnreadableMessage(path));
+        }
+        finally
+        {
+            System.IO.File.Delete(path);
+        }
+    }
+
+    /// <summary>
+    /// 読めないときの案内は 3 要素（何が・なぜ・どうすれば）を満たし、行動指示で終わること
+    /// </summary>
+    [Fact]
+    public void 読めないファイルの案内は3要素を満たすこと()
+    {
+        var message = DataExportImportViewModel.BuildPreviewFileUnreadableMessage(@"C:\data\cards.csv");
+
+        message.Should().Contain("「cards.csv」").And.Contain("可能性があります").And.EndWith("確認してください。");
+        message.Should().NotContain(@"C:\data", "フルパスは出さない（ファイル名で名指しする）");
     }
 
     #endregion

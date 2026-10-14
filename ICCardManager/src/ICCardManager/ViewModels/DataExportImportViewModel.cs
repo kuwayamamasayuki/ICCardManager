@@ -381,11 +381,29 @@ public partial class DataExportImportViewModel : ViewModelBase
     /// 上限を超えるファイルはハッシュを取らずに大きさだけを記録する（取り込み側が読む前に拒む）。
     /// プレビューの読み込みとは別にもう一度読む（プレビューは <see cref="CsvImportService"/> が読み、バイト列を返さないため）。
     /// </para>
+    /// <para>
+    /// 読み取りは共有フォルダー（SMB）上では応答が無いと長く戻らない同期処理なので、UI スレッドで行わず
+    /// <see cref="DedicatedThread.Run{T}(Func{T})"/> で専用スレッドへ載せる（<see cref="CaptureAsync"/>。
+    /// viewmodel-conventions.md「ブロックし得る同期処理は DedicatedThread.Run で起動する」#2221）。呼び出し側は処理中の表示の中で待つ。
+    /// </para>
+    /// <para>
+    /// 読めないとき（存在しない・ロック・権限・切断）は <c>null</c>（＝確かめられない）を返す。読めなかったことを
+    /// 特定の値に畳むと、プレビュー時と実行時の両方で読めないときに値が一致して照合が素通りし（fail-open）、
+    /// 片方だけ読めないときは「書き換えられた」と誤って案内する。
+    /// </para>
     /// </remarks>
-    internal sealed record PreviewFileFingerprint(bool Exists, long Length, string ContentSha256)
+    internal sealed record PreviewFileFingerprint(long Length, string ContentSha256)
     {
-        /// <summary>いまのファイルの状態を読む（読めなければ「存在しない」として扱う）</summary>
-        public static PreviewFileFingerprint Capture(string filePath)
+        /// <summary>
+        /// いまのファイルの状態を専用スレッドで読む（読めなければ <c>null</c>）
+        /// </summary>
+        public static Task<PreviewFileFingerprint?> CaptureAsync(string filePath)
+            => DedicatedThread.Run(() => Capture(filePath));
+
+        /// <summary>
+        /// いまのファイルの状態を、呼び出したスレッドで読む（読めなければ <c>null</c>）。UI スレッドから直接呼ばないこと
+        /// </summary>
+        public static PreviewFileFingerprint? Capture(string filePath)
         {
             try
             {
@@ -393,22 +411,27 @@ public partial class DataExportImportViewModel : ViewModelBase
                 var length = stream.Length;
                 if (length > CsvImportService.MaxImportFileSizeBytes)
                 {
-                    return new PreviewFileFingerprint(true, length, string.Empty);
+                    return new PreviewFileFingerprint(length, string.Empty);
                 }
 
                 using var sha256 = System.Security.Cryptography.SHA256.Create();
                 var hash = sha256.ComputeHash(stream);
-                return new PreviewFileFingerprint(true, length, BitConverter.ToString(hash));
+                return new PreviewFileFingerprint(length, BitConverter.ToString(hash));
             }
             catch (Exception ex) when (ex is IOException || ex is UnauthorizedAccessException || ex is ArgumentException || ex is NotSupportedException || ex is System.Security.SecurityException)
             {
-                return new PreviewFileFingerprint(false, 0, string.Empty);
+                return null;
             }
         }
     }
 
     /// <summary>プレビューした時点の条件とファイルの状態（プレビューが無ければ null）</summary>
-    private sealed record PreviewSnapshot(ImportConditions Conditions, PreviewFileFingerprint File);
+    /// <remarks>
+    /// <c>File</c> が null になるのは、単体テストが存在しないファイル名でプレビューを組み立てたとき
+    /// （<see cref="RecordPreviewSnapshotForCurrentState"/>）だけ。本番の <see cref="PreviewFileAsync"/> は、
+    /// ファイルを読めなければプレビューを表示しない（スナップショットを記録しない）。
+    /// </remarks>
+    private sealed record PreviewSnapshot(ImportConditions Conditions, PreviewFileFingerprint? File);
 
     private PreviewSnapshot? _previewSnapshot;
 
@@ -425,6 +448,7 @@ public partial class DataExportImportViewModel : ViewModelBase
     /// <remarks>
     /// 本番では <see cref="PreviewFileAsync"/> が、読み込みを始める前に確定させた条件で記録する。
     /// 単体テストがプレビューの表示を直接組み立てるときにも使う（プレビュー無しの扱いにならないように）。
+    /// テスト用のため、ファイルの読み取りは呼び出したスレッドで同期的に行う。
     /// </remarks>
     internal void RecordPreviewSnapshotForCurrentState()
         => _previewSnapshot = new PreviewSnapshot(CaptureImportConditions(), PreviewFileFingerprint.Capture(ImportPreviewFile));
@@ -435,6 +459,17 @@ public partial class DataExportImportViewModel : ViewModelBase
     internal const string PreviewConditionsChangedWhileLoadingMessage =
         "プレビューを読み込んでいる間に取り込みの条件（データ種別・既存データのスキップ・取り込み先カード）が変わったため、" +
         "プレビューを表示しませんでした。いまの条件で、もう一度「プレビュー」を押してください。";
+
+    /// <summary>
+    /// プレビューした後で CSV ファイルが書き換えられたため、取り込まなかったときの案内（Issue #2262）
+    /// </summary>
+    /// <summary>
+    /// CSV ファイルを読み取れず、プレビュー・取り込みの前に内容を確かめられなかったときの案内（Issue #2262）
+    /// </summary>
+    internal static string BuildPreviewFileUnreadableMessage(string filePath)
+        => $"CSVファイル「{Path.GetFileName(filePath)}」を読み取れないため、内容が確かめられず、取り込んでいません。" +
+           "ファイルが移動・削除されたか、他のプログラムで開かれているか、共有フォルダーに接続できない可能性があります。" +
+           "ファイルを閉じるか接続を確認してから、もう一度「プレビュー」で内容を確認してください。";
 
     /// <summary>
     /// プレビューした後で CSV ファイルが書き換えられたため、取り込まなかったときの案内（Issue #2262）
@@ -731,7 +766,6 @@ public partial class DataExportImportViewModel : ViewModelBase
         ImportErrors.Clear();
 
         var conditions = CaptureImportConditions();
-        var file = PreviewFileFingerprint.Capture(filePath);
 
         using (BeginBusy("プレビュー読み込み中..."))
         {
@@ -739,6 +773,15 @@ public partial class DataExportImportViewModel : ViewModelBase
             await Task.Yield();
             try
             {
+                // ファイルの状態は読み込む前に、処理中の表示の中で、専用スレッドで取る
+                var file = await PreviewFileFingerprint.CaptureAsync(filePath);
+                if (file == null)
+                {
+                    // 内容を確かめられないファイルのプレビューは表示しない（照合の前提が作れない）
+                    SetStatus(BuildPreviewFileUnreadableMessage(filePath), true);
+                    return;
+                }
+
                 CsvImportPreviewResult preview;
 
                 switch (conditions.DataType)
@@ -878,21 +921,14 @@ public partial class DataExportImportViewModel : ViewModelBase
             return;
         }
 
-        var previewedFile = _previewSnapshot.File;
-        if (PreviewFileFingerprint.Capture(ImportPreviewFile) != previewedFile)
-        {
-            var changedFileMessage = BuildPreviewFileChangedMessage(ImportPreviewFile);
-            ClearPreview();
-            ImportErrors.Clear();
-            SetStatus(changedFileMessage, true);
-            return;
-        }
-
         // Issue #1741: インポート元パスをここで確定させて引数として渡す。
         // ImportPreviewFile は画面の一時状態で、取り込み後の ClearPreview() が空にするため、
         // 取り込み後に読み直すと監査ログへ空パスが記録される。
-        // Issue #2262: 認証を待つ間の書き換えも検出できるよう、プレビューしたファイルの状態を渡す
-        await RunImportAsync(ImportPreviewFile, expectedFile: previewedFile);
+        // Issue #2262: ファイルの照合は取り込む直前（ImportAndReportAsync の処理中の表示の中）の 1 か所で行う。
+        // 認証の前にも照合すると、認証が挟まらない経路（カード一覧）では同じファイルを続けて 2 回読むことになり、
+        // 認証が挟まる経路でも認証を待つ間の書き換えは直前の照合でしか拾えないため、前の照合は省く
+        // （認証の前に書き換えられていたときは、認証の後に案内する）。
+        await RunImportAsync(ImportPreviewFile, expectedFile: _previewSnapshot.File);
     }
 
     /// <summary>
@@ -960,7 +996,12 @@ public partial class DataExportImportViewModel : ViewModelBase
         // タッチしたカード（TouchedCardIdm）は変えないので、取り込み先カードもプレビューも変わらない。
         if (IsWaitingForCardTouch)
         {
+            // 「キャンセル」（CancelCardTouch）と同じく、まだタッチしていなければ「カードをタッチしてください」の表示も消す
             IsWaitingForCardTouch = false;
+            if (string.IsNullOrWhiteSpace(TouchedCardIdm))
+            {
+                TouchedCardInfo = string.Empty;
+            }
         }
 
         // Issue #2262: 職員・利用履歴・利用履歴詳細の取り込みは、職員証の認証を経て、認証した職員の操作として行う。
@@ -1174,14 +1215,6 @@ public partial class DataExportImportViewModel : ViewModelBase
         // 分岐ごとに組み立てた文言をその場に残したまま、ダイアログを出す地点を1か所へ集約できる。
         // 分岐が増えても「文言の組み立て」と「表示のタイミング」が離れないため、
         // 新しい分岐だけスコープ内で表示する形の再発を構造的に防ぐ。
-        // Issue #2262: プレビューしたファイルが、認証を待つ間などに書き換えられていたら取り込まない
-        if (request.ExpectedFile != null && PreviewFileFingerprint.Capture(request.SourceFilePath) != request.ExpectedFile)
-        {
-            ClearPreview();
-            SetStatus(BuildPreviewFileChangedMessage(request.SourceFilePath), true);
-            return;
-        }
-
         Action? pendingResultDialog = null;
 
         using (BeginBusy("インポート中..."))
@@ -1190,6 +1223,23 @@ public partial class DataExportImportViewModel : ViewModelBase
             await Task.Yield();
             try
             {
+                // Issue #2262: プレビューしたファイルと、いまのファイルを照合する（プレビュー経由のときだけ）。
+                // 照合はこの 1 か所（認証の後・取り込む直前）。読み取りは処理中の表示の中で、専用スレッドで行う
+                if (request.ExpectedFile != null)
+                {
+                    var current = await PreviewFileFingerprint.CaptureAsync(request.SourceFilePath);
+                    if (current == null || current != request.ExpectedFile)
+                    {
+                        ClearPreview();
+                        SetStatus(
+                            current == null
+                                ? BuildPreviewFileUnreadableMessage(request.SourceFilePath)
+                                : BuildPreviewFileChangedMessage(request.SourceFilePath),
+                            true);
+                        return;
+                    }
+                }
+
                 CsvImportResult result;
                 var sourceFilePath = request.SourceFilePath;
 
