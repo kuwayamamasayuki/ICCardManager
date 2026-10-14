@@ -100,6 +100,11 @@ namespace ICCardManager.Services
         {
             var deleting = databaseFilePath == null;
             var existedBefore = File.Exists(configFilePath);
+            // 元に戻すために書き換え前の内容をバイト列のまま控える（文字コードの判定を経由させない）。
+            // 変更の有無を判定する前に読む: AppConfigFiles.Read は読めない（ロック・権限）ときも空文字を返すため、
+            // 先に判定すると、読めないファイルを「空＝既定と同じ」とみなして何もせず成功を返してしまう。
+            // 読めなければここで例外になり、呼び出し元が失敗を案内する
+            var originalBytes = existedBefore ? File.ReadAllBytes(configFilePath) : null;
             var beforeContent = AppConfigFiles.Read(configFilePath);
             var afterContent = databaseFilePath ?? string.Empty;
 
@@ -111,8 +116,6 @@ namespace ICCardManager.Services
                 return false;
             }
 
-            // 元に戻すために書き換え前の内容をバイト列のまま控える（文字コードの判定を経由させない）
-            var originalBytes = existedBefore ? File.ReadAllBytes(configFilePath) : null;
             var fileChanged = false;
 
             try

@@ -465,13 +465,16 @@ public partial class SettingsViewModel : ViewModelBase
                 normalizedBackupPath = PathValidator.NormalizePath(backupInput) ?? backupInput;
             }
 
-            var normalizedLoaded = _loadedBackupPath.Length > 0
+            // 空は既定の場所として比べる。未設定のとき欄には既定のパスが出るため、欄を空にしても既定の場所のまま
+            //（空の値と既定のパスを比べて変更とみなすと、起きていない変更のために認証を求める）
+            var comparableInput = normalizedBackupPath.Length > 0 ? normalizedBackupPath : PathValidator.GetDefaultBackupPath();
+            var comparableLoaded = _loadedBackupPath.Length > 0
                 ? PathValidator.NormalizePath(_loadedBackupPath) ?? _loadedBackupPath
-                : _loadedBackupPath;
+                : PathValidator.GetDefaultBackupPath();
             // 末尾の区切り文字の有無は同じフォルダー（NormalizePath は末尾の区切り文字を残す）
             if (!string.Equals(
-                    normalizedBackupPath.TrimEnd('\\', '/'),
-                    normalizedLoaded.TrimEnd('\\', '/'),
+                    comparableInput.TrimEnd('\\', '/'),
+                    comparableLoaded.TrimEnd('\\', '/'),
                     StringComparison.OrdinalIgnoreCase))
             {
                 newBackupPath = normalizedBackupPath;
@@ -510,8 +513,13 @@ public partial class SettingsViewModel : ViewModelBase
                 newDatabaseFilePath = Path.Combine(normalizedDir, Data.DbContext.DatabaseFileName);
             }
 
-            var currentDatabaseFilePath = AppConfigFiles.Read(DatabaseConfigPath);
-            if (string.Equals(newDatabaseFilePath, currentDatabaseFilePath, StringComparison.OrdinalIgnoreCase))
+            // 既定へ（空）の変更は、設定ファイルが無い・中身が空白だけなら変更なし。AppConfigFiles.Read は読めない
+            //（ロック・権限）ときも空文字を返すため、それで比べると共有 DB を指したままのファイルを「既定のまま」と
+            // みなしてしまう。読めないファイルは変更ありとして進め、書き換えの段で失敗を案内する（「デフォルトに戻す」と同じ判定）
+            var unchangedDatabasePath = newDatabaseFilePath.Length == 0
+                ? !HasNonEmptyConfigFile(DatabaseConfigPath)
+                : string.Equals(newDatabaseFilePath, AppConfigFiles.Read(DatabaseConfigPath), StringComparison.OrdinalIgnoreCase);
+            if (unchangedDatabasePath)
             {
                 // 正規化すると今と同じ保存先（末尾の区切り文字の違い・既に既定のまま等）。変更しない
                 _originalDatabasePath = DatabasePath ?? string.Empty;
@@ -948,16 +956,34 @@ public partial class SettingsViewModel : ViewModelBase
     /// <summary>
     /// 設定ファイルが存在し、空でないか（読めるかどうかは問わない。Issue #2264）
     /// </summary>
+    /// <remarks>
+    /// 空白・改行だけのファイルは既定の保存先を指す（起動時の読み取りも前後の空白を除く）ので「空」とみなす。
+    /// 中身を確かめるのは小さいファイルに限る（パス 1 行の設定ファイルより大きいものは中身ありとみなす）。
+    /// 読めない（ロック・権限）ときは既定とは言えないので「中身あり」とする。
+    /// </remarks>
     private static bool HasNonEmptyConfigFile(string configPath)
     {
+        const long MaxInspectedBytes = 4096;
         try
         {
             var info = new FileInfo(configPath);
-            return info.Exists && info.Length > 0;
+            if (!info.Exists || info.Length == 0)
+            {
+                return false;
+            }
+
+            if (info.Length > MaxInspectedBytes)
+            {
+                return true;
+            }
+
+            // 読めることを先に確かめる（AppConfigFiles.Read は読めないときも空文字を返すため）
+            _ = File.ReadAllBytes(configPath);
+            return AppConfigFiles.Read(configPath).Length > 0;
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
-            // 大きさも分からない: 既定とは言えないので変更ありとして進める
+            // 大きさも中身も分からない: 既定とは言えないので変更ありとして進める
             return true;
         }
     }

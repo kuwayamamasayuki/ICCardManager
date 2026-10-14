@@ -57,6 +57,8 @@ public sealed class SettingsViewModelSecuritySettingsTests : IDisposable
     private readonly string _configDirectory;
     private readonly string _newBackupFolder;
     private readonly string _newDatabaseFolder;
+    private readonly Mock<IValidationService> _validation = new();
+    private readonly SettingsChangeService _settingsChangeService;
     private readonly SettingsViewModel _viewModel;
 
     public SettingsViewModelSecuritySettingsTests()
@@ -82,14 +84,13 @@ public sealed class SettingsViewModelSecuritySettingsTests : IDisposable
             .Setup(r => r.SaveAppSettingsAsync(It.IsAny<AppSettings>()))
             .ReturnsAsync(false);
 
-        var validation = new Mock<IValidationService>();
-        validation.Setup(v => v.ValidateWarningBalance(It.IsAny<int>())).Returns(ValidationResult.Success());
-        validation.Setup(v => v.ValidateCompanionCountInputTimeout(It.IsAny<int>())).Returns(ValidationResult.Success());
-        validation.Setup(v => v.ValidateLongTermUnreturnedDays(It.IsAny<int>())).Returns(ValidationResult.Success());
+        _validation.Setup(v => v.ValidateWarningBalance(It.IsAny<int>())).Returns(ValidationResult.Success());
+        _validation.Setup(v => v.ValidateCompanionCountInputTimeout(It.IsAny<int>())).Returns(ValidationResult.Success());
+        _validation.Setup(v => v.ValidateLongTermUnreturnedDays(It.IsAny<int>())).Returns(ValidationResult.Success());
         _dialogServiceMock.Setup(d => d.ShowConfirmation(It.IsAny<string>(), It.IsAny<string>())).Returns(true);
         _staffRepositoryMock.Setup(r => r.HasActiveStaffAsync()).ReturnsAsync(true);
 
-        var settingsChangeService = new SettingsChangeService(
+        _settingsChangeService = new SettingsChangeService(
             _dbContext,
             _realSettingsRepository,
             new OperationLogger(_operationLogRepository, _operatorContext),
@@ -100,16 +101,21 @@ public sealed class SettingsViewModelSecuritySettingsTests : IDisposable
             new FixedSystemClock(new DateTime(2026, 10, 13, 14, 5, 0)),
             NullLogger<SettingsChangeService>.Instance);
 
-        _viewModel = new SettingsViewModel(
-            _bulkSettingsRepositoryMock.Object,
-            validation.Object,
-            new Mock<ISoundPlayer>().Object,
-            _dialogServiceMock.Object,
-            new SummaryGenerator(DepartmentType.MayorOffice),
-            _staffAuthServiceMock.Object,
-            settingsChangeService,
-            _configDirectory);
+        _viewModel = CreateViewModel();
     }
+
+    /// <summary>
+    /// 画面を作る（コンストラクタが database_config.txt を読むため、設定ファイルを置いた後で作り直す用途にも使う）
+    /// </summary>
+    private SettingsViewModel CreateViewModel() => new SettingsViewModel(
+        _bulkSettingsRepositoryMock.Object,
+        _validation.Object,
+        new Mock<ISoundPlayer>().Object,
+        _dialogServiceMock.Object,
+        new SummaryGenerator(DepartmentType.MayorOffice),
+        _staffAuthServiceMock.Object,
+        _settingsChangeService,
+        _configDirectory);
 
     public void Dispose()
     {
@@ -529,6 +535,66 @@ public sealed class SettingsViewModelSecuritySettingsTests : IDisposable
         _viewModel.StatusMessage.Should().NotContain("デフォルトに戻しました");
         _staffAuthServiceMock.Verify(a => a.RequestAuthenticationAsync("データベース保存先をデフォルトに戻す"), Times.Once,
             "既定とはみなさず、変更ありとして進める");
+    }
+
+    /// <summary>
+    /// レビュー 4 回目（should）: 読めない設定ファイルを空文字として読むと、DB 保存先の欄を空にした保存が
+    /// 「"" == ""（変更なし）」になり、ファイルは共有 DB を指したまま「設定を保存しました」で閉じていた。
+    /// 「読めない設定ファイルでデフォルトに戻すは…」の対（保存の経路）。
+    /// </summary>
+    [Fact]
+    public async Task 読めない設定ファイルで保存先を空にして保存すると_変更なしとみなさず失敗を案内すること()
+    {
+        ArrangeAuthenticationSucceeds();
+        File.WriteAllText(ConfigPath, @"\\fileserver\share\iccard.db");
+        var viewModel = CreateViewModel();
+        viewModel.DatabasePath = string.Empty;
+
+        using (new FileStream(ConfigPath, FileMode.Open, FileAccess.Read, FileShare.None))
+        {
+            await viewModel.SaveAsync();
+        }
+
+        File.ReadAllText(ConfigPath).Should().Be(@"\\fileserver\share\iccard.db");
+        _staffAuthServiceMock.Verify(a => a.RequestAuthenticationAsync(It.IsAny<string>()), Times.Once,
+            "既定とはみなさず、変更ありとして進める");
+        viewModel.IsStatusError.Should().BeTrue();
+        viewModel.IsSaved.Should().BeFalse("ファイルを書き換えられていないのに保存済みとして閉じない");
+        _bulkSettingsRepositoryMock.Verify(r => r.SaveAppSettingsAsync(It.IsAny<AppSettings>()), Times.Never);
+    }
+
+    /// <summary>
+    /// レビュー 4 回目（nit 3）: 空白・改行だけの設定ファイルは既定の保存先を指す。「デフォルトに戻す」で既定 → 既定を記録しない。
+    /// </summary>
+    [Fact]
+    public async Task 空白だけの設定ファイルでデフォルトに戻すは_既定のままなので認証も記録もしないこと()
+    {
+        File.WriteAllText(ConfigPath, "  \r\n");
+
+        await _viewModel.ResetDatabasePathToDefaultAsync();
+
+        _staffAuthServiceMock.Verify(a => a.RequestAuthenticationAsync(It.IsAny<string>()), Times.Never);
+        (await GetSettingLogsAsync()).Should().BeEmpty();
+    }
+
+    /// <summary>
+    /// レビュー 4 回目（nit 1）: バックアップ先が未設定のとき欄には既定のパスが出る。欄を空にしても既定の場所のままなので、
+    /// 変更とみなして認証を求めない（サービス側も "" と "" で何もしない）。
+    /// </summary>
+    [Fact]
+    public async Task バックアップ先が未設定のとき欄を空にして保存しても_認証も記録もしないこと()
+    {
+        _bulkSettingsRepositoryMock
+            .Setup(r => r.GetAppSettingsAsync())
+            .ReturnsAsync(new AppSettings { WarningBalance = 10000, BackupPath = PathValidator.GetDefaultBackupPath() });
+        await _viewModel.LoadSettingsAsync();
+        _viewModel.BackupPath = string.Empty;
+
+        await _viewModel.SaveAsync();
+
+        _staffAuthServiceMock.Verify(a => a.RequestAuthenticationAsync(It.IsAny<string>()), Times.Never);
+        (await GetSettingLogsAsync()).Should().BeEmpty();
+        _bulkSettingsRepositoryMock.Verify(r => r.SaveAppSettingsAsync(It.IsAny<AppSettings>()), Times.Once);
     }
 
     [Fact]
