@@ -33,7 +33,7 @@ namespace ICCardManager.Common
         /// <param name="target">対象の説明（例: <c>交通系ICカード「はやかけん H-001」</c>）。「何が」に相当する</param>
         /// <param name="listName">再読込した一覧の名称（例: <c>カード一覧</c>）</param>
         public static string ForUpdate(string target, string listName)
-            => Build(target, "更新", "他のパソコンや別の操作で削除された可能性があります。", listName);
+            => Build(target, "更新", DeletedReason, listName);
 
         /// <summary>
         /// 払い戻し対象の行が見つからなかったときの文言を組み立てる。
@@ -46,7 +46,7 @@ namespace ICCardManager.Common
         /// 「更新できませんでした」と出すと、自分の操作と結果が結び付かない。
         /// </remarks>
         public static string ForRefund(string target, string listName)
-            => Build(target, "払い戻し", "他のパソコンや別の操作で削除された可能性があります。", listName);
+            => Build(target, "払い戻し", DeletedReason, listName);
 
         /// <summary>
         /// 復元対象の行（削除済みの行）が見つからなかったときの文言を組み立てる。
@@ -54,7 +54,7 @@ namespace ICCardManager.Common
         /// <param name="target">対象の説明。「何が」に相当する</param>
         /// <param name="listName">再読込した一覧の名称</param>
         public static string ForRestore(string target, string listName)
-            => Build(target, "復元", "他のパソコンや別の操作で先に復元された可能性があります。", listName);
+            => Build(target, "復元", RestoredReason, listName);
 
         /// <summary>
         /// 登録が書き込めなかった（同じ識別子の行が既にある）ときの文言を組み立てる（Issue #2263）。
@@ -76,6 +76,39 @@ namespace ICCardManager.Common
         /// <param name="listName">再読込した一覧の名称</param>
         public static string ForDelete(string target, string listName)
             => Build(target, "削除", "他のパソコンや別の操作で先に削除された可能性があります。", listName);
+
+        /// <summary>
+        /// CSV インポートで、更新しようとした行が無くなっていたときの文言（Issue #2262）。
+        /// </summary>
+        /// <param name="target">対象の説明（CSV の行の内容で名指しする。例: <c>職員「山田 太郎」</c>）</param>
+        /// <param name="screenName">状態を確かめる画面（例: <c>職員管理画面（F2）</c>）</param>
+        /// <remarks>
+        /// 「なぜ」は <see cref="ForUpdate"/> と同じ。取り込みでは一覧を再読込しない（画面に一覧が無い）ため、
+        /// 公開のファクトリの「一覧を再読み込みしました」は事実にならない。取り込みは全件を巻き戻すので、
+        /// 「どうすれば」は状態を確かめて CSV を直し、あらためてプレビューから取り込むこと。
+        /// 一覧の再読込を前提にする公開のファクトリと形が違うため internal に置く（全ファクトリの品質検証は
+        /// 公開のファクトリを (target, listName) で呼ぶ）。
+        /// </remarks>
+        internal static string ForImportUpdate(string target, string screenName)
+            => BuildForImport(target, "更新", DeletedReason, screenName);
+
+        /// <summary>
+        /// CSV インポートで、復元しようとした削除済みの行が削除済みでなくなっていたときの文言（Issue #2262）。
+        /// </summary>
+        /// <param name="target">対象の説明（CSV の行の内容で名指しする）</param>
+        /// <param name="screenName">状態を確かめる画面</param>
+        internal static string ForImportRestore(string target, string screenName)
+            => BuildForImport(target, "復元", RestoredReason, screenName);
+
+        /// <summary>対象の行が削除されていた（更新・払い戻しの「なぜ」）</summary>
+        private const string DeletedReason = "他のパソコンや別の操作で削除された可能性があります。";
+
+        /// <summary>削除済みの行が先に復元されていた（復元の「なぜ」）</summary>
+        private const string RestoredReason = "他のパソコンや別の操作で先に復元された可能性があります。";
+
+        private static string BuildForImport(string target, string operationName, string reason, string screenName)
+            => $"{target}を{operationName}できませんでした。{reason}取り込みは行っていません。" +
+               $"{screenName}で状態を確認してCSVファイルを直し、あらためてプレビューしてからインポートしてください。";
 
         /// <summary>
         /// 「何が」「なぜ」「どうすれば」の 3 要素を組み立てる。

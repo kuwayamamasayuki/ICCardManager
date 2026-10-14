@@ -398,7 +398,8 @@
                     Padding="15,10"
                     Margin="10,0,0,0"
                     AutomationProperties.Name="直接CSVインポート"
-                    ToolTip="プレビューなしで直接インポートします（アクセスキー: Alt+R）"/>
+                    ToolTipService.ShowOnDisabled="True"
+                    ToolTip="プレビューなしで交通系ICカードの新しいカードだけを登録します。職員一覧・利用履歴・利用履歴詳細と、登録済みのカードを変更する取り込みは「プレビュー」で確認してから「インポート実行」を押してください（アクセスキー: Alt+R）"/>
         </StackPanel>
 
         <!-- ステータスメッセージ -->

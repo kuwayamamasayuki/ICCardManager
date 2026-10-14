@@ -85,7 +85,8 @@ public class DataExportImportViewModelMessagingTests : IDisposable
             _dbContextMock.Object,
             _cacheServiceMock.Object,
             // Issue #1955: 摘要の再生成が参照する部署種別の供給元
-            new Mock<ISettingsRepository>().Object);
+            new Mock<ISettingsRepository>().Object,
+            new ICCardManager.Services.OperationLogger(new Mock<ICCardManager.Data.Repositories.IOperationLogRepository>().Object, Mock.Of<ICCardManager.Services.ICurrentOperatorContext>()));
 
         var operationLogRepository = new OperationLogRepository(_realDbContext);
         var operatorContext = new CurrentOperatorContext(new SystemClock());
@@ -103,7 +104,21 @@ public class DataExportImportViewModelMessagingTests : IDisposable
             _messenger,
             new Mock<ICCardManager.Services.ISafeFileLauncher>().Object,
             _dispatcher,
+            CreateSucceedingStaffAuthService(),
+            new StaffManagementService(
+                _realDbContext, _staffRepositoryMock.Object, operationLogger, NullLogger<StaffManagementService>.Instance),
             _cardReaderMock.Object);
+    }
+
+    /// <summary>
+    /// Issue #2262: 認証が成功する代役（本テストクラスの関心はカード読み取りの抑制で、認証ではない）
+    /// </summary>
+    private static IStaffAuthService CreateSucceedingStaffAuthService()
+    {
+        var mock = new Mock<IStaffAuthService>();
+        mock.Setup(s => s.RequestAuthenticationAsync(It.IsAny<string>()))
+            .ReturnsAsync(() => new StaffAuthResult { Idm = "TEST_OPERATOR_IDM", StaffName = "テスト操作者" });
+        return mock.Object;
     }
 
     public void Dispose()

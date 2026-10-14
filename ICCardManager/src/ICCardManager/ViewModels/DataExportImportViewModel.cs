@@ -107,11 +107,22 @@ public partial class DataExportImportViewModel : ViewModelBase
     /// </summary>
     private readonly IDispatcherService _dispatcherService;
     private readonly ISafeFileLauncher _safeFileLauncher;
+    private readonly IStaffAuthService _staffAuthService;
+    private readonly StaffManagementService _staffManagementService;
 
     [ObservableProperty]
     private DataType _selectedExportType = DataType.Cards;
 
+    /// <summary>
+    /// インポートするデータ種別
+    /// </summary>
+    /// <remarks>
+    /// Issue #2262: 「直接インポート」を使えるかはこの種別で決まる（<see cref="CanImportDirectly"/>）ため、
+    /// 変わったらコマンドの実行可否を通知する。
+    /// </remarks>
     [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(CanImportDirectly))]
+    [NotifyCanExecuteChangedFor(nameof(ImportCommand))]
     private DataType _selectedImportType = DataType.Cards;
 
     [ObservableProperty]
@@ -240,6 +251,40 @@ public partial class DataExportImportViewModel : ViewModelBase
     public bool IsLedgerImportSelected => SelectedImportType == DataType.Ledgers;
 
     /// <summary>
+    /// 「直接インポート」（プレビューを経ない取り込み）を使えるか（Issue #2262）
+    /// </summary>
+    /// <remarks>
+    /// <see cref="ImportCommand"/> の実行可否と、ボタンの有効・無効を兼ねる。判定は <see cref="IsDirectImportAllowed"/>。
+    /// </remarks>
+    public bool CanImportDirectly => IsDirectImportAllowed(SelectedImportType);
+
+    /// <summary>
+    /// そのデータ種別を「直接インポート」で取り込めるか（Issue #2262）
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// 直接インポートできるのは交通系ICカード（カード一覧）だけで、しかも新しいカードの登録に限る
+    /// （<see cref="CsvImportService.ImportNewCardsAsync"/>。登録済みのカードを変更・復元する行があれば取り込まない）。
+    /// </para>
+    /// <para>
+    /// 職員・利用履歴・利用履歴詳細の取り込みは、職員の登録・変更・復元や、6 年保存の台帳の追加・変更・明細の置き換えを
+    /// 行い得る。どれも職員管理画面・履歴画面では職員証の認証を求める操作で、取り込みも認証を経て行う。認証する前に
+    /// 「何が変わるか」をプレビューで確かめさせるため、直接インポートを使えなくする（以前はプレビューを経ずに書き換えられた）。
+    /// </para>
+    /// </remarks>
+    internal static bool IsDirectImportAllowed(DataType dataType) => dataType == DataType.Cards;
+
+    /// <summary>
+    /// 直接インポートを使えないデータ種別で、直接インポートが要求されたときの案内（Issue #2262）
+    /// </summary>
+    /// <remarks>
+    /// ボタンはコマンドの実行可否で無効になるため、通常は表示されない（アクセスキー等でコマンドが実行された場合の受け皿）。
+    /// </remarks>
+    internal const string DirectImportRequiresPreviewMessage =
+        "職員一覧・利用履歴・利用履歴詳細は「直接インポート」では取り込めません。取り込みには職員証の認証が必要なため、" +
+        "「プレビュー」で内容を確認してから「インポート実行」を押してください。";
+
+    /// <summary>
     /// プレビューDataGridの列1ヘッダー（データ種別に応じて変化）
     /// </summary>
     public string PreviewColumn1Header => SelectedImportType switch
@@ -289,22 +334,146 @@ public partial class DataExportImportViewModel : ViewModelBase
     /// インポート時に使用するターゲットカードIDmを取得
     /// </summary>
     /// <returns>選択またはタッチされたカードのIDm。未選択の場合はnull</returns>
-    private string? GetTargetCardIdm()
-    {
-        if (SelectedImportType != DataType.Ledgers)
-        {
-            return null;
-        }
+    private string? GetTargetCardIdm() => CaptureImportConditions().ResolveTargetCardIdm();
 
-        if (UseCardListSelection)
+    /// <summary>
+    /// 取り込みの条件（画面の状態）。プレビューした条件と実行する条件の照合に使う（Issue #2262）
+    /// </summary>
+    /// <remarks>
+    /// 取り込み先カードは、カードの指定方法・一覧で選んだカード・タッチしたカードの 3 つから決まる
+    /// （<see cref="ResolveTargetCardIdm"/>）。照合は決まった値ではなく 3 つの元の値で行う（どれを変えても破棄する）。
+    /// </remarks>
+    private sealed record ImportConditions(
+        DataType DataType,
+        bool SkipExisting,
+        bool UseCardListSelection,
+        string? SelectedTargetCardIdm,
+        string TouchedCardIdm)
+    {
+        /// <summary>利用履歴の取り込み先カードの IDm（利用履歴以外・未指定は null。Issue #511）</summary>
+        public string? ResolveTargetCardIdm()
         {
-            return SelectedTargetCard?.CardIdm;
-        }
-        else
-        {
+            if (DataType != DataType.Ledgers)
+            {
+                return null;
+            }
+
+            if (UseCardListSelection)
+            {
+                return SelectedTargetCardIdm;
+            }
+
             return string.IsNullOrWhiteSpace(TouchedCardIdm) ? null : TouchedCardIdm;
         }
     }
+
+    /// <summary>
+    /// 取り込むファイルの状態（大きさと内容の SHA-256）。プレビューした後の書き換えを検出する（Issue #2262）
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// 最終更新日時と大きさだけでは見逃す書き換えがある: 共有フォルダー（SMB）のファイル情報のキャッシュ
+    /// （既定 10 秒）の間の別 PC による変更、更新日時を保ったコピー・同じ大きさの差し替え、FAT の 2 秒単位の更新日時。
+    /// 内容を読んでハッシュを取れば、ファイル情報のキャッシュにも更新日時にも左右されない。
+    /// </para>
+    /// <para>
+    /// 取り込めるファイルは <see cref="CsvImportService.MaxImportFileSizeBytes"/>（64MB）以下で、読むコストは小さい。
+    /// 上限を超えるファイルはハッシュを取らずに大きさだけを記録する（取り込み側が読む前に拒む）。
+    /// プレビューの読み込みとは別にもう一度読む（プレビューは <see cref="CsvImportService"/> が読み、バイト列を返さないため）。
+    /// </para>
+    /// <para>
+    /// 読み取りは共有フォルダー（SMB）上では応答が無いと長く戻らない同期処理なので、UI スレッドで行わず
+    /// <see cref="DedicatedThread.Run{T}(Func{T})"/> で専用スレッドへ載せる（<see cref="CaptureAsync"/>。
+    /// viewmodel-conventions.md「ブロックし得る同期処理は DedicatedThread.Run で起動する」#2221）。呼び出し側は処理中の表示の中で待つ。
+    /// </para>
+    /// <para>
+    /// 読めないとき（存在しない・ロック・権限・切断）は <c>null</c>（＝確かめられない）を返す。読めなかったことを
+    /// 特定の値に畳むと、プレビュー時と実行時の両方で読めないときに値が一致して照合が素通りし（fail-open）、
+    /// 片方だけ読めないときは「書き換えられた」と誤って案内する。
+    /// </para>
+    /// </remarks>
+    internal sealed record PreviewFileFingerprint(long Length, string ContentSha256)
+    {
+        /// <summary>
+        /// いまのファイルの状態を専用スレッドで読む（読めなければ <c>null</c>）
+        /// </summary>
+        public static Task<PreviewFileFingerprint?> CaptureAsync(string filePath)
+            => DedicatedThread.Run(() => Capture(filePath));
+
+        /// <summary>
+        /// いまのファイルの状態を、呼び出したスレッドで読む（読めなければ <c>null</c>）。UI スレッドから直接呼ばないこと
+        /// </summary>
+        public static PreviewFileFingerprint? Capture(string filePath)
+        {
+            try
+            {
+                using var stream = new FileStream(filePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+                var length = stream.Length;
+                if (length > CsvImportService.MaxImportFileSizeBytes)
+                {
+                    return new PreviewFileFingerprint(length, string.Empty);
+                }
+
+                using var sha256 = System.Security.Cryptography.SHA256.Create();
+                var hash = sha256.ComputeHash(stream);
+                return new PreviewFileFingerprint(length, BitConverter.ToString(hash));
+            }
+            catch (Exception ex) when (ex is IOException || ex is UnauthorizedAccessException || ex is ArgumentException || ex is NotSupportedException || ex is System.Security.SecurityException)
+            {
+                return null;
+            }
+        }
+    }
+
+    /// <summary>プレビューした時点の条件とファイルの状態（プレビューが無ければ null）</summary>
+    /// <remarks>
+    /// <c>File</c> が null になるのは、単体テストが存在しないファイル名でプレビューを組み立てたとき
+    /// （<see cref="RecordPreviewSnapshotForCurrentState"/>）だけ。本番の <see cref="PreviewFileAsync"/> は、
+    /// ファイルを読めなければプレビューを表示しない（スナップショットを記録しない）。
+    /// </remarks>
+    private sealed record PreviewSnapshot(ImportConditions Conditions, PreviewFileFingerprint? File);
+
+    private PreviewSnapshot? _previewSnapshot;
+
+    private ImportConditions CaptureImportConditions() => new(
+        SelectedImportType,
+        SkipExistingOnImport,
+        UseCardListSelection,
+        SelectedTargetCard?.CardIdm,
+        TouchedCardIdm);
+
+    /// <summary>
+    /// いまの条件とファイルの状態を、表示中のプレビューの前提として記録する
+    /// </summary>
+    /// <remarks>
+    /// 本番では <see cref="PreviewFileAsync"/> が、読み込みを始める前に確定させた条件で記録する。
+    /// 単体テストがプレビューの表示を直接組み立てるときにも使う（プレビュー無しの扱いにならないように）。
+    /// テスト用のため、ファイルの読み取りは呼び出したスレッドで同期的に行う。
+    /// </remarks>
+    internal void RecordPreviewSnapshotForCurrentState()
+        => _previewSnapshot = new PreviewSnapshot(CaptureImportConditions(), PreviewFileFingerprint.Capture(ImportPreviewFile));
+
+    /// <summary>
+    /// プレビューの読み込み中に取り込みの条件が変わったため、プレビューを表示しなかったときの案内（Issue #2262）
+    /// </summary>
+    internal const string PreviewConditionsChangedWhileLoadingMessage =
+        "プレビューを読み込んでいる間に取り込みの条件（データ種別・既存データのスキップ・取り込み先カード）が変わったため、" +
+        "プレビューを表示しませんでした。いまの条件で、もう一度「プレビュー」を押してください。";
+
+    /// <summary>
+    /// CSV ファイルを読み取れず、プレビュー・取り込みの前に内容を確かめられなかったときの案内（Issue #2262）
+    /// </summary>
+    internal static string BuildPreviewFileUnreadableMessage(string filePath)
+        => $"CSVファイル「{Path.GetFileName(filePath)}」を読み取れないため、内容が確かめられず、取り込んでいません。" +
+           "ファイルが移動・削除されたか、他のプログラムで開かれているか、共有フォルダーに接続できない可能性があります。" +
+           "ファイルを閉じるか接続を確認してから、もう一度「プレビュー」で内容を確認してください。";
+
+    /// <summary>
+    /// プレビューした後で CSV ファイルが書き換えられたため、取り込まなかったときの案内（Issue #2262）
+    /// </summary>
+    internal static string BuildPreviewFileChangedMessage(string filePath)
+        => $"プレビューした後でCSVファイル「{Path.GetFileName(filePath)}」が書き換えられた（または移動・削除された）ため、取り込んでいません。" +
+           "表示していたプレビューはクリアしました。いまのファイルの内容を「プレビュー」で確認してから「インポート実行」を押してください。";
 
     public DataExportImportViewModel(
         CsvExportService exportService,
@@ -315,6 +484,8 @@ public partial class DataExportImportViewModel : ViewModelBase
         IMessenger messenger,
         ISafeFileLauncher safeFileLauncher,
         IDispatcherService dispatcherService,
+        IStaffAuthService staffAuthService,
+        StaffManagementService staffManagementService,
         ICardReader? cardReader = null)
     {
         _exportService = exportService;
@@ -325,6 +496,9 @@ public partial class DataExportImportViewModel : ViewModelBase
         _messenger = messenger;
         _safeFileLauncher = safeFileLauncher;
         _dispatcherService = dispatcherService;
+        // Issue #2262: 職員・利用履歴・利用履歴詳細の取り込みは職員証の認証を経て行う。既定値を持たない必須引数にする
+        _staffAuthService = staffAuthService ?? throw new ArgumentNullException(nameof(staffAuthService));
+        _staffManagementService = staffManagementService ?? throw new ArgumentNullException(nameof(staffManagementService));
         _cardReader = cardReader;
 
         // カードリーダーイベント購読
@@ -388,6 +562,58 @@ public partial class DataExportImportViewModel : ViewModelBase
             TouchedCardInfo = string.Empty;
             IsWaitingForCardTouch = false;
         }
+
+        DiscardPreviewBecauseImportConditionsChanged();
+    }
+
+    // Issue #2262: 取り込みの条件（データ種別・既存データのスキップ・取り込み先カード）が変わったらプレビューを破棄する。
+    // 取り込み先カードは GetTargetCardIdm が UseCardListSelection / SelectedTargetCard / TouchedCardIdm から決める。
+    partial void OnSkipExistingOnImportChanged(bool value) => DiscardPreviewBecauseImportConditionsChanged();
+
+    partial void OnSelectedTargetCardChanged(CardDto? value) => DiscardPreviewBecauseImportConditionsChanged();
+
+    partial void OnTouchedCardIdmChanged(string value) => DiscardPreviewBecauseImportConditionsChanged();
+
+    partial void OnUseCardListSelectionChanged(bool value) => DiscardPreviewBecauseImportConditionsChanged();
+
+    /// <summary>
+    /// 取り込みの条件を変えたためにプレビューを破棄したときの案内（Issue #2262）
+    /// </summary>
+    internal const string PreviewDiscardedByConditionChangeMessage =
+        "取り込みの条件（データ種別・既存データのスキップ・取り込み先カード）を変えたため、表示していたプレビューをクリアしました。" +
+        "この条件で取り込む場合は、あらためて「プレビュー」で内容を確認してから「インポート実行」を押してください。";
+
+    /// <summary>
+    /// 取り込みの条件が変わったら、表示中のプレビューを破棄する（Issue #2262）
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// 「インポート実行」（<see cref="ExecuteImportAsync"/>）は、実行した時点の画面の条件で取り込む。プレビューを残したまま
+    /// 条件だけを変えられると、カード A 宛てにプレビューしてカード B に変えて実行する・「既存データをスキップする」を
+    /// 外して実行する、といった<b>プレビューと違う内容</b>を、認証した職員の操作として取り込めてしまう
+    /// （直接インポートを禁じて「確かめてから認証させる」とした理由が空になる）。
+    /// </para>
+    /// <para>
+    /// プレビュー時の条件で取り込む方式は採らない。画面の表示（変えた後の条件）と実際に取り込む条件
+    /// （プレビュー時の条件）が食い違い、職員は画面で見ている条件で取り込まれたと思い込む。条件を変えたら破棄して
+    /// プレビューからやり直させる。
+    /// </para>
+    /// <para>
+    /// この破棄は画面の案内であって、取り込む内容の保証ではない。読み込み中（<see cref="ImportPreview"/> が null の間）の
+    /// 条件の変更や、プレビューした後のファイルの書き換えには届かないため、保証はプレビューした条件・ファイルの状態と
+    /// いまの状態の照合（<see cref="PreviewFileAsync"/> の読み込み後・<see cref="ExecuteImportAsync"/>・取り込む直前）で行う。
+    /// </para>
+    /// </remarks>
+    private void DiscardPreviewBecauseImportConditionsChanged()
+    {
+        if (!HasPreview && ImportPreview == null)
+        {
+            return;
+        }
+
+        ClearPreview();
+        ImportErrors.Clear();
+        SetStatus(PreviewDiscardedByConditionChangeMessage, false);
     }
 
     /// <summary>
@@ -518,8 +744,25 @@ public partial class DataExportImportViewModel : ViewModelBase
             return;
         }
 
+        await PreviewFileAsync(dialog.FileName);
+    }
+
+    /// <summary>
+    /// 指定したファイルのプレビュー本体（<see cref="PreviewImportAsync"/> がファイル選択後に呼ぶ。単体テストからも呼ぶ）
+    /// </summary>
+    /// <remarks>
+    /// Issue #2262: 取り込みの条件とファイルの状態は、読み込みを始める前に確定させ、その条件で読み込む。
+    /// 読み込み中（処理中の表示の間もデータ種別のアクセスキーやカードのタッチは届く）に条件が変わったら、
+    /// 古い条件で作ったプレビューを表示しない。読み込みの間は <see cref="ImportPreview"/> が null のため、
+    /// 条件変更時の破棄（<see cref="DiscardPreviewBecauseImportConditionsChanged"/>）は何も消さずに素通りする。
+    /// 確定させた条件とファイルの状態はプレビューと一緒に記録し、「インポート実行」で照合する（<see cref="ExecuteImportAsync"/>）。
+    /// </remarks>
+    internal async Task PreviewFileAsync(string filePath)
+    {
         ClearPreview();
         ImportErrors.Clear();
+
+        var conditions = CaptureImportConditions();
 
         using (BeginBusy("プレビュー読み込み中..."))
         {
@@ -527,25 +770,34 @@ public partial class DataExportImportViewModel : ViewModelBase
             await Task.Yield();
             try
             {
+                // ファイルの状態は読み込む前に、処理中の表示の中で、専用スレッドで取る
+                var file = await PreviewFileFingerprint.CaptureAsync(filePath);
+                if (file == null)
+                {
+                    // 内容を確かめられないファイルのプレビューは表示しない（照合の前提が作れない）
+                    SetStatus(BuildPreviewFileUnreadableMessage(filePath), true);
+                    return;
+                }
+
                 CsvImportPreviewResult preview;
 
-                switch (SelectedImportType)
+                switch (conditions.DataType)
                 {
                     case DataType.Cards:
-                        preview = await _importService.PreviewCardsAsync(dialog.FileName, SkipExistingOnImport);
+                        preview = await _importService.PreviewCardsAsync(filePath, conditions.SkipExisting);
                         break;
 
                     case DataType.Staff:
-                        preview = await _importService.PreviewStaffAsync(dialog.FileName, SkipExistingOnImport);
+                        preview = await _importService.PreviewStaffAsync(filePath, conditions.SkipExisting);
                         break;
 
                     case DataType.Ledgers:
                         // Issue #511: ターゲットカードIDmを渡す
-                        preview = await _importService.PreviewLedgersAsync(dialog.FileName, SkipExistingOnImport, GetTargetCardIdm());
+                        preview = await _importService.PreviewLedgersAsync(filePath, conditions.SkipExisting, conditions.ResolveTargetCardIdm());
                         break;
 
                     case DataType.LedgerDetails:
-                        preview = await _importService.PreviewLedgerDetailsAsync(dialog.FileName);
+                        preview = await _importService.PreviewLedgerDetailsAsync(filePath);
                         break;
 
                     default:
@@ -553,7 +805,15 @@ public partial class DataExportImportViewModel : ViewModelBase
                         return;
                 }
 
-                ImportPreviewFile = dialog.FileName;
+                if (CaptureImportConditions() != conditions)
+                {
+                    // 読み込み中に条件が変わった。古い条件のプレビューは取り込む内容を示していないので表示しない
+                    SetStatus(PreviewConditionsChangedWhileLoadingMessage, true);
+                    return;
+                }
+
+                ImportPreviewFile = filePath;
+                _previewSnapshot = new PreviewSnapshot(conditions, file);
                 ImportPreview = preview;
 
                 if (!string.IsNullOrEmpty(preview.ErrorMessage))
@@ -644,10 +904,28 @@ public partial class DataExportImportViewModel : ViewModelBase
             return;
         }
 
+        // Issue #2262: プレビューした条件・ファイルと、いま取り込む条件・ファイルを照合する。条件の変更時の破棄
+        // （DiscardPreviewBecauseImportConditionsChanged）は画面の案内のためで、取り込む内容の保証はここで行う
+        // （破棄が届かない経路 ― 読み込み中の変更・ファイルの書き換え ― があるため）。
+        // 条件の照合は防御の層: 画面のプロパティの変更は On…Changed が先に破棄するので通常は到達しないが、
+        // 変更通知を経ずに条件がずれる経路（選んだカードの DTO の IDm が書き換わる等）や、今後の条件の追加で
+        // 破棄の書き忘れがあっても、プレビューと違う条件で取り込まない。
+        if (_previewSnapshot == null || _previewSnapshot.Conditions != CaptureImportConditions())
+        {
+            ClearPreview();
+            ImportErrors.Clear();
+            SetStatus(PreviewDiscardedByConditionChangeMessage, true);
+            return;
+        }
+
         // Issue #1741: インポート元パスをここで確定させて引数として渡す。
         // ImportPreviewFile は画面の一時状態で、取り込み後の ClearPreview() が空にするため、
         // 取り込み後に読み直すと監査ログへ空パスが記録される。
-        await RunImportAsync(ImportPreviewFile);
+        // Issue #2262: ファイルの照合は取り込む直前（ImportAndReportAsync の処理中の表示の中）の 1 か所で行う。
+        // 認証の前にも照合すると、認証が挟まらない経路（カード一覧）では同じファイルを続けて 2 回読むことになり、
+        // 認証が挟まる経路でも認証を待つ間の書き換えは直前の照合でしか拾えないため、前の照合は省く
+        // （認証の前に書き換えられていたときは、認証の後に案内する）。
+        await RunImportAsync(ImportPreviewFile, expectedFile: _previewSnapshot.File);
     }
 
     /// <summary>
@@ -665,9 +943,33 @@ public partial class DataExportImportViewModel : ViewModelBase
     /// インポートの分岐を増やすときは必ずここへ書き、コマンド側へ複製しないこと。
     /// テストから直接呼べるよう internal にしている（<see cref="ImportAsync"/> は
     /// <see cref="OpenFileDialog"/> をコマンド内で生成するため単体テストから起動できない）。
+    /// <para>
+    /// Issue #2262: 職員・利用履歴・利用履歴詳細の取り込みは、職員証の認証を経て行う（職員一覧は登録済みの職員が
+    /// 0 人なら免除）。認証が完了しなければ何も書き込まず、プレビューを残したまま案内する。
+    /// 処理中の表示・サービスの呼び分け・結果の通知は <see cref="ImportAndReportAsync"/> が持つ。
+    /// </para>
     /// </remarks>
-    internal async Task RunImportAsync(string sourceFilePath)
+    /// <param name="directImport">
+    /// 直接インポート（<see cref="ImportAsync"/>。プレビューを経ない）なら <c>true</c>。交通系ICカードの
+    /// 新しいカードの登録だけに限る（<see cref="IsDirectImportAllowed"/>。Issue #2262）
+    /// </param>
+    /// <param name="expectedFile">
+    /// プレビューしたときのファイルの状態（プレビュー経由のときだけ。Issue #2262）。取り込む直前に照合し、
+    /// 書き換えられていれば取り込まない（認証を待つ間の書き換えも検出する）
+    /// </param>
+    internal async Task RunImportAsync(string sourceFilePath, bool directImport = false, PreviewFileFingerprint? expectedFile = null)
     {
+        // Issue #2262: 取り込みの条件は認証より前に確定させる。認証ダイアログ（職員証タッチ待ち）の間も
+        // UI スレッドは入力を処理するため、認証の後で画面のプロパティを読み直さない（ui-conventions「選択状態のスナップショット」）。
+        // Issue #1741: 対象データ種別も同じ理由でここで確定させる（監査ログの対象テーブルが実際と食い違わないように）。
+        var request = new ImportRequest(
+            sourceFilePath,
+            SelectedImportType,
+            SkipExistingOnImport,
+            GetTargetCardIdm(),
+            directImport,
+            expectedFile);
+
         ImportErrors.Clear();
 
         // Issue #1783: 「インポート完了: <ファイル名>」（DataExportImportDialog.xaml の LastImportedFile 表示）は
@@ -678,6 +980,228 @@ public partial class DataExportImportViewModel : ViewModelBase
         // 例外で中断する経路（共有フォルダーの切断等）も同じ経路でまとめて塞げる。
         LastImportedFile = string.Empty;
 
+        if (directImport && !IsDirectImportAllowed(request.DataType))
+        {
+            SetStatus(DirectImportRequiresPreviewMessage, true);
+            return;
+        }
+
+        // Issue #2262: 取り込み先カードのタッチ待ちを終えてから認証を求める。認証ダイアログ（StaffAuthDialog）と
+        // この画面の両方がカードリーダーの読み取りを購読しているため、タッチ待ちのまま職員証をタッチすると、
+        // この画面も読み取りを処理して「登録されていないカード」のモーダルを認証ダイアログに重ねる。
+        // 職員管理画面（#2263）も、認証は職員証のタッチ待ちを終えた後（保存・復元の確認の後）に求めている。
+        // タッチしたカード（TouchedCardIdm）は変えないので、取り込み先カードもプレビューも変わらない。
+        if (IsWaitingForCardTouch)
+        {
+            // 「キャンセル」（CancelCardTouch）と同じく、まだタッチしていなければ「カードをタッチしてください」の表示も消す
+            IsWaitingForCardTouch = false;
+            if (string.IsNullOrWhiteSpace(TouchedCardIdm))
+            {
+                TouchedCardInfo = string.Empty;
+            }
+        }
+
+        // Issue #2262: 職員・利用履歴・利用履歴詳細の取り込みは、職員証の認証を経て、認証した職員の操作として行う。
+        // 認証ダイアログは処理中（BeginBusy）の外で出す（背後に処理中の表示を出さない）。取り込み全体
+        // （1 行ごとの操作ログ・取り込み全体の操作ログを含む）が認証した職員のスコープの内側で行われる。
+        bool authorized;
+        switch (request.DataType)
+        {
+            case DataType.Staff:
+                var requiresAuthentication = await TryDetermineStaffImportRequiresAuthenticationAsync();
+                if (requiresAuthentication == null)
+                {
+                    // 判定に失敗した（案内は表示済み）。何も書き込まない
+                    return;
+                }
+
+                authorized = await RunStaffImportWithAuthenticationAsync(
+                    requiresAuthentication.Value, () => ImportAndReportAsync(request));
+                break;
+
+            case DataType.Ledgers:
+                authorized = await RunLedgerImportWithAuthenticationAsync(() => ImportAndReportAsync(request));
+                break;
+
+            case DataType.LedgerDetails:
+                authorized = await RunLedgerDetailImportWithAuthenticationAsync(() => ImportAndReportAsync(request));
+                break;
+
+            default:
+                // 交通系ICカードは認証を求めない（交通系ICカード管理画面の登録・編集・復元と同じ。04 §9）
+                await ImportAndReportAsync(request);
+                authorized = true;
+                break;
+        }
+
+        if (!authorized)
+        {
+            // 何も書き込んでいない。プレビューは残すので、もう一度「インポート実行」を押せば取り込める
+            // 認証を待つ間に条件を変えるとプレビューは破棄されている。残っているかで案内を選ぶ
+            SetStatus(BuildImportAuthenticationCancelledMessage(request.DataType, previewRetained: HasPreview), true);
+        }
+    }
+
+    /// <summary>
+    /// 取り込みの条件（認証の前に確定させた値。Issue #2262）
+    /// </summary>
+    private sealed class ImportRequest
+    {
+        public ImportRequest(
+            string sourceFilePath, DataType dataType, bool skipExisting, string? targetCardIdm, bool directImport,
+            PreviewFileFingerprint? expectedFile)
+        {
+            SourceFilePath = sourceFilePath;
+            DataType = dataType;
+            SkipExisting = skipExisting;
+            TargetCardIdm = targetCardIdm;
+            DirectImport = directImport;
+            ExpectedFile = expectedFile;
+        }
+
+        /// <summary>プレビューしたときのファイルの状態（プレビュー経由のときだけ。Issue #2262）</summary>
+        public PreviewFileFingerprint? ExpectedFile { get; }
+
+        /// <summary>取り込む CSV のパス（呼び出し元で確定済み。Issue #1741）</summary>
+        public string SourceFilePath { get; }
+
+        /// <summary>取り込むデータ種別</summary>
+        public DataType DataType { get; }
+
+        /// <summary>既存データをスキップするか</summary>
+        public bool SkipExisting { get; }
+
+        /// <summary>利用履歴の取り込み先カード（Issue #511。利用履歴以外は null）</summary>
+        public string? TargetCardIdm { get; }
+
+        /// <summary>直接インポート（プレビューを経ない）か</summary>
+        public bool DirectImport { get; }
+    }
+
+    /// <summary>
+    /// 職員の取り込みに職員証の認証を求めるかを判定する（Issue #2262）
+    /// </summary>
+    /// <returns>求めるなら <c>true</c>、登録済みの職員が 0 人なら <c>false</c>、判定に失敗したら <c>null</c>（案内は表示済み）</returns>
+    /// <remarks>
+    /// 免除の判定は職員管理画面と同じ <see cref="StaffManagementService.RequiresOperatorAuthenticationAsync"/> に寄せる
+    /// （Issue #2263。初回セットアップで職員一覧の CSV を取り込むとき、認証できる職員証がまだ無い）。
+    /// DB を待つ間は処理中にする（処理中の外で DB を待つと、その間に画面を操作できてしまう）。
+    /// </remarks>
+    private async Task<bool?> TryDetermineStaffImportRequiresAuthenticationAsync()
+    {
+        using (BeginBusy("確認中..."))
+        {
+            try
+            {
+                return await _staffManagementService.RequiresOperatorAuthenticationAsync();
+            }
+            catch (Exception ex)
+            {
+                // 技術的詳細はログへ。UI には 3 要素のユーザー向け文言を表示（Issue #1614）。
+                ErrorDialogHelper.LogException(ex, "インポート");
+                SetStatus(ExceptionMessageFormatter.ToUserMessage(ex, "インポート"), true);
+                return null;
+            }
+        }
+    }
+
+    /// <summary>
+    /// 職員の取り込みを、操作者の職員証認証を経て行う（Issue #2262）
+    /// </summary>
+    /// <param name="requiresAuthentication">認証を求めるか（登録済みの職員が 0 人なら <c>false</c>）</param>
+    /// <param name="import">認証した操作の中で行う取り込みと結果の表示</param>
+    /// <returns><paramref name="import"/> を実行したら <c>true</c>。認証が完了しなかったら <c>false</c></returns>
+    /// <remarks>
+    /// <para>
+    /// 認証結果の <c>Enter()</c> はこのメソッドの流れで操作者セッションを開始し、<paramref name="import"/> は
+    /// その流れの内側で実行されるため、取り込みの操作ログには認証した職員が記録される（Issue #2260）。
+    /// </para>
+    /// <para>
+    /// データ種別ごとに 3 つに分けているのは、操作名を <c>RequestAuthenticationAsync</c> へ文字列リテラルで渡すため
+    /// （静的検査がリテラルを数える。Issue #2255）。
+    /// </para>
+    /// </remarks>
+    private async Task<bool> RunStaffImportWithAuthenticationAsync(bool requiresAuthentication, Func<Task> import)
+    {
+        if (!requiresAuthentication)
+        {
+            // 初回セットアップ（登録済みの職員が 0 人）。認証できる職員証がまだ無いため免除し、
+            // 操作ログは「GUI操作」として記録される（職員管理画面の登録と同じ。Issue #2263）
+            await import();
+            return true;
+        }
+
+        using var authResult = (await _staffAuthService.RequestAuthenticationAsync("職員のインポート"))?.Enter();
+        if (authResult == null)
+        {
+            return false;
+        }
+
+        await import();
+        return true;
+    }
+
+    /// <summary>
+    /// 利用履歴の取り込みを、操作者の職員証認証を経て行う（Issue #2262。
+    /// 詳細は <see cref="RunStaffImportWithAuthenticationAsync"/>）
+    /// </summary>
+    /// <remarks>
+    /// 新しい行を追加するだけの取り込みでも認証を求める。履歴画面の「追加」が認証を求める操作だから（SEQ-AUTH-01）。
+    /// </remarks>
+    private async Task<bool> RunLedgerImportWithAuthenticationAsync(Func<Task> import)
+    {
+        using var authResult = (await _staffAuthService.RequestAuthenticationAsync("利用履歴のインポート"))?.Enter();
+        if (authResult == null)
+        {
+            return false;
+        }
+
+        await import();
+        return true;
+    }
+
+    /// <summary>
+    /// 利用履歴詳細の取り込みを、操作者の職員証認証を経て行う（Issue #2262。
+    /// 詳細は <see cref="RunStaffImportWithAuthenticationAsync"/>）
+    /// </summary>
+    /// <remarks>
+    /// 利用履歴詳細の取り込みは、既存の履歴の明細を置き換えて摘要・金額を作り直すか、新しい履歴を作る。
+    /// どちらも履歴画面では認証を求める操作（明細の保存・履歴の追加）に当たる。
+    /// </remarks>
+    private async Task<bool> RunLedgerDetailImportWithAuthenticationAsync(Func<Task> import)
+    {
+        using var authResult = (await _staffAuthService.RequestAuthenticationAsync("利用履歴詳細のインポート"))?.Enter();
+        if (authResult == null)
+        {
+            return false;
+        }
+
+        await import();
+        return true;
+    }
+
+    /// <summary>
+    /// 取り込みで職員証の認証が完了しなかったときの案内を組み立てる（Issue #2262）
+    /// </summary>
+    /// <param name="dataType">取り込もうとしたデータ種別</param>
+    /// <param name="previewRetained">
+    /// プレビューが残っているか。認証を待つ間に取り込みの条件を変えるとプレビューは破棄されており、
+    /// 「もう一度インポート実行を押す」ではやり直せない
+    /// </param>
+    internal static string BuildImportAuthenticationCancelledMessage(DataType dataType, bool previewRetained)
+        => previewRetained
+            ? $"職員証の認証が完了しなかったため、{GetDataTypeDisplayName(dataType)}を取り込んでいません。プレビューはそのままです。" +
+              "取り込むには、もう一度「インポート実行」を押し、登録済みの職員の職員証で認証してください。"
+            : $"職員証の認証が完了しなかったため、{GetDataTypeDisplayName(dataType)}を取り込んでいません。" +
+              "認証を待つ間に取り込みの条件が変わったため、プレビューはクリアしました。" +
+              "取り込むには、「プレビュー」で内容を確認してから「インポート実行」を押し、登録済みの職員の職員証で認証してください。";
+
+    /// <summary>
+    /// 取り込みの本体（処理中の表示・サービスの呼び分け・結果の反映と通知）
+    /// </summary>
+    /// <param name="request">認証の前に確定させた取り込みの条件</param>
+    private async Task ImportAndReportAsync(ImportRequest request)
+    {
         // Issue #1784: 結果ダイアログは BeginBusy スコープを抜けて IsBusy=false が確定した後に表示する。
         // スコープ内で表示すると MessageBox がモーダルで待機する間、
         // DataExportImportDialog.xaml の全面オーバーレイ（Grid.RowSpan=6・不透明）と不確定 ProgressBar が
@@ -696,27 +1220,47 @@ public partial class DataExportImportViewModel : ViewModelBase
             await Task.Yield();
             try
             {
-                CsvImportResult result;
+                // Issue #2262: プレビューしたファイルと、いまのファイルを照合する（プレビュー経由のときだけ）。
+                // 照合はこの 1 か所（認証の後・取り込む直前）。読み取りは処理中の表示の中で、専用スレッドで行う
+                if (request.ExpectedFile != null)
+                {
+                    var current = await PreviewFileFingerprint.CaptureAsync(request.SourceFilePath);
+                    if (current == null || current != request.ExpectedFile)
+                    {
+                        ClearPreview();
+                        SetStatus(
+                            current == null
+                                ? BuildPreviewFileUnreadableMessage(request.SourceFilePath)
+                                : BuildPreviewFileChangedMessage(request.SourceFilePath),
+                            true);
+                        return;
+                    }
+                }
 
-                // Issue #1741: 対象データ種別をここでローカル変数へ確定させる。
+                CsvImportResult result;
+                var sourceFilePath = request.SourceFilePath;
+
+                // Issue #1741: 対象データ種別は呼び出し元（RunImportAsync）が最初の await より前に確定させている。
                 // SelectedImportType は await 中のキー操作（データ種別コンボのアクセスキー）で変わり得るため、
                 // 監査ログ記録時にプロパティを読み直すと実際とは異なる対象テーブルが記録される。
-                var importDataType = SelectedImportType;
-                var importTargetTable = MapDataTypeToTableName(importDataType);
+                var importTargetTable = MapDataTypeToTableName(request.DataType);
 
-                switch (importDataType)
+                switch (request.DataType)
                 {
                     case DataType.Cards:
-                        result = await _importService.ImportCardsAsync(sourceFilePath, SkipExistingOnImport);
+                        // Issue #2262: 直接インポートは新しいカードの登録だけ（登録済みのカードの変更・復元はプレビュー経由に限る）
+                        result = request.DirectImport
+                            ? await _importService.ImportNewCardsAsync(sourceFilePath)
+                            : await _importService.ImportCardsAsync(sourceFilePath, request.SkipExisting);
                         break;
 
                     case DataType.Staff:
-                        result = await _importService.ImportStaffAsync(sourceFilePath, SkipExistingOnImport);
+                        result = await _importService.ImportStaffAsync(sourceFilePath, request.SkipExisting);
                         break;
 
                     case DataType.Ledgers:
                         // Issue #511: ターゲットカードIDmを渡す
-                        result = await _importService.ImportLedgersAsync(sourceFilePath, SkipExistingOnImport, GetTargetCardIdm());
+                        result = await _importService.ImportLedgersAsync(sourceFilePath, request.SkipExisting, request.TargetCardIdm);
                         break;
 
                     case DataType.LedgerDetails:
@@ -833,7 +1377,7 @@ public partial class DataExportImportViewModel : ViewModelBase
 
         if (result.Success)
         {
-            var message = $"インポート完了: {result.ImportedCount}件を登録しました";
+            var message = $"インポート完了: {result.ImportedCount}件を登録しました" + FormatUpdatedCountNote(result);
             if (result.SkippedCount > 0)
             {
                 message += $"（{result.SkippedCount}件はスキップ）";
@@ -847,7 +1391,7 @@ public partial class DataExportImportViewModel : ViewModelBase
             var auditLogged = await TryLogImportAsync(targetTable, sourceFilePath, result);
 
             var completionMessage =
-                $"インポートが完了しました。\n\n登録件数: {result.ImportedCount}件"
+                $"インポートが完了しました。\n\n登録件数: {result.ImportedCount}件" + FormatUpdatedCountNote(result)
                 + (result.SkippedCount > 0 ? $"\nスキップ: {result.SkippedCount}件" : "");
 
             if (auditLogged)
@@ -919,6 +1463,12 @@ public partial class DataExportImportViewModel : ViewModelBase
             partialWarningMessage,
             importCommitted ? "インポート完了（一部エラー）" : "インポートを中断しました");
     }
+
+    /// <summary>
+    /// 登録件数のうち既存データを書き換えた件数の注記（Issue #2262。書き換えが無ければ空文字）
+    /// </summary>
+    internal static string FormatUpdatedCountNote(CsvImportResult result)
+        => result.UpdatedCount > 0 ? $"（うち既存データの更新 {result.UpdatedCount}件）" : string.Empty;
 
     /// <summary>
     /// 部分成功（一部エラー）時の復旧手順を組み立てる（Issue #1781）
@@ -1022,10 +1572,12 @@ public partial class DataExportImportViewModel : ViewModelBase
     {
         try
         {
+            // Issue #2262: 追加と更新を分けて記録する（以前は利用履歴の取り込みが合計を「登録件数」として記録していた）
             await _operationLogger.LogImportAsync(
                 targetTable,
                 sourceFilePath,
-                result.ImportedCount,
+                result.ImportedCount - result.UpdatedCount,
+                result.UpdatedCount,
                 result.SkippedCount,
                 result.ErrorCount);
             return true;
@@ -1080,6 +1632,7 @@ public partial class DataExportImportViewModel : ViewModelBase
     [RelayCommand]
     public void ClearPreview()
     {
+        _previewSnapshot = null;
         ImportPreviewFile = string.Empty;
         ImportPreview = null;
         PreviewItems.Clear();
@@ -1090,9 +1643,18 @@ public partial class DataExportImportViewModel : ViewModelBase
     /// <summary>
     /// インポートを実行（旧API互換 - 直接インポート）
     /// </summary>
-    [RelayCommand]
+    /// <remarks>
+    /// Issue #2262: 交通系ICカードの新しいカードの登録だけに使える（<see cref="IsDirectImportAllowed"/>）。
+    /// </remarks>
+    [RelayCommand(CanExecute = nameof(CanImportDirectly))]
     public async Task ImportAsync()
     {
+        if (!CanImportDirectly)
+        {
+            SetStatus(DirectImportRequiresPreviewMessage, true);
+            return;
+        }
+
         var dialog = new OpenFileDialog
         {
             Filter = "CSV ファイル (*.csv)|*.csv|すべてのファイル (*.*)|*.*",
@@ -1107,7 +1669,7 @@ public partial class DataExportImportViewModel : ViewModelBase
         // Issue #1782: この経路のインポート元はプレビューではなくファイルダイアログの選択結果だが、
         // 取り込みが確定したらプレビュー表示も畳む。残すと別ファイルのプレビューに対して
         // 「インポート実行」ボタンが有効なまま残り、古いファイルを取り込み直せてしまう。
-        await RunImportAsync(dialog.FileName);
+        await RunImportAsync(dialog.FileName, directImport: true);
     }
 
     /// <summary>

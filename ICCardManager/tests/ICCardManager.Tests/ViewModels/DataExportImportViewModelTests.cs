@@ -7,6 +7,7 @@ using CommunityToolkit.Mvvm.Messaging;
 using FluentAssertions;
 using ICCardManager.Data;
 using ICCardManager.Data.Repositories;
+using ICCardManager.Dtos;
 using ICCardManager.Infrastructure.Caching;
 using ICCardManager.Infrastructure.Timing;
 using ICCardManager.Services;
@@ -45,6 +46,14 @@ public class DataExportImportViewModelTests : IDisposable
     /// 「記録して再スローしない」代役を使う。
     /// </summary>
     private readonly RecordingDispatcherService _dispatcher = new();
+    /// <summary>
+    /// Issue #2262: 職員・利用履歴・利用履歴詳細の取り込みは職員証の認証を経て行う。既定では認証が成功する
+    /// （<c>Mock.Of</c> の既定値 null のままだと「認証が完了しなかった」扱いになり、書き込みが黙って行われない）。
+    /// </summary>
+    private readonly Mock<IStaffAuthService> _staffAuthServiceMock;
+    /// <summary>操作者の文脈（実物）。認証した職員の操作として取り込まれたかを確かめるために共有する</summary>
+    private readonly CurrentOperatorContext _operatorContext;
+    private readonly StaffManagementService _staffManagementService;
     private readonly DataExportImportViewModel _viewModel;
 
     public DataExportImportViewModelTests()
@@ -79,14 +88,23 @@ public class DataExportImportViewModelTests : IDisposable
             _dbContextMock.Object,
             _cacheServiceMock.Object,
             // Issue #1955: 摘要の再生成が参照する部署種別の供給元
-            new Mock<ISettingsRepository>().Object);
+            new Mock<ISettingsRepository>().Object,
+            new ICCardManager.Services.OperationLogger(new Mock<ICCardManager.Data.Repositories.IOperationLogRepository>().Object, Mock.Of<ICCardManager.Services.ICurrentOperatorContext>()));
 
         // OperationLogger (Issue #1302): 実DB + 実Contextを使う。
         // Issue #1741: 書き込まれた operation_log 行そのものを検証対象にするため、
         // リポジトリをフィールドで保持して読み返せるようにする。
         _operationLogRepository = new OperationLogRepository(_realDbContext);
-        var operatorContext = new CurrentOperatorContext(new SystemClock());
-        var operationLogger = new OperationLogger(_operationLogRepository, operatorContext);
+        _operatorContext = new CurrentOperatorContext(new SystemClock());
+        var operationLogger = new OperationLogger(_operationLogRepository, _operatorContext);
+
+        // Issue #2262: 認証は既定で成功させる（登録済みの職員がいる＝職員の取り込みも認証を求める）
+        _staffAuthServiceMock = new Mock<IStaffAuthService>();
+        _staffAuthServiceMock.Setup(s => s.RequestAuthenticationAsync(It.IsAny<string>()))
+            .ReturnsAsync(() => new StaffAuthResult { Idm = "TEST_OPERATOR_IDM", StaffName = "テスト操作者" });
+        _staffRepositoryMock.Setup(r => r.HasActiveStaffAsync()).ReturnsAsync(true);
+        _staffManagementService = new StaffManagementService(
+            _realDbContext, _staffRepositoryMock.Object, operationLogger, NullLogger<StaffManagementService>.Instance);
 
         _safeFileLauncherMock = new Mock<ICCardManager.Services.ISafeFileLauncher>();
         _safeFileLauncherMock.Setup(l => l.LaunchFile(It.IsAny<string>()))
@@ -102,7 +120,9 @@ public class DataExportImportViewModelTests : IDisposable
             operationLogger,
             new WeakReferenceMessenger(),
             _safeFileLauncherMock.Object,
-            _dispatcher);
+            _dispatcher,
+            _staffAuthServiceMock.Object,
+            _staffManagementService);
     }
 
     public void Dispose()
@@ -525,6 +545,8 @@ public class DataExportImportViewModelTests : IDisposable
         viewModel.ImportPreviewFile = "test.csv";
         viewModel.ImportPreview = new CsvImportPreviewResult { IsValid = true };
         viewModel.HasPreview = true;
+        // Issue #2262: 「インポート実行」はプレビューした条件・ファイルと照合するため、その前提も記録する
+        viewModel.RecordPreviewSnapshotForCurrentState();
     }
 
     #region Issue #1383: エクスポート完了時にプログレスバー(IsBusy)がダイアログ表示前に閉じること
@@ -1124,7 +1146,9 @@ public class DataExportImportViewModelTests : IDisposable
             operationLogger,
             new WeakReferenceMessenger(),
             _safeFileLauncherMock.Object,
-            _dispatcher);
+            _dispatcher,
+            _staffAuthServiceMock.Object,
+            _staffManagementService);
     }
 
     /// <summary>
@@ -2324,6 +2348,685 @@ public class DataExportImportViewModelTests : IDisposable
         // Assert
         _viewModel.TouchedCardIdm.Should().Be(firstIdm, "2 件目が 1 件目の読み取り結果を上書きしないこと");
         _cardRepositoryMock.Verify(r => r.GetByIdmAsync("0807060504030201", false), Times.Never);
+    }
+
+    #endregion
+
+    #region Issue #2262: 職員・利用履歴・利用履歴詳細の取り込みは職員証の認証を経て行うこと
+
+    private const string AuthenticatedStaffIdm = "ABCDEF0123456789";
+    private const string AuthenticatedStaffName = "認証 職員";
+
+    /// <summary>
+    /// 認証した職員の操作者セッションを伴う認証結果（本物の <see cref="CurrentOperatorContext"/> に結び付ける）
+    /// </summary>
+    private void SetupAuthenticationAs(string idm, string name)
+    {
+        _staffAuthServiceMock.Setup(s => s.RequestAuthenticationAsync(It.IsAny<string>()))
+            .ReturnsAsync(() => new StaffAuthResult(idm, name, _operatorContext));
+    }
+
+    private void SetupAuthenticationCancelled()
+    {
+        _staffAuthServiceMock.Setup(s => s.RequestAuthenticationAsync(It.IsAny<string>()))
+            .ReturnsAsync((StaffAuthResult?)null);
+    }
+
+    /// <summary>
+    /// 欠陥を突く側: 職員の取り込みは「職員のインポート」で認証し、取り込みと取り込み全体の操作ログを
+    /// 認証した職員の操作として行うこと
+    /// </summary>
+    [Fact]
+    public async Task RunImportAsync_職員の取り込みは認証した職員の操作として行うこと()
+    {
+        SetupValidPreview(DataType.Staff);
+        SetupAuthenticationAs(AuthenticatedStaffIdm, AuthenticatedStaffName);
+        string? operatorDuringImport = null;
+        _importServiceMock
+            .Setup(s => s.ImportStaffAsync(It.IsAny<string>(), It.IsAny<bool>()))
+            .Callback(() => operatorDuringImport = _operatorContext.CurrentIdm)
+            .ReturnsAsync(new CsvImportResult { Success = true, ImportedCount = 2, UpdatedCount = 1 });
+
+        await _viewModel.ExecuteImportAsync();
+
+        _staffAuthServiceMock.Verify(s => s.RequestAuthenticationAsync("職員のインポート"), Times.Once);
+        operatorDuringImport.Should().Be(AuthenticatedStaffIdm,
+            "取り込み（1 行ごとの操作ログ）は認証した職員のスコープの内側で行う");
+        var importLog = await GetSingleImportLogAsync();
+        importLog.OperatorIdm.Should().Be(AuthenticatedStaffIdm, "取り込み全体の記録も認証した職員の操作");
+        importLog.OperatorName.Should().Be(AuthenticatedStaffName);
+        _operatorContext.HasSession.Should().BeFalse("取り込みが終わったらセッションも終わる（#2260）");
+    }
+
+    /// <summary>
+    /// 欠陥を突く側: 認証が完了しなければ取り込まず、プレビューを残して案内すること
+    /// </summary>
+    [Theory]
+    [InlineData(DataType.Staff)]
+    [InlineData(DataType.Ledgers)]
+    [InlineData(DataType.LedgerDetails)]
+    public async Task RunImportAsync_認証が完了しなければ取り込まずプレビューを残すこと(DataType dataType)
+    {
+        SetupValidPreview(dataType);
+        SetupAuthenticationCancelled();
+
+        await _viewModel.ExecuteImportAsync();
+
+        _importServiceMock.Verify(s => s.ImportStaffAsync(It.IsAny<string>(), It.IsAny<bool>()), Times.Never);
+        _importServiceMock.Verify(s => s.ImportLedgersAsync(It.IsAny<string>(), It.IsAny<bool>(), It.IsAny<string?>()), Times.Never);
+        _importServiceMock.Verify(s => s.ImportLedgerDetailsAsync(It.IsAny<string>()), Times.Never);
+        _viewModel.StatusMessage.Should().Be(DataExportImportViewModel.BuildImportAuthenticationCancelledMessage(dataType, previewRetained: true));
+        _viewModel.IsStatusError.Should().BeTrue();
+        _viewModel.HasPreview.Should().BeTrue("もう一度「インポート実行」を押せばやり直せる");
+        await AssertNoImportLogAsync();
+    }
+
+    /// <summary>
+    /// 利用履歴・利用履歴詳細の取り込みも、それぞれの操作名で認証してから取り込むこと
+    /// </summary>
+    [Theory]
+    [InlineData(DataType.Ledgers, "利用履歴のインポート")]
+    [InlineData(DataType.LedgerDetails, "利用履歴詳細のインポート")]
+    public async Task RunImportAsync_利用履歴と利用履歴詳細は認証してから取り込むこと(DataType dataType, string operationName)
+    {
+        SetupValidPreview(dataType);
+        SetupAuthenticationAs(AuthenticatedStaffIdm, AuthenticatedStaffName);
+        string? operatorDuringImport = null;
+        var success = new CsvImportResult { Success = true, ImportedCount = 1 };
+        _importServiceMock
+            .Setup(s => s.ImportLedgersAsync(It.IsAny<string>(), It.IsAny<bool>(), It.IsAny<string?>()))
+            .Callback(() => operatorDuringImport = _operatorContext.CurrentIdm)
+            .ReturnsAsync(success);
+        _importServiceMock
+            .Setup(s => s.ImportLedgerDetailsAsync(It.IsAny<string>()))
+            .Callback(() => operatorDuringImport = _operatorContext.CurrentIdm)
+            .ReturnsAsync(success);
+
+        await _viewModel.ExecuteImportAsync();
+
+        _staffAuthServiceMock.Verify(s => s.RequestAuthenticationAsync(operationName), Times.Once);
+        operatorDuringImport.Should().Be(AuthenticatedStaffIdm, "取り込みは認証した職員の操作として行う");
+    }
+
+    /// <summary>
+    /// 正当な挙動を塞いでいない側: 登録済みの職員が 0 人なら、職員の取り込みは認証を求めずに行う
+    /// （初回セットアップで認証できる職員証がまだ無い。職員管理画面と同じ免除。#2263）
+    /// </summary>
+    [Fact]
+    public async Task RunImportAsync_職員が0人なら職員の取り込みは認証を求めないこと()
+    {
+        SetupValidPreview(DataType.Staff);
+        _staffRepositoryMock.Setup(r => r.HasActiveStaffAsync()).ReturnsAsync(false);
+        _importServiceMock
+            .Setup(s => s.ImportStaffAsync(It.IsAny<string>(), It.IsAny<bool>()))
+            .ReturnsAsync(new CsvImportResult { Success = true, ImportedCount = 3 });
+
+        await _viewModel.ExecuteImportAsync();
+
+        _staffAuthServiceMock.Verify(s => s.RequestAuthenticationAsync(It.IsAny<string>()), Times.Never);
+        _importServiceMock.Verify(s => s.ImportStaffAsync("test.csv", It.IsAny<bool>()), Times.Once);
+    }
+
+    /// <summary>
+    /// 正当な挙動を塞いでいない側: 交通系ICカードの取り込みは認証を求めない（カード管理画面の登録・編集と同じ）
+    /// </summary>
+    [Fact]
+    public async Task RunImportAsync_カードの取り込みは認証を求めないこと()
+    {
+        SetupValidPreview(DataType.Cards);
+        _importServiceMock
+            .Setup(s => s.ImportCardsAsync(It.IsAny<string>(), It.IsAny<bool>()))
+            .ReturnsAsync(new CsvImportResult { Success = true, ImportedCount = 1 });
+
+        await _viewModel.ExecuteImportAsync();
+
+        _staffAuthServiceMock.Verify(s => s.RequestAuthenticationAsync(It.IsAny<string>()), Times.Never);
+        _importServiceMock.Verify(s => s.ImportCardsAsync("test.csv", It.IsAny<bool>()), Times.Once);
+    }
+
+    /// <summary>
+    /// 取り込みの条件は認証の前に確定させ、認証を待つ間にデータ種別を変えても取り込む内容は変わらないこと
+    /// </summary>
+    [Fact]
+    public async Task RunImportAsync_認証を待つ間にデータ種別を変えても認証前の種別で取り込むこと()
+    {
+        SetupValidPreview(DataType.Staff);
+        _staffAuthServiceMock.Setup(s => s.RequestAuthenticationAsync(It.IsAny<string>()))
+            .Callback(() => _viewModel.SelectedImportType = DataType.Cards)
+            .ReturnsAsync(() => new StaffAuthResult(AuthenticatedStaffIdm, AuthenticatedStaffName, _operatorContext));
+        _importServiceMock
+            .Setup(s => s.ImportStaffAsync(It.IsAny<string>(), It.IsAny<bool>()))
+            .ReturnsAsync(new CsvImportResult { Success = true, ImportedCount = 1 });
+
+        await _viewModel.ExecuteImportAsync();
+
+        _importServiceMock.Verify(s => s.ImportStaffAsync("test.csv", It.IsAny<bool>()), Times.Once);
+        _importServiceMock.Verify(s => s.ImportCardsAsync(It.IsAny<string>(), It.IsAny<bool>()), Times.Never);
+        (await GetSingleImportLogAsync()).TargetTable.Should().Be(OperationLogger.Tables.Staff);
+    }
+
+    /// <summary>
+    /// 取り込み全体の記録は、追加件数と更新件数を分けて記録すること（以前は合計を「登録件数」に入れていた）
+    /// </summary>
+    [Fact]
+    public async Task RunImportAsync_取り込み全体の記録は追加件数と更新件数を分けること()
+    {
+        SetupValidPreview(DataType.Ledgers);
+        _importServiceMock
+            .Setup(s => s.ImportLedgersAsync(It.IsAny<string>(), It.IsAny<bool>(), It.IsAny<string?>()))
+            .ReturnsAsync(new CsvImportResult { Success = true, ImportedCount = 5, UpdatedCount = 2 });
+
+        await _viewModel.ExecuteImportAsync();
+
+        var log = await GetSingleImportLogAsync();
+        using var document = System.Text.Json.JsonDocument.Parse(log.AfterData!);
+        document.RootElement.GetProperty("InsertedCount").GetInt32().Should().Be(3);
+        document.RootElement.GetProperty("UpdatedCount").GetInt32().Should().Be(2);
+        _viewModel.StatusMessage.Should().Contain("うち既存データの更新 2件");
+    }
+
+    /// <summary>
+    /// 「直接インポート」はカード一覧のときだけ実行でき、他のデータ種別ではコマンドが無効になること
+    /// </summary>
+    [Theory]
+    [InlineData(DataType.Cards, true)]
+    [InlineData(DataType.Staff, false)]
+    [InlineData(DataType.Ledgers, false)]
+    [InlineData(DataType.LedgerDetails, false)]
+    public void ImportCommand_直接インポートはカード一覧のときだけ実行できること(DataType dataType, bool expected)
+    {
+        _viewModel.SelectedImportType = dataType;
+
+        _viewModel.CanImportDirectly.Should().Be(expected);
+        _viewModel.ImportCommand.CanExecute(null).Should().Be(expected);
+    }
+
+    /// <summary>
+    /// データ種別を変えたら「直接インポート」の実行可否の変化を通知すること（通知が無いとボタンの有効・無効が変わらない）
+    /// </summary>
+    [Fact]
+    public void ImportCommand_データ種別を変えたら実行可否の変化を通知すること()
+    {
+        var raised = 0;
+        _viewModel.ImportCommand.CanExecuteChanged += (_, _) => raised++;
+
+        _viewModel.SelectedImportType = DataType.Ledgers;
+
+        raised.Should().BeGreaterThan(0);
+    }
+
+    /// <summary>
+    /// 欠陥を突く側: 職員・利用履歴・利用履歴詳細は、直接インポートの経路から呼ばれても取り込まないこと
+    /// （アクセスキー等でコマンドが実行された場合の受け皿）
+    /// </summary>
+    [Theory]
+    [InlineData(DataType.Staff)]
+    [InlineData(DataType.Ledgers)]
+    [InlineData(DataType.LedgerDetails)]
+    public async Task RunImportAsync_直接インポートでは職員と利用履歴を取り込まないこと(DataType dataType)
+    {
+        _viewModel.SelectedImportType = dataType;
+
+        await _viewModel.RunImportAsync("direct.csv", directImport: true);
+
+        _staffAuthServiceMock.Verify(s => s.RequestAuthenticationAsync(It.IsAny<string>()), Times.Never);
+        _importServiceMock.Verify(s => s.ImportStaffAsync(It.IsAny<string>(), It.IsAny<bool>()), Times.Never);
+        _importServiceMock.Verify(s => s.ImportLedgersAsync(It.IsAny<string>(), It.IsAny<bool>(), It.IsAny<string?>()), Times.Never);
+        _importServiceMock.Verify(s => s.ImportLedgerDetailsAsync(It.IsAny<string>()), Times.Never);
+        _viewModel.StatusMessage.Should().Be(DataExportImportViewModel.DirectImportRequiresPreviewMessage);
+    }
+
+    /// <summary>
+    /// 直接インポートのカード一覧は、新しいカードの登録だけを行う取り込み（ImportNewCardsAsync）を使うこと。
+    /// プレビュー経由は従来どおり登録済みのカードも更新する取り込み（ImportCardsAsync）を使う
+    /// </summary>
+    [Fact]
+    public async Task RunImportAsync_直接インポートのカード一覧は新しいカードの登録だけを行うこと()
+    {
+        _viewModel.SelectedImportType = DataType.Cards;
+        _importServiceMock
+            .Setup(s => s.ImportNewCardsAsync(It.IsAny<string>()))
+            .ReturnsAsync(new CsvImportResult { Success = true, ImportedCount = 1 });
+
+        await _viewModel.RunImportAsync("direct.csv", directImport: true);
+
+        _importServiceMock.Verify(s => s.ImportNewCardsAsync("direct.csv"), Times.Once);
+        _importServiceMock.Verify(s => s.ImportCardsAsync(It.IsAny<string>(), It.IsAny<bool>()), Times.Never);
+    }
+
+    /// <summary>取り込み全体の記録（IMPORT）が 1 件も無いことを表明する</summary>
+    private async Task AssertNoImportLogAsync()
+    {
+        var logs = await _operationLogRepository.GetByDateRangeAsync(DateTime.Today.AddDays(-1), DateTime.Today.AddDays(1));
+        logs.Should().NotContain(l => l.Action == OperationLogger.Actions.Import);
+    }
+
+    #endregion
+
+    #region Issue #2262: プレビューと取り込みの条件を結び付けること（レビュー指摘）
+
+    /// <summary>
+    /// 欠陥を突く側: プレビューの後で取り込みの条件を変えたら、プレビューを破棄し、
+    /// 「インポート実行」で変えた後の条件の取り込みを行わないこと
+    /// （カード A 宛てにプレビューしてカード B に変えて実行すると、プレビューと違う内容を取り込めた）
+    /// </summary>
+    [Theory]
+    [InlineData("取り込み先カード")]
+    [InlineData("既存データのスキップ")]
+    [InlineData("データ種別")]
+    [InlineData("カードの指定方法")]
+    [InlineData("タッチしたカード")]
+    public async Task 取り込みの条件を変えたらプレビューを破棄し古いプレビューで取り込まないこと(string condition)
+    {
+        SetupValidPreview(DataType.Ledgers);
+        _viewModel.SelectedTargetCard = new CardDto { CardIdm = "0000000000000001", CardType = "はやかけん", CardNumber = "001" };
+        SetupValidPreview(DataType.Ledgers);
+
+        switch (condition)
+        {
+            case "取り込み先カード":
+                _viewModel.SelectedTargetCard = new CardDto { CardIdm = "0000000000000002", CardType = "nimoca", CardNumber = "002" };
+                break;
+            case "既存データのスキップ":
+                _viewModel.SkipExistingOnImport = !_viewModel.SkipExistingOnImport;
+                break;
+            case "データ種別":
+                _viewModel.SelectedImportType = DataType.LedgerDetails;
+                break;
+            case "カードの指定方法":
+                _viewModel.UseCardListSelection = !_viewModel.UseCardListSelection;
+                break;
+            case "タッチしたカード":
+                _viewModel.TouchedCardIdm = "0000000000000003";
+                break;
+        }
+
+        _viewModel.HasPreview.Should().BeFalse("条件を変えたプレビューは、取り込む内容を示していない");
+        _viewModel.StatusMessage.Should().Be(DataExportImportViewModel.PreviewDiscardedByConditionChangeMessage);
+
+        await _viewModel.ExecuteImportAsync();
+
+        _staffAuthServiceMock.Verify(s => s.RequestAuthenticationAsync(It.IsAny<string>()), Times.Never);
+        _importServiceMock.Verify(s => s.ImportLedgersAsync(It.IsAny<string>(), It.IsAny<bool>(), It.IsAny<string?>()), Times.Never);
+        _importServiceMock.Verify(s => s.ImportLedgerDetailsAsync(It.IsAny<string>()), Times.Never);
+    }
+
+    /// <summary>
+    /// 正当な挙動を塞いでいない側: 条件を変えずに「インポート実行」を押せば、プレビューした条件で取り込むこと
+    /// </summary>
+    [Fact]
+    public async Task 条件を変えなければプレビューした条件で取り込むこと()
+    {
+        _viewModel.SelectedImportType = DataType.Ledgers;
+        _viewModel.SelectedTargetCard = new CardDto { CardIdm = "0000000000000001", CardType = "はやかけん", CardNumber = "001" };
+        SetupValidPreview(DataType.Ledgers);
+        _importServiceMock
+            .Setup(s => s.ImportLedgersAsync(It.IsAny<string>(), It.IsAny<bool>(), It.IsAny<string?>()))
+            .ReturnsAsync(new CsvImportResult { Success = true, ImportedCount = 1 });
+
+        await _viewModel.ExecuteImportAsync();
+
+        _importServiceMock.Verify(s => s.ImportLedgersAsync("test.csv", true, "0000000000000001"), Times.Once);
+    }
+
+    #endregion
+
+    #region Issue #2262: プレビューした条件・ファイルと取り込む条件・ファイルを照合すること（レビュー 2 回目）
+
+    /// <summary>
+    /// 取り込み先カードを持たない種別間（カード一覧→職員一覧）の切り替えでもプレビューを破棄すること
+    /// （利用履歴→利用履歴詳細の切り替えは取り込み先カードのクリア側でも破棄されるため、種別の変更そのものでの破棄を確かめられない）
+    /// </summary>
+    [Fact]
+    public void 取り込み先カードの無い種別間でデータ種別を変えてもプレビューを破棄すること()
+    {
+        SetupValidPreview(DataType.Cards);
+
+        _viewModel.SelectedImportType = DataType.Staff;
+
+        _viewModel.HasPreview.Should().BeFalse();
+        _viewModel.StatusMessage.Should().Be(DataExportImportViewModel.PreviewDiscardedByConditionChangeMessage);
+    }
+
+    /// <summary>
+    /// 欠陥を突く側: プレビューの読み込み中にデータ種別が変わったら、古い条件のプレビューを表示せず、取り込みもしないこと
+    /// </summary>
+    [Fact]
+    public async Task プレビューの読み込み中にデータ種別が変わったら古い条件のプレビューを表示しないこと()
+    {
+        _viewModel.SelectedImportType = DataType.Cards;
+        _importServiceMock
+            .Setup(s => s.PreviewCardsAsync(It.IsAny<string>(), It.IsAny<bool>()))
+            .Callback(() => _viewModel.SelectedImportType = DataType.Staff)
+            .ReturnsAsync(new CsvImportPreviewResult { IsValid = true });
+
+        // 本物のファイルを読ませる（読めないファイルはプレビューの読み込み自体を行わない）
+        var path = WriteTempCsv("カードIDm,カード種別,管理番号,備考\n0102030405060708,はやかけん,001,\n");
+        try
+        {
+            await _viewModel.PreviewFileAsync(path);
+        }
+        finally
+        {
+            System.IO.File.Delete(path);
+        }
+
+        _importServiceMock.Verify(s => s.PreviewCardsAsync(It.IsAny<string>(), It.IsAny<bool>()), Times.Once, "前提: 読み込みが行われたこと");
+        _viewModel.HasPreview.Should().BeFalse();
+        _viewModel.ImportPreview.Should().BeNull();
+        _viewModel.StatusMessage.Should().Be(DataExportImportViewModel.PreviewConditionsChangedWhileLoadingMessage);
+
+        await _viewModel.ExecuteImportAsync();
+
+        _importServiceMock.Verify(s => s.ImportStaffAsync(It.IsAny<string>(), It.IsAny<bool>()), Times.Never);
+        _importServiceMock.Verify(s => s.ImportCardsAsync(It.IsAny<string>(), It.IsAny<bool>()), Times.Never);
+    }
+
+    /// <summary>
+    /// 欠陥を突く側: タッチで取り込み先カードを指定する利用履歴で、読み込み中に別のカードがタッチされたら、
+    /// そのプレビューを表示しないこと（表示すると、カード未指定でプレビューした行がカード B へ取り込まれる）
+    /// </summary>
+    [Fact]
+    public async Task プレビューの読み込み中に別のカードがタッチされたら古い条件のプレビューを表示しないこと()
+    {
+        _viewModel.SelectedImportType = DataType.Ledgers;
+        _viewModel.UseCardListSelection = false;
+        _importServiceMock
+            .Setup(s => s.PreviewLedgersAsync(It.IsAny<string>(), It.IsAny<bool>(), It.IsAny<string?>()))
+            .Callback(() => _viewModel.TouchedCardIdm = "000000000000000B")
+            .ReturnsAsync(new CsvImportPreviewResult { IsValid = true });
+
+        var path = WriteTempCsv("ID,日時,カードIDm,管理番号,摘要,受入金額,払出金額,残額,利用者,備考\n");
+        try
+        {
+            await _viewModel.PreviewFileAsync(path);
+        }
+        finally
+        {
+            System.IO.File.Delete(path);
+        }
+
+        _viewModel.HasPreview.Should().BeFalse();
+        _importServiceMock.Verify(s => s.PreviewLedgersAsync(path, It.IsAny<bool>(), null), Times.Once,
+            "読み込みは開始時に確定させた条件（取り込み先カード未指定）で行う");
+
+        await _viewModel.ExecuteImportAsync();
+
+        _importServiceMock.Verify(s => s.ImportLedgersAsync(It.IsAny<string>(), It.IsAny<bool>(), It.IsAny<string?>()), Times.Never);
+    }
+
+    /// <summary>
+    /// 欠陥を突く側: プレビューした後で CSV ファイルが書き換えられたら、取り込まずにプレビューを破棄すること
+    /// </summary>
+    [Fact]
+    public async Task プレビューした後でファイルが書き換えられたら取り込まないこと()
+    {
+        var path = WriteTempCsv("カードIDm,カード種別,管理番号,備考\n0102030405060708,はやかけん,001,\n");
+        try
+        {
+            _viewModel.SelectedImportType = DataType.Cards;
+            _importServiceMock
+                .Setup(s => s.PreviewCardsAsync(It.IsAny<string>(), It.IsAny<bool>()))
+                .ReturnsAsync(new CsvImportPreviewResult { IsValid = true });
+            await _viewModel.PreviewFileAsync(path);
+            _viewModel.HasPreview.Should().BeTrue("前提: プレビューが表示されていること");
+
+            System.IO.File.AppendAllText(path, "1112131415161718,nimoca,002,\n");
+            await _viewModel.ExecuteImportAsync();
+
+            _importServiceMock.Verify(s => s.ImportCardsAsync(It.IsAny<string>(), It.IsAny<bool>()), Times.Never);
+            _viewModel.HasPreview.Should().BeFalse();
+            _viewModel.StatusMessage.Should().Be(DataExportImportViewModel.BuildPreviewFileChangedMessage(path));
+        }
+        finally
+        {
+            System.IO.File.Delete(path);
+        }
+    }
+
+    /// <summary>
+    /// 欠陥を突く側: 認証を待つ間に CSV ファイルが書き換えられたら、認証した後でも取り込まないこと
+    /// </summary>
+    [Fact]
+    public async Task 認証を待つ間にファイルが書き換えられたら取り込まないこと()
+    {
+        var path = WriteTempCsv("職員IDm,氏名,職員番号,備考\n0102030405060708,山田太郎,001,\n");
+        try
+        {
+            _viewModel.SelectedImportType = DataType.Staff;
+            _importServiceMock
+                .Setup(s => s.PreviewStaffAsync(It.IsAny<string>(), It.IsAny<bool>()))
+                .ReturnsAsync(new CsvImportPreviewResult { IsValid = true });
+            await _viewModel.PreviewFileAsync(path);
+            _staffAuthServiceMock.Setup(s => s.RequestAuthenticationAsync(It.IsAny<string>()))
+                .Callback(() => System.IO.File.AppendAllText(path, "1112131415161718,鈴木花子,002,\n"))
+                .ReturnsAsync(() => new StaffAuthResult { Idm = "TEST_OPERATOR_IDM", StaffName = "テスト操作者" });
+
+            await _viewModel.ExecuteImportAsync();
+
+            _staffAuthServiceMock.Verify(s => s.RequestAuthenticationAsync("職員のインポート"), Times.Once);
+            _importServiceMock.Verify(s => s.ImportStaffAsync(It.IsAny<string>(), It.IsAny<bool>()), Times.Never);
+            _viewModel.StatusMessage.Should().Be(DataExportImportViewModel.BuildPreviewFileChangedMessage(path));
+        }
+        finally
+        {
+            System.IO.File.Delete(path);
+        }
+    }
+
+    /// <summary>
+    /// 正当な挙動を塞いでいない側: プレビューした後で条件もファイルも変わらなければ、そのファイルを取り込むこと
+    /// </summary>
+    [Fact]
+    public async Task プレビューした後で条件もファイルも変わらなければ取り込むこと()
+    {
+        var path = WriteTempCsv("カードIDm,カード種別,管理番号,備考\n0102030405060708,はやかけん,001,\n");
+        try
+        {
+            _viewModel.SelectedImportType = DataType.Cards;
+            _importServiceMock
+                .Setup(s => s.PreviewCardsAsync(It.IsAny<string>(), It.IsAny<bool>()))
+                .ReturnsAsync(new CsvImportPreviewResult { IsValid = true });
+            _importServiceMock
+                .Setup(s => s.ImportCardsAsync(It.IsAny<string>(), It.IsAny<bool>()))
+                .ReturnsAsync(new CsvImportResult { Success = true, ImportedCount = 1 });
+            await _viewModel.PreviewFileAsync(path);
+
+            await _viewModel.ExecuteImportAsync();
+
+            _importServiceMock.Verify(s => s.ImportCardsAsync(path, true), Times.Once);
+        }
+        finally
+        {
+            System.IO.File.Delete(path);
+        }
+    }
+
+    /// <summary>
+    /// 認証を待つ間に条件が変わってプレビューが破棄された後で認証がキャンセルされたら、
+    /// 「プレビューはそのまま」と案内しないこと
+    /// </summary>
+    [Fact]
+    public async Task 認証を待つ間にプレビューが破棄されたらキャンセルの案内はプレビューからやり直させること()
+    {
+        SetupValidPreview(DataType.Staff);
+        _staffAuthServiceMock.Setup(s => s.RequestAuthenticationAsync(It.IsAny<string>()))
+            .Callback(() => _viewModel.SkipExistingOnImport = !_viewModel.SkipExistingOnImport)
+            .ReturnsAsync((StaffAuthResult?)null);
+
+        await _viewModel.ExecuteImportAsync();
+
+        _viewModel.StatusMessage.Should().Be(
+            DataExportImportViewModel.BuildImportAuthenticationCancelledMessage(DataType.Staff, previewRetained: false));
+        _viewModel.StatusMessage.Should().NotContain("プレビューはそのままです");
+    }
+
+    private static string WriteTempCsv(string content)
+    {
+        var path = System.IO.Path.Combine(System.IO.Path.GetTempPath(), $"preview_{Guid.NewGuid():N}.csv");
+        System.IO.File.WriteAllText(path, content, new System.Text.UTF8Encoding(true));
+        return path;
+    }
+
+    #endregion
+
+    #region Issue #2262: レビュー 3 回目（内容のハッシュでの照合・タッチ待ちと認証・照合の防御の層）
+
+    /// <summary>
+    /// 欠陥を突く側: 同じ大きさ・同じ更新日時のまま内容だけを差し替えたファイルも、書き換えとして検出すること
+    /// （更新日時と大きさだけの照合は、SMB のファイル情報のキャッシュや更新日時を保ったコピーで見逃す）
+    /// </summary>
+    [Fact]
+    public async Task 同じ大きさと更新日時のまま内容だけ差し替えたファイルは取り込まないこと()
+    {
+        var path = WriteTempCsv("カードIDm,カード種別,管理番号,備考\n0102030405060708,はやかけん,001,\n");
+        try
+        {
+            _viewModel.SelectedImportType = DataType.Cards;
+            _importServiceMock
+                .Setup(s => s.PreviewCardsAsync(It.IsAny<string>(), It.IsAny<bool>()))
+                .ReturnsAsync(new CsvImportPreviewResult { IsValid = true });
+            await _viewModel.PreviewFileAsync(path);
+            var originalWriteTime = System.IO.File.GetLastWriteTimeUtc(path);
+            var originalLength = new System.IO.FileInfo(path).Length;
+
+            // 同じ大きさで内容だけ違う（管理番号 001 → 009）。更新日時も元に戻す
+            System.IO.File.WriteAllText(path, "カードIDm,カード種別,管理番号,備考\n0102030405060708,はやかけん,009,\n", new System.Text.UTF8Encoding(true));
+            System.IO.File.SetLastWriteTimeUtc(path, originalWriteTime);
+            new System.IO.FileInfo(path).Length.Should().Be(originalLength, "前提: 大きさが同じであること");
+
+            await _viewModel.ExecuteImportAsync();
+
+            _importServiceMock.Verify(s => s.ImportCardsAsync(It.IsAny<string>(), It.IsAny<bool>()), Times.Never);
+            _viewModel.StatusMessage.Should().Be(DataExportImportViewModel.BuildPreviewFileChangedMessage(path));
+        }
+        finally
+        {
+            System.IO.File.Delete(path);
+        }
+    }
+
+    /// <summary>
+    /// 欠陥を突く側: 取り込み先カードのタッチ待ちのまま「インポート実行」を押したら、認証を求める前にタッチ待ちを終えること
+    /// （残すと、認証の職員証のタッチをこの画面も処理し、「登録されていないカード」のモーダルが認証ダイアログに重なる）
+    /// </summary>
+    [Fact]
+    public async Task タッチ待ちのまま実行したら認証の前にタッチ待ちを終えること()
+    {
+        _viewModel.SelectedImportType = DataType.Ledgers;
+        _viewModel.UseCardListSelection = false;
+        _viewModel.IsWaitingForCardTouch = true;
+        _viewModel.TouchedCardInfo = "カードをタッチしてください...";
+        SetupValidPreview(DataType.Ledgers);
+        bool? waitingDuringAuthentication = null;
+        _staffAuthServiceMock.Setup(s => s.RequestAuthenticationAsync(It.IsAny<string>()))
+            .Callback(() => waitingDuringAuthentication = _viewModel.IsWaitingForCardTouch)
+            .ReturnsAsync(() => new StaffAuthResult { Idm = "TEST_OPERATOR_IDM", StaffName = "テスト操作者" });
+        _importServiceMock
+            .Setup(s => s.ImportLedgersAsync(It.IsAny<string>(), It.IsAny<bool>(), It.IsAny<string?>()))
+            .ReturnsAsync(new CsvImportResult { Success = true, ImportedCount = 1 });
+
+        await _viewModel.ExecuteImportAsync();
+
+        waitingDuringAuthentication.Should().BeFalse("認証ダイアログが職員証を読む間、この画面はカードの読み取りを処理しない");
+        _viewModel.TouchedCardInfo.Should().BeEmpty("タッチ待ちを終えたら、「キャンセル」と同じく案内の表示も消す（タッチしていないため）");
+        _importServiceMock.Verify(s => s.ImportLedgersAsync("test.csv", It.IsAny<bool>(), null), Times.Once,
+            "タッチ待ちを終えても取り込み先カード（未タッチ＝CSV の IDm 列）とプレビューは変わらない");
+    }
+
+    /// <summary>
+    /// 防御の層: 変更通知を経ずに条件がずれた（一覧で選んだカードの DTO の IDm が書き換わった）ときも、
+    /// プレビューと違う条件で取り込まないこと
+    /// </summary>
+    [Fact]
+    public async Task 変更通知を経ずに取り込み先カードがずれたら取り込まないこと()
+    {
+        var card = new CardDto { CardIdm = "0000000000000001", CardType = "はやかけん", CardNumber = "001" };
+        _viewModel.SelectedImportType = DataType.Ledgers;
+        _viewModel.SelectedTargetCard = card;
+        SetupValidPreview(DataType.Ledgers);
+
+        card.CardIdm = "0000000000000002";
+        _viewModel.HasPreview.Should().BeTrue("前提: 条件変更時の破棄は届いていないこと");
+
+        await _viewModel.ExecuteImportAsync();
+
+        _importServiceMock.Verify(s => s.ImportLedgersAsync(It.IsAny<string>(), It.IsAny<bool>(), It.IsAny<string?>()), Times.Never);
+        _viewModel.HasPreview.Should().BeFalse();
+        _viewModel.StatusMessage.Should().Be(DataExportImportViewModel.PreviewDiscardedByConditionChangeMessage);
+    }
+
+    #endregion
+
+    #region Issue #2262: レビュー 4 回目（ファイルを読めないときは確かめられないとして扱う）
+
+    /// <summary>
+    /// 欠陥を突く側: プレビューするファイルを読めないときは、内容を確かめられないとしてプレビューを表示しないこと
+    /// </summary>
+    [Fact]
+    public async Task 読めないファイルはプレビューしないこと()
+    {
+        var path = WriteTempCsv("カードIDm,カード種別,管理番号,備考\n0102030405060708,はやかけん,001,\n");
+        try
+        {
+            _viewModel.SelectedImportType = DataType.Cards;
+            using (new System.IO.FileStream(path, System.IO.FileMode.Open, System.IO.FileAccess.ReadWrite, System.IO.FileShare.None))
+            {
+                await _viewModel.PreviewFileAsync(path);
+            }
+
+            _viewModel.HasPreview.Should().BeFalse();
+            _viewModel.StatusMessage.Should().Be(DataExportImportViewModel.BuildPreviewFileUnreadableMessage(path));
+            _importServiceMock.Verify(s => s.PreviewCardsAsync(It.IsAny<string>(), It.IsAny<bool>()), Times.Never);
+        }
+        finally
+        {
+            System.IO.File.Delete(path);
+        }
+    }
+
+    /// <summary>
+    /// 欠陥を突く側: プレビューした後で取り込む直前にファイルを読めなくなったら、「書き換えられた」ではなく
+    /// 「確かめられない」と案内して取り込まないこと
+    /// </summary>
+    [Fact]
+    public async Task 取り込む直前にファイルを読めなければ確かめられないとして取り込まないこと()
+    {
+        var path = WriteTempCsv("カードIDm,カード種別,管理番号,備考\n0102030405060708,はやかけん,001,\n");
+        try
+        {
+            _viewModel.SelectedImportType = DataType.Cards;
+            _importServiceMock
+                .Setup(s => s.PreviewCardsAsync(It.IsAny<string>(), It.IsAny<bool>()))
+                .ReturnsAsync(new CsvImportPreviewResult { IsValid = true });
+            await _viewModel.PreviewFileAsync(path);
+            _viewModel.HasPreview.Should().BeTrue("前提: プレビューが表示されていること");
+
+            using (new System.IO.FileStream(path, System.IO.FileMode.Open, System.IO.FileAccess.ReadWrite, System.IO.FileShare.None))
+            {
+                await _viewModel.ExecuteImportAsync();
+            }
+
+            _importServiceMock.Verify(s => s.ImportCardsAsync(It.IsAny<string>(), It.IsAny<bool>()), Times.Never);
+            _viewModel.HasPreview.Should().BeFalse();
+            _viewModel.StatusMessage.Should().Be(DataExportImportViewModel.BuildPreviewFileUnreadableMessage(path));
+        }
+        finally
+        {
+            System.IO.File.Delete(path);
+        }
+    }
+
+    /// <summary>
+    /// 読めないときの案内は 3 要素（何が・なぜ・どうすれば）を満たし、行動指示で終わること
+    /// </summary>
+    [Fact]
+    public void 読めないファイルの案内は3要素を満たすこと()
+    {
+        var message = DataExportImportViewModel.BuildPreviewFileUnreadableMessage(@"C:\data\cards.csv");
+
+        message.Should().Contain("「cards.csv」").And.Contain("可能性があります").And.EndWith("確認してください。");
+        message.Should().NotContain(@"C:\data", "フルパスは出さない（ファイル名で名指しする）");
     }
 
     #endregion

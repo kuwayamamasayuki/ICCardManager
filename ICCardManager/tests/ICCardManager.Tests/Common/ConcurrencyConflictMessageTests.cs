@@ -149,4 +149,24 @@ public class ConcurrencyConflictMessageTests
         register.Should().NotContain("削除された");
         register.Should().NotContain("復元された");
     }
+    /// <summary>
+    /// Issue #2262: CSV インポートの競合の文言は「なぜ」を公開のファクトリと共有し、
+    /// 一覧の再読込（取り込みでは行わない）を述べず、取り込んでいないことと次の行動を示すこと
+    /// </summary>
+    [Fact]
+    public void ForImportUpdateAndRestore_ShareTheCauseAndDoNotClaimAReload()
+    {
+        const string target = "職員「山田 太郎」";
+        const string screen = "職員管理画面（F2）";
+        var update = ConcurrencyConflictMessage.ForImportUpdate(target, screen);
+        var restore = ConcurrencyConflictMessage.ForImportRestore(target, screen);
+
+        update.Should().StartWith($"{target}を更新できませんでした。").And.Contain("削除された可能性があります");
+        restore.Should().StartWith($"{target}を復元できませんでした。").And.Contain("先に復元された可能性があります");
+        foreach (var message in new[] { update, restore })
+        {
+            message.Should().Contain("取り込みは行っていません").And.Contain(screen).And.EndWith("インポートしてください。");
+            message.Should().NotContain("再読み込み", "取り込みは一覧を再読込しない");
+        }
+    }
 }

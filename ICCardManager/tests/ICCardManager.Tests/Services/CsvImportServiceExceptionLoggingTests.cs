@@ -109,6 +109,7 @@ public class CsvImportServiceExceptionLoggingTests : IDisposable
             _dbContextMock.Object,
             _cacheServiceMock.Object,
             _settingsRepositoryMock.Object,
+            new ICCardManager.Services.OperationLogger(new Mock<ICCardManager.Data.Repositories.IOperationLogRepository>().Object, Mock.Of<ICCardManager.Services.ICurrentOperatorContext>()),
             _logger);
     }
 

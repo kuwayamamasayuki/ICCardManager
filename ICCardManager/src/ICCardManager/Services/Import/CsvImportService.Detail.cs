@@ -26,7 +26,7 @@ namespace ICCardManager.Services
     {
         // === 利用履歴詳細CSVインポート・プレビュー ===
 
-        public async Task<CsvImportPreviewResult> PreviewLedgerDetailsAsync(string filePath)
+        public virtual async Task<CsvImportPreviewResult> PreviewLedgerDetailsAsync(string filePath)
         {
             var errors = new List<CsvImportError>();
             return await ExecutePreviewWithErrorHandlingAsync(
@@ -484,6 +484,8 @@ namespace ICCardManager.Services
 
             // 既存ledger_idごとにReplaceDetailsAsyncで全置換（変更がある場合のみ）
             var skippedCount = 0;
+            // Issue #2262: 置き換えた明細の行数（既存の履歴を書き換えた件数として、新規作成と分けて操作ログへ記録する）
+            var updatedCount = 0;
             foreach (var kvp in detailsByLedgerId)
             {
                 var ledgerId = kvp.Key;
@@ -526,6 +528,7 @@ namespace ICCardManager.Services
                     {
                         scope.Commit();
                         importedCount += detailRows.Count;
+                        updatedCount += detailRows.Count;
                     }
                     else
                     {
@@ -578,6 +581,7 @@ namespace ICCardManager.Services
             {
                 Success = errors.Count == 0,
                 ImportedCount = importedCount,
+                UpdatedCount = updatedCount,
                 SkippedCount = skippedCount,
                 ErrorCount = errors.Count,
                 Errors = errors
@@ -608,6 +612,10 @@ namespace ICCardManager.Services
                 return BuildParentLedgerConflictMessage(ledgerId);
             }
 
+            // Issue #2262: 操作ログの「変更前」。下で ledger を書き換える前に、明細ごと別のインスタンスへ複製する
+            // （同じインスタンスを渡すと、記録する時点の値＝変更後が写る。db-write-conventions.md #1959）
+            var before = LedgerCloner.Clone(ledger);
+
             // Issue #1913: CSV の明細行は CsvExportService と同じ時系列昇順（古い→新しい）で
             // 並ぶ。ReplaceDetailsAsync は DELETE + INSERT で id を再採番するため、昇順のまま
             // 渡すと LedgerDetail.SequenceNumber の規約（FeliCa 互換で小さい id ＝ 新しい）が
@@ -633,7 +641,19 @@ namespace ICCardManager.Services
             // Issue #2212: 明細から再計算した列（摘要・金額）だけを SET する（#1726）
             var parentUpdated = await _ledgerRepository.UpdateSummaryAndAmountsAsync(
                 ledger.Id, ledger.Summary, ledger.Income, ledger.Expense, ledger.Balance, transaction).ConfigureAwait(false);
-            return parentUpdated ? null : BuildParentLedgerConflictMessage(ledgerId);
+            if (!parentUpdated)
+            {
+                return BuildParentLedgerConflictMessage(ledgerId);
+            }
+
+            // Issue #2262: 明細の置き換えを、変更前・変更後（明細を含む）とともに同じトランザクションで操作ログへ記録する。
+            // 以前は 1 行も記録せず、6 年保存の台帳の明細・摘要・金額が書き換わっても変更前の値が残らなかった。
+            // 変更後の明細は取り込んだ明細（時系列の昇順。GetByIdAsync が返す並びと同じ）で、記録は書き込みの後に行う
+            // （記録より後ろの書き込みは変更後に載らない。#1979）。記録が失敗したら例外が抜け、呼び出し元がこの履歴の
+            // 置き換えを巻き戻す（記録の無い書き換えを残さない）
+            ledger.Details = newDetails;
+            await _operationLogger.LogLedgerUpdateAsync(before, ledger, transaction).ConfigureAwait(false);
+            return null;
         }
 
         /// <summary>

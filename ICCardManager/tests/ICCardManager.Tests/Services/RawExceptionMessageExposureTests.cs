@@ -301,6 +301,7 @@ public class RawExceptionMessageExposureTests : IDisposable
             dbContext.Object,
             new Mock<ICacheService>().Object,
             settingsRepository.Object,
+            new ICCardManager.Services.OperationLogger(new Mock<ICCardManager.Data.Repositories.IOperationLogRepository>().Object, Mock.Of<ICCardManager.Services.ICurrentOperatorContext>()),
             logger);
 
         return (service, cardRepository, logger);

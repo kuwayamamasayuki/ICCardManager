@@ -188,6 +188,7 @@ public class CsvImportServiceDepartmentTypeTests : IDisposable
             dbContextMock.Object,
             new Mock<ICacheService>().Object,
             settingsRepositoryMock.Object,
+            new ICCardManager.Services.OperationLogger(new Mock<ICCardManager.Data.Repositories.IOperationLogRepository>().Object, Mock.Of<ICCardManager.Services.ICurrentOperatorContext>()),
             // Issue #1991: ロガー未注入だと取込失敗が ErrorDialogHelper 経由で
             // 本番のログディレクトリへ追記される。no-op のロガーを明示的に渡す。
             NullLogger<CsvImportService>.Instance);

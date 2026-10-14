@@ -1,6 +1,8 @@
+#nullable enable
 using System;
 using System.Collections.Generic;
 using System.Data.SQLite;
+using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Security;
@@ -54,7 +56,7 @@ namespace ICCardManager.Services
                 var existingCardIdms = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
                 // 全カードのIDmをキャッシュ（パフォーマンス向上）
-                var allCards = await _cardRepository.GetAllIncludingDeletedAsync().ConfigureAwait(false);
+                var allCards = (await _cardRepository.GetAllIncludingDeletedAsync().ConfigureAwait(false)).ToList();
                 foreach (var card in allCards)
                 {
                     existingCardIdms.Add(card.CardIdm);
@@ -81,12 +83,20 @@ namespace ICCardManager.Services
 
                     // 既存レコードの確認（IDがある場合）
                     var isUpdate = false;
-                    Ledger existingLedgerForUpdate = null;
+                    Ledger? existingLedgerForUpdate = null;
                     if (parsed.LedgerId.HasValue)
                     {
                         var existingLedger = await _ledgerRepository.GetByIdAsync(parsed.LedgerId.Value).ConfigureAwait(false);
                         if (existingLedger != null)
                         {
+                            // Issue #2262: ID が指す履歴と行のカードが食い違う行は取り込まない（下記 BuildLedgerCardMismatchError）
+                            var cardMismatch = BuildLedgerCardMismatchError(lineNumber, parsed.LedgerId.Value, existingLedger, parsed.CardIdm, allCards);
+                            if (cardMismatch != null)
+                            {
+                                errors.Add(cardMismatch);
+                                continue;
+                            }
+
                             var hasChanges = existingLedger.Summary != parsed.Summary ||
                                             (existingLedger.StaffName ?? "") != parsed.StaffName ||
                                             (existingLedger.Note ?? "") != parsed.Note ||
@@ -220,8 +230,8 @@ namespace ICCardManager.Services
                     {
                         if (isUpdate)
                         {
-                            // 既存レコードを更新
-                            var success = await _ledgerRepository.UpdateAsync(ledger, scope.Transaction).ConfigureAwait(false);
+                            // 既存レコードを更新し、変更前・変更後を同じトランザクションで操作ログへ記録する（Issue #2262）
+                            var success = await UpdateLedgerWithAuditLogAsync(ledger, scope.Transaction).ConfigureAwait(false);
                             if (success)
                             {
                                 updatedCount++;
@@ -231,7 +241,10 @@ namespace ICCardManager.Services
                                 errors.Add(new CsvImportError
                                 {
                                     LineNumber = lineNumber,
-                                    Message = "履歴の更新に失敗しました",
+                                    // Issue #2262 / #1759: false は「対象の行が無い（他の PC や別の操作で削除された）」競合だけ
+                                    // （UpdateLedgerWithAuditLogAsync の読み直しが null、または UPDATE が 0 行）。原因を名指しする
+                                    Message = ConcurrencyConflictMessage.ForImportUpdate(
+                                        $"利用履歴ID {ledger.Id.ToString(CultureInfo.InvariantCulture)} の履歴", "履歴画面"),
                                     Data = ledger.CardIdm
                                 });
                             }
@@ -305,6 +318,8 @@ namespace ICCardManager.Services
                 {
                     Success = errors.Count == 0,
                     ImportedCount = importedCount + updatedCount,
+                    // Issue #2262: 操作ログが追加と更新を分けて記録できるよう、更新件数を別に返す
+                    UpdatedCount = updatedCount,
                     SkippedCount = skippedCount,
                     ErrorCount = errors.Count,
                     Errors = errors
@@ -325,6 +340,88 @@ namespace ICCardManager.Services
         }
 
         /// <summary>
+        /// 既存の利用履歴 1 行を CSV の内容で更新し、変更前・変更後を同じトランザクションで操作ログへ記録する（Issue #2262）
+        /// </summary>
+        /// <param name="ledger">更新後の内容（CSV の行から組み立てたもの）</param>
+        /// <param name="transaction">取り込み全体のトランザクション</param>
+        /// <returns>更新したら <c>true</c>。対象の行が無かった（他 PC や別の操作で削除された）ら <c>false</c></returns>
+        /// <remarks>
+        /// <para>
+        /// 以前は更新しても操作ログを 1 行も残さず、取り込み全体についてファイル名と件数だけを記録していた。
+        /// 履歴画面の「変更」（認証あり・変更前後を記録）と同じ台帳の書き換えが、変更前の値も残らない形で行えた。
+        /// </para>
+        /// <para>
+        /// 変更前は<b>このトランザクションの中で読み直した</b>行を使う。検証の段階で読んだ行（<c>existingLedgerForUpdate</c>）は
+        /// トランザクションの外で読んだもので、共有モードでは書き込むまでの間に他 PC が書き換え得る。読み直した行は
+        /// 更新後の <paramref name="ledger"/> とは別のインスタンスなので、記録する時点で変更後の値を写すこともない
+        /// （db-write-conventions.md「監査ログへ渡す『変更前』は、変更対象と別のインスタンスにする」#1959）。
+        /// </para>
+        /// <para>
+        /// 利用履歴 CSV は明細を持たず、この更新は明細に触れない。変更後の記録に明細が無いと、操作ログの画面・Excel が
+        /// 「明細 N 件 → なし」という起きていない変更として表示するため、変更後には変更前の明細の複製を載せる。
+        /// </para>
+        /// <para>
+        /// 操作ログの書き込みが失敗したら例外がそのまま抜け、呼び出し元が取り込み全体を巻き戻す
+        /// （記録の無い書き換えを残さない。AuditedWriteTransaction と同じ考え方）。
+        /// </para>
+        /// </remarks>
+        private async Task<bool> UpdateLedgerWithAuditLogAsync(Ledger ledger, SQLiteTransaction transaction)
+        {
+            // DbContext は接続を 1 本しか持たないため、この読み取りは同じ接続上のトランザクションの内側で行われる
+            // （CsvImportService.Detail.cs の ReplaceDetailsAndUpdateParentAsync と同じ）
+            var before = await _ledgerRepository.GetByIdAsync(ledger.Id).ConfigureAwait(false);
+            if (before == null)
+            {
+                // 読み取りが null なら書き込みも行わない（#1760）。UPDATE も同じ WHERE で 0 行になる
+                return false;
+            }
+
+            var updated = await _ledgerRepository.UpdateAsync(ledger, transaction).ConfigureAwait(false);
+            if (!updated)
+            {
+                return false;
+            }
+
+            // 履歴のカード（card_idm）は UpdateAsync が SET しない列。検証で一致を確かめているが、
+            // 変更後の記録には実際に DB にある値を載せる（書いていない値を「変更後」として記録しない）
+            ledger.CardIdm = before.CardIdm;
+            ledger.Details = LedgerCloner.Clone(before).Details;
+            await _operationLogger.LogLedgerUpdateAsync(before, ledger, transaction).ConfigureAwait(false);
+            return true;
+        }
+
+        /// <summary>
+        /// 利用履歴 ID が指す既存の履歴と、行のカード（カードIDm列、空欄なら取り込み先カード）が食い違うときのエラー（Issue #2262）
+        /// </summary>
+        /// <returns>一致すれば <c>null</c></returns>
+        /// <remarks>
+        /// 履歴の更新（<c>LedgerRepository.UpdateAsync</c>）はカード（<c>card_idm</c>）を書き換えない。食い違う行を
+        /// 更新として受け付けると、別のカードの履歴の摘要・金額・残額を、そのカードの残高チェーンの検証を経ないまま
+        /// 書き換え、操作ログの「変更後」には実際には書いていないカードが載る。カードを付け替える取り込みは
+        /// 想定していないため、検証エラーにする（プレビューにも同じエラーを出す）。
+        /// IDm は画面に出さない（#1986）。登録済みのカードはカード種別と管理番号で名指しする。
+        /// </remarks>
+        private static CsvImportError? BuildLedgerCardMismatchError(
+            int lineNumber, int ledgerId, Ledger existingLedger, string rowCardIdm, IEnumerable<IcCard> cards)
+        {
+            if (string.Equals(existingLedger.CardIdm, rowCardIdm, StringComparison.OrdinalIgnoreCase))
+            {
+                return null;
+            }
+
+            var owner = cards.FirstOrDefault(c => string.Equals(c.CardIdm, existingLedger.CardIdm, StringComparison.OrdinalIgnoreCase));
+            var ownerLabel = owner != null ? $"「{$"{owner.CardType} {owner.CardNumber}".Trim()}」" : "（登録されていないカード）";
+            return new CsvImportError
+            {
+                LineNumber = lineNumber,
+                Message = $"利用履歴ID {ledgerId.ToString(CultureInfo.InvariantCulture)} は別の交通系ICカード{ownerLabel}の履歴で、" +
+                          "この行のカードと一致しないため取り込めません。利用履歴IDとカードIDm列（または取り込み先カード）を確認し、" +
+                          "新しい履歴として取り込む場合は利用履歴IDを空欄にしてください。",
+                Data = ledgerId.ToString(CultureInfo.InvariantCulture)
+            };
+        }
+
+        /// <summary>
         /// 履歴CSVのインポートプレビューを取得
         /// </summary>
         /// <param name="filePath">CSVファイルパス</param>
@@ -332,7 +429,7 @@ namespace ICCardManager.Services
         /// <param name="targetCardIdm">CSV内のIDmが空の場合に使用するカードIDm（オプション）</param>
         /// <remarks>Issue #511: CSVのIDm列が空の場合、targetCardIdmが指定されていればそのIDmを使用</remarks>
 
-        public async Task<CsvImportPreviewResult> PreviewLedgersAsync(string filePath, bool skipExisting = true, string? targetCardIdm = null)
+        public virtual async Task<CsvImportPreviewResult> PreviewLedgersAsync(string filePath, bool skipExisting = true, string? targetCardIdm = null)
         {
             var errors = new List<CsvImportError>();
             var items = new List<CsvImportPreviewItem>();
@@ -426,6 +523,14 @@ namespace ICCardManager.Services
                         var existingLedger = await _ledgerRepository.GetByIdAsync(ledgerId.Value).ConfigureAwait(false);
                         if (existingLedger != null)
                         {
+                            // Issue #2262: 取り込みと同じ検証（ID が指す履歴と行のカードの食い違い）をプレビューでも行う
+                            var cardMismatch = BuildLedgerCardMismatchError(lineNumber, ledgerId.Value, existingLedger, cardIdm, allCards);
+                            if (cardMismatch != null)
+                            {
+                                errors.Add(cardMismatch);
+                                continue;
+                            }
+
                             // Issue #639: 金額・日付を含む全フィールドで変更点を検出
                             DetectLedgerChanges(existingLedger, date, summary, income, expense, balance, staffName, note, companionCount, changes);
                             if (changes.Count > 0)

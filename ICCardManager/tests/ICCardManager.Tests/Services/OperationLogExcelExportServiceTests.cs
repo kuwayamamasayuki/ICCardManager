@@ -359,7 +359,7 @@ public class OperationLogExcelExportServiceTests : IDisposable
         var result = OperationLogExcelExportService.GetFieldNameMap("unknown");
 
         result.Keys.Should().BeEquivalentTo(
-            "FilePath", "FileName", "InsertedCount", "SkippedCount", "ErrorCount", "RecordCount");
+            "FilePath", "FileName", "InsertedCount", "UpdatedCount", "SkippedCount", "ErrorCount", "RecordCount");
     }
 
     #endregion

@@ -1,3 +1,4 @@
+#nullable enable
 using System;
 using System.Collections.Generic;
 using System.Data.SQLite;
@@ -25,8 +26,19 @@ namespace ICCardManager.Services
         /// <summary>成功したか</summary>
         public bool Success { get; set; }
 
-        /// <summary>インポートした件数</summary>
+        /// <summary>インポートした件数（新規追加と既存データの更新の合計）</summary>
         public int ImportedCount { get; set; }
+
+        /// <summary>
+        /// <see cref="ImportedCount"/> のうち、既存データを書き換えた件数（Issue #2262）
+        /// </summary>
+        /// <remarks>
+        /// 既存の行の更新・削除済みの職員や交通系ICカードの復元・利用履歴詳細の置き換え（置き換えた明細の行数）を数える。
+        /// 新規に追加した件数は <c>ImportedCount - UpdatedCount</c>。操作ログ（<c>OperationLogger.LogImportAsync</c>）は
+        /// 追加と更新を分けて記録する。以前は利用履歴の取り込みが両者を合計して「登録件数」として記録しており、
+        /// 既存の履歴を書き換えた取り込みかどうかを操作ログから区別できなかった。
+        /// </remarks>
+        public int UpdatedCount { get; set; }
 
         /// <summary>スキップした件数（既存データ）</summary>
         public int SkippedCount { get; set; }
@@ -38,7 +50,7 @@ namespace ICCardManager.Services
         public List<CsvImportError> Errors { get; set; } = new();
 
         /// <summary>エラーメッセージ</summary>
-        public string ErrorMessage { get; set; }
+        public string? ErrorMessage { get; set; }
     }
 
     /// <summary>
@@ -53,7 +65,7 @@ namespace ICCardManager.Services
         public string Message { get; set; } = string.Empty;
 
         /// <summary>対象データ</summary>
-        public string Data { get; set; }
+        public string? Data { get; set; }
     }
 
     /// <summary>
@@ -83,7 +95,7 @@ namespace ICCardManager.Services
         public List<CsvImportPreviewItem> Items { get; set; } = new();
 
         /// <summary>エラーメッセージ</summary>
-        public string ErrorMessage { get; set; }
+        public string? ErrorMessage { get; set; }
     }
 
     /// <summary>
@@ -101,7 +113,7 @@ namespace ICCardManager.Services
         public string Name { get; set; } = string.Empty;
 
         /// <summary>追加情報（管理番号または職員番号）</summary>
-        public string AdditionalInfo { get; set; }
+        public string? AdditionalInfo { get; set; }
 
         /// <summary>アクション（新規/更新/スキップ）</summary>
         public ImportAction Action { get; set; }
@@ -134,10 +146,10 @@ namespace ICCardManager.Services
         public string FieldName { get; set; } = string.Empty;
 
         /// <summary>変更前の値</summary>
-        public string OldValue { get; set; } = string.Empty;
+        public string? OldValue { get; set; } = string.Empty;
 
         /// <summary>変更後の値</summary>
-        public string NewValue { get; set; } = string.Empty;
+        public string? NewValue { get; set; } = string.Empty;
 
         /// <summary>表示専用フラグ（追加・スキップ時のデータ表示用）</summary>
         public bool IsDisplayOnly { get; set; }
@@ -201,25 +213,11 @@ namespace ICCardManager.Services
         private readonly DbContext _dbContext;
         private readonly ICacheService _cacheService;
         private readonly ISettingsRepository _settingsRepository;
+        private readonly OperationLogger _operationLogger;
         private readonly ILogger<CsvImportService>? _logger;
 
         /// <summary>
-        /// 7 引数オーバーロード（既存テストの Moq プロキシ生成互換性のため維持）
-        /// </summary>
-        public CsvImportService(
-            ICardRepository cardRepository,
-            IStaffRepository staffRepository,
-            ILedgerRepository ledgerRepository,
-            IValidationService validationService,
-            DbContext dbContext,
-            ICacheService cacheService,
-            ISettingsRepository settingsRepository)
-            : this(cardRepository, staffRepository, ledgerRepository, validationService, dbContext, cacheService, settingsRepository, logger: null)
-        {
-        }
-
-        /// <summary>
-        /// Issue #1282: ILogger を受け取るコンストラクタ
+        /// 8 引数オーバーロード（既存テストの Moq プロキシ生成互換性のため維持）
         /// </summary>
         public CsvImportService(
             ICardRepository cardRepository,
@@ -229,6 +227,28 @@ namespace ICCardManager.Services
             DbContext dbContext,
             ICacheService cacheService,
             ISettingsRepository settingsRepository,
+            OperationLogger operationLogger)
+            : this(cardRepository, staffRepository, ledgerRepository, validationService, dbContext, cacheService, settingsRepository, operationLogger, logger: null)
+        {
+        }
+
+        /// <summary>
+        /// Issue #1282: ILogger を受け取るコンストラクタ
+        /// </summary>
+        /// <remarks>
+        /// Issue #2262: <c>operationLogger</c> は、職員の追加・更新・復元、利用履歴の更新、利用履歴詳細の置き換えの操作ログを、
+        /// 書き込みと同じトランザクションで 1 行ずつ記録する。既定値を持たない必須引数にする
+        /// （#1820 / #2151 と同じ判断。既定値を付けると、渡し忘れた経路だけ変更前の値が記録されない）
+        /// </remarks>
+        public CsvImportService(
+            ICardRepository cardRepository,
+            IStaffRepository staffRepository,
+            ILedgerRepository ledgerRepository,
+            IValidationService validationService,
+            DbContext dbContext,
+            ICacheService cacheService,
+            ISettingsRepository settingsRepository,
+            OperationLogger operationLogger,
             ILogger<CsvImportService>? logger)
         {
             _cardRepository = cardRepository;
@@ -238,6 +258,7 @@ namespace ICCardManager.Services
             _dbContext = dbContext;
             _cacheService = cacheService;
             _settingsRepository = settingsRepository;
+            _operationLogger = operationLogger ?? throw new ArgumentNullException(nameof(operationLogger));
             _logger = logger;
         }
 
@@ -296,7 +317,7 @@ namespace ICCardManager.Services
         /// </remarks>
         /// <exception cref="FileOperationException">文字コードを判別できない、または宣言された文字コードとして読めない場合</exception>
         /// <exception cref="FileOperationException">ファイルが <see cref="MaxImportFileSizeBytes"/> を超えている場合（Issue #2272）</exception>
-        internal static Task<List<string>> ReadCsvFileAsync(string filePath, ILogger logger = null)
+        internal static Task<List<string>> ReadCsvFileAsync(string filePath, ILogger? logger = null)
         {
             return ReadCsvFileAsync(filePath, logger, MaxImportFileSizeBytes);
         }
@@ -308,7 +329,7 @@ namespace ICCardManager.Services
         /// 上限の境界を、実際に数十MBのファイルを作らずに単体テストで固定するためのオーバーロード。
         /// 本番の経路は上の版から <see cref="MaxImportFileSizeBytes"/> を渡す。
         /// </remarks>
-        internal static async Task<List<string>> ReadCsvFileAsync(string filePath, ILogger logger, long maxFileSizeBytes)
+        internal static async Task<List<string>> ReadCsvFileAsync(string filePath, ILogger? logger, long maxFileSizeBytes)
         {
             var bytes = await ReadAllBytesAsync(filePath, maxFileSizeBytes).ConfigureAwait(false);
 
@@ -419,7 +440,7 @@ namespace ICCardManager.Services
         /// </para>
         /// </remarks>
         private static FileOperationException CreateEncodingFailureException(
-            TextDecodeResult decoded, string filePath, ILogger logger)
+            TextDecodeResult decoded, string filePath, ILogger? logger)
         {
             if (decoded.Failure == TextDecodeFailure.DeclaredEncodingUnreadable)
             {
@@ -678,7 +699,7 @@ namespace ICCardManager.Services
             // （development-conventions.md #1745「catch の中の後始末は、それ自体が失敗し得ることを前提に書く」）。
             try
             {
-                if (exception?.Data != null && !exception.Data.IsReadOnly)
+                if (exception.Data != null && !exception.Data.IsReadOnly)
                 {
                     exception.Data[LoggedMarkerKey] = true;
                 }
@@ -877,7 +898,7 @@ namespace ICCardManager.Services
         /// （空白のみ・空文字は null）。保存時の <c>Number = …</c> / <c>Note = …</c> と
         /// <c>Detect*Changes</c> の比較で同じ式を使うため（Issue #1808 の「幻の差分」再発防止）。
         /// </summary>
-        internal static string NormalizeOptionalText(string value)
+        internal static string? NormalizeOptionalText(string? value)
             => string.IsNullOrWhiteSpace(value) ? null : value;
 
         /// <summary>

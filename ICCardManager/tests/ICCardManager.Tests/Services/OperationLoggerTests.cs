@@ -465,6 +465,7 @@ public class OperationLoggerTests : IDisposable
             OperationLogger.Tables.Staff,
             @"C:\import\staff_20260419.csv",
             insertedCount: 10,
+            updatedCount: 3,
             skippedCount: 2,
             errorCount: 0);
 
@@ -480,6 +481,8 @@ public class OperationLoggerTests : IDisposable
         log.OperatorName.Should().Be("田中 太郎");
         log.BeforeData.Should().BeNull();
         log.AfterData.Should().Contain("\"InsertedCount\":10");
+        // Issue #2262: 追加と更新を分けて記録する
+        log.AfterData.Should().Contain("\"UpdatedCount\":3");
         log.AfterData.Should().Contain("\"SkippedCount\":2");
         log.AfterData.Should().Contain("\"ErrorCount\":0");
         log.AfterData.Should().Contain("staff_20260419.csv");
@@ -495,6 +498,7 @@ public class OperationLoggerTests : IDisposable
             OperationLogger.Tables.Ledger,
             @"D:\data\ledger.csv",
             insertedCount: 100,
+            updatedCount: 0,
             skippedCount: 0,
             errorCount: 0);
 

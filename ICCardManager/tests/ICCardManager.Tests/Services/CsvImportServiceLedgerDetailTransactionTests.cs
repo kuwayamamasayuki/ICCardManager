@@ -177,6 +177,7 @@ public class CsvImportServiceLedgerDetailTransactionTests : IDisposable
             _dbContext,
             new Mock<ICacheService>().Object,
             settingsRepositoryMock.Object,
+            new ICCardManager.Services.OperationLogger(new Mock<ICCardManager.Data.Repositories.IOperationLogRepository>().Object, Mock.Of<ICCardManager.Services.ICurrentOperatorContext>()),
             NullLogger<CsvImportService>.Instance);
 
         return (service, ledgerRepositoryMock);

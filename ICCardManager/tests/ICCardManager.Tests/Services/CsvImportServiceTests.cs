@@ -85,7 +85,8 @@ public class CsvImportServiceTests : IDisposable
             _dbContextMock.Object,
             _cacheServiceMock.Object,
             _settingsRepositoryMock.Object,
-            // Issue #1991: ロガーを渡さない 7 引数版だと、取込失敗のたびに
+            new OperationLogger(new Mock<IOperationLogRepository>().Object, Mock.Of<ICurrentOperatorContext>()),
+            // Issue #1991: ロガーを渡さない 8 引数版だと、取込失敗のたびに
             // ErrorDialogHelper.LogException が**本番のログディレクトリ**（ACL 設定つき）へ
             // 追記する。意図的に例外を投げるテストが数百件あるため、実運用の障害ログが
             // テスト実行のたびに汚染される。no-op のロガーを明示的に渡す。
@@ -1024,10 +1025,39 @@ FEDCBA9876543210,鈴木花子,002,テスト2";
         result.ImportedCount.Should().Be(0);
         var error = result.Errors.Should().ContainSingle().Subject;
         error.LineNumber.Should().Be(2, "CSV の 2 行目（ヘッダーの次）の復元に失敗した");
-        error.Message.Should().Be("職員の復元・更新に失敗しました", "通常の更新失敗と区別できる文言で報告するべき");
+        // Issue #2262: 復元の false は「先に復元された」競合。原因を名指しし、通常の更新の競合とは別の文言で報告する
+        error.Message.Should().Be(
+            ICCardManager.Common.ConcurrencyConflictMessage.ForImportRestore("職員「山田太郎」", "職員管理画面（F2）"),
+            "通常の更新失敗と区別できる文言で報告するべき");
         AssertRolledBack(probe);
         _staffRepositoryMock.Verify(x => x.UpdateAsync(It.IsAny<Staff>(), It.IsAny<SQLiteTransaction>()), Times.Never,
             "復元できなかった職員を更新しない（更新は WHERE is_deleted = 0 なので、呼んでも成功しない）");
+    }
+
+    /// <summary>
+    /// Issue #2262: 登録済みの職員の更新が 0 行（他の PC や別の操作で削除された）なら、原因を名指しする行エラーにすること
+    /// </summary>
+    [Fact]
+    public async Task ImportStaffAsync_UpdateAffectsNoRow_ReportsConcurrencyConflict()
+    {
+        var csvContent = @"職員IDm,氏名,職員番号,備考
+0123456789ABCDEF,山田太郎,001,更新";
+        var filePath = Path.Combine(_testDirectory, "staff_update_conflict.csv");
+        await Task.Run(() => File.WriteAllText(filePath, csvContent, CsvEncoding));
+
+        _staffRepositoryMock.Setup(x => x.GetByIdmAsync("0123456789ABCDEF", true))
+            .ReturnsAsync(new Staff { StaffIdm = "0123456789ABCDEF", Name = "山田太郎", Number = "001" });
+        _staffRepositoryMock.Setup(x => x.UpdateAsync(It.IsAny<Staff>(), It.IsAny<SQLiteTransaction>())).ReturnsAsync(false);
+        using var probe = UseObservableTransaction();
+
+        var result = await _service.ImportStaffAsync(filePath);
+
+        result.Success.Should().BeFalse();
+        var error = result.Errors.Should().ContainSingle().Subject;
+        error.LineNumber.Should().Be(2);
+        error.Message.Should().Be(
+            ICCardManager.Common.ConcurrencyConflictMessage.ForImportUpdate("職員「山田太郎」", "職員管理画面（F2）"));
+        AssertRolledBack(probe);
     }
 
     /// <summary>
@@ -1054,7 +1084,8 @@ FEDCBA9876543210,鈴木花子,002,テスト2";
 
         result.Success.Should().BeFalse();
         result.ImportedCount.Should().Be(0);
-        result.Errors.Should().ContainSingle().Which.Message.Should().Be("職員の復元・更新に失敗しました");
+        result.Errors.Should().ContainSingle().Which.Message.Should().Be(
+            ICCardManager.Common.ConcurrencyConflictMessage.ForImportRestore("職員「山田太郎」", "職員管理画面（F2）"));
         AssertRolledBack(probe);
     }
 
@@ -2084,6 +2115,45 @@ FEDCBA9876543210,鈴木花子,002,テスト2";
             l.Balance == 10000 &&
             l.Summary == "12月から繰越"
         ), It.IsAny<SQLiteTransaction>()), Times.Once);
+    }
+
+    /// <summary>
+    /// Issue #2262: 既存の利用履歴の更新が 0 行（他の PC や別の操作で削除された）なら、原因を名指しする行エラーで巻き戻すこと
+    /// </summary>
+    [Fact]
+    public async Task ImportLedgersAsync_UpdateAffectsNoRow_ReportsConcurrencyConflict()
+    {
+        var csvContent = @"ID,日時,カードIDm,管理番号,摘要,受入金額,払出金額,残額,利用者,備考
+1,2025-02-01 00:00:00,0123456789ABCDEF,001,12月から繰越,10000,,10000,,";
+        var filePath = Path.Combine(_testDirectory, "ledgers_update_conflict.csv");
+        await Task.Run(() => File.WriteAllText(filePath, csvContent, CsvEncoding));
+
+        _cardRepositoryMock.Setup(x => x.GetAllIncludingDeletedAsync()).ReturnsAsync(new List<IcCard>
+        {
+            new IcCard { CardIdm = "0123456789ABCDEF", CardType = "はやかけん", CardNumber = "001" }
+        });
+        _ledgerRepositoryMock.Setup(x => x.GetByIdAsync(1)).ReturnsAsync(new Ledger
+        {
+            Id = 1,
+            CardIdm = "0123456789ABCDEF",
+            Date = new DateTime(2025, 2, 1),
+            Summary = "12月から繰越",
+            Income = 8806,
+            Balance = 8806
+        });
+        _ledgerRepositoryMock.Setup(x => x.UpdateAsync(It.IsAny<Ledger>(), It.IsAny<SQLiteTransaction>())).ReturnsAsync(false);
+        _ledgerRepositoryMock.Setup(x => x.GetExistingLedgerKeysAsync(It.IsAny<IEnumerable<string>>()))
+            .ReturnsAsync(new HashSet<(string, DateTime, string, int, int, int)>());
+
+        var result = await _service.ImportLedgersAsync(filePath);
+
+        result.Success.Should().BeFalse();
+        result.ImportedCount.Should().Be(0);
+        var error = result.Errors.Should().ContainSingle().Subject;
+        error.LineNumber.Should().Be(2);
+        error.Message.Should().Be(
+            ICCardManager.Common.ConcurrencyConflictMessage.ForImportUpdate("利用履歴ID 1 の履歴", "履歴画面"));
+        error.Message.Should().Contain("可能性があります").And.EndWith("してください。");
     }
 
     /// <summary>
@@ -3261,7 +3331,7 @@ FEDCBA9876543210,鈴木花子,002,テスト2";
     };
 
     /// <summary>指定した経路を実行し、（成功したか, エラーメッセージ）を返す</summary>
-    private async Task<(bool Succeeded, string ErrorMessage)> InvokeImportRouteAsync(string route, string filePath)
+    private async Task<(bool Succeeded, string? ErrorMessage)> InvokeImportRouteAsync(string route, string filePath)
     {
         switch (route)
         {
@@ -3434,6 +3504,7 @@ FEDCBA9876543210,鈴木花子,002,テスト2";
             _dbContextMock.Object,
             _cacheServiceMock.Object,
             _settingsRepositoryMock.Object,
+            new OperationLogger(new Mock<IOperationLogRepository>().Object, Mock.Of<ICurrentOperatorContext>()),
             loggerMock.Object);
 
         // Act
