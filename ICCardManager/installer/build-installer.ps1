@@ -360,3 +360,14 @@ if ($InstallerFile) {
     Write-Host "インストーラー: $($InstallerFile.FullName)" -ForegroundColor Green
     Write-Host "サイズ: $([math]::Round($InstallerFile.Length / 1MB, 2)) MB" -ForegroundColor Green
 }
+
+# 作成したインストーラーの SHA-256 を、sha256sum 互換の形式で隣に書き出す（Issue #2268）。
+# コード署名の証明書が無いため、共有フォルダー等で受け渡すときに受け取った側が Get-FileHash で照合できるようにする。
+# GitHub Release へは publish-release.ps1 が SHA256SUMS.txt と本文に載せる（形式は tools/checksums.ps1 の 1 か所）
+. (Join-Path $ProjectRoot "tools\checksums.ps1")
+$SetupPath = Join-Path $OutputDir "ICCardManager_Setup_${Version}.exe"
+$ChecksumPath = "${SetupPath}.sha256"
+$ChecksumLine = Get-Sha256SumLine -Path $SetupPath
+Write-Sha256SumsFile -Path $ChecksumPath -Lines @($ChecksumLine)
+Write-Host "SHA-256: $($ChecksumLine.Substring(0, 64))" -ForegroundColor Green
+Write-Host "  （$ChecksumPath に書き出しました。配布先では Get-FileHash -Algorithm SHA256 で照合できます）" -ForegroundColor Green

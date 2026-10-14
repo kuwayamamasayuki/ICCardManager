@@ -244,8 +244,10 @@ installer/output/ICCardManager_Setup_1.0.7.exe
 > マニュアル変換が失敗します。
 
 7. Windows PowerShell を開き、`installer/` ディレクトリに移動
-8. `.\build-installer.ps1` を実行（マニュアル変換 + インストーラー作成を自動実行）
+8. `.\build-installer.ps1` を実行（マニュアル変換 + インストーラー作成を自動実行）。インストーラーの隣に SHA-256 の `ICCardManager_Setup_X.Y.Z.exe.sha256` も書き出される
 9. `gh release upload vX.Y.Z .\output\ICCardManager_Setup_X.Y.Z.exe` でインストーラーをアップロード
+
+> **SHA-256（Issue #2268）**: 通常は `tools/publish-release.ps1` が、release.yml の添付した `SHA256SUMS.txt`（ZIP の行）にインストーラーの行を加えて上書きアップロードし、Release 本文にも両方のハッシュを載せる。手作業でアップロードした場合は `SHA256SUMS.txt` にインストーラーの行が無いので、`publish-release.ps1 -Version X.Y.Z -SkipTag -SkipBuild` を実行して揃える。publish-release.ps1 の完了後に同じタグで release.yml を再実行した場合も、`SHA256SUMS.txt` が ZIP の行だけで上書きされ本文も雛形に戻る（インストーラーのハッシュが消える）ので、同じコマンドをもう一度実行して揃える。照合手順は IT担当者ガイド §8.6
 
 > **補足**: `build-installer.ps1` は `.csproj` からバージョンを自動取得し、
 > マニュアルの `.docx` に正しいバージョンを注入します（`-Force -Version` オプション）。
