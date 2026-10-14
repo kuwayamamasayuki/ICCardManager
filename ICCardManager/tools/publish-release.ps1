@@ -272,7 +272,7 @@ while ($true) {
     }
 
     if ($elapsed -eq 0) {
-        Write-Host "  見つかりません。待機します（最大${maxWaitSeconds}秒）..." -ForegroundColor Gray
+        Write-Host "  Release または ${Sha256SumsFileName} が見つかりません。待機します（最大${maxWaitSeconds}秒）..." -ForegroundColor Gray
     }
 
     Start-Sleep -Seconds $waitInterval
@@ -403,7 +403,6 @@ if (-not (Test-ReleaseBodyMatches -Expected $fullReleaseNotes -Actual $actualBod
 }
 Remove-Item -LiteralPath $notesFile -ErrorAction SilentlyContinue
 Write-Success "リリースノート更新完了（${bodyLength} 文字。読み戻して確認済み）"
-
 
 # ─────────────────────────────────────────────────
 # 6. 結果出力
