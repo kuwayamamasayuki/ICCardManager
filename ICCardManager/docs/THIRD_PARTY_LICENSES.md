@@ -76,6 +76,7 @@
 | [coverlet.collector](https://github.com/coverlet-coverage/coverlet) | 3.2.0 | MIT | コードカバレッジ収集 |
 | [FluentAssertions](https://github.com/fluentassertions/fluentassertions) | 6.12.2 | Apache-2.0 | テストアサーションライブラリ |
 | [Moq](https://github.com/moq/moq) | 4.21.0 | BSD-3-Clause | モックフレームワーク |
+| [YamlDotNet](https://github.com/aaubry/YamlDotNet) | 16.3.0 | MIT | GitHub Actions のワークフローを構文木として読む静的検査 |
 | [Xunit.SkippableFact](https://github.com/AArnott/Xunit.SkippableFact) | 1.5.85 | MS-PL | 実行時の条件による UI テストのスキップ |
 | [FlaUI.Core](https://github.com/FlaUI/FlaUI) | 5.0.0 | MIT | UIオートメーションテスト基盤 |
 | [FlaUI.UIA3](https://github.com/FlaUI/FlaUI) | 5.0.0 | MIT | UIA3による画面操作自動化 |
@@ -124,6 +125,7 @@ DebugDataViewer はアプリケーション本体と共通のライブラリ（S
 
 | 日付 | 内容 |
 |---|---|
+| 2026-10-14 | テスト用ライブラリ（§2）に YamlDotNet を追加（ワークフローの静的検査を構文木で行うため。Issue #2271） |
 | 2026-10-03 | 推移的に配布されるライブラリ（§1a）を追加し、§1 の Microsoft.Extensions.* のライセンスを MIT に訂正（8.0 系の宣言は MIT。Apache-2.0 は 3.x 系まで）。ライセンス欄を各パッケージの宣言と照合するテストを追加（Issue #2215） |
 | 2026-10-03 | §3 の見出しと中身の食い違いを解消し、ビルド時のみ使用するライブラリ（§3）と開発ツール（DebugDataViewer）の依存ライブラリ（§4）に分けた。DebugDataViewer はインストーラーに同梱されるため、「配布されない」とした記述を改めた。以降の節番号を 1 つずつ繰り下げた |
 | 2026-10-02 | テスト用ライブラリ（§2）の版を csproj に同期し、Xunit.SkippableFact を追加。UI テストのテスト基盤パッケージを単体テストと同じ版へ更新。xunit.runner.visualstudio は 2.8.2 でライセンスが MIT から Apache-2.0 に変わった（Issue #2166） |

@@ -103,6 +103,15 @@
   - 自動で入れた欄は、入力例の位置に「自動入力：…」の注記を太字で出して職員の入力と区別し、ステータス欄に件数を出す。保存済みの値がある欄と、職員が一度でも操作した欄には入れない。スキップの破棄の確認と保存前の類似の確認は職員の入力だけを数える。入力欄の読み上げの補足も注記に切り替え、自動で入れた欄にフォーカスが入ると（Tab でもクリックでも）値の全体を選択し（打ち始めた文字で置き換わる）、候補は値で絞らずその行の並びの先頭を出す
   - 集計は `LedgerRepository.GetBusStopUsageStatsAsync`（バス停名 × 金額 × 指定した職員の利用か）、並べ方と既定値・往復の判断は `Services/BusStopInputAssistant`（純関数）が持つ。マイグレーションは不要。単体テスト +71（`BusStopInputAssistantTests` 31・`LedgerRepositoryBusStopUsageStatTests` 8・`BusStopInputViewModelAutoFillTests` 28・`BusStopInputDialogAutoFillLayoutTests` 4。単体 8,675→8,746・合計 8,791→8,862）
 
+**開発基盤**
+- Issue #2271 **GitHub Actions のトークン権限を読み取りに限り、release.yml がタグ名をスクリプトへ直接埋め込んでいたのを環境変数で渡すようにした**（セキュリティ）
+  - ci.yml・screenshot-sync-check.yml・test-count-sync-check.yml・vulnerability-scan.yml には `permissions:` の宣言が無く、push・schedule・手動実行の `GITHUB_TOKEN` はリポジトリ設定の既定の権限（設定によっては write）で動いていた。全ワークフローの最上位に `permissions: contents: read` を置き、書き込みは release.yml の `build-release` ジョブの `contents: write`（GitHub Release の作成）だけに限った
+  - release.yml は `run:` の中に `${{ github.ref_name }}` を直接書いており、式はシェルが読む前にスクリプトへ埋め込まれるため、`$` や `(` `)` を含むタグ名が pwsh の式として実行され得た（タグを push できるのは書き込み権限者だけなので権限の上昇にはならない）。ジョブの `env: REF_NAME` で渡し、スクリプトでは `$env:REF_NAME` で読む
+  - 静的検査 `CiWorkflowConventionTests` に 5 件を追加: 全ワークフローの最上位の権限が read / none だけであること、書き込み権限が理由付きの許可リストにあるジョブだけであり許可リストの権限が実際に宣言されていること、`run:` の中の式が参照するコンテキストが `matrix` / `strategy` / `runner` に限られること（禁止する名前ではなく許すコンテキストを列挙し、`env` / `steps.*.outputs` を経由して戻す経路も塞ぐ）、検出ロジック 2 件。あわせて `strategy:`（matrix）の定義に式が無いこと（matrix を許す前提）と、入力をコードとして実行する `actions/github-script` を使っていないことを同じテストで表明する
+  - 検査はワークフローを YAML パーサー（テストプロジェクトに追加した YamlDotNet 16.3.0、MIT）で構文木として読む。行単位の正規表現で読む実装は、レビューのたびに読めない書き方（引用符付きのキーやジョブ名・1 行のジョブ・値を次の行に書いた `run:`・エイリアス等）を「無い」と読んで素通りさせていた。読めないファイル・想定の形でない節は例外で赤にする。式の範囲は文字列リテラルの中の `}}` で切らない
+  - 開発者ガイド §5.9 にワークフローを書くときの規約を追加した（`actions/github-script` の `with: script:` は「`with:` はシェルを通らない」の例外であることも注記）。THIRD_PARTY_LICENSES.md §2 に YamlDotNet を追加した
+  - 単体テスト +5（`CiWorkflowConventionTests` 29→34）で 9,216→9,221、合計 9,333→9,338
+
 ### v2.11.1 (2026-10-06)
 
 **ドキュメント**

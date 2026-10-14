@@ -45,6 +45,9 @@
     <!-- テストヘルパー (.NET Framework対応版) -->
     <PackageReference Include="FluentAssertions" Version="6.12.2" />
     <PackageReference Include="Moq" Version="4.21.0" />
+
+    <!-- GitHub Actions のワークフローを構文木として読む（CiWorkflowConventionTests。Issue #2271） -->
+    <PackageReference Include="YamlDotNet" Version="16.3.0" />
   </ItemGroup>
 
   <ItemGroup>

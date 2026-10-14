@@ -20,6 +20,11 @@ on:
       - 'tools/tests/test_check_test_count_sync.py'
       - '.github/workflows/test-count-sync-check.yml'
 
+# GITHUB_TOKEN の権限は読み取りだけを最上位で宣言する（Issue #2271）。宣言が無いと既定の権限（リポジトリの設定
+# によっては write）で動く。書き込みが要るジョブだけが、ジョブ単位で理由を添えて広げる（CiWorkflowConventionTests が検査する）。
+permissions:
+  contents: read
+
 env:
   DOTNET_VERSION: '8.0.x'
   DOTNET_NOLOGO: true
