@@ -41,7 +41,7 @@ CVE スキャンの詳細プロセスは `docs/manual/開発者ガイド.md` §5
 pwsh.exe -File ./tools/release.ps1 -Version X.Y.Z
 ```
 - Phase 1: バージョンバンプ → PR作成 → CIチェック待ち → squashマージ → main最新化
-- Phase 2: タグ → インストーラービルド → GitHub Release更新（リリースノート+exe）
+- Phase 2: タグ → インストーラービルド → GitHub Release更新（リリースノート+exe+SHA256SUMS.txt）
 - `-DryRun` でCHANGELOG生成と差分プレビューのみ
 - `-Force` でタグ作成時の確認プロンプトをスキップ
 
@@ -103,6 +103,7 @@ gh release edit vX.Y.Z --notes-file <本文のファイル>   # stdin（--notes-
 gh release view vX.Y.Z --json body -q '.body | length'   # 0 でないことを確かめる
 gh release upload vX.Y.Z "installer/output/ICCardManager_Setup_X.Y.Z.exe" --clobber
 ```
+手作業でアップロードすると、`SHA256SUMS.txt` にインストーラーの行が無く、本文にもハッシュが載らない。最後に `pwsh.exe -File ./tools/publish-release.ps1 -Version X.Y.Z -SkipTag -SkipBuild` を実行して揃える（下記「SHA-256」）
 
 ## 補足
 - `build-installer.ps1` はクリーンビルド、dotnet publish、マニュアル変換(-NoMermaid)、Inno Setupを一括実行
@@ -148,6 +149,7 @@ gh release upload vX.Y.Z "installer/output/ICCardManager_Setup_X.Y.Z.exe" --clob
 - **タグ重複**: 失敗リトライ時、タグ `vX.Y.Z` が既に存在する場合は `-SkipTag` で既存タグをスキップ
 - **ISCC.exe パス**: `settings.local.json` の許可パスと実際のインストール先が一致していること
 - **リリースノートの本文（Issue #2246）**: `publish-release.ps1` は本文を一時ファイルで `gh release edit --notes-file` へ渡し、`gh release view --json body` で読み戻して内容を照合する（本文を組み立てられるかはタグを打つ前に確かめる）。**終了コードは成功の根拠にしない**（stdin で渡していた頃は本文が届かず、gh は空の本文を終了コード 0 で受け付けて v2.9.5〜v2.11.0 の本文が空のまま残った）。照合に失敗したら一時ファイル（`installer/output/release-notes-X.Y.Z.md`）が残るので、原因を直して `-SkipTag -SkipBuild` で再実行する。手作業で直す場合も、本文を設定したら `gh release view vX.Y.Z --json body -q '.body | length'` で 0 でないことを確かめる
+- **SHA-256（Issue #2268）**: `release.yml` が ZIP の行だけの `SHA256SUMS.txt` を Release に添付し、`publish-release.ps1` がそれを取得してインストーラーの行を加え、`--clobber` で上書きアップロードしてから、本文（「SHA-256（改ざんの確認）」欄）に載せる（アップロードの失敗で本文と添付が食い違わないよう、アップロードが先）。Release の存在ではなく `SHA256SUMS.txt` の添付が済むまで待つ（`-ReleaseWaitSeconds` が上限）。待ち切れない・取得できない（release.yml が添付していない）と止まるので、Actions の「Create checksums」ステップを確認して `-SkipTag -SkipBuild` で再実行する。公開後は Release ページで、本文の 2 行と `SHA256SUMS.txt` の中身が一致し、ダウンロードした exe・ZIP の `Get-FileHash -Algorithm SHA256` とも一致することを確かめる。形式と計算は `tools/checksums.ps1` の 1 か所にある。**publish-release.ps1 の完了後に同じタグで release.yml を再実行すると**、`SHA256SUMS.txt` が ZIP の行だけで上書きされ本文も雛形に戻る（インストーラーのハッシュが黙って消える）ので、再実行したら `publish-release.ps1 -Version X.Y.Z -SkipTag -SkipBuild` をもう一度実行して揃える
 - **本文の上限は 125,000 文字**: 超えると `release-notes.ps1` が分類行と各項目の見出し行（行頭の `- `）だけに絞り、タグ時点の CHANGELOG へのリンクを添える。見出しだけでも超えるときは収まる分だけ載せて「ほか N 件」と示す。組み立ては `release-notes.ps1` の 1 か所にあるので、雛形（動作環境など）を変えるときはそこを直す
 - **GitHub Release の作成待ち**: `release.yml` は 3〜6 分かかる。`publish-release.ps1` は既定で最大 900 秒待つ（`-ReleaseWaitSeconds` で変更可）。待ち切れずに止まったら、Release の作成を確かめてから `-SkipTag -SkipBuild` で再開する
 - **CHANGELOG.md の `### Unreleased`**: `bump-version.ps1` は既存 `### Unreleased` セクションを検出すると、見出しを `### vX.Y.Z (date)` にリネームする。Unreleased に本文があればそれを正典として採用し、コミットメッセージからの自動生成エントリは破棄する（本文が空のときだけ自動生成を採用）。Unreleased が存在しない場合は「# 更新履歴」直後に新規セクションを挿入する従来挙動。

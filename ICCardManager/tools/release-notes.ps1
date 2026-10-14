@@ -8,6 +8,9 @@
 # GitHub のリリース本文の上限（文字数）。超えると gh release edit が失敗する。
 $ReleaseBodyMaxLength = 125000
 
+# 配布物の SHA-256 の節（New-ChecksumsMarkdown）。チェックサムの形式は checksums.ps1 の 1 か所に置く（Issue #2268）
+. (Join-Path $PSScriptRoot "checksums.ps1")
+
 function Get-ChangelogSection {
     param([string]$Path, [string]$Ver)
     $content = Get-Content -LiteralPath $Path -Encoding UTF8
@@ -60,7 +63,9 @@ function New-ReleaseNotesBody {
         [Parameter(Mandatory = $true)][string]$Version,
         [AllowEmptyString()][string]$Section,
         [Parameter(Mandatory = $true)][string]$ChangelogUrl,
-        [int]$MaxLength = $ReleaseBodyMaxLength
+        [int]$MaxLength = $ReleaseBodyMaxLength,
+        # 配布物の SHA-256（sha256sum 互換の行）。渡すと末尾に照合用の節を載せる。本文を見出しに絞るときも落とさない（Issue #2268）
+        [AllowEmptyCollection()][string[]]$Checksums = @()
     )
 
     if ([string]::IsNullOrWhiteSpace($Section)) {
@@ -80,6 +85,10 @@ function New-ReleaseNotesBody {
         "### インストール方法",
         "インストーラー（``ICCardManager_Setup_${Version}.exe``）を実行してください。"
     )
+    $checksumSection = New-ChecksumsMarkdown $Checksums
+    if ($checksumSection.Count -gt 0) {
+        $footer = @($footer) + @("") + @($checksumSection)
+    }
 
     $full = (@($header) + @($Section) + @($footer)) -join "`n"
     if ((Measure-ReleaseBodyLength $full) -le $MaxLength) {

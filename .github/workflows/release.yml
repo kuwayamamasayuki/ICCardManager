@@ -28,7 +28,7 @@ jobs:
   build-release:
     runs-on: windows-latest
     timeout-minutes: 45
-    # GitHub Release の作成と ZIP の添付（Create Release）に contents: write が要る。最上位の read をこのジョブだけ広げる（Issue #2271）。
+    # GitHub Release の作成と ZIP・SHA256SUMS.txt の添付（Create Release）に contents: write が要る。最上位の read をこのジョブだけ広げる（Issue #2271）。
     permissions:
       contents: write
 
@@ -71,6 +71,21 @@ jobs:
       run: |
         Compress-Archive -Path ./publish/* -DestinationPath "ICCardManager-$env:REF_NAME.zip"
 
+    # 配布物の SHA-256 を sha256sum 互換の SHA256SUMS.txt に書き、Release に添付して本文にも載せる（Issue #2268）。
+    # コード署名の証明書が無いため、配布の途中（共有フォルダー経由の受け渡し等）での差し替えを受け取った側が
+    # Get-FileHash で照合して検出できるようにする。形式は tools/checksums.ps1 の 1 か所に置き、publish-release.ps1 が
+    # このファイルにインストーラーの行を加えて上書きする。
+    - name: Create checksums
+      id: checksums
+      run: |
+        . ./tools/checksums.ps1
+        $line = Get-Sha256SumLine -Path "ICCardManager-$env:REF_NAME.zip"
+        Write-Sha256SumsFile -Path $Sha256SumsFileName -Lines @($line)
+        Write-Host $line
+        # 出力ファイルへは符号化を明示して書く（>> はシェルの既定の符号化に従い、Windows PowerShell 5.1 では UTF-16 になる）
+        [System.IO.File]::AppendAllText($env:GITHUB_OUTPUT, "ZIP_SHA256=$($line.Substring(0, 64))`n", (New-Object System.Text.UTF8Encoding($false)))
+      shell: pwsh
+
     - name: Extract version info
       id: version
       run: |
@@ -94,10 +109,18 @@ jobs:
           - Windows 11
           - PaSoRi (RC-S300/RC-S380)
 
+          ### SHA-256（改ざんの確認）
+          ダウンロードしたファイルの `Get-FileHash -Algorithm SHA256 <ファイル>` の値を、次の値（`SHA256SUMS.txt` にも記載）と照合してください（大文字・小文字は問いません）。
+
+          ```text
+          ${{ steps.checksums.outputs.ZIP_SHA256 }}  ICCardManager-${{ github.ref_name }}.zip
+          ```
+
           ### 変更内容
           変更内容はコミットログを参照してください。
         files: |
           ICCardManager/ICCardManager-${{ github.ref_name }}.zip
+          ICCardManager/SHA256SUMS.txt
         draft: false
         prerelease: ${{ contains(github.ref_name, '-') }}
       env:

@@ -31,7 +31,7 @@ $InstallerOutput = Join-Path $ProjectRoot "installer\output\ICCardManager_Setup_
 
 $TagName = "v${Version}"
 
-# リリースノートの組み立てと照合（Issue #2246）
+# リリースノートの組み立てと照合（Issue #2246）。配布物の SHA-256（checksums.ps1、Issue #2268）も併せて読み込まれる
 . (Join-Path $ScriptDir "release-notes.ps1")
 
 # ─────────────────────────────────────────────────
@@ -147,9 +147,15 @@ Write-Success "CHANGELOG.md にセクション確認済み"
 
 # リリースノートを組み立てられるか（上限を超えて見出しに絞っても収まらない等）を、タグを打つ前に確かめる。
 # 組み立ての失敗は CHANGELOG の形の問題なので、タグ・ビルド・Release 作成の待機を済ませてから気付いても手戻りになる
+# 本番では末尾に SHA-256 の節が付くので、同じ長さの仮の行で組み立てて上限の判定を本番と揃える（Issue #2268）
+$placeholderChecksums = @(
+    (("0" * 64) + "  ICCardManager-${TagName}.zip"),
+    (("0" * 64) + "  ICCardManager_Setup_${Version}.exe")
+)
 try {
     $null = New-ReleaseNotesBody -Version $Version -Section (Get-ChangelogSection -Path $ChangelogPath -Ver $Version) `
-        -ChangelogUrl (Get-ChangelogUrlAtTag -RepoUrl "https://github.com/owner/repository-name-placeholder" -TagName $TagName)
+        -ChangelogUrl (Get-ChangelogUrlAtTag -RepoUrl "https://github.com/owner/repository-name-placeholder" -TagName $TagName) `
+        -Checksums $placeholderChecksums
 } catch {
     Write-Fail "$($_.Exception.Message)"
     Write-Host "  CHANGELOG.md を直して main へ反映してから、もう一度実行してください" -ForegroundColor Yellow
@@ -238,26 +244,35 @@ if (-not $SkipBuild) {
 Write-Step "GitHub Release更新"
 
 # GitHub Actionのリリース作成を待機
+# softprops/action-gh-release は Release を作ってからアセットを添付するため、Release の存在だけを見ると
+# 添付の前に次へ進み、SHA256SUMS.txt を取得できずに止まり得る。SHA256SUMS.txt の添付が済むまで待つ（Issue #2268）
 $maxWaitSeconds = $ReleaseWaitSeconds
 $waitInterval = 15
 $elapsed = 0
 $releaseFound = $false
+$assetReady = $false
 
-Write-Host "  GitHub Actionのリリース作成を待機中..." -ForegroundColor Gray
+Write-Host "  GitHub Actionのリリース作成と ${Sha256SumsFileName} の添付を待機中..." -ForegroundColor Gray
 
 while ($true) {
-    $null = Invoke-Gh release view $TagName 2>$null
+    $assetsJson = Invoke-Gh release view $TagName --json assets 2>$null
     if ($LASTEXITCODE -eq 0) {
-        $releaseFound = $true
-        Write-Success "GitHub Release ${TagName} を検出"
-        break
+        if (-not $releaseFound) {
+            $releaseFound = $true
+            Write-Success "GitHub Release ${TagName} を検出"
+        }
+        if (Test-ReleaseAssetUploaded -ViewJson ($assetsJson -join "`n") -Name $Sha256SumsFileName) {
+            $assetReady = $true
+            Write-Success "${Sha256SumsFileName} の添付を検出"
+            break
+        }
     }
     if ($elapsed -ge $maxWaitSeconds) {
         break
     }
 
     if ($elapsed -eq 0) {
-        Write-Host "  リリースが見つかりません。待機します（最大${maxWaitSeconds}秒）..." -ForegroundColor Gray
+        Write-Host "  見つかりません。待機します（最大${maxWaitSeconds}秒）..." -ForegroundColor Gray
     }
 
     Start-Sleep -Seconds $waitInterval
@@ -272,6 +287,44 @@ if (-not $releaseFound) {
     Write-Host "  pwsh.exe -File tools/publish-release.ps1 -Version ${Version} -SkipTag -SkipBuild" -ForegroundColor Yellow
     exit 1
 }
+if (-not $assetReady) {
+    Write-Warn "GitHub Release ${TagName} に ${Sha256SumsFileName} が${maxWaitSeconds}秒以内に添付されませんでした"
+    Write-Host "  release.yml の実行結果（Create checksums / Create Release）を確認してください: gh release view ${TagName} --json assets" -ForegroundColor Yellow
+    Write-Host "  添付されたら、以下で再実行できます:" -ForegroundColor Yellow
+    Write-Host "  pwsh.exe -File tools/publish-release.ps1 -Version ${Version} -SkipTag -SkipBuild" -ForegroundColor Yellow
+    exit 1
+}
+
+# 配布物の SHA-256（Issue #2268）。release.yml が添付した SHA256SUMS.txt（ZIP の行）を取得し、
+# インストーラーの行を加えて、Release 本文とアップロードする SHA256SUMS.txt の両方に使う。
+# 取得できないまま進むと、インストーラーの行だけのファイルで ZIP の行を上書きしてしまうため、ここで止める
+$checksumsDir = Join-Path $ProjectRoot "installer\output\checksums-${Version}"
+$null = New-Item -ItemType Directory -Force -Path $checksumsDir
+$checksumsFile = Join-Path $checksumsDir $Sha256SumsFileName
+Remove-Item -LiteralPath $checksumsFile -ErrorAction SilentlyContinue
+Invoke-Gh release download $TagName --pattern $Sha256SumsFileName --dir (ConvertTo-WslPath $checksumsDir) --clobber
+if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $checksumsFile)) {
+    Write-Fail "Release ${TagName} から ${Sha256SumsFileName} を取得できませんでした（gh release download）"
+    Write-Host "  release.yml の実行結果で ${Sha256SumsFileName} が添付されたかを確かめ、-SkipTag -SkipBuild を付けて再実行してください" -ForegroundColor Yellow
+    exit 1
+}
+try {
+    $releaseChecksums = Read-Sha256SumsFile -Path $checksumsFile
+    $zipName = "ICCardManager-${TagName}.zip"
+    if (-not (@($releaseChecksums) | Where-Object { $_.EndsWith("  $zipName", [System.StringComparison]::Ordinal) })) {
+        throw "${Sha256SumsFileName} に ${zipName} の行がありません"
+    }
+    $checksums = Merge-Sha256SumLines -Existing $releaseChecksums -New @(Get-Sha256SumLine -Path $InstallerOutput)
+    Write-Sha256SumsFile -Path $checksumsFile -Lines $checksums
+} catch {
+    Write-Fail "SHA-256 のチェックサムを用意できませんでした: $($_.Exception.Message)"
+    Write-Host "  release.yml の実行結果と $checksumsFile を確かめ、-SkipTag -SkipBuild を付けて再実行してください" -ForegroundColor Yellow
+    exit 1
+}
+foreach ($line in $checksums) {
+    Write-Host "  $line" -ForegroundColor Gray
+}
+Write-Success "SHA-256 のチェックサムを用意しました（$($checksums.Count) 件）"
 
 # CHANGELOGから該当バージョンのセクションを抽出
 $releaseNotes = Get-ChangelogSection -Path $ChangelogPath -Ver $Version
@@ -291,7 +344,7 @@ $changelogUrl = Get-ChangelogUrlAtTag -RepoUrl $repoUrl -TagName $TagName
 
 # 本文が上限（125,000 文字）を超える場合は、各項目の見出し行だけに絞り CHANGELOG へのリンクを添える
 try {
-    $fullReleaseNotes = New-ReleaseNotesBody -Version $Version -Section $releaseNotes -ChangelogUrl $changelogUrl
+    $fullReleaseNotes = New-ReleaseNotesBody -Version $Version -Section $releaseNotes -ChangelogUrl $changelogUrl -Checksums $checksums
 } catch {
     Write-Fail "$($_.Exception.Message)"
     Write-Host "  CHANGELOG.md を直して main へ反映してから、-SkipTag -SkipBuild を付けて再実行してください" -ForegroundColor Yellow
@@ -305,6 +358,17 @@ if (-not [string]::IsNullOrWhiteSpace($releaseNotes) -and -not $fullReleaseNotes
     }
     Write-Warn "CHANGELOG のセクションが上限（${ReleaseBodyMaxLength} 文字）を超えるため、各項目の見出しだけを載せます（${bodyLength} 文字${omitted}）"
 }
+
+# インストーラーexeと、その行を加えた SHA256SUMS.txt をアップロード（--clobber で上書き対応）。
+# 本文の書き換えより先に行う。本文を先に書き換えると、アップロードに失敗したときに本文のハッシュ（新しいインストーラー）と
+# 添付（古いインストーラー・ZIP の行だけの SHA256SUMS.txt）が食い違ったまま公開される（Issue #2268）
+Invoke-Gh release upload $TagName (ConvertTo-WslPath $InstallerOutput) (ConvertTo-WslPath $checksumsFile) --clobber
+if ($LASTEXITCODE -ne 0) {
+    Write-Fail "インストーラーと ${Sha256SumsFileName} のアップロードに失敗しました"
+    Write-Host "  gh auth status で認証を確認し、-SkipTag -SkipBuild を付けて再実行してください" -ForegroundColor Yellow
+    exit 1
+}
+Write-Success "インストーラーと ${Sha256SumsFileName} のアップロード完了"
 
 # 本文は stdin ではなく一時ファイルで渡す。pwsh → wsl.exe → gh の stdin では本文が届かず、
 # gh は空の本文を正常に処理して終了コード 0 を返していた（Issue #2246）
@@ -340,13 +404,6 @@ if (-not (Test-ReleaseBodyMatches -Expected $fullReleaseNotes -Actual $actualBod
 Remove-Item -LiteralPath $notesFile -ErrorAction SilentlyContinue
 Write-Success "リリースノート更新完了（${bodyLength} 文字。読み戻して確認済み）"
 
-# インストーラーexeをアップロード（--clobber で上書き対応）
-Invoke-Gh release upload $TagName (ConvertTo-WslPath $InstallerOutput) --clobber
-if ($LASTEXITCODE -ne 0) {
-    Write-Fail "インストーラーのアップロードに失敗しました"
-    exit 1
-}
-Write-Success "インストーラーアップロード完了"
 
 # ─────────────────────────────────────────────────
 # 6. 結果出力

@@ -1154,7 +1154,7 @@ jobs:
     /// </summary>
     private static readonly (string Workflow, string Job, string Scope, string Reason)[] AllowedWritePermissions =
     {
-        ("release.yml", "build-release", "contents", "GitHub Release の作成と ZIP の添付（softprops/action-gh-release）"),
+        ("release.yml", "build-release", "contents", "GitHub Release の作成と ZIP・SHA256SUMS.txt の添付（softprops/action-gh-release）"),
     };
 
     /// <summary>
