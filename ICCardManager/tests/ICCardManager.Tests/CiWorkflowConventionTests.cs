@@ -1734,12 +1734,6 @@ jobs:
         return text.Substring(start, (end < 0 ? text.Length : end) - start).Trim();
     }
 
-    /// <summary>
-    /// 行末のコメント（空白に続く <c>#</c> 以降、または行頭の <c>#</c>）を取り除く（行単位で読む <see cref="ExtractJobs"/> が使う）。
-    /// </summary>
-    private static string StripYamlComment(string line)
-        => Regex.Replace(line, @"(^|\s)#.*$", string.Empty);
-
     #endregion
 
     #region 読み取りヘルパー
@@ -2027,6 +2021,12 @@ jobs:
     }
 
     private static int IndentOf(string line) => line.Length - line.TrimStart(' ').Length;
+
+    /// <summary>
+    /// 行末のコメント（空白に続く <c>#</c> 以降、または行頭の <c>#</c>）を取り除く（行単位で読む <see cref="ExtractJobs"/> が使う）。
+    /// </summary>
+    private static string StripYamlComment(string line)
+        => Regex.Replace(line, @"(^|\s)#.*$", string.Empty);
 
     private static string[] SplitLines(string text) => text.Replace("\r\n", "\n").Split('\n');
 
