@@ -57,6 +57,5 @@ namespace ICCardManager.Services
         /// 失敗したら設定ファイルを元の内容へ戻してから例外を投げ直す。
         /// </remarks>
         Task<bool> ChangeDatabaseConfigAsync(string configFilePath, string? databaseFilePath);
-
     }
 }

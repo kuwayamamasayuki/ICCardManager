@@ -446,6 +446,8 @@ public sealed class SettingsViewModelSecuritySettingsTests : IDisposable
         await _viewModel.SaveAsync();
 
         _viewModel.StatusMessage.Should().StartWith("バックアップ先の変更は保存しました。");
+        _viewModel.StatusMessage.Should().Contain("ほかの設定（文字サイズ・残額警告など）は保存していません。");
+        _viewModel.StatusMessage.Should().EndWith("もう一度「保存」を押してください。");
         _viewModel.IsStatusError.Should().BeTrue();
         (await _realSettingsRepository.GetAsync(SettingsRepository.KeyBackupPath))
             .Should().Be(PathValidator.NormalizePath(_newBackupFolder));

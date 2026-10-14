@@ -660,9 +660,13 @@ public partial class SettingsViewModel : ViewModelBase
                 catch (Exception ex)
                 {
                     ErrorDialogHelper.LogException(ex, "データベース保存先の設定ファイルの保存");
+                    // 実際に保存した方だけを名指しし、保存していないもの（ほかの設定）と再度の保存を案内する
+                    //（BuildPartialSaveFailureMessage と同じ形）
                     SetStatus(
                         (plan.NewBackupPath != null ? "バックアップ先の変更は保存しました。" : string.Empty) +
-                        ExceptionMessageFormatter.ToUserMessage(ex, "データベース保存先の設定ファイルの保存"),
+                        "ほかの設定（文字サイズ・残額警告など）は保存していません。" +
+                        ExceptionMessageFormatter.ToUserMessage(ex, "データベース保存先の設定ファイルの保存") +
+                        "そのうえで、もう一度「保存」を押してください。",
                         true);
                     return;
                 }
