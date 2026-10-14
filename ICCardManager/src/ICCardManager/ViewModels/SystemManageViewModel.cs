@@ -185,6 +185,32 @@ public partial class SystemManageViewModel : ViewModelBase
         $"最終実施PC: {(string.IsNullOrWhiteSpace(BackupHealth?.LastSuccessMachineName) ? "-" : BackupHealth!.LastSuccessMachineName)}";
 
     /// <summary>
+    /// バックアップ先の最終変更の表示テキスト（Issue #2264）
+    /// </summary>
+    /// <remarks>
+    /// バックアップ先は共有 DB に保存され全 PC に効くため、いつ変わったかを常に示す。
+    /// 変更した PC 名は「最終実施PC」（#1689）と同じく共有モードのときだけ載せる（ローカルモードでは自 PC しか変更し得ない）。
+    /// 記録が無いのは、Issue #2264 より前に設定した（またはまだ変更していない）場合。
+    /// </remarks>
+    public string BackupPathChangeText
+    {
+        get
+        {
+            var changedAt = BackupHealth?.BackupPathChangedAt;
+            if (changedAt == null)
+            {
+                return "バックアップ先の最終変更: 記録なし（設定画面（F5）で変更すると表示されます）";
+            }
+
+            var machine = BackupHealth?.BackupPathChangedMachineName;
+            var machineText = IsSharedMode
+                ? $"（変更したPC: {(machine is null || string.IsNullOrWhiteSpace(machine) ? "-" : machine)}）"
+                : string.Empty;
+            return $"バックアップ先の最終変更: {DisplayFormatters.FormatDateTime(changedAt.Value)}{machineText}";
+        }
+    }
+
+    /// <summary>
     /// 共有モードでのみ表示する「最終VACUUM」の表示テキスト（Issue #1689）
     /// </summary>
     public string LastVacuumText
@@ -221,6 +247,7 @@ public partial class SystemManageViewModel : ViewModelBase
         OnPropertyChanged(nameof(BackupFolderFallbackText));
         OnPropertyChanged(nameof(LastBackupMachineText));
         OnPropertyChanged(nameof(LastVacuumText));
+        OnPropertyChanged(nameof(BackupPathChangeText));
     }
 
     /// <summary>

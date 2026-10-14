@@ -341,6 +341,12 @@
                                    FontSize="{DynamicResource SmallFontSize}"
                                    Foreground="{DynamicResource SecondaryTextBrush}"
                                    Margin="0,5,0,0"/>
+                        <!-- Issue #2264: 共有されるセキュリティ関連の設定は、変更時に職員証の認証を求め操作ログに残す -->
+                        <TextBlock Text="※ バックアップ先はすべてのPCに共通の設定です。変更して保存するときは職員証での認証が必要で、変更は操作ログに記録されます"
+                                   FontSize="{DynamicResource SmallFontSize}"
+                                   Foreground="{DynamicResource SecondaryTextBrush}"
+                                   TextWrapping="Wrap"
+                                   Margin="0,2,0,0"/>
                     </StackPanel>
                 </GroupBox>
 
@@ -392,6 +398,12 @@
                         <TextBlock Text="※ 共有フォルダのパスは「参照」ボタンで選択するか、テキスト欄に直接入力できます"
                                    FontSize="{DynamicResource SmallFontSize}"
                                    Foreground="{DynamicResource SecondaryTextBrush}"
+                                   Margin="0,2,0,0"/>
+                        <!-- Issue #2264: 共有されるセキュリティ関連の設定は、変更時に職員証の認証を求め操作ログに残す -->
+                        <TextBlock Text="※ 保存先を変更して保存するとき・デフォルトに戻すときは職員証での認証が必要で、変更は操作ログに記録されます"
+                                   FontSize="{DynamicResource SmallFontSize}"
+                                   Foreground="{DynamicResource SecondaryTextBrush}"
+                                   TextWrapping="Wrap"
                                    Margin="0,2,0,0"/>
                         <TextBlock Text="※ 変更後はアプリケーションの再起動が必要です"
                                    FontSize="{DynamicResource SmallFontSize}"

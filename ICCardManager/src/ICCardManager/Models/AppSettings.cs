@@ -20,6 +20,10 @@ namespace ICCardManager.Models
         /// <summary>
         /// バックアップ先フォルダパス
         /// </summary>
+        /// <remarks>
+        /// 読み込み専用。設定しても一括保存（<c>SaveAppSettingsAsync</c>）では DB へ反映されない（Issue #2264）。
+        /// 変更は職員証の認証と操作ログを伴う <c>Services.ISettingsChangeService.ChangeBackupPathAsync</c> で行う。
+        /// </remarks>
         public string BackupPath { get; set; } = string.Empty;
 
         /// <summary>

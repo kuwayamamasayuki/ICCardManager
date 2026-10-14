@@ -47,6 +47,8 @@ public class SystemManageDialogBackupHealthLayoutTests
             // 連結するため、この GroupBox で最も長くなる行。折り返しの担保から漏らさない
             "BackupFolderFallbackText",
             "LastBackupMachineText",
+            // Issue #2264: バックアップ先の最終変更（共有モードでは PC 名も付く）
+            "BackupPathChangeText",
             "LastVacuumText"
         };
 

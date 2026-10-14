@@ -49,7 +49,7 @@ public class SettingsMaintenanceKeyConventionTests
     private static readonly string[] ExpectedKeyConstants =
     {
         "KeyWarningBalance",
-        "KeyBackupPath",
+        // Issue #2264: KeyBackupPath は外した（職員証の認証と操作ログを伴う ChangeBackupPathAsync だけが書く）
         "KeyFontSize",
         "KeySoundMode",
         "KeyToastPosition",
@@ -80,6 +80,10 @@ public class SettingsMaintenanceKeyConventionTests
         "last_vacuum_machine",
         "last_backup_success_at",
         "last_backup_machine",
+        // Issue #2264: バックアップ先とその変更記録は ChangeBackupPathAsync だけが書く
+        "backup_path",
+        "backup_path_changed_at",
+        "backup_path_changed_machine",
     };
 
     [Fact]
@@ -140,6 +144,116 @@ public class SettingsMaintenanceKeyConventionTests
         body.Should().Contain(
             "substr(settings.value, 1, 7)",
             "月ガード付きの UPSERT であること（この条件こそが一括保存へ載せられない理由）");
+    }
+
+    /// <summary>
+    /// 対の表明（Issue #2264）: 専用経路はバックアップ先と変更記録を<b>実際に書いている</b>こと。
+    /// これが無いと、バックアップ先の書き込みを両方から消した実装でも一括保存側の検査は緑になる。
+    /// </summary>
+    [Fact]
+    public void バックアップ先の専用経路は値と変更記録を書いていること()
+    {
+        var body = TestSourceInspection.ExtractMethodBodyPreservingLiterals(
+            File.ReadAllText(RepositoryPath),
+            "public async Task ChangeBackupPathAsync(");
+
+        body.Should().Contain("KeyBackupPath,");
+        body.Should().Contain("KeyBackupPathChangedAt");
+        body.Should().Contain("KeyBackupPathChangedMachine");
+    }
+
+    /// <summary>
+    /// Issue #2264: <c>backup_path</c> を書くのは <c>ChangeBackupPathAsync</c>（職員証の認証と操作ログを伴う経路）だけであること。
+    /// </summary>
+    /// <remarks>
+    /// 汎用の <c>ISettingsRepository.SetAsync(key, value)</c> はどのキーでも書けるため、一括保存から外しただけでは
+    /// 別の経路から認証も記録も無く書き換えられる。本番ソース全体で <c>KeyBackupPath</c> の参照を数え、
+    /// 定義・読み取り（<c>Get</c> / <c>GetAsync</c> の第 1 引数）と <c>ChangeBackupPathAsync</c> の内側以外を違反とする。
+    /// 生の文字列 <c>"backup_path"</c> を <c>SetAsync</c> へ渡す形も違反とする。
+    /// </remarks>
+    [Fact]
+    public void backup_pathは専用経路の外から書き込まないこと()
+    {
+        var violations = ProductionSourceFiles.CSharp
+            .SelectMany(f => FindBackupPathWritesOutsideDedicatedPath(f.Name, f.CodeOnly, f.CommentsRemovedPreservingLines)
+                .Select(v => $"  - {f.RelativePath}: {v}"))
+            .ToList();
+
+        violations.Should().BeEmpty(
+            "バックアップ先は全 PC が DB 全体をコピーする先で、変更は職員証の認証と操作ログを伴う ChangeBackupPathAsync だけが行う（Issue #2264）\n" +
+            string.Join("\n", violations));
+    }
+
+    /// <summary>
+    /// 対の表明: 検査が実際の参照を拾っていること（読み取りは許し、ChangeBackupPathAsync の内側を除外できていること）。
+    /// </summary>
+    [Fact]
+    public void backup_pathの書き込み検査は本番の読み取りと専用経路を見分けていること()
+    {
+        var repository = ProductionSourceFiles.CSharp.Single(f => f.Name == "SettingsRepository.cs");
+        BackupPathKeyReference.Matches(repository.CodeOnly).Count.Should().BeGreaterOrEqualTo(4,
+            "定義・同期と非同期の読み取り・専用経路の書き込みを拾えていること");
+        FindBackupPathWritesOutsideDedicatedPath(repository.Name, repository.CodeOnly, repository.CommentsRemovedPreservingLines)
+            .Should().BeEmpty();
+    }
+
+    /// <summary>
+    /// 検査ロジック自体をサンプル入力で固定する（書き込みは検出し、読み取りは検出しない）。
+    /// </summary>
+    [Fact]
+    public void backup_pathの書き込み検査は書き込みだけを検出すること()
+    {
+        const string write = "await _settingsRepository.SetAsync(SettingsRepository.KeyBackupPath, path);";
+        const string read = "var v = await _settingsRepository.GetAsync(SettingsRepository.KeyBackupPath, tx);";
+        const string literalWrite = "await repo.SetAsync(\"backup_path\", path);";
+
+        FindBackupPathWritesOutsideDedicatedPath("X.cs", write, write).Should().HaveCount(1);
+        FindBackupPathWritesOutsideDedicatedPath("X.cs", read, read).Should().BeEmpty();
+        FindBackupPathWritesOutsideDedicatedPath("X.cs", "var s = \"\";", literalWrite).Should().HaveCount(1);
+    }
+
+    private static readonly Regex BackupPathKeyReference = new Regex(@"\bKeyBackupPath\b");
+    private static readonly Regex BackupPathReadPrefix = new Regex(@"\b(?:Get|GetAsync)\(\s*(?:SettingsRepository\.)?$");
+    private static readonly Regex BackupPathDefinitionPrefix = new Regex(@"\bconst\s+string\s+$");
+    private static readonly Regex BackupPathLiteralWrite = new Regex(@"SetAsync\(\s*""backup_path""");
+
+    private static IReadOnlyList<string> FindBackupPathWritesOutsideDedicatedPath(
+        string fileName, string codeOnly, string commentsRemoved)
+    {
+        var violations = new List<string>();
+        var allowedStart = -1;
+        var allowedEnd = -1;
+        if (fileName == "SettingsRepository.cs")
+        {
+            var body = TestSourceInspection.ExtractMethodBody(codeOnly, "public async Task ChangeBackupPathAsync(");
+            allowedStart = codeOnly.IndexOf(body, StringComparison.Ordinal);
+            allowedEnd = allowedStart + body.Length;
+        }
+
+        foreach (Match match in BackupPathKeyReference.Matches(codeOnly))
+        {
+            if (match.Index >= allowedStart && match.Index < allowedEnd)
+            {
+                continue;
+            }
+
+            var before = codeOnly.Substring(0, match.Index);
+            if (BackupPathReadPrefix.IsMatch(before) || BackupPathDefinitionPrefix.IsMatch(before))
+            {
+                continue;
+            }
+
+            var lineStart = codeOnly.LastIndexOf('\n', Math.Max(0, match.Index - 1)) + 1;
+            var lineEnd = codeOnly.IndexOf('\n', match.Index);
+            violations.Add(codeOnly.Substring(lineStart, (lineEnd < 0 ? codeOnly.Length : lineEnd) - lineStart).Trim());
+        }
+
+        foreach (Match match in BackupPathLiteralWrite.Matches(commentsRemoved))
+        {
+            violations.Add(match.Value);
+        }
+
+        return violations;
     }
 
     /// <summary>

@@ -63,6 +63,8 @@ public class ScreenTransitionDiagramConsistencyTests
         ["CarryoverRecoveryViewModel.cs"] = "CARRYRECOVER",
         // Issue #2262: 職員・利用履歴・利用履歴詳細の CSV インポートは、データ入出力ダイアログの「インポート実行」で認証する
         ["DataExportImportViewModel.cs"] = "DATAEXIMP",
+        // Issue #2264: バックアップ先・データベース保存先の変更と「デフォルトに戻す」は設定ダイアログで認証する
+        ["SettingsViewModel.cs"] = "SETTINGS",
     };
 
     /// <summary>
@@ -90,6 +92,8 @@ public class ScreenTransitionDiagramConsistencyTests
         "職員のインポート",
         "利用履歴のインポート",
         "利用履歴詳細のインポート",
+        "バックアップ先・データベース保存先の変更",
+        "データベース保存先をデフォルトに戻す",
     };
 
     /// <summary>ノード定義行（例: <c>MAIN[メイン画面]</c>）。</summary>

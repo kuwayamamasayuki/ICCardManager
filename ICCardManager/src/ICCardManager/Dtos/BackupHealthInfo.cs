@@ -1,3 +1,4 @@
+#nullable enable
 using System;
 
 namespace ICCardManager.Dtos
@@ -25,7 +26,7 @@ namespace ICCardManager.Dtos
         /// <summary>
         /// 最後にバックアップを実施した PC 名。共有モードでどの PC が実施したかの追跡に使用
         /// </summary>
-        public string LastSuccessMachineName { get; set; }
+        public string? LastSuccessMachineName { get; set; }
 
         /// <summary>
         /// バックアップ保存先に現存する世代（バックアップファイル）の数
@@ -45,7 +46,7 @@ namespace ICCardManager.Dtos
         /// <summary>
         /// バックアップ保存先フォルダのパス（実際に使用される正規化済みパス）
         /// </summary>
-        public string BackupFolderPath { get; set; }
+        public string? BackupFolderPath { get; set; }
 
         /// <summary>
         /// 設定されていたバックアップ保存先（Issue #1924）。未設定の場合は null または空文字
@@ -56,13 +57,13 @@ namespace ICCardManager.Dtos
         /// 退避していなくても文字列としては食い違い得る（末尾区切り文字・相対表記の解決など）。
         /// 理由は <see cref="BackupFolderFallbackReason"/> に入る。
         /// </remarks>
-        public string ConfiguredFolderPath { get; set; }
+        public string? ConfiguredFolderPath { get; set; }
 
         /// <summary>
         /// 設定されたバックアップ保存先が使えず既定パスへ退避した理由（Issue #1924）。
         /// 退避していない場合は null
         /// </summary>
-        public string BackupFolderFallbackReason { get; set; }
+        public string? BackupFolderFallbackReason { get; set; }
 
         /// <summary>
         /// 設定されたバックアップ保存先が使えず既定パスへ退避しているか（Issue #1924）
@@ -82,7 +83,21 @@ namespace ICCardManager.Dtos
         /// <summary>
         /// 最後に VACUUM を実行した PC 名
         /// </summary>
-        public string LastVacuumMachineName { get; set; }
+        public string? LastVacuumMachineName { get; set; }
+
+        /// <summary>
+        /// バックアップ先を最後に変更した日時（Issue #2264）。記録が無い場合は null
+        /// </summary>
+        /// <remarks>
+        /// 設定画面（F5）でバックアップ先を変更したときだけ記録される（職員証の認証と操作ログを伴う）。
+        /// Issue #2264 より前に設定したバックアップ先は記録が無い。
+        /// </remarks>
+        public DateTime? BackupPathChangedAt { get; set; }
+
+        /// <summary>
+        /// バックアップ先を最後に変更した PC 名（Issue #2264）
+        /// </summary>
+        public string? BackupPathChangedMachineName { get; set; }
 
         /// <summary>
         /// 共有フォルダモードで動作しているか（PC 名の表示要否の判定に使用）

@@ -1,3 +1,4 @@
+#nullable enable
 using System;
 using System.Collections.Generic;
 using System.Data.SQLite;
@@ -37,6 +38,14 @@ namespace ICCardManager.Data.Repositories
 
         /// <summary>最後に VACUUM を実行した PC 名（日付は <see cref="KeyLastVacuumDate"/>）</summary>
         public const string KeyLastVacuumMachine = "last_vacuum_machine";
+
+        // バックアップ先の変更記録キー（Issue #2264）
+        // backup_path（KeyBackupPath）と同じく ChangeBackupPathAsync だけが書く。一括保存（SaveAppSettingsAsync）には載せない。
+        /// <summary>バックアップ先を最後に変更した日時（"yyyy-MM-dd HH:mm:ss"）</summary>
+        public const string KeyBackupPathChangedAt = "backup_path_changed_at";
+
+        /// <summary>バックアップ先を最後に変更した PC 名</summary>
+        public const string KeyBackupPathChangedMachine = "backup_path_changed_machine";
 
         // ウィンドウ設定キー
         public const string KeyWindowLeft = "window_left";
@@ -90,18 +99,49 @@ namespace ICCardManager.Data.Repositories
         }
 
         /// <inheritdoc/>
-        public async Task<string> GetAsync(string key)
+        public async Task<string?> GetAsync(string key)
         {
             using var lease = await _dbContext.LeaseConnectionAsync().ConfigureAwait(false);
-            var connection = lease.Connection;
+            return await ReadValueAsync(lease.Connection, transaction: null, key).ConfigureAwait(false);
+        }
 
+        /// <inheritdoc/>
+        public Task<string?> GetAsync(string key, SQLiteTransaction transaction)
+        {
+            return ReadValueAsync(transaction.Connection, transaction, key);
+        }
+
+        private static async Task<string?> ReadValueAsync(SQLiteConnection connection, SQLiteTransaction? transaction, string key)
+        {
             using var command = connection.CreateCommand();
+            if (transaction != null)
+            {
+                command.Transaction = transaction;
+            }
             command.CommandText = "SELECT value FROM settings WHERE key = @key";
             command.Parameters.AddWithValue("@key", key);
 
             var result = await command.ExecuteScalarAsync().ConfigureAwait(false);
-            return result == DBNull.Value ? null : result?.ToString();
+            return result == null || result == DBNull.Value ? null : result.ToString();
         }
+
+        /// <inheritdoc/>
+        public async Task ChangeBackupPathAsync(
+            string backupPath, string machineName, DateTime changedAt, SQLiteTransaction transaction)
+        {
+            // Issue #2264: バックアップ先と、その変更日時・変更した PC 名を同じトランザクションで書く。
+            // 監査ログ（operation_log）も呼び出し元（SettingsChangeService）が同じトランザクションで書く。
+            var connection = transaction.Connection;
+            await ExecuteWriteAsync(connection, transaction, c => ConfigureSetCommand(c, KeyBackupPath, backupPath))
+                .ConfigureAwait(false);
+            await ExecuteWriteAsync(connection, transaction, c => ConfigureSetCommand(c, KeyBackupPathChangedAt, SqliteDateTimeFormat.ToText(changedAt)))
+                .ConfigureAwait(false);
+            await ExecuteWriteAsync(connection, transaction, c => ConfigureSetCommand(c, KeyBackupPathChangedMachine, machineName))
+                .ConfigureAwait(false);
+        }
+
+        /// <inheritdoc/>
+        public void InvalidateCache() => _cacheService.Invalidate(CacheKeys.AppSettings);
 
         /// <inheritdoc/>
         public async Task<bool> SetAsync(string key, string value)
@@ -118,19 +158,19 @@ namespace ICCardManager.Data.Repositories
         /// 引数なし版はスコープの持ち主を判別できず、他フローのスコープに巻き込まれる余地が残る
         /// （<see cref="WriteGuardedAsync"/> の分岐②の注記を参照）。
         /// </remarks>
-        private async Task<bool> SetAsync(string key, string value, TransactionScope scope)
+        private async Task<bool> SetAsync(string key, string? value, TransactionScope scope)
         {
             return await WriteGuardedAsync(command => ConfigureSetCommand(command, key, value), scope)
                 .ConfigureAwait(false);
         }
 
-        private static void ConfigureSetCommand(SQLiteCommand command, string key, string value)
+        private static void ConfigureSetCommand(SQLiteCommand command, string key, string? value)
         {
             command.CommandText = @"INSERT INTO settings (key, value) VALUES (@key, @value)
 ON CONFLICT(key) DO UPDATE SET value = @value";
 
             command.Parameters.AddWithValue("@key", key);
-            command.Parameters.AddWithValue("@value", (object)value ?? DBNull.Value);
+            command.Parameters.AddWithValue("@value", (object?)value ?? DBNull.Value);
         }
 
         /// <inheritdoc/>
@@ -201,7 +241,7 @@ WHERE settings.value IS NULL OR substr(settings.value, 1, 7) <> @currentMonth";
         /// で包む（Issue #1727「書込みトランザクションを新設したら既存の同種経路と同じ防御が掛かっているかを見る」）。
         /// </para>
         /// </remarks>
-        private async Task<bool> WriteGuardedAsync(Action<SQLiteCommand> configureCommand, TransactionScope scope)
+        private async Task<bool> WriteGuardedAsync(Action<SQLiteCommand> configureCommand, TransactionScope? scope)
         {
             // ① 呼び出し元がトランザクションを引き渡した場合はそれを使う
             if (scope != null)
@@ -241,7 +281,7 @@ WHERE settings.value IS NULL OR substr(settings.value, 1, 7) <> @currentMonth";
         /// </remarks>
         private static async Task<bool> ExecuteWriteAsync(
             SQLiteConnection connection,
-            SQLiteTransaction transaction,
+            SQLiteTransaction? transaction,
             Action<SQLiteCommand> configureCommand)
         {
             using var command = connection.CreateCommand();
@@ -355,7 +395,7 @@ WHERE settings.value IS NULL OR substr(settings.value, 1, 7) <> @currentMonth";
         /// <summary>
         /// 設定値を取得（同期版）
         /// </summary>
-        private string Get(string key)
+        private string? Get(string key)
         {
             using var lease = _dbContext.LeaseConnection();
             var connection = lease.Connection;
@@ -365,7 +405,7 @@ WHERE settings.value IS NULL OR substr(settings.value, 1, 7) <> @currentMonth";
             command.Parameters.AddWithValue("@key", key);
 
             var result = command.ExecuteScalar();
-            return result == DBNull.Value ? null : result?.ToString();
+            return result == null || result == DBNull.Value ? null : result.ToString();
         }
 
         /// <summary>
@@ -535,7 +575,11 @@ WHERE settings.value IS NULL OR substr(settings.value, 1, 7) <> @currentMonth";
                     // 引数なし版に頼ると HasActiveTransactionScope（プロセス全体のカウンタ）経由の
                     // 暗黙参加になり、「自分のスコープか他フローのスコープか」を区別できない。
                     success &= await SetAsync(KeyWarningBalance, settings.WarningBalance.ToString(CultureInfo.InvariantCulture), scope).ConfigureAwait(false);
-                    success &= await SetAsync(KeyBackupPath, settings.BackupPath, scope).ConfigureAwait(false);
+                    // Issue #2264: backup_path はここで書かない。バックアップ先の変更は職員証の認証を求め、
+                    // 変更日時・PC 名・操作ログと同じトランザクションで書く（ChangeBackupPathAsync）。
+                    // 一括保存は条件を持たない UPSERT で、終了時のウィンドウ位置の保存（MainWindow）は
+                    // TTL キャッシュ由来の古い AppSettings を丸ごと書き戻すため、ここに載せると
+                    // 他 PC で認証して変更したバックアップ先を、認証も記録も無いまま巻き戻す（#1997 と同じ形）。
                     success &= await SetAsync(KeyFontSize, FontSizeToString(settings.FontSize), scope).ConfigureAwait(false);
 
                     // Issue #1997: last_vacuum_date はここで書かない。
@@ -643,13 +687,13 @@ WHERE settings.value IS NULL OR substr(settings.value, 1, 7) <> @currentMonth";
         /// <c>?.ToLowerInvariant() != "false"</c> の形は、既定が false の兄弟キー（<c>== "true"</c>）と
         /// 極性が逆の手組みの判定になり、認識できない値の扱いがキーごとに変わる（コードレビュー指摘）。
         /// </remarks>
-        private static bool ParseBool(string value, bool defaultValue)
+        private static bool ParseBool(string? value, bool defaultValue)
             => bool.TryParse(value, out var parsed) ? parsed : defaultValue;
 
         /// <summary>
         /// 文字列からFontSizeOptionに変換
         /// </summary>
-        private static FontSizeOption ParseFontSize(string value)
+        private static FontSizeOption ParseFontSize(string? value)
         {
             return value?.ToLowerInvariant() switch
             {
@@ -679,7 +723,7 @@ WHERE settings.value IS NULL OR substr(settings.value, 1, 7) <> @currentMonth";
         /// <summary>
         /// 文字列からSoundModeに変換
         /// </summary>
-        private static SoundMode ParseSoundMode(string value)
+        private static SoundMode ParseSoundMode(string? value)
         {
             return value?.ToLowerInvariant() switch
             {
@@ -709,7 +753,7 @@ WHERE settings.value IS NULL OR substr(settings.value, 1, 7) <> @currentMonth";
         /// <summary>
         /// 文字列からToastPositionに変換
         /// </summary>
-        private static ToastPosition ParseToastPosition(string value)
+        private static ToastPosition ParseToastPosition(string? value)
         {
             return value?.ToLowerInvariant() switch
             {
@@ -739,7 +783,7 @@ WHERE settings.value IS NULL OR substr(settings.value, 1, 7) <> @currentMonth";
         /// <summary>
         /// 文字列からDepartmentTypeに変換
         /// </summary>
-        internal static DepartmentType ParseDepartmentType(string value)
+        internal static DepartmentType ParseDepartmentType(string? value)
         {
             return value?.ToLowerInvariant() switch
             {

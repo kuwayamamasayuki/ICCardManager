@@ -1171,6 +1171,22 @@ public class OperationLogSearchViewModelTests
     }
 
     /// <summary>
+    /// Issue #2264: 設定の変更（バックアップ先・データベース保存先）は、どの設定がどう変わったかを詳細に出す。
+    /// </summary>
+    [Fact]
+    public async Task 設定の変更_変更前後の値が詳細に出ること()
+    {
+        var testLog = MakeLog(1, action: "UPDATE", targetTable: "settings", targetId: "バックアップ先",
+            beforeData: "{\"Setting\":\"バックアップ先\",\"Value\":\"C:\\\\Backup\"}",
+            afterData: "{\"Setting\":\"バックアップ先\",\"Value\":\"\\\\\\\\fs\\\\bk\",\"MachineName\":\"PC01\"}");
+        SetupKeysetReturning(new[] { testLog });
+
+        await _viewModel.SearchAsync();
+
+        _viewModel.Logs[0].DetailSummary.Should().Be(@"設定（バックアップ先）を更新: 値: C:\Backup→\\fs\bk");
+    }
+
+    /// <summary>
     /// Issue #2265: 統合の取り消しも、統合・分割と同じく明細件数の推移を詳細に出す（統合先 1 件 → 統合先・統合元）。
     /// </summary>
     [Fact]

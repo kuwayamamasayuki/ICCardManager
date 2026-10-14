@@ -56,6 +56,7 @@ namespace ICCardManager.Services
                 new KeyValuePair<string, string>(OperationLogger.Tables.LedgerDetail, "利用明細"),
                 new KeyValuePair<string, string>(OperationLogger.Tables.Database, "データベース"),
                 new KeyValuePair<string, string>(OperationLogger.Tables.OperationLog, "操作ログ"),
+                new KeyValuePair<string, string>(OperationLogger.Tables.Settings, "設定"),
             };
 
         private static readonly Dictionary<string, string> ActionMap = BuildMap(ActionEntries);
@@ -142,6 +143,26 @@ namespace ICCardManager.Services
             public const string Database = "database";
             // Issue #1787: 操作ログ自身の Excel 書き出し（個人情報の持ち出し）を EXPORT として記録する対象
             public const string OperationLog = "operation_log";
+            // Issue #2264: 設定画面（F5）のバックアップ先・データベース保存先の変更。対象 ID は設定項目名
+            // （<see cref="SettingNames"/>）。データベース保存先はテーブルではなく PC ごとの設定ファイルだが、
+            // 「設定」として同じ対象にまとめる（操作ログ画面の絞り込みで設定の変更を 1 つの対象として探せるように）
+            public const string Settings = "settings";
+        }
+
+        /// <summary>
+        /// 設定の変更を記録するときの設定項目名（操作ログの対象 ID。Issue #2264）
+        /// </summary>
+        /// <remarks>
+        /// 対象 ID は操作ログ画面の「対象」列と詳細列（「設定（バックアップ先）を更新: …」）にそのまま出るため、
+        /// 設定キー（<c>backup_path</c>）ではなく画面の項目名で記録する。
+        /// </remarks>
+        public static class SettingNames
+        {
+            /// <summary>データベースの自動バックアップ先（共有 DB の <c>settings.backup_path</c>。全 PC に効く）</summary>
+            public const string BackupPath = "バックアップ先";
+
+            /// <summary>データベースの保存先（その PC の <c>database_config.txt</c>）</summary>
+            public const string DatabasePath = "データベース保存先";
         }
 
         public OperationLogger(
@@ -825,6 +846,37 @@ namespace ICCardManager.Services
                 Action = Actions.Unmerge,
                 BeforeData = SerializeToJson(mergedBefore),
                 AfterData = SerializeToJson(after)
+            }, transaction).ConfigureAwait(false);
+        }
+
+        /// <summary>
+        /// 設定の変更のログを既存トランザクションで記録する（Issue #2264）。
+        /// </summary>
+        /// <param name="settingName">設定項目名（<see cref="SettingNames"/>）。対象 ID になる</param>
+        /// <param name="beforeValue">変更前の値（未設定は空文字）</param>
+        /// <param name="afterValue">変更後の値（既定に戻した場合は空文字）</param>
+        /// <param name="transaction">設定の書き込みと同じトランザクション（記録に失敗したら変更ごと巻き戻す）</param>
+        /// <remarks>
+        /// 操作種別は <see cref="Actions.Update"/>。値は <c>Value</c> に入れ、操作ログ画面の詳細列は
+        /// 「設定（バックアップ先）を更新: 値: A→B」になる。JSON は <see cref="SerializeToJson{T}"/> で作る（手組みしない。#1996）。
+        /// </remarks>
+        public async Task LogSettingChangeAsync(
+            string settingName, string beforeValue, string afterValue, SQLiteTransaction transaction)
+        {
+            var (idm, name) = ResolveOperator();
+            // 変更した PC 名は変更後にだけ載せる（変更前の値をどの PC が設定したかは、この記録からは分からないため）。
+            // 引数で受け取らない（操作者の識別子に当たる値は引数で受け取らない。#2164）
+            var machineName = Environment.MachineName;
+            await _operationLogRepository.InsertAsync(new OperationLog
+            {
+                Timestamp = DateTime.Now,
+                OperatorIdm = idm,
+                OperatorName = name,
+                TargetTable = Tables.Settings,
+                TargetId = settingName,
+                Action = Actions.Update,
+                BeforeData = SerializeToJson(new { Setting = settingName, Value = beforeValue }),
+                AfterData = SerializeToJson(new { Setting = settingName, Value = afterValue, MachineName = machineName })
             }, transaction).ConfigureAwait(false);
         }
 

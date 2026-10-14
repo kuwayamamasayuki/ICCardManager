@@ -29,6 +29,16 @@ public partial class SettingsViewModel : ViewModelBase
     private readonly IDialogService _dialogService;
 
     /// <summary>
+    /// 職員証の認証（Issue #2264: バックアップ先・データベース保存先の変更で求める）
+    /// </summary>
+    private readonly IStaffAuthService _staffAuthService;
+
+    /// <summary>
+    /// バックアップ先・データベース保存先の変更と操作ログ（Issue #2264）
+    /// </summary>
+    private readonly ISettingsChangeService _settingsChangeService;
+
+    /// <summary>
     /// 摘要生成器（DI シングルトン、Issue #1975）
     /// </summary>
     /// <remarks>
@@ -186,19 +196,32 @@ public partial class SettingsViewModel : ViewModelBase
 
     private string _originalDatabasePath = string.Empty;
 
+    /// <summary>
+    /// 読み込んだ時点（または最後に変更した時点）のバックアップ先（Issue #2264）
+    /// </summary>
+    /// <remarks>
+    /// 入力欄の値がこれと異なるときだけ「バックアップ先を変更する」とみなし、職員証の認証を求める。
+    /// 正規化した値ではなく入力欄の生の値で比べる（触っていないバックアップ先が、正規化の差で変更扱いにならないように）。
+    /// </remarks>
+    private string _loadedBackupPath = string.Empty;
+
     public SettingsViewModel(
         ISettingsRepository settingsRepository,
         IValidationService validationService,
         ISoundPlayer soundPlayer,
         IOptions<DatabaseOptions> databaseOptions, // DI互換のため引数を維持（本体では未使用）
         IDialogService dialogService,
-        SummaryGenerator summaryGenerator)
+        SummaryGenerator summaryGenerator,
+        IStaffAuthService staffAuthService,
+        ISettingsChangeService settingsChangeService)
         : this(
             settingsRepository,
             validationService,
             soundPlayer,
             dialogService,
             summaryGenerator,
+            staffAuthService,
+            settingsChangeService,
             AppDataPaths.RootDirectory)
     {
     }
@@ -211,6 +234,8 @@ public partial class SettingsViewModel : ViewModelBase
     /// <param name="soundPlayer">効果音・音声の再生</param>
     /// <param name="dialogService">確認ダイアログの表示</param>
     /// <param name="summaryGenerator">摘要生成器（部署種別の反映先。Issue #1975）</param>
+    /// <param name="staffAuthService">職員証の認証（バックアップ先・データベース保存先の変更で求める。Issue #2264）</param>
+    /// <param name="settingsChangeService">バックアップ先・データベース保存先の変更と操作ログ（Issue #2264）</param>
     /// <param name="configDirectory">
     /// <c>database_config.txt</c> / <c>department_config.txt</c> を読み書きするフォルダー。
     /// テストはテストごとの一時フォルダーを渡し、開発機の本物の設定ファイルや、
@@ -225,6 +250,8 @@ public partial class SettingsViewModel : ViewModelBase
         ISoundPlayer soundPlayer,
         IDialogService dialogService,
         SummaryGenerator summaryGenerator,
+        IStaffAuthService staffAuthService,
+        ISettingsChangeService settingsChangeService,
         string configDirectory)
     {
         _settingsRepository = settingsRepository;
@@ -232,6 +259,9 @@ public partial class SettingsViewModel : ViewModelBase
         _soundPlayer = soundPlayer;
         _dialogService = dialogService;
         _summaryGenerator = summaryGenerator;
+        // 既定値を持たない必須引数にする（省略可能にすると DI の配線漏れが「認証なしで保存できる」形で潜在化する。#1820）
+        _staffAuthService = staffAuthService ?? throw new ArgumentNullException(nameof(staffAuthService));
+        _settingsChangeService = settingsChangeService ?? throw new ArgumentNullException(nameof(settingsChangeService));
         _configDirectory = configDirectory;
         // database_config.txtから直接読む（設定ファイルが正。DI経由のDatabaseOptionsは
         // アプリ起動時に固定されるため、同一セッション中に設定変更しても反映されない）
@@ -279,6 +309,7 @@ public partial class SettingsViewModel : ViewModelBase
 
             WarningBalance = settings.WarningBalance;
             BackupPath = settings.BackupPath;
+            _loadedBackupPath = settings.BackupPath ?? string.Empty;
             SelectedFontSize = settings.FontSize;
 
             // FontSizeItemを選択
@@ -350,29 +381,300 @@ public partial class SettingsViewModel : ViewModelBase
             return;
         }
 
-        // バックアップパスの検証（空の場合はデフォルトを使用するのでスキップ）
-        // Issue #1269: UNC到達性チェックをUIブロックせず非同期実行
-        var validatedBackupPath = BackupPath;
-        if (!string.IsNullOrWhiteSpace(BackupPath))
+        // Issue #2264: 職員証の認証を求めるのは、共有されるセキュリティ関連の設定（バックアップ先・データベース保存先）が
+        // 変わるときだけ。文字サイズ等だけの保存では求めない。
+        // 入力の検証・確認（未作成フォルダーの確認）・職員の登録状況の確認は認証より前に、短い処理中スコープの中で済ませる
+        // （UNC の到達確認・Directory.Exists は待ち得るため、待っている間に保存を重ねて押させない）。
+        // 認証ダイアログはそのスコープの外で出す（#2263 / #2265 と同じ）。
+        SavePlan? plan;
+        var requiresAuthentication = false;
+        using (BeginBusy("確認中..."))
         {
-            var pathResult = await PathValidator.ValidateBackupPathAsync(BackupPath);
-            if (!pathResult.IsValid)
+            plan = await PrepareSavePlanAsync();
+            if (plan == null)
             {
-                SetStatus($"バックアップパスが無効です: {pathResult.ErrorMessage}", true);
-                // Issue #1279
-                FirstErrorField = nameof(BackupPath);
+                // 検証で弾いた・確認で中止した（案内は設定済み）。何も保存しない
                 return;
             }
-            // パスを正規化
-            validatedBackupPath = PathValidator.NormalizePath(BackupPath) ?? BackupPath;
+
+            if (plan.ChangesSecuritySettings)
+            {
+                try
+                {
+                    // 職員が 0 人なら免除する（2 台目以降の PC は職員 0 人のローカルの既定 DB で起動し、ここで共有 DB を指す）。
+                    // 判定は保存を押した時点の DB の状態で行う（#2263）
+                    requiresAuthentication = await _settingsChangeService.RequiresOperatorAuthenticationAsync();
+                }
+                catch (Exception ex)
+                {
+                    // 現在の DB を開けない。職員を確かめられないので、認証なしで別の場所へ向ける変更は許さない
+                    //（「デフォルトに戻す」も同じく断る。復旧は接続の回復か、IT 担当者による設定ファイルの削除）
+                    ErrorDialogHelper.LogException(ex, "職員の登録状況の確認");
+                    SetStatus(SecuritySettingsDatabaseUnavailableMessage, true);
+                    return;
+                }
+            }
         }
 
+        if (requiresAuthentication)
+        {
+            // 保存全体を認証した 1 操作のスコープ（#2260）の中で行い、操作ログの操作者を認証した職員にする
+            using var authResult = (await _staffAuthService.RequestAuthenticationAsync("バックアップ先・データベース保存先の変更"))?.Enter();
+            if (authResult == null)
+            {
+                // 何も保存していない。入力内容は残し（HasChanges は true のまま）、認証し直せばそのまま保存できるようにする
+                SetStatus(SaveAuthenticationCancelledMessage, true);
+                return;
+            }
+
+            await SaveCoreAsync(plan);
+            return;
+        }
+
+        // 変更しない・職員が 0 人（免除。操作ログは「GUI操作」になる）
+        await SaveCoreAsync(plan);
+    }
+
+    /// <summary>
+    /// 入力を検証・正規化し、1 回の保存で何を変えるかを決める（Issue #2264）
+    /// </summary>
+    /// <returns>保存する内容。検証で弾いた・確認で中止したときは null（案内は設定済み）</returns>
+    /// <remarks>
+    /// 変更の有無は<b>正規化した後の値</b>で判定する。末尾の区切り文字だけが違う入力や、既定のままの保存先を
+    /// 「変更」とみなすと、起きていない変更のために認証を求め、「既定 → 既定」のような記録を残す。
+    /// </remarks>
+    private async Task<SavePlan?> PrepareSavePlanAsync()
+    {
+        // バックアップ先（空は既定の場所。空白だけの入力は空とみなさず検証で弾く）
+        string? newBackupPath = null;
+        var backupInput = BackupPath ?? string.Empty;
+        if (!string.Equals(backupInput, _loadedBackupPath, StringComparison.Ordinal))
+        {
+            var normalizedBackupPath = backupInput;
+            if (backupInput.Length > 0)
+            {
+                // Issue #1269: UNC到達性チェックをUIブロックせず非同期実行
+                var pathResult = await PathValidator.ValidateBackupPathAsync(backupInput);
+                if (!pathResult.IsValid)
+                {
+                    SetStatus($"バックアップパスが無効です: {pathResult.ErrorMessage}", true);
+                    // Issue #1279
+                    FirstErrorField = nameof(BackupPath);
+                    return null;
+                }
+                normalizedBackupPath = PathValidator.NormalizePath(backupInput) ?? backupInput;
+            }
+
+            // 空は既定の場所として比べる。未設定のとき欄には既定のパスが出るため、欄を空にしても既定の場所のまま
+            //（空の値と既定のパスを比べて変更とみなすと、起きていない変更のために認証を求める）
+            var comparableInput = normalizedBackupPath.Length > 0 ? normalizedBackupPath : PathValidator.GetDefaultBackupPath();
+            var comparableLoaded = _loadedBackupPath.Length > 0
+                ? PathValidator.NormalizePath(_loadedBackupPath) ?? _loadedBackupPath
+                : PathValidator.GetDefaultBackupPath();
+            // 末尾の区切り文字の有無は同じフォルダー（NormalizePath は末尾の区切り文字を残す）
+            if (!string.Equals(
+                    comparableInput.TrimEnd('\\', '/'),
+                    comparableLoaded.TrimEnd('\\', '/'),
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                newBackupPath = normalizedBackupPath;
+            }
+        }
+
+        // DBフォルダパスの検証（空の場合はデフォルトに戻す）。Issue #2264 で保存の前（認証の前）へ移した。
+        // 以前は他の設定を保存した後で検証しており、ここで弾かれても他の設定だけが保存されていた。
+        string? newDatabaseFolder = null;
+        string newDatabaseFilePath = string.Empty; // database_config.txt に保存するファイルパス（空は既定）
+        if (IsDatabasePathChanged)
+        {
+            var folder = DatabasePath ?? string.Empty;
+            if (!string.IsNullOrWhiteSpace(folder))
+            {
+                // Issue #1269: UNC到達性をUIブロックせず非同期検証
+                var dbPathResult = await PathValidator.ValidateBackupPathAsync(folder);
+                if (!dbPathResult.IsValid)
+                {
+                    SetStatus($"データベース保存先が無効です: {dbPathResult.ErrorMessage}", true);
+                    // Issue #1279
+                    FirstErrorField = nameof(DatabasePath);
+                    return null;
+                }
+
+                // パスを正規化
+                var normalizedDir = PathValidator.NormalizePath(folder);
+                if (normalizedDir == null)
+                {
+                    SetStatus("データベース保存先のパスを正規化できません", true);
+                    // Issue #1279
+                    FirstErrorField = nameof(DatabasePath);
+                    return null;
+                }
+                folder = normalizedDir;
+                newDatabaseFilePath = Path.Combine(normalizedDir, Data.DbContext.DatabaseFileName);
+            }
+
+            // 既定へ（空）の変更は、設定ファイルが無い・中身が空白だけなら変更なし。AppConfigFiles.Read は読めない
+            //（ロック・権限）ときも空文字を返すため、それで比べると共有 DB を指したままのファイルを「既定のまま」と
+            // みなしてしまう。読めないファイルは変更ありとして進め、書き換えの段で失敗を案内する（「デフォルトに戻す」と同じ判定）
+            var unchangedDatabasePath = newDatabaseFilePath.Length == 0
+                ? !HasNonEmptyConfigFile(DatabaseConfigPath)
+                : string.Equals(newDatabaseFilePath, AppConfigFiles.Read(DatabaseConfigPath), StringComparison.OrdinalIgnoreCase);
+            if (unchangedDatabasePath)
+            {
+                // 正規化すると今と同じ保存先（末尾の区切り文字の違い・既に既定のまま等）。変更しない
+                _originalDatabasePath = DatabasePath ?? string.Empty;
+                IsDatabasePathChanged = false;
+            }
+            else
+            {
+                if (newDatabaseFilePath.Length > 0)
+                {
+                    // Issue #1924: 保存先フォルダーが未作成なら、続行前に確認する。
+                    //
+                    // バックアップ先の検証（ValidateBackupPathAsync）は「フォルダーが
+                    // まだ無い」ことを許容する（作成は実行時に行う）。この検証は DB 保存先にも
+                    // 使い回されているが、DB の場合は意味が違う ―― 未作成のフォルダーを
+                    // 指定して再起動すると、SQLite が**新しい空の DB**をそこに作り、
+                    // 既存の共有データベースからは切り離される（台帳分裂）。
+                    // 入力誤り（共有名のタイポ）と初回セットアップ（意図的な新規作成）は
+                    // パスだけでは区別できないため、機械的に弾かずに利用者へ判断させる
+                    //（`.claude/rules/development-conventions.md`「曖昧な入力は『塞ぐ』より
+                    // 『解決結果を見せる』」）。
+                    //
+                    // Directory.Exists は UNC でハングし得るため Task.Run へ逃がす（Issue #1746）。
+                    var folderExists = await Task.Run(() => Directory.Exists(folder));
+                    if (!ConfirmCreatingNewDatabaseFolderIfMissing(folder, folderExists))
+                    {
+                        SetStatus("データベース保存先の変更を中止しました。", false);
+                        return null;
+                    }
+                }
+
+                newDatabaseFolder = folder;
+            }
+        }
+
+        return new SavePlan(newBackupPath, newDatabaseFolder, newDatabaseFilePath);
+    }
+
+    /// <summary>
+    /// バックアップ先・データベース保存先を変えようとしたが、現在の DB を開けず職員を確かめられないときの案内（Issue #2264）
+    /// </summary>
+    internal const string SecuritySettingsDatabaseUnavailableMessage =
+        "現在のデータベースに接続できないため、職員証の認証ができず、バックアップ先・データベース保存先を変更していません" +
+        "（ほかの設定も保存していません）。共有フォルダーへの接続を回復してからもう一度「保存」を押すか、" +
+        "接続を回復できないときは IT 担当者にこの PC の database_config.txt の削除を依頼してください。";
+
+    /// <summary>
+    /// 「デフォルトに戻す」を、現在の DB を開けず職員を確かめられないために断ったときの案内（Issue #2264）
+    /// </summary>
+    internal const string ResetDatabaseUnavailableMessage =
+        "現在のデータベースに接続できないため、職員証の認証ができず、データベース保存先をデフォルトに戻していません。" +
+        "共有フォルダーへの接続を回復してからもう一度「デフォルトに戻す」を押すか、" +
+        "接続を回復できないときは IT 担当者にこの PC の database_config.txt の削除を依頼してください。";
+
+    /// <summary>
+    /// 設定の保存で職員証の認証が完了しなかったときの案内（Issue #2264）
+    /// </summary>
+    internal const string SaveAuthenticationCancelledMessage =
+        "バックアップ先・データベース保存先の変更には職員証の認証が必要ですが、認証が完了しなかったため、" +
+        "設定を保存していません（入力内容はそのまま残っています）。" +
+        "保存するには、もう一度「保存」を押して職員証をタッチしてください。";
+
+    /// <summary>
+    /// 「デフォルトに戻す」で職員証の認証が完了しなかったときの案内（Issue #2264）
+    /// </summary>
+    internal const string ResetAuthenticationCancelledMessage =
+        "データベース保存先をデフォルトに戻すには職員証の認証が必要ですが、認証が完了しなかったため、" +
+        "保存先を変更していません。戻すには、もう一度「デフォルトに戻す」を押して職員証をタッチしてください。";
+
+    /// <summary>
+    /// 1 回の保存で何を変えるか（Issue #2264）
+    /// </summary>
+    internal sealed class SavePlan
+    {
+        public SavePlan(string? newBackupPath, string? newDatabaseFolder, string newDatabaseFilePath)
+        {
+            NewBackupPath = newBackupPath;
+            NewDatabaseFolder = newDatabaseFolder;
+            NewDatabaseFilePath = newDatabaseFilePath;
+        }
+
+        /// <summary>変更後のバックアップ先（正規化済み）。変更しないなら null</summary>
+        public string? NewBackupPath { get; }
+
+        /// <summary>変更後のデータベース保存先フォルダー（画面表示用）。変更しないなら null</summary>
+        public string? NewDatabaseFolder { get; }
+
+        /// <summary>database_config.txt に書くファイルパス（空は既定の場所）</summary>
+        public string NewDatabaseFilePath { get; }
+
+        /// <summary>共有されるセキュリティ関連の設定を変えるか（職員が 1 人以上いれば職員証の認証を求める）</summary>
+        public bool ChangesSecuritySettings => NewBackupPath != null || NewDatabaseFolder != null;
+    }
+
+    /// <summary>
+    /// 保存の本体（検証・確認・認証を済ませた後）
+    /// </summary>
+    /// <remarks>
+    /// Issue #2264: セキュリティ関連の設定（バックアップ先 → データベース保存先）を先に変更し、そのあとで他の設定を保存する。
+    /// バックアップ先の変更に失敗したら何も保存しない。
+    /// </remarks>
+    private async Task SaveCoreAsync(SavePlan plan)
+    {
         using (BeginBusy("保存中..."))
         {
+            // バックアップ先の変更（共有 DB。値・変更日時・PC 名・操作ログを 1 トランザクションで書く）
+            if (plan.NewBackupPath is string newBackupPath)
+            {
+                try
+                {
+                    // DB の書き込みは UI スレッドから退避する（#2197 と同じ）
+                    await Task.Run(() => _settingsChangeService.ChangeBackupPathAsync(newBackupPath));
+                }
+                catch (Exception ex)
+                {
+                    ErrorDialogHelper.LogException(ex, "バックアップ先の変更");
+                    SetStatus(ExceptionMessageFormatter.ToUserMessage(ex, "バックアップ先の変更"), true);
+                    return;
+                }
+
+                _loadedBackupPath = newBackupPath;
+                // 正規化されたパスをUIに反映
+                if (BackupPath != newBackupPath)
+                {
+                    BackupPath = newBackupPath;
+                }
+            }
+
+            // データベース保存先の変更（この PC の database_config.txt。操作ログは現在の DB に残す）
+            if (plan.NewDatabaseFolder is string newDatabaseFolder)
+            {
+                try
+                {
+                    await Task.Run(() => _settingsChangeService.ChangeDatabaseConfigAsync(DatabaseConfigPath, plan.NewDatabaseFilePath));
+                    DatabasePath = newDatabaseFolder;
+                    _originalDatabasePath = newDatabaseFolder;
+                    IsDatabasePathChanged = false;
+                }
+                catch (Exception ex)
+                {
+                    ErrorDialogHelper.LogException(ex, "データベース保存先の設定ファイルの保存");
+                    // 実際に保存した方だけを名指しし、保存していないもの（ほかの設定）と再度の保存を案内する
+                    //（BuildPartialSaveFailureMessage と同じ形）
+                    SetStatus(
+                        (plan.NewBackupPath != null ? "バックアップ先の変更は保存しました。" : string.Empty) +
+                        "ほかの設定（文字サイズ・残額警告など）は保存していません。" +
+                        ExceptionMessageFormatter.ToUserMessage(ex, "データベース保存先の設定ファイルの保存") +
+                        "そのうえで、もう一度「保存」を押してください。",
+                        true);
+                    return;
+                }
+            }
+
             var settings = new AppSettings
             {
                 WarningBalance = WarningBalance,
-                BackupPath = validatedBackupPath,
                 FontSize = SelectedFontSizeItem?.Value ?? FontSizeOption.Medium,
                 SoundMode = SelectedSoundModeItem?.Value ?? SoundMode.Beep,
                 ToastPosition = SelectedToastPositionItem?.Value ?? ToastPosition.TopRight,
@@ -392,6 +694,7 @@ public partial class SettingsViewModel : ViewModelBase
             // Issue #2202 で DbContext の入口が UI スレッドから移すようになったため、この Task.Run は二重の備えになる
             // （外しても固まらない）。Task.Run の中からの呼び出しは UI 起点のゲートを取らないが、書き込みは
             // トランザクション（セマフォ）でほかの書き込みと直列化される（#2197 から変わらない）。
+            // バックアップ先（backup_path）は一括保存に載らない（Issue #2264。上の ChangeBackupPathAsync だけが書く）。
             var success = await Task.Run(() => _settingsRepository.SaveAppSettingsAsync(settings));
 
             if (success)
@@ -409,12 +712,6 @@ public partial class SettingsViewModel : ViewModelBase
                 // それらが失敗しても台帳へ効く反映だけは確定させるため
                 // （development-conventions.md「コミット確定後の後処理を、成否の判定に巻き込まない」）
                 _summaryGenerator.ApplyDepartmentType(settings.DepartmentType);
-
-                // 正規化されたパスをUIに反映
-                if (BackupPath != validatedBackupPath)
-                {
-                    BackupPath = validatedBackupPath;
-                }
 
                 // 文字サイズの変更を反映
                 ApplyFontSize(settings.FontSize);
@@ -437,73 +734,9 @@ public partial class SettingsViewModel : ViewModelBase
                     // 非致命的: DBが正なので設定ファイルの書き込み失敗は無視
                 }
 
-                // DBパスが変更された場合、appsettings.jsonに保存
-                if (IsDatabasePathChanged)
+                if (plan.NewDatabaseFolder != null)
                 {
-                    // DBフォルダパスの検証（空の場合はデフォルトに戻すためスキップ）
-                    var validatedFolderPath = DatabasePath;
-                    string fullDbPath = string.Empty; // appsettings.jsonに保存するファイルパス
-                    if (!string.IsNullOrWhiteSpace(DatabasePath))
-                    {
-                        // Issue #1269: UNC到達性をUIブロックせず非同期検証
-                        var dbPathResult = await PathValidator.ValidateBackupPathAsync(DatabasePath);
-                        if (!dbPathResult.IsValid)
-                        {
-                            SetStatus($"データベース保存先が無効です: {dbPathResult.ErrorMessage}", true);
-                            // Issue #1279
-                            FirstErrorField = nameof(DatabasePath);
-                            return;
-                        }
-
-                        // パスを正規化
-                        var normalizedDir = PathValidator.NormalizePath(DatabasePath);
-                        if (normalizedDir == null)
-                        {
-                            SetStatus("データベース保存先のパスを正規化できません", true);
-                            // Issue #1279
-                            FirstErrorField = nameof(DatabasePath);
-                            return;
-                        }
-                        validatedFolderPath = normalizedDir;
-                        fullDbPath = Path.Combine(normalizedDir, Data.DbContext.DatabaseFileName);
-
-                        // Issue #1924: 保存先フォルダーが未作成なら、続行前に確認する。
-                        //
-                        // バックアップ先の検証（ValidateBackupPathAsync）は「フォルダーが
-                        // まだ無い」ことを許容する（作成は実行時に行う）。この検証は DB 保存先にも
-                        // 使い回されているが、DB の場合は意味が違う ―― 未作成のフォルダーを
-                        // 指定して再起動すると、SQLite が**新しい空の DB**をそこに作り、
-                        // 既存の共有データベースからは切り離される（台帳分裂）。
-                        // 入力誤り（共有名のタイポ）と初回セットアップ（意図的な新規作成）は
-                        // パスだけでは区別できないため、機械的に弾かずに利用者へ判断させる
-                        //（`.claude/rules/development-conventions.md`「曖昧な入力は『塞ぐ』より
-                        // 『解決結果を見せる』」）。
-                        //
-                        // Directory.Exists は UNC でハングし得るため Task.Run へ逃がす（Issue #1746）。
-                        var folderExists = await Task.Run(() => Directory.Exists(normalizedDir));
-                        if (!ConfirmCreatingNewDatabaseFolderIfMissing(normalizedDir, folderExists))
-                        {
-                            SetStatus("データベース保存先の変更を中止しました。", false);
-                            return;
-                        }
-                    }
-
-                    try
-                    {
-                        AppConfigFiles.Write(DatabaseConfigPath, fullDbPath);
-                        DatabasePath = validatedFolderPath;
-                        _originalDatabasePath = validatedFolderPath;
-                        IsDatabasePathChanged = false;
-                    }
-                    catch (Exception ex)
-                    {
-                        ErrorDialogHelper.LogException(ex, "データベース保存先の設定ファイルの保存");
-                        SetStatus(ExceptionMessageFormatter.ToUserMessage(ex, "データベース保存先の設定ファイルの保存"), true);
-                        return;
-                    }
-
                     // DBパス変更時はダイアログを閉じず、再起動を案内
-                    HasChanges = false;
                     SetStatus("データベース保存先を変更しました。変更を反映するにはアプリケーションを再起動してください。", false);
                     return;
                 }
@@ -513,9 +746,31 @@ public partial class SettingsViewModel : ViewModelBase
             }
             else
             {
-                SetStatus("設定の保存に失敗しました", true);
+                SetStatus(
+                    plan.ChangesSecuritySettings ? BuildPartialSaveFailureMessage(plan) : "設定の保存に失敗しました",
+                    true);
             }
         }
+    }
+
+    /// <summary>
+    /// セキュリティ関連の設定は変更できたが、ほかの設定の一括保存に失敗したときの案内（Issue #2264）
+    /// </summary>
+    /// <remarks>
+    /// 実際に変えた方だけを名指しする。データベース保存先を書き換えた後なら、成功時と同じく再起動の案内を付ける
+    /// （設定ファイルは書き換え済みで、次の起動から新しい保存先を使う）。
+    /// </remarks>
+    internal static string BuildPartialSaveFailureMessage(SavePlan plan)
+    {
+        var changed = plan.NewBackupPath != null && plan.NewDatabaseFolder != null
+            ? "バックアップ先とデータベース保存先"
+            : plan.NewBackupPath != null ? "バックアップ先" : "データベース保存先";
+        var restart = plan.NewDatabaseFolder != null
+            ? "データベース保存先の変更は、アプリケーションを再起動すると反映されます。"
+            : string.Empty;
+        return $"{changed}は変更しましたが、ほかの設定（文字サイズ・残額警告など）はデータベースへ書き込めなかったため保存していません。" +
+               restart +
+               "ほかの設定を保存するには、もう一度「保存」を押してください。";
     }
 
     /// <summary>
@@ -523,9 +778,9 @@ public partial class SettingsViewModel : ViewModelBase
     /// </summary>
     /// <remarks>
     /// <para>
-    /// モーダル表示は <c>BeginBusy</c> スコープの内側にあるため <c>SuspendBusy()</c> で囲む。
-    /// 囲まないと全面オーバーレイと不確定 ProgressBar がダイアログの背後で回り続け、
-    /// 利用者の判断を妨げる（Issue #1793 / `03_画面設計書.md` §3.10）。
+    /// Issue #2264 で保存の前（<c>BeginBusy</c> スコープの外、職員証の認証の前）へ移したが、
+    /// 呼び出し元が処理中スコープの内側へ戻っても背後でオーバーレイが回らないよう <c>SuspendBusy()</c> で囲んだままにする
+    /// （処理中でないときは何もしない。Issue #1793 / `03_画面設計書.md` §3.10）。
     /// </para>
     /// <para>
     /// フォルダーの存在確認（I/O）は呼び出し元が行い、本メソッドは<b>判断と提示</b>だけを担う。
@@ -618,8 +873,12 @@ public partial class SettingsViewModel : ViewModelBase
     /// データベース保存先をデフォルト（ローカル）に戻す（Issue #1559）。
     /// database_config.txt を削除し、UI上のパスをデフォルトフォルダパスに更新する。反映には再起動が必要。
     /// </summary>
+    /// <remarks>
+    /// Issue #2264: この PC の以後の記録を別の DB へ切り替える操作のため、保存先の変更と同じく職員証の認証を求め、
+    /// 操作ログ（変更前後の保存先）を記録する。設定ファイルが無い（既にデフォルト）ときは何も変わらないので認証を求めない。
+    /// </remarks>
     [RelayCommand]
-    public void ResetDatabasePathToDefault()
+    public async Task ResetDatabasePathToDefaultAsync()
     {
         var defaultFolder = GetDefaultDatabaseFolder();
         const string Title = "データベース保存先をデフォルトに戻す";
@@ -633,27 +892,125 @@ public partial class SettingsViewModel : ViewModelBase
             return;
         }
 
-        try
+        var configPath = DatabaseConfigPath;
+        // 設定ファイルが無い・中身が空なら既に既定の保存先。変化が無いので認証も記録もしない
+        //（空のファイルは残しても既定の保存先を指すので、そのまま置いておく）。
+        // 空かどうかは AppConfigFiles.Read ではなくファイルの大きさで見る。Read は読めない（権限・ロック）ときも
+        // 空文字を返すため、それで判定すると読めないファイルを残したまま「デフォルトに戻しました」と案内してしまう。
+        // 読めないファイルは「変更あり」として進め、削除・記録の段で失敗を案内する
+        if (HasNonEmptyConfigFile(configPath))
         {
-            var configPath = DatabaseConfigPath;
-            if (File.Exists(configPath))
+            var requiresAuthentication = false;
+            Exception? databaseUnavailable = null;
+            using (BeginBusy("確認中..."))
             {
-                File.Delete(configPath);
+                try
+                {
+                    // 職員が 0 人なら免除する（誤った共有フォルダーを指して空の DB ができた PC を、#1924 の状態から戻せるように）
+                    requiresAuthentication = await _settingsChangeService.RequiresOperatorAuthenticationAsync();
+                }
+                catch (Exception ex)
+                {
+                    databaseUnavailable = ex;
+                }
             }
 
-            // デフォルトフォルダを UI に表示。config 削除は既に完了しているため、
-            // 「変更なし状態」として IsDatabasePathChanged=false にして再保存処理を不要にする
-            DatabasePath = defaultFolder;
-            _originalDatabasePath = defaultFolder;
-            IsDatabasePathChanged = false;
-            SetStatus(
-                "データベース保存先をデフォルトに戻しました。変更を反映するにはアプリケーションを再起動してください。",
-                false);
+            if (databaseUnavailable != null)
+            {
+                // 現在の DB を開けない（共有フォルダーに接続できない・壊れている）。職員を確かめられず認証できないので断る。
+                // 認証なしで戻せると、ネットワークを切って戻す → 再起動で職員 0 人のローカルの既定 DB → 免除で認証なしに
+                // 保存先を任意の場所へ、という迂回路になる（レビューで検出）。起動時に DB を開けなければアプリは起動しないため、
+                // その場合の復旧は IT 担当者が database_config.txt を削除する
+                ErrorDialogHelper.LogException(databaseUnavailable, "データベース保存先をデフォルトに戻す前の職員の確認");
+                SetStatus(ResetDatabaseUnavailableMessage, true);
+                return;
+            }
+            else if (requiresAuthentication)
+            {
+                using var authResult = (await _staffAuthService.RequestAuthenticationAsync("データベース保存先をデフォルトに戻す"))?.Enter();
+                if (authResult == null)
+                {
+                    // 設定ファイルは削除していない
+                    SetStatus(ResetAuthenticationCancelledMessage, true);
+                    return;
+                }
+
+                if (!await ResetWithAuditAsync(configPath))
+                {
+                    return;
+                }
+            }
+            else if (!await ResetWithAuditAsync(configPath))
+            {
+                // 職員が 0 人（免除。操作ログは「GUI操作」になる）
+                return;
+            }
+        }
+
+        // デフォルトフォルダを UI に表示。config 削除は既に完了しているため、
+        // 「変更なし状態」として IsDatabasePathChanged=false にして再保存処理を不要にする
+        DatabasePath = defaultFolder;
+        _originalDatabasePath = defaultFolder;
+        IsDatabasePathChanged = false;
+        SetStatus(
+            "データベース保存先をデフォルトに戻しました。変更を反映するにはアプリケーションを再起動してください。",
+            false);
+    }
+
+    /// <summary>
+    /// 設定ファイルが存在し、空でないか（読めるかどうかは問わない。Issue #2264）
+    /// </summary>
+    /// <remarks>
+    /// 空白・改行だけのファイルは既定の保存先を指す（起動時の読み取りも前後の空白を除く）ので「空」とみなす。
+    /// 中身を確かめるのは小さいファイルに限る（パス 1 行の設定ファイルより大きいものは中身ありとみなす）。
+    /// 読めない（ロック・権限）ときは既定とは言えないので「中身あり」とする。
+    /// </remarks>
+    private static bool HasNonEmptyConfigFile(string configPath)
+    {
+        const long MaxInspectedBytes = 4096;
+        try
+        {
+            var info = new FileInfo(configPath);
+            if (!info.Exists || info.Length == 0)
+            {
+                return false;
+            }
+
+            if (info.Length > MaxInspectedBytes)
+            {
+                return true;
+            }
+
+            // 読めることを先に確かめる（AppConfigFiles.Read は読めないときも空文字を返すため）
+            _ = File.ReadAllBytes(configPath);
+            return AppConfigFiles.Read(configPath).Length > 0;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            // 大きさも中身も分からない: 既定とは言えないので変更ありとして進める
+            return true;
+        }
+    }
+
+    /// <summary>
+    /// 設定ファイルを削除し、操作ログに記録する（「デフォルトに戻す」。Issue #2264）
+    /// </summary>
+    /// <returns>削除できたら true。失敗したら案内を設定して false</returns>
+    private async Task<bool> ResetWithAuditAsync(string configPath)
+    {
+        try
+        {
+            using (BeginBusy("保存中..."))
+            {
+                await Task.Run(() => _settingsChangeService.ChangeDatabaseConfigAsync(configPath, databaseFilePath: null));
+            }
+            return true;
         }
         catch (Exception ex)
         {
             ErrorDialogHelper.LogException(ex, "データベース保存先の設定ファイルの削除");
             SetStatus(ExceptionMessageFormatter.ToUserMessage(ex, "データベース保存先の設定ファイルの削除"), true);
+            return false;
         }
     }
 
