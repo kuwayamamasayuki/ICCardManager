@@ -2851,4 +2851,90 @@ public class DataExportImportViewModelTests : IDisposable
     }
 
     #endregion
+
+    #region Issue #2262: レビュー 3 回目（内容のハッシュでの照合・タッチ待ちと認証・照合の防御の層）
+
+    /// <summary>
+    /// 欠陥を突く側: 同じ大きさ・同じ更新日時のまま内容だけを差し替えたファイルも、書き換えとして検出すること
+    /// （更新日時と大きさだけの照合は、SMB のファイル情報のキャッシュや更新日時を保ったコピーで見逃す）
+    /// </summary>
+    [Fact]
+    public async Task 同じ大きさと更新日時のまま内容だけ差し替えたファイルは取り込まないこと()
+    {
+        var path = WriteTempCsv("カードIDm,カード種別,管理番号,備考\n0102030405060708,はやかけん,001,\n");
+        try
+        {
+            _viewModel.SelectedImportType = DataType.Cards;
+            _importServiceMock
+                .Setup(s => s.PreviewCardsAsync(It.IsAny<string>(), It.IsAny<bool>()))
+                .ReturnsAsync(new CsvImportPreviewResult { IsValid = true });
+            await _viewModel.PreviewFileAsync(path);
+            var originalWriteTime = System.IO.File.GetLastWriteTimeUtc(path);
+            var originalLength = new System.IO.FileInfo(path).Length;
+
+            // 同じ大きさで内容だけ違う（管理番号 001 → 009）。更新日時も元に戻す
+            System.IO.File.WriteAllText(path, "カードIDm,カード種別,管理番号,備考\n0102030405060708,はやかけん,009,\n", new System.Text.UTF8Encoding(true));
+            System.IO.File.SetLastWriteTimeUtc(path, originalWriteTime);
+            new System.IO.FileInfo(path).Length.Should().Be(originalLength, "前提: 大きさが同じであること");
+
+            await _viewModel.ExecuteImportAsync();
+
+            _importServiceMock.Verify(s => s.ImportCardsAsync(It.IsAny<string>(), It.IsAny<bool>()), Times.Never);
+            _viewModel.StatusMessage.Should().Be(DataExportImportViewModel.BuildPreviewFileChangedMessage(path));
+        }
+        finally
+        {
+            System.IO.File.Delete(path);
+        }
+    }
+
+    /// <summary>
+    /// 欠陥を突く側: 取り込み先カードのタッチ待ちのまま「インポート実行」を押したら、認証を求める前にタッチ待ちを終えること
+    /// （残すと、認証の職員証のタッチをこの画面も処理し、「登録されていないカード」のモーダルが認証ダイアログに重なる）
+    /// </summary>
+    [Fact]
+    public async Task タッチ待ちのまま実行したら認証の前にタッチ待ちを終えること()
+    {
+        _viewModel.SelectedImportType = DataType.Ledgers;
+        _viewModel.UseCardListSelection = false;
+        _viewModel.IsWaitingForCardTouch = true;
+        SetupValidPreview(DataType.Ledgers);
+        bool? waitingDuringAuthentication = null;
+        _staffAuthServiceMock.Setup(s => s.RequestAuthenticationAsync(It.IsAny<string>()))
+            .Callback(() => waitingDuringAuthentication = _viewModel.IsWaitingForCardTouch)
+            .ReturnsAsync(() => new StaffAuthResult { Idm = "TEST_OPERATOR_IDM", StaffName = "テスト操作者" });
+        _importServiceMock
+            .Setup(s => s.ImportLedgersAsync(It.IsAny<string>(), It.IsAny<bool>(), It.IsAny<string?>()))
+            .ReturnsAsync(new CsvImportResult { Success = true, ImportedCount = 1 });
+
+        await _viewModel.ExecuteImportAsync();
+
+        waitingDuringAuthentication.Should().BeFalse("認証ダイアログが職員証を読む間、この画面はカードの読み取りを処理しない");
+        _importServiceMock.Verify(s => s.ImportLedgersAsync("test.csv", It.IsAny<bool>(), null), Times.Once,
+            "タッチ待ちを終えても取り込み先カード（未タッチ＝CSV の IDm 列）とプレビューは変わらない");
+    }
+
+    /// <summary>
+    /// 防御の層: 変更通知を経ずに条件がずれた（一覧で選んだカードの DTO の IDm が書き換わった）ときも、
+    /// プレビューと違う条件で取り込まないこと
+    /// </summary>
+    [Fact]
+    public async Task 変更通知を経ずに取り込み先カードがずれたら取り込まないこと()
+    {
+        var card = new CardDto { CardIdm = "0000000000000001", CardType = "はやかけん", CardNumber = "001" };
+        _viewModel.SelectedImportType = DataType.Ledgers;
+        _viewModel.SelectedTargetCard = card;
+        SetupValidPreview(DataType.Ledgers);
+
+        card.CardIdm = "0000000000000002";
+        _viewModel.HasPreview.Should().BeTrue("前提: 条件変更時の破棄は届いていないこと");
+
+        await _viewModel.ExecuteImportAsync();
+
+        _importServiceMock.Verify(s => s.ImportLedgersAsync(It.IsAny<string>(), It.IsAny<bool>(), It.IsAny<string?>()), Times.Never);
+        _viewModel.HasPreview.Should().BeFalse();
+        _viewModel.StatusMessage.Should().Be(DataExportImportViewModel.PreviewDiscardedByConditionChangeMessage);
+    }
+
+    #endregion
 }

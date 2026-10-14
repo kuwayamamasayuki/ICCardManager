@@ -368,23 +368,41 @@ public partial class DataExportImportViewModel : ViewModelBase
     }
 
     /// <summary>
-    /// 取り込むファイルの状態（最終更新日時と大きさ）。プレビューした後の書き換えを検出する（Issue #2262）
+    /// 取り込むファイルの状態（大きさと内容の SHA-256）。プレビューした後の書き換えを検出する（Issue #2262）
     /// </summary>
-    internal sealed record PreviewFileFingerprint(bool Exists, DateTime LastWriteTimeUtc, long Length)
+    /// <remarks>
+    /// <para>
+    /// 最終更新日時と大きさだけでは見逃す書き換えがある: 共有フォルダー（SMB）のファイル情報のキャッシュ
+    /// （既定 10 秒）の間の別 PC による変更、更新日時を保ったコピー・同じ大きさの差し替え、FAT の 2 秒単位の更新日時。
+    /// 内容を読んでハッシュを取れば、ファイル情報のキャッシュにも更新日時にも左右されない。
+    /// </para>
+    /// <para>
+    /// 取り込めるファイルは <see cref="CsvImportService.MaxImportFileSizeBytes"/>（64MB）以下で、読むコストは小さい。
+    /// 上限を超えるファイルはハッシュを取らずに大きさだけを記録する（取り込み側が読む前に拒む）。
+    /// プレビューの読み込みとは別にもう一度読む（プレビューは <see cref="CsvImportService"/> が読み、バイト列を返さないため）。
+    /// </para>
+    /// </remarks>
+    internal sealed record PreviewFileFingerprint(bool Exists, long Length, string ContentSha256)
     {
         /// <summary>いまのファイルの状態を読む（読めなければ「存在しない」として扱う）</summary>
         public static PreviewFileFingerprint Capture(string filePath)
         {
             try
             {
-                var info = new FileInfo(filePath);
-                return info.Exists
-                    ? new PreviewFileFingerprint(true, info.LastWriteTimeUtc, info.Length)
-                    : new PreviewFileFingerprint(false, default, 0);
+                using var stream = new FileStream(filePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+                var length = stream.Length;
+                if (length > CsvImportService.MaxImportFileSizeBytes)
+                {
+                    return new PreviewFileFingerprint(true, length, string.Empty);
+                }
+
+                using var sha256 = System.Security.Cryptography.SHA256.Create();
+                var hash = sha256.ComputeHash(stream);
+                return new PreviewFileFingerprint(true, length, BitConverter.ToString(hash));
             }
             catch (Exception ex) when (ex is IOException || ex is UnauthorizedAccessException || ex is ArgumentException || ex is NotSupportedException || ex is System.Security.SecurityException)
             {
-                return new PreviewFileFingerprint(false, default, 0);
+                return new PreviewFileFingerprint(false, 0, string.Empty);
             }
         }
     }
@@ -849,6 +867,9 @@ public partial class DataExportImportViewModel : ViewModelBase
         // Issue #2262: プレビューした条件・ファイルと、いま取り込む条件・ファイルを照合する。条件の変更時の破棄
         // （DiscardPreviewBecauseImportConditionsChanged）は画面の案内のためで、取り込む内容の保証はここで行う
         // （破棄が届かない経路 ― 読み込み中の変更・ファイルの書き換え ― があるため）。
+        // 条件の照合は防御の層: 画面のプロパティの変更は On…Changed が先に破棄するので通常は到達しないが、
+        // 変更通知を経ずに条件がずれる経路（選んだカードの DTO の IDm が書き換わる等）や、今後の条件の追加で
+        // 破棄の書き忘れがあっても、プレビューと違う条件で取り込まない。
         if (_previewSnapshot == null || _previewSnapshot.Conditions != CaptureImportConditions())
         {
             ClearPreview();
@@ -930,6 +951,16 @@ public partial class DataExportImportViewModel : ViewModelBase
         {
             SetStatus(DirectImportRequiresPreviewMessage, true);
             return;
+        }
+
+        // Issue #2262: 取り込み先カードのタッチ待ちを終えてから認証を求める。認証ダイアログ（StaffAuthDialog）と
+        // この画面の両方がカードリーダーの読み取りを購読しているため、タッチ待ちのまま職員証をタッチすると、
+        // この画面も読み取りを処理して「登録されていないカード」のモーダルを認証ダイアログに重ねる。
+        // 職員管理画面（#2263）も、認証は職員証のタッチ待ちを終えた後（保存・復元の確認の後）に求めている。
+        // タッチしたカード（TouchedCardIdm）は変えないので、取り込み先カードもプレビューも変わらない。
+        if (IsWaitingForCardTouch)
+        {
+            IsWaitingForCardTouch = false;
         }
 
         // Issue #2262: 職員・利用履歴・利用履歴詳細の取り込みは、職員証の認証を経て、認証した職員の操作として行う。
