@@ -96,6 +96,24 @@ namespace ICCardManager.Tests.Tools
         }
 
         [Fact]
+        public void 行_PSModulePathがPowerShell7の値でもハッシュを求められる()
+        {
+            // GitHub のランナーでテストから起動した Windows PowerShell 5.1 は、PowerShell 7 の PSModulePath を引き継ぐ。
+            // 5.1 の Get-FileHash は Microsoft.PowerShell.Utility の .psm1 にあり、この状態では自動読み込みできない（PR #2286 の CI）
+            var path = Path.Combine(_tempDir, "ICCardManager-v9.8.7.zip");
+            File.WriteAllBytes(path, Encoding.ASCII.GetBytes("abc"));
+
+            var result = PowerShellScriptRunner.RunCommand(
+                "$ErrorActionPreference = 'Stop'\n" +
+                "$env:PSModulePath = 'C:\\Program Files\\PowerShell\\Modules;C:\\Program Files\\PowerShell\\7\\Modules'\n" +
+                ". " + Q(ChecksumsScriptPath) + "\n" +
+                "Get-Sha256SumLine -Path " + Q(path));
+
+            result.ExitCode.Should().Be(0, result.StdErr);
+            result.StdOut.TrimEnd('\r', '\n').Should().Be(AbcSha256 + "  ICCardManager-v9.8.7.zip");
+        }
+
+        [Fact]
         public void 行_ファイルが無ければ失敗し_空のハッシュを返さない()
         {
             var result = RunWithChecksums("Get-Sha256SumLine -Path " + PowerShellScriptRunner.SingleQuote(Path.Combine(_tempDir, "missing.zip")));
@@ -394,7 +412,9 @@ namespace ICCardManager.Tests.Tools
             CallsGetFileHash(ReleaseStepRun("Create checksums")).Should().BeFalse();
             CallsGetFileHash("$h = (Get-FileHash -LiteralPath $p -Algorithm SHA256).Hash").Should().BeTrue("検出ロジックが呼び出しを拾えること");
             CallsGetFileHash("Write-Host \"配布先では Get-FileHash -Algorithm SHA256 で照合できます\"").Should().BeFalse("案内の文字列は呼び出しではない");
-            File.ReadAllText(ChecksumsScriptPath, Encoding.UTF8).Should().Contain("Get-FileHash -LiteralPath $item.FullName -Algorithm SHA256");
+            CallsGetFileHash(ScriptCode(ChecksumsScriptPath)).Should().BeFalse(
+                "checksums.ps1 も Get-FileHash に頼らない（5.1 では PSModulePath によって読み込めない）");
+            ScriptCode(ChecksumsScriptPath).Should().Contain("[System.Security.Cryptography.SHA256]::Create()");
         }
 
         [Fact]

@@ -5,7 +5,7 @@
 # 5.1 で使えない構文（?? / 三項演算子など）を書かない。
 #
 # 形式は GNU coreutils の sha256sum と同じ「<小文字の 16 進 64 桁><空白 2 つ><ファイル名>」を 1 行 1 ファイルで並べる。
-# Linux では `sha256sum -c SHA256SUMS.txt` でそのまま照合でき、Windows では Get-FileHash の結果と目で照合できる
+# Linux では `sha256sum -c SHA256SUMS.txt` でそのまま照合でき、Windows では受け取った側が Get-FileHash の結果と照合できる
 # （Get-FileHash は大文字で出すが、PowerShell の -eq は大文字・小文字を区別しない）。
 
 # Release に添付するチェックサムのファイル名
@@ -28,8 +28,32 @@ function Get-Sha256SumLine {
         throw "SHA-256 を求めるファイルが見つかりません: $Path"
     }
     $item = Get-Item -LiteralPath $Path
-    $hash = (Get-FileHash -LiteralPath $item.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+    $hash = Get-Sha256Hex -Path $item.FullName
     return "$hash  $($item.Name)"
+}
+
+# ファイルの SHA-256 を小文字の 16 進 64 桁で返す。Get-FileHash は使わない: Windows PowerShell 5.1 では
+# Microsoft.PowerShell.Utility のスクリプト部分（.psm1）に定義された関数で、PSModulePath が PowerShell 7 の値に
+# 置き換わった環境（GitHub のランナーから起動した 5.1 など）では自動読み込みできず「見つからない」で失敗する。
+# .NET の SHA256 で直接計算すれば、実行するシェルとモジュールの構成に依存しない（Issue #2268）
+function Get-Sha256Hex {
+    param([Parameter(Mandatory = $true)][string]$Path)
+    $sha = [System.Security.Cryptography.SHA256]::Create()
+    try {
+        $stream = [System.IO.File]::OpenRead((Resolve-ChecksumPath $Path))
+        try {
+            $bytes = $sha.ComputeHash($stream)
+        } finally {
+            $stream.Dispose()
+        }
+    } finally {
+        $sha.Dispose()
+    }
+    $builder = New-Object System.Text.StringBuilder (64)
+    foreach ($b in $bytes) {
+        $null = $builder.Append($b.ToString('x2', [System.Globalization.CultureInfo]::InvariantCulture))
+    }
+    return $builder.ToString()
 }
 
 # 行の形を確かめ、ファイル名を返す。形が崩れた行は例外（照合できない行を公開しない）。
