@@ -196,13 +196,15 @@ namespace ICCardManager.UITests.Infrastructure
         /// </param>
         /// <param name="seedDatabase">マイグレーション済み DB のパスを受け取り、データを投入する。</param>
         /// <param name="launchOwningGuard">本起動。受け取ったガードで、自身の Dispose 時に DB を復元すること。</param>
+        /// <param name="maxAttempts">ファイルが使用中のときの試行回数（<see cref="UiTestDatabaseGuard.Acquire"/> へ渡す）。</param>
         internal static TFixture LaunchWithSeedCore<TFixture>(
             string dbDirectory,
             Func<IDisposable> launchForMigration,
             Action<string> seedDatabase,
-            Func<UiTestDatabaseGuard, TFixture> launchOwningGuard)
+            Func<UiTestDatabaseGuard, TFixture> launchOwningGuard,
+            int maxAttempts = UiTestDatabaseGuard.DefaultMaxAttempts)
         {
-            var guard = UiTestDatabaseGuard.Acquire(dbDirectory);
+            var guard = UiTestDatabaseGuard.Acquire(dbDirectory, maxAttempts);
             try
             {
                 // 空の状態からマイグレーションさせる
