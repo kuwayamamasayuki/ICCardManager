@@ -189,6 +189,81 @@ namespace ICCardManager.UITests.Infrastructure
             }
         }
 
+        /// <summary>過去のバス利用として投入するバス停名（Issue #2251 の既定値の確認用）。</summary>
+        public const string PastBusStops = "天神～博多";
+
+        /// <summary>過去のバス利用の金額。仮想タッチの「履歴追加」の既定金額（200 円）と揃える。</summary>
+        public const int PastBusAmount = 200;
+
+        /// <summary>
+        /// <see cref="ScreenshotSeedData.SeedForVirtualTouch(SQLiteConnection, bool)"/>（バス停名入力を出す）に加えて、
+        /// 仮想タッチの職員（<see cref="AppFixture.SeededStaffIdm"/>）が <see cref="PastBusAmount"/> 円のバスで
+        /// 「<see cref="PastBusStops"/>」を 2 回入力した履歴を通常カードへ足す（Issue #2251。同じ職員×同じ金額の実績が 2 回）。
+        /// </summary>
+        /// <remarks>
+        /// 仮想タッチ用のカードには足さない（導入行より前の行を作ると残高チェーンの警告が割り込み、
+        /// 同じ日の履歴があると返却時の既存明細との照合〈#326〉が今回の利用を取り込まなくなる）。
+        /// 通常カードの最終行の日付・残額から続けて、残高チェーンを保つ。
+        /// </remarks>
+        public static void SeedWithPastBusStopsForVirtualTouch(SQLiteConnection conn)
+        {
+            ScreenshotSeedData.SeedForVirtualTouch(conn, skipBusStopInput: false);
+
+            using var tx = conn.BeginTransaction();
+
+            string date;
+            int balance;
+            using (var cmd = conn.CreateCommand())
+            {
+                cmd.CommandText = "SELECT date, balance FROM ledger WHERE card_idm = @card ORDER BY date DESC, id DESC LIMIT 1";
+                cmd.Parameters.AddWithValue("@card", ScreenshotSeedData.NormalCardIdm);
+                using var reader = cmd.ExecuteReader();
+                if (!reader.Read())
+                {
+                    throw new InvalidOperationException("通常カードの履歴が投入データにありません（ScreenshotSeedData.Seed を変えたら本メソッドも直すこと）。");
+                }
+
+                date = reader.GetString(0);
+                balance = Convert.ToInt32(reader.GetValue(1), CultureInfo.InvariantCulture);
+            }
+
+            for (var i = 0; i < 2; i++)
+            {
+                balance -= PastBusAmount;
+                long ledgerId;
+                using (var cmd = conn.CreateCommand())
+                {
+                    cmd.CommandText =
+                        "INSERT INTO ledger (card_idm, lender_idm, date, summary, income, expense, balance, staff_name, note, is_lent_record) " +
+                        "VALUES (@card, @lender, @date, @summary, 0, @expense, @balance, @staff, NULL, 0); SELECT last_insert_rowid();";
+                    cmd.Parameters.AddWithValue("@card", ScreenshotSeedData.NormalCardIdm);
+                    cmd.Parameters.AddWithValue("@lender", AppFixture.SeededStaffIdm);
+                    cmd.Parameters.AddWithValue("@date", date);
+                    cmd.Parameters.AddWithValue("@summary", $"バス（{PastBusStops}）");
+                    cmd.Parameters.AddWithValue("@expense", PastBusAmount);
+                    cmd.Parameters.AddWithValue("@balance", balance);
+                    cmd.Parameters.AddWithValue("@staff", ScreenshotSeedData.PrimaryStaffName);
+                    ledgerId = Convert.ToInt64(cmd.ExecuteScalar(), CultureInfo.InvariantCulture);
+                }
+
+                using (var cmd = conn.CreateCommand())
+                {
+                    cmd.CommandText =
+                        "INSERT INTO ledger_detail (ledger_id, use_date, entry_station, exit_station, bus_stops, amount, balance, " +
+                        "is_charge, is_bus, is_point_redemption, group_id) " +
+                        "VALUES (@ledger, @date, NULL, NULL, @stops, @amount, @balance, 0, 1, 0, NULL)";
+                    cmd.Parameters.AddWithValue("@ledger", ledgerId);
+                    cmd.Parameters.AddWithValue("@date", date);
+                    cmd.Parameters.AddWithValue("@stops", PastBusStops);
+                    cmd.Parameters.AddWithValue("@amount", PastBusAmount);
+                    cmd.Parameters.AddWithValue("@balance", balance);
+                    cmd.ExecuteNonQuery();
+                }
+            }
+
+            tx.Commit();
+        }
+
         private static void InsertDetail(
             SQLiteConnection conn, long ledgerId, string date, string entry, string exit, int amount, int balance)
         {

@@ -262,6 +262,24 @@ namespace ICCardManager.UITests.Infrastructure
         [UiaName]
         public const string BusStopSaveButton = "バス停名を保存";
 
+        // ── バス停名入力の自動入力（Issue #2251） ────────
+
+        /// <summary>バス停名入力ダイアログの候補リスト（Popup の中の ListBox）。</summary>
+        [UiaName]
+        public const string BusStopSuggestionList = "バス停名の候補";
+
+        // 自動入力の注記は AutomationProperties.HelpText="{Binding AutoFillNote}" のバインディングで、XAML にリテラルとしては現れない
+        // （値は BusStopInputItem.SuggestedAutoFillNote / RoundTripAutoFillNote。一致は BusStopAutoFillUiTestConstantsTests が固定する）。
+        /// <summary>既定値を入れた欄の注記と読み上げの補足。</summary>
+        [NotUiaName]
+        public const string BusStopSuggestedAutoFillNote =
+            "自動入力：これまでの入力（同じ職員・同じ金額）から入れました。違う場合は書き換えてください";
+
+        /// <summary>往復の帰りを入れた欄の注記と読み上げの補足。</summary>
+        [NotUiaName]
+        public const string BusStopRoundTripAutoFillNote =
+            "自動入力：上の行の帰り（往復）として入れました。違う場合は書き換えてください";
+
         // 終了の確認（Issue #2143）は Win32 の MessageBox で、タイトルは XAML ではなく
         // MainViewModel.ConfirmExit が DialogService.ShowConfirmation へ渡す文字列そのもの。
         /// <summary>終了の確認 MessageBox のタイトル。</summary>
