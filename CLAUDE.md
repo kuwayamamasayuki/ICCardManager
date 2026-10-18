@@ -44,9 +44,11 @@ WSL2では "/mnt/c/Program Files/dotnet/dotnet.exe" を使用すること。
 | `viewmodel-conventions.md` | 条件付き（`ViewModels/**`、`Views/**`、`Resources/**`、03_画面設計書、04_機能設計書） | ViewModel 規約（Dispatcher の受け皿、処理中フラグとカード読み取り抑制、丸め込み後の取り直し、警告エリアの生成・除去、ブロックし得る同期処理の起動） |
 | `ui-conventions.md` | 条件付き（同上） | UI/UX 原則（選択状態のスナップショット、完了メッセージの順序と所在、Busy スコープとモーダル、MessageBox のオーナー、色・折り返し・系列色） |
 | `logging.md` | 条件付き（`src/**`） | ロギング規約（LogDebug は本番で出ない、AggregateException の平坦化、IDm のマスク、Information 併設、埋め込む値の改行の継続行化） |
-| `business-logic.md` | 常時 | 状態遷移、貸出/返却フロー、バス判別、摘要生成、共有モード、残高不足処理、月次帳票 |
+| `business-logic.md` | 常時 | 状態遷移、貸出/返却フロー、バス判別、摘要生成、残高不足処理、月次帳票 |
+| `ledger-and-shared-mode.md` | 条件付き（`ICCardManager/src/**`、`tests/**`、`installer/**`） | 共有フォルダモード（journal_mode・VACUUM の CAS ロック・バックアップ保持）、ledger を集計するときの前提（実績でないレコード・カードの母集団・残高チェーンのシード）。`business-logic.md` から分割 |
 | `git-workflow.md` | 常時 | ブランチルール、ステージング規約 |
 | `error-messages.md` | 常時 | エラーメッセージ品質（「何が/なぜ/どうすれば」3要素、禁止パターン、Issue #1275） |
+| `error-messages-implementation.md` | 条件付き（`ICCardManager/src/**`、`tests/**`） | エラー経路の実装規約（`ToUserMessage` と `GetErrorInfo` の分担、UI 文言とログの対、制約違反の例外変換、影響行数 0 の競合文言、エラーコードの一意性、品質テスト一覧）。`error-messages.md` から分割 |
 | `testing.md` | 条件付き（`tests/**`、07_テスト設計書） | テスト品質、ハードコーディング禁止、テスト実装原則 |
 | `async-configureawait.md` | 条件付き（`Services/**`、`Data/**`、`Infrastructure/**`、`Common/**`） | async/ConfigureAwait(false) 規約（Service 層のみ付与、ViewModels/Views/tests は付けない、CA2007、Issue #1287） |
 | `migrations.md` | 条件付き（`Data/Migrations/**`、02_DB設計書） | マイグレーション作成規約（冪等性必須、AddColumnIfNotExists 引数検証、新規マイグレーション追加手順） |
