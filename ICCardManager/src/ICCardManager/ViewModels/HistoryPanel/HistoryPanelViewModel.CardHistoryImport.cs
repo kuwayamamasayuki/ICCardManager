@@ -15,7 +15,7 @@ public partial class HistoryPanelViewModel
 {
     /// <summary>履歴の上に出す案内（取り込みを勧める理由）</summary>
     internal const string CardHistoryImportOfferMessage =
-        "このカードは、カードの残額とピッすいの記録が食い違っています。カードに残る利用履歴から、記録されていない利用を取り込めます。";
+        "このカードは、カードの残額とピッすいの記録が食い違っています。「カードの履歴から取り込む...」を押し、カードに残る利用履歴から記録されていない利用を取り込んでください。";
 
     /// <summary>履歴の上に出す案内（XAML の束縛用）</summary>
     public string CardHistoryImportOfferMessageText => CardHistoryImportOfferMessage;
@@ -82,7 +82,7 @@ public partial class HistoryPanelViewModel
     /// </summary>
     /// <remarks>
     /// 取り込みは前月以前の利用（ピッすいを通さずに使われ、そのまま戻されたもの）を記録し得る。今の表示期間のまま読み直すと、
-    /// 「N件の行を記録しました」と案内したのに履歴に現れない。表示期間がその行を含まなければ、最も古い行の月の 1 日から
+    /// 「N件の行を記録しました」と案内したのに履歴に現れない。表示期間がその行を含まなければ（前の月を表示している場合も）、最も古い行の月の 1 日から
     /// 開き直す（返却確認 #1907 と同じ。期間を月単位で扱う画面に日付単位の値を渡さない）。開き直すと案内が取り下げられる
     /// （<see cref="ShowHistoryAsync"/>）ので立て直す（食い違いが解消したかは、この後の判定し直しで決める）。
     /// </remarks>
@@ -91,9 +91,14 @@ public partial class HistoryPanelViewModel
         var oldest = outcome.RecordedLedgers.Count > 0
             ? outcome.RecordedLedgers.Min(l => l.Date).Date
             : (DateTime?)null;
+        var newest = outcome.RecordedLedgers.Count > 0
+            ? outcome.RecordedLedgers.Max(l => l.Date).Date
+            : (DateTime?)null;
         var fromMonth = oldest.HasValue ? new DateTime(oldest.Value.Year, oldest.Value.Month, 1) : (DateTime?)null;
 
-        if (fromMonth.HasValue && HistoryCard?.CardIdm == cardIdm && fromMonth.Value < HistoryFromDate)
+        // 前だけでなく後ろへはみ出す場合も開き直す（月送りで前の月を表示したまま取り込んだとき）
+        var outsideShownPeriod = oldest < HistoryFromDate.Date || newest > HistoryToDate.Date;
+        if (fromMonth.HasValue && HistoryCard?.CardIdm == cardIdm && outsideShownPeriod)
         {
             var card = await _cardRepository.GetByIdmAsync(cardIdm);
             if (card != null)
@@ -138,6 +143,12 @@ public partial class HistoryPanelViewModel
                 await LoadHistoryLedgersAsync();
             }
         }
+        else if (outcome.Completed)
+        {
+            // 一覧を見ている間に他の操作（返却・他のパソコンの取り込み）で記録されていた。その記録を見せるため読み直す
+            await LoadHistoryLedgersAsync();
+            await Host.RefreshDashboardAsync();
+        }
 
         if (outcome.ActualBalance.HasValue)
         {
@@ -148,7 +159,7 @@ public partial class HistoryPanelViewModel
             }
         }
 
-        if (outcome.HasImported)
+        if (outcome.Completed)
         {
             await Host.CheckWarningsAsync();
             await CheckAndNotifyConsistencyAsync();

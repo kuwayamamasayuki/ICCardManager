@@ -393,6 +393,46 @@ public sealed class CardHistoryImportViewModelTests : IDisposable
     }
 
     [Fact]
+    public async Task 取り込みの最中は処理中にして_EscやバツでダイアログをClosingさせないこと()
+    {
+        // BusyCloseGuard は DataContext の IsBusy で Esc・✕ を止める。取り込みの最中に処理中でないと、閉じた時点で
+        // 呼び出し元は「取り込まなかった」として後処理を飛ばし、その後に確定した行が履歴に出ないまま警告も残る
+        SetupCard(balance: 4790, Usage(new DateTime(2026, 9, 10), 4790));
+        var vm = await CreateReadyViewModelAsync();
+        var busyMessages = new List<string>();
+        vm.PropertyChanged += (_, e) =>
+        {
+            // IsBusy と BusyMessage のどちらが先に変わっても拾う
+            if ((e.PropertyName == nameof(vm.IsBusy) || e.PropertyName == nameof(vm.BusyMessage)) && vm.IsBusy)
+            {
+                busyMessages.Add(vm.BusyMessage);
+            }
+        };
+
+        await vm.ImportAsync();
+
+        busyMessages.Should().Contain("取り込み中...", "記録している間は処理中（閉じるガードの対象）");
+        vm.IsBusy.Should().BeFalse("終われば処理中を解き、「閉じる」で閉じられる");
+        vm.Phase.Should().Be(CardHistoryImportPhase.Completed);
+    }
+
+    [Fact]
+    public async Task 一覧を見ている間に他の操作で記録されたら新たに記録せず_その旨を案内し_完了として渡すこと()
+    {
+        var history = new List<LedgerDetail> { Usage(new DateTime(2026, 9, 10), 4790) };
+        SetupCard(balance: 4790, history.ToArray());
+        var vm = await CreateReadyViewModelAsync();
+        (await _lendingService.ImportUnrecordedUsageAsync(TargetIdm, new List<LedgerDetail> { Usage(new DateTime(2026, 9, 10), 4790) }))
+            .CreatedLedgers.Should().ContainSingle("前提: 他の操作で先に記録される");
+
+        await vm.ImportAsync();
+
+        vm.HasImported.Should().BeFalse();
+        vm.Outcome.Completed.Should().BeTrue("呼び出し元が履歴を読み直して、その記録を見せる");
+        vm.StatusMessage.Should().Contain("他の操作").And.Contain("一致しました");
+    }
+
+    [Fact]
     public async Task 認証が完了しなければ何も記録せず_もう一度押すよう案内すること()
     {
         _staffAuthService.Setup(s => s.RequestAuthenticationAsync(It.IsAny<string>())).ReturnsAsync((StaffAuthResult?)null);

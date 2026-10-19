@@ -295,9 +295,11 @@ namespace ICCardManager.Services
                                 }
                             }
 
+                            // 記録済みの利用は計画（同じトランザクションの中）で照合済みなので、ここでは照合し直さない
+                            // （問い合わせと「重複履歴を除外しました」のログが二重になる）
                             var ledgers = await CreateUsageLedgersAsync(
                                 cardIdm, null, null, plan.DetailsToRecord.ToList(),
-                                transaction: scope.Transaction).ConfigureAwait(false);
+                                skipDuplicateCheck: true, transaction: scope.Transaction).ConfigureAwait(false);
 
                             foreach (var ledger in ledgers)
                             {

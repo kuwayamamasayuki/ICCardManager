@@ -2738,6 +2738,46 @@ public class HistoryPanelViewModelTests : IDisposable
     }
 
     [Fact]
+    public async Task 前の月を表示したまま今月の行を取り込んだら取り込んだ月から開き直すこと()
+    {
+        // 月送りでは案内を取り下げないので、前の月を表示したまま取り込める（後ろへはみ出す形）
+        _cardRepositoryMock.Setup(r => r.GetByIdmAsync(MismatchCardIdm, It.IsAny<bool>())).ReturnsAsync(MismatchCard());
+        await _history.ShowCardHistoryForBalanceMismatchAsync(MismatchCard());
+        await _history.HistorySetLastMonth();
+        _history.IsCardHistoryImportOffered.Should().BeTrue("前提: 月送りでは案内を取り下げない");
+        var today = DateTime.Today;
+        _host.MismatchRemainsAfterReevaluation = true;
+
+        await _history.CompleteCardHistoryImportAsync(MismatchCardIdm, new CardHistoryImportOutcome(
+            true, new[] { new Ledger { Id = 10, CardIdm = MismatchCardIdm, Date = today, Summary = "鉄道（博多～天神）" } }, 4000));
+
+        _history.HistoryFromDate.Should().Be(new DateTime(today.Year, today.Month, 1));
+        _history.HistoryToDate.Should().Be(today, "取り込んだ行が表示期間に入ること");
+        _history.IsCardHistoryImportOffered.Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task 記録した行が無くても取り込みを終えたら読み直して警告を検査し直すこと()
+    {
+        // 一覧を見ている間に返却・他のパソコンの取り込みで記録されていた。その記録を画面に見せる
+        await _history.ShowCardHistoryForBalanceMismatchAsync(MismatchCard());
+        _host.Calls.Clear();
+        _host.MismatchRemainsAfterReevaluation = false;
+        _ledgerRepositoryMock.Invocations.Clear();
+
+        await _history.CompleteCardHistoryImportAsync(MismatchCardIdm, new CardHistoryImportOutcome(
+            hasImported: false, recordedLedgers: Array.Empty<Ledger>(), actualBalance: 4580, completed: true));
+
+        _ledgerRepositoryMock.Verify(r => r.GetPagedAsync(
+            MismatchCardIdm, It.IsAny<DateTime>(), It.IsAny<DateTime>(), It.IsAny<int>(), It.IsAny<int>()), Times.AtLeastOnce());
+        _host.Calls.Where(c => c != RecordingHistoryPanelHost.BeginBusyCall).Should().Equal(
+            RecordingHistoryPanelHost.RefreshDashboardCall,
+            RecordingHistoryPanelHost.ReevaluateCardBalanceMismatchCall,
+            RecordingHistoryPanelHost.CheckWarningsCall);
+        _navigationServiceMock.Verify(n => n.ShowDialogAsync(It.IsAny<Func<ICCardManager.Views.Dialogs.BusStopInputDialog, Task>>()), Times.Never);
+    }
+
+    [Fact]
     public async Task 読み取らずに閉じたら何もしないこと()
     {
         await _history.ShowCardHistoryForBalanceMismatchAsync(MismatchCard());

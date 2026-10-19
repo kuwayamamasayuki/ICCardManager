@@ -41,15 +41,21 @@ namespace ICCardManager.ViewModels
     /// </summary>
     public sealed class CardHistoryImportOutcome
     {
-        public CardHistoryImportOutcome(bool hasImported, IReadOnlyList<Ledger> recordedLedgers, int? actualBalance)
+        public CardHistoryImportOutcome(bool hasImported, IReadOnlyList<Ledger> recordedLedgers, int? actualBalance, bool completed = false)
         {
             HasImported = hasImported;
+            Completed = completed || hasImported;
             RecordedLedgers = recordedLedgers ?? throw new ArgumentNullException(nameof(recordedLedgers));
             ActualBalance = actualBalance;
         }
 
         /// <summary>台帳に行を記録したか</summary>
         public bool HasImported { get; }
+
+        /// <summary>
+        /// 取り込みを実行し終えたか（記録した行が無かった場合も含む。一覧を見ている間に他の操作で記録されていたとき）
+        /// </summary>
+        public bool Completed { get; }
 
         /// <summary>記録した台帳行（新しく作った行と、同じ日の既存の行へ明細を足した行）</summary>
         public IReadOnlyList<Ledger> RecordedLedgers { get; }
@@ -170,7 +176,8 @@ namespace ICCardManager.ViewModels
         public CardHistoryImportOutcome Outcome => new(
             HasImported,
             (IReadOnlyList<Ledger>?)ImportResult?.CreatedLedgers ?? Array.Empty<Ledger>(),
-            ActualBalance);
+            ActualBalance,
+            completed: ImportResult?.Success == true);
 
         /// <summary>
         /// 取り込む対象のカードを受け取る（タッチの待ち受けは <see cref="Start"/> で始める）
@@ -447,7 +454,7 @@ namespace ICCardManager.ViewModels
                 "この画面を閉じ、職員証と交通系ICカードをタッチして返却してください。",
             UsageImportBlockReason.NoBaseline =>
                 $"{cardName}には台帳の記録が 1 行も無いため、どこまでが記録済みかを決められず取り込めません。" +
-                "交通系ICカード管理画面でカードの登録内容を確認してください。",
+                "この画面を閉じ、履歴の「＋ 行を追加」でカードを使い始めたときの残額の行（「新規購入」など）を入力してから、もう一度取り込んでください。",
             _ =>
                 $"{cardName}が見つからないか、削除・払い戻し済みのため取り込めません。" +
                 "この画面を閉じ、交通系ICカード管理画面でカードの状態を確認してください。",
@@ -469,7 +476,7 @@ namespace ICCardManager.ViewModels
             // チャージ・ポイント還元の行は利用者が空欄のままでよいので、利用の行に限って入力を促す
             var head = importedCount > 0
                 ? $"{importedCount}件の行を台帳に記録しました。利用の行の利用者は空欄です。分かる場合は履歴の各行の「変更」で入力してください。"
-                : "台帳に記録する利用はありませんでした。";
+                : "一覧の利用は、この画面を開いている間に他の操作（返却や他のパソコンの取り込み）で記録されていたため、新たに記録した行はありません。";
 
             if (recordedBalanceAfter == null || actualBalance == null)
             {
