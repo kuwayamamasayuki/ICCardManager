@@ -339,7 +339,8 @@ public sealed class CardHistoryImportViewModelTests : IDisposable
 
         vm.Phase.Should().Be(CardHistoryImportPhase.Ready);
         vm.Rows.Should().BeEmpty();
-        vm.StatusMessage.Should().Be(CardHistoryImportViewModel.BuildNothingToImportMessage());
+        vm.StatusMessage.Should().Be(CardHistoryImportViewModel.BuildNothingToImportMessage(new DateTime(2026, 9, 1)));
+        vm.StatusMessage.Should().Contain("2026/09/01 以降", "実際の下限（導入行の日付）を示す");
         vm.ImportCommand.CanExecute(null).Should().BeFalse();
     }
 
@@ -420,6 +421,7 @@ public sealed class CardHistoryImportViewModelTests : IDisposable
         vm.IsStatusError.Should().BeTrue();
         vm.StatusMessage.Should().Be(CardHistoryImportViewModel.BuildBlockedMessage(UsageImportBlockReason.CardIsLent, CardName));
         (await GetUsageLedgersAsync()).Should().BeEmpty();
+        vm.ImportCommand.CanExecute(null).Should().BeFalse("押し直しても同じ理由で断られるので、取り込めない状態にする");
     }
 
     [Fact]
@@ -446,6 +448,10 @@ public sealed class CardHistoryImportViewModelTests : IDisposable
             .Should().Contain("790円 の差があります").And.NotContain("一致しました");
         CardHistoryImportViewModel.BuildCompletionMessage(1, null, 4000)
             .Should().Contain("確認できませんでした").And.NotContain("一致しました");
+        CardHistoryImportViewModel.BuildCompletionMessage(1, 4790, 4000)
+            .Should().Contain("可能性があります", "差の原因は言い切らない（導入時の残額の誤りなど別の原因もあり得る）");
+        CardHistoryImportViewModel.BuildCompletionMessage(2, 4580, 4580)
+            .Should().Contain("利用の行の利用者は空欄", "チャージ・ポイント還元の行は空欄のままでよい");
     }
 
     [Fact]
@@ -457,7 +463,8 @@ public sealed class CardHistoryImportViewModelTests : IDisposable
             CardHistoryImportViewModel.AuthenticationCancelledMessage,
             CardHistoryImportViewModel.BuildWrongCardMessage(CardName),
             CardHistoryImportViewModel.BuildReadFailedMessage(),
-            CardHistoryImportViewModel.BuildNothingToImportMessage(),
+            CardHistoryImportViewModel.BuildNothingToImportMessage(new DateTime(2026, 9, 1)),
+            CardHistoryImportViewModel.BuildNothingToImportMessage(null),
             CardHistoryImportViewModel.BuildBlockedMessage(UsageImportBlockReason.CardIsLent, CardName),
             CardHistoryImportViewModel.BuildBlockedMessage(UsageImportBlockReason.NoBaseline, CardName),
             CardHistoryImportViewModel.BuildBlockedMessage(UsageImportBlockReason.CardNotInOperation, CardName),

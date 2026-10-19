@@ -278,11 +278,22 @@ namespace ICCardManager.Services
                                 return (BlockReason: UsageImportBlockReason.None, Ledgers: new List<Ledger>());
                             }
 
-                            // 同じ日の既存の行へ明細を足した場合は、操作ログの「変更前」に足す前の行を残す（Issue #1760）
+                            // 同じ日の既存の行へ明細を足した場合は、操作ログの「変更前」に足す前の行を残す（Issue #1760）。
+                            // 変更後（下で明細ごと読み直す）と同じ粒度にするため、明細ごと読む（日付の範囲の取得は明細を読まない。#1959）
                             var dates = plan.DetailsToRecord.Select(d => d.UseDate!.Value.Date).ToList();
-                            var beforeRows = (await _ledgerRepository
+                            var candidateIds = (await _ledgerRepository
                                     .GetByDateRangeAsync(cardIdm, dates.Min(), dates.Max()).ConfigureAwait(false))
-                                .ToDictionary(l => l.Id);
+                                .Select(l => l.Id)
+                                .ToList();
+                            var beforeRows = new Dictionary<int, Ledger>();
+                            foreach (var id in candidateIds)
+                            {
+                                var before = await _ledgerRepository.GetByIdAsync(id).ConfigureAwait(false);
+                                if (before != null)
+                                {
+                                    beforeRows[id] = before;
+                                }
+                            }
 
                             var ledgers = await CreateUsageLedgersAsync(
                                 cardIdm, null, null, plan.DetailsToRecord.ToList(),
@@ -290,13 +301,15 @@ namespace ICCardManager.Services
 
                             foreach (var ledger in ledgers)
                             {
+                                // 変更後は明細ごと読み直す（新しく作った行は明細を持たないインスタンスのため。同じトランザクションの接続なので書いた行が見える）
+                                var after = await _ledgerRepository.GetByIdAsync(ledger.Id).ConfigureAwait(false) ?? ledger;
                                 if (beforeRows.TryGetValue(ledger.Id, out var before))
                                 {
-                                    await _operationLogger.LogLedgerUpdateAsync(before, ledger, scope.Transaction).ConfigureAwait(false);
+                                    await _operationLogger.LogLedgerUpdateAsync(before, after, scope.Transaction).ConfigureAwait(false);
                                 }
                                 else
                                 {
-                                    await _operationLogger.LogLedgerInsertAsync(ledger, scope.Transaction).ConfigureAwait(false);
+                                    await _operationLogger.LogLedgerInsertAsync(after, scope.Transaction).ConfigureAwait(false);
                                 }
                             }
 

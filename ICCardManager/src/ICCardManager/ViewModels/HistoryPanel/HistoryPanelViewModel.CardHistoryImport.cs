@@ -1,4 +1,6 @@
 #nullable enable
+using System;
+using System.Linq;
 using System.Threading.Tasks;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
@@ -76,11 +78,42 @@ public partial class HistoryPanelViewModel
     }
 
     /// <summary>
+    /// 取り込んだ行が見えるように履歴を読み直す
+    /// </summary>
+    /// <remarks>
+    /// 取り込みは前月以前の利用（ピッすいを通さずに使われ、そのまま戻されたもの）を記録し得る。今の表示期間のまま読み直すと、
+    /// 「N件の行を記録しました」と案内したのに履歴に現れない。表示期間がその行を含まなければ、最も古い行の月の 1 日から
+    /// 開き直す（返却確認 #1907 と同じ。期間を月単位で扱う画面に日付単位の値を渡さない）。開き直すと案内が取り下げられる
+    /// （<see cref="ShowHistoryAsync"/>）ので立て直す（食い違いが解消したかは、この後の判定し直しで決める）。
+    /// </remarks>
+    private async Task ShowImportedRowsAsync(string cardIdm, CardHistoryImportOutcome outcome)
+    {
+        var oldest = outcome.RecordedLedgers.Count > 0
+            ? outcome.RecordedLedgers.Min(l => l.Date).Date
+            : (DateTime?)null;
+        var fromMonth = oldest.HasValue ? new DateTime(oldest.Value.Year, oldest.Value.Month, 1) : (DateTime?)null;
+
+        if (fromMonth.HasValue && HistoryCard?.CardIdm == cardIdm && fromMonth.Value < HistoryFromDate)
+        {
+            var card = await _cardRepository.GetByIdmAsync(cardIdm);
+            if (card != null)
+            {
+                var offered = IsCardHistoryImportOffered;
+                await ShowHistoryAsync(card, fromMonth.Value);
+                IsCardHistoryImportOffered = offered && HistoryCard?.CardIdm == cardIdm;
+                return;
+            }
+        }
+
+        await LoadHistoryLedgersAsync();
+    }
+
+    /// <summary>
     /// 取り込みのダイアログを閉じた後の処理（Issue #2293）
     /// </summary>
     /// <remarks>
     /// <para>
-    /// 取り込んだ後は返却の後処理と同じ順に進める: 履歴・ダッシュボードの再読み込み → バス停名の入力（バス利用があれば）→
+    /// 取り込んだ後は返却の後処理と同じ順に進める: 履歴（取り込んだ行が見える期間で）・ダッシュボードの再読み込み → バス停名の入力（バス利用があれば）→
     /// 残額の食い違いの判定し直し → データ系の警告（残額不足・バス停名未入力）→ 残高チェーンの検査。
     /// </para>
     /// <para>
@@ -93,7 +126,7 @@ public partial class HistoryPanelViewModel
     {
         if (outcome.HasImported)
         {
-            await LoadHistoryLedgersAsync();
+            await ShowImportedRowsAsync(cardIdm, outcome);
             await Host.RefreshDashboardAsync();
 
             // バス利用を含む行は、返却と同じくバス停名の入力へ進む（閉じても「バス（★）」のまま未入力の警告に残る）

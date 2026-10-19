@@ -302,6 +302,7 @@ public sealed class LendingServiceUsageImportTests : IDisposable
             && l.OperatorIdm == OperatorIdm && l.OperatorName == OperatorName);
         logs.Select(l => l.TargetId).Should().BeEquivalentTo(
             result.CreatedLedgers.Select(l => l.Id.ToString(System.Globalization.CultureInfo.InvariantCulture)));
+        logs.Should().OnlyContain(l => DetailCount(l.AfterData) == 1, "新しく作った行も明細ごと記録する");
     }
 
     [Fact]
@@ -330,6 +331,8 @@ public sealed class LendingServiceUsageImportTests : IDisposable
         log.TargetId.Should().Be(existingId.ToString(System.Globalization.CultureInfo.InvariantCulture));
         log.BeforeData.Should().Contain("4790", "変更前は明細を足す前の行（残額 4,790 円）");
         log.AfterData.Should().Contain("4580");
+        DetailCount(log.BeforeData).Should().Be(1, "変更前も明細ごと記録する（明細 0 件と読めると、足す前から明細があった事実が消える。#1959）");
+        DetailCount(log.AfterData).Should().Be(2, "変更後は足した後の明細");
     }
 
     [Fact]
@@ -500,6 +503,15 @@ public sealed class LendingServiceUsageImportTests : IDisposable
     {
         var logs = await _operationLogRepository.GetByDateRangeAsync(new DateTime(2000, 1, 1), new DateTime(2100, 1, 1));
         return logs.Where(l => l.TargetTable == OperationLogger.Tables.Ledger).ToList();
+    }
+
+    /// <summary>操作ログの台帳の JSON が持つ明細の件数（名前の大文字小文字は問わない）</summary>
+    private static int DetailCount(string json)
+    {
+        using var document = System.Text.Json.JsonDocument.Parse(json);
+        var details = document.RootElement.EnumerateObject()
+            .Single(p => string.Equals(p.Name, nameof(Ledger.Details), StringComparison.OrdinalIgnoreCase));
+        return details.Value.GetArrayLength();
     }
 
     private static LedgerDetail Usage(DateTime useDate, int balanceAfter) => new()

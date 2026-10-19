@@ -2705,6 +2705,39 @@ public class HistoryPanelViewModelTests : IDisposable
     }
 
     [Fact]
+    public async Task 表示期間より前の行を取り込んだらその月の1日から開き直し_案内を保つこと()
+    {
+        // 前月以前の利用を取り込むと、今の表示期間のままでは記録した行が見えない
+        _cardRepositoryMock.Setup(r => r.GetByIdmAsync(MismatchCardIdm, It.IsAny<bool>())).ReturnsAsync(MismatchCard());
+        await _history.ShowCardHistoryForBalanceMismatchAsync(MismatchCard());
+        var today = DateTime.Today;
+        var twoMonthsAgo = new DateTime(today.Year, today.Month, 1).AddMonths(-2).AddDays(14);
+        _host.MismatchRemainsAfterReevaluation = true;
+
+        await _history.CompleteCardHistoryImportAsync(MismatchCardIdm, new CardHistoryImportOutcome(
+            true, new[] { new Ledger { Id = 10, CardIdm = MismatchCardIdm, Date = twoMonthsAgo, Summary = "鉄道（博多～天神）" } }, 4000));
+
+        _history.HistoryFromDate.Should().Be(new DateTime(twoMonthsAgo.Year, twoMonthsAgo.Month, 1),
+            "最も古い取り込んだ行の月の 1 日から（日付単位ではなく月単位。#1907）");
+        _history.HistoryCard!.CardIdm.Should().Be(MismatchCardIdm);
+        _history.IsCardHistoryImportOffered.Should().BeTrue("開き直しても、食い違いが残る間は案内を保つ");
+    }
+
+    [Fact]
+    public async Task 表示期間の中の行を取り込んだら期間を変えずに読み直すこと()
+    {
+        await _history.ShowCardHistoryForBalanceMismatchAsync(MismatchCard());
+        var shownFrom = _history.HistoryFromDate;
+
+        await _history.CompleteCardHistoryImportAsync(MismatchCardIdm, new CardHistoryImportOutcome(
+            true, new[] { new Ledger { Id = 10, CardIdm = MismatchCardIdm, Date = DateTime.Today, Summary = "鉄道（博多～天神）" } }, 4000));
+
+        _history.HistoryFromDate.Should().Be(shownFrom);
+        _cardRepositoryMock.Verify(r => r.GetByIdmAsync(It.IsAny<string>(), It.IsAny<bool>()), Times.Never,
+            "開き直さない（期間内なので読み直すだけ）");
+    }
+
+    [Fact]
     public async Task 読み取らずに閉じたら何もしないこと()
     {
         await _history.ShowCardHistoryForBalanceMismatchAsync(MismatchCard());

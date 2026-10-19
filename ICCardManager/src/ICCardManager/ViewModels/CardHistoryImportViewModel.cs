@@ -346,7 +346,7 @@ namespace ICCardManager.ViewModels
 
             if (Rows.Count == 0)
             {
-                SetInfo(BuildNothingToImportMessage());
+                SetInfo(BuildNothingToImportMessage(plan.LowerBound));
                 return;
             }
 
@@ -395,9 +395,19 @@ namespace ICCardManager.ViewModels
 
             if (!result.Success)
             {
-                SetError(result.BlockReason != UsageImportBlockReason.None
-                    ? BuildBlockedMessage(result.BlockReason, CardDisplayName)
-                    : BuildImportFailedMessage(result.ErrorMessage));
+                if (result.BlockReason != UsageImportBlockReason.None)
+                {
+                    // 一覧を出した後に貸出・削除された等。押し直しても同じ理由で断られるので、取り込めない状態にする
+                    // （書き込みの失敗は一過性のことがあるので、押し直せるまま残す）
+                    _readHistory = null;
+                    ImportCommand.NotifyCanExecuteChanged();
+                    SetError(BuildBlockedMessage(result.BlockReason, CardDisplayName));
+                }
+                else
+                {
+                    SetError(BuildImportFailedMessage(result.ErrorMessage));
+                }
+
                 return;
             }
 
@@ -417,9 +427,17 @@ namespace ICCardManager.ViewModels
             "カードをカードリーダーに載せ直し、読み取りが終わるまでそのままにしてください。";
 
         /// <summary>台帳に未記録の利用が無かったときの案内</summary>
-        internal static string BuildNothingToImportMessage() =>
-            "カードに残る利用履歴は、すべて台帳に記録済みです（記録の対象はカードの導入日以降の利用）。" +
-            "残額の食い違いが残る場合は、カードに残る直近 20 件より前の利用が原因です。CSVインポートまたは履歴の追加で補ってください。";
+        /// <param name="lowerBound">記録の下限（この日付以降を記録する。<see cref="UsageImportPlan.LowerBound"/>）</param>
+        /// <remarks>
+        /// 下限は導入行の日付とは限らない（導入行が無ければ台帳の最新行の日付、明細を持たない行があればその翌日）。
+        /// 言い切らずに、実際の下限の日付を示す（それより前の未記録の利用は取り込まないため）。
+        /// </remarks>
+        internal static string BuildNothingToImportMessage(DateTime? lowerBound) =>
+            (lowerBound.HasValue
+                ? $"カードに残る利用履歴のうち、{DisplayFormatters.FormatDate(lowerBound.Value)} 以降の利用は台帳に記録済みです。"
+                : "カードに残る利用履歴に、台帳へ記録していない利用は見つかりませんでした。") +
+            "残額の食い違いが残る場合は、それより前の利用やカードに残っていない古い利用が記録されていない可能性があります。" +
+            "履歴を確認し、CSVインポートまたは履歴の追加で補ってください。";
 
         /// <summary>取り込めない理由の案内</summary>
         internal static string BuildBlockedMessage(UsageImportBlockReason reason, string cardName) => reason switch
@@ -448,8 +466,9 @@ namespace ICCardManager.ViewModels
         /// <param name="actualBalance">カードの実残額（読めなかったら null）</param>
         internal static string BuildCompletionMessage(int importedCount, int? recordedBalanceAfter, int? actualBalance)
         {
+            // チャージ・ポイント還元の行は利用者が空欄のままでよいので、利用の行に限って入力を促す
             var head = importedCount > 0
-                ? $"{importedCount}件の行を台帳に記録しました。利用者は空欄です。履歴の各行の「変更」で利用者を入力してください。"
+                ? $"{importedCount}件の行を台帳に記録しました。利用の行の利用者は空欄です。分かる場合は履歴の各行の「変更」で入力してください。"
                 : "台帳に記録する利用はありませんでした。";
 
             if (recordedBalanceAfter == null || actualBalance == null)
@@ -468,7 +487,8 @@ namespace ICCardManager.ViewModels
                    $"記録の残額 {DisplayFormatters.FormatBalanceWithUnit(recordedBalanceAfter.Value)} と" +
                    $"カードの残額 {DisplayFormatters.FormatBalanceWithUnit(actualBalance.Value)} には、" +
                    $"まだ {DisplayFormatters.FormatBalanceWithUnit(difference)} の差があります。" +
-                   "カードに残る直近 20 件より前の利用は読み取れないため、CSVインポートまたは履歴の追加で補ってください。";
+                   "カードに残っていない古い利用（直近 20 件より前）などが記録されていない可能性があります。" +
+                   "履歴を確認し、CSVインポートまたは履歴の追加で補ってください。";
         }
 
         private void SetInfo(string message)
