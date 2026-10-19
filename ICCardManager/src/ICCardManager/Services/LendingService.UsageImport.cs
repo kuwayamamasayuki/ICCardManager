@@ -279,10 +279,13 @@ namespace ICCardManager.Services
                             }
 
                             // 同じ日の既存の行へ明細を足した場合は、操作ログの「変更前」に足す前の行を残す（Issue #1760）。
-                            // 変更後（下で明細ごと読み直す）と同じ粒度にするため、明細ごと読む（日付の範囲の取得は明細を読まない。#1959）
-                            var dates = plan.DetailsToRecord.Select(d => d.UseDate!.Value.Date).ToList();
+                            // 変更後（下で明細ごと読み直す）と同じ粒度にするため、明細ごと読む（日付の範囲の取得は明細を読まない。#1959）。
+                            // 読むのは足す先になり得る行だけ（取り込む利用の日付にあり、統合の条件を満たす行）。書き込みのロックを
+                            // 持ったまま期間内の全行を 1 件ずつ読むと、共有モードで他のパソコンの貸出・返却を待たせる
+                            var dates = new HashSet<DateTime>(plan.DetailsToRecord.Select(d => d.UseDate!.Value.Date));
                             var candidateIds = (await _ledgerRepository
                                     .GetByDateRangeAsync(cardIdm, dates.Min(), dates.Max()).ConfigureAwait(false))
+                                .Where(l => dates.Contains(l.Date.Date) && IsSameDayMergeTarget(l, null))
                                 .Select(l => l.Id)
                                 .ToList();
                             var beforeRows = new Dictionary<int, Ledger>();

@@ -307,7 +307,7 @@ namespace ICCardManager.ViewModels
                 {
                     Phase = CardHistoryImportPhase.WaitingForTouch;
                     SetError(ExceptionMessageFormatter.ToUserMessage(ex, "交通系ICカードの読み取り") +
-                             " 復旧したら、もう一度カードをタッチしてください。");
+                             "復旧したら、もう一度カードをタッチしてください。");
                 }
             }
             finally

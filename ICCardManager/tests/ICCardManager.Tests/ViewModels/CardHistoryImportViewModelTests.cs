@@ -449,6 +449,38 @@ public sealed class CardHistoryImportViewModelTests : IDisposable
     }
 
     [Fact]
+    public async Task 書き込みに失敗したら台帳に何も記録せず_もう一度押せるまま案内すること()
+    {
+        // 一過性の失敗（共有フォルダーの切断・DB ロック）は押し直せば通り得る。断られた場合（貸出中など）と違って押せるまま残す
+        var failingLogs = new Mock<IOperationLogRepository>();
+        failingLogs.Setup(r => r.InsertAsync(It.IsAny<OperationLog>(), It.IsAny<System.Data.SQLite.SQLiteTransaction>()))
+            .ThrowsAsync(new System.IO.IOException("ネットワーク切断（テスト）"));
+        var failingService = new LendingService(
+            _dbContext, _cardRepository,
+            new StaffRepository(_dbContext, PassThroughCache(), Options.Create(new CacheOptions()), NullLogger<StaffRepository>.Instance),
+            _ledgerRepository,
+            new SettingsRepository(_dbContext, PassThroughCache(), Options.Create(new CacheOptions())),
+            new OperationLogger(failingLogs.Object, _operatorContext),
+            new SummaryGenerator(DepartmentType.MayorOffice),
+            _lockManager,
+            Options.Create(new AppOptions { CardLockTimeoutSeconds = 5, RetouchWindowSeconds = 30 }),
+            NullLogger<LendingService>.Instance,
+            new FixedSystemClock(Now));
+        SetupCard(balance: 4790, Usage(new DateTime(2026, 9, 10), 4790));
+        var vm = CreateViewModel(failingService);
+        vm.Start();
+        await vm.HandleCardReadAsync(TargetIdm);
+
+        await vm.ImportAsync();
+
+        vm.HasImported.Should().BeFalse();
+        vm.IsStatusError.Should().BeTrue();
+        vm.StatusMessage.Should().StartWith("カードの履歴を取り込めませんでした。").And.Contain("何も記録していません");
+        vm.ImportCommand.CanExecute(null).Should().BeTrue("一過性の失敗なので、もう一度押せる");
+        (await GetUsageLedgersAsync()).Should().BeEmpty();
+    }
+
+    [Fact]
     public async Task 一覧を出した後に貸出されたら記録せずに理由を案内すること()
     {
         SetupCard(balance: 4790, Usage(new DateTime(2026, 9, 10), 4790));
@@ -523,11 +555,11 @@ public sealed class CardHistoryImportViewModelTests : IDisposable
 
     #region ヘルパー
 
-    private CardHistoryImportViewModel CreateViewModel()
+    private CardHistoryImportViewModel CreateViewModel(LendingService? lendingService = null)
     {
         var vm = new CardHistoryImportViewModel(
             _cardReader.Object,
-            _lendingService,
+            lendingService ?? _lendingService,
             _staffAuthService.Object,
             new SynchronousDispatcherService(),
             _messenger,
@@ -543,6 +575,18 @@ public sealed class CardHistoryImportViewModelTests : IDisposable
         await vm.HandleCardReadAsync(TargetIdm);
         vm.Phase.Should().Be(CardHistoryImportPhase.Ready, vm.StatusMessage);
         return vm;
+    }
+
+    private static ICacheService PassThroughCache()
+    {
+        var cache = new Mock<ICacheService>();
+        cache.Setup(c => c.GetOrCreateAsync(
+            It.IsAny<string>(), It.IsAny<Func<Task<IEnumerable<Staff>>>>(), It.IsAny<TimeSpan>()))
+            .Returns((string _, Func<Task<IEnumerable<Staff>>> factory, TimeSpan _) => factory());
+        cache.Setup(c => c.GetOrCreateAsync(
+            It.IsAny<string>(), It.IsAny<Func<Task<AppSettings>>>(), It.IsAny<TimeSpan>()))
+            .Returns((string _, Func<Task<AppSettings>> factory, TimeSpan _) => factory());
+        return cache.Object;
     }
 
     private void SetupCard(int balance, params LedgerDetail[] historyNewestFirst)

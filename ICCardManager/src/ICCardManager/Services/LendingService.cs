@@ -1309,6 +1309,19 @@ namespace ICCardManager.Services
         private Task<bool> InsertDetailsInTransactionAsync(int ledgerId, IEnumerable<LedgerDetail> details, SQLiteTransaction? transaction)
             => transaction != null ? _ledgerRepository.InsertDetailsAsync(ledgerId, details, transaction) : _ledgerRepository.InsertDetailsAsync(ledgerId, details);
 
+        /// <summary>
+        /// 同じ日の利用を足す先にできる既存の台帳行か（Issue #837 / #1147 / #1723）
+        /// </summary>
+        /// <remarks>
+        /// 貸出中レコード・導入行（繰越）・受入のある行・備考のある行は足す先にしない。利用者が一致する行に限る
+        /// （異なる職員が同じ日に同じカードを使った場合は別の行）。<see cref="CreateUsageLedgersAsync"/> と、
+        /// カードの履歴からの取り込みの操作ログの「変更前」を集める対象（Issue #2293）が共有する。
+        /// </remarks>
+        internal static bool IsSameDayMergeTarget(Ledger ledger, string? staffName) =>
+            !ledger.IsLentRecord && !ledger.IsCarryover && ledger.Income == 0
+            && string.IsNullOrEmpty(ledger.Note)
+            && ledger.StaffName == staffName;
+
         private async Task<List<Ledger>> CreateUsageLedgersAsync(
             string cardIdm, string? staffIdm, string? staffName, List<LedgerDetail> details, bool skipDuplicateCheck = false,
             SQLiteTransaction? transaction = null)
@@ -1461,9 +1474,7 @@ namespace ICCardManager.Services
                 {
                     var existingLedgers = await _ledgerRepository.GetByDateRangeAsync(cardIdm, date, date).ConfigureAwait(false);
                     existingUsageLedgers = existingLedgers
-                        .Where(l => !l.IsLentRecord && !l.IsCarryover && l.Income == 0
-                                    && string.IsNullOrEmpty(l.Note)
-                                    && l.StaffName == staffName)  // Issue #1147: 同一利用者のみ統合
+                        .Where(l => IsSameDayMergeTarget(l, staffName))
                         .OrderByDescending(l => l.Balance)  // 残高降順（高い=古い）
                         .ToList();
                 }

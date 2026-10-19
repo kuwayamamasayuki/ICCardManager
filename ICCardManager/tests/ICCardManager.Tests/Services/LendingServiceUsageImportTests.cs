@@ -432,11 +432,59 @@ public sealed class LendingServiceUsageImportTests : IDisposable
         (await GetLedgerLogsAsync()).Should().BeEmpty();
     }
 
+    [Fact]
+    public async Task ImportUnrecordedUsageAsync_カードのロックを取れなければ何も書かずに理由を返すこと()
+    {
+        // 同じカードの貸出・返却などが実行中（同じ PC の別の処理がロックを持っている）
+        await InsertIntroductionAsync(new DateTime(2026, 9, 1), balance: 5000);
+        var service = CreateService(_operationLogRepository, lockTimeoutSeconds: 1);
+        var cardLock = _lockManager.GetLock(TestCardIdm);
+        (await cardLock.WaitAsync(TimeSpan.FromSeconds(5))).Should().BeTrue("前提: 先にロックを取る");
+        try
+        {
+            var result = await service.ImportUnrecordedUsageAsync(TestCardIdm, new List<LedgerDetail>
+            {
+                Usage(new DateTime(2026, 9, 10), balanceAfter: 4790),
+            });
+
+            result.Success.Should().BeFalse();
+            result.BlockReason.Should().Be(UsageImportBlockReason.None, "取り込めない理由ではなく、書き込めなかった失敗");
+            result.ErrorMessage.Should().Contain("実行中");
+            (await GetUsageLedgersAsync()).Should().BeEmpty();
+        }
+        finally
+        {
+            cardLock.Release();
+        }
+    }
+
+    [Theory]
+    [InlineData(false, false, 0, null, null, true)]
+    [InlineData(true, false, 0, null, null, false)]       // 貸出中レコード
+    [InlineData(false, true, 0, null, null, false)]       // 導入行（繰越）
+    [InlineData(false, false, 1000, null, null, false)]   // 受入のある行（チャージ）
+    [InlineData(false, false, 0, "現金で支払", null, false)] // 備考のある行（残高不足の 1 行化など）
+    [InlineData(false, false, 0, null, "博多 花子", false)]  // 利用者が違う
+    public void IsSameDayMergeTarget_同じ日の利用を足せる行は利用者が同じ受入も備考も無い利用の行だけであること(
+        bool isLentRecord, bool isCarryover, int income, string? note, string? staffName, bool expected)
+    {
+        var ledger = new Ledger
+        {
+            IsLentRecord = isLentRecord,
+            Summary = isCarryover ? "新規購入" : "鉄道（博多～天神）",
+            Income = income,
+            Note = note,
+            StaffName = staffName,
+        };
+
+        LendingService.IsSameDayMergeTarget(ledger, null).Should().Be(expected);
+    }
+
     #endregion
 
     #region ヘルパー
 
-    private LendingService CreateService(IOperationLogRepository operationLogRepository)
+    private LendingService CreateService(IOperationLogRepository operationLogRepository, int lockTimeoutSeconds = 5)
     {
         var operatorContext = new Mock<ICurrentOperatorContext>();
         string? operatorIdmOut = OperatorIdm;
@@ -452,7 +500,7 @@ public sealed class LendingServiceUsageImportTests : IDisposable
             new OperationLogger(operationLogRepository, operatorContext.Object),
             new SummaryGenerator(DepartmentType.MayorOffice),
             _lockManager,
-            Options.Create(new AppOptions { CardLockTimeoutSeconds = 5, RetouchWindowSeconds = 30 }),
+            Options.Create(new AppOptions { CardLockTimeoutSeconds = lockTimeoutSeconds, RetouchWindowSeconds = 30 }),
             _logger,
             new FixedSystemClock(Now));
     }
