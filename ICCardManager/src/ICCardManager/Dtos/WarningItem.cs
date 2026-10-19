@@ -37,7 +37,8 @@ namespace ICCardManager.Dtos
         /// </summary>
         /// <remarks>
         /// Issue #1726 以前の <c>UPDATE ic_card</c> が繰越4項目を既定値で上書きしていたことによる被害。
-        /// 検出のみで復旧手段は持たない（復旧は DB の直接修正）。
+        /// 警告のクリックで開く一覧の「復旧...」から、失われた値を職員証の認証のうえで書き戻せる
+        /// （繰越情報の復旧ダイアログ、Issue #2255）。
         /// </remarks>
         CarryoverDataLoss,
 

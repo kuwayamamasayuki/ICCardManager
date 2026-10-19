@@ -310,7 +310,7 @@ public class CarryoverDataLossDetectorTests
     [Fact]
     public async Task DetectAsync_繰越情報が設定されたUPDATE_検出しないこと()
     {
-        // 既定値 → 非既定値の向きは「消失」ではない（将来 Issue #1758 案B の復旧 UI が入ったときの経路）。
+        // 既定値 → 非既定値の向きは「消失」ではない（繰越情報の復旧ダイアログ（Issue #2255）で書き戻したときの経路）。
         var detector = CreateDetector(
             logs: new[] { UpdateLog(DamagedCard(), MigratedCard(), new DateTime(2026, 5, 20)) },
             currentCards: new[] { MigratedCard() });

@@ -19,7 +19,8 @@ namespace ICCardManager.Tests.Services;
 /// <remarks>
 /// Issue #1726 以前の <c>UPDATE ic_card</c> で繰越累計・開始ページ番号を失ったカードは、
 /// アプリからは何も通知されず、利用者が被害の有無を自力で判断できなかった。
-/// 検出結果を警告エリアへ出すことで「気付けること」自体を価値とする（案A）。
+/// 検出結果を警告エリアへ出すことで「気付けること」自体を価値とした（案A）。
+/// その後 Issue #2255 で、警告から開く一覧の「復旧...」から画面で復旧できるようになった。
 /// </remarks>
 public class WarningServiceCarryoverDataLossTests
 {
