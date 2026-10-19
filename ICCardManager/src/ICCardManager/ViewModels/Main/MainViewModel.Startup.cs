@@ -216,7 +216,8 @@ public partial class MainViewModel
     /// <remarks>
     /// operation_log の走査（共有モードでは SMB アクセス）を伴うため Task.Run でバックグラウンド実行し、
     /// WarningMessages の更新は await 後の UI コンテキストで行う。<c>CheckBackupHealthAsync</c> と同じ形。
-    /// DB を直接修正して復旧された場合に警告が消えるよう、解消済みなら既存の警告を取り除く。
+    /// 復旧された場合（繰越情報の復旧ダイアログ（Issue #2255）からの書き戻し、または DB の直接修正）に
+    /// 警告が消えるよう、解消済みなら既存の警告を取り除く。
     /// </remarks>
     internal async Task CheckCarryoverDataLossAsync()
     {
