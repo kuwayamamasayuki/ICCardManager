@@ -44,8 +44,8 @@ namespace ICCardManager.Services
     /// 画面からは復旧できず DB の直接修正になる。
     /// </para>
     /// <para>
-    /// このクラスは検知だけを担う。検出したカードの復旧は <c>CarryoverRecoveryViewModel</c>
-    /// （繰越情報の復旧ダイアログ、Issue #2255）が行う。
+    /// このクラスは検知だけを担う。検出したカードの復旧は繰越情報の復旧ダイアログ
+    /// （<c>CarryoverRecoveryViewModel</c> → <c>CardManagementService.RecoverCarryoverInfoAsync</c>、Issue #2255）が行う。
     /// </para>
     /// </remarks>
     public class CarryoverDataLossDetector : ICarryoverDataLossDetector

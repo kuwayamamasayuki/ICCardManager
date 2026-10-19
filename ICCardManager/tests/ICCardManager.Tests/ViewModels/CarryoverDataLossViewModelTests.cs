@@ -17,7 +17,8 @@ namespace ICCardManager.Tests.ViewModels;
 /// 繰越情報消失一覧ダイアログの ViewModel の単体テスト（Issue #1758）
 /// </summary>
 /// <remarks>
-/// このダイアログの唯一の役割は「失われた元の値を、復旧を依頼する相手へ正確に伝えられる形で見せる」こと。
+/// このダイアログの役割は「失われた元の値を正確に見せる」ことと、行の「復旧...」から
+/// その値を初期値にした復旧ダイアログを開くこと（Issue #2255）。
 /// したがって表示の正確さ（消失していない項目を消失として見せない・値を加工しすぎない）が要件になる。
 /// </remarks>
 public class CarryoverDataLossViewModelTests
