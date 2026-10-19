@@ -600,5 +600,35 @@ namespace ICCardManager.UITests.Infrastructure
         /// <summary>「利用推移」タブの残高推移の一覧（年月 × 描画するカード）。カードの選択はカード名を Name に持つチェックボックス。</summary>
         [UiaName]
         public const string AdminDashboardBalanceTable = "カード別の残高推移一覧";
+
+        // ── カードの履歴からの取り込み（Issue #2293） ──────────────────
+
+        /// <summary>残額の食い違い警告の行だけを見分ける文字列（<c>WarningService.CheckCardBalanceMismatchWarning</c> の文言の一部）。</summary>
+        [NotUiaName]
+        public const string CardBalanceMismatchWarningMarker = "食い違っています";
+
+        /// <summary>食い違い警告から開いた履歴の上の「カードの履歴から取り込む...」ボタン。</summary>
+        [UiaName]
+        public const string CardHistoryImportOfferButton = "カードの履歴から取り込む";
+
+        /// <summary>カードの履歴から取り込むダイアログ。</summary>
+        [UiaName]
+        public const string CardHistoryImportDialogName = "カードの履歴から取り込むダイアログ";
+
+        /// <summary>取り込みダイアログの、取り込む利用の一覧。</summary>
+        [UiaName]
+        public const string CardHistoryImportRows = "取り込む利用の一覧";
+
+        /// <summary>取り込みダイアログの「取り込む」ボタン。</summary>
+        [UiaName]
+        public const string CardHistoryImportExecuteButton = "取り込む";
+
+        /// <summary>取り込みダイアログの、警告のカードの仮想タッチ（DEBUG のみ）。</summary>
+        [UiaName]
+        public const string CardHistoryImportVirtualTouchButton = "交通系ICカード仮想タッチ（デバッグ用）";
+
+        /// <summary>取り込みダイアログの「閉じる」（取り込んだ後に「キャンセル」から切り替わる。名前はスタイルのセッターで切り替える）。</summary>
+        [UiaName]
+        public const string CardHistoryImportCloseButton = "閉じる";
     }
 }

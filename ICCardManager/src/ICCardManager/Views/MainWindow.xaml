@@ -426,9 +426,10 @@
                             </Grid>
                         </Border>
 
+                        <!-- 履歴の上の案内（返却確認・取り込みの案内。どちらも開いた経路で決まり、同時には出ない） -->
+                        <StackPanel Grid.Row="1">
                         <!-- Issue #1907: 返却確認の案内（返却直後に自動表示したときだけ出る） -->
-                        <Border Grid.Row="1"
-                                Background="{DynamicResource ReturnBackgroundBrush}"
+                        <Border Background="{DynamicResource ReturnBackgroundBrush}"
                                 BorderBrush="{DynamicResource InfoTextBrush}"
                                 BorderThickness="1"
                                 CornerRadius="4"
@@ -455,6 +456,42 @@
                                 </StackPanel>
                             </DockPanel>
                         </Border>
+
+                        <!-- Issue #2293: 残額の食い違い警告から、貸出中でないカードの履歴を開いたときだけ出る -->
+                        <Border Background="{DynamicResource WarningBackgroundBrush}"
+                                BorderBrush="{DynamicResource WarningBorderBrush}"
+                                BorderThickness="1"
+                                CornerRadius="4"
+                                Padding="12,8"
+                                Margin="0,0,0,10"
+                                Visibility="{Binding IsCardHistoryImportOffered, Converter={StaticResource BoolToVisibilityConverter}}">
+                            <DockPanel>
+                                <TextBlock DockPanel.Dock="Left"
+                                           Text="⚠️"
+                                           FontSize="{DynamicResource LargeFontSize}"
+                                           VerticalAlignment="Top"
+                                           Margin="0,0,10,0"/>
+                                <!-- 文字サイズが大きいとボタンが文の下へ回る（幅ではなく折り返しで収める） -->
+                                <WrapPanel>
+                                    <TextBlock x:Name="CardHistoryImportOfferText"
+                                               Text="{Binding CardHistoryImportOfferMessageText}"
+                                               Foreground="{DynamicResource WarningForegroundBrush}"
+                                               FontSize="{DynamicResource BaseFontSize}"
+                                               TextWrapping="Wrap"
+                                               VerticalAlignment="Center"
+                                               MaxWidth="{Binding ActualWidth, RelativeSource={RelativeSource AncestorType=WrapPanel}}"
+                                               Margin="0,0,10,6"/>
+                                    <Button Content="カードの履歴から取り込む..."
+                                            Style="{StaticResource SecondaryActionButtonStyle}"
+                                            Command="{Binding ImportFromCardHistoryCommand}"
+                                            Padding="12,6"
+                                            AutomationProperties.Name="カードの履歴から取り込む"
+                                            AutomationProperties.HelpText="交通系ICカードをタッチして、カードに残る利用履歴のうち記録されていない利用を取り込みます。職員証の認証が必要です"
+                                            ToolTip="カードをタッチして、記録されていない利用を取り込む"/>
+                                </WrapPanel>
+                            </DockPanel>
+                        </Border>
+                        </StackPanel>
 
                         <!-- 期間選択 -->
                         <Grid Grid.Row="2" Margin="0,0,0,10">

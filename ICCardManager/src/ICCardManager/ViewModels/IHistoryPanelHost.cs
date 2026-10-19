@@ -1,3 +1,4 @@
+#nullable enable
 using System;
 using System.Threading.Tasks;
 using ICCardManager.Dtos;
@@ -48,4 +49,15 @@ public interface IHistoryPanelHost
 
     /// <summary>貸出中一覧を読み直す（貸出中レコードの削除で <c>ic_card.is_lent</c> を戻したとき）。</summary>
     Task RefreshLentCardsAsync();
+
+    /// <summary>
+    /// 指定カードの残額の食い違い警告（<see cref="WarningType.CardBalanceMismatch"/>）を、カードから読んだ実残額で判定し直す
+    /// （Issue #2293。カードの履歴から取り込んだ後）。
+    /// </summary>
+    /// <remarks>
+    /// 判定と警告の入れ替えはメイン画面の <c>CheckCardBalanceMismatchAsync</c> と同じ処理を通す（#1763）。
+    /// 実残額はカードがリーダーに載っているときしか読めないため、取り込みのダイアログで読んだ値を渡す。
+    /// </remarks>
+    /// <returns>判定し直した後も食い違いの警告が残っていれば true</returns>
+    Task<bool> ReevaluateCardBalanceMismatchAsync(string cardIdm, int actualBalance);
 }

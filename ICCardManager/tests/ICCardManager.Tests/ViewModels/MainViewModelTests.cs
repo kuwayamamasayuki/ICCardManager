@@ -3496,6 +3496,77 @@ public class MainViewModelTests : IDisposable
         _viewModel.History.HistoryCard.CardIdm.Should().Be(MismatchCardIdm);
     }
 
+    [Fact]
+    public async Task HandleWarningClick_貸出中でないカードの食い違い警告なら履歴に取り込みを案内すること()
+    {
+        // Issue #2293: 警告の文言が案内する「カードの履歴から取り込む...」へ、クリックで到達できること
+        SetupWarningCheckDefaults();
+        ArrangeHistoryPaging(_ => 0, pageSize: 30);
+        _cardRepositoryMock.Setup(r => r.GetByIdmAsync(MismatchCardIdm, It.IsAny<bool>()))
+            .ReturnsAsync(MismatchTargetCard());
+
+        await _viewModel.HandleWarningClick(new WarningItem
+        {
+            Type = WarningType.CardBalanceMismatch,
+            CardIdm = MismatchCardIdm
+        });
+
+        _viewModel.History.IsCardHistoryImportOffered.Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task HandleWarningClick_貸出中のカードの食い違い警告では取り込みを案内しないこと()
+    {
+        SetupWarningCheckDefaults();
+        ArrangeHistoryPaging(_ => 0, pageSize: 30);
+        var lentCard = MismatchTargetCard();
+        lentCard.IsLent = true;
+        _cardRepositoryMock.Setup(r => r.GetByIdmAsync(MismatchCardIdm, It.IsAny<bool>()))
+            .ReturnsAsync(lentCard);
+
+        await _viewModel.HandleWarningClick(new WarningItem
+        {
+            Type = WarningType.CardBalanceMismatch,
+            CardIdm = MismatchCardIdm
+        });
+
+        _viewModel.History.IsHistoryVisible.Should().BeTrue();
+        _viewModel.History.IsCardHistoryImportOffered.Should().BeFalse("貸出中なら返却が利用履歴を記録する");
+    }
+
+    [Fact]
+    public async Task ReevaluateCardBalanceMismatchAsync_取り込みで一致したら警告を取り除き_知らせないこと()
+    {
+        // Issue #2293: 取り込みのダイアログが結果を案内済みなので、警告音・トーストは重ねない
+        ExistingMismatchWarning();
+        ArrangeCardBalance(actualBalance: 1250, recordedBalance: 1250);
+        _cardRepositoryMock.Setup(r => r.GetByIdmAsync(MismatchCardIdm, It.IsAny<bool>()))
+            .ReturnsAsync(MismatchTargetCard());
+
+        var remains = await _viewModel.ReevaluateCardBalanceMismatchAsync(MismatchCardIdm, 1250);
+
+        remains.Should().BeFalse();
+        _viewModel.WarningMessages.Should().NotContain(w => w.Type == WarningType.CardBalanceMismatch);
+        _toastMock.Verify(t => t.ShowWarning(It.IsAny<string>(), It.IsAny<string>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task ReevaluateCardBalanceMismatchAsync_食い違いが残れば警告を新しい金額で入れ替えて残すこと()
+    {
+        ExistingMismatchWarning();
+        ArrangeCardBalance(actualBalance: 1250, recordedBalance: 2000);
+        _cardRepositoryMock.Setup(r => r.GetByIdmAsync(MismatchCardIdm, It.IsAny<bool>()))
+            .ReturnsAsync(MismatchTargetCard());
+
+        var remains = await _viewModel.ReevaluateCardBalanceMismatchAsync(MismatchCardIdm, 1250);
+
+        remains.Should().BeTrue();
+        var warning = _viewModel.WarningMessages.Should()
+            .ContainSingle(w => w.Type == WarningType.CardBalanceMismatch).Subject;
+        warning.DisplayText.Should().Contain("2,000円", "取り込みの後の記録の残額で作り直す");
+        _toastMock.Verify(t => t.ShowWarning(It.IsAny<string>(), It.IsAny<string>()), Times.Never);
+    }
+
     /// <summary>
     /// 返却フローの後処理で使う既定のモックを整える。対象カードはダッシュボードに残す
     /// （残さないと「母集団から外れたので消えた」だけのテストになり、返却による除去を検証できない）。

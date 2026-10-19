@@ -170,6 +170,18 @@ public partial class BusStopInputViewModel : ViewModelBase
     }
 
     /// <summary>
+    /// 記録した台帳行のうち、バス停名の入力へ進む行（バス利用を含む行）を選ぶ
+    /// </summary>
+    /// <remarks>
+    /// 返却（Issue #593 / #1203）と、カードの履歴からの取り込み（Issue #2293）が共有する。
+    /// 判定は摘要のバスラベルで行う（Issue #1818: ラベルは組織設定 <c>SummaryText.BusLabel</c> 由来のため直書きしない）。
+    /// </remarks>
+    internal static List<Ledger> SelectBusStopInputTargets(IEnumerable<Ledger> recordedLedgers) =>
+        recordedLedgers
+            .Where(l => !l.IsLentRecord && SummaryGenerator.ContainsBusLabel(l.Summary))
+            .ToList();
+
+    /// <summary>
     /// Issue #1203: 複数の Ledger のバス利用をまとめて1つのダイアログで編集するための初期化。
     /// 返却処理でバス利用が複数日にまたがる場合に、1件ずつダイアログを出さずまとめて入力させる用途。
     /// </summary>

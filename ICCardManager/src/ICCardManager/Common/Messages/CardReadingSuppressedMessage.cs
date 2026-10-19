@@ -66,7 +66,17 @@ namespace ICCardManager.Common.Messages
         /// 職員証タッチ後に閉じようとして確認の裏で交通系ICカードをタッチすると、貸出・返却が台帳に確定し、
         /// 「はい」でその後処理（バス停名・同行者数の入力）の途中に終了する（#1807 と同じ形）。確認の区間だけを抑制する。
         /// </remarks>
-        ExitConfirmation
+        ExitConfirmation,
+
+        /// <summary>
+        /// カードの履歴からの取り込みダイアログ（<c>CardHistoryImportViewModel</c>）
+        /// </summary>
+        /// <remarks>
+        /// Issue #2293: ダイアログは交通系ICカードのタッチを待って利用履歴を読む。抑制が無いと、同じタッチが
+        /// メイン画面にも届き、職員証タッチ待ちの分岐で履歴の表示と残額の食い違い判定が走る（職員証タッチ済みなら
+        /// 貸出・返却まで進む）。ダイアログの表示範囲（開いてから閉じるまで）で抑制する（#1807 の「表示範囲と一致」）。
+        /// </remarks>
+        CardHistoryImport
     }
 
     /// <summary>

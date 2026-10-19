@@ -1,3 +1,4 @@
+#nullable enable
 #if DEBUG
 using System;
 using System.Collections.Generic;
@@ -26,9 +27,9 @@ namespace ICCardManager.Infrastructure.CardReader
         private readonly MockHistorySettings _settings = new();
         private bool _disposed;
 
-        public event EventHandler<CardReadEventArgs> CardRead;
-        public event EventHandler<Exception> Error;
-        public event EventHandler<ConnectionStateChangedEventArgs> ConnectionStateChanged;
+        public event EventHandler<CardReadEventArgs>? CardRead;
+        public event EventHandler<Exception>? Error;
+        public event EventHandler<ConnectionStateChangedEventArgs>? ConnectionStateChanged;
 
         /// <inheritdoc/>
         public bool IsReading => _realReader.IsReading;
@@ -107,6 +108,25 @@ namespace ICCardManager.Infrastructure.CardReader
                 Idm = idm,
                 SystemCode = "0003"
             });
+        }
+
+        /// <summary>
+        /// 仮想タッチしたカードが返す残額・利用履歴を設定する（Issue #2293。<see cref="DebugCardData"/> が起動時に呼ぶ）
+        /// </summary>
+        /// <param name="idm">カードの IDm</param>
+        /// <param name="balance">残額。null なら設定しない（実カードリーダーへ委譲する）</param>
+        /// <param name="history">利用履歴（新しい順）。null なら設定しない</param>
+        public void SetCustomCardData(string idm, int? balance, IEnumerable<LedgerDetail>? history)
+        {
+            if (balance.HasValue)
+            {
+                _settings.CustomBalances[idm] = balance.Value;
+            }
+
+            if (history != null)
+            {
+                _settings.CustomHistory[idm] = history.ToList();
+            }
         }
 
         /// <inheritdoc/>

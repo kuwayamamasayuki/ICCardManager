@@ -65,6 +65,8 @@ public class ScreenTransitionDiagramConsistencyTests
         ["DataExportImportViewModel.cs"] = "DATAEXIMP",
         // Issue #2264: バックアップ先・データベース保存先の変更と「デフォルトに戻す」は設定ダイアログで認証する
         ["SettingsViewModel.cs"] = "SETTINGS",
+        // Issue #2293: カードの履歴からの取り込みは、取り込みダイアログの「取り込む」で認証する
+        ["CardHistoryImportViewModel.cs"] = "CARDHISTIMP",
     };
 
     /// <summary>
@@ -94,6 +96,7 @@ public class ScreenTransitionDiagramConsistencyTests
         "利用履歴詳細のインポート",
         "バックアップ先・データベース保存先の変更",
         "データベース保存先をデフォルトに戻す",
+        "カード履歴の取り込み",
     };
 
     /// <summary>ノード定義行（例: <c>MAIN[メイン画面]</c>）。</summary>

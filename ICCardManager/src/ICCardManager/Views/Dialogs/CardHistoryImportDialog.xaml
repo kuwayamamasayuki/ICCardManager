@@ -1,0 +1,175 @@
+<Window x:Class="ICCardManager.Views.Dialogs.CardHistoryImportDialog"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        xmlns:vm="clr-namespace:ICCardManager.ViewModels"
+        xmlns:common="clr-namespace:ICCardManager.Common"
+        mc:Ignorable="d"
+        d:DataContext="{d:DesignInstance Type=vm:CardHistoryImportViewModel}"
+        Title="カードの履歴から取り込む"
+        Height="600"
+        Width="780"
+        MinHeight="420"
+        MinWidth="560"
+        WindowStartupLocation="CenterOwner"
+        ResizeMode="CanResize"
+        FontSize="{DynamicResource BaseFontSize}"
+        AutomationProperties.Name="カードの履歴から取り込むダイアログ"
+        AutomationProperties.HelpText="交通系ICカードに残る利用履歴のうち、台帳に記録されていない利用を取り込みます。取り込みには職員証の認証が必要です。">
+
+    <Window.Resources>
+        <BooleanToVisibilityConverter x:Key="BoolToVisibilityConverter"/>
+        <common:BoolToVisibilityConverter x:Key="InverseBoolToVisibilityConverter"/>
+    </Window.Resources>
+
+    <Grid Margin="20">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+        <StackPanel Grid.Row="0">
+            <!-- ヘッダー -->
+            <TextBlock Text="{Binding CardDisplayName}"
+                       FontSize="{DynamicResource LargeFontSize}"
+                       FontWeight="Bold"
+                       TextWrapping="Wrap"
+                       AutomationProperties.HelpText="履歴を取り込むカード"/>
+
+            <!-- 案内 -->
+            <Border Background="{DynamicResource ReturnBackgroundBrush}"
+                    Padding="12"
+                    Margin="0,10,0,10">
+                <TextBlock TextWrapping="Wrap"
+                           FontSize="{DynamicResource SmallFontSize}"
+                           Foreground="{DynamicResource HintForegroundBrush}">
+                    <Run Text="💡 カードに残る直近 20 件の利用履歴のうち、台帳に記録されていない利用を返却と同じ規則で取り込みます。"/>
+                    <Run Text="誰が使ったかはカードから分からないため、利用者は空欄で記録します（取り込んだ後に履歴の「変更」で入力できます）。"/>
+                </TextBlock>
+            </Border>
+
+            <!-- カードの残額と件数 -->
+            <WrapPanel Margin="0,0,0,8">
+                <TextBlock Text="カードの残額:" Margin="0,0,6,0"/>
+                <TextBlock Text="{Binding CardBalanceText}"
+                           FontWeight="Bold"
+                           Margin="0,0,24,0"
+                           AutomationProperties.Name="{Binding CardBalanceText, StringFormat={}カードの残額 {0}}"/>
+                <TextBlock Text="取り込む利用:" Margin="0,0,6,0"/>
+                <TextBlock Text="{Binding RowCountText}"
+                           FontWeight="Bold"
+                           AutomationProperties.Name="{Binding RowCountText, StringFormat={}取り込む利用 {0}}"/>
+            </WrapPanel>
+        </StackPanel>
+
+        <!-- 取り込む利用の一覧（古い順）。列幅は見出しと値に合わせ、収まらなければ横スクロール（#2258） -->
+        <DataGrid Grid.Row="1"
+                  x:Name="ImportRowsDataGrid"
+                  ItemsSource="{Binding Rows}"
+                  AutoGenerateColumns="False"
+                  IsReadOnly="True"
+                  SelectionMode="Extended"
+                  CanUserSortColumns="False"
+                  CanUserReorderColumns="False"
+                  CanUserResizeColumns="True"
+                  HeadersVisibility="Column"
+                  RowHeaderWidth="0"
+                  HorizontalScrollBarVisibility="Auto"
+                  GridLinesVisibility="Horizontal"
+                  BorderBrush="{DynamicResource NeutralBorderBrush}"
+                  BorderThickness="1"
+                  FontSize="{DynamicResource BaseFontSize}"
+                  AutomationProperties.Name="取り込む利用の一覧"
+                  AutomationProperties.HelpText="台帳に記録されていない利用を古い順に表示します">
+            <DataGrid.Columns>
+                <DataGridTextColumn Header="利用日" Binding="{Binding UseDateDisplay}" Width="Auto"/>
+                <DataGridTextColumn Header="内容" Binding="{Binding RouteDisplay}" Width="*" MinWidth="160"/>
+                <DataGridTextColumn Header="金額" Binding="{Binding AmountDisplay}" Width="Auto"/>
+                <DataGridTextColumn Header="残額" Binding="{Binding BalanceDisplay}" Width="Auto"/>
+            </DataGrid.Columns>
+        </DataGrid>
+
+        <!-- 案内・結果・誤り。複数行になり得るため折り返す（一覧の外に置き、スクロールせずに読めるようにする） -->
+        <TextBlock Grid.Row="2"
+                   x:Name="StatusTextBlock"
+                   Text="{Binding StatusMessage}"
+                   FontWeight="Bold"
+                   TextWrapping="Wrap"
+                   Margin="0,10,0,0"
+                   AutomationProperties.LiveSetting="Assertive"
+                   AutomationProperties.Name="{Binding StatusMessage}">
+            <TextBlock.Style>
+                <Style TargetType="TextBlock">
+                    <Setter Property="Foreground" Value="{DynamicResource InfoTextBrush}"/>
+                    <Style.Triggers>
+                        <DataTrigger Binding="{Binding IsStatusError}" Value="True">
+                            <Setter Property="Foreground" Value="{DynamicResource DangerTextBrush}"/>
+                        </DataTrigger>
+                    </Style.Triggers>
+                </Style>
+            </TextBlock.Style>
+        </TextBlock>
+
+        <!-- ボタン（右端が主操作、その左にキャンセル／閉じる） -->
+        <DockPanel Grid.Row="3" Margin="0,15,0,0" LastChildFill="False">
+            <!-- デバッグ用: 取り込む対象のカードの仮想タッチ（DEBUG ビルドで仮想リーダーのときだけ表示する） -->
+            <Button x:Name="DebugVirtualTouchButton"
+                    DockPanel.Dock="Left"
+                    Content="🃏 交通系ICカード（仮想タッチ）"
+                    Padding="16,8"
+                    Click="DebugVirtualTouchButton_Click"
+                    Visibility="Collapsed"
+                    AutomationProperties.Name="交通系ICカード仮想タッチ（デバッグ用）"
+                    ToolTip="デバッグ用: 取り込む交通系ICカードの仮想タッチをシミュレート"/>
+
+            <Button DockPanel.Dock="Right"
+                    Style="{StaticResource PrimaryActionButtonStyle}"
+                    Content="取り込む(_I)"
+                    Command="{Binding ImportCommand}"
+                    Padding="20,8"
+                    IsDefault="True"
+                    Visibility="{Binding IsCompleted, Converter={StaticResource InverseBoolToVisibilityConverter}, ConverterParameter=invert}"
+                    AutomationProperties.Name="取り込む"
+                    AutomationProperties.HelpText="一覧の利用を台帳に記録します。職員証の認証が必要です"
+                    ToolTip="職員証の認証のあと取り込む (Enter / Alt+I)"/>
+            <Button DockPanel.Dock="Right"
+                    x:Name="CloseButton"
+                    Padding="20,8"
+                    Margin="0,0,10,0"
+                    IsCancel="True"
+                    AutomationProperties.HelpText="ダイアログを閉じます">
+                <Button.Style>
+                    <Style TargetType="Button" BasedOn="{StaticResource {x:Type Button}}">
+                        <Setter Property="Content" Value="キャンセル"/>
+                        <Setter Property="AutomationProperties.Name" Value="キャンセル"/>
+                        <Setter Property="ToolTip" Value="取り込まずに閉じる (Escape)"/>
+                        <Style.Triggers>
+                            <DataTrigger Binding="{Binding IsCompleted}" Value="True">
+                                <Setter Property="Content" Value="閉じる"/>
+                                <Setter Property="AutomationProperties.Name" Value="閉じる"/>
+                                <Setter Property="ToolTip" Value="閉じる (Escape)"/>
+                            </DataTrigger>
+                        </Style.Triggers>
+                    </Style>
+                </Button.Style>
+            </Button>
+        </DockPanel>
+
+        <!-- 処理中オーバーレイ -->
+        <Border Grid.RowSpan="4"
+                Background="{DynamicResource OverlayBrush}"
+                Visibility="{Binding IsBusy, Converter={StaticResource BoolToVisibilityConverter}}">
+            <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center">
+                <ProgressBar IsIndeterminate="True" Width="200" MinHeight="4"/>
+                <TextBlock Text="{Binding BusyMessage}"
+                           Foreground="{DynamicResource OnPrimaryBrush}"
+                           FontSize="{DynamicResource BaseFontSize}"
+                           Margin="0,10,0,0"
+                           HorizontalAlignment="Center"/>
+            </StackPanel>
+        </Border>
+    </Grid>
+</Window>

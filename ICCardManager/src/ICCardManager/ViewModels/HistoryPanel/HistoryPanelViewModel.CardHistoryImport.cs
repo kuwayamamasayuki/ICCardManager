@@ -1,0 +1,124 @@
+#nullable enable
+using System.Threading.Tasks;
+using CommunityToolkit.Mvvm.ComponentModel;
+using CommunityToolkit.Mvvm.Input;
+using ICCardManager.Models;
+
+namespace ICCardManager.ViewModels;
+
+/// <summary>
+/// 残額の食い違い（貸出中でないカード）を、カードの利用履歴から取り込んで復旧する導線（Issue #2293）
+/// </summary>
+public partial class HistoryPanelViewModel
+{
+    /// <summary>履歴の上に出す案内（取り込みを勧める理由）</summary>
+    internal const string CardHistoryImportOfferMessage =
+        "このカードは、カードの残額とピッすいの記録が食い違っています。カードに残る利用履歴から、記録されていない利用を取り込めます。";
+
+    /// <summary>履歴の上に出す案内（XAML の束縛用）</summary>
+    public string CardHistoryImportOfferMessageText => CardHistoryImportOfferMessage;
+
+    /// <summary>
+    /// 「カードの履歴から取り込む...」を案内しているか（残額の食い違い警告から、貸出中でないカードの履歴を開いたときだけ）
+    /// </summary>
+    /// <remarks>
+    /// どの経路で履歴を開き直しても（<see cref="ShowHistoryAsync"/>）、閉じても（<see cref="CloseHistory"/>）取り下げる。
+    /// 案内は警告をクリックした直後の、その警告のカードに限る（他の経路で開いた履歴に取り込みの操作を出さない）。
+    /// </remarks>
+    [ObservableProperty]
+    [NotifyCanExecuteChangedFor(nameof(ImportFromCardHistoryCommand))]
+    private bool _isCardHistoryImportOffered;
+
+    /// <summary>
+    /// 残額の食い違い警告のクリックから、カードの履歴を開く（Issue #2293）
+    /// </summary>
+    /// <remarks>
+    /// 貸出中のカードは返却処理が利用履歴を記録する正規の経路なので、取り込みを案内しない（履歴を開くだけ）。
+    /// 貸出状態はクリックした時点の DB の値で決める（警告を出した後に貸出・返却されていることがある）。
+    /// </remarks>
+    public async Task ShowCardHistoryForBalanceMismatchAsync(IcCard? card)
+    {
+        await ShowCardHistoryAsync(card);
+
+        if (card != null && card.IsInOperation && !card.IsLent && HistoryCard?.CardIdm == card.CardIdm)
+        {
+            IsCardHistoryImportOffered = true;
+        }
+    }
+
+    /// <summary>取り込みの案内を取り下げる</summary>
+    private void EndCardHistoryImportOffer() => IsCardHistoryImportOffered = false;
+
+    /// <summary>
+    /// 「カードの履歴から取り込む...」: カードのタッチを求め、未記録の利用を取り込むダイアログを開く
+    /// </summary>
+    [RelayCommand(CanExecute = nameof(IsCardHistoryImportOffered))]
+    public async Task ImportFromCardHistoryAsync()
+    {
+        var card = HistoryCard;
+        if (card == null)
+        {
+            return;
+        }
+
+        Views.Dialogs.CardHistoryImportDialog? dialog = null;
+        await _navigationService.ShowDialogAsync<Views.Dialogs.CardHistoryImportDialog>(d =>
+        {
+            dialog = d;
+            d.SetTarget(card.CardIdm, card.DisplayName);
+            return Task.CompletedTask;
+        });
+
+        if (dialog != null)
+        {
+            await CompleteCardHistoryImportAsync(card.CardIdm, dialog.ViewModel.Outcome);
+        }
+    }
+
+    /// <summary>
+    /// 取り込みのダイアログを閉じた後の処理（Issue #2293）
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// 取り込んだ後は返却の後処理と同じ順に進める: 履歴・ダッシュボードの再読み込み → バス停名の入力（バス利用があれば）→
+    /// 残額の食い違いの判定し直し → データ系の警告（残額不足・バス停名未入力）→ 残高チェーンの検査。
+    /// </para>
+    /// <para>
+    /// 読み取りまで進んでいれば、取り込んでいなくてもその実残額で食い違いを判定し直す（他のパソコンの取り込みで
+    /// 解消していることがある）。解消したら案内を取り下げる。
+    /// </para>
+    /// <para>internal: ダイアログ（WPF のウィンドウ）を介さずにテストから呼ぶため。</para>
+    /// </remarks>
+    internal async Task CompleteCardHistoryImportAsync(string cardIdm, CardHistoryImportOutcome outcome)
+    {
+        if (outcome.HasImported)
+        {
+            await LoadHistoryLedgersAsync();
+            await Host.RefreshDashboardAsync();
+
+            // バス利用を含む行は、返却と同じくバス停名の入力へ進む（閉じても「バス（★）」のまま未入力の警告に残る）
+            var busLedgers = BusStopInputViewModel.SelectBusStopInputTargets(outcome.RecordedLedgers);
+            if (busLedgers.Count > 0)
+            {
+                await _navigationService.ShowDialogAsync<Views.Dialogs.BusStopInputDialog>(
+                    async d => await d.InitializeWithLedgersAsync(busLedgers));
+                await LoadHistoryLedgersAsync();
+            }
+        }
+
+        if (outcome.ActualBalance.HasValue)
+        {
+            var stillMismatched = await Host.ReevaluateCardBalanceMismatchAsync(cardIdm, outcome.ActualBalance.Value);
+            if (!stillMismatched && HistoryCard?.CardIdm == cardIdm)
+            {
+                EndCardHistoryImportOffer();
+            }
+        }
+
+        if (outcome.HasImported)
+        {
+            await Host.CheckWarningsAsync();
+            await CheckAndNotifyConsistencyAsync();
+        }
+    }
+}

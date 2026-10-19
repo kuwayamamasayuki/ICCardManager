@@ -2572,4 +2572,150 @@ public class HistoryPanelViewModelTests : IDisposable
     }
 
     #endregion
+
+    #region カードの履歴からの取り込み（Issue #2293）
+
+    private const string MismatchCardIdm = "07FE112233445566";
+
+    private static IcCard MismatchCard(bool isLent = false) =>
+        new() { CardIdm = MismatchCardIdm, CardType = "はやかけん", CardNumber = "H-001", IsLent = isLent };
+
+    [Fact]
+    public async Task 残額の食い違い警告から貸出中でないカードの履歴を開くと取り込みを案内すること()
+    {
+        await _history.ShowCardHistoryForBalanceMismatchAsync(MismatchCard());
+
+        _history.IsHistoryVisible.Should().BeTrue();
+        _history.IsCardHistoryImportOffered.Should().BeTrue();
+        _history.ImportFromCardHistoryCommand.CanExecute(null).Should().BeTrue();
+        _history.CardHistoryImportOfferMessageText.Should().Be(HistoryPanelViewModel.CardHistoryImportOfferMessage);
+    }
+
+    [Fact]
+    public async Task 貸出中のカードには取り込みを案内しないこと()
+    {
+        await _history.ShowCardHistoryForBalanceMismatchAsync(MismatchCard(isLent: true));
+
+        _history.IsHistoryVisible.Should().BeTrue("履歴は開く");
+        _history.IsCardHistoryImportOffered.Should().BeFalse("貸出中のカードは返却が利用履歴を記録する");
+        _history.ImportFromCardHistoryCommand.CanExecute(null).Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task 運用から外れたカードには取り込みを案内しないこと()
+    {
+        var refunded = MismatchCard();
+        refunded.IsRefunded = true;
+
+        await _history.ShowCardHistoryForBalanceMismatchAsync(refunded);
+
+        _history.IsCardHistoryImportOffered.Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task 他の経路で開き直すと取り込みの案内を取り下げること()
+    {
+        await _history.ShowCardHistoryForBalanceMismatchAsync(MismatchCard());
+
+        await _history.ShowCardHistoryAsync(MismatchCard());
+
+        _history.IsCardHistoryImportOffered.Should().BeFalse(
+            "案内するのは警告のクリックで開いた直後だけ（待機中のタッチ等で同じカードを開き直したときも出さない）");
+        _history.ImportFromCardHistoryCommand.CanExecute(null).Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task 履歴を閉じると取り込みの案内を取り下げること()
+    {
+        await _history.ShowCardHistoryForBalanceMismatchAsync(MismatchCard());
+
+        _history.CloseHistory();
+
+        _history.IsCardHistoryImportOffered.Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task 取り込んだ後は再読み込み_ダッシュボード_食い違いの判定し直し_警告の順に進めること()
+    {
+        await _history.ShowCardHistoryForBalanceMismatchAsync(MismatchCard());
+        _host.Calls.Clear();
+        _host.MismatchRemainsAfterReevaluation = false;
+
+        await _history.CompleteCardHistoryImportAsync(MismatchCardIdm, new CardHistoryImportOutcome(
+            hasImported: true,
+            recordedLedgers: new[] { new Ledger { Id = 10, CardIdm = MismatchCardIdm, Summary = "鉄道（博多～天神）" } },
+            actualBalance: 4580));
+
+        // 処理中表示（履歴の再読み込みが開く）は順序の表明から除く
+        _host.Calls.Where(c => c != RecordingHistoryPanelHost.BeginBusyCall).Should().Equal(
+            RecordingHistoryPanelHost.RefreshDashboardCall,
+            RecordingHistoryPanelHost.ReevaluateCardBalanceMismatchCall,
+            RecordingHistoryPanelHost.CheckWarningsCall);
+        _host.MismatchReevaluations.Should().Equal((MismatchCardIdm, 4580));
+        _history.IsCardHistoryImportOffered.Should().BeFalse("食い違いが解消したら案内を取り下げる");
+        _ledgerRepositoryMock.Verify(r => r.GetPagedAsync(
+            MismatchCardIdm, It.IsAny<DateTime>(), It.IsAny<DateTime>(), It.IsAny<int>(), It.IsAny<int>()),
+            Times.AtLeast(2), "開いたときと、取り込んだ後の再読み込み");
+        _navigationServiceMock.Verify(n => n.ShowDialogAsync(It.IsAny<Func<ICCardManager.Views.Dialogs.BusStopInputDialog, Task>>()),
+            Times.Never, "バス利用の行が無ければバス停名の入力へ進まない");
+    }
+
+    [Fact]
+    public async Task 取り込んでも食い違いが残れば案内を残すこと()
+    {
+        await _history.ShowCardHistoryForBalanceMismatchAsync(MismatchCard());
+        _host.MismatchRemainsAfterReevaluation = true;
+
+        await _history.CompleteCardHistoryImportAsync(MismatchCardIdm, new CardHistoryImportOutcome(
+            true, new[] { new Ledger { Id = 10, CardIdm = MismatchCardIdm, Summary = "鉄道（博多～天神）" } }, 4000));
+
+        _history.IsCardHistoryImportOffered.Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task 取り込んだ行にバス利用があればバス停名の入力へ進むこと()
+    {
+        await _history.ShowCardHistoryForBalanceMismatchAsync(MismatchCard());
+        var busLedger = new Ledger
+        {
+            Id = 11,
+            CardIdm = MismatchCardIdm,
+            Summary = SummaryGenerator.FormatBusSummary(SummaryGenerator.BusPlaceholder),
+        };
+
+        await _history.CompleteCardHistoryImportAsync(MismatchCardIdm, new CardHistoryImportOutcome(
+            true, new[] { new Ledger { Id = 10, CardIdm = MismatchCardIdm, Summary = "鉄道（博多～天神）" }, busLedger }, 4580));
+
+        _navigationServiceMock.Verify(n => n.ShowDialogAsync(It.IsAny<Func<ICCardManager.Views.Dialogs.BusStopInputDialog, Task>>()),
+            Times.Once, "返却と同じく、バス利用を含む行のバス停名を入力させる");
+    }
+
+    [Fact]
+    public async Task 取り込まずに閉じても_読み取っていれば実残額で判定し直し_警告の再判定はしないこと()
+    {
+        await _history.ShowCardHistoryForBalanceMismatchAsync(MismatchCard());
+        _host.Calls.Clear();
+        _host.MismatchRemainsAfterReevaluation = true;
+
+        await _history.CompleteCardHistoryImportAsync(MismatchCardIdm, new CardHistoryImportOutcome(
+            hasImported: false, recordedLedgers: Array.Empty<Ledger>(), actualBalance: 4580));
+
+        _host.Calls.Should().Equal(RecordingHistoryPanelHost.ReevaluateCardBalanceMismatchCall);
+        _history.IsCardHistoryImportOffered.Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task 読み取らずに閉じたら何もしないこと()
+    {
+        await _history.ShowCardHistoryForBalanceMismatchAsync(MismatchCard());
+        _host.Calls.Clear();
+
+        await _history.CompleteCardHistoryImportAsync(MismatchCardIdm, new CardHistoryImportOutcome(
+            hasImported: false, recordedLedgers: Array.Empty<Ledger>(), actualBalance: null));
+
+        _host.Calls.Should().BeEmpty("実残額が無いまま「解消した」と判断しない（#1908）");
+        _history.IsCardHistoryImportOffered.Should().BeTrue();
+    }
+
+    #endregion
 }

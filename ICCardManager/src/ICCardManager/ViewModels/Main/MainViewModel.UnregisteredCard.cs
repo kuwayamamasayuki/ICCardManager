@@ -1,3 +1,4 @@
+#nullable enable
 using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
@@ -67,7 +68,7 @@ public partial class MainViewModel
         // Issue #596対応: 履歴も事前に読み取っておく（カード登録時に当月分をインポートするため）
         // エラーイベントを一時的に抑制（ユーザーに混乱を与えるエラーメッセージを防止）
         int? preReadBalance = null;
-        List<LedgerDetail> preReadHistory = null;
+        List<LedgerDetail>? preReadHistory = null;
         _cardReader.Error -= OnCardReaderError;
         try
         {
@@ -85,7 +86,7 @@ public partial class MainViewModel
 
         // Issue #312: IDmからカード種別を判別することは技術的に不可能なため、
         // カスタムダイアログでユーザーに職員証か交通系ICカードかを選択させる
-        Views.Dialogs.CardTypeSelectionDialog capturedSelectionDialog = null;
+        Views.Dialogs.CardTypeSelectionDialog? capturedSelectionDialog = null;
         _navigationService.ShowDialog<Views.Dialogs.CardTypeSelectionDialog>(
             d => capturedSelectionDialog = d);
 
@@ -204,7 +205,39 @@ public partial class MainViewModel
             return;
         }
 
-        Models.Ledger latestLedger;
+        await JudgeCardBalanceMismatchAsync(card, actualBalance.Value, notifyNewWarning: true);
+    }
+
+    /// <summary>
+    /// Issue #2293: カードの履歴から取り込んだ後に、取り込みのダイアログで読んだ実残額で食い違いを判定し直す
+    /// （<see cref="IHistoryPanelHost.ReevaluateCardBalanceMismatchAsync"/>）。
+    /// </summary>
+    /// <remarks>
+    /// 判定と警告の入れ替えは <see cref="CheckCardBalanceMismatchAsync"/> と同じ <see cref="JudgeCardBalanceMismatchAsync"/> を通す。
+    /// 警告音・トーストは出さない（取り込みのダイアログが結果を案内済み）。運用から外れたカードは判定しない
+    /// （警告は <c>RefreshDashboardAsync</c> が取り除く。#1947）。
+    /// </remarks>
+    /// <returns>判定し直した後も、このカードの食い違い警告が残っていれば true</returns>
+    internal async Task<bool> ReevaluateCardBalanceMismatchAsync(string cardIdm, int actualBalance)
+    {
+        var card = await _cardRepository.GetByIdmAsync(cardIdm);
+        if (card != null && card.IsInOperation)
+        {
+            await JudgeCardBalanceMismatchAsync(card, actualBalance, notifyNewWarning: false);
+        }
+
+        return WarningMessages.Any(w => w.Type == WarningType.CardBalanceMismatch && w.CardIdm == cardIdm);
+    }
+
+    /// <summary>
+    /// 実残額と台帳の最新残額を比べて、このカードの食い違い警告を入れ替える（Issue #1908。#2293 で切り出し）
+    /// </summary>
+    /// <param name="card">対象カード（運用中であること）</param>
+    /// <param name="actualBalance">カードから読み取った実残額</param>
+    /// <param name="notifyNewWarning">警告が立ったときに警告音とトーストで知らせるか</param>
+    private async Task JudgeCardBalanceMismatchAsync(IcCard card, int actualBalance, bool notifyNewWarning)
+    {
+        Models.Ledger? latestLedger;
         try
         {
             latestLedger = await _ledgerRepository.GetLatestLedgerAsync(card.CardIdm);
@@ -228,14 +261,14 @@ public partial class MainViewModel
 
         var warning = _warningService.CheckCardBalanceMismatchWarning(
             card.CardIdm, card.CardType, card.CardNumber,
-            actualBalance.Value, latestLedger.Balance, card.IsLent);
+            actualBalance, latestLedger.Balance, card.IsLent);
 
         // 自分が生成する種別の、しかも同一カード分だけを入れ替える（04_機能設計書 §7.4）
         ReplaceWarnings(
             w => w.Type == WarningType.CardBalanceMismatch && w.CardIdm == card.CardIdm,
             warning == null ? null : new[] { warning });
 
-        if (warning != null)
+        if (warning != null && notifyNewWarning)
         {
             // 色・アイコン・テキスト・音の4要素で伝える。トーストは文字数制約があるため簡潔にし、
             // 「なぜ／どうすれば」は警告エリアの行が担う（error-messages.md）。
@@ -243,7 +276,7 @@ public partial class MainViewModel
             _toastNotificationService.ShowWarning(
                 "残額の食い違い",
                 $"{card.CardType} {card.CardNumber}\n" +
-                $"カード {DisplayFormatters.FormatBalanceWithUnit(actualBalance.Value)} / " +
+                $"カード {DisplayFormatters.FormatBalanceWithUnit(actualBalance)} / " +
                 $"記録 {DisplayFormatters.FormatBalanceWithUnit(latestLedger.Balance)}");
         }
     }

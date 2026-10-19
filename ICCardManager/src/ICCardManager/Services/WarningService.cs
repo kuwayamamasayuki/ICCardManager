@@ -82,6 +82,17 @@ namespace ICCardManager.Services
         }
 
         /// <summary>
+        /// カードの実残額と台帳の最新残額が食い違っているか（Issue #1908 の判定。Issue #2293 で切り出し）
+        /// </summary>
+        /// <remarks>
+        /// 警告の生成（<see cref="CheckCardBalanceMismatchWarning"/>）と、カードの履歴から取り込んだ後の案内
+        /// （<c>CardHistoryImportViewModel</c>）が同じ判定を使う。案内が「一致した」と述べたのに警告が残る、
+        /// といった食い違いを作らないため（#1763）。
+        /// </remarks>
+        public static bool IsCardBalanceMismatched(int actualBalance, int recordedBalance) =>
+            actualBalance != recordedBalance;
+
+        /// <summary>
         /// Issue #1908: 交通系ICカードの実残額と、ピッすいが記録している残額の食い違いを判定する。
         /// </summary>
         /// <remarks>
@@ -92,8 +103,9 @@ namespace ICCardManager.Services
         /// <para>
         /// <b>判定は貸出中のカードも対象にする</b>。本 Issue が主目的とする「ピッすいを通さずに返却された」
         /// カードは、DB 上は貸出中のまま残るためである（貸出時に記録した残額と現物の残額がずれる）。
-        /// 「どうすれば」は貸出状態で変わる — 貸出中なら返却操作で記録が追いつくが、
-        /// 未貸出のカードは記録を追加する手段が CSV インポートか履歴の直接編集しかない。
+        /// 「どうすれば」は貸出状態で変わる — 貸出中なら返却操作で記録が追いつく。未貸出のカードは、
+        /// 警告のクリックで開く履歴の「カードの履歴から取り込む...」がカードに残る利用履歴から記録を追いつかせる
+        /// （Issue #2293）。カードに残る直近 20 件より前の利用は読めないため、その分だけ CSV インポートか履歴の追加で補う。
         /// </para>
         /// <para>
         /// 残額を読み取れなかった場合はこのメソッドを呼ばないこと。読み取り失敗は「差異なし」を意味しないため、
@@ -115,17 +127,19 @@ namespace ICCardManager.Services
             int recordedBalance,
             bool isLent)
         {
-            if (actualBalance == recordedBalance)
+            if (!IsCardBalanceMismatched(actualBalance, recordedBalance))
             {
                 return null;
             }
 
             var difference = Math.Abs(actualBalance - recordedBalance);
 
-            // 「どうすれば」は貸出状態で変わる（貸出中は返却操作が記録を追いつかせる正規の手段）
+            // 「どうすれば」は貸出状態で変わる（貸出中は返却操作、未貸出はカードの履歴からの取り込みが
+            // 記録を追いつかせる正規の手段。Issue #2293）
             var action = isLent
                 ? "貸出中のままです。職員証と交通系ICカードをタッチして返却処理を実行してください。"
-                : "履歴を確認し、CSVインポートまたは履歴の追加で不足分を補完してください。";
+                : "カードに残っていない古い利用は、CSVインポートまたは履歴の追加で補えます。" +
+                  "この警告をクリックして開く履歴の「カードの履歴から取り込む...」で、カードに残る利用履歴の取り込みを実行してください。";
 
             return new WarningItem
             {

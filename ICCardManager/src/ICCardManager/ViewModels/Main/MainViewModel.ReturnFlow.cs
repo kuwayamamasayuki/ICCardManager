@@ -1,3 +1,4 @@
+#nullable enable
 using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
@@ -100,10 +101,8 @@ public partial class MainViewModel
             {
                 // Issue #593: バス利用を含むLedgerをすべて取得（Summaryで判定）
                 // LastOrDefaultでは最後のLedgerのみ取得されるため、バス利用が別日にある場合に空ダイアログになる
-                var busLedgers = result.CreatedLedgers
-                    // Issue #1818: バスラベルは組織設定（SummaryText.BusLabel）由来のため直書きしない
-                    .Where(l => !l.IsLentRecord && SummaryGenerator.ContainsBusLabel(l.Summary))
-                    .ToList();
+                // 選び方はカードの履歴からの取り込み（Issue #2293）と共有する
+                var busLedgers = BusStopInputViewModel.SelectBusStopInputTargets(result.CreatedLedgers);
 
                 // Issue #1203: 複数のバス利用がある場合でも1つのダイアログでまとめて入力できるようにする
                 if (busLedgers.Count > 0)
