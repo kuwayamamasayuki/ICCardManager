@@ -40,8 +40,8 @@ namespace ICCardManager.Services
     /// </para>
     /// <para>
     /// <b>検出できない範囲</b>: <c>operation_log</c> は6年で物理削除されるため、それ以前の消失は
-    /// 検出できない。また操作ログを書かない経路での更新も対象外。案A（検知のみ）の割り切りであり、
-    /// 復旧手段は提供しない（Issue #1758 の案B のスコープ）。
+    /// 検出できない。また操作ログを書かない経路での更新も対象外。このクラスは検知だけを担い、
+    /// 復旧は <c>CarryoverRecoveryViewModel</c>（繰越情報の復旧ダイアログ、Issue #2255）が行う。
     /// </para>
     /// </remarks>
     public class CarryoverDataLossDetector : ICarryoverDataLossDetector
