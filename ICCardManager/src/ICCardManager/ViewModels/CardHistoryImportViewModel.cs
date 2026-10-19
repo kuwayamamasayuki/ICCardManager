@@ -438,7 +438,8 @@ namespace ICCardManager.ViewModels
             OnPropertyChanged(nameof(HasImported));
             SetInfo(BuildCompletionMessage(
                 result.CreatedLedgers.Count, result.RecordedBalanceAfter, ActualBalance,
-                recordedElsewhereCount: Math.Max(0, Rows.Count - result.RecordedUsageCount)));
+                recordedElsewhereCount: Math.Max(0, Rows.Count - result.RecordedUsageCount),
+                recordedBeyondListCount: Math.Max(0, result.RecordedUsageCount - Rows.Count)));
         }
 
         /// <summary>タッチされたカードが対象と違うときの案内</summary>
@@ -489,13 +490,18 @@ namespace ICCardManager.ViewModels
         /// <param name="recordedBalanceAfter">取り込みの後の台帳の最新残額（読めなかったら null）</param>
         /// <param name="actualBalance">カードの実残額（読めなかったら null）</param>
         /// <param name="recordedElsewhereCount">一覧に出した利用のうち、この画面を開いている間に他の操作で記録されていた数</param>
-        internal static string BuildCompletionMessage(int importedCount, int? recordedBalanceAfter, int? actualBalance, int recordedElsewhereCount = 0)
+        /// <param name="recordedBeyondListCount">一覧に出ていなかったのに記録した利用の数（開いている間に台帳の行が削除され、記録の下限や照合が変わったとき）</param>
+        internal static string BuildCompletionMessage(
+            int importedCount, int? recordedBalanceAfter, int? actualBalance, int recordedElsewhereCount = 0, int recordedBeyondListCount = 0)
         {
             // チャージ・ポイント還元の行は利用者が空欄のままでよいので、利用の行に限って入力を促す
             var head = importedCount > 0
                 ? $"{importedCount}件の行を台帳に記録しました。" +
                   (recordedElsewhereCount > 0
                       ? $"一覧のうち {recordedElsewhereCount} 件の利用は、この画面を開いている間に他の操作で記録されていました。"
+                      : string.Empty) +
+                  (recordedBeyondListCount > 0
+                      ? $"この画面を開いている間に台帳が変わったため、一覧に出ていなかった利用 {recordedBeyondListCount} 件も記録しました。"
                       : string.Empty) +
                   "利用の行の利用者は空欄です。分かる場合は履歴の各行の「変更」で入力してください。"
                 : "一覧の利用は、この画面を開いている間に他の操作（返却や他のパソコンの取り込み）で記録されていたため、新たに記録した行はありません。";

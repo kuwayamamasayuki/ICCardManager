@@ -530,6 +530,8 @@ public sealed class CardHistoryImportViewModelTests : IDisposable
             .And.NotContain("他の操作で記録されていました", "対: 一覧の利用をすべて記録したときは添えない");
         CardHistoryImportViewModel.BuildCompletionMessage(1, 4580, 4580, recordedElsewhereCount: 1)
             .Should().Contain("一覧のうち 1 件の利用は、この画面を開いている間に他の操作で記録されていました");
+        CardHistoryImportViewModel.BuildCompletionMessage(2, 4580, 4580, recordedBeyondListCount: 1)
+            .Should().Contain("一覧に出ていなかった利用 1 件も記録しました");
     }
 
     [Fact]

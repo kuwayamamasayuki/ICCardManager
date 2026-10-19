@@ -157,6 +157,19 @@ public sealed class LendingServiceUsageImportTests : IDisposable
     }
 
     [Fact]
+    public void ResolveImportLowerBound_導入行が無く最新行の日付が未来なら今日を上限にすること()
+    {
+        // 導入行が無いカードの最新行が、日付を打ち間違えた手入力の行（明細なし）だった
+        var result = LendingService.ResolveImportLowerBound(
+            introductionDate: null,
+            latestLedgerDate: new DateTime(2026, 12, 1),
+            latestLedgerDateWithoutDetails: new DateTime(2026, 12, 1),
+            today: Now);
+
+        result.Should().Be(Now.Date, "下限が未来になってカードの利用をすべて捨てない");
+    }
+
+    [Fact]
     public void ResolveImportLowerBound_明細を持たない行が導入行より前なら導入行の日付のままであること()
     {
         var result = LendingService.ResolveImportLowerBound(

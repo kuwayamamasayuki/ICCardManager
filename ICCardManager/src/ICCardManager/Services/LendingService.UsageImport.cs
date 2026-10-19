@@ -137,10 +137,14 @@ namespace ICCardManager.Services
 
             return ResolveUsageLowerBoundCore(
                 introductionDate,
-                fallbackWithoutIntroduction: (latestLedgerDate ?? introductionDate!.Value).Date,
+                // 導入行が無いときの下限（最新行の日付）にも今日を上限として掛ける。最新行が未来の日付（手で追加した行の入力の誤り）だと、
+                // 下限が未来になってカードの利用をすべて捨て、「未来の日付以降は記録済み」と案内してしまう
+                fallbackWithoutIntroduction: Min((latestLedgerDate ?? introductionDate!.Value).Date, today.Date),
                 latestLedgerDateWithoutDetails,
                 upperLimitOfRowWithoutDetails: today.Date);
         }
+
+        private static DateTime Min(DateTime a, DateTime b) => a <= b ? a : b;
 
         /// <summary>
         /// Issue #326: カードから読んだ利用のうち、台帳に記録済みのもの（既存明細と利用日・残高・チャージ区分が一致）を除く
