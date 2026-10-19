@@ -40,8 +40,12 @@ namespace ICCardManager.Services
     /// </para>
     /// <para>
     /// <b>検出できない範囲</b>: <c>operation_log</c> は6年で物理削除されるため、それ以前の消失は
-    /// 検出できない。また操作ログを書かない経路での更新も対象外。このクラスは検知だけを担い、
-    /// 復旧は <c>CarryoverRecoveryViewModel</c>（繰越情報の復旧ダイアログ、Issue #2255）が行う。
+    /// 検出できない。また操作ログを書かない経路での更新も対象外（失われた値が分からないので、
+    /// 画面から復旧できず DB の直接修正になる）。
+    /// </para>
+    /// <para>
+    /// このクラスは検知だけを担う。検出したカードの復旧は <c>CarryoverRecoveryViewModel</c>
+    /// （繰越情報の復旧ダイアログ、Issue #2255）が行う。
     /// </para>
     /// </remarks>
     public class CarryoverDataLossDetector : ICarryoverDataLossDetector
@@ -189,7 +193,7 @@ namespace ICCardManager.Services
         /// 数値項目が「非既定値 → 既定値」へ落ち、かつ現在も既定値のままなら、失われた元の値を返す。
         /// </summary>
         /// <remarks>
-        /// 現在値の確認が要点。これが無いと、DB を直接修正して復旧した後も
+        /// 現在値の確認が要点。これが無いと、復旧ダイアログ（Issue #2255）や DB の直接修正で復旧した後も
         /// 6年間残る消失ログを根拠に警告が出続ける（Issue #1739 の「復旧したのに消えない」）。
         /// </remarks>
         private static int? DetectLostInt(int before, int after, int current, int defaultValue)
