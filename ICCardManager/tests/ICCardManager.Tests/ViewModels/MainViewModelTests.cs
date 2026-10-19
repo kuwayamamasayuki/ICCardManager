@@ -273,7 +273,8 @@ public class MainViewModelTests : IDisposable
     [Fact]
     public async Task CheckCarryoverDataLossAsync_復旧後の再判定で既存の警告を取り除くこと()
     {
-        // 繰越情報の復旧ダイアログ（Issue #2255）または DB の直接修正で復旧した後、再起動せずとも（再判定の入口を通れば）警告が消えること。
+        // 復旧した後、再起動せずとも（再判定の入口を通れば）警告が消えること。
+        // 復旧の経路は、繰越情報の復旧ダイアログ（Issue #2255）からの書き戻しと、DB の直接修正。
         // 追加のみで書くと一度出た警告が復旧後も残り続ける。
         var vm = CreateViewModelWithCarryoverDetector(DetectorReturning());
         vm.WarningMessages.Add(new WarningItem
