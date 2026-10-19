@@ -84,6 +84,12 @@ namespace ICCardManager.Services
         public List<Ledger> CreatedLedgers { get; } = new();
 
         /// <summary>
+        /// 記録した利用（カードの履歴の行）の数。確定の直前に立て直した計画の数で、一覧に出した数より少なければ、
+        /// その差は一覧を見ている間に他の操作で記録されていた
+        /// </summary>
+        public int RecordedUsageCount { get; set; }
+
+        /// <summary>
         /// 取り込みの後の、台帳の最新行の残額。読み取れなかったときは null
         /// </summary>
         /// <remarks>
@@ -110,16 +116,19 @@ namespace ICCardManager.Services
         /// 導入行も台帳の記録も無ければ、計上済みの境界を決められないので取り込まない（null）
         /// </description></item>
         /// <item><description>
-        /// <b>明細を持たない行で押し上げる下限に上限を設けない</b>。返却の上限（貸出日）は「今回の貸出中の利用を
-        /// 捨てない」ためのもので、取り込みには守るべき貸出が無い。手で追加した行の日までの利用は記録済みとみなす
+        /// <b>明細を持たない行で押し上げる下限の上限は今日</b>（返却では貸出日）。返却の上限は「今回の貸出中の利用を
+        /// 捨てない」ためのもので、取り込みには守るべき貸出が無い。手で追加した行の日までの利用は記録済みとみなす。
+        /// ただし手で追加した行の日付が未来（入力の誤り）だと、下限が未来になり「未来の日付以降は記録済み」と案内してしまう
+        /// （カードの利用はどれも今日以前なので、下限が今日を超えても取り込む範囲は変わらない）
         /// </description></item>
         /// </list>
         /// </remarks>
         /// <param name="introductionDate">導入行の日付。無ければ null</param>
         /// <param name="latestLedgerDate">台帳の最新行の日付。記録が無ければ null</param>
         /// <param name="latestLedgerDateWithoutDetails">明細を持たない台帳行の最新日。無ければ null</param>
+        /// <param name="today">今日（明細を持たない行で押し上げる下限の上限）</param>
         internal static DateTime? ResolveImportLowerBound(
-            DateTime? introductionDate, DateTime? latestLedgerDate, DateTime? latestLedgerDateWithoutDetails)
+            DateTime? introductionDate, DateTime? latestLedgerDate, DateTime? latestLedgerDateWithoutDetails, DateTime today)
         {
             if (!introductionDate.HasValue && !latestLedgerDate.HasValue)
             {
@@ -130,7 +139,7 @@ namespace ICCardManager.Services
                 introductionDate,
                 fallbackWithoutIntroduction: (latestLedgerDate ?? introductionDate!.Value).Date,
                 latestLedgerDateWithoutDetails,
-                upperLimitOfRowWithoutDetails: null);
+                upperLimitOfRowWithoutDetails: today.Date);
         }
 
         /// <summary>
@@ -202,7 +211,7 @@ namespace ICCardManager.Services
             var latestLedger = await _ledgerRepository.GetLatestLedgerAsync(cardIdm).ConfigureAwait(false);
             var latestLedgerDateWithoutDetails = await _ledgerRepository.GetLatestLedgerDateWithoutDetailsAsync(cardIdm).ConfigureAwait(false);
 
-            var lowerBound = ResolveImportLowerBound(introductionDate, latestLedger?.Date, latestLedgerDateWithoutDetails);
+            var lowerBound = ResolveImportLowerBound(introductionDate, latestLedger?.Date, latestLedgerDateWithoutDetails, _clock.Now);
             if (!lowerBound.HasValue)
             {
                 return UsageImportPlan.Blocked(UsageImportBlockReason.NoBaseline);
@@ -269,13 +278,13 @@ namespace ICCardManager.Services
                             if (plan.BlockReason != UsageImportBlockReason.None)
                             {
                                 scope.Commit();
-                                return (BlockReason: plan.BlockReason, Ledgers: new List<Ledger>());
+                                return (BlockReason: plan.BlockReason, Ledgers: new List<Ledger>(), UsageCount: 0);
                             }
 
                             if (plan.DetailsToRecord.Count == 0)
                             {
                                 scope.Commit();
-                                return (BlockReason: UsageImportBlockReason.None, Ledgers: new List<Ledger>());
+                                return (BlockReason: UsageImportBlockReason.None, Ledgers: new List<Ledger>(), UsageCount: 0);
                             }
 
                             // 同じ日の既存の行へ明細を足した場合は、操作ログの「変更前」に足す前の行を残す（Issue #1760）。
@@ -319,7 +328,7 @@ namespace ICCardManager.Services
                             }
 
                             scope.Commit();
-                            return (BlockReason: UsageImportBlockReason.None, Ledgers: ledgers);
+                            return (BlockReason: UsageImportBlockReason.None, Ledgers: ledgers, UsageCount: plan.DetailsToRecord.Count);
                         }
                         catch
                         {
@@ -332,6 +341,7 @@ namespace ICCardManager.Services
                     result.BlockReason = created.BlockReason;
                     result.Success = created.BlockReason == UsageImportBlockReason.None;
                     result.CreatedLedgers.AddRange(created.Ledgers);
+                    result.RecordedUsageCount = created.UsageCount;
                 }
                 catch (Exception ex)
                 {

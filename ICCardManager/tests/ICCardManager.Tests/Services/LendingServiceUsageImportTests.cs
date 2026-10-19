@@ -111,7 +111,8 @@ public sealed class LendingServiceUsageImportTests : IDisposable
         var result = LendingService.ResolveImportLowerBound(
             introductionDate: new DateTime(2026, 9, 1, 15, 0, 0),
             latestLedgerDate: new DateTime(2026, 9, 12),
-            latestLedgerDateWithoutDetails: null);
+            latestLedgerDateWithoutDetails: null,
+            today: Now);
 
         result.Should().Be(new DateTime(2026, 9, 1), "返却時（#2237）と同じく、導入行より前は導入行の残高に含まれている");
     }
@@ -122,22 +123,37 @@ public sealed class LendingServiceUsageImportTests : IDisposable
         var result = LendingService.ResolveImportLowerBound(
             introductionDate: null,
             latestLedgerDate: new DateTime(2026, 9, 12, 18, 30, 0),
-            latestLedgerDateWithoutDetails: null);
+            latestLedgerDateWithoutDetails: null,
+            today: Now);
 
         result.Should().Be(new DateTime(2026, 9, 12),
             "最新行と同じ日の利用は既存明細との照合で除けるので、その日を含める");
     }
 
     [Fact]
-    public void ResolveImportLowerBound_明細を持たない行があればその翌日へ押し上げ_上限を設けないこと()
+    public void ResolveImportLowerBound_明細を持たない行があればその翌日へ押し上げること()
     {
-        // 返却なら貸出日で頭打ちになる未来の日付でも、取り込みでは翌日まで押し上げる（守るべき貸出が無い）
+        // 返却なら貸出日で頭打ちになる日付でも、取り込みでは翌日まで押し上げる（守るべき貸出が無い）
         var result = LendingService.ResolveImportLowerBound(
             introductionDate: new DateTime(2026, 9, 1),
-            latestLedgerDate: new DateTime(2026, 9, 25),
-            latestLedgerDateWithoutDetails: new DateTime(2026, 9, 25));
+            latestLedgerDate: new DateTime(2026, 9, 15),
+            latestLedgerDateWithoutDetails: new DateTime(2026, 9, 15),
+            today: Now);
 
-        result.Should().Be(new DateTime(2026, 9, 26));
+        result.Should().Be(new DateTime(2026, 9, 16));
+    }
+
+    [Fact]
+    public void ResolveImportLowerBound_明細を持たない行の日付が未来なら今日を上限にすること()
+    {
+        // 手で追加した行の日付の打ち間違い（未来）で、「未来の日付以降は記録済み」と案内しない
+        var result = LendingService.ResolveImportLowerBound(
+            introductionDate: new DateTime(2026, 9, 1),
+            latestLedgerDate: new DateTime(2027, 9, 25),
+            latestLedgerDateWithoutDetails: new DateTime(2027, 9, 25),
+            today: Now);
+
+        result.Should().Be(Now.Date);
     }
 
     [Fact]
@@ -146,7 +162,8 @@ public sealed class LendingServiceUsageImportTests : IDisposable
         var result = LendingService.ResolveImportLowerBound(
             introductionDate: new DateTime(2026, 9, 10),
             latestLedgerDate: new DateTime(2026, 9, 12),
-            latestLedgerDateWithoutDetails: new DateTime(2026, 9, 5));
+            latestLedgerDateWithoutDetails: new DateTime(2026, 9, 5),
+            today: Now);
 
         result.Should().Be(new DateTime(2026, 9, 10));
     }
@@ -154,7 +171,7 @@ public sealed class LendingServiceUsageImportTests : IDisposable
     [Fact]
     public void ResolveImportLowerBound_導入行も記録も無ければnullを返すこと()
     {
-        var result = LendingService.ResolveImportLowerBound(null, null, null);
+        var result = LendingService.ResolveImportLowerBound(null, null, null, Now);
 
         result.Should().BeNull("どこまでが計上済みかの根拠が無いので取り込まない");
     }

@@ -41,10 +41,13 @@ namespace ICCardManager.ViewModels
     /// </summary>
     public sealed class CardHistoryImportOutcome
     {
-        public CardHistoryImportOutcome(bool hasImported, IReadOnlyList<Ledger> recordedLedgers, int? actualBalance, bool completed = false)
+        public CardHistoryImportOutcome(
+            bool hasImported, IReadOnlyList<Ledger> recordedLedgers, int? actualBalance, bool completed = false,
+            bool cardNoLongerEligible = false)
         {
             HasImported = hasImported;
             Completed = completed || hasImported;
+            CardNoLongerEligible = cardNoLongerEligible;
             RecordedLedgers = recordedLedgers ?? throw new ArgumentNullException(nameof(recordedLedgers));
             ActualBalance = actualBalance;
         }
@@ -56,6 +59,12 @@ namespace ICCardManager.ViewModels
         /// 取り込みを実行し終えたか（記録した行が無かった場合も含む。一覧を見ている間に他の操作で記録されていたとき）
         /// </summary>
         public bool Completed { get; }
+
+        /// <summary>
+        /// カードが取り込みの対象でなくなっていたか（貸出中・削除・払い戻し）。呼び出し元は取り込みの案内を取り下げる
+        /// （貸出中なら返却が利用履歴を記録する。押しても同じ理由で断られる）
+        /// </summary>
+        public bool CardNoLongerEligible { get; }
 
         /// <summary>記録した台帳行（新しく作った行と、同じ日の既存の行へ明細を足した行）</summary>
         public IReadOnlyList<Ledger> RecordedLedgers { get; }
@@ -177,7 +186,11 @@ namespace ICCardManager.ViewModels
             HasImported,
             (IReadOnlyList<Ledger>?)ImportResult?.CreatedLedgers ?? Array.Empty<Ledger>(),
             ActualBalance,
-            completed: ImportResult?.Success == true);
+            completed: ImportResult?.Success == true,
+            cardNoLongerEligible: _lastBlockReason is UsageImportBlockReason.CardIsLent or UsageImportBlockReason.CardNotInOperation);
+
+        /// <summary>計画・確定で最後に断られた理由（断られていなければ None）</summary>
+        private UsageImportBlockReason _lastBlockReason = UsageImportBlockReason.None;
 
         /// <summary>
         /// 取り込む対象のカードを受け取る（タッチの待ち受けは <see cref="Start"/> で始める）
@@ -337,6 +350,7 @@ namespace ICCardManager.ViewModels
 
             if (plan.BlockReason != UsageImportBlockReason.None)
             {
+                _lastBlockReason = plan.BlockReason;
                 RowCountText = string.Empty;
                 SetError(BuildBlockedMessage(plan.BlockReason, CardDisplayName));
                 return;
@@ -407,6 +421,7 @@ namespace ICCardManager.ViewModels
                     // 一覧を出した後に貸出・削除された等。押し直しても同じ理由で断られるので、取り込めない状態にする
                     // （書き込みの失敗は一過性のことがあるので、押し直せるまま残す）
                     _readHistory = null;
+                    _lastBlockReason = result.BlockReason;
                     ImportCommand.NotifyCanExecuteChanged();
                     SetError(BuildBlockedMessage(result.BlockReason, CardDisplayName));
                 }
@@ -421,7 +436,9 @@ namespace ICCardManager.ViewModels
             ImportResult = result;
             Phase = CardHistoryImportPhase.Completed;
             OnPropertyChanged(nameof(HasImported));
-            SetInfo(BuildCompletionMessage(result.CreatedLedgers.Count, result.RecordedBalanceAfter, ActualBalance));
+            SetInfo(BuildCompletionMessage(
+                result.CreatedLedgers.Count, result.RecordedBalanceAfter, ActualBalance,
+                recordedElsewhereCount: Math.Max(0, Rows.Count - result.RecordedUsageCount)));
         }
 
         /// <summary>タッチされたカードが対象と違うときの案内</summary>
@@ -471,11 +488,16 @@ namespace ICCardManager.ViewModels
         /// <param name="importedCount">記録した台帳行の数</param>
         /// <param name="recordedBalanceAfter">取り込みの後の台帳の最新残額（読めなかったら null）</param>
         /// <param name="actualBalance">カードの実残額（読めなかったら null）</param>
-        internal static string BuildCompletionMessage(int importedCount, int? recordedBalanceAfter, int? actualBalance)
+        /// <param name="recordedElsewhereCount">一覧に出した利用のうち、この画面を開いている間に他の操作で記録されていた数</param>
+        internal static string BuildCompletionMessage(int importedCount, int? recordedBalanceAfter, int? actualBalance, int recordedElsewhereCount = 0)
         {
             // チャージ・ポイント還元の行は利用者が空欄のままでよいので、利用の行に限って入力を促す
             var head = importedCount > 0
-                ? $"{importedCount}件の行を台帳に記録しました。利用の行の利用者は空欄です。分かる場合は履歴の各行の「変更」で入力してください。"
+                ? $"{importedCount}件の行を台帳に記録しました。" +
+                  (recordedElsewhereCount > 0
+                      ? $"一覧のうち {recordedElsewhereCount} 件の利用は、この画面を開いている間に他の操作で記録されていました。"
+                      : string.Empty) +
+                  "利用の行の利用者は空欄です。分かる場合は履歴の各行の「変更」で入力してください。"
                 : "一覧の利用は、この画面を開いている間に他の操作（返却や他のパソコンの取り込み）で記録されていたため、新たに記録した行はありません。";
 
             if (recordedBalanceAfter == null || actualBalance == null)

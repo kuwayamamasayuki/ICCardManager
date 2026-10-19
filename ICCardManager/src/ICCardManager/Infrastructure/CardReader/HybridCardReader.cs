@@ -59,7 +59,7 @@ namespace ICCardManager.Infrastructure.CardReader
             // カスタム履歴データがあればそれを使用（仮想タッチで設定されたデータ）
             if (_settings.CustomHistory.TryGetValue(idm, out var customHistory))
             {
-                return customHistory;
+                return CloneHistory(customHistory);
             }
 
             // カスタムデータがなければ実カードリーダーに委譲
@@ -72,7 +72,7 @@ namespace ICCardManager.Infrastructure.CardReader
             // Issue #1169: カスタム履歴データがあれば成功として返す
             if (_settings.CustomHistory.TryGetValue(idm, out var customHistory))
             {
-                return CardReadResult<IReadOnlyList<LedgerDetail>>.Ok(customHistory.ToList());
+                return CardReadResult<IReadOnlyList<LedgerDetail>>.Ok(CloneHistory(customHistory));
             }
 
             return await _realReader.TryReadHistoryAsync(idm).ConfigureAwait(false);
@@ -109,6 +109,13 @@ namespace ICCardManager.Infrastructure.CardReader
                 SystemCode = "0003"
             });
         }
+
+        /// <summary>
+        /// 設定した履歴を、読むたびに複製して返す（台帳へ記録すると明細の LedgerId が書き換わるため、
+        /// 同じ明細のインスタンスを次の読み取りへ持ち越さない。実カードリーダーも読むたびに新しい明細を作る）
+        /// </summary>
+        private static List<LedgerDetail> CloneHistory(IEnumerable<LedgerDetail> history) =>
+            history.Select(d => Common.LedgerCloner.CloneDetail(d)!).ToList();
 
         /// <summary>
         /// 仮想タッチしたカードが返す残額・利用履歴を設定する（Issue #2293。<see cref="DebugCardData"/> が起動時に呼ぶ）

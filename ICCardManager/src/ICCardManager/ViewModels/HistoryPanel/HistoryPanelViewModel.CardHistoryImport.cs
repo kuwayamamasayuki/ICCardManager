@@ -159,6 +159,12 @@ public partial class HistoryPanelViewModel
             }
         }
 
+        if (outcome.CardNoLongerEligible && HistoryCard?.CardIdm == cardIdm)
+        {
+            // 貸出中・運用外になっていた（押しても同じ理由で断られる）。貸出中なら返却が利用履歴を記録する
+            EndCardHistoryImportOffer();
+        }
+
         if (outcome.Completed)
         {
             await Host.CheckWarningsAsync();

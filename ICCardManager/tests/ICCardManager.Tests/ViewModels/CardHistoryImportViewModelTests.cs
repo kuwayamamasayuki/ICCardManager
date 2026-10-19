@@ -357,6 +357,7 @@ public sealed class CardHistoryImportViewModelTests : IDisposable
         vm.IsStatusError.Should().BeTrue();
         vm.StatusMessage.Should().Be(CardHistoryImportViewModel.BuildBlockedMessage(UsageImportBlockReason.CardIsLent, CardName));
         vm.ImportCommand.CanExecute(null).Should().BeFalse();
+        vm.Outcome.CardNoLongerEligible.Should().BeTrue("呼び出し元は取り込みの案内を取り下げる");
     }
 
     #endregion
@@ -477,6 +478,7 @@ public sealed class CardHistoryImportViewModelTests : IDisposable
         vm.IsStatusError.Should().BeTrue();
         vm.StatusMessage.Should().StartWith("カードの履歴を取り込めませんでした。").And.Contain("何も記録していません");
         vm.ImportCommand.CanExecute(null).Should().BeTrue("一過性の失敗なので、もう一度押せる");
+        vm.Outcome.CardNoLongerEligible.Should().BeFalse("対: 書き込みの失敗ではカードは対象のまま");
         (await GetUsageLedgersAsync()).Should().BeEmpty();
     }
 
@@ -494,6 +496,7 @@ public sealed class CardHistoryImportViewModelTests : IDisposable
         vm.StatusMessage.Should().Be(CardHistoryImportViewModel.BuildBlockedMessage(UsageImportBlockReason.CardIsLent, CardName));
         (await GetUsageLedgersAsync()).Should().BeEmpty();
         vm.ImportCommand.CanExecute(null).Should().BeFalse("押し直しても同じ理由で断られるので、取り込めない状態にする");
+        vm.Outcome.CardNoLongerEligible.Should().BeTrue();
     }
 
     [Fact]
@@ -523,7 +526,10 @@ public sealed class CardHistoryImportViewModelTests : IDisposable
         CardHistoryImportViewModel.BuildCompletionMessage(1, 4790, 4000)
             .Should().Contain("可能性があります", "差の原因は言い切らない（導入時の残額の誤りなど別の原因もあり得る）");
         CardHistoryImportViewModel.BuildCompletionMessage(2, 4580, 4580)
-            .Should().Contain("利用の行の利用者は空欄", "チャージ・ポイント還元の行は空欄のままでよい");
+            .Should().Contain("利用の行の利用者は空欄", "チャージ・ポイント還元の行は空欄のままでよい")
+            .And.NotContain("他の操作で記録されていました", "対: 一覧の利用をすべて記録したときは添えない");
+        CardHistoryImportViewModel.BuildCompletionMessage(1, 4580, 4580, recordedElsewhereCount: 1)
+            .Should().Contain("一覧のうち 1 件の利用は、この画面を開いている間に他の操作で記録されていました");
     }
 
     [Fact]

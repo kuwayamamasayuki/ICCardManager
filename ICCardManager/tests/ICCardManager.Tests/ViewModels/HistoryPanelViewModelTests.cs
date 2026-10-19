@@ -2778,6 +2778,19 @@ public class HistoryPanelViewModelTests : IDisposable
     }
 
     [Fact]
+    public async Task カードが取り込みの対象でなくなっていたら食い違いが残っても案内を取り下げること()
+    {
+        // 一覧の段階で貸出中と分かった（貸出中なら返却が記録する。押しても同じ理由で断られる）
+        await _history.ShowCardHistoryForBalanceMismatchAsync(MismatchCard());
+        _host.MismatchRemainsAfterReevaluation = true;
+
+        await _history.CompleteCardHistoryImportAsync(MismatchCardIdm, new CardHistoryImportOutcome(
+            hasImported: false, recordedLedgers: Array.Empty<Ledger>(), actualBalance: 4580, cardNoLongerEligible: true));
+
+        _history.IsCardHistoryImportOffered.Should().BeFalse();
+    }
+
+    [Fact]
     public async Task 読み取らずに閉じたら何もしないこと()
     {
         await _history.ShowCardHistoryForBalanceMismatchAsync(MismatchCard());
