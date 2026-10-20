@@ -202,10 +202,11 @@ public partial class MainViewModel
 
             case WarningType.CardBalanceMismatch:
                 // Issue #1908: 残額の食い違い警告: 該当カードの履歴を表示する。
-                // 文言が「履歴を確認し」と案内する以上、クリックでその履歴へ到達できること。
+                // Issue #2293: 貸出中でないカードなら、履歴の上に「カードの履歴から取り込む...」を案内する
+                // （警告の文言がその操作を案内している）。
                 // ここで再判定はしない（実残額はカードがリーダーに載っているときしか読めず、
                 // 読めないまま「解消した」と判断すると警告が黙って消える）。
-                await History.ShowCardHistoryAsync(await _cardRepository.GetByIdmAsync(warning.CardIdm));
+                await History.ShowCardHistoryForBalanceMismatchAsync(await _cardRepository.GetByIdmAsync(warning.CardIdm));
                 break;
 
             case WarningType.BalanceInconsistency:

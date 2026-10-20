@@ -2068,4 +2068,21 @@ public class BusStopInputItemTests
     }
 
     #endregion
+
+    #region バス停名の入力へ進む行の選び方（Issue #2293 で返却と取り込みが共有）
+
+    [Fact]
+    public void SelectBusStopInputTargets_バス利用を含む行だけを選び_貸出中レコードを除くこと()
+    {
+        var bus = new Ledger { Id = 1, Summary = SummaryGenerator.FormatBusSummary(SummaryGenerator.BusPlaceholder) };
+        var mixed = new Ledger { Id = 2, Summary = "鉄道（博多～天神）、" + SummaryGenerator.FormatBusSummary(SummaryGenerator.BusPlaceholder) };
+        var rail = new Ledger { Id = 3, Summary = "鉄道（博多～天神）" };
+        var lent = new Ledger { Id = 4, Summary = SummaryGenerator.FormatBusSummary(SummaryGenerator.BusPlaceholder), IsLentRecord = true };
+
+        var targets = BusStopInputViewModel.SelectBusStopInputTargets(new[] { bus, mixed, rail, lent });
+
+        targets.Select(l => l.Id).Should().Equal(1, 2);
+    }
+
+    #endregion
 }

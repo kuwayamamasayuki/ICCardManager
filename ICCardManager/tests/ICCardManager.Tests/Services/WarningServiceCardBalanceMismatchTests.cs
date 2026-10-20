@@ -89,6 +89,35 @@ public class WarningServiceCardBalanceMismatchTests
             "未貸出のカードは返却処理ができないため、実行できない指示を出さない");
     }
 
+    [Fact]
+    public void 未貸出のカードにはカードの履歴からの取り込みを案内すること()
+    {
+        // Issue #2293: 主な復旧手段は、警告から開いた履歴の「カードの履歴から取り込む...」
+        var warning = Check(actualBalance: 1250, recordedBalance: 2500, isLent: false);
+
+        warning.DisplayText.Should().Contain("「カードの履歴から取り込む...」");
+        warning.DisplayText.Should().EndWith("取り込みを実行してください。", "主な手段を最後の行動指示にする");
+    }
+
+    [Fact]
+    public void 貸出中のカードにはカードの履歴からの取り込みを案内しないこと()
+    {
+        var warning = Check(actualBalance: 1250, recordedBalance: 2500, isLent: true);
+
+        warning.DisplayText.Should().NotContain("カードの履歴から取り込む", "貸出中なら返却が利用履歴を記録する");
+    }
+
+    [Theory]
+    [InlineData(1250, 1250, false)]
+    [InlineData(1250, 2500, true)]
+    [InlineData(0, 10, true)]
+    public void IsCardBalanceMismatchedは警告の生成と同じ判定であること(int actual, int recorded, bool expected)
+    {
+        WarningService.IsCardBalanceMismatched(actual, recorded).Should().Be(expected);
+        (Check(actual, recorded, isLent: false) != null).Should().Be(expected,
+            "取り込みの後の案内（一致した／差がある）と警告の有無を食い違わせない");
+    }
+
     [Theory]
     [InlineData(true)]
     [InlineData(false)]

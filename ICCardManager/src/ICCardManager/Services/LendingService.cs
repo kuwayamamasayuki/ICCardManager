@@ -182,7 +182,7 @@ namespace ICCardManager.Services
     /// ロック取得のタイムアウトは5秒で、タイムアウト時は処理が拒否されます。
     /// </para>
     /// </remarks>
-    public class LendingService
+    public partial class LendingService
     {
         /// <summary>
         /// 残高不足パターン検出時に許容するチャージ超過額の閾値（円）。
@@ -976,22 +976,44 @@ namespace ICCardManager.Services
         {
             var lentDate = (lentRecord.LentAt ?? now.AddDays(-1)).Date;
 
-            DateTime lowerBound;
-            if (introductionDate.HasValue)
-            {
-                lowerBound = introductionDate.Value.Date;
-            }
-            else
-            {
-                lowerBound = lentDate.AddDays(-FallbackLookbackDaysWithoutIntroduction);
-            }
+            return ResolveUsageLowerBoundCore(
+                introductionDate,
+                fallbackWithoutIntroduction: lentDate.AddDays(-FallbackLookbackDaysWithoutIntroduction),
+                latestLedgerDateWithoutDetails,
+                upperLimitOfRowWithoutDetails: lentDate);
+        }
+
+        /// <summary>
+        /// 記録の下限を決める規則の本体（返却時の <see cref="ResolveUsageLowerBound"/> と、
+        /// カードの履歴からの取り込み（Issue #2293）の <see cref="ResolveImportLowerBound"/> が共有する）。
+        /// </summary>
+        /// <remarks>
+        /// 導入行があればその日付、無ければ <paramref name="fallbackWithoutIntroduction"/>。明細を持たない行があれば
+        /// その最新日の翌日と遅いほう（ただし <paramref name="upperLimitOfRowWithoutDetails"/> を超えない）。
+        /// 規則を 2 か所に書くと、一方だけ直したときに返却と取り込みで記録される範囲が食い違う（#1763）。
+        /// </remarks>
+        /// <param name="introductionDate">導入行の日付。無ければ null</param>
+        /// <param name="fallbackWithoutIntroduction">導入行が無いときの下限</param>
+        /// <param name="latestLedgerDateWithoutDetails">明細を持たない台帳行の最新日。無ければ null</param>
+        /// <param name="upperLimitOfRowWithoutDetails">
+        /// 明細を持たない行で押し上げる下限の上限（返却では貸出日）。null なら上限を設けない
+        /// </param>
+        private static DateTime ResolveUsageLowerBoundCore(
+            DateTime? introductionDate,
+            DateTime fallbackWithoutIntroduction,
+            DateTime? latestLedgerDateWithoutDetails,
+            DateTime? upperLimitOfRowWithoutDetails)
+        {
+            var lowerBound = introductionDate.HasValue
+                ? introductionDate.Value.Date
+                : fallbackWithoutIntroduction.Date;
 
             if (latestLedgerDateWithoutDetails.HasValue)
             {
                 var afterRowWithoutDetails = latestLedgerDateWithoutDetails.Value.Date.AddDays(1);
-                if (afterRowWithoutDetails > lentDate)
+                if (upperLimitOfRowWithoutDetails.HasValue && afterRowWithoutDetails > upperLimitOfRowWithoutDetails.Value.Date)
                 {
-                    afterRowWithoutDetails = lentDate;
+                    afterRowWithoutDetails = upperLimitOfRowWithoutDetails.Value.Date;
                 }
 
                 if (afterRowWithoutDetails > lowerBound)
@@ -1287,6 +1309,19 @@ namespace ICCardManager.Services
         private Task<bool> InsertDetailsInTransactionAsync(int ledgerId, IEnumerable<LedgerDetail> details, SQLiteTransaction? transaction)
             => transaction != null ? _ledgerRepository.InsertDetailsAsync(ledgerId, details, transaction) : _ledgerRepository.InsertDetailsAsync(ledgerId, details);
 
+        /// <summary>
+        /// 同じ日の利用を足す先にできる既存の台帳行か（Issue #837 / #1147 / #1723）
+        /// </summary>
+        /// <remarks>
+        /// 貸出中レコード・導入行（繰越）・受入のある行・備考のある行は足す先にしない。利用者が一致する行に限る
+        /// （異なる職員が同じ日に同じカードを使った場合は別の行）。<see cref="CreateUsageLedgersAsync"/> と、
+        /// カードの履歴からの取り込みの操作ログの「変更前」を集める対象（Issue #2293）が共有する。
+        /// </remarks>
+        internal static bool IsSameDayMergeTarget(Ledger ledger, string? staffName) =>
+            !ledger.IsLentRecord && !ledger.IsCarryover && ledger.Income == 0
+            && string.IsNullOrEmpty(ledger.Note)
+            && ledger.StaffName == staffName;
+
         private async Task<List<Ledger>> CreateUsageLedgersAsync(
             string cardIdm, string? staffIdm, string? staffName, List<LedgerDetail> details, bool skipDuplicateCheck = false,
             SQLiteTransaction? transaction = null)
@@ -1312,30 +1347,7 @@ namespace ICCardManager.Services
             // 仮想タッチの場合はスキップ（物理カード読み取りではないため重複は発生しない）
             if (!skipDuplicateCheck)
             {
-                // 最も古い履歴の日付を基準に既存データを取得
-                var oldestDate = details
-                    .Where(d => d.UseDate.HasValue)
-                    .Select(d => d.UseDate!.Value)
-                    .DefaultIfEmpty(DateTime.Today)
-                    .Min();
-
-                var existingKeys = await _ledgerRepository.GetExistingDetailKeysAsync(cardIdm, oldestDate).ConfigureAwait(false);
-
-                if (existingKeys.Count > 0)
-                {
-                    var originalCount = details.Count;
-                    details = details
-                        .Where(d => !existingKeys.Contains((d.UseDate, d.Balance, d.IsCharge)))
-                        .ToList();
-
-                    var removedCount = originalCount - details.Count;
-                    if (removedCount > 0)
-                    {
-                        _logger.LogInformation(
-                            "LendingService: 重複履歴を除外しました（除外件数={RemovedCount}, 残り件数={RemainingCount}）",
-                            removedCount, details.Count);
-                    }
-                }
+                details = await ExcludeAlreadyRecordedDetailsAsync(cardIdm, details).ConfigureAwait(false);
 
                 if (details.Count == 0)
                 {
@@ -1462,9 +1474,7 @@ namespace ICCardManager.Services
                 {
                     var existingLedgers = await _ledgerRepository.GetByDateRangeAsync(cardIdm, date, date).ConfigureAwait(false);
                     existingUsageLedgers = existingLedgers
-                        .Where(l => !l.IsLentRecord && !l.IsCarryover && l.Income == 0
-                                    && string.IsNullOrEmpty(l.Note)
-                                    && l.StaffName == staffName)  // Issue #1147: 同一利用者のみ統合
+                        .Where(l => IsSameDayMergeTarget(l, staffName))
                         .OrderByDescending(l => l.Balance)  // 残高降順（高い=古い）
                         .ToList();
                 }

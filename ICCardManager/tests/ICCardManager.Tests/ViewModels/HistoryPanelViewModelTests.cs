@@ -2572,4 +2572,236 @@ public class HistoryPanelViewModelTests : IDisposable
     }
 
     #endregion
+
+    #region カードの履歴からの取り込み（Issue #2293）
+
+    private const string MismatchCardIdm = "07FE112233445566";
+
+    private static IcCard MismatchCard(bool isLent = false) =>
+        new() { CardIdm = MismatchCardIdm, CardType = "はやかけん", CardNumber = "H-001", IsLent = isLent };
+
+    [Fact]
+    public async Task 残額の食い違い警告から貸出中でないカードの履歴を開くと取り込みを案内すること()
+    {
+        await _history.ShowCardHistoryForBalanceMismatchAsync(MismatchCard());
+
+        _history.IsHistoryVisible.Should().BeTrue();
+        _history.IsCardHistoryImportOffered.Should().BeTrue();
+        _history.ImportFromCardHistoryCommand.CanExecute(null).Should().BeTrue();
+        _history.CardHistoryImportOfferMessageText.Should().Be(HistoryPanelViewModel.CardHistoryImportOfferMessage);
+    }
+
+    [Fact]
+    public async Task 貸出中のカードには取り込みを案内しないこと()
+    {
+        await _history.ShowCardHistoryForBalanceMismatchAsync(MismatchCard(isLent: true));
+
+        _history.IsHistoryVisible.Should().BeTrue("履歴は開く");
+        _history.IsCardHistoryImportOffered.Should().BeFalse("貸出中のカードは返却が利用履歴を記録する");
+        _history.ImportFromCardHistoryCommand.CanExecute(null).Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task 運用から外れたカードには取り込みを案内しないこと()
+    {
+        var refunded = MismatchCard();
+        refunded.IsRefunded = true;
+
+        await _history.ShowCardHistoryForBalanceMismatchAsync(refunded);
+
+        _history.IsCardHistoryImportOffered.Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task 他の経路で開き直すと取り込みの案内を取り下げること()
+    {
+        await _history.ShowCardHistoryForBalanceMismatchAsync(MismatchCard());
+
+        await _history.ShowCardHistoryAsync(MismatchCard());
+
+        _history.IsCardHistoryImportOffered.Should().BeFalse(
+            "案内するのは警告のクリックで開いた直後だけ（待機中のタッチ等で同じカードを開き直したときも出さない）");
+        _history.ImportFromCardHistoryCommand.CanExecute(null).Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task 履歴を閉じると取り込みの案内を取り下げること()
+    {
+        await _history.ShowCardHistoryForBalanceMismatchAsync(MismatchCard());
+
+        _history.CloseHistory();
+
+        _history.IsCardHistoryImportOffered.Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task 取り込んだ後は再読み込み_ダッシュボード_食い違いの判定し直し_警告の順に進めること()
+    {
+        await _history.ShowCardHistoryForBalanceMismatchAsync(MismatchCard());
+        _host.Calls.Clear();
+        _host.MismatchRemainsAfterReevaluation = false;
+
+        await _history.CompleteCardHistoryImportAsync(MismatchCardIdm, new CardHistoryImportOutcome(
+            hasImported: true,
+            recordedLedgers: new[] { new Ledger { Id = 10, CardIdm = MismatchCardIdm, Summary = "鉄道（博多～天神）" } },
+            actualBalance: 4580));
+
+        // 処理中表示（履歴の再読み込みが開く）は順序の表明から除く
+        _host.Calls.Where(c => c != RecordingHistoryPanelHost.BeginBusyCall).Should().Equal(
+            RecordingHistoryPanelHost.RefreshDashboardCall,
+            RecordingHistoryPanelHost.ReevaluateCardBalanceMismatchCall,
+            RecordingHistoryPanelHost.CheckWarningsCall);
+        _host.MismatchReevaluations.Should().Equal((MismatchCardIdm, 4580));
+        _history.IsCardHistoryImportOffered.Should().BeFalse("食い違いが解消したら案内を取り下げる");
+        _ledgerRepositoryMock.Verify(r => r.GetPagedAsync(
+            MismatchCardIdm, It.IsAny<DateTime>(), It.IsAny<DateTime>(), It.IsAny<int>(), It.IsAny<int>()),
+            Times.AtLeast(2), "開いたときと、取り込んだ後の再読み込み");
+        _navigationServiceMock.Verify(n => n.ShowDialogAsync(It.IsAny<Func<ICCardManager.Views.Dialogs.BusStopInputDialog, Task>>()),
+            Times.Never, "バス利用の行が無ければバス停名の入力へ進まない");
+    }
+
+    [Fact]
+    public async Task 取り込んでも食い違いが残れば案内を残すこと()
+    {
+        await _history.ShowCardHistoryForBalanceMismatchAsync(MismatchCard());
+        _host.MismatchRemainsAfterReevaluation = true;
+
+        await _history.CompleteCardHistoryImportAsync(MismatchCardIdm, new CardHistoryImportOutcome(
+            true, new[] { new Ledger { Id = 10, CardIdm = MismatchCardIdm, Summary = "鉄道（博多～天神）" } }, 4000));
+
+        _history.IsCardHistoryImportOffered.Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task 取り込んだ行にバス利用があればバス停名の入力へ進むこと()
+    {
+        await _history.ShowCardHistoryForBalanceMismatchAsync(MismatchCard());
+        var busLedger = new Ledger
+        {
+            Id = 11,
+            CardIdm = MismatchCardIdm,
+            Summary = SummaryGenerator.FormatBusSummary(SummaryGenerator.BusPlaceholder),
+        };
+
+        await _history.CompleteCardHistoryImportAsync(MismatchCardIdm, new CardHistoryImportOutcome(
+            true, new[] { new Ledger { Id = 10, CardIdm = MismatchCardIdm, Summary = "鉄道（博多～天神）" }, busLedger }, 4580));
+
+        _navigationServiceMock.Verify(n => n.ShowDialogAsync(It.IsAny<Func<ICCardManager.Views.Dialogs.BusStopInputDialog, Task>>()),
+            Times.Once, "返却と同じく、バス利用を含む行のバス停名を入力させる");
+    }
+
+    [Fact]
+    public async Task 取り込まずに閉じても_読み取っていれば実残額で判定し直し_警告の再判定はしないこと()
+    {
+        await _history.ShowCardHistoryForBalanceMismatchAsync(MismatchCard());
+        _host.Calls.Clear();
+        _host.MismatchRemainsAfterReevaluation = true;
+
+        await _history.CompleteCardHistoryImportAsync(MismatchCardIdm, new CardHistoryImportOutcome(
+            hasImported: false, recordedLedgers: Array.Empty<Ledger>(), actualBalance: 4580));
+
+        _host.Calls.Should().Equal(RecordingHistoryPanelHost.ReevaluateCardBalanceMismatchCall);
+        _history.IsCardHistoryImportOffered.Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task 表示期間より前の行を取り込んだらその月の1日から開き直し_案内を保つこと()
+    {
+        // 前月以前の利用を取り込むと、今の表示期間のままでは記録した行が見えない
+        _cardRepositoryMock.Setup(r => r.GetByIdmAsync(MismatchCardIdm, It.IsAny<bool>())).ReturnsAsync(MismatchCard());
+        await _history.ShowCardHistoryForBalanceMismatchAsync(MismatchCard());
+        var today = DateTime.Today;
+        var twoMonthsAgo = new DateTime(today.Year, today.Month, 1).AddMonths(-2).AddDays(14);
+        _host.MismatchRemainsAfterReevaluation = true;
+
+        await _history.CompleteCardHistoryImportAsync(MismatchCardIdm, new CardHistoryImportOutcome(
+            true, new[] { new Ledger { Id = 10, CardIdm = MismatchCardIdm, Date = twoMonthsAgo, Summary = "鉄道（博多～天神）" } }, 4000));
+
+        _history.HistoryFromDate.Should().Be(new DateTime(twoMonthsAgo.Year, twoMonthsAgo.Month, 1),
+            "最も古い取り込んだ行の月の 1 日から（日付単位ではなく月単位。#1907）");
+        _history.HistoryCard!.CardIdm.Should().Be(MismatchCardIdm);
+        _history.IsCardHistoryImportOffered.Should().BeTrue("開き直しても、食い違いが残る間は案内を保つ");
+    }
+
+    [Fact]
+    public async Task 表示期間の中の行を取り込んだら期間を変えずに読み直すこと()
+    {
+        await _history.ShowCardHistoryForBalanceMismatchAsync(MismatchCard());
+        var shownFrom = _history.HistoryFromDate;
+
+        await _history.CompleteCardHistoryImportAsync(MismatchCardIdm, new CardHistoryImportOutcome(
+            true, new[] { new Ledger { Id = 10, CardIdm = MismatchCardIdm, Date = DateTime.Today, Summary = "鉄道（博多～天神）" } }, 4000));
+
+        _history.HistoryFromDate.Should().Be(shownFrom);
+        _cardRepositoryMock.Verify(r => r.GetByIdmAsync(It.IsAny<string>(), It.IsAny<bool>()), Times.Never,
+            "開き直さない（期間内なので読み直すだけ）");
+    }
+
+    [Fact]
+    public async Task 前の月を表示したまま今月の行を取り込んだら取り込んだ月から開き直すこと()
+    {
+        // 月送りでは案内を取り下げないので、前の月を表示したまま取り込める（後ろへはみ出す形）
+        _cardRepositoryMock.Setup(r => r.GetByIdmAsync(MismatchCardIdm, It.IsAny<bool>())).ReturnsAsync(MismatchCard());
+        await _history.ShowCardHistoryForBalanceMismatchAsync(MismatchCard());
+        await _history.HistorySetLastMonth();
+        _history.IsCardHistoryImportOffered.Should().BeTrue("前提: 月送りでは案内を取り下げない");
+        var today = DateTime.Today;
+        _host.MismatchRemainsAfterReevaluation = true;
+
+        await _history.CompleteCardHistoryImportAsync(MismatchCardIdm, new CardHistoryImportOutcome(
+            true, new[] { new Ledger { Id = 10, CardIdm = MismatchCardIdm, Date = today, Summary = "鉄道（博多～天神）" } }, 4000));
+
+        _history.HistoryFromDate.Should().Be(new DateTime(today.Year, today.Month, 1));
+        _history.HistoryToDate.Should().Be(today, "取り込んだ行が表示期間に入ること");
+        _history.IsCardHistoryImportOffered.Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task 記録した行が無くても取り込みを終えたら読み直して警告を検査し直すこと()
+    {
+        // 一覧を見ている間に返却・他のパソコンの取り込みで記録されていた。その記録を画面に見せる
+        await _history.ShowCardHistoryForBalanceMismatchAsync(MismatchCard());
+        _host.Calls.Clear();
+        _host.MismatchRemainsAfterReevaluation = false;
+        _ledgerRepositoryMock.Invocations.Clear();
+
+        await _history.CompleteCardHistoryImportAsync(MismatchCardIdm, new CardHistoryImportOutcome(
+            hasImported: false, recordedLedgers: Array.Empty<Ledger>(), actualBalance: 4580, completed: true));
+
+        _ledgerRepositoryMock.Verify(r => r.GetPagedAsync(
+            MismatchCardIdm, It.IsAny<DateTime>(), It.IsAny<DateTime>(), It.IsAny<int>(), It.IsAny<int>()), Times.AtLeastOnce());
+        _host.Calls.Where(c => c != RecordingHistoryPanelHost.BeginBusyCall).Should().Equal(
+            RecordingHistoryPanelHost.RefreshDashboardCall,
+            RecordingHistoryPanelHost.ReevaluateCardBalanceMismatchCall,
+            RecordingHistoryPanelHost.CheckWarningsCall);
+        _navigationServiceMock.Verify(n => n.ShowDialogAsync(It.IsAny<Func<ICCardManager.Views.Dialogs.BusStopInputDialog, Task>>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task カードが取り込みの対象でなくなっていたら食い違いが残っても案内を取り下げること()
+    {
+        // 一覧の段階で貸出中と分かった（貸出中なら返却が記録する。押しても同じ理由で断られる）
+        await _history.ShowCardHistoryForBalanceMismatchAsync(MismatchCard());
+        _host.MismatchRemainsAfterReevaluation = true;
+
+        await _history.CompleteCardHistoryImportAsync(MismatchCardIdm, new CardHistoryImportOutcome(
+            hasImported: false, recordedLedgers: Array.Empty<Ledger>(), actualBalance: 4580, cardNoLongerEligible: true));
+
+        _history.IsCardHistoryImportOffered.Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task 読み取らずに閉じたら何もしないこと()
+    {
+        await _history.ShowCardHistoryForBalanceMismatchAsync(MismatchCard());
+        _host.Calls.Clear();
+
+        await _history.CompleteCardHistoryImportAsync(MismatchCardIdm, new CardHistoryImportOutcome(
+            hasImported: false, recordedLedgers: Array.Empty<Ledger>(), actualBalance: null));
+
+        _host.Calls.Should().BeEmpty("実残額が無いまま「解消した」と判断しない（#1908）");
+        _history.IsCardHistoryImportOffered.Should().BeTrue();
+    }
+
+    #endregion
 }

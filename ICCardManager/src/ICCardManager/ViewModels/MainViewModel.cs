@@ -1,3 +1,4 @@
+#nullable enable
 using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
@@ -450,6 +451,9 @@ public partial class MainViewModel : ViewModelBase, IHistoryPanelHost
     Task IHistoryPanelHost.CheckWarningsAsync() => CheckWarningsAsync();
 
     Task IHistoryPanelHost.RefreshLentCardsAsync() => RefreshLentCardsAsync();
+
+    Task<bool> IHistoryPanelHost.ReevaluateCardBalanceMismatchAsync(string cardIdm, int actualBalance)
+        => ReevaluateCardBalanceMismatchAsync(cardIdm, actualBalance);
 
     #endregion
 

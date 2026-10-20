@@ -386,6 +386,8 @@ public partial class HistoryPanelViewModel : ObservableObject
     {
         // Issue #1907: どの経路で開いても、前の返却確認の状態（バナー・強調・操作済みの印）は引き継がない
         EndReturnHistoryReview();
+        // Issue #2293: 取り込みの案内も同じ（案内するのは食い違い警告から開いた直後だけ。呼び出し元が開いた後に立てる）
+        EndCardHistoryImportOffer();
         if (recentlyRecordedLedgerIds != null)
         {
             _recentlyRecordedLedgerIds.UnionWith(recentlyRecordedLedgerIds);
@@ -435,6 +437,7 @@ public partial class HistoryPanelViewModel : ObservableObject
         HistoryLedgers.Clear();
         _balanceInconsistencies.Clear();
         EndReturnHistoryReview();
+        EndCardHistoryImportOffer();
     }
 
     /// <summary>

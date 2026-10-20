@@ -607,7 +607,13 @@ namespace ICCardManager
 #if DEBUG
             // Issue #640: HybridCardReader で物理カードリーダー（PaSoRi + felicalib）をラップし、
             // 仮想タッチ機能も利用可能にする
-            services.AddSingleton<HybridCardReader>(sp => new HybridCardReader(CreateCardReader(sp)));
+            services.AddSingleton<HybridCardReader>(sp =>
+            {
+                var hybridReader = new HybridCardReader(CreateCardReader(sp));
+                // Issue #2293: UI テストが仮想タッチしたカードの残額・利用履歴を渡せるようにする（環境変数が無ければ何もしない）
+                DebugCardData.ApplyFromEnvironment(hybridReader, Environment.GetEnvironmentVariable);
+                return hybridReader;
+            });
             services.AddSingleton<ICardReader>(sp => sp.GetRequiredService<HybridCardReader>());
 #else
             // 物理カードリーダー（PaSoRi + felicalib）で FelicaCardReader を使用
@@ -642,6 +648,8 @@ namespace ICCardManager
             services.AddTransient<IncompleteBusStopViewModel>();
             services.AddTransient<CarryoverDataLossViewModel>();
             services.AddTransient<CarryoverRecoveryViewModel>();
+            // Issue #2293: カードの履歴からの取り込み（残額の食い違い警告から開いた履歴で使う）
+            services.AddTransient<CardHistoryImportViewModel>();
             services.AddTransient<LedgerRowEditViewModel>();
             services.AddTransient<ReportPreflightViewModel>();
             services.AddTransient<ConnectionDiagnosticsViewModel>();
@@ -672,6 +680,7 @@ namespace ICCardManager
             services.AddTransient<Views.Dialogs.IncompleteBusStopDialog>();
             services.AddTransient<Views.Dialogs.CarryoverDataLossDialog>();
             services.AddTransient<Views.Dialogs.CarryoverRecoveryDialog>();
+            services.AddTransient<Views.Dialogs.CardHistoryImportDialog>();
             services.AddTransient<Views.Dialogs.LedgerRowEditDialog>();
             services.AddTransient<Views.Dialogs.CardTypeSelectionDialog>();
             services.AddTransient<Views.Dialogs.ConnectionDiagnosticsDialog>();

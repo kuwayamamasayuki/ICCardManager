@@ -34,6 +34,7 @@ internal sealed class RecordingHistoryPanelHost : IHistoryPanelHost
     public const string RefreshDashboardCall = nameof(IHistoryPanelHost.RefreshDashboardAsync);
     public const string CheckWarningsCall = nameof(IHistoryPanelHost.CheckWarningsAsync);
     public const string RefreshLentCardsCall = nameof(IHistoryPanelHost.RefreshLentCardsAsync);
+    public const string ReevaluateCardBalanceMismatchCall = nameof(IHistoryPanelHost.ReevaluateCardBalanceMismatchAsync);
 
     /// <summary>親が持つ警告エリアの代役</summary>
     public ObservableCollection<WarningItem> WarningMessages { get; } = new();
@@ -52,6 +53,12 @@ internal sealed class RecordingHistoryPanelHost : IHistoryPanelHost
     /// 共有フォルダーの切断・DB ロックのように、履歴の再読込とダッシュボード更新が同じ原因で失敗する状況の再現用（#1727 / #1954）。
     /// </summary>
     public Exception? RefreshDashboardFailure { get; set; }
+
+    /// <summary><see cref="ReevaluateCardBalanceMismatchAsync"/> へ渡された（カード, 実残額）</summary>
+    public List<(string CardIdm, int ActualBalance)> MismatchReevaluations { get; } = new();
+
+    /// <summary><see cref="ReevaluateCardBalanceMismatchAsync"/> が返す値（判定し直した後も食い違いが残るか）</summary>
+    public bool MismatchRemainsAfterReevaluation { get; set; }
 
     public int CountOf(string call) => Calls.Count(c => c == call);
 
@@ -96,6 +103,13 @@ internal sealed class RecordingHistoryPanelHost : IHistoryPanelHost
     {
         Calls.Add(RefreshLentCardsCall);
         return Task.CompletedTask;
+    }
+
+    public Task<bool> ReevaluateCardBalanceMismatchAsync(string cardIdm, int actualBalance)
+    {
+        Calls.Add(ReevaluateCardBalanceMismatchCall);
+        MismatchReevaluations.Add((cardIdm, actualBalance));
+        return Task.FromResult(MismatchRemainsAfterReevaluation);
     }
 
     private sealed class Scope : IDisposable
