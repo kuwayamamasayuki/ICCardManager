@@ -744,6 +744,17 @@ namespace ICCardManager.Infrastructure.CardReader
         }
 
         /// <summary>
+        /// <paramref name="sender"/> が現役のヘルスチェックタイマーかを返す（Issue #2298）。
+        /// </summary>
+        private bool IsCurrentHealthCheckTimer(object sender)
+        {
+            lock (_lifecycleLock)
+            {
+                return ReferenceEquals(sender, _healthCheckTimer);
+            }
+        }
+
+        /// <summary>
         /// 起動時に PaSoRi が見つからなかったときの案内（Issue #1428 / #2298）。
         /// </summary>
         /// <remarks>
@@ -844,6 +855,14 @@ namespace ICCardManager.Infrastructure.CardReader
                         StartPollingTimer();
                         _isReading = true;
                     }
+                }
+
+                // 判定から通知までの間に停止・再接続が割り込むと、遅れた通知が新しい状態を上書きする
+                // （再接続が Connected を通知した後に、古い確認の Disconnected が届く等）。通知の直前にも現役のタイマーかを確かめる。
+                // 通知そのものはロックの外で行う（購読者をロックの内側で呼ばない）。
+                if (action != HealthCheckAction.None && !IsCurrentHealthCheckTimer(sender))
+                {
+                    return;
                 }
 
                 switch (action)

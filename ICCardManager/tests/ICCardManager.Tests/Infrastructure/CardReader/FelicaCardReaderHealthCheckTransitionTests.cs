@@ -176,6 +176,27 @@ public class FelicaCardReaderHealthCheckTransitionTests
             "読み取りを始めるときはポーリングを起動する。起動せずに接続中と通知するとカードを読まない");
         body.Should().Contain("ReferenceEquals(sender, _healthCheckTimer)",
             "停止済みのタイマーから遅れて届いたコールバックで読み取りを始めない");
+
+        // 古いタイマーの確認は判定より前に置く（判定の後ろでは、古いコールバックが読み取りを始めてしまう）
+        var guardIndex = body.IndexOf("ReferenceEquals(sender, _healthCheckTimer)", System.StringComparison.Ordinal);
+        var decideIndex = body.IndexOf("DecideHealthCheckAction(", System.StringComparison.Ordinal);
+        guardIndex.Should().BeLessThan(decideIndex, "停止済みのタイマーを無視する確認が、判定より前にあること");
+
+        // ポーリングの起動は「読み取りを始める」判定の内側に限る（毎回起動するとポーリングを 10 秒ごとに作り直す）
+        var startReadingBranch = body.IndexOf("action == HealthCheckAction.StartReading", System.StringComparison.Ordinal);
+        startReadingBranch.Should().BeGreaterThan(0, "読み取りを始める判定の分岐が見つからない");
+        var pollingIndex = body.IndexOf("StartPollingTimer()", System.StringComparison.Ordinal);
+        pollingIndex.Should().BeGreaterThan(startReadingBranch, "ポーリングの起動が読み取りを始める分岐より前にある");
+        body.IndexOf("}", startReadingBranch, System.StringComparison.Ordinal).Should().BeGreaterThan(pollingIndex,
+            "ポーリングの起動が読み取りを始める分岐の内側にあること");
+        body.IndexOf("StartPollingTimer()", pollingIndex + 1, System.StringComparison.Ordinal).Should().Be(-1,
+            "ポーリングを起動するのは読み取りを始める分岐の 1 か所だけ");
+
+        // 判定から通知までの間に再接続が割り込んだ場合に備え、通知の直前にも現役のタイマーかを確かめる
+        var recheckIndex = body.IndexOf("IsCurrentHealthCheckTimer(sender)", System.StringComparison.Ordinal);
+        recheckIndex.Should().BeGreaterThan(pollingIndex, "通知の直前の再確認が無い");
+        body.IndexOf("switch (action)", System.StringComparison.Ordinal).Should().BeGreaterThan(recheckIndex,
+            "再確認は通知（switch）より前に置く");
     }
 
     private static string ExtractBody(string signatureMarker)
