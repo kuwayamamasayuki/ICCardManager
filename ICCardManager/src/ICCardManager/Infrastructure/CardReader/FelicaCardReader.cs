@@ -1,3 +1,4 @@
+#nullable enable
 using System;
 using System.Collections.Generic;
 using System.Globalization;
@@ -58,8 +59,18 @@ namespace ICCardManager.Infrastructure.CardReader
         /// </summary>
         private readonly object _lastReadLock = new object();
 
-        private Timer _pollingTimer;
-        private Timer _healthCheckTimer;
+        /// <summary>
+        /// タイマーの起動・停止と読み取り中フラグを直列化するロックオブジェクト（Issue #2298）。
+        /// </summary>
+        /// <remarks>
+        /// ヘルスチェックはタイマーのスレッドからポーリングを起動し得るため、
+        /// 停止・再接続・破棄と同時に走ると、停止したはずのポーリングが生き残る。
+        /// felicalib へのアクセス（<see cref="_felicaLock"/>）とは別に持ち、このロックの内側では felicalib を呼ばない。
+        /// </remarks>
+        private readonly object _lifecycleLock = new object();
+
+        private Timer? _pollingTimer;
+        private Timer? _healthCheckTimer;
         private bool _isReading;
         private bool _disposed;
         private CardReaderConnectionState _connectionState = CardReaderConnectionState.Disconnected;
@@ -72,7 +83,7 @@ namespace ICCardManager.Infrastructure.CardReader
         /// <summary>
         /// 最後に読み取ったカードのIDm
         /// </summary>
-        private string _lastReadIdm;
+        private string? _lastReadIdm;
 
         /// <summary>
         /// 最後にカードを読み取った時刻
@@ -117,9 +128,9 @@ namespace ICCardManager.Infrastructure.CardReader
         /// </summary>
         private const int WildcardSystemCode = 0xFFFF;
 
-        public event EventHandler<CardReadEventArgs> CardRead;
-        public event EventHandler<Exception> Error;
-        public event EventHandler<ConnectionStateChangedEventArgs> ConnectionStateChanged;
+        public event EventHandler<CardReadEventArgs>? CardRead;
+        public event EventHandler<Exception>? Error;
+        public event EventHandler<ConnectionStateChangedEventArgs>? ConnectionStateChanged;
 
         public bool IsReading => _isReading;
         public CardReaderConnectionState ConnectionState => _connectionState;
@@ -160,22 +171,31 @@ namespace ICCardManager.Infrastructure.CardReader
                     // DLL は存在しても PaSoRi が接続されていない場合は Disconnected として確実に通知する。
                     if (!IsReaderConnected())
                     {
-                        _logger.LogWarning("FelicaCardReader: PaSoRi が見つかりません");
-                        SetConnectionStateForceNotify(
-                            CardReaderConnectionState.Disconnected,
-                            "PaSoRi が見つかりません。USB 接続を確認して再接続ボタンを押してください。");
+                        _logger.LogWarning("FelicaCardReader: PaSoRi が見つかりません。接続を監視し、接続されたらカード読み取りを開始します");
+
+                        // Issue #2298: 未接続でも接続の監視（ヘルスチェック）だけは始める。
+                        // 始めないと、後から接続しても「再接続」ボタンを押すまで認識されない。
+                        // ポーリングは接続を検出した時点でヘルスチェックが起動する（DecideHealthCheckAction）。
+                        lock (_lifecycleLock)
+                        {
+                            StopPollingTimer();
+                            _isReading = false;
+                            StartHealthCheckTimer();
+                        }
+
+                        SetConnectionStateForceNotify(CardReaderConnectionState.Disconnected, ReaderNotFoundMessage);
                         return;
                     }
 
                     _logger.LogInformation("FelicaCardReader: カード読み取りを開始します");
 
-                    // ポーリングタイマーを開始
-                    StartPollingTimer();
+                    lock (_lifecycleLock)
+                    {
+                        StartPollingTimer();
+                        StartHealthCheckTimer();
+                        _isReading = true;
+                    }
 
-                    // ヘルスチェックタイマーを開始
-                    StartHealthCheckTimer();
-
-                    _isReading = true;
                     SetConnectionStateForceNotify(CardReaderConnectionState.Connected);
                 }
                 catch (Exception ex)
@@ -196,10 +216,13 @@ namespace ICCardManager.Infrastructure.CardReader
         {
             return Task.Run(() =>
             {
-                StopPollingTimer();
-                StopHealthCheckTimer();
+                lock (_lifecycleLock)
+                {
+                    StopPollingTimer();
+                    StopHealthCheckTimer();
+                    _isReading = false;
+                }
 
-                _isReading = false;
                 _lastReadIdm = null;
                 SetConnectionState(CardReaderConnectionState.Disconnected);
 
@@ -303,7 +326,7 @@ namespace ICCardManager.Infrastructure.CardReader
             // FelicaCardReader.ReadHistoryAsyncは内部でtry/catchして空リストを返すため、
             // ここでは「IDmが一致しない」「全く読み取れなかった」場合をエラー扱いにはしない
             // （既存挙動の維持を優先）。実装の主目的はインターフェース遵守。
-            CardReaderException capturedError = null;
+            CardReaderException? capturedError = null;
             EventHandler<System.Exception> handler = (s, e) =>
             {
                 if (e is CardReaderException cre)
@@ -508,7 +531,7 @@ namespace ICCardManager.Infrastructure.CardReader
         /// 表示層 (<c>MainWindow.xaml</c>) のデフォルト Setter「切断」によるフォールバックと併用する。
         /// internal 公開でテストから直接検証可能にする。
         /// </remarks>
-        internal static bool IsReaderUnavailableException(Exception ex)
+        internal static bool IsReaderUnavailableException(Exception? ex)
         {
             if (ex is DllNotFoundException)
             {
@@ -516,7 +539,7 @@ namespace ICCardManager.Infrastructure.CardReader
             }
 
             var message = ex?.Message;
-            if (string.IsNullOrEmpty(message))
+            if (message is null || string.IsNullOrEmpty(message))
             {
                 return false;
             }
@@ -572,7 +595,7 @@ namespace ICCardManager.Infrastructure.CardReader
             {
                 _isPolling = true;
 
-                string idm;
+                string? idm;
 
                 // FelicaUtility へのアクセスはすべてロックで保護
                 lock (_felicaLock)
@@ -591,7 +614,7 @@ namespace ICCardManager.Infrastructure.CardReader
                     idm = GetIdmString(idmBytes);
                 }
 
-                if (string.IsNullOrEmpty(idm))
+                if (idm is null || string.IsNullOrEmpty(idm))
                 {
                     _cardWasLifted = true;
                     return;
@@ -721,6 +744,80 @@ namespace ICCardManager.Infrastructure.CardReader
         }
 
         /// <summary>
+        /// <paramref name="sender"/> が現役のヘルスチェックタイマーかを返す（Issue #2298）。
+        /// </summary>
+        private bool IsCurrentHealthCheckTimer(object sender)
+        {
+            lock (_lifecycleLock)
+            {
+                return ReferenceEquals(sender, _healthCheckTimer);
+            }
+        }
+
+        /// <summary>
+        /// 起動時に PaSoRi が見つからなかったときの案内（Issue #1428 / #2298）。
+        /// </summary>
+        /// <remarks>
+        /// メイン画面の警告エリアに「カードリーダー切断: 」に続けて表示される。
+        /// 未接続でもヘルスチェックが接続を監視しているので、接続すれば再接続ボタンを押さなくても認識される。
+        /// </remarks>
+        internal const string ReaderNotFoundMessage =
+            "PaSoRi が見つかりません。USB で接続してください（接続すると自動で認識します）。";
+
+        /// <summary>
+        /// ヘルスチェック 1 回の結果として行う処理（Issue #2298）。
+        /// </summary>
+        internal enum HealthCheckAction
+        {
+            /// <summary>状態を変えない</summary>
+            None,
+
+            /// <summary>接続中だったカードリーダーが見えなくなったので切断として通知する</summary>
+            MarkDisconnected,
+
+            /// <summary>読み取り中に切断されていたカードリーダーが見えるようになったので回復として通知する</summary>
+            MarkRecovered,
+
+            /// <summary>読み取りを始めていない（起動時に未接続だった）カードリーダーが見えるようになったので、ポーリングを起動して接続中として通知する</summary>
+            StartReading,
+        }
+
+        /// <summary>
+        /// ヘルスチェックの結果から、行う処理を決める（Issue #2298）。
+        /// </summary>
+        /// <param name="isAvailable">felicalib が読み込め、PaSoRi が接続されているか</param>
+        /// <param name="state">現在通知している接続状態</param>
+        /// <param name="isReading">ポーリングを起動済みか（起動時に未接続だった場合は false）</param>
+        /// <remarks>
+        /// <para>
+        /// 起動時に未接続だった場合はポーリングが動いていないため、使用中の抜き差し（<see cref="HealthCheckAction.MarkRecovered"/>）と
+        /// 同じく Connected を通知するだけでは「接続中」なのにカードを読まない。ポーリングを起動する必要があるのはこの組だけで、
+        /// 読み取り中に起動し直すとポーリングを作り直すことになる。
+        /// </para>
+        /// <para>
+        /// 再接続中（<see cref="CardReaderConnectionState.Reconnecting"/>）は再接続の処理が状態を決めるため、ここでは書き換えない。
+        /// 実機 felicalib に依存せず検証できるよう純粋関数として切り出している（<see cref="ShouldLogHealthCheckFailure"/> と同じ形）。
+        /// </para>
+        /// </remarks>
+        internal static HealthCheckAction DecideHealthCheckAction(
+            bool isAvailable, CardReaderConnectionState state, bool isReading)
+        {
+            if (!isAvailable)
+            {
+                return state == CardReaderConnectionState.Connected
+                    ? HealthCheckAction.MarkDisconnected
+                    : HealthCheckAction.None;
+            }
+
+            if (state != CardReaderConnectionState.Disconnected)
+            {
+                return HealthCheckAction.None;
+            }
+
+            return isReading ? HealthCheckAction.MarkRecovered : HealthCheckAction.StartReading;
+        }
+
+        /// <summary>
         /// ヘルスチェックタイマーのイベントハンドラ
         /// </summary>
         private void OnHealthCheckTimerElapsed(object sender, ElapsedEventArgs e)
@@ -735,16 +832,55 @@ namespace ICCardManager.Infrastructure.CardReader
             {
                 // Issue #1428: DLL ロードと PaSoRi 物理接続を別々に判定し、
                 // 「DLL 不在」と「PaSoRi 未接続」を統一して切断扱いにする。
+                // felicalib を呼ぶ判定は _lifecycleLock の外で行う（ロックの内側で felicalib を待たない）。
                 var isAvailable = IsFelicaLibLoaded() && IsReaderConnected();
-                if (!isAvailable && _connectionState == CardReaderConnectionState.Connected)
+
+                HealthCheckAction action;
+                lock (_lifecycleLock)
                 {
-                    _logger.LogWarning("FelicaCardReader: 接続が失われました");
-                    SetConnectionState(CardReaderConnectionState.Disconnected, "接続が失われました");
+                    // Issue #2298: 停止済みのタイマーから遅れて届いたコールバックは無視する。
+                    // System.Timers.Timer は Stop() の後もキュー済みの Elapsed を配ることがあり、
+                    // 再接続（停止 → 開始）の途中で古いコールバックが読み取りを始めると、停止したはずのポーリングが生き残る。
+                    if (!ReferenceEquals(sender, _healthCheckTimer))
+                    {
+                        return;
+                    }
+
+                    action = DecideHealthCheckAction(isAvailable, _connectionState, _isReading);
+
+                    // Issue #2298: 起動時に未接続だった場合は、接続を検出した時点でポーリングを起動する。
+                    // 起動せずに Connected を通知すると「接続中」なのにカードを読まない状態になる。
+                    if (action == HealthCheckAction.StartReading)
+                    {
+                        StartPollingTimer();
+                        _isReading = true;
+                    }
                 }
-                else if (isAvailable && _connectionState == CardReaderConnectionState.Disconnected)
+
+                // 判定から通知までの間に停止・再接続が割り込むと、遅れた通知が新しい状態を上書きする
+                // （再接続が Connected を通知した後に、古い確認の Disconnected が届く等）。通知の直前にも現役のタイマーかを確かめる。
+                // 通知そのものはロックの外で行う（購読者をロックの内側で呼ばない）。
+                if (action != HealthCheckAction.None && !IsCurrentHealthCheckTimer(sender))
                 {
-                    _logger.LogInformation("FelicaCardReader: 接続が回復しました");
-                    SetConnectionState(CardReaderConnectionState.Connected, "接続が回復しました");
+                    return;
+                }
+
+                switch (action)
+                {
+                    case HealthCheckAction.MarkDisconnected:
+                        _logger.LogWarning("FelicaCardReader: 接続が失われました");
+                        SetConnectionState(CardReaderConnectionState.Disconnected, "接続が失われました");
+                        break;
+
+                    case HealthCheckAction.MarkRecovered:
+                        _logger.LogInformation("FelicaCardReader: 接続が回復しました");
+                        SetConnectionState(CardReaderConnectionState.Connected, "接続が回復しました");
+                        break;
+
+                    case HealthCheckAction.StartReading:
+                        _logger.LogInformation("FelicaCardReader: PaSoRi の接続を検出したため、カード読み取りを開始しました");
+                        SetConnectionState(CardReaderConnectionState.Connected, "カードリーダーの接続を検出しました");
+                        break;
                 }
 
                 // Issue #1819: 例外が止んだことも本番ログへ残す（失敗の Warning と対で調査できるようにする）。
@@ -780,7 +916,7 @@ namespace ICCardManager.Infrastructure.CardReader
         /// <summary>
         /// 接続状態を設定し、状態が変化した場合のみイベントを発火する。
         /// </summary>
-        private void SetConnectionState(CardReaderConnectionState state, string message = null)
+        private void SetConnectionState(CardReaderConnectionState state, string? message = null)
         {
             if (_connectionState == state)
             {
@@ -800,7 +936,7 @@ namespace ICCardManager.Infrastructure.CardReader
         /// あり、<see cref="SetConnectionState"/> では通知が抑止されてしまう。
         /// 起動時の初回確定通知に限り本メソッドを使用し、ViewModel に確実に状態を伝播させる。
         /// </remarks>
-        private void SetConnectionStateForceNotify(CardReaderConnectionState state, string message = null)
+        private void SetConnectionStateForceNotify(CardReaderConnectionState state, string? message = null)
         {
             _connectionState = state;
             _logger.LogDebug("FelicaCardReader: 接続状態確定 {State} ({Message})", state, message);
@@ -810,7 +946,7 @@ namespace ICCardManager.Infrastructure.CardReader
         /// <summary>
         /// IDm バイト配列を16進数文字列に変換
         /// </summary>
-        private static string GetIdmString(byte[] idmBytes)
+        private static string? GetIdmString(byte[]? idmBytes)
         {
             if (idmBytes == null || idmBytes.Length == 0)
             {
@@ -829,7 +965,7 @@ namespace ICCardManager.Infrastructure.CardReader
         /// 純粋関数部分は <see cref="FelicaHistoryBlockDecoder.Decode"/> に抽出されている。
         /// このメソッドは駅名解決サービスとロガー（Issue #942 のフォールバック診断）の責務を保持する。
         /// </remarks>
-        private LedgerDetail ParseHistoryData(byte[] currentData, byte[] previousData, CardType cardType)
+        private LedgerDetail? ParseHistoryData(byte[] currentData, byte[]? previousData, CardType cardType)
         {
             try
             {
@@ -891,8 +1027,11 @@ namespace ICCardManager.Infrastructure.CardReader
             {
                 if (disposing)
                 {
-                    StopPollingTimer();
-                    StopHealthCheckTimer();
+                    lock (_lifecycleLock)
+                    {
+                        StopPollingTimer();
+                        StopHealthCheckTimer();
+                    }
                 }
                 _disposed = true;
             }
