@@ -1,5 +1,7 @@
 #nullable enable
 
+using System.Diagnostics.CodeAnalysis;
+
 namespace ICCardManager.Infrastructure.Security
 {
     /// <summary>
@@ -58,9 +60,10 @@ namespace ICCardManager.Infrastructure.Security
         /// </summary>
         /// <param name="idm">生の IDm（16進16文字を想定）。null / 空はそのまま返す</param>
         /// <returns>マスク済み文字列（例: <c>0123********CDEF</c>）</returns>
-        public static string Mask(string idm)
+        [return: NotNullIfNotNull("idm")]
+        public static string? Mask(string? idm)
         {
-            if (string.IsNullOrEmpty(idm))
+            if (idm is null || string.IsNullOrEmpty(idm))
             {
                 return idm;
             }
