@@ -228,12 +228,16 @@
                 </CheckBox>
             </StackPanel>
 
-            <!-- 利用者 (_U) -->
+            <!-- 利用者 (_U)
+                 Issue #2300: 右の欄はコンボボックスの下に注記が出て高くなるため、ラベルは上端に置き、
+                 高さをコンボボックスに合わせてその中で縦中央に揃える（文字サイズの設定が変わっても行が揃う） -->
             <Label Grid.Row="5" Grid.Column="0"
                    Content="利用者(_U):"
                    Target="{Binding ElementName=StaffComboBox}"
                    FontSize="{DynamicResource BaseFontSize}"
-                   VerticalAlignment="Center"
+                   VerticalAlignment="Top"
+                   VerticalContentAlignment="Center"
+                   Height="{Binding ActualHeight, ElementName=StaffComboBox}"
                    Padding="0"
                    Margin="0,0,0,8"/>
             <!-- Issue #2300: 一覧に無い利用者を選択中は、その旨の注記をコンボボックスの下に出す -->

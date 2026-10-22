@@ -699,7 +699,7 @@ public class LedgerRowEditViewModelTests : IDisposable
     }
 
     /// <summary>
-    /// 氏名を持たず IDm だけが残る行も、表示用の「（氏名なし）」を氏名として書き込まず、IDm を残す
+    /// 氏名を持たず IDm だけが残る行も、表示用の選択肢名（「氏名なし（職員証 …、職員一覧にいません）」）を氏名として書き込まず、IDm を残す
     /// </summary>
     [Fact]
     public async Task SaveEdit_UnlistedStaffIdmWithoutName_PreservesIdmAndDoesNotWriteDisplayLabel()
@@ -707,7 +707,7 @@ public class LedgerRowEditViewModelTests : IDisposable
         await InitializeForEditWithStaffAsync(UnlistedStaffIdm, staffName: null);
 
         _viewModel.IsUnlistedStaffSelected.Should().BeTrue();
-        _viewModel.DisplayStaffNamePreview.Should().Be(ICCardManager.Common.StaffNameFormatter.Format(null, 0), "表示用の「（氏名なし）」を氏名欄のプレビューに出さない");
+        _viewModel.DisplayStaffNamePreview.Should().Be(ICCardManager.Common.StaffNameFormatter.Format(null, 0), "表示用の選択肢名を氏名欄のプレビューに出さない");
         await _viewModel.SaveCommand.ExecuteAsync(null);
 
         _ledgerRepoMock.Verify(r => r.UpdateAsync(It.Is<Ledger>(l =>

@@ -173,7 +173,7 @@ namespace ICCardManager.ViewModels
         /// <remarks>
         /// 氏名が無く貸出者 IDm だけが残る行は、誰の記録かを見分けられるよう職員証の IDm を添える。
         /// IDm は職員証の唯一の認証要素なので、生の値ではなく <see cref="IdmMasker.Mask"/> を通した値にする
-        /// （末尾 4 文字で個体を識別できる。#1940）。表示名は保存に使わない（保存は退避した行の値を書き戻す）。
+        /// （末尾 4 文字で個体を識別できる。#1940）。表示名は保存に使わない（この選択肢のまま保存するときは利用者の列に触れず、保存直前に読み直した行の値を残す）。
         /// </remarks>
         internal static string FormatUnlistedStaffLabel(string? staffName, string? lenderIdm)
         {
