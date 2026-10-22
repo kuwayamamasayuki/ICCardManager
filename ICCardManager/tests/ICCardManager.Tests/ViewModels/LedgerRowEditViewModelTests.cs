@@ -619,7 +619,7 @@ public class LedgerRowEditViewModelTests : IDisposable
 
         // Assert
         _viewModel.SelectedStaff.Should().NotBeNull();
-        _viewModel.SelectedStaff!.Name.Should().Be(UnlistedStaffName);
+        _viewModel.SelectedStaff!.Name.Should().Be(LedgerRowEditViewModel.FormatUnlistedStaffLabel(UnlistedStaffName, null));
         _viewModel.IsUnlistedStaffSelected.Should().BeTrue();
         _viewModel.StaffList.Should().HaveCount(3, "在籍職員 2 名＋この行の一覧に無い利用者 1 名");
         _viewModel.StaffList[0].Should().BeSameAs(_viewModel.SelectedStaff, "一覧に無い利用者は先頭に置く");
@@ -747,6 +747,42 @@ public class LedgerRowEditViewModelTests : IDisposable
         _ledgerRepoMock.Verify(r => r.UpdateAsync(It.Is<Ledger>(l =>
             l.StaffName == _staffB.Name && l.LenderIdm == _staffB.StaffIdm
         ), It.IsAny<SQLiteTransaction>()), Times.Once);
+    }
+
+    /// <summary>
+    /// 一覧に無い利用者 → 別の職員 → 一覧に無い利用者へ戻して保存すると、行に記録されていた値に戻る
+    /// </summary>
+    [Fact]
+    public async Task SaveEdit_UnlistedStaff_ReselectedAndBack_PreservesOriginalValues()
+    {
+        await InitializeForEditWithStaffAsync(UnlistedStaffIdm, UnlistedStaffName);
+        var unlisted = _viewModel.SelectedStaff;
+
+        _viewModel.SelectedStaff = _staffB;
+        _viewModel.SelectedStaff = unlisted;
+        _viewModel.IsUnlistedStaffSelected.Should().BeTrue();
+        await _viewModel.SaveCommand.ExecuteAsync(null);
+
+        _ledgerRepoMock.Verify(r => r.UpdateAsync(It.Is<Ledger>(l =>
+            l.StaffName == UnlistedStaffName && l.LenderIdm == UnlistedStaffIdm
+        ), It.IsAny<SQLiteTransaction>()), Times.Once);
+    }
+
+    /// <summary>
+    /// 一覧に無い利用者の表示名は、ドロップダウンで在籍職員と見分けられる目印を付ける。
+    /// 氏名が無く IDm だけの行は、マスクした職員証の IDm を添えて誰の記録か見分けられるようにし、生の IDm は出さない
+    /// </summary>
+    [Fact]
+    public void FormatUnlistedStaffLabel_MarksUnlistedAndMasksIdm()
+    {
+        var named = LedgerRowEditViewModel.FormatUnlistedStaffLabel(UnlistedStaffName, UnlistedStaffIdm);
+        named.Should().StartWith(UnlistedStaffName).And.Contain("職員一覧にいません");
+        named.Should().NotContain(UnlistedStaffIdm, "氏名があれば IDm は添えない");
+
+        var idmOnly = LedgerRowEditViewModel.FormatUnlistedStaffLabel(null, UnlistedStaffIdm);
+        idmOnly.Should().Contain(ICCardManager.Infrastructure.Security.IdmMasker.Mask(UnlistedStaffIdm))
+            .And.Contain("職員一覧にいません");
+        idmOnly.Should().NotContain(UnlistedStaffIdm, "職員証の IDm は認証要素なので生で表示しない");
     }
 
     /// <summary>

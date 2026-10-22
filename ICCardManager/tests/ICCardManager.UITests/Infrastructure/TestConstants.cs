@@ -494,9 +494,6 @@ namespace ICCardManager.UITests.Infrastructure
         [UiaName]
         public const string LedgerRowEditDeleteButton = "この履歴を削除";
 
-        /// <summary>履歴行の追加・修正ダイアログの利用者のコンボボックス。</summary>
-        [UiaName]
-        public const string LedgerRowEditStaffComboBox = "利用者を選択";
 
         /// <summary>履歴行の追加・修正ダイアログの「×」（利用者をクリア）ボタン。</summary>
         [UiaName]

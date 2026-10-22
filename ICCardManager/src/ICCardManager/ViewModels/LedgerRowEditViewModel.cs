@@ -11,6 +11,7 @@ using ICCardManager.Common;
 using ICCardManager.Data;
 using ICCardManager.Data.Repositories;
 using ICCardManager.Dtos;
+using ICCardManager.Infrastructure.Security;
 using ICCardManager.Models;
 using ICCardManager.Services;
 
@@ -170,6 +171,24 @@ namespace ICCardManager.ViewModels
         /// </summary>
         public bool IsUnlistedStaffSelected =>
             _unlistedStaffEntry != null && ReferenceEquals(SelectedStaff, _unlistedStaffEntry);
+
+        /// <summary>
+        /// Issue #2300: 一覧に無い利用者の選択肢の表示名。ドロップダウンで在籍職員と見分けられるよう目印を付ける。
+        /// </summary>
+        /// <remarks>
+        /// 氏名が無く貸出者 IDm だけが残る行は、誰の記録かを見分けられるよう職員証の IDm を添える。
+        /// IDm は職員証の唯一の認証要素なので、生の値ではなく <see cref="IdmMasker.Mask"/> を通した値にする
+        /// （末尾 4 文字で個体を識別できる。#1940）。表示名は保存に使わない（保存は退避した行の値を書き戻す）。
+        /// </remarks>
+        internal static string FormatUnlistedStaffLabel(string? staffName, string? lenderIdm)
+        {
+            if (staffName is not null && !string.IsNullOrEmpty(staffName))
+            {
+                return $"{staffName}（職員一覧にいません）";
+            }
+
+            return $"氏名なし（職員証 {IdmMasker.Mask(lenderIdm ?? string.Empty)}、職員一覧にいません）";
+        }
 
         /// <summary>
         /// Issue #2300: 一覧に無い利用者を選択中に表示する注記
@@ -541,7 +560,7 @@ namespace ICCardManager.ViewModels
                 _unlistedStaffEntry = new Staff
                 {
                     StaffIdm = ledger.LenderIdm ?? string.Empty,
-                    Name = string.IsNullOrEmpty(ledger.StaffName) ? "（氏名なし）" : ledger.StaffName,
+                    Name = FormatUnlistedStaffLabel(ledger.StaffName, ledger.LenderIdm),
                 };
                 StaffList.Insert(0, _unlistedStaffEntry);
                 SelectedStaff = _unlistedStaffEntry;
@@ -1123,7 +1142,7 @@ namespace ICCardManager.ViewModels
             if (selectedStaff != null && ReferenceEquals(selectedStaff, _unlistedStaffEntry))
             {
                 // Issue #2300: 一覧に無い利用者のまま保存する場合は、行に記録されていた値をそのまま書き戻す
-                // （表示用の「（氏名なし）」や、IDm の無い行に空文字を書き込まない）
+                // （表示用の「（職員一覧にいません）」付きの名前や、IDm の無い行に空文字を書き込まない）
                 ledger.LenderIdm = _unlistedStaffOriginalIdm;
                 ledger.StaffName = _unlistedStaffOriginalName;
             }
