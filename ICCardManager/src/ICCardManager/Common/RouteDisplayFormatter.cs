@@ -52,7 +52,7 @@ namespace ICCardManager.Common
             {
                 // Issue #1818: ラベル・プレースホルダは組織設定（SummaryText）由来のため直書きしない
                 return SummaryGenerator.FormatBusSummary(
-                    string.IsNullOrEmpty(busStops) ? SummaryGenerator.BusPlaceholder : busStops);
+                    busStops is null || busStops.Length == 0 ? SummaryGenerator.BusPlaceholder : busStops);
             }
 
             if (!string.IsNullOrEmpty(entryStation) && !string.IsNullOrEmpty(exitStation))
