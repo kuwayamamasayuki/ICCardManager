@@ -105,6 +105,11 @@ namespace ICCardManager.UITests.Tests
         }
 
         /// <summary>通常カードの最後の行の残額（投入した行の残高チェーンを崩さないため）。</summary>
+        /// <remarks>
+        /// 通常カードの投入行の日付はすべて当月の「今日以前の日の 0 時」（<c>ScreenshotSeedData.DayOfMonth</c>）なので、
+        /// 今日 0 時に足す行より後の行は無い。同じ日付の行があっても、ここで足す行は id が最大で
+        /// （date, id）の順の末尾になるため、末尾の行の残額から計算すれば残高チェーンは切れない。
+        /// </remarks>
         private static int DatabaseBalance(SQLiteConnection conn)
         {
             using var cmd = conn.CreateCommand();
