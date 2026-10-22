@@ -63,7 +63,17 @@ public class SettingsMaintenanceKeyConventionTests
         // Issue #1907: 返却時の利用履歴自動表示（設定画面から編集する）
         "KeyShowHistoryOnReturn",
         "KeyReportOutputFolder",
-        // SaveWindowSettingsToDbAsync（一括保存から呼ばれる private ヘルパー）が書く
+        // Issue #2305: ウィンドウの位置・サイズ（KeyWindow*）は外した（設定画面で編集しない。終了時に
+        // SaveMainWindowSettingsAsync だけが書く。下の WindowKeyConstants）
+    };
+
+    private const string WindowSaveSignatureMarker = "Task<bool> SaveMainWindowSettingsAsync(WindowSettings windowSettings)";
+
+    /// <summary>
+    /// 終了時の保存（<c>SaveMainWindowSettingsAsync</c>。到達する private ヘルパーを含む）が書き込む設定キー定数（Issue #2305）。
+    /// </summary>
+    private static readonly string[] WindowKeyConstants =
+    {
         "KeyWindowLeft",
         "KeyWindowTop",
         "KeyWindowWidth",
@@ -117,17 +127,105 @@ public class SettingsMaintenanceKeyConventionTests
     [Fact]
     public void 走査は一括保存から呼ばれるヘルパーの内側まで届くこと()
     {
+        // Issue #2305 で一括保存からウィンドウ設定のヘルパー（SaveWindowSettingsToDbAsync）を外したため、
+        // 目印は一括保存が今も呼ぶ private ヘルパー FontSizeToString の内側のリテラル（"xlarge"）にした。
+        const string helperLiteral = "\"xlarge\"";
         var direct = TestSourceInspection.ExtractMethodBodyPreservingLiterals(
             File.ReadAllText(RepositoryPath), SaveSignatureMarker);
 
         direct.Should().NotContain(
-            "KeyWindowLeft",
-            "ウィンドウ設定キーは SaveWindowSettingsToDbAsync の内側にある（直接の本体には現れない）");
+            helperLiteral,
+            "前提: 目印は FontSizeToString の内側にある（直接の本体には現れない）");
 
-        ExtractKeyConstants(ExtractSaveBodyWithCallees()).Should().Contain(
-            "KeyWindowLeft",
+        ExtractSaveBodyWithCallees().Should().Contain(
+            helperLiteral,
             "呼び出し先まで辿らないと、ヘルパーへ保守用のキーを書き足した形を検出できない");
     }
+
+    /// <summary>
+    /// Issue #2305: 終了時の保存（<c>SaveMainWindowSettingsAsync</c>）が書くのはウィンドウの位置・サイズの 5 キーだけであること。
+    /// </summary>
+    /// <remarks>
+    /// 以前は終了時に一括保存へキャッシュ由来の <c>AppSettings</c> を丸ごと渡しており、共有モードで他の PC が変えた
+    /// 部署種別・残額警告などを古い値へ巻き戻していた。専用経路へ他のキーを書き足すと同じ巻き戻りが再発する。
+    /// 走査は一括保存と同じく、到達する private ヘルパー（<c>SaveWindowSettingsToDbAsync</c>）まで辿る。
+    /// </remarks>
+    [Fact]
+    public void 終了時の保存が書き込む設定キーはウィンドウの位置とサイズだけであること()
+    {
+        var source = File.ReadAllText(RepositoryPath);
+
+        TestSourceInspection.ExtractMethodBodyPreservingLiterals(source, WindowSaveSignatureMarker)
+            .Should().NotContain(
+                "KeyWindowLeft",
+                "前提: キーはヘルパー SaveWindowSettingsToDbAsync の内側にある（直接の本体だけを見ると空振りする）");
+
+        ExtractKeyConstants(ExpandWithCallees(source, WindowSaveSignatureMarker)).Should().BeEquivalentTo(
+            WindowKeyConstants,
+            "終了時の保存はキャッシュの古さに依らず安全でなければならない。他のキーを書くと、" +
+            "他の PC が変えた設定を古い値へ巻き戻す（Issue #2305）");
+    }
+
+    /// <summary>
+    /// Issue #2305: 本番コードで一括保存（<c>SaveAppSettingsAsync</c>）を呼ぶのは設定画面（<c>SettingsViewModel</c>）だけであること。
+    /// </summary>
+    /// <remarks>
+    /// 巻き戻りの実際の入口は「<c>GetAppSettingsAsync()</c>（TTL キャッシュ）で読む → 一部だけ変える → 一括保存」という呼び出し元で、
+    /// 一括保存のキー集合を固定するだけでは防げない（#1997 / #2264 / #2305 と 3 度、この形の呼び出し元が原因になった）。
+    /// 設定画面は画面の値から <c>new AppSettings { … }</c> を組み立てて渡すため、この形にならない。
+    /// 新しい呼び出し元が要るときは、一括保存ではなく書くキーだけを書く専用メソッドを足すこと（<c>SaveMainWindowSettingsAsync</c> と同じ形）。
+    /// </remarks>
+    [Fact]
+    public void 一括保存を呼ぶ本番コードは設定画面だけであること()
+    {
+        var callers = ProductionSourceFiles.CSharp
+            .Where(f => CountBulkSaveCalls(f.CodeOnly) > 0)
+            .Select(f => f.Name)
+            .ToList();
+
+        callers.Should().BeEquivalentTo(
+            new[] { "SettingsViewModel.cs" },
+            "一括保存は渡された値をすべて書く。キャッシュで読んだ設定を渡す呼び出し元は、" +
+            "共有モードで他の PC が変えた設定を巻き戻す（Issue #2305）");
+    }
+
+    /// <summary>
+    /// 対の表明: 終了時の保存（<c>MainWindow</c>）が専用経路を実際に呼んでいること。
+    /// これが無いと、終了時の保存を丸ごと消した実装でも上の検査は緑になる。
+    /// </summary>
+    [Fact]
+    public void 終了時の保存はウィンドウ位置の専用経路を呼んでいること()
+    {
+        var mainWindow = ProductionSourceFiles.CSharp.Single(f => f.Name == "MainWindow.xaml.cs");
+        var body = TestSourceInspection.ExtractMethodBody(
+            mainWindow.CodeOnly, "private async Task SaveWindowPositionAsync(WindowPosition position)");
+
+        body.Should().Contain(".SaveMainWindowSettingsAsync(");
+        CountBulkSaveCalls(body).Should().Be(0);
+        body.Should().NotContain(
+            "GetAppSettingsAsync",
+            "キャッシュから読んだ設定を保存へ使う形に戻さない（Issue #2305）");
+    }
+
+    /// <summary>
+    /// 検査ロジック自体をサンプル入力で固定する（呼び出し・メソッドグループ・null 条件演算子を数え、定義は数えない）。
+    /// </summary>
+    [Theory]
+    [InlineData("var ok = await _settingsRepository.SaveAppSettingsAsync(settings);", 1)]
+    [InlineData("await Task.Run(() => _repo.SaveAppSettingsAsync(s));", 1)]
+    [InlineData("var f = _repo?.SaveAppSettingsAsync;", 1)]
+    [InlineData("await _repo\n    .SaveAppSettingsAsync(s);", 1)]
+    [InlineData("public async Task<bool> SaveAppSettingsAsync(AppSettings settings)", 0)]
+    [InlineData("Task<bool> SaveAppSettingsAsync(AppSettings settings);", 0)]
+    [InlineData("await _repo.SaveAppSettingsAsyncLegacy(s);", 0)]
+    public void 一括保存の呼び出しの検出は呼び出しだけを数えること(string code, int expected)
+    {
+        CountBulkSaveCalls(code).Should().Be(expected);
+    }
+
+    private static readonly Regex BulkSaveCall = new Regex(@"\.\s*SaveAppSettingsAsync\b");
+
+    private static int CountBulkSaveCalls(string code) => BulkSaveCall.Matches(code).Count;
 
     /// <summary>
     /// 対の表明: CAS 経路は <c>last_vacuum_date</c> を<b>実際に書いている</b>こと。
