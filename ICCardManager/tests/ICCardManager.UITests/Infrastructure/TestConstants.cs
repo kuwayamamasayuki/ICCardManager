@@ -494,7 +494,6 @@ namespace ICCardManager.UITests.Infrastructure
         [UiaName]
         public const string LedgerRowEditDeleteButton = "この履歴を削除";
 
-
         /// <summary>履歴行の追加・修正ダイアログの「×」（利用者をクリア）ボタン。</summary>
         [UiaName]
         public const string LedgerRowEditClearStaffButton = "利用者をクリア";

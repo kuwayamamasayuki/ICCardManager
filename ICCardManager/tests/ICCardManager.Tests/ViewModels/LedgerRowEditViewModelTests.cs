@@ -769,6 +769,52 @@ public class LedgerRowEditViewModelTests : IDisposable
     }
 
     /// <summary>
+    /// 一覧に無い利用者のまま保存するときは、保存直前に読み直した行の利用者を残す
+    /// （共有フォルダモードで開いている間に別の PC が利用者を直した場合に、開いたときの古い値で上書きしない）
+    /// </summary>
+    [Fact]
+    public async Task SaveEdit_UnlistedStaff_KeepsStaffReReadAtSave()
+    {
+        await InitializeForEditWithStaffAsync(UnlistedStaffIdm, UnlistedStaffName);
+        // 開いた後に別の PC が利用者を在籍職員 A へ直した
+        _ledgerRepoMock.Setup(r => r.GetByIdAsync(20)).ReturnsAsync(new Ledger
+        {
+            Id = 20,
+            CardIdm = TestCardIdm,
+            Date = new DateTime(2026, 4, 17),
+            Summary = "鉄道（博多～天神）",
+            Expense = 210,
+            Balance = 800,
+            LenderIdm = _staffA.StaffIdm,
+            StaffName = _staffA.Name,
+            Note = "元の備考"
+        });
+
+        _viewModel.Note = "備考だけ直した";
+        await _viewModel.SaveCommand.ExecuteAsync(null);
+
+        _ledgerRepoMock.Verify(r => r.UpdateAsync(It.Is<Ledger>(l =>
+            l.Note == "備考だけ直した" && l.StaffName == _staffA.Name && l.LenderIdm == _staffA.StaffIdm
+        ), It.IsAny<SQLiteTransaction>()), Times.Once);
+    }
+
+    /// <summary>
+    /// 氏名が空白だけで IDm も無い行は「利用者の記録なし」として扱い、選択肢を加えない。
+    /// 空白の氏名と IDm が残る行は「氏名なし（職員証 …）」の表示名になる（StaffNameFormatter.Format と同じく空白を氏名とみなさない）
+    /// </summary>
+    [Fact]
+    public async Task UnlistedStaff_WhitespaceName_TreatedAsNoName()
+    {
+        LedgerRowEditViewModel.FormatUnlistedStaffLabel(" ", UnlistedStaffIdm)
+            .Should().Be(LedgerRowEditViewModel.FormatUnlistedStaffLabel(null, UnlistedStaffIdm));
+
+        await InitializeForEditWithStaffAsync(lenderIdm: null, staffName: " ");
+
+        _viewModel.SelectedStaff.Should().BeNull();
+        _viewModel.StaffList.Should().HaveCount(2);
+    }
+
+    /// <summary>
     /// 一覧に無い利用者の表示名は、ドロップダウンで在籍職員と見分けられる目印を付ける。
     /// 氏名が無く IDm だけの行は、マスクした職員証の IDm を添えて誰の記録か見分けられるようにし、生の IDm は出さない
     /// </summary>

@@ -157,12 +157,7 @@ namespace ICCardManager.ViewModels
         private Staff? _unlistedStaffEntry;
 
         /// <summary>
-        /// Issue #2300: <see cref="_unlistedStaffEntry"/> を作ったときの行の貸出者 IDm（保存時に書き戻す値）
-        /// </summary>
-        private string? _unlistedStaffOriginalIdm;
-
-        /// <summary>
-        /// Issue #2300: <see cref="_unlistedStaffEntry"/> を作ったときの行の氏名（保存時に書き戻す値）
+        /// Issue #2300: <see cref="_unlistedStaffEntry"/> を作ったときの行の氏名（氏名欄の表示プレビュー用）
         /// </summary>
         private string? _unlistedStaffOriginalName;
 
@@ -182,7 +177,8 @@ namespace ICCardManager.ViewModels
         /// </remarks>
         internal static string FormatUnlistedStaffLabel(string? staffName, string? lenderIdm)
         {
-            if (staffName is not null && !string.IsNullOrEmpty(staffName))
+            // 空白だけの氏名は氏名なしとして扱う（StaffNameFormatter.Format と同じ判定）
+            if (staffName is not null && !string.IsNullOrWhiteSpace(staffName))
             {
                 return $"{staffName}（職員一覧にいません）";
             }
@@ -553,9 +549,8 @@ namespace ICCardManager.ViewModels
             // Issue #2300: IDm・氏名のどちらでも在籍職員に紐づかないが利用者の記録がある行は、
             // その利用者をこの行だけの選択肢として加えて選択する（null のままにすると保存で消える）
             if (SelectedStaff == null
-                && (!string.IsNullOrEmpty(ledger.StaffName) || !string.IsNullOrEmpty(ledger.LenderIdm)))
+                && (!string.IsNullOrWhiteSpace(ledger.StaffName) || !string.IsNullOrWhiteSpace(ledger.LenderIdm)))
             {
-                _unlistedStaffOriginalIdm = ledger.LenderIdm;
                 _unlistedStaffOriginalName = ledger.StaffName;
                 _unlistedStaffEntry = new Staff
                 {
@@ -598,7 +593,6 @@ namespace ICCardManager.ViewModels
             var staffMembers = await _staffRepository.GetAllAsync();
             // Issue #2300: 一覧を作り直すときは、前の行のために加えた「一覧に無い利用者」も捨てる
             _unlistedStaffEntry = null;
-            _unlistedStaffOriginalIdm = null;
             _unlistedStaffOriginalName = null;
             StaffList.Clear();
             foreach (var staff in staffMembers.OrderBy(s => s.Name))
@@ -1139,22 +1133,19 @@ namespace ICCardManager.ViewModels
             ledger.Note = Note;
             ledger.CompanionCount = CompanionCount;
 
-            if (selectedStaff != null && ReferenceEquals(selectedStaff, _unlistedStaffEntry))
-            {
-                // Issue #2300: 一覧に無い利用者のまま保存する場合は、行に記録されていた値をそのまま書き戻す
-                // （表示用の「（職員一覧にいません）」付きの名前や、IDm の無い行に空文字を書き込まない）
-                ledger.LenderIdm = _unlistedStaffOriginalIdm;
-                ledger.StaffName = _unlistedStaffOriginalName;
-            }
-            else if (selectedStaff != null)
-            {
-                ledger.LenderIdm = selectedStaff.StaffIdm;
-                ledger.StaffName = selectedStaff.Name;
-            }
-            else
+            // Issue #2300: 一覧に無い利用者（_unlistedStaffEntry）のまま保存する場合は、利用者の列に触れない。
+            // 上で読み直した行の LenderIdm / StaffName がそのまま UPDATE に載る（表示用の目印付きの名前や、
+            // IDm の無い行の空文字を書き込まない）。開いたときの値を書き戻すと、共有フォルダモードで
+            // 開いている間に別の PC が利用者を直した場合に、利用者に触れていない保存が古い値で上書きしてしまう
+            if (selectedStaff == null)
             {
                 ledger.LenderIdm = null;
                 ledger.StaffName = null;
+            }
+            else if (!ReferenceEquals(selectedStaff, _unlistedStaffEntry))
+            {
+                ledger.LenderIdm = selectedStaff.StaffIdm;
+                ledger.StaffName = selectedStaff.Name;
             }
 
             // Issue #1458: Ledger UPDATE と監査ログ INSERT を同一トランザクションで実行
