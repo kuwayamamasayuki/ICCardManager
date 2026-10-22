@@ -289,7 +289,12 @@ namespace ICCardManager.Services
 
             // Issue #983: 摘要が手動編集されている場合、Detail.BusStopsが未同期の
             // 可能性があるため、各Ledgerの摘要からバス停名を抽出してDetailに反映する
-            SyncBusStopsFromSummary(ledgers);
+            // Issue #2306: 反映した値は統合と同じトランザクションで DB へも書く（下の UpdateDetailBusStopsAsync）。
+            // in-memory だけを書き換えると、監査ログの AfterData に DB に存在しないバス停名が残る。
+            // ここで (id, 値) を採っておく — 直後の摘要再生成が SequenceNumber を一時的に振り直すため。
+            var busStopUpdates = SyncBusStopsFromSummary(ledgers)
+                .Select(c => (c.Detail.SequenceNumber, c.BusStops))
+                .ToList();
 
             // Issue #920: 摘要を再生成（詳細を新しい順にソートしてからGenerateに渡す）
             // Generate()はICカードの読み取り順（新しい順）を前提に.Reverse()するため、
@@ -361,6 +366,18 @@ namespace ICCardManager.Services
                 using (var scope = await _dbContext.BeginTransactionAsync().ConfigureAwait(false))
                 {
                     var success = await _ledgerRepository.MergeLedgersAsync(target.Id, sourceIds, target, scope.Transaction).ConfigureAwait(false);
+
+                    // Issue #2306: 摘要から同期したバス停名を永続化する。明細は MergeLedgersAsync が
+                    // id を保ったまま統合先へ付け替え済みなので、統合先の id で特定する（WHERE id AND ledger_id。#1806）。
+                    // 影響行数 0（他 PC が明細を全置換して id が振り直された等）は統合ごと巻き戻す（#1945）。
+                    // 統合の取り消し（UnmergeLedgersCore）は bus_stops を戻さない。同期した値は各台帳の
+                    // 摘要から取ったものなので、摘要を戻した統合元とも食い違わない。
+                    if (success && busStopUpdates.Count > 0)
+                    {
+                        success = await _ledgerRepository.UpdateDetailBusStopsAsync(
+                            target.Id, busStopUpdates, scope.Transaction).ConfigureAwait(false);
+                    }
+
                     if (!success)
                     {
                         return new LedgerMergeResult
@@ -744,52 +761,40 @@ namespace ICCardManager.Services
         /// <summary>
         /// 各Ledgerの摘要からバス停名を抽出してDetail.BusStopsに反映する（Issue #983）
         /// </summary>
+        /// <returns>
+        /// 値が変わった明細と、その新しいバス停名（Issue #2306）。呼び出し元はこれを統合と同じ
+        /// トランザクションで <c>UpdateDetailBusStopsAsync</c> へ渡して永続化する。
+        /// </returns>
         /// <remarks>
+        /// <para>
         /// 摘要の直接編集（LedgerRowEditViewModel）ではDetail.BusStopsが更新されないため、
         /// 統合時にSummaryGenerator.Generate()が古いBusStopsから摘要を再生成してしまう。
         /// この処理で摘要とDetailの整合性を回復する。
+        /// </para>
+        /// <para>
+        /// 対応付け（往復の展開・件数の照合）は <see cref="SummaryGenerator.PlanBusStopSync"/> ただ 1 つ
+        /// （行編集と同じ規則。Issue #2306）。対応付けられない形は書き換えない。
+        /// </para>
+        /// <para>
+        /// Issue #2306: 以前は in-memory の明細だけを書き換えて DB へは書かなかったため、
+        /// 監査ログの AfterData だけが同期後のバス停名を記録し、<c>ledger_detail.bus_stops</c> は
+        /// 同期前のまま残っていた（#1979 が行編集で禁じた形）。
+        /// </para>
         /// </remarks>
-        internal static void SyncBusStopsFromSummary(List<Ledger> ledgers)
+        internal static List<(LedgerDetail Detail, string BusStops)> SyncBusStopsFromSummary(List<Ledger> ledgers)
         {
+            var changes = new List<(LedgerDetail Detail, string BusStops)>();
             foreach (var ledger in ledgers)
             {
-                // Issue #1904: 摘要は時系列（交互ブロック）で生成され、バスブロックは
-                // 複数になり得る。抽出したバス停名（摘要中の出現順）と位置で対応付けるため、
-                // バス明細は生成側の出力順そのもの（GetBusStopEmissionOrder）で並べる
-                //（並び順の定義を消費側に書き写さない）
-                var busDetails = SummaryGenerator.GetBusStopEmissionOrder(ledger.Details);
-                if (busDetails.Count == 0)
+                var plan = SummaryGenerator.PlanBusStopSync(ledger.Summary, ledger.Details);
+                foreach (var assignment in plan.Changes.ToList())
                 {
-                    continue;
-                }
-
-                // Issue #1818: 抽出パターンは組織設定 BusLabel から導出する
-                //（生成側だけが設定値を使い、抽出側がリテラルを直書きする乖離の防止）
-                var blocks = SummaryGenerator.ExtractBusStopBlocks(ledger.Summary);
-                if (blocks.Count == 0)
-                {
-                    continue;
-                }
-
-                if (busDetails.Count == 1)
-                {
-                    // 先頭ブロックのみ書き戻す（従来挙動）。複数ブロックの結合テキストを
-                    // 1 明細へ書き込むと「A～B、C～D」となり ParseBusRoute で解析できない
-                    busDetails[0].BusStops = blocks[0];
-                }
-                else
-                {
-                    // 複数件のバス利用: 「、」で分割してDetailに対応付け
-                    var parts = string.Join("、", blocks).Split('、');
-                    if (parts.Length == busDetails.Count)
-                    {
-                        for (int i = 0; i < parts.Length; i++)
-                        {
-                            busDetails[i].BusStops = parts[i];
-                        }
-                    }
+                    assignment.Detail.BusStops = assignment.BusStops;
+                    changes.Add((assignment.Detail, assignment.BusStops));
                 }
             }
+
+            return changes;
         }
     }
 }
