@@ -179,7 +179,7 @@ public class SettingsMaintenanceKeyConventionTests
     public void 一括保存を呼ぶ本番コードは設定画面だけであること()
     {
         var callers = ProductionSourceFiles.CSharp
-            .Where(f => CountBulkSaveCalls(f.CodeOnly) > 0)
+            .Where(f => CountBulkSaveCalls(f.CodeOnly, selfCalls: f.Name == RepositoryFileName) > 0)
             .Select(f => f.Name)
             .ToList();
 
@@ -209,23 +209,33 @@ public class SettingsMaintenanceKeyConventionTests
 
     /// <summary>
     /// 検査ロジック自体をサンプル入力で固定する（呼び出し・メソッドグループ・null 条件演算子を数え、定義は数えない）。
+    /// <c>SettingsRepository.cs</c> の中ではドットを伴わない自己呼び出しも数える（同じクラスに一括保存を呼ぶ便利メソッドを足すと、
+    /// ドット付きの呼び出しだけを数える検査を素通りするため。レビュー 1 回目で追加）。
     /// </summary>
     [Theory]
-    [InlineData("var ok = await _settingsRepository.SaveAppSettingsAsync(settings);", 1)]
-    [InlineData("await Task.Run(() => _repo.SaveAppSettingsAsync(s));", 1)]
-    [InlineData("var f = _repo?.SaveAppSettingsAsync;", 1)]
-    [InlineData("await _repo\n    .SaveAppSettingsAsync(s);", 1)]
-    [InlineData("public async Task<bool> SaveAppSettingsAsync(AppSettings settings)", 0)]
-    [InlineData("Task<bool> SaveAppSettingsAsync(AppSettings settings);", 0)]
-    [InlineData("await _repo.SaveAppSettingsAsyncLegacy(s);", 0)]
-    public void 一括保存の呼び出しの検出は呼び出しだけを数えること(string code, int expected)
+    [InlineData("var ok = await _settingsRepository.SaveAppSettingsAsync(settings);", false, 1)]
+    [InlineData("await Task.Run(() => _repo.SaveAppSettingsAsync(s));", false, 1)]
+    [InlineData("var f = _repo?.SaveAppSettingsAsync;", false, 1)]
+    [InlineData("await _repo\n    .SaveAppSettingsAsync(s);", false, 1)]
+    [InlineData("public async Task<bool> SaveAppSettingsAsync(AppSettings settings)", false, 0)]
+    [InlineData("Task<bool> SaveAppSettingsAsync(AppSettings settings);", false, 0)]
+    [InlineData("await _repo.SaveAppSettingsAsyncLegacy(s);", false, 0)]
+    [InlineData("success = await SaveAppSettingsAsync(settings).ConfigureAwait(false);", true, 1)]
+    [InlineData("public async Task<bool> SaveAppSettingsAsync(AppSettings settings)", true, 0)]
+    public void 一括保存の呼び出しの検出は呼び出しだけを数えること(string code, bool selfCalls, int expected)
     {
-        CountBulkSaveCalls(code).Should().Be(expected);
+        CountBulkSaveCalls(code, selfCalls).Should().Be(expected);
     }
 
     private static readonly Regex BulkSaveCall = new Regex(@"\.\s*SaveAppSettingsAsync\b");
 
-    private static int CountBulkSaveCalls(string code) => BulkSaveCall.Matches(code).Count;
+    /// <summary>ドットを伴わない呼び出し（同じクラスからの自己呼び出し）。定義（戻り値の型の直後の名前）は除く。</summary>
+    private static readonly Regex SelfBulkSaveCall = new Regex(@"(?<!Task<bool>\s+)(?<!\.\s*)(?<!\w)SaveAppSettingsAsync\s*\(");
+
+    private const string RepositoryFileName = "SettingsRepository.cs";
+
+    private static int CountBulkSaveCalls(string code, bool selfCalls = false)
+        => BulkSaveCall.Matches(code).Count + (selfCalls ? SelfBulkSaveCall.Matches(code).Count : 0);
 
     /// <summary>
     /// 対の表明: CAS 経路は <c>last_vacuum_date</c> を<b>実際に書いている</b>こと。
