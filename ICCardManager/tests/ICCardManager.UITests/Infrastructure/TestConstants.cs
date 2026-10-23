@@ -78,6 +78,10 @@ namespace ICCardManager.UITests.Infrastructure
         // これらは AutomationProperties ではなく画面に出る文字列そのもの（前方一致で検索する）。
         [NotUiaName]
         public const string CardReaderStatusTextPrefix = "リーダー:";
+
+        /// <summary>ステータスバーの状態表示の先頭（Issue #2308。後ろに日本語の状態名が続く）。</summary>
+        [NotUiaName]
+        public const string AppStateStatusTextPrefix = "状態:";
         [NotUiaName]
         public const string AppVersionTextPrefix = "Ver.";
 
@@ -477,6 +481,14 @@ namespace ICCardManager.UITests.Infrastructure
         /// <summary>設定ダイアログの初期フォーカス（<c>ToastPositionComboBox</c>）。</summary>
         [UiaName]
         public const string SettingsToastPositionComboBox = "トースト通知位置選択";
+
+        /// <summary>設定ダイアログの「データベース保存先フォルダ」の入力欄（Alt+D。Issue #2308）。</summary>
+        [UiaName]
+        public const string SettingsDatabasePathInput = "データベース保存先フォルダパス";
+
+        /// <summary>設定ダイアログの「同行者数入力を自動的に閉じるまでの秒数」の入力欄（Alt+I。Issue #2308）。</summary>
+        [UiaName]
+        public const string SettingsCompanionCountTimeoutInput = "同行者数入力の自動クローズ秒数";
 
         /// <summary>データ入出力ダイアログの初期フォーカス（<c>ExportDataTypeComboBox</c>）。</summary>
         [UiaName]

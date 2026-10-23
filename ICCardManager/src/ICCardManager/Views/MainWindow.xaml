@@ -1262,7 +1262,7 @@
             <StatusBarItem>
                 <TextBlock>
                     <Run Text="状態: "/>
-                    <Run Text="{Binding CurrentState, Mode=OneWay}"/>
+                    <Run Text="{Binding NextActionStateText, Mode=OneWay}"/>
                 </TextBlock>
             </StatusBarItem>
             <Separator/>
