@@ -300,11 +300,18 @@ public partial class SettingsViewModel : ViewModelBase
     /// <summary>
     /// 設定を読み込み
     /// </summary>
+    /// <remarks>
+    /// Issue #2305: 読む前に設定のキャッシュを破棄し、開くたびに DB から読み直す。保存（一括保存）は画面の全項目を書くため、
+    /// TTL キャッシュ（既定 5 分・共有モード 3 分）の古い値を初期値にすると、共有モードで他の PC がその後に変えた設定
+    /// （部署種別など）を、別の項目だけを変えて保存したときに古い値へ巻き戻す。読み直しても、画面を開いてから保存するまでの間に
+    /// 他の PC が変えた値は巻き戻り得る（変えた項目だけを書く根本対策は別 Issue）。
+    /// </remarks>
     [RelayCommand]
     public async Task LoadSettingsAsync()
     {
         using (BeginBusy("読み込み中..."))
         {
+            _settingsRepository.InvalidateCache();
             var settings = await _settingsRepository.GetAppSettingsAsync();
 
             WarningBalance = settings.WarningBalance;

@@ -102,8 +102,11 @@ namespace ICCardManager.Data.Repositories
         /// 一括保存は条件を持たない UPSERT で、渡された値を<b>すべて</b>書く。<see cref="GetAppSettingsAsync"/>
         /// （TTL キャッシュ）で読んだ値の一部だけを変えて渡すと、触っていない値も読んだ時点の値で書き戻し、
         /// 共有モードでは他 PC がその後に変えた設定（部署種別・残額警告など）を巻き戻す（Issue #2305）。
-        /// 呼び出し元は画面で編集した値から組み立てる設定画面（F5）だけにすること
-        /// （静的検査 <c>SettingsMaintenanceKeyConventionTests</c> が固定する）。
+        /// 本番の呼び出し元は設定画面（F5）だけにすること（静的検査 <c>SettingsMaintenanceKeyConventionTests</c> が固定する）。
+        /// <b>設定画面の経路にも同じ巻き戻りは残っている</b>: 画面は全項目を書くため、開いた時点の値が古ければ、別の項目だけを
+        /// 変えて保存したときに他 PC の変更を巻き戻す。画面を開くたびにキャッシュを破棄して DB から読み直す
+        /// （<c>SettingsViewModel.LoadSettingsAsync</c>）ことで窓を「画面を開いている間」に縮めているが、消えてはいない
+        /// （変えた項目だけを書く根本対策は別 Issue）。
         /// </para>
         /// </remarks>
         Task<bool> SaveAppSettingsAsync(AppSettings settings);
