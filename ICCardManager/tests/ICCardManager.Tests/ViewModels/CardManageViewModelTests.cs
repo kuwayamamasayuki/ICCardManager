@@ -1013,8 +1013,8 @@ public class CardManageViewModelTests : IDisposable
             l.Date == _clock.Now), It.Is<SQLiteTransaction>(t => t != null)), Times.Once);
         // Issue #2151: tx なし（autocommit）の旧経路では書かないこと
         _ledgerRepositoryMock.Verify(r => r.InsertAsync(It.IsAny<Ledger>()), Times.Never);
-        // 最新残高を取得していること
-        _ledgerRepositoryMock.Verify(r => r.GetLatestLedgerAsync(idm), Times.Once);
+        // 最新残高を取得していること（Issue #2322: 確認ダイアログの表示用と、書き込むトランザクションの中での読み直しの 2 回）
+        _ledgerRepositoryMock.Verify(r => r.GetLatestLedgerAsync(idm), Times.Exactly(2));
         // カードが払戻済状態に更新されること
         _cardRepositoryMock.Verify(r => r.SetRefundedAsync(idm, _clock.Now, It.Is<SQLiteTransaction>(t => t != null)), Times.Once);
     }
@@ -4038,6 +4038,190 @@ public class CardManageViewModelTests : IDisposable
     }
 
     #endregion
+
+    #endregion
+
+    #region 払い戻しの認証と残額の読み直し（Issue #2322）
+
+    private const string RefundTargetIdm = "0102030405060708";
+
+    /// <summary>
+    /// 払い戻しの対象（払戻済でも貸出中でもないカード）を選び、払い戻しが成立するリポジトリの応答を用意する
+    /// </summary>
+    private void ArrangeRefundableCard(int balance)
+    {
+        _viewModel.SelectedCard = new CardDto
+        {
+            CardIdm = RefundTargetIdm,
+            CardType = "はやかけん",
+            CardNumber = "H-001",
+            IsLent = false,
+            IsRefunded = false
+        };
+        _ledgerRepositoryMock.Setup(r => r.GetLatestLedgerAsync(RefundTargetIdm))
+            .ReturnsAsync(new Ledger { CardIdm = RefundTargetIdm, Balance = balance });
+        _ledgerRepositoryMock.Setup(r => r.InsertAsync(It.IsAny<Ledger>())).ReturnsAsync(1);
+        _ledgerRepositoryMock.Setup(r => r.InsertAsync(It.IsAny<Ledger>(), It.IsAny<SQLiteTransaction>())).ReturnsAsync(1);
+        _cardRepositoryMock.Setup(r => r.SetRefundedAsync(RefundTargetIdm, It.IsAny<DateTime>(), It.IsAny<SQLiteTransaction>()))
+            .ReturnsAsync(ICCardManager.Data.Repositories.CardOperationResult.Success);
+        _cardRepositoryMock.Setup(r => r.GetByIdmAsync(RefundTargetIdm, It.IsAny<bool>()))
+            .ReturnsAsync(new IcCard { CardIdm = RefundTargetIdm, CardType = "はやかけん", CardNumber = "H-001" });
+        _cardRepositoryMock.Setup(r => r.GetAllAsync()).ReturnsAsync(new List<IcCard>());
+    }
+
+    /// <summary>
+    /// 払い戻しは確認の後に職員証の認証を求め、操作ログの操作者を認証した職員にすること
+    /// </summary>
+    /// <remarks>
+    /// 修正前は認証を求めず、操作ログの操作者は「GUI操作」だった。操作者の解決は本物の
+    /// <see cref="CurrentOperatorContext"/> で行い、認証した 1 操作のスコープ（#2260）が
+    /// 書き込みの間だけ開いていることを表明する。
+    /// </remarks>
+    [Fact]
+    public async Task RefundAsync_ShouldAuthenticateAfterConfirmationAndRecordAuthenticatedOperator()
+    {
+        // Arrange
+        ArrangeRefundableCard(3000);
+        var operatorContext = new CurrentOperatorContext(new FixedSystemClock(_clock.Now));
+        var lendingService = new LendingService(
+            _dbContext,
+            _cardRepositoryMock.Object,
+            _staffRepositoryMock.Object,
+            _ledgerRepositoryMock.Object,
+            Mock.Of<ISettingsRepository>(),
+            new OperationLogger(_operationLogRepositoryMock.Object, operatorContext),
+            new SummaryGenerator(),
+            _lockManager,
+            Options.Create(new AppOptions()),
+            NullLogger<LendingService>.Instance);
+        var viewModel = new CardManageViewModel(
+            _cardRepositoryMock.Object,
+            _ledgerRepositoryMock.Object,
+            _cardReaderMock.Object,
+            _validationServiceMock.Object,
+            _cardManagementService,
+            _dialogServiceMock.Object,
+            _staffAuthServiceMock.Object,
+            lendingService,
+            new WeakReferenceMessenger(),
+            _dispatcher,
+            Mock.Of<INavigationService>(),
+            () => throw new InvalidOperationException("このテストは貸出記録作成ダイアログを使用しません"),
+            clock: _clock);
+        viewModel.SelectedCard = _viewModel.SelectedCard;
+
+        var events = new List<string>();
+        _dialogServiceMock.Setup(d => d.ShowWarningConfirmation(It.IsAny<string>(), "払い戻し確認"))
+            .Callback(() => events.Add("confirm"))
+            .Returns(true);
+        _staffAuthServiceMock.Setup(s => s.RequestAuthenticationAsync("交通系ICカードの払い戻し"))
+            .Callback(() => events.Add("auth"))
+            .ReturnsAsync(() => new StaffAuthResult("AUTH_STAFF_IDM", "天神 太郎", operatorContext));
+        OperationLog? recorded = null;
+        _operationLogRepositoryMock.Setup(r => r.InsertAsync(It.IsAny<OperationLog>(), It.IsAny<SQLiteTransaction>()))
+            .Callback<OperationLog, SQLiteTransaction>((log, _) => recorded = log)
+            .ReturnsAsync(1);
+
+        // Act
+        await viewModel.RefundAsync();
+
+        // Assert
+        events.Should().Equal(new[] { "confirm", "auth" },
+            "払い戻すかどうかを決める前に職員証を求めない（#2263 / #2265 と同じ順序）");
+        recorded.Should().NotBeNull();
+        recorded!.OperatorIdm.Should().Be("AUTH_STAFF_IDM", "操作ログの操作者は認証した職員");
+        recorded.OperatorName.Should().Be("天神 太郎");
+        operatorContext.TryGetOperator(out _, out _).Should().BeFalse("認証は 1 操作に限る（#2260）");
+        viewModel.StatusMessage.Should().StartWith("払い戻しが完了しました");
+    }
+
+    /// <summary>
+    /// 認証が完了しなければ（キャンセル・タイムアウト）何も書かないこと
+    /// </summary>
+    [Fact]
+    public async Task RefundAsync_WhenAuthenticationNotCompleted_ShouldNotRefund()
+    {
+        // Arrange
+        ArrangeRefundableCard(3000);
+        _staffAuthServiceMock.Setup(s => s.RequestAuthenticationAsync("交通系ICカードの払い戻し"))
+            .ReturnsAsync((StaffAuthResult?)null);
+
+        // Act
+        await _viewModel.RefundAsync();
+
+        // Assert
+        _ledgerRepositoryMock.Verify(r => r.InsertAsync(It.IsAny<Ledger>(), It.IsAny<SQLiteTransaction>()), Times.Never);
+        _ledgerRepositoryMock.Verify(r => r.InsertAsync(It.IsAny<Ledger>()), Times.Never);
+        _cardRepositoryMock.Verify(r => r.SetRefundedAsync(
+            It.IsAny<string>(), It.IsAny<DateTime>(), It.IsAny<SQLiteTransaction>()), Times.Never);
+        _operationLogRepositoryMock.Verify(
+            r => r.InsertAsync(It.IsAny<OperationLog>(), It.IsAny<SQLiteTransaction>()), Times.Never);
+    }
+
+    /// <summary>
+    /// 確認で「いいえ」を選んだら職員証を求めないこと
+    /// </summary>
+    [Fact]
+    public async Task RefundAsync_WhenConfirmationDeclined_ShouldNotRequestAuthentication()
+    {
+        ArrangeRefundableCard(3000);
+        _dialogServiceMock.Setup(d => d.ShowWarningConfirmation(It.IsAny<string>(), It.IsAny<string>()))
+            .Returns(false);
+
+        await _viewModel.RefundAsync();
+
+        _staffAuthServiceMock.Verify(s => s.RequestAuthenticationAsync(It.IsAny<string>()), Times.Never);
+    }
+
+    /// <summary>
+    /// 確認した後に残額が変わっていたら、払い戻さずに一覧を読み直し、両方の金額を示して案内すること
+    /// </summary>
+    /// <remarks>
+    /// 確認ダイアログの表示用の読み取りは 3,000 円、書き込むトランザクションの中での読み直しは 2,790 円
+    /// （確認・認証を待つ間に他 PC で 210 円の利用が記録された）。修正前は 3,000 円の払出で払戻台帳を作った。
+    /// 正当な払い戻し（読み直しても同じ金額）は <see cref="RefundAsync_ShouldCreateRefundLedgerWithBalanceAsExpense"/> が固定している。
+    /// </remarks>
+    [Fact]
+    public async Task RefundAsync_WhenBalanceChangedAfterConfirmation_ShouldShowBothAmountsAndNotRefund()
+    {
+        // Arrange
+        ArrangeRefundableCard(3000);
+        _ledgerRepositoryMock.SetupSequence(r => r.GetLatestLedgerAsync(RefundTargetIdm))
+            .ReturnsAsync(new Ledger { CardIdm = RefundTargetIdm, Balance = 3000 })
+            .ReturnsAsync(new Ledger { CardIdm = RefundTargetIdm, Balance = 2790 });
+        var events = new List<string>();
+        _cardRepositoryMock.Setup(r => r.GetAllAsync())
+            .Callback(() => events.Add("reload"))
+            .ReturnsAsync(new List<IcCard>());
+        _dialogServiceMock.Setup(d => d.ShowError(It.IsAny<string>(), It.IsAny<string>()))
+            .Callback(() => events.Add("error"));
+
+        // Act
+        await _viewModel.RefundAsync();
+
+        // Assert
+        _dialogServiceMock.Verify(d => d.ShowError(
+            CardManageViewModel.FormatRefundBalanceChangedMessage("交通系ICカード「はやかけん H-001」", 3000, 2790),
+            "払い戻しできません"), Times.Once);
+        events.Should().Equal(new[] { "reload", "error" }, "「再読み込みしました」と案内するので、先に再読込する");
+        _ledgerRepositoryMock.Verify(r => r.InsertAsync(It.IsAny<Ledger>(), It.IsAny<SQLiteTransaction>()), Times.Never);
+        _cardRepositoryMock.Verify(r => r.SetRefundedAsync(
+            It.IsAny<string>(), It.IsAny<DateTime>(), It.IsAny<SQLiteTransaction>()), Times.Never);
+        _viewModel.StatusMessage.Should().NotStartWith("払い戻しが完了しました");
+    }
+
+    /// <summary>
+    /// 残額が変わったときの案内が 3 要素（何が・なぜ・どうすれば）を含むこと
+    /// </summary>
+    [Fact]
+    public void FormatRefundBalanceChangedMessage_ShouldNameAmountsCauseAndAction()
+    {
+        var message = CardManageViewModel.FormatRefundBalanceChangedMessage("交通系ICカード「はやかけん H-001」", 3000, 2790);
+
+        message.Should().Contain("はやかけん H-001").And.Contain("¥3,000").And.Contain("¥2,790");
+        message.Should().Contain("他のパソコンや別の操作");
+        message.Should().EndWith("確認してください。");
+    }
 
     #endregion
 }

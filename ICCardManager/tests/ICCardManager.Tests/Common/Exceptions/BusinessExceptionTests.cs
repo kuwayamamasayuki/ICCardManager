@@ -273,6 +273,6 @@ public class BusinessExceptionTests
         var ex = BusinessException.LentStatusUpdateConflict("0102030405060708", operationName);
 
         ex.UserFriendlyMessage.Should().Be(
-            $"{operationName}を記録できませんでした。交通系ICカード管理（F3）で削除されていないか確認してください。");
+            $"{operationName}を記録できませんでした。交通系ICカード管理（F3）で削除・払戻済でないか確認してください。");
     }
 }

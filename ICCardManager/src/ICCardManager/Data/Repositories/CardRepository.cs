@@ -461,9 +461,12 @@ WHERE card_idm = @cardIdm AND is_deleted = 0
             var connection = lease.Connection;
 
             using var command = connection.CreateCommand();
+            // Issue #2322: 貸出中にする更新（@isLent = 1）は払戻済のカードに一致させない。
+            // LendingService の事前検証（is_refunded）と書き込みは別の読み取りで、その間に他 PC が
+            // 払い戻すと払戻済のカードが貸出中になる。返却・修復（@isLent = 0）は従来どおり is_refunded を見ない。
             command.CommandText = @"UPDATE ic_card
 SET is_lent = @isLent, last_lent_at = @lentAt, last_lent_staff = @staffIdm
-WHERE card_idm = @cardIdm AND is_deleted = 0";
+WHERE card_idm = @cardIdm AND is_deleted = 0 AND (@isLent = 0 OR is_refunded = 0)";
 
             command.Parameters.AddWithValue("@cardIdm", cardIdm);
             command.Parameters.AddWithValue("@isLent", isLent ? 1 : 0);

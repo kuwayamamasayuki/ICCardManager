@@ -311,6 +311,17 @@ namespace ICCardManager.Services
 
                         if (hasLentRecord && !card.IsLent)
                         {
+                            // Issue #2322: 払戻済のカードは貸出中にしない（UpdateLentStatusAsync も 0 行になる）。
+                            // 競合（他 PC の削除）として記録すると原因を取り違えるので、別の文言で残して飛ばす
+                            if (card.IsRefunded)
+                            {
+                                _logger.LogWarning(
+                                    "Issue #2322: 払戻済のカードに貸出中レコードが残っています。" +
+                                    "払戻済のカードは貸出中にしないため修復しません: CardIdm={CardIdm}",
+                                    IdmMasker.Mask(card.CardIdm));
+                                continue;
+                            }
+
                             // 貸出中レコードがあるのにis_lent=0 → is_lent=1に修復
                             // Issue #1953: 影響行数 0（他 PC がこのカードを論理削除した）は修復ではない。
                             // 数えると DB が変わっていないのに「N件修復しました」と報告し、
@@ -588,6 +599,17 @@ namespace ICCardManager.Services
                 return (null, null, "カードが登録されていません。");
             }
 
+            // Issue #2322: 払戻済のカードは貸出対象外（Issue #530）。判定を書き込みの入口に置き、
+            // 呼び出し元（メイン画面のタッチ・30秒ルールの逆処理・貸出記録の作成ダイアログ）へ配らない。
+            // 以前は呼び出し元ごとに判定しており、職員証タッチ待ちでの再タッチ（逆処理）と、
+            // 貸出記録の作成ダイアログを開いた後の払い戻しでは誰も確かめていなかった。
+            // 削除済みのカードは GetByIdmAsync が返さない（上の null）ので、ここで運用中かどうかがそろう。
+            // この読み取りと書き込みの間の払い戻しは UpdateLentStatusAsync の WHERE（is_refunded = 0）が検出する。
+            if (card.IsRefunded)
+            {
+                return (card, null, "このカードは払い戻し済みのため貸出できません。別の交通系ICカードを使用してください。");
+            }
+
             if (card.IsLent)
             {
                 return (card, null, "このカードは既に貸出中です。");
@@ -706,12 +728,18 @@ namespace ICCardManager.Services
         /// 払い戻し前に読み取ったカード。操作ログの変更前データになる。読み取れなかった（<c>null</c>）場合に
         /// 払い戻しを行わない判断は呼び出し元の責務（Issue #1760。競合の案内は画面ごとに異なるため）。
         /// </param>
-        /// <param name="refundAmount">払い戻す金額（払い戻し時点の残額）。払戻台帳の払出金額になる。</param>
+        /// <param name="refundAmount">
+        /// 払い戻す金額（確認ダイアログで示した残額）。払戻台帳の払出金額になる。書き込む時点の残額と違えば払い戻さない（Issue #2322）。
+        /// </param>
         /// <param name="refundedAt">払い戻しの日時。払戻台帳の日付・<c>refunded_at</c>・操作ログの変更後データに共通で使う。</param>
         /// <returns>作成した払戻台帳</returns>
         /// <exception cref="RefundConflictException">
         /// 払戻済への更新が 0 行だった（他のパソコンや別の操作でカードが削除・貸出・払い戻しされた）。
         /// <see cref="RefundConflictException.Result"/> に原因が入る。台帳も操作ログも残らない。
+        /// </exception>
+        /// <exception cref="RefundBalanceChangedException">
+        /// 書き込む時点の台帳の残額が <paramref name="refundAmount"/> と違った（確認した後に台帳が進んだ。Issue #2322）。
+        /// 台帳も操作ログも残らない。
         /// </exception>
         /// <remarks>
         /// <para>
@@ -749,6 +777,26 @@ namespace ICCardManager.Services
 
                     try
                     {
+                        // Issue #2322: 払い戻す金額は呼び出し元が確認ダイアログより前に読んだ残額であり、
+                        // 確認・認証を待つ間に他 PC や別の操作で台帳が進むと、古い金額のまま払戻台帳
+                        // （払出＝金額、残額 0）が作られて残高チェーンが払戻行で切れる。払戻済への更新の
+                        // WHERE（is_lent / is_refunded / is_deleted）は「貸出→返却」の済んだ変化を検出しないので、
+                        // 同じトランザクションの中で直前の残額を読み直し、違えば何も書かずに巻き戻す。
+                        // 読み取りは同じ接続（DbContext は接続を 1 本しか持たない）の上でこのトランザクションに含まれ、
+                        // 読んでからコミットするまでに他の接続が台帳を書き換えたなら、こちらの書き込みが
+                        // SQLITE_BUSY になって ExecuteWithRetryAsync が読み直しからやり直す。
+                        // 判定は呼び出し元の表示と同じ「直近の台帳の残額、無ければ 0」。
+                        var latestLedger = await _ledgerRepository.GetLatestLedgerAsync(cardIdm).ConfigureAwait(false);
+                        var currentBalance = latestLedger?.Balance ?? 0;
+                        if (currentBalance != refundAmount)
+                        {
+                            // 画面はダイアログを出すだけなので、痕跡はここで残す（UI 文言とログを対で数える #1817）
+                            _logger.LogWarning(
+                                "払い戻しを記録できませんでした（確認後に残額が変化）: {CardIdm} 確認時 {ConfirmedAmount}円 現在 {CurrentBalance}円",
+                                IdmMasker.Mask(cardIdm), refundAmount, currentBalance);
+                            throw new RefundBalanceChangedException(cardIdm, refundAmount, currentBalance);
+                        }
+
                         // Issue #1737: 入れ子になる書き込みは tx を明示的に渡す（暗黙参加に頼らない）。
                         // 台帳はリトライのたびに作り直す（前の試行で採番された Id を持ち越さない）。
                         var ledger = CreateRefundLedger(cardIdm, refundAmount, refundedAt);

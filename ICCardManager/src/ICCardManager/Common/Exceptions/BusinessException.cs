@@ -182,7 +182,8 @@ namespace ICCardManager.Common.Exceptions
         /// <remarks>
         /// <para>
         /// Issue #1953: <c>UPDATE ic_card … WHERE card_idm = @cardIdm AND is_deleted = 0</c> が
-        /// 0 行になるのは「他のパソコンや別の操作でこのカードが論理削除された」場合だけであり
+        /// 0 行になるのは「他のパソコンや別の操作でこのカードが論理削除された（貸出では、払い戻された。
+        /// Issue #2322 で貸出中にする更新の WHERE に <c>is_refunded = 0</c> を加えた）」場合だけであり
         /// （Issue #1753 の影響行数による競合検出）、原因を名指しできる。
         /// </para>
         /// <para>
@@ -195,7 +196,7 @@ namespace ICCardManager.Common.Exceptions
         /// （<c>.claude/rules/error-messages.md</c>「取れる行動が違う経路には専用の文言を置く」）。
         /// </para>
         /// <para>
-        /// <b>長さは 47 文字に抑えている</b>（「貸出」「返却」のとき）。Issue #2211 で案内先を「カード管理画面（F2）」から
+        /// <b>長さは 48 文字に抑えている</b>（「貸出」「返却」のとき）。Issue #2211 で案内先を「カード管理画面（F2）」から
         /// 「交通系ICカード管理（F3）」へ直した（F2 は職員管理）。「画面」を付けないのはメイン画面のボタンの表記に合わせ、
         /// トーストの上限（<c>LendingServiceLentStatusConflictTests</c> が固定する 48 文字）に収めるため。戻り先は
         /// <c>LendingResult.ErrorMessage</c> → <c>MainViewModel</c> の
@@ -205,8 +206,8 @@ namespace ICCardManager.Common.Exceptions
         /// ＝「どうすれば」が失われる。<c>LendingService.GetUserFriendlyErrorMessage</c> は同じ理由で
         /// <c>ExceptionMessageFormatter.ToUserMessage</c> の <b>58 文字</b>の文言を退けており、
         /// ここで 58 文字の文言を新設すると同じ判断と矛盾する（コードレビューで検出）。
-        /// 「なぜ」は独立した文にせず「削除されていないか確認してください」という形で
-        /// 「どうすれば」と一体にまとめた。
+        /// 「なぜ」は独立した文にせず「削除・払戻済でないか確認してください」という形で
+        /// 「どうすれば」と一体にまとめた（Issue #2322 で払戻済を加えた。「払い戻されていないか」では上限を超える）。
         /// </para>
         /// </remarks>
         public static BusinessException LentStatusUpdateConflict(string cardIdm, string operationName)
@@ -218,7 +219,7 @@ namespace ICCardManager.Common.Exceptions
             var message = $"Lent status update affected 0 rows: {IdmMasker.Mask(cardIdm)} ({operationName})";
             var userMessage =
                 $"{operationName}を記録できませんでした。" +
-                "交通系ICカード管理（F3）で削除されていないか確認してください。";
+                "交通系ICカード管理（F3）で削除・払戻済でないか確認してください。";
             const string errorCode = "BIZ015";
 
             return new BusinessException(message, userMessage, errorCode);
