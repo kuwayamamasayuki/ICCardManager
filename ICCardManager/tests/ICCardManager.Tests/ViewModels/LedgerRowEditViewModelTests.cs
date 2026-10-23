@@ -2334,7 +2334,7 @@ public class LedgerRowEditViewModelTests : IDisposable
         _viewModel.Summary = "バス（天神～大橋）";
 
         // Assert
-        _viewModel.WarningMessage.Should().Contain(LedgerRowEditViewModel.BuildBusStopUnmappableWarning(2));
+        _viewModel.WarningMessage.Should().Contain(LedgerRowEditViewModel.BuildBusStopUnmappableWarning(BusStopSyncFailure.CountMismatch, 2));
         _viewModel.CanSave.Should().BeTrue("警告であって保存は止めない");
 
         await _viewModel.SaveCommand.ExecuteAsync(null);
@@ -2366,18 +2366,70 @@ public class LedgerRowEditViewModelTests : IDisposable
     }
 
     /// <summary>
-    /// Issue #2306: 警告文言の品質（何が・なぜ・どうすれば、行動指示で終わる）。
-    /// 往復の書き方は組織設定の接尾辞から作る（リテラルを直書きしない。#1818）。
+    /// Issue #2306（コードレビューで検出）: 件数が合っていても往路と復路が隣り合わない往復は反映できない。
+    /// その警告は「区間の数が合わない」「往復は … の形で」と案内しない（事実と違う理由と、いま入力した形を示すことになる）。
     /// </summary>
     [Fact]
-    public void BuildBusStopUnmappableWarning_3要素を含み行動指示で終わること_Issue2306()
+    public async Task Validate_往路と復路が隣り合わない往復は理由を区別して警告すること_Issue2306()
     {
-        var message = LedgerRowEditViewModel.BuildBusStopUnmappableWarning(2);
+        // Arrange: 天神→博多／大橋→薬院／博多→天神（古い順。SequenceNumber は大きいほど古い）
+        var date = new DateTime(2026, 1, 10);
+        var ledger = new Ledger
+        {
+            Id = 1,
+            CardIdm = TestCardIdm,
+            Date = date,
+            Summary = "バス（天神～博多 往復、大橋～薬院）",
+            Expense = 690,
+            Balance = 1810,
+            Details = new List<LedgerDetail>
+            {
+                new LedgerDetail { LedgerId = 1, IsBus = true, BusStops = "博多～天神", Amount = 230, Balance = 1810, SequenceNumber = 1, UseDate = date },
+                new LedgerDetail { LedgerId = 1, IsBus = true, BusStops = "大橋～薬院", Amount = 230, Balance = 2040, SequenceNumber = 2, UseDate = date },
+                new LedgerDetail { LedgerId = 1, IsBus = true, BusStops = "天神～博多", Amount = 230, Balance = 2270, SequenceNumber = 3, UseDate = date },
+            }
+        };
+        var dto = ArrangeBusLedgerForEdit(ledger);
+        await _viewModel.InitializeForEditAsync(dto);
+
+        // Act: 件数は 3＝3 のまま、往復の折り返し点だけを直す
+        _viewModel.Summary = "バス（天神～博多駅前 往復、大橋～薬院）";
+
+        // Assert
+        var expected = LedgerRowEditViewModel.BuildBusStopUnmappableWarning(BusStopSyncFailure.RoundTripNotAdjacent, 3);
+        _viewModel.WarningMessage.Should().Contain(expected);
+        _viewModel.WarningMessage.Should().NotContain("区間の数が利用の件数と合わない", "件数は合っているので事実と違う");
+        _viewModel.WarningMessage.Should().Contain("往復の表記を使わず", "反映できる書き方（利用 1 件ごとに区切る）を案内する");
+    }
+
+    /// <summary>
+    /// Issue #2306: 警告文言の品質（何が・なぜ・どうすれば、行動指示で終わる）を理由ごとに確かめる。
+    /// 往復の書き方は組織設定の接尾辞から作る（リテラルを直書きしない。#1818）。
+    /// </summary>
+    [Theory]
+    [InlineData(nameof(BusStopSyncFailure.CountMismatch), "区間の数が利用の件数と合わない")]
+    [InlineData(nameof(BusStopSyncFailure.RoundTripNotAdjacent), "あいだに別のバス利用がある")]
+    [InlineData(nameof(BusStopSyncFailure.RoundTripOnSingleUsage), "バス利用が1件だけなのに往復")]
+    public void BuildBusStopUnmappableWarning_理由ごとに3要素を含み行動指示で終わること_Issue2306(
+        string failureName, string reason)
+    {
+        // BusStopSyncFailure は internal のため、public なテストメソッドの引数には名前で渡す
+        var failure = (BusStopSyncFailure)Enum.Parse(typeof(BusStopSyncFailure), failureName);
+        var message = LedgerRowEditViewModel.BuildBusStopUnmappableWarning(failure, 2);
 
         message.Should().Contain("2件", "何が（この履歴のバス利用の件数）");
-        message.Should().Contain("統合したときに", "なぜ（放置すると何が起きるか）");
-        message.Should().Contain($"乗車～降車{SummaryGenerator.RoundTripSuffix}", "どうすれば（往復の書き方）");
+        message.Should().Contain(reason, "なぜ（理由ごとに出し分ける）");
+        message.Should().Contain("統合したときに", "放置すると何が起きるか");
+        message.Should().Contain("バス利用1件ごとに「乗車～降車」を利用した順に「、」で区切って", "どうすれば（どの理由でも反映できる書き方）");
         message.Should().EndWith("入力してください。");
+        if (failure == BusStopSyncFailure.CountMismatch)
+        {
+            message.Should().Contain($"乗車～降車{SummaryGenerator.RoundTripSuffix}", "件数の不一致では往復のまとめ方も示す");
+        }
+        else
+        {
+            message.Should().NotContain($"乗車～降車{SummaryGenerator.RoundTripSuffix}", "往復の表記が原因のときに往復の形を勧めない");
+        }
     }
 
     #endregion

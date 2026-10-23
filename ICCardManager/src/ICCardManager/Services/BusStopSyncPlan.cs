@@ -25,6 +25,27 @@ namespace ICCardManager.Services
     }
 
     /// <summary>
+    /// 対応付けられない理由（Issue #2306 のコードレビューで追加）。利用者への案内を理由ごとに出し分けるため
+    /// </summary>
+    internal enum BusStopSyncFailure
+    {
+        /// <summary>対応付けられた・対象が無い</summary>
+        None,
+
+        /// <summary>区間の数（往復は 2 件と数える）がバス利用の件数と合わない</summary>
+        CountMismatch,
+
+        /// <summary>バス利用が 1 件なのに往復の表記がある</summary>
+        RoundTripOnSingleUsage,
+
+        /// <summary>
+        /// 往復の往路と復路が隣り合う明細と読めない（あいだに別の利用がある等）。
+        /// 件数は合っていても、位置で書き戻すと別の利用へ名前が入る
+        /// </summary>
+        RoundTripNotAdjacent,
+    }
+
+    /// <summary>
     /// 明細 1 件へ書き戻すバス停名（Issue #2306）
     /// </summary>
     internal sealed class BusStopAssignment
@@ -57,26 +78,31 @@ namespace ICCardManager.Services
     /// </remarks>
     internal sealed class BusStopSyncPlan
     {
-        private BusStopSyncPlan(BusStopSyncOutcome outcome, IReadOnlyList<BusStopAssignment> assignments)
+        private BusStopSyncPlan(
+            BusStopSyncOutcome outcome, IReadOnlyList<BusStopAssignment> assignments, BusStopSyncFailure failure)
         {
             Outcome = outcome;
             Assignments = assignments;
+            Failure = failure;
         }
 
         /// <summary>書き戻す対象が無い</summary>
         public static BusStopSyncPlan NothingToSync { get; } =
-            new BusStopSyncPlan(BusStopSyncOutcome.NothingToSync, new List<BusStopAssignment>());
+            new BusStopSyncPlan(BusStopSyncOutcome.NothingToSync, new List<BusStopAssignment>(), BusStopSyncFailure.None);
 
-        /// <summary>対応付けられない形</summary>
-        public static BusStopSyncPlan Unmappable { get; } =
-            new BusStopSyncPlan(BusStopSyncOutcome.Unmappable, new List<BusStopAssignment>());
+        /// <summary>対応付けられない形（理由付き）</summary>
+        public static BusStopSyncPlan Unmappable(BusStopSyncFailure failure)
+            => new BusStopSyncPlan(BusStopSyncOutcome.Unmappable, new List<BusStopAssignment>(), failure);
 
         /// <summary>対応付けられた計画を作る</summary>
         public static BusStopSyncPlan Mapped(IReadOnlyList<BusStopAssignment> assignments)
-            => new BusStopSyncPlan(BusStopSyncOutcome.Mapped, assignments);
+            => new BusStopSyncPlan(BusStopSyncOutcome.Mapped, assignments, BusStopSyncFailure.None);
 
         /// <summary>判定結果</summary>
         public BusStopSyncOutcome Outcome { get; }
+
+        /// <summary>対応付けられない理由（<see cref="BusStopSyncOutcome.Unmappable"/> 以外では None）</summary>
+        public BusStopSyncFailure Failure { get; }
 
         /// <summary>対応付けた明細とバス停名（<see cref="BusStopSyncOutcome.Mapped"/> のときだけ要素を持つ）</summary>
         public IReadOnlyList<BusStopAssignment> Assignments { get; }

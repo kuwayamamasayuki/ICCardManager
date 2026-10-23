@@ -170,7 +170,41 @@ public class SummaryGeneratorBusStopSyncPlanTests : IDisposable
         var plan = SummaryGenerator.PlanBusStopSync("バス（天神～吉塚 往復、大橋～薬院）", details);
 
         plan.Outcome.Should().Be(BusStopSyncOutcome.Unmappable);
+        plan.Failure.Should().Be(BusStopSyncFailure.RoundTripNotAdjacent, "件数は 3＝3 で合っている");
         plan.Assignments.Should().BeEmpty();
+    }
+
+    /// <summary>
+    /// コードレビューで検出: 往路の候補の片方が未入力（★）でも、解析できた側の相手（逆向きの値）が
+    /// ほかの位置にあれば位置で書き戻さない。明細 [天神～博多, ★, 博多～天神] に手で書いた
+    /// 「天神～博多 往復、★」を位置で書くと、★の明細へ「博多～天神」が、博多～天神 の明細へ★が入れ替わって入る。
+    /// </summary>
+    [Fact]
+    public void 片方が未入力で相手がほかの位置にある往復_位置で書き戻さないこと()
+    {
+        var details = BusDetails("天神～博多", "★", "博多～天神");
+
+        var plan = SummaryGenerator.PlanBusStopSync("バス（天神～博多 往復、★）", details);
+
+        plan.Outcome.Should().Be(BusStopSyncOutcome.Unmappable);
+        plan.Failure.Should().Be(BusStopSyncFailure.RoundTripNotAdjacent);
+    }
+
+    /// <summary>上の対: 片方が未入力でも、相手がほかの位置に無ければ摘要の並びを信じて書き戻す。</summary>
+    [Fact]
+    public void 片方が未入力で相手がほかの位置に無い往復_位置で書き戻すこと()
+    {
+        var details = BusDetails("天神～博多", "★", "大橋～薬院");
+
+        var plan = SummaryGenerator.PlanBusStopSync("バス（天神～博多 往復、大橋～薬院）", details);
+
+        plan.Outcome.Should().Be(BusStopSyncOutcome.Mapped);
+        AssignedBySequence(plan).Should().Equal(new Dictionary<int, string>
+        {
+            [3] = "天神～博多",
+            [2] = "博多～天神",
+            [1] = "大橋～薬院",
+        });
     }
 
     /// <summary>上の対: 往路と復路が隣り合っていれば、同じ摘要を書き戻すこと。</summary>
@@ -199,6 +233,7 @@ public class SummaryGeneratorBusStopSyncPlanTests : IDisposable
         var plan = SummaryGenerator.PlanBusStopSync("バス（天神）", BusDetails("★", "★"));
 
         plan.Outcome.Should().Be(BusStopSyncOutcome.Unmappable);
+        plan.Failure.Should().Be(BusStopSyncFailure.CountMismatch);
         plan.Assignments.Should().BeEmpty();
     }
 
@@ -208,6 +243,7 @@ public class SummaryGeneratorBusStopSyncPlanTests : IDisposable
         var plan = SummaryGenerator.PlanBusStopSync("バス（天神～博多 往復）", BusDetails("★"));
 
         plan.Outcome.Should().Be(BusStopSyncOutcome.Unmappable);
+        plan.Failure.Should().Be(BusStopSyncFailure.RoundTripOnSingleUsage);
     }
 
     [Fact]

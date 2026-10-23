@@ -926,10 +926,10 @@ namespace ICCardManager.ViewModels
             // 保存しても摘要だけが変わり、履歴を統合したときに明細から摘要が作り直されて編集が失われる。
             // 無言で成功扱いにせず、保存前に知らせる（保存は止めない。#1914 と同じく正当な運用と区別できないため）。
             // バス停名の部分を変えていない編集（鉄道の区間・備考だけを直した等）では出さない。
-            var unmappableBusCount = CountBusDetailsIfBusStopsUnmappable();
-            if (unmappableBusCount > 0)
+            var unmappable = FindBusStopsUnmappableFailure();
+            if (unmappable.Failure != BusStopSyncFailure.None)
             {
-                AddWarning(BuildBusStopUnmappableWarning(unmappableBusCount));
+                AddWarning(BuildBusStopUnmappableWarning(unmappable.Failure, unmappable.BusDetailCount));
             }
 
             // Addモードの場合の日付チェック
@@ -1155,36 +1155,58 @@ namespace ICCardManager.ViewModels
             "再読み込みし、最新の内容を確認してからやり直してください。";
 
         /// <summary>
-        /// Issue #2306: 編集した摘要のバス停名を明細へ対応付けられないとき、その履歴のバス利用の件数を返す。
-        /// 対応付けられる・バス停名の部分を変えていない・Add モードのときは 0。
+        /// Issue #2306: 編集した摘要のバス停名を明細へ対応付けられないとき、その理由とこの履歴のバス利用の件数を返す。
+        /// 対応付けられる・バス停名の部分を変えていない・Add モードのときは <see cref="BusStopSyncFailure.None"/>。
         /// </summary>
-        private int CountBusDetailsIfBusStopsUnmappable()
+        private (BusStopSyncFailure Failure, int BusDetailCount) FindBusStopsUnmappableFailure()
         {
             if (Mode != LedgerRowEditMode.Edit || _editDetails == null || Summary == _initialSummary)
             {
-                return 0;
+                return (BusStopSyncFailure.None, 0);
             }
 
             if (SummaryGenerator.ExtractBusStopBlocks(Summary)
                 .SequenceEqual(SummaryGenerator.ExtractBusStopBlocks(_initialSummary)))
             {
-                return 0;
+                return (BusStopSyncFailure.None, 0);
             }
 
             var plan = SummaryGenerator.PlanBusStopSync(Summary, _editDetails);
             return plan.Outcome == BusStopSyncOutcome.Unmappable
-                ? SummaryGenerator.GetBusStopEmissionOrder(_editDetails).Count
-                : 0;
+                ? (plan.Failure, SummaryGenerator.GetBusStopEmissionOrder(_editDetails).Count)
+                : (BusStopSyncFailure.None, 0);
         }
 
         /// <summary>
         /// Issue #2306: バス停名を明細へ反映できない摘要の警告文言（「何が」「なぜ」「どうすれば」の 3 要素）。
         /// </summary>
-        internal static string BuildBusStopUnmappableWarning(int busDetailCount) =>
-            $"摘要のバス停名を、この履歴のバス利用（{busDetailCount}件）へ反映できません。" +
-            "バス停名の区間の数が利用の件数と合わないため、このまま保存すると履歴を統合したときに" +
-            "編集前のバス停名へ戻ります。バス利用1件ごとに「乗車～降車」を「、」で区切るか、" +
-            $"往復は「乗車～降車{SummaryGenerator.RoundTripSuffix}」の形で入力してください。";
+        /// <remarks>
+        /// 理由ごとに「なぜ」と「どうすれば」を出し分ける（コードレビューで検出）。件数が合っていても
+        /// 往路と復路が隣り合わない往復は反映できず、その場合に「区間の数が合わない」「往復は … の形で」と
+        /// 案内すると、事実と違う理由と、いま入力した形そのものを示すことになる。
+        /// どの理由でも「往復の表記を使わず、利用 1 件ごとに区切って書けば反映できる」ことは共通して案内する。
+        /// </remarks>
+        internal static string BuildBusStopUnmappableWarning(BusStopSyncFailure failure, int busDetailCount)
+        {
+            var what = $"摘要のバス停名を、この履歴のバス利用（{busDetailCount}件）へ反映できません。";
+            var why = failure switch
+            {
+                BusStopSyncFailure.RoundTripNotAdjacent =>
+                    "往復の行きと帰りのあいだに別のバス利用があるため、往復の表記ではどの利用のバス停名か決められず、",
+                BusStopSyncFailure.RoundTripOnSingleUsage =>
+                    "バス利用が1件だけなのに往復（2件分）の表記になっているため、",
+                _ => "バス停名の区間の数が利用の件数と合わないため、",
+            };
+            var consequence = "このまま保存すると履歴を統合したときに編集前のバス停名へ戻ります。";
+            var how = failure switch
+            {
+                BusStopSyncFailure.CountMismatch =>
+                    $"行きと帰りが1件ずつで続けて乗った往復は「乗車～降車{SummaryGenerator.RoundTripSuffix}」とまとめて書けます。" +
+                    "それ以外は、バス利用1件ごとに「乗車～降車」を利用した順に「、」で区切って入力してください。",
+                _ => "往復の表記を使わず、バス利用1件ごとに「乗車～降車」を利用した順に「、」で区切って入力してください。",
+            };
+            return what + why + consequence + how;
+        }
 
         /// <summary>
         /// 摘要からバス停名を抽出してDetail.BusStopsに同期する（Issue #983）

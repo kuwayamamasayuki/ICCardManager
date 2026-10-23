@@ -606,7 +606,7 @@ namespace ICCardManager.Services
                 // 往復は 2 件の利用を表すので、1 件の明細へは書き戻せない
                 if (blocks[0].Split('、').Any(part => ExpandRoundTrip(part, context) != null))
                 {
-                    return BusStopSyncPlan.Unmappable;
+                    return BusStopSyncPlan.Unmappable(BusStopSyncFailure.RoundTripOnSingleUsage);
                 }
 
                 return BusStopSyncPlan.Mapped(new[] { new BusStopAssignment(busDetails[0], blocks[0]) });
@@ -631,12 +631,12 @@ namespace ICCardManager.Services
 
             if (entries.Count != busDetails.Count)
             {
-                return BusStopSyncPlan.Unmappable;
+                return BusStopSyncPlan.Unmappable(BusStopSyncFailure.CountMismatch);
             }
 
-            if (roundTripStarts.Any(k => ContradictsRoundTripPairing(busDetails[k], busDetails[k + 1], context)))
+            if (roundTripStarts.Any(k => ContradictsRoundTripPairing(busDetails, k, context)))
             {
-                return BusStopSyncPlan.Unmappable;
+                return BusStopSyncPlan.Unmappable(BusStopSyncFailure.RoundTripNotAdjacent);
             }
 
             return BusStopSyncPlan.Mapped(
@@ -719,25 +719,54 @@ namespace ICCardManager.Services
         }
 
         /// <summary>
-        /// 隣り合う 2 明細の現在のバス停名が、往復の往路・復路であることと矛盾するか（Issue #2306）
+        /// 位置 <paramref name="k"/>・<paramref name="k"/>+1 の 2 明細の現在のバス停名が、
+        /// 往復の往路・復路であることと矛盾するか（Issue #2306）
         /// </summary>
         /// <remarks>
-        /// 両方が「A～B」形式で解析でき、かつ互いに逆向き（同一視グループを考慮）でないときだけ矛盾とする。
-        /// 未入力（★）や停留所名だけの値は対応の手掛かりにならないため、摘要の並びを信じる。
+        /// <para>
+        /// 両方が「A～B」形式で解析できるときは、互いに逆向き（同一視グループを考慮）でなければ矛盾とする。
+        /// </para>
+        /// <para>
+        /// 片方だけが解析できる（もう片方は未入力の★や停留所名だけ）ときは、解析できた側の逆向きの値を持つ明細が
+        /// <b>ほかの位置に</b>あれば矛盾とする（明細 [A～B, ★, B～A] に手で書いた「A～B 往復、★」では、
+        /// A～B の相手は隣の★ではなく 3 件目の B～A なので、位置で書くと★の明細と B～A の明細の名前が入れ替わる。
+        /// コードレビューで検出）。
+        /// </para>
+        /// <para>
+        /// <b>限界:</b> 両方とも解析できない（どちらも★）ときは手掛かりが無いため、摘要の並びを信じる。
+        /// 明細 [★, ★, ★] に「A～B、C～D 往復」と書けば、2・3 件目が往復だと読む（摘要の並びが利用順である限り正しい）。
+        /// </para>
         /// </remarks>
         private static bool ContradictsRoundTripPairing(
-            LedgerDetail forward, LedgerDetail returnLeg, SummaryGenerationContext context)
+            List<LedgerDetail> busDetails, int k, SummaryGenerationContext context)
         {
-            var forwardRoute = forward.BusStops == null ? null : ParseBusRoute(forward.BusStops);
-            var returnRoute = returnLeg.BusStops == null ? null : ParseBusRoute(returnLeg.BusStops);
-            if (forwardRoute == null || returnRoute == null)
+            var forwardRoute = ParseExistingBusRoute(busDetails[k]);
+            var returnRoute = ParseExistingBusRoute(busDetails[k + 1]);
+
+            if (forwardRoute != null && returnRoute != null)
+            {
+                return !IsReverseRoute(forwardRoute.Value, returnRoute.Value, context);
+            }
+
+            var known = forwardRoute ?? returnRoute;
+            if (known == null)
             {
                 return false;
             }
 
-            return !(context.AreTransferStations(forwardRoute.Value.Entry, returnRoute.Value.Exit)
-                && context.AreTransferStations(forwardRoute.Value.Exit, returnRoute.Value.Entry));
+            // 解析できた側の相手（逆向きの値）が、隣ではなくほかの位置にある
+            return busDetails
+                .Where((_, i) => i != k && i != k + 1)
+                .Select(ParseExistingBusRoute)
+                .Any(other => other != null && IsReverseRoute(known.Value, other.Value, context));
         }
+
+        private static (string Entry, string Exit)? ParseExistingBusRoute(LedgerDetail detail)
+            => detail.BusStops == null ? null : ParseBusRoute(detail.BusStops);
+
+        private static bool IsReverseRoute(
+            (string Entry, string Exit) a, (string Entry, string Exit) b, SummaryGenerationContext context)
+            => context.AreTransferStations(a.Entry, b.Exit) && context.AreTransferStations(a.Exit, b.Entry);
 
         /// <summary>
         /// 摘要にバス利用が含まれるかを判定（Issue #1818）
