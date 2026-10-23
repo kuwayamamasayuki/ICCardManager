@@ -733,8 +733,11 @@ public class MainViewModelIntegrationTests
     /// </summary>
     /// <remarks>
     /// 逆処理の「操作者」は職員B（Issue #1729）だが、返却の操作者は台帳に記録しない。
-    /// 利用の行は貸出レコードの貸出者の名義で作られ、<c>ic_card.lender_idm</c> は返却で null に戻る。
+    /// 利用の行は貸出レコードの貸出者の名義で作られ、<c>ic_card.last_lent_staff</c> は返却で null に戻る。
     /// 名義は貸出者（カードを持ち出して使った職員）を正とする（04_機能設計書 §2.4.1・§3.4）。
+    /// 逆処理だけが出す通知は無く、貸出中のカードを職員B がタッチした結果は通常の返却と同じになるため、
+    /// 逆処理の経路を通ることは 2 回目のタッチの直前に <see cref="LendingService.IsRetouchWithinTimeout"/> が
+    /// 真であること（真なら必ず <c>Process30SecondRuleAsync</c> へ分岐する）で前提として表明する。
     /// </remarks>
     [Fact]
     public async Task Retouch30Sec_別職員が逆処理で返却しても利用の行は貸出者の名義で記録されること()
@@ -787,6 +790,9 @@ public class MainViewModelIntegrationTests
         // Act-2: 職員B が自分の職員証をタッチしてから同一カードをタッチ（30秒以内の再タッチ → 逆処理で返却）
         RaiseCardRead(StaffIdmB);
         await _dispatcherService.WaitForPendingAsync();
+        _viewModel.CurrentState.Should().Be(AppState.WaitingForIcCard, "職員B の職員証タッチで操作者が確定している");
+        _lendingService.IsRetouchWithinTimeout(CardIdmA).Should().BeTrue(
+            "次のタッチは 30秒ルールの逆処理（Process30SecondRuleAsync）へ分岐する");
         RaiseCardRead(CardIdmA);
         await _dispatcherService.WaitForPendingAsync();
 
@@ -800,7 +806,7 @@ public class MainViewModelIntegrationTests
             l => l.LenderIdm == StaffIdmB || l.StaffName == StaffNameB,
             "逆処理で返却した職員B の名義では記録しない");
 
-        // Assert: ic_card.lender_idm は返却で null に戻る（職員B を貸出者として残さない）
+        // Assert: ic_card.last_lent_staff は返却で null に戻る（職員B を最終貸出者として残さない）
         _cardRepositoryMock.Verify(r => r.UpdateLentStatusAsync(CardIdmA, false, null, null), Times.Once);
         _cardRepositoryMock.Verify(
             r => r.UpdateLentStatusAsync(CardIdmA, true, It.IsAny<DateTime?>(), StaffIdmB),

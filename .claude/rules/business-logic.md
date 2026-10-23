@@ -26,9 +26,9 @@
 | 職員証タッチ待ち | null | 前回操作者（`_lastProcessedStaffIdm`）で補完 |
 | 職員証タッチ待ち かつ 前回操作者も null | null | 記録せずエラー通知 |
 
-- **「逆処理の操作者」と「台帳の利用の行の名義」は別物**（Issue #2323）。操作者が台帳に残るのは**貸出方向だけ**（貸出レコードの `lender_idm` / `staff_name` と `ic_card.lender_idm`）。**返却方向では操作者はどこにも記録されない** — `ReturnAsync` の `staffIdm` は登録済みの職員かの確認にだけ使い、利用の行は**貸出レコードの貸出者**の名義で作られ（`PersistReturnAsync`）、`ic_card.lender_idm` は NULL に戻り、貸出レコードは削除される。職員B が職員A の貸出を逆処理で返却しても、利用の行は職員A の名義。名義を貸出者にするのは、カードを持ち出して使ったのが貸出者であり物品出納簿の実態に合うため（業務判断。04_機能設計書 §2.4.1・§3.4）。なお貸出・返却（逆処理を含む）は `operation_log` に記録しない
+- **「逆処理の操作者」と「台帳の利用の行の名義」は別物**（Issue #2323）。操作者が台帳に残るのは**貸出方向だけ**（貸出レコードの `lender_idm` / `staff_name` と `ic_card.last_lent_staff`）。**返却方向では操作者はどこにも記録されない** — `ReturnAsync` の `staffIdm` は登録済みの職員かの確認にだけ使い、利用の行は**貸出レコードの貸出者**の名義で作られ（`PersistReturnAsync`）、`ic_card.last_lent_staff` は NULL に戻り、貸出レコードは削除される（`ledger.returner_idm` / `returned_at` はどの経路も書かない未使用の列）。職員B が職員A の貸出を逆処理で返却しても、利用の行は職員A の名義。名義を貸出者にするのは、カードを持ち出して使ったのが貸出者であり物品出納簿の実態に合うため（業務判断。04_機能設計書 §2.4.1・§3.4）。なお**カードのタッチによる**貸出・返却（逆処理を含む）は `operation_log` に記録しない（システム操作による貸出記録の作成 `SystemLendViewModel`（#1909）は記録する）
   - **名義の回帰は貸出者と返却者を別の職員にして表明する**。同じ職員で貸出・返却するテストは、名義に貸出者・返却者のどちらを書いても緑になる（#2323 で設計書が「返却者」、実装が「貸出者」のまま食い違っていたのを、既存テストが検出できなかった）
-- **「無い値の補完」と「有る値の上書き」を同じ代入文で書かない**。`Process30SecondRuleAsync` の `_currentStaffIdm = _lastProcessedStaffIdm;` は「操作者不在時の補完」が意図（XML コメントもその趣旨）だったが、無条件代入だったため職員証タッチ済みの経路では**確定済みの操作者を捨てて前回操作者に差し替えていた**。貸出レコードの `ledger.StaffName` / `ic_card.lender_idm` が実際の操作者と食い違い、長期未返却の督促も誤った職員へ向かう
+- **「無い値の補完」と「有る値の上書き」を同じ代入文で書かない**。`Process30SecondRuleAsync` の `_currentStaffIdm = _lastProcessedStaffIdm;` は「操作者不在時の補完」が意図（XML コメントもその趣旨）だったが、無条件代入だったため職員証タッチ済みの経路では**確定済みの操作者を捨てて前回操作者に差し替えていた**。貸出レコードの `ledger.StaffName` / `ic_card.last_lent_staff` が実際の操作者と食い違い、長期未返却の督促も誤った職員へ向かう
 - **「意図が補完なら、補完の条件を書く」**。`if (string.IsNullOrEmpty(_currentStaffIdm))` を付けるだけで意図とコードが一致する。コメントで意図を書いても、コードが無条件なら無条件に動く
 - **null 判定を経路判定の代理に使うなら、その等価性を確かめて明記する**。`AppState.WaitingForStaffCard` へ遷移する経路は `MainViewModel.ResetState()` ただ 1 つで、そこで `_currentStaffIdm` は必ず null になるため「未確定＝職員証タッチ待ち経路」が成立する。この前提が崩れる遷移を足すときは本規則を見直すこと
 - **エラー分岐（操作者が現在も前回も不明）は到達可能**。仮想タッチ（Issue #1577）は `LendingService.ReturnAsync` を直接呼ぶため `LastProcessedCardIdm` は立つが `MainViewModel` の前回操作者は立たない。「到達不能だから」と削らない
