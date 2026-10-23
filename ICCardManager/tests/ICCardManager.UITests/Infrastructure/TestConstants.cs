@@ -494,6 +494,23 @@ namespace ICCardManager.UITests.Infrastructure
         [UiaName]
         public const string LedgerRowEditDeleteButton = "この履歴を削除";
 
+        /// <summary>履歴行の追加・修正ダイアログの「×」（利用者をクリア）ボタン。</summary>
+        [UiaName]
+        public const string LedgerRowEditClearStaffButton = "利用者をクリア";
+
+        /// <summary>履歴行の追加・修正ダイアログの備考の入力欄。</summary>
+        [UiaName]
+        public const string LedgerRowEditNoteInput = "備考";
+
+        /// <summary>履歴行の追加・修正ダイアログの「保存」ボタン。</summary>
+        [UiaName]
+        public const string LedgerRowEditSaveButton = "保存";
+
+        // 一覧に無い利用者の注記は Name を文言へバインドしているため、AutomationId で探す（Issue #2300）。
+        /// <summary>履歴行の追加・修正ダイアログで、利用者が職員一覧に無いときに出す注記の AutomationId。</summary>
+        [NotUiaName]
+        public const string LedgerRowEditUnlistedStaffNoticeId = "UnlistedStaffNotice";
+
         /// <summary>メイン画面の利用履歴の一覧（DataGrid）。</summary>
         [UiaName]
         public const string HistoryLedgerGrid = "利用履歴一覧";
