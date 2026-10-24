@@ -116,7 +116,7 @@ public class WarningServiceTests
             new() { Summary = "バス（★）" }
         };
         _ledgerRepositoryMock
-            .Setup(r => r.GetByDateRangeAsync(null, It.IsAny<DateTime>(), It.IsAny<DateTime>()))
+            .Setup(r => r.GetBySummaryContainingAsync(It.IsAny<string>()))
             .ReturnsAsync(ledgers);
 
         // Act
@@ -139,7 +139,7 @@ public class WarningServiceTests
             new() { Summary = "鉄道（博多～天神 往復）" }
         };
         _ledgerRepositoryMock
-            .Setup(r => r.GetByDateRangeAsync(null, It.IsAny<DateTime>(), It.IsAny<DateTime>()))
+            .Setup(r => r.GetBySummaryContainingAsync(It.IsAny<string>()))
             .ReturnsAsync(ledgers);
 
         // Act
@@ -160,7 +160,7 @@ public class WarningServiceTests
             new() { Summary = "バス（★）" }
         };
         _ledgerRepositoryMock
-            .Setup(r => r.GetByDateRangeAsync(null, It.IsAny<DateTime>(), It.IsAny<DateTime>()))
+            .Setup(r => r.GetBySummaryContainingAsync(It.IsAny<string>()))
             .ReturnsAsync(ledgers);
 
         // Act: null混在でも例外は発生せず、★を含む1件のみカウントされる
@@ -172,34 +172,35 @@ public class WarningServiceTests
         warning!.DisplayText.Should().Be("⚠️ バス停名が未入力の履歴が1件あります", "カウントは1件");
     }
 
+    /// <summary>
+    /// Issue #2329: 期間で区切らず、全期間の取得元（<c>GetBySummaryContainingAsync(プレースホルダ)</c>）から数えること。
+    /// </summary>
+    /// <remarks>
+    /// 以前は直近 1 年（<c>GetByDateRangeAsync(null, 1 年前, 現在)</c>）で問い合わせており、1 年より前の未入力は
+    /// 件数から外れて二度と案内されなかった（Issue #2104 / #2106 のテストはその期間を固定していた）。
+    /// 期間で区切った問い合わせへ戻した実装を、取得元の違いで検出する。
+    /// </remarks>
     [Fact]
-    public async Task CheckIncompleteBusStopsAsync_過去1年間の範囲で問い合わせること()
+    public async Task CheckIncompleteBusStopsAsync_期間で区切らず全期間の未入力を数えること()
     {
-        // Arrange
-        DateTime? capturedFrom = null;
-        DateTime? capturedTo = null;
+        // Arrange: 1 年より前（5 年前）の未入力を含む
         _ledgerRepositoryMock
-            .Setup(r => r.GetByDateRangeAsync(null, It.IsAny<DateTime>(), It.IsAny<DateTime>()))
-            .Callback<string, DateTime, DateTime>((_, from, to) =>
+            .Setup(r => r.GetBySummaryContainingAsync(It.IsAny<string>()))
+            .ReturnsAsync(new List<Ledger>
             {
-                capturedFrom = from;
-                capturedTo = to;
-            })
-            .ReturnsAsync(new List<Ledger>());
+                new() { Date = DateTime.Today, Summary = "バス（★）" },
+                new() { Date = DateTime.Today.AddYears(-5), Summary = "バス（★）" }
+            });
 
-        // Act: 本体は DateTime.Now を直接読むため、呼び出しの前後の時刻で挟んで起点を確定する
-        var before = DateTime.Now;
-        await _service.CheckIncompleteBusStopsAsync();
-        var after = DateTime.Now;
+        // Act
+        var warning = await _service.CheckIncompleteBusStopsAsync();
 
-        // Assert: 期間が「現在から1年前 〜 現在」になっている。
-        // Issue #2106: 旧版は幅（約 1 年）しか見ておらず、期間がまるごと過去へずれても
-        // （例: 2 年前〜1 年前）緑だった。起点と終点をそれぞれ呼び出し時刻の前後で挟む。
-        capturedFrom.Should().NotBeNull();
-        capturedTo.Should().NotBeNull();
-        capturedTo!.Value.Should().BeOnOrAfter(before).And.BeOnOrBefore(after, "終点は呼び出した時点の現在時刻");
-        capturedFrom!.Value.Should().BeOnOrAfter(before.AddYears(-1)).And.BeOnOrBefore(
-            after.AddYears(-1), "起点は呼び出した時点のちょうど 1 年前（日付単位へ丸めない）");
+        // Assert
+        warning!.DisplayText.Should().Be("⚠️ バス停名が未入力の履歴が2件あります", "1 年より前の未入力も数える");
+        _ledgerRepositoryMock.Verify(r => r.GetBySummaryContainingAsync(SummaryGenerator.BusPlaceholder), Times.Once);
+        _ledgerRepositoryMock.Verify(
+            r => r.GetByDateRangeAsync(It.IsAny<string>(), It.IsAny<DateTime>(), It.IsAny<DateTime>()),
+            Times.Never, "期間で区切った問い合わせをしない");
     }
 
     #endregion

@@ -59,7 +59,7 @@ public partial class MainViewModel
             // Issue #790: 起動時に貸出状態の整合性をチェック・修復
             await _lendingService.RepairLentStatusConsistencyAsync();
 
-            // ダッシュボード更新（カード情報・残高を取得）
+            // ダッシュボード更新（カード情報・残高を取得）。残額警告もここで同じしきい値から作る（Issue #2329）
             await RefreshDashboardAsync();
 
             // 設定を取得してサウンドモードを適用
@@ -68,9 +68,6 @@ public partial class MainViewModel
 
             // 貸出中カードを取得
             await RefreshLentCardsAsync();
-
-            // 警告チェック（ダッシュボードデータを使用して高速化）
-            ApplyDataWarnings(settings.WarningBalance);
 
             // カード読み取り開始
             await _cardReader.StartReadingAsync();
@@ -532,6 +529,13 @@ public partial class MainViewModel
         {
             CardBalanceDashboard.Add(item);
         }
+
+        // Issue #2329: 残額警告（LowBalance）はダッシュボードと同じ時点・同じしきい値で作り直す。
+        // ダッシュボードの警告アイコン（IsBalanceWarning）は DashboardService が result.WarningBalance で判定しているため、
+        // 一覧も同じ値で判定すれば両者は食い違わない。以前は警告再チェック（CheckWarningsAsync）でしか作り直さず、
+        // 共有モードの定期更新（RefreshSharedDataAsync）では他の PC の返却・チャージでアイコンだけが変わり、
+        // 一覧は自分の PC の次の操作まで古いまま（チャージ済みのカードが「残額不足」のまま）残っていた。
+        ApplyDataWarnings(result.WarningBalance);
 
         // Issue #1739: 有効でなくなったカードの残高不整合警告を取り除く。
         // 生成元（履歴パネル HistoryPanelViewModel の CheckAndNotifyConsistencyAsync / CheckAllCardsConsistencyAsync）はどちらも

@@ -354,8 +354,7 @@ public class MainViewModelTests : IDisposable
         // DB 同時アクセスを避けるために直列 await へまとめると、この性質が失われる（Issue #1737）。
         // 個別 catch で明示的に保存していることを表明する。
         SetupWarningCheckDefaults();
-        _ledgerRepositoryMock.Setup(r => r.GetByDateRangeAsync(
-                It.IsAny<string>(), It.IsAny<DateTime>(), It.IsAny<DateTime>()))
+        _ledgerRepositoryMock.Setup(r => r.GetBySummaryContainingAsync(It.IsAny<string>()))
             .ThrowsAsync(new InvalidOperationException("バス停チェックの失敗を注入"));
 
         var vm = CreateViewModelWithCarryoverDetector(DetectorReturning("はやかけん 001"));
@@ -387,8 +386,7 @@ public class MainViewModelTests : IDisposable
             return (IReadOnlyList<CarryoverDataLossItem>)new List<CarryoverDataLossItem>();
         });
 
-        _ledgerRepositoryMock.Setup(r => r.GetByDateRangeAsync(
-                It.IsAny<string>(), It.IsAny<DateTime>(), It.IsAny<DateTime>()))
+        _ledgerRepositoryMock.Setup(r => r.GetBySummaryContainingAsync(It.IsAny<string>()))
             .Returns(async () =>
             {
                 lock (gate) { maxConcurrent = Math.Max(maxConcurrent, ++concurrent); }
@@ -491,8 +489,7 @@ public class MainViewModelTests : IDisposable
     {
         _settingsRepositoryMock.Setup(r => r.GetAppSettingsAsync())
             .ReturnsAsync(new AppSettings { WarningBalance = warningBalance });
-        _ledgerRepositoryMock.Setup(r => r.GetByDateRangeAsync(
-                It.IsAny<string>(), It.IsAny<DateTime>(), It.IsAny<DateTime>()))
+        _ledgerRepositoryMock.Setup(r => r.GetBySummaryContainingAsync(It.IsAny<string>()))
             .ReturnsAsync(busStopLedgers ?? new List<Ledger>());
     }
 
@@ -764,8 +761,7 @@ public class MainViewModelTests : IDisposable
 
         var firstCallGate = new TaskCompletionSource<IEnumerable<Ledger>>();
         var callCount = 0;
-        _ledgerRepositoryMock.Setup(r => r.GetByDateRangeAsync(
-                It.IsAny<string>(), It.IsAny<DateTime>(), It.IsAny<DateTime>()))
+        _ledgerRepositoryMock.Setup(r => r.GetBySummaryContainingAsync(It.IsAny<string>()))
             .Returns(() => ++callCount == 1
                 ? firstCallGate.Task
                 : Task.FromResult<IEnumerable<Ledger>>(new List<Ledger>()));
@@ -3076,6 +3072,117 @@ public class MainViewModelTests : IDisposable
             .Should().Equal(new[] { 1, 2 },
                 "定期リフレッシュは利用者の選択操作を消さないこと");
     }
+
+    #region 共有モードの定期更新と残額警告（Issue #2329）
+
+    private const string SharedRefreshCardIdm = "0D0D0D0D0D0D0D0D";
+
+    /// <summary>
+    /// 定期更新（RefreshSharedDataAsync）が最後まで走る既定値を置き、カード 1 枚の最新残額を返す。
+    /// </summary>
+    private void ArrangeSharedRefresh(int balance, params int[] warningBalancesInCallOrder)
+    {
+        _cardRepositoryMock.Setup(r => r.GetLentAsync(It.IsAny<bool>()))
+            .ReturnsAsync(new List<IcCard>());
+        _cardRepositoryMock.Setup(r => r.GetAllAsync())
+            .ReturnsAsync(new List<IcCard> { new IcCard { CardIdm = SharedRefreshCardIdm, CardType = "はやかけん", CardNumber = "5042" } });
+        _staffRepositoryMock.Setup(r => r.GetAllAsync())
+            .ReturnsAsync(new List<Staff>());
+        _ledgerRepositoryMock.Setup(r => r.GetAllLatestBalancesAsync())
+            .ReturnsAsync(new Dictionary<string, (int Balance, DateTime? LastUsageDate)>
+            {
+                [SharedRefreshCardIdm] = (balance, DateTime.Today)
+            });
+        var settings = _settingsRepositoryMock.SetupSequence(r => r.GetAppSettingsAsync());
+        foreach (var warningBalance in warningBalancesInCallOrder)
+        {
+            settings = settings.ReturnsAsync(new AppSettings { WarningBalance = warningBalance });
+        }
+    }
+
+    /// <summary>
+    /// 欠陥を突く側: 他の PC の返却で残額がしきい値以下になったら、定期更新で警告アイコンと残額警告の一覧が揃って変わること。
+    /// </summary>
+    /// <remarks>
+    /// 以前は定期更新がダッシュボード（アイコン）だけを作り直し、一覧は自分の PC の次の操作（警告再チェック）まで古いままだった。
+    /// 残額はしきい値ちょうど（「以下」の境界。Issue #1998）に置き、アイコンと一覧の境界が揃っていることもあわせて表明する。
+    /// </remarks>
+    [Fact]
+    public async Task RefreshSharedDataAsync_残額がしきい値以下になったカードを残額警告の一覧にも載せること()
+    {
+        ArrangeSharedRefresh(balance: 1000, 1000, 1000, 1000);
+
+        await _viewModel.RefreshSharedDataAsync();
+
+        _viewModel.CardBalanceDashboard.Should().ContainSingle(i => i.CardIdm == SharedRefreshCardIdm)
+            .Which.IsBalanceWarning.Should().BeTrue("前提: アイコンは残額不足を示す");
+        _viewModel.WarningMessages.Should().ContainSingle(w => w.Type == WarningType.LowBalance && w.CardIdm == SharedRefreshCardIdm,
+            "アイコンと同じ時点で一覧にも載せる");
+    }
+
+    /// <summary>
+    /// 欠陥を突く側（逆向き）: 他の PC でチャージされて残額が回復したら、定期更新で残額警告を取り除くこと。
+    /// </summary>
+    /// <remarks>
+    /// 取り除かないと、アイコンが消えたカードに「残額不足」の一覧が残り、補充済みのカードを補充するよう誤って案内する。
+    /// </remarks>
+    [Fact]
+    public async Task RefreshSharedDataAsync_残額が回復したカードの残額警告を取り除くこと()
+    {
+        _viewModel.WarningMessages.Add(new WarningItem
+        {
+            Type = WarningType.LowBalance,
+            CardIdm = SharedRefreshCardIdm,
+            DisplayText = "⚠️ はやかけん 5042: 残額 500円（しきい値: 1,000円）"
+        });
+        ArrangeSharedRefresh(balance: 5000, 1000, 1000, 1000);
+
+        await _viewModel.RefreshSharedDataAsync();
+
+        _viewModel.CardBalanceDashboard.Single().IsBalanceWarning.Should().BeFalse("前提: アイコンは消えている");
+        _viewModel.WarningMessages.Should().NotContain(w => w.Type == WarningType.LowBalance);
+    }
+
+    /// <summary>
+    /// 一覧はダッシュボードのアイコンを判定したしきい値（<c>DashboardResult.WarningBalance</c>）で作ること。
+    /// </summary>
+    /// <remarks>
+    /// 設定を読み直すと、ダッシュボードを作った後に変わったしきい値で一覧だけが作られ、アイコンと一覧が食い違う。
+    /// 1 回目の設定読み取り（ダッシュボード）だけが 1,000 円で、以後は 100 円を返す形で、読み直した実装を検出する。
+    /// </remarks>
+    [Fact]
+    public async Task RefreshSharedDataAsync_残額警告はダッシュボードと同じしきい値で作ること()
+    {
+        ArrangeSharedRefresh(balance: 800, 1000, 100, 100);
+
+        await _viewModel.RefreshSharedDataAsync();
+
+        var iconShown = _viewModel.CardBalanceDashboard.Single().IsBalanceWarning;
+        var listed = _viewModel.WarningMessages.Any(w => w.Type == WarningType.LowBalance && w.CardIdm == SharedRefreshCardIdm);
+        iconShown.Should().BeTrue("前提: ダッシュボードは 1,000 円で判定している");
+        listed.Should().Be(iconShown, "アイコンと一覧は同じしきい値で作る");
+        _viewModel.WarningMessages.Single(w => w.Type == WarningType.LowBalance).DisplayText
+            .Should().Contain("しきい値: 1,000円");
+    }
+
+    /// <summary>
+    /// 正当な動作を塞いでいない側: 定期更新は残額警告だけを入れ替え、他の種別を消さず、繰り返しても重複させないこと。
+    /// </summary>
+    [Fact]
+    public async Task RefreshSharedDataAsync_残額警告以外を消さず繰り返しても重複させないこと()
+    {
+        var preserved = new WarningItem { Type = WarningType.BackupStale, DisplayText = "⚠️ バックアップのテスト警告" };
+        _viewModel.WarningMessages.Add(preserved);
+        ArrangeSharedRefresh(balance: 500, 1000, 1000, 1000, 1000, 1000, 1000);
+
+        await _viewModel.RefreshSharedDataAsync();
+        await _viewModel.RefreshSharedDataAsync();
+
+        _viewModel.WarningMessages.Count(w => w.Type == WarningType.LowBalance).Should().Be(1);
+        _viewModel.WarningMessages.Should().Contain(preserved);
+    }
+
+    #endregion
 
     /// <summary>
     /// Issue #2202: 定期リフレッシュが貸出中カード・ダッシュボードの読み込みを待つ間にカードのタッチ（返却フロー）が

@@ -160,11 +160,16 @@ namespace ICCardManager.Services
         /// <summary>
         /// バス停名未入力の件数をチェック
         /// </summary>
+        /// <remarks>
+        /// Issue #2329: 対象は台帳に残っている全期間（保存期間 6 年）。以前は直近 1 年に区切っており、
+        /// 1 年より前の「バス（★）」は件数から外れて二度と案内されなかった。
+        /// 取得元は一覧（<c>IncompleteBusStopViewModel</c>）と同じ <see cref="ILedgerQueryService.GetBySummaryContainingAsync"/>（プレースホルダを渡す）
+        /// （件数と一覧の母集団を食い違わせない）。
+        /// </remarks>
         /// <returns>未入力件数がある場合はWarningItem、ない場合はnull</returns>
         public async Task<WarningItem?> CheckIncompleteBusStopsAsync()
         {
-            var ledgers = await _ledgerRepository.GetByDateRangeAsync(
-                null, DateTime.Now.AddYears(-1), DateTime.Now).ConfigureAwait(false);
+            var ledgers = await _ledgerRepository.GetBySummaryContainingAsync(SummaryGenerator.BusPlaceholder).ConfigureAwait(false);
 
             // Issue #1818: プレースホルダは組織設定（SummaryText.BusPlaceholder）由来のため直書きしない
             var incompleteCount = ledgers.Count(l => SummaryGenerator.HasIncompleteBusStop(l.Summary));

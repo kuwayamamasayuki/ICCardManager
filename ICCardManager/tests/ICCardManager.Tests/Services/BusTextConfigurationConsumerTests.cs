@@ -156,7 +156,7 @@ public class BusTextConfigurationConsumerTests : IDisposable
     public async Task CheckIncompleteBusStopsAsync_設定したプレースホルダで未入力を数える()
     {
         var ledgerRepo = new Mock<ILedgerRepository>();
-        ledgerRepo.Setup(r => r.GetByDateRangeAsync(null, It.IsAny<DateTime>(), It.IsAny<DateTime>()))
+        ledgerRepo.Setup(r => r.GetBySummaryContainingAsync(It.IsAny<string>()))
             .ReturnsAsync(new List<Ledger>
             {
                 new Ledger { Id = 1, Summary = $"{CustomBusLabel}（{CustomPlaceholder}）" },
@@ -176,7 +176,7 @@ public class BusTextConfigurationConsumerTests : IDisposable
     {
         // 対のテスト: 「★」と設定値の両方を拾う実装（判定が広すぎる形）を検出する
         var ledgerRepo = new Mock<ILedgerRepository>();
-        ledgerRepo.Setup(r => r.GetByDateRangeAsync(null, It.IsAny<DateTime>(), It.IsAny<DateTime>()))
+        ledgerRepo.Setup(r => r.GetBySummaryContainingAsync(It.IsAny<string>()))
             .ReturnsAsync(new List<Ledger>
             {
                 new Ledger { Id = 1, Summary = "バス（★）" },
@@ -196,7 +196,7 @@ public class BusTextConfigurationConsumerTests : IDisposable
     public async Task IncompleteBusStopViewModel_設定したプレースホルダの履歴を一覧に載せる()
     {
         var ledgerRepo = new Mock<ILedgerRepository>();
-        ledgerRepo.Setup(r => r.GetByDateRangeAsync(null, It.IsAny<DateTime>(), It.IsAny<DateTime>()))
+        ledgerRepo.Setup(r => r.GetBySummaryContainingAsync(It.IsAny<string>()))
             .ReturnsAsync(new List<Ledger>
             {
                 new Ledger { Id = 1, CardIdm = "A", Date = DateTime.Today, Summary = $"{CustomBusLabel}（{CustomPlaceholder}）" },
