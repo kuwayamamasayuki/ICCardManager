@@ -24,8 +24,8 @@ namespace ICCardManager.Data.Migrations
         {
             // ledgerテーブルに (card_idm, id DESC) の複合インデックスを追加
             // 追加当時は GetAllLatestBalancesAsync() が各カードの最新レコードを id で取っていたため。
-            // Issue #1068 で最新残高の取得を日付基準へ変えて以降、これを探索に使う本番クエリは無い
-            // （カード単位の検索は idx_ledger_card_date が担う。02_DB設計書 §5）。適用済みのマイグレーションなので変えない
+            // Issue #1068 で最新残高の取得を日付基準へ変えたため当初の用途は無くなったが、card_idm の等値で絞る
+            // クエリで SQLite が選ぶことがある（02_DB設計書 §5）。適用済みのマイグレーションなので定義は変えない
             ExecuteNonQuery(connection, transaction,
                 "CREATE INDEX IF NOT EXISTS idx_ledger_card_id ON ledger(card_idm, id DESC)");
 
