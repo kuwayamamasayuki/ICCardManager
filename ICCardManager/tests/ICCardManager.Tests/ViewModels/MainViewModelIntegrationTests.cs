@@ -377,7 +377,7 @@ public class MainViewModelIntegrationTests
         _viewModel.WarningMessages.Add(new WarningItem
         {
             Type = WarningType.BackupStale,
-            DisplayText = "⚠️ 自動バックアップが10日間成功していません"
+            DisplayText = "⚠️ バックアップが10日間成功していません"
         });
         _viewModel.WarningMessages.Add(new WarningItem
         {
