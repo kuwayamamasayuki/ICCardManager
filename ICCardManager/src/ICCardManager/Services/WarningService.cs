@@ -20,12 +20,16 @@ namespace ICCardManager.Services
     {
         private readonly ILedgerRepository _ledgerRepository;
         private readonly IDatabaseInfo _databaseInfo;
+        private readonly ICardRepository _cardRepository;
         private readonly IUpdateNotificationService? _updateNotificationService;
         private readonly IBackupHealthService? _backupHealthService;
         private readonly ICarryoverDataLossDetector? _carryoverDataLossDetector;
 
         /// <param name="ledgerRepository">台帳リポジトリ</param>
         /// <param name="databaseInfo">DB接続情報</param>
+        /// <param name="cardRepository">
+        /// カードの母集団（Issue #2329。バス停名未入力の警告を運用中のカードに限るため）
+        /// </param>
         /// <param name="updateNotificationService">
         /// 更新通知チェック（Issue #1687）。null の場合、更新通知警告は常に生成されない
         /// （既存テストの構築コードとの互換のため省略可能にしている。DI経由では常に注入される）
@@ -41,12 +45,14 @@ namespace ICCardManager.Services
         public WarningService(
             ILedgerRepository ledgerRepository,
             IDatabaseInfo databaseInfo,
+            ICardRepository cardRepository,
             IUpdateNotificationService? updateNotificationService = null,
             IBackupHealthService? backupHealthService = null,
             ICarryoverDataLossDetector? carryoverDataLossDetector = null)
         {
             _ledgerRepository = ledgerRepository;
             _databaseInfo = databaseInfo;
+            _cardRepository = cardRepository;
             _updateNotificationService = updateNotificationService;
             _backupHealthService = backupHealthService;
             _carryoverDataLossDetector = carryoverDataLossDetector;
@@ -161,18 +167,14 @@ namespace ICCardManager.Services
         /// バス停名未入力の件数をチェック
         /// </summary>
         /// <remarks>
-        /// Issue #2329: 対象は台帳に残っている全期間（保存期間 6 年）。以前は直近 1 年に区切っており、
-        /// 1 年より前の「バス（★）」は件数から外れて二度と案内されなかった。
-        /// 取得元は一覧（<c>IncompleteBusStopViewModel</c>）と同じ <see cref="ILedgerQueryService.GetBySummaryContainingAsync"/>（プレースホルダを渡す）
+        /// Issue #2329: 対象は台帳に残っている全期間（保存期間 6 年）の、運用中のカードの未入力。
+        /// 取得は一覧（<c>IncompleteBusStopViewModel</c>）と同じ <see cref="IncompleteBusStopLedgers.LoadAsync"/>
         /// （件数と一覧の母集団を食い違わせない）。
         /// </remarks>
         /// <returns>未入力件数がある場合はWarningItem、ない場合はnull</returns>
         public async Task<WarningItem?> CheckIncompleteBusStopsAsync()
         {
-            var ledgers = await _ledgerRepository.GetBySummaryContainingAsync(SummaryGenerator.BusPlaceholder).ConfigureAwait(false);
-
-            // Issue #1818: プレースホルダは組織設定（SummaryText.BusPlaceholder）由来のため直書きしない
-            var incompleteCount = ledgers.Count(l => SummaryGenerator.HasIncompleteBusStop(l.Summary));
+            var incompleteCount = (await IncompleteBusStopLedgers.LoadAsync(_ledgerRepository, _cardRepository).ConfigureAwait(false)).Count;
             if (incompleteCount > 0)
             {
                 return new WarningItem

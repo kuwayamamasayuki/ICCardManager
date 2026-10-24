@@ -17,7 +17,8 @@ public class WarningServiceCardBalanceMismatchTests
 
     private readonly WarningService _service = new WarningService(
         new Mock<ILedgerRepository>().Object,
-        new Mock<IDatabaseInfo>().Object);
+        new Mock<IDatabaseInfo>().Object,
+        new Mock<ICardRepository>().Object);
 
     private WarningItem Check(int actualBalance, int recordedBalance, bool isLent = false) =>
         _service.CheckCardBalanceMismatchWarning(

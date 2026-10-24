@@ -234,7 +234,7 @@ public class MainViewModelSyncDisplayTests
 
         // dbContextはIDatabaseInfoを実装しているので直接使用可能
         var sharedModeMonitor = new SharedModeMonitor(dbContext, timerFactory, _clock);
-        var warningService = new WarningService(ledgerRepositoryMock.Object, dbContext);
+        var warningService = new WarningService(ledgerRepositoryMock.Object, dbContext, cardRepositoryMock.Object);
         var dashboardService = new DashboardService(cardRepositoryMock.Object, ledgerRepositoryMock.Object,
             staffRepositoryMock.Object, settingsRepositoryMock.Object);
 
@@ -340,7 +340,7 @@ public class MainViewModelSyncDisplayTests
         var ledgerConsistencyChecker = new LedgerConsistencyChecker(ledgerRepositoryMock.Object);
 
         var sharedModeMonitor = new SharedModeMonitor(dbContext, timerFactory, _clock);
-        var warningService = new WarningService(ledgerRepositoryMock.Object, dbContext);
+        var warningService = new WarningService(ledgerRepositoryMock.Object, dbContext, cardRepositoryMock.Object);
         var dashboardService = new DashboardService(cardRepositoryMock.Object, ledgerRepositoryMock.Object,
             staffRepositoryMock.Object, settingsRepositoryMock.Object);
 

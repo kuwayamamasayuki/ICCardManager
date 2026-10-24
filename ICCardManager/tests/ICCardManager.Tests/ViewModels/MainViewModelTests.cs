@@ -172,7 +172,7 @@ public class MainViewModelTests : IDisposable
             databaseInfoMock.Object,
             new Mock<ICacheService>().Object,
             new SharedModeMonitor(databaseInfoMock.Object, _timerFactory, new SystemClock()),
-            new WarningService(_ledgerRepositoryMock.Object, databaseInfoMock.Object),
+            new WarningService(_ledgerRepositoryMock.Object, databaseInfoMock.Object, _cardRepositoryMock.Object),
             new DashboardService(_cardRepositoryMock.Object, _ledgerRepositoryMock.Object,
                 _staffRepositoryMock.Object, _settingsRepositoryMock.Object),
             new Mock<ICCardManager.Services.ISafeFileLauncher>().Object,
@@ -220,6 +220,7 @@ public class MainViewModelTests : IDisposable
             new WarningService(
                 _ledgerRepositoryMock.Object,
                 databaseInfoMock.Object,
+                _cardRepositoryMock.Object,
                 updateNotificationService: null,
                 backupHealthService: backupHealthService,
                 carryoverDataLossDetector: carryoverDataLossDetector),
@@ -491,6 +492,17 @@ public class MainViewModelTests : IDisposable
             .ReturnsAsync(new AppSettings { WarningBalance = warningBalance });
         _ledgerRepositoryMock.Setup(r => r.GetBySummaryContainingAsync(It.IsAny<string>()))
             .ReturnsAsync(busStopLedgers ?? new List<Ledger>());
+        if (busStopLedgers != null)
+        {
+            // Issue #2329: バス停名未入力は運用中のカードに限って数えるため、台帳の行が属するカードを運用中として返す
+            SetupOperatingCards(busStopLedgers.Select(l => l.CardIdm).Distinct().ToArray());
+        }
+    }
+
+    private void SetupOperatingCards(params string[] cardIdms)
+    {
+        _cardRepositoryMock.Setup(r => r.GetAllAsync())
+            .ReturnsAsync(cardIdms.Select(idm => new IcCard { CardIdm = idm, CardType = "はやかけん", CardNumber = idm }).ToList());
     }
 
     /// <summary>
@@ -758,6 +770,9 @@ public class MainViewModelTests : IDisposable
     {
         _settingsRepositoryMock.Setup(r => r.GetAppSettingsAsync())
             .ReturnsAsync(new AppSettings { WarningBalance = 1000 });
+
+        // Issue #2329: 保留分の ★ が運用中のカードの行として数えられる状態にしておく（数えられなければ本テストは空振りする）
+        SetupOperatingCards("1111222233334444");
 
         var firstCallGate = new TaskCompletionSource<IEnumerable<Ledger>>();
         var callCount = 0;
@@ -1296,7 +1311,7 @@ public class MainViewModelTests : IDisposable
             isolatedDbInfoMock.Object,
             new Mock<ICacheService>().Object,
             new SharedModeMonitor(isolatedDbInfoMock.Object, isolatedTimerFactory, new SystemClock()),
-            new WarningService(_ledgerRepositoryMock.Object, isolatedDbInfoMock.Object),
+            new WarningService(_ledgerRepositoryMock.Object, isolatedDbInfoMock.Object, _cardRepositoryMock.Object),
             new DashboardService(_cardRepositoryMock.Object, _ledgerRepositoryMock.Object,
                 _staffRepositoryMock.Object, _settingsRepositoryMock.Object),
             new Mock<ICCardManager.Services.ISafeFileLauncher>().Object,
@@ -2520,7 +2535,7 @@ public class MainViewModelTests : IDisposable
             databaseInfo,
             new Mock<ICacheService>().Object,
             new SharedModeMonitor(databaseInfo, _timerFactory, new SystemClock()),
-            new WarningService(_ledgerRepositoryMock.Object, databaseInfo),
+            new WarningService(_ledgerRepositoryMock.Object, databaseInfo, _cardRepositoryMock.Object),
             new DashboardService(_cardRepositoryMock.Object, _ledgerRepositoryMock.Object,
                 _staffRepositoryMock.Object, _settingsRepositoryMock.Object),
             new Mock<ICCardManager.Services.ISafeFileLauncher>().Object,
@@ -3180,6 +3195,50 @@ public class MainViewModelTests : IDisposable
 
         _viewModel.WarningMessages.Count(w => w.Type == WarningType.LowBalance).Should().Be(1);
         _viewModel.WarningMessages.Should().Contain(preserved);
+    }
+
+    /// <summary>
+    /// 内容が変わらない更新では残額警告の行を入れ替えない（15 秒ごとの更新で並びが変わり、クリック中の行が置き換わらない）こと。
+    /// 対の表明として、残額が変われば作り直すこと。
+    /// </summary>
+    [Fact]
+    public async Task RefreshSharedDataAsync_内容が同じなら残額警告の行を入れ替えないこと()
+    {
+        ArrangeSharedRefresh(balance: 500, 1000, 1000, 1000, 1000, 1000, 1000);
+        await _viewModel.RefreshSharedDataAsync();
+        var before = _viewModel.WarningMessages.Single(w => w.Type == WarningType.LowBalance);
+        var later = new WarningItem { Type = WarningType.BackupStale, DisplayText = "⚠️ 後から立った警告" };
+        _viewModel.WarningMessages.Add(later);
+
+        await _viewModel.RefreshSharedDataAsync();
+
+        _viewModel.WarningMessages.Single(w => w.Type == WarningType.LowBalance).Should().BeSameAs(before, "同じ内容なら同じ行のまま");
+        _viewModel.WarningMessages.IndexOf(before).Should().BeLessThan(_viewModel.WarningMessages.IndexOf(later), "並びも変えない");
+
+        // 対の表明: 残額が変われば作り直す
+        _ledgerRepositoryMock.Setup(r => r.GetAllLatestBalancesAsync())
+            .ReturnsAsync(new Dictionary<string, (int Balance, DateTime? LastUsageDate)>
+            {
+                [SharedRefreshCardIdm] = (300, DateTime.Today)
+            });
+        await _viewModel.RefreshSharedDataAsync();
+
+        _viewModel.WarningMessages.Single(w => w.Type == WarningType.LowBalance).DisplayText.Should().Contain("300円");
+    }
+
+    /// <summary>
+    /// 警告再チェック（CheckWarningsAsync）も、最後のダッシュボードのしきい値で残額警告を作ること（設定を読み直さない）。
+    /// </summary>
+    [Fact]
+    public async Task CheckWarningsAsync_ダッシュボード作成後はダッシュボードのしきい値で残額警告を作ること()
+    {
+        ArrangeSharedRefresh(balance: 800, 1000, 100, 100, 100);
+        await _viewModel.RefreshSharedDataAsync();
+
+        await _viewModel.CheckWarningsAsync();
+
+        _viewModel.WarningMessages.Should().ContainSingle(w => w.Type == WarningType.LowBalance)
+            .Which.DisplayText.Should().Contain("しきい値: 1,000円", "アイコンと同じしきい値（設定を読み直した 100 円ではない）");
     }
 
     #endregion

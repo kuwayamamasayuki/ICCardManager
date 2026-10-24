@@ -152,6 +152,14 @@ public class BusTextConfigurationConsumerTests : IDisposable
 
     #region 未入力警告（WarningService）
 
+    /// <summary>運用中のカードだけを返すカードの母集団（Issue #2329: 未入力は運用中のカードに限って数える）</summary>
+    private static ICardRepository OperatingCards(params string[] cardIdms)
+    {
+        var cardRepo = new Mock<ICardRepository>();
+        cardRepo.Setup(r => r.GetAllAsync()).ReturnsAsync(cardIdms.Select(idm => new IcCard { CardIdm = idm }).ToList());
+        return cardRepo.Object;
+    }
+
     [Fact]
     public async Task CheckIncompleteBusStopsAsync_設定したプレースホルダで未入力を数える()
     {
@@ -159,10 +167,10 @@ public class BusTextConfigurationConsumerTests : IDisposable
         ledgerRepo.Setup(r => r.GetBySummaryContainingAsync(It.IsAny<string>()))
             .ReturnsAsync(new List<Ledger>
             {
-                new Ledger { Id = 1, Summary = $"{CustomBusLabel}（{CustomPlaceholder}）" },
-                new Ledger { Id = 2, Summary = $"{CustomBusLabel}（天神～博多）" },
+                new Ledger { Id = 1, CardIdm = "A", Summary = $"{CustomBusLabel}（{CustomPlaceholder}）" },
+                new Ledger { Id = 2, CardIdm = "A", Summary = $"{CustomBusLabel}（天神～博多）" },
             });
-        var service = new WarningService(ledgerRepo.Object, new Mock<IDatabaseInfo>().Object);
+        var service = new WarningService(ledgerRepo.Object, new Mock<IDatabaseInfo>().Object, OperatingCards("A"));
 
         var warning = await service.CheckIncompleteBusStopsAsync();
 
@@ -179,9 +187,9 @@ public class BusTextConfigurationConsumerTests : IDisposable
         ledgerRepo.Setup(r => r.GetBySummaryContainingAsync(It.IsAny<string>()))
             .ReturnsAsync(new List<Ledger>
             {
-                new Ledger { Id = 1, Summary = "バス（★）" },
+                new Ledger { Id = 1, CardIdm = "A", Summary = "バス（★）" },
             });
-        var service = new WarningService(ledgerRepo.Object, new Mock<IDatabaseInfo>().Object);
+        var service = new WarningService(ledgerRepo.Object, new Mock<IDatabaseInfo>().Object, OperatingCards("A"));
 
         var warning = await service.CheckIncompleteBusStopsAsync();
 

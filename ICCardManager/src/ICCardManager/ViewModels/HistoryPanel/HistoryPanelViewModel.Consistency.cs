@@ -173,6 +173,8 @@ public partial class HistoryPanelViewModel
         // 払戻済みカードの履歴を編集して立てた警告は、次のダッシュボード更新（貸出・返却／共有モードの定期更新）で
         // 誰の操作にも紐づかず消える。CheckAllCardsConsistencyAsync（#1947）と生成側の母集団を揃える。
         // ハイライトは画面に出ている行の印なので、運用中かどうかに関わらず従来どおり付ける。
+        // card.IsInOperation は履歴を開いた時点の写し（CardDto へ変換したとき）。開いている間に別の画面・他の PC で
+        // 払い戻し・削除されても更新されないが、その場合は除去側（RefreshDashboardAsync）が次の更新で取り除く。
         if (card.IsInOperation)
         {
             var warningResult = fullPeriodResult ?? await _ledgerConsistencyChecker.CheckBalanceConsistencyAsync(

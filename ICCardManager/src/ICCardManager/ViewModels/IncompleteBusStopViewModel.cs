@@ -92,13 +92,10 @@ namespace ICCardManager.ViewModels
                 var previousDateFilter = SelectedDateFilter;
                 var previousCardFilter = SelectedCardFilter;
 
-                // Issue #2329: 期間で区切らず、台帳に残っている全期間（保存期間 6 年）の未入力を一覧にする。
+                // Issue #2329: 期間で区切らず、台帳に残っている全期間（保存期間 6 年）の、運用中のカードの未入力を一覧にする。
                 // 以前は直近 1 年に区切っており、1 年より前の「バス（★）」は一覧からも警告からも消えていた。
-                // 取得元は警告の件数（WarningService.CheckIncompleteBusStopsAsync）と同じ。
-                var ledgers = await _ledgerRepository.GetBySummaryContainingAsync(SummaryGenerator.BusPlaceholder);
-                // Issue #1818: プレースホルダは組織設定（SummaryText.BusPlaceholder）由来のため直書きしない
-                var incompleteLedgers = ledgers
-                    .Where(l => SummaryGenerator.HasIncompleteBusStop(l.Summary)).ToList();
+                // 取得は警告の件数（WarningService.CheckIncompleteBusStopsAsync）と同じ IncompleteBusStopLedgers.LoadAsync。
+                var incompleteLedgers = await IncompleteBusStopLedgers.LoadAsync(_ledgerRepository, _cardRepository);
 
                 var cards = await _cardRepository.GetAllAsync();
                 var cardMap = cards.ToDictionary(c => c.CardIdm, c => $"{c.CardType} {c.CardNumber}");

@@ -89,7 +89,7 @@ public class IncompleteBusStopViewModelTests
             });
         _cardRepositoryMock
             .Setup(r => r.GetAllAsync())
-            .ReturnsAsync(new List<IcCard>());
+            .ReturnsAsync(new List<IcCard> { new IcCard { CardIdm = "CARD001", CardType = "はやかけん", CardNumber = "001" } });
 
         // Act
         await _viewModel.InitializeAsync();
@@ -100,6 +100,42 @@ public class IncompleteBusStopViewModelTests
         _ledgerRepositoryMock.Verify(
             r => r.GetByDateRangeAsync(It.IsAny<string>(), It.IsAny<DateTime>(), It.IsAny<DateTime>()),
             Times.Never, "期間で区切った問い合わせをしない");
+    }
+
+    /// <summary>
+    /// Issue #2329: 論理削除・払い戻したカードの未入力は一覧に載せず、運用中のカード（貸出中を含む）の未入力は載せること。
+    /// </summary>
+    /// <remarks>
+    /// 全期間に広げると、もう使わないカードの未入力が最長 6 年一覧に残る（論理削除したカードは
+    /// <c>GetAllAsync</c> が返さないため、カード名を解決できず IDm がそのまま出ていた）。
+    /// </remarks>
+    [Fact]
+    public async Task InitializeAsync_運用中のカードの未入力だけを一覧にすること()
+    {
+        var today = DateTime.Today;
+        _ledgerRepositoryMock
+            .Setup(r => r.GetBySummaryContainingAsync(It.IsAny<string>()))
+            .ReturnsAsync(new List<Ledger>
+            {
+                new Ledger { Id = 1, CardIdm = "OPERATING", Date = today, Summary = "バス（★）" },
+                new Ledger { Id = 2, CardIdm = "LENT", Date = today, Summary = "バス（★）" },
+                new Ledger { Id = 3, CardIdm = "REFUNDED", Date = today, Summary = "バス（★）" },
+                new Ledger { Id = 4, CardIdm = "DELETED", Date = today, Summary = "バス（★）" },
+                new Ledger { Id = 5, CardIdm = "MISSING", Date = today, Summary = "バス（★）" }   // 論理削除済み（GetAllAsync が返さない）
+            });
+        _cardRepositoryMock
+            .Setup(r => r.GetAllAsync())
+            .ReturnsAsync(new List<IcCard>
+            {
+                new IcCard { CardIdm = "OPERATING", CardType = "はやかけん", CardNumber = "001" },
+                new IcCard { CardIdm = "LENT", CardType = "はやかけん", CardNumber = "002", IsLent = true },
+                new IcCard { CardIdm = "REFUNDED", CardType = "はやかけん", CardNumber = "003", IsRefunded = true },
+                new IcCard { CardIdm = "DELETED", CardType = "はやかけん", CardNumber = "004", IsDeleted = true }
+            });
+
+        await _viewModel.InitializeAsync();
+
+        _viewModel.Items.Select(i => i.LedgerId).Should().BeEquivalentTo(new[] { 1, 2 });
     }
 
     /// <summary>
@@ -136,10 +172,14 @@ public class IncompleteBusStopViewModelTests
     }
 
     /// <summary>
-    /// 未登録カードの場合CardIdmがそのまま表示されること
+    /// カードの一覧に居ない（論理削除済みの）カードの未入力は一覧に載せないこと
     /// </summary>
+    /// <remarks>
+    /// Issue #2329 で期待値を変えた。以前はカード名を解決できないまま IDm を表示していたが、
+    /// 未入力の対象を運用中のカードに限ったため、カードの一覧に居ないカードの行は載せない。
+    /// </remarks>
     [Fact]
-    public async Task InitializeAsync_ShouldFallbackToCardIdm_WhenCardNotFound()
+    public async Task InitializeAsync_カードの一覧に居ないカードの未入力は載せないこと()
     {
         // Arrange
         var ledgers = new List<Ledger>
@@ -158,8 +198,7 @@ public class IncompleteBusStopViewModelTests
         await _viewModel.InitializeAsync();
 
         // Assert
-        _viewModel.Items.Should().HaveCount(1);
-        _viewModel.Items[0].CardDisplayName.Should().Be("UNKNOWN_CARD");
+        _viewModel.Items.Should().BeEmpty("運用中のカードでない行は載せない");
     }
 
     /// <summary>

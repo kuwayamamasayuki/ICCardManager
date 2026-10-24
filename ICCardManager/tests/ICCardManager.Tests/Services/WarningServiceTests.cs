@@ -19,13 +19,20 @@ public class WarningServiceTests
 {
     private readonly Mock<ILedgerRepository> _ledgerRepositoryMock;
     private readonly Mock<IDatabaseInfo> _databaseInfoMock;
+    private readonly Mock<ICardRepository> _cardRepositoryMock;
+
+    /// <summary>バス停名未入力の検出テストで、台帳の行が属する運用中のカード（Issue #2329）</summary>
+    private const string OperatingCardIdm = "0101010101010101";
     private readonly WarningService _service;
 
     public WarningServiceTests()
     {
         _ledgerRepositoryMock = new Mock<ILedgerRepository>();
         _databaseInfoMock = new Mock<IDatabaseInfo>();
-        _service = new WarningService(_ledgerRepositoryMock.Object, _databaseInfoMock.Object);
+        _cardRepositoryMock = new Mock<ICardRepository>();
+        _cardRepositoryMock.Setup(r => r.GetAllAsync())
+            .ReturnsAsync(new List<IcCard> { new IcCard { CardIdm = OperatingCardIdm, CardType = "はやかけん", CardNumber = "H-001" } });
+        _service = new WarningService(_ledgerRepositoryMock.Object, _databaseInfoMock.Object, _cardRepositoryMock.Object);
     }
 
     #region CheckLowBalanceWarnings — 残額警告境界値
@@ -109,11 +116,11 @@ public class WarningServiceTests
         // Arrange — 過去1年分の履歴のうち3件に「★」を含む摘要が含まれる
         var ledgers = new List<Ledger>
         {
-            new() { Summary = "鉄道（博多～天神）" },
-            new() { Summary = "バス（★）" },
-            new() { Summary = "バス（★）、鉄道（博多～天神）" },
-            new() { Summary = "鉄道（博多～天神 往復）" },
-            new() { Summary = "バス（★）" }
+            new() { CardIdm = OperatingCardIdm, Summary = "鉄道（博多～天神）" },
+            new() { CardIdm = OperatingCardIdm, Summary = "バス（★）" },
+            new() { CardIdm = OperatingCardIdm, Summary = "バス（★）、鉄道（博多～天神）" },
+            new() { CardIdm = OperatingCardIdm, Summary = "鉄道（博多～天神 往復）" },
+            new() { CardIdm = OperatingCardIdm, Summary = "バス（★）" }
         };
         _ledgerRepositoryMock
             .Setup(r => r.GetBySummaryContainingAsync(It.IsAny<string>()))
@@ -135,8 +142,8 @@ public class WarningServiceTests
         // Arrange
         var ledgers = new List<Ledger>
         {
-            new() { Summary = "鉄道（博多～天神）" },
-            new() { Summary = "鉄道（博多～天神 往復）" }
+            new() { CardIdm = OperatingCardIdm, Summary = "鉄道（博多～天神）" },
+            new() { CardIdm = OperatingCardIdm, Summary = "鉄道（博多～天神 往復）" }
         };
         _ledgerRepositoryMock
             .Setup(r => r.GetBySummaryContainingAsync(It.IsAny<string>()))
@@ -155,9 +162,9 @@ public class WarningServiceTests
         // Arrange: null/空/有効な★の混在パターン
         var ledgers = new List<Ledger>
         {
-            new() { Summary = null },
-            new() { Summary = "" },
-            new() { Summary = "バス（★）" }
+            new() { CardIdm = OperatingCardIdm, Summary = null },
+            new() { CardIdm = OperatingCardIdm, Summary = "" },
+            new() { CardIdm = OperatingCardIdm, Summary = "バス（★）" }
         };
         _ledgerRepositoryMock
             .Setup(r => r.GetBySummaryContainingAsync(It.IsAny<string>()))
@@ -188,8 +195,8 @@ public class WarningServiceTests
             .Setup(r => r.GetBySummaryContainingAsync(It.IsAny<string>()))
             .ReturnsAsync(new List<Ledger>
             {
-                new() { Date = DateTime.Today, Summary = "バス（★）" },
-                new() { Date = DateTime.Today.AddYears(-5), Summary = "バス（★）" }
+                new() { CardIdm = OperatingCardIdm, Date = DateTime.Today, Summary = "バス（★）" },
+                new() { CardIdm = OperatingCardIdm, Date = DateTime.Today.AddYears(-5), Summary = "バス（★）" }
             });
 
         // Act
@@ -201,6 +208,58 @@ public class WarningServiceTests
         _ledgerRepositoryMock.Verify(
             r => r.GetByDateRangeAsync(It.IsAny<string>(), It.IsAny<DateTime>(), It.IsAny<DateTime>()),
             Times.Never, "期間で区切った問い合わせをしない");
+    }
+
+    /// <summary>
+    /// Issue #2329（欠陥側）: 論理削除・払い戻したカードの未入力は数えないこと。
+    /// </summary>
+    /// <remarks>
+    /// 全期間に広げると、もう使わないカードの未入力が最長 6 年数えられ続ける。
+    /// 論理削除済みは <c>GetAllAsync</c> が返さない形と、返ってきても <c>IsInOperation</c> で外す形の両方を置く。
+    /// </remarks>
+    [Theory]
+    [InlineData(false, true)]
+    [InlineData(true, false)]
+    public async Task CheckIncompleteBusStopsAsync_運用中でないカードの未入力は数えないこと(bool isDeleted, bool isRefunded)
+    {
+        const string retiredCardIdm = "0202020202020202";
+        const string missingCardIdm = "0303030303030303";
+        _cardRepositoryMock.Setup(r => r.GetAllAsync()).ReturnsAsync(new List<IcCard>
+        {
+            new IcCard { CardIdm = OperatingCardIdm },
+            new IcCard { CardIdm = retiredCardIdm, IsDeleted = isDeleted, IsRefunded = isRefunded }
+        });
+        _ledgerRepositoryMock
+            .Setup(r => r.GetBySummaryContainingAsync(It.IsAny<string>()))
+            .ReturnsAsync(new List<Ledger>
+            {
+                new() { CardIdm = OperatingCardIdm, Summary = "バス（★）" },
+                new() { CardIdm = retiredCardIdm, Summary = "バス（★）" },
+                new() { CardIdm = missingCardIdm, Summary = "バス（★）" }   // 論理削除済み（GetAllAsync が返さない）
+            });
+
+        var warning = await _service.CheckIncompleteBusStopsAsync();
+
+        warning!.DisplayText.Should().Be("⚠️ バス停名が未入力の履歴が1件あります", "運用中のカードの 1 件だけを数える");
+    }
+
+    /// <summary>
+    /// Issue #2329（既存挙動側）: 運用中のカードなら、貸出中でも未入力を数えること（貸出中は運用中の否定要因ではない）。
+    /// </summary>
+    [Fact]
+    public async Task CheckIncompleteBusStopsAsync_運用中のカードは貸出中でも数えること()
+    {
+        _cardRepositoryMock.Setup(r => r.GetAllAsync()).ReturnsAsync(new List<IcCard>
+        {
+            new IcCard { CardIdm = OperatingCardIdm, IsLent = true }
+        });
+        _ledgerRepositoryMock
+            .Setup(r => r.GetBySummaryContainingAsync(It.IsAny<string>()))
+            .ReturnsAsync(new List<Ledger> { new() { CardIdm = OperatingCardIdm, Summary = "バス（★）" } });
+
+        var warning = await _service.CheckIncompleteBusStopsAsync();
+
+        warning!.DisplayText.Should().Be("⚠️ バス停名が未入力の履歴が1件あります");
     }
 
     #endregion
@@ -245,7 +304,7 @@ public class WarningServiceTests
             CurrentVersion = "2.10.0",
         });
         var service = new WarningService(
-            _ledgerRepositoryMock.Object, _databaseInfoMock.Object, updateServiceMock.Object);
+            _ledgerRepositoryMock.Object, _databaseInfoMock.Object, _cardRepositoryMock.Object, updateServiceMock.Object);
 
         var warning = service.CheckUpdateNotificationWarning();
 
@@ -262,7 +321,7 @@ public class WarningServiceTests
         var updateServiceMock = new Mock<IUpdateNotificationService>();
         updateServiceMock.Setup(x => x.CheckForNewerVersion()).Returns((UpdateCheckResult)null);
         var service = new WarningService(
-            _ledgerRepositoryMock.Object, _databaseInfoMock.Object, updateServiceMock.Object);
+            _ledgerRepositoryMock.Object, _databaseInfoMock.Object, _cardRepositoryMock.Object, updateServiceMock.Object);
 
         service.CheckUpdateNotificationWarning().Should().BeNull();
     }

@@ -409,10 +409,19 @@ public partial class MainViewModel
     /// </summary>
     internal async Task CheckWarningsAsync()
     {
-        var settings = await _settingsRepository.GetAppSettingsAsync();
-        ApplyDataWarnings(settings.WarningBalance);
+        // Issue #2329: 残額警告はダッシュボードのアイコンと同じしきい値で作る。設定を読み直すと、
+        // ダッシュボードを作った後に変わったしきい値で一覧だけが作られ、アイコンと食い違う。
+        // ダッシュボードをまだ一度も作っていないとき（起動処理の前に呼ばれた等）だけ設定から読む。
+        var warningBalance = _dashboardWarningBalance
+            ?? (await _settingsRepository.GetAppSettingsAsync()).WarningBalance;
+        ApplyDataWarnings(warningBalance);
         await CheckIncompleteBusStopsAsync();
     }
+
+    /// <summary>
+    /// Issue #2329: 最後に作ったダッシュボードが警告アイコンの判定に使ったしきい値（円）。未作成なら null。
+    /// </summary>
+    private int? _dashboardWarningBalance;
 
     /// <summary>
     /// Issue #504: ダッシュボードデータからデータ系の警告を生成・適用（WarningServiceに委譲）
@@ -427,10 +436,19 @@ public partial class MainViewModel
     /// </remarks>
     private void ApplyDataWarnings(int warningBalance)
     {
+        var replacements = _warningService.CheckLowBalanceWarnings(CardBalanceDashboard, warningBalance);
+
+        // Issue #2329: 内容が変わらないなら入れ替えない。ダッシュボードの更新（共有モードでは 15 秒ごと）のたびに
+        // 同じ行を消して足し直すと、警告エリアの並びが変わり、クリックしようとした行が押す直前に置き換わる
+        var current = WarningMessages.Where(w => w.Type == WarningType.LowBalance).ToList();
+        if (current.Count == replacements.Count
+            && current.Zip(replacements, (a, b) => a.CardIdm == b.CardIdm && a.DisplayText == b.DisplayText).All(same => same))
+        {
+            return;
+        }
+
         // 直後に作り直す残額警告のみ取り除く（他種別はそれぞれのチェックメソッドが管理する）
-        ReplaceWarnings(
-            w => w.Type == WarningType.LowBalance,
-            _warningService.CheckLowBalanceWarnings(CardBalanceDashboard, warningBalance));
+        ReplaceWarnings(w => w.Type == WarningType.LowBalance, replacements);
     }
 
     /// <summary>
@@ -535,6 +553,7 @@ public partial class MainViewModel
         // 一覧も同じ値で判定すれば両者は食い違わない。以前は警告再チェック（CheckWarningsAsync）でしか作り直さず、
         // 共有モードの定期更新（RefreshSharedDataAsync）では他の PC の返却・チャージでアイコンだけが変わり、
         // 一覧は自分の PC の次の操作まで古いまま（チャージ済みのカードが「残額不足」のまま）残っていた。
+        _dashboardWarningBalance = result.WarningBalance;
         ApplyDataWarnings(result.WarningBalance);
 
         // Issue #1739: 有効でなくなったカードの残高不整合警告を取り除く。
