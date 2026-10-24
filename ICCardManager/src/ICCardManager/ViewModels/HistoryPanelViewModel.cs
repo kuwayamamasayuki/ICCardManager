@@ -371,6 +371,28 @@ public partial class HistoryPanelViewModel : ObservableObject
     }
 
     /// <summary>
+    /// 払戻済なのに貸出中のカードの履歴を、貸出日の月から開く（Issue #2322）
+    /// </summary>
+    /// <remarks>
+    /// 警告（<c>WarningType.RefundedCardLent</c>）のクリックから呼ぶ。直すべき貸出中の行は貸出日の日付で
+    /// 記録されており、何か月も前になり得るため、当月から開くと画面に出ない。表示期間は月単位で扱う画面なので、
+    /// 開始日はその月の 1 日へ丸める（日付単位の値を渡さない。#1907）。
+    /// </remarks>
+    public async Task ShowRefundedCardLentHistoryAsync(IcCard? card)
+    {
+        _balanceInconsistencies.Clear();
+        if (card == null)
+        {
+            return;
+        }
+
+        DateTime? fromDate = card.LastLentAt.HasValue
+            ? new DateTime(card.LastLentAt.Value.Year, card.LastLentAt.Value.Month, 1)
+            : null;
+        await ShowHistoryAsync(card, fromDate);
+    }
+
+    /// <summary>
     /// 履歴表示（メイン画面に表示）
     /// </summary>
     /// <param name="card">表示するカード</param>

@@ -312,13 +312,11 @@ namespace ICCardManager.Services
                         if (hasLentRecord && !card.IsLent)
                         {
                             // Issue #2322: 払戻済のカードは貸出中にしない（UpdateLentStatusAsync も 0 行になる）。
-                            // 競合（他 PC の削除）として記録すると原因を取り違えるので、別の文言で残して飛ばす
+                            // 競合（他 PC の削除）として記録すると原因を取り違えるので、別の文言で残して飛ばす。
+                            // 起動のたびに出続けるので、対処（貸出中の行の削除）を添える
                             if (card.IsRefunded)
                             {
-                                _logger.LogWarning(
-                                    "Issue #2322: 払戻済のカードに貸出中レコードが残っています。" +
-                                    "払戻済のカードは貸出中にしないため修復しません: CardIdm={CardIdm}",
-                                    IdmMasker.Mask(card.CardIdm));
+                                LogRefundedCardWithLentRecord(IdmMasker.Mask(card.CardIdm), card.IsLent);
                                 continue;
                             }
 
@@ -337,6 +335,15 @@ namespace ICCardManager.Services
                                 "Issue #790: 貸出状態の不整合を修復しました（is_lent: 0→1）: CardIdm={CardIdm}, LentAt={LentAt}",
                                 IdmMasker.Mask(card.CardIdm), lentRecord.LentAt);
                             repairCount++;
+                        }
+                        else if (hasLentRecord && card.IsRefunded)
+                        {
+                            // Issue #2322: 修正前の欠陥（30秒ルールの逆処理・貸出記録の作成ダイアログ）で作られ得た
+                            // 「払戻済なのに貸出中」の状態。is_lent と貸出中レコードは一致しているので上下の
+                            // 分岐には入らず、何も記録されないまま長期未返却として残り続ける。
+                            // 台帳は自動で直さない（どの行を消すかは利用者が履歴で確かめる）。メイン画面の警告
+                            // （WarningType.RefundedCardLent）とこのログで知らせる
+                            LogRefundedCardWithLentRecord(IdmMasker.Mask(card.CardIdm), card.IsLent);
                         }
                         else if (!hasLentRecord && card.IsLent)
                         {
@@ -544,6 +551,16 @@ namespace ICCardManager.Services
                         .UpdateLentStatusAsync(cardIdm, true, now, staffIdm).ConfigureAwait(false);
                     if (!lentStatusUpdated)
                     {
+                        // Issue #2322: 貸出中にする更新の 0 行は「削除」と「払い戻し」の 2 つの原因を持つ。
+                        // 読み直して原因を分け、1 つのエラーコードに 2 つの原因を割り当てない（#1985）。
+                        // 払い戻しなら事前検証で拒んだときと同じ文言で案内する（#1757）
+                        var current = await _cardRepository
+                            .GetByIdmAsync(cardIdm, includeDeleted: true).ConfigureAwait(false);
+                        if (current != null && !current.IsDeleted && current.IsRefunded)
+                        {
+                            throw BusinessException.LendRefundedCardConflict(cardIdm);
+                        }
+
                         throw BusinessException.LentStatusUpdateConflict(cardIdm, "貸出");
                     }
 
@@ -607,7 +624,7 @@ namespace ICCardManager.Services
             // この読み取りと書き込みの間の払い戻しは UpdateLentStatusAsync の WHERE（is_refunded = 0）が検出する。
             if (card.IsRefunded)
             {
-                return (card, null, "このカードは払い戻し済みのため貸出できません。別の交通系ICカードを使用してください。");
+                return (card, null, BusinessException.RefundedCardLendMessage);
             }
 
             if (card.IsLent)
@@ -782,9 +799,10 @@ namespace ICCardManager.Services
                         // （払出＝金額、残額 0）が作られて残高チェーンが払戻行で切れる。払戻済への更新の
                         // WHERE（is_lent / is_refunded / is_deleted）は「貸出→返却」の済んだ変化を検出しないので、
                         // 同じトランザクションの中で直前の残額を読み直し、違えば何も書かずに巻き戻す。
-                        // 読み取りは同じ接続（DbContext は接続を 1 本しか持たない）の上でこのトランザクションに含まれ、
-                        // 読んでからコミットするまでに他の接続が台帳を書き換えたなら、こちらの書き込みが
-                        // SQLITE_BUSY になって ExecuteWithRetryAsync が読み直しからやり直す。
+                        // 読み取りは同じ接続（DbContext は接続を 1 本しか持たない）の上でこのトランザクションに含まれる。
+                        // DbContext.BeginTransactionAsync は引数なしの SQLiteConnection.BeginTransaction()
+                        // （System.Data.SQLite の既定で BEGIN IMMEDIATE）で開くので、開始の時点で書き込みロックを取っており、
+                        // 読んでから書くまでの間に他の接続は書き込めない（読んだ残額がそのまま書き込みの前提になる）。
                         // 判定は呼び出し元の表示と同じ「直近の台帳の残額、無ければ 0」。
                         var latestLedger = await _ledgerRepository.GetLatestLedgerAsync(cardIdm).ConfigureAwait(false);
                         var currentBalance = latestLedger?.Balance ?? 0;
@@ -2104,6 +2122,20 @@ namespace ICCardManager.Services
             }
 
             return "データベースへの書き込み中に問題が発生しました。";
+        }
+
+        /// <summary>
+        /// 貸出中レコードが残る払戻済のカードを記録する（Issue #2322）。起動のたびに出るので対処を添える
+        /// </summary>
+        /// <param name="maskedCardIdm"><see cref="IdmMasker.Mask"/> 済みの IDm（呼び出し地点でマスクする。#1852）</param>
+        /// <param name="isLent">カードの <c>is_lent</c>（どちらの形かをログに残す）</param>
+        private void LogRefundedCardWithLentRecord(string maskedCardIdm, bool isLent)
+        {
+            _logger.LogWarning(
+                "Issue #2322: 払戻済のカードに貸出中レコードが残っています（is_lent={IsLent}）。" +
+                "払戻済のカードは貸出中にしないため修復しません。メイン画面でこのカードの履歴を開き、" +
+                "貸出中の行を「変更」から削除してください（削除すると貸出中の状態も解消されます）: CardIdm={CardIdm}",
+                isLent ? 1 : 0, maskedCardIdm);
         }
 
         /// <summary>

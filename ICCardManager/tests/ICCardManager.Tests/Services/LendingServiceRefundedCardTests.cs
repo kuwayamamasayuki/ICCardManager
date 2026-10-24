@@ -100,6 +100,7 @@ public sealed class LendingServiceRefundedCardTests : IDisposable
         // Assert
         result.Success.Should().BeFalse("払戻済のカードは貸出対象外（Issue #530）");
         result.ErrorMessage.Should().Contain("払い戻し済み", "「なぜ」を名指しする");
+        result.ErrorMessage.Should().Be(ICCardManager.Common.Exceptions.BusinessException.RefundedCardLendMessage);
         result.ErrorMessage.Should().EndWith("ください。", "「どうすれば」で終わる");
         result.ErrorMessage!.Length.Should().BeLessOrEqualTo(48, "トーストの上限（LendingServiceLentStatusConflictTests と同じ）");
         (await CountLedgersAsync()).Should().Be(0, "払戻済のカードに貸出中レコードを作らない");
@@ -121,7 +122,10 @@ public sealed class LendingServiceRefundedCardTests : IDisposable
         var beforeRefund = (await _realCardRepository.GetByIdmAsync(TestCardIdm))!;
         await MarkRefundedAsync();
         var cardRepository = new Mock<ICardRepository>();
-        cardRepository.Setup(r => r.GetByIdmAsync(TestCardIdm, It.IsAny<bool>())).ReturnsAsync(beforeRefund);
+        // 事前検証（includeDeleted: false）には払い戻し前のスナップショット、0 行の原因の読み直し（includeDeleted: true）には DB の現在値
+        cardRepository.Setup(r => r.GetByIdmAsync(TestCardIdm, false)).ReturnsAsync(beforeRefund);
+        cardRepository.Setup(r => r.GetByIdmAsync(TestCardIdm, true))
+            .Returns(() => _realCardRepository.GetByIdmAsync(TestCardIdm, true));
         cardRepository.Setup(r => r.UpdateLentStatusAsync(
                 It.IsAny<string>(), It.IsAny<bool>(), It.IsAny<DateTime?>(), It.IsAny<string>()))
             .Returns<string, bool, DateTime?, string>((idm, isLent, lentAt, staffIdm)
@@ -133,7 +137,8 @@ public sealed class LendingServiceRefundedCardTests : IDisposable
 
         // Assert
         result.Success.Should().BeFalse();
-        result.ErrorMessage.Should().Contain("払戻済", "競合の案内が払い戻しの可能性を名指しする");
+        result.ErrorMessage.Should().Be(ICCardManager.Common.Exceptions.BusinessException.RefundedCardLendMessage,
+            "原因（払い戻し）を読み直して名指しし、事前検証で拒んだときと同じ文言で案内する（#1757）");
         (await CountLedgersAsync()).Should().Be(0, "貸出中レコードだけが残ると、払戻済のカードが長期未返却として残り続ける");
         var card = (await _realCardRepository.GetByIdmAsync(TestCardIdm))!;
         card.IsLent.Should().BeFalse();
@@ -175,12 +180,77 @@ public sealed class LendingServiceRefundedCardTests : IDisposable
         var warning = logger.Entries.Should().ContainSingle(e => e.Level == LogLevel.Warning).Subject;
         warning.Message.Should().Contain("払戻済");
         warning.Message.Should().NotContain("削除された可能性", "他 PC の削除という別の原因として記録しない");
+        warning.Message.Should().Contain("削除してください", "起動のたびに出るので対処を添える");
+        warning.Message.Should().NotContain(TestCardIdm, "IDm はマスクしてログへ出す（#1852）");
+    }
+
+    /// <summary>
+    /// 修正前の欠陥で作られ得た「払戻済なのに貸出中（is_lent = 1）で貸出中レコードあり」を、起動時に検出して記録すること
+    /// </summary>
+    /// <remarks>
+    /// is_lent と貸出中レコードが一致しているので、従来の修復の 2 分岐（0→1 / 1→0）のどちらにも入らず、
+    /// 何も記録されないまま長期未返却として残っていた。台帳は自動で直さず（どの行を消すかは利用者が履歴で確かめる）、
+    /// 対処を添えて記録する。メイン画面の警告は MainViewModelTests が固定する。
+    /// </remarks>
+    [Fact]
+    public async Task RepairLentStatusConsistencyAsync_払戻済なのに貸出中_書き換えずに対処を添えて記録すること()
+    {
+        // Arrange
+        await InsertLentRecordAsync();
+        await MarkRefundedAsync(isLent: true);
+        var logger = new RecordingLogger<LendingService>();
+        var service = CreateService(_realCardRepository, logger);
+
+        // Act
+        var repaired = await service.RepairLentStatusConsistencyAsync();
+
+        // Assert
+        repaired.Should().Be(0);
+        (await _realCardRepository.GetByIdmAsync(TestCardIdm))!.IsLent.Should().BeTrue("台帳もカードも自動では書き換えない");
+        (await CountLedgersAsync()).Should().Be(1);
+        var warning = logger.Entries.Should().ContainSingle(e => e.Level == LogLevel.Warning).Subject;
+        warning.Message.Should().Contain("払戻済").And.Contain("is_lent=1").And.Contain("削除してください");
         warning.Message.Should().NotContain(TestCardIdm, "IDm はマスクしてログへ出す（#1852）");
     }
 
     #endregion
 
     #region 正当な操作を塞いでいない側
+
+    /// <summary>
+    /// 貸出の競合でも、原因が削除なら従来どおり削除を案内し、払い戻しを持ち出さないこと
+    /// </summary>
+    /// <remarks>
+    /// 貸出中にする更新の 0 行は「削除」と「払い戻し」の 2 つの原因を持つ。読み直して分けるので、
+    /// 削除のときは従来の BIZ015 の文言のまま（1 つのエラーコードに 2 つの原因を割り当てない。#1985）。
+    /// </remarks>
+    [Fact]
+    public async Task LendAsync_事前検証の後に削除された_削除の案内のまま払い戻しを持ち出さないこと()
+    {
+        // Arrange
+        var beforeDelete = (await _realCardRepository.GetByIdmAsync(TestCardIdm))!;
+        (await _realCardRepository.DeleteAsync(TestCardIdm)).Should().Be(CardOperationResult.Success);
+        var cardRepository = new Mock<ICardRepository>();
+        cardRepository.Setup(r => r.GetByIdmAsync(TestCardIdm, false)).ReturnsAsync(beforeDelete);
+        cardRepository.Setup(r => r.GetByIdmAsync(TestCardIdm, true))
+            .Returns(() => _realCardRepository.GetByIdmAsync(TestCardIdm, true));
+        cardRepository.Setup(r => r.UpdateLentStatusAsync(
+                It.IsAny<string>(), It.IsAny<bool>(), It.IsAny<DateTime?>(), It.IsAny<string>()))
+            .Returns<string, bool, DateTime?, string>((idm, isLent, lentAt, staffIdm)
+                => _realCardRepository.UpdateLentStatusAsync(idm, isLent, lentAt, staffIdm));
+        var service = CreateService(cardRepository.Object);
+
+        // Act
+        var result = await service.LendAsync(TestStaffIdm, TestCardIdm, 5000);
+
+        // Assert
+        result.Success.Should().BeFalse();
+        result.ErrorMessage.Should().Be(
+            ICCardManager.Common.Exceptions.BusinessException.LentStatusUpdateConflict(TestCardIdm, "貸出").UserFriendlyMessage);
+        result.ErrorMessage.Should().NotContain("払");
+        (await CountLedgersAsync()).Should().Be(0);
+    }
+
 
     /// <summary>
     /// 払戻済でないカードは従来どおり貸し出せること

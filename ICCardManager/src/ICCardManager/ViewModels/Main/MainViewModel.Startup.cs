@@ -513,12 +513,34 @@ public partial class MainViewModel
     /// </summary>
     private async Task RefreshLentCardsAsync()
     {
-        var lentCards = await _cardRepository.GetLentAsync();
+        var lentCards = (await _cardRepository.GetLentAsync()).ToList();
         LentCards.Clear();
         foreach (var card in lentCards)
         {
             LentCards.Add(card.ToDto());
         }
+
+        // Issue #2322: 払戻済なのに貸出中のカード（修正前の欠陥で作られ得た）を警告に出す。
+        // 貸出中カードの母集団を知っているのはここなので、生成と除去をここで行う（§7.4「生成元が除去の責任も負う」）。
+        // 履歴から貸出中の行を削除すれば is_lent が 0 に戻り、次の読み直しで警告も消える
+        ReplaceWarnings(
+            w => w.Type == WarningType.RefundedCardLent,
+            lentCards.Where(c => c.IsRefunded).Select(BuildRefundedCardLentWarning).ToList());
+    }
+
+    /// <summary>
+    /// 払戻済なのに貸出中のカードの警告（Issue #2322）
+    /// </summary>
+    internal static WarningItem BuildRefundedCardLentWarning(IcCard card)
+    {
+        return new WarningItem
+        {
+            Type = WarningType.RefundedCardLent,
+            CardIdm = card.CardIdm,
+            DisplayText =
+                $"⚠️ 払い戻した {card.CardType} {card.CardNumber} が貸出中のままです。" +
+                "クリックして履歴を開き、貸出中の行を「変更」から削除してください"
+        };
     }
 
     /// <summary>
@@ -546,7 +568,7 @@ public partial class MainViewModel
         var activeCardIdms = new HashSet<string>(CardBalanceDashboard.Select(i => i.CardIdm));
         ReplaceWarnings(w => (w.Type == WarningType.BalanceInconsistency
                               || w.Type == WarningType.CardBalanceMismatch)
-                             && !activeCardIdms.Contains(w.CardIdm));
+                             && !activeCardIdms.Contains(w.CardIdm ?? string.Empty));
     }
 
     /// <summary>

@@ -3534,6 +3534,85 @@ public class MainViewModelTests : IDisposable
         _viewModel.History.IsCardHistoryImportOffered.Should().BeFalse("貸出中なら返却が利用履歴を記録する");
     }
 
+    #region Issue #2322: 払戻済なのに貸出中のカードの警告
+
+    private const string RefundedLentCardIdm = "0123456789ABCDEF";
+
+    private static IcCard RefundedLentCard() => new()
+    {
+        CardIdm = RefundedLentCardIdm,
+        CardType = "はやかけん",
+        CardNumber = "H-009",
+        IsLent = true,
+        IsRefunded = true,
+        LastLentAt = new DateTime(2025, 3, 18, 9, 30, 0),
+    };
+
+    /// <summary>
+    /// 貸出中カード一覧の読み直しで、払戻済なのに貸出中のカードを警告に出すこと
+    /// </summary>
+    /// <remarks>
+    /// 修正前の欠陥で作られ得た状態。払戻済のカードはタッチで返却できず残高ダッシュボードにも出ないため、
+    /// 警告が無いと長期未返却のまま気付く手段が無い。払戻済でない貸出中カードは対象にしない（対の表明）。
+    /// </remarks>
+    [Fact]
+    public async Task RefreshLentCardsAsync_払戻済なのに貸出中のカードだけを警告に出すこと()
+    {
+        var normalLent = new IcCard { CardIdm = "1111222233334444", CardType = "nimoca", CardNumber = "N-001", IsLent = true };
+        _cardRepositoryMock.Setup(r => r.GetLentAsync(It.IsAny<bool>()))
+            .ReturnsAsync(new List<IcCard> { normalLent, RefundedLentCard() });
+
+        await ((IHistoryPanelHost)_viewModel).RefreshLentCardsAsync();
+        await ((IHistoryPanelHost)_viewModel).RefreshLentCardsAsync();
+
+        var warning = _viewModel.WarningMessages.Should()
+            .ContainSingle(w => w.Type == WarningType.RefundedCardLent, "読み直しのたびに入れ替え、重複させない").Subject;
+        warning.CardIdm.Should().Be(RefundedLentCardIdm);
+        warning.DisplayText.Should().Contain("はやかけん H-009").And.Contain("削除してください");
+        _viewModel.LentCards.Should().HaveCount(2, "貸出中カード一覧そのものは従来どおり");
+    }
+
+    /// <summary>
+    /// 貸出中の行を削除して貸出中でなくなったら、次の読み直しで警告が消えること
+    /// </summary>
+    [Fact]
+    public async Task RefreshLentCardsAsync_貸出中でなくなったら警告を取り除くこと()
+    {
+        _cardRepositoryMock.Setup(r => r.GetLentAsync(It.IsAny<bool>()))
+            .ReturnsAsync(new List<IcCard> { RefundedLentCard() });
+        await ((IHistoryPanelHost)_viewModel).RefreshLentCardsAsync();
+        _viewModel.WarningMessages.Should().Contain(w => w.Type == WarningType.RefundedCardLent);
+
+        _cardRepositoryMock.Setup(r => r.GetLentAsync(It.IsAny<bool>()))
+            .ReturnsAsync(new List<IcCard>());
+        await ((IHistoryPanelHost)_viewModel).RefreshLentCardsAsync();
+
+        _viewModel.WarningMessages.Should().NotContain(w => w.Type == WarningType.RefundedCardLent);
+    }
+
+    /// <summary>
+    /// 警告のクリックで、そのカードの履歴を貸出日の月の 1 日から開くこと
+    /// </summary>
+    /// <remarks>
+    /// 直すべき貸出中の行は貸出日に記録されている。当月から開くと画面に出ず、文言の案内が実行できない。
+    /// </remarks>
+    [Fact]
+    public async Task HandleWarningClick_払戻済なのに貸出中の警告で貸出日の月から履歴を開くこと()
+    {
+        SetupWarningCheckDefaults();
+        ArrangeHistoryPaging(_ => 0, pageSize: 30);
+        _cardRepositoryMock.Setup(r => r.GetByIdmAsync(RefundedLentCardIdm, It.IsAny<bool>()))
+            .ReturnsAsync(RefundedLentCard());
+
+        await _viewModel.HandleWarningClick(MainViewModel.BuildRefundedCardLentWarning(RefundedLentCard()));
+
+        _viewModel.History.IsHistoryVisible.Should().BeTrue();
+        _viewModel.History.HistoryCard.CardIdm.Should().Be(RefundedLentCardIdm);
+        _viewModel.History.HistoryFromDate.Should().Be(new DateTime(2025, 3, 1), "期間は月単位で扱うので月の 1 日へ丸める");
+    }
+
+    #endregion
+
     [Fact]
     public async Task ReevaluateCardBalanceMismatchAsync_取り込みで一致したら警告を取り除き_知らせないこと()
     {

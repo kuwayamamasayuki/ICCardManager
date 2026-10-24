@@ -1,3 +1,4 @@
+#nullable enable
 namespace ICCardManager.Dtos
 {
     /// <summary>
@@ -50,7 +51,18 @@ namespace ICCardManager.Dtos
         /// 登録済みカードを単独でタッチしたとき（履歴表示）にだけ判定する
         /// （カードがリーダーに載っている瞬間にしか実残額を読めないため）。
         /// </remarks>
-        CardBalanceMismatch
+        CardBalanceMismatch,
+
+        /// <summary>
+        /// 払戻済の交通系ICカードが貸出中のまま残っている警告（カード単位、Issue #2322）
+        /// </summary>
+        /// <remarks>
+        /// Issue #2322 の修正前は、30秒ルールの逆処理と貸出記録の作成ダイアログから払戻済のカードを貸出中にできた。
+        /// そのカードは払戻済のため交通系ICカードのタッチで返却できず、残高ダッシュボードにも出ないので、
+        /// 警告のクリックで履歴を開き、貸出中の行を削除して直す（削除すると貸出中の状態も解消される）。
+        /// 生成・除去は貸出中カード一覧の読み直し（<c>RefreshLentCardsAsync</c>）が行う。
+        /// </remarks>
+        RefundedCardLent
     }
 
     /// <summary>
@@ -69,9 +81,9 @@ namespace ICCardManager.Dtos
         public WarningType Type { get; set; }
 
         /// <summary>
-        /// 対象カードIDm（LowBalance・BalanceInconsistency・CardBalanceMismatch時に使用）
+        /// 対象カードIDm（LowBalance・BalanceInconsistency・CardBalanceMismatch・RefundedCardLent時に使用）
         /// </summary>
-        public string CardIdm { get; set; }
+        public string? CardIdm { get; set; }
 
         /// <summary>
         /// 同じ種別の警告が繰り返し発生した回数（既定 1）。
