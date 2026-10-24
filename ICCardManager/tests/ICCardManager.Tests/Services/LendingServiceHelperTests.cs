@@ -446,8 +446,10 @@ namespace ICCardManager.Tests.Services
         }
 
         /// <summary>
-        /// Issue #2326: カードの読取値がちょうど 0 円のときは「読み取れなかった」値として扱い、
-        /// 作成した ledger の末尾の残額へ進むこと（04 §2.4・07 の優先順位の条件を固定する）
+        /// Issue #2326: カードの読取値がちょうど 0 円のときは読取値を使わず、
+        /// 作成した ledger の末尾の残額へ進むこと（04 §2.5.1・07 の優先順位の条件を固定する）。
+        /// 0 円は実際の残額だが、同じ返却で台帳行の残額を決める <c>CreateUsageLedgersAsync</c> の
+        /// <c>useCardBalance</c>（1 円以上の残額を持つ明細があるときだけカードの残額を使う）と根拠を揃えるため除く
         /// </summary>
         [Fact]
         public async Task ResolveReturnBalanceAsync_CardBalanceZero_FallsBackToCreatedLedger()

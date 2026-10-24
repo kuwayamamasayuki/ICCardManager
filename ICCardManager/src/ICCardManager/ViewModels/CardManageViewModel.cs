@@ -1713,7 +1713,7 @@ namespace ICCardManager.ViewModels
                     // 繰越月が3月の場合は年度末＝前年度繰越と同義なので、
                     // 「前年度より繰越」として扱い受入金額にも残高を記録する。
                     var isFiscalYearCarryover = !modeResult.IsNewPurchase
-                        && Views.Dialogs.CardRegistrationModeResult.IsFiscalYearStartCarryoverMonth(modeResult.CarryoverMonth!.Value);
+                        && PaperCarryoverPolicy.IsFiscalYearStartCarryoverMonth(modeResult.CarryoverMonth!.Value);
                     string summary;
                     if (modeResult.IsNewPurchase)
                     {
