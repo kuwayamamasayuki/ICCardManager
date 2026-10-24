@@ -2286,6 +2286,25 @@ public class LedgerMergeServiceTests : IDisposable
     }
 
     /// <summary>
+    /// Issue #2306（コードレビュー 4 回目で検出）: 並び順の規則が違った頃の生成器で作った整合済みの摘要を統合しても、
+    /// 明細どうしのバス停名を入れ替えないこと。
+    /// </summary>
+    [Fact]
+    public void SyncBusStopsFromSummary_旧生成器の並びの整合済み摘要_入れ替えない()
+    {
+        var older = new LedgerDetail { IsBus = true, BusStops = "★", Amount = 230, Balance = 770, SequenceNumber = 2 };
+        var newer = new LedgerDetail { IsBus = true, BusStops = "天神～博多", Amount = 230, Balance = 540, SequenceNumber = 1 };
+        var ledgers = new List<Ledger>
+        {
+            new() { Id = 1, Summary = "バス（天神～博多、★）", Details = new List<LedgerDetail> { older, newer } }
+        };
+
+        LedgerMergeService.SyncBusStopsFromSummary(ledgers).Should().BeEmpty();
+        older.BusStops.Should().Be("★");
+        newer.BusStops.Should().Be("天神～博多");
+    }
+
+    /// <summary>
     /// Issue #2306: 同期したバス停名は統合と同じトランザクションで、統合先の id に付け替えた明細として永続化すること。
     /// </summary>
     [Fact]

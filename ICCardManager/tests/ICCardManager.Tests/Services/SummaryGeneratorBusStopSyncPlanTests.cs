@@ -387,11 +387,66 @@ public class SummaryGeneratorBusStopSyncPlanTests : IDisposable
         var details = BusDetails(busStopsOldestFirstJoined.Split('|'));
         var summary = Regenerate(details);
 
-        var plan = SummaryGenerator.PlanBusStopSync(summary, details);
+        // 逆変換そのもの（守りを通さない対応付け）: 生成した摘要を読み戻すと、明細の値がそのまま得られる
+        var mapped = SummaryGenerator.MapBusStopsFromSummary(summary, details);
+        mapped.Outcome.Should().Be(BusStopSyncOutcome.Mapped, $"生成した摘要「{summary}」は対応付けられるべき（逆変換）");
+        mapped.Changes.Should().BeEmpty($"生成した摘要「{summary}」の逆変換が明細と食い違ってはならない");
 
-        // コードレビュー 3 回目: 現在の明細から作り直した摘要と同じなら、そもそも書き戻さない
+        // 同期の入口: 現在の明細から作り直した摘要と同じなら、そもそも書き戻さない（コードレビュー 3 回目）
+        var plan = SummaryGenerator.PlanBusStopSync(summary, details);
         plan.Outcome.Should().Be(BusStopSyncOutcome.NothingToSync, $"生成した摘要「{summary}」は明細と整合している");
-        plan.Changes.Should().BeEmpty($"生成した摘要「{summary}」の同期で明細が書き換わってはならない");
+    }
+
+    /// <summary>
+    /// 整合の守り（作り直した摘要との一致）: 逆変換で読み戻せない生成済みの摘要（乗継統合「天神～大橋」、
+    /// 解析できないバス停名の重複除去）も、明細と整合しているので「書き戻せない」ではなく「書き戻す対象なし」と判定する。
+    /// 守りを外すと、整合済みの行が反映できない形として扱われる。
+    /// </summary>
+    [Theory]
+    [InlineData("天神～博多|博多～大橋")]
+    [InlineData("天神|天神")]
+    public void 逆変換で読み戻せない生成済みの摘要_書き戻す対象なしと判定すること(string busStopsOldestFirstJoined)
+    {
+        var details = BusDetails(busStopsOldestFirstJoined.Split('|'));
+        var summary = Regenerate(details);
+        SummaryGenerator.MapBusStopsFromSummary(summary, details).Outcome
+            .Should().Be(BusStopSyncOutcome.Unmappable, $"前提: 「{summary}」は逆変換では読み戻せない");
+
+        SummaryGenerator.PlanBusStopSync(summary, details).Outcome.Should().Be(BusStopSyncOutcome.NothingToSync);
+    }
+
+    /// <summary>
+    /// コードレビュー 4 回目で検出: 並び順の規則が違った頃の生成器（#2033 以前は「解析できた経路 → 解析できない
+    /// バス停名」の固定順）で作った整合済みの行は、位置で対応付けると明細どうしの値が入れ替わる。
+    /// 対応付けた値が現在の値の並べ替えにすぎないなら書き換えない。
+    /// </summary>
+    [Fact]
+    public void 旧生成器の並びの整合済み摘要_明細どうしの値を入れ替えないこと()
+    {
+        var details = BusDetails("★", "天神～博多");
+        SummaryGenerator.MapBusStopsFromSummary("バス（天神～博多、★）", details).Changes
+            .Should().NotBeEmpty("前提: 位置で対応付けると値が入れ替わる");
+
+        var plan = SummaryGenerator.PlanBusStopSync("バス（天神～博多、★）", details);
+
+        plan.Outcome.Should().Be(BusStopSyncOutcome.NothingToSync);
+        details.Select(d => d.BusStops).Should().Equal("★", "天神～博多");
+    }
+
+    /// <summary>上の対: 値そのものを直した編集（並べ替えではない）は書き戻す。</summary>
+    [Fact]
+    public void 旧生成器の並びの摘要で名前を直した編集_書き戻すこと()
+    {
+        var details = BusDetails("★", "天神～博多");
+
+        var plan = SummaryGenerator.PlanBusStopSync("バス（大橋～薬院、天神～博多）", details);
+
+        plan.Outcome.Should().Be(BusStopSyncOutcome.Mapped);
+        AssignedBySequence(plan).Should().Equal(new Dictionary<int, string>
+        {
+            [2] = "大橋～薬院",
+            [1] = "天神～博多",
+        });
     }
 
     /// <summary>

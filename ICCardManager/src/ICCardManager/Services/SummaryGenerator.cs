@@ -474,6 +474,12 @@ namespace ICCardManager.Services
         /// </para>
         /// </remarks>
         internal static List<string> ExtractBusStopBlocks(string? summary)
+            => ExtractBusStopBlocksCore(summary, _context);
+
+        /// <summary>
+        /// 捕捉済みの世代のバスラベルで、摘要からバス停名をブロック単位で抽出する（Issue #2306。#1919）
+        /// </summary>
+        private static List<string> ExtractBusStopBlocksCore(string? summary, SummaryGenerationContext context)
         {
             var blocks = new List<string>();
             var text = summary ?? string.Empty;
@@ -484,7 +490,7 @@ namespace ICCardManager.Services
                 return blocks;
             }
 
-            var opener = BusLabel + FullWidthOpenParenthesis;
+            var opener = ResolveBusLabel(context) + FullWidthOpenParenthesis;
             var searchFrom = 0;
 
             while (searchFrom < text.Length)
@@ -578,16 +584,14 @@ namespace ICCardManager.Services
         /// </remarks>
         internal static BusStopSyncPlan PlanBusStopSync(string? summary, IEnumerable<LedgerDetail> details)
         {
+            // Issue #1919: 設定の世代は入口で 1 回だけ捕捉し、抽出・作り直し・対応付けのすべてへ持ち回る
+            var context = _context;
             var detailList = details.ToList();
             var busDetails = GetBusStopEmissionOrder(detailList);
-            if (busDetails.Count == 0)
-            {
-                return BusStopSyncPlan.NothingToSync;
-            }
 
             // Issue #1818: 抽出パターンは組織設定 BusLabel から導出する
-            var blocks = ExtractBusStopBlocks(summary);
-            if (blocks.Count == 0)
+            var blocks = ExtractBusStopBlocksCore(summary, context);
+            if (busDetails.Count == 0 || blocks.Count == 0)
             {
                 return BusStopSyncPlan.NothingToSync;
             }
@@ -596,17 +600,69 @@ namespace ICCardManager.Services
             // 明細は既に摘要と整合しているので書き換えない。統合は摘要を変えていない行も全行を同期するため、
             // この守りが無いと、摘要を生成した後に同一視グループを消してから統合しただけで、併記
             // 「往路（復路）」を 1 つのバス停名と読み直して明細を書き換え、実際の降車地が単独の値として失われる。
-            // Generate は新しい順を受け取る（SequenceNumber が小さいほど新しい）。比べるのはバスのブロックだけで、
-            // 部署種別（チャージ摘要の文言だけを変える）は結果に影響しないが、既定値で固定せず現在の世代の値を渡す（#1955）。
-            var context = _context;
-            var regenerated = ExtractBusStopBlocks(
-                new SummaryGenerator(context.DepartmentType).Generate(detailList.OrderBy(d => d.SequenceNumber).ToList()));
-            if (regenerated.SequenceEqual(blocks))
+            if (RegenerateBusStopBlocks(detailList, context).SequenceEqual(blocks))
             {
                 return BusStopSyncPlan.NothingToSync;
             }
 
-            return PlanBusStopSyncCore(busDetails, blocks, context);
+            var plan = PlanBusStopSyncCore(busDetails, blocks, context);
+
+            // Issue #2306（コードレビュー 4 回目で検出）: 対応付けた値が、現在の明細の値の並べ替えにすぎないなら
+            // 書き換えない。上の守りは今の生成器の出力と一致する行しか守れず、並び順の規則が違った頃の生成器
+            // （#2033 以前は「解析できた経路 → 解析できないバス停名」の固定順）で作った整合済みの行は、
+            // 位置で対応付けると明細どうしの値が入れ替わる（明細 [★, 天神～博多] に旧摘要「バス（天神～博多、★）」）。
+            // 限界: 明細どうしの名前の取り違えを摘要の並べ替えで直す編集も書き戻さない（明細の編集で直す）。
+            if (plan.Outcome == BusStopSyncOutcome.Mapped && IsPermutationOfCurrentValues(plan))
+            {
+                return BusStopSyncPlan.NothingToSync;
+            }
+
+            return plan;
+        }
+
+        /// <summary>
+        /// 整合の守り（作り直した摘要との一致・並べ替えの検出）を通さずに、対応付けだけを行う（Issue #2306。テスト用）
+        /// </summary>
+        /// <remarks>
+        /// 逆変換（往復の展開・併記の読み取り）が正しいことを、生成した摘要で確かめるための入口。
+        /// <see cref="PlanBusStopSync"/> は生成した摘要を守りで早期に返すため、逆変換そのものを通らない。
+        /// </remarks>
+        internal static BusStopSyncPlan MapBusStopsFromSummary(string? summary, IEnumerable<LedgerDetail> details)
+        {
+            var context = _context;
+            var busDetails = GetBusStopEmissionOrder(details.ToList());
+            var blocks = ExtractBusStopBlocksCore(summary, context);
+            return busDetails.Count == 0 || blocks.Count == 0
+                ? BusStopSyncPlan.NothingToSync
+                : PlanBusStopSyncCore(busDetails, blocks, context);
+        }
+
+        /// <summary>
+        /// 現在の明細から摘要を作り直し、そのバスのブロックを返す（Issue #2306）
+        /// </summary>
+        /// <remarks>
+        /// 捕捉済みの世代で生成する（<see cref="Generate"/> は世代を捕捉し直すため使わない。#1919）。
+        /// 部署種別はチャージ摘要の文言だけを変え、利用の摘要には影響しないが、既定値で固定せず世代の値を渡す（#1955）。
+        /// </remarks>
+        private static List<string> RegenerateBusStopBlocks(List<LedgerDetail> details, SummaryGenerationContext context)
+        {
+            // 時系列順（古い → 新しい。SequenceNumber が大きいほど古い）で、Generate と同じく利用だけを渡す
+            var usageDetails = details
+                .OrderByDescending(d => d.SequenceNumber)
+                .Where(d => !d.IsCharge && !d.IsPointRedemption && !IsImplicitPointRedemption(d))
+                .ToList();
+            var generator = new SummaryGenerator(context.DepartmentType);
+            return ExtractBusStopBlocksCore(generator.GenerateUsageSummary(usageDetails, context), context);
+        }
+
+        /// <summary>
+        /// 対応付けた値の多重集合が、現在の明細の値の多重集合と同じか（並べ替えにすぎないか。Issue #2306）
+        /// </summary>
+        private static bool IsPermutationOfCurrentValues(BusStopSyncPlan plan)
+        {
+            var assigned = plan.Assignments.Select(a => a.BusStops).OrderBy(v => v, StringComparer.Ordinal);
+            var current = plan.Assignments.Select(a => a.Detail.BusStops ?? string.Empty).OrderBy(v => v, StringComparer.Ordinal);
+            return assigned.SequenceEqual(current, StringComparer.Ordinal);
         }
 
         /// <summary>
