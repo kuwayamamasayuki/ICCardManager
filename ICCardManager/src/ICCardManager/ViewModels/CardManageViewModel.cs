@@ -610,10 +610,13 @@ namespace ICCardManager.ViewModels
                     };
 
                     // Issue #1215: 紙の出納簿からの繰越時は累計受入・払出の初期値を保存
-                    if (!modeResult.IsNewPurchase && modeResult.CarryoverMonth.HasValue)
+                    // Issue #2326: 3 月から繰越（新年度の始まり）は保存しない。繰越年度は新年度になるため、
+                    // 旧年度の紙の累計を保存すると新年度の 5 月以降の累計行に上乗せされる。
+                    // ダイアログも欄を無効にしているが、判定は結果側の 1 か所（CarriesPaperCumulative）で行う
+                    if (modeResult.CarriesPaperCumulative && modeResult.CarryoverMonth is int carryoverMonth)
                     {
                         var carryoverDate = SummaryGenerator.GetMidYearCarryoverDate(
-                            modeResult.CarryoverMonth.Value, registeredAt);
+                            carryoverMonth, registeredAt);
                         card.CarryoverIncomeTotal = modeResult.CarryoverIncomeTotal;
                         card.CarryoverExpenseTotal = modeResult.CarryoverExpenseTotal;
                         card.CarryoverFiscalYear = FiscalYearHelper.GetFiscalYear(
@@ -1710,7 +1713,7 @@ namespace ICCardManager.ViewModels
                     // 繰越月が3月の場合は年度末＝前年度繰越と同義なので、
                     // 「前年度より繰越」として扱い受入金額にも残高を記録する。
                     var isFiscalYearCarryover = !modeResult.IsNewPurchase
-                        && modeResult.CarryoverMonth!.Value == 3;
+                        && Views.Dialogs.CardRegistrationModeResult.IsFiscalYearStartCarryoverMonth(modeResult.CarryoverMonth!.Value);
                     string summary;
                     if (modeResult.IsNewPurchase)
                     {

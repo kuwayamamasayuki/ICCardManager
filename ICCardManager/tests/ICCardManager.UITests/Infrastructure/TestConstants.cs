@@ -564,6 +564,35 @@ namespace ICCardManager.UITests.Infrastructure
         [UiaName]
         public const string CardNewRegistrationButton = "新規カード登録";
 
+        // Issue #2326: 繰越月を 3 月にすると累計の入力欄が無効になることの UI テスト用。
+        /// <summary>交通系ICカード管理ダイアログの「保存」ボタン（AutomationProperties.Name を持たず、Name は Content の文字列）。</summary>
+        [NotUiaName]
+        public const string CardManageSaveButton = "保存";
+
+        /// <summary>交通系ICカード管理ダイアログで未登録のカードを読み取った後のステータス欄の先頭（StatusMessage のバインディング。読み取り完了の目印）。</summary>
+        [NotUiaName]
+        public const string CardManageCardReadStatusPrefix = "カードを読み取りました";
+
+        /// <summary>カード登録方法の選択ダイアログ（Issue #510）。</summary>
+        [UiaName]
+        public const string CardRegistrationModeDialogName = "カード登録方法選択ダイアログ";
+
+        [UiaName]
+        public const string CardRegistrationCarryoverRadio = "紙の出納簿からの繰越として登録";
+
+        [UiaName]
+        public const string CardRegistrationCarryoverMonthCombo = "繰越月の選択";
+
+        [UiaName]
+        public const string CardRegistrationIncomeTotalTextBox = "累計受入金額";
+
+        [UiaName]
+        public const string CardRegistrationExpenseTotalTextBox = "累計払出金額";
+
+        /// <summary>カード登録方法の選択ダイアログの「キャンセル」（登録をやめる）。</summary>
+        [UiaName]
+        public const string CardRegistrationCancelButton = "キャンセル";
+
         // 削除済みカードの復元の確認は Win32 の MessageBox で、タイトルは CardManageViewModel が渡す文字列そのもの。
         /// <summary>削除済みのカードを読み取ったときの復元の確認 MessageBox のタイトル（#284）。</summary>
         [NotUiaName]

@@ -800,6 +800,78 @@ public class LedgerMergeServiceTests : IDisposable
             "Generate が空文字を返した場合は統合先の元の摘要を維持する");
     }
 
+    /// <summary>
+    /// Issue #2326: 明細を持たない行同士の統合では、残額は最新（表示順で最後）の統合元の残額になること
+    /// </summary>
+    /// <remarks>
+    /// 以前は残額を持つ明細が 1 件も無いと統合先（最古）の残額 800 のまま残り、受入・払出だけが合算されて
+    /// 「前行残額 1,000 ＋ 0 − 410 ＝ 590」のはずの行が 800 になっていた（次の行との間でもチェーンが切れる）。
+    /// </remarks>
+    [Fact]
+    [Trait("Category", "Unit")]
+    public async Task MergeAsync_LedgersWithoutDetails_UsesLatestLedgerBalance()
+    {
+        var date = new DateTime(2026, 2, 3);
+        var ledger1 = CreateTestLedger(1, TestCardIdm, date, "鉄道（博多～天神）", 200, 800);
+        var ledger2 = CreateTestLedger(2, TestCardIdm, date, "鉄道（天神～博多）", 210, 590);
+        SetupGetByIdMocks(ledger1, ledger2);
+        SetupMergeMockSuccess();
+
+        var result = await _service.MergeAsync(new List<int> { 1, 2 });
+
+        result.Success.Should().BeTrue();
+        result.MergedLedger!.Expense.Should().Be(410);
+        result.MergedLedger.Balance.Should().Be(590, "受入・払出を合算した以上、残額は最新の台帳の値");
+        _ledgerRepositoryMock.Verify(x => x.MergeLedgersAsync(
+            1, It.IsAny<IEnumerable<int>>(), It.Is<Ledger>(l => l.Balance == 590), It.IsAny<SQLiteTransaction>()),
+            Times.Once, "DB へ書く残額も最新の台帳の値であること");
+    }
+
+    /// <summary>
+    /// Issue #2326: 明細を持つ行の後ろに明細を持たない行（手入力の行）を統合しても、
+    /// 残額は最新の台帳（明細なし）の値になること（古い行の明細の残額に戻らない）
+    /// </summary>
+    [Fact]
+    [Trait("Category", "Unit")]
+    public async Task MergeAsync_LatestLedgerWithoutDetails_UsesItsBalanceOverOlderDetail()
+    {
+        var date = new DateTime(2026, 2, 3);
+        var ledger1 = CreateTestLedger(1, TestCardIdm, date, "鉄道（A～B）", 200, 800);
+        ledger1.Details.Add(CreateRailDetail(1, "A", "B", 200, 800, 1, date));
+        var ledger2 = CreateTestLedger(2, TestCardIdm, date, "鉄道（B～C）", 210, 590);
+        SetupGetByIdMocks(ledger1, ledger2);
+        SetupMergeMockSuccess();
+
+        var result = await _service.MergeAsync(new List<int> { 1, 2 });
+
+        result.Success.Should().BeTrue();
+        result.MergedLedger!.Balance.Should().Be(590);
+    }
+
+    /// <summary>
+    /// Issue #2326 の対: 最新の台帳が残額を持つ明細を持つときは、従来どおり最新の明細の残額を使うこと
+    /// （古い行に明細が無くても、台帳の残額より明細の残額を優先する — Issue #1932 の並びの規則を変えていない）
+    /// </summary>
+    /// <remarks>
+    /// 経路を見分けるため、最新の台帳の残額（600）と明細の残額（590）を別の値にしている。
+    /// </remarks>
+    [Fact]
+    [Trait("Category", "Unit")]
+    public async Task MergeAsync_LatestLedgerWithDetails_KeepsUsingLatestDetailBalance()
+    {
+        var date = new DateTime(2026, 2, 3);
+        var ledger1 = CreateTestLedger(1, TestCardIdm, date, "鉄道（A～B）", 200, 800);
+        var ledger2 = CreateTestLedger(2, TestCardIdm, date, "鉄道（B～C）", 210, 600);
+        ledger2.Details.Add(CreateRailDetail(2, "B", "C", 210, 590, 2, date));
+        SetupGetByIdMocks(ledger1, ledger2);
+        SetupMergeMockSuccess();
+
+        var result = await _service.MergeAsync(new List<int> { 1, 2 });
+
+        result.Success.Should().BeTrue();
+        result.MergedLedger!.Balance.Should().Be(590, "明細を持つ台帳では最新の明細の残額を使う");
+    }
+
     // 注: MergeAsync_ThreeRailTrips_CalculatesFinancialsCorrectly は
     // 既存の MergeAsync_ThreeLedgers_MergesAllIntoFirst と完全重複のため追加しない
     // (既存テストにIncome=0のアサーションを追加するに留めた)

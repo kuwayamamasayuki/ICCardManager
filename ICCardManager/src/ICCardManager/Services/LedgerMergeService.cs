@@ -280,11 +280,20 @@ namespace ICCardManager.Services
             var chronologicalDetails = OrderChronologically(allDetails);
 
             // 残高: 最新（時系列で末尾）のDetailの残高を使用
+            // Issue #2326: 表示順で最後の統合元（＝最新の台帳）が残額を持つ明細を持たないとき（履歴の「追加」で
+            // 手入力した行など）は、その台帳の残額を使う。以前は明細が 1 件も無いと最古の統合先の残額のまま残り、
+            // 受入・払出は合算されるのに残額だけが古い値になって、前行残額 ＋ 受入 − 払出 ＝ 残額 が
+            // 統合した行とその次の行の 2 か所で崩れていた（6 年保存の台帳・物品出納簿の残額欄）。
+            var latestLedger = ledgers[ledgers.Count - 1];
             var latestDetail = chronologicalDetails
                 .LastOrDefault(d => d.Balance.HasValue);
-            if (latestDetail != null)
+            if (latestDetail != null && latestLedger.Details.Any(d => d.Balance.HasValue))
             {
                 target.Balance = latestDetail.Balance!.Value;
+            }
+            else
+            {
+                target.Balance = latestLedger.Balance;
             }
 
             // Issue #983: 摘要が手動編集されている場合、Detail.BusStopsが未同期の

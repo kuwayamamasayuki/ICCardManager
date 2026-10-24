@@ -445,6 +445,37 @@ namespace ICCardManager.Tests.Services
             result.Should().Be(200);
         }
 
+        /// <summary>
+        /// Issue #2326: カードの読取値がちょうど 0 円のときは「読み取れなかった」値として扱い、
+        /// 作成した ledger の末尾の残額へ進むこと（04 §2.4・07 の優先順位の条件を固定する）
+        /// </summary>
+        [Fact]
+        public async Task ResolveReturnBalanceAsync_CardBalanceZero_FallsBackToCreatedLedger()
+        {
+            var details = new List<LedgerDetail> { new() { Balance = 0 } };
+            var createdLedgers = new List<Ledger> { new() { Balance = 300 } };
+
+            var service = CreateService();
+            var result = await service.ResolveReturnBalanceAsync(details, createdLedgers, "CARD01");
+
+            result.Should().Be(300);
+        }
+
+        /// <summary>
+        /// Issue #2326 の対: 読取値が 1 円なら作成した ledger より読取値を優先すること（境界の 1 つ上）
+        /// </summary>
+        [Fact]
+        public async Task ResolveReturnBalanceAsync_CardBalanceOneYen_ReturnsCardBalance()
+        {
+            var details = new List<LedgerDetail> { new() { Balance = 1 } };
+            var createdLedgers = new List<Ledger> { new() { Balance = 300 } };
+
+            var service = CreateService();
+            var result = await service.ResolveReturnBalanceAsync(details, createdLedgers, "CARD01");
+
+            result.Should().Be(1);
+        }
+
         [Fact]
         public async Task ResolveReturnBalanceAsync_NoDetailNoLedger_UsesDbFallback()
         {

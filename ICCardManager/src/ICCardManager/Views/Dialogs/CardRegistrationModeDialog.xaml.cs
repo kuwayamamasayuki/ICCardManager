@@ -1,3 +1,4 @@
+#nullable enable
 using System;
 using System.Collections.Generic;
 using System.Globalization;
@@ -51,6 +52,31 @@ namespace ICCardManager.Views.Dialogs
         /// 紙の出納簿で管理していた際の、前月末時点での累計払出金額。
         /// </summary>
         public int CarryoverExpenseTotal { get; set; }
+
+        /// <summary>
+        /// 繰越月が年度の区切り（3 月）かどうか（Issue #510 / #2326）
+        /// </summary>
+        /// <remarks>
+        /// 3 月から繰越 = 新年度の始まりであり、導入行は「前年度より繰越」（新年度 4/1、受入＝残額）になる。
+        /// 紙の出納簿の 3 月末時点の累計は**旧年度**のもので、新年度の累計は 0 から始まるため、
+        /// 累計受入・累計払出は受け付けず保存もしない（<see cref="CarriesPaperCumulative"/>）。
+        /// 導入行の摘要・受入の判定（<c>CardManageViewModel.BuildInitialLedgerAsync</c>）、累計を保存するかの判定、
+        /// ダイアログの累計欄の有効・無効はすべてこの 1 か所に委ねる。
+        /// </remarks>
+        public static bool IsFiscalYearStartCarryoverMonth(int carryoverMonth) => carryoverMonth == 3;
+
+        /// <summary>
+        /// 紙の出納簿の累計受入・累計払出を当該年度の累計へ引き継ぐ登録かどうか（Issue #1215 / #2326）
+        /// </summary>
+        /// <remarks>
+        /// 繰越モードで、繰越月が 3 月以外のときだけ真。3 月を繰越月にすると繰越年度が新年度になるため、
+        /// 旧年度の紙の累計を保存すると新年度の 5 月以降の累計行に上乗せされ、物品出納簿の
+        /// 「受入 − 払出 = 残額」が年度を通して成り立たなくなる（#2326）。
+        /// </remarks>
+        public bool CarriesPaperCumulative =>
+            !IsNewPurchase
+            && CarryoverMonth.HasValue
+            && !IsFiscalYearStartCarryoverMonth(CarryoverMonth.Value);
     }
 
     /// <summary>
@@ -124,6 +150,8 @@ namespace ICCardManager.Views.Dialogs
             var previousMonth = currentMonth == 1 ? 12 : currentMonth - 1;
             CarryoverMonthCombo.SelectedValue = previousMonth;
             UpdateCarryoverDatePreview();
+            // 4 月に開くと既定の繰越月が 3 月になるため、初期表示から累計欄の有効・無効を揃える（Issue #2326）
+            UpdateCarryoverCumulativeAvailability();
         }
 
         /// <summary>
@@ -132,6 +160,33 @@ namespace ICCardManager.Views.Dialogs
         private void CarryoverMonthCombo_SelectionChanged(object sender, SelectionChangedEventArgs e)
         {
             UpdateCarryoverDatePreview();
+            UpdateCarryoverCumulativeAvailability();
+        }
+
+        /// <summary>
+        /// 累計受入・累計払出の入力欄を、繰越月に応じて有効・無効にする（Issue #2326）
+        /// </summary>
+        /// <remarks>
+        /// 3 月から繰越は新年度の始まり（「前年度より繰越」）で、紙の出納簿の 3 月末時点の累計は旧年度のもの。
+        /// 入力を受け付けると新年度の 5 月以降の累計行に上乗せされるため、欄を無効にして理由を注記する。
+        /// 判定は <see cref="CardRegistrationModeResult.IsFiscalYearStartCarryoverMonth"/> 1 か所に委ねる。
+        /// </remarks>
+        private void UpdateCarryoverCumulativeAvailability()
+        {
+            // SelectionChanged は XAML 読み込み中にも発火し得る（UpdateCarryoverDatePreview と同じ）
+            if (CarryoverCumulativePanel == null || CarryoverCumulativeHintText == null)
+            {
+                return;
+            }
+
+            var isFiscalYearStart = CarryoverMonthCombo.SelectedValue is int carryoverMonth
+                && CardRegistrationModeResult.IsFiscalYearStartCarryoverMonth(carryoverMonth);
+
+            CarryoverCumulativePanel.IsEnabled = !isFiscalYearStart;
+            CarryoverCumulativeHintText.Text = isFiscalYearStart
+                ? "※ 3月から繰越は新年度の始まりとして登録するため、累計の入力は不要です（新年度の累計は0円から始まります）"
+                : "※ 月次帳票の「累計」欄に加算されます（当該年度のみ）";
+            AutomationProperties.SetName(CarryoverCumulativeHintText, CarryoverCumulativeHintText.Text);
         }
 
         /// <summary>
@@ -236,6 +291,16 @@ namespace ICCardManager.Views.Dialogs
                         return;
                     }
                     result.CarryoverBalance = carryoverBalance;
+                }
+
+                // Issue #2326: 3 月から繰越は旧年度の累計になるため受け付けない（入力欄も無効）。
+                // 無効な欄に残った値で検証エラーを出さないよう、検証より前に抜ける
+                if (!result.CarriesPaperCumulative)
+                {
+                    Result = result;
+                    DialogResult = true;
+                    Close();
+                    return;
                 }
 
                 // Issue #1215: 累計受入金額

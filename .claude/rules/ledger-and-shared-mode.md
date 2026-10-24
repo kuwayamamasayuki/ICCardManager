@@ -42,6 +42,7 @@ paths:
 |------|------|------|
 | `新規購入` | カード登録時。`Income=初期残高` | `Ledger.IsCarryover` |
 | `○月から繰越` | 紙出納簿から年度途中で移行（Issue #510）。`Income=残高` | `SummaryGenerator.IsMidYearCarryoverSummary` |
+| `前年度より繰越` | 繰越月を 3 月にして登録したカードの導入行（新年度 4/1、`Income=残高`、貸出者なし）。帳票では in-memory 合成もされるが、この形だけは DB に保存される | `SummaryGenerator.GetCarryoverFromPreviousYearSummary` との一致 |
 | `（貸出中）` | 貸出中のプレースホルダ。返却時に**物理削除**される | `is_lent_record = 1` |
 | チャージ／ポイント還元／払戻し | 実際の取引 | 摘要文字列（`SummaryGenerator` の各 `Get*Summary`） |
 
@@ -54,7 +55,8 @@ paths:
   - **母集団を絞ると、その母集団に依存した副作用も動く**。`MainViewModel.RefreshDashboardAsync` は「ダッシュボードに居ないカード」の `BalanceInconsistency` / `CardBalanceMismatch` 警告を除去する（#1739 / #1908）ため、絞った分だけ除去対象が増える（本件では望ましい方向だが、**絞り込みの変更は必ず両方向の効果を数える**）
   - **除去手段を持たない警告ほど、母集団の誤りが恒久的な害になる**（`ui-conventions.md` #1811）。`LowBalance` は毎回作り直される種別なので、母集団が誤っていると「消しても消せない」ではなく「消す操作自体が無い」形で残り続ける
 - **除外を忘れると「使っていないカードが使われているように見える」**。登録しただけのカードが「利用1回・稼働率 > 0%」になり、遊休カードの発見という目的が成立しなくなる
-- SQL で除外する場合の表現は `summary = '新規購入' OR summary LIKE @midYearCarryoverPattern`（`LedgerRepository.GetByDateRangeAsync` の ORDER BY と `Ledger.IsCarryover` に同じ判定がある）。繰越側の LIKE パターンは `'%月から繰越'` をハードコードせず、`SummaryGenerator.GetMidYearCarryoverLikePattern`（組織設定 `MidYearCarryoverFormat` 由来）をパラメータバインドする（Issue #1749。`LedgerRepository.AddMidYearCarryoverParameter` を併用）。テストでは摘要文字列をハードコードせず `SummaryGenerator.GetMidYearCarryoverSummary` の生成結果を使い、生成側と検査側が揃って壊れないようにする
+  - **導入行は 3 種ある — 判定は `Ledger.IsInitialRecordSummary` 1 つに寄せる**（Issue #2326）。上の表の「新規購入」「○月から繰越」と、3 月繰越の「前年度より繰越」。`Ledger.IsCarryover` は帳票の集計・ソート用で前年度繰越を**含まない**（帳票では in-memory 合成される行のため）。利用実績の SQL（`LedgerRepository.ExcludeCarryoverCondition`）はこれと同じ 2 種しか見ておらず、3 月繰越で登録しただけのカードが稼働率・最終利用日（4/1）・月別利用額の「（職員名なし）」系列に現れていた。#2046（購入日）・#2237（返却時の下限）で寄せた判定から、利用実績のクエリだけが取り残された形。**「導入行」を扱う新しい集計は `IsCarryover` ではなく `IsInitialRecordSummary` の集合で書く**（SQL では `@previousYearCarryoverSummary` も併せてバインドする）
+- SQL で除外する場合の表現は `summary = '新規購入' OR summary LIKE @midYearCarryoverPattern OR summary = @previousYearCarryoverSummary`（利用実績の除外。`LedgerRepository.ExcludeCarryoverCondition`。帳票の並べ替えの CASE 式は前年度繰越を含まない旧来の 2 種）（`LedgerRepository.GetByDateRangeAsync` の ORDER BY と `Ledger.IsCarryover` に同じ判定がある）。繰越側の LIKE パターンは `'%月から繰越'` をハードコードせず、`SummaryGenerator.GetMidYearCarryoverLikePattern`（組織設定 `MidYearCarryoverFormat` 由来）をパラメータバインドする（Issue #1749。`LedgerRepository.AddMidYearCarryoverParameter` を併用）。テストでは摘要文字列をハードコードせず `SummaryGenerator.GetMidYearCarryoverSummary` の生成結果を使い、生成側と検査側が揃って壊れないようにする
 - **貸出期間は DB に残らない**。返却時に `LendingService` が貸出中レコードを物理削除し、`ic_card.last_lent_at` も null に戻す。`operation_log` にも記録がないため、「何日間貸し出されていたか」を後から集計することはできない（Issue #1692 で稼働率を「利用実績のあった日数」で定義した理由）
 - **`ledger.date` は「返却日」ではなく「カードの利用日」**（`LedgerDetail.UseDate`）。`LendingService.CreateUsageLedgersAsync` の Ledger 生成 4 経路（通常の利用／チャージ／ポイント還元／残高不足マージ）はすべて `Date = ….UseDate ?? dateGroup.Key` で、`dateGroup.Key` も `UseDate.Date`。返却時刻は `returned_at` 列に入るが集計には使わない。したがって**月・年度の帰属は乗車日で決まる**（例: 3/31 に乗車し 4/1 に返却 → 3月＝FY2025 に計上）
 - **貸出中の利用は返却まで台帳に存在しない**。行が作られるのは返却処理のときで、貸出中はカードが手元に無く利用内容を読み取れない。よって**月末時点で貸出中のカードがあると、その月の集計は未確定**（返却時に乗車日の月へ遡って追加される）。「月末に締めた数値が後から増える」ことを前提に、集計系の画面・帳票では**貸出中カードの有無を利用者に示す**こと（帳票は `ReportPreflightChecker` の「未返却のまま月をまたぐカード」警告、管理者ダッシュボードは「貸出中」「長期未返却」タイルが担う）

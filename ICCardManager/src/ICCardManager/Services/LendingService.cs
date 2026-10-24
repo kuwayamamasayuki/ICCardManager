@@ -870,6 +870,12 @@ namespace ICCardManager.Services
         /// 返却時の残高解決カスケード。
         /// 優先順位: (1)カード直接読取値 > (2)作成ledger末尾 > (3)DB 直近 ledger(Issue #1139)。
         /// </summary>
+        /// <remarks>
+        /// (1) は読取値が **1 円以上のときだけ**使う。0 円は「読み取れなかった」ことと区別できない値として扱い、
+        /// (2)(3) へ進む（<see cref="CreateUsageLedgersAsync"/> の <c>useCardBalance</c> と同じ判断）。
+        /// 実際に 0 円まで使い切った場合も、通常は作成した ledger の末尾が 0 円になるので結果は同じになる。
+        /// 境界は <c>LendingServiceHelperTests.ResolveReturnBalanceAsync_CardBalanceZero_*</c> が固定する（Issue #2326）。
+        /// </remarks>
         internal async Task<int> ResolveReturnBalanceAsync(
             List<LedgerDetail> detailList, List<Ledger> createdLedgers, string cardIdm)
         {
