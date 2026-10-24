@@ -128,10 +128,17 @@ public class SettingsMaintenanceKeyConventionTests
     public void 走査は一括保存から呼ばれるヘルパーの内側まで届くこと()
     {
         // Issue #2305 で一括保存からウィンドウ設定のヘルパー（SaveWindowSettingsToDbAsync）を外したため、
-        // 目印は一括保存が今も呼ぶ private ヘルパー FontSizeToString の内側のリテラル（"xlarge"）にした。
-        const string helperLiteral = "\"xlarge\"";
+        // 目印は一括保存が今も呼ぶ private ヘルパー FontSizeToString にしか無い式（ExtraLarge → "xlarge" の変換）にした。
+        // "xlarge" だけでは逆向きの ParseFontSize（呼ばれない）にも現れ、どちらへ展開したかを区別できない（レビュー 3 回目）。
+        const string helperLiteral = "FontSizeOption.ExtraLarge => \"xlarge\"";
         var direct = TestSourceInspection.ExtractMethodBodyPreservingLiterals(
             File.ReadAllText(RepositoryPath), SaveSignatureMarker);
+
+        TestSourceInspection.ExtractMethodBodyPreservingLiterals(
+                File.ReadAllText(RepositoryPath), "private static string FontSizeToString(FontSizeOption fontsize)")
+            .Should().Contain(helperLiteral, "前提: 目印は FontSizeToString の内側にある");
+        Regex.Matches(File.ReadAllText(RepositoryPath), Regex.Escape(helperLiteral)).Count.Should().Be(
+            1, "前提: 目印はファイル内で FontSizeToString にしか無い（展開先を区別できる）");
 
         direct.Should().NotContain(
             helperLiteral,

@@ -459,6 +459,7 @@
                 <Button Style="{StaticResource PrimaryActionButtonStyle}"
                         Content="保存(_S)"
                         Click="SaveButton_Click"
+                        IsEnabled="{Binding CanSaveSettings}"
                         Padding="20,10"
                         MinWidth="100"
                         IsDefault="True"

@@ -84,10 +84,73 @@ public class SettingsViewModelFreshLoadTests : IDisposable
         viewModel.WarningBalance.Should().Be(3000);
     }
 
+    /// <summary>
+    /// レビュー 3 回目: 設定の読み込みに失敗した画面からは保存できないこと。
+    /// </summary>
+    /// <remarks>
+    /// 設定の読み込みは再試行を通らないため、共有モードで一時的に DB へ接続できないだけでも失敗する。失敗すると画面の項目は既定値
+    /// （部署種別は市長事務部局、残額警告は 0 など）のまま残り、保存は全項目を書くので、別の項目だけを変えて保存すると
+    /// 変えていない設定まで既定値で上書きする。開くたびに DB を読むようにした（本 Issue）ことで、この経路を踏む頻度が上がる。
+    /// </remarks>
+    [Fact]
+    public async Task 設定の読み込みに失敗したら保存できないこと()
+    {
+        var repository = new Mock<ISettingsRepository>();
+        repository.Setup(r => r.GetAppSettingsAsync())
+            .ThrowsAsync(new InvalidOperationException("共有フォルダーに接続できない（テスト用）"));
+        var viewModel = CreateViewModel(repository.Object);
+
+        await viewModel.Invoking(v => v.LoadSettingsAsync()).Should().ThrowAsync<InvalidOperationException>(
+            "例外は呼び出し元（SettingsDialog）へ伝え、エラーを表示させる");
+
+        viewModel.CanSaveSettings.Should().BeFalse("保存ボタンを押せないようにする");
+        viewModel.StatusMessage.Should().Be(SettingsViewModel.SettingsLoadFailedMessage);
+        viewModel.IsStatusError.Should().BeTrue();
+
+        // ボタンを経ずに保存を呼んでも（Enter キー等）、既定値で上書きしない
+        viewModel.WarningBalance = 5000;
+        await viewModel.SaveAsync();
+
+        repository.Verify(r => r.SaveAppSettingsAsync(It.IsAny<AppSettings>()), Times.Never,
+            "読み込みに失敗した画面の既定値（部署種別は市長事務部局など）を保存しない");
+        viewModel.IsSaved.Should().BeFalse("ダイアログを閉じない");
+        viewModel.StatusMessage.Should().Be(SettingsViewModel.SettingsLoadFailedMessage);
+    }
+
+    /// <summary>
+    /// 対の表明: 読み込みに成功した画面からは従来どおり保存できること。
+    /// これが無いと、保存を常に止める実装でも上のテストは緑になる。
+    /// </summary>
+    [Fact]
+    public async Task 設定の読み込みに成功したら保存できること()
+    {
+        var repository = new Mock<ISettingsRepository>();
+        repository.Setup(r => r.GetAppSettingsAsync()).ReturnsAsync(new AppSettings
+        {
+            DepartmentType = DepartmentType.EnterpriseAccount,
+            WarningBalance = 3000,
+        });
+        // WPF 依存の文字サイズの反映を避けるため false を返す（SettingsViewModelTests と同じ）
+        repository.Setup(r => r.SaveAppSettingsAsync(It.IsAny<AppSettings>())).ReturnsAsync(false);
+        var viewModel = CreateViewModel(repository.Object);
+
+        await viewModel.LoadSettingsAsync();
+        viewModel.CanSaveSettings.Should().BeTrue();
+
+        viewModel.WarningBalance = 5000;
+        await viewModel.SaveAsync();
+
+        repository.Verify(r => r.SaveAppSettingsAsync(It.Is<AppSettings>(s =>
+            s.WarningBalance == 5000 && s.DepartmentType == DepartmentType.EnterpriseAccount)), Times.Once,
+            "読み込んだ部署種別を保ったまま、変えた残額警告を保存する");
+    }
+
     private static SettingsViewModel CreateViewModel(ISettingsRepository repository)
     {
         var validation = new Mock<IValidationService>();
         validation.Setup(v => v.ValidateWarningBalance(It.IsAny<int>())).Returns(ValidationResult.Success());
+        validation.Setup(v => v.ValidateCompanionCountInputTimeout(It.IsAny<int>())).Returns(ValidationResult.Success());
+        validation.Setup(v => v.ValidateLongTermUnreturnedDays(It.IsAny<int>())).Returns(ValidationResult.Success());
 
         return new SettingsViewModel(
             repository,

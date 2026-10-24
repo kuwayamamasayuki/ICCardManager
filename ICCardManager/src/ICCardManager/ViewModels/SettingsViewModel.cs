@@ -85,6 +85,30 @@ public partial class SettingsViewModel : ViewModelBase
     private bool _isSaved;
 
     /// <summary>
+    /// 設定の読み込みに失敗したかどうか（Issue #2305）
+    /// </summary>
+    /// <remarks>
+    /// 読み込みに失敗すると、画面の項目は既定値（部署種別は市長事務部局など）のまま残る。保存は画面の全項目を書くため、
+    /// そのまま保存すると、変えていない設定まで既定値で上書きする。失敗したら保存させず、画面を開き直すよう案内する。
+    /// 設定の読み込みは再試行を通らない（共有モードで一時的に DB へ接続できないだけでも失敗する）。
+    /// </remarks>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(CanSaveSettings))]
+    private bool _isSettingsLoadFailed;
+
+    /// <summary>
+    /// 保存ボタンを押せるかどうか（設定の読み込みに失敗していないこと。Issue #2305）
+    /// </summary>
+    public bool CanSaveSettings => !IsSettingsLoadFailed;
+
+    /// <summary>
+    /// 設定の読み込みに失敗したときの案内（Issue #2305）
+    /// </summary>
+    internal const string SettingsLoadFailedMessage =
+        "設定を読み込めなかったため、この画面からは保存できません（このまま保存すると、変えていない設定まで初期値で上書きされます）。" +
+        "データベース（共有フォルダー）に接続できることを確かめてから、この画面を閉じて開き直してください。";
+
+    /// <summary>
     /// Issue #1279: 最初にエラーが発生したフィールドのプロパティ名。
     /// Dialog のコードビハインドがこの値を参照し、該当コントロールへフォーカスを移動する。
     /// エラーなしの場合は null。
@@ -312,7 +336,20 @@ public partial class SettingsViewModel : ViewModelBase
         using (BeginBusy("読み込み中..."))
         {
             _settingsRepository.InvalidateCache();
-            var settings = await _settingsRepository.GetAppSettingsAsync();
+            AppSettings settings;
+            try
+            {
+                settings = await _settingsRepository.GetAppSettingsAsync();
+            }
+            catch
+            {
+                // Issue #2305: 既定値のまま保存させない（呼び出し元の SettingsDialog がエラーを表示する）
+                IsSettingsLoadFailed = true;
+                SetStatus(SettingsLoadFailedMessage, true);
+                throw;
+            }
+
+            IsSettingsLoadFailed = false;
 
             WarningBalance = settings.WarningBalance;
             BackupPath = settings.BackupPath;
@@ -359,6 +396,13 @@ public partial class SettingsViewModel : ViewModelBase
     {
         // Issue #1279: 検証前にエラーフィールド情報をリセット
         FirstErrorField = null;
+
+        // Issue #2305: 読み込みに失敗した画面（項目が既定値のまま）からは保存しない
+        if (IsSettingsLoadFailed)
+        {
+            SetStatus(SettingsLoadFailedMessage, true);
+            return;
+        }
 
         // バリデーション
         var balanceResult = _validationService.ValidateWarningBalance(WarningBalance);
