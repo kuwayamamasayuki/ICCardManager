@@ -2260,6 +2260,32 @@ public class LedgerMergeServiceTests : IDisposable
     }
 
     /// <summary>
+    /// Issue #2306（コードレビュー 3 回目で検出）: 統合は摘要を変えていない行も同期する。摘要を生成した後に
+    /// 同一視グループを消してから統合しても、併記「往路（復路）」の明細を書き換えないこと。
+    /// </summary>
+    [Fact]
+    public void SyncBusStopsFromSummary_同一視グループを消した後の併記の摘要_書き換えない()
+    {
+        var forward = new LedgerDetail { IsBus = true, BusStops = "天神日銀前～下原中央", Amount = 230, Balance = 770, SequenceNumber = 2 };
+        var returnLeg = new LedgerDetail { IsBus = true, BusStops = "下原中央～天神中央郵便局前", Amount = 230, Balance = 540, SequenceNumber = 1 };
+        var ledgers = new List<Ledger>
+        {
+            new()
+            {
+                Id = 1,
+                Summary = "バス（天神日銀前（天神中央郵便局前）～下原中央 往復）",
+                Details = new List<LedgerDetail> { forward, returnLeg }
+            }
+        };
+
+        var changes = LedgerMergeService.SyncBusStopsFromSummary(ledgers);
+
+        changes.Should().BeEmpty();
+        forward.BusStops.Should().Be("天神日銀前～下原中央");
+        returnLeg.BusStops.Should().Be("下原中央～天神中央郵便局前");
+    }
+
+    /// <summary>
     /// Issue #2306: 同期したバス停名は統合と同じトランザクションで、統合先の id に付け替えた明細として永続化すること。
     /// </summary>
     [Fact]

@@ -2403,6 +2403,46 @@ public class LedgerRowEditViewModelTests : IDisposable
     }
 
     /// <summary>
+    /// Issue #2306（コードレビュー 3 回目で検出）: 編集前にあったバスのブロックが 1 つも読み取れなくなった摘要
+    /// （半角括弧「バス(…)」）は、明細へ書き戻されず統合で編集が失われるので警告する。
+    /// </summary>
+    [Fact]
+    public async Task Validate_バスのブロックが読み取れなくなった摘要は警告すること_Issue2306()
+    {
+        var ledger = CreateBusLedger("バス（天神～博多）");
+        var dto = ArrangeBusLedgerForEdit(ledger);
+        await _viewModel.InitializeForEditAsync(dto);
+
+        _viewModel.Summary = "バス(天神～大橋)";
+
+        _viewModel.WarningMessage.Should().Contain(
+            LedgerRowEditViewModel.BuildBusStopUnmappableWarning(BusStopSyncFailure.BusBlockMissing, 1));
+    }
+
+    /// <summary>
+    /// 上の対: 全角括弧の対応が取れていない形は #1914 の警告だけを出し、重ねて出さない。
+    /// 編集前からバスのブロックが無い摘要も対象外。
+    /// </summary>
+    [Fact]
+    public async Task Validate_括弧の不均衡や元からバスのブロックが無い摘要では重ねて警告しないこと_Issue2306()
+    {
+        var ledger = CreateBusLedger("バス（天神～博多）");
+        var dto = ArrangeBusLedgerForEdit(ledger);
+        await _viewModel.InitializeForEditAsync(dto);
+        var missing = LedgerRowEditViewModel.BuildBusStopUnmappableWarning(BusStopSyncFailure.BusBlockMissing, 1);
+
+        _viewModel.Summary = "バス（天神～大橋";
+        _viewModel.WarningMessage.Should().Contain("全角括弧「（」「）」の対応が取れていません");
+        _viewModel.WarningMessage.Should().NotContain(missing);
+
+        var plain = CreateBusLedger("手入力の摘要");
+        var plainDto = ArrangeBusLedgerForEdit(plain);
+        await _viewModel.InitializeForEditAsync(plainDto);
+        _viewModel.Summary = "手入力の摘要（修正）";
+        _viewModel.WarningMessage.Should().NotContain(missing);
+    }
+
+    /// <summary>
     /// Issue #2306: 警告文言の品質（何が・なぜ・どうすれば、行動指示で終わる）を理由ごとに確かめる。
     /// 往復の書き方は組織設定の接尾辞から作る（リテラルを直書きしない。#1818）。
     /// </summary>
@@ -2410,6 +2450,8 @@ public class LedgerRowEditViewModelTests : IDisposable
     [InlineData(nameof(BusStopSyncFailure.CountMismatch), "区間の数が利用の件数と合わない")]
     [InlineData(nameof(BusStopSyncFailure.RoundTripNotAdjacent), "往復の相手に当たるバス利用が続いていない離れた位置にある")]
     [InlineData(nameof(BusStopSyncFailure.RoundTripOnSingleUsage), "バス利用が1件だけなのに往復")]
+    [InlineData(nameof(BusStopSyncFailure.MalformedRoundTrip), "往復の表記の前が「乗車～降車」の形")]
+    [InlineData(nameof(BusStopSyncFailure.BusBlockMissing), "全角の括弧）のバス停名が見つからない")]
     public void BuildBusStopUnmappableWarning_理由ごとに3要素を含み行動指示で終わること_Issue2306(
         string failureName, string reason)
     {

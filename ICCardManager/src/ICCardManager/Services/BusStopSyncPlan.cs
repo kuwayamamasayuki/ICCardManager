@@ -43,6 +43,15 @@ namespace ICCardManager.Services
         /// 件数は合っていても、位置で書き戻すと別の利用へ名前が入る
         /// </summary>
         RoundTripNotAdjacent,
+
+        /// <summary>往復の接尾辞で終わるのに、その前が「乗車～降車」の形になっていない（「A～B～C 往復」「天神 往復」）</summary>
+        MalformedRoundTrip,
+
+        /// <summary>
+        /// 編集前の摘要にはバスのブロックがあったのに、編集後は 1 つも読み取れない（半角括弧「バス(…)」・ラベルの削除等）。
+        /// 計画（<see cref="SummaryGenerator.PlanBusStopSync"/>）は返さず、行編集が編集前後を比べて判定する
+        /// </summary>
+        BusBlockMissing,
     }
 
     /// <summary>

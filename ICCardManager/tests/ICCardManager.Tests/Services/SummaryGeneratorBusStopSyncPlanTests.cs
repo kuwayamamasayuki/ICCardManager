@@ -389,8 +389,65 @@ public class SummaryGeneratorBusStopSyncPlanTests : IDisposable
 
         var plan = SummaryGenerator.PlanBusStopSync(summary, details);
 
-        plan.Outcome.Should().Be(BusStopSyncOutcome.Mapped, $"生成した摘要「{summary}」は対応付けられるべき");
+        // コードレビュー 3 回目: 現在の明細から作り直した摘要と同じなら、そもそも書き戻さない
+        plan.Outcome.Should().Be(BusStopSyncOutcome.NothingToSync, $"生成した摘要「{summary}」は明細と整合している");
         plan.Changes.Should().BeEmpty($"生成した摘要「{summary}」の同期で明細が書き換わってはならない");
+    }
+
+    /// <summary>
+    /// コードレビュー 3 回目で検出: 摘要を生成した後に同一視グループを消しても、併記「往路（復路）」を 1 つのバス停名と
+    /// 読み直して明細を書き換えない（統合は摘要を変えていない行も同期する）。書き換えると、実際に降りた
+    /// 天神中央郵便局前 が単独の値として 6 年保存の明細から失われる。
+    /// </summary>
+    [Fact]
+    public void 同一視グループを消した後の併記の摘要_明細を書き換えないこと()
+    {
+        SummaryGenerator.ApplyTransferStationGroups(new[] { new[] { "天神日銀前", "天神中央郵便局前" } });
+        var details = BusDetails("天神日銀前～下原中央", "下原中央～天神中央郵便局前");
+        var summary = Regenerate(details);
+        summary.Should().Be("バス（天神日銀前（天神中央郵便局前）～下原中央 往復）", "前提: グループがある間に生成した併記");
+        SummaryGenerator.ApplyTransferStationGroups(Array.Empty<string[]>());
+
+        var plan = SummaryGenerator.PlanBusStopSync(summary, details);
+
+        plan.Changes.Should().BeEmpty();
+        details.Select(d => d.BusStops).Should().Equal("天神日銀前～下原中央", "下原中央～天神中央郵便局前");
+    }
+
+    /// <summary>
+    /// 上の対: グループを消した後でも、併記の往復を正当に直した編集は書き戻す。
+    /// 括弧の外と内が現在の往路の乗車地・復路の降車地と一致するので、併記として読む。
+    /// </summary>
+    [Fact]
+    public void 同一視グループを消した後に併記の往復を直した摘要_併記として書き戻すこと()
+    {
+        var details = BusDetails("天神日銀前～下原中央", "下原中央～天神中央郵便局前");
+
+        var plan = SummaryGenerator.PlanBusStopSync("バス（天神日銀前（天神中央郵便局前）～下原 往復）", details);
+
+        plan.Outcome.Should().Be(BusStopSyncOutcome.Mapped);
+        AssignedBySequence(plan).Should().Equal(new Dictionary<int, string>
+        {
+            [2] = "天神日銀前～下原",
+            [1] = "下原～天神中央郵便局前",
+        });
+    }
+
+    /// <summary>
+    /// コードレビュー 3 回目で検出: 往復の接尾辞で終わるのに「乗車～降車」と読めない区間は、
+    /// 接尾辞ごと 1 件のバス停名として明細へ書かない。
+    /// </summary>
+    [Theory]
+    [InlineData("バス（天神～博多～吉塚 往復）", 1)]
+    [InlineData("バス（天神 往復）", 2)]
+    public void 往復の接尾辞の前が乗車と降車でない区間_対応付けないこと(string summary, int busCount)
+    {
+        var details = BusDetails(Enumerable.Repeat<string?>("★", busCount).ToArray());
+
+        var plan = SummaryGenerator.PlanBusStopSync(summary, details);
+
+        plan.Outcome.Should().Be(BusStopSyncOutcome.Unmappable);
+        plan.Failure.Should().Be(BusStopSyncFailure.MalformedRoundTrip);
     }
 
     [Fact]

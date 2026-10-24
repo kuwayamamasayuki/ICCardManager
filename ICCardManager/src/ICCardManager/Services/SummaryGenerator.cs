@@ -578,7 +578,8 @@ namespace ICCardManager.Services
         /// </remarks>
         internal static BusStopSyncPlan PlanBusStopSync(string? summary, IEnumerable<LedgerDetail> details)
         {
-            var busDetails = GetBusStopEmissionOrder(details);
+            var detailList = details.ToList();
+            var busDetails = GetBusStopEmissionOrder(detailList);
             if (busDetails.Count == 0)
             {
                 return BusStopSyncPlan.NothingToSync;
@@ -591,7 +592,21 @@ namespace ICCardManager.Services
                 return BusStopSyncPlan.NothingToSync;
             }
 
-            return PlanBusStopSyncCore(busDetails, blocks, _context);
+            // Issue #2306（コードレビュー 3 回目で検出）: 摘要のバス停名が、現在の明細から作り直したものと同じなら
+            // 明細は既に摘要と整合しているので書き換えない。統合は摘要を変えていない行も全行を同期するため、
+            // この守りが無いと、摘要を生成した後に同一視グループを消してから統合しただけで、併記
+            // 「往路（復路）」を 1 つのバス停名と読み直して明細を書き換え、実際の降車地が単独の値として失われる。
+            // Generate は新しい順を受け取る（SequenceNumber が小さいほど新しい）。比べるのはバスのブロックだけで、
+            // 部署種別（チャージ摘要の文言だけを変える）は結果に影響しないが、既定値で固定せず現在の世代の値を渡す（#1955）。
+            var context = _context;
+            var regenerated = ExtractBusStopBlocks(
+                new SummaryGenerator(context.DepartmentType).Generate(detailList.OrderBy(d => d.SequenceNumber).ToList()));
+            if (regenerated.SequenceEqual(blocks))
+            {
+                return BusStopSyncPlan.NothingToSync;
+            }
+
+            return PlanBusStopSyncCore(busDetails, blocks, context);
         }
 
         /// <summary>
@@ -608,16 +623,22 @@ namespace ICCardManager.Services
             var roundTripStarts = new List<int>();
             foreach (var part in string.Join("、", blocks).Split('、'))
             {
-                var expanded = ExpandRoundTrip(part, context);
-                if (expanded == null)
+                if (!IsRoundTripPart(part, context))
                 {
                     entries.Add(part);
+                    continue;
                 }
-                else
+
+                // 往復の接尾辞で終わるのに「乗車～降車」と読めない区間（「A～B～C 往復」「天神 往復」）は、
+                // 1 件のバス停名として書き戻すと接尾辞ごと明細へ入る（コードレビュー 3 回目で検出）
+                var expanded = ExpandRoundTrip(part, busDetails, entries.Count, context);
+                if (expanded == null)
                 {
-                    roundTripStarts.Add(entries.Count);
-                    entries.AddRange(expanded);
+                    return BusStopSyncPlan.Unmappable(BusStopSyncFailure.MalformedRoundTrip);
                 }
+
+                roundTripStarts.Add(entries.Count);
+                entries.AddRange(expanded);
             }
 
             if (entries.Count != busDetails.Count)
@@ -637,29 +658,44 @@ namespace ICCardManager.Services
         }
 
         /// <summary>
+        /// 区間が往復の接尾辞（組織設定 <c>SummaryText.RoundTripSuffix</c>）で終わるか（Issue #2306）
+        /// </summary>
+        private static bool IsRoundTripPart(string part, SummaryGenerationContext context)
+        {
+            var suffix = context.Options.SummaryText.RoundTripSuffix;
+            return !string.IsNullOrEmpty(suffix) && part.EndsWith(suffix, StringComparison.Ordinal);
+        }
+
+        /// <summary>
         /// 往復の区間（「A～B 往復」）を往路・復路のバス停名へ展開する（Issue #2306）
         /// </summary>
-        /// <returns>[往路, 復路]。往復の形でなければ null</returns>
+        /// <param name="part">往復の接尾辞で終わる区間（<see cref="IsRoundTripPart"/> が true）</param>
+        /// <param name="busDetails">生成側の出力順に並べたバス明細</param>
+        /// <param name="k">この往復の往路を対応付ける位置</param>
+        /// <param name="context">この同期が参照する設定の世代</param>
+        /// <returns>[往路, 復路]。接尾辞の前が「乗車～降車」と読めなければ null</returns>
         /// <remarks>
         /// <see cref="FormatRoundTrip"/> の逆変換。往路は「A～B」、復路は「B'～A'」
         /// （端点が「往路の名前（復路の名前）」と併記されていれば復路の名前を使う）。
         /// </remarks>
-        private static List<string>? ExpandRoundTrip(string part, SummaryGenerationContext context)
+        private static List<string>? ExpandRoundTrip(
+            string part, List<LedgerDetail> busDetails, int k, SummaryGenerationContext context)
         {
             var suffix = context.Options.SummaryText.RoundTripSuffix;
-            if (string.IsNullOrEmpty(suffix) || !part.EndsWith(suffix, StringComparison.Ordinal))
-            {
-                return null;
-            }
-
             var route = ParseBusRoute(part.Substring(0, part.Length - suffix.Length));
             if (route == null)
             {
                 return null;
             }
 
-            var (startOutbound, startReturn) = SplitRoundTripEndpoint(route.Value.Entry, context);
-            var (endOutbound, endReturn) = SplitRoundTripEndpoint(route.Value.Exit, context);
+            // 併記の判定に使う、現在の往路・復路の値（明細の現在の値と一致する併記は、グループに関係なく併記と読む）
+            var forward = k < busDetails.Count ? ParseExistingBusRoute(busDetails[k]) : null;
+            var returnLeg = k + 1 < busDetails.Count ? ParseExistingBusRoute(busDetails[k + 1]) : null;
+            var knownStart = forward is { } f && returnLeg is { } r ? (f.Entry, r.Exit) : ((string, string)?)null;
+            var knownEnd = forward is { } f2 && returnLeg is { } r2 ? (f2.Exit, r2.Entry) : ((string, string)?)null;
+
+            var (startOutbound, startReturn) = SplitRoundTripEndpoint(route.Value.Entry, knownStart, context);
+            var (endOutbound, endReturn) = SplitRoundTripEndpoint(route.Value.Exit, knownEnd, context);
             return new List<string>
             {
                 $"{startOutbound}～{endOutbound}",
@@ -670,13 +706,18 @@ namespace ICCardManager.Services
         /// <summary>
         /// 往復の端点「往路の名前（復路の名前）」を分ける（Issue #2306。<see cref="FormatEndpoint"/> の逆変換）
         /// </summary>
+        /// <param name="endpoint">往復の端点（「往路の名前（復路の名前）」または名前 1 つ）</param>
+        /// <param name="known">現在の明細での（往路の名前, 復路の名前）。両方の明細が読めないときは null</param>
+        /// <param name="context">この同期が参照する設定の世代</param>
         /// <remarks>
         /// 末尾の全角括弧を併記として読むのは、括弧の内と外が同一視グループで同一とみなされる
-        /// 別名どうしのときだけ。生成側は同一視された別名にしか併記を付けないため、
+        /// 別名どうしのときと、括弧の外と内が<b>現在の明細の往路・復路の名前と一致する</b>とき
+        /// （摘要を生成した後に同一視グループを消しても、明細が実際に持つ併記は読み取れるように。コードレビュー 3 回目）。
+        /// 生成側は同一視された別名にしか併記を付けないため、
         /// それ以外の括弧（「博多駅（筑紫口）」のようなバス停名の一部）は名前としてそのまま扱う。
         /// </remarks>
         private static (string Outbound, string Return) SplitRoundTripEndpoint(
-            string endpoint, SummaryGenerationContext context)
+            string endpoint, (string Outbound, string Return)? known, SummaryGenerationContext context)
         {
             if (endpoint.Length > 0 && endpoint[endpoint.Length - 1] == FullWidthCloseParenthesis)
             {
@@ -697,7 +738,10 @@ namespace ICCardManager.Services
                             if (outbound.Length > 0
                                 && returnName.Length > 0
                                 && !string.Equals(outbound, returnName, StringComparison.Ordinal)
-                                && context.AreTransferStations(outbound, returnName))
+                                && (context.AreTransferStations(outbound, returnName)
+                                    || (known is { } pair
+                                        && string.Equals(pair.Outbound, outbound, StringComparison.Ordinal)
+                                        && string.Equals(pair.Return, returnName, StringComparison.Ordinal))))
                             {
                                 return (outbound, returnName);
                             }

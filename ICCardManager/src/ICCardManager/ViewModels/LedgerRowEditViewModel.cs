@@ -1165,10 +1165,24 @@ namespace ICCardManager.ViewModels
                 return (BusStopSyncFailure.None, 0);
             }
 
-            if (SummaryGenerator.ExtractBusStopBlocks(Summary)
-                .SequenceEqual(SummaryGenerator.ExtractBusStopBlocks(_initialSummary)))
+            var currentBlocks = SummaryGenerator.ExtractBusStopBlocks(Summary);
+            var initialBlocks = SummaryGenerator.ExtractBusStopBlocks(_initialSummary);
+            if (currentBlocks.SequenceEqual(initialBlocks))
             {
                 return (BusStopSyncFailure.None, 0);
+            }
+
+            // コードレビュー 3 回目で検出: 編集前にあったバスのブロックが 1 つも読み取れなくなった
+            // （半角括弧「バス(…)」・ラベルの削除等）。同期する名前が無いので書き戻されず、統合で明細から
+            // 摘要が作り直されて編集が失われる。括弧の不均衡（#1914）は上で別に警告済みなので重ねない。
+            if (currentBlocks.Count == 0 && initialBlocks.Count > 0)
+            {
+                var busDetailCount = SummaryGenerator.GetBusStopEmissionOrder(_editDetails).Count;
+                var unbalanced = SummaryGenerator.ContainsBusLabel(Summary)
+                    && !SummaryGenerator.HasBalancedFullWidthParentheses(Summary);
+                return busDetailCount > 0 && !unbalanced
+                    ? (BusStopSyncFailure.BusBlockMissing, busDetailCount)
+                    : (BusStopSyncFailure.None, 0);
             }
 
             var plan = SummaryGenerator.PlanBusStopSync(Summary, _editDetails);
@@ -1195,6 +1209,10 @@ namespace ICCardManager.ViewModels
                     "往復の相手に当たるバス利用が続いていない離れた位置にあるため、往復の表記ではどの利用のバス停名か決められず、",
                 BusStopSyncFailure.RoundTripOnSingleUsage =>
                     "バス利用が1件だけなのに往復（2件分）の表記になっているため、",
+                BusStopSyncFailure.MalformedRoundTrip =>
+                    "往復の表記の前が「乗車～降車」の形（乗車と降車を「～」1つでつなぐ）になっていないため、",
+                BusStopSyncFailure.BusBlockMissing =>
+                    $"摘要に「{SummaryGenerator.BusLabel}（…）」の形（全角の括弧）のバス停名が見つからないため、",
                 _ => "バス停名の区間の数が利用の件数と合わないため、",
             };
             var consequence = "このまま保存すると履歴を統合したときに編集前のバス停名へ戻ります。";
@@ -1206,6 +1224,9 @@ namespace ICCardManager.ViewModels
                     $"行きと帰りが1件ずつで続けて乗った往復は「乗車～降車{roundTripSuffix}」とまとめて書けます。" +
                     "それ以外は、バス利用1件ごとに「乗車～降車」を利用した順に「、」で区切って入力してください。",
                 BusStopSyncFailure.CountMismatch =>
+                    "バス利用1件ごとに「乗車～降車」を利用した順に「、」で区切って入力してください。",
+                BusStopSyncFailure.BusBlockMissing =>
+                    $"バス停名は「{SummaryGenerator.BusLabel}（乗車～降車）」のように全角の括弧で囲み、" +
                     "バス利用1件ごとに「乗車～降車」を利用した順に「、」で区切って入力してください。",
                 _ => "往復の表記を使わず、バス利用1件ごとに「乗車～降車」を利用した順に「、」で区切って入力してください。",
             };
