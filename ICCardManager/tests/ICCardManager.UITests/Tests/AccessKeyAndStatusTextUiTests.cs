@@ -1,6 +1,7 @@
 using System;
 using System.Data.SQLite;
 using System.Globalization;
+using System.Linq;
 using FlaUI.Core.AutomationElements;
 using FlaUI.Core.Definitions;
 using FlaUI.Core.Input;
@@ -72,11 +73,11 @@ namespace ICCardManager.UITests.Tests
                 cf.ByName(expectedName).And(cf.ByControlType(ControlType.Edit)));
             target.Should().NotBeNull($"設定ダイアログに「{expectedName}」の入力欄があること");
 
-            ScreenshotHelper.RequireForeground(dialog.Window);
-            Keyboard.TypeSimultaneously(VirtualKeyShort.ALT, key);
-
-            FocusInspection.WaitForFocusWithin(target!).Should().BeTrue(
-                $"Alt+{key} 1 回で「{expectedName}」へフォーカスが移ること（実際は {FocusInspection.DescribeFocused(target!)}）");
+            // キーの前の前提: 開いた直後の初期フォーカス（UT-054）が来てから押す
+            var initialFocus = dialog.Window.FindFirstDescendant(cf => cf.ByName(TestConstants.SettingsToastPositionComboBox));
+            PressAltAndAssert(dialog.Window, initialFocus, key,
+                () => FocusInspection.HasFocusWithin(target!),
+                () => $"「{expectedName}」へフォーカスが移ること（実際は {FocusInspection.DescribeFocused(target!)}）");
         }
 
         /// <summary>
@@ -114,14 +115,68 @@ namespace ICCardManager.UITests.Tests
             Amount(income).Should().Be(WrongInitialAmount, "前提: 受入は書き換えた誤りの値で開くこと");
             Amount(balance).Should().Be(WrongInitialAmount, "前提: 残額は書き換えた誤りの値で開くこと");
 
-            ScreenshotHelper.RequireForeground(edit.Window);
-            Keyboard.TypeSimultaneously(VirtualKeyShort.ALT, VirtualKeyShort.KEY_R);
+            // キーの前の前提: 開いた直後の初期フォーカス（修正モードは出納日付。UT-054）が来てから押す
+            var initialFocus = edit.Window.FindFirstDescendant(cf.ByName(TestConstants.LedgerRowEditDateInput));
+            PressAltAndAssert(edit.Window, initialFocus, VirtualKeyShort.KEY_R,
+                () => Amount(income) == CorrectInitialAmount && Amount(balance) == CorrectInitialAmount,
+                () => $"受入と残額が逆算値 {CorrectInitialAmount} 円になること（実際は 受入 {income.Patterns.Value.Pattern.Value.Value}・" +
+                      $"残額 {balance.Patterns.Value.Pattern.Value.Value}、フォーカスは {FocusInspection.DescribeFocused(income)}）");
+        }
 
-            Retry.WhileFalse(() => Amount(income) == CorrectInitialAmount && Amount(balance) == CorrectInitialAmount,
-                    TimeSpan.FromSeconds(TestConstants.DialogOpenTimeoutSeconds)).Success
-                .Should().BeTrue(
-                    $"Alt+R 1 回で受入と残額が逆算値 {CorrectInitialAmount} 円になること（実際は 受入 {income.Patterns.Value.Pattern.Value.Value}・" +
-                    $"残額 {balance.Patterns.Value.Pattern.Value.Value}、フォーカスは {FocusInspection.DescribeFocused(income)}）");
+        /// <summary>
+        /// 初期フォーカスが来るのを待って Alt+キーを 1 回だけ送り、期待した結果になったかを判定する。
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// <b>キーは再試行しない</b>。重複したアクセスキー（本 Issue の欠陥）は押すたびにフォーカスを循環させるので、
+        /// 押し直すと 2 回目で目的の要素に届き、欠陥を見逃す。
+        /// </para>
+        /// <para>
+        /// 失敗したときは、キー送信の直前・直後・判定時の前面ウィンドウを見て、アプリ以外（Windows の通知など）へ移っていたら
+        /// 「外部にフォーカスを奪われた（判定不能）」と分かる別の失敗メッセージにする。キーの重複では前面のウィンドウは変わらないので、
+        /// この切り分けで欠陥を見逃すことはない。
+        /// </para>
+        /// </remarks>
+        private static void PressAltAndAssert(
+            Window dialog, AutomationElement? initialFocus, VirtualKeyShort key, Func<bool> succeeded, Func<string> expectation)
+        {
+            initialFocus.Should().NotBeNull("前提: 初期フォーカスの要素がダイアログにあること");
+            ScreenshotHelper.RequireForeground(dialog);
+            FocusInspection.WaitForFocusWithin(initialFocus!).Should().BeTrue(
+                $"前提: キーを押す前に初期フォーカスが「{initialFocus!.Name}」にあること（実際は {FocusInspection.DescribeFocused(initialFocus)}）");
+
+            var appProcessId = ScreenshotHelper.ProcessIdOf(NativeWindows.HandleOf(dialog));
+            var before = NativeWindows.Foreground;
+            Keyboard.TypeSimultaneously(VirtualKeyShort.ALT, key);
+            var after = NativeWindows.Foreground;
+
+            var ok = Retry.WhileFalse(succeeded, TimeSpan.FromSeconds(TestConstants.DialogOpenTimeoutSeconds)).Success;
+            if (ok)
+            {
+                return;
+            }
+
+            var atFailure = NativeWindows.Foreground;
+            var label = KeyLabel(key);
+            var stolen = new[] { before, after, atFailure }.Any(h => ScreenshotHelper.ProcessIdOf(h) != appProcessId);
+            var foregrounds =
+                $"前面ウィンドウ: 送信直前「{ScreenshotHelper.DescribeWindow(before)}」・送信直後「{ScreenshotHelper.DescribeWindow(after)}」・" +
+                $"判定時「{ScreenshotHelper.DescribeWindow(atFailure)}」";
+            if (stolen)
+            {
+                throw new InvalidOperationException(
+                    $"Alt+{label} の判定不能: フォーカスをアプリ外のウィンドウに奪われました（キーの重複ではありません）。{foregrounds}。" +
+                    "通知などを閉じてから実行し直してください。");
+            }
+
+            ok.Should().BeTrue($"Alt+{label} 1 回で{expectation()}。{foregrounds}");
+        }
+
+        /// <summary>失敗メッセージ用のキー表記（<c>KEY_D</c> → <c>D</c>）。</summary>
+        private static string KeyLabel(VirtualKeyShort key)
+        {
+            var name = key.ToString();
+            return name.StartsWith("KEY_", StringComparison.Ordinal) ? name.Substring(4) : name;
         }
 
         private const string InitialRowSummary = "新規購入";
