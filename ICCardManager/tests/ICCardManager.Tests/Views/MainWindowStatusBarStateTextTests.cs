@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Text.RegularExpressions;
 using FluentAssertions;
 using ICCardManager.Tests.Views.Helpers;
 using Xunit;
@@ -55,6 +56,7 @@ public class MainWindowStatusBarStateTextTests
     [InlineData(@"<DataTrigger Binding=""{Binding CurrentState}"" Value=""WaitingForIcCard""/>", 0)]
     [InlineData(@"<Setter Property=""Visibility"" Value=""{Binding CurrentState}""/>", 0)]
     [InlineData(@"<TextBlock Text=""{Binding NextActionStateText}""/>", 0)]
+    [InlineData(@"<TextBlock Text=""{Binding CurrentState, ConverterCulture=ja-JP}""/>", 1)]
     public void 状態の列挙型の直接表示の検出が既知の入力を正しく分類すること(string xaml, int expected)
     {
         FindRawStateDisplayLines(xaml).Should().HaveCount(expected);
@@ -69,6 +71,9 @@ public class MainWindowStatusBarStateTextTests
     /// </summary>
     /// <remarks>
     /// <c>DataTrigger Binding="{Binding CurrentState}"</c>（本番の <c>MainWindow.xaml</c> に実在）は値の比較であって表示ではないので拾わない。
+    /// コンバーターの有無は <c>Converter=</c> で判定する（<c>ConverterCulture=</c> だけでは表示用の変換にならない）。
+    /// <b>既知の範囲外</b>: プロパティ要素形のバインディング（<c>&lt;TextBlock.Text&gt;&lt;Binding Path="CurrentState"/&gt;&lt;/TextBlock.Text&gt;</c>）と
+    /// <c>MultiBinding</c>（本番には現在どちらも <c>CurrentState</c> への形が無い）。
     /// </remarks>
     private static IEnumerable<int> FindRawStateDisplayLines(string xaml)
     {
@@ -81,7 +86,7 @@ public class MainWindowStatusBarStateTextTests
                 : DisplayProperties.Select(p => XamlElementInspection.GetAttribute(tag.StartTag, p));
 
             if (values.Any(v => XamlElementInspection.GetBindingPropertyName(v) == "CurrentState"
-                                && v!.IndexOf("Converter", StringComparison.Ordinal) < 0))
+                                && !Regex.IsMatch(v!, @"(?<![A-Za-z])Converter\s*=")))
             {
                 yield return tag.Line;
             }

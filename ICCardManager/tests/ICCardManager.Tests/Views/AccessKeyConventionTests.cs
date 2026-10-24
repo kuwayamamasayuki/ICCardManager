@@ -111,6 +111,7 @@ public class AccessKeyConventionTests
     [InlineData("逆算した金額を適用（導入行の残高の訂正提案が出ているときだけ表示）", "逆算した金額を適用", true)]
     [InlineData("同行者数", "逆算した金額を適用", false)]
     [InlineData("データベース保存先フォルダパス", "同行者数入力を自動的に閉じるまでの秒数", false)]
+    [InlineData("同行者数", "", false)]
     public void 設計書の項目とXAMLの表記の対応を判定すること(string item, string label, bool expected)
     {
         CorrespondsTo(item, label).Should().Be(expected);
@@ -362,8 +363,10 @@ public class AccessKeyConventionTests
     /// 設計書の項目が XAML のラベルと対応するか（一方が他方を含む）。設計書は「エクスポート データ種別」のように
     /// 画面上の位置を補った名前で書くので、完全一致ではなく包含で見る。
     /// </summary>
+    /// <remarks>空のラベル・項目は対応しないとみなす（空文字はどの文字列にも含まれるので、そのままだと常に真になる）。</remarks>
     internal static bool CorrespondsTo(string item, string label)
-        => item.IndexOf(label, StringComparison.Ordinal) >= 0 || label.IndexOf(item, StringComparison.Ordinal) >= 0;
+        => item.Length > 0 && label.Length > 0
+           && (item.IndexOf(label, StringComparison.Ordinal) >= 0 || label.IndexOf(item, StringComparison.Ordinal) >= 0);
 
     #endregion
 }

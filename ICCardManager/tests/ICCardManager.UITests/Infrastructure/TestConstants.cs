@@ -518,6 +518,18 @@ namespace ICCardManager.UITests.Infrastructure
         [UiaName]
         public const string LedgerRowEditSaveButton = "保存";
 
+        /// <summary>履歴行の追加・修正ダイアログの受入金額の入力欄（Issue #2308）。</summary>
+        [UiaName]
+        public const string LedgerRowEditIncomeInput = "受入金額";
+
+        /// <summary>履歴行の追加・修正ダイアログの残高の入力欄（Issue #2308）。</summary>
+        [UiaName]
+        public const string LedgerRowEditBalanceInput = "残高";
+
+        /// <summary>導入行の残高の訂正提案の「逆算した金額を適用」ボタン（Alt+R。Issue #2007 / #2308）。</summary>
+        [UiaName]
+        public const string LedgerRowEditApplyInitialBalanceButton = "逆算した金額を受入と残額に適用";
+
         // 一覧に無い利用者の注記は Name を文言へバインドしているため、AutomationId で探す（Issue #2300）。
         /// <summary>履歴行の追加・修正ダイアログで、利用者が職員一覧に無いときに出す注記の AutomationId。</summary>
         [NotUiaName]

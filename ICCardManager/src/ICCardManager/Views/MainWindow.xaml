@@ -196,7 +196,7 @@
         <Border Grid.Row="2" Padding="15,8"
                 Visibility="{Binding RemainingSeconds, Converter={StaticResource IntToVisibilityConverter}}"
                 AutomationProperties.Name="交通系ICカードタッチの残り時間"
-                AutomationProperties.HelpText="交通系ICカードをタッチできる残り時間です。0秒になると職員証タッチ待ちに戻ります。">
+                AutomationProperties.HelpText="交通系ICカードをタッチできる残り時間です。0秒になると待機中に戻ります。">
             <Border.Style>
                 <Style TargetType="Border">
                     <Setter Property="Background" Value="{DynamicResource WaitingBackgroundBrush}"/>

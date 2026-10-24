@@ -1,4 +1,7 @@
 using System;
+using System.Data.SQLite;
+using System.Globalization;
+using FlaUI.Core.AutomationElements;
 using FlaUI.Core.Definitions;
 using FlaUI.Core.Input;
 using FlaUI.Core.Tools;
@@ -7,6 +10,7 @@ using FluentAssertions;
 using ICCardManager.UITests.Infrastructure;
 using ICCardManager.UITests.PageObjects;
 using Xunit;
+using static ICCardManager.UITests.Infrastructure.TouchOperations;
 
 namespace ICCardManager.UITests.Tests
 {
@@ -29,6 +33,12 @@ namespace ICCardManager.UITests.Tests
     [Trait("Category", "UI")]
     public class AccessKeyAndStatusTextUiTests
     {
+        public AccessKeyAndStatusTextUiTests()
+        {
+            // 履歴を開く操作（OpenCardHistory）は行を実際にクリックするため、座標系をそろえる（DialogInitialFocusUiTests と同じ）
+            ScreenshotHelper.EnsureProcessDpiAware();
+        }
+
         [Fact]
         public void ステータスバーの状態表示が内部名ではなく日本語の状態名であること()
         {
@@ -67,6 +77,87 @@ namespace ICCardManager.UITests.Tests
 
             FocusInspection.WaitForFocusWithin(target!).Should().BeTrue(
                 $"Alt+{key} 1 回で「{expectedName}」へフォーカスが移ること（実際は {FocusInspection.DescribeFocused(target!)}）");
+        }
+
+        /// <summary>
+        /// 行編集で導入行の残高の訂正提案が出ているとき、Alt+R 1 回で受入と残額が逆算値になること。
+        /// </summary>
+        /// <remarks>
+        /// 是正前は「逆算した金額を適用(_G)」が「同行者数(_G)」と重複しており、Alt+G はフォーカスを移すだけでボタンを実行しなかった。
+        /// 投入データは通常カードの新規購入行を受入・残額とも 12,000 円に書き換えたもの。直後の利用行（残額 9,740 円・払出 260 円）は
+        /// カード由来で正しいとみなせるので、導入行の逆算値は 10,000 円になる（<c>DetectInitialBalanceCorrection</c> の形）。
+        /// 行の修正は職員証認証を要するため Debug 起動のときだけ実行する。
+        /// </remarks>
+        [SkippableFact]
+        public void 行編集で訂正提案が出ているときAltRキー1回で受入と残額が逆算値になること()
+        {
+            Skip.If(!string.Equals(AppFixture.LaunchConfiguration, "Debug", StringComparison.Ordinal),
+                "Issue #2308: 行の修正は職員証認証を要し、仮想タッチ（DEBUG ビルド限定）でしか通せないため、Debug 起動のときだけ実行する。");
+            using var fixture = AppFixture.LaunchWithSeed(SeedWithWrongInitialBalance, AppFixture.SuppressDebugTestData);
+            ScreenshotHelper.MoveToTopLeft(fixture.MainWindow);
+            var page = new MainWindowPage(fixture.MainWindow, fixture.Automation);
+            page.OpenCardHistory(ScreenshotSeedData.NormalCardDisplayName);
+            page.InvokeHistoryRowButton(InitialRowSummary, TestConstants.HistoryRowEditButton);
+            PassStaffAuthentication(fixture, fixture.MainWindow);
+            var edit = new DialogPageBase(
+                DialogLocator.WaitForNestedDialog(fixture, fixture.MainWindow, TestConstants.LedgerRowEditDialogName));
+
+            var cf = edit.Window.ConditionFactory;
+            Retry.WhileNull(
+                    () => edit.Window.FindFirstDescendant(
+                        cf.ByName(TestConstants.LedgerRowEditApplyInitialBalanceButton).And(cf.ByControlType(ControlType.Button))),
+                    TimeSpan.FromSeconds(TestConstants.DialogOpenTimeoutSeconds)).Result
+                .Should().NotBeNull("前提: 導入行の残高の訂正提案（逆算した金額を適用）が表示されていること");
+
+            var income = FindEdit(edit, TestConstants.LedgerRowEditIncomeInput);
+            var balance = FindEdit(edit, TestConstants.LedgerRowEditBalanceInput);
+            Amount(income).Should().Be(WrongInitialAmount, "前提: 受入は書き換えた誤りの値で開くこと");
+            Amount(balance).Should().Be(WrongInitialAmount, "前提: 残額は書き換えた誤りの値で開くこと");
+
+            ScreenshotHelper.RequireForeground(edit.Window);
+            Keyboard.TypeSimultaneously(VirtualKeyShort.ALT, VirtualKeyShort.KEY_R);
+
+            Retry.WhileFalse(() => Amount(income) == CorrectInitialAmount && Amount(balance) == CorrectInitialAmount,
+                    TimeSpan.FromSeconds(TestConstants.DialogOpenTimeoutSeconds)).Success
+                .Should().BeTrue(
+                    $"Alt+R 1 回で受入と残額が逆算値 {CorrectInitialAmount} 円になること（実際は 受入 {income.Patterns.Value.Pattern.Value.Value}・" +
+                    $"残額 {balance.Patterns.Value.Pattern.Value.Value}、フォーカスは {FocusInspection.DescribeFocused(income)}）");
+        }
+
+        private const string InitialRowSummary = "新規購入";
+        private const int WrongInitialAmount = 12000;
+
+        /// <summary>直後の利用行（残額 9,740 円・払出 260 円）から逆算した導入時の残高。</summary>
+        private const int CorrectInitialAmount = 10000;
+
+        /// <summary>
+        /// 通常の投入データの、通常カードの新規購入行だけを受入・残額とも誤った値にする（直後の行との残高チェーンが 1 か所だけ切れる）。
+        /// </summary>
+        private static void SeedWithWrongInitialBalance(SQLiteConnection conn)
+        {
+            ScreenshotSeedData.Seed(conn);
+            using var cmd = conn.CreateCommand();
+            cmd.CommandText = "UPDATE ledger SET income = @amount, balance = @amount WHERE card_idm = @card AND summary = @summary";
+            cmd.Parameters.AddWithValue("@amount", WrongInitialAmount);
+            cmd.Parameters.AddWithValue("@card", ScreenshotSeedData.NormalCardIdm);
+            cmd.Parameters.AddWithValue("@summary", InitialRowSummary);
+            cmd.ExecuteNonQuery().Should().Be(1, "前提: 通常カードの新規購入行が 1 行あること");
+        }
+
+        private static AutomationElement FindEdit(DialogPageBase edit, string name)
+        {
+            var cf = edit.Window.ConditionFactory;
+            return Retry.WhileNull(
+                    () => edit.Window.FindFirstDescendant(cf.ByName(name).And(cf.ByControlType(ControlType.Edit))),
+                    TimeSpan.FromSeconds(TestConstants.DialogOpenTimeoutSeconds)).Result
+                ?? throw new InvalidOperationException($"入力欄が見つかりません: \"{name}\"");
+        }
+
+        /// <summary>入力欄の金額（桁区切りを除いて整数として読む。読めなければ null）。</summary>
+        private static int? Amount(AutomationElement input)
+        {
+            var text = input.Patterns.Value.Pattern.Value.Value?.Replace(",", string.Empty).Trim();
+            return int.TryParse(text, NumberStyles.Integer, CultureInfo.InvariantCulture, out var value) ? value : null;
         }
     }
 }
