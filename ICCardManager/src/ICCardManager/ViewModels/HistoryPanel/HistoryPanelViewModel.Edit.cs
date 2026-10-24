@@ -377,6 +377,17 @@ public partial class HistoryPanelViewModel
             // 捨てたまま残る形だった。
             await DeleteLedgerRowCoreAsync(ledger);
         }
+        // Issue #2325: 保存で競合（この行が他 PC の削除・返却で無くなった）を検出したまま閉じた場合。
+        // ダイアログの案内は「閉じると履歴一覧を再読み込みします」と述べているので、ここで読み直す
+        // （#1759。読み直さないと、消えた行が一覧に残り、開き直しても同じ失敗を繰り返す）。
+        // 何も保存していないので「保存して次へ」「次へ」「戻る」へは進まない（一覧の並びが変わっている）。
+        else if (capturedEditDialog?.NeedsHistoryReload == true)
+        {
+            await LoadHistoryLedgersAsync();
+            await Host.RefreshDashboardAsync();
+            await Host.CheckWarningsAsync();
+            await CheckAndNotifyConsistencyAsync();
+        }
         else if (dialogResult == true)
         {
             await LoadHistoryLedgersAsync();

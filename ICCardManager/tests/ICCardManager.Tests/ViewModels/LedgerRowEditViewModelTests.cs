@@ -424,8 +424,10 @@ public class LedgerRowEditViewModelTests : IDisposable
             _viewModel.MoveInsertPositionUpCommand.Execute(null);
         }
 
-        // Assert: 次の行（繰越行 1/1）より新しい
-        _viewModel.WarningMessage.Should().Be("日付が次の行より新しくなっています。挿入位置を確認してください。");
+        // Assert: 次の行（繰越行 1/1）より新しい。
+        // Issue #2325: 先頭では自動計算が使えず残高が未入力になるため、その警告も並ぶ（日付の警告だけを比べる）
+        _viewModel.WarningMessage.Should().Contain("日付が次の行より新しくなっています。挿入位置を確認してください。");
+        _viewModel.WarningMessage.Should().NotContain("日付が前の行より古くなっています");
     }
 
     #endregion
@@ -1235,10 +1237,13 @@ public class LedgerRowEditViewModelTests : IDisposable
         // Act: さらに先頭へ（直前行が無くなる）
         _viewModel.MoveInsertPositionUpCommand.Execute(null);
 
-        // Assert: 0 + 3000 - 0 = 3000 で上書きされず、直前の値のまま残る
+        // Assert: 0 + 3000 - 0 = 3000 で上書きされない。
+        // Issue #2325: 前の位置（InsertIndex=1）で計算した 5300 も残さず、未入力（0）に戻す
+        // （5300 は今の位置の残高ではなく、手入力の値として保存され得た）
         _viewModel.InsertIndex.Should().Be(0);
-        _viewModel.Balance.Should().Be(5300);
+        _viewModel.Balance.Should().Be(0);
         _viewModel.Balance.Should().NotBe(3000, "起点不明のまま 0 から計算してはいけない");
+        _viewModel.Balance.Should().NotBe(5300, "別の位置で計算した値を確定値として見せない");
     }
 
     /// <summary>

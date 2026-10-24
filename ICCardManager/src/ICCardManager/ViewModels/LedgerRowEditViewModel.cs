@@ -430,6 +430,39 @@ namespace ICCardManager.ViewModels
         /// </summary>
         private int? _balanceBeforeAutoBalance;
 
+        /// <summary>
+        /// Issue #2325: Addモードで、自動計算が使えなくなったため残高が利用者の入力を待っている（未入力）か。
+        /// </summary>
+        /// <remarks>
+        /// Addモードは自動計算 ON で始まり、ON にする直前の残高（<see cref="_balanceBeforeAutoBalance"/>）を持たない。
+        /// 挿入位置を先頭へ動かして自動計算が使えなくなると、前の位置で計算した残高が手入力の値のように残り、
+        /// そのまま保存すると根拠の無い残高が台帳へ入っていた。使えなくなった時点で残高を 0 に戻してこのフラグを立て、
+        /// 利用者が残高を入力する（または自動計算を ON に戻す）まで警告し、保存の前に確認する。
+        /// </remarks>
+        private bool _isAddBalanceNotEntered;
+
+        /// <summary>
+        /// Issue #2325: Editモードで、競合の案内に名指しする対象（ダイアログを開いた時点の日付・摘要）。
+        /// 未保存の入力値では名指ししない（#1759）。
+        /// </summary>
+        private string _editTargetLabel = string.Empty;
+
+        /// <summary>
+        /// Issue #2325: 保存で、編集対象の行がもう無いこと（他の PC・返却による削除）を検出したか。
+        /// </summary>
+        private bool _conflictDetected;
+
+        /// <summary>
+        /// ダイアログを閉じたあと、呼び出し元が履歴一覧を読み込み直す必要があるか（Issue #2325）
+        /// </summary>
+        /// <remarks>
+        /// 保存で競合（編集対象の行が他 PC や返却で削除された）を検出したとき true。何も保存していないが、
+        /// 一覧に残っている行はもう DB と一致しないため、閉じたら読み込み直す
+        /// （#1759「一覧を確認するよう案内するなら、案内する側が先に再読込する」。<c>LedgerDetailViewModel</c> と同じ形）。
+        /// 保存できたときは <see cref="IsSaved"/>（呼び出し元はダイアログの結果 true で読み直す）が担う。
+        /// </remarks>
+        public bool NeedsHistoryReload => _conflictDetected;
+
         public LedgerRowEditViewModel(
             ILedgerRepository ledgerRepository,
             IStaffRepository staffRepository,
@@ -501,6 +534,8 @@ namespace ICCardManager.ViewModels
         {
             _cardIdm = ledgerDto.CardIdm;
             _editLedgerId = ledgerDto.Id;
+            // Issue #2325: 競合の案内で名指しする対象は、開いた時点の値で確定させる（削除の案内と同じ表記）
+            _editTargetLabel = $"履歴「{ledgerDto.DateDisplay} {ledgerDto.Summary}」";
 
             Mode = LedgerRowEditMode.Edit;
             DialogTitle = "履歴行の修正";
@@ -633,6 +668,7 @@ namespace ICCardManager.ViewModels
         {
             if (value)
             {
+                _isAddBalanceNotEntered = false;
                 _balanceBeforeAutoBalance = Balance;
                 RecalculateBalance();
             }
@@ -649,6 +685,9 @@ namespace ICCardManager.ViewModels
         /// </summary>
         partial void OnBalanceChanged(int value)
         {
+            // Issue #2325: 残高が変わった（利用者が入力した）ら、未入力の状態は終わる。
+            // 自動計算が使えなくなったときに 0 へ戻す代入もここを通るが、フラグはその後で立てる
+            _isAddBalanceNotEntered = false;
             TrackFieldChange();
             Validate();
         }
@@ -843,6 +882,15 @@ namespace ICCardManager.ViewModels
             {
                 // OnIsAutoBalanceChanged が自動計算前の残高を復元する
                 IsAutoBalance = false;
+
+                // Issue #2325: Addモードは自動計算 ON で始まるため復元する値を持たず、残高には前の挿入位置で
+                // 計算した値が残る。それは今の位置の残高ではない（起点が分からない）ので、確定値に見せない。
+                // 0 に戻して未入力として扱い、入力を促す（Validate の警告・保存前の確認）。
+                if (Mode == LedgerRowEditMode.Add)
+                {
+                    Balance = 0;
+                    _isAddBalanceNotEntered = true;
+                }
             }
         }
 
@@ -895,13 +943,58 @@ namespace ICCardManager.ViewModels
         }
 
         /// <summary>
+        /// 受入・払出が両方 0 円でも正当な行か（「両方0円」警告の除外。Issue #2325）
+        /// </summary>
+        /// <remarks>
+        /// 導入行（新規購入・○月から繰越・前年度より繰越）・ポイント還元・貸出中レコード。
+        /// 摘要の文言は組織設定で変えられるため、リテラルの直書きではなく設定から導出した判定を使う
+        /// （service-conventions.md「設定値で生成したものは、設定値で判定する」#1818）。旧実装は
+        /// 「繰越」「新規購入」「ポイント還元」を直書きしており、ポイント還元の文言を変えた組織では
+        /// ポイント還元の行を開くたびに警告が出ていた。貸出中レコードは摘要ではなく行自身のフラグで判定する（#2044）。
+        /// </remarks>
+        private bool IsZeroAmountExpectedSummary() =>
+            IsLentRecord
+            || Ledger.IsInitialRecordSummary(Summary)
+            || Summary == SummaryGenerator.GetPointRedemptionSummary();
+
+        /// <summary>
+        /// Issue #2325: Addモードで自動計算が使えなくなり、残高が未入力のときの警告（何が／なぜ／どうすれば）
+        /// </summary>
+        internal const string AddBalanceNotEnteredWarning =
+            "残高が未入力です（0円のまま）。挿入位置の直前の行が履歴一覧に表示されていないため、" +
+            "残高を自動計算できません。1つ上の行の残高 + 受入 - 払出 を確認し、残高欄に金額を入力してください。";
+
+        /// <summary>
+        /// Issue #2325: 残高が未入力のまま保存しようとしたときに保存してよいか確認する。
+        /// </summary>
+        /// <returns>保存を続けてよい場合 true</returns>
+        /// <remarks>
+        /// 保存は塞がない（入力したい残高が 0 円のこともある。0 を入力し直しても値が変わらず未入力の状態が解けない）。
+        /// 書き込みの前に確認する（ui-conventions.md #1811）。処理中表示より前に呼ぶ（#1793）。
+        /// </remarks>
+        private bool ConfirmAddBalanceNotEntered()
+        {
+            if (Mode != LedgerRowEditMode.Add || !_isAddBalanceNotEntered)
+            {
+                return true;
+            }
+
+            return _dialogService.ShowWarningConfirmation(
+                $"残高が {Balance:N0}円 のまま入力されていません。挿入位置の直前の行が履歴一覧に表示されていないため、" +
+                "残高を自動計算していません。\n\nこのまま保存すると、この金額が残高として記録されます。保存しますか？\n" +
+                "（「いいえ」を選び、1つ上の行の残高 + 受入 - 払出 を残高欄に入力してから保存してください）",
+                "残高の確認");
+        }
+
+        /// <summary>
         /// バリデーション
         /// </summary>
         private void Validate()
         {
             ValidationMessage = string.Empty;
             WarningMessage = string.Empty;
-            CanSave = true;
+            // Issue #2325: 編集対象の行がもう無いと分かったら、何を直しても保存は成功しないので保存させない
+            CanSave = !_conflictDetected;
             // Issue #1279: 最初のエラーフィールドをリセット
             FirstErrorField = null;
 
@@ -916,11 +1009,8 @@ namespace ICCardManager.ViewModels
                 return;
             }
 
-            // 受入・払出が両方0かチェック（繰越等の特殊パターンは除外）
-            var isSpecialSummary = Summary.Contains("繰越") ||
-                                   Summary.Contains("新規購入") ||
-                                   Summary == "ポイント還元";
-            if (Income == 0 && Expense == 0 && !isSpecialSummary)
+            // 受入・払出が両方0かチェック（0 円が正当な行は除外）
+            if (Income == 0 && Expense == 0 && !IsZeroAmountExpectedSummary())
             {
                 AddWarning("受入と払出が両方0円です。繰越等でなければ金額を入力してください。");
             }
@@ -931,6 +1021,12 @@ namespace ICCardManager.ViewModels
             if (Ledger.InitialRecordCarriesIncome(Summary) && Income != Balance)
             {
                 AddWarning(InitialBalanceCorrectionMessage.ForIncomeBalanceMismatch(Income, Balance));
+            }
+
+            // Issue #2325: Addモードで自動計算が使えなくなり、残高がまだ入力されていない
+            if (Mode == LedgerRowEditMode.Add && _isAddBalanceNotEntered)
+            {
+                AddWarning(AddBalanceNotEnteredWarning);
             }
 
             // 残高が負になるチェック
@@ -1021,7 +1117,7 @@ namespace ICCardManager.ViewModels
         [RelayCommand]
         private async Task Save()
         {
-            if (!CanSave)
+            if (!CanSave || !ConfirmAddBalanceNotEntered())
             {
                 return;
             }
@@ -1096,7 +1192,10 @@ namespace ICCardManager.ViewModels
             }
             else
             {
-                StatusMessage = "保存に失敗しました";
+                // Issue #2325: InsertAsync は last_insert_rowid() を返すので通常ここへは来ない（失敗は例外になる）。
+                // 来た場合も何も確定していない（commit 前に抜けている）ことと、取れる行動を伝える
+                StatusMessage = "履歴の行の追加に失敗しました（データベースに行が書き込まれず、何も保存していません）。" +
+                                "しばらく待ってから、もう一度保存してください。";
             }
         }
 
@@ -1113,7 +1212,8 @@ namespace ICCardManager.ViewModels
             var ledger = await _ledgerRepository.GetByIdAsync(_editLedgerId);
             if (ledger == null)
             {
-                StatusMessage = "履歴データが見つかりません";
+                // Issue #2325: 読み直しで行が無い＝UPDATE が 0 行になるのと同じ競合（他 PC の削除・返却で貸出中レコードが消えた）
+                NotifyRowGoneConflict();
                 return;
             }
 
@@ -1200,10 +1300,32 @@ namespace ICCardManager.ViewModels
             {
                 IsSaved = true;
             }
+            else if (busStopConflict)
+            {
+                StatusMessage = BusStopConflictMessage;
+            }
             else
             {
-                StatusMessage = busStopConflict ? BusStopConflictMessage : "保存に失敗しました";
+                // Issue #2325: UpdateAsync の WHERE は id だけなので、false は「行が無くなった」の 1 つに定まる
+                NotifyRowGoneConflict();
             }
+        }
+
+        /// <summary>
+        /// Issue #2325: 編集対象の行がもう無い（他 PC の削除・返却による貸出中レコードの削除）ことを案内し、
+        /// 閉じたら呼び出し元に履歴一覧を読み直させる。
+        /// </summary>
+        /// <remarks>
+        /// 何度保存しても同じ失敗になるので、保存を無効にし、入力を「未保存の変更」として残さない
+        /// （残すと閉じるときに破棄の確認が出る。<c>LedgerDetailViewModel</c> #2177 と同じ判断）。
+        /// 入力欄は消さない（#1757「エラー表示で入力内容を消さない」。控えを取ってから閉じられる）。
+        /// </remarks>
+        private void NotifyRowGoneConflict()
+        {
+            _conflictDetected = true;
+            _hasFieldChanges = false;
+            CanSave = false;
+            StatusMessage = ConcurrencyConflictMessage.ForUpdateReloadOnClose(_editTargetLabel, "履歴一覧");
         }
 
         /// <summary>
@@ -1390,7 +1512,7 @@ namespace ICCardManager.ViewModels
         [RelayCommand]
         private async Task SaveAndEditNext()
         {
-            if (!CanSave)
+            if (!CanSave || !ConfirmAddBalanceNotEntered())
             {
                 return;
             }
@@ -1489,8 +1611,9 @@ namespace ICCardManager.ViewModels
                     || !string.IsNullOrWhiteSpace(Note) || CompanionCount != 0 || SelectedStaff != null;
             }
 
-            // Editモード: 初期値が設定されていれば比較
-            return _hasFieldChanges;
+            // Editモード: 初期値が設定されていれば比較。
+            // Issue #2325: 編集対象の行がもう無いと分かった後の入力は保存できないので、破棄の確認の対象にしない
+            return _hasFieldChanges && !_conflictDetected;
         }
 
         /// <summary>
