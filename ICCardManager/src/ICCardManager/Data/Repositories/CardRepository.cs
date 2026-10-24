@@ -171,6 +171,42 @@ ORDER BY card_type, card_number";
         }
 
         /// <summary>
+        /// <see cref="GetRefundedWithLentRecordsAsync"/> のクエリ（Issue #2322。テストが実行計画を検査するため internal）
+        /// </summary>
+        /// <remarks>
+        /// 払戻済のカード（<c>ic_card</c> は高々数十行）を起点にし、台帳は相関サブクエリの <c>l.card_idm = c.card_idm</c> で
+        /// <c>card_idm</c> を先頭に持つインデックス（<c>idx_ledger_card_date</c> / <c>idx_ledger_card_id</c>）から引く。
+        /// 台帳を全件走査しない。列を関数に包まない（db-write-conventions「WHERE で列を関数に包まない」）。
+        /// </remarks>
+        internal const string RefundedWithLentRecordsSql = @"SELECT c.card_idm, c.card_type, c.card_number, c.note, c.is_deleted, c.deleted_at,
+       c.is_lent, c.last_lent_at, c.last_lent_staff, c.starting_page_number,
+       c.is_refunded, c.refunded_at,
+       c.carryover_income_total, c.carryover_expense_total, c.carryover_fiscal_year
+FROM ic_card c
+WHERE c.is_refunded = 1 AND c.is_deleted = 0
+  AND EXISTS (SELECT 1 FROM ledger l WHERE l.card_idm = c.card_idm AND l.is_lent_record = 1)
+ORDER BY c.card_idm";
+
+        /// <inheritdoc/>
+        public async Task<IReadOnlyList<IcCard>> GetRefundedWithLentRecordsAsync()
+        {
+            using var lease = await _dbContext.LeaseConnectionAsync().ConfigureAwait(false);
+            var connection = lease.Connection;
+            var cardList = new List<IcCard>();
+
+            using var command = connection.CreateCommand();
+            command.CommandText = RefundedWithLentRecordsSql;
+
+            using var reader = await command.ExecuteReaderAsync().ConfigureAwait(false);
+            while (await reader.ReadAsync().ConfigureAwait(false))
+            {
+                cardList.Add(MapToIcCard(reader));
+            }
+
+            return cardList;
+        }
+
+        /// <summary>
         /// DBから貸出中のカードを取得
         /// </summary>
         private async Task<IEnumerable<IcCard>> GetLentFromDbAsync()

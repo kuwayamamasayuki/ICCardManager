@@ -3561,30 +3561,22 @@ public class MainViewModelTests : IDisposable
         _ledgerRepositoryMock.Setup(r => r.GetAllLentRecordsAsync()).ReturnsAsync(records.ToList());
     }
 
+    private void ArrangeRefundedWithLentRecords(params IcCard[] cards)
+    {
+        _cardRepositoryMock.Setup(r => r.GetRefundedWithLentRecordsAsync()).ReturnsAsync(cards.ToList());
+    }
+
     /// <summary>
-    /// 貸出中の記録が残る払戻済のカードを、is_lent の値によらず警告に出すこと
+    /// 貸出中の記録が残る払戻済のカードを警告に出すこと（読み直しのたびに入れ替え、重複させない）
     /// </summary>
     /// <remarks>
-    /// 起動時の修復は is_lent が 0 でも 1 でも「履歴から貸出中の行を削除」と案内する。払戻済のカードは手元に無く
-    /// タッチできないので、警告がその案内に辿り着く唯一の入口になる（is_lent = 1 だけを見ると is_lent = 0 の形が漏れる）。
-    /// 払戻済でないカード・貸出中の記録が無い払戻済のカードは対象にしない（対の表明）。
+    /// 母集団（is_lent によらない・払戻済・貸出中レコードあり）の絞り込みはリポジトリのクエリが持ち、
+    /// <c>CardRepositoryRefundedWithLentRecordsTests</c>（実 DB）が固定する。
     /// </remarks>
-    [Theory]
-    [InlineData(true)]
-    [InlineData(false)]
-    public async Task RefreshLentCardsAsync_貸出中の記録が残る払戻済のカードを警告に出すこと(bool isLent)
+    [Fact]
+    public async Task RefreshLentCardsAsync_貸出中の記録が残る払戻済のカードを警告に出すこと()
     {
-        const string normalIdm = "1111222233334444";
-        const string refundedWithoutRecordIdm = "5555666677778888";
-        _cardRepositoryMock.Setup(r => r.GetAllAsync()).ReturnsAsync(new List<IcCard>
-        {
-            new() { CardIdm = normalIdm, CardType = "nimoca", CardNumber = "N-001", IsLent = true },
-            new() { CardIdm = refundedWithoutRecordIdm, CardType = "SUGOCA", CardNumber = "S-001", IsRefunded = true },
-            RefundedCard(isLent),
-        });
-        ArrangeLentRecords(
-            LentRecord(normalIdm, new DateTime(2025, 6, 1)),
-            LentRecord(RefundedLentCardIdm, new DateTime(2025, 3, 18)));
+        ArrangeRefundedWithLentRecords(RefundedCard(isLent: false));
 
         await ((IHistoryPanelHost)_viewModel).RefreshLentCardsAsync();
         await ((IHistoryPanelHost)_viewModel).RefreshLentCardsAsync();
@@ -3593,6 +3585,8 @@ public class MainViewModelTests : IDisposable
             .ContainSingle(w => w.Type == WarningType.RefundedCardLent, "読み直しのたびに入れ替え、重複させない").Subject;
         warning.CardIdm.Should().Be(RefundedLentCardIdm);
         warning.DisplayText.Should().Contain("はやかけん H-009").And.Contain("削除してください");
+        _ledgerRepositoryMock.Verify(r => r.GetAllLentRecordsAsync(), Times.Never,
+            "読み直しのたびに台帳を全件読まない（専用のクエリで払戻済のカードから引く）");
     }
 
     /// <summary>
@@ -3601,15 +3595,40 @@ public class MainViewModelTests : IDisposable
     [Fact]
     public async Task RefreshLentCardsAsync_貸出中の記録が無くなったら警告を取り除くこと()
     {
-        _cardRepositoryMock.Setup(r => r.GetAllAsync()).ReturnsAsync(new List<IcCard> { RefundedCard(isLent: true) });
-        ArrangeLentRecords(LentRecord(RefundedLentCardIdm, new DateTime(2025, 3, 18)));
+        ArrangeRefundedWithLentRecords(RefundedCard(isLent: true));
         await ((IHistoryPanelHost)_viewModel).RefreshLentCardsAsync();
         _viewModel.WarningMessages.Should().Contain(w => w.Type == WarningType.RefundedCardLent);
 
-        ArrangeLentRecords();
+        ArrangeRefundedWithLentRecords();
         await ((IHistoryPanelHost)_viewModel).RefreshLentCardsAsync();
 
         _viewModel.WarningMessages.Should().NotContain(w => w.Type == WarningType.RefundedCardLent);
+    }
+
+    /// <summary>
+    /// 照合のクエリが失敗しても、例外を外へ出さず、貸出中カード一覧は更新し、出ていた警告は残すこと
+    /// </summary>
+    /// <remarks>
+    /// <c>RefreshLentCardsAsync</c> は返却・貸出の後処理から呼ばれる。ここで例外が抜けると、記録済みの操作が
+    /// 失敗に見える（#1805 と同じ形）。警告を消すと、解消していない状態が解消したように見える。
+    /// </remarks>
+    [Fact]
+    public async Task RefreshLentCardsAsync_照合に失敗しても例外を出さず一覧を更新し警告を残すこと()
+    {
+        ArrangeRefundedWithLentRecords(RefundedCard(isLent: true));
+        await ((IHistoryPanelHost)_viewModel).RefreshLentCardsAsync();
+
+        var lent = new IcCard { CardIdm = "1111222233334444", CardType = "nimoca", CardNumber = "N-001", IsLent = true };
+        _cardRepositoryMock.Setup(r => r.GetLentAsync(It.IsAny<bool>())).ReturnsAsync(new List<IcCard> { lent });
+        _cardRepositoryMock.Setup(r => r.GetRefundedWithLentRecordsAsync())
+            .ThrowsAsync(new System.Data.SQLite.SQLiteException(System.Data.SQLite.SQLiteErrorCode.Busy, "database is locked"));
+
+        var act = () => ((IHistoryPanelHost)_viewModel).RefreshLentCardsAsync();
+
+        await act.Should().NotThrowAsync();
+        _viewModel.LentCards.Should().ContainSingle(c => c.CardIdm == lent.CardIdm, "貸出中カード一覧の更新は済ませる");
+        _viewModel.WarningMessages.Should().ContainSingle(w => w.Type == WarningType.RefundedCardLent,
+            "確かめられなかったときは従来の警告を残す");
     }
 
     /// <summary>

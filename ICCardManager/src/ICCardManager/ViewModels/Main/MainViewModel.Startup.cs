@@ -545,19 +545,18 @@ public partial class MainViewModel
     {
         try
         {
-            var lentRecordCardIdms = new HashSet<string>(
-                (await _ledgerRepository.GetAllLentRecordsAsync() ?? new List<Ledger>()).Select(r => r.CardIdm));
-            var refundedCards = lentRecordCardIdms.Count == 0
-                ? new List<IcCard>()
-                : (await _cardRepository.GetAllAsync() ?? Enumerable.Empty<IcCard>())
-                    .Where(c => c.IsRefunded && lentRecordCardIdms.Contains(c.CardIdm))
-                    .ToList();
+            // 共有モードでは 15 秒ごとに走り、対象はほぼ常に 0 件なので、台帳を全件読まず
+            // 払戻済のカードを起点に絞った専用のクエリで引く（コードレビューで検出）
+            var refundedCards = await _cardRepository.GetRefundedWithLentRecordsAsync()
+                ?? (IReadOnlyList<IcCard>)Array.Empty<IcCard>();
             ReplaceWarnings(
                 w => w.Type == WarningType.RefundedCardLent,
                 refundedCards.Select(BuildRefundedCardLentWarning).ToList());
         }
         catch (Exception ex)
         {
+            // 返却・貸出の後処理（RefreshLentCardsAsync）から呼ばれるため、ここで例外を外へ出すと
+            // 記録済みの操作が失敗に見える（#1805 と同じ形）。付随する表示なので、ログを残して従来の警告を保つ
             _logger?.LogWarning(ex, "Issue #2322: 払戻済のカードに残る貸出中の記録の確認に失敗しました");
         }
     }

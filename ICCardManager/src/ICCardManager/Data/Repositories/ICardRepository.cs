@@ -56,6 +56,17 @@ namespace ICCardManager.Data.Repositories
         Task<IEnumerable<IcCard>> GetLentAsync(bool bypassCache = false);
 
         /// <summary>
+        /// 貸出中の記録（<c>ledger.is_lent_record = 1</c>）が残っている払戻済の交通系ICカードを取得する（Issue #2322）
+        /// </summary>
+        /// <remarks>
+        /// <c>is_lent</c> の値は見ない。修正前の欠陥で作られ得た「払戻済なのに貸出中」の状態を、メイン画面の警告に出すために使う。
+        /// 貸出中カード一覧を読み直すたび（共有モードでは 15 秒ごと）に呼ばれ、対象はほぼ常に 0 件なので、
+        /// 払戻済のカードを起点に絞り、台帳は <c>card_idm</c> のインデックスで引く（台帳を全件走査しない）。
+        /// キャッシュは通さない。
+        /// </remarks>
+        Task<IReadOnlyList<IcCard>> GetRefundedWithLentRecordsAsync();
+
+        /// <summary>
         /// IDmでICカードを取得
         /// </summary>
         /// <param name="cardIdm">ICカードIDm</param>
