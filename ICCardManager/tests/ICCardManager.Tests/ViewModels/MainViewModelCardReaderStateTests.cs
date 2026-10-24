@@ -45,6 +45,10 @@ public class MainViewModelCardReaderStateTests
     private readonly Mock<IStaffRepository> _staffRepositoryMock = new() { DefaultValue = DefaultValue.Empty };
     private readonly Mock<ISettingsRepository> _settingsRepositoryMock = new();
     private readonly Mock<IDatabaseInfo> _databaseInfoMock = new();
+    private readonly Mock<IUpdateNotificationService> _updateNotificationMock = new();
+
+    /// <summary>更新通知の確認（最新版ファイルの読み取り）が呼ばれたら完了する。バックグラウンド（Task.Run）で走るため待ち合わせに使う</summary>
+    private readonly TaskCompletionSource<bool> _updateCheckCalled = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private readonly TestTimerFactory _monitorTimerFactory = new();
     private readonly MainViewModel _viewModel;
 
@@ -60,6 +64,9 @@ public class MainViewModelCardReaderStateTests
         dbContext.InitializeDatabase();
 
         _settingsRepositoryMock.Setup(r => r.GetAppSettingsAsync()).ReturnsAsync(new AppSettings());
+        _updateNotificationMock.Setup(s => s.CheckForNewerVersion())
+            .Callback(() => _updateCheckCalled.TrySetResult(true))
+            .Returns((UpdateCheckResult)null!);
         _cardRepositoryMock.Setup(r => r.GetAllAsync()).ReturnsAsync(new List<IcCard>());
         _cardRepositoryMock.Setup(r => r.GetLentAsync(It.IsAny<bool>())).ReturnsAsync(new List<IcCard>());
         _ledgerRepositoryMock.Setup(r => r.GetAllLentRecordsAsync()).ReturnsAsync(new List<Ledger>());
@@ -107,7 +114,7 @@ public class MainViewModelCardReaderStateTests
             _databaseInfoMock.Object,
             new Mock<ICacheService>().Object,
             sharedModeMonitor,
-            new WarningService(_ledgerRepositoryMock.Object, _databaseInfoMock.Object),
+            new WarningService(_ledgerRepositoryMock.Object, _databaseInfoMock.Object, _updateNotificationMock.Object),
             new DashboardService(_cardRepositoryMock.Object, _ledgerRepositoryMock.Object,
                 _staffRepositoryMock.Object, _settingsRepositoryMock.Object),
             new Mock<ISafeFileLauncher>().Object,
@@ -119,7 +126,7 @@ public class MainViewModelCardReaderStateTests
     #region 起動時にカードリーダーの開始が失敗しても、残りの起動処理を始めること
 
     [Fact]
-    public async Task InitializeAsync_カードリーダーの開始が例外になっても_共有モードの接続監視と起動時チェックを始めること()
+    public async Task InitializeAsync_カードリーダーの開始が例外になっても_共有モードの接続監視と起動時チェックと更新通知を始めること()
     {
         _databaseInfoMock.Setup(d => d.IsSharedMode).Returns(true);
         _cardReaderMock.Setup(r => r.StartReadingAsync())
@@ -136,6 +143,10 @@ public class MainViewModelCardReaderStateTests
             r => r.GetByDateRangeAsync(null, It.IsAny<DateTime>(), It.IsAny<DateTime>()),
             Times.AtLeastOnce(),
             "起動時のデータチェック（バス停名未入力）が始まっていること");
+
+        // 更新通知の確認はバックグラウンド（Task.Run）で走るので、呼ばれるのを待つ（始まらなければ時間切れで赤）
+        var completed = await Task.WhenAny(_updateCheckCalled.Task, Task.Delay(TimeSpan.FromSeconds(10)));
+        completed.Should().BeSameAs(_updateCheckCalled.Task, "新バージョンの通知の確認（最新版ファイルの読み取り）が始まっていること");
     }
 
     [Fact]
