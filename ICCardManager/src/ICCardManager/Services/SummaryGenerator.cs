@@ -612,9 +612,11 @@ namespace ICCardManager.Services
             // （#2033 以前は「解析できた経路 → 解析できないバス停名」の固定順）で作った整合済みの行は、
             // 位置で対応付けると明細どうしの値が入れ替わる（明細 [★, 天神～博多] に旧摘要「バス（天神～博多、★）」）。
             // 限界: 明細どうしの名前の取り違えを摘要の並べ替えで直す編集も書き戻さない（明細の編集で直す）。
+            // 値が 1 つも変わらない対応付けは単に整合している。値が入れ替わるだけの対応付けは、行編集が
+            // 「並べ替えただけの編集」を警告できるよう、抑止したことを計画に残す（コードレビュー 5 回目）。
             if (plan.Outcome == BusStopSyncOutcome.Mapped && IsPermutationOfCurrentValues(plan))
             {
-                return BusStopSyncPlan.NothingToSync;
+                return plan.Changes.Any() ? BusStopSyncPlan.SuppressedAsReorder : BusStopSyncPlan.NothingToSync;
             }
 
             return plan;
@@ -658,10 +660,15 @@ namespace ICCardManager.Services
         /// <summary>
         /// 対応付けた値の多重集合が、現在の明細の値の多重集合と同じか（並べ替えにすぎないか。Issue #2306）
         /// </summary>
+        /// <remarks>
+        /// 現在の値は <see cref="BusStopAssignment.CurrentBusStops"/>（未入力の null・空白をプレースホルダへ寄せた値）で比べる。
+        /// 摘要側の未入力は★として読まれるので、null のまま比べると明細 [null, 天神～博多] と旧摘要
+        /// 「バス（天神～博多、★）」が並べ替えと判定されず、値が入れ替わって書かれる（コードレビュー 5 回目）。
+        /// </remarks>
         private static bool IsPermutationOfCurrentValues(BusStopSyncPlan plan)
         {
             var assigned = plan.Assignments.Select(a => a.BusStops).OrderBy(v => v, StringComparer.Ordinal);
-            var current = plan.Assignments.Select(a => a.Detail.BusStops ?? string.Empty).OrderBy(v => v, StringComparer.Ordinal);
+            var current = plan.Assignments.Select(a => a.CurrentBusStops).OrderBy(v => v, StringComparer.Ordinal);
             return assigned.SequenceEqual(current, StringComparer.Ordinal);
         }
 
@@ -709,8 +716,14 @@ namespace ICCardManager.Services
                 return BusStopSyncPlan.Unmappable(BusStopSyncFailure.RoundTripNotAdjacent);
             }
 
+            // 現在の値の未入力（null・空白）は、摘要側と同じく捕捉した世代のプレースホルダとして扱う
+            var placeholder = ResolveBusPlaceholder(context);
             return BusStopSyncPlan.Mapped(
-                entries.Select((busStops, i) => new BusStopAssignment(busDetails[i], busStops)).ToList());
+                entries.Select((busStops, i) => new BusStopAssignment(
+                    busDetails[i],
+                    busStops,
+                    busDetails[i].BusStops is { } current && !string.IsNullOrWhiteSpace(current) ? current : placeholder))
+                    .ToList());
         }
 
         /// <summary>

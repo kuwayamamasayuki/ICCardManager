@@ -430,7 +430,51 @@ public class SummaryGeneratorBusStopSyncPlanTests : IDisposable
         var plan = SummaryGenerator.PlanBusStopSync("バス（天神～博多、★）", details);
 
         plan.Outcome.Should().Be(BusStopSyncOutcome.NothingToSync);
+        plan.SuppressedReorder.Should().BeTrue("値が入れ替わる対応付けを抑止したことを行編集へ伝える");
         details.Select(d => d.BusStops).Should().Equal("★", "天神～博多");
+    }
+
+    /// <summary>
+    /// 上の Fact の、明細のバス停名が未入力（null）の版（コードレビュー 5 回目で検出）。摘要側の未入力は★として読まれるので、
+    /// 現在の値の null を★へ寄せずに比べると並べ替えと判定されず、値が入れ替わって書かれていた。
+    /// </summary>
+    [Fact]
+    public void 旧生成器の並びの整合済み摘要で明細が未入力_明細どうしの値を入れ替えないこと()
+    {
+        var details = BusDetails(null, "天神～博多");
+
+        var plan = SummaryGenerator.PlanBusStopSync("バス（天神～博多、★）", details);
+
+        plan.Outcome.Should().Be(BusStopSyncOutcome.NothingToSync);
+        plan.Changes.Should().BeEmpty();
+        details.Select(d => d.BusStops).Should().Equal(null, "天神～博多");
+    }
+
+    /// <summary>
+    /// 往復の向きだけを逆に書いた摘要（値は明細と同じで並びだけが違う）は書き戻さず、抑止したことを伝える（コードレビュー 5 回目）。
+    /// </summary>
+    [Fact]
+    public void 往復の向きだけを逆に書いた摘要_並べ替えとして抑止したことを伝えること()
+    {
+        var details = BusDetails("天神～博多", "博多～天神");
+
+        var plan = SummaryGenerator.PlanBusStopSync("バス（博多～天神 往復）", details);
+
+        plan.Outcome.Should().Be(BusStopSyncOutcome.NothingToSync);
+        plan.SuppressedReorder.Should().BeTrue();
+    }
+
+    /// <summary>上の対: 値が 1 つも変わらない対応付けは、並べ替えとして扱わない（単に整合している）。</summary>
+    [Fact]
+    public void 値が変わらない対応付け_並べ替えとして扱わないこと()
+    {
+        var details = BusDetails(null, "★");
+
+        var plan = SummaryGenerator.PlanBusStopSync("バス（★、★）", details);
+
+        plan.Outcome.Should().Be(BusStopSyncOutcome.NothingToSync);
+        plan.SuppressedReorder.Should().BeFalse("未入力の明細と★は同じ値とみなす");
+        details[0].BusStops.Should().BeNull("未入力の明細へ★を書き込まない");
     }
 
     /// <summary>上の対: 値そのものを直した編集（並べ替えではない）は書き戻す。</summary>

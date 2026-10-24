@@ -1186,8 +1186,17 @@ namespace ICCardManager.ViewModels
             }
 
             var plan = SummaryGenerator.PlanBusStopSync(Summary, _editDetails);
-            return plan.Outcome == BusStopSyncOutcome.Unmappable
-                ? (plan.Failure, SummaryGenerator.GetBusStopEmissionOrder(_editDetails).Count)
+            var count = SummaryGenerator.GetBusStopEmissionOrder(_editDetails).Count;
+            if (plan.Outcome == BusStopSyncOutcome.Unmappable)
+            {
+                return (plan.Failure, count);
+            }
+
+            // コードレビュー 5 回目で検出: バス停名の並びだけを変えた編集（往復の向きを逆に書いた等）は、
+            // 並べ替えの守りで書き戻されず、無警告のまま摘要だけが保存されて次の統合で戻る。
+            // 旧生成器の並びを作り直しどおりに戻す編集は、作り直しとの一致の守りで先に返るのでここへ来ない。
+            return plan.SuppressedReorder
+                ? (BusStopSyncFailure.ReorderOnly, count)
                 : (BusStopSyncFailure.None, 0);
         }
 
@@ -1213,6 +1222,8 @@ namespace ICCardManager.ViewModels
                     "往復の表記の前が「乗車～降車」の形（乗車と降車を「～」1つでつなぐ）になっていないため、",
                 BusStopSyncFailure.BusBlockMissing =>
                     $"摘要に「{SummaryGenerator.BusLabel}（…）」の形（全角の括弧）のバス停名が見つからないため、",
+                BusStopSyncFailure.ReorderOnly =>
+                    "バス停名の並びだけが明細の利用の順と違い、どの利用のバス停名を直したのか決められないため明細へ反映できず、",
                 _ => "バス停名の区間の数が利用の件数と合わないため、",
             };
             var consequence = "このまま保存すると履歴を統合したときに編集前のバス停名へ戻ります。";
@@ -1225,6 +1236,8 @@ namespace ICCardManager.ViewModels
                     "それ以外は、バス利用1件ごとに「乗車～降車」を利用した順に「、」で区切って入力してください。",
                 BusStopSyncFailure.CountMismatch =>
                     "バス利用1件ごとに「乗車～降車」を利用した順に「、」で区切って入力してください。",
+                BusStopSyncFailure.ReorderOnly =>
+                    "明細どうしのバス停名を入れ替えることはこの画面ではできないため、バス停名は利用した順に並べて入力してください。",
                 BusStopSyncFailure.BusBlockMissing =>
                     $"バス停名は「{SummaryGenerator.BusLabel}（乗車～降車）」のように全角の括弧で囲み、" +
                     "バス利用1件ごとに「乗車～降車」を利用した順に「、」で区切って入力してください。",

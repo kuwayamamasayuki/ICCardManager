@@ -2305,6 +2305,24 @@ public class LedgerMergeServiceTests : IDisposable
     }
 
     /// <summary>
+    /// 上の Fact の、明細のバス停名が未入力（null。CSV 取込の空欄等）の版（コードレビュー 5 回目で検出）。
+    /// </summary>
+    [Fact]
+    public void SyncBusStopsFromSummary_旧生成器の並びの整合済み摘要で明細が未入力_入れ替えない()
+    {
+        var older = new LedgerDetail { IsBus = true, BusStops = null, Amount = 230, Balance = 770, SequenceNumber = 2 };
+        var newer = new LedgerDetail { IsBus = true, BusStops = "天神～博多", Amount = 230, Balance = 540, SequenceNumber = 1 };
+        var ledgers = new List<Ledger>
+        {
+            new() { Id = 1, Summary = "バス（天神～博多、★）", Details = new List<LedgerDetail> { older, newer } }
+        };
+
+        LedgerMergeService.SyncBusStopsFromSummary(ledgers).Should().BeEmpty();
+        older.BusStops.Should().BeNull();
+        newer.BusStops.Should().Be("天神～博多");
+    }
+
+    /// <summary>
     /// Issue #2306: 同期したバス停名は統合と同じトランザクションで、統合先の id に付け替えた明細として永続化すること。
     /// </summary>
     [Fact]

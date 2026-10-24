@@ -2443,6 +2443,39 @@ public class LedgerRowEditViewModelTests : IDisposable
     }
 
     /// <summary>
+    /// Issue #2306（コードレビュー 5 回目で検出）: バス停名の並びだけを変えた編集（往復の向きを逆に書いた）は
+    /// 明細へ書き戻されず、次の統合で戻るので警告する。
+    /// </summary>
+    [Fact]
+    public async Task Validate_バス停名の並びだけを変えた編集は警告すること_Issue2306()
+    {
+        var ledger = CreateRoundTripBusLedger("バス（天神～博多 往復）", "天神～博多", "博多～天神");
+        var dto = ArrangeBusLedgerForEdit(ledger);
+        await _viewModel.InitializeForEditAsync(dto);
+
+        _viewModel.Summary = "バス（博多～天神 往復）";
+
+        var expected = LedgerRowEditViewModel.BuildBusStopUnmappableWarning(BusStopSyncFailure.ReorderOnly, 2);
+        _viewModel.WarningMessage.Should().Contain(expected);
+        expected.Should().Contain("明細の利用の順と違い").And.EndWith("利用した順に並べて入力してください。");
+    }
+
+    /// <summary>
+    /// 上の対: 旧生成器の並びの摘要を、今の生成どおりの並びへ戻す編集は警告しない（作り直しと一致する）。
+    /// </summary>
+    [Fact]
+    public async Task Validate_旧生成器の並びを今の生成どおりに戻す編集は警告しないこと_Issue2306()
+    {
+        var ledger = CreateRoundTripBusLedger("バス（天神～博多、★）", "★", "天神～博多");
+        var dto = ArrangeBusLedgerForEdit(ledger);
+        await _viewModel.InitializeForEditAsync(dto);
+
+        _viewModel.Summary = "バス（★、天神～博多）";
+
+        _viewModel.WarningMessage.Should().BeEmpty();
+    }
+
+    /// <summary>
     /// Issue #2306: 警告文言の品質（何が・なぜ・どうすれば、行動指示で終わる）を理由ごとに確かめる。
     /// 往復の書き方は組織設定の接尾辞から作る（リテラルを直書きしない。#1818）。
     /// </summary>

@@ -52,6 +52,12 @@ namespace ICCardManager.Services
         /// 計画（<see cref="SummaryGenerator.PlanBusStopSync"/>）は返さず、行編集が編集前後を比べて判定する
         /// </summary>
         BusBlockMissing,
+
+        /// <summary>
+        /// バス停名の並びだけを変えた編集（値は同じ）。明細の利用の順と違うため書き戻さない。
+        /// 計画は <see cref="BusStopSyncPlan.SuppressedReorder"/> で伝え、行編集がこの理由で警告する（コードレビュー 5 回目）
+        /// </summary>
+        ReorderOnly,
     }
 
     /// <summary>
@@ -59,10 +65,11 @@ namespace ICCardManager.Services
     /// </summary>
     internal sealed class BusStopAssignment
     {
-        public BusStopAssignment(LedgerDetail detail, string busStops)
+        public BusStopAssignment(LedgerDetail detail, string busStops, string currentBusStops)
         {
             Detail = detail;
             BusStops = busStops;
+            CurrentBusStops = currentBusStops;
         }
 
         /// <summary>書き戻し先の明細</summary>
@@ -71,8 +78,14 @@ namespace ICCardManager.Services
         /// <summary>書き戻すバス停名</summary>
         public string BusStops { get; }
 
-        /// <summary>明細の現在の値と異なる（実際に書き換えが要る）か</summary>
-        public bool IsChange => Detail.BusStops != BusStops;
+        /// <summary>
+        /// 計画を立てた時点の明細の値。未入力（null・空白）はプレースホルダ（★）へ寄せてある
+        /// （摘要側の未入力も★として読まれるため。コードレビュー 5 回目）
+        /// </summary>
+        public string CurrentBusStops { get; }
+
+        /// <summary>明細の現在の値と異なる（実際に書き換えが要る）か。未入力と★は同じとみなす</summary>
+        public bool IsChange => !string.Equals(CurrentBusStops, BusStops, System.StringComparison.Ordinal);
     }
 
     /// <summary>
@@ -88,16 +101,32 @@ namespace ICCardManager.Services
     internal sealed class BusStopSyncPlan
     {
         private BusStopSyncPlan(
-            BusStopSyncOutcome outcome, IReadOnlyList<BusStopAssignment> assignments, BusStopSyncFailure failure)
+            BusStopSyncOutcome outcome,
+            IReadOnlyList<BusStopAssignment> assignments,
+            BusStopSyncFailure failure,
+            bool suppressedReorder = false)
         {
             Outcome = outcome;
             Assignments = assignments;
             Failure = failure;
+            SuppressedReorder = suppressedReorder;
         }
+
+        /// <summary>
+        /// 対応付けた値が現在の値の並べ替えにすぎないため書き戻さなかったか（Outcome は NothingToSync）
+        /// </summary>
+        public bool SuppressedReorder { get; }
 
         /// <summary>書き戻す対象が無い</summary>
         public static BusStopSyncPlan NothingToSync { get; } =
             new BusStopSyncPlan(BusStopSyncOutcome.NothingToSync, new List<BusStopAssignment>(), BusStopSyncFailure.None);
+
+        /// <summary>
+        /// 書き戻さない（対応付けた値が現在の値の並べ替えにすぎない）。<see cref="BusStopSyncOutcome.NothingToSync"/> の一種で、
+        /// 行編集が「並べ替えただけの編集」を警告するために <see cref="SuppressedReorder"/> を立てる（コードレビュー 5 回目）
+        /// </summary>
+        public static BusStopSyncPlan SuppressedAsReorder { get; } =
+            new BusStopSyncPlan(BusStopSyncOutcome.NothingToSync, new List<BusStopAssignment>(), BusStopSyncFailure.None, suppressedReorder: true);
 
         /// <summary>対応付けられない形（理由付き）</summary>
         public static BusStopSyncPlan Unmappable(BusStopSyncFailure failure)
