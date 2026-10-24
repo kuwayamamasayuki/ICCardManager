@@ -158,14 +158,14 @@ namespace ICCardManager.UITests.Tests
 
             var atFailure = NativeWindows.Foreground;
             var label = KeyLabel(key);
-            var stolen = new[] { before, after, atFailure }.Any(h => ScreenshotHelper.ProcessIdOf(h) != appProcessId);
+            var stolen = new[] { before, after, atFailure }.Any(h => h != IntPtr.Zero && ScreenshotHelper.ProcessIdOf(h) != appProcessId);
             var foregrounds =
                 $"前面ウィンドウ: 送信直前「{ScreenshotHelper.DescribeWindow(before)}」・送信直後「{ScreenshotHelper.DescribeWindow(after)}」・" +
                 $"判定時「{ScreenshotHelper.DescribeWindow(atFailure)}」";
             if (stolen)
             {
                 throw new InvalidOperationException(
-                    $"Alt+{label} の判定不能: フォーカスをアプリ外のウィンドウに奪われました（キーの重複ではありません）。{foregrounds}。" +
+                    $"Alt+{label} の判定不能: フォーカスをアプリ外のウィンドウに奪われたため、キーの重複か判定できません。{foregrounds}。" +
                     "通知などを閉じてから実行し直してください。");
             }
 
