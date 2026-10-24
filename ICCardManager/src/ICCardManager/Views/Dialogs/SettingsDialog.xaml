@@ -337,9 +337,11 @@
                                     AutomationProperties.Name="バックアップフォルダを選択"
                                     ToolTip="バックアップ先フォルダを選択します（アクセスキー: Alt+R）"/>
                         </Grid>
-                        <TextBlock Text="※ 空欄の場合、アプリケーションフォルダにバックアップされます"
+                        <!-- Issue #2328: 既定の保存先は実装と同じ値（PathValidator.GetDefaultBackupPath）から作る -->
+                        <TextBlock Text="{Binding DefaultBackupPathNotice, Mode=OneTime}"
                                    FontSize="{DynamicResource SmallFontSize}"
                                    Foreground="{DynamicResource SecondaryTextBrush}"
+                                   TextWrapping="Wrap"
                                    Margin="0,5,0,0"/>
                         <!-- Issue #2264: 共有されるセキュリティ関連の設定は、変更時に職員証の認証を求め操作ログに残す -->
                         <TextBlock Text="※ バックアップ先はすべてのPCに共通の設定です。変更して保存するときは職員証での認証が必要で、変更は操作ログに記録されます"

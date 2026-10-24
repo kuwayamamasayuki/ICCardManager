@@ -1,3 +1,4 @@
+#nullable enable
 using System;
 using System.Collections.Generic;
 using System.Data.Common;
@@ -26,9 +27,9 @@ namespace ICCardManager.Data.Repositories
         public Task<int> InsertAsync(OperationLog log) => InsertAsync(log, transaction: null);
 
         /// <inheritdoc/>
-        public async Task<int> InsertAsync(OperationLog log, SQLiteTransaction transaction)
+        public async Task<int> InsertAsync(OperationLog log, SQLiteTransaction? transaction)
         {
-            ConnectionLease lease = null;
+            ConnectionLease? lease = null;
             try
             {
                 SQLiteConnection connection;
@@ -83,11 +84,15 @@ SELECT last_insert_rowid();";
             command.CommandText = @"SELECT id, timestamp, operator_idm, operator_name, target_table,
        target_id, action, before_data, after_data
 FROM operation_log
-WHERE date(timestamp) BETWEEN @fromDate AND @toDate
+WHERE timestamp >= @fromDate AND timestamp <= @toDate
 ORDER BY timestamp ASC";
 
-            command.Parameters.AddWithValue("@fromDate", SqliteDateTimeFormat.ToDateText(fromDate));
-            command.Parameters.AddWithValue("@toDate", SqliteDateTimeFormat.ToDateText(toDate));
+            // Issue #2328: 列を date() で包まない（包むと idx_log_timestamp を探索キーにできず全件走査になる。
+            // #1834 / #1996）。timestamp は SqliteDateTimeFormat.ToText（yyyy-MM-dd HH:mm:ss）で書かれ、
+            // 辞書順＝時系列順なので「その日の 0 時以上・23:59:59 以下」は date(timestamp) の範囲と同じ行集合になる
+
+            command.Parameters.AddWithValue("@fromDate", SqliteDateTimeFormat.ToDayStartText(fromDate));
+            command.Parameters.AddWithValue("@toDate", SqliteDateTimeFormat.ToDayEndText(toDate));
 
             using var reader = await command.ExecuteReaderAsync().ConfigureAwait(false);
             while (await reader.ReadAsync().ConfigureAwait(false))
@@ -192,7 +197,7 @@ ORDER BY timestamp ASC";
             OperationLogSearchCriteria criteria,
             int pageSize,
             KeysetDirection direction,
-            OperationLogCursor cursor,
+            OperationLogCursor? cursor,
             bool isAnchoredAtEdge)
         {
             if (pageSize <= 0)
@@ -301,8 +306,8 @@ LIMIT @limit";
                 hasNext = !isAnchoredAtEdge;       // Last の場合は false、Prev の場合は true
             }
 
-            OperationLogCursor firstCursor = null;
-            OperationLogCursor lastCursor = null;
+            OperationLogCursor? firstCursor = null;
+            OperationLogCursor? lastCursor = null;
             if (raw.Count > 0)
             {
                 var first = raw[0];
@@ -360,16 +365,17 @@ ORDER BY timestamp ASC, id ASC";
             var conditions = new List<string>();
             var parameters = new Dictionary<string, object>();
 
+            // Issue #2328: 日付範囲は列を date() で包まずに比べる（理由は GetByDateRangeAsync）
             if (criteria.FromDate.HasValue)
             {
-                conditions.Add("date(timestamp) >= @fromDate");
-                parameters["@fromDate"] = SqliteDateTimeFormat.ToDateText(criteria.FromDate.Value);
+                conditions.Add("timestamp >= @fromDate");
+                parameters["@fromDate"] = SqliteDateTimeFormat.ToDayStartText(criteria.FromDate.Value);
             }
 
             if (criteria.ToDate.HasValue)
             {
-                conditions.Add("date(timestamp) <= @toDate");
-                parameters["@toDate"] = SqliteDateTimeFormat.ToDateText(criteria.ToDate.Value);
+                conditions.Add("timestamp <= @toDate");
+                parameters["@toDate"] = SqliteDateTimeFormat.ToDayEndText(criteria.ToDate.Value);
             }
 
             if (!string.IsNullOrEmpty(criteria.Action))

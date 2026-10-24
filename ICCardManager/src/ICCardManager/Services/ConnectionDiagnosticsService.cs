@@ -1,3 +1,4 @@
+#nullable enable
 using System;
 using System.Collections.Generic;
 using System.Globalization;
@@ -319,7 +320,10 @@ namespace ICCardManager.Services
                         "切断",
                         "共有フォルダへの接続が切断されています。" +
                         "ネットワークケーブルの抜けや、ファイルサーバーの停止が考えられます。" +
-                        "ネットワーク接続を復旧させ、復旧後にこのアプリを再起動してください。");
+                        // Issue #2328: 復旧後の再起動は不要（ヘルスチェックが再接続し、自動で通常動作へ戻る。04 §18.5）。
+                        // 不要な再起動を案内すると業務を止めるため、自動復帰と手動の再接続（切断警告のクリック）を案内する
+                        $"ネットワーク接続を復旧させてください。復旧すると{MonitoringIntervalSeconds}秒以内に自動で再接続されるため、" +
+                        "アプリの再起動は不要です。すぐに再接続するときは、メイン画面の接続切断の警告をクリックしてください。");
             }
         }
 
@@ -361,7 +365,7 @@ namespace ICCardManager.Services
         private const string BackupFolderWritableTitle = "バックアップ保存先";
         private const string DiskFreeSpaceTitle = "空きディスク容量";
 
-        private async Task<string> ResolveBackupFolderOrNullAsync()
+        private async Task<string?> ResolveBackupFolderOrNullAsync()
         {
             try
             {
@@ -382,16 +386,16 @@ namespace ICCardManager.Services
         /// 「権限がない」「ディスクが満杯」といった状態は単体テストから再現できないため、
         /// 本メソッドを差し替えて判定と文言だけを検証できるようにしている。
         /// </remarks>
-        protected virtual FolderWriteAccess ProbeFolderWriteAccess(string folder) =>
+        protected virtual FolderWriteAccess ProbeFolderWriteAccess(string? folder) =>
             FolderWriteAccessProbe.Probe(folder);
 
         /// <summary>
         /// バックアップ保存先の空き容量を取得する（テスト用の継ぎ目。<see cref="ProbeFolderWriteAccess"/> と同じ理由）
         /// </summary>
-        protected virtual long? GetFreeSpaceBytes(string folder) =>
+        protected virtual long? GetFreeSpaceBytes(string? folder) =>
             DiskSpaceHelper.TryGetAvailableFreeSpace(folder);
 
-        private DiagnosticItem CheckBackupFolderWritable(string folder)
+        private DiagnosticItem CheckBackupFolderWritable(string? folder)
         {
             var access = ProbeFolderWriteAccess(folder);
 
@@ -432,7 +436,7 @@ namespace ICCardManager.Services
             }
         }
 
-        private DiagnosticItem CheckDiskFreeSpace(string folder)
+        private DiagnosticItem CheckDiskFreeSpace(string? folder)
         {
             var freeBytes = GetFreeSpaceBytes(folder);
             var formatted = DiskSpaceHelper.FormatBytes(freeBytes);
@@ -485,7 +489,7 @@ namespace ICCardManager.Services
             }
 
             var lastSuccess = health?.LastSuccessAt;
-            if (lastSuccess == null)
+            if (health == null || lastSuccess == null)
             {
                 // 記録がないのは「失敗している」ではなく「判断材料がない」。
                 // 導入前からの既存環境で必ず警告が出る状態を避ける（Issue #1689 の方針）。

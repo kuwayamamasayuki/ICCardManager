@@ -89,10 +89,10 @@ public class ConnectionDiagnosticsServiceTests : IDisposable
         public bool FileReachable { get; set; } = true;
 
         /// <summary><see cref="ProbeFolderWriteAccess"/> が受け取った保存先</summary>
-        public List<string> ProbedFolders { get; } = new();
+        public List<string?> ProbedFolders { get; } = new();
 
         /// <summary><see cref="GetFreeSpaceBytes"/> が受け取った保存先</summary>
-        public List<string> FreeSpaceFolders { get; } = new();
+        public List<string?> FreeSpaceFolders { get; } = new();
 
         /// <summary><see cref="ProbeDatabaseFileReachable"/> が受け取った DB パス</summary>
         public List<string> ProbedDatabasePaths { get; } = new();
@@ -112,13 +112,13 @@ public class ConnectionDiagnosticsServiceTests : IDisposable
 
         // 本番（FolderWriteAccessProbe.Probe / DiskSpaceHelper / File.Exists）と同じく、
         // パスが無いときは「特定できない」側へ倒す。
-        protected override FolderWriteAccess ProbeFolderWriteAccess(string folder)
+        protected override FolderWriteAccess ProbeFolderWriteAccess(string? folder)
         {
             ProbedFolders.Add(folder);
             return string.IsNullOrWhiteSpace(folder) ? FolderWriteAccess.PathNotSpecified : FolderAccess;
         }
 
-        protected override long? GetFreeSpaceBytes(string folder)
+        protected override long? GetFreeSpaceBytes(string? folder)
         {
             FreeSpaceFolders.Add(folder);
             return string.IsNullOrWhiteSpace(folder) ? null : FreeSpace;
@@ -445,6 +445,22 @@ public class ConnectionDiagnosticsServiceTests : IDisposable
         var item = await RunAndGet(DiagnosticItemKind.SharedFolderConnection);
 
         item.Status.Should().Be(DiagnosticStatus.Error);
+    }
+
+    [Fact]
+    public async Task SharedFolderConnection_WhenDisconnected_GuidesAutomaticReconnectInsteadOfRestart()
+    {
+        // Issue #2328: 切断中もヘルスチェックが再接続を試み、成功すれば通常動作へ自動で戻る（04 §18.5）。
+        // 「復旧後にこのアプリを再起動してください」は不要な再起動で業務を止め、メイン画面のトースト
+        // （15秒ごとに自動で再接続を試行します）とも食い違っていた
+        _databaseInfo.SetupGet(d => d.IsSharedMode).Returns(true);
+        _connectionState.SetupGet(p => p.CurrentConnectionState).Returns(SharedDbConnectionState.Disconnected);
+
+        var item = await RunAndGet(DiagnosticItemKind.SharedFolderConnection);
+
+        item.DetailText.Should().NotContain("再起動してください", "復旧後の再起動は不要");
+        item.DetailText.Should().Contain("15秒以内に自動で再接続", "どうすれば: 復旧すれば自動で戻ることを伝える");
+        item.DetailText.Should().Contain("警告をクリック", "すぐに戻したいときの手動の再接続を案内する");
     }
 
     [Fact]
