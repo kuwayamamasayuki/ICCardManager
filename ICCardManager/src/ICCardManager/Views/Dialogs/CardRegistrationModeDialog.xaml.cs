@@ -6,6 +6,7 @@ using System.Windows;
 using System.Windows.Automation;
 using System.Windows.Controls;
 using System.Windows.Input;
+using ICCardManager.Common;
 using ICCardManager.Services;
 
 namespace ICCardManager.Views.Dialogs
@@ -61,9 +62,10 @@ namespace ICCardManager.Views.Dialogs
         /// 紙の出納簿の 3 月末時点の累計は**旧年度**のもので、新年度の累計は 0 から始まるため、
         /// 累計受入・累計払出は受け付けず保存もしない（<see cref="CarriesPaperCumulative"/>）。
         /// 導入行の摘要・受入の判定（<c>CardManageViewModel.BuildInitialLedgerAsync</c>）、累計を保存するかの判定、
-        /// ダイアログの累計欄の有効・無効はすべてこの 1 か所に委ねる。
+        /// ダイアログの累計欄の有効・無効はすべてここを通す（判定の本体は <see cref="PaperCarryoverPolicy"/>。帳票の加算も同じクラス）。
         /// </remarks>
-        public static bool IsFiscalYearStartCarryoverMonth(int carryoverMonth) => carryoverMonth == 3;
+        public static bool IsFiscalYearStartCarryoverMonth(int carryoverMonth) =>
+            PaperCarryoverPolicy.IsFiscalYearStartCarryoverMonth(carryoverMonth);
 
         /// <summary>
         /// 紙の出納簿の累計受入・累計払出を当該年度の累計へ引き継ぐ登録かどうか（Issue #1215 / #2326）
@@ -74,9 +76,7 @@ namespace ICCardManager.Views.Dialogs
         /// 「受入 − 払出 = 残額」が年度を通して成り立たなくなる（#2326）。
         /// </remarks>
         public bool CarriesPaperCumulative =>
-            !IsNewPurchase
-            && CarryoverMonth.HasValue
-            && !IsFiscalYearStartCarryoverMonth(CarryoverMonth.Value);
+            PaperCarryoverPolicy.CarriesPaperCumulative(IsNewPurchase, CarryoverMonth);
     }
 
     /// <summary>

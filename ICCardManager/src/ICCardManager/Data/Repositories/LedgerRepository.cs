@@ -968,8 +968,9 @@ ORDER BY l.card_idm ASC, l.date ASC, l.id ASC";
         /// という目的に直接反する。
         /// </para>
         /// <para>
-        /// 条件は <c>GetByDateRangeAsync</c> の ORDER BY および <see cref="Models.Ledger.IsCarryover"/>
-        /// と同じ判定（「新規購入」リテラル＋繰越 LIKE パターン）を使う。繰越側のパターンは
+        /// 「新規購入」と「○月から繰越」の判定は <c>GetByDateRangeAsync</c> の ORDER BY（<see cref="CarryoverFirstSortKey"/>）および
+        /// <see cref="Models.Ledger.IsCarryover"/> と同じ（「新規購入」リテラル＋繰越 LIKE パターン）。これらは帳票用で
+        /// 「前年度より繰越」を含まないため、本条件はその 2 種に「前年度より繰越」を加えた 3 種になる（下記）。繰越側のパターンは
         /// <c>'%月から繰越'</c> のハードコードではなく、組織設定 <c>MidYearCarryoverFormat</c> 由来の
         /// <c>SummaryGenerator.GetMidYearCarryoverLikePattern</c> をパラメータバインドする
         /// （Issue #1749。書式カスタム時に SQL だけが追従しない乖離の防止）。
@@ -1069,7 +1070,9 @@ ORDER BY l.card_idm ASC, l.date ASC, l.id ASC";
         /// 「新規購入・繰越レコードを同日の先頭に固定する」ORDER BY のソートキー（Issue #590）。
         /// </summary>
         /// <remarks>
-        /// <see cref="ExcludeCarryoverCondition"/> と同じ判定を肯定形で使う。3 クエリ
+        /// 「新規購入」と「○月から繰越」の 2 種を肯定形で判定する（<see cref="Models.Ledger.IsCarryover"/> と同じ）。
+        /// <see cref="ExcludeCarryoverCondition"/> は Issue #2326 で「前年度より繰越」を加えた 3 種になったが、
+        /// 並べ替えは帳票の並び（#590）に関わるため変えていない。3 クエリ
         /// （<c>GetByDateRangeAsync</c> / <c>GetPagedAsync</c> の CTE 内・外側）に同一の
         /// CASE 式を書き写していた重複を 1 か所へ集約（Issue #1749 レビュー指摘）。
         /// 本キーを含むクエリも <see cref="AddMidYearCarryoverParameter"/> を必ず併用すること。
