@@ -461,7 +461,19 @@ namespace ICCardManager.ViewModels
         /// （#1759「一覧を確認するよう案内するなら、案内する側が先に再読込する」。<c>LedgerDetailViewModel</c> と同じ形）。
         /// 保存できたときは <see cref="IsSaved"/>（呼び出し元はダイアログの結果 true で読み直す）が担う。
         /// </remarks>
-        public bool NeedsHistoryReload => _conflictDetected;
+        public bool NeedsHistoryReload => _conflictDetected || _busStopConflictDetected;
+
+        /// <summary>
+        /// Issue #2325: バス停名の同期が競合した（明細が他 PC や別の編集で変わった）か。行は残っているので保存は塞がないが、
+        /// 案内どおり閉じたら一覧を読み直させる（コードレビューで検出）。
+        /// </summary>
+        private bool _busStopConflictDetected;
+
+        /// <summary>
+        /// Issue #2325: 「次へ」「戻る」を実行できるか。編集対象の行がもう無いと分かった後は、閉じると一覧を読み直して
+        /// 隣の行へは進まない（呼び出し元）ので、押せても閉じるだけになる。押せないようにして行動と結果を一致させる。
+        /// </summary>
+        public bool CanNavigateToAdjacent => !_conflictDetected;
 
         public LedgerRowEditViewModel(
             ILedgerRepository ledgerRepository,
@@ -556,6 +568,8 @@ namespace ICCardManager.ViewModels
             IsAutoBalance = false; // 編集モードでは手動入力開始
             _editPreviousBalance = previousBalance;
             _initialEditDate = ledger.Date;
+            // Issue #2325: 摘要の代入（Validate が走る）より前に置く
+            _isPointRedemptionRow = ledger.Details.Count > 0 && ledger.Details.All(d => d.IsPointRedemption);
             PreviousBalance = previousBalance ?? 0;
             UpdateAutoBalanceAvailability();
 
@@ -880,17 +894,33 @@ namespace ICCardManager.ViewModels
 
             if (reason != AutoBalanceUnavailableReason.None && IsAutoBalance)
             {
+                // 復元する値（自動計算を ON にする直前の残高）があるかは、OFF にする前に確かめる
+                // （OnIsAutoBalanceChanged が復元と同時に退避値を捨てる）
+                var hasValueToRestore = _balanceBeforeAutoBalance.HasValue;
+
                 // OnIsAutoBalanceChanged が自動計算前の残高を復元する
                 IsAutoBalance = false;
 
-                // Issue #2325: Addモードは自動計算 ON で始まるため復元する値を持たず、残高には前の挿入位置で
-                // 計算した値が残る。それは今の位置の残高ではない（起点が分からない）ので、確定値に見せない。
-                // 0 に戻して未入力として扱い、入力を促す（Validate の警告・保存前の確認）。
-                if (Mode == LedgerRowEditMode.Add)
+                // Issue #2325: Addモードは自動計算 ON で始まるため、利用者が一度も OFF にしていなければ復元する値を持たず、
+                // 残高には前の挿入位置で計算した値が残る。それは今の位置の残高ではない（起点が分からない）ので、
+                // 確定値に見せない。0 に戻して未入力として扱い、入力を促す（Validate の警告・保存前の確認）。
+                // 復元する値があったとき（OFF にして入力した残高から ON にした）は、その値を残す（§3.12「OFF に戻したときに復元する」）
+                if (Mode == LedgerRowEditMode.Add && !hasValueToRestore)
                 {
                     Balance = 0;
                     _isAddBalanceNotEntered = true;
                 }
+            }
+            else if (reason == AutoBalanceUnavailableReason.None && Mode == LedgerRowEditMode.Add && _isAddBalanceNotEntered)
+            {
+                // Issue #2325（コードレビューで検出）: 未入力のまま自動計算が使える位置へ戻ったら、自動計算を ON に戻す。
+                // 戻さないと「直前の行が表示されていないため自動計算できません」という警告と保存前の確認が、
+                // 起点が分かる今の位置について事実と食い違う。ON にすると未入力の扱いも解ける（OnIsAutoBalanceChanged）。
+                // 利用者が残高を入力していれば（フラグは解けている）その値を残す
+                IsAutoBalance = true;
+                // ON にした時点の 0 は利用者の値ではないので退避しない（退避すると、もう一度先頭へ動かしたときに
+                // 「復元する値がある」扱いになり、未入力の扱いが立たない）
+                _balanceBeforeAutoBalance = null;
             }
         }
 
@@ -951,11 +981,27 @@ namespace ICCardManager.ViewModels
         /// （service-conventions.md「設定値で生成したものは、設定値で判定する」#1818）。旧実装は
         /// 「繰越」「新規購入」「ポイント還元」を直書きしており、ポイント還元の文言を変えた組織では
         /// ポイント還元の行を開くたびに警告が出ていた。貸出中レコードは摘要ではなく行自身のフラグで判定する（#2044）。
+        /// <para>
+        /// ポイント還元は<b>行自身の情報（明細がすべてポイント還元）を優先</b>し、明細の無い行（手入力の追加等）だけ摘要で見る
+        /// （コードレビューで検出）。摘要を現在の設定値とだけ比べると、文言を変える前に保存された行（旧文言）を開くたびに
+        /// 警告が出る — #2044「保存済みの行を現在の設定値で判定しない」と同じ形。明細の無い旧文言の行のため、
+        /// 設定の既定値の文言（<see cref="SummaryTextOptions.PointRedemption"/> の初期値）も除外に含める。
+        /// </para>
         /// </remarks>
         private bool IsZeroAmountExpectedSummary() =>
             IsLentRecord
+            || _isPointRedemptionRow
             || Ledger.IsInitialRecordSummary(Summary)
-            || Summary == SummaryGenerator.GetPointRedemptionSummary();
+            || Summary == SummaryGenerator.GetPointRedemptionSummary()
+            || Summary == DefaultPointRedemptionSummary;
+
+        /// <summary>ポイント還元の摘要の既定値（組織設定で変える前に保存された行の文言）</summary>
+        private static readonly string DefaultPointRedemptionSummary = new SummaryTextOptions().PointRedemption;
+
+        /// <summary>
+        /// Issue #2325: Editモードで開いた行の明細がすべてポイント還元か（摘要の文言に依らない行自身の情報）
+        /// </summary>
+        private bool _isPointRedemptionRow;
 
         /// <summary>
         /// Issue #2325: Addモードで自動計算が使えなくなり、残高が未入力のときの警告（何が／なぜ／どうすれば）
@@ -1302,6 +1348,7 @@ namespace ICCardManager.ViewModels
             }
             else if (busStopConflict)
             {
+                _busStopConflictDetected = true;
                 StatusMessage = BusStopConflictMessage;
             }
             else
@@ -1325,6 +1372,8 @@ namespace ICCardManager.ViewModels
             _conflictDetected = true;
             _hasFieldChanges = false;
             CanSave = false;
+            SkipToNextCommand.NotifyCanExecuteChanged();
+            BackCommand.NotifyCanExecuteChanged();
             StatusMessage = ConcurrencyConflictMessage.ForUpdateReloadOnClose(_editTargetLabel, "履歴一覧");
         }
 
@@ -1334,8 +1383,8 @@ namespace ICCardManager.ViewModels
         /// </summary>
         internal const string BusStopConflictMessage =
             "摘要とバス停名を保存できませんでした。この履歴の明細が、他のパソコンや別の編集操作で" +
-            "変更された可能性があります。変更は取り消していますので、画面を閉じて履歴一覧を" +
-            "再読み込みし、最新の内容を確認してからやり直してください。";
+            "変更された可能性があります。変更は取り消していますので、この画面を閉じると履歴一覧を" +
+            "再読み込みしますので、最新の内容を確認してからやり直してください。";
 
         /// <summary>
         /// 摘要からバス停名を抽出してDetail.BusStopsに同期する（Issue #983）
@@ -1562,7 +1611,7 @@ namespace ICCardManager.ViewModels
         /// <summary>
         /// 保存せず次の履歴へ（Issue #1134）
         /// </summary>
-        [RelayCommand]
+        [RelayCommand(CanExecute = nameof(CanNavigateToAdjacent))]
         private void SkipToNext()
         {
             if (HasUnsavedChanges())
@@ -1579,7 +1628,7 @@ namespace ICCardManager.ViewModels
         /// <summary>
         /// 前の履歴へ戻る（Issue #1134）
         /// </summary>
-        [RelayCommand]
+        [RelayCommand(CanExecute = nameof(CanNavigateToAdjacent))]
         private void Back()
         {
             if (HasUnsavedChanges())

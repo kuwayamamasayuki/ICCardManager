@@ -385,6 +385,9 @@ public partial class HistoryPanelViewModel
         {
             await LoadHistoryLedgersAsync();
             await Host.RefreshDashboardAsync();
+            // 消えた行が貸出中レコード（開いている間に返却された）ならカードの貸出状態も変わっている。
+            // メイン画面の「貸出中」一覧も読み直す（削除の経路 #2159 と同じ。一覧・ダッシュボードの後ろに置く）
+            await Host.RefreshLentCardsAsync();
             await Host.CheckWarningsAsync();
             await CheckAndNotifyConsistencyAsync();
         }

@@ -152,6 +152,46 @@ public class LedgerRowEditSaveConflictAndWarningTests : IDisposable
     }
 
     [Fact]
+    public async Task 競合の後は次へと戻るを押せないこと()
+    {
+        var ledger = CreateLedger();
+        _ledgerRepoMock.Setup(r => r.GetByIdAsync(ledger.Id)).ReturnsAsync(() => CreateLedger());
+        _ledgerRepoMock.Setup(r => r.UpdateAsync(It.IsAny<Ledger>(), It.IsAny<SQLiteTransaction>())).ReturnsAsync(false);
+        await _viewModel.InitializeForEditAsync(ToDto(ledger), previousBalance: 2510);
+        _viewModel.SkipToNextCommand.CanExecute(null).Should().BeTrue("競合の前は押せる（対）");
+        _viewModel.BackCommand.CanExecute(null).Should().BeTrue();
+
+        await _viewModel.SaveCommand.ExecuteAsync(null);
+
+        _viewModel.SkipToNextCommand.CanExecute(null).Should().BeFalse("閉じると一覧を読み直し、隣の行へは進まない");
+        _viewModel.BackCommand.CanExecute(null).Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task バス停名の同期の競合でも_閉じたら一覧の再読込を求め_保存は塞がないこと()
+    {
+        var ledger = CreateLedger(summary: "バス（天神～博多）");
+        ledger.Details = new List<LedgerDetail> { new() { LedgerId = 7, SequenceNumber = 1, IsBus = true, BusStops = "天神～博多" } };
+        _ledgerRepoMock.Setup(r => r.GetByIdAsync(ledger.Id)).ReturnsAsync(() =>
+        {
+            var l = CreateLedger(summary: "バス（天神～博多）");
+            l.Details = new List<LedgerDetail> { new() { LedgerId = 7, SequenceNumber = 1, IsBus = true, BusStops = "天神～博多" } };
+            return l;
+        });
+        _ledgerRepoMock.Setup(r => r.UpdateAsync(It.IsAny<Ledger>(), It.IsAny<SQLiteTransaction>())).ReturnsAsync(true);
+        // 明細の id が振り直されている（実 DB に該当する明細が無い）ので、同期の UPDATE は 0 行になる
+        await _viewModel.InitializeForEditAsync(ToDto(ledger), previousBalance: 2510);
+
+        _viewModel.Summary = "バス（天神～博多駅前）";
+        await _viewModel.SaveCommand.ExecuteAsync(null);
+
+        _viewModel.StatusMessage.Should().Be(LedgerRowEditViewModel.BusStopConflictMessage);
+        _viewModel.StatusMessage.Should().Contain("この画面を閉じると履歴一覧を再読み込みします");
+        _viewModel.NeedsHistoryReload.Should().BeTrue();
+        _viewModel.CanSave.Should().BeTrue("行は残っているので、読み直した明細で保存し直せる");
+    }
+
+    [Fact]
     public async Task 保存できたときは再読込の要求を立てないこと()
     {
         var ledger = CreateLedger();
@@ -195,11 +235,19 @@ public class LedgerRowEditSaveConflictAndWarningTests : IDisposable
 
     #region 「両方0円」警告の除外は組織設定に追従する
 
-    private async Task OpenZeroAmountRowAsync(string summary, bool isLentRecord = false)
+    private async Task OpenZeroAmountRowAsync(string summary, bool isLentRecord = false, params bool[] detailIsPointRedemption)
     {
-        var ledger = CreateLedger(summary: summary, expense: 0, isLentRecord: isLentRecord);
-        _ledgerRepoMock.Setup(r => r.GetByIdAsync(ledger.Id)).ReturnsAsync(() => CreateLedger(summary: summary, expense: 0, isLentRecord: isLentRecord));
-        await _viewModel.InitializeForEditAsync(ToDto(ledger), previousBalance: 2300);
+        Ledger Create()
+        {
+            var l = CreateLedger(summary: summary, expense: 0, isLentRecord: isLentRecord);
+            l.Details = detailIsPointRedemption
+                .Select((p, i) => new LedgerDetail { LedgerId = l.Id, SequenceNumber = i + 1, IsPointRedemption = p })
+                .ToList();
+            return l;
+        }
+
+        _ledgerRepoMock.Setup(r => r.GetByIdAsync(7)).ReturnsAsync(() => Create());
+        await _viewModel.InitializeForEditAsync(ToDto(Create()), previousBalance: 2300);
     }
 
     [Fact]
@@ -214,14 +262,34 @@ public class LedgerRowEditSaveConflictAndWarningTests : IDisposable
         _viewModel.WarningMessage.Should().NotContain(ZeroAmountWarningFragment);
     }
 
+    /// <summary>
+    /// 文言を変える前に保存された行（旧文言）を、現在の設定値だけで判定しない（#2044。コードレビューで検出）。
+    /// 明細の無い旧文言の行は、設定の既定値の文言で除外する。
+    /// </summary>
     [Fact]
-    public async Task 設定を変えたあとの旧文言のポイント還元には_両方0円の警告を出すこと()
+    public async Task 設定を変える前に保存された既定の文言のポイント還元には_両方0円の警告を出さないこと()
     {
         var options = new OrganizationOptions();
         options.SummaryText.PointRedemption = "ポイント充当";
         SummaryGenerator.Configure(options);
 
         await OpenZeroAmountRowAsync("ポイント還元");
+
+        _viewModel.WarningMessage.Should().NotContain(ZeroAmountWarningFragment);
+    }
+
+    [Fact]
+    public async Task 明細がすべてポイント還元の行は_摘要の文言に依らず両方0円の警告を出さないこと()
+    {
+        await OpenZeroAmountRowAsync("ポイント利用分", false, true, true);
+
+        _viewModel.WarningMessage.Should().NotContain(ZeroAmountWarningFragment);
+    }
+
+    [Fact]
+    public async Task 明細にポイント還元以外が混ざる行は_摘要が還元でなければ両方0円の警告を出すこと()
+    {
+        await OpenZeroAmountRowAsync("ポイント利用分", false, true, false);
 
         _viewModel.WarningMessage.Should().Contain(ZeroAmountWarningFragment);
     }
@@ -259,7 +327,12 @@ public class LedgerRowEditSaveConflictAndWarningTests : IDisposable
     /// </summary>
     /// <remarks>
     /// 摘要の文言は組織設定で変えられる（#1818）。経路ごとのテストは経路の追加に追随できないため
-    /// 静的検査を対で置く（#1764）。例外は組織設定に無い固定の文言「新規購入」だけ。
+    /// 静的検査を対で置く（#1764）。例外は組織設定に無い固定の文言「新規購入」を <c>Models/Ledger.cs</c>
+    /// （<c>IsCarryover</c> / <c>IsInitialRecordSummary</c>）で比べることだけ。
+    /// <para>
+    /// 限界: 検出は 1 行の中の字句の形による。摘要を別名の変数（<c>var s = ledger.Summary;</c>）へ移してから比べる形、
+    /// 比較が複数行にまたがる形、<c>switch</c> の <c>case "…":</c>・パターン（<c>is "…"</c>）・<c>Regex</c> での照合は検出しない。
+    /// </para>
     /// </remarks>
     [Fact]
     public void 本体ソースが摘要をリテラルと比べていないこと()
@@ -278,7 +351,7 @@ public class LedgerRowEditSaveConflictAndWarningTests : IDisposable
             {
                 foreach (var literal in FindSummaryLiteralComparisons(lines[i]))
                 {
-                    if (literal != "新規購入")
+                    if (!(literal == "新規購入" && IsAllowedFixedSummaryFile(sourceRoot, path)))
                     {
                         violations.Add($"{Path.GetFileName(path)}:{i + 1}: {lines[i].Trim()}");
                     }
@@ -288,6 +361,20 @@ public class LedgerRowEditSaveConflictAndWarningTests : IDisposable
 
         violations.Should().BeEmpty(
             "摘要の文言は組織設定から導出した判定（SummaryGenerator.Get…Summary / Ledger.IsInitialRecordSummary 等）で比べること");
+    }
+
+    private static bool IsAllowedFixedSummaryFile(string sourceRoot, string path) =>
+        string.Equals(
+            path.Substring(sourceRoot.Length).TrimStart('\\', '/').Replace('\\', '/'),
+            "Models/Ledger.cs",
+            StringComparison.OrdinalIgnoreCase);
+
+    [Fact]
+    public void 新規購入の例外はLedgerだけに効くこと()
+    {
+        var root = TestPaths.GetProductionSourceRoot();
+        IsAllowedFixedSummaryFile(root, Path.Combine(root, "Models", "Ledger.cs")).Should().BeTrue();
+        IsAllowedFixedSummaryFile(root, Path.Combine(root, "ViewModels", "LedgerRowEditViewModel.cs")).Should().BeFalse();
     }
 
     [Fact]
@@ -305,6 +392,10 @@ public class LedgerRowEditSaveConflictAndWarningTests : IDisposable
     [InlineData("if (Summary.Contains(\"繰越\"))", "繰越")]
     [InlineData("if (ledger.Summary != \"（貸出中）\")", "（貸出中）")]
     [InlineData("summary?.StartsWith(\"鉄道\")", "鉄道")]
+    [InlineData("if (\"ポイント還元\" == Summary)", "ポイント還元")]
+    [InlineData("if (newSummary == \"（貸出中）\")", "（貸出中）")]
+    [InlineData("string.Equals(ledger.Summary, \"繰越\")", "繰越")]
+    [InlineData("summary.IndexOf(\"繰越\") >= 0", "繰越")]
     public void 摘要のリテラル比較を検出すること(string line, string expected)
     {
         FindSummaryLiteralComparisons(line).Should().Equal(expected);
@@ -315,17 +406,29 @@ public class LedgerRowEditSaveConflictAndWarningTests : IDisposable
     [InlineData("ValidationMessage = \"摘要が空です。\";")]
     [InlineData("var summaryText = \"鉄道\";")]
     [InlineData("SummaryText == \"x\"")]
+    [InlineData("if (\"x\" == SummaryText)")]
+    [InlineData("string.Equals(summaryText, \"x\")")]
     public void 摘要のリテラル比較でない形は検出しないこと(string line)
     {
         FindSummaryLiteralComparisons(line).Should().BeEmpty();
     }
 
-    private static readonly Regex SummaryLiteralComparison = new(
-        @"\b[Ss]ummary(?:\s*(?:==|!=)\s*|\??\.(?:Contains|StartsWith|EndsWith|Equals)\(\s*)""([^""]*)""",
-        RegexOptions.Compiled);
+    /// <summary>
+    /// 摘要（名前が <c>Summary</c> / <c>summary</c> で終わる識別子）をリテラルと比べる形。
+    /// ①<c>X == "…"</c>・<c>X.Contains("…")</c> 等（StartsWith / EndsWith / Equals / IndexOf） ②<c>"…" == X</c> ③<c>string.Equals(X, "…")</c>
+    /// </summary>
+    private static readonly Regex[] SummaryLiteralComparisons =
+    {
+        new(@"\b\w*[Ss]ummary\??(?:\s*(?:==|!=)\s*|\.(?:Contains|StartsWith|EndsWith|Equals|IndexOf)\(\s*)""([^""]*)""", RegexOptions.Compiled),
+        new(@"""([^""]*)""\s*(?:==|!=)\s*[\w.?]*\b\w*[Ss]ummary\b(?!\s*\()", RegexOptions.Compiled),
+        new(@"\b[Ss]tring\.Equals\(\s*[\w.?]*\b\w*[Ss]ummary\s*,\s*""([^""]*)""", RegexOptions.Compiled),
+    };
 
     private static IEnumerable<string> FindSummaryLiteralComparisons(string line) =>
-        SummaryLiteralComparison.Matches(line).Cast<System.Text.RegularExpressions.Match>().Select(m => m.Groups[1].Value).ToList();
+        SummaryLiteralComparisons
+            .SelectMany(r => r.Matches(line).Cast<System.Text.RegularExpressions.Match>())
+            .Select(m => m.Groups[1].Value)
+            .ToList();
 
     #endregion
 
@@ -401,6 +504,56 @@ public class LedgerRowEditSaveConflictAndWarningTests : IDisposable
         _viewModel.IsAutoBalance = true;
 
         _viewModel.Balance.Should().Be(2300 - 200);
+        _viewModel.WarningMessage.Should().NotContain(LedgerRowEditViewModel.AddBalanceNotEnteredWarning);
+    }
+
+    [Fact]
+    public async Task 未入力のまま自動計算が使える位置へ戻しただけで_自動計算がONに戻り警告も確認も出さないこと()
+    {
+        await InitAddAtTopAsync();
+
+        _viewModel.MoveInsertPositionDownCommand.Execute(null);
+
+        _viewModel.IsAutoBalance.Should().BeTrue("起点が分かる位置で「自動計算できません」と案内しない");
+        _viewModel.Balance.Should().Be(2300 - 200);
+        _viewModel.WarningMessage.Should().NotContain(LedgerRowEditViewModel.AddBalanceNotEnteredWarning);
+        await _viewModel.SaveCommand.ExecuteAsync(null);
+        _dialogServiceMock.Verify(d => d.ShowWarningConfirmation(It.IsAny<string>(), It.IsAny<string>()), Times.Never);
+
+        // もう一度先頭へ動かせば、また未入力へ戻る（戻した時点の 0 を「復元する値」として扱わない）
+        _viewModel.MoveInsertPositionUpCommand.Execute(null);
+        _viewModel.Balance.Should().Be(0);
+        _viewModel.WarningMessage.Should().Contain(LedgerRowEditViewModel.AddBalanceNotEnteredWarning);
+    }
+
+    [Fact]
+    public async Task 残高を入力してから使える位置へ戻しても_入力した残高を残すこと()
+    {
+        await InitAddAtTopAsync();
+        _viewModel.Balance = 2510;
+
+        _viewModel.MoveInsertPositionDownCommand.Execute(null);
+
+        _viewModel.IsAutoBalance.Should().BeFalse("利用者が入力した値を自動計算で上書きしない");
+        _viewModel.Balance.Should().Be(2510);
+    }
+
+    [Fact]
+    public async Task OFFにして入力した残高からONにしてから先頭へ動かすと_入力した残高を復元すること()
+    {
+        await _viewModel.InitializeForAddAsync(TestCardIdm, CreateListedLedgers(), historyStartsAtCardBeginning: false);
+        _viewModel.Summary = "鉄道（六本松～天神）";
+        _viewModel.Expense = 200;
+        _viewModel.IsAutoBalance = false;
+        _viewModel.Balance = 1234;
+        _viewModel.IsAutoBalance = true;
+        _viewModel.Balance.Should().Be(1890);
+
+        _viewModel.MoveInsertPositionUpCommand.Execute(null);
+        _viewModel.MoveInsertPositionUpCommand.Execute(null);
+
+        _viewModel.IsAutoBalance.Should().BeFalse();
+        _viewModel.Balance.Should().Be(1234, "OFF に戻したときは ON にする直前の残高を復元する（§3.12）");
         _viewModel.WarningMessage.Should().NotContain(LedgerRowEditViewModel.AddBalanceNotEnteredWarning);
     }
 
