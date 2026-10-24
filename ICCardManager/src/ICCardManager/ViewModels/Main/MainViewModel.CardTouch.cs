@@ -1,3 +1,4 @@
+#nullable enable
 using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
@@ -424,13 +425,26 @@ public partial class MainViewModel
             var historyResult = await _cardReader.TryReadHistoryAsync(card.CardIdm);
             if (!historyResult.Success)
             {
-                // リーダーエラー: 不正確なデータをDBに記録しないため返却処理を中断
+                // リーダーエラー、または読み取りの途中で交通系ICカードが離れた・載せ替えられた（Issue #2301）:
+                // 不正確なデータ（読めたぶんだけ・0 件・別のカードの履歴）をDBに記録しないため返却処理を中断する。
+                // 30秒ルールも武装しない（記録が無いので、交通系ICカードだけの再タッチを逆処理にしない）
                 _soundPlayer.Play(SoundType.Error);
                 // Issue #2141: 状態リセット（finally）で職員証が消えるため、交通系ICカードだけを
                 // タッチし直すと履歴表示になる。やり直しは職員証のタッチからと案内する
-                _toastNotificationService.ShowError(
-                    "カードリーダーエラー",
-                    "履歴の読み取りに失敗しました。" + OperationRetryGuidance.RestartFromStaffCard);
+                if (historyResult.Error?.IsCardRemoved == true)
+                {
+                    // Issue #2301: カードが離れたのは利用者の操作。「カードリーダーエラー」と表示すると故障と受け取られる。
+                    // トーストは文字サイズ「大」以上で切れやすいので短くする
+                    _toastNotificationService.ShowError(
+                        "交通系ICカードが離れました",
+                        OperationRetryGuidance.RestartFromStaffCardKeepingCardOn);
+                }
+                else
+                {
+                    _toastNotificationService.ShowError(
+                        "カードリーダーエラー",
+                        "履歴の読み取りに失敗しました。" + OperationRetryGuidance.RestartFromStaffCard);
+                }
                 return; // 状態リセットは finally が行う
             }
             var usageDetailsList = historyResult.Value.ToList();

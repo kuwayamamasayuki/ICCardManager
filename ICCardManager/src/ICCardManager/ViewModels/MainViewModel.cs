@@ -665,7 +665,7 @@ public partial class MainViewModel : ViewModelBase, IHistoryPanelHost
 
             case CardReaderConnectionState.Connected:
                 // 再接続成功時はメッセージを表示
-                if (!string.IsNullOrEmpty(e.Message) && e.Message.Contains("再接続"))
+                if (e.Message is not null && e.Message.Contains("再接続"))
                 {
                     // 一時的に成功メッセージを表示（3秒後に削除）
                     var successWarning = new WarningItem

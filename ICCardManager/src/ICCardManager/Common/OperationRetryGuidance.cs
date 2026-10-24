@@ -37,6 +37,15 @@ namespace ICCardManager.Common
         public const string RestartFromStaffCard = "職員証のタッチからやり直してください。";
 
         /// <summary>
+        /// 読み取りの途中で交通系ICカードが離れたときのやり直し方（句点付き。Issue #2301）。
+        /// </summary>
+        /// <remarks>
+        /// 手順の順に「職員証のタッチから」→「音が鳴るまで載せたまま」と書く（逆に書くと、載せたまま待ってから
+        /// 職員証をタッチすると読める）。返却のトーストと <c>CardReaderException.CardRemoved</c> の文言が共有する。
+        /// </remarks>
+        public const string RestartFromStaffCardKeepingCardOn = "職員証のタッチからやり直し、音が鳴るまで載せたままにしてください。";
+
+        /// <summary>
         /// 「{操作}処理に失敗しました。職員証のタッチからやり直してください。」を組み立てる。
         /// </summary>
         /// <param name="operationName">ユーザー視点の操作名（「貸出」「返却」）</param>
