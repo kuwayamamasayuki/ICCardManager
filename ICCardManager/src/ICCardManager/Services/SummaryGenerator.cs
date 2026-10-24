@@ -564,14 +564,15 @@ namespace ICCardManager.Services
         /// <para>
         /// <b>位置の対応付けは、往路と復路が隣り合っていることを前提にする</b>。往復の検出
         /// （<see cref="DetectRoundTrips"/>）は隣り合わない区間とも組むため（A→B／C→D／B→A は
-        /// 「A～B 往復、C～D」）、隣り合う 2 明細の現在のバス停名が互いに逆向きでない
-        /// （いずれも「A～B」形式で解析でき、かつ逆向きでない）ときは対応付けを諦める。
-        /// 位置だけで書き戻すと、C→D の明細へ復路の名前が入る。
+        /// 「A～B 往復、C～D」）、往路・復路の候補の現在のバス停名の逆向きの値が<b>ほかの位置</b>に
+        /// あるときは対応付けを諦める（<see cref="ContradictsRoundTripPairing"/>）。
+        /// 位置だけで書き戻すと、C→D の明細へ復路の名前が入る。ほかに相手の候補が無ければ、
+        /// 現在の値が行きと帰りになっていなくても（帰りの入力ミス等）摘要を正として書き戻す。
         /// </para>
         /// <para>
-        /// 件数が合わない（乗継統合「A～C」・重複除去・区間の書き漏らし等）・往復を 1 件の明細へ
-        /// 書き戻す形は <see cref="BusStopSyncOutcome.Unmappable"/>。呼び出し側は書き戻さず、
-        /// 行編集は保存前に警告する。
+        /// 区間の数（往復は 2 件と数える）がバス利用の件数と合わない形（乗継統合「A～C」・重複除去・
+        /// 区間の書き漏らし・利用 1 件に複数の区間や往復）は <see cref="BusStopSyncOutcome.Unmappable"/>。
+        /// 呼び出し側は書き戻さず、行編集は保存前に警告する。
         /// 汎用/固有の別: 交通系固有（バス混在表記）。
         /// </para>
         /// </remarks>
@@ -599,20 +600,10 @@ namespace ICCardManager.Services
         private static BusStopSyncPlan PlanBusStopSyncCore(
             List<LedgerDetail> busDetails, List<string> blocks, SummaryGenerationContext context)
         {
-            if (busDetails.Count == 1)
-            {
-                // 先頭ブロックのみ書き戻す（従来挙動）。複数ブロックの結合テキストを
-                // 1 明細へ書き込むと「A～B、C～D」となり ParseBusRoute で解析できない。
-                // 往復は 2 件の利用を表すので、1 件の明細へは書き戻せない
-                if (blocks[0].Split('、').Any(part => ExpandRoundTrip(part, context) != null))
-                {
-                    return BusStopSyncPlan.Unmappable(BusStopSyncFailure.RoundTripOnSingleUsage);
-                }
-
-                return BusStopSyncPlan.Mapped(new[] { new BusStopAssignment(busDetails[0], blocks[0]) });
-            }
-
-            // 複数件のバス利用: 「、」で分割し、往復は往路・復路の 2 件へ展開して対応付ける
+            // 「、」で分割し、往復は往路・復路の 2 件へ展開して対応付ける。
+            // 利用 1 件でも特別扱いしない（Issue #2306 のコードレビューで検出）。以前は先頭ブロックを
+            // そのまま書き戻しており、「バス（X～Y、Z～W）」は結合テキストを 1 明細へ、
+            // 「バス（X～Y）、鉄道（…）、バス（Z～W）」は 2 つ目を無言で捨てていた
             var entries = new List<string>();
             var roundTripStarts = new List<int>();
             foreach (var part in string.Join("、", blocks).Split('、'))
@@ -631,10 +622,12 @@ namespace ICCardManager.Services
 
             if (entries.Count != busDetails.Count)
             {
-                return BusStopSyncPlan.Unmappable(BusStopSyncFailure.CountMismatch);
+                return BusStopSyncPlan.Unmappable(busDetails.Count == 1 && roundTripStarts.Count > 0
+                    ? BusStopSyncFailure.RoundTripOnSingleUsage
+                    : BusStopSyncFailure.CountMismatch);
             }
 
-            if (roundTripStarts.Any(k => ContradictsRoundTripPairing(busDetails, k, context)))
+            if (roundTripStarts.Any(k => ContradictsRoundTripPairing(busDetails, k, roundTripStarts, context)))
             {
                 return BusStopSyncPlan.Unmappable(BusStopSyncFailure.RoundTripNotAdjacent);
             }
@@ -719,46 +712,73 @@ namespace ICCardManager.Services
         }
 
         /// <summary>
-        /// 位置 <paramref name="k"/>・<paramref name="k"/>+1 の 2 明細の現在のバス停名が、
-        /// 往復の往路・復路であることと矛盾するか（Issue #2306）
+        /// 位置 <paramref name="k"/>・<paramref name="k"/>+1 を往復の往路・復路として書き戻すと、
+        /// 別の利用へ名前が入るおそれがあるか（Issue #2306）
         /// </summary>
+        /// <param name="busDetails">生成側の出力順に並べたバス明細</param>
+        /// <param name="k">調べる往復の枠の先頭位置（往路）</param>
+        /// <param name="roundTripStarts">この摘要で往復と読んだ枠の先頭位置すべて</param>
+        /// <param name="context">この同期が参照する設定の世代</param>
         /// <remarks>
         /// <para>
-        /// 両方が「A～B」形式で解析できるときは、互いに逆向き（同一視グループを考慮）でなければ矛盾とする。
+        /// 隣の 2 明細の現在のバス停名が互いに逆向き（同一視グループを考慮）なら矛盾しない。
+        /// そうでないとき（片方が★等で解析できない、または逆向きでない）は、解析できた側の<b>逆向きの値を持つ明細が
+        /// ほかの位置にあれば</b>矛盾とする — 往復の本当の相手が離れた位置にある（天神→博多／大橋→薬院／博多→天神
+        /// の「天神～博多 往復、大橋～薬院」、明細 [A～B, ★, B～A] に手で書いた「A～B 往復、★」）。
         /// </para>
         /// <para>
-        /// 片方だけが解析できる（もう片方は未入力の★や停留所名だけ）ときは、解析できた側の逆向きの値を持つ明細が
-        /// <b>ほかの位置に</b>あれば矛盾とする（明細 [A～B, ★, B～A] に手で書いた「A～B 往復、★」では、
-        /// A～B の相手は隣の★ではなく 3 件目の B～A なので、位置で書くと★の明細と B～A の明細の名前が入れ替わる。
-        /// コードレビューで検出）。
+        /// ほかに相手の候補が無ければ矛盾としない。現在の値が行きと帰りになっていない（[天神～博多, 博多～薬院] の
+        /// 帰りの入力ミス）ときも、相手を取り違える余地は無いので摘要を正として書き戻す（同期は摘要を正として明細を直す処理）。
+        /// </para>
+        /// <para>
+        /// 相手の候補から、<b>ほかの往復の枠で隣どうしが無矛盾に組めている位置</b>は外す（コードレビューで検出）。
+        /// 明細 [A～B, B～A, A～B, ★] に「A～B 往復、A～B 往復」では、2 組目の A～B の逆向き B～A は
+        /// 1 組目が使っており、2 組目の相手ではない。
         /// </para>
         /// <para>
         /// <b>限界:</b> 両方とも解析できない（どちらも★）ときは手掛かりが無いため、摘要の並びを信じる。
-        /// 明細 [★, ★, ★] に「A～B、C～D 往復」と書けば、2・3 件目が往復だと読む（摘要の並びが利用順である限り正しい）。
         /// </para>
         /// </remarks>
         private static bool ContradictsRoundTripPairing(
-            List<LedgerDetail> busDetails, int k, SummaryGenerationContext context)
+            List<LedgerDetail> busDetails, int k, List<int> roundTripStarts, SummaryGenerationContext context)
         {
             var forwardRoute = ParseExistingBusRoute(busDetails[k]);
             var returnRoute = ParseExistingBusRoute(busDetails[k + 1]);
 
-            if (forwardRoute != null && returnRoute != null)
-            {
-                return !IsReverseRoute(forwardRoute.Value, returnRoute.Value, context);
-            }
-
-            var known = forwardRoute ?? returnRoute;
-            if (known == null)
+            if (forwardRoute != null && returnRoute != null
+                && IsReverseRoute(forwardRoute.Value, returnRoute.Value, context))
             {
                 return false;
             }
 
-            // 解析できた側の相手（逆向きの値）が、隣ではなくほかの位置にある
-            return busDetails
-                .Where((_, i) => i != k && i != k + 1)
-                .Select(ParseExistingBusRoute)
-                .Any(other => other != null && IsReverseRoute(known.Value, other.Value, context));
+            // ほかの往復の枠のうち、隣どうしが既に逆向きで組めている位置（相手の候補から外す）
+            var settled = new HashSet<int>();
+            foreach (var other in roundTripStarts.Where(start => start != k))
+            {
+                var a = ParseExistingBusRoute(busDetails[other]);
+                var b = ParseExistingBusRoute(busDetails[other + 1]);
+                if (a != null && b != null && IsReverseRoute(a.Value, b.Value, context))
+                {
+                    settled.Add(other);
+                    settled.Add(other + 1);
+                }
+            }
+
+            for (var i = 0; i < busDetails.Count; i++)
+            {
+                if (i == k || i == k + 1 || settled.Contains(i) || !(ParseExistingBusRoute(busDetails[i]) is { } other))
+                {
+                    continue;
+                }
+
+                if ((forwardRoute is { } f && IsReverseRoute(f, other, context))
+                    || (returnRoute is { } r && IsReverseRoute(r, other, context)))
+                {
+                    return true;
+                }
+            }
+
+            return false;
         }
 
         private static (string Entry, string Exit)? ParseExistingBusRoute(LedgerDetail detail)

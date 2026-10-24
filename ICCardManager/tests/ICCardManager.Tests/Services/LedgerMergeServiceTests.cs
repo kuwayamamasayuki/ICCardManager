@@ -2096,11 +2096,13 @@ public class LedgerMergeServiceTests : IDisposable
     }
 
     /// <summary>
-    /// Issue #1904（コードレビュー指摘）: バス明細が 1 件のとき、複数ブロックの結合テキストではなく
-    /// 先頭ブロックのみを書き戻すこと（結合テキストは ParseBusRoute で解析できない値になる）
+    /// Issue #1904（コードレビュー指摘）: バス明細が 1 件のとき、複数ブロックの結合テキストを書き戻さないこと
+    /// （結合テキストは ParseBusRoute で解析できない値になる）。
+    /// Issue #2306（コードレビュー 2 回目）: 以前は先頭ブロックだけを書き戻して 2 つ目を無言で捨てていた。
+    /// 区間の数（2）が利用の件数（1）と合わない形として書き換えない（行編集は保存前に警告する）。
     /// </summary>
     [Fact]
-    public void SyncBusStopsFromSummary_バス明細1件で複数ブロックの摘要_先頭ブロックのみ書き戻す()
+    public void SyncBusStopsFromSummary_バス明細1件で複数ブロックの摘要_書き換えない()
     {
         // Arrange: 手編集でバスブロックが 2 つある摘要に対し、バス明細は 1 件
         var ledgers = new List<Ledger>
@@ -2119,8 +2121,8 @@ public class LedgerMergeServiceTests : IDisposable
         // Act
         LedgerMergeService.SyncBusStopsFromSummary(ledgers);
 
-        // Assert: 結合テキスト「薬院大通～天神、博多～吉塚」ではなく先頭ブロックのみ
-        ledgers[0].Details[0].BusStops.Should().Be("薬院大通～天神");
+        // Assert: 結合テキスト「薬院大通～天神、博多～吉塚」も、先頭ブロックだけ（2 つ目を捨てる）も書かない
+        ledgers[0].Details[0].BusStops.Should().Be("★");
     }
 
     /// <summary>

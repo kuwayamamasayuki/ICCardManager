@@ -227,6 +227,103 @@ public class SummaryGeneratorBusStopSyncPlanTests : IDisposable
         Regenerate(details).Should().Be(edited);
     }
 
+    /// <summary>
+    /// コードレビュー 2 回目で検出: 相手の候補から、ほかの往復の枠で隣どうしが既に組めている位置は外す。
+    /// 明細 [A～B, B～A, A～B, ★] に「A～B 往復、A～B 往復」では、2 組目の A～B の逆向き（位置 1 の B～A）は
+    /// 1 組目が使っているので 2 組目の相手ではない。
+    /// </summary>
+    [Fact]
+    public void ほかの往復が使っている明細_相手の候補に数えず書き戻すこと()
+    {
+        var details = BusDetails("天神～博多", "博多～天神", "天神～博多", "★");
+
+        var plan = SummaryGenerator.PlanBusStopSync("バス（天神～博多 往復、天神～博多 往復）", details);
+
+        plan.Outcome.Should().Be(BusStopSyncOutcome.Mapped);
+        AssignedBySequence(plan).Should().Equal(new Dictionary<int, string>
+        {
+            [4] = "天神～博多",
+            [3] = "博多～天神",
+            [2] = "天神～博多",
+            [1] = "博多～天神",
+        });
+    }
+
+    /// <summary>上の対: ほかの往復の枠でも、隣どうしが組めていない位置は相手の候補に数える。</summary>
+    [Fact]
+    public void 組めていない往復の枠にある明細_相手の候補に数えて書き戻さないこと()
+    {
+        var details = BusDetails("天神～博多", "★", "博多～天神", "★");
+
+        var plan = SummaryGenerator.PlanBusStopSync("バス（天神～博多 往復、天神～博多 往復）", details);
+
+        plan.Outcome.Should().Be(BusStopSyncOutcome.Unmappable);
+        plan.Failure.Should().Be(BusStopSyncFailure.RoundTripNotAdjacent);
+    }
+
+    /// <summary>
+    /// コードレビュー 2 回目で検出: 往復の相手を取り違える余地が無ければ、現在の値が行きと帰りになっていなくても
+    /// 摘要を正として書き戻す（帰りの入力ミス「博多～薬院」を、往復の摘要で直す）。
+    /// </summary>
+    [Fact]
+    public void 相手の候補がほかに無い往復_現在の値が行きと帰りでなくても書き戻すこと()
+    {
+        var details = BusDetails("天神～博多", "博多～薬院");
+
+        var plan = SummaryGenerator.PlanBusStopSync("バス（天神～博多 往復）", details);
+
+        plan.Outcome.Should().Be(BusStopSyncOutcome.Mapped);
+        AssignedBySequence(plan).Should().Equal(new Dictionary<int, string>
+        {
+            [2] = "天神～博多",
+            [1] = "博多～天神",
+        });
+    }
+
+    /// <summary>
+    /// コードレビュー 2 回目で検出: 利用 1 件に区間が複数ある摘要は対応付けない。以前は先頭のブロックをそのまま書き、
+    /// 「バス（X～Y、Z～W）」は結合テキストを 1 明細へ、ブロックが 2 つなら 2 つ目を無言で捨てていた。
+    /// </summary>
+    [Theory]
+    [InlineData("バス（天神～博多、大橋～薬院）")]
+    [InlineData("バス（天神～博多）、鉄道（博多～吉塚）、バス（吉塚～千早）")]
+    public void バス利用1件に区間が複数の摘要_件数の不一致と判定すること(string summary)
+    {
+        var plan = SummaryGenerator.PlanBusStopSync(summary, BusDetails("★"));
+
+        plan.Outcome.Should().Be(BusStopSyncOutcome.Unmappable);
+        plan.Failure.Should().Be(BusStopSyncFailure.CountMismatch);
+    }
+
+    /// <summary>上の対: 利用 1 件に区間 1 つは従来どおり書き戻す。</summary>
+    [Fact]
+    public void バス利用1件に区間1つの摘要_書き戻すこと()
+    {
+        var details = BusDetails("★");
+
+        var plan = SummaryGenerator.PlanBusStopSync("鉄道（博多～吉塚）、バス（吉塚～千早）", details);
+
+        plan.Outcome.Should().Be(BusStopSyncOutcome.Mapped);
+        AssignedBySequence(plan).Should().Equal(new Dictionary<int, string> { [1] = "吉塚～千早" });
+    }
+
+    /// <summary>
+    /// 往復の接尾辞を空に設定した組織では往復の表記が無いので、警告文は往復に触れない（コードレビュー 2 回目の参考指摘）。
+    /// </summary>
+    [Fact]
+    public void 往復の接尾辞が空の組織_警告文が往復に触れないこと()
+    {
+        var options = new OrganizationOptions();
+        options.SummaryText.RoundTripSuffix = string.Empty;
+        SummaryGenerator.Configure(options);
+
+        var message = ICCardManager.ViewModels.LedgerRowEditViewModel.BuildBusStopUnmappableWarning(
+            BusStopSyncFailure.CountMismatch, 2);
+
+        message.Should().NotContain("往復");
+        message.Should().EndWith("区切って入力してください。");
+    }
+
     [Fact]
     public void 区間数がバス利用の件数と合わない摘要_対応付けられないと判定すること()
     {

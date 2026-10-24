@@ -2408,7 +2408,7 @@ public class LedgerRowEditViewModelTests : IDisposable
     /// </summary>
     [Theory]
     [InlineData(nameof(BusStopSyncFailure.CountMismatch), "区間の数が利用の件数と合わない")]
-    [InlineData(nameof(BusStopSyncFailure.RoundTripNotAdjacent), "あいだに別のバス利用がある")]
+    [InlineData(nameof(BusStopSyncFailure.RoundTripNotAdjacent), "往復の相手に当たるバス利用が続いていない離れた位置にある")]
     [InlineData(nameof(BusStopSyncFailure.RoundTripOnSingleUsage), "バス利用が1件だけなのに往復")]
     public void BuildBusStopUnmappableWarning_理由ごとに3要素を含み行動指示で終わること_Issue2306(
         string failureName, string reason)

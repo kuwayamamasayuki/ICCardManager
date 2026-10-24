@@ -1192,17 +1192,21 @@ namespace ICCardManager.ViewModels
             var why = failure switch
             {
                 BusStopSyncFailure.RoundTripNotAdjacent =>
-                    "往復の行きと帰りのあいだに別のバス利用があるため、往復の表記ではどの利用のバス停名か決められず、",
+                    "往復の相手に当たるバス利用が続いていない離れた位置にあるため、往復の表記ではどの利用のバス停名か決められず、",
                 BusStopSyncFailure.RoundTripOnSingleUsage =>
                     "バス利用が1件だけなのに往復（2件分）の表記になっているため、",
                 _ => "バス停名の区間の数が利用の件数と合わないため、",
             };
             var consequence = "このまま保存すると履歴を統合したときに編集前のバス停名へ戻ります。";
+            // 往復の接尾辞を空に設定した組織では往復の表記そのものが無いので、往復には触れない
+            var roundTripSuffix = SummaryGenerator.RoundTripSuffix;
             var how = failure switch
             {
-                BusStopSyncFailure.CountMismatch =>
-                    $"行きと帰りが1件ずつで続けて乗った往復は「乗車～降車{SummaryGenerator.RoundTripSuffix}」とまとめて書けます。" +
+                BusStopSyncFailure.CountMismatch when !string.IsNullOrWhiteSpace(roundTripSuffix) =>
+                    $"行きと帰りが1件ずつで続けて乗った往復は「乗車～降車{roundTripSuffix}」とまとめて書けます。" +
                     "それ以外は、バス利用1件ごとに「乗車～降車」を利用した順に「、」で区切って入力してください。",
+                BusStopSyncFailure.CountMismatch =>
+                    "バス利用1件ごとに「乗車～降車」を利用した順に「、」で区切って入力してください。",
                 _ => "往復の表記を使わず、バス利用1件ごとに「乗車～降車」を利用した順に「、」で区切って入力してください。",
             };
             return what + why + consequence + how;
