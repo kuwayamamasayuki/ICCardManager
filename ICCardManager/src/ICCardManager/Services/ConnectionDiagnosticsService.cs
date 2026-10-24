@@ -329,6 +329,12 @@ namespace ICCardManager.Services
 
         private const string CardReaderTitle = "ICカードリーダー";
 
+        /// <remarks>
+        /// Issue #2327: カードリーダーの状態は「接続中」「切断」の 2 つだけなので、この項目に「警告」は無い。
+        /// 判定元の <see cref="ICardReader.ConnectionState"/> はカードリーダーの定期ヘルスチェック（10 秒周期）が
+        /// 更新する値で、診断の時点で即時に確かめ直してはいない。USB を差し直した直後は、最大 10 秒ほど
+        /// 「接続されていません」のままになり得る（04_機能設計書 §19.2・管理者マニュアルの案内もこれに合わせている）。
+        /// </remarks>
         private DiagnosticItem CheckCardReader()
         {
             switch (_cardReader.ConnectionState)
@@ -337,13 +343,6 @@ namespace ICCardManager.Services
                     return Ok(DiagnosticItemKind.CardReader, CardReaderTitle,
                         "接続中",
                         "ICカードリーダーが認識されています。");
-
-                case CardReaderConnectionState.Reconnecting:
-                    return Warning(DiagnosticItemKind.CardReader, CardReaderTitle,
-                        "再接続中",
-                        "ICカードリーダーとの通信が途切れ、再接続を試みています。" +
-                        "USBケーブルの接触不良や、USBハブの電力不足が考えられます。" +
-                        "リーダーをパソコン本体のUSBポートへ直接つなぎ直してください。");
 
                 default:
                     return Error(DiagnosticItemKind.CardReader, CardReaderTitle,

@@ -73,17 +73,6 @@ public class FelicaCardReaderHealthCheckTransitionTests
             .Should().Be(FelicaCardReader.HealthCheckAction.None);
     }
 
-    [Theory]
-    [InlineData(true, true)]
-    [InlineData(true, false)]
-    [InlineData(false, true)]
-    [InlineData(false, false)]
-    public void DecideHealthCheckAction_再接続中は_ヘルスチェックが状態を書き換えないこと(bool isAvailable, bool isReading)
-    {
-        FelicaCardReader.DecideHealthCheckAction(isAvailable, CardReaderConnectionState.Reconnecting, isReading)
-            .Should().Be(FelicaCardReader.HealthCheckAction.None);
-    }
-
     /// <summary>
     /// 入力の全域を走査し、「読み取りを始める」が起きるのは
     /// 「見えている・切断中・読み取り前」の組だけであることを固定する。
@@ -95,12 +84,8 @@ public class FelicaCardReaderHealthCheckTransitionTests
     [Fact]
     public void DecideHealthCheckAction_読み取りを始めるのは起動時未接続から接続を検出した組だけであること()
     {
-        var states = new[]
-        {
-            CardReaderConnectionState.Disconnected,
-            CardReaderConnectionState.Connected,
-            CardReaderConnectionState.Reconnecting,
-        };
+        // Issue #2327: 状態は列挙型の全値から導出する（「再接続中」を撤去した。状態を足したら下の件数で気付く）
+        var states = (CardReaderConnectionState[])System.Enum.GetValues(typeof(CardReaderConnectionState));
 
         var checkedCount = 0;
         foreach (var isAvailable in new[] { true, false })
@@ -120,7 +105,7 @@ public class FelicaCardReaderHealthCheckTransitionTests
             }
         }
 
-        checkedCount.Should().Be(12, "走査が空振りしていないこと");
+        checkedCount.Should().Be(8, "走査が空振りしていないこと（状態 2 × 可否 2 × 読み取り中 2）");
     }
 
     #endregion

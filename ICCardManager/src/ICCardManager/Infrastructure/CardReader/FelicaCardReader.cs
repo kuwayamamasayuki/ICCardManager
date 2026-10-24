@@ -639,7 +639,7 @@ namespace ICCardManager.Infrastructure.CardReader
                         // カードが離された場合：
                         // 30秒ルール（誤操作キャンセル機能）を正しく動作させるため、
                         // 時間制限は設けない。
-                        // ポーリング間隔（250ms）が自然なチャタリング防止となる。
+                        // ポーリング間隔（PollingIntervalMs = 500ms）が自然なチャタリング防止となる。
                     }
 
                     // 新しいカード、または離されてから再度置かれたカードとして処理
@@ -795,7 +795,7 @@ namespace ICCardManager.Infrastructure.CardReader
         /// 読み取り中に起動し直すとポーリングを作り直すことになる。
         /// </para>
         /// <para>
-        /// 再接続中（<see cref="CardReaderConnectionState.Reconnecting"/>）は再接続の処理が状態を決めるため、ここでは書き換えない。
+        /// 接続状態は Connected / Disconnected の 2 つだけ（Issue #2327 で到達しない「再接続中」を撤去した）。
         /// 実機 felicalib に依存せず検証できるよう純粋関数として切り出している（<see cref="ShouldLogHealthCheckFailure"/> と同じ形）。
         /// </para>
         /// </remarks>

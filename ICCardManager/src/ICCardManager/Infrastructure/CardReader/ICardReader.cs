@@ -9,6 +9,12 @@ namespace ICCardManager.Infrastructure.CardReader
     /// <summary>
     /// カードリーダーの接続状態
     /// </summary>
+    /// <remarks>
+    /// Issue #2327: 状態は「接続中」「切断」の 2 つだけ。以前は「再接続中（Reconnecting）」と再接続の試行回数を
+    /// 持っていたが、どのカードリーダー実装も通知しておらず、画面・接続診断・ヘルスチェックの判定に
+    /// 到達しない分岐が残っていた。再接続を試行回数つきで行う実装を足すなら、状態と表示を一緒に足すこと。
+    /// 共有フォルダモードの DB 接続状態（<c>SharedDbConnectionState</c>）は別物で、こちらは再接続中を実際に通知する。
+    /// </remarks>
     public enum CardReaderConnectionState
     {
         /// <summary>
@@ -20,11 +26,6 @@ namespace ICCardManager.Infrastructure.CardReader
         /// 切断
         /// </summary>
         Disconnected,
-
-        /// <summary>
-        /// 再接続中
-        /// </summary>
-        Reconnecting
     }
 
     /// <summary>
@@ -42,16 +43,10 @@ namespace ICCardManager.Infrastructure.CardReader
         /// </summary>
         public string Message { get; }
 
-        /// <summary>
-        /// 再接続試行回数（再接続中の場合）
-        /// </summary>
-        public int RetryCount { get; }
-
-        public ConnectionStateChangedEventArgs(CardReaderConnectionState state, string message = null, int retryCount = 0)
+        public ConnectionStateChangedEventArgs(CardReaderConnectionState state, string message = null)
         {
             State = state;
             Message = message;
-            RetryCount = retryCount;
         }
     }
 
@@ -142,6 +137,11 @@ namespace ICCardManager.Infrastructure.CardReader
         /// <summary>
         /// 接続状態を確認（ヘルスチェック）
         /// </summary>
+        /// <remarks>
+        /// Issue #2327: 現在、本体にこのメソッドの呼び出し元は無い。接続診断（<c>ConnectionDiagnosticsService</c>）は
+        /// <see cref="ConnectionState"/> を読むだけで、その値は実装の定期ヘルスチェック（<c>FelicaCardReader</c> は 10 秒周期）が
+        /// 更新する。即時に確かめたい処理を足すときはこのメソッドを使う。
+        /// </remarks>
         /// <returns>接続中の場合true</returns>
         Task<bool> CheckConnectionAsync();
 

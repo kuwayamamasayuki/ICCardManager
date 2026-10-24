@@ -498,7 +498,6 @@ public class ConnectionDiagnosticsServiceTests : IDisposable
 
     [Theory]
     [InlineData(CardReaderConnectionState.Connected, DiagnosticStatus.Ok)]
-    [InlineData(CardReaderConnectionState.Reconnecting, DiagnosticStatus.Warning)]
     [InlineData(CardReaderConnectionState.Disconnected, DiagnosticStatus.Error)]
     public async Task CardReader_MapsConnectionStateToStatus(
         CardReaderConnectionState state, DiagnosticStatus expected)
@@ -518,6 +517,27 @@ public class ConnectionDiagnosticsServiceTests : IDisposable
         var item = await RunAndGet(DiagnosticItemKind.CardReader);
 
         item.DetailText.Should().Contain("USB");
+    }
+
+    /// <summary>
+    /// Issue #2327: カードリーダーの状態は「接続中」「切断」の 2 つだけで、項目5に「警告」は無い。
+    /// 状態は列挙型の全値から導出し、到達しない状態（旧「再接続中」）の警告分岐が戻ったら赤になるよう、
+    /// 走査した件数もリテラルで固定する。
+    /// </summary>
+    [Fact]
+    public async Task CardReader_すべての接続状態が正常か異常のどちらかになり_警告にならないこと()
+    {
+        var states = (CardReaderConnectionState[])Enum.GetValues(typeof(CardReaderConnectionState));
+        states.Should().HaveCount(2, "カードリーダーの状態は接続中・切断の 2 つ（状態を足すなら診断と設計書も見直す）");
+
+        foreach (var state in states)
+        {
+            _cardReader.SetupGet(r => r.ConnectionState).Returns(state);
+
+            var item = await RunAndGet(DiagnosticItemKind.CardReader);
+
+            item.Status.Should().BeOneOf(new[] { DiagnosticStatus.Ok, DiagnosticStatus.Error }, $"state={state}");
+        }
     }
 
     #endregion
