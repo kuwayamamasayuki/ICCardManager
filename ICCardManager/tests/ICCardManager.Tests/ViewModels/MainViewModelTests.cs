@@ -3534,33 +3534,57 @@ public class MainViewModelTests : IDisposable
         _viewModel.History.IsCardHistoryImportOffered.Should().BeFalse("貸出中なら返却が利用履歴を記録する");
     }
 
-    #region Issue #2322: 払戻済なのに貸出中のカードの警告
+    #region Issue #2322: 貸出中の記録が残っている払戻済のカードの警告
 
     private const string RefundedLentCardIdm = "0123456789ABCDEF";
 
-    private static IcCard RefundedLentCard() => new()
+    private static IcCard RefundedCard(bool isLent) => new()
     {
         CardIdm = RefundedLentCardIdm,
         CardType = "はやかけん",
         CardNumber = "H-009",
-        IsLent = true,
+        IsLent = isLent,
         IsRefunded = true,
         LastLentAt = new DateTime(2025, 3, 18, 9, 30, 0),
     };
 
+    private static Ledger LentRecord(string cardIdm, DateTime date) => new()
+    {
+        CardIdm = cardIdm,
+        Date = date,
+        LentAt = date,
+        IsLentRecord = true,
+    };
+
+    private void ArrangeLentRecords(params Ledger[] records)
+    {
+        _ledgerRepositoryMock.Setup(r => r.GetAllLentRecordsAsync()).ReturnsAsync(records.ToList());
+    }
+
     /// <summary>
-    /// 貸出中カード一覧の読み直しで、払戻済なのに貸出中のカードを警告に出すこと
+    /// 貸出中の記録が残る払戻済のカードを、is_lent の値によらず警告に出すこと
     /// </summary>
     /// <remarks>
-    /// 修正前の欠陥で作られ得た状態。払戻済のカードはタッチで返却できず残高ダッシュボードにも出ないため、
-    /// 警告が無いと長期未返却のまま気付く手段が無い。払戻済でない貸出中カードは対象にしない（対の表明）。
+    /// 起動時の修復は is_lent が 0 でも 1 でも「履歴から貸出中の行を削除」と案内する。払戻済のカードは手元に無く
+    /// タッチできないので、警告がその案内に辿り着く唯一の入口になる（is_lent = 1 だけを見ると is_lent = 0 の形が漏れる）。
+    /// 払戻済でないカード・貸出中の記録が無い払戻済のカードは対象にしない（対の表明）。
     /// </remarks>
-    [Fact]
-    public async Task RefreshLentCardsAsync_払戻済なのに貸出中のカードだけを警告に出すこと()
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task RefreshLentCardsAsync_貸出中の記録が残る払戻済のカードを警告に出すこと(bool isLent)
     {
-        var normalLent = new IcCard { CardIdm = "1111222233334444", CardType = "nimoca", CardNumber = "N-001", IsLent = true };
-        _cardRepositoryMock.Setup(r => r.GetLentAsync(It.IsAny<bool>()))
-            .ReturnsAsync(new List<IcCard> { normalLent, RefundedLentCard() });
+        const string normalIdm = "1111222233334444";
+        const string refundedWithoutRecordIdm = "5555666677778888";
+        _cardRepositoryMock.Setup(r => r.GetAllAsync()).ReturnsAsync(new List<IcCard>
+        {
+            new() { CardIdm = normalIdm, CardType = "nimoca", CardNumber = "N-001", IsLent = true },
+            new() { CardIdm = refundedWithoutRecordIdm, CardType = "SUGOCA", CardNumber = "S-001", IsRefunded = true },
+            RefundedCard(isLent),
+        });
+        ArrangeLentRecords(
+            LentRecord(normalIdm, new DateTime(2025, 6, 1)),
+            LentRecord(RefundedLentCardIdm, new DateTime(2025, 3, 18)));
 
         await ((IHistoryPanelHost)_viewModel).RefreshLentCardsAsync();
         await ((IHistoryPanelHost)_viewModel).RefreshLentCardsAsync();
@@ -3569,46 +3593,50 @@ public class MainViewModelTests : IDisposable
             .ContainSingle(w => w.Type == WarningType.RefundedCardLent, "読み直しのたびに入れ替え、重複させない").Subject;
         warning.CardIdm.Should().Be(RefundedLentCardIdm);
         warning.DisplayText.Should().Contain("はやかけん H-009").And.Contain("削除してください");
-        _viewModel.LentCards.Should().HaveCount(2, "貸出中カード一覧そのものは従来どおり");
     }
 
     /// <summary>
-    /// 貸出中の行を削除して貸出中でなくなったら、次の読み直しで警告が消えること
+    /// 貸出中の行をすべて削除したら、次の読み直しで警告が消えること
     /// </summary>
     [Fact]
-    public async Task RefreshLentCardsAsync_貸出中でなくなったら警告を取り除くこと()
+    public async Task RefreshLentCardsAsync_貸出中の記録が無くなったら警告を取り除くこと()
     {
-        _cardRepositoryMock.Setup(r => r.GetLentAsync(It.IsAny<bool>()))
-            .ReturnsAsync(new List<IcCard> { RefundedLentCard() });
+        _cardRepositoryMock.Setup(r => r.GetAllAsync()).ReturnsAsync(new List<IcCard> { RefundedCard(isLent: true) });
+        ArrangeLentRecords(LentRecord(RefundedLentCardIdm, new DateTime(2025, 3, 18)));
         await ((IHistoryPanelHost)_viewModel).RefreshLentCardsAsync();
         _viewModel.WarningMessages.Should().Contain(w => w.Type == WarningType.RefundedCardLent);
 
-        _cardRepositoryMock.Setup(r => r.GetLentAsync(It.IsAny<bool>()))
-            .ReturnsAsync(new List<IcCard>());
+        ArrangeLentRecords();
         await ((IHistoryPanelHost)_viewModel).RefreshLentCardsAsync();
 
         _viewModel.WarningMessages.Should().NotContain(w => w.Type == WarningType.RefundedCardLent);
     }
 
     /// <summary>
-    /// 警告のクリックで、そのカードの履歴を貸出日の月の 1 日から開くこと
+    /// 警告のクリックで、そのカードの履歴を最も古い貸出中の行の月の 1 日から開くこと
     /// </summary>
     /// <remarks>
-    /// 直すべき貸出中の行は貸出日に記録されている。当月から開くと画面に出ず、文言の案内が実行できない。
+    /// 直すべき貸出中の行は貸出日に記録されている。<c>last_lent_at</c>（最新の貸出、3 月）から開くと
+    /// 1 月の行が画面に出ず、削除しても警告が残る。
     /// </remarks>
     [Fact]
-    public async Task HandleWarningClick_払戻済なのに貸出中の警告で貸出日の月から履歴を開くこと()
+    public async Task HandleWarningClick_貸出中の記録が残る払戻済のカードの警告で最も古い貸出中の行の月から履歴を開くこと()
     {
         SetupWarningCheckDefaults();
         ArrangeHistoryPaging(_ => 0, pageSize: 30);
         _cardRepositoryMock.Setup(r => r.GetByIdmAsync(RefundedLentCardIdm, It.IsAny<bool>()))
-            .ReturnsAsync(RefundedLentCard());
+            .ReturnsAsync(RefundedCard(isLent: true));
+        ArrangeLentRecords(
+            LentRecord("1111222233334444", new DateTime(2024, 11, 5)),
+            LentRecord(RefundedLentCardIdm, new DateTime(2025, 3, 18)),
+            LentRecord(RefundedLentCardIdm, new DateTime(2025, 1, 20)));
 
-        await _viewModel.HandleWarningClick(MainViewModel.BuildRefundedCardLentWarning(RefundedLentCard()));
+        await _viewModel.HandleWarningClick(MainViewModel.BuildRefundedCardLentWarning(RefundedCard(isLent: true)));
 
         _viewModel.History.IsHistoryVisible.Should().BeTrue();
         _viewModel.History.HistoryCard.CardIdm.Should().Be(RefundedLentCardIdm);
-        _viewModel.History.HistoryFromDate.Should().Be(new DateTime(2025, 3, 1), "期間は月単位で扱うので月の 1 日へ丸める");
+        _viewModel.History.HistoryFromDate.Should().Be(new DateTime(2025, 1, 1),
+            "最も古い貸出中の行の月の 1 日（他のカードの行・last_lent_at の月ではない）");
     }
 
     #endregion

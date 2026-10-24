@@ -371,12 +371,14 @@ public partial class HistoryPanelViewModel : ObservableObject
     }
 
     /// <summary>
-    /// 払戻済なのに貸出中のカードの履歴を、貸出日の月から開く（Issue #2322）
+    /// 貸出中の記録が残っている払戻済のカードの履歴を、最も古い貸出中の行の月から開く（Issue #2322）
     /// </summary>
     /// <remarks>
     /// 警告（<c>WarningType.RefundedCardLent</c>）のクリックから呼ぶ。直すべき貸出中の行は貸出日の日付で
-    /// 記録されており、何か月も前になり得るため、当月から開くと画面に出ない。表示期間は月単位で扱う画面なので、
-    /// 開始日はその月の 1 日へ丸める（日付単位の値を渡さない。#1907）。
+    /// 記録されており、何か月も前になり得るため、当月から開くと画面に出ない。貸出中の行が複数あるとき
+    /// （<c>last_lent_at</c> は最新の貸出しか持たない）も全部を画面に出すため、最も古い行の日付から開く。
+    /// 表示期間は月単位で扱う画面なので、開始日はその月の 1 日へ丸める（日付単位の値を渡さない。#1907）。
+    /// 貸出中の行が見つからなければ（他 PC が先に削除した）当月から開く。
     /// </remarks>
     public async Task ShowRefundedCardLentHistoryAsync(IcCard? card)
     {
@@ -386,8 +388,13 @@ public partial class HistoryPanelViewModel : ObservableObject
             return;
         }
 
-        DateTime? fromDate = card.LastLentAt.HasValue
-            ? new DateTime(card.LastLentAt.Value.Year, card.LastLentAt.Value.Month, 1)
+        var lentRecords = await _ledgerRepository.GetAllLentRecordsAsync() ?? new List<Ledger>();
+        var oldest = lentRecords
+            .Where(r => r.CardIdm == card.CardIdm)
+            .Select(r => (DateTime?)r.Date)
+            .Min();
+        DateTime? fromDate = oldest.HasValue
+            ? new DateTime(oldest.Value.Year, oldest.Value.Month, 1)
             : null;
         await ShowHistoryAsync(card, fromDate);
     }

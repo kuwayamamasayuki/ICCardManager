@@ -2133,7 +2133,7 @@ namespace ICCardManager.Services
         {
             _logger.LogWarning(
                 "Issue #2322: 払戻済のカードに貸出中レコードが残っています（is_lent={IsLent}）。" +
-                "払戻済のカードは貸出中にしないため修復しません。メイン画面でこのカードの履歴を開き、" +
+                "払戻済のカードは貸出中にしないため修復しません。メイン画面の警告をクリックしてこのカードの履歴を開き、" +
                 "貸出中の行を「変更」から削除してください（削除すると貸出中の状態も解消されます）: CardIdm={CardIdm}",
                 isLent ? 1 : 0, maskedCardIdm);
         }

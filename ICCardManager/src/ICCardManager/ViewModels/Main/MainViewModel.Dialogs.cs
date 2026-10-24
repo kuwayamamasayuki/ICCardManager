@@ -221,7 +221,7 @@ public partial class MainViewModel
 
             case WarningType.RefundedCardLent:
                 // Issue #2322: 払戻済なのに貸出中のカード。払戻済のカードはタッチで返却できず、残高ダッシュボードにも
-                // 出ないので、ここが履歴を開く入口になる。貸出日の月から開き、職員が貸出中の行を削除して直す
+                // 出ないので、ここが履歴を開く入口になる。最も古い貸出中の行の月から開き、職員が貸出中の行を削除して直す
                 // （削除すると貸出中一覧が読み直され、この警告も消える）
                 await History.ShowRefundedCardLentHistoryAsync(
                     await _cardRepository.GetByIdmAsync(warning.CardIdm ?? string.Empty));
