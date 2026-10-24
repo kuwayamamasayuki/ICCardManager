@@ -419,6 +419,15 @@
 
         <!-- ステータスメッセージとボタン -->
         <StackPanel Grid.Row="1" Margin="0,15,0,0">
+            <!-- Issue #2305: 設定の読み込みに失敗した警告。状態欄はほかの操作の案内で上書きされるため別に出し続ける -->
+            <TextBlock Text="{Binding SettingsLoadFailedNotice}"
+                       FontWeight="Bold"
+                       TextWrapping="Wrap"
+                       Margin="0,0,0,10"
+                       Foreground="{DynamicResource DangerTextBrush}"
+                       Visibility="{Binding IsSettingsLoadFailed, Converter={StaticResource BoolToVisibilityConverter}}"
+                       AutomationProperties.Name="{Binding SettingsLoadFailedNotice}"
+                       AutomationProperties.LiveSetting="Assertive"/>
             <!-- エラーメッセージ（常に表示領域内） -->
             <TextBlock Text="{Binding StatusMessage}"
                        FontWeight="Bold"

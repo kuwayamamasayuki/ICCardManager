@@ -85,21 +85,42 @@ public partial class SettingsViewModel : ViewModelBase
     private bool _isSaved;
 
     /// <summary>
-    /// 設定の読み込みに失敗したかどうか（Issue #2305）
+    /// 設定の読み込みが成功して終わったかどうか（Issue #2305）
     /// </summary>
     /// <remarks>
-    /// 読み込みに失敗すると、画面の項目は既定値（部署種別は市長事務部局など）のまま残る。保存は画面の全項目を書くため、
-    /// そのまま保存すると、変えていない設定まで既定値で上書きする。失敗したら保存させず、画面を開き直すよう案内する。
+    /// 読み込みが終わるまで（失敗したときを含む）、画面の項目は既定値（部署種別は市長事務部局など）のまま。保存は画面の全項目を書くため、
+    /// その間に保存すると、変えていない設定まで既定値で上書きする。読み込み中は処理中オーバーレイが出るがマウスしか遮らず、
+    /// 既定ボタンの Enter や Alt+S は届く。そこで「成功した」ときだけ保存できるようにする（失敗だけを止めると読み込み中が漏れる）。
     /// 設定の読み込みは再試行を通らない（共有モードで一時的に DB へ接続できないだけでも失敗する）。
     /// </remarks>
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(CanSaveSettings))]
+    private bool _isSettingsLoaded;
+
+    /// <summary>
+    /// 設定の読み込みに失敗したかどうか（失敗の警告を、状態欄とは別に出し続けるため。Issue #2305）
+    /// </summary>
+    /// <remarks>
+    /// 状態欄はほかの操作（「デフォルトに戻す」等）の案内で上書きされ、保存ボタンが押せない理由が消えるため、別の表示にする。
+    /// </remarks>
+    [ObservableProperty]
     private bool _isSettingsLoadFailed;
 
     /// <summary>
-    /// 保存ボタンを押せるかどうか（設定の読み込みに失敗していないこと。Issue #2305）
+    /// 保存ボタンを押せるかどうか（設定の読み込みが成功して終わったこと。Issue #2305）
     /// </summary>
-    public bool CanSaveSettings => !IsSettingsLoadFailed;
+    public bool CanSaveSettings => IsSettingsLoaded;
+
+    /// <summary>
+    /// 設定の読み込みに失敗したときに画面へ出す警告（Issue #2305）
+    /// </summary>
+    public string SettingsLoadFailedNotice => SettingsLoadFailedMessage;
+
+    /// <summary>
+    /// 読み込みが終わる前に保存しようとしたときの案内（Issue #2305）
+    /// </summary>
+    internal const string SettingsNotLoadedMessage =
+        "設定の読み込みが終わっていないため、まだ保存できません。読み込みが終わってから、もう一度「保存」を押してください。";
 
     /// <summary>
     /// 設定の読み込みに失敗したときの案内（Issue #2305）
@@ -335,6 +356,8 @@ public partial class SettingsViewModel : ViewModelBase
     {
         using (BeginBusy("読み込み中..."))
         {
+            IsSettingsLoaded = false;
+            IsSettingsLoadFailed = false;
             _settingsRepository.InvalidateCache();
             AppSettings settings;
             try
@@ -345,11 +368,8 @@ public partial class SettingsViewModel : ViewModelBase
             {
                 // Issue #2305: 既定値のまま保存させない（呼び出し元の SettingsDialog がエラーを表示する）
                 IsSettingsLoadFailed = true;
-                SetStatus(SettingsLoadFailedMessage, true);
                 throw;
             }
-
-            IsSettingsLoadFailed = false;
 
             WarningBalance = settings.WarningBalance;
             BackupPath = settings.BackupPath;
@@ -385,6 +405,9 @@ public partial class SettingsViewModel : ViewModelBase
 
             HasChanges = false;
             SetStatus(string.Empty, false);
+
+            // Issue #2305: すべての項目を読み込んだ値にしてから保存を許す
+            IsSettingsLoaded = true;
         }
     }
 
@@ -397,10 +420,14 @@ public partial class SettingsViewModel : ViewModelBase
         // Issue #1279: 検証前にエラーフィールド情報をリセット
         FirstErrorField = null;
 
-        // Issue #2305: 読み込みに失敗した画面（項目が既定値のまま）からは保存しない
-        if (IsSettingsLoadFailed)
+        // Issue #2305: 読み込みが成功して終わる前（読み込み中・失敗。項目が既定値のまま）は保存しない
+        if (!IsSettingsLoaded)
         {
-            SetStatus(SettingsLoadFailedMessage, true);
+            // 失敗は専用の警告が出し続けている。読み込み中に Enter / Alt+S が届いたときだけ状態欄で案内する
+            if (!IsSettingsLoadFailed)
+            {
+                SetStatus(SettingsNotLoadedMessage, true);
+            }
             return;
         }
 

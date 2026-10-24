@@ -104,8 +104,8 @@ public class SettingsViewModelFreshLoadTests : IDisposable
             "例外は呼び出し元（SettingsDialog）へ伝え、エラーを表示させる");
 
         viewModel.CanSaveSettings.Should().BeFalse("保存ボタンを押せないようにする");
-        viewModel.StatusMessage.Should().Be(SettingsViewModel.SettingsLoadFailedMessage);
-        viewModel.IsStatusError.Should().BeTrue();
+        viewModel.IsSettingsLoadFailed.Should().BeTrue("保存できない理由を、状態欄とは別の警告で出し続ける（レビュー 4 回目）");
+        viewModel.SettingsLoadFailedNotice.Should().Be(SettingsViewModel.SettingsLoadFailedMessage);
 
         // ボタンを経ずに保存を呼んでも（Enter キー等）、既定値で上書きしない
         viewModel.WarningBalance = 5000;
@@ -114,7 +114,7 @@ public class SettingsViewModelFreshLoadTests : IDisposable
         repository.Verify(r => r.SaveAppSettingsAsync(It.IsAny<AppSettings>()), Times.Never,
             "読み込みに失敗した画面の既定値（部署種別は市長事務部局など）を保存しない");
         viewModel.IsSaved.Should().BeFalse("ダイアログを閉じない");
-        viewModel.StatusMessage.Should().Be(SettingsViewModel.SettingsLoadFailedMessage);
+        viewModel.IsSettingsLoadFailed.Should().BeTrue();
     }
 
     /// <summary>
@@ -143,6 +143,81 @@ public class SettingsViewModelFreshLoadTests : IDisposable
         repository.Verify(r => r.SaveAppSettingsAsync(It.Is<AppSettings>(s =>
             s.WarningBalance == 5000 && s.DepartmentType == DepartmentType.EnterpriseAccount)), Times.Once,
             "読み込んだ部署種別を保ったまま、変えた残額警告を保存する");
+    }
+
+    /// <summary>
+    /// レビュー 4 回目: 読み込みが終わる前（画面を開いて読み込みを待っている間）に保存しても、既定値で上書きしないこと。
+    /// </summary>
+    /// <remarks>
+    /// 読み込み中は処理中オーバーレイが出るがマウスしか遮らず、既定ボタンの Enter や Alt+S は届く。
+    /// 失敗だけを止める形では、この間の保存が既定値（部署種別は市長事務部局など）で全項目を書いていた。
+    /// </remarks>
+    [Fact]
+    public async Task 読み込み前に保存してもSaveAppSettingsAsyncを呼ばないこと()
+    {
+        var repository = new Mock<ISettingsRepository>();
+        var viewModel = CreateViewModel(repository.Object);
+
+        viewModel.CanSaveSettings.Should().BeFalse("読み込みが成功して終わるまで保存ボタンを押せない");
+
+        viewModel.WarningBalance = 5000;
+        await viewModel.SaveAsync();
+
+        repository.Verify(r => r.SaveAppSettingsAsync(It.IsAny<AppSettings>()), Times.Never,
+            "読み込み前の既定値で全項目を書かない");
+        viewModel.IsSaved.Should().BeFalse("ダイアログを閉じない");
+        viewModel.StatusMessage.Should().Be(SettingsViewModel.SettingsNotLoadedMessage);
+        viewModel.IsStatusError.Should().BeTrue();
+    }
+
+    /// <summary>
+    /// レビュー 4 回目: 読み込みに失敗した後、読み込み直して成功したら、失敗の警告を消して保存できること。
+    /// </summary>
+    /// <remarks>
+    /// 読み込みの最初で失敗の印を戻す行が働いていることを固定する（消すと、保存できるのに「保存できません」の警告が残る）。
+    /// </remarks>
+    [Fact]
+    public async Task 読み込みに失敗した後で読み込み直して成功したら警告を消して保存できること()
+    {
+        var repository = new Mock<ISettingsRepository>();
+        repository.SetupSequence(r => r.GetAppSettingsAsync())
+            .ThrowsAsync(new InvalidOperationException("共有フォルダーに接続できない（テスト用）"))
+            .ReturnsAsync(new AppSettings { DepartmentType = DepartmentType.EnterpriseAccount });
+        var viewModel = CreateViewModel(repository.Object);
+
+        await viewModel.Invoking(v => v.LoadSettingsAsync()).Should().ThrowAsync<InvalidOperationException>();
+        viewModel.IsSettingsLoadFailed.Should().BeTrue("前提: 1 回目は失敗している");
+
+        await viewModel.LoadSettingsAsync();
+
+        viewModel.IsSettingsLoadFailed.Should().BeFalse("読み込みに成功したら失敗の警告を消す");
+        viewModel.CanSaveSettings.Should().BeTrue();
+    }
+
+    /// <summary>
+    /// レビュー 4 回目: 読み込みに成功した後、読み込み直して失敗したら（または読み込み中は）保存できないこと。
+    /// </summary>
+    /// <remarks>
+    /// 読み込みの最初で「読み込み済み」の印を戻す行が働いていることを固定する（消すと、前回の成功の印が残り、
+    /// 読み込み直しの途中や失敗した後でも既定値・中途半端な値のまま保存できてしまう）。
+    /// </remarks>
+    [Fact]
+    public async Task 読み込みに成功した後で読み込み直して失敗したら保存できないこと()
+    {
+        var repository = new Mock<ISettingsRepository>();
+        repository.SetupSequence(r => r.GetAppSettingsAsync())
+            .ReturnsAsync(new AppSettings { DepartmentType = DepartmentType.EnterpriseAccount })
+            .ThrowsAsync(new InvalidOperationException("共有フォルダーに接続できない（テスト用）"));
+        var viewModel = CreateViewModel(repository.Object);
+
+        await viewModel.LoadSettingsAsync();
+        viewModel.CanSaveSettings.Should().BeTrue("前提: 1 回目は成功している");
+
+        await viewModel.Invoking(v => v.LoadSettingsAsync()).Should().ThrowAsync<InvalidOperationException>();
+
+        viewModel.CanSaveSettings.Should().BeFalse("前回の成功の印を残さない");
+        await viewModel.SaveAsync();
+        repository.Verify(r => r.SaveAppSettingsAsync(It.IsAny<AppSettings>()), Times.Never);
     }
 
     private static SettingsViewModel CreateViewModel(ISettingsRepository repository)
