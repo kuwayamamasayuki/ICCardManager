@@ -21,7 +21,8 @@ namespace ICCardManager.UITests.Tests
     /// <para>
     /// 設定の Alt+D は「同行者数入力を自動的に閉じるまでの秒数」と「データベース保存先フォルダ」が重複していた。
     /// WPF は重複したキーを押すたびにツリー順でフォーカスを循環させるので、<b>是正前は 1 回目の Alt+D で秒数欄へ移っていた</b>
-    /// （秒数欄が先にある）。キーの組み合わせは同時押し（<see cref="Keyboard.TypeSimultaneously"/>）で送り、押したままにしない。
+    /// （秒数欄が先にある）。ただし秒数欄は同行者数入力のスキップが有効（Issue #2178 以降の既定）だと無効になり、
+    /// 無効な要素はアクセスキーの対象から外れるので、スキップしない設定を投入して衝突が起きる状態で確かめる。キーの組み合わせは同時押し（<see cref="Keyboard.TypeSimultaneously"/>）で送り、押したままにしない。
     /// </para>
     /// </remarks>
     [Collection("UI")]
@@ -50,7 +51,10 @@ namespace ICCardManager.UITests.Tests
         [InlineData(VirtualKeyShort.KEY_I, TestConstants.SettingsCompanionCountTimeoutInput)]
         public void 設定ダイアログでAltキー1回で目的の入力欄へフォーカスが移ること(VirtualKeyShort key, string expectedName)
         {
-            using var fixture = AppFixture.LaunchWithSeed(ScreenshotSeedData.Seed, AppFixture.SuppressDebugTestData);
+            // 秒数欄は同行者数入力のスキップが有効だと操作不可になり、アクセスキーが働かない（重複も起きない）。
+            // 衝突が実際に起きる状態（スキップしない）で確かめる
+            using var fixture = AppFixture.LaunchWithSeed(
+                ScreenshotSeedData.SeedWithCompanionCountInputEnabled, AppFixture.SuppressDebugTestData);
             var page = new MainWindowPage(fixture.MainWindow, fixture.Automation);
             var dialog = page.ClickToolbarButtonAndWaitForDialog(TestConstants.OpenSettingsButton, TestConstants.SettingsDialogName);
 

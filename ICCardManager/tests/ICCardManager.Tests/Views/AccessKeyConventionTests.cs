@@ -30,7 +30,10 @@ namespace ICCardManager.Tests.Views;
 /// アクセスキーを持ち得る記述は 4 形ある: ①開始タグの <c>Content</c> / <c>Header</c> 属性
 /// ②<c>&lt;AccessText Text="…"/&gt;</c> ③<c>&lt;Setter Property="Content" Value="…"/&gt;</c>
 /// ④<c>Label</c> / <c>Button</c> 等の本体の直接テキスト。<c>TextBlock</c> の文字列はアクセスキーを解釈しないので対象外。
-/// <b>既知の走査範囲外</b>: バインディングやコードビハインドで組み立てる文字列（本番には現在無い）。
+/// <b>既知の走査範囲外</b>: ①バインディングやコードビハインドで組み立てる文字列（本番には現在無い）
+/// ②ファイルをまたぐ衝突 — 一意性はファイル（＝ダイアログ）単位で見るので、<c>UserControl</c> を別ファイルに置いて
+/// ダイアログへ埋め込むと、埋め込み先とのキーの衝突は検出できない（本番には現在 <c>UserControl</c> が無い。足すときは検査を広げる）
+/// ③同じ表記のラベル（設定の「参照...」が 2 つ）どうしの、§5.3 の項目との対応の入れ替わり（表記で区別できない）。
 /// </para>
 /// </remarks>
 public class AccessKeyConventionTests
@@ -62,11 +65,10 @@ public class AccessKeyConventionTests
     public void 設計書のアクセスキー一覧が本番のXAMLと一致すること()
     {
         var documented = ReadDocumentedAccessKeys();
-        var actual = ProductionAccessKeys()
-            .ToDictionary(
-                kv => Path.GetFileNameWithoutExtension(kv.Key),
-                kv => kv.Value.Select(u => u.Key).OrderBy(c => c).ToList(),
-                StringComparer.Ordinal);
+        var uses = ProductionAccessKeys()
+            .ToDictionary(kv => Path.GetFileNameWithoutExtension(kv.Key), kv => kv.Value, StringComparer.Ordinal);
+        var actual = uses.ToDictionary(
+            kv => kv.Key, kv => kv.Value.Select(u => u.Key).OrderBy(c => c).ToList(), StringComparer.Ordinal);
 
         // 空振り防止: 欠陥のあった 2 画面が両方の側に現れること
         actual.Keys.Should().Contain(new[] { "LedgerRowEditDialog", "SettingsDialog" });
@@ -79,9 +81,39 @@ public class AccessKeyConventionTests
 
         foreach (var dialog in actual.Keys)
         {
-            documented[dialog].OrderBy(c => c).Should().Equal(actual[dialog],
+            documented[dialog].Select(r => r.Key).OrderBy(c => c).Should().Equal(actual[dialog],
                 "03_画面設計書 §5.3 の {0} の表は XAML のアクセスキーの全量と一致すること", dialog);
+
+            // キーの集合だけでなく、キーと項目の対応も見る（Alt+R と Alt+E の入れ替わり等）
+            var mismatches = uses[dialog]
+                .Where(u => !documented[dialog].Any(r => r.Key == u.Key && CorrespondsTo(r.Item, LabelOf(u.Text))))
+                .Select(u => $"Alt+{u.Key}「{LabelOf(u.Text)}」")
+                .ToList();
+            mismatches.Should().BeEmpty(
+                "03_画面設計書 §5.3 の {0} の表で、各キーの項目が XAML の表記と対応すること。対応しないもの: {1}",
+                dialog, string.Join("、", mismatches));
         }
+    }
+
+    [Theory]
+    [InlineData("参照...(_R)", "参照...")]
+    [InlineData("同行者数(_G):", "同行者数")]
+    [InlineData("a__b(_C)", "a_b")]
+    [InlineData("_Delete", "Delete")]
+    public void ラベルの表記からアクセスキーの記法を除くこと(string text, string expected)
+    {
+        LabelOf(text).Should().Be(expected);
+    }
+
+    [Theory]
+    [InlineData("バックアップ参照...", "参照...", true)]
+    [InlineData("データベース保存先フォルダパス", "データベース保存先フォルダ", true)]
+    [InlineData("逆算した金額を適用（導入行の残高の訂正提案が出ているときだけ表示）", "逆算した金額を適用", true)]
+    [InlineData("同行者数", "逆算した金額を適用", false)]
+    [InlineData("データベース保存先フォルダパス", "同行者数入力を自動的に閉じるまでの秒数", false)]
+    public void 設計書の項目とXAMLの表記の対応を判定すること(string item, string label, bool expected)
+    {
+        CorrespondsTo(item, label).Should().Be(expected);
     }
 
     [Fact]
@@ -119,15 +151,17 @@ public class AccessKeyConventionTests
   <Button Header=""見出し(_H)""/>
   <AccessText Text=""アクセス(_A)""/>
   <Button><Button.Style><Style><Setter Property=""Content"" Value=""設定(_S)""/></Style></Button.Style></Button>
+  <GroupBox><GroupBox.Style><Style><Setter Property=""Header"" Value=""見出し設定(_E)""/></Style></GroupBox.Style></GroupBox>
   <CheckBox>本体(_B)</CheckBox>
+  <Button><Button.Content>内容(_X)</Button.Content></Button>
   <TextBlock Text=""テキスト(_T)""/>
   <TextBlock>本文(_Z)</TextBlock>
-  <Button Content=""{Binding Caption_X}""/>
+  <Button Content=""{Binding Caption_Y}""/>
   <Button ToolTip=""ヒント(_P)""/>
 </Window>";
 
         ExtractAccessKeys(XamlElementInspection.StripXmlComments(xaml)).Select(u => u.Key)
-            .Should().BeEquivalentTo(new[] { 'D', 'H', 'A', 'S', 'B' });
+            .Should().BeEquivalentTo(new[] { 'D', 'H', 'A', 'S', 'E', 'B', 'X' });
     }
 
     [Fact]
@@ -274,7 +308,7 @@ public class AccessKeyConventionTests
     /// <summary>
     /// 03_画面設計書 §5.3 の各表（見出し末尾の「（ダイアログ名）」→ Alt+キーの一覧）を読む。
     /// </summary>
-    private static Dictionary<string, List<char>> ReadDocumentedAccessKeys()
+    private static Dictionary<string, List<DocumentedAccessKey>> ReadDocumentedAccessKeys()
     {
         var text = File.ReadAllText(
             Path.Combine(TestPaths.GetSolutionRoot(), "docs", "design", "03_画面設計書.md")).Replace("\r\n", "\n");
@@ -283,27 +317,53 @@ public class AccessKeyConventionTests
         var end = text.IndexOf("\n### 5.4 ", start, StringComparison.Ordinal);
         var section = end < 0 ? text.Substring(start) : text.Substring(start, end - start);
 
-        var result = new Dictionary<string, List<char>>(StringComparer.Ordinal);
-        List<char>? current = null;
+        var result = new Dictionary<string, List<DocumentedAccessKey>>(StringComparer.Ordinal);
+        List<DocumentedAccessKey>? current = null;
         foreach (var line in section.Split('\n'))
         {
-            var heading = Regex.Match(line, @"^#### .*（(?<name>[A-Za-z]+)）\s*$");
-            if (heading.Success)
+            if (line.StartsWith("#### ", StringComparison.Ordinal))
             {
-                current = new List<char>();
-                result[heading.Groups["name"].Value] = current;
+                // 「（ダイアログ名）」で終わらない見出しの下の表は、直前のダイアログへ混ぜない
+                current = null;
+                var heading = Regex.Match(line, @"^#### .*（(?<name>[A-Za-z]+)）\s*$");
+                if (heading.Success)
+                {
+                    current = new List<DocumentedAccessKey>();
+                    result[heading.Groups["name"].Value] = current;
+                }
+
                 continue;
             }
 
-            var row = Regex.Match(line, @"^\| Alt\+(?<k>[A-Za-z0-9]) \|");
+            var row = Regex.Match(line, @"^\| Alt\+(?<k>[A-Za-z0-9]) \| (?<item>[^|]+?) \|");
             if (row.Success && current != null)
             {
-                current.Add(char.ToUpperInvariant(row.Groups["k"].Value[0]));
+                current.Add(new DocumentedAccessKey(
+                    char.ToUpperInvariant(row.Groups["k"].Value[0]), row.Groups["item"].Value.Trim()));
             }
         }
 
         return result;
     }
+
+    private sealed record DocumentedAccessKey(char Key, string Item);
+
+    /// <summary>
+    /// アクセスキーの記法（<c>(_X)</c>・<c>_</c>・末尾のコロン）を除いた表示上のラベル。<c>__</c> はリテラルの <c>_</c>。
+    /// </summary>
+    internal static string LabelOf(string text)
+    {
+        var withoutKey = Regex.Replace(text, @"\(_[^_]\)", string.Empty);
+        var label = Regex.Replace(withoutKey, "__|_", m => m.Value == "__" ? "_" : string.Empty);
+        return label.Trim().TrimEnd(':', '：').Trim();
+    }
+
+    /// <summary>
+    /// 設計書の項目が XAML のラベルと対応するか（一方が他方を含む）。設計書は「エクスポート データ種別」のように
+    /// 画面上の位置を補った名前で書くので、完全一致ではなく包含で見る。
+    /// </summary>
+    internal static bool CorrespondsTo(string item, string label)
+        => item.IndexOf(label, StringComparison.Ordinal) >= 0 || label.IndexOf(item, StringComparison.Ordinal) >= 0;
 
     #endregion
 }

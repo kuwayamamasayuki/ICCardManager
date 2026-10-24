@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Linq;
 using FluentAssertions;
 using ICCardManager.Tests.Views.Helpers;
@@ -35,19 +36,56 @@ public class MainWindowStatusBarStateTextTests
     [Fact]
     public void 本番のXAMLで状態の列挙型をコンバーターなしで文字として表示しないこと()
     {
-        // ステータスバー以外に同じ形が増えないよう、全 XAML の Text 属性を見る
+        // ステータスバー以外に同じ形が増えないよう、全 XAML の表示に使う属性と Setter を見る
         var violations = FillForegroundPairs.EnumerateProductionXaml()
-            .SelectMany(f => XamlElementInspection.EnumerateStartTags(f.Text)
-                .Where(t =>
-                {
-                    var text = XamlElementInspection.GetAttribute(t.StartTag, "Text");
-                    return XamlElementInspection.GetBindingPropertyName(text) == "CurrentState"
-                           && text!.IndexOf("Converter", StringComparison.Ordinal) < 0;
-                })
-                .Select(t => $"{f.Name}:{t.Line}"))
+            .SelectMany(f => FindRawStateDisplayLines(f.Text).Select(line => $"{f.Name}:{line}"))
             .ToList();
 
         violations.Should().BeEmpty("AppState の内部名が画面に出る。違反: {0}", string.Join(", ", violations));
+    }
+
+    [Theory]
+    [InlineData(@"<TextBlock Text=""{Binding CurrentState}""/>", 1)]
+    [InlineData(@"<Run Text=""{Binding CurrentState, Mode=OneWay}""/>", 1)]
+    [InlineData(@"<Label Content=""{Binding CurrentState}""/>", 1)]
+    [InlineData(@"<Button ToolTip=""{Binding Path=CurrentState}""/>", 1)]
+    [InlineData(@"<TextBlock AutomationProperties.Name=""{Binding CurrentState}""/>", 1)]
+    [InlineData(@"<Setter Property=""Content"" Value=""{Binding CurrentState}""/>", 1)]
+    [InlineData(@"<TextBlock Text=""{Binding CurrentState, Converter={StaticResource StateToTextConverter}}""/>", 0)]
+    [InlineData(@"<DataTrigger Binding=""{Binding CurrentState}"" Value=""WaitingForIcCard""/>", 0)]
+    [InlineData(@"<Setter Property=""Visibility"" Value=""{Binding CurrentState}""/>", 0)]
+    [InlineData(@"<TextBlock Text=""{Binding NextActionStateText}""/>", 0)]
+    public void 状態の列挙型の直接表示の検出が既知の入力を正しく分類すること(string xaml, int expected)
+    {
+        FindRawStateDisplayLines(xaml).Should().HaveCount(expected);
+    }
+
+    /// <summary>表示に使う依存関係プロパティ（文字として画面・読み上げに出るもの）。</summary>
+    private static readonly string[] DisplayProperties =
+        { "Text", "Content", "Header", "ToolTip", "AutomationProperties.Name" };
+
+    /// <summary>
+    /// <c>CurrentState</c> をコンバーターなしで表示に使うプロパティへバインドしている開始タグの行。
+    /// </summary>
+    /// <remarks>
+    /// <c>DataTrigger Binding="{Binding CurrentState}"</c>（本番の <c>MainWindow.xaml</c> に実在）は値の比較であって表示ではないので拾わない。
+    /// </remarks>
+    private static IEnumerable<int> FindRawStateDisplayLines(string xaml)
+    {
+        foreach (var tag in XamlElementInspection.EnumerateStartTags(xaml))
+        {
+            var values = tag.StartTag.StartsWith("<Setter", StringComparison.Ordinal)
+                ? DisplayProperties.Contains(XamlElementInspection.GetAttribute(tag.StartTag, "Property"))
+                    ? new[] { XamlElementInspection.GetAttribute(tag.StartTag, "Value") }
+                    : Array.Empty<string?>()
+                : DisplayProperties.Select(p => XamlElementInspection.GetAttribute(tag.StartTag, p));
+
+            if (values.Any(v => XamlElementInspection.GetBindingPropertyName(v) == "CurrentState"
+                                && v!.IndexOf("Converter", StringComparison.Ordinal) < 0))
+            {
+                yield return tag.Line;
+            }
+        }
     }
 
     private static XamlElementInspection.XamlElementSpan StatusBar()
