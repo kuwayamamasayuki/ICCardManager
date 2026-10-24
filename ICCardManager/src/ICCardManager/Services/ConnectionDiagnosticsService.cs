@@ -1,3 +1,4 @@
+#nullable enable
 using System;
 using System.Collections.Generic;
 using System.Globalization;
@@ -360,7 +361,7 @@ namespace ICCardManager.Services
         private const string BackupFolderWritableTitle = "バックアップ保存先";
         private const string DiskFreeSpaceTitle = "空きディスク容量";
 
-        private async Task<string> ResolveBackupFolderOrNullAsync()
+        private async Task<string?> ResolveBackupFolderOrNullAsync()
         {
             try
             {
@@ -381,16 +382,16 @@ namespace ICCardManager.Services
         /// 「権限がない」「ディスクが満杯」といった状態は単体テストから再現できないため、
         /// 本メソッドを差し替えて判定と文言だけを検証できるようにしている。
         /// </remarks>
-        protected virtual FolderWriteAccess ProbeFolderWriteAccess(string folder) =>
+        protected virtual FolderWriteAccess ProbeFolderWriteAccess(string? folder) =>
             FolderWriteAccessProbe.Probe(folder);
 
         /// <summary>
         /// バックアップ保存先の空き容量を取得する（テスト用の継ぎ目。<see cref="ProbeFolderWriteAccess"/> と同じ理由）
         /// </summary>
-        protected virtual long? GetFreeSpaceBytes(string folder) =>
+        protected virtual long? GetFreeSpaceBytes(string? folder) =>
             DiskSpaceHelper.TryGetAvailableFreeSpace(folder);
 
-        private DiagnosticItem CheckBackupFolderWritable(string folder)
+        private DiagnosticItem CheckBackupFolderWritable(string? folder)
         {
             var access = ProbeFolderWriteAccess(folder);
 
@@ -431,7 +432,7 @@ namespace ICCardManager.Services
             }
         }
 
-        private DiagnosticItem CheckDiskFreeSpace(string folder)
+        private DiagnosticItem CheckDiskFreeSpace(string? folder)
         {
             var freeBytes = GetFreeSpaceBytes(folder);
             var formatted = DiskSpaceHelper.FormatBytes(freeBytes);
@@ -484,7 +485,7 @@ namespace ICCardManager.Services
             }
 
             var lastSuccess = health?.LastSuccessAt;
-            if (lastSuccess == null)
+            if (health == null || lastSuccess == null)
             {
                 // 記録がないのは「失敗している」ではなく「判断材料がない」。
                 // 導入前からの既存環境で必ず警告が出る状態を避ける（Issue #1689 の方針）。

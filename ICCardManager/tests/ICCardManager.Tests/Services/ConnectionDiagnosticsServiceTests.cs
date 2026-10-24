@@ -89,10 +89,10 @@ public class ConnectionDiagnosticsServiceTests : IDisposable
         public bool FileReachable { get; set; } = true;
 
         /// <summary><see cref="ProbeFolderWriteAccess"/> が受け取った保存先</summary>
-        public List<string> ProbedFolders { get; } = new();
+        public List<string?> ProbedFolders { get; } = new();
 
         /// <summary><see cref="GetFreeSpaceBytes"/> が受け取った保存先</summary>
-        public List<string> FreeSpaceFolders { get; } = new();
+        public List<string?> FreeSpaceFolders { get; } = new();
 
         /// <summary><see cref="ProbeDatabaseFileReachable"/> が受け取った DB パス</summary>
         public List<string> ProbedDatabasePaths { get; } = new();
@@ -112,13 +112,13 @@ public class ConnectionDiagnosticsServiceTests : IDisposable
 
         // 本番（FolderWriteAccessProbe.Probe / DiskSpaceHelper / File.Exists）と同じく、
         // パスが無いときは「特定できない」側へ倒す。
-        protected override FolderWriteAccess ProbeFolderWriteAccess(string folder)
+        protected override FolderWriteAccess ProbeFolderWriteAccess(string? folder)
         {
             ProbedFolders.Add(folder);
             return string.IsNullOrWhiteSpace(folder) ? FolderWriteAccess.PathNotSpecified : FolderAccess;
         }
 
-        protected override long? GetFreeSpaceBytes(string folder)
+        protected override long? GetFreeSpaceBytes(string? folder)
         {
             FreeSpaceFolders.Add(folder);
             return string.IsNullOrWhiteSpace(folder) ? null : FreeSpace;

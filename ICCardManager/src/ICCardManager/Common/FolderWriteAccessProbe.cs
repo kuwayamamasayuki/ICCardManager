@@ -54,7 +54,7 @@ namespace ICCardManager.Common
         /// </summary>
         /// <param name="folderPath">対象フォルダのパス（UNC 可）</param>
         /// <returns>実測結果。例外は投げず、失敗理由を列挙値で返す</returns>
-        public static FolderWriteAccess Probe(string folderPath)
+        public static FolderWriteAccess Probe(string? folderPath)
         {
             if (string.IsNullOrWhiteSpace(folderPath))
             {
