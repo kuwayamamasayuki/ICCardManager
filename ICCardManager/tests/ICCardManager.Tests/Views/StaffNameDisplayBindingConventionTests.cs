@@ -21,6 +21,12 @@ namespace ICCardManager.Tests.Views;
 /// 個別の ViewModel のテストは「導出した値を持つこと」しか表明できず、XAML が生の氏名へ束縛し直されても
 /// 緑のまま通る。束縛の側を本番の全 XAML から検査する。
 /// </para>
+/// <para>
+/// <b>検査できない形</b>: 2 段以上入れ子にしたマークアップ拡張を <c>Path=</c> の前に挟んだ束縛
+/// （<c>{Binding Converter={x:Static … {…}}, Path=StaffName}</c>）と、コードビハインドで組み立てる束縛
+/// （<c>new Binding("StaffName")</c>）は見ない。1 段の入れ子（<c>Converter={StaticResource …}</c>）と、単引用符の
+/// <c>&lt;Binding Path='…'/&gt;</c> は拾う（サンプル入力で固定）。
+/// </para>
 /// </remarks>
 public class StaffNameDisplayBindingConventionTests
 {
@@ -32,8 +38,10 @@ public class StaffNameDisplayBindingConventionTests
     private static readonly Regex[] BindingPathPatterns =
     {
         new(@"\{Binding\s+(?!Path\s*=)(?![A-Za-z]+\s*=)(?<path>[^,}\s]+)", RegexOptions.Compiled),
-        new(@"\{Binding\b[^}]*?\bPath\s*=\s*(?<path>[^,}\s]+)", RegexOptions.Compiled),
-        new(@"<Binding\b[^>]*?\bPath\s*=\s*""(?<path>[^""]+)""", RegexOptions.Compiled),
+        // 1 段の入れ子のマークアップ拡張（Converter={StaticResource …}）を Path= の前に挟んだ形も拾う
+        new(@"\{Binding\b(?:[^{}]|\{[^{}]*\})*?\bPath\s*=\s*(?<path>[^,}\s]+)", RegexOptions.Compiled),
+        // 属性値は二重引用符・単引用符のどちらでもよい
+        new(@"<Binding\b[^>]*?\bPath\s*=\s*(?<q>[""'])(?<path>(?:(?!\k<q>).)+)\k<q>", RegexOptions.Compiled),
     };
 
     private static readonly Regex XmlComment = new(@"<!--.*?-->", RegexOptions.Compiled | RegexOptions.Singleline);
@@ -103,6 +111,10 @@ public class StaffNameDisplayBindingConventionTests
     [InlineData("Text=\"{Binding DisplayStaffNamePreview, StringFormat=氏名欄: {0}}\"", false)]
     [InlineData("<Binding Path=\"SelectedStaff.Name\" />", false)]
     [InlineData("<TextBlock Text=\"{Binding StaffNameLabel}\"/>", false)]
+    // 入れ子のマークアップ拡張を Path= の前に挟んだ形・単引用符の要素形
+    [InlineData("<TextBlock Text=\"{Binding Converter={StaticResource X}, Path=Ledger.StaffName}\"/>", true)]
+    [InlineData("<Binding Path='StaffName'/>", true)]
+    [InlineData("<Binding Path='Item.DisplayStaffName'/>", false)]
     // コメントの中は対象外
     [InlineData("<!-- 以前は {Binding StaffName} だった -->", false)]
     public void 検査ロジックは生の氏名への束縛だけを拾うこと(string markup, bool expected)
