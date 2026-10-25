@@ -1623,27 +1623,6 @@ namespace ICCardManager.ViewModels
             }
         }
 
-#if DEBUG
-        /// <summary>
-        /// デバッグ用: カード読み取りをシミュレート
-        /// </summary>
-        [RelayCommand]
-        public void SimulateCardRead()
-        {
-            if (!IsWaitingForCard)
-            {
-                return;
-            }
-
-            if (_cardReader is MockCardReader mockReader)
-            {
-                // 未使用のIDmを生成
-                var newIdm = $"07FE{Guid.NewGuid().ToString("N").Substring(0, 12).ToUpperInvariant()}";
-                mockReader.SimulateCardRead(newIdm);
-            }
-        }
-#endif
-
         /// <summary>
         /// カード登録モード選択ダイアログを表示（Issue #510）
         /// </summary>

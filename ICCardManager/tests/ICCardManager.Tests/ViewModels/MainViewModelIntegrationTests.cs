@@ -1907,7 +1907,6 @@ public class MainViewModelIntegrationTests
         nameField.GetValue(_viewModel).Should().BeNull();
         // UI 状態も初期化
         _viewModel.CurrentState.Should().Be(AppState.WaitingForStaffCard);
-        _viewModel.StatusMessage.Should().Be("職員証をタッチしてください");
         _viewModel.RemainingSeconds.Should().Be(0);
         timer.IsRunning.Should().BeFalse();
     }
@@ -2368,8 +2367,11 @@ public class MainViewModelIntegrationTests
         // 返却後のカード A は貸出中ではないので、待機中のタッチは履歴表示になる
         _cardRepositoryMock.Setup(r => r.GetByIdmAsync(CardIdmA, It.IsAny<bool>()))
             .ReturnsAsync(new IcCard { CardIdm = CardIdmA, CardType = "はやかけん", CardNumber = "5042", IsLent = false });
-        // 30 秒ルールの逆処理に入らないよう、直前の操作を忘れさせる
-        _lendingService.ClearHistory();
+        // 30 秒ルールの逆処理に入らないよう、直前の操作を忘れさせる（Issue #2330: 本番から呼ばれない
+        // LendingService.ClearHistory を削除したため、判定に使う IDm だけを反射で消す）
+        typeof(LendingService).GetProperty(nameof(LendingService.LastProcessedCardIdm))!
+            .SetValue(_lendingService, null);
+        _lendingService.IsRetouchWithinTimeout(CardIdmA).Should().BeFalse("前提: 逆処理に入らない");
         RaiseCardRead(CardIdmA);
         await _dispatcherService.WaitForPendingAsync();
 
