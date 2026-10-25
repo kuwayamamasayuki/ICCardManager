@@ -126,6 +126,59 @@ public sealed class SargableDateQueryPlanTests : IDisposable
             .Should().Equal(expected);
     }
 
+    /// <summary>
+    /// 終了日が 9999/12/31（<see cref="DateTime.MaxValue"/>）でも例外にならず、開始日以降をすべて返すこと（レビュー 3 回目で検出）。
+    /// </summary>
+    /// <remarks>
+    /// 上限を「終了日の翌日未満」にしたことで <c>AddDays(1)</c> が範囲外になり、旧実装（<c>date(timestamp) &lt;= 終了日</c>）では
+    /// 動いていた検索が <see cref="ArgumentOutOfRangeException"/> で落ちていた。検索画面には例外の受け皿が無い。
+    /// </remarks>
+    [Fact]
+    public async Task 操作ログの期間検索は終了日が最大値でも開始日以降をすべて返すこと()
+    {
+        var stored = new[] { "2025-12-31 23:59:59", "2026-01-01", "2026-06-30 12:00:00", "9999-12-31 23:59:59" };
+        using (var lease = await _dbContext.LeaseConnectionAsync())
+        {
+            foreach (var timestamp in stored)
+            {
+                using var command = lease.Connection.CreateCommand();
+                command.CommandText = "INSERT INTO operation_log (timestamp, operator_idm, operator_name, target_table, target_id, action) " +
+                                      "VALUES (@t, 'FFFF000000000001', 'テスト', 'ledger', '1', 'UPDATE')";
+                command.Parameters.AddWithValue("@t", timestamp);
+                command.ExecuteNonQuery();
+            }
+        }
+
+        // 初期化（マイグレーション）が書く操作ログも混ざるため、件数は date() 版で数えた正解と比べる
+        long expected;
+        using (var lease = await _dbContext.LeaseConnectionAsync())
+        {
+            using var command = lease.Connection.CreateCommand();
+            command.CommandText = "SELECT COUNT(*) FROM operation_log WHERE date(timestamp) BETWEEN '2026-01-01' AND '9999-12-31'";
+            expected = (long)command.ExecuteScalar();
+        }
+
+        expected.Should().BeGreaterThanOrEqualTo(3, "前提: 開始日以降の 3 行（9999/12/31 を含む）が数えられている");
+
+        var repository = new OperationLogRepository(_dbContext);
+        var from = new DateTime(2026, 1, 1);
+        var criteria = new OperationLogSearchCriteria { FromDate = from, ToDate = DateTime.MaxValue };
+
+        (await repository.GetByDateRangeAsync(from, DateTime.MaxValue)).Should().HaveCount((int)expected);
+        (await repository.SearchAllAsync(criteria)).Should().HaveCount((int)expected);
+        (await repository.SearchFirstPageAsync(criteria, pageSize: 500)).TotalCount.Should().Be((int)expected);
+    }
+
+    [Fact]
+    public void 期間の上限は終了日の翌日で_最大値の日だけ上限を付けないこと()
+    {
+        OperationLogRepository.ToExclusiveUpperBoundText(new DateTime(2026, 1, 31, 15, 30, 0)).Should().Be("2026-02-01");
+        OperationLogRepository.ToExclusiveUpperBoundText(new DateTime(9999, 12, 30)).Should().Be("9999-12-31",
+            "最大値の前日までは翌日を上限にする（上限を外す範囲を広げすぎない）");
+        OperationLogRepository.ToExclusiveUpperBoundText(DateTime.MaxValue).Should().BeNull();
+        OperationLogRepository.ToExclusiveUpperBoundText(DateTime.MaxValue.Date).Should().BeNull();
+    }
+
     [Fact]
     public async Task 全カードの最新残高は台帳を全件走査せず相関サブクエリも使わないこと()
     {
