@@ -14,13 +14,12 @@ using Xunit;
 namespace ICCardManager.UITests.Tests
 {
     /// <summary>
-    /// 統合の取り消し・バス停名未入力の 2 画面のボタンの並びと、「外N名」・削除済みカードの表示の回帰テスト（Issue #2332）。
+    /// 統合の取り消し・バス停名未入力の 2 画面のボタンの並びと、「外N名」の表示の回帰テスト（Issue #2332）。
     /// </summary>
     /// <remarks>
     /// <para>
     /// 単体テストは XAML のテキスト（ボタンの並び・束縛先）と ViewModel の値を固定している。ここでは実際の画面で、
-    /// 主操作が「閉じる」の右に描かれること、利用者欄とヘッダーに「外N名」が出ること、削除済みのカードの行が
-    /// IDm ではなくカード名で出ることを確かめる。
+    /// 主操作が「閉じる」の右に描かれること、利用者欄とヘッダーに「外N名」が出ることを確かめる。
     /// </para>
     /// <para>
     /// 職員証の認証が要らない操作だけなので、Release 起動でも実行できる。
@@ -34,15 +33,8 @@ namespace ICCardManager.UITests.Tests
         private const int CompanionCount = 2;
         private static readonly string ExpectedStaffName = $"{ScreenshotSeedData.PrimaryStaffName} 外{CompanionCount}名";
 
-        private const string DeletedCardIdm = "07FE99999999";
-        private const string DeletedCardType = "nimoca";
-        private const string DeletedCardNumber = "N-099";
-        private static readonly string DeletedCardDisplayName = $"{DeletedCardType} {DeletedCardNumber}";
-
         private const string MergeHistoryDescription = "2件の履歴を統合（UIテスト）";
 
-        private const string IncompleteBusStopDialogName = "バス停名未入力履歴一覧ダイアログ";
-        private const string IncompleteBusStopWarningMarker = "バス停名が未入力の履歴が";
         private const string IncompleteBusStopPrimaryButton = "選択した履歴のバス停名を入力";
         private const string MergeHistoryDialogName = "統合履歴選択ダイアログ";
         private const string UndoMergeOpenButton = "統合を元に戻す";
@@ -57,7 +49,7 @@ namespace ICCardManager.UITests.Tests
         }
 
         [Fact]
-        public void バス停名未入力の一覧は_外N名と削除済みカードの名前を表示し_主操作が閉じるの右にあること()
+        public void バス停名未入力の一覧は_外N名を表示し_主操作が閉じるの右にあること()
         {
             using var fixture = AppFixture.LaunchWithSeed(Seed, AppFixture.SuppressDebugTestData);
             ScreenshotHelper.MoveToTopLeft(fixture.MainWindow);
@@ -65,19 +57,16 @@ namespace ICCardManager.UITests.Tests
 
             var warning = Retry.WhileNull(
                 () => page.Window.FindAllDescendants(cf => cf.ByControlType(ControlType.Button))
-                    .FirstOrDefault(b => (b.Properties.Name.ValueOrDefault ?? string.Empty).Contains(IncompleteBusStopWarningMarker)),
+                    .FirstOrDefault(b => (b.Properties.Name.ValueOrDefault ?? string.Empty).Contains(TestConstants.IncompleteBusStopWarningMarker)),
                 Wait).Result;
             warning.Should().NotBeNull("前提: バス停名未入力の警告が出ること");
             warning!.AsButton().Invoke();
 
-            var dialog = new DialogPageBase(page.WaitForDialog(IncompleteBusStopDialogName));
+            var dialog = new DialogPageBase(page.WaitForDialog(TestConstants.IncompleteBusStopDialogName));
             try
             {
                 dialog.FindByNameWithRetry(ExpectedStaffName).Should().NotBeNull(
                     "利用者欄は、同行者のいる行に履歴一覧と同じく「外N名」を付けること");
-                dialog.FindByName(DeletedCardDisplayName).Should().NotBeNull(
-                    "削除済みのカードの行も、IDm ではなくカード名で表示すること");
-                dialog.FindByName(DeletedCardIdm).Should().BeNull("削除済みのカードの行に IDm を表示しないこと");
 
                 AssertPrimaryIsRightOfClose(dialog, IncompleteBusStopPrimaryButton);
                 CaptureIfRequested(dialog.Window, "uitest_2332_incomplete_busstop.png");
@@ -165,8 +154,7 @@ namespace ICCardManager.UITests.Tests
         }
 
         /// <summary>
-        /// 通常の投入データに、同行者 2 名のバス利用（バス停名未入力）の行、削除済みカードのバス停名未入力の行、
-        /// 取り消せる統合履歴 1 件を加える。
+        /// 通常の投入データに、同行者 2 名のバス利用（バス停名未入力）の行と、取り消せる統合履歴 1 件を加える。
         /// </summary>
         private static void Seed(SQLiteConnection conn)
         {
@@ -190,16 +178,6 @@ namespace ICCardManager.UITests.Tests
                     "VALUES (@ledger, @date, NULL, NULL, NULL, @amount, @balance, 0, 1, 0, NULL)",
                     ("@ledger", busRowId), ("@date", today), ("@amount", amount), ("@balance", after));
             }
-
-            Execute(conn,
-                "INSERT OR IGNORE INTO ic_card (card_idm, card_type, card_number, note, is_deleted, deleted_at, is_lent) " +
-                "VALUES (@idm, @type, @number, NULL, 1, @today, 0)",
-                ("@idm", DeletedCardIdm), ("@type", DeletedCardType), ("@number", DeletedCardNumber), ("@today", today));
-            Execute(conn,
-                "INSERT INTO ledger (card_idm, lender_idm, date, summary, income, expense, balance, staff_name, note, is_lent_record) " +
-                "VALUES (@card, @lender, @date, @summary, 0, 230, 4770, @staff, NULL, 0)",
-                ("@card", DeletedCardIdm), ("@lender", AppFixture.SeededStaffIdm), ("@date", today),
-                ("@summary", BusRowSummary), ("@staff", ScreenshotSeedData.SecondaryStaffName));
 
             Execute(conn,
                 "INSERT INTO ledger_merge_history (merged_at, target_ledger_id, description, undo_data, is_undone) " +

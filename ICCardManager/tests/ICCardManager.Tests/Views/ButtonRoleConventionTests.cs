@@ -57,18 +57,13 @@ public class ButtonRoleConventionTests
     /// 閉じる／キャンセルより左に置いてよい、役割の無い補助のボタン（ファイル名, アクセスキーを除いた内容）（Issue #2332）。
     /// </summary>
     /// <remarks>
-    /// いずれも「閉じる」しか確定の操作が無い表示用の画面の補助で、画面の目的を確定する主操作ではない
-    /// （主操作なら役割スタイルを付けて閉じるの右へ置く）。
-    /// <list type="bullet">
-    /// <item><description><c>AdminDashboardDialog.xaml</c>「出力したファイルを開く」: 直前の Excel 出力の結果を開くだけの補助</description></item>
-    /// <item><description><c>ConnectionDiagnosticsDialog.xaml</c>「再診断」: 表示中の診断結果を取り直すだけの補助</description></item>
-    /// </list>
+    /// <para>
+    /// 現在は空。確定を伴わない補助（管理者ダッシュボードの「出力したファイルを開く」・接続診断の「再診断」）は
+    /// 03 §4.5 の役割表の二次操作に当たるので、許可ではなく <c>SecondaryActionButtonStyle</c> を付けた。
+    /// 許可は抑制に近いので、役割表のどれにも当たらないボタンだけを理由とともに載せる。
+    /// </para>
     /// </remarks>
-    private static readonly HashSet<(string File, string Content)> AllowedRolelessButtonsLeftOfDismiss = new()
-    {
-        ("AdminDashboardDialog.xaml", "出力したファイルを開く"),
-        ("ConnectionDiagnosticsDialog.xaml", "再診断"),
-    };
+    private static readonly HashSet<(string File, string Content)> AllowedRolelessButtonsLeftOfDismiss = new();
 
     #region 色
 
@@ -257,11 +252,17 @@ public class ButtonRoleConventionTests
     /// 並びの検査は主操作を「役割スタイルか IsDefault」で見分けるため、役割スタイルを付け忘れた主操作は
     /// 「主操作が無い行」として素通りしていた（統合履歴・バス停名未入力の 2 画面で、主操作が閉じるの左にあった）。
     /// 主操作かどうかは画面の目的で決まり機械的には判定できないので、閉じる／キャンセルより左にある役割の無いボタンは、
-    /// 役割スタイルを付けるか、「主操作ではない補助のボタン」として <see cref="AllowedRolelessButtonsLeftOfDismiss"/> に
-    /// 理由とともに載せるかのどちらかを求める（どちらも無いまま足すと赤になる）。
+    /// 役割スタイルを付けることを求める（確定を伴わない補助は二次操作 <c>SecondaryActionButtonStyle</c>）。役割表のどれにも当たらない
+    /// ボタンだけを <see cref="AllowedRolelessButtonsLeftOfDismiss"/> に理由とともに載せる（どちらも無いまま足すと赤になる）。
     /// </para>
     /// <para>
     /// 閉じる／キャンセルより右の役割の無いボタン（行編集の「戻る／次へ」等）は、並びの規約（閉じるの右に主操作）に反しないので対象外。
+    /// </para>
+    /// <para>
+    /// <b>検査できない形</b>: 「同じ行」は共通の祖先が横並びの <c>StackPanel</c> / <c>WrapPanel</c> かで判定し、左右は XAML 上の出現順で決める。
+    /// <c>Grid</c> の列に分けて並べた形・<c>DockPanel</c>（<c>DockPanel.Dock="Right"</c> は見た目の順が XAML の順と逆になる）は
+    /// 見ていない。並びの検査（<see cref="同じ行でキャンセルや閉じるが主操作より左にあること"/>）も同じ制約を持つ。
+    /// 描画後の位置で確かめたい画面は FlaUI の UI テスト（<c>DialogButtonOrderAndStaffNameUiTests</c>）で座標を比べる
     /// </para>
     /// </remarks>
     [Fact]
@@ -276,7 +277,7 @@ public class ButtonRoleConventionTests
         violations.Should().BeEmpty(
             "閉じる／キャンセルより左のボタンには役割スタイル（{0} / {1} / {2}）を付けること。" +
             "付けないと主操作かどうかが分からず、並びの検査（右端が主操作）が届かない。" +
-            "主操作ではない補助のボタンなら AllowedRolelessButtonsLeftOfDismiss に理由とともに載せること（Issue #2332）:\n{3}",
+            "確定を伴わない補助なら二次操作のスタイルを付け、役割表のどれにも当たらないボタンだけを AllowedRolelessButtonsLeftOfDismiss に理由とともに載せること（Issue #2332）:\n{3}",
             PrimaryRoleStyle, SecondaryRoleStyle, CautionRoleStyle, string.Join("\n", violations));
     }
 
@@ -480,6 +481,10 @@ public class ButtonRoleConventionTests
     /// <summary>
     /// 2 つのボタンを含む最も内側の要素が横並びのパネルなら、同じ行に並んでいるとみなす。
     /// </summary>
+    /// <remarks>
+    /// 横並びとみなすのは <c>StackPanel Orientation="Horizontal"</c> と <c>WrapPanel</c> だけ。<c>Grid</c> の列・<c>DockPanel</c>
+    /// （<c>Dock="Right"</c> で見た目の順が XAML の順と逆になる）に並べたボタンは同じ行と判定しない（検査できない形。Issue #2332）。
+    /// </remarks>
     private static bool AreInSameRow(string xaml, XamlElementInspection.XamlElementSpan a, XamlElementInspection.XamlElementSpan b)
     {
         var ancestorsOfB = new HashSet<int>(XamlElementInspection.EnumerateEnclosingElements(xaml, b.Start).Select(e => e.Start));

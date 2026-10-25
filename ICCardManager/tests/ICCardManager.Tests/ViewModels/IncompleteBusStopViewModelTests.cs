@@ -57,7 +57,7 @@ public class IncompleteBusStopViewModelTests
             .Setup(r => r.GetByDateRangeAsync(null, It.IsAny<DateTime>(), It.IsAny<DateTime>()))
             .ReturnsAsync(ledgers);
         _cardRepositoryMock
-            .Setup(r => r.GetAllIncludingDeletedAsync())
+            .Setup(r => r.GetAllAsync())
             .ReturnsAsync(cards);
 
         // Act
@@ -90,7 +90,7 @@ public class IncompleteBusStopViewModelTests
             })
             .ReturnsAsync(new List<Ledger>());
         _cardRepositoryMock
-            .Setup(r => r.GetAllIncludingDeletedAsync())
+            .Setup(r => r.GetAllAsync())
             .ReturnsAsync(new List<IcCard>());
 
         // Act
@@ -126,7 +126,7 @@ public class IncompleteBusStopViewModelTests
             .Setup(r => r.GetByDateRangeAsync(null, It.IsAny<DateTime>(), It.IsAny<DateTime>()))
             .ReturnsAsync(ledgers);
         _cardRepositoryMock
-            .Setup(r => r.GetAllIncludingDeletedAsync())
+            .Setup(r => r.GetAllAsync())
             .ReturnsAsync(cards);
 
         // Act
@@ -155,7 +155,7 @@ public class IncompleteBusStopViewModelTests
             .Setup(r => r.GetByDateRangeAsync(null, It.IsAny<DateTime>(), It.IsAny<DateTime>()))
             .ReturnsAsync(ledgers);
         _cardRepositoryMock
-            .Setup(r => r.GetAllIncludingDeletedAsync())
+            .Setup(r => r.GetAllAsync())
             .ReturnsAsync(new List<IcCard>());
 
         // Act
@@ -164,40 +164,6 @@ public class IncompleteBusStopViewModelTests
         // Assert
         _viewModel.Items.Should().HaveCount(1);
         _viewModel.Items[0].CardDisplayName.Should().Be("UNKNOWN_CARD");
-    }
-
-    /// <summary>
-    /// Issue #2332: 論理削除済みのカードの行も、IDm ではなくカード名で表示すること。
-    /// </summary>
-    /// <remarks>
-    /// 実際のリポジトリと同じく、削除済みのカードは GetAllAsync に現れず GetAllIncludingDeletedAsync にだけ現れる形にする。
-    /// 削除済みを除く取得へ戻すと IDm が表示されて赤になる。
-    /// </remarks>
-    [Fact]
-    public async Task InitializeAsync_削除済みカードの行もカード名で表示すること()
-    {
-        var ledgers = new List<Ledger>
-        {
-            new Ledger { Id = 1, CardIdm = "0102030405060708", Date = new DateTime(2026, 1, 10), Summary = "バス（★）", Expense = 100, StaffName = "佐藤" },
-        };
-        _ledgerRepositoryMock
-            .Setup(r => r.GetByDateRangeAsync(null, It.IsAny<DateTime>(), It.IsAny<DateTime>()))
-            .ReturnsAsync(ledgers);
-        _cardRepositoryMock
-            .Setup(r => r.GetAllAsync())
-            .ReturnsAsync(new List<IcCard>());
-        _cardRepositoryMock
-            .Setup(r => r.GetAllIncludingDeletedAsync())
-            .ReturnsAsync(new List<IcCard>
-            {
-                new IcCard { CardIdm = "0102030405060708", CardType = "nimoca", CardNumber = "N-003", IsDeleted = true },
-            });
-
-        await _viewModel.InitializeAsync();
-
-        _viewModel.Items.Should().ContainSingle()
-            .Which.CardDisplayName.Should().Be("nimoca N-003");
-        _viewModel.CardFilterOptions.Should().Contain("nimoca N-003").And.NotContain("0102030405060708");
     }
 
     /// <summary>
@@ -216,7 +182,7 @@ public class IncompleteBusStopViewModelTests
             .Setup(r => r.GetByDateRangeAsync(null, It.IsAny<DateTime>(), It.IsAny<DateTime>()))
             .ReturnsAsync(ledgers);
         _cardRepositoryMock
-            .Setup(r => r.GetAllIncludingDeletedAsync())
+            .Setup(r => r.GetAllAsync())
             .ReturnsAsync(new List<IcCard> { new IcCard { CardIdm = "CARD001", CardType = "はやかけん", CardNumber = "001" } });
 
         await _viewModel.InitializeAsync();
@@ -248,7 +214,7 @@ public class IncompleteBusStopViewModelTests
             .Setup(r => r.GetByDateRangeAsync(null, It.IsAny<DateTime>(), It.IsAny<DateTime>()))
             .ReturnsAsync(ledgers);
         _cardRepositoryMock
-            .Setup(r => r.GetAllIncludingDeletedAsync())
+            .Setup(r => r.GetAllAsync())
             .ReturnsAsync(cards);
 
         // Act
@@ -283,7 +249,7 @@ public class IncompleteBusStopViewModelTests
             .Setup(r => r.GetByDateRangeAsync(null, It.IsAny<DateTime>(), It.IsAny<DateTime>()))
             .ReturnsAsync(ledgers);
         _cardRepositoryMock
-            .Setup(r => r.GetAllIncludingDeletedAsync())
+            .Setup(r => r.GetAllAsync())
             .ReturnsAsync(cards);
 
         // Act
@@ -319,7 +285,7 @@ public class IncompleteBusStopViewModelTests
             .Setup(r => r.GetByDateRangeAsync(null, It.IsAny<DateTime>(), It.IsAny<DateTime>()))
             .ReturnsAsync(ledgers);
         _cardRepositoryMock
-            .Setup(r => r.GetAllIncludingDeletedAsync())
+            .Setup(r => r.GetAllAsync())
             .ReturnsAsync(cards);
 
         // Act
@@ -359,7 +325,7 @@ public class IncompleteBusStopViewModelTests
             .Setup(r => r.GetByDateRangeAsync(null, It.IsAny<DateTime>(), It.IsAny<DateTime>()))
             .ReturnsAsync(ledgers);
         _cardRepositoryMock
-            .Setup(r => r.GetAllIncludingDeletedAsync())
+            .Setup(r => r.GetAllAsync())
             .ReturnsAsync(cards);
 
         await _viewModel.InitializeAsync();
@@ -394,7 +360,7 @@ public class IncompleteBusStopViewModelTests
             .Setup(r => r.GetByDateRangeAsync(null, It.IsAny<DateTime>(), It.IsAny<DateTime>()))
             .ReturnsAsync(ledgers);
         _cardRepositoryMock
-            .Setup(r => r.GetAllIncludingDeletedAsync())
+            .Setup(r => r.GetAllAsync())
             .ReturnsAsync(cards);
 
         await _viewModel.InitializeAsync();
@@ -435,7 +401,7 @@ public class IncompleteBusStopViewModelTests
             .Setup(r => r.GetByDateRangeAsync(null, It.IsAny<DateTime>(), It.IsAny<DateTime>()))
             .ReturnsAsync(ledgers);
         _cardRepositoryMock
-            .Setup(r => r.GetAllIncludingDeletedAsync())
+            .Setup(r => r.GetAllAsync())
             .ReturnsAsync(cards);
 
         await _viewModel.InitializeAsync();
@@ -469,7 +435,7 @@ public class IncompleteBusStopViewModelTests
             .Setup(r => r.GetByDateRangeAsync(null, It.IsAny<DateTime>(), It.IsAny<DateTime>()))
             .ReturnsAsync(ledgers);
         _cardRepositoryMock
-            .Setup(r => r.GetAllIncludingDeletedAsync())
+            .Setup(r => r.GetAllAsync())
             .ReturnsAsync(cards);
 
         await _viewModel.InitializeAsync();
@@ -506,7 +472,7 @@ public class IncompleteBusStopViewModelTests
             .Setup(r => r.GetByDateRangeAsync(null, It.IsAny<DateTime>(), It.IsAny<DateTime>()))
             .ReturnsAsync(ledgers);
         _cardRepositoryMock
-            .Setup(r => r.GetAllIncludingDeletedAsync())
+            .Setup(r => r.GetAllAsync())
             .ReturnsAsync(cards);
 
         await _viewModel.InitializeAsync();
@@ -548,7 +514,7 @@ public class IncompleteBusStopViewModelTests
             .Setup(r => r.GetByDateRangeAsync(null, It.IsAny<DateTime>(), It.IsAny<DateTime>()))
             .ReturnsAsync(ledgers);
         _cardRepositoryMock
-            .Setup(r => r.GetAllIncludingDeletedAsync())
+            .Setup(r => r.GetAllAsync())
             .ReturnsAsync(cards);
 
         await _viewModel.InitializeAsync();
@@ -586,7 +552,7 @@ public class IncompleteBusStopViewModelTests
             .Setup(r => r.GetByDateRangeAsync(null, It.IsAny<DateTime>(), It.IsAny<DateTime>()))
             .ReturnsAsync(initialLedgers);
         _cardRepositoryMock
-            .Setup(r => r.GetAllIncludingDeletedAsync())
+            .Setup(r => r.GetAllAsync())
             .ReturnsAsync(cards);
 
         await _viewModel.InitializeAsync();
@@ -667,7 +633,7 @@ public class IncompleteBusStopViewModelTests
             .Setup(r => r.GetByDateRangeAsync(null, It.IsAny<DateTime>(), It.IsAny<DateTime>()))
             .ReturnsAsync(ledgers);
         _cardRepositoryMock
-            .Setup(r => r.GetAllIncludingDeletedAsync())
+            .Setup(r => r.GetAllAsync())
             .ReturnsAsync(cards);
 
         await _viewModel.InitializeAsync();
@@ -702,7 +668,7 @@ public class IncompleteBusStopViewModelTests
             .Setup(r => r.GetByDateRangeAsync(null, It.IsAny<DateTime>(), It.IsAny<DateTime>()))
             .ReturnsAsync(ledgers);
         _cardRepositoryMock
-            .Setup(r => r.GetAllIncludingDeletedAsync())
+            .Setup(r => r.GetAllAsync())
             .ReturnsAsync(new List<IcCard> { new IcCard { CardIdm = "CARD001", CardType = "はやかけん", CardNumber = "001" } });
         await _viewModel.InitializeAsync();
         _ledgerRepositoryMock
@@ -753,7 +719,7 @@ public class IncompleteBusStopViewModelTests
             .Setup(r => r.GetByDateRangeAsync(null, It.IsAny<DateTime>(), It.IsAny<DateTime>()))
             .ReturnsAsync(ledgers);
         _cardRepositoryMock
-            .Setup(r => r.GetAllIncludingDeletedAsync())
+            .Setup(r => r.GetAllAsync())
             .ReturnsAsync(cards);
 
         await _viewModel.InitializeAsync();
@@ -802,7 +768,7 @@ public class IncompleteBusStopViewModelTests
             .Setup(r => r.GetByDateRangeAsync(null, It.IsAny<DateTime>(), It.IsAny<DateTime>()))
             .ReturnsAsync(ledgers);
         _cardRepositoryMock
-            .Setup(r => r.GetAllIncludingDeletedAsync())
+            .Setup(r => r.GetAllAsync())
             .ReturnsAsync(cards);
 
         await _viewModel.InitializeAsync();
@@ -834,7 +800,7 @@ public class IncompleteBusStopViewModelTests
             .Setup(r => r.GetByDateRangeAsync(null, It.IsAny<DateTime>(), It.IsAny<DateTime>()))
             .ReturnsAsync(new List<Ledger>());
         _cardRepositoryMock
-            .Setup(r => r.GetAllIncludingDeletedAsync())
+            .Setup(r => r.GetAllAsync())
             .ReturnsAsync(new List<IcCard>());
 
         await _viewModel.InitializeAsync();

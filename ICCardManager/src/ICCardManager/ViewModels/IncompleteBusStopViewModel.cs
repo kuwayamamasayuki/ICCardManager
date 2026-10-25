@@ -98,8 +98,7 @@ namespace ICCardManager.ViewModels
                 var incompleteLedgers = ledgers
                     .Where(l => SummaryGenerator.HasIncompleteBusStop(l.Summary)).ToList();
 
-                // Issue #2332: 論理削除済みのカードの行も、IDm ではなくカード名で表示する（未入力の行は削除後も残る）
-                var cards = await _cardRepository.GetAllIncludingDeletedAsync();
+                var cards = await _cardRepository.GetAllAsync();
                 var cardMap = cards.ToDictionary(c => c.CardIdm, c => $"{c.CardType} {c.CardNumber}");
 
                 _allItems = incompleteLedgers.Select(l => new IncompleteBusStopItem

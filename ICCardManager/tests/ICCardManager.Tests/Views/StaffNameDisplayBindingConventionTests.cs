@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using System.Linq;
 using System.Text.RegularExpressions;
 using FluentAssertions;
@@ -24,21 +25,24 @@ namespace ICCardManager.Tests.Views;
 public class StaffNameDisplayBindingConventionTests
 {
     /// <summary>
-    /// 生の氏名（<c>StaffName</c>）への束縛。<c>DisplayStaffName</c> / <c>DisplayStaffNamePreview</c> など、
-    /// 別の識別子の一部には一致しない。
+    /// 束縛のパス。マークアップ拡張（<c>{Binding X}</c> / <c>{Binding Path=X}</c> / <c>{Binding Mode=…, Path=X}</c>）と
+    /// 要素の形（<c>&lt;Binding Path="X"/&gt;</c>。<c>MultiBinding</c> の子を含む）。<c>[^}]</c> / <c>[^&gt;]</c> は改行にも一致するので、
+    /// 複数行に分けて書いた束縛も拾う。
     /// </summary>
-    private static readonly Regex RawStaffNameBinding = new Regex(
-        @"\{Binding\s+(?:Path\s*=\s*)?StaffName\s*[,}]|\bPath\s*=\s*""?StaffName""?(?![\w.])",
-        RegexOptions.Compiled);
+    private static readonly Regex[] BindingPathPatterns =
+    {
+        new(@"\{Binding\s+(?!Path\s*=)(?![A-Za-z]+\s*=)(?<path>[^,}\s]+)", RegexOptions.Compiled),
+        new(@"\{Binding\b[^}]*?\bPath\s*=\s*(?<path>[^,}\s]+)", RegexOptions.Compiled),
+        new(@"<Binding\b[^>]*?\bPath\s*=\s*""(?<path>[^""]+)""", RegexOptions.Compiled),
+    };
+
+    private static readonly Regex XmlComment = new(@"<!--.*?-->", RegexOptions.Compiled | RegexOptions.Singleline);
 
     [Fact]
     public void 本番のXAMLは生の氏名へ束縛しないこと()
     {
         var violations = ProductionSourceFiles.Xaml
-            .SelectMany(f => f.Text.Split('\n')
-                .Select((line, i) => (File: f.RelativePath, Line: i + 1, Text: line))
-                .Where(x => RawStaffNameBinding.IsMatch(x.Text)))
-            .Select(x => $"  {x.File}:{x.Line} {x.Text.Trim()}")
+            .SelectMany(f => FindRawStaffNameBindings(f.Text).Select(v => $"  {f.RelativePath}:{v.Line} {v.Path}"))
             .ToList();
 
         violations.Should().BeEmpty(
@@ -46,6 +50,24 @@ public class StaffNameDisplayBindingConventionTests
             "生の StaffName を表示すると、同行者のいる行が履歴一覧と食い違います（Issue #1906 / #2332）。\n" +
             string.Join("\n", violations));
     }
+
+    /// <summary>
+    /// 束縛のパスの最後の区切りが <c>StaffName</c> のもの（<c>Ledger.StaffName</c> のようなドット付きのパスを含む）。
+    /// </summary>
+    private static IReadOnlyList<(int Line, string Path)> FindRawStaffNameBindings(string xaml)
+    {
+        // コメントは同じ長さの空白へ置き換え、行番号を保つ（設計意図を書いたコメントを違反にしない）
+        var code = XmlComment.Replace(xaml, m => Regex.Replace(m.Value, @"[^\n]", " "));
+        return BindingPathPatterns
+            .SelectMany(p => p.Matches(code).Cast<Match>())
+            .Select(m => (m.Groups["path"].Index, Path: m.Groups["path"].Value.Trim('"', '\'')))
+            .Where(x => LastSegment(x.Path) == "StaffName")
+            .Select(x => (Line: code.Take(x.Index).Count(c => c == '\n') + 1, x.Path))
+            .Distinct()
+            .ToList();
+    }
+
+    private static string LastSegment(string path) => path.Split('.').Last().Trim();
 
     /// <summary>
     /// 走査が空振りしていないこと（導出した値への束縛が実在すること）。
@@ -66,12 +88,25 @@ public class StaffNameDisplayBindingConventionTests
     [InlineData("<TextBlock Text=\"{Binding StaffName}\"/>", true)]
     [InlineData("Binding=\"{Binding StaffName, Mode=OneWay}\"", true)]
     [InlineData("Binding=\"{Binding Path=StaffName}\"", true)]
+    [InlineData("Binding=\"{Binding Mode=OneWay, Path=StaffName}\"", true)]
     [InlineData("<Binding Path=\"StaffName\" />", true)]
+    // ドット付きのパス（最後の区切りが StaffName）
+    [InlineData("<TextBlock Text=\"{Binding Ledger.StaffName}\"/>", true)]
+    [InlineData("<TextBlock Text=\"{Binding Path=SelectedItem.StaffName}\"/>", true)]
+    [InlineData("<MultiBinding><Binding Path=\"Item.StaffName\"/></MultiBinding>", true)]
+    // 複数行に分けた束縛
+    [InlineData("<TextBlock Text=\"{Binding\r\n    StaffName,\r\n    Mode=OneWay}\"/>", true)]
+    [InlineData("<Binding\r\n    Mode=\"OneWay\"\r\n    Path=\"Ledger.StaffName\"/>", true)]
+    // 適合
     [InlineData("<TextBlock Text=\"{Binding DisplayStaffName}\"/>", false)]
+    [InlineData("<TextBlock Text=\"{Binding Ledger.DisplayStaffName}\"/>", false)]
     [InlineData("Text=\"{Binding DisplayStaffNamePreview, StringFormat=氏名欄: {0}}\"", false)]
     [InlineData("<Binding Path=\"SelectedStaff.Name\" />", false)]
+    [InlineData("<TextBlock Text=\"{Binding StaffNameLabel}\"/>", false)]
+    // コメントの中は対象外
+    [InlineData("<!-- 以前は {Binding StaffName} だった -->", false)]
     public void 検査ロジックは生の氏名への束縛だけを拾うこと(string markup, bool expected)
     {
-        RawStaffNameBinding.IsMatch(markup).Should().Be(expected);
+        FindRawStaffNameBindings(markup).Any().Should().Be(expected);
     }
 }

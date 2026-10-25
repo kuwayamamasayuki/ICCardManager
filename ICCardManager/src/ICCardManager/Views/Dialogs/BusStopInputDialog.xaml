@@ -41,7 +41,7 @@
         <!-- 説明 -->
         <!-- Issue #2079: この画面は返却処理の途中（返却 → バス停名入力 → 同行者数入力）に出るため、
              ヘッダーは返却系の寒色を使う。暖色（LendingBackgroundBrush / LendingForegroundBrush）は
-             「貸出」専用のシグナル色で汎用の情報ヘッダー用途を持たない（03_画面設計書 §4.2.1）ため、
+             貸出のシグナルと注意の枠に兼用しているが、返却フローの画面には使わない（03_画面設計書 §4.1。Issue #2332）。
              ここで使うと返却の途中で「貸出になった？」と読まれる。
              ReturnBackgroundBrush の情報ヘッダー兼用は Issue #1399 の設計判断 -->
         <Border Grid.Row="0" Background="{DynamicResource ReturnBackgroundBrush}" CornerRadius="4" Padding="15" Margin="0,0,0,15">
