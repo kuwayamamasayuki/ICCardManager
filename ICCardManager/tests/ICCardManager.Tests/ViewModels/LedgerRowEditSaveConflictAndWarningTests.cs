@@ -168,6 +168,20 @@ public class LedgerRowEditSaveConflictAndWarningTests : IDisposable
     }
 
     [Fact]
+    public async Task 行が無いと分かった後は削除を押せないこと()
+    {
+        var ledger = CreateLedger();
+        _ledgerRepoMock.Setup(r => r.GetByIdAsync(ledger.Id)).ReturnsAsync(() => CreateLedger());
+        _ledgerRepoMock.Setup(r => r.UpdateAsync(It.IsAny<Ledger>(), It.IsAny<SQLiteTransaction>())).ReturnsAsync(false);
+        await _viewModel.InitializeForEditAsync(ToDto(ledger), previousBalance: 2510);
+        _viewModel.CanDelete.Should().BeTrue("競合の前は削除できる（対）");
+
+        await _viewModel.SaveCommand.ExecuteAsync(null);
+
+        _viewModel.CanDelete.Should().BeFalse("行はもう無いので、削除の確認と削除の競合を重ねて案内しない");
+    }
+
+    [Fact]
     public async Task バス停名の同期の競合でも_閉じたら一覧の再読込を求め_保存は塞がないこと()
     {
         var ledger = CreateLedger(summary: "バス（天神～博多）");
@@ -590,6 +604,63 @@ public class LedgerRowEditSaveConflictAndWarningTests : IDisposable
 
         _viewModel.IsAutoBalance.Should().BeFalse();
         _viewModel.Balance.Should().Be(1234, "OFF に戻したときは ON にする直前の残高を復元する（§3.12）");
+        _viewModel.WarningMessage.Should().NotContain(LedgerRowEditViewModel.AddBalanceNotEnteredWarning);
+    }
+
+    /// <summary>
+    /// OFF にしただけ（入力なし）で ON に戻した残高は、前の位置で計算した値なので「復元する値」として扱わない（コードレビュー 3 回目）。
+    /// </summary>
+    [Fact]
+    public async Task OFFにして入力せずONに戻してから先頭へ動かすと_計算値を復元せず未入力になること()
+    {
+        await _viewModel.InitializeForAddAsync(TestCardIdm, CreateListedLedgers(), historyStartsAtCardBeginning: false);
+        _viewModel.Summary = "鉄道（六本松～天神）";
+        _viewModel.Expense = 200;
+        _viewModel.MoveInsertPositionUpCommand.Execute(null); // 位置 1（直前行 2300 から計算）
+        _viewModel.Balance.Should().Be(2100);
+        _viewModel.IsAutoBalance = false; // 入力しない
+        _viewModel.IsAutoBalance = true;
+
+        _viewModel.MoveInsertPositionUpCommand.Execute(null); // 先頭（起点不明）
+
+        _viewModel.Balance.Should().Be(0, "位置 1 で計算した 2,100 を今の位置の値として残さない");
+        _viewModel.WarningMessage.Should().Contain(LedgerRowEditViewModel.AddBalanceNotEnteredWarning);
+    }
+
+    /// <summary>
+    /// 未入力へ戻す 0 は利用者の入力として数えない。数えると、戻した後に手で OFF→ON しただけの計算値が
+    /// 「利用者の値」として退避され、もう一度先頭へ動かしたときに復元される。
+    /// </summary>
+    [Fact]
+    public async Task 未入力へ戻した後に戻してOFFからONにしても_計算値を復元しないこと()
+    {
+        await InitAddAtTopAsync(); // 先頭で未入力（0）
+        _viewModel.MoveInsertPositionDownCommand.Execute(null); // 自動計算が ON に戻る
+        _viewModel.IsAutoBalance = false; // 入力しない
+        _viewModel.IsAutoBalance = true;
+
+        _viewModel.MoveInsertPositionUpCommand.Execute(null);
+
+        _viewModel.Balance.Should().Be(0);
+        _viewModel.WarningMessage.Should().Contain(LedgerRowEditViewModel.AddBalanceNotEnteredWarning);
+    }
+
+    [Fact]
+    public async Task 入力した残高をOFFで復元した後にもう一度ONにしても_その残高を復元すること()
+    {
+        await _viewModel.InitializeForAddAsync(TestCardIdm, CreateListedLedgers(), historyStartsAtCardBeginning: false);
+        _viewModel.Expense = 200;
+        _viewModel.IsAutoBalance = false;
+        _viewModel.Balance = 1234;
+        _viewModel.IsAutoBalance = true;
+        _viewModel.IsAutoBalance = false; // 1,234 を復元
+        _viewModel.Balance.Should().Be(1234);
+        _viewModel.IsAutoBalance = true;
+
+        _viewModel.MoveInsertPositionUpCommand.Execute(null);
+        _viewModel.MoveInsertPositionUpCommand.Execute(null);
+
+        _viewModel.Balance.Should().Be(1234, "復元した残高も利用者が入力した値");
         _viewModel.WarningMessage.Should().NotContain(LedgerRowEditViewModel.AddBalanceNotEnteredWarning);
     }
 

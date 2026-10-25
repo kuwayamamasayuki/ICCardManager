@@ -699,13 +699,20 @@ namespace ICCardManager.ViewModels
             if (value)
             {
                 _isAddBalanceNotEntered = false;
-                _balanceBeforeAutoBalance = Balance;
+                // Issue #2325（コードレビュー 3 回目）: Addモードで退避するのは、利用者が OFF の間に入力した残高だけ。
+                // OFF にしただけ（入力なし）の残高は前の挿入位置で計算した値であり、退避すると先頭へ動かしたときに
+                // 「復元」されて、手入力の値として保存され得る（この Issue の欠陥そのもの）
+                _balanceBeforeAutoBalance = Mode == LedgerRowEditMode.Add && !_isAddBalanceEnteredWhileManual
+                    ? null
+                    : Balance;
                 RecalculateBalance();
             }
             else if (_balanceBeforeAutoBalance.HasValue)
             {
-                Balance = _balanceBeforeAutoBalance.Value;
+                SetBalanceProgrammatically(_balanceBeforeAutoBalance.Value);
                 _balanceBeforeAutoBalance = null;
+                // 退避していたのは利用者が入力した値で、_isAddBalanceEnteredWhileManual は立ったまま（下ろす操作は無い）なので、
+                // 復元した残高も利用者の値として扱われる
             }
             Validate();
         }
@@ -718,8 +725,38 @@ namespace ICCardManager.ViewModels
             // Issue #2325: 残高が変わった（利用者が入力した）ら、未入力の状態は終わる。
             // 自動計算が使えなくなったときに 0 へ戻す代入もここを通るが、フラグはその後で立てる
             _isAddBalanceNotEntered = false;
+            if (!IsAutoBalance && !_isSettingBalanceProgrammatically)
+            {
+                _isAddBalanceEnteredWhileManual = true;
+            }
             TrackFieldChange();
             Validate();
+        }
+
+        /// <summary>
+        /// Issue #2325: 自動計算 OFF の間に利用者が残高を入力したか（Addモードで、ON にするときに退避するかの判断に使う）
+        /// </summary>
+        private bool _isAddBalanceEnteredWhileManual;
+
+        /// <summary>
+        /// Issue #2325: プログラムが残高を代入している最中か（利用者の入力と区別するため）
+        /// </summary>
+        private bool _isSettingBalanceProgrammatically;
+
+        /// <summary>
+        /// Issue #2325: 利用者の入力として数えずに残高を代入する（復元・未入力への 0）
+        /// </summary>
+        private void SetBalanceProgrammatically(int value)
+        {
+            _isSettingBalanceProgrammatically = true;
+            try
+            {
+                Balance = value;
+            }
+            finally
+            {
+                _isSettingBalanceProgrammatically = false;
+            }
         }
 
         /// <summary>
@@ -923,7 +960,7 @@ namespace ICCardManager.ViewModels
                 // 復元する値があったとき（OFF にして入力した残高から ON にした）は、その値を残す（§3.12「OFF に戻したときに復元する」）
                 if (Mode == LedgerRowEditMode.Add && !hasValueToRestore)
                 {
-                    Balance = 0;
+                    SetBalanceProgrammatically(0);
                     _isAddBalanceNotEntered = true;
                 }
             }
@@ -1391,6 +1428,8 @@ namespace ICCardManager.ViewModels
             _conflictDetected = true;
             _hasFieldChanges = false;
             CanSave = false;
+            // 行はもう無いので削除もできない（押すと確認の後に削除の競合として 2 度目の案内になる。コードレビュー 3 回目）
+            CanDelete = false;
             SkipToNextCommand.NotifyCanExecuteChanged();
             BackCommand.NotifyCanExecuteChanged();
             StatusMessage = ConcurrencyConflictMessage.ForUpdateReloadOnClose(_editTargetLabel, "履歴一覧");
