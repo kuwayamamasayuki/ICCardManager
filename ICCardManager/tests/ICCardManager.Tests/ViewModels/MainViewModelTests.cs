@@ -348,6 +348,51 @@ public class MainViewModelTests : IDisposable
         vm.WarningMessages.Should().NotContain(w => w.Type == WarningType.CarryoverDataLoss);
     }
 
+    /// <summary>
+    /// Issue #2329（レビュー 2 回目）: バス停名未入力の警告は運用中のカードに限って数えるため、カード管理画面を閉じたら
+    /// 数え直すこと（★のあるカードを払い戻すと件数が変わる）。対の表明として、運用中のままなら警告を保つこと。
+    /// </summary>
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task OpenCardManageAsync_バス停名未入力の警告を数え直すこと(bool refundedInDialog)
+    {
+        const string cardIdm = "0E0E0E0E0E0E0E0E";
+        SetupWarningCheckDefaults(busStopLedgers: new List<Ledger>
+        {
+            new Ledger { CardIdm = cardIdm, Summary = "バス（★）" }
+        });
+        _ledgerRepositoryMock.Setup(r => r.GetAllLatestBalancesAsync())
+            .ReturnsAsync(new Dictionary<string, (int Balance, DateTime? LastUsageDate)>());
+        await _viewModel.CheckIncompleteBusStopsAsync();
+        _viewModel.WarningMessages.Should().ContainSingle(w => w.Type == WarningType.IncompleteBusStop, "前提: 警告が出ている");
+
+        // カード管理画面で払い戻した状態を模す
+        _navigationServiceMock.Setup(n => n.ShowDialog<ICCardManager.Views.Dialogs.CardManageDialog>(
+                It.IsAny<Action<ICCardManager.Views.Dialogs.CardManageDialog>>()))
+            .Callback(() =>
+            {
+                if (refundedInDialog)
+                {
+                    _cardRepositoryMock.Setup(r => r.GetAllAsync())
+                        .ReturnsAsync(new List<IcCard> { new IcCard { CardIdm = cardIdm, IsRefunded = true } });
+                }
+            });
+
+        await _viewModel.OpenCardManageAsync();
+
+        if (refundedInDialog)
+        {
+            _viewModel.WarningMessages.Should().NotContain(w => w.Type == WarningType.IncompleteBusStop,
+                "払い戻したカードの★は数えないため、警告は消える");
+        }
+        else
+        {
+            _viewModel.WarningMessages.Should().ContainSingle(w => w.Type == WarningType.IncompleteBusStop)
+                .Which.DisplayText.Should().Contain("1件");
+        }
+    }
+
     [Fact]
     public async Task RunStartupDataChecksAsync_1件が失敗しても後続のチェックを実行すること()
     {
