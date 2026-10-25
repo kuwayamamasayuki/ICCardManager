@@ -20,18 +20,20 @@
 
 `IsRetouchWithinTimeout` は**交通系ICカードの IDm しか見ない**（職員証は判定条件に含まれない）。したがって**前回とは別の職員が続けて操作した場合も逆処理が発動する**。誰の操作として記録するかは操作者の確定状況で決まる。
 
-| 再タッチ時の状態 | `_currentStaffIdm` | 記録する操作者 |
+| 再タッチ時の状態 | `_currentStaffIdm` | 逆処理の操作者 |
 |------------------|--------------------|----------------|
 | ICカードタッチ待ち（職員証タッチ済み） | 確定済み | **いまタッチした職員**（上書き禁止） |
 | 職員証タッチ待ち | null | 前回操作者（`_lastProcessedStaffIdm`）で補完 |
 | 職員証タッチ待ち かつ 前回操作者も null | null | 記録せずエラー通知 |
 
-- **「無い値の補完」と「有る値の上書き」を同じ代入文で書かない**。`Process30SecondRuleAsync` の `_currentStaffIdm = _lastProcessedStaffIdm;` は「操作者不在時の補完」が意図（XML コメントもその趣旨）だったが、無条件代入だったため職員証タッチ済みの経路では**確定済みの操作者を捨てて前回操作者に差し替えていた**。`ledger.StaffName` / `ic_card.lender_idm` / `operation_log` が実際の操作者と食い違い、長期未返却の督促も誤った職員へ向かう
+- **「逆処理の操作者」と「台帳の利用の行の名義」は別物**（Issue #2323）。操作者が台帳に残るのは**貸出方向だけ**（貸出レコードの `lender_idm` / `staff_name` と `ic_card.last_lent_staff`）。**返却方向では操作者はどこにも記録されない** — `ReturnAsync` の `staffIdm` は登録済みの職員かの確認にだけ使い、利用の行は**貸出レコードの貸出者**の名義で作られ（`PersistReturnAsync`）、`ic_card.last_lent_staff` は NULL に戻り、貸出レコードは削除される（`ledger.returner_idm` / `returned_at` はどの経路も書かない未使用の列）。職員B が職員A の貸出を逆処理で返却しても、利用の行は職員A の名義。名義を貸出者にするのは、カードを持ち出して使ったのが貸出者であり物品出納簿の実態に合うため（業務判断。04_機能設計書 §2.4.1・§3.4）。なお**カードのタッチによる**貸出・返却（逆処理を含む）は `operation_log` に記録しない（システム操作による貸出記録の作成 `SystemLendViewModel`（#1909）は記録する）
+  - **名義の回帰は貸出者と返却者を別の職員にして表明する**。同じ職員で貸出・返却するテストは、名義に貸出者・返却者のどちらを書いても緑になる（#2323 で設計書が「返却者」、実装が「貸出者」のまま食い違っていたのを、既存テストが検出できなかった）
+- **「無い値の補完」と「有る値の上書き」を同じ代入文で書かない**。`Process30SecondRuleAsync` の `_currentStaffIdm = _lastProcessedStaffIdm;` は「操作者不在時の補完」が意図（XML コメントもその趣旨）だったが、無条件代入だったため職員証タッチ済みの経路では**確定済みの操作者を捨てて前回操作者に差し替えていた**。貸出レコードの `ledger.StaffName` / `ic_card.last_lent_staff` が実際の操作者と食い違い、長期未返却の督促も誤った職員へ向かう
 - **「意図が補完なら、補完の条件を書く」**。`if (string.IsNullOrEmpty(_currentStaffIdm))` を付けるだけで意図とコードが一致する。コメントで意図を書いても、コードが無条件なら無条件に動く
 - **null 判定を経路判定の代理に使うなら、その等価性を確かめて明記する**。`AppState.WaitingForStaffCard` へ遷移する経路は `MainViewModel.ResetState()` ただ 1 つで、そこで `_currentStaffIdm` は必ず null になるため「未確定＝職員証タッチ待ち経路」が成立する。この前提が崩れる遷移を足すときは本規則を見直すこと
 - **エラー分岐（操作者が現在も前回も不明）は到達可能**。仮想タッチ（Issue #1577）は `LendingService.ReturnAsync` を直接呼ぶため `LastProcessedCardIdm` は立つが `MainViewModel` の前回操作者は立たない。「到達不能だから」と削らない
 - **30秒ルールの武装（`LastProcessedCardIdm` / `LastProcessedTime` / `LastOperationType`）は台帳への記録が確定した直後に行う**（Issue #1805）。`ReturnAsync` はコミット後に残額の解決・残額警告の DB I/O を持つため、その後ろに置くと後処理の失敗で「返却は記録済みなのに未武装・`Success=false`」になり、「返却失敗・もう一度タッチ」の案内どおりに再タッチした職員の操作が貸出として新規に記録される。`Success` は「記録が確定した」ことだけを表し、付帯情報（残額・残額警告）の欠落は `LendingResult.HasPostCommitFailure` で別途伝える（詳細は `db-write-conventions.md` の「コミット確定後の後処理を、成否の判定に巻き込まない」）
-- **操作者の帰属はテストで表明する**。`CurrentState` や「例外が出ない」ではなく、**台帳に記録された IDm・氏名**（`ledger.LenderIdm` / `StaffName`）と `UpdateLentStatusAsync` の第4引数を具体値で検証する（`MainViewModelIntegrationTests` の `Retouch30Sec_*` 3件が参考実装）
+- **操作者の帰属はテストで表明する**。`CurrentState` や「例外が出ない」ではなく、**台帳に記録された IDm・氏名**（`ledger.LenderIdm` / `StaffName`）と `UpdateLentStatusAsync` の第4引数を具体値で検証する（`MainViewModelIntegrationTests` の `Retouch30Sec_*` が参考実装。返却方向の名義は `Retouch30Sec_別職員が逆処理で返却しても利用の行は貸出者の名義で記録されること`）
 
 ### 返却時に記録する利用履歴の下限は「導入行の日付」（Issue #2237）
 
