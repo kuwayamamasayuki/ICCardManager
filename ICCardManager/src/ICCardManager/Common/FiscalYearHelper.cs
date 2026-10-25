@@ -43,20 +43,5 @@ namespace ICCardManager.Common
         {
             return new DateTime(fiscalYear, 4, 1);
         }
-
-        /// <summary>
-        /// 前月の年・月を取得
-        /// </summary>
-        /// <param name="year">西暦年</param>
-        /// <param name="month">月（1-12）</param>
-        /// <returns>前月の（年, 月）タプル</returns>
-        public static (int Year, int Month) GetPreviousMonth(int year, int month)
-        {
-            if (month == 1)
-            {
-                return (year - 1, 12);
-            }
-            return (year, month - 1);
-        }
     }
 }

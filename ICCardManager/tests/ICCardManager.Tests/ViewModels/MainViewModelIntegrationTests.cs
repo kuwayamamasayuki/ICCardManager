@@ -4,6 +4,7 @@ using System.Linq;
 using System.Threading.Tasks;
 using CommunityToolkit.Mvvm.Messaging;
 using FluentAssertions;
+using ICCardManager.Common;
 using ICCardManager.Common.Exceptions;
 using ICCardManager.Data;
 using ICCardManager.Data.Repositories;
@@ -77,6 +78,7 @@ public class MainViewModelIntegrationTests
     private readonly TestTimerFactory _timerFactory = new();
     private readonly SynchronousDispatcherService _dispatcherService = new();
     private readonly DbContext _dbContext;
+    private readonly OffsetClock _lendingClock = new();
     private readonly MainViewModel _viewModel;
 
     public MainViewModelIntegrationTests()
@@ -101,7 +103,8 @@ public class MainViewModelIntegrationTests
             summaryGenerator,
             lockManager,
             Options.Create(new AppOptions()),
-            NullLogger<LendingService>.Instance);
+            NullLogger<LendingService>.Instance,
+            _lendingClock);
 
         _ledgerConsistencyChecker = new LedgerConsistencyChecker(_ledgerRepositoryMock.Object);
 
@@ -2453,10 +2456,9 @@ public class MainViewModelIntegrationTests
         // 返却後のカード A は貸出中ではないので、待機中のタッチは履歴表示になる
         _cardRepositoryMock.Setup(r => r.GetByIdmAsync(CardIdmA, It.IsAny<bool>()))
             .ReturnsAsync(new IcCard { CardIdm = CardIdmA, CardType = "はやかけん", CardNumber = "5042", IsLent = false });
-        // 30 秒ルールの逆処理に入らないよう、直前の操作を忘れさせる（Issue #2330: 本番から呼ばれない
-        // LendingService.ClearHistory を削除したため、判定に使う IDm だけを反射で消す）
-        typeof(LendingService).GetProperty(nameof(LendingService.LastProcessedCardIdm))!
-            .SetValue(_lendingService, null);
+        // 30 秒ルールの逆処理に入らないよう、再タッチの時間を過ぎるまで時計を進める（本番で職員が
+        // 時間をおいてタッチし直したときと同じ前提。Issue #2330）
+        _lendingClock.Offset = TimeSpan.FromSeconds(AppConstants.DefaultCardRetouchTimeoutSeconds + 1);
         _lendingService.IsRetouchWithinTimeout(CardIdmA).Should().BeFalse("前提: 逆処理に入らない");
         RaiseCardRead(CardIdmA);
         await _dispatcherService.WaitForPendingAsync();
@@ -2523,4 +2525,15 @@ public class MainViewModelIntegrationTests
     }
 
     #endregion
+
+    /// <summary>
+    /// 実時刻に <see cref="Offset"/> を足した時刻を返す時計。既定は 0 で <see cref="SystemClock"/> と同じ振る舞いになり、
+    /// 30 秒ルールの時間を過ぎた状態を作るテストだけが進める。
+    /// </summary>
+    private sealed class OffsetClock : ISystemClock
+    {
+        public TimeSpan Offset { get; set; }
+
+        public DateTime Now => DateTime.Now + Offset;
+    }
 }

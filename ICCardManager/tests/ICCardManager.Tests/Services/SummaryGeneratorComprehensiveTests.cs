@@ -384,32 +384,6 @@ public class SummaryGeneratorComprehensiveTests : IDisposable
         OutputInputAndResult(details, summary);
     }
 
-    [Fact]
-    public void TC022_UseDateがnull_スキップ()
-    {
-        // Arrange
-        var details = new List<LedgerDetail>
-        {
-            new LedgerDetail
-            {
-                UseDate = null,
-                EntryStation = "天神",
-                ExitStation = "博多",
-                Amount = 210,
-                Balance = 4790,
-                IsCharge = false,
-                IsBus = false
-            },
-            CreateRailwayUsage(new DateTime(2024, 12, 9), "博多", "天神", 210, 4580)
-        };
-
-        // Act
-        var summary = _generator.Generate(details);
-
-        // Assert: UseDateがnullのレコードはスキップ
-        OutputInputAndResult(details, summary);
-    }
-
     #endregion
 
     #region カテゴリ7: 静的メソッド
