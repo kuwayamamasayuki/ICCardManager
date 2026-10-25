@@ -515,10 +515,33 @@ namespace ICCardManager.Services
                 Message = $"利用履歴ID {idText} の履歴は台帳にありません（履歴画面で削除した・統合で他の履歴にまとめた履歴か、" +
                           "別のパソコンやバックアップから戻す前のデータベースで出力したCSVの可能性があります）。" +
                           "削除・統合した履歴を取り込みで台帳に戻さないため、この行は取り込めません。" +
-                          "不要な行ならCSVから削除し、新しい履歴として登録する場合は利用履歴IDを空欄にしてから、もう一度取り込んでください。",
+                          "不要な行ならCSVから削除し、新しい履歴として登録する場合は利用履歴IDを空欄にしてから、もう一度取り込んでください。" +
+                          LedgerCsvFromOtherDatabaseGuidance,
                 Data = idText
             };
         }
+
+        /// <summary>
+        /// 利用履歴 CSV の行エラーのうち、原因が「別のデータベース（別の PC・リストア前）で出力した CSV」であり得るものに添える案内（Issue #2324）
+        /// </summary>
+        /// <remarks>
+        /// その原因なら、エラーになった行だけ直しても、エラーにならなかった行の ID が同じカードの無関係な履歴を指したまま残り、
+        /// 黙って更新され得る。行単位の直し方とは別に、CSV 全体の対処（ID 列の値をすべて消し、見出しは残し、スキップ指定ありで
+        /// 取り込み直す）を示す。管理者マニュアル・04 §14.7 の移行・リストア後の手順と同じ内容。
+        /// </remarks>
+        internal const string LedgerCsvFromOtherDatabaseGuidance =
+            "別のパソコンやバックアップから戻す前のデータベースで出力したCSVの場合は、利用履歴IDの値をすべて消し（1行目の「ID」の見出しは残す）、" +
+            "「既存データはスキップする」をオンにして取り込み直してください。";
+
+        /// <summary>
+        /// 利用履歴詳細 CSV の行エラーのうち、原因が「別のデータベースで出力した CSV」であり得るものに添える案内（Issue #2324）
+        /// </summary>
+        /// <remarks>
+        /// 明細 CSV は ID を消すと既存の履歴と照合されずに新しい履歴になり、ID を残すと同じカードの無関係な履歴の明細を
+        /// 置き換え得るため、その CSV を取り込まないことだけを示す（管理者マニュアル・04 §14.7 と同じ）。
+        /// </remarks>
+        internal const string DetailCsvFromOtherDatabaseGuidance =
+            "別のパソコンやバックアップから戻す前のデータベースで出力したCSVの場合は、このCSVは取り込まないでください。";
 
         /// <summary>
         /// 利用履歴 CSV で、行のカードを直す場所（カードIDm列が空欄なら取り込み先カードを使う）
@@ -574,8 +597,10 @@ namespace ICCardManager.Services
                 Message = $"利用履歴ID {ledgerId.ToString(CultureInfo.InvariantCulture)} は別の交通系ICカード{ownerLabel}の履歴で、" +
                           $"この行のカードと一致しないため取り込めません。" +
                           (offerBlankIdAsNewLedger
-                              ? $"利用履歴IDと{cardColumnLabel}を確認し、新しい履歴として取り込む場合は利用履歴IDを空欄にしてください。"
-                              : $"利用履歴IDと{cardColumnLabel}を確認してください。"),
+                              ? $"利用履歴IDと{cardColumnLabel}を確認し、新しい履歴として取り込む場合は利用履歴IDを空欄にしてください。" +
+                                "「既存データはスキップする」がオフだと、台帳に既にある履歴も二重に登録されます。" +
+                                LedgerCsvFromOtherDatabaseGuidance
+                              : $"利用履歴IDと{cardColumnLabel}を確認してください。" + DetailCsvFromOtherDatabaseGuidance),
                 Data = ledgerId.ToString(CultureInfo.InvariantCulture)
             };
         }

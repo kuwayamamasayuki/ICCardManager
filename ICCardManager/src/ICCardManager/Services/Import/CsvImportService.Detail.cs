@@ -324,7 +324,8 @@ namespace ICCardManager.Services
         internal static string BuildDetailLedgerIdNotFoundMessage(int ledgerId)
             => $"利用履歴ID {ledgerId.ToString(CultureInfo.InvariantCulture)} が存在しません（履歴画面で削除した・統合で他の履歴にまとめた履歴か、" +
                "別のパソコンやバックアップから戻す前のデータベースで出力したCSVの可能性があります）。" +
-               "台帳に無い履歴の明細は取り込めないため、この行をCSVから削除してから、もう一度取り込んでください。";
+               "台帳に無い履歴の明細は取り込めないため、この行をCSVから削除してから、もう一度取り込んでください。" +
+               DetailCsvFromOtherDatabaseGuidance;
 
         /// <summary>
         /// 利用履歴詳細CSVをインポート

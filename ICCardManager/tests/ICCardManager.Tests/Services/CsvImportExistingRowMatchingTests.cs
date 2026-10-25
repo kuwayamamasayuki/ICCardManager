@@ -161,6 +161,10 @@ public class CsvImportExistingRowMatchingTests : IDisposable
         error.LineNumber.Should().Be(2);
         error.Message.Should().Contain("利用履歴ID 50").And.Contain("台帳にありません")
             .And.Contain("削除").And.Contain("統合").And.Contain("バックアップ").And.Contain("利用履歴IDを空欄");
+        // 原因が別のデータベースで出力した CSV なら、エラーの行だけでなく CSV 全体の対処（ID 列の値をすべて消し、見出しは残し、
+        // スキップ指定ありで取り込み直す）を示す。行だけ直すと、エラーにならなかった行が無関係な履歴を指したまま残るため
+        error.Message.Should().Contain("別のパソコンやバックアップから戻す前").And.Contain("利用履歴IDの値をすべて消し")
+            .And.Contain("「ID」の見出しは残す").And.Contain("「既存データはスキップする」をオンにして取り込み直してください。");
         AssertActionable(error.Message);
         preview.Errors.Should().ContainSingle().Which.Message.Should().Be(error.Message, "プレビューと取り込みで同じ判定・同じ文言");
     }
@@ -286,6 +290,9 @@ public class CsvImportExistingRowMatchingTests : IDisposable
         var error = result.Errors.Should().ContainSingle().Subject;
         error.LineNumber.Should().Be(2);
         error.Message.Should().Contain("利用履歴ID 1").And.Contain("「はやかけん 001」").And.Contain("カードIDm列を確認");
+        // 原因が別のデータベースで出力した CSV なら、その明細 CSV は取り込まない（ID を消すと照合されずに新しい履歴になり、
+        // 残すと同じカードの無関係な履歴の明細を置き換え得る）
+        error.Message.Should().Contain("別のパソコンやバックアップから戻す前").And.Contain("このCSVは取り込まないでください。");
         error.Message.Should().NotContain("取り込み先カード", "利用履歴詳細の取り込みに取り込み先カードの指定は無い");
         error.Message.Should().NotContain("空欄",
             "明細 CSV の ID 空欄の行は既存の履歴と照合されずに新しい履歴になり、ID を書き間違えた行で案内すると同じ利用を二重に計上させる");
@@ -361,6 +368,9 @@ public class CsvImportExistingRowMatchingTests : IDisposable
         error.Message.Should().Contain("利用履歴ID 50 が存在しません")
             .And.Contain("削除").And.Contain("統合").And.Contain("バックアップ")
             .And.Contain("この行をCSVから削除してから");
+        // 原因が別のデータベースで出力した CSV なら、その明細 CSV は取り込まない（ID を消すと照合されずに新しい履歴になり、
+        // 残すと同じカードの無関係な履歴の明細を置き換え得る）
+        error.Message.Should().Contain("別のパソコンやバックアップから戻す前").And.Contain("このCSVは取り込まないでください。");
         error.Message.Should().NotContain("空欄", "明細 CSV の ID 空欄の行は既存の履歴と照合されずに登録されるため、直し方として案内しない");
         AssertActionable(error.Message);
         preview.Errors.Should().ContainSingle().Which.Message.Should().Be(error.Message, "プレビューと取り込みで同じ文言");
