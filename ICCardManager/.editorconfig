@@ -95,8 +95,10 @@ dotnet_diagnostic.CA1848.severity = none
 # インターフェースのメンバー名を変えると実装・モック・テストへ波及するだけで、得るものが無い。
 dotnet_diagnostic.CA1716.severity = none
 
-# CA1000（ジェネリック型に静的メンバーを宣言しない）: ServiceResult<T>.Ok / Fail、CardReadResult<T> の
-# 静的ファクトリが対象。型引数を推論させる生成手段として意図した形で、呼び出し側の可読性が高い。
+# CA1000（ジェネリック型に静的メンバーを宣言しない）: 対象は CardReadResult<T>.Ok / Fail だけ。
+# コンストラクターを private にし、成功と失敗の 2 通りの組み合わせ（値かエラーのどちらか）だけを作れるようにする
+# 名前付きのファクトリで、呼び出し側は CardReadResult<IReadOnlyList<LedgerDetail>>.Ok(...) と型を明示して使う。
+# 非ジェネリックの補助クラスへ移しても、ファクトリと型が 2 つに分かれるだけで呼び出し側の読みやすさは変わらない。
 dotnet_diagnostic.CA1000.severity = none
 
 # CA1859（性能のために具象型を使う）: private メソッドの戻り値・引数をインターフェースから具象型へ変える提案。
