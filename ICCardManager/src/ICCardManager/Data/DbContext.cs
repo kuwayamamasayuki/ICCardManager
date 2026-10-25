@@ -1974,7 +1974,7 @@ ON CONFLICT(key) DO UPDATE SET value = excluded.value";
         /// <para>
         /// 判定（<see cref="IsTransientLockError"/>）と同じく、記録の形も 1 か所に置く。
         /// 各リポジトリへ書き写すと、片方だけが新しい文言・レベルになる
-        /// （<c>.claude/rules/development-conventions.md</c> #1763）。
+        /// （<c>.claude/rules/service-conventions.md</c> #1763「同じ論理的な処理に手段が 2 通りあるか」）。
         /// </para>
         /// <para>
         /// <b>レベルは「システムの不具合か、利用者の入力の問題か」で分ける</b>
