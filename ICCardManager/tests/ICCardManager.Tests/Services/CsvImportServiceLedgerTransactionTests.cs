@@ -398,10 +398,12 @@ SELECT last_insert_rowid();";
             "失敗した行を行番号付きで示すこと（CSV 3行目＝2件目の登録）");
         VerifyNoAutocommitWrites(ledgerRepositoryMock);
 
-        // Issue #2324: 文言は「何が（この行の履歴）・なぜ（登録できず全体を取り消した）・どうすれば（取り込み直す）」の 3 要素
+        // Issue #2324: 文言は「何が（この行の履歴）・なぜ（登録できず全体を取り消した）・どうすれば（取り込み直し、繰り返すなら連絡）」の 3 要素
         var message = result.Errors.Single().Message;
         message.Should().Be(CsvImportService.LedgerInsertFailedMessage);
-        message.Should().Contain("この行の履歴").And.Contain("取り込み全体を取り消しました").And.Contain("取り込んでください");
+        message.Should().Contain("この行の履歴").And.Contain("取り込み全体を取り消しました")
+            .And.Contain("もう一度取り込み").And.Contain("管理者（IT担当者）に連絡してください");
+        message.Should().NotContain("しばらく待って", "待てば解消する失敗とは限らない");
         message.Should().EndWith("ください。");
         message.Length.Should().BeGreaterThanOrEqualTo(20);
     }

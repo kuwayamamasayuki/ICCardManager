@@ -160,7 +160,7 @@ namespace ICCardManager.Services
                         errors.Add(new CsvImportError
                         {
                             LineNumber = lineNumber,
-                            Message = $"利用履歴ID {detail.LedgerId} が存在しません",
+                            Message = BuildDetailLedgerIdNotFoundMessage(detail.LedgerId),
                             Data = detail.LedgerId.ToString(CultureInfo.InvariantCulture)
                         });
                         continue;
@@ -307,6 +307,20 @@ namespace ICCardManager.Services
         }
 
         /// <summary>
+        /// 利用履歴詳細 CSV で、利用履歴 ID が台帳に無い行のエラー文言（Issue #2324）
+        /// </summary>
+        /// <remarks>
+        /// 以前は「利用履歴ID N が存在しません」だけで、なぜ無いのか・どう直すのかを示さなかった。
+        /// 台帳に無い理由は利用履歴 CSV（<see cref="BuildLedgerIdNotFoundError"/>）と同じ（削除・統合した履歴、
+        /// 別のデータベースで出力した CSV）。利用履歴 ID が空欄の行はカードIDm列のカードの新しい履歴として登録されるため
+        /// （Issue #906）、意図して登録する手段としてそれを案内する。プレビューと取り込みで同じ文言を使う。
+        /// </remarks>
+        internal static string BuildDetailLedgerIdNotFoundMessage(int ledgerId)
+            => $"利用履歴ID {ledgerId.ToString(CultureInfo.InvariantCulture)} が存在しません（履歴画面で削除した・統合で他の履歴にまとめた履歴か、" +
+               "別のパソコンやバックアップから戻す前のデータベースで出力したCSVの可能性があります）。" +
+               "不要な行ならCSVから削除し、新しい履歴として登録する場合は利用履歴IDを空欄にしてカードIDm列にカードのIDmを入れてから、もう一度取り込んでください。";
+
+        /// <summary>
         /// 利用履歴詳細CSVをインポート
         /// </summary>
         /// <remarks>
@@ -442,7 +456,7 @@ namespace ICCardManager.Services
                         errors.Add(new CsvImportError
                         {
                             LineNumber = lineNumber,
-                            Message = $"利用履歴ID {detail.LedgerId} が存在しません",
+                            Message = BuildDetailLedgerIdNotFoundMessage(detail.LedgerId),
                             Data = detail.LedgerId.ToString(CultureInfo.InvariantCulture)
                         });
                         continue;

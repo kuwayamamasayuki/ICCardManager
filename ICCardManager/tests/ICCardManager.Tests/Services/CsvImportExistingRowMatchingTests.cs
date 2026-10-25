@@ -334,6 +334,50 @@ public class CsvImportExistingRowMatchingTests : IDisposable
         _ledgerRepositoryMock.Verify(x => x.ReplaceDetailsAsync(1, It.IsAny<IEnumerable<LedgerDetail>>(), It.IsAny<SQLiteTransaction>()), Times.Once);
     }
 
+    /// <summary>
+    /// 利用履歴 ID が台帳に無い明細の行は、なぜ無いのか（削除・統合・別のデータベース）とどう直すのか
+    /// （不要なら削除、登録するなら ID を空欄にしてカードIDm を入れる）を示す。プレビューと取り込みで同じ文言。
+    /// 以前は「利用履歴ID N が存在しません」だけだった。
+    /// </summary>
+    [Fact]
+    public async Task ImportLedgerDetailsAsync_IDが台帳に無い行は理由と直し方を示して拒否すること()
+    {
+        var path = await WriteCsvAsync("detail_id_not_found.csv", DetailCsvHeader,
+            "50,2026-10-01 08:00:00,0123456789ABCDEF,001,博多,中洲川端,,210,9790,0,0,0,");
+
+        var preview = await _importService.PreviewLedgerDetailsAsync(path);
+        var result = await _importService.ImportLedgerDetailsAsync(path);
+
+        preview.IsValid.Should().BeFalse();
+        result.Success.Should().BeFalse();
+        _ledgerRepositoryMock.Verify(x => x.ReplaceDetailsAsync(It.IsAny<int>(), It.IsAny<IEnumerable<LedgerDetail>>(), It.IsAny<SQLiteTransaction>()), Times.Never);
+
+        var error = result.Errors.Should().ContainSingle().Subject;
+        error.LineNumber.Should().Be(2);
+        error.Message.Should().Be(CsvImportService.BuildDetailLedgerIdNotFoundMessage(50));
+        error.Message.Should().Contain("利用履歴ID 50 が存在しません")
+            .And.Contain("削除").And.Contain("統合").And.Contain("バックアップ")
+            .And.Contain("CSVから削除").And.Contain("利用履歴IDを空欄にしてカードIDm列");
+        AssertActionable(error.Message);
+        preview.Errors.Should().ContainSingle().Which.Message.Should().Be(error.Message, "プレビューと取り込みで同じ文言");
+    }
+
+    /// <summary>
+    /// 対: 文言が案内する直し方（利用履歴 ID を空欄にしてカードIDm を入れる）の行は、新しい履歴として受け付ける。
+    /// </summary>
+    [Fact]
+    public async Task PreviewLedgerDetailsAsync_ID空欄でカードIDmのある行は新しい履歴として受け付けること()
+    {
+        var path = await WriteCsvAsync("detail_id_blank.csv", DetailCsvHeader,
+            ",2026-10-01 08:00:00,0123456789ABCDEF,001,博多,中洲川端,,210,9790,0,0,0,");
+
+        var preview = await _importService.PreviewLedgerDetailsAsync(path);
+
+        preview.IsValid.Should().BeTrue();
+        preview.Errors.Should().BeEmpty();
+        preview.NewCount.Should().Be(1);
+    }
+
     // ===== 職員・カード CSV: 「削除済み」列 =====
 
     /// <summary>
