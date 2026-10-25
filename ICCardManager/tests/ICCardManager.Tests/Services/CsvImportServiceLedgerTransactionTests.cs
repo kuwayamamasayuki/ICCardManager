@@ -402,7 +402,7 @@ SELECT last_insert_rowid();";
         var message = result.Errors.Single().Message;
         message.Should().Be(CsvImportService.LedgerInsertFailedMessage);
         message.Should().Contain("この行の履歴").And.Contain("取り込み全体を取り消しました")
-            .And.Contain("もう一度取り込み").And.Contain("管理者（IT担当者）に連絡してください");
+            .And.Contain("もう一度取り込み").And.Contain("管理者に連絡してください");
         message.Should().NotContain("しばらく待って", "待てば解消する失敗とは限らない");
         message.Should().EndWith("ください。");
         message.Length.Should().BeGreaterThanOrEqualTo(20);

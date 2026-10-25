@@ -336,8 +336,9 @@ public class CsvImportExistingRowMatchingTests : IDisposable
 
     /// <summary>
     /// 利用履歴 ID が台帳に無い明細の行は、なぜ無いのか（削除・統合・別のデータベース）とどう直すのか
-    /// （不要なら削除、登録するなら ID を空欄にしてカードIDm を入れる）を示す。プレビューと取り込みで同じ文言。
-    /// 以前は「利用履歴ID N が存在しません」だけだった。
+    /// （この行を CSV から削除する）を示す。プレビューと取り込みで同じ文言。以前は「利用履歴ID N が存在しません」だけだった。
+    /// ID を空欄にする方法は案内しない（明細 CSV の ID 空欄の行は台帳の既存の履歴と照合されずに新しい履歴になり、
+    /// 削除・統合した履歴を戻したり、同じ利用を 2 行にしたりし得るため。レビュー 3 回目）。
     /// </summary>
     [Fact]
     public async Task ImportLedgerDetailsAsync_IDが台帳に無い行は理由と直し方を示して拒否すること()
@@ -357,13 +358,14 @@ public class CsvImportExistingRowMatchingTests : IDisposable
         error.Message.Should().Be(CsvImportService.BuildDetailLedgerIdNotFoundMessage(50));
         error.Message.Should().Contain("利用履歴ID 50 が存在しません")
             .And.Contain("削除").And.Contain("統合").And.Contain("バックアップ")
-            .And.Contain("CSVから削除").And.Contain("利用履歴IDを空欄にしてカードIDm列");
+            .And.Contain("この行をCSVから削除してから");
+        error.Message.Should().NotContain("空欄", "明細 CSV の ID 空欄の行は既存の履歴と照合されずに登録されるため、直し方として案内しない");
         AssertActionable(error.Message);
         preview.Errors.Should().ContainSingle().Which.Message.Should().Be(error.Message, "プレビューと取り込みで同じ文言");
     }
 
     /// <summary>
-    /// 対: 文言が案内する直し方（利用履歴 ID を空欄にしてカードIDm を入れる）の行は、新しい履歴として受け付ける。
+    /// 対: ID 不在の判定は、利用履歴 ID が空欄でカードIDm のある行（Issue #906 の新しい履歴の作成）を塞がない。
     /// </summary>
     [Fact]
     public async Task PreviewLedgerDetailsAsync_ID空欄でカードIDmのある行は新しい履歴として受け付けること()
