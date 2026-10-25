@@ -381,7 +381,9 @@ public partial class HistoryPanelViewModel
         // ダイアログの案内は「閉じると履歴一覧を再読み込みします」と述べているので、ここで読み直す
         // （#1759。読み直さないと、消えた行が一覧に残り、開き直しても同じ失敗を繰り返す）。
         // 何も保存していないので「保存して次へ」「次へ」「戻る」へは進まない（一覧の並びが変わっている）。
-        else if (capturedEditDialog?.NeedsHistoryReload == true)
+        // 保存できた（dialogResult == true）ときは下の分岐が読み直して「保存して次へ」へ進む。競合の後に保存し直して
+        // 成功した場合も保存の側を優先する（コードレビュー 2 回目。ViewModel 側も保存の成功で印を下ろす）。
+        else if (dialogResult != true && capturedEditDialog?.NeedsHistoryReload == true)
         {
             await LoadHistoryLedgersAsync();
             await Host.RefreshDashboardAsync();

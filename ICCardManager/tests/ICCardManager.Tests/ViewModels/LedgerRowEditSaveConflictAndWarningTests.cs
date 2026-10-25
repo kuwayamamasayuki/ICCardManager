@@ -189,6 +189,38 @@ public class LedgerRowEditSaveConflictAndWarningTests : IDisposable
         _viewModel.StatusMessage.Should().Contain("この画面を閉じると履歴一覧を再読み込みします");
         _viewModel.NeedsHistoryReload.Should().BeTrue();
         _viewModel.CanSave.Should().BeTrue("行は残っているので、読み直した明細で保存し直せる");
+        _viewModel.SkipToNextCommand.CanExecute(null).Should().BeFalse("閉じると一覧を読み直し、隣の行へは進まない");
+        _viewModel.BackCommand.CanExecute(null).Should().BeFalse();
+    }
+
+    /// <summary>
+    /// バス停名の競合の後に保存し直して成功したら、競合の印を下ろす（コードレビュー 2 回目）。
+    /// 残すと呼び出し元が「保存して次へ」を競合の再読込として扱い、次の行を開かない。
+    /// </summary>
+    [Fact]
+    public async Task バス停名の同期の競合の後に保存し直して成功したら_再読込の要求を下ろし保存して次へへ進むこと()
+    {
+        var ledger = CreateLedger(summary: "バス（天神～博多）");
+        _ledgerRepoMock.Setup(r => r.GetByIdAsync(ledger.Id)).ReturnsAsync(() =>
+        {
+            var l = CreateLedger(summary: "バス（天神～博多）");
+            l.Details = new List<LedgerDetail> { new() { LedgerId = 7, SequenceNumber = 1, IsBus = true, BusStops = "天神～博多" } };
+            return l;
+        });
+        _ledgerRepoMock.Setup(r => r.UpdateAsync(It.IsAny<Ledger>(), It.IsAny<SQLiteTransaction>())).ReturnsAsync(true);
+        await _viewModel.InitializeForEditAsync(ToDto(ledger), previousBalance: 2510);
+        _viewModel.Summary = "バス（天神～博多駅前）";
+        await _viewModel.SaveAndEditNextCommand.ExecuteAsync(null);
+        _viewModel.NeedsHistoryReload.Should().BeTrue("前提: 1 回目は競合");
+
+        // バス停名を元に戻して（同期が要らない）保存し直す
+        _viewModel.Summary = "バス（天神～博多）";
+        _viewModel.Note = "備考";
+        await _viewModel.SaveAndEditNextCommand.ExecuteAsync(null);
+
+        _viewModel.IsSaveAndEditNextRequested.Should().BeTrue();
+        _viewModel.NeedsHistoryReload.Should().BeFalse("保存できたので競合の再読込ではない");
+        _viewModel.SkipToNextCommand.CanExecute(null).Should().BeTrue();
     }
 
     [Fact]
@@ -229,6 +261,10 @@ public class LedgerRowEditSaveConflictAndWarningTests : IDisposable
                 @"capturedEditDialog\?\.NeedsHistoryReload\s*==\s*true\s*\)\s*\{\s*await\s+LoadHistoryLedgersAsync\(\)",
                 RegexOptions.Singleline)
             .Should().BeTrue("競合の案内は「閉じると履歴一覧を再読み込みします」と述べている");
+
+        // 保存できたとき（dialogResult == true）は、競合の再読込より保存の分岐を優先する（「保存して次へ」へ進む）
+        Regex.IsMatch(code, @"dialogResult\s*!=\s*true\s*&&\s*capturedEditDialog\?\.NeedsHistoryReload\s*==\s*true")
+            .Should().BeTrue("競合の後に保存し直して成功した場合に、再読込の分岐が保存の分岐を奪わない");
     }
 
     #endregion

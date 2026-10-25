@@ -473,7 +473,23 @@ namespace ICCardManager.ViewModels
         /// Issue #2325: 「次へ」「戻る」を実行できるか。編集対象の行がもう無いと分かった後は、閉じると一覧を読み直して
         /// 隣の行へは進まない（呼び出し元）ので、押せても閉じるだけになる。押せないようにして行動と結果を一致させる。
         /// </summary>
-        public bool CanNavigateToAdjacent => !_conflictDetected;
+        public bool CanNavigateToAdjacent => !_conflictDetected && !_busStopConflictDetected;
+
+        /// <summary>
+        /// Issue #2325: バス停名の同期の競合の印を設定し、「次へ」「戻る」の可否を更新する。
+        /// 競合の後は閉じると一覧を読み直して隣の行へは進まないので、押せても閉じるだけになる（コードレビュー 2 回目）。
+        /// </summary>
+        private void SetBusStopConflictDetected(bool value)
+        {
+            if (_busStopConflictDetected == value)
+            {
+                return;
+            }
+
+            _busStopConflictDetected = value;
+            SkipToNextCommand.NotifyCanExecuteChanged();
+            BackCommand.NotifyCanExecuteChanged();
+        }
 
         public LedgerRowEditViewModel(
             ILedgerRepository ledgerRepository,
@@ -1344,11 +1360,14 @@ namespace ICCardManager.ViewModels
 
             if (result)
             {
+                // Issue #2325（コードレビュー 2 回目）: バス停名の競合の後に保存し直して成功したら、競合の印を下ろす。
+                // 残すと「保存できた」のに呼び出し元が競合の再読込として扱い、「保存して次へ」が次の行を開かない
+                SetBusStopConflictDetected(false);
                 IsSaved = true;
             }
             else if (busStopConflict)
             {
-                _busStopConflictDetected = true;
+                SetBusStopConflictDetected(true);
                 StatusMessage = BusStopConflictMessage;
             }
             else
