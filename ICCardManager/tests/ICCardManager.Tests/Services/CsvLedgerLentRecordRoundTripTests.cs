@@ -210,16 +210,21 @@ public class CsvLedgerLentRecordRoundTripTests : IDisposable
         var path = Path.Combine(_testDirectory, "roundtrip.csv");
         (await _exportService.ExportLedgersAsync(path, new DateTime(2026, 10, 1), new DateTime(2026, 10, 31))).Success.Should().BeTrue();
 
-        // 返却後の DB: どちらの ID の行も無い（通常の行は別の DB へ取り込む想定、貸出中レコードは返却で削除）
+        // 返却後の DB: 通常の行は台帳に残り、貸出中レコードは返却で削除されて無い。
+        // Issue #2324: 以前は「どちらの ID の行も無い（通常の行は別の DB へ取り込む想定）」として通常の行が追加されることを
+        // 表明していたが、ID が台帳に無い行は削除・統合した行として拒否するようになったため、実際の返却後の DB の形にした
         _ledgerRepositoryMock.Setup(x => x.GetByIdAsync(It.IsAny<int>())).ReturnsAsync((Ledger?)null);
+        _ledgerRepositoryMock.Setup(x => x.GetByIdAsync(1)).ReturnsAsync(Usage(1, new DateTime(2026, 10, 1), 260, 9740));
 
         var preview = await _importService.PreviewLedgersAsync(path);
         var result = await _importService.ImportLedgersAsync(path);
 
         preview.IsValid.Should().BeTrue();
-        preview.NewCount.Should().Be(1);
+        preview.Items.Should().ContainSingle("貸出中の行は CSV に出ない").Which.Name.Should().Be("鉄道（博多～天神）");
+        preview.SkipCount.Should().Be(1, "通常の行は台帳の行と全項目一致");
         result.Success.Should().BeTrue();
-        _inserted.Should().ContainSingle().Which.Summary.Should().Be("鉄道（博多～天神）");
+        result.SkippedCount.Should().Be(1);
+        _inserted.Should().BeEmpty("「（貸出中）」の行は台帳に入らない");
     }
 
     // ===== 取り込みでの拒否（修正前に出力した CSV・手で作った CSV） =====
@@ -231,12 +236,14 @@ public class CsvLedgerLentRecordRoundTripTests : IDisposable
             "1,2026-10-01 00:00:00,0123456789ABCDEF,001,鉄道（博多～天神）,,260,9740,山田太郎,,",
             "2,2026-10-02 00:00:00,0123456789ABCDEF,001,（貸出中）,,,9740,山田太郎,,");
         _ledgerRepositoryMock.Setup(x => x.GetByIdAsync(It.IsAny<int>())).ReturnsAsync((Ledger?)null);
+        // Issue #2324: 通常の行（ID 1）は台帳に残っている（ID が台帳に無い行は別の理由で拒否されるため）
+        _ledgerRepositoryMock.Setup(x => x.GetByIdAsync(1)).ReturnsAsync(Usage(1, new DateTime(2026, 10, 1), 260, 9740));
 
         var result = await _importService.ImportLedgersAsync(path);
 
         result.Success.Should().BeFalse();
         result.ImportedCount.Should().Be(0);
-        _inserted.Should().BeEmpty("取り込みは全か無か。貸出中の行があれば通常の行も入れない");
+        _inserted.Should().BeEmpty("貸出中の行は台帳に入れない");
         var error = result.Errors.Should().ContainSingle().Subject;
         error.LineNumber.Should().Be(3);
         error.Message.Should().Contain("「（貸出中）」").And.Contain("取り込めません").And.EndWith("ください。");
@@ -249,12 +256,14 @@ public class CsvLedgerLentRecordRoundTripTests : IDisposable
             "1,2026-10-01 00:00:00,0123456789ABCDEF,001,鉄道（博多～天神）,,260,9740,山田太郎,,",
             "2,2026-10-02 00:00:00,0123456789ABCDEF,001,（貸出中）,,,9740,山田太郎,,");
         _ledgerRepositoryMock.Setup(x => x.GetByIdAsync(It.IsAny<int>())).ReturnsAsync((Ledger?)null);
+        // Issue #2324: 通常の行（ID 1）は台帳に残っている（ID が台帳に無い行は別の理由で拒否されるため）
+        _ledgerRepositoryMock.Setup(x => x.GetByIdAsync(1)).ReturnsAsync(Usage(1, new DateTime(2026, 10, 1), 260, 9740));
 
         var preview = await _importService.PreviewLedgersAsync(path);
 
         preview.IsValid.Should().BeFalse();
         preview.Errors.Should().ContainSingle().Which.LineNumber.Should().Be(3);
-        preview.Items.Should().ContainSingle("貸出中の行は「追加」として並べない").Which.Name.Should().Be("鉄道（博多～天神）");
+        preview.Items.Should().ContainSingle("貸出中の行はプレビューの一覧に並べない").Which.Name.Should().Be("鉄道（博多～天神）");
     }
 
     [Fact]
@@ -363,8 +372,8 @@ public class CsvLedgerLentRecordRoundTripTests : IDisposable
             SummaryText = new SummaryTextOptions { LendingSummary = "貸出中（未返却）" }
         });
         var path = await WriteCsvAsync("normal_custom.csv",
-            $"1,2026-10-01 00:00:00,0123456789ABCDEF,001,{summaryInCsv},,260,9740,山田太郎,,");
-        _ledgerRepositoryMock.Setup(x => x.GetByIdAsync(It.IsAny<int>())).ReturnsAsync((Ledger?)null);
+            // Issue #2324: ID の無い行（新しい履歴）として取り込む。ID が台帳に無い行は削除・統合した行として拒否するため
+            $",2026-10-01 00:00:00,0123456789ABCDEF,001,{summaryInCsv},,260,9740,山田太郎,,");
 
         var preview = await _importService.PreviewLedgersAsync(path);
         var result = await _importService.ImportLedgersAsync(path);

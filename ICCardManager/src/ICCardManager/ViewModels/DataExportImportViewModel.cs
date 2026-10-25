@@ -1038,7 +1038,7 @@ public partial class DataExportImportViewModel : ViewModelBase
                 break;
 
             default:
-                // 交通系ICカードは認証を求めない（交通系ICカード管理画面の登録・編集・復元と同じ。04 §9）
+                // 交通系ICカードは認証を求めない（交通系ICカード管理画面の登録・編集・復元と同じ。04 §14.7）
                 await ImportAndReportAsync(request);
                 authorized = true;
                 break;

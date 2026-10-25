@@ -169,6 +169,14 @@ namespace ICCardManager.Services
                     ledgerCardIdmMap[detail.LedgerId] = ledger.CardIdm ?? "";
                 }
 
+                // Issue #2324: 取り込みと同じく、ID が指す履歴と行のカードの食い違いを行ごとに確かめる
+                var previewCardMismatch = BuildDetailCardMismatchError(lineNumber, detail.LedgerId, ledgerCardIdmMap[detail.LedgerId], fields, allCards);
+                if (previewCardMismatch != null)
+                {
+                    errors.Add(previewCardMismatch);
+                    continue;
+                }
+
                 if (!detailsByLedgerId.TryGetValue(detail.LedgerId, out var ledgerGroup))
                 {
                     ledgerGroup = new List<(int, LedgerDetail)>();
@@ -340,6 +348,10 @@ namespace ICCardManager.Services
             // Issue #906: 利用履歴ID空欄の新規詳細をカードIDm＋日付ごとにグループ化
             // Issue #918: カードIDmだけでなく日付でもグループ化し、日付ごとに個別のLedgerを作成
             var newDetailsByCardIdmAndDate = new Dictionary<(string CardIdm, DateTime Date), List<(int LineNumber, LedgerDetail Detail)>>();
+            // Issue #2324: ledger_id からカードIDmへのマッピング（行のカードとの照合用。プレビューと同じ）
+            var ledgerCardIdmMap = new Dictionary<int, string>();
+            // 食い違いのエラーでカードを名指しするために使う（プレビューと同じく削除済みを含む）
+            var allCards = await _cardRepository.GetAllIncludingDeletedAsync().ConfigureAwait(false);
 
             for (var i = 1; i < lines.Count; i++)
             {
@@ -432,6 +444,15 @@ namespace ICCardManager.Services
                         continue;
                     }
                     existingDetailsByLedgerId[detail.LedgerId] = ledger.Details ?? new List<LedgerDetail>();
+                    ledgerCardIdmMap[detail.LedgerId] = ledger.CardIdm ?? "";
+                }
+
+                // Issue #2324: ID が指す履歴と行のカードが食い違う行は取り込まない（BuildDetailCardMismatchError の remarks）
+                var cardMismatch = BuildDetailCardMismatchError(lineNumber, detail.LedgerId, ledgerCardIdmMap[detail.LedgerId], fields, allCards);
+                if (cardMismatch != null)
+                {
+                    errors.Add(cardMismatch);
+                    continue;
                 }
 
                 if (!detailsByLedgerId.TryGetValue(detail.LedgerId, out var ledgerGroup))
@@ -654,6 +675,40 @@ namespace ICCardManager.Services
             ledger.Details = newDetails;
             await _operationLogger.LogLedgerUpdateAsync(before, ledger, transaction).ConfigureAwait(false);
             return null;
+        }
+
+        /// <summary>
+        /// 利用履歴詳細 CSV の、既存の利用履歴 ID を指す行のカードの照合（Issue #2324。取り込み・プレビューが共通で使う）
+        /// </summary>
+        /// <param name="lineNumber">CSV の行番号</param>
+        /// <param name="ledgerId">行の利用履歴 ID</param>
+        /// <param name="ledgerCardIdm">ID が指す既存の履歴のカード</param>
+        /// <param name="fields">行のフィールド（カードIDm列は 3 列目）</param>
+        /// <param name="cards">登録済みのカード（削除済みを含む。名指しに使う）</param>
+        /// <returns>一致する・照合しない（カードIDm列が空欄）なら <c>null</c></returns>
+        /// <remarks>
+        /// <para>
+        /// 以前は利用履歴 ID が空欄の行でしかカードIDm列を読まず、既存の ID を指す行は履歴が存在するかしか確かめていなかった。
+        /// 明細の置き換え（<c>ReplaceDetailsAndUpdateParentAsync</c>）は親の摘要・受入・払出・残額を明細から計算し直して書くため、
+        /// ID を書き間違えた CSV は、別のカードの履歴の明細と金額を、そのカードの残高チェーンの検証を経ないまま置き換えていた。
+        /// 利用履歴 CSV と同じ照合（<see cref="BuildLedgerCardMismatchError"/>）を行う。
+        /// </para>
+        /// <para>
+        /// カードIDm列が空欄の行は照合しない。エクスポートは期間内の利用履歴からカードを引くため、明細の利用日が期間内でも
+        /// 親の履歴の日付が期間外だと（日付をまたぐ統合など）カードIDm列を空欄で出力する。空欄を拒否すると、
+        /// そうして出力した CSV がそのまま取り込めなくなる。
+        /// </para>
+        /// </remarks>
+        private static CsvImportError? BuildDetailCardMismatchError(
+            int lineNumber, int ledgerId, string ledgerCardIdm, List<string> fields, IEnumerable<IcCard> cards)
+        {
+            var rowCardIdm = fields[2].Trim();
+            if (rowCardIdm.Length == 0)
+            {
+                return null;
+            }
+
+            return BuildLedgerCardMismatchError(lineNumber, ledgerId, ledgerCardIdm, rowCardIdm, cards, DetailCsvCardColumnLabel);
         }
 
         /// <summary>

@@ -397,6 +397,13 @@ SELECT last_insert_rowid();";
         result.Errors.Should().ContainSingle(e => e.LineNumber == 3,
             "失敗した行を行番号付きで示すこと（CSV 3行目＝2件目の登録）");
         VerifyNoAutocommitWrites(ledgerRepositoryMock);
+
+        // Issue #2324: 文言は「何が（この行の履歴）・なぜ（登録できず全体を取り消した）・どうすれば（取り込み直す）」の 3 要素
+        var message = result.Errors.Single().Message;
+        message.Should().Be(CsvImportService.LedgerInsertFailedMessage);
+        message.Should().Contain("この行の履歴").And.Contain("取り込み全体を取り消しました").And.Contain("取り込んでください");
+        message.Should().EndWith("ください。");
+        message.Length.Should().BeGreaterThanOrEqualTo(20);
     }
 
     /// <summary>
