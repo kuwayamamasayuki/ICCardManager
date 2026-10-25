@@ -59,26 +59,27 @@
             </ListView.View>
         </ListView>
 
-        <!-- ボタン -->
+        <!-- ボタン（右端が主操作、その左に閉じる。03 §4.5、Issue #2332） -->
         <StackPanel Grid.Row="2" Orientation="Horizontal" HorizontalAlignment="Right">
-            <Button x:Name="UndoButton"
-                    Content="選択した統合を元に戻す"
-                    Padding="16,8"
-                    FontSize="{DynamicResource BaseFontSize}"
-                    IsEnabled="False"
-                    Click="UndoButton_Click"
-                    AutomationProperties.Name="選択した統合を元に戻す"
-                    AutomationProperties.HelpText="選択した統合操作を取り消します"/>
-
             <Button x:Name="CancelButton"
                     Content="閉じる"
                     Padding="16,8"
-                    Margin="10,0,0,0"
                     FontSize="{DynamicResource BaseFontSize}"
                     IsCancel="True"
                     Click="CancelButton_Click"
                     AutomationProperties.Name="閉じる"
                     AutomationProperties.HelpText="ダイアログを閉じます"/>
+
+            <Button x:Name="UndoButton"
+                    Style="{StaticResource PrimaryActionButtonStyle}"
+                    Content="選択した統合を元に戻す"
+                    Padding="16,8"
+                    Margin="10,0,0,0"
+                    FontSize="{DynamicResource BaseFontSize}"
+                    IsEnabled="False"
+                    Click="UndoButton_Click"
+                    AutomationProperties.Name="選択した統合を元に戻す"
+                    AutomationProperties.HelpText="選択した統合操作を取り消します"/>
         </StackPanel>
     </Grid>
 </Window>

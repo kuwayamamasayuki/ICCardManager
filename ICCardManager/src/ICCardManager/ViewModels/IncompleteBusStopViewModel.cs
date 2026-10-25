@@ -1,3 +1,4 @@
+#nullable enable
 using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
@@ -24,7 +25,7 @@ namespace ICCardManager.ViewModels
         private ObservableCollection<IncompleteBusStopItem> _items = new();
 
         [ObservableProperty]
-        private IncompleteBusStopItem _selectedItem;
+        private IncompleteBusStopItem? _selectedItem;
 
         /// <summary>
         /// 利用日フィルタの選択肢
@@ -53,7 +54,7 @@ namespace ICCardManager.ViewModels
         /// <summary>
         /// 選択されたカードのIDm
         /// </summary>
-        public string SelectedCardIdm => SelectedItem?.CardIdm;
+        public string? SelectedCardIdm => SelectedItem?.CardIdm;
 
         /// <summary>
         /// ヘッダーの説明文（Issue #1818）
@@ -97,7 +98,8 @@ namespace ICCardManager.ViewModels
                 var incompleteLedgers = ledgers
                     .Where(l => SummaryGenerator.HasIncompleteBusStop(l.Summary)).ToList();
 
-                var cards = await _cardRepository.GetAllAsync();
+                // Issue #2332: 論理削除済みのカードの行も、IDm ではなくカード名で表示する（未入力の行は削除後も残る）
+                var cards = await _cardRepository.GetAllIncludingDeletedAsync();
                 var cardMap = cards.ToDictionary(c => c.CardIdm, c => $"{c.CardType} {c.CardNumber}");
 
                 _allItems = incompleteLedgers.Select(l => new IncompleteBusStopItem
@@ -108,7 +110,8 @@ namespace ICCardManager.ViewModels
                     Date = l.Date,
                     Summary = l.Summary,
                     Expense = l.Expense,
-                    StaffName = l.StaffName ?? ""
+                    StaffName = l.StaffName ?? "",
+                    CompanionCount = l.CompanionCount
                 }).OrderByDescending(i => i.Date).ToList();
 
                 // 利用日フィルタの選択肢を構築
@@ -139,7 +142,7 @@ namespace ICCardManager.ViewModels
         /// バス停名保存後にアイテムの摘要を更新する（Issue #709）
         /// </summary>
         /// <returns>更新後のアイテム。見つからない場合はnull</returns>
-        internal async Task<IncompleteBusStopItem> UpdateItemSummaryAsync(int ledgerId)
+        internal async Task<IncompleteBusStopItem?> UpdateItemSummaryAsync(int ledgerId)
         {
             var ledger = await _ledgerRepository.GetByIdAsync(ledgerId);
             if (ledger == null)
@@ -167,7 +170,8 @@ namespace ICCardManager.ViewModels
                 Date = oldItem.Date,
                 Summary = ledger.Summary,
                 Expense = oldItem.Expense,
-                StaffName = oldItem.StaffName
+                StaffName = oldItem.StaffName,
+                CompanionCount = oldItem.CompanionCount
             };
 
             // ObservableCollection の要素差し替え → DataGrid が自動更新

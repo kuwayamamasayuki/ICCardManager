@@ -112,7 +112,7 @@
                                FontSize="{DynamicResource SmallFontSize}"
                                Foreground="{DynamicResource SecondaryTextBrush}"
                                VerticalAlignment="Center"/>
-                    <TextBlock Text="{Binding StaffName}"
+                    <TextBlock Text="{Binding DisplayStaffName}"
                                FontSize="{DynamicResource SmallFontSize}"
                                Margin="5,0,20,0"
                                VerticalAlignment="Center"/>

@@ -1,3 +1,4 @@
+#nullable enable
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -5,7 +6,6 @@ using System.Threading.Tasks;
 using ICCardManager.Common;
 using ICCardManager.Data.Repositories;
 using ICCardManager.Dtos;
-using ICCardManager.ViewModels;
 
 namespace ICCardManager.Services
 {
@@ -121,7 +121,7 @@ namespace ICCardManager.Services
     public class DashboardResult
     {
         /// <summary>ソート済みダッシュボードアイテム</summary>
-        public IReadOnlyList<CardBalanceDashboardItem> Items { get; set; }
+        public IReadOnlyList<CardBalanceDashboardItem> Items { get; set; } = Array.Empty<CardBalanceDashboardItem>();
 
         /// <summary>残額警告しきい値（警告チェック用）</summary>
         public int WarningBalance { get; set; }

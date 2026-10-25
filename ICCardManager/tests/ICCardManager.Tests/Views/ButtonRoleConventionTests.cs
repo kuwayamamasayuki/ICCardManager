@@ -53,6 +53,23 @@ public class ButtonRoleConventionTests
         ["MainWindow.xaml"] = 1,
     };
 
+    /// <summary>
+    /// 閉じる／キャンセルより左に置いてよい、役割の無い補助のボタン（ファイル名, アクセスキーを除いた内容）（Issue #2332）。
+    /// </summary>
+    /// <remarks>
+    /// いずれも「閉じる」しか確定の操作が無い表示用の画面の補助で、画面の目的を確定する主操作ではない
+    /// （主操作なら役割スタイルを付けて閉じるの右へ置く）。
+    /// <list type="bullet">
+    /// <item><description><c>AdminDashboardDialog.xaml</c>「出力したファイルを開く」: 直前の Excel 出力の結果を開くだけの補助</description></item>
+    /// <item><description><c>ConnectionDiagnosticsDialog.xaml</c>「再診断」: 表示中の診断結果を取り直すだけの補助</description></item>
+    /// </list>
+    /// </remarks>
+    private static readonly HashSet<(string File, string Content)> AllowedRolelessButtonsLeftOfDismiss = new()
+    {
+        ("AdminDashboardDialog.xaml", "出力したファイルを開く"),
+        ("ConnectionDiagnosticsDialog.xaml", "再診断"),
+    };
+
     #region 色
 
     [Fact]
@@ -227,7 +244,99 @@ public class ButtonRoleConventionTests
             "TransferStationGroupDialog.xaml",
             "LedgerDetailDialog.xaml",
             "SettingsDialog.xaml",
-        }, "Issue #2142 で並びを直した 3 画面と、多数派の画面が検査の対象に含まれること");
+            "MergeHistoryDialog.xaml",
+            "IncompleteBusStopDialog.xaml",
+        }, "Issue #2142 で並びを直した 3 画面と、多数派の画面、主操作に役割スタイルを付けた 2 画面（Issue #2332）が検査の対象に含まれること");
+    }
+
+    /// <summary>
+    /// 閉じる／キャンセルより左に並ぶボタンは、役割（役割スタイルか既定ボタン）を宣言していること（Issue #2332）。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// 並びの検査は主操作を「役割スタイルか IsDefault」で見分けるため、役割スタイルを付け忘れた主操作は
+    /// 「主操作が無い行」として素通りしていた（統合履歴・バス停名未入力の 2 画面で、主操作が閉じるの左にあった）。
+    /// 主操作かどうかは画面の目的で決まり機械的には判定できないので、閉じる／キャンセルより左にある役割の無いボタンは、
+    /// 役割スタイルを付けるか、「主操作ではない補助のボタン」として <see cref="AllowedRolelessButtonsLeftOfDismiss"/> に
+    /// 理由とともに載せるかのどちらかを求める（どちらも無いまま足すと赤になる）。
+    /// </para>
+    /// <para>
+    /// 閉じる／キャンセルより右の役割の無いボタン（行編集の「戻る／次へ」等）は、並びの規約（閉じるの右に主操作）に反しないので対象外。
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public void 閉じるやキャンセルより左のボタンは役割を宣言していること()
+    {
+        var violations = FillForegroundPairs.EnumerateProductionXaml()
+            .SelectMany(f => FindUndeclaredRoleButtons(f.Text)
+                .Where(v => !IsAllowedRoleless(f.Name, v.Content))
+                .Select(v => $"{f.Name}: {v.Message}"))
+            .ToList();
+
+        violations.Should().BeEmpty(
+            "閉じる／キャンセルより左のボタンには役割スタイル（{0} / {1} / {2}）を付けること。" +
+            "付けないと主操作かどうかが分からず、並びの検査（右端が主操作）が届かない。" +
+            "主操作ではない補助のボタンなら AllowedRolelessButtonsLeftOfDismiss に理由とともに載せること（Issue #2332）:\n{3}",
+            PrimaryRoleStyle, SecondaryRoleStyle, CautionRoleStyle, string.Join("\n", violations));
+    }
+
+    [Fact]
+    public void 役割の無い補助のボタンの許可がまだ有効であること()
+    {
+        // 許可した補助のボタンが消えたり役割を持ったりしたら、許可も外す（使われない許可は、次に足す無印のボタンの抜け穴になる）
+        var found = FillForegroundPairs.EnumerateProductionXaml()
+            .SelectMany(f => FindUndeclaredRoleButtons(f.Text).Select(v => (File: f.Name, Content: NormalizeContent(v.Content))))
+            .ToList();
+
+        AllowedRolelessButtonsLeftOfDismiss
+            .Where(allowed => !found.Contains(allowed))
+            .Should().BeEmpty("許可した補助のボタンが実データに無い。許可の一覧から外すこと");
+    }
+
+    [Theory]
+    // 役割スタイルの無い操作ボタンが閉じるより左にある（Issue #2332 の欠陥の形）
+    [InlineData(
+        "<StackPanel Orientation=\"Horizontal\"><Button Content=\"選択した統合を元に戻す\"/><Button Content=\"閉じる\" IsCancel=\"True\"/></StackPanel>",
+        1)]
+    // 入れ子の横並びでも同じ行
+    [InlineData(
+        "<StackPanel Orientation=\"Horizontal\"><StackPanel Orientation=\"Horizontal\"><Button Content=\"バス停名を入力\"/></StackPanel><Button Content=\"閉じる\"/></StackPanel>",
+        1)]
+    // 役割を宣言していれば対象外（並びの検査の側で見る）
+    [InlineData(
+        "<StackPanel Orientation=\"Horizontal\"><Button Content=\"バス停名を入力\"><Button.Style><Style TargetType=\"Button\" BasedOn=\"{StaticResource PrimaryActionButtonStyle}\"/></Button.Style></Button><Button Content=\"閉じる\" IsCancel=\"True\"/></StackPanel>",
+        0)]
+    [InlineData(
+        "<StackPanel Orientation=\"Horizontal\"><Button Style=\"{StaticResource SecondaryActionButtonStyle}\" Content=\"Excel出力\"/><Button Content=\"閉じる\"/></StackPanel>",
+        0)]
+    // 閉じるより右は対象外（ウィザードの「次へ」）
+    [InlineData(
+        "<StackPanel Orientation=\"Horizontal\"><Button Content=\"キャンセル\" IsCancel=\"True\"/><Button Content=\"次へ\"/></StackPanel>",
+        0)]
+    // 別の行（縦の並び）は対象外
+    [InlineData(
+        "<StackPanel><Button Content=\"検索\"/><Button Content=\"閉じる\"/></StackPanel>",
+        0)]
+    // 閉じる／キャンセルの無い行は対象外
+    [InlineData(
+        "<StackPanel Orientation=\"Horizontal\"><Button Content=\"追加\"/><Button Content=\"削除\"/></StackPanel>",
+        0)]
+    // ポップアップの中のキャンセルは、ポップアップを開くツールバーの行とは別の行（メイン画面の「その他の月...」）
+    [InlineData(
+        "<StackPanel Orientation=\"Horizontal\"><Button Content=\"先月\"/><Popup><StackPanel Orientation=\"Horizontal\"><Button Content=\"キャンセル\"/><Button Style=\"{StaticResource SecondaryActionButtonStyle}\" Content=\"表示\"/></StackPanel></Popup></StackPanel>",
+        0)]
+    public void 役割の宣言漏れの検査が既知の入力を正しく分類すること(string xaml, int expectedViolations)
+    {
+        FindUndeclaredRoleButtons(xaml).Should().HaveCount(expectedViolations);
+    }
+
+    [Theory]
+    [InlineData("再診断", "再診断")]
+    [InlineData("再診断(_R)", "再診断")]
+    [InlineData("_再診断", "再診断")]
+    public void 許可の照合はアクセスキーの表記を無視すること(string content, string expected)
+    {
+        NormalizeContent(content).Should().Be(expected);
     }
 
     [Theory]
@@ -396,6 +505,47 @@ public class ButtonRoleConventionTests
             }
         }
     }
+
+    /// <summary>
+    /// 閉じる／キャンセルより左にある、役割を宣言していないボタン（内容と報告文）。
+    /// </summary>
+    private static IEnumerable<(string Content, string Message)> FindUndeclaredRoleButtons(string xaml)
+    {
+        var buttons = XamlElementInspection.EnumerateElementsIncludingNested(xaml, "Button").ToList();
+        var dismisses = buttons.Where(IsDismiss).ToList();
+        foreach (var button in buttons.Where(b => !IsDismiss(b) && !IsPrimary(b) && RoleOf(b) == null && !OwnFillKeys(b).Any()))
+        {
+            var dismiss = dismisses.FirstOrDefault(d => d.Start > button.Start
+                                                        && AreInSameRow(xaml, button, d)
+                                                        && !IsSeparatedByPopup(xaml, button, d));
+            if (dismiss != null)
+            {
+                var content = ContentOf(button);
+                yield return (content, $"{button.Line} 行の「{content}」が {dismiss.Line} 行の「{ContentOf(dismiss)}」より左にある");
+            }
+        }
+    }
+
+    /// <summary>
+    /// 2 つのボタンの共通の祖先より内側に <c>Popup</c> があれば、別の面（ポップアップ）に載っている。
+    /// </summary>
+    private static bool IsSeparatedByPopup(string xaml, XamlElementInspection.XamlElementSpan a, XamlElementInspection.XamlElementSpan b)
+    {
+        var ancestorsOfA = XamlElementInspection.EnumerateEnclosingElements(xaml, a.Start).ToList();
+        var ancestorsOfB = XamlElementInspection.EnumerateEnclosingElements(xaml, b.Start).ToList();
+        var startsOfB = new HashSet<int>(ancestorsOfB.Select(e => e.Start));
+        var common = ancestorsOfA.Where(e => startsOfB.Contains(e.Start)).OrderByDescending(e => e.Start).FirstOrDefault();
+        var commonStart = common?.Start ?? -1;
+        return ancestorsOfA.Concat(ancestorsOfB)
+            .Any(e => e.Start > commonStart && e.StartTag.StartsWith("<Popup", StringComparison.Ordinal));
+    }
+
+    private static bool IsAllowedRoleless(string fileName, string content)
+        => AllowedRolelessButtonsLeftOfDismiss.Contains((fileName, NormalizeContent(content)));
+
+    /// <summary>アクセスキーの表記（「(_R)」・先頭の「_」）を除いた内容。アクセスキーの追加で許可が外れないようにする。</summary>
+    private static string NormalizeContent(string content)
+        => System.Text.RegularExpressions.Regex.Replace(content, @"\(_.\)$", string.Empty).Replace("_", string.Empty).Trim();
 
     private static int CountRowPairs(string xaml)
     {
