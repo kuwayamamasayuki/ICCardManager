@@ -93,8 +93,8 @@ public class SummaryGenerationSnapshotConventionTests
     /// <remarks>
     /// <para>
     /// 上の「生成の各段階が静的状態を直接読まないこと」は<b>世代を引数に取るメソッドだけ</b>を
-    /// 走査するため、世代を捕捉する側である <c>Generate</c> / <c>GenerateByDate</c> は対象外になる。
-    /// ところが #1975 の欠陥が実際に住んでいたのはその 2 つで、
+    /// 走査するため、世代を捕捉する側である <c>Generate</c>（当時は日別集約の <c>GenerateByDate</c> も。
+    /// 本番から呼ばれず Issue #2330 で削除）は対象外になる。ところが #1975 の欠陥が実際に住んでいたのはその入口で、
     /// <c>Generate</c> の「チャージのみ」分岐が <c>_departmentType</c> を直接読んでいた。
     /// <b>ガードが見ていない場所に欠陥がある</b>状態だったので、フィールドの参照箇所そのものを数える。
     /// </para>
@@ -138,9 +138,9 @@ public class SummaryGenerationSnapshotConventionTests
 
         var captureCalls = Regex.Matches(source, @"(?<![A-Za-z0-9_])CaptureContext\(\)").Count;
 
-        // 定義（=> _context）1 か所 ＋ 入口 2 か所（Generate / GenerateByDate）
-        captureCalls.Should().Be(3,
-            "世代の捕捉は生成の入口（Generate / GenerateByDate）に限ること（Issue #1919）");
+        // 定義（=> _context）1 か所 ＋ 入口 1 か所（Generate。日別集約の GenerateByDate は Issue #2330 で削除）
+        captureCalls.Should().Be(2,
+            "世代の捕捉は生成の入口（Generate）に限ること（Issue #1919）");
     }
 
     /// <summary>
@@ -188,7 +188,7 @@ class C
     /// </para>
     /// <list type="number">
     /// <item><description>
-    /// 世代を捕捉する入口（<c>GenerateByDate</c>）自身が静的状態を読む形。旧実装はポイント還元の行で
+    /// 世代を捕捉する入口自身が静的状態を読む形。旧実装の日別集約（<c>GenerateByDate</c>、Issue #2330 で削除）はポイント還元の行で
     /// <c>GetPointRedemptionSummary()</c>（内部で <c>CurrentOptions</c> を読む）を呼んでおり、
     /// 同じ生成のチャージの行は捕捉した世代から引いていた。
     /// </description></item>
@@ -239,7 +239,7 @@ class C
         // 生成パイプライン（入口 ＋ 世代を引数に取るメンバー）
         analysis.Pipeline.Should().Contain(new[]
         {
-            "Generate/1", "GenerateByDate/1", "GenerateUsageSummary/2",
+            "Generate/1", "GenerateUsageSummary/2",
             "ConsolidateRoutes/4", "DetectRoundTrips/2", "GetRemainingRoutes/3"
         });
     }

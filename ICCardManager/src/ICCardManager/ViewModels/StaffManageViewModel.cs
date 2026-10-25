@@ -1211,27 +1211,6 @@ namespace ICCardManager.ViewModels
             }
         }
 
-#if DEBUG
-        /// <summary>
-        /// デバッグ用: カード読み取りをシミュレート
-        /// </summary>
-        [RelayCommand]
-        public void SimulateCardRead()
-        {
-            if (!IsWaitingForCard)
-            {
-                return;
-            }
-
-            if (_cardReader is MockCardReader mockReader)
-            {
-                // 未使用のIDmを生成（職員証はFFFFで始まる）
-                var newIdm = $"FFFF{Guid.NewGuid().ToString("N").Substring(0, 12).ToUpperInvariant()}";
-                mockReader.SimulateCardRead(newIdm);
-            }
-        }
-#endif
-
         /// <summary>
         /// 保存・更新・復元後にハイライト対象のIDmを設定する
         /// </summary>

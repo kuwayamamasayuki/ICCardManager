@@ -42,7 +42,7 @@ public class NullableContextConventionTests
     /// 0 になったら csproj に <c>&lt;Nullable&gt;enable&lt;/Nullable&gt;</c> を置き、各ファイルの
     /// <c>#nullable enable</c> と <c>NoWarn</c> の CS8632 を外す（Issue #2163 の手順 4）。
     /// </remarks>
-    private const int MaxFilesWithoutNullableEnable = 159;
+    private const int MaxFilesWithoutNullableEnable = 154;
 
     /// <summary>
     /// 移行を終えたディレクトリ（本番ソースのルートからの相対パス。入れ子を含む）。
@@ -149,7 +149,7 @@ public class NullableContextConventionTests
     [MemberData(nameof(PolyfilledAttributeNames))]
     public void Null許容の属性が本体にinternalで定義されていること(string attributeName)
     {
-        var type = typeof(ServiceResult).Assembly.GetType("System.Diagnostics.CodeAnalysis." + attributeName);
+        var type = typeof(FiscalYearHelper).Assembly.GetType("System.Diagnostics.CodeAnalysis." + attributeName);
 
         type.Should().NotBeNull($"{attributeName} の Polyfill が本体に定義されていること");
         type!.IsPublic.Should().BeFalse("Polyfill は internal にする（参照側の同名型と衝突させないため）");

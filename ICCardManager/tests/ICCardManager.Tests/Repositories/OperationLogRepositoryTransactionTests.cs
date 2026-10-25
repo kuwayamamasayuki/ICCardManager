@@ -4,6 +4,7 @@ using FluentAssertions;
 using ICCardManager.Data;
 using ICCardManager.Data.Repositories;
 using ICCardManager.Models;
+using ICCardManager.Tests.Infrastructure;
 using Xunit;
 
 namespace ICCardManager.Tests.Repositories;

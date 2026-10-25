@@ -1008,37 +1008,6 @@ public class LendingServiceTests : IDisposable
     }
 
     /// <summary>
-    /// ClearHistoryで履歴がクリアされることを確認
-    /// </summary>
-    [Fact]
-    public async Task ClearHistory_AfterLend_ClearsAllHistory()
-    {
-        // Arrange - まず貸出処理を実行
-        var card = CreateTestCard(isLent: false);
-        var staff = CreateTestStaff();
-
-        _cardRepositoryMock.Setup(x => x.GetByIdmAsync(TestCardIdm, false))
-            .ReturnsAsync(card);
-        _staffRepositoryMock.Setup(x => x.GetByIdmAsync(TestStaffIdm, false))
-            .ReturnsAsync(staff);
-        _ledgerRepositoryMock.Setup(x => x.InsertAsync(It.IsAny<Ledger>()))
-            .ReturnsAsync(1);
-        _cardRepositoryMock.Setup(x => x.UpdateLentStatusAsync(It.IsAny<string>(), It.IsAny<bool>(), It.IsAny<DateTime?>(), It.IsAny<string?>()))
-            .ReturnsAsync(true);
-
-        await _service.LendAsync(TestStaffIdm, TestCardIdm);
-
-        // Act
-        _service.ClearHistory();
-
-        // Assert
-        _service.LastProcessedCardIdm.Should().BeNull();
-        _service.LastProcessedTime.Should().BeNull();
-        _service.LastOperationType.Should().BeNull();
-        _service.IsRetouchWithinTimeout(TestCardIdm).Should().BeFalse();
-    }
-
-    /// <summary>
     /// 貸出後の30秒以内再タッチで、逆操作（返却）が必要であることを判定できることを確認
     /// </summary>
     [Fact]

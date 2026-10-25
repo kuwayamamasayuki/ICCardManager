@@ -197,58 +197,6 @@ public class StationCodeToSummaryTests
         _output.WriteLine("");
     }
 
-    /// <summary>
-    /// GenerateByDate用のテスト結果を詳細に出力
-    /// </summary>
-    private void OutputTestResultByDate(string testName, List<DailySummary> results)
-    {
-        _output.WriteLine("");
-        _output.WriteLine($"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
-        _output.WriteLine($"テスト: {testName}");
-        _output.WriteLine($"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
-        _output.WriteLine("");
-        _output.WriteLine("【ICカード履歴データ（入力）】");
-        _output.WriteLine($"  件数: {_inputRecords.Count}");
-        _output.WriteLine("");
-
-        for (int i = 0; i < _inputRecords.Count; i++)
-        {
-            var rec = _inputRecords[i];
-            _output.WriteLine($"  [{i + 1}] {rec.RecordType}");
-            _output.WriteLine($"      日時: {rec.UseDate:yyyy-MM-dd}");
-
-            if (rec.RecordType == "鉄道")
-            {
-                _output.WriteLine($"      カード種別: {GetCardTypeName(rec.CardType)}");
-                _output.WriteLine($"      乗車駅: 0x{rec.EntryStationCode:X4} → {rec.EntryStationName}");
-                _output.WriteLine($"      降車駅: 0x{rec.ExitStationCode:X4} → {rec.ExitStationName}");
-                _output.WriteLine($"      金額: {rec.Amount}円");
-                _output.WriteLine($"      残高: {rec.Balance}円");
-            }
-            else if (rec.RecordType == "バス")
-            {
-                _output.WriteLine($"      バス停: {rec.BusStops ?? "(未入力)"}");
-                _output.WriteLine($"      金額: {rec.Amount}円");
-                _output.WriteLine($"      残高: {rec.Balance}円");
-            }
-            else if (rec.RecordType == "チャージ")
-            {
-                _output.WriteLine($"      金額: {rec.Amount}円");
-                _output.WriteLine($"      残高: {rec.Balance}円");
-            }
-            _output.WriteLine("");
-        }
-
-        _output.WriteLine("【生成された摘要（出力）】");
-        _output.WriteLine($"  件数: {results.Count}");
-        foreach (var r in results)
-        {
-            var typeLabel = r.IsCharge ? "[チャージ]" : "[利用]";
-            _output.WriteLine($"  {r.Date:yyyy-MM-dd} {typeLabel}: {r.Summary}");
-        }
-        _output.WriteLine("");
-    }
-
     #endregion
 
     #region 福岡市地下鉄（はやかけん）単純利用テスト
@@ -649,61 +597,13 @@ public class StationCodeToSummaryTests
 
     #endregion
 
-    #region 複数日・複合利用シナリオ
+    #region 複合利用シナリオ
 
     /// <summary>
-    /// GenerateByDate: 2日間の通勤記録（各日往復）
+    /// 鉄道とバスの複合利用（同日）
     /// </summary>
     [Fact]
-    public void GenerateByDate_TwoDays_Commute()
-    {
-        // Arrange
-        ClearInputRecords();
-        var details = new List<LedgerDetail>
-        {
-            // 12/9: 往復（新しい順）
-            CreateRailwayUsageFromCodes(
-                new DateTime(2024, 12, 9),
-                0xE715,  // 博多（帰り）
-                0xE70F,  // 天神
-                CardType.Hayakaken, 210, 4160),
-            CreateRailwayUsageFromCodes(
-                new DateTime(2024, 12, 9),
-                0xE70F,  // 天神（行き）
-                0xE715,  // 博多
-                CardType.Hayakaken, 210, 4370),
-            // 12/8: 往復（新しい順）
-            CreateRailwayUsageFromCodes(
-                new DateTime(2024, 12, 8),
-                0xE715,  // 博多（帰り）
-                0xE70F,  // 天神
-                CardType.Hayakaken, 210, 4580),
-            CreateRailwayUsageFromCodes(
-                new DateTime(2024, 12, 8),
-                0xE70F,  // 天神（行き）
-                0xE715,  // 博多
-                CardType.Hayakaken, 210, 4790)
-        };
-
-        // Act
-        var results = _summaryGenerator.GenerateByDate(details);
-
-        // Assert
-        results.Should().HaveCount(2);
-        // 古い順
-        results[0].Date.Should().Be(new DateTime(2024, 12, 8));
-        results[0].Summary.Should().Be("鉄道（天神～博多 往復）");
-        results[1].Date.Should().Be(new DateTime(2024, 12, 9));
-        results[1].Summary.Should().Be("鉄道（天神～博多 往復）");
-
-        OutputTestResultByDate("2日間の通勤記録", results);
-    }
-
-    /// <summary>
-    /// GenerateByDate: 鉄道とバスの複合利用
-    /// </summary>
-    [Fact]
-    public void GenerateByDate_Railway_And_Bus()
+    public void Generate_Railway_And_Bus()
     {
         // Arrange
         ClearInputRecords();
@@ -731,59 +631,12 @@ public class StationCodeToSummaryTests
         };
 
         // Act
-        var results = _summaryGenerator.GenerateByDate(details);
+        var summary = _summaryGenerator.Generate(details);
 
         // Assert
-        results.Should().HaveCount(1);
-        results[0].Summary.Should().Be("鉄道（天神～博多）、バス（天神～博多駅）");
+        summary.Should().Be("鉄道（天神～博多）、バス（天神～博多駅）");
 
-        OutputTestResultByDate("鉄道とバスの複合利用", results);
-    }
-
-    /// <summary>
-    /// GenerateByDate: 利用とチャージの混在
-    /// </summary>
-    [Fact]
-    public void GenerateByDate_Usage_And_Charge()
-    {
-        // Arrange
-        ClearInputRecords();
-        var details = new List<LedgerDetail>
-        {
-            // 利用（新しい方）
-            CreateRailwayUsageFromCodes(
-                new DateTime(2024, 12, 9),
-                0xE70F,  // 天神
-                0xE715,  // 博多
-                CardType.Hayakaken, 210, 4790),
-            // チャージ（古い方）
-            new LedgerDetail
-            {
-                UseDate = new DateTime(2024, 12, 9),
-                EntryStation = null,
-                ExitStation = null,
-                Amount = 3000,
-                Balance = 5000,
-                IsCharge = true,
-                IsBus = false
-            }
-        };
-        // チャージを記録
-        RecordChargeInput(new DateTime(2024, 12, 9), 3000, 5000);
-
-        // Act
-        var results = _summaryGenerator.GenerateByDate(details);
-
-        // Assert
-        results.Should().HaveCount(2);
-        // チャージが先（古い）
-        results[0].IsCharge.Should().BeTrue();
-        results[0].Summary.Should().Be("役務費によりチャージ");
-        // 利用が後（新しい）
-        results[1].IsCharge.Should().BeFalse();
-        results[1].Summary.Should().Be("鉄道（天神～博多）");
-
-        OutputTestResultByDate("利用とチャージの混在", results);
+        OutputTestResult("鉄道とバスの複合利用", summary);
     }
 
     #endregion

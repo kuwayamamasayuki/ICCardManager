@@ -291,9 +291,8 @@ public class TransferStationGroupServiceTests : IDisposable
 
         await CreateService().SaveGroupsAsync(new[] { new[] { "天神日銀前", "天神中央郵便局前" } });
 
-        generator.GenerateByDate(TenjinRoundTripByBus()).Should().ContainSingle()
-            .Which.Summary.Should().Be("バス（天神日銀前（天神中央郵便局前）～下原中央 往復）",
-                "同一視を登録したので往復として認識され、目的地（下原中央）が残るべき");
+        generator.Generate(TenjinRoundTripByBus()).Should().Be("バス（天神日銀前（天神中央郵便局前）～下原中央 往復）",
+            "同一視を登録したので往復として認識され、目的地（下原中央）が残るべき");
     }
 
     /// <summary>
@@ -312,9 +311,8 @@ public class TransferStationGroupServiceTests : IDisposable
 
         await CreateService().SaveGroupsAsync(new[] { new[] { "天神日銀前", "天神中央郵便局前" } });
 
-        generator.GenerateByDate(TenjinRoundTripByBus()).Should().ContainSingle()
-            .Which.Summary.Should().Be("バス（天神日銀前～天神中央郵便局前）",
-                "保存できなかったグループを摘要生成に使わないべき");
+        generator.Generate(TenjinRoundTripByBus()).Should().Be("バス（天神日銀前～天神中央郵便局前）",
+            "保存できなかったグループを摘要生成に使わないべき");
     }
 
     #endregion

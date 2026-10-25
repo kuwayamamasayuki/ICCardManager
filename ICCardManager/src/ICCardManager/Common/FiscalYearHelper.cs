@@ -45,16 +45,6 @@ namespace ICCardManager.Common
         }
 
         /// <summary>
-        /// 指定された年度の終了日を取得
-        /// </summary>
-        /// <param name="fiscalYear">年度</param>
-        /// <returns>年度終了日（翌年3月31日）</returns>
-        public static DateTime GetFiscalYearEnd(int fiscalYear)
-        {
-            return new DateTime(fiscalYear + 1, 3, 31);
-        }
-
-        /// <summary>
         /// 前月の年・月を取得
         /// </summary>
         /// <param name="year">西暦年</param>

@@ -7,21 +7,6 @@ using System.Threading.Tasks;
 namespace ICCardManager.Common
 {
     /// <summary>
-    /// アプリケーションの状態
-    /// </summary>
-    public enum AppState
-    {
-        /// <summary>職員証タッチ待ち</summary>
-        WaitingForStaffCard,
-
-        /// <summary>交通系ICカードタッチ待ち</summary>
-        WaitingForIcCard,
-
-        /// <summary>処理中</summary>
-        Processing
-    }
-
-    /// <summary>
     /// 交通系ICカードの種別
     /// </summary>
     public enum CardType

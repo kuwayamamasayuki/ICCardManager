@@ -123,28 +123,6 @@ public class DtoMapperTests
         dto.LentStatusDisplay.Should().Be("在庫");
     }
 
-    /// <summary>
-    /// カードリストの一括変換が正しく行われること
-    /// </summary>
-    [Fact]
-    public void ToDtoList_FromIcCards_ShouldMapAllItems()
-    {
-        // Arrange
-        var cards = new List<IcCard>
-        {
-            new IcCard { CardIdm = "07FE112233445566", CardType = "はやかけん", CardNumber = "H-001" },
-            new IcCard { CardIdm = "05FE112233445567", CardType = "nimoca", CardNumber = "N-001" }
-        };
-
-        // Act
-        var dtos = cards.ToDtoList();
-
-        // Assert
-        dtos.Should().HaveCount(2);
-        dtos[0].CardType.Should().Be("はやかけん");
-        dtos[1].CardType.Should().Be("nimoca");
-    }
-
     #endregion
 
     #region Staff → StaffDto
@@ -198,28 +176,6 @@ public class DtoMapperTests
 
         // Assert
         dto.DisplayName.Should().Be("山田太郎");
-    }
-
-    /// <summary>
-    /// 職員リストの一括変換が正しく行われること
-    /// </summary>
-    [Fact]
-    public void ToDtoList_FromStaffs_ShouldMapAllItems()
-    {
-        // Arrange
-        var staffList = new List<Staff>
-        {
-            new Staff { StaffIdm = "FFFF000000000001", Name = "山田太郎" },
-            new Staff { StaffIdm = "FFFF000000000002", Name = "鈴木花子" }
-        };
-
-        // Act
-        var dtos = staffList.ToDtoList();
-
-        // Assert
-        dtos.Should().HaveCount(2);
-        dtos[0].Name.Should().Be("山田太郎");
-        dtos[1].Name.Should().Be("鈴木花子");
     }
 
     #endregion
@@ -465,160 +421,6 @@ public class DtoMapperTests
 
     #endregion
 
-    #region AppSettings → SettingsDto
-
-    /// <summary>
-    /// AppSettingsからSettingsDtoへの変換が正しく行われること
-    /// </summary>
-    [Fact]
-    public void ToDto_FromAppSettings_ShouldMapAllProperties()
-    {
-        // Arrange
-        var settings = new AppSettings
-        {
-            WarningBalance = 3000,
-            BackupPath = @"C:\Backup",
-            FontSize = FontSizeOption.Large
-        };
-
-        // Act
-        var dto = settings.ToDto();
-
-        // Assert
-        dto.WarningBalance.Should().Be(3000);
-        dto.BackupPath.Should().Be(@"C:\Backup");
-        dto.FontSize.Should().Be(FontSizeOption.Large);
-    }
-
-    /// <summary>
-    /// 残額警告閾値の表示が正しいこと
-    /// </summary>
-    [Fact]
-    public void SettingsDto_WarningBalanceDisplay_ShouldFormatWithYen()
-    {
-        // Arrange
-        var dto = new SettingsDto { WarningBalance = 10000 };
-
-        // Assert
-        dto.WarningBalanceDisplay.Should().Be("10,000円");
-    }
-
-    /// <summary>
-    /// 文字サイズの表示が正しいこと
-    /// </summary>
-    [Theory]
-    [InlineData(FontSizeOption.Small, "小")]
-    [InlineData(FontSizeOption.Medium, "中（標準）")]
-    [InlineData(FontSizeOption.Large, "大")]
-    [InlineData(FontSizeOption.ExtraLarge, "特大")]
-    public void SettingsDto_FontSizeDisplay_ShouldShowCorrectText(FontSizeOption fontSize, string expected)
-    {
-        // Arrange
-        var dto = new SettingsDto { FontSize = fontSize };
-
-        // Assert
-        dto.FontSizeDisplay.Should().Be(expected);
-    }
-
-    #endregion
-
-    #region DTO → Entity（逆変換）
-
-    /// <summary>
-    /// CardDtoからIcCardへの変換が正しく行われること
-    /// </summary>
-    [Fact]
-    public void ToEntity_FromCardDto_ShouldMapAllProperties()
-    {
-        // Arrange
-        var dto = new CardDto
-        {
-            CardIdm = "07FE112233445566",
-            CardType = "はやかけん",
-            CardNumber = "H-001",
-            Note = "テストカード",
-            IsLent = true,
-            LastLentStaff = "FFFF000000000001",
-            LentAt = new DateTime(2025, 1, 15),
-            // Issue #2106: 繰越・開始ページ・払戻の各項目も既定値と異なる値で渡す。
-            // 逆変換で落ちると、カード更新時に紙出納簿移行カードの繰越累計が既定値へ戻る（#1726 と同じ害）
-            StartingPageNumber = 7,
-            CarryoverIncomeTotal = 12000,
-            CarryoverExpenseTotal = 8350,
-            CarryoverFiscalYear = 2024,
-            IsRefunded = true,
-            RefundedAt = new DateTime(2025, 3, 31, 17, 0, 0)
-        };
-
-        // Act
-        var entity = dto.ToEntity();
-
-        // Assert
-        entity.CardIdm.Should().Be("07FE112233445566");
-        entity.CardType.Should().Be("はやかけん");
-        entity.CardNumber.Should().Be("H-001");
-        entity.Note.Should().Be("テストカード");
-        entity.IsLent.Should().BeTrue();
-        entity.LastLentStaff.Should().Be("FFFF000000000001");
-        entity.LastLentAt.Should().Be(new DateTime(2025, 1, 15));
-        entity.StartingPageNumber.Should().Be(7, "既定値 1 と異なる値で写像を確かめる");
-        entity.CarryoverIncomeTotal.Should().Be(12000);
-        entity.CarryoverExpenseTotal.Should().Be(8350);
-        entity.CarryoverFiscalYear.Should().Be(2024);
-        entity.IsRefunded.Should().BeTrue();
-        entity.RefundedAt.Should().Be(new DateTime(2025, 3, 31, 17, 0, 0));
-    }
-
-    /// <summary>
-    /// StaffDtoからStaffへの変換が正しく行われること
-    /// </summary>
-    [Fact]
-    public void ToEntity_FromStaffDto_ShouldMapAllProperties()
-    {
-        // Arrange
-        var dto = new StaffDto
-        {
-            StaffIdm = "FFFF000000000001",
-            Name = "山田太郎",
-            Number = "001",
-            Note = "テスト職員"
-        };
-
-        // Act
-        var entity = dto.ToEntity();
-
-        // Assert
-        entity.StaffIdm.Should().Be("FFFF000000000001");
-        entity.Name.Should().Be("山田太郎");
-        entity.Number.Should().Be("001");
-        entity.Note.Should().Be("テスト職員");
-    }
-
-    /// <summary>
-    /// SettingsDtoからAppSettingsへの変換が正しく行われること
-    /// </summary>
-    [Fact]
-    public void ToEntity_FromSettingsDto_ShouldMapAllProperties()
-    {
-        // Arrange
-        var dto = new SettingsDto
-        {
-            WarningBalance = 5000,
-            BackupPath = @"D:\Backup",
-            FontSize = FontSizeOption.ExtraLarge
-        };
-
-        // Act
-        var entity = dto.ToEntity();
-
-        // Assert
-        entity.WarningBalance.Should().Be(5000);
-        entity.BackupPath.Should().Be(@"D:\Backup");
-        entity.FontSize.Should().Be(FontSizeOption.ExtraLarge);
-    }
-
-    #endregion
-
     #region 写像の網羅（リフレクション、Issue #2106）
 
     // Issue #2106: 上の「ShouldMapAllProperties」は項目を手で列挙するため、モデルと DTO の両方へ
@@ -660,27 +462,6 @@ public class DtoMapperTests
     }
 
     [Fact]
-    public void ToEntity_FromCardDto_MapsEveryCounterpartProperty()
-    {
-        AssertEveryCounterpartIsMapped<CardDto, IcCard>(
-            d => d.ToEntity(),
-            expectedCounterparts: new[]
-            {
-                nameof(IcCard.CardIdm), nameof(IcCard.CardType), nameof(IcCard.CardNumber), nameof(IcCard.Note),
-                nameof(IcCard.IsLent), nameof(IcCard.LastLentStaff), nameof(IcCard.LastLentAt),
-                nameof(IcCard.StartingPageNumber), nameof(IcCard.CarryoverIncomeTotal),
-                nameof(IcCard.CarryoverExpenseTotal), nameof(IcCard.CarryoverFiscalYear),
-                nameof(IcCard.IsRefunded), nameof(IcCard.RefundedAt)
-            },
-            renamedFrom: new Dictionary<string, string> { [nameof(IcCard.LastLentAt)] = nameof(CardDto.LentAt) },
-            targetOnly: new Dictionary<string, string>
-            {
-                [nameof(IcCard.IsDeleted)] = "CardDto は削除状態を持たない（論理削除は専用のリポジトリ操作で行う）",
-                [nameof(IcCard.DeletedAt)] = "CardDto は削除状態を持たない（論理削除は専用のリポジトリ操作で行う）"
-            });
-    }
-
-    [Fact]
     public void ToDto_FromStaff_MapsEveryCounterpartProperty()
     {
         AssertEveryCounterpartIsMapped<Staff, StaffDto>(
@@ -690,22 +471,6 @@ public class DtoMapperTests
                 nameof(StaffDto.StaffIdm), nameof(StaffDto.Name), nameof(StaffDto.Number), nameof(StaffDto.Note)
             },
             targetOnly: new Dictionary<string, string>());
-    }
-
-    [Fact]
-    public void ToEntity_FromStaffDto_MapsEveryCounterpartProperty()
-    {
-        AssertEveryCounterpartIsMapped<StaffDto, Staff>(
-            d => d.ToEntity(),
-            expectedCounterparts: new[]
-            {
-                nameof(Staff.StaffIdm), nameof(Staff.Name), nameof(Staff.Number), nameof(Staff.Note)
-            },
-            targetOnly: new Dictionary<string, string>
-            {
-                [nameof(Staff.IsDeleted)] = "StaffDto は削除状態を持たない（論理削除は専用のリポジトリ操作で行う）",
-                [nameof(Staff.DeletedAt)] = "StaffDto は削除状態を持たない（論理削除は専用のリポジトリ操作で行う）"
-            });
     }
 
     [Fact]
@@ -753,32 +518,6 @@ public class DtoMapperTests
             {
                 [nameof(LedgerDetailDto.UseDateDisplay)] = "UseDate から導出する表示文字列（ToDto_FromLedgerDetail_ShouldMapAllProperties で検証）"
             });
-    }
-
-    [Fact]
-    public void ToDto_FromAppSettings_MapsEveryCounterpartProperty()
-    {
-        AssertEveryCounterpartIsMapped<AppSettings, SettingsDto>(
-            s => s.ToDto(),
-            expectedCounterparts: new[]
-            {
-                nameof(SettingsDto.WarningBalance), nameof(SettingsDto.BackupPath), nameof(SettingsDto.FontSize)
-            },
-            targetOnly: new Dictionary<string, string>());
-    }
-
-    [Fact]
-    public void ToEntity_FromSettingsDto_MapsEveryCounterpartProperty()
-    {
-        // AppSettings には SettingsDto に無い項目が多数ある（SettingsDto は画面が編集する 3 項目だけを持つ）ため、
-        // 写像先にしか無いプロパティの列挙は省く（targetOnly: null）
-        AssertEveryCounterpartIsMapped<SettingsDto, AppSettings>(
-            d => d.ToEntity(),
-            expectedCounterparts: new[]
-            {
-                nameof(AppSettings.WarningBalance), nameof(AppSettings.BackupPath), nameof(AppSettings.FontSize)
-            },
-            targetOnly: null);
     }
 
     /// <summary>

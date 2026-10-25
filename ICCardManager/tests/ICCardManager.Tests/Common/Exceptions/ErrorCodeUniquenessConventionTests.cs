@@ -68,10 +68,10 @@ public class ErrorCodeUniquenessConventionTests
     {
         var codes = CollectErrorCodes().Select(e => e.Code).ToList();
 
-        codes.Should().Contain("DB001", "DatabaseException.ConnectionFailed の採番");
+        codes.Should().Contain("DB002", "DatabaseException.QueryFailed の採番");
         codes.Should().Contain("DB008", "DatabaseVersionMismatchException の採番");
         codes.Should().Contain("DB009", "Issue #1985 で追加した InvalidStoredDate の採番");
-        codes.Should().Contain("CR001").And.Contain("VAL001");
+        codes.Should().Contain("CR002").And.Contain("FILE008").And.Contain("BIZ015");
         codes.Should().Contain("CARD001", "Common/Exceptions 外にある DuplicateCardNumberException の採番（Issue #2101）");
         codes.Should().Contain("SYS999", "ErrorDialogHelper.GetErrorInfo の採番（Issue #2101）");
     }

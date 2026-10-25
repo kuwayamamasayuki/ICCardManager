@@ -24,7 +24,10 @@ namespace ICCardManager.Infrastructure.CardReader
     public class HybridCardReader : ICardReader
     {
         private readonly ICardReader _realReader;
-        private readonly MockHistorySettings _settings = new();
+        // 仮想タッチしたカードへ渡す利用履歴・残額（IDm ごと）。以前は MockCardReader と共有の設定クラスに
+        // 置いていたが、MockCardReader は本番で生成されず Issue #2330 で削除したため、使う 2 項目だけをここに持つ
+        private readonly Dictionary<string, List<LedgerDetail>> _customHistory = new();
+        private readonly Dictionary<string, int> _customBalances = new();
         private bool _disposed;
 
         public event EventHandler<CardReadEventArgs>? CardRead;
@@ -57,7 +60,7 @@ namespace ICCardManager.Infrastructure.CardReader
         public async Task<IEnumerable<LedgerDetail>> ReadHistoryAsync(string idm)
         {
             // カスタム履歴データがあればそれを使用（仮想タッチで設定されたデータ）
-            if (_settings.CustomHistory.TryGetValue(idm, out var customHistory))
+            if (_customHistory.TryGetValue(idm, out var customHistory))
             {
                 return CloneHistory(customHistory);
             }
@@ -70,7 +73,7 @@ namespace ICCardManager.Infrastructure.CardReader
         public async Task<CardReadResult<IReadOnlyList<LedgerDetail>>> TryReadHistoryAsync(string idm)
         {
             // Issue #1169: カスタム履歴データがあれば成功として返す
-            if (_settings.CustomHistory.TryGetValue(idm, out var customHistory))
+            if (_customHistory.TryGetValue(idm, out var customHistory))
             {
                 return CardReadResult<IReadOnlyList<LedgerDetail>>.Ok(CloneHistory(customHistory));
             }
@@ -82,7 +85,7 @@ namespace ICCardManager.Infrastructure.CardReader
         public async Task<int?> ReadBalanceAsync(string idm)
         {
             // カスタム残高があればそれを使用（仮想タッチで設定されたデータ）
-            if (_settings.CustomBalances.TryGetValue(idm, out var customBalance))
+            if (_customBalances.TryGetValue(idm, out var customBalance))
             {
                 return customBalance;
             }
@@ -127,12 +130,12 @@ namespace ICCardManager.Infrastructure.CardReader
         {
             if (balance.HasValue)
             {
-                _settings.CustomBalances[idm] = balance.Value;
+                _customBalances[idm] = balance.Value;
             }
 
             if (history != null)
             {
-                _settings.CustomHistory[idm] = history.ToList();
+                _customHistory[idm] = history.ToList();
             }
         }
 

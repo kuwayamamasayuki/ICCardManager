@@ -53,16 +53,6 @@ public class FiscalYearHelperTests
 
     #endregion
 
-    #region GetFiscalYearEnd
-
-    [Fact]
-    public void GetFiscalYearEnd_ReturnsMarch31OfNextYear()
-    {
-        FiscalYearHelper.GetFiscalYearEnd(2025).Should().Be(new DateTime(2026, 3, 31));
-    }
-
-    #endregion
-
     #region GetPreviousMonth
 
     [Theory]

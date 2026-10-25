@@ -112,8 +112,7 @@ public partial class MainViewModel
             _soundPlayer.Play(SoundType.Notify);
 
             // メイン画面は変更せず、ポップアップ通知のみ表示（Issue #186）
-            // 「職員証をタッチしてください」のメッセージはクリアする
-            SetInternalState(AppState.WaitingForIcCard, clearStatusMessage: true);
+            SetInternalState(AppState.WaitingForIcCard);
 
             // Issue #1907: 前の職員の返却確認（自動表示した履歴）は、次の職員証タッチ＝次の操作の開始で閉じる。
             // 職員が操作していた履歴は閉じない。#186（メイン画面を変更しない）の例外だが、

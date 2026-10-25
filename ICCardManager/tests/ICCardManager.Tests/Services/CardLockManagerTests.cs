@@ -48,7 +48,7 @@ public class CardLockManagerTests : IDisposable
         // Assert
         semaphore.Should().NotBeNull();
         _lockManager.LockCount.Should().Be(1);
-        _lockManager.HasLock(cardIdm).Should().BeTrue();
+        HasLock(_lockManager, cardIdm).Should().BeTrue();
     }
 
     /// <summary>
@@ -107,7 +107,7 @@ public class CardLockManagerTests : IDisposable
         _lockManager.LockCount.Should().Be(1);
         // 参照カウントがあるため、即座にクリーンアップされないことを確認
         _lockManager.CleanupExpiredLocks();
-        _lockManager.HasLock(cardIdm).Should().BeTrue();
+        HasLock(_lockManager, cardIdm).Should().BeTrue();
     }
 
     #endregion
@@ -130,7 +130,7 @@ public class CardLockManagerTests : IDisposable
         _lockManager.ReleaseLockReference(cardIdm);
 
         // Assert - 参照カウントが0になってもロックは即座には削除されない
-        _lockManager.HasLock(cardIdm).Should().BeTrue();
+        HasLock(_lockManager, cardIdm).Should().BeTrue();
     }
 
     /// <summary>
@@ -163,7 +163,7 @@ public class CardLockManagerTests : IDisposable
         _lockManager.ReleaseLockReference(cardIdm);
 
         // Assert - 例外なく完了
-        _lockManager.HasLock(cardIdm).Should().BeTrue();
+        HasLock(_lockManager, cardIdm).Should().BeTrue();
     }
 
     #endregion
@@ -188,7 +188,7 @@ public class CardLockManagerTests : IDisposable
         _lockManager.CleanupExpiredLocks();
 
         // Assert
-        _lockManager.HasLock(cardIdm).Should().BeFalse();
+        HasLock(_lockManager, cardIdm).Should().BeFalse();
         _lockManager.LockCount.Should().Be(0);
     }
 
@@ -209,7 +209,7 @@ public class CardLockManagerTests : IDisposable
         _lockManager.CleanupExpiredLocks();
 
         // Assert - 参照カウントがあるため削除されない
-        _lockManager.HasLock(cardIdm).Should().BeTrue();
+        HasLock(_lockManager, cardIdm).Should().BeTrue();
     }
 
     /// <summary>
@@ -231,7 +231,7 @@ public class CardLockManagerTests : IDisposable
         _lockManager.CleanupExpiredLocks();
 
         // Assert - SemaphoreSlimが使用中のため削除されない
-        _lockManager.HasLock(cardIdm).Should().BeTrue();
+        HasLock(_lockManager, cardIdm).Should().BeTrue();
 
         // Cleanup
         semaphore.Release();
@@ -254,7 +254,7 @@ public class CardLockManagerTests : IDisposable
         _lockManager.CleanupExpiredLocks();
 
         // Assert - 期限切れでないため削除されない
-        _lockManager.HasLock(cardIdm).Should().BeTrue();
+        HasLock(_lockManager, cardIdm).Should().BeTrue();
     }
 
     /// <summary>
@@ -283,8 +283,8 @@ public class CardLockManagerTests : IDisposable
         _lockManager.CleanupExpiredLocks();
 
         // Assert
-        _lockManager.HasLock(expiredCardIdm).Should().BeFalse("期限切れのロックは削除される");
-        _lockManager.HasLock(recentCardIdm).Should().BeTrue("期限切れでないロックは残る");
+        HasLock(_lockManager, expiredCardIdm).Should().BeFalse("期限切れのロックは削除される");
+        HasLock(_lockManager, recentCardIdm).Should().BeTrue("期限切れでないロックは残る");
     }
 
     #endregion
@@ -307,9 +307,9 @@ public class CardLockManagerTests : IDisposable
 
         // Assert
         _lockManager.LockCount.Should().Be(0);
-        _lockManager.HasLock("card1").Should().BeFalse();
-        _lockManager.HasLock("card2").Should().BeFalse();
-        _lockManager.HasLock("card3").Should().BeFalse();
+        HasLock(_lockManager, "card1").Should().BeFalse();
+        HasLock(_lockManager, "card2").Should().BeFalse();
+        HasLock(_lockManager, "card3").Should().BeFalse();
     }
 
     /// <summary>
@@ -321,69 +321,6 @@ public class CardLockManagerTests : IDisposable
         // Act & Assert
         var action = () => _lockManager.ClearAllLocks();
         action.Should().NotThrow();
-    }
-
-    #endregion
-
-    #region RemoveLock テスト
-
-    /// <summary>
-    /// RemoveLockが特定のロックを削除することを確認
-    /// </summary>
-    [Fact]
-    public void RemoveLock_ExistingLock_RemovesAndReturnsTrue()
-    {
-        // Arrange
-        const string cardIdm = "0102030405060708";
-        _lockManager.GetLock(cardIdm);
-
-        // Act
-        var result = _lockManager.RemoveLock(cardIdm);
-
-        // Assert
-        result.Should().BeTrue();
-        _lockManager.HasLock(cardIdm).Should().BeFalse();
-    }
-
-    /// <summary>
-    /// 存在しないロックに対するRemoveLockがfalseを返すことを確認
-    /// </summary>
-    [Fact]
-    public void RemoveLock_NonExistentLock_ReturnsFalse()
-    {
-        // Act
-        var result = _lockManager.RemoveLock("NONEXISTENT");
-
-        // Assert
-        result.Should().BeFalse();
-    }
-
-    #endregion
-
-    #region HasLock テスト
-
-    /// <summary>
-    /// 存在するロックに対してHasLockがtrueを返すことを確認
-    /// </summary>
-    [Fact]
-    public void HasLock_ExistingLock_ReturnsTrue()
-    {
-        // Arrange
-        const string cardIdm = "0102030405060708";
-        _lockManager.GetLock(cardIdm);
-
-        // Act & Assert
-        _lockManager.HasLock(cardIdm).Should().BeTrue();
-    }
-
-    /// <summary>
-    /// 存在しないロックに対してHasLockがfalseを返すことを確認
-    /// </summary>
-    [Fact]
-    public void HasLock_NonExistentLock_ReturnsFalse()
-    {
-        // Act & Assert
-        _lockManager.HasLock("NONEXISTENT").Should().BeFalse();
     }
 
     #endregion
@@ -457,7 +394,7 @@ public class CardLockManagerTests : IDisposable
 
         // Assert - ロックは1つだけ存在
         _lockManager.LockCount.Should().Be(1);
-        _lockManager.HasLock(cardIdm).Should().BeTrue();
+        HasLock(_lockManager, cardIdm).Should().BeTrue();
     }
 
     /// <summary>
@@ -496,7 +433,7 @@ public class CardLockManagerTests : IDisposable
         _lockManager.LockCount.Should().Be(0, "期限切れかつ未使用のロックは全件削除されるべき");
         for (var i = 0; i < 10; i++)
         {
-            _lockManager.HasLock($"card{i}").Should().BeFalse($"card{i} は削除されているべき");
+            HasLock(_lockManager, $"card{i}").Should().BeFalse($"card{i} は削除されているべき");
         }
     }
 
@@ -551,8 +488,6 @@ public class CardLockManagerTests : IDisposable
         _lockManager.GetLock("card2");
         _lockManager.LockCount.Should().Be(2);
 
-        _lockManager.RemoveLock("card1");
-        _lockManager.LockCount.Should().Be(1);
     }
 
     #endregion
@@ -730,7 +665,7 @@ public class CardLockManagerTests : IDisposable
             lockManager.CleanupExpiredLocks();
 
             // Assert: 残っていること
-            lockManager.HasLock("card1").Should().BeTrue("参照カウント>0なら削除されないべき");
+            HasLock(lockManager, "card1").Should().BeTrue("参照カウント>0なら削除されないべき");
 
             // 同じセマフォインスタンスが返ること
             var sem2 = lockManager.GetLock("card1");
@@ -745,6 +680,16 @@ public class CardLockManagerTests : IDisposable
     #endregion
 
     #region Dispose 済みエントリの TOCTOU テスト（Issue #1823）
+
+    /// <summary>
+    /// 指定した IDm のロックエントリが残っているか（テストの観測用）
+    /// </summary>
+    /// <remarks>
+    /// Issue #2330: 本番から呼ばれない公開メソッド <c>CardLockManager.HasLock</c> を削除したため、
+    /// クリーンアップの結果は保持している辞書を直接見て確かめる。
+    /// </remarks>
+    private static bool HasLock(CardLockManager manager, string cardIdm)
+        => GetLocksDictionary(manager).Contains(cardIdm);
 
     /// <summary>
     /// 内部辞書（_locks）を非公開フィールドから取得する
@@ -821,27 +766,6 @@ public class CardLockManagerTests : IDisposable
         act.Should().NotThrow<ObjectDisposedException>();
         semaphore.Wait(0).Should().BeFalse("直前の Wait で取得済みのため、同じセマフォは再取得できない");
         semaphore.Release();
-    }
-
-    /// <summary>
-    /// RemoveLock が Dispose 済みフラグを立てることを確認
-    /// </summary>
-    /// <remarks>
-    /// 辞書からの除去が Dispose より先でも、除去前に GetOrAdd で同じエントリを取得し
-    /// lock(entry) の獲得を待っているスレッドが存在し得るため、ClearAllLocks と同じ手当てが要る。
-    /// </remarks>
-    [Fact]
-    public void RemoveLock_Dispose済みフラグを立てること()
-    {
-        // Arrange
-        _lockManager.GetLock("card1");
-        var entry = GetLocksDictionary(_lockManager).Values.Cast<object>().Single();
-
-        // Act
-        _lockManager.RemoveLock("card1").Should().BeTrue();
-
-        // Assert
-        GetIsDisposed(entry).Should().BeTrue();
     }
 
     #endregion

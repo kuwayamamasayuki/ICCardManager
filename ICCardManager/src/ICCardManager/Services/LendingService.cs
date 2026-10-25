@@ -1814,16 +1814,6 @@ namespace ICCardManager.Services
         }
 
         /// <summary>
-        /// 処理履歴をクリア
-        /// </summary>
-        public void ClearHistory()
-        {
-            LastProcessedCardIdm = null;
-            LastProcessedTime = null;
-            LastOperationType = null;
-        }
-
-        /// <summary>
         /// カード登録時に履歴をインポート（Issue #596）
         /// </summary>
         /// <remarks>

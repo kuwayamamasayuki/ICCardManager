@@ -63,7 +63,6 @@ public class DomainBoundaryConventionTests
         "IStationMasterService",
         "StationMasterService",
         "FelicaHistoryBlockDecoder",
-        "DetermineIsBusUsage",
     };
 
     /// <summary>

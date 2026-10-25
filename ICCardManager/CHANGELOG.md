@@ -56,6 +56,14 @@
   - テスト: 単体 9,393 → 9,478（+85）・UI 129 → 131（+2）・合計 9,522 → 9,609
 
 **開発基盤**
+- Issue #2330 **本番から使われないコード（デッドコード）と、それを現役として扱う設計書・テストを整理した**。各項目は本番（`src/ICCardManager`）からの参照が無いことを grep で確かめてから削除した（テスト・DebugDataViewer・tools からの参照は本番に数えない）
+  - 削除した型: `Common.AppState`（`ViewModels.AppState` と同名・同値の二重定義）、`MockCardReader`（どこでも生成されない。仮想タッチは `HybridCardReader`）、`BatchReportGenerationResult`（一括作成の集計は `ReportViewModel` の 1 か所だけ）、`ServiceResult` / `ServiceResult<T>`（継承する型も呼び出しも無い）、Value Object 4 種（`CardIdm` / `StaffIdm` / `FiscalYear` / `Money`。本体は移行されなかった）、`ValidationException`（一度も投げられない）、`SettingsDto`、`DailySummary`
+  - 削除したメンバー: `MainViewModel.OpenOperationLog`・`StatusMessage`・`StatusIcon`（どの画面にもバインドされない）、`WarekiConverter` の年度計算ラッパー 3 つと `FiscalYearHelper.GetFiscalYearEnd`、`SummaryGenerator.GenerateByDate`（日別集約。返却時の台帳行は `Generate` で作る）、`DtoMapper` の `ToEntity`×3・`ToDtoList`×4・`ToDto(AppSettings)`、`IOperationLogRepository` の `GetByDateRangeAsync` / `GetByOperatorAsync` / `GetByTargetAsync`、`LendingService.ClearHistory`、`CsvExportService.ExportLedgerTemplateAsync`、`CardLockManager.HasLock` / `RemoveLock`、`LedgerDetail.DetermineIsBusUsage` / `IsTransitUsage` / `IsImplicitPointRedemption`、例外のファクトリのうち本番で送出されないもの（BIZ001〜BIZ014・CR001・CR005〜CR008・DB001・DB003〜DB007・FILE001〜FILE007。番号は再利用しない）
+  - 交通系ICカード管理・職員管理の DEBUG ビルドにだけ出ていた「[DEBUG] … 読み取りシミュレート」ボタンを削除した（`MockCardReader` 前提で、押しても何も起きなかった）
+  - 年度の計算は `FiscalYearHelper` に一本化し、05_クラス設計書 §5.8b の「新規コードは `FiscalYear` を使う」移行計画（v3.0 で `[Obsolete]`）を撤回した
+  - `idx_ledger_card_id` は削除しない。`id` の降順の並びを使うクエリは無いが、`card_idm` だけを条件にする問い合わせではプランナーがこの索引を選ぶ（`EXPLAIN QUERY PLAN` で確認）。02_DB設計書 §7 と Migration_004 のコメントの用途を実態に合わせた
+  - テスト: 本番から使われないコードだけを検査していたテストメソッド 213 件を削除。`GenerateByDate` 経由で摘要の文言を検査していたテスト（`SummaryGeneratorComprehensiveTests` の 63 件ほか）は `Generate` へ移し、期待値は変えずに全件が通ることを確かめた。操作ログを読み返すテストは本番の検索経路（`SearchAllAsync`）を通すテスト用の問い合わせ（`OperationLogTestQueries`）へ移した。`AppState` の定義が 1 つであること・`StatusMessage` / `StatusIcon` が復活しないことの回帰を追加（旧コードで赤を実測）。単体 9,581 → 9,341
+  - 触れたファイルのうち 3 つ（`CardLockManager` / `CsvExportService` / `SummaryGenerationContext`）に `#nullable enable`（未移行ファイルの上限 159 → 154。削除した未移行ファイル 2 つを含む）
 - Issue #2290 **UI テストの DB ガードが、DB を開いているアプリがあると古い退避ファイルを残し、次回の実行でその間の記録を巻き戻していたのを是正した**
   - 起動中のピッすい（インストール版など）が開発機の `iccard.db` を開いていると、退避のコピーは成功するのに続く削除と書き戻しが失敗し、退避ファイル（`iccard.db.uitest-backup`）が残っていた。次に UI テストを流すと、それを「中断した実行の痕」と見なして書き戻し、その間にピッすいで記録した貸出・返却が消えた
   - 退避の前に DB を排他で開けるかを確かめ、開けなければ何も触らずに中止して「ピッすいを終了してから実行してください」と案内する。確認の後に開かれた場合に備え、DB 本体を消せなかったときは退避ファイルを捨てる（DB は置き換わっていないので書き戻しは要らない）。DB 本体を消した後の失敗では従来どおり退避ファイルを残す

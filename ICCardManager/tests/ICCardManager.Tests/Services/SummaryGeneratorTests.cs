@@ -12,7 +12,7 @@ namespace ICCardManager.Tests.Services;
 
 /// <summary>
 /// SummaryGenerator の固有機能テスト
-/// 基本的な Generate/GenerateByDate のテストは SummaryGeneratorComprehensiveTests を参照
+/// 基本的な Generate のテストは SummaryGeneratorComprehensiveTests を参照
 /// </summary>
 /// <remarks>
 /// Issue #1307: SummaryGenerator の静的状態共有による並列実行時の偶発的失敗を防ぐため、

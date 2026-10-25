@@ -1,3 +1,5 @@
+#nullable enable
+
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
@@ -250,46 +252,6 @@ namespace ICCardManager.Services
 
                 _logger.LogDebug("すべてのロックをクリアしました: {Count}件", count);
             }
-        }
-
-        /// <summary>
-        /// 特定のカードIDmのロックを削除（テスト用）
-        /// </summary>
-        /// <param name="cardIdm">カードIDm</param>
-        /// <returns>削除成功した場合はtrue</returns>
-        public bool RemoveLock(string cardIdm)
-        {
-            if (_locks.TryRemove(cardIdm, out var entry))
-            {
-                // Issue #1823: ClearAllLocks と同じ理由で、Dispose の前に lock(entry) 内で
-                // IsDisposed を立てる。辞書からの除去が先でも、除去前に GetOrAdd で
-                // 同じエントリを取得したスレッドが lock(entry) の獲得を待っている可能性があるため。
-                lock (entry)
-                {
-                    entry.IsDisposed = true;
-
-                    try
-                    {
-                        entry.Semaphore.Dispose();
-                    }
-                    catch (ObjectDisposedException)
-                    {
-                        // 既にDisposeされている場合は無視
-                    }
-                }
-                return true;
-            }
-            return false;
-        }
-
-        /// <summary>
-        /// 指定されたカードIDmのロックが存在するかチェック
-        /// </summary>
-        /// <param name="cardIdm">カードIDm</param>
-        /// <returns>存在する場合はtrue</returns>
-        public bool HasLock(string cardIdm)
-        {
-            return _locks.ContainsKey(cardIdm);
         }
 
         /// <summary>

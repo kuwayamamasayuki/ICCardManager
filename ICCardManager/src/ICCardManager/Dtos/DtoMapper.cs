@@ -41,14 +41,6 @@ namespace ICCardManager.Dtos
             };
         }
 
-        /// <summary>
-        /// IcCardエンティティのコレクションをCardDtoのリストに変換
-        /// </summary>
-        public static List<CardDto> ToDtoList(this IEnumerable<IcCard> cards)
-        {
-            return cards.Select(c => c.ToDto()).ToList();
-        }
-
         #endregion
 
         #region Staff → StaffDto
@@ -65,14 +57,6 @@ namespace ICCardManager.Dtos
                 Number = staff.Number,
                 Note = staff.Note
             };
-        }
-
-        /// <summary>
-        /// Staffエンティティのコレクションをリストに変換
-        /// </summary>
-        public static List<StaffDto> ToDtoList(this IEnumerable<Staff> staffList)
-        {
-            return staffList.Select(s => s.ToDto()).ToList();
         }
 
         #endregion
@@ -107,14 +91,6 @@ namespace ICCardManager.Dtos
             };
         }
 
-        /// <summary>
-        /// Ledgerエンティティのコレクションをリストに変換
-        /// </summary>
-        public static List<LedgerDto> ToDtoList(this IEnumerable<Ledger> ledgers)
-        {
-            return ledgers.Select(l => l.ToDto()).ToList();
-        }
-
         #endregion
 
         #region LedgerDetail → LedgerDetailDto
@@ -137,85 +113,6 @@ namespace ICCardManager.Dtos
                 IsCharge = detail.IsCharge,
                 IsPointRedemption = detail.IsPointRedemption,
                 IsBus = detail.IsBus
-            };
-        }
-
-        /// <summary>
-        /// LedgerDetailエンティティのコレクションをリストに変換
-        /// </summary>
-        public static List<LedgerDetailDto> ToDtoList(this IEnumerable<LedgerDetail> details)
-        {
-            return details.Select(d => d.ToDto()).ToList();
-        }
-
-        #endregion
-
-        #region AppSettings → SettingsDto
-
-        /// <summary>
-        /// AppSettingsをSettingsDtoに変換
-        /// </summary>
-        public static SettingsDto ToDto(this AppSettings settings)
-        {
-            return new SettingsDto
-            {
-                WarningBalance = settings.WarningBalance,
-                BackupPath = settings.BackupPath,
-                FontSize = settings.FontSize
-            };
-        }
-
-        #endregion
-
-        #region DTO → Entity（逆変換：更新用）
-
-        /// <summary>
-        /// CardDtoからIcCardエンティティを生成（新規登録・更新用）
-        /// </summary>
-        public static IcCard ToEntity(this CardDto dto)
-        {
-            return new IcCard
-            {
-                CardIdm = dto.CardIdm,
-                CardType = dto.CardType,
-                CardNumber = dto.CardNumber,
-                Note = dto.Note,
-                IsLent = dto.IsLent,
-                LastLentStaff = dto.LastLentStaff,
-                LastLentAt = dto.LentAt,
-                StartingPageNumber = dto.StartingPageNumber,
-                CarryoverIncomeTotal = dto.CarryoverIncomeTotal,
-                CarryoverExpenseTotal = dto.CarryoverExpenseTotal,
-                CarryoverFiscalYear = dto.CarryoverFiscalYear,
-                IsRefunded = dto.IsRefunded,
-                RefundedAt = dto.RefundedAt
-            };
-        }
-
-        /// <summary>
-        /// StaffDtoからStaffエンティティを生成（新規登録用）
-        /// </summary>
-        public static Staff ToEntity(this StaffDto dto)
-        {
-            return new Staff
-            {
-                StaffIdm = dto.StaffIdm,
-                Name = dto.Name,
-                Number = dto.Number,
-                Note = dto.Note
-            };
-        }
-
-        /// <summary>
-        /// SettingsDtoからAppSettingsを生成
-        /// </summary>
-        public static AppSettings ToEntity(this SettingsDto dto)
-        {
-            return new AppSettings
-            {
-                WarningBalance = dto.WarningBalance,
-                BackupPath = dto.BackupPath,
-                FontSize = dto.FontSize
             };
         }
 

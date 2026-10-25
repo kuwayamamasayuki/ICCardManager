@@ -1,3 +1,5 @@
+#nullable enable
+
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -106,8 +108,8 @@ namespace ICCardManager.Services
         /// <see cref="SummaryGenerator.ApplyDepartmentType"/> が DI シングルトンへ反映する。
         /// 値が意味を持つのは <see cref="WithDepartmentType"/> を通した世代だけで、
         /// <see cref="Create"/> が置く既定値は生成の入口で必ず上書きされる（<see cref="Create"/> の remarks 参照）。
-        /// 1 回の摘要生成は複数の地点でチャージ摘要を作る（<c>GenerateByDate</c> は
-        /// 日付ごと・チャージ境界ごとに作る）ため、途中で差し替わると<b>同じ生成の中で
+        /// 1 回の摘要生成の途中で差し替わると（かつての日別集約 <c>GenerateByDate</c> は
+        /// 日付ごと・チャージ境界ごとにチャージ摘要を作っていた）<b>同じ生成の中で
         /// 「役務費によりチャージ」と「旅費によりチャージ」が混ざる</b>。
         /// 世代へ畳み込んで入口で 1 回だけ捕捉することで、この中間状態を構造的に無くす
         /// （Issue #1919 の同一視グループと同じ扱い）。

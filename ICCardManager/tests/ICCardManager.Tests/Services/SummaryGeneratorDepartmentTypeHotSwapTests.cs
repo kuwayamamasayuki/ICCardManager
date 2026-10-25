@@ -21,8 +21,8 @@ namespace ICCardManager.Tests.Services;
 /// </para>
 /// <para>
 /// 6 経路はいずれも <c>_summaryGenerator.Generate(...)</c> を通るため、本テストは
-/// <see cref="SummaryGenerator.Generate"/> / <see cref="SummaryGenerator.GenerateByDate"/> の
-/// 2 つの入口で表明する（経路ごとのテストは経路が増えたときに追随できない）。
+/// 入口の <see cref="SummaryGenerator.Generate"/> で表明する（経路ごとのテストは経路が増えたときに追随できない。
+/// 日別集約の入口 <c>GenerateByDate</c> は本番から呼ばれず Issue #2330 で削除した）。
 /// </para>
 /// <para>
 /// テストは<b>既定と異なる部署種別へ変更してから</b>呼ぶ（既定のままだと修正前のコードでも
@@ -70,29 +70,6 @@ public class SummaryGeneratorDepartmentTypeHotSwapTests : IDisposable
         before.Should().Be(MayorOfficeCharge, "変更前は従来どおりであること");
         after.Should().Be(EnterpriseCharge,
             "再起動なしで新しい部署種別が反映されること（Issue #1975）");
-    }
-
-    /// <summary>
-    /// 差し替えが <see cref="SummaryGenerator.GenerateByDate"/>（返却時の台帳生成の入口）へ効くこと。
-    /// </summary>
-    /// <remarks>
-    /// <c>Generate</c> と <c>GenerateByDate</c> はチャージ摘要を別々の地点で作る。
-    /// 片方だけを直す退行を検出するため、入口ごとに表明する。
-    /// </remarks>
-    [Fact]
-    public void 部署種別の差し替えがGenerateByDateのチャージ摘要へ反映されること()
-    {
-        // Arrange
-        var generator = new SummaryGenerator(DepartmentType.MayorOffice);
-        var before = generator.GenerateByDate(CreateChargeOnlyDetails());
-
-        // Act
-        generator.ApplyDepartmentType(DepartmentType.EnterpriseAccount);
-        var after = generator.GenerateByDate(CreateChargeOnlyDetails());
-
-        // Assert
-        before.Should().ContainSingle().Which.Summary.Should().Be(MayorOfficeCharge);
-        after.Should().ContainSingle().Which.Summary.Should().Be(EnterpriseCharge);
     }
 
     /// <summary>
@@ -202,14 +179,13 @@ public class SummaryGeneratorDepartmentTypeHotSwapTests : IDisposable
         var generator = new DepartmentSwappingGenerator(
             DepartmentType.MayorOffice, DepartmentType.EnterpriseAccount);
 
-        // Act: 同一日に 2 回チャージした明細（1 回の生成で複数のチャージ摘要を作る）
-        var summaries = generator.GenerateByDate(CreateTwoChargesOnSameDay());
+        // Act: 同一日に 2 回チャージした明細
+        var summary = generator.Generate(CreateTwoChargesOnSameDay());
 
         // Assert
         generator.SwapPerformed.Should().BeTrue("差し替えを割り込ませられていること");
-        summaries.Should().HaveCount(2);
-        summaries.Should().OnlyContain(s => s.Summary == MayorOfficeCharge,
-            "1 回の生成の中で新旧の文言が混ざらないこと（Issue #1919）");
+        summary.Should().Be(MayorOfficeCharge,
+            "捕捉した後の差し替えは、その生成に混ざらないこと（Issue #1919）");
     }
 
     /// <summary>チャージのみの明細（ICカード履歴は新しい順）</summary>

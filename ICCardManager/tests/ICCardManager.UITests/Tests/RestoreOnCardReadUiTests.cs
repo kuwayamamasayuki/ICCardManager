@@ -21,8 +21,8 @@ namespace ICCardManager.UITests.Tests
     /// 読み取りの経路を通っていることは、変異で確かめた（ほかの経路の確認を外しても緑のまま、読み取りの経路を外すと赤）。
     /// </para>
     /// <para>
-    /// 読み取りはメイン画面の DEBUG パネル（<c>HybridCardReader.SimulateCardRead</c>）で起こす。ダイアログ側の
-    /// 「[DEBUG] … 読み取りシミュレート」は毎回新しい IDm を作るので、削除済みのものを読ませられない。メイン画面はモーダルの間
+    /// 読み取りはメイン画面の DEBUG パネル（<c>HybridCardReader.SimulateCardRead</c>）で起こす。ダイアログ側には
+    /// 読み取りを起こす手段が無い（以前の「[DEBUG] … 読み取りシミュレート」ボタンは押しても何も起きず Issue #2330 で削除した）。メイン画面はモーダルの間
     /// Win32 レベルで無効だが、UIA の Invoke は WPF のボタンを直接実行するので届き、読み取りのイベントはダイアログにも届く。
     /// DEBUG パネルを使うため Debug 起動のときだけ実行する。
     /// </para>

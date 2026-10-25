@@ -894,6 +894,25 @@ public class MainViewModelTests : IDisposable
     #region AppState列挙型テスト
 
     /// <summary>
+    /// AppState の定義が本体アセンブリに 1 つだけであること（Issue #2330）
+    /// </summary>
+    /// <remarks>
+    /// 以前は <c>ICCardManager.Common</c> にも同名・同値の列挙型があり、どこからも使われていなかった。
+    /// 同名の型が 2 つあると、片方の値だけを変えたときに食い違い、どちらが使われているかは
+    /// 名前空間の解決順でしか決まらない。
+    /// </remarks>
+    [Fact]
+    public void AppState_本体アセンブリに1つだけ定義されていること()
+    {
+        var types = typeof(MainViewModel).Assembly.GetTypes()
+            .Where(t => t.Name == nameof(AppState))
+            .ToList();
+
+        types.Should().ContainSingle()
+            .Which.Should().Be(typeof(AppState), "メイン画面の状態は ViewModels の AppState だけで表す");
+    }
+
+    /// <summary>
     /// AppStateが必要な全ての状態を持つこと
     /// </summary>
     [Fact]
@@ -958,31 +977,15 @@ public class MainViewModelTests : IDisposable
     }
 
     /// <summary>
-    /// 初期メッセージが「職員証をタッチしてください」であること
-    /// </summary>
-    [Fact]
-    public void Constructor_ShouldSetInitialStatusMessage()
-    {
-        _viewModel.StatusMessage.Should().Be("職員証をタッチしてください");
-    }
-
-    /// <summary>
-    /// 初期アイコンが👤であること
-    /// </summary>
-    [Fact]
-    public void Constructor_ShouldSetInitialIcon()
-    {
-        _viewModel.StatusIcon.Should().Be("👤");
-    }
-
-    /// <summary>
-    /// MainViewModel が公開する状態系プロパティが
-    /// CurrentState / StatusMessage / StatusIcon の 3 つに限定されていること（Issue #1398）。
+    /// MainViewModel が、どの画面にもバインドされない状態表示用のプロパティを公開していないこと
+    /// （Issue #1398 / #2330）。
     /// </summary>
     /// <remarks>
     /// 過去に存在した StatusBackgroundColor / StatusBorderColor / StatusForegroundColor /
     /// StatusLabel / StatusIconDescription は XAML から一度もバインドされず、SetState() の
     /// switch 式も常にデフォルトケースに落ちるデッドコードだったため Issue #1398 で削除済み。
+    /// Issue #2330: StatusMessage / StatusIcon も、メイン画面の表示が次アクションガイド（NextAction*）へ
+    /// 移ってからどの XAML にもバインドされず、値を更新し続けるだけだったため削除した。
     /// 同種のプロパティが復活してデッドコード化することを防ぐための回帰テスト。
     /// </remarks>
     [Fact]
@@ -995,6 +998,8 @@ public class MainViewModelTests : IDisposable
             "StatusForegroundColor",
             "StatusLabel",
             "StatusIconDescription",
+            "StatusMessage",
+            "StatusIcon",
         };
 
         var existing = deadProperties
@@ -1002,7 +1007,7 @@ public class MainViewModelTests : IDisposable
             .ToArray();
 
         existing.Should().BeEmpty(
-            "Issue #1398 で削除した未バインドプロパティが復活している: {0}",
+            "Issue #1398 / #2330 で削除した未バインドプロパティが復活している: {0}",
             string.Join(", ", existing));
     }
 
@@ -1194,7 +1199,6 @@ public class MainViewModelTests : IDisposable
 
         // Assert
         _viewModel.CurrentState.Should().Be(AppState.WaitingForStaffCard);
-        _viewModel.StatusMessage.Should().Be("職員証をタッチしてください");
         _viewModel.RemainingSeconds.Should().Be(0);
     }
 
@@ -1498,7 +1502,7 @@ public class MainViewModelTests : IDisposable
     /// <summary>
     /// 職員証タッチ後は、次アクションガイドに状態名「交通系ICカードタッチ待ち」＋アイコン🚃＋
     /// 操作者名入りの「○○さん、交通系ICカードをタッチしてください」が表示されること
-    /// （StatusMessage は Issue #186 でクリアされるが、ガイドは CurrentState から導出するため常設表示できる）
+    /// （ガイドは CurrentState から導出するため、Issue #186 で画面を変えない状態遷移でも常設表示できる）
     /// </summary>
     [Fact]
     public async Task NextActionGuide_AfterStaffTouch_ShouldShowIcCardPromptWithStaffName()
@@ -3810,15 +3814,12 @@ MainViewModel 仕様書
 
 1.1 初期状態
     - CurrentState = WaitingForStaffCard
-    - StatusMessage = "職員証をタッチしてください"
-    - StatusIcon = "👤"
     - RemainingSeconds = 0
 
 1.2 職員証タッチ時（WaitingForStaffCard → WaitingForIcCard）
     条件: 有効な職員証IDmが読み取られた場合
     動作:
     - CurrentState が WaitingForIcCard に遷移（内部状態のみ）
-    - メイン画面の表示はクリアされる（StatusMessage = ""）
     - ポップアップ通知で「{職員名} さん / 交通系ICカードをタッチしてください」を表示
     - タイムアウトタイマー（60秒）が開始
     - RemainingSeconds = 60
@@ -3849,7 +3850,6 @@ MainViewModel 仕様書
     条件: 60秒経過
     動作:
     - CurrentState が WaitingForStaffCard に戻る
-    - StatusMessage = "職員証をタッチしてください"
     - エラー音が再生される
 
 --------------------------------------------------------------------------------

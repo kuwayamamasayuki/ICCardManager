@@ -13,6 +13,7 @@ using ICCardManager.Infrastructure.CardReader;
 using ICCardManager.Models;
 using ICCardManager.Services;
 using ICCardManager.Tests.Data;
+using ICCardManager.Tests.Infrastructure;
 using ICCardManager.Tests.Infrastructure.Timing;
 using ICCardManager.ViewModels;
 using Microsoft.Extensions.Logging.Abstractions;
