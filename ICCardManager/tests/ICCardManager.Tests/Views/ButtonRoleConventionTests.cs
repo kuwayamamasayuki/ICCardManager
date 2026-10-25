@@ -62,6 +62,10 @@ public class ButtonRoleConventionTests
     /// 03 §4.5 の役割表の二次操作に当たるので、許可ではなく <c>SecondaryActionButtonStyle</c> を付けた。
     /// 許可は抑制に近いので、役割表のどれにも当たらないボタンだけを理由とともに載せる。
     /// </para>
+    /// <para>
+    /// 空の間は <see cref="役割の無い補助のボタンの許可がまだ有効であること"/>（許可の陳腐化の検査）が常に緑になる（検査する許可が無いため）。
+    /// 許可を足したときに働き始める。照合の正しさはサンプル入力（<see cref="許可の照合はアクセスキーの表記を無視すること"/>）が固定する。
+    /// </para>
     /// </remarks>
     private static readonly HashSet<(string File, string Content)> AllowedRolelessButtonsLeftOfDismiss = new();
 
