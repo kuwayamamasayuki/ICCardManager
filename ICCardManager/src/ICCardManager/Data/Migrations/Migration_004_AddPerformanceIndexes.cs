@@ -1,3 +1,4 @@
+#nullable enable
 using System;
 using System.Collections.Generic;
 using System.Data.SQLite;
@@ -24,8 +25,10 @@ namespace ICCardManager.Data.Migrations
             // ledgerテーブルに (card_idm, id DESC) の複合インデックスを追加
             // 追加当時は GetAllLatestBalancesAsync() が各カードの最新レコードを id の降順で取っていたため。
             // Issue #1068 / #1731 で最新残高の取得は日付基準へ変わり、id の降順の並びを使うクエリは無い。
-            // card_idm だけを条件にする問い合わせではプランナーがこの索引を選ぶため残している
-            // （02_DB設計書 §7、Issue #2330）。適用済みのマイグレーションなので SQL は変えない
+            // card_idm を先頭に持つ索引は idx_ledger_card_date もあり、この索引でなければならない問い合わせは
+            // いまの main には無い。残しているのは、未マージの PR #2343（Issue #2322）が台帳を引く索引として
+            // これを挙げているため。削除するならその後に新しいマイグレーションで行う（02_DB設計書 §7、Issue #2330）。
+            // 適用済みのマイグレーションなので SQL は変えない
             ExecuteNonQuery(connection, transaction,
                 "CREATE INDEX IF NOT EXISTS idx_ledger_card_id ON ledger(card_idm, id DESC)");
 
