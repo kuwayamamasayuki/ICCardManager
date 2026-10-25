@@ -196,10 +196,10 @@ public class CsvLedgerLentRecordRoundTripTests : IDisposable
 
     /// <summary>
     /// 受け入れ条件: 貸出中に出力した CSV を返却後（貸出中レコードは削除済み）に取り込んでも、「（貸出中）」の行が台帳に入らない。
-    /// 対: 同じ CSV の通常の行は従来どおり取り込まれる。
+    /// 対: 同じ CSV の通常の行は従来どおり扱われる（台帳の行と全項目一致してスキップ）。
     /// </summary>
     [Fact]
-    public async Task 貸出中に出力したCSVを返却後に取り込んでも通常の行だけが追加されること()
+    public async Task 貸出中に出力したCSVを返却後に取り込んでも貸出中の行は台帳に入らないこと()
     {
         _ledgerRepositoryMock.Setup(x => x.GetByDateRangeAsync(null, It.IsAny<DateTime>(), It.IsAny<DateTime>()))
             .ReturnsAsync(new List<Ledger>
@@ -232,18 +232,18 @@ public class CsvLedgerLentRecordRoundTripTests : IDisposable
     [Fact]
     public async Task ImportLedgersAsync_返却済みの貸出中レコードを写した行は取り込まずエラーにすること()
     {
+        // 通常の行は ID 空欄（新しい履歴として追加される行）にして、貸出中の行があれば通常の行も入れない（全か無か）ことを見る。
+        // Issue #2324: ID が台帳に無い通常の行は別の理由で拒否されるようになったため、ID のある形からこの形へ変えた
         var path = await WriteCsvAsync("lent_import.csv",
-            "1,2026-10-01 00:00:00,0123456789ABCDEF,001,鉄道（博多～天神）,,260,9740,山田太郎,,",
+            ",2026-10-01 00:00:00,0123456789ABCDEF,001,鉄道（博多～天神）,,260,9740,山田太郎,,",
             "2,2026-10-02 00:00:00,0123456789ABCDEF,001,（貸出中）,,,9740,山田太郎,,");
         _ledgerRepositoryMock.Setup(x => x.GetByIdAsync(It.IsAny<int>())).ReturnsAsync((Ledger?)null);
-        // Issue #2324: 通常の行（ID 1）は台帳に残っている（ID が台帳に無い行は別の理由で拒否されるため）
-        _ledgerRepositoryMock.Setup(x => x.GetByIdAsync(1)).ReturnsAsync(Usage(1, new DateTime(2026, 10, 1), 260, 9740));
 
         var result = await _importService.ImportLedgersAsync(path);
 
         result.Success.Should().BeFalse();
         result.ImportedCount.Should().Be(0);
-        _inserted.Should().BeEmpty("貸出中の行は台帳に入れない");
+        _inserted.Should().BeEmpty("取り込みは全か無か。貸出中の行があれば、追加されるはずの通常の行も入れない");
         var error = result.Errors.Should().ContainSingle().Subject;
         error.LineNumber.Should().Be(3);
         error.Message.Should().Contain("「（貸出中）」").And.Contain("取り込めません").And.EndWith("ください。");

@@ -160,7 +160,7 @@ public class CsvImportExistingRowMatchingTests : IDisposable
         var error = result.Errors.Should().ContainSingle().Subject;
         error.LineNumber.Should().Be(2);
         error.Message.Should().Contain("利用履歴ID 50").And.Contain("台帳にありません")
-            .And.Contain("削除").And.Contain("統合").And.Contain("利用履歴IDを空欄");
+            .And.Contain("削除").And.Contain("統合").And.Contain("バックアップ").And.Contain("利用履歴IDを空欄");
         AssertActionable(error.Message);
         preview.Errors.Should().ContainSingle().Which.Message.Should().Be(error.Message, "プレビューと取り込みで同じ判定・同じ文言");
     }

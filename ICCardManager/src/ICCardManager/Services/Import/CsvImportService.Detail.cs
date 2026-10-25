@@ -170,7 +170,8 @@ namespace ICCardManager.Services
                 }
 
                 // Issue #2324: 取り込みと同じく、ID が指す履歴と行のカードの食い違いを行ごとに確かめる
-                var previewCardMismatch = BuildDetailCardMismatchError(lineNumber, detail.LedgerId, ledgerCardIdmMap[detail.LedgerId], fields, allCards);
+                var previewCardMismatch = await BuildDetailCardMismatchErrorAsync(lineNumber, detail.LedgerId, ledgerCardIdmMap[detail.LedgerId], fields,
+                    () => Task.FromResult(allCards)).ConfigureAwait(false);
                 if (previewCardMismatch != null)
                 {
                     errors.Add(previewCardMismatch);
@@ -350,8 +351,11 @@ namespace ICCardManager.Services
             var newDetailsByCardIdmAndDate = new Dictionary<(string CardIdm, DateTime Date), List<(int LineNumber, LedgerDetail Detail)>>();
             // Issue #2324: ledger_id からカードIDmへのマッピング（行のカードとの照合用。プレビューと同じ）
             var ledgerCardIdmMap = new Dictionary<int, string>();
-            // 食い違いのエラーでカードを名指しするために使う（プレビューと同じく削除済みを含む）
-            var allCards = await _cardRepository.GetAllIncludingDeletedAsync().ConfigureAwait(false);
+            // 食い違いのエラーでカードを名指しするために使う（プレビューと同じく削除済みを含む）。
+            // 取り込みはプレビューと違いカード名を表示しないので、食い違う行があったときだけ読む
+            IEnumerable<IcCard>? allCards = null;
+            async Task<IEnumerable<IcCard>> GetAllCardsAsync()
+                => allCards ??= await _cardRepository.GetAllIncludingDeletedAsync().ConfigureAwait(false);
 
             for (var i = 1; i < lines.Count; i++)
             {
@@ -447,8 +451,9 @@ namespace ICCardManager.Services
                     ledgerCardIdmMap[detail.LedgerId] = ledger.CardIdm ?? "";
                 }
 
-                // Issue #2324: ID が指す履歴と行のカードが食い違う行は取り込まない（BuildDetailCardMismatchError の remarks）
-                var cardMismatch = BuildDetailCardMismatchError(lineNumber, detail.LedgerId, ledgerCardIdmMap[detail.LedgerId], fields, allCards);
+                // Issue #2324: ID が指す履歴と行のカードが食い違う行は取り込まない（BuildDetailCardMismatchErrorAsync の remarks）
+                var cardMismatch = await BuildDetailCardMismatchErrorAsync(lineNumber, detail.LedgerId, ledgerCardIdmMap[detail.LedgerId], fields,
+                    GetAllCardsAsync).ConfigureAwait(false);
                 if (cardMismatch != null)
                 {
                     errors.Add(cardMismatch);
@@ -684,7 +689,7 @@ namespace ICCardManager.Services
         /// <param name="ledgerId">行の利用履歴 ID</param>
         /// <param name="ledgerCardIdm">ID が指す既存の履歴のカード</param>
         /// <param name="fields">行のフィールド（カードIDm列は 3 列目）</param>
-        /// <param name="cards">登録済みのカード（削除済みを含む。名指しに使う）</param>
+        /// <param name="getCards">登録済みのカード（削除済みを含む。名指しに使う）。食い違ったときだけ呼ぶ</param>
         /// <returns>一致する・照合しない（カードIDm列が空欄）なら <c>null</c></returns>
         /// <remarks>
         /// <para>
@@ -699,15 +704,16 @@ namespace ICCardManager.Services
         /// そうして出力した CSV がそのまま取り込めなくなる。
         /// </para>
         /// </remarks>
-        private static CsvImportError? BuildDetailCardMismatchError(
-            int lineNumber, int ledgerId, string ledgerCardIdm, List<string> fields, IEnumerable<IcCard> cards)
+        private static async Task<CsvImportError?> BuildDetailCardMismatchErrorAsync(
+            int lineNumber, int ledgerId, string ledgerCardIdm, List<string> fields, Func<Task<IEnumerable<IcCard>>> getCards)
         {
             var rowCardIdm = fields[2].Trim();
-            if (rowCardIdm.Length == 0)
+            if (rowCardIdm.Length == 0 || string.Equals(ledgerCardIdm, rowCardIdm, StringComparison.OrdinalIgnoreCase))
             {
                 return null;
             }
 
+            var cards = await getCards().ConfigureAwait(false);
             return BuildLedgerCardMismatchError(lineNumber, ledgerId, ledgerCardIdm, rowCardIdm, cards, DetailCsvCardColumnLabel);
         }
 
