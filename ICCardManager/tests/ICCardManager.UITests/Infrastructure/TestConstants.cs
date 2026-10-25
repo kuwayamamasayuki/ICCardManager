@@ -482,6 +482,18 @@ namespace ICCardManager.UITests.Infrastructure
         [UiaName]
         public const string ExportDataTypeComboBox = "エクスポートするデータ種別";
 
+        /// <summary>データ入出力ダイアログのインポートのデータ種別（Issue #2307）。</summary>
+        [UiaName]
+        public const string ImportDataTypeComboBox = "インポートするデータ種別";
+
+        /// <summary>データ入出力ダイアログの「既存データはスキップする」（Issue #2307）。</summary>
+        [UiaName]
+        public const string ImportSkipExistingCheckBox = "既存データをスキップ";
+
+        /// <summary>利用履歴詳細を選んでいる間だけ表示する「スキップ指定は効かない」の案内（Issue #2307）。</summary>
+        [UiaName]
+        public const string ImportSkipExistingNotApplicableText = "利用履歴詳細の取り込みには、この指定は効きません。";
+
         /// <summary>履歴行の追加・修正ダイアログの初期フォーカス（<c>EditDatePicker</c>）。</summary>
         [UiaName]
         public const string LedgerRowEditDateInput = "出納日付";
@@ -493,6 +505,23 @@ namespace ICCardManager.UITests.Infrastructure
         /// <summary>履歴行の追加・修正ダイアログの「削除」ボタン（Issue #750）。</summary>
         [UiaName]
         public const string LedgerRowEditDeleteButton = "この履歴を削除";
+
+        /// <summary>履歴行の追加・修正ダイアログの「×」（利用者をクリア）ボタン。</summary>
+        [UiaName]
+        public const string LedgerRowEditClearStaffButton = "利用者をクリア";
+
+        /// <summary>履歴行の追加・修正ダイアログの備考の入力欄。</summary>
+        [UiaName]
+        public const string LedgerRowEditNoteInput = "備考";
+
+        /// <summary>履歴行の追加・修正ダイアログの「保存」ボタン。</summary>
+        [UiaName]
+        public const string LedgerRowEditSaveButton = "保存";
+
+        // 一覧に無い利用者の注記は Name を文言へバインドしているため、AutomationId で探す（Issue #2300）。
+        /// <summary>履歴行の追加・修正ダイアログで、利用者が職員一覧に無いときに出す注記の AutomationId。</summary>
+        [NotUiaName]
+        public const string LedgerRowEditUnlistedStaffNoticeId = "UnlistedStaffNotice";
 
         /// <summary>メイン画面の利用履歴の一覧（DataGrid）。</summary>
         [UiaName]

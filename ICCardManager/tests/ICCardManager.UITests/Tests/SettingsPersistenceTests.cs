@@ -80,8 +80,14 @@ namespace ICCardManager.UITests.Tests
             button.Should().NotBeNull($"メイン画面に「{TestConstants.OpenSettingsButton}」ボタンがあること");
             ScreenshotHelper.RequireForeground(page.Window);
             button!.Click();
-            return new DialogPageBase(
+            var settings = new DialogPageBase(
                 DialogLocator.WaitForNestedDialog(fixture, fixture.MainWindow, TestConstants.SettingsDialogName));
+
+            // Issue #2305: 設定画面は開くたびに DB から読み込み、読み込みが終わるまで「保存」を押せない。
+            // 読み込みが終わる前に入力すると、読み込んだ値で上書きされる（保存も押せない）ので、保存ボタンが有効になるまで待つ
+            settings.WaitUntilEnabled(TestConstants.SettingsSaveButton).Should().BeTrue(
+                $"設定の読み込みが終わり「{TestConstants.SettingsSaveButton}」ボタンが有効になること");
+            return settings;
         }
 
         private static AutomationElement RequireInput(DialogPageBase settings)

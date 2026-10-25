@@ -1,3 +1,4 @@
+#nullable enable
 namespace ICCardManager.Dtos
 {
     /// <summary>
@@ -29,7 +30,7 @@ namespace ICCardManager.Dtos
         /// <summary>新しいアプリバージョンが公開されている通知（共有フォルダの latest_version.txt 経由、Issue #1687）</summary>
         NewVersionAvailable,
 
-        /// <summary>自動バックアップが長期間成功していない警告（Issue #1689）</summary>
+        /// <summary>バックアップ（自動・手動）が長期間成功していない警告（Issue #1689 / #2304）</summary>
         BackupStale,
 
         /// <summary>
@@ -71,7 +72,7 @@ namespace ICCardManager.Dtos
         /// <summary>
         /// 対象カードIDm（LowBalance・BalanceInconsistency・CardBalanceMismatch時に使用）
         /// </summary>
-        public string CardIdm { get; set; }
+        public string? CardIdm { get; set; }
 
         /// <summary>
         /// 同じ種別の警告が繰り返し発生した回数（既定 1）。

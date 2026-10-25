@@ -14,6 +14,7 @@ using ICCardManager.Infrastructure.Sound;
 using ICCardManager.Infrastructure.Timing;
 using ICCardManager.Models;
 using ICCardManager.Services;
+using ICCardManager.Tests.Infrastructure.CardReader;
 using ICCardManager.Tests.Infrastructure.Timing;
 using ICCardManager.ViewModels;
 using Microsoft.Extensions.Logging;
@@ -377,7 +378,7 @@ public class MainViewModelIntegrationTests
         _viewModel.WarningMessages.Add(new WarningItem
         {
             Type = WarningType.BackupStale,
-            DisplayText = "⚠️ 自動バックアップが10日間成功していません"
+            DisplayText = "⚠️ バックアップが10日間成功していません"
         });
         _viewModel.WarningMessages.Add(new WarningItem
         {
@@ -486,6 +487,151 @@ public class MainViewModelIntegrationTests
         // 状態は職員証待ちにリセット
         _viewModel.CurrentState.Should().Be(AppState.WaitingForStaffCard);
         _viewModel.RemainingSeconds.Should().Be(0);
+    }
+
+    /// <summary>
+    /// 本物の <see cref="FelicaCardReader"/>（felicalib だけを <see cref="FakeFelicaDevice"/> へ差し替え）の履歴読み取りを
+    /// 返却フローへつなぐ（Issue #2301）。返却フローとカードリーダーの境界をまたぐ不変条件を、手組みの <c>Fail</c> ではなく
+    /// 実際の読み取り結果で表明するため。カードには今日の利用が 2 件残っている（読めれば台帳へ記録される）。
+    /// </summary>
+    private FakeFelicaDevice ConnectRealHistoryReader()
+    {
+        var device = new FakeFelicaDevice { CurrentIdm = CardIdmA };
+        var blocks = device.BlocksOf(CardIdmA);
+        blocks.Add(FakeFelicaDevice.BuildRailBlock(DateTime.Today, balance: 2290));
+        blocks.Add(FakeFelicaDevice.BuildRailBlock(DateTime.Today, balance: 2500));
+        blocks.Add(FakeFelicaDevice.BuildRailBlock(DateTime.Today.AddDays(-30), balance: 2710));
+        device.BlocksOf(CardIdmB).Add(FakeFelicaDevice.BuildRailBlock(DateTime.Today, balance: 9000));
+
+        var reader = new FelicaCardReader(
+            NullLogger<FelicaCardReader>.Instance, new Mock<IStationMasterService>().Object, device);
+        _cardReaderMock.Setup(r => r.TryReadHistoryAsync(CardIdmA))
+            .Returns(() => reader.TryReadHistoryAsync(CardIdmA));
+        _ledgerRepositoryMock.Setup(r => r.InsertAsync(It.IsAny<Ledger>())).ReturnsAsync(1);
+        return device;
+    }
+
+    /// <summary>台帳へ書き込むメソッド（オーバーロードを問わない）の呼び出し回数</summary>
+    private int CountLedgerWrites()
+        => _ledgerRepositoryMock.Invocations.Count(i => LedgerWriteMethodNames.Contains(i.Method.Name));
+
+    private static readonly string[] LedgerWriteMethodNames =
+    {
+        nameof(ILedgerRepository.InsertAsync),
+        nameof(ILedgerRepository.InsertDetailAsync),
+        nameof(ILedgerRepository.InsertDetailsAsync),
+        nameof(ILedgerRepository.UpdateAsync),
+        nameof(ILedgerRepository.DeleteAllLentRecordsAsync),
+    };
+
+    /// <summary>
+    /// Issue #2301: 返却で利用履歴を読み取っている途中に交通系ICカードが離れた・載せ替えられたら、返却を記録せず
+    /// （カードは貸出中のまま）、「交通系ICカードが離れました」と職員証のタッチからやり直す案内を出す。30秒ルールも武装しない。
+    /// </summary>
+    /// <remarks>
+    /// 「カードリーダーエラー」とは表示しない（利用者の操作であり故障ではない）。
+    /// 対の表明は <see cref="ReturnFlow_Issue2301_最後まで読めたら返却と利用を記録すること"/>（同じ準備で台帳へ書き込まれる）。
+    /// </remarks>
+    [Theory]
+    [InlineData("読み取り前に別のカードが載っていた")] // Issue #2301 の主経路（旧実装は Ok(空) で利用 0 件の返却）
+    [InlineData("読み取り前に離した")]
+    [InlineData("途中で離れた")]
+    [InlineData("確認の後に別のカードへ載せ替えた")]
+    [InlineData("読み終えた直後に離した")]
+    public async Task ReturnFlow_Issue2301_履歴の読み取り中にカードが離れたら返却を記録せず職員証からの案内を出すこと(string scenario)
+    {
+        ArrangeSuccessfulReturn();
+        var device = ConnectRealHistoryReader();
+        switch (scenario)
+        {
+            case "読み取り前に別のカードが載っていた":
+                device.CurrentIdm = CardIdmB;
+                break;
+            case "読み取り前に離した":
+                device.CurrentIdm = null;
+                break;
+            case "途中で離れた":
+                device.RemoveCardDuringReadAfterBlocks = 1;
+                break;
+            case "確認の後に別のカードへ載せ替えた":
+                device.SwapBeforeReadBlocksTo = CardIdmB;
+                break;
+            case "読み終えた直後に離した":
+                device.RemoveCardAfterReadBlocks = true;
+                break;
+        }
+
+        RaiseCardRead(StaffIdm);
+        await _dispatcherService.WaitForPendingAsync();
+
+        // Act
+        RaiseCardRead(CardIdmA);
+        await _dispatcherService.WaitForPendingAsync();
+
+        // Assert: 返却は記録されず、カードは貸出中のまま
+        _cardRepositoryMock.Verify(r => r.UpdateLentStatusAsync(CardIdmA, false, null, null), Times.Never);
+        CountLedgerWrites().Should().Be(0, "台帳（ledger / ledger_detail）へ何も書き込まない");
+        _soundPlayerMock.Verify(s => s.Play(SoundType.Error), Times.Once);
+        _toastMock.Verify(t => t.ShowError(
+            "交通系ICカードが離れました",
+            "職員証のタッチからやり直し、音が鳴るまで載せたままにしてください。"), Times.Once);
+        _toastMock.Verify(t => t.ShowError("カードリーダーエラー", It.IsAny<string>()), Times.Never);
+        // 30秒ルールは武装しない（記録が無いので、交通系ICカードだけの再タッチを逆処理にしない）
+        _lendingService.LastProcessedCardIdm.Should().BeNull();
+        _lendingService.LastOperationType.Should().BeNull();
+        _viewModel.CurrentState.Should().Be(AppState.WaitingForStaffCard);
+    }
+
+    /// <summary>
+    /// Issue #2301 の対: 同じ準備でカードが最後まで載っていれば、返却と利用を記録する。
+    /// </summary>
+    /// <remarks>
+    /// これが無いと、上のテストの「書き込まれない」は準備の不足（読めても記録されない）でも成り立つ。
+    /// </remarks>
+    [Fact]
+    public async Task ReturnFlow_Issue2301_最後まで読めたら返却と利用を記録すること()
+    {
+        ArrangeSuccessfulReturn();
+        ConnectRealHistoryReader();
+
+        RaiseCardRead(StaffIdm);
+        await _dispatcherService.WaitForPendingAsync();
+
+        // Act
+        RaiseCardRead(CardIdmA);
+        await _dispatcherService.WaitForPendingAsync();
+
+        _cardRepositoryMock.Verify(r => r.UpdateLentStatusAsync(CardIdmA, false, null, null), Times.Once);
+        _ledgerRepositoryMock.Invocations.Count(i => i.Method.Name == nameof(ILedgerRepository.InsertAsync))
+            .Should().BeGreaterThan(0, "今日の利用 2 件が台帳へ記録される（上のテストの「書き込まない」が準備の不足で成り立っていないことの対）");
+        _lendingService.LastOperationType.Should().Be(LendingOperationType.Return);
+        _toastMock.Verify(t => t.ShowError(It.IsAny<string>(), It.IsAny<string>()), Times.Never);
+    }
+
+    /// <summary>
+    /// Issue #2301 の対: カードを最後まで読めて利用が本当に 0 件なら、従来どおり返却を記録する。
+    /// </summary>
+    /// <remarks>
+    /// これが無いと「履歴が 0 件なら常に失敗にする」実装でも上のテストは緑になる。
+    /// </remarks>
+    [Fact]
+    public async Task ReturnFlow_Issue2301_最後まで読めて利用が本当に0件なら返却を記録すること()
+    {
+        ArrangeSuccessfulReturn();
+        var device = ConnectRealHistoryReader();
+        device.BlocksOf(CardIdmA).Clear(); // 履歴ブロックはすべて 0 埋め。カードは載ったまま
+
+        RaiseCardRead(StaffIdm);
+        await _dispatcherService.WaitForPendingAsync();
+
+        // Act
+        RaiseCardRead(CardIdmA);
+        await _dispatcherService.WaitForPendingAsync();
+
+        _cardRepositoryMock.Verify(r => r.UpdateLentStatusAsync(CardIdmA, false, null, null), Times.Once);
+        _lendingService.LastOperationType.Should().Be(LendingOperationType.Return);
+        _lendingService.LastProcessedCardIdm.Should().Be(CardIdmA);
+        _toastMock.Verify(t => t.ShowError(It.IsAny<string>(), It.IsAny<string>()), Times.Never);
     }
 
     #endregion

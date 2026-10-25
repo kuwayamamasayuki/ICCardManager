@@ -108,5 +108,17 @@ namespace ICCardManager.Data.Repositories
         /// </summary>
         /// <returns><see cref="MarkMergeHistoryUndoneAsync(int)"/> と同じ</returns>
         Task<bool> MarkMergeHistoryUndoneAsync(int historyId, SQLiteTransaction? transaction);
+
+        /// <summary>
+        /// Issue #2302: <paramref name="historyId"/> より後に保存された、同じ統合先（<paramref name="targetLedgerId"/>）への
+        /// 未取り消しの統合履歴があるか。統合の取り消しの前提条件の確認に使う（あれば後の統合から順に取り消す必要がある）。
+        /// </summary>
+        /// <remarks>
+        /// 取り消しの書き込みと同じトランザクションで呼ぶ（判定の後、書き込みまでの間に統合履歴が増えないようにする）。
+        /// 統合履歴の保存は統合のコミット後の別トランザクション（Issue #1954）なので、履歴が未保存・保存に失敗した統合は
+        /// 検出できない。その形は統合直後の金額の照合（<c>LedgerMergeUndoData.MergedTargetAmounts</c>）が塞ぐ。
+        /// 「後に保存された」は履歴の ID の大小で判定する（統合日時は秒単位のため、同じ秒の統合を区別できない）
+        /// </remarks>
+        Task<bool> HasLaterUndoableMergeOnSameTargetAsync(int historyId, int targetLedgerId, SQLiteTransaction transaction);
     }
 }
