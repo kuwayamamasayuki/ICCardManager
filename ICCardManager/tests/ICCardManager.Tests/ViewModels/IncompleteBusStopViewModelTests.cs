@@ -103,14 +103,14 @@ public class IncompleteBusStopViewModelTests
     }
 
     /// <summary>
-    /// Issue #2329: 論理削除・払い戻したカードの未入力は一覧に載せず、運用中のカード（貸出中を含む）の未入力は載せること。
+    /// Issue #2329: 論理削除したカードの未入力は一覧に載せず、それ以外（貸出中・払戻済みを含む）は載せること。
     /// </summary>
     /// <remarks>
-    /// 全期間に広げると、もう使わないカードの未入力が最長 6 年一覧に残る（論理削除したカードは
-    /// <c>GetAllAsync</c> が返さないため、カード名を解決できず IDm がそのまま出ていた）。
+    /// 全期間に広げると、論理削除したカードの未入力が最長 6 年一覧に残る（<c>GetAllAsync</c> が返さないため、
+    /// カード名を解決できず IDm がそのまま出ていた）。払い戻したカードは手元に無く、ここで案内しないと直す手段が無いため残す。
     /// </remarks>
     [Fact]
-    public async Task InitializeAsync_運用中のカードの未入力だけを一覧にすること()
+    public async Task InitializeAsync_論理削除したカードの未入力だけを一覧から外すこと()
     {
         var today = DateTime.Today;
         _ledgerRepositoryMock
@@ -135,7 +135,8 @@ public class IncompleteBusStopViewModelTests
 
         await _viewModel.InitializeAsync();
 
-        _viewModel.Items.Select(i => i.LedgerId).Should().BeEquivalentTo(new[] { 1, 2 });
+        _viewModel.Items.Select(i => i.LedgerId).Should().BeEquivalentTo(new[] { 1, 2, 3 });
+        _viewModel.Items.Single(i => i.LedgerId == 3).CardDisplayName.Should().Be("はやかけん 003", "払戻済みカードもカード名で表示する");
     }
 
     /// <summary>
@@ -176,7 +177,7 @@ public class IncompleteBusStopViewModelTests
     /// </summary>
     /// <remarks>
     /// Issue #2329 で期待値を変えた。以前はカード名を解決できないまま IDm を表示していたが、
-    /// 未入力の対象を運用中のカードに限ったため、カードの一覧に居ないカードの行は載せない。
+    /// 未入力の対象から論理削除したカードを除いたため、カードの一覧に居ない（＝論理削除済みの）カードの行は載せない。
     /// </remarks>
     [Fact]
     public async Task InitializeAsync_カードの一覧に居ないカードの未入力は載せないこと()
@@ -198,7 +199,7 @@ public class IncompleteBusStopViewModelTests
         await _viewModel.InitializeAsync();
 
         // Assert
-        _viewModel.Items.Should().BeEmpty("運用中のカードでない行は載せない");
+        _viewModel.Items.Should().BeEmpty("論理削除したカードの行は載せない");
     }
 
     /// <summary>

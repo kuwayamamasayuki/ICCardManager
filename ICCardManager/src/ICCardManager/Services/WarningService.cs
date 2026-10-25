@@ -28,7 +28,7 @@ namespace ICCardManager.Services
         /// <param name="ledgerRepository">台帳リポジトリ</param>
         /// <param name="databaseInfo">DB接続情報</param>
         /// <param name="cardRepository">
-        /// カードの母集団（Issue #2329。バス停名未入力の警告を運用中のカードに限るため）
+        /// カードの母集団（Issue #2329。バス停名未入力の警告から論理削除したカードを除くため）
         /// </param>
         /// <param name="updateNotificationService">
         /// 更新通知チェック（Issue #1687）。null の場合、更新通知警告は常に生成されない
@@ -167,14 +167,15 @@ namespace ICCardManager.Services
         /// バス停名未入力の件数をチェック
         /// </summary>
         /// <remarks>
-        /// Issue #2329: 対象は台帳に残っている全期間（保存期間 6 年）の、運用中のカードの未入力。
+        /// Issue #2329: 対象は台帳に残っている全期間（保存期間 6 年）の、論理削除していないカード（払戻済みを含む）の未入力。
         /// 取得は一覧（<c>IncompleteBusStopViewModel</c>）と同じ <see cref="IncompleteBusStopLedgers.LoadAsync"/>
         /// （件数と一覧の母集団を食い違わせない）。
         /// </remarks>
         /// <returns>未入力件数がある場合はWarningItem、ない場合はnull</returns>
         public async Task<WarningItem?> CheckIncompleteBusStopsAsync()
         {
-            var incompleteCount = (await IncompleteBusStopLedgers.LoadAsync(_ledgerRepository, _cardRepository).ConfigureAwait(false)).Count;
+            var cards = await _cardRepository.GetAllAsync().ConfigureAwait(false);
+            var incompleteCount = (await IncompleteBusStopLedgers.LoadAsync(_ledgerRepository, cards).ConfigureAwait(false)).Count;
             if (incompleteCount > 0)
             {
                 return new WarningItem

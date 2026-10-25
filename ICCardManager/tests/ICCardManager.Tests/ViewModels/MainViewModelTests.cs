@@ -349,13 +349,13 @@ public class MainViewModelTests : IDisposable
     }
 
     /// <summary>
-    /// Issue #2329（レビュー 2 回目）: バス停名未入力の警告は運用中のカードに限って数えるため、カード管理画面を閉じたら
-    /// 数え直すこと（★のあるカードを払い戻すと件数が変わる）。対の表明として、運用中のままなら警告を保つこと。
+    /// Issue #2329: バス停名未入力の警告は論理削除したカードの行を数えないため、カード管理画面を閉じたら
+    /// 数え直すこと（★のあるカードを論理削除すると件数が変わる）。対の表明として、削除しなければ警告を保つこと。
     /// </summary>
     [Theory]
     [InlineData(true)]
     [InlineData(false)]
-    public async Task OpenCardManageAsync_バス停名未入力の警告を数え直すこと(bool refundedInDialog)
+    public async Task OpenCardManageAsync_バス停名未入力の警告を数え直すこと(bool deletedInDialog)
     {
         const string cardIdm = "0E0E0E0E0E0E0E0E";
         SetupWarningCheckDefaults(busStopLedgers: new List<Ledger>
@@ -367,24 +367,24 @@ public class MainViewModelTests : IDisposable
         await _viewModel.CheckIncompleteBusStopsAsync();
         _viewModel.WarningMessages.Should().ContainSingle(w => w.Type == WarningType.IncompleteBusStop, "前提: 警告が出ている");
 
-        // カード管理画面で払い戻した状態を模す
+        // カード管理画面で論理削除した状態を模す（GetAllAsync は論理削除済みを返さない）
         _navigationServiceMock.Setup(n => n.ShowDialog<ICCardManager.Views.Dialogs.CardManageDialog>(
                 It.IsAny<Action<ICCardManager.Views.Dialogs.CardManageDialog>>()))
             .Callback(() =>
             {
-                if (refundedInDialog)
+                if (deletedInDialog)
                 {
                     _cardRepositoryMock.Setup(r => r.GetAllAsync())
-                        .ReturnsAsync(new List<IcCard> { new IcCard { CardIdm = cardIdm, IsRefunded = true } });
+                        .ReturnsAsync(new List<IcCard>());
                 }
             });
 
         await _viewModel.OpenCardManageAsync();
 
-        if (refundedInDialog)
+        if (deletedInDialog)
         {
             _viewModel.WarningMessages.Should().NotContain(w => w.Type == WarningType.IncompleteBusStop,
-                "払い戻したカードの★は数えないため、警告は消える");
+                "論理削除したカードの★は数えないため、警告は消える");
         }
         else
         {

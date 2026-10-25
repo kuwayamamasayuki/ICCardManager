@@ -21,29 +21,34 @@ namespace ICCardManager.Services
     /// 1 年以上入力し残した「バス（★）」は警告からも一覧からも消えて二度と案内されなかった。
     /// </para>
     /// <para>
-    /// 対象のカード: 運用中のカード（<see cref="IcCard.IsInOperation"/>。未削除 かつ 未払戻）に限る。
-    /// 全期間に広げると、論理削除・払い戻したカードの未入力が最長 6 年間、件数に数えられ一覧に残る
-    /// （論理削除したカードは一覧でカード名を解決できず IDm がそのまま出る）。もう使わないカードの入力を
-    /// 促し続ける警告は、本当に入力が要るカードの案内を埋もれさせる（残額ダッシュボードの母集団 #1947 と同じ判断）。
-    /// 判定は <see cref="IcCard.IsInOperation"/> に委ね、ここで書き直さない。
+    /// 対象のカード: 論理削除していないカード（払戻済みを含む）。論理削除したカードは登録の誤り等で台帳ごと
+    /// 扱わなくなったもので、全期間に広げると最長 6 年間、一覧に IDm のまま残り件数に数えられ続ける。
+    /// 一方で払戻済みカードの未入力は残す。返却時にバス停名の入力をスキップしたまま払い戻すと、カードは手元に無く
+    /// 履歴にも直接は辿り着きにくいため、ここで案内しないと直す手段が無くなり、6 年保存の物品出納簿に
+    /// 「バス（★）」のまま印刷され続ける（Issue #2329 のコードレビューで判断）。運用中のカード（<see cref="IcCard.IsInOperation"/>）に
+    /// 絞る残額ダッシュボード（#1947）とは、目的（入力し残しを直す／補充が要るカードを探す）が違うため母集団も違う。
     /// </para>
     /// </remarks>
     public static class IncompleteBusStopLedgers
     {
         /// <summary>
-        /// 運用中のカードの、バス停名が未入力の利用履歴を全期間から取得する（利用日の新しい順）
+        /// 論理削除していないカードの、バス停名が未入力の利用履歴を全期間から取得する（利用日の新しい順）
         /// </summary>
         /// <param name="ledgerQuery">台帳の問い合わせ</param>
-        /// <param name="cardRepository">カードの母集団（<c>GetAllAsync</c> は論理削除済みを返さない）</param>
-        public static async Task<IReadOnlyList<Ledger>> LoadAsync(ILedgerQueryService ledgerQuery, ICardRepository cardRepository)
+        /// <param name="cards">
+        /// カードの一覧（<c>ICardRepository.GetAllAsync</c> の結果。論理削除済みを返さない）。呼び出し側がカード名の解決にも
+        /// 使えるよう、取得は呼び出し側に任せて 2 度読まない
+        /// </param>
+        public static async Task<IReadOnlyList<Ledger>> LoadAsync(ILedgerQueryService ledgerQuery, IEnumerable<IcCard> cards)
         {
             var ledgers = await ledgerQuery.GetBySummaryContainingAsync(SummaryGenerator.BusPlaceholder).ConfigureAwait(false);
-            var cards = await cardRepository.GetAllAsync().ConfigureAwait(false);
-            var operatingCardIdms = new HashSet<string>(cards.Where(c => c.IsInOperation).Select(c => c.CardIdm));
+
+            // GetAllAsync は論理削除済みを返さないが、母集団の条件をこのメソッドの内側で完結させるため明示する
+            var targetCardIdms = new HashSet<string>(cards.Where(c => !c.IsDeleted).Select(c => c.CardIdm));
 
             // Issue #1818: プレースホルダは組織設定（SummaryText.BusPlaceholder）由来のため直書きしない
             return ledgers
-                .Where(l => SummaryGenerator.HasIncompleteBusStop(l.Summary) && operatingCardIdms.Contains(l.CardIdm))
+                .Where(l => SummaryGenerator.HasIncompleteBusStop(l.Summary) && targetCardIdms.Contains(l.CardIdm))
                 .ToList();
         }
     }

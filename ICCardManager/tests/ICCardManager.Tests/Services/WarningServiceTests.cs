@@ -211,16 +211,16 @@ public class WarningServiceTests
     }
 
     /// <summary>
-    /// Issue #2329（欠陥側）: 論理削除・払い戻したカードの未入力は数えないこと。
+    /// Issue #2329: 論理削除したカードの未入力は数えず、払い戻したカードの未入力は数えること（対の表明）。
     /// </summary>
     /// <remarks>
-    /// 全期間に広げると、もう使わないカードの未入力が最長 6 年数えられ続ける。
-    /// 論理削除済みは <c>GetAllAsync</c> が返さない形と、返ってきても <c>IsInOperation</c> で外す形の両方を置く。
+    /// 論理削除したカードは全期間に広げると最長 6 年数えられ続けるため外す（<c>GetAllAsync</c> が返さない形と、
+    /// 返ってきても削除フラグで外す形の両方を置く）。払い戻したカードは手元に無く、ここで案内しないと直す手段が無いため残す。
     /// </remarks>
     [Theory]
-    [InlineData(false, true)]
-    [InlineData(true, false)]
-    public async Task CheckIncompleteBusStopsAsync_運用中でないカードの未入力は数えないこと(bool isDeleted, bool isRefunded)
+    [InlineData(false, true, 3)]    // 払戻済み → 数える（運用中の 1 件 ＋ 払戻済みの 2 件）
+    [InlineData(true, false, 1)]    // 論理削除 → 数えない（運用中の 1 件だけ）
+    public async Task CheckIncompleteBusStopsAsync_論理削除したカードの未入力は数えず払戻済みは数えること(bool isDeleted, bool isRefunded, int expectedCount)
     {
         const string retiredCardIdm = "0202020202020202";
         const string missingCardIdm = "0303030303030303";
@@ -235,16 +235,17 @@ public class WarningServiceTests
             {
                 new() { CardIdm = OperatingCardIdm, Summary = "バス（★）" },
                 new() { CardIdm = retiredCardIdm, Summary = "バス（★）" },
+                new() { CardIdm = retiredCardIdm, Summary = "バス（★）、鉄道（博多～天神）" },
                 new() { CardIdm = missingCardIdm, Summary = "バス（★）" }   // 論理削除済み（GetAllAsync が返さない）
             });
 
         var warning = await _service.CheckIncompleteBusStopsAsync();
 
-        warning!.DisplayText.Should().Be("⚠️ バス停名が未入力の履歴が1件あります", "運用中のカードの 1 件だけを数える");
+        warning!.DisplayText.Should().Be($"⚠️ バス停名が未入力の履歴が{expectedCount}件あります");
     }
 
     /// <summary>
-    /// Issue #2329（既存挙動側）: 運用中のカードなら、貸出中でも未入力を数えること（貸出中は運用中の否定要因ではない）。
+    /// Issue #2329（既存挙動側）: 貸出中のカードの未入力も数えること。
     /// </summary>
     [Fact]
     public async Task CheckIncompleteBusStopsAsync_運用中のカードは貸出中でも数えること()

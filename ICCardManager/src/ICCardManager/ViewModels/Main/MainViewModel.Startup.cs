@@ -436,8 +436,7 @@ public partial class MainViewModel
     /// </remarks>
     private void ApplyDataWarnings(int warningBalance)
     {
-        var replacements = _warningService.CheckLowBalanceWarnings(CardBalanceDashboard, warningBalance)
-            ?? Array.Empty<WarningItem>();
+        var replacements = _warningService.CheckLowBalanceWarnings(CardBalanceDashboard, warningBalance);
 
         // Issue #2329: 内容が変わらないなら入れ替えない。ダッシュボードの更新（共有モードでは 15 秒ごと）のたびに
         // 同じ行を消して足し直すと、警告エリアの並びが変わり、クリックしようとした行が押す直前に置き換わる
