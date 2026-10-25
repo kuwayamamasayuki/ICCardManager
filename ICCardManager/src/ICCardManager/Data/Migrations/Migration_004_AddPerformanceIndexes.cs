@@ -25,10 +25,9 @@ namespace ICCardManager.Data.Migrations
             // ledgerテーブルに (card_idm, id DESC) の複合インデックスを追加
             // 追加当時は GetAllLatestBalancesAsync() が各カードの最新レコードを id の降順で取っていたため。
             // Issue #1068 / #1731 で最新残高の取得は日付基準へ変わり、id の降順の並びを使うクエリは無い。
-            // card_idm を先頭に持つ索引は idx_ledger_card_date もあるので、card_idm だけを条件にする問い合わせは
-            // そちらでも引ける。残しているのは、Issue #2322 の検出（払戻済で貸出中レコードが残るカード）の問い合わせが
-            // 台帳を引く索引としてこれと idx_ledger_card_date を挙げているため。削除するなら新しいマイグレーションで行う
-            // （02_DB設計書 §7、Issue #2330）。
+            // 現在のプランナーは card_idm 単独の条件でこの索引を選ぶ（EXPLAIN QUERY PLAN で確認。この索引が無ければ
+            // idx_ledger_card_date を選ぶ）。削除すると使われる索引が切り替わるので、性能への影響を確かめてから
+            // 新しいマイグレーションで削除を判断する（02_DB設計書 §7、Issue #2330）。
             // 適用済みのマイグレーションなので SQL は変えない
             ExecuteNonQuery(connection, transaction,
                 "CREATE INDEX IF NOT EXISTS idx_ledger_card_id ON ledger(card_idm, id DESC)");
