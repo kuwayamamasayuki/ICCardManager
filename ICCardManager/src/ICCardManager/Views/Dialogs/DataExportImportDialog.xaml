@@ -219,17 +219,31 @@
                 </Grid>
 
                 <!-- 既存スキップ -->
+                <!-- Issue #2307: 説明は #1376 の判定（全項目が同じ既存データだけを飛ばし、違いがあれば更新）に合わせる。
+                     利用履歴詳細の取り込みは指定を受け取らないため、選んでいる間は無効にし、効かない旨を表示する -->
                 <Grid Margin="0,0,0,10">
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="120"/>
                         <ColumnDefinition Width="*"/>
                     </Grid.ColumnDefinitions>
-                    <CheckBox Grid.Column="1"
-                              Content="既存データはスキップする(_K)"
-                              IsChecked="{Binding SkipExistingOnImport}"
-                              VerticalAlignment="Center"
-                              AutomationProperties.Name="既存データをスキップ"
-                              ToolTip="同じIDmのデータが既に存在する場合はスキップします（オフの場合は上書き更新）（アクセスキー: Alt+K）"/>
+                    <StackPanel Grid.Column="1">
+                        <CheckBox x:Name="SkipExistingCheckBox"
+                                  Content="既存データはスキップする(_K)"
+                                  IsChecked="{Binding SkipExistingOnImport}"
+                                  IsEnabled="{Binding IsSkipExistingApplicable}"
+                                  VerticalAlignment="Center"
+                                  AutomationProperties.Name="既存データをスキップ"
+                                  ToolTipService.ShowOnDisabled="True"
+                                  ToolTip="全項目が同じ既存データだけを取り込まずに飛ばします。項目に違いがある既存データは、この指定に関係なく更新します。オフにすると、同じ既存データも更新として扱い、利用履歴のID列が空欄の行は重複を確かめずに登録します（利用履歴詳細の取り込みには効きません）（アクセスキー: Alt+K）"/>
+                        <TextBlock x:Name="SkipExistingNotApplicableText"
+                                   Text="利用履歴詳細の取り込みには、この指定は効きません。"
+                                   AutomationProperties.Name="利用履歴詳細の取り込みには、この指定は効きません。"
+                                   Visibility="{Binding IsSkipExistingApplicable, Converter={StaticResource InverseBoolToVisibilityConverter}, ConverterParameter=invert}"
+                                   Foreground="{DynamicResource SecondaryTextBrush}"
+                                   FontSize="{DynamicResource SmallFontSize}"
+                                   TextWrapping="Wrap"
+                                   Margin="0,4,0,0"/>
+                    </StackPanel>
                 </Grid>
 
                 <!-- Issue #511: カード指定セクション（利用履歴インポート時のみ表示） -->

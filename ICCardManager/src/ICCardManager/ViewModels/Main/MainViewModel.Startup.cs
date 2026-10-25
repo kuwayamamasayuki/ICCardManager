@@ -552,7 +552,7 @@ public partial class MainViewModel
         var activeCardIdms = new HashSet<string>(CardBalanceDashboard.Select(i => i.CardIdm));
         ReplaceWarnings(w => (w.Type == WarningType.BalanceInconsistency
                               || w.Type == WarningType.CardBalanceMismatch)
-                             && !activeCardIdms.Contains(w.CardIdm));
+                             && (w.CardIdm is null || !activeCardIdms.Contains(w.CardIdm)));
     }
 
     /// <summary>

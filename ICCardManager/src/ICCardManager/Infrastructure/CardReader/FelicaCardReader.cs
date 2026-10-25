@@ -49,6 +49,11 @@ namespace ICCardManager.Infrastructure.CardReader
         private readonly IStationMasterService _stationMasterService;
 
         /// <summary>
+        /// felicalib への呼び出しの継ぎ目（Issue #2301）。本番は <see cref="FelicaUtilityDevice"/>。
+        /// </summary>
+        private readonly IFelicaDevice _device;
+
+        /// <summary>
         /// FelicaUtility へのアクセスを同期するためのロックオブジェクト。
         /// FelicaLib.DotNet はスレッドセーフではないため、すべてのアクセスを直列化する必要があります。
         /// </summary>
@@ -141,9 +146,21 @@ namespace ICCardManager.Infrastructure.CardReader
         /// <param name="logger">ロガー</param>
         /// <param name="stationMasterService">駅マスタサービス</param>
         public FelicaCardReader(ILogger<FelicaCardReader> logger, IStationMasterService stationMasterService)
+            : this(logger, stationMasterService, FelicaUtilityDevice.Instance)
+        {
+        }
+
+        /// <summary>
+        /// felicalib への呼び出しを差し替えてインスタンスを初期化します（Issue #2301。テスト用）。
+        /// </summary>
+        /// <remarks>
+        /// DI コンテナは public コンストラクターだけを使うため、本番では常に <see cref="FelicaUtilityDevice"/> になる。
+        /// </remarks>
+        internal FelicaCardReader(ILogger<FelicaCardReader> logger, IStationMasterService stationMasterService, IFelicaDevice device)
         {
             _logger = logger;
             _stationMasterService = stationMasterService ?? throw new ArgumentNullException(nameof(stationMasterService));
+            _device = device ?? throw new ArgumentNullException(nameof(device));
         }
 
         /// <summary>
@@ -231,123 +248,299 @@ namespace ICCardManager.Infrastructure.CardReader
         }
 
         /// <summary>
-        /// カードから履歴を読み取ります。
+        /// カードから履歴を読み取ります（後方互換用）。
         /// </summary>
         /// <param name="idm">カードのIDm</param>
-        /// <returns>利用履歴詳細のリスト（最大20件、新しい順）</returns>
+        /// <returns>利用履歴詳細のリスト（最大20件、新しい順）。読み取れなかった場合は空のリスト</returns>
         /// <remarks>
-        /// 読み取り前にカードのIDmを検証し、指定されたカードと一致することを確認します。
-        /// カードが載せ替えられた場合は空のリストを返します。
+        /// <para>
+        /// 読み取り前にカードの IDm を検証し、指定されたカードと一致しない場合（別のカードが載っている）は空のリストを返します。
+        /// felicalib の例外（カードが離れた場合を含む）は <see cref="Error"/> を発火して空のリストを返します。
+        /// </para>
+        /// <para>
+        /// Issue #2301 で足した「読み取り後の確認」は、このメソッドでは<b>別のカードが載っていた</b>（IDm の不一致）ときだけ使い、
+        /// 空のリストを返します（読んだのは載せ替えた先のカードの履歴である可能性が高く、登録すると別のカードの履歴が導入行・履歴になる。
+        /// 読み取り前の不一致を空にするのと同じ扱い）。確認ができなかった（カードが離れた・リーダーの例外）ときは読めた明細を従来どおり返し、
+        /// <see cref="Error"/> も発火しません。呼び出し元はカード登録時の事前読み取りで、警告音の直後に離されやすく、
+        /// ここで捨てると以前なら取り込めていた登録が黙って履歴なしになるためです（返却の不具合を直すために登録の挙動を変えない）。
+        /// 残る危険: 確認の後に別のカードへ載せ替え、そのカードを後の確認より前に離すと「見失った」になり、別のカードの履歴を返し得る
+        /// （登録の挙動を変えないために受け入れている。数百ミリ秒の間に載せ替えて離す操作が要るため極めて稀）。
+        /// 空のリストは「履歴ゼロ件」と区別できないので、区別が要る処理は <see cref="TryReadHistoryAsync"/> を使うこと。
+        /// </para>
         /// </remarks>
         public async Task<IEnumerable<LedgerDetail>> ReadHistoryAsync(string idm)
         {
-            var details = new List<LedgerDetail>();
-
-            await Task.Run(() =>
+            var outcome = await Task.Run(() => ReadHistoryCore(idm)).ConfigureAwait(false);
+            switch (outcome.Kind)
             {
-                lock (_felicaLock)
-                {
-                    try
-                    {
-                        // IDm検証: 読み取り対象のカードが載っていることを確認
-                        var currentIdmBytes = FelicaUtility.GetIDm(FelicaSystemCode.Suica);
-                        var currentIdm = GetIdmString(currentIdmBytes);
-                        if (!string.Equals(currentIdm, idm, StringComparison.OrdinalIgnoreCase))
-                        {
-                            // Issue #1704: IDm は認証クレデンシャルのためログにはマスクして出力する
-                            _logger.LogWarning("FelicaCardReader: 履歴読み取り時にIDmが一致しません。期待={Expected}, 実際={Actual}", IdmMasker.Mask(idm), IdmMasker.Mask(currentIdm));
-                            return;
-                        }
+                case HistoryReadKind.ReadFailed:
+                    Error?.Invoke(this, CardReaderException.HistoryReadFailed(outcome.Exception?.Message, outcome.Exception));
+                    return new List<LedgerDetail>();
 
-                        // FelicaUtility.ReadBlocksWithoutEncryption で複数ブロックを一括取得
-                        var historyDataList = new List<byte[]>();
+                case HistoryReadKind.NotPresentBeforeRead:
+                case HistoryReadKind.OtherCardAfterRead:
+                    return new List<LedgerDetail>();
 
-                        _logger.LogDebug("FelicaCardReader: 履歴読み取り開始 (システムコード=0x{SystemCode:X4}, サービスコード=0x{ServiceCode:X4})",
-                            (int)FelicaSystemCode.Suica, (int)FelicaServiceCode.SuicaHistory);
-
-                        int blockIndex = 0;
-                        foreach (var data in FelicaUtility.ReadBlocksWithoutEncryption(
-                            FelicaSystemCode.Suica,
-                            FelicaServiceCode.SuicaHistory,
-                            0,
-                            MaxHistoryCount))
-                        {
-                            if (data == null)
-                            {
-                                _logger.LogDebug("FelicaCardReader: ブロック{Index}はnull", blockIndex);
-                                break;
-                            }
-                            if (data.All(b => b == 0))
-                            {
-                                _logger.LogDebug("FelicaCardReader: ブロック{Index}は全て0", blockIndex);
-                                break;
-                            }
-                            _logger.LogDebug("FelicaCardReader: ブロック{Index}: {Data}", blockIndex, BitConverter.ToString(data));
-                            historyDataList.Add(data);
-                            blockIndex++;
-                        }
-
-                        _logger.LogInformation("FelicaCardReader: 履歴データを {Count} 件取得", historyDataList.Count);
-
-                        // 駅名解決にはCardType.Unknownを使用
-                        // 注: IDmの先頭2バイトは製造者コードであり、カード種別ではないため、
-                        //     CardTypeDetector.DetectFromIdmは信頼できない
-                        //     StationMasterServiceのUnknown優先順位（九州優先）が使用される
-                        var cardType = CardType.Unknown;
-
-                        // 履歴データをパースして金額を計算
-                        for (int i = 0; i < historyDataList.Count; i++)
-                        {
-                            var currentData = historyDataList[i];
-                            var nextData = i + 1 < historyDataList.Count ? historyDataList[i + 1] : null;
-
-                            var detail = ParseHistoryData(currentData, nextData, cardType);
-                            if (detail != null)
-                            {
-                                details.Add(detail);
-                            }
-                        }
-                    }
-                    catch (Exception ex)
-                    {
-                        _logger.LogError(ex, "FelicaCardReader: 履歴読み取りエラー");
-                        Error?.Invoke(this, CardReaderException.HistoryReadFailed(ex.Message, ex));
-                    }
-                }
-            }).ConfigureAwait(false);
-
-            return details;
+                default:
+                    // Succeeded・LostAfterRead・ReaderFailedAfterRead（確認できなかっただけなので従来どおり返す。上の remarks）
+                    return outcome.Details;
+            }
         }
 
         /// <inheritdoc/>
+        /// <remarks>
+        /// <para>
+        /// Issue #2301: 対象のカードが載っていなかった場合は <see cref="CardReaderException.CardRemoved"/> で <c>Fail</c> を返し、
+        /// <see cref="Error"/> は発火しない（利用者の操作でありリーダーの故障ではないため。警告エリアへ「カードリーダーエラー」を出さない）。
+        /// 以前は読み取り前の IDm の不一致（別のカードが載っている）を <c>Ok(空リスト)</c> としていたため、
+        /// 返却で「利用 0 件の返却」が記録されていた。「載っていなかった」に当たるのは次のとおり。
+        /// </para>
+        /// <list type="bullet">
+        /// <item><description>読み取りの前に、別のカードが載っている（IDm の不一致。カード無しで <c>GetIDm</c> が null の場合も含める）</description></item>
+        /// <item><description>読み取りの後に、別のカードが載っている・カードを見失った例外が出た。確認の後・ブロックを読む前に載せ替えると、felicalib は
+        /// <b>載せ替えた先のカードの履歴</b>を読む（1.2.67 は <c>ReadBlocksWithoutEncryption</c> のたびにポーリングし直す）</description></item>
+        /// <item><description>felicalib がカードを見失った例外（<see cref="IsCardNotPresentException"/>）。実機で「タッチしてすぐ離す」と多くはこれになる</description></item>
+        /// </list>
+        /// <para>
+        /// それ以外の felicalib の例外は、読み取りの前・途中・後のどこで出ても <see cref="Error"/> を発火したうえで <c>Fail</c>（<see cref="CardReaderException.HistoryReadFailed"/>）を返す
+        /// （読み終えた直後に USB が抜けた等を「交通系ICカードが離れました」と表示しない）。
+        /// </para>
+        /// </remarks>
         public async Task<CardReadResult<IReadOnlyList<LedgerDetail>>> TryReadHistoryAsync(string idm)
         {
-            // Issue #1169: 既存ReadHistoryAsyncに委譲しつつ、エラー判定を加味する。
-            // FelicaCardReader.ReadHistoryAsyncは内部でtry/catchして空リストを返すため、
-            // ここでは「IDmが一致しない」「全く読み取れなかった」場合をエラー扱いにはしない
-            // （既存挙動の維持を優先）。実装の主目的はインターフェース遵守。
-            CardReaderException? capturedError = null;
-            EventHandler<System.Exception> handler = (s, e) =>
+            var outcome = await Task.Run(() => ReadHistoryCore(idm)).ConfigureAwait(false);
+            switch (outcome.Kind)
             {
-                if (e is CardReaderException cre)
-                {
-                    capturedError = cre;
-                }
-            };
-            Error += handler;
-            try
-            {
-                var details = (await ReadHistoryAsync(idm).ConfigureAwait(false)).ToList();
-                if (capturedError != null)
-                {
-                    return CardReadResult<IReadOnlyList<LedgerDetail>>.Fail(capturedError);
-                }
-                return CardReadResult<IReadOnlyList<LedgerDetail>>.Ok(details);
+                case HistoryReadKind.Succeeded:
+                    return CardReadResult<IReadOnlyList<LedgerDetail>>.Ok(outcome.Details);
+
+                case HistoryReadKind.ReadFailed when !IsCardNotPresentException(outcome.Exception):
+                case HistoryReadKind.ReaderFailedAfterRead:
+                    var readerError = CardReaderException.HistoryReadFailed(outcome.Exception?.Message, outcome.Exception);
+                    Error?.Invoke(this, readerError);
+                    return CardReadResult<IReadOnlyList<LedgerDetail>>.Fail(readerError);
+
+                default:
+                    // NotPresentBeforeRead・OtherCardAfterRead・LostAfterRead・カードを見失った例外
+                    return CardReadResult<IReadOnlyList<LedgerDetail>>.Fail(CardReaderException.CardRemoved(outcome.Exception));
             }
-            finally
+        }
+
+        /// <summary>
+        /// felicalib の例外が「読み取り対象のカードを見失った」ことを示すかを判定する純粋関数（Issue #2301）。
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// FelicaLib.DotNet 1.2.67 の <c>Felica.TransferData</c> は呼び出しのたびに PaSoRi を開いてポーリングし、カードが無ければ
+        /// <see cref="InvalidOperationException"/>（<see cref="FelicaLibCardNotFoundMessage"/>）を投げる（<c>GetIDm</c> は null を返さない）。
+        /// ブロックの読み取りに失敗すると同じ型で <see cref="FelicaLibBlockNotReadMessage"/> を投げる（読めなかったブロックを null で返さない）。
+        /// 履歴の読み取りはカードを検出した直後に行うため、どちらも「カードが離れた・載せ替えられた」と読む。
+        /// 後者は「対象のカード（はやかけん・nimoca・SUGOCA 等の Suica 互換の履歴サービス 0x090F）は常に 20 ブロックを返し、未使用は 0 で埋める」
+        /// という前提に立つ（本システムが 20 件を読むのも同じ前提）。<b>全種類のカードで実機確認はしていない未確認の前提</b>で、
+        /// 載ったままでも 20 ブロック読めないカードがあれば「交通系ICカードが離れました」と誤って案内する（表示だけの誤りで、返却は記録しない）。
+        /// どちらも DLL を ildasm で逆アセンブルして確かめた（文言は DLL 内の文字列リテラル）。
+        /// </para>
+        /// <para>
+        /// 文言での判定は felicalib の版で変わり得る（<see cref="IsReaderUnavailableException"/> と同じ弱さ）。変わった場合は
+        /// リーダーの例外（<see cref="CardReaderException.HistoryReadFailed"/>）に倒れるだけで、返却が記録されることはない。
+        /// </para>
+        /// </remarks>
+        internal static bool IsCardNotPresentException(Exception? ex)
+        {
+            if (!(ex is InvalidOperationException) || ex.Message is null)
             {
-                Error -= handler;
+                return false;
             }
+
+            return ex.Message.IndexOf(FelicaLibCardNotFoundMessage, StringComparison.Ordinal) >= 0
+                || ex.Message.IndexOf(FelicaLibBlockNotReadMessage, StringComparison.Ordinal) >= 0;
+        }
+
+        /// <summary>FelicaLib.DotNet 1.2.67 がポーリングでカードを見つけられないときの例外メッセージ（の先頭）</summary>
+        internal const string FelicaLibCardNotFoundMessage = "IC カードが見つかりません。";
+
+        /// <summary>FelicaLib.DotNet 1.2.67 がブロックを読めないときの例外メッセージ</summary>
+        internal const string FelicaLibBlockNotReadMessage = "指定されたサービス コードおよびアドレスのデータが存在しません。";
+
+        /// <summary>履歴の読み取り 1 回の結果の種類（Issue #2301）</summary>
+        private enum HistoryReadKind
+        {
+            /// <summary>読み取りの前後とも対象のカードが載っていた</summary>
+            Succeeded,
+
+            /// <summary>読み取りの前に、別のカードが載っていた（またはカード無し）。ブロックは読んでいない</summary>
+            NotPresentBeforeRead,
+
+            /// <summary>ブロックは読めたが、読み取りの後に別のカードが載っていた（読んだのは別のカードの履歴の可能性が高い）</summary>
+            OtherCardAfterRead,
+
+            /// <summary>ブロックは読めたが、読み取りの後にカードを見失った（カードを見失った例外、または <c>GetIDm</c> が null）</summary>
+            LostAfterRead,
+
+            /// <summary>ブロックは読めたが、読み取りの後の確認でリーダーの例外が出た（USB が抜けた等）</summary>
+            ReaderFailedAfterRead,
+
+            /// <summary>読み取りの前か途中で felicalib が例外を投げた（カードを見失った場合を含む）</summary>
+            ReadFailed,
+        }
+
+        /// <summary>
+        /// 履歴の読み取り 1 回の結果（Issue #2301）。成否の判断は呼び出し元（<see cref="ReadHistoryAsync"/> / <see cref="TryReadHistoryAsync"/>）が行う。
+        /// </summary>
+        private sealed class HistoryReadOutcome
+        {
+            public HistoryReadOutcome(HistoryReadKind kind, List<LedgerDetail> details, Exception? exception = null)
+            {
+                Kind = kind;
+                Details = details;
+                Exception = exception;
+            }
+
+            public HistoryReadKind Kind { get; }
+
+            /// <summary>読めた明細（読み取り後の確認で失敗した種類でも、読めたぶんを持つ）</summary>
+            public List<LedgerDetail> Details { get; }
+
+            /// <summary>例外による種類（<see cref="HistoryReadKind.ReadFailed"/> 等）の原因</summary>
+            public Exception? Exception { get; }
+        }
+
+        /// <summary>
+        /// 履歴を読み取る本体（<see cref="ReadHistoryAsync"/> と <see cref="TryReadHistoryAsync"/> が共有する。Issue #2301）。
+        /// </summary>
+        /// <remarks>
+        /// 読み取りの<b>前と後</b>で対象のカードが載っていることを確かめる。前の確認と <c>ReadBlocksWithoutEncryption</c> は
+        /// felicalib の別々の呼び出し（それぞれがポーリングし直す）なので、その間に載せ替えると別のカードの履歴を読む。
+        /// 後の確認の結果は「別のカード」「カードを見失った」「リーダーの例外」に分けて返す（後方互換の <see cref="ReadHistoryAsync"/> が扱いを分けるため）。
+        /// </remarks>
+        private HistoryReadOutcome ReadHistoryCore(string idm)
+        {
+            lock (_felicaLock)
+            {
+                List<LedgerDetail> details;
+                try
+                {
+                    // IDm検証: 読み取り対象のカードが載っていることを確認
+                    var currentIdm = GetIdmString(_device.GetIDm(FelicaSystemCode.Suica));
+                    if (!IsSameCard(idm, currentIdm, "履歴読み取り前"))
+                    {
+                        return new HistoryReadOutcome(HistoryReadKind.NotPresentBeforeRead, new List<LedgerDetail>());
+                    }
+
+                    // FelicaUtility.ReadBlocksWithoutEncryption で複数ブロックを一括取得
+                    var historyDataList = new List<byte[]>();
+
+                    _logger.LogDebug("FelicaCardReader: 履歴読み取り開始 (システムコード=0x{SystemCode:X4}, サービスコード=0x{ServiceCode:X4})",
+                        (int)FelicaSystemCode.Suica, (int)FelicaServiceCode.SuicaHistory);
+
+                    int blockIndex = 0;
+                    foreach (var data in _device.ReadBlocksWithoutEncryption(
+                        FelicaSystemCode.Suica,
+                        FelicaServiceCode.SuicaHistory,
+                        0,
+                        MaxHistoryCount))
+                    {
+                        // FelicaLib.DotNet 1.2.67 は読めなかったブロックを null で返さず例外を投げる（IsCardNotPresentException）。
+                        // null の打ち切りは版が変わったときのための防御として残す
+                        if (data == null)
+                        {
+                            _logger.LogDebug("FelicaCardReader: ブロック{Index}はnull", blockIndex);
+                            break;
+                        }
+                        if (data.All(b => b == 0))
+                        {
+                            _logger.LogDebug("FelicaCardReader: ブロック{Index}は全て0", blockIndex);
+                            break;
+                        }
+                        _logger.LogDebug("FelicaCardReader: ブロック{Index}: {Data}", blockIndex, BitConverter.ToString(data));
+                        historyDataList.Add(data);
+                        blockIndex++;
+                    }
+
+                    _logger.LogInformation("FelicaCardReader: 履歴データを {Count} 件取得", historyDataList.Count);
+
+                    // 駅名解決にはCardType.Unknownを使用
+                    // 注: IDmの先頭2バイトは製造者コードであり、カード種別ではないため、
+                    //     CardTypeDetector.DetectFromIdmは信頼できない
+                    //     StationMasterServiceのUnknown優先順位（九州優先）が使用される
+                    var cardType = CardType.Unknown;
+
+                    // 履歴データをパースして金額を計算
+                    details = new List<LedgerDetail>();
+                    for (int i = 0; i < historyDataList.Count; i++)
+                    {
+                        var currentData = historyDataList[i];
+                        var nextData = i + 1 < historyDataList.Count ? historyDataList[i + 1] : null;
+
+                        var detail = ParseHistoryData(currentData, nextData, cardType);
+                        if (detail != null)
+                        {
+                            details.Add(detail);
+                        }
+                    }
+                }
+                catch (Exception ex)
+                {
+                    if (IsCardNotPresentException(ex))
+                    {
+                        // Issue #2301: カードが離れたのは利用者の操作。本番ログ（Information 以上）へは Warning で残す
+                        _logger.LogWarning(ex, "FelicaCardReader: 履歴読み取り中に交通系ICカードを見失いました（カードが離れた・載せ替えられた）");
+                    }
+                    else
+                    {
+                        _logger.LogError(ex, "FelicaCardReader: 履歴読み取りエラー");
+                    }
+
+                    return new HistoryReadOutcome(HistoryReadKind.ReadFailed, new List<LedgerDetail>(), ex);
+                }
+
+                // Issue #2301: 読み取りの後にも対象のカードが載っていることを確認する
+                string? idmAfterRead;
+                try
+                {
+                    idmAfterRead = GetIdmString(_device.GetIDm(FelicaSystemCode.Suica));
+                }
+                catch (Exception ex) when (IsCardNotPresentException(ex))
+                {
+                    // カードが離れると felicalib はポーリングに失敗して例外を投げる
+                    _logger.LogWarning(ex, "FelicaCardReader: 履歴読み取り後の確認でカードを検出できませんでした（カードが離れた）");
+                    return new HistoryReadOutcome(HistoryReadKind.LostAfterRead, details, ex);
+                }
+                catch (Exception ex)
+                {
+                    // USB が抜けた等。カードの操作ではないので「離れた」とは扱わない
+                    _logger.LogError(ex, "FelicaCardReader: 履歴読み取り後の確認でエラーが発生しました");
+                    return new HistoryReadOutcome(HistoryReadKind.ReaderFailedAfterRead, details, ex);
+                }
+
+                if (IsSameCard(idm, idmAfterRead, "履歴読み取り後"))
+                {
+                    return new HistoryReadOutcome(HistoryReadKind.Succeeded, details);
+                }
+
+                return idmAfterRead is null
+                    ? new HistoryReadOutcome(HistoryReadKind.LostAfterRead, details)
+                    : new HistoryReadOutcome(HistoryReadKind.OtherCardAfterRead, details);
+            }
+        }
+
+        /// <summary>
+        /// 読み取ったカードの IDm が読み取り対象と同じかを確かめ、違えばマスクしてログへ残す（Issue #2301）。
+        /// </summary>
+        /// <param name="idm">読み取り対象のカードの IDm</param>
+        /// <param name="currentIdm">いまリーダーに載っているカードの IDm（カード無しなら null）</param>
+        /// <param name="phase">ログに残す確認の時点（「履歴読み取り前」等）</param>
+        private bool IsSameCard(string idm, string? currentIdm, string phase)
+        {
+            if (string.Equals(currentIdm, idm, StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+
+            // Issue #1704: IDm は認証クレデンシャルのためログにはマスクして出力する
+            _logger.LogWarning("FelicaCardReader: {Phase}にIDmが一致しません（カードが離れた・載せ替えられた）。期待={Expected}, 実際={Actual}",
+                phase, IdmMasker.Mask(idm), IdmMasker.Mask(currentIdm));
+            return false;
         }
 
         /// <summary>
@@ -378,7 +571,7 @@ namespace ICCardManager.Infrastructure.CardReader
                     try
                     {
                         // IDm検証: 読み取り対象のカードが載っていることを確認
-                        var currentIdmBytes = FelicaUtility.GetIDm(FelicaSystemCode.Suica);
+                        var currentIdmBytes = _device.GetIDm(FelicaSystemCode.Suica);
                         var currentIdm = GetIdmString(currentIdmBytes);
                         if (!string.Equals(currentIdm, idm, StringComparison.OrdinalIgnoreCase))
                         {
@@ -391,7 +584,7 @@ namespace ICCardManager.Infrastructure.CardReader
                         // 注: 残高サービス(0x008B)はバイト位置が異なる場合があるため、
                         //     履歴サービス(0x090F)を使用する（Issue #465対応）
                         _logger.LogDebug("FelicaCardReader: 履歴サービス(0x{ServiceCode:X4})から読み取り試行", (int)FelicaServiceCode.SuicaHistory);
-                        var historyData = FelicaUtility.ReadWithoutEncryption(
+                        var historyData = _device.ReadWithoutEncryption(
                             FelicaSystemCode.Suica,
                             FelicaServiceCode.SuicaHistory,
                             0);
@@ -476,7 +669,7 @@ namespace ICCardManager.Infrastructure.CardReader
             {
                 try
                 {
-                    _ = FelicaUtility.GetIDm(WildcardSystemCode);
+                    _ = _device.GetIDm(WildcardSystemCode);
                     return true;
                 }
                 catch (DllNotFoundException)
@@ -506,7 +699,7 @@ namespace ICCardManager.Infrastructure.CardReader
             {
                 try
                 {
-                    _ = FelicaUtility.GetIDm(WildcardSystemCode);
+                    _ = _device.GetIDm(WildcardSystemCode);
                     return true;
                 }
                 catch (Exception ex) when (IsReaderUnavailableException(ex))
@@ -602,7 +795,7 @@ namespace ICCardManager.Infrastructure.CardReader
                 {
                     // ワイルドカードシステムコード（0xFFFF）ですべてのFeliCaカードを検出
                     // これにより、交通系ICカードだけでなく職員証なども検出できる
-                    var idmBytes = FelicaUtility.GetIDm(WildcardSystemCode);
+                    var idmBytes = _device.GetIDm(WildcardSystemCode);
                     if (idmBytes == null || idmBytes.Length == 0)
                     {
                         // カードが検出されない = カードが離された

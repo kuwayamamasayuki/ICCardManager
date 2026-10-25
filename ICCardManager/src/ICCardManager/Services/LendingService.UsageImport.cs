@@ -33,10 +33,19 @@ namespace ICCardManager.Services
     /// </summary>
     public sealed class UsageImportPlan
     {
-        private UsageImportPlan(UsageImportBlockReason blockReason, DateTime? lowerBound, IReadOnlyList<LedgerDetail> detailsToRecord)
+        private UsageImportPlan(
+            UsageImportBlockReason blockReason,
+            DateTime? lowerBound,
+            DateTime? noticeLowerBound,
+            DateTime? futureDatedRowWithoutDetails,
+            DateTime? futureIntroductionDate,
+            IReadOnlyList<LedgerDetail> detailsToRecord)
         {
             BlockReason = blockReason;
             LowerBound = lowerBound;
+            NoticeLowerBound = noticeLowerBound;
+            FutureDatedRowWithoutDetails = futureDatedRowWithoutDetails;
+            FutureIntroductionDate = futureIntroductionDate;
             DetailsToRecord = detailsToRecord;
         }
 
@@ -44,7 +53,44 @@ namespace ICCardManager.Services
         public UsageImportBlockReason BlockReason { get; }
 
         /// <summary>記録の下限（この日付以降を記録する）。取り込めないときは null</summary>
+        /// <remarks>
+        /// 今日の日付以降の手入力の行（明細なし）があれば明日以降になる（今日の利用も記録済みとみなす。Issue #2303）。
+        /// 案内に出す日付は <see cref="NoticeLowerBound"/> を使う。
+        /// </remarks>
         public DateTime? LowerBound { get; }
+
+        /// <summary>
+        /// 案内に出す下限（<see cref="LowerBound"/> を今日で切り詰めたもの）。取り込めないときは null
+        /// </summary>
+        /// <remarks>
+        /// Issue #2303: 取り込む範囲の判定（<see cref="LowerBound"/>）と案内の文言に使う日付を分ける。
+        /// 下限が明日以降でも「明日以降は記録済み」とは案内しない（カードの利用はどれも今日以前で、今日の利用も記録済みとみなしている）。
+        /// </remarks>
+        public DateTime? NoticeLowerBound { get; }
+
+        /// <summary>
+        /// 下限を決めた明細を持たない行の日付が今日より後（未来）なら、その日付。そうでなければ null
+        /// </summary>
+        /// <remarks>
+        /// 手で追加した行の日付の打ち間違いで、その日までの利用が記録済みとみなされ何も取り込めない。
+        /// 案内（<see cref="NoticeLowerBound"/> は今日）だけでは原因に気付けないため、案内に添えて履歴の確認を促す。
+        /// 導入行の日付が今日より後なら null（<see cref="FutureIntroductionDate"/> を優先する。その行の日付を直しても、
+        /// 下限は未来の導入行の日付より前へは下がらず、取り込める利用は増えない）。
+        /// </remarks>
+        public DateTime? FutureDatedRowWithoutDetails { get; }
+
+        /// <summary>
+        /// 導入行の日付が今日より後（未来）なら、その日付。そうでなければ null
+        /// </summary>
+        /// <remarks>
+        /// 導入行の日付が登録日より後のカード（3 月登録の「前年度より繰越」など。正当な形）では、導入行より前の利用は
+        /// 導入行の残高（紙の出納簿）に含める扱いで取り込まない。<see cref="NoticeLowerBound"/>（今日）を示して
+        /// 「それより前の利用を CSV インポート・履歴の追加で補う」と案内すると、導入行の残高と二重に計上させるため、
+        /// 導入行の日付を示す専用の案内にする（Issue #2303 のレビューで検出）。
+        /// 未来の日付の手入力の行（明細なし）が下限をさらに押し上げていても、こちらを優先する
+        /// （カードの利用はどれも今日以前で、導入行より前なので、手入力の行を直しても取り込める利用は無い）。
+        /// </remarks>
+        public DateTime? FutureIntroductionDate { get; }
 
         /// <summary>
         /// 台帳へ記録する利用（下限より前と、記録済みの利用を除いたもの）。カードから読んだ順（新しい順）のまま
@@ -52,10 +98,40 @@ namespace ICCardManager.Services
         public IReadOnlyList<LedgerDetail> DetailsToRecord { get; }
 
         internal static UsageImportPlan Blocked(UsageImportBlockReason reason) =>
-            new(reason, null, Array.Empty<LedgerDetail>());
+            new(reason, null, null, null, null, Array.Empty<LedgerDetail>());
 
-        internal static UsageImportPlan Of(DateTime lowerBound, IReadOnlyList<LedgerDetail> detailsToRecord) =>
-            new(UsageImportBlockReason.None, lowerBound, detailsToRecord);
+        internal static UsageImportPlan Of(
+            DateTime lowerBound,
+            DateTime today,
+            DateTime? introductionDate,
+            DateTime? latestLedgerDateWithoutDetails,
+            IReadOnlyList<LedgerDetail> detailsToRecord)
+        {
+            var bound = lowerBound.Date;
+
+            // 導入行の日付が未来なら、手入力の行の有無にかかわらず導入行を原因とする。下限は導入行の日付以上で、
+            // カードの利用（今日以前）はすべて導入行より前なので、手入力の行の日付を直しても取り込める利用は無い
+            var futureIntroduction = introductionDate.HasValue && introductionDate.Value.Date > today.Date
+                ? introductionDate.Value.Date
+                : (DateTime?)null;
+
+            // 未来の日付の手入力の行（導入行が今日以前のときだけ）。導入行・最新行の日付による下限は今日以前なので、
+            // このとき下限は必ずその行の翌日になる（その行が下限を決めている）。
+            // 今日の日付の行（下限は明日）は打ち間違いではない。今日の利用はその行が記録している扱い
+            var futureRowWithoutDetails = !futureIntroduction.HasValue
+                && latestLedgerDateWithoutDetails.HasValue
+                && latestLedgerDateWithoutDetails.Value.Date > today.Date
+                    ? latestLedgerDateWithoutDetails.Value.Date
+                    : (DateTime?)null;
+
+            return new(
+                UsageImportBlockReason.None,
+                lowerBound,
+                bound > today.Date ? today.Date : bound,
+                futureRowWithoutDetails,
+                futureIntroduction,
+                detailsToRecord);
+        }
     }
 
     /// <summary>
@@ -116,17 +192,19 @@ namespace ICCardManager.Services
         /// 導入行も台帳の記録も無ければ、計上済みの境界を決められないので取り込まない（null）
         /// </description></item>
         /// <item><description>
-        /// <b>明細を持たない行で押し上げる下限の上限は今日</b>（返却では貸出日）。返却の上限は「今回の貸出中の利用を
+        /// <b>明細を持たない行で押し上げる下限に上限を設けない</b>（返却では貸出日）。返却の上限は「今回の貸出中の利用を
         /// 捨てない」ためのもので、取り込みには守るべき貸出が無い。手で追加した行の日までの利用は記録済みとみなす。
-        /// ただし手で追加した行の日付が未来（入力の誤り）だと、下限が未来になり「未来の日付以降は記録済み」と案内してしまう
-        /// （カードの利用はどれも今日以前なので、下限が今日を超えても取り込む範囲は変わらない）
+        /// 手で追加した行が今日の日付なら下限は明日になり、今日の利用は取り込まない（明細を持たない行は照合のキーを
+        /// 持たないので、今日を下限にすると手で追加した行と同じ利用を二重に記録する。Issue #2303）。
+        /// 下限が今日より後になっても「明日以降は記録済み」と案内しないよう、案内に出す日付だけを今日で切り詰める
+        /// （<see cref="UsageImportPlan.NoticeLowerBound"/>）
         /// </description></item>
         /// </list>
         /// </remarks>
         /// <param name="introductionDate">導入行の日付。無ければ null</param>
         /// <param name="latestLedgerDate">台帳の最新行の日付。記録が無ければ null</param>
         /// <param name="latestLedgerDateWithoutDetails">明細を持たない台帳行の最新日。無ければ null</param>
-        /// <param name="today">今日（明細を持たない行で押し上げる下限の上限）</param>
+        /// <param name="today">今日（導入行が無いときの下限の上限）</param>
         internal static DateTime? ResolveImportLowerBound(
             DateTime? introductionDate, DateTime? latestLedgerDate, DateTime? latestLedgerDateWithoutDetails, DateTime today)
         {
@@ -137,11 +215,13 @@ namespace ICCardManager.Services
 
             return ResolveUsageLowerBoundCore(
                 introductionDate,
-                // 導入行が無いときの下限（最新行の日付）にも今日を上限として掛ける。最新行が未来の日付（手で追加した行の入力の誤り）だと、
-                // 下限が未来になってカードの利用をすべて捨て、「未来の日付以降は記録済み」と案内してしまう
+                // 導入行が無いときの下限（最新行の日付）には今日を上限として掛ける。明細を持つ最新行の日付が未来（行の編集での入力の誤り）だと、
+                // 下限が未来になってカードの利用をすべて捨てる（明細を持つ行の利用は照合で除けるので、今日を下限にしても二重にならない）。
+                // 最新行が明細を持たない行なら、下の明細を持たない行の規則がその翌日まで押し上げる（照合で除けないため。Issue #2303）
                 fallbackWithoutIntroduction: Min((latestLedgerDate ?? introductionDate!.Value).Date, today.Date),
                 latestLedgerDateWithoutDetails,
-                upperLimitOfRowWithoutDetails: today.Date);
+                // 今日で切り詰めない（Issue #2303）。今日の手入力の行があるとき、今日の利用を取り込み対象にしない
+                upperLimitOfRowWithoutDetails: null);
         }
 
         private static DateTime Min(DateTime a, DateTime b) => a <= b ? a : b;
@@ -215,7 +295,9 @@ namespace ICCardManager.Services
             var latestLedger = await _ledgerRepository.GetLatestLedgerAsync(cardIdm).ConfigureAwait(false);
             var latestLedgerDateWithoutDetails = await _ledgerRepository.GetLatestLedgerDateWithoutDetailsAsync(cardIdm).ConfigureAwait(false);
 
-            var lowerBound = ResolveImportLowerBound(introductionDate, latestLedger?.Date, latestLedgerDateWithoutDetails, _clock.Now);
+            // 下限の判定と案内に使う「今日」を揃える（Issue #2303）
+            var today = _clock.Now.Date;
+            var lowerBound = ResolveImportLowerBound(introductionDate, latestLedger?.Date, latestLedgerDateWithoutDetails, today);
             if (!lowerBound.HasValue)
             {
                 return UsageImportPlan.Blocked(UsageImportBlockReason.NoBaseline);
@@ -228,7 +310,7 @@ namespace ICCardManager.Services
                 ? withinBound
                 : await ExcludeAlreadyRecordedDetailsAsync(cardIdm, withinBound).ConfigureAwait(false);
 
-            return UsageImportPlan.Of(lowerBound.Value, toRecord);
+            return UsageImportPlan.Of(lowerBound.Value, today, introductionDate, latestLedgerDateWithoutDetails, toRecord);
         }
 
         /// <summary>

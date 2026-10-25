@@ -1,3 +1,4 @@
+#nullable enable
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -41,9 +42,9 @@ namespace ICCardManager.Infrastructure.CardReader
         /// <summary>
         /// メッセージ（エラー詳細など）
         /// </summary>
-        public string Message { get; }
+        public string? Message { get; }
 
-        public ConnectionStateChangedEventArgs(CardReaderConnectionState state, string message = null)
+        public ConnectionStateChangedEventArgs(CardReaderConnectionState state, string? message = null)
         {
             State = state;
             Message = message;
@@ -63,7 +64,7 @@ namespace ICCardManager.Infrastructure.CardReader
         /// <summary>
         /// システムコード
         /// </summary>
-        public string SystemCode { get; set; }
+        public string SystemCode { get; set; } = string.Empty;
     }
 
     /// <summary>
@@ -74,17 +75,17 @@ namespace ICCardManager.Infrastructure.CardReader
         /// <summary>
         /// カードが読み取られた時に発生するイベント
         /// </summary>
-        event EventHandler<CardReadEventArgs> CardRead;
+        event EventHandler<CardReadEventArgs>? CardRead;
 
         /// <summary>
         /// エラーが発生した時に発生するイベント
         /// </summary>
-        event EventHandler<Exception> Error;
+        event EventHandler<Exception>? Error;
 
         /// <summary>
         /// 接続状態が変更された時に発生するイベント
         /// </summary>
-        event EventHandler<ConnectionStateChangedEventArgs> ConnectionStateChanged;
+        event EventHandler<ConnectionStateChangedEventArgs>? ConnectionStateChanged;
 
         /// <summary>
         /// カード読み取りを開始
@@ -123,6 +124,11 @@ namespace ICCardManager.Infrastructure.CardReader
         /// リーダーエラー発生時はFailを返し、呼び出し元でリーダーエラーと
         /// 「履歴ゼロ件（正常）」を明確に区別できる。
         /// </summary>
+        /// <remarks>
+        /// Issue #2301: 読み取り対象のカードが載っていない場合（読み取りの途中で離れた・別のカードへ載せ替えられた・
+        /// カード無し）も Fail（<see cref="ICCardManager.Common.Exceptions.CardReaderException.CardRemoved"/>）を返す。載っていない状態は「正常なゼロ件」ではない。
+        /// <c>Ok</c> の空リストは、対象のカードを最後まで読めて利用が本当に 0 件だった場合に限る。
+        /// </remarks>
         /// <param name="idm">カードのIDm</param>
         /// <returns>成功時は利用履歴詳細のリスト、失敗時はエラー情報</returns>
         Task<CardReadResult<IReadOnlyList<LedgerDetail>>> TryReadHistoryAsync(string idm);

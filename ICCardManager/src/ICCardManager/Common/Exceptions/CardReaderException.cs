@@ -12,6 +12,19 @@ namespace ICCardManager.Common.Exceptions
     public class CardReaderException : AppException
     {
         /// <summary>
+        /// 読み取り対象の交通系ICカードがリーダーに載っていなかった（離れた・載せ替えられた）ことを示すエラーコード（Issue #2301）。
+        /// </summary>
+        internal const string CardRemovedErrorCode = "CR009";
+
+        /// <summary>
+        /// 読み取り対象のカードが載っていなかったための失敗か（<see cref="CardRemoved"/> で作られたか。Issue #2301）。
+        /// </summary>
+        /// <remarks>
+        /// カードリーダーの故障ではなく利用者の操作によるものなので、呼び出し元は「カードリーダーエラー」と表示しない。
+        /// </remarks>
+        public bool IsCardRemoved => ErrorCode == CardRemovedErrorCode;
+
+        /// <summary>
         /// カードリーダー未接続
         /// </summary>
         public static CardReaderException NotConnected(Exception? innerException = null)
@@ -127,8 +140,9 @@ namespace ICCardManager.Common.Exceptions
         public static CardReaderException CardRemoved(Exception? innerException = null)
         {
             const string message = "Card was removed during read operation";
-            const string userMessage = "カードの読み取り中にカードが離されました。カードをリーダーに置いたままお待ちください。";
-            const string errorCode = "CR009";
+            // Issue #2301: 返却の案内（トースト）と語彙・手順をそろえる
+            const string userMessage = "読み取りの途中で交通系ICカードが離されました。" + OperationRetryGuidance.RestartFromStaffCardKeepingCardOn;
+            const string errorCode = CardRemovedErrorCode;
 
             return innerException != null
                 ? new CardReaderException(message, userMessage, errorCode, innerException)

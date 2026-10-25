@@ -91,11 +91,37 @@ namespace ICCardManager.Data.Repositories
         /// <para>
         /// <see cref="AppSettings.BackupPath"/> も<b>設定しても DB へは反映されない</b>（Issue #2264）。
         /// バックアップ先の変更は職員証の認証と操作ログを伴う <see cref="ChangeBackupPathAsync"/> だけが書く。
-        /// 一括保存は終了時のウィンドウ位置の保存がキャッシュ由来の古い値ごと呼ぶため、載せると
+        /// 一括保存は渡された値を条件なしで書くため、載せると、古い値を持つ PC の保存が
         /// 他 PC で変更したバックアップ先を認証も記録も無いまま巻き戻す。
+        /// </para>
+        /// <para>
+        /// <see cref="AppSettings.MainWindowSettings"/> も<b>設定しても DB へは反映されない</b>（Issue #2305）。
+        /// ウィンドウの位置・サイズは設定画面で編集しない値で、終了時に <see cref="SaveMainWindowSettingsAsync"/> だけが書く。
+        /// </para>
+        /// <para>
+        /// 一括保存は条件を持たない UPSERT で、渡された値を<b>すべて</b>書く。<see cref="GetAppSettingsAsync"/>
+        /// （TTL キャッシュ）で読んだ値の一部だけを変えて渡すと、触っていない値も読んだ時点の値で書き戻し、
+        /// 共有モードでは他 PC がその後に変えた設定（部署種別・残額警告など）を巻き戻す（Issue #2305）。
+        /// 本番の呼び出し元は設定画面（F5）だけにすること（静的検査 <c>SettingsMaintenanceKeyConventionTests</c> が固定する）。
+        /// <b>設定画面の経路にも同じ巻き戻りは残っている</b>: 画面は全項目を書くため、開いた時点の値が古ければ、別の項目だけを
+        /// 変えて保存したときに他 PC の変更を巻き戻す。画面を開くたびにキャッシュを破棄して DB から読み直す
+        /// （<c>SettingsViewModel.LoadSettingsAsync</c>）ことで窓を「画面を開いている間」に縮めているが、消えてはいない
+        /// （変えた項目だけを書く根本対策は別 Issue）。
         /// </para>
         /// </remarks>
         Task<bool> SaveAppSettingsAsync(AppSettings settings);
+
+        /// <summary>
+        /// メインウィンドウの位置・サイズだけを保存する（終了時の保存。Issue #2305）
+        /// </summary>
+        /// <param name="windowSettings">保存する位置・サイズ。<see cref="WindowSettings.Left"/> 等が null の項目は書かない</param>
+        /// <returns>すべてのキーを書けたら true</returns>
+        /// <remarks>
+        /// <c>window_left</c> / <c>window_top</c> / <c>window_width</c> / <c>window_height</c> / <c>window_maximized</c>
+        /// 以外のキーは書かない。以前は終了時に <see cref="SaveAppSettingsAsync"/> へキャッシュ由来の
+        /// <see cref="AppSettings"/> を丸ごと渡しており、共有モードで他 PC が変えた設定を古い値へ巻き戻していた。
+        /// </remarks>
+        Task<bool> SaveMainWindowSettingsAsync(WindowSettings windowSettings);
 
         /// <summary>
         /// 当月の VACUUM 実行権を先勝ちで獲得する（Issue #1482）。
