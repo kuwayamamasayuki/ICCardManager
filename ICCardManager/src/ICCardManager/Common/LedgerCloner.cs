@@ -27,7 +27,7 @@ namespace ICCardManager.Common
     /// <para>
     /// コピーの生成手段は本クラスただ 1 つに寄せる（履歴分割 <c>LedgerSplitService</c> も本クラスを使う）。
     /// 手段が 2 通りあると、モデルへ列を足したとき片方だけが更新される
-    /// （`.claude/rules/db-write-conventions.md`「同じ論理的な書き込みに手段が 2 通りあるか」Issue #1763）。
+    /// （`.claude/rules/db-write-conventions.md`「複製の生成手段は 1 か所に寄せる」Issue #1763。寄せ先として本クラスを名指ししている）。
     /// コピー漏れは静かに古い値を記録するため、<c>LedgerClonerCoverageTests</c> が
     /// リフレクションで全プロパティを走査して検出する。
     /// </para>

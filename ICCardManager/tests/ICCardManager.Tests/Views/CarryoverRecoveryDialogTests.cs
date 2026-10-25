@@ -48,11 +48,13 @@ public class CarryoverRecoveryDialogTests
     /// 併せて表明し、説明と検証規則の片方だけが変わったときに赤になるようにする。
     /// </remarks>
     [Theory]
-    [InlineData("この欄が失われた項目のとき", true, null, "0")]
-    [InlineData("現在の値（年度）があるとき", false, 2024, "0")]
-    [InlineData("1円以上", false, null, "45000")]
+    [InlineData("この欄が失われた項目のとき", true, null, "0", "0")]
+    [InlineData("現在の値（年度）があるとき", false, 2024, "0", "0")]
+    // 「繰越累計」は受入・払出の両方を指す（Parse はどちらかが 1 円以上なら空欄を拒む）
+    [InlineData("繰越累計が1円以上", false, null, "45000", "0")]
+    [InlineData("繰越累計が1円以上", false, null, "0", "38000")]
     public void 対象年度欄の読み上げ用説明が_空欄を拒む条件を述べること(
-        string phrase, bool yearLost, int? currentYear, string incomeText)
+        string phrase, bool yearLost, int? currentYear, string incomeText, string expenseText)
     {
         var lost = new CarryoverDataLossItem
         {
@@ -63,7 +65,7 @@ public class CarryoverRecoveryDialogTests
         };
 
         var result = CarryoverInfoInput.Parse(
-            "7", incomeText, "0", "", lost, new CarryoverInfo(1, 0, 0, currentYear), CurrentFiscalYear);
+            "7", incomeText, expenseText, "", lost, new CarryoverInfo(1, 0, 0, currentYear), CurrentFiscalYear);
 
         result.ErrorField.Should().Be(CarryoverInputField.CarryoverFiscalYear,
             "この条件では保存時に空欄が拒まれること（説明が述べる条件の前提）");
