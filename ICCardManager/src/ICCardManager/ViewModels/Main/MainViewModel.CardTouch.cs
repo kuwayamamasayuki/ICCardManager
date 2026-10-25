@@ -251,8 +251,11 @@ public partial class MainViewModel
     /// ICカード待ち状態（<see cref="AppState.WaitingForIcCard"/>）から呼ばれる場合、
     /// 直前の職員証タッチで <c>_currentStaffIdm</c> が確定している。ここで前回操作者に
     /// 差し替えると、実際に操作した職員とは別の職員が
-    /// <c>ledger.StaffName</c> / <c>ic_card.lender_idm</c> / <c>operation_log</c> に記録され、
+    /// 貸出レコードの <c>ledger.StaffName</c> / <c>ic_card.last_lent_staff</c> に記録され、
     /// 長期未返却の督促も誤った職員へ向かう。
+    /// 逆処理が返却のときは、操作者は台帳に記録されない（利用の行は貸出レコードの貸出者の名義、
+    /// <c>ic_card.last_lent_staff</c> は NULL に戻る。Issue #2323）。
+    /// タッチによる貸出・返却は <c>operation_log</c> に記録しない。
     /// なお <see cref="AppState.WaitingForStaffCard"/> へ遷移する経路は
     /// <c>ResetState()</c> ただ 1 つで、そこで <c>_currentStaffIdm</c> は必ず null になるため、
     /// 「未確定＝職員証タッチ待ち経路」と判定できる。

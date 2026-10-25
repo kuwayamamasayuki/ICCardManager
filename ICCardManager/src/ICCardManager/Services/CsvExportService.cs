@@ -1,5 +1,4 @@
 #nullable enable
-
 using System;
 using System.Collections.Generic;
 using System.Globalization;
@@ -193,7 +192,12 @@ namespace ICCardManager.Services
             try
             {
                 // cardIdmがnullの場合は全カードの履歴を取得
-                var ledgers = await _ledgerRepository.GetByDateRangeAsync(cardIdm, startDate, endDate).ConfigureAwait(false);
+                // Issue #2307: 貸出中レコード（返却時に物理削除される一時的な行）は出力しない。判定は摘要ではなくフラグで行う（#2044）。
+                // CSV には貸出中フラグの列が無いため、出力すると返却後に取り込み直したとき通常の行として台帳へ入り、
+                // 物品出納簿に「0円／0円」の行が出る（取り込み側も LedgerCsvLentRowPolicy で拒否する）
+                var ledgers = (await _ledgerRepository.GetByDateRangeAsync(cardIdm, startDate, endDate).ConfigureAwait(false))
+                    .Where(l => !l.IsLentRecord)
+                    .ToList();
 
                 // カードIDmから管理番号へのマッピングを作成
                 var allCards = await _cardRepository.GetAllIncludingDeletedAsync().ConfigureAwait(false);
@@ -245,7 +249,7 @@ namespace ICCardManager.Services
                 return new CsvExportResult
                 {
                     Success = true,
-                    ExportedCount = ledgers.Count(),
+                    ExportedCount = ledgers.Count,
                     FilePath = filePath
                 };
             }

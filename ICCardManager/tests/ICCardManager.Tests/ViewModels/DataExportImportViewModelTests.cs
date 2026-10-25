@@ -531,6 +531,38 @@ public class DataExportImportViewModelTests : IDisposable
 
     #endregion
 
+    #region Issue #2307: 「既存データはスキップする」が効くデータ種別
+
+    /// <summary>
+    /// 利用履歴詳細の取り込みはスキップ指定を受け取らないため、選んでいる間だけ「効かない」（false）になる。
+    /// 対: ほかの 3 種別では効く（常に false にした実装を赤にする）。
+    /// </summary>
+    [Theory]
+    [InlineData(DataType.Cards, true)]
+    [InlineData(DataType.Staff, true)]
+    [InlineData(DataType.Ledgers, true)]
+    [InlineData(DataType.LedgerDetails, false)]
+    public void IsSkipExistingApplicable_利用履歴詳細のときだけfalseになる(DataType dataType, bool expected)
+    {
+        _viewModel.SelectedImportType = dataType;
+
+        _viewModel.IsSkipExistingApplicable.Should().Be(expected);
+    }
+
+    [Fact]
+    public void IsSkipExistingApplicable_種別変更時にPropertyChangedが発火する()
+    {
+        var changedProperties = new List<string?>();
+        _viewModel.PropertyChanged += (_, e) => changedProperties.Add(e.PropertyName);
+
+        _viewModel.SelectedImportType = DataType.LedgerDetails;
+
+        changedProperties.Should().Contain(nameof(DataExportImportViewModel.IsSkipExistingApplicable),
+            "チェックボックスの有効・無効と「効きません」の表示が種別の切り替えに追随すること");
+    }
+
+    #endregion
+
     /// <summary>
     /// テスト用にプレビュー状態をセットアップするヘルパー
     /// </summary>
