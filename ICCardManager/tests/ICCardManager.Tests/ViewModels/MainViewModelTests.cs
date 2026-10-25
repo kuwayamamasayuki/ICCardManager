@@ -539,7 +539,7 @@ public class MainViewModelTests : IDisposable
             .ReturnsAsync(busStopLedgers ?? new List<Ledger>());
         if (busStopLedgers != null)
         {
-            // Issue #2329: バス停名未入力は運用中のカードに限って数えるため、台帳の行が属するカードを運用中として返す
+            // Issue #2329: バス停名未入力は論理削除していないカードの行に限って数えるため、台帳の行が属するカードを返す
             SetupOperatingCards(busStopLedgers.Select(l => l.CardIdm).Distinct().ToArray());
         }
     }
@@ -816,7 +816,7 @@ public class MainViewModelTests : IDisposable
         _settingsRepositoryMock.Setup(r => r.GetAppSettingsAsync())
             .ReturnsAsync(new AppSettings { WarningBalance = 1000 });
 
-        // Issue #2329: 保留分の ★ が運用中のカードの行として数えられる状態にしておく（数えられなければ本テストは空振りする）
+        // Issue #2329: 保留分の ★ が論理削除していないカードの行として数えられる状態にしておく（数えられなければ本テストは空振りする）
         SetupOperatingCards("1111222233334444");
 
         var firstCallGate = new TaskCompletionSource<IEnumerable<Ledger>>();
@@ -3269,6 +3269,41 @@ public class MainViewModelTests : IDisposable
         await _viewModel.RefreshSharedDataAsync();
 
         _viewModel.WarningMessages.Single(w => w.Type == WarningType.LowBalance).DisplayText.Should().Contain("300円");
+    }
+
+    /// <summary>
+    /// ダッシュボードの並べ替えだけでは、残額警告の行を入れ替えないこと（同一判定は順番を見ない）。
+    /// </summary>
+    [Fact]
+    public async Task CheckWarningsAsync_ダッシュボードの並べ替えだけでは残額警告の行を入れ替えないこと()
+    {
+        const string cardA = "0A0A0A0A0A0A0A0A";
+        const string cardB = "0B0B0B0B0B0B0B0B";
+        _cardRepositoryMock.Setup(r => r.GetLentAsync(It.IsAny<bool>())).ReturnsAsync(new List<IcCard>());
+        _cardRepositoryMock.Setup(r => r.GetAllAsync()).ReturnsAsync(new List<IcCard>
+        {
+            new IcCard { CardIdm = cardA, CardType = "はやかけん", CardNumber = "001" },
+            new IcCard { CardIdm = cardB, CardType = "はやかけん", CardNumber = "002" }
+        });
+        _staffRepositoryMock.Setup(r => r.GetAllAsync()).ReturnsAsync(new List<Staff>());
+        _ledgerRepositoryMock.Setup(r => r.GetAllLatestBalancesAsync())
+            .ReturnsAsync(new Dictionary<string, (int Balance, DateTime? LastUsageDate)>
+            {
+                [cardA] = (800, DateTime.Today),
+                [cardB] = (300, DateTime.Today)
+            });
+        _settingsRepositoryMock.Setup(r => r.GetAppSettingsAsync()).ReturnsAsync(new AppSettings { WarningBalance = 1000 });
+        _viewModel.DashboardSortOrder = DashboardSortOrder.CardName;
+        await _viewModel.RefreshSharedDataAsync();
+        var before = _viewModel.WarningMessages.Where(w => w.Type == WarningType.LowBalance).ToList();
+        before.Select(w => w.CardIdm).Should().Equal(new[] { cardA, cardB }, "前提: カード名順で作られている");
+
+        _viewModel.DashboardSortOrder = DashboardSortOrder.BalanceAscending;
+        _viewModel.CardBalanceDashboard.Select(i => i.CardIdm).Should().Equal(new[] { cardB, cardA }, "前提: ダッシュボードの並びが変わった");
+        await _viewModel.CheckWarningsAsync();
+
+        _viewModel.WarningMessages.Where(w => w.Type == WarningType.LowBalance).Should().Equal(before,
+            "内容が同じなら並べ替えだけで行を入れ替えない（同じ行・同じ並びのまま）");
     }
 
     /// <summary>

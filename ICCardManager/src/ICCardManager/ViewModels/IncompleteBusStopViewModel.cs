@@ -105,6 +105,7 @@ namespace ICCardManager.ViewModels
                 {
                     LedgerId = l.Id,
                     CardIdm = l.CardIdm,
+                    // LoadAsync は同じカードの一覧に居ない行を外すため通常は必ず引けるが、防御として IDm へ落とす
                     CardDisplayName = cardMap.TryGetValue(l.CardIdm, out var name) ? name : l.CardIdm,
                     Date = l.Date,
                     Summary = l.Summary,

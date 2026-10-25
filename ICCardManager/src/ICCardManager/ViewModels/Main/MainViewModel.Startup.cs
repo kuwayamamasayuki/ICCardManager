@@ -439,10 +439,13 @@ public partial class MainViewModel
         var replacements = _warningService.CheckLowBalanceWarnings(CardBalanceDashboard, warningBalance);
 
         // Issue #2329: 内容が変わらないなら入れ替えない。ダッシュボードの更新（共有モードでは 15 秒ごと）のたびに
-        // 同じ行を消して足し直すと、警告エリアの並びが変わり、クリックしようとした行が押す直前に置き換わる
-        var current = WarningMessages.Where(w => w.Type == WarningType.LowBalance).ToList();
-        if (current.Count == replacements.Count
-            && current.Zip(replacements, (a, b) => a.CardIdm == b.CardIdm && a.DisplayText == b.DisplayText).All(same => same))
+        // 同じ行を消して足し直すと、警告エリアの並びが変わり、クリックしようとした行が押す直前に置き換わる。
+        // 比べるのは（カード・文言）の集合で、順番は見ない（ダッシュボードの並べ替えだけで入れ替えない）
+        static IEnumerable<(string CardIdm, string DisplayText)> Normalize(IEnumerable<WarningItem> items) =>
+            items.Select(w => (w.CardIdm, w.DisplayText))
+                .OrderBy(k => k.CardIdm, StringComparer.Ordinal)
+                .ThenBy(k => k.DisplayText, StringComparer.Ordinal);
+        if (Normalize(WarningMessages.Where(w => w.Type == WarningType.LowBalance)).SequenceEqual(Normalize(replacements)))
         {
             return;
         }

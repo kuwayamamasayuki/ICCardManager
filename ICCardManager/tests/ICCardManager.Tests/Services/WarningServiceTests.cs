@@ -21,7 +21,7 @@ public class WarningServiceTests
     private readonly Mock<IDatabaseInfo> _databaseInfoMock;
     private readonly Mock<ICardRepository> _cardRepositoryMock;
 
-    /// <summary>バス停名未入力の検出テストで、台帳の行が属する運用中のカード（Issue #2329）</summary>
+    /// <summary>バス停名未入力の検出テストで、台帳の行が属する論理削除していないカード（Issue #2329）</summary>
     private const string OperatingCardIdm = "0101010101010101";
     private readonly WarningService _service;
 
@@ -218,8 +218,8 @@ public class WarningServiceTests
     /// 返ってきても削除フラグで外す形の両方を置く）。払い戻したカードは手元に無く、ここで案内しないと直す手段が無いため残す。
     /// </remarks>
     [Theory]
-    [InlineData(false, true, 3)]    // 払戻済み → 数える（運用中の 1 件 ＋ 払戻済みの 2 件）
-    [InlineData(true, false, 1)]    // 論理削除 → 数えない（運用中の 1 件だけ）
+    [InlineData(false, true, 3)]    // 払戻済み → 数える（通常のカードの 1 件 ＋ 払戻済みの 2 件）
+    [InlineData(true, false, 1)]    // 論理削除 → 数えない（通常のカードの 1 件だけ）
     public async Task CheckIncompleteBusStopsAsync_論理削除したカードの未入力は数えず払戻済みは数えること(bool isDeleted, bool isRefunded, int expectedCount)
     {
         const string retiredCardIdm = "0202020202020202";
@@ -248,7 +248,7 @@ public class WarningServiceTests
     /// Issue #2329（既存挙動側）: 貸出中のカードの未入力も数えること。
     /// </summary>
     [Fact]
-    public async Task CheckIncompleteBusStopsAsync_運用中のカードは貸出中でも数えること()
+    public async Task CheckIncompleteBusStopsAsync_貸出中のカードの未入力も数えること()
     {
         _cardRepositoryMock.Setup(r => r.GetAllAsync()).ReturnsAsync(new List<IcCard>
         {
