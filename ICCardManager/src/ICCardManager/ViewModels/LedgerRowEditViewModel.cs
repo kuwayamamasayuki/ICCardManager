@@ -712,7 +712,9 @@ namespace ICCardManager.ViewModels
                 SetBalanceProgrammatically(_balanceBeforeAutoBalance.Value);
                 _balanceBeforeAutoBalance = null;
                 // 退避していたのは利用者が入力した値で、_isAddBalanceEnteredWhileManual は立ったまま（下ろす操作は無い）なので、
-                // 復元した残高も利用者の値として扱われる
+                // 復元した残高も利用者の値として扱われる。一度立つと下りないため、復元する値はその後の挿入位置の移動や
+                // 金額の変更から見て古くなり得る（「OFF に戻したときは ON にする直前の残高を復元する」§3.12 の範囲内。
+                // 07 UT-029a8 No.41c で固定）
             }
             Validate();
         }
@@ -963,6 +965,16 @@ namespace ICCardManager.ViewModels
                     SetBalanceProgrammatically(0);
                     _isAddBalanceNotEntered = true;
                 }
+            }
+            else if (reason != AutoBalanceUnavailableReason.None && Mode == LedgerRowEditMode.Add
+                     && !_isAddBalanceEnteredWhileManual && !_isAddBalanceNotEntered)
+            {
+                // Issue #2325（コードレビュー 4 回目）: 自動計算を自分で OFF にした（入力なし）まま使えない位置へ動いた。
+                // 残高は前の位置で計算した値のままで、今の位置の残高ではないので、上と同じく未入力として扱う。
+                // OFF の間に入力した残高があれば（_isAddBalanceEnteredWhileManual）、それは利用者の値なので残す。
+                // 使える位置で OFF にしたときに計算値を残す挙動（手で微調整するための OFF）はここに来ないので変わらない
+                SetBalanceProgrammatically(0);
+                _isAddBalanceNotEntered = true;
             }
             else if (reason == AutoBalanceUnavailableReason.None && Mode == LedgerRowEditMode.Add && _isAddBalanceNotEntered)
             {

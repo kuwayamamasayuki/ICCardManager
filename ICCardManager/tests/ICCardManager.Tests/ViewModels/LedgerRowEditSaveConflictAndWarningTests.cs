@@ -664,6 +664,41 @@ public class LedgerRowEditSaveConflictAndWarningTests : IDisposable
         _viewModel.WarningMessage.Should().NotContain(LedgerRowEditViewModel.AddBalanceNotEnteredWarning);
     }
 
+    /// <summary>
+    /// 自分で OFF にした（入力なし）まま使えない位置へ動いても、前の位置の計算値を残さない（コードレビュー 4 回目）。
+    /// </summary>
+    [Fact]
+    public async Task 自動計算をOFFにして入力せず先頭へ動かすと_計算値を残さず未入力になること()
+    {
+        await _viewModel.InitializeForAddAsync(TestCardIdm, CreateListedLedgers(), historyStartsAtCardBeginning: false);
+        _viewModel.Summary = "鉄道（六本松～天神）";
+        _viewModel.Expense = 200;
+        _viewModel.IsAutoBalance = false; // 入力しない
+        _viewModel.Balance.Should().Be(1890, "前提: 使える位置で自分で OFF にしたら計算値を残す（No.43）");
+
+        _viewModel.MoveInsertPositionUpCommand.Execute(null);
+        _viewModel.MoveInsertPositionUpCommand.Execute(null);
+
+        _viewModel.Balance.Should().Be(0, "末尾で計算した 1,890 は先頭の残高ではない");
+        _viewModel.WarningMessage.Should().Contain(LedgerRowEditViewModel.AddBalanceNotEnteredWarning);
+    }
+
+    [Fact]
+    public async Task 自動計算をOFFにして入力してから先頭へ動かすと_入力した残高を残し警告を出さないこと()
+    {
+        await _viewModel.InitializeForAddAsync(TestCardIdm, CreateListedLedgers(), historyStartsAtCardBeginning: false);
+        _viewModel.Summary = "鉄道（六本松～天神）";
+        _viewModel.Expense = 200;
+        _viewModel.IsAutoBalance = false;
+        _viewModel.Balance = 2510;
+
+        _viewModel.MoveInsertPositionUpCommand.Execute(null);
+        _viewModel.MoveInsertPositionUpCommand.Execute(null);
+
+        _viewModel.Balance.Should().Be(2510, "利用者が入力した残高は残す");
+        _viewModel.WarningMessage.Should().NotContain(LedgerRowEditViewModel.AddBalanceNotEnteredWarning);
+    }
+
     [Fact]
     public async Task 自動計算が使える位置での保存では確認を出さないこと()
     {
