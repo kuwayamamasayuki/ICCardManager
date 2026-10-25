@@ -244,6 +244,41 @@ public sealed class LendingServiceRefundTests : IDisposable
         warning.Message.Should().NotContain(TestCardIdm, "IDm はマスクしてログへ出す（#1852）");
     }
 
+    /// <summary>
+    /// 8. 確認した後に他の PC が先に払い戻していたら、残額の変化（BIZ017）ではなく状態の競合（BIZ016）として案内すること（Issue #2322）
+    /// </summary>
+    /// <remarks>
+    /// 他の PC の払い戻しは払戻台帳（残額 0）を作るので、残額も確認時から変わっている。残額の照合を
+    /// 払戻済への更新より先に置くと「利用・チャージが記録された可能性」と案内し、名指しできる原因
+    /// （既に払戻済）を隠す。状態の競合を先に判定する。残額だけが変わった場合は No.7 が BIZ017 を固定する（対の表明）。
+    /// </remarks>
+    [Fact]
+    public async Task RefundAsync_RefundedByAnotherPcAfterConfirmation_ThrowsRefundConflictNotBalanceChanged()
+    {
+        // Arrange: 確認後に他の PC が同じカードを払い戻した（払戻台帳＋払戻済）
+        var before = (await _realCardRepository.GetByIdmAsync(TestCardIdm))!;
+        await InsertLedgerAsync(SummaryGenerator.GetRefundSummary(), income: 0, expense: InitialBalance, balance: 0,
+            date: new DateTime(2025, 6, 14));
+        using (var lease = await _dbContext.LeaseConnectionAsync())
+        using (var command = lease.Connection.CreateCommand())
+        {
+            command.CommandText = "UPDATE ic_card SET is_refunded = 1, refunded_at = '2025-06-14 09:00:00' WHERE card_idm = @idm";
+            command.Parameters.AddWithValue("@idm", TestCardIdm);
+            await command.ExecuteNonQueryAsync();
+        }
+        var (cardRepository, _) = CreateCardRepositoryMock();
+        var service = CreateService(cardRepository.Object);
+
+        // Act
+        var act = () => service.RefundAsync(before, InitialBalance, RefundedAt);
+
+        // Assert
+        await act.Should().ThrowAsync<RefundConflictException>(
+            "残額の変化より先に、名指しできる状態の競合（既に払戻済）を案内する");
+        (await CountAsync(RefundLedgerCountSql)).Should().Be(1, "他の PC の払戻台帳 1 行だけが残り、こちらは何も書かない");
+        (await CountAsync("SELECT COUNT(*) FROM operation_log WHERE target_table = 'ic_card' AND target_id = @idm")).Should().Be(0);
+    }
+
     #endregion
 
     #region 正当な払い戻しを塞いでいない側

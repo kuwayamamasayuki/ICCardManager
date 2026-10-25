@@ -4204,9 +4204,11 @@ public class CardManageViewModelTests : IDisposable
             CardManageViewModel.FormatRefundBalanceChangedMessage("交通系ICカード「はやかけん H-001」", 3000, 2790),
             "払い戻しできません"), Times.Once);
         events.Should().Equal(new[] { "reload", "error" }, "「再読み込みしました」と案内するので、先に再読込する");
-        _ledgerRepositoryMock.Verify(r => r.InsertAsync(It.IsAny<Ledger>(), It.IsAny<SQLiteTransaction>()), Times.Never);
-        _cardRepositoryMock.Verify(r => r.SetRefundedAsync(
-            It.IsAny<string>(), It.IsAny<DateTime>(), It.IsAny<SQLiteTransaction>()), Times.Never);
+        // Issue #2322（レビュー 5 回目）: 残額の照合は払戻済への更新が成功した後（同じトランザクション・コミット前）に移した。
+        // 台帳と払戻済の書き込みはトランザクションごと巻き戻る（実 DB での巻き戻しは LendingServiceRefundTests が固定する）。
+        // モックで表明できるのは、照合の後に書く操作ログが書かれないこと
+        _operationLogRepositoryMock.Verify(
+            r => r.InsertAsync(It.IsAny<OperationLog>(), It.IsAny<SQLiteTransaction>()), Times.Never);
         _viewModel.StatusMessage.Should().NotStartWith("払い戻しが完了しました");
     }
 

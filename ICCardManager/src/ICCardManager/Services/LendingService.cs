@@ -804,16 +804,12 @@ namespace ICCardManager.Services
                         // （System.Data.SQLite の既定で BEGIN IMMEDIATE）で開くので、開始の時点で書き込みロックを取っており、
                         // 読んでから書くまでの間に他の接続は書き込めない（読んだ残額がそのまま書き込みの前提になる）。
                         // 判定は呼び出し元の表示と同じ「直近の台帳の残額、無ければ 0」。
+                        // 読むのは払戻台帳を INSERT する前（INSERT の後では払戻台帳そのものが直近になる）。
+                        // 照合して中止するのは、払戻済への更新が成功した後（下）— 先に照合すると、他 PC が先に
+                        // 払い戻した・貸し出した場合（貸出・返却・払い戻しは残額も動かし得る）にも「利用・チャージが
+                        // 記録された」（BIZ017）と案内し、名指しできる原因（BIZ016: 既に払戻済・貸出中・削除）を隠す。
                         var latestLedger = await _ledgerRepository.GetLatestLedgerAsync(cardIdm).ConfigureAwait(false);
                         var currentBalance = latestLedger?.Balance ?? 0;
-                        if (currentBalance != refundAmount)
-                        {
-                            // 画面はダイアログを出すだけなので、痕跡はここで残す（UI 文言とログを対で数える #1817）
-                            _logger.LogWarning(
-                                "払い戻しを記録できませんでした（確認後に残額が変化）: {CardIdm} 確認時 {ConfirmedAmount}円 現在 {CurrentBalance}円",
-                                IdmMasker.Mask(cardIdm), refundAmount, currentBalance);
-                            throw new RefundBalanceChangedException(cardIdm, refundAmount, currentBalance);
-                        }
 
                         // Issue #1737: 入れ子になる書き込みは tx を明示的に渡す（暗黙参加に頼らない）。
                         // 台帳はリトライのたびに作り直す（前の試行で採番された Id を持ち越さない）。
@@ -831,6 +827,16 @@ namespace ICCardManager.Services
                                 "払い戻しを記録できませんでした（払戻済への更新が 0 行）: {CardIdm} 原因 {Result}",
                                 IdmMasker.Mask(cardIdm), refundResult);
                             throw new RefundConflictException(cardIdm, refundResult);
+                        }
+
+                        // カードの状態（払戻済・貸出中・削除）の競合が無いと分かってから、残額の変化を判定する（上のコメント）
+                        if (currentBalance != refundAmount)
+                        {
+                            // 画面はダイアログを出すだけなので、痕跡はここで残す（UI 文言とログを対で数える #1817）
+                            _logger.LogWarning(
+                                "払い戻しを記録できませんでした（確認後に残額が変化）: {CardIdm} 確認時 {ConfirmedAmount}円 現在 {CurrentBalance}円",
+                                IdmMasker.Mask(cardIdm), refundAmount, currentBalance);
+                            throw new RefundBalanceChangedException(cardIdm, refundAmount, currentBalance);
                         }
 
                         // 変更後データは同じトランザクションの中で組み立てる。コミット後に読み直すと、
