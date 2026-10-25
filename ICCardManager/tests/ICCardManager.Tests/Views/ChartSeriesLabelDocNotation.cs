@@ -10,7 +10,7 @@ namespace ICCardManager.Tests.Views;
 /// <para>
 /// 同じ導出をドキュメント検査クラスごとに持つと（Issue #1890 の 03_画面設計書 §3.23.4、
 /// Issue #1892 の管理者マニュアル 付録 C.3）、本番の書式が変わったときに片方だけが直る
-/// （<c>.claude/rules/db-write-conventions.md</c> #1763「同じ論理的な書き込みに手段が 2 通りあるか」）。
+/// （<c>.claude/rules/service-conventions.md</c> #1763「同じ論理的な処理に手段が 2 通りあるか」）。
 /// 節の切り出しを <see cref="MarkdownDocumentInspection"/> へ寄せたのと同じ判断。
 /// </para>
 /// <para>

@@ -166,7 +166,7 @@
                              VerticalAlignment="Center"
                              Margin="0,0,10,10"
                              AutomationProperties.Name="対象年度（西暦）"
-                             AutomationProperties.HelpText="繰越累計を加算する年度。西暦4桁（例: 2025）。失われた項目のとき・今の年度が入っているとき・繰越累計が1円以上のときは空欄にできない"/>
+                             AutomationProperties.HelpText="繰越累計を加算する年度。西暦4桁（例: 2025）。失われた項目のとき・現在の値（年度）があるとき・繰越累計が1円以上のときは空欄にできない"/>
                     <TextBlock Grid.Row="3" Grid.Column="2"
                                VerticalAlignment="Center"
                                TextWrapping="Wrap"

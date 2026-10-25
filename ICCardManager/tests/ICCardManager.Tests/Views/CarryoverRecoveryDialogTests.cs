@@ -43,13 +43,13 @@ public class CarryoverRecoveryDialogTests
     /// </summary>
     /// <remarks>
     /// 旧文言「繰越累計が0円なら空欄でもよい」は <see cref="CarryoverInfoInput.Parse"/> より緩く、
-    /// 年度が失われたカード・今の年度を持つカードでは、読み上げソフトの利用者だけが案内どおりに空欄にして
+    /// 年度が失われたカード・現在の値として年度を持つカードでは、読み上げソフトの利用者だけが案内どおりに空欄にして
     /// 保存時に拒まれていた。各行で「その条件で Parse が実際に空欄を拒むこと」と「説明がその条件を述べること」を
     /// 併せて表明し、説明と検証規則の片方だけが変わったときに赤になるようにする。
     /// </remarks>
     [Theory]
     [InlineData("失われた項目", true, null, "0")]
-    [InlineData("今の年度", false, 2024, "0")]
+    [InlineData("現在の値（年度）があるとき", false, 2024, "0")]
     [InlineData("1円以上", false, null, "45000")]
     public void 対象年度欄の読み上げ用説明が_空欄を拒む条件を述べること(
         string phrase, bool yearLost, int? currentYear, string incomeText)

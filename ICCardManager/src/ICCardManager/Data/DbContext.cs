@@ -367,7 +367,7 @@ namespace ICCardManager.Data
         /// <b>共有フォルダーを指定するとバックアップだけが必ず失敗していた</b>
         /// （DB 本体は本メソッド経由なので開ける）。接続文字列の組み立て手段を 2 つ持つと、
         /// 片方だけが知識を持つ状態が生まれる
-        /// （<c>.claude/rules/db-write-conventions.md</c> #1763「同じ論理的な書き込みに手段が 2 通りあるか」）。
+        /// （<c>.claude/rules/service-conventions.md</c>「SQLite の接続文字列は 1 か所で組み立てる」の #1763「同じ論理的な処理に手段が 2 通りあるか」）。
         /// 新たに SQLite 接続を開く箇所は必ず本メソッドを通すこと
         /// （回帰は <c>SqliteConnectionStringConventionTests</c> が静的検査で固定する）。
         /// </para>
@@ -1948,7 +1948,7 @@ ON CONFLICT(key) DO UPDATE SET value = excluded.value";
         /// </para>
         /// <para>
         /// 判定を各所へ書き写すと、片方だけが新しい ResultCode を知っている状態が生まれる
-        /// （<c>.claude/rules/db-write-conventions.md</c> #1763「同じ論理的な書き込みに手段が 2 通りあるか」）。
+        /// （<c>.claude/rules/service-conventions.md</c> #1763「同じ論理的な処理に手段が 2 通りあるか」）。
         /// </para>
         /// </remarks>
         internal static bool IsTransientLockError(SQLiteException ex)

@@ -32,8 +32,10 @@ namespace ICCardManager.ViewModels;
 /// </para>
 /// <para>
 /// 30 秒ルールは武装しない（<c>armRetouchWindow: false</c>）。物理タッチが 1 度も
-/// 起きていないため再タッチ窓を開く根拠が無く、武装すると借用者が 30 秒以内に戻って
-/// タッチしたときに「返却」ではなく「作成した貸出記録の取り消し」が走ってしまう。
+/// 起きていないため再タッチ窓を開く根拠が無く、武装すると借用者が 30 秒以内に職員証を通さず
+/// 交通系ICカードだけをタッチしたとき（本来は履歴の表示）に、メイン画面が最後に物理タッチで
+/// 処理した職員を操作者とする返却が記録されてしまう（詳細は <c>LendingService.LendAsync</c> の
+/// <c>armRetouchWindow</c>）。
 /// </para>
 /// </remarks>
 public partial class SystemLendViewModel : ViewModelBase
