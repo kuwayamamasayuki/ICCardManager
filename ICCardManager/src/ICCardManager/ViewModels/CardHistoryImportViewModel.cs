@@ -367,7 +367,7 @@ namespace ICCardManager.ViewModels
 
             if (Rows.Count == 0)
             {
-                SetInfo(BuildNothingToImportMessage(plan.LowerBound));
+                SetInfo(BuildNothingToImportMessage(plan.NoticeLowerBound, plan.FutureDatedRowWithoutDetails, plan.FutureIntroductionDate));
                 return;
             }
 
@@ -452,17 +452,37 @@ namespace ICCardManager.ViewModels
             "カードをカードリーダーに載せ直し、読み取りが終わるまでそのままにしてください。";
 
         /// <summary>台帳に未記録の利用が無かったときの案内</summary>
-        /// <param name="lowerBound">記録の下限（この日付以降を記録する。<see cref="UsageImportPlan.LowerBound"/>）</param>
+        /// <param name="lowerBound">案内に出す記録の下限（<see cref="UsageImportPlan.NoticeLowerBound"/>。今日より後にはならない）</param>
+        /// <param name="futureDatedRowWithoutDetails">
+        /// 下限を決めた明細を持たない行の日付が未来ならその日付（<see cref="UsageImportPlan.FutureDatedRowWithoutDetails"/>）。
+        /// あれば、日付の打ち間違いを疑って履歴で確かめるよう案内する（Issue #2303。案内の日付は今日なので、それだけでは原因に気付けない）
+        /// </param>
+        /// <param name="futureIntroductionDate">
+        /// 下限を決めた導入行の日付が未来ならその日付（<see cref="UsageImportPlan.FutureIntroductionDate"/>）。
+        /// あれば、導入行より前の利用は導入行の残高に含めているため取り込まないと案内する。
+        /// 「それより前の利用を CSV インポート・履歴の追加で補う」とは案内しない（導入行の残高と二重に計上させる）
+        /// </param>
         /// <remarks>
         /// 下限は導入行の日付とは限らない（導入行が無ければ台帳の最新行の日付、明細を持たない行があればその翌日）。
         /// 言い切らずに、実際の下限の日付を示す（それより前の未記録の利用は取り込まないため）。
         /// </remarks>
-        internal static string BuildNothingToImportMessage(DateTime? lowerBound) =>
-            (lowerBound.HasValue
-                ? $"カードに残る利用履歴のうち、{DisplayFormatters.FormatDate(lowerBound.Value)} 以降の利用は台帳に記録済みです。"
-                : "カードに残る利用履歴に、台帳へ記録していない利用は見つかりませんでした。") +
-            "残額の食い違いが残る場合は、それより前の利用やカードに残っていない古い利用が記録されていない可能性があります。" +
-            "履歴を確認し、CSVインポートまたは履歴の追加で補ってください。";
+        internal static string BuildNothingToImportMessage(
+            DateTime? lowerBound, DateTime? futureDatedRowWithoutDetails = null, DateTime? futureIntroductionDate = null) =>
+            futureIntroductionDate.HasValue
+                ? $"導入行の日付（{DisplayFormatters.FormatDate(futureIntroductionDate.Value)}）より前の利用は、" +
+                  "導入行の残額に含めているため取り込みません。カードに残る利用は、すべてこの日付より前です。" +
+                  "残額の食い違いが残る場合は、履歴で導入行の日付と残額を確かめてください。"
+            : futureDatedRowWithoutDetails.HasValue
+                // 下限が未来なので、今日より前の利用も含めてカードに残る利用をすべて記録済みとみなしている。
+                // 「今日以降は記録済み」と書くと、今日より前の未記録の利用が別の理由で対象外になったと読まれる（レビューで検出）
+                ? $"台帳に未来の日付（{DisplayFormatters.FormatDate(futureDatedRowWithoutDetails.Value)}）の行があるため、" +
+                  "カードに残る利用はすべて記録済みとみなしています。" +
+                  "履歴でその行の日付を確かめ、打ち間違いなら正しい日付に直してから、もう一度取り込んでください。"
+                : (lowerBound.HasValue
+                    ? $"カードに残る利用履歴のうち、{DisplayFormatters.FormatDate(lowerBound.Value)} 以降の利用は台帳に記録済みです。"
+                    : "カードに残る利用履歴に、台帳へ記録していない利用は見つかりませんでした。") +
+                  "残額の食い違いが残る場合は、それより前の利用やカードに残っていない古い利用が記録されていない可能性があります。" +
+                  "履歴を確認し、CSVインポートまたは履歴の追加で補ってください。";
 
         /// <summary>取り込めない理由の案内</summary>
         internal static string BuildBlockedMessage(UsageImportBlockReason reason, string cardName) => reason switch
