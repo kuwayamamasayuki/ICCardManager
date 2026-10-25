@@ -1,3 +1,5 @@
+#nullable enable
+
 using System.Collections.Generic;
 
 namespace ICCardManager.Services
@@ -88,7 +90,7 @@ namespace ICCardManager.Services
         /// 区間を特定できない利用の代替摘要（Issue #1735）
         /// </summary>
         /// <remarks>
-        /// 乗車駅・降車駅の両方が欠落し摘要の自動生成が空文字になった利用レコードに充てる文言。
+        /// 摘要の自動生成が空文字になった利用レコード（乗車駅・降車駅の両方が欠落した、運賃 0 円で片側だけの入場記録だけ等）に充てる文言。
         /// 摘要が空欄の台帳行を保存しないための安全網。
         /// </remarks>
         public string UnknownUsageSummary { get; set; } = "鉄道（区間不明）";
