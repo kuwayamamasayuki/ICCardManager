@@ -314,8 +314,8 @@ namespace ICCardManager.Services
         /// 台帳に無い理由は利用履歴 CSV（<see cref="BuildLedgerIdNotFoundError"/>）と同じ（削除・統合した履歴、
         /// 別のデータベースで出力した CSV）。プレビューと取り込みで同じ文言を使う。
         /// <para>
-        /// 「どうすれば」は「この行を CSV から削除する」だけを案内し、<b>利用履歴 ID を空欄にする方法は案内しない</b>
-        /// （レビュー 3 回目）。明細 CSV で ID が空欄の行は <c>NewLedgerFromSegmentsBuilder</c> が台帳の既存の履歴と
+        /// 「どうすれば」は「この行を CSV から削除する」だけを案内し、<b>利用履歴 ID を空欄にする方法は案内しない</b>。
+        /// 明細 CSV で ID が空欄の行は <c>NewLedgerFromSegmentsBuilder</c> が台帳の既存の履歴と
         /// 照合せずに新しい履歴を作る（重複キーの照合もスキップ指定も効かない）ため、削除・統合した履歴の明細で
         /// 案内すれば台帳に戻り（統合元は二重計上）、移行・リストア後に利用履歴を取り込んだあとなら同じ利用が 2 行になる。
         /// 利用履歴 CSV の文言（ID を空欄にすれば重複キーの照合を経て登録される）と違うのはこのため。
@@ -734,7 +734,8 @@ namespace ICCardManager.Services
             }
 
             var cards = await getCards().ConfigureAwait(false);
-            return BuildLedgerCardMismatchError(lineNumber, ledgerId, ledgerCardIdm, rowCardIdm, cards, DetailCsvCardColumnLabel);
+            return BuildLedgerCardMismatchError(lineNumber, ledgerId, ledgerCardIdm, rowCardIdm, cards, DetailCsvCardColumnLabel,
+                offerBlankIdAsNewLedger: false);
         }
 
         /// <summary>

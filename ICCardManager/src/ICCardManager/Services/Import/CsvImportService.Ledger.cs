@@ -108,7 +108,7 @@ namespace ICCardManager.Services
                     {
                         // Issue #2262: ID が指す履歴と行のカードが食い違う行は取り込まない（下記 BuildLedgerCardMismatchError）
                         var cardMismatch = BuildLedgerCardMismatchError(lineNumber, parsed.LedgerId.Value, existingLedger.CardIdm, parsed.CardIdm, allCards,
-                            LedgerCsvCardColumnLabel);
+                            LedgerCsvCardColumnLabel, offerBlankIdAsNewLedger: true);
                         if (cardMismatch != null)
                         {
                             errors.Add(cardMismatch);
@@ -550,8 +550,16 @@ namespace ICCardManager.Services
         /// <param name="cardColumnLabel">
         /// 行のカードをどこで直すか（利用履歴は <see cref="LedgerCsvCardColumnLabel"/>、利用履歴詳細は <see cref="DetailCsvCardColumnLabel"/>）
         /// </param>
+        /// <param name="offerBlankIdAsNewLedger">
+        /// 「新しい履歴として取り込むなら利用履歴 ID を空欄にする」を案内するか。利用履歴 CSV だけ <c>true</c>:
+        /// ID が空欄の行は、スキップ指定ありなら重複キー（カード・日付・摘要・金額・残額）で既存の履歴と照合されてから登録される。
+        /// 利用履歴詳細 CSV では <c>false</c>: ID が空欄の明細行は <c>NewLedgerFromSegmentsBuilder</c> が既存の履歴と照合せずに
+        /// 新しい履歴を作るため、ID を書き間違えた行で空欄を案内すると同じ利用を二重に計上させる
+        /// （<see cref="BuildDetailLedgerIdNotFoundMessage"/> と同じ理由）
+        /// </param>
         private static CsvImportError? BuildLedgerCardMismatchError(
-            int lineNumber, int ledgerId, string ledgerCardIdm, string rowCardIdm, IEnumerable<IcCard> cards, string cardColumnLabel)
+            int lineNumber, int ledgerId, string ledgerCardIdm, string rowCardIdm, IEnumerable<IcCard> cards, string cardColumnLabel,
+            bool offerBlankIdAsNewLedger)
         {
             if (string.Equals(ledgerCardIdm, rowCardIdm, StringComparison.OrdinalIgnoreCase))
             {
@@ -564,8 +572,10 @@ namespace ICCardManager.Services
             {
                 LineNumber = lineNumber,
                 Message = $"利用履歴ID {ledgerId.ToString(CultureInfo.InvariantCulture)} は別の交通系ICカード{ownerLabel}の履歴で、" +
-                          $"この行のカードと一致しないため取り込めません。利用履歴IDと{cardColumnLabel}を確認し、" +
-                          "新しい履歴として取り込む場合は利用履歴IDを空欄にしてください。",
+                          $"この行のカードと一致しないため取り込めません。" +
+                          (offerBlankIdAsNewLedger
+                              ? $"利用履歴IDと{cardColumnLabel}を確認し、新しい履歴として取り込む場合は利用履歴IDを空欄にしてください。"
+                              : $"利用履歴IDと{cardColumnLabel}を確認してください。"),
                 Data = ledgerId.ToString(CultureInfo.InvariantCulture)
             };
         }
@@ -679,7 +689,7 @@ namespace ICCardManager.Services
                     if (ledgerId.HasValue && existingLedger != null)
                     {
                         var cardMismatch = BuildLedgerCardMismatchError(lineNumber, ledgerId.Value, existingLedger.CardIdm, cardIdm, allCards,
-                            LedgerCsvCardColumnLabel);
+                            LedgerCsvCardColumnLabel, offerBlankIdAsNewLedger: true);
                         if (cardMismatch != null)
                         {
                             errors.Add(cardMismatch);

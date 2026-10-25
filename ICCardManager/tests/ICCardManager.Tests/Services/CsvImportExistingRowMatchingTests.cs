@@ -287,6 +287,8 @@ public class CsvImportExistingRowMatchingTests : IDisposable
         error.LineNumber.Should().Be(2);
         error.Message.Should().Contain("利用履歴ID 1").And.Contain("「はやかけん 001」").And.Contain("カードIDm列を確認");
         error.Message.Should().NotContain("取り込み先カード", "利用履歴詳細の取り込みに取り込み先カードの指定は無い");
+        error.Message.Should().NotContain("空欄",
+            "明細 CSV の ID 空欄の行は既存の履歴と照合されずに新しい履歴になり、ID を書き間違えた行で案内すると同じ利用を二重に計上させる");
         AssertActionable(error.Message);
         preview.Errors.Should().ContainSingle().Which.Message.Should().Be(error.Message, "プレビューと取り込みで同じ判定・同じ文言");
     }
@@ -338,7 +340,7 @@ public class CsvImportExistingRowMatchingTests : IDisposable
     /// 利用履歴 ID が台帳に無い明細の行は、なぜ無いのか（削除・統合・別のデータベース）とどう直すのか
     /// （この行を CSV から削除する）を示す。プレビューと取り込みで同じ文言。以前は「利用履歴ID N が存在しません」だけだった。
     /// ID を空欄にする方法は案内しない（明細 CSV の ID 空欄の行は台帳の既存の履歴と照合されずに新しい履歴になり、
-    /// 削除・統合した履歴を戻したり、同じ利用を 2 行にしたりし得るため。レビュー 3 回目）。
+    /// 削除・統合した履歴を戻したり、同じ利用を 2 行にしたりし得るため）。
     /// </summary>
     [Fact]
     public async Task ImportLedgerDetailsAsync_IDが台帳に無い行は理由と直し方を示して拒否すること()
