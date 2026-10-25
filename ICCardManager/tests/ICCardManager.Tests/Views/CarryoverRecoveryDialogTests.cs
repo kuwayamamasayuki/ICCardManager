@@ -48,7 +48,7 @@ public class CarryoverRecoveryDialogTests
     /// 併せて表明し、説明と検証規則の片方だけが変わったときに赤になるようにする。
     /// </remarks>
     [Theory]
-    [InlineData("失われた項目", true, null, "0")]
+    [InlineData("この欄が失われた項目のとき", true, null, "0")]
     [InlineData("現在の値（年度）があるとき", false, 2024, "0")]
     [InlineData("1円以上", false, null, "45000")]
     public void 対象年度欄の読み上げ用説明が_空欄を拒む条件を述べること(
