@@ -134,7 +134,7 @@ public class DatabaseLocationResolverTests
     }
 
     [Fact]
-    public void AppXaml_DBパスの解決をDatabasePathResolverへ委ね_TTL判定を自前で書かないこと()
+    public void AppXaml_DBパスの解決をDatabaseLocationResolverへ委ね_TTL判定を自前で書かないこと()
     {
         // 対の表明: 委譲していること／App.xaml.cs が database_config.txt を自前で読んで共有モードを判定し直していないこと
         var code = TestSourceInspection.ToCodeOnly(
@@ -143,6 +143,35 @@ public class DatabaseLocationResolverTests
         code.Should().Contain("DatabaseLocationResolver.Register(");
         code.Should().NotContain("IsSharedModePath(", "共有モードの TTL 判定は DatabaseLocationResolver が実際に開くパスで行う");
         code.Should().NotContain("PostConfigure<CacheOptions>");
+        code.Should().Contain("DatabaseLocationResolver.DescribePathForStartupError(",
+            "起動失敗のダイアログも、接続と同じ解決結果のパスを表示する");
+    }
+
+    /// <summary>
+    /// 起動失敗のダイアログに添えるパスは、接続と同じ解決結果であること（Issue #2328 のレビューで検出）。
+    /// </summary>
+    /// <remarks>
+    /// 旧実装は database_config.txt を直接表示しており、appsettings.json だけで共有フォルダーを指す構成では空、
+    /// database_config.txt が形式不正で棄却された構成では実際には開いていないパスを示していた。
+    /// </remarks>
+    [Theory]
+    [InlineData(null, UncPath, UncPath)]              // appsettings だけで指す（旧実装は空）
+    [InlineData(RelativePath, LocalPath, LocalPath)]  // database_config.txt を棄却（旧実装は棄却した値）
+    [InlineData(UncPath, LocalPath, UncPath)]         // database_config.txt が優先（正当な側）
+    public void DescribePathForStartupError_接続と同じ解決結果のパスを示すこと(
+        string? configFile, string? appSettings, string expected)
+    {
+        DatabaseLocationResolver.DescribePathForStartupError(configFile, appSettings).Should().Be(expected);
+    }
+
+    [Fact]
+    public void DescribePathForStartupError_既定のときは既定のパスを示すこと()
+    {
+        var description = DatabaseLocationResolver.DescribePathForStartupError(RelativePath, null);
+
+        description.Should().Contain(DbContext.DatabaseFileName).And.EndWith("（既定）",
+            "空欄だと何を開こうとしたか分からない。棄却した値も示さない");
+        description.Should().NotContain(RelativePath);
     }
 
     private static CacheOptions SharedModeCacheOptions()

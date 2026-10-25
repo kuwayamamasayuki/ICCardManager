@@ -931,8 +931,9 @@ ORDER BY date ASC, id ASC";
             // ※ 最新日の 1 行ではなく全行を取得するのは、同一日内の順序を残高チェーンで確定するため (Issue #1731)
             // ※ Issue #2328: 旧実装は `WHERE DATE(l.date) = (相関サブクエリ)` で、列を DATE() で包んだうえ
             //   台帳の全行についてサブクエリを評価していた（非 sargable。#1834 / #1996 と同じ形）。
-            //   GetMonthEndBalancesByCardAsync と同じく、カードごとの最新日を CTE の 1 回の GROUP BY で求め、
-            //   その日の行だけを `l.date >= 最新日`（日付だけの文字列）で idx_ledger_card_date から探索する。
+            //   最終日を CTE の 1 回の GROUP BY で求める点は GetMonthEndBalancesByCardAsync と同じだが、結合条件は違う。
+            //   こちらはカードごとに最終日が 1 つなので、その日の行だけを `l.date >= 最新日`（日付だけの文字列）で
+            //   idx_ledger_card_date から探索できる（あちらは月ごとに最終日があるため `last_day.d = DATE(l.date)` で照合する）。
             //   CROSS JOIN は SQLite で結合順を固定する書き方で、last_day を外側にして ledger を探索させる
             //   （普通の JOIN だと ledger 側を全件走査して last_day を引く計画が選ばれた。実測）
             var latestDayLedgers = new List<Ledger>();
@@ -1217,6 +1218,10 @@ ORDER BY ym, staff";
             // `last_day.d = DATE(l.date)` が月の一致も含意する（ym は GROUP BY の粒度としてのみ必要）。
             // 日付は ISO 8601 の TEXT（YYYY-MM-DD HH:MM:SS）で辞書順＝時系列順のため、
             // 旧実装の DATE(MAX(date)) と MAX(DATE(date)) は同値。
+            // Issue #2328: 結合条件の `last_day.d = DATE(l.date)` は列を関数で包んでいるが、残している。
+            // 1 枚のカードに月ごとの最終日が複数あるため、GetAllLatestBalancesAsync の `l.date >= 最終日` には置き換えられない
+            // （後の月の行まで拾う）。外側の `l.date BETWEEN @fromDate AND @toDate` が idx_ledger_card_date / idx_ledger_date の
+            // 探索キーになるので全件走査にはならず、DATE() は期間内の行に対する絞り込みとして評価されるだけである。
             var lastDayLedgers = new List<Ledger>();
             using (var command = connection.CreateCommand())
             {

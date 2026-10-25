@@ -150,6 +150,8 @@ icacls "D:\share\ICCardManager" /grant "DOMAIN\ICCardUsers:(OI)(CI)M"
 
 データベースの保存先そのものは `C:\ProgramData\ICCardManager\database_config.txt` で指定します。このファイルが無い場合はローカルの既定パス（`C:\ProgramData\ICCardManager\iccard.db`）が使われます。
 
+> **補足**: `appsettings.json` の `DatabaseOptions` の `Path` でも保存先を指定できますが、使われるのは `database_config.txt` が空（または無い）ときだけです。この値は設定画面（F5）の「データベース保存先」欄には表示されません（欄は `database_config.txt` の値を表示・保存します）。保存先は `database_config.txt`（設定画面・インストーラー）で管理してください。
+
 ### 4.2 共有モードの自動判定
 
 保存先に **UNC パス**（`\\server\share\...`）または **マップドネットワークドライブ**（`Z:\share\...` 等で `DriveType.Network`）を指定すると、共有モードが自動的に有効になります。ローカルフルパス（例: `C:\Users\...`）を指定した場合は共有モードになりません。

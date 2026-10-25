@@ -225,8 +225,8 @@ namespace ICCardManager
                 mainWindow.Show();
                 _logger.LogInformation("アプリケーション起動完了");
 
-                // Issue #1599: database_config.txt のパスが形式不正でデフォルトへ
-                // フォールバックしていた場合、ここでユーザーへ警告する
+                // Issue #1599 / #2328: database_config.txt または appsettings.json のパスが形式不正で
+                // 使わなかった場合（既定または次の候補で起動した場合）、ここでユーザーへ警告する
                 WarnIfDatabaseConfigPathRejected();
             }
             catch (DatabaseVersionMismatchException ex)
@@ -258,11 +258,13 @@ namespace ICCardManager
                 var dbPathInfo = "";
                 try
                 {
-                    var configPath = AppConfigFiles.Read(AppConfigFiles.DatabaseConfigPath);
-                    if (!string.IsNullOrWhiteSpace(configPath))
-                    {
-                        dbPathInfo = $"\n\nデータベースパス: {configPath}";
-                    }
+                    // Issue #2328: database_config.txt を直接表示せず、接続と同じ解決結果を表示する
+                    // （appsettings.json だけで指す構成・形式不正で棄却した値でも、実際に開こうとしたパスを示す）。
+                    // 構成の読み込み前に失敗した場合は Configuration が未設定なので appsettings の値は null として扱う
+                    var path = DatabaseLocationResolver.DescribePathForStartupError(
+                        AppConfigFiles.Read(AppConfigFiles.DatabaseConfigPath),
+                        Configuration?["DatabaseOptions:Path"]);
+                    dbPathInfo = $"\n\nデータベースパス: {path}";
                 }
                 catch (Exception configEx)
                 {

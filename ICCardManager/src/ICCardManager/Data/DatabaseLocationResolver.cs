@@ -88,6 +88,23 @@ namespace ICCardManager.Data
         }
 
         /// <summary>
+        /// 起動失敗のダイアログに添える、実際に開こうとしたデータベースパス（Issue #2328 のレビューで検出）
+        /// </summary>
+        /// <remarks>
+        /// database_config.txt を直接読んで表示すると、appsettings.json だけで共有フォルダーを指す構成では空になり、
+        /// database_config.txt が形式不正で棄却されたときは実際には開いていないパスを示す。接続と同じ
+        /// <see cref="Resolve"/> の結果を表示し、既定のときは既定のパスを示す。
+        /// 起動失敗は DI コンテナの構築前でも起こり得るため、Options ではなく生の設定値から解決する。
+        /// </remarks>
+        /// <param name="configFileValue">database_config.txt の内容</param>
+        /// <param name="appSettingsValue">appsettings.json の <c>DatabaseOptions:Path</c>（構成の読み込み前なら null）</param>
+        public static string DescribePathForStartupError(string? configFileValue, string? appSettingsValue)
+        {
+            var path = Resolve(configFileValue, appSettingsValue).Path;
+            return path ?? $"{System.IO.Path.Combine(AppDataPaths.RootDirectory, DbContext.DatabaseFileName)}（既定）";
+        }
+
+        /// <summary>
         /// 棄却したデータベースパスを起動後に知らせる警告文言（Issue #1599 / #2328）
         /// </summary>
         /// <remarks>
