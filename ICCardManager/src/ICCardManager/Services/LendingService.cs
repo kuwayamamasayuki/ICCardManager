@@ -393,7 +393,7 @@ namespace ICCardManager.Services
         /// 30秒ルール（<see cref="IsRetouchWithinTimeout"/>）を武装するかどうか。既定は true（物理タッチ経路）。
         /// Issue #1909: システム操作による貸出記録作成では false を指定する。物理タッチが 1 度も起きていないため
         /// 再タッチ窓を開く根拠が無く、武装すると借用者が 30 秒以内に戻ってタッチしたときに
-        /// 「返却」ではなく「貸出の逆処理（＝作成した記録の取り消し）」が走ってしまう。
+        /// 「返却」ではなく「貸出の逆処理（＝返却の記録。作成した貸出の記録は消えず、逆の操作が 1 件増える）」が走ってしまう。
         /// </param>
         public async Task<LendingResult> LendAsync(
             string staffIdm,
@@ -1439,7 +1439,8 @@ namespace ICCardManager.Services
                     //
                     // Issue #1932: この台帳を履歴統合の対象にしたときの残額選択は
                     // LedgerMergeService.OrderChronologically が担う。同メソッドは同一日内の順序を
-                    // まず残高チェーンで解き、解けないときだけ SequenceNumber の規約へ倒すため、
+                    // まず残高チェーンで解き、解けないときは台帳ごとに分け直して台帳の中を再びチェーンで解く
+                    // （台帳どうしの順序だけを SequenceNumber の規約で決める。04_機能設計書 §5.6.3）ため、
                     // 規約の例外であるこの並び（チャージ → 利用）でも利用後の実残高が選ばれる。
                     // ここの挿入順を変えるときは同メソッドの対のテストを確認すること。
                     charge.LedgerId = ledgerId;

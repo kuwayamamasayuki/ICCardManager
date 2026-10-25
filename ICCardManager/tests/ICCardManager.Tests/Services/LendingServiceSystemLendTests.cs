@@ -281,7 +281,7 @@ public class LendingServiceSystemLendTests : IDisposable
     /// <summary>
     /// システム操作では物理タッチが1度も起きていないため、再タッチ窓を開かない。
     /// 武装すると、借用者が30秒以内に戻ってタッチしたとき「返却」ではなく
-    /// 「貸出の逆処理（取り消し）」が走ってしまう。
+    /// 「貸出の逆処理（逆の操作の新たな記録。取り消しではない）」が走ってしまう。
     /// </summary>
     [Fact]
     public async Task LendAsync_armRetouchWindowがfalseなら30秒ルールを武装しない()

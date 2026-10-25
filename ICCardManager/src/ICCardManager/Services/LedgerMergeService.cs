@@ -374,7 +374,7 @@ namespace ICCardManager.Services
             // Issue #1932: 統合対象の明細を時系列順（古い→新しい）に 1 度だけ並べ、
             // 残額の選択（末尾＝最新）と摘要の再生成（下の sortedDetailsForSummary）の
             // 両方をこの並びに載せる。判定を 2 か所に書き分けると片方だけ変わる日が来る
-            // （development-conventions.md「同じ論理的な処理に手段が 2 通りあるか」）。
+            // （db-write-conventions.md #1763「同じ論理的な書き込みに手段が 2 通りあるか」）。
             var chronologicalDetails = OrderChronologically(allDetails);
 
             // 残高: 最新（時系列で末尾）のDetailの残高を使用

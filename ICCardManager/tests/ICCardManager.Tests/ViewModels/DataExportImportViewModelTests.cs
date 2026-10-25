@@ -1605,7 +1605,7 @@ public class DataExportImportViewModelTests : IDisposable
     /// </summary>
     /// <remarks>
     /// 起きていない事象を警告すると、職員は存在しない重複を探して原因究明が止まる
-    /// （error-messages.md「エラー文言で原因を断定する前に、その原因が成立する構成かを確認する」）。
+    /// （error-messages-implementation.md「原因を断定する前に、その原因が成立する構成かを確認する」）。
     /// </remarks>
     [Fact]
     public async Task ExecuteImportAsync_1件も登録されていなければ二重登録を警告しないこと()
@@ -1893,7 +1893,7 @@ public class DataExportImportViewModelTests : IDisposable
     /// <remarks>
     /// この経路で消えるのは、いま取り込んだファイル自身のプレビューであり消えて当然。
     /// 起きていない事象（別ファイルの作業状態の消失）を案内すると、職員は失われていない作業を探す
-    /// （error-messages.md「原因を断定する前に、その原因が成立する構成かを確認する」）。
+    /// （error-messages-implementation.md「原因を断定する前に、その原因が成立する構成かを確認する」）。
     /// </remarks>
     [Fact]
     public async Task プレビュー経由の取り込みではプレビュー破棄を案内しないこと()

@@ -112,7 +112,7 @@ public partial class HistoryPanelViewModel
     /// 履歴一覧からの削除（<see cref="DeleteLedgerRow"/>）と行編集ダイアログからの削除要求
     /// （Issue #750。<see cref="EditLedgerWithAuthAsync"/>）は同じ論理的な書き込みなので、
     /// 経路ごとに同じ防御を配らずここへ寄せる
-    /// （<c>.claude/rules/development-conventions.md</c>「同じ論理的な書き込みに手段が 2 通りあるか」）。
+    /// （<c>.claude/rules/db-write-conventions.md</c> #1763「同じ論理的な書き込みに手段が 2 通りあるか」）。
     /// 後者はモーダルダイアログを実体化するため ViewModel 単体テストから到達できず、
     /// 寄せることでしか回帰を担保できない（静的検査は <c>RepositoryDeleteResultConventionTests</c>）。
     /// なお <see cref="DeleteLedgerRow"/> は Issue #635 で一覧の削除ボタン用に作られたが、

@@ -33,7 +33,7 @@ namespace ICCardManager.Services
 
         /// <summary>
         /// DB 接続ヘルスチェックの実行間隔（秒）。
-        /// 共有モードの最大キャッシュ TTL（<c>CacheOptions.CardListSeconds</c>=15）
+        /// 共有モードのカード系キャッシュの最長 TTL（<c>CacheOptions.CardListSeconds</c>=15）
         /// および <see cref="StaleThresholdSeconds"/> と一致させ、
         /// TTL を超えて stale データが滞留しないようにする（Issue #1493）。
         /// </summary>
