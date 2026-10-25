@@ -70,6 +70,9 @@ public partial class HistoryPanelViewModel
             return;
         }
 
+        // Issue #2322: 確認文言の出し分けに使う。await をまたいで表示中のカードを読み直さない（#2202）
+        var isRefundedCard = HistoryCard?.IsRefunded == true;
+
         // 認証
         using var authResult = (await _staffAuthService.RequestAuthenticationAsync("履歴の削除"))?.Enter();
         if (authResult == null)
@@ -83,8 +86,7 @@ public partial class HistoryPanelViewModel
               $"日付: {ledger.DateDisplay}\n摘要: {ledger.Summary}\n残高: {ledger.BalanceDisplay}円\n\n" +
               "削除すると、このカードの貸出中状態も解消されます\n" +
               "（他に貸出中レコードが残っている場合は維持されます）。\n\n" +
-              "通常は、メイン画面で交通系ICカードをタッチして返却操作を\n" +
-              "行うのが正しい復旧方法です。それでも削除しますか？"
+              LentRecordDeletionGuidance.Build(isRefundedCard)
             : $"以下の履歴を削除してよろしいですか？\n\n日付: {ledger.DateDisplay}\n摘要: {ledger.Summary}\n残高: {ledger.BalanceDisplay}円";
 
         if (!_navigationService.ShowWarningConfirmation(confirmMessage, "履歴の削除"))
@@ -345,6 +347,8 @@ public partial class HistoryPanelViewModel
     private async Task EditLedgerWithAuthAsync(LedgerDto ledger, bool showSaveAndNext = false)
     {
         var cardName = HistoryCard?.DisplayName;
+        // Issue #2322: 貸出中の行の削除の確認文言を、払戻済のカードでは出し分ける
+        var isRefundedCard = HistoryCard?.IsRefunded == true;
 
         // Issue #1740: 残高の自動計算に使う直前行の残高を、ダイアログを開く前に確定させる
         var previousBalance = FindPreviousBalanceForEdit(ledger);
@@ -358,6 +362,7 @@ public partial class HistoryPanelViewModel
             async d =>
             {
                 await d.InitializeForEditAsync(ledger, previousBalance, initialBalanceCorrection);
+                d.SetRefundedCard(isRefundedCard);
                 if (showSaveAndNext)
                 {
                     d.SetShowSaveAndNextButton(true);
