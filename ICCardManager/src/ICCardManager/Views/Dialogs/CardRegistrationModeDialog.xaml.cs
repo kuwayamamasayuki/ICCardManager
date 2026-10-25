@@ -61,8 +61,8 @@ namespace ICCardManager.Views.Dialogs
         /// 3 月から繰越 = 新年度の始まりであり、導入行は「前年度より繰越」（新年度 4/1、受入＝残額）になる。
         /// 紙の出納簿の 3 月末時点の累計は**旧年度**のもので、新年度の累計は 0 から始まるため、
         /// 累計受入・累計払出は受け付けず保存もしない（<see cref="CarriesPaperCumulative"/>）。
-        /// 導入行の摘要・受入の判定（<c>CardManageViewModel.BuildInitialLedgerAsync</c>）、累計を保存するかの判定、
-        /// ダイアログの累計欄の有効・無効はすべてここを通す（判定の本体は <see cref="PaperCarryoverPolicy"/>。帳票の加算も同じクラス）。
+        /// ここを通すのはダイアログの累計欄の有効・無効だけ。ViewModel（導入行の摘要・受入の判定、累計を保存するかの判定）と
+        /// 帳票（紙の累計を加算するかの判定）は <see cref="PaperCarryoverPolicy"/> を直接呼ぶ（判定の本体はそちらに 1 か所）。
         /// </remarks>
         public static bool IsFiscalYearStartCarryoverMonth(int carryoverMonth) =>
             PaperCarryoverPolicy.IsFiscalYearStartCarryoverMonth(carryoverMonth);

@@ -612,8 +612,9 @@ namespace ICCardManager.ViewModels
                     // Issue #1215: 紙の出納簿からの繰越時は累計受入・払出の初期値を保存
                     // Issue #2326: 3 月から繰越（新年度の始まり）は保存しない。繰越年度は新年度になるため、
                     // 旧年度の紙の累計を保存すると新年度の 5 月以降の累計行に上乗せされる。
-                    // ダイアログも欄を無効にしているが、判定は結果側の 1 か所（CarriesPaperCumulative）で行う
-                    if (modeResult.CarriesPaperCumulative && modeResult.CarryoverMonth is int carryoverMonth)
+                    // ダイアログも欄を無効にしているが、保存するかは PaperCarryoverPolicy の 1 か所で判定する
+                    if (PaperCarryoverPolicy.CarriesPaperCumulative(modeResult.IsNewPurchase, modeResult.CarryoverMonth)
+                        && modeResult.CarryoverMonth is int carryoverMonth)
                     {
                         var carryoverDate = SummaryGenerator.GetMidYearCarryoverDate(
                             carryoverMonth, registeredAt);
