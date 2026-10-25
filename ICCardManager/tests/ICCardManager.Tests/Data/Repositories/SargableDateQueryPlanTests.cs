@@ -66,6 +66,66 @@ public sealed class SargableDateQueryPlanTests : IDisposable
         }
     }
 
+    /// <summary>
+    /// 列を包まない比較が、<c>date(timestamp) BETWEEN 開始日 AND 終了日</c> と同じ行集合を返すこと（レビュー 2 回目で検出）。
+    /// </summary>
+    /// <remarks>
+    /// 「0 時以上・23:59:59 以下」で比べると、日付だけで保存された値（開始日）と 'T' 区切りの値（終了日）を落とす。
+    /// 実行計画だけを見るテストでは検出できないため、同じ DB に対する <c>date()</c> 版の結果を正解として突き合わせる。
+    /// 隣の日（範囲外）の行も置き、広げすぎた実装も赤にする。
+    /// </remarks>
+    [Fact]
+    public async Task 操作ログの期間検索はdate関数で絞った場合と同じ行を返すこと()
+    {
+        var stored = new[]
+        {
+            "2025-12-31 23:59:59",   // 範囲外（前日）
+            "2025-12-31T23:59:59",   // 範囲外（前日、T 区切り）
+            "2026-01-01",            // 開始日（日付だけ）
+            "2026-01-01 00:00:00",   // 開始日の 0 時
+            "2026-01-15 12:00",      // 秒の無い値
+            "2026-01-31 23:59:59",   // 終了日の最後の秒
+            "2026-01-31T10:00:00",   // 終了日（T 区切り）
+            "2026-02-01",            // 範囲外（翌日、日付だけ）
+            "2026-02-01 00:00:00",   // 範囲外（翌日の 0 時）
+        };
+        using (var lease = await _dbContext.LeaseConnectionAsync())
+        {
+            foreach (var timestamp in stored)
+            {
+                using var command = lease.Connection.CreateCommand();
+                command.CommandText = "INSERT INTO operation_log (timestamp, operator_idm, operator_name, target_table, target_id, action) " +
+                                      "VALUES (@t, 'FFFF000000000001', 'テスト', 'ledger', '1', 'UPDATE')";
+                command.Parameters.AddWithValue("@t", timestamp);
+                command.ExecuteNonQuery();
+            }
+        }
+
+        var expected = new List<long>();
+        using (var lease = await _dbContext.LeaseConnectionAsync())
+        {
+            using var command = lease.Connection.CreateCommand();
+            command.CommandText = "SELECT id FROM operation_log WHERE date(timestamp) BETWEEN '2026-01-01' AND '2026-01-31' ORDER BY id";
+            using var reader = command.ExecuteReader();
+            while (reader.Read())
+            {
+                expected.Add(reader.GetInt64(0));
+            }
+        }
+
+        expected.Should().HaveCount(5, "前提: date() 版は範囲内の 5 行を返す");
+
+        var repository = new OperationLogRepository(_dbContext);
+        var from = new DateTime(2026, 1, 1);
+        var to = new DateTime(2026, 1, 31);
+        var criteria = new OperationLogSearchCriteria { FromDate = from, ToDate = to };
+
+        (await repository.GetByDateRangeAsync(from, to)).Select(l => (long)l.Id).OrderBy(i => i)
+            .Should().Equal(expected);
+        (await repository.SearchAllAsync(criteria)).Select(l => (long)l.Id).OrderBy(i => i)
+            .Should().Equal(expected);
+    }
+
     [Fact]
     public async Task 全カードの最新残高は台帳を全件走査せず相関サブクエリも使わないこと()
     {

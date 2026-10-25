@@ -459,7 +459,8 @@ public class ConnectionDiagnosticsServiceTests : IDisposable
         var item = await RunAndGet(DiagnosticItemKind.SharedFolderConnection);
 
         item.DetailText.Should().NotContain("再起動してください", "復旧後の再起動は不要");
-        item.DetailText.Should().Contain("15秒以内に自動で再接続", "どうすれば: 復旧すれば自動で戻ることを伝える");
+        item.DetailText.Should().Contain($"{SharedModeMonitor.HealthCheckIntervalSeconds}秒以内に自動で再接続",
+            "どうすれば: 復旧すれば監視の間隔のうちに自動で戻ることを伝える（間隔は SharedModeMonitor から組み立てる）");
         item.DetailText.Should().Contain("警告をクリック", "すぐに戻したいときの手動の再接続を案内する");
     }
 

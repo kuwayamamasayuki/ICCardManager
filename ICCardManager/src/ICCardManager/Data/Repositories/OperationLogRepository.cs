@@ -84,15 +84,17 @@ SELECT last_insert_rowid();";
             command.CommandText = @"SELECT id, timestamp, operator_idm, operator_name, target_table,
        target_id, action, before_data, after_data
 FROM operation_log
-WHERE timestamp >= @fromDate AND timestamp <= @toDate
+WHERE timestamp >= @fromDate AND timestamp < @toDateExclusive
 ORDER BY timestamp ASC";
 
             // Issue #2328: 列を date() で包まない（包むと idx_log_timestamp を探索キーにできず全件走査になる。
-            // #1834 / #1996）。timestamp は SqliteDateTimeFormat.ToText（yyyy-MM-dd HH:mm:ss）で書かれ、
-            // 辞書順＝時系列順なので「その日の 0 時以上・23:59:59 以下」は date(timestamp) の範囲と同じ行集合になる
+            // #1834 / #1996）。しきい値は日付だけの文字列（yyyy-MM-dd）で、下限は「開始日以上」、上限は「終了日の翌日未満」。
+            // timestamp は辞書順＝時系列順の ISO テキストなので、秒未満を持つ値・T 区切りの値・日付だけの値も含めて
+            // date(timestamp) BETWEEN 開始日 AND 終了日 と同じ行集合になる
+            //（「23:59:59 以下」だと 23:59:59.5 や 'T' 区切りの値を落とし、「0 時以上」だと日付だけの値を落とす）
 
-            command.Parameters.AddWithValue("@fromDate", SqliteDateTimeFormat.ToDayStartText(fromDate));
-            command.Parameters.AddWithValue("@toDate", SqliteDateTimeFormat.ToDayEndText(toDate));
+            command.Parameters.AddWithValue("@fromDate", SqliteDateTimeFormat.ToDateText(fromDate));
+            command.Parameters.AddWithValue("@toDateExclusive", SqliteDateTimeFormat.ToDateText(toDate.Date.AddDays(1)));
 
             using var reader = await command.ExecuteReaderAsync().ConfigureAwait(false);
             while (await reader.ReadAsync().ConfigureAwait(false))
@@ -369,13 +371,13 @@ ORDER BY timestamp ASC, id ASC";
             if (criteria.FromDate.HasValue)
             {
                 conditions.Add("timestamp >= @fromDate");
-                parameters["@fromDate"] = SqliteDateTimeFormat.ToDayStartText(criteria.FromDate.Value);
+                parameters["@fromDate"] = SqliteDateTimeFormat.ToDateText(criteria.FromDate.Value);
             }
 
             if (criteria.ToDate.HasValue)
             {
-                conditions.Add("timestamp <= @toDate");
-                parameters["@toDate"] = SqliteDateTimeFormat.ToDayEndText(criteria.ToDate.Value);
+                conditions.Add("timestamp < @toDateExclusive");
+                parameters["@toDateExclusive"] = SqliteDateTimeFormat.ToDateText(criteria.ToDate.Value.Date.AddDays(1));
             }
 
             if (!string.IsNullOrEmpty(criteria.Action))
