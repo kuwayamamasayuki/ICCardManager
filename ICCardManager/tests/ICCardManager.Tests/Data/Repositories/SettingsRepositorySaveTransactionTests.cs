@@ -163,7 +163,9 @@ public class SettingsRepositorySaveTransactionTests : IDisposable
         };
 
         // Act
+        // Issue #2305: ウィンドウの位置・サイズは一括保存では書かない（終了時の専用経路 SaveMainWindowSettingsAsync が書く）
         (await _repository.SaveAppSettingsAsync(settings)).Should().BeTrue();
+        (await _repository.SaveMainWindowSettingsAsync(settings.MainWindowSettings)).Should().BeTrue();
 
         var freshCache = new Mock<ICacheService>();
         freshCache.Setup(c => c.GetOrCreateAsync(

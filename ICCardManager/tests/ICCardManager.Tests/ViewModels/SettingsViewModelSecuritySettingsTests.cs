@@ -550,6 +550,8 @@ public sealed class SettingsViewModelSecuritySettingsTests : IDisposable
         ArrangeAuthenticationSucceeds();
         File.WriteAllText(ConfigPath, @"\\fileserver\share\iccard.db");
         var viewModel = CreateViewModel();
+        // Issue #2305（レビュー 4 回目）: 保存は設定の読み込みが成功して終わった画面からしかできないため、先に読み込む
+        await viewModel.InitializeAsync();
         viewModel.DatabasePath = string.Empty;
 
         using (new FileStream(ConfigPath, FileMode.Open, FileAccess.Read, FileShare.None))

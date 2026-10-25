@@ -577,9 +577,8 @@ WHERE settings.value IS NULL OR substr(settings.value, 1, 7) <> @currentMonth";
                     success &= await SetAsync(KeyWarningBalance, settings.WarningBalance.ToString(CultureInfo.InvariantCulture), scope).ConfigureAwait(false);
                     // Issue #2264: backup_path はここで書かない。バックアップ先の変更は職員証の認証を求め、
                     // 変更日時・PC 名・操作ログと同じトランザクションで書く（ChangeBackupPathAsync）。
-                    // 一括保存は条件を持たない UPSERT で、終了時のウィンドウ位置の保存（MainWindow）は
-                    // TTL キャッシュ由来の古い AppSettings を丸ごと書き戻すため、ここに載せると
-                    // 他 PC で認証して変更したバックアップ先を、認証も記録も無いまま巻き戻す（#1997 と同じ形）。
+                    // 一括保存は条件を持たない UPSERT で、渡された値を丸ごと書くため、ここに載せると
+                    // 古い値を持つ PC の保存が、他 PC で認証して変更したバックアップ先を、認証も記録も無いまま巻き戻す（#1997 と同じ形）。
                     success &= await SetAsync(KeyFontSize, FontSizeToString(settings.FontSize), scope).ConfigureAwait(false);
 
                     // Issue #1997: last_vacuum_date はここで書かない。
@@ -590,8 +589,11 @@ WHERE settings.value IS NULL OR substr(settings.value, 1, 7) <> @currentMonth";
                     // 保守用のキー（last_backup_success_at / last_backup_machine / last_vacuum_machine）も
                     // 同じ理由で一括保存に載せない。集合は SettingsMaintenanceKeyConventionTests が固定する。
 
-                    // ウィンドウ設定を保存
-                    success &= await SaveWindowSettingsToDbAsync(settings.MainWindowSettings, scope).ConfigureAwait(false);
+                    // Issue #2305: ウィンドウの位置・サイズ（window_*）はここで書かない。設定画面で編集しない値で、
+                    // 終了時に SaveMainWindowSettingsAsync だけが書く。以前は終了時の保存がキャッシュ由来の
+                    // AppSettings を丸ごとこのメソッドへ渡しており、共有モードで他 PC が変えた設定（部署種別・
+                    // 残額警告など）を古い値へ巻き戻していた。設定画面の保存も既定値の MainWindowSettings を渡すため、
+                    // 載せたままだと window_maximized を false で上書きしていた（SET 句は編集する列に限る。#1726）。
 
                     // 音声モード設定を保存
                     success &= await SetAsync(KeySoundMode, SoundModeToString(settings.SoundMode), scope).ConfigureAwait(false);
@@ -631,6 +633,35 @@ WHERE settings.value IS NULL OR substr(settings.value, 1, 7) <> @currentMonth";
             }).ConfigureAwait(false);
 
             // トランザクション完了後にキャッシュを無効化
+            _cacheService.Invalidate(CacheKeys.AppSettings);
+
+            return success;
+        }
+
+        /// <inheritdoc/>
+        public async Task<bool> SaveMainWindowSettingsAsync(WindowSettings windowSettings)
+        {
+            // Issue #2305: window_* の 5 キーだけを 1 トランザクションで書く（一括保存を呼ばない）。
+            // 書くキーの集合は SettingsMaintenanceKeyConventionTests が固定する。
+            var success = true;
+
+            await _dbContext.ExecuteWithRetryAsync(async () =>
+            {
+                using var scope = await _dbContext.BeginTransactionAsync().ConfigureAwait(false);
+
+                try
+                {
+                    success = await SaveWindowSettingsToDbAsync(windowSettings, scope).ConfigureAwait(false);
+                    scope.Commit();
+                }
+                catch
+                {
+                    // Issue #1831: 素の Rollback() を呼ばない（詳細は SafeRollback の XML doc）
+                    SafeRollback.TryRollback(() => scope.Rollback(), logger: null, "ウィンドウ位置の保存");
+                    throw;
+                }
+            }).ConfigureAwait(false);
+
             _cacheService.Invalidate(CacheKeys.AppSettings);
 
             return success;
