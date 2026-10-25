@@ -815,9 +815,11 @@ namespace ICCardManager.ViewModels
                         break;
                     }
                 }
+                var previousIndex = InsertIndex;
                 InsertIndex = newIndex;
                 UpdateInsertPreviewRows();
                 UpdateAutoBalanceAvailability();
+                ResumeAutoBalanceAfterInsertMove(previousIndex);
                 RecalculateBalance();
             }
             else if (Mode == LedgerRowEditMode.Edit)
@@ -869,6 +871,7 @@ namespace ICCardManager.ViewModels
                 InsertIndex--;
                 UpdateInsertPreviewRows();
                 UpdateAutoBalanceAvailability();
+                ResumeAutoBalanceAfterInsertMove(InsertIndex + 1);
                 RecalculateBalance();
                 Validate();
             }
@@ -885,6 +888,7 @@ namespace ICCardManager.ViewModels
                 InsertIndex++;
                 UpdateInsertPreviewRows();
                 UpdateAutoBalanceAvailability();
+                ResumeAutoBalanceAfterInsertMove(InsertIndex - 1);
                 RecalculateBalance();
                 Validate();
             }
@@ -987,6 +991,34 @@ namespace ICCardManager.ViewModels
                 // 「復元する値がある」扱いになり、未入力の扱いが立たない）
                 _balanceBeforeAutoBalance = null;
             }
+        }
+
+        /// <summary>
+        /// Issue #2325（コードレビュー 5 回目）: Addモードで挿入位置が変わったとき、自動計算を自分で OFF にした（入力なし）
+        /// ままなら、ON に戻して今の位置で計算し直す。
+        /// </summary>
+        /// <param name="previousIndex">移動する前の挿入位置</param>
+        /// <remarks>
+        /// OFF のまま残っている残高は前の位置で計算した値で、別の位置へ動いた後は今の位置の残高ではない。
+        /// 使えない位置へ動いたときは <see cref="UpdateAutoBalanceAvailability"/> が 0（未入力）に戻すので、ここは使える位置だけを扱う。
+        /// 同じ位置にとどまって OFF にした場合（手で微調整するための OFF）と、OFF の間に残高を入力した場合は変えない。
+        /// <see cref="UpdateAutoBalanceAvailability"/> の後、<see cref="RecalculateBalance"/> の前に呼ぶ。
+        /// </remarks>
+        private void ResumeAutoBalanceAfterInsertMove(int previousIndex)
+        {
+            if (Mode != LedgerRowEditMode.Add
+                || InsertIndex == previousIndex
+                || !CanAutoBalance
+                || IsAutoBalance
+                || _isAddBalanceEnteredWhileManual
+                || _isAddBalanceNotEntered)
+            {
+                return;
+            }
+
+            IsAutoBalance = true;
+            // ON にした時点の残高は前の位置の計算値なので退避しない（OFF にしたときに「復元」させない）
+            _balanceBeforeAutoBalance = null;
         }
 
         /// <summary>

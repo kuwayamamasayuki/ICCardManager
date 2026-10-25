@@ -699,6 +699,58 @@ public class LedgerRowEditSaveConflictAndWarningTests : IDisposable
         _viewModel.WarningMessage.Should().NotContain(LedgerRowEditViewModel.AddBalanceNotEnteredWarning);
     }
 
+    /// <summary>
+    /// 自分で OFF にした（入力なし）まま使える別の位置へ動いたら、ON に戻して今の位置で計算し直す（コードレビュー 5 回目）。
+    /// </summary>
+    [Fact]
+    public async Task 自動計算をOFFにして入力せず使える別の位置へ動かすと_ONに戻して今の位置で計算し直すこと()
+    {
+        await _viewModel.InitializeForAddAsync(TestCardIdm, CreateListedLedgers(), historyStartsAtCardBeginning: false);
+        _viewModel.Summary = "鉄道（六本松～天神）";
+        _viewModel.Expense = 200;
+        _viewModel.IsAutoBalance = false; // 末尾の計算値 1,890 のまま、入力しない
+
+        _viewModel.MoveInsertPositionUpCommand.Execute(null); // 位置 1（直前行 2,300）
+
+        _viewModel.IsAutoBalance.Should().BeTrue();
+        _viewModel.Balance.Should().Be(2300 - 200, "末尾で計算した 1,890 は位置 1 の残高ではない");
+        _viewModel.WarningMessage.Should().NotContain(LedgerRowEditViewModel.AddBalanceNotEnteredWarning);
+    }
+
+    /// <summary>
+    /// 利用日を変えても挿入位置が変わらなければ、自分で OFF にした（手で微調整するための）状態と計算値を変えない（No.43 の対）。
+    /// </summary>
+    [Fact]
+    public async Task 自動計算をOFFにしたまま挿入位置の変わらない利用日の変更では_OFFと計算値を残すこと()
+    {
+        await _viewModel.InitializeForAddAsync(TestCardIdm, CreateListedLedgers(), historyStartsAtCardBeginning: false);
+        _viewModel.Summary = "鉄道（六本松～天神）";
+        _viewModel.Expense = 200;
+        _viewModel.EditDate = new DateTime(2026, 1, 20);
+        _viewModel.IsAutoBalance = false;
+
+        _viewModel.EditDate = new DateTime(2026, 1, 21); // 末尾のまま
+
+        _viewModel.InsertIndex.Should().Be(2);
+        _viewModel.IsAutoBalance.Should().BeFalse();
+        _viewModel.Balance.Should().Be(1890);
+    }
+
+    [Fact]
+    public async Task 自動計算をOFFにして入力してから使える別の位置へ動かすと_入力した残高を残すこと()
+    {
+        await _viewModel.InitializeForAddAsync(TestCardIdm, CreateListedLedgers(), historyStartsAtCardBeginning: false);
+        _viewModel.Summary = "鉄道（六本松～天神）";
+        _viewModel.Expense = 200;
+        _viewModel.IsAutoBalance = false;
+        _viewModel.Balance = 2510;
+
+        _viewModel.MoveInsertPositionUpCommand.Execute(null);
+
+        _viewModel.IsAutoBalance.Should().BeFalse("利用者が入力した残高を自動計算で上書きしない");
+        _viewModel.Balance.Should().Be(2510);
+    }
+
     [Fact]
     public async Task 自動計算が使える位置での保存では確認を出さないこと()
     {
