@@ -78,6 +78,10 @@ namespace ICCardManager.UITests.Infrastructure
         // これらは AutomationProperties ではなく画面に出る文字列そのもの（前方一致で検索する）。
         [NotUiaName]
         public const string CardReaderStatusTextPrefix = "リーダー:";
+
+        /// <summary>ステータスバーの状態表示の先頭（Issue #2308。後ろに日本語の状態名が続く）。</summary>
+        [NotUiaName]
+        public const string AppStateStatusTextPrefix = "状態:";
         [NotUiaName]
         public const string AppVersionTextPrefix = "Ver.";
 
@@ -478,6 +482,14 @@ namespace ICCardManager.UITests.Infrastructure
         [UiaName]
         public const string SettingsToastPositionComboBox = "トースト通知位置選択";
 
+        /// <summary>設定ダイアログの「データベース保存先フォルダ」の入力欄（Alt+D。Issue #2308）。</summary>
+        [UiaName]
+        public const string SettingsDatabasePathInput = "データベース保存先フォルダパス";
+
+        /// <summary>設定ダイアログの「同行者数入力を自動的に閉じるまでの秒数」の入力欄（Alt+I。Issue #2308）。</summary>
+        [UiaName]
+        public const string SettingsCompanionCountTimeoutInput = "同行者数入力の自動クローズ秒数";
+
         /// <summary>データ入出力ダイアログの初期フォーカス（<c>ExportDataTypeComboBox</c>）。</summary>
         [UiaName]
         public const string ExportDataTypeComboBox = "エクスポートするデータ種別";
@@ -517,6 +529,18 @@ namespace ICCardManager.UITests.Infrastructure
         /// <summary>履歴行の追加・修正ダイアログの「保存」ボタン。</summary>
         [UiaName]
         public const string LedgerRowEditSaveButton = "保存";
+
+        /// <summary>履歴行の追加・修正ダイアログの受入金額の入力欄（Issue #2308）。</summary>
+        [UiaName]
+        public const string LedgerRowEditIncomeInput = "受入金額";
+
+        /// <summary>履歴行の追加・修正ダイアログの残高の入力欄（Issue #2308）。</summary>
+        [UiaName]
+        public const string LedgerRowEditBalanceInput = "残高";
+
+        /// <summary>導入行の残高の訂正提案の「逆算した金額を適用」ボタン（Alt+R。Issue #2007 / #2308）。</summary>
+        [UiaName]
+        public const string LedgerRowEditApplyInitialBalanceButton = "逆算した金額を受入と残額に適用";
 
         // 一覧に無い利用者の注記は Name を文言へバインドしているため、AutomationId で探す（Issue #2300）。
         /// <summary>履歴行の追加・修正ダイアログで、利用者が職員一覧に無いときに出す注記の AutomationId。</summary>
