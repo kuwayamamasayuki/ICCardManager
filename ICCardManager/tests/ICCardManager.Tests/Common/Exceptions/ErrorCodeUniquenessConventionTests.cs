@@ -77,6 +77,91 @@ public class ErrorCodeUniquenessConventionTests
     }
 
     /// <summary>
+    /// 廃止したエラーコード（欠番）。過去のログ・問い合わせに残っているため、別の原因へ再利用しない。
+    /// </summary>
+    /// <remarks>
+    /// 欠番はコメントだけでは守れない — 「次の空き番号」を探す人はコメントの無いファイルを見て採番する。
+    /// 廃止するときはここへ足す（理由も添える）。
+    /// </remarks>
+    private static readonly IReadOnlyDictionary<string, string> RetiredCodes = new Dictionary<string, string>
+    {
+        // Issue #2327: CardReaderException.ReconnectFailed（試行回数つきの再接続失敗）。本番の呼び出し元が無く撤去した
+        ["CR008"] = "CardReaderException.ReconnectFailed（Issue #2327 で撤去）",
+        // Issue #2330: 本番から一度も送出されなかったファクトリを削除した（過去のログには現れないが、再利用しない）
+        ["BIZ001"] = "BusinessException.CardAlreadyLent（Issue #2330 で削除）",
+        ["BIZ002"] = "BusinessException.CardNotLent（Issue #2330 で削除）",
+        ["BIZ003"] = "BusinessException.UnregisteredStaff（Issue #2330 で削除）",
+        ["BIZ004"] = "BusinessException.UnregisteredCard（Issue #2330 で削除）",
+        ["BIZ005"] = "BusinessException.DeletedStaff（Issue #2330 で削除）",
+        ["BIZ006"] = "BusinessException.DeletedCard（Issue #2330 で削除）",
+        ["BIZ007"] = "BusinessException.LowBalance（Issue #2330 で削除）",
+        ["BIZ008"] = "BusinessException.OperationNotAllowed（Issue #2330 で削除）",
+        ["BIZ009"] = "BusinessException.OperationTimeout（Issue #2330 で削除）",
+        ["BIZ010"] = "BusinessException.BackupPathNotConfigured（Issue #2330 で削除）",
+        ["BIZ011"] = "BusinessException.BackupFailed（Issue #2330 で削除）",
+        ["BIZ012"] = "BusinessException.RestoreFailed（Issue #2330 で削除）",
+        ["BIZ013"] = "BusinessException.ReportGenerationFailed（Issue #2330 で削除）",
+        ["BIZ014"] = "BusinessException.FileWriteAccessDenied（Issue #2330 で削除）",
+        ["CR001"] = "CardReaderException.NotConnected（Issue #2330 で削除）",
+        ["CR005"] = "CardReaderException.Timeout（Issue #2330 で削除）",
+        ["CR006"] = "CardReaderException.ServiceNotAvailable（Issue #2330 で削除）",
+        ["CR007"] = "CardReaderException.MonitorError（Issue #2330 で削除）",
+        ["DB001"] = "DatabaseException.ConnectionFailed（Issue #2330 で削除）",
+        ["DB003"] = "DatabaseException.NotFound（Issue #2330 で削除）",
+        ["DB004"] = "DatabaseException.DuplicateEntry（Issue #2330 で削除）",
+        ["DB005"] = "DatabaseException.ForeignKeyViolation（Issue #2330 で削除）",
+        ["DB006"] = "DatabaseException.TransactionFailed（Issue #2330 で削除）",
+        ["DB007"] = "DatabaseException.FileAccessDenied（Issue #2330 で削除）",
+        ["FILE001"] = "FileOperationException.FileNotFound（Issue #2330 で削除）",
+        ["FILE002"] = "FileOperationException.ReadFailed（Issue #2330 で削除）",
+        ["FILE003"] = "FileOperationException.WriteFailed（Issue #2330 で削除）",
+        ["FILE004"] = "FileOperationException.AccessDenied（Issue #2330 で削除）",
+        ["FILE005"] = "FileOperationException.FileInUse（Issue #2330 で削除）",
+        ["FILE006"] = "FileOperationException.InvalidFormat（Issue #2330 で削除）",
+        ["FILE007"] = "FileOperationException.DirectoryCreationFailed（Issue #2330 で削除）",
+        ["VAL001"] = "ValidationException（型ごと）の Required（Issue #2330 で削除）",
+        ["VAL002"] = "ValidationException（型ごと）の OutOfRange（Issue #2330 で削除）",
+        ["VAL003"] = "ValidationException（型ごと）の InvalidFormat（Issue #2330 で削除）",
+        ["VAL004"] = "ValidationException（型ごと）の InvalidIdm（Issue #2330 で削除）",
+        ["VAL005"] = "ValidationException（型ごと）の TooLong（Issue #2330 で削除）",
+        ["VAL006"] = "ValidationException（型ごと）の Multiple（Issue #2330 で削除）",
+        ["VAL007"] = "ValidationException（型ごと）の InvalidDate（Issue #2330 で削除）",
+    };
+
+    /// <summary>
+    /// 廃止したエラーコードが本番コードで再び割り当てられていないこと（Issue #2327）
+    /// </summary>
+    [Fact]
+    public void 廃止したエラーコードが再利用されていないこと()
+    {
+        var reused = CollectErrorCodes()
+            .Where(e => RetiredCodes.ContainsKey(e.Code))
+            .Select(e => $"{e.Code}（{RetiredCodes[e.Code]}）: {e.Location}")
+            .ToList();
+
+        reused.Should().BeEmpty(
+            "廃止したエラーコードは過去のログや問い合わせに残っており、別の原因へ再利用すると受け取った側が原因を取り違える。" +
+            "新しいコードは欠番を避けて採番してください。再利用: " + string.Join(", ", reused));
+    }
+
+    /// <summary>
+    /// 廃止したコードを割り当てる形が、抽出で実際に拾えること（上の検査の空振り防止）
+    /// </summary>
+    /// <remarks>
+    /// 抽出が欠番の形を拾えなければ、上の検査は再利用されても緑のままになる。
+    /// 一覧の全コードについて、本番の採番と同じ書き方のサンプルで固定する。
+    /// </remarks>
+    [Fact]
+    public void 廃止したエラーコードを割り当てる形は抽出で拾えること()
+    {
+        RetiredCodes.Should().NotBeEmpty();
+        foreach (var code in RetiredCodes.Keys)
+        {
+            ExtractCodes($"const string errorCode = \"{code}\";").Should().Equal(new[] { code }, code);
+        }
+    }
+
+    /// <summary>
     /// 同じファイルで採番するエラーコードは同じ接頭辞（分類）を持つこと
     /// </summary>
     /// <remarks>

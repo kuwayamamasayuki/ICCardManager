@@ -72,6 +72,12 @@ namespace ICCardManager.Common.Exceptions
                 : new CardReaderException(message, userMessage, errorCode);
         }
 
+        // CR001・CR005〜CR007 は欠番（Issue #2330）。未接続・通信タイムアウト・スマートカードサービス停止・監視エラーの
+        // ファクトリは本番から送出されていなかったため削除した。
+        // CR008 は欠番（Issue #2327）。試行回数つきの「再接続失敗」（ReconnectFailed）は、どのカードリーダー実装も
+        // 回数つきの再接続を行わず本番の呼び出し元が無かったため、到達しない「再接続中」の状態と一緒に撤去した。
+        // 過去のログのエラーコードと取り違えないよう、欠番のコードは別の原因に再利用しない（ErrorCodeUniquenessConventionTests.RetiredCodes）。
+
         /// <summary>
         /// カード取り外し（読み取り中にカードが離された）
         /// </summary>
