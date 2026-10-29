@@ -1,3 +1,4 @@
+#nullable enable
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -9,6 +10,12 @@ namespace ICCardManager.Infrastructure.CardReader
     /// <summary>
     /// カードリーダーの接続状態
     /// </summary>
+    /// <remarks>
+    /// Issue #2327: 状態は「接続中」「切断」の 2 つだけ。以前は「再接続中（Reconnecting）」と再接続の試行回数を
+    /// 持っていたが、どのカードリーダー実装も通知しておらず、画面・接続診断・ヘルスチェックの判定に
+    /// 到達しない分岐が残っていた。再接続を試行回数つきで行う実装を足すなら、状態と表示を一緒に足すこと。
+    /// 共有フォルダモードの DB 接続状態（<c>SharedDbConnectionState</c>）は別物で、こちらは再接続中を実際に通知する。
+    /// </remarks>
     public enum CardReaderConnectionState
     {
         /// <summary>
@@ -20,11 +27,6 @@ namespace ICCardManager.Infrastructure.CardReader
         /// 切断
         /// </summary>
         Disconnected,
-
-        /// <summary>
-        /// 再接続中
-        /// </summary>
-        Reconnecting
     }
 
     /// <summary>
@@ -40,18 +42,12 @@ namespace ICCardManager.Infrastructure.CardReader
         /// <summary>
         /// メッセージ（エラー詳細など）
         /// </summary>
-        public string Message { get; }
+        public string? Message { get; }
 
-        /// <summary>
-        /// 再接続試行回数（再接続中の場合）
-        /// </summary>
-        public int RetryCount { get; }
-
-        public ConnectionStateChangedEventArgs(CardReaderConnectionState state, string message = null, int retryCount = 0)
+        public ConnectionStateChangedEventArgs(CardReaderConnectionState state, string? message = null)
         {
             State = state;
             Message = message;
-            RetryCount = retryCount;
         }
     }
 
@@ -68,7 +64,7 @@ namespace ICCardManager.Infrastructure.CardReader
         /// <summary>
         /// システムコード
         /// </summary>
-        public string SystemCode { get; set; }
+        public string SystemCode { get; set; } = string.Empty;
     }
 
     /// <summary>
@@ -79,17 +75,17 @@ namespace ICCardManager.Infrastructure.CardReader
         /// <summary>
         /// カードが読み取られた時に発生するイベント
         /// </summary>
-        event EventHandler<CardReadEventArgs> CardRead;
+        event EventHandler<CardReadEventArgs>? CardRead;
 
         /// <summary>
         /// エラーが発生した時に発生するイベント
         /// </summary>
-        event EventHandler<Exception> Error;
+        event EventHandler<Exception>? Error;
 
         /// <summary>
         /// 接続状態が変更された時に発生するイベント
         /// </summary>
-        event EventHandler<ConnectionStateChangedEventArgs> ConnectionStateChanged;
+        event EventHandler<ConnectionStateChangedEventArgs>? ConnectionStateChanged;
 
         /// <summary>
         /// カード読み取りを開始
@@ -128,6 +124,11 @@ namespace ICCardManager.Infrastructure.CardReader
         /// リーダーエラー発生時はFailを返し、呼び出し元でリーダーエラーと
         /// 「履歴ゼロ件（正常）」を明確に区別できる。
         /// </summary>
+        /// <remarks>
+        /// Issue #2301: 読み取り対象のカードが載っていない場合（読み取りの途中で離れた・別のカードへ載せ替えられた・
+        /// カード無し）も Fail（<see cref="ICCardManager.Common.Exceptions.CardReaderException.CardRemoved"/>）を返す。載っていない状態は「正常なゼロ件」ではない。
+        /// <c>Ok</c> の空リストは、対象のカードを最後まで読めて利用が本当に 0 件だった場合に限る。
+        /// </remarks>
         /// <param name="idm">カードのIDm</param>
         /// <returns>成功時は利用履歴詳細のリスト、失敗時はエラー情報</returns>
         Task<CardReadResult<IReadOnlyList<LedgerDetail>>> TryReadHistoryAsync(string idm);
@@ -142,6 +143,11 @@ namespace ICCardManager.Infrastructure.CardReader
         /// <summary>
         /// 接続状態を確認（ヘルスチェック）
         /// </summary>
+        /// <remarks>
+        /// Issue #2327: 現在、本体にこのメソッドの呼び出し元は無い。接続診断（<c>ConnectionDiagnosticsService</c>）は
+        /// <see cref="ConnectionState"/> を読むだけで、その値は実装の定期ヘルスチェック（<c>FelicaCardReader</c> は 10 秒周期）が
+        /// 更新する。即時に確かめたい処理を足すときはこのメソッドを使う。
+        /// </remarks>
         /// <returns>接続中の場合true</returns>
         Task<bool> CheckConnectionAsync();
 

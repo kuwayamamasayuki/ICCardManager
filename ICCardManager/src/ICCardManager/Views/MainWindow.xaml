@@ -1299,11 +1299,6 @@
                                         <Setter Property="Foreground" Value="{DynamicResource SuccessForegroundBrush}"/>
                                         <Setter Property="ToolTip" Value="カードリーダー接続中"/>
                                     </DataTrigger>
-                                    <DataTrigger Binding="{Binding CardReaderConnectionState}" Value="{x:Static cardReader:CardReaderConnectionState.Reconnecting}">
-                                        <Setter Property="Text" Value="🔄"/>
-                                        <Setter Property="Foreground" Value="{DynamicResource WarningForegroundBrush}"/>
-                                        <Setter Property="ToolTip" Value="再接続中..."/>
-                                    </DataTrigger>
                                 </Style.Triggers>
                             </Style>
                         </TextBlock.Style>
@@ -1319,14 +1314,6 @@
                                     <DataTrigger Binding="{Binding CardReaderConnectionState}" Value="{x:Static cardReader:CardReaderConnectionState.Connected}">
                                         <Setter Property="Text" Value="リーダー: 接続中"/>
                                         <Setter Property="Foreground" Value="{DynamicResource SuccessForegroundBrush}"/>
-                                    </DataTrigger>
-                                    <DataTrigger Binding="{Binding CardReaderConnectionState}" Value="{x:Static cardReader:CardReaderConnectionState.Reconnecting}">
-                                        <Setter Property="Text">
-                                            <Setter.Value>
-                                                <Binding Path="CardReaderReconnectAttempts" StringFormat="リーダー: 再接続中 ({0}/10)"/>
-                                            </Setter.Value>
-                                        </Setter>
-                                        <Setter Property="Foreground" Value="{DynamicResource WarningForegroundBrush}"/>
                                     </DataTrigger>
                                 </Style.Triggers>
                             </Style>

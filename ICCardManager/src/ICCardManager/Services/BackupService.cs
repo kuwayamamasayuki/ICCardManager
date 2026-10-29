@@ -361,6 +361,9 @@ namespace ICCardManager.Services
         /// バックアップ成功日時と実施PC名を settings に記録する（Issue #1689）
         /// </summary>
         /// <remarks>
+        /// 呼び出し元は自動バックアップ（<see cref="ExecuteAutoBackupAsync"/>）と
+        /// 手動バックアップ（<see cref="CreateManualBackupAsync"/>、Issue #2304）の 2 つ。
+        /// リストア前バックアップは記録しない（理由は <see cref="CreateManualBackupAsync"/> の remarks）。
         /// 記録の失敗はバックアップ本体の成功を取り消さない（記録は監視用の補助情報のため）。
         /// 失敗時は Warning ログのみ出して続行する。
         /// </remarks>
@@ -461,6 +464,42 @@ namespace ICCardManager.Services
         public virtual Task<bool> CreateBackupAsync(string backupFilePath)
         {
             return Task.Run(() => CreateBackup(backupFilePath));
+        }
+
+        /// <summary>
+        /// 手動バックアップを作成し、成功したら成功日時と実施PC名を記録する（Issue #2304）
+        /// </summary>
+        /// <param name="backupFilePath">バックアップファイルのパス（利用者が選んだ保存先）</param>
+        /// <returns>成功時はtrue、失敗時はfalse</returns>
+        /// <remarks>
+        /// <para>
+        /// バックアップの警告（<c>BackupStale</c>）は「システム管理画面（F6）で…手動バックアップを実行してください」と案内し、
+        /// F6 を閉じたときに再判定する。<see cref="CreateBackupAsync"/> は成功を記録しないため、
+        /// 案内どおりに手動バックアップを成功させても <c>last_backup_success_at</c> が変わらず、警告が消えなかった。
+        /// 作成と記録を 1 つのメソッドにまとめ、「作成に成功したときだけ記録する」を呼び出し元へ配らない。
+        /// </para>
+        /// <para>
+        /// 保存先が自動バックアップの保存先と違っても成功として数える。手動バックアップは保存先を利用者が選べ、
+        /// 警告の原因が自動バックアップの保存先の障害であるとき、案内どおりに実行できるのは別の保存先だけだからである。
+        /// 自動バックアップの失敗が続けば、最終成功から 7 日を超えた時点で警告は再び出る。
+        /// </para>
+        /// <para>
+        /// リストア前バックアップは <see cref="CreateBackupAsync"/> を使い、記録しない。
+        /// リストアが成功すると DB はリストア元に置き換わり、ここで書いた記録も消えるためである。
+        /// </para>
+        /// <para>
+        /// 記録の失敗はバックアップ本体の成功を取り消さない（<see cref="RecordBackupSuccessAsync"/> と同じ扱い）。
+        /// </para>
+        /// </remarks>
+        public virtual async Task<bool> CreateManualBackupAsync(string backupFilePath)
+        {
+            var success = await CreateBackupAsync(backupFilePath).ConfigureAwait(false);
+            if (success)
+            {
+                await RecordBackupSuccessAsync().ConfigureAwait(false);
+            }
+
+            return success;
         }
 
         /// <summary>

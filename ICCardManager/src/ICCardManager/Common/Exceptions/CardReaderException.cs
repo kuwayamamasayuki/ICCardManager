@@ -12,6 +12,19 @@ namespace ICCardManager.Common.Exceptions
     public class CardReaderException : AppException
     {
         /// <summary>
+        /// 読み取り対象の交通系ICカードがリーダーに載っていなかった（離れた・載せ替えられた）ことを示すエラーコード（Issue #2301）。
+        /// </summary>
+        internal const string CardRemovedErrorCode = "CR009";
+
+        /// <summary>
+        /// 読み取り対象のカードが載っていなかったための失敗か（<see cref="CardRemoved"/> で作られたか。Issue #2301）。
+        /// </summary>
+        /// <remarks>
+        /// カードリーダーの故障ではなく利用者の操作によるものなので、呼び出し元は「カードリーダーエラー」と表示しない。
+        /// </remarks>
+        public bool IsCardRemoved => ErrorCode == CardRemovedErrorCode;
+
+        /// <summary>
         /// カードリーダー未接続
         /// </summary>
         public static CardReaderException NotConnected(Exception? innerException = null)
@@ -117,19 +130,9 @@ namespace ICCardManager.Common.Exceptions
                 : new CardReaderException(message, userMessage, errorCode);
         }
 
-        /// <summary>
-        /// 再接続失敗
-        /// </summary>
-        public static CardReaderException ReconnectFailed(int attemptCount, Exception? innerException = null)
-        {
-            var message = $"Failed to reconnect to card reader after {attemptCount} attempts";
-            var userMessage = $"カードリーダーへの再接続に失敗しました（{attemptCount}回試行）。接続を確認して手動で再接続してください。";
-            const string errorCode = "CR008";
-
-            return innerException != null
-                ? new CardReaderException(message, userMessage, errorCode, innerException)
-                : new CardReaderException(message, userMessage, errorCode);
-        }
+        // CR008 は欠番（Issue #2327）。試行回数つきの「再接続失敗」（ReconnectFailed）は、どのカードリーダー実装も
+        // 回数つきの再接続を行わず本番の呼び出し元が無かったため、到達しない「再接続中」の状態と一緒に撤去した。
+        // 過去のログのエラーコードと取り違えないよう、CR008 は別の原因に再利用しない。
 
         /// <summary>
         /// カード取り外し（読み取り中にカードが離された）
@@ -137,8 +140,9 @@ namespace ICCardManager.Common.Exceptions
         public static CardReaderException CardRemoved(Exception? innerException = null)
         {
             const string message = "Card was removed during read operation";
-            const string userMessage = "カードの読み取り中にカードが離されました。カードをリーダーに置いたままお待ちください。";
-            const string errorCode = "CR009";
+            // Issue #2301: 返却の案内（トースト）と語彙・手順をそろえる
+            const string userMessage = "読み取りの途中で交通系ICカードが離されました。" + OperationRetryGuidance.RestartFromStaffCardKeepingCardOn;
+            const string errorCode = CardRemovedErrorCode;
 
             return innerException != null
                 ? new CardReaderException(message, userMessage, errorCode, innerException)

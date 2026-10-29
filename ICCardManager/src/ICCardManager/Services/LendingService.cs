@@ -666,6 +666,8 @@ namespace ICCardManager.Services
                     // 注意: Issue #1575 で LedgerRepository.InsertDetailsAsync(1 引数版) が外側 tx 中の再入を
                     // 自己検知する設計（DbContext.HasActiveTransactionScope）に変更されたため、ここで明示的に
                     // transaction を伝搬しなくてもデッドロックしない。
+                    // Issue #2323: 利用の行の名義は貸出者（カードを持ち出して使った職員）。返却者ではない —
+                    // 30秒ルールで別の職員が逆処理（返却）した場合も同じ（04_機能設計書 §2.4.1・§3.4）。
                     var ledgers = await CreateUsageLedgersAsync(
                         cardIdm, lentRecord.LenderIdm, lentRecord.StaffName ?? string.Empty, usageToRecord, skipDuplicateCheck).ConfigureAwait(false);
 
@@ -870,6 +872,14 @@ namespace ICCardManager.Services
         /// 返却時の残高解決カスケード。
         /// 優先順位: (1)カード直接読取値 > (2)作成ledger末尾 > (3)DB 直近 ledger(Issue #1139)。
         /// </summary>
+        /// <remarks>
+        /// (1) は読取値が **1 円以上のときだけ**使い、0 円なら (2)(3) へ進む。残額は履歴ブロックから実値で読む
+        /// （<c>FelicaHistoryBlockDecoder</c>）ので、0 円は「読めなかった」印ではなく実際の残額である。
+        /// それでも 0 円を除くのは、同じ返却で台帳行の残額を決める <see cref="CreateUsageLedgersAsync"/> の
+        /// <c>useCardBalance</c>（1 円以上の残額を持つ明細があるときだけカードの残額を使う）と根拠を揃えるため。
+        /// 実際に 0 円まで使い切った場合も、通常は作成した ledger の末尾が 0 円になるので結果は同じになる。
+        /// 境界は <c>LendingServiceHelperTests.ResolveReturnBalanceAsync_CardBalanceZero_*</c> が固定する（Issue #2326）。
+        /// </remarks>
         internal async Task<int> ResolveReturnBalanceAsync(
             List<LedgerDetail> detailList, List<Ledger> createdLedgers, string cardIdm)
         {
@@ -1030,7 +1040,8 @@ namespace ICCardManager.Services
         /// </summary>
         /// <remarks>
         /// 該当する行が無い（貸出後の利用だけを記録した）通常の返却では何も出さない。
-        /// チャージ・ポイント還元の行は数えない（利用者の名前で記録されないので、「返却者の利用として記録した」に当たらない）。
+        /// チャージ・ポイント還元の行は数えない（利用者の名前で記録されないので、「貸出者の利用として記録した」に当たらない）。
+        /// 利用の行の名義は返却者ではなく貸出レコードの貸出者（<see cref="PersistReturnAsync"/>。Issue #2323）。
         /// 残高不足の特殊処理でぴったりチャージした行は払出が 0 円になり、数えない（ログの件数が少なくなるだけで、記録には影響しない）。
         /// 貸出時刻が無い貸出レコードでは「貸出日より前」を決められないので出さない。
         /// IDm はマスク済みの値を受け取る（生の IDm をログ用のヘルパーへ渡さない。Issue #1852）。
@@ -1052,7 +1063,7 @@ namespace ICCardManager.Services
             }
 
             _logger.LogInformation(
-                "LendingService: 貸出日より前の利用を返却者の利用として記録しました" +
+                "LendingService: 貸出日より前の利用を貸出者の利用として記録しました" +
                 "（CardIdm={CardIdm}, 貸出日={LentDate}, 該当する台帳行={Count}件, 最も古い利用日={OldestDate}）",
                 maskedCardIdm, SqliteDateTimeFormat.ToDateText(lentDate), beforeLending.Count,
                 SqliteDateTimeFormat.ToDateText(beforeLending.Min(l => l.Date).Date));
@@ -1102,7 +1113,10 @@ namespace ICCardManager.Services
         /// <summary>
         /// ICカードの返却処理を実行し、利用履歴を記録します。
         /// </summary>
-        /// <param name="staffIdm">返却者の職員証IDm（16桁の16進数文字列）</param>
+        /// <param name="staffIdm">
+        /// 返却者の職員証IDm（16桁の16進数文字列）。登録済みの職員かの確認にだけ使い、台帳には記録しない
+        /// （利用の行の名義は貸出レコードの貸出者。Issue #2323）
+        /// </param>
         /// <param name="cardIdm">返却対象のICカードIDm（16桁の16進数文字列）</param>
         /// <param name="usageDetails">ICカードから読み取った利用履歴詳細（貸出時刻以降のみ使用）</param>
         /// <param name="skipDuplicateCheck">重複チェックをスキップするかどうか（既定値: false）</param>
@@ -1113,8 +1127,8 @@ namespace ICCardManager.Services
         /// <item><description>カードごとの排他ロックを取得（タイムアウト: 5秒）</description></item>
         /// <item><description>カード・職員・貸出レコードの存在確認</description></item>
         /// <item><description>貸出時刻以降の利用履歴のみを抽出</description></item>
-        /// <item><description>日付ごとに利用履歴レコードを作成（<see cref="SummaryGenerator"/> で摘要生成）</description></item>
-        /// <item><description>貸出レコードを更新（返却者・返却時刻を記録）</description></item>
+        /// <item><description>日付ごとに利用履歴レコードを作成（<see cref="SummaryGenerator"/> で摘要生成。名義は貸出レコードの貸出者）</description></item>
+        /// <item><description>貸出レコードを削除（履歴に「（貸出中）」を残さない）</description></item>
         /// <item><description>カードの貸出状態を解除（ここまでが単一トランザクション。コミットで返却が確定）</description></item>
         /// <item><description>30秒ルール用の処理情報を記録し <see cref="LendingResult.Success"/> を確定（Issue #1805）</description></item>
         /// <item><description>残額の解決と残額警告チェック（コミット後の付帯情報）</description></item>
@@ -1226,7 +1240,8 @@ namespace ICCardManager.Services
                 }
 
                 // Issue #2237: 貸出日より前の利用（ピッすいを通さずに使われた利用）を記録したことを本番ログへ残す。
-                // 台帳上は今回の返却者の利用として記録される（貸出日より前の利用を誰が使ったかはカードから分からない）。
+                // 台帳上は今回の貸出の貸出者の利用として記録される（返却者ではない。Issue #2323。
+                // 貸出日より前の利用を誰が使ったかはカードから分からない）。
                 // 後から「使っていない利用が自分の名前で載っている」と問い合わせがあったときに、
                 // 返却時に取り込んだ行であることをログから辿れるようにする。正常な返却（貸出後の利用だけ）では出さない。
                 LogUsageRecordedBeforeLending(IdmMasker.Mask(cardIdm), lentRecord.LentAt, result.CreatedLedgers);

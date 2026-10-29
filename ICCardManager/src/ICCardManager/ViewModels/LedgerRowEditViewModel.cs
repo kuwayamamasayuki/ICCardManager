@@ -426,6 +426,14 @@ namespace ICCardManager.ViewModels
         private DateTime _initialEditDate;
 
         /// <summary>
+        /// Editモードの初期の摘要と明細（Issue #2306）。バス停名を明細へ反映できない摘要を
+        /// 保存前に警告するため。Add モード（明細を持たない）では null。
+        /// </summary>
+        private string? _initialSummary;
+
+        private List<LedgerDetail>? _editDetails;
+
+        /// <summary>
         /// 自動計算を ON にする直前の残高（Issue #1740）。OFF に戻したときの復元用。
         /// </summary>
         private int? _balanceBeforeAutoBalance;
@@ -521,6 +529,9 @@ namespace ICCardManager.ViewModels
             IsAutoBalance = false; // 編集モードでは手動入力開始
             _editPreviousBalance = previousBalance;
             _initialEditDate = ledger.Date;
+            // Issue #2306: 摘要の代入（Validate が走る）より前に置く
+            _initialSummary = ledger.Summary;
+            _editDetails = ledger.Details;
             PreviousBalance = previousBalance ?? 0;
             UpdateAutoBalanceAvailability();
 
@@ -989,6 +1000,16 @@ namespace ICCardManager.ViewModels
                     "バス停名の括弧を半角「(」「)」に置き換えてください。");
             }
 
+            // Issue #2306: 摘要のバス停名を明細へ対応付けられない形（区間数とバス利用の件数が合わない等）は、
+            // 保存しても摘要だけが変わり、履歴を統合したときに明細から摘要が作り直されて編集が失われる。
+            // 無言で成功扱いにせず、保存前に知らせる（保存は止めない。#1914 と同じく正当な運用と区別できないため）。
+            // バス停名の部分を変えていない編集（鉄道の区間・備考だけを直した等）では出さない。
+            var unmappable = FindBusStopsUnmappableFailure();
+            if (unmappable.Failure != BusStopSyncFailure.None)
+            {
+                AddWarning(BuildBusStopUnmappableWarning(unmappable.Failure, unmappable.BusDetailCount));
+            }
+
             // Addモードの場合の日付チェック
             if (Mode == LedgerRowEditMode.Add && _allLedgers.Count > 0)
             {
@@ -1216,6 +1237,98 @@ namespace ICCardManager.ViewModels
             "再読み込みし、最新の内容を確認してからやり直してください。";
 
         /// <summary>
+        /// Issue #2306: 編集した摘要のバス停名を明細へ対応付けられないとき、その理由とこの履歴のバス利用の件数を返す。
+        /// 対応付けられる・バス停名の部分を変えていない・Add モードのときは <see cref="BusStopSyncFailure.None"/>。
+        /// </summary>
+        private (BusStopSyncFailure Failure, int BusDetailCount) FindBusStopsUnmappableFailure()
+        {
+            if (Mode != LedgerRowEditMode.Edit || _editDetails == null || Summary == _initialSummary)
+            {
+                return (BusStopSyncFailure.None, 0);
+            }
+
+            var currentBlocks = SummaryGenerator.ExtractBusStopBlocks(Summary);
+            var initialBlocks = SummaryGenerator.ExtractBusStopBlocks(_initialSummary);
+            if (currentBlocks.SequenceEqual(initialBlocks))
+            {
+                return (BusStopSyncFailure.None, 0);
+            }
+
+            // コードレビュー 3 回目で検出: 編集前にあったバスのブロックが 1 つも読み取れなくなった
+            // （半角括弧「バス(…)」・ラベルの削除等）。同期する名前が無いので書き戻されず、統合で明細から
+            // 摘要が作り直されて編集が失われる。括弧の不均衡（#1914）は上で別に警告済みなので重ねない。
+            if (currentBlocks.Count == 0 && initialBlocks.Count > 0)
+            {
+                var busDetailCount = SummaryGenerator.GetBusStopEmissionOrder(_editDetails).Count;
+                var unbalanced = SummaryGenerator.ContainsBusLabel(Summary)
+                    && !SummaryGenerator.HasBalancedFullWidthParentheses(Summary);
+                return busDetailCount > 0 && !unbalanced
+                    ? (BusStopSyncFailure.BusBlockMissing, busDetailCount)
+                    : (BusStopSyncFailure.None, 0);
+            }
+
+            var plan = SummaryGenerator.PlanBusStopSync(Summary, _editDetails);
+            var count = SummaryGenerator.GetBusStopEmissionOrder(_editDetails).Count;
+            if (plan.Outcome == BusStopSyncOutcome.Unmappable)
+            {
+                return (plan.Failure, count);
+            }
+
+            // コードレビュー 5 回目で検出: バス停名の並びだけを変えた編集（往復の向きを逆に書いた等）は、
+            // 並べ替えの守りで書き戻されず、無警告のまま摘要だけが保存されて次の統合で戻る。
+            // 旧生成器の並びを作り直しどおりに戻す編集は、作り直しとの一致の守りで先に返るのでここへ来ない。
+            return plan.SuppressedReorder
+                ? (BusStopSyncFailure.ReorderOnly, count)
+                : (BusStopSyncFailure.None, 0);
+        }
+
+        /// <summary>
+        /// Issue #2306: バス停名を明細へ反映できない摘要の警告文言（「何が」「なぜ」「どうすれば」の 3 要素）。
+        /// </summary>
+        /// <remarks>
+        /// 理由ごとに「なぜ」と「どうすれば」を出し分ける（コードレビューで検出）。件数が合っていても
+        /// 往路と復路が隣り合わない往復は反映できず、その場合に「区間の数が合わない」「往復は … の形で」と
+        /// 案内すると、事実と違う理由と、いま入力した形そのものを示すことになる。
+        /// どの理由でも「往復の表記を使わず、利用 1 件ごとに区切って書けば反映できる」ことは共通して案内する。
+        /// </remarks>
+        internal static string BuildBusStopUnmappableWarning(BusStopSyncFailure failure, int busDetailCount)
+        {
+            var what = $"摘要のバス停名を、この履歴のバス利用（{busDetailCount}件）へ反映できません。";
+            var why = failure switch
+            {
+                BusStopSyncFailure.RoundTripNotAdjacent =>
+                    "往復の相手に当たるバス利用が続いていない離れた位置にあるため、往復の表記ではどの利用のバス停名か決められず、",
+                BusStopSyncFailure.RoundTripOnSingleUsage =>
+                    "バス利用が1件だけなのに往復（2件分）の表記になっているため、",
+                BusStopSyncFailure.MalformedRoundTrip =>
+                    "往復の表記の前が「乗車～降車」の形（乗車と降車を「～」1つでつなぐ）になっていないため、",
+                BusStopSyncFailure.BusBlockMissing =>
+                    $"摘要に「{SummaryGenerator.BusLabel}（…）」の形（全角の括弧）のバス停名が見つからないため、",
+                BusStopSyncFailure.ReorderOnly =>
+                    "バス停名の並びだけが明細の利用の順と違い、どの利用のバス停名を直したのか決められないため明細へ反映できず、",
+                _ => "バス停名の区間の数が利用の件数と合わないため、",
+            };
+            var consequence = "このまま保存すると履歴を統合したときに編集前のバス停名へ戻ります。";
+            // 往復の接尾辞を空に設定した組織では往復の表記そのものが無いので、往復には触れない
+            var roundTripSuffix = SummaryGenerator.RoundTripSuffix;
+            var how = failure switch
+            {
+                BusStopSyncFailure.CountMismatch when !string.IsNullOrWhiteSpace(roundTripSuffix) =>
+                    $"行きと帰りが1件ずつで続けて乗った往復は「乗車～降車{roundTripSuffix}」とまとめて書けます。" +
+                    "それ以外は、バス利用1件ごとに「乗車～降車」を利用した順に「、」で区切って入力してください。",
+                BusStopSyncFailure.CountMismatch =>
+                    "バス利用1件ごとに「乗車～降車」を利用した順に「、」で区切って入力してください。",
+                BusStopSyncFailure.ReorderOnly =>
+                    "明細どうしのバス停名を入れ替えることはこの画面ではできないため、バス停名は利用した順に並べて入力してください。",
+                BusStopSyncFailure.BusBlockMissing =>
+                    $"バス停名は「{SummaryGenerator.BusLabel}（乗車～降車）」のように全角の括弧で囲み、" +
+                    "バス利用1件ごとに「乗車～降車」を利用した順に「、」で区切って入力してください。",
+                _ => "往復の表記を使わず、バス利用1件ごとに「乗車～降車」を利用した順に「、」で区切って入力してください。",
+            };
+            return what + why + consequence + how;
+        }
+
+        /// <summary>
         /// 摘要からバス停名を抽出してDetail.BusStopsに同期する（Issue #983）
         /// </summary>
         /// <remarks>
@@ -1228,42 +1341,13 @@ namespace ICCardManager.ViewModels
         /// </returns>
         private async Task<bool> SyncBusStopsFromSummaryAsync(Ledger ledger, SQLiteTransaction transaction)
         {
-            // Issue #1904: バス停名（摘要中の出現順）との位置対応付けは、バス明細を
-            // 生成側の出力順（GetBusStopEmissionOrder）で並べて初めて成立する
-            //（並び順の定義を消費側に書き写さない。LedgerMergeService.SyncBusStopsFromSummary と同じ）
-            var busDetails = SummaryGenerator.GetBusStopEmissionOrder(ledger.Details);
-            if (busDetails.Count == 0)
-            {
-                return true;
-            }
-
-            // Issue #1818: 抽出パターンは組織設定 BusLabel から導出する
-            var blocks = SummaryGenerator.ExtractBusStopBlocks(ledger.Summary);
-            if (blocks.Count == 0)
-            {
-                return true;
-            }
-
-            var busStopUpdates = new List<(int SequenceNumber, string BusStops)>();
-
-            if (busDetails.Count == 1)
-            {
-                // 先頭ブロックのみ書き戻す（従来挙動）。複数ブロックの結合テキストを
-                // 1 明細へ書き込むと「A～B、C～D」となり ParseBusRoute で解析できない
-                busStopUpdates.Add((busDetails[0].SequenceNumber, blocks[0]));
-            }
-            else
-            {
-                // 複数件のバス利用: 「、」で分割してDetailに対応付け
-                var parts = string.Join("、", blocks).Split('、');
-                if (parts.Length == busDetails.Count)
-                {
-                    for (int i = 0; i < parts.Length; i++)
-                    {
-                        busStopUpdates.Add((busDetails[i].SequenceNumber, parts[i]));
-                    }
-                }
-            }
+            // Issue #2306: 対応付け（生成側の出力順への位置対応・往復の展開・件数の照合）は
+            // SummaryGenerator.PlanBusStopSync ただ 1 つ（統合の LedgerMergeService.SyncBusStopsFromSummary と同じ）。
+            // 対応付けられない形（Unmappable）は書き戻さない。保存前に Validate が警告している。
+            var plan = SummaryGenerator.PlanBusStopSync(ledger.Summary, ledger.Details);
+            var busStopUpdates = plan.Assignments
+                .Select(a => (a.Detail.SequenceNumber, a.BusStops))
+                .ToList();
 
             if (busStopUpdates.Count == 0)
             {
