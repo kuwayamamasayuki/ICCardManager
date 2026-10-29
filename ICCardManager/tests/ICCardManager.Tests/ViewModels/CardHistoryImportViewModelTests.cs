@@ -345,6 +345,88 @@ public sealed class CardHistoryImportViewModelTests : IDisposable
     }
 
     [Fact]
+    public async Task 今日の日付の手入力の行があれば今日の利用を一覧に出さず_案内に未来の日付を出さないこと()
+    {
+        // Issue #2303: 今日の利用を手入力の行（明細なし）で記録済み。取り込む範囲の下限は明日になるが、案内は今日の日付で示す
+        await _ledgerRepository.InsertAsync(new Ledger
+        {
+            CardIdm = TargetIdm,
+            Date = Now.Date,
+            Summary = "鉄道（博多～天神）",
+            Expense = 210,
+            Balance = 4790,
+        });
+        SetupCard(balance: 4790, Usage(Now.Date, 4790));
+        var vm = CreateViewModel();
+        vm.Start();
+
+        await vm.HandleCardReadAsync(TargetIdm);
+
+        vm.Rows.Should().BeEmpty("今日の利用は手入力の行と二重になる");
+        vm.StatusMessage.Should().Be(CardHistoryImportViewModel.BuildNothingToImportMessage(Now.Date));
+        vm.StatusMessage.Should().Contain("2026/09/20 以降").And.NotContain("2026/09/21", "明日（未来）の日付を案内しない");
+        vm.StatusMessage.Should().NotContain("未来の日付", "今日の日付の行は打ち間違いではない");
+    }
+
+    [Fact]
+    public async Task 導入行の日付が未来なら_導入行より前の利用を補うよう案内しないこと()
+    {
+        // 導入行の日付が登録日より後のカード（3 月登録の「前年度より繰越」など）。導入行より前の利用は導入行の残高に含める扱いで、
+        // 「今日より前の利用を CSV インポート・履歴の追加で補う」と案内すると二重に計上させる
+        // フィクスチャの導入行（9/1 の新規購入）を、未来の日付の「前年度より繰越」に置き換える
+        foreach (var row in await _ledgerRepository.GetByDateRangeAsync(TargetIdm, new DateTime(2026, 1, 1), new DateTime(2026, 12, 31)))
+        {
+            await _ledgerRepository.DeleteAsync(row.Id);
+        }
+
+        var introductionDate = new DateTime(2026, 10, 10);
+        await _ledgerRepository.InsertAsync(new Ledger
+        {
+            CardIdm = TargetIdm,
+            Date = introductionDate,
+            Summary = SummaryGenerator.GetCarryoverFromPreviousYearSummary(),
+            Income = 4790,
+            Balance = 4790,
+        });
+        SetupCard(balance: 4580, Usage(Now.Date, 4580));
+        var vm = CreateViewModel();
+        vm.Start();
+
+        await vm.HandleCardReadAsync(TargetIdm);
+
+        vm.Rows.Should().BeEmpty();
+        vm.StatusMessage.Should().Be(CardHistoryImportViewModel.BuildNothingToImportMessage(Now.Date, null, introductionDate));
+        vm.StatusMessage.Should().Contain("導入行の日付（2026/10/10）より前の利用は");
+        vm.StatusMessage.Should().NotContain("CSVインポート", "導入行より前の利用を補わせない").And.NotContain("2026/09/20 以降");
+    }
+
+    [Fact]
+    public async Task 手入力の行の日付が未来なら_その行の日付を確かめるよう案内すること()
+    {
+        // 手入力の行の日付を未来へ打ち間違えると、その日までの利用が記録済みとみなされて何も取り込めない。
+        // 案内の日付（今日）だけでは原因に気付けないので、行の日付を示して確かめさせる
+        var futureDate = new DateTime(2026, 10, 5);
+        await _ledgerRepository.InsertAsync(new Ledger
+        {
+            CardIdm = TargetIdm,
+            Date = futureDate,
+            Summary = "鉄道（博多～天神）",
+            Expense = 210,
+            Balance = 4790,
+        });
+        SetupCard(balance: 4790, Usage(Now.Date, 4790));
+        var vm = CreateViewModel();
+        vm.Start();
+
+        await vm.HandleCardReadAsync(TargetIdm);
+
+        vm.Rows.Should().BeEmpty();
+        vm.StatusMessage.Should().Be(CardHistoryImportViewModel.BuildNothingToImportMessage(Now.Date, futureDate));
+        vm.StatusMessage.Should().Contain("未来の日付（2026/10/05）の行").And.Contain("すべて記録済みとみなしています");
+        vm.StatusMessage.Should().NotContain("2026/09/20 以降", "今日より前の利用も記録済みとみなしているので、今日以降に限ったように読ませない");
+    }
+
+    [Fact]
     public async Task 貸出中のカードは理由を案内して取り込まないこと()
     {
         await _cardRepository.UpdateLentStatusAsync(TargetIdm, true, Now, null);
@@ -545,6 +627,8 @@ public sealed class CardHistoryImportViewModelTests : IDisposable
             CardHistoryImportViewModel.BuildReadFailedMessage(),
             CardHistoryImportViewModel.BuildNothingToImportMessage(new DateTime(2026, 9, 1)),
             CardHistoryImportViewModel.BuildNothingToImportMessage(null),
+            CardHistoryImportViewModel.BuildNothingToImportMessage(new DateTime(2026, 9, 20), new DateTime(2026, 10, 5)),
+            CardHistoryImportViewModel.BuildNothingToImportMessage(new DateTime(2026, 9, 20), null, new DateTime(2026, 10, 10)),
             CardHistoryImportViewModel.BuildBlockedMessage(UsageImportBlockReason.CardIsLent, CardName),
             CardHistoryImportViewModel.BuildBlockedMessage(UsageImportBlockReason.NoBaseline, CardName),
             CardHistoryImportViewModel.BuildBlockedMessage(UsageImportBlockReason.CardNotInOperation, CardName),

@@ -67,6 +67,100 @@ namespace ICCardManager.Services
         /// シリアライズできないため、キーをstring型にしている。
         /// </remarks>
         public Dictionary<string, int> DetailOriginalLedgerMap { get; set; } = new();
+
+        /// <summary>
+        /// Issue #2302: Detail SequenceNumber → 統合した時点の明細の内容。
+        /// <see cref="DetailOriginalLedgerMap"/> と同じキーを持つ。
+        /// </summary>
+        /// <remarks>
+        /// 明細の保存（<c>ReplaceDetailsAsync</c> の DELETE + INSERT）は、統合先の明細が表の末尾にあると
+        /// <b>同じ統合先のまま同じ id を別の内容で振り直す</b>（id は <c>max(id)+1</c> で再利用される）。
+        /// id と所属だけでは「統合後に編集された」ことを検出できないため、取り消しの前に内容を照合する。
+        /// この項目を持たない（Issue #2302 より前に保存した）Undo データでは <c>null</c> になり、
+        /// 照合を行わない（id と所属による従来のガードだけが働く）。
+        /// </remarks>
+        public Dictionary<string, LedgerDetailSnapshot>? DetailSnapshots { get; set; }
+
+        /// <summary>
+        /// Issue #2302: 統合した直後の統合先の金額（受入・払出・残額）。取り消しの前に、いまの統合先と照合する。
+        /// </summary>
+        /// <remarks>
+        /// 同じ統合先へ後から別の統合を重ねると、統合先の金額が合算で変わる。後の統合の統合元が明細を持たない行だと
+        /// 明細の件数・内容は変わらず、統合履歴の有無で確かめる前提条件も、後の統合の履歴の保存（コミット後の別トランザクション。
+        /// Issue #1954）が済んでいない・失敗した・ID の順が逆転した場合は効かない。金額は統合のコミットと同時に変わるため、
+        /// 履歴の有無や順序に頼らずに検出できる（統合後の行編集で金額だけを直した場合も中止になる）。
+        /// 摘要（統合後のバス停名の入力が書き換える正当な経路がある）と同行者数は含めない。
+        /// この項目を持たない（Issue #2302 より前に保存した）Undo データでは <c>null</c> になり、照合を行わない。
+        /// </remarks>
+        public MergedTargetAmounts? MergedTargetAmounts { get; set; }
+    }
+
+    /// <summary>
+    /// Issue #2302: 統合した直後の統合先の金額（JSONシリアライズ用）。<see cref="LedgerMergeUndoData.MergedTargetAmounts"/> を参照。
+    /// </summary>
+    public class MergedTargetAmounts
+    {
+        public int Income { get; set; }
+        public int Expense { get; set; }
+        public int Balance { get; set; }
+    }
+
+    /// <summary>
+    /// Issue #2302: 統合した時点の明細の内容（JSONシリアライズ用）。
+    /// 取り消しの前に、いま同じ id を持つ明細が「同じ記録」かを確かめるために使う。
+    /// </summary>
+    /// <remarks>
+    /// <c>bus_stops</c> は照合に含めない。統合そのもの（摘要から明細へのバス停名の同期を同じトランザクションで書く。
+    /// Issue #2306）と統合後のバス停名の入力が、どちらも <c>UpdateDetailBusStopsAsync</c> で
+    /// id を保ったまま書き換える列で、書き換わっても「同じ利用の記録」であることに変わりはない
+    /// （取り消しは明細の内容に触れず、所属を戻すだけなので、統合時に同期した値も入力したバス停名もそのまま統合元へ移る。
+    /// 同期した値は統合元自身の摘要から取ったものなので、摘要を戻した統合元と明細は食い違わない）。
+    /// それ以外の列は、明細を id を保ったまま書き換える経路が無い（明細の編集はすべて作り直し）。
+    /// </remarks>
+    public class LedgerDetailSnapshot
+    {
+        public string? UseDateText { get; set; }
+        public string? EntryStation { get; set; }
+        public string? ExitStation { get; set; }
+        public int? Amount { get; set; }
+        public int? Balance { get; set; }
+        public bool IsCharge { get; set; }
+        public bool IsPointRedemption { get; set; }
+        public bool IsBus { get; set; }
+        public int? GroupId { get; set; }
+
+        public static LedgerDetailSnapshot FromDetail(LedgerDetail detail)
+        {
+            return new LedgerDetailSnapshot
+            {
+                UseDateText = SqliteDateTimeFormat.ToText(detail.UseDate),
+                EntryStation = detail.EntryStation,
+                ExitStation = detail.ExitStation,
+                Amount = detail.Amount,
+                Balance = detail.Balance,
+                IsCharge = detail.IsCharge,
+                IsPointRedemption = detail.IsPointRedemption,
+                IsBus = detail.IsBus,
+                GroupId = detail.GroupId
+            };
+        }
+
+        /// <summary>
+        /// <paramref name="detail"/> が、このスナップショットを取った明細と同じ内容かどうか。
+        /// 駅名の null と空文字は同じ「未設定」として比べる（保存の経路によってどちらにもなり得るため）。
+        /// </summary>
+        public bool Matches(LedgerDetail detail)
+        {
+            return UseDateText == SqliteDateTimeFormat.ToText(detail.UseDate)
+                && string.Equals(EntryStation ?? string.Empty, detail.EntryStation ?? string.Empty, StringComparison.Ordinal)
+                && string.Equals(ExitStation ?? string.Empty, detail.ExitStation ?? string.Empty, StringComparison.Ordinal)
+                && Amount == detail.Amount
+                && Balance == detail.Balance
+                && IsCharge == detail.IsCharge
+                && IsPointRedemption == detail.IsPointRedemption
+                && IsBus == detail.IsBus
+                && GroupId == detail.GroupId;
+        }
     }
 
     /// <summary>
@@ -253,17 +347,24 @@ namespace ICCardManager.Services
             {
                 OriginalTarget = LedgerSnapshot.FromLedger(target),
                 DeletedSources = sources.Select(LedgerSnapshot.FromLedger).ToList(),
-                DetailOriginalLedgerMap = new Dictionary<string, int>()
+                DetailOriginalLedgerMap = new Dictionary<string, int>(),
+                DetailSnapshots = new Dictionary<string, LedgerDetailSnapshot>()
             };
 
             // DetailのSequenceNumber→元のLedgerIDマッピングを構築
+            // Issue #2302: 同時に統合した時点の明細の内容も残す。取り消しは id と所属に加えて内容も照合し、
+            // 統合後の編集で同じ id が別の内容で振り直された明細を統合元へ移さない。
+            // 下の SyncBusStopsFromSummary より前に取る（統合が手を加える前の明細を残す。同期は明細の値を書き換え、
+            // Issue #2306 以降はその値を DB へも書くので、順序を逆にすると取り消し用データが統合前の記録でなくなる）
             foreach (var ledger in ledgers)
             {
                 foreach (var detail in ledger.Details)
                 {
                     if (detail.SequenceNumber > 0)
                     {
-                        undoData.DetailOriginalLedgerMap[detail.SequenceNumber.ToString(CultureInfo.InvariantCulture)] = ledger.Id;
+                        var key = detail.SequenceNumber.ToString(CultureInfo.InvariantCulture);
+                        undoData.DetailOriginalLedgerMap[key] = ledger.Id;
+                        undoData.DetailSnapshots[key] = LedgerDetailSnapshot.FromDetail(detail);
                     }
                 }
             }
@@ -347,6 +448,14 @@ namespace ICCardManager.Services
             // （DB 側は MergeLedgersAsync が ledger_detail の ledger_id を付け替えて全件を移す）。
             // 明細まで含めて記録する #1959 の是正は BeforeData 側だけで、対側が粗いままだった。
             target.Details = chronologicalDetails.ToList();
+
+            // Issue #2302: 統合した直後の統合先の金額を取り消し用データへ残す（MergeLedgersAsync が SET する値そのもの）
+            undoData.MergedTargetAmounts = new MergedTargetAmounts
+            {
+                Income = target.Income,
+                Expense = target.Expense,
+                Balance = target.Balance
+            };
 
             // 説明テキスト（UI表示用）
             var description = $"{DisplayFormatters.FormatDate(beforeLedgers[0].Date)} {string.Join(" + ", originalSummaryTexts)}";
@@ -458,6 +567,28 @@ namespace ICCardManager.Services
                 // 案内どおりの再実行で統合元が二重に INSERT された（月次帳票の二重計上）。
                 using (var scope = await _dbContext.BeginTransactionAsync().ConfigureAwait(false))
                 {
+                    // Issue #2302: 同じ統合先へ後から別の統合を重ねているなら、後の統合から順に取り消す。
+                    // 先の統合を取り消すと統合先は先の統合の前の金額・摘要へ戻り、後の統合で合算した分が台帳から消える。
+                    // 明細の件数・内容の照合（UnmergeLedgersCore）は、後の統合の統合元が明細を持たない行（手入力の行など）だと
+                    // 件数が変わらないため検出できない。統合履歴そのもので前提条件として確かめる（重ねた統合の案内を出すため）。
+                    // 書き込みと同じトランザクション（BEGIN IMMEDIATE）で確かめるので、この判定の後に統合履歴が増えることは無い。
+                    // ただし統合履歴の保存は統合のコミット後の別トランザクション（#1954）なので、他 PC の統合がコミット済みで
+                    // 履歴が未保存・保存に失敗した・ID の順が逆転した場合はここでは検出できない。その形は統合直後の金額の照合
+                    // （UnmergeLedgersCore。LedgerMergeUndoData.MergedTargetAmounts）が塞ぐ
+                    if (await _ledgerRepository.HasLaterUndoableMergeOnSameTargetAsync(mergeHistoryId, entry.TargetLedgerId, scope.Transaction)
+                            .ConfigureAwait(false))
+                    {
+                        _logger.LogWarning(
+                            "Unmerge aborted: a later undoable merge onto ledger {TargetId} exists after history {HistoryId}",
+                            entry.TargetLedgerId, mergeHistoryId);
+                        scope.Rollback();
+                        return new LedgerMergeResult
+                        {
+                            Success = false,
+                            ErrorMessage = StackedMergeUnmergeErrorMessage
+                        };
+                    }
+
                     // Issue #2265: 監査ログの「変更前」は、取り消す直前の統合先（明細を含む）を同じトランザクションの中で
                     // DB から読み直した別インスタンスにする（#1959。書き換えと同じインスタンスを写すと変更前が変更後になる）。
                     // 読めない＝統合先が統合後に削除された競合で、復元も 0 行になるため同じ失敗として扱う
@@ -477,7 +608,10 @@ namespace ICCardManager.Services
                             Success = false,
                             // 復元の 0 行は「Undo データが指す明細・統合先がもう無い」。統合後の編集（明細の
                             // 保存は DELETE + INSERT で id が変わる）・分割・削除、または他 PC の先行取り消し。
+                            // Issue #2302: 統合直後の金額の照合で中止した場合（後の統合の履歴が無い・保存に失敗した等）も
+                            // この文言になるため「別の統合が重なった」も原因として挙げる
                             ErrorMessage = "統合の取り消しに失敗しました。統合後にこの履歴の内容が編集・分割・削除されたか、" +
+                                           "この履歴へ別の統合が重なったか、" +
                                            "他のPCまたは他の操作で先に取り消された可能性があります。" +
                                            "画面を最新の状態に更新して履歴を確認してください。"
                         };
@@ -540,6 +674,13 @@ namespace ICCardManager.Services
                 };
             }
         }
+
+        /// <summary>
+        /// Issue #2302: 同じ統合先へ後から重ねた統合を残したまま、先の統合を取り消そうとして中止したときの文言。
+        /// </summary>
+        internal const string StackedMergeUnmergeErrorMessage =
+            "統合の取り消しに失敗しました。この統合の後に、同じ履歴へ別の統合が重なっています。" +
+            "一覧で新しい方の統合を先に取り消してから、この統合をもう一度取り消してください。";
 
         /// <summary>
         /// 元に戻せる統合履歴の一覧を取得

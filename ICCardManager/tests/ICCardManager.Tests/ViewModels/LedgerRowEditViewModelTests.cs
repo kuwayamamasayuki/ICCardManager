@@ -608,45 +608,271 @@ public class LedgerRowEditViewModelTests : IDisposable
     }
 
     /// <summary>
-    /// Issue #1303: 該当氏名の職員がリストに存在しない場合は SelectedStaff が null のままになることを確認
+    /// Issue #1303 / #2300: 該当氏名の職員がリストに存在しない場合は、その利用者をこの行だけの選択肢として
+    /// 一覧の先頭へ加えて選択することを確認（旧仕様は SelectedStaff=null で、保存すると氏名が消えた）
     /// </summary>
     [Fact]
-    public async Task InitializeForEdit_LenderIdmNullAndStaffNameNotInList_LeavesSelectedStaffNull()
+    public async Task InitializeForEdit_LenderIdmNullAndStaffNameNotInList_SelectsUnlistedStaffEntry()
     {
         // Arrange
+        await InitializeForEditWithStaffAsync(lenderIdm: null, staffName: UnlistedStaffName);
+
+        // Assert
+        _viewModel.SelectedStaff.Should().NotBeNull();
+        _viewModel.SelectedStaff!.Name.Should().Be(LedgerRowEditViewModel.FormatUnlistedStaffLabel(UnlistedStaffName, null));
+        _viewModel.IsUnlistedStaffSelected.Should().BeTrue();
+        _viewModel.StaffList.Should().HaveCount(3, "在籍職員 2 名＋この行の一覧に無い利用者 1 名");
+        _viewModel.StaffList[0].Should().BeSameAs(_viewModel.SelectedStaff, "一覧に無い利用者は先頭に置く");
+    }
+
+    #region Issue #2300: 一覧に無い利用者の行の保存
+
+    private const string UnlistedStaffName = "退職 次郎";
+    private const string UnlistedStaffIdm = "DDDD000000000009";
+
+    /// <summary>
+    /// 利用者の情報を指定した行（Id=20）で Edit 初期化する。UpdateAsync は成功を返す。
+    /// </summary>
+    private async Task InitializeForEditWithStaffAsync(string? lenderIdm, string? staffName)
+    {
         var ledger = new Ledger
         {
-            Id = 4,
+            Id = 20,
             CardIdm = TestCardIdm,
             Date = new DateTime(2026, 4, 17),
             Summary = "鉄道（博多～天神）",
-            Income = 0,
             Expense = 210,
             Balance = 800,
-            LenderIdm = null,
-            StaffName = "存在しない人物",
-            Note = string.Empty
+            LenderIdm = lenderIdm,
+            StaffName = staffName,
+            Note = "元の備考"
         };
-        _ledgerRepoMock.Setup(r => r.GetByIdAsync(4)).ReturnsAsync(ledger);
+        _ledgerRepoMock.Setup(r => r.GetByIdAsync(20)).ReturnsAsync(() => ICCardManager.Common.LedgerCloner.Clone(ledger));
+        _ledgerRepoMock.Setup(r => r.UpdateAsync(It.IsAny<Ledger>(), It.IsAny<SQLiteTransaction>())).ReturnsAsync(true);
         var dto = new LedgerDto
         {
-            Id = 4,
+            Id = 20,
             CardIdm = TestCardIdm,
             Date = ledger.Date,
             DateDisplay = "R8.4.17",
             Summary = ledger.Summary,
-            Income = 0,
+            Expense = ledger.Expense,
+            Balance = ledger.Balance,
+            StaffName = staffName
+        };
+        await _viewModel.InitializeForEditAsync(dto);
+    }
+
+    /// <summary>
+    /// 退職（論理削除）した職員の行で備考だけを直して保存しても、氏名と貸出者 IDm が保存前の値で残る（欠陥を突く側）
+    /// </summary>
+    [Fact]
+    public async Task SaveEdit_UnlistedStaff_EditOtherFieldOnly_PreservesStaffNameAndLenderIdm()
+    {
+        await InitializeForEditWithStaffAsync(UnlistedStaffIdm, UnlistedStaffName);
+
+        _viewModel.Note = "備考だけ直した";
+        await _viewModel.SaveCommand.ExecuteAsync(null);
+
+        _viewModel.IsSaved.Should().BeTrue();
+        _ledgerRepoMock.Verify(r => r.UpdateAsync(It.Is<Ledger>(l =>
+            l.Note == "備考だけ直した"
+            && l.StaffName == UnlistedStaffName
+            && l.LenderIdm == UnlistedStaffIdm
+        ), It.IsAny<SQLiteTransaction>()), Times.Once);
+    }
+
+    /// <summary>
+    /// CSV 取込等で IDm を持たない一覧に無い氏名の行は、IDm を空文字にせず null のまま、氏名を残して保存する
+    /// </summary>
+    [Fact]
+    public async Task SaveEdit_UnlistedStaffNameWithoutIdm_PreservesNameAndKeepsIdmNull()
+    {
+        await InitializeForEditWithStaffAsync(lenderIdm: null, staffName: UnlistedStaffName);
+
+        _viewModel.Expense = 230;
+        await _viewModel.SaveCommand.ExecuteAsync(null);
+
+        _ledgerRepoMock.Verify(r => r.UpdateAsync(It.Is<Ledger>(l =>
+            l.Expense == 230 && l.StaffName == UnlistedStaffName && l.LenderIdm == null
+        ), It.IsAny<SQLiteTransaction>()), Times.Once);
+    }
+
+    /// <summary>
+    /// 氏名を持たず IDm だけが残る行も、表示用の選択肢名（「氏名なし（職員証 …、職員一覧にいません）」）を氏名として書き込まず、IDm を残す
+    /// </summary>
+    [Fact]
+    public async Task SaveEdit_UnlistedStaffIdmWithoutName_PreservesIdmAndDoesNotWriteDisplayLabel()
+    {
+        await InitializeForEditWithStaffAsync(UnlistedStaffIdm, staffName: null);
+
+        _viewModel.IsUnlistedStaffSelected.Should().BeTrue();
+        _viewModel.DisplayStaffNamePreview.Should().Be(ICCardManager.Common.StaffNameFormatter.Format(null, 0), "表示用の選択肢名を氏名欄のプレビューに出さない");
+        await _viewModel.SaveCommand.ExecuteAsync(null);
+
+        _ledgerRepoMock.Verify(r => r.UpdateAsync(It.Is<Ledger>(l =>
+            l.LenderIdm == UnlistedStaffIdm && l.StaffName == null
+        ), It.IsAny<SQLiteTransaction>()), Times.Once);
+    }
+
+    /// <summary>
+    /// 一覧に無い利用者を「×」でクリアして保存した場合は、従来どおり氏名・IDm とも null になる（上の保存と対）
+    /// </summary>
+    [Fact]
+    public async Task SaveEdit_UnlistedStaff_Cleared_WritesNull()
+    {
+        await InitializeForEditWithStaffAsync(UnlistedStaffIdm, UnlistedStaffName);
+
+        _viewModel.ClearStaffCommand.Execute(null);
+        _viewModel.IsUnlistedStaffSelected.Should().BeFalse();
+        await _viewModel.SaveCommand.ExecuteAsync(null);
+
+        _ledgerRepoMock.Verify(r => r.UpdateAsync(It.Is<Ledger>(l =>
+            l.StaffName == null && l.LenderIdm == null
+        ), It.IsAny<SQLiteTransaction>()), Times.Once);
+    }
+
+    /// <summary>
+    /// 一覧に無い利用者から別の職員へ選び直した場合は、その職員の IDm・氏名になる
+    /// </summary>
+    [Fact]
+    public async Task SaveEdit_UnlistedStaff_ReselectedListedStaff_WritesSelectedStaff()
+    {
+        await InitializeForEditWithStaffAsync(UnlistedStaffIdm, UnlistedStaffName);
+
+        _viewModel.SelectedStaff = _staffB;
+        _viewModel.IsUnlistedStaffSelected.Should().BeFalse();
+        await _viewModel.SaveCommand.ExecuteAsync(null);
+
+        _ledgerRepoMock.Verify(r => r.UpdateAsync(It.Is<Ledger>(l =>
+            l.StaffName == _staffB.Name && l.LenderIdm == _staffB.StaffIdm
+        ), It.IsAny<SQLiteTransaction>()), Times.Once);
+    }
+
+    /// <summary>
+    /// 一覧に無い利用者 → 別の職員 → 一覧に無い利用者へ戻して保存すると、行に記録されていた値に戻る
+    /// </summary>
+    [Fact]
+    public async Task SaveEdit_UnlistedStaff_ReselectedAndBack_PreservesOriginalValues()
+    {
+        await InitializeForEditWithStaffAsync(UnlistedStaffIdm, UnlistedStaffName);
+        var unlisted = _viewModel.SelectedStaff;
+
+        _viewModel.SelectedStaff = _staffB;
+        _viewModel.SelectedStaff = unlisted;
+        _viewModel.IsUnlistedStaffSelected.Should().BeTrue();
+        await _viewModel.SaveCommand.ExecuteAsync(null);
+
+        _ledgerRepoMock.Verify(r => r.UpdateAsync(It.Is<Ledger>(l =>
+            l.StaffName == UnlistedStaffName && l.LenderIdm == UnlistedStaffIdm
+        ), It.IsAny<SQLiteTransaction>()), Times.Once);
+    }
+
+    /// <summary>
+    /// 一覧に無い利用者のまま保存するときは、保存直前に読み直した行の利用者を残す
+    /// （共有フォルダモードで開いている間に別の PC が利用者を直した場合に、開いたときの古い値で上書きしない）
+    /// </summary>
+    [Fact]
+    public async Task SaveEdit_UnlistedStaff_KeepsStaffReReadAtSave()
+    {
+        await InitializeForEditWithStaffAsync(UnlistedStaffIdm, UnlistedStaffName);
+        // 開いた後に別の PC が利用者を在籍職員 A へ直した
+        _ledgerRepoMock.Setup(r => r.GetByIdAsync(20)).ReturnsAsync(new Ledger
+        {
+            Id = 20,
+            CardIdm = TestCardIdm,
+            Date = new DateTime(2026, 4, 17),
+            Summary = "鉄道（博多～天神）",
             Expense = 210,
             Balance = 800,
-            StaffName = "存在しない人物"
-        };
+            LenderIdm = _staffA.StaffIdm,
+            StaffName = _staffA.Name,
+            Note = "元の備考"
+        });
 
-        // Act
-        await _viewModel.InitializeForEditAsync(dto);
+        _viewModel.Note = "備考だけ直した";
+        await _viewModel.SaveCommand.ExecuteAsync(null);
 
-        // Assert
-        _viewModel.SelectedStaff.Should().BeNull();
+        _ledgerRepoMock.Verify(r => r.UpdateAsync(It.Is<Ledger>(l =>
+            l.Note == "備考だけ直した" && l.StaffName == _staffA.Name && l.LenderIdm == _staffA.StaffIdm
+        ), It.IsAny<SQLiteTransaction>()), Times.Once);
     }
+
+    /// <summary>
+    /// 氏名が空白だけで IDm も無い行は「利用者の記録なし」として扱い、選択肢を加えない。
+    /// 空白の氏名と IDm が残る行は「氏名なし（職員証 …）」の表示名になる（StaffNameFormatter.Format と同じく空白を氏名とみなさない）
+    /// </summary>
+    [Fact]
+    public async Task UnlistedStaff_WhitespaceName_TreatedAsNoName()
+    {
+        LedgerRowEditViewModel.FormatUnlistedStaffLabel(" ", UnlistedStaffIdm)
+            .Should().Be(LedgerRowEditViewModel.FormatUnlistedStaffLabel(null, UnlistedStaffIdm));
+
+        await InitializeForEditWithStaffAsync(lenderIdm: null, staffName: " ");
+
+        _viewModel.SelectedStaff.Should().BeNull();
+        _viewModel.StaffList.Should().HaveCount(2);
+    }
+
+    /// <summary>
+    /// 一覧に無い利用者の表示名は、ドロップダウンで在籍職員と見分けられる目印を付ける。
+    /// 氏名が無く IDm だけの行は、マスクした職員証の IDm を添えて誰の記録か見分けられるようにし、生の IDm は出さない
+    /// </summary>
+    [Fact]
+    public void FormatUnlistedStaffLabel_MarksUnlistedAndMasksIdm()
+    {
+        var named = LedgerRowEditViewModel.FormatUnlistedStaffLabel(UnlistedStaffName, UnlistedStaffIdm);
+        named.Should().StartWith(UnlistedStaffName).And.Contain("職員一覧にいません");
+        named.Should().NotContain(UnlistedStaffIdm, "氏名があれば IDm は添えない");
+
+        var idmOnly = LedgerRowEditViewModel.FormatUnlistedStaffLabel(null, UnlistedStaffIdm);
+        idmOnly.Should().Contain(ICCardManager.Infrastructure.Security.IdmMasker.Mask(UnlistedStaffIdm))
+            .And.Contain("職員一覧にいません");
+        idmOnly.Should().NotContain(UnlistedStaffIdm, "職員証の IDm は認証要素なので生で表示しない");
+    }
+
+    /// <summary>
+    /// 在籍職員の行では一覧に選択肢を足さず、注記も出さない（正当な動作を塞いでいない側）
+    /// </summary>
+    [Fact]
+    public async Task InitializeForEdit_ListedStaff_DoesNotAddUnlistedEntry()
+    {
+        await InitializeForEditWithStaffAsync(_staffA.StaffIdm, _staffA.Name);
+
+        _viewModel.SelectedStaff.Should().BeSameAs(_staffA);
+        _viewModel.IsUnlistedStaffSelected.Should().BeFalse();
+        _viewModel.StaffList.Should().HaveCount(2);
+    }
+
+    /// <summary>
+    /// 一覧に無い利用者の行でも「氏名欄の表示」プレビューは行の氏名から作る（同行者数の入力で確かめる）
+    /// </summary>
+    [Fact]
+    public async Task DisplayStaffNamePreview_UnlistedStaff_UsesRecordedName()
+    {
+        await InitializeForEditWithStaffAsync(UnlistedStaffIdm, UnlistedStaffName);
+
+        _viewModel.CompanionCount = 1;
+
+        _viewModel.DisplayStaffNamePreview.Should().Be(ICCardManager.Common.StaffNameFormatter.Format(UnlistedStaffName, 1));
+        _viewModel.DisplayStaffNamePreview.Should().StartWith(UnlistedStaffName);
+    }
+
+    /// <summary>
+    /// 一覧に無い利用者を選択肢に加えても、初期化直後は「未保存の変更あり」にならない（閉じる確認が出ない）
+    /// </summary>
+    [Fact]
+    public async Task InitializeForEdit_UnlistedStaff_DoesNotMarkUnsavedChanges()
+    {
+        await InitializeForEditWithStaffAsync(UnlistedStaffIdm, UnlistedStaffName);
+
+        _viewModel.BackCommand.Execute(null);
+
+        _viewModel.IsBackRequested.Should().BeTrue();
+        _dialogServiceMock.Verify(d => d.ShowWarningConfirmation(It.IsAny<string>(), It.IsAny<string>()), Times.Never);
+    }
+
+    #endregion
 
     #endregion
 
