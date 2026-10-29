@@ -144,29 +144,71 @@ public sealed class LendingServiceUsageImportTests : IDisposable
     }
 
     [Fact]
-    public void ResolveImportLowerBound_明細を持たない行の日付が未来なら今日を上限にすること()
+    public void ResolveImportLowerBound_今日の日付の明細を持たない行があれば明日を下限にすること()
     {
-        // 手で追加した行の日付の打ち間違い（未来）で、「未来の日付以降は記録済み」と案内しない
+        // Issue #2303: 今日の手入力の行（明細なし）は照合のキーを持たない。下限を今日で切り詰めると、
+        // 今日の利用が取り込み対象に入り、手入力の行と同じ利用を二重に記録する
         var result = LendingService.ResolveImportLowerBound(
             introductionDate: new DateTime(2026, 9, 1),
-            latestLedgerDate: new DateTime(2027, 9, 25),
-            latestLedgerDateWithoutDetails: new DateTime(2027, 9, 25),
+            latestLedgerDate: Now.Date,
+            latestLedgerDateWithoutDetails: Now.Date,
+            today: Now);
+
+        result.Should().Be(Now.Date.AddDays(1), "今日の利用は手入力の行で記録済みとみなす");
+    }
+
+    [Fact]
+    public void ResolveImportLowerBound_昨日の日付の明細を持たない行なら今日を下限にすること()
+    {
+        // 上の対。手入力の行が昨日以前なら、今日の利用は従来どおり取り込み対象に入る
+        var result = LendingService.ResolveImportLowerBound(
+            introductionDate: new DateTime(2026, 9, 1),
+            latestLedgerDate: Now.Date.AddDays(-1),
+            latestLedgerDateWithoutDetails: Now.Date.AddDays(-1),
             today: Now);
 
         result.Should().Be(Now.Date);
     }
 
     [Fact]
-    public void ResolveImportLowerBound_導入行が無く最新行の日付が未来なら今日を上限にすること()
+    public void ResolveImportLowerBound_明細を持たない行の日付が未来でも今日で切り詰めないこと()
     {
-        // 導入行が無いカードの最新行が、日付を打ち間違えた手入力の行（明細なし）だった
+        // Issue #2303: 切り詰めるのは案内に出す日付だけ（UsageImportPlan.NoticeLowerBound）。
+        // 取り込む範囲は、手で追加した行の日までの利用を記録済みとみなす規則のまま
+        var result = LendingService.ResolveImportLowerBound(
+            introductionDate: new DateTime(2026, 9, 1),
+            latestLedgerDate: new DateTime(2027, 9, 25),
+            latestLedgerDateWithoutDetails: new DateTime(2027, 9, 25),
+            today: Now);
+
+        result.Should().Be(new DateTime(2027, 9, 26));
+    }
+
+    [Fact]
+    public void ResolveImportLowerBound_導入行が無く明細を持つ最新行の日付が未来なら今日を上限にすること()
+    {
+        // 導入行が無いカードの最新行（明細あり）の日付を、行の編集で未来へ打ち間違えた。
+        // 明細を持つ行の利用は照合で除けるので、今日を下限にしても二重にならない
+        var result = LendingService.ResolveImportLowerBound(
+            introductionDate: null,
+            latestLedgerDate: new DateTime(2026, 12, 1),
+            latestLedgerDateWithoutDetails: null,
+            today: Now);
+
+        result.Should().Be(Now.Date, "下限が未来になってカードの利用をすべて捨てない");
+    }
+
+    [Fact]
+    public void ResolveImportLowerBound_導入行が無く最新行が未来の日付の明細を持たない行ならその翌日を下限にすること()
+    {
+        // Issue #2303: 明細を持たない行は照合で除けないので、今日で切り詰めると今日の利用を二重に記録し得る
         var result = LendingService.ResolveImportLowerBound(
             introductionDate: null,
             latestLedgerDate: new DateTime(2026, 12, 1),
             latestLedgerDateWithoutDetails: new DateTime(2026, 12, 1),
             today: Now);
 
-        result.Should().Be(Now.Date, "下限が未来になってカードの利用をすべて捨てない");
+        result.Should().Be(new DateTime(2026, 12, 2));
     }
 
     [Fact]
@@ -211,6 +253,133 @@ public sealed class LendingServiceUsageImportTests : IDisposable
         plan.LowerBound.Should().Be(new DateTime(2026, 9, 1));
         plan.DetailsToRecord.Select(d => d.UseDate).Should().Equal(
             new DateTime(2026, 9, 15), new DateTime(2026, 9, 10));
+    }
+
+    [Fact]
+    public async Task PlanUsageImportAsync_今日の日付の手入力の行があれば今日の利用を取り込み対象にしないこと()
+    {
+        // Issue #2303: 今日の利用を手入力の行（明細なし）で記録済み。カードにも同じ利用が残っている
+        await InsertIntroductionAsync(new DateTime(2026, 9, 1), balance: 5000);
+        await InsertManualRowAsync(Now.Date, balanceAfter: 4580);
+
+        var plan = await _service.PlanUsageImportAsync(TestCardIdm, new List<LedgerDetail>
+        {
+            Usage(Now.Date, balanceAfter: 4580),                   // 手入力の行と同じ利用
+            Usage(new DateTime(2026, 9, 10), balanceAfter: 4790),  // 手入力の行より前（記録済みとみなす）
+        });
+
+        plan.BlockReason.Should().Be(UsageImportBlockReason.None);
+        plan.DetailsToRecord.Should().BeEmpty("今日の利用は手入力の行と二重になる");
+        plan.LowerBound.Should().Be(Now.Date.AddDays(1));
+        plan.NoticeLowerBound.Should().Be(Now.Date, "案内に明日（未来）の日付を出さない");
+        plan.FutureDatedRowWithoutDetails.Should().BeNull("今日の日付の行は打ち間違いではない");
+    }
+
+    [Fact]
+    public async Task PlanUsageImportAsync_昨日の日付の手入力の行なら今日の利用を取り込み対象にすること()
+    {
+        // 上の対。手入力の行が昨日なら、今日の利用は未記録
+        await InsertIntroductionAsync(new DateTime(2026, 9, 1), balance: 5000);
+        await InsertManualRowAsync(Now.Date.AddDays(-1), balanceAfter: 4790);
+
+        var plan = await _service.PlanUsageImportAsync(TestCardIdm, new List<LedgerDetail>
+        {
+            Usage(Now.Date, balanceAfter: 4580),
+            Usage(Now.Date.AddDays(-1), balanceAfter: 4790),
+        });
+
+        plan.DetailsToRecord.Select(d => d.UseDate).Should().Equal(Now.Date);
+        plan.LowerBound.Should().Be(Now.Date);
+        plan.NoticeLowerBound.Should().Be(Now.Date);
+    }
+
+    [Fact]
+    public async Task PlanUsageImportAsync_手入力の行の日付が未来でも案内の下限は今日であること()
+    {
+        // 手で追加した行の日付の打ち間違い（未来）で、「未来の日付以降は記録済み」と案内しない
+        await InsertIntroductionAsync(new DateTime(2026, 9, 1), balance: 5000);
+        await InsertManualRowAsync(new DateTime(2026, 10, 5), balanceAfter: 4790);
+
+        var plan = await _service.PlanUsageImportAsync(TestCardIdm, new List<LedgerDetail>
+        {
+            Usage(Now.Date, balanceAfter: 4790),
+        });
+
+        plan.DetailsToRecord.Should().BeEmpty();
+        plan.LowerBound.Should().Be(new DateTime(2026, 10, 6));
+        plan.NoticeLowerBound.Should().Be(Now.Date);
+        plan.FutureDatedRowWithoutDetails.Should().Be(new DateTime(2026, 10, 5), "案内で未来の日付の行を確かめるよう促す");
+        plan.FutureIntroductionDate.Should().BeNull("下限を決めたのは導入行ではない");
+    }
+
+    [Fact]
+    public async Task PlanUsageImportAsync_導入行の日付のほうが遅ければ未来の日付の手入力の行を原因として示さないこと()
+    {
+        // 導入行の日付が登録日より後のカード（3 月登録の「前年度より繰越」など）。下限を決めたのは導入行で、手入力の行ではない
+        await InsertIntroductionAsync(new DateTime(2026, 10, 10), balance: 5000);
+        await InsertManualRowAsync(new DateTime(2026, 10, 5), balanceAfter: 4790);
+
+        var plan = await _service.PlanUsageImportAsync(TestCardIdm, new List<LedgerDetail>
+        {
+            Usage(Now.Date, balanceAfter: 4790),
+        });
+
+        plan.LowerBound.Should().Be(new DateTime(2026, 10, 10));
+        plan.FutureDatedRowWithoutDetails.Should().BeNull();
+        plan.FutureIntroductionDate.Should().Be(new DateTime(2026, 10, 10), "導入行より前の利用を取り込まない理由を案内する");
+        plan.NoticeLowerBound.Should().Be(Now.Date);
+    }
+
+    [Fact]
+    public async Task PlanUsageImportAsync_導入行の日付と手入力の行の翌日が並んだら導入行を原因として示すこと()
+    {
+        // 手入力の行（10/5）の翌日と導入行（10/6）が同じ日。手入力の行の日付を直しても下限は導入行のまま変わらない
+        await InsertIntroductionAsync(new DateTime(2026, 10, 6), balance: 5000);
+        await InsertManualRowAsync(new DateTime(2026, 10, 5), balanceAfter: 4790);
+
+        var plan = await _service.PlanUsageImportAsync(TestCardIdm, new List<LedgerDetail>
+        {
+            Usage(Now.Date, balanceAfter: 4790),
+        });
+
+        plan.LowerBound.Should().Be(new DateTime(2026, 10, 6));
+        plan.FutureDatedRowWithoutDetails.Should().BeNull();
+        plan.FutureIntroductionDate.Should().Be(new DateTime(2026, 10, 6));
+    }
+
+    [Fact]
+    public async Task PlanUsageImportAsync_導入行の日付が未来なら手入力の行が下限を押し上げても導入行を原因として示すこと()
+    {
+        // 導入行 10/10（未来）・手入力の行を 10/15 に打ち間違えた → 下限は 10/16。手入力の行を直しても下限は 10/10 で、
+        // カードの利用（今日以前）はすべてそれより前なので取り込めない。「行を直して取り込み直す」と案内しない
+        await InsertIntroductionAsync(new DateTime(2026, 10, 10), balance: 5000);
+        await InsertManualRowAsync(new DateTime(2026, 10, 15), balanceAfter: 4790);
+
+        var plan = await _service.PlanUsageImportAsync(TestCardIdm, new List<LedgerDetail>
+        {
+            Usage(Now.Date, balanceAfter: 4790),
+        });
+
+        plan.LowerBound.Should().Be(new DateTime(2026, 10, 16));
+        plan.FutureDatedRowWithoutDetails.Should().BeNull();
+        plan.FutureIntroductionDate.Should().Be(new DateTime(2026, 10, 10));
+        plan.NoticeLowerBound.Should().Be(Now.Date);
+    }
+
+    [Fact]
+    public async Task PlanUsageImportAsync_導入行の日付が今日以前なら導入行を原因として示さないこと()
+    {
+        // 上の 2 件の対。導入行で下限が決まっても今日以前なら、通常の案内（下限の日付以降は記録済み）でよい
+        await InsertIntroductionAsync(new DateTime(2026, 9, 1), balance: 5000);
+
+        var plan = await _service.PlanUsageImportAsync(TestCardIdm, new List<LedgerDetail>
+        {
+            Usage(new DateTime(2026, 8, 30), balanceAfter: 5000),
+        });
+
+        plan.LowerBound.Should().Be(new DateTime(2026, 9, 1));
+        plan.NoticeLowerBound.Should().Be(new DateTime(2026, 9, 1));
+        plan.FutureIntroductionDate.Should().BeNull();
     }
 
     [Fact]
@@ -463,6 +632,25 @@ public sealed class LendingServiceUsageImportTests : IDisposable
     }
 
     [Fact]
+    public async Task ImportUnrecordedUsageAsync_今日の日付の手入力の行と同じ利用を二重に記録しないこと()
+    {
+        // Issue #2303: 確定も計画と同じ下限で決める。今日の手入力の行（明細なし）があれば、今日の利用は記録しない
+        await InsertIntroductionAsync(new DateTime(2026, 9, 1), balance: 5000);
+        var manualId = await InsertManualRowAsync(Now.Date, balanceAfter: 4790);
+
+        var result = await _service.ImportUnrecordedUsageAsync(TestCardIdm, new List<LedgerDetail>
+        {
+            Usage(Now.Date, balanceAfter: 4790),
+        });
+
+        result.Success.Should().BeTrue();
+        result.CreatedLedgers.Should().BeEmpty();
+        (await GetUsageLedgersAsync()).Select(l => l.Id).Should().Equal(manualId);
+        (await _ledgerRepository.GetByIdAsync(manualId))!.Details.Should().BeEmpty("手入力の行へ明細を足さない");
+        (await GetLedgerLogsAsync()).Should().BeEmpty();
+    }
+
+    [Fact]
     public async Task ImportUnrecordedUsageAsync_カードのロックを取れなければ何も書かずに理由を返すこと()
     {
         // 同じカードの貸出・返却などが実行中（同じ PC の別の処理がロックを持っている）
@@ -562,6 +750,21 @@ public sealed class LendingServiceUsageImportTests : IDisposable
         });
         await _ledgerRepository.InsertDetailsAsync(id, new[] { Usage(date, balanceAfter) });
         return id;
+    }
+
+    /// <summary>明細を持たない利用の行（履歴の「追加」で手入力した行）</summary>
+    private async Task<int> InsertManualRowAsync(DateTime date, int balanceAfter)
+    {
+        return await _ledgerRepository.InsertAsync(new Ledger
+        {
+            CardIdm = TestCardIdm,
+            Date = date,
+            Summary = "鉄道（博多～天神）",
+            Expense = 210,
+            Balance = balanceAfter,
+            LenderIdm = TestStaffIdm,
+            StaffName = TestStaffName,
+        });
     }
 
     /// <summary>導入行・貸出中レコードを除いた、利用の台帳行（日付昇順）</summary>

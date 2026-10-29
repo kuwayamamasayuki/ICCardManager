@@ -15,6 +15,7 @@ using ICCardManager.Data;
 using ICCardManager.Data.Repositories;
 using ICCardManager.Infrastructure.Caching;
 using ICCardManager.Models;
+using ICCardManager.Services.Import;
 using ICCardManager.Services.Import.Parsers;
 using Microsoft.Extensions.Logging;
 
@@ -62,6 +63,22 @@ namespace ICCardManager.Services
                     existingCardIdms.Add(card.CardIdm);
                 }
 
+                // Issue #2307: 既存履歴の重複キーをカードごとに 1 回だけ読む。貸出中の行の判定（下のループ）と
+                // 新規分の重複チェック（取り込みの段）が同じ読み取り結果を使う
+                var existingKeysByCard = new Dictionary<string, HashSet<(string CardIdm, DateTime Date, string Summary, int Income, int Expense, int Balance)>>(StringComparer.OrdinalIgnoreCase);
+                async Task<HashSet<(string CardIdm, DateTime Date, string Summary, int Income, int Expense, int Balance)>> GetExistingKeysForCardAsync(string cardIdm)
+                {
+                    if (!existingKeysByCard.TryGetValue(cardIdm, out var keys))
+                    {
+                        // 検証の段（行ごとのループ）で読むため、この読み取りが例外になると、行エラー・残高の不一致の一覧の代わりに
+                        // 例外の文言（メソッド末尾の catch）だけが出る。読み取りの失敗は取り込みを続けられない状態なので、それでよい
+                        keys = await _ledgerRepository.GetExistingLedgerKeysAsync(new[] { cardIdm }).ConfigureAwait(false);
+                        existingKeysByCard[cardIdm] = keys;
+                    }
+
+                    return keys;
+                }
+
                 for (var i = 1; i < lines.Count; i++)
                 {
                     var lineNumber = i + 1;
@@ -84,28 +101,47 @@ namespace ICCardManager.Services
                     // 既存レコードの確認（IDがある場合）
                     var isUpdate = false;
                     Ledger? existingLedgerForUpdate = null;
+                    var existingLedger = parsed.LedgerId.HasValue
+                        ? await _ledgerRepository.GetByIdAsync(parsed.LedgerId.Value).ConfigureAwait(false)
+                        : null;
+                    if (parsed.LedgerId.HasValue && existingLedger != null)
+                    {
+                        // Issue #2262: ID が指す履歴と行のカードが食い違う行は取り込まない（下記 BuildLedgerCardMismatchError）
+                        var cardMismatch = BuildLedgerCardMismatchError(lineNumber, parsed.LedgerId.Value, existingLedger, parsed.CardIdm, allCards);
+                        if (cardMismatch != null)
+                        {
+                            errors.Add(cardMismatch);
+                            continue;
+                        }
+                    }
+
+                    // 変更の検出はプレビューと同じ関数で行う（経路ごとに別実装だと、貸出中の行を拒否するかが経路で食い違う。Issue #2307）
+                    var detectedChanges = new List<FieldChange>();
+                    if (existingLedger != null)
+                    {
+                        DetectLedgerChanges(existingLedger, parsed.Date, parsed.Summary, parsed.Income, parsed.Expense, parsed.Balance,
+                            parsed.StaffName, parsed.Note, parsed.CompanionCount, detectedChanges);
+                    }
+
+                    var hasChanges = detectedChanges.Count > 0;
+                    var duplicateKeyExists = existingLedger == null && skipExisting &&
+                        (await GetExistingKeysForCardAsync(parsed.CardIdm).ConfigureAwait(false))
+                            .Contains((parsed.CardIdm, parsed.Date, parsed.Summary, parsed.Income, parsed.Expense, parsed.Balance));
+
+                    // Issue #2307: 貸出中レコードを写した行は、通常の行として取り込まない（LedgerCsvLentRowPolicy の remarks）。
+                    // 台帳を変えない行（既存の行と全項目一致・ID の無い行で重複キーが一致してスキップ）は拒否しない
+                    var lentRowError = LedgerCsvLentRowPolicy.BuildError(lineNumber, parsed.Summary, existingLedger,
+                        leavesLedgerUnchanged: LeavesLedgerUnchanged(existingLedger, hasChanges, duplicateKeyExists));
+                    if (lentRowError != null)
+                    {
+                        errors.Add(lentRowError);
+                        continue;
+                    }
+
                     if (parsed.LedgerId.HasValue)
                     {
-                        var existingLedger = await _ledgerRepository.GetByIdAsync(parsed.LedgerId.Value).ConfigureAwait(false);
                         if (existingLedger != null)
                         {
-                            // Issue #2262: ID が指す履歴と行のカードが食い違う行は取り込まない（下記 BuildLedgerCardMismatchError）
-                            var cardMismatch = BuildLedgerCardMismatchError(lineNumber, parsed.LedgerId.Value, existingLedger, parsed.CardIdm, allCards);
-                            if (cardMismatch != null)
-                            {
-                                errors.Add(cardMismatch);
-                                continue;
-                            }
-
-                            var hasChanges = existingLedger.Summary != parsed.Summary ||
-                                            (existingLedger.StaffName ?? "") != parsed.StaffName ||
-                                            (existingLedger.Note ?? "") != parsed.Note ||
-                                            // Issue #1906: 列が無い旧形式 CSV（null）は「指定なし」なので変更として数えない
-                                            (parsed.CompanionCount.HasValue && existingLedger.CompanionCount != parsed.CompanionCount.Value) ||
-                                            existingLedger.Income != parsed.Income ||
-                                            existingLedger.Expense != parsed.Expense ||
-                                            existingLedger.Balance != parsed.Balance ||
-                                            existingLedger.Date != parsed.Date;
                             if (hasChanges)
                             {
                                 isUpdate = true;
@@ -200,9 +236,14 @@ namespace ICCardManager.Services
                 // Issue #903: skipExisting=falseの場合は重複チェックを行わず全レコードを登録する
                 var newRecords = validRecords.Where(r => !r.IsUpdate).ToList();
                 var uniqueCardIdms = newRecords.Select(r => r.Ledger.CardIdm).Distinct();
-                var existingLedgerKeys = skipExisting
-                    ? await _ledgerRepository.GetExistingLedgerKeysAsync(uniqueCardIdms).ConfigureAwait(false)
-                    : new HashSet<(string CardIdm, DateTime Date, string Summary, int Income, int Expense, int Balance)>();
+                var existingLedgerKeys = new HashSet<(string CardIdm, DateTime Date, string Summary, int Income, int Expense, int Balance)>();
+                if (skipExisting)
+                {
+                    foreach (var cardIdm in uniqueCardIdms)
+                    {
+                        existingLedgerKeys.UnionWith(await GetExistingKeysForCardAsync(cardIdm).ConfigureAwait(false));
+                    }
+                }
 
                 // Issue #1745: インポート実行はトランザクションで囲み「全か無か」で確定させる。
                 // 以前はここだけトランザクションを持たず（カード/職員インポートは Card.cs:157- /
@@ -391,6 +432,22 @@ namespace ICCardManager.Services
         }
 
         /// <summary>
+        /// CSV の行が台帳を変えないか（Issue #2307。取り込みとプレビューが同じ判定で貸出中の行の拒否を決める）
+        /// </summary>
+        /// <param name="existingLedger">利用履歴 ID が指す既存の行（ID が空欄・見つからないときは <c>null</c>）</param>
+        /// <param name="hasChanges">既存の行との差分があるか（<c>DetectLedgerChanges</c> の結果）</param>
+        /// <param name="duplicateKeyExists">
+        /// 既存の行が無い行について、スキップ指定ありで重複キー（カード・日付・摘要・金額・残額）が既存の履歴と一致するか
+        /// （取り込みはこの行をスキップする）
+        /// </param>
+        /// <remarks>
+        /// 既存の行があれば全項目一致（スキップ・無変更の更新）、無ければ重複キーの一致（スキップ）。
+        /// 以前の取り込みで通常の行として混入した「（貸出中）」の行と同じ行の往復を止めないため。
+        /// </remarks>
+        private static bool LeavesLedgerUnchanged(Ledger? existingLedger, bool hasChanges, bool duplicateKeyExists)
+            => existingLedger != null ? !hasChanges : duplicateKeyExists;
+
+        /// <summary>
         /// 利用履歴 ID が指す既存の履歴と、行のカード（カードIDm列、空欄なら取り込み先カード）が食い違うときのエラー（Issue #2262）
         /// </summary>
         /// <returns>一致すれば <c>null</c></returns>
@@ -503,6 +560,10 @@ namespace ICCardManager.Services
 
                 // Issue #428: 金額の整合性チェック（カードごとに残高の連続性を検証）
                 // Issue #907: 最初の行もDB上の直前残高と照合
+                // 母集団は取り込み（ImportLedgersAsync）と違う: 取り込みは行エラー（カードの食い違い #2262・貸出中の行 #2307）の行を
+                // 除いて検証するが、プレビューはそれらの判定（下のループ）より前にパースできた全行で検証する。
+                // 行エラーがあればどちらも取り込まないので結果（取り込むか）は変わらず、違うのは残高の不一致エラーが追加で出るかだけ。
+                // 揃えるには行エラーの判定（ID ごとの DB 読み取り）をこの前へ移す必要があり、本件の範囲では揃えない
                 ValidateBalanceConsistency(validatedRecords, errors, previousBalanceByCard);
 
                 // Issue #334: 既存履歴の重複チェック用キーを取得（新規追加分のみ）
@@ -517,22 +578,44 @@ namespace ICCardManager.Services
                     ImportAction action;
                     var changes = new List<FieldChange>();
 
+                    // IDがある場合は既存レコードを検索
+                    var existingLedger = ledgerId.HasValue
+                        ? await _ledgerRepository.GetByIdAsync(ledgerId.Value).ConfigureAwait(false)
+                        : null;
+
+                    // Issue #2262: 取り込みと同じ検証（ID が指す履歴と行のカードの食い違い）をプレビューでも行う
+                    if (ledgerId.HasValue && existingLedger != null)
+                    {
+                        var cardMismatch = BuildLedgerCardMismatchError(lineNumber, ledgerId.Value, existingLedger, cardIdm, allCards);
+                        if (cardMismatch != null)
+                        {
+                            errors.Add(cardMismatch);
+                            continue;
+                        }
+                    }
+
+                    // Issue #639: 金額・日付を含む全フィールドで変更点を検出
+                    if (existingLedger != null)
+                    {
+                        DetectLedgerChanges(existingLedger, date, summary, income, expense, balance, staffName, note, companionCount, changes);
+                    }
+
+                    // Issue #2307: 取り込みと同じ検証（貸出中レコードを写した行）をプレビューでも行う。
+                    // 台帳を変えない行は拒否しない（取り込み側と同じ関数で判定する）
+                    var duplicateKeyExists = existingLedger == null &&
+                        existingLedgerKeys.Contains((cardIdm, date, summary, income, expense, balance));
+                    var lentRowError = LedgerCsvLentRowPolicy.BuildError(lineNumber, summary, existingLedger,
+                        leavesLedgerUnchanged: LeavesLedgerUnchanged(existingLedger, changes.Count > 0, duplicateKeyExists));
+                    if (lentRowError != null)
+                    {
+                        errors.Add(lentRowError);
+                        continue;
+                    }
+
                     if (ledgerId.HasValue)
                     {
-                        // IDがある場合は既存レコードを検索
-                        var existingLedger = await _ledgerRepository.GetByIdAsync(ledgerId.Value).ConfigureAwait(false);
                         if (existingLedger != null)
                         {
-                            // Issue #2262: 取り込みと同じ検証（ID が指す履歴と行のカードの食い違い）をプレビューでも行う
-                            var cardMismatch = BuildLedgerCardMismatchError(lineNumber, ledgerId.Value, existingLedger, cardIdm, allCards);
-                            if (cardMismatch != null)
-                            {
-                                errors.Add(cardMismatch);
-                                continue;
-                            }
-
-                            // Issue #639: 金額・日付を含む全フィールドで変更点を検出
-                            DetectLedgerChanges(existingLedger, date, summary, income, expense, balance, staffName, note, companionCount, changes);
                             if (changes.Count > 0)
                             {
                                 // 変更がある場合は更新
@@ -556,11 +639,20 @@ namespace ICCardManager.Services
                         }
                         else
                         {
-                            // IDが指定されているがレコードが見つからない場合は新規追加
-                            action = ImportAction.Insert;
-                            newCount++;
-                            // Issue #969: 追加時もデータ内容を表示
+                            // IDが指定されているがレコードが見つからない場合は新規追加。
+                            // ただしスキップ指定ありで重複キーが既存の履歴と一致すれば、取り込みと同じくスキップ（Issue #2307。
+                            // 以前は常に「追加」と表示し、取り込みはスキップするので結果が食い違っていた。#2324 の所見の一部）
                             changes = CreateLedgerDisplayChanges(date, summary, income, expense, balance, staffName, note, companionCount);
+                            if (duplicateKeyExists)
+                            {
+                                action = ImportAction.Skip;
+                                skipCount++;
+                            }
+                            else
+                            {
+                                action = ImportAction.Insert;
+                                newCount++;
+                            }
                         }
                     }
                     else

@@ -482,6 +482,18 @@ namespace ICCardManager.UITests.Infrastructure
         [UiaName]
         public const string ExportDataTypeComboBox = "エクスポートするデータ種別";
 
+        /// <summary>データ入出力ダイアログのインポートのデータ種別（Issue #2307）。</summary>
+        [UiaName]
+        public const string ImportDataTypeComboBox = "インポートするデータ種別";
+
+        /// <summary>データ入出力ダイアログの「既存データはスキップする」（Issue #2307）。</summary>
+        [UiaName]
+        public const string ImportSkipExistingCheckBox = "既存データをスキップ";
+
+        /// <summary>利用履歴詳細を選んでいる間だけ表示する「スキップ指定は効かない」の案内（Issue #2307）。</summary>
+        [UiaName]
+        public const string ImportSkipExistingNotApplicableText = "利用履歴詳細の取り込みには、この指定は効きません。";
+
         /// <summary>履歴行の追加・修正ダイアログの初期フォーカス（<c>EditDatePicker</c>）。</summary>
         [UiaName]
         public const string LedgerRowEditDateInput = "出納日付";

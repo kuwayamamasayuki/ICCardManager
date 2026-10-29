@@ -238,6 +238,11 @@ namespace ICCardManager.Services
         /// 必ず警告が出てしまい「オオカミ少年」になるため。
         /// </para>
         /// <para>
+        /// 文言は「自動バックアップが」ではなく「バックアップが」と書く（Issue #2304）。最終成功には手動バックアップも
+        /// 記録されるため、「自動バックアップが N 日間（最終成功: D）」と書くと、自動が D まで動いていたと読み誤らせる
+        /// （自動の保存先が壊れたまま手動で USB へ取った場合、自動はそれより前から止まっている）。
+        /// </para>
+        /// <para>
         /// settings の読み取りとバックアップフォルダ走査（共有モードでは SMB アクセス）を伴うため、
         /// UI スレッドから呼ぶ場合は Task.Run 経由を推奨。
         /// </para>
@@ -267,7 +272,7 @@ namespace ICCardManager.Services
             {
                 Type = WarningType.BackupStale,
                 DisplayText =
-                    $"⚠️ 自動バックアップが{elapsedDays}日間成功していません" +
+                    $"⚠️ バックアップが{elapsedDays}日間成功していません" +
                     $"（最終成功: {DisplayFormatters.FormatDateTime(health.LastSuccessAt)}）。" +
                     "保存先フォルダーの空き容量やアクセス権に問題がある可能性があります。" +
                     "システム管理画面（F6）でバックアップ状況を確認し、手動バックアップを実行してください。"

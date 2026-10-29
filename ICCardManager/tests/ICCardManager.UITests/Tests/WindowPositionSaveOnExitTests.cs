@@ -71,6 +71,53 @@ namespace ICCardManager.UITests.Tests
             }
         }
 
+        /// <summary>
+        /// Issue #2305: 起動中に他の PC が設定を変えても、終了時の保存がその設定を巻き戻さないこと。
+        /// </summary>
+        /// <remarks>
+        /// 以前の終了時の保存は、起動時に読んでキャッシュした設定（TTL 5 分・共有モード 3 分）のウィンドウ値だけを差し替えて
+        /// 一括保存へ丸ごと渡していた。起動後に DB の部署種別・残額警告を書き換えて（他の PC の変更に相当）終了し、
+        /// 書き換えた値が終了後も残っていることを表明する。DB は <see cref="AppFixture"/> の Dispose で復元される。
+        /// </remarks>
+        [Fact]
+        public void 起動中に他のPCが変えた設定を終了時の保存が巻き戻さないこと()
+        {
+            using var fixture = AppFixture.Launch();
+            ScreenshotHelper.MoveToTopLeft(fixture.MainWindow);
+            var page = new MainWindowPage(fixture.MainWindow, fixture.Automation);
+
+            // 起動時に読んだ値と異なる値へ書き換える（他の PC が設定画面で変えたことに相当）
+            var changedDepartment = ReadSetting(DepartmentTypeKey) == EnterpriseAccount ? MayorOffice : EnterpriseAccount;
+            var changedWarningBalance = ReadSetting(WarningBalanceKey) == "4321" ? "4322" : "4321";
+            WriteSetting(DepartmentTypeKey, changedDepartment);
+            WriteSetting(WarningBalanceKey, changedWarningBalance);
+            WriteSetting(WindowLeftKey, Marker);
+            ReadSetting(DepartmentTypeKey).Should().Be(changedDepartment, "前提: 他の PC の変更に相当する値を書き込めていること");
+
+            page.ClickExitButton();
+            var confirmation = MessageBoxOperations.WaitFor(fixture, fixture.MainWindow, TestConstants.ExitConfirmationTitle);
+            MessageBoxOperations.Answer(confirmation, MessageBoxOperations.YesPrefix);
+
+            var exited = Retry.WhileTrue(() => !fixture.App.HasExited, TimeSpan.FromSeconds(30)).Success;
+            exited.Should().BeTrue("前提: 終了の確認に「はい」と答えたら、アプリケーションが終了すること");
+
+            ReadSetting(WindowLeftKey).Should().NotBe(Marker, "前提: 終了時の保存が走っていること（走らなければ巻き戻りも起きず空振りする）");
+            ReadSetting(DepartmentTypeKey).Should().Be(
+                changedDepartment,
+                "終了時の保存が部署種別を起動時の値へ戻すと、以後のチャージの摘要が誤った方で台帳へ入る（Issue #2305）");
+            ReadSetting(WarningBalanceKey).Should().Be(changedWarningBalance, "残額警告のしきい値も巻き戻さないこと");
+        }
+
+        /// <summary>部署種別の設定キー（本体の <c>SettingsRepository.KeyDepartmentType</c>）。</summary>
+        private const string DepartmentTypeKey = "department_type";
+
+        /// <summary>残額警告の設定キー（本体の <c>SettingsRepository.KeyWarningBalance</c>）。</summary>
+        private const string WarningBalanceKey = "warning_balance";
+
+        private const string MayorOffice = "mayor_office";
+
+        private const string EnterpriseAccount = "enterprise_account";
+
         private static void WriteSetting(string key, string value)
         {
             using var conn = new SQLiteConnection($"Data Source={AppFixture.DatabasePath};Version=3");

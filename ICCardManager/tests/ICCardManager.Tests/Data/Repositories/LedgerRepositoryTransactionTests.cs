@@ -661,7 +661,11 @@ END";
     /// 統合（<c>MergeLedgersAsync</c>）は明細を UPDATE で移すため rowid は保たれ、
     /// 取り消しはこの rowid を頼りに明細を統合元へ戻す。
     /// </remarks>
-    private async Task<(int TargetId, int SourceId, LedgerMergeUndoData UndoData)> MergeForUndoAsync()
+    /// <param name="withDetailSnapshots">
+    /// true なら Issue #2302 以降の本番と同じく、統合した時点の明細の内容（<c>DetailSnapshots</c>）も残す。
+    /// false は #2302 より前に保存された Undo データ（内容の照合なし）を表す。
+    /// </param>
+    private async Task<(int TargetId, int SourceId, LedgerMergeUndoData UndoData)> MergeForUndoAsync(bool withDetailSnapshots = false)
     {
         var targetId = await _repository.InsertAsync(CreateLedger(balance: 2186, summary: "鉄道（薬院～博多）"));
         await _repository.InsertDetailAsync(CreateDetail(targetId, amount: 210, balance: 2186));
@@ -681,6 +685,11 @@ END";
             foreach (var detail in ledger.Details)
             {
                 undoData.DetailOriginalLedgerMap[detail.SequenceNumber.ToString()] = ledger.Id;
+                if (withDetailSnapshots)
+                {
+                    undoData.DetailSnapshots ??= new Dictionary<string, LedgerDetailSnapshot>();
+                    undoData.DetailSnapshots[detail.SequenceNumber.ToString()] = LedgerDetailSnapshot.FromDetail(detail);
+                }
             }
         }
 
@@ -801,6 +810,130 @@ END";
         target.Expense.Should().Be(420);
         (await CountDetailsAsync(targetId)).Should().Be(detailCountBefore, "統合先の明細は動かさないべき");
         (await CountDetailsAsync(laterId)).Should().Be(1, "後続の台帳の明細も動かさないべき");
+    }
+
+    /// <summary>
+    /// Issue #2302: 上のテストが避けている形 — 統合先の明細が表の末尾にあり件数も同じだと、作り直した明細は
+    /// <b>同じ統合先のまま同じ id</b>を別の内容で再利用する。id と所属のガードは通ってしまうため、
+    /// 統合した時点の明細の内容と照合して競合として中止し、何も変更しないこと。
+    /// </summary>
+    [Fact]
+    public async Task UnmergeLedgersAsync_WhenTargetDetailsReplacedReusingSameIds_ReturnsFalseAndChangesNothing()
+    {
+        var (targetId, _, undoData) = await MergeForUndoAsync(withDetailSnapshots: true);
+        var mergedRowids = undoData.DetailOriginalLedgerMap.Keys.Select(int.Parse).ToList();
+
+        var replaced = await _repository.ReplaceDetailsAsync(targetId, new[]
+        {
+            CreateDetail(targetId, amount: 210, balance: 2186),
+            CreateDetail(targetId, amount: 260, balance: 1926),
+        });
+        replaced.Should().BeTrue("前提の明細編集は成功するべき");
+        var target = await _repository.GetByIdAsync(targetId);
+        target!.Details.Select(d => d.SequenceNumber).Should().BeEquivalentTo(
+            mergedRowids, "前提: 表の末尾の明細を作り直すと、統合時と同じ id が再利用される（欠陥の起点）");
+
+        var result = await UnmergeWithScopeAsync(undoData);
+
+        result.Should().BeFalse("同じ id でも内容が統合時と違えば、別の記録なので競合として検出されるべき");
+        (await CountLedgersAsync()).Should().Be(1, "統合元を復活させないべき");
+        target = await _repository.GetByIdAsync(targetId);
+        target!.Summary.Should().Be("鉄道（薬院～博多 往復）", "統合先の摘要も戻さないべき");
+        target.Expense.Should().Be(420);
+        target.Details.Should().HaveCount(2, "明細は統合先に残ったままであるべき");
+    }
+
+    /// <summary>
+    /// Issue #2302（対）: 統合後に何も変更していなければ、内容の照合があっても取り消しは成功すること。
+    /// </summary>
+    [Fact]
+    public async Task UnmergeLedgersAsync_WithDetailSnapshotsAndRowsIntact_Restores()
+    {
+        var (targetId, _, undoData) = await MergeForUndoAsync(withDetailSnapshots: true);
+
+        var result = await UnmergeWithScopeAsync(undoData);
+
+        result.Should().BeTrue();
+        (await CountLedgersAsync()).Should().Be(2, "統合元が 1 行だけ復活するべき");
+        (await _repository.GetByIdAsync(targetId))!.Summary.Should().Be("鉄道（薬院～博多）");
+    }
+
+    /// <summary>
+    /// Issue #2302: スナップショットが明細マップのキーを欠いている Undo データ（破損）は、照合できないので中止すること
+    /// （他のガードと同じ fail-closed）。
+    /// </summary>
+    [Fact]
+    public async Task UnmergeLedgersAsync_WhenDetailSnapshotMissing_ReturnsFalse()
+    {
+        var (_, _, undoData) = await MergeForUndoAsync(withDetailSnapshots: true);
+        undoData.DetailSnapshots!.Remove(undoData.DetailSnapshots.Keys.First());
+
+        var result = await UnmergeWithScopeAsync(undoData);
+
+        result.Should().BeFalse("照合できない明細を移さないべき");
+        (await CountLedgersAsync()).Should().Be(1, "統合元を復活させないべき");
+    }
+
+    /// <summary>
+    /// Issue #2302（レビュー指摘）: 統合後に統合先へ明細が増えていたら（編集で足した・別の統合を重ねた）、
+    /// 内容のスナップショットを持たない旧 Undo データでも件数の不一致で中止すること。
+    /// </summary>
+    [Fact]
+    public async Task UnmergeLedgersAsync_WhenTargetGainedDetailAfterMerge_ReturnsFalseEvenWithoutSnapshots()
+    {
+        var (targetId, _, undoData) = await MergeForUndoAsync(withDetailSnapshots: false);
+        await _repository.InsertDetailAsync(CreateDetail(targetId, amount: 150, balance: 1826));
+
+        var result = await UnmergeWithScopeAsync(undoData);
+
+        result.Should().BeFalse("増えた明細を統合先に残したまま統合前の金額へ書き戻してはならない");
+        (await CountLedgersAsync()).Should().Be(1, "統合元を復活させないべき");
+        (await CountDetailsAsync(targetId)).Should().Be(3, "明細は動かさないべき");
+    }
+
+    /// <summary>
+    /// Issue #2302: 重ねた統合の有無は「同じ統合先・未取り消し・自分より大きい ID」の履歴だけを数えること
+    /// （別の統合先・取り消し済み・自分より前の履歴は数えない）。
+    /// </summary>
+    [Fact]
+    public async Task HasLaterUndoableMergeOnSameTargetAsync_CountsOnlyLaterUndoableHistoriesOfSameTarget()
+    {
+        await _repository.SaveMergeHistoryAsync(10, "先の統合", "{}");
+        await _repository.SaveMergeHistoryAsync(20, "別の統合先", "{}");
+        await _repository.SaveMergeHistoryAsync(10, "後の統合（取り消し済み）", "{}");
+        var histories = await _repository.GetMergeHistoriesAsync(undoneOnly: false);
+        int IdOf(string description) => histories.Single(h => h.Description == description).Id;
+        (await _repository.MarkMergeHistoryUndoneAsync(IdOf("後の統合（取り消し済み）"))).Should().BeTrue();
+
+        async Task<bool> HasLaterAsync(int historyId, int targetId)
+        {
+            using var scope = await _dbContext.BeginTransactionAsync();
+            return await _repository.HasLaterUndoableMergeOnSameTargetAsync(historyId, targetId, scope.Transaction);
+        }
+
+        (await HasLaterAsync(IdOf("先の統合"), 10)).Should().BeFalse("後の同じ統合先の履歴は取り消し済み、別の統合先は数えない");
+
+        await _repository.SaveMergeHistoryAsync(10, "後の統合", "{}");
+        histories = await _repository.GetMergeHistoriesAsync(undoneOnly: false);
+        (await HasLaterAsync(IdOf("先の統合"), 10)).Should().BeTrue("同じ統合先へ後から重ねた未取り消しの統合がある");
+        (await HasLaterAsync(IdOf("後の統合"), 10)).Should().BeFalse("自分より前の履歴は数えない");
+    }
+
+    /// <summary>
+    /// Issue #2302（レビュー指摘 5 回目）: ledger の金額の列は NULL を許す。統合後に NULL へ書き換わっていても、
+    /// 統合直後の金額の照合は読み取りで例外にせず、0 として比べて不一致（競合）として false を返すこと。
+    /// </summary>
+    [Fact]
+    public async Task UnmergeLedgersAsync_WhenTargetAmountBecameNull_ReturnsFalseWithoutThrowing()
+    {
+        var (targetId, _, undoData) = await MergeForUndoAsync(withDetailSnapshots: true);
+        undoData.MergedTargetAmounts = new MergedTargetAmounts { Income = 0, Expense = 420, Balance = 1976 };
+        (await ScalarAsync("UPDATE ledger SET expense = NULL WHERE id = @id; SELECT changes();", ("@id", targetId))).Should().Be(1);
+
+        var act = async () => await UnmergeWithScopeAsync(undoData);
+
+        (await act.Should().NotThrowAsync("NULL の金額で読み取りの例外にしない")).Subject.Should().BeFalse("統合直後の払出と食い違うので中止するべき");
+        (await CountLedgersAsync()).Should().Be(1, "統合元を復活させないべき");
     }
 
     /// <summary>

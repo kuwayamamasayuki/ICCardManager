@@ -59,7 +59,10 @@ public class SettingsRepositoryNumberCultureTests : IDisposable
         using (new NegativeSignCultureScope())
         {
             AssertCultureActive();
-            (await _repository.SaveAppSettingsAsync(CreateSettings())).Should().BeTrue();
+            // Issue #2305: ウィンドウの位置・サイズは一括保存では書かない（終了時の専用経路が書く）
+            var settings = CreateSettings();
+            (await _repository.SaveAppSettingsAsync(settings)).Should().BeTrue();
+            (await _repository.SaveMainWindowSettingsAsync(settings.MainWindowSettings)).Should().BeTrue();
 
             (await ReadSettingAsync(SettingsRepository.KeyWindowLeft)).Should().Be("-1280",
                 "settings の値は地域設定によらず同じ文字列で保存する。他の PC（共有モード）や地域設定を変えた後に読めなくなる");
@@ -74,7 +77,10 @@ public class SettingsRepositoryNumberCultureTests : IDisposable
         using (new NegativeSignCultureScope())
         {
             AssertCultureActive();
-            (await _repository.SaveAppSettingsAsync(CreateSettings())).Should().BeTrue();
+            // Issue #2305: ウィンドウの位置・サイズは一括保存では書かない（終了時の専用経路が書く）
+            var settings = CreateSettings();
+            (await _repository.SaveAppSettingsAsync(settings)).Should().BeTrue();
+            (await _repository.SaveMainWindowSettingsAsync(settings.MainWindowSettings)).Should().BeTrue();
 
             AssertCultureActive();
             var loaded = await _repository.GetAppSettingsAsync();

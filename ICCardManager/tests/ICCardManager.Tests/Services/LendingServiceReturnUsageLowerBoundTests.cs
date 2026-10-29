@@ -40,6 +40,10 @@ public sealed class LendingServiceReturnUsageLowerBoundTests : IDisposable
     private const string TestStaffIdm = "FFFF000000000001";
     private const string TestStaffName = "テスト職員";
 
+    /// <summary>Issue #2323: 貸出者（TestStaff）とは別の、返却だけを行う職員</summary>
+    private const string ReturnerStaffIdm = "FFFF000000000002";
+    private const string ReturnerStaffName = "返却した職員";
+
     /// <summary>貸出・返却の時刻（固定）。貸出日の 7 日前は 9/13</summary>
     private static readonly DateTime Now = new(2026, 9, 20, 10, 0, 0);
 
@@ -99,6 +103,14 @@ public sealed class LendingServiceReturnUsageLowerBoundTests : IDisposable
             IsDeleted = false,
         }).GetAwaiter().GetResult();
 
+        staffRepo.InsertAsync(new Staff
+        {
+            StaffIdm = ReturnerStaffIdm,
+            Name = ReturnerStaffName,
+            Number = "002",
+            IsDeleted = false,
+        }).GetAwaiter().GetResult();
+
         cardRepo.InsertAsync(new IcCard
         {
             CardIdm = TestCardIdm,
@@ -138,7 +150,47 @@ public sealed class LendingServiceReturnUsageLowerBoundTests : IDisposable
         var old = usageLedgers.Single(l => l.Date.Date == new DateTime(2026, 9, 5));
         old.Expense.Should().Be(210);
         old.Balance.Should().Be(4790, "残高のチェーンが 9/5 の分だけずれない");
-        old.StaffName.Should().Be(TestStaffName, "貸出日より前の利用も、今回の返却者の利用として記録する（従来の 7 日以内の分と同じ）");
+        old.StaffName.Should().Be(TestStaffName, "貸出日より前の利用も、今回の貸出の貸出者の利用として記録する（従来の 7 日以内の分と同じ）");
+    }
+
+    /// <summary>
+    /// Issue #2323: 貸出者と返却者が別の職員のとき、返却で記録する利用の行の名義は貸出者であること。
+    /// </summary>
+    /// <remarks>
+    /// 上のテストは貸出と返却を同じ職員で行うため、名義に貸出者・返却者のどちらを書いても緑になる。
+    /// 名義は貸出者（カードを持ち出して使った職員）を正とする（04_機能設計書 §2.4.1）。
+    /// 貸出後の利用（9/20）と貸出日より前の利用（9/5）の両方で、貸出者の IDm・氏名を具体値で表明し、
+    /// 返却者の名義の行が 1 行も無いことも併せて表明する（両方に書く実装を検出するため）。
+    /// </remarks>
+    [Fact]
+    public async Task ReturnAsync_貸出者と返却者が別の職員のとき_利用の行は貸出者の名義で記録すること()
+    {
+        // Arrange: 9/1 に導入。TestStaff が貸し出し、別の職員が返却する
+        await InsertIntroductionAsync(new DateTime(2026, 9, 1), balance: 5000);
+        await LendAsync();
+
+        // Act
+        var result = await _service.ReturnAsync(ReturnerStaffIdm, TestCardIdm, new List<LedgerDetail>
+        {
+            Usage(new DateTime(2026, 9, 20), balanceAfter: 4580),
+            Usage(new DateTime(2026, 9, 5), balanceAfter: 4790),
+        });
+
+        // Assert
+        result.Success.Should().BeTrue(_logger.FormatEntries());
+        var usageLedgers = await GetUsageLedgersAsync();
+        usageLedgers.Select(l => l.Date.Date).Should().Equal(
+            new[] { new DateTime(2026, 9, 5), new DateTime(2026, 9, 20) },
+            "準備どおり貸出日の前後の利用が 1 行ずつ記録されている（名義の表明が空振りしないことの確認）");
+        foreach (var ledger in usageLedgers)
+        {
+            ledger.LenderIdm.Should().Be(TestStaffIdm, $"{ledger.Date:M/d} の利用は貸出者の IDm で記録する");
+            ledger.StaffName.Should().Be(TestStaffName, $"{ledger.Date:M/d} の利用は貸出者の氏名で記録する");
+        }
+
+        usageLedgers.Should().NotContain(
+            l => l.LenderIdm == ReturnerStaffIdm || l.StaffName == ReturnerStaffName,
+            "返却者の名義では記録しない");
     }
 
     [Fact]
@@ -229,7 +281,7 @@ public sealed class LendingServiceReturnUsageLowerBoundTests : IDisposable
             .Where(e => e.Level == LogLevel.Information && e.Message.Contains("貸出日より前の利用"))
             .Should().ContainSingle(_logger.FormatEntries()).Subject;
         entry.Message.Should().Contain("貸出日=2026-09-20")
-            .And.Contain("該当する台帳行=2件", "9/5 と 9/8 の利用の 2 行。9/6 のチャージ行は返却者の利用ではないので数えない")
+            .And.Contain("該当する台帳行=2件", "9/5 と 9/8 の利用の 2 行。9/6 のチャージ行は貸出者の利用ではないので数えない")
             .And.Contain("最も古い利用日=2026-09-05")
             .And.NotContain(TestCardIdm, "カード IDm はログへ生のまま残さない（IdmMasker.Mask）");
     }
@@ -416,7 +468,7 @@ public sealed class LendingServiceReturnUsageLowerBoundTests : IDisposable
 
     /// <summary>
     /// 履歴の「追加」で手入力した行と同じ形（明細を持たない利用行）。
-    /// 利用者は返却者と別の職員にする — 同じだと同日統合（#837）が新しい明細をこの行へ取り込み、
+    /// 利用者は貸出者（返却で記録する行の名義）と別の職員にする — 同じだと同日統合（#837）が新しい明細をこの行へ取り込み、
     /// 二重に記録しても行数が増えないため、下限の効果を行数で観測できない
     /// </summary>
     private async Task InsertLedgerWithoutDetailsAsync(DateTime date, int balanceAfter)
