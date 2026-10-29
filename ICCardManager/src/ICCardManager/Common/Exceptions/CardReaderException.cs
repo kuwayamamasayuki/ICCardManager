@@ -130,19 +130,9 @@ namespace ICCardManager.Common.Exceptions
                 : new CardReaderException(message, userMessage, errorCode);
         }
 
-        /// <summary>
-        /// 再接続失敗
-        /// </summary>
-        public static CardReaderException ReconnectFailed(int attemptCount, Exception? innerException = null)
-        {
-            var message = $"Failed to reconnect to card reader after {attemptCount} attempts";
-            var userMessage = $"カードリーダーへの再接続に失敗しました（{attemptCount}回試行）。接続を確認して手動で再接続してください。";
-            const string errorCode = "CR008";
-
-            return innerException != null
-                ? new CardReaderException(message, userMessage, errorCode, innerException)
-                : new CardReaderException(message, userMessage, errorCode);
-        }
+        // CR008 は欠番（Issue #2327）。試行回数つきの「再接続失敗」（ReconnectFailed）は、どのカードリーダー実装も
+        // 回数つきの再接続を行わず本番の呼び出し元が無かったため、到達しない「再接続中」の状態と一緒に撤去した。
+        // 過去のログのエラーコードと取り違えないよう、CR008 は別の原因に再利用しない。
 
         /// <summary>
         /// カード取り外し（読み取り中にカードが離された）
