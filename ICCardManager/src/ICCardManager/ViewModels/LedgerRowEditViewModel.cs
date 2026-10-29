@@ -1373,6 +1373,15 @@ namespace ICCardManager.ViewModels
         }
 
         /// <summary>
+        /// 編集対象の行のカードが払戻済か（Issue #2322）。貸出中の行を削除するときの確認文言を出し分ける。
+        /// </summary>
+        /// <remarks>
+        /// 呼び出し元（履歴一覧）が表示中のカードから設定する（<c>LedgerRowEditDialog.SetRefundedCard</c>）。
+        /// 払戻済のカードはタッチで返却できないため、「タッチして返却するのが正しい復旧方法」と案内しない。
+        /// </remarks>
+        public bool IsRefundedCard { get; set; }
+
+        /// <summary>
         /// 削除を要求（Issue #750 / Issue #1574）。
         /// </summary>
         /// <remarks>
@@ -1391,8 +1400,7 @@ namespace ICCardManager.ViewModels
                 ? "この履歴は「貸出中」状態のレコードです。\n" +
                   "削除すると、このカードの貸出中状態も解消されます\n" +
                   "（他に貸出中レコードが残っている場合は維持されます）。\n\n" +
-                  "通常は、メイン画面で交通系ICカードをタッチして返却操作を\n" +
-                  "行うのが正しい復旧方法です。それでも削除しますか？\n\n" +
+                  LentRecordDeletionGuidance.Build(IsRefundedCard) + "\n\n" +
                   "削除した履歴は元に戻せません。"
                 : "この履歴を削除してよろしいですか？\n\n削除した履歴は元に戻せません。";
 

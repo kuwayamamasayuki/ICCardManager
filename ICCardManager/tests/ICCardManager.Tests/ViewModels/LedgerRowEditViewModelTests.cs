@@ -2045,6 +2045,57 @@ public class LedgerRowEditViewModelTests : IDisposable
             "確認は IDialogService 経由で行うこと（MessageBox 直呼びはオーナー無しになる。Issue #1837）");
     }
 
+    /// <summary>
+    /// Issue #2322: 貸出中の行を削除するときの確認は、払戻済のカードでは「タッチして返却」を勧めないこと
+    /// </summary>
+    /// <remarks>
+    /// 払戻済のカードはタッチで返却できない。払戻済のカードに残った貸出中の行の警告から削除へ進んだ職員に
+    /// 実行できない手順を勧めない。払戻済でないカードは従来どおり返却を勧める（対の表明）。
+    /// </remarks>
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task RequestDelete_貸出中の行の確認文言を払戻済かどうかで出し分けること(bool isRefundedCard)
+    {
+        _ledgerRepoMock.Setup(r => r.GetByIdAsync(1)).ReturnsAsync(new Ledger
+        {
+            Id = 1,
+            CardIdm = TestCardIdm,
+            Date = new DateTime(2026, 1, 10),
+            Summary = "（貸出中）",
+            Balance = 2300,
+            IsLentRecord = true,
+        });
+        await _viewModel.InitializeForEditAsync(
+            new LedgerDto
+            {
+                Id = 1,
+                CardIdm = TestCardIdm,
+                DateDisplay = "R8.1.10",
+                Summary = "（貸出中）",
+                Balance = 2300,
+                IsLentRecord = true,
+            });
+        _viewModel.IsRefundedCard = isRefundedCard;
+        string? message = null;
+        _dialogServiceMock
+            .Setup(d => d.ShowWarningConfirmation(It.IsAny<string>(), "履歴の削除"))
+            .Callback<string, string>((m, _) => message = m)
+            .Returns(false);
+
+        _viewModel.RequestDeleteCommand.Execute(null);
+
+        message.Should().NotBeNull();
+        if (isRefundedCard)
+        {
+            message.Should().Contain("払戻済のカードはタッチで返却できない").And.NotContain("タッチして返却操作");
+        }
+        else
+        {
+            message.Should().Contain("タッチして返却操作").And.NotContain("払戻済");
+        }
+    }
+
     [Theory]
     [InlineData(true, true)]
     [InlineData(false, false)]

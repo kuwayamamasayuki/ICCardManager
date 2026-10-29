@@ -227,6 +227,13 @@ public partial class MainViewModel
                 }
                 break;
 
+            case WarningType.RefundedCardLent:
+                // Issue #2322: 払戻済なのに貸出中のカード。払戻済のカードはタッチで返却できず、残高ダッシュボードにも
+                // 出ないので、ここが履歴を開く入口になる。最も古い貸出中の行の月から開き、職員が貸出中の行を削除して直す
+                // （削除すると貸出中一覧が読み直され、この警告も消える）
+                await History.ShowRefundedCardLentHistoryAsync(await FindWarningCardAsync(warning));
+                break;
+
             case WarningType.IncompleteBusStop:
                 // バス停未入力警告: 一覧ダイアログを表示（Issue #703: ダイアログ内で直接バス停名入力）
                 _navigationService.ShowDialog<Views.Dialogs.IncompleteBusStopDialog>();

@@ -525,6 +525,61 @@ public partial class MainViewModel
         {
             LentCards.Add(card.ToDto());
         }
+
+        await CheckRefundedCardsWithLentRecordsAsync();
+    }
+
+    /// <summary>
+    /// 貸出中の記録（貸出中レコード）が残っている払戻済のカードを警告に出す（Issue #2322）
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// 修正前の欠陥で作られ得た状態。母集団は <c>is_lent</c> ではなく<b>貸出中レコードの有無</b>で決める —
+    /// <c>is_lent = 0</c> でも貸出中レコードが残っていれば起動時の修復はそのカードを Warning で記録し、
+    /// 「履歴から貸出中の行を削除する」よう案内する。払戻済のカードは手元に無くタッチもできず、残高ダッシュボードにも
+    /// 出ないので、警告が無いとその案内に辿り着けない（コードレビューで検出）。
+    /// </para>
+    /// <para>
+    /// 貸出中カード一覧を読み直す契機（起動時・貸出・返却・履歴の削除の後・共有モードの定期更新）で生成と除去を行う
+    /// （§7.4「生成元が除去の責任も負う」）。貸出中の行をすべて削除すれば次の読み直しで消える。
+    /// 失敗しても貸出中カード一覧の更新は済んでいるので、ログを残して従来の警告を保つ（付随する表示のため）。
+    /// 世代番号の判定（#1739）は持たない — 貸出中カード一覧と同じく、重なった読み直しは最後に終わったものが勝ち、
+    /// 次の読み直しで正しい状態に戻る。
+    /// </para>
+    /// </remarks>
+    private async Task CheckRefundedCardsWithLentRecordsAsync()
+    {
+        try
+        {
+            // 共有モードでは 15 秒ごとに走り、対象はほぼ常に 0 件なので、台帳を全件読まず
+            // 払戻済のカードを起点に絞った専用のクエリで引く（コードレビューで検出）
+            var refundedCards = await _cardRepository.GetRefundedWithLentRecordsAsync()
+                ?? (IReadOnlyList<IcCard>)Array.Empty<IcCard>();
+            ReplaceWarnings(
+                w => w.Type == WarningType.RefundedCardLent,
+                refundedCards.Select(BuildRefundedCardLentWarning).ToList());
+        }
+        catch (Exception ex)
+        {
+            // 返却・貸出の後処理（RefreshLentCardsAsync）から呼ばれるため、ここで例外を外へ出すと
+            // 記録済みの操作が失敗に見える（#1805 と同じ形）。付随する表示なので、ログを残して従来の警告を保つ
+            _logger?.LogWarning(ex, "Issue #2322: 払戻済のカードに残る貸出中の記録の確認に失敗しました");
+        }
+    }
+
+    /// <summary>
+    /// 貸出中の記録が残っている払戻済のカードの警告（Issue #2322）
+    /// </summary>
+    internal static WarningItem BuildRefundedCardLentWarning(IcCard card)
+    {
+        return new WarningItem
+        {
+            Type = WarningType.RefundedCardLent,
+            CardIdm = card.CardIdm,
+            DisplayText =
+                $"⚠️ 払い戻した {card.CardType} {card.CardNumber} に貸出中の記録が残っています。" +
+                "クリックして履歴を開き、貸出中の行を「変更」から削除してください"
+        };
     }
 
     /// <summary>
