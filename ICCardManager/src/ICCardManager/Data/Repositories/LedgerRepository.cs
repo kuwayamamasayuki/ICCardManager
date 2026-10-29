@@ -691,7 +691,9 @@ VALUES (@ledgerId, @useDate, @entryStation, @exitStation,
             SQLiteConnection connection, string cardIdm, string? beforeDate)
         {
             // 最新日（DATE(date) が最大の日）の全レコードを取得する。
-            // date は "yyyy-MM-dd HH:mm:ss" の TEXT のため MAX(date) が最新日時、その DATE() が最新日
+            // date は "yyyy-MM-dd HH:mm:ss" の TEXT のため MAX(date) が最新日時、その DATE() が最新日。
+            // 外側は列を DATE() で包まず `date >= 最新日`（日付だけの文字列）で絞る。最新日より後の行は無いので
+            // その日の全行と同じ集合になり、idx_ledger_card_date の探索キー（card_idm, date）を使える（Issue #2328）
             var beforeFilter = beforeDate != null ? "AND date < @beforeDate" : string.Empty;
             var latestDayLedgers = new List<Ledger>();
 
@@ -701,7 +703,7 @@ VALUES (@ledgerId, @useDate, @entryStation, @exitStation,
        staff_name, note, returner_idm, lent_at, returned_at, is_lent_record, companion_count
 FROM ledger
 WHERE card_idm = @cardIdm {beforeFilter}
-  AND DATE(date) = (
+  AND date >= (
     SELECT DATE(MAX(date)) FROM ledger
     WHERE card_idm = @cardIdm {beforeFilter})
 ORDER BY date ASC, id ASC";
@@ -927,16 +929,25 @@ ORDER BY date ASC, id ASC";
             // 各カードについて最新日（DATE(date) が最大の日）の全レコードを取得
             // ※ MAX(id) ではなく日付基準にすることで、データインポート後も正しい最終利用日・残高が表示される (Issue #1068)
             // ※ 最新日の 1 行ではなく全行を取得するのは、同一日内の順序を残高チェーンで確定するため (Issue #1731)
+            // ※ Issue #2328: 旧実装は `WHERE DATE(l.date) = (相関サブクエリ)` で、列を DATE() で包んだうえ
+            //   台帳の全行についてサブクエリを評価していた（非 sargable。#1834 / #1996 と同じ形）。
+            //   最終日を CTE の 1 回の GROUP BY で求める点は GetMonthEndBalancesByCardAsync と同じだが、結合条件は違う。
+            //   こちらはカードごとに最終日が 1 つなので、その日の行だけを `l.date >= 最新日`（日付だけの文字列）で
+            //   idx_ledger_card_date から探索できる（あちらは月ごとに最終日があるため `last_day.d = DATE(l.date)` で照合する）。
+            //   CROSS JOIN は SQLite で結合順を固定する書き方で、last_day を外側にして ledger を探索させる
+            //   （普通の JOIN だと ledger 側を全件走査して last_day を引く計画が選ばれた。実測）
             var latestDayLedgers = new List<Ledger>();
             using (var command = connection.CreateCommand())
             {
-                command.CommandText = @"SELECT id, card_idm, lender_idm, date, summary, income, expense, balance,
-       staff_name, note, returner_idm, lent_at, returned_at, is_lent_record, companion_count
-FROM ledger l
-WHERE DATE(l.date) = (
-    SELECT DATE(MAX(l2.date)) FROM ledger l2
-    WHERE l2.card_idm = l.card_idm
+                command.CommandText = @"WITH last_day AS (
+    SELECT card_idm AS c, DATE(MAX(date)) AS d
+    FROM ledger
+    GROUP BY card_idm
 )
+SELECT l.id, l.card_idm, l.lender_idm, l.date, l.summary, l.income, l.expense, l.balance,
+       l.staff_name, l.note, l.returner_idm, l.lent_at, l.returned_at, l.is_lent_record, l.companion_count
+FROM last_day
+CROSS JOIN ledger l ON l.card_idm = last_day.c AND l.date >= last_day.d
 ORDER BY l.card_idm ASC, l.date ASC, l.id ASC";
 
                 using var reader = await command.ExecuteReaderAsync().ConfigureAwait(false);
@@ -1230,6 +1241,10 @@ ORDER BY ym, staff";
             // `last_day.d = DATE(l.date)` が月の一致も含意する（ym は GROUP BY の粒度としてのみ必要）。
             // 日付は ISO 8601 の TEXT（YYYY-MM-DD HH:MM:SS）で辞書順＝時系列順のため、
             // 旧実装の DATE(MAX(date)) と MAX(DATE(date)) は同値。
+            // Issue #2328: 結合条件の `last_day.d = DATE(l.date)` は列を関数で包んでいるが、残している。
+            // 1 枚のカードに月ごとの最終日が複数あるため、GetAllLatestBalancesAsync の `l.date >= 最終日` には置き換えられない
+            // （後の月の行まで拾う）。外側の `l.date BETWEEN @fromDate AND @toDate` が idx_ledger_card_date / idx_ledger_date の
+            // 探索キーになるので全件走査にはならず、DATE() は期間内の行に対する絞り込みとして評価されるだけである。
             var lastDayLedgers = new List<Ledger>();
             using (var command = connection.CreateCommand())
             {
@@ -1284,23 +1299,27 @@ ORDER BY l.card_idm, l.date, l.id";
             using var lease = await _dbContext.LeaseConnectionAsync().ConfigureAwait(false);
             var connection = lease.Connection;
 
-            // 「指定日より前の最終稼働日」を相関サブクエリで特定し、その日の**全行**を取得する
+            // 「指定日より前の最終稼働日」をカードごとに特定し、その日の**全行**を取得する
             // （GetMonthEndBalancesByCardAsync と同じ作法。同一日内の順序は残高チェーンで確定する、Issue #1770）。
             // 繰越・新規購入レコードも残高の情報源として正しいため除外しない。
+            // Issue #2328: 最終稼働日は CTE の 1 回の GROUP BY で求め、外側は列を DATE() で包まずに
+            // `l.date >= 最終稼働日`（日付だけの文字列）で探索する（GetAllLatestBalancesAsync と同じ形。理由はそちら）
             var lastDayLedgers = new List<Ledger>();
             using (var command = connection.CreateCommand())
             {
-                command.CommandText = @"SELECT l.id, l.card_idm, l.lender_idm, l.date, l.summary, l.income, l.expense, l.balance,
+                command.CommandText = @"WITH last_day AS (
+    SELECT card_idm AS c, DATE(MAX(date)) AS d
+    FROM ledger
+    WHERE date < @beforeDate
+      AND is_lent_record = 0
+    GROUP BY card_idm
+)
+SELECT l.id, l.card_idm, l.lender_idm, l.date, l.summary, l.income, l.expense, l.balance,
        l.staff_name, l.note, l.returner_idm, l.lent_at, l.returned_at, l.is_lent_record, l.companion_count
-FROM ledger l
+FROM last_day
+CROSS JOIN ledger l ON l.card_idm = last_day.c AND l.date >= last_day.d
 WHERE l.date < @beforeDate
   AND l.is_lent_record = 0
-  AND DATE(l.date) = (
-      SELECT DATE(MAX(l2.date)) FROM ledger l2
-      WHERE l2.card_idm = l.card_idm
-        AND l2.is_lent_record = 0
-        AND l2.date < @beforeDate
-  )
 ORDER BY l.card_idm, l.date, l.id";
 
                 command.Parameters.AddWithValue("@beforeDate", SqliteDateTimeFormat.ToDayStartText(beforeDate));

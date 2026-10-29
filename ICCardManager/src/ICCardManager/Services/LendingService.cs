@@ -432,7 +432,7 @@ namespace ICCardManager.Services
                 lockAcquired = await cardLock.WaitAsync(GetLockTimeoutMs()).ConfigureAwait(false);
                 if (!lockAcquired)
                 {
-                    result.ErrorMessage = "他の処理が実行中です。しばらく待ってから再度お試しください。";
+                    result.ErrorMessage = BuildLockTimeoutMessage("貸出");
                     return result;
                 }
 
@@ -490,7 +490,7 @@ namespace ICCardManager.Services
                 // 本番ログへ必ず残す。LogDebug では既定の Logging:LogLevel=Information によりファイル出力されない
                 _logger.LogError(ex, "貸出処理に失敗しました（CardIdm={CardIdm}）", IdmMasker.Mask(cardIdm));
                 // Issue #1110: SQLiteエラーをユーザー向けメッセージに変換
-                result.ErrorMessage = GetUserFriendlyErrorMessage(ex, "貸出");
+                result.ErrorMessage = GetUserFriendlyErrorMessage(ex, "貸出", _dbContext.IsSharedMode);
             }
             finally
             {
@@ -1230,7 +1230,7 @@ namespace ICCardManager.Services
                 lockAcquired = await cardLock.WaitAsync(GetLockTimeoutMs()).ConfigureAwait(false);
                 if (!lockAcquired)
                 {
-                    result.ErrorMessage = "他の処理が実行中です。しばらく待ってから再度お試しください。";
+                    result.ErrorMessage = BuildLockTimeoutMessage("返却");
                     return result;
                 }
 
@@ -1347,7 +1347,7 @@ namespace ICCardManager.Services
                 // 本番ログへ必ず残す。LogDebug では既定の Logging:LogLevel=Information によりファイル出力されない
                 _logger.LogError(ex, "返却処理に失敗しました（CardIdm={CardIdm}）", IdmMasker.Mask(cardIdm));
                 // Issue #1110: SQLiteエラーをユーザー向けメッセージに変換
-                result.ErrorMessage = GetUserFriendlyErrorMessage(ex, "返却");
+                result.ErrorMessage = GetUserFriendlyErrorMessage(ex, "返却", _dbContext.IsSharedMode);
             }
             finally
             {
@@ -2189,6 +2189,18 @@ namespace ICCardManager.Services
         protected virtual int GetLockTimeoutMs() => _lockTimeoutMs;
 
         /// <summary>
+        /// カードごとのロックを時間内に取れなかったときの文言（Issue #2328）
+        /// </summary>
+        /// <remarks>
+        /// 記録が確定する前の失敗であり、失敗後は職員証タッチ待ちへ戻るため、やり直しは
+        /// 「職員証のタッチから」と案内する（#2141）。旧文言「しばらく待ってから再度お試しください」は
+        /// 交通系ICカードだけの再タッチを促し、履歴表示になっていた。
+        /// </remarks>
+        /// <param name="operationName">ユーザー視点の操作名（「貸出」「返却」）</param>
+        internal static string BuildLockTimeoutMessage(string operationName)
+            => $"他の処理が実行中のため、{operationName}できませんでした。少し待って、{OperationRetryGuidance.RestartFromStaffCard}";
+
+        /// <summary>
         /// Issue #1110: 例外をユーザー向けエラーメッセージに変換
         /// </summary>
         /// <remarks>
@@ -2199,25 +2211,44 @@ namespace ICCardManager.Services
         /// （Issue #1614、#1817）、トーストに収まる簡潔な行動指示を返す。
         /// <see cref="AppException"/> は整備済みの <see cref="AppException.UserFriendlyMessage"/> を尊重する。
         /// </para>
+        /// <para>
+        /// Issue #2328: どの分岐も、やり直しは「職員証のタッチから」と案内する（#2141。失敗後は
+        /// <c>MainViewModel</c> が職員証タッチ待ちへ戻すため、交通系ICカードだけを再タッチすると履歴表示になる）。
+        /// 旧実装は既定分岐だけがこの案内で、Busy / Locked は「しばらく待ってから再度○○をお試しください」、
+        /// IoErr は接続の確認だけだった。原因の「なぜ」は <paramref name="isSharedMode"/> で分け、
+        /// ローカルモードで存在しない「他のPC」「ネットワーク共有フォルダ」を原因として案内しない
+        /// （<see cref="GetHistoryImportFailureReason"/> と同じ分け方。db-write-conventions.md）。
+        /// </para>
         /// </remarks>
-        internal static string GetUserFriendlyErrorMessage(Exception ex, string operationName)
+        /// <param name="ex">捕捉した例外</param>
+        /// <param name="operationName">ユーザー視点の操作名（「貸出」「返却」）</param>
+        /// <param name="isSharedMode">共有フォルダモードで動作しているか（<c>DbContext.IsSharedMode</c>）</param>
+        internal static string GetUserFriendlyErrorMessage(Exception ex, string operationName, bool isSharedMode)
         {
+            // トーストに出るため簡潔に保つ（文字サイズ「大」以上で末尾が切れる）
+            var restart = OperationRetryGuidance.RestartFromStaffCard;
+            var ioMessage = isSharedMode
+                ? $"共有フォルダに接続できず、{operationName}できませんでした。ネットワークを確認し、{restart}"
+                : $"データベースを読み書きできず、{operationName}できませんでした。少し待って、{restart}";
+
             if (ex is System.Data.SQLite.SQLiteException sqliteEx)
             {
                 switch (sqliteEx.ResultCode)
                 {
                     case System.Data.SQLite.SQLiteErrorCode.Busy:
-                        return $"他のPCと処理が競合しています。しばらく待ってから再度{operationName}をお試しください。";
+                        return isSharedMode
+                            ? $"他のPCと処理が競合し、{operationName}できませんでした。少し待って、{restart}"
+                            : $"他の処理（バックアップ等）と競合し、{operationName}できませんでした。少し待って、{restart}";
                     case System.Data.SQLite.SQLiteErrorCode.Locked:
-                        return $"データベースがロックされています。しばらく待ってから再度{operationName}をお試しください。";
+                        return $"データベースがロックされていて、{operationName}できませんでした。少し待って、{restart}";
                     case System.Data.SQLite.SQLiteErrorCode.IoErr:
-                        return $"ネットワーク共有フォルダへの接続に失敗しました。ネットワーク接続を確認してください。";
+                        return ioMessage;
                 }
             }
 
             if (ex is System.IO.IOException)
             {
-                return $"ネットワーク共有フォルダへの接続に失敗しました。ネットワーク接続を確認してください。";
+                return ioMessage;
             }
 
             // Issue #1817: 既定分岐で生の ex.Message を返すと、.NET／SQLite の英語文言が

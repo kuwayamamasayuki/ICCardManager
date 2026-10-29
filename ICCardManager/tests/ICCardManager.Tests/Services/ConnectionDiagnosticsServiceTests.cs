@@ -448,6 +448,23 @@ public class ConnectionDiagnosticsServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task SharedFolderConnection_WhenDisconnected_GuidesAutomaticReconnectInsteadOfRestart()
+    {
+        // Issue #2328: 切断中もヘルスチェックが再接続を試み、成功すれば通常動作へ自動で戻る（04 §18.5）。
+        // 「復旧後にこのアプリを再起動してください」は不要な再起動で業務を止め、メイン画面のトースト
+        // （15秒ごとに自動で再接続を試行します）とも食い違っていた
+        _databaseInfo.SetupGet(d => d.IsSharedMode).Returns(true);
+        _connectionState.SetupGet(p => p.CurrentConnectionState).Returns(SharedDbConnectionState.Disconnected);
+
+        var item = await RunAndGet(DiagnosticItemKind.SharedFolderConnection);
+
+        item.DetailText.Should().NotContain("再起動してください", "復旧後の再起動は不要");
+        item.DetailText.Should().Contain($"{SharedModeMonitor.HealthCheckIntervalSeconds}秒以内に自動で再接続",
+            "どうすれば: 復旧すれば監視の間隔のうちに自動で戻ることを伝える（間隔は SharedModeMonitor から組み立てる）");
+        item.DetailText.Should().Contain("警告をクリック", "すぐに戻したいときの手動の再接続を案内する");
+    }
+
+    [Fact]
     public async Task SharedFolderConnection_WhenConnectedAndReachable_DetailDisclosesMonitoringInterval()
     {
         // 「正常」が意味するのは「最大15秒前の確認が成功していた」であり、
