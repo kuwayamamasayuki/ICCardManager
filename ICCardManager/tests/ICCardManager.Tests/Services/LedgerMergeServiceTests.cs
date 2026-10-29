@@ -175,6 +175,14 @@ public class LedgerMergeServiceTests : IDisposable
                 It.IsAny<SQLiteTransaction>()))
             .ReturnsAsync(true);
 
+        // Issue #2306: 摘要から同期したバス停名は統合と同じ tx で永続化される
+        _ledgerRepositoryMock
+            .Setup(x => x.UpdateDetailBusStopsAsync(
+                It.IsAny<int>(),
+                It.IsAny<IEnumerable<(int SequenceNumber, string BusStops)>>(),
+                It.IsAny<SQLiteTransaction>()))
+            .ReturnsAsync(true);
+
         _ledgerRepositoryMock
             .Setup(x => x.SaveMergeHistoryAsync(
                 It.IsAny<int>(),
@@ -2088,11 +2096,13 @@ public class LedgerMergeServiceTests : IDisposable
     }
 
     /// <summary>
-    /// Issue #1904（コードレビュー指摘）: バス明細が 1 件のとき、複数ブロックの結合テキストではなく
-    /// 先頭ブロックのみを書き戻すこと（結合テキストは ParseBusRoute で解析できない値になる）
+    /// Issue #1904（コードレビュー指摘）: バス明細が 1 件のとき、複数ブロックの結合テキストを書き戻さないこと
+    /// （結合テキストは ParseBusRoute で解析できない値になる）。
+    /// Issue #2306（コードレビュー 2 回目）: 以前は先頭ブロックだけを書き戻して 2 つ目を無言で捨てていた。
+    /// 区間の数（2）が利用の件数（1）と合わない形として書き換えない（行編集は保存前に警告する）。
     /// </summary>
     [Fact]
-    public void SyncBusStopsFromSummary_バス明細1件で複数ブロックの摘要_先頭ブロックのみ書き戻す()
+    public void SyncBusStopsFromSummary_バス明細1件で複数ブロックの摘要_書き換えない()
     {
         // Arrange: 手編集でバスブロックが 2 つある摘要に対し、バス明細は 1 件
         var ledgers = new List<Ledger>
@@ -2111,8 +2121,8 @@ public class LedgerMergeServiceTests : IDisposable
         // Act
         LedgerMergeService.SyncBusStopsFromSummary(ledgers);
 
-        // Assert: 結合テキスト「薬院大通～天神、博多～吉塚」ではなく先頭ブロックのみ
-        ledgers[0].Details[0].BusStops.Should().Be("薬院大通～天神");
+        // Assert: 結合テキスト「薬院大通～天神、博多～吉塚」も、先頭ブロックだけ（2 つ目を捨てる）も書かない
+        ledgers[0].Details[0].BusStops.Should().Be("★");
     }
 
     /// <summary>
@@ -2200,6 +2210,200 @@ public class LedgerMergeServiceTests : IDisposable
         ledgers[0].Details[0].BusStops.Should().Be("a");
         ledgers[0].Details[1].BusStops.Should().Be("b");
         ledgers[0].Details[2].BusStops.Should().Be("c");
+    }
+
+    /// <summary>
+    /// Issue #2306: 往復の摘要（「バス（A～B 往復）」）は往路・復路の 2 明細へ書き戻すこと。
+    /// 旧実装は区間数（1）と明細数（2）が合わないため何もしなかった。
+    /// </summary>
+    [Fact]
+    public void SyncBusStopsFromSummary_往復の摘要_往路と復路へ書き戻し変化した明細を返す()
+    {
+        var forward = new LedgerDetail { IsBus = true, BusStops = "★", Amount = 230, Balance = 770, SequenceNumber = 2 };
+        var returnLeg = new LedgerDetail { IsBus = true, BusStops = "★", Amount = 230, Balance = 540, SequenceNumber = 1 };
+        var ledgers = new List<Ledger>
+        {
+            new() { Id = 1, Summary = "バス（天神～博多 往復）", Details = new List<LedgerDetail> { forward, returnLeg } }
+        };
+
+        var changes = LedgerMergeService.SyncBusStopsFromSummary(ledgers);
+
+        forward.BusStops.Should().Be("天神～博多");
+        returnLeg.BusStops.Should().Be("博多～天神");
+        changes.Select(c => (c.Detail.SequenceNumber, c.BusStops)).Should().BeEquivalentTo(
+            new[] { (2, "天神～博多"), (1, "博多～天神") },
+            "呼び出し元が DB へ永続化する値（Issue #2306）");
+    }
+
+    /// <summary>
+    /// Issue #2306（対の表明）: 既に摘要と一致している明細は「変化した明細」に含めないこと。
+    /// 含めると統合のたびに無変化の UPDATE が走り、競合判定（影響行数）の対象も増える。
+    /// </summary>
+    [Fact]
+    public void SyncBusStopsFromSummary_既に一致している明細_変化として返さない()
+    {
+        var ledgers = new List<Ledger>
+        {
+            new()
+            {
+                Id = 1,
+                Summary = "バス（天神～博多 往復）",
+                Details = new List<LedgerDetail>
+                {
+                    new() { IsBus = true, BusStops = "天神～博多", Amount = 230, Balance = 770, SequenceNumber = 2 },
+                    new() { IsBus = true, BusStops = "博多～天神", Amount = 230, Balance = 540, SequenceNumber = 1 },
+                }
+            }
+        };
+
+        LedgerMergeService.SyncBusStopsFromSummary(ledgers).Should().BeEmpty();
+    }
+
+    /// <summary>
+    /// Issue #2306（コードレビュー 3 回目で検出）: 統合は摘要を変えていない行も同期する。摘要を生成した後に
+    /// 同一視グループを消してから統合しても、併記「往路（復路）」の明細を書き換えないこと。
+    /// </summary>
+    [Fact]
+    public void SyncBusStopsFromSummary_同一視グループを消した後の併記の摘要_書き換えない()
+    {
+        var forward = new LedgerDetail { IsBus = true, BusStops = "天神日銀前～下原中央", Amount = 230, Balance = 770, SequenceNumber = 2 };
+        var returnLeg = new LedgerDetail { IsBus = true, BusStops = "下原中央～天神中央郵便局前", Amount = 230, Balance = 540, SequenceNumber = 1 };
+        var ledgers = new List<Ledger>
+        {
+            new()
+            {
+                Id = 1,
+                Summary = "バス（天神日銀前（天神中央郵便局前）～下原中央 往復）",
+                Details = new List<LedgerDetail> { forward, returnLeg }
+            }
+        };
+
+        var changes = LedgerMergeService.SyncBusStopsFromSummary(ledgers);
+
+        changes.Should().BeEmpty();
+        forward.BusStops.Should().Be("天神日銀前～下原中央");
+        returnLeg.BusStops.Should().Be("下原中央～天神中央郵便局前");
+    }
+
+    /// <summary>
+    /// Issue #2306（コードレビュー 4 回目で検出）: 並び順の規則が違った頃の生成器で作った整合済みの摘要を統合しても、
+    /// 明細どうしのバス停名を入れ替えないこと。
+    /// </summary>
+    [Fact]
+    public void SyncBusStopsFromSummary_旧生成器の並びの整合済み摘要_入れ替えない()
+    {
+        var older = new LedgerDetail { IsBus = true, BusStops = "★", Amount = 230, Balance = 770, SequenceNumber = 2 };
+        var newer = new LedgerDetail { IsBus = true, BusStops = "天神～博多", Amount = 230, Balance = 540, SequenceNumber = 1 };
+        var ledgers = new List<Ledger>
+        {
+            new() { Id = 1, Summary = "バス（天神～博多、★）", Details = new List<LedgerDetail> { older, newer } }
+        };
+
+        LedgerMergeService.SyncBusStopsFromSummary(ledgers).Should().BeEmpty();
+        older.BusStops.Should().Be("★");
+        newer.BusStops.Should().Be("天神～博多");
+    }
+
+    /// <summary>
+    /// 上の Fact の、明細のバス停名が未入力（null。CSV 取込の空欄等）の版（コードレビュー 5 回目で検出）。
+    /// </summary>
+    [Fact]
+    public void SyncBusStopsFromSummary_旧生成器の並びの整合済み摘要で明細が未入力_入れ替えない()
+    {
+        var older = new LedgerDetail { IsBus = true, BusStops = null, Amount = 230, Balance = 770, SequenceNumber = 2 };
+        var newer = new LedgerDetail { IsBus = true, BusStops = "天神～博多", Amount = 230, Balance = 540, SequenceNumber = 1 };
+        var ledgers = new List<Ledger>
+        {
+            new() { Id = 1, Summary = "バス（天神～博多、★）", Details = new List<LedgerDetail> { older, newer } }
+        };
+
+        LedgerMergeService.SyncBusStopsFromSummary(ledgers).Should().BeEmpty();
+        older.BusStops.Should().BeNull();
+        newer.BusStops.Should().Be("天神～博多");
+    }
+
+    /// <summary>
+    /// Issue #2306: 同期したバス停名は統合と同じトランザクションで、統合先の id に付け替えた明細として永続化すること。
+    /// </summary>
+    [Fact]
+    public async Task MergeAsync_同期したバス停名を統合と同じトランザクションで永続化すること()
+    {
+        var date = new DateTime(2026, 2, 3);
+        var railLedger = CreateTestLedger(1, TestCardIdm, date, "鉄道（博多～天神）", 260, 9740);
+        railLedger.Details.Add(CreateRailDetail(1, "博多", "天神", 260, 9740, 3, date));
+        var busLedger = CreateTestLedger(2, TestCardIdm, date, "バス（天神～大橋 往復）", 460, 9280);
+        busLedger.Details.Add(new LedgerDetail { LedgerId = 2, IsBus = true, BusStops = "★", Amount = 230, Balance = 9510, SequenceNumber = 2, UseDate = date });
+        busLedger.Details.Add(new LedgerDetail { LedgerId = 2, IsBus = true, BusStops = "★", Amount = 230, Balance = 9280, SequenceNumber = 1, UseDate = date });
+        SetupGetByIdMocks(railLedger, busLedger);
+        SetupMergeMockSuccess();
+        List<(int SequenceNumber, string BusStops)>? written = null;
+        _ledgerRepositoryMock
+            .Setup(x => x.UpdateDetailBusStopsAsync(
+                It.IsAny<int>(), It.IsAny<IEnumerable<(int SequenceNumber, string BusStops)>>(), It.IsAny<SQLiteTransaction>()))
+            .Callback<int, IEnumerable<(int SequenceNumber, string BusStops)>, SQLiteTransaction>((_, u, _) => written = u.ToList())
+            .ReturnsAsync(true);
+
+        var result = await _service.MergeAsync(new List<int> { 1, 2 });
+
+        result.Success.Should().BeTrue();
+        _ledgerRepositoryMock.Verify(x => x.UpdateDetailBusStopsAsync(
+                1, It.IsAny<IEnumerable<(int SequenceNumber, string BusStops)>>(), It.IsNotNull<SQLiteTransaction>()),
+            Times.Once,
+            "統合先（id=1）へ付け替えた明細を、統合と同じトランザクションで書く");
+        written!.OrderBy(u => u.SequenceNumber).Should().Equal(new[] { (1, "大橋～天神"), (2, "天神～大橋") },
+            "古い明細（往路）へ順向き、新しい明細（復路）へ逆向き");
+        result.MergedLedger!.Summary.Should().Contain("バス（天神～大橋 往復）", "手で直した往復の摘要が統合後も保たれる");
+    }
+
+    /// <summary>
+    /// Issue #2306（対の表明）: 同期で値が変わらない統合では、バス停名の UPDATE を発行しないこと。
+    /// </summary>
+    [Fact]
+    public async Task MergeAsync_同期で値が変わらないとき_バス停名の更新を発行しないこと()
+    {
+        var date = new DateTime(2026, 2, 3);
+        var railLedger = CreateTestLedger(1, TestCardIdm, date, "鉄道（博多～天神）", 260, 9740);
+        railLedger.Details.Add(CreateRailDetail(1, "博多", "天神", 260, 9740, 2, date));
+        var busLedger = CreateTestLedger(2, TestCardIdm, date, "バス（天神～大橋）", 230, 9510);
+        busLedger.Details.Add(new LedgerDetail { LedgerId = 2, IsBus = true, BusStops = "天神～大橋", Amount = 230, Balance = 9510, SequenceNumber = 1, UseDate = date });
+        SetupGetByIdMocks(railLedger, busLedger);
+        SetupMergeMockSuccess();
+
+        var result = await _service.MergeAsync(new List<int> { 1, 2 });
+
+        result.Success.Should().BeTrue();
+        _ledgerRepositoryMock.Verify(x => x.UpdateDetailBusStopsAsync(
+                It.IsAny<int>(), It.IsAny<IEnumerable<(int, string)>>(), It.IsAny<SQLiteTransaction>()),
+            Times.Never);
+    }
+
+    /// <summary>
+    /// Issue #2306: バス停名の永続化が競合（影響行数 0）したら、統合ごと失敗にして監査ログ・取り消し情報を残さないこと。
+    /// </summary>
+    [Fact]
+    public async Task MergeAsync_バス停名の永続化が競合したら統合を失敗にすること()
+    {
+        var date = new DateTime(2026, 2, 3);
+        var railLedger = CreateTestLedger(1, TestCardIdm, date, "鉄道（博多～天神）", 260, 9740);
+        railLedger.Details.Add(CreateRailDetail(1, "博多", "天神", 260, 9740, 2, date));
+        var busLedger = CreateTestLedger(2, TestCardIdm, date, "バス（天神～大橋）", 230, 9510);
+        busLedger.Details.Add(new LedgerDetail { LedgerId = 2, IsBus = true, BusStops = "★", Amount = 230, Balance = 9510, SequenceNumber = 1, UseDate = date });
+        SetupGetByIdMocks(railLedger, busLedger);
+        SetupMergeMockSuccess();
+        _ledgerRepositoryMock
+            .Setup(x => x.UpdateDetailBusStopsAsync(
+                It.IsAny<int>(), It.IsAny<IEnumerable<(int SequenceNumber, string BusStops)>>(), It.IsAny<SQLiteTransaction>()))
+            .ReturnsAsync(false);
+
+        var result = await _service.MergeAsync(new List<int> { 1, 2 });
+
+        result.Success.Should().BeFalse();
+        result.ErrorMessage.Should().Contain("他の操作で変更された可能性があります");
+        _ledgerRepositoryMock.Verify(x => x.SaveMergeHistoryAsync(
+            It.IsAny<int>(), It.IsAny<string>(), It.IsAny<string>()), Times.Never);
+        _operationLogRepositoryMock.Verify(x => x.InsertAsync(
+            It.IsAny<OperationLog>(), It.IsAny<SQLiteTransaction>()), Times.Never,
+            "巻き戻した統合の監査ログを残さない");
     }
 
     #endregion
