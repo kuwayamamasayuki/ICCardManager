@@ -37,18 +37,22 @@ public class LedgerRepositoryAggregationTests : IDisposable
     private const string StaffB = "STAFF00000000002";
 
     /// <summary>
-    /// 台帳に保存されるが利用実績ではない「繰越」系の摘要。
+    /// 台帳に保存されるが利用実績ではない導入行（カード登録時に書く行）の摘要。
     /// </summary>
     /// <remarks>
-    /// 「○月から繰越」は生成側（<see cref="SummaryGenerator"/>）から取り、テスト側で
+    /// 「○月から繰越」「前年度より繰越」は生成側（<see cref="SummaryGenerator"/>）から取り、テスト側で
     /// 文字列を組み立てない。「新規購入」は本番にも生成メソッドが無くリテラルのため、
     /// <c>CarryoverSummaries_AreRecognizedByTheProductionPredicate</c> で
-    /// <see cref="Ledger.IsCarryover"/> との対応を表明して乖離を検出する。
+    /// <see cref="Ledger.IsInitialRecordSummary"/> との対応を表明して乖離を検出する。
+    /// Issue #2326: 「前年度より繰越」は繰越月を 3 月にして登録したカードで DB に保存される 3 種目の導入行。
+    /// 以前は <see cref="Ledger.IsCarryover"/>（帳票用で前年度繰越を含まない）と対応させていたため、
+    /// 集計の除外条件から漏れたことを検出できなかった。
     /// </remarks>
     private static readonly string[] CarryoverSummaries =
     {
         "新規購入",
-        SummaryGenerator.GetMidYearCarryoverSummary(4)
+        SummaryGenerator.GetMidYearCarryoverSummary(4),
+        SummaryGenerator.GetCarryoverFromPreviousYearSummary()
     };
 
     public LedgerRepositoryAggregationTests()
@@ -258,9 +262,70 @@ public class LedgerRepositoryAggregationTests : IDisposable
         // テストだけ旧文字列で通り続け、除外漏れを検出できなくなる。
         foreach (var summary in CarryoverSummaries)
         {
-            new Ledger { Summary = summary }.IsCarryover.Should().BeTrue(
-                $"「{summary}」は Ledger.IsCarryover が繰越と判定する摘要であるべき");
+            Ledger.IsInitialRecordSummary(summary).Should().BeTrue(
+                $"「{summary}」は Ledger.IsInitialRecordSummary が導入行と判定する摘要であるべき");
         }
+
+        // 本番の導入行判定が認める 3 種をすべてテストが網羅していること（1 種だけ漏れる形を防ぐ）
+        CarryoverSummaries.Should().HaveCount(3, "導入行は新規購入・○月から繰越・前年度より繰越の 3 種（04 §8.8）");
+    }
+
+    /// <summary>
+    /// Issue #2326: 繰越月を 3 月にして登録したカードの導入行「前年度より繰越」（新年度 4/1、受入＝残額、
+    /// 貸出者なし）だけがあるカードは、利用実績の 3 クエリのいずれにも現れないこと
+    /// </summary>
+    /// <remarks>
+    /// 登録しただけのカードが「利用 1 回・稼働率 &gt; 0%」・最終利用日 4/1 に見え、月別利用額に
+    /// 払出 0 の「（職員名なし）」系列が立っていた。本番の導入行と同じ形（貸出者 IDm・氏名なし）で入れる。
+    /// </remarks>
+    [Fact]
+    public async Task UsageQueries_WithOnlyPreviousYearCarryoverInitialRecord_DoNotCountTheCard()
+    {
+        await SeedMastersAsync();
+        await InsertLedgerAsync(CardA, new DateTime(2026, 4, 1), income: 6000, balance: 6000,
+            lenderIdm: null, staffName: null,
+            summary: SummaryGenerator.GetCarryoverFromPreviousYearSummary());
+
+        var stats = await _ledgerRepository.GetUsageStatsByCardAsync(
+            new DateTime(2026, 4, 1), new DateTime(2027, 3, 31));
+        var lastUsage = await _ledgerRepository.GetAllLastUsageDatesAsync();
+        var monthly = await _ledgerRepository.GetMonthlyUsageByLenderAsync(
+            new DateTime(2026, 4, 1), new DateTime(2027, 3, 31));
+
+        stats.Should().BeEmpty("登録しただけのカードは稼働率 0%");
+        lastUsage.Should().NotContainKey(CardA, "最終利用日は空欄");
+        monthly.Should().BeEmpty("「（職員名なし）」の系列を立てない");
+    }
+
+    /// <summary>
+    /// Issue #2326 の対: 「前年度より繰越」の導入行と同じ日の実際の利用は従来どおり数えること
+    /// （除外を摘要ではなく日付・貸出者なし等で広く掛けた実装を落とす）
+    /// </summary>
+    [Fact]
+    public async Task UsageQueries_WithPreviousYearCarryoverAndRealUsage_CountOnlyTheUsage()
+    {
+        await SeedMastersAsync();
+        await InsertLedgerAsync(CardA, new DateTime(2026, 4, 1), income: 6000, balance: 6000,
+            lenderIdm: null, staffName: null,
+            summary: SummaryGenerator.GetCarryoverFromPreviousYearSummary());
+        await InsertLedgerAsync(CardA, new DateTime(2026, 4, 1), expense: 210, balance: 5790);
+        await InsertLedgerAsync(CardA, new DateTime(2026, 4, 8), expense: 300, balance: 5490);
+
+        var row = (await _ledgerRepository.GetUsageStatsByCardAsync(
+            new DateTime(2026, 4, 1), new DateTime(2027, 3, 31))).Single();
+        var lastUsage = await _ledgerRepository.GetAllLastUsageDatesAsync();
+        var monthly = (await _ledgerRepository.GetMonthlyUsageByLenderAsync(
+            new DateTime(2026, 4, 1), new DateTime(2027, 3, 31))).Single();
+
+        row.UsedDayCount.Should().Be(2);
+        row.UsageCount.Should().Be(2);
+        row.TotalIncome.Should().Be(0, "導入行の受入（残高）を投入額として数えない");
+        row.TotalExpense.Should().Be(510);
+        lastUsage[CardA].Should().Be(new DateTime(2026, 4, 8));
+        monthly.StaffName.Should().Be("福岡 太郎");
+        monthly.UsageCount.Should().Be(2);
+        monthly.TotalIncome.Should().Be(0);
+        monthly.TotalExpense.Should().Be(510);
     }
 
     [Fact]

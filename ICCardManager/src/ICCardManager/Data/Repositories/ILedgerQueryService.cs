@@ -175,9 +175,10 @@ namespace ICCardManager.Data.Repositories
         /// </summary>
         /// <remarks>
         /// 「利用実績」の定義は稼働状況の集計（<see cref="GetUsageStatsByCardAsync"/>）と同じ:
-        /// 貸出中プレースホルダ（<c>is_lent_record = 1</c>）と繰越レコード
-        /// （「新規購入」および組織設定 <c>MidYearCarryoverFormat</c> に従う繰越摘要。
-        /// 既定書式では「○月から繰越」、Issue #1749）は利用実績ではないため除外する。
+        /// 貸出中プレースホルダ（<c>is_lent_record = 1</c>）と導入行
+        /// （<see cref="Models.Ledger.IsInitialRecordSummary"/> の 3 種: 「新規購入」、組織設定
+        /// <c>MidYearCarryoverFormat</c> に従う繰越摘要（既定書式では「○月から繰越」、Issue #1749）、
+        /// 繰越月を 3 月にして登録したカードの「前年度より繰越」（Issue #2326））は利用実績ではないため除外する。
         /// 利用実績が 1 件も無いカードは辞書に含まれない（最終利用日は空欄扱い）。
         /// <see cref="GetAllLatestBalancesAsync"/> の LastUsageDate はこれらを除外しない
         /// 「最新レコード日」であり、登録しただけのカードが「使われている」ように見えるため、
@@ -192,6 +193,8 @@ namespace ICCardManager.Data.Repositories
         /// <remarks>
         /// 台帳は 6 年分保持されるため、全件を読み出さず SQL 側で GROUP BY する。
         /// 貸出中レコード（<c>is_lent_record = 1</c>）は「利用」ではないため除外する。
+        /// 導入行（<see cref="Models.Ledger.IsInitialRecordSummary"/> の 3 種。「前年度より繰越」を含む、Issue #2326）も
+        /// 利用実績ではないため除外する（<see cref="GetAllLastUsageDatesAsync"/> と同じ定義）。
         /// </remarks>
         Task<IReadOnlyList<CardUsageStatsRow>> GetUsageStatsByCardAsync(DateTime fromDate, DateTime toDate);
 
@@ -199,7 +202,7 @@ namespace ICCardManager.Data.Repositories
         /// 指定期間の月別 × 貸出職員別の利用額を集計して取得（Issue #1692）
         /// </summary>
         /// <remarks>
-        /// 貸出中レコード・繰越レコードに加え、払戻台帳（払い戻しで残高全額を払出に計上した行）も除外する
+        /// 貸出中レコード・導入行（「前年度より繰越」を含む 3 種、Issue #2326）に加え、払戻台帳（払い戻しで残高全額を払出に計上した行）も除外する
         /// （Issue #2157）。払い戻しは職員の支出ではなく、残すと「（職員名なし）」系列に残高全額が積まれる。
         /// 判定は摘要ではなく行の形で行う。<see cref="GetUsageStatsByCardAsync"/> はこの除外を行わない
         /// （稼働状況は払戻済カードをカード単位で除外しているため）。

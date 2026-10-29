@@ -872,6 +872,14 @@ namespace ICCardManager.Services
         /// 返却時の残高解決カスケード。
         /// 優先順位: (1)カード直接読取値 > (2)作成ledger末尾 > (3)DB 直近 ledger(Issue #1139)。
         /// </summary>
+        /// <remarks>
+        /// (1) は読取値が **1 円以上のときだけ**使い、0 円なら (2)(3) へ進む。残額は履歴ブロックから実値で読む
+        /// （<c>FelicaHistoryBlockDecoder</c>）ので、0 円は「読めなかった」印ではなく実際の残額である。
+        /// それでも 0 円を除くのは、同じ返却で台帳行の残額を決める <see cref="CreateUsageLedgersAsync"/> の
+        /// <c>useCardBalance</c>（1 円以上の残額を持つ明細があるときだけカードの残額を使う）と根拠を揃えるため。
+        /// 実際に 0 円まで使い切った場合も、通常は作成した ledger の末尾が 0 円になるので結果は同じになる。
+        /// 境界は <c>LendingServiceHelperTests.ResolveReturnBalanceAsync_CardBalanceZero_*</c> が固定する（Issue #2326）。
+        /// </remarks>
         internal async Task<int> ResolveReturnBalanceAsync(
             List<LedgerDetail> detailList, List<Ledger> createdLedgers, string cardIdm)
         {
