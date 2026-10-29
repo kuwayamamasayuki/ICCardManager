@@ -1620,6 +1620,83 @@ public class CardManageViewModelTests : IDisposable
     }
 
     /// <summary>
+    /// Issue #2326: 3 月から繰越で累計受入・累計払出が渡っても、カードへ保存しないこと
+    /// </summary>
+    /// <remarks>
+    /// 3 月から繰越は新年度の始まりで、繰越年度は新年度になる。旧年度の紙の累計を保存すると、
+    /// <c>ReportDataBuilder</c> が新年度の 5 月以降の累計行へ上乗せし、物品出納簿の
+    /// 「受入 − 払出 = 残額」が崩れる。ダイアログは欄を無効にしているが、結果に値が残っても保存しないことを表明する。
+    /// </remarks>
+    [Fact]
+    public async Task SaveAsync_CarryoverMode_March_ShouldNotSavePaperCumulativeTotals()
+    {
+        var card = await RegisterCarryoverCardAsync(carryoverMonth: 3, incomeTotal: 120000, expenseTotal: 95000);
+
+        card.CarryoverIncomeTotal.Should().Be(0, "3 月末時点の紙の累計は旧年度のもの");
+        card.CarryoverExpenseTotal.Should().Be(0);
+        card.CarryoverFiscalYear.Should().BeNull("加算対象の年度を持たせない（新年度の累計は 0 から始まる）");
+    }
+
+    /// <summary>
+    /// Issue #2326 の対: 3 月以外の繰越月では従来どおり紙の累計と繰越年度を保存すること（Issue #1215）
+    /// </summary>
+    [Fact]
+    public async Task SaveAsync_CarryoverMode_May_ShouldSavePaperCumulativeTotals()
+    {
+        var card = await RegisterCarryoverCardAsync(carryoverMonth: 5, incomeTotal: 120000, expenseTotal: 95000);
+
+        card.CarryoverIncomeTotal.Should().Be(120000);
+        card.CarryoverExpenseTotal.Should().Be(95000);
+        card.CarryoverFiscalYear.Should().Be(2025, "2025/6/15 に「5月から繰越」→ 導入行は 2025/6/1 ＝ 2025 年度");
+    }
+
+    /// <summary>
+    /// 累計を保存するかの判定（<c>CarriesPaperCumulative</c>）を全月で走査する（Issue #2326）。
+    /// 3 月だけが偽で、新規購入は月によらず偽。
+    /// </summary>
+    [Fact]
+    public void CardRegistrationModeResult_CarriesPaperCumulative_IsFalseOnlyForMarchAndNewPurchase()
+    {
+        for (var month = 1; month <= 12; month++)
+        {
+            new ICCardManager.Views.Dialogs.CardRegistrationModeResult { IsNewPurchase = false, CarryoverMonth = month }
+                .CarriesPaperCumulative.Should().Be(month != 3, $"{month}月から繰越");
+            new ICCardManager.Views.Dialogs.CardRegistrationModeResult { IsNewPurchase = true, CarryoverMonth = month }
+                .CarriesPaperCumulative.Should().BeFalse("新規購入は紙の累計を持たない");
+        }
+    }
+
+    private async Task<IcCard> RegisterCarryoverCardAsync(int carryoverMonth, int incomeTotal, int expenseTotal)
+    {
+        var idm = "0102030405060708";
+        IcCard? inserted = null;
+        _cardRepositoryMock.Setup(r => r.GetByIdmAsync(idm, true)).ReturnsAsync((IcCard?)null);
+        _cardRepositoryMock.Setup(r => r.InsertAsync(It.IsAny<IcCard>(), It.IsAny<SQLiteTransaction>()))
+            .Callback<IcCard, SQLiteTransaction>((c, _) => inserted = c)
+            .ReturnsAsync(true);
+        _dialogServiceMock.Setup(d => d.ShowCardRegistrationModeDialog(It.IsAny<int?>()))
+            .Returns(new ICCardManager.Views.Dialogs.CardRegistrationModeResult
+            {
+                IsNewPurchase = false,
+                CarryoverMonth = carryoverMonth,
+                StartingPageNumber = 1,
+                CarryoverBalance = 6000,
+                CarryoverIncomeTotal = incomeTotal,
+                CarryoverExpenseTotal = expenseTotal
+            });
+        _viewModel.SetPreReadBalance(6000);
+        _viewModel.StartNewCard();
+        _viewModel.EditCardIdm = idm;
+        _viewModel.EditCardType = "はやかけん";
+        _viewModel.EditCardNumber = "H-001";
+
+        await _viewModel.SaveAsync();
+
+        inserted.Should().NotBeNull("カードが登録されていること");
+        return inserted!;
+    }
+
+    /// <summary>
     /// CarryoverBalanceがnullの場合、事前読み取り残高にフォールバックすること
     /// </summary>
     [Fact]

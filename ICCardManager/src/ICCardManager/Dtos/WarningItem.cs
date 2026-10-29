@@ -30,7 +30,7 @@ namespace ICCardManager.Dtos
         /// <summary>新しいアプリバージョンが公開されている通知（共有フォルダの latest_version.txt 経由、Issue #1687）</summary>
         NewVersionAvailable,
 
-        /// <summary>自動バックアップが長期間成功していない警告（Issue #1689）</summary>
+        /// <summary>バックアップ（自動・手動）が長期間成功していない警告（Issue #1689 / #2304）</summary>
         BackupStale,
 
         /// <summary>

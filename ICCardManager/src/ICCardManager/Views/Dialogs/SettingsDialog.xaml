@@ -262,7 +262,7 @@
                                    TextWrapping="Wrap"
                                    Margin="0,5,0,0"/>
                         <!-- Issue #2009: 同行者数入力の自動クローズ秒数 -->
-                        <Label Content="同行者数入力を自動的に閉じるまでの秒数(_D)"
+                        <Label Content="同行者数入力を自動的に閉じるまでの秒数(_I)"
                                Target="{Binding ElementName=CompanionCountTimeoutTextBox}"
                                Margin="0,15,0,0"
                                Padding="0"/>
@@ -276,7 +276,7 @@
                                      IsEnabled="{Binding SkipCompanionCountInputOnReturn, Converter={StaticResource InverseBooleanConverter}}"
                                      AutomationProperties.Name="同行者数入力の自動クローズ秒数"
                                      AutomationProperties.HelpText="返却時の同行者数入力を「外0名」として自動的に閉じるまでの秒数。0 を入力すると自動的に閉じません"
-                                     ToolTip="0 を入力すると自動的に閉じず、必ず同行者数を尋ねます（アクセスキー: Alt+D）">
+                                     ToolTip="0 を入力すると自動的に閉じず、必ず同行者数を尋ねます（アクセスキー: Alt+I）">
                                 <TextBox.Text>
                                     <Binding Path="CompanionCountInputTimeoutSeconds" UpdateSourceTrigger="PropertyChanged">
                                         <Binding.ValidationRules>
@@ -384,11 +384,11 @@
                         <StackPanel Orientation="Horizontal"
                                     HorizontalAlignment="Right"
                                     Margin="0,5,0,0">
-                            <Button Content="デフォルトに戻す(_R)"
+                            <Button Content="デフォルトに戻す(_U)"
                                     Command="{Binding ResetDatabasePathToDefaultCommand}"
                                     Padding="15,6"
                                     AutomationProperties.Name="データベース保存先をデフォルトに戻す"
-                                    ToolTip="database_config.txt を削除して、ローカルデフォルトパス（C:\ProgramData\ICCardManager\iccard.db）に戻します（アクセスキー: Alt+R）"/>
+                                    ToolTip="database_config.txt を削除して、ローカルデフォルトパス（C:\ProgramData\ICCardManager\iccard.db）に戻します（アクセスキー: Alt+U）"/>
                         </StackPanel>
                         <TextBlock Text="※ 空欄の場合、このPCのローカルフォルダ（C:\ProgramData\ICCardManager\）に保存されます"
                                    FontSize="{DynamicResource SmallFontSize}"
@@ -419,6 +419,15 @@
 
         <!-- ステータスメッセージとボタン -->
         <StackPanel Grid.Row="1" Margin="0,15,0,0">
+            <!-- Issue #2305: 設定の読み込みに失敗した警告。状態欄はほかの操作の案内で上書きされるため別に出し続ける -->
+            <TextBlock Text="{Binding SettingsLoadFailedNotice}"
+                       FontWeight="Bold"
+                       TextWrapping="Wrap"
+                       Margin="0,0,0,10"
+                       Foreground="{DynamicResource DangerTextBrush}"
+                       Visibility="{Binding IsSettingsLoadFailed, Converter={StaticResource BoolToVisibilityConverter}}"
+                       AutomationProperties.Name="{Binding SettingsLoadFailedNotice}"
+                       AutomationProperties.LiveSetting="Assertive"/>
             <!-- エラーメッセージ（常に表示領域内） -->
             <TextBlock Text="{Binding StatusMessage}"
                        FontWeight="Bold"
@@ -459,6 +468,7 @@
                 <Button Style="{StaticResource PrimaryActionButtonStyle}"
                         Content="保存(_S)"
                         Click="SaveButton_Click"
+                        IsEnabled="{Binding CanSaveSettings}"
                         Padding="20,10"
                         MinWidth="100"
                         IsDefault="True"

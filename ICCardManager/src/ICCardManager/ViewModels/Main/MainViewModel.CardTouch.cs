@@ -1,3 +1,4 @@
+#nullable enable
 using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
@@ -251,8 +252,11 @@ public partial class MainViewModel
     /// ICカード待ち状態（<see cref="AppState.WaitingForIcCard"/>）から呼ばれる場合、
     /// 直前の職員証タッチで <c>_currentStaffIdm</c> が確定している。ここで前回操作者に
     /// 差し替えると、実際に操作した職員とは別の職員が
-    /// <c>ledger.StaffName</c> / <c>ic_card.lender_idm</c> / <c>operation_log</c> に記録され、
+    /// 貸出レコードの <c>ledger.StaffName</c> / <c>ic_card.last_lent_staff</c> に記録され、
     /// 長期未返却の督促も誤った職員へ向かう。
+    /// 逆処理が返却のときは、操作者は台帳に記録されない（利用の行は貸出レコードの貸出者の名義、
+    /// <c>ic_card.last_lent_staff</c> は NULL に戻る。Issue #2323）。
+    /// タッチによる貸出・返却は <c>operation_log</c> に記録しない。
     /// なお <see cref="AppState.WaitingForStaffCard"/> へ遷移する経路は
     /// <c>ResetState()</c> ただ 1 つで、そこで <c>_currentStaffIdm</c> は必ず null になるため、
     /// 「未確定＝職員証タッチ待ち経路」と判定できる。
@@ -424,13 +428,26 @@ public partial class MainViewModel
             var historyResult = await _cardReader.TryReadHistoryAsync(card.CardIdm);
             if (!historyResult.Success)
             {
-                // リーダーエラー: 不正確なデータをDBに記録しないため返却処理を中断
+                // リーダーエラー、または読み取りの途中で交通系ICカードが離れた・載せ替えられた（Issue #2301）:
+                // 不正確なデータ（読めたぶんだけ・0 件・別のカードの履歴）をDBに記録しないため返却処理を中断する。
+                // 30秒ルールも武装しない（記録が無いので、交通系ICカードだけの再タッチを逆処理にしない）
                 _soundPlayer.Play(SoundType.Error);
                 // Issue #2141: 状態リセット（finally）で職員証が消えるため、交通系ICカードだけを
                 // タッチし直すと履歴表示になる。やり直しは職員証のタッチからと案内する
-                _toastNotificationService.ShowError(
-                    "カードリーダーエラー",
-                    "履歴の読み取りに失敗しました。" + OperationRetryGuidance.RestartFromStaffCard);
+                if (historyResult.Error?.IsCardRemoved == true)
+                {
+                    // Issue #2301: カードが離れたのは利用者の操作。「カードリーダーエラー」と表示すると故障と受け取られる。
+                    // トーストは文字サイズ「大」以上で切れやすいので短くする
+                    _toastNotificationService.ShowError(
+                        "交通系ICカードが離れました",
+                        OperationRetryGuidance.RestartFromStaffCardKeepingCardOn);
+                }
+                else
+                {
+                    _toastNotificationService.ShowError(
+                        "カードリーダーエラー",
+                        "履歴の読み取りに失敗しました。" + OperationRetryGuidance.RestartFromStaffCard);
+                }
                 return; // 状態リセットは finally が行う
             }
             var usageDetailsList = historyResult.Value.ToList();

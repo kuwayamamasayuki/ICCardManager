@@ -35,6 +35,12 @@ namespace ICCardManager.UITests.Tests
             var settings = page.ClickToolbarButtonAndWaitForDialog(
                 TestConstants.OpenSettingsButton, TestConstants.SettingsDialogName);
 
+            // Issue #2305: 設定画面は開くたびに DB から読み込み、読み込みが終わるまで「保存」を押せない。
+            // 読み込みの前にロックを取ると読み込みが待たされ、保存の待ちではなく読み込みの待ちを見てしまうので、
+            // 保存ボタンが有効になる（＝読み込みが終わる）まで待ってからロックを取る
+            settings.WaitUntilEnabled(TestConstants.SettingsSaveButton).Should().BeTrue(
+                $"前提: 設定の読み込みが終わり「{TestConstants.SettingsSaveButton}」ボタンが有効になること");
+
             using var dbLock = DatabaseExclusiveLock.Acquire();
             settings.ClickButton(TestConstants.SettingsSaveButton);
 

@@ -228,34 +228,52 @@
                 </CheckBox>
             </StackPanel>
 
-            <!-- 利用者 (_U) -->
+            <!-- 利用者 (_U)
+                 Issue #2300: 右の欄はコンボボックスの下に注記が出て高くなるため、ラベルは上端に置き、
+                 高さをコンボボックスに合わせてその中で縦中央に揃える（文字サイズの設定が変わっても行が揃う） -->
             <Label Grid.Row="5" Grid.Column="0"
                    Content="利用者(_U):"
                    Target="{Binding ElementName=StaffComboBox}"
                    FontSize="{DynamicResource BaseFontSize}"
-                   VerticalAlignment="Center"
+                   VerticalAlignment="Top"
+                   VerticalContentAlignment="Center"
+                   Height="{Binding ActualHeight, ElementName=StaffComboBox}"
                    Padding="0"
                    Margin="0,0,0,8"/>
-            <StackPanel Grid.Row="5" Grid.Column="1" Orientation="Horizontal" Margin="0,0,0,8">
-                <ComboBox x:Name="StaffComboBox"
-                          ItemsSource="{Binding StaffList}"
-                          SelectedItem="{Binding SelectedStaff}"
-                          DisplayMemberPath="Name"
-                          FontSize="{DynamicResource BaseFontSize}"
-                          MinWidth="150"
-                          AutomationProperties.Name="利用者を選択"
-                          ToolTip="利用者を選択（任意）（アクセスキー: Alt+U）"/>
-                <Button Content="×"
-                        Command="{Binding ClearStaffCommand}"
-                        FontSize="{DynamicResource BaseFontSize}"
-                        Padding="6,1"
-                        Margin="4,0,0,0"
-                        VerticalAlignment="Center"
-                        AutomationProperties.Name="利用者をクリア"
-                        ToolTip="利用者の選択を解除して空欄にします"/>
+            <!-- Issue #2300: 一覧に無い利用者を選択中は、その旨の注記をコンボボックスの下に出す -->
+            <StackPanel Grid.Row="5" Grid.Column="1" Margin="0,0,0,8">
+                <StackPanel Orientation="Horizontal">
+                    <ComboBox x:Name="StaffComboBox"
+                              ItemsSource="{Binding StaffList}"
+                              SelectedItem="{Binding SelectedStaff}"
+                              DisplayMemberPath="Name"
+                              FontSize="{DynamicResource BaseFontSize}"
+                              MinWidth="150"
+                              AutomationProperties.Name="利用者を選択"
+                              ToolTip="利用者を選択（任意）（アクセスキー: Alt+U）"/>
+                    <Button Content="×"
+                            Command="{Binding ClearStaffCommand}"
+                            FontSize="{DynamicResource BaseFontSize}"
+                            Padding="6,1"
+                            Margin="4,0,0,0"
+                            VerticalAlignment="Center"
+                            AutomationProperties.Name="利用者をクリア"
+                            ToolTip="利用者の選択を解除して空欄にします"/>
+                </StackPanel>
+                <TextBlock x:Name="UnlistedStaffNoticeText"
+                           Text="{Binding UnlistedStaffNotice}"
+                           Visibility="{Binding IsUnlistedStaffSelected, Converter={StaticResource BoolToVisibilityConverter}}"
+                           TextWrapping="Wrap"
+                           MaxWidth="420"
+                           HorizontalAlignment="Left"
+                           Margin="0,4,0,0"
+                           Foreground="{DynamicResource SecondaryTextBrush}"
+                           FontSize="{DynamicResource SmallFontSize}"
+                           AutomationProperties.AutomationId="UnlistedStaffNotice"
+                           AutomationProperties.Name="{Binding UnlistedStaffNotice}"/>
             </StackPanel>
 
-            <!-- 同行者数 (_C)（Issue #1906: 複数名で同一の交通系ICカードを利用した場合。氏名欄に「外N名」と表示） -->
+            <!-- 同行者数 (_G)（Issue #1906: 複数名で同一の交通系ICカードを利用した場合。氏名欄に「外N名」と表示） -->
             <Label Grid.Row="6" Grid.Column="0"
                    Content="同行者数(_G):"
                    Target="{Binding ElementName=CompanionCountTextBox}"
@@ -376,14 +394,14 @@
                     Visibility="{Binding HasInitialBalanceSuggestion, Converter={StaticResource BoolToVisibilityConverter}}">
                 <DockPanel LastChildFill="True">
                     <Button DockPanel.Dock="Right"
-                            Content="逆算した金額を適用(_G)"
+                            Content="逆算した金額を適用(_R)"
                             Command="{Binding ApplyInitialBalanceSuggestionCommand}"
                             Padding="12,4"
                             Margin="10,0,0,0"
                             VerticalAlignment="Center"
                             FontSize="{DynamicResource BaseFontSize}"
                             AutomationProperties.Name="逆算した金額を受入と残額に適用"
-                            ToolTip="直後の記録から逆算した残高を受入・残額に入力します（アクセスキー: Alt+G）"/>
+                            ToolTip="直後の記録から逆算した残高を受入・残額に入力します（アクセスキー: Alt+R）"/>
                     <TextBlock Text="{Binding InitialBalanceSuggestionText}"
                                TextWrapping="Wrap"
                                VerticalAlignment="Center"

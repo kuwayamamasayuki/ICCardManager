@@ -42,7 +42,8 @@ public partial class MainViewModel
     /// <item><description>貸出中カードの一覧取得</description></item>
     /// <item><description>カード残高ダッシュボードの更新</description></item>
     /// <item><description>職員証スキップ設定の読み込み</description></item>
-    /// <item><description>カードリーダー監視の開始</description></item>
+    /// <item><description>起動時チェック・更新通知（バックグラウンド）と共有モードの接続監視の開始</description></item>
+    /// <item><description>カードリーダー監視の開始（失敗し得るので最後。Issue #2327）</description></item>
     /// </list>
     /// </remarks>
     /// <returns>初期化処理のTask</returns>
@@ -72,9 +73,6 @@ public partial class MainViewModel
             // 警告チェック（ダッシュボードデータを使用して高速化）
             ApplyDataWarnings(settings.WarningBalance);
 
-            // カード読み取り開始
-            await _cardReader.StartReadingAsync();
-
             // Issue #504 / #1689 / #1758: DB を読む起動時チェックはバックグラウンドで、かつ**直列に**実行する
             // （起動を遅延させず、同一接続上のコマンド並走も避ける）。詳細は RunStartupDataChecksAsync を参照。
             _ = RunStartupDataChecksAsync();
@@ -89,6 +87,14 @@ public partial class MainViewModel
             {
                 _sharedModeMonitor.Start();
             }
+
+            // カード読み取り開始（必ず最後に置く）
+            // Issue #2327: 開始は felicalib.dll はあるが Sony NFC ポートソフトウェアが無い等の環境で例外になり、
+            // 例外は MainWindow_Loaded の「初期化エラー」表示まで抜ける。以前はこの行が上の起動時チェック・
+            // 更新通知・共有モードの接続監視より前にあり、例外でそれらが一度も始まらなかった。
+            // カードリーダーと無関係な処理はこの行より前に置くこと（失敗の理由は警告エリアにも出る:
+            // FelicaCardReader が Disconnected の状態と Error を通知する）。
+            await _cardReader.StartReadingAsync();
         }
     }
 
@@ -601,7 +607,7 @@ public partial class MainViewModel
         var activeCardIdms = new HashSet<string>(CardBalanceDashboard.Select(i => i.CardIdm));
         ReplaceWarnings(w => (w.Type == WarningType.BalanceInconsistency
                               || w.Type == WarningType.CardBalanceMismatch)
-                             && !activeCardIdms.Contains(w.CardIdm ?? string.Empty));
+                             && (w.CardIdm is null || !activeCardIdms.Contains(w.CardIdm)));
     }
 
     /// <summary>

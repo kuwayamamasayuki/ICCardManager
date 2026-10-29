@@ -608,45 +608,271 @@ public class LedgerRowEditViewModelTests : IDisposable
     }
 
     /// <summary>
-    /// Issue #1303: 該当氏名の職員がリストに存在しない場合は SelectedStaff が null のままになることを確認
+    /// Issue #1303 / #2300: 該当氏名の職員がリストに存在しない場合は、その利用者をこの行だけの選択肢として
+    /// 一覧の先頭へ加えて選択することを確認（旧仕様は SelectedStaff=null で、保存すると氏名が消えた）
     /// </summary>
     [Fact]
-    public async Task InitializeForEdit_LenderIdmNullAndStaffNameNotInList_LeavesSelectedStaffNull()
+    public async Task InitializeForEdit_LenderIdmNullAndStaffNameNotInList_SelectsUnlistedStaffEntry()
     {
         // Arrange
+        await InitializeForEditWithStaffAsync(lenderIdm: null, staffName: UnlistedStaffName);
+
+        // Assert
+        _viewModel.SelectedStaff.Should().NotBeNull();
+        _viewModel.SelectedStaff!.Name.Should().Be(LedgerRowEditViewModel.FormatUnlistedStaffLabel(UnlistedStaffName, null));
+        _viewModel.IsUnlistedStaffSelected.Should().BeTrue();
+        _viewModel.StaffList.Should().HaveCount(3, "在籍職員 2 名＋この行の一覧に無い利用者 1 名");
+        _viewModel.StaffList[0].Should().BeSameAs(_viewModel.SelectedStaff, "一覧に無い利用者は先頭に置く");
+    }
+
+    #region Issue #2300: 一覧に無い利用者の行の保存
+
+    private const string UnlistedStaffName = "退職 次郎";
+    private const string UnlistedStaffIdm = "DDDD000000000009";
+
+    /// <summary>
+    /// 利用者の情報を指定した行（Id=20）で Edit 初期化する。UpdateAsync は成功を返す。
+    /// </summary>
+    private async Task InitializeForEditWithStaffAsync(string? lenderIdm, string? staffName)
+    {
         var ledger = new Ledger
         {
-            Id = 4,
+            Id = 20,
             CardIdm = TestCardIdm,
             Date = new DateTime(2026, 4, 17),
             Summary = "鉄道（博多～天神）",
-            Income = 0,
             Expense = 210,
             Balance = 800,
-            LenderIdm = null,
-            StaffName = "存在しない人物",
-            Note = string.Empty
+            LenderIdm = lenderIdm,
+            StaffName = staffName,
+            Note = "元の備考"
         };
-        _ledgerRepoMock.Setup(r => r.GetByIdAsync(4)).ReturnsAsync(ledger);
+        _ledgerRepoMock.Setup(r => r.GetByIdAsync(20)).ReturnsAsync(() => ICCardManager.Common.LedgerCloner.Clone(ledger));
+        _ledgerRepoMock.Setup(r => r.UpdateAsync(It.IsAny<Ledger>(), It.IsAny<SQLiteTransaction>())).ReturnsAsync(true);
         var dto = new LedgerDto
         {
-            Id = 4,
+            Id = 20,
             CardIdm = TestCardIdm,
             Date = ledger.Date,
             DateDisplay = "R8.4.17",
             Summary = ledger.Summary,
-            Income = 0,
+            Expense = ledger.Expense,
+            Balance = ledger.Balance,
+            StaffName = staffName
+        };
+        await _viewModel.InitializeForEditAsync(dto);
+    }
+
+    /// <summary>
+    /// 退職（論理削除）した職員の行で備考だけを直して保存しても、氏名と貸出者 IDm が保存前の値で残る（欠陥を突く側）
+    /// </summary>
+    [Fact]
+    public async Task SaveEdit_UnlistedStaff_EditOtherFieldOnly_PreservesStaffNameAndLenderIdm()
+    {
+        await InitializeForEditWithStaffAsync(UnlistedStaffIdm, UnlistedStaffName);
+
+        _viewModel.Note = "備考だけ直した";
+        await _viewModel.SaveCommand.ExecuteAsync(null);
+
+        _viewModel.IsSaved.Should().BeTrue();
+        _ledgerRepoMock.Verify(r => r.UpdateAsync(It.Is<Ledger>(l =>
+            l.Note == "備考だけ直した"
+            && l.StaffName == UnlistedStaffName
+            && l.LenderIdm == UnlistedStaffIdm
+        ), It.IsAny<SQLiteTransaction>()), Times.Once);
+    }
+
+    /// <summary>
+    /// CSV 取込等で IDm を持たない一覧に無い氏名の行は、IDm を空文字にせず null のまま、氏名を残して保存する
+    /// </summary>
+    [Fact]
+    public async Task SaveEdit_UnlistedStaffNameWithoutIdm_PreservesNameAndKeepsIdmNull()
+    {
+        await InitializeForEditWithStaffAsync(lenderIdm: null, staffName: UnlistedStaffName);
+
+        _viewModel.Expense = 230;
+        await _viewModel.SaveCommand.ExecuteAsync(null);
+
+        _ledgerRepoMock.Verify(r => r.UpdateAsync(It.Is<Ledger>(l =>
+            l.Expense == 230 && l.StaffName == UnlistedStaffName && l.LenderIdm == null
+        ), It.IsAny<SQLiteTransaction>()), Times.Once);
+    }
+
+    /// <summary>
+    /// 氏名を持たず IDm だけが残る行も、表示用の選択肢名（「氏名なし（職員証 …、職員一覧にいません）」）を氏名として書き込まず、IDm を残す
+    /// </summary>
+    [Fact]
+    public async Task SaveEdit_UnlistedStaffIdmWithoutName_PreservesIdmAndDoesNotWriteDisplayLabel()
+    {
+        await InitializeForEditWithStaffAsync(UnlistedStaffIdm, staffName: null);
+
+        _viewModel.IsUnlistedStaffSelected.Should().BeTrue();
+        _viewModel.DisplayStaffNamePreview.Should().Be(ICCardManager.Common.StaffNameFormatter.Format(null, 0), "表示用の選択肢名を氏名欄のプレビューに出さない");
+        await _viewModel.SaveCommand.ExecuteAsync(null);
+
+        _ledgerRepoMock.Verify(r => r.UpdateAsync(It.Is<Ledger>(l =>
+            l.LenderIdm == UnlistedStaffIdm && l.StaffName == null
+        ), It.IsAny<SQLiteTransaction>()), Times.Once);
+    }
+
+    /// <summary>
+    /// 一覧に無い利用者を「×」でクリアして保存した場合は、従来どおり氏名・IDm とも null になる（上の保存と対）
+    /// </summary>
+    [Fact]
+    public async Task SaveEdit_UnlistedStaff_Cleared_WritesNull()
+    {
+        await InitializeForEditWithStaffAsync(UnlistedStaffIdm, UnlistedStaffName);
+
+        _viewModel.ClearStaffCommand.Execute(null);
+        _viewModel.IsUnlistedStaffSelected.Should().BeFalse();
+        await _viewModel.SaveCommand.ExecuteAsync(null);
+
+        _ledgerRepoMock.Verify(r => r.UpdateAsync(It.Is<Ledger>(l =>
+            l.StaffName == null && l.LenderIdm == null
+        ), It.IsAny<SQLiteTransaction>()), Times.Once);
+    }
+
+    /// <summary>
+    /// 一覧に無い利用者から別の職員へ選び直した場合は、その職員の IDm・氏名になる
+    /// </summary>
+    [Fact]
+    public async Task SaveEdit_UnlistedStaff_ReselectedListedStaff_WritesSelectedStaff()
+    {
+        await InitializeForEditWithStaffAsync(UnlistedStaffIdm, UnlistedStaffName);
+
+        _viewModel.SelectedStaff = _staffB;
+        _viewModel.IsUnlistedStaffSelected.Should().BeFalse();
+        await _viewModel.SaveCommand.ExecuteAsync(null);
+
+        _ledgerRepoMock.Verify(r => r.UpdateAsync(It.Is<Ledger>(l =>
+            l.StaffName == _staffB.Name && l.LenderIdm == _staffB.StaffIdm
+        ), It.IsAny<SQLiteTransaction>()), Times.Once);
+    }
+
+    /// <summary>
+    /// 一覧に無い利用者 → 別の職員 → 一覧に無い利用者へ戻して保存すると、行に記録されていた値に戻る
+    /// </summary>
+    [Fact]
+    public async Task SaveEdit_UnlistedStaff_ReselectedAndBack_PreservesOriginalValues()
+    {
+        await InitializeForEditWithStaffAsync(UnlistedStaffIdm, UnlistedStaffName);
+        var unlisted = _viewModel.SelectedStaff;
+
+        _viewModel.SelectedStaff = _staffB;
+        _viewModel.SelectedStaff = unlisted;
+        _viewModel.IsUnlistedStaffSelected.Should().BeTrue();
+        await _viewModel.SaveCommand.ExecuteAsync(null);
+
+        _ledgerRepoMock.Verify(r => r.UpdateAsync(It.Is<Ledger>(l =>
+            l.StaffName == UnlistedStaffName && l.LenderIdm == UnlistedStaffIdm
+        ), It.IsAny<SQLiteTransaction>()), Times.Once);
+    }
+
+    /// <summary>
+    /// 一覧に無い利用者のまま保存するときは、保存直前に読み直した行の利用者を残す
+    /// （共有フォルダモードで開いている間に別の PC が利用者を直した場合に、開いたときの古い値で上書きしない）
+    /// </summary>
+    [Fact]
+    public async Task SaveEdit_UnlistedStaff_KeepsStaffReReadAtSave()
+    {
+        await InitializeForEditWithStaffAsync(UnlistedStaffIdm, UnlistedStaffName);
+        // 開いた後に別の PC が利用者を在籍職員 A へ直した
+        _ledgerRepoMock.Setup(r => r.GetByIdAsync(20)).ReturnsAsync(new Ledger
+        {
+            Id = 20,
+            CardIdm = TestCardIdm,
+            Date = new DateTime(2026, 4, 17),
+            Summary = "鉄道（博多～天神）",
             Expense = 210,
             Balance = 800,
-            StaffName = "存在しない人物"
-        };
+            LenderIdm = _staffA.StaffIdm,
+            StaffName = _staffA.Name,
+            Note = "元の備考"
+        });
 
-        // Act
-        await _viewModel.InitializeForEditAsync(dto);
+        _viewModel.Note = "備考だけ直した";
+        await _viewModel.SaveCommand.ExecuteAsync(null);
 
-        // Assert
-        _viewModel.SelectedStaff.Should().BeNull();
+        _ledgerRepoMock.Verify(r => r.UpdateAsync(It.Is<Ledger>(l =>
+            l.Note == "備考だけ直した" && l.StaffName == _staffA.Name && l.LenderIdm == _staffA.StaffIdm
+        ), It.IsAny<SQLiteTransaction>()), Times.Once);
     }
+
+    /// <summary>
+    /// 氏名が空白だけで IDm も無い行は「利用者の記録なし」として扱い、選択肢を加えない。
+    /// 空白の氏名と IDm が残る行は「氏名なし（職員証 …）」の表示名になる（StaffNameFormatter.Format と同じく空白を氏名とみなさない）
+    /// </summary>
+    [Fact]
+    public async Task UnlistedStaff_WhitespaceName_TreatedAsNoName()
+    {
+        LedgerRowEditViewModel.FormatUnlistedStaffLabel(" ", UnlistedStaffIdm)
+            .Should().Be(LedgerRowEditViewModel.FormatUnlistedStaffLabel(null, UnlistedStaffIdm));
+
+        await InitializeForEditWithStaffAsync(lenderIdm: null, staffName: " ");
+
+        _viewModel.SelectedStaff.Should().BeNull();
+        _viewModel.StaffList.Should().HaveCount(2);
+    }
+
+    /// <summary>
+    /// 一覧に無い利用者の表示名は、ドロップダウンで在籍職員と見分けられる目印を付ける。
+    /// 氏名が無く IDm だけの行は、マスクした職員証の IDm を添えて誰の記録か見分けられるようにし、生の IDm は出さない
+    /// </summary>
+    [Fact]
+    public void FormatUnlistedStaffLabel_MarksUnlistedAndMasksIdm()
+    {
+        var named = LedgerRowEditViewModel.FormatUnlistedStaffLabel(UnlistedStaffName, UnlistedStaffIdm);
+        named.Should().StartWith(UnlistedStaffName).And.Contain("職員一覧にいません");
+        named.Should().NotContain(UnlistedStaffIdm, "氏名があれば IDm は添えない");
+
+        var idmOnly = LedgerRowEditViewModel.FormatUnlistedStaffLabel(null, UnlistedStaffIdm);
+        idmOnly.Should().Contain(ICCardManager.Infrastructure.Security.IdmMasker.Mask(UnlistedStaffIdm))
+            .And.Contain("職員一覧にいません");
+        idmOnly.Should().NotContain(UnlistedStaffIdm, "職員証の IDm は認証要素なので生で表示しない");
+    }
+
+    /// <summary>
+    /// 在籍職員の行では一覧に選択肢を足さず、注記も出さない（正当な動作を塞いでいない側）
+    /// </summary>
+    [Fact]
+    public async Task InitializeForEdit_ListedStaff_DoesNotAddUnlistedEntry()
+    {
+        await InitializeForEditWithStaffAsync(_staffA.StaffIdm, _staffA.Name);
+
+        _viewModel.SelectedStaff.Should().BeSameAs(_staffA);
+        _viewModel.IsUnlistedStaffSelected.Should().BeFalse();
+        _viewModel.StaffList.Should().HaveCount(2);
+    }
+
+    /// <summary>
+    /// 一覧に無い利用者の行でも「氏名欄の表示」プレビューは行の氏名から作る（同行者数の入力で確かめる）
+    /// </summary>
+    [Fact]
+    public async Task DisplayStaffNamePreview_UnlistedStaff_UsesRecordedName()
+    {
+        await InitializeForEditWithStaffAsync(UnlistedStaffIdm, UnlistedStaffName);
+
+        _viewModel.CompanionCount = 1;
+
+        _viewModel.DisplayStaffNamePreview.Should().Be(ICCardManager.Common.StaffNameFormatter.Format(UnlistedStaffName, 1));
+        _viewModel.DisplayStaffNamePreview.Should().StartWith(UnlistedStaffName);
+    }
+
+    /// <summary>
+    /// 一覧に無い利用者を選択肢に加えても、初期化直後は「未保存の変更あり」にならない（閉じる確認が出ない）
+    /// </summary>
+    [Fact]
+    public async Task InitializeForEdit_UnlistedStaff_DoesNotMarkUnsavedChanges()
+    {
+        await InitializeForEditWithStaffAsync(UnlistedStaffIdm, UnlistedStaffName);
+
+        _viewModel.BackCommand.Execute(null);
+
+        _viewModel.IsBackRequested.Should().BeTrue();
+        _dialogServiceMock.Verify(d => d.ShowWarningConfirmation(It.IsAny<string>(), It.IsAny<string>()), Times.Never);
+    }
+
+    #endregion
 
     #endregion
 
@@ -2309,6 +2535,253 @@ public class LedgerRowEditViewModelTests : IDisposable
         _ledgerRepoMock.Verify(r => r.UpdateDetailBusStopsAsync(
                 It.IsAny<int>(), It.IsAny<IEnumerable<(int, string)>>(), It.IsAny<SQLiteTransaction>()),
             Times.Never);
+    }
+
+    /// <summary>
+    /// Issue #2306: 往復のバス明細 2 件を持つ台帳（往路＝古い SequenceNumber 2、復路＝新しい 1）。
+    /// </summary>
+    private static Ledger CreateRoundTripBusLedger(string summary, string forwardBusStops, string returnBusStops) => new Ledger
+    {
+        Id = 1,
+        CardIdm = TestCardIdm,
+        Date = new DateTime(2026, 1, 10),
+        Summary = summary,
+        Expense = 460,
+        Balance = 2040,
+        Details = new List<LedgerDetail>
+        {
+            new LedgerDetail { LedgerId = 1, IsBus = true, BusStops = returnBusStops, Amount = 230, Balance = 2040, SequenceNumber = 1, UseDate = new DateTime(2026, 1, 10) },
+            new LedgerDetail { LedgerId = 1, IsBus = true, BusStops = forwardBusStops, Amount = 230, Balance = 2270, SequenceNumber = 2, UseDate = new DateTime(2026, 1, 10) },
+        }
+    };
+
+    /// <summary>
+    /// Issue #2306（欠陥を突く側）: 往復のバス摘要を直して保存すると、往路・復路の両方の明細へ書き戻すこと。
+    /// 旧実装は区間数（1）と明細数（2）が合わないため何もせず、摘要だけが保存されて、
+    /// 統合のたびに明細（旧バス停名）から摘要が作り直されていた。
+    /// </summary>
+    [Fact]
+    public async Task SaveEdit_往復のバス摘要を直すと往路と復路の明細へ書き戻すこと_Issue2306()
+    {
+        // Arrange
+        var ledger = CreateRoundTripBusLedger("バス（天神～博多 往復）", "天神～博多", "博多～天神");
+        var dto = ArrangeBusLedgerForEdit(ledger);
+        List<(int SequenceNumber, string BusStops)>? written = null;
+        _ledgerRepoMock.Setup(r => r.UpdateDetailBusStopsAsync(
+                It.IsAny<int>(), It.IsAny<IEnumerable<(int, string)>>(), It.IsAny<SQLiteTransaction>()))
+            .Callback<int, IEnumerable<(int SequenceNumber, string BusStops)>, SQLiteTransaction>((_, u, _) => written = u.ToList())
+            .ReturnsAsync(true);
+
+        await _viewModel.InitializeForEditAsync(dto);
+        _viewModel.Summary = "バス（天神～大橋 往復）";
+
+        // Act
+        await _viewModel.SaveCommand.ExecuteAsync(null);
+
+        // Assert
+        _viewModel.IsSaved.Should().BeTrue();
+        _viewModel.WarningMessage.Should().BeEmpty("往復は明細へ反映できる形なので警告しない");
+        written.Should().NotBeNull("往復の摘要でも明細へ書き戻すべき");
+        written!.OrderBy(u => u.SequenceNumber).Should().Equal(new[] { (1, "大橋～天神"), (2, "天神～大橋") },
+            "古い明細（往路）へ順向き、新しい明細（復路）へ逆向きを書く");
+
+        // 受け入れ条件: その後に統合（明細からの摘要の再生成）をしても、編集した摘要が保たれる
+        new SummaryGenerator().Generate(ledger.Details.OrderBy(d => d.SequenceNumber).ToList())
+            .Should().Be("バス（天神～大橋 往復）");
+    }
+
+    /// <summary>
+    /// Issue #2306: バス停名を明細へ反映できない形の摘要（区間数が利用の件数と合わない）は、保存前に警告すること。
+    /// 保存は止めない（正当な運用と区別できないため。#1914 と同じ判断）が、無言の成功にしない。
+    /// </summary>
+    [Fact]
+    public async Task Validate_バス停名を明細へ反映できない摘要は警告すること_Issue2306()
+    {
+        // Arrange
+        var ledger = CreateRoundTripBusLedger("バス（天神～博多 往復）", "天神～博多", "博多～天神");
+        var dto = ArrangeBusLedgerForEdit(ledger);
+        _ledgerRepoMock.Setup(r => r.UpdateDetailBusStopsAsync(
+                It.IsAny<int>(), It.IsAny<IEnumerable<(int, string)>>(), It.IsAny<SQLiteTransaction>()))
+            .ReturnsAsync(true);
+
+        await _viewModel.InitializeForEditAsync(dto);
+        _viewModel.WarningMessage.Should().BeEmpty("前提: 編集前は警告なし");
+
+        // Act: 2 件の利用を 1 区間（往復の表記なし）に書き換える
+        _viewModel.Summary = "バス（天神～大橋）";
+
+        // Assert
+        _viewModel.WarningMessage.Should().Contain(LedgerRowEditViewModel.BuildBusStopUnmappableWarning(BusStopSyncFailure.CountMismatch, 2));
+        _viewModel.CanSave.Should().BeTrue("警告であって保存は止めない");
+
+        await _viewModel.SaveCommand.ExecuteAsync(null);
+        _viewModel.IsSaved.Should().BeTrue();
+        _ledgerRepoMock.Verify(r => r.UpdateDetailBusStopsAsync(
+                It.IsAny<int>(), It.IsAny<IEnumerable<(int, string)>>(), It.IsAny<SQLiteTransaction>()),
+            Times.Never, "対応付けられない形は明細へ書き戻さない（位置だけで書くと別の利用へ名前が入る）");
+    }
+
+    /// <summary>
+    /// Issue #2306（対の表明）: バス停名の部分を変えていない編集では警告しないこと。
+    /// 乗継統合された摘要（2 件の利用が 1 区間）は元から対応付けられないため、
+    /// 摘要の変更だけで警告すると、鉄道の区間や表記を直しただけの編集にも警告が出る。
+    /// </summary>
+    [Fact]
+    public async Task Validate_バス停名を変えない摘要の編集では警告しないこと_Issue2306()
+    {
+        // Arrange: 天神→博多→大橋 の乗継が「天神～大橋」に統合された摘要
+        var ledger = CreateRoundTripBusLedger("バス（天神～大橋）", "天神～博多", "博多～大橋");
+        var dto = ArrangeBusLedgerForEdit(ledger);
+
+        await _viewModel.InitializeForEditAsync(dto);
+
+        // Act: バスのブロックはそのまま、前に鉄道の区間を書き足す
+        _viewModel.Summary = "鉄道（薬院～天神）、バス（天神～大橋）";
+
+        // Assert
+        _viewModel.WarningMessage.Should().BeEmpty();
+    }
+
+    /// <summary>
+    /// Issue #2306（コードレビューで検出）: 件数が合っていても往路と復路が隣り合わない往復は反映できない。
+    /// その警告は「区間の数が合わない」「往復は … の形で」と案内しない（事実と違う理由と、いま入力した形を示すことになる）。
+    /// </summary>
+    [Fact]
+    public async Task Validate_往路と復路が隣り合わない往復は理由を区別して警告すること_Issue2306()
+    {
+        // Arrange: 天神→博多／大橋→薬院／博多→天神（古い順。SequenceNumber は大きいほど古い）
+        var date = new DateTime(2026, 1, 10);
+        var ledger = new Ledger
+        {
+            Id = 1,
+            CardIdm = TestCardIdm,
+            Date = date,
+            Summary = "バス（天神～博多 往復、大橋～薬院）",
+            Expense = 690,
+            Balance = 1810,
+            Details = new List<LedgerDetail>
+            {
+                new LedgerDetail { LedgerId = 1, IsBus = true, BusStops = "博多～天神", Amount = 230, Balance = 1810, SequenceNumber = 1, UseDate = date },
+                new LedgerDetail { LedgerId = 1, IsBus = true, BusStops = "大橋～薬院", Amount = 230, Balance = 2040, SequenceNumber = 2, UseDate = date },
+                new LedgerDetail { LedgerId = 1, IsBus = true, BusStops = "天神～博多", Amount = 230, Balance = 2270, SequenceNumber = 3, UseDate = date },
+            }
+        };
+        var dto = ArrangeBusLedgerForEdit(ledger);
+        await _viewModel.InitializeForEditAsync(dto);
+
+        // Act: 件数は 3＝3 のまま、往復の折り返し点だけを直す
+        _viewModel.Summary = "バス（天神～博多駅前 往復、大橋～薬院）";
+
+        // Assert
+        var expected = LedgerRowEditViewModel.BuildBusStopUnmappableWarning(BusStopSyncFailure.RoundTripNotAdjacent, 3);
+        _viewModel.WarningMessage.Should().Contain(expected);
+        _viewModel.WarningMessage.Should().NotContain("区間の数が利用の件数と合わない", "件数は合っているので事実と違う");
+        _viewModel.WarningMessage.Should().Contain("往復の表記を使わず", "反映できる書き方（利用 1 件ごとに区切る）を案内する");
+    }
+
+    /// <summary>
+    /// Issue #2306（コードレビュー 3 回目で検出）: 編集前にあったバスのブロックが 1 つも読み取れなくなった摘要
+    /// （半角括弧「バス(…)」）は、明細へ書き戻されず統合で編集が失われるので警告する。
+    /// </summary>
+    [Fact]
+    public async Task Validate_バスのブロックが読み取れなくなった摘要は警告すること_Issue2306()
+    {
+        var ledger = CreateBusLedger("バス（天神～博多）");
+        var dto = ArrangeBusLedgerForEdit(ledger);
+        await _viewModel.InitializeForEditAsync(dto);
+
+        _viewModel.Summary = "バス(天神～大橋)";
+
+        _viewModel.WarningMessage.Should().Contain(
+            LedgerRowEditViewModel.BuildBusStopUnmappableWarning(BusStopSyncFailure.BusBlockMissing, 1));
+    }
+
+    /// <summary>
+    /// 上の対: 全角括弧の対応が取れていない形は #1914 の警告だけを出し、重ねて出さない。
+    /// 編集前からバスのブロックが無い摘要も対象外。
+    /// </summary>
+    [Fact]
+    public async Task Validate_括弧の不均衡や元からバスのブロックが無い摘要では重ねて警告しないこと_Issue2306()
+    {
+        var ledger = CreateBusLedger("バス（天神～博多）");
+        var dto = ArrangeBusLedgerForEdit(ledger);
+        await _viewModel.InitializeForEditAsync(dto);
+        var missing = LedgerRowEditViewModel.BuildBusStopUnmappableWarning(BusStopSyncFailure.BusBlockMissing, 1);
+
+        _viewModel.Summary = "バス（天神～大橋";
+        _viewModel.WarningMessage.Should().Contain("全角括弧「（」「）」の対応が取れていません");
+        _viewModel.WarningMessage.Should().NotContain(missing);
+
+        var plain = CreateBusLedger("手入力の摘要");
+        var plainDto = ArrangeBusLedgerForEdit(plain);
+        await _viewModel.InitializeForEditAsync(plainDto);
+        _viewModel.Summary = "手入力の摘要（修正）";
+        _viewModel.WarningMessage.Should().NotContain(missing);
+    }
+
+    /// <summary>
+    /// Issue #2306（コードレビュー 5 回目で検出）: バス停名の並びだけを変えた編集（往復の向きを逆に書いた）は
+    /// 明細へ書き戻されず、次の統合で戻るので警告する。
+    /// </summary>
+    [Fact]
+    public async Task Validate_バス停名の並びだけを変えた編集は警告すること_Issue2306()
+    {
+        var ledger = CreateRoundTripBusLedger("バス（天神～博多 往復）", "天神～博多", "博多～天神");
+        var dto = ArrangeBusLedgerForEdit(ledger);
+        await _viewModel.InitializeForEditAsync(dto);
+
+        _viewModel.Summary = "バス（博多～天神 往復）";
+
+        var expected = LedgerRowEditViewModel.BuildBusStopUnmappableWarning(BusStopSyncFailure.ReorderOnly, 2);
+        _viewModel.WarningMessage.Should().Contain(expected);
+        expected.Should().Contain("明細の利用の順と違い").And.EndWith("利用した順に並べて入力してください。");
+    }
+
+    /// <summary>
+    /// 上の対: 旧生成器の並びの摘要を、今の生成どおりの並びへ戻す編集は警告しない（作り直しと一致する）。
+    /// </summary>
+    [Fact]
+    public async Task Validate_旧生成器の並びを今の生成どおりに戻す編集は警告しないこと_Issue2306()
+    {
+        var ledger = CreateRoundTripBusLedger("バス（天神～博多、★）", "★", "天神～博多");
+        var dto = ArrangeBusLedgerForEdit(ledger);
+        await _viewModel.InitializeForEditAsync(dto);
+
+        _viewModel.Summary = "バス（★、天神～博多）";
+
+        _viewModel.WarningMessage.Should().BeEmpty();
+    }
+
+    /// <summary>
+    /// Issue #2306: 警告文言の品質（何が・なぜ・どうすれば、行動指示で終わる）を理由ごとに確かめる。
+    /// 往復の書き方は組織設定の接尾辞から作る（リテラルを直書きしない。#1818）。
+    /// </summary>
+    [Theory]
+    [InlineData(nameof(BusStopSyncFailure.CountMismatch), "区間の数が利用の件数と合わない")]
+    [InlineData(nameof(BusStopSyncFailure.RoundTripNotAdjacent), "往復の相手に当たるバス利用が続いていない離れた位置にある")]
+    [InlineData(nameof(BusStopSyncFailure.RoundTripOnSingleUsage), "バス利用が1件だけなのに往復")]
+    [InlineData(nameof(BusStopSyncFailure.MalformedRoundTrip), "往復の表記の前が「乗車～降車」の形")]
+    [InlineData(nameof(BusStopSyncFailure.BusBlockMissing), "全角の括弧）のバス停名が見つからない")]
+    public void BuildBusStopUnmappableWarning_理由ごとに3要素を含み行動指示で終わること_Issue2306(
+        string failureName, string reason)
+    {
+        // BusStopSyncFailure は internal のため、public なテストメソッドの引数には名前で渡す
+        var failure = (BusStopSyncFailure)Enum.Parse(typeof(BusStopSyncFailure), failureName);
+        var message = LedgerRowEditViewModel.BuildBusStopUnmappableWarning(failure, 2);
+
+        message.Should().Contain("2件", "何が（この履歴のバス利用の件数）");
+        message.Should().Contain(reason, "なぜ（理由ごとに出し分ける）");
+        message.Should().Contain("統合したときに", "放置すると何が起きるか");
+        message.Should().Contain("バス利用1件ごとに「乗車～降車」を利用した順に「、」で区切って", "どうすれば（どの理由でも反映できる書き方）");
+        message.Should().EndWith("入力してください。");
+        if (failure == BusStopSyncFailure.CountMismatch)
+        {
+            message.Should().Contain($"乗車～降車{SummaryGenerator.RoundTripSuffix}", "件数の不一致では往復のまとめ方も示す");
+        }
+        else
+        {
+            message.Should().NotContain($"乗車～降車{SummaryGenerator.RoundTripSuffix}", "往復の表記が原因のときに往復の形を勧めない");
+        }
     }
 
     #endregion

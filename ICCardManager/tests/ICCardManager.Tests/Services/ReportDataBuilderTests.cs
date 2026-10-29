@@ -467,6 +467,55 @@ public class ReportDataBuilderTests
         result.CumulativeTotal.Balance.Should().Be(6590);           // 残高は加算されない
     }
 
+    /// <summary>
+    /// Issue #2326: 3 月繰越（導入行「前年度より繰越」）で紙の累計を入力して登録した既存のカードは、
+    /// 年度累計に紙の累計を加算しないこと（DB の累計は残ったまま、帳票側で加算しない）
+    /// </summary>
+    /// <remarks>
+    /// #2326 より前の登録では、3 月繰越でも紙の 3 月末時点の累計（旧年度のもの）が保存され、繰越年度は新年度になる。
+    /// 加算すると新年度の 5 月以降の累計行が「受入 − 払出 = 残額」を満たさなくなる。
+    /// 対（年度途中の繰越は加算する）は <see cref="BuildAsync_MidYearCarryover_AddsCarryoverTotalsToCumulative"/>。
+    /// </remarks>
+    [Fact]
+    public async Task BuildAsync_FiscalYearStartCarryoverWithSavedPaperTotals_DoesNotAddToCumulative()
+    {
+        // Arrange: 2025/4/1 登録の 3 月繰越。DB には旧年度の紙の累計 120,000 / 95,000 が残っている
+        var card = new IcCard
+        {
+            CardIdm = TestCardIdm,
+            CardType = "はやかけん",
+            CardNumber = "001",
+            CarryoverIncomeTotal = 120000,
+            CarryoverExpenseTotal = 95000,
+            CarryoverFiscalYear = 2025
+        };
+        _cardRepositoryMock
+            .Setup(r => r.GetByIdmAsync(TestCardIdm, true))
+            .ReturnsAsync(card);
+
+        var introduction = CreateTestLedger(1, TestCardIdm, new DateTime(2025, 4, 1),
+            SummaryGenerator.GetCarryoverFromPreviousYearSummary(), 6000, 0, 6000);
+        var mayUsage = CreateTestLedger(2, TestCardIdm, new DateTime(2025, 5, 10), "鉄道（天神～博多）", 0, 210, 5790);
+        var juneUsage = CreateTestLedger(3, TestCardIdm, new DateTime(2025, 6, 3), "鉄道（博多～天神）", 0, 300, 5490);
+
+        SetupMonthlyLedgers(TestCardIdm, 2025, 4, new List<Ledger> { introduction });
+        SetupMonthlyLedgers(TestCardIdm, 2025, 5, new List<Ledger> { mayUsage });
+        SetupMonthlyLedgers(TestCardIdm, 2025, 6, new List<Ledger> { juneUsage });
+        SetupDateRangeLedgers(TestCardIdm, new DateTime(2025, 4, 1), new DateTime(2025, 6, 30),
+            new List<Ledger> { introduction, mayUsage, juneUsage });
+
+        // Act
+        var result = await _builder.BuildAsync(TestCardIdm, 2025, 6);
+
+        // Assert: 累計は導入行の受入 6,000 とアプリの払出 510 だけ。受入 − 払出 = 残額 が成り立つ
+        result.CumulativeTotal.Should().NotBeNull();
+        result.CumulativeTotal.Income.Should().Be(6000, "旧年度の紙の累計受入 120,000 を加算しない");
+        result.CumulativeTotal.Expense.Should().Be(510, "旧年度の紙の累計払出 95,000 を加算しない");
+        result.CumulativeTotal.Balance.Should().Be(5490);
+        (result.CumulativeTotal.Income - result.CumulativeTotal.Expense)
+            .Should().Be(result.CumulativeTotal.Balance, "年度の累計で受入 − 払出 = 残額 が成り立つこと");
+    }
+
     [Fact]
     public async Task BuildAsync_MidYearCarryover_NextFiscalYear_DoesNotAddCarryoverTotals()
     {
