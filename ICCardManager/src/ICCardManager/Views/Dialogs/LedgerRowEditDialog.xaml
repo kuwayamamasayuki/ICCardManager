@@ -273,7 +273,7 @@
                            AutomationProperties.Name="{Binding UnlistedStaffNotice}"/>
             </StackPanel>
 
-            <!-- 同行者数 (_C)（Issue #1906: 複数名で同一の交通系ICカードを利用した場合。氏名欄に「外N名」と表示） -->
+            <!-- 同行者数 (_G)（Issue #1906: 複数名で同一の交通系ICカードを利用した場合。氏名欄に「外N名」と表示） -->
             <Label Grid.Row="6" Grid.Column="0"
                    Content="同行者数(_G):"
                    Target="{Binding ElementName=CompanionCountTextBox}"
@@ -394,14 +394,14 @@
                     Visibility="{Binding HasInitialBalanceSuggestion, Converter={StaticResource BoolToVisibilityConverter}}">
                 <DockPanel LastChildFill="True">
                     <Button DockPanel.Dock="Right"
-                            Content="逆算した金額を適用(_G)"
+                            Content="逆算した金額を適用(_R)"
                             Command="{Binding ApplyInitialBalanceSuggestionCommand}"
                             Padding="12,4"
                             Margin="10,0,0,0"
                             VerticalAlignment="Center"
                             FontSize="{DynamicResource BaseFontSize}"
                             AutomationProperties.Name="逆算した金額を受入と残額に適用"
-                            ToolTip="直後の記録から逆算した残高を受入・残額に入力します（アクセスキー: Alt+G）"/>
+                            ToolTip="直後の記録から逆算した残高を受入・残額に入力します（アクセスキー: Alt+R）"/>
                     <TextBlock Text="{Binding InitialBalanceSuggestionText}"
                                TextWrapping="Wrap"
                                VerticalAlignment="Center"

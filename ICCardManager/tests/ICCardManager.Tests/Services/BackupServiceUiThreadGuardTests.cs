@@ -6,10 +6,13 @@ using FluentAssertions;
 using ICCardManager.Common;
 using ICCardManager.Data;
 using ICCardManager.Data.Repositories;
+using ICCardManager.Infrastructure.Caching;
 using ICCardManager.Models;
 using ICCardManager.Services;
 using ICCardManager.Tests.Data;
 using ICCardManager.Tests.Infrastructure;
+using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Options;
 using Moq;
 using Xunit;
 
@@ -155,6 +158,32 @@ public class BackupServiceUiThreadGuardTests : IDisposable
             + Environment.NewLine + logger.FormatEntries());
         File.Exists(backupPath).Should().BeTrue(
             "成功時はバックアップファイルが実際に生成されるべき");
+    }
+
+    /// <summary>
+    /// Issue #2304: 手動バックアップ（F6 の「バックアップを作成」）は UI スレッドから呼ばれる。
+    /// 作成に続く成功日時の記録（settings への書き込み）も UI スレッドガードに抵触せず、実際に記録されるべき。
+    /// </summary>
+    [Fact]
+    public async Task CreateManualBackupAsync_UIスレッド模擬時でも作成と成功日時の記録ができること()
+    {
+        using var dbContext = new DbContext(_dbPath);
+        dbContext.InitializeDatabase();
+        using var cacheService = new CacheService(NullLogger<CacheService>.Instance);
+        var settingsRepository = new SettingsRepository(dbContext, cacheService, Options.Create(new CacheOptions()));
+
+        var logger = new RecordingLogger<BackupService>();
+        var service = new BackupService(dbContext, settingsRepository, logger);
+
+        var backupPath = Path.Combine(_backupDirectory, "ui_thread_manual.db");
+
+        var result = await SimulatedUiThread.InvokeAsync(() => service.CreateManualBackupAsync(backupPath));
+
+        result.Should().BeTrue("実際のログ:" + Environment.NewLine + logger.FormatEntries());
+        File.Exists(backupPath).Should().BeTrue();
+        (await settingsRepository.GetAsync(SettingsRepository.KeyLastBackupSuccessAt)).Should().NotBeNullOrEmpty(
+            "記録が UI スレッドガードで失敗すると Warning ログだけ出て記録されない。実際のログ:"
+            + Environment.NewLine + logger.FormatEntries());
     }
 
     /// <summary>

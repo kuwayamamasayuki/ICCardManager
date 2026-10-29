@@ -78,6 +78,8 @@ public class ScreenTransitionDiagramConsistencyTests
     {
         "交通系ICカードの削除",
         "貸出記録の作成",
+        // Issue #2322: 払い戻しは台帳に「払戻しによる払出」の行を作るため、確認の後に認証する
+        "交通系ICカードの払い戻し",
         "職員の登録",
         "職員情報の変更",
         "職員の復元",

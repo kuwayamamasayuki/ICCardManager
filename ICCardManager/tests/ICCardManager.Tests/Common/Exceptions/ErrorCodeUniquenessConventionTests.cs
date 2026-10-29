@@ -77,6 +77,52 @@ public class ErrorCodeUniquenessConventionTests
     }
 
     /// <summary>
+    /// 廃止したエラーコード（欠番）。過去のログ・問い合わせに残っているため、別の原因へ再利用しない。
+    /// </summary>
+    /// <remarks>
+    /// 欠番はコメントだけでは守れない — 「次の空き番号」を探す人はコメントの無いファイルを見て採番する。
+    /// 廃止するときはここへ足す（理由も添える）。
+    /// </remarks>
+    private static readonly IReadOnlyDictionary<string, string> RetiredCodes = new Dictionary<string, string>
+    {
+        // Issue #2327: CardReaderException.ReconnectFailed（試行回数つきの再接続失敗）。本番の呼び出し元が無く撤去した
+        ["CR008"] = "CardReaderException.ReconnectFailed（Issue #2327 で撤去）",
+    };
+
+    /// <summary>
+    /// 廃止したエラーコードが本番コードで再び割り当てられていないこと（Issue #2327）
+    /// </summary>
+    [Fact]
+    public void 廃止したエラーコードが再利用されていないこと()
+    {
+        var reused = CollectErrorCodes()
+            .Where(e => RetiredCodes.ContainsKey(e.Code))
+            .Select(e => $"{e.Code}（{RetiredCodes[e.Code]}）: {e.Location}")
+            .ToList();
+
+        reused.Should().BeEmpty(
+            "廃止したエラーコードは過去のログや問い合わせに残っており、別の原因へ再利用すると受け取った側が原因を取り違える。" +
+            "新しいコードは欠番を避けて採番してください。再利用: " + string.Join(", ", reused));
+    }
+
+    /// <summary>
+    /// 廃止したコードを割り当てる形が、抽出で実際に拾えること（上の検査の空振り防止）
+    /// </summary>
+    /// <remarks>
+    /// 抽出が欠番の形を拾えなければ、上の検査は再利用されても緑のままになる。
+    /// 一覧の全コードについて、本番の採番と同じ書き方のサンプルで固定する。
+    /// </remarks>
+    [Fact]
+    public void 廃止したエラーコードを割り当てる形は抽出で拾えること()
+    {
+        RetiredCodes.Should().NotBeEmpty();
+        foreach (var code in RetiredCodes.Keys)
+        {
+            ExtractCodes($"const string errorCode = \"{code}\";").Should().Equal(new[] { code }, code);
+        }
+    }
+
+    /// <summary>
     /// 同じファイルで採番するエラーコードは同じ接頭辞（分類）を持つこと
     /// </summary>
     /// <remarks>

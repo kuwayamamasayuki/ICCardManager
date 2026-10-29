@@ -981,22 +981,32 @@ ORDER BY l.card_idm ASC, l.date ASC, l.id ASC";
         // 「（貸出中）」というプレースホルダであり利用実績ではないため（帳票でも出力しない）。
 
         /// <summary>
-        /// 利用実績の集計から除外する「繰越レコード」の条件。
+        /// 利用実績の集計から除外する「導入行」（カード登録時に書く行）の条件。
         /// </summary>
         /// <remarks>
         /// <para>
-        /// 「新規購入」と「○月から繰越」（紙の出納簿から年度途中で移行したカード、Issue #510）は
+        /// 「新規購入」と「○月から繰越」（紙の出納簿から年度途中で移行したカード、Issue #510）、
+        /// および繰越月を 3 月にして登録したカードの「前年度より繰越」（Issue #2326）は
         /// 台帳に実レコードとして保存されるが、**利用実績ではない**。これを数えると
         /// 一度も使っていないカードが「利用1回・稼働率 &gt; 0%」に見え、「遊んでいるカードの発見」
         /// という目的に直接反する。
         /// </para>
         /// <para>
-        /// 条件は <c>GetByDateRangeAsync</c> の ORDER BY および <see cref="Models.Ledger.IsCarryover"/>
-        /// と同じ判定（「新規購入」リテラル＋繰越 LIKE パターン）を使う。繰越側のパターンは
+        /// 「新規購入」と「○月から繰越」の判定は <c>GetByDateRangeAsync</c> の ORDER BY（<see cref="CarryoverFirstSortKey"/>）および
+        /// <see cref="Models.Ledger.IsCarryover"/> と同じ（「新規購入」リテラル＋繰越 LIKE パターン）。これらは帳票用で
+        /// 「前年度より繰越」を含まないため、本条件はその 2 種に「前年度より繰越」を加えた 3 種になる（下記）。繰越側のパターンは
         /// <c>'%月から繰越'</c> のハードコードではなく、組織設定 <c>MidYearCarryoverFormat</c> 由来の
         /// <c>SummaryGenerator.GetMidYearCarryoverLikePattern</c> をパラメータバインドする
         /// （Issue #1749。書式カスタム時に SQL だけが追従しない乖離の防止）。
-        /// 本条件を含むクエリは <see cref="AddMidYearCarryoverParameter"/> を必ず併用すること。
+        /// 本条件を含むクエリは <see cref="AddInitialRecordExclusionParameters"/> を必ず併用すること。
+        /// </para>
+        /// <para>
+        /// 判定する行の集合は <see cref="Models.Ledger.IsInitialRecordSummary"/>（#2046 / #2237）と同じ 3 種。
+        /// 「前年度より繰越」は帳票では in-memory 合成される行だが、3 月を繰越月にして登録したカードでは
+        /// 導入行として DB に保存される（日付は新年度の 4/1、受入＝残額、貸出者なし）。#2326 まではこの条件から
+        /// 漏れており、登録しただけのカードが「利用 1 回・稼働率 &gt; 0%」・最終利用日 4/1 に見え、
+        /// 月別利用額にも払出 0 の「（職員名なし）」系列が立っていた。摘要は組織設定由来の
+        /// <c>SummaryGenerator.GetCarryoverFromPreviousYearSummary</c> をパラメータバインドする（#1749 と同じ）。
         /// 対応関係は <c>LedgerRepositoryAggregationTests</c> /
         /// <c>LedgerRepositoryMidYearCarryoverPatternTests</c> が
         /// <c>SummaryGenerator.GetMidYearCarryoverSummary</c> の生成結果で検証している。
@@ -1013,7 +1023,18 @@ ORDER BY l.card_idm ASC, l.date ASC, l.id ASC";
         /// </para>
         /// </remarks>
         private const string ExcludeCarryoverCondition =
-            @"AND summary <> '新規購入' AND summary NOT LIKE @midYearCarryoverPattern ESCAPE '\'";
+            @"AND summary <> '新規購入' AND summary NOT LIKE @midYearCarryoverPattern ESCAPE '\' AND summary <> @previousYearCarryoverSummary";
+
+        /// <summary>
+        /// <see cref="ExcludeCarryoverCondition"/> が参照するパラメータ（繰越の LIKE パターンと
+        /// 「前年度より繰越」の摘要。いずれも組織設定由来）をコマンドへバインドする（Issue #2326）。
+        /// </summary>
+        private static void AddInitialRecordExclusionParameters(SQLiteCommand command)
+        {
+            AddMidYearCarryoverParameter(command);
+            command.Parameters.AddWithValue(
+                "@previousYearCarryoverSummary", SummaryGenerator.GetCarryoverFromPreviousYearSummary());
+        }
 
         /// <summary>
         /// 職員別の利用額（<see cref="GetMonthlyUsageByLenderAsync"/>）から除外する「払戻台帳」の条件（Issue #2157）。
@@ -1073,7 +1094,9 @@ ORDER BY l.card_idm ASC, l.date ASC, l.id ASC";
         /// 「新規購入・繰越レコードを同日の先頭に固定する」ORDER BY のソートキー（Issue #590）。
         /// </summary>
         /// <remarks>
-        /// <see cref="ExcludeCarryoverCondition"/> と同じ判定を肯定形で使う。3 クエリ
+        /// 「新規購入」と「○月から繰越」の 2 種を肯定形で判定する（<see cref="Models.Ledger.IsCarryover"/> と同じ）。
+        /// <see cref="ExcludeCarryoverCondition"/> は Issue #2326 で「前年度より繰越」を加えた 3 種になったが、
+        /// 並べ替えは帳票の並び（#590）に関わるため変えていない。3 クエリ
         /// （<c>GetByDateRangeAsync</c> / <c>GetPagedAsync</c> の CTE 内・外側）に同一の
         /// CASE 式を書き写していた重複を 1 か所へ集約（Issue #1749 レビュー指摘）。
         /// 本キーを含むクエリも <see cref="AddMidYearCarryoverParameter"/> を必ず併用すること。
@@ -1100,7 +1123,7 @@ WHERE is_lent_record = 0
   {ExcludeCarryoverCondition}
 GROUP BY card_idm";
 
-            AddMidYearCarryoverParameter(command);
+            AddInitialRecordExclusionParameters(command);
 
             using var reader = await command.ExecuteReaderAsync().ConfigureAwait(false);
             while (await reader.ReadAsync().ConfigureAwait(false))
@@ -1134,7 +1157,7 @@ WHERE date BETWEEN @fromDate AND @toDate
 GROUP BY card_idm";
 
             AddDateRangeParameters(command, fromDate, toDate);
-            AddMidYearCarryoverParameter(command);
+            AddInitialRecordExclusionParameters(command);
 
             using var reader = await command.ExecuteReaderAsync().ConfigureAwait(false);
             while (await reader.ReadAsync().ConfigureAwait(false))
@@ -1179,7 +1202,7 @@ GROUP BY ym, lender, staff
 ORDER BY ym, staff";
 
             AddDateRangeParameters(command, fromDate, toDate);
-            AddMidYearCarryoverParameter(command);
+            AddInitialRecordExclusionParameters(command);
 
             using var reader = await command.ExecuteReaderAsync().ConfigureAwait(false);
             while (await reader.ReadAsync().ConfigureAwait(false))

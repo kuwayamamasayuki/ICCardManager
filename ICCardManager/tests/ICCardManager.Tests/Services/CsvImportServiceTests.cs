@@ -1915,6 +1915,9 @@ FEDCBA9876543210,鈴木花子,002,テスト2";
 
         _ledgerRepositoryMock.Setup(x => x.GetLatestBeforeDateAsync("0123456789ABCDEF", It.IsAny<DateTime>()))
             .ReturnsAsync(new Ledger { CardIdm = "0123456789ABCDEF", Balance = 5000, Date = new DateTime(2024, 1, 14) });
+        // Issue #2307: 重複キーは検証の段で読むため、準備として既存の履歴なしを返す（期待値は不変）
+        _ledgerRepositoryMock.Setup(x => x.GetExistingLedgerKeysAsync(It.IsAny<IEnumerable<string>>()))
+            .ReturnsAsync(new HashSet<(string, DateTime, string, int, int, int)>());
 
         // Act
         var result = await _service.ImportLedgersAsync(filePath);

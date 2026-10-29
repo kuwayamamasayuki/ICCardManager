@@ -101,6 +101,51 @@ public partial class SettingsViewModel : ViewModelBase
     private bool _isSaved;
 
     /// <summary>
+    /// 設定の読み込みが成功して終わったかどうか（Issue #2305）
+    /// </summary>
+    /// <remarks>
+    /// 読み込みが終わるまで（失敗したときを含む）、画面の項目は既定値（部署種別は市長事務部局など）のまま。保存は画面の全項目を書くため、
+    /// その間に保存すると、変えていない設定まで既定値で上書きする。読み込み中は処理中オーバーレイが出るがマウスしか遮らず、
+    /// 既定ボタンの Enter や Alt+S は届く。そこで「成功した」ときだけ保存できるようにする（失敗だけを止めると読み込み中が漏れる）。
+    /// 設定の読み込みは再試行を通らない（共有モードで一時的に DB へ接続できないだけでも失敗する）。
+    /// </remarks>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(CanSaveSettings))]
+    private bool _isSettingsLoaded;
+
+    /// <summary>
+    /// 設定の読み込みに失敗したかどうか（失敗の警告を、状態欄とは別に出し続けるため。Issue #2305）
+    /// </summary>
+    /// <remarks>
+    /// 状態欄はほかの操作（「デフォルトに戻す」等）の案内で上書きされ、保存ボタンが押せない理由が消えるため、別の表示にする。
+    /// </remarks>
+    [ObservableProperty]
+    private bool _isSettingsLoadFailed;
+
+    /// <summary>
+    /// 保存ボタンを押せるかどうか（設定の読み込みが成功して終わったこと。Issue #2305）
+    /// </summary>
+    public bool CanSaveSettings => IsSettingsLoaded;
+
+    /// <summary>
+    /// 設定の読み込みに失敗したときに画面へ出す警告（Issue #2305）
+    /// </summary>
+    public string SettingsLoadFailedNotice => SettingsLoadFailedMessage;
+
+    /// <summary>
+    /// 読み込みが終わる前に保存しようとしたときの案内（Issue #2305）
+    /// </summary>
+    internal const string SettingsNotLoadedMessage =
+        "設定の読み込みが終わっていないため、まだ保存できません。読み込みが終わってから、もう一度「保存」を押してください。";
+
+    /// <summary>
+    /// 設定の読み込みに失敗したときの案内（Issue #2305）
+    /// </summary>
+    internal const string SettingsLoadFailedMessage =
+        "設定を読み込めなかったため、この画面からは保存できません（このまま保存すると、変えていない設定まで初期値で上書きされます）。" +
+        "データベース（共有フォルダー）に接続できることを確かめてから、この画面を閉じて開き直してください。";
+
+    /// <summary>
     /// Issue #1279: 最初にエラーが発生したフィールドのプロパティ名。
     /// Dialog のコードビハインドがこの値を参照し、該当コントロールへフォーカスを移動する。
     /// エラーなしの場合は null。
@@ -316,12 +361,31 @@ public partial class SettingsViewModel : ViewModelBase
     /// <summary>
     /// 設定を読み込み
     /// </summary>
+    /// <remarks>
+    /// Issue #2305: 読む前に設定のキャッシュを破棄し、開くたびに DB から読み直す。保存（一括保存）は画面の全項目を書くため、
+    /// TTL キャッシュ（既定 5 分・共有モード 3 分）の古い値を初期値にすると、共有モードで他の PC がその後に変えた設定
+    /// （部署種別など）を、別の項目だけを変えて保存したときに古い値へ巻き戻す。読み直しても、画面を開いてから保存するまでの間に
+    /// 他の PC が変えた値は巻き戻り得る（変えた項目だけを書く根本対策は別 Issue）。
+    /// </remarks>
     [RelayCommand]
     public async Task LoadSettingsAsync()
     {
         using (BeginBusy("読み込み中..."))
         {
-            var settings = await _settingsRepository.GetAppSettingsAsync();
+            IsSettingsLoaded = false;
+            IsSettingsLoadFailed = false;
+            _settingsRepository.InvalidateCache();
+            AppSettings settings;
+            try
+            {
+                settings = await _settingsRepository.GetAppSettingsAsync();
+            }
+            catch
+            {
+                // Issue #2305: 既定値のまま保存させない（呼び出し元の SettingsDialog がエラーを表示する）
+                IsSettingsLoadFailed = true;
+                throw;
+            }
 
             WarningBalance = settings.WarningBalance;
             BackupPath = settings.BackupPath;
@@ -357,6 +421,9 @@ public partial class SettingsViewModel : ViewModelBase
 
             HasChanges = false;
             SetStatus(string.Empty, false);
+
+            // Issue #2305: すべての項目を読み込んだ値にしてから保存を許す
+            IsSettingsLoaded = true;
         }
     }
 
@@ -368,6 +435,17 @@ public partial class SettingsViewModel : ViewModelBase
     {
         // Issue #1279: 検証前にエラーフィールド情報をリセット
         FirstErrorField = null;
+
+        // Issue #2305: 読み込みが成功して終わる前（読み込み中・失敗。項目が既定値のまま）は保存しない
+        if (!IsSettingsLoaded)
+        {
+            // 失敗は専用の警告が出し続けている。読み込み中に Enter / Alt+S が届いたときだけ状態欄で案内する
+            if (!IsSettingsLoadFailed)
+            {
+                SetStatus(SettingsNotLoadedMessage, true);
+            }
+            return;
+        }
 
         // バリデーション
         var balanceResult = _validationService.ValidateWarningBalance(WarningBalance);

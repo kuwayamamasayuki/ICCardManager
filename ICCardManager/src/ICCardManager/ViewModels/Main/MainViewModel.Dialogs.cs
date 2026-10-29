@@ -183,6 +183,14 @@ public partial class MainViewModel
     }
 
     /// <summary>
+    /// カード単位の警告が指す交通系ICカードを取得する。対象カードを持たない警告（<see cref="WarningItem.CardIdm"/> が null）は null
+    /// </summary>
+    private async Task<IcCard?> FindWarningCardAsync(WarningItem warning)
+    {
+        return warning.CardIdm is null ? null : await _cardRepository.GetByIdmAsync(warning.CardIdm);
+    }
+
+    /// <summary>
     /// Issue #672: 警告クリック時の処理
     /// </summary>
     [RelayCommand]
@@ -197,7 +205,7 @@ public partial class MainViewModel
         {
             case WarningType.LowBalance:
                 // 残額警告: 直接カード履歴を表示
-                await History.ShowCardHistoryAsync(await _cardRepository.GetByIdmAsync(warning.CardIdm));
+                await History.ShowCardHistoryAsync(await FindWarningCardAsync(warning));
                 break;
 
             case WarningType.CardBalanceMismatch:
@@ -206,17 +214,24 @@ public partial class MainViewModel
                 // （警告の文言がその操作を案内している）。
                 // ここで再判定はしない（実残額はカードがリーダーに載っているときしか読めず、
                 // 読めないまま「解消した」と判断すると警告が黙って消える）。
-                await History.ShowCardHistoryForBalanceMismatchAsync(await _cardRepository.GetByIdmAsync(warning.CardIdm));
+                await History.ShowCardHistoryForBalanceMismatchAsync(await FindWarningCardAsync(warning));
                 break;
 
             case WarningType.BalanceInconsistency:
                 // Issue #1052: 残高不整合警告: カード履歴を表示し、不整合行をハイライト
-                var card = await _cardRepository.GetByIdmAsync(warning.CardIdm);
+                var card = await FindWarningCardAsync(warning);
                 if (card != null)
                 {
                     // Issue #2007: 導入時残高の誤りなら導入行の日付から表示する（期間の決定とハイライトは履歴パネル側）
                     await History.ShowBalanceInconsistencyAsync(card);
                 }
+                break;
+
+            case WarningType.RefundedCardLent:
+                // Issue #2322: 払戻済なのに貸出中のカード。払戻済のカードはタッチで返却できず、残高ダッシュボードにも
+                // 出ないので、ここが履歴を開く入口になる。最も古い貸出中の行の月から開き、職員が貸出中の行を削除して直す
+                // （削除すると貸出中一覧が読み直され、この警告も消える）
+                await History.ShowRefundedCardLentHistoryAsync(await FindWarningCardAsync(warning));
                 break;
 
             case WarningType.IncompleteBusStop:
