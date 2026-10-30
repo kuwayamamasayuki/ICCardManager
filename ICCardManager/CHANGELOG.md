@@ -138,6 +138,7 @@
   - カードのタッチによる貸出・返却は操作ログに記録しないことを、機能設計書・管理者マニュアル（操作ログに記録される操作の一覧）・クラス設計書・テスト設計書に正しく書いた（システム操作による貸出記録の作成は記録する）。`ledger.returner_idm` / `returned_at` はどの経路も書き込まない未使用の列であることを DB 設計書・開発者ガイドに注記した
   - 貸出と返却を別の職員にしたテストを追加（従来のテストは同じ職員で貸出・返却しており、名義を検出できなかった）
 - Issue #2319 **開発規約（`.claude/rules`）の記述を実装・テストに合わせた**（動作の変更なし）。VACUUM の失敗ログは待っても直らない原因（読み取り専用・容量不足・破損など）を Error、それ以外を Warning とする実装どおりに書き、テーブルを作り直すマイグレーション（011）が意図して素の `CREATE TABLE` を使う型を冪等パターンと禁止パターンの例外に加え（002 / 003 が作り直すのは `Down()` だけ）、3 月を繰越月にして登録したカードの「前年度より繰越」は DB に実在する導入行であることを集計ルールに書いた。あわせて、存在しない名前（`_transferStationGroups` の静的状態・`SaveOutputFolderAsync`・`PrimaryButtonStyle`）への参照と、`!` が実行時チェックにならない理由を「nullable が有効でない」とする古い前提を直した
+- Issue #2314 **クラス設計書 §6〜付録の記述を実装・テストに合わせた**（動作の変更なし）。DI 登録の例を実際の配線（`NavigationService` が `IDialogService` / `INavigationService` を兼ねる転送登録、DEBUG / Release の `ICardReader` の分岐、`SummaryGenerator` は起動時の設定読み込みの後でしか解決できないファクトリ）に改め、`ISoundPlayer`（`Play(SoundType)` / `PlayAsync` / `SoundMode`）・`WarekiConverter`・`LedgerDetailChronologicalSorter`・`HybridCardReader`・`PathValidator`（結果型は入れ子の `ValidationResult`）・`MigrationRunner`・警告の種別（`CardBalanceMismatch` / `RefundedCardLent`）・ダッシュボードの DTO の図を実在するメンバーにそろえた。競合の文言（`ConcurrencyConflictMessage`）は、職員の登録で読み直して行があるときだけ `ForRegister` で案内することと、取り込み用・行編集用のファクトリを載せた。付録A に後から加わったサービスと機能設計書の節を足し、テスト設計書にカードリーダーの接続監視のテスト（UT-145）を設けた
 
 ### v2.13.0 (2026-10-21)
 
