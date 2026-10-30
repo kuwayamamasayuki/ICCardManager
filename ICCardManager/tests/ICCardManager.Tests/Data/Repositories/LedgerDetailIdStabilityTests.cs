@@ -25,7 +25,7 @@ namespace ICCardManager.Tests.Data.Repositories;
 /// 暗黙 rowid は永続的な識別子ではなく、VACUUM がテーブルを再構築する際に振り直され得る。
 /// 本システムは毎月 10 日以降の初回起動で VACUUM を実行する（Issue #1482。全モードで動作）ため、
 /// <b>月に一度</b>その機会がある。行の同定に rowid を使う経路のうち、履歴統合の取り消しは
-/// <c>ledger_merge_history.undo_data_json</c> として識別子を<b>永続化</b>しており、
+/// <c>ledger_merge_history.undo_data</c> として識別子を<b>永続化</b>しており、
 /// セッションをまたいで（＝VACUUM をまたいで）使われる。
 /// Issue #1806 が併記した <c>ledger_id</c> は「無関係な別台帳への誤爆」しか防がない。
 /// </para>
