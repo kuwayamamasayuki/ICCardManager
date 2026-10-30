@@ -51,7 +51,7 @@ namespace ICCardManager.Data.Repositories
         Task<Ledger?> GetByIdAsync(int id);
 
         /// <summary>
-        /// 指定日以前の利用履歴を取得（残額計算用）
+        /// 指定日より前（当日を含まない）の利用履歴を取得（残額計算用）
         /// </summary>
         /// <remarks>
         /// Issue #1731: 同一日に複数レコードがある場合は id 順ではなく残高チェーン
