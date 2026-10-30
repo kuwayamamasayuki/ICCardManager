@@ -2718,7 +2718,8 @@ namespace ICCardManager.Services
         /// 利用明細から摘要を生成できなかった（<see cref="Generate"/> が空文字を返した）場合に、
         /// 摘要が空欄の台帳行を保存しないための代替文言。LendingService の Ledger 生成経路が使う。
         /// 片側欠落は <see cref="UnknownStationPlaceholder"/> による補完で摘要に採用されるため、
-        /// 本文言が使われるのは乗車駅・降車駅の両方が欠落した鉄道明細のみ。
+        /// 本文言が使われるのは、摘要に載せる明細が 1 件も無い利用（乗車駅・降車駅の両方が欠落した鉄道明細、
+        /// 運賃 0 円で片側だけの入場記録など。<see cref="IsSummarizableTrip"/> が除くもの）に限られる。
         /// </para>
         /// <para>交通系固有メソッド（駅名からの摘要組み立ての安全網。domain-boundaries.md 参照）。</para>
         /// </remarks>

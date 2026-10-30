@@ -1492,7 +1492,7 @@ public partial class DataExportImportViewModel : ViewModelBase
     /// <para>
     /// <paramref name="importedCount"/> が 0 のときに二重登録へ言及しないのは、
     /// 起きていない事象を警告すると職員が存在しない重複を探して原因究明が止まるため
-    /// （error-messages.md「原因を断定する前に、その原因が成立する構成かを確認する」）。
+    /// （error-messages-implementation.md「原因を断定する前に、その原因が成立する構成かを確認する」）。
     /// </para>
     /// </remarks>
     /// <param name="importedCount">実際に登録が確定した件数</param>
@@ -1521,7 +1521,7 @@ public partial class DataExportImportViewModel : ViewModelBase
     /// ファイル自身のプレビューであり、消えて当然のため案内しない。案内するのは直接インポートで
     /// 「別のファイルのプレビューが表示されたまま」だった場合に限る。起きていない事象を案内すると
     /// 職員は存在しない作業の消失を探して混乱する
-    /// （error-messages.md「原因を断定する前に、その原因が成立する構成かを確認する」）。
+    /// （error-messages-implementation.md「原因を断定する前に、その原因が成立する構成かを確認する」）。
     /// <para>
     /// 文言は「何が」＝表示中だった別ファイルのプレビューを消したこと、「なぜ」＝取り込みで
     /// データが変わり件数が最新でなくなること、「どうすれば」＝あらためてプレビューしてから

@@ -57,6 +57,25 @@ public class DbContextMigrationTests : IDisposable
         TableShouldExist(connection, "operation_log");
         TableShouldExist(connection, "settings");
         TableShouldExist(connection, "schema_migrations");
+        TableShouldExist(connection, "ledger_merge_history");
+
+        // Issue #2331: UT-031 No.2 は「全テーブル存在」を約束する。列挙だけだと Migration_007 の
+        // ledger_merge_history のように、後から足したテーブルの漏れに気付けないため、
+        // 作られたテーブルの集合そのものを期待値と突き合わせる（足したら本テストの期待値も足す）。
+        var actualTables = new List<string>();
+        using (var cmd = connection.CreateCommand())
+        {
+            cmd.CommandText = "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'";
+            using var reader = cmd.ExecuteReader();
+            while (reader.Read())
+            {
+                actualTables.Add(reader.GetString(0));
+            }
+        }
+
+        actualTables.Should().BeEquivalentTo(
+            new[] { "staff", "ic_card", "ledger", "ledger_detail", "operation_log", "settings", "schema_migrations", "ledger_merge_history" },
+            "初期化後のテーブルは 02_DB設計書のテーブル一覧と schema_migrations に一致すること（作業用の一時テーブルを残さないことも含む）");
     }
 
     [Fact]

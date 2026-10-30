@@ -804,12 +804,12 @@ public class MainViewModelIntegrationTests
     }
 
     /// <summary>
-    /// Issue #1729: 職員証をタッチせずに再タッチした場合（誤操作の即時取り消し）は、
+    /// Issue #1729: 職員証をタッチせずに再タッチした場合（誤操作を逆の操作で戻す）は、
     /// 従来どおり前回操作者で補完されること。
     /// </summary>
     /// <remarks>
     /// 上の修正で「操作者が確定していれば上書きしない」に変えたため、
-    /// 30秒ルール本来の用途（職員証を再度タッチせずに直前の操作を取り消す）が
+    /// 30秒ルール本来の用途（職員証を再度タッチせずに直前とは逆の操作を記録する）が
     /// 壊れていないことを併せて固定する。
     /// </remarks>
     [Fact]
@@ -1477,7 +1477,8 @@ public class MainViewModelIntegrationTests
     /// </summary>
     /// <remarks>
     /// ここで従来のフォールバック文言「もう一度タッチしてください」を出すと、
-    /// 30秒ルールにより<b>逆処理（貸出→返却）</b>が走り、記録済みの操作が取り消される。
+    /// 30秒ルールにより<b>逆処理（貸出→返却）</b>が新たに行われ、持ち出したばかりのカードが貸出中でなくなる
+    /// （貸出中レコードは通常の返却と同じく消え、利用が無ければ台帳に何も残らない。取り消しではない）。
     /// 音も中立的な <see cref="SoundType.Warning"/> を使う（記録は成功しているため
     /// エラー音は事実と矛盾する）。
     /// </remarks>
@@ -1500,7 +1501,7 @@ public class MainViewModelIntegrationTests
         _toastMock.Verify(t => t.ShowRecordedNotice(
             It.Is<string>(title => title.Contains("記録済み")),
             It.IsAny<string>()), Times.Once);
-        // 再タッチを促す文言は出さない（逆処理で記録が取り消されるため）
+        // 再タッチを促す文言は出さない（逆の操作が新たに記録されるため）
         _toastMock.Verify(t => t.ShowError(
             It.IsAny<string>(),
             It.Is<string>(m => m.Contains("職員証のタッチから"))), Times.Never);

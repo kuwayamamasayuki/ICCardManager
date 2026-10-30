@@ -119,7 +119,7 @@ namespace ICCardManager.Common
                 // `default` の「予期しない問題」へ落ちていた。DB 障害はこの対応表で最も起こりやすい
                 // 部類であり、原因が名指しできないと職員は次の行動を選べない。
                 // 文言はモード中立（ローカルモードでも VACUUM・バックアップ・ヘルスチェックの
-                // 別接続と競合し得る。`development-conventions.md`「原因を断定する前に、
+                // 別接続と競合し得る。`error-messages-implementation.md`「原因を断定する前に、
                 // その原因が成立する構成かを確認する」）。
                 case SQLiteException _:
                     return ("データベースの読み書きができませんでした。",

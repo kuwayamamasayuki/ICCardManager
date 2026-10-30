@@ -540,7 +540,7 @@ namespace ICCardManager.Tests.Services
         /// </summary>
         /// <remarks>
         /// 本テストは以前 <c>BalanceEqualThreshold_NotLow</c> として厳密な <c>&lt;</c> を固定していたが、
-        /// 設計書（04 §7.1 の設定値表・03 画面設計書）・管理者マニュアル・Excel 出力見出し、
+        /// 設計書（04 §17.1 の設定項目一覧・03 画面設計書）・管理者マニュアル・Excel 出力見出し、
         /// および <c>DashboardService</c> / <c>AdminDashboardService</c> / <c>WarningService</c> の
         /// 3 か所はいずれも「以下」であり、テスト側が仕様を後追いで固定していた。
         /// </remarks>

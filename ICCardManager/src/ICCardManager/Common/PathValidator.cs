@@ -621,7 +621,7 @@ namespace ICCardManager.Common
         /// 開かれていないか確認し」と案内するため。ここで失敗しているのは<b>バックアップ先
         /// フォルダーへの書き込みプローブ</b>であり、原因はネットワーク共有の切断・
         /// ディスク満杯・オフライン状態で、その行動指示は実行できない
-        /// （<c>.claude/rules/error-messages.md</c>「取れる行動が違う経路には専用の文言」）。
+        /// （<c>.claude/rules/error-messages-implementation.md</c>「集約ヘルパー（<c>ExceptionMessageFormatter.ToUserMessage</c>）へ委譲するか専用文言を持つかは、『表示先の制約』と『その場で取れる行動』の2つで決める」）。
         /// 同メソッド内の <see cref="UnauthorizedAccessException"/> 分岐も同じ理由で専用文言を持つ。
         /// </para>
         /// <para>

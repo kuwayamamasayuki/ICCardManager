@@ -192,7 +192,7 @@ namespace ICCardManager.Common.Exceptions
         /// </para>
         /// <para>
         /// 文言に「もう一度タッチしてください」と書かないのは、再タッチしても同じ競合が続くため
-        /// （<c>.claude/rules/error-messages.md</c>「取れる行動が違う経路には専用の文言を置く」）。
+        /// （<c>.claude/rules/error-messages-implementation.md</c> #1757「取れる行動が違う経路には専用のファクトリ」）。
         /// </para>
         /// <para>
         /// <b>長さは 47 文字に抑えている</b>（「貸出」「返却」のとき）。Issue #2211 で案内先を「カード管理画面（F2）」から

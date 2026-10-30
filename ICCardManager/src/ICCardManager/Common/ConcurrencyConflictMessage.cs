@@ -21,8 +21,8 @@ namespace ICCardManager.Common
     /// <para>
     /// 「なぜ」を<b>可能性</b>として述べ「他のパソコンで削除されました」と断定しないのは、
     /// ローカルモード（単一 PC）でも同じ分岐に到達し得るため。存在しない相手を探させると
-    /// 原因究明が止まる（<c>.claude/rules/development-conventions.md</c>
-    /// 「エラー文言で原因を断定する前に、その原因が成立する構成かを確認する」）。
+    /// 原因究明が止まる（<c>.claude/rules/error-messages-implementation.md</c>「『影響行数 0』は失敗ではなく競合」の
+    /// 「原因を断定する前に、その原因が成立する構成かを確認する」）。
     /// </para>
     /// </remarks>
     public static class ConcurrencyConflictMessage

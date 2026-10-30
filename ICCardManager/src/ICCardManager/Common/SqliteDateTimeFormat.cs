@@ -22,7 +22,7 @@ namespace ICCardManager.Common
     /// </para>
     /// <para>
     /// 書式文字列とカルチャの指定を呼び出し元へ配ると、次に列を足す人が配り忘れる
-    /// （<c>development-conventions.md</c> #1763「同じ論理的な処理に手段が 2 通りあるか」）。
+    /// （<c>service-conventions.md</c> #1763「同じ論理的な処理に手段が 2 通りあるか」）。
     /// <b>呼び出し元は書式文字列を直書きせず、本クラスのメソッドを使うこと。</b>
     /// 規約は <c>InvariantCultureDateConventionTests</c> が静的検査で固定する。
     /// </para>

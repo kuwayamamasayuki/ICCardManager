@@ -1,3 +1,5 @@
+#nullable enable
+
 using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
@@ -34,7 +36,7 @@ public partial class CompanionCountInputViewModel : ViewModelBase
 {
     private readonly ILedgerRepository _ledgerRepository;
     private readonly ITimerFactory _timerFactory;
-    private ITimer _countdownTimer;
+    private ITimer? _countdownTimer;
 
     [ObservableProperty]
     private ObservableCollection<CompanionCountInputItem> _items = new();
@@ -245,7 +247,7 @@ public partial class CompanionCountInputViewModel : ViewModelBase
             }
             catch (Exception ex)
             {
-                // 返却は記録済み。「再タッチ」と案内すると 30 秒ルールの逆処理で返却が取り消される（#1725）
+                // 返却は記録済み。「再タッチ」と案内すると 30 秒ルールで逆の操作（貸出）が新たに記録される（返却の記録は残る。#1725）
                 ErrorDialogHelper.LogException(ex, "同行者数の保存");
                 StatusMessage = ExceptionMessageFormatter.ToUserMessage(ex, "同行者数の保存") +
                                 Environment.NewLine +
