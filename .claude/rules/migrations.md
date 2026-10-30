@@ -20,12 +20,15 @@ paths:
 | 列追加 | `MigrationHelpers.AddColumnIfNotExists(conn, tx, "table", "column", "TYPE DEFAULT ...")` |
 | 行追加 | `INSERT OR IGNORE INTO ...` |
 | 行更新 | `UPDATE ... WHERE <条件が同じ入力で同じ結果を出す>` |
+| テーブル再作成 | 冒頭で `MigrationHelpers.HasColumn` 等により「適用済みなら何もしない」ガードを置き、作業テーブルは `DROP TABLE IF EXISTS` してから素の `CREATE TABLE`（`IF NOT EXISTS` を付けない）→ 素の `INSERT INTO ... SELECT` で移す（`Migration_011_AddLedgerDetailId`） |
 
 ## 禁止パターン
 
 - 素の `ALTER TABLE ... ADD COLUMN`（SQLite では `IF NOT EXISTS` が一部バージョンで非サポート）
 - 素の `CREATE TABLE` / `CREATE INDEX`（必ず `IF NOT EXISTS` を付ける）
 - 素の `INSERT`（主キー重複で失敗するため `INSERT OR IGNORE` を使う）
+- **例外: テーブル再作成の作業テーブル**（上表の「テーブル再作成」）。冪等性は冒頭のガードが担い、作業テーブルは直前に `DROP TABLE IF EXISTS` で空にしてから作る。ここに `IF NOT EXISTS` を足すと、前回の中断で残った作業テーブル（列が欠けた・行が半端な残骸）を再利用して「壊れた移行の成功」へ化けるので、**足す方向へ直さない**。`INSERT` にも `OR IGNORE` を付けない。直前に空にした作業テーブルへ移すので主キーの重複は起きず、付けても制約違反（`NOT NULL` 等）を握りつぶすだけになる
+  - **002 / 003 の `Down()` はこの例外の形になっていない**（ガードも `DROP TABLE IF EXISTS` も無く、素の `CREATE TABLE ledger_detail_backup` で始まる）。1 つのトランザクションの中で走るので中断しても作業テーブルは残らず、本番の経路（`DbContext` → `MigrationRunner.MigrateToLatest`）はダウングレードしない（古い版のアプリは新しい版のマイグレーションを持たないので、ロールバックの対象が空になる）ため、`Down()` を呼ぶのはテストだけである。既存のまま直さないが、**新しく書く再作成の手本にはしない**（手本は 011 の `Up()` / `Down()`）
 
 ## 冪等性の規約は「マイグレーション本体」だけでなく「適用記録の書き込み」にも掛かる（Issue #1738）
 
@@ -54,7 +57,7 @@ paths:
 4. `Down()` は可能ならロールバック、不可能なら空実装 + 理由コメント
 5. 冪等性テストは**追加不要**（`MigrationIdempotencyTests.Up_SecondRunDoesNotChangeSchemaOrData` が `MigrationRunner` の自動検出から対象を導出し、新しい版も自動で対象になる。Issue #2107）
    - 検証は「2 回目の `Up()` の前後で、スキーマ（`sqlite_master` の全定義）と全テーブルの全行が一致すること」。行を入れた DB で流すため、例外にならない非冪等（行の重複・書き換え・インデックスの消失）も検出する
-   - テーブルを作り直す移行（002 / 003 / 011）は、**作り直しで消えるインデックスを移行前と同じ定義で作り直していること**を、その版の専用テストで直前の版までのスキーマと比べて表明する（`Migration_011_AddLedgerDetailIdTests.Up_RecreatesLedgerDetailIndexesAsBeforeMigration`）。冪等性テストは 1 回目と 2 回目を比べるので、1 回目で消えたものは検出できない
+   - テーブルを作り直す移行（`Up()` で作り直すのは 011。002 / 003 は `Down()` だけが作り直す）は、**作り直しで消えるインデックスを移行前と同じ定義で作り直していること**を、その版の専用テストで直前の版までのスキーマと比べて表明する（`Migration_011_AddLedgerDetailIdTests.Up_RecreatesLedgerDetailIndexesAsBeforeMigration`）。冪等性テストは 1 回目と 2 回目を比べるので、1 回目で消えたものは検出できない
 6. スキーマに列追加した場合は `docs/design/02_DB設計書.md` の該当テーブルに反映
 
 ## 自動検出
