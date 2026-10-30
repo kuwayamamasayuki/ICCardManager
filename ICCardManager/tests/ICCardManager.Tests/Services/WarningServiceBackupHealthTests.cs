@@ -118,8 +118,8 @@ public class WarningServiceBackupHealthTests
         var warning = await service.CheckBackupHealthWarningAsync(Now);
         var text = warning.DisplayText;
 
-        // 「何が」: 対象（自動バックアップ）と経過日数・最終成功日時が具体的に示されている
-        text.Should().Contain("自動バックアップ");
+        // 「何が」: 対象（バックアップ）と経過日数・最終成功日時が具体的に示されている
+        text.Should().StartWith("⚠️ バックアップが12日間成功していません");
         text.Should().Contain("12日間");
         text.Should().Contain(DisplayFormatters.FormatDateTime(Now.Date.AddDays(-12).AddHours(8)));
 
@@ -132,6 +132,26 @@ public class WarningServiceBackupHealthTests
 
         // 情報不足を防ぐ最低文字数
         text.Length.Should().BeGreaterThan(20);
+    }
+
+    /// <summary>
+    /// Issue #2304: 最終成功には手動バックアップも記録されるため、文言は「自動バックアップが」と書かない。
+    /// 「自動バックアップが N 日間（最終成功: D）」だと、自動の保存先が壊れたまま手動で取った D を
+    /// 「D までは自動が動いていた」と読み誤らせる。
+    /// </summary>
+    [Fact]
+    public async Task BackupStaleWarning_最終成功が手動でも読み誤らないよう自動バックアップと書かないこと()
+    {
+        var service = CreateService(HealthWithLastSuccessDaysAgo(12));
+
+        var warning = await service.CheckBackupHealthWarningAsync(Now);
+
+        warning.DisplayText.Should().Be(
+            "⚠️ バックアップが12日間成功していません" +
+            $"（最終成功: {DisplayFormatters.FormatDateTime(Now.Date.AddDays(-12).AddHours(8))}）。" +
+            "保存先フォルダーの空き容量やアクセス権に問題がある可能性があります。" +
+            "システム管理画面（F6）でバックアップ状況を確認し、手動バックアップを実行してください。");
+        warning.DisplayText.Should().NotContain("自動バックアップ");
     }
 
     #endregion

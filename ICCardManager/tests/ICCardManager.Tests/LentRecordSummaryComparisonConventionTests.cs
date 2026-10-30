@@ -91,9 +91,11 @@ public class LentRecordSummaryComparisonConventionTests
     /// =&gt; l.Summary == lendingSummary;</c>）は、大文字小文字の違いだけで素通りしていた
     /// （Issue #2101 のコードレビューで検出）。本番コードでこの名前を貸出中の摘要以外に使っている箇所は無い
     /// （導入時に実測）。
+    /// 既定値のインスタンスから読む形（<c>new SummaryTextOptions().LendingSummary</c>）も同じ値で、
+    /// 前置きを <c>[\w.?]+</c> だけにすると別名の右辺として拾えなかった（Issue #2307 のコードレビューで検出）。
     /// </remarks>
     private const string LendingSettingValue =
-        @"(?:[\w.?]+\s*\.\s*)?(?<![A-Za-z0-9_])_?[Ll]endingSummary(?![A-Za-z0-9_(])";
+        @"(?:(?:new\s+[\w.]*SummaryTextOptions\s*\(\s*\)|[\w.?]+)\s*\.\s*)?(?<![A-Za-z0-9_])_?[Ll]endingSummary(?![A-Za-z0-9_(])";
 
     /// <summary>
     /// 値を変えずに運ぶ後置（<c>.Trim()</c> 等）と、既定値の補い（<c>?? "（貸出中）"</c>）。
@@ -294,6 +296,8 @@ public class LentRecordSummaryComparisonConventionTests
     // 同: 引数・フィールドとして受け取った設定値（大文字小文字の違う綴り）
     [InlineData("bool IsLent(Ledger l, string lendingSummary) => l.Summary == lendingSummary;", true)]
     [InlineData("if (_lendingSummary.Equals(l.Summary)) { }", true)]
+    // Issue #2307 のコードレビューで検出: 既定値のインスタンスから読んだ設定値を別名へ退避して比べる形
+    [InlineData("private static readonly string X = new SummaryTextOptions().LendingSummary; bool F(Ledger l) => l.Summary == X;", true)]
     // 対の表明: 代入としての SQL・未設定判定・比較せずに使う別名
     [InlineData("var sql = $\"UPDATE ledger SET summary = '{SummaryGenerator.GetLendingSummary()}' WHERE id = @id\";", false)]
     [InlineData("if (lendingSummary == null) { }", false)]
@@ -303,25 +307,144 @@ public class LentRecordSummaryComparisonConventionTests
         DetectViolations(TestSourceInspection.RemoveCommentsPreservingLines(code)).Any().Should().Be(expected);
     }
 
+    /// <summary>
+    /// 摘要で判定することを理由付きで認めたファイルと、その中で認めた比較（Issue #2307）。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <c>Services/Import/LedgerCsvLentRowPolicy.cs</c>: 利用履歴 CSV の行は貸出中フラグの列を持たず、
+    /// 貸出中レコードを写した行かどうかの手掛かりが摘要しか無い（台帳の行と違い「行自身が持つフラグ」が無い）。
+    /// 判定はこのファイル 1 か所に置き、取り込み・プレビューはここへ委譲する（委譲の実在は
+    /// <see cref="利用履歴CSVの取り込みとプレビューが貸出中の行の判定を共通の1か所へ委譲していること"/> が見る）。
+    /// </para>
+    /// <para>
+    /// ファイル単位の除外だけにすると、同じファイルへ別の判定を書き足しても緑になる。数だけを固定しても、
+    /// 2 つのうち 1 つを別の比較へ差し替えれば緑のまま（レビュー 2 回目で検出）。そのため、検出した比較を含む
+    /// <b>ソースの行</b>（前後の空白を除き、連続する空白を 1 つにしたもの）の集合を期待値として固定する
+    /// （現在の設定の文言との比較と、既定の文言との比較の 2 行）。
+    /// </para>
+    /// </remarks>
+    private static readonly IReadOnlyDictionary<string, string[]> AllowedSummaryComparisons = new Dictionary<string, string[]>
+    {
+        [Path.Combine("Services", "Import", "LedgerCsvLentRowPolicy.cs")] = new[]
+        {
+            "return string.Equals(text, SummaryGenerator.GetLendingSummary()?.Trim(), StringComparison.Ordinal)",
+            "|| string.Equals(text, DefaultLendingSummaryText, StringComparison.Ordinal);",
+        },
+    };
+
+    /// <summary>検出位置を含むソースの行を、前後の空白を除き連続する空白を 1 つにして返す。</summary>
+    private static string NormalizedLineAt(string code, int index)
+    {
+        var start = code.LastIndexOf('\n', Math.Max(0, index - 1)) + 1;
+        var end = code.IndexOf('\n', index);
+        var line = end < 0 ? code.Substring(start) : code.Substring(start, end - start);
+        return Regex.Replace(line.Trim(), @"\s+", " ");
+    }
+
     [Fact]
     public void 本番コードが貸出中レコードを摘要文字列で判定していないこと()
     {
         var violations = new List<string>();
+        var allowedFound = new Dictionary<string, string[]>();
 
         foreach (var file in EnumerateProductionSources())
         {
             var code = file.CommentsRemovedPreservingLines;
+            var detected = DetectViolations(code);
 
-            foreach (var (index, text) in DetectViolations(code))
+            if (AllowedSummaryComparisons.ContainsKey(file.RelativePath))
+            {
+                allowedFound[file.RelativePath] = detected
+                    .Select(d => NormalizedLineAt(code, d.Index))
+                    .Distinct(StringComparer.Ordinal)
+                    .ToArray();
+                continue;
+            }
+
+            foreach (var (index, text) in detected)
             {
                 var line = code.Take(index).Count(c => c == '\n') + 1;
                 violations.Add($"{file.Name}:{line}: {text.Trim()}");
             }
         }
 
+        // 認めたファイルが存在し、認めた比較だけをしていること（消えた・増えた・差し替えたのいずれも赤にする）
+        allowedFound.Should().BeEquivalentTo(AllowedSummaryComparisons,
+            "摘要で判定してよいのは、フラグを持たない CSV の行を見る LedgerCsvLentRowPolicy だけ（現在と既定の文言の 2 比較。Issue #2307）");
+
         violations.Should().BeEmpty(
             "貸出中レコードは is_lent_record（Ledger.IsLentRecord）で判定する。摘要は組織設定から生成した" +
             "文字列であり、設定を変更すると既存の貸出中レコードは旧文言のまま残って判定をすり抜ける（Issue #2044）");
+    }
+
+    /// <summary>
+    /// Issue #2307: 利用履歴 CSV の取り込み・プレビューが、貸出中レコードを写した行の判定を
+    /// <c>LedgerCsvLentRowPolicy</c> へ委譲していること。
+    /// </summary>
+    /// <remarks>
+    /// 判定の所在だけを認めても、呼び出しを消せば拒否は働かない（認めた例外が空の例外になる）。
+    /// 取り込みとプレビューの 2 経路の両方を数える（片方だけ外すとプレビューと取り込みの結果が食い違う）。
+    /// </remarks>
+    [Fact]
+    public void 利用履歴CSVの取り込みとプレビューが貸出中の行の判定を共通の1か所へ委譲していること()
+    {
+        var path = Path.Combine(TestPaths.GetProductionSourceRoot(), "Services", "Import", "CsvImportService.Ledger.cs");
+        File.Exists(path).Should().BeTrue("CsvImportService.Ledger.cs が存在すること（検査対象の空振り防止）");
+
+        var code = TestSourceInspection.ToCodeOnly(File.ReadAllText(path));
+
+        Regex.Matches(code, @"LedgerCsvLentRowPolicy\s*\.\s*BuildError\s*\(").Count.Should().Be(2,
+            "ImportLedgersAsync と PreviewLedgersAsync の両方が貸出中の行を拒否すること（Issue #2307）");
+    }
+
+    /// <summary>
+    /// Issue #2307: 貸出中の行を拒否するかを左右する「台帳を変えないか」を、取り込みとプレビューが同じ関数で決めていること。
+    /// </summary>
+    /// <remarks>
+    /// 以前は取り込みが差分を直書きの比較で、プレビューが <c>DetectLedgerChanges</c> で求めていた。片方だけ比較する列を変えると、
+    /// プレビューは「スキップ」なのに取り込みは拒否（全体の失敗）のように経路で食い違う（レビュー 4 回目で検出）。
+    /// </remarks>
+    [Fact]
+    public void 利用履歴CSVの取り込みとプレビューが台帳を変えないかを同じ関数で判定していること()
+    {
+        var path = Path.Combine(TestPaths.GetProductionSourceRoot(), "Services", "Import", "CsvImportService.Ledger.cs");
+        File.Exists(path).Should().BeTrue("CsvImportService.Ledger.cs が存在すること（検査対象の空振り防止）");
+
+        var code = TestSourceInspection.ToCodeOnly(File.ReadAllText(path));
+
+        Regex.Matches(code, @"\bDetectLedgerChanges\s*\(").Count.Should().Be(2,
+            "取り込みとプレビューの両方が差分を DetectLedgerChanges で求めること");
+        Regex.Matches(code, @"leavesLedgerUnchanged\s*:\s*LeavesLedgerUnchanged\s*\(").Count.Should().Be(2,
+            "取り込みとプレビューの両方が LeavesLedgerUnchanged の結果を BuildError へ渡すこと");
+        code.Should().NotMatchRegex(@"existingLedger\s*\.\s*(?:Summary|Income|Expense|Balance|Date)\s*!=",
+            "既存の行との差分を直書きの比較で求めないこと（経路ごとの別実装に戻さない）");
+    }
+
+    /// <summary>
+    /// Issue #2307: 摘要で判定する例外（<c>LedgerCsvLentRowPolicy</c>）を、CSV の取り込み以外が使っていないこと。
+    /// </summary>
+    /// <remarks>
+    /// 台帳の行（フラグを持つ）の判定に流用すると #2044 の欠陥（設定を変えると旧文言の行がすり抜ける）が再発するが、
+    /// 摘要との比較はこのクラスの内側にあるので、上の検査は呼び出し側を見ても緑のままになる。参照してよいファイルを固定する
+    /// （コードレビューで検出）。
+    /// </remarks>
+    [Fact]
+    public void 摘要で判定する例外のクラスを利用履歴CSVの取り込み以外が参照していないこと()
+    {
+        var allowed = new[]
+        {
+            Path.Combine("Services", "Import", "LedgerCsvLentRowPolicy.cs"),
+            Path.Combine("Services", "Import", "CsvImportService.Ledger.cs"),
+        };
+
+        var referencing = EnumerateProductionSources()
+            .Where(f => Regex.IsMatch(f.CodeOnly, @"\bLedgerCsvLentRowPolicy\b"))
+            .Select(f => f.RelativePath)
+            .ToList();
+
+        referencing.Should().BeEquivalentTo(allowed,
+            "CSV の行はフラグを持たないので摘要で判定するが、台帳の行は is_lent_record で判定する（Issue #2044 / #2307）");
     }
 
     [Fact]

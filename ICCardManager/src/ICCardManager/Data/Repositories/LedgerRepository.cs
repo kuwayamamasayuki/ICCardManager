@@ -11,6 +11,7 @@ using ICCardManager.Common;
 using ICCardManager.Dtos;
 using ICCardManager.Models;
 using ICCardManager.Services;
+using Microsoft.Extensions.Logging;
 
 namespace ICCardManager.Data.Repositories
 {
@@ -20,10 +21,22 @@ namespace ICCardManager.Data.Repositories
     public class LedgerRepository : ILedgerRepository
     {
         private readonly DbContext _dbContext;
+        private readonly ILogger<LedgerRepository>? _logger;
 
         public LedgerRepository(DbContext dbContext)
+            : this(dbContext, logger: null)
+        {
+        }
+
+        /// <param name="dbContext">DB コンテキスト</param>
+        /// <param name="logger">
+        /// 診断用のロガー。null の場合はログを出さない（テスト等で DB だけを使う呼び出し用）。
+        /// Issue #2302: 統合の取り消しを中止した理由（件数・内容・id・統合先のどれが合わなかったか）を残す
+        /// </param>
+        public LedgerRepository(DbContext dbContext, ILogger<LedgerRepository>? logger)
         {
             _dbContext = dbContext;
+            _logger = logger;
         }
 
         /// <inheritdoc/>
@@ -716,7 +729,9 @@ VALUES (@ledgerId, @useDate, @entryStation, @exitStation,
             SQLiteConnection connection, string cardIdm, string? beforeDate)
         {
             // 最新日（DATE(date) が最大の日）の全レコードを取得する。
-            // date は "yyyy-MM-dd HH:mm:ss" の TEXT のため MAX(date) が最新日時、その DATE() が最新日
+            // date は "yyyy-MM-dd HH:mm:ss" の TEXT のため MAX(date) が最新日時、その DATE() が最新日。
+            // 外側は列を DATE() で包まず `date >= 最新日`（日付だけの文字列）で絞る。最新日より後の行は無いので
+            // その日の全行と同じ集合になり、idx_ledger_card_date の探索キー（card_idm, date）を使える（Issue #2328）
             var beforeFilter = beforeDate != null ? "AND date < @beforeDate" : string.Empty;
             var latestDayLedgers = new List<Ledger>();
 
@@ -726,7 +741,7 @@ VALUES (@ledgerId, @useDate, @entryStation, @exitStation,
        staff_name, note, returner_idm, lent_at, returned_at, is_lent_record, companion_count
 FROM ledger
 WHERE card_idm = @cardIdm {beforeFilter}
-  AND DATE(date) = (
+  AND date >= (
     SELECT DATE(MAX(date)) FROM ledger
     WHERE card_idm = @cardIdm {beforeFilter})
 ORDER BY date ASC, id ASC";
@@ -952,16 +967,25 @@ ORDER BY date ASC, id ASC";
             // 各カードについて最新日（DATE(date) が最大の日）の全レコードを取得
             // ※ MAX(id) ではなく日付基準にすることで、データインポート後も正しい最終利用日・残高が表示される (Issue #1068)
             // ※ 最新日の 1 行ではなく全行を取得するのは、同一日内の順序を残高チェーンで確定するため (Issue #1731)
+            // ※ Issue #2328: 旧実装は `WHERE DATE(l.date) = (相関サブクエリ)` で、列を DATE() で包んだうえ
+            //   台帳の全行についてサブクエリを評価していた（非 sargable。#1834 / #1996 と同じ形）。
+            //   最終日を CTE の 1 回の GROUP BY で求める点は GetMonthEndBalancesByCardAsync と同じだが、結合条件は違う。
+            //   こちらはカードごとに最終日が 1 つなので、その日の行だけを `l.date >= 最新日`（日付だけの文字列）で
+            //   idx_ledger_card_date から探索できる（あちらは月ごとに最終日があるため `last_day.d = DATE(l.date)` で照合する）。
+            //   CROSS JOIN は SQLite で結合順を固定する書き方で、last_day を外側にして ledger を探索させる
+            //   （普通の JOIN だと ledger 側を全件走査して last_day を引く計画が選ばれた。実測）
             var latestDayLedgers = new List<Ledger>();
             using (var command = connection.CreateCommand())
             {
-                command.CommandText = @"SELECT id, card_idm, lender_idm, date, summary, income, expense, balance,
-       staff_name, note, returner_idm, lent_at, returned_at, is_lent_record, companion_count
-FROM ledger l
-WHERE DATE(l.date) = (
-    SELECT DATE(MAX(l2.date)) FROM ledger l2
-    WHERE l2.card_idm = l.card_idm
+                command.CommandText = @"WITH last_day AS (
+    SELECT card_idm AS c, DATE(MAX(date)) AS d
+    FROM ledger
+    GROUP BY card_idm
 )
+SELECT l.id, l.card_idm, l.lender_idm, l.date, l.summary, l.income, l.expense, l.balance,
+       l.staff_name, l.note, l.returner_idm, l.lent_at, l.returned_at, l.is_lent_record, l.companion_count
+FROM last_day
+CROSS JOIN ledger l ON l.card_idm = last_day.c AND l.date >= last_day.d
 ORDER BY l.card_idm ASC, l.date ASC, l.id ASC";
 
                 using var reader = await command.ExecuteReaderAsync().ConfigureAwait(false);
@@ -995,22 +1019,32 @@ ORDER BY l.card_idm ASC, l.date ASC, l.id ASC";
         // 「（貸出中）」というプレースホルダであり利用実績ではないため（帳票でも出力しない）。
 
         /// <summary>
-        /// 利用実績の集計から除外する「繰越レコード」の条件。
+        /// 利用実績の集計から除外する「導入行」（カード登録時に書く行）の条件。
         /// </summary>
         /// <remarks>
         /// <para>
-        /// 「新規購入」と「○月から繰越」（紙の出納簿から年度途中で移行したカード、Issue #510）は
+        /// 「新規購入」と「○月から繰越」（紙の出納簿から年度途中で移行したカード、Issue #510）、
+        /// および繰越月を 3 月にして登録したカードの「前年度より繰越」（Issue #2326）は
         /// 台帳に実レコードとして保存されるが、**利用実績ではない**。これを数えると
         /// 一度も使っていないカードが「利用1回・稼働率 &gt; 0%」に見え、「遊んでいるカードの発見」
         /// という目的に直接反する。
         /// </para>
         /// <para>
-        /// 条件は <c>GetByDateRangeAsync</c> の ORDER BY および <see cref="Models.Ledger.IsCarryover"/>
-        /// と同じ判定（「新規購入」リテラル＋繰越 LIKE パターン）を使う。繰越側のパターンは
+        /// 「新規購入」と「○月から繰越」の判定は <c>GetByDateRangeAsync</c> の ORDER BY（<see cref="CarryoverFirstSortKey"/>）および
+        /// <see cref="Models.Ledger.IsCarryover"/> と同じ（「新規購入」リテラル＋繰越 LIKE パターン）。これらは帳票用で
+        /// 「前年度より繰越」を含まないため、本条件はその 2 種に「前年度より繰越」を加えた 3 種になる（下記）。繰越側のパターンは
         /// <c>'%月から繰越'</c> のハードコードではなく、組織設定 <c>MidYearCarryoverFormat</c> 由来の
         /// <c>SummaryGenerator.GetMidYearCarryoverLikePattern</c> をパラメータバインドする
         /// （Issue #1749。書式カスタム時に SQL だけが追従しない乖離の防止）。
-        /// 本条件を含むクエリは <see cref="AddMidYearCarryoverParameter"/> を必ず併用すること。
+        /// 本条件を含むクエリは <see cref="AddInitialRecordExclusionParameters"/> を必ず併用すること。
+        /// </para>
+        /// <para>
+        /// 判定する行の集合は <see cref="Models.Ledger.IsInitialRecordSummary"/>（#2046 / #2237）と同じ 3 種。
+        /// 「前年度より繰越」は帳票では in-memory 合成される行だが、3 月を繰越月にして登録したカードでは
+        /// 導入行として DB に保存される（日付は新年度の 4/1、受入＝残額、貸出者なし）。#2326 まではこの条件から
+        /// 漏れており、登録しただけのカードが「利用 1 回・稼働率 &gt; 0%」・最終利用日 4/1 に見え、
+        /// 月別利用額にも払出 0 の「（職員名なし）」系列が立っていた。摘要は組織設定由来の
+        /// <c>SummaryGenerator.GetCarryoverFromPreviousYearSummary</c> をパラメータバインドする（#1749 と同じ）。
         /// 対応関係は <c>LedgerRepositoryAggregationTests</c> /
         /// <c>LedgerRepositoryMidYearCarryoverPatternTests</c> が
         /// <c>SummaryGenerator.GetMidYearCarryoverSummary</c> の生成結果で検証している。
@@ -1027,7 +1061,18 @@ ORDER BY l.card_idm ASC, l.date ASC, l.id ASC";
         /// </para>
         /// </remarks>
         private const string ExcludeCarryoverCondition =
-            @"AND summary <> '新規購入' AND summary NOT LIKE @midYearCarryoverPattern ESCAPE '\'";
+            @"AND summary <> '新規購入' AND summary NOT LIKE @midYearCarryoverPattern ESCAPE '\' AND summary <> @previousYearCarryoverSummary";
+
+        /// <summary>
+        /// <see cref="ExcludeCarryoverCondition"/> が参照するパラメータ（繰越の LIKE パターンと
+        /// 「前年度より繰越」の摘要。いずれも組織設定由来）をコマンドへバインドする（Issue #2326）。
+        /// </summary>
+        private static void AddInitialRecordExclusionParameters(SQLiteCommand command)
+        {
+            AddMidYearCarryoverParameter(command);
+            command.Parameters.AddWithValue(
+                "@previousYearCarryoverSummary", SummaryGenerator.GetCarryoverFromPreviousYearSummary());
+        }
 
         /// <summary>
         /// 職員別の利用額（<see cref="GetMonthlyUsageByLenderAsync"/>）から除外する「払戻台帳」の条件（Issue #2157）。
@@ -1087,7 +1132,9 @@ ORDER BY l.card_idm ASC, l.date ASC, l.id ASC";
         /// 「新規購入・繰越レコードを同日の先頭に固定する」ORDER BY のソートキー（Issue #590）。
         /// </summary>
         /// <remarks>
-        /// <see cref="ExcludeCarryoverCondition"/> と同じ判定を肯定形で使う。3 クエリ
+        /// 「新規購入」と「○月から繰越」の 2 種を肯定形で判定する（<see cref="Models.Ledger.IsCarryover"/> と同じ）。
+        /// <see cref="ExcludeCarryoverCondition"/> は Issue #2326 で「前年度より繰越」を加えた 3 種になったが、
+        /// 並べ替えは帳票の並び（#590）に関わるため変えていない。3 クエリ
         /// （<c>GetByDateRangeAsync</c> / <c>GetPagedAsync</c> の CTE 内・外側）に同一の
         /// CASE 式を書き写していた重複を 1 か所へ集約（Issue #1749 レビュー指摘）。
         /// 本キーを含むクエリも <see cref="AddMidYearCarryoverParameter"/> を必ず併用すること。
@@ -1114,7 +1161,7 @@ WHERE is_lent_record = 0
   {ExcludeCarryoverCondition}
 GROUP BY card_idm";
 
-            AddMidYearCarryoverParameter(command);
+            AddInitialRecordExclusionParameters(command);
 
             using var reader = await command.ExecuteReaderAsync().ConfigureAwait(false);
             while (await reader.ReadAsync().ConfigureAwait(false))
@@ -1148,7 +1195,7 @@ WHERE date BETWEEN @fromDate AND @toDate
 GROUP BY card_idm";
 
             AddDateRangeParameters(command, fromDate, toDate);
-            AddMidYearCarryoverParameter(command);
+            AddInitialRecordExclusionParameters(command);
 
             using var reader = await command.ExecuteReaderAsync().ConfigureAwait(false);
             while (await reader.ReadAsync().ConfigureAwait(false))
@@ -1193,7 +1240,7 @@ GROUP BY ym, lender, staff
 ORDER BY ym, staff";
 
             AddDateRangeParameters(command, fromDate, toDate);
-            AddMidYearCarryoverParameter(command);
+            AddInitialRecordExclusionParameters(command);
 
             using var reader = await command.ExecuteReaderAsync().ConfigureAwait(false);
             while (await reader.ReadAsync().ConfigureAwait(false))
@@ -1232,6 +1279,10 @@ ORDER BY ym, staff";
             // `last_day.d = DATE(l.date)` が月の一致も含意する（ym は GROUP BY の粒度としてのみ必要）。
             // 日付は ISO 8601 の TEXT（YYYY-MM-DD HH:MM:SS）で辞書順＝時系列順のため、
             // 旧実装の DATE(MAX(date)) と MAX(DATE(date)) は同値。
+            // Issue #2328: 結合条件の `last_day.d = DATE(l.date)` は列を関数で包んでいるが、残している。
+            // 1 枚のカードに月ごとの最終日が複数あるため、GetAllLatestBalancesAsync の `l.date >= 最終日` には置き換えられない
+            // （後の月の行まで拾う）。外側の `l.date BETWEEN @fromDate AND @toDate` が idx_ledger_card_date / idx_ledger_date の
+            // 探索キーになるので全件走査にはならず、DATE() は期間内の行に対する絞り込みとして評価されるだけである。
             var lastDayLedgers = new List<Ledger>();
             using (var command = connection.CreateCommand())
             {
@@ -1286,23 +1337,27 @@ ORDER BY l.card_idm, l.date, l.id";
             using var lease = await _dbContext.LeaseConnectionAsync().ConfigureAwait(false);
             var connection = lease.Connection;
 
-            // 「指定日より前の最終稼働日」を相関サブクエリで特定し、その日の**全行**を取得する
+            // 「指定日より前の最終稼働日」をカードごとに特定し、その日の**全行**を取得する
             // （GetMonthEndBalancesByCardAsync と同じ作法。同一日内の順序は残高チェーンで確定する、Issue #1770）。
             // 繰越・新規購入レコードも残高の情報源として正しいため除外しない。
+            // Issue #2328: 最終稼働日は CTE の 1 回の GROUP BY で求め、外側は列を DATE() で包まずに
+            // `l.date >= 最終稼働日`（日付だけの文字列）で探索する（GetAllLatestBalancesAsync と同じ形。理由はそちら）
             var lastDayLedgers = new List<Ledger>();
             using (var command = connection.CreateCommand())
             {
-                command.CommandText = @"SELECT l.id, l.card_idm, l.lender_idm, l.date, l.summary, l.income, l.expense, l.balance,
+                command.CommandText = @"WITH last_day AS (
+    SELECT card_idm AS c, DATE(MAX(date)) AS d
+    FROM ledger
+    WHERE date < @beforeDate
+      AND is_lent_record = 0
+    GROUP BY card_idm
+)
+SELECT l.id, l.card_idm, l.lender_idm, l.date, l.summary, l.income, l.expense, l.balance,
        l.staff_name, l.note, l.returner_idm, l.lent_at, l.returned_at, l.is_lent_record, l.companion_count
-FROM ledger l
+FROM last_day
+CROSS JOIN ledger l ON l.card_idm = last_day.c AND l.date >= last_day.d
 WHERE l.date < @beforeDate
   AND l.is_lent_record = 0
-  AND DATE(l.date) = (
-      SELECT DATE(MAX(l2.date)) FROM ledger l2
-      WHERE l2.card_idm = l.card_idm
-        AND l2.is_lent_record = 0
-        AND l2.date < @beforeDate
-  )
 ORDER BY l.card_idm, l.date, l.id";
 
                 command.Parameters.AddWithValue("@beforeDate", SqliteDateTimeFormat.ToDayStartText(beforeDate));
@@ -2207,9 +2262,44 @@ WHERE id = @id";
         /// 競合（Undo データが指す行が既に無い）を検出したら null。
         /// null の場合、途中まで書き込んだ内容は呼び出し元のロールバックで巻き戻る前提。
         /// </returns>
-        private static async Task<IReadOnlyDictionary<int, int>?> UnmergeLedgersCore(
+        private async Task<IReadOnlyDictionary<int, int>?> UnmergeLedgersCore(
             Services.LedgerMergeUndoData undoData, SQLiteConnection connection, SQLiteTransaction? transaction)
         {
+            // 0. Issue #2302: Undo データが指す明細が、統合した時点と同じ内容のまま統合先にあるかを先に確かめる。
+            //    明細の保存（ReplaceDetailsAsync の DELETE + INSERT）は、統合先の明細が表の末尾にあると
+            //    同じ統合先のまま同じ id を別の内容で振り直す（id は max(id)+1 で再利用される。02 §3.4）。
+            //    手順 2 の「id と所属」のガードはこの形を通してしまい、編集後の別の内容の明細を統合元へ移したうえ
+            //    統合先の金額だけを統合前へ書き戻していた（明細と金額が食い違ったまま「取り消しました」）。
+            //    統合先自身の明細も照合する（統合先の明細だけを編集した場合も、書き戻す金額と明細が食い違う）。
+            //    スナップショットを持たない（#2302 より前に保存した）Undo データでは内容を照合できないため、件数だけを見る
+            //    件数: Undo データのキーにある明細だけを照合しても、統合先に明細が「増えた」形は通る
+            //    （明細の編集で古い利用を 1 件足すと既存分は同じ id・同じ内容を取り直し、追加分だけが新しい id になる。
+            //    同じ統合先へ後から別の統合を重ね、それを残したまま先の統合を取り消す場合も同じ形）。
+            //    増えた明細は統合先に残ったまま金額・摘要だけが統合前へ戻るので、件数の一致も条件にする。
+            //    内容を使わないため、スナップショットを持たない旧データにも適用する
+            // 金額: 同じ統合先へ後から別の統合を重ねると統合先の金額が合算で変わる。後の統合の統合元が明細を持たない行だと
+            //    明細の件数・内容は変わらず、統合履歴による前提条件（LedgerMergeService）も履歴の保存が済んでいなければ効かないため、
+            //    統合した直後の金額と照合する。持たない（#2302 より前に保存した）Undo データでは照合しない
+            if (undoData.MergedTargetAmounts != null
+                && !await TargetAmountsMatchAsync(undoData, undoData.MergedTargetAmounts, connection, transaction).ConfigureAwait(false))
+            {
+                LogUnmergeAborted(undoData, "統合先の金額（受入・払出・残額）が統合直後と一致しない（同じ統合先へ後から別の統合を重ねた、統合後に行の金額を編集した、または明細の編集で金額が再計算された）");
+                return null;
+            }
+
+            if (!await TargetDetailCountMatchesAsync(undoData, connection, transaction).ConfigureAwait(false))
+            {
+                LogUnmergeAborted(undoData, "統合先の明細の件数が統合時と一致しない（統合後に明細を足した・減らした、または同じ統合先へ後から別の統合を重ねた）");
+                return null;
+            }
+
+            if (undoData.DetailSnapshots != null
+                && !await DetailsMatchSnapshotsAsync(undoData, connection, transaction).ConfigureAwait(false))
+            {
+                LogUnmergeAborted(undoData, "統合先の明細の内容が統合時と一致しない（統合後に明細を編集し、同じ id が別の内容で振り直された等）");
+                return null;
+            }
+
             // 1. ソースLedgerを再作成し、新IDを取得
             var idMapping = new Dictionary<int, int>();
             foreach (var source in undoData.DeletedSources)
@@ -2256,6 +2346,7 @@ SELECT last_insert_rowid();";
                         // Undo データが指す元台帳が DeletedSources に無い（保存された JSON が欠損・破損している）。
                         // 読み飛ばすと明細は統合先に残ったまま統合元だけが明細ゼロで復活し、
                         // 「取り消し済み」まで確定してやり直せなくなる。他の 2 つのガードと同じく fail-closed にする。
+                        LogUnmergeAborted(undoData, $"明細の戻し先（元の LedgerId={originalLedgerId}）が Undo データの統合元に無い（Undo データの欠損）");
                         return null;
                     }
 
@@ -2281,6 +2372,7 @@ SELECT last_insert_rowid();";
                     var moved = await moveCommand.ExecuteNonQueryAsync().ConfigureAwait(false);
                     if (moved != 1)
                     {
+                        LogUnmergeAborted(undoData, $"明細（id={sequenceNumber}）がもう統合先に属していない");
                         return null;
                     }
                 }
@@ -2309,7 +2401,99 @@ WHERE id = @id";
             // 0 行は「統合先が統合後に削除された」＝競合。統合元だけを復活させると
             // 残高チェーンの起点を持たない行になるため、ここで打ち切る（呼び出し元がロールバック）。
             var updated = await updateCommand.ExecuteNonQueryAsync().ConfigureAwait(false);
-            return updated == 1 ? idMapping : null;
+            if (updated != 1)
+            {
+                LogUnmergeAborted(undoData, "統合先の行が存在しない（統合後に削除された）");
+                return null;
+            }
+
+            return idMapping;
+        }
+
+        /// <summary>
+        /// Issue #2302: 統合の取り消しを中止した理由を Warning で残す（呼び出し元は「中止した」ことしか知らない）。
+        /// </summary>
+        private void LogUnmergeAborted(Services.LedgerMergeUndoData undoData, string reason)
+        {
+            _logger?.LogWarning(
+                "統合の取り消しを中止しました（統合先 LedgerId={TargetId}）: {Reason}",
+                undoData.OriginalTarget.Id, reason);
+        }
+
+        /// <summary>
+        /// Issue #2302: いまの統合先の受入・払出・残額が、統合した直後の値と一致するか。統合先が無ければ false。
+        /// </summary>
+        private static async Task<bool> TargetAmountsMatchAsync(
+            Services.LedgerMergeUndoData undoData, Services.MergedTargetAmounts expected,
+            SQLiteConnection connection, SQLiteTransaction? transaction)
+        {
+            using var command = connection.CreateCommand();
+            command.Transaction = transaction;
+            command.CommandText = "SELECT income, expense, balance FROM ledger WHERE id = @targetId";
+            command.Parameters.AddWithValue("@targetId", undoData.OriginalTarget.Id);
+            using var reader = await command.ExecuteReaderAsync().ConfigureAwait(false);
+            if (!await reader.ReadAsync().ConfigureAwait(false))
+            {
+                return false;
+            }
+
+            // income / expense / balance は NULL を許す列（Migration_001）。NULL は 0 として比べる
+            // （統合の UPDATE は常に非 NULL の値を SET するため、NULL なら統合後に書き換えられたことになり不一致で中止する）
+            int ReadOrZero(int ordinal) => reader.IsDBNull(ordinal) ? 0 : reader.GetInt32(ordinal);
+            return ReadOrZero(0) == expected.Income
+                && ReadOrZero(1) == expected.Expense
+                && ReadOrZero(2) == expected.Balance;
+        }
+
+        /// <summary>
+        /// Issue #2302: いま統合先に属する明細の件数が、Undo データの明細マップの件数と一致するか。
+        /// 一致しなければ統合後に明細が増えた（編集で足した・同じ統合先へ別の統合を重ねた）か減った。
+        /// </summary>
+        private static async Task<bool> TargetDetailCountMatchesAsync(
+            Services.LedgerMergeUndoData undoData, SQLiteConnection connection, SQLiteTransaction? transaction)
+        {
+            using var command = connection.CreateCommand();
+            command.Transaction = transaction;
+            command.CommandText = "SELECT COUNT(*) FROM ledger_detail WHERE ledger_id = @targetId";
+            command.Parameters.AddWithValue("@targetId", undoData.OriginalTarget.Id);
+            var count = Convert.ToInt64(await command.ExecuteScalarAsync().ConfigureAwait(false), CultureInfo.InvariantCulture);
+            return count == undoData.DetailOriginalLedgerMap.Count;
+        }
+
+        /// <summary>
+        /// Issue #2302: Undo データの全明細（統合元から移したもの・統合先自身のもの）が、統合した時点と同じ内容のまま
+        /// 統合先に属しているか。1 件でも見つからない・内容が違う・スナップショットが欠けていれば false（fail-closed）。
+        /// </summary>
+        private static async Task<bool> DetailsMatchSnapshotsAsync(
+            Services.LedgerMergeUndoData undoData, SQLiteConnection connection, SQLiteTransaction? transaction)
+        {
+            var snapshots = undoData.DetailSnapshots!;
+            using var command = connection.CreateCommand();
+            command.Transaction = transaction;
+            command.CommandText = @"SELECT ledger_id, use_date, entry_station, exit_station,
+       bus_stops, amount, balance, is_charge, is_point_redemption, is_bus, group_id, id
+FROM ledger_detail
+WHERE id = @id AND ledger_id = @targetId";
+            var pId = command.Parameters.Add("@id", DbType.Int32);
+            command.Parameters.AddWithValue("@targetId", undoData.OriginalTarget.Id);
+
+            foreach (var key in undoData.DetailOriginalLedgerMap.Keys)
+            {
+                if (!snapshots.TryGetValue(key, out var snapshot))
+                {
+                    // マップとスナップショットのキーは統合時に同じループで作るため、欠けているのは Undo データの破損
+                    return false;
+                }
+
+                pId.Value = int.Parse(key, CultureInfo.InvariantCulture);
+                using var reader = await command.ExecuteReaderAsync().ConfigureAwait(false);
+                if (!await reader.ReadAsync().ConfigureAwait(false) || !snapshot.Matches(MapToLedgerDetail(reader)))
+                {
+                    return false;
+                }
+            }
+
+            return true;
         }
 
         /// <inheritdoc/>
@@ -2375,6 +2559,25 @@ VALUES (@mergedAt, @targetLedgerId, @description, @undoData)";
 
             using var lease = await _dbContext.LeaseConnectionAsync().ConfigureAwait(false);
             return await MarkMergeHistoryUndoneCore(historyId, lease.Connection, transaction: null).ConfigureAwait(false);
+        }
+
+        /// <inheritdoc/>
+        public async Task<bool> HasLaterUndoableMergeOnSameTargetAsync(int historyId, int targetLedgerId, SQLiteTransaction transaction)
+        {
+            if (transaction == null)
+            {
+                throw new ArgumentNullException(nameof(transaction));
+            }
+
+            using var command = ((SQLiteConnection)transaction.Connection).CreateCommand();
+            command.Transaction = transaction;
+            // undo_data（JSON）は読まない。統合先の ID は target_ledger_id 列にもある（SaveMergeHistoryAsync）
+            command.CommandText = @"SELECT EXISTS (
+    SELECT 1 FROM ledger_merge_history
+    WHERE target_ledger_id = @targetLedgerId AND is_undone = 0 AND id > @historyId)";
+            command.Parameters.AddWithValue("@targetLedgerId", targetLedgerId);
+            command.Parameters.AddWithValue("@historyId", historyId);
+            return Convert.ToInt64(await command.ExecuteScalarAsync().ConfigureAwait(false), CultureInfo.InvariantCulture) == 1;
         }
 
         private static async Task<bool> MarkMergeHistoryUndoneCore(int historyId, SQLiteConnection connection, SQLiteTransaction? transaction)

@@ -2016,6 +2016,45 @@ public class HistoryPanelViewModelTests : IDisposable
     }
 
     /// <summary>
+    /// Issue #2322: 履歴一覧から貸出中の行を削除するときも、払戻済のカードでは「タッチして返却」を勧めないこと
+    /// </summary>
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task DeleteLedgerRow_貸出中の行の確認文言を払戻済かどうかで出し分けること(bool isRefundedCard)
+    {
+        _history.HistoryCard = new CardDto { CardIdm = "0123456789ABCDEF", CardNumber = "H-009", IsRefunded = isRefundedCard };
+        _staffAuthServiceMock
+            .Setup(a => a.RequestAuthenticationAsync(It.IsAny<string>()))
+            .ReturnsAsync(new StaffAuthResult { Idm = "AABBCCDDEEFF0011", StaffName = "田中太郎" });
+        string? message = null;
+        _navigationServiceMock
+            .Setup(d => d.ShowWarningConfirmation(It.IsAny<string>(), "履歴の削除"))
+            .Callback<string, string>((m, _) => message = m)
+            .Returns(false);
+
+        await _history.DeleteLedgerRow(new LedgerDto
+        {
+            Id = 42,
+            CardIdm = "0123456789ABCDEF",
+            DateDisplay = "R7.3.18",
+            Summary = "（貸出中）",
+            Balance = 1000,
+            IsLentRecord = true,
+        });
+
+        message.Should().NotBeNull();
+        if (isRefundedCard)
+        {
+            message.Should().Contain("払戻済のカードはタッチで返却できない").And.NotContain("タッチして返却操作");
+        }
+        else
+        {
+            message.Should().Contain("タッチして返却操作").And.NotContain("払戻済");
+        }
+    }
+
+    /// <summary>
     /// 認証をキャンセルした場合は確認ダイアログを出さないこと（対の表明）。
     /// これが無いと「認証を無視して必ず確認する」実装でも上のテストは緑になる。
     /// </summary>

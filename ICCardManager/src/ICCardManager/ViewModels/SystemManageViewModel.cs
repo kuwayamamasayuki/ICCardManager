@@ -101,7 +101,7 @@ public partial class SystemManageViewModel : ViewModelBase
         {
             if (BackupHealth?.LastSuccessAt == null)
             {
-                return "最終成功: 記録なし（次回の自動バックアップ成功後に表示されます）";
+                return "最終成功: 記録なし（次回のバックアップ成功後に表示されます）";
             }
 
             var elapsed = BackupHealth.GetDaysSinceLastSuccess(DateTime.Now) ?? 0;
@@ -395,8 +395,11 @@ public partial class SystemManageViewModel : ViewModelBase
             try
             {
                 // Issue #1361: UI スレッドから sync 呼び出しは LeaseConnection の UI スレッドガード (#1281) に抵触するため、
-                // Task.Run で委譲する CreateBackupAsync を使用する
-                var success = await _backupService.CreateBackupAsync(backupFilePath);
+                // Task.Run で委譲する CreateBackupAsync を使用する。
+                // Issue #2304: 手動バックアップは成功日時も記録する CreateManualBackupAsync を通す
+                // （記録しないと BackupStale 警告が案内どおりに実行しても消えない）。
+                // リストア前バックアップ（ExecuteRestoreAsync）は記録しない CreateBackupAsync のまま。
+                var success = await _backupService.CreateManualBackupAsync(backupFilePath);
                 if (success)
                 {
                     LastBackupFile = backupFilePath;

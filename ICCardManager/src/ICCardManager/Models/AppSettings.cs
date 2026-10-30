@@ -44,6 +44,11 @@ namespace ICCardManager.Models
         /// <summary>
         /// メインウィンドウの位置・サイズ設定
         /// </summary>
+        /// <remarks>
+        /// 一括保存（<c>SaveAppSettingsAsync</c>）では DB へ反映されない（Issue #2305）。
+        /// 終了時に <c>ISettingsRepository.SaveMainWindowSettingsAsync</c> だけが書く。
+        /// 共有フォルダーモードでは共有 DB の 1 組の値を全 PC が使い、最後に終了した PC の位置が残る。
+        /// </remarks>
         public WindowSettings MainWindowSettings { get; set; } = new();
 
         /// <summary>

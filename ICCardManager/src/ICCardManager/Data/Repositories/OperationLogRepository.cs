@@ -1,3 +1,4 @@
+#nullable enable
 using System;
 using System.Collections.Generic;
 using System.Data.Common;
@@ -26,9 +27,9 @@ namespace ICCardManager.Data.Repositories
         public Task<int> InsertAsync(OperationLog log) => InsertAsync(log, transaction: null);
 
         /// <inheritdoc/>
-        public async Task<int> InsertAsync(OperationLog log, SQLiteTransaction transaction)
+        public async Task<int> InsertAsync(OperationLog log, SQLiteTransaction? transaction)
         {
-            ConnectionLease lease = null;
+            ConnectionLease? lease = null;
             try
             {
                 SQLiteConnection connection;
@@ -80,14 +81,25 @@ SELECT last_insert_rowid();";
             var logs = new List<OperationLog>();
 
             using var command = connection.CreateCommand();
-            command.CommandText = @"SELECT id, timestamp, operator_idm, operator_name, target_table,
+            // Issue #2328: 列を date() で包まない（包むと idx_log_timestamp を探索キーにできず全件走査になる。
+            // #1834 / #1996）。しきい値は日付だけの文字列（yyyy-MM-dd）で、下限は「開始日以上」、上限は「終了日の翌日未満」。
+            // 書き込みはすべて SqliteDateTimeFormat.ToText（yyyy-MM-dd HH:mm:ss。タイムゾーン表記なし）なので
+            // timestamp は辞書順＝時系列順の ISO テキストであり、秒未満を持つ値・T 区切りの値・日付だけの値も含めて
+            // date(timestamp) BETWEEN 開始日 AND 終了日 と同じ行集合になる
+            //（「23:59:59 以下」だと 23:59:59.5 や 'T' 区切りの値を落とし、「0 時以上」だと日付だけの値を落とす。
+            //  タイムゾーン表記付きの値を書く経路を足すと、date() は UTC へ換算するため同値でなくなる）
+            var upperBound = ToExclusiveUpperBoundText(toDate);
+            command.CommandText = $@"SELECT id, timestamp, operator_idm, operator_name, target_table,
        target_id, action, before_data, after_data
 FROM operation_log
-WHERE date(timestamp) BETWEEN @fromDate AND @toDate
+WHERE timestamp >= @fromDate{(upperBound is null ? string.Empty : " AND timestamp < @toDateExclusive")}
 ORDER BY timestamp ASC";
 
             command.Parameters.AddWithValue("@fromDate", SqliteDateTimeFormat.ToDateText(fromDate));
-            command.Parameters.AddWithValue("@toDate", SqliteDateTimeFormat.ToDateText(toDate));
+            if (upperBound is not null)
+            {
+                command.Parameters.AddWithValue("@toDateExclusive", upperBound);
+            }
 
             using var reader = await command.ExecuteReaderAsync().ConfigureAwait(false);
             while (await reader.ReadAsync().ConfigureAwait(false))
@@ -192,7 +204,7 @@ ORDER BY timestamp ASC";
             OperationLogSearchCriteria criteria,
             int pageSize,
             KeysetDirection direction,
-            OperationLogCursor cursor,
+            OperationLogCursor? cursor,
             bool isAnchoredAtEdge)
         {
             if (pageSize <= 0)
@@ -301,8 +313,8 @@ LIMIT @limit";
                 hasNext = !isAnchoredAtEdge;       // Last の場合は false、Prev の場合は true
             }
 
-            OperationLogCursor firstCursor = null;
-            OperationLogCursor lastCursor = null;
+            OperationLogCursor? firstCursor = null;
+            OperationLogCursor? lastCursor = null;
             if (raw.Count > 0)
             {
                 var first = raw[0];
@@ -353,6 +365,18 @@ ORDER BY timestamp ASC, id ASC";
         }
 
         /// <summary>
+        /// 期間の上限（終了日の翌日。日付だけの文字列）。終了日が <see cref="DateTime.MaxValue"/> の日なら null（上限なし）。
+        /// </summary>
+        /// <remarks>
+        /// Issue #2328（レビュー 3 回目で検出）: 翌日を求める <c>AddDays(1)</c> は 9999/12/31 で
+        /// <see cref="ArgumentOutOfRangeException"/> になる。その日より後の行は存在し得ないので、上限の条件を付けないのと同じ。
+        /// </remarks>
+        internal static string? ToExclusiveUpperBoundText(DateTime toDate)
+            => toDate.Date == DateTime.MaxValue.Date
+                ? null
+                : SqliteDateTimeFormat.ToDateText(toDate.Date.AddDays(1));
+
+        /// <summary>
         /// 検索条件からWHERE句を構築
         /// </summary>
         private static (string whereClause, Dictionary<string, object> parameters) BuildWhereClause(OperationLogSearchCriteria criteria)
@@ -360,16 +384,17 @@ ORDER BY timestamp ASC, id ASC";
             var conditions = new List<string>();
             var parameters = new Dictionary<string, object>();
 
+            // Issue #2328: 日付範囲は列を date() で包まずに比べる（理由は GetByDateRangeAsync）
             if (criteria.FromDate.HasValue)
             {
-                conditions.Add("date(timestamp) >= @fromDate");
+                conditions.Add("timestamp >= @fromDate");
                 parameters["@fromDate"] = SqliteDateTimeFormat.ToDateText(criteria.FromDate.Value);
             }
 
-            if (criteria.ToDate.HasValue)
+            if (criteria.ToDate.HasValue && ToExclusiveUpperBoundText(criteria.ToDate.Value) is string upperBound)
             {
-                conditions.Add("date(timestamp) <= @toDate");
-                parameters["@toDate"] = SqliteDateTimeFormat.ToDateText(criteria.ToDate.Value);
+                conditions.Add("timestamp < @toDateExclusive");
+                parameters["@toDateExclusive"] = upperBound;
             }
 
             if (!string.IsNullOrEmpty(criteria.Action))

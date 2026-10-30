@@ -336,6 +336,33 @@ public class SystemLendViewModelTests : IDisposable
         _ledgerRepositoryMock.Verify(r => r.InsertAsync(It.IsAny<Ledger>()), Times.Never);
     }
 
+    /// <summary>
+    /// Issue #2322: ダイアログを開いた後に他 PC がカードを払い戻したら、保存しても貸出中にしないこと。
+    /// </summary>
+    /// <remarks>
+    /// 払戻済かどうかは交通系ICカード管理がダイアログを開く前に 1 回確かめるだけで、ダイアログは
+    /// 操作者セッション（最大 30 分）のあいだ開いたままにできる。保存時はサービスの事前検証が拒む。
+    /// 正当な保存は <see cref="SaveAsync_指定した借用者と日時で貸出中レコードを作る"/> が固定している。
+    /// </remarks>
+    [Fact]
+    public async Task SaveAsync_ダイアログを開いた後に払い戻されたら記録せず案内する()
+    {
+        var vm = await CreateInitializedAsync();
+        vm.SelectedStaff = vm.StaffList.First(s => s.StaffIdm == BorrowerIdm);
+        _cardRepositoryMock.Setup(r => r.GetByIdmAsync(CardIdm, false))
+            .ReturnsAsync(new IcCard { CardIdm = CardIdm, CardType = "はやかけん", CardNumber = "C001", IsRefunded = true });
+
+        await vm.SaveAsync();
+
+        vm.IsCompleted.Should().BeFalse();
+        vm.IsStatusError.Should().BeTrue();
+        vm.StatusMessage.Should().Contain("払い戻し済み");
+        _ledgerRepositoryMock.Verify(r => r.InsertAsync(It.IsAny<Ledger>()), Times.Never);
+        _cardRepositoryMock.Verify(r => r.UpdateLentStatusAsync(
+            CardIdm, true, It.IsAny<DateTime?>(), It.IsAny<string?>()), Times.Never);
+        _recordedLogs.Should().BeEmpty();
+    }
+
     /// <summary>固定時計。</summary>
     private sealed class FakeClock : ISystemClock
     {

@@ -42,7 +42,8 @@ public partial class MainViewModel
     /// <item><description>貸出中カードの一覧取得</description></item>
     /// <item><description>カード残高ダッシュボードの更新</description></item>
     /// <item><description>職員証スキップ設定の読み込み</description></item>
-    /// <item><description>カードリーダー監視の開始</description></item>
+    /// <item><description>起動時チェック・更新通知（バックグラウンド）と共有モードの接続監視の開始</description></item>
+    /// <item><description>カードリーダー監視の開始（失敗し得るので最後。Issue #2327）</description></item>
     /// </list>
     /// </remarks>
     /// <returns>初期化処理のTask</returns>
@@ -69,9 +70,6 @@ public partial class MainViewModel
             // 貸出中カードを取得
             await RefreshLentCardsAsync();
 
-            // カード読み取り開始
-            await _cardReader.StartReadingAsync();
-
             // Issue #504 / #1689 / #1758: DB を読む起動時チェックはバックグラウンドで、かつ**直列に**実行する
             // （起動を遅延させず、同一接続上のコマンド並走も避ける）。詳細は RunStartupDataChecksAsync を参照。
             _ = RunStartupDataChecksAsync();
@@ -86,6 +84,14 @@ public partial class MainViewModel
             {
                 _sharedModeMonitor.Start();
             }
+
+            // カード読み取り開始（必ず最後に置く）
+            // Issue #2327: 開始は felicalib.dll はあるが Sony NFC ポートソフトウェアが無い等の環境で例外になり、
+            // 例外は MainWindow_Loaded の「初期化エラー」表示まで抜ける。以前はこの行が上の起動時チェック・
+            // 更新通知・共有モードの接続監視より前にあり、例外でそれらが一度も始まらなかった。
+            // カードリーダーと無関係な処理はこの行より前に置くこと（失敗の理由は警告エリアにも出る:
+            // FelicaCardReader が Disconnected の状態と Error を通知する）。
+            await _cardReader.StartReadingAsync();
         }
     }
 
@@ -441,7 +447,7 @@ public partial class MainViewModel
         // Issue #2329: 内容が変わらないなら入れ替えない。ダッシュボードの更新（共有モードでは 15 秒ごと）のたびに
         // 同じ行を消して足し直すと、警告エリアの並びが変わり、クリックしようとした行が押す直前に置き換わる。
         // 比べるのは（カード・文言）の集合で、順番は見ない（ダッシュボードの並べ替えだけで入れ替えない）
-        static IEnumerable<(string CardIdm, string DisplayText)> Normalize(IEnumerable<WarningItem> items) =>
+        static IEnumerable<(string? CardIdm, string DisplayText)> Normalize(IEnumerable<WarningItem> items) =>
             items.Select(w => (w.CardIdm, w.DisplayText))
                 .OrderBy(k => k.CardIdm, StringComparer.Ordinal)
                 .ThenBy(k => k.DisplayText, StringComparer.Ordinal);
@@ -537,6 +543,61 @@ public partial class MainViewModel
         {
             LentCards.Add(card.ToDto());
         }
+
+        await CheckRefundedCardsWithLentRecordsAsync();
+    }
+
+    /// <summary>
+    /// 貸出中の記録（貸出中レコード）が残っている払戻済のカードを警告に出す（Issue #2322）
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// 修正前の欠陥で作られ得た状態。母集団は <c>is_lent</c> ではなく<b>貸出中レコードの有無</b>で決める —
+    /// <c>is_lent = 0</c> でも貸出中レコードが残っていれば起動時の修復はそのカードを Warning で記録し、
+    /// 「履歴から貸出中の行を削除する」よう案内する。払戻済のカードは手元に無くタッチもできず、残高ダッシュボードにも
+    /// 出ないので、警告が無いとその案内に辿り着けない（コードレビューで検出）。
+    /// </para>
+    /// <para>
+    /// 貸出中カード一覧を読み直す契機（起動時・貸出・返却・履歴の削除の後・共有モードの定期更新）で生成と除去を行う
+    /// （§7.4「生成元が除去の責任も負う」）。貸出中の行をすべて削除すれば次の読み直しで消える。
+    /// 失敗しても貸出中カード一覧の更新は済んでいるので、ログを残して従来の警告を保つ（付随する表示のため）。
+    /// 世代番号の判定（#1739）は持たない — 貸出中カード一覧と同じく、重なった読み直しは最後に終わったものが勝ち、
+    /// 次の読み直しで正しい状態に戻る。
+    /// </para>
+    /// </remarks>
+    private async Task CheckRefundedCardsWithLentRecordsAsync()
+    {
+        try
+        {
+            // 共有モードでは 15 秒ごとに走り、対象はほぼ常に 0 件なので、台帳を全件読まず
+            // 払戻済のカードを起点に絞った専用のクエリで引く（コードレビューで検出）
+            var refundedCards = await _cardRepository.GetRefundedWithLentRecordsAsync()
+                ?? (IReadOnlyList<IcCard>)Array.Empty<IcCard>();
+            ReplaceWarnings(
+                w => w.Type == WarningType.RefundedCardLent,
+                refundedCards.Select(BuildRefundedCardLentWarning).ToList());
+        }
+        catch (Exception ex)
+        {
+            // 返却・貸出の後処理（RefreshLentCardsAsync）から呼ばれるため、ここで例外を外へ出すと
+            // 記録済みの操作が失敗に見える（#1805 と同じ形）。付随する表示なので、ログを残して従来の警告を保つ
+            _logger?.LogWarning(ex, "Issue #2322: 払戻済のカードに残る貸出中の記録の確認に失敗しました");
+        }
+    }
+
+    /// <summary>
+    /// 貸出中の記録が残っている払戻済のカードの警告（Issue #2322）
+    /// </summary>
+    internal static WarningItem BuildRefundedCardLentWarning(IcCard card)
+    {
+        return new WarningItem
+        {
+            Type = WarningType.RefundedCardLent,
+            CardIdm = card.CardIdm,
+            DisplayText =
+                $"⚠️ 払い戻した {card.CardType} {card.CardNumber} に貸出中の記録が残っています。" +
+                "クリックして履歴を開き、貸出中の行を「変更」から削除してください"
+        };
     }
 
     /// <summary>
@@ -572,7 +633,7 @@ public partial class MainViewModel
         var activeCardIdms = new HashSet<string>(CardBalanceDashboard.Select(i => i.CardIdm));
         ReplaceWarnings(w => (w.Type == WarningType.BalanceInconsistency
                               || w.Type == WarningType.CardBalanceMismatch)
-                             && !activeCardIdms.Contains(w.CardIdm));
+                             && (w.CardIdm is null || !activeCardIdms.Contains(w.CardIdm)));
     }
 
     /// <summary>

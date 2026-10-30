@@ -676,6 +676,79 @@ public sealed class LendingServiceUsageImportTests : IDisposable
         }
     }
 
+    /// <summary>
+    /// Issue #2328: 取り込みが <c>GetLock</c> で増やした参照カウントを戻すこと（貸出・返却と同じ対）。
+    /// </summary>
+    /// <remarks>
+    /// 戻さないと取り込みのたびにカウントが 1 ずつ残り、期限切れロックの掃除（<see cref="CardLockManager.CleanupExpiredLocks"/>）
+    /// が参照中と判断して永久に削除しない。観測は掃除の結果（<see cref="CardLockManager.HasLock"/>）で行う。
+    /// </remarks>
+    [Fact]
+    public async Task ImportUnrecordedUsageAsync_取り込んだ後はカードのロックの参照を残さないこと()
+    {
+        await InsertIntroductionAsync(new DateTime(2026, 9, 1), balance: 5000);
+
+        var result = await _service.ImportUnrecordedUsageAsync(TestCardIdm, new List<LedgerDetail>
+        {
+            Usage(new DateTime(2026, 9, 10), balanceAfter: 4790),
+        });
+        result.Success.Should().BeTrue(_logger.FormatEntries());
+
+        CleanupAllExpired();
+
+        _lockManager.HasLock(TestCardIdm).Should().BeFalse(
+            "参照カウントが 0 に戻っていれば、期限切れの掃除で削除される");
+    }
+
+    /// <summary>
+    /// Issue #2328: ロックを取れずに戻る経路でも、参照カウントを戻すこと。
+    /// </summary>
+    [Fact]
+    public async Task ImportUnrecordedUsageAsync_ロックを取れなかったときもカードのロックの参照を残さないこと()
+    {
+        await InsertIntroductionAsync(new DateTime(2026, 9, 1), balance: 5000);
+        var service = CreateService(_operationLogRepository, lockTimeoutSeconds: 1);
+        var cardLock = _lockManager.GetLock(TestCardIdm);
+        (await cardLock.WaitAsync(TimeSpan.FromSeconds(5))).Should().BeTrue("前提: 先にロックを取る");
+
+        var result = await service.ImportUnrecordedUsageAsync(TestCardIdm, new List<LedgerDetail>
+        {
+            Usage(new DateTime(2026, 9, 10), balanceAfter: 4790),
+        });
+        result.Success.Should().BeFalse("前提: ロックを取れずに戻る経路を通る");
+
+        // 先にロックを持っていた側が、取得と解放の対を閉じる
+        cardLock.Release();
+        _lockManager.ReleaseLockReference(TestCardIdm);
+        CleanupAllExpired();
+
+        _lockManager.HasLock(TestCardIdm).Should().BeFalse(
+            "取り込みが増やした参照も戻っていれば、期限切れの掃除で削除される");
+    }
+
+    /// <summary>
+    /// Issue #2328: 参照を戻しすぎないこと（他の処理が持っている参照まで減らさない）。
+    /// </summary>
+    /// <remarks>
+    /// 上の 2 件だけだと、<c>ReleaseLockReference</c> を 2 回呼ぶ実装や、掃除が参照カウントを見ない退行でも緑になる。
+    /// </remarks>
+    [Fact]
+    public async Task ImportUnrecordedUsageAsync_他の処理が参照中のロックは掃除で削除されないこと()
+    {
+        await InsertIntroductionAsync(new DateTime(2026, 9, 1), balance: 5000);
+        _lockManager.GetLock(TestCardIdm);  // 別の処理が参照を 1 つ持っている（解放はまだ）
+
+        var result = await _service.ImportUnrecordedUsageAsync(TestCardIdm, new List<LedgerDetail>
+        {
+            Usage(new DateTime(2026, 9, 10), balanceAfter: 4790),
+        });
+        result.Success.Should().BeTrue(_logger.FormatEntries());
+
+        CleanupAllExpired();
+
+        _lockManager.HasLock(TestCardIdm).Should().BeTrue("別の処理の参照は残っている");
+    }
+
     [Theory]
     [InlineData(false, false, 0, null, null, true)]
     [InlineData(true, false, 0, null, null, false)]       // 貸出中レコード
@@ -701,6 +774,19 @@ public sealed class LendingServiceUsageImportTests : IDisposable
     #endregion
 
     #region ヘルパー
+
+    /// <summary>
+    /// 参照カウントが 0 のロックをすべて期限切れとして掃除する（最終使用時刻の比較を待たない）。
+    /// </summary>
+    /// <remarks>
+    /// 期限を 0 にすると、<see cref="DateTime.UtcNow"/> の分解能（約 15ms）の中では最終使用時刻と
+    /// しきい値が等しくなって削除されないことがある。負の期限で「すべて期限切れ」にする。
+    /// </remarks>
+    private void CleanupAllExpired()
+    {
+        _lockManager.LockExpiration = TimeSpan.FromHours(-1);
+        _lockManager.CleanupExpiredLocks();
+    }
 
     private LendingService CreateService(IOperationLogRepository operationLogRepository, int lockTimeoutSeconds = 5)
     {

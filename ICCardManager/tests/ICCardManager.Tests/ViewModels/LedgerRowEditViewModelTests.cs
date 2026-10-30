@@ -424,8 +424,10 @@ public class LedgerRowEditViewModelTests : IDisposable
             _viewModel.MoveInsertPositionUpCommand.Execute(null);
         }
 
-        // Assert: 次の行（繰越行 1/1）より新しい
-        _viewModel.WarningMessage.Should().Be("日付が次の行より新しくなっています。挿入位置を確認してください。");
+        // Assert: 次の行（繰越行 1/1）より新しい。
+        // Issue #2325: 先頭では自動計算が使えず残高が未入力になるため、その警告も並ぶ（日付の警告だけを比べる）
+        _viewModel.WarningMessage.Should().Contain("日付が次の行より新しくなっています。挿入位置を確認してください。");
+        _viewModel.WarningMessage.Should().NotContain("日付が前の行より古くなっています");
     }
 
     #endregion
@@ -1235,10 +1237,13 @@ public class LedgerRowEditViewModelTests : IDisposable
         // Act: さらに先頭へ（直前行が無くなる）
         _viewModel.MoveInsertPositionUpCommand.Execute(null);
 
-        // Assert: 0 + 3000 - 0 = 3000 で上書きされず、直前の値のまま残る
+        // Assert: 0 + 3000 - 0 = 3000 で上書きされない。
+        // Issue #2325: 前の位置（InsertIndex=1）で計算した 5300 も残さず、未入力（0）に戻す
+        // （5300 は今の位置の残高ではなく、手入力の値として保存され得た）
         _viewModel.InsertIndex.Should().Be(0);
-        _viewModel.Balance.Should().Be(5300);
+        _viewModel.Balance.Should().Be(0);
         _viewModel.Balance.Should().NotBe(3000, "起点不明のまま 0 から計算してはいけない");
+        _viewModel.Balance.Should().NotBe(5300, "別の位置で計算した値を確定値として見せない");
     }
 
     /// <summary>
@@ -2045,6 +2050,57 @@ public class LedgerRowEditViewModelTests : IDisposable
             "確認は IDialogService 経由で行うこと（MessageBox 直呼びはオーナー無しになる。Issue #1837）");
     }
 
+    /// <summary>
+    /// Issue #2322: 貸出中の行を削除するときの確認は、払戻済のカードでは「タッチして返却」を勧めないこと
+    /// </summary>
+    /// <remarks>
+    /// 払戻済のカードはタッチで返却できない。払戻済のカードに残った貸出中の行の警告から削除へ進んだ職員に
+    /// 実行できない手順を勧めない。払戻済でないカードは従来どおり返却を勧める（対の表明）。
+    /// </remarks>
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task RequestDelete_貸出中の行の確認文言を払戻済かどうかで出し分けること(bool isRefundedCard)
+    {
+        _ledgerRepoMock.Setup(r => r.GetByIdAsync(1)).ReturnsAsync(new Ledger
+        {
+            Id = 1,
+            CardIdm = TestCardIdm,
+            Date = new DateTime(2026, 1, 10),
+            Summary = "（貸出中）",
+            Balance = 2300,
+            IsLentRecord = true,
+        });
+        await _viewModel.InitializeForEditAsync(
+            new LedgerDto
+            {
+                Id = 1,
+                CardIdm = TestCardIdm,
+                DateDisplay = "R8.1.10",
+                Summary = "（貸出中）",
+                Balance = 2300,
+                IsLentRecord = true,
+            });
+        _viewModel.IsRefundedCard = isRefundedCard;
+        string? message = null;
+        _dialogServiceMock
+            .Setup(d => d.ShowWarningConfirmation(It.IsAny<string>(), "履歴の削除"))
+            .Callback<string, string>((m, _) => message = m)
+            .Returns(false);
+
+        _viewModel.RequestDeleteCommand.Execute(null);
+
+        message.Should().NotBeNull();
+        if (isRefundedCard)
+        {
+            message.Should().Contain("払戻済のカードはタッチで返却できない").And.NotContain("タッチして返却操作");
+        }
+        else
+        {
+            message.Should().Contain("タッチして返却操作").And.NotContain("払戻済");
+        }
+    }
+
     [Theory]
     [InlineData(true, true)]
     [InlineData(false, false)]
@@ -2484,6 +2540,253 @@ public class LedgerRowEditViewModelTests : IDisposable
         _ledgerRepoMock.Verify(r => r.UpdateDetailBusStopsAsync(
                 It.IsAny<int>(), It.IsAny<IEnumerable<(int, string)>>(), It.IsAny<SQLiteTransaction>()),
             Times.Never);
+    }
+
+    /// <summary>
+    /// Issue #2306: 往復のバス明細 2 件を持つ台帳（往路＝古い SequenceNumber 2、復路＝新しい 1）。
+    /// </summary>
+    private static Ledger CreateRoundTripBusLedger(string summary, string forwardBusStops, string returnBusStops) => new Ledger
+    {
+        Id = 1,
+        CardIdm = TestCardIdm,
+        Date = new DateTime(2026, 1, 10),
+        Summary = summary,
+        Expense = 460,
+        Balance = 2040,
+        Details = new List<LedgerDetail>
+        {
+            new LedgerDetail { LedgerId = 1, IsBus = true, BusStops = returnBusStops, Amount = 230, Balance = 2040, SequenceNumber = 1, UseDate = new DateTime(2026, 1, 10) },
+            new LedgerDetail { LedgerId = 1, IsBus = true, BusStops = forwardBusStops, Amount = 230, Balance = 2270, SequenceNumber = 2, UseDate = new DateTime(2026, 1, 10) },
+        }
+    };
+
+    /// <summary>
+    /// Issue #2306（欠陥を突く側）: 往復のバス摘要を直して保存すると、往路・復路の両方の明細へ書き戻すこと。
+    /// 旧実装は区間数（1）と明細数（2）が合わないため何もせず、摘要だけが保存されて、
+    /// 統合のたびに明細（旧バス停名）から摘要が作り直されていた。
+    /// </summary>
+    [Fact]
+    public async Task SaveEdit_往復のバス摘要を直すと往路と復路の明細へ書き戻すこと_Issue2306()
+    {
+        // Arrange
+        var ledger = CreateRoundTripBusLedger("バス（天神～博多 往復）", "天神～博多", "博多～天神");
+        var dto = ArrangeBusLedgerForEdit(ledger);
+        List<(int SequenceNumber, string BusStops)>? written = null;
+        _ledgerRepoMock.Setup(r => r.UpdateDetailBusStopsAsync(
+                It.IsAny<int>(), It.IsAny<IEnumerable<(int, string)>>(), It.IsAny<SQLiteTransaction>()))
+            .Callback<int, IEnumerable<(int SequenceNumber, string BusStops)>, SQLiteTransaction>((_, u, _) => written = u.ToList())
+            .ReturnsAsync(true);
+
+        await _viewModel.InitializeForEditAsync(dto);
+        _viewModel.Summary = "バス（天神～大橋 往復）";
+
+        // Act
+        await _viewModel.SaveCommand.ExecuteAsync(null);
+
+        // Assert
+        _viewModel.IsSaved.Should().BeTrue();
+        _viewModel.WarningMessage.Should().BeEmpty("往復は明細へ反映できる形なので警告しない");
+        written.Should().NotBeNull("往復の摘要でも明細へ書き戻すべき");
+        written!.OrderBy(u => u.SequenceNumber).Should().Equal(new[] { (1, "大橋～天神"), (2, "天神～大橋") },
+            "古い明細（往路）へ順向き、新しい明細（復路）へ逆向きを書く");
+
+        // 受け入れ条件: その後に統合（明細からの摘要の再生成）をしても、編集した摘要が保たれる
+        new SummaryGenerator().Generate(ledger.Details.OrderBy(d => d.SequenceNumber).ToList())
+            .Should().Be("バス（天神～大橋 往復）");
+    }
+
+    /// <summary>
+    /// Issue #2306: バス停名を明細へ反映できない形の摘要（区間数が利用の件数と合わない）は、保存前に警告すること。
+    /// 保存は止めない（正当な運用と区別できないため。#1914 と同じ判断）が、無言の成功にしない。
+    /// </summary>
+    [Fact]
+    public async Task Validate_バス停名を明細へ反映できない摘要は警告すること_Issue2306()
+    {
+        // Arrange
+        var ledger = CreateRoundTripBusLedger("バス（天神～博多 往復）", "天神～博多", "博多～天神");
+        var dto = ArrangeBusLedgerForEdit(ledger);
+        _ledgerRepoMock.Setup(r => r.UpdateDetailBusStopsAsync(
+                It.IsAny<int>(), It.IsAny<IEnumerable<(int, string)>>(), It.IsAny<SQLiteTransaction>()))
+            .ReturnsAsync(true);
+
+        await _viewModel.InitializeForEditAsync(dto);
+        _viewModel.WarningMessage.Should().BeEmpty("前提: 編集前は警告なし");
+
+        // Act: 2 件の利用を 1 区間（往復の表記なし）に書き換える
+        _viewModel.Summary = "バス（天神～大橋）";
+
+        // Assert
+        _viewModel.WarningMessage.Should().Contain(LedgerRowEditViewModel.BuildBusStopUnmappableWarning(BusStopSyncFailure.CountMismatch, 2));
+        _viewModel.CanSave.Should().BeTrue("警告であって保存は止めない");
+
+        await _viewModel.SaveCommand.ExecuteAsync(null);
+        _viewModel.IsSaved.Should().BeTrue();
+        _ledgerRepoMock.Verify(r => r.UpdateDetailBusStopsAsync(
+                It.IsAny<int>(), It.IsAny<IEnumerable<(int, string)>>(), It.IsAny<SQLiteTransaction>()),
+            Times.Never, "対応付けられない形は明細へ書き戻さない（位置だけで書くと別の利用へ名前が入る）");
+    }
+
+    /// <summary>
+    /// Issue #2306（対の表明）: バス停名の部分を変えていない編集では警告しないこと。
+    /// 乗継統合された摘要（2 件の利用が 1 区間）は元から対応付けられないため、
+    /// 摘要の変更だけで警告すると、鉄道の区間や表記を直しただけの編集にも警告が出る。
+    /// </summary>
+    [Fact]
+    public async Task Validate_バス停名を変えない摘要の編集では警告しないこと_Issue2306()
+    {
+        // Arrange: 天神→博多→大橋 の乗継が「天神～大橋」に統合された摘要
+        var ledger = CreateRoundTripBusLedger("バス（天神～大橋）", "天神～博多", "博多～大橋");
+        var dto = ArrangeBusLedgerForEdit(ledger);
+
+        await _viewModel.InitializeForEditAsync(dto);
+
+        // Act: バスのブロックはそのまま、前に鉄道の区間を書き足す
+        _viewModel.Summary = "鉄道（薬院～天神）、バス（天神～大橋）";
+
+        // Assert
+        _viewModel.WarningMessage.Should().BeEmpty();
+    }
+
+    /// <summary>
+    /// Issue #2306（コードレビューで検出）: 件数が合っていても往路と復路が隣り合わない往復は反映できない。
+    /// その警告は「区間の数が合わない」「往復は … の形で」と案内しない（事実と違う理由と、いま入力した形を示すことになる）。
+    /// </summary>
+    [Fact]
+    public async Task Validate_往路と復路が隣り合わない往復は理由を区別して警告すること_Issue2306()
+    {
+        // Arrange: 天神→博多／大橋→薬院／博多→天神（古い順。SequenceNumber は大きいほど古い）
+        var date = new DateTime(2026, 1, 10);
+        var ledger = new Ledger
+        {
+            Id = 1,
+            CardIdm = TestCardIdm,
+            Date = date,
+            Summary = "バス（天神～博多 往復、大橋～薬院）",
+            Expense = 690,
+            Balance = 1810,
+            Details = new List<LedgerDetail>
+            {
+                new LedgerDetail { LedgerId = 1, IsBus = true, BusStops = "博多～天神", Amount = 230, Balance = 1810, SequenceNumber = 1, UseDate = date },
+                new LedgerDetail { LedgerId = 1, IsBus = true, BusStops = "大橋～薬院", Amount = 230, Balance = 2040, SequenceNumber = 2, UseDate = date },
+                new LedgerDetail { LedgerId = 1, IsBus = true, BusStops = "天神～博多", Amount = 230, Balance = 2270, SequenceNumber = 3, UseDate = date },
+            }
+        };
+        var dto = ArrangeBusLedgerForEdit(ledger);
+        await _viewModel.InitializeForEditAsync(dto);
+
+        // Act: 件数は 3＝3 のまま、往復の折り返し点だけを直す
+        _viewModel.Summary = "バス（天神～博多駅前 往復、大橋～薬院）";
+
+        // Assert
+        var expected = LedgerRowEditViewModel.BuildBusStopUnmappableWarning(BusStopSyncFailure.RoundTripNotAdjacent, 3);
+        _viewModel.WarningMessage.Should().Contain(expected);
+        _viewModel.WarningMessage.Should().NotContain("区間の数が利用の件数と合わない", "件数は合っているので事実と違う");
+        _viewModel.WarningMessage.Should().Contain("往復の表記を使わず", "反映できる書き方（利用 1 件ごとに区切る）を案内する");
+    }
+
+    /// <summary>
+    /// Issue #2306（コードレビュー 3 回目で検出）: 編集前にあったバスのブロックが 1 つも読み取れなくなった摘要
+    /// （半角括弧「バス(…)」）は、明細へ書き戻されず統合で編集が失われるので警告する。
+    /// </summary>
+    [Fact]
+    public async Task Validate_バスのブロックが読み取れなくなった摘要は警告すること_Issue2306()
+    {
+        var ledger = CreateBusLedger("バス（天神～博多）");
+        var dto = ArrangeBusLedgerForEdit(ledger);
+        await _viewModel.InitializeForEditAsync(dto);
+
+        _viewModel.Summary = "バス(天神～大橋)";
+
+        _viewModel.WarningMessage.Should().Contain(
+            LedgerRowEditViewModel.BuildBusStopUnmappableWarning(BusStopSyncFailure.BusBlockMissing, 1));
+    }
+
+    /// <summary>
+    /// 上の対: 全角括弧の対応が取れていない形は #1914 の警告だけを出し、重ねて出さない。
+    /// 編集前からバスのブロックが無い摘要も対象外。
+    /// </summary>
+    [Fact]
+    public async Task Validate_括弧の不均衡や元からバスのブロックが無い摘要では重ねて警告しないこと_Issue2306()
+    {
+        var ledger = CreateBusLedger("バス（天神～博多）");
+        var dto = ArrangeBusLedgerForEdit(ledger);
+        await _viewModel.InitializeForEditAsync(dto);
+        var missing = LedgerRowEditViewModel.BuildBusStopUnmappableWarning(BusStopSyncFailure.BusBlockMissing, 1);
+
+        _viewModel.Summary = "バス（天神～大橋";
+        _viewModel.WarningMessage.Should().Contain("全角括弧「（」「）」の対応が取れていません");
+        _viewModel.WarningMessage.Should().NotContain(missing);
+
+        var plain = CreateBusLedger("手入力の摘要");
+        var plainDto = ArrangeBusLedgerForEdit(plain);
+        await _viewModel.InitializeForEditAsync(plainDto);
+        _viewModel.Summary = "手入力の摘要（修正）";
+        _viewModel.WarningMessage.Should().NotContain(missing);
+    }
+
+    /// <summary>
+    /// Issue #2306（コードレビュー 5 回目で検出）: バス停名の並びだけを変えた編集（往復の向きを逆に書いた）は
+    /// 明細へ書き戻されず、次の統合で戻るので警告する。
+    /// </summary>
+    [Fact]
+    public async Task Validate_バス停名の並びだけを変えた編集は警告すること_Issue2306()
+    {
+        var ledger = CreateRoundTripBusLedger("バス（天神～博多 往復）", "天神～博多", "博多～天神");
+        var dto = ArrangeBusLedgerForEdit(ledger);
+        await _viewModel.InitializeForEditAsync(dto);
+
+        _viewModel.Summary = "バス（博多～天神 往復）";
+
+        var expected = LedgerRowEditViewModel.BuildBusStopUnmappableWarning(BusStopSyncFailure.ReorderOnly, 2);
+        _viewModel.WarningMessage.Should().Contain(expected);
+        expected.Should().Contain("明細の利用の順と違い").And.EndWith("利用した順に並べて入力してください。");
+    }
+
+    /// <summary>
+    /// 上の対: 旧生成器の並びの摘要を、今の生成どおりの並びへ戻す編集は警告しない（作り直しと一致する）。
+    /// </summary>
+    [Fact]
+    public async Task Validate_旧生成器の並びを今の生成どおりに戻す編集は警告しないこと_Issue2306()
+    {
+        var ledger = CreateRoundTripBusLedger("バス（天神～博多、★）", "★", "天神～博多");
+        var dto = ArrangeBusLedgerForEdit(ledger);
+        await _viewModel.InitializeForEditAsync(dto);
+
+        _viewModel.Summary = "バス（★、天神～博多）";
+
+        _viewModel.WarningMessage.Should().BeEmpty();
+    }
+
+    /// <summary>
+    /// Issue #2306: 警告文言の品質（何が・なぜ・どうすれば、行動指示で終わる）を理由ごとに確かめる。
+    /// 往復の書き方は組織設定の接尾辞から作る（リテラルを直書きしない。#1818）。
+    /// </summary>
+    [Theory]
+    [InlineData(nameof(BusStopSyncFailure.CountMismatch), "区間の数が利用の件数と合わない")]
+    [InlineData(nameof(BusStopSyncFailure.RoundTripNotAdjacent), "往復の相手に当たるバス利用が続いていない離れた位置にある")]
+    [InlineData(nameof(BusStopSyncFailure.RoundTripOnSingleUsage), "バス利用が1件だけなのに往復")]
+    [InlineData(nameof(BusStopSyncFailure.MalformedRoundTrip), "往復の表記の前が「乗車～降車」の形")]
+    [InlineData(nameof(BusStopSyncFailure.BusBlockMissing), "全角の括弧）のバス停名が見つからない")]
+    public void BuildBusStopUnmappableWarning_理由ごとに3要素を含み行動指示で終わること_Issue2306(
+        string failureName, string reason)
+    {
+        // BusStopSyncFailure は internal のため、public なテストメソッドの引数には名前で渡す
+        var failure = (BusStopSyncFailure)Enum.Parse(typeof(BusStopSyncFailure), failureName);
+        var message = LedgerRowEditViewModel.BuildBusStopUnmappableWarning(failure, 2);
+
+        message.Should().Contain("2件", "何が（この履歴のバス利用の件数）");
+        message.Should().Contain(reason, "なぜ（理由ごとに出し分ける）");
+        message.Should().Contain("統合したときに", "放置すると何が起きるか");
+        message.Should().Contain("バス利用1件ごとに「乗車～降車」を利用した順に「、」で区切って", "どうすれば（どの理由でも反映できる書き方）");
+        message.Should().EndWith("入力してください。");
+        if (failure == BusStopSyncFailure.CountMismatch)
+        {
+            message.Should().Contain($"乗車～降車{SummaryGenerator.RoundTripSuffix}", "件数の不一致では往復のまとめ方も示す");
+        }
+        else
+        {
+            message.Should().NotContain($"乗車～降車{SummaryGenerator.RoundTripSuffix}", "往復の表記が原因のときに往復の形を勧めない");
+        }
     }
 
     #endregion
