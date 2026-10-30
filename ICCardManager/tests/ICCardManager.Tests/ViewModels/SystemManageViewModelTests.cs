@@ -422,7 +422,7 @@ public class SystemManageViewModelTests : IDisposable
     {
         // Arrange: バックアップ成功 + 既存3件 → LoadBackupsInternalAsync(false) が件数を上書きしない経路の検証
         const string backupPath = "/backups/backup_manual_20260501_120000.db";
-        _backupServiceMock.Setup(s => s.CreateBackupAsync(backupPath)).ReturnsAsync(true);
+        _backupServiceMock.Setup(s => s.CreateManualBackupAsync(backupPath)).ReturnsAsync(true);
         _backupServiceMock.Setup(s => s.GetBackupFilesAsync())
             .ReturnsAsync(new List<BackupFileInfo>
             {
@@ -446,7 +446,7 @@ public class SystemManageViewModelTests : IDisposable
     {
         // Arrange
         const string backupPath = "/backups/manual.db";
-        _backupServiceMock.Setup(s => s.CreateBackupAsync(backupPath)).ReturnsAsync(true);
+        _backupServiceMock.Setup(s => s.CreateManualBackupAsync(backupPath)).ReturnsAsync(true);
         _backupServiceMock.Setup(s => s.GetBackupFilesAsync())
             .ReturnsAsync(Enumerable.Empty<BackupFileInfo>());
 
@@ -466,7 +466,7 @@ public class SystemManageViewModelTests : IDisposable
         {
             new BackupFileInfo { FileName = "manual.db", FilePath = backupPath, CreatedAt = DateTime.Now },
         };
-        _backupServiceMock.Setup(s => s.CreateBackupAsync(backupPath)).ReturnsAsync(true);
+        _backupServiceMock.Setup(s => s.CreateManualBackupAsync(backupPath)).ReturnsAsync(true);
         _backupServiceMock.Setup(s => s.GetBackupFilesAsync()).ReturnsAsync(refreshedList);
 
         // Act
@@ -482,7 +482,7 @@ public class SystemManageViewModelTests : IDisposable
     {
         // Arrange
         const string backupPath = "/backups/manual.db";
-        _backupServiceMock.Setup(s => s.CreateBackupAsync(backupPath)).ReturnsAsync(false);
+        _backupServiceMock.Setup(s => s.CreateManualBackupAsync(backupPath)).ReturnsAsync(false);
 
         // Act
         await _viewModel.CreateBackupCoreAsync(backupPath);
@@ -504,7 +504,7 @@ public class SystemManageViewModelTests : IDisposable
     {
         // Arrange
         const string backupPath = "/backups/manual.db";
-        _backupServiceMock.Setup(s => s.CreateBackupAsync(backupPath))
+        _backupServiceMock.Setup(s => s.CreateManualBackupAsync(backupPath))
             .ThrowsAsync(new Exception("disk full"));
 
         // Act
@@ -517,6 +517,30 @@ public class SystemManageViewModelTests : IDisposable
         _viewModel.StatusMessage.Should().MatchRegex("してください。?$|連絡してください。?$",
             "行動指示で終わるべき");
         _viewModel.IsStatusError.Should().BeTrue();
+    }
+
+    /// <summary>
+    /// Issue #2304: 手動バックアップは成功日時を記録する経路（CreateManualBackupAsync）で作る。
+    /// 記録しない CreateBackupAsync を通すと、BackupStale 警告が案内どおりに実行しても消えない。
+    /// 記録そのものは BackupServiceManualBackupRecordingTests が実 DB で表明する。
+    /// </summary>
+    [Fact]
+    public async Task CreateBackupCoreAsync_手動バックアップは成功日時を記録する経路で作ること()
+    {
+        // Arrange
+        const string backupPath = "/backups/backup_manual_20261020_093000.db";
+        _backupServiceMock.Setup(s => s.CreateManualBackupAsync(backupPath)).ReturnsAsync(true);
+        _backupServiceMock.Setup(s => s.GetBackupFilesAsync())
+            .ReturnsAsync(Enumerable.Empty<BackupFileInfo>());
+
+        // Act
+        await _viewModel.CreateBackupCoreAsync(backupPath);
+
+        // Assert
+        _backupServiceMock.Verify(s => s.CreateManualBackupAsync(backupPath), Times.Once);
+        _backupServiceMock.Verify(s => s.CreateBackupAsync(It.IsAny<string>()), Times.Never,
+            "記録しない経路で手動バックアップを作ってはならない");
+        _viewModel.StatusMessage.Should().Be("バックアップを作成しました: backup_manual_20261020_093000.db");
     }
 
     #endregion
@@ -533,7 +557,7 @@ public class SystemManageViewModelTests : IDisposable
             new BackupFileInfo { FileName = "b.db", FilePath = "/b.db", CreatedAt = DateTime.Now },
         };
         _backupServiceMock.Setup(s => s.GetBackupFilesAsync()).ReturnsAsync(backupFiles);
-        _backupServiceMock.Setup(s => s.CreateBackupAsync(It.IsAny<string>())).ReturnsAsync(true);
+        _backupServiceMock.Setup(s => s.CreateManualBackupAsync(It.IsAny<string>())).ReturnsAsync(true);
         await _viewModel.CreateBackupCoreAsync("/backups/test.db");
 
         var statusBeforeReload = _viewModel.StatusMessage;
@@ -1174,7 +1198,7 @@ public class SystemManageViewModelTests : IDisposable
         // Arrange: 作成は成功し、operation_log への記録だけが失敗する
         const string backupPath = "/backups/backup_manual_20260925_101500.db";
         var viewModel = CreateViewModelWithFailingAuditLog();
-        _backupServiceMock.Setup(s => s.CreateBackupAsync(backupPath)).ReturnsAsync(true);
+        _backupServiceMock.Setup(s => s.CreateManualBackupAsync(backupPath)).ReturnsAsync(true);
         _backupServiceMock.Setup(s => s.GetBackupFilesAsync())
             .ReturnsAsync(new List<BackupFileInfo>
             {
@@ -1204,7 +1228,7 @@ public class SystemManageViewModelTests : IDisposable
     {
         // Arrange: 実 DB へ記録する既定の ViewModel
         const string backupPath = "/backups/backup_manual_20260925_111500.db";
-        _backupServiceMock.Setup(s => s.CreateBackupAsync(backupPath)).ReturnsAsync(true);
+        _backupServiceMock.Setup(s => s.CreateManualBackupAsync(backupPath)).ReturnsAsync(true);
         _backupServiceMock.Setup(s => s.GetBackupFilesAsync())
             .ReturnsAsync(Enumerable.Empty<BackupFileInfo>());
 
@@ -1484,6 +1508,27 @@ public class SystemManageViewModelTests : IDisposable
         // Assert
         calls.Should().Equal("validate", "pre-restore-backup", "restore");
         _viewModel.StatusMessage.Should().Be(RestoreCompletedStatus);
+    }
+
+    /// <summary>
+    /// Issue #2304: リストア前バックアップは成功日時を記録しない経路（CreateBackupAsync）で作る。
+    /// リストアが成功すると DB は置き換わり、記録も消えるため、手動バックアップとは数えない。
+    /// </summary>
+    [Fact]
+    public async Task RestoreFromFileCoreAsync_リストア前バックアップは成功日時を記録しない経路で作ること()
+    {
+        // Arrange
+        const string sourcePath = "/external/pre_restore_not_recorded.db";
+        SetupSuccessfulRestore(sourcePath);
+
+        // Act
+        await _viewModel.RestoreFromFileCoreAsync(sourcePath);
+
+        // Assert
+        _viewModel.StatusMessage.Should().Be(RestoreCompletedStatus);
+        _backupServiceMock.Verify(s => s.CreateBackupAsync(It.IsAny<string>()), Times.Once);
+        _backupServiceMock.Verify(s => s.CreateManualBackupAsync(It.IsAny<string>()), Times.Never,
+            "リストア前バックアップを手動バックアップとして記録しない");
     }
 
     [Fact]

@@ -78,12 +78,14 @@ public class CacheSharedModeTests
     [Trait("Category", "Unit")]
     public void App_共有モードのTTL短縮はApplySharedModeTtlへ委ねていること()
     {
+        // Issue #2328: 共有モードの判定と TTL の短縮は App.xaml.cs から DatabaseLocationResolver.Register へ移した
+        // （DB 接続と同じ解決結果で判定するため）。App.xaml.cs が委譲していることは DatabaseLocationResolverTests が表明する
         var code = TestSourceInspection.ToCodeOnly(
-            File.ReadAllText(Path.Combine(TestPaths.GetProductionSourceRoot(), "App.xaml.cs")));
+            File.ReadAllText(Path.Combine(TestPaths.GetProductionSourceRoot(), "Data", "DatabaseLocationResolver.cs")));
 
         Regex.IsMatch(code, @"\bIsSharedModePath\s*\([^)]*\)\s*\)\s*\{\s*cacheOptions\s*\.\s*ApplySharedModeTtl\s*\(\s*\)\s*;")
             .Should().BeTrue("共有モード判定の分岐の中で ApplySharedModeTtl を呼ぶべき");
         Regex.IsMatch(code, @"\bcacheOptions\s*\.\s*(CardListSeconds|LentCardsSeconds|StaffListSeconds|SettingsMinutes)\s*=")
-            .Should().BeFalse("TTL の値を App.xaml.cs に直書きしない（テストが本番の値を見られなくなる）");
+            .Should().BeFalse("TTL の値を直書きしない（テストが本番の値を見られなくなる）");
     }
 }

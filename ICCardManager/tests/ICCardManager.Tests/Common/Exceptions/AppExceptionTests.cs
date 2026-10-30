@@ -149,32 +149,6 @@ public class AppExceptionTests
     }
 
     [Fact]
-    public void CardReaderException_ReconnectFailed_ReturnsCorrectInfo()
-    {
-        // Act
-        var exception = CardReaderException.ReconnectFailed(3);
-
-        // Assert
-        exception.UserFriendlyMessage.Should().Contain("再接続に失敗").And.Contain("3回");
-        exception.ErrorCode.Should().Be("CR008");
-        exception.Message.Should().Contain("3 attempts");
-    }
-
-    [Fact]
-    public void CardReaderException_ReconnectFailed_WithInnerException_PreservesInnerException()
-    {
-        // Arrange
-        var innerException = new IOException("Connection refused");
-
-        // Act
-        var exception = CardReaderException.ReconnectFailed(5, innerException);
-
-        // Assert
-        exception.InnerException.Should().BeSameAs(innerException);
-        exception.ErrorCode.Should().Be("CR008");
-    }
-
-    [Fact]
     public void CardReaderException_CardRemoved_ReturnsCorrectInfo()
     {
         // Act

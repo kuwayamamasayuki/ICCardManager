@@ -177,6 +177,14 @@ namespace ICCardManager.Views.Dialogs
         }
 
         /// <summary>
+        /// 編集対象の行のカードが払戻済かを設定する（Issue #2322。貸出中の行の削除の確認文言を出し分ける）
+        /// </summary>
+        public void SetRefundedCard(bool isRefunded)
+        {
+            _viewModel.IsRefundedCard = isRefunded;
+        }
+
+        /// <summary>
         /// 閉じる直前の未保存変更ガード（Issue #2141）
         /// </summary>
         /// <remarks>

@@ -3534,6 +3534,132 @@ public class MainViewModelTests : IDisposable
         _viewModel.History.IsCardHistoryImportOffered.Should().BeFalse("貸出中なら返却が利用履歴を記録する");
     }
 
+    #region Issue #2322: 貸出中の記録が残っている払戻済のカードの警告
+
+    private const string RefundedLentCardIdm = "0123456789ABCDEF";
+
+    private static IcCard RefundedCard(bool isLent) => new()
+    {
+        CardIdm = RefundedLentCardIdm,
+        CardType = "はやかけん",
+        CardNumber = "H-009",
+        IsLent = isLent,
+        IsRefunded = true,
+        LastLentAt = new DateTime(2025, 3, 18, 9, 30, 0),
+    };
+
+    private static Ledger LentRecord(string cardIdm, DateTime date) => new()
+    {
+        CardIdm = cardIdm,
+        Date = date,
+        LentAt = date,
+        IsLentRecord = true,
+    };
+
+    private void ArrangeLentRecords(params Ledger[] records)
+    {
+        _ledgerRepositoryMock.Setup(r => r.GetAllLentRecordsAsync()).ReturnsAsync(records.ToList());
+    }
+
+    private void ArrangeRefundedWithLentRecords(params IcCard[] cards)
+    {
+        _cardRepositoryMock.Setup(r => r.GetRefundedWithLentRecordsAsync()).ReturnsAsync(cards.ToList());
+    }
+
+    /// <summary>
+    /// 貸出中の記録が残る払戻済のカードを警告に出すこと（読み直しのたびに入れ替え、重複させない）
+    /// </summary>
+    /// <remarks>
+    /// 母集団（is_lent によらない・払戻済・貸出中レコードあり）の絞り込みはリポジトリのクエリが持ち、
+    /// <c>CardRepositoryRefundedWithLentRecordsTests</c>（実 DB）が固定する。
+    /// </remarks>
+    [Fact]
+    public async Task RefreshLentCardsAsync_貸出中の記録が残る払戻済のカードを警告に出すこと()
+    {
+        ArrangeRefundedWithLentRecords(RefundedCard(isLent: false));
+
+        await ((IHistoryPanelHost)_viewModel).RefreshLentCardsAsync();
+        await ((IHistoryPanelHost)_viewModel).RefreshLentCardsAsync();
+
+        var warning = _viewModel.WarningMessages.Should()
+            .ContainSingle(w => w.Type == WarningType.RefundedCardLent, "読み直しのたびに入れ替え、重複させない").Subject;
+        warning.CardIdm.Should().Be(RefundedLentCardIdm);
+        warning.DisplayText.Should().Contain("はやかけん H-009").And.Contain("削除してください");
+        _ledgerRepositoryMock.Verify(r => r.GetAllLentRecordsAsync(), Times.Never,
+            "読み直しのたびに台帳を全件読まない（専用のクエリで払戻済のカードから引く）");
+    }
+
+    /// <summary>
+    /// 貸出中の行をすべて削除したら、次の読み直しで警告が消えること
+    /// </summary>
+    [Fact]
+    public async Task RefreshLentCardsAsync_貸出中の記録が無くなったら警告を取り除くこと()
+    {
+        ArrangeRefundedWithLentRecords(RefundedCard(isLent: true));
+        await ((IHistoryPanelHost)_viewModel).RefreshLentCardsAsync();
+        _viewModel.WarningMessages.Should().Contain(w => w.Type == WarningType.RefundedCardLent);
+
+        ArrangeRefundedWithLentRecords();
+        await ((IHistoryPanelHost)_viewModel).RefreshLentCardsAsync();
+
+        _viewModel.WarningMessages.Should().NotContain(w => w.Type == WarningType.RefundedCardLent);
+    }
+
+    /// <summary>
+    /// 照合のクエリが失敗しても、例外を外へ出さず、貸出中カード一覧は更新し、出ていた警告は残すこと
+    /// </summary>
+    /// <remarks>
+    /// <c>RefreshLentCardsAsync</c> は返却・貸出の後処理から呼ばれる。ここで例外が抜けると、記録済みの操作が
+    /// 失敗に見える（#1805 と同じ形）。警告を消すと、解消していない状態が解消したように見える。
+    /// </remarks>
+    [Fact]
+    public async Task RefreshLentCardsAsync_照合に失敗しても例外を出さず一覧を更新し警告を残すこと()
+    {
+        ArrangeRefundedWithLentRecords(RefundedCard(isLent: true));
+        await ((IHistoryPanelHost)_viewModel).RefreshLentCardsAsync();
+
+        var lent = new IcCard { CardIdm = "1111222233334444", CardType = "nimoca", CardNumber = "N-001", IsLent = true };
+        _cardRepositoryMock.Setup(r => r.GetLentAsync(It.IsAny<bool>())).ReturnsAsync(new List<IcCard> { lent });
+        _cardRepositoryMock.Setup(r => r.GetRefundedWithLentRecordsAsync())
+            .ThrowsAsync(new System.Data.SQLite.SQLiteException(System.Data.SQLite.SQLiteErrorCode.Busy, "database is locked"));
+
+        var act = () => ((IHistoryPanelHost)_viewModel).RefreshLentCardsAsync();
+
+        await act.Should().NotThrowAsync();
+        _viewModel.LentCards.Should().ContainSingle(c => c.CardIdm == lent.CardIdm, "貸出中カード一覧の更新は済ませる");
+        _viewModel.WarningMessages.Should().ContainSingle(w => w.Type == WarningType.RefundedCardLent,
+            "確かめられなかったときは従来の警告を残す");
+    }
+
+    /// <summary>
+    /// 警告のクリックで、そのカードの履歴を最も古い貸出中の行の月の 1 日から開くこと
+    /// </summary>
+    /// <remarks>
+    /// 直すべき貸出中の行は貸出日に記録されている。<c>last_lent_at</c>（最新の貸出、3 月）から開くと
+    /// 1 月の行が画面に出ず、削除しても警告が残る。
+    /// </remarks>
+    [Fact]
+    public async Task HandleWarningClick_貸出中の記録が残る払戻済のカードの警告で最も古い貸出中の行の月から履歴を開くこと()
+    {
+        SetupWarningCheckDefaults();
+        ArrangeHistoryPaging(_ => 0, pageSize: 30);
+        _cardRepositoryMock.Setup(r => r.GetByIdmAsync(RefundedLentCardIdm, It.IsAny<bool>()))
+            .ReturnsAsync(RefundedCard(isLent: true));
+        ArrangeLentRecords(
+            LentRecord("1111222233334444", new DateTime(2024, 11, 5)),
+            LentRecord(RefundedLentCardIdm, new DateTime(2025, 3, 18)),
+            LentRecord(RefundedLentCardIdm, new DateTime(2025, 1, 20)));
+
+        await _viewModel.HandleWarningClick(MainViewModel.BuildRefundedCardLentWarning(RefundedCard(isLent: true)));
+
+        _viewModel.History.IsHistoryVisible.Should().BeTrue();
+        _viewModel.History.HistoryCard.CardIdm.Should().Be(RefundedLentCardIdm);
+        _viewModel.History.HistoryFromDate.Should().Be(new DateTime(2025, 1, 1),
+            "最も古い貸出中の行の月の 1 日（他のカードの行・last_lent_at の月ではない）");
+    }
+
+    #endregion
+
     [Fact]
     public async Task ReevaluateCardBalanceMismatchAsync_取り込みで一致したら警告を取り除き_知らせないこと()
     {

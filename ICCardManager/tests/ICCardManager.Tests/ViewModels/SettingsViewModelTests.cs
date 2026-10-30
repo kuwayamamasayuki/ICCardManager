@@ -56,6 +56,11 @@ public class SettingsViewModelTests
             _summaryGenerator,
             _staffAuthServiceMock.Object,
             _settingsChangeServiceMock.Object);
+
+        // Issue #2305（レビュー 4 回目）: 保存は設定の読み込みが成功して終わった画面からしかできない。
+        // このクラスの保存のテストは読み込みを経ずに画面の値を組み立てて保存するため、読み込み済みの状態から始める
+        // （読み込みを経るテストは LoadSettingsAsync がこの印を立て直す）
+        _viewModel.IsSettingsLoaded = true;
     }
 
     #region 設定読み込みテスト
