@@ -114,7 +114,7 @@ public class MainViewModelIntegrationTests
 
         _sharedModeMonitor = new SharedModeMonitor(
             _databaseInfoMock.Object, _timerFactory, new SystemClock());
-        _warningService = new WarningService(_ledgerRepositoryMock.Object, _databaseInfoMock.Object);
+        _warningService = new WarningService(_ledgerRepositoryMock.Object, _databaseInfoMock.Object, _cardRepositoryMock.Object);
         _dashboardService = new DashboardService(
             _cardRepositoryMock.Object, _ledgerRepositoryMock.Object,
             _staffRepositoryMock.Object, _settingsRepositoryMock.Object);

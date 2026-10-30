@@ -26,6 +26,21 @@ namespace ICCardManager.Data.Repositories
         Task<IEnumerable<Ledger>> GetByDateRangeAsync(string? cardIdm, DateTime fromDate, DateTime toDate);
 
         /// <summary>
+        /// 摘要に指定した文字列をそのまま含む利用履歴を、全カード・全期間から取得する（利用日の新しい順）
+        /// </summary>
+        /// <remarks>
+        /// Issue #2329: バス停名未入力の警告（<c>WarningService.CheckIncompleteBusStopsAsync</c>）と
+        /// 一覧（<c>IncompleteBusStopViewModel</c>）が、プレースホルダ（<c>SummaryGenerator.BusPlaceholder</c>）を渡して使う。
+        /// 以前は両者とも直近 1 年に区切っており、1 年より前の未入力は警告からも一覧からも消えて二度と案内されなかった。
+        /// 台帳は 6 年保存なので、期間で区切らず台帳に残っている行をすべて対象にする。
+        /// 何を探すか（交通系固有の判断）は呼び出し側が決め、永続化層は文字列の部分一致だけを担う（Issue #1695）。
+        /// 一致は大文字・小文字を区別するそのままの部分一致（<c>string.Contains</c> と同じ）で、LIKE のワイルドカードは解釈しない。
+        /// </remarks>
+        /// <param name="fragment">探す文字列（空にはできない。空だと全行が一致する）</param>
+        /// <exception cref="ArgumentException"><paramref name="fragment"/> が null または空のとき</exception>
+        Task<IEnumerable<Ledger>> GetBySummaryContainingAsync(string fragment);
+
+        /// <summary>
         /// 指定月の利用履歴を取得（帳票用）
         /// </summary>
         Task<IEnumerable<Ledger>> GetByMonthAsync(string cardIdm, int year, int month);

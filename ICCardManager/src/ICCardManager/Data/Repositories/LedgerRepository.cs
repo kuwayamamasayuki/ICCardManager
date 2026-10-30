@@ -82,6 +82,44 @@ ORDER BY DATE(date) ASC,
         }
 
         /// <inheritdoc/>
+        public async Task<IEnumerable<Ledger>> GetBySummaryContainingAsync(string fragment)
+        {
+            if (string.IsNullOrEmpty(fragment))
+            {
+                throw new ArgumentException("摘要から探す文字列が空です。空だとすべての行が一致するため、1 文字以上を指定してください。", nameof(fragment));
+            }
+
+            using var lease = await _dbContext.LeaseConnectionAsync().ConfigureAwait(false);
+            var connection = lease.Connection;
+            var ledgerList = new List<Ledger>();
+
+            using var command = connection.CreateCommand();
+
+            // Issue #2329: 期間で区切らず、台帳に残っている全行（保存期間 6 年）を対象にする。
+            // 部分一致は索引で探索できないため、摘要の索引（idx_ledger_summary）だけを読む走査で該当する id を絞り、
+            // 本体は該当行だけを主キーで引く（台帳本体を全件読まない。EXPLAIN QUERY PLAN は
+            // 「SCAN ledger USING COVERING INDEX idx_ledger_summary」＋「SEARCH ledger USING INTEGER PRIMARY KEY」）。
+            // LIKE ではなく instr を使うのは、探す文字列（バス停名のプレースホルダは組織設定由来）が
+            // 「%」「_」を含み得るため（LIKE だとワイルドカードとして解釈される）。判定は
+            // string.Contains（序数比較）と同じ「そのままの部分一致」。
+            command.CommandText = @"SELECT id, card_idm, lender_idm, date, summary, income, expense, balance,
+       staff_name, note, returner_idm, lent_at, returned_at, is_lent_record, companion_count
+FROM ledger
+WHERE id IN (SELECT id FROM ledger WHERE instr(summary, @fragment) > 0)
+ORDER BY date DESC, id DESC";
+
+            command.Parameters.AddWithValue("@fragment", fragment);
+
+            using var reader = await command.ExecuteReaderAsync().ConfigureAwait(false);
+            while (await reader.ReadAsync().ConfigureAwait(false))
+            {
+                ledgerList.Add(MapToLedger(reader));
+            }
+
+            return ledgerList;
+        }
+
+        /// <inheritdoc/>
         public async Task<IEnumerable<Ledger>> GetByMonthAsync(string cardIdm, int year, int month)
         {
             var fromDate = new DateTime(year, month, 1);

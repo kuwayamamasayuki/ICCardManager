@@ -1,3 +1,4 @@
+#nullable enable
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -121,9 +122,15 @@ namespace ICCardManager.Services
     public class DashboardResult
     {
         /// <summary>ソート済みダッシュボードアイテム</summary>
-        public IReadOnlyList<CardBalanceDashboardItem> Items { get; set; }
+        public IReadOnlyList<CardBalanceDashboardItem> Items { get; set; } = Array.Empty<CardBalanceDashboardItem>();
 
-        /// <summary>残額警告しきい値（警告チェック用）</summary>
+        /// <summary>
+        /// 各アイテムの <c>IsBalanceWarning</c> を判定したときの残額警告しきい値（円）
+        /// </summary>
+        /// <remarks>
+        /// Issue #2329: メイン画面の残額警告の一覧（<c>MainViewModel.RefreshDashboardAsync</c>）を
+        /// アイコンと同じしきい値で作るために使う。設定を読み直すと、その間の変更でアイコンと一覧が食い違い得る。
+        /// </remarks>
         public int WarningBalance { get; set; }
     }
 }

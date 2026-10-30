@@ -72,6 +72,10 @@ public partial class MainViewModel
         // Issue #1758: カードの論理削除で繰越情報消失の母集団が変わる。カード管理画面が唯一の入口のため、
         // ここで再判定しないと「クリックしても対象が無い警告」が再起動まで残る（Issue #1739 の教訓）。
         await CheckCarryoverDataLossAsync();
+
+        // Issue #2329: バス停名未入力の警告は論理削除したカードの行を数えないため、カードの論理削除で件数が変わる。
+        // 再判定しないと、一覧（開くたびに作り直す）と警告の件数が食い違ったまま次の警告再チェックまで残る
+        await CheckIncompleteBusStopsAsync();
     }
 
     /// <summary>

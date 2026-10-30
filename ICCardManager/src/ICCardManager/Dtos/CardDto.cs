@@ -1,3 +1,4 @@
+#nullable enable
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -36,7 +37,7 @@ namespace ICCardManager.Dtos
         /// <summary>
         /// 備考
         /// </summary>
-        public string Note { get; set; }
+        public string? Note { get; set; }
 
         /// <summary>
         /// 貸出状態
@@ -46,12 +47,12 @@ namespace ICCardManager.Dtos
         /// <summary>
         /// 最終貸出者IDm（更新用）
         /// </summary>
-        public string LastLentStaff { get; set; }
+        public string? LastLentStaff { get; set; }
 
         /// <summary>
         /// 最終貸出者名（表示用）
         /// </summary>
-        public string LentStaffName { get; set; }
+        public string? LentStaffName { get; set; }
 
         /// <summary>
         /// 最終貸出日時
@@ -76,6 +77,18 @@ namespace ICCardManager.Dtos
         /// 払戻日時（Issue #530）
         /// </summary>
         public DateTime? RefundedAt { get; set; }
+
+        /// <summary>
+        /// 運用中のカードかどうか（変換元の <c>IcCard.IsInOperation</c> の写し。Issue #2329）
+        /// </summary>
+        /// <remarks>
+        /// DTO は論理削除フラグを持たないため、母集団の判定はここで書き直さず、
+        /// 変換時に <c>IcCard.IsInOperation</c>（唯一の判定。Issue #1947）の結果を写す。
+        /// 残高不整合の警告を立てる側（<c>HistoryPanelViewModel.CheckAndNotifyConsistencyAsync</c>）が、
+        /// 除去する側（<c>MainViewModel.RefreshDashboardAsync</c>）と同じ母集団に揃えるために使う。
+        /// 既定値は true（変換元を持たずに組み立てた DTO は、写す前と同じく警告を立てる側へ倒す）。
+        /// </remarks>
+        public bool IsInOperation { get; set; } = true;
 
         /// <summary>
         /// 表示用: 貸出状態テキスト
@@ -103,7 +116,7 @@ namespace ICCardManager.Dtos
         /// <summary>
         /// 表示用: 貸出日時
         /// </summary>
-        public string LentAtDisplay => DisplayFormatters.FormatDateTime(LentAt, null);
+        public string? LentAtDisplay => DisplayFormatters.FormatDateTime(LentAt, null);
 
         /// <summary>
         /// 開始ページ番号（Issue #510: 年度途中導入対応）

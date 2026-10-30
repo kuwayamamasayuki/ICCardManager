@@ -145,6 +145,23 @@ public class DtoMapperTests
         dtos[1].CardType.Should().Be("nimoca");
     }
 
+    /// <summary>
+    /// Issue #2329: 運用中かどうかは <c>IcCard.IsInOperation</c>（未削除 かつ 未払戻）の結果を写すこと。
+    /// </summary>
+    /// <remarks>
+    /// DTO は論理削除フラグを持たないため、払戻済みだけでなく論理削除済みも運用外として写ることを表明する。
+    /// </remarks>
+    [Theory]
+    [InlineData(false, false, true)]
+    [InlineData(false, true, false)]
+    [InlineData(true, false, false)]
+    public void ToDto_FromIcCard_運用中かどうかをIsInOperationから写すこと(bool isDeleted, bool isRefunded, bool expected)
+    {
+        var card = new IcCard { CardIdm = "07FE112233445566", IsDeleted = isDeleted, IsRefunded = isRefunded };
+
+        card.ToDto().IsInOperation.Should().Be(expected);
+    }
+
     #endregion
 
     #region Staff → StaffDto
@@ -648,6 +665,11 @@ public class DtoMapperTests
                 nameof(CardDto.IsRefunded), nameof(CardDto.RefundedAt)
             },
             renamedFrom: new Dictionary<string, string> { [nameof(CardDto.LentAt)] = nameof(IcCard.LastLentAt) },
+            verifiedSeparately: new Dictionary<string, string>
+            {
+                [nameof(CardDto.IsInOperation)] =
+                    "写像元 IcCard.IsInOperation は導出値で書き込めない（Issue #2329。ToDto_FromIcCard_運用中かどうかをIsInOperationから写すこと で検証）"
+            },
             targetOnly: new Dictionary<string, string>
             {
                 [nameof(CardDto.IsSelected)] = UiStateReason,
