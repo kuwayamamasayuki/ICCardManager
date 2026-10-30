@@ -117,6 +117,19 @@ namespace ICCardManager.UITests.Infrastructure
         }
 
         /// <summary>
+        /// <see cref="Seed"/> に、返却時の同行者数入力を「スキップしない」設定を加える（Issue #2308）。
+        /// </summary>
+        /// <remarks>
+        /// 設定画面の「同行者数入力を自動的に閉じるまでの秒数」欄は、スキップが有効だと操作不可（<c>IsEnabled=false</c>）になり、
+        /// 無効な要素にはアクセスキーが働かない。Issue #2178 で未設定の既定が true（スキップ）になったため、明示的に false を書く。
+        /// </remarks>
+        public static void SeedWithCompanionCountInputEnabled(SQLiteConnection conn)
+        {
+            Seed(conn);
+            SetSetting(conn, "skip_companion_count_input_on_return", "false");
+        }
+
+        /// <summary>
         /// 概要版マニュアルの写真と並べる職員証認識トースト用のサンプルデータ（Issue #2243）。
         /// <see cref="SeedForVirtualTouch(SQLiteConnection)"/> の主担当の職員（仮想タッチの IDm）の氏名を
         /// <see cref="PhotographedStaffName"/> へ置き換える。

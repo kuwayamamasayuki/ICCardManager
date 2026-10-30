@@ -71,6 +71,7 @@ public class BackupServiceManualBackupRecordingTests : IDisposable
         _warningService = new WarningService(
             new Mock<ILedgerRepository>().Object,
             new Mock<IDatabaseInfo>().Object,
+            new Mock<ICardRepository>().Object,
             backupHealthService: healthService);
     }
 

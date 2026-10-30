@@ -70,6 +70,9 @@ public partial class HistoryPanelViewModel
             return;
         }
 
+        // Issue #2322: 確認文言の出し分けに使う。await をまたいで表示中のカードを読み直さない（#2202）
+        var isRefundedCard = HistoryCard?.IsRefunded == true;
+
         // 認証
         using var authResult = (await _staffAuthService.RequestAuthenticationAsync("履歴の削除"))?.Enter();
         if (authResult == null)
@@ -83,8 +86,7 @@ public partial class HistoryPanelViewModel
               $"日付: {ledger.DateDisplay}\n摘要: {ledger.Summary}\n残高: {ledger.BalanceDisplay}円\n\n" +
               "削除すると、このカードの貸出中状態も解消されます\n" +
               "（他に貸出中レコードが残っている場合は維持されます）。\n\n" +
-              "通常は、メイン画面で交通系ICカードをタッチして返却操作を\n" +
-              "行うのが正しい復旧方法です。それでも削除しますか？"
+              LentRecordDeletionGuidance.Build(isRefundedCard)
             : $"以下の履歴を削除してよろしいですか？\n\n日付: {ledger.DateDisplay}\n摘要: {ledger.Summary}\n残高: {ledger.BalanceDisplay}円";
 
         if (!_navigationService.ShowWarningConfirmation(confirmMessage, "履歴の削除"))
@@ -345,6 +347,8 @@ public partial class HistoryPanelViewModel
     private async Task EditLedgerWithAuthAsync(LedgerDto ledger, bool showSaveAndNext = false)
     {
         var cardName = HistoryCard?.DisplayName;
+        // Issue #2322: 貸出中の行の削除の確認文言を、払戻済のカードでは出し分ける
+        var isRefundedCard = HistoryCard?.IsRefunded == true;
 
         // Issue #1740: 残高の自動計算に使う直前行の残高を、ダイアログを開く前に確定させる
         var previousBalance = FindPreviousBalanceForEdit(ledger);
@@ -358,6 +362,7 @@ public partial class HistoryPanelViewModel
             async d =>
             {
                 await d.InitializeForEditAsync(ledger, previousBalance, initialBalanceCorrection);
+                d.SetRefundedCard(isRefundedCard);
                 if (showSaveAndNext)
                 {
                     d.SetShowSaveAndNextButton(true);
@@ -376,6 +381,22 @@ public partial class HistoryPanelViewModel
             // 旧実装はここにも同じコードの写しを持ち、そちらだけが DeleteAsync の戻り値を
             // 捨てたまま残る形だった。
             await DeleteLedgerRowCoreAsync(ledger);
+        }
+        // Issue #2325: 保存で競合（この行が他 PC の削除・返却で無くなった）を検出したまま閉じた場合。
+        // ダイアログの案内は「閉じると履歴一覧を再読み込みします」と述べているので、ここで読み直す
+        // （#1759。読み直さないと、消えた行が一覧に残り、開き直しても同じ失敗を繰り返す）。
+        // 何も保存していないので「保存して次へ」「次へ」「戻る」へは進まない（一覧の並びが変わっている）。
+        // 保存できた（dialogResult == true）ときは下の分岐が読み直して「保存して次へ」へ進む。競合の後に保存し直して
+        // 成功した場合も保存の側を優先する（コードレビュー 2 回目。ViewModel 側も保存の成功で印を下ろす）。
+        else if (dialogResult != true && capturedEditDialog?.NeedsHistoryReload == true)
+        {
+            await LoadHistoryLedgersAsync();
+            await Host.RefreshDashboardAsync();
+            // 消えた行が貸出中レコード（開いている間に返却された）ならカードの貸出状態も変わっている。
+            // メイン画面の「貸出中」一覧も読み直す（削除の経路 #2159 と同じ。一覧・ダッシュボードの後ろに置く）
+            await Host.RefreshLentCardsAsync();
+            await Host.CheckWarningsAsync();
+            await CheckAndNotifyConsistencyAsync();
         }
         else if (dialogResult == true)
         {

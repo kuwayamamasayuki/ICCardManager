@@ -145,7 +145,7 @@
         </Border>
 
         <!-- 次アクションガイド（Issue #1684） -->
-        <!-- 現在の状態（職員証タッチ待ち／交通系ICカードタッチ待ち／処理中）と次に行う操作を常設表示する。
+        <!-- 現在の状態（待機中／交通系ICカードタッチ待ち／処理中）と次に行う操作を常設表示する。
              トースト通知（数秒で消える）を見逃しても画面上に誘導が残るようにするための常設バナー。
              アイコン＋状態名＋操作文言＋背景色の4要素で状態を伝達（色のみに依存しない）。 -->
         <!-- Issue #2142: 枠に固定の Name と LiveSetting を置いても、通知すれば固定の Name が読まれるだけで
@@ -197,7 +197,7 @@
         <Border Grid.Row="2" Padding="15,8"
                 Visibility="{Binding RemainingSeconds, Converter={StaticResource IntToVisibilityConverter}}"
                 AutomationProperties.Name="交通系ICカードタッチの残り時間"
-                AutomationProperties.HelpText="交通系ICカードをタッチできる残り時間です。0秒になると職員証タッチ待ちに戻ります。">
+                AutomationProperties.HelpText="交通系ICカードをタッチできる残り時間です。0秒になると待機中に戻ります。">
             <Border.Style>
                 <Style TargetType="Border">
                     <Setter Property="Background" Value="{DynamicResource WaitingBackgroundBrush}"/>
@@ -1263,7 +1263,7 @@
             <StatusBarItem>
                 <TextBlock>
                     <Run Text="状態: "/>
-                    <Run Text="{Binding CurrentState, Mode=OneWay}"/>
+                    <Run Text="{Binding NextActionStateText, Mode=OneWay}"/>
                 </TextBlock>
             </StatusBarItem>
             <Separator/>
@@ -1300,11 +1300,6 @@
                                         <Setter Property="Foreground" Value="{DynamicResource SuccessForegroundBrush}"/>
                                         <Setter Property="ToolTip" Value="カードリーダー接続中"/>
                                     </DataTrigger>
-                                    <DataTrigger Binding="{Binding CardReaderConnectionState}" Value="{x:Static cardReader:CardReaderConnectionState.Reconnecting}">
-                                        <Setter Property="Text" Value="🔄"/>
-                                        <Setter Property="Foreground" Value="{DynamicResource WarningForegroundBrush}"/>
-                                        <Setter Property="ToolTip" Value="再接続中..."/>
-                                    </DataTrigger>
                                 </Style.Triggers>
                             </Style>
                         </TextBlock.Style>
@@ -1320,14 +1315,6 @@
                                     <DataTrigger Binding="{Binding CardReaderConnectionState}" Value="{x:Static cardReader:CardReaderConnectionState.Connected}">
                                         <Setter Property="Text" Value="リーダー: 接続中"/>
                                         <Setter Property="Foreground" Value="{DynamicResource SuccessForegroundBrush}"/>
-                                    </DataTrigger>
-                                    <DataTrigger Binding="{Binding CardReaderConnectionState}" Value="{x:Static cardReader:CardReaderConnectionState.Reconnecting}">
-                                        <Setter Property="Text">
-                                            <Setter.Value>
-                                                <Binding Path="CardReaderReconnectAttempts" StringFormat="リーダー: 再接続中 ({0}/10)"/>
-                                            </Setter.Value>
-                                        </Setter>
-                                        <Setter Property="Foreground" Value="{DynamicResource WarningForegroundBrush}"/>
                                     </DataTrigger>
                                 </Style.Triggers>
                             </Style>

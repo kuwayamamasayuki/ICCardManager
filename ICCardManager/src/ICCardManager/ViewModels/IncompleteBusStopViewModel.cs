@@ -92,19 +92,20 @@ namespace ICCardManager.ViewModels
                 var previousDateFilter = SelectedDateFilter;
                 var previousCardFilter = SelectedCardFilter;
 
-                var ledgers = await _ledgerRepository.GetByDateRangeAsync(
-                    null, DateTime.Now.AddYears(-1), DateTime.Now);
-                // Issue #1818: プレースホルダは組織設定（SummaryText.BusPlaceholder）由来のため直書きしない
-                var incompleteLedgers = ledgers
-                    .Where(l => SummaryGenerator.HasIncompleteBusStop(l.Summary)).ToList();
+                // Issue #2329: 期間で区切らず、台帳に残っている全期間（保存期間 6 年）の、論理削除していないカード（払戻済みを含む）の未入力を一覧にする。
+                // 以前は直近 1 年に区切っており、1 年より前の「バス（★）」は一覧からも警告からも消えていた。
+                // 取得は警告の件数（WarningService.CheckIncompleteBusStopsAsync）と同じ IncompleteBusStopLedgers.LoadAsync。
+                // カードの一覧は対象の絞り込みとカード名の解決の両方に使う（2 度読まない）
+                var cards = (await _cardRepository.GetAllAsync()).ToList();
+                var incompleteLedgers = await IncompleteBusStopLedgers.LoadAsync(_ledgerRepository, cards);
 
-                var cards = await _cardRepository.GetAllAsync();
                 var cardMap = cards.ToDictionary(c => c.CardIdm, c => $"{c.CardType} {c.CardNumber}");
 
                 _allItems = incompleteLedgers.Select(l => new IncompleteBusStopItem
                 {
                     LedgerId = l.Id,
                     CardIdm = l.CardIdm,
+                    // LoadAsync は同じカードの一覧に居ない行を外すため通常は必ず引けるが、防御として IDm へ落とす
                     CardDisplayName = cardMap.TryGetValue(l.CardIdm, out var name) ? name : l.CardIdm,
                     Date = l.Date,
                     Summary = l.Summary,

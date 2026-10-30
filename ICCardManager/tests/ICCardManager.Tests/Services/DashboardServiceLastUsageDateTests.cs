@@ -214,22 +214,22 @@ public class DashboardServiceLastUsageDateTests : IDisposable
 
     #endregion
 
-    #region 既知の制限（文書と挙動の対応を固定する）
+    #region 前年度より繰越（Issue #2326 で既知の制限を解消）
 
     [Fact]
-    public async Task 前年度より繰越だけのカード_既知の制限として導入日が最終利用日に出る()
+    public async Task 前年度より繰越だけのカード_最終利用日は空欄()
     {
-        // 3 月に登録したカードの導入行「前年度より繰越」は、利用実績の除外条件
-        // （新規購入・○月から繰越）に含まれていない。画面設計書 §3.1.4・CHANGELOG に
-        // 既知の制限として書いた挙動を固定し、将来この除外を足したときに文書の更新漏れを
-        // 気付けるようにする（この表明が赤になったら、文書側の「既知の制限」も消すこと）。
+        // 3 月に登録したカードの導入行「前年度より繰越」は、以前は利用実績の除外条件
+        // （新規購入・○月から繰越）に含まれず、導入日が最終利用日に出ていた（既知の制限）。
+        // Issue #2326 で導入行 3 種（Ledger.IsInitialRecordSummary）をすべて除外したので、空欄になる。
+        // 画面設計書 §3.1.4 の「既知の制限」の記述も同じ PR で解消済みとした。
         await SeedMastersAsync();
         await InsertLedgerAsync(CardA, new DateTime(2026, 3, 15),
             SummaryGenerator.GetCarryoverFromPreviousYearSummary(), income: 4000, balance: 4000);
 
         var item = await BuildItemAsync(CardA);
 
-        item.LastUsageDate.Should().Be(new DateTime(2026, 3, 15));
+        item.LastUsageDate.Should().BeNull("導入行は利用実績ではない");
     }
 
     #endregion

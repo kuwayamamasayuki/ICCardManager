@@ -195,9 +195,6 @@ namespace DebugDataViewer
                     case CardReaderConnectionState.Disconnected:
                         CardStatusMessage = $"カードリーダー未接続: {e.Message ?? "リーダーを確認してください"}";
                         break;
-                    case CardReaderConnectionState.Reconnecting:
-                        CardStatusMessage = $"再接続中... (試行 {e.RetryCount})";
-                        break;
                 }
             });
         }

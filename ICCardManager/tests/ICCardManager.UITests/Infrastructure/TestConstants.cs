@@ -78,6 +78,10 @@ namespace ICCardManager.UITests.Infrastructure
         // これらは AutomationProperties ではなく画面に出る文字列そのもの（前方一致で検索する）。
         [NotUiaName]
         public const string CardReaderStatusTextPrefix = "リーダー:";
+
+        /// <summary>ステータスバーの状態表示の先頭（Issue #2308。後ろに日本語の状態名が続く）。</summary>
+        [NotUiaName]
+        public const string AppStateStatusTextPrefix = "状態:";
         [NotUiaName]
         public const string AppVersionTextPrefix = "Ver.";
 
@@ -486,9 +490,29 @@ namespace ICCardManager.UITests.Infrastructure
         [UiaName]
         public const string SettingsToastPositionComboBox = "トースト通知位置選択";
 
+        /// <summary>設定ダイアログの「データベース保存先フォルダ」の入力欄（Alt+D。Issue #2308）。</summary>
+        [UiaName]
+        public const string SettingsDatabasePathInput = "データベース保存先フォルダパス";
+
+        /// <summary>設定ダイアログの「同行者数入力を自動的に閉じるまでの秒数」の入力欄（Alt+I。Issue #2308）。</summary>
+        [UiaName]
+        public const string SettingsCompanionCountTimeoutInput = "同行者数入力の自動クローズ秒数";
+
         /// <summary>データ入出力ダイアログの初期フォーカス（<c>ExportDataTypeComboBox</c>）。</summary>
         [UiaName]
         public const string ExportDataTypeComboBox = "エクスポートするデータ種別";
+
+        /// <summary>データ入出力ダイアログのインポートのデータ種別（Issue #2307）。</summary>
+        [UiaName]
+        public const string ImportDataTypeComboBox = "インポートするデータ種別";
+
+        /// <summary>データ入出力ダイアログの「既存データはスキップする」（Issue #2307）。</summary>
+        [UiaName]
+        public const string ImportSkipExistingCheckBox = "既存データをスキップ";
+
+        /// <summary>利用履歴詳細を選んでいる間だけ表示する「スキップ指定は効かない」の案内（Issue #2307）。</summary>
+        [UiaName]
+        public const string ImportSkipExistingNotApplicableText = "利用履歴詳細の取り込みには、この指定は効きません。";
 
         /// <summary>履歴行の追加・修正ダイアログの初期フォーカス（<c>EditDatePicker</c>）。</summary>
         [UiaName]
@@ -513,6 +537,18 @@ namespace ICCardManager.UITests.Infrastructure
         /// <summary>履歴行の追加・修正ダイアログの「保存」ボタン。</summary>
         [UiaName]
         public const string LedgerRowEditSaveButton = "保存";
+
+        /// <summary>履歴行の追加・修正ダイアログの受入金額の入力欄（Issue #2308）。</summary>
+        [UiaName]
+        public const string LedgerRowEditIncomeInput = "受入金額";
+
+        /// <summary>履歴行の追加・修正ダイアログの残高の入力欄（Issue #2308）。</summary>
+        [UiaName]
+        public const string LedgerRowEditBalanceInput = "残高";
+
+        /// <summary>導入行の残高の訂正提案の「逆算した金額を適用」ボタン（Alt+R。Issue #2007 / #2308）。</summary>
+        [UiaName]
+        public const string LedgerRowEditApplyInitialBalanceButton = "逆算した金額を受入と残額に適用";
 
         // 一覧に無い利用者の注記は Name を文言へバインドしているため、AutomationId で探す（Issue #2300）。
         /// <summary>履歴行の追加・修正ダイアログで、利用者が職員一覧に無いときに出す注記の AutomationId。</summary>
@@ -571,6 +607,35 @@ namespace ICCardManager.UITests.Infrastructure
         /// <summary>交通系ICカード管理ダイアログの「新規カード登録」ボタン（押すと交通系ICカードのタッチ待ちになる）。</summary>
         [UiaName]
         public const string CardNewRegistrationButton = "新規カード登録";
+
+        // Issue #2326: 繰越月を 3 月にすると累計の入力欄が無効になることの UI テスト用。
+        /// <summary>交通系ICカード管理ダイアログの「保存」ボタン（AutomationProperties.Name を持たず、Name は Content の文字列）。</summary>
+        [NotUiaName]
+        public const string CardManageSaveButton = "保存";
+
+        /// <summary>交通系ICカード管理ダイアログで未登録のカードを読み取った後のステータス欄の先頭（StatusMessage のバインディング。読み取り完了の目印）。</summary>
+        [NotUiaName]
+        public const string CardManageCardReadStatusPrefix = "カードを読み取りました";
+
+        /// <summary>カード登録方法の選択ダイアログ（Issue #510）。</summary>
+        [UiaName]
+        public const string CardRegistrationModeDialogName = "カード登録方法選択ダイアログ";
+
+        [UiaName]
+        public const string CardRegistrationCarryoverRadio = "紙の出納簿からの繰越として登録";
+
+        [UiaName]
+        public const string CardRegistrationCarryoverMonthCombo = "繰越月の選択";
+
+        [UiaName]
+        public const string CardRegistrationIncomeTotalTextBox = "累計受入金額";
+
+        [UiaName]
+        public const string CardRegistrationExpenseTotalTextBox = "累計払出金額";
+
+        /// <summary>カード登録方法の選択ダイアログの「キャンセル」（登録をやめる）。</summary>
+        [UiaName]
+        public const string CardRegistrationCancelButton = "キャンセル";
 
         // 削除済みカードの復元の確認は Win32 の MessageBox で、タイトルは CardManageViewModel が渡す文字列そのもの。
         /// <summary>削除済みのカードを読み取ったときの復元の確認 MessageBox のタイトル（#284）。</summary>

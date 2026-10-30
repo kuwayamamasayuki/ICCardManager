@@ -251,6 +251,15 @@ public partial class DataExportImportViewModel : ViewModelBase
     public bool IsLedgerImportSelected => SelectedImportType == DataType.Ledgers;
 
     /// <summary>
+    /// 「既存データはスキップする」が取り込みに効くか（Issue #2307。チェックボックスの有効・無効と、効かない旨の表示に使う）
+    /// </summary>
+    /// <remarks>
+    /// 利用履歴詳細の取り込み（<c>PreviewLedgerDetailsAsync</c> / <c>ImportLedgerDetailsAsync</c>）は指定を受け取らない。
+    /// 以前はチェックを操作でき、変えるとプレビューも破棄されたため、効く指定に見えていた。
+    /// </remarks>
+    public bool IsSkipExistingApplicable => SelectedImportType != DataType.LedgerDetails;
+
+    /// <summary>
     /// 「直接インポート」（プレビューを経ない取り込み）を使えるか（Issue #2262）
     /// </summary>
     /// <remarks>
@@ -550,6 +559,7 @@ public partial class DataExportImportViewModel : ViewModelBase
     partial void OnSelectedImportTypeChanged(DataType value)
     {
         OnPropertyChanged(nameof(IsLedgerImportSelected));
+        OnPropertyChanged(nameof(IsSkipExistingApplicable));
         OnPropertyChanged(nameof(PreviewColumn1Header));
         OnPropertyChanged(nameof(PreviewColumn2Header));
         OnPropertyChanged(nameof(PreviewColumn3Header));
