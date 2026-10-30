@@ -2356,7 +2356,7 @@ SELECT last_insert_rowid();";
                     // 統合後に統合先の明細が編集（ReplaceDetailsAsync の DELETE + INSERT）されると
                     // その id は空き、無関係な別台帳の明細に再利用され得る。id だけで UPDATE すると
                     // その明細を復活先へ移してしまう（交差破損）。UpdateDetailBusStopsAsync と同じスコープ。
-                    // Issue #2000: この undoData は ledger_merge_history.undo_data_json として
+                    // Issue #2000: この undoData は ledger_merge_history.undo_data として
                     // 永続化され、セッションをまたいで使われる。ledger_detail が暗黙 rowid だった頃は
                     // 月次 VACUUM（Issue #1482）が値を振り直すため、ここで参照する識別子は
                     // 「保存した時点の行」を指さなくなっていた（ledger_id の併記でも防げない）。
