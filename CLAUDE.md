@@ -7,7 +7,7 @@
 ## 技術スタック
 
 - **言語**: C# 10 / .NET Framework 4.8 + WPF（MVVM） — .NET Core / .NET 5+ ではない
-- **ICカードリーダー**: PaSoRi（felicalib 経由。NuGet ではなくネイティブ DLL 依存）
+- **ICカードリーダー**: PaSoRi（felicalib 経由。NuGet の `FelicaLib.DotNet` ＋ NuGet 管理外の x86 ネイティブ `felicalib.dll`。後者は SHA-256 で整合性を検証する）
 
 ## ディレクトリ構成の注意点
 

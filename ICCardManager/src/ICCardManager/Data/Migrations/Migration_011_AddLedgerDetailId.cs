@@ -14,7 +14,7 @@ namespace ICCardManager.Data.Migrations
     ///
     /// <para>
     /// 「rowid を VACUUM をまたいで保持する経路は無い」という不変条件は成立していなかった。
-    /// 履歴統合の取り消しデータ（<c>ledger_merge_history.undo_data_json</c> の
+    /// 履歴統合の取り消しデータ（<c>ledger_merge_history.undo_data</c> の
     /// <c>DetailOriginalLedgerMap</c>）は rowid をキーとして JSON で永続化され、セッションをまたいで
     /// <c>UnmergeLedgersCore</c> の <c>WHERE id = @id AND ledger_id = @targetId</c> に使われる。
     /// Issue #1806 が併記した <c>ledger_id</c> は「無関係な別台帳への誤爆」を塞ぐが、
