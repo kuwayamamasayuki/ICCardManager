@@ -857,6 +857,75 @@ namespace ICCardManager.Services
         }
 
         /// <summary>
+        /// 職員・カード CSV の「削除済み」列（5 列目）の列番号（Issue #2324）
+        /// </summary>
+        internal const int DeletedFlagColumnIndex = 4;
+
+        /// <summary>
+        /// 職員・カード CSV の「削除済み」列（5 列目）を読む（Issue #2324）
+        /// </summary>
+        /// <param name="fields">パースされたフィールド</param>
+        /// <param name="lineNumber">行番号</param>
+        /// <param name="line">元の行データ</param>
+        /// <param name="errors">エラーリスト</param>
+        /// <param name="isDeleted">「1」なら <c>true</c>。「0」・空欄・列が無いなら <c>false</c></param>
+        /// <returns>読み取れたら <c>true</c>。それ以外の値ならエラーを追加して <c>false</c></returns>
+        /// <remarks>
+        /// <para>
+        /// エクスポート（<see cref="CsvExportService"/>）は「削除済みデータを含める」とき、削除済みの職員・カードを
+        /// この列が「1」の行として出力する。以前の取り込みはこの列を読まず、そうして出力した CSV をそのまま取り込むと、
+        /// 削除済みの行が「復元」（DB でも削除済みのとき）や「登録」（DB に無いとき）として扱われ、削除した職員・カードが
+        /// 黙って有効に戻っていた（職員は認証できる職員証が増える）。
+        /// </para>
+        /// <para>
+        /// 「1」の行は取り込まずスキップする（復元も登録も更新もしない。往復で状態を変えない）。取り込みで削除はしない
+        /// （DB で有効な職員・カードを「1」の行で削除しない）。削除は職員管理画面・交通系ICカード管理画面で行う操作で、
+        /// 貸出中かどうか等の確認を経るため。復元したい行は、列を「0」（または空欄）にして取り込む。
+        /// 列の無い 4 列の CSV（手で作った CSV・以前の書式）は、従来どおり有効な行として扱う。
+        /// </para>
+        /// </remarks>
+        private static bool TryReadDeletedFlag(
+            List<string> fields,
+            int lineNumber,
+            string line,
+            List<CsvImportError> errors,
+            out bool isDeleted)
+        {
+            var value = ReadTextField(fields, DeletedFlagColumnIndex);
+            switch (value)
+            {
+                case "":
+                case "0":
+                    isDeleted = false;
+                    return true;
+                case "1":
+                    isDeleted = true;
+                    return true;
+                default:
+                    isDeleted = false;
+                    errors.Add(new CsvImportError
+                    {
+                        LineNumber = lineNumber,
+                        Message = $"削除済み列の値「{value}」は読み取れません。" +
+                                  "削除済みの行は「1」、有効な行は「0」（または空欄）を入力してから、もう一度取り込んでください。",
+                        Data = line
+                    });
+                    return false;
+            }
+        }
+
+        /// <summary>
+        /// 「削除済み」列が「1」の行をプレビューでスキップとして示す表示（Issue #2324）
+        /// </summary>
+        private static FieldChange CreateDeletedRowSkipDisplay()
+            => new()
+            {
+                FieldName = "状態",
+                NewValue = "削除済みの行（取り込みません）",
+                IsDisplayOnly = true
+            };
+
+        /// <summary>
         /// CSV のテキスト列を読み取り、DB へ保存する自然な値へ正規化する（Issue #1808）。
         /// </summary>
         /// <param name="fields">パース済みのフィールド</param>
