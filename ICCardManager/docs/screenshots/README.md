@@ -25,6 +25,7 @@
 | `busstop.png` | バス停名入力ダイアログ | ユーザーマニュアル |
 | `ledger_detail_merge.png` | 履歴の統合分割（履歴詳細） | ユーザーマニュアル |
 | `history_merge.png` | 履歴の統合（履歴一覧） | ユーザーマニュアル |
+| `incomplete_busstop.png` | バス停名未入力の履歴一覧 | ユーザーマニュアル |
 | `print_preview.png` | 帳票プレビュー画面 | ユーザーマニュアル |
 | `report_excel.png` | 物品出納簿（Excel出力例） | ユーザーマニュアル |
 | `installer_options.png` | インストーラーオプション選択画面 | 管理者マニュアル |
@@ -54,6 +55,7 @@ cd D:\OneDrive\交通系\src\ICCardManager
 | Release | ツールバーから開くダイアログ | `card.png` `staff.png` `report.png` `export.png` `settings.png` `system.png` `admin_dashboard.png` |
 | Release | システム管理から開く二段目のダイアログ | `operation_log.png` `connection_diagnostics.png` `transfer_station_groups.png` |
 | Release | 帳票の事前チェック結果 | `report_preflight.png` |
+| Release | バス停名未入力の履歴一覧 | `incomplete_busstop.png` |
 | Release | リストア用バックアップ一覧（1 件選択した状態） | `restore_list.png` |
 | Release | 画面の一部だけを撮るもの（要素の矩形で撮影） | `card_list_status_mixed.png`（カード一覧）`error_no_reader.png`（ステータスバーの接続状態と再接続ボタン） |
 | Debug | 職員証認識・貸出完了・返却完了（メイン画面と画面隅のトーストの両方を含む矩形で撮る） | `staff_recognized.png` `lend.png` `return.png` |

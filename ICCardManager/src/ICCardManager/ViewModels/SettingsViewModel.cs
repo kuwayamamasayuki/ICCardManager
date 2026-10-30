@@ -66,6 +66,22 @@ public partial class SettingsViewModel : ViewModelBase
     [ObservableProperty]
     private string _backupPath = string.Empty;
 
+    /// <summary>
+    /// バックアップ先が空欄のときの保存先の注記（Issue #2328）
+    /// </summary>
+    /// <remarks>
+    /// 以前は XAML に「アプリケーションフォルダにバックアップされます」と直書きしていたが、既定の保存先は
+    /// <see cref="PathValidator.GetDefaultBackupPath"/>（C:\ProgramData\ICCardManager\backup）であり、
+    /// Program Files 配下にバックアップがあると誤解させていた。保存先を決める実装と同じ値から作る。
+    /// </remarks>
+    public string DefaultBackupPathNotice => BuildDefaultBackupPathNotice();
+
+    /// <summary>
+    /// <see cref="DefaultBackupPathNotice"/> の文言を組み立てる（Issue #2328）
+    /// </summary>
+    internal static string BuildDefaultBackupPathNotice()
+        => $"※ 空欄の場合、このPCの {PathValidator.GetDefaultBackupPath()} にバックアップされます";
+
     [ObservableProperty]
     private FontSizeOption _selectedFontSize;
 

@@ -56,6 +56,17 @@ namespace ICCardManager.Data.Repositories
         Task<IEnumerable<IcCard>> GetLentAsync(bool bypassCache = false);
 
         /// <summary>
+        /// 貸出中の記録（<c>ledger.is_lent_record = 1</c>）が残っている払戻済の交通系ICカードを取得する（Issue #2322）
+        /// </summary>
+        /// <remarks>
+        /// <c>is_lent</c> の値は見ない。修正前の欠陥で作られ得た「払戻済なのに貸出中」の状態を、メイン画面の警告に出すために使う。
+        /// 貸出中カード一覧を読み直すたび（共有モードでは 15 秒ごと）に呼ばれ、対象はほぼ常に 0 件なので、
+        /// 払戻済のカードを起点に絞り、台帳は <c>card_idm</c> のインデックスで引く（台帳を全件走査しない）。
+        /// キャッシュは通さない。
+        /// </remarks>
+        Task<IReadOnlyList<IcCard>> GetRefundedWithLentRecordsAsync();
+
+        /// <summary>
         /// IDmでICカードを取得
         /// </summary>
         /// <param name="cardIdm">ICカードIDm</param>
@@ -158,8 +169,9 @@ namespace ICCardManager.Data.Repositories
         /// <param name="staffIdm">貸出者IDm（貸出時のみ）</param>
         /// <returns>
         /// 更新できたら <c>true</c>。<c>false</c> は<b>競合</b>を意味する（Issue #1753 / #1953）。
-        /// WHERE 句は <c>card_idm = @cardIdm AND is_deleted = 0</c> なので、0 行になるのは
-        /// 「他のパソコンや別の操作でこのカードが論理削除された」場合だけである。
+        /// WHERE 句は <c>card_idm = @cardIdm AND is_deleted = 0</c>（貸出中にする更新ではさらに
+        /// <c>AND is_refunded = 0</c>。Issue #2322）なので、0 行になるのは「他のパソコンや別の操作で
+        /// このカードが論理削除された（貸出中にする更新では、払い戻された）」場合だけである。
         /// <b>戻り値を捨ててはならない</b> — 捨てると <c>ledger</c> の貸出中レコードと
         /// <c>ic_card.is_lent</c> が恒久的に食い違う。
         /// なお <c>false</c> のときもカードキャッシュは破棄される（Issue #1759）。

@@ -72,7 +72,7 @@ public class MainViewModelCardReaderStateTests
         _ledgerRepositoryMock.Setup(r => r.GetAllLentRecordsAsync()).ReturnsAsync(new List<Ledger>());
         _ledgerRepositoryMock.Setup(r => r.GetDetailsByLedgerIdsAsync(It.IsAny<IEnumerable<int>>()))
             .ReturnsAsync(new Dictionary<int, List<LedgerDetail>>());
-        _ledgerRepositoryMock.Setup(r => r.GetByDateRangeAsync(null, It.IsAny<DateTime>(), It.IsAny<DateTime>()))
+        _ledgerRepositoryMock.Setup(r => r.GetBySummaryContainingAsync(It.IsAny<string>()))
             .ReturnsAsync(new List<Ledger>());
 
         var lendingService = new LendingService(
@@ -114,7 +114,7 @@ public class MainViewModelCardReaderStateTests
             _databaseInfoMock.Object,
             new Mock<ICacheService>().Object,
             sharedModeMonitor,
-            new WarningService(_ledgerRepositoryMock.Object, _databaseInfoMock.Object, _updateNotificationMock.Object),
+            new WarningService(_ledgerRepositoryMock.Object, _databaseInfoMock.Object, _cardRepositoryMock.Object, _updateNotificationMock.Object),
             new DashboardService(_cardRepositoryMock.Object, _ledgerRepositoryMock.Object,
                 _staffRepositoryMock.Object, _settingsRepositoryMock.Object),
             new Mock<ISafeFileLauncher>().Object,
@@ -140,7 +140,7 @@ public class MainViewModelCardReaderStateTests
         _monitorTimerFactory.LastCreatedTimer.Should().NotBeNull("共有モードの接続監視（15 秒ごとのヘルスチェック）が開始されていること");
         _monitorTimerFactory.LastCreatedTimer!.IsRunning.Should().BeTrue();
         _ledgerRepositoryMock.Verify(
-            r => r.GetByDateRangeAsync(null, It.IsAny<DateTime>(), It.IsAny<DateTime>()),
+            r => r.GetBySummaryContainingAsync(It.IsAny<string>()),
             Times.AtLeastOnce(),
             "起動時のデータチェック（バス停名未入力）が始まっていること");
 

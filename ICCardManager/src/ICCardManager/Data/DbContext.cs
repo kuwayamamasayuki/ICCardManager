@@ -367,7 +367,7 @@ namespace ICCardManager.Data
         /// <b>共有フォルダーを指定するとバックアップだけが必ず失敗していた</b>
         /// （DB 本体は本メソッド経由なので開ける）。接続文字列の組み立て手段を 2 つ持つと、
         /// 片方だけが知識を持つ状態が生まれる
-        /// （<c>.claude/rules/development-conventions.md</c>「同じ論理的な処理に手段が 2 通りあるか」）。
+        /// （<c>.claude/rules/service-conventions.md</c>「SQLite の接続文字列は 1 か所で組み立てる」の #1763「同じ論理的な処理に手段が 2 通りあるか」）。
         /// 新たに SQLite 接続を開く箇所は必ず本メソッドを通すこと
         /// （回帰は <c>SqliteConnectionStringConventionTests</c> が静的検査で固定する）。
         /// </para>
@@ -1626,7 +1626,7 @@ ON CONFLICT(key) DO UPDATE SET value = excluded.value";
         /// </summary>
         /// <remarks>
         /// 各カラムは 'YYYY-MM-DD HH:MM:SS' 形式で保存されているため、
-        /// date()関数で日付部分のみを抽出して比較する必要があります。
+        /// 列は date() で包まず（索引が使えず全件走査になる）、ISO テキストのまま日付だけのしきい値と文字列比較する（02_DB設計書 §7.2）。
         /// また、'localtime'を指定することでローカルタイムゾーンで比較します。
         ///
         /// Issue #1170: 両テーブルの削除を単一トランザクションで実行し、
@@ -1948,7 +1948,7 @@ ON CONFLICT(key) DO UPDATE SET value = excluded.value";
         /// </para>
         /// <para>
         /// 判定を各所へ書き写すと、片方だけが新しい ResultCode を知っている状態が生まれる
-        /// （<c>.claude/rules/development-conventions.md</c> #1763「同じ論理的な処理に手段が 2 通りあるか」）。
+        /// （<c>.claude/rules/service-conventions.md</c> #1763「同じ論理的な処理に手段が 2 通りあるか」）。
         /// </para>
         /// </remarks>
         internal static bool IsTransientLockError(SQLiteException ex)
@@ -1974,7 +1974,7 @@ ON CONFLICT(key) DO UPDATE SET value = excluded.value";
         /// <para>
         /// 判定（<see cref="IsTransientLockError"/>）と同じく、記録の形も 1 か所に置く。
         /// 各リポジトリへ書き写すと、片方だけが新しい文言・レベルになる
-        /// （<c>.claude/rules/development-conventions.md</c> #1763）。
+        /// （<c>.claude/rules/service-conventions.md</c> #1763「同じ論理的な処理に手段が 2 通りあるか」）。
         /// </para>
         /// <para>
         /// <b>レベルは「システムの不具合か、利用者の入力の問題か」で分ける</b>
@@ -1989,7 +1989,7 @@ ON CONFLICT(key) DO UPDATE SET value = excluded.value";
         /// <para>
         /// <b>「どうすれば」も同時に分ける</b>。制約違反に「ディスクの空き容量を確認してください」と
         /// 案内すると、実行できない指示で真の原因から遠ざける
-        /// （<c>.claude/rules/error-messages.md</c> #1817「取れる行動が違う経路には専用の文言」）。
+        /// （<c>.claude/rules/error-messages-implementation.md</c> #1757「取れる行動が違う経路には専用のファクトリ」）。
         /// </para>
         /// <para>
         /// IDm・氏名といった個人を特定し得る値は渡さない（<c>.claude/rules/logging.md</c>）。

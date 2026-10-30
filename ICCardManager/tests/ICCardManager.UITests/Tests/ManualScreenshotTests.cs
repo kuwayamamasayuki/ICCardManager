@@ -176,6 +176,40 @@ namespace ICCardManager.UITests.Tests
             File.Exists(ScreenshotHelper.Capture(fixture.MainWindow, "history_merge.png")).Should().BeTrue();
         }
 
+        /// <summary>
+        /// バス停名未入力の一覧（Issue #2332 でボタンの並びを「閉じる → バス停名を入力」に改め、利用者欄に「外N名」を出すようにした）。
+        /// </summary>
+        [SkippableFact]
+        public void incomplete_busstop_バス停名未入力の履歴一覧()
+        {
+            Skip.If(ScreenshotHelper.ShouldSkip, SkipReason);
+
+            using var fixture = AppFixture.LaunchWithSeed(conn => ScreenshotSeedData.SeedWithIncompleteBusStops(conn));
+            ScreenshotHelper.MoveToTopLeft(fixture.MainWindow);
+            var page = new MainWindowPage(fixture.MainWindow, fixture.Automation);
+
+            // 警告は残額チェックの後に非同期で現れる。警告の行をクリックして一覧を開く
+            var warning = Retry.WhileNull(
+                () => page.Window.FindAllDescendants(cf => cf.ByControlType(ControlType.Button))
+                    .FirstOrDefault(b => (b.Properties.Name.ValueOrDefault ?? string.Empty).Contains(TestConstants.IncompleteBusStopWarningMarker)),
+                TimeSpan.FromSeconds(TestConstants.DialogOpenTimeoutSeconds)).Result;
+            warning.Should().NotBeNull("バス停名未入力の警告が出ること（投入データに「★」の行があること）");
+            warning!.AsButton().Invoke();
+
+            var dialog = new DialogPageBase(page.WaitForDialog(TestConstants.IncompleteBusStopDialogName));
+            try
+            {
+                dialog.FindByNameWithRetry(
+                    $"{ScreenshotSeedData.PrimaryStaffName} 外{ScreenshotSeedData.IncompleteBusStopCompanionCount}名")
+                    .Should().NotBeNull("一覧の読み込みが終わり、同行者のいる行が写ること");
+                File.Exists(ScreenshotHelper.Capture(dialog.Window, "incomplete_busstop.png")).Should().BeTrue();
+            }
+            finally
+            {
+                dialog.Close();
+            }
+        }
+
         [SkippableFact]
         public void admin_dashboard_管理者ダッシュボード()
         {

@@ -23,7 +23,7 @@ namespace ICCardManager.Common
     /// 整形の手段は本クラスただ 1 つに寄せる（画面 <c>OperationLogSearchViewModel</c> と
     /// Excel <c>OperationLogExcelExportService</c> の双方が使う）。手段が 2 通りあると、
     /// モデルへ列を足したとき片方だけが更新される
-    /// （`.claude/rules/development-conventions.md`「同じ論理的な処理に手段が 2 通りあるか」Issue #1763）。
+    /// （`.claude/rules/service-conventions.md` #1763「同じ論理的な処理に手段が 2 通りあるか」）。
     /// 区間表記は <see cref="RouteDisplayFormatter"/> へ委譲する（バスのラベル・プレースホルダは
     /// 組織設定由来のため直書きしない。Issue #1818）。
     /// </para>

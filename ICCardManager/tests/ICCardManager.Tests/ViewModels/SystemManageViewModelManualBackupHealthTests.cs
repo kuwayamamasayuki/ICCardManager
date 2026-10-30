@@ -77,6 +77,7 @@ public class SystemManageViewModelManualBackupHealthTests : IDisposable
         _warningService = new WarningService(
             new Mock<ILedgerRepository>().Object,
             databaseInfo.Object,
+            new Mock<ICardRepository>().Object,
             backupHealthService: healthService);
     }
 

@@ -56,7 +56,7 @@ namespace ICCardManager.Common
         /// 同じユーザーの別セッション（リモートデスクトップ・ユーザーの簡易切り替え）と、
         /// 先行インスタンスがまだ画面を表示していない場合の<b>両方</b>があり得る。
         /// どちらかを断定すると片方で誤った案内になるため、両方で実行できる指示にする
-        /// （<c>error-messages.md</c>「取れる行動が違う経路には専用のファクトリ」）。
+        /// （<c>error-messages-implementation.md</c> #1757「取れる行動が違う経路には専用のファクトリ」）。
         /// </remarks>
         public static string BuildWindowNotFoundMessage()
             => CommonCause +

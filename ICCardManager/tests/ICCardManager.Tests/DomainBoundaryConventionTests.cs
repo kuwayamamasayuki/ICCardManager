@@ -79,6 +79,11 @@ public class DomainBoundaryConventionTests
     /// <b>完全修飾の呼び出し形</b>（開き括弧まで）で限定して許可する。
     /// </para>
     /// <para>
+    /// 「前年度より繰越」の摘要（<c>GetCarryoverFromPreviousYearSummary</c>）も同じ理由で許可する（Issue #2326）。
+    /// 物品出納簿の様式の文言（組織設定由来）で、利用実績の集計から導入行を除外する SQL
+    /// （<c>LedgerRepository.ExcludeCarryoverCondition</c>）がパラメータバインドで参照する。
+    /// </para>
+    /// <para>
     /// 許可の適用は「行から許可呼び出しを除去してから禁止記号を照合する」方式。
     /// 同一行に固有メソッドの参照が同居していれば従来どおり違反として検出される
     /// （<see cref="RemoveAllowedDataLayerCalls_KnownSamples_BehaveAsPinned"/> で固定）。
@@ -87,6 +92,7 @@ public class DomainBoundaryConventionTests
     private static readonly string[] GenericSummaryGeneratorCallsAllowedInDataLayer =
     {
         "SummaryGenerator.GetMidYearCarryoverLikePattern(",
+        "SummaryGenerator.GetCarryoverFromPreviousYearSummary(",
     };
 
     /// <summary>
@@ -171,7 +177,7 @@ public class DomainBoundaryConventionTests
             "LedgerDetail の乗車駅・降車駅・バス停を DB 列へマッピングすることは正当な責務ですが、\n" +
             "摘要生成・駅名解決・バス判別といった解釈は Services / Infrastructure の責務です。\n" +
             "例外として、汎用メソッドの完全修飾呼び出し（GenericSummaryGeneratorCallsAllowedInDataLayer、\n" +
-            "現在は繰越 LIKE パターン導出のみ）は許可されています（Issue #1749）。\n" +
+            "現在は繰越 LIKE パターン導出と「前年度より繰越」の摘要のみ）は許可されています（Issue #1749 / #2326）。\n" +
             "意図的に境界を変更する場合は、docs/design/05_クラス設計書.md §2a.4 の " +
             "seam カタログを更新したうえで本テストを修正してください。\n\n" +
             "違反箇所:\n" + string.Join("\n", violations));

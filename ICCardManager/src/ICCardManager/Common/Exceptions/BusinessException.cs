@@ -30,7 +30,7 @@ namespace ICCardManager.Common.Exceptions
         /// </para>
         /// <para>
         /// 文言に「もう一度タッチしてください」と書かないのは、再タッチしても同じ競合が続くため
-        /// （<c>.claude/rules/error-messages.md</c>「取れる行動が違う経路には専用の文言を置く」）。
+        /// （<c>.claude/rules/error-messages-implementation.md</c> #1757「取れる行動が違う経路には専用のファクトリ」）。
         /// </para>
         /// <para>
         /// <b>長さは 47 文字に抑えている</b>（「貸出」「返却」のとき）。Issue #2211 で案内先を「カード管理画面（F2）」から
@@ -60,6 +60,45 @@ namespace ICCardManager.Common.Exceptions
             const string errorCode = "BIZ015";
 
             return new BusinessException(message, userMessage, errorCode);
+        }
+
+        /// <summary>
+        /// 払戻済の交通系ICカードを貸し出そうとしたときの案内（Issue #2322）
+        /// </summary>
+        /// <remarks>
+        /// 貸出の事前検証（<c>LendingService.ValidateLendPreconditionsAsync</c>）と、事前検証の後に払い戻された
+        /// 競合（<see cref="LendRefundedCardConflict"/>）の両方が使う。同じ原因（払戻済）を経路によって
+        /// 別の文言で案内しない（<c>.claude/rules/error-messages-implementation.md</c>「同じ制約違反は
+        /// すべての経路で同じ例外へ変換する」）。トーストの上限（48 文字）に収める。
+        /// </remarks>
+        public const string RefundedCardLendMessage =
+            "このカードは払い戻し済みのため貸出できません。別の交通系ICカードを使用してください。";
+
+        /// <summary>
+        /// 貸出の事前検証の後、書き込みの前に他のパソコンでカードが払い戻された（Issue #2322）
+        /// </summary>
+        /// <param name="cardIdm">対象カードの IDm（ログ用。ユーザー向け文言には含めない）</param>
+        /// <remarks>
+        /// <para>
+        /// 貸出中にする更新（<c>UpdateLentStatusAsync(isLent: true)</c>）の WHERE は
+        /// <c>is_deleted = 0 AND is_refunded = 0</c> なので、0 行の原因は「削除」と「払い戻し」の 2 つになる。
+        /// 呼び出し元（<c>LendingService.InsertLendLedgerAsync</c>）がカードを読み直して原因を分け、
+        /// 払い戻しは本例外（BIZ018）、削除は <see cref="LentStatusUpdateConflict"/>（BIZ015）を投げる。
+        /// 1 つのコードに 2 つの原因を割り当てない（<c>error-messages-implementation.md</c>
+        /// 「エラーコードは 1 つの原因だけを指す」、Issue #1985）。返却の 0 行の原因は削除だけなので、
+        /// BIZ015 の文言は従来どおり削除だけを述べる。
+        /// </para>
+        /// <para>
+        /// 文言は事前検証で払戻済を拒んだときと同じ（<see cref="RefundedCardLendMessage"/>）。
+        /// </para>
+        /// </remarks>
+        public static BusinessException LendRefundedCardConflict(string cardIdm)
+        {
+            // Issue #1986: 例外の Message はログファイルへ書き出すため、IDm はマスクを通す
+            var message = $"Lend rejected: card was refunded after the precondition check: {IdmMasker.Mask(cardIdm)}";
+            const string errorCode = "BIZ018";
+
+            return new BusinessException(message, RefundedCardLendMessage, errorCode);
         }
 
         private BusinessException(string message, string userFriendlyMessage, string errorCode)

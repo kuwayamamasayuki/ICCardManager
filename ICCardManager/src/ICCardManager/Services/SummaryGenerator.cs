@@ -1,3 +1,4 @@
+#nullable enable
 using System;
 using System.Collections.Generic;
 using System.Globalization;
@@ -132,7 +133,7 @@ namespace ICCardManager.Services
         /// <summary>
         /// 組織固有設定を注入（起動時に1回だけ呼ぶ）
         /// </summary>
-        public static void Configure(OrganizationOptions options)
+        public static void Configure(OrganizationOptions? options)
         {
             _context = SummaryGenerationContext.Create(options);
         }
@@ -281,6 +282,12 @@ namespace ICCardManager.Services
         public static string BusPlaceholder => ResolveBusPlaceholder(_context);
 
         /// <summary>
+        /// 往復の接尾辞（組織設定 <c>SummaryText.RoundTripSuffix</c> 由来）。
+        /// 画面の案内文言が往復の書き方を示すために使う（Issue #2306。文言へリテラルを直書きしない。#1818）
+        /// </summary>
+        public static string RoundTripSuffix => _context.Options.SummaryText.RoundTripSuffix;
+
+        /// <summary>
         /// 指定した世代のバス停名プレースホルダを解決する（Issue #1919）
         /// </summary>
         private static string ResolveBusPlaceholder(SummaryGenerationContext context) => Coalesce(
@@ -290,7 +297,7 @@ namespace ICCardManager.Services
         /// 設定値が空（null／空白のみ）なら既定値へフォールバックする
         /// </summary>
         private static string Coalesce(string? configured, string fallback)
-            => string.IsNullOrWhiteSpace(configured) ? fallback : configured;
+            => configured is not null && !string.IsNullOrWhiteSpace(configured) ? configured : fallback;
 
         /// <summary>
         /// バス区間の摘要表記を生成（Issue #1818）
@@ -441,6 +448,12 @@ namespace ICCardManager.Services
         /// </para>
         /// </remarks>
         internal static List<string> ExtractBusStopBlocks(string? summary)
+            => ExtractBusStopBlocksCore(summary, _context);
+
+        /// <summary>
+        /// 捕捉済みの世代のバスラベルで、摘要からバス停名をブロック単位で抽出する（Issue #2306。#1919）
+        /// </summary>
+        private static List<string> ExtractBusStopBlocksCore(string? summary, SummaryGenerationContext context)
         {
             var blocks = new List<string>();
             var text = summary ?? string.Empty;
@@ -451,7 +464,7 @@ namespace ICCardManager.Services
                 return blocks;
             }
 
-            var opener = BusLabel + FullWidthOpenParenthesis;
+            var opener = ResolveBusLabel(context) + FullWidthOpenParenthesis;
             var searchFrom = 0;
 
             while (searchFrom < text.Length)
@@ -510,6 +523,359 @@ namespace ICCardManager.Services
         }
 
         /// <summary>
+        /// 摘要のバス停名を明細へ書き戻す計画を立てる（Issue #2306）
+        /// </summary>
+        /// <param name="summary">摘要（手編集後の値を含む）</param>
+        /// <param name="details">台帳の明細（順序は問わない）</param>
+        /// <returns>書き戻す明細とバス停名、または書き戻せない／対象が無いことを示す計画</returns>
+        /// <remarks>
+        /// <para>
+        /// 統合（<c>LedgerMergeService.SyncBusStopsFromSummary</c>）と行編集
+        /// （<c>LedgerRowEditViewModel.SyncBusStopsFromSummaryAsync</c>）が共有する唯一の対応付け。
+        /// 抽出したバス停名（摘要中の出現順）を、生成側の出力順（<see cref="GetBusStopEmissionOrder"/>）に
+        /// 並べたバス明細へ位置で対応付ける。
+        /// </para>
+        /// <para>
+        /// <b>往復（「A～B 往復」）は往路・復路の 2 件へ展開する</b>。生成側は 2 明細から 1 区間を作る
+        /// （<see cref="FormatRoundTrip"/>）ので、展開しないと件数が必ず合わず、往復の摘要を直しても
+        /// 明細へ反映されなかった（Issue #2306）。端点の併記「往路の名前（復路の名前）」（Issue #1905）は
+        /// 同一視グループに登録された組のときだけ併記として読み、復路はその逆向き（B'～A'）にする。
+        /// </para>
+        /// <para>
+        /// <b>位置の対応付けは、往路と復路が隣り合っていることを前提にする</b>。往復の検出
+        /// （<see cref="DetectRoundTrips"/>）は隣り合わない区間とも組むため（A→B／C→D／B→A は
+        /// 「A～B 往復、C～D」）、往路・復路の候補の現在のバス停名の逆向きの値が<b>ほかの位置</b>に
+        /// あるときは対応付けを諦める（<see cref="ContradictsRoundTripPairing"/>）。
+        /// 位置だけで書き戻すと、C→D の明細へ復路の名前が入る。ほかに相手の候補が無ければ、
+        /// 現在の値が行きと帰りになっていなくても（帰りの入力ミス等）摘要を正として書き戻す。
+        /// </para>
+        /// <para>
+        /// 区間の数（往復は 2 件と数える）がバス利用の件数と合わない形（乗継統合「A～C」・重複除去・
+        /// 区間の書き漏らし・利用 1 件に複数の区間や往復）は <see cref="BusStopSyncOutcome.Unmappable"/>。
+        /// 呼び出し側は書き戻さず、行編集は保存前に警告する。
+        /// 汎用/固有の別: 交通系固有（バス混在表記）。
+        /// </para>
+        /// </remarks>
+        internal static BusStopSyncPlan PlanBusStopSync(string? summary, IEnumerable<LedgerDetail> details)
+        {
+            // Issue #1919: 設定の世代は入口で 1 回だけ捕捉し、抽出・作り直し・対応付けのすべてへ持ち回る
+            var context = _context;
+            var detailList = details.ToList();
+            var busDetails = GetBusStopEmissionOrder(detailList);
+
+            // Issue #1818: 抽出パターンは組織設定 BusLabel から導出する
+            var blocks = ExtractBusStopBlocksCore(summary, context);
+            if (busDetails.Count == 0 || blocks.Count == 0)
+            {
+                return BusStopSyncPlan.NothingToSync;
+            }
+
+            // Issue #2306（コードレビュー 3 回目で検出）: 摘要のバス停名が、現在の明細から作り直したものと同じなら
+            // 明細は既に摘要と整合しているので書き換えない。統合は摘要を変えていない行も全行を同期するため、
+            // この守りが無いと、摘要を生成した後に同一視グループを消してから統合しただけで、併記
+            // 「往路（復路）」を 1 つのバス停名と読み直して明細を書き換え、実際の降車地が単独の値として失われる。
+            if (RegenerateBusStopBlocks(detailList, context).SequenceEqual(blocks))
+            {
+                return BusStopSyncPlan.NothingToSync;
+            }
+
+            var plan = PlanBusStopSyncCore(busDetails, blocks, context);
+
+            // Issue #2306（コードレビュー 4 回目で検出）: 対応付けた値が、現在の明細の値の並べ替えにすぎないなら
+            // 書き換えない。上の守りは今の生成器の出力と一致する行しか守れず、並び順の規則が違った頃の生成器
+            // （#2033 以前は「解析できた経路 → 解析できないバス停名」の固定順）で作った整合済みの行は、
+            // 位置で対応付けると明細どうしの値が入れ替わる（明細 [★, 天神～博多] に旧摘要「バス（天神～博多、★）」）。
+            // 限界: 明細どうしの名前の取り違えを摘要の並べ替えで直す編集も書き戻さない（明細の編集で直す）。
+            // 値が 1 つも変わらない対応付けは単に整合している。値が入れ替わるだけの対応付けは、行編集が
+            // 「並べ替えただけの編集」を警告できるよう、抑止したことを計画に残す（コードレビュー 5 回目）。
+            if (plan.Outcome == BusStopSyncOutcome.Mapped && IsPermutationOfCurrentValues(plan))
+            {
+                return plan.Changes.Any() ? BusStopSyncPlan.SuppressedAsReorder : BusStopSyncPlan.NothingToSync;
+            }
+
+            return plan;
+        }
+
+        /// <summary>
+        /// 整合の守り（作り直した摘要との一致・並べ替えの検出）を通さずに、対応付けだけを行う（Issue #2306。テスト用）
+        /// </summary>
+        /// <remarks>
+        /// 逆変換（往復の展開・併記の読み取り）が正しいことを、生成した摘要で確かめるための入口。
+        /// <see cref="PlanBusStopSync"/> は生成した摘要を守りで早期に返すため、逆変換そのものを通らない。
+        /// </remarks>
+        internal static BusStopSyncPlan MapBusStopsFromSummary(string? summary, IEnumerable<LedgerDetail> details)
+        {
+            var context = _context;
+            var busDetails = GetBusStopEmissionOrder(details.ToList());
+            var blocks = ExtractBusStopBlocksCore(summary, context);
+            return busDetails.Count == 0 || blocks.Count == 0
+                ? BusStopSyncPlan.NothingToSync
+                : PlanBusStopSyncCore(busDetails, blocks, context);
+        }
+
+        /// <summary>
+        /// 現在の明細から摘要を作り直し、そのバスのブロックを返す（Issue #2306）
+        /// </summary>
+        /// <remarks>
+        /// 捕捉済みの世代で生成する（<see cref="Generate"/> は世代を捕捉し直すため使わない。#1919）。
+        /// 部署種別はチャージ摘要の文言だけを変え、利用の摘要には影響しないが、既定値で固定せず世代の値を渡す（#1955）。
+        /// </remarks>
+        private static List<string> RegenerateBusStopBlocks(List<LedgerDetail> details, SummaryGenerationContext context)
+        {
+            // 時系列順（古い → 新しい。SequenceNumber が大きいほど古い）で、Generate と同じく利用だけを渡す
+            var usageDetails = details
+                .OrderByDescending(d => d.SequenceNumber)
+                .Where(d => !d.IsCharge && !d.IsPointRedemption && !IsImplicitPointRedemption(d))
+                .ToList();
+            var generator = new SummaryGenerator(context.DepartmentType);
+            return ExtractBusStopBlocksCore(generator.GenerateUsageSummary(usageDetails, context), context);
+        }
+
+        /// <summary>
+        /// 対応付けた値の多重集合が、現在の明細の値の多重集合と同じか（並べ替えにすぎないか。Issue #2306）
+        /// </summary>
+        /// <remarks>
+        /// 現在の値は <see cref="BusStopAssignment.CurrentBusStops"/>（未入力の null・空白をプレースホルダへ寄せた値）で比べる。
+        /// 摘要側の未入力は★として読まれるので、null のまま比べると明細 [null, 天神～博多] と旧摘要
+        /// 「バス（天神～博多、★）」が並べ替えと判定されず、値が入れ替わって書かれる（コードレビュー 5 回目）。
+        /// </remarks>
+        private static bool IsPermutationOfCurrentValues(BusStopSyncPlan plan)
+        {
+            var assigned = plan.Assignments.Select(a => a.BusStops).OrderBy(v => v, StringComparer.Ordinal);
+            var current = plan.Assignments.Select(a => a.CurrentBusStops).OrderBy(v => v, StringComparer.Ordinal);
+            return assigned.SequenceEqual(current, StringComparer.Ordinal);
+        }
+
+        /// <summary>
+        /// 捕捉済みの世代で、抽出済みのバス停名をバス明細へ対応付ける（Issue #2306）
+        /// </summary>
+        private static BusStopSyncPlan PlanBusStopSyncCore(
+            List<LedgerDetail> busDetails, List<string> blocks, SummaryGenerationContext context)
+        {
+            // 「、」で分割し、往復は往路・復路の 2 件へ展開して対応付ける。
+            // 利用 1 件でも特別扱いしない（Issue #2306 のコードレビューで検出）。以前は先頭ブロックを
+            // そのまま書き戻しており、「バス（X～Y、Z～W）」は結合テキストを 1 明細へ、
+            // 「バス（X～Y）、鉄道（…）、バス（Z～W）」は 2 つ目を無言で捨てていた
+            var entries = new List<string>();
+            var roundTripStarts = new List<int>();
+            foreach (var part in string.Join("、", blocks).Split('、'))
+            {
+                if (!IsRoundTripPart(part, context))
+                {
+                    entries.Add(part);
+                    continue;
+                }
+
+                // 往復の接尾辞で終わるのに「乗車～降車」と読めない区間（「A～B～C 往復」「天神 往復」）は、
+                // 1 件のバス停名として書き戻すと接尾辞ごと明細へ入る（コードレビュー 3 回目で検出）
+                var expanded = ExpandRoundTrip(part, busDetails, entries.Count, context);
+                if (expanded == null)
+                {
+                    return BusStopSyncPlan.Unmappable(BusStopSyncFailure.MalformedRoundTrip);
+                }
+
+                roundTripStarts.Add(entries.Count);
+                entries.AddRange(expanded);
+            }
+
+            if (entries.Count != busDetails.Count)
+            {
+                return BusStopSyncPlan.Unmappable(busDetails.Count == 1 && roundTripStarts.Count > 0
+                    ? BusStopSyncFailure.RoundTripOnSingleUsage
+                    : BusStopSyncFailure.CountMismatch);
+            }
+
+            if (roundTripStarts.Any(k => ContradictsRoundTripPairing(busDetails, k, roundTripStarts, context)))
+            {
+                return BusStopSyncPlan.Unmappable(BusStopSyncFailure.RoundTripNotAdjacent);
+            }
+
+            // 現在の値の未入力（null・空白）は、摘要側と同じく捕捉した世代のプレースホルダとして扱う
+            var placeholder = ResolveBusPlaceholder(context);
+            return BusStopSyncPlan.Mapped(
+                entries.Select((busStops, i) => new BusStopAssignment(
+                    busDetails[i],
+                    busStops,
+                    busDetails[i].BusStops is { } current && !string.IsNullOrWhiteSpace(current) ? current : placeholder))
+                    .ToList());
+        }
+
+        /// <summary>
+        /// 区間が往復の接尾辞（組織設定 <c>SummaryText.RoundTripSuffix</c>）で終わるか（Issue #2306）
+        /// </summary>
+        private static bool IsRoundTripPart(string part, SummaryGenerationContext context)
+        {
+            var suffix = context.Options.SummaryText.RoundTripSuffix;
+            return !string.IsNullOrEmpty(suffix) && part.EndsWith(suffix, StringComparison.Ordinal);
+        }
+
+        /// <summary>
+        /// 往復の区間（「A～B 往復」）を往路・復路のバス停名へ展開する（Issue #2306）
+        /// </summary>
+        /// <param name="part">往復の接尾辞で終わる区間（<see cref="IsRoundTripPart"/> が true）</param>
+        /// <param name="busDetails">生成側の出力順に並べたバス明細</param>
+        /// <param name="k">この往復の往路を対応付ける位置</param>
+        /// <param name="context">この同期が参照する設定の世代</param>
+        /// <returns>[往路, 復路]。接尾辞の前が「乗車～降車」と読めなければ null</returns>
+        /// <remarks>
+        /// <see cref="FormatRoundTrip"/> の逆変換。往路は「A～B」、復路は「B'～A'」
+        /// （端点が「往路の名前（復路の名前）」と併記されていれば復路の名前を使う）。
+        /// </remarks>
+        private static List<string>? ExpandRoundTrip(
+            string part, List<LedgerDetail> busDetails, int k, SummaryGenerationContext context)
+        {
+            var suffix = context.Options.SummaryText.RoundTripSuffix;
+            var route = ParseBusRoute(part.Substring(0, part.Length - suffix.Length));
+            if (route == null)
+            {
+                return null;
+            }
+
+            // 併記の判定に使う、現在の往路・復路の値（明細の現在の値と一致する併記は、グループに関係なく併記と読む）
+            var forward = k < busDetails.Count ? ParseExistingBusRoute(busDetails[k]) : null;
+            var returnLeg = k + 1 < busDetails.Count ? ParseExistingBusRoute(busDetails[k + 1]) : null;
+            var knownStart = forward is { } f && returnLeg is { } r ? (f.Entry, r.Exit) : ((string, string)?)null;
+            var knownEnd = forward is { } f2 && returnLeg is { } r2 ? (f2.Exit, r2.Entry) : ((string, string)?)null;
+
+            var (startOutbound, startReturn) = SplitRoundTripEndpoint(route.Value.Entry, knownStart, context);
+            var (endOutbound, endReturn) = SplitRoundTripEndpoint(route.Value.Exit, knownEnd, context);
+            return new List<string>
+            {
+                $"{startOutbound}～{endOutbound}",
+                $"{endReturn}～{startReturn}",
+            };
+        }
+
+        /// <summary>
+        /// 往復の端点「往路の名前（復路の名前）」を分ける（Issue #2306。<see cref="FormatEndpoint"/> の逆変換）
+        /// </summary>
+        /// <param name="endpoint">往復の端点（「往路の名前（復路の名前）」または名前 1 つ）</param>
+        /// <param name="known">現在の明細での（往路の名前, 復路の名前）。両方の明細が読めないときは null</param>
+        /// <param name="context">この同期が参照する設定の世代</param>
+        /// <remarks>
+        /// 末尾の全角括弧を併記として読むのは、括弧の内と外が同一視グループで同一とみなされる
+        /// 別名どうしのときと、括弧の外と内が<b>現在の明細の往路・復路の名前と一致する</b>とき
+        /// （摘要を生成した後に同一視グループを消しても、明細が実際に持つ併記は読み取れるように。コードレビュー 3 回目）。
+        /// 生成側は同一視された別名にしか併記を付けないため、
+        /// それ以外の括弧（「博多駅（筑紫口）」のようなバス停名の一部）は名前としてそのまま扱う。
+        /// </remarks>
+        private static (string Outbound, string Return) SplitRoundTripEndpoint(
+            string endpoint, (string Outbound, string Return)? known, SummaryGenerationContext context)
+        {
+            if (endpoint.Length > 0 && endpoint[endpoint.Length - 1] == FullWidthCloseParenthesis)
+            {
+                var depth = 0;
+                for (var i = endpoint.Length - 1; i >= 0; i--)
+                {
+                    if (endpoint[i] == FullWidthCloseParenthesis)
+                    {
+                        depth++;
+                    }
+                    else if (endpoint[i] == FullWidthOpenParenthesis)
+                    {
+                        depth--;
+                        if (depth == 0)
+                        {
+                            var outbound = endpoint.Substring(0, i);
+                            var returnName = endpoint.Substring(i + 1, endpoint.Length - i - 2);
+                            if (outbound.Length > 0
+                                && returnName.Length > 0
+                                && !string.Equals(outbound, returnName, StringComparison.Ordinal)
+                                && (context.AreTransferStations(outbound, returnName)
+                                    || (known is { } pair
+                                        && string.Equals(pair.Outbound, outbound, StringComparison.Ordinal)
+                                        && string.Equals(pair.Return, returnName, StringComparison.Ordinal))))
+                            {
+                                return (outbound, returnName);
+                            }
+
+                            break;
+                        }
+                    }
+                }
+            }
+
+            return (endpoint, endpoint);
+        }
+
+        /// <summary>
+        /// 位置 <paramref name="k"/>・<paramref name="k"/>+1 を往復の往路・復路として書き戻すと、
+        /// 別の利用へ名前が入るおそれがあるか（Issue #2306）
+        /// </summary>
+        /// <param name="busDetails">生成側の出力順に並べたバス明細</param>
+        /// <param name="k">調べる往復の枠の先頭位置（往路）</param>
+        /// <param name="roundTripStarts">この摘要で往復と読んだ枠の先頭位置すべて</param>
+        /// <param name="context">この同期が参照する設定の世代</param>
+        /// <remarks>
+        /// <para>
+        /// 隣の 2 明細の現在のバス停名が互いに逆向き（同一視グループを考慮）なら矛盾しない。
+        /// そうでないとき（片方が★等で解析できない、または逆向きでない）は、解析できた側の<b>逆向きの値を持つ明細が
+        /// ほかの位置にあれば</b>矛盾とする — 往復の本当の相手が離れた位置にある（天神→博多／大橋→薬院／博多→天神
+        /// の「天神～博多 往復、大橋～薬院」、明細 [A～B, ★, B～A] に手で書いた「A～B 往復、★」）。
+        /// </para>
+        /// <para>
+        /// ほかに相手の候補が無ければ矛盾としない。現在の値が行きと帰りになっていない（[天神～博多, 博多～薬院] の
+        /// 帰りの入力ミス）ときも、相手を取り違える余地は無いので摘要を正として書き戻す（同期は摘要を正として明細を直す処理）。
+        /// </para>
+        /// <para>
+        /// 相手の候補から、<b>ほかの往復の枠で隣どうしが無矛盾に組めている位置</b>は外す（コードレビューで検出）。
+        /// 明細 [A～B, B～A, A～B, ★] に「A～B 往復、A～B 往復」では、2 組目の A～B の逆向き B～A は
+        /// 1 組目が使っており、2 組目の相手ではない。
+        /// </para>
+        /// <para>
+        /// <b>限界:</b> 両方とも解析できない（どちらも★）ときは手掛かりが無いため、摘要の並びを信じる。
+        /// </para>
+        /// </remarks>
+        private static bool ContradictsRoundTripPairing(
+            List<LedgerDetail> busDetails, int k, List<int> roundTripStarts, SummaryGenerationContext context)
+        {
+            var forwardRoute = ParseExistingBusRoute(busDetails[k]);
+            var returnRoute = ParseExistingBusRoute(busDetails[k + 1]);
+
+            if (forwardRoute != null && returnRoute != null
+                && IsReverseRoute(forwardRoute.Value, returnRoute.Value, context))
+            {
+                return false;
+            }
+
+            // ほかの往復の枠のうち、隣どうしが既に逆向きで組めている位置（相手の候補から外す）
+            var settled = new HashSet<int>();
+            foreach (var other in roundTripStarts.Where(start => start != k))
+            {
+                var a = ParseExistingBusRoute(busDetails[other]);
+                var b = ParseExistingBusRoute(busDetails[other + 1]);
+                if (a != null && b != null && IsReverseRoute(a.Value, b.Value, context))
+                {
+                    settled.Add(other);
+                    settled.Add(other + 1);
+                }
+            }
+
+            for (var i = 0; i < busDetails.Count; i++)
+            {
+                if (i == k || i == k + 1 || settled.Contains(i) || !(ParseExistingBusRoute(busDetails[i]) is { } other))
+                {
+                    continue;
+                }
+
+                if ((forwardRoute is { } f && IsReverseRoute(f, other, context))
+                    || (returnRoute is { } r && IsReverseRoute(r, other, context)))
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        private static (string Entry, string Exit)? ParseExistingBusRoute(LedgerDetail detail)
+            => detail.BusStops == null ? null : ParseBusRoute(detail.BusStops);
+
+        private static bool IsReverseRoute(
+            (string Entry, string Exit) a, (string Entry, string Exit) b, SummaryGenerationContext context)
+            => context.AreTransferStations(a.Entry, b.Exit) && context.AreTransferStations(a.Exit, b.Entry);
+
+        /// <summary>
         /// 摘要にバス利用が含まれるかを判定（Issue #1818）
         /// </summary>
         /// <remarks>
@@ -566,7 +932,7 @@ namespace ICCardManager.Services
         /// （設定の差し替えは新しいインスタンスで <see cref="Configure"/> する、または
         /// <see cref="ApplyTransferStationGroups"/> / <see cref="ApplyDepartmentType"/> を使う）。
         /// </remarks>
-        public SummaryGenerator(DepartmentType departmentType, OrganizationOptions options)
+        public SummaryGenerator(DepartmentType departmentType, OrganizationOptions? options)
             : this(departmentType)
         {
             // DI経由で生成された場合、静的フィールドも設定する
@@ -843,9 +1209,10 @@ namespace ICCardManager.Services
         /// 出力順は <see cref="CoalesceExplicitGroups"/> を通した run の並びそのものになる。
         /// 従来は「グループ → 未グループ」「解析できた経路 → 解析できなかったバス停名」の
         /// 固定順だったため、本メソッドもそれを書き写していた。
-        /// 往復・乗継統合（<see cref="BuildRouteSummary"/>）や重複除去が起きた場合は摘要側の
-        /// バス停数が明細数より少なくなるが、同期側の件数一致ガードが書き戻しを
-        /// 抑止するため、本メソッドは統合前の順序を返せば足りる。
+        /// 乗継統合（<see cref="BuildRouteSummary"/>）や重複除去が起きた場合は摘要側の
+        /// バス停数が明細数より少なくなるが、同期側（<see cref="PlanBusStopSync"/>）の件数一致ガードが
+        /// 書き戻しを抑止するため、本メソッドは統合前の順序を返せば足りる。往復は
+        /// <see cref="PlanBusStopSync"/> が往路・復路の 2 件へ展開して数える（Issue #2306）。
         /// 汎用/固有の別: 交通系固有（バス混在表記）。
         /// </para>
         /// </remarks>
@@ -1613,15 +1980,15 @@ namespace ICCardManager.Services
             // 復路（例: 下原中央→天神中央郵便局前）が往路（天神日銀前→下原中央）の
             // 逆方向キーと一致せず「余り」に残り、「A～B 往復、B～C」と重複表示になる。
             // 突合に使う名前だけを正規化し、余りとして返す経路は元の名前のまま保つ。
-            var forwardQuotas = new Dictionary<(string, string), int>();
+            var forwardQuotas = new Dictionary<(string?, string?), int>();
             foreach (var rt in roundTrips)
             {
                 var key = (context.CanonicalStation(rt.Start), context.CanonicalStation(rt.End));
                 forwardQuotas[key] = forwardQuotas.TryGetValue(key, out var count) ? count + 1 : 1;
             }
 
-            var consumedForward = new Dictionary<(string, string), int>();
-            var consumedReverse = new Dictionary<(string, string), int>();
+            var consumedForward = new Dictionary<(string?, string?), int>();
+            var consumedReverse = new Dictionary<(string?, string?), int>();
 
             var remaining = new List<(int Index, string Entry, string Exit)>();
             for (int index = 0; index < allRoutes.Count; index++)
@@ -1761,12 +2128,12 @@ namespace ICCardManager.Services
             var visitedInChain = new List<string> { currentStart, currentEnd };
 
             // Issue #1902: 直前に確定したチェーンの端点（逆走判定用）
-            string previousChainStart = null;
-            string previousChainEnd = null;
+            string? previousChainStart = null;
+            string? previousChainEnd = null;
 
             // Issue #1917: 直前の区切りが逆走ガードによるものなら、ガードで閉じたチェーンの先頭の駅
             // （閉じた循環の検出用）。null は「直前の区切りは逆走ガードによるものではない」。
-            string pendingGuardChainStartStation = null;
+            string? pendingGuardChainStartStation = null;
             var pendingGuardChainStart = -1;
             var pendingGuardResultCount = -1;
 
@@ -2169,7 +2536,8 @@ namespace ICCardManager.Services
         /// 利用明細から摘要を生成できなかった（<see cref="Generate"/> が空文字を返した）場合に、
         /// 摘要が空欄の台帳行を保存しないための代替文言。LendingService の Ledger 生成経路が使う。
         /// 片側欠落は <see cref="UnknownStationPlaceholder"/> による補完で摘要に採用されるため、
-        /// 本文言が使われるのは乗車駅・降車駅の両方が欠落した鉄道明細のみ。
+        /// 本文言が使われるのは、摘要に載せる明細が 1 件も無い利用（乗車駅・降車駅の両方が欠落した鉄道明細、
+        /// 運賃 0 円で片側だけの入場記録など。<see cref="IsSummarizableTrip"/> が除くもの）に限られる。
         /// </para>
         /// <para>交通系固有メソッド（駅名からの摘要組み立ての安全網。domain-boundaries.md 参照）。</para>
         /// </remarks>

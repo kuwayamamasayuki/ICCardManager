@@ -645,7 +645,8 @@ public class DashboardServiceTests
 
         var warningService = new WarningService(
             _ledgerRepositoryMock.Object,
-            new Mock<IDatabaseInfo>().Object);
+            new Mock<IDatabaseInfo>().Object,
+            _cardRepositoryMock.Object);
 
         // Act
         var result = await _service.BuildDashboardAsync(DashboardSortOrder.CardName);

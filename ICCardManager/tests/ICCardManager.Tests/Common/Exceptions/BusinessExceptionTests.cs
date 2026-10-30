@@ -51,4 +51,21 @@ public class BusinessExceptionTests
         ex.UserFriendlyMessage.Should().Be(
             $"{operationName}を記録できませんでした。交通系ICカード管理（F3）で削除されていないか確認してください。");
     }
+
+    /// <summary>
+    /// Issue #2322: 事前検証の後に払い戻された貸出の競合は、削除（BIZ015）と別のコードで、事前検証と同じ文言で案内すること
+    /// </summary>
+    [Fact]
+    public void LendRefundedCardConflict_削除とは別のコードで事前検証と同じ文言を返すこと()
+    {
+        var ex = BusinessException.LendRefundedCardConflict("0102030405060708");
+
+        ex.ErrorCode.Should().Be("BIZ018");
+        ex.ErrorCode.Should().NotBe(BusinessException.LentStatusUpdateConflict("0102030405060708", "貸出").ErrorCode,
+            "1 つのエラーコードに 2 つの原因を割り当てない（#1985）");
+        ex.UserFriendlyMessage.Should().Be(BusinessException.RefundedCardLendMessage);
+        ex.UserFriendlyMessage.Length.Should().BeLessOrEqualTo(48, "トーストの上限");
+        ex.UserFriendlyMessage.Should().EndWith("ください。");
+        ex.Message.Should().NotContain("0102030405060708", "IDm はマスクしてログへ出す（#1986）");
+    }
 }

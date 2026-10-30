@@ -11,7 +11,7 @@ namespace ICCardManager.Common.Charting
     /// 同一のグラフ上には、軸・棒の金額ラベル（<see cref="ChartScale"/>）と
     /// 系列名に含まれる件数（<see cref="ChartSeriesNameFormatter"/>）という
     /// <b>2 種類の数値ラベル</b>が並ぶ。整形の手段が 2 通りあると、片方だけ変わる日が来る
-    /// （<c>.claude/rules/development-conventions.md</c>「同じ論理的な処理に手段が 2 通りあるか」）。
+    /// （<c>.claude/rules/service-conventions.md</c> #1763「同じ論理的な処理に手段が 2 通りあるか」）。
     /// 実際 Issue #1885 の時点では、金額は <see cref="CultureInfo.InvariantCulture"/> ＋ <c>#,##0</c>、
     /// 件数は <see cref="CultureInfo.CurrentCulture"/> ＋ <c>N0</c> と規則が分かれており、
     /// 理由はコードにもコメントにも書かれていなかった。

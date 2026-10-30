@@ -51,32 +51,6 @@ public enum AppState
 }
 
 /// <summary>
-/// ダッシュボードのソート順
-/// </summary>
-public enum DashboardSortOrder
-{
-    /// <summary>
-    /// カード種別・番号順（デフォルト）
-    /// </summary>
-    CardName,
-
-    /// <summary>
-    /// 残高昇順（少ない順）
-    /// </summary>
-    BalanceAscending,
-
-    /// <summary>
-    /// 残高降順（多い順）
-    /// </summary>
-    BalanceDescending,
-
-    /// <summary>
-    /// 最終利用日順（新しい順）
-    /// </summary>
-    LastUsageDate
-}
-
-/// <summary>
 /// メイン画面のViewModel。ICカードの貸出・返却処理を制御します。
 /// </summary>
 /// <remarks>

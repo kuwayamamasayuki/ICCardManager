@@ -21,8 +21,8 @@ namespace ICCardManager.Common
     /// <para>
     /// 「なぜ」を<b>可能性</b>として述べ「他のパソコンで削除されました」と断定しないのは、
     /// ローカルモード（単一 PC）でも同じ分岐に到達し得るため。存在しない相手を探させると
-    /// 原因究明が止まる（<c>.claude/rules/development-conventions.md</c>
-    /// 「エラー文言で原因を断定する前に、その原因が成立する構成かを確認する」）。
+    /// 原因究明が止まる（<c>.claude/rules/error-messages-implementation.md</c>「『影響行数 0』は失敗ではなく競合」の
+    /// 「原因を断定する前に、その原因が成立する構成かを確認する」）。
     /// </para>
     /// </remarks>
     public static class ConcurrencyConflictMessage
@@ -34,6 +34,22 @@ namespace ICCardManager.Common
         /// <param name="listName">再読込した一覧の名称（例: <c>カード一覧</c>）</param>
         public static string ForUpdate(string target, string listName)
             => Build(target, "更新", DeletedReason, listName);
+
+        /// <summary>
+        /// 編集ダイアログで更新しようとした行が見つからなかったときの文言を組み立てる（Issue #2325）。
+        /// </summary>
+        /// <param name="target">対象の説明（ダイアログを開いた時点の値で名指しする）。「何が」に相当する</param>
+        /// <param name="listName">ダイアログを閉じたあとに再読込する一覧の名称</param>
+        /// <remarks>
+        /// 「なぜ」は <see cref="ForUpdate"/> と同じ。違うのは「どうすれば」で、ダイアログは背後の一覧を
+        /// 読み直す手段を持たず、一覧は<b>閉じたあとに呼び出し元が</b>読み直す（<c>LedgerDetailViewModel.NeedsHistoryReload</c>
+        /// と同じ形）。<see cref="ForUpdate"/> の「再読み込みしましたので」はその時点では事実にならないため分ける
+        /// （#1753「案内するなら、案内する側が先に再読込する」）。同じ行は何度保存しても失敗するので、
+        /// 入力が保存されないことも明示する。
+        /// </remarks>
+        public static string ForUpdateReloadOnClose(string target, string listName)
+            => $"{target}を更新できませんでした。{DeletedReason}入力した内容は保存していません。" +
+               $"この画面を閉じると{listName}を再読み込みしますので、一覧で状態を確認してからやり直してください。";
 
         /// <summary>
         /// 払い戻し対象の行が見つからなかったときの文言を組み立てる。

@@ -170,7 +170,7 @@
                             Margin="0,0,0,5"
                             Foreground="{DynamicResource WarningForegroundBrush}"
                             AutomationProperties.Name="カード払い戻し"
-                            AutomationProperties.HelpText="選択したカードを払い戻します。残高が払出金額として記録され、カードは「払戻済」状態になります。帳票作成は引き続き可能です。"
+                            AutomationProperties.HelpText="選択したカードを払い戻します。残高が払出金額として記録され、カードは「払戻済」状態になります。帳票作成は引き続き可能です。職員証による認証が必要です。"
                             ToolTip="払い戻し処理を行い、カードを「払戻済」状態に設定"/>
                 </WrapPanel>
             </DockPanel>

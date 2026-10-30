@@ -121,6 +121,11 @@ namespace ICCardManager.Views.Dialogs
         public bool IsBackRequested => _viewModel.IsBackRequested;
 
         /// <summary>
+        /// 保存で競合（編集対象の行がもう無い）を検出し、閉じたあと履歴一覧の再読込が要るか（Issue #2325）
+        /// </summary>
+        public bool NeedsHistoryReload => _viewModel.NeedsHistoryReload;
+
+        /// <summary>
         /// 追加モードで初期化
         /// </summary>
         /// <param name="cardIdm">対象カードIDm</param>
@@ -169,6 +174,14 @@ namespace ICCardManager.Views.Dialogs
         public void SetShowSaveAndNextButton(bool show)
         {
             _viewModel.ShowSaveAndNextButton = show;
+        }
+
+        /// <summary>
+        /// 編集対象の行のカードが払戻済かを設定する（Issue #2322。貸出中の行の削除の確認文言を出し分ける）
+        /// </summary>
+        public void SetRefundedCard(bool isRefunded)
+        {
+            _viewModel.IsRefundedCard = isRefunded;
         }
 
         /// <summary>
