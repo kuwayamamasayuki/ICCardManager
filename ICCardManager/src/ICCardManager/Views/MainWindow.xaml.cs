@@ -274,20 +274,34 @@ namespace ICCardManager.Views
         /// <summary>
         /// ウィンドウ位置・サイズを保存（画面の値を読まないので、スレッドプールで走らせてよい）
         /// </summary>
+        /// <remarks>
+        /// Issue #2305: 位置・サイズの 5 キーだけを書く <c>SaveMainWindowSettingsAsync</c> を使う。以前は
+        /// <c>GetAppSettingsAsync</c>（TTL キャッシュ）で読んだ設定のウィンドウ値だけを差し替えて一括保存へ丸ごと渡しており、
+        /// 共有モードでは他の PC がその後に変えた設定（部署種別・残額警告など）を、この PC が終了するたびに古い値へ巻き戻していた。
+        /// </remarks>
         private async Task SaveWindowPositionAsync(WindowPosition position)
         {
             try
             {
-                var settings = await _settingsRepository.GetAppSettingsAsync();
-                settings.MainWindowSettings.IsMaximized = position.IsMaximized;
-                settings.MainWindowSettings.Left = position.Left;
-                settings.MainWindowSettings.Top = position.Top;
-                settings.MainWindowSettings.Width = position.Width;
-                settings.MainWindowSettings.Height = position.Height;
+                var windowSettings = new WindowSettings
+                {
+                    IsMaximized = position.IsMaximized,
+                    Left = position.Left,
+                    Top = position.Top,
+                    Width = position.Width,
+                    Height = position.Height,
+                };
 
-                await _settingsRepository.SaveAppSettingsAsync(settings);
+                var saved = await _settingsRepository.SaveMainWindowSettingsAsync(windowSettings);
+                if (!saved)
+                {
+                    // Release でも痕跡を残す（終了を妨げない。位置が保存されないだけ）
+                    ErrorDialogHelper.LogException(
+                        new InvalidOperationException("終了時のウィンドウ位置の保存で、書き込めなかった設定キーがありました（次回は前回保存した位置で開きます）。"),
+                        "終了時のウィンドウ位置の保存");
+                }
 #if DEBUG
-                System.Diagnostics.Debug.WriteLine($"[MainWindow] ウィンドウ位置を保存: Left={settings.MainWindowSettings.Left}, Top={settings.MainWindowSettings.Top}, Width={settings.MainWindowSettings.Width}, Height={settings.MainWindowSettings.Height}, Maximized={settings.MainWindowSettings.IsMaximized}");
+                System.Diagnostics.Debug.WriteLine($"[MainWindow] ウィンドウ位置を保存: Left={windowSettings.Left}, Top={windowSettings.Top}, Width={windowSettings.Width}, Height={windowSettings.Height}, Maximized={windowSettings.IsMaximized}");
 #endif
             }
             catch (Exception ex)

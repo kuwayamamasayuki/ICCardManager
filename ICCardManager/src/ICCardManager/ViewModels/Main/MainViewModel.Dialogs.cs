@@ -72,6 +72,10 @@ public partial class MainViewModel
         // Issue #1758: カードの論理削除で繰越情報消失の母集団が変わる。カード管理画面が唯一の入口のため、
         // ここで再判定しないと「クリックしても対象が無い警告」が再起動まで残る（Issue #1739 の教訓）。
         await CheckCarryoverDataLossAsync();
+
+        // Issue #2329: バス停名未入力の警告は論理削除したカードの行を数えないため、カードの論理削除で件数が変わる。
+        // 再判定しないと、一覧（開くたびに作り直す）と警告の件数が食い違ったまま次の警告再チェックまで残る
+        await CheckIncompleteBusStopsAsync();
     }
 
     /// <summary>
@@ -225,6 +229,13 @@ public partial class MainViewModel
                     // Issue #2007: 導入時残高の誤りなら導入行の日付から表示する（期間の決定とハイライトは履歴パネル側）
                     await History.ShowBalanceInconsistencyAsync(card);
                 }
+                break;
+
+            case WarningType.RefundedCardLent:
+                // Issue #2322: 払戻済なのに貸出中のカード。払戻済のカードはタッチで返却できず、残高ダッシュボードにも
+                // 出ないので、ここが履歴を開く入口になる。最も古い貸出中の行の月から開き、職員が貸出中の行を削除して直す
+                // （削除すると貸出中一覧が読み直され、この警告も消える）
+                await History.ShowRefundedCardLentHistoryAsync(await FindWarningCardAsync(warning));
                 break;
 
             case WarningType.IncompleteBusStop:

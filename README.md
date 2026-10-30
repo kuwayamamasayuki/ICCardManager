@@ -42,8 +42,9 @@
 
 | 項目 | 要件 |
 |------|------|
-| OS | Windows 10 / 11 |
-| ランタイム | .NET Framework 4.8（Windows 10 以降は標準搭載） |
+| OS | 64bit 版 Windows 10 / 11（32bit 版は対象外） |
+| CPU | x64（本体は x86 ビルドで、WoW64 で動作） |
+| ランタイム | .NET Framework 4.8（Windows 10 May 2019 Update（1903）以降と Windows 11 は標準搭載） |
 | ICカードリーダー | Sony PaSoRi（RC-S300/RC-S380 等） |
 | ネットワーク | 不要（スタンドアロン動作。共有モード利用時のみ LAN 接続が必要） |
 

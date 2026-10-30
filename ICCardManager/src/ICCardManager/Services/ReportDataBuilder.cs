@@ -144,9 +144,11 @@ namespace ICCardManager.Services
             // 該当年度の累計には紙の出納簿時代の累計を加算する。
             // 4月は cumulativeTotal=null（Issue #813）かつ月計には紙時代累計を含めない設計のため
             // 加算は5月以降のみで意味を持つ。意図を明確化するため month != 4 ガードを併記。
-            if (card.CarryoverFiscalYear.HasValue
-                && card.CarryoverFiscalYear.Value == fiscalYearStartYear
-                && month != 4)
+            // Issue #2326: 3 月繰越（導入行が「前年度より繰越」）のカードの紙の累計は旧年度のものなので加算しない。
+            // #2326 より前に累計を入力して登録したカードにも DB を書き換えずに効かせるため、保存済みの台帳から判定する
+            // （判定は PaperCarryoverPolicy 1 か所。登録時に保存しない判定と同じクラス）。
+            if (month != 4
+                && PaperCarryoverPolicy.AddsPaperCumulativeToFiscalYear(card, fiscalYearStartYear, yearlyLedgers))
             {
                 yearlyIncome += card.CarryoverIncomeTotal;
                 yearlyExpense += card.CarryoverExpenseTotal;

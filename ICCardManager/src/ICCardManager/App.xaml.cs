@@ -48,10 +48,10 @@ namespace ICCardManager
         private ILogger<App>? _logger;
 
         /// <summary>
-        /// Issue #1599: database_config.txt のパスが形式不正でデフォルトへフォールバック
-        /// した場合に、起動完了後ユーザーへ警告するための退避領域（不正だった生のパス）。
+        /// Issue #1599: データベースパスが形式不正でフォールバックした場合に、
+        /// 起動完了後ユーザーへ警告するための退避領域（Issue #2328 で appsettings.json の値も対象にした）。
         /// </summary>
-        private string? _rejectedDatabaseConfigPath;
+        private ResolvedDatabasePath? _rejectedDatabasePathResolution;
 
         /// <summary>
         /// Issue #1910: 二重起動防止のガード。プロセスが生きている間ミューテックスのハンドルを
@@ -225,8 +225,8 @@ namespace ICCardManager
                 mainWindow.Show();
                 _logger.LogInformation("アプリケーション起動完了");
 
-                // Issue #1599: database_config.txt のパスが形式不正でデフォルトへ
-                // フォールバックしていた場合、ここでユーザーへ警告する
+                // Issue #1599 / #2328: database_config.txt または appsettings.json のパスが形式不正で
+                // 使わなかった場合（既定または次の候補で起動した場合）、ここでユーザーへ警告する
                 WarnIfDatabaseConfigPathRejected();
             }
             catch (DatabaseVersionMismatchException ex)
@@ -258,11 +258,13 @@ namespace ICCardManager
                 var dbPathInfo = "";
                 try
                 {
-                    var configPath = AppConfigFiles.Read(AppConfigFiles.DatabaseConfigPath);
-                    if (!string.IsNullOrWhiteSpace(configPath))
-                    {
-                        dbPathInfo = $"\n\nデータベースパス: {configPath}";
-                    }
+                    // Issue #2328: database_config.txt を直接表示せず、接続と同じ解決結果を表示する
+                    // （appsettings.json だけで指す構成・形式不正で棄却した値でも、実際に開こうとしたパスを示す）。
+                    // 構成の読み込み前に失敗した場合は Configuration が未設定なので appsettings の値は null として扱う
+                    var path = DatabaseLocationResolver.DescribePathForStartupError(
+                        AppConfigFiles.Read(AppConfigFiles.DatabaseConfigPath),
+                        Configuration?["DatabaseOptions:Path"]);
+                    dbPathInfo = $"\n\nデータベースパス: {path}";
                 }
                 catch (Exception configEx)
                 {
@@ -380,70 +382,50 @@ namespace ICCardManager
         }
 
         /// <summary>
-        /// database_config.txt のデータベースパスを読み込み、形式が不正な場合は
-        /// デフォルトパスへフォールバックさせるため null を返す（Issue #1599）。
+        /// データベースパスの解決結果を受け取り、形式不正で棄却した値があればログに残して
+        /// 起動後の警告のために退避する（Issue #1599 / #2328）。
         /// </summary>
         /// <remarks>
-        /// <para>
-        /// 起動時の検証は <see cref="PathValidator.ValidatePathFormat"/> による
-        /// 「形式チェックのみ」に限定する。到達性・ドライブ準備・書き込み権限の検証は
-        /// 行わない。これらを起動時に行うと、一時的にネットワークが切断されているだけの
-        /// 正当な共有 DB パスまで無効と判定し、黙ってローカルのデフォルト DB へ
-        /// 切り替わってしまう（データ消失に見える）危険があるため。
-        /// </para>
-        /// <para>
-        /// 不正だった場合は <see cref="_rejectedDatabaseConfigPath"/> に元の値を退避し、
-        /// 起動完了後（メインウィンドウ表示後）に <see cref="WarnIfDatabaseConfigPathRejected"/>
-        /// で 1 度だけユーザーへ警告する。複数回呼ばれても同じ値で冪等。
-        /// </para>
+        /// 起動時の検証は <see cref="PathValidator.ValidatePathFormat"/> による「形式チェックのみ」に限定する
+        /// （<see cref="DatabaseLocationResolver.Resolve"/> の remarks を参照）。
         /// </remarks>
-        private string? GetValidatedDatabaseConfigPath()
+        private void OnDatabasePathResolved(ResolvedDatabasePath resolution)
         {
-            var raw = AppConfigFiles.Read(AppConfigFiles.DatabaseConfigPath);
-
-            // 空（未設定）はデフォルトパス利用の正常系。検証対象外。
-            if (string.IsNullOrWhiteSpace(raw))
+            if (resolution.Rejected.Count == 0)
             {
-                return null;
+                return;
             }
 
-            var validation = PathValidator.ValidatePathFormat(raw);
-            if (validation.IsValid)
+            foreach (var rejected in resolution.Rejected)
             {
-                return raw;
+                _logger?.LogWarning(
+                    "データベースパスが形式不正のため使用しません。Source={Source}, Path={Path}, Reason={Reason}",
+                    rejected.Source, rejected.Value, rejected.Reason);
             }
 
-            // 形式不正: デフォルトパスへフォールバックし、起動後に警告する
-            _rejectedDatabaseConfigPath = raw;
-            _logger?.LogWarning(
-                "database_config.txt のデータベースパスが形式不正のためデフォルトへフォールバックします。" +
-                "Path={Path}, Reason={Reason}",
-                raw, validation.ErrorMessage);
-            return null;
+            _rejectedDatabasePathResolution = resolution;
         }
 
         /// <summary>
-        /// <see cref="GetValidatedDatabaseConfigPath"/> がパスを棄却していた場合、
-        /// ユーザーへ警告ダイアログを表示する（Issue #1599）。起動完了後に 1 度だけ呼ぶ。
+        /// データベースパスを棄却していた場合、ユーザーへ警告ダイアログを表示する（Issue #1599）。
+        /// 起動完了後に 1 度だけ呼ぶ。
         /// </summary>
         private void WarnIfDatabaseConfigPathRejected()
         {
-            if (string.IsNullOrEmpty(_rejectedDatabaseConfigPath))
+            var resolution = _rejectedDatabasePathResolution;
+            if (resolution is null || resolution.Rejected.Count == 0)
             {
                 return;
             }
 
             Common.OwnedMessageBox.Show(
-                $"設定ファイル（database_config.txt）のデータベース保存先「{_rejectedDatabaseConfigPath}」が" +
-                "無効な形式（相対パス・不正な文字を含む等）のため、既定の保存先を使用して起動しました。\n\n" +
-                "意図した保存先と異なる場合は、設定画面（F5）でドライブ文字から始まる絶対パス、" +
-                "または「\\\\server\\share」形式のネットワークパスを再設定してください。",
+                DatabaseLocationResolver.BuildRejectedWarningMessage(resolution),
                 "データベース保存先の設定に関する警告",
                 MessageBoxButton.OK,
                 MessageBoxImage.Warning);
 
             // 一度警告したら再表示しない
-            _rejectedDatabaseConfigPath = null;
+            _rejectedDatabasePathResolution = null;
         }
 
         /// <summary>
@@ -456,38 +438,24 @@ namespace ICCardManager
             services.Configure<CacheOptions>(Configuration.GetSection("CacheOptions"));
             // Issue #974: 組織固有設定の外部化
             services.Configure<OrganizationOptions>(Configuration.GetSection("OrganizationOptions"));
-            services.Configure<DatabaseOptions>(Configuration.GetSection("DatabaseOptions"));
 
-            // ProgramData配下の設定ファイルからDBパスを読み込み、DatabaseOptionsを上書き
-            // （appsettings.jsonはProgram Files内で書き込み不可のため、別ファイルで管理）
-            services.PostConfigure<DatabaseOptions>(dbOptions =>
-            {
-                // Issue #1599: 形式不正なパスはここで弾き、デフォルトへフォールバックさせる
-                var configPath = GetValidatedDatabaseConfigPath();
-                if (configPath is not null && !string.IsNullOrWhiteSpace(configPath))
-                {
-                    dbOptions.Path = configPath;
-                }
-            });
-
-            // 共有モード時はキャッシュTTLを短縮（他PCの変更を素早く反映するため。値と理由は CacheOptions.ApplySharedModeTtl）
-            // Issue #1597: 「パス指定の有無」ではなく DbContext と同一の共有モード判定
-            //   （UNC／マップドネットワークドライブ）に揃える。ローカルフルパス指定では短縮しない。
-            services.PostConfigure<CacheOptions>(cacheOptions =>
-            {
-                // Issue #1599: 形式不正パスはフォールバック（=ローカルデフォルト）扱いとし、
-                // 共有モード判定にも検証後のパスを用いる
-                var dbPath = GetValidatedDatabaseConfigPath();
-                if (Data.DbContext.IsSharedModePath(dbPath))
-                {
-                    cacheOptions.ApplySharedModeTtl();
-                }
-            });
+            // DBパスは ProgramData 配下の database_config.txt を優先し、無ければ appsettings.json の
+            // DatabaseOptions:Path（appsettings.json は Program Files 内で書き込み不可のため、通常は別ファイルで管理）。
+            // Issue #2328: DbContext が開くパスと、共有モードのキャッシュTTL短縮の判定に渡すパスを
+            // 同じ解決結果にする（両方の PostConfigure は DatabaseLocationResolver.Register が登録する）
+            DatabaseLocationResolver.Register(
+                services,
+                Configuration,
+                () => AppConfigFiles.Read(AppConfigFiles.DatabaseConfigPath),
+                OnDatabasePathResolved);
 
             // ロギングの設定
             services.AddLogging(builder =>
             {
                 builder.AddConfiguration(Configuration.GetSection("Logging"));
+                // デバッガーへの出力（OutputDebugString）。デバッガーが接続されているときだけ出力され、
+                // 詳細度は Logging:LogLevel で決まる。有効・無効を切り替える設定は無い（Issue #2328 で、
+                // どこからも読まれていなかった appsettings.json の Logging:Debug:Enabled を削除した）
                 builder.AddDebug();
                 builder.AddFile();
             });
@@ -501,14 +469,9 @@ namespace ICCardManager
             // Data層
             services.AddSingleton<DbContext>(sp =>
             {
-                var dbOptions = sp.GetRequiredService<IOptions<DatabaseOptions>>().Value;
-                var path = dbOptions.Path;
-                // PostConfigureで設定されなかった場合、database_config.txtから直接読む（フォールバック）
-                // Issue #1599: ここでも形式検証を通し、不正パスはデフォルトへフォールバックさせる
-                if (string.IsNullOrWhiteSpace(path))
-                {
-                    path = GetValidatedDatabaseConfigPath();
-                }
+                // Issue #2328: パスは DatabaseLocationResolver が解決済み（形式検証も済み。空＝既定）。
+                // ここで database_config.txt を読み直さない（読み直すと TTL 判定と入力が分かれる）
+                var path = sp.GetRequiredService<IOptions<DatabaseOptions>>().Value.Path;
                 var logger = sp.GetService<ILogger<DbContext>>();
                 return new DbContext(string.IsNullOrWhiteSpace(path) ? null : path, logger);
             });

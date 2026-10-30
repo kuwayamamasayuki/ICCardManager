@@ -466,6 +466,10 @@ namespace ICCardManager.Services
                 {
                     cardLock.Release();
                 }
+
+                // Issue #2328: GetLock で増やした参照カウントを戻す（貸出・返却と同じ対）。
+                // 戻さないと取り込みのたびにカウントが 1 ずつ残り、期限切れロックの掃除で永久に削除されない
+                _lockManager.ReleaseLockReference(cardIdm);
             }
         }
     }

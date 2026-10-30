@@ -115,7 +115,7 @@ public class MainViewModelSharedDbStateTests
             _databaseInfoMock.Object,
             new Mock<ICacheService>().Object,
             _sharedModeMonitor,
-            new WarningService(_ledgerRepositoryMock.Object, _databaseInfoMock.Object),
+            new WarningService(_ledgerRepositoryMock.Object, _databaseInfoMock.Object, _cardRepositoryMock.Object),
             new DashboardService(_cardRepositoryMock.Object, _ledgerRepositoryMock.Object,
                 _staffRepositoryMock.Object, _settingsRepositoryMock.Object),
             new Mock<ICCardManager.Services.ISafeFileLauncher>().Object,

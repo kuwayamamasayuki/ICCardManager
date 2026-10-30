@@ -31,6 +31,7 @@ public class WarningServiceBackupHealthTests
         return new WarningService(
             new Mock<ILedgerRepository>().Object,
             new Mock<IDatabaseInfo>().Object,
+            new Mock<ICardRepository>().Object,
             updateNotificationService: null,
             backupHealthService: backupHealthMock.Object);
     }
@@ -97,7 +98,8 @@ public class WarningServiceBackupHealthTests
         // DI 未注入（既存テストの構築コード互換）でも例外にせず警告なしとする
         var service = new WarningService(
             new Mock<ILedgerRepository>().Object,
-            new Mock<IDatabaseInfo>().Object);
+            new Mock<IDatabaseInfo>().Object,
+            new Mock<ICardRepository>().Object);
 
         var warning = await service.CheckBackupHealthWarningAsync(Now);
 

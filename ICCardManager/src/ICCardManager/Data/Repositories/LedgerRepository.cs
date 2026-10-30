@@ -82,6 +82,44 @@ ORDER BY DATE(date) ASC,
         }
 
         /// <inheritdoc/>
+        public async Task<IEnumerable<Ledger>> GetBySummaryContainingAsync(string fragment)
+        {
+            if (string.IsNullOrEmpty(fragment))
+            {
+                throw new ArgumentException("摘要から探す文字列が空です。空だとすべての行が一致するため、1 文字以上を指定してください。", nameof(fragment));
+            }
+
+            using var lease = await _dbContext.LeaseConnectionAsync().ConfigureAwait(false);
+            var connection = lease.Connection;
+            var ledgerList = new List<Ledger>();
+
+            using var command = connection.CreateCommand();
+
+            // Issue #2329: 期間で区切らず、台帳に残っている全行（保存期間 6 年）を対象にする。
+            // 部分一致は索引で探索できないため、摘要の索引（idx_ledger_summary）だけを読む走査で該当する id を絞り、
+            // 本体は該当行だけを主キーで引く（台帳本体を全件読まない。EXPLAIN QUERY PLAN は
+            // 「SCAN ledger USING COVERING INDEX idx_ledger_summary」＋「SEARCH ledger USING INTEGER PRIMARY KEY」）。
+            // LIKE ではなく instr を使うのは、探す文字列（バス停名のプレースホルダは組織設定由来）が
+            // 「%」「_」を含み得るため（LIKE だとワイルドカードとして解釈される）。判定は
+            // string.Contains（序数比較）と同じ「そのままの部分一致」。
+            command.CommandText = @"SELECT id, card_idm, lender_idm, date, summary, income, expense, balance,
+       staff_name, note, returner_idm, lent_at, returned_at, is_lent_record, companion_count
+FROM ledger
+WHERE id IN (SELECT id FROM ledger WHERE instr(summary, @fragment) > 0)
+ORDER BY date DESC, id DESC";
+
+            command.Parameters.AddWithValue("@fragment", fragment);
+
+            using var reader = await command.ExecuteReaderAsync().ConfigureAwait(false);
+            while (await reader.ReadAsync().ConfigureAwait(false))
+            {
+                ledgerList.Add(MapToLedger(reader));
+            }
+
+            return ledgerList;
+        }
+
+        /// <inheritdoc/>
         public async Task<IEnumerable<Ledger>> GetByMonthAsync(string cardIdm, int year, int month)
         {
             var fromDate = new DateTime(year, month, 1);
@@ -691,7 +729,9 @@ VALUES (@ledgerId, @useDate, @entryStation, @exitStation,
             SQLiteConnection connection, string cardIdm, string? beforeDate)
         {
             // 最新日（DATE(date) が最大の日）の全レコードを取得する。
-            // date は "yyyy-MM-dd HH:mm:ss" の TEXT のため MAX(date) が最新日時、その DATE() が最新日
+            // date は "yyyy-MM-dd HH:mm:ss" の TEXT のため MAX(date) が最新日時、その DATE() が最新日。
+            // 外側は列を DATE() で包まず `date >= 最新日`（日付だけの文字列）で絞る。最新日より後の行は無いので
+            // その日の全行と同じ集合になり、idx_ledger_card_date の探索キー（card_idm, date）を使える（Issue #2328）
             var beforeFilter = beforeDate != null ? "AND date < @beforeDate" : string.Empty;
             var latestDayLedgers = new List<Ledger>();
 
@@ -701,7 +741,7 @@ VALUES (@ledgerId, @useDate, @entryStation, @exitStation,
        staff_name, note, returner_idm, lent_at, returned_at, is_lent_record, companion_count
 FROM ledger
 WHERE card_idm = @cardIdm {beforeFilter}
-  AND DATE(date) = (
+  AND date >= (
     SELECT DATE(MAX(date)) FROM ledger
     WHERE card_idm = @cardIdm {beforeFilter})
 ORDER BY date ASC, id ASC";
@@ -927,16 +967,25 @@ ORDER BY date ASC, id ASC";
             // 各カードについて最新日（DATE(date) が最大の日）の全レコードを取得
             // ※ MAX(id) ではなく日付基準にすることで、データインポート後も正しい最終利用日・残高が表示される (Issue #1068)
             // ※ 最新日の 1 行ではなく全行を取得するのは、同一日内の順序を残高チェーンで確定するため (Issue #1731)
+            // ※ Issue #2328: 旧実装は `WHERE DATE(l.date) = (相関サブクエリ)` で、列を DATE() で包んだうえ
+            //   台帳の全行についてサブクエリを評価していた（非 sargable。#1834 / #1996 と同じ形）。
+            //   最終日を CTE の 1 回の GROUP BY で求める点は GetMonthEndBalancesByCardAsync と同じだが、結合条件は違う。
+            //   こちらはカードごとに最終日が 1 つなので、その日の行だけを `l.date >= 最新日`（日付だけの文字列）で
+            //   idx_ledger_card_date から探索できる（あちらは月ごとに最終日があるため `last_day.d = DATE(l.date)` で照合する）。
+            //   CROSS JOIN は SQLite で結合順を固定する書き方で、last_day を外側にして ledger を探索させる
+            //   （普通の JOIN だと ledger 側を全件走査して last_day を引く計画が選ばれた。実測）
             var latestDayLedgers = new List<Ledger>();
             using (var command = connection.CreateCommand())
             {
-                command.CommandText = @"SELECT id, card_idm, lender_idm, date, summary, income, expense, balance,
-       staff_name, note, returner_idm, lent_at, returned_at, is_lent_record, companion_count
-FROM ledger l
-WHERE DATE(l.date) = (
-    SELECT DATE(MAX(l2.date)) FROM ledger l2
-    WHERE l2.card_idm = l.card_idm
+                command.CommandText = @"WITH last_day AS (
+    SELECT card_idm AS c, DATE(MAX(date)) AS d
+    FROM ledger
+    GROUP BY card_idm
 )
+SELECT l.id, l.card_idm, l.lender_idm, l.date, l.summary, l.income, l.expense, l.balance,
+       l.staff_name, l.note, l.returner_idm, l.lent_at, l.returned_at, l.is_lent_record, l.companion_count
+FROM last_day
+CROSS JOIN ledger l ON l.card_idm = last_day.c AND l.date >= last_day.d
 ORDER BY l.card_idm ASC, l.date ASC, l.id ASC";
 
                 using var reader = await command.ExecuteReaderAsync().ConfigureAwait(false);
@@ -970,22 +1019,32 @@ ORDER BY l.card_idm ASC, l.date ASC, l.id ASC";
         // 「（貸出中）」というプレースホルダであり利用実績ではないため（帳票でも出力しない）。
 
         /// <summary>
-        /// 利用実績の集計から除外する「繰越レコード」の条件。
+        /// 利用実績の集計から除外する「導入行」（カード登録時に書く行）の条件。
         /// </summary>
         /// <remarks>
         /// <para>
-        /// 「新規購入」と「○月から繰越」（紙の出納簿から年度途中で移行したカード、Issue #510）は
+        /// 「新規購入」と「○月から繰越」（紙の出納簿から年度途中で移行したカード、Issue #510）、
+        /// および繰越月を 3 月にして登録したカードの「前年度より繰越」（Issue #2326）は
         /// 台帳に実レコードとして保存されるが、**利用実績ではない**。これを数えると
         /// 一度も使っていないカードが「利用1回・稼働率 &gt; 0%」に見え、「遊んでいるカードの発見」
         /// という目的に直接反する。
         /// </para>
         /// <para>
-        /// 条件は <c>GetByDateRangeAsync</c> の ORDER BY および <see cref="Models.Ledger.IsCarryover"/>
-        /// と同じ判定（「新規購入」リテラル＋繰越 LIKE パターン）を使う。繰越側のパターンは
+        /// 「新規購入」と「○月から繰越」の判定は <c>GetByDateRangeAsync</c> の ORDER BY（<see cref="CarryoverFirstSortKey"/>）および
+        /// <see cref="Models.Ledger.IsCarryover"/> と同じ（「新規購入」リテラル＋繰越 LIKE パターン）。これらは帳票用で
+        /// 「前年度より繰越」を含まないため、本条件はその 2 種に「前年度より繰越」を加えた 3 種になる（下記）。繰越側のパターンは
         /// <c>'%月から繰越'</c> のハードコードではなく、組織設定 <c>MidYearCarryoverFormat</c> 由来の
         /// <c>SummaryGenerator.GetMidYearCarryoverLikePattern</c> をパラメータバインドする
         /// （Issue #1749。書式カスタム時に SQL だけが追従しない乖離の防止）。
-        /// 本条件を含むクエリは <see cref="AddMidYearCarryoverParameter"/> を必ず併用すること。
+        /// 本条件を含むクエリは <see cref="AddInitialRecordExclusionParameters"/> を必ず併用すること。
+        /// </para>
+        /// <para>
+        /// 判定する行の集合は <see cref="Models.Ledger.IsInitialRecordSummary"/>（#2046 / #2237）と同じ 3 種。
+        /// 「前年度より繰越」は帳票では in-memory 合成される行だが、3 月を繰越月にして登録したカードでは
+        /// 導入行として DB に保存される（日付は新年度の 4/1、受入＝残額、貸出者なし）。#2326 まではこの条件から
+        /// 漏れており、登録しただけのカードが「利用 1 回・稼働率 &gt; 0%」・最終利用日 4/1 に見え、
+        /// 月別利用額にも払出 0 の「（職員名なし）」系列が立っていた。摘要は組織設定由来の
+        /// <c>SummaryGenerator.GetCarryoverFromPreviousYearSummary</c> をパラメータバインドする（#1749 と同じ）。
         /// 対応関係は <c>LedgerRepositoryAggregationTests</c> /
         /// <c>LedgerRepositoryMidYearCarryoverPatternTests</c> が
         /// <c>SummaryGenerator.GetMidYearCarryoverSummary</c> の生成結果で検証している。
@@ -1002,7 +1061,18 @@ ORDER BY l.card_idm ASC, l.date ASC, l.id ASC";
         /// </para>
         /// </remarks>
         private const string ExcludeCarryoverCondition =
-            @"AND summary <> '新規購入' AND summary NOT LIKE @midYearCarryoverPattern ESCAPE '\'";
+            @"AND summary <> '新規購入' AND summary NOT LIKE @midYearCarryoverPattern ESCAPE '\' AND summary <> @previousYearCarryoverSummary";
+
+        /// <summary>
+        /// <see cref="ExcludeCarryoverCondition"/> が参照するパラメータ（繰越の LIKE パターンと
+        /// 「前年度より繰越」の摘要。いずれも組織設定由来）をコマンドへバインドする（Issue #2326）。
+        /// </summary>
+        private static void AddInitialRecordExclusionParameters(SQLiteCommand command)
+        {
+            AddMidYearCarryoverParameter(command);
+            command.Parameters.AddWithValue(
+                "@previousYearCarryoverSummary", SummaryGenerator.GetCarryoverFromPreviousYearSummary());
+        }
 
         /// <summary>
         /// 職員別の利用額（<see cref="GetMonthlyUsageByLenderAsync"/>）から除外する「払戻台帳」の条件（Issue #2157）。
@@ -1062,7 +1132,9 @@ ORDER BY l.card_idm ASC, l.date ASC, l.id ASC";
         /// 「新規購入・繰越レコードを同日の先頭に固定する」ORDER BY のソートキー（Issue #590）。
         /// </summary>
         /// <remarks>
-        /// <see cref="ExcludeCarryoverCondition"/> と同じ判定を肯定形で使う。3 クエリ
+        /// 「新規購入」と「○月から繰越」の 2 種を肯定形で判定する（<see cref="Models.Ledger.IsCarryover"/> と同じ）。
+        /// <see cref="ExcludeCarryoverCondition"/> は Issue #2326 で「前年度より繰越」を加えた 3 種になったが、
+        /// 並べ替えは帳票の並び（#590）に関わるため変えていない。3 クエリ
         /// （<c>GetByDateRangeAsync</c> / <c>GetPagedAsync</c> の CTE 内・外側）に同一の
         /// CASE 式を書き写していた重複を 1 か所へ集約（Issue #1749 レビュー指摘）。
         /// 本キーを含むクエリも <see cref="AddMidYearCarryoverParameter"/> を必ず併用すること。
@@ -1089,7 +1161,7 @@ WHERE is_lent_record = 0
   {ExcludeCarryoverCondition}
 GROUP BY card_idm";
 
-            AddMidYearCarryoverParameter(command);
+            AddInitialRecordExclusionParameters(command);
 
             using var reader = await command.ExecuteReaderAsync().ConfigureAwait(false);
             while (await reader.ReadAsync().ConfigureAwait(false))
@@ -1123,7 +1195,7 @@ WHERE date BETWEEN @fromDate AND @toDate
 GROUP BY card_idm";
 
             AddDateRangeParameters(command, fromDate, toDate);
-            AddMidYearCarryoverParameter(command);
+            AddInitialRecordExclusionParameters(command);
 
             using var reader = await command.ExecuteReaderAsync().ConfigureAwait(false);
             while (await reader.ReadAsync().ConfigureAwait(false))
@@ -1168,7 +1240,7 @@ GROUP BY ym, lender, staff
 ORDER BY ym, staff";
 
             AddDateRangeParameters(command, fromDate, toDate);
-            AddMidYearCarryoverParameter(command);
+            AddInitialRecordExclusionParameters(command);
 
             using var reader = await command.ExecuteReaderAsync().ConfigureAwait(false);
             while (await reader.ReadAsync().ConfigureAwait(false))
@@ -1207,6 +1279,10 @@ ORDER BY ym, staff";
             // `last_day.d = DATE(l.date)` が月の一致も含意する（ym は GROUP BY の粒度としてのみ必要）。
             // 日付は ISO 8601 の TEXT（YYYY-MM-DD HH:MM:SS）で辞書順＝時系列順のため、
             // 旧実装の DATE(MAX(date)) と MAX(DATE(date)) は同値。
+            // Issue #2328: 結合条件の `last_day.d = DATE(l.date)` は列を関数で包んでいるが、残している。
+            // 1 枚のカードに月ごとの最終日が複数あるため、GetAllLatestBalancesAsync の `l.date >= 最終日` には置き換えられない
+            // （後の月の行まで拾う）。外側の `l.date BETWEEN @fromDate AND @toDate` が idx_ledger_card_date / idx_ledger_date の
+            // 探索キーになるので全件走査にはならず、DATE() は期間内の行に対する絞り込みとして評価されるだけである。
             var lastDayLedgers = new List<Ledger>();
             using (var command = connection.CreateCommand())
             {
@@ -1261,23 +1337,27 @@ ORDER BY l.card_idm, l.date, l.id";
             using var lease = await _dbContext.LeaseConnectionAsync().ConfigureAwait(false);
             var connection = lease.Connection;
 
-            // 「指定日より前の最終稼働日」を相関サブクエリで特定し、その日の**全行**を取得する
+            // 「指定日より前の最終稼働日」をカードごとに特定し、その日の**全行**を取得する
             // （GetMonthEndBalancesByCardAsync と同じ作法。同一日内の順序は残高チェーンで確定する、Issue #1770）。
             // 繰越・新規購入レコードも残高の情報源として正しいため除外しない。
+            // Issue #2328: 最終稼働日は CTE の 1 回の GROUP BY で求め、外側は列を DATE() で包まずに
+            // `l.date >= 最終稼働日`（日付だけの文字列）で探索する（GetAllLatestBalancesAsync と同じ形。理由はそちら）
             var lastDayLedgers = new List<Ledger>();
             using (var command = connection.CreateCommand())
             {
-                command.CommandText = @"SELECT l.id, l.card_idm, l.lender_idm, l.date, l.summary, l.income, l.expense, l.balance,
+                command.CommandText = @"WITH last_day AS (
+    SELECT card_idm AS c, DATE(MAX(date)) AS d
+    FROM ledger
+    WHERE date < @beforeDate
+      AND is_lent_record = 0
+    GROUP BY card_idm
+)
+SELECT l.id, l.card_idm, l.lender_idm, l.date, l.summary, l.income, l.expense, l.balance,
        l.staff_name, l.note, l.returner_idm, l.lent_at, l.returned_at, l.is_lent_record, l.companion_count
-FROM ledger l
+FROM last_day
+CROSS JOIN ledger l ON l.card_idm = last_day.c AND l.date >= last_day.d
 WHERE l.date < @beforeDate
   AND l.is_lent_record = 0
-  AND DATE(l.date) = (
-      SELECT DATE(MAX(l2.date)) FROM ledger l2
-      WHERE l2.card_idm = l.card_idm
-        AND l2.is_lent_record = 0
-        AND l2.date < @beforeDate
-  )
 ORDER BY l.card_idm, l.date, l.id";
 
                 command.Parameters.AddWithValue("@beforeDate", SqliteDateTimeFormat.ToDayStartText(beforeDate));

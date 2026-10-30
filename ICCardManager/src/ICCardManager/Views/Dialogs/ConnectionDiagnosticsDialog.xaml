@@ -170,7 +170,9 @@
             <StackPanel Grid.Column="1"
                         Orientation="Horizontal"
                         VerticalAlignment="Center">
-                <Button Content="再診断"
+                <!-- 二次操作（03 §4.5。確定を伴わない補助。Issue #2332） -->
+                <Button Style="{StaticResource SecondaryActionButtonStyle}"
+                        Content="再診断"
                         Command="{Binding RunDiagnosticsCommand}"
                         Padding="20,10"
                         MinWidth="100"

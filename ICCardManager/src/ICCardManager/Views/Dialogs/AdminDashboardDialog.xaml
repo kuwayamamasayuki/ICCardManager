@@ -713,7 +713,9 @@
             <StackPanel Grid.Column="1"
                         Orientation="Horizontal"
                         VerticalAlignment="Center">
-                <Button Content="出力したファイルを開く"
+                <!-- 二次操作（03 §4.5。確定を伴わない補助。Issue #2332） -->
+                <Button Style="{StaticResource SecondaryActionButtonStyle}"
+                        Content="出力したファイルを開く"
                         Command="{Binding OpenExportedFileCommand}"
                         Padding="16,10"
                         Margin="0,0,10,0"

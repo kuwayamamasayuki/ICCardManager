@@ -141,7 +141,8 @@ namespace ICCardManager.UITests.Infrastructure
                 "管理者権限で動いている可能性があります。そのウィンドウを閉じるか最小化してから、撮影をやり直してください。");
         }
 
-        private static string DescribeWindow(IntPtr handle)
+        /// <summary>ウィンドウのタイトルとプロセス名（失敗メッセージ用）。</summary>
+        internal static string DescribeWindow(IntPtr handle)
         {
             var title = new System.Text.StringBuilder(256);
             _ = GetWindowText(handle, title, title.Capacity);
@@ -150,6 +151,13 @@ namespace ICCardManager.UITests.Infrastructure
             try { process = System.Diagnostics.Process.GetProcessById((int)pid).ProcessName; }
             catch { process = "?"; }
             return $"{title}（{process}.exe）";
+        }
+
+        /// <summary>ウィンドウを持つプロセスの ID（<c>GetWindowThreadProcessId</c>）。</summary>
+        internal static uint ProcessIdOf(IntPtr handle)
+        {
+            _ = GetWindowThreadProcessId(handle, out var pid);
+            return pid;
         }
 
         [System.Runtime.InteropServices.DllImport("user32.dll", CharSet = System.Runtime.InteropServices.CharSet.Unicode)]

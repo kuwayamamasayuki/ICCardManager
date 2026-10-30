@@ -108,9 +108,11 @@
                         </Style>
                     </DataGridTextColumn.ElementStyle>
                 </DataGridTextColumn>
+                <!-- Issue #2332: 「外N名」が付くと固定幅 100 では切れるため、内容に合わせて広げる -->
                 <DataGridTextColumn Header="利用者"
-                                    Binding="{Binding StaffName}"
-                                    Width="100"/>
+                                    Binding="{Binding DisplayStaffName}"
+                                    Width="Auto"
+                                    MinWidth="100"/>
             </DataGrid.Columns>
         </DataGrid>
 
@@ -130,15 +132,22 @@
                 <Run Text="{Binding Items.Count, Mode=OneWay, StringFormat={}{0}件}"/>
             </TextBlock>
 
-            <!-- ボタン（Issue #703: バス停名入力画面に直接遷移） -->
+            <!-- ボタン（Issue #703: バス停名入力画面に直接遷移）。右端が主操作、その左に閉じる（03 §4.5、Issue #2332） -->
             <StackPanel Grid.Column="2" Orientation="Horizontal">
+                <Button Content="閉じる"
+                        Click="CloseButton_Click"
+                        Padding="20,8"
+                        IsCancel="True"
+                        AutomationProperties.Name="閉じる"
+                        ToolTip="ダイアログを閉じる (Escape)"/>
                 <Button Content="バス停名を入力"
                         Click="InputBusStopButton_Click"
                         Padding="20,8"
+                        Margin="10,0,0,0"
                         AutomationProperties.Name="選択した履歴のバス停名を入力"
                         ToolTip="選択した項目のバス停名入力画面を開きます">
                     <Button.Style>
-                        <Style TargetType="Button">
+                        <Style TargetType="Button" BasedOn="{StaticResource PrimaryActionButtonStyle}">
                             <Style.Triggers>
                                 <DataTrigger Binding="{Binding SelectedItem}" Value="{x:Null}">
                                     <Setter Property="IsEnabled" Value="False"/>
@@ -147,13 +156,6 @@
                         </Style>
                     </Button.Style>
                 </Button>
-                <Button Content="閉じる"
-                        Click="CloseButton_Click"
-                        Padding="20,8"
-                        Margin="10,0,0,0"
-                        IsCancel="True"
-                        AutomationProperties.Name="閉じる"
-                        ToolTip="ダイアログを閉じる (Escape)"/>
             </StackPanel>
         </Grid>
 

@@ -293,6 +293,19 @@
       ]
     },
     {
+      "name": "incomplete_busstop.png",
+      "pass": "Release",
+      "filter": "FullyQualifiedName~ManualScreenshotTests.incomplete_busstop_",
+      "sources": [
+        "ICCardManager/src/ICCardManager/Views/Dialogs/IncompleteBusStopDialog.xaml",
+        "ICCardManager/src/ICCardManager/Views/Dialogs/IncompleteBusStopDialog.xaml.cs",
+        "ICCardManager/src/ICCardManager/ViewModels/IncompleteBusStopViewModel.cs",
+        "ICCardManager/src/ICCardManager/Dtos/**",
+        "ICCardManager/src/ICCardManager/Common/DisplayFormatters.cs",
+        "ICCardManager/src/ICCardManager/Common/StaffNameFormatter.cs"
+      ]
+    },
+    {
       "name": "admin_dashboard.png",
       "pass": "Release",
       "filter": "FullyQualifiedName~ManualScreenshotTests.admin_dashboard_",

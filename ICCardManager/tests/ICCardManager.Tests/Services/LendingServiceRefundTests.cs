@@ -48,6 +48,13 @@ public sealed class LendingServiceRefundTests : IDisposable
 
     private static readonly DateTime RefundedAt = new DateTime(2025, 6, 15, 10, 0, 0);
 
+    /// <summary>払い戻し前の台帳の残額（Issue #2322）</summary>
+    private const int InitialBalance = 3000;
+
+    /// <summary>払戻台帳の件数を数える SQL（払い戻し前の台帳の行を数えない）</summary>
+    private const string RefundLedgerCountSql =
+        "SELECT COUNT(*) FROM ledger WHERE card_idm = @idm AND summary = @refundSummary";
+
     private readonly DbContext _dbContext;
     private readonly RecordingRetryDelay _retryDelay;
     private readonly CardRepository _realCardRepository;
@@ -74,6 +81,11 @@ public sealed class LendingServiceRefundTests : IDisposable
             CardNumber = "H-001",
             Note = "予備カード",
         }).GetAwaiter().GetResult();
+
+        // Issue #2322: 払い戻しはトランザクションの中で直前の残額を読み直し、確認時の金額と違えば払い戻さない。
+        // 各テストが払い戻す 3,000 円を、払い戻し前の台帳の残額として用意しておく
+        InsertLedgerAsync("新規購入", income: InitialBalance, expense: 0, balance: InitialBalance,
+            date: new DateTime(2025, 6, 1)).GetAwaiter().GetResult();
     }
 
     public void Dispose()
@@ -108,7 +120,7 @@ public sealed class LendingServiceRefundTests : IDisposable
         // Assert
         (await act.Should().ThrowAsync<RefundConflictException>())
             .Which.Result.Should().Be(CardOperationResult.CardIsLent);
-        (await CountAsync("SELECT COUNT(*) FROM ledger WHERE card_idm = @idm")).Should().Be(0,
+        (await CountAsync(RefundLedgerCountSql)).Should().Be(0,
             "払戻台帳だけが 6 年保存の台帳に残ると、カードは払戻済にならないまま残額が 0 に見える");
         (await CountAsync("SELECT COUNT(*) FROM operation_log WHERE target_table = 'ic_card' AND target_id = @idm")).Should().Be(0);
         (await _realCardRepository.GetByIdmAsync(TestCardIdm))!.IsRefunded.Should().BeFalse();
@@ -138,7 +150,7 @@ public sealed class LendingServiceRefundTests : IDisposable
         (await act.Should().ThrowAsync<RefundConflictException>())
             .Which.Result.Should().Be(CardOperationResult.Conflict,
                 "削除済みの行は存在するが操作条件を満たさない（DiagnoseFailureAsync の Conflict）");
-        (await CountAsync("SELECT COUNT(*) FROM ledger WHERE card_idm = @idm")).Should().Be(0);
+        (await CountAsync(RefundLedgerCountSql)).Should().Be(0);
         (await CountAsync("SELECT COUNT(*) FROM operation_log WHERE target_table = 'ic_card' AND target_id = @idm")).Should().Be(0);
     }
 
@@ -165,7 +177,7 @@ public sealed class LendingServiceRefundTests : IDisposable
 
         // Assert
         await act.Should().ThrowAsync<InvalidOperationException>();
-        (await CountAsync("SELECT COUNT(*) FROM ledger WHERE card_idm = @idm")).Should().Be(0);
+        (await CountAsync(RefundLedgerCountSql)).Should().Be(0);
         (await _realCardRepository.GetByIdmAsync(TestCardIdm))!.IsRefunded.Should().BeFalse(
             "監査ログが残らない払い戻しを確定させないこと");
         operationLogRepository.Verify(r => r.InsertAsync(It.IsAny<OperationLog>()), Times.Never);
@@ -191,9 +203,80 @@ public sealed class LendingServiceRefundTests : IDisposable
 
         // Assert
         await act.Should().ThrowAsync<InvalidOperationException>();
-        (await CountAsync("SELECT COUNT(*) FROM ledger WHERE card_idm = @idm")).Should().Be(0);
+        (await CountAsync(RefundLedgerCountSql)).Should().Be(0);
         (await CountAsync("SELECT COUNT(*) FROM operation_log WHERE target_table = 'ic_card' AND target_id = @idm")).Should().Be(0);
         _retryDelay.Delays.Should().BeEmpty("一過性のロック以外は再試行しない");
+    }
+
+    /// <summary>
+    /// 7. 確認した後に台帳の残額が変わっていたら、古い金額で払戻台帳を作らずに巻き戻すこと（Issue #2322）
+    /// </summary>
+    /// <remarks>
+    /// 画面は確認ダイアログより前に残額を読み、その金額を渡す。確認・認証を待つ間に他 PC で貸出→返却が済むと
+    /// <c>is_lent = 0</c> に戻っているため払戻済への更新の WHERE は一致し、修正前は 3,000 円の払出・残額 0 の
+    /// 払戻台帳が残額 2,790 円の行の後ろに作られて、残高チェーンが払戻行で切れた。
+    /// </remarks>
+    [Fact]
+    public async Task RefundAsync_BalanceChangedAfterConfirmation_ThrowsAndLeavesNoRefund()
+    {
+        // Arrange: 確認後に他 PC で 210 円の利用が記録された
+        var before = (await _realCardRepository.GetByIdmAsync(TestCardIdm))!;
+        await InsertLedgerAsync("鉄道（天神～博多）", income: 0, expense: 210, balance: 2790,
+            date: new DateTime(2025, 6, 14));
+        var (cardRepository, _) = CreateCardRepositoryMock();
+        var logger = new RecordingLogger<LendingService>();
+        var service = CreateService(cardRepository.Object, logger: logger);
+
+        // Act
+        var act = () => service.RefundAsync(before, InitialBalance, RefundedAt);
+
+        // Assert
+        var thrown = (await act.Should().ThrowAsync<RefundBalanceChangedException>()).Which;
+        thrown.ConfirmedAmount.Should().Be(InitialBalance);
+        thrown.CurrentBalance.Should().Be(2790);
+        (await CountAsync(RefundLedgerCountSql)).Should().Be(0, "古い金額の払戻台帳を作ると残高チェーンが払戻行で切れる");
+        (await CountAsync("SELECT COUNT(*) FROM operation_log WHERE target_table = 'ic_card' AND target_id = @idm")).Should().Be(0);
+        (await _realCardRepository.GetByIdmAsync(TestCardIdm))!.IsRefunded.Should().BeFalse();
+        _retryDelay.Delays.Should().BeEmpty("残額の食い違いは再試行で解消しない");
+
+        var warning = logger.Entries.Should().ContainSingle(e => e.Level == LogLevel.Warning).Subject;
+        warning.Message.Should().Contain("2790");
+        warning.Message.Should().NotContain(TestCardIdm, "IDm はマスクしてログへ出す（#1852）");
+    }
+
+    /// <summary>
+    /// 8. 確認した後に他の PC が先に払い戻していたら、残額の変化（BIZ017）ではなく状態の競合（BIZ016）として案内すること（Issue #2322）
+    /// </summary>
+    /// <remarks>
+    /// 他の PC の払い戻しは払戻台帳（残額 0）を作るので、残額も確認時から変わっている。残額の照合を
+    /// 払戻済への更新より先に置くと「利用・チャージが記録された可能性」と案内し、名指しできる原因
+    /// （既に払戻済）を隠す。状態の競合を先に判定する。残額だけが変わった場合は No.7 が BIZ017 を固定する（対の表明）。
+    /// </remarks>
+    [Fact]
+    public async Task RefundAsync_RefundedByAnotherPcAfterConfirmation_ThrowsRefundConflictNotBalanceChanged()
+    {
+        // Arrange: 確認後に他の PC が同じカードを払い戻した（払戻台帳＋払戻済）
+        var before = (await _realCardRepository.GetByIdmAsync(TestCardIdm))!;
+        await InsertLedgerAsync(SummaryGenerator.GetRefundSummary(), income: 0, expense: InitialBalance, balance: 0,
+            date: new DateTime(2025, 6, 14));
+        using (var lease = await _dbContext.LeaseConnectionAsync())
+        using (var command = lease.Connection.CreateCommand())
+        {
+            command.CommandText = "UPDATE ic_card SET is_refunded = 1, refunded_at = '2025-06-14 09:00:00' WHERE card_idm = @idm";
+            command.Parameters.AddWithValue("@idm", TestCardIdm);
+            await command.ExecuteNonQueryAsync();
+        }
+        var (cardRepository, _) = CreateCardRepositoryMock();
+        var service = CreateService(cardRepository.Object);
+
+        // Act
+        var act = () => service.RefundAsync(before, InitialBalance, RefundedAt);
+
+        // Assert
+        await act.Should().ThrowAsync<RefundConflictException>(
+            "残額の変化より先に、名指しできる状態の競合（既に払戻済）を案内する");
+        (await CountAsync(RefundLedgerCountSql)).Should().Be(1, "他の PC の払戻台帳 1 行だけが残り、こちらは何も書かない");
+        (await CountAsync("SELECT COUNT(*) FROM operation_log WHERE target_table = 'ic_card' AND target_id = @idm")).Should().Be(0);
     }
 
     #endregion
@@ -238,6 +321,9 @@ public sealed class LendingServiceRefundTests : IDisposable
         ledger.Expense.Should().Be(3000, "残額を払出金額として計上する");
         ledger.Balance.Should().Be(0);
         ledger.IsLentRecord.Should().BeFalse();
+        // Issue #2322: 払戻行で残高チェーンが切れない（前の行の残額 − 払出 = 0）
+        (await _realLedgerRepository.GetLatestBeforeDateAsync(TestCardIdm, RefundedAt.Date))!.Balance
+            .Should().Be(ledger.Expense);
         ledgerRepository.Verify(r => r.InsertAsync(It.IsAny<Ledger>()), Times.Never,
             "tx なし（autocommit）の旧経路では書かない");
 
@@ -272,7 +358,9 @@ public sealed class LendingServiceRefundTests : IDisposable
     [Fact]
     public async Task RefundAsync_ZeroBalance_Succeeds()
     {
-        // Arrange
+        // Arrange: 残額を使い切った台帳（Issue #2322: 払い戻す金額は台帳の残額と一致していなければならない）
+        await InsertLedgerAsync("鉄道（天神～博多）", income: 0, expense: InitialBalance, balance: 0,
+            date: new DateTime(2025, 6, 10));
         var before = (await _realCardRepository.GetByIdmAsync(TestCardIdm))!;
         var (cardRepository, _) = CreateCardRepositoryMock();
         var service = CreateService(cardRepository.Object);
@@ -318,7 +406,7 @@ public sealed class LendingServiceRefundTests : IDisposable
         // Assert
         attempts.Should().Be(2);
         _retryDelay.Delays.Should().HaveCount(1);
-        (await CountAsync("SELECT COUNT(*) FROM ledger WHERE card_idm = @idm")).Should().Be(1,
+        (await CountAsync(RefundLedgerCountSql)).Should().Be(1,
             "失敗した試行の台帳は巻き戻され、成功した試行の 1 行だけが残る");
         (await CountAsync("SELECT COUNT(*) FROM operation_log WHERE target_table = 'ic_card' AND target_id = @idm")).Should().Be(1);
         (await _realCardRepository.GetByIdmAsync(TestCardIdm))!.IsRefunded.Should().BeTrue();
@@ -418,6 +506,9 @@ public sealed class LendingServiceRefundTests : IDisposable
             .Returns<Ledger>(l => _realLedgerRepository.InsertAsync(l));
         mock.Setup(r => r.InsertAsync(It.IsAny<Ledger>(), It.IsAny<SQLiteTransaction>()))
             .Returns<Ledger, SQLiteTransaction>((l, tx) => _realLedgerRepository.InsertAsync(l, tx));
+        // Issue #2322: トランザクションの中で直前の残額を読み直す
+        mock.Setup(r => r.GetLatestLedgerAsync(It.IsAny<string>()))
+            .Returns<string>(idm => _realLedgerRepository.GetLatestLedgerAsync(idm));
         return mock;
     }
 
@@ -440,7 +531,21 @@ public sealed class LendingServiceRefundTests : IDisposable
         using var command = lease.Connection.CreateCommand();
         command.CommandText = sql;
         command.Parameters.AddWithValue("@idm", TestCardIdm);
+        command.Parameters.AddWithValue("@refundSummary", SummaryGenerator.GetRefundSummary());
         return Convert.ToInt32(await command.ExecuteScalarAsync());
+    }
+
+    private Task<int> InsertLedgerAsync(string summary, int income, int expense, int balance, DateTime date)
+    {
+        return _realLedgerRepository.InsertAsync(new Ledger
+        {
+            CardIdm = TestCardIdm,
+            Date = date,
+            Summary = summary,
+            Income = income,
+            Expense = expense,
+            Balance = balance,
+        });
     }
 
     private static ICacheService CreatePassThroughCacheService()
