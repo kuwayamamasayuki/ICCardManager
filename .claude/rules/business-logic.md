@@ -201,7 +201,9 @@ THEN
 
 ### 集計ルール（Issue #1494）
 
-「前年度より繰越」レコードは DB に保存されず `CarryoverRowData` として表示用に in-memory 合成されるため、月計・累計の集計には明示的に加算する必要がある。
+前年度末の残高がある 4 月の「前年度より繰越」行は DB に保存されず `CarryoverRowData` として表示用に in-memory 合成されるため、月計・累計の集計には明示的に加算する必要がある（`ReportDataBuilder` は前月までの残高 `precedingBalance` があるときだけ合成する）。
+
+- **例外: 3 月を繰越月にして登録したカードの「前年度より繰越」は DB に実在する導入行**（4/1 付け・`Income=残高`。`CardManageViewModel.BuildInitialLedgerAsync`）。この行より前に台帳が無いので合成行は作られず、通常の ledger 行として月計・累計の受入に入る。導入行かどうかは `Ledger.IsInitialRecord` で判定する（集計・ソート用の `Ledger.IsCarryover` は「前年度より繰越」を含まない）。**「前年度より繰越は DB に無い」を前提に集計を書かない**
 
 - **4月計の受入金額** = 当月の受入合計（「○月から繰越」レコード除外） ＋ 前年度繰越額
 - **5月以降の年度累計の受入金額** = 年度内の受入合計（「○月から繰越」レコード除外） ＋ 前年度繰越額（＋ 紙出納簿移行時のみ `CarryoverIncomeTotal`）
