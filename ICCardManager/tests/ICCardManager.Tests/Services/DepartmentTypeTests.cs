@@ -119,58 +119,6 @@ public class DepartmentTypeTests
 
     #endregion
 
-    #region SummaryGenerator - GenerateByDate with DepartmentType
-
-    [Fact]
-    public void GenerateByDate_ChargeEntry_MayorOffice_Returns役務費()
-    {
-        // Arrange
-        var generator = new SummaryGenerator(DepartmentType.MayorOffice);
-        var details = new List<LedgerDetail>
-        {
-            new LedgerDetail
-            {
-                IsCharge = true,
-                Amount = 3000,
-                UseDate = new DateTime(2025, 4, 1, 10, 0, 0)
-            }
-        };
-
-        // Act
-        var result = generator.GenerateByDate(details);
-
-        // Assert
-        result.Should().HaveCount(1);
-        result[0].Summary.Should().Be("役務費によりチャージ");
-        result[0].IsCharge.Should().BeTrue();
-    }
-
-    [Fact]
-    public void GenerateByDate_ChargeEntry_EnterpriseAccount_Returns旅費()
-    {
-        // Arrange
-        var generator = new SummaryGenerator(DepartmentType.EnterpriseAccount);
-        var details = new List<LedgerDetail>
-        {
-            new LedgerDetail
-            {
-                IsCharge = true,
-                Amount = 3000,
-                UseDate = new DateTime(2025, 4, 1, 10, 0, 0)
-            }
-        };
-
-        // Act
-        var result = generator.GenerateByDate(details);
-
-        // Assert
-        result.Should().HaveCount(1);
-        result[0].Summary.Should().Be("旅費によりチャージ");
-        result[0].IsCharge.Should().BeTrue();
-    }
-
-    #endregion
-
     #region SettingsRepository - Parse/Serialize
 
     [Theory]

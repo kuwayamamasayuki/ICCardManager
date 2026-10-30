@@ -114,15 +114,6 @@ public partial class MainViewModel
     }
 
     /// <summary>
-    /// 操作ログ画面を開く
-    /// </summary>
-    [RelayCommand]
-    public void OpenOperationLog()
-    {
-        _navigationService.ShowDialog<Views.Dialogs.OperationLogDialog>();
-    }
-
-    /// <summary>
     /// システム管理画面を開く
     /// </summary>
     /// <remarks>

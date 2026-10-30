@@ -25,20 +25,6 @@ namespace ICCardManager.Common.Exceptions
         public bool IsCardRemoved => ErrorCode == CardRemovedErrorCode;
 
         /// <summary>
-        /// カードリーダー未接続
-        /// </summary>
-        public static CardReaderException NotConnected(Exception? innerException = null)
-        {
-            const string message = "Card reader is not connected or not found";
-            const string userMessage = "カードリーダーが接続されていません。接続を確認してください。";
-            const string errorCode = "CR001";
-
-            return innerException != null
-                ? new CardReaderException(message, userMessage, errorCode, innerException)
-                : new CardReaderException(message, userMessage, errorCode);
-        }
-
-        /// <summary>
         /// カード読み取り失敗
         /// </summary>
         public static CardReaderException ReadFailed(string? detail = null, Exception? innerException = null)
@@ -86,53 +72,11 @@ namespace ICCardManager.Common.Exceptions
                 : new CardReaderException(message, userMessage, errorCode);
         }
 
-        /// <summary>
-        /// 通信タイムアウト
-        /// </summary>
-        public static CardReaderException Timeout(Exception? innerException = null)
-        {
-            const string message = "Card reader communication timeout";
-            const string userMessage = "カードリーダーとの通信がタイムアウトしました。再度お試しください。";
-            const string errorCode = "CR005";
-
-            return innerException != null
-                ? new CardReaderException(message, userMessage, errorCode, innerException)
-                : new CardReaderException(message, userMessage, errorCode);
-        }
-
-        /// <summary>
-        /// スマートカードサービスが起動していない
-        /// </summary>
-        public static CardReaderException ServiceNotAvailable(Exception? innerException = null)
-        {
-            const string message = "Smart card service is not running";
-            const string userMessage = "スマートカードサービスが起動していません。Windowsの設定を確認してください。";
-            const string errorCode = "CR006";
-
-            return innerException != null
-                ? new CardReaderException(message, userMessage, errorCode, innerException)
-                : new CardReaderException(message, userMessage, errorCode);
-        }
-
-        /// <summary>
-        /// 監視エラー（モニター例外）
-        /// </summary>
-        public static CardReaderException MonitorError(string? detail = null, Exception? innerException = null)
-        {
-            var message = string.IsNullOrEmpty(detail)
-                ? "Card reader monitor error"
-                : $"Card reader monitor error: {detail}";
-            const string userMessage = "カードリーダーの監視中にエラーが発生しました。接続を確認してください。";
-            const string errorCode = "CR007";
-
-            return innerException != null
-                ? new CardReaderException(message, userMessage, errorCode, innerException)
-                : new CardReaderException(message, userMessage, errorCode);
-        }
-
+        // CR001・CR005〜CR007 は欠番（Issue #2330）。未接続・通信タイムアウト・スマートカードサービス停止・監視エラーの
+        // ファクトリは本番から送出されていなかったため削除した。
         // CR008 は欠番（Issue #2327）。試行回数つきの「再接続失敗」（ReconnectFailed）は、どのカードリーダー実装も
         // 回数つきの再接続を行わず本番の呼び出し元が無かったため、到達しない「再接続中」の状態と一緒に撤去した。
-        // 過去のログのエラーコードと取り違えないよう、CR008 は別の原因に再利用しない。
+        // 過去のログのエラーコードと取り違えないよう、欠番のコードは別の原因に再利用しない（ErrorCodeUniquenessConventionTests.RetiredCodes）。
 
         /// <summary>
         /// カード取り外し（読み取り中にカードが離された）

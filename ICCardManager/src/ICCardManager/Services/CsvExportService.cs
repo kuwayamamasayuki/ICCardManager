@@ -28,7 +28,7 @@ namespace ICCardManager.Services
         /// <summary>出力ファイルパス</summary>
         public string FilePath { get; set; } = string.Empty;
 
-        /// <summary>エラーメッセージ</summary>
+        /// <summary>エラーメッセージ（成功時は null）</summary>
         public string? ErrorMessage { get; set; }
     }
 
@@ -369,61 +369,6 @@ namespace ICCardManager.Services
             catch (Exception ex)
             {
                 return ToFailureResult(ex, "利用明細のエクスポート", filePath);
-            }
-        }
-
-        /// <summary>
-        /// 履歴インポート用のCSVテンプレートを出力（Issue #510）
-        /// </summary>
-        /// <remarks>
-        /// 年度途中導入時に、紙の出納簿からデータを入力するためのテンプレート。
-        /// ヘッダー行のみを出力し、カード情報を含めることで入力を容易にする。
-        /// </remarks>
-        /// <param name="filePath">出力先ファイルパス</param>
-        /// <param name="cardIdm">対象カードのIDm</param>
-        /// <param name="cardNumber">対象カードの管理番号</param>
-        /// <returns>エクスポート結果</returns>
-        public async Task<CsvExportResult> ExportLedgerTemplateAsync(
-            string filePath,
-            string cardIdm,
-            string cardNumber)
-        {
-            try
-            {
-                var lines = new List<string>
-                {
-                    // ヘッダー行（インポート形式と同じ）
-                    "ID,日時,カードIDm,管理番号,摘要,受入金額,払出金額,残額,利用者,備考,同行者数",
-                    // サンプル行（コメントアウト形式で記載）
-                    $"# このテンプレートを使って履歴データを入力してください",
-                    $"# カードIDm: {cardIdm}",
-                    $"# 管理番号: {cardNumber}",
-                    $"#",
-                    $"# 入力例（先頭の#を削除して使用）:",
-                    $"#,2024-04-01 09:00:00,{cardIdm},{cardNumber},鉄道（博多駅～天神駅）,,220,4780,山田太郎,,",
-                    $"#,2024-04-02 10:30:00,{cardIdm},{cardNumber},役務費によりチャージ,5000,,9780,,,",
-                    $"#",
-                    $"# 注意:",
-                    $"# - ID列は空欄にしてください（新規追加の場合）",
-                    $"# - 日時は YYYY-MM-DD HH:MM:SS 形式で入力してください",
-                    $"# - 受入金額はチャージ時のみ、払出金額は利用時のみ入力してください",
-                    $"# - 残額は前の行の残額 + 受入金額 - 払出金額 と一致するようにしてください",
-                    $"# - 同行者数は複数名で利用したときの本人を除く人数（省略時は0）。氏名欄に「外N名」と表示されます"
-                };
-
-                // .NET Framework 4.8ではFile.WriteAllLinesAsyncがないためTask.Runで同期版を使用
-                await Task.Run(() => File.WriteAllLines(filePath, lines, CsvEncoding)).ConfigureAwait(false);
-
-                return new CsvExportResult
-                {
-                    Success = true,
-                    ExportedCount = 0,  // テンプレートなのでデータ件数は0
-                    FilePath = filePath
-                };
-            }
-            catch (Exception ex)
-            {
-                return ToFailureResult(ex, "取込用テンプレートの出力", filePath);
             }
         }
 

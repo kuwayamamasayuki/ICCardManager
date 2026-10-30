@@ -17,7 +17,7 @@ namespace ICCardManager.Tests.Services;
 /// <summary>
 /// LendingServiceのエッジケーステスト
 /// LendingServiceTestsでカバーされない真のエッジケース
-/// (null安全性、削除済みカード、ゼロ秒ウィンドウ、ClearHistory) のみを扱う。
+/// (null安全性、削除済みカード、ゼロ秒ウィンドウ) のみを扱う。
 /// </summary>
 public class LendingServiceEdgeCaseTests : IDisposable
 {
@@ -93,35 +93,6 @@ public class LendingServiceEdgeCaseTests : IDisposable
         var result = service.IsRetouchWithinTimeout(null);
 
         result.Should().BeFalse();
-    }
-
-    /// <summary>
-    /// ClearHistoryが全てのフィールドをリセットすること。
-    /// </summary>
-    /// <remarks>
-    /// Issue #2105: 以前は生成直後のインスタンス（全フィールドが最初から null）に対して呼んでいたため、
-    /// <c>ClearHistory</c> の本体を空にしても緑だった。貸出で 30 秒ルールを武装してから消す。
-    /// </remarks>
-    [Fact]
-    public async Task ClearHistory_ResetsAllFields()
-    {
-        var service = CreateService();
-        SetupCardAndStaff();
-        var lend = await service.LendAsync("STAFF00000000001", "0102030405060708");
-        lend.Success.Should().BeTrue(lend.ErrorMessage);
-        // 前提: 貸出で 3 つとも値を持っていること（持っていなければ「消した」ことを観測できない）
-        service.LastProcessedCardIdm.Should().Be("0102030405060708");
-        service.LastProcessedTime.Should().Be(_clock.Now);
-        service.LastOperationType.Should().Be(LendingOperationType.Lend);
-        service.IsRetouchWithinTimeout("0102030405060708").Should().BeTrue();
-
-        service.ClearHistory();
-
-        service.LastProcessedCardIdm.Should().BeNull();
-        service.LastProcessedTime.Should().BeNull();
-        service.LastOperationType.Should().BeNull();
-        service.IsRetouchWithinTimeout("0102030405060708").Should().BeFalse(
-            "履歴を消した後の再タッチは逆処理にならないこと");
     }
 
     /// <summary>

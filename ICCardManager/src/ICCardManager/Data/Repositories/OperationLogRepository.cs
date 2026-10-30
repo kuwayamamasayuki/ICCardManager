@@ -74,94 +74,6 @@ SELECT last_insert_rowid();";
         }
 
         /// <inheritdoc/>
-        public async Task<IEnumerable<OperationLog>> GetByDateRangeAsync(DateTime fromDate, DateTime toDate)
-        {
-            using var lease = await _dbContext.LeaseConnectionAsync().ConfigureAwait(false);
-            var connection = lease.Connection;
-            var logs = new List<OperationLog>();
-
-            using var command = connection.CreateCommand();
-            // Issue #2328: 列を date() で包まない（包むと idx_log_timestamp を探索キーにできず全件走査になる。
-            // #1834 / #1996）。しきい値は日付だけの文字列（yyyy-MM-dd）で、下限は「開始日以上」、上限は「終了日の翌日未満」。
-            // 書き込みはすべて SqliteDateTimeFormat.ToText（yyyy-MM-dd HH:mm:ss。タイムゾーン表記なし）なので
-            // timestamp は辞書順＝時系列順の ISO テキストであり、秒未満を持つ値・T 区切りの値・日付だけの値も含めて
-            // date(timestamp) BETWEEN 開始日 AND 終了日 と同じ行集合になる
-            //（「23:59:59 以下」だと 23:59:59.5 や 'T' 区切りの値を落とし、「0 時以上」だと日付だけの値を落とす。
-            //  タイムゾーン表記付きの値を書く経路を足すと、date() は UTC へ換算するため同値でなくなる）
-            var upperBound = ToExclusiveUpperBoundText(toDate);
-            command.CommandText = $@"SELECT id, timestamp, operator_idm, operator_name, target_table,
-       target_id, action, before_data, after_data
-FROM operation_log
-WHERE timestamp >= @fromDate{(upperBound is null ? string.Empty : " AND timestamp < @toDateExclusive")}
-ORDER BY timestamp ASC";
-
-            command.Parameters.AddWithValue("@fromDate", SqliteDateTimeFormat.ToDateText(fromDate));
-            if (upperBound is not null)
-            {
-                command.Parameters.AddWithValue("@toDateExclusive", upperBound);
-            }
-
-            using var reader = await command.ExecuteReaderAsync().ConfigureAwait(false);
-            while (await reader.ReadAsync().ConfigureAwait(false))
-            {
-                logs.Add(MapToOperationLog(reader));
-            }
-
-            return logs;
-        }
-
-        /// <inheritdoc/>
-        public async Task<IEnumerable<OperationLog>> GetByOperatorAsync(string operatorIdm)
-        {
-            using var lease = await _dbContext.LeaseConnectionAsync().ConfigureAwait(false);
-            var connection = lease.Connection;
-            var logs = new List<OperationLog>();
-
-            using var command = connection.CreateCommand();
-            command.CommandText = @"SELECT id, timestamp, operator_idm, operator_name, target_table,
-       target_id, action, before_data, after_data
-FROM operation_log
-WHERE operator_idm = @operatorIdm
-ORDER BY timestamp ASC";
-
-            command.Parameters.AddWithValue("@operatorIdm", operatorIdm);
-
-            using var reader = await command.ExecuteReaderAsync().ConfigureAwait(false);
-            while (await reader.ReadAsync().ConfigureAwait(false))
-            {
-                logs.Add(MapToOperationLog(reader));
-            }
-
-            return logs;
-        }
-
-        /// <inheritdoc/>
-        public async Task<IEnumerable<OperationLog>> GetByTargetAsync(string targetTable, string targetId)
-        {
-            using var lease = await _dbContext.LeaseConnectionAsync().ConfigureAwait(false);
-            var connection = lease.Connection;
-            var logs = new List<OperationLog>();
-
-            using var command = connection.CreateCommand();
-            command.CommandText = @"SELECT id, timestamp, operator_idm, operator_name, target_table,
-       target_id, action, before_data, after_data
-FROM operation_log
-WHERE target_table = @targetTable AND target_id = @targetId
-ORDER BY timestamp ASC";
-
-            command.Parameters.AddWithValue("@targetTable", targetTable);
-            command.Parameters.AddWithValue("@targetId", targetId);
-
-            using var reader = await command.ExecuteReaderAsync().ConfigureAwait(false);
-            while (await reader.ReadAsync().ConfigureAwait(false))
-            {
-                logs.Add(MapToOperationLog(reader));
-            }
-
-            return logs;
-        }
-
-        /// <inheritdoc/>
         public Task<OperationLogKeysetPage> SearchFirstPageAsync(OperationLogSearchCriteria criteria, int pageSize)
             => FetchKeysetPageAsync(criteria, pageSize, KeysetDirection.Forward, cursor: null, isAnchoredAtEdge: true);
 
@@ -384,7 +296,13 @@ ORDER BY timestamp ASC, id ASC";
             var conditions = new List<string>();
             var parameters = new Dictionary<string, object>();
 
-            // Issue #2328: 日付範囲は列を date() で包まずに比べる（理由は GetByDateRangeAsync）
+            // Issue #2328: 列を date() で包まない（包むと idx_log_timestamp を探索キーにできず全件走査になる。
+            // #1834 / #1996）。しきい値は日付だけの文字列（yyyy-MM-dd）で、下限は「開始日以上」、上限は「終了日の翌日未満」。
+            // 書き込みはすべて SqliteDateTimeFormat.ToText（yyyy-MM-dd HH:mm:ss。タイムゾーン表記なし）なので
+            // timestamp は辞書順＝時系列順の ISO テキストであり、秒未満を持つ値・T 区切りの値・日付だけの値も含めて
+            // date(timestamp) BETWEEN 開始日 AND 終了日 と同じ行集合になる
+            //（「23:59:59 以下」だと 23:59:59.5 や 'T' 区切りの値を落とし、「0 時以上」だと日付だけの値を落とす。
+            //  タイムゾーン表記付きの値を書く経路を足すと、date() は UTC へ換算するため同値でなくなる）
             if (criteria.FromDate.HasValue)
             {
                 conditions.Add("timestamp >= @fromDate");

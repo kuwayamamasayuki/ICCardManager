@@ -41,11 +41,9 @@ namespace ICCardManager.Services
 
         /// <summary>対象テーブルの表示名（コンボの表示順を兼ねる順序付きリスト）</summary>
         /// <remarks>
-        /// ledger_detail の「利用明細」は <c>DatabaseException.GetEntityDisplayName</c> と同じ訳語にしている。
-        /// ただし ledger は本表が「利用履歴」、同メソッドが「出納記録」で**意図的に異なる**:
-        /// 操作ログ画面は職員が日々の貸出・返却を追う文脈、DB エラーダイアログは帳票の元帳を指す文脈で、
-        /// 画面ごとに定着した呼称を優先している。両者を統合するなら用語集（00_用語集）の改訂を伴うため、
-        /// ここで片方へ寄せない（Issue #1787 のコードレビューで検出）。
+        /// ledger は「利用履歴」、ledger_detail は「利用明細」と呼ぶ（操作ログ画面は職員が日々の貸出・返却を追う文脈）。
+        /// かつて DB エラーダイアログ用の訳語（<c>DatabaseException.GetEntityDisplayName</c>。ledger は「出納記録」）が
+        /// 別にあったが、それを使うファクトリが本番から送出されず Issue #2330 で削除した（Issue #1787 の経緯）。
         /// </remarks>
         public static IReadOnlyList<KeyValuePair<string, string>> TableEntries { get; } =
             new[]

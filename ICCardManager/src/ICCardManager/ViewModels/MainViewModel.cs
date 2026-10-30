@@ -199,12 +199,6 @@ public partial class MainViewModel : ViewModelBase, IHistoryPanelHost
     [NotifyPropertyChangedFor(nameof(NextActionMessage))]
     private AppState _currentState = AppState.WaitingForStaffCard;
 
-    [ObservableProperty]
-    private string _statusMessage = "職員証をタッチしてください";
-
-    [ObservableProperty]
-    private string _statusIcon = "👤";
-
     /// <summary>
     /// 交通系ICカードタッチ待ちの残り秒数。
     /// Issue #1682: メイン画面のカウントダウンバナー（プログレスバー＋残り秒数）に表示する。
@@ -236,8 +230,7 @@ public partial class MainViewModel : ViewModelBase, IHistoryPanelHost
     /// メイン画面ヘッダー直下の常設バナーに「現在どの状態か」を表示する。
     /// </summary>
     /// <remarks>
-    /// <see cref="StatusMessage"/> は職員証タッチ後に意図的にクリアされる（Issue #186）ため、
-    /// 常設表示には使えない。状態の Single Source of Truth である <see cref="CurrentState"/>
+    /// 状態の Single Source of Truth である <see cref="CurrentState"/>
     /// から導出する（<see cref="TimeoutRemainingText"/> と同じ computed property パターン）。
     /// </remarks>
     public string NextActionStateText => CurrentState switch
@@ -426,23 +419,6 @@ public partial class MainViewModel : ViewModelBase, IHistoryPanelHost
     #endregion
 
     /// <summary>
-    /// 状態を設定
-    /// </summary>
-    private void SetState(AppState state, string message)
-    {
-        CurrentState = state;
-        StatusMessage = message;
-
-        StatusIcon = state switch
-        {
-            AppState.WaitingForStaffCard => "👤",
-            AppState.WaitingForIcCard => "🚃",
-            AppState.Processing => "⏳",
-            _ => "👤"
-        };
-    }
-
-    /// <summary>
     /// 内部状態のみを設定（UIは変更しない）
     /// </summary>
     /// <remarks>
@@ -450,17 +426,9 @@ public partial class MainViewModel : ViewModelBase, IHistoryPanelHost
     /// Issue #186: 職員の操作を妨げないよう、メイン画面は変更しない。
     /// </remarks>
     /// <param name="state">新しい状態</param>
-    /// <param name="clearStatusMessage">ステータスメッセージをクリアするかどうか</param>
-    private void SetInternalState(AppState state, bool clearStatusMessage = false)
+    private void SetInternalState(AppState state)
     {
         CurrentState = state;
-
-        if (clearStatusMessage)
-        {
-            // 「職員証をタッチしてください」などの待機メッセージをクリア
-            StatusMessage = string.Empty;
-            StatusIcon = string.Empty;
-        }
     }
 
     /// <summary>
@@ -472,7 +440,7 @@ public partial class MainViewModel : ViewModelBase, IHistoryPanelHost
 
         _currentStaffIdm = null;
         _currentStaffName = null;
-        SetState(AppState.WaitingForStaffCard, "職員証をタッチしてください");
+        SetInternalState(AppState.WaitingForStaffCard);
     }
 
     /// <summary>

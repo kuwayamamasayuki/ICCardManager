@@ -88,6 +88,6 @@ public class WarekiConverterTests
         result.Should().BeNull();
     }
 
-    // 注: GetFiscalYear / GetFiscalYearStart / GetFiscalYearEnd のテストは
-    // FiscalYearHelperTests および FiscalYearTests でカバー済みのため削除
+    // 注: 年度の計算は FiscalYearHelper（GetFiscalYear / GetFiscalYearStart）に一本化しており、
+    // そのテストは FiscalYearHelperTests にある
 }

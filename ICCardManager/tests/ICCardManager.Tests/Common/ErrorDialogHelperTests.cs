@@ -20,70 +20,56 @@ public class ErrorDialogHelperTests
     public void GetErrorInfo_CardReaderExceptionの場合UserFriendlyMessageとErrorCodeを返すこと()
     {
         // Arrange
-        var exception = CardReaderException.NotConnected();
+        var exception = CardReaderException.ReadFailed();
 
         // Act
         var (message, errorCode) = ErrorDialogHelper.GetErrorInfo(exception);
 
         // Assert
         message.Should().Be(exception.UserFriendlyMessage);
-        errorCode.Should().Be("CR001");
+        errorCode.Should().Be("CR002");
     }
 
     [Fact]
     public void GetErrorInfo_DatabaseExceptionの場合UserFriendlyMessageとErrorCodeを返すこと()
     {
         // Arrange
-        var exception = DatabaseException.ConnectionFailed();
+        var exception = DatabaseException.QueryFailed();
 
         // Act
         var (message, errorCode) = ErrorDialogHelper.GetErrorInfo(exception);
 
         // Assert
         message.Should().Be(exception.UserFriendlyMessage);
-        errorCode.Should().Be("DB001");
+        errorCode.Should().Be("DB002");
     }
 
     [Fact]
     public void GetErrorInfo_BusinessExceptionの場合UserFriendlyMessageとErrorCodeを返すこと()
     {
         // Arrange
-        var exception = BusinessException.CardAlreadyLent("TEST_IDM");
+        var exception = BusinessException.LentStatusUpdateConflict("TEST_IDM", "貸出");
 
         // Act
         var (message, errorCode) = ErrorDialogHelper.GetErrorInfo(exception);
 
         // Assert
         message.Should().Be(exception.UserFriendlyMessage);
-        errorCode.Should().Be("BIZ001");
-    }
-
-    [Fact]
-    public void GetErrorInfo_ValidationExceptionの場合UserFriendlyMessageとErrorCodeを返すこと()
-    {
-        // Arrange
-        var exception = ValidationException.Required("name", "氏名");
-
-        // Act
-        var (message, errorCode) = ErrorDialogHelper.GetErrorInfo(exception);
-
-        // Assert
-        message.Should().Be(exception.UserFriendlyMessage);
-        errorCode.Should().Be("VAL001");
+        errorCode.Should().Be("BIZ015");
     }
 
     [Fact]
     public void GetErrorInfo_FileOperationExceptionの場合UserFriendlyMessageとErrorCodeを返すこと()
     {
         // Arrange
-        var exception = FileOperationException.FileNotFound("/test/path.txt");
+        var exception = FileOperationException.UndecidableEncoding("/test/path.txt");
 
         // Act
         var (message, errorCode) = ErrorDialogHelper.GetErrorInfo(exception);
 
         // Assert
         message.Should().Be(exception.UserFriendlyMessage);
-        errorCode.Should().Be("FILE001");
+        errorCode.Should().Be("FILE008");
     }
 
     #endregion
@@ -255,9 +241,8 @@ public class ErrorDialogHelperTests
         {
             CardReaderException.ReadFailed("detail"),
             DatabaseException.QueryFailed("SELECT"),
-            ValidationException.TooLong("field", "フィールド", 50),
-            BusinessException.OperationTimeout(),
-            FileOperationException.WriteFailed("/path"),
+            BusinessException.LentStatusUpdateConflict("TEST_IDM", "返却"),
+            FileOperationException.FileTooLarge(2048, 1024, "/path"),
         };
 
         // Act & Assert

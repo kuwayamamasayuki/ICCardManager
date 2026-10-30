@@ -1,7 +1,9 @@
 using System;
+using System.Collections;
 using System.Collections.Generic;
 using System.Data.SQLite;
 using System.Linq;
+using System.Reflection;
 using System.Threading.Tasks;
 using FluentAssertions;
 using ICCardManager.Data;
@@ -681,7 +683,7 @@ public sealed class LendingServiceUsageImportTests : IDisposable
     /// </summary>
     /// <remarks>
     /// 戻さないと取り込みのたびにカウントが 1 ずつ残り、期限切れロックの掃除（<see cref="CardLockManager.CleanupExpiredLocks"/>）
-    /// が参照中と判断して永久に削除しない。観測は掃除の結果（<see cref="CardLockManager.HasLock"/>）で行う。
+    /// が参照中と判断して永久に削除しない。観測は掃除の結果（ロックの辞書にエントリが残っているか。<see cref="HasLock"/>）で行う。
     /// </remarks>
     [Fact]
     public async Task ImportUnrecordedUsageAsync_取り込んだ後はカードのロックの参照を残さないこと()
@@ -696,7 +698,7 @@ public sealed class LendingServiceUsageImportTests : IDisposable
 
         CleanupAllExpired();
 
-        _lockManager.HasLock(TestCardIdm).Should().BeFalse(
+        HasLock(_lockManager, TestCardIdm).Should().BeFalse(
             "参照カウントが 0 に戻っていれば、期限切れの掃除で削除される");
     }
 
@@ -722,7 +724,7 @@ public sealed class LendingServiceUsageImportTests : IDisposable
         _lockManager.ReleaseLockReference(TestCardIdm);
         CleanupAllExpired();
 
-        _lockManager.HasLock(TestCardIdm).Should().BeFalse(
+        HasLock(_lockManager, TestCardIdm).Should().BeFalse(
             "取り込みが増やした参照も戻っていれば、期限切れの掃除で削除される");
     }
 
@@ -746,7 +748,7 @@ public sealed class LendingServiceUsageImportTests : IDisposable
 
         CleanupAllExpired();
 
-        _lockManager.HasLock(TestCardIdm).Should().BeTrue("別の処理の参照は残っている");
+        HasLock(_lockManager, TestCardIdm).Should().BeTrue("別の処理の参照は残っている");
     }
 
     [Theory]
@@ -786,6 +788,20 @@ public sealed class LendingServiceUsageImportTests : IDisposable
     {
         _lockManager.LockExpiration = TimeSpan.FromHours(-1);
         _lockManager.CleanupExpiredLocks();
+    }
+
+    /// <summary>
+    /// 指定したカードのロックのエントリが、ロックマネージャーの内部辞書（<c>_locks</c>）に残っているか。
+    /// </summary>
+    /// <remarks>
+    /// 本番から使われない <c>CardLockManager.HasLock</c> は Issue #2330 で削除したため、
+    /// <c>CardLockManagerTests</c> と同じく保持している辞書を直接見る。
+    /// </remarks>
+    private static bool HasLock(CardLockManager manager, string cardIdm)
+    {
+        var field = typeof(CardLockManager).GetField("_locks", BindingFlags.NonPublic | BindingFlags.Instance);
+        field.Should().NotBeNull("CardLockManager は _locks でロックエントリを保持する");
+        return ((IDictionary)field!.GetValue(manager)!).Contains(cardIdm);
     }
 
     private LendingService CreateService(IOperationLogRepository operationLogRepository, int lockTimeoutSeconds = 5)

@@ -585,7 +585,7 @@ namespace ICCardManager.Services
         /// <b>レベルは「システムの不具合か、利用者の入力の問題か」で分ける</b>
         /// （<c>development-conventions.md</c> #1716「障害調査でこの行が無いと困るか」）。
         /// ファイルが見つからない・権限が無い・文字コードが読めない
-        /// （<see cref="FileOperationException"/>）・入力値が不正（<see cref="ValidationException"/>）は
+        /// （<see cref="FileOperationException"/>）は
         /// 職員が選び直せば解決する<b>想定内の失敗</b>で、その都度 <c>Error</c> を積むと
         /// 本当の不具合が埋もれる。痕跡は残しつつ <c>Warning</c> にする（本番のログには出力される）。
         /// </para>
@@ -610,7 +610,6 @@ namespace ICCardManager.Services
             // 「想定内」は例外の基底型ではなく「職員が選び直せば解決するか」で列挙する。
             var isExpectedInputProblem =
                 ex is FileOperationException
-                || ex is ValidationException
                 || ex is FileNotFoundException
                 || ex is UnauthorizedAccessException;
 

@@ -11,32 +11,6 @@ using ICCardManager.Models;
 namespace ICCardManager.Services
 {
     /// <summary>
-    /// 日別摘要の結果
-    /// </summary>
-    public class DailySummary
-    {
-        /// <summary>
-        /// 利用日
-        /// </summary>
-        public DateTime Date { get; set; }
-
-        /// <summary>
-        /// 摘要文字列
-        /// </summary>
-        public string Summary { get; set; } = string.Empty;
-
-        /// <summary>
-        /// チャージかどうか
-        /// </summary>
-        public bool IsCharge { get; set; }
-
-        /// <summary>
-        /// ポイント還元かどうか
-        /// </summary>
-        public bool IsPointRedemption { get; set; }
-    }
-
-    /// <summary>
     /// 交通系ICカードの利用履歴から摘要文字列を生成するサービスです。
     /// </summary>
     /// <remarks>
@@ -118,7 +92,7 @@ namespace ICCardManager.Services
         /// <b>本フィールドの参照箇所そのものを列挙して</b>固定する（コンストラクタ・
         /// <see cref="CaptureContext"/>・<see cref="ApplyDepartmentType"/> の 3 か所のみ）。
         /// 世代を引数に取るメソッドだけを走査する検査では、世代を捕捉する
-        /// <see cref="Generate"/> / <see cref="GenerateByDate"/> 自身が対象外になり、
+        /// <see cref="Generate"/> 自身が対象外になり、
         /// この欠陥が実際に住んでいた場所を見られない。
         /// </remarks>
         private DepartmentType _departmentType;
@@ -217,7 +191,7 @@ namespace ICCardManager.Services
         /// 1 回の摘要生成が参照する設定の世代を捕捉する（Issue #1919）
         /// </summary>
         /// <remarks>
-        /// 生成の入口（<see cref="Generate"/> / <see cref="GenerateByDate"/>）で 1 回だけ呼び、
+        /// 生成の入口（<see cref="Generate"/>）で 1 回だけ呼び、
         /// 以降の各段階へは戻り値を引数で持ち回る。生成の途中で
         /// <see cref="ApplyTransferStationGroups"/> が走っても、その生成は捕捉済みの世代を
         /// 最後まで一貫して見る。
@@ -987,161 +961,6 @@ namespace ICCardManager.Services
         }
 
         /// <summary>
-        /// 利用履歴詳細から日付ごとの摘要リストを生成します。
-        /// </summary>
-        /// <param name="details">利用履歴詳細のリスト（ICカードから取得した新しい順）</param>
-        /// <returns>日別摘要のリスト（古い順）</returns>
-        /// <remarks>
-        /// <para>このメソッドは以下の処理を行います：</para>
-        /// <list type="bullet">
-        /// <item><description>日付ごとにグループ化</description></item>
-        /// <item><description>利用（鉄道・バス）とチャージを別行として分離</description></item>
-        /// <item><description>古い順（時系列順）にソート</description></item>
-        /// </list>
-        /// <para>
-        /// ICカードの履歴は新しい順で格納されているため、
-        /// インデックスが大きいほど古いデータとして処理します。
-        /// </para>
-        /// </remarks>
-        /// <example>
-        /// <code>
-        /// var generator = new SummaryGenerator(DepartmentType.MayorOffice);
-        /// var summaries = generator.GenerateByDate(usageDetails);
-        /// foreach (var summary in summaries)
-        /// {
-        ///     Console.WriteLine($"{summary.Date:yyyy/MM/dd}: {summary.Summary}");
-        /// }
-        /// </code>
-        /// </example>
-        /// <seealso cref="Generate"/>
-        public List<DailySummary> GenerateByDate(IEnumerable<LedgerDetail> details)
-        {
-            // Issue #1919: 設定の世代を入口で 1 回だけ捕捉し、以降の段階へ持ち回る
-            var context = CaptureContext();
-            var detailList = details.ToList();
-
-            if (detailList.Count == 0)
-            {
-                return new List<DailySummary>();
-            }
-
-            var results = new List<DailySummary>();
-
-            // 入力順にインデックスを付与（ICカード履歴は新しい順なので、インデックスが大きいほど古い）
-            var indexedDetails = detailList
-                .Select((d, index) => (Detail: d, Index: index))
-                .Where(x => x.Detail.UseDate.HasValue)
-                .ToList();
-
-            // 日付でグループ化（古い順にソート）
-            var groupedByDate = indexedDetails
-                .GroupBy(x => x.Detail.UseDate!.Value.Date)
-                .OrderBy(g => g.Key);
-
-            foreach (var dateGroup in groupedByDate)
-            {
-                var date = dateGroup.Key;
-                var dayItems = dateGroup.ToList();
-
-                // ポイント還元を先に分離（ポイント還元は個別DailySummaryだがチャージ境界にはしない）
-                // Issue #942: 明示的フラグ + 暗黙のポイント還元（金額が負でチャージでもない）を両方分離
-                var pointRedemptionItems = dayItems
-                    .Where(x => x.Detail.IsPointRedemption || IsImplicitPointRedemption(x.Detail)).ToList();
-
-                // 残りの項目（利用+チャージ）を時系列順（古い順＝インデックス降順）にソート
-                var usageAndChargeItems = dayItems
-                    .Where(x => !x.Detail.IsPointRedemption && !IsImplicitPointRedemption(x.Detail))
-                    .OrderByDescending(x => x.Index)
-                    .ToList();
-
-                // 出力候補を作成（最古のインデックスと共に）
-                var summariesToAdd = new List<(int OldestIndex, DailySummary Summary)>();
-
-                // チャージ境界で利用グループを分割しながら摘要を生成
-                var currentUsageGroup = new List<(LedgerDetail Detail, int Index)>();
-
-                foreach (var item in usageAndChargeItems)
-                {
-                    if (item.Detail.IsCharge)
-                    {
-                        // 溜まった利用グループを先に出力
-                        if (currentUsageGroup.Count > 0)
-                        {
-                            var usageDetails = currentUsageGroup.Select(x => x.Detail).ToList();
-                            var usageSummary = GenerateUsageSummary(usageDetails, context);
-                            if (!string.IsNullOrEmpty(usageSummary))
-                            {
-                                var oldestIndex = currentUsageGroup.Max(x => x.Index);
-                                summariesToAdd.Add((oldestIndex, new DailySummary
-                                {
-                                    Date = date,
-                                    Summary = usageSummary,
-                                    IsCharge = false,
-                                    IsPointRedemption = false
-                                }));
-                            }
-                            currentUsageGroup.Clear();
-                        }
-
-                        // チャージを出力
-                        summariesToAdd.Add((item.Index, new DailySummary
-                        {
-                            Date = date,
-                            Summary = ResolveChargeSummary(context),
-                            IsCharge = true,
-                            IsPointRedemption = false
-                        }));
-                    }
-                    else
-                    {
-                        // 利用: グループに追加
-                        currentUsageGroup.Add(item);
-                    }
-                }
-
-                // 残りの利用グループを出力
-                if (currentUsageGroup.Count > 0)
-                {
-                    var usageDetails = currentUsageGroup.Select(x => x.Detail).ToList();
-                    var usageSummary = GenerateUsageSummary(usageDetails, context);
-                    if (!string.IsNullOrEmpty(usageSummary))
-                    {
-                        var oldestIndex = currentUsageGroup.Max(x => x.Index);
-                        summariesToAdd.Add((oldestIndex, new DailySummary
-                        {
-                            Date = date,
-                            Summary = usageSummary,
-                            IsCharge = false,
-                            IsPointRedemption = false
-                        }));
-                    }
-                }
-
-                // ポイント還元がある場合はポイント還元摘要を追加
-                if (pointRedemptionItems.Count > 0)
-                {
-                    var oldestIndex = pointRedemptionItems.Max(x => x.Index);
-                    summariesToAdd.Add((oldestIndex, new DailySummary
-                    {
-                        Date = date,
-                        // Issue #2035: チャージの行と同じく、捕捉した世代から文言を引く
-                        Summary = ResolvePointRedemptionSummary(context),
-                        IsCharge = false,
-                        IsPointRedemption = true
-                    }));
-                }
-
-                // 古い順（インデックス降順）にソートして追加
-                foreach (var item in summariesToAdd.OrderByDescending(x => x.OldestIndex))
-                {
-                    results.Add(item.Summary);
-                }
-            }
-
-            return results;
-        }
-
-        /// <summary>
         /// 利用（鉄道・バス）の摘要を生成
         /// </summary>
         /// <remarks>
@@ -1303,7 +1122,6 @@ namespace ICCardManager.Services
         /// 例：薬院→博多→薬院の往復移動は「薬院～博多 往復」と表示されます。
         /// </para>
         /// </remarks>
-        /// <seealso cref="GenerateByDate"/>
         public virtual string Generate(IEnumerable<LedgerDetail> details)
         {
             // ICカード履歴は新しい順で格納されているため、
@@ -2691,7 +2509,7 @@ namespace ICCardManager.Services
         /// 捕捉済みの世代からポイント還元の摘要を生成する（生成パイプライン用、Issue #2035）
         /// </summary>
         /// <remarks>
-        /// 旧実装の <see cref="GenerateByDate"/> は、チャージの行を世代から引く一方でポイント還元の行は
+        /// 旧実装の日別集約（<c>GenerateByDate</c>。本番から呼ばれず Issue #2330 で削除）は、チャージの行を世代から引く一方でポイント還元の行は
         /// 静的な <see cref="GetPointRedemptionSummary"/> を呼んでおり、1 回の生成の中で読む先が分かれていた
         /// （<see cref="ResolveChargeSummary"/> の remarks「性質は経路ごとに欠けさせない」に反していた）。
         /// 静的 API とパイプラインの両方がこのメソッドを通るので、文言の定義は 1 つに保たれる。

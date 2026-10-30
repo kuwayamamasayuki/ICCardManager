@@ -68,10 +68,10 @@ public class ErrorCodeUniquenessConventionTests
     {
         var codes = CollectErrorCodes().Select(e => e.Code).ToList();
 
-        codes.Should().Contain("DB001", "DatabaseException.ConnectionFailed の採番");
+        codes.Should().Contain("DB002", "DatabaseException.QueryFailed の採番");
         codes.Should().Contain("DB008", "DatabaseVersionMismatchException の採番");
         codes.Should().Contain("DB009", "Issue #1985 で追加した InvalidStoredDate の採番");
-        codes.Should().Contain("CR001").And.Contain("VAL001");
+        codes.Should().Contain("CR002").And.Contain("FILE008").And.Contain("BIZ015");
         codes.Should().Contain("CARD001", "Common/Exceptions 外にある DuplicateCardNumberException の採番（Issue #2101）");
         codes.Should().Contain("SYS999", "ErrorDialogHelper.GetErrorInfo の採番（Issue #2101）");
     }
@@ -87,6 +87,45 @@ public class ErrorCodeUniquenessConventionTests
     {
         // Issue #2327: CardReaderException.ReconnectFailed（試行回数つきの再接続失敗）。本番の呼び出し元が無く撤去した
         ["CR008"] = "CardReaderException.ReconnectFailed（Issue #2327 で撤去）",
+        // Issue #2330: 本番から一度も送出されなかったファクトリを削除した（過去のログには現れないが、再利用しない）
+        ["BIZ001"] = "BusinessException.CardAlreadyLent（Issue #2330 で削除）",
+        ["BIZ002"] = "BusinessException.CardNotLent（Issue #2330 で削除）",
+        ["BIZ003"] = "BusinessException.UnregisteredStaff（Issue #2330 で削除）",
+        ["BIZ004"] = "BusinessException.UnregisteredCard（Issue #2330 で削除）",
+        ["BIZ005"] = "BusinessException.DeletedStaff（Issue #2330 で削除）",
+        ["BIZ006"] = "BusinessException.DeletedCard（Issue #2330 で削除）",
+        ["BIZ007"] = "BusinessException.LowBalance（Issue #2330 で削除）",
+        ["BIZ008"] = "BusinessException.OperationNotAllowed（Issue #2330 で削除）",
+        ["BIZ009"] = "BusinessException.OperationTimeout（Issue #2330 で削除）",
+        ["BIZ010"] = "BusinessException.BackupPathNotConfigured（Issue #2330 で削除）",
+        ["BIZ011"] = "BusinessException.BackupFailed（Issue #2330 で削除）",
+        ["BIZ012"] = "BusinessException.RestoreFailed（Issue #2330 で削除）",
+        ["BIZ013"] = "BusinessException.ReportGenerationFailed（Issue #2330 で削除）",
+        ["BIZ014"] = "BusinessException.FileWriteAccessDenied（Issue #2330 で削除）",
+        ["CR001"] = "CardReaderException.NotConnected（Issue #2330 で削除）",
+        ["CR005"] = "CardReaderException.Timeout（Issue #2330 で削除）",
+        ["CR006"] = "CardReaderException.ServiceNotAvailable（Issue #2330 で削除）",
+        ["CR007"] = "CardReaderException.MonitorError（Issue #2330 で削除）",
+        ["DB001"] = "DatabaseException.ConnectionFailed（Issue #2330 で削除）",
+        ["DB003"] = "DatabaseException.NotFound（Issue #2330 で削除）",
+        ["DB004"] = "DatabaseException.DuplicateEntry（Issue #2330 で削除）",
+        ["DB005"] = "DatabaseException.ForeignKeyViolation（Issue #2330 で削除）",
+        ["DB006"] = "DatabaseException.TransactionFailed（Issue #2330 で削除）",
+        ["DB007"] = "DatabaseException.FileAccessDenied（Issue #2330 で削除）",
+        ["FILE001"] = "FileOperationException.FileNotFound（Issue #2330 で削除）",
+        ["FILE002"] = "FileOperationException.ReadFailed（Issue #2330 で削除）",
+        ["FILE003"] = "FileOperationException.WriteFailed（Issue #2330 で削除）",
+        ["FILE004"] = "FileOperationException.AccessDenied（Issue #2330 で削除）",
+        ["FILE005"] = "FileOperationException.FileInUse（Issue #2330 で削除）",
+        ["FILE006"] = "FileOperationException.InvalidFormat（Issue #2330 で削除）",
+        ["FILE007"] = "FileOperationException.DirectoryCreationFailed（Issue #2330 で削除）",
+        ["VAL001"] = "ValidationException（型ごと）の Required（Issue #2330 で削除）",
+        ["VAL002"] = "ValidationException（型ごと）の OutOfRange（Issue #2330 で削除）",
+        ["VAL003"] = "ValidationException（型ごと）の InvalidFormat（Issue #2330 で削除）",
+        ["VAL004"] = "ValidationException（型ごと）の InvalidIdm（Issue #2330 で削除）",
+        ["VAL005"] = "ValidationException（型ごと）の TooLong（Issue #2330 で削除）",
+        ["VAL006"] = "ValidationException（型ごと）の Multiple（Issue #2330 で削除）",
+        ["VAL007"] = "ValidationException（型ごと）の InvalidDate（Issue #2330 で削除）",
     };
 
     /// <summary>

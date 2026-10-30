@@ -21,9 +21,8 @@ namespace ICCardManager.Tests.Services;
 /// 以下の観点を検証する:
 /// 1. タイムアウト境界値（29秒以内 / ちょうど30秒 / 31秒経過）
 /// 2. LastProcessedCardIdm / LastOperationType の状態遷移
-/// 3. ClearHistory 後の初期状態
-/// 4. 複数カードの交互操作時の混同防止
-/// 5. AppOptions.RetouchWindowSeconds 設定の反映
+/// 3. 複数カードの交互操作時の混同防止
+/// 4. AppOptions.RetouchWindowSeconds 設定の反映
 ///
 /// 時刻は <see cref="ISystemClock"/> を注入した固定時計（<see cref="FakeClock"/>）で
 /// 制御する。貸出／返却で記録される LastProcessedTime も判定で読む現在時刻も同一の
@@ -297,37 +296,6 @@ public class LendingServiceRetouchTimeoutTests : IDisposable
             "31秒経過後は30秒ルール非適用。新規の貸出として処理される");
         // LastOperationType と LastProcessedCardIdm は残っているが、時間ウィンドウが切れている
         service.LastProcessedCardIdm.Should().Be(CardAIdm);
-    }
-
-    #endregion
-
-    #region ClearHistory 後の初期状態
-
-    /// <summary>
-    /// ClearHistory 実行後は LastProcessedCardIdm / LastProcessedTime /
-    /// LastOperationType が全て null になり、IsRetouchWithinTimeout も false を返すこと。
-    /// </summary>
-    [Fact]
-    public async Task ClearHistory_AfterReturn_InitializesAllStateToNull()
-    {
-        // Arrange: 返却を実行 → 履歴が蓄積された状態
-        var service = CreateService(retouchWindowSeconds: 30);
-        SetupReturnMocks(CardAIdm);
-        await service.ReturnAsync(StaffIdm, CardAIdm, new List<LedgerDetail>());
-
-        service.LastProcessedCardIdm.Should().Be(CardAIdm);
-        service.LastProcessedTime.Should().NotBeNull();
-        service.LastOperationType.Should().Be(LendingOperationType.Return);
-
-        // Act
-        service.ClearHistory();
-
-        // Assert: 全て初期状態
-        service.LastProcessedCardIdm.Should().BeNull();
-        service.LastProcessedTime.Should().BeNull();
-        service.LastOperationType.Should().BeNull();
-        service.IsRetouchWithinTimeout(CardAIdm).Should().BeFalse(
-            "履歴クリア後は直前のカードでも30秒ルール非適用");
     }
 
     #endregion

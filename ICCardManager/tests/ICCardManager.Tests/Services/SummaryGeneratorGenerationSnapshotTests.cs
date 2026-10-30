@@ -179,28 +179,28 @@ public class SummaryGeneratorGenerationSnapshotTests : IDisposable
     }
 
     /// <summary>
-    /// Issue #2035: <see cref="SummaryGenerator.GenerateByDate"/> のポイント還元の摘要も、
+    /// Issue #2035: <see cref="SummaryGenerator.Generate"/> のポイント還元の摘要も、
     /// 捕捉した世代から作ること。
     /// </summary>
     /// <remarks>
-    /// 旧実装はチャージの行だけを世代から引き（<c>ResolveChargeSummary(context)</c>）、
-    /// ポイント還元の行は静的な <c>GetPointRedemptionSummary()</c> を呼んでいたため、
+    /// 旧実装の日別集約（<c>GenerateByDate</c>。本番から呼ばれず Issue #2330 で削除）はチャージの行だけを
+    /// 世代から引き、ポイント還元の行は静的な <c>GetPointRedemptionSummary()</c> を呼んでいたため、
     /// 1 回の生成の中で読む先が分かれていた。組織設定の差し替えを捕捉の直後に割り込ませ、
-    /// 同じ生成のチャージとポイント還元が同じ世代の文言になることを表明する。
+    /// ポイント還元の文言が捕捉した世代のものになることを表明する。
     /// </remarks>
     [Fact]
-    public void GenerateByDate_ポイント還元の摘要も捕捉した世代から作ること()
+    public void Generate_ポイント還元の摘要も捕捉した世代から作ること()
     {
         // Arrange
         SummaryGenerator.Configure(CreateTextOptions("旧チャージ", "旧ポイント還元"));
         var generator = new OptionsSwappingGenerator(CreateTextOptions("新チャージ", "新ポイント還元"));
 
         // Act
-        var summaries = generator.GenerateByDate(CreateChargeAndPointRedemptionDetails());
+        var summary = generator.Generate(CreatePointRedemptionDetails());
 
         // Assert
         generator.SwapPerformed.Should().BeTrue("差し替えを割り込ませられていること");
-        summaries.Select(s => s.Summary).Should().BeEquivalentTo(new[] { "旧チャージ", "旧ポイント還元" });
+        summary.Should().Be("旧ポイント還元");
     }
 
     /// <summary>
@@ -210,18 +210,18 @@ public class SummaryGeneratorGenerationSnapshotTests : IDisposable
     /// これが無いと、ポイント還元の文言を起動時の値に固定する実装でも上のテストが緑になる。
     /// </remarks>
     [Fact]
-    public void GenerateByDate_組織設定の差し替えは次の生成から反映されること()
+    public void Generate_組織設定の差し替えは次の生成から反映されること()
     {
         // Arrange
         SummaryGenerator.Configure(CreateTextOptions("旧チャージ", "旧ポイント還元"));
         var generator = new OptionsSwappingGenerator(CreateTextOptions("新チャージ", "新ポイント還元"));
-        generator.GenerateByDate(CreateChargeAndPointRedemptionDetails());
+        generator.Generate(CreatePointRedemptionDetails());
 
         // Act
-        var summaries = generator.GenerateByDate(CreateChargeAndPointRedemptionDetails());
+        var summary = generator.Generate(CreatePointRedemptionDetails());
 
         // Assert
-        summaries.Select(s => s.Summary).Should().BeEquivalentTo(new[] { "新チャージ", "新ポイント還元" });
+        summary.Should().Be("新ポイント還元");
     }
 
     /// <summary>
@@ -282,18 +282,13 @@ public class SummaryGeneratorGenerationSnapshotTests : IDisposable
         return options;
     }
 
-    /// <summary>同じ日のチャージとポイント還元（ICカード履歴は新しい順）</summary>
-    private static List<LedgerDetail> CreateChargeAndPointRedemptionDetails() => new()
+    /// <summary>ポイント還元だけの明細</summary>
+    private static List<LedgerDetail> CreatePointRedemptionDetails() => new()
     {
         new LedgerDetail
         {
             UseDate = new DateTime(2024, 12, 9), Amount = -100, Balance = 2100,
             IsPointRedemption = true, SequenceNumber = 1
-        },
-        new LedgerDetail
-        {
-            UseDate = new DateTime(2024, 12, 9), Amount = -1000, Balance = 2000,
-            IsCharge = true, SequenceNumber = 2
         },
     };
 

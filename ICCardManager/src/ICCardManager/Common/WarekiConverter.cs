@@ -128,35 +128,5 @@ namespace ICCardManager.Common
                 return null;
             }
         }
-
-        /// <summary>
-        /// 指定された日付が属する年度を取得します
-        /// </summary>
-        /// <param name="date">日付</param>
-        /// <returns>年度（4月始まり）</returns>
-        public static int GetFiscalYear(DateTime date)
-        {
-            return FiscalYearHelper.GetFiscalYear(date);
-        }
-
-        /// <summary>
-        /// 指定された年度の開始日を取得します
-        /// </summary>
-        /// <param name="fiscalYear">年度</param>
-        /// <returns>年度開始日（4月1日）</returns>
-        public static DateTime GetFiscalYearStart(int fiscalYear)
-        {
-            return FiscalYearHelper.GetFiscalYearStart(fiscalYear);
-        }
-
-        /// <summary>
-        /// 指定された年度の終了日を取得します
-        /// </summary>
-        /// <param name="fiscalYear">年度</param>
-        /// <returns>年度終了日（翌年3月31日）</returns>
-        public static DateTime GetFiscalYearEnd(int fiscalYear)
-        {
-            return FiscalYearHelper.GetFiscalYearEnd(fiscalYear);
-        }
     }
 }

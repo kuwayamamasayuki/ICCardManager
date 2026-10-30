@@ -19,7 +19,7 @@ namespace ICCardManager.Tests.Data.Repositories;
 /// 列を <c>date()</c> で包む形は<b>結果が正しいまま遅くなるだけ</b>なので、行の内容を見る既存のテスト
 /// （期間の両端を含み隣の日を含まない等）では検出できない。リポジトリが実際に発行した SQL を
 /// <see cref="SQLiteConnection.Trace"/> で捕まえ、同じ接続で <c>EXPLAIN QUERY PLAN</c> を取って表明する。
-/// 行の内容が変わっていないことは、既存の <c>OperationLogRepositoryTests</c>（期間の境界）と
+/// 行の内容が変わっていないことは、本クラスの <c>date()</c> 版との突き合わせ（操作ログの期間検索）と
 /// <c>LedgerRepository*Tests</c>（最新残高・指定日より前の残高）が対で押さえる。
 /// </para>
 /// <para>
@@ -51,12 +51,13 @@ public sealed class SargableDateQueryPlanTests : IDisposable
 
         var plans = await CapturePlansAsync("FROM operation_log", async () =>
         {
-            await repository.GetByDateRangeAsync(from, to);
             await repository.SearchFirstPageAsync(criteria, pageSize: 50);
             await repository.SearchAllAsync(criteria);
         });
 
-        plans.Should().HaveCountGreaterThanOrEqualTo(3, "前提: 3 つの経路が発行した SELECT を捕まえている");
+        // 本番の期間検索は操作ログ画面のページ取得（Search*PageAsync）とエクスポート（SearchAllAsync）の 2 経路
+        // （GetByDateRangeAsync は本番から使われないため Issue #2330 で削除した）
+        plans.Should().HaveCountGreaterThanOrEqualTo(2, "前提: 2 つの経路が発行した SELECT を捕まえている");
         foreach (var (sql, details) in plans)
         {
             details.Should().NotContain(d => d.StartsWith("SCAN operation_log", StringComparison.Ordinal),
@@ -120,8 +121,6 @@ public sealed class SargableDateQueryPlanTests : IDisposable
         var to = new DateTime(2026, 1, 31);
         var criteria = new OperationLogSearchCriteria { FromDate = from, ToDate = to };
 
-        (await repository.GetByDateRangeAsync(from, to)).Select(l => (long)l.Id).OrderBy(i => i)
-            .Should().Equal(expected);
         (await repository.SearchAllAsync(criteria)).Select(l => (long)l.Id).OrderBy(i => i)
             .Should().Equal(expected);
     }
@@ -164,7 +163,6 @@ public sealed class SargableDateQueryPlanTests : IDisposable
         var from = new DateTime(2026, 1, 1);
         var criteria = new OperationLogSearchCriteria { FromDate = from, ToDate = DateTime.MaxValue };
 
-        (await repository.GetByDateRangeAsync(from, DateTime.MaxValue)).Should().HaveCount((int)expected);
         (await repository.SearchAllAsync(criteria)).Should().HaveCount((int)expected);
         (await repository.SearchFirstPageAsync(criteria, pageSize: 500)).TotalCount.Should().Be((int)expected);
     }
