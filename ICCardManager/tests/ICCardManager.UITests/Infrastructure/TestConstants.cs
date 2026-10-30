@@ -411,6 +411,14 @@ namespace ICCardManager.UITests.Infrastructure
 
         // ── ダイアログの閉じる前の確認・Esc・履歴の月送りの回帰テスト（Issue #2192） ────────
 
+        /// <summary>バス停名未入力の履歴一覧ダイアログの AutomationProperties.Name（Issue #2332）。</summary>
+        [UiaName]
+        public const string IncompleteBusStopDialogName = "バス停名未入力履歴一覧ダイアログ";
+
+        /// <summary>バス停名未入力の警告の行だけを見分ける文字列（<c>WarningService</c> の文言の一部）。</summary>
+        [NotUiaName]
+        public const string IncompleteBusStopWarningMarker = "バス停名が未入力の履歴が";
+
         /// <summary>利用履歴詳細ダイアログ（#1743 の閉じる前の確認の対象）。</summary>
         [UiaName]
         public const string LedgerDetailDialogName = "利用履歴詳細ダイアログ";

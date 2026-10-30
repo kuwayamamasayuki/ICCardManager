@@ -425,6 +425,35 @@ public class LedgerDetailViewModelTests : IDisposable
         _viewModel.BreadcrumbText.Should().Be("履歴詳細");
     }
 
+    /// <summary>
+    /// Issue #2332: ヘッダーの利用者は、同行者がいれば履歴一覧と同じく「外N名」を付けて表示すること。
+    /// </summary>
+    [Theory]
+    [InlineData("博多 花子", 1, "博多 花子 外1名")]
+    [InlineData("博多 花子", 0, "博多 花子")] // 対: 単独利用は氏名のまま（常に接尾辞を付ける実装を赤にする）
+    [InlineData(null, 0, "-")] // 対: 氏名が無い行は従来どおり「-」
+    public async Task InitializeAsync_利用者は同行者数から外N名を導出して表示すること(
+        string? staffName, int companionCount, string expected)
+    {
+        var testLedger = new Ledger
+        {
+            Id = 1,
+            CardIdm = "0102030405060708",
+            Date = new DateTime(2026, 3, 15),
+            Summary = "テスト",
+            Balance = 500,
+            StaffName = staffName,
+            CompanionCount = companionCount,
+            Details = new List<LedgerDetail>()
+        };
+        _ledgerRepoMock.Setup(r => r.GetByIdAsync(1)).ReturnsAsync(testLedger);
+
+        await _viewModel.InitializeAsync(1);
+
+        _viewModel.DisplayStaffName.Should().Be(expected);
+        testLedger.StaffName.Should().Be(staffName, "「外N名」は表示時の導出であり、台帳の氏名へは書き込まない（#1906）");
+    }
+
     #endregion
 
     #region 履歴分割の職員認証ゲート（SEQ-AUTH-01）

@@ -6,7 +6,6 @@ using System.Threading.Tasks;
 using ICCardManager.Common;
 using ICCardManager.Data.Repositories;
 using ICCardManager.Dtos;
-using ICCardManager.ViewModels;
 
 namespace ICCardManager.Services
 {

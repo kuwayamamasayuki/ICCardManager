@@ -110,7 +110,8 @@ namespace ICCardManager.ViewModels
                     Date = l.Date,
                     Summary = l.Summary,
                     Expense = l.Expense,
-                    StaffName = l.StaffName ?? ""
+                    StaffName = l.StaffName ?? "",
+                    CompanionCount = l.CompanionCount
                 }).OrderByDescending(i => i.Date).ToList();
 
                 // 利用日フィルタの選択肢を構築
@@ -169,7 +170,8 @@ namespace ICCardManager.ViewModels
                 Date = oldItem.Date,
                 Summary = ledger.Summary,
                 Expense = oldItem.Expense,
-                StaffName = oldItem.StaffName
+                StaffName = oldItem.StaffName,
+                CompanionCount = oldItem.CompanionCount
             };
 
             // ObservableCollection の要素差し替え → DataGrid が自動更新

@@ -147,7 +147,8 @@ public class MainViewModelTests : IDisposable
         ICardReader cardReader = null,
         ILogger<MainViewModel> logger = null,
         IMessenger messenger = null,
-        int? retouchWindowSeconds = null)
+        int? retouchWindowSeconds = null,
+        ICCardManager.Services.ISafeFileLauncher safeFileLauncher = null)
     {
         var databaseInfoMock = new Mock<IDatabaseInfo>();
         var appOptions = new AppOptions { StaffCardTimeoutSeconds = timeoutSeconds };
@@ -175,7 +176,7 @@ public class MainViewModelTests : IDisposable
             new WarningService(_ledgerRepositoryMock.Object, databaseInfoMock.Object, _cardRepositoryMock.Object),
             new DashboardService(_cardRepositoryMock.Object, _ledgerRepositoryMock.Object,
                 _staffRepositoryMock.Object, _settingsRepositoryMock.Object),
-            new Mock<ICCardManager.Services.ISafeFileLauncher>().Object,
+            safeFileLauncher ?? new Mock<ICCardManager.Services.ISafeFileLauncher>().Object,
             new HistoryPanelViewModel(_ledgerRepositoryMock.Object, _cardRepositoryMock.Object, _dbContext, _staffAuthServiceMock.Object, _ledgerMergeService, _navigationServiceMock.Object, _operationLoggerMock.Object, _ledgerConsistencyChecker, _toastMock.Object),
             logger);
     }
@@ -4164,6 +4165,52 @@ public class MainViewModelTests : IDisposable
         await _dispatcherService.WaitForPendingAsync();
 
         _viewModel.CurrentState.Should().Be(AppState.WaitingForIcCard, "確認を閉じた後のタッチは処理される（対）");
+    }
+
+    #endregion
+
+    #region Issue #2332: ヘルプ（ドキュメントフォルダ）を開く
+
+    /// <summary>
+    /// ドキュメントフォルダを開けなかったとき、理由と復旧手段（再インストール）を警告で示すこと。
+    /// </summary>
+    /// <remarks>
+    /// 07 §2.51 は「MessageBox.Show を伴うため自動テスト対象外」としていたが、OpenHelp は
+    /// ISafeFileLauncher と INavigationService（どちらも注入された抽象）しか使わないため単体テストできる。
+    /// </remarks>
+    [Fact]
+    public void OpenHelp_ドキュメントフォルダを開けないとき_理由と再インストールの案内を警告すること()
+    {
+        const string LauncherMessage = "指定されたフォルダが見つかりません。パスを確認してください: X:\\Docs";
+        var launcher = new Mock<ICCardManager.Services.ISafeFileLauncher>();
+        launcher.Setup(l => l.LaunchFolder(It.IsAny<string>()))
+            .Returns(ICCardManager.Services.SafeFileLaunchResult.Fail(LauncherMessage));
+        var viewModel = CreateViewModel(safeFileLauncher: launcher.Object);
+
+        viewModel.OpenHelp();
+
+        var expectedDocs = System.IO.Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Docs");
+        launcher.Verify(l => l.LaunchFolder(expectedDocs), Times.Once());
+        _navigationServiceMock.Verify(n => n.ShowWarning(
+            It.Is<string>(m => m.StartsWith(LauncherMessage, StringComparison.Ordinal) && m.Contains("再インストール")),
+            "ヘルプ"), Times.Once());
+    }
+
+    /// <summary>
+    /// 開けたときは警告を出さないこと（対）。結果を見ずに常に警告する実装を赤にする。
+    /// </summary>
+    [Fact]
+    public void OpenHelp_ドキュメントフォルダを開けたとき_警告を出さないこと()
+    {
+        var launcher = new Mock<ICCardManager.Services.ISafeFileLauncher>();
+        launcher.Setup(l => l.LaunchFolder(It.IsAny<string>()))
+            .Returns(ICCardManager.Services.SafeFileLaunchResult.Ok());
+        var viewModel = CreateViewModel(safeFileLauncher: launcher.Object);
+
+        viewModel.OpenHelp();
+
+        launcher.Verify(l => l.LaunchFolder(It.IsAny<string>()), Times.Once());
+        _navigationServiceMock.Verify(n => n.ShowWarning(It.IsAny<string>(), It.IsAny<string>()), Times.Never());
     }
 
     #endregion

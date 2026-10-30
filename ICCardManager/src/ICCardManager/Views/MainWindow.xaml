@@ -7,6 +7,7 @@
         xmlns:conv="clr-namespace:ICCardManager.Common"
         xmlns:cardReader="clr-namespace:ICCardManager.Infrastructure.CardReader"
         xmlns:services="clr-namespace:ICCardManager.Services"
+        xmlns:dtos="clr-namespace:ICCardManager.Dtos"
         xmlns:app="clr-namespace:ICCardManager"
         mc:Ignorable="d"
         d:DataContext="{d:DesignInstance Type=vm:MainViewModel}"
@@ -940,10 +941,10 @@
                                   TabIndex="9"
                                   AutomationProperties.Name="ダッシュボードの並び順"
                                   ToolTip="カード一覧の並び順を変更">
-                            <ComboBoxItem Content="残高（少ない順）" Tag="{x:Static vm:DashboardSortOrder.BalanceAscending}"/>
-                            <ComboBoxItem Content="残高（多い順）" Tag="{x:Static vm:DashboardSortOrder.BalanceDescending}"/>
-                            <ComboBoxItem Content="カード名順" Tag="{x:Static vm:DashboardSortOrder.CardName}"/>
-                            <ComboBoxItem Content="最終利用日順" Tag="{x:Static vm:DashboardSortOrder.LastUsageDate}"/>
+                            <ComboBoxItem Content="残高（少ない順）" Tag="{x:Static dtos:DashboardSortOrder.BalanceAscending}"/>
+                            <ComboBoxItem Content="残高（多い順）" Tag="{x:Static dtos:DashboardSortOrder.BalanceDescending}"/>
+                            <ComboBoxItem Content="カード名順" Tag="{x:Static dtos:DashboardSortOrder.CardName}"/>
+                            <ComboBoxItem Content="最終利用日順" Tag="{x:Static dtos:DashboardSortOrder.LastUsageDate}"/>
                         </ComboBox>
                     </StackPanel>
 

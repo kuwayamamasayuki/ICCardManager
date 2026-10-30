@@ -195,6 +195,48 @@ namespace ICCardManager.UITests.Infrastructure
             tx.Commit();
         }
 
+        /// <summary>バス停名が未入力のバス利用の摘要（既定のラベル・プレースホルダ）。</summary>
+        public const string IncompleteBusStopSummary = "バス（★）";
+
+        /// <summary><see cref="SeedWithIncompleteBusStops"/> が同行者を付ける行の同行者数。</summary>
+        public const int IncompleteBusStopCompanionCount = 2;
+
+        /// <summary>
+        /// <see cref="Seed"/> に、バス停名が未入力のバス利用の行を 3 行加える（Issue #2332）。
+        /// バス停名未入力の一覧のマニュアル用スクリーンショット（<c>incomplete_busstop.png</c>）が使う。
+        /// </summary>
+        /// <returns>同行者 <see cref="IncompleteBusStopCompanionCount"/> 名を付けた行（通常カード・<see cref="PrimaryStaffName"/>）の id。</returns>
+        /// <remarks>
+        /// 日付は今日。各カードの最後の行の残額から積むので、残高チェーンは切れない（同じ日付の行は id の順で末尾になる）。
+        /// </remarks>
+        public static long SeedWithIncompleteBusStops(SQLiteConnection conn)
+        {
+            Seed(conn);
+
+            var today = DateTime.Today;
+            _ = InsertLedger(conn, LowBalanceCardIdm, today, IncompleteBusStopSummary, 0, 230,
+                LatestBalance(conn, LowBalanceCardIdm), PrimaryStaffName);
+            _ = InsertLedger(conn, NormalCardIdm, today, IncompleteBusStopSummary, 0, 230,
+                LatestBalance(conn, NormalCardIdm), SecondaryStaffName, SecondaryStaffIdm);
+            _ = InsertLedger(conn, NormalCardIdm, today, IncompleteBusStopSummary, 0, 200,
+                LatestBalance(conn, NormalCardIdm), PrimaryStaffName);
+
+            using var cmd = conn.CreateCommand();
+            cmd.CommandText = "SELECT last_insert_rowid()";
+            var id = Convert.ToInt64(cmd.ExecuteScalar(), CultureInfo.InvariantCulture);
+            Execute(conn, "UPDATE ledger SET companion_count = @count WHERE id = @id",
+                ("@count", IncompleteBusStopCompanionCount), ("@id", id));
+            return id;
+        }
+
+        private static int LatestBalance(SQLiteConnection conn, string cardIdm)
+        {
+            using var cmd = conn.CreateCommand();
+            cmd.CommandText = "SELECT balance FROM ledger WHERE card_idm = @card ORDER BY date DESC, id DESC LIMIT 1";
+            cmd.Parameters.AddWithValue("@card", cardIdm);
+            return Convert.ToInt32(cmd.ExecuteScalar(), CultureInfo.InvariantCulture);
+        }
+
         /// <summary>
         /// <see cref="Seed"/> 投入直後の残額不足カードの残額。<see cref="SeedWithoutWarnings"/> が
         /// 残高チェーンを継ぐ起点に使う（新規購入 2,000 円 − 往復 520 円）。

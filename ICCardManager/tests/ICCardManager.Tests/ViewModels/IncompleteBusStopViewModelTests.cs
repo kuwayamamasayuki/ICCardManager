@@ -203,6 +203,32 @@ public class IncompleteBusStopViewModelTests
     }
 
     /// <summary>
+    /// Issue #2332: 利用者欄は、同行者がいれば履歴一覧と同じく「外N名」を付けて表示すること。
+    /// </summary>
+    [Theory]
+    [InlineData(2, "田中 外2名")]
+    [InlineData(0, "田中")] // 対: 単独利用は氏名のまま
+    public async Task InitializeAsync_利用者欄は同行者数から外N名を導出すること(int companionCount, string expected)
+    {
+        var ledgers = new List<Ledger>
+        {
+            new Ledger { Id = 1, CardIdm = "CARD001", Date = new DateTime(2026, 1, 10), Summary = "バス（★）", Expense = 200, StaffName = "田中", CompanionCount = companionCount },
+        };
+        _ledgerRepositoryMock
+            .Setup(r => r.GetBySummaryContainingAsync(It.IsAny<string>()))
+            .ReturnsAsync(ledgers);
+        _cardRepositoryMock
+            .Setup(r => r.GetAllAsync())
+            .ReturnsAsync(new List<IcCard> { new IcCard { CardIdm = "CARD001", CardType = "はやかけん", CardNumber = "001" } });
+
+        await _viewModel.InitializeAsync();
+
+        var item = _viewModel.Items.Should().ContainSingle().Subject;
+        item.DisplayStaffName.Should().Be(expected);
+        item.StaffName.Should().Be("田中", "「外N名」は表示時の導出であり、氏名そのものは書き換えない（#1906）");
+    }
+
+    /// <summary>
     /// 日付降順でソートされること
     /// </summary>
     [Fact]
@@ -662,6 +688,33 @@ public class IncompleteBusStopViewModelTests
         result.Should().NotBeNull();
         result.Summary.Should().Be("バス（天神→博多）");
         _viewModel.Items[0].Summary.Should().Be("バス（天神→博多）");
+    }
+
+    /// <summary>
+    /// Issue #2332: バス停名を入力して行を差し替えても、利用者欄の「外N名」が消えないこと。
+    /// </summary>
+    [Fact]
+    public async Task UpdateItemSummaryAsync_同行者数を引き継ぐこと()
+    {
+        var ledgers = new List<Ledger>
+        {
+            new Ledger { Id = 10, CardIdm = "CARD001", Date = new DateTime(2026, 1, 10), Summary = "バス（★）", Expense = 200, StaffName = "田中", CompanionCount = 2 },
+        };
+        _ledgerRepositoryMock
+            .Setup(r => r.GetBySummaryContainingAsync(It.IsAny<string>()))
+            .ReturnsAsync(ledgers);
+        _cardRepositoryMock
+            .Setup(r => r.GetAllAsync())
+            .ReturnsAsync(new List<IcCard> { new IcCard { CardIdm = "CARD001", CardType = "はやかけん", CardNumber = "001" } });
+        await _viewModel.InitializeAsync();
+        _ledgerRepositoryMock
+            .Setup(r => r.GetByIdAsync(10))
+            .ReturnsAsync(new Ledger { Id = 10, CardIdm = "CARD001", Date = new DateTime(2026, 1, 10), Summary = "バス（天神→博多）", Expense = 200, StaffName = "田中", CompanionCount = 2 });
+
+        var result = await _viewModel.UpdateItemSummaryAsync(10);
+
+        result!.DisplayStaffName.Should().Be("田中 外2名");
+        _viewModel.Items[0].DisplayStaffName.Should().Be("田中 外2名");
     }
 
     /// <summary>
