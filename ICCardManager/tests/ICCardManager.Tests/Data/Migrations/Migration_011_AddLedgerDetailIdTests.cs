@@ -14,7 +14,7 @@ namespace ICCardManager.Tests.Data.Migrations
     /// <b>既存の rowid 値をそのまま引き継ぐ</b>こと。
     /// </summary>
     /// <remarks>
-    /// 値を採番し直すと、既に <c>ledger_merge_history.undo_data_json</c> へ保存済みの
+    /// 値を採番し直すと、既に <c>ledger_merge_history.undo_data</c> へ保存済みの
     /// 統合取り消しデータが指す行がずれ、6 年保存の台帳明細が別の台帳へ移る。
     /// FeliCa 互換の「小さい値＝新しい」大小関係（Issue #548 / #880）も同時に壊れる。
     /// </remarks>
