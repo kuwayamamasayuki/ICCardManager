@@ -181,7 +181,10 @@
                                        Foreground="{DynamicResource MutedTextBrush}"
                                        Margin="0,4,0,0"/>
 
-                            <!-- Issue #1215: 紙の出納簿の累計受入・累計払出入力 -->
+                            <!-- Issue #1215: 紙の出納簿の累計受入・累計払出入力
+                                 Issue #2326: 繰越月が 3 月（新年度の始まり）のときは旧年度の累計なので入力欄を無効にする
+                                 （CarryoverCumulativePanel.IsEnabled と注記はコードビハインドが繰越月から決める） -->
+                            <StackPanel x:Name="CarryoverCumulativePanel">
                             <StackPanel Orientation="Horizontal" Margin="0,10,0,0">
                                 <TextBlock Text="累計受入:"
                                            FontSize="{DynamicResource BaseFontSize}"
@@ -218,8 +221,10 @@
                                            VerticalAlignment="Center"
                                            Margin="5,0,0,0"/>
                             </StackPanel>
-                            <TextBlock Text="※ 月次帳票の「累計」欄に加算されます（当該年度のみ）"
-                                   TextWrapping="Wrap"
+                            </StackPanel>
+                            <TextBlock x:Name="CarryoverCumulativeHintText"
+                                       Text="※ 月次帳票の「累計」欄に加算されます（当該年度のみ）"
+                                       TextWrapping="Wrap"
                                        FontSize="{DynamicResource SmallFontSize}"
                                        Foreground="{DynamicResource MutedTextBrush}"
                                        Margin="0,4,0,0"/>

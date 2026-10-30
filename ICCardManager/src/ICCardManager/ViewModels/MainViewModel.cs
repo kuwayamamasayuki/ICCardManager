@@ -51,32 +51,6 @@ public enum AppState
 }
 
 /// <summary>
-/// ダッシュボードのソート順
-/// </summary>
-public enum DashboardSortOrder
-{
-    /// <summary>
-    /// カード種別・番号順（デフォルト）
-    /// </summary>
-    CardName,
-
-    /// <summary>
-    /// 残高昇順（少ない順）
-    /// </summary>
-    BalanceAscending,
-
-    /// <summary>
-    /// 残高降順（多い順）
-    /// </summary>
-    BalanceDescending,
-
-    /// <summary>
-    /// 最終利用日順（新しい順）
-    /// </summary>
-    LastUsageDate
-}
-
-/// <summary>
 /// メイン画面のViewModel。ICカードの貸出・返却処理を制御します。
 /// </summary>
 /// <remarks>
@@ -322,12 +296,6 @@ public partial class MainViewModel : ViewModelBase, IHistoryPanelHost
     /// </summary>
     [ObservableProperty]
     private string _cardReaderConnectionMessage = string.Empty;
-
-    /// <summary>
-    /// カードリーダー再接続試行回数
-    /// </summary>
-    [ObservableProperty]
-    private int _cardReaderReconnectAttempts;
 
     /// <summary>
     /// Issue #1110, #1131: 共有モードでのデータ最終同期の経過時間テキスト
@@ -620,7 +588,6 @@ public partial class MainViewModel : ViewModelBase, IHistoryPanelHost
         {
             CardReaderConnectionState = e.State;
             CardReaderConnectionMessage = e.Message ?? string.Empty;
-            CardReaderReconnectAttempts = e.RetryCount;
 
             // 警告メッセージの更新
             UpdateConnectionWarningMessage(e);
@@ -642,49 +609,20 @@ public partial class MainViewModel : ViewModelBase, IHistoryPanelHost
             WarningMessages.Remove(warning);
         }
 
-        // 状態に応じて警告を追加
-        switch (e.State)
+        // 切断のときだけ警告を出す。接続中は上で取り除いたまま（警告を出さない）。
+        // Issue #2327: 以前は「再接続中 (n/10)」と、メッセージに「再接続」を含む Connected で
+        // 「✅ 再接続しました」を 3 秒出す分岐があったが、どのカードリーダー実装もその状態・メッセージを
+        // 通知しないため一度も表示されていなかった。手動再接続の成功を知らせるなら、通知する側で
+        // 経路を明示して渡すこと（メッセージの文言で判定しない）。
+        if (e.State == CardReaderConnectionState.Disconnected)
         {
-            case CardReaderConnectionState.Disconnected:
-                WarningMessages.Add(new WarningItem
-                {
-                    DisplayText = !string.IsNullOrEmpty(e.Message)
-                        ? $"⚠️ カードリーダー切断: {e.Message}"
-                        : "⚠️ カードリーダーが切断されています",
-                    Type = WarningType.CardReaderConnection
-                });
-                break;
-
-            case CardReaderConnectionState.Reconnecting:
-                WarningMessages.Add(new WarningItem
-                {
-                    DisplayText = $"🔄 カードリーダーに再接続中... ({e.RetryCount}/10)",
-                    Type = WarningType.CardReaderConnection
-                });
-                break;
-
-            case CardReaderConnectionState.Connected:
-                // 再接続成功時はメッセージを表示
-                if (e.Message is not null && e.Message.Contains("再接続"))
-                {
-                    // 一時的に成功メッセージを表示（3秒後に削除）
-                    var successWarning = new WarningItem
-                    {
-                        DisplayText = "✅ カードリーダーに再接続しました",
-                        Type = WarningType.CardReaderConnection
-                    };
-                    WarningMessages.Add(successWarning);
-
-                    // 3秒後にメッセージを削除
-                    _ = Task.Delay(3000).ContinueWith(_ =>
-                    {
-                        _dispatcherService.InvokeAsync(() =>
-                        {
-                            WarningMessages.Remove(successWarning);
-                        });
-                    });
-                }
-                break;
+            WarningMessages.Add(new WarningItem
+            {
+                DisplayText = !string.IsNullOrEmpty(e.Message)
+                    ? $"⚠️ カードリーダー切断: {e.Message}"
+                    : "⚠️ カードリーダーが切断されています",
+                Type = WarningType.CardReaderConnection
+            });
         }
     }
 

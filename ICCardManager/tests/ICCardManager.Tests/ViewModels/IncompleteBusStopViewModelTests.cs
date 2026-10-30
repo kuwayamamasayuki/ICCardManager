@@ -54,7 +54,7 @@ public class IncompleteBusStopViewModelTests
         };
 
         _ledgerRepositoryMock
-            .Setup(r => r.GetByDateRangeAsync(null, It.IsAny<DateTime>(), It.IsAny<DateTime>()))
+            .Setup(r => r.GetBySummaryContainingAsync(It.IsAny<string>()))
             .ReturnsAsync(ledgers);
         _cardRepositoryMock
             .Setup(r => r.GetAllAsync())
@@ -69,41 +69,74 @@ public class IncompleteBusStopViewModelTests
     }
 
     /// <summary>
-    /// Issue #2104: 直近 1 年分（1 年前 ～ 現在）の履歴を取得すること。
+    /// Issue #2329: 期間で区切らず、全期間の取得元（<c>GetBySummaryContainingAsync(プレースホルダ)</c>）から一覧を作ること。
     /// </summary>
     /// <remarks>
-    /// 他のテストは取得期間を <c>It.IsAny</c> で受けているため、期間（<c>AddYears(-1)</c>）を変えても緑になる。
-    /// 本体は現在時刻を 2 回読むため、呼び出しの前後の時刻で挟んで表明する。
+    /// 以前は直近 1 年（Issue #2104 のテストがその期間を固定していた）で、1 年より前の未入力は一覧から消えていた。
+    /// 警告の件数（<c>WarningService.CheckIncompleteBusStopsAsync</c>）と同じ取得元を使うことも、この表明で固定する。
     /// </remarks>
     [Fact]
-    public async Task InitializeAsync_直近1年分の履歴を取得すること()
+    public async Task InitializeAsync_期間で区切らず全期間の未入力を一覧にすること()
     {
-        // Arrange
-        DateTime? requestedFrom = null;
-        DateTime? requestedTo = null;
+        // Arrange: 1 年より前（5 年前）の未入力を含む
+        var today = DateTime.Today;
         _ledgerRepositoryMock
-            .Setup(r => r.GetByDateRangeAsync(null, It.IsAny<DateTime>(), It.IsAny<DateTime>()))
-            .Callback<string, DateTime, DateTime>((_, from, to) =>
+            .Setup(r => r.GetBySummaryContainingAsync(It.IsAny<string>()))
+            .ReturnsAsync(new List<Ledger>
             {
-                requestedFrom = from;
-                requestedTo = to;
-            })
-            .ReturnsAsync(new List<Ledger>());
+                new Ledger { Id = 1, CardIdm = "CARD001", Date = today, Summary = "バス（★）" },
+                new Ledger { Id = 2, CardIdm = "CARD001", Date = today.AddYears(-5), Summary = "バス（★）" }
+            });
         _cardRepositoryMock
             .Setup(r => r.GetAllAsync())
-            .ReturnsAsync(new List<IcCard>());
+            .ReturnsAsync(new List<IcCard> { new IcCard { CardIdm = "CARD001", CardType = "はやかけん", CardNumber = "001" } });
 
         // Act
-        var before = DateTime.Now;
         await _viewModel.InitializeAsync();
-        var after = DateTime.Now;
 
         // Assert
-        requestedFrom.Should().NotBeNull();
-        requestedFrom!.Value.Should().BeOnOrAfter(before.AddYears(-1)).And.BeOnOrBefore(after.AddYears(-1),
-            "取得の開始は現在から 1 年前であること");
-        requestedTo!.Value.Should().BeOnOrAfter(before).And.BeOnOrBefore(after,
-            "取得の終了は現在であること");
+        _viewModel.Items.Select(i => i.LedgerId).Should().Equal(new[] { 1, 2 }, "1 年より前の未入力も一覧に載せる");
+        _ledgerRepositoryMock.Verify(r => r.GetBySummaryContainingAsync(SummaryGenerator.BusPlaceholder), Times.Once);
+        _ledgerRepositoryMock.Verify(
+            r => r.GetByDateRangeAsync(It.IsAny<string>(), It.IsAny<DateTime>(), It.IsAny<DateTime>()),
+            Times.Never, "期間で区切った問い合わせをしない");
+    }
+
+    /// <summary>
+    /// Issue #2329: 論理削除したカードの未入力は一覧に載せず、それ以外（貸出中・払戻済みを含む）は載せること。
+    /// </summary>
+    /// <remarks>
+    /// 全期間に広げると、論理削除したカードの未入力が最長 6 年一覧に残る（<c>GetAllAsync</c> が返さないため、
+    /// カード名を解決できず IDm がそのまま出ていた）。払い戻したカードは手元に無く、ここで案内しないと直す手段が無いため残す。
+    /// </remarks>
+    [Fact]
+    public async Task InitializeAsync_論理削除したカードの未入力だけを一覧から外すこと()
+    {
+        var today = DateTime.Today;
+        _ledgerRepositoryMock
+            .Setup(r => r.GetBySummaryContainingAsync(It.IsAny<string>()))
+            .ReturnsAsync(new List<Ledger>
+            {
+                new Ledger { Id = 1, CardIdm = "OPERATING", Date = today, Summary = "バス（★）" },
+                new Ledger { Id = 2, CardIdm = "LENT", Date = today, Summary = "バス（★）" },
+                new Ledger { Id = 3, CardIdm = "REFUNDED", Date = today, Summary = "バス（★）" },
+                new Ledger { Id = 4, CardIdm = "DELETED", Date = today, Summary = "バス（★）" },
+                new Ledger { Id = 5, CardIdm = "MISSING", Date = today, Summary = "バス（★）" }   // 論理削除済み（GetAllAsync が返さない）
+            });
+        _cardRepositoryMock
+            .Setup(r => r.GetAllAsync())
+            .ReturnsAsync(new List<IcCard>
+            {
+                new IcCard { CardIdm = "OPERATING", CardType = "はやかけん", CardNumber = "001" },
+                new IcCard { CardIdm = "LENT", CardType = "はやかけん", CardNumber = "002", IsLent = true },
+                new IcCard { CardIdm = "REFUNDED", CardType = "はやかけん", CardNumber = "003", IsRefunded = true },
+                new IcCard { CardIdm = "DELETED", CardType = "はやかけん", CardNumber = "004", IsDeleted = true }
+            });
+
+        await _viewModel.InitializeAsync();
+
+        _viewModel.Items.Select(i => i.LedgerId).Should().BeEquivalentTo(new[] { 1, 2, 3 });
+        _viewModel.Items.Single(i => i.LedgerId == 3).CardDisplayName.Should().Be("はやかけん 003", "払戻済みカードもカード名で表示する");
     }
 
     /// <summary>
@@ -123,7 +156,7 @@ public class IncompleteBusStopViewModelTests
         };
 
         _ledgerRepositoryMock
-            .Setup(r => r.GetByDateRangeAsync(null, It.IsAny<DateTime>(), It.IsAny<DateTime>()))
+            .Setup(r => r.GetBySummaryContainingAsync(It.IsAny<string>()))
             .ReturnsAsync(ledgers);
         _cardRepositoryMock
             .Setup(r => r.GetAllAsync())
@@ -140,10 +173,14 @@ public class IncompleteBusStopViewModelTests
     }
 
     /// <summary>
-    /// 未登録カードの場合CardIdmがそのまま表示されること
+    /// カードの一覧に居ない（論理削除済みの）カードの未入力は一覧に載せないこと
     /// </summary>
+    /// <remarks>
+    /// Issue #2329 で期待値を変えた。以前はカード名を解決できないまま IDm を表示していたが、
+    /// 未入力の対象から論理削除したカードを除いたため、カードの一覧に居ない（＝論理削除済みの）カードの行は載せない。
+    /// </remarks>
     [Fact]
-    public async Task InitializeAsync_ShouldFallbackToCardIdm_WhenCardNotFound()
+    public async Task InitializeAsync_カードの一覧に居ないカードの未入力は載せないこと()
     {
         // Arrange
         var ledgers = new List<Ledger>
@@ -152,7 +189,7 @@ public class IncompleteBusStopViewModelTests
         };
 
         _ledgerRepositoryMock
-            .Setup(r => r.GetByDateRangeAsync(null, It.IsAny<DateTime>(), It.IsAny<DateTime>()))
+            .Setup(r => r.GetBySummaryContainingAsync(It.IsAny<string>()))
             .ReturnsAsync(ledgers);
         _cardRepositoryMock
             .Setup(r => r.GetAllAsync())
@@ -162,8 +199,33 @@ public class IncompleteBusStopViewModelTests
         await _viewModel.InitializeAsync();
 
         // Assert
-        _viewModel.Items.Should().HaveCount(1);
-        _viewModel.Items[0].CardDisplayName.Should().Be("UNKNOWN_CARD");
+        _viewModel.Items.Should().BeEmpty("論理削除したカードの行は載せない");
+    }
+
+    /// <summary>
+    /// Issue #2332: 利用者欄は、同行者がいれば履歴一覧と同じく「外N名」を付けて表示すること。
+    /// </summary>
+    [Theory]
+    [InlineData(2, "田中 外2名")]
+    [InlineData(0, "田中")] // 対: 単独利用は氏名のまま
+    public async Task InitializeAsync_利用者欄は同行者数から外N名を導出すること(int companionCount, string expected)
+    {
+        var ledgers = new List<Ledger>
+        {
+            new Ledger { Id = 1, CardIdm = "CARD001", Date = new DateTime(2026, 1, 10), Summary = "バス（★）", Expense = 200, StaffName = "田中", CompanionCount = companionCount },
+        };
+        _ledgerRepositoryMock
+            .Setup(r => r.GetBySummaryContainingAsync(It.IsAny<string>()))
+            .ReturnsAsync(ledgers);
+        _cardRepositoryMock
+            .Setup(r => r.GetAllAsync())
+            .ReturnsAsync(new List<IcCard> { new IcCard { CardIdm = "CARD001", CardType = "はやかけん", CardNumber = "001" } });
+
+        await _viewModel.InitializeAsync();
+
+        var item = _viewModel.Items.Should().ContainSingle().Subject;
+        item.DisplayStaffName.Should().Be(expected);
+        item.StaffName.Should().Be("田中", "「外N名」は表示時の導出であり、氏名そのものは書き換えない（#1906）");
     }
 
     /// <summary>
@@ -185,7 +247,7 @@ public class IncompleteBusStopViewModelTests
         };
 
         _ledgerRepositoryMock
-            .Setup(r => r.GetByDateRangeAsync(null, It.IsAny<DateTime>(), It.IsAny<DateTime>()))
+            .Setup(r => r.GetBySummaryContainingAsync(It.IsAny<string>()))
             .ReturnsAsync(ledgers);
         _cardRepositoryMock
             .Setup(r => r.GetAllAsync())
@@ -220,7 +282,7 @@ public class IncompleteBusStopViewModelTests
         };
 
         _ledgerRepositoryMock
-            .Setup(r => r.GetByDateRangeAsync(null, It.IsAny<DateTime>(), It.IsAny<DateTime>()))
+            .Setup(r => r.GetBySummaryContainingAsync(It.IsAny<string>()))
             .ReturnsAsync(ledgers);
         _cardRepositoryMock
             .Setup(r => r.GetAllAsync())
@@ -256,7 +318,7 @@ public class IncompleteBusStopViewModelTests
         };
 
         _ledgerRepositoryMock
-            .Setup(r => r.GetByDateRangeAsync(null, It.IsAny<DateTime>(), It.IsAny<DateTime>()))
+            .Setup(r => r.GetBySummaryContainingAsync(It.IsAny<string>()))
             .ReturnsAsync(ledgers);
         _cardRepositoryMock
             .Setup(r => r.GetAllAsync())
@@ -296,7 +358,7 @@ public class IncompleteBusStopViewModelTests
         };
 
         _ledgerRepositoryMock
-            .Setup(r => r.GetByDateRangeAsync(null, It.IsAny<DateTime>(), It.IsAny<DateTime>()))
+            .Setup(r => r.GetBySummaryContainingAsync(It.IsAny<string>()))
             .ReturnsAsync(ledgers);
         _cardRepositoryMock
             .Setup(r => r.GetAllAsync())
@@ -331,7 +393,7 @@ public class IncompleteBusStopViewModelTests
         };
 
         _ledgerRepositoryMock
-            .Setup(r => r.GetByDateRangeAsync(null, It.IsAny<DateTime>(), It.IsAny<DateTime>()))
+            .Setup(r => r.GetBySummaryContainingAsync(It.IsAny<string>()))
             .ReturnsAsync(ledgers);
         _cardRepositoryMock
             .Setup(r => r.GetAllAsync())
@@ -372,7 +434,7 @@ public class IncompleteBusStopViewModelTests
         };
 
         _ledgerRepositoryMock
-            .Setup(r => r.GetByDateRangeAsync(null, It.IsAny<DateTime>(), It.IsAny<DateTime>()))
+            .Setup(r => r.GetBySummaryContainingAsync(It.IsAny<string>()))
             .ReturnsAsync(ledgers);
         _cardRepositoryMock
             .Setup(r => r.GetAllAsync())
@@ -406,7 +468,7 @@ public class IncompleteBusStopViewModelTests
         };
 
         _ledgerRepositoryMock
-            .Setup(r => r.GetByDateRangeAsync(null, It.IsAny<DateTime>(), It.IsAny<DateTime>()))
+            .Setup(r => r.GetBySummaryContainingAsync(It.IsAny<string>()))
             .ReturnsAsync(ledgers);
         _cardRepositoryMock
             .Setup(r => r.GetAllAsync())
@@ -443,7 +505,7 @@ public class IncompleteBusStopViewModelTests
         };
 
         _ledgerRepositoryMock
-            .Setup(r => r.GetByDateRangeAsync(null, It.IsAny<DateTime>(), It.IsAny<DateTime>()))
+            .Setup(r => r.GetBySummaryContainingAsync(It.IsAny<string>()))
             .ReturnsAsync(ledgers);
         _cardRepositoryMock
             .Setup(r => r.GetAllAsync())
@@ -485,7 +547,7 @@ public class IncompleteBusStopViewModelTests
         };
 
         _ledgerRepositoryMock
-            .Setup(r => r.GetByDateRangeAsync(null, It.IsAny<DateTime>(), It.IsAny<DateTime>()))
+            .Setup(r => r.GetBySummaryContainingAsync(It.IsAny<string>()))
             .ReturnsAsync(ledgers);
         _cardRepositoryMock
             .Setup(r => r.GetAllAsync())
@@ -523,7 +585,7 @@ public class IncompleteBusStopViewModelTests
         };
 
         _ledgerRepositoryMock
-            .Setup(r => r.GetByDateRangeAsync(null, It.IsAny<DateTime>(), It.IsAny<DateTime>()))
+            .Setup(r => r.GetBySummaryContainingAsync(It.IsAny<string>()))
             .ReturnsAsync(initialLedgers);
         _cardRepositoryMock
             .Setup(r => r.GetAllAsync())
@@ -538,7 +600,7 @@ public class IncompleteBusStopViewModelTests
             new Ledger { Id = 1, CardIdm = "CARD001", Date = new DateTime(2026, 1, 10), Summary = "バス（★）", Expense = 200 },
         };
         _ledgerRepositoryMock
-            .Setup(r => r.GetByDateRangeAsync(null, It.IsAny<DateTime>(), It.IsAny<DateTime>()))
+            .Setup(r => r.GetBySummaryContainingAsync(It.IsAny<string>()))
             .ReturnsAsync(updatedLedgers);
 
         await _viewModel.InitializeAsync();
@@ -604,7 +666,7 @@ public class IncompleteBusStopViewModelTests
         };
 
         _ledgerRepositoryMock
-            .Setup(r => r.GetByDateRangeAsync(null, It.IsAny<DateTime>(), It.IsAny<DateTime>()))
+            .Setup(r => r.GetBySummaryContainingAsync(It.IsAny<string>()))
             .ReturnsAsync(ledgers);
         _cardRepositoryMock
             .Setup(r => r.GetAllAsync())
@@ -626,6 +688,33 @@ public class IncompleteBusStopViewModelTests
         result.Should().NotBeNull();
         result.Summary.Should().Be("バス（天神→博多）");
         _viewModel.Items[0].Summary.Should().Be("バス（天神→博多）");
+    }
+
+    /// <summary>
+    /// Issue #2332: バス停名を入力して行を差し替えても、利用者欄の「外N名」が消えないこと。
+    /// </summary>
+    [Fact]
+    public async Task UpdateItemSummaryAsync_同行者数を引き継ぐこと()
+    {
+        var ledgers = new List<Ledger>
+        {
+            new Ledger { Id = 10, CardIdm = "CARD001", Date = new DateTime(2026, 1, 10), Summary = "バス（★）", Expense = 200, StaffName = "田中", CompanionCount = 2 },
+        };
+        _ledgerRepositoryMock
+            .Setup(r => r.GetBySummaryContainingAsync(It.IsAny<string>()))
+            .ReturnsAsync(ledgers);
+        _cardRepositoryMock
+            .Setup(r => r.GetAllAsync())
+            .ReturnsAsync(new List<IcCard> { new IcCard { CardIdm = "CARD001", CardType = "はやかけん", CardNumber = "001" } });
+        await _viewModel.InitializeAsync();
+        _ledgerRepositoryMock
+            .Setup(r => r.GetByIdAsync(10))
+            .ReturnsAsync(new Ledger { Id = 10, CardIdm = "CARD001", Date = new DateTime(2026, 1, 10), Summary = "バス（天神→博多）", Expense = 200, StaffName = "田中", CompanionCount = 2 });
+
+        var result = await _viewModel.UpdateItemSummaryAsync(10);
+
+        result!.DisplayStaffName.Should().Be("田中 外2名");
+        _viewModel.Items[0].DisplayStaffName.Should().Be("田中 外2名");
     }
 
     /// <summary>
@@ -663,7 +752,7 @@ public class IncompleteBusStopViewModelTests
         };
 
         _ledgerRepositoryMock
-            .Setup(r => r.GetByDateRangeAsync(null, It.IsAny<DateTime>(), It.IsAny<DateTime>()))
+            .Setup(r => r.GetBySummaryContainingAsync(It.IsAny<string>()))
             .ReturnsAsync(ledgers);
         _cardRepositoryMock
             .Setup(r => r.GetAllAsync())
@@ -712,7 +801,7 @@ public class IncompleteBusStopViewModelTests
         };
 
         _ledgerRepositoryMock
-            .Setup(r => r.GetByDateRangeAsync(null, It.IsAny<DateTime>(), It.IsAny<DateTime>()))
+            .Setup(r => r.GetBySummaryContainingAsync(It.IsAny<string>()))
             .ReturnsAsync(ledgers);
         _cardRepositoryMock
             .Setup(r => r.GetAllAsync())
@@ -744,7 +833,7 @@ public class IncompleteBusStopViewModelTests
     {
         // Arrange: Itemsは空だがDBにはレコードがある
         _ledgerRepositoryMock
-            .Setup(r => r.GetByDateRangeAsync(null, It.IsAny<DateTime>(), It.IsAny<DateTime>()))
+            .Setup(r => r.GetBySummaryContainingAsync(It.IsAny<string>()))
             .ReturnsAsync(new List<Ledger>());
         _cardRepositoryMock
             .Setup(r => r.GetAllAsync())

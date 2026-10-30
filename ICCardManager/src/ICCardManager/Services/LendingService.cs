@@ -311,6 +311,15 @@ namespace ICCardManager.Services
 
                         if (hasLentRecord && !card.IsLent)
                         {
+                            // Issue #2322: 払戻済のカードは貸出中にしない（UpdateLentStatusAsync も 0 行になる）。
+                            // 競合（他 PC の削除）として記録すると原因を取り違えるので、別の文言で残して飛ばす。
+                            // 起動のたびに出続けるので、対処（貸出中の行の削除）を添える
+                            if (card.IsRefunded)
+                            {
+                                LogRefundedCardWithLentRecord(IdmMasker.Mask(card.CardIdm), card.IsLent);
+                                continue;
+                            }
+
                             // 貸出中レコードがあるのにis_lent=0 → is_lent=1に修復
                             // Issue #1953: 影響行数 0（他 PC がこのカードを論理削除した）は修復ではない。
                             // 数えると DB が変わっていないのに「N件修復しました」と報告し、
@@ -326,6 +335,15 @@ namespace ICCardManager.Services
                                 "Issue #790: 貸出状態の不整合を修復しました（is_lent: 0→1）: CardIdm={CardIdm}, LentAt={LentAt}",
                                 IdmMasker.Mask(card.CardIdm), lentRecord.LentAt);
                             repairCount++;
+                        }
+                        else if (hasLentRecord && card.IsRefunded)
+                        {
+                            // Issue #2322: 修正前の欠陥（30秒ルールの逆処理・貸出記録の作成ダイアログ）で作られ得た
+                            // 「払戻済なのに貸出中」の状態。is_lent と貸出中レコードは一致しているので上下の
+                            // 分岐には入らず、何も記録されないまま長期未返却として残り続ける。
+                            // 台帳は自動で直さない（どの行を消すかは利用者が履歴で確かめる）。メイン画面の警告
+                            // （WarningType.RefundedCardLent）とこのログで知らせる
+                            LogRefundedCardWithLentRecord(IdmMasker.Mask(card.CardIdm), card.IsLent);
                         }
                         else if (!hasLentRecord && card.IsLent)
                         {
@@ -417,7 +435,7 @@ namespace ICCardManager.Services
                 lockAcquired = await cardLock.WaitAsync(GetLockTimeoutMs()).ConfigureAwait(false);
                 if (!lockAcquired)
                 {
-                    result.ErrorMessage = "他の処理が実行中です。しばらく待ってから再度お試しください。";
+                    result.ErrorMessage = BuildLockTimeoutMessage("貸出");
                     return result;
                 }
 
@@ -475,7 +493,7 @@ namespace ICCardManager.Services
                 // 本番ログへ必ず残す。LogDebug では既定の Logging:LogLevel=Information によりファイル出力されない
                 _logger.LogError(ex, "貸出処理に失敗しました（CardIdm={CardIdm}）", IdmMasker.Mask(cardIdm));
                 // Issue #1110: SQLiteエラーをユーザー向けメッセージに変換
-                result.ErrorMessage = GetUserFriendlyErrorMessage(ex, "貸出");
+                result.ErrorMessage = GetUserFriendlyErrorMessage(ex, "貸出", _dbContext.IsSharedMode);
             }
             finally
             {
@@ -536,6 +554,16 @@ namespace ICCardManager.Services
                         .UpdateLentStatusAsync(cardIdm, true, now, staffIdm).ConfigureAwait(false);
                     if (!lentStatusUpdated)
                     {
+                        // Issue #2322: 貸出中にする更新の 0 行は「削除」と「払い戻し」の 2 つの原因を持つ。
+                        // 読み直して原因を分け、1 つのエラーコードに 2 つの原因を割り当てない（#1985）。
+                        // 払い戻しなら事前検証で拒んだときと同じ文言で案内する（#1757）
+                        var current = await _cardRepository
+                            .GetByIdmAsync(cardIdm, includeDeleted: true).ConfigureAwait(false);
+                        if (current != null && !current.IsDeleted && current.IsRefunded)
+                        {
+                            throw BusinessException.LendRefundedCardConflict(cardIdm);
+                        }
+
                         throw BusinessException.LentStatusUpdateConflict(cardIdm, "貸出");
                     }
 
@@ -589,6 +617,17 @@ namespace ICCardManager.Services
             if (card == null)
             {
                 return (null, null, "カードが登録されていません。");
+            }
+
+            // Issue #2322: 払戻済のカードは貸出対象外（Issue #530）。判定を書き込みの入口に置き、
+            // 呼び出し元（メイン画面のタッチ・30秒ルールの逆処理・貸出記録の作成ダイアログ）へ配らない。
+            // 以前は呼び出し元ごとに判定しており、職員証タッチ待ちでの再タッチ（逆処理）と、
+            // 貸出記録の作成ダイアログを開いた後の払い戻しでは誰も確かめていなかった。
+            // 削除済みのカードは GetByIdmAsync が返さない（上の null）ので、ここで運用中かどうかがそろう。
+            // この読み取りと書き込みの間の払い戻しは UpdateLentStatusAsync の WHERE（is_refunded = 0）が検出する。
+            if (card.IsRefunded)
+            {
+                return (card, null, BusinessException.RefundedCardLendMessage);
             }
 
             if (card.IsLent)
@@ -711,12 +750,18 @@ namespace ICCardManager.Services
         /// 払い戻し前に読み取ったカード。操作ログの変更前データになる。読み取れなかった（<c>null</c>）場合に
         /// 払い戻しを行わない判断は呼び出し元の責務（Issue #1760。競合の案内は画面ごとに異なるため）。
         /// </param>
-        /// <param name="refundAmount">払い戻す金額（払い戻し時点の残額）。払戻台帳の払出金額になる。</param>
+        /// <param name="refundAmount">
+        /// 払い戻す金額（確認ダイアログで示した残額）。払戻台帳の払出金額になる。書き込む時点の残額と違えば払い戻さない（Issue #2322）。
+        /// </param>
         /// <param name="refundedAt">払い戻しの日時。払戻台帳の日付・<c>refunded_at</c>・操作ログの変更後データに共通で使う。</param>
         /// <returns>作成した払戻台帳</returns>
         /// <exception cref="RefundConflictException">
         /// 払戻済への更新が 0 行だった（他のパソコンや別の操作でカードが削除・貸出・払い戻しされた）。
         /// <see cref="RefundConflictException.Result"/> に原因が入る。台帳も操作ログも残らない。
+        /// </exception>
+        /// <exception cref="RefundBalanceChangedException">
+        /// 書き込む時点の台帳の残額が <paramref name="refundAmount"/> と違った（確認した後に台帳が進んだ。Issue #2322）。
+        /// 台帳も操作ログも残らない。
         /// </exception>
         /// <remarks>
         /// <para>
@@ -754,6 +799,23 @@ namespace ICCardManager.Services
 
                     try
                     {
+                        // Issue #2322: 払い戻す金額は呼び出し元が確認ダイアログより前に読んだ残額であり、
+                        // 確認・認証を待つ間に他 PC や別の操作で台帳が進むと、古い金額のまま払戻台帳
+                        // （払出＝金額、残額 0）が作られて残高チェーンが払戻行で切れる。払戻済への更新の
+                        // WHERE（is_lent / is_refunded / is_deleted）は「貸出→返却」の済んだ変化を検出しないので、
+                        // 同じトランザクションの中で直前の残額を読み直し、違えば何も書かずに巻き戻す。
+                        // 読み取りは同じ接続（DbContext は接続を 1 本しか持たない）の上でこのトランザクションに含まれる。
+                        // DbContext.BeginTransactionAsync は引数なしの SQLiteConnection.BeginTransaction()
+                        // （System.Data.SQLite の既定で BEGIN IMMEDIATE）で開くので、開始の時点で書き込みロックを取っており、
+                        // 読んでから書くまでの間に他の接続は書き込めない（読んだ残額がそのまま書き込みの前提になる）。
+                        // 判定は呼び出し元の表示と同じ「直近の台帳の残額、無ければ 0」。
+                        // 読むのは払戻台帳を INSERT する前（INSERT の後では払戻台帳そのものが直近になる）。
+                        // 照合して中止するのは、払戻済への更新が成功した後（下）— 先に照合すると、他 PC が先に
+                        // 払い戻した・貸し出した場合（貸出・返却・払い戻しは残額も動かし得る）にも「利用・チャージが
+                        // 記録された」（BIZ017）と案内し、名指しできる原因（BIZ016: 既に払戻済・貸出中・削除）を隠す。
+                        var latestLedger = await _ledgerRepository.GetLatestLedgerAsync(cardIdm).ConfigureAwait(false);
+                        var currentBalance = latestLedger?.Balance ?? 0;
+
                         // Issue #1737: 入れ子になる書き込みは tx を明示的に渡す（暗黙参加に頼らない）。
                         // 台帳はリトライのたびに作り直す（前の試行で採番された Id を持ち越さない）。
                         var ledger = CreateRefundLedger(cardIdm, refundAmount, refundedAt);
@@ -770,6 +832,16 @@ namespace ICCardManager.Services
                                 "払い戻しを記録できませんでした（払戻済への更新が 0 行）: {CardIdm} 原因 {Result}",
                                 IdmMasker.Mask(cardIdm), refundResult);
                             throw new RefundConflictException(cardIdm, refundResult);
+                        }
+
+                        // カードの状態（払戻済・貸出中・削除）の競合が無いと分かってから、残額の変化を判定する（上のコメント）
+                        if (currentBalance != refundAmount)
+                        {
+                            // 画面はダイアログを出すだけなので、痕跡はここで残す（UI 文言とログを対で数える #1817）
+                            _logger.LogWarning(
+                                "払い戻しを記録できませんでした（確認後に残額が変化）: {CardIdm} 確認時 {ConfirmedAmount}円 現在 {CurrentBalance}円",
+                                IdmMasker.Mask(cardIdm), refundAmount, currentBalance);
+                            throw new RefundBalanceChangedException(cardIdm, refundAmount, currentBalance);
                         }
 
                         // 変更後データは同じトランザクションの中で組み立てる。コミット後に読み直すと、
@@ -875,6 +947,14 @@ namespace ICCardManager.Services
         /// 返却時の残高解決カスケード。
         /// 優先順位: (1)カード直接読取値 > (2)作成ledger末尾 > (3)DB 直近 ledger(Issue #1139)。
         /// </summary>
+        /// <remarks>
+        /// (1) は読取値が **1 円以上のときだけ**使い、0 円なら (2)(3) へ進む。残額は履歴ブロックから実値で読む
+        /// （<c>FelicaHistoryBlockDecoder</c>）ので、0 円は「読めなかった」印ではなく実際の残額である。
+        /// それでも 0 円を除くのは、同じ返却で台帳行の残額を決める <see cref="CreateUsageLedgersAsync"/> の
+        /// <c>useCardBalance</c>（1 円以上の残額を持つ明細があるときだけカードの残額を使う）と根拠を揃えるため。
+        /// 実際に 0 円まで使い切った場合も、通常は作成した ledger の末尾が 0 円になるので結果は同じになる。
+        /// 境界は <c>LendingServiceHelperTests.ResolveReturnBalanceAsync_CardBalanceZero_*</c> が固定する（Issue #2326）。
+        /// </remarks>
         internal async Task<int> ResolveReturnBalanceAsync(
             List<LedgerDetail> detailList, List<Ledger> createdLedgers, string cardIdm)
         {
@@ -1153,7 +1233,7 @@ namespace ICCardManager.Services
                 lockAcquired = await cardLock.WaitAsync(GetLockTimeoutMs()).ConfigureAwait(false);
                 if (!lockAcquired)
                 {
-                    result.ErrorMessage = "他の処理が実行中です。しばらく待ってから再度お試しください。";
+                    result.ErrorMessage = BuildLockTimeoutMessage("返却");
                     return result;
                 }
 
@@ -1270,7 +1350,7 @@ namespace ICCardManager.Services
                 // 本番ログへ必ず残す。LogDebug では既定の Logging:LogLevel=Information によりファイル出力されない
                 _logger.LogError(ex, "返却処理に失敗しました（CardIdm={CardIdm}）", IdmMasker.Mask(cardIdm));
                 // Issue #1110: SQLiteエラーをユーザー向けメッセージに変換
-                result.ErrorMessage = GetUserFriendlyErrorMessage(ex, "返却");
+                result.ErrorMessage = GetUserFriendlyErrorMessage(ex, "返却", _dbContext.IsSharedMode);
             }
             finally
             {
@@ -2070,6 +2150,20 @@ namespace ICCardManager.Services
         }
 
         /// <summary>
+        /// 貸出中レコードが残る払戻済のカードを記録する（Issue #2322）。起動のたびに出るので対処を添える
+        /// </summary>
+        /// <param name="maskedCardIdm"><see cref="IdmMasker.Mask"/> 済みの IDm（呼び出し地点でマスクする。#1852）</param>
+        /// <param name="isLent">カードの <c>is_lent</c>（どちらの形かをログに残す）</param>
+        private void LogRefundedCardWithLentRecord(string maskedCardIdm, bool isLent)
+        {
+            _logger.LogWarning(
+                "Issue #2322: 払戻済のカードに貸出中レコードが残っています（is_lent={IsLent}）。" +
+                "払戻済のカードは貸出中にしないため修復しません。メイン画面の警告をクリックしてこのカードの履歴を開き、" +
+                "貸出中の行を「変更」から削除してください（削除すると貸出中の状態も解消されます）: CardIdm={CardIdm}",
+                isLent ? 1 : 0, maskedCardIdm);
+        }
+
+        /// <summary>
         /// 整合性修復の <c>UPDATE</c> が影響行数 0 になった（競合）ことを記録する。
         /// </summary>
         /// <remarks>
@@ -2099,6 +2193,18 @@ namespace ICCardManager.Services
         protected virtual int GetLockTimeoutMs() => _lockTimeoutMs;
 
         /// <summary>
+        /// カードごとのロックを時間内に取れなかったときの文言（Issue #2328）
+        /// </summary>
+        /// <remarks>
+        /// 記録が確定する前の失敗であり、失敗後は職員証タッチ待ちへ戻るため、やり直しは
+        /// 「職員証のタッチから」と案内する（#2141）。旧文言「しばらく待ってから再度お試しください」は
+        /// 交通系ICカードだけの再タッチを促し、履歴表示になっていた。
+        /// </remarks>
+        /// <param name="operationName">ユーザー視点の操作名（「貸出」「返却」）</param>
+        internal static string BuildLockTimeoutMessage(string operationName)
+            => $"他の処理が実行中のため、{operationName}できませんでした。少し待って、{OperationRetryGuidance.RestartFromStaffCard}";
+
+        /// <summary>
         /// Issue #1110: 例外をユーザー向けエラーメッセージに変換
         /// </summary>
         /// <remarks>
@@ -2109,25 +2215,44 @@ namespace ICCardManager.Services
         /// （Issue #1614、#1817）、トーストに収まる簡潔な行動指示を返す。
         /// <see cref="AppException"/> は整備済みの <see cref="AppException.UserFriendlyMessage"/> を尊重する。
         /// </para>
+        /// <para>
+        /// Issue #2328: どの分岐も、やり直しは「職員証のタッチから」と案内する（#2141。失敗後は
+        /// <c>MainViewModel</c> が職員証タッチ待ちへ戻すため、交通系ICカードだけを再タッチすると履歴表示になる）。
+        /// 旧実装は既定分岐だけがこの案内で、Busy / Locked は「しばらく待ってから再度○○をお試しください」、
+        /// IoErr は接続の確認だけだった。原因の「なぜ」は <paramref name="isSharedMode"/> で分け、
+        /// ローカルモードで存在しない「他のPC」「ネットワーク共有フォルダ」を原因として案内しない
+        /// （<see cref="GetHistoryImportFailureReason"/> と同じ分け方。db-write-conventions.md）。
+        /// </para>
         /// </remarks>
-        internal static string GetUserFriendlyErrorMessage(Exception ex, string operationName)
+        /// <param name="ex">捕捉した例外</param>
+        /// <param name="operationName">ユーザー視点の操作名（「貸出」「返却」）</param>
+        /// <param name="isSharedMode">共有フォルダモードで動作しているか（<c>DbContext.IsSharedMode</c>）</param>
+        internal static string GetUserFriendlyErrorMessage(Exception ex, string operationName, bool isSharedMode)
         {
+            // トーストに出るため簡潔に保つ（文字サイズ「大」以上で末尾が切れる）
+            var restart = OperationRetryGuidance.RestartFromStaffCard;
+            var ioMessage = isSharedMode
+                ? $"共有フォルダに接続できず、{operationName}できませんでした。ネットワークを確認し、{restart}"
+                : $"データベースを読み書きできず、{operationName}できませんでした。少し待って、{restart}";
+
             if (ex is System.Data.SQLite.SQLiteException sqliteEx)
             {
                 switch (sqliteEx.ResultCode)
                 {
                     case System.Data.SQLite.SQLiteErrorCode.Busy:
-                        return $"他のPCと処理が競合しています。しばらく待ってから再度{operationName}をお試しください。";
+                        return isSharedMode
+                            ? $"他のPCと処理が競合し、{operationName}できませんでした。少し待って、{restart}"
+                            : $"他の処理（バックアップ等）と競合し、{operationName}できませんでした。少し待って、{restart}";
                     case System.Data.SQLite.SQLiteErrorCode.Locked:
-                        return $"データベースがロックされています。しばらく待ってから再度{operationName}をお試しください。";
+                        return $"データベースがロックされていて、{operationName}できませんでした。少し待って、{restart}";
                     case System.Data.SQLite.SQLiteErrorCode.IoErr:
-                        return $"ネットワーク共有フォルダへの接続に失敗しました。ネットワーク接続を確認してください。";
+                        return ioMessage;
                 }
             }
 
             if (ex is System.IO.IOException)
             {
-                return $"ネットワーク共有フォルダへの接続に失敗しました。ネットワーク接続を確認してください。";
+                return ioMessage;
             }
 
             // Issue #1817: 既定分岐で生の ex.Message を返すと、.NET／SQLite の英語文言が

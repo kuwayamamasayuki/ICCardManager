@@ -36,6 +36,22 @@ namespace ICCardManager.Common
             => Build(target, "更新", DeletedReason, listName);
 
         /// <summary>
+        /// 編集ダイアログで更新しようとした行が見つからなかったときの文言を組み立てる（Issue #2325）。
+        /// </summary>
+        /// <param name="target">対象の説明（ダイアログを開いた時点の値で名指しする）。「何が」に相当する</param>
+        /// <param name="listName">ダイアログを閉じたあとに再読込する一覧の名称</param>
+        /// <remarks>
+        /// 「なぜ」は <see cref="ForUpdate"/> と同じ。違うのは「どうすれば」で、ダイアログは背後の一覧を
+        /// 読み直す手段を持たず、一覧は<b>閉じたあとに呼び出し元が</b>読み直す（<c>LedgerDetailViewModel.NeedsHistoryReload</c>
+        /// と同じ形）。<see cref="ForUpdate"/> の「再読み込みしましたので」はその時点では事実にならないため分ける
+        /// （#1753「案内するなら、案内する側が先に再読込する」）。同じ行は何度保存しても失敗するので、
+        /// 入力が保存されないことも明示する。
+        /// </remarks>
+        public static string ForUpdateReloadOnClose(string target, string listName)
+            => $"{target}を更新できませんでした。{DeletedReason}入力した内容は保存していません。" +
+               $"この画面を閉じると{listName}を再読み込みしますので、一覧で状態を確認してからやり直してください。";
+
+        /// <summary>
         /// 払い戻し対象の行が見つからなかったときの文言を組み立てる。
         /// </summary>
         /// <param name="target">対象の説明。「何が」に相当する</param>

@@ -26,6 +26,21 @@ namespace ICCardManager.Data.Repositories
         Task<IEnumerable<Ledger>> GetByDateRangeAsync(string? cardIdm, DateTime fromDate, DateTime toDate);
 
         /// <summary>
+        /// 摘要に指定した文字列をそのまま含む利用履歴を、全カード・全期間から取得する（利用日の新しい順）
+        /// </summary>
+        /// <remarks>
+        /// Issue #2329: バス停名未入力の警告（<c>WarningService.CheckIncompleteBusStopsAsync</c>）と
+        /// 一覧（<c>IncompleteBusStopViewModel</c>）が、プレースホルダ（<c>SummaryGenerator.BusPlaceholder</c>）を渡して使う。
+        /// 以前は両者とも直近 1 年に区切っており、1 年より前の未入力は警告からも一覧からも消えて二度と案内されなかった。
+        /// 台帳は 6 年保存なので、期間で区切らず台帳に残っている行をすべて対象にする。
+        /// 何を探すか（交通系固有の判断）は呼び出し側が決め、永続化層は文字列の部分一致だけを担う（Issue #1695）。
+        /// 一致は大文字・小文字を区別するそのままの部分一致（<c>string.Contains</c> と同じ）で、LIKE のワイルドカードは解釈しない。
+        /// </remarks>
+        /// <param name="fragment">探す文字列（空にはできない。空だと全行が一致する）</param>
+        /// <exception cref="ArgumentException"><paramref name="fragment"/> が null または空のとき</exception>
+        Task<IEnumerable<Ledger>> GetBySummaryContainingAsync(string fragment);
+
+        /// <summary>
         /// 指定月の利用履歴を取得（帳票用）
         /// </summary>
         Task<IEnumerable<Ledger>> GetByMonthAsync(string cardIdm, int year, int month);
@@ -175,9 +190,10 @@ namespace ICCardManager.Data.Repositories
         /// </summary>
         /// <remarks>
         /// 「利用実績」の定義は稼働状況の集計（<see cref="GetUsageStatsByCardAsync"/>）と同じ:
-        /// 貸出中プレースホルダ（<c>is_lent_record = 1</c>）と繰越レコード
-        /// （「新規購入」および組織設定 <c>MidYearCarryoverFormat</c> に従う繰越摘要。
-        /// 既定書式では「○月から繰越」、Issue #1749）は利用実績ではないため除外する。
+        /// 貸出中プレースホルダ（<c>is_lent_record = 1</c>）と導入行
+        /// （<see cref="Models.Ledger.IsInitialRecordSummary"/> の 3 種: 「新規購入」、組織設定
+        /// <c>MidYearCarryoverFormat</c> に従う繰越摘要（既定書式では「○月から繰越」、Issue #1749）、
+        /// 繰越月を 3 月にして登録したカードの「前年度より繰越」（Issue #2326））は利用実績ではないため除外する。
         /// 利用実績が 1 件も無いカードは辞書に含まれない（最終利用日は空欄扱い）。
         /// <see cref="GetAllLatestBalancesAsync"/> の LastUsageDate はこれらを除外しない
         /// 「最新レコード日」であり、登録しただけのカードが「使われている」ように見えるため、
@@ -192,6 +208,8 @@ namespace ICCardManager.Data.Repositories
         /// <remarks>
         /// 台帳は 6 年分保持されるため、全件を読み出さず SQL 側で GROUP BY する。
         /// 貸出中レコード（<c>is_lent_record = 1</c>）は「利用」ではないため除外する。
+        /// 導入行（<see cref="Models.Ledger.IsInitialRecordSummary"/> の 3 種。「前年度より繰越」を含む、Issue #2326）も
+        /// 利用実績ではないため除外する（<see cref="GetAllLastUsageDatesAsync"/> と同じ定義）。
         /// </remarks>
         Task<IReadOnlyList<CardUsageStatsRow>> GetUsageStatsByCardAsync(DateTime fromDate, DateTime toDate);
 
@@ -199,7 +217,7 @@ namespace ICCardManager.Data.Repositories
         /// 指定期間の月別 × 貸出職員別の利用額を集計して取得（Issue #1692）
         /// </summary>
         /// <remarks>
-        /// 貸出中レコード・繰越レコードに加え、払戻台帳（払い戻しで残高全額を払出に計上した行）も除外する
+        /// 貸出中レコード・導入行（「前年度より繰越」を含む 3 種、Issue #2326）に加え、払戻台帳（払い戻しで残高全額を払出に計上した行）も除外する
         /// （Issue #2157）。払い戻しは職員の支出ではなく、残すと「（職員名なし）」系列に残高全額が積まれる。
         /// 判定は摘要ではなく行の形で行う。<see cref="GetUsageStatsByCardAsync"/> はこの除外を行わない
         /// （稼働状況は払戻済カードをカード単位で除外しているため）。

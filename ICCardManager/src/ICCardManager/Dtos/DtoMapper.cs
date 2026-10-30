@@ -1,3 +1,4 @@
+#nullable enable
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -20,7 +21,7 @@ namespace ICCardManager.Dtos
         /// <param name="card">変換元のカードエンティティ</param>
         /// <param name="staffName">貸出中の場合の職員名（オプション）</param>
         /// <returns>変換後のDTO</returns>
-        public static CardDto ToDto(this IcCard card, string staffName = null)
+        public static CardDto ToDto(this IcCard card, string? staffName = null)
         {
             return new CardDto
             {
@@ -37,7 +38,8 @@ namespace ICCardManager.Dtos
                 CarryoverExpenseTotal = card.CarryoverExpenseTotal,
                 CarryoverFiscalYear = card.CarryoverFiscalYear,
                 IsRefunded = card.IsRefunded,
-                RefundedAt = card.RefundedAt
+                RefundedAt = card.RefundedAt,
+                IsInOperation = card.IsInOperation
             };
         }
 

@@ -445,6 +445,39 @@ namespace ICCardManager.Tests.Services
             result.Should().Be(200);
         }
 
+        /// <summary>
+        /// Issue #2326: カードの読取値がちょうど 0 円のときは読取値を使わず、
+        /// 作成した ledger の末尾の残額へ進むこと（04 §2.5.1・07 の優先順位の条件を固定する）。
+        /// 0 円は実際の残額だが、同じ返却で台帳行の残額を決める <c>CreateUsageLedgersAsync</c> の
+        /// <c>useCardBalance</c>（1 円以上の残額を持つ明細があるときだけカードの残額を使う）と根拠を揃えるため除く
+        /// </summary>
+        [Fact]
+        public async Task ResolveReturnBalanceAsync_CardBalanceZero_FallsBackToCreatedLedger()
+        {
+            var details = new List<LedgerDetail> { new() { Balance = 0 } };
+            var createdLedgers = new List<Ledger> { new() { Balance = 300 } };
+
+            var service = CreateService();
+            var result = await service.ResolveReturnBalanceAsync(details, createdLedgers, "CARD01");
+
+            result.Should().Be(300);
+        }
+
+        /// <summary>
+        /// Issue #2326 の対: 読取値が 1 円なら作成した ledger より読取値を優先すること（境界の 1 つ上）
+        /// </summary>
+        [Fact]
+        public async Task ResolveReturnBalanceAsync_CardBalanceOneYen_ReturnsCardBalance()
+        {
+            var details = new List<LedgerDetail> { new() { Balance = 1 } };
+            var createdLedgers = new List<Ledger> { new() { Balance = 300 } };
+
+            var service = CreateService();
+            var result = await service.ResolveReturnBalanceAsync(details, createdLedgers, "CARD01");
+
+            result.Should().Be(1);
+        }
+
         [Fact]
         public async Task ResolveReturnBalanceAsync_NoDetailNoLedger_UsesDbFallback()
         {

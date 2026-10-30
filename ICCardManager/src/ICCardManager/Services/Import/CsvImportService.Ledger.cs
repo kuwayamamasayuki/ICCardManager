@@ -107,7 +107,8 @@ namespace ICCardManager.Services
                     if (parsed.LedgerId.HasValue && existingLedger != null)
                     {
                         // Issue #2262: ID が指す履歴と行のカードが食い違う行は取り込まない（下記 BuildLedgerCardMismatchError）
-                        var cardMismatch = BuildLedgerCardMismatchError(lineNumber, parsed.LedgerId.Value, existingLedger, parsed.CardIdm, allCards);
+                        var cardMismatch = BuildLedgerCardMismatchError(lineNumber, parsed.LedgerId.Value, existingLedger.CardIdm, parsed.CardIdm, allCards,
+                            LedgerCsvCardColumnLabel, offerBlankIdAsNewLedger: true);
                         if (cardMismatch != null)
                         {
                             errors.Add(cardMismatch);
@@ -135,6 +136,14 @@ namespace ICCardManager.Services
                     if (lentRowError != null)
                     {
                         errors.Add(lentRowError);
+                        continue;
+                    }
+
+                    // Issue #2324: 利用履歴 ID が台帳に無い行（削除・統合した行）を新しい履歴として戻さない（BuildLedgerIdNotFoundError の remarks）
+                    var idNotFoundError = BuildLedgerIdNotFoundError(lineNumber, parsed.LedgerId, existingLedger, duplicateKeyExists);
+                    if (idNotFoundError != null)
+                    {
+                        errors.Add(idNotFoundError);
                         continue;
                     }
 
@@ -311,7 +320,8 @@ namespace ICCardManager.Services
                                 errors.Add(new CsvImportError
                                 {
                                     LineNumber = lineNumber,
-                                    Message = "履歴の登録に失敗しました",
+                                    // Issue #2324: 何が（この行の履歴）・なぜ（登録できず全体を取り消した）・どうすれば（取り込み直す）
+                                    Message = LedgerInsertFailedMessage,
                                     Data = ledger.CardIdm
                                 });
                             }
@@ -448,6 +458,102 @@ namespace ICCardManager.Services
             => existingLedger != null ? !hasChanges : duplicateKeyExists;
 
         /// <summary>
+        /// 利用履歴 CSV で新しい履歴の登録（<c>InsertAsync</c>）が失敗値を返したときの行エラーの文言（Issue #2324）
+        /// </summary>
+        /// <remarks>
+        /// 以前は「履歴の登録に失敗しました」だけで、取り込み全体を取り消したことも次の行動も示さなかった。
+        /// 画面は「行N: 」を前に付けるので、「何が」は「この行の履歴」で足りる。
+        /// 失敗値は待てば解消する失敗を示すとは限らないため、「しばらく待って」ではなく、取り込み直しても繰り返すときの連絡先を示す。
+        /// 連絡先は他のエラー文言（約 9 か所）と同じ「管理者に連絡してください」に揃える（#1817 の「近くにある既存文言の語彙に揃える」）。
+        /// この文言だけ「管理者（IT担当者）」と言い換えると、同じ連絡先が画面ごとに別の人に読める。語彙そのものを見直すなら、
+        /// 全文言を一度に変える別の Issue で扱う。
+        /// 「1件も取り込んでいません」は、巻き戻し（<c>TryRollbackImportTransaction</c>）が失敗しても成り立つ
+        /// （未コミットのトランザクションは <c>TransactionScope.Dispose()</c> で必ず巻き戻る）。
+        /// </remarks>
+        internal const string LedgerInsertFailedMessage =
+            "この行の履歴を台帳に登録できなかったため、取り込み全体を取り消しました（1件も取り込んでいません）。" +
+            "同じCSVをプレビューからもう一度取り込み、同じエラーが繰り返し出る場合は管理者に連絡してください。";
+
+        /// <summary>
+        /// 利用履歴 ID が台帳に無い行のエラー（Issue #2324）
+        /// </summary>
+        /// <param name="lineNumber">CSV の行番号</param>
+        /// <param name="ledgerId">行の利用履歴 ID（空欄なら <c>null</c>）</param>
+        /// <param name="existingLedger">ID が指す既存の行（見つからなければ <c>null</c>）</param>
+        /// <param name="duplicateKeyExists">
+        /// スキップ指定ありで重複キー（カード・日付・摘要・金額・残額）が既存の履歴と一致するか（一致すれば取り込みはスキップする）
+        /// </param>
+        /// <returns>取り込んでよければ <c>null</c></returns>
+        /// <remarks>
+        /// <para>
+        /// 利用履歴 ID は <c>ledger.id</c>（AUTOINCREMENT。削除した値は再利用されない）を写したもので、ID があるのに台帳に
+        /// 行が無いのは、その行が<b>台帳から消えた</b>か、<b>別のデータベースで出力した</b>場合: 履歴画面で削除した行、
+        /// 統合で他の行にまとめた統合元、返却で削除された貸出中レコード（<see cref="LedgerCsvLentRowPolicy"/> が先に専用の
+        /// 文言で拒否する）、別の PC のデータベースから出力した CSV の行、バックアップからのリストアより前に出力した CSV の行
+        /// （リストアで <c>sqlite_sequence</c> も巻き戻るため、リストア後に作られていない ID は台帳に無い）。以前はこれらを新しい履歴として登録しており、昔の CSV を取り込み直すと、
+        /// 削除・統合で消した行が別の ID で台帳に戻った（統合元は統合先と二重計上になる）。残高の検証は CSV の中のつながりと
+        /// 最初の行の直前残高しか見ないため、この復活は検証を通っていた。
+        /// </para>
+        /// <para>
+        /// 台帳を変えない行は拒否しない（#2307 の <see cref="LeavesLedgerUnchanged"/> と同じ考え方）: スキップ指定ありで
+        /// 重複キーが既存の履歴と一致する行は、取り込みもプレビューもスキップする。新しい履歴として登録したいときは、
+        /// 利用履歴 ID を空欄にすれば ID の無い行として扱われ、重複キーの照合を経て登録される（意図して戻す手段を残す）。
+        /// 判定は取り込み・プレビューが共通のこの関数で行う。
+        /// </para>
+        /// </remarks>
+        private static CsvImportError? BuildLedgerIdNotFoundError(int lineNumber, int? ledgerId, Ledger? existingLedger, bool duplicateKeyExists)
+        {
+            if (!ledgerId.HasValue || existingLedger != null || duplicateKeyExists)
+            {
+                return null;
+            }
+
+            var idText = ledgerId.Value.ToString(CultureInfo.InvariantCulture);
+            return new CsvImportError
+            {
+                LineNumber = lineNumber,
+                Message = $"利用履歴ID {idText} の履歴は台帳にありません（履歴画面で削除した・統合で他の履歴にまとめた履歴か、" +
+                          "別のパソコンやバックアップから戻す前のデータベースで出力したCSVの可能性があります）。" +
+                          "削除・統合した履歴を取り込みで台帳に戻さないため、この行は取り込めません。" +
+                          "不要な行ならCSVから削除し、新しい履歴として登録する場合は利用履歴IDを空欄にしてから、もう一度取り込んでください。" +
+                          LedgerCsvFromOtherDatabaseGuidance,
+                Data = idText
+            };
+        }
+
+        /// <summary>
+        /// 利用履歴 CSV の行エラーのうち、原因が「別のデータベース（別の PC・リストア前）で出力した CSV」であり得るものに添える案内（Issue #2324）
+        /// </summary>
+        /// <remarks>
+        /// その原因なら、エラーになった行だけ直しても、エラーにならなかった行の ID が同じカードの無関係な履歴を指したまま残り、
+        /// 黙って更新され得る。行単位の直し方とは別に、CSV 全体の対処（ID 列の値をすべて消し、見出しは残し、スキップ指定ありで
+        /// 取り込み直す）を示す。管理者マニュアル・04 §14.7 の移行・リストア後の手順と同じ内容。
+        /// </remarks>
+        internal const string LedgerCsvFromOtherDatabaseGuidance =
+            "別のパソコンやバックアップから戻す前のデータベースで出力したCSVの場合は、利用履歴IDの値をすべて消し（1行目の「ID」の見出しは残す）、" +
+            "「既存データはスキップする」をオンにして取り込み直してください。";
+
+        /// <summary>
+        /// 利用履歴詳細 CSV の行エラーのうち、原因が「別のデータベースで出力した CSV」であり得るものに添える案内（Issue #2324）
+        /// </summary>
+        /// <remarks>
+        /// 明細 CSV は ID を消すと既存の履歴と照合されずに新しい履歴になり、ID を残すと同じカードの無関係な履歴の明細を
+        /// 置き換え得るため、その CSV を取り込まないことだけを示す（管理者マニュアル・04 §14.7 と同じ）。
+        /// </remarks>
+        internal const string DetailCsvFromOtherDatabaseGuidance =
+            "別のパソコンやバックアップから戻す前のデータベースで出力したCSVの場合は、このCSVは取り込まないでください。";
+
+        /// <summary>
+        /// 利用履歴 CSV で、行のカードを直す場所（カードIDm列が空欄なら取り込み先カードを使う）
+        /// </summary>
+        private const string LedgerCsvCardColumnLabel = "カードIDm列（または取り込み先カード）";
+
+        /// <summary>
+        /// 利用履歴詳細 CSV で、行のカードを直す場所（取り込み先カードの指定は無い）
+        /// </summary>
+        private const string DetailCsvCardColumnLabel = "カードIDm列";
+
+        /// <summary>
         /// 利用履歴 ID が指す既存の履歴と、行のカード（カードIDm列、空欄なら取り込み先カード）が食い違うときのエラー（Issue #2262）
         /// </summary>
         /// <returns>一致すれば <c>null</c></returns>
@@ -457,23 +563,44 @@ namespace ICCardManager.Services
         /// 書き換え、操作ログの「変更後」には実際には書いていないカードが載る。カードを付け替える取り込みは
         /// 想定していないため、検証エラーにする（プレビューにも同じエラーを出す）。
         /// IDm は画面に出さない（#1986）。登録済みのカードはカード種別と管理番号で名指しする。
+        /// 利用履歴詳細 CSV の明細の置き換えも同じ理由で同じ照合を行う（Issue #2324。<c>CsvImportService.Detail.cs</c>）。
         /// </remarks>
+        /// <param name="lineNumber">CSV の行番号</param>
+        /// <param name="ledgerId">行の利用履歴 ID</param>
+        /// <param name="ledgerCardIdm">ID が指す既存の履歴のカード</param>
+        /// <param name="rowCardIdm">行のカード</param>
+        /// <param name="cards">登録済みのカード（削除済みを含む。名指しに使う）</param>
+        /// <param name="cardColumnLabel">
+        /// 行のカードをどこで直すか（利用履歴は <see cref="LedgerCsvCardColumnLabel"/>、利用履歴詳細は <see cref="DetailCsvCardColumnLabel"/>）
+        /// </param>
+        /// <param name="offerBlankIdAsNewLedger">
+        /// 「新しい履歴として取り込むなら利用履歴 ID を空欄にする」を案内するか。利用履歴 CSV だけ <c>true</c>:
+        /// ID が空欄の行は、スキップ指定ありなら重複キー（カード・日付・摘要・金額・残額）で既存の履歴と照合されてから登録される。
+        /// 利用履歴詳細 CSV では <c>false</c>: ID が空欄の明細行は <c>NewLedgerFromSegmentsBuilder</c> が既存の履歴と照合せずに
+        /// 新しい履歴を作るため、ID を書き間違えた行で空欄を案内すると同じ利用を二重に計上させる
+        /// （<see cref="BuildDetailLedgerIdNotFoundMessage"/> と同じ理由）
+        /// </param>
         private static CsvImportError? BuildLedgerCardMismatchError(
-            int lineNumber, int ledgerId, Ledger existingLedger, string rowCardIdm, IEnumerable<IcCard> cards)
+            int lineNumber, int ledgerId, string ledgerCardIdm, string rowCardIdm, IEnumerable<IcCard> cards, string cardColumnLabel,
+            bool offerBlankIdAsNewLedger)
         {
-            if (string.Equals(existingLedger.CardIdm, rowCardIdm, StringComparison.OrdinalIgnoreCase))
+            if (string.Equals(ledgerCardIdm, rowCardIdm, StringComparison.OrdinalIgnoreCase))
             {
                 return null;
             }
 
-            var owner = cards.FirstOrDefault(c => string.Equals(c.CardIdm, existingLedger.CardIdm, StringComparison.OrdinalIgnoreCase));
+            var owner = cards.FirstOrDefault(c => string.Equals(c.CardIdm, ledgerCardIdm, StringComparison.OrdinalIgnoreCase));
             var ownerLabel = owner != null ? $"「{$"{owner.CardType} {owner.CardNumber}".Trim()}」" : "（登録されていないカード）";
             return new CsvImportError
             {
                 LineNumber = lineNumber,
                 Message = $"利用履歴ID {ledgerId.ToString(CultureInfo.InvariantCulture)} は別の交通系ICカード{ownerLabel}の履歴で、" +
-                          "この行のカードと一致しないため取り込めません。利用履歴IDとカードIDm列（または取り込み先カード）を確認し、" +
-                          "新しい履歴として取り込む場合は利用履歴IDを空欄にしてください。",
+                          $"この行のカードと一致しないため取り込めません。" +
+                          (offerBlankIdAsNewLedger
+                              ? $"利用履歴IDと{cardColumnLabel}を確認し、新しい履歴として取り込む場合は利用履歴IDを空欄にしてください。" +
+                                "「既存データはスキップする」がオフだと、台帳に既にある履歴も二重に登録されます。" +
+                                LedgerCsvFromOtherDatabaseGuidance
+                              : $"利用履歴IDと{cardColumnLabel}を確認してください。" + DetailCsvFromOtherDatabaseGuidance),
                 Data = ledgerId.ToString(CultureInfo.InvariantCulture)
             };
         }
@@ -586,7 +713,8 @@ namespace ICCardManager.Services
                     // Issue #2262: 取り込みと同じ検証（ID が指す履歴と行のカードの食い違い）をプレビューでも行う
                     if (ledgerId.HasValue && existingLedger != null)
                     {
-                        var cardMismatch = BuildLedgerCardMismatchError(lineNumber, ledgerId.Value, existingLedger, cardIdm, allCards);
+                        var cardMismatch = BuildLedgerCardMismatchError(lineNumber, ledgerId.Value, existingLedger.CardIdm, cardIdm, allCards,
+                            LedgerCsvCardColumnLabel, offerBlankIdAsNewLedger: true);
                         if (cardMismatch != null)
                         {
                             errors.Add(cardMismatch);
@@ -609,6 +737,14 @@ namespace ICCardManager.Services
                     if (lentRowError != null)
                     {
                         errors.Add(lentRowError);
+                        continue;
+                    }
+
+                    // Issue #2324: 取り込みと同じ関数で、利用履歴 ID が台帳に無い行を拒否する
+                    var idNotFoundError = BuildLedgerIdNotFoundError(lineNumber, ledgerId, existingLedger, duplicateKeyExists);
+                    if (idNotFoundError != null)
+                    {
+                        errors.Add(idNotFoundError);
                         continue;
                     }
 
@@ -639,20 +775,12 @@ namespace ICCardManager.Services
                         }
                         else
                         {
-                            // IDが指定されているがレコードが見つからない場合は新規追加。
-                            // ただしスキップ指定ありで重複キーが既存の履歴と一致すれば、取り込みと同じくスキップ（Issue #2307。
-                            // 以前は常に「追加」と表示し、取り込みはスキップするので結果が食い違っていた。#2324 の所見の一部）
+                            // IDが指定されているがレコードが見つからない行は、スキップ指定ありで重複キーが既存の履歴と一致する
+                            // （台帳を変えない）場合だけここへ来る。それ以外は上の BuildLedgerIdNotFoundError で拒否済み（Issue #2324）。
+                            // 取り込みと同じくスキップと表示する（Issue #2307。以前は常に「追加」と表示し、取り込みはスキップしていた）
                             changes = CreateLedgerDisplayChanges(date, summary, income, expense, balance, staffName, note, companionCount);
-                            if (duplicateKeyExists)
-                            {
-                                action = ImportAction.Skip;
-                                skipCount++;
-                            }
-                            else
-                            {
-                                action = ImportAction.Insert;
-                                newCount++;
-                            }
+                            action = ImportAction.Skip;
+                            skipCount++;
                         }
                     }
                     else

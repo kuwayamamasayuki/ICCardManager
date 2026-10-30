@@ -93,6 +93,19 @@ namespace ICCardManager.Services
                     continue;
                 }
 
+                // Issue #2324: 「削除済み」列が「1」の行は取り込まない（復元・登録・更新しない。TryReadDeletedFlag の remarks）。
+                // 職員の復元は認証できる職員証を増やすので、削除済みとして出力した行を黙って有効に戻さない
+                if (!TryReadDeletedFlag(fields, lineNumber, line, errors, out var isDeletedRow))
+                {
+                    continue;
+                }
+
+                if (isDeletedRow)
+                {
+                    skippedCount++;
+                    continue;
+                }
+
                 // 書き込む内容（取り込み後の職員）。Issue #2262: 既存の職員（検証で読んだインスタンス）は書き換えない。
                 // 書き換えると、操作ログの「変更前」に使う値と「変更後」の値が同じインスタンスを指し得る（#1959）。
                 // 取り込み後の職員は is_deleted = 0（削除済みなら復元する）で、Staff の列はこれですべて。
@@ -410,12 +423,24 @@ namespace ICCardManager.Services
                     continue;
                 }
 
+                // Issue #2324: 取り込みと同じく「削除済み」列が「1」の行はスキップと示す
+                if (!TryReadDeletedFlag(fields, lineNumber, line, errors, out var isDeletedRow))
+                {
+                    continue;
+                }
+
                 // 既存チェック（削除済みも含めて検索）
                 var existingStaff = await _staffRepository.GetByIdmAsync(staffIdm, includeDeleted: true).ConfigureAwait(false);
                 ImportAction action;
                 var changes = new List<FieldChange>();
 
-                if (existingStaff != null)
+                if (isDeletedRow)
+                {
+                    action = ImportAction.Skip;
+                    skipCount++;
+                    changes.Add(CreateDeletedRowSkipDisplay());
+                }
+                else if (existingStaff != null)
                 {
                     // 削除済み職員の場合は復元対象として扱う
                     if (existingStaff.IsDeleted)

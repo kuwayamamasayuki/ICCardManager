@@ -1,3 +1,4 @@
+#nullable enable
 using System;
 using ICCardManager.Common;
 
@@ -52,5 +53,19 @@ namespace ICCardManager.Dtos
         /// 利用者名
         /// </summary>
         public string StaffName { get; set; } = string.Empty;
+
+        /// <summary>
+        /// 同行者数（本人を含まない。<c>ledger.companion_count</c>）
+        /// </summary>
+        public int CompanionCount { get; set; }
+
+        /// <summary>
+        /// 表示用: 利用者名（同行者がいれば「外N名」を付ける。Issue #2332）
+        /// </summary>
+        /// <remarks>
+        /// 「外N名」は保存値ではなく表示時の導出（Issue #1906）。履歴一覧（<see cref="LedgerDto.DisplayStaffName"/>）と
+        /// 同じ <see cref="StaffNameFormatter.Format"/> で組み立て、同じ行が画面によって違う氏名で見えないようにする。
+        /// </remarks>
+        public string DisplayStaffName => StaffNameFormatter.Format(StaffName, CompanionCount);
     }
 }

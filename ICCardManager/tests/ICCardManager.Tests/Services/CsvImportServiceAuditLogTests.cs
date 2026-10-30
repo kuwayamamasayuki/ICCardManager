@@ -341,6 +341,11 @@ FROM operation_log WHERE target_table = @table AND action <> 'IMPORT' ORDER BY i
         var error = result.Errors.Should().ContainSingle().Subject;
         error.LineNumber.Should().Be(2);
         error.Message.Should().Contain("別の交通系ICカード「はやかけん 001」").And.EndWith("してください。");
+        // Issue #2324: 利用履歴 CSV の ID 空欄の行は、スキップ指定ありなら重複キーで既存の履歴と照合されてから登録されるので、
+        // 空欄の案内を残す（利用履歴詳細 CSV では外す。CsvImportExistingRowMatchingTests と対）
+        error.Message.Should().Contain("新しい履歴として取り込む場合は利用履歴IDを空欄にしてください。")
+            .And.Contain("「既存データはスキップする」がオフだと、台帳に既にある履歴も二重に登録されます", "空欄にした行はスキップ指定オフでは照合されない（#903）")
+            .And.Contain("利用履歴IDの値をすべて消し", "別のデータベースで出力した CSV でも出得るので、CSV 全体の対処を示す");
         error.Message.Should().NotContain(TestCardIdm).And.NotContain("1111111111111111", "IDm は画面に出さない（#1986）");
         (await _ledgerRepository.GetByIdAsync(ledgerId))!.Note.Should().Be("変更前の備考");
         (await GetRowLogsAsync(OperationLogger.Tables.Ledger)).Should().BeEmpty();

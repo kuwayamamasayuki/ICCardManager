@@ -180,10 +180,10 @@ namespace ICCardManager.ViewModels
         private string _balanceDisplay = string.Empty;
 
         /// <summary>
-        /// 利用者名
+        /// 表示用: 利用者名（同行者がいれば「外N名」を付ける。氏名が無ければ「-」。Issue #2332）
         /// </summary>
         [ObservableProperty]
-        private string _staffName = string.Empty;
+        private string _displayStaffName = string.Empty;
 
         /// <summary>
         /// 備考
@@ -308,7 +308,9 @@ namespace ICCardManager.ViewModels
             IncomeDisplay = DisplayFormatters.FormatAmountWithUnitOrEmpty(_ledger.Income);
             ExpenseDisplay = DisplayFormatters.FormatAmountWithUnitOrEmpty(_ledger.Expense);
             BalanceDisplay = DisplayFormatters.FormatBalanceWithUnit(_ledger.Balance);
-            StaffName = _ledger.StaffName ?? "-";
+            // Issue #2332: 同行者がいれば「外N名」を付ける（履歴一覧の LedgerDto.DisplayStaffName と同じ導出。#1906）
+            var displayStaffName = _ledger.DisplayStaffName;
+            DisplayStaffName = displayStaffName.Length == 0 ? "-" : displayStaffName;
             Note = _ledger.Note ?? string.Empty;
 
             // 詳細アイテムを設定

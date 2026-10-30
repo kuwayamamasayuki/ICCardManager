@@ -140,6 +140,18 @@ namespace ICCardManager.Services
                     continue;
                 }
 
+                // Issue #2324: 「削除済み」列が「1」の行は取り込まない（復元・登録・更新しない。TryReadDeletedFlag の remarks）
+                if (!TryReadDeletedFlag(fields, lineNumber, line, errors, out var isDeletedRow))
+                {
+                    continue;
+                }
+
+                if (isDeletedRow)
+                {
+                    skippedCount++;
+                    continue;
+                }
+
                 // 既存チェック（削除済みも含めて検索）
                 var existingCard = await _cardRepository.GetByIdmAsync(cardIdm, includeDeleted: true).ConfigureAwait(false);
                 if (existingCard != null)
@@ -407,12 +419,24 @@ namespace ICCardManager.Services
                     continue;
                 }
 
+                // Issue #2324: 取り込みと同じく「削除済み」列が「1」の行はスキップと示す
+                if (!TryReadDeletedFlag(fields, lineNumber, line, errors, out var isDeletedRow))
+                {
+                    continue;
+                }
+
                 // 既存チェック（削除済みも含めて検索）
                 var existingCard = await _cardRepository.GetByIdmAsync(cardIdm, includeDeleted: true).ConfigureAwait(false);
                 ImportAction action;
                 var changes = new List<FieldChange>();
 
-                if (existingCard != null)
+                if (isDeletedRow)
+                {
+                    action = ImportAction.Skip;
+                    skipCount++;
+                    changes.Add(CreateDeletedRowSkipDisplay());
+                }
+                else if (existingCard != null)
                 {
                     // 削除済みカードの場合は復元対象として扱う
                     if (existingCard.IsDeleted)

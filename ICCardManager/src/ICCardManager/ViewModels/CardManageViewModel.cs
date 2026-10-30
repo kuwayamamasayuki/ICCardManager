@@ -610,10 +610,14 @@ namespace ICCardManager.ViewModels
                     };
 
                     // Issue #1215: 紙の出納簿からの繰越時は累計受入・払出の初期値を保存
-                    if (!modeResult.IsNewPurchase && modeResult.CarryoverMonth.HasValue)
+                    // Issue #2326: 3 月から繰越（新年度の始まり）は保存しない。繰越年度は新年度になるため、
+                    // 旧年度の紙の累計を保存すると新年度の 5 月以降の累計行に上乗せされる。
+                    // ダイアログも欄を無効にしているが、保存するかは PaperCarryoverPolicy の 1 か所で判定する
+                    if (PaperCarryoverPolicy.CarriesPaperCumulative(modeResult.IsNewPurchase, modeResult.CarryoverMonth)
+                        && modeResult.CarryoverMonth is int carryoverMonth)
                     {
                         var carryoverDate = SummaryGenerator.GetMidYearCarryoverDate(
-                            modeResult.CarryoverMonth.Value, registeredAt);
+                            carryoverMonth, registeredAt);
                         card.CarryoverIncomeTotal = modeResult.CarryoverIncomeTotal;
                         card.CarryoverExpenseTotal = modeResult.CarryoverExpenseTotal;
                         card.CarryoverFiscalYear = FiscalYearHelper.GetFiscalYear(
@@ -1118,6 +1122,9 @@ namespace ICCardManager.ViewModels
         /// 払い戻し時は残高を払出金額として計上し、残高を0にする。
         /// Issue #530対応: 払戻済カードは削除せず「払戻済」状態として保持。
         /// 払戻済カードは帳票作成時に引き続き選択可能だが、貸出対象からは除外される。
+        /// Issue #2322: 払い戻しは台帳に「払戻しによる払出」の行を作りカードを運用から外すため、
+        /// 確認の後に職員証の認証を求め、操作ログの操作者を認証した職員にする（削除・貸出記録の作成と同じ）。
+        /// 確認より前に認証すると、払い戻すかどうかを決める前に職員証を求めることになる（#2263 / #2265 と同じ順序）。
         /// </remarks>
         [RelayCommand(CanExecute = nameof(CanRefund))]
         public async Task RefundAsync()
@@ -1155,6 +1162,16 @@ namespace ICCardManager.ViewModels
 
             if (!confirmed)
             {
+                return;
+            }
+
+            // Issue #2322: 払い戻しは台帳に行を作る操作なので職員証の認証を求める（03 §3.17）。
+            // 認証した 1 操作のスコープ（#2260）の中で書き込み、操作ログの操作者を認証した職員にする。
+            // 認証の待機中に台帳が進んでも、RefundAsync がトランザクションの中で残額を読み直して検出する。
+            using var authResult = (await _staffAuthService.RequestAuthenticationAsync("交通系ICカードの払い戻し"))?.Enter();
+            if (authResult == null)
+            {
+                // 認証キャンセルまたはタイムアウト（削除と同じく何もしない）
                 return;
             }
 
@@ -1200,6 +1217,21 @@ namespace ICCardManager.ViewModels
                     await LoadCardsAsync();
                     return;
                 }
+                catch (RefundBalanceChangedException ex)
+                {
+                    // Issue #2322: 確認した後に台帳が進んだ（他 PC や別の操作で利用・チャージ・履歴の変更が記録された）。
+                    // 古い金額で払戻台帳を作ると残高チェーンが払戻行で切れるため、サービスが何も書かずに巻き戻した。
+                    // 「再読み込みしました」と案内するので、再読込を先に行う（キャッシュは RefundAsync が破棄済み。#1759）。
+                    await LoadCardsAsync();
+                    using (SuspendBusy())
+                    {
+                        _dialogService.ShowError(
+                            FormatRefundBalanceChangedMessage(
+                                FormatCardLabel(refundCardType, refundCardNumber), ex.ConfirmedAmount, ex.CurrentBalance),
+                            "払い戻しできません");
+                    }
+                    return;
+                }
 
                 await LoadCardsAsync();
                 CancelEdit();
@@ -1210,6 +1242,20 @@ namespace ICCardManager.ViewModels
                     : "払い戻しが完了しました";
                 IsStatusError = false;
             }
+        }
+
+        /// <summary>
+        /// 確認した後に残額が変わったため払い戻せなかったことの案内（Issue #2322）
+        /// </summary>
+        /// <param name="targetLabel">対象カードの表示名（<c>FormatCardLabel</c> の形）</param>
+        /// <param name="confirmedAmount">確認ダイアログで示した残額</param>
+        /// <param name="currentBalance">書き込む時点の台帳の残額</param>
+        internal static string FormatRefundBalanceChangedMessage(string targetLabel, int confirmedAmount, int currentBalance)
+        {
+            return $"{targetLabel}を払い戻せませんでした。" +
+                   $"確認画面の残高（¥{confirmedAmount:N0}）と現在の残高（¥{currentBalance:N0}）が異なります。" +
+                   "確認した後に、他のパソコンや別の操作で利用・チャージが記録された可能性があります。" +
+                   "カード一覧を再読み込みしました。もう一度「払い戻し」を押し、表示される残高を確認してください。";
         }
 
         /// <summary>
@@ -1286,8 +1332,9 @@ namespace ICCardManager.ViewModels
 
             // Issue #1909: CanExecute で見ている条件（貸出中・払戻済）は一覧に載っている値なので、
             // 書き込み直前に DB から読み直した値で確定させる。認証の待機中に他 PC が貸出・払い戻しし得る。
-            // 払戻済カードは貸出対象外（Issue #530）であり、LendingService の事前検証は
-            // is_refunded を見ないため、ここで弾かないと払戻済のカードが貸出中になる。
+            // 払戻済カードは貸出対象外（Issue #530）。Issue #2322 で LendingService の事前検証と
+            // 貸出中への更新の WHERE も払戻済を拒むようになったので、ここは「ダイアログを開く前に
+            // 理由を名指しして止める」ための判定であり、ダイアログを開いた後の払い戻しは保存時に拒まれる。
             if (card.IsLent || card.IsRefunded)
             {
                 var reason = card.IsLent ? "既に貸出中のため" : "既に払戻済のため";
@@ -1710,7 +1757,7 @@ namespace ICCardManager.ViewModels
                     // 繰越月が3月の場合は年度末＝前年度繰越と同義なので、
                     // 「前年度より繰越」として扱い受入金額にも残高を記録する。
                     var isFiscalYearCarryover = !modeResult.IsNewPurchase
-                        && modeResult.CarryoverMonth!.Value == 3;
+                        && PaperCarryoverPolicy.IsFiscalYearStartCarryoverMonth(modeResult.CarryoverMonth!.Value);
                     string summary;
                     if (modeResult.IsNewPurchase)
                     {

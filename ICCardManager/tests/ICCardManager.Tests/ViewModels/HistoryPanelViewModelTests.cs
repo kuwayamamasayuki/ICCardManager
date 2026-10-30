@@ -1318,6 +1318,84 @@ public class HistoryPanelViewModelTests : IDisposable
 
     #endregion
 
+    #region 表示中のカードの整合性チェックの母集団（Issue #2329）
+
+    /// <summary>
+    /// 表示中のカードの履歴を開き、そのカードの残高チェーンを切れた状態にする。
+    /// </summary>
+    private async Task<IcCard> OpenHistoryWithBrokenChainAsync(bool isDeleted, bool isRefunded)
+    {
+        var card = new IcCard
+        {
+            CardIdm = "0C0C0C0C0C0C0C0C",
+            CardType = "はやかけん",
+            CardNumber = "5042",
+            IsDeleted = isDeleted,
+            IsRefunded = isRefunded
+        };
+        _cardRepositoryMock.Setup(r => r.GetAllAsync()).ReturnsAsync(new List<IcCard> { card });
+        _ledgerRepositoryMock.Setup(r => r.GetByDateRangeAsync(card.CardIdm, It.IsAny<DateTime>(), It.IsAny<DateTime>()))
+            .ReturnsAsync(new List<Ledger>
+            {
+                new Ledger { Id = 1, CardIdm = card.CardIdm, Date = DateTime.Today.AddDays(-1), Summary = "役務費によりチャージ", Income = 1000, Balance = 1000 },
+                new Ledger { Id = 2, CardIdm = card.CardIdm, Date = DateTime.Today, Summary = "鉄道（博多～天神）", Expense = 100, Balance = 500 }
+                // 期待値: 1000 - 100 = 900 ≠ 500
+            });
+        await _history.ShowCardHistoryAsync(card);
+        return card;
+    }
+
+    private Dictionary<int, (int ExpectedBalance, int ActualBalance, bool IsInitialBalanceCorrection)> BalanceInconsistencyMarkers()
+    {
+        var field = typeof(HistoryPanelViewModel).GetField("_balanceInconsistencies",
+            System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+        return (Dictionary<int, (int ExpectedBalance, int ActualBalance, bool IsInitialBalanceCorrection)>)field!.GetValue(_history)!;
+    }
+
+    /// <summary>
+    /// 欠陥を突く側: 運用中でない（払戻済み・論理削除済み）カードの履歴を開いて整合性を判定しても、
+    /// 残高不整合の警告を立てないこと。ハイライトは従来どおり付けること。
+    /// </summary>
+    /// <remarks>
+    /// 除去側（<c>MainViewModel.RefreshDashboardAsync</c>）は残額ダッシュボードの母集団（運用中のカード）に居ない
+    /// カードの警告を取り除くため、ここで立てると次のダッシュボード更新で誰の操作にも紐づかず消える。
+    /// 表示中のカードの判定（<c>CheckAndNotifyConsistencyAsync</c>）は、全カードの判定
+    /// （<c>CheckAllCardsConsistencyAsync</c>）の末尾からも呼ばれる。全カードの側は運用中でないカードを
+    /// 飛ばす（#1947）ので、この経路で警告が立てば表示中のカードの判定が立てたものである。
+    /// </remarks>
+    [Theory]
+    [InlineData(false, true)]
+    [InlineData(true, false)]
+    public async Task 表示中のカードの整合性チェックは_運用中でないカードには警告を立てないこと(bool isDeleted, bool isRefunded)
+    {
+        var card = await OpenHistoryWithBrokenChainAsync(isDeleted, isRefunded);
+
+        await _history.CheckAllCardsConsistencyAsync();
+
+        _host.WarningMessages.Should().NotContain(w => w.Type == WarningType.BalanceInconsistency && w.CardIdm == card.CardIdm,
+            "運用中でないカードの警告は次のダッシュボード更新で黙って消えるため、立てない");
+        BalanceInconsistencyMarkers().Should().ContainKey(2, "画面に出ている行のハイライトは運用中かどうかに関わらず付ける");
+    }
+
+    /// <summary>
+    /// 対の表明: 運用中のカードでは従来どおり警告を立てること（判定を丸ごと止めた実装を検出する）。
+    /// </summary>
+    [Fact]
+    public async Task 表示中のカードの整合性チェックは_運用中のカードには警告を立てること()
+    {
+        var card = await OpenHistoryWithBrokenChainAsync(isDeleted: false, isRefunded: false);
+        _host.WarningMessages.Clear();
+        // 全カードの判定が立てた分と区別するため、全カードの母集団からは外す（表示中のカードの判定だけが立て得る）
+        _cardRepositoryMock.Setup(r => r.GetAllAsync()).ReturnsAsync(new List<IcCard>());
+
+        await _history.CheckAllCardsConsistencyAsync();
+
+        _host.WarningMessages.Should().ContainSingle(w => w.Type == WarningType.BalanceInconsistency && w.CardIdm == card.CardIdm);
+        BalanceInconsistencyMarkers().Should().ContainKey(2);
+    }
+
+    #endregion
+
     #region 全カード残高整合性チェック（Issue #1058）
 
     [Fact]
@@ -1935,6 +2013,45 @@ public class HistoryPanelViewModelTests : IDisposable
             r => r.GetByIdAsync(It.IsAny<int>()),
             confirmed ? Times.Once() : Times.Never(),
             "確認で「いいえ」を選んだら削除処理へ進まないこと");
+    }
+
+    /// <summary>
+    /// Issue #2322: 履歴一覧から貸出中の行を削除するときも、払戻済のカードでは「タッチして返却」を勧めないこと
+    /// </summary>
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task DeleteLedgerRow_貸出中の行の確認文言を払戻済かどうかで出し分けること(bool isRefundedCard)
+    {
+        _history.HistoryCard = new CardDto { CardIdm = "0123456789ABCDEF", CardNumber = "H-009", IsRefunded = isRefundedCard };
+        _staffAuthServiceMock
+            .Setup(a => a.RequestAuthenticationAsync(It.IsAny<string>()))
+            .ReturnsAsync(new StaffAuthResult { Idm = "AABBCCDDEEFF0011", StaffName = "田中太郎" });
+        string? message = null;
+        _navigationServiceMock
+            .Setup(d => d.ShowWarningConfirmation(It.IsAny<string>(), "履歴の削除"))
+            .Callback<string, string>((m, _) => message = m)
+            .Returns(false);
+
+        await _history.DeleteLedgerRow(new LedgerDto
+        {
+            Id = 42,
+            CardIdm = "0123456789ABCDEF",
+            DateDisplay = "R7.3.18",
+            Summary = "（貸出中）",
+            Balance = 1000,
+            IsLentRecord = true,
+        });
+
+        message.Should().NotBeNull();
+        if (isRefundedCard)
+        {
+            message.Should().Contain("払戻済のカードはタッチで返却できない").And.NotContain("タッチして返却操作");
+        }
+        else
+        {
+            message.Should().Contain("タッチして返却操作").And.NotContain("払戻済");
+        }
     }
 
     /// <summary>
