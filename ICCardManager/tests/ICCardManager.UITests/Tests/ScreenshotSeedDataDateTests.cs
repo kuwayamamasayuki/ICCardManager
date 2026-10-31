@@ -43,18 +43,28 @@ namespace ICCardManager.UITests.Tests
         /// <summary>
         /// 対: 日数が足りる日は当月に置くこと（撮影側は「前の月」を押さずに撮れる）。前月へ倒すのは足りない日だけ。
         /// </summary>
-        /// <remarks>これが無いと、常に前月へ置く実装でも上のテストは緑になる。</remarks>
-        [Fact]
-        public void 今日がサンプルの最後の日以降なら当月に置き_それより前なら前月に置くこと()
+        /// <remarks>
+        /// これが無いと、常に前月へ置く実装でも上のテストは緑になる。期待値は実装と同じ式で組み立てず、
+        /// 境界（最後のサンプルの日 12 日の前後）・年またぎ・月末の具体的な日付で書く。
+        /// </remarks>
+        [Theory]
+        [InlineData("2027-03-11", "2027-02-01", "2027-02-12")] // 12 日の前日 → 前月
+        [InlineData("2027-03-12", "2027-03-01", "2027-03-12")] // 12 日ちょうど → 当月（最後の行が今日）
+        [InlineData("2027-03-31", "2027-03-01", "2027-03-12")] // 月末 → 当月
+        [InlineData("2027-01-05", "2026-12-01", "2026-12-12")] // 1 月の月初 → 前年 12 月
+        [InlineData("2027-01-01", "2026-12-01", "2026-12-12")] // 元日 → 前年 12 月
+        [InlineData("2028-03-01", "2028-02-01", "2028-02-12")] // 閏年の 3 月 1 日 → 2 月
+        public void 今日がサンプルの最後の日以降なら当月に置き_それより前なら前月に置くこと(
+            string today, string expectedMonth, string expectedLatestDay)
         {
-            foreach (var today in CaptureDays)
-            {
-                var month = ScreenshotSeedData.HistorySampleMonth(today);
-                var expected = today.Day >= ScreenshotSeedData.LatestHistorySampleDay
-                    ? new DateTime(today.Year, today.Month, 1)
-                    : new DateTime(today.Year, today.Month, 1).AddMonths(-1);
-                month.Should().Be(expected, $"{today:yyyy-MM-dd} に撮ったときの置き場所");
-            }
+            var date = DateTime.ParseExact(today, "yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture);
+
+            ScreenshotSeedData.HistorySampleMonth(date).Should().Be(
+                DateTime.ParseExact(expectedMonth, "yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture),
+                $"{today} に撮ったときにサンプルを置く月");
+            ScreenshotSeedData.HistorySampleDay(date, ScreenshotSeedData.LatestHistorySampleDay).Should().Be(
+                DateTime.ParseExact(expectedLatestDay, "yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture),
+                $"{today} に撮ったときの最後のサンプル行の日付");
         }
     }
 }

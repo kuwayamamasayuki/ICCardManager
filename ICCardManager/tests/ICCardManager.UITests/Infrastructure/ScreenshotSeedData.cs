@@ -366,7 +366,7 @@ namespace ICCardManager.UITests.Infrastructure
             InsertCard(conn, LentCardIdm, LentCardType, LentCardNumber, isLent: true, lentAt: now, lentStaff: SecondaryStaffIdm);
             InsertCard(conn, LowBalanceCardIdm, LowBalanceCardType, LowBalanceCardNumber, isLent: false, lentAt: null, lentStaff: null);
 
-            // 通常カード: 当月の利用履歴（新規購入 → 利用 → チャージ → 利用）。残額は順に計算する。
+            // 通常カードの利用履歴（月は呼び出し側が normalCardDay で決める。新規購入 → 利用 → チャージ → 利用）。残額は順に計算する。
             var balance = 0;
             balance = InsertLedger(conn, NormalCardIdm, normalCardDay(1), "新規購入", income: 10000, expense: 0, balance, PrimaryStaffName);
             balance = InsertLedger(conn, NormalCardIdm, normalCardDay(2), "鉄道（博多～天神）", 0, 260, balance, PrimaryStaffName);

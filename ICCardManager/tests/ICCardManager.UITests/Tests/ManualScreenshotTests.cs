@@ -344,9 +344,10 @@ namespace ICCardManager.UITests.Tests
                 page.OpenCardHistory(ScreenshotSeedData.NormalCardDisplayName);
                 ShowHistorySampleMonth(page);
             }
-            catch (System.TimeoutException)
+            catch (Exception)
             {
-                // 失敗時の画面を残す（履歴が開かない原因の切り分け用。docs/screenshots/auto/ は Git 管理外）
+                // 失敗時の画面を残す（履歴が開かない・サンプルの月へ移れない原因の切り分け用。docs/screenshots/auto/ は Git 管理外）。
+                // OpenCardHistory は TimeoutException、ShowHistorySampleMonth は FluentAssertions の例外で失敗するため、型で絞らない
                 ScreenshotHelper.Capture(fixture.MainWindow, "history_FAILED.png");
                 throw;
             }
