@@ -153,11 +153,12 @@ namespace ICCardManager.UITests.Tests
         {
             Skip.If(ScreenshotHelper.ShouldSkip, SkipReason);
 
-            using var fixture = AppFixture.LaunchWithSeed(ScreenshotSeedData.Seed);
+            using var fixture = AppFixture.LaunchWithSeed(ScreenshotSeedData.SeedForHistoryScreenshot);
             ScreenshotHelper.MoveToTopLeft(fixture.MainWindow);
             var page = new MainWindowPage(fixture.MainWindow, fixture.Automation);
 
             page.OpenCardHistory(ScreenshotSeedData.NormalCardDisplayName);
+            ShowHistorySampleMonth(page);
 
             // 統合の説明図なので、チェック済みの行が写っていることが要点。
             // 実際の統合（職員認証を伴う）は実行しない
@@ -334,13 +335,14 @@ namespace ICCardManager.UITests.Tests
         {
             Skip.If(ScreenshotHelper.ShouldSkip, SkipReason);
 
-            using var fixture = AppFixture.LaunchWithSeed(ScreenshotSeedData.Seed);
+            using var fixture = AppFixture.LaunchWithSeed(ScreenshotSeedData.SeedForHistoryScreenshot);
             ScreenshotHelper.MoveToTopLeft(fixture.MainWindow);
             var page = new MainWindowPage(fixture.MainWindow, fixture.Automation);
 
             try
             {
                 page.OpenCardHistory(ScreenshotSeedData.NormalCardDisplayName);
+                ShowHistorySampleMonth(page);
             }
             catch (System.TimeoutException)
             {
@@ -451,6 +453,30 @@ namespace ICCardManager.UITests.Tests
                 TimeSpan.FromSeconds(TestConstants.OperationLogDialogOpenTimeoutSeconds)).Result;
             row.Should().NotBeNull(because);
             return row!;
+        }
+
+        /// <summary>
+        /// 開いた履歴の表示期間を、<see cref="ScreenshotSeedData.SeedForHistoryScreenshot"/> が履歴を置いた月に合わせ、
+        /// 最後のサンプル行が表示されるまで待つ（月初に撮ると前月に置くため、「前の月」で 1 か月戻す）。
+        /// </summary>
+        private static void ShowHistorySampleMonth(MainWindowPage page)
+        {
+            var today = DateTime.Today;
+            var sampleMonth = ScreenshotSeedData.HistorySampleMonth(today);
+            if (sampleMonth.Month != today.Month || sampleMonth.Year != today.Year)
+            {
+                var previous = page.FindByNameWithRetry(TestConstants.HistoryPreviousMonthButton);
+                previous.Should().NotBeNull($"履歴の期間選択に「{TestConstants.HistoryPreviousMonthButton}」ボタンがあること");
+                previous!.AsButton().Invoke();
+            }
+
+            var label = sampleMonth.ToString("yyyy年M月", System.Globalization.CultureInfo.InvariantCulture);
+            Retry.WhileNull(() => page.Window.FindFirstDescendant(cf => cf.ByName(label)),
+                TimeSpan.FromSeconds(TestConstants.DialogOpenTimeoutSeconds)).Result
+                .Should().NotBeNull($"履歴の表示期間が「{label}」になること");
+            Retry.WhileNull(() => page.Window.FindFirstDescendant(cf => cf.ByName(ScreenshotSeedData.LatestHistorySampleSummary)),
+                TimeSpan.FromSeconds(TestConstants.DialogOpenTimeoutSeconds)).Result
+                .Should().NotBeNull($"履歴の一覧に最後のサンプル行「{ScreenshotSeedData.LatestHistorySampleSummary}」が表示されること");
         }
 
         private static void WaitForCardRow(MainWindowPage page, string cardDisplayName)

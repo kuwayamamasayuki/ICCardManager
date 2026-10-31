@@ -304,10 +304,46 @@ namespace ICCardManager.UITests.Infrastructure
                 "INSERT OR REPLACE INTO settings (key, value) VALUES (@key, @value)",
                 ("@key", key), ("@value", value));
 
+        /// <summary>通常カードのサンプル履歴で使う日のうち、最も遅い日（月内の日）。</summary>
+        internal const int LatestHistorySampleDay = 12;
+
+        /// <summary>通常カードのサンプル履歴の最後の行（<see cref="LatestHistorySampleDay"/> 日）の摘要。撮影側が表示完了の目印にする。</summary>
+        internal const string LatestHistorySampleSummary = "鉄道（博多～貝塚）";
+
         /// <summary>
-        /// サンプルデータを投入する。
+        /// サンプルデータを投入する。通常カードの利用履歴は当月に収める（月初は今日の日付で頭打ちにする）。
         /// </summary>
-        public static void Seed(SQLiteConnection conn)
+        /// <remarks>
+        /// 履歴を開いて行を操作する UI テストの多くが「既定の表示（今月）に行がある」ことを前提にするため、
+        /// 日付が今日へ寄ることより、当月に収まることを優先する。履歴そのものを撮る画像は
+        /// <see cref="SeedForHistoryScreenshot"/> を使う。
+        /// </remarks>
+        public static void Seed(SQLiteConnection conn) =>
+            SeedCore(conn, day => DayOfMonth(DateTime.Today, day));
+
+        /// <summary>
+        /// 履歴画面の撮影（<c>history.png</c> / <c>history_merge.png</c>）用。通常カードの利用履歴を
+        /// <see cref="HistorySampleMonth"/> の月に置き、撮影日によらず日付が散らばるようにする。
+        /// </summary>
+        /// <remarks>
+        /// <see cref="Seed"/> は月初に撮ると全行が今日（例: R8.11.1）にそろい、利用日ごとに 1 行という
+        /// 物品出納簿の説明図として読めなくなる。撮影側は、この月が前月なら「前の月」で表示を合わせる。
+        /// </remarks>
+        public static void SeedForHistoryScreenshot(SQLiteConnection conn) =>
+            SeedCore(conn, day => HistorySampleDay(DateTime.Today, day));
+
+        /// <summary>
+        /// 履歴画面の撮影で通常カードの履歴を置く月の 1 日。今日が <see cref="LatestHistorySampleDay"/> 日以降なら当月、
+        /// それより前なら前月（当月に置くと、今日より後の日付になるか、今日へ寄せて日付がそろうため）。
+        /// </summary>
+        internal static DateTime HistorySampleMonth(DateTime today) =>
+            today.Day >= LatestHistorySampleDay ? new DateTime(today.Year, today.Month, 1) : FirstDayOfPreviousMonth(today);
+
+        /// <summary><see cref="HistorySampleMonth"/> の <paramref name="day"/> 日。</summary>
+        internal static DateTime HistorySampleDay(DateTime today, int day) =>
+            HistorySampleMonth(today).AddDays(day - 1);
+
+        private static void SeedCore(SQLiteConnection conn, Func<int, DateTime> normalCardDay)
         {
             if (conn == null)
             {
@@ -332,13 +368,13 @@ namespace ICCardManager.UITests.Infrastructure
 
             // 通常カード: 当月の利用履歴（新規購入 → 利用 → チャージ → 利用）。残額は順に計算する。
             var balance = 0;
-            balance = InsertLedger(conn, NormalCardIdm, DayOfMonth(today, 1), "新規購入", income: 10000, expense: 0, balance, PrimaryStaffName);
-            balance = InsertLedger(conn, NormalCardIdm, DayOfMonth(today, 2), "鉄道（博多～天神）", 0, 260, balance, PrimaryStaffName);
-            balance = InsertLedger(conn, NormalCardIdm, DayOfMonth(today, 2), "バス（博多駅前～天神）", 0, 230, balance, PrimaryStaffName);
-            balance = InsertLedger(conn, NormalCardIdm, DayOfMonth(today, 5), "鉄道（博多～薬院 往復）", 0, 420, balance, SecondaryStaffName, SecondaryStaffIdm);
-            balance = InsertLedger(conn, NormalCardIdm, DayOfMonth(today, 8), "役務費によりチャージ", 3000, 0, balance, PrimaryStaffName);
-            balance = InsertLedger(conn, NormalCardIdm, DayOfMonth(today, 8), "鉄道（天神～福岡空港）", 0, 260, balance, PrimaryStaffName);
-            balance = InsertLedger(conn, NormalCardIdm, DayOfMonth(today, 12), "鉄道（博多～貝塚）", 0, 340, balance, SecondaryStaffName, SecondaryStaffIdm);
+            balance = InsertLedger(conn, NormalCardIdm, normalCardDay(1), "新規購入", income: 10000, expense: 0, balance, PrimaryStaffName);
+            balance = InsertLedger(conn, NormalCardIdm, normalCardDay(2), "鉄道（博多～天神）", 0, 260, balance, PrimaryStaffName);
+            balance = InsertLedger(conn, NormalCardIdm, normalCardDay(2), "バス（博多駅前～天神）", 0, 230, balance, PrimaryStaffName);
+            balance = InsertLedger(conn, NormalCardIdm, normalCardDay(5), "鉄道（博多～薬院 往復）", 0, 420, balance, SecondaryStaffName, SecondaryStaffIdm);
+            balance = InsertLedger(conn, NormalCardIdm, normalCardDay(8), "役務費によりチャージ", 3000, 0, balance, PrimaryStaffName);
+            balance = InsertLedger(conn, NormalCardIdm, normalCardDay(8), "鉄道（天神～福岡空港）", 0, 260, balance, PrimaryStaffName);
+            balance = InsertLedger(conn, NormalCardIdm, normalCardDay(LatestHistorySampleDay), LatestHistorySampleSummary, 0, 340, balance, SecondaryStaffName, SecondaryStaffIdm);
             _ = balance;
 
             // 貸出中カード: 新規購入の後、貸出中レコード（is_lent_record=1）。
