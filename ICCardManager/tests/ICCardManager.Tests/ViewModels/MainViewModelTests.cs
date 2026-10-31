@@ -4027,23 +4027,25 @@ public class MainViewModelTests : IDisposable
         var viewModel = CreateViewModel(retouchWindowSeconds: 45);
 
         viewModel.RetouchGuideText.Should().Be(
-            "45秒以内に同じカードをもう一度タッチすると、逆の操作（貸出⇔返却）を記録します（元の記録も履歴に残ります）");
+            "45秒以内に同じカードをもう一度タッチすると、逆の操作（貸出⇔返却）を記録します（取り消しではありません）");
     }
 
     /// <summary>
-    /// 再タッチは取り消しではないことを案内が述べ、取り消し・修正と読める語を含まないこと。
+    /// 再タッチは取り消しではないことを案内が述べ、「履歴に残ります」・修正と読める語を含まないこと。
     /// </summary>
     /// <remarks>
-    /// 30 秒ルールは逆の操作を新たに記録するだけで、直前の記録は消えず両方が履歴に残る（business-logic.md）。
+    /// 30 秒ルールは逆の操作を新たに記録するだけで、取り消しではない。ただし「元の記録も履歴に残る」とは限らない
+    /// （Issue #2367）。返却のやり直しでは返却で記録した利用の行が残るが、貸出のやり直しは通常の返却と同じく
+    /// 「（貸出中）」の行を消すので、その間に利用が無ければ台帳に行は残らない。
     /// 旧文言「誤操作の修正」は誤った記録が消えると読まれた。
     /// </remarks>
     [Fact]
-    public void RetouchGuideText_元の記録が残ることを述べ取り消しと読める語を含まないこと()
+    public void RetouchGuideText_取り消しではないことを述べ履歴に残るとは書かないこと()
     {
         var text = MainViewModel.BuildRetouchGuideText(ICCardManager.Common.AppConstants.DefaultCardRetouchTimeoutSeconds);
 
-        text.Should().Contain("元の記録も履歴に残ります");
-        text.Should().NotContain("取り消");
+        text.Should().Contain("取り消しではありません");
+        text.Should().NotContain("履歴に残ります");
         text.Should().NotContain("修正");
     }
 

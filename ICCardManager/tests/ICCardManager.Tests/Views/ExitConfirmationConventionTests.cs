@@ -83,7 +83,7 @@ public class ExitConfirmationConventionTests
     /// <remarks>
     /// 秒数は <c>AppOptions.RetouchWindowSeconds</c> で変更できる。「30秒」を XAML に直書きすると、
     /// 設定を変えたときに案内だけが実際の判定と食い違う。旧見出し「誤操作の修正」は、
-    /// 誤った記録が消えると読まれた（30 秒ルールは逆の操作を新たに記録するだけで、元の記録は残る）。
+    /// 誤った記録が消えると読まれた（30 秒ルールは取り消しではなく、逆の操作を新たに記録する）。
     /// </remarks>
     [Fact]
     public void 使い方ガイドの再タッチ案内は設定値から組み立てた文言を表示すること()
