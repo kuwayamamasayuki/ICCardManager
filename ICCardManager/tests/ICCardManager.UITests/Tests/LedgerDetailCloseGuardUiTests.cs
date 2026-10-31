@@ -85,16 +85,21 @@ namespace ICCardManager.UITests.Tests
         /// </summary>
         /// <remarks>
         /// 単一グループ（統合）の保存ではダイアログは自動で閉じず「保存しました」を表示する（自動で閉じるのは複数グループの保存だけ。#634）。
+        /// 明細の保存は職員証認証を挟む（#2265）。認証は DEBUG ビルドの仮想タッチでしか通せないため、Debug 起動のときだけ実行する。
         /// </remarks>
-        [Fact]
+        [SkippableFact]
         public void 統合を保存した後は閉じても確認が出ず変更がDBに反映されていること()
         {
+            Skip.If(!string.Equals(AppFixture.LaunchConfiguration, "Debug", StringComparison.Ordinal),
+                "Issue #2265: 明細の保存の職員証認証は仮想タッチ（DEBUG ビルド限定）でしか通せないため、Debug 起動のときだけ実行する。");
+
             using var fixture = AppFixture.LaunchWithSeed(RegressionSeedData.SeedWithLedgerDetails, AppFixture.SuppressDebugTestData);
             var detail = OpenLedgerDetail(fixture);
             CountGroupedDetails().Should().Be(0L, "前提: 投入直後の明細はグループを持たないこと");
 
             detail.ClickButton(TestConstants.LedgerDetailMergeAllButton);
             detail.ClickButton(TestConstants.LedgerDetailSaveButton);
+            TouchOperations.PassStaffAuthentication(fixture, detail.Window);
             detail.FindByNameWithRetry(TestConstants.LedgerDetailSavedMessage).Should().NotBeNull(
                 $"保存が終わったら「{TestConstants.LedgerDetailSavedMessage}」と表示されること");
             CountGroupedDetails().Should().Be(2L, "「すべて統合」を保存したので、明細 2 件がグループを持つこと");
@@ -107,9 +112,15 @@ namespace ICCardManager.UITests.Tests
         /// <summary>
         /// 分割して「摘要のみ更新」で保存すると、確認なしに自動で閉じること（#634 の自動クローズが #1743 の確認に止められない）。
         /// </summary>
-        [Fact]
+        /// <remarks>
+        /// 「摘要のみ更新」も明細の保存（<c>SaveAsync</c>）なので職員証認証を挟む（#2265）。Debug 起動のときだけ実行する。
+        /// </remarks>
+        [SkippableFact]
         public void 分割を保存すると確認なしに自動で閉じること()
         {
+            Skip.If(!string.Equals(AppFixture.LaunchConfiguration, "Debug", StringComparison.Ordinal),
+                "Issue #2265: 明細の保存の職員証認証は仮想タッチ（DEBUG ビルド限定）でしか通せないため、Debug 起動のときだけ実行する。");
+
             using var fixture = AppFixture.LaunchWithSeed(RegressionSeedData.SeedWithLedgerDetails, AppFixture.SuppressDebugTestData);
             var detail = OpenLedgerDetail(fixture);
 
@@ -117,6 +128,7 @@ namespace ICCardManager.UITests.Tests
             detail.WaitUntilEnabled(TestConstants.LedgerDetailSummaryOnlyButton).Should().BeTrue(
                 $"複数のグループに分けたら「{TestConstants.LedgerDetailSummaryOnlyButton}」で保存できること");
             detail.ClickButton(TestConstants.LedgerDetailSummaryOnlyButton);
+            TouchOperations.PassStaffAuthentication(fixture, detail.Window);
 
             DialogLocator.WaitUntilClosed(fixture, fixture.MainWindow, TestConstants.LedgerDetailDialogName)
                 .Should().BeTrue($"分割を保存したら、確認なしに自動で閉じること。開いていたウィンドウ: {DialogLocator.DescribeOpenWindows(fixture)}" +
