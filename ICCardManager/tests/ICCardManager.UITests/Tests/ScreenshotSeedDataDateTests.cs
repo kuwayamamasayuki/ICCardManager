@@ -13,7 +13,7 @@ namespace ICCardManager.UITests.Tests
     /// </summary>
     /// <remarks>
     /// 月初に撮った <c>history.png</c> は、今日で頭打ちにする日付（<c>DayOfMonth</c>）のせいで全行が同じ日（R8.11.1）にそろっていた。
-    /// どの日に撮っても、サンプルの日がそれぞれ別の日付になり、今日より後にならないことを、1 年分の撮影日で走査して固定する。
+    /// どの日に撮っても、サンプルの日がそれぞれ別の日付になり、今日より後にならないことを、2 年分の撮影日で走査して固定する。
     /// </remarks>
     public class ScreenshotSeedDataDateTests
     {

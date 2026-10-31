@@ -348,7 +348,15 @@ namespace ICCardManager.UITests.Tests
             {
                 // 失敗時の画面を残す（履歴が開かない・サンプルの月へ移れない原因の切り分け用。docs/screenshots/auto/ は Git 管理外）。
                 // OpenCardHistory は TimeoutException、ShowHistorySampleMonth は FluentAssertions の例外で失敗するため、型で絞らない
-                ScreenshotHelper.Capture(fixture.MainWindow, "history_FAILED.png");
+                try
+                {
+                    ScreenshotHelper.Capture(fixture.MainWindow, "history_FAILED.png");
+                }
+                catch (Exception)
+                {
+                    // 切り分け用の撮影に失敗しても、元の失敗の原因を失わないよう握りつぶして元の例外を投げ直す
+                }
+
                 throw;
             }
 
