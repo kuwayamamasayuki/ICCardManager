@@ -684,9 +684,11 @@ public partial class MainViewModel : ViewModelBase, IHistoryPanelHost
     /// 使い方ガイドの「操作を間違えたとき」の案内文を組み立てる（Issue #2143）
     /// </summary>
     /// <remarks>
-    /// 再タッチは直前の記録を取り消すのではなく、逆の操作を新たに記録する（元の記録も履歴に残る）。
+    /// 再タッチは直前の記録を取り消すのではなく、逆の操作を新たに記録する。
     /// 旧文言の「誤操作の修正」は、誤った記録が消えると読まれた。
+    /// 「元の記録も履歴に残ります」とも書かない（Issue #2367）。返却のやり直しでは返却で記録した利用の行が残るが、
+    /// 貸出のやり直しは通常の返却と同じく「（貸出中）」の行を消すので、台帳に未記録の利用が無ければ台帳に行は残らない。
     /// </remarks>
     internal static string BuildRetouchGuideText(int retouchWindowSeconds)
-        => $"{retouchWindowSeconds}秒以内に同じカードをもう一度タッチすると、逆の操作（貸出⇔返却）を記録します（元の記録も履歴に残ります）";
+        => $"{retouchWindowSeconds}秒以内に同じカードをもう一度タッチすると、逆の操作（貸出⇔返却）を記録します（取り消しではありません）";
 }

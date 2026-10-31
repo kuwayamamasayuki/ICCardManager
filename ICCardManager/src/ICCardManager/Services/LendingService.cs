@@ -169,12 +169,14 @@ namespace ICCardManager.Services
     /// <list type="bullet">
     /// <item><description>ICカードの貸出処理（<see cref="LendAsync"/>）</description></item>
     /// <item><description>ICカードの返却処理と利用履歴の記録（<see cref="ReturnAsync"/>）</description></item>
-    /// <item><description>30秒ルールによる誤操作修正（<see cref="IsRetouchWithinTimeout"/>）</description></item>
+    /// <item><description>30秒ルールによる逆処理の判定（<see cref="IsRetouchWithinTimeout"/>）</description></item>
     /// </list>
     /// <para>
     /// <strong>30秒ルール:</strong>
     /// 同一カードが30秒以内に再度タッチされた場合、直前の処理と逆の処理が実行されます。
-    /// これにより、誤って貸出/返却した場合に即座に取り消すことができます。
+    /// 直前の記録を取り消すのではなく、逆の操作を通常の貸出・返却として新たに記録します（Issue #2367）。
+    /// 返却の後の貸出では返却で記録した利用の行が残り、貸出の後の返却では通常の返却と同じく
+    /// 「（貸出中）」の行を削除します（台帳に未記録の利用が無ければ行は残りません）。
     /// </para>
     /// <para>
     /// <strong>排他制御:</strong>
@@ -1877,7 +1879,7 @@ namespace ICCardManager.Services
         /// </returns>
         /// <remarks>
         /// <para>
-        /// このメソッドは誤操作修正のための「30秒ルール」の判定に使用します。
+        /// このメソッドは30秒ルール（逆処理）の判定に使用します。
         /// </para>
         /// <para>
         /// <strong>使用例:</strong>
