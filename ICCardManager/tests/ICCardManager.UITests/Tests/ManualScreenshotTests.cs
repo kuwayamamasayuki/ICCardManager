@@ -157,8 +157,25 @@ namespace ICCardManager.UITests.Tests
             ScreenshotHelper.MoveToTopLeft(fixture.MainWindow);
             var page = new MainWindowPage(fixture.MainWindow, fixture.Automation);
 
-            page.OpenCardHistory(ScreenshotSeedData.NormalCardDisplayName);
-            ShowHistorySampleMonth(page);
+            try
+            {
+                page.OpenCardHistory(ScreenshotSeedData.NormalCardDisplayName);
+                ShowHistorySampleMonth(page);
+            }
+            catch (Exception)
+            {
+                // 失敗時の画面を残す（history_履歴照会画面 と同じ切り分け用。型で絞らない理由も同じ）
+                try
+                {
+                    ScreenshotHelper.Capture(fixture.MainWindow, "history_merge_FAILED.png");
+                }
+                catch (Exception)
+                {
+                    // 切り分け用の撮影に失敗しても、元の失敗の原因を失わないよう握りつぶして元の例外を投げ直す
+                }
+
+                throw;
+            }
 
             // 統合の説明図なので、チェック済みの行が写っていることが要点。
             // 実際の統合（職員認証を伴う）は実行しない
