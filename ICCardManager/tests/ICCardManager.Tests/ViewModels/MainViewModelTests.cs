@@ -4047,6 +4047,7 @@ public class MainViewModelTests : IDisposable
         text.Should().Contain("取り消しではありません");
         text.Should().NotContain("履歴に残ります");
         text.Should().NotContain("取り消せ");
+        text.Should().NotContain("取り消す");
         text.Should().NotContain("修正");
     }
 

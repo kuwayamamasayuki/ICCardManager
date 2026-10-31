@@ -1879,7 +1879,7 @@ namespace ICCardManager.Services
         /// </returns>
         /// <remarks>
         /// <para>
-        /// このメソッドは誤操作修正のための「30秒ルール」の判定に使用します。
+        /// このメソッドは30秒ルール（逆処理）の判定に使用します。
         /// </para>
         /// <para>
         /// <strong>使用例:</strong>
