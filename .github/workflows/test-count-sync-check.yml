@@ -25,6 +25,12 @@ on:
 permissions:
   contents: read
 
+# 同じ PR に新しいコミットが積まれたら、古いコミットの実行を取り消す。push はコミットごとに別のグループにして
+# 取り消さない（理由は ci.yml の concurrency の注記）。
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: true
+
 env:
   DOTNET_VERSION: '8.0.x'
   DOTNET_NOLOGO: true
@@ -41,10 +47,33 @@ jobs:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
+      # SDK の確認・導入と NuGet のキャッシュは ci.yml の build-and-test と同じ（理由はそちらの注記）。
+      - name: Check preinstalled .NET SDK
+        id: sdk
+        shell: pwsh
+        run: |
+          $found = $false
+          try {
+            dotnet --version
+            $found = $LASTEXITCODE -eq 0
+          } catch {
+            Write-Host "dotnet が見つかりません: $_"
+          }
+          "found=$(if ($found) { 'true' } else { 'false' })" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          exit 0
+
       - name: Setup .NET
+        if: steps.sdk.outputs.found != 'true'
         uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
         with:
           dotnet-version: ${{ env.DOTNET_VERSION }}
+
+      - name: Cache NuGet packages
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.nuget/packages
+          key: nuget-${{ runner.os }}-${{ hashFiles('ICCardManager/**/packages.lock.json') }}
+          restore-keys: nuget-${{ runner.os }}-
 
       - name: Setup Python
         uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0

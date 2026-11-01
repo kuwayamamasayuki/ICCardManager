@@ -19,6 +19,13 @@ on:
 permissions:
   contents: read
 
+# 同じ PR に新しいコミットが積まれたら、古いコミットの実行を取り消す。push（main / develop）はコミットごとに別の
+# グループにして取り消さない — 同じグループに入れると、cancel-in-progress が無くても「待機中」の実行が後続に
+# 置き換えられて取り消され、CI の結果が残らない main のコミットが出る。
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: true
+
 env:
   DOTNET_VERSION: '8.0.x'
   DOTNET_NOLOGO: true
@@ -54,10 +61,41 @@ jobs:
     - name: Checkout
       uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
+    # SDK はランナーのイメージに入っているものを使い、global.json（8.0.400 + latestFeature）を満たす SDK が
+    # 無いときだけ setup-dotnet で入れる（全ワークフロー共通）。setup-dotnet は「8.0 系の最新パッチ」を求めるため、
+    # イメージの更新が .NET のパッチに遅れている間は、8.0.4xx が入っていても SDK（約 285MB）と Runtime を
+    # 毎回ダウンロードしていた（1 ジョブ約 30 秒。2026-10-30〜11-01 の 100 回中 85 回）。
+    # ロックファイルの中身を変えるのは SDK のメジャー版で（下の Restore の注記）、それは global.json が固定している。
+    # 食い違いが起きても、ロックモードの復元が NU1004 で止める。
+    - name: Check preinstalled .NET SDK
+      id: sdk
+      shell: pwsh
+      run: |
+        $found = $false
+        try {
+          dotnet --version
+          $found = $LASTEXITCODE -eq 0
+        } catch {
+          Write-Host "dotnet が見つかりません: $_"
+        }
+        "found=$(if ($found) { 'true' } else { 'false' })" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+        exit 0
+
     - name: Setup .NET
+      if: steps.sdk.outputs.found != 'true'
       uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
       with:
         dotnet-version: ${{ env.DOTNET_VERSION }}
+
+    # NuGet のパッケージをキャッシュする（復元は 1 ジョブ約 23 秒だった）。キーはロックファイルのハッシュで、
+    # ロックファイルが変われば作り直す。--locked-mode の復元はロックファイルのハッシュ値と突き合わせるので、
+    # キャッシュに古い版が残っていても検証は素通りしない。
+    - name: Cache NuGet packages
+      uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: ~/.nuget/packages
+        key: nuget-${{ runner.os }}-${{ hashFiles('ICCardManager/**/packages.lock.json') }}
+        restore-keys: nuget-${{ runner.os }}-
 
     # 復元はロックファイル（packages.lock.json）どおりに行い、食い違えば失敗させる（全ワークフロー共通。Issue #2117）。
     # 素の restore は食い違いを黙ってロックファイルの書き換えで吸収するため、ロックファイルが何も固定しなくなる
@@ -133,10 +171,33 @@ jobs:
     - name: Checkout
       uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
+    # SDK の確認・導入と NuGet のキャッシュは build-and-test と同じ（理由はそちらの注記）。
+    - name: Check preinstalled .NET SDK
+      id: sdk
+      shell: pwsh
+      run: |
+        $found = $false
+        try {
+          dotnet --version
+          $found = $LASTEXITCODE -eq 0
+        } catch {
+          Write-Host "dotnet が見つかりません: $_"
+        }
+        "found=$(if ($found) { 'true' } else { 'false' })" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+        exit 0
+
     - name: Setup .NET
+      if: steps.sdk.outputs.found != 'true'
       uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
       with:
         dotnet-version: ${{ env.DOTNET_VERSION }}
+
+    - name: Cache NuGet packages
+      uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: ~/.nuget/packages
+        key: nuget-${{ runner.os }}-${{ hashFiles('ICCardManager/**/packages.lock.json') }}
+        restore-keys: nuget-${{ runner.os }}-
 
     - name: Restore dependencies
       run: dotnet restore --locked-mode
