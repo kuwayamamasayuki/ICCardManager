@@ -143,3 +143,132 @@ function Merge-CoverletJson {
         KeysConsistent  = $consistent
     }
 }
+
+function Format-CiNameList {
+    # 名前の一覧を最大 $Limit 件まで Markdown の箇条書きにする。超えた分は件数だけ示す。
+    param([string[]]$Names, [int]$Limit = 30)
+    Set-StrictMode -Version Latest
+    $lines = [System.Collections.Generic.List[string]]::new()
+    foreach ($name in @($Names | Select-Object -First $Limit)) { $lines.Add("  - ``$name``") }
+    if (@($Names).Count -gt $Limit) { $lines.Add("  - ほか $(@($Names).Count - $Limit) 件") }
+    return , $lines.ToArray()
+}
+
+function Format-CiPercent {
+    param([double]$Rate)
+    Set-StrictMode -Version Latest
+    return ($Rate * 100).ToString('F1', [System.Globalization.CultureInfo]::InvariantCulture) + '%'
+}
+
+function Invoke-CiTestSummary {
+    # ダウンロードした artifact（<Artifacts>/test-results-<構成>-<シャード>/**）を読み、構成ごとに
+    # 「全件がちょうど 1 回ずつ実行されたこと」を照合し、サマリー（Markdown）とカバレッジを報告する。
+    # 戻り値は終了コード（0 = 照合がすべて有効、1 = 無効または結果の欠落）。カバレッジでは合否を決めない（#2117）。
+    param(
+        [Parameter(Mandatory)][string]$ArtifactsDirectory,
+        [Parameter(Mandatory)][string[]]$Configurations,
+        [string]$SummaryPath
+    )
+    Set-StrictMode -Version Latest
+    $failed = $false
+    $md = [System.Collections.Generic.List[string]]::new()
+    $md.Add('## テストの照合（シャード）')
+    $md.Add('')
+
+    foreach ($config in $Configurations) {
+        $prefix = "test-results-$config-"
+        $md.Add("### $config")
+        $md.Add('')
+        $shardDirs = @()
+        if (Test-Path -LiteralPath $ArtifactsDirectory) {
+            $shardDirs = @(Get-ChildItem -LiteralPath $ArtifactsDirectory -Directory | Where-Object { $_.Name.StartsWith($prefix, [StringComparison]::Ordinal) } | Sort-Object Name)
+        }
+        if ($shardDirs.Count -eq 0) {
+            Write-Host "::error::$config のテスト結果が無い（$prefix* の artifact が見つからない）ため、テストの照合ができません。ビルドまたはテストのジョブが失敗していないか、ci.yml の matrix.shard と artifact 名が一致しているかを確かめてください。"
+            $md.Add("- 結果が無い（$prefix* の artifact が無い）")
+            $md.Add('')
+            $failed = $true
+            continue
+        }
+
+        $shards = @{}
+        $missingResult = $false
+        foreach ($dir in $shardDirs) {
+            $shard = $dir.Name.Substring($prefix.Length)
+            $trx = @(Get-ChildItem -LiteralPath $dir.FullName -Recurse -File -Filter 'results.trx')
+            if ($trx.Count -eq 0) {
+                Write-Host "::error::$config のシャード $shard の結果（results.trx）が無いため、テストの照合ができません。そのシャードのテストが開始前に失敗していないか、ジョブのログを確かめてください。"
+                $md.Add("- シャード ``$shard``: 結果が無い（results.trx が無い）")
+                $missingResult = $true
+                continue
+            }
+            $names = [System.Collections.Generic.List[string]]::new()
+            foreach ($file in $trx) { foreach ($n in (Read-TrxTestNames -Path $file.FullName)) { $names.Add($n) } }
+            $shards[$shard] = $names.ToArray()
+        }
+
+        $listFiles = @(Get-ChildItem -LiteralPath ($shardDirs | ForEach-Object { $_.FullName }) -Recurse -File -Filter 'list-tests.txt')
+        if ($listFiles.Count -ne 1) {
+            $why = if ($listFiles.Count -eq 0) { 'テスト一覧（list-tests.txt）がどのシャードにも無い' } else { "テスト一覧（list-tests.txt）が $($listFiles.Count) 個あり、どれが期待の正か決められない" }
+            Write-Host "::error::$config のテストの照合ができません。$why ためです。ci.yml で一覧を作るシャードが 1 つだけで、その artifact がアップロードされているかを確かめてください。"
+            $md.Add("- 照合できない: $why")
+            $md.Add('')
+            $failed = $true
+            continue
+        }
+        if ($missingResult) {
+            $md.Add('')
+            $failed = $true
+            continue
+        }
+
+        $expected = Read-ListTestsOutput -Path $listFiles[0].FullName
+        $part = Test-ShardPartition -Expected $expected -Shards $shards
+        $md.Add("- 照合したテスト（名前の数）: $($part.ExpectedCount)")
+        $md.Add("- 実行件数（理論の展開後）: $($part.ExecutedCount)")
+        foreach ($shard in ($shards.Keys | Sort-Object)) { $md.Add("  - シャード ``$shard``: $(@($shards[$shard]).Count) 件") }
+
+        if (-not $part.IsValid) {
+            $failed = $true
+            $detail = "欠落 $(@($part.Missing).Count) 件・期待外 $(@($part.Unexpected).Count) 件・重複 $(@($part.Duplicated).Count) 件・空のシャード $(@($part.EmptyShards).Count) 個"
+            $sample = @(@($part.Missing) + @($part.Unexpected) + @($part.Duplicated) | Select-Object -First 3) -join ', '
+            Write-Host "::error::$config のテストの照合が無効です（$detail。例: $sample）。シャード ($(($shards.Keys | Sort-Object) -join ', ')) の合算が全件を 1 回ずつ実行していません。ci.yml の TEST_SHARD_NAMESPACE と matrix.shard の対応、ビルドの失敗の有無を確かめてください。本体に Category=UI のテストが足された場合も、services・others のどちらの絞り込みにも入らないことがあります。"
+            $md.Add('- **照合が無効**: ' + $detail)
+            foreach ($section in @(@('欠落（一覧にあるが実行されていない）', $part.Missing), @('期待外（一覧に無いのに実行された）', $part.Unexpected), @('重複（複数のシャードで実行された）', $part.Duplicated), @('空のシャード', $part.EmptyShards))) {
+                if (@($section[1]).Count -gt 0) {
+                    $md.Add("- $($section[0])")
+                    foreach ($line in (Format-CiNameList -Names @($section[1]))) { $md.Add($line) }
+                }
+            }
+        }
+
+        $coverageFiles = @(Get-ChildItem -LiteralPath ($shardDirs | ForEach-Object { $_.FullName }) -Recurse -File -Filter 'coverage.json')
+        if ($coverageFiles.Count -eq 0) {
+            if ($config -eq 'Release') {
+                Write-Host "::warning::$config のカバレッジ（coverage.json）が無いため、カバレッジを報告できません。テストの照合は続けています。coverlet の収集が動いたか、テストのジョブのログを確かめてください。"
+                $md.Add('- カバレッジ: 結果が無い（coverage.json が無い）')
+            }
+        }
+        else {
+            try {
+                $cov = Merge-CoverletJson -Paths @($coverageFiles | ForEach-Object { $_.FullName })
+                $md.Add("- カバレッジ（シャード合算）: 行 $(Format-CiPercent $cov.LineRate)（$($cov.LinesCovered)/$($cov.LinesTotal)）、分岐 $(Format-CiPercent $cov.BranchRate)（$($cov.BranchesCovered)/$($cov.BranchesTotal)）")
+                if (-not $cov.KeysConsistent) {
+                    Write-Host "::warning::$config のカバレッジはシャードごとの行・分岐の集合が食い違っています。シャードのビルドが別の成果物になっていないか確かめてください。数値は和集合で合算しています。"
+                    $md.Add('- カバレッジの注意: シャード間で行・分岐の集合が食い違っている（和集合で合算）')
+                }
+            }
+            catch {
+                Write-Host "::warning::$config のカバレッジを読めませんでした（$($_.Exception.Message)）。coverage.json が壊れていないか確かめてください。テストの照合は続けています。"
+                $md.Add('- カバレッジ: 読めなかった')
+            }
+        }
+        $md.Add('')
+    }
+
+    $text = ($md -join "`n") + "`n"
+    if (-not [string]::IsNullOrEmpty($SummaryPath)) {
+        [System.IO.File]::AppendAllText($SummaryPath, $text, [System.Text.UTF8Encoding]::new($false))
+    }
+    return [int]$(if ($failed) { 1 } else { 0 })
+}

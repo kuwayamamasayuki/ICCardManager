@@ -265,5 +265,161 @@ namespace ICCardManager.Tests.Tools
             result.GetProperty("LineRate").GetDouble().Should().Be(0, "Total が 0 のときは 0 割りせず 0 とする");
             result.GetProperty("BranchRate").GetDouble().Should().Be(0);
         }
+
+        // ---- Invoke-CiTestSummary（集約の入口） ----
+
+        private static string TrxOf(params string[] names) =>
+            "<?xml version=\"1.0\" encoding=\"UTF-8\"?>" +
+            "<TestRun xmlns=\"http://microsoft.com/schemas/VisualStudio/TeamTest/2010\"><Results>" +
+            string.Concat(names.Select(n => $"<UnitTestResult testName=\"{n}\" outcome=\"Passed\" />")) +
+            "</Results></TestRun>";
+
+        private static string ListOf(params string[] names) =>
+            "Test run for C:\\x\\Tests.dll (.NETFramework,Version=v4.8)\r\n\r\nThe following Tests are available:\r\n" +
+            string.Concat(names.Select(n => "    " + n + "\r\n"));
+
+        private static string CoverageOf(int hits) =>
+            CovDoc(CovMethod("M1", $"\"1\":{hits},\"2\":{hits}", CovBranch(1, 0, 1, 0, 0, hits)));
+
+        /// <summary>artifact の 1 シャード分（<c>test-results-構成-シャード/サブ/…</c>）を作る。null のファイルは作らない。</summary>
+        private void WriteShard(string artifacts, string configuration, string shard, string[]? executed, string[]? list = null, string? coverage = null)
+        {
+            var dir = Path.Combine(artifacts, $"test-results-{configuration}-{shard}", "sub");
+            Directory.CreateDirectory(dir);
+            if (executed != null) { File.WriteAllText(Path.Combine(dir, "results.trx"), TrxOf(executed)); }
+            if (list != null) { File.WriteAllText(Path.Combine(dir, "list-tests.txt"), ListOf(list)); }
+            if (coverage != null) { File.WriteAllText(Path.Combine(dir, "coverage.json"), coverage); }
+        }
+
+        private static readonly string[] AllTests = { "A.S1", "A.S2", "B.O1" };
+
+        /// <summary>全部揃った配置（services が一覧を持つ）。テストごとに必要な部分だけ作り直す。</summary>
+        private string FullArtifacts(string configuration, bool withList = true, bool withCoverage = true)
+        {
+            var artifacts = Path.Combine(_tempDir, "artifacts");
+            WriteShard(artifacts, configuration, "services", new[] { "A.S1", "A.S2" }, withList ? AllTests : null, withCoverage && configuration == "Release" ? CoverageOf(1) : null);
+            WriteShard(artifacts, configuration, "others", new[] { "B.O1" }, null, withCoverage && configuration == "Release" ? CoverageOf(0) : null);
+            return artifacts;
+        }
+
+        private (int ExitCode, string StdOut, string Summary) Summarize()
+        {
+            var artifacts = Path.Combine(_tempDir, "artifacts");
+            var summary = Path.Combine(_tempDir, "summary.md");
+            var command = ". " + PowerShellScriptRunner.SingleQuote(ScriptPath) +
+                "; exit (Invoke-CiTestSummary -ArtifactsDirectory " + PowerShellScriptRunner.SingleQuote(artifacts) +
+                " -Configurations @('Release','Debug') -SummaryPath " + PowerShellScriptRunner.SingleQuote(summary) + ")";
+            var result = PowerShellScriptRunner.RunPwshCommand(command);
+            return (result.ExitCode, result.StdOut, File.Exists(summary) ? File.ReadAllText(summary) : string.Empty);
+        }
+
+        [Fact]
+        public void 集約_すべて揃えば0を返しサマリーに件数とカバレッジを書く()
+        {
+            FullArtifacts("Release");
+            FullArtifacts("Debug");
+
+            var r = Summarize();
+
+            r.ExitCode.Should().Be(0, $"全件がちょうど 1 回ずつ実行されていること。出力: {r.StdOut}");
+            r.Summary.Should().Contain("Release").And.Contain("Debug");
+            r.Summary.Should().Contain("照合したテスト", "構成ごとに照合した名前の数を書くこと");
+            r.Summary.Should().Contain("services").And.Contain("others", "シャードごとの件数を書くこと");
+            r.Summary.Should().Contain("行").And.Contain("分岐", "カバレッジの行と分岐を書くこと");
+            r.Summary.Should().Contain("100.0%", "行は 2 行ともヒット、分岐は 1 つがヒットなので 100.0%");
+        }
+
+        [Fact]
+        public void 集約_構成ごとにその構成の一覧とだけ照合する()
+        {
+            FullArtifacts("Release");
+            var artifacts = Path.Combine(_tempDir, "artifacts");
+            WriteShard(artifacts, "Debug", "services", new[] { "A.S1", "A.S2" }, new[] { "A.S1", "A.S2", "B.O1", "D.DebugOnly" });
+            WriteShard(artifacts, "Debug", "others", new[] { "B.O1", "D.DebugOnly" });
+
+            var r = Summarize();
+
+            r.ExitCode.Should().Be(0, $"Debug だけにあるテストを Debug の一覧で照合し、Release 側で期待外と数えないこと。出力: {r.StdOut}");
+        }
+
+        [Fact]
+        public void 集約_シャードの結果が無ければ失敗する()
+        {
+            FullArtifacts("Release");
+            var artifacts = Path.Combine(_tempDir, "artifacts");
+            WriteShard(artifacts, "Debug", "services", new[] { "A.S1", "A.S2" }, AllTests);
+
+            var r = Summarize();
+
+            r.ExitCode.Should().Be(1);
+            r.StdOut.Should().Contain("::error::").And.Contain("Debug").And.Contain("others", "どの構成のどのシャードの結果が無いかを名指しすること");
+        }
+
+        [Fact]
+        public void 集約_一覧が無ければ失敗する()
+        {
+            FullArtifacts("Release");
+            FullArtifacts("Debug", withList: false);
+
+            var r = Summarize();
+
+            r.ExitCode.Should().Be(1);
+            r.StdOut.Should().Contain("::error::").And.Contain("Debug");
+        }
+
+        [Fact]
+        public void 集約_一覧が2つあれば失敗する()
+        {
+            FullArtifacts("Debug");
+            var artifacts = FullArtifacts("Release");
+            WriteShard(artifacts, "Release", "others", new[] { "B.O1" }, AllTests);
+
+            var r = Summarize();
+
+            r.ExitCode.Should().Be(1, "一覧が 2 つあると、どちらが期待の正か決められない");
+            r.StdOut.Should().Contain("::error::").And.Contain("Release");
+        }
+
+        [Fact]
+        public void 集約_欠落があれば失敗し名前を出す()
+        {
+            FullArtifacts("Debug");
+            var artifacts = Path.Combine(_tempDir, "artifacts");
+            WriteShard(artifacts, "Release", "services", new[] { "A.S1", "A.S2" }, new[] { "A.S1", "A.S2", "B.O1", "B.Lost" });
+            WriteShard(artifacts, "Release", "others", new[] { "B.O1" });
+
+            var r = Summarize();
+
+            r.ExitCode.Should().Be(1);
+            r.StdOut.Should().Contain("::error::").And.Contain("B.Lost");
+            r.Summary.Should().Contain("B.Lost", "サマリーにも欠落の名前を残すこと");
+        }
+
+        [Fact]
+        public void 集約_カバレッジが無くても照合は続け警告だけ出す()
+        {
+            FullArtifacts("Release", withCoverage: false);
+            FullArtifacts("Debug");
+
+            var r = Summarize();
+
+            r.ExitCode.Should().Be(0, "カバレッジの欠落は合否に影響しないこと");
+            r.StdOut.Should().Contain("::warning::");
+            r.StdOut.Should().NotContain("::error::");
+        }
+
+        [Fact]
+        public void 集約_カバレッジで合否を決めない()
+        {
+            var artifacts = Path.Combine(_tempDir, "artifacts");
+            WriteShard(artifacts, "Release", "services", new[] { "A.S1", "A.S2" }, AllTests, CoverageOf(0));
+            WriteShard(artifacts, "Release", "others", new[] { "B.O1" }, null, CoverageOf(0));
+            FullArtifacts("Debug");
+
+            var r = Summarize();
+
+            r.ExitCode.Should().Be(0, $"ヒットがすべて 0 でも閾値で落とさない（#2117）。出力: {r.StdOut}");
+            r.Summary.Should().Contain("0.0%");
+        }
     }
 }
