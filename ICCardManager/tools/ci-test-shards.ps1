@@ -85,3 +85,61 @@ function Test-ShardPartition {
         IsValid       = ($missing.Count -eq 0 -and $unexpected.Count -eq 0 -and $duplicated.Count -eq 0 -and $empty.Count -eq 0)
     }
 }
+
+function Merge-CoverletJson {
+    # シャードごとの coverlet の json（coverage.json）を合算し、coverlet の cobertura と同じ数え方で行・分岐のカバレッジを返す。
+    # 行は「モジュール|ファイル|クラス|メソッド|行番号」、分岐は「…|Line|Offset|EndOffset|Path|Ordinal」をキーにする。
+    # 同じ行番号でもメソッドが違えば別に数える（コンストラクタが複数あるクラスで、ファイルと行番号だけで数えると cobertura と食い違う）。
+    # シャードごとのヒット数を足し、1 以上なら covered と数える。キーの集合は和集合で数え、食い違いは KeysConsistent で知らせる。
+    param([Parameter(Mandatory)][string[]]$Paths)
+    Set-StrictMode -Version Latest
+    $lineHits = [System.Collections.Generic.Dictionary[string, long]]::new([System.StringComparer]::Ordinal)
+    $branchHits = [System.Collections.Generic.Dictionary[string, long]]::new([System.StringComparer]::Ordinal)
+    $lineCounts = [System.Collections.Generic.List[int]]::new()
+    $branchCounts = [System.Collections.Generic.List[int]]::new()
+    foreach ($path in $Paths) {
+        $doc = [System.IO.File]::ReadAllText($path) | ConvertFrom-Json -AsHashtable
+        $lineKeys = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::Ordinal)
+        $branchKeys = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::Ordinal)
+        foreach ($module in $doc.Keys) {
+            foreach ($file in $doc[$module].Keys) {
+                foreach ($class in $doc[$module][$file].Keys) {
+                    foreach ($method in $doc[$module][$file][$class].Keys) {
+                        $prefix = "$module|$file|$class|$method|"
+                        $entry = $doc[$module][$file][$class][$method]
+                        if ($entry.ContainsKey('Lines') -and $null -ne $entry['Lines']) {
+                            foreach ($line in $entry['Lines'].Keys) {
+                                $key = $prefix + $line
+                                $null = $lineKeys.Add($key)
+                                $lineHits[$key] = $(if ($lineHits.ContainsKey($key)) { $lineHits[$key] } else { 0 }) + [long]$entry['Lines'][$line]
+                            }
+                        }
+                        if ($entry.ContainsKey('Branches') -and $null -ne $entry['Branches']) {
+                            foreach ($branch in @($entry['Branches'])) {
+                                $key = $prefix + "$($branch['Line'])|$($branch['Offset'])|$($branch['EndOffset'])|$($branch['Path'])|$($branch['Ordinal'])"
+                                $null = $branchKeys.Add($key)
+                                $branchHits[$key] = $(if ($branchHits.ContainsKey($key)) { $branchHits[$key] } else { 0 }) + [long]$branch['Hits']
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        $lineCounts.Add($lineKeys.Count)
+        $branchCounts.Add($branchKeys.Count)
+    }
+    $linesCovered = @($lineHits.Values | Where-Object { $_ -gt 0 }).Count
+    $branchesCovered = @($branchHits.Values | Where-Object { $_ -gt 0 }).Count
+    $consistent = $true
+    foreach ($count in $lineCounts) { if ($count -ne $lineHits.Count) { $consistent = $false } }
+    foreach ($count in $branchCounts) { if ($count -ne $branchHits.Count) { $consistent = $false } }
+    return [pscustomobject]@{
+        LinesCovered    = [int]$linesCovered
+        LinesTotal      = [int]$lineHits.Count
+        BranchesCovered = [int]$branchesCovered
+        BranchesTotal   = [int]$branchHits.Count
+        LineRate        = $(if ($lineHits.Count -eq 0) { [double]0 } else { [double]$linesCovered / $lineHits.Count })
+        BranchRate      = $(if ($branchHits.Count -eq 0) { [double]0 } else { [double]$branchesCovered / $branchHits.Count })
+        KeysConsistent  = $consistent
+    }
+}

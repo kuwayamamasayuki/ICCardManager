@@ -180,5 +180,90 @@ namespace ICCardManager.Tests.Tools
             act.Should().Throw<InvalidOperationException>("pwsh が無い環境では検査をスキップせず失敗させること")
                 .WithMessage("*PowerShell 7*");
         }
+
+        // ---- Merge-CoverletJson（カバレッジの合算） ----
+
+        private static string CovBranch(int line, int offset, int endOffset, int path, int ordinal, int hits) =>
+            $"{{\"Line\":{line},\"Offset\":{offset},\"EndOffset\":{endOffset},\"Path\":{path},\"Ordinal\":{ordinal},\"Hits\":{hits}}}";
+
+        private static string CovMethod(string name, string lines, string branches) =>
+            $"\"{name}\":{{\"Lines\":{{{lines}}},\"Branches\":[{branches}]}}";
+
+        /// <summary>coverlet の json と同じ形（モジュール → ファイル → クラス → メソッド）。メソッドは 1 つのクラスにまとめる。</summary>
+        private static string CovDoc(params string[] methods) =>
+            "{\"M.dll\":{\"F.cs\":{\"C\":{" + string.Join(",", methods) + "}}}}";
+
+        private JsonElement Merge(params string[] jsonDocs)
+        {
+            var paths = jsonDocs.Select((json, i) => PowerShellScriptRunner.SingleQuote(WriteTemp($"cov{i}.json", json)));
+            return RunJson("Merge-CoverletJson -Paths @(" + string.Join(",", paths) + ")");
+        }
+
+        [Fact]
+        public void 合算_シャードごとのヒットの和集合で数える()
+        {
+            var shardA = CovDoc(CovMethod("M1", "\"10\":1,\"11\":0,\"12\":0", CovBranch(10, 1, 2, 0, 0, 1) + "," + CovBranch(10, 1, 3, 1, 1, 0)));
+            var shardB = CovDoc(CovMethod("M1", "\"10\":0,\"11\":2,\"12\":0", CovBranch(10, 1, 2, 0, 0, 0) + "," + CovBranch(10, 1, 3, 1, 1, 5)));
+
+            var result = Merge(shardA, shardB);
+
+            result.GetProperty("LinesCovered").GetInt32().Should().Be(2, "行 10 は A で、行 11 は B でヒットしたので和集合は 2 行");
+            result.GetProperty("LinesTotal").GetInt32().Should().Be(3);
+            result.GetProperty("BranchesCovered").GetInt32().Should().Be(2, "分岐は A が 1 つ、B がもう 1 つヒットしたので和集合は 2 つ");
+            result.GetProperty("BranchesTotal").GetInt32().Should().Be(2);
+            result.GetProperty("KeysConsistent").GetBoolean().Should().BeTrue();
+        }
+
+        [Fact]
+        public void 合算_同じ行が別のメソッドにあれば別々に数える()
+        {
+            var doc = CovDoc(
+                CovMethod("C::.ctor()", "\"5\":1", string.Empty),
+                CovMethod("C::.ctor(System.Int32)", "\"5\":0", string.Empty));
+
+            var result = Merge(doc);
+
+            result.GetProperty("LinesCovered").GetInt32().Should().Be(1, "同じ行番号でもメソッドが別なら別の行として数える（coverlet の数え方）");
+            result.GetProperty("LinesTotal").GetInt32().Should().Be(2);
+        }
+
+        [Fact]
+        public void 合算_キーの集合が食い違えば知らせる()
+        {
+            var shardA = CovDoc(CovMethod("M1", "\"10\":1,\"11\":0,\"12\":0", string.Empty));
+            var shardB = CovDoc(CovMethod("M1", "\"10\":0,\"11\":1,\"12\":0,\"13\":1", string.Empty));
+
+            var result = Merge(shardA, shardB);
+
+            result.GetProperty("KeysConsistent").GetBoolean().Should().BeFalse("B にだけ行 13 があるのでキーの集合が食い違う");
+            result.GetProperty("LinesTotal").GetInt32().Should().Be(4, "合算はキーの和集合で行う");
+            result.GetProperty("LinesCovered").GetInt32().Should().Be(3);
+        }
+
+        [Fact]
+        public void 合算_1ファイルなら行と分岐の割合はそのファイルの数え上げと一致する()
+        {
+            var doc = CovDoc(
+                CovMethod("M1", "\"1\":3,\"2\":0,\"3\":1,\"4\":0", CovBranch(2, 0, 1, 0, 0, 1) + "," + CovBranch(2, 0, 2, 1, 1, 0) + "," + CovBranch(3, 4, 5, 0, 2, 0)));
+
+            var result = Merge(doc);
+
+            result.GetProperty("LinesCovered").GetInt32().Should().Be(2);
+            result.GetProperty("LinesTotal").GetInt32().Should().Be(4);
+            result.GetProperty("LineRate").GetDouble().Should().BeApproximately(0.5, 1e-9);
+            result.GetProperty("BranchesCovered").GetInt32().Should().Be(1);
+            result.GetProperty("BranchesTotal").GetInt32().Should().Be(3);
+            result.GetProperty("BranchRate").GetDouble().Should().BeApproximately(1.0 / 3.0, 1e-9);
+        }
+
+        [Fact]
+        public void 合算_行も分岐も無ければ割合は0で例外にしない()
+        {
+            var result = Merge(CovDoc(CovMethod("M1", string.Empty, string.Empty)));
+
+            result.GetProperty("LinesTotal").GetInt32().Should().Be(0);
+            result.GetProperty("LineRate").GetDouble().Should().Be(0, "Total が 0 のときは 0 割りせず 0 とする");
+            result.GetProperty("BranchRate").GetDouble().Should().Be(0);
+        }
     }
 }
