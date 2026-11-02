@@ -1,12 +1,13 @@
 ﻿# CI のテストのシャーディング（全件がちょうど 1 回ずつ実行されたことの照合など）の関数群。
 # 関数定義だけで、ドットソースしても何も実行しない。
 
-Set-StrictMode -Version Latest
+# StrictMode は各関数の先頭で設定する（ドットソースで呼び出し側のスコープへ漏らさないため）。
 
 function Get-TestKey {
     # xUnit の理論は引数ごとに別の表示名になる（"A.B.M(x: 1)"）。末尾の「(名前: 値...)」だけを除いて 1 つのキーにする。
     # 全角の括弧やコロンの無い括弧（"Name (note)"）は表示名の一部なので残す。
     param([Parameter(Mandatory)][string]$DisplayName)
+    Set-StrictMode -Version Latest
     return ($DisplayName -replace '\([A-Za-z_][A-Za-z0-9_]*: .*\)$', '')
 }
 
@@ -14,6 +15,7 @@ function Read-ListTestsOutput {
     # dotnet test --list-tests の出力から、テスト名の行（4 文字以上の空白で始まる行）だけを読む。
     # 見出しの言語（英語・日本語）に依存しない。
     param([Parameter(Mandatory)][string]$Path)
+    Set-StrictMode -Version Latest
     $names = [System.Collections.Generic.List[string]]::new()
     foreach ($line in [System.IO.File]::ReadAllLines($Path)) {
         if ($line -match '^\s{4,}\S') {
@@ -26,6 +28,7 @@ function Read-ListTestsOutput {
 function Read-TrxTestNames {
     # trx の UnitTestResult の testName を、結果（成功・失敗・スキップ）を問わずすべて返す。
     param([Parameter(Mandatory)][string]$Path)
+    Set-StrictMode -Version Latest
     $xml = [xml][System.IO.File]::ReadAllText($Path)
     $names = [System.Collections.Generic.List[string]]::new()
     foreach ($result in @($xml.TestRun.Results.UnitTestResult)) {
@@ -43,6 +46,7 @@ function Test-ShardPartition {
         [Parameter(Mandatory)][AllowEmptyCollection()][string[]]$Expected,
         [Parameter(Mandatory)][hashtable]$Shards
     )
+    Set-StrictMode -Version Latest
     $comparer = [StringComparer]::Ordinal
     $expectedKeys = [System.Collections.Generic.HashSet[string]]::new($comparer)
     foreach ($name in $Expected) { [void]$expectedKeys.Add((Get-TestKey -DisplayName $name)) }

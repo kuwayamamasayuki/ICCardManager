@@ -543,12 +543,6 @@ namespace ICCardManager.Tests.Tools
         /// </summary>
         public static ScriptResult RunCommand(string command) => RunEncodedCommand("powershell.exe", command);
 
-        /// <summary>
-        /// pwsh 7 の場所を解決する。差し替え可能にしてあるのは「pwsh が無い環境では検査をスキップせず失敗する」ことを
-        /// テストで固定するため（既定は <see cref="LocatePwsh"/>）。
-        /// </summary>
-        internal static Func<string?> PwshLocator { get; set; } = LocatePwsh;
-
         /// <summary><c>PATH</c> 上の pwsh.exe、無ければ <c>%ProgramFiles%\PowerShell\7\pwsh.exe</c>。無ければ null。</summary>
         internal static string? LocatePwsh()
         {
@@ -576,8 +570,14 @@ namespace ICCardManager.Tests.Tools
         }
 
         /// <summary>pwsh 7 の実行ファイルのパス。見つからなければ検査をスキップせず失敗させる。</summary>
-        public static string PwshPath =>
-            PwshLocator()
+        public static string PwshPath => ResolvePwsh(LocatePwsh);
+
+        /// <summary>
+        /// 場所の探索結果から pwsh 7 のパスを決める。探索関数を引数に取るのは、グローバルな状態を書き換えずに
+        /// 「pwsh が無ければ失敗する」ことをテストで固定するため。
+        /// </summary>
+        internal static string ResolvePwsh(Func<string?> locator) =>
+            locator()
             ?? throw new InvalidOperationException(
                 "pwsh 7 が見つからない。ci-test-shards.ps1 の検査はスキップせず失敗させる。" +
                 "PowerShell 7 を入れてください（PATH 上の pwsh.exe か %ProgramFiles%\\PowerShell\\7\\pwsh.exe）。");

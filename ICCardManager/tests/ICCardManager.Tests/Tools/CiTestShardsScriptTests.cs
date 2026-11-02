@@ -150,22 +150,35 @@ namespace ICCardManager.Tests.Tools
         }
 
         [Fact]
+        public void ドットソースは呼び出し側のStrictModeを変えない()
+        {
+            var token = RunJson("[string]$notDefinedVariable + 'ok'");
+
+            token.GetString().Should().Be("ok", "ドットソースしても呼び出し側のスコープが strict にならず、未定義変数の参照で例外にならないこと");
+        }
+
+        [Theory]
+        [InlineData("<Results />")]
+        [InlineData("")]
+        public void trx_結果が0件なら空配列を返す(string results)
+        {
+            var path = WriteTemp("empty.trx",
+                "<?xml version=\"1.0\" encoding=\"UTF-8\"?>" +
+                "<TestRun xmlns=\"http://microsoft.com/schemas/VisualStudio/TeamTest/2010\">" + results + "</TestRun>");
+
+            var token = RunJson("Read-TrxTestNames -Path " + PowerShellScriptRunner.SingleQuote(path));
+
+            token.ValueKind.Should().Be(JsonValueKind.Array, "0 件は例外ではなく空配列で返ること（空のシャードは照合側で検出する）");
+            token.GetArrayLength().Should().Be(0);
+        }
+
+        [Fact]
         public void pwshが無ければスキップせず失敗する()
         {
-            var original = PowerShellScriptRunner.PwshLocator;
-            try
-            {
-                PowerShellScriptRunner.PwshLocator = () => null;
+            Action act = () => PowerShellScriptRunner.ResolvePwsh(() => null);
 
-                Action act = () => PowerShellScriptRunner.RunPwshCommand("1");
-
-                act.Should().Throw<InvalidOperationException>("pwsh が無い環境では検査をスキップせず失敗させること")
-                    .WithMessage("*PowerShell 7*");
-            }
-            finally
-            {
-                PowerShellScriptRunner.PwshLocator = original;
-            }
+            act.Should().Throw<InvalidOperationException>("pwsh が無い環境では検査をスキップせず失敗させること")
+                .WithMessage("*PowerShell 7*");
         }
     }
 }
