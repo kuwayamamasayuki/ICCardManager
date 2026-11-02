@@ -541,14 +541,58 @@ namespace ICCardManager.Tests.Tools
         /// 標準出力は UTF-8 で読むよう <c>[Console]::OutputEncoding</c> を先に設定する（既定のままだと
         /// <c>Write-Host</c> の日本語がシステムのコードページで出力され、文字化けして照合できない）。
         /// </summary>
-        public static ScriptResult RunCommand(string command)
+        public static ScriptResult RunCommand(string command) => RunEncodedCommand("powershell.exe", command);
+
+        /// <summary>
+        /// pwsh 7 の場所を解決する。差し替え可能にしてあるのは「pwsh が無い環境では検査をスキップせず失敗する」ことを
+        /// テストで固定するため（既定は <see cref="LocatePwsh"/>）。
+        /// </summary>
+        internal static Func<string?> PwshLocator { get; set; } = LocatePwsh;
+
+        /// <summary><c>PATH</c> 上の pwsh.exe、無ければ <c>%ProgramFiles%\PowerShell\7\pwsh.exe</c>。無ければ null。</summary>
+        internal static string? LocatePwsh()
+        {
+            var pathDirs = (Environment.GetEnvironmentVariable("PATH") ?? string.Empty)
+                .Split(new[] { Path.PathSeparator }, StringSplitOptions.RemoveEmptyEntries);
+            foreach (var dir in pathDirs)
+            {
+                try
+                {
+                    var candidate = Path.Combine(dir.Trim().Trim('"'), "pwsh.exe");
+                    if (File.Exists(candidate))
+                    {
+                        return candidate;
+                    }
+                }
+                catch (ArgumentException)
+                {
+                    // PATH に不正な文字を含む項目があっても、残りの項目で探す
+                }
+            }
+
+            var fallback = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), "PowerShell", "7", "pwsh.exe");
+            return File.Exists(fallback) ? fallback : null;
+        }
+
+        /// <summary>pwsh 7 の実行ファイルのパス。見つからなければ検査をスキップせず失敗させる。</summary>
+        public static string PwshPath =>
+            PwshLocator()
+            ?? throw new InvalidOperationException(
+                "pwsh 7 が見つからない。ci-test-shards.ps1 の検査はスキップせず失敗させる。" +
+                "PowerShell 7 を入れてください（PATH 上の pwsh.exe か %ProgramFiles%\\PowerShell\\7\\pwsh.exe）。");
+
+        /// <summary><see cref="RunCommand"/> の pwsh 7 版（CI のスクリプトは pwsh 7 で動かすため）。</summary>
+        public static ScriptResult RunPwshCommand(string command) => RunEncodedCommand(PwshPath, command);
+
+        private static ScriptResult RunEncodedCommand(string fileName, string command)
         {
             var script = "[Console]::OutputEncoding = [System.Text.Encoding]::UTF8\n" + command;
             var encoded = Convert.ToBase64String(Encoding.Unicode.GetBytes(script));
 
             var psi = new ProcessStartInfo
             {
-                FileName = "powershell.exe",
+                FileName = fileName,
                 Arguments = "-NoProfile -NonInteractive -ExecutionPolicy Bypass -EncodedCommand " + encoded,
                 UseShellExecute = false,
                 RedirectStandardOutput = true,
