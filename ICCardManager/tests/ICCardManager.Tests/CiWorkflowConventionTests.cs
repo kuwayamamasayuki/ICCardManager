@@ -1858,8 +1858,9 @@ jobs:
         var summary = YamlJob(root, "test-summary");
         summary.Should().NotBeNull("全シャードの結果を照合する集約ジョブ test-summary が要る");
         JobNeeds(summary!).Should().Contain("build-and-test", "needs: が無いと、シャードの完了を待たずに照合して必ず「結果が無い」になる");
-        IsAlwaysCondition((Child(summary!, "if") as YamlScalarNode)?.Value).Should().BeTrue(
-            "if: always() が無いと、テストが 1 件でも失敗したシャードがあると集約ジョブがスキップされ、欠落の照合が行われない");
+        IsNotCancelledCondition((Child(summary!, "if") as YamlScalarNode)?.Value).Should().BeTrue(
+            "if: ${{ !cancelled() }} が無いと、テストが 1 件でも失敗したシャードがあると集約ジョブがスキップされ、欠落の照合が行われない。" +
+            "always() にすると、concurrency で取り消した実行でも照合が走り、途中までの結果で赤を残す（設計 §3.5）");
 
         var summaryRun = JobRunScripts(root, "test-summary");
         summaryRun.Should().Contain("Invoke-CiTestSummary", "照合と合算は ci-test-shards.ps1 の Invoke-CiTestSummary が行う");
@@ -1885,9 +1886,13 @@ jobs:
         var listCommand = ExtractDotnetTestCommands(listRun).Should().ContainSingle(c => c.Contains("--list-tests")).Subject;
         listCommand.Should().Contain("--configuration ${{ matrix.configuration }}", "一覧は照合する構成ごとに作る（#if DEBUG 側のテストは Debug にしか無い）");
         listCommand.Should().Contain("tests/ICCardManager.Tests/ICCardManager.Tests.csproj", "照合の対象は本体のテストプロジェクト（設計 §3.8）");
-        var listIf = Regex.Match((Child(listStep, "if") as YamlScalarNode)?.Value ?? string.Empty, @"^\s*matrix\.shard\s*==\s*'([^']+)'\s*$");
-        listIf.Success.Should().BeTrue("一覧は構成ごとに 1 つだけ作る（if: matrix.shard == '<shard>'）。全シャードで作ると、どれが正解か決まらない");
-        shards.Should().Contain(listIf.Groups[1].Value, "matrix に無い shard の値を条件にすると、一覧がどのシャードでも作られない");
+        var listCondition = (Child(listStep, "if") as YamlScalarNode)?.Value;
+        var listShard = ListStepShard(listCondition);
+        listShard.Should().NotBeNull(
+            "一覧は構成ごとに 1 つだけ、テストが失敗しても作る（if: ${{ !cancelled() && matrix.shard == '<shard>' }}）。" +
+            "条件が無いと全シャードで作られてどれが正解か決まらず、!cancelled() が無いと（暗黙の success() で）テストが失敗したシャードで" +
+            $"一覧が作られず、その構成の照合ができない: {listCondition ?? "(if: なし)"}");
+        shards.Should().Contain(listShard!, "matrix に無い shard の値を条件にすると、一覧がどのシャードでも作られない");
         var listOutput = Regex.Match(listRun, @"Out-File\s+-FilePath\s+(\S+)").Groups[1].Value;
         listOutput.Should().NotBeEmpty("一覧の出力先（Out-File -FilePath）を明示する: " + listRun);
 
@@ -1895,8 +1900,8 @@ jobs:
         var uploads = YamlStepsUsing(root, "build-and-test", "actions/upload-artifact").ToList();
         uploads.Should().ContainSingle("シャードの結果を上げる upload-artifact が build-and-test に 1 つ要る");
         var (upload, uploadIndex) = uploads[0];
-        IsAlwaysCondition((Child(upload, "if") as YamlScalarNode)?.Value).Should().BeTrue(
-            "if: always() が無いと、テストが失敗したシャードの trx が上がらず、失敗したテストが照合から「欠落」として消える");
+        RunsEvenIfFailed((Child(upload, "if") as YamlScalarNode)?.Value).Should().BeTrue(
+            "if: always()（または !cancelled()）が無いと、テストが失敗したシャードの trx が上がらず、失敗したテストが照合から「欠落」として消える");
         uploadIndex.Should().BeGreaterThan(listIndex, "一覧を作る前に上げると、一覧が artifact に載らない");
         var uploadWith = Child(upload, "with") as YamlMappingNode;
         var artifactName = uploadWith == null ? null : (Child(uploadWith, "name") as YamlScalarNode)?.Value;
@@ -1932,6 +1937,66 @@ jobs:
     /// <summary><c>if:</c> の値が <c>always()</c>（<c>${{ always() }}</c> も含む）か。</summary>
     private static bool IsAlwaysCondition(string? condition)
         => condition != null && Regex.IsMatch(condition, @"^\s*(\$\{\{\s*)?always\(\)\s*(\}\})?\s*$");
+
+    /// <summary>
+    /// <c>if:</c> の値が <c>!cancelled()</c>（<c>${{ !cancelled() }}</c> も含む）か。前段の失敗では動き、取り消しでは動かない。
+    /// </summary>
+    private static bool IsNotCancelledCondition(string? condition)
+        => condition != null && Regex.IsMatch(condition, @"^\s*(\$\{\{\s*)?!\s*cancelled\(\)\s*(\}\})?\s*$");
+
+    /// <summary>前のステップが失敗しても動く条件（<c>always()</c> か <c>!cancelled()</c>）か。</summary>
+    private static bool RunsEvenIfFailed(string? condition)
+        => IsAlwaysCondition(condition) || IsNotCancelledCondition(condition);
+
+    /// <summary>
+    /// 一覧のステップの <c>if:</c>（<c>!cancelled() &amp;&amp; matrix.shard == '&lt;shard&gt;'</c>。<c>${{ }}</c> の有無は問わない）から
+    /// shard の値を読む。この形でなければ null。
+    /// </summary>
+    private static string? ListStepShard(string? condition)
+    {
+        if (condition is null)
+        {
+            return null;
+        }
+
+        var match = Regex.Match(
+            condition,
+            @"^\s*(?<open>\$\{\{\s*)?!\s*cancelled\(\)\s*&&\s*matrix\.shard\s*==\s*'(?<s>[^']+)'\s*(?(open)\}\}|)\s*$");
+        return match.Success ? match.Groups["s"].Value : null;
+    }
+
+    /// <summary>
+    /// 実行条件の読み取り（集約ジョブ・artifact・一覧のステップ）を既知の入力で固定する（#1786）。
+    /// 暗黙の <c>success()</c> はテストが 1 件でも失敗すると後続を飛ばすため、照合の材料を作る側は失敗でも動く条件が要る。
+    /// </summary>
+    [Fact]
+    public void 検出ロジックが集約と一覧の実行条件を読めること()
+    {
+        IsNotCancelledCondition("${{ !cancelled() }}").Should().BeTrue();
+        IsNotCancelledCondition("!cancelled()").Should().BeTrue("${{ }} を省いても同じ式");
+        IsNotCancelledCondition(null).Should().BeFalse("条件が無いと暗黙の success() になり、シャードの失敗で集約ジョブが飛ばされる");
+        IsNotCancelledCondition("success()").Should().BeFalse("success() はシャードの失敗で集約ジョブを飛ばす");
+        IsNotCancelledCondition("always()").Should().BeFalse("always() は取り消した実行でも照合を走らせ、途中までの結果で赤を残す");
+        IsNotCancelledCondition("cancelled()").Should().BeFalse("否定の無い cancelled() は取り消したときだけ動く");
+
+        RunsEvenIfFailed("always()").Should().BeTrue();
+        RunsEvenIfFailed("${{ !cancelled() }}").Should().BeTrue();
+        RunsEvenIfFailed(null).Should().BeFalse();
+        RunsEvenIfFailed("success()").Should().BeFalse();
+
+        ListStepShard("${{ !cancelled() && matrix.shard == 'services' }}").Should().Be("services");
+        ListStepShard("!cancelled() && matrix.shard == 'others'").Should().Be("others");
+        ListStepShard("${{ !cancelled() && matrix.shard == 'nothing' }}").Should().Be("nothing",
+            "値の読み取りはここで行い、matrix にある値かは呼び出し側が照合する");
+        ListStepShard("matrix.shard == 'services'").Should().BeNull(
+            "!cancelled() が無いと暗黙の success() になり、テストが失敗したシャードで一覧が作られない");
+        ListStepShard(null).Should().BeNull("条件が無いと全シャードで一覧が作られ、どれが正解か決まらない");
+        ListStepShard("${{ always() && matrix.shard == 'services' }}").Should().BeNull(
+            "always() は取り消した実行でも一覧を作る。許可するのは !cancelled() の形だけ");
+        ListStepShard("${{ !cancelled() || matrix.shard == 'services' }}").Should().BeNull("|| で合成するとすべてのシャードで作られる");
+        ListStepShard("${{ !cancelled() && matrix.shard == 'services' }").Should().BeNull("閉じていない式は読まない");
+        ListStepShard("!cancelled() && matrix.shard == 'services' }}").Should().BeNull("開いていない式は読まない");
+    }
 
     /// <summary>名前が <paramref name="name"/> のジョブ（対応表）。無ければ null。</summary>
     private static YamlMappingNode? YamlJob(YamlMappingNode root, string name)

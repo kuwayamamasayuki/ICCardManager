@@ -146,14 +146,20 @@ jobs:
     # 全件を列挙する。一覧は構成ごとに 1 つあればよいので、services のシャード（2 つのうち軽い方）でだけ作る。
     # 見出しの言語を固定するため英語の UI にする（照合はテスト名の行だけを読むが、ログの読み違いを避ける）。
     # 終了コードは pwsh のパイプラインでも $LASTEXITCODE に残り、ランナーがステップの結果にする。
+    # 条件に !cancelled() を付けるのは、テストが失敗したシャードでも一覧を作るため。付けないと暗黙の success() になり、
+    # services のテストが 1 件でも失敗すると一覧が作られず、集約ジョブがその構成の照合をまったく行えない
+    # （失敗したテストも「実行された」として照合する設計 §3.5 が成り立たない）。always() にしないのは、
+    # concurrency で取り消した実行で一覧を作っても使われないため。
     - name: List tests (シャードの照合の正解)
-      if: matrix.shard == 'services'
+      if: ${{ !cancelled() && matrix.shard == 'services' }}
       env:
         DOTNET_CLI_UI_LANGUAGE: en
       run: dotnet test tests/ICCardManager.Tests/ICCardManager.Tests.csproj --no-build --configuration ${{ matrix.configuration }} --list-tests --blame-hang-timeout 5m --blame-hang-dump-type none | Out-File -FilePath test-results/list-tests.txt -Encoding utf8
 
     # 結果（trx・カバレッジの json・一覧）を集約ジョブへ渡す。テストが失敗したシャードの結果も上げる（if: always()）—
     # 上げないと、失敗したテストが照合で「実行されていない」として数えられ、原因を取り違える。
+    # ここは always() のままにする — 取り消した実行でも途中までの結果を上げるだけで、赤を残すのは集約ジョブの側
+    # （そちらは !cancelled() で取り消しでは動かない）。
     # path は作業ディレクトリに従わず、リポジトリの直下から書く。保持は集約ジョブが読めれば足りるので短くする。
     - name: Upload test results
       if: always()
@@ -167,7 +173,10 @@ jobs:
   # 全シャードの後に、全件がちょうど 1 回ずつ実行されたことを照合し、カバレッジを合算する
   # （ICCardManager/docs/superpowers/specs/2026-11-02-ci-test-sharding-design.md §3.3〜§3.5）。
   # 照合と合算は ICCardManager/tools/ci-test-shards.ps1 に置き、単体テスト（CiTestShardsScriptTests）で固定している。
-  # シャードのテストが失敗しても照合は行う（if: always()）。シャード自体の失敗はそのジョブの失敗として残るので、
+  # シャードのテストが失敗しても照合は行う（設計 §3.5。照合は失敗したテストも「実行された」として数える）。
+  # 条件は always() ではなく !cancelled() にする — always() だと、concurrency で取り消した実行でも照合が走り、
+  # 途中までしか無い結果に対して「結果が無い」の赤を残す。条件を書かないと暗黙の success() になり、シャードが
+  # 1 つでも失敗すると集約ジョブごと飛ばされる。シャード自体の失敗はそのジョブの失敗として残るので、
   # 集約ジョブの成功が失敗を覆い隠すことはない。.NET もビルドも要らないので ubuntu で動かす。
   #
   # カバレッジは閾値で合否を決めず、合算した実測値をジョブのサマリーへ出すだけにする（Issue #2117）。
@@ -181,7 +190,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     needs: [ build-and-test ]
-    if: always()
+    if: ${{ !cancelled() }}
 
     steps:
     - name: Checkout
