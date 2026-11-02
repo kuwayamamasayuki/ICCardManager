@@ -63,6 +63,38 @@ namespace ICCardManager.Tests.Tools
         }
 
         [Theory]
+        [InlineData("`n")]
+        [InlineData("`r`n")]
+        public void キー_改行を含む理論の引数でも引数を除く(string newline)
+        {
+            // VSTest は例外メッセージを引数に持つ理論の表示名を複数行で出す（ArgumentNullException の「Parameter name: param」など）。
+            // PowerShell の '.' は改行に一致しないので、Singleline でないと引数が除かれず照合が「期待外」になる。
+            var token = RunJson("Get-TestKey -DisplayName (\"A.M(exception: System.ArgumentNullException: Value cannot be null.\" + \"" + newline +
+                "\" + \"Parameter name: param)\")");
+
+            token.GetString().Should().Be("A.M", "引数の値に改行があっても末尾の理論の引数が除かれること");
+        }
+
+        [Fact]
+        public void 照合_trxの改行を含む理論の表示名は一覧のメソッド名と同じキーになる()
+        {
+            // VSTest は testName 属性の改行を &#xD;&#xA; で書く。読み戻した名前に改行が残り、それでも一覧のキー "A.M" と一致すること。
+            var path = WriteTemp("multiline.trx",
+                "<?xml version=\"1.0\" encoding=\"UTF-8\"?>" +
+                "<TestRun xmlns=\"http://microsoft.com/schemas/VisualStudio/TeamTest/2010\"><Results>" +
+                "<UnitTestResult testName=\"A.M(exception: System.ArgumentNullException: Value cannot be null.&#xD;&#xA;Parameter name: param)\" outcome=\"Passed\" />" +
+                "</Results></TestRun>");
+
+            var names = RunJson("Read-TrxTestNames -Path " + PowerShellScriptRunner.SingleQuote(path));
+            Strings(names).Single().Should().Contain("\n", "trx から読み戻した表示名に改行が含まれること（テストの前提）");
+
+            var token = RunJson("Test-ShardPartition -Expected @('A.M') -Shards @{ s1 = @(Read-TrxTestNames -Path " + PowerShellScriptRunner.SingleQuote(path) + ") }");
+
+            token.GetProperty("IsValid").GetBoolean().Should().BeTrue("改行を含む理論の表示名も 1 つのキー A.M として照合されること");
+            Strings(token.GetProperty("Unexpected")).Should().BeEmpty();
+        }
+
+        [Theory]
         [InlineData("The following Tests are available:")]
         [InlineData("次のテストを使用できます:")]
         public void 一覧_見出しの言語に依存せず字下げされた行だけを読む(string heading)

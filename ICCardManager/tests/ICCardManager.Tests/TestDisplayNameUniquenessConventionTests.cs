@@ -64,6 +64,16 @@ public class TestDisplayNameUniquenessConventionTests
     }
 
     [Fact]
+    public void 検出ロジックは引数の値に改行があっても引数を除いて衝突を見つけること()
+    {
+        var methods = typeof(SampleMultilineArgument).GetMethods(BindingFlags.Public | BindingFlags.Instance | BindingFlags.DeclaredOnly)
+            .Select(m => (Type: typeof(SampleMultilineArgument), Method: m))
+            .ToList();
+
+        FindDuplicateDisplayNames(methods).Should().HaveCount(1, "改行を含む引数も Get-TestKey と同じく除かれ、引数の無い同名と衝突するはず");
+    }
+
+    [Fact]
     public void 検出ロジックは重複の無い入力で何も返さないこと()
     {
         var methods = typeof(SampleWithoutDuplicates).GetMethods(BindingFlags.Public | BindingFlags.Instance | BindingFlags.DeclaredOnly)
@@ -105,8 +115,8 @@ public class TestDisplayNameUniquenessConventionTests
     }
 
     // CI の照合のキー（ci-test-shards.ps1 の Get-TestKey）と同じ正規化: 末尾の理論の引数「(引数名: 値...)」を除く。
-    // 引数名は Unicode の文字（日本語を含む）。Get-TestKey の正規表現を変えたら、ここも同じに変えること。
-    private static readonly Regex TheoryArgumentSuffix = new(@"\([\p{L}_][\p{L}\p{Nd}_]*: .*\)$", RegexOptions.CultureInvariant);
+    // 引数名は Unicode の文字（日本語を含む）。値は改行を含み得る（Singleline = PowerShell の (?s)）。Get-TestKey の正規表現を変えたら、ここも同じに変えること。
+    private static readonly Regex TheoryArgumentSuffix = new(@"\([\p{L}_][\p{L}\p{Nd}_]*: .*\)$", RegexOptions.CultureInvariant | RegexOptions.Singleline);
 
     private static string NormalizeToCiKey(string displayName) => TheoryArgumentSuffix.Replace(displayName, string.Empty);
 
@@ -148,6 +158,15 @@ public class TestDisplayNameUniquenessConventionTests
 
         [Fact(DisplayName = "日本語の引数名")]
         public void E() { }
+    }
+
+    private sealed class SampleMultilineArgument
+    {
+        [Fact(DisplayName = "改行のキー(exception: System.ArgumentNullException: Value cannot be null.\nParameter name: param)")]
+        public void A() { }
+
+        [Fact(DisplayName = "改行のキー")]
+        public void B() { }
     }
 
     private sealed class SampleWithoutDuplicates

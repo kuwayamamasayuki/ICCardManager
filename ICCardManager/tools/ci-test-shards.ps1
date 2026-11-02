@@ -9,7 +9,9 @@ function Get-TestKey {
     param([Parameter(Mandatory)][string]$DisplayName)
     Set-StrictMode -Version Latest
     # 引数名は Unicode の文字（日本語の引数名を含む）。C# 側の TestDisplayNameUniquenessConventionTests も同じ正規表現で正規化する。
-    return ($DisplayName -replace '\([\p{L}_][\p{L}\p{Nd}_]*: .*\)$', '')
+    # 引数の値に改行を含む理論（例外メッセージ。"Value cannot be null.`nParameter name: param"）があるので (?s) で '.' を改行にも一致させる。
+    # 一覧（--list-tests）が複数行の表示名を出す場合は 2 行目以降が字下げされず読まれない。その名前はキーが一致せず「欠落」になり、黙って通らない。
+    return ($DisplayName -replace '(?s)\([\p{L}_][\p{L}\p{Nd}_]*: .*\)$', '')
 }
 
 function Read-ListTestsOutput {
