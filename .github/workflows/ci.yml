@@ -30,16 +30,26 @@ env:
   DOTNET_VERSION: '8.0.x'
   DOTNET_NOLOGO: true
   DOTNET_CLI_TELEMETRY_OPTOUT: true
+  # テストのシャードを分ける名前空間（ICCardManager/docs/superpowers/specs/2026-11-02-ci-test-sharding-design.md §3.1）。
+  # services のシャードはこの名前空間の中、others はその外（否定）を実行する。否定側を名前空間の列挙で書かないのは、
+  # 後から足した名前空間が列挙から漏れると、どのシャードでも黙って実行されなくなるため。末尾の「.」は
+  # ServicesX のような別の名前空間を含めないためで、消さないこと。値を run の中の式で展開せず環境変数で読む
+  # （CiWorkflowConventionTests が形を検査する）。
+  TEST_SHARD_NAMESPACE: 'ICCardManager.Tests.Services.'
 
 jobs:
   # テストは Release と Debug の両方で回す（Issue #2099）。#if DEBUG 側のテスト（Debug 構成でだけ
-  # コンパイルされる）は Release だけでは一度も実行されない。matrix の 2 ジョブは別ランナーで
-  # 並走するため、所要時間（壁時計）はほぼ増えない。
+  # コンパイルされる）は Release だけでは一度も実行されない。
+  #
+  # 各構成をさらに 2 つのシャード（services / others）に分け、4 ジョブを別ランナーで並走させる
+  # （ICCardManager/docs/superpowers/specs/2026-11-02-ci-test-sharding-design.md）。ビルドはシャードごとに行う
+  # （1 回のビルドを配る形は、Windows の artifact の転送とジョブの直列化で短くならないため。設計 §3.2）。
+  # 全件がちょうど 1 回ずつ実行されたことの照合と、カバレッジの合算は、全シャードの後の test-summary ジョブが行う。
   #
   # ハングへの備えは二段で置く（Issue #2099）。--blame-hang-timeout は 1 件のテストが止まったとき
   # そのテスト名を記録して実行を打ち切り、timeout-minutes はそれ以外（ビルドや復元の停止）を止める。
   # どちらも無いと、デッドロックは「失敗」ではなくジョブの既定上限（6 時間）までの停止になる。
-  # 通常の所要時間は 1 ジョブ 6 分前後。
+  # 通常の所要時間は 1 ジョブ 3〜4 分（分割前は 6 分前後）。
   build-and-test:
     runs-on: windows-latest
     timeout-minutes: 30
@@ -48,6 +58,7 @@ jobs:
       fail-fast: false
       matrix:
         configuration: [ Release, Debug ]
+        shard: [ services, others ]
 
     defaults:
       run:
@@ -114,51 +125,83 @@ jobs:
     - name: Build
       run: dotnet build --no-restore --configuration ${{ matrix.configuration }} ${{ matrix.configuration == 'Release' && '-p:DebugType=portable -p:DebugSymbols=true' || '' }}
 
-    # カバレッジは報告する Release でだけ収集する（Issue #2116）。報告ステップ（Report coverage）が
-    # Release に限られているため、Debug で収集しても時間を使うだけになる。
-    # 収集の設定（マイグレーション・自動生成コードの除外）は coverlet.runsettings に置く（Issue #2117）。
+    # フィルタはシャードの名前空間（env の TEST_SHARD_NAMESPACE）の中（~）か外（!~）かで分ける（設計 §3.1）。
+    # 結果は trx（照合の材料）として --results-directory へ出す。この場所はカバレッジの出力先も兼ね、
+    # 構成によらず使うので Release の式の外に置く（式の中だと Debug の trx が既定の場所へ出て集約ジョブへ届かない）。
+    # カバレッジは報告する Release でだけ収集する（Issue #2116）。集約ジョブが報告するのは Release の合算だけなので、
+    # Debug で収集しても時間を使うだけになる。
+    # 収集の設定（マイグレーション・自動生成コードの除外、合算に使う json の出力）は coverlet.runsettings に置く（Issue #2117）。
     - name: Run tests
-      run: dotnet test --no-build --configuration ${{ matrix.configuration }} --verbosity normal --filter "Category!=UI" --blame-hang-timeout 5m --blame-hang-dump-type none ${{ matrix.configuration == 'Release' && '--collect:"XPlat Code Coverage" --settings tests/ICCardManager.Tests/coverlet.runsettings --results-directory ./coverage' || '' }}
+      run: dotnet test --no-build --configuration ${{ matrix.configuration }} --verbosity normal --filter "Category!=UI&FullyQualifiedName${{ matrix.shard == 'services' && '~' || '!~' }}$env:TEST_SHARD_NAMESPACE" --blame-hang-timeout 5m --blame-hang-dump-type none --results-directory ./test-results --logger "trx;LogFileName=results.trx" ${{ matrix.configuration == 'Release' && '--collect:"XPlat Code Coverage" --settings tests/ICCardManager.Tests/coverlet.runsettings' || '' }}
 
     # UITests はソリューション単位の実行から自分を外している（csproj の BuildingSolutionFile 条件）ため、
     # 上の「Run tests」には含まれない。GUI 不要のテスト（Category=UI を持たないもの）を回すには
     # csproj を直接指定する必要がある（Issue #2099）。アプリを起動するテストは filter で除く。
+    # このステップはシャードで分けず、各シャードで全件を実行する（設計 §3.8）。if: を付けると片方の構成で
+    # 走らない形になり得、フィルタで分けると片方のシャードが 0 件で成功して終わる形を作るため。重複は約 3 秒。
     - name: Run GUI-free tests in UITests project
       run: dotnet test tests/ICCardManager.UITests/ICCardManager.UITests.csproj --no-build --configuration ${{ matrix.configuration }} --verbosity normal --filter "Category!=UI&Category!=Screenshot" --blame-hang-timeout 5m --blame-hang-dump-type none
 
-    # カバレッジは閾値で合否を決めず、実測値をジョブのサマリーへ出すだけにする（Issue #2117）。
-    # 行カバレッジは「テストが何を表明しているか」を測らない（.claude/rules/testing.md「カバレッジだけでなく、
-    # 実際の品質を重視する」）。閾値を置くと、表明の無いテストで数字を満たす方向へ誘導する。
-    # 一方で数字が誰の目にも触れない状態も避ける。以前は codecov へ送信していたが、トークンが無く
-    # 「Token required」で毎回失敗しており（continue-on-error で緑のまま）、外部から毎回取得する CLI の
-    # リスクとトークン管理に見合う使い方も無かったため削除した（Issue #2117）。
-    - name: Report coverage
-      if: matrix.configuration == 'Release'
+    # 照合の正解（本体のテストプロジェクトの全件）を作る（設計 §3.3・§3.6）。--list-tests はフィルタを無視して
+    # 全件を列挙する。一覧は構成ごとに 1 つあればよいので、services のシャード（2 つのうち軽い方）でだけ作る。
+    # 見出しの言語を固定するため英語の UI にする（照合はテスト名の行だけを読むが、ログの読み違いを避ける）。
+    # 終了コードは pwsh のパイプラインでも $LASTEXITCODE に残り、ランナーがステップの結果にする。
+    - name: List tests (シャードの照合の正解)
+      if: matrix.shard == 'services'
+      env:
+        DOTNET_CLI_UI_LANGUAGE: en
+      run: dotnet test tests/ICCardManager.Tests/ICCardManager.Tests.csproj --no-build --configuration ${{ matrix.configuration }} --list-tests --blame-hang-timeout 5m --blame-hang-dump-type none | Out-File -FilePath test-results/list-tests.txt -Encoding utf8
+
+    # 結果（trx・カバレッジの json・一覧）を集約ジョブへ渡す。テストが失敗したシャードの結果も上げる（if: always()）—
+    # 上げないと、失敗したテストが照合で「実行されていない」として数えられ、原因を取り違える。
+    # path は作業ディレクトリに従わず、リポジトリの直下から書く。保持は集約ジョブが読めれば足りるので短くする。
+    - name: Upload test results
+      if: always()
+      uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+      with:
+        name: test-results-${{ matrix.configuration }}-${{ matrix.shard }}
+        path: ICCardManager/test-results
+        retention-days: 3
+        if-no-files-found: warn
+
+  # 全シャードの後に、全件がちょうど 1 回ずつ実行されたことを照合し、カバレッジを合算する
+  # （ICCardManager/docs/superpowers/specs/2026-11-02-ci-test-sharding-design.md §3.3〜§3.5）。
+  # 照合と合算は ICCardManager/tools/ci-test-shards.ps1 に置き、単体テスト（CiTestShardsScriptTests）で固定している。
+  # シャードのテストが失敗しても照合は行う（if: always()）。シャード自体の失敗はそのジョブの失敗として残るので、
+  # 集約ジョブの成功が失敗を覆い隠すことはない。.NET もビルドも要らないので ubuntu で動かす。
+  #
+  # カバレッジは閾値で合否を決めず、合算した実測値をジョブのサマリーへ出すだけにする（Issue #2117）。
+  # 行カバレッジは「テストが何を表明しているか」を測らない（.claude/rules/testing.md「カバレッジだけでなく、
+  # 実際の品質を重視する」）。閾値を置くと、表明の無いテストで数字を満たす方向へ誘導する。
+  # 一方で数字が誰の目にも触れない状態も避ける。以前は codecov へ送信していたが、トークンが無く
+  # 「Token required」で毎回失敗しており（continue-on-error で緑のまま）、外部から毎回取得する CLI の
+  # リスクとトークン管理に見合う使い方も無かったため削除した（Issue #2117）。
+  # 終了コードはスクリプトの照合だけが決める（run に exit 1 や ::error:: を直書きしない）。
+  test-summary:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    needs: [ build-and-test ]
+    if: always()
+
+    steps:
+    - name: Checkout
+      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+    # 名前やパターンで絞らずに全シャードの artifact を下ろす。artifact ごとに artifacts/<artifact 名>/ へ置かれ、
+    # スクリプトはそのディレクトリ名から構成とシャードを読む（merge-multiple で 1 か所へまとめないこと）。
+    - name: Download test results
+      uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+      with:
+        path: artifacts
+
+    - name: Verify shards and report coverage
       shell: pwsh
       run: |
-        $report = Get-ChildItem -Path ./coverage -Recurse -Filter coverage.cobertura.xml | Select-Object -First 1
-        if (-not $report) {
-          Write-Host "::warning::カバレッジの結果（coverage.cobertura.xml）が見つかりません。Run tests の --collect と --results-directory を確認してください。"
-          exit 0
-        }
-        [xml]$xml = Get-Content -LiteralPath $report.FullName -Raw
-        $invariant = [Globalization.CultureInfo]::InvariantCulture
-        $line = [math]::Round([double]::Parse($xml.coverage.'line-rate', $invariant) * 100, 1)
-        $branch = [math]::Round([double]::Parse($xml.coverage.'branch-rate', $invariant) * 100, 1)
-        if ([int]$xml.coverage.'lines-valid' -eq 0) {
-          Write-Host "::warning::カバレッジの対象行が 0 行です。アセンブリが計装されていません（PDB が無い等）。Build の -p:DebugType=portable を確認してください。"
-        }
-        Write-Host "行カバレッジ: $line% / 分岐カバレッジ: $branch%"
-        @(
-          '### カバレッジ（Release）'
-          ''
-          '| 行 | 分岐 |'
-          '|---|---|'
-          "| $line% | $branch% |"
-          ''
-          '閾値による合否判定は行いません（Issue #2117）。'
-        ) -join "`n" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
+        . ./ICCardManager/tools/ci-test-shards.ps1
+        exit (Invoke-CiTestSummary -ArtifactsDirectory artifacts -Configurations @('Release','Debug') -SummaryPath $env:GITHUB_STEP_SUMMARY)
 
+  # 整形の検査と警告ゼロのビルドは別のジョブにして並走させる（設計 §3.7）。1 つのジョブで続けて行うと、
+  # シャード化したテストより後に終わり、PR の CI の所要時間を決めてしまうため。各ステップの中身は変えていない。
   code-quality:
     runs-on: windows-latest
     timeout-minutes: 30
@@ -208,6 +251,50 @@ jobs:
     # 失敗の握りつぶし・範囲の絞り込みは CiWorkflowConventionTests が見張る。
     - name: Check code format
       run: dotnet format --no-restore --verify-no-changes --verbosity diagnostic
+
+  # ビルド警告ゼロの検証（設計 §3.7 で code-quality から分けた。理由は code-quality の上の注記）。
+  build-warnings:
+    runs-on: windows-latest
+    timeout-minutes: 30
+
+    defaults:
+      run:
+        working-directory: ICCardManager
+
+    steps:
+    - name: Checkout
+      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+    # SDK の確認・導入と NuGet のキャッシュは build-and-test と同じ（理由はそちらの注記）。
+    - name: Check preinstalled .NET SDK
+      id: sdk
+      shell: pwsh
+      run: |
+        $found = $false
+        try {
+          dotnet --version
+          $found = $LASTEXITCODE -eq 0
+        } catch {
+          Write-Host "dotnet が見つかりません: $_"
+        }
+        "found=$(if ($found) { 'true' } else { 'false' })" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+        exit 0
+
+    - name: Setup .NET
+      if: steps.sdk.outputs.found != 'true'
+      uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+      with:
+        dotnet-version: ${{ env.DOTNET_VERSION }}
+
+    - name: Cache NuGet packages
+      uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: ~/.nuget/packages
+        key: nuget-${{ runner.os }}-${{ hashFiles('ICCardManager/**/packages.lock.json') }}
+        restore-keys: nuget-${{ runner.os }}-
+
+    - name: Restore dependencies
+      run: dotnet restore --locked-mode
 
     # ビルド警告ゼロを維持する（.claude/rules/development-conventions.md、Issue #1786）。
     # 警告を消した「手段」（NoWarn / #pragma への逃げ）は BuildWarningSuppressionConventionTests が

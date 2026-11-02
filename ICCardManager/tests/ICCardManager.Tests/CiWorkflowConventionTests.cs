@@ -396,8 +396,8 @@ jobs:
     }
 
     /// <summary>
-    /// カバレッジは報告する構成（Release）でだけ収集する（Issue #2116）。報告ステップ（Report coverage）は
-    /// <c>if: matrix.configuration == 'Release'</c> で Release に限っているため、Debug で収集しても時間を使うだけになる。
+    /// カバレッジは報告する構成（Release）でだけ収集する（Issue #2116）。集約ジョブ（test-summary）が報告するのは
+    /// Release の合算だけなので、Debug で収集しても時間を使うだけになる。
     /// 対の表明として、Release では収集していること（報告するものが無くならないこと）も見る。
     /// </summary>
     [Fact]
@@ -419,21 +419,32 @@ jobs:
     }
 
     /// <summary>
-    /// カバレッジの報告ステップは、収集と同じ構成（Release）で、収集した場所を読む（Issue #2117）。
+    /// カバレッジの報告は、収集と同じ構成（Release）の結果を、収集した場所から集めて読む（Issue #2117）。
     /// 片方だけ場所を変えると、報告は「結果が見つからない」警告を出すだけで緑のまま数字が消える。
     /// 報告は閾値で合否を決めない（#2117 の判断。行カバレッジはテストが何を表明しているかを測らない）。
     /// </summary>
+    /// <remarks>
+    /// テストのシャーディング（ICCardManager/docs/superpowers/specs/2026-11-02-ci-test-sharding-design.md §3.4・§5）で、
+    /// 報告は Release のテストジョブの中のステップから、全シャードの後に動く集約ジョブ（<c>test-summary</c>）へ移った。
+    /// 収集先（<c>--results-directory</c>）は照合の材料（trx）の置き場所も兼ねるので、Release の式の中ではなく
+    /// 無条件の部分に置き、build-and-test の artifact がその場所を上げ、集約ジョブが下ろした場所を読むことを表明する。
+    /// スクリプトの中でカバレッジが終了コードに影響しないことは <c>CiTestShardsScriptTests</c> が固定している。
+    /// </remarks>
     [Fact]
     public void カバレッジの報告は収集と同じ構成と場所を読み合否を決めないこと()
     {
         var workflow = File.ReadAllText(CiWorkflowPath);
+        var root = LoadWorkflow(workflow);
         var collect = ExtractDotnetTestCommands(workflow)
             .SelectMany(ExtractExpressions)
             .Where(e => e.Contains("--collect"))
             .Should().ContainSingle("カバレッジを収集する dotnet test は 1 つだけのはず").Subject;
+        var collecting = ExtractDotnetTestCommands(workflow).Single(c => c.Contains(collect));
 
-        var resultsDirectory = Regex.Match(collect, @"--results-directory\s+([^\s']+)").Groups[1].Value;
-        resultsDirectory.Should().NotBeEmpty("収集先を明示しないと、報告ステップがどこを読むべきか決まらない");
+        collect.Should().NotContain("--results-directory",
+            "結果の場所を Release の式の中に置くと、Debug のシャードは trx（照合の材料）を既定の場所へ出し、集約ジョブへ届かない");
+        var resultsDirectory = ResultsDirectoryOf(RemoveExpressions(collecting));
+        resultsDirectory.Should().NotBeNullOrEmpty("収集先を明示しないと、artifact がどこを上げるべきか決まらない: " + collecting);
 
         var settings = Regex.Match(collect, @"--settings\s+([^\s']+)").Groups[1].Value;
         settings.Should().NotBeEmpty("除外の設定（マイグレーション・自動生成コード）を収集に効かせる");
@@ -451,17 +462,26 @@ jobs:
                 "Release のビルドに ${{ matrix.configuration == 'Release' && '-p:DebugType=portable …' || '' }} が無いと、" +
                 "収集したカバレッジは常に 0% になる: " + matrixBuild);
 
-        var reportStep = ExtractStepsContaining(workflow, "coverage.cobertura.xml")
-            .Should().ContainSingle("カバレッジを報告するステップが 1 つだけあること").Subject;
-        Regex.IsMatch(reportStep, @"^\s*if:\s*matrix\.configuration\s*==\s*'Release'\s*$", RegexOptions.Multiline).Should().BeTrue(
-            "収集は Release に限っているので、報告も Release に限る（Debug では毎回「見つからない」警告になる）");
+        // 収集した場所を、シャードの artifact が上げる
+        var workingDirectory = JobWorkingDirectory(root, "build-and-test");
+        UploadArtifactPaths(root, "build-and-test").Should().Contain(CombineWorkflowPath(workingDirectory, resultsDirectory!),
+            $"build-and-test の upload-artifact の path が収集先（作業ディレクトリ {workingDirectory} からの {resultsDirectory}）を指さないと、" +
+            "集約ジョブにカバレッジが届かない");
 
-        var script = ExtractJobs(workflow).Values
-            .Select(block => ExtractStepRunBlock(block, "Report coverage"))
-            .Single(s => s != null)!;
-        script.Should().Contain("-Path " + resultsDirectory, "収集先と同じ場所を読む");
-        Regex.IsMatch(script, @"\bexit\s+(?!0\b)\S|\bthrow\b|\bWrite-Error\b|::error::").Should().BeFalse(
-            "カバレッジは閾値で合否を決めない（Issue #2117）。行カバレッジを満たすための表明の無いテストへ誘導しないため");
+        // 集約ジョブが、下ろした場所を読んで報告する。合否は照合だけが決める
+        var summaryRun = JobRunScripts(root, "test-summary");
+        summaryRun.Should().Contain("Invoke-CiTestSummary", "カバレッジの合算と報告は集約ジョブのスクリプトが行う");
+        var artifactsDirectory = Regex.Match(summaryRun, @"-ArtifactsDirectory\s+(\S+)").Groups[1].Value;
+        artifactsDirectory.Should().NotBeEmpty("集約ジョブが読む場所（-ArtifactsDirectory）を明示する");
+        DownloadArtifactPaths(root, "test-summary").Should().ContainSingle()
+            .Which.Should().Be(NormalizeWorkflowPath(artifactsDirectory), "下ろした場所と読む場所が食い違うと、報告は「結果が無い」になる");
+        Regex.IsMatch(summaryRun, @"\bexit\s+[1-9]|\bthrow\b|\bWrite-Error\b|::error::").Should().BeFalse(
+            "カバレッジは閾値で合否を決めない（Issue #2117）。集約ジョブの合否はスクリプトの照合だけが決め、run に失敗を直書きしない: " + summaryRun);
+
+        ExtractStepsContaining(workflow, "coverage.cobertura.xml").Should().BeEmpty(
+            "テストジョブの中で cobertura を読む旧来の報告ステップは、シャードごとの部分的な数字を出すため残さない（報告は集約ジョブへ移った）");
+        ExtractJobs(workflow).Values.Select(block => ExtractStepRunBlock(block, "Report coverage"))
+            .Should().OnlyContain(s => s == null, "旧来の Report coverage ステップを残さない");
     }
 
     /// <summary>
@@ -1732,6 +1752,274 @@ jobs:
 
         var end = text.IndexOf('\n', index);
         return text.Substring(start, (end < 0 ? text.Length : end) - start).Trim();
+    }
+
+    #endregion
+
+    #region ⑧テストのシャード（ICCardManager/docs/superpowers/specs/2026-11-02-ci-test-sharding-design.md）
+
+    /// <summary>テストアセンブリの根の名前空間。シャードの名前空間はこの下の 1 つに限る。</summary>
+    private const string TestAssemblyNamespaceRoot = "ICCardManager.Tests.";
+
+    /// <summary>
+    /// シャードのフィルタの許可形。肯定（<c>~</c>）と否定（<c>!~</c>）を同じ 1 つの名前空間（<c>$env:TEST_SHARD_NAMESPACE</c>）から作り、
+    /// matrix の shard の値で切り替える。
+    /// </summary>
+    private static readonly Regex ShardFilterForm = new(
+        @"^Category!=UI&FullyQualifiedName\$\{\{ matrix\.shard == '(?<s>[^']+)' && '~' \|\| '!~' \}\}\$env:TEST_SHARD_NAMESPACE$",
+        RegexOptions.Compiled);
+
+    /// <summary>
+    /// 検出ロジック（シャードのフィルタの許可形）を既知の入力で固定する（#1786「空振り検出を実データの非空で書かない」）。
+    /// 否定側を名前空間の列挙で書く形は、後から足した名前空間がどのシャードにも入らず「黙って実行されない」に直結する。
+    /// </summary>
+    [Fact]
+    public void 検出ロジックがシャードのフィルタの許可形を判定できること()
+    {
+        var shards = new[] { "services", "others" };
+        const string allowed = "Category!=UI&FullyQualifiedName${{ matrix.shard == 'services' && '~' || '!~' }}$env:TEST_SHARD_NAMESPACE";
+
+        IsAllowedShardFilter(allowed, shards).Should().BeTrue();
+        IsAllowedShardFilter(allowed.Replace("'services'", "'others'"), shards).Should().BeTrue(
+            "どちらのシャードを肯定側にしても、もう片方はその補集合になる");
+
+        IsAllowedShardFilter(
+            "Category!=UI&FullyQualifiedName~ICCardManager.Tests.Data.|FullyQualifiedName~ICCardManager.Tests.Common.", shards)
+            .Should().BeFalse("否定側を名前空間の列挙に書き換えると、列挙から漏れた名前空間がどのシャードでも実行されない");
+        IsAllowedShardFilter(
+            "Category!=UI&FullyQualifiedName${{ matrix.shard == 'services' && '~' || '!~' }}ICCardManager.Tests.Services.", shards)
+            .Should().BeFalse("接頭辞を直書きすると、env: の名前空間と食い違っても検出できない");
+        IsAllowedShardFilter(
+            "Category!=UI&FullyQualifiedName${{ matrix.shard == 'services' && '~ICCardManager.Tests.Services.' || '!~ICCardManager.Tests.Services.' }}", shards)
+            .Should().BeFalse("肯定側と否定側に接頭辞を別々に書くと、片方だけ書き換えられる");
+        IsAllowedShardFilter(
+            "Category!=UI&FullyQualifiedName${{ matrix.shard == 'services' && '~' || '~' }}$env:TEST_SHARD_NAMESPACE", shards)
+            .Should().BeFalse("両方が肯定（~）だと、名前空間の外のテストがどのシャードでも実行されない");
+        IsAllowedShardFilter(allowed.Replace("'services'", "'nothing'"), shards).Should().BeFalse(
+            "matrix に無い値を肯定側にすると、どのシャードも肯定側にならず、名前空間の中のテストが 1 件も実行されない");
+        IsAllowedShardFilter(allowed + "|FullyQualifiedName~ICCardManager.Tests.Data.", shards).Should().BeFalse(
+            "条件を足すと、名前空間の内と外の 2 分割が崩れる");
+        IsAllowedShardFilter(
+            "FullyQualifiedName${{ matrix.shard == 'services' && '~' || '!~' }}$env:TEST_SHARD_NAMESPACE", shards)
+            .Should().BeFalse("Category!=UI を外すと、GUI を要するテストを CI のランナーで実行しようとする");
+        IsAllowedShardFilter(null, shards).Should().BeFalse("--filter が無いと、両方のシャードが全件を実行する");
+    }
+
+    /// <summary>
+    /// build-and-test のシャードは、ワークフローの <c>env:</c> に置いた 1 つの名前空間（<c>TEST_SHARD_NAMESPACE</c>）から、
+    /// 肯定（<c>~</c>）と否定（<c>!~</c>）で作られていること（設計 §3.1）。否定側を補集合として書けば、後から足した
+    /// 名前空間・テストも必ずどちらかのシャードに入る。
+    /// </summary>
+    [Fact]
+    public void シャードのフィルタは1つの名前空間から肯定と否定で作られていること()
+    {
+        var workflow = File.ReadAllText(CiWorkflowPath);
+
+        var env = Child(LoadWorkflow(workflow), "env") as YamlMappingNode;
+        env.Should().NotBeNull("シャードの名前空間はワークフローの最上位の env: に置く（run の中で外の値を式で展開しないため）");
+        var shardNamespace = (Child(env!, "TEST_SHARD_NAMESPACE") as YamlScalarNode)?.Value;
+        shardNamespace.Should().NotBeNull("最上位の env: に TEST_SHARD_NAMESPACE が無いと、フィルタの $env:TEST_SHARD_NAMESPACE が空になる");
+        shardNamespace!.Should().StartWith(TestAssemblyNamespaceRoot, "テストアセンブリの名前空間の下の 1 つで分ける")
+            .And.EndWith(".", "末尾の . が無いと、ServicesX のような別の名前空間まで肯定側に入る");
+        shardNamespace.Length.Should().BeGreaterThan(TestAssemblyNamespaceRoot.Length,
+            "テストアセンブリの根の名前空間そのものだと、否定側のシャードが 0 件になる");
+
+        var jobs = ExtractJobs(workflow);
+        jobs.Should().ContainKey("build-and-test");
+        var shards = ExtractMatrixValues(jobs["build-and-test"], "shard");
+        shards.Should().HaveCount(2, "シャードは名前空間の内と外の 2 つ（設計 §3.1）。3 つ目は肯定と否定の補集合の関係に入らない");
+
+        var solutionRun = ExtractDotnetTestCommands(jobs["build-and-test"])
+            .Where(c => !c.Contains(".csproj"))
+            .Should().ContainSingle("ソリューション全体を対象にする dotnet test は 1 つだけのはず").Subject;
+        var filter = ExtractFilterExpression(solutionRun);
+        IsAllowedShardFilter(filter, shards).Should().BeTrue(
+            "--filter は「Category!=UI&FullyQualifiedName${{ matrix.shard == '<shard>' && '~' || '!~' }}$env:TEST_SHARD_NAMESPACE」の形にし、" +
+            $"<shard> は matrix の shard の値（{string.Join(" / ", shards)}）の 1 つにすること: {filter}");
+    }
+
+    /// <summary>
+    /// 集約ジョブ（<c>test-summary</c>）が全シャードの完了を待ち、シャードが失敗しても動いて、全件の照合とカバレッジの合算を
+    /// 行うこと（設計 §3.3〜§3.6）。照合の材料（trx・正解の一覧）がシャードの artifact に載っていることも見る —
+    /// 載っていなければ、集約ジョブは「結果が無い」で赤くなるが、その原因はワークフローの側にある。
+    /// </summary>
+    [Fact]
+    public void 集約ジョブが全シャードの後に照合と合算を行うこと()
+    {
+        var workflow = File.ReadAllText(CiWorkflowPath);
+        var root = LoadWorkflow(workflow);
+        var testJob = ExtractJobs(workflow)["build-and-test"];
+        var configurations = ExtractMatrixValues(testJob, "configuration");
+        var shards = ExtractMatrixValues(testJob, "shard");
+        configurations.Should().NotBeEmpty("導出が空振りすると無検査で緑になる");
+        shards.Should().NotBeEmpty("導出が空振りすると無検査で緑になる");
+
+        // 集約ジョブ
+        var summary = YamlJob(root, "test-summary");
+        summary.Should().NotBeNull("全シャードの結果を照合する集約ジョブ test-summary が要る");
+        JobNeeds(summary!).Should().Contain("build-and-test", "needs: が無いと、シャードの完了を待たずに照合して必ず「結果が無い」になる");
+        IsAlwaysCondition((Child(summary!, "if") as YamlScalarNode)?.Value).Should().BeTrue(
+            "if: always() が無いと、テストが 1 件でも失敗したシャードがあると集約ジョブがスキップされ、欠落の照合が行われない");
+
+        var summaryRun = JobRunScripts(root, "test-summary");
+        summaryRun.Should().Contain("Invoke-CiTestSummary", "照合と合算は ci-test-shards.ps1 の Invoke-CiTestSummary が行う");
+        var listed = Regex.Match(summaryRun, @"-Configurations\s+@\(([^)]*)\)");
+        listed.Success.Should().BeTrue("照合する構成を -Configurations @('…') で明示する: " + summaryRun);
+        listed.Groups[1].Value.Split(',').Select(v => v.Trim().Trim('\'', '"')).Where(v => v.Length > 0)
+            .Should().BeEquivalentTo(configurations, "照合する構成が matrix の configuration と食い違うと、片方の構成の欠落が照合されない");
+
+        var download = YamlStepsUsing(root, "test-summary", "actions/download-artifact").Should().ContainSingle(
+            "集約ジョブはシャードの artifact を下ろす").Subject.Step;
+        var downloadWith = Child(download, "with") as YamlMappingNode;
+        new[] { "name", "pattern" }.Where(k => downloadWith != null && Child(downloadWith, k) != null).Should().BeEmpty(
+            "artifact を名前やパターンで絞ると、絞りから漏れたシャードの結果が照合に届かない");
+        (downloadWith == null ? null : (Child(downloadWith, "merge-multiple") as YamlScalarNode)?.Value).Should().NotBe("true",
+            "merge-multiple で 1 つの場所へまとめると、シャードの名前（artifact のディレクトリ名）が失われる");
+
+        // シャードの側: 正解の一覧
+        var steps = YamlJobSteps(root, "build-and-test");
+        var listIndex = steps.FindIndex(s => (Child(s, "run") as YamlScalarNode)?.Value?.Contains("--list-tests") == true);
+        listIndex.Should().BeGreaterThanOrEqualTo(0, "照合の正解（dotnet test --list-tests の一覧）を作るステップが build-and-test に要る");
+        var listStep = steps[listIndex];
+        var listRun = ((YamlScalarNode)Child(listStep, "run")!).Value!;
+        var listCommand = ExtractDotnetTestCommands(listRun).Should().ContainSingle(c => c.Contains("--list-tests")).Subject;
+        listCommand.Should().Contain("--configuration ${{ matrix.configuration }}", "一覧は照合する構成ごとに作る（#if DEBUG 側のテストは Debug にしか無い）");
+        listCommand.Should().Contain("tests/ICCardManager.Tests/ICCardManager.Tests.csproj", "照合の対象は本体のテストプロジェクト（設計 §3.8）");
+        var listIf = Regex.Match((Child(listStep, "if") as YamlScalarNode)?.Value ?? string.Empty, @"^\s*matrix\.shard\s*==\s*'([^']+)'\s*$");
+        listIf.Success.Should().BeTrue("一覧は構成ごとに 1 つだけ作る（if: matrix.shard == '<shard>'）。全シャードで作ると、どれが正解か決まらない");
+        shards.Should().Contain(listIf.Groups[1].Value, "matrix に無い shard の値を条件にすると、一覧がどのシャードでも作られない");
+        var listOutput = Regex.Match(listRun, @"Out-File\s+-FilePath\s+(\S+)").Groups[1].Value;
+        listOutput.Should().NotBeEmpty("一覧の出力先（Out-File -FilePath）を明示する: " + listRun);
+
+        // シャードの側: artifact
+        var uploads = YamlStepsUsing(root, "build-and-test", "actions/upload-artifact").ToList();
+        uploads.Should().ContainSingle("シャードの結果を上げる upload-artifact が build-and-test に 1 つ要る");
+        var (upload, uploadIndex) = uploads[0];
+        IsAlwaysCondition((Child(upload, "if") as YamlScalarNode)?.Value).Should().BeTrue(
+            "if: always() が無いと、テストが失敗したシャードの trx が上がらず、失敗したテストが照合から「欠落」として消える");
+        uploadIndex.Should().BeGreaterThan(listIndex, "一覧を作る前に上げると、一覧が artifact に載らない");
+        var uploadWith = Child(upload, "with") as YamlMappingNode;
+        var artifactName = uploadWith == null ? null : (Child(uploadWith, "name") as YamlScalarNode)?.Value;
+        artifactName.Should().Contain("${{ matrix.configuration }}", "構成とシャードの組ごとに別の名前にしないと、artifact が衝突する")
+            .And.Contain("${{ matrix.shard }}", "構成とシャードの組ごとに別の名前にしないと、artifact が衝突する");
+
+        var workingDirectory = JobWorkingDirectory(root, "build-and-test");
+        var listDirectory = listOutput.Contains("/") ? listOutput.Substring(0, listOutput.LastIndexOf('/')) : ".";
+        var resultsDirectory = ResultsDirectoryOf(RemoveExpressions(ExtractDotnetTestCommands(testJob).Single(c => !c.Contains(".csproj"))));
+        resultsDirectory.Should().NotBeNullOrEmpty("trx の出力先（--results-directory）を明示する");
+        var paths = UploadArtifactPaths(root, "build-and-test");
+        paths.Should().Contain(CombineWorkflowPath(workingDirectory, listDirectory), "一覧の出力先を上げないと、集約ジョブに正解が届かない");
+        paths.Should().Contain(CombineWorkflowPath(workingDirectory, resultsDirectory!), "trx の出力先を上げないと、集約ジョブに実行結果が届かない");
+    }
+
+    /// <summary>
+    /// シャードのフィルタが許可形（<see cref="ShardFilterForm"/>）で、肯定側の shard の値が matrix にあり、
+    /// <c>FullyQualifiedName</c> が 1 回しか現れないか。
+    /// </summary>
+    private static bool IsAllowedShardFilter(string? filter, IReadOnlyCollection<string> shards)
+    {
+        if (filter is null)
+        {
+            return false;
+        }
+
+        var match = ShardFilterForm.Match(filter);
+        return match.Success
+               && shards.Contains(match.Groups["s"].Value)
+               && Regex.Matches(filter, "FullyQualifiedName").Count == 1;
+    }
+
+    /// <summary><c>if:</c> の値が <c>always()</c>（<c>${{ always() }}</c> も含む）か。</summary>
+    private static bool IsAlwaysCondition(string? condition)
+        => condition != null && Regex.IsMatch(condition, @"^\s*(\$\{\{\s*)?always\(\)\s*(\}\})?\s*$");
+
+    /// <summary>名前が <paramref name="name"/> のジョブ（対応表）。無ければ null。</summary>
+    private static YamlMappingNode? YamlJob(YamlMappingNode root, string name)
+        => WorkflowJobs(root).Where(j => j.Name == name).Select(j => j.Node).OfType<YamlMappingNode>().SingleOrDefault();
+
+    /// <summary>ジョブのステップ（対応表）。ジョブや steps: が無ければ空。</summary>
+    private static List<YamlMappingNode> YamlJobSteps(YamlMappingNode root, string jobName)
+        => (YamlJob(root, jobName) is { } job ? Child(job, "steps") as YamlSequenceNode : null)?.Children
+            .OfType<YamlMappingNode>().ToList() ?? new List<YamlMappingNode>();
+
+    /// <summary>ジョブの中で <paramref name="action"/> を使うステップ（ステップと、ジョブの中での位置）。</summary>
+    private static IEnumerable<(YamlMappingNode Step, int Index)> YamlStepsUsing(YamlMappingNode root, string jobName, string action)
+        => YamlJobSteps(root, jobName)
+            .Select((step, index) => (Step: step, Index: index))
+            .Where(s => (Child(s.Step, "uses") as YamlScalarNode)?.Value is { } uses && ActionName(uses) == action);
+
+    /// <summary>ジョブの <c>needs:</c>（1 つの名前・列のどちらも読む）。</summary>
+    private static List<string> JobNeeds(YamlMappingNode job)
+        => Child(job, "needs") switch
+        {
+            YamlScalarNode scalar => new List<string> { scalar.Value ?? string.Empty },
+            YamlSequenceNode sequence => sequence.Children.OfType<YamlScalarNode>().Select(s => s.Value ?? string.Empty).ToList(),
+            _ => new List<string>(),
+        };
+
+    /// <summary>ジョブのすべてのステップの <c>run:</c> を改行でつないだもの。</summary>
+    private static string JobRunScripts(YamlMappingNode root, string jobName)
+        => string.Join("\n", YamlJobSteps(root, jobName)
+            .Select(s => (Child(s, "run") as YamlScalarNode)?.Value)
+            .Where(r => r != null));
+
+    /// <summary>ジョブの <c>defaults.run.working-directory</c>。無ければ <c>.</c>（リポジトリの直下）。</summary>
+    private static string JobWorkingDirectory(YamlMappingNode root, string jobName)
+    {
+        var job = YamlJob(root, jobName);
+        var defaults = job == null ? null : Child(job, "defaults") as YamlMappingNode;
+        var run = defaults == null ? null : Child(defaults, "run") as YamlMappingNode;
+        return (run == null ? null : (Child(run, "working-directory") as YamlScalarNode)?.Value) ?? ".";
+    }
+
+    /// <summary>ジョブの upload-artifact の <c>with.path</c> の各行（正規化したもの）。</summary>
+    private static List<string> UploadArtifactPaths(YamlMappingNode root, string jobName)
+        => ArtifactPaths(root, jobName, "actions/upload-artifact");
+
+    /// <summary>ジョブの download-artifact の <c>with.path</c> の各行（正規化したもの）。</summary>
+    private static List<string> DownloadArtifactPaths(YamlMappingNode root, string jobName)
+        => ArtifactPaths(root, jobName, "actions/download-artifact");
+
+    private static List<string> ArtifactPaths(YamlMappingNode root, string jobName, string action)
+        => YamlStepsUsing(root, jobName, action)
+            .Select(s => Child(s.Step, "with") as YamlMappingNode)
+            .Select(with => with == null ? null : (Child(with, "path") as YamlScalarNode)?.Value)
+            .Where(path => path != null)
+            .SelectMany(path => SplitLines(path!))
+            .Where(line => line.Trim().Length > 0)
+            .Select(NormalizeWorkflowPath)
+            .ToList();
+
+    /// <summary><c>--results-directory</c> の値（式を除いた部分から読む）。無ければ null。</summary>
+    private static string? ResultsDirectoryOf(string command)
+    {
+        var match = Regex.Match(command, @"--results-directory\s+([^\s']+)");
+        return match.Success ? match.Groups[1].Value : null;
+    }
+
+    /// <summary>ワークフローに書いたパスを比べられる形にする（区切りを <c>/</c> に、先頭の <c>./</c> と末尾の <c>/</c> を除く）。</summary>
+    private static string NormalizeWorkflowPath(string path)
+    {
+        var normalized = path.Trim().Replace('\\', '/');
+        while (normalized.StartsWith("./", StringComparison.Ordinal))
+        {
+            normalized = normalized.Substring(2);
+        }
+
+        return normalized.TrimEnd('/');
+    }
+
+    /// <summary>作業ディレクトリからの相対パスを、リポジトリの直下からのパスにする（upload-artifact の path は作業ディレクトリに従わない）。</summary>
+    private static string CombineWorkflowPath(string workingDirectory, string relative)
+    {
+        var baseDirectory = NormalizeWorkflowPath(workingDirectory);
+        var rest = NormalizeWorkflowPath(relative);
+        if (baseDirectory is "" or ".")
+        {
+            return rest;
+        }
+
+        return rest is "" or "." ? baseDirectory : baseDirectory + "/" + rest;
     }
 
     #endregion
