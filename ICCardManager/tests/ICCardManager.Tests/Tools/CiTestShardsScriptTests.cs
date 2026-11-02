@@ -54,6 +54,7 @@ namespace ICCardManager.Tests.Tools
         [InlineData("A.B.M", "A.B.M")]
         [InlineData("表示名（全角の括弧）", "表示名（全角の括弧）")]
         [InlineData("Name (note)", "Name (note)")]
+        [InlineData("A.M(金額: 1)", "A.M")]
         public void キー_理論の引数だけを除く(string displayName, string expected)
         {
             var token = RunJson("Get-TestKey -DisplayName " + PowerShellScriptRunner.SingleQuote(displayName));
@@ -420,6 +421,22 @@ namespace ICCardManager.Tests.Tools
             r.ExitCode.Should().Be(0, "カバレッジの欠落は合否に影響しないこと");
             r.StdOut.Should().Contain("::warning::");
             r.StdOut.Should().NotContain("::error::");
+        }
+
+        [Fact]
+        public void 集約_一部のシャードだけカバレッジがあれば構成とシャードを名指しして警告する()
+        {
+            var artifacts = Path.Combine(_tempDir, "artifacts");
+            WriteShard(artifacts, "Release", "services", new[] { "A.S1", "A.S2" }, AllTests, CoverageOf(1));
+            WriteShard(artifacts, "Release", "others", new[] { "B.O1" }, null, null);
+            FullArtifacts("Debug");
+
+            var r = Summarize();
+
+            r.ExitCode.Should().Be(0, $"カバレッジの欠落は合否に影響しないこと。出力: {r.StdOut}");
+            var warning = r.StdOut.Split('\n').Where(l => l.Contains("::warning::")).ToList();
+            warning.Should().Contain(l => l.Contains("Release") && l.Contains("others"), "coverage.json の無いシャードを構成名とシャード名で名指しすること");
+            r.Summary.Should().Contain("一部のシャード", "サマリーのカバレッジ行にも、合算が一部のシャードだけの数字であることを書くこと");
         }
 
         [Fact]

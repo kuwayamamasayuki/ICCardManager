@@ -3,6 +3,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
+using System.Text.RegularExpressions;
 using FluentAssertions;
 using Xunit;
 
@@ -48,6 +49,21 @@ public class TestDisplayNameUniquenessConventionTests
     }
 
     [Fact]
+    public void 検出ロジックは理論の引数を除いた後で衝突する表示名を見つけること()
+    {
+        var methods = typeof(SampleCollidingAfterNormalization).GetMethods(BindingFlags.Public | BindingFlags.Instance | BindingFlags.DeclaredOnly)
+            .Select(m => (Type: typeof(SampleCollidingAfterNormalization), Method: m))
+            .ToList();
+
+        var duplicates = FindDuplicateDisplayNames(methods);
+
+        duplicates.Should().HaveCount(2, "CI の照合（Get-TestKey）は末尾の「(引数名: 値)」を除いて比べるので、生の表示名が違っても正規化後に同じなら重複");
+        duplicates.Should().Contain(d => d.Contains("同じキー") && d.Contains(nameof(SampleCollidingAfterNormalization.A)) && d.Contains(nameof(SampleCollidingAfterNormalization.B)));
+        duplicates.Should().Contain(d => d.Contains("日本語の引数名") && d.Contains(nameof(SampleCollidingAfterNormalization.D)) && d.Contains(nameof(SampleCollidingAfterNormalization.E)),
+            "日本語の引数名でも除くこと（Get-TestKey と同じ）");
+    }
+
+    [Fact]
     public void 検出ロジックは重複の無い入力で何も返さないこと()
     {
         var methods = typeof(SampleWithoutDuplicates).GetMethods(BindingFlags.Public | BindingFlags.Instance | BindingFlags.DeclaredOnly)
@@ -81,12 +97,18 @@ public class TestDisplayNameUniquenessConventionTests
     internal static IReadOnlyList<string> FindDuplicateDisplayNames(IEnumerable<(Type Type, MethodInfo Method)> methods)
     {
         return methods
-            .Select(x => (Name: GetDisplayName(x.Type, x.Method), Where: $"{x.Type.FullName}.{x.Method.Name}"))
+            .Select(x => (Name: NormalizeToCiKey(GetDisplayName(x.Type, x.Method)), Where: $"{x.Type.FullName}.{x.Method.Name}"))
             .GroupBy(x => x.Name, StringComparer.Ordinal)
             .Where(g => g.Count() >= 2)
             .Select(g => $"重複する表示名 \"{g.Key}\": " + string.Join(", ", g.Select(x => x.Where)))
             .ToList();
     }
+
+    // CI の照合のキー（ci-test-shards.ps1 の Get-TestKey）と同じ正規化: 末尾の理論の引数「(引数名: 値...)」を除く。
+    // 引数名は Unicode の文字（日本語を含む）。Get-TestKey の正規表現を変えたら、ここも同じに変えること。
+    private static readonly Regex TheoryArgumentSuffix = new(@"\([\p{L}_][\p{L}\p{Nd}_]*: .*\)$", RegexOptions.CultureInvariant);
+
+    private static string NormalizeToCiKey(string displayName) => TheoryArgumentSuffix.Replace(displayName, string.Empty);
 
     private static string GetDisplayName(Type type, MethodInfo method)
     {
@@ -108,6 +130,24 @@ public class TestDisplayNameUniquenessConventionTests
 
         [Fact(DisplayName = "別の表示名")]
         public void C() { }
+    }
+
+    private sealed class SampleCollidingAfterNormalization
+    {
+        [Fact(DisplayName = "同じキー(a: 1)")]
+        public void A() { }
+
+        [Fact(DisplayName = "同じキー")]
+        public void B() { }
+
+        [Fact(DisplayName = "別のキー(a: 1)")]
+        public void C() { }
+
+        [Fact(DisplayName = "日本語の引数名(金額: 1)")]
+        public void D() { }
+
+        [Fact(DisplayName = "日本語の引数名")]
+        public void E() { }
     }
 
     private sealed class SampleWithoutDuplicates

@@ -8,7 +8,8 @@ function Get-TestKey {
     # 全角の括弧やコロンの無い括弧（"Name (note)"）は表示名の一部なので残す。
     param([Parameter(Mandatory)][string]$DisplayName)
     Set-StrictMode -Version Latest
-    return ($DisplayName -replace '\([A-Za-z_][A-Za-z0-9_]*: .*\)$', '')
+    # 引数名は Unicode の文字（日本語の引数名を含む）。C# 側の TestDisplayNameUniquenessConventionTests も同じ正規表現で正規化する。
+    return ($DisplayName -replace '\([\p{L}_][\p{L}\p{Nd}_]*: .*\)$', '')
 }
 
 function Read-ListTestsOutput {
@@ -271,7 +272,15 @@ function Invoke-CiTestSummary {
         else {
             try {
                 $cov = Merge-CoverletJson -Paths @($coverageFiles | ForEach-Object { $_.FullName })
-                $md.Add("- カバレッジ（シャード合算）: 行 $(Format-CiPercent $cov.LineRate)（$($cov.LinesCovered)/$($cov.LinesTotal)）、分岐 $(Format-CiPercent $cov.BranchRate)（$($cov.BranchesCovered)/$($cov.BranchesTotal)）")
+                $covDirs = @($shardDirs | Where-Object { @(Get-ChildItem -LiteralPath $_.FullName -Recurse -File -Filter 'coverage.json').Count -gt 0 })
+                $noCovShards = @($shardDirs | Where-Object { $covDirs.FullName -notcontains $_.FullName } | ForEach-Object { $_.Name.Substring($prefix.Length) })
+                $partialNote = ''
+                if ($noCovShards.Count -gt 0) {
+                    $noCovText = $noCovShards -join ', '
+                    Write-Host "::warning::$config のカバレッジ（coverage.json）がシャード ($noCovText) に無く、合算は一部のシャードだけの数字です。そのシャードの coverlet の収集が動いたか、テストのジョブのログを確かめてください。テストの照合は続けています。"
+                    $partialNote = "（一部のシャードのみ。coverage.json が無いシャード: $noCovText）"
+                }
+                $md.Add("- カバレッジ（シャード合算）${partialNote}: 行 $(Format-CiPercent $cov.LineRate)（$($cov.LinesCovered)/$($cov.LinesTotal)）、分岐 $(Format-CiPercent $cov.BranchRate)（$($cov.BranchesCovered)/$($cov.BranchesTotal)）")
                 if (-not $cov.KeysConsistent) {
                     Write-Host "::warning::$config のカバレッジはシャードごとの行・分岐の集合が食い違っています。シャードのビルドが別の成果物になっていないか確かめてください。数値は和集合で合算しています。"
                     $md.Add('- カバレッジの注意: シャード間で行・分岐の集合が食い違っている（和集合で合算）')
