@@ -352,7 +352,21 @@ namespace ICCardManager.Tests.Tools
             var r = Summarize();
 
             r.ExitCode.Should().Be(1);
-            r.StdOut.Should().Contain("::error::").And.Contain("Debug").And.Contain("others", "どの構成のどのシャードの結果が無いかを名指しすること");
+            r.StdOut.Should().Contain("::error::").And.Contain("構成 Debug にシャード others の結果（test-results-Debug-others）がありません", "どの構成のどのシャードの結果が無いかを名指しすること");
+        }
+
+        [Fact]
+        public void 集約_trxが無いシャードは失敗し名指しする()
+        {
+            FullArtifacts("Release");
+            var artifacts = Path.Combine(_tempDir, "artifacts");
+            WriteShard(artifacts, "Debug", "services", new[] { "A.S1", "A.S2" }, AllTests);
+            WriteShard(artifacts, "Debug", "others", null, null, "{}");
+
+            var r = Summarize();
+
+            r.ExitCode.Should().Be(1);
+            r.StdOut.Should().Contain("::error::").And.Contain("構成 Debug のシャード others の結果（test-results-Debug-others の results.trx）が無い");
         }
 
         [Fact]

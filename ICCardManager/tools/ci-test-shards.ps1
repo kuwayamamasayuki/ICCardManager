@@ -175,6 +175,17 @@ function Invoke-CiTestSummary {
     $md.Add('## テストの照合（シャード）')
     $md.Add('')
 
+    # 期待するシャードは、いずれかの構成にある artifact 名の和集合とする（ci.yml の matrix の値を二重に持たない）。
+    $knownShards = [System.Collections.Generic.SortedSet[string]]::new([StringComparer]::Ordinal)
+    if (Test-Path -LiteralPath $ArtifactsDirectory) {
+        foreach ($dir in (Get-ChildItem -LiteralPath $ArtifactsDirectory -Directory)) {
+            foreach ($config in $Configurations) {
+                $p = "test-results-$config-"
+                if ($dir.Name.StartsWith($p, [StringComparison]::Ordinal)) { [void]$knownShards.Add($dir.Name.Substring($p.Length)) }
+            }
+        }
+    }
+
     foreach ($config in $Configurations) {
         $prefix = "test-results-$config-"
         $md.Add("### $config")
@@ -193,11 +204,19 @@ function Invoke-CiTestSummary {
 
         $shards = @{}
         $missingResult = $false
+        $presentShards = @($shardDirs | ForEach-Object { $_.Name.Substring($prefix.Length) })
+        foreach ($shard in $knownShards) {
+            if ($presentShards -notcontains $shard) {
+                Write-Host "::error::構成 $config にシャード $shard の結果（$prefix$shard）がありません。ほかの構成にはあるため、このシャードのテストが開始前に失敗したか artifact のアップロードが漏れた可能性があります。ジョブのログとアップロードの手順を確かめてください。"
+                $md.Add("- シャード ``$shard``: 結果が無い（$prefix$shard の artifact が無い）")
+                $missingResult = $true
+            }
+        }
         foreach ($dir in $shardDirs) {
             $shard = $dir.Name.Substring($prefix.Length)
             $trx = @(Get-ChildItem -LiteralPath $dir.FullName -Recurse -File -Filter 'results.trx')
             if ($trx.Count -eq 0) {
-                Write-Host "::error::$config のシャード $shard の結果（results.trx）が無いため、テストの照合ができません。そのシャードのテストが開始前に失敗していないか、ジョブのログを確かめてください。"
+                Write-Host "::error::構成 $config のシャード $shard の結果（$prefix$shard の results.trx）が無いため、テストの照合ができません。そのシャードのテストが開始前に失敗していないか、ジョブのログを確かめてください。"
                 $md.Add("- シャード ``$shard``: 結果が無い（results.trx が無い）")
                 $missingResult = $true
                 continue
@@ -232,7 +251,7 @@ function Invoke-CiTestSummary {
             $failed = $true
             $detail = "欠落 $(@($part.Missing).Count) 件・期待外 $(@($part.Unexpected).Count) 件・重複 $(@($part.Duplicated).Count) 件・空のシャード $(@($part.EmptyShards).Count) 個"
             $sample = @(@($part.Missing) + @($part.Unexpected) + @($part.Duplicated) | Select-Object -First 3) -join ', '
-            Write-Host "::error::$config のテストの照合が無効です（$detail。例: $sample）。シャード ($(($shards.Keys | Sort-Object) -join ', ')) の合算が全件を 1 回ずつ実行していません。ci.yml の TEST_SHARD_NAMESPACE と matrix.shard の対応、ビルドの失敗の有無を確かめてください。本体に Category=UI のテストが足された場合も、services・others のどちらの絞り込みにも入らないことがあります。"
+            Write-Host "::error::$config のテストの照合が無効です（$detail。例: $sample）。シャード ($(($shards.Keys | Sort-Object) -join ', ')) の合算が全件を 1 回ずつ実行していません。ci.yml の TEST_SHARD_NAMESPACE と matrix.shard の対応、ビルドの失敗の有無を確かめてください。本体に Category=UI のテストが足された場合も、どのシャードの絞り込みにも入らないことがあります。"
             $md.Add('- **照合が無効**: ' + $detail)
             foreach ($section in @(@('欠落（一覧にあるが実行されていない）', $part.Missing), @('期待外（一覧に無いのに実行された）', $part.Unexpected), @('重複（複数のシャードで実行された）', $part.Duplicated), @('空のシャード', $part.EmptyShards))) {
                 if (@($section[1]).Count -gt 0) {
