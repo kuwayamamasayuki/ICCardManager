@@ -3,6 +3,7 @@ using System.Data.SQLite;
 using System.IO;
 using FluentAssertions;
 using ICCardManager.Data;
+using ICCardManager.Tests.Infrastructure;
 using Microsoft.Extensions.Logging;
 using Moq;
 using Xunit;
@@ -60,6 +61,7 @@ public class DbContextVacuumTests : IDisposable
     {
         // Arrange
         var loggerMock = new Mock<ILogger<DbContext>>();
+        MigratedDatabaseTemplate.CopyTo(_databasePath);
         using var dbContext = new DbContext(_databasePath, loggerMock.Object);
         dbContext.InitializeDatabase();
 
@@ -79,6 +81,7 @@ public class DbContextVacuumTests : IDisposable
         // 修正前は Busy / Locked しか catch していなかったため例外が呼び出し元へ飛び、
         // 消費済みの CAS ロックだけが残って当月は誰も再試行しない状態になっていた。
         var loggerMock = new Mock<ILogger<DbContext>>();
+        MigratedDatabaseTemplate.CopyTo(_databasePath);
         using var dbContext = new DbContext(_databasePath, loggerMock.Object);
         dbContext.InitializeDatabase();
 
@@ -101,6 +104,7 @@ public class DbContextVacuumTests : IDisposable
     {
         // Arrange
         var loggerMock = new Mock<ILogger<DbContext>>();
+        MigratedDatabaseTemplate.CopyTo(_databasePath);
         using var dbContext = new DbContext(_databasePath, loggerMock.Object);
         dbContext.InitializeDatabase();
 

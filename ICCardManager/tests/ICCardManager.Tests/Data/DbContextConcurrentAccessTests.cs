@@ -56,6 +56,7 @@ public class DbContextConcurrentAccessTests : IDisposable
     public async Task 複数DbContextからの同時INSERTが両方成功すること()
     {
         // Arrange: 1つ目のDbContextでDB初期化＋テーブル作成
+        MigratedDatabaseTemplate.CopyTo(_dbPath);
         using var dbContext1 = new DbContext(_dbPath);
         dbContext1.InitializeDatabase();
         using var lease1 = dbContext1.LeaseConnection();
@@ -126,6 +127,7 @@ public class DbContextConcurrentAccessTests : IDisposable
     public async Task 高並行INSERTがすべて成功すること()
     {
         // Arrange
+        MigratedDatabaseTemplate.CopyTo(_dbPath);
         using var dbContext = new DbContext(_dbPath);
         dbContext.InitializeDatabase();
         using var lease = dbContext.LeaseConnection();
@@ -174,6 +176,7 @@ public class DbContextConcurrentAccessTests : IDisposable
     public async Task 同一レコードへの同時UPDATEでデータ整合性が保たれること()
     {
         // Arrange
+        MigratedDatabaseTemplate.CopyTo(_dbPath);
         using var dbContext = new DbContext(_dbPath);
         dbContext.InitializeDatabase();
         using var lease = dbContext.LeaseConnection();
@@ -229,6 +232,7 @@ public class DbContextConcurrentAccessTests : IDisposable
     public async Task ExecuteWithRetryAsync_BUSY発生時にリトライして成功すること()
     {
         // Arrange
+        MigratedDatabaseTemplate.CopyTo(_dbPath);
         using var dbContext = new DbContext(_dbPath);
         dbContext.InitializeDatabase();
         var retryDelay = RecordingRetryDelay.AttachTo(dbContext);
@@ -418,6 +422,7 @@ public class DbContextConcurrentAccessTests : IDisposable
     [Trait("Category", "Integration")]
     public void 接続切断後にリース取得で自動再接続されること()
     {
+        MigratedDatabaseTemplate.CopyTo(_dbPath);
         using var dbContext = new DbContext(_dbPath);
         dbContext.InitializeDatabase();
 
@@ -467,6 +472,7 @@ public class DbContextConcurrentAccessTests : IDisposable
     [Trait("Category", "Integration")]
     public void Vacuum_単独接続時に成功すること()
     {
+        MigratedDatabaseTemplate.CopyTo(_dbPath);
         using var dbContext = new DbContext(_dbPath);
         dbContext.InitializeDatabase();
 
@@ -491,6 +497,7 @@ public class DbContextConcurrentAccessTests : IDisposable
     public void Vacuum_他接続が読み取り中ならfalseを返しWarningを残すこと()
     {
         var logger = new RecordingLogger<DbContext>();
+        MigratedDatabaseTemplate.CopyTo(_dbPath);
         using var dbContext1 = new DbContext(_dbPath, logger);
         dbContext1.InitializeDatabase();
         using (var lease = dbContext1.LeaseConnection())

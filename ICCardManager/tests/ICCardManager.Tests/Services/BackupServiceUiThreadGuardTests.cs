@@ -109,6 +109,7 @@ public class BackupServiceUiThreadGuardTests : IDisposable
     [Fact]
     public void CreateBackup_sync_UIスレッド模擬時はガードが発火しfalseを返すこと()
     {
+        MigratedDatabaseTemplate.CopyTo(_dbPath);
         using var dbContext = new DbContext(_dbPath);
         dbContext.InitializeDatabase(); // 初期化はガード設定の前に実行する（セットアップ自体が UI ガードに抵触しないように）
 
@@ -139,6 +140,7 @@ public class BackupServiceUiThreadGuardTests : IDisposable
     [Fact]
     public async Task CreateBackupAsync_UIスレッド模擬時でも成功すること()
     {
+        MigratedDatabaseTemplate.CopyTo(_dbPath);
         using var dbContext = new DbContext(_dbPath);
         dbContext.InitializeDatabase();
 
@@ -167,6 +169,7 @@ public class BackupServiceUiThreadGuardTests : IDisposable
     [Fact]
     public async Task CreateManualBackupAsync_UIスレッド模擬時でも作成と成功日時の記録ができること()
     {
+        MigratedDatabaseTemplate.CopyTo(_dbPath);
         using var dbContext = new DbContext(_dbPath);
         dbContext.InitializeDatabase();
         using var cacheService = new CacheService(NullLogger<CacheService>.Instance);
@@ -194,6 +197,7 @@ public class BackupServiceUiThreadGuardTests : IDisposable
     [Fact]
     public void RestoreFromBackup_sync_UIスレッド模擬時はガードが発火しfalseを返すこと()
     {
+        MigratedDatabaseTemplate.CopyTo(_dbPath);
         using var dbContext = new DbContext(_dbPath);
         dbContext.InitializeDatabase();
 
@@ -224,6 +228,7 @@ public class BackupServiceUiThreadGuardTests : IDisposable
     [Fact]
     public async Task RestoreFromBackupAsync_UIスレッド模擬時でも成功すること()
     {
+        MigratedDatabaseTemplate.CopyTo(_dbPath);
         using var dbContext = new DbContext(_dbPath);
         dbContext.InitializeDatabase();
 
@@ -271,6 +276,7 @@ public class BackupServiceUiThreadGuardTests : IDisposable
     [Fact]
     public async Task ExecuteAutoBackupAsync_UIスレッド模擬時でもバックアップファイルが生成されること()
     {
+        MigratedDatabaseTemplate.CopyTo(_dbPath);
         using var dbContext = new DbContext(_dbPath);
         dbContext.InitializeDatabase(); // 初期化はガード設定の前に実行する（セットアップ自体が UI ガードに抵触しないように）
 
@@ -300,6 +306,7 @@ public class BackupServiceUiThreadGuardTests : IDisposable
     [Fact]
     public async Task ExecuteAutoBackupAsync_オフロード先までUIと判定するとnullを返しガードの例外が記録されること()
     {
+        MigratedDatabaseTemplate.CopyTo(_dbPath);
         using var dbContext = new DbContext(_dbPath);
         dbContext.InitializeDatabase();
 

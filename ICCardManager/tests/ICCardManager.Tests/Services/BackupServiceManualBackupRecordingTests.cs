@@ -7,6 +7,7 @@ using ICCardManager.Data;
 using ICCardManager.Data.Repositories;
 using ICCardManager.Infrastructure.Caching;
 using ICCardManager.Services;
+using ICCardManager.Tests.Infrastructure;
 using ICCardManager.Tests.Infrastructure.Timing;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
@@ -52,6 +53,7 @@ public class BackupServiceManualBackupRecordingTests : IDisposable
         _backupDirectory = Path.Combine(_testDirectory, "backup");
         Directory.CreateDirectory(_backupDirectory);
 
+        MigratedDatabaseTemplate.CopyTo(Path.Combine(_testDirectory, "test.db"));
         _dbContext = new DbContext(Path.Combine(_testDirectory, "test.db"));
         _dbContext.InitializeDatabase();
 

@@ -72,6 +72,7 @@ public class RepositoryInsertFailureLoggingTests : IDisposable
     public RepositoryInsertFailureLoggingTests()
     {
         _dbPath = Path.Combine(Path.GetTempPath(), $"ic_insert_log_{Guid.NewGuid():N}.db");
+        MigratedDatabaseTemplate.CopyTo(_dbPath);
         _dbContext = new DbContext(_dbPath);
         _dbContext.InitializeDatabase();
 

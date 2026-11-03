@@ -7,6 +7,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using FluentAssertions;
 using ICCardManager.Data;
+using ICCardManager.Tests.Infrastructure;
 using Xunit;
 
 namespace ICCardManager.Tests.Data;
@@ -51,9 +52,11 @@ public class DbContextConnectionLeaseTests : IDisposable
 
     /// <summary>
     /// 初期化済みのDbContextを作成するヘルパー
+    /// 呼ぶたびに移行済みテンプレートを同じパスへコピーするため、同じパスでの 2 回目の呼び出しは例外になる（2 つ目の DB には別のパスを使う）
     /// </summary>
     private DbContext CreateInitializedDbContext()
     {
+        MigratedDatabaseTemplate.CopyTo(_dbPath);
         var dbContext = new DbContext(_dbPath);
         dbContext.InitializeDatabase();
         return dbContext;
