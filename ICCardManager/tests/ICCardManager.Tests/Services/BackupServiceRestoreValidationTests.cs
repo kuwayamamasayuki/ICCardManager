@@ -877,6 +877,7 @@ public class BackupServiceRestoreValidationTests : IDisposable
 
     /// <summary>
     /// 全マイグレーションを適用した本システムの DB ファイルを作る（接続は閉じて返す）
+    /// 呼ぶたびに移行済みテンプレートをそのパスへコピーするため、同じパスでの 2 回目の呼び出しは例外になる（2 つ目の DB には別のファイル名を使う）
     /// </summary>
     private string CreateAppDatabaseFile(string fileName)
     {
