@@ -51,7 +51,11 @@ internal static class MigratedDatabaseTemplate
 
     private static int _buildCount;
 
-    private static readonly Lazy<string> Template = new Lazy<string>(CreateProcessTemplate, LazyThreadSafetyMode.ExecutionAndPublication);
+    private static readonly Lazy<string> Template = CreateTemplateLazy(CreateProcessTemplate);
+
+    /// <summary>テンプレートの遅延作成。作成関数は最初の要求で 1 回だけ実行される（テストが新しい Lazy で競合を再現できるよう分けている）。</summary>
+    internal static Lazy<string> CreateTemplateLazy(Func<string> build)
+        => new Lazy<string>(build, LazyThreadSafetyMode.ExecutionAndPublication);
 
     /// <summary>テンプレートを作った回数（テスト用。プロセスで 1 を超えてはならない）。</summary>
     internal static int BuildCount => Volatile.Read(ref _buildCount);
@@ -97,7 +101,7 @@ internal static class MigratedDatabaseTemplate
     /// <paramref name="directory"/> に全マイグレーション適用済みの DB を作ってパスを返す。
     /// 失敗したら作りかけのファイルを消して例外を投げる。
     /// </summary>
-    internal static string BuildTemplate(string directory)
+    internal static string BuildTemplate(string directory, Action<string>? afterInitialize = null)
     {
         var path = Path.Combine(directory, TemplateFileName);
         try
@@ -108,6 +112,7 @@ internal static class MigratedDatabaseTemplate
                 context.InitializeDatabase();
             }
             SQLiteConnection.ClearAllPools();
+            afterInitialize?.Invoke(path);
 
             foreach (var suffix in CompanionSuffixes)
             {

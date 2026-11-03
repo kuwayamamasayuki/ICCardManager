@@ -156,24 +156,38 @@ public class MigratedDatabaseTemplateTests : IDisposable
     [Fact]
     public void 並列に初回の要求が来てもテンプレートは1回だけ作られること()
     {
-        var scratch = CreateFromScratch();
-        var expected = MigratedDatabaseTemplate.ReadShape(scratch);
+        // プロセス共有の Lazy は他のテストが先に評価済みのことがあるため、新しい Lazy で初回の競合を再現する
         const int Parallelism = 8;
+        var builds = 0;
+        var lazy = MigratedDatabaseTemplate.CreateTemplateLazy(() =>
+        {
+            var n = Interlocked.Increment(ref builds);
+            Thread.Sleep(200);
+            return "built-" + n;
+        });
         using var gate = new ManualResetEventSlim(false);
         var tasks = Enumerable.Range(0, Parallelism).Select(_ => Task.Factory.StartNew(() =>
         {
             gate.Wait();
-            return MigratedDatabaseTemplate.CopyTo(NewPath("parallel.db"));
+            return lazy.Value;
         }, TaskCreationOptions.LongRunning)).ToArray();
 
         gate.Set();
         Task.WaitAll(tasks);
 
-        foreach (var task in tasks)
+        builds.Should().Be(1, "初回の要求が重なっても作成は 1 回だけのため");
+        tasks.Select(x => x.Result).Distinct().Should().Equal(new[] { "built-1" }, "全スレッドが同じ結果を受け取るため");
+
+        // 実物のテンプレートも並列のコピーで空から作った DB と一致する
+        var expected = MigratedDatabaseTemplate.ReadShape(CreateFromScratch());
+        var copies = Enumerable.Range(0, Parallelism).Select(_ => Task.Factory.StartNew(
+            () => MigratedDatabaseTemplate.CopyTo(NewPath("parallel.db")), TaskCreationOptions.LongRunning)).ToArray();
+        Task.WaitAll(copies);
+        foreach (var c in copies)
         {
-            AssertSameShape(MigratedDatabaseTemplate.ReadShape(task.Result), expected);
+            AssertSameShape(MigratedDatabaseTemplate.ReadShape(c.Result), expected);
         }
-        MigratedDatabaseTemplate.BuildCount.Should().Be(1, "テンプレートはプロセスで 1 回だけ作るため（別のテストクラスが先に作っていてもよいが 2 回以上は不可）");
+        MigratedDatabaseTemplate.BuildCount.Should().Be(1, "実物のテンプレートもプロセスで 1 回だけ作るため");
     }
 
     [Fact]
@@ -206,15 +220,22 @@ public class MigratedDatabaseTemplateTests : IDisposable
     [Fact]
     public void 作成途中で失敗したら作りかけのファイルを消すこと()
     {
-        // DB ファイルの置き場所に同名のフォルダーがあると、SQLite が開けず作成が途中で失敗する
+        // DB ファイルが作られ、付随ファイルも置かれた後で失敗させる
         var dir = Path.Combine(_dir, "partial");
-        Directory.CreateDirectory(Path.Combine(dir, MigratedDatabaseTemplate.TemplateFileName));
+        var dbPath = Path.Combine(dir, MigratedDatabaseTemplate.TemplateFileName);
 
-        Action act = () => MigratedDatabaseTemplate.BuildTemplate(dir);
+        Action act = () => MigratedDatabaseTemplate.BuildTemplate(dir, path =>
+        {
+            File.Exists(path).Should().BeTrue("失敗させる時点で作りかけの DB が存在するため");
+            File.WriteAllBytes(path + "-journal", new byte[0]);
+            throw new InvalidOperationException("テスト用の失敗");
+        });
 
-        act.Should().Throw<Exception>();
-        File.Exists(Path.Combine(dir, MigratedDatabaseTemplate.TemplateFileName + "-journal")).Should().BeFalse();
-        File.Exists(Path.Combine(dir, MigratedDatabaseTemplate.TemplateFileName + "-wal")).Should().BeFalse();
-        File.Exists(Path.Combine(dir, MigratedDatabaseTemplate.TemplateFileName + "-shm")).Should().BeFalse();
+        act.Should().Throw<InvalidOperationException>().WithMessage("テスト用の失敗");
+        File.Exists(dbPath).Should().BeFalse("作りかけのテンプレートを使い回さないため");
+        foreach (var suffix in new[] { "-journal", "-wal", "-shm" })
+        {
+            File.Exists(dbPath + suffix).Should().BeFalse($"{suffix} を残さないため");
+        }
     }
 }
