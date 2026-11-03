@@ -45,22 +45,18 @@ namespace ICCardManager.Tests.Data.Repositories;
 /// ロック競合は実 SQLite でしか再現しないため、ファイル DB と第 2 の接続で作る。
 /// </para>
 /// <para>
-/// <b>ロックの保持時間は「1 回目の試行が実際に失敗する」ことから逆算する。</b>
-/// <c>PRAGMA busy_timeout = 0</c> にしても System.Data.SQLite は内部で再試行しており、
-/// 実測では約 2.8 秒ブロックしてから SQLITE_BUSY を返す（開発機で計測）。
-/// 保持時間をそれより短く（例: 250ms）すると 1 回目の試行がそのまま成功してしまい、
+/// <b>①は「1 回目の試行が実際に失敗した」ことを、時間ではなく順序で作る。</b>
+/// ロックはリポジトリが最初のリトライの待機を要求した時点で解放し（<c>ReleaseWriteLockOnFirstRetry</c>）、
+/// 待機の要求がちょうど 1 回だったことも表明する。1 回目の試行がそのまま成功すると、
 /// <b>修正前のコードでも緑になる＝検出力ゼロ</b>のテストになる（初版が実際にそうだった）。
-/// <see cref="LockHoldMilliseconds"/> はこの実測値より十分長く、かつローカルモードの
-/// リトライ枠（100 / 500 / 2,000ms）を使い切る前に解ける値を選んでいる。
+/// 以前はロックを固定時間（4 秒）保持し、System.Data.SQLite の内部の再試行（開発機で約 2.8 秒）より
+/// 長いことを当てにしていたが、その再試行は <c>DisableBusyTimeout</c> で止め、待機も記録するだけにしたので、
+/// 実際に待つ時間は無い（4 件で約 40 秒かかっていた）。
 /// </para>
 /// </remarks>
 public class RepositoryInsertRetryTests : IDisposable
 {
-    /// <summary>
-    /// ロックを保持する時間（ミリ秒）。remarks の「逆算」を参照。
-    /// </summary>
-    private const int LockHoldMilliseconds = 4000;
-
+    private readonly List<IDisposable> _lockHolders = new List<IDisposable>();
     private readonly string _dbPath;
     private readonly DbContext _dbContext;
     private readonly CardRepository _cardRepository;
@@ -80,6 +76,11 @@ public class RepositoryInsertRetryTests : IDisposable
 
     public void Dispose()
     {
+        foreach (var holder in _lockHolders)
+        {
+            holder.Dispose();
+        }
+
         _dbContext.Dispose();
         TryDeleteDatabaseFiles();
         GC.SuppressFinalize(this);
@@ -95,8 +96,9 @@ public class RepositoryInsertRetryTests : IDisposable
     [Trait("Category", "Integration")]
     public async Task カード登録_一過性のロック競合はリトライで成功すること()
     {
-        // Arrange: 別接続が書き込みロックを保持し、1 回目の試行が SQLITE_BUSY で失敗したあとに解放する
-        using var release = HoldWriteLockFor(TimeSpan.FromMilliseconds(LockHoldMilliseconds));
+        // Arrange: 別接続が書き込みロックを保持し、1 回目の試行が SQLITE_BUSY で失敗したあと
+        // （＝リポジトリが 1 回目のリトライの待機を要求した時点で）解放する
+        var retryDelay = ReleaseWriteLockOnFirstRetry();
         var card = CreateCard("CARD000000000001", "はやかけん", "1");
 
         // Act
@@ -107,6 +109,8 @@ public class RepositoryInsertRetryTests : IDisposable
             "SQLITE_BUSY は一過性の競合であり、リトライで回復できる。false へ畳むと恒久的な失敗として報告される");
         (await _cardRepository.GetByIdmAsync("CARD000000000001")).Should().NotBeNull(
             "リトライで成功した以上、行が実際に書き込まれていること");
+        retryDelay.Delays.Should().Equal(new[] { DbContext.LocalRetryDelays[0] },
+            "1 回目の試行はロックで失敗し、1 回のリトライで成功したこと（1 回目で成功していたら、リトライの経路を通っていない）");
     }
 
     /// <summary>
@@ -116,13 +120,14 @@ public class RepositoryInsertRetryTests : IDisposable
     [Trait("Category", "Integration")]
     public async Task 職員登録_一過性のロック競合はリトライで成功すること()
     {
-        using var release = HoldWriteLockFor(TimeSpan.FromMilliseconds(LockHoldMilliseconds));
+        var retryDelay = ReleaseWriteLockOnFirstRetry();
         var staff = CreateStaff("STAFF00000000001", "博多 花子");
 
         var success = await _staffRepository.InsertAsync(staff);
 
         success.Should().BeTrue();
         (await _staffRepository.GetByIdmAsync("STAFF00000000001")).Should().NotBeNull();
+        retryDelay.Delays.Should().Equal(new[] { DbContext.LocalRetryDelays[0] });
     }
 
     #endregion
@@ -257,11 +262,15 @@ public class RepositoryInsertRetryTests : IDisposable
     }
 
     /// <summary>
-    /// DbContext 側の接続の busy_timeout を 0 にする。
+    /// DbContext 側の接続で、SQLite の待機（busy_timeout）と System.Data.SQLite の内部の再試行を止める。
     /// </summary>
     /// <remarks>
-    /// 既定（ローカルモード 5,000ms）のままだと、ロックを 250ms で解放するテストは
-    /// 待機だけで成功してしまい、修正前のコードでも緑になる（＝検出力ゼロ）。
+    /// busy_timeout が既定（ローカルモード 5,000ms）のままだと、ロックはリトライを待たずに
+    /// 待機だけで解けてしまい、修正前のコードでも緑になる（＝検出力ゼロ）。
+    /// busy_timeout = 0 にしても System.Data.SQLite は <see cref="SQLiteConnection.DefaultTimeout"/>
+    /// （コマンドの CommandTimeout の既定）の間、自前で再試行してから SQLITE_BUSY を返す（開発機で 1 回
+    /// 約 2.8 秒）。これを 0 にすると 1 回目の試行がすぐに失敗し、リポジトリのリトライ（待機は
+    /// <see cref="RecordingRetryDelay"/> が記録するだけ）だけが残る。本番の接続は変えない。
     /// </remarks>
     private void DisableBusyTimeout()
     {
@@ -269,20 +278,31 @@ public class RepositoryInsertRetryTests : IDisposable
         using var command = lease.Connection.CreateCommand();
         command.CommandText = "PRAGMA busy_timeout = 0;";
         command.ExecuteNonQuery();
+        lease.Connection.DefaultTimeout = 0;
     }
 
     /// <summary>
-    /// 別接続で書き込みロック（RESERVED）を取り、指定時間後に解放する。
+    /// 別接続で書き込みロック（RESERVED）を取り、リポジトリが最初のリトライの待機を要求した時点で解放する。
+    /// 待機そのものは <see cref="RecordingRetryDelay"/> が記録するだけで、実際には待たない。
     /// </summary>
-    private IDisposable HoldWriteLockFor(TimeSpan duration)
+    /// <remarks>
+    /// 以前はロックを固定時間（4 秒）保持し、「1 回目の試行がその間に失敗する」ことを当てにしていた。
+    /// 保持時間は System.Data.SQLite の内部の再試行（開発機で約 2.8 秒）から逆算した値で、
+    /// 環境が遅い・速いと 1 回目が成功してリトライの経路を通らなくなる余地があった。
+    /// 「リトライの待機を要求された＝1 回目が失敗した」という順序で解放すれば、時間に依存しない。
+    /// ロックは返り値ではなくテストの終了時（<see cref="Dispose"/>）にも解放する。
+    /// </remarks>
+    private RecordingRetryDelay ReleaseWriteLockOnFirstRetry()
     {
         var holder = new WriteLockHolder(_dbPath);
-        _ = Task.Run(async () =>
+        _lockHolders.Add(holder);
+        var recorder = new RecordingRetryDelay();
+        _dbContext.RetryDelayAsync = (milliseconds, cancellationToken) =>
         {
-            await Task.Delay(duration).ConfigureAwait(false);
             holder.Release();
-        });
-        return holder;
+            return recorder.WaitAsync(milliseconds, cancellationToken);
+        };
+        return recorder;
     }
 
     /// <summary>
