@@ -603,6 +603,7 @@ public class BackupServiceRestoreValidationTests : IDisposable
     public void RestoreFromBackup_トリガーを含むバックアップは拒否し現在のDBを書き換えないこと()
     {
         var dbPath = Path.Combine(_testDirectory, "restore_target.db");
+        MigratedDatabaseTemplate.CopyTo(dbPath);
         using var dbContext = new DbContext(dbPath);
         dbContext.InitializeDatabase();
 
@@ -628,6 +629,7 @@ public class BackupServiceRestoreValidationTests : IDisposable
     public void RestoreFromBackup_古い版のバックアップはリストアでき一時コピーを残さないこと()
     {
         var dbPath = Path.Combine(_testDirectory, "restore_target_ok.db");
+        MigratedDatabaseTemplate.CopyTo(dbPath);
         using var dbContext = new DbContext(dbPath);
         dbContext.InitializeDatabase();
 
@@ -654,6 +656,7 @@ public class BackupServiceRestoreValidationTests : IDisposable
     public void RestoreFromPreparedSource_検証した後にリストア元が書き換えられても検証した内容で置き換えること()
     {
         var dbPath = Path.Combine(_testDirectory, "restore_target_toctou.db");
+        MigratedDatabaseTemplate.CopyTo(dbPath);
         using var dbContext = new DbContext(dbPath);
         dbContext.InitializeDatabase();
 
@@ -878,6 +881,7 @@ public class BackupServiceRestoreValidationTests : IDisposable
     private string CreateAppDatabaseFile(string fileName)
     {
         var path = Path.Combine(_testDirectory, fileName);
+        MigratedDatabaseTemplate.CopyTo(path);
         using (var dbContext = new DbContext(path))
         {
             dbContext.InitializeDatabase();

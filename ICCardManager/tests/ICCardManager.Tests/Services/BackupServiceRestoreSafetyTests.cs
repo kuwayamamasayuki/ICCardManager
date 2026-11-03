@@ -6,6 +6,7 @@ using ICCardManager.Data;
 using ICCardManager.Data.Repositories;
 using ICCardManager.Models;
 using ICCardManager.Services;
+using ICCardManager.Tests.Infrastructure;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using Xunit;
@@ -172,6 +173,7 @@ public class BackupServiceRestoreSafetyTests : IDisposable
     public void RestoreFromBackup_共有モードで他接続ありの場合falseを返しDBを書き換えないこと()
     {
         var dbPath = Path.Combine(_testDirectory, "shared_restore.db");
+        MigratedDatabaseTemplate.CopyTo(dbPath);
         using var dbContext = new DbContext(dbPath, null, forceSharedMode: true);
         dbContext.InitializeDatabase();
 
@@ -212,6 +214,7 @@ public class BackupServiceRestoreSafetyTests : IDisposable
     public void RestoreFromBackup_ローカルモードでは他のハンドルがあってもリストアが進むこと()
     {
         var dbPath = Path.Combine(_testDirectory, "local_restore.db");
+        MigratedDatabaseTemplate.CopyTo(dbPath);
         using var dbContext = new DbContext(dbPath, null, forceSharedMode: false);
         dbContext.InitializeDatabase();
 
@@ -250,6 +253,7 @@ public class BackupServiceRestoreSafetyTests : IDisposable
     public void RestoreFromBackup_共有モードで他接続なしの場合成功すること()
     {
         var dbPath = Path.Combine(_testDirectory, "shared_restore_ok.db");
+        MigratedDatabaseTemplate.CopyTo(dbPath);
         using var dbContext = new DbContext(dbPath, null, forceSharedMode: true);
         dbContext.InitializeDatabase();
 
@@ -308,6 +312,7 @@ public class BackupServiceRestoreSafetyTests : IDisposable
     public void RestoreFromBackup_成功後にジャーナルファイルが削除されること()
     {
         var dbPath = Path.Combine(_testDirectory, "journal_cleanup.db");
+        MigratedDatabaseTemplate.CopyTo(dbPath);
         using var dbContext = new DbContext(dbPath);
         dbContext.InitializeDatabase();
 
@@ -377,6 +382,7 @@ public class BackupServiceRestoreSafetyTests : IDisposable
     public async Task SuspendConnections_接続リース取得が例外をスローすること()
     {
         var dbPath = Path.Combine(_testDirectory, "suspend_test.db");
+        MigratedDatabaseTemplate.CopyTo(dbPath);
         using var dbContext = new DbContext(dbPath);
         dbContext.InitializeDatabase();
 
@@ -408,6 +414,7 @@ public class BackupServiceRestoreSafetyTests : IDisposable
     public void SuspendConnections_Dispose後に接続リース取得が成功すること()
     {
         var dbPath = Path.Combine(_testDirectory, "suspend_resume.db");
+        MigratedDatabaseTemplate.CopyTo(dbPath);
         using var dbContext = new DbContext(dbPath);
         dbContext.InitializeDatabase();
 
@@ -430,6 +437,7 @@ public class BackupServiceRestoreSafetyTests : IDisposable
     public void RestoreFromBackup_リストア中は接続リース取得が拒否されること()
     {
         var dbPath = Path.Combine(_testDirectory, "restore_guard.db");
+        MigratedDatabaseTemplate.CopyTo(dbPath);
         using var dbContext = new DbContext(dbPath);
         dbContext.InitializeDatabase();
 
@@ -461,6 +469,7 @@ public class BackupServiceRestoreSafetyTests : IDisposable
     public void SuspendConnections_複数回Disposeしてもエラーにならないこと()
     {
         var dbPath = Path.Combine(_testDirectory, "double_dispose.db");
+        MigratedDatabaseTemplate.CopyTo(dbPath);
         using var dbContext = new DbContext(dbPath);
         dbContext.InitializeDatabase();
 

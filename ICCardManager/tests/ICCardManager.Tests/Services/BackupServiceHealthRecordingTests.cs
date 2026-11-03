@@ -7,6 +7,7 @@ using ICCardManager.Data;
 using ICCardManager.Data.Repositories;
 using ICCardManager.Models;
 using ICCardManager.Services;
+using ICCardManager.Tests.Infrastructure;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using Xunit;
@@ -38,6 +39,7 @@ public class BackupServiceHealthRecordingTests : IDisposable
         _backupDirectory = Path.Combine(_testDirectory, "backup");
         Directory.CreateDirectory(_backupDirectory);
 
+        MigratedDatabaseTemplate.CopyTo(Path.Combine(_testDirectory, "test.db"));
         _dbContext = new DbContext(Path.Combine(_testDirectory, "test.db"));
         _dbContext.InitializeDatabase();
 

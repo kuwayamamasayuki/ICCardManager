@@ -51,6 +51,7 @@ public class BackupServiceTests : IDisposable
         Directory.CreateDirectory(_backupDirectory);
 
         // テスト用DBを作成
+        MigratedDatabaseTemplate.CopyTo(_testDbPath);
         _dbContext = new DbContext(_testDbPath);
         _dbContext.InitializeDatabase();
 
@@ -612,6 +613,7 @@ public class BackupServiceTests : IDisposable
         var restoreTargetPath = Path.Combine(_testDirectory, "restore_open_connection.db");
 
         // 本番環境のシミュレーション: DbContextを作成し、接続を開いたまま保持
+        MigratedDatabaseTemplate.CopyTo(restoreTargetPath);
         var restoreDbContext = new DbContext(restoreTargetPath);
         restoreDbContext.InitializeDatabase(); // これにより接続が開かれる
         using (var lease = restoreDbContext.LeaseConnection())

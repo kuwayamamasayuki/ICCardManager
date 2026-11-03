@@ -9,6 +9,7 @@ using ICCardManager.Data;
 using ICCardManager.Data.Repositories;
 using ICCardManager.Models;
 using ICCardManager.Services;
+using ICCardManager.Tests.Infrastructure;
 using ICCardManager.Tests.Infrastructure.Timing;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
@@ -55,6 +56,7 @@ public class BackupServiceAtomicWriteTests : IDisposable
         _backupDirectory = Path.Combine(_testDirectory, "backup");
         Directory.CreateDirectory(_backupDirectory);
 
+        MigratedDatabaseTemplate.CopyTo(_testDbPath);
         _dbContext = new DbContext(_testDbPath);
         _dbContext.InitializeDatabase();
 

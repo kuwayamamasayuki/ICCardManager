@@ -8,6 +8,7 @@ using ICCardManager.Data.Repositories;
 using ICCardManager.Infrastructure.Caching;
 using ICCardManager.Infrastructure.Timing;
 using ICCardManager.Services;
+using ICCardManager.Tests.Infrastructure;
 using ICCardManager.ViewModels;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
@@ -47,6 +48,7 @@ public class SystemManageViewModelManualBackupHealthTests : IDisposable
         _backupDirectory = Path.Combine(_testDirectory, "backup");
         Directory.CreateDirectory(_backupDirectory);
 
+        MigratedDatabaseTemplate.CopyTo(Path.Combine(_testDirectory, "test.db"));
         _dbContext = new DbContext(Path.Combine(_testDirectory, "test.db"));
         _dbContext.InitializeDatabase();
 
