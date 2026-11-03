@@ -10,6 +10,7 @@ using ICCardManager.Data;
 using ICCardManager.Data.Repositories;
 using ICCardManager.Infrastructure.Caching;
 using ICCardManager.Models;
+using ICCardManager.Tests.Infrastructure;
 using ICCardManager.Tests.Infrastructure.Timing;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
@@ -68,6 +69,7 @@ public class RepositoryInsertRetryTests : IDisposable
     public RepositoryInsertRetryTests()
     {
         _dbPath = Path.Combine(Path.GetTempPath(), $"ic_insert_retry_{Guid.NewGuid():N}.db");
+        MigratedDatabaseTemplate.CopyTo(_dbPath);
         _dbContext = new DbContext(_dbPath);
         _dbContext.InitializeDatabase();
         DisableBusyTimeout();

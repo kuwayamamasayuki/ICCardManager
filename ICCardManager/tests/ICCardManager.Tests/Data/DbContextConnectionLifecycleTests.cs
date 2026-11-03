@@ -5,6 +5,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using FluentAssertions;
 using ICCardManager.Data;
+using ICCardManager.Tests.Infrastructure;
 using Microsoft.Extensions.Logging;
 using Moq;
 using Xunit;
@@ -65,6 +66,7 @@ public class DbContextConnectionLifecycleTests : IDisposable
     public async Task SuspendConnections_進行中のトランザクションが解放されるまで待機すること()
     {
         // Arrange
+        MigratedDatabaseTemplate.CopyTo(_dbPath);
         using var dbContext = new DbContext(_dbPath);
         dbContext.InitializeDatabase();
         CreateProbeTable(dbContext);
@@ -110,6 +112,7 @@ public class DbContextConnectionLifecycleTests : IDisposable
     public async Task SuspendConnections_進行中の非同期リースが解放されるまで接続を閉じないこと()
     {
         // Arrange
+        MigratedDatabaseTemplate.CopyTo(_dbPath);
         using var dbContext = new DbContext(_dbPath);
         dbContext.InitializeDatabase();
 
@@ -147,6 +150,7 @@ public class DbContextConnectionLifecycleTests : IDisposable
     public async Task SuspendConnections_一時停止中のBeginTransactionAsyncは解除まで待機し解除後に成功すること()
     {
         // Arrange
+        MigratedDatabaseTemplate.CopyTo(_dbPath);
         using var dbContext = new DbContext(_dbPath);
         dbContext.InitializeDatabase();
         CreateProbeTable(dbContext);
@@ -180,6 +184,7 @@ public class DbContextConnectionLifecycleTests : IDisposable
     {
         // Arrange
         var loggerMock = new Mock<ILogger<DbContext>>();
+        MigratedDatabaseTemplate.CopyTo(_dbPath);
         using var dbContext = new DbContext(_dbPath, loggerMock.Object)
         {
             AsyncLeaseDrainTimeout = TimeSpan.FromMilliseconds(200),
