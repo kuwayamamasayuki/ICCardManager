@@ -209,6 +209,53 @@ jobs:
     - name: Check code format
       run: dotnet format --no-restore --verify-no-changes --verbosity diagnostic
 
+  # ビルド警告ゼロの検証は、整形の検査（code-quality）とは別のジョブで並列に動かす。同じジョブで直列に
+  # 実行すると、整形の検査（約 100 秒）と Release・Debug のビルド（約 100 秒）が足し合わさり、テスト用の
+  # DB をテンプレートのコピーにした（PR #2397）後は、このジョブが PR の CI で最後に終わるジョブになっていた
+  # （CI 全体 265〜293 秒のうち code-quality が 262〜291 秒）。各ステップの中身は変えていない。
+  build-warnings:
+    runs-on: windows-latest
+    timeout-minutes: 30
+
+    defaults:
+      run:
+        working-directory: ICCardManager
+
+    steps:
+    - name: Checkout
+      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+    # SDK の確認・導入と NuGet のキャッシュは build-and-test と同じ（理由はそちらの注記）。
+    - name: Check preinstalled .NET SDK
+      id: sdk
+      shell: pwsh
+      run: |
+        $found = $false
+        try {
+          dotnet --version
+          $found = $LASTEXITCODE -eq 0
+        } catch {
+          Write-Host "dotnet が見つかりません: $_"
+        }
+        "found=$(if ($found) { 'true' } else { 'false' })" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+        exit 0
+
+    - name: Setup .NET
+      if: steps.sdk.outputs.found != 'true'
+      uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+      with:
+        dotnet-version: ${{ env.DOTNET_VERSION }}
+
+    - name: Cache NuGet packages
+      uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: ~/.nuget/packages
+        key: nuget-${{ runner.os }}-${{ hashFiles('ICCardManager/**/packages.lock.json') }}
+        restore-keys: nuget-${{ runner.os }}-
+
+    - name: Restore dependencies
+      run: dotnet restore --locked-mode
+
     # ビルド警告ゼロを維持する（.claude/rules/development-conventions.md、Issue #1786）。
     # 警告を消した「手段」（NoWarn / #pragma への逃げ）は BuildWarningSuppressionConventionTests が
     # 見張るが、警告の「発生」自体を止めるゲートはここにしか置けない。
