@@ -4,6 +4,7 @@
         xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
         xmlns:vm="clr-namespace:ICCardManager.ViewModels"
+        xmlns:helpers="clr-namespace:ICCardManager.Views.Helpers"
         mc:Ignorable="d"
         d:DataContext="{d:DesignInstance Type=vm:IncompleteBusStopViewModel}"
         Title="バス停名未入力の履歴"
@@ -86,6 +87,7 @@
                   BorderThickness="1"
                   FontSize="{DynamicResource BaseFontSize}"
                   MouseDoubleClick="DataGrid_MouseDoubleClick"
+                  helpers:DataGridAutoColumnFit.IsEnabled="True"
                   AutomationProperties.Name="バス停名未入力履歴一覧">
 
             <DataGrid.Columns>
@@ -108,7 +110,9 @@
                         </Style>
                     </DataGridTextColumn.ElementStyle>
                 </DataGridTextColumn>
-                <!-- Issue #2332: 「外N名」が付くと固定幅 100 では切れるため、内容に合わせて広げる -->
+                <!-- Issue #2332: 「外N名」が付くと固定幅 100 では切れるため、内容に合わせて広げる。
+                     Issue #2393: * 列（摘要）と並ぶと、後から読み込んだ行の内容では Auto 列が広がらないため、
+                     DataGridAutoColumnFit で読み込み後に必要な幅まで引き上げる -->
                 <DataGridTextColumn Header="利用者"
                                     Binding="{Binding DisplayStaffName}"
                                     Width="Auto"

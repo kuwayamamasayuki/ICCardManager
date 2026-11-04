@@ -52,24 +52,64 @@ namespace ICCardManager.UITests.Tests
         public void バス停名未入力の一覧は_外N名を表示し_主操作が閉じるの右にあること()
         {
             using var fixture = AppFixture.LaunchWithSeed(Seed, AppFixture.SuppressDebugTestData);
-            ScreenshotHelper.MoveToTopLeft(fixture.MainWindow);
-            var page = new MainWindowPage(fixture.MainWindow, fixture.Automation);
-
-            var warning = Retry.WhileNull(
-                () => page.Window.FindAllDescendants(cf => cf.ByControlType(ControlType.Button))
-                    .FirstOrDefault(b => (b.Properties.Name.ValueOrDefault ?? string.Empty).Contains(TestConstants.IncompleteBusStopWarningMarker)),
-                Wait).Result;
-            warning.Should().NotBeNull("前提: バス停名未入力の警告が出ること");
-            warning!.AsButton().Invoke();
-
-            var dialog = new DialogPageBase(page.WaitForDialog(TestConstants.IncompleteBusStopDialogName));
+            var dialog = OpenIncompleteBusStopDialog(fixture);
             try
             {
                 dialog.FindByNameWithRetry(ExpectedStaffName).Should().NotBeNull(
                     "利用者欄は、同行者のいる行に履歴一覧と同じく「外N名」を付けること");
+                AssertStaffNameIsNotClipped(dialog);
 
                 AssertPrimaryIsRightOfClose(dialog, IncompleteBusStopPrimaryButton);
                 CaptureIfRequested(dialog.Window, "uitest_2332_incomplete_busstop.png");
+            }
+            finally
+            {
+                dialog.Close();
+            }
+        }
+
+        [Fact]
+        public void バス停名未入力の一覧は_文字サイズが特大でも利用者の外N名を末尾まで表示すること()
+        {
+            // Issue #2393: 必要な幅は文字サイズで変わる。最も広い「特大」でも列が内容に合わせて広がること
+            using var fixture = AppFixture.LaunchWithSeed(
+                conn =>
+                {
+                    Seed(conn);
+                    Execute(conn, "INSERT OR REPLACE INTO settings (key, value) VALUES ('font_size', 'xlarge')");
+                },
+                AppFixture.SuppressDebugTestData);
+            var dialog = OpenIncompleteBusStopDialog(fixture);
+            try
+            {
+                AssertStaffNameIsNotClipped(dialog);
+                CaptureIfRequested(dialog.Window, "uitest_2393_incomplete_busstop_xlarge.png");
+            }
+            finally
+            {
+                dialog.Close();
+            }
+        }
+
+        [Fact]
+        public void バス停名未入力の一覧は_ウィンドウの幅を変えても利用者の外N名を末尾まで表示すること()
+        {
+            // Issue #2393: 幅を変えると DataGrid は * 列（摘要）の幅を計算し直す。そのときに利用者の列を最小幅へ戻さないこと
+            using var fixture = AppFixture.LaunchWithSeed(Seed, AppFixture.SuppressDebugTestData);
+            var dialog = OpenIncompleteBusStopDialog(fixture);
+            try
+            {
+                AssertStaffNameIsNotClipped(dialog);
+                var handle = NativeWindows.HandleOf(dialog.Window);
+                var original = dialog.Window.BoundingRectangle;
+
+                // 広げる → 最小幅まで縮める（MinWidth より細く指示すると WPF は MinWidth で止める）
+                NativeWindows.Resize(handle, original.Width + 300, original.Height);
+                dialog.Window.BoundingRectangle.Width.Should().BeGreaterThan(original.Width, "前提: ウィンドウが広がったこと");
+                AssertStaffNameIsNotClipped(dialog);
+                NativeWindows.Resize(handle, 100, original.Height);
+                dialog.Window.BoundingRectangle.Width.Should().BeLessOrEqualTo(original.Width, "前提: ウィンドウが最小幅まで縮んだこと");
+                AssertStaffNameIsNotClipped(dialog);
             }
             finally
             {
@@ -122,6 +162,70 @@ namespace ICCardManager.UITests.Tests
             {
                 dialog.ClickButton(TestConstants.LedgerDetailCloseButton);
             }
+        }
+
+        /// <summary>
+        /// メイン画面の警告から、バス停名未入力の一覧を開く。
+        /// </summary>
+        private static DialogPageBase OpenIncompleteBusStopDialog(AppFixture fixture)
+        {
+            ScreenshotHelper.MoveToTopLeft(fixture.MainWindow);
+            var page = new MainWindowPage(fixture.MainWindow, fixture.Automation);
+
+            var warning = Retry.WhileNull(
+                () => page.Window.FindAllDescendants(cf => cf.ByControlType(ControlType.Button))
+                    .FirstOrDefault(b => (b.Properties.Name.ValueOrDefault ?? string.Empty).Contains(TestConstants.IncompleteBusStopWarningMarker)),
+                Wait).Result;
+            warning.Should().NotBeNull("前提: バス停名未入力の警告が出ること");
+            warning!.AsButton().Invoke();
+
+            return new DialogPageBase(page.WaitForDialog(TestConstants.IncompleteBusStopDialogName));
+        }
+
+        /// <summary>
+        /// 利用者のセルが「外N名」を含む氏名を末尾まで収めていること（Issue #2393）。
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// 文字列の存在（<c>FindByNameWithRetry</c>）だけを見ると、末尾が切れていても緑になる（#2332 の UI テストがそうだった）。
+        /// セル（Custom）の中の文字列（Text）は、セルより狭く配置されても切り抜かれるだけで、要素の矩形は文字列の全幅を保つ
+        /// （WPF は配置の幅が足りない要素を本来の幅で配置し、はみ出した部分を切り抜く）。
+        /// そのため「文字列の右端がセルの右端を越えないこと」で、切れていないことを表明できる。
+        /// あわせて、セルが一覧の表示領域の内側にあることも表明する（列が広がっても、横に隠れていれば読めない）。
+        /// </para>
+        /// <para>
+        /// 列幅の引き上げは行の読み込み後のレイアウトで行われるので、収まるまで待つ。
+        /// </para>
+        /// </remarks>
+        private static void AssertStaffNameIsNotClipped(DialogPageBase dialog)
+        {
+            var cf = dialog.Window.ConditionFactory;
+            var grid = dialog.Window.FindFirstDescendant(cf.ByControlType(ControlType.DataGrid));
+            grid.Should().NotBeNull("一覧（DataGrid）が見つかること");
+
+            System.Drawing.Rectangle cellRect = default, textRect = default;
+            var fitted = Retry.WhileFalse(
+                () =>
+                {
+                    var cell = dialog.Window.FindFirstDescendant(
+                        cf.ByName(ExpectedStaffName).And(cf.ByControlType(ControlType.Custom)));
+                    var text = cell?.FindFirstChild(cf.ByControlType(ControlType.Text));
+                    if (cell == null || text == null)
+                    {
+                        return false;
+                    }
+
+                    cellRect = cell.BoundingRectangle;
+                    textRect = text.BoundingRectangle;
+                    return textRect.Right <= cellRect.Right;
+                },
+                Wait).Result;
+
+            fitted.Should().BeTrue(
+                $"利用者「{ExpectedStaffName}」は末尾まで表示すること（文字列の右端 {textRect.Right}、セルの右端 {cellRect.Right}）。" +
+                "利用者の列は内容に合わせて広げる（Issue #2393）");
+            cellRect.Right.Should().BeLessOrEqualTo(grid!.BoundingRectangle.Right,
+                "利用者のセルは一覧の表示領域の内側にあること（横に隠れていれば読めない）");
         }
 
         /// <summary>
