@@ -219,7 +219,7 @@ namespace ICCardManager.Data
 
         /// <summary>
         /// Issue #2202: UI スレッドから始まった DB の処理（リース・トランザクション・<see cref="RunOffUiThreadAsync{T}"/> の本体）を
-        /// 1 つずつ通すゲート。<see cref="EnterFromUiThreadAsync"/> の remarks を参照。
+        /// 1 つずつ通すゲート。<see cref="EnterUiOriginGateAsync"/> の remarks を参照。
         /// </summary>
         private readonly SemaphoreSlim _uiOriginGate = new SemaphoreSlim(1, 1);
 
@@ -591,8 +591,11 @@ namespace ICCardManager.Data
             ct.ThrowIfCancellationRequested();
 
             // Issue #2202: UI スレッドから呼ばれたら、スレッドプールへ移り UI 起点のゲートを取ってから続ける
-            // （EnterFromUiThreadAsync の remarks）。ゲートはリースの破棄で返す
-            var heldUiGate = await EnterFromUiThreadAsync(ct).ConfigureAwait(false);
+            // （EnterUiOriginGateAsync の remarks）。ゲートはリースの破棄で返す。
+            // Issue #2401: 移る await はこのメソッドの中に置く（別の async メソッドの中で移ると、続きが UI スレッドで走り得る）
+            var fromUiThread = IsOnUiThread();
+            await ThreadPoolSwitch.When(fromUiThread).ConfigureAwait(false);
+            var heldUiGate = await EnterUiOriginGateAsync(fromUiThread, ct).ConfigureAwait(false);
             try
             {
                 return await AcquireLeaseAsync(heldUiGate, ct).ConfigureAwait(false);
@@ -730,10 +733,24 @@ namespace ICCardManager.Data
         private static bool DefaultIsOnUiThread() => IsDispatcherContext(SynchronizationContext.Current);
 
         /// <summary>
-        /// UI スレッドから呼ばれていたら、続きをスレッドプールへ移し、UI 起点のゲート（<see cref="_uiOriginGate"/>）を取る（Issue #2202）。
+        /// UI スレッドから呼ばれていたら、UI 起点のゲート（<see cref="_uiOriginGate"/>）を取る（Issue #2202）。
+        /// 呼び出し元は、呼ぶ前に自分の中で <c>await ThreadPoolSwitch.When(fromUiThread)</c> によりスレッドプールへ移っておくこと。
         /// </summary>
+        /// <param name="fromUiThread">入口で、移る前に <see cref="IsOnUiThread"/> で判定した「UI スレッドから呼ばれたか」。</param>
+        /// <param name="ct">ゲートの待機のキャンセル。</param>
         /// <returns>ゲートを取ったら true（呼び出し元が <see cref="ExitUiOriginGate"/> で返す）。UI スレッド以外からなら何もせず false。</returns>
         /// <remarks>
+        /// <para>
+        /// <b>移る <c>await</c> を、このメソッドの中に置かない（Issue #2401）</b>。別の async メソッドの中で移ると、UI スレッドが
+        /// そのメソッドから戻って <c>Task</c> を <c>await</c> するより先に、スレッドプール側がゲートを取ってその <c>Task</c> を
+        /// 完了させ得る（UI スレッドが OS にちょうど中断されたとき）。完了済みの <c>Task</c> の <c>await</c> は呼び出し元の
+        /// スレッドで同期的に続くので、入口の続き（セマフォ・接続の取得・<c>BEGIN</c>）が UI スレッドで走っていた。
+        /// <see cref="RunOffUiThreadAsync{T}"/> では本体まで UI スレッドで走り、本体の中の DB の処理が「UI から来た」と判定されて、
+        /// <see cref="RunOffUiThreadAsync{T}"/> 自身が持つゲートを待って永久に止まった（以後 UI から始まる DB の処理がすべて止まる。
+        /// CI の Debug で 30 秒の打ち切りとしてまれに観測）。<see cref="ThreadPoolSwitch"/> は常に未完了なので、呼び出し元が
+        /// 自分で <c>await</c> すれば続きは必ずスレッドプールで走る。スレッドプールへ移った後なら、このメソッドの <c>Task</c> が
+        /// 先に完了していても続きはスレッドプールのままなので、ゲートの待機はここへまとめてよい。
+        /// </para>
         /// <para>
         /// <see cref="LeaseConnectionAsync"/> と <see cref="BeginTransactionAsync"/> は <c>async</c> だが、内部の待機
         /// （セマフォ・保守トランザクションのゲート）は空いていれば同期的に完了し、その後の接続の取得と、呼び出し元の
@@ -767,20 +784,19 @@ namespace ICCardManager.Data
         /// UI 判定は同じ <see cref="IsOnUiThread"/> を使う。
         /// </para>
         /// </remarks>
-        private async Task<bool> EnterFromUiThreadAsync(CancellationToken ct)
+        private async Task<bool> EnterUiOriginGateAsync(bool fromUiThread, CancellationToken ct)
         {
-            if (!IsOnUiThread())
+            if (!fromUiThread)
             {
                 return false;
             }
 
-            await ThreadPoolSwitch.When(true).ConfigureAwait(false);
             await _uiOriginGate.WaitAsync(ct).ConfigureAwait(false);
             return true;
         }
 
         /// <summary>
-        /// <see cref="EnterFromUiThreadAsync"/> で取ったゲートを返す。
+        /// <see cref="EnterUiOriginGateAsync"/> で取ったゲートを返す。
         /// </summary>
         private void ExitUiOriginGate()
         {
@@ -875,7 +891,11 @@ namespace ICCardManager.Data
         /// </remarks>
         public async Task<T> RunOffUiThreadAsync<T>(Func<Task<T>> body)
         {
-            var heldUiGate = await EnterFromUiThreadAsync(CancellationToken.None).ConfigureAwait(false);
+            // Issue #2401: 移る await はこのメソッドの中に置く。別の async メソッドの中で移ると、本体が UI スレッドで走り、
+            // 本体の中の DB の処理が「UI から来た」と判定されて、ここで取ったゲートを待ち永久に止まる（EnterUiOriginGateAsync の remarks）
+            var fromUiThread = IsOnUiThread();
+            await ThreadPoolSwitch.When(fromUiThread).ConfigureAwait(false);
+            var heldUiGate = await EnterUiOriginGateAsync(fromUiThread, CancellationToken.None).ConfigureAwait(false);
             try
             {
                 return await body().ConfigureAwait(false);
@@ -923,8 +943,11 @@ namespace ICCardManager.Data
         private async Task<TransactionScope> BeginTransactionCoreAsync(CancellationToken ct)
         {
             // Issue #2202: UI スレッドから呼ばれたら、スレッドプールへ移り UI 起点のゲートを取ってからセマフォを待つ
-            // （EnterFromUiThreadAsync の remarks。取る順はゲート → セマフォ）。ゲートはスコープの破棄で返す
-            var heldUiGate = await EnterFromUiThreadAsync(ct).ConfigureAwait(false);
+            // （EnterUiOriginGateAsync の remarks。取る順はゲート → セマフォ）。ゲートはスコープの破棄で返す。
+            // Issue #2401: 移る await はこのメソッドの中に置く（EnterUiOriginGateAsync の remarks）
+            var fromUiThread = IsOnUiThread();
+            await ThreadPoolSwitch.When(fromUiThread).ConfigureAwait(false);
+            var heldUiGate = await EnterUiOriginGateAsync(fromUiThread, ct).ConfigureAwait(false);
             try
             {
                 await _semaphore.WaitAsync(ct).ConfigureAwait(false);

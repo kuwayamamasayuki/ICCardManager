@@ -45,9 +45,45 @@ namespace ICCardManager.Common
         /// <summary>移る必要が無いときだけ完了済みとして扱う。</summary>
         public bool IsCompleted => !_required;
 
+        /// <summary>
+        /// テスト専用: 続きをスレッドプールへ投げた後、その続きがスレッドを返す（完了するか、本当に非同期な待ちに入る）まで、
+        /// 投げた側のスレッドを止める（Issue #2401）。
+        /// </summary>
+        /// <remarks>
+        /// 「投げた側（UI スレッド）が OS に中断され、その間に続きが先へ進む」競合を決定的に作る。本番の負荷の下でまれにしか
+        /// 起きない順序なので、これが無いと回帰テストは確率でしか赤くならない。<see cref="AsyncLocal{T}"/> なので、設定した
+        /// テストの流れ（そこから始めた続き）だけに効き、並列に動くほかのテストには漏れない。
+        /// 投げた側を止めるので、続きが投げた側のスレッドを同期的に必要とする（Dispatcher の <c>Invoke</c> 等）場面では使えない
+        /// （互いを待って止まる）。
+        /// </remarks>
+        internal static readonly AsyncLocal<bool> HoldCallerUntilContinuationYields = new();
+
         /// <summary>続きをスレッドプールへ投げる。</summary>
-        public void OnCompleted(Action continuation) =>
-            ThreadPool.QueueUserWorkItem(static state => ((Action)state!)(), continuation);
+        public void OnCompleted(Action continuation)
+        {
+            if (!HoldCallerUntilContinuationYields.Value)
+            {
+                ThreadPool.QueueUserWorkItem(static state => ((Action)state!)(), continuation);
+                return;
+            }
+
+            // 破棄しない: Wait が戻った時点でスレッドプール側の Set がまだ戻っていないことがある。
+            // Wait()（上限なし）だけならカーネルのハンドルは作られないので、破棄しなくても漏れない
+            var yielded = new ManualResetEventSlim();
+            ThreadPool.QueueUserWorkItem(
+                _ =>
+                {
+                    try
+                    {
+                        continuation();
+                    }
+                    finally
+                    {
+                        yielded.Set();
+                    }
+                });
+            yielded.Wait();
+        }
 
         /// <summary>結果は無い。</summary>
         public void GetResult()
