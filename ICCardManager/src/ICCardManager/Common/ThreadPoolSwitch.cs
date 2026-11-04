@@ -53,6 +53,8 @@ namespace ICCardManager.Common
         /// 「投げた側（UI スレッド）が OS に中断され、その間に続きが先へ進む」競合を決定的に作る。本番の負荷の下でまれにしか
         /// 起きない順序なので、これが無いと回帰テストは確率でしか赤くならない。<see cref="AsyncLocal{T}"/> なので、設定した
         /// テストの流れ（そこから始めた続き）だけに効き、並列に動くほかのテストには漏れない。
+        /// 投げた側を止めるので、続きが投げた側のスレッドを同期的に必要とする（Dispatcher の <c>Invoke</c> 等）場面では使えない
+        /// （互いを待って止まる）。
         /// </remarks>
         internal static readonly AsyncLocal<bool> HoldCallerUntilContinuationYields = new();
 
@@ -65,7 +67,9 @@ namespace ICCardManager.Common
                 return;
             }
 
-            using var yielded = new ManualResetEventSlim();
+            // 破棄しない: Wait が戻った時点でスレッドプール側の Set がまだ戻っていないことがある。
+            // Wait()（上限なし）だけならカーネルのハンドルは作られないので、破棄しなくても漏れない
+            var yielded = new ManualResetEventSlim();
             ThreadPool.QueueUserWorkItem(
                 _ =>
                 {

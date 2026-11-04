@@ -262,6 +262,52 @@ public sealed class DbContextUiThreadOffloadTests : IDisposable
     }
 
     /// <summary>
+    /// リースの入口でも同じ: 移った先が先に進んでも、接続の取得（初回のオープン）は UI スレッドの外で走る（Issue #2401）。
+    /// </summary>
+    /// <remarks>
+    /// 接続の取得は SQL を伴わないことがあるので、まだ開いていない <see cref="DbContext"/> を使い、
+    /// 接続が開かれたスレッドを <see cref="SQLiteConnection.Changed"/>（<see cref="SQLiteConnectionEventType.Opened"/>。
+    /// 開いたスレッドで発火する）で記録する。
+    /// </remarks>
+    [Fact]
+    public async Task LeaseConnectionAsync_移った先が先に進んでも_接続の取得はUIスレッドの外で走ること()
+    {
+        // Arrange: まだ接続を開いていない DbContext（最初のリースで開く）
+        using var unopened = new DbContext(":memory:");
+        var opened = new ConcurrentQueue<(object? Sender, int ThreadId)>();
+        SQLiteConnectionEventHandler handler = (sender, e) =>
+        {
+            if (e.EventType == SQLiteConnectionEventType.Opened)
+            {
+                opened.Enqueue((sender, Thread.CurrentThread.ManagedThreadId));
+            }
+        };
+
+        // Act
+        SQLiteConnection.Changed += handler;
+        (int UiThreadId, SQLiteConnection Connection) result;
+        try
+        {
+            result = await RunOnDispatcherAsync(async ui =>
+            {
+                ThreadPoolSwitch.HoldCallerUntilContinuationYields.Value = true;
+                using var lease = await unopened.LeaseConnectionAsync();
+                return (ui, lease.Connection);
+            });
+        }
+        finally
+        {
+            SQLiteConnection.Changed -= handler;
+        }
+
+        // Assert
+        var openedHere = opened.Where(o => ReferenceEquals(o.Sender, result.Connection)).ToList();
+        openedHere.Should().NotBeEmpty("前提: 最初のリースで接続が開かれていること（空振り防止）");
+        openedHere.Should().OnlyContain(o => o.ThreadId != result.UiThreadId,
+            "移った先が先に進んでも、リースの入口の続き（接続の取得）は UI スレッドへ戻らない（Issue #2401）");
+    }
+
+    /// <summary>
     /// <see cref="DbContext.RunOffUiThreadAsync{T}"/> でも同じ競合で本体が UI スレッドで走ると、本体の中の DB の処理が
     /// 「UI から来た」と判定され、<see cref="DbContext.RunOffUiThreadAsync{T}"/> 自身が持つゲートを待って永久に止まっていた
     /// （CI の Debug でまれに 30 秒で打ち切られた。Issue #2401）。アプリでは、以後 UI から始まる DB の処理がすべて止まる。
