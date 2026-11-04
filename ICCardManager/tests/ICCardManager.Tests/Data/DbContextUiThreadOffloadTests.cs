@@ -86,13 +86,23 @@ public sealed class DbContextUiThreadOffloadTests : IDisposable
     /// 同期コンテキストが <see cref="DispatcherSynchronizationContext"/> なので、ViewModel と同じく
     /// <c>ConfigureAwait</c> を付けない <c>await</c> の続きはこのスレッドへ戻り、既定の UI 判定も真になる。
     /// </remarks>
-    private static Task<T> RunOnDispatcherAsync<T>(Func<int, Task<T>> func)
+    private static Task<T> RunOnDispatcherAsync<T>(Func<int, Task<T>> func) =>
+        RunOnDispatcherAsync<T>((uiThreadId, _) => func(uiThreadId));
+
+    /// <summary>
+    /// <see cref="RunOnDispatcherAsync{T}(Func{int, Task{T}})"/> に、段階の記録（<see cref="StaStageLog"/>）を渡す版。
+    /// </summary>
+    /// <remarks>
+    /// 待ちに上限の無い <c>await</c> を挟むテストは、段階を記録して <see cref="StaTestRunner"/> の打ち切り時に
+    /// 「どこで止まったか」が失敗メッセージに残るようにする（Issue #2401。記録が無いと「1 段階も完了していない」としか出ない）。
+    /// </remarks>
+    private static Task<T> RunOnDispatcherAsync<T>(Func<int, StaStageLog, Task<T>> func)
     {
         // STA スレッドの組み立ては共有ヘルパーに寄せる（Issue #2083。StaThreadCollectionConventionTests）。
         // ヘルパーは本体が終わるまで呼び出し元を同期的に待たせるので、結果は完了済みの Task で返す
         T result = default!;
         Exception? failure = null;
-        StaTestRunner.Run(() =>
+        StaTestRunner.Run(stages =>
         {
             var dispatcher = Dispatcher.CurrentDispatcher;
             SynchronizationContext.SetSynchronizationContext(new DispatcherSynchronizationContext(dispatcher));
@@ -101,7 +111,7 @@ public sealed class DbContextUiThreadOffloadTests : IDisposable
             {
                 try
                 {
-                    result = await func(uiThreadId);
+                    result = await func(uiThreadId, stages);
                 }
                 catch (Exception ex)
                 {
@@ -218,6 +228,73 @@ public sealed class DbContextUiThreadOffloadTests : IDisposable
         statements.Should().ContainSingle("前提: トランザクション内の書き込みが実行されていること（空振り防止）");
         statements.Single().ThreadId.Should().NotBe(uiThreadId,
             "トランザクションの開始の入口で UI スレッドから移り、await の続きもスレッドプールで走る（Issue #2202）");
+    }
+
+    /// <summary>
+    /// 入口でスレッドプールへ投げた続きが、UI スレッドが入口から戻るより先に進んでも（UI スレッドが OS に中断されたとき）、
+    /// 入口の続き（セマフォ・接続の取得・<c>BEGIN</c>）は UI スレッドの外で走る（Issue #2401）。
+    /// </summary>
+    /// <remarks>
+    /// 移る <c>await</c> を別の async メソッドの中に置くと、その <c>Task</c> が呼び出し元の <c>await</c> より先に完了し、
+    /// 呼び出し元の続きが UI スレッドで同期的に走っていた。競合は <see cref="ThreadPoolSwitch.HoldCallerUntilContinuationYields"/>
+    /// で決定的に作る（投げた側を、続きがスレッドを返すまで止める）。
+    /// </remarks>
+    [Fact]
+    public async Task BeginTransactionAsync_移った先が先に進んでも_BEGINはUIスレッドの外で走ること()
+    {
+        // Arrange
+        ClearRecorded();
+
+        // Act
+        var uiThreadId = await RunOnDispatcherAsync(async ui =>
+        {
+            ThreadPoolSwitch.HoldCallerUntilContinuationYields.Value = true;
+            using var scope = await _dbContext.BeginTransactionAsync();
+            scope.Commit();
+            return ui;
+        });
+
+        // Assert
+        var begins = _executedStatements.Where(s => s.Statement.TrimStart().StartsWith("BEGIN", StringComparison.OrdinalIgnoreCase)).ToList();
+        begins.Should().ContainSingle("前提: トランザクションの開始が記録されていること（空振り防止）。実行された文: " + DescribeRecorded());
+        begins.Single().ThreadId.Should().NotBe(uiThreadId,
+            "移った先が先に進んでも、入口の続きは UI スレッドへ戻らない（Issue #2401）");
+    }
+
+    /// <summary>
+    /// <see cref="DbContext.RunOffUiThreadAsync{T}"/> でも同じ競合で本体が UI スレッドで走ると、本体の中の DB の処理が
+    /// 「UI から来た」と判定され、<see cref="DbContext.RunOffUiThreadAsync{T}"/> 自身が持つゲートを待って永久に止まっていた
+    /// （CI の Debug でまれに 30 秒で打ち切られた。Issue #2401）。アプリでは、以後 UI から始まる DB の処理がすべて止まる。
+    /// </summary>
+    [Fact]
+    public async Task RunOffUiThreadAsync_移った先が先に進んでも_本体はUIスレッドの外で走り自分のゲートを待たないこと()
+    {
+        // Arrange
+        ClearRecorded();
+
+        // Act（止まる実装でも上限で戻るよう、本体の完了は上限つきで待つ）
+        var (uiThreadId, bodyThreadId, completed) = await RunOnDispatcherAsync(async ui =>
+        {
+            ThreadPoolSwitch.HoldCallerUntilContinuationYields.Value = true;
+            var bodyThread = 0;
+            var run = _dbContext.RunOffUiThreadAsync(async () =>
+            {
+                bodyThread = Thread.CurrentThread.ManagedThreadId;
+                using var scope = await _dbContext.BeginTransactionAsync();
+                await ExecuteInTransactionAsync(scope, "INSERT OR REPLACE INTO settings (key, value) VALUES ('issue_2401_body', 'x')");
+                scope.Commit();
+                return true;
+            });
+
+            var done = await CompletesWithin(run, CompletionTimeout);
+            return (ui, bodyThread, done);
+        });
+
+        // Assert
+        bodyThreadId.Should().NotBe(0, "前提: 本体が始まっていること（空振り防止）");
+        bodyThreadId.Should().NotBe(uiThreadId, "移った先が先に進んでも、本体は UI スレッドで走らない（Issue #2401）");
+        completed.Should().BeTrue("本体の中の DB の処理は UI から来たと判定されず、自分の持つゲートを待たない");
+        _executedStatements.Single(s => s.Statement.Contains("issue_2401_body")).ThreadId.Should().NotBe(uiThreadId);
     }
 
     /// <summary>
@@ -399,6 +476,57 @@ public sealed class DbContextUiThreadOffloadTests : IDisposable
         ThreadPoolSwitch.When(true).GetAwaiter().IsCompleted.Should().BeFalse();
     }
 
+    /// <summary>
+    /// 回帰テストが使う競合の再現（<see cref="ThreadPoolSwitch.HoldCallerUntilContinuationYields"/>）自体を固定する。
+    /// 立てると、投げた側は続きが走り終えるまで戻らない。立てなければ、続きを待たずに戻る（対の表明。Issue #2401）。
+    /// </summary>
+    [Fact]
+    public void ThreadPoolSwitch_テスト用の保留を立てると_投げた側は続きがスレッドを返すまで戻らないこと()
+    {
+        bool? heldContinuationFinished = null;
+        bool? unheldContinuationFinished = null;
+        bool? heldContinuationOnPool = null;
+        Exception? failure = null;
+
+        // AsyncLocal を同期的に立てると呼び出したスレッドに残るので、専用スレッドで立てる
+        var thread = new Thread(() =>
+        {
+            try
+            {
+                using var releaseUnheld = new ManualResetEventSlim();
+                var unheldFinished = false;
+                ThreadPoolSwitch.When(true).GetAwaiter().OnCompleted(() =>
+                {
+                    releaseUnheld.Wait();
+                    Volatile.Write(ref unheldFinished, true);
+                });
+                unheldContinuationFinished = Volatile.Read(ref unheldFinished);
+                releaseUnheld.Set();
+
+                ThreadPoolSwitch.HoldCallerUntilContinuationYields.Value = true;
+                var heldFinished = false;
+                ThreadPoolSwitch.When(true).GetAwaiter().OnCompleted(() =>
+                {
+                    Thread.Sleep(BlockedProbe);
+                    heldContinuationOnPool = Thread.CurrentThread.IsThreadPoolThread;
+                    Volatile.Write(ref heldFinished, true);
+                });
+                heldContinuationFinished = Volatile.Read(ref heldFinished);
+            }
+            catch (Exception ex)
+            {
+                failure = ex;
+            }
+        });
+        thread.Start();
+        thread.Join(TimeSpan.FromSeconds(30)).Should().BeTrue("専用スレッドが時間内に終わること");
+
+        failure.Should().BeNull();
+        unheldContinuationFinished.Should().BeFalse("立てなければ、続きの終わりを待たずに戻る");
+        heldContinuationFinished.Should().BeTrue("立てると、続きが走り終えるまで投げた側は戻らない");
+        heldContinuationOnPool.Should().BeTrue("立てても、続きはスレッドプールで走る（投げた側で走らせない）");
+    }
+
     #endregion
 
     #region UI 起点の処理は 1 つずつ走ること
@@ -508,27 +636,35 @@ public sealed class DbContextUiThreadOffloadTests : IDisposable
         var release = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
         var bodyStarted = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
 
-        // Act
-        var (uiThreadId, blockedDuringBody, completedAfterBody) = await RunOnDispatcherAsync(async ui =>
+        // Act（上限の無い await を挟むので、止まった位置が打ち切りのメッセージに残るよう段階を記録する。Issue #2401）
+        var (uiThreadId, blockedDuringBody, completedAfterBody) = await RunOnDispatcherAsync(async (ui, stages) =>
         {
             var run = _dbContext.RunOffUiThreadAsync(async () =>
             {
                 // ViewModel と同じく ConfigureAwait を付けずに await する本体
+                stages.Complete("本体の開始（UI スレッドの外でゲートを取った）");
                 using var scope = await _dbContext.BeginTransactionAsync();
+                stages.Complete("本体のトランザクションの開始");
                 await ExecuteInTransactionAsync(scope, "INSERT OR REPLACE INTO settings (key, value) VALUES ('issue_2202_vm_1', 'x')");
                 bodyStarted.SetResult(true);
                 await release.Task;
                 await ExecuteInTransactionAsync(scope, "INSERT OR REPLACE INTO settings (key, value) VALUES ('issue_2202_vm_2', 'x')");
                 scope.Commit();
+                stages.Complete("本体の終了（コミット）");
                 return true;
             });
+            stages.Complete("RunOffUiThreadAsync の呼び出し（UI スレッドへ戻った）");
 
             await bodyStarted.Task;
+            stages.Complete("bodyStarted の後（UI スレッド）");
             var other = _dbContext.LeaseConnectionAsync();
             var blocked = !await CompletesWithin(other, BlockedProbe);
             release.SetResult(true);
+            stages.Complete("release の後");
             await run;
+            stages.Complete("await run の後");
             var completed = await CompletesWithin(other, CompletionTimeout);
+            stages.Complete("後続のリースの待ち（完了=" + completed + "）");
             if (completed)
             {
                 (await other).Dispose();
