@@ -540,14 +540,20 @@ public sealed class DbContextUiThreadOffloadTests : IDisposable
             try
             {
                 using var releaseUnheld = new ManualResetEventSlim();
+                // 破棄しない: Wait が戻った時点で続きの Set がまだ戻っていないことがある（継ぎ目の本体と同じ理由）
+                var unheldDone = new ManualResetEventSlim();
                 var unheldFinished = false;
                 ThreadPoolSwitch.When(true).GetAwaiter().OnCompleted(() =>
                 {
                     releaseUnheld.Wait();
                     Volatile.Write(ref unheldFinished, true);
+                    unheldDone.Set();
                 });
                 unheldContinuationFinished = Volatile.Read(ref unheldFinished);
                 releaseUnheld.Set();
+
+                // 続きの終わりを待ってから先へ進む（スレッドプールの混雑で続きの開始が遅れても、破棄済みのイベントを待たせない）
+                unheldDone.Wait();
 
                 ThreadPoolSwitch.HoldCallerUntilContinuationYields.Value = true;
                 var heldFinished = false;
