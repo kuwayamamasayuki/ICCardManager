@@ -291,4 +291,18 @@ public class PathValidatorErrorMessageQualityTests : IDisposable
         result.ErrorMessage.Should().Contain("書き込み",
             "何が: バックアップ先フォルダーへの書き込みの確認");
     }
+
+    /// <summary>
+    /// Issue #2383: ドライブの準備確認が上限内に終わらなかったときの文言が 3 要素を満たし、ドライブと上限の秒数を示すこと。
+    /// </summary>
+    [Fact]
+    public void CreateDriveReadyTimeoutFailure_MeetsQualityAndIncludesDriveAndTimeoutSeconds()
+    {
+        var result = PathValidator.CreateDriveReadyTimeoutFailure(@"Z:\", 5_000);
+
+        result.IsValid.Should().BeFalse();
+        AssertQualityCriteria(result.ErrorMessage);
+        result.ErrorMessage.Should().Contain(@"Z:\", "何が: 確認したドライブ");
+        result.ErrorMessage.Should().Contain("5秒以内", "なぜ問題か: 上限の秒数を示す");
+    }
 }

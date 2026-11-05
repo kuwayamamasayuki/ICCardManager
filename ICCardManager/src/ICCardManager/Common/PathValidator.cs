@@ -39,6 +39,13 @@ namespace ICCardManager.Common
         public const int DefaultWriteProbeTimeoutMs = 10000;
 
         /// <summary>
+        /// Issue #2383: ローカルパス（ドライブ文字）のドライブの準備確認（<see cref="DriveInfo.IsReady"/>）を待つ上限（ミリ秒）。
+        /// マップドネットワークドライブ（共有モード、Issue #1559）は UNC 扱いにならず到達確認を通らないため、
+        /// 切断されたドライブではここが UNC の到達確認の役を担う。上限は到達確認（<see cref="DefaultUncTimeoutMs"/>）と揃える。
+        /// </summary>
+        public const int DefaultDriveReadyTimeoutMs = 5000;
+
+        /// <summary>
         /// パス検証結果
         /// </summary>
         public class ValidationResult
@@ -81,15 +88,17 @@ namespace ICCardManager.Common
         /// </remarks>
         public static ValidationResult ValidateBackupPath(string path)
             => ValidateBackupPath(
-                path, UncReachabilityChecker, DefaultUncTimeoutMs, DefaultWritePermissionChecker, DefaultWriteProbeTimeoutMs);
+                path, UncReachabilityChecker, DefaultUncTimeoutMs, DefaultWritePermissionChecker, DefaultWriteProbeTimeoutMs,
+                DefaultDriveReadinessChecker, DefaultDriveReadyTimeoutMs);
 
         /// <summary>
         /// バックアップパスの非同期検証（Issue #1269）。UI スレッドをブロックせず、
         /// UNC パスの到達性を <paramref name="cancellationToken"/> でキャンセル可能に検証する。
         /// </summary>
         /// <remarks>
-        /// キャンセルすると、確認の終わりを待たずに <see cref="OperationCanceledException"/> で戻る
-        /// （走り出した確認そのものは中断できないが、上限付きで終わる。Issue #2383）。
+        /// キャンセルに対応できる形にしてある。キャンセルされると、確認の終わりを待たずに
+        /// <see cref="OperationCanceledException"/> で戻る（走り出した確認そのものは中断できないが、上限付きで終わる。Issue #2383）。
+        /// ただし現在、トークンを渡す本番の呼び出し元は無い。
         /// </remarks>
         public static Task<ValidationResult> ValidateBackupPathAsync(
             string path, CancellationToken cancellationToken = default)
@@ -110,7 +119,8 @@ namespace ICCardManager.Common
         /// </para>
         /// <para>
         /// 呼び出しは設定の保存とバックアップ先の解決（利用者の操作か起動時）に限られ、呼ぶたびにスレッドを 1 本作っても
-        /// 足りる。検証の中の待ちはどちらも上限付きなので、専用スレッドも上限で終わる。
+        /// 足りる。検証の中のブロックし得る確認（UNC の到達確認・ドライブの準備確認・書き込み確認）はすべて上限付きなので、
+        /// 専用スレッドも上限で終わる。
         /// </para>
         /// </remarks>
         internal static Task<ValidationResult> ValidateBackupPathAsync(
@@ -128,7 +138,8 @@ namespace ICCardManager.Common
 
             var validation = DedicatedThread.Run(
                 () => ValidateBackupPath(
-                    path, uncReachabilityChecker, uncTimeoutMs, writePermissionChecker, writeProbeTimeoutMs));
+                    path, uncReachabilityChecker, uncTimeoutMs, writePermissionChecker, writeProbeTimeoutMs,
+                    DefaultDriveReadinessChecker, DefaultDriveReadyTimeoutMs));
 
             return cancellationToken.CanBeCanceled
                 ? WaitWithCancellationAsync(validation, cancellationToken)
@@ -141,7 +152,8 @@ namespace ICCardManager.Common
         private static async Task<ValidationResult> WaitWithCancellationAsync(
             Task<ValidationResult> validation, CancellationToken cancellationToken)
         {
-            var cancelled = new TaskCompletionSource<bool>();
+            // 続きを Cancel() を呼んだスレッド上で同期的に走らせない
+            var cancelled = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
             using (cancellationToken.Register(() => cancelled.TrySetResult(true)))
             {
                 var first = await Task.WhenAny(validation, cancelled.Task).ConfigureAwait(false);
@@ -163,17 +175,21 @@ namespace ICCardManager.Common
             Func<string, int, bool> uncReachabilityChecker,
             int uncTimeoutMs)
             => ValidateBackupPath(
-                path, uncReachabilityChecker, uncTimeoutMs, DefaultWritePermissionChecker, DefaultWriteProbeTimeoutMs);
+                path, uncReachabilityChecker, uncTimeoutMs, DefaultWritePermissionChecker, DefaultWriteProbeTimeoutMs,
+                DefaultDriveReadinessChecker, DefaultDriveReadyTimeoutMs);
 
         /// <summary>
-        /// テスト容易性のための内部 API。到達確認・書き込み確認の関数と上限を外部から注入できる。
+        /// テスト容易性のための内部 API。到達確認・書き込み確認・ドライブの準備確認の関数と上限を外部から注入できる。
+        /// ドライブの準備確認を省略すると既定（<see cref="DefaultDriveReadinessChecker"/>）を使う。
         /// </summary>
         internal static ValidationResult ValidateBackupPath(
             string path,
             Func<string, int, bool> uncReachabilityChecker,
             int uncTimeoutMs,
             Func<string, int, ValidationResult> writePermissionChecker,
-            int writeProbeTimeoutMs)
+            int writeProbeTimeoutMs,
+            Func<string, int, ValidationResult>? driveReadinessChecker = null,
+            int driveReadyTimeoutMs = DefaultDriveReadyTimeoutMs)
         {
             // 1. null または空でないこと
             if (string.IsNullOrWhiteSpace(path))
@@ -260,20 +276,19 @@ namespace ICCardManager.Common
 
             // 8. ドライブが存在すること（ローカルパスの場合のみ）
             // UNCパスにはドライブの概念がないためスキップ
+            //    マップドネットワークドライブは UNC 扱いにならず項目 7 を通らないため、切断されたドライブでは
+            //    DriveInfo.IsReady が戻らないことがある。専用スレッドで上限付きに待つ（Issue #2383）
             if (!IsUncPath(path))
             {
                 try
                 {
                     var root = Path.GetPathRoot(path);
-                    if (!string.IsNullOrEmpty(root))
+                    if (root is not null && !string.IsNullOrEmpty(root))
                     {
-                        var driveInfo = new DriveInfo(root);
-                        if (!driveInfo.IsReady)
+                        var driveResult = (driveReadinessChecker ?? DefaultDriveReadinessChecker)(root, driveReadyTimeoutMs);
+                        if (!driveResult.IsValid)
                         {
-                            return ValidationResult.Failure(
-                                $"ドライブ {root} が利用できません。" +
-                                "USB メモリの抜けや未マウントが原因の可能性があります。" +
-                                "接続を確認するか、利用可能な別のドライブを指定してください。");
+                            return driveResult;
                         }
                     }
                 }
@@ -594,19 +609,19 @@ namespace ICCardManager.Common
                     try { return probe(path); }
                     catch { return false; }
                 },
-                onTimeout: _ => false);
+                onTimeout: (_, _) => false);
 
         /// <summary>
         /// 確認を専用スレッドで走らせて上限付きで待ち、同じパスへの確認を進行中のものが終わるまで 1 本に限る関数を作る
         /// （Issue #2225 / #2383。到達確認と書き込み確認で共有する）。
         /// </summary>
         /// <param name="check">確認の本体。例外を投げないこと（呼び出し側で結果へ変換しておく）。</param>
-        /// <param name="onTimeout">上限内に終わらなかったとき（待ちが例外で終わったときも）の結果。引数は上限（ミリ秒）。</param>
+        /// <param name="onTimeout">上限内に終わらなかったとき（待ちが例外で終わったときも）の結果。引数は確認したパスと上限（ミリ秒）。</param>
         /// <remarks>
         /// 後から来た呼び出しは進行中の確認の結果を（自分の上限まで）待つ。終わった確認の結果は使い回さない。
         /// 詳細は <see cref="CreateUncReachabilityChecker"/> を参照。
         /// </remarks>
-        private static Func<string, int, T> CreateSingleFlightChecker<T>(Func<string, T> check, Func<int, T> onTimeout)
+        private static Func<string, int, T> CreateSingleFlightChecker<T>(Func<string, T> check, Func<string, int, T> onTimeout)
         {
             var pendingChecks = new Dictionary<string, Task<T>>(StringComparer.OrdinalIgnoreCase);
             var pendingChecksLock = new object();
@@ -633,12 +648,12 @@ namespace ICCardManager.Common
 
                 try
                 {
-                    return current.Wait(timeoutMs) ? current.Result : onTimeout(timeoutMs);
+                    return current.Wait(timeoutMs) ? current.Result : onTimeout(path, timeoutMs);
                 }
                 catch
                 {
                     // Wait 中の AggregateException 等は上限切れと同じ扱いにする
-                    return onTimeout(timeoutMs);
+                    return onTimeout(path, timeoutMs);
                 }
             };
         }
@@ -649,6 +664,38 @@ namespace ICCardManager.Common
         /// </summary>
         internal static readonly Func<string, int, ValidationResult> DefaultWritePermissionChecker =
             CreateWritePermissionChecker(CheckWritePermission);
+
+        /// <summary>
+        /// 公開エントリポイントが使う、ローカルパスのドライブの準備確認（Issue #2383）。
+        /// 実体は <see cref="DriveInfo.IsReady"/> を <see cref="CreateDriveReadinessChecker"/> で包んだもの。
+        /// </summary>
+        internal static readonly Func<string, int, ValidationResult> DefaultDriveReadinessChecker =
+            CreateDriveReadinessChecker(root => new DriveInfo(root).IsReady);
+
+        /// <summary>
+        /// ローカルパスのドライブの準備確認を、専用スレッドで上限付きに待つ関数を作る（Issue #2383）。
+        /// </summary>
+        /// <param name="isReady">
+        /// ドライブのルート（<c>Z:\</c> 等）が使えるかを返す本体（既定は <see cref="DriveInfo.IsReady"/>）。
+        /// 切断されたマップドネットワークドライブでは戻らないことがある。例外を投げた場合は従来どおり致命的としない
+        /// （他の検証項目に任せる）。
+        /// </param>
+        /// <remarks>
+        /// マップドネットワークドライブ（共有モード、Issue #1559）は UNC 扱いにならず、UNC の到達確認（項目 7）を通らない。
+        /// 上限が無いと検証の専用スレッドが止まり、トークンを渡さない呼び出し元（設定の保存・バックアップ先の解決）の待ちが戻らない。
+        /// 到達確認・書き込み確認と同じく、同じドライブへの確認は進行中のものが終わるまで 1 本に限る。
+        /// </remarks>
+        internal static Func<string, int, ValidationResult> CreateDriveReadinessChecker(Func<string, bool> isReady)
+            => CreateSingleFlightChecker(
+                root =>
+                {
+                    bool ready;
+                    try { ready = isReady(root); }
+                    catch { return ValidationResult.Success(); }
+
+                    return ready ? ValidationResult.Success() : CreateDriveNotReadyFailure(root);
+                },
+                onTimeout: CreateDriveReadyTimeoutFailure);
 
         /// <summary>
         /// バックアップ先の書き込み確認を、専用スレッドで上限付きに待つ関数を作る（Issue #2383）。
@@ -673,7 +720,7 @@ namespace ICCardManager.Common
                     try { return check(path); }
                     catch { return ValidationResult.Success(); }
                 },
-                onTimeout: CreateWriteProbeTimeoutFailure);
+                onTimeout: (_, timeoutMs) => CreateWriteProbeTimeoutFailure(timeoutMs));
 
         /// <summary>
         /// <see cref="UncReachabilityChecker"/> の AsyncLocal バッキングストア。
@@ -762,6 +809,33 @@ namespace ICCardManager.Common
                 "指定されたフォルダへの書き込み確認中に入出力エラーが発生しました。" +
                 "ネットワーク共有の切断やディスクの空き容量不足が考えられるため、" +
                 "接続状態と空き容量を確認するか、書き込み可能な別のフォルダを指定してください。");
+        }
+
+        /// <summary>
+        /// ドライブが準備できていない（<see cref="DriveInfo.IsReady"/> が false）ときの検証エラーを生成する。
+        /// </summary>
+        internal static ValidationResult CreateDriveNotReadyFailure(string root)
+        {
+            return ValidationResult.Failure(
+                $"ドライブ {root} が利用できません。" +
+                "USB メモリの抜けや未マウントが原因の可能性があります。" +
+                "接続を確認するか、利用可能な別のドライブを指定してください。");
+        }
+
+        /// <summary>
+        /// ドライブの準備確認が上限内に終わらなかったときの検証エラーを生成する（Issue #2383）。
+        /// </summary>
+        /// <param name="root">確認したドライブのルート（<c>Z:\</c> 等）。</param>
+        /// <param name="timeoutMs">待った上限（ミリ秒）。</param>
+        /// <remarks>
+        /// 応答しないのは主に切断されたマップドネットワークドライブ。UNC の到達確認と同じく上限の秒数を示す。
+        /// </remarks>
+        internal static ValidationResult CreateDriveReadyTimeoutFailure(string root, int timeoutMs)
+        {
+            return ValidationResult.Failure(
+                $"ドライブ {root} の確認が" + (timeoutMs / 1000) + "秒以内に終わりませんでした。" +
+                "ネットワークドライブの接続が切れている可能性があるため、" +
+                "ネットワーク接続とドライブの割り当てを確認するか、利用可能な別のドライブを指定してください。");
         }
 
         /// <summary>

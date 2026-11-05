@@ -95,4 +95,33 @@ public sealed class PathValidatorUncReachabilityThreadPoolTests
             Directory.Delete(folder, recursive: true);
         }
     }
+
+    [Fact]
+    public void 公開の非同期の検証もスレッドプールが塞がっていても始まって終わること()
+    {
+        // 本番の呼び出し元（設定の保存・バックアップ先の解決）が使う公開オーバーロードの起動先を確かめる
+        // （内部オーバーロードだけを検証すると、公開側を Task.Run に戻しても緑になる）
+        var folder = Path.Combine(Path.GetTempPath(), $"PathValidatorThreadPoolPublic_{Guid.NewGuid():N}");
+        Directory.CreateDirectory(folder);
+        try
+        {
+            // Arrange
+            using var saturator = ThreadPoolSaturator.Saturate(ReserveBlockers);
+            saturator.IsSaturated.Should().BeTrue(
+                "前提: プールが塞がっていて、Task.Run の処理が始まらないこと（塞げていなければ本テストは何も検証しない）");
+
+            // Act: 一時フォルダー（ローカル）なので到達確認は通らず、ドライブの準備確認と書き込み確認は既定のもの
+            var validation = PathValidator.ValidateBackupPathAsync(folder);
+            var completed = validation.Wait(PathValidator.DefaultWriteProbeTimeoutMs);
+
+            // Assert
+            completed.Should().BeTrue("公開の検証も専用スレッドで走るため、プールの空きを待たずに始まる（Issue #2383）");
+            validation.Result.IsValid.Should().BeTrue(validation.Result.ErrorMessage);
+            saturator.SentinelStarted.Should().BeFalse("検証を待っている間も、プールが塞がったままであること");
+        }
+        finally
+        {
+            Directory.Delete(folder, recursive: true);
+        }
+    }
 }

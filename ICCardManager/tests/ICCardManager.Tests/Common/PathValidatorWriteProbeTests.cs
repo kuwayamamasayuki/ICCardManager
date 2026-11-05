@@ -199,6 +199,96 @@ public sealed class PathValidatorWriteProbeTests : IDisposable
     }
 
     [Fact]
+    public void ドライブの準備確認が上限内に終わらなければ終わらなかったことを理由に検証エラーを返すこと()
+    {
+        // マップドドライブ（共有モード、#1559）は UNC 扱いにならず到達確認を通らない。切断されたドライブでは
+        // DriveInfo.IsReady が戻らないことがあるため、上限付きで待つ（Issue #2383 のレビュー）
+        var checker = PathValidator.CreateDriveReadinessChecker(root =>
+        {
+            Interlocked.Increment(ref _checkCallCount);
+            _checkStarted.Set();
+            return _release.Wait(TimeSpan.FromSeconds(30));
+        });
+
+        var stopwatch = Stopwatch.StartNew();
+        var result = checker(@"Z:\", 100);
+        stopwatch.Stop();
+
+        result.IsValid.Should().BeFalse("応答しないドライブをバックアップ先として受け入れない");
+        result.ErrorMessage.Should().Be(PathValidator.CreateDriveReadyTimeoutFailure(@"Z:\", 100).ErrorMessage);
+        stopwatch.ElapsedMilliseconds.Should().BeLessThan(10_000, "上限で打ち切って戻ること");
+
+        // 続けて確認しても戻らない確認を積み上げない
+        WaitUntilCheckStarted();
+        checker(@"z:\", 50).IsValid.Should().BeFalse();
+        CheckCallCount.Should().Be(1);
+    }
+
+    [Fact]
+    public void ドライブの準備確認が上限内に終わればその結果で判定すること()
+    {
+        // 対の表明: 上限を設けても、準備できているドライブは通り、準備できていないドライブは従来の文言で弾く
+        PathValidator.CreateDriveReadinessChecker(_ => true)(@"C:\", 5_000).IsValid.Should().BeTrue();
+
+        var notReady = PathValidator.CreateDriveReadinessChecker(_ => false)(@"E:\", 5_000);
+        notReady.IsValid.Should().BeFalse();
+        notReady.ErrorMessage.Should().Contain("ドライブ E:\\ が利用できません");
+
+        // Path API の例外等は従来どおり致命的としない（他の検証項目に任せる）
+        PathValidator.CreateDriveReadinessChecker(_ => throw new ArgumentException("bad"))(@"C:\", 5_000)
+            .IsValid.Should().BeTrue();
+    }
+
+    [Fact]
+    public void ドライブの準備確認はスレッドプールではなく専用スレッドで走ること()
+    {
+        bool? ranOnPoolThread = null;
+        var checker = PathValidator.CreateDriveReadinessChecker(_ =>
+        {
+            ranOnPoolThread = Thread.CurrentThread.IsThreadPoolThread;
+            return true;
+        });
+
+        checker(@"C:\", 5_000).IsValid.Should().BeTrue();
+
+        ranOnPoolThread.Should().BeFalse();
+    }
+
+    [Fact]
+    public void 検証はローカルパスのドライブの準備確認を上限付きで待ち上限を超えたら検証エラーを返すこと()
+    {
+        // 検証（ValidateBackupPath）がドライブのルートと上限を渡し、その結果を返していること（配線の確認）
+        string? passedRoot = null;
+        int? passedTimeoutMs = null;
+        var writeCheckerCalled = false;
+
+        var result = PathValidator.ValidateBackupPath(
+            _testDirectory,
+            (_, _) => true,
+            PathValidator.DefaultUncTimeoutMs,
+            (_, _) =>
+            {
+                writeCheckerCalled = true;
+                return PathValidator.ValidationResult.Success();
+            },
+            PathValidator.DefaultWriteProbeTimeoutMs,
+            (root, timeoutMs) =>
+            {
+                passedRoot = root;
+                passedTimeoutMs = timeoutMs;
+                return PathValidator.CreateDriveReadyTimeoutFailure(root, timeoutMs);
+            },
+            1_234);
+
+        result.IsValid.Should().BeFalse();
+        result.ErrorMessage.Should().Be(
+            PathValidator.CreateDriveReadyTimeoutFailure(Path.GetPathRoot(_testDirectory)!, 1_234).ErrorMessage);
+        passedRoot.Should().Be(Path.GetPathRoot(_testDirectory));
+        passedTimeoutMs.Should().Be(1_234);
+        writeCheckerCalled.Should().BeFalse("ドライブが使えなければ書き込み確認へ進まない");
+    }
+
+    [Fact]
     public async Task 非同期の検証はスレッドプールではなく専用スレッドで走ること()
     {
         // 以前は検証全体を Task.Run で起動しており、到達確認・書き込み確認の上限付きの待ちでプールのスレッドを塞いでいた
