@@ -193,6 +193,8 @@
 - Issue #2312 **テスト設計書 §1〜§2.21 の記述を実装・テストに合わせた**（動作の変更なし）。件数の数え方の手順に Release 構成の指定を足し、§1.5 の早見表を実際の節番号へ直した。重複していたテスト ID・節番号（UT-002c〜g・UT-017a4・§2.20a・UT-008 の No.10・UT-016 の No.13〜29・UT-002a の #1916 の No.13）を一意にし、並び順を直した。存在しない `BalanceCalculator`・`WarekiConverter` の年度計算・削除済みのテスト名への参照を除き、和暦の期待値（ゼロ埋めしない）・貸出失敗の文言・「○月より繰越」・バックアップの保持ルール・一括保存に含めない `backup_path`・同日の並び（新規購入が先頭で残りは id 順）を実装どおりに書いた。載っていなかったテスト（摘要の TC013〜TC033、境界値のクラス 4 つ、システム操作による貸出記録、印刷プレビュー画面、利用履歴 CSV の更新・新規・スキップと残高の検証など）を表に加えた
 
 **開発基盤**
+- Issue #2384 **利用履歴詳細 CSV の取り込みで、同じ日の鉄道利用とポイント還元を別々の履歴にし、ポイント還元の履歴の受入に金額を計上すること（07 の UT-016 No.59）を、取り込みの経路をつないで表明するテストを追加した**（アプリの動作の変更なし。現行の実装は設計書どおりだった）
+  - これまでは分割（`LendingHistoryAnalyzerTests`）と受入への計上（`LedgerSplitServiceTests`）を部品ごとに固定しているだけで、取り込み側がポイント還元を区切りとして渡さない・払出に入れる変更は部品のテストを緑のまま通った。`CsvImportServicePointRedemptionSplitTests`（3 件）を新設し、実 DB で取り込んで読み返した履歴を表明する（明示のフラグと暗黙のポイント還元の 2 ケース、対として利用だけの日は 1 行のまま）
 - Issue #2399 **CI のカバレッジが本体（ICCardManager.exe）を計測しておらず、開発用ツール（DebugDataViewer.exe、347 行）だけの数字（行 61.7%・分岐 60.9%）を報告していたのを是正した**（アプリの動作の変更なし）
   - coverlet の詳細ログで、本体は `Mono.Cecil.ResolutionException: Failed to resolve System.Windows.Threading.DispatcherPriority` で計装に失敗していた。計装したモジュールを書き戻すとき、enum 型の既定値（`DispatcherObservation.InvokeAsyncObserved` の `DispatcherPriority priority = DispatcherPriority.Normal`）の型を解決する必要があるが、データコレクターは .NET（Core）上で動き GAC を探さないため、テストの出力に無い WindowsBase を見つけられなかった
   - テストの csproj が WPF の参照アセンブリ（WindowsBase・PresentationCore・PresentationFramework・System.Xaml）を出力へ置くようにした（実行時は GAC が優先されるのでテストの動作は変わらない）。手元の実測で本体（16,044 行）が計測に入ることを確かめた
