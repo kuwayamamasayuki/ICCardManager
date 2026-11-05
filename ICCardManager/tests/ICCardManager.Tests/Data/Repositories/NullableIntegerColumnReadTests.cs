@@ -246,6 +246,149 @@ public class NullableIntegerColumnReadTests : IDisposable
 
     #endregion
 
+    #region 絞り込み・書き込みの条件も同じ解釈にそろっていること
+
+    // 読み取りで NULL を既定値（偽）として扱った以上、SQL の条件（WHERE 列 = 0）も NULL を 0 として扱わないと、
+    // 「未貸出・未削除と表示されるのに、削除・払い戻し・取り消しが何度やっても競合で失敗する」状態になる（#1759 の誤った名指し）。
+
+    [Fact]
+    public async Task 貸出状態と払戻状態がNULLの交通系ICカードは貸出可能な一覧に並び貸出も削除もできること()
+    {
+        await InsertCardAsync();
+        Execute("UPDATE ic_card SET is_lent = NULL, is_refunded = NULL WHERE card_idm = @idm", CardIdm);
+
+        (await _cardRepository.GetAvailableAsync(bypassCache: true)).Should().ContainSingle(c => c.CardIdm == CardIdm);
+        (await _cardRepository.UpdateLentStatusAsync(CardIdm, true, new DateTime(2026, 4, 10, 9, 0, 0), null))
+            .Should().BeTrue("払戻状態が NULL のカードは未払戻として貸し出せる");
+
+        Execute("UPDATE ic_card SET is_lent = NULL WHERE card_idm = @idm", CardIdm);
+        (await _cardRepository.DeleteAsync(CardIdm)).Should().Be(CardOperationResult.Success);
+        (await _cardRepository.GetByIdmAsync(CardIdm, includeDeleted: true))!.IsDeleted.Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task 貸出状態がNULLの交通系ICカードは払い戻しできること()
+    {
+        await InsertCardAsync();
+        Execute("UPDATE ic_card SET is_lent = NULL, is_refunded = NULL WHERE card_idm = @idm", CardIdm);
+
+        var result = await _cardRepository.SetRefundedAsync(CardIdm, new DateTime(2026, 4, 10, 9, 0, 0), null);
+
+        result.Should().Be(CardOperationResult.Success);
+        (await _cardRepository.GetByIdmAsync(CardIdm))!.IsRefunded.Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task 削除フラグがNULLの交通系ICカードは通常の一覧と単票に並び編集できること()
+    {
+        await InsertCardAsync();
+        Execute("UPDATE ic_card SET is_deleted = NULL WHERE card_idm = @idm", CardIdm);
+
+        (await _cardRepository.GetAllAsync()).Should().ContainSingle(c => c.CardIdm == CardIdm);
+        var card = await _cardRepository.GetByIdmAsync(CardIdm);
+        card.Should().NotBeNull();
+
+        card!.Note = "編集後";
+        (await _cardRepository.UpdateAsync(card)).Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task 貸出中や削除済みの値が入っていれば従来どおり絞り込まれ削除も払い戻しもできないこと()
+    {
+        // 対の表明: 条件を丸ごと外した実装（何でも削除・払い戻しできる、削除済みも一覧に並ぶ）を落とす
+        await InsertCardAsync();
+        Execute("UPDATE ic_card SET is_lent = 1 WHERE card_idm = @idm", CardIdm);
+
+        (await _cardRepository.GetAvailableAsync(bypassCache: true)).Should().BeEmpty();
+        (await _cardRepository.DeleteAsync(CardIdm)).Should().Be(CardOperationResult.CardIsLent);
+        (await _cardRepository.SetRefundedAsync(CardIdm, new DateTime(2026, 4, 10, 9, 0, 0), null))
+            .Should().Be(CardOperationResult.CardIsLent);
+
+        Execute("UPDATE ic_card SET is_lent = 0, is_deleted = 1 WHERE card_idm = @idm", CardIdm);
+        (await _cardRepository.GetAllAsync()).Should().BeEmpty();
+        (await _cardRepository.GetByIdmAsync(CardIdm)).Should().BeNull();
+    }
+
+    [Fact]
+    public async Task 削除フラグがNULLの職員は通常の一覧と単票に並び編集も削除もできること()
+    {
+        await InsertStaffAsync();
+        Execute("UPDATE staff SET is_deleted = NULL WHERE staff_idm = @idm", StaffIdm);
+
+        (await _staffRepository.GetAllAsync()).Should().ContainSingle(s => s.StaffIdm == StaffIdm);
+        (await _staffRepository.HasActiveStaffAsync()).Should().BeTrue();
+        var staff = await _staffRepository.GetByIdmAsync(StaffIdm);
+        staff.Should().NotBeNull();
+
+        staff!.Note = "編集後";
+        (await _staffRepository.UpdateAsync(staff)).Should().BeTrue();
+        (await _staffRepository.DeleteAsync(StaffIdm)).Should().BeTrue();
+        (await _staffRepository.GetByIdmAsync(StaffIdm, includeDeleted: true))!.IsDeleted.Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task 削除済みの職員は従来どおり一覧に並ばず削除もできないこと()
+    {
+        await InsertStaffAsync();
+        Execute("UPDATE staff SET is_deleted = 1 WHERE staff_idm = @idm", StaffIdm);
+
+        (await _staffRepository.GetAllAsync()).Should().BeEmpty();
+        (await _staffRepository.HasActiveStaffAsync()).Should().BeFalse();
+        (await _staffRepository.DeleteAsync(StaffIdm)).Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task 取消済みフラグがNULLの統合履歴は取り消し済みにでき取消済みなら競合になること()
+    {
+        await InsertCardAsync();
+        var ledgerId = await InsertLedgerWithDetailAsync();
+        await _ledgerRepository.SaveMergeHistoryAsync(ledgerId, "統合A", "{}");
+        await _ledgerRepository.SaveMergeHistoryAsync(ledgerId, "統合B", "{}");
+        Execute("UPDATE ledger_merge_history SET is_undone = NULL WHERE description = '統合A'", null);
+        Execute("UPDATE ledger_merge_history SET is_undone = 1 WHERE description = '統合B'", null);
+        var histories = await _ledgerRepository.GetMergeHistoriesAsync(undoneOnly: false);
+        var idA = histories.Single(h => h.Description == "統合A").Id;
+        var idB = histories.Single(h => h.Description == "統合B").Id;
+
+        (await _ledgerRepository.MarkMergeHistoryUndoneAsync(idA)).Should().BeTrue("NULL は未取消として取り消せる");
+        (await _ledgerRepository.MarkMergeHistoryUndoneAsync(idB)).Should().BeFalse("取消済みは従来どおり競合");
+
+        (await _ledgerRepository.GetMergeHistoriesAsync(undoneOnly: true))
+            .Should().Contain(h => h.Id == idA);
+    }
+
+    [Fact]
+    public async Task 取消済みフラグがNULLの後の統合は未取消として前の統合の取り消しを止めること()
+    {
+        await InsertCardAsync();
+        var ledgerId = await InsertLedgerWithDetailAsync();
+        await _ledgerRepository.SaveMergeHistoryAsync(ledgerId, "統合A", "{}");
+        await _ledgerRepository.SaveMergeHistoryAsync(ledgerId, "統合B", "{}");
+        var histories = await _ledgerRepository.GetMergeHistoriesAsync(undoneOnly: false);
+        var idA = histories.Single(h => h.Description == "統合A").Id;
+
+        // 後の統合 B が NULL（一覧では未取消と表示される）→ A の取り消しは止まる
+        Execute("UPDATE ledger_merge_history SET is_undone = NULL WHERE description = '統合B'", null);
+        bool laterWhenNull;
+        using (var scope = await _dbContext.BeginTransactionAsync())
+        {
+            laterWhenNull = await _ledgerRepository.HasLaterUndoableMergeOnSameTargetAsync(idA, ledgerId, scope.Transaction);
+        }
+
+        // 対の表明: B が取消済みなら止めない
+        Execute("UPDATE ledger_merge_history SET is_undone = 1 WHERE description = '統合B'", null);
+        bool laterWhenUndone;
+        using (var scope = await _dbContext.BeginTransactionAsync())
+        {
+            laterWhenUndone = await _ledgerRepository.HasLaterUndoableMergeOnSameTargetAsync(idA, ledgerId, scope.Transaction);
+        }
+
+        laterWhenNull.Should().BeTrue();
+        laterWhenUndone.Should().BeFalse();
+    }
+
+    #endregion
+
     #region ヘルパー
 
     private Task<bool> InsertCardAsync() => _cardRepository.InsertAsync(new IcCard

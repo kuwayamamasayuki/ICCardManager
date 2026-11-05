@@ -65,7 +65,7 @@ namespace ICCardManager.Data.Repositories
             using var command = connection.CreateCommand();
             command.CommandText = @"SELECT staff_idm, name, number, note, is_deleted, deleted_at
 FROM staff
-WHERE is_deleted = 0
+WHERE (is_deleted = 0 OR is_deleted IS NULL)
 ORDER BY name";
 
             using var reader = await command.ExecuteReaderAsync().ConfigureAwait(false);
@@ -111,7 +111,7 @@ FROM staff
 WHERE staff_idm = @staffIdm"
                 : @"SELECT staff_idm, name, number, note, is_deleted, deleted_at
 FROM staff
-WHERE staff_idm = @staffIdm AND is_deleted = 0";
+WHERE staff_idm = @staffIdm AND (is_deleted = 0 OR is_deleted IS NULL)";
 
             command.Parameters.AddWithValue("@staffIdm", staffIdm);
 
@@ -217,7 +217,7 @@ VALUES (@staffIdm, @name, @number, @note, 0, NULL)";
             command.Transaction = transaction;
             command.CommandText = @"UPDATE staff
 SET name = @name, number = @number, note = @note
-WHERE staff_idm = @staffIdm AND is_deleted = 0";
+WHERE staff_idm = @staffIdm AND (is_deleted = 0 OR is_deleted IS NULL)";
 
             command.Parameters.AddWithValue("@staffIdm", staff.StaffIdm);
             command.Parameters.AddWithValue("@name", staff.Name);
@@ -263,7 +263,7 @@ WHERE staff_idm = @staffIdm AND is_deleted = 0";
             command.Transaction = transaction;
             command.CommandText = @"UPDATE staff
 SET is_deleted = 1, deleted_at = datetime('now', 'localtime')
-WHERE staff_idm = @staffIdm AND is_deleted = 0";
+WHERE staff_idm = @staffIdm AND (is_deleted = 0 OR is_deleted IS NULL)";
 
             command.Parameters.AddWithValue("@staffIdm", staffIdm);
 
@@ -352,7 +352,7 @@ WHERE staff_idm = @staffIdm AND is_deleted = 1";
             var connection = lease.Connection;
 
             using var command = connection.CreateCommand();
-            command.CommandText = "SELECT EXISTS(SELECT 1 FROM staff WHERE is_deleted = 0)";
+            command.CommandText = "SELECT EXISTS(SELECT 1 FROM staff WHERE (is_deleted = 0 OR is_deleted IS NULL))";
 
             var result = await command.ExecuteScalarAsync().ConfigureAwait(false);
             return Convert.ToInt32(result, CultureInfo.InvariantCulture) == 1;

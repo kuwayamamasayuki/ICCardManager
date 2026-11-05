@@ -2437,7 +2437,7 @@ WHERE id = @id";
                 return false;
             }
 
-            // income / expense / balance は NULL を許す列（Migration_001）。NULL は 0 として比べる
+            // income / expense は NULL を許す列（Migration_001。balance は NOT NULL）。NULL は 0 として比べる
             // （統合の UPDATE は常に非 NULL の値を SET するため、NULL なら統合後に書き換えられたことになり不一致で中止する）
             return reader.GetInt32OrDefault(0, 0) == expected.Income
                 && reader.GetInt32OrDefault(1, 0) == expected.Expense
@@ -2573,7 +2573,7 @@ VALUES (@mergedAt, @targetLedgerId, @description, @undoData)";
             // undo_data（JSON）は読まない。統合先の ID は target_ledger_id 列にもある（SaveMergeHistoryAsync）
             command.CommandText = @"SELECT EXISTS (
     SELECT 1 FROM ledger_merge_history
-    WHERE target_ledger_id = @targetLedgerId AND is_undone = 0 AND id > @historyId)";
+    WHERE target_ledger_id = @targetLedgerId AND (is_undone = 0 OR is_undone IS NULL) AND id > @historyId)";
             command.Parameters.AddWithValue("@targetLedgerId", targetLedgerId);
             command.Parameters.AddWithValue("@historyId", historyId);
             return Convert.ToInt64(await command.ExecuteScalarAsync().ConfigureAwait(false), CultureInfo.InvariantCulture) == 1;
@@ -2587,7 +2587,7 @@ VALUES (@mergedAt, @targetLedgerId, @description, @undoData)";
             // 共有モードで 2 台が同じ履歴を同時に取り消すと、両方が「未取消」を読んでから書き込みに来る。
             // 後着の UPDATE を 0 行にして false を返し、呼び出し元が台帳の復元ごとロールバックすることで
             // 統合元の二重 INSERT を防ぐ。
-            command.CommandText = "UPDATE ledger_merge_history SET is_undone = 1 WHERE id = @id AND is_undone = 0";
+            command.CommandText = "UPDATE ledger_merge_history SET is_undone = 1 WHERE id = @id AND (is_undone = 0 OR is_undone IS NULL)";
             command.Parameters.AddWithValue("@id", historyId);
 
             var affected = await command.ExecuteNonQueryAsync().ConfigureAwait(false);

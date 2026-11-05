@@ -28,6 +28,15 @@ namespace ICCardManager.Data
     /// <c>NOT NULL</c> の列（<c>ledger.balance</c> / <c>companion_count</c> 等）や、NULL が別の意味を持つ列
     /// （<c>carryover_fiscal_year</c>・<c>ledger_detail.amount</c> は NULL のまま読む）には使わない。
     /// </para>
+    /// <para>
+    /// <b>SQL の条件も同じ解釈にそろえる</b>。NULL を偽と読むフラグを <c>WHERE 列 = 0</c> で絞ると、NULL の行は
+    /// 「未貸出・未削除」と表示されるのに一覧から漏れ、削除・払い戻し・取り消しの UPDATE は 0 行になって
+    /// 「他の PC が変更した」競合を何度でも報告する（#1759 の名指しが誤る）。そのため <c>ic_card</c>
+    /// （<c>is_deleted</c> / <c>is_lent</c> / <c>is_refunded</c>）・<c>staff.is_deleted</c>・
+    /// <c>ledger_merge_history.is_undone</c> の「= 0」の条件は <c>(列 = 0 OR 列 IS NULL)</c> と書く
+    /// （列を関数で包まない。#1834 / #1996）。「= 1」の条件は NULL を偽と読むのと一致するのでそのままでよい。
+    /// <c>ledger.is_lent_record = 0</c> の集計の条件は対象外（02_DB設計書 §3 の既知の制約）。
+    /// </para>
     /// </remarks>
     internal static class NullableColumnReader
     {
