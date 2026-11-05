@@ -97,6 +97,7 @@ public class CoverageInstrumentationPrerequisiteTests
             ("Sample.Sample(color)", typeof(ConsoleColor)),
             ("Sample.MaybeDispatch(priority)", typeof(DispatcherPriority)),
             ("Sample.LocalDefault(kind)", typeof(SampleKind)),
+            ("Sample.InDispatch(priority)", typeof(DispatcherPriority)),
             ("Sample.DefaultPriority", typeof(DispatcherPriority)),
         });
     }
@@ -171,6 +172,12 @@ public class CoverageInstrumentationPrerequisiteTests
 
     private static Type? AsEnum(Type type)
     {
+        // in / ref の引数（DispatcherPriority&）も、Cecil は要素の型をたどって解決する
+        if (type.IsByRef)
+        {
+            type = type.GetElementType()!;
+        }
+
         var underlying = Nullable.GetUnderlyingType(type) ?? type;
         return underlying.IsEnum ? underlying : null;
     }
@@ -232,6 +239,10 @@ public class CoverageInstrumentationPrerequisiteTests
         }
 
         public static void LocalDefault(SampleKind kind = SampleKind.Second)
+        {
+        }
+
+        public static void InDispatch(in DispatcherPriority priority = DispatcherPriority.Input)
         {
         }
 

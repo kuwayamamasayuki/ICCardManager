@@ -178,7 +178,7 @@ jobs:
           '|---|---|---|---|'
           "| 全体 | $($xml.coverage.'lines-valid') | $line% | $branch% |"
         )
-        $summary += $modules | ForEach-Object { "| $($_.Name) | $($_.Lines) | $($_.Line)% | $($_.Branch)% |" }
+        $summary += @($modules | ForEach-Object { "| $($_.Name) | $($_.Lines) | $($_.Line)% | $($_.Branch)% |" })
         $summary += ''
         foreach ($name in $missing) {
           $summary += "> ⚠️ 本体（$name）が計測されていません。上の数字は本体を表していません（Issue #2399）。"
