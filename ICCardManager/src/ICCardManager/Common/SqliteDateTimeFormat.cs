@@ -86,8 +86,20 @@ namespace ICCardManager.Common
         /// <summary>
         /// その日の終了時刻（23:59:59）のテキスト。期間検索の上限に使う。
         /// </summary>
+        /// <remarks>
+        /// Issue #2380: 「翌日の 0 時の 1 秒前」（<c>AddDays(1).AddSeconds(-1)</c>）として求めると、
+        /// <see cref="DateTime.MaxValue"/> の日（9999/12/31）では翌日が表現できず
+        /// <see cref="ArgumentOutOfRangeException"/> になる。その日の 0 時に <see cref="LastSecondOfDay"/> を足す形なら
+        /// 値域の端でも収まるので、「終了日なし」を <see cref="DateTime.MaxValue"/> で表す呼び出しも
+        /// 特別扱いなしで <c>9999-12-31 23:59:59</c>（どの保存値よりも後ろ）になる。
+        /// 操作ログの期間検索は上限を「終了日の翌日未満」で表すため、同じ端を null（上限なし）で避けている
+        /// （<c>OperationLogRepository.ToExclusiveUpperBoundText</c>。#2328）。
+        /// </remarks>
         public static string ToDayEndText(DateTime value)
-            => ToText(value.Date.AddDays(1).AddSeconds(-1));
+            => ToText(value.Date.Add(LastSecondOfDay));
+
+        /// <summary>その日の 0 時から、その日の最後の秒（23:59:59）までの長さ。</summary>
+        private static readonly TimeSpan LastSecondOfDay = new TimeSpan(23, 59, 59);
 
         /// <summary>
         /// DB の TEXT 列に入り得る書式（<see cref="ParseStored"/> / <see cref="TryParseStored"/> が受け付ける形）。
