@@ -97,7 +97,7 @@ namespace ICCardManager.Common
         /// </summary>
         /// <remarks>
         /// キャンセルに対応できる形にしてある。キャンセルされると、確認の終わりを待たずに
-        /// <see cref="OperationCanceledException"/> で戻る（走り出した確認そのものは中断できないが、上限付きで終わる。Issue #2383）。
+        /// <see cref="OperationCanceledException"/> で戻る（Issue #2383）。走り出した確認そのものは中断できず、応答しない共有ではその確認のスレッドが残り得るが、検証は上限で戻る（同じパスへの確認は進行中のものが終わるまで 1 本に限る）。
         /// ただし現在、トークンを渡す本番の呼び出し元は無い。
         /// </remarks>
         public static Task<ValidationResult> ValidateBackupPathAsync(
@@ -119,8 +119,9 @@ namespace ICCardManager.Common
         /// </para>
         /// <para>
         /// 呼び出しは設定の保存とバックアップ先の解決（利用者の操作か起動時）に限られ、呼ぶたびにスレッドを 1 本作っても
-        /// 足りる。検証の中のブロックし得る確認（UNC の到達確認・ドライブの準備確認・書き込み確認）はすべて上限付きなので、
-        /// 専用スレッドも上限で終わる。
+        /// 足りる。検証の中のブロックし得る確認（UNC の到達確認・ドライブの準備確認・書き込み確認）はすべて上限付きで待つので、
+        /// 検証全体を走らせる専用スレッドは上限で戻る。確認そのもののスレッド（専用スレッド）は中断できず、応答しない共有では残り得るが、
+        /// 同じパスへの確認は進行中のものが終わるまで 1 本に限るので、呼び直しのたびには増えない。
         /// </para>
         /// </remarks>
         internal static Task<ValidationResult> ValidateBackupPathAsync(
