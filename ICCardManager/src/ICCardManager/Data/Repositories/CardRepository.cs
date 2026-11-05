@@ -747,16 +747,16 @@ WHERE card_type = @cardType";
                 CardType = reader.GetString(1),
                 CardNumber = reader.GetString(2),
                 Note = reader.IsDBNull(3) ? null : reader.GetString(3),
-                IsDeleted = reader.GetInt32(4) == 1,
+                IsDeleted = reader.GetFlagOrFalse(4),
                 DeletedAt = reader.IsDBNull(5) ? null : SqliteDateTimeFormat.ParseStored(reader.GetString(5)),
-                IsLent = reader.GetInt32(6) == 1,
+                IsLent = reader.GetFlagOrFalse(6),
                 LastLentAt = reader.IsDBNull(7) ? null : SqliteDateTimeFormat.ParseStored(reader.GetString(7)),
                 LastLentStaff = reader.IsDBNull(8) ? null : reader.GetString(8),
-                StartingPageNumber = reader.IsDBNull(9) ? 1 : reader.GetInt32(9),
-                IsRefunded = reader.IsDBNull(10) ? false : reader.GetInt32(10) == 1,
+                StartingPageNumber = reader.GetInt32OrDefault(9, 1),
+                IsRefunded = reader.GetFlagOrFalse(10),
                 RefundedAt = reader.IsDBNull(11) ? null : SqliteDateTimeFormat.ParseStored(reader.GetString(11)),
-                CarryoverIncomeTotal = reader.IsDBNull(12) ? 0 : reader.GetInt32(12),
-                CarryoverExpenseTotal = reader.IsDBNull(13) ? 0 : reader.GetInt32(13),
+                CarryoverIncomeTotal = reader.GetInt32OrDefault(12, 0),
+                CarryoverExpenseTotal = reader.GetInt32OrDefault(13, 0),
                 CarryoverFiscalYear = reader.IsDBNull(14) ? (int?)null : reader.GetInt32(14)
             };
         }

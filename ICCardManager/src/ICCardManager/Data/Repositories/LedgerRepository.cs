@@ -1853,15 +1853,15 @@ ORDER BY ledger_id, use_date ASC, is_charge DESC, is_point_redemption DESC, id D
                 LenderIdm = reader.IsDBNull(2) ? null : reader.GetString(2),
                 Date = SqliteDateTimeFormat.ParseStored(reader.GetString(3)),
                 Summary = reader.GetString(4),
-                Income = reader.GetInt32(5),
-                Expense = reader.GetInt32(6),
+                Income = reader.GetInt32OrDefault(5, 0),
+                Expense = reader.GetInt32OrDefault(6, 0),
                 Balance = reader.GetInt32(7),
                 StaffName = reader.IsDBNull(8) ? null : reader.GetString(8),
                 Note = reader.IsDBNull(9) ? null : reader.GetString(9),
                 ReturnerIdm = reader.IsDBNull(10) ? null : reader.GetString(10),
                 LentAt = reader.IsDBNull(11) ? null : SqliteDateTimeFormat.ParseStored(reader.GetString(11)),
                 ReturnedAt = reader.IsDBNull(12) ? null : SqliteDateTimeFormat.ParseStored(reader.GetString(12)),
-                IsLentRecord = reader.GetInt32(13) == 1,
+                IsLentRecord = reader.GetFlagOrFalse(13),
                 CompanionCount = reader.GetInt32(14)
             };
         }
@@ -1878,15 +1878,15 @@ ORDER BY ledger_id, use_date ASC, is_charge DESC, is_point_redemption DESC, id D
                 LenderIdm = reader.IsDBNull(2) ? null : reader.GetString(2),
                 Date = SqliteDateTimeFormat.ParseStored(reader.GetString(3)),
                 Summary = reader.GetString(4),
-                Income = reader.GetInt32(5),
-                Expense = reader.GetInt32(6),
+                Income = reader.GetInt32OrDefault(5, 0),
+                Expense = reader.GetInt32OrDefault(6, 0),
                 Balance = reader.GetInt32(7),
                 StaffName = reader.IsDBNull(8) ? null : reader.GetString(8),
                 Note = reader.IsDBNull(9) ? null : reader.GetString(9),
                 ReturnerIdm = reader.IsDBNull(10) ? null : reader.GetString(10),
                 LentAt = reader.IsDBNull(11) ? null : SqliteDateTimeFormat.ParseStored(reader.GetString(11)),
                 ReturnedAt = reader.IsDBNull(12) ? null : SqliteDateTimeFormat.ParseStored(reader.GetString(12)),
-                IsLentRecord = reader.GetInt32(13) == 1,
+                IsLentRecord = reader.GetFlagOrFalse(13),
                 CompanionCount = reader.GetInt32(14),
                 DetailCount = reader.GetInt32(15)
             };
@@ -1910,9 +1910,9 @@ ORDER BY ledger_id, use_date ASC, is_charge DESC, is_point_redemption DESC, id D
                 BusStops = reader.IsDBNull(4) ? null : reader.GetString(4),
                 Amount = reader.IsDBNull(5) ? null : reader.GetInt32(5),
                 Balance = reader.IsDBNull(6) ? null : reader.GetInt32(6),
-                IsCharge = reader.GetInt32(7) == 1,
-                IsPointRedemption = !reader.IsDBNull(8) && reader.GetInt32(8) == 1,
-                IsBus = reader.GetInt32(9) == 1,
+                IsCharge = reader.GetFlagOrFalse(7),
+                IsPointRedemption = reader.GetFlagOrFalse(8),
+                IsBus = reader.GetFlagOrFalse(9),
                 GroupId = reader.IsDBNull(10) ? null : reader.GetInt32(10),
                 // Issue #548: ledger_detail.id を使って正しい時系列順を保持
                 SequenceNumber = reader.IsDBNull(11) ? 0 : (int)reader.GetInt64(11)
@@ -1956,7 +1956,7 @@ WHERE l.card_idm = @cardIdm AND l.date < @fromDate AND d.use_date >= @fromDate";
             {
                 var useDate = reader.IsDBNull(0) ? (DateTime?)null : SqliteDateTimeFormat.ParseStored(reader.GetString(0));
                 var balance = reader.IsDBNull(1) ? (int?)null : reader.GetInt32(1);
-                var isCharge = reader.GetInt32(2) == 1;
+                var isCharge = reader.GetFlagOrFalse(2);
                 result.Add((useDate, balance, isCharge));
             }
 
@@ -2000,8 +2000,8 @@ WHERE card_idm IN ({string.Join(", ", parameters)})";
                 var cardIdm = reader.GetString(0);
                 var date = SqliteDateTimeFormat.ParseStored(reader.GetString(1));
                 var summary = reader.GetString(2);
-                var income = reader.GetInt32(3);
-                var expense = reader.GetInt32(4);
+                var income = reader.GetInt32OrDefault(3, 0);
+                var expense = reader.GetInt32OrDefault(4, 0);
                 var balance = reader.GetInt32(5);
                 result.Add((cardIdm, date, summary, income, expense, balance));
             }
@@ -2439,10 +2439,9 @@ WHERE id = @id";
 
             // income / expense / balance は NULL を許す列（Migration_001）。NULL は 0 として比べる
             // （統合の UPDATE は常に非 NULL の値を SET するため、NULL なら統合後に書き換えられたことになり不一致で中止する）
-            int ReadOrZero(int ordinal) => reader.IsDBNull(ordinal) ? 0 : reader.GetInt32(ordinal);
-            return ReadOrZero(0) == expected.Income
-                && ReadOrZero(1) == expected.Expense
-                && ReadOrZero(2) == expected.Balance;
+            return reader.GetInt32OrDefault(0, 0) == expected.Income
+                && reader.GetInt32OrDefault(1, 0) == expected.Expense
+                && reader.GetInt32OrDefault(2, 0) == expected.Balance;
         }
 
         /// <summary>
@@ -2535,7 +2534,7 @@ VALUES (@mergedAt, @targetLedgerId, @description, @undoData)";
                     reader.GetInt32(2),
                     reader.GetString(3),
                     reader.GetString(4),
-                    reader.GetInt32(5) == 1
+                    reader.GetFlagOrFalse(5)
                 ));
             }
 
