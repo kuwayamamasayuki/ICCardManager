@@ -399,6 +399,18 @@ namespace ICCardManager.UITests.Infrastructure
         [NotUiaName]
         public const string LowBalanceWarningMarker = "（しきい値:";
 
+        /// <summary>
+        /// 更新の案内（<c>WarningService</c> の <c>NewVersionAvailable</c>）の文言に含まれる語（Issue #2394）。
+        /// 警告の行は TextBlock なので、UIA Name が Text へフォールバックして一致する。
+        /// </summary>
+        /// <remarks>
+        /// 更新の案内は DB と同じフォルダーの <c>latest_version.txt</c> から作られる。UI テストの間は
+        /// <c>UiTestDatabaseGuard</c> がこのファイルを退避して取り除くので、撮影画像に出てはならない
+        /// （投入データではなく、ガードが支配する環境由来の警告）。
+        /// </remarks>
+        [NotUiaName]
+        public const string NewVersionNoticeMarker = "新しいバージョン";
+
         // ── タイムアウト（秒） ────────────────────────────
         public const int AppLaunchTimeoutSeconds = 30;
         public const int DialogOpenTimeoutSeconds = 10;

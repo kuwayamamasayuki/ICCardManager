@@ -7,7 +7,7 @@ using Xunit;
 namespace ICCardManager.UITests.Tests
 {
     /// <summary>
-    /// UI テストが開発機の既存 DB を壊さないことの検証（Issue #2062 / #2290）。
+    /// UI テストが開発機の既存 DB と更新通知ファイルを壊さないことの検証（Issue #2062 / #2290 / #2394）。
     /// アプリは起動せず、一時フォルダー上でファイルの退避・復元だけを検証する。
     /// GUI 不要のため Category=UI を付けず、CI でも実行される。
     /// UITests はソリューション単位の実行から外れているため、CI は ci.yml の
@@ -40,6 +40,14 @@ namespace ICCardManager.UITests.Tests
         private string DbPath => Path.Combine(_directory, UiTestDatabaseGuard.DatabaseFileName);
 
         private string PathOf(string fileName) => Path.Combine(_directory, fileName);
+
+        private string LatestVersionPath => Path.Combine(_directory, UiTestDatabaseGuard.LatestVersionFileName);
+
+        /// <summary>開発機に残っていた更新通知ファイルの内容（Issue #2394 の実例）。</summary>
+        private const string OriginalLatestVersion = "99.0.0";
+
+        /// <summary>起動時タスク（Issue #2149）がテスト中に書く自バージョン。</summary>
+        private const string AppWrittenLatestVersion = "2.20.0";
 
         #region LaunchWithSeed の手順
 
@@ -371,6 +379,126 @@ namespace ICCardManager.UITests.Tests
 
         #endregion
 
+        #region 更新案内ファイル（latest_version.txt、Issue #2394）
+
+        [Fact]
+        public void LaunchWithSeed_更新案内ファイルがあるとき_起動中は無く終了後に元の内容へ戻ること()
+        {
+            // Issue #2394: 開発機に残った latest_version.txt（99.0.0）が、撮影画像に「新しいバージョン 99.0.0 が公開されています」を写していた
+            File.WriteAllText(DbPath, OriginalContent);
+            File.WriteAllText(LatestVersionPath, OriginalLatestVersion);
+            bool? existsWhileRunning = null;
+
+            using (RunSeededLaunch(onLaunched: () =>
+                   {
+                       existsWhileRunning = File.Exists(LatestVersionPath);
+                       // 起動時タスク（Issue #2149）は、ファイルが無ければ自バージョンを書く
+                       File.WriteAllText(LatestVersionPath, AppWrittenLatestVersion);
+                   }))
+            {
+            }
+
+            existsWhileRunning.Should().BeFalse("撮影中のアプリに開発機の更新案内を読ませない");
+            File.ReadAllText(LatestVersionPath).Should().Be(OriginalLatestVersion,
+                "テスト中にアプリが書いた自バージョンを残さず、元の内容へ戻す");
+            Directory.GetFiles(_directory).Should().BeEquivalentTo(new[] { DbPath, LatestVersionPath }, "退避ファイル・印を残さない");
+        }
+
+        [Fact]
+        public void LaunchWithSeed_更新案内ファイルが無いとき_テストのアプリが書いたファイルを残さないこと()
+        {
+            File.WriteAllText(DbPath, OriginalContent);
+
+            using (RunSeededLaunch(onLaunched: () => File.WriteAllText(LatestVersionPath, AppWrittenLatestVersion)))
+            {
+            }
+
+            Directory.GetFiles(_directory).Should().BeEquivalentTo(new[] { DbPath },
+                "残すと、開発機に無かった更新通知ファイルが以後の起動の判定に使われる");
+        }
+
+        [Fact]
+        public void Launch_DBが無くても_更新案内ファイルは退避して元へ戻すこと()
+        {
+            // AppFixture.Launch の手順（Acquire → 起動 → Restore）。DB の有無と更新案内ファイルの有無は独立
+            File.WriteAllText(LatestVersionPath, OriginalLatestVersion);
+
+            var guard = UiTestDatabaseGuard.Acquire(_directory);
+            File.Exists(LatestVersionPath).Should().BeFalse();
+            File.WriteAllText(DbPath, SeededContent);
+            File.WriteAllText(LatestVersionPath, AppWrittenLatestVersion);
+            guard.Restore();
+
+            Directory.GetFiles(_directory).Should().BeEquivalentTo(new[] { LatestVersionPath });
+            File.ReadAllText(LatestVersionPath).Should().Be(OriginalLatestVersion);
+        }
+
+        [Fact]
+        public void Acquire_更新案内ファイルを退避したまま中断していたとき_元の内容へ戻すこと()
+        {
+            File.WriteAllText(DbPath, OriginalContent);
+            File.WriteAllText(LatestVersionPath, OriginalLatestVersion);
+            UiTestDatabaseGuard.Acquire(_directory);
+            File.WriteAllText(LatestVersionPath, AppWrittenLatestVersion);
+
+            var guard = UiTestDatabaseGuard.Acquire(_directory);
+            File.Exists(LatestVersionPath).Should().BeFalse("前回の退避を書き戻したうえで、今回も退避する");
+            guard.Restore();
+
+            File.ReadAllText(LatestVersionPath).Should().Be(OriginalLatestVersion,
+                "退避ファイルをテストのアプリが書いた内容で上書きしない");
+            Directory.GetFiles(_directory).Should().BeEquivalentTo(new[] { DbPath, LatestVersionPath });
+        }
+
+        [Fact]
+        public void Acquire_更新案内ファイルが無いまま中断していたとき_テストのアプリが書いたファイルを消すこと()
+        {
+            File.WriteAllText(DbPath, OriginalContent);
+            UiTestDatabaseGuard.Acquire(_directory);
+            File.WriteAllText(LatestVersionPath, AppWrittenLatestVersion);
+
+            UiTestDatabaseGuard.Acquire(_directory).Restore();
+
+            Directory.GetFiles(_directory).Should().BeEquivalentTo(new[] { DbPath });
+        }
+
+        [Fact]
+        public void DeleteWorkingDatabase_退避の後にDBが開かれたとき_更新案内ファイルも元へ戻すこと()
+        {
+            // DB の退避を捨てる経路（Issue #2290）でも、退避した更新案内ファイルは捨てずに戻す
+            File.WriteAllText(DbPath, OriginalContent);
+            File.WriteAllText(LatestVersionPath, OriginalLatestVersion);
+            var guard = UiTestDatabaseGuard.Acquire(_directory, maxAttempts: 1);
+
+            using (OpenLikeSqlite(DbPath))
+            {
+                Action act = () => guard.DeleteWorkingDatabase();
+                act.Should().Throw<IOException>();
+            }
+
+            File.ReadAllText(LatestVersionPath).Should().Be(OriginalLatestVersion,
+                "退避を捨てたガードの Restore は何もしないので、ここで戻さないと開発機の更新通知ファイルが消えたままになる");
+            Directory.GetFiles(_directory).Should().BeEquivalentTo(new[] { DbPath, LatestVersionPath });
+        }
+
+        [Fact]
+        public void Acquire_DBを別のプロセスが開いているとき_更新案内ファイルにも触れないこと()
+        {
+            File.WriteAllText(DbPath, OriginalContent);
+            File.WriteAllText(LatestVersionPath, OriginalLatestVersion);
+
+            using (OpenLikeSqlite(DbPath))
+            {
+                Action act = () => UiTestDatabaseGuard.Acquire(_directory, maxAttempts: 1);
+                act.Should().Throw<InvalidOperationException>();
+            }
+
+            Directory.GetFiles(_directory).Should().BeEquivalentTo(new[] { DbPath, LatestVersionPath });
+            File.ReadAllText(LatestVersionPath).Should().Be(OriginalLatestVersion);
+        }
+
+        #endregion
+
         #region 付随ファイル・設定
 
         [Fact]
@@ -439,7 +567,13 @@ namespace ICCardManager.UITests.Tests
         /// <summary>
         /// アプリの代わりに DB ファイルを書き換える <see cref="AppFixture.LaunchWithSeedCore"/> を実行する。
         /// </summary>
-        private FakeFixture RunSeededLaunch(Action<string>? seedDatabase = null, int maxAttempts = UiTestDatabaseGuard.DefaultMaxAttempts)
+        /// <param name="seedDatabase">投入。null なら <see cref="SeededContent"/> を書く。</param>
+        /// <param name="maxAttempts">ファイルが使用中のときの試行回数。</param>
+        /// <param name="onLaunched">本起動の直後（アプリが起動している間）に行うこと。</param>
+        private FakeFixture RunSeededLaunch(
+            Action<string>? seedDatabase = null,
+            int maxAttempts = UiTestDatabaseGuard.DefaultMaxAttempts,
+            Action? onLaunched = null)
         {
             return AppFixture.LaunchWithSeedCore(
                 _directory,
@@ -450,7 +584,11 @@ namespace ICCardManager.UITests.Tests
                     return new FakeFixture(ownedGuard: null);
                 },
                 seedDatabase: seedDatabase ?? (path => File.WriteAllText(path, SeededContent)),
-                launchOwningGuard: guard => new FakeFixture(guard),
+                launchOwningGuard: guard =>
+                {
+                    onLaunched?.Invoke();
+                    return new FakeFixture(guard);
+                },
                 maxAttempts: maxAttempts);
         }
 

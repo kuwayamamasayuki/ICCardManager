@@ -65,6 +65,7 @@ namespace ICCardManager.UITests.Tests
             // これが無いと、投入データが警告を消しきれていなくても 2 枚が同じ画像のまま緑になる
             // （実際、貸出中カードの残額を引き上げ忘れた初版はこの形だった。コードレビューで検出）
             RequireNoLowBalanceWarning(page);
+            RequireNoNewVersionNotice(page);
 
             var path = ScreenshotHelper.Capture(fixture.MainWindow, "main.png");
             File.Exists(path).Should().BeTrue();
@@ -83,6 +84,8 @@ namespace ICCardManager.UITests.Tests
             // 警告は残額チェック（WarningService）の非同期実行後に現れる。出現を待たずに撮ると
             // 「警告つき」と名乗る画像に警告が写らない
             WaitForWarningArea(page);
+            // 「システム警告つき」の説明図に、投入データ以外の警告（開発機の更新案内）を写さない（Issue #2394）
+            RequireNoNewVersionNotice(page);
 
             File.Exists(ScreenshotHelper.Capture(fixture.MainWindow, "main_with_warnings.png")).Should().BeTrue();
         }
@@ -445,6 +448,8 @@ namespace ICCardManager.UITests.Tests
         /// <b>投入データでは作れない環境由来の警告</b>も並ぶため、それを含めて禁止すると、そうした環境では
         /// <c>main.png</c> が原理的に撮れなくなる。投入データが支配する残額不足だけを見る。
         /// 環境由来の警告が写り込んでいないかは差し替え前の目視で確かめる（<c>docs/screenshots/README.md</c>）。
+        /// ただし更新の案内は、UI テストのガードが <c>latest_version.txt</c> を退避して支配するので
+        /// <see cref="RequireNoNewVersionNotice"/> で表明する（Issue #2394）。
         /// </para>
         /// </remarks>
         private static void RequireNoLowBalanceWarning(MainWindowPage page)
@@ -457,6 +462,27 @@ namespace ICCardManager.UITests.Tests
             warnings.Should().BeEmpty(
                 "残額不足の警告が出ていないこと（しきい値以下の残額のカードが投入データに残っていないこと）。" +
                 $"出ている警告: {string.Join(" / ", warnings)}");
+        }
+
+        /// <summary>
+        /// 更新の案内（「新しいバージョン … が公開されています」）が出ていないことを確かめる（Issue #2394）。
+        /// </summary>
+        /// <remarks>
+        /// 更新の案内は DB と同じフォルダーの <c>latest_version.txt</c> から作られる。開発機に残った 99.0.0 の
+        /// ファイルが、マニュアル用の画像に実在しない版への更新案内を写していた。UI テストの間は
+        /// <c>UiTestDatabaseGuard</c> がこのファイルを退避して取り除くので、出ていればガードの退行である。
+        /// 呼ぶのはカード一覧の行が現れた後（＝起動時の更新チェックと残額チェックが済んだ後）にすること。
+        /// </remarks>
+        private static void RequireNoNewVersionNotice(MainWindowPage page)
+        {
+            var notices = page.Window.FindAllDescendants()
+                .Select(e => e.Name)
+                .Where(n => !string.IsNullOrWhiteSpace(n) && n.Contains(TestConstants.NewVersionNoticeMarker))
+                .ToArray();
+
+            notices.Should().BeEmpty(
+                "更新の案内が出ていないこと（UI テストの間は latest_version.txt を退避しているため）。" +
+                $"出ている案内: {string.Join(" / ", notices)}");
         }
 
         /// <summary>

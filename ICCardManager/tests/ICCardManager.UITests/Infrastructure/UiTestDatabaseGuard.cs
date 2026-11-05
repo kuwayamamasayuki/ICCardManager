@@ -7,6 +7,7 @@ namespace ICCardManager.UITests.Infrastructure
     /// <summary>
     /// UI テストが開発機の既存 DB（<c>%ProgramData%\ICCardManager\iccard.db</c>）を壊さないよう、
     /// 退避と復元を 1 か所で受け持つ（Issue #2062）。
+    /// DB と同じフォルダーの更新通知ファイル（<c>latest_version.txt</c>）も同じ規約で退避する（Issue #2394）。
     /// </summary>
     /// <remarks>
     /// <para>
@@ -31,6 +32,14 @@ namespace ICCardManager.UITests.Infrastructure
 
         /// <summary>本体が DB の保存先を読む設定ファイル（<c>AppConfigFiles.DatabaseConfigPath</c> と同じ名前）。</summary>
         internal const string DatabaseConfigFileName = "database_config.txt";
+
+        /// <summary>
+        /// 更新通知ファイル（本体の <c>UpdateNotificationService.LatestVersionFileName</c> と同じ名前。DB と同じフォルダーに置かれる）。
+        /// </summary>
+        internal const string LatestVersionFileName = "latest_version.txt";
+
+        /// <summary>元の更新通知ファイルが無かったことを示す印。中断後の回復で、テスト中のアプリが書いたファイルを消すために使う。</summary>
+        internal const string LatestVersionAbsentMarkerFileName = LatestVersionFileName + ".uitest-absent";
 
         /// <summary>旧実装（#2062 以前）の <c>LaunchWithSeed</c> が中断時に残し得た退避ファイル。</summary>
         internal static readonly string LegacySeededOriginalFileName = DatabaseFileName + BackupSuffix + ".seeded-original";
@@ -102,6 +111,8 @@ namespace ICCardManager.UITests.Infrastructure
                 File.WriteAllText(guard.PathOf(AbsentMarkerFileName), string.Empty);
             }
 
+            guard.SetAsideLatestVersionFile();
+
             return guard;
         }
 
@@ -169,6 +180,7 @@ namespace ICCardManager.UITests.Infrastructure
             }
 
             RestoreFromBackup();
+            RestoreLatestVersionFile();
             _restored = true;
         }
 
@@ -189,6 +201,10 @@ namespace ICCardManager.UITests.Infrastructure
             {
                 DeleteWithRetry(BackupPathOf(name));
             }
+
+            // 更新通知ファイルは DB と違い、退避した時点で取り除いている（テストのアプリに読ませないため）。
+            // 退避を捨てると戻す機会が無くなるので、ここで戻す
+            RestoreLatestVersionFile();
         }
 
         /// <summary>
@@ -262,6 +278,64 @@ namespace ICCardManager.UITests.Infrastructure
             if (File.Exists(BackupPathOf(DatabaseFileName)) || File.Exists(PathOf(AbsentMarkerFileName)))
             {
                 RestoreFromBackup();
+            }
+
+            // DB の印とは独立に回復する（DB の有無と更新通知ファイルの有無は独立）
+            RestoreLatestVersionFile();
+        }
+
+        /// <summary>
+        /// Issue #2394: 更新通知ファイルを退避し、テストのアプリから見えないよう取り除く。
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// 本体は DB と同じフォルダーの <c>latest_version.txt</c> に自バージョンより新しい版が書かれていると、
+        /// システム警告エリアに「新しいバージョン … が公開されています」を出す。開発機に残ったこのファイル
+        /// （実例は 99.0.0）が、マニュアル用のスクリーンショットに写り込んでいた。撮影の結果を撮影機の状態に左右させない。
+        /// </para>
+        /// <para>
+        /// 退避の形は DB と同じ規約に揃える。元があれば <see cref="BackupSuffix"/> 付きの退避ファイル、
+        /// 無ければ印（<see cref="LatestVersionAbsentMarkerFileName"/>）を置き、どちらかが「退避が完了した」ことの印になる。
+        /// 本体の起動時タスク（Issue #2149）はファイルが無ければ自バージョンを書くので、復元ではテスト中に書かれたファイルを消してから戻す。
+        /// </para>
+        /// </remarks>
+        private void SetAsideLatestVersionFile()
+        {
+            var path = PathOf(LatestVersionFileName);
+            if (File.Exists(path))
+            {
+                // 退避ファイルを置き切ってから元を消す（途中で落ちても、印があれば次回の回復が書き戻す）
+                CopyWithRetry(path, BackupPathOf(LatestVersionFileName));
+                DeleteWithRetry(path);
+            }
+            else
+            {
+                File.WriteAllText(PathOf(LatestVersionAbsentMarkerFileName), string.Empty);
+            }
+        }
+
+        /// <summary>
+        /// 退避した更新通知ファイルを書き戻す（元が無かったなら、テスト中に書かれたファイルを消す）。退避が無ければ何もしない。
+        /// </summary>
+        /// <remarks>
+        /// 書き戻しに失敗したら退避ファイル（印）を消さずに例外を投げる。次回の <see cref="Acquire"/> が回復する。
+        /// </remarks>
+        private void RestoreLatestVersionFile()
+        {
+            var path = PathOf(LatestVersionFileName);
+            var backup = BackupPathOf(LatestVersionFileName);
+            var absentMarker = PathOf(LatestVersionAbsentMarkerFileName);
+
+            if (File.Exists(backup))
+            {
+                CopyWithRetry(backup, path);
+                DeleteWithRetry(backup);
+                DeleteWithRetry(absentMarker);
+            }
+            else if (File.Exists(absentMarker))
+            {
+                DeleteWithRetry(path);
+                DeleteWithRetry(absentMarker);
             }
         }
 
