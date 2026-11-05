@@ -14,14 +14,15 @@ using Xunit;
 namespace ICCardManager.Tests.Views;
 
 /// <summary>
-/// Issue #2369: bool しか扱えない Visibility コンバーターへ、bool 以外のプロパティを束縛しない規約テスト。
+/// Issue #2369: 特定の型しか扱えない Visibility コンバーターへ、その型以外のプロパティを束縛しない規約テスト。
 /// </summary>
 /// <remarks>
 /// <para>
-/// WPF 標準の <c>BooleanToVisibilityConverter</c> と自前の <see cref="BoolToVisibilityConverter"/> は、
-/// bool（<c>bool?</c> の箱詰めを含む）以外の値を受け取ると常に <see cref="Visibility.Collapsed"/> を返す。
+/// WPF 標準の <c>BooleanToVisibilityConverter</c> と自前の <see cref="BoolToVisibilityConverter"/> は bool
+/// （<c>bool?</c> の箱詰めを含む）以外を、<see cref="IntToVisibilityConverter"/> は int 以外を受け取ると、
+/// 例外も警告も出さずに常に <see cref="Visibility.Collapsed"/> を返す。
 /// string 型の <c>LastExportedFile</c>（操作ログの「開く」）・<c>LastBackupFile</c>（手動バックアップの「作成先」）・
-/// <c>IncomeDisplay</c> / <c>ExpenseDisplay</c>（利用履歴詳細の見出しの金額）を束縛していたため、値が入っても表示されなかった。
+/// <c>IncomeDisplay</c> / <c>ExpenseDisplay</c>（利用履歴詳細の見出しの金額）を bool 用へ束縛していたため、値が入っても表示されなかった。
 /// 同じ形は #1410（int の <c>CreatedFiles.Count</c>）でも起きており、個別に直すだけでは再発する。
 /// </para>
 /// <para>
@@ -30,43 +31,58 @@ namespace ICCardManager.Tests.Views;
 /// 既知のプロパティ名を列挙する形にしないのは、新しい string プロパティを束縛したときに検出できないため。
 /// </para>
 /// <para>
-/// 解決できない束縛（<c>ElementName</c> / <c>RelativeSource</c>・添字・添付プロパティ・<c>d:DesignInstance</c> の無い画面）は
-/// 「検査できた」とみなさず赤にする（#1786「ガードは破れる全経路を列挙する」）。必要になったら、bool のプロパティを
-/// ViewModel に足して束縛するか、本テストの解決を広げること。
+/// 検査を素通りする経路を残さないため（#1786「ガードは破れる全経路を列挙する」）:
+/// ①解決できない束縛（<c>ElementName</c> / <c>RelativeSource</c>・添字・添付プロパティ・<c>d:DesignInstance</c> の無い画面）は
+/// 違反にする ②対象のキーへの参照の数と、束縛として解釈できた数を突き合わせ、解釈できなかった参照（未知の書き方）も違反にする。
+/// 必要になったら、許される型のプロパティを ViewModel に足して束縛するか、本テストの解釈を広げること。
+/// </para>
+/// <para>
+/// <b>近似の限界</b>: どの型が実際の DataContext かは見ず、到達できる型のうち <c>Path</c> を解決できたものすべてが
+/// 許される型であることを求める。DataTemplate の項目型に到達できない（ItemsSource が非ジェネリックの <c>IEnumerable</c>・
+/// <c>object</c> 等）とき、無関係な型が同じ名前の bool プロパティを持っていると見逃す。
 /// </para>
 /// </remarks>
-public class BoolToVisibilityBindingTypeConventionTests
+public class VisibilityConverterBindingTypeConventionTests
 {
     /// <summary>
-    /// bool 以外を常に Collapsed にするコンバーターの型（XAML の要素のローカル名, 名前空間の接頭辞が必要か）。
+    /// 特定の型以外を常に Collapsed にするコンバーター（XAML の要素のローカル名, 接頭辞が要るか → 許される型）。
     /// </summary>
     /// <remarks>
     /// 標準の型は既定の名前空間（接頭辞なし）、自前の型は <c>ICCardManager.Common</c>（接頭辞あり）で定義される。
-    /// 前提（bool 以外で Collapsed）は <see cref="前提_bool専用のコンバーターは文字列を受け取るとCollapsedを返すこと"/> が固定する。
+    /// 前提（許される型以外で Collapsed）は <see cref="前提_型の限られたコンバーターは文字列を受け取るとCollapsedを返すこと"/> が固定する。
+    /// Nullable の値は箱詰めで中身の型になるため <c>bool?</c> / <c>int?</c> も許す。
     /// </remarks>
-    private static readonly Regex BoolOnlyConverterDefinition = new(
-        @"<(?:(?<prefix>[A-Za-z_][\w]*):)?(?<type>BooleanToVisibilityConverter|BoolToVisibilityConverter)\b(?<attrs>[^>]*)>",
+    private static readonly Dictionary<(string Type, bool Prefixed), Type[]> TypedConverters = new()
+    {
+        [("BooleanToVisibilityConverter", false)] = new[] { typeof(bool), typeof(bool?) },
+        [("BoolToVisibilityConverter", true)] = new[] { typeof(bool), typeof(bool?) },
+        [("IntToVisibilityConverter", true)] = new[] { typeof(int), typeof(int?) },
+    };
+
+    private static readonly Regex ConverterDefinition = new(
+        @"<(?:(?<prefix>[A-Za-z_]\w*):)?(?<type>\w+Converter)\b(?<attrs>[^>]*)>",
         RegexOptions.Compiled);
 
     #region 本番の XAML
 
     [Fact]
-    public void bool専用のVisibilityコンバーターにはboolのプロパティだけを束縛すること()
+    public void 型の限られたVisibilityコンバーターには許される型のプロパティだけを束縛すること()
     {
         var files = FillForegroundPairs.EnumerateProductionXaml().ToList();
-        var keys = CollectBoolOnlyConverterKeys(files.Select(f => f.Text));
+        var keys = CollectTypedConverterKeys(files.Select(f => f.Text));
 
         var findings = files
             .SelectMany(f => Inspect(f.Name, f.Text, keys))
             .ToList();
 
-        // 空振りの検出: 本番には 70 件を超える束縛がある。走査が壊れて 0 件になったら赤にする
-        findings.Should().HaveCountGreaterThan(50, "BoolToVisibilityConverter の束縛を走査できていること");
+        // 空振りの検出: 走査が壊れて束縛を拾えなくなったら赤にする（本番の件数は多数。下限は余裕を持たせる）
+        findings.Count(f => f.IsAllowed).Should().BeGreaterThan(50, "型の限られたコンバーターの束縛を走査できていること");
 
-        var violations = findings.Where(f => !f.IsBool).Select(f => f.ToString()).ToList();
+        var violations = findings.Where(f => !f.IsAllowed).Select(f => f.ToString()).ToList();
         violations.Should().BeEmpty(
-            "bool 以外の値は常に Collapsed になる（Issue #2369）。string なら StringToVisibilityConverter、" +
-            "件数なら bool の Has… プロパティ（#1410）を束縛すること。解決できない束縛は、bool のプロパティを ViewModel に足して束縛すること");
+            "許される型以外の値は常に Collapsed になる（Issue #2369）。string なら StringToVisibilityConverter、" +
+            "件数なら bool の Has… プロパティ（#1410）を束縛すること。解決・解釈できない束縛は、許される型のプロパティを ViewModel に足して" +
+            "「{Binding Path, Converter={StaticResource Key}}」の形で束縛すること");
     }
 
     #endregion
@@ -82,14 +98,15 @@ public class BoolToVisibilityBindingTypeConventionTests
         "        d:DataContext=\"{d:DesignInstance Type=s:BoolVisibilitySampleViewModel}\">\n" +
         "  <Window.Resources>\n" +
         "    <BooleanToVisibilityConverter x:Key=\"BoolToVisibilityConverter\"/>\n" +
-        "    <conv:BoolToVisibilityConverter x:Key=\"CustomBoolToVisibility\"/>\n" +
+        "    <conv:BoolToVisibilityConverter x:Key='CustomBoolToVisibility'/>\n" +
+        "    <conv:IntToVisibilityConverter x:Key=\"IntToVisibilityConverter\"/>\n" +
         "    <conv:StringToVisibilityConverter x:Key=\"StringToVisibilityConverter\"/>\n" +
         "  </Window.Resources>\n";
 
     private static List<BindingFinding> InspectSample(string body)
     {
         var xaml = SampleHeader + body + "</Window>\n";
-        return Inspect("Sample.xaml", xaml, CollectBoolOnlyConverterKeys(new[] { xaml }));
+        return Inspect("Sample.xaml", xaml, CollectTypedConverterKeys(new[] { xaml }));
     }
 
     [Fact]
@@ -99,17 +116,17 @@ public class BoolToVisibilityBindingTypeConventionTests
             "<Button Visibility=\"{Binding LastExportedFile, Converter={StaticResource BoolToVisibilityConverter}}\"/>\n");
 
         findings.Should().ContainSingle();
-        findings[0].IsBool.Should().BeFalse();
-        findings[0].ToString().Should().Contain("System.String").And.Contain("Sample.xaml:12");
+        findings[0].IsAllowed.Should().BeFalse();
+        findings[0].ToString().Should().Contain("System.String").And.Contain("Sample.xaml:13");
     }
 
     [Fact]
-    public void 検査_自前のBoolToVisibilityConverterも対象になること()
+    public void 検査_自前のBoolToVisibilityConverterも単引用符のキーも対象になること()
     {
         var findings = InspectSample(
             "<Button Visibility=\"{Binding LastExportedFile, Converter={StaticResource CustomBoolToVisibility}, ConverterParameter=invert}\"/>\n");
 
-        findings.Should().ContainSingle().Which.IsBool.Should().BeFalse();
+        findings.Should().ContainSingle().Which.IsAllowed.Should().BeFalse();
     }
 
     [Fact]
@@ -120,7 +137,18 @@ public class BoolToVisibilityBindingTypeConventionTests
             "<Button Visibility=\"{Binding Path=IsChecked, Mode=OneWay,\n" +
             "                     Converter={StaticResource BoolToVisibilityConverter}}\"/>\n");
 
-        findings.Should().HaveCount(2).And.OnlyContain(f => f.IsBool);
+        findings.Should().HaveCount(2).And.OnlyContain(f => f.IsAllowed);
+    }
+
+    [Fact]
+    public void 検査_IntToVisibilityConverterはintだけを許すこと()
+    {
+        var findings = InspectSample(
+            "<Button Visibility=\"{Binding Rows.Count, Converter={StaticResource IntToVisibilityConverter}}\"/>\n" +
+            "<Button Visibility=\"{Binding IsBusy, Converter={StaticResource IntToVisibilityConverter}}\"/>\n" +
+            "<Button Visibility=\"{Binding LastExportedFile, Converter={StaticResource IntToVisibilityConverter}}\"/>\n");
+
+        findings.Select(f => f.IsAllowed).Should().Equal(true, false, false);
     }
 
     [Fact]
@@ -135,7 +163,7 @@ public class BoolToVisibilityBindingTypeConventionTests
             // #1410 の形: int の Count
             "<Button Visibility=\"{Binding Rows.Count, Converter={StaticResource BoolToVisibilityConverter}}\"/>\n");
 
-        findings.Select(f => (f.Path, f.IsBool)).Should().Equal(
+        findings.Select(f => (f.Path, f.IsAllowed)).Should().Equal(
             ("Child.IsOpen", true),
             ("Child.Label", false),
             ("IsCarryoverRow", true),
@@ -150,7 +178,64 @@ public class BoolToVisibilityBindingTypeConventionTests
             "<Button Visibility=\"{Binding Source={x:Static s:BoolVisibilitySampleStatics.Enabled}, Converter={StaticResource BoolToVisibilityConverter}}\"/>\n" +
             "<Button Visibility=\"{Binding Source={x:Static s:BoolVisibilitySampleStatics.Name}, Converter={StaticResource BoolToVisibilityConverter}}\"/>\n");
 
-        findings.Select(f => f.IsBool).Should().Equal(true, false);
+        findings.Select(f => f.IsAllowed).Should().Equal(true, false);
+    }
+
+    [Fact]
+    public void 検査_ResourceKeyの形と要素構文の束縛も解釈すること()
+    {
+        // レビューで検出: 当初は「{StaticResource Key}」の形の Binding マークアップ拡張しか拾わず、これらは黙って対象外だった
+        var findings = InspectSample(
+            "<Button Visibility=\"{Binding LastExportedFile, Converter={StaticResource ResourceKey=BoolToVisibilityConverter}}\"/>\n" +
+            "<Button Visibility=\"{Binding IsBusy, Converter={DynamicResource ResourceKey = BoolToVisibilityConverter }}\"/>\n" +
+            "<Button>\n" +
+            "  <Button.Visibility>\n" +
+            "    <Binding Path=\"LastExportedFile\" Converter=\"{StaticResource BoolToVisibilityConverter}\"/>\n" +
+            "  </Button.Visibility>\n" +
+            "</Button>\n" +
+            "<Button>\n" +
+            "  <Button.Visibility>\n" +
+            "    <Binding Path=\"IsBusy\" Mode=\"OneWay\"\n" +
+            "             Converter=\"{StaticResource BoolToVisibilityConverter}\"></Binding>\n" +
+            "  </Button.Visibility>\n" +
+            "</Button>\n");
+
+        findings.Select(f => (f.Path, f.IsAllowed)).Should().Equal(
+            ("LastExportedFile", false),
+            ("IsBusy", true),
+            ("LastExportedFile", false),
+            ("IsBusy", true));
+    }
+
+    [Fact]
+    public void 検査_波括弧が深く入れ子になった束縛も解釈すること()
+    {
+        var findings = InspectSample(
+            "<Button Visibility=\"{Binding LastExportedFile, FallbackValue={x:Static s:BoolVisibilitySampleStatics.Name}, " +
+            "TargetNullValue={Binding Source={x:Static s:BoolVisibilitySampleStatics.Name}, Converter={StaticResource StringToVisibilityConverter}}, " +
+            "Converter={StaticResource BoolToVisibilityConverter}}\"/>\n");
+
+        findings.Should().ContainSingle().Which.IsAllowed.Should().BeFalse();
+    }
+
+    [Fact]
+    public void 検査_束縛として解釈できない参照は違反として報告すること()
+    {
+        // 未知の書き方（ここでは Converter を子要素で与える形）は、参照の数と解釈できた束縛の数のずれで検出する
+        var findings = InspectSample(
+            "<Button>\n" +
+            "  <Button.Visibility>\n" +
+            "    <Binding Path=\"LastExportedFile\">\n" +
+            "      <Binding.Converter><StaticResource ResourceKey=\"BoolToVisibilityConverter\"/></Binding.Converter>\n" +
+            "    </Binding>\n" +
+            "  </Button.Visibility>\n" +
+            "</Button>\n" +
+            "<Button Visibility=\"{Binding IsBusy, Converter={StaticResource BoolToVisibilityConverter}}\"/>\n");
+
+        findings.Should().HaveCount(2);
+        findings.Should().ContainSingle(f => f.IsAllowed);
+        findings.Single(f => !f.IsAllowed).ToString().Should()
+            .Contain("Sample.xaml:16 BoolToVisibilityConverter").And.Contain("解釈できない参照", "漏れた参照そのものの行を示すこと");
     }
 
     [Fact]
@@ -162,7 +247,7 @@ public class BoolToVisibilityBindingTypeConventionTests
             "<Button Visibility=\"{Binding NoSuchProperty, Converter={StaticResource BoolToVisibilityConverter}}\"/>\n" +
             "<Button Visibility=\"{Binding Converter={StaticResource BoolToVisibilityConverter}}\"/>\n");
 
-        findings.Should().HaveCount(4).And.OnlyContain(f => !f.IsBool && f.ResolvedTypes.Count == 0);
+        findings.Should().HaveCount(4).And.OnlyContain(f => !f.IsAllowed && f.ResolvedTypes.Count == 0);
     }
 
     [Fact]
@@ -175,13 +260,13 @@ public class BoolToVisibilityBindingTypeConventionTests
             "  <Button Visibility=\"{Binding IsBusy, Converter={StaticResource BoolToVisibilityConverter}}\"/>\n" +
             "</Window>\n";
 
-        var findings = Inspect("NoDesign.xaml", xaml, CollectBoolOnlyConverterKeys(new[] { xaml }));
+        var findings = Inspect("NoDesign.xaml", xaml, CollectTypedConverterKeys(new[] { xaml }));
 
-        findings.Should().ContainSingle().Which.IsBool.Should().BeFalse();
+        findings.Should().ContainSingle().Which.IsAllowed.Should().BeFalse();
     }
 
     [Fact]
-    public void 検査_bool専用でないコンバーターの束縛は対象にしないこと()
+    public void 検査_型の限られていないコンバーターの束縛は対象にしないこと()
     {
         var findings = InspectSample(
             "<Button Visibility=\"{Binding LastExportedFile, Converter={StaticResource StringToVisibilityConverter}}\"/>\n");
@@ -199,16 +284,17 @@ public class BoolToVisibilityBindingTypeConventionTests
     }
 
     [Theory]
-    [InlineData(typeof(System.Windows.Controls.BooleanToVisibilityConverter))]
-    [InlineData(typeof(BoolToVisibilityConverter))]
-    public void 前提_bool専用のコンバーターは文字列を受け取るとCollapsedを返すこと(Type converterType)
+    [InlineData(typeof(System.Windows.Controls.BooleanToVisibilityConverter), true)]
+    [InlineData(typeof(BoolToVisibilityConverter), true)]
+    [InlineData(typeof(IntToVisibilityConverter), 1)]
+    public void 前提_型の限られたコンバーターは文字列を受け取るとCollapsedを返すこと(Type converterType, object allowedValue)
     {
-        // 本テストが bool 以外を違反とみなす根拠。コンバーターが文字列を扱えるようになったら、本規約は見直してよい
+        // 本テストが許される型以外を違反とみなす根拠。コンバーターが文字列を扱えるようになったら、本規約は見直してよい
         var converter = (System.Windows.Data.IValueConverter)Activator.CreateInstance(converterType)!;
 
         converter.Convert(@"C:\export\操作ログ.xlsx", typeof(Visibility), null!, CultureInfo.InvariantCulture)
             .Should().Be(Visibility.Collapsed);
-        converter.Convert(true, typeof(Visibility), null!, CultureInfo.InvariantCulture)
+        converter.Convert(allowedValue, typeof(Visibility), null!, CultureInfo.InvariantCulture)
             .Should().Be(Visibility.Visible);
     }
 
@@ -254,26 +340,23 @@ public class BoolToVisibilityBindingTypeConventionTests
 
     #region 検査の実装
 
-    /// <summary>XAML 群から、bool 専用のコンバーターを定義しているリソースキーを集める。</summary>
-    private static HashSet<string> CollectBoolOnlyConverterKeys(IEnumerable<string> xamls)
+    /// <summary>XAML 群から、型の限られたコンバーターを定義しているリソースキーと、そのコンバーターが許す型を集める。</summary>
+    private static Dictionary<string, Type[]> CollectTypedConverterKeys(IEnumerable<string> xamls)
     {
-        var keys = new HashSet<string>(StringComparer.Ordinal);
+        var keys = new Dictionary<string, Type[]>(StringComparer.Ordinal);
         foreach (var xaml in xamls)
         {
-            foreach (Match m in BoolOnlyConverterDefinition.Matches(XamlElementInspection.StripXmlComments(xaml)))
+            foreach (Match m in ConverterDefinition.Matches(XamlElementInspection.StripXmlComments(xaml)))
             {
-                // 標準の型は接頭辞なし（WPF の既定の名前空間）、自前の型は接頭辞あり（ICCardManager.Common）
-                var isStandard = m.Groups["type"].Value == "BooleanToVisibilityConverter" && !m.Groups["prefix"].Success;
-                var isCustom = m.Groups["type"].Value == "BoolToVisibilityConverter" && m.Groups["prefix"].Success;
-                if (!isStandard && !isCustom)
+                if (!TypedConverters.TryGetValue((m.Groups["type"].Value, m.Groups["prefix"].Success), out var allowed))
                 {
                     continue;
                 }
 
-                var key = Regex.Match(m.Groups["attrs"].Value, @"\bx:Key=""(?<k>[^""]+)""");
+                var key = Regex.Match(m.Groups["attrs"].Value, @"\bx:Key\s*=\s*(?<q>[""'])(?<k>[^""']+)\k<q>");
                 if (key.Success)
                 {
-                    keys.Add(key.Groups["k"].Value);
+                    keys[key.Groups["k"].Value] = allowed;
                 }
             }
         }
@@ -282,7 +365,7 @@ public class BoolToVisibilityBindingTypeConventionTests
     }
 
     /// <summary>1 つの XAML で、<paramref name="keys"/> のコンバーターを使う束縛をすべて解決する。</summary>
-    private static List<BindingFinding> Inspect(string fileName, string xaml, ISet<string> keys)
+    private static List<BindingFinding> Inspect(string fileName, string xaml, IReadOnlyDictionary<string, Type[]> keys)
     {
         var text = XamlElementInspection.StripXmlComments(xaml);
         var namespaces = ParseClrNamespaces(text);
@@ -296,26 +379,87 @@ public class BoolToVisibilityBindingTypeConventionTests
         var candidates = roots.SelectMany(Reachable).Distinct().ToList();
 
         var findings = new List<BindingFinding>();
-        foreach (Match m in Regex.Matches(text, @"\{Binding\b(?<body>(?:[^{}]|\{(?:[^{}]|\{[^{}]*\})*\})*)\}"))
+        var spans = new List<(string Key, int Start, int End)>();
+        foreach (var (index, length, args) in EnumerateBindings(text))
         {
-            var args = ParseBindingArguments(m.Groups["body"].Value);
             if (!args.TryGetValue("Converter", out var converter))
             {
                 continue;
             }
 
-            var key = Regex.Match(converter, @"^\{(?:Static|Dynamic)Resource\s+(?<k>[^\s}]+)\}$");
-            if (!key.Success || !keys.Contains(key.Groups["k"].Value))
+            var key = ResourceKeyOf(converter);
+            if (key == null || !keys.TryGetValue(key, out var allowed))
             {
                 continue;
             }
 
-            var line = text.Take(m.Index).Count(c => c == '\n') + 1;
             args.TryGetValue("Path", out var path);
-            findings.Add(new BindingFinding(fileName, line, path ?? string.Empty, Resolve(args, path, namespaces, candidates)));
+            spans.Add((key, index, index + length));
+            findings.Add(new BindingFinding(fileName, LineOf(text, index), key, path ?? string.Empty, allowed, Resolve(args, path, namespaces, candidates)));
+        }
+
+        // 解釈できなかった参照（未知の書き方）: キーへの参照のうち、そのキーで解釈できた束縛の範囲の外にあるもの
+        foreach (var pair in keys)
+        {
+            var unmatchedReferences = Regex.Matches(text, $@"(?<!x:Key\s*=\s*[""'])(?<![<:\w.]){Regex.Escape(pair.Key)}(?![\w])")
+                .Cast<Match>()
+                .Where(r => !spans.Any(s => s.Key == pair.Key && s.Start <= r.Index && r.Index < s.End));
+            foreach (var unmatched in unmatchedReferences)
+            {
+                findings.Add(new BindingFinding(fileName, LineOf(text, unmatched.Index), pair.Key, "（束縛として解釈できない参照）", pair.Value, Array.Empty<Type>()));
+            }
         }
 
         return findings;
+    }
+
+    private static int LineOf(string text, int index) => text.Take(index).Count(c => c == '\n') + 1;
+
+    /// <summary><c>{StaticResource K}</c> / <c>{DynamicResource ResourceKey=K}</c> からキーを取り出す。</summary>
+    private static string? ResourceKeyOf(string markup)
+    {
+        var m = Regex.Match(markup, @"^\{\s*(?:Static|Dynamic)Resource\s+(?:ResourceKey\s*=\s*)?(?<k>[^\s}]+)\s*\}$");
+        return m.Success ? m.Groups["k"].Value : null;
+    }
+
+    /// <summary>
+    /// マークアップ拡張 <c>{Binding …}</c>（波括弧の入れ子を数えて閉じを探す）と、要素構文 <c>&lt;Binding …&gt;</c> の開始タグを、
+    /// 出現位置・長さ・引数の組で列挙する。
+    /// </summary>
+    private static IEnumerable<(int Index, int Length, Dictionary<string, string> Args)> EnumerateBindings(string text)
+    {
+        var results = new List<(int, int, Dictionary<string, string>)>();
+
+        foreach (Match m in Regex.Matches(text, @"\{\s*Binding(?![\w.])"))
+        {
+            var depth = 0;
+            for (var i = m.Index; i < text.Length; i++)
+            {
+                if (text[i] == '{')
+                {
+                    depth++;
+                }
+                else if (text[i] == '}' && --depth == 0)
+                {
+                    var bodyStart = m.Index + m.Length;
+                    results.Add((m.Index, i + 1 - m.Index, ParseMarkupArguments(text.Substring(bodyStart, i - bodyStart))));
+                    break;
+                }
+            }
+        }
+
+        foreach (Match m in Regex.Matches(text, @"<Binding(?=[\s/>])(?<attrs>(?:[^>""']|""[^""]*""|'[^']*')*)>"))
+        {
+            var args = new Dictionary<string, string>(StringComparer.Ordinal);
+            foreach (Match a in Regex.Matches(m.Groups["attrs"].Value, @"(?<name>[\w:.]+)\s*=\s*(?<q>[""'])(?<v>.*?)\k<q>", RegexOptions.Singleline))
+            {
+                args[a.Groups["name"].Value] = a.Groups["v"].Value.Trim();
+            }
+
+            results.Add((m.Index, m.Length, args));
+        }
+
+        return results.OrderBy(r => r.Item1);
     }
 
     private static IReadOnlyList<Type> Resolve(
@@ -328,7 +472,7 @@ public class BoolToVisibilityBindingTypeConventionTests
 
         if (args.TryGetValue("Source", out var source))
         {
-            var stat = Regex.Match(source, @"^\{x:Static\s+(?<type>[\w:.]+)\.(?<member>\w+)\}$");
+            var stat = Regex.Match(source, @"^\{x:Static\s+(?:Member\s*=\s*)?(?<type>[\w:.]+)\.(?<member>\w+)\s*\}$");
             var owner = stat.Success ? ResolveXamlType(stat.Groups["type"].Value, namespaces) : null;
             var memberType = owner == null ? null : StaticMemberType(owner, stat.Groups["member"].Value);
             if (memberType == null)
@@ -362,7 +506,7 @@ public class BoolToVisibilityBindingTypeConventionTests
     /// <c>{Binding …}</c> の中身を引数に分ける。先頭の名前なしの引数は <c>Path</c>。
     /// 入れ子の波括弧（<c>{StaticResource …}</c> 等）の中のカンマでは分けない。
     /// </summary>
-    private static Dictionary<string, string> ParseBindingArguments(string body)
+    private static Dictionary<string, string> ParseMarkupArguments(string body)
     {
         var parts = new List<string>();
         var depth = 0;
@@ -534,14 +678,16 @@ public class BoolToVisibilityBindingTypeConventionTests
         return depth;
     }
 
-    /// <summary>束縛 1 件の解決結果。解決できなかったら <see cref="ResolvedTypes"/> は空。</summary>
+    /// <summary>束縛 1 件の解決結果。解決・解釈できなかったら <see cref="ResolvedTypes"/> は空。</summary>
     private sealed class BindingFinding
     {
-        public BindingFinding(string file, int line, string path, IReadOnlyList<Type> resolvedTypes)
+        public BindingFinding(string file, int line, string key, string path, IReadOnlyList<Type> allowedTypes, IReadOnlyList<Type> resolvedTypes)
         {
             File = file;
             Line = line;
+            Key = key;
             Path = path;
+            AllowedTypes = allowedTypes;
             ResolvedTypes = resolvedTypes;
         }
 
@@ -549,17 +695,23 @@ public class BoolToVisibilityBindingTypeConventionTests
 
         public int Line { get; }
 
+        /// <summary>束縛が使うコンバーターのリソースキー。</summary>
+        public string Key { get; }
+
         public string Path { get; }
+
+        /// <summary>このコンバーターが扱える型。</summary>
+        public IReadOnlyList<Type> AllowedTypes { get; }
 
         public IReadOnlyList<Type> ResolvedTypes { get; }
 
-        /// <summary>解決でき、かつ解決した型がすべて bool / bool? であること。</summary>
-        public bool IsBool => ResolvedTypes.Count > 0 && ResolvedTypes.All(t => t == typeof(bool) || t == typeof(bool?));
+        /// <summary>解決でき、かつ解決した型がすべて <see cref="AllowedTypes"/> に含まれること。</summary>
+        public bool IsAllowed => ResolvedTypes.Count > 0 && ResolvedTypes.All(t => AllowedTypes.Contains(t));
 
         public override string ToString()
             => ResolvedTypes.Count == 0
-                ? $"{File}:{Line} Binding '{Path}'（型を解決できない）"
-                : $"{File}:{Line} Binding '{Path}'（{string.Join(" / ", ResolvedTypes.Select(t => t.FullName))}）";
+                ? $"{File}:{Line} {Key} の束縛 '{Path}'（型を解決できない）"
+                : $"{File}:{Line} {Key} の束縛 '{Path}'（{string.Join(" / ", ResolvedTypes.Select(t => t.FullName))}）";
     }
 
     #endregion
@@ -567,7 +719,7 @@ public class BoolToVisibilityBindingTypeConventionTests
 
 // 以下は XAML から参照するサンプルの型（入れ子の型は XAML の型名で参照できないため、トップレベルに置く）
 
-/// <summary><see cref="BoolToVisibilityBindingTypeConventionTests"/> のサンプル XAML の DataContext。</summary>
+/// <summary><see cref="VisibilityConverterBindingTypeConventionTests"/> のサンプル XAML の DataContext。</summary>
 internal sealed class BoolVisibilitySampleViewModel
 {
     public string LastExportedFile { get; set; } = string.Empty;

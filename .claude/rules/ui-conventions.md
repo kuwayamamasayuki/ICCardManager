@@ -238,7 +238,7 @@ paths:
 
 ### 表示切替のコンバーターは、束縛する値の型で選ぶ（Issue #2369）
 
-`BoolToVisibilityConverter`（各画面の `Window.Resources` で定義する WPF 標準の `BooleanToVisibilityConverter`、メイン画面の自前の `Common.BoolToVisibilityConverter`）は **bool 以外を受け取ると常に非表示**を返す。例外も警告も出ないので、束縛を書いた時点では気付けない。
+`BoolToVisibilityConverter`（各画面の `Window.Resources` で定義する WPF 標準の `BooleanToVisibilityConverter`、メイン画面ほかの自前の `Common.BoolToVisibilityConverter`。キー `InverseBoolToVisibilityConverter` で定義する画面もある）は **bool 以外を、`IntToVisibilityConverter` は int 以外を受け取ると常に非表示**を返す。例外も警告も出ないので、束縛を書いた時点では気付けない。
 
 - **string なら `StringToVisibilityConverter`（空・null なら非表示）**、件数なら bool の `Has…` プロパティを ViewModel に足して束縛する（#1410 の `HasCreatedFiles`）。操作ログの「開く」・手動バックアップの「作成先」・利用履歴詳細の見出しの金額は string を束縛していたため、値が入っても出なかった
-- 静的検査 `BoolToVisibilityBindingTypeConventionTests` が、束縛の型を `d:DesignInstance` から解決して bool / `bool?` であることを確かめる。**型を解決できない束縛（`ElementName` / `RelativeSource`・添字・`d:DesignInstance` の無い画面）も違反になる**ので、そうした束縛が要るときは bool のプロパティを ViewModel に足して束縛する
+- 静的検査 `VisibilityConverterBindingTypeConventionTests` が、束縛の型を `d:DesignInstance` から解決して許される型であることを確かめる。**型を解決できない束縛（`ElementName` / `RelativeSource`・添字・`d:DesignInstance` の無い画面）と、束縛として解釈できない参照（`<Binding.Converter>` の子要素など）も違反になる**ので、そうした束縛が要るときは許される型のプロパティを ViewModel に足し、`{Binding Path, Converter={StaticResource Key}}` の形で束縛する
