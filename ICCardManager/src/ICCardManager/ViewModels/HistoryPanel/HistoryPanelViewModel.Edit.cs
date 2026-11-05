@@ -353,6 +353,15 @@ public partial class HistoryPanelViewModel
         // Issue #1740: 残高の自動計算に使う直前行の残高を、ダイアログを開く前に確定させる
         var previousBalance = FindPreviousBalanceForEdit(ledger);
 
+        // Issue #2378: 一覧に表示されていても、他 PC の削除・統合で行が既に無いことがある。
+        // 開いてしまうと空のダイアログになり、職員が入力して保存を押すまで競合が分からない（入力が無駄になる）。
+        // 開く前に確かめ、無ければ開かずに案内する（タイトルは開けなかった画面の名前＝行編集ダイアログのタイトル）
+        if (await _ledgerRepository.GetByIdAsync(ledger.Id) == null)
+        {
+            await NotifyRowGoneOnOpenAsync(ledger, "履歴行の修正");
+            return;
+        }
+
         // Issue #2007: 導入行なら、導入時残高の誤りの訂正案をダイアログへ渡す
         var initialBalanceCorrection = await ResolveInitialBalanceCorrectionForEditAsync(ledger);
 
@@ -421,6 +430,28 @@ public partial class HistoryPanelViewModel
         {
             await EditAdjacentLedgerAsync(ledger, offset: -1);
         }
+    }
+
+    /// <summary>
+    /// 一覧から開こうとした行（行編集・詳細）が既に無いとき、一覧ほかを読み直してから競合を案内する（Issue #2378）。
+    /// </summary>
+    /// <param name="ledger">一覧に表示されていた行。案内で名指しする</param>
+    /// <param name="screenTitle">開けなかった画面の名前（そのダイアログのタイトル）。エラーダイアログのタイトルにする</param>
+    /// <remarks>
+    /// 読み直す範囲は保存時の競合（#2325）と同じ。消えた行が貸出中レコード（開いている間に返却された）なら
+    /// カードの貸出状態も変わっている。文言が「再読み込みしました」と述べる以上、案内より前に読み直す（#1753）。
+    /// 対象の名指しは読み直しで一覧が作り直される前に確定させる（#1759）。
+    /// 行編集と詳細の 2 つの入口が同じ判断を持つので、ここへ寄せる（#1763）。
+    /// </remarks>
+    private async Task NotifyRowGoneOnOpenAsync(LedgerDto ledger, string screenTitle)
+    {
+        var target = $"履歴「{ledger.DateDisplay} {ledger.Summary}」";
+        await LoadHistoryLedgersAsync();
+        await Host.RefreshDashboardAsync();
+        await Host.RefreshLentCardsAsync();
+        await Host.CheckWarningsAsync();
+        await CheckAndNotifyConsistencyAsync();
+        _navigationService.ShowError(ConcurrencyConflictMessage.ForOpen(target, "履歴一覧"), screenTitle);
     }
 
     /// <summary>
