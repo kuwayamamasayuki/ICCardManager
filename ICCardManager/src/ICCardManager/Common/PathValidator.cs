@@ -670,7 +670,7 @@ namespace ICCardManager.Common
         /// 実体は <see cref="DriveInfo.IsReady"/> を <see cref="CreateDriveReadinessChecker"/> で包んだもの。
         /// </summary>
         internal static readonly Func<string, int, ValidationResult> DefaultDriveReadinessChecker =
-            CreateDriveReadinessChecker(root => new DriveInfo(root).IsReady);
+            CreateDriveReadinessChecker(root => (DriveIsReadyProbe ?? (r => new DriveInfo(r).IsReady))(root));
 
         /// <summary>
         /// ローカルパスのドライブの準備確認を、専用スレッドで上限付きに待つ関数を作る（Issue #2383）。
@@ -711,6 +711,15 @@ namespace ICCardManager.Common
         /// 到達確認（<see cref="CreateUncReachabilityChecker"/>、Issue #2225）と同じく、専用スレッドで走らせて上限で打ち切り、
         /// 上限を超えたら「書き込みの確認が終わらなかった」という検証エラー（<see cref="CreateWriteProbeTimeoutFailure"/>）を返す。
         /// 打ち切っても下位の呼び出しは中断できないため、同じパスへの確認は進行中のものが終わるまで 1 本に限る。
+        /// </para>
+        /// <para>
+        /// <b>限界</b>: 1 本に限るキーは指定されたパスそのもので、実際の書き込み先（未作成のフォルダーなら
+        /// <see cref="FindNearestExistingAncestor"/> が返す祖先）ではない。書き込み先を決めるには <see cref="Directory.Exists"/> が要り、
+        /// それ自体が応答しない共有では戻らないため、上限付きのスレッドに入る前にはキーを決められない。
+        /// 共有ルートや祖先をキーにすると、応答している共有で別のフォルダーの判定（権限は場所ごとに違う）を流用することになる。
+        /// そのため、到達はできるが書き込みが応答しない共有で、未作成の別々のサブフォルダーを順に指定すると、戻らない確認が指定ごとに 1 本ずつ増え得る。
+        /// 共有ルートへ到達できない場合は UNC の到達確認（共有ルートをキーに 1 本）で先に弾かれるので、この形には入らない。
+        /// いずれも利用者の保存の操作でしか起きず、確認は SMB のタイムアウトで戻れば終わる。
         /// </para>
         /// </remarks>
         internal static Func<string, int, ValidationResult> CreateWritePermissionChecker(Func<string, ValidationResult> check)
@@ -896,6 +905,61 @@ namespace ICCardManager.Common
         }
 
         /// <summary>
+        /// 書き込み確認のテストファイルを書き込んで削除する。応答しない共有では戻らない。
+        /// </summary>
+        private static void WriteAndDeleteProbeFile(string testFile)
+        {
+            var probe = WriteProbeFileOverride.Value;
+            if (probe != null)
+            {
+                probe(testFile);
+                return;
+            }
+
+            File.WriteAllText(testFile, "test");
+            File.Delete(testFile);
+        }
+
+        /// <summary>
+        /// <see cref="WriteProbeFile"/> の AsyncLocal バッキングストア（<see cref="UncReachabilityCheckerOverride"/> と同じ機構）。
+        /// </summary>
+        private static readonly AsyncLocal<Action<string>?> WriteProbeFileOverride = new();
+
+        /// <summary>
+        /// テスト用フック（Issue #2383）。書き込み確認のテストファイルの書き込みと削除（<see cref="WriteAndDeleteProbeFile"/>）を差し替える。
+        /// </summary>
+        /// <remarks>
+        /// 確認の本体の最も内側を差し替えるので、公開の入口から <see cref="DefaultWritePermissionChecker"/>（上限付き）までの
+        /// どこかで上限を通らない形に戻すと、戻らない書き込みを差し込んだテストが上限で返らず赤になる。
+        /// AsyncLocal のため差し替えは設定したテストの実行コンテキスト（そこから起動した専用スレッドを含む）にのみ見える。
+        /// 既定の確認は指定されたパスをキーに 1 本に限るので、テストは自分専用のフォルダーのパスでだけ介入し、
+        /// それ以外は <c>null</c>（既定の書き込み）へ委ねること。
+        /// </remarks>
+        internal static Action<string>? WriteProbeFile
+        {
+            get => WriteProbeFileOverride.Value;
+            set => WriteProbeFileOverride.Value = value;
+        }
+
+        /// <summary>
+        /// <see cref="DriveIsReadyProbe"/> の AsyncLocal バッキングストア。
+        /// </summary>
+        private static readonly AsyncLocal<Func<string, bool>?> DriveIsReadyProbeOverride = new();
+
+        /// <summary>
+        /// テスト用フック（Issue #2383）。<see cref="DefaultDriveReadinessChecker"/> の本体（<see cref="DriveInfo.IsReady"/>）を差し替える。
+        /// </summary>
+        /// <remarks>
+        /// <see cref="WriteProbeFile"/> と同じ目的。既定の確認はドライブのルートをキーに 1 本に限るため、戻らない確認を差し込むと
+        /// 同じドライブを検証する他のテストがそれに相乗りする。テストは他のテストが使わないドライブ文字でだけ介入すること。
+        /// </remarks>
+        internal static Func<string, bool>? DriveIsReadyProbe
+        {
+            get => DriveIsReadyProbeOverride.Value;
+            set => DriveIsReadyProbeOverride.Value = value;
+        }
+
+        /// <summary>
         /// 書き込み権限をチェックする（テストファイルの書き込みと削除）。応答しない共有では戻らないため、
         /// 直接呼ばず <see cref="DefaultWritePermissionChecker"/> を通す（Issue #2383）。
         /// </summary>
@@ -910,8 +974,7 @@ namespace ICCardManager.Common
                     var testFile = Path.Combine(path, $".write_test_{Guid.NewGuid():N}");
                     try
                     {
-                        File.WriteAllText(testFile, "test");
-                        File.Delete(testFile);
+                        WriteAndDeleteProbeFile(testFile);
                     }
                     catch (UnauthorizedAccessException)
                     {
@@ -945,8 +1008,7 @@ namespace ICCardManager.Common
                         var testFile = Path.Combine(parentDir, $".write_test_{Guid.NewGuid():N}");
                         try
                         {
-                            File.WriteAllText(testFile, "test");
-                            File.Delete(testFile);
+                            WriteAndDeleteProbeFile(testFile);
                         }
                         catch (UnauthorizedAccessException)
                         {
