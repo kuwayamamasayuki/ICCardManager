@@ -561,8 +561,8 @@ namespace ICCardManager.ViewModels
                         StatusMessage = await RegisterFailureNotice.ResolveAsync(
                             $"職員「{FormatStaffLabel(staff.Name, staff.Number)}」",
                             () => _staffRepository.GetByIdmAsync(staff.StaffIdm, includeDeleted: true),
-                            existing => existing.IsDeleted,
-                            existing => $"職員「{FormatStaffLabel(existing.Name, existing.Number)}」",
+                            reread => reread.IsDeleted,
+                            reread => $"職員「{FormatStaffLabel(reread.Name, reread.Number)}」",
                             LoadStaffAsync,
                             "職員一覧",
                             (ex, message) => ErrorDialogHelper.LogException(ex, message));

@@ -103,6 +103,16 @@ namespace ICCardManager.Common
                $"画面を閉じて開き直し、一覧で{target}を確認してからやり直してください。";
 
         /// <summary>
+        /// <see cref="ForRestore"/> と同じ状況だが、案内の前の一覧の再読込にも失敗したときの文言（Issue #2382）。
+        /// </summary>
+        /// <param name="target">復元しようとした行の説明</param>
+        /// <param name="listName">再読込できなかった一覧の名称</param>
+        /// <remarks>公開のファクトリは「再読み込みしました」と述べるため、再読込に失敗したときには使えない（#1753）。</remarks>
+        internal static string ForRestoreReloadFailed(string target, string listName)
+            => $"{target}を復元できませんでした。{RestoredReason}{listName}の再読み込みにも失敗したため、" +
+               $"画面を閉じて開き直し、一覧で{target}を確認してからやり直してください。";
+
+        /// <summary>
         /// 登録が書き込めなかった原因が、同じ IDm の<b>削除済み</b>の行だったときの文言（Issue #2382）。
         /// </summary>
         /// <param name="target">読み直した既存の（削除済みの）行の説明</param>

@@ -193,6 +193,27 @@ public class ConcurrencyConflictMessageTests
     }
 
     /// <summary>
+    /// Issue #2382: 復元の競合で一覧の再読込にも失敗したときの文言は、「再読み込みしました」と偽らず、
+    /// 復元の「なぜ」を <see cref="ConcurrencyConflictMessage.ForRestore"/> と共有し、開き直しを指示すること
+    /// </summary>
+    [Fact]
+    public void ForRestoreReloadFailed_ShouldNotClaimReloadAndShouldTellToReopen()
+    {
+        var message = ConcurrencyConflictMessage.ForRestoreReloadFailed(Target, ListName);
+
+        message.Length.Should().BeGreaterOrEqualTo(20);
+        message.Should().StartWith($"{Target}を復元できませんでした。");
+        message.Should().Contain("先に復元された可能性があります");
+        message.Should().Contain("カード一覧の再読み込みにも失敗したため");
+        message.Should().NotContain("再読み込みしましたので");
+        message.Should().EndWith($"画面を閉じて開き直し、一覧で{Target}を確認してからやり直してください。");
+        foreach (var vague in VaguePhrases)
+        {
+            message.Should().NotContain(vague);
+        }
+    }
+
+    /// <summary>
     /// Issue #2382: 読み直した行が削除済みだったときの文言は、一覧での確認（削除済みは一覧に出ない）を案内せず、
     /// もう一度保存して復元する道を示すこと（internal のため全ファクトリの品質検査の外にあり、ここで 3 要素を固定する）
     /// </summary>

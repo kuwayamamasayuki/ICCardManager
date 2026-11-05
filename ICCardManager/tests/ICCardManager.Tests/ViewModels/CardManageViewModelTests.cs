@@ -523,6 +523,8 @@ public class CardManageViewModelTests : IDisposable
 
         var existingCard = new IcCard { CardIdm = "0102030405060708", CardType = "はやかけん", CardNumber = "H-999" };
         _cardRepositoryMock.Setup(r => r.GetByIdmAsync("0102030405060708", true)).ReturnsAsync(existingCard);
+        // 入力中に他のパソコンが登録した場合、この画面の一覧にはまだ載っていない。再読込で載る
+        _cardRepositoryMock.Setup(r => r.GetAllAsync()).ReturnsAsync(new List<IcCard> { existingCard });
 
         // Act
         await _viewModel.SaveAsync();
@@ -532,6 +534,8 @@ public class CardManageViewModelTests : IDisposable
             "このカードは交通系ICカード「はやかけん H-999」として既に登録されています。" +
             "登録内容を変更する場合は、カード一覧でこのカードを選択して編集してください。");
         _viewModel.IsStatusError.Should().BeTrue();
+        _viewModel.Cards.Should().ContainSingle(c => c.CardNumber == "H-999",
+            "案内が「カード一覧でこのカードを選択」と述べるので、先に一覧を再読込する（#1759）");
     }
 
     /// <summary>
@@ -548,16 +552,81 @@ public class CardManageViewModelTests : IDisposable
             CardType = "nimoca",
             CardNumber = "N-003"
         });
+        _cardRepositoryMock.Setup(r => r.GetAllAsync()).ReturnsAsync(new List<IcCard>
+        {
+            new IcCard { CardIdm = idm, CardType = "nimoca", CardNumber = "N-003" }
+        });
         _viewModel.StartNewCard();
 
         // Act
         await _viewModel.HandleCardReadAsync(idm);
 
         // Assert
+        _viewModel.Cards.Should().ContainSingle(c => c.CardNumber == "N-003",
+            "案内が「カード一覧でこのカードを選択」と述べるので、先に一覧を再読込する（#1759）");
         _viewModel.StatusMessage.Should().Contain("交通系ICカード「nimoca N-003」として既に登録されています");
         _viewModel.StatusMessage.Should().EndWith("カード一覧でこのカードを選択して編集してください。");
         _viewModel.IsStatusError.Should().BeTrue();
         _cardRepositoryMock.Verify(r => r.InsertAsync(It.IsAny<IcCard>(), It.IsAny<SQLiteTransaction>()), Times.Never);
+    }
+
+    /// <summary>
+    /// Issue #2382: 既に登録済みの案内の前の一覧の再読込が例外でも、案内を失わず、一覧の所在を「開き直した一覧」とすること
+    /// </summary>
+    [Fact]
+    public async Task HandleCardReadAsync_WhenCardAlreadyRegisteredAndReloadThrows_ShouldTellToReopen()
+    {
+        // Arrange
+        const string idm = "0102030405060708";
+        _cardRepositoryMock.Setup(r => r.GetByIdmAsync(idm, true)).ReturnsAsync(new IcCard
+        {
+            CardIdm = idm,
+            CardType = "nimoca",
+            CardNumber = "N-003"
+        });
+        _viewModel.StartNewCard();
+        _cardRepositoryMock.Setup(r => r.GetAllAsync())
+            .ThrowsAsync(new System.Data.SQLite.SQLiteException(System.Data.SQLite.SQLiteErrorCode.IoErr, "disk I/O error"));
+
+        // Act
+        await _viewModel.HandleCardReadAsync(idm);
+
+        // Assert
+        _viewModel.StatusMessage.Should().Be(
+            "このカードは交通系ICカード「nimoca N-003」として既に登録されています。" +
+            "登録内容を変更する場合は、この画面を閉じて開き直したカード一覧でこのカードを選択して編集してください。");
+        _viewModel.IsStatusError.Should().BeTrue();
+    }
+
+    /// <summary>
+    /// Issue #2382: 未登録カードとして開いた時点の復元が false で、案内の前の一覧の再読込も例外のとき、
+    /// 例外を画面の初期化（CardManageDialog の Loaded）まで通さず、「再読み込みしました」と述べない案内で続けること
+    /// </summary>
+    [Fact]
+    public async Task StartNewCardWithIdmAsync_WhenRestoreReturnsFalseAndReloadThrows_ShouldNotifyWithoutClaimingReload()
+    {
+        // Arrange
+        const string idm = "0102030405060708";
+        _cardRepositoryMock.Setup(r => r.GetByIdmAsync(idm, true)).ReturnsAsync(new IcCard
+        {
+            CardIdm = idm,
+            CardType = "はやかけん",
+            CardNumber = "H-007",
+            IsDeleted = true
+        });
+        _cardRepositoryMock.Setup(r => r.RestoreAsync(idm, It.IsAny<SQLiteTransaction>())).ReturnsAsync(false);
+        _cardRepositoryMock.Setup(r => r.GetAllAsync())
+            .ThrowsAsync(new System.Data.SQLite.SQLiteException(System.Data.SQLite.SQLiteErrorCode.IoErr, "disk I/O error"));
+
+        // Act
+        var act = async () => await _viewModel.StartNewCardWithIdmAsync(idm);
+
+        // Assert
+        (await act.Should().NotThrowAsync()).Which.Should().BeFalse("画面は開いたまま");
+        _viewModel.StatusMessage.Should().Be(
+            ICCardManager.Common.ConcurrencyConflictMessage.ForRestoreReloadFailed("交通系ICカード「はやかけん H-007」", "カード一覧"));
+        _viewModel.StatusMessage.Should().NotContain("再読み込みしましたので");
+        _viewModel.IsStatusError.Should().BeTrue();
     }
 
     /// <summary>
