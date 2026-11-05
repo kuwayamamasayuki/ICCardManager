@@ -1078,6 +1078,8 @@ public partial class HistoryPanelViewModel : ObservableObject
         var ledgerWithDetails = await _ledgerRepository.GetByIdAsync(ledger.Id);
         if (ledgerWithDetails == null)
         {
+            // Issue #2378: 他 PC が削除・統合した行。黙って戻ると「押しても何も起きない」ので、行編集と同じく案内する
+            await NotifyRowGoneOnOpenAsync(ledger, "利用履歴詳細");
             return;
         }
 

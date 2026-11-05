@@ -2152,11 +2152,13 @@ public class HistoryPanelViewModelTests : IDisposable
         var pagesLoadedBeforeMessage = -1;
         List<string>? hostCallsBeforeMessage = null;
         string? message = null;
+        string? title = null;
         _navigationServiceMock
             .Setup(d => d.ShowError(It.IsAny<string>(), It.IsAny<string>()))
-            .Callback<string, string>((m, _) =>
+            .Callback<string, string>((m, t) =>
             {
                 message = m;
+                title = t;
                 pagesLoadedBeforeMessage = requestedPages.Count;
                 hostCallsBeforeMessage = _host.Calls.ToList();
             });
@@ -2167,6 +2169,7 @@ public class HistoryPanelViewModelTests : IDisposable
             n => n.ShowDialogAsync(It.IsAny<Func<ICCardManager.Views.Dialogs.LedgerRowEditDialog, Task>>()), Times.Never,
             "行が無いのに空のダイアログを開かない");
         message.Should().Be(ConcurrencyConflictMessage.ForOpen(DeleteConflictTarget, "履歴一覧"));
+        title.Should().Be("履歴行の修正", "開けなかった画面の名前（行編集ダイアログのタイトル）で示す");
         pagesLoadedBeforeMessage.Should().BeGreaterThan(0, "文言が「再読み込みしました」と述べる以上、案内より前に一覧を読み直す（#1753）");
         hostCallsBeforeMessage.Should().Contain(new[]
         {
@@ -2191,6 +2194,69 @@ public class HistoryPanelViewModelTests : IDisposable
             n => n.ShowDialogAsync(It.IsAny<Func<ICCardManager.Views.Dialogs.LedgerRowEditDialog, Task>>()), Times.Once);
         _navigationServiceMock.Verify(
             n => n.ShowError(It.IsAny<string>(), It.IsAny<string>()), Times.Never);
+    }
+
+    /// <summary>
+    /// Issue #2378（PR #2408 のレビューで範囲を拡張）: 「詳細」も同じ形で、開く時点で行が無いと黙って戻り何も起きなかった。
+    /// 詳細ダイアログを開かず、一覧を読み直してから行編集と同じ競合の案内を出すこと。
+    /// </summary>
+    [Fact]
+    public async Task ShowLedgerDetail_開く時点で行が無いなら_ダイアログを開かず_一覧を読み直してから案内すること()
+    {
+        var requestedPages = ArrangeLedgerEditOpen(current: null);
+        var pagesLoadedBeforeMessage = -1;
+        List<string>? hostCallsBeforeMessage = null;
+        string? message = null;
+        string? title = null;
+        _navigationServiceMock
+            .Setup(d => d.ShowError(It.IsAny<string>(), It.IsAny<string>()))
+            .Callback<string, string>((m, t) =>
+            {
+                message = m;
+                title = t;
+                pagesLoadedBeforeMessage = requestedPages.Count;
+                hostCallsBeforeMessage = _host.Calls.ToList();
+            });
+
+        await _history.ShowLedgerDetail(DetailTargetDto());
+
+        _navigationServiceMock.Verify(
+            n => n.ShowDialogAsync(It.IsAny<Func<ICCardManager.Views.Dialogs.LedgerDetailDialog, Task>>()), Times.Never,
+            "行が無いのに詳細ダイアログを開かない");
+        message.Should().Be(ConcurrencyConflictMessage.ForOpen(DeleteConflictTarget, "履歴一覧"),
+            "黙って戻ると、押しても何も起きない（案内が無い）");
+        title.Should().Be("利用履歴詳細", "開けなかった画面の名前（詳細ダイアログのタイトル）で示す");
+        pagesLoadedBeforeMessage.Should().BeGreaterThan(0, "案内より前に一覧を読み直す（#1753）");
+        hostCallsBeforeMessage.Should().Contain(new[]
+        {
+            RecordingHistoryPanelHost.RefreshDashboardCall,
+            RecordingHistoryPanelHost.RefreshLentCardsCall,
+            RecordingHistoryPanelHost.CheckWarningsCall,
+        }, "行編集を開けなかったときと同じものを読み直す");
+    }
+
+    /// <summary>
+    /// 対の表明: 行があれば従来どおり詳細ダイアログを開き、案内は出さないこと。
+    /// </summary>
+    [Fact]
+    public async Task ShowLedgerDetail_開く時点で行があれば_ダイアログを開き_案内は出さないこと()
+    {
+        ArrangeLedgerEditOpen(new Ledger { Id = 42, CardIdm = DeleteConflictCardIdm, Summary = "鉄道（天神～博多）" });
+
+        await _history.ShowLedgerDetail(DetailTargetDto());
+
+        _navigationServiceMock.Verify(
+            n => n.ShowDialogAsync(It.IsAny<Func<ICCardManager.Views.Dialogs.LedgerDetailDialog, Task>>()), Times.Once);
+        _navigationServiceMock.Verify(
+            n => n.ShowError(It.IsAny<string>(), It.IsAny<string>()), Times.Never);
+    }
+
+    /// <summary>「詳細」ボタンが出る行（明細が 2 件以上）</summary>
+    private static LedgerDto DetailTargetDto()
+    {
+        var dto = DeleteTargetDto();
+        dto.DetailCountValue = 2;
+        return dto;
     }
 
     #endregion
