@@ -45,19 +45,23 @@ namespace ICCardManager.Tests.Views;
 public class VisibilityConverterBindingTypeConventionTests
 {
     /// <summary>
-    /// 特定の型以外を常に Collapsed にするコンバーター（XAML の要素のローカル名, 接頭辞が要るか → 許される型）。
+    /// 特定の型以外を常に Collapsed にするコンバーター（XAML の要素のローカル名 → 許される型）。
     /// </summary>
     /// <remarks>
-    /// 標準の型は既定の名前空間（接頭辞なし）、自前の型は <c>ICCardManager.Common</c>（接頭辞あり）で定義される。
+    /// 名前空間の接頭辞は見ない（標準の <c>BooleanToVisibilityConverter</c> を接頭辞付きで書いても対象にする）。
+    /// 同名の別の型は WPF にも本プロジェクトにも無い。
     /// 前提（許される型以外で Collapsed）は <see cref="前提_型の限られたコンバーターは文字列を受け取るとCollapsedを返すこと"/> が固定する。
     /// Nullable の値は箱詰めで中身の型になるため <c>bool?</c> / <c>int?</c> も許す。
     /// </remarks>
-    private static readonly Dictionary<(string Type, bool Prefixed), Type[]> TypedConverters = new()
+    private static readonly Dictionary<string, Type[]> TypedConverters = new(StringComparer.Ordinal)
     {
-        [("BooleanToVisibilityConverter", false)] = new[] { typeof(bool), typeof(bool?) },
-        [("BoolToVisibilityConverter", true)] = new[] { typeof(bool), typeof(bool?) },
-        [("IntToVisibilityConverter", true)] = new[] { typeof(int), typeof(int?) },
+        ["BooleanToVisibilityConverter"] = new[] { typeof(bool), typeof(bool?) },
+        ["BoolToVisibilityConverter"] = new[] { typeof(bool), typeof(bool?) },
+        ["IntToVisibilityConverter"] = new[] { typeof(int), typeof(int?) },
     };
+
+    /// <summary>要素構文の束縛が引数を子要素で持つことを示す、引数表の印（属性名と衝突しない名前）。</summary>
+    private const string ChildElementArgument = "<child>";
 
     private static readonly Regex ConverterDefinition = new(
         @"<(?:(?<prefix>[A-Za-z_]\w*):)?(?<type>\w+Converter)\b(?<attrs>[^>]*)>",
@@ -69,7 +73,8 @@ public class VisibilityConverterBindingTypeConventionTests
     public void 型の限られたVisibilityコンバーターには許される型のプロパティだけを束縛すること()
     {
         var files = FillForegroundPairs.EnumerateProductionXaml().ToList();
-        var keys = CollectTypedConverterKeys(files.Select(f => f.Text));
+        var keys = CollectTypedConverterKeys(files.Select(f => f.Text), out var conflicts);
+        conflicts.Should().BeEmpty("同じキーを扱える型の違うコンバーターで定義すると、どちらの型で判定すべきか決まらない");
 
         var findings = files
             .SelectMany(f => Inspect(f.Name, f.Text, keys))
@@ -106,7 +111,7 @@ public class VisibilityConverterBindingTypeConventionTests
     private static List<BindingFinding> InspectSample(string body)
     {
         var xaml = SampleHeader + body + "</Window>\n";
-        return Inspect("Sample.xaml", xaml, CollectTypedConverterKeys(new[] { xaml }));
+        return Inspect("Sample.xaml", xaml, CollectTypedConverterKeys(new[] { xaml }, out _));
     }
 
     [Fact]
@@ -239,6 +244,68 @@ public class VisibilityConverterBindingTypeConventionTests
     }
 
     [Fact]
+    public void 検査_キーの無いコンバーターは違反として報告すること()
+    {
+        // レビュー 2 回目で検出: <Binding.Converter> の中に直接書いたコンバーターはキーを持たず、参照の突き合わせにも掛からなかった
+        var findings = InspectSample(
+            "<Button>\n" +
+            "  <Button.Visibility>\n" +
+            "    <Binding Path=\"LastExportedFile\">\n" +
+            "      <Binding.Converter><BooleanToVisibilityConverter/></Binding.Converter>\n" +
+            "    </Binding>\n" +
+            "  </Button.Visibility>\n" +
+            "</Button>\n");
+
+        findings.Should().ContainSingle(f => !f.IsAllowed)
+            .Which.ToString().Should().Contain("Sample.xaml:16 BooleanToVisibilityConverter").And.Contain("キーの無いコンバーター");
+    }
+
+    [Fact]
+    public void 検査_子要素で引数を与えた要素構文の束縛は解決できない違反になること()
+    {
+        // Source を子要素で与えると属性に現れない。DataContext の上で IsBusy（bool）と解決して見逃さないこと
+        var findings = InspectSample(
+            "<Button>\n" +
+            "  <Button.Visibility>\n" +
+            "    <Binding Path=\"IsBusy\" Converter=\"{StaticResource BoolToVisibilityConverter}\">\n" +
+            "      <Binding.Source><x:Static Member=\"s:BoolVisibilitySampleStatics.Name\"/></Binding.Source>\n" +
+            "    </Binding>\n" +
+            "  </Button.Visibility>\n" +
+            "</Button>\n");
+
+        findings.Should().ContainSingle().Which.ResolvedTypes.Should().BeEmpty();
+    }
+
+    [Fact]
+    public void 検査_同名のプロパティが候補の型ごとに違う型なら違反になること()
+    {
+        // 近似（到達できる型の和集合）の核心: 解決した型の「すべて」が許される型であることを求める。
+        // Note は ViewModel では string、行では bool。どちらが DataContext か決められないので違反にする
+        var findings = InspectSample(
+            "<Button Visibility=\"{Binding Note, Converter={StaticResource BoolToVisibilityConverter}}\"/>\n");
+
+        var finding = findings.Should().ContainSingle().Subject;
+        finding.ResolvedTypes.Should().BeEquivalentTo(new[] { typeof(string), typeof(bool) });
+        finding.IsAllowed.Should().BeFalse();
+    }
+
+    [Fact]
+    public void 検査_同じキーを扱える型の違うコンバーターで定義すると食い違いとして報告すること()
+    {
+        var keys = CollectTypedConverterKeys(
+            new[]
+            {
+                "<BooleanToVisibilityConverter x:Key=\"ShowIf\"/>",
+                "<conv:IntToVisibilityConverter x:Key=\"ShowIf\"/>",
+                "<conv:BoolToVisibilityConverter x:Key=\"Same\"/><BooleanToVisibilityConverter x:Key=\"Same\"/>",
+            },
+            out var conflicts);
+
+        conflicts.Should().Equal("ShowIf");
+        keys.Should().ContainKey("Same");
+    }
+
+    [Fact]
     public void 検査_解決できない束縛は違反として報告すること()
     {
         var findings = InspectSample(
@@ -260,7 +327,7 @@ public class VisibilityConverterBindingTypeConventionTests
             "  <Button Visibility=\"{Binding IsBusy, Converter={StaticResource BoolToVisibilityConverter}}\"/>\n" +
             "</Window>\n";
 
-        var findings = Inspect("NoDesign.xaml", xaml, CollectTypedConverterKeys(new[] { xaml }));
+        var findings = Inspect("NoDesign.xaml", xaml, CollectTypedConverterKeys(new[] { xaml }, out _));
 
         findings.Should().ContainSingle().Which.IsAllowed.Should().BeFalse();
     }
@@ -341,27 +408,42 @@ public class VisibilityConverterBindingTypeConventionTests
     #region 検査の実装
 
     /// <summary>XAML 群から、型の限られたコンバーターを定義しているリソースキーと、そのコンバーターが許す型を集める。</summary>
-    private static Dictionary<string, Type[]> CollectTypedConverterKeys(IEnumerable<string> xamls)
+    /// <param name="conflicts">同じキーを、扱える型の違うコンバーターで定義しているキー。</param>
+    private static Dictionary<string, Type[]> CollectTypedConverterKeys(IEnumerable<string> xamls, out List<string> conflicts)
     {
         var keys = new Dictionary<string, Type[]>(StringComparer.Ordinal);
+        conflicts = new List<string>();
         foreach (var xaml in xamls)
         {
             foreach (Match m in ConverterDefinition.Matches(XamlElementInspection.StripXmlComments(xaml)))
             {
-                if (!TypedConverters.TryGetValue((m.Groups["type"].Value, m.Groups["prefix"].Success), out var allowed))
+                if (!TypedConverters.TryGetValue(m.Groups["type"].Value, out var allowed))
                 {
                     continue;
                 }
 
-                var key = Regex.Match(m.Groups["attrs"].Value, @"\bx:Key\s*=\s*(?<q>[""'])(?<k>[^""']+)\k<q>");
-                if (key.Success)
+                var key = KeyOf(m.Groups["attrs"].Value);
+                if (key == null)
                 {
-                    keys[key.Groups["k"].Value] = allowed;
+                    continue;
                 }
+
+                if (keys.TryGetValue(key, out var existing) && !existing.SequenceEqual(allowed))
+                {
+                    conflicts.Add(key);
+                }
+
+                keys[key] = allowed;
             }
         }
 
         return keys;
+    }
+
+    private static string? KeyOf(string attributes)
+    {
+        var key = Regex.Match(attributes, @"\bx:Key\s*=\s*(?<q>[""'])(?<k>[^""']+)\k<q>");
+        return key.Success ? key.Groups["k"].Value : null;
     }
 
     /// <summary>1 つの XAML で、<paramref name="keys"/> のコンバーターを使う束縛をすべて解決する。</summary>
@@ -410,7 +492,16 @@ public class VisibilityConverterBindingTypeConventionTests
             }
         }
 
-        return findings;
+        // キーを持たない定義（<Binding.Converter> の中に直接書いたコンバーター）は、どの束縛に効くかを解釈しないので違反にする
+        foreach (Match m in ConverterDefinition.Matches(text))
+        {
+            if (TypedConverters.TryGetValue(m.Groups["type"].Value, out var allowed) && KeyOf(m.Groups["attrs"].Value) == null)
+            {
+                findings.Add(new BindingFinding(fileName, LineOf(text, m.Index), m.Groups["type"].Value, "（キーの無いコンバーター）", allowed, Array.Empty<Type>()));
+            }
+        }
+
+        return findings.OrderBy(f => f.Line).ToList();
     }
 
     private static int LineOf(string text, int index) => text.Take(index).Count(c => c == '\n') + 1;
@@ -456,6 +547,17 @@ public class VisibilityConverterBindingTypeConventionTests
                 args[a.Groups["name"].Value] = a.Groups["v"].Value.Trim();
             }
 
+            // 子要素で与えた引数（<Binding.Source> / <Binding.RelativeSource> 等）は属性に現れない。
+            // DataContext の上で解決すると取り違えるので、子要素を持つ束縛は解決しない
+            if (!m.Groups["attrs"].Value.TrimEnd().EndsWith("/", StringComparison.Ordinal))
+            {
+                var close = text.IndexOf("</Binding>", m.Index + m.Length, StringComparison.Ordinal);
+                if (close >= 0 && text.Substring(m.Index + m.Length, close - (m.Index + m.Length)).Contains("<Binding."))
+                {
+                    args[ChildElementArgument] = "1";
+                }
+            }
+
             results.Add((m.Index, m.Length, args));
         }
 
@@ -465,7 +567,7 @@ public class VisibilityConverterBindingTypeConventionTests
     private static IReadOnlyList<Type> Resolve(
         IReadOnlyDictionary<string, string> args, string? path, IReadOnlyDictionary<string, (string Namespace, string Assembly)> namespaces, IReadOnlyList<Type> candidates)
     {
-        if (args.ContainsKey("ElementName") || args.ContainsKey("RelativeSource"))
+        if (args.ContainsKey("ElementName") || args.ContainsKey("RelativeSource") || args.ContainsKey(ChildElementArgument))
         {
             return Array.Empty<Type>();
         }
@@ -728,6 +830,8 @@ internal sealed class BoolVisibilitySampleViewModel
 
     public bool? IsChecked { get; set; }
 
+    public string Note { get; set; } = string.Empty;
+
     public BoolVisibilitySampleChild Child { get; set; } = new();
 
     public System.Collections.ObjectModel.ObservableCollection<BoolVisibilitySampleRow> Rows { get; } = new();
@@ -747,6 +851,8 @@ internal sealed class BoolVisibilitySampleRow
     public bool IsCarryoverRow { get; set; }
 
     public string RowNote { get; set; } = string.Empty;
+
+    public bool Note { get; set; }
 }
 
 /// <summary><c>x:Static</c> の束縛元のサンプル。</summary>
