@@ -1069,11 +1069,10 @@ namespace ICCardManager.ViewModels
                     await NotifyDeleteConflictAsync(targetLabel);
                 }
                 else if (deleteResult == CardOperationResult.Conflict
-                    && (await _cardRepository.GetByIdmAsync(targetIdm))?.IsRefunded == true)
+                    && await IsRefundedAfterDeleteConflictAsync(targetIdm))
                 {
                     // Issue #2370: 読み直した後・書き込みの前に払い戻され、論理削除の WHERE（is_refunded = 0）が
-                    // 拒否した。読み直しはキャッシュを経由するが、0 行のときリポジトリの事後診断と
-                    // CardManagementService.DeleteAsync の finally がキャッシュを破棄済みなので DB の最新状態を読む。
+                    // 拒否した。
                     await NotifyDeleteRefusedAsync(ConcurrencyConflictMessage.ForDeleteRefunded(targetLabel, "カード一覧"));
                 }
                 else
@@ -1104,6 +1103,33 @@ namespace ICCardManager.ViewModels
         {
             _cardRepository.InvalidateCache();
             await NotifyDeleteRefusedAsync(ConcurrencyConflictMessage.ForDelete(targetLabel, "カード一覧"));
+        }
+
+        /// <summary>
+        /// 削除が競合（影響行数 0）で拒否された後に、原因が払い戻しかどうかを読み直して判定する（Issue #2370）
+        /// </summary>
+        /// <returns>
+        /// 読み直したカードが払戻済なら <c>true</c>。存在しない・未払戻・読み直しに失敗した場合は <c>false</c>
+        /// （呼び出し側は従来の汎用の競合文言で案内する）
+        /// </returns>
+        /// <remarks>
+        /// 読み直しはキャッシュを経由するが、0 行のときリポジトリの事後診断と
+        /// <c>CardManagementService.DeleteAsync</c> の finally がキャッシュを破棄済みなので DB の最新状態を読む。
+        /// 読み直しは文言を選ぶためだけのもので、削除が拒否されたことは確定している。ここで例外を外へ出すと
+        /// 案内も一覧の再読込も行われないため、ログを残して汎用の競合文言へ倒す。
+        /// </remarks>
+        private async Task<bool> IsRefundedAfterDeleteConflictAsync(string cardIdm)
+        {
+            try
+            {
+                return (await _cardRepository.GetByIdmAsync(cardIdm))?.IsRefunded == true;
+            }
+            catch (Exception ex)
+            {
+                _logger?.LogWarning(ex,
+                    "交通系ICカードの削除が競合で拒否された後、原因（払い戻し）を確かめる読み直しに失敗しました。汎用の競合文言で案内します");
+                return false;
+            }
         }
 
         /// <summary>
