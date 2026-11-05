@@ -222,7 +222,8 @@
                                    FontSize="{DynamicResource SmallFontSize}"
                                    Margin="0,10,0,0"
                                    TextTrimming="CharacterEllipsis"
-                                   Visibility="{Binding LastBackupFile, Converter={StaticResource BoolToVisibilityConverter}}"/>
+                                   ToolTip="{Binding LastBackupFile}"
+                                   Visibility="{Binding LastBackupFile, Converter={StaticResource StringToVisibilityConverter}}"/>
                     </StackPanel>
                 </GroupBox>
 

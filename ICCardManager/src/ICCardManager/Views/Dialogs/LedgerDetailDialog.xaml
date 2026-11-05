@@ -65,36 +65,43 @@
                     <ColumnDefinition Width="Auto"/>
                 </Grid.ColumnDefinitions>
 
-                <!-- 日付と摘要 -->
-                <StackPanel Grid.Row="0" Grid.Column="0" Orientation="Horizontal">
-                    <TextBlock Text="{Binding DateDisplay}"
+                <!-- 日付と摘要
+                     Issue #2369: 右の金額が表示されるようになり、文字サイズ「特大」・最小幅ではこの列が狭くなる。
+                     横並びの StackPanel は摘要を無限の幅で測るため TextTrimming が効かず「…」も出ずに切れていた。
+                     DockPanel で残りの幅を渡し、収まらなければ「…」で省略して全文はツールチップで示す -->
+                <DockPanel Grid.Row="0" Grid.Column="0" LastChildFill="True">
+                    <TextBlock DockPanel.Dock="Left"
+                               Text="{Binding DateDisplay}"
                                FontSize="{DynamicResource LargeFontSize}"
                                FontWeight="Bold"
                                VerticalAlignment="Center"/>
                     <TextBlock Text="{Binding SummaryDisplay}"
+                               ToolTip="{Binding SummaryDisplay}"
                                FontSize="{DynamicResource BaseFontSize}"
-                               Margin="20,0,0,0"
+                               Margin="20,0,15,0"
                                VerticalAlignment="Center"
+                               HorizontalAlignment="Left"
                                TextTrimming="CharacterEllipsis"
                                MaxWidth="300"/>
-                </StackPanel>
+                </DockPanel>
 
                 <!-- 金額情報 -->
                 <StackPanel Grid.Row="0" Grid.Column="1" Orientation="Horizontal">
-                    <TextBlock Text="{Binding IncomeDisplay}"
+                    <!-- Issue #2369: 色だけで受入・払出を区別しないよう見出しを付ける（金額の無い側は出さない） -->
+                    <TextBlock Text="{Binding IncomeDisplay, StringFormat=受入: {0}}"
                                FontSize="{DynamicResource LargeFontSize}"
                                FontWeight="Bold"
                                Foreground="{DynamicResource SuccessForegroundBrush}"
                                VerticalAlignment="Center"
                                Margin="0,0,15,0"
-                               Visibility="{Binding IncomeDisplay, Converter={StaticResource BoolToVisibilityConverter}}"/>
-                    <TextBlock Text="{Binding ExpenseDisplay}"
+                               Visibility="{Binding IncomeDisplay, Converter={StaticResource StringToVisibilityConverter}}"/>
+                    <TextBlock Text="{Binding ExpenseDisplay, StringFormat=払出: {0}}"
                                FontSize="{DynamicResource LargeFontSize}"
                                FontWeight="Bold"
                                Foreground="{DynamicResource LendingForegroundBrush}"
                                VerticalAlignment="Center"
                                Margin="0,0,15,0"
-                               Visibility="{Binding ExpenseDisplay, Converter={StaticResource BoolToVisibilityConverter}}"/>
+                               Visibility="{Binding ExpenseDisplay, Converter={StaticResource StringToVisibilityConverter}}"/>
                     <TextBlock Text="残高:"
                                FontSize="{DynamicResource BaseFontSize}"
                                VerticalAlignment="Center"/>

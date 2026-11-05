@@ -4,6 +4,7 @@
         xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
         xmlns:vm="clr-namespace:ICCardManager.ViewModels"
+        xmlns:conv="clr-namespace:ICCardManager.Common"
         mc:Ignorable="d"
         d:DataContext="{d:DesignInstance Type=vm:OperationLogSearchViewModel}"
         Title="操作ログ"
@@ -19,6 +20,7 @@
 
     <Window.Resources>
         <BooleanToVisibilityConverter x:Key="BoolToVisibilityConverter"/>
+        <conv:StringToVisibilityConverter x:Key="StringToVisibilityConverter"/>
     </Window.Resources>
 
     <Grid Margin="15">
@@ -409,7 +411,7 @@
                         Command="{Binding OpenExportedFileCommand}"
                         Padding="10,8"
                         Margin="5,0,0,0"
-                        Visibility="{Binding LastExportedFile, Converter={StaticResource BoolToVisibilityConverter}}"
+                        Visibility="{Binding LastExportedFile, Converter={StaticResource StringToVisibilityConverter}}"
                         AutomationProperties.Name="エクスポートしたファイルを開く"
                         AutomationProperties.HelpText="直前にエクスポートしたExcelファイルを既定のアプリで開きます"
                         ToolTip="出力したExcelファイルを開く"/>
