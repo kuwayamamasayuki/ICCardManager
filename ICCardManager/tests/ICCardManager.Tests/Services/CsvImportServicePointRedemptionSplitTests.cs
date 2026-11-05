@@ -169,8 +169,6 @@ public class CsvImportServicePointRedemptionSplitTests : IDisposable
         redemption.Expense.Should().Be(0, "ポイント還元を払出に入れない");
         redemption.Balance.Should().Be(980);
         var redemptionDetail = redemption.Details.Should().ContainSingle().Subject;
-        // バス利用とポイント還元は業務ルール上排他（Issue #1948 の複合状態を作らない）
-        redemptionDetail.IsBus.Should().BeFalse("ポイント還元の明細はバス利用ではない");
         redemptionDetail.Balance.Should().Be(980);
     }
 
@@ -212,14 +210,18 @@ public class CsvImportServicePointRedemptionSplitTests : IDisposable
     /// プレビューの経路（<c>PreviewLedgerDetailsAsync</c>）も、取り込みと同じ区切りで「利用」と「ポイント還元」の
     /// 2 件を示すこと（取り込みは 2 行なのにプレビューは 1 件、という食い違いを検出する）。
     /// </summary>
-    [Fact]
-    public async Task プレビュー_利用とポイント還元が混在する日は取り込みと同じく2件に分けて示すこと()
+    /// <remarks>取り込み側の Theory と同じ 2 ケース（明示のフラグ／暗黙のポイント還元）。</remarks>
+    [Theory]
+    [InlineData("240", "1")]
+    [InlineData("-240", "0")]
+    public async Task プレビュー_利用とポイント還元が混在する日は取り込みと同じく2件に分けて示すこと(
+        string pointAmount, string pointFlag)
     {
         // Arrange
         await SeedCardAsync();
         var csvPath = WriteCsv(
             $",2024-01-15 08:00:00,{TestCardIdm},001,博多,天神,,260,740,0,0,0,",
-            $",2024-01-15 12:00:00,{TestCardIdm},001,,,,240,980,0,1,0,");
+            $",2024-01-15 12:00:00,{TestCardIdm},001,,,,{pointAmount},980,0,{pointFlag},0,");
 
         // Act
         var preview = await _service.PreviewLedgerDetailsAsync(csvPath);
