@@ -649,9 +649,9 @@ namespace ICCardManager.ViewModels
                     // Issue #2263: 認証の後で読む。認証を待つ間に他 PC が職員を削除・変更していることがある。
                     var beforeStaff = await _staffRepository.GetByIdmAsync(staff.StaffIdm);
 
-                    // Issue #1760: 読み取れなかった時点で「対象の職員は現在 is_deleted = 0 として
+                    // Issue #1760: 読み取れなかった時点で「対象の職員は現在 is_deleted が 0 または NULL（未削除）として
                     // 存在しない」ことが確定しているため、UpdateAsync を呼ばずに競合として扱う。
-                    // 通常は UpdateAsync の WHERE（同じ is_deleted = 0）も 0 行になるが、
+                    // 通常は UpdateAsync の WHERE（同じ is_deleted が 0 または NULL（未削除））も 0 行になるが、
                     // 読み取りと書き込みの間に他 PC が職員を復元すると 1 行に一致して成功し、
                     // 更新だけが通って operation_log には 1 行も残らない。カード側
                     // （CardManageViewModel）と同型の欠陥のため同じ扱いにする。
@@ -677,7 +677,7 @@ namespace ICCardManager.ViewModels
                     else
                     {
                         // Issue #1759: UpdateAsync が false を返すのは
-                        // UPDATE ... WHERE staff_idm = @staffIdm AND is_deleted = 0 が
+                        // UPDATE ... WHERE staff_idm = @staffIdm AND (is_deleted = 0 OR is_deleted IS NULL) が
                         // 0 行に一致した場合だけ（Issue #1753）。つまり編集中に対象の職員が
                         // 論理削除されたことを意味する。カード側（CardManageViewModel）と同じ扱いにする。
                         await NotifyUpdateConflictAsync(targetLabel);
@@ -881,7 +881,7 @@ namespace ICCardManager.ViewModels
                     //
                     // Issue #1760: 読めなければ削除自体を行わない。読み取れない時点で対象の職員は
                     // 現在存在しないが、その直後に他 PC が復元すると DeleteAsync（論理削除。
-                    // WHERE is_deleted = 0）は 1 行に一致して成功し得る。従来の
+                    // WHERE is_deleted が 0 または NULL（未削除））は 1 行に一致して成功し得る。従来の
                     // `if (staff != null)` ガードでは、論理削除だけが確定して
                     // operation_log には 1 行も残らなかった。カード側と同じ扱いにする。
                     var staff = await _staffRepository.GetByIdmAsync(targetIdm);
@@ -906,7 +906,7 @@ namespace ICCardManager.ViewModels
                     else
                     {
                         // Issue #1759: DeleteAsync（論理削除）が false を返すのは
-                        // UPDATE ... WHERE staff_idm = @staffIdm AND is_deleted = 0 が
+                        // UPDATE ... WHERE staff_idm = @staffIdm AND (is_deleted = 0 OR is_deleted IS NULL) が
                         // 0 行に一致した場合だけ。つまり他 PC が先に削除したことを意味する。
                         // カード側の削除は CardOperationResult を返し Issue #1109 で是正済みだが、
                         // 職員側は bool のままで案内が「削除に失敗しました」の9文字だけだった。

@@ -547,7 +547,7 @@ namespace ICCardManager.Services
                     var ledgerId = await _ledgerRepository.InsertAsync(ledger).ConfigureAwait(false);
                     ledger.Id = ledgerId;
 
-                    // Issue #1953: 影響行数 0（WHERE is_deleted = 0 に一致しない）は競合であり、
+                    // Issue #1953: 影響行数 0（WHERE is_deleted が 0 または NULL（未削除）に一致しない）は競合であり、
                     // 握りつぶすと ledger に貸出中レコードだけが入り is_lent = 0 のままコミットされる。
                     // 手元に無いカードが次のタッチで新規貸出として再記録されるため、
                     // 例外でトランザクションごと巻き戻す（BusinessException は SQLITE_BUSY ではないので
