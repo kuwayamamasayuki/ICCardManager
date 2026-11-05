@@ -88,8 +88,8 @@ namespace ICCardManager.Common
         /// </remarks>
         public static ValidationResult ValidateBackupPath(string path)
             => ValidateBackupPath(
-                path, UncReachabilityChecker, DefaultUncTimeoutMs, DefaultWritePermissionChecker, DefaultWriteProbeTimeoutMs,
-                DefaultDriveReadinessChecker, DefaultDriveReadyTimeoutMs);
+                path, UncReachabilityChecker, DefaultUncTimeoutMs, DefaultWritePermissionChecker, WriteProbeTimeoutMs,
+                DefaultDriveReadinessChecker, DriveReadyTimeoutMs);
 
         /// <summary>
         /// バックアップパスの非同期検証（Issue #1269）。UI スレッドをブロックせず、
@@ -104,7 +104,7 @@ namespace ICCardManager.Common
             string path, CancellationToken cancellationToken = default)
             => ValidateBackupPathAsync(
                 path, UncReachabilityChecker, DefaultUncTimeoutMs,
-                DefaultWritePermissionChecker, DefaultWriteProbeTimeoutMs, cancellationToken);
+                DefaultWritePermissionChecker, WriteProbeTimeoutMs, cancellationToken);
 
         /// <summary>
         /// テスト容易性のための内部 API。到達確認・書き込み確認の関数と上限を外部から注入できる。
@@ -136,10 +136,12 @@ namespace ICCardManager.Common
                 return Task.FromCanceled<ValidationResult>(cancellationToken);
             }
 
+            // テスト用の上限の差し替え（AsyncLocal）は呼び出し元のスレッドで読んでから渡す
+            var driveReadyTimeoutMs = DriveReadyTimeoutMs;
             var validation = DedicatedThread.Run(
                 () => ValidateBackupPath(
                     path, uncReachabilityChecker, uncTimeoutMs, writePermissionChecker, writeProbeTimeoutMs,
-                    DefaultDriveReadinessChecker, DefaultDriveReadyTimeoutMs));
+                    DefaultDriveReadinessChecker, driveReadyTimeoutMs));
 
             return cancellationToken.CanBeCanceled
                 ? WaitWithCancellationAsync(validation, cancellationToken)
@@ -175,8 +177,8 @@ namespace ICCardManager.Common
             Func<string, int, bool> uncReachabilityChecker,
             int uncTimeoutMs)
             => ValidateBackupPath(
-                path, uncReachabilityChecker, uncTimeoutMs, DefaultWritePermissionChecker, DefaultWriteProbeTimeoutMs,
-                DefaultDriveReadinessChecker, DefaultDriveReadyTimeoutMs);
+                path, uncReachabilityChecker, uncTimeoutMs, DefaultWritePermissionChecker, WriteProbeTimeoutMs,
+                DefaultDriveReadinessChecker, DriveReadyTimeoutMs);
 
         /// <summary>
         /// テスト容易性のための内部 API。到達確認・書き込み確認・ドライブの準備確認の関数と上限を外部から注入できる。
@@ -628,10 +630,12 @@ namespace ICCardManager.Common
 
             return (path, timeoutMs) =>
             {
+                // 末尾の区切り文字だけが違うパス（C:\Backup と C:\Backup\）は同じ確認とみなす
+                var key = path.TrimEnd(PathSeparators);
                 Task<T> current;
                 lock (pendingChecksLock)
                 {
-                    if (!pendingChecks.TryGetValue(path, out var pending) || pending.IsCompleted)
+                    if (!pendingChecks.TryGetValue(key, out var pending) || pending.IsCompleted)
                     {
                         // 終わった確認を辞書から外す（使ったパスの数だけ残り続けないように）
                         foreach (var completedPath in pendingChecks.Where(p => p.Value.IsCompleted).Select(p => p.Key).ToList())
@@ -640,7 +644,7 @@ namespace ICCardManager.Common
                         }
 
                         pending = DedicatedThread.Run(() => check(path));
-                        pendingChecks[path] = pending;
+                        pendingChecks[key] = pending;
                     }
 
                     current = pending;
@@ -677,8 +681,10 @@ namespace ICCardManager.Common
         /// </summary>
         /// <param name="isReady">
         /// ドライブのルート（<c>Z:\</c> 等）が使えるかを返す本体（既定は <see cref="DriveInfo.IsReady"/>）。
-        /// 切断されたマップドネットワークドライブでは戻らないことがある。例外を投げた場合は従来どおり致命的としない
-        /// （他の検証項目に任せる）。
+        /// 切断されたマップドネットワークドライブでは戻らないことがある。例外を投げた場合は<b>種類を問わず</b>致命的としない
+        /// （他の検証項目と実際の書き込みに任せる）。以前の項目 8 は Path API の <see cref="PathTooLongException"/>・
+        /// <see cref="ArgumentException"/> だけを捕捉し、<see cref="DriveInfo.IsReady"/> からのそれ以外の例外は検証の呼び出し元へ伝わっていた。
+        /// 確認を専用スレッドへ移すと例外は別のスレッドで起きるため、到達確認・書き込み確認と同じく結果へ変換する。
         /// </param>
         /// <remarks>
         /// マップドネットワークドライブ（共有モード、Issue #1559）は UNC 扱いにならず、UNC の到達確認（項目 7）を通らない。
@@ -902,6 +908,50 @@ namespace ICCardManager.Common
             }
 
             return null;
+        }
+
+        /// <summary>
+        /// <see cref="WriteProbeTimeoutMs"/> の AsyncLocal バッキングストア。
+        /// </summary>
+        private static readonly AsyncLocal<int?> WriteProbeTimeoutMsOverride = new();
+
+        /// <summary>
+        /// 公開エントリポイントが使う書き込み確認の上限（ミリ秒）。既定は <see cref="DefaultWriteProbeTimeoutMs"/>。
+        /// </summary>
+        /// <remarks>
+        /// テスト用フック（Issue #2383）。<see cref="WriteProbeFile"/> で戻らない書き込みを差し込むテストが、本番の上限（10 秒）を
+        /// 実時間で待たずに済むよう短くする。差し替えは設定したテストの実行コンテキストにのみ見える。
+        /// </remarks>
+        internal static int WriteProbeTimeoutMs
+        {
+            get => WriteProbeTimeoutMsOverride.Value ?? DefaultWriteProbeTimeoutMs;
+            set => WriteProbeTimeoutMsOverride.Value = value;
+        }
+
+        /// <summary>
+        /// <see cref="DriveReadyTimeoutMs"/> の AsyncLocal バッキングストア。
+        /// </summary>
+        private static readonly AsyncLocal<int?> DriveReadyTimeoutMsOverride = new();
+
+        /// <summary>
+        /// 公開エントリポイントが使うドライブの準備確認の上限（ミリ秒）。既定は <see cref="DefaultDriveReadyTimeoutMs"/>。
+        /// テスト用フック（<see cref="WriteProbeTimeoutMs"/> と同じ）。
+        /// </summary>
+        internal static int DriveReadyTimeoutMs
+        {
+            get => DriveReadyTimeoutMsOverride.Value ?? DefaultDriveReadyTimeoutMs;
+            set => DriveReadyTimeoutMsOverride.Value = value;
+        }
+
+        /// <summary>
+        /// テスト用フックの差し替え（上限・確認の本体）をすべて既定へ戻す。
+        /// </summary>
+        internal static void ResetProbeHooks()
+        {
+            WriteProbeFileOverride.Value = null;
+            DriveIsReadyProbeOverride.Value = null;
+            WriteProbeTimeoutMsOverride.Value = null;
+            DriveReadyTimeoutMsOverride.Value = null;
         }
 
         /// <summary>

@@ -126,6 +126,20 @@ public sealed class PathValidatorWriteProbeTests : IDisposable
     }
 
     [Fact]
+    public void 末尾の区切り文字だけが違うパスは同じ書き込み確認を共有すること()
+    {
+        // C:\Backup と C:\Backup\ は同じフォルダーなので、応答しない共有へ確認を 2 本走らせない
+        var checker = PathValidator.CreateWritePermissionChecker(HangingCheck);
+
+        checker(FolderPath, 50).IsValid.Should().BeFalse();
+        WaitUntilCheckStarted();
+        checker(FolderPath + "\\", 50).IsValid.Should().BeFalse();
+        checker(FolderPath + "/", 50).IsValid.Should().BeFalse();
+
+        CheckCallCount.Should().Be(1);
+    }
+
+    [Fact]
     public void 終わった書き込み確認の結果は使い回さず次の呼び出しで確認し直すこと()
     {
         var calls = 0;

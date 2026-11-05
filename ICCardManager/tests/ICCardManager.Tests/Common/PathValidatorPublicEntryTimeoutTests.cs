@@ -22,17 +22,32 @@ namespace ICCardManager.Tests.Common;
 /// </para>
 /// <para>
 /// 既定の確認は同じパス（ドライブはルート）への確認を 1 本に限るので、差し替えは自分専用のフォルダーと
-/// 他のテストが使わないドライブ文字（<see cref="HangingDriveRoot"/>）でだけ介入し、それ以外は既定の動作に委ねる。
-/// 上限は本番の既定値（書き込み 10 秒・ドライブ 5 秒）なので、各テストはその分だけ時間がかかる。
+/// テストごとに別の、他のテストが使わないドライブ文字（<see cref="SyncDriveRoot"/>・<see cref="AsyncDriveRoot"/>）でだけ介入し、
+/// それ以外は既定の動作に委ねる（同じドライブを共有すると、前のテストで解放した確認に次のテストが相乗りし得る）。
+/// </para>
+/// <para>
+/// 上限はテスト用フック（<c>WriteProbeTimeoutMs</c>・<c>DriveReadyTimeoutMs</c>）で 1 秒に縮め、本番の上限（10 秒・5 秒）を
+/// 実時間で待たない（testing.md「実時間の待ちを仕様の代わりにしない」）。配線を上限の無い形に戻すと、
+/// 戻らない確認が差し込みの上限（<see cref="HangCap"/>）まで返らず、<see cref="ReturnDeadline"/> を超えて赤になる。
+/// 確認の上限そのものの挙動（上限で打ち切る・1 本に限る）は <c>PathValidatorWriteProbeTests</c> が確かめる。
 /// </para>
 /// </remarks>
 public sealed class PathValidatorPublicEntryTimeoutTests : IDisposable
 {
-    /// <summary>戻らない準備確認を差し込むドライブ（他のテストが使わない文字）。</summary>
-    private const string HangingDriveRoot = @"Q:\";
+    /// <summary>同期の検証のテストで戻らない準備確認を差し込むドライブ（他のテストが使わない文字）。</summary>
+    private const string SyncDriveRoot = @"Q:\";
+
+    /// <summary>非同期の検証のテストで戻らない準備確認を差し込むドライブ（同上。同期のテストとも分ける）。</summary>
+    private const string AsyncDriveRoot = @"R:\";
+
+    /// <summary>テストで使う確認の上限（ミリ秒）。</summary>
+    private const int TestTimeoutMs = 1_000;
 
     /// <summary>上限で返ったかを判定する余裕込みの待ち時間。</summary>
-    private static readonly TimeSpan ReturnDeadline = TimeSpan.FromSeconds(30);
+    private static readonly TimeSpan ReturnDeadline = TimeSpan.FromSeconds(8);
+
+    /// <summary>戻らない確認が自ら戻るまでの時間（<see cref="ReturnDeadline"/> より長く取る）。</summary>
+    private static readonly TimeSpan HangCap = TimeSpan.FromSeconds(15);
 
     /// <summary>戻らない確認を止めておくゲート。</summary>
     private readonly ManualResetEventSlim _release = new(false);
@@ -67,7 +82,7 @@ public sealed class PathValidatorPublicEntryTimeoutTests : IDisposable
     {
         if (testFile.StartsWith(_testDirectory, StringComparison.OrdinalIgnoreCase))
         {
-            _release.Wait(TimeSpan.FromSeconds(60));
+            _release.Wait(HangCap);
             return;
         }
 
@@ -75,24 +90,31 @@ public sealed class PathValidatorPublicEntryTimeoutTests : IDisposable
         File.Delete(testFile);
     }
 
-    /// <summary><see cref="HangingDriveRoot"/> の準備確認だけを戻らなくする（それ以外は既定の確認）。</summary>
-    private bool HangingDriveProbe(string root)
+    /// <summary>指定したドライブの準備確認だけを戻らなくする（それ以外は既定の確認）。</summary>
+    private Func<string, bool> HangingDriveProbe(string hangingRoot) => root =>
     {
-        if (string.Equals(root, HangingDriveRoot, StringComparison.OrdinalIgnoreCase))
+        if (string.Equals(root, hangingRoot, StringComparison.OrdinalIgnoreCase))
         {
-            return _release.Wait(TimeSpan.FromSeconds(60));
+            return _release.Wait(HangCap);
         }
 
         return new DriveInfo(root).IsReady;
-    }
+    };
 
     private static string WriteTimeoutMessage
-        => PathValidator.CreateWriteProbeTimeoutFailure(PathValidator.DefaultWriteProbeTimeoutMs).ErrorMessage!;
+        => PathValidator.CreateWriteProbeTimeoutFailure(TestTimeoutMs).ErrorMessage!;
 
-    private static string DriveTimeoutMessage
-        => PathValidator.CreateDriveReadyTimeoutFailure(HangingDriveRoot, PathValidator.DefaultDriveReadyTimeoutMs).ErrorMessage!;
+    private static string DriveTimeoutMessage(string root)
+        => PathValidator.CreateDriveReadyTimeoutFailure(root, TestTimeoutMs).ErrorMessage!;
 
-    private string HangingDrivePath => Path.Combine(HangingDriveRoot, $"PathValidatorPublicEntry_{Guid.NewGuid():N}", "backup");
+    private static string DrivePath(string root) => Path.Combine(root, $"PathValidatorPublicEntry_{Guid.NewGuid():N}", "backup");
+
+    /// <summary>上限を縮め、確認の本体を差し替える（テストの実行コンテキストにのみ見える）。</summary>
+    private static void ShortenTimeouts()
+    {
+        PathValidator.WriteProbeTimeoutMs = TestTimeoutMs;
+        PathValidator.DriveReadyTimeoutMs = TestTimeoutMs;
+    }
 
     private static async Task<PathValidator.ValidationResult> AwaitWithDeadline(Task<PathValidator.ValidationResult> validation)
     {
@@ -104,6 +126,7 @@ public sealed class PathValidatorPublicEntryTimeoutTests : IDisposable
     [Fact]
     public void 公開の同期の検証は戻らない書き込み確認を上限で打ち切ること()
     {
+        ShortenTimeouts();
         PathValidator.WriteProbeFile = HangingWriteProbe;
         try
         {
@@ -117,13 +140,14 @@ public sealed class PathValidatorPublicEntryTimeoutTests : IDisposable
         }
         finally
         {
-            PathValidator.WriteProbeFile = null;
+            PathValidator.ResetProbeHooks();
         }
     }
 
     [Fact]
     public async Task 公開の非同期の検証は戻らない書き込み確認を上限で打ち切ること()
     {
+        ShortenTimeouts();
         PathValidator.WriteProbeFile = HangingWriteProbe;
         try
         {
@@ -134,62 +158,46 @@ public sealed class PathValidatorPublicEntryTimeoutTests : IDisposable
         }
         finally
         {
-            PathValidator.WriteProbeFile = null;
-        }
-    }
-
-    [Fact]
-    public void 到達確認だけを注入する内部の検証も戻らない書き込み確認を上限で打ち切ること()
-    {
-        // 3 引数の内部オーバーロード（既存のテストが使う）も、書き込み確認は上限付きの既定を使う
-        PathValidator.WriteProbeFile = HangingWriteProbe;
-        try
-        {
-            var result = PathValidator.ValidateBackupPath(_testDirectory, (_, _) => true, PathValidator.DefaultUncTimeoutMs);
-
-            result.IsValid.Should().BeFalse();
-            result.ErrorMessage.Should().Be(WriteTimeoutMessage);
-        }
-        finally
-        {
-            PathValidator.WriteProbeFile = null;
+            PathValidator.ResetProbeHooks();
         }
     }
 
     [Fact]
     public void 公開の同期の検証は戻らないドライブの準備確認を上限で打ち切ること()
     {
-        PathValidator.DriveIsReadyProbe = HangingDriveProbe;
+        ShortenTimeouts();
+        PathValidator.DriveIsReadyProbe = HangingDriveProbe(SyncDriveRoot);
         try
         {
             var stopwatch = Stopwatch.StartNew();
-            var result = PathValidator.ValidateBackupPath(HangingDrivePath);
+            var result = PathValidator.ValidateBackupPath(DrivePath(SyncDriveRoot));
             stopwatch.Stop();
 
             result.IsValid.Should().BeFalse();
-            result.ErrorMessage.Should().Be(DriveTimeoutMessage);
+            result.ErrorMessage.Should().Be(DriveTimeoutMessage(SyncDriveRoot));
             stopwatch.Elapsed.Should().BeLessThan(ReturnDeadline);
         }
         finally
         {
-            PathValidator.DriveIsReadyProbe = null;
+            PathValidator.ResetProbeHooks();
         }
     }
 
     [Fact]
     public async Task 公開の非同期の検証は戻らないドライブの準備確認を上限で打ち切ること()
     {
-        PathValidator.DriveIsReadyProbe = HangingDriveProbe;
+        ShortenTimeouts();
+        PathValidator.DriveIsReadyProbe = HangingDriveProbe(AsyncDriveRoot);
         try
         {
-            var result = await AwaitWithDeadline(PathValidator.ValidateBackupPathAsync(HangingDrivePath));
+            var result = await AwaitWithDeadline(PathValidator.ValidateBackupPathAsync(DrivePath(AsyncDriveRoot)));
 
             result.IsValid.Should().BeFalse();
-            result.ErrorMessage.Should().Be(DriveTimeoutMessage);
+            result.ErrorMessage.Should().Be(DriveTimeoutMessage(AsyncDriveRoot));
         }
         finally
         {
-            PathValidator.DriveIsReadyProbe = null;
+            PathValidator.ResetProbeHooks();
         }
     }
 }
