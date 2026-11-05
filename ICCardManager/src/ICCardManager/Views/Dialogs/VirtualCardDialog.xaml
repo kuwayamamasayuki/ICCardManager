@@ -72,7 +72,8 @@
                   AutomationProperties.Name="利用履歴一覧"
                   AutomationProperties.HelpText="仮想交通系ICカードの利用履歴を入力します。セルをクリックして編集できます。">
             <DataGrid.Columns>
-                <!-- Issue #2404: 日付の列は文字サイズで必要な幅が変わるので、内容に合わせて広げ、従来の幅を下限に残す -->
+                <!-- Issue #2404: 日付の列は文字サイズで必要な幅が変わるので、内容に合わせて広げ、従来の幅を下限に残す。
+                     編集中の DatePicker が表示より広いと列はその幅まで広がり、編集後も縮まない（DEBUG 専用の画面なので許容する） -->
                 <DataGridTemplateColumn Header="日付" Width="Auto" MinWidth="130">
                     <DataGridTemplateColumn.CellTemplate>
                         <DataTemplate>
