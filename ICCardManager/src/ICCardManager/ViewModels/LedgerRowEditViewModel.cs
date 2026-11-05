@@ -584,6 +584,9 @@ namespace ICCardManager.ViewModels
             var ledger = await _ledgerRepository.GetByIdAsync(ledgerDto.Id);
             if (ledger == null)
             {
+                // Issue #2378: 黙って戻ると空のダイアログが開き、職員が入力して保存を押すまで競合が分からない。
+                // 呼び出し元（履歴パネル）は開く前にも確かめるが、その確認とこの読み取りの間に消えた場合の受け皿
+                NotifyRowGoneConflict(ConcurrencyConflictMessage.ForOpenReloadOnClose(_editTargetLabel, "履歴一覧"));
                 return;
             }
 
@@ -1487,8 +1490,10 @@ namespace ICCardManager.ViewModels
         /// 何度保存しても同じ失敗になるので、保存を無効にし、入力を「未保存の変更」として残さない
         /// （残すと閉じるときに破棄の確認が出る。<c>LedgerDetailViewModel</c> #2177 と同じ判断）。
         /// 入力欄は消さない（#1757「エラー表示で入力内容を消さない」。控えを取ってから閉じられる）。
+        /// Issue #2378: 開く時点で行が無かった場合も同じ状態にする（文言だけを「開けませんでした」に替える）。
         /// </remarks>
-        private void NotifyRowGoneConflict()
+        /// <param name="message">案内の文言。省略時は保存の競合の文言（<see cref="ConcurrencyConflictMessage.ForUpdateReloadOnClose"/>）</param>
+        private void NotifyRowGoneConflict(string? message = null)
         {
             _conflictDetected = true;
             _hasFieldChanges = false;
@@ -1497,7 +1502,7 @@ namespace ICCardManager.ViewModels
             CanDelete = false;
             SkipToNextCommand.NotifyCanExecuteChanged();
             BackCommand.NotifyCanExecuteChanged();
-            StatusMessage = ConcurrencyConflictMessage.ForUpdateReloadOnClose(_editTargetLabel, "履歴一覧");
+            StatusMessage = message ?? ConcurrencyConflictMessage.ForUpdateReloadOnClose(_editTargetLabel, "履歴一覧");
         }
 
         /// <summary>

@@ -353,6 +353,24 @@ public partial class HistoryPanelViewModel
         // Issue #1740: 残高の自動計算に使う直前行の残高を、ダイアログを開く前に確定させる
         var previousBalance = FindPreviousBalanceForEdit(ledger);
 
+        // Issue #2378: 一覧に表示されていても、他 PC の削除・統合で行が既に無いことがある。
+        // 開いてしまうと空のダイアログになり、職員が入力して保存を押すまで競合が分からない（入力が無駄になる）。
+        // 開く前に確かめ、無ければ保存時の競合（#2325）と同じものを読み直してから案内する
+        // （文言が「再読み込みしました」と述べる以上、案内より前に読み直す。#1753）。
+        // 対象の名指しは読み直しで一覧が作り直される前に確定させる（#1759）。
+        if (await _ledgerRepository.GetByIdAsync(ledger.Id) == null)
+        {
+            var target = $"履歴「{ledger.DateDisplay} {ledger.Summary}」";
+            await LoadHistoryLedgersAsync();
+            await Host.RefreshDashboardAsync();
+            // 消えた行が貸出中レコード（返却された）ならカードの貸出状態も変わっている（#2325 と同じ）
+            await Host.RefreshLentCardsAsync();
+            await Host.CheckWarningsAsync();
+            await CheckAndNotifyConsistencyAsync();
+            _navigationService.ShowError(ConcurrencyConflictMessage.ForOpen(target, "履歴一覧"), "履歴の修正");
+            return;
+        }
+
         // Issue #2007: 導入行なら、導入時残高の誤りの訂正案をダイアログへ渡す
         var initialBalanceCorrection = await ResolveInitialBalanceCorrectionForEditAsync(ledger);
 
