@@ -1,4 +1,7 @@
+using System;
 using System.Diagnostics;
+using System.IO;
+using System.Threading;
 using FluentAssertions;
 using ICCardManager.Common;
 using ICCardManager.Tests.Infrastructure;
@@ -54,5 +57,42 @@ public sealed class PathValidatorUncReachabilityThreadPoolTests
 
         // 対の表明: 確認を待っている間もプールは塞がったままだった
         saturator.SentinelStarted.Should().BeFalse("確認を待っている間も、プールが塞がったままであること");
+    }
+
+    [Fact]
+    public void 非同期の検証はスレッドプールが塞がっていても始まって終わること()
+    {
+        // Issue #2383: 以前は検証全体を Task.Run で起動していたため、プールが塞がっていると検証そのものが始まらず、
+        // 応答しない共有への書き込み確認はプールのスレッドを上限なく塞いでいた。検証全体と書き込み確認を専用スレッドで走らせる
+        var folder = Path.Combine(Path.GetTempPath(), $"PathValidatorThreadPool_{Guid.NewGuid():N}");
+        Directory.CreateDirectory(folder);
+        try
+        {
+            // Arrange
+            using var saturator = ThreadPoolSaturator.Saturate(ReserveBlockers);
+            saturator.IsSaturated.Should().BeTrue(
+                "前提: プールが塞がっていて、Task.Run の処理が始まらないこと（塞げていなければ本テストは何も検証しない）");
+
+            // Act
+            var validation = PathValidator.ValidateBackupPathAsync(
+                folder,
+                (_, _) => true,
+                TimeoutMs,
+                PathValidator.CreateWritePermissionChecker(_ => PathValidator.ValidationResult.Success()),
+                PathValidator.DefaultWriteProbeTimeoutMs,
+                CancellationToken.None);
+            var completed = validation.Wait(TimeoutMs);
+
+            // Assert
+            completed.Should().BeTrue("検証は専用スレッドで走るため、プールの空きを待たずに始まる（Issue #2383）");
+            validation.Result.IsValid.Should().BeTrue();
+
+            // 対の表明: 検証を待っている間もプールは塞がったままだった
+            saturator.SentinelStarted.Should().BeFalse("検証を待っている間も、プールが塞がったままであること");
+        }
+        finally
+        {
+            Directory.Delete(folder, recursive: true);
+        }
     }
 }
