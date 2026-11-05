@@ -3,8 +3,8 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Reflection;
-using System.Text.RegularExpressions;
 using System.Windows.Threading;
+using System.Xml.Linq;
 using FluentAssertions;
 using Xunit;
 
@@ -49,6 +49,8 @@ public class CoverageInstrumentationPrerequisiteTests
     /// <summary>
     /// 計測の対象になるモジュール。テストの csproj の ProjectReference（出力へ PDB ごと置かれるプロジェクト）から導出する。
     /// 名前で列挙すると、参照を足したプロジェクトが検査から黙って漏れる（development-conventions.md #1786）。
+    /// csproj は XML として読み（属性の順序・引用符・条件付きの参照に依存しない）、参照先が参照するプロジェクトと、
+    /// すべてのプロジェクトに効く Directory.Build.props / .targets の参照もたどる。
     /// </summary>
     public static IEnumerable<object[]> MeasuredModules() =>
         ReferencedProjectAssemblyNames().Select(name => new object[] { name });
@@ -80,6 +82,49 @@ public class CoverageInstrumentationPrerequisiteTests
             $"{moduleName} の enum 定数の定義がテストの出力（{outputDirectory}）に無いと、coverlet が {moduleName} を計装できず" +
             "カバレッジから黙って抜ける。ICCardManager.Tests.csproj の CopyWpfReferenceAssembliesForCoverage に" +
             "そのアセンブリを加えること（データコレクターのランタイムが解決できる facade なら ResolvedByCollectorRuntime の注記を参照）");
+    }
+
+    /// <summary>
+    /// 計測するモジュールの導出を既知の入力で固定する。属性の順序・引用符・条件付きの参照・参照先が参照するプロジェクト・
+    /// 共有の Directory.Build.props の参照・AssemblyName の上書きのどれでも、参照を黙って取りこぼさないこと。
+    /// </summary>
+    [Fact]
+    public void 計測するモジュールの導出は書き方によらず推移的な参照までたどること()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "coverage-prereq-projects-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            void Write(string relative, string content)
+            {
+                var path = Path.Combine(root, relative);
+                Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+                File.WriteAllText(path, content);
+            }
+
+            Write(@"tests\T\T.csproj",
+                "<Project Sdk=\"Microsoft.NET.Sdk\"><ItemGroup>" +
+                "<ProjectReference Condition=\"'$(Configuration)' == 'Release'\" Include='..\\..\\src\\A\\A.csproj' />" +
+                "</ItemGroup></Project>");
+            Write(@"src\A\A.csproj",
+                "<Project><PropertyGroup><AssemblyName>Alpha</AssemblyName></PropertyGroup>" +
+                "<ItemGroup><ProjectReference Include=\"..\\B\\B.csproj\"></ProjectReference></ItemGroup></Project>");
+            Write(@"src\B\B.csproj", "<Project />");
+            Write("Directory.Build.props",
+                "<Project><ItemGroup><ProjectReference Include=\"$(MSBuildThisFileDirectory)src\\C\\C.csproj\" /></ItemGroup></Project>");
+            Write(@"src\C\C.csproj", "<Project />");
+
+            ReferencedProjectAssemblyNames(Path.Combine(root, "tests", "T", "T.csproj"), root)
+                .Should().BeEquivalentTo("Alpha", "B", "C");
+
+            // 展開できないプロパティを含む参照は、黙って飛ばさず止める
+            Write(@"src\B\B.csproj", "<Project><ItemGroup><ProjectReference Include=\"$(Unknown)D.csproj\" /></ItemGroup></Project>");
+            Action act = () => ReferencedProjectAssemblyNames(Path.Combine(root, "tests", "T", "T.csproj"), root).ToList();
+            act.Should().Throw<InvalidDataException>().WithMessage("*$(Unknown)*");
+        }
+        finally
+        {
+            try { Directory.Delete(root, recursive: true); } catch { /* ignore */ }
+        }
     }
 
     /// <summary>
@@ -200,14 +245,66 @@ public class CoverageInstrumentationPrerequisiteTests
 
     private static IEnumerable<string> ReferencedProjectAssemblyNames()
     {
-        var testProjectDirectory = Path.Combine(TestPaths.GetSolutionRoot(), "tests", "ICCardManager.Tests");
-        var csproj = File.ReadAllText(Path.Combine(testProjectDirectory, "ICCardManager.Tests.csproj"));
-        foreach (Match reference in Regex.Matches(csproj, @"<ProjectReference\s+Include=""([^""]+)"""))
+        var solutionRoot = TestPaths.GetSolutionRoot();
+        return ReferencedProjectAssemblyNames(
+            Path.Combine(solutionRoot, "tests", "ICCardManager.Tests", "ICCardManager.Tests.csproj"), solutionRoot);
+    }
+
+    private static IEnumerable<string> ReferencedProjectAssemblyNames(string testProject, string solutionRoot)
+    {
+        var sharedImports = new[] { "Directory.Build.props", "Directory.Build.targets" }
+            .Select(name => Path.Combine(solutionRoot, name))
+            .Where(File.Exists)
+            .ToList();
+
+        var visited = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var pending = new Queue<string>(ProjectReferences(testProject, testProject, sharedImports));
+        while (pending.Count > 0)
         {
-            var path = Path.GetFullPath(Path.Combine(testProjectDirectory, reference.Groups[1].Value));
-            var assemblyName = Regex.Match(File.ReadAllText(path), @"<AssemblyName>\s*([^<\s]+)\s*</AssemblyName>");
-            yield return assemblyName.Success ? assemblyName.Groups[1].Value : Path.GetFileNameWithoutExtension(path);
+            var project = pending.Dequeue();
+            if (!visited.Add(project))
+            {
+                continue;
+            }
+
+            foreach (var next in ProjectReferences(project, project, sharedImports))
+            {
+                pending.Enqueue(next);
+            }
         }
+
+        return visited.Select(AssemblyNameOf).Distinct(StringComparer.OrdinalIgnoreCase).OrderBy(n => n, StringComparer.Ordinal);
+    }
+
+    /// <summary>プロジェクト（と共有の import）の ProjectReference を、そのプロジェクトのフォルダを基準に絶対パスにする。</summary>
+    private static IEnumerable<string> ProjectReferences(string project, string baseProject, IEnumerable<string> sharedImports)
+    {
+        // import したファイル（Directory.Build.*）の相対パスも、MSBuild と同じく import した側のプロジェクトを基準にする
+        var baseDirectory = Path.GetDirectoryName(baseProject)!;
+        return new[] { project }.Concat(sharedImports)
+            .SelectMany(file => XDocument.Load(file).Descendants()
+                .Where(e => e.Name.LocalName == "ProjectReference")
+                .Select(e => (string?)e.Attribute("Include"))
+                .Where(include => !string.IsNullOrWhiteSpace(include))
+                .SelectMany(include => include!.Split(';'))
+                .Select(include => include.Trim())
+                .Where(include => include.Length > 0)
+                .Select(include => include.Replace(
+                    "$(MSBuildThisFileDirectory)", Path.GetDirectoryName(file) + Path.DirectorySeparatorChar))
+                .Select(include => include.Contains("$(")
+                    ? throw new InvalidDataException(
+                        $"{file} の ProjectReference「{include}」のプロパティを展開できないため、計測するモジュールを導出できません")
+                    : include))
+            .Select(include => Path.GetFullPath(Path.Combine(baseDirectory, include)));
+    }
+
+    private static string AssemblyNameOf(string project)
+    {
+        var assemblyName = XDocument.Load(project).Descendants()
+            .Where(e => e.Name.LocalName == "AssemblyName")
+            .Select(e => e.Value.Trim())
+            .LastOrDefault(v => v.Length > 0);
+        return assemblyName ?? Path.GetFileNameWithoutExtension(project);
     }
 
     private static bool ExistsInDirectory(string directory, string assemblyName) =>
