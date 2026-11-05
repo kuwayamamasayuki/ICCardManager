@@ -41,6 +41,8 @@ namespace ICCardManager.Tests.Views;
 /// 許される型であることを求める。DataTemplate の項目型に到達できない（ItemsSource が非ジェネリックの <c>IEnumerable</c>・
 /// <c>object</c> 等）とき、無関係な型が同じ名前の bool プロパティを持っていると見逃す。
 /// コンバーターは型名の完全一致で判定するため、<c>BooleanToVisibilityConverter</c> の派生クラスは対象にならない（現在は無い）。
+/// リソースキーは全画面で共通に扱うため、ある画面が型の限られたコンバーターに付けたキー名を別の画面が別のコンバーターで定義すると、
+/// その画面の正しい束縛まで違反になる（安全側の誤検出。現在は無い）。
 /// </para>
 /// </remarks>
 public class VisibilityConverterBindingTypeConventionTests
@@ -451,6 +453,27 @@ public class VisibilityConverterBindingTypeConventionTests
         files["LedgerDetailDialog.xaml"].Should()
             .Contain(@"Text=""{Binding IncomeDisplay, StringFormat=受入: {0}}""")
             .And.Contain(@"Text=""{Binding ExpenseDisplay, StringFormat=払出: {0}}""");
+    }
+
+    [Fact]
+    public void 是正後_見出しの摘要は金額の左の残りの幅で省略されること()
+    {
+        // 金額が表示されるようになり、文字サイズ「特大」・最小幅では見出しの左の列が狭くなる（レビュー 5 回目で検出）。
+        // 横並びの StackPanel の中では摘要が無限の幅で測られ、TextTrimming が効かず「…」も出ずに切れる
+        var xaml = FillForegroundPairs.EnumerateProductionXaml().Single(f => f.Name == "LedgerDetailDialog.xaml").Text;
+        var summary = xaml.IndexOf(@"Text=""{Binding SummaryDisplay}""", StringComparison.Ordinal);
+        summary.Should().BeGreaterThan(0);
+
+        var before = xaml.Substring(0, summary);
+        var container = new[] { "<StackPanel", "<DockPanel", "<Grid" }
+            .Select(tag => (Tag: tag, Index: before.LastIndexOf(tag, StringComparison.Ordinal)))
+            .OrderByDescending(c => c.Index)
+            .First();
+
+        container.Tag.Should().Be("<DockPanel", "摘要に残りの幅を渡して省略させる");
+        xaml.Substring(summary, xaml.IndexOf("/>", summary, StringComparison.Ordinal) - summary).Should()
+            .Contain(@"TextTrimming=""CharacterEllipsis""")
+            .And.Contain(@"ToolTip=""{Binding SummaryDisplay}""", "省略した全文を確かめられること");
     }
 
     #endregion
