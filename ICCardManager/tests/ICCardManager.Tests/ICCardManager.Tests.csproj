@@ -70,7 +70,8 @@
     探すのはモジュールと同じフォルダと自身のランタイムだけなので、WindowsBase 等が出力に無いと
     「Unable to instrument module」で本体だけが計測から黙って抜ける（CI が DebugDataViewer だけの数値を報告していた）。
     実行時は .NET Framework が厳密名のアセンブリを GAC から先に読むため、ここに置いたファイルはテストの動作に使われない。
-    抜けたことは CI の Report coverage が本体のモジュールの有無で検出する（CiWorkflowConventionTests が固定）。
+    出力に無いアセンブリの enum を既定値に使う変更は CoverageInstrumentationPrerequisiteTests が先に止め、
+    それでも抜けたことは CI の Report coverage が本体のモジュールの有無で警告する（CiWorkflowConventionTests が固定）。
   -->
   <Target Name="CopyWpfReferenceAssembliesForCoverage" AfterTargets="CopyFilesToOutputDirectory">
     <ItemGroup>

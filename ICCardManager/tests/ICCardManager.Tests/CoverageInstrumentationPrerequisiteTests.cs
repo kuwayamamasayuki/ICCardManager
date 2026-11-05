@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Reflection;
+using System.Text.RegularExpressions;
 using System.Windows.Threading;
 using FluentAssertions;
 using Xunit;
@@ -45,12 +46,23 @@ public class CoverageInstrumentationPrerequisiteTests
     private static readonly HashSet<string> ResolvedByCollectorRuntime =
         new(StringComparer.OrdinalIgnoreCase) { "mscorlib" };
 
-    /// <summary>計測の対象になるモジュール（テストが参照し、出力へ PDB ごと置かれるプロジェクト）。</summary>
-    public static IEnumerable<object[]> MeasuredModules() => new[]
+    /// <summary>
+    /// 計測の対象になるモジュール。テストの csproj の ProjectReference（出力へ PDB ごと置かれるプロジェクト）から導出する。
+    /// 名前で列挙すると、参照を足したプロジェクトが検査から黙って漏れる（development-conventions.md #1786）。
+    /// </summary>
+    public static IEnumerable<object[]> MeasuredModules() =>
+        ReferencedProjectAssemblyNames().Select(name => new object[] { name });
+
+    /// <summary>導出が空振りしていないこと（参照が読めず 0 件になると、Theory は 1 件も走らずに緑になる）。</summary>
+    [Fact]
+    public void 計測するモジュールの導出はテストが参照するプロジェクトを拾うこと()
     {
-        new object[] { typeof(ICCardManager.App).Assembly.GetName().Name! },
-        new object[] { typeof(DebugDataViewer.App).Assembly.GetName().Name! },
-    };
+        ReferencedProjectAssemblyNames().Should().Contain(new[]
+        {
+            typeof(ICCardManager.App).Assembly.GetName().Name!,
+            typeof(DebugDataViewer.App).Assembly.GetName().Name!,
+        });
+    }
 
     [Theory]
     [MemberData(nameof(MeasuredModules))]
@@ -61,6 +73,7 @@ public class CoverageInstrumentationPrerequisiteTests
 
         var missing = FindUnresolvableEnumConstants(module, GetLoadableTypes(module), outputDirectory)
             .Select(c => $"{c.Member}: {c.EnumType.FullName}（{c.EnumType.Assembly.GetName().Name}）")
+            .Distinct()
             .ToList();
 
         string.Join(Environment.NewLine, missing).Should().BeEmpty(
@@ -170,7 +183,23 @@ public class CoverageInstrumentationPrerequisiteTests
         }
         catch (ReflectionTypeLoadException ex)
         {
-            return ex.Types.Where(t => t != null)!;
+            // 読めなかった型を黙って飛ばすと、検査の対象が減ったことが表に出ない
+            throw new InvalidOperationException(
+                $"{assembly.GetName().Name} の型を読み込めないため、enum 定数を検査できません: " +
+                string.Join(" / ", ex.LoaderExceptions.Where(e => e != null).Select(e => e.Message).Distinct()),
+                ex);
+        }
+    }
+
+    private static IEnumerable<string> ReferencedProjectAssemblyNames()
+    {
+        var testProjectDirectory = Path.Combine(TestPaths.GetSolutionRoot(), "tests", "ICCardManager.Tests");
+        var csproj = File.ReadAllText(Path.Combine(testProjectDirectory, "ICCardManager.Tests.csproj"));
+        foreach (Match reference in Regex.Matches(csproj, @"<ProjectReference\s+Include=""([^""]+)"""))
+        {
+            var path = Path.GetFullPath(Path.Combine(testProjectDirectory, reference.Groups[1].Value));
+            var assemblyName = Regex.Match(File.ReadAllText(path), @"<AssemblyName>\s*([^<\s]+)\s*</AssemblyName>");
+            yield return assemblyName.Success ? assemblyName.Groups[1].Value : Path.GetFileNameWithoutExtension(path);
         }
     }
 
