@@ -1,6 +1,8 @@
 #nullable enable
 using System;
 using System.Globalization;
+using FlaUI.Core.Definitions;
+using FlaUI.Core.Tools;
 using FluentAssertions;
 using ICCardManager.UITests.Infrastructure;
 using ICCardManager.UITests.PageObjects;
@@ -25,6 +27,8 @@ namespace ICCardManager.UITests.Tests
     [Trait("Category", "UI")]
     public class FontScaledColumnWidthUiTests
     {
+        private const string OperationColumnHeader = "操作";
+
         private static readonly TimeSpan Wait = TimeSpan.FromSeconds(TestConstants.DialogOpenTimeoutSeconds);
 
         public FontScaledColumnWidthUiTests()
@@ -33,7 +37,7 @@ namespace ICCardManager.UITests.Tests
         }
 
         [Fact]
-        public void メイン画面の履歴一覧は_文字サイズが特大でも日付を末尾まで表示すること()
+        public void メイン画面の履歴一覧は_文字サイズが特大でも日付を末尾まで表示し_最小幅で操作列を押し出さないこと()
         {
             using var fixture = AppFixture.LaunchWithSeed(
                 conn =>
@@ -59,6 +63,25 @@ namespace ICCardManager.UITests.Tests
             {
                 ScreenshotHelper.Capture(page.Window, "uitest_2404_history_xlarge.png");
             }
+
+            // Issue #2076 の懸念: 固定幅の合計が広がると、ウィンドウを最小幅にしたとき右端の「操作」列が横スクロールの外へ押し出される。
+            // 日付の列は特大で 9 広がるので、最小幅でも「操作」列の見出しが一覧の表示領域の内側にあることを確かめる
+            // （CellClipping の「セルが一覧の表示領域の内側にある」と同じ形）
+            var handle = NativeWindows.HandleOf(page.Window);
+            var original = page.Window.BoundingRectangle;
+            NativeWindows.Resize(handle, 100, original.Height);
+            page.Window.BoundingRectangle.Width.Should().BeLessOrEqualTo(original.Width, "前提: ウィンドウが最小幅まで縮んだこと（MinWidth より細く指示すると WPF は MinWidth で止める）");
+            CellClipping.AssertTextIsNotClipped(
+                grid!, DateTime.Today.ToString("yyyy/MM/dd", CultureInfo.InvariantCulture), "日付", Wait);
+
+            var cf = grid!.ConditionFactory;
+            var operationHeader = Retry.WhileNull(
+                () => grid.FindFirstDescendant(cf.ByName(OperationColumnHeader).And(cf.ByControlType(ControlType.HeaderItem))),
+                Wait).Result;
+            operationHeader.Should().NotBeNull($"前提: 「{OperationColumnHeader}」列の見出しがあること");
+            operationHeader!.BoundingRectangle.Right.Should().BeLessOrEqualTo(grid.BoundingRectangle.Right,
+                $"ウィンドウが最小幅でも、右端の「{OperationColumnHeader}」列は一覧の表示領域の内側にあること" +
+                "（日付の列が広がった分で横スクロールの外へ押し出さない。Issue #2076 / #2404）");
         }
     }
 }
