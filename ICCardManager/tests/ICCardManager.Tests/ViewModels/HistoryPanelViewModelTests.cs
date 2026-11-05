@@ -2122,6 +2122,198 @@ public class HistoryPanelViewModelTests : IDisposable
         Balance = 2300,
     };
 
+    #region 行編集を開く時点で行が無い（Issue #2378）
+
+    /// <summary>
+    /// 行編集を「認証済み」まで進め、開く前の読み取り結果を指定する。戻り値は一覧再読込の要求ページ記録。
+    /// </summary>
+    /// <param name="current">
+    /// <c>GetByIdAsync</c> が返す行。<c>null</c> は「一覧に表示されているが、他 PC が削除・統合して既に無い」を表す
+    /// </param>
+    private List<int> ArrangeLedgerEditOpen(Ledger? current)
+    {
+        _staffAuthServiceMock
+            .Setup(a => a.RequestAuthenticationAsync(It.IsAny<string>()))
+            .ReturnsAsync(new StaffAuthResult { Idm = "AABBCCDDEEFF0011", StaffName = "田中太郎" });
+        _ledgerRepositoryMock
+            .Setup(r => r.GetByIdAsync(It.IsAny<int>()))
+            .ReturnsAsync(current);
+        return ArrangeHistoryPaging(_ => 0, pageSize: 30);
+    }
+
+    /// <summary>
+    /// Issue #2378: 開く時点で行が既に無いなら、空の行編集ダイアログを開かず、一覧を読み直してから競合を案内すること。
+    /// 旧実装は空のダイアログを開き、職員が入力して「保存」を押して初めて競合が分かった（入力が無駄になる）。
+    /// </summary>
+    [Fact]
+    public async Task EditLedger_開く時点で行が無いなら_ダイアログを開かず_一覧を読み直してから案内すること()
+    {
+        var requestedPages = ArrangeLedgerEditOpen(current: null);
+        var pagesLoadedBeforeMessage = -1;
+        List<string>? hostCallsBeforeMessage = null;
+        string? message = null;
+        string? title = null;
+        _navigationServiceMock
+            .Setup(d => d.ShowError(It.IsAny<string>(), It.IsAny<string>()))
+            .Callback<string, string>((m, t) =>
+            {
+                message = m;
+                title = t;
+                pagesLoadedBeforeMessage = requestedPages.Count;
+                hostCallsBeforeMessage = _host.Calls.ToList();
+            });
+
+        await _history.EditLedger(DeleteTargetDto());
+
+        _navigationServiceMock.Verify(
+            n => n.ShowDialogAsync(It.IsAny<Func<ICCardManager.Views.Dialogs.LedgerRowEditDialog, Task>>()), Times.Never,
+            "行が無いのに空のダイアログを開かない");
+        message.Should().Be(ConcurrencyConflictMessage.ForOpen(DeleteConflictTarget, "履歴一覧"));
+        title.Should().Be("履歴行の修正", "開けなかった画面の名前（行編集ダイアログのタイトル）で示す");
+        pagesLoadedBeforeMessage.Should().BeGreaterThan(0, "文言が「再読み込みしました」と述べる以上、案内より前に一覧を読み直す（#1753）");
+        hostCallsBeforeMessage.Should().Contain(new[]
+        {
+            RecordingHistoryPanelHost.RefreshDashboardCall,
+            RecordingHistoryPanelHost.RefreshLentCardsCall,
+            RecordingHistoryPanelHost.CheckWarningsCall,
+        }, "消えた行が貸出中レコードならカードの貸出状態も変わっている（保存時の競合 #2325 と同じ読み直し）");
+    }
+
+    /// <summary>
+    /// Issue #2378 の対の表明: 行があれば従来どおりダイアログを開き、競合の案内は出さないこと。
+    /// これが無いと「常に開かない」実装でも上のテストが緑になる。
+    /// </summary>
+    [Fact]
+    public async Task EditLedger_開く時点で行があれば_ダイアログを開き_案内は出さないこと()
+    {
+        ArrangeLedgerEditOpen(new Ledger { Id = 42, CardIdm = DeleteConflictCardIdm, Summary = "鉄道（天神～博多）" });
+
+        await _history.EditLedger(DeleteTargetDto());
+
+        _navigationServiceMock.Verify(
+            n => n.ShowDialogAsync(It.IsAny<Func<ICCardManager.Views.Dialogs.LedgerRowEditDialog, Task>>()), Times.Once);
+        _navigationServiceMock.Verify(
+            n => n.ShowError(It.IsAny<string>(), It.IsAny<string>()), Times.Never);
+    }
+
+    /// <summary>
+    /// Issue #2378（PR #2408 のレビューで範囲を拡張）: 「詳細」も同じ形で、開く時点で行が無いと黙って戻り何も起きなかった。
+    /// 詳細ダイアログを開かず、一覧を読み直してから行編集と同じ競合の案内を出すこと。
+    /// </summary>
+    [Fact]
+    public async Task ShowLedgerDetail_開く時点で行が無いなら_ダイアログを開かず_一覧を読み直してから案内すること()
+    {
+        var requestedPages = ArrangeLedgerEditOpen(current: null);
+        var pagesLoadedBeforeMessage = -1;
+        List<string>? hostCallsBeforeMessage = null;
+        string? message = null;
+        string? title = null;
+        _navigationServiceMock
+            .Setup(d => d.ShowError(It.IsAny<string>(), It.IsAny<string>()))
+            .Callback<string, string>((m, t) =>
+            {
+                message = m;
+                title = t;
+                pagesLoadedBeforeMessage = requestedPages.Count;
+                hostCallsBeforeMessage = _host.Calls.ToList();
+            });
+
+        await _history.ShowLedgerDetail(DetailTargetDto());
+
+        _navigationServiceMock.Verify(
+            n => n.ShowDialogAsync(It.IsAny<Func<ICCardManager.Views.Dialogs.LedgerDetailDialog, Task>>()), Times.Never,
+            "行が無いのに詳細ダイアログを開かない");
+        message.Should().Be(ConcurrencyConflictMessage.ForOpen(DeleteConflictTarget, "履歴一覧"),
+            "黙って戻ると、押しても何も起きない（案内が無い）");
+        title.Should().Be("利用履歴詳細", "開けなかった画面の名前（詳細ダイアログのタイトル）で示す");
+        pagesLoadedBeforeMessage.Should().BeGreaterThan(0, "案内より前に一覧を読み直す（#1753）");
+        hostCallsBeforeMessage.Should().Contain(new[]
+        {
+            RecordingHistoryPanelHost.RefreshDashboardCall,
+            RecordingHistoryPanelHost.RefreshLentCardsCall,
+            RecordingHistoryPanelHost.CheckWarningsCall,
+        }, "行編集を開けなかったときと同じものを読み直す");
+    }
+
+    /// <summary>
+    /// 対の表明: 行があれば従来どおり詳細ダイアログを開き、案内は出さないこと。
+    /// </summary>
+    [Fact]
+    public async Task ShowLedgerDetail_開く時点で行があれば_ダイアログを開き_案内は出さないこと()
+    {
+        ArrangeLedgerEditOpen(new Ledger { Id = 42, CardIdm = DeleteConflictCardIdm, Summary = "鉄道（天神～博多）" });
+
+        await _history.ShowLedgerDetail(DetailTargetDto());
+
+        _navigationServiceMock.Verify(
+            n => n.ShowDialogAsync(It.IsAny<Func<ICCardManager.Views.Dialogs.LedgerDetailDialog, Task>>()), Times.Once);
+        _navigationServiceMock.Verify(
+            n => n.ShowError(It.IsAny<string>(), It.IsAny<string>()), Times.Never);
+    }
+
+    /// <summary>「詳細」ボタンが出る行（明細が 2 件以上）</summary>
+    private static LedgerDto DetailTargetDto()
+    {
+        var dto = DeleteTargetDto();
+        dto.DetailCountValue = 2;
+        return dto;
+    }
+
+    /// <summary>
+    /// Issue #2378（レビュー 2 回目）: 開く前の確認の後、詳細ダイアログ自身の読み取りまでの間に行が消えた場合。
+    /// ダイアログの初期化は <see cref="ICCardManager.Common.Exceptions.LedgerRowGoneException"/> で中断する。
+    /// それがコマンドの例外として漏れず、開く前に無かった場合と同じく読み直してから案内すること。
+    /// </summary>
+    [Fact]
+    public async Task ShowLedgerDetail_ダイアログの読み取りで行が無くなっていたら_読み直してから案内すること()
+    {
+        var requestedPages = ArrangeLedgerEditOpen(new Ledger { Id = 42, CardIdm = DeleteConflictCardIdm });
+        var pagesLoadedBeforeOpen = -1;
+        _navigationServiceMock
+            .Setup(n => n.ShowDialogAsync(It.IsAny<Func<ICCardManager.Views.Dialogs.LedgerDetailDialog, Task>>()))
+            .Callback(() => pagesLoadedBeforeOpen = requestedPages.Count)
+            .ThrowsAsync(new ICCardManager.Common.Exceptions.LedgerRowGoneException());
+        var pagesLoadedBeforeMessage = -1;
+        string? message = null;
+        string? title = null;
+        _navigationServiceMock
+            .Setup(d => d.ShowError(It.IsAny<string>(), It.IsAny<string>()))
+            .Callback<string, string>((m, t) =>
+            {
+                message = m;
+                title = t;
+                pagesLoadedBeforeMessage = requestedPages.Count;
+            });
+
+        var act = () => _history.ShowLedgerDetail(DetailTargetDto());
+
+        await act.Should().NotThrowAsync("行が無いことは競合として案内する（コマンドの例外にしない）");
+        message.Should().Be(ConcurrencyConflictMessage.ForOpen(DeleteConflictTarget, "履歴一覧"));
+        title.Should().Be("利用履歴詳細");
+        pagesLoadedBeforeMessage.Should().BeGreaterThan(pagesLoadedBeforeOpen, "案内より前に一覧を読み直す（#1753）");
+    }
+
+    /// <summary>
+    /// 対の表明: 「行が無い」以外の失敗は競合として案内せず、従来どおり伝えること。
+    /// これが無いと、例外を丸ごと捕まえて競合の案内へ倒す実装でも上のテストが緑になる。
+    /// </summary>
+    [Fact]
+    public async Task ShowLedgerDetail_行が無いこと以外の失敗は_競合として案内しないこと()
+    {
+        ArrangeLedgerEditOpen(new Ledger { Id = 42, CardIdm = DeleteConflictCardIdm });
+        _navigationServiceMock
+            .Setup(n => n.ShowDialogAsync(It.IsAny<Func<ICCardManager.Views.Dialogs.LedgerDetailDialog, Task>>()))
+            .ThrowsAsync(new InvalidOperationException("injected"));
+
+        var act = () => _history.ShowLedgerDetail(DetailTargetDto());
+
+        await act.Should().ThrowAsync<InvalidOperationException>().WithMessage("injected");
+        _navigationServiceMock.Verify(
+            n => n.ShowError(It.IsAny<string>(), It.IsAny<string>()), Times.Never);
+    }
+
+    #endregion
+
     #region 認証は 1 操作に限るスコープ（Issue #2260）
 
     private const string AuthenticatedStaffIdm = "AABBCCDDEEFF0011";
