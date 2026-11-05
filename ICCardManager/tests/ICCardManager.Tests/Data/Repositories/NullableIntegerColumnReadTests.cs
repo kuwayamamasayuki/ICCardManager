@@ -387,6 +387,213 @@ public class NullableIntegerColumnReadTests : IDisposable
         laterWhenUndone.Should().BeFalse();
     }
 
+    /// <summary>
+    /// 交通系ICカードの削除フラグで絞る経路のそれぞれが、削除フラグが NULL のカードを「削除されていない」として
+    /// 対象に入れること（一覧に並ぶ・更新が成功する）。対の表明として、削除済み（1）なら対象に入らないこと。
+    /// </summary>
+    /// <remarks>
+    /// 経路ごとに 1 行ずつ置くのは、条件を 1 か所だけ <c>is_deleted = 0</c> へ戻した退行をその経路の行で検出するため。
+    /// 1 つの経路のテストだけでは、ほかの経路の条件が戻っても緑のままになる。
+    /// </remarks>
+    [Theory]
+    [InlineData("GetAllAsync")]
+    [InlineData("GetByIdmAsync")]
+    [InlineData("GetAvailableAsync")]
+    [InlineData("GetLentAsync")]
+    [InlineData("GetRefundedWithLentRecordsAsync")]
+    [InlineData("UpdateAsync")]
+    [InlineData("UpdateCarryoverInfoAsync")]
+    [InlineData("UpdateLentStatusAsync")]
+    [InlineData("DeleteAsync")]
+    [InlineData("SetRefundedAsync")]
+    public async Task 削除フラグがNULLの交通系ICカードはどの経路でも削除されていないカードとして扱われること(string path)
+    {
+        (await RunCardPathAsync(path, isDeletedSql: "NULL")).Should().BeTrue("削除フラグが NULL のカードは未削除として扱う");
+        (await RunCardPathAsync(path, isDeletedSql: "1")).Should().BeFalse("削除済みのカードは従来どおり対象外");
+    }
+
+    /// <summary>
+    /// 貸出中の記録のフラグ（<c>is_lent_record</c>）で絞る集計のそれぞれで、フラグが NULL の行が 0 の行と同じに扱われること。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// NULL の行は帳票（<c>ReportDataBuilder</c> の <c>!IsLentRecord</c>）では通常の行として印字されるので、
+    /// 集計・月末残高・残高チェーンのシードが同じ行を除くと、同じ帳票の中で「受入 − 払出 = 残額」が崩れる。
+    /// </para>
+    /// <para>
+    /// 期待値は「フラグ 0 のときの結果」と比べる（集計ごとの期待値を書き写さない）。あわせて「フラグ 1 のときの結果が
+    /// 0 のときと異なる」ことを表明し、その集計が実際にこの行をフラグで絞っている（入力が条件を通っている）ことを確かめる。
+    /// </para>
+    /// <para>
+    /// 「シード」の 2 行は、前日の 1 行（残額 1,000 円）だけがフラグを変え、当日の 2 行（ポイント還元 +210 と利用 −210）が
+    /// 残高の循環（Issue #1004 の形）をなす。当日の最終残高は前日の残高（シード）からしか決まらないので、
+    /// シードの条件だけを戻すと結果が変わる。
+    /// </para>
+    /// </remarks>
+    [Theory]
+    [InlineData("最終利用日", false)]
+    [InlineData("利用状況", false)]
+    [InlineData("職員別の月次利用", false)]
+    [InlineData("月末残高", false)]
+    [InlineData("指定日より前の残高", false)]
+    [InlineData("明細を持たない行の最新日", false)]
+    [InlineData("月末残高", true)]
+    [InlineData("指定日より前の残高", true)]
+    public async Task 貸出中の記録のフラグがNULLの行は集計で通常の行として扱われること(string query, bool seedScenario)
+    {
+        await InsertCardAsync();
+        await InsertStaffAsync();
+
+        var whenZero = await RunLedgerQueryAsync(query, seedScenario, "0");
+        var whenNull = await RunLedgerQueryAsync(query, seedScenario, "NULL");
+        var whenLent = await RunLedgerQueryAsync(query, seedScenario, "1");
+
+        whenLent.Should().NotBe(whenZero, "この集計が対象の行を貸出中の記録のフラグで絞っていること（入力が条件を通っていること）");
+        whenNull.Should().Be(whenZero, "フラグが NULL の行は 0 の行と同じに扱う");
+    }
+
+    private async Task<bool> RunCardPathAsync(string path, string isDeletedSql)
+    {
+        Execute("DELETE FROM ledger_detail", idm: null, requireRows: false);
+        Execute("DELETE FROM ledger", idm: null, requireRows: false);
+        Execute("DELETE FROM ic_card", idm: null, requireRows: false);
+        await InsertCardAsync();
+        Execute($"UPDATE ic_card SET is_deleted = {isDeletedSql} WHERE card_idm = @idm", CardIdm);
+
+        switch (path)
+        {
+            case "GetAllAsync":
+                return (await _cardRepository.GetAllAsync()).Any(c => c.CardIdm == CardIdm);
+            case "GetByIdmAsync":
+                return await _cardRepository.GetByIdmAsync(CardIdm) != null;
+            case "GetAvailableAsync":
+                return (await _cardRepository.GetAvailableAsync(bypassCache: true)).Any(c => c.CardIdm == CardIdm);
+            case "GetLentAsync":
+                Execute("UPDATE ic_card SET is_lent = 1 WHERE card_idm = @idm", CardIdm);
+                return (await _cardRepository.GetLentAsync(bypassCache: true)).Any(c => c.CardIdm == CardIdm);
+            case "GetRefundedWithLentRecordsAsync":
+                Execute("UPDATE ic_card SET is_refunded = 1 WHERE card_idm = @idm", CardIdm);
+                await _ledgerRepository.InsertAsync(new Ledger
+                {
+                    CardIdm = CardIdm,
+                    Date = new DateTime(2026, 4, 10, 9, 0, 0),
+                    Summary = "（貸出中）",
+                    Balance = 1000,
+                    IsLentRecord = true
+                }, transaction: null);
+                return (await _cardRepository.GetRefundedWithLentRecordsAsync()).Any(c => c.CardIdm == CardIdm);
+            case "UpdateAsync":
+                return await _cardRepository.UpdateAsync(new IcCard
+                {
+                    CardIdm = CardIdm,
+                    CardType = "はやかけん",
+                    CardNumber = "H001",
+                    Note = "編集後"
+                });
+            case "UpdateCarryoverInfoAsync":
+                using (var scope = await _dbContext.BeginTransactionAsync())
+                {
+                    var updated = await _cardRepository.UpdateCarryoverInfoAsync(
+                        CardIdm, new CarryoverInfo(1, 0, 0, null), new CarryoverInfo(7, 45000, 0, 2025), scope.Transaction);
+                    scope.Commit();
+                    return updated;
+                }
+
+            case "UpdateLentStatusAsync":
+                return await _cardRepository.UpdateLentStatusAsync(CardIdm, true, new DateTime(2026, 4, 10, 9, 0, 0), null);
+            case "DeleteAsync":
+                return await _cardRepository.DeleteAsync(CardIdm) == CardOperationResult.Success;
+            case "SetRefundedAsync":
+                return await _cardRepository.SetRefundedAsync(CardIdm, new DateTime(2026, 4, 10, 9, 0, 0), null)
+                    == CardOperationResult.Success;
+            default:
+                throw new ArgumentOutOfRangeException(nameof(path), path, "未知の経路");
+        }
+    }
+
+    private async Task<string> RunLedgerQueryAsync(string query, bool seedScenario, string flagSql)
+    {
+        Execute("DELETE FROM ledger_detail", idm: null, requireRows: false);
+        Execute("DELETE FROM ledger", idm: null, requireRows: false);
+
+        int flaggedId;
+        if (seedScenario)
+        {
+            flaggedId = await InsertPlainLedgerAsync(new DateTime(2026, 4, 9, 9, 0, 0), "鉄道（博多～天神）", 0, 210, 1000);
+            // 当日: ポイント還元（790 → 1,000）を先に、利用（1,000 → 790）を後に INSERT する（id 順と時系列が食い違う）
+            await InsertPlainLedgerAsync(new DateTime(2026, 4, 10, 9, 0, 0), "ポイント還元", 210, 0, 1000);
+            await InsertPlainLedgerAsync(new DateTime(2026, 4, 10, 9, 0, 0), "鉄道（天神～博多）", 0, 210, 790);
+        }
+        else
+        {
+            flaggedId = await InsertPlainLedgerAsync(new DateTime(2026, 4, 10, 9, 0, 0), "鉄道（博多～天神）", 0, 210, 790);
+        }
+
+        Execute($"UPDATE ledger SET is_lent_record = {flagSql} WHERE id = {flaggedId}", idm: null);
+
+        var from = new DateTime(2026, 4, 1);
+        var to = new DateTime(2026, 4, 30, 23, 59, 59);
+        switch (query)
+        {
+            case "最終利用日":
+                return Dump(await _ledgerRepository.GetAllLastUsageDatesAsync());
+            case "利用状況":
+                return Dump(await _ledgerRepository.GetUsageStatsByCardAsync(from, to));
+            case "職員別の月次利用":
+                return Dump(await _ledgerRepository.GetMonthlyUsageByLenderAsync(from, to));
+            case "月末残高":
+                return Dump(await _ledgerRepository.GetMonthEndBalancesByCardAsync(from, to));
+            case "指定日より前の残高":
+                return Dump(await _ledgerRepository.GetBalancesBeforeAsync(new DateTime(2026, 5, 1)));
+            case "明細を持たない行の最新日":
+                return Dump(await _ledgerRepository.GetLatestLedgerDateWithoutDetailsAsync(CardIdm));
+            default:
+                throw new ArgumentOutOfRangeException(nameof(query), query, "未知の集計");
+        }
+    }
+
+    private Task<int> InsertPlainLedgerAsync(DateTime date, string summary, int income, int expense, int balance)
+        => _ledgerRepository.InsertAsync(new Ledger
+        {
+            CardIdm = CardIdm,
+            LenderIdm = StaffIdm,
+            StaffName = "博多 太郎",
+            Date = date,
+            Summary = summary,
+            Income = income,
+            Expense = expense,
+            Balance = balance
+        }, transaction: null);
+
+    /// <summary>集計の結果を、比較できる文字列にする（行・辞書の要素は公開プロパティを並べる）。</summary>
+    private static string Dump(object? value)
+    {
+        switch (value)
+        {
+            case null:
+                return "null";
+            case string s:
+                return s;
+            case System.Collections.IDictionary dict:
+                return "{" + string.Join(", ", dict.Keys.Cast<object>().Select(k => $"{Dump(k)}={Dump(dict[k])}")) + "}";
+            case System.Collections.IEnumerable items:
+                return "[" + string.Join(", ", items.Cast<object>().Select(Dump)) + "]";
+        }
+
+        var type = value.GetType();
+        if (type.IsPrimitive || value is DateTime || value is decimal)
+        {
+            return Convert.ToString(value, System.Globalization.CultureInfo.InvariantCulture)!;
+        }
+
+        if (type.IsGenericType && type.FullName!.StartsWith("System.ValueTuple", StringComparison.Ordinal))
+        {
+            return "(" + string.Join(", ", type.GetFields().Select(f => Dump(f.GetValue(value)))) + ")";
+        }
+
+        return type.Name + "(" + string.Join(", ", type.GetProperties().Select(p => $"{p.Name}={Dump(p.GetValue(value))}")) + ")";
+    }
+
     #endregion
 
     #region ヘルパー
@@ -459,7 +666,7 @@ public class NullableIntegerColumnReadTests : IDisposable
         return columns;
     }
 
-    private void Execute(string sql, string? idm)
+    private void Execute(string sql, string? idm, bool requireRows = true)
     {
         using var lease = _dbContext.LeaseConnection();
         using var command = lease.Connection.CreateCommand();
@@ -469,7 +676,11 @@ public class NullableIntegerColumnReadTests : IDisposable
             command.Parameters.AddWithValue("@idm", idm);
         }
 
-        command.ExecuteNonQuery().Should().BeGreaterThan(0);
+        var affected = command.ExecuteNonQuery();
+        if (requireRows)
+        {
+            affected.Should().BeGreaterThan(0);
+        }
     }
 
     #endregion

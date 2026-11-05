@@ -126,9 +126,9 @@ ORDER BY card_type, card_number";
         /// </summary>
         /// <remarks>
         /// 貸出可能なカードの条件:
-        /// - 論理削除されていない（is_deleted = 0）
-        /// - 払戻済でない（is_refunded = 0）←Issue #530
-        /// - 貸出中でない（is_lent = 0）
+        /// - 論理削除されていない（is_deleted が 0 または NULL。Issue #2381）
+        /// - 払戻済でない（is_refunded が 0 または NULL）←Issue #530
+        /// - 貸出中でない（is_lent が 0 または NULL）
         /// </remarks>
         private async Task<IEnumerable<IcCard>> GetAvailableFromDbAsync()
         {
@@ -413,7 +413,7 @@ WHERE card_idm = @cardIdm AND (is_deleted = 0 OR is_deleted IS NULL)";
                 if (transaction == null)
                 {
                     // トランザクション外の場合のみキャッシュ無効化。
-                    // Issue #1759: 影響行数 0（＝WHERE is_deleted = 0 に一致しない）のときも
+                    // Issue #1759: 影響行数 0（＝未削除（is_deleted が 0 または NULL）の条件に一致しない）のときも
                     // 無効化する。0 行は「他 PC がこのカードを削除した」ことの証明であり、
                     // キャッシュされたカード一覧が古いと確定している。ここで捨てないと、
                     // 競合を検出した ViewModel が案内どおりに一覧を再読込しても
@@ -512,7 +512,7 @@ WHERE card_idm = @cardIdm AND (is_deleted = 0 OR is_deleted IS NULL) AND (@isLen
             var result = await command.ExecuteNonQueryAsync().ConfigureAwait(false);
 
             // 貸出状態変更時は即座にキャッシュを無効化。
-            // Issue #1759 / #1953: 影響行数 0（＝WHERE is_deleted = 0 に一致しない）のときも
+            // Issue #1759 / #1953: 影響行数 0（＝未削除（is_deleted が 0 または NULL）の条件に一致しない）のときも
             // 無効化する。0 行は「他 PC がこのカードを削除した」ことの証明であり、
             // 手元のカード一覧が古いと確定した瞬間である（書き込みが成功したときより
             // 無効化の根拠が強い）。捨てないと、競合を検出した呼び出し元が一覧を再読込しても

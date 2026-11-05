@@ -915,7 +915,7 @@ ORDER BY date ASC, id ASC";
         private static async Task<List<Ledger>> GetLastActiveDayLedgersBeforeAsync(
             SQLiteConnection connection, string cardIdm, DateTime day, bool excludeLentRecords)
         {
-            var lentFilter = excludeLentRecords ? "AND is_lent_record = 0" : string.Empty;
+            var lentFilter = excludeLentRecords ? "AND (is_lent_record = 0 OR is_lent_record IS NULL)" : string.Empty;
             var ledgers = new List<Ledger>();
 
             using var command = connection.CreateCommand();
@@ -1157,7 +1157,7 @@ ORDER BY l.card_idm ASC, l.date ASC, l.id ASC";
             // 残高が要らないため残高チェーン（Issue #1731）は不要で、MAX(date) だけでよい。
             command.CommandText = $@"SELECT card_idm, MAX(date) AS last_usage
 FROM ledger
-WHERE is_lent_record = 0
+WHERE (is_lent_record = 0 OR is_lent_record IS NULL)
   {ExcludeCarryoverCondition}
 GROUP BY card_idm";
 
@@ -1190,7 +1190,7 @@ GROUP BY card_idm";
        MAX(date) AS last_usage
 FROM ledger
 WHERE date BETWEEN @fromDate AND @toDate
-  AND is_lent_record = 0
+  AND (is_lent_record = 0 OR is_lent_record IS NULL)
   {ExcludeCarryoverCondition}
 GROUP BY card_idm";
 
@@ -1233,7 +1233,7 @@ GROUP BY card_idm";
        COUNT(*) AS usage_count
 FROM ledger
 WHERE date BETWEEN @fromDate AND @toDate
-  AND is_lent_record = 0
+  AND (is_lent_record = 0 OR is_lent_record IS NULL)
   {ExcludeCarryoverCondition}
   {ExcludeRefundLedgerCondition}
 GROUP BY ym, lender, staff
@@ -1290,7 +1290,7 @@ ORDER BY ym, staff";
     SELECT card_idm AS c, strftime('%Y-%m', date) AS ym, MAX(DATE(date)) AS d
     FROM ledger
     WHERE date BETWEEN @fromDate AND @toDate
-      AND is_lent_record = 0
+      AND (is_lent_record = 0 OR is_lent_record IS NULL)
     GROUP BY c, ym
 )
 SELECT l.id, l.card_idm, l.lender_idm, l.date, l.summary, l.income, l.expense, l.balance,
@@ -1298,7 +1298,7 @@ SELECT l.id, l.card_idm, l.lender_idm, l.date, l.summary, l.income, l.expense, l
 FROM ledger l
 JOIN last_day ON last_day.c = l.card_idm AND last_day.d = DATE(l.date)
 WHERE l.date BETWEEN @fromDate AND @toDate
-  AND l.is_lent_record = 0
+  AND (l.is_lent_record = 0 OR l.is_lent_record IS NULL)
 ORDER BY l.card_idm, l.date, l.id";
 
                 AddDateRangeParameters(command, fromDate, toDate);
@@ -1349,7 +1349,7 @@ ORDER BY l.card_idm, l.date, l.id";
     SELECT card_idm AS c, DATE(MAX(date)) AS d
     FROM ledger
     WHERE date < @beforeDate
-      AND is_lent_record = 0
+      AND (is_lent_record = 0 OR is_lent_record IS NULL)
     GROUP BY card_idm
 )
 SELECT l.id, l.card_idm, l.lender_idm, l.date, l.summary, l.income, l.expense, l.balance,
@@ -1357,7 +1357,7 @@ SELECT l.id, l.card_idm, l.lender_idm, l.date, l.summary, l.income, l.expense, l
 FROM last_day
 CROSS JOIN ledger l ON l.card_idm = last_day.c AND l.date >= last_day.d
 WHERE l.date < @beforeDate
-  AND l.is_lent_record = 0
+  AND (l.is_lent_record = 0 OR l.is_lent_record IS NULL)
 ORDER BY l.card_idm, l.date, l.id";
 
                 command.Parameters.AddWithValue("@beforeDate", SqliteDateTimeFormat.ToDayStartText(beforeDate));
@@ -2583,7 +2583,7 @@ VALUES (@mergedAt, @targetLedgerId, @description, @undoData)";
         {
             using var command = connection.CreateCommand();
             command.Transaction = transaction;
-            // Issue #1806: is_undone = 0 を条件に含め、影響行数で競合を検出する（Issue #1753 の作法）。
+            // Issue #1806: 未取消（is_undone が 0 または NULL。Issue #2381）を条件に含め、影響行数で競合を検出する（Issue #1753 の作法）。
             // 共有モードで 2 台が同じ履歴を同時に取り消すと、両方が「未取消」を読んでから書き込みに来る。
             // 後着の UPDATE を 0 行にして false を返し、呼び出し元が台帳の復元ごとロールバックすることで
             // 統合元の二重 INSERT を防ぐ。
@@ -2674,7 +2674,7 @@ ORDER BY date ASC, id ASC";
             // 該当する行が無いカード（明細なしの行を持たない通常のカード）では、そのカードの台帳行をすべて読む
             // （読むのは日付と摘要の 2 列で、カード 1 枚分。返却のたびに 1 回）
             command.CommandText = @"SELECT l.date, l.summary FROM ledger l
-WHERE l.card_idm = @cardIdm AND l.is_lent_record = 0
+WHERE l.card_idm = @cardIdm AND (l.is_lent_record = 0 OR l.is_lent_record IS NULL)
   AND NOT EXISTS (SELECT 1 FROM ledger_detail d WHERE d.ledger_id = l.id)
 ORDER BY l.date DESC, l.id DESC";
 

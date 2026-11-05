@@ -228,7 +228,7 @@ WHERE staff_idm = @staffIdm AND (is_deleted = 0 OR is_deleted IS NULL)";
             if (transaction == null)
             {
                 // トランザクション外の場合のみキャッシュ無効化。
-                // Issue #1759: 影響行数 0（＝WHERE is_deleted = 0 に一致しない）のときも
+                // Issue #1759: 影響行数 0（＝未削除（is_deleted が 0 または NULL）の条件に一致しない）のときも
                 // 無効化する。0 行は「他 PC がこの職員を削除した」ことの証明であり、
                 // キャッシュされた職員一覧が古いと確定している。ここで捨てないと、
                 // 競合を検出した ViewModel が案内どおりに一覧を再読込しても

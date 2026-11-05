@@ -169,8 +169,8 @@ namespace ICCardManager.Data.Repositories
         /// <param name="staffIdm">貸出者IDm（貸出時のみ）</param>
         /// <returns>
         /// 更新できたら <c>true</c>。<c>false</c> は<b>競合</b>を意味する（Issue #1753 / #1953）。
-        /// WHERE 句は <c>card_idm = @cardIdm AND is_deleted = 0</c>（貸出中にする更新ではさらに
-        /// <c>AND is_refunded = 0</c>。Issue #2322）なので、0 行になるのは「他のパソコンや別の操作で
+        /// WHERE 句は <c>card_idm = @cardIdm</c> かつ未削除（<c>is_deleted</c> が 0 または NULL。Issue #2381）（貸出中にする更新ではさらに
+        /// 未払戻（<c>is_refunded</c> が 0 または NULL）。Issue #2322）なので、0 行になるのは「他のパソコンや別の操作で
         /// このカードが論理削除された（貸出中にする更新では、払い戻された）」場合だけである。
         /// <b>戻り値を捨ててはならない</b> — 捨てると <c>ledger</c> の貸出中レコードと
         /// <c>ic_card.is_lent</c> が恒久的に食い違う。
@@ -242,7 +242,7 @@ namespace ICCardManager.Data.Repositories
         /// 払戻済カードは論理削除と異なり、帳票作成時には引き続き選択可能。
         /// ただし、貸出対象からは除外される。
         /// <para>
-        /// WHERE 句は <c>is_deleted = 0 AND is_refunded = 0 AND is_lent = 0</c>。0 行のときは
+        /// WHERE 句は未削除・未払戻・未貸出（<c>is_deleted</c> / <c>is_refunded</c> / <c>is_lent</c> がいずれも 0 または NULL。Issue #2381）。0 行のときは
         /// DB の最新状態から原因（未存在／貸出中／競合）を診断して返す（Issue #1109）。
         /// </para>
         /// <para>
