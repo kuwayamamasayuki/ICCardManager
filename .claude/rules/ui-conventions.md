@@ -235,3 +235,10 @@ paths:
   - 回帰は規約テストで固定する（`ToastPositionCommentConventionTests` が参考実装）。「断定表現の不在」だけでなく**「実装が全選択肢を分岐していること」も併せて検証**する。前者だけだと実装が固定値へ退化した際に逆方向の乖離が生まれるため
   - 検査対象が汎用ファイル（`MainViewModel` 等）に及ぶ場合は、対象機能のキーワードを含む行に絞る。「メイン画面右下の警告エリア」のような**別機能の正当な記述を誤検出する**（実際に発生）
   - **「禁止された要素の不在」を検査するときは要素タグで照合する**（Issue #1692）。`NotContain("UniformGrid")` のような単語一致は、「`UniformGrid` は特大文字で切れるため `WrapPanel` を使う」という**設計意図を書いたコメント自体**を違反として検出する（実際に発生）。`NotContain("<UniformGrid")` のようにタグで検査すれば、規約の理由をコードに残しつつ回帰を固定できる
+
+### 表示切替のコンバーターは、束縛する値の型で選ぶ（Issue #2369）
+
+`BoolToVisibilityConverter`（各画面の `Window.Resources` で定義する WPF 標準の `BooleanToVisibilityConverter`、メイン画面の自前の `Common.BoolToVisibilityConverter`）は **bool 以外を受け取ると常に非表示**を返す。例外も警告も出ないので、束縛を書いた時点では気付けない。
+
+- **string なら `StringToVisibilityConverter`（空・null なら非表示）**、件数なら bool の `Has…` プロパティを ViewModel に足して束縛する（#1410 の `HasCreatedFiles`）。操作ログの「開く」・手動バックアップの「作成先」・利用履歴詳細の見出しの金額は string を束縛していたため、値が入っても出なかった
+- 静的検査 `BoolToVisibilityBindingTypeConventionTests` が、束縛の型を `d:DesignInstance` から解決して bool / `bool?` であることを確かめる。**型を解決できない束縛（`ElementName` / `RelativeSource`・添字・`d:DesignInstance` の無い画面）も違反になる**ので、そうした束縛が要るときは bool のプロパティを ViewModel に足して束縛する

@@ -456,6 +456,43 @@ public class LedgerDetailViewModelTests : IDisposable
 
     #endregion
 
+    #region Issue #2369: 見出しの受入・払出の金額
+
+    /// <summary>
+    /// 見出しの金額は StringToVisibilityConverter で「値があれば表示」する（LedgerDetailDialog.xaml）。
+    /// 金額のある側だけが文字列になり、0 の側は空文字（＝非表示）になることを固定する。
+    /// </summary>
+    [Theory]
+    [InlineData(1000, 0, "1,000円", "")]
+    [InlineData(0, 260, "", "260円")]
+    [InlineData(0, 0, "", "")]
+    public async Task InitializeAsync_金額のある側だけ見出しの金額が文字列になること(
+        int income, int expense, string expectedIncome, string expectedExpense)
+    {
+        // Arrange
+        var testLedger = new Ledger
+        {
+            Id = 1,
+            CardIdm = "0102030405060708",
+            Date = new DateTime(2026, 3, 15),
+            Summary = "テスト",
+            Income = income,
+            Expense = expense,
+            Balance = 500,
+            Details = new List<LedgerDetail>()
+        };
+        _ledgerRepoMock.Setup(r => r.GetByIdAsync(1)).ReturnsAsync(testLedger);
+
+        // Act
+        await _viewModel.InitializeAsync(1);
+
+        // Assert
+        _viewModel.IncomeDisplay.Should().Be(expectedIncome);
+        _viewModel.ExpenseDisplay.Should().Be(expectedExpense);
+    }
+
+    #endregion
+
     #region 履歴分割の職員認証ゲート（SEQ-AUTH-01）
 
     [Fact]

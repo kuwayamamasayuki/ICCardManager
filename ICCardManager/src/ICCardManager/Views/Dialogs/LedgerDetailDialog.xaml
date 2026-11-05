@@ -87,14 +87,14 @@
                                Foreground="{DynamicResource SuccessForegroundBrush}"
                                VerticalAlignment="Center"
                                Margin="0,0,15,0"
-                               Visibility="{Binding IncomeDisplay, Converter={StaticResource BoolToVisibilityConverter}}"/>
+                               Visibility="{Binding IncomeDisplay, Converter={StaticResource StringToVisibilityConverter}}"/>
                     <TextBlock Text="{Binding ExpenseDisplay}"
                                FontSize="{DynamicResource LargeFontSize}"
                                FontWeight="Bold"
                                Foreground="{DynamicResource LendingForegroundBrush}"
                                VerticalAlignment="Center"
                                Margin="0,0,15,0"
-                               Visibility="{Binding ExpenseDisplay, Converter={StaticResource BoolToVisibilityConverter}}"/>
+                               Visibility="{Binding ExpenseDisplay, Converter={StaticResource StringToVisibilityConverter}}"/>
                     <TextBlock Text="残高:"
                                FontSize="{DynamicResource BaseFontSize}"
                                VerticalAlignment="Center"/>

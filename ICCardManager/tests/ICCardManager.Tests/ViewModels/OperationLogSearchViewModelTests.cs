@@ -129,6 +129,14 @@ public class OperationLogSearchViewModelTests
     }
 
     [Fact]
+    public void Constructor_エクスポート前はLastExportedFileが空文字であること()
+    {
+        // Issue #2369: 「開く」ボタンは StringToVisibilityConverter で LastExportedFile が空なら隠す。
+        // エクスポート前に出ない側の前提（エクスポート後に値が入る側は ExportToExcel の各テストが固定する）
+        _viewModel.LastExportedFile.Should().BeEmpty();
+    }
+
+    [Fact]
     public void Constructor_デフォルトで全ての操作種別が選択されていること()
     {
         _viewModel.SelectedAction.Should().NotBeNull();
