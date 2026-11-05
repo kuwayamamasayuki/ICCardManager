@@ -306,6 +306,40 @@ public class VisibilityConverterBindingTypeConventionTests
     }
 
     [Fact]
+    public void 検査_xStaticで渡したコンバーターは中身の型で判定しそれ以外の形は違反になること()
+    {
+        // レビュー 3 回目で検出: キーで参照しない Converter はどの検査にも掛からなかった
+        var findings = InspectSample(
+            "<Button Visibility=\"{Binding LastExportedFile, Converter={x:Static s:BoolVisibilitySampleStatics.BoolToVisibility}}\"/>\n" +
+            "<Button Visibility=\"{Binding LastExportedFile, Converter={x:Static s:BoolVisibilitySampleStatics.BoolToVisibilityAsInterface}}\"/>\n" +
+            "<Button Visibility=\"{Binding IsBusy, Converter={x:Static s:BoolVisibilitySampleStatics.BoolToVisibility}}\"/>\n" +
+            "<Button Visibility=\"{Binding LastExportedFile, Converter={x:Static s:BoolVisibilitySampleStatics.StringToVisibility}}\"/>\n" +
+            "<Button Visibility=\"{Binding IsBusy, Converter={s:UnknownConverterExtension}}\"/>\n");
+
+        findings.Select(f => (f.Line, f.IsAllowed)).Should().Equal(
+            (13, false),
+            (14, false),
+            (15, true),
+            (17, false));
+        findings.Last().ToString().Should().Contain("解釈できない Converter の指定");
+    }
+
+    [Fact]
+    public void 検査_自己終了の要素構文の束縛は後続の束縛の子要素を取り込まないこと()
+    {
+        // 自己終了の判定が無いと、後ろの <Binding> の </Binding> までを子要素とみなして解決を諦める
+        var findings = InspectSample(
+            "<Button>\n" +
+            "  <Button.Visibility><Binding Path=\"IsBusy\" Converter=\"{StaticResource BoolToVisibilityConverter}\"/></Button.Visibility>\n" +
+            "</Button>\n" +
+            "<TextBlock>\n" +
+            "  <TextBlock.Text><Binding Path=\"LastExportedFile\"><Binding.Source><x:Static Member=\"s:BoolVisibilitySampleStatics.Name\"/></Binding.Source></Binding></TextBlock.Text>\n" +
+            "</TextBlock>\n");
+
+        findings.Should().ContainSingle().Which.IsAllowed.Should().BeTrue();
+    }
+
+    [Fact]
     public void 検査_解決できない束縛は違反として報告すること()
     {
         var findings = InspectSample(
@@ -470,9 +504,30 @@ public class VisibilityConverterBindingTypeConventionTests
             }
 
             var key = ResourceKeyOf(converter);
-            if (key == null || !keys.TryGetValue(key, out var allowed))
+            Type[]? allowed;
+            if (key != null)
             {
-                continue;
+                if (!keys.TryGetValue(key, out allowed))
+                {
+                    continue;
+                }
+            }
+            else
+            {
+                // リソース参照以外: x:Static の静的インスタンスは中身の型で判定し、それ以外の形は解釈できないので違反にする
+                var staticConverter = StaticConverterType(converter, namespaces);
+                if (staticConverter == null)
+                {
+                    findings.Add(new BindingFinding(fileName, LineOf(text, index), converter, "（解釈できない Converter の指定）", Array.Empty<Type>(), Array.Empty<Type>()));
+                    continue;
+                }
+
+                if (!TypedConverters.TryGetValue(staticConverter.Name, out allowed))
+                {
+                    continue;
+                }
+
+                key = converter;
             }
 
             args.TryGetValue("Path", out var path);
@@ -676,6 +731,25 @@ public class VisibilityConverterBindingTypeConventionTests
         return assembly.GetType($"{ns.Namespace}.{qualifiedName.Substring(colon + 1)}");
     }
 
+    /// <summary>
+    /// <c>{x:Static T.Member}</c> で渡したコンバーターの型。宣言の型が <c>IValueConverter</c> 等でも見逃さないよう、
+    /// 読み出せれば中身の型を返す。<c>x:Static</c> でない・解決できないときは null。
+    /// </summary>
+    private static Type? StaticConverterType(string markup, IReadOnlyDictionary<string, (string Namespace, string Assembly)> namespaces)
+    {
+        var stat = Regex.Match(markup, @"^\{x:Static\s+(?:Member\s*=\s*)?(?<type>[\w:.]+)\.(?<member>\w+)\s*\}$");
+        var owner = stat.Success ? ResolveXamlType(stat.Groups["type"].Value, namespaces) : null;
+        if (owner == null)
+        {
+            return null;
+        }
+
+        const BindingFlags flags = BindingFlags.Public | BindingFlags.Static | BindingFlags.FlattenHierarchy;
+        var member = stat.Groups["member"].Value;
+        var value = owner.GetProperty(member, flags)?.GetValue(null) ?? owner.GetField(member, flags)?.GetValue(null);
+        return value?.GetType() ?? StaticMemberType(owner, member);
+    }
+
     private static Type? StaticMemberType(Type owner, string member)
     {
         const BindingFlags flags = BindingFlags.Public | BindingFlags.Static | BindingFlags.FlattenHierarchy;
@@ -861,4 +935,11 @@ internal static class BoolVisibilitySampleStatics
     public static bool Enabled => true;
 
     public static string Name => "sample";
+
+    public static readonly System.Windows.Controls.BooleanToVisibilityConverter BoolToVisibility = new();
+
+    /// <summary>宣言の型がインターフェイスでも、中身の型で判定されること。</summary>
+    public static readonly System.Windows.Data.IValueConverter BoolToVisibilityAsInterface = new System.Windows.Controls.BooleanToVisibilityConverter();
+
+    public static readonly StringToVisibilityConverter StringToVisibility = new();
 }
