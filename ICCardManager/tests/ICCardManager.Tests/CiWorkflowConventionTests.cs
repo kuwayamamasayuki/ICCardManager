@@ -465,6 +465,34 @@ jobs:
     }
 
     /// <summary>
+    /// カバレッジの報告は、本体のモジュールが計測に含まれているかを確かめ、含まれないときは警告する（Issue #2399）。
+    /// coverlet は計装に失敗したモジュールを黙って計測から外すため、全体の数字だけを出すと
+    /// 「本体を含まない数字」が本体のカバレッジとして読まれる（#2399 では開発用ツールだけの数字を報告していた）。
+    /// 確かめる名前は本体の csproj の AssemblyName から導出する（名前を変えたときに検査が空振りしないように）。
+    /// </summary>
+    [Fact]
+    public void カバレッジの報告は本体のモジュールが計測に含まれないときに警告すること()
+    {
+        var csproj = File.ReadAllText(Path.Combine(TestPaths.GetSolutionRoot(), "src", "ICCardManager", "ICCardManager.csproj"));
+        var assemblyName = Regex.Match(csproj, @"<AssemblyName>\s*([^<\s]+)\s*</AssemblyName>").Groups[1].Value;
+        assemblyName.Should().NotBeEmpty("本体の csproj から AssemblyName を読めないと、確かめるべき名前が決まらない");
+
+        var script = ExtractJobs(File.ReadAllText(CiWorkflowPath)).Values
+            .Select(block => ExtractStepRunBlock(block, "Report coverage"))
+            .Single(s => s != null)!;
+
+        var required = Regex.Match(script, @"\$requiredModules\s*=\s*@\(([^)]*)\)");
+        required.Success.Should().BeTrue("計測に含まれていなければならないモジュールを $requiredModules = @(...) で宣言する");
+        Regex.Matches(required.Groups[1].Value, @"'([^']+)'").Cast<Match>().Select(m => m.Groups[1].Value)
+            .Should().Contain(assemblyName, "本体のモジュールが計測から抜けたことを検出する");
+
+        script.Should().Contain("SelectNodes('/coverage/packages/package')",
+            "モジュールごとの数字を出さないと、全体の数字が何を測ったものか分からない");
+        Regex.IsMatch(script, @"foreach\s*\(\s*\$\w+\s+in\s+\$missing\s*\)\s*\{\s*Write-Host\s+""::warning::").Should().BeTrue(
+            "含まれないモジュールは ::warning:: で知らせる（合否にはしない。Issue #2117）");
+    }
+
+    /// <summary>
     /// GitHub Release を作るステップは、タグの実行でだけ走ること（Issue #2116）。
     /// release.yml はタグを打つ前に試せるよう <c>workflow_dispatch</c> を持つため、条件が無いと
     /// 手動実行が「ブランチ名のリリース」を公開してしまう。対象はステップの内容（使う Action）から導出する。

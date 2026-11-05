@@ -62,4 +62,24 @@
     <Reference Include="System.IO.Compression" />
   </ItemGroup>
 
+  <!--
+    Issue #2399: カバレッジの計装で本体（ICCardManager.exe）を書き戻せるよう、WPF の参照アセンブリをテストの出力へ置く。
+    coverlet（Mono.Cecil）は計装したモジュールを書き戻すとき、enum 型の既定値を持つ引数
+    （DispatcherObservation.InvokeAsyncObserved の DispatcherPriority priority = DispatcherPriority.Normal 等）の
+    基になる型を知るためにその enum の定義を解決する。データコレクターは .NET（Core）上で動くため GAC を探さず、
+    探すのはモジュールと同じフォルダと自身のランタイムだけなので、WindowsBase 等が出力に無いと
+    「Unable to instrument module」で本体だけが計測から黙って抜ける（CI が DebugDataViewer だけの数値を報告していた）。
+    実行時は .NET Framework が厳密名のアセンブリを GAC から先に読むため、ここに置いたファイルはテストの動作に使われない。
+    出力に無いアセンブリの enum を既定値に使う変更は CoverageInstrumentationPrerequisiteTests が先に止め、
+    それでも抜けたことは CI の Report coverage が本体のモジュールの有無で警告する（CiWorkflowConventionTests が固定）。
+  -->
+  <Target Name="CopyWpfReferenceAssembliesForCoverage" AfterTargets="CopyFilesToOutputDirectory">
+    <ItemGroup>
+      <_WpfReferenceForCoverage Include="@(ReferencePath)" Condition="'%(Filename)' == 'WindowsBase' Or '%(Filename)' == 'PresentationCore' Or '%(Filename)' == 'PresentationFramework' Or '%(Filename)' == 'System.Xaml'" />
+    </ItemGroup>
+    <Copy SourceFiles="@(_WpfReferenceForCoverage)" DestinationFolder="$(OutDir)" SkipUnchangedFiles="true">
+      <Output TaskParameter="CopiedFiles" ItemName="FileWrites" />
+    </Copy>
+  </Target>
+
 </Project>

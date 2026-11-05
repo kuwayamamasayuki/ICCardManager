@@ -132,32 +132,60 @@ jobs:
     # 一方で数字が誰の目にも触れない状態も避ける。以前は codecov へ送信していたが、トークンが無く
     # 「Token required」で毎回失敗しており（continue-on-error で緑のまま）、外部から毎回取得する CLI の
     # リスクとトークン管理に見合う使い方も無かったため削除した（Issue #2117）。
+    # 数字はモジュール（計装できたアセンブリ）ごとにも出し、本体（ICCardManager）が含まれないときは警告する（Issue #2399）。
+    # coverlet は計装に失敗したモジュールを黙って計測から外すため、全体の数字だけでは「何を測った数字か」が分からない
+    # （#2399 では本体が一度も計装されず、開発用ツール DebugDataViewer だけの数字を報告していた）。
+    # 計装の失敗は合否にしない（上の #2117 の方針）が、警告とサマリーの明記で誰の目にも触れるようにする。
     - name: Report coverage
       if: matrix.configuration == 'Release'
       shell: pwsh
       run: |
-        $report = Get-ChildItem -Path ./coverage -Recurse -Filter coverage.cobertura.xml | Select-Object -First 1
-        if (-not $report) {
+        $requiredModules = @('ICCardManager')
+        $reports = @(Get-ChildItem -Path ./coverage -Recurse -Filter coverage.cobertura.xml)
+        if ($reports.Count -eq 0) {
           Write-Host "::warning::カバレッジの結果（coverage.cobertura.xml）が見つかりません。Run tests の --collect と --results-directory を確認してください。"
           exit 0
         }
+        if ($reports.Count -gt 1) {
+          Write-Host "::warning::カバレッジの結果が $($reports.Count) 個あり、先頭の 1 個だけを集計します。カバレッジを収集するテストプロジェクトが 1 つになっているか確認してください。"
+        }
+        $report = $reports[0]
         [xml]$xml = Get-Content -LiteralPath $report.FullName -Raw
         $invariant = [Globalization.CultureInfo]::InvariantCulture
-        $line = [math]::Round([double]::Parse($xml.coverage.'line-rate', $invariant) * 100, 1)
-        $branch = [math]::Round([double]::Parse($xml.coverage.'branch-rate', $invariant) * 100, 1)
+        function Format-Rate([string]$rate) { [math]::Round([double]::Parse($rate, $invariant) * 100, 1) }
+        $line = Format-Rate $xml.coverage.'line-rate'
+        $branch = Format-Rate $xml.coverage.'branch-rate'
         if ([int]$xml.coverage.'lines-valid' -eq 0) {
           Write-Host "::warning::カバレッジの対象行が 0 行です。アセンブリが計装されていません（PDB が無い等）。Build の -p:DebugType=portable を確認してください。"
         }
-        Write-Host "行カバレッジ: $line% / 分岐カバレッジ: $branch%"
-        @(
+        $modules = @($xml.SelectNodes('/coverage/packages/package') | ForEach-Object {
+          [pscustomobject]@{
+            Name = $_.GetAttribute('name')
+            Lines = $_.SelectNodes('classes/class/lines/line').Count
+            Line = Format-Rate $_.GetAttribute('line-rate')
+            Branch = Format-Rate $_.GetAttribute('branch-rate')
+          }
+        })
+        $missing = @($requiredModules | Where-Object { $_ -notin @($modules | Where-Object Lines -gt 0 | ForEach-Object Name) })
+        foreach ($name in $missing) {
+          Write-Host "::warning::本体（$name）がカバレッジの計測に含まれていません。coverlet が計装に失敗すると、そのモジュールは黙って計測から外れます。テストの実行に --diag を付けて coverlet のログの「Unable to instrument module」の理由を確認してください（Issue #2399）。"
+        }
+        Write-Host "行カバレッジ: $line% / 分岐カバレッジ: $branch%（計測したモジュール: $(($modules | ForEach-Object Name) -join ', ')）"
+        $summary = @(
           '### カバレッジ（Release）'
           ''
-          '| 行 | 分岐 |'
-          '|---|---|'
-          "| $line% | $branch% |"
-          ''
-          '閾値による合否判定は行いません（Issue #2117）。'
-        ) -join "`n" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
+          '| 対象 | 対象行 | 行 | 分岐 |'
+          '|---|---|---|---|'
+          "| 全体 | $($xml.coverage.'lines-valid') | $line% | $branch% |"
+        )
+        $summary += @($modules | ForEach-Object { "| $($_.Name) | $($_.Lines) | $($_.Line)% | $($_.Branch)% |" })
+        $summary += ''
+        foreach ($name in $missing) {
+          $summary += "> ⚠️ 本体（$name）が計測されていません。上の数字は本体を表していません（Issue #2399）。"
+          $summary += ''
+        }
+        $summary += '閾値による合否判定は行いません（Issue #2117）。'
+        $summary -join "`n" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
 
   code-quality:
     runs-on: windows-latest
