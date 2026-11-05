@@ -50,7 +50,8 @@ public class CoverageInstrumentationPrerequisiteTests
     /// 計測の対象になるモジュール。テストの csproj の ProjectReference（出力へ PDB ごと置かれるプロジェクト）から導出する。
     /// 名前で列挙すると、参照を足したプロジェクトが検査から黙って漏れる（development-conventions.md #1786）。
     /// csproj は XML として読み（属性の順序・引用符・条件付きの参照に依存しない）、参照先が参照するプロジェクトと、
-    /// すべてのプロジェクトに効く Directory.Build.props / .targets の参照もたどる。
+    /// ソリューション直下の Directory.Build.props / .targets の参照もたどる。下位のフォルダの Directory.Build.* と
+    /// <c>&lt;Import&gt;</c> 経由の参照は読まない（現在どちらも無い。足すときはここも広げる）。
     /// </summary>
     public static IEnumerable<object[]> MeasuredModules() =>
         ReferencedProjectAssemblyNames().Select(name => new object[] { name });
