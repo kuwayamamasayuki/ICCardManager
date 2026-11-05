@@ -81,14 +81,15 @@
 
                 <!-- 金額情報 -->
                 <StackPanel Grid.Row="0" Grid.Column="1" Orientation="Horizontal">
-                    <TextBlock Text="{Binding IncomeDisplay}"
+                    <!-- Issue #2369: 色だけで受入・払出を区別しないよう見出しを付ける（金額の無い側は出さない） -->
+                    <TextBlock Text="{Binding IncomeDisplay, StringFormat=受入: {0}}"
                                FontSize="{DynamicResource LargeFontSize}"
                                FontWeight="Bold"
                                Foreground="{DynamicResource SuccessForegroundBrush}"
                                VerticalAlignment="Center"
                                Margin="0,0,15,0"
                                Visibility="{Binding IncomeDisplay, Converter={StaticResource StringToVisibilityConverter}}"/>
-                    <TextBlock Text="{Binding ExpenseDisplay}"
+                    <TextBlock Text="{Binding ExpenseDisplay, StringFormat=払出: {0}}"
                                FontSize="{DynamicResource LargeFontSize}"
                                FontWeight="Bold"
                                Foreground="{DynamicResource LendingForegroundBrush}"

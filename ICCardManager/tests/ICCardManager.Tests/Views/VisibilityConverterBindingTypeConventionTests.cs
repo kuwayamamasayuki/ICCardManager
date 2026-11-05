@@ -40,6 +40,7 @@ namespace ICCardManager.Tests.Views;
 /// <b>近似の限界</b>: どの型が実際の DataContext かは見ず、到達できる型のうち <c>Path</c> を解決できたものすべてが
 /// 許される型であることを求める。DataTemplate の項目型に到達できない（ItemsSource が非ジェネリックの <c>IEnumerable</c>・
 /// <c>object</c> 等）とき、無関係な型が同じ名前の bool プロパティを持っていると見逃す。
+/// コンバーターは型名の完全一致で判定するため、<c>BooleanToVisibilityConverter</c> の派生クラスは対象にならない（現在は無い）。
 /// </para>
 /// </remarks>
 public class VisibilityConverterBindingTypeConventionTests
@@ -210,6 +211,16 @@ public class VisibilityConverterBindingTypeConventionTests
             ("IsBusy", true),
             ("LastExportedFile", false),
             ("IsBusy", true));
+    }
+
+    [Fact]
+    public void 検査_単引用符で囲んだ引数の中のカンマで分けないこと()
+    {
+        // 分けると「IsBusy」が Path を上書きし、bool として見逃す
+        var findings = InspectSample(
+            "<Button Visibility=\"{Binding LastExportedFile, ConverterParameter='a, IsBusy, b', Converter={StaticResource BoolToVisibilityConverter}}\"/>\n");
+
+        findings.Should().ContainSingle().Which.Path.Should().Be("LastExportedFile");
     }
 
     [Fact]
@@ -435,6 +446,11 @@ public class VisibilityConverterBindingTypeConventionTests
                 $@"Visibility=""\{{Binding {property}, Converter=\{{StaticResource StringToVisibilityConverter\}}\}}""",
                 $"{file} の {property} は値が入ったときに表示すること");
         }
+
+        // 表示されるようになった見出しの金額は、色だけでなく文字でも受入・払出を区別する
+        files["LedgerDetailDialog.xaml"].Should()
+            .Contain(@"Text=""{Binding IncomeDisplay, StringFormat=受入: {0}}""")
+            .And.Contain(@"Text=""{Binding ExpenseDisplay, StringFormat=払出: {0}}""");
     }
 
     #endregion
@@ -670,6 +686,14 @@ public class VisibilityConverterBindingTypeConventionTests
         var start = 0;
         for (var i = 0; i < body.Length; i++)
         {
+            if (body[i] == '\'' && depth == 0)
+            {
+                // 単引用符で囲んだ値（ConverterParameter='a, b' 等）の中のカンマでは分けない
+                var close = body.IndexOf('\'', i + 1);
+                i = close < 0 ? body.Length - 1 : close;
+                continue;
+            }
+
             switch (body[i])
             {
                 case '{':
@@ -746,7 +770,17 @@ public class VisibilityConverterBindingTypeConventionTests
 
         const BindingFlags flags = BindingFlags.Public | BindingFlags.Static | BindingFlags.FlattenHierarchy;
         var member = stat.Groups["member"].Value;
-        var value = owner.GetProperty(member, flags)?.GetValue(null) ?? owner.GetField(member, flags)?.GetValue(null);
+        object? value;
+        try
+        {
+            value = owner.GetProperty(member, flags)?.GetValue(null) ?? owner.GetField(member, flags)?.GetValue(null);
+        }
+        catch (TargetInvocationException)
+        {
+            // 読み出しに実行環境（Application.Current 等）が要るメンバーは中身を確かめられない。解釈できない指定として違反にする
+            return null;
+        }
+
         return value?.GetType() ?? StaticMemberType(owner, member);
     }
 
