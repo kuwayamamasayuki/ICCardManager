@@ -5,6 +5,7 @@
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
         xmlns:vm="clr-namespace:ICCardManager.ViewModels"
         xmlns:conv="clr-namespace:ICCardManager.Common"
+        xmlns:helpers="clr-namespace:ICCardManager.Views.Helpers"
         mc:Ignorable="d"
         d:DataContext="{d:DesignInstance Type=vm:TransferStationGroupViewModel}"
         Title="同一とみなす駅・バス停"
@@ -67,6 +68,7 @@
 
         <!-- グループ一覧。選択は「一覧の選択状態」を表すだけで、操作対象は行の識別子で特定する（Issue #1761） -->
         <DataGrid Grid.Row="1"
+                  helpers:DataGridAutoColumnFit.IsEnabled="True"
                   ItemsSource="{Binding Groups}"
                   SelectedItem="{Binding SelectedGroup}"
                   AutoGenerateColumns="False"

@@ -1,6 +1,7 @@
 ﻿<Window x:Class="ICCardManager.Views.Dialogs.VirtualCardDialog"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:helpers="clr-namespace:ICCardManager.Views.Helpers"
         Title="仮想交通系ICカード設定 [DEBUG]"
         Width="700" Height="550"
         MinHeight="440"
@@ -59,6 +60,7 @@
 
         <!-- 履歴一覧 DataGrid -->
         <DataGrid Grid.Row="2" ItemsSource="{Binding Entries}"
+                  helpers:DataGridAutoColumnFit.IsEnabled="True"
                   SelectedItem="{Binding SelectedEntry}"
                   AutoGenerateColumns="False"
                   CanUserAddRows="False" CanUserDeleteRows="False"
@@ -70,7 +72,8 @@
                   AutomationProperties.Name="利用履歴一覧"
                   AutomationProperties.HelpText="仮想交通系ICカードの利用履歴を入力します。セルをクリックして編集できます。">
             <DataGrid.Columns>
-                <DataGridTemplateColumn Header="日付" Width="130">
+                <!-- Issue #2404: 日付の列は文字サイズで必要な幅が変わるので、内容に合わせて広げ、従来の幅を下限に残す -->
+                <DataGridTemplateColumn Header="日付" Width="Auto" MinWidth="130">
                     <DataGridTemplateColumn.CellTemplate>
                         <DataTemplate>
                             <TextBlock Text="{Binding UseDate, StringFormat=yyyy/MM/dd}" VerticalAlignment="Center" Margin="4,0"/>
