@@ -135,10 +135,10 @@ public class CsvImportServicePointRedemptionSplitTests : IDisposable
     /// 利用の行の残額（740 円）とポイント還元の行の残額（980 円）が違うので、行の取り違えも検出できる。
     /// </remarks>
     [Theory]
-    [InlineData("240", "1", true)]
-    [InlineData("-240", "0", false)]
+    [InlineData("240", "1")]
+    [InlineData("-240", "0")]
     public async Task 利用とポイント還元が混在する日_別々の台帳の行になりポイント還元の行の受入に計上されること(
-        string pointAmount, string pointFlag, bool expectedFlagInDetail)
+        string pointAmount, string pointFlag)
     {
         // Arrange: 08:00 博多→天神（260 円、残額 740）→ 12:00 ポイント還元 240 円（残額 980）
         await SeedCardAsync();
@@ -169,8 +169,67 @@ public class CsvImportServicePointRedemptionSplitTests : IDisposable
         redemption.Expense.Should().Be(0, "ポイント還元を払出に入れない");
         redemption.Balance.Should().Be(980);
         var redemptionDetail = redemption.Details.Should().ContainSingle().Subject;
-        redemptionDetail.IsPointRedemption.Should().Be(expectedFlagInDetail, "明細はフラグを CSV のまま保存する");
+        // バス利用とポイント還元は業務ルール上排他（Issue #1948 の複合状態を作らない）
+        redemptionDetail.IsBus.Should().BeFalse("ポイント還元の明細はバス利用ではない");
         redemptionDetail.Balance.Should().Be(980);
+    }
+
+    /// <summary>
+    /// 欠陥を突く側（UT-016 No.59 の並び）: 利用 → ポイント還元 → 利用 の日は、ポイント還元を挟んで 3 行になり、
+    /// 前後の利用をまとめないこと。それぞれの行が自分の受入・払出・残額を持つこと。
+    /// </summary>
+    /// <remarks>
+    /// 前後の利用を 1 行にまとめる（ポイント還元を後ろへ寄せる）実装では、利用の行が往復 1 行（払出 520）になり赤になる。
+    /// 入力の形（行の数）が上の Theory と違うため、InlineData ではなく別のテストにした。
+    /// </remarks>
+    [Fact]
+    public async Task 利用とポイント還元と利用の日_ポイント還元を挟んで3つの台帳の行になること()
+    {
+        // Arrange: 08:00 博多→天神（260、残額 740）→ 12:00 ポイント還元 240（残額 980）→ 18:00 天神→博多（260、残額 720）
+        await SeedCardAsync();
+        var csvPath = WriteCsv(
+            $",2024-01-15 08:00:00,{TestCardIdm},001,博多,天神,,260,740,0,0,0,",
+            $",2024-01-15 12:00:00,{TestCardIdm},001,,,,240,980,0,1,0,",
+            $",2024-01-15 18:00:00,{TestCardIdm},001,天神,博多,,260,720,0,0,0,");
+
+        // Act
+        var result = await _service.ImportLedgerDetailsAsync(csvPath);
+
+        // Assert
+        result.Success.Should().BeTrue(string.Join(" / ", result.Errors.Select(e => e.Message)));
+        result.ImportedCount.Should().Be(3);
+
+        var rows = (await ReadLedgersOfDayAsync())
+            .Select(l => (l.Summary, l.Income, l.Expense, l.Balance))
+            .ToList();
+        rows.Should().Equal(
+            ("鉄道（博多～天神）", 0, 260, 740),
+            (SummaryGenerator.GetPointRedemptionSummary(), 240, 0, 980),
+            ("鉄道（天神～博多）", 0, 260, 720));
+    }
+
+    /// <summary>
+    /// プレビューの経路（<c>PreviewLedgerDetailsAsync</c>）も、取り込みと同じ区切りで「利用」と「ポイント還元」の
+    /// 2 件を示すこと（取り込みは 2 行なのにプレビューは 1 件、という食い違いを検出する）。
+    /// </summary>
+    [Fact]
+    public async Task プレビュー_利用とポイント還元が混在する日は取り込みと同じく2件に分けて示すこと()
+    {
+        // Arrange
+        await SeedCardAsync();
+        var csvPath = WriteCsv(
+            $",2024-01-15 08:00:00,{TestCardIdm},001,博多,天神,,260,740,0,0,0,",
+            $",2024-01-15 12:00:00,{TestCardIdm},001,,,,240,980,0,1,0,");
+
+        // Act
+        var preview = await _service.PreviewLedgerDetailsAsync(csvPath);
+
+        // Assert
+        preview.IsValid.Should().BeTrue(string.Join(" / ", preview.Errors.Select(e => e.Message)));
+        preview.NewCount.Should().Be(2);
+        preview.Items.Select(i => (i.Action, i.AdditionalInfo)).Should().Equal(
+            (ImportAction.Insert, "利用 1件 (2024-01-15)"),
+            (ImportAction.Insert, "ポイント還元 1件 (2024-01-15)"));
     }
 
     /// <summary>
