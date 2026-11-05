@@ -497,6 +497,76 @@ namespace ICCardManager.UITests.Tests
             File.ReadAllText(LatestVersionPath).Should().Be(OriginalLatestVersion);
         }
 
+        [Fact]
+        public void Acquire_更新案内ファイルが読み取り専用のとき_DBの退避も残さずに属性の確認を案内して中止すること()
+        {
+            // 取り除けない更新通知ファイルで Acquire が途中で抜けると、ガードが返らないので Restore が走らない。
+            // DB の回復の印が残れば、次回の Acquire がそれを書き戻し、その間の業務の記録を巻き戻す（#2290）
+            File.WriteAllText(DbPath, OriginalContent);
+            File.WriteAllText(LatestVersionPath, OriginalLatestVersion);
+            File.SetAttributes(LatestVersionPath, FileAttributes.ReadOnly);
+            try
+            {
+                Action act = () => UiTestDatabaseGuard.Acquire(_directory, maxAttempts: 1);
+
+                var thrown = act.Should().Throw<InvalidOperationException>().Which;
+                thrown.Message.Should().Contain(LatestVersionPath, "何が: どのファイルかを示す")
+                    .And.Contain("読み取り専用", "なぜ: 中止した理由を示す")
+                    .And.EndWith("確認してから実行してください。", "どうすれば: 行動指示で終わる");
+                Directory.GetFiles(_directory).Should().BeEquivalentTo(new[] { DbPath, LatestVersionPath },
+                    "DB の退避ファイル・印、更新通知ファイルの退避を残さない");
+                File.ReadAllText(LatestVersionPath).Should().Be(OriginalLatestVersion);
+            }
+            finally
+            {
+                foreach (var file in Directory.GetFiles(_directory))
+                {
+                    File.SetAttributes(file, FileAttributes.Normal);
+                }
+            }
+        }
+
+        [Fact]
+        public void Acquire_DBの退避に失敗したとき_更新案内ファイルを元へ戻して例外を伝えること()
+        {
+            // DB 本体の退避先に同名のフォルダーがあると、コピーが失敗する（DB の退避が完了しない）
+            File.WriteAllText(DbPath, OriginalContent);
+            File.WriteAllText(LatestVersionPath, OriginalLatestVersion);
+            Directory.CreateDirectory(PathOf(UiTestDatabaseGuard.DatabaseFileName + UiTestDatabaseGuard.BackupSuffix));
+
+            Action act = () => UiTestDatabaseGuard.Acquire(_directory, maxAttempts: 1);
+
+            act.Should().Throw<Exception>().Which.Should().Match<Exception>(e => e is IOException || e is UnauthorizedAccessException);
+            File.ReadAllText(LatestVersionPath).Should().Be(OriginalLatestVersion,
+                "ガードが返らないので Restore は走らない。ここで戻さないと開発機の更新通知ファイルが消えたままになる");
+            Directory.GetFiles(_directory).Should().BeEquivalentTo(new[] { DbPath, LatestVersionPath });
+        }
+
+        [Fact]
+        public void Restore_DBの書き戻しに失敗しても_更新案内ファイルは元へ戻すこと()
+        {
+            var journal = PathOf(UiTestDatabaseGuard.DatabaseFileName + "-journal");
+            File.WriteAllText(DbPath, OriginalContent);
+            File.WriteAllText(LatestVersionPath, OriginalLatestVersion);
+            var guard = UiTestDatabaseGuard.Acquire(_directory, maxAttempts: 1);
+            File.WriteAllText(DbPath, SeededContent);
+            File.WriteAllText(journal, "テストのジャーナル");
+            File.WriteAllText(LatestVersionPath, AppWrittenLatestVersion);
+
+            using (OpenLikeSqlite(journal))
+            {
+                Action restore = () => guard.Restore();
+                restore.Should().Throw<IOException>("前提: ジャーナルが開かれている間は DB を書き戻せない（DB の失敗を優先して伝える）");
+            }
+
+            File.ReadAllText(LatestVersionPath).Should().Be(OriginalLatestVersion,
+                "更新通知ファイルは DB の書き戻しの成否と独立に戻す");
+
+            UiTestDatabaseGuard.Acquire(_directory).Restore();
+            File.ReadAllText(DbPath).Should().Be(OriginalContent, "DB は従来どおり次回の Acquire が回復する");
+            File.ReadAllText(LatestVersionPath).Should().Be(OriginalLatestVersion);
+        }
+
         #endregion
 
         #region 付随ファイル・設定

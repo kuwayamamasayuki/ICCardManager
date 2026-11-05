@@ -65,10 +65,11 @@ namespace ICCardManager.UITests.Tests
             // これが無いと、投入データが警告を消しきれていなくても 2 枚が同じ画像のまま緑になる
             // （実際、貸出中カードの残額を引き上げ忘れた初版はこの形だった。コードレビューで検出）
             RequireNoLowBalanceWarning(page);
-            RequireNoNewVersionNotice(page);
 
             var path = ScreenshotHelper.Capture(fixture.MainWindow, "main.png");
             File.Exists(path).Should().BeTrue();
+            // 撮った後に確かめる（理由は RequireNoNewVersionNotice。Issue #2394）
+            RequireNoNewVersionNotice(page);
         }
 
         [SkippableFact]
@@ -84,10 +85,11 @@ namespace ICCardManager.UITests.Tests
             // 警告は残額チェック（WarningService）の非同期実行後に現れる。出現を待たずに撮ると
             // 「警告つき」と名乗る画像に警告が写らない
             WaitForWarningArea(page);
-            // 「システム警告つき」の説明図に、投入データ以外の警告（開発機の更新案内）を写さない（Issue #2394）
-            RequireNoNewVersionNotice(page);
 
             File.Exists(ScreenshotHelper.Capture(fixture.MainWindow, "main_with_warnings.png")).Should().BeTrue();
+            // 「システム警告つき」の説明図に、投入データ以外の警告（開発機の更新案内）が写っていないこと。
+            // 撮った後に確かめる（理由は RequireNoNewVersionNotice。Issue #2394）
+            RequireNoNewVersionNotice(page);
         }
 
         [SkippableFact]
@@ -468,10 +470,19 @@ namespace ICCardManager.UITests.Tests
         /// 更新の案内（「新しいバージョン … が公開されています」）が出ていないことを確かめる（Issue #2394）。
         /// </summary>
         /// <remarks>
+        /// <para>
         /// 更新の案内は DB と同じフォルダーの <c>latest_version.txt</c> から作られる。開発機に残った 99.0.0 の
         /// ファイルが、マニュアル用の画像に実在しない版への更新案内を写していた。UI テストの間は
         /// <c>UiTestDatabaseGuard</c> がこのファイルを退避して取り除くので、出ていればガードの退行である。
-        /// 呼ぶのはカード一覧の行が現れた後（＝起動時の更新チェックと残額チェックが済んだ後）にすること。
+        /// </para>
+        /// <para>
+        /// <b>撮った後に呼ぶこと</b>。更新のチェック（<c>MainViewModel.CheckUpdateNotificationAsync</c>）は、カード一覧の読み込みの
+        /// <b>後に</b> fire-and-forget で始まり、完了を待てる合図が画面に無い。撮る前に確かめても、まだ追加されていないだけで緑になり得る。
+        /// 更新の案内は一度出たらその起動の間は消えない（<c>WarningMessages</c> から取り除く経路は種別を絞っており、
+        /// <c>NewVersionAvailable</c> を含まない）ので、撮った後に無ければ、撮った時点にも無かった。
+        /// ただし、撮った後にもまだチェックが終わっていない可能性は残る（ファイルの読み取り 1 回なので、撮影の待ちの間に終わる想定）。
+        /// ガードの退避・復元そのものは <c>UiTestDatabaseGuardTests</c>（CI で実行）が固定している。
+        /// </para>
         /// </remarks>
         private static void RequireNoNewVersionNotice(MainWindowPage page)
         {

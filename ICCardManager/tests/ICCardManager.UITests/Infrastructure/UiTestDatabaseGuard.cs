@@ -1,6 +1,7 @@
 using System;
 using System.IO;
 using System.Linq;
+using System.Runtime.ExceptionServices;
 
 namespace ICCardManager.UITests.Infrastructure
 {
@@ -93,25 +94,46 @@ namespace ICCardManager.UITests.Infrastructure
             // 続く削除だけが失敗して、退避ファイル（＝「中断した実行の痕」の印）が残る。次回の Acquire はそれを書き戻し、
             // その間にピッすいで記録した貸出・返却を巻き戻す。回復（書き戻し）も DB を消すので、開かれている間は同じく失敗する
             guard.ThrowIfDatabaseInUse();
+            // Issue #2394: 更新通知ファイルも、取り除けるかを何も触る前に確かめる（読み取り専用・別のプロセスが開いている）
+            guard.ThrowIfLatestVersionFileNotRemovable();
             guard.RecoverInterruptedRun();
             guard.DeleteOrphanedCompanionBackups();
 
-            if (File.Exists(guard.DatabasePath))
-            {
-                // 付随ファイルを先に退避し、DB 本体の退避ファイルを最後に置く。
-                // DB 本体の退避ファイルが「退避が完了した」ことの印になる（途中で落ちたら印が無いので回復しない）。
-                foreach (var name in CompanionFileNames().Where(n => File.Exists(guard.PathOf(n))))
-                {
-                    guard.CopyWithRetry(guard.PathOf(name), guard.BackupPathOf(name));
-                }
-                guard.CopyWithRetry(guard.DatabasePath, guard.BackupPathOf(DatabaseFileName));
-            }
-            else
-            {
-                File.WriteAllText(guard.PathOf(AbsentMarkerFileName), string.Empty);
-            }
-
+            // Issue #2394: 更新通知ファイルは DB より先に退避する。DB の回復の印を置いた後に失敗すると、ガードが返らないので
+            // Restore も DiscardBackup も走らず、印だけが残る。次回の Acquire がそれを書き戻し、その間の業務の記録を巻き戻す（#2290）
             guard.SetAsideLatestVersionFile();
+
+            try
+            {
+                if (File.Exists(guard.DatabasePath))
+                {
+                    // 付随ファイルを先に退避し、DB 本体の退避ファイルを最後に置く。
+                    // DB 本体の退避ファイルが「退避が完了した」ことの印になる（途中で落ちたら印が無いので回復しない）。
+                    foreach (var name in CompanionFileNames().Where(n => File.Exists(guard.PathOf(n))))
+                    {
+                        guard.CopyWithRetry(guard.PathOf(name), guard.BackupPathOf(name));
+                    }
+                    guard.CopyWithRetry(guard.DatabasePath, guard.BackupPathOf(DatabaseFileName));
+                }
+                else
+                {
+                    File.WriteAllText(guard.PathOf(AbsentMarkerFileName), string.Empty);
+                }
+            }
+            catch (Exception ex) when (ex is IOException || ex is UnauthorizedAccessException)
+            {
+                // DB の退避が完了しなかった（印が無いので、DB は次回も回復しない）。取り除いた更新通知ファイルはここで戻す。
+                // 戻せなくても退避ファイルは残るので次回の Acquire が戻す。本来の原因（DB の退避の失敗）を失わないよう、こちらは握る
+                try
+                {
+                    guard.RestoreLatestVersionFile();
+                }
+                catch (Exception restoreFailure) when (restoreFailure is IOException || restoreFailure is UnauthorizedAccessException)
+                {
+                }
+
+                throw;
+            }
 
             return guard;
         }
@@ -153,6 +175,8 @@ namespace ICCardManager.UITests.Infrastructure
                         $"{DatabasePath} を別のプロセスが開いていたため UI テストの DB を消せず、" +
                         $"退避ファイル {BackupPathOf(DatabaseFileName)}（元の DB が無かったときは {PathOf(AbsentMarkerFileName)}）も捨て切れませんでした。" +
                         "このファイルを残したまま UI テストを実行すると、次の実行がそれを書き戻し、その間に加えた変更が巻き戻ります。" +
+                        $"更新通知ファイルの退避 {BackupPathOf(LatestVersionFileName)}（元が無かったときは {PathOf(LatestVersionAbsentMarkerFileName)}）も残り得ますが、" +
+                        "こちらは次の実行が元の位置へ戻すので削除しないでください。" +
                         "ピッすいを終了し、これらのファイルが残っていれば削除してから実行してください。",
                         ex, discardFailure);
                 }
@@ -179,8 +203,25 @@ namespace ICCardManager.UITests.Infrastructure
                 return;
             }
 
+            // 更新通知ファイルは DB の書き戻しの成否と独立に戻す（DB の書き戻しの失敗で、開発機の更新通知ファイルを消えたままにしない）。
+            // DB の書き戻しが失敗したときはその例外を優先して伝える（更新通知ファイルの退避は残り、次回の Acquire が戻す）
+            Exception? latestVersionFailure = null;
+            try
+            {
+                RestoreLatestVersionFile();
+            }
+            catch (Exception ex) when (ex is IOException || ex is UnauthorizedAccessException)
+            {
+                latestVersionFailure = ex;
+            }
+
             RestoreFromBackup();
-            RestoreLatestVersionFile();
+
+            if (latestVersionFailure != null)
+            {
+                ExceptionDispatchInfo.Capture(latestVersionFailure).Throw();
+            }
+
             _restored = true;
         }
 
@@ -305,12 +346,67 @@ namespace ICCardManager.UITests.Infrastructure
             if (File.Exists(path))
             {
                 // 退避ファイルを置き切ってから元を消す（途中で落ちても、印があれば次回の回復が書き戻す）
-                CopyWithRetry(path, BackupPathOf(LatestVersionFileName));
-                DeleteWithRetry(path);
+                var backup = BackupPathOf(LatestVersionFileName);
+                CopyWithRetry(path, backup);
+                try
+                {
+                    DeleteWithRetry(path);
+                }
+                catch (Exception ex) when (ex is IOException || ex is UnauthorizedAccessException)
+                {
+                    // 確認（ThrowIfLatestVersionFileNotRemovable）と削除の間に開かれた。元は残っているので退避を捨てる
+                    // （残すと次回の回復が、その間に書き換わった内容を退避した時点の内容で上書きする）。
+                    // 退避ファイルは元の属性ごとコピーされるので、読み取り専用を外してから消す
+                    File.SetAttributes(backup, FileAttributes.Normal);
+                    DeleteWithRetry(backup);
+                    throw;
+                }
             }
             else
             {
                 File.WriteAllText(PathOf(LatestVersionAbsentMarkerFileName), string.Empty);
+            }
+        }
+
+        /// <summary>
+        /// Issue #2394: 更新通知ファイルを取り除けない（読み取り専用・権限不足・別のプロセスが開いている）なら、何も触らずに中止する。
+        /// </summary>
+        /// <remarks>
+        /// 取り除けないまま撮影すると、開発機の更新の案内が画像へ写る。退避の途中で失敗すると、読み取り専用の属性ごとコピーされた
+        /// 退避ファイルが残り、次回以降の回復が毎回それを書き戻そうとして失敗する。
+        /// </remarks>
+        private void ThrowIfLatestVersionFileNotRemovable()
+        {
+            var path = PathOf(LatestVersionFileName);
+            if (!File.Exists(path))
+            {
+                return;
+            }
+
+            try
+            {
+                RetryOnIOException(() =>
+                {
+                    using (new FileStream(path, FileMode.Open, FileAccess.ReadWrite, FileShare.None))
+                    {
+                    }
+                });
+            }
+            catch (IOException ex)
+            {
+                throw new InvalidOperationException(
+                    $"更新通知ファイル {path} を別のプロセスが使用しているため、UI テストを中止しました（DB にも更新通知ファイルにも触れていません）。" +
+                    "UI テストは撮影画像に開発機の更新の案内が写らないよう、このファイルを一時的に退避します。" +
+                    "このファイルを開いているアプリ（ピッすい・エディター等）を終了してから実行してください。",
+                    ex);
+            }
+            catch (UnauthorizedAccessException ex)
+            {
+                throw new InvalidOperationException(
+                    $"更新通知ファイル {path} が読み取り専用か、書き込む権限が無いため、UI テストを中止しました（DB にも更新通知ファイルにも触れていません）。" +
+                    "UI テストは撮影画像に開発機の更新の案内が写らないよう、このファイルを一時的に退避します。" +
+                    "ファイルの読み取り専用の属性とアクセス権を確認してから実行してください。",
+                    ex);
             }
         }
 
