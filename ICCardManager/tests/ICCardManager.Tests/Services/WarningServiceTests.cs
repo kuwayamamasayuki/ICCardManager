@@ -93,7 +93,7 @@ public class WarningServiceTests
     }
 
     [Fact]
-    public void CheckLowBalanceWarnings_全カードが閾値以上なら警告ゼロ件()
+    public void CheckLowBalanceWarnings_全カードが閾値より大きければ警告ゼロ件()
     {
         var items = new[]
         {

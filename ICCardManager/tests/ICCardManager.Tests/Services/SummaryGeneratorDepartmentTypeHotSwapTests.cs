@@ -118,7 +118,7 @@ public class SummaryGeneratorDepartmentTypeHotSwapTests : IDisposable
     /// <remarks>
     /// 世代（<c>SummaryGenerationContext</c>）へ部署種別を畳み込む実装にしたため、
     /// 差し替えが世代を作り直して他の項目を既定値へ落とす退行が起こり得る
-    /// （<c>development-conventions.md</c>「UPDATE の SET 句は、その経路で本当に編集する列に限る」）。
+    /// （<c>db-write-conventions.md</c>「DB設計原則」の「UPDATE の SET 句は『その経路で本当に編集する列』に限る」）。
     /// </remarks>
     [Fact]
     public void 差し替えが部署種別以外の設定を保持すること()

@@ -67,7 +67,7 @@ public class LedgerMergeCompanionCountTests : IDisposable
 
         // OperationLogger のログ記録メソッドは virtual ではないため実物を使い、
         // 「実際に挿入された OperationLog の中身」を書き込み先のモックで捕捉する
-        // （`.claude/rules/development-conventions.md`「ログが残ったかの検証はログ記録クラスのモックではできない」）。
+        // （`.claude/rules/db-write-conventions.md`「DB設計原則」の「「ログが残ったか」の検証は、ログ記録クラスのモックではできない」）。
         var operationLogRepositoryMock = new Mock<IOperationLogRepository>();
         operationLogRepositoryMock
             .Setup(x => x.InsertAsync(It.IsAny<OperationLog>()))

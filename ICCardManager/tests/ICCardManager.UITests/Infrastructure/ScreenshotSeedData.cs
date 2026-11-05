@@ -266,7 +266,7 @@ namespace ICCardManager.UITests.Infrastructure
 
             using var tx = conn.BeginTransaction();
             // 貸出中レコードと ic_card の両方を遡らせる。片方だけだと起動時の
-            // LendingService.CheckAndRepairLentStatusAsync が食い違いを修復して貸出中の表示が消える。
+            // LendingService.RepairLentStatusConsistencyAsync が食い違いを修復して貸出中の表示が消える。
             Execute(conn,
                 "UPDATE ledger SET date = @date, lent_at = @date WHERE card_idm = @card AND is_lent_record = 1",
                 ("@date", lentAt), ("@card", LentCardIdm));

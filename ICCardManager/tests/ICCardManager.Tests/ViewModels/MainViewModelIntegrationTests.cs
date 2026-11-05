@@ -714,7 +714,7 @@ public class MainViewModelIntegrationTests
     /// </summary>
     /// <remarks>
     /// 台帳に記録された操作者は <c>ledger.LenderIdm</c> / <c>ledger.StaffName</c> と
-    /// <c>ic_card.lender_idm</c>（<c>UpdateLentStatusAsync</c> の第4引数）に現れるため、
+    /// <c>ic_card.last_lent_staff</c>（<c>UpdateLentStatusAsync</c> の第4引数）に現れるため、
     /// 呼び出し側はこの2つを突き合わせて「誰の名前で記録されたか」を検証する。
     /// </remarks>
     private List<Ledger> ArrangeReturnThenRelendScenario()
@@ -765,7 +765,7 @@ public class MainViewModelIntegrationTests
     /// <remarks>
     /// 修正前は <c>Process30SecondRuleAsync</c> が <c>_currentStaffIdm</c> を
     /// 前回操作者（職員A）で無条件に上書きしていたため、実際に持ち出したのは職員B なのに
-    /// <c>ledger.StaffName</c> / <c>ic_card.lender_idm</c> / <c>operation_log</c> が職員A になり、
+    /// <c>ledger.StaffName</c> / <c>ic_card.last_lent_staff</c> が職員A になり（カードのタッチによる貸出は operation_log に記録しない）、
     /// 長期未返却の督促も職員A へ向かっていた。
     /// </remarks>
     [Fact]
@@ -797,7 +797,7 @@ public class MainViewModelIntegrationTests
         lendLedgers[0].LenderIdm.Should().Be(StaffIdmB, "実際にカードを持ち出したのは職員B");
         lendLedgers[0].StaffName.Should().Be(StaffNameB);
 
-        // Assert: ic_card.lender_idm も職員B（督促の宛先になる）
+        // Assert: ic_card.last_lent_staff も職員B（督促の宛先になる）
         _cardRepositoryMock.Verify(r => r.UpdateLentStatusAsync(
             CardIdmA, true, It.IsAny<DateTime?>(), StaffIdmB), Times.Once);
         _cardRepositoryMock.Verify(

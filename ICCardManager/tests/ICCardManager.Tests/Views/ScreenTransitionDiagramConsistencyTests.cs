@@ -46,7 +46,7 @@ public class ScreenTransitionDiagramConsistencyTests
     /// 職員認証を要求する ViewModel（ファイル名）と、遷移図で認証エッジの起点となるノード ID の対応。
     /// 認証は「操作の前」の関門であり、認証後に開かれるダイアログではなく
     /// <c>RequestAuthenticationAsync</c> を呼ぶ側が起点になる。
-    /// 例: 履歴の追加は MainViewModel が認証してから利用履歴行編集ダイアログを開くため、
+    /// 例: 履歴の追加は HistoryPanelViewModel が認証してから利用履歴行編集ダイアログを開くため（Issue #2159）、
     /// 起点は LEDGERROWEDIT ではなく HISTORY（履歴表示エリア）。
     /// </summary>
     private static readonly Dictionary<string, string> StaffAuthCallerNodes = new Dictionary<string, string>
@@ -334,7 +334,7 @@ public class ScreenTransitionDiagramConsistencyTests
 
         stale.Should().BeEmpty(
             "遷移図に、実装では認証を要求していない画面からの認証エッジが残っている。" +
-            "（例: 認証は MainViewModel が行うのに LEDGERROWEDIT から出ていた誤記。Issue #1715）\n" +
+            "（例: 認証は履歴パネル（HistoryPanelViewModel。当時は MainViewModel）が行うのに LEDGERROWEDIT から出ていた誤記。Issue #1715）\n" +
             string.Join("\n", stale));
     }
 

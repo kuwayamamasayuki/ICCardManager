@@ -34,7 +34,7 @@ public class BusTextLiteralConventionTests
     private static readonly (string Literal, string Replacement)[] ForbiddenBusTextLiterals =
     {
         ("★", "SummaryGenerator.BusPlaceholder / HasIncompleteBusStop / IsBusStopPlaceholder"),
-        ("バス（", "SummaryGenerator.FormatBusSummary / ExtractBusStopBlocks / TryExtractBusStops"),
+        ("バス（", "SummaryGenerator.FormatBusSummary / ExtractBusStopBlocks"),
     };
 
     /// <summary>

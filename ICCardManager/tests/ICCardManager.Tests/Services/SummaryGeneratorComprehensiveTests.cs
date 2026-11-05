@@ -1932,11 +1932,10 @@ public class SummaryGeneratorComprehensiveTests : IDisposable
         var summary = _generator.Generate(details);
 
         // Act
-        var extracted = SummaryGenerator.TryExtractBusStops(summary, out var busStops);
+        var blocks = SummaryGenerator.ExtractBusStopBlocks(summary);
 
         // Assert: 併記の閉じ括弧で切れず、ブロック全体が取り出される
-        extracted.Should().BeTrue();
-        busStops.Should().Be("天神日銀前（天神中央郵便局前）～下原中央 往復");
+        blocks.Should().Equal("天神日銀前（天神中央郵便局前）～下原中央 往復");
     }
 
     /// <summary>
@@ -2084,7 +2083,7 @@ public class SummaryGeneratorComprehensiveTests : IDisposable
     /// </summary>
     /// <remarks>
     /// 候補探索を無条件に回すと、この形が「天神～姪浜 往復」へ書き換わる
-    /// （実際に TC014 の 12/8 が退行した）。#1916 が消したい欠陥は
+    /// （実際に、この形を含んでいた旧 TC014〔#2330 で削除〕の 12/8 が退行した）。#1916 が消したい欠陥は
     /// 「通しでは乗っていない区間が摘要に現れる」ことなので、
     /// 既定解に束ねられた区間（LegCount ≥ 2）が余っているときだけ別解を探す。
     /// </remarks>

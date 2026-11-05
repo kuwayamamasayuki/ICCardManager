@@ -77,9 +77,8 @@ public class SummaryGeneratorBusTextTests : IDisposable
         // 上のフォールバックが実際に守っている性質を、抽出の結果で表明する
         ConfigureBusText("", "");
 
-        SummaryGenerator.TryExtractBusStops("鉄道（博多～天神）", out var busStops)
-            .Should().BeFalse();
-        busStops.Should().BeEmpty();
+        SummaryGenerator.ExtractBusStopBlocks("鉄道（博多～天神）")
+            .Should().BeEmpty();
 
         SummaryGenerator.HasIncompleteBusStop("鉄道（博多～天神）").Should().BeFalse();
     }
@@ -97,67 +96,61 @@ public class SummaryGeneratorBusTextTests : IDisposable
     }
 
     [Fact]
-    public void TryExtractBusStops_生成した摘要から同じ値を取り出せる()
+    public void ExtractBusStopBlocks_生成した摘要から同じ値を取り出せる()
     {
         ConfigureBusText("乗合自動車", "※");
         var summary = SummaryGenerator.FormatBusSummary("天神～博多");
 
-        SummaryGenerator.TryExtractBusStops(summary, out var busStops).Should().BeTrue();
-        busStops.Should().Be("天神～博多");
+        SummaryGenerator.ExtractBusStopBlocks(summary).Should().Equal("天神～博多");
     }
 
     [Fact]
-    public void TryExtractBusStops_鉄道混在の摘要からバス部分だけを取り出す()
+    public void ExtractBusStopBlocks_鉄道混在の摘要からバス部分だけを取り出す()
     {
         ConfigureBusText("乗合自動車", "※");
 
-        SummaryGenerator.TryExtractBusStops("鉄道（博多～天神）、乗合自動車（天神～薬院）", out var busStops)
-            .Should().BeTrue();
-        busStops.Should().Be("天神～薬院");
+        SummaryGenerator.ExtractBusStopBlocks("鉄道（博多～天神）、乗合自動車（天神～薬院）")
+            .Should().Equal("天神～薬院");
     }
 
     [Fact]
-    public void TryExtractBusStops_旧ラベルの摘要には一致しない()
+    public void ExtractBusStopBlocks_旧ラベルの摘要には一致しない()
     {
         // 設定を変えた組織で、判定側が「バス」を直書きしたままだと通ってしまう形を固定する
         ConfigureBusText("乗合自動車", "※");
 
-        SummaryGenerator.TryExtractBusStops("バス（天神～博多）", out var busStops).Should().BeFalse();
-        busStops.Should().BeEmpty();
+        SummaryGenerator.ExtractBusStopBlocks("バス（天神～博多）").Should().BeEmpty();
     }
 
     [Theory]
     [InlineData(null)]
     [InlineData("")]
     [InlineData("鉄道（博多～天神）")]
-    public void TryExtractBusStops_バスを含まない摘要はfalseを返す(string summary)
+    public void ExtractBusStopBlocks_バスを含まない摘要は空を返す(string summary)
     {
-        SummaryGenerator.TryExtractBusStops(summary, out var busStops).Should().BeFalse();
-        busStops.Should().BeEmpty();
+        SummaryGenerator.ExtractBusStopBlocks(summary).Should().BeEmpty();
     }
 
     [Fact]
-    public void TryExtractBusStops_バスブロックが複数の摘要から全バス停を結合して取り出す()
+    public void ExtractBusStopBlocks_バスブロックが複数の摘要から全バス停を出現順に取り出す()
     {
         // Issue #1904: 摘要が時系列（交互ブロック）になり、バスブロックは複数になり得る。
-        // 全ブロックのバス停名を摘要中の出現順（＝時系列順）に「、」で結合して返す。
+        // 全ブロックのバス停名を摘要中の出現順（＝時系列順）に返す。
         ConfigureBusText("乗合自動車", "※");
         var summary = SummaryGenerator.FormatBusSummary("天神三丁目～舞鶴一丁目") +
                       "、鉄道（赤坂～天神）、" +
                       SummaryGenerator.FormatBusSummary("那の川～渡辺通一丁目");
 
-        SummaryGenerator.TryExtractBusStops(summary, out var busStops).Should().BeTrue();
-        busStops.Should().Be("天神三丁目～舞鶴一丁目、那の川～渡辺通一丁目");
+        SummaryGenerator.ExtractBusStopBlocks(summary).Should().Equal("天神三丁目～舞鶴一丁目", "那の川～渡辺通一丁目");
     }
 
     [Fact]
-    public void TryExtractBusStops_正規表現メタ文字を含むラベルでも壊れない()
+    public void ExtractBusStopBlocks_正規表現メタ文字を含むラベルでも壊れない()
     {
         ConfigureBusText("バス(市営)", "★");
 
         var summary = SummaryGenerator.FormatBusSummary("天神～博多");
-        SummaryGenerator.TryExtractBusStops(summary, out var busStops).Should().BeTrue();
-        busStops.Should().Be("天神～博多");
+        SummaryGenerator.ExtractBusStopBlocks(summary).Should().Equal("天神～博多");
     }
 
     #endregion

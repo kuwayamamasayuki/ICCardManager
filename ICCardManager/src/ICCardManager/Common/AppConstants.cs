@@ -30,7 +30,8 @@ namespace ICCardManager.Common
 
         /// <summary>
         /// 同一カードへの同時アクセスを防ぐ排他ロック取得のタイムアウト（秒）。
-        /// <see href=".claude/rules/business-logic.md">「排他制御」参照</see>。
+        /// <c>LendingService</c> が貸出・返却の処理中にカードごとに取得するロックの待ち時間で、
+        /// <c>AppOptions.CardLockTimeoutSeconds</c> で変更できる。
         /// </summary>
         public const int DefaultCardLockTimeoutSeconds = 5;
 

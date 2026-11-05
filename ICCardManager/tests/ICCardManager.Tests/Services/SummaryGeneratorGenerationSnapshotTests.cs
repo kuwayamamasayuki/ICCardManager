@@ -158,7 +158,7 @@ public class SummaryGeneratorGenerationSnapshotTests : IDisposable
     /// </summary>
     /// <remarks>
     /// 世代を作り直す実装にしたことで、他の項目を既定値へ落とす退行が起こり得る
-    /// （development-conventions.md「UPDATE の SET 句は、その経路で本当に編集する列に限る」）。
+    /// （db-write-conventions.md「DB設計原則」の「UPDATE の SET 句は『その経路で本当に編集する列』に限る」）。
     /// </remarks>
     [Fact]
     public void 差し替えがグループ以外の設定を保持すること()
