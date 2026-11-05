@@ -543,6 +543,76 @@ namespace ICCardManager.UITests.Tests
         }
 
         [Fact]
+        public void Acquire_更新案内ファイルの退避に失敗したとき_DBの退避も印も残さないこと()
+        {
+            // 順序の固定: 更新通知ファイルは DB より先に退避する。後にすると、ここで抜けたときに DB の回復の印だけが残り、
+            // ガードが返らないので Restore も退避の破棄も走らない。次回の Acquire がそれを書き戻し、その間の業務の記録を巻き戻す（#2290）。
+            // 退避先に同名のフォルダーがあると、取り除けるかの確認は通るがコピーが失敗する
+            var latestBackupFolder = PathOf(UiTestDatabaseGuard.LatestVersionFileName + UiTestDatabaseGuard.BackupSuffix);
+            File.WriteAllText(DbPath, OriginalContent);
+            File.WriteAllText(LatestVersionPath, OriginalLatestVersion);
+            Directory.CreateDirectory(latestBackupFolder);
+
+            Action act = () => UiTestDatabaseGuard.Acquire(_directory, maxAttempts: 1);
+
+            act.Should().Throw<Exception>().Which.Should().Match<Exception>(e => e is IOException || e is UnauthorizedAccessException);
+            Directory.GetFiles(_directory).Should().BeEquivalentTo(new[] { DbPath, LatestVersionPath },
+                "DB の退避ファイル・印を残さない（残すと次回の Acquire が書き戻す）");
+            File.ReadAllText(LatestVersionPath).Should().Be(OriginalLatestVersion);
+        }
+
+        [Fact]
+        public void DeleteWorkingDatabase_DBの退避ファイルを捨て切れなかったときも_更新案内ファイルは元へ戻すこと()
+        {
+            // #2290 の最後の経路（DB も退避ファイルも開かれている）。更新通知ファイルの戻しは DB の退避の破棄に従属させない
+            var dbBackup = PathOf(UiTestDatabaseGuard.DatabaseFileName + UiTestDatabaseGuard.BackupSuffix);
+            File.WriteAllText(DbPath, OriginalContent);
+            File.WriteAllText(LatestVersionPath, OriginalLatestVersion);
+            var guard = UiTestDatabaseGuard.Acquire(_directory, maxAttempts: 1);
+
+            using (OpenLikeSqlite(DbPath))
+            using (OpenLikeSqlite(dbBackup))
+            {
+                Action act = () => guard.DeleteWorkingDatabase();
+                act.Should().Throw<AggregateException>();
+            }
+
+            File.ReadAllText(LatestVersionPath).Should().Be(OriginalLatestVersion,
+                "退避を捨てたガードの Restore は何もしないので、ここで戻さないと開発機の更新通知ファイルが消えたままになる");
+            File.Exists(PathOf(UiTestDatabaseGuard.LatestVersionFileName + UiTestDatabaseGuard.BackupSuffix)).Should().BeFalse();
+        }
+
+        [Fact]
+        public void DeleteWorkingDatabase_更新案内ファイルだけ戻せなかったとき_DBの巻き戻りではなく次の実行が戻すことを伝えること()
+        {
+            File.WriteAllText(DbPath, OriginalContent);
+            File.WriteAllText(LatestVersionPath, OriginalLatestVersion);
+            var guard = UiTestDatabaseGuard.Acquire(_directory, maxAttempts: 1);
+            // 書き戻し先に同名のフォルダーがあると、更新通知ファイルを戻せない
+            Directory.CreateDirectory(LatestVersionPath);
+
+            using (OpenLikeSqlite(DbPath))
+            {
+                Action act = () => guard.DeleteWorkingDatabase();
+
+                var thrown = act.Should().Throw<AggregateException>().Which;
+                thrown.InnerExceptions.Should().HaveCount(2, "DB を消せなかった本来の原因と、更新通知ファイルを戻せなかった原因の両方を伝える");
+                thrown.Message.Should().Contain(PathOf(UiTestDatabaseGuard.LatestVersionFileName + UiTestDatabaseGuard.BackupSuffix), "何が: 残った退避を名指しする")
+                    .And.NotContain("巻き戻ります", "DB の退避は捨てられており、業務の記録は巻き戻らない")
+                    .And.EndWith("実行してください。", "どうすれば: 行動指示で終わる");
+            }
+
+            Directory.GetFiles(_directory).Should().BeEquivalentTo(
+                new[] { DbPath, PathOf(UiTestDatabaseGuard.LatestVersionFileName + UiTestDatabaseGuard.BackupSuffix) },
+                "DB の退避ファイル・印は捨て、更新通知ファイルの退避は次の実行のために残す");
+
+            Directory.Delete(LatestVersionPath);
+            UiTestDatabaseGuard.Acquire(_directory).Restore();
+            File.ReadAllText(LatestVersionPath).Should().Be(OriginalLatestVersion, "次の実行が戻す");
+            File.ReadAllText(DbPath).Should().Be(OriginalContent);
+        }
+
+        [Fact]
         public void Restore_DBの書き戻しに失敗しても_更新案内ファイルは元へ戻すこと()
         {
             var journal = PathOf(UiTestDatabaseGuard.DatabaseFileName + "-journal");
