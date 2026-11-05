@@ -1039,6 +1039,16 @@ namespace ICCardManager.ViewModels
                     return;
                 }
 
+                // Issue #2370: CanDelete は一覧を読んだ時点の IsRefunded しか見ない。その後に他 PC や
+                // 別の操作で払い戻されていたら、書き込む前に払い戻されたことを名指しして案内する。
+                // 削除を止める正は論理削除の WHERE（is_refunded = 0）で、ここは文言のための早期の案内。
+                if (card.IsRefunded)
+                {
+                    _cardRepository.InvalidateCache();
+                    await NotifyDeleteRefusedAsync(ConcurrencyConflictMessage.ForDeleteRefunded(targetLabel, "カード一覧"));
+                    return;
+                }
+
                 // Issue #2156: 論理削除と監査ログを 1 トランザクションで確定させる
                 // （操作者は Issue #429 の認証済み職員。OperationLogger が ICurrentOperatorContext から解決する）
                 var deleteResult = await _cardManagementService.DeleteAsync(card);
@@ -1057,6 +1067,14 @@ namespace ICCardManager.ViewModels
                     // 同じ文言で案内する。検出のタイミングによって案内が変わると、
                     // 同じ状況に別の説明が出ることになる（Issue #1757 と同じ判断）。
                     await NotifyDeleteConflictAsync(targetLabel);
+                }
+                else if (deleteResult == CardOperationResult.Conflict
+                    && (await _cardRepository.GetByIdmAsync(targetIdm))?.IsRefunded == true)
+                {
+                    // Issue #2370: 読み直した後・書き込みの前に払い戻され、論理削除の WHERE（is_refunded = 0）が
+                    // 拒否した。読み直しはキャッシュを経由するが、0 行のときリポジトリの事後診断と
+                    // CardManagementService.DeleteAsync の finally がキャッシュを破棄済みなので DB の最新状態を読む。
+                    await NotifyDeleteRefusedAsync(ConcurrencyConflictMessage.ForDeleteRefunded(targetLabel, "カード一覧"));
                 }
                 else
                 {
@@ -1085,6 +1103,18 @@ namespace ICCardManager.ViewModels
         private async Task NotifyDeleteConflictAsync(string targetLabel)
         {
             _cardRepository.InvalidateCache();
+            await NotifyDeleteRefusedAsync(ConcurrencyConflictMessage.ForDelete(targetLabel, "カード一覧"));
+        }
+
+        /// <summary>
+        /// 削除できなかったことを案内する（カード一覧を再読込してからダイアログを出す）
+        /// </summary>
+        /// <param name="message">案内の文言（「一覧を再読み込みしました」と述べるもの）</param>
+        /// <remarks>
+        /// 書き込みを 1 回も通らない経路では、呼び出し側が先にキャッシュを破棄すること（Issue #1759）。
+        /// </remarks>
+        private async Task NotifyDeleteRefusedAsync(string message)
+        {
             await LoadCardsAsync();
 
             // Issue #1793: 本メソッドは BeginBusy("削除中...") スコープの内側から呼ばれるため、
@@ -1092,9 +1122,7 @@ namespace ICCardManager.ViewModels
             // 呼び出し側でまとめて囲むと直前の一覧再読込中もオーバーレイが外れる。
             using (SuspendBusy())
             {
-                _dialogService.ShowError(
-                    ConcurrencyConflictMessage.ForDelete(targetLabel, "カード一覧"),
-                    "削除できません");
+                _dialogService.ShowError(message, "削除できません");
             }
         }
 
