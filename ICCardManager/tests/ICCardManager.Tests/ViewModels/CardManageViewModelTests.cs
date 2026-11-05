@@ -702,7 +702,9 @@ public class CardManageViewModelTests : IDisposable
 
         // Assert
         _viewModel.StatusMessage.Should().Be(
-            ICCardManager.Common.ConcurrencyConflictMessage.ForRegister("交通系ICカード「はやかけん H-001」", "カード一覧"));
+            ICCardManager.Common.ConcurrencyConflictMessage.ForRegister("交通系ICカード「はやかけん H-005」", "カード一覧"));
+        _viewModel.StatusMessage.Should().NotContain("H-001",
+            "入力した管理番号は一覧に無い。他の PC が登録した行の値で名指ししないと、一覧で確認できない");
         _viewModel.StatusMessage.Should().NotContain("書き込みに失敗",
             "行がある以上、原因は書き込みの失敗ではなく先に登録されたこと");
         _viewModel.IsStatusError.Should().BeTrue();
@@ -742,8 +744,71 @@ public class CardManageViewModelTests : IDisposable
         // Assert
         await act.Should().NotThrowAsync();
         _viewModel.StatusMessage.Should().Be(
-            ICCardManager.Common.ConcurrencyConflictMessage.ForRegisterReloadFailed("交通系ICカード「はやかけん H-001」", "カード一覧"));
+            ICCardManager.Common.ConcurrencyConflictMessage.ForRegisterReloadFailed("交通系ICカード「はやかけん H-005」", "カード一覧"));
         _viewModel.StatusMessage.Should().NotContain("再読み込みしましたので");
+        _viewModel.IsStatusError.Should().BeTrue();
+        _viewModel.IsEditing.Should().BeTrue("入力内容を消さない（Issue #1757）");
+    }
+
+    /// <summary>
+    /// Issue #2382: 書き込めなかった直後の読み直しが例外になっても、未処理例外にせず「書き込めなかった」と案内すること
+    /// </summary>
+    /// <remarks>
+    /// 共有フォルダが不安定なとき、<c>InsertAsync</c> の false と直後の読み直しの例外は同時に起きやすい。
+    /// 書き込めなかったことは確実なので、原因を断定しない案内に倒す。
+    /// </remarks>
+    [Fact]
+    public async Task SaveAsync_NewCard_WhenInsertReturnsFalseAndRereadThrows_ShouldShowWriteFailedMessage()
+    {
+        // Arrange
+        _viewModel.StartNewCard();
+        _viewModel.EditCardIdm = "0102030405060708";
+        _viewModel.EditCardType = "はやかけん";
+        _viewModel.EditCardNumber = "H-001";
+
+        _cardRepositoryMock.SetupSequence(r => r.GetByIdmAsync("0102030405060708", true))
+            .ReturnsAsync((IcCard?)null)
+            .ThrowsAsync(new System.Data.SQLite.SQLiteException(
+                System.Data.SQLite.SQLiteErrorCode.IoErr, "disk I/O error"));
+        _cardRepositoryMock.Setup(r => r.InsertAsync(It.IsAny<IcCard>(), It.IsAny<SQLiteTransaction>())).ReturnsAsync(false);
+
+        // Act
+        var act = async () => await _viewModel.SaveAsync();
+
+        // Assert
+        await act.Should().NotThrowAsync();
+        _viewModel.StatusMessage.Should().Be(
+            ICCardManager.Common.RegisterWriteFailedMessage.Build("交通系ICカード「はやかけん H-001」"));
+        _viewModel.IsStatusError.Should().BeTrue();
+        _viewModel.IsEditing.Should().BeTrue("入力内容を消さない（Issue #1757）");
+    }
+
+    /// <summary>
+    /// Issue #2382: 読み直した行が削除済み（確認の後に他の PC が登録して削除した）なら、一覧に出ないので
+    /// 一覧での確認ではなく、もう一度保存して復元する道を案内すること
+    /// </summary>
+    [Fact]
+    public async Task SaveAsync_NewCard_WhenInsertReturnsFalseAndRereadIsDeleted_ShouldGuideToRestore()
+    {
+        // Arrange
+        _viewModel.StartNewCard();
+        _viewModel.EditCardIdm = "0102030405060708";
+        _viewModel.EditCardType = "はやかけん";
+        _viewModel.EditCardNumber = "H-001";
+
+        _cardRepositoryMock.SetupSequence(r => r.GetByIdmAsync("0102030405060708", true))
+            .ReturnsAsync((IcCard?)null)
+            .ReturnsAsync(new IcCard { CardIdm = "0102030405060708", CardType = "nimoca", CardNumber = "N-009", IsDeleted = true });
+        _cardRepositoryMock.Setup(r => r.InsertAsync(It.IsAny<IcCard>(), It.IsAny<SQLiteTransaction>())).ReturnsAsync(false);
+
+        // Act
+        await _viewModel.SaveAsync();
+
+        // Assert
+        _viewModel.StatusMessage.Should().Be(
+            ICCardManager.Common.ConcurrencyConflictMessage.ForRegisterFoundDeleted("交通系ICカード「nimoca N-009」"));
+        _viewModel.StatusMessage.Should().NotContain("再読み込みしました");
+        _cardRepositoryMock.Verify(r => r.GetAllAsync(), Times.Never, "削除済みの行は一覧に出ないので再読込しない");
         _viewModel.IsStatusError.Should().BeTrue();
         _viewModel.IsEditing.Should().BeTrue("入力内容を消さない（Issue #1757）");
     }

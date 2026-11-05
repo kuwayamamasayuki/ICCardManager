@@ -452,11 +452,83 @@ public class StaffManageViewModelAuthenticationTests : IDisposable
         await _viewModel.SaveAsync();
 
         _staffRepositoryMock.Verify(r => r.GetAllAsync(), Times.Once, "案内が「再読み込みしました」と述べるので、先に再読込する");
-        _viewModel.StatusMessage.Should().Be(ConcurrencyConflictMessage.ForRegister("職員「新人 花子（S-100）」", "職員一覧"));
+        // Issue #2382: 入力した値ではなく、他 PC が登録した行の値で名指しする（入力した氏名は一覧に無い）
+        _viewModel.StatusMessage.Should().Be(ConcurrencyConflictMessage.ForRegister("職員「他PC 登録」", "職員一覧"));
+        _viewModel.StatusMessage.Should().NotContain("新人 花子");
         _viewModel.IsStatusError.Should().BeTrue();
         _viewModel.IsEditing.Should().BeTrue("入力内容を消さない（Issue #1757）");
         _viewModel.EditName.Should().Be("新人 花子");
         _operationLogs.Should().BeEmpty();
+    }
+
+    /// <summary>
+    /// Issue #2382: 読み直した行が削除済みなら一覧に出ないので、一覧での確認ではなく、もう一度保存して復元する道を案内すること
+    /// </summary>
+    [Fact]
+    public async Task 登録_読み直した行が削除済みなら_一覧を再読込せず復元の道を案内すること()
+    {
+        ArrangeAuthenticationSucceeds();
+        await EnterNewStaffFormAsync();
+        _staffRepositoryMock.Setup(r => r.InsertAsync(It.IsAny<Staff>(), It.IsAny<SQLiteTransaction>())).ReturnsAsync(false);
+        _staffRepositoryMock.SetupSequence(r => r.GetByIdmAsync(TargetIdm, true))
+            .ReturnsAsync((Staff?)null)
+            .ReturnsAsync(new Staff { StaffIdm = TargetIdm, Name = "退職 済子", IsDeleted = true });
+        _staffRepositoryMock.Invocations.Clear();
+
+        await _viewModel.SaveAsync();
+
+        _viewModel.StatusMessage.Should().Be(ConcurrencyConflictMessage.ForRegisterFoundDeleted("職員「退職 済子」"));
+        _viewModel.StatusMessage.Should().NotContain("再読み込みしました");
+        _staffRepositoryMock.Verify(r => r.GetAllAsync(), Times.Never, "削除済みの行は一覧に出ないので再読込しない");
+        _viewModel.IsEditing.Should().BeTrue("入力内容を消さない（Issue #1757）");
+    }
+
+    /// <summary>
+    /// Issue #2382: 書き込めなかった直後の読み直しが例外になっても、未処理例外にせず「書き込めなかった」と案内すること
+    /// （共有フォルダが不安定なとき、書き込みの失敗と読み直しの失敗は同時に起きやすい）
+    /// </summary>
+    [Fact]
+    public async Task 登録_書き込めず読み直しも例外なら_書き込めなかったことを案内すること()
+    {
+        ArrangeAuthenticationSucceeds();
+        await EnterNewStaffFormAsync();
+        _staffRepositoryMock.Setup(r => r.InsertAsync(It.IsAny<Staff>(), It.IsAny<SQLiteTransaction>())).ReturnsAsync(false);
+        _staffRepositoryMock.SetupSequence(r => r.GetByIdmAsync(TargetIdm, true))
+            .ReturnsAsync((Staff?)null)
+            .ThrowsAsync(new SQLiteException(SQLiteErrorCode.IoErr, "disk I/O error"));
+        _staffRepositoryMock.Invocations.Clear();
+
+        var act = async () => await _viewModel.SaveAsync();
+
+        await act.Should().NotThrowAsync();
+        _viewModel.StatusMessage.Should().Be(
+            ICCardManager.Common.RegisterWriteFailedMessage.Build("職員「新人 花子（S-100）」"));
+        _viewModel.IsStatusError.Should().BeTrue();
+        _viewModel.IsEditing.Should().BeTrue("入力内容を消さない（Issue #1757）");
+    }
+
+    /// <summary>
+    /// Issue #2382: 競合の案内の前の一覧の再読込が例外になっても、案内を失わず「再読み込みしました」と偽らないこと
+    /// </summary>
+    [Fact]
+    public async Task 登録_競合の案内の前の再読込が例外でも_案内を失わず開き直しを促すこと()
+    {
+        ArrangeAuthenticationSucceeds();
+        await EnterNewStaffFormAsync();
+        _staffRepositoryMock.Setup(r => r.InsertAsync(It.IsAny<Staff>(), It.IsAny<SQLiteTransaction>())).ReturnsAsync(false);
+        _staffRepositoryMock.SetupSequence(r => r.GetByIdmAsync(TargetIdm, true))
+            .ReturnsAsync((Staff?)null)
+            .ReturnsAsync(new Staff { StaffIdm = TargetIdm, Name = "他PC 登録" });
+        _staffRepositoryMock.Setup(r => r.GetAllAsync())
+            .ThrowsAsync(new SQLiteException(SQLiteErrorCode.IoErr, "disk I/O error"));
+        _staffRepositoryMock.Invocations.Clear();
+
+        var act = async () => await _viewModel.SaveAsync();
+
+        await act.Should().NotThrowAsync();
+        _viewModel.StatusMessage.Should().Be(ConcurrencyConflictMessage.ForRegisterReloadFailed("職員「他PC 登録」", "職員一覧"));
+        _viewModel.IsStatusError.Should().BeTrue();
+        _viewModel.IsEditing.Should().BeTrue("入力内容を消さない（Issue #1757）");
     }
 
     /// <summary>

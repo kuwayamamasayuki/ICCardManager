@@ -556,19 +556,16 @@ namespace ICCardManager.ViewModels
                         // 主キーの重複（認証を待つ間に他 PC が同じ職員証を登録した）のほか、ディスク満杯・
                         // 読み取り専用・破損・I/O エラーも同じ false になるため、読み直して原因を分ける。
                         // 入力内容はどちらでも消さない（#1757）。キャッシュは RegisterAsync の finally が破棄済み
-                        var label = $"職員「{FormatStaffLabel(staff.Name, staff.Number)}」";
-                        var registeredMeanwhile = await _staffRepository.GetByIdmAsync(staff.StaffIdm, includeDeleted: true);
-                        if (registeredMeanwhile != null)
-                        {
-                            // 案内が「再読み込みしました」と述べるので、先に一覧を再読込する（#1759）
-                            await LoadStaffAsync();
-                            StatusMessage = ConcurrencyConflictMessage.ForRegister(label, "職員一覧");
-                        }
-                        else
-                        {
-                            // 行が無い＝重複ではない。原因（書き込めなかった理由）はリポジトリがログに残している
-                            StatusMessage = RegisterWriteFailedMessage.Build(label);
-                        }
+                        // Issue #2382: 判断（読み直し・削除済み・再読込の失敗）は交通系ICカード管理画面と共有する。
+                        // 行があれば入力した値ではなく行の値で名指しする（他 PC が別の氏名で登録していれば入力した値は一覧に無い）
+                        StatusMessage = await RegisterFailureNotice.ResolveAsync(
+                            $"職員「{FormatStaffLabel(staff.Name, staff.Number)}」",
+                            () => _staffRepository.GetByIdmAsync(staff.StaffIdm, includeDeleted: true),
+                            existing => existing.IsDeleted,
+                            existing => $"職員「{FormatStaffLabel(existing.Name, existing.Number)}」",
+                            LoadStaffAsync,
+                            "職員一覧",
+                            (ex, message) => ErrorDialogHelper.LogException(ex, message));
 
                         IsStatusError = true;
                     }

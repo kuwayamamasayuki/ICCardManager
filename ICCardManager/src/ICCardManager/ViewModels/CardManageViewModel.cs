@@ -841,32 +841,15 @@ namespace ICCardManager.ViewModels
                         // 読み取り専用・破損・I/O エラーも同じ false になるため、読み直して原因を分ける
                         // （職員管理画面の #2263 と同じ形）。入力内容はどちらでも消さない（#1757）。
                         // キャッシュは RegisterAsync の finally が破棄済み
-                        var label = FormatCardLabel(card.CardType, card.CardNumber);
-                        var registeredMeanwhile = await _cardRepository.GetByIdmAsync(card.CardIdm, includeDeleted: true);
-                        if (registeredMeanwhile != null)
-                        {
-                            // 案内が「再読み込みしました」と述べるので、先に一覧を再読込する（#1759）。
-                            // 書き込みが失敗する原因（共有フォルダの切断・DB のロック）は再読込でも例外になり得る。
-                            // 例外を通すと案内そのものが失われるため、成功時（#1727）と同じく握って案内は続ける。
-                            // ただし「再読み込みしました」は事実にならないので、開き直しを促す文言にする
-                            try
-                            {
-                                await LoadCardsAsync();
-                                StatusMessage = ConcurrencyConflictMessage.ForRegister(label, "カード一覧");
-                            }
-                            catch (Exception ex)
-                            {
-                                _logger?.LogWarning(ex,
-                                    "登録の競合を案内する前のカード一覧の再読込に失敗しました。一覧は古い可能性があります。");
-                                StatusMessage = ConcurrencyConflictMessage.ForRegisterReloadFailed(label, "カード一覧");
-                            }
-                        }
-                        else
-                        {
-                            // 行が無い＝重複ではない。原因（書き込めなかった理由）はリポジトリがログに残している
-                            StatusMessage = RegisterWriteFailedMessage.Build(label);
-                        }
-
+                        // 判断（読み直し・削除済み・再読込の失敗）は職員管理画面と共有する（RegisterFailureNotice）
+                        StatusMessage = await RegisterFailureNotice.ResolveAsync(
+                            FormatCardLabel(card.CardType, card.CardNumber),
+                            () => _cardRepository.GetByIdmAsync(card.CardIdm, includeDeleted: true),
+                            existing => existing.IsDeleted,
+                            existing => FormatCardLabel(existing.CardType, existing.CardNumber),
+                            LoadCardsAsync,
+                            "カード一覧",
+                            (ex, message) => _logger?.LogWarning(ex, "交通系ICカードの登録の失敗を案内する処理: {Detail}", message));
                         IsStatusError = true;
                     }
                     _registrationModeResult = null;

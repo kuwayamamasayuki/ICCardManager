@@ -179,10 +179,37 @@ public class ConcurrencyConflictMessageTests
     {
         var message = ConcurrencyConflictMessage.ForRegisterReloadFailed(Target, ListName);
 
-        message.Should().StartWith($"{Target}を登録できませんでした。");
+        message.Length.Should().BeGreaterOrEqualTo(20);
+        message.Should().Contain(Target, "読み直した行で名指しする");
+        message.Should().Contain("登録できませんでした");
         message.Should().Contain("先に登録された可能性があります");
         message.Should().Contain("カード一覧の再読み込みにも失敗したため");
         message.Should().NotContain("再読み込みしましたので");
-        message.Should().EndWith("画面を閉じて開き直し、一覧で状態を確認してからやり直してください。");
+        message.Should().EndWith($"画面を閉じて開き直し、一覧で{Target}を確認してからやり直してください。");
+        foreach (var vague in VaguePhrases)
+        {
+            message.Should().NotContain(vague);
+        }
+    }
+
+    /// <summary>
+    /// Issue #2382: 読み直した行が削除済みだったときの文言は、一覧での確認（削除済みは一覧に出ない）を案内せず、
+    /// もう一度保存して復元する道を示すこと（internal のため全ファクトリの品質検査の外にあり、ここで 3 要素を固定する）
+    /// </summary>
+    [Fact]
+    public void ForRegisterFoundDeleted_ShouldGuideToRestoreWithoutClaimingReload()
+    {
+        var message = ConcurrencyConflictMessage.ForRegisterFoundDeleted(Target);
+
+        message.Length.Should().BeGreaterOrEqualTo(20);
+        message.Should().Contain(Target);
+        message.Should().Contain("削除済み").And.Contain("登録できませんでした");
+        message.Should().Contain("可能性があります");
+        message.Should().NotContain("再読み込み");
+        message.Should().EndWith("もう一度「保存」を押し、表示される確認で「はい」を選択してください。");
+        foreach (var vague in VaguePhrases)
+        {
+            message.Should().NotContain(vague);
+        }
     }
 }
