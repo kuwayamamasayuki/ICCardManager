@@ -543,11 +543,15 @@ WHERE card_idm = @cardIdm AND is_deleted = 0 AND (@isLent = 0 OR is_refunded = 0
 
             // Issue #1109: check-then-act を排除し、WHERE句のDBガードに一元化。
             // affected rows = 0 の場合は事後診断で原因を特定する。
+            // Issue #2370: 払戻済のカードは削除できない（Issue #530）。画面の CanDelete は一覧を読んだ時点の
+            // 値しか見ないため、その後に他 PC や別の操作で払い戻されたカードもここまで到達し得る。
+            // 保証は WHERE の is_refunded = 0 で行う（払い戻し・貸出中にする更新と同じく WHERE が正）。
+            // 拒否は事後診断で Conflict になる（貸出中でなく、行は存在する）。
             using var command = connection.CreateCommand();
             command.Transaction = transaction;
             command.CommandText = @"UPDATE ic_card
 SET is_deleted = 1, deleted_at = datetime('now', 'localtime')
-WHERE card_idm = @cardIdm AND is_deleted = 0 AND is_lent = 0";
+WHERE card_idm = @cardIdm AND is_deleted = 0 AND is_lent = 0 AND is_refunded = 0";
 
             command.Parameters.AddWithValue("@cardIdm", cardIdm);
 
