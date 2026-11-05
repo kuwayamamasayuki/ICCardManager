@@ -169,4 +169,20 @@ public class ConcurrencyConflictMessageTests
             message.Should().NotContain("再読み込み", "取り込みは一覧を再読込しない");
         }
     }
+
+    /// <summary>
+    /// Issue #2382: 登録の競合で一覧の再読込にも失敗したときの文言は、「再読み込みしました」と偽らず、
+    /// 「なぜ」を <see cref="ConcurrencyConflictMessage.ForRegister"/> と共有し、開き直しを指示すること
+    /// </summary>
+    [Fact]
+    public void ForRegisterReloadFailed_ShouldNotClaimReloadAndShouldTellToReopen()
+    {
+        var message = ConcurrencyConflictMessage.ForRegisterReloadFailed(Target, ListName);
+
+        message.Should().StartWith($"{Target}を登録できませんでした。");
+        message.Should().Contain("先に登録された可能性があります");
+        message.Should().Contain("カード一覧の再読み込みにも失敗したため");
+        message.Should().NotContain("再読み込みしましたので");
+        message.Should().EndWith("画面を閉じて開き直し、一覧で状態を確認してからやり直してください。");
+    }
 }

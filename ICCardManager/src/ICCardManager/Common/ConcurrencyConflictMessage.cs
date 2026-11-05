@@ -83,7 +83,20 @@ namespace ICCardManager.Common
         /// すべて <c>false</c> に畳むため、呼び出し側は読み直して行があることを確かめてから、この文言で案内すること。
         /// </remarks>
         public static string ForRegister(string target, string listName)
-            => Build(target, "登録", "他のパソコンや別の操作で先に登録された可能性があります。", listName);
+            => Build(target, "登録", RegisteredReason, listName);
+
+        /// <summary>
+        /// 登録が先に行われていた（<see cref="ForRegister"/> と同じ状況）が、案内の前の一覧の再読込にも失敗したときの文言（Issue #2382）。
+        /// </summary>
+        /// <param name="target">対象の説明。「何が」に相当する</param>
+        /// <param name="listName">再読込できなかった一覧の名称</param>
+        /// <remarks>
+        /// 公開のファクトリは「再読み込みしました」と述べるため、再読込に失敗したときには使えない（#1753）。
+        /// 一覧の再読込を前提にする公開のファクトリと形が違うため internal に置く。
+        /// </remarks>
+        internal static string ForRegisterReloadFailed(string target, string listName)
+            => $"{target}を登録できませんでした。{RegisteredReason}" +
+               $"{listName}の再読み込みにも失敗したため、画面を閉じて開き直し、一覧で状態を確認してからやり直してください。";
 
         /// <summary>
         /// 削除対象の行が見つからなかったときの文言を組み立てる。
@@ -118,6 +131,9 @@ namespace ICCardManager.Common
 
         /// <summary>対象の行が削除されていた（更新・払い戻しの「なぜ」）</summary>
         private const string DeletedReason = "他のパソコンや別の操作で削除された可能性があります。";
+
+        /// <summary>同じ識別子の行が先に登録されていた（登録の「なぜ」）</summary>
+        private const string RegisteredReason = "他のパソコンや別の操作で先に登録された可能性があります。";
 
         /// <summary>削除済みの行が先に復元されていた（復元の「なぜ」）</summary>
         private const string RestoredReason = "他のパソコンや別の操作で先に復元された可能性があります。";
