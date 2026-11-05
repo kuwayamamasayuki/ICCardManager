@@ -44,15 +44,27 @@ public class DateColumnWidthConventionTests
     private static readonly string[] ColumnTags = DataGridColumnTags.Append("GridViewColumn").ToArray();
 
     /// <summary>
-    /// <c>*</c> の日付列に課す最小幅。文字サイズ「特大」で要る幅（DataGrid で実測）に余裕を足した値
+    /// <c>*</c> の日付列に課す最小幅。文字サイズ「特大」で要る幅に、書体の差を見込んだ余裕 10 前後を足した値
     /// </summary>
     /// <remarks>
-    /// 日付だけ「2026/11/05」109、分まで「2026/11/05 13:53」162、秒まで「…13:53:12」188。
-    /// 書式は <c>StringFormat</c> から読む。プロパティ名で日付と判定した列（書式が見えない）は日付だけの値として扱う
+    /// <para>
+    /// 要る幅は、開発機（Windows 11 日本語版）の既定の UI 書体（WPF の既定。<c>SystemFonts.MessageFontFamily</c>）で、
+    /// DataGrid の Auto 列の <c>ActualWidth</c> を読んで実測した。日付だけ「2026/12/28」109、分まで「2026/12/28 23:59」162、
+    /// 秒まで「…23:59:59」188。
+    /// </para>
+    /// <para>
+    /// 書式は <c>StringFormat</c> から読む。時（<c>H</c> / <c>h</c>）があれば時刻付き、秒（<c>s</c>）があれば秒まで、とみなす。
+    /// プロパティ名で日付と判定した列（書式が見えない）は日付だけの値として扱う。
+    /// </para>
+    /// <para>
+    /// 検出の限界: 年を 4 桁で書かない書式（<c>yy/MM/dd</c>）、標準書式（<c>{0:d}</c> / <c>{0:g}</c>）、
+    /// <c>Converter</c> で整形する列は、プロパティ名が日付と読めない限り日付の列として検出しない。
+    /// このリポジトリの日付の書式は <c>yyyy</c> で書く（<c>DisplayFormatters</c>）ので、新しい書式を足すときはここを見直すこと。
+    /// </para>
     /// </remarks>
-    private const double StarDateMinWidth = 110;
-    private const double StarDateTimeMinWidth = 165;
-    private const double StarDateTimeWithSecondsMinWidth = 190;
+    private const double StarDateMinWidth = 120;
+    private const double StarDateTimeMinWidth = 175;
+    private const double StarDateTimeWithSecondsMinWidth = 200;
 
     private static readonly Regex BindingPathRegex = new(
         @"(?:\{Binding\s+(?:Path\s*=\s*)?|<Binding\s+Path\s*=\s*[""'])(?<path>[\w.]+)", RegexOptions.Compiled);
@@ -80,7 +92,7 @@ public class DateColumnWidthConventionTests
 
         violations.Should().BeEmpty(
             "日付・日時の列は Width=\"Auto\" / SizeToCells（DataGrid は従来の幅を MinWidth に）で内容に合わせて広げること。" +
-            "* 列にするなら特大で要る幅を MinWidth に与えること（日付 110・分まで 165・秒まで 190）。GridView の列は幅を省くか Auto。" +
+            "* 列にするなら特大で要る幅を MinWidth に与えること（日付 120・分まで 175・秒まで 200）。GridView の列は幅を省くか Auto。" +
             "固定幅だと文字サイズ「大」「特大」で日付の末尾が切れる（Issue #2404）");
     }
 
@@ -149,10 +161,18 @@ public class DateColumnWidthConventionTests
     // * 列は特大で要る幅を MinWidth に持つときだけ許す（書式は StringFormat から読む）
     [InlineData("<DataGridTextColumn Binding=\"{Binding LastUsageDate}\" Width=\"1.1*\"/>", 1)]
     [InlineData("<DataGridTextColumn Binding=\"{Binding LastUsageDate}\" Width=\"1.1*\" MinWidth=\"100\"/>", 1)]
-    [InlineData("<DataGridTextColumn Binding=\"{Binding LastUsageDate}\" Width=\"1.1*\" MinWidth=\"110\"/>", 0)]
-    [InlineData("<DataGridTextColumn Binding=\"{Binding LentAt, StringFormat='{}{0:yyyy/MM/dd HH:mm}'}\" Width=\"1.3*\" MinWidth=\"110\"/>", 1)]
-    [InlineData("<DataGridTextColumn Binding=\"{Binding LentAt, StringFormat='{}{0:yyyy/MM/dd HH:mm}'}\" Width=\"1.3*\" MinWidth=\"165\"/>", 0)]
-    [InlineData("<DataGridTextColumn Binding=\"{Binding Created, StringFormat=yyyy/MM/dd HH:mm:ss}\" Width=\"*\" MinWidth=\"165\"/>", 1)]
+    [InlineData("<DataGridTextColumn Binding=\"{Binding LastUsageDate}\" Width=\"1.1*\" MinWidth=\"110\"/>", 1)]
+    [InlineData("<DataGridTextColumn Binding=\"{Binding LastUsageDate}\" Width=\"1.1*\" MinWidth=\"120\"/>", 0)]
+    [InlineData("<DataGridTextColumn Binding=\"{Binding LentAt, StringFormat='{}{0:yyyy/MM/dd HH:mm}'}\" Width=\"1.3*\" MinWidth=\"120\"/>", 1)]
+    [InlineData("<DataGridTextColumn Binding=\"{Binding LentAt, StringFormat='{}{0:yyyy/MM/dd HH:mm}'}\" Width=\"1.3*\" MinWidth=\"165\"/>", 1)]
+    // 時は H / h の 1 文字でも時刻付きとみなす（HH だけを見ると、日付だけの最小幅で合格してしまう）
+    [InlineData("<DataGridTextColumn Binding=\"{Binding LentAt, StringFormat='{}{0:yyyy/MM/dd H:mm}'}\" Width=\"1.3*\" MinWidth=\"120\"/>", 1)]
+    [InlineData("<DataGridTextColumn Binding=\"{Binding LentAt, StringFormat='{}{0:yyyy/MM/dd h:mm}'}\" Width=\"1.3*\" MinWidth=\"120\"/>", 1)]
+    [InlineData("<DataGridTextColumn Binding=\"{Binding LentAt, StringFormat='{}{0:yyyy/MM/dd H:mm}'}\" Width=\"1.3*\" MinWidth=\"175\"/>", 0)]
+    [InlineData("<DataGridTextColumn Binding=\"{Binding LentAt, StringFormat='{}{0:yyyy/MM/dd HH:mm}'}\" Width=\"1.3*\" MinWidth=\"175\"/>", 0)]
+    [InlineData("<DataGridTextColumn Binding=\"{Binding Created, StringFormat=yyyy/MM/dd HH:mm:ss}\" Width=\"*\" MinWidth=\"175\"/>", 1)]
+    [InlineData("<DataGridTextColumn Binding=\"{Binding Created, StringFormat=yyyy/MM/dd H:mm:s}\" Width=\"*\" MinWidth=\"175\"/>", 1)]
+    [InlineData("<DataGridTextColumn Binding=\"{Binding Created, StringFormat=yyyy/MM/dd HH:mm:ss}\" Width=\"*\" MinWidth=\"200\"/>", 0)]
     // テンプレートの中の束縛・年を含む StringFormat でも日付の列とみなす
     [InlineData("<DataGridTemplateColumn Header=\"日付\" Width=\"130\"><DataGridTemplateColumn.CellTemplate><DataTemplate>" +
                 "<TextBlock Text=\"{Binding UseDate, StringFormat=yyyy/MM/dd}\"/></DataTemplate></DataGridTemplateColumn.CellTemplate></DataGridTemplateColumn>", 1)]
@@ -275,12 +295,12 @@ public class DateColumnWidthConventionTests
     private static double RequiredStarMinWidth(string columnXaml)
     {
         var format = string.Concat(YearFormatRegex.Matches(columnXaml).Cast<Match>().Select(m => m.Groups["f"].Value));
-        if (format.Contains("ss"))
+        if (format.IndexOf('s') >= 0)
         {
             return StarDateTimeWithSecondsMinWidth;
         }
 
-        return format.Contains("HH") ? StarDateTimeMinWidth : StarDateMinWidth;
+        return format.IndexOfAny(new[] { 'H', 'h' }) >= 0 ? StarDateTimeMinWidth : StarDateMinWidth;
     }
 
     private static bool IsDateColumn(string columnXaml)
