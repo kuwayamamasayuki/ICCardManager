@@ -94,6 +94,23 @@ namespace ICCardManager.Common
             => Build(target, "削除", "他のパソコンや別の操作で先に削除された可能性があります。", listName);
 
         /// <summary>
+        /// 削除しようとした交通系ICカードが払戻済になっていたときの文言を組み立てる（Issue #2370）。
+        /// </summary>
+        /// <param name="target">対象の説明。「何が」に相当する</param>
+        /// <param name="listName">再読込した一覧の名称</param>
+        /// <remarks>
+        /// 払戻済のカードは削除できない（Issue #530）。一覧を読んだ後に他のパソコンや別の操作で払い戻されると、
+        /// 画面の CanDelete（一覧の値）では止まらず、削除の直前の読み直しか論理削除の WHERE（<c>is_refunded = 0</c>）で拒否される。
+        /// 「どうすれば」は<see cref="ForDelete"/> の「やり直してください」ではなく状態の確認にする。
+        /// 払戻済のカードは何度やり直しても削除できないため。公開のファクトリは「やり直してください」で
+        /// 終わることを全件で検証している（<c>ConcurrencyConflictMessageTests</c>）ので、形の違う本ファクトリは internal に置く。
+        /// </remarks>
+        internal static string ForDeleteRefunded(string target, string listName)
+            => $"{target}を削除できませんでした。他のパソコンや別の操作で払い戻された可能性があります。" +
+               "払戻済の交通系ICカードは削除できません。" +
+               $"{listName}を再読み込みしましたので、一覧で払戻済になっていることを確認してください。";
+
+        /// <summary>
         /// CSV インポートで、更新しようとした行が無くなっていたときの文言（Issue #2262）。
         /// </summary>
         /// <param name="target">対象の説明（CSV の行の内容で名指しする。例: <c>職員「山田 太郎」</c>）</param>
