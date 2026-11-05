@@ -475,7 +475,7 @@ public class StaffManageViewModelAuthenticationTests : IDisposable
 
         _staffRepositoryMock.Verify(r => r.GetByIdmAsync(TargetIdm, true), Times.Exactly(2), "書き込みの後に読み直して原因を分ける");
         _viewModel.StatusMessage.Should().Be(
-            StaffManageViewModel.BuildRegisterWriteFailedMessage("職員「新人 花子（S-100）」"));
+            ICCardManager.Common.RegisterWriteFailedMessage.Build("職員「新人 花子（S-100）」"));
         _viewModel.StatusMessage.Should().NotContain("先に登録された");
         _viewModel.StatusMessage.Should().NotContain("再読み込みしました");
         _viewModel.IsStatusError.Should().BeTrue();

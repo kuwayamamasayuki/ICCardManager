@@ -416,6 +416,18 @@ namespace ICCardManager.ViewModels
             => $"交通系ICカード「{cardType} {cardNumber}」";
 
         /// <summary>
+        /// 登録しようとしたカードが既に登録済み（有効）だったときの案内を組み立てる（Issue #2382）
+        /// </summary>
+        /// <param name="cardNumber">登録済みのカードの管理番号</param>
+        /// <remarks>
+        /// 保存時の確認とカードをタッチした時点の確認で同じ文言を使う。以前は「既に登録されています」で終わり、
+        /// 「どうすれば」を欠いていた。
+        /// </remarks>
+        internal static string BuildAlreadyRegisteredMessage(string cardNumber)
+            => $"このカードは {cardNumber} として既に登録されています。" +
+               $"登録内容を変更する場合は、カード一覧で {cardNumber} を選択して編集してください。";
+
+        /// <summary>
         /// 編集中の対象を、編集開始時に一覧へ載っていた表記で名指しする（Issue #1761）
         /// </summary>
         private string EditTargetLabel => FormatCardLabel(_editTargetCardType, _editTargetCardNumber);
@@ -579,7 +591,7 @@ namespace ICCardManager.ViewModels
                         }
                         else
                         {
-                            StatusMessage = $"このカードは {existing.CardNumber} として既に登録されています";
+                            StatusMessage = BuildAlreadyRegisteredMessage(existing.CardNumber);
                             IsStatusError = true;
                             return;
                         }
@@ -805,7 +817,25 @@ namespace ICCardManager.ViewModels
                     }
                     else
                     {
-                        StatusMessage = "登録に失敗しました";
+                        // Issue #2382: InsertAsync は一過性でない SQLite の失敗をすべて false に畳む（#1951 / #2001）。
+                        // 主キーの重複（登録前の確認の後に他 PC が同じカードを登録した）のほか、ディスク満杯・
+                        // 読み取り専用・破損・I/O エラーも同じ false になるため、読み直して原因を分ける
+                        // （職員管理画面の #2263 と同じ形）。入力内容はどちらでも消さない（#1757）。
+                        // キャッシュは RegisterAsync の finally が破棄済み
+                        var label = FormatCardLabel(card.CardType, card.CardNumber);
+                        var registeredMeanwhile = await _cardRepository.GetByIdmAsync(card.CardIdm, includeDeleted: true);
+                        if (registeredMeanwhile != null)
+                        {
+                            // 案内が「再読み込みしました」と述べるので、先に一覧を再読込する（#1759）
+                            await LoadCardsAsync();
+                            StatusMessage = ConcurrencyConflictMessage.ForRegister(label, "カード一覧");
+                        }
+                        else
+                        {
+                            // 行が無い＝重複ではない。原因（書き込めなかった理由）はリポジトリがログに残している
+                            StatusMessage = RegisterWriteFailedMessage.Build(label);
+                        }
+
                         IsStatusError = true;
                     }
                     _registrationModeResult = null;
@@ -1583,7 +1613,7 @@ namespace ICCardManager.ViewModels
                 else
                 {
                     // 既に登録済みの場合はメッセージを表示（赤色で目立たせる: Issue #286）
-                    StatusMessage = $"このカードは {existing.CardNumber} として既に登録されています";
+                    StatusMessage = BuildAlreadyRegisteredMessage(existing.CardNumber);
                     IsStatusError = true;
                     // フォームはそのままにして、ユーザーが確認できるようにする
                 }

@@ -427,7 +427,7 @@ public class StaffManageViewModelTests : IDisposable
         await _viewModel.SaveAsync();
 
         // Assert
-        _viewModel.StatusMessage.Should().Be(StaffManageViewModel.BuildRegisterWriteFailedMessage("職員「田中太郎」"));
+        _viewModel.StatusMessage.Should().Be(ICCardManager.Common.RegisterWriteFailedMessage.Build("職員「田中太郎」"));
         _viewModel.IsStatusError.Should().BeTrue();
         _viewModel.IsEditing.Should().BeTrue("入力内容を消さない（Issue #1757）");
     }

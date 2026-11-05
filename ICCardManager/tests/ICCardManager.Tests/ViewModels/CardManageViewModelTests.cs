@@ -505,6 +505,109 @@ public class CardManageViewModelTests : IDisposable
     }
 
     /// <summary>
+    /// Issue #2382: 既に登録済みのカードを登録しようとしたときの案内が、「どうすれば」まで述べること
+    /// </summary>
+    /// <remarks>
+    /// 以前は「このカードは H-999 として既に登録されています」で終わり、職員は次に何をすればよいか分からなかった。
+    /// 保存時の確認と、カードをタッチした時点の確認（<c>HandleCardReadCoreAsync</c>）は同じ文言を使う。
+    /// </remarks>
+    [Fact]
+    public async Task SaveAsync_NewCard_WithDuplicateIdm_ShouldTellWhatToDo()
+    {
+        // Arrange
+        _viewModel.StartNewCard();
+        _viewModel.EditCardIdm = "0102030405060708";
+        _viewModel.EditCardType = "はやかけん";
+        _viewModel.EditCardNumber = "H-001";
+
+        var existingCard = new IcCard { CardIdm = "0102030405060708", CardType = "はやかけん", CardNumber = "H-999" };
+        _cardRepositoryMock.Setup(r => r.GetByIdmAsync("0102030405060708", true)).ReturnsAsync(existingCard);
+
+        // Act
+        await _viewModel.SaveAsync();
+
+        // Assert
+        _viewModel.StatusMessage.Should().Be(CardManageViewModel.BuildAlreadyRegisteredMessage("H-999"));
+        _viewModel.StatusMessage.Should().EndWith("ください。");
+        _viewModel.IsStatusError.Should().BeTrue();
+    }
+
+    /// <summary>
+    /// Issue #2382: 登録の書き込みが false で、読み直してもカードが無い（重複ではない）とき、
+    /// 「書き込めなかった」理由と取れる行動を案内すること
+    /// </summary>
+    /// <remarks>
+    /// <c>CardRepository.InsertAsync</c> は一過性でない SQLite の失敗（ディスク満杯・読み取り専用・破損・I/O エラー、
+    /// 主キーの重複）をすべて false に畳む（#1951 / #2001）。以前は「登録に失敗しました」とだけ表示していた。
+    /// 職員管理画面（#2263）と同じ文言を共有する。
+    /// </remarks>
+    [Fact]
+    public async Task SaveAsync_NewCard_WhenInsertReturnsFalseAndCardIsAbsent_ShouldShowWriteFailedMessage()
+    {
+        // Arrange
+        _viewModel.StartNewCard();
+        _viewModel.EditCardIdm = "0102030405060708";
+        _viewModel.EditCardType = "はやかけん";
+        _viewModel.EditCardNumber = "H-001";
+
+        _cardRepositoryMock.Setup(r => r.GetByIdmAsync("0102030405060708", true)).ReturnsAsync((IcCard?)null);
+        _cardRepositoryMock.Setup(r => r.InsertAsync(It.IsAny<IcCard>(), It.IsAny<SQLiteTransaction>())).ReturnsAsync(false);
+
+        // Act
+        await _viewModel.SaveAsync();
+
+        // Assert
+        _viewModel.StatusMessage.Should().Be(
+            ICCardManager.Common.RegisterWriteFailedMessage.Build("交通系ICカード「はやかけん H-001」"));
+        _viewModel.StatusMessage.Should().NotContain("先に登録された",
+            "読み直して行が無い以上、重複とは言えない");
+        _viewModel.IsStatusError.Should().BeTrue();
+        _viewModel.IsEditing.Should().BeTrue("入力内容を消さない（Issue #1757）");
+        _cardRepositoryMock.Verify(r => r.GetByIdmAsync("0102030405060708", true), Times.Exactly(2),
+            "登録前の確認と、失敗後の読み直しの 2 回");
+    }
+
+    /// <summary>
+    /// Issue #2382: 登録の書き込みが false で、読み直すと同じ IDm のカードがある（確認と書き込みの間に
+    /// 他のパソコンが登録した）とき、競合として案内し、案内の前に一覧を再読込すること
+    /// </summary>
+    [Fact]
+    public async Task SaveAsync_NewCard_WhenInsertReturnsFalseAndCardRegisteredMeanwhile_ShouldShowConflictAfterReload()
+    {
+        // Arrange
+        _viewModel.StartNewCard();
+        _viewModel.EditCardIdm = "0102030405060708";
+        _viewModel.EditCardType = "はやかけん";
+        _viewModel.EditCardNumber = "H-001";
+
+        var registeredMeanwhile = new IcCard { CardIdm = "0102030405060708", CardType = "はやかけん", CardNumber = "H-005" };
+        _cardRepositoryMock.SetupSequence(r => r.GetByIdmAsync("0102030405060708", true))
+            .ReturnsAsync((IcCard?)null)
+            .ReturnsAsync(registeredMeanwhile);
+        _cardRepositoryMock.Setup(r => r.InsertAsync(It.IsAny<IcCard>(), It.IsAny<SQLiteTransaction>())).ReturnsAsync(false);
+        var reloadCount = 0;
+        _cardRepositoryMock.Setup(r => r.GetAllAsync())
+            .ReturnsAsync(() =>
+            {
+                reloadCount++;
+                return new List<IcCard> { registeredMeanwhile };
+            });
+
+        // Act
+        await _viewModel.SaveAsync();
+
+        // Assert
+        _viewModel.StatusMessage.Should().Be(
+            ICCardManager.Common.ConcurrencyConflictMessage.ForRegister("交通系ICカード「はやかけん H-001」", "カード一覧"));
+        _viewModel.StatusMessage.Should().NotContain("書き込みに失敗",
+            "行がある以上、原因は書き込みの失敗ではなく先に登録されたこと");
+        _viewModel.IsStatusError.Should().BeTrue();
+        _viewModel.IsEditing.Should().BeTrue("入力内容を消さない（Issue #1757）");
+        reloadCount.Should().BeGreaterThan(0, "文言が「再読み込みしました」と述べるので、一覧を再読込する（#1759）");
+        _viewModel.Cards.Should().ContainSingle(c => c.CardNumber == "H-005");
+    }
+
+    /// <summary>
     /// カードIDmが空の場合、保存できないこと
     /// </summary>
     [Fact]

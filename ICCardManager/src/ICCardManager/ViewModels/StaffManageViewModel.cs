@@ -567,7 +567,7 @@ namespace ICCardManager.ViewModels
                         else
                         {
                             // 行が無い＝重複ではない。原因（書き込めなかった理由）はリポジトリがログに残している
-                            StatusMessage = BuildRegisterWriteFailedMessage(label);
+                            StatusMessage = RegisterWriteFailedMessage.Build(label);
                         }
 
                         IsStatusError = true;
@@ -792,20 +792,6 @@ namespace ICCardManager.ViewModels
         internal static string BuildRestoreAuthenticationCancelledMessage(string identifier, string retryAction)
             => $"職員証の認証が完了しなかったため、{identifier} を復元していません。復元する職員証では認証できません。" +
                $"復元するには、{retryAction}、登録済みの職員の職員証で認証してください。";
-
-        /// <summary>
-        /// 登録の書き込みが重複以外の理由で失敗したときの案内を組み立てる（Issue #2263）
-        /// </summary>
-        /// <param name="target">登録しようとした職員の説明（「職員「…」」）</param>
-        /// <remarks>
-        /// 原因（ディスク満杯・読み取り専用・破損・I/O エラー等）は断定しない。語彙は
-        /// <c>ExceptionMessageFormatter</c> の SQLite の文言（「データベースの読み書きができませんでした」）にそろえる。
-        /// 技術的な詳細はリポジトリ（<c>DbContext.LogNonTransientWriteFailure</c>）がログへ残している。
-        /// </remarks>
-        internal static string BuildRegisterWriteFailedMessage(string target)
-            => $"{target}を登録できませんでした。データベースへの書き込みに失敗しました" +
-               "（保存先の空き容量・書き込み権限・共有フォルダーの接続が原因の可能性があります）。" +
-               "これらを確認してから、もう一度「保存」を押してください。詳細はログファイルを確認してください。";
 
         /// <summary>
         /// 更新対象の職員が見つからなかった（競合）ことを案内し、職員一覧を再読込する
