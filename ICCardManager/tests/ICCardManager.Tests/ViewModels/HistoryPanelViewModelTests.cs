@@ -2259,6 +2259,59 @@ public class HistoryPanelViewModelTests : IDisposable
         return dto;
     }
 
+    /// <summary>
+    /// Issue #2378（レビュー 2 回目）: 開く前の確認の後、詳細ダイアログ自身の読み取りまでの間に行が消えた場合。
+    /// ダイアログの初期化は <see cref="ICCardManager.Common.Exceptions.LedgerRowGoneException"/> で中断する。
+    /// それがコマンドの例外として漏れず、開く前に無かった場合と同じく読み直してから案内すること。
+    /// </summary>
+    [Fact]
+    public async Task ShowLedgerDetail_ダイアログの読み取りで行が無くなっていたら_読み直してから案内すること()
+    {
+        var requestedPages = ArrangeLedgerEditOpen(new Ledger { Id = 42, CardIdm = DeleteConflictCardIdm });
+        var pagesLoadedBeforeOpen = -1;
+        _navigationServiceMock
+            .Setup(n => n.ShowDialogAsync(It.IsAny<Func<ICCardManager.Views.Dialogs.LedgerDetailDialog, Task>>()))
+            .Callback(() => pagesLoadedBeforeOpen = requestedPages.Count)
+            .ThrowsAsync(new ICCardManager.Common.Exceptions.LedgerRowGoneException());
+        var pagesLoadedBeforeMessage = -1;
+        string? message = null;
+        string? title = null;
+        _navigationServiceMock
+            .Setup(d => d.ShowError(It.IsAny<string>(), It.IsAny<string>()))
+            .Callback<string, string>((m, t) =>
+            {
+                message = m;
+                title = t;
+                pagesLoadedBeforeMessage = requestedPages.Count;
+            });
+
+        var act = () => _history.ShowLedgerDetail(DetailTargetDto());
+
+        await act.Should().NotThrowAsync("行が無いことは競合として案内する（コマンドの例外にしない）");
+        message.Should().Be(ConcurrencyConflictMessage.ForOpen(DeleteConflictTarget, "履歴一覧"));
+        title.Should().Be("利用履歴詳細");
+        pagesLoadedBeforeMessage.Should().BeGreaterThan(pagesLoadedBeforeOpen, "案内より前に一覧を読み直す（#1753）");
+    }
+
+    /// <summary>
+    /// 対の表明: 「行が無い」以外の失敗は競合として案内せず、従来どおり伝えること。
+    /// これが無いと、例外を丸ごと捕まえて競合の案内へ倒す実装でも上のテストが緑になる。
+    /// </summary>
+    [Fact]
+    public async Task ShowLedgerDetail_行が無いこと以外の失敗は_競合として案内しないこと()
+    {
+        ArrangeLedgerEditOpen(new Ledger { Id = 42, CardIdm = DeleteConflictCardIdm });
+        _navigationServiceMock
+            .Setup(n => n.ShowDialogAsync(It.IsAny<Func<ICCardManager.Views.Dialogs.LedgerDetailDialog, Task>>()))
+            .ThrowsAsync(new InvalidOperationException("injected"));
+
+        var act = () => _history.ShowLedgerDetail(DetailTargetDto());
+
+        await act.Should().ThrowAsync<InvalidOperationException>().WithMessage("injected");
+        _navigationServiceMock.Verify(
+            n => n.ShowError(It.IsAny<string>(), It.IsAny<string>()), Times.Never);
+    }
+
     #endregion
 
     #region 認証は 1 操作に限るスコープ（Issue #2260）
