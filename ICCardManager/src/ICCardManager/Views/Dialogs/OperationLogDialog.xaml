@@ -5,6 +5,7 @@
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
         xmlns:vm="clr-namespace:ICCardManager.ViewModels"
         xmlns:conv="clr-namespace:ICCardManager.Common"
+        xmlns:helpers="clr-namespace:ICCardManager.Views.Helpers"
         mc:Ignorable="d"
         d:DataContext="{d:DesignInstance Type=vm:OperationLogSearchViewModel}"
         Title="操作ログ"
@@ -218,6 +219,7 @@
 
         <!-- 操作ログ一覧 -->
         <DataGrid x:Name="LogsDataGrid"
+                  helpers:DataGridAutoColumnFit.IsEnabled="True"
                   Grid.Row="2"
                   ItemsSource="{Binding Logs}"
                   SelectedItem="{Binding SelectedLog}"
@@ -233,7 +235,10 @@
                   AutomationProperties.Name="操作ログ一覧"
                   AutomationProperties.HelpText="検索条件に一致する操作ログの一覧です。">
             <DataGrid.Columns>
-                <DataGridTextColumn Header="日時" Binding="{Binding TimestampDisplay}" Width="150"/>
+                <!-- Issue #2404: 固定幅 150 では「2026/11/05 13:53:12」の秒が文字サイズ「大」から切れる（大 152・特大 188 要る）。
+                     日時は固定長なので、下の #1787 が Auto を避けた理由（長い値で広がったまま縮まない）は当たらない。
+                     内容に合わせて広げ、150 を下限に残す。* 列と並ぶので DataGridAutoColumnFit で読み込み後に引き上げる（#2393） -->
+                <DataGridTextColumn Header="日時" Binding="{Binding TimestampDisplay}" Width="Auto" MinWidth="150"/>
                 <!-- Issue #1787: 列幅の設計。「インポート」「エクスポート」「バックアップ」等の表示名が
                      入るようになったため従来の Width="60" では中サイズでも切れる。
                      ・幅は「中」(BaseFontSize=14) で最長値が収まる固定値とし、大／特大は TextWrapping で担保する

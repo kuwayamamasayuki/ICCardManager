@@ -1267,5 +1267,24 @@ public class LedgerDetailViewModelTests : IDisposable
     }
 
     #endregion
+
+    #region 開く時点で行が無い（Issue #2378）
+
+    /// <summary>
+    /// Issue #2378: 読み取りの時点で行が無ければ、呼び出し元が「行が無い」だけを識別して案内できる専用の型で中断すること。
+    /// 従来の型（InvalidOperationException）を受けている箇所の挙動は変えない。
+    /// </summary>
+    [Fact]
+    public async Task InitializeAsync_行が無ければ_行が無いことを表す例外で中断すること()
+    {
+        _ledgerRepoMock.Setup(r => r.GetByIdAsync(42)).ReturnsAsync((Ledger?)null);
+
+        var act = () => _viewModel.InitializeAsync(42);
+
+        var thrown = await act.Should().ThrowAsync<ICCardManager.Common.Exceptions.LedgerRowGoneException>();
+        thrown.Which.Should().BeAssignableTo<InvalidOperationException>();
+    }
+
+    #endregion
 }
 

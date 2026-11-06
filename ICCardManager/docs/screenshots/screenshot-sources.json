@@ -334,6 +334,7 @@
       "sources": [
         "ICCardManager/src/ICCardManager/Views/Dialogs/OperationLogDialog.xaml",
         "ICCardManager/src/ICCardManager/Views/Dialogs/OperationLogDialog.xaml.cs",
+        "ICCardManager/src/ICCardManager/Views/Helpers/DataGridAutoColumnFit.cs",
         "ICCardManager/src/ICCardManager/ViewModels/OperationLogSearchViewModel.cs"
       ]
     },
@@ -355,6 +356,7 @@
       "sources": [
         "ICCardManager/src/ICCardManager/Views/Dialogs/TransferStationGroupDialog.xaml",
         "ICCardManager/src/ICCardManager/Views/Dialogs/TransferStationGroupDialog.xaml.cs",
+        "ICCardManager/src/ICCardManager/Views/Helpers/DataGridAutoColumnFit.cs",
         "ICCardManager/src/ICCardManager/ViewModels/TransferStationGroupViewModel.cs"
       ]
     },
@@ -386,6 +388,7 @@
       "sources": [
         "ICCardManager/src/ICCardManager/Views/Dialogs/VirtualCardDialog.xaml",
         "ICCardManager/src/ICCardManager/Views/Dialogs/VirtualCardDialog.xaml.cs",
+        "ICCardManager/src/ICCardManager/Views/Helpers/DataGridAutoColumnFit.cs",
         "ICCardManager/src/ICCardManager/ViewModels/VirtualCardViewModel.cs"
       ]
     },
