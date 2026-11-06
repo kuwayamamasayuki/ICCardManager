@@ -314,6 +314,28 @@ public class LedgerRepositoryTests : IDisposable
     }
 
     /// <summary>
+    /// Issue #2380: 期間の上限に <see cref="DateTime.MaxValue"/>（「終了日なし」）を渡しても例外にならず、
+    /// 下限の <see cref="DateTime.MinValue"/> と合わせて全件を返すこと。
+    /// 修正前は上限の「その日の 23:59:59」を <c>AddDays(1)</c> で求めており、9999/12/31 の翌日で
+    /// <see cref="ArgumentOutOfRangeException"/> になっていた。
+    /// </summary>
+    [Fact]
+    public async Task GetByDateRangeAsync_MinValueToMaxValue_ReturnsAllRecords()
+    {
+        // Arrange - 期間の両端から遠い日付を含める
+        var oldest = new DateTime(2000, 4, 1, 9, 0, 0);
+        var latest = new DateTime(2099, 3, 31, 23, 59, 59);
+        await _repository.InsertAsync(CreateTestLedger(TestCardIdm, oldest, "最古の利用", expense: 260));
+        await _repository.InsertAsync(CreateTestLedger(TestCardIdm, latest, "最新の利用", expense: 310));
+
+        // Act
+        var result = (await _repository.GetByDateRangeAsync(null, DateTime.MinValue, DateTime.MaxValue)).ToList();
+
+        // Assert
+        result.Select(l => l.Summary).Should().Equal("最古の利用", "最新の利用");
+    }
+
+    /// <summary>
     /// 同一日付では新規購入（繰越）が最優先で、それ以外は id 順（挿入順）で並ぶことを確認。
     /// 新規購入の時刻が遅く・id が最大で・income がチャージより小さくても先頭に来る。
     /// Issue #590: summaryベースのCASE式で新規購入/繰越を最優先にソート（income額・時刻に依存しない）
@@ -1237,6 +1259,25 @@ public class LedgerRepositoryTests : IDisposable
         itemList.Should().HaveCount(2);
         itemList[0].Summary.Should().Be("利用3");
         itemList[1].Summary.Should().Be("利用2");
+    }
+
+    /// <summary>
+    /// Issue #2380: ページング取得も期間の上限に <see cref="DateTime.MaxValue"/> を受け付け、件数と行を返すこと
+    /// （件数クエリと行クエリの両方が上限を整形する）。
+    /// </summary>
+    [Fact]
+    public async Task GetPagedAsync_ToMaxValue_ReturnsAllRecords()
+    {
+        // Arrange
+        await _repository.InsertAsync(CreateTestLedger(TestCardIdm, new DateTime(2026, 4, 1, 9, 0, 0), "利用A", expense: 260));
+        await _repository.InsertAsync(CreateTestLedger(TestCardIdm, new DateTime(2099, 3, 31, 23, 59, 59), "利用B", expense: 310));
+
+        // Act
+        var (items, totalCount) = await _repository.GetPagedAsync(TestCardIdm, DateTime.MinValue, DateTime.MaxValue, 1, 10);
+
+        // Assert
+        totalCount.Should().Be(2);
+        items.Select(l => l.Summary).Should().Equal("利用A", "利用B");
     }
 
     /// <summary>

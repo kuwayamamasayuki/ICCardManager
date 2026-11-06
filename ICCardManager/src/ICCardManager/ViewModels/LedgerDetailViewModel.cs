@@ -8,6 +8,7 @@ using System.Windows.Input;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using ICCardManager.Common;
+using ICCardManager.Common.Exceptions;
 using ICCardManager.Data;
 using ICCardManager.Data.Repositories;
 using ICCardManager.Dtos;
@@ -293,7 +294,9 @@ namespace ICCardManager.ViewModels
                 _cardName = cardName;
             }
             _ledger = await _ledgerRepository.GetByIdAsync(ledgerId)
-                ?? throw new InvalidOperationException($"Ledger ID {ledgerId} が見つかりません");
+                // Issue #2378: 開く前の確認の後に他 PC が削除・統合した行。呼び出し元（履歴パネル）が「行が無い」だけを
+                // 識別して一覧を読み直し、競合を案内できるよう専用の型で中断する（空の画面は出さない）
+                ?? throw new LedgerRowGoneException($"Ledger ID {ledgerId} が見つかりません");
 
             _committedLedger = LedgerCloner.Clone(_ledger)!;
 
