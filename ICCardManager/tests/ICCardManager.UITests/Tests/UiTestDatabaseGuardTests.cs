@@ -643,6 +643,30 @@ namespace ICCardManager.UITests.Tests
         }
 
         [Fact]
+        public void Restore_DBは戻せて更新案内ファイルだけ戻せなかったとき_例外を伝え退避を残して次回に戻すこと()
+        {
+            File.WriteAllText(DbPath, OriginalContent);
+            File.WriteAllText(LatestVersionPath, OriginalLatestVersion);
+            var guard = UiTestDatabaseGuard.Acquire(_directory, maxAttempts: 1);
+            File.WriteAllText(DbPath, SeededContent);
+            // 書き戻し先に同名のフォルダーがあると、更新通知ファイルを戻せない
+            Directory.CreateDirectory(LatestVersionPath);
+
+            Action restore = () => guard.Restore();
+
+            restore.Should().Throw<Exception>("黙って成功にすると、開発機の更新通知ファイルが消えたままになったことに誰も気付かない")
+                .Which.Should().Match<Exception>(e => e is IOException || e is UnauthorizedAccessException);
+            File.ReadAllText(DbPath).Should().Be(OriginalContent, "DB の書き戻しは更新通知ファイルの失敗に巻き込まれない");
+            File.Exists(PathOf(UiTestDatabaseGuard.LatestVersionFileName + UiTestDatabaseGuard.BackupSuffix)).Should().BeTrue(
+                "戻せなかった退避は残し、次回の Acquire に任せる");
+
+            Directory.Delete(LatestVersionPath);
+            UiTestDatabaseGuard.Acquire(_directory).Restore();
+            File.ReadAllText(LatestVersionPath).Should().Be(OriginalLatestVersion);
+            File.ReadAllText(DbPath).Should().Be(OriginalContent);
+        }
+
+        [Fact]
         public void Restore_DBの書き戻しに失敗しても_更新案内ファイルは元へ戻すこと()
         {
             var journal = PathOf(UiTestDatabaseGuard.DatabaseFileName + "-journal");

@@ -391,11 +391,23 @@ namespace ICCardManager.UITests.Infrastructure
                     // （残すと次回の回復が、その間に書き換わった内容を退避した時点の内容で上書きする）。
                     // 退避ファイルは元の属性ごとコピーされるので、読み取り専用を外してから消す。
                     // 確認と削除の間の競合でしか通らないため、単体テストでは再現していない（確認の側の文言は UiTestDatabaseGuardTests が固定）
-                    File.SetAttributes(backup, FileAttributes.Normal);
-                    DeleteWithRetry(backup);
+                    var leftover = string.Empty;
+                    try
+                    {
+                        File.SetAttributes(backup, FileAttributes.Normal);
+                        DeleteWithRetry(backup);
+                    }
+                    catch (Exception cleanupFailure) when (cleanupFailure is IOException || cleanupFailure is UnauthorizedAccessException)
+                    {
+                        // 後始末の失敗で、本来の原因（取り除けなかったこと）と案内を失わない。残った退避は名指しする
+                        // （元は残っているので、この退避は不要。残したままにすると次回の回復が元を退避した時点の内容で上書きする）
+                        leftover = $"退避ファイル {backup} も消せませんでした。元のファイルは残っているので、この退避ファイルは削除してください。";
+                    }
+
                     throw new InvalidOperationException(
                         $"更新通知ファイル {path} を取り除けなかったため、UI テストを中止しました（DB にも更新通知ファイルにも触れていません）。" +
                         "確認の直後に、別のプロセスがこのファイルを開いたか、属性・アクセス権が変わりました。" +
+                        leftover +
                         "このファイルを開いているアプリ（ピッすい・エディター等）を終了し、読み取り専用の属性とアクセス権を確認してから実行してください。",
                         ex);
                 }

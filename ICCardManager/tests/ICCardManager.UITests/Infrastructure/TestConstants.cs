@@ -386,6 +386,10 @@ namespace ICCardManager.UITests.Infrastructure
         [NotUiaName]
         public const string SystemWarningHeaderText = "⚠ システム警告";
 
+        /// <summary>システム警告の一覧（ItemsControl）の AutomationProperties.Name。警告の行はこの子に並ぶ（Issue #2394）。</summary>
+        [UiaName]
+        public const string SystemWarningListName = "システム警告一覧";
+
         /// <summary>
         /// 残額不足の警告だけを見分ける文字列（<c>WarningService</c> の LowBalance の
         /// <c>DisplayText</c> にだけ現れる）。警告行は <c>DisplayText</c> をそのまま表示する

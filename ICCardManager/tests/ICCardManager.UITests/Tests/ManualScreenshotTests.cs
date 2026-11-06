@@ -69,7 +69,7 @@ namespace ICCardManager.UITests.Tests
             var path = ScreenshotHelper.Capture(fixture.MainWindow, "main.png");
             File.Exists(path).Should().BeTrue();
             // 撮った後に確かめる（理由は ScreenshotAssertions.RequireNoNewVersionNotice。Issue #2394）
-            ScreenshotAssertions.RequireNoNewVersionNotice(fixture.MainWindow);
+            ScreenshotAssertions.RequireNoNewVersionNotice(fixture.MainWindow, path);
         }
 
         [SkippableFact]
@@ -86,10 +86,11 @@ namespace ICCardManager.UITests.Tests
             // 「警告つき」と名乗る画像に警告が写らない
             WaitForWarningArea(page);
 
-            File.Exists(ScreenshotHelper.Capture(fixture.MainWindow, "main_with_warnings.png")).Should().BeTrue();
+            var path = ScreenshotHelper.Capture(fixture.MainWindow, "main_with_warnings.png");
+            File.Exists(path).Should().BeTrue();
             // 「システム警告つき」の説明図に、投入データ以外の警告（開発機の更新案内）が写っていないこと。
             // 撮った後に確かめる（理由は ScreenshotAssertions.RequireNoNewVersionNotice。Issue #2394）
-            ScreenshotAssertions.RequireNoNewVersionNotice(fixture.MainWindow);
+            ScreenshotAssertions.RequireNoNewVersionNotice(fixture.MainWindow, path);
         }
 
         [SkippableFact]
@@ -196,8 +197,10 @@ namespace ICCardManager.UITests.Tests
             checkBoxes![0].AsCheckBox().IsChecked = true;
             checkBoxes[1].AsCheckBox().IsChecked = true;
 
-            File.Exists(ScreenshotHelper.Capture(fixture.MainWindow, "history_merge.png")).Should().BeTrue();
-            ScreenshotAssertions.RequireNoNewVersionNotice(fixture.MainWindow);
+            var path = ScreenshotHelper.Capture(fixture.MainWindow, "history_merge.png");
+            File.Exists(path).Should().BeTrue();
+            // 撮った後に確かめる（理由は ScreenshotAssertions.RequireNoNewVersionNotice。Issue #2394）
+            ScreenshotAssertions.RequireNoNewVersionNotice(fixture.MainWindow, path);
         }
 
         /// <summary>
@@ -385,7 +388,8 @@ namespace ICCardManager.UITests.Tests
 
             var path = ScreenshotHelper.Capture(fixture.MainWindow, "history.png");
             File.Exists(path).Should().BeTrue();
-            ScreenshotAssertions.RequireNoNewVersionNotice(fixture.MainWindow);
+            // 撮った後に確かめる（理由は ScreenshotAssertions.RequireNoNewVersionNotice。Issue #2394）
+            ScreenshotAssertions.RequireNoNewVersionNotice(fixture.MainWindow, path);
         }
 
         [SkippableTheory]
