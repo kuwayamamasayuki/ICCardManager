@@ -78,8 +78,10 @@ H3_OR_DEEPER_PREFIX = r"^ {0,3}#{3,6}[ \t]+"
 TOKEN_END = r"(?=[\s:]|[^\x00-\x7F]|$)"
 # 見出しの先頭に置く ID（``#### UT-049: …`` / ``### UT-083`` / ``#### UT-058c-FlaUI: …``）。
 # 接頭辞は英大文字 2〜4 文字（UT / IT / ST / PT / SEC / UAT）。ID は ASCII の英数字とハイフンだけを取るので、
-# ``:`` ・全角コロン・全角括弧・空白の手前で切れる。
-ID_TOKEN = r"[A-Z]{2,4}-[A-Za-z0-9-]+"
+# ``:`` ・全角コロン・全角括弧・空白の手前で切れる。節番号と同じく直後に TOKEN_END を要求するので、
+# ``#### UT-049.1`` ・ ``#### UT-049_b`` のように ASCII の記号が続く見出しは ID として数えない（UT-049 と
+# 数えると、別の見出しを重複と誤検出する）。
+ID_TOKEN = r"[A-Z]{2,4}-[A-Za-z0-9-]+" + TOKEN_END
 HEADING_ID_RE = re.compile(HEADING_PREFIX + r"(" + ID_TOKEN + r")")
 # ID の範囲見出し（``#### UT-067〜UT-071: …``）の終端。末尾の数字だけが違う範囲（同じ桁数）は展開して
 # 各 ID を占有済みとして扱う。展開できない範囲（``UT-058b〜UT-058c-FlaUI`` 等）は両端だけを占有として扱う。
@@ -285,6 +287,9 @@ class HeadingScan(NamedTuple):
 
     ids: List[tuple]
     sections: List[tuple]
+    # ファイルの終わりで開いたままのコードブロック・HTML コメント（"コードブロック（123 行目から）" 等）。
+    # 閉じ忘れると以降の見出しをすべて数えずに「重複なし」になるため、検査を fail にする。
+    unclosed: Optional[str] = None
 
 
 def expand_section_range(start: str, end: str) -> List[str]:
@@ -331,6 +336,7 @@ def parse_headings(md_path: str) -> HeadingScan:
     sections = []
     fence = None  # 開いているフェンスの記号（例: "````"）。None ならブロックの外
     in_comment = False
+    opened_at = 0  # 開いているコードブロック・HTML コメントの開始行
     with open(md_path, encoding="utf-8-sig") as f:
         for lineno, line in enumerate(f, start=1):
             if fence is not None:
@@ -350,11 +356,13 @@ def parse_headings(md_path: str) -> HeadingScan:
             m = FENCE_OPEN_RE.match(line)
             if m and not (m.group(1)[0] == "`" and "`" in m.group(2)):
                 fence = m.group(1)
+                opened_at = lineno
                 continue
             m = HTML_COMMENT_OPEN_RE.match(line)
             if m:
                 if HTML_COMMENT_CLOSE not in line[m.end():]:
                     in_comment = True
+                    opened_at = lineno
                 continue
             m = HEADING_ID_RE.match(line)
             if m:
@@ -374,7 +382,12 @@ def parse_headings(md_path: str) -> HeadingScan:
                         sections.append((lineno, n))
                 else:
                     sections.append((lineno, number))
-    return HeadingScan(ids, sections)
+    unclosed = None
+    if fence is not None:
+        unclosed = f"コードブロック（{opened_at} 行目の {fence}）"
+    elif in_comment:
+        unclosed = f"HTML コメント（{opened_at} 行目の <!--）"
+    return HeadingScan(ids, sections, unclosed)
 
 
 def find_duplicates(entries) -> Dict[str, List[int]]:
@@ -393,6 +406,12 @@ def check_heading_uniqueness(scan: HeadingScan) -> Tuple[bool, str]:
     側・後から足した側を空いている ID へ付け替え、旧 ID を本文に注記する）。
     見出しを 1 つも読めなかったときは、正規表現が文書の書式から外れた空振りとして fail する。
     """
+    if scan.unclosed:
+        return False, (
+            f"❌ ファイルの終わりまで {scan.unclosed} が閉じていません\n"
+            "  閉じていないと、そこから後の見出しを 1 つも数えずに「重複なし」になります。"
+            "閉じの記号（開いた記号と同じ種類・同じ長さ以上の ``` / ~~~、または -->）を書き足してください。"
+        )
     if not scan.ids or not scan.sections:
         return False, (
             "⚠ 見出しの ID・節番号を読み取れませんでした（"

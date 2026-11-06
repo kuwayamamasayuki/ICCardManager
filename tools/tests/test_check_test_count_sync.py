@@ -558,6 +558,25 @@ class HeadingUniquenessTests(unittest.TestCase):
         self.assertEqual(["UT-067", "UT-068", "UT-069", "UT-070", "UT-071"], [i for i in ids if i.startswith(("UT-06", "UT-07"))])
         self._assert_duplicate("\n#### UT-067〜UT-071: まとめた節\n\n#### UT-069: 後から\n", "ID UT-069:")
 
+    # --- レビュー 3 回目 ---
+
+    def test_id_followed_by_ascii_symbol_is_not_counted_as_that_id(self):
+        # UT-024a.1 / UT-024a_b を UT-024a と数えると、別の見出しを重複と誤検出する
+        ok, report = self._check(SAMPLE_HEADINGS_UNIQUE + "\n#### UT-024a.1 補足\n\n#### UT-024a_b 補足\n")
+        self.assertTrue(ok, report)
+
+    def test_unclosed_fence_at_end_of_file_fails(self):
+        ok, report = self._check(SAMPLE_HEADINGS_UNIQUE + "\n```\n閉じ忘れ\n#### UT-024a: 数えられない\n")
+        self.assertFalse(ok)
+        self.assertIn("コードブロック", report)
+        self.assertIn("閉じていません", report)
+
+    def test_unclosed_html_comment_at_end_of_file_fails(self):
+        ok, report = self._check(SAMPLE_HEADINGS_UNIQUE + "\n<!--\n閉じ忘れ\n#### UT-024a: 数えられない\n")
+        self.assertFalse(ok)
+        self.assertIn("HTML コメント", report)
+        self.assertIn("閉じていません", report)
+
 
 class MainReportsHeadingCheckOnEarlyExitTests(unittest.TestCase):
     """レビュー 2 回目: 後ろの検査が早期に終了しても、見出しの検査結果は必ず出す。"""
@@ -595,6 +614,54 @@ class MainReportsHeadingCheckOnEarlyExitTests(unittest.TestCase):
             _mod.list_test_names = original
         self.assertEqual(2, code)
         self.assertIn("ID UT-001:", output)
+
+
+class MainExitCodeCombinesHeadingCheckTests(unittest.TestCase):
+    """レビュー 3 回目: 最後まで進んだとき、終了コードは見出しの検査結果も合成する。"""
+
+    CLASS_COUNT = MIN_CLASS_ROWS
+
+    def _doc(self, headings):
+        rows = "\n".join(
+            f"| `Services/Sample{i}Tests` | 1 | 見本 |" for i in range(self.CLASS_COUNT)
+        )
+        return textwrap.dedent(f"""\
+            ### 1.1a テスト規模（現状）
+
+            | 種別 | テスト数 | 備考 |
+            |------|---------|------|
+            | 単体テスト（ICCardManager.Tests） | {self.CLASS_COUNT}件 | 見本 |
+            | UIテスト（ICCardManager.UITests） | 1件 | 見本 |
+            | **合計** | **{self.CLASS_COUNT + 1}件** | 見本 |
+
+            """) + "## 2. 単体テスト\n\n| クラス | 件数 | 観点 |\n|---|---|---|\n" + rows + "\n" + headings
+
+    def _run_main(self, doc):
+        def fake_list(_csproj, prefix):
+            if prefix == "Tests":
+                return [f"    ICCardManager.Tests.Services.Sample{i}Tests.Test" for i in range(self.CLASS_COUNT)]
+            return ["    ICCardManager.UITests.Sample.Test"]
+
+        original = _mod.list_test_names
+        _mod.list_test_names = fake_list
+        path = _write_md(doc)
+        try:
+            with contextlib.redirect_stderr(io.StringIO()) as err, contextlib.redirect_stdout(io.StringIO()) as out:
+                code = _mod.main(["--doc", path, "--unit-csproj", "u.csproj", "--ui-csproj", "ui.csproj"])
+        finally:
+            _mod.list_test_names = original
+            pathlib.Path(path).unlink()
+        return code, out.getvalue() + err.getvalue()
+
+    def test_all_checks_pass_returns_zero(self):
+        code, output = self._run_main(self._doc("\n### 2.1 節\n\n#### UT-001: a\n"))
+        self.assertEqual(0, code, output)
+
+    def test_counts_match_but_headings_duplicate_returns_one(self):
+        code, output = self._run_main(self._doc("\n### 2.1 節\n\n#### UT-001: a\n\n#### UT-001: b\n"))
+        self.assertEqual(1, code, output)
+        self.assertIn("ID UT-001:", output)
+        self.assertIn("✅", output)  # 件数の検査は通っている（失敗の原因が見出しだけであることの前提）
 
 
 if __name__ == "__main__":
