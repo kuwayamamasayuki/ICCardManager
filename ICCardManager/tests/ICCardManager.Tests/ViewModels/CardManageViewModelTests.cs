@@ -875,7 +875,7 @@ public class CardManageViewModelTests : IDisposable
 
         // Assert
         _viewModel.StatusMessage.Should().Be(
-            ICCardManager.Common.ConcurrencyConflictMessage.ForRegisterFoundDeleted("交通系ICカード「nimoca N-009」"));
+            ICCardManager.Common.ConcurrencyConflictMessage.ForRegisterFoundDeleted("交通系ICカード「nimoca N-009」", restoreRequiresStaffCardAuthentication: false));
         _viewModel.StatusMessage.Should().NotContain("再読み込みしました");
         _cardRepositoryMock.Verify(r => r.GetAllAsync(), Times.Never, "削除済みの行は一覧に出ないので再読込しない");
         _viewModel.IsStatusError.Should().BeTrue();

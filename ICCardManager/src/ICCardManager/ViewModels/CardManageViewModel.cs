@@ -434,8 +434,8 @@ namespace ICCardManager.ViewModels
         /// 種別も含めて名指しする（<see cref="FormatCardLabel"/>）。
         /// </remarks>
         internal static string BuildAlreadyRegisteredMessage(string cardType, string cardNumber, string listLocation)
-            => $"このカードは{FormatCardLabel(cardType, cardNumber)}として既に登録されています。" +
-               $"登録内容を変更する場合は、{listLocation}でこのカードを選択して編集してください。";
+            => RegisterFailureNotice.BuildAlreadyRegistered(
+                "このカード", FormatCardLabel(cardType, cardNumber), "このカード", listLocation);
 
         /// <summary>この画面を開いたまま案内するときのカード一覧の所在</summary>
         internal const string CardListInThisScreen = "カード一覧";
@@ -472,29 +472,20 @@ namespace ICCardManager.ViewModels
         /// </remarks>
         private async Task NotifyRestoreConflictAsync(IcCard existing)
         {
-            var label = FormatCardLabel(existing.CardType, existing.CardNumber);
-            StatusMessage = await TryReloadCardsAsync("復元の競合の案内")
-                ? ConcurrencyConflictMessage.ForRestore(label, "カード一覧")
-                : ConcurrencyConflictMessage.ForRestoreReloadFailed(label, "カード一覧");
+            StatusMessage = await RegisterFailureNotice.ResolveRestoreConflictAsync(
+                FormatCardLabel(existing.CardType, existing.CardNumber), LoadCardsAsync, "カード一覧", LogNoticeFailure);
             IsStatusError = true;
         }
 
         /// <summary>
         /// 案内の前にカード一覧を再読込する。例外はログに残して false を返す（案内そのものを失わないため。#1727）
         /// </summary>
-        private async Task<bool> TryReloadCardsAsync(string purpose)
-        {
-            try
-            {
-                await LoadCardsAsync();
-                return true;
-            }
-            catch (Exception ex)
-            {
-                _logger?.LogWarning(ex, "{Purpose}の前のカード一覧の再読込に失敗しました。一覧は古い可能性があります。", purpose);
-                return false;
-            }
-        }
+        private Task<bool> TryReloadCardsAsync(string purpose)
+            => RegisterFailureNotice.TryReloadAsync(LoadCardsAsync, LogNoticeFailure, purpose);
+
+        /// <summary>案内の前の読み直し・再読込の失敗を記録する（案内は失わない）</summary>
+        private void LogNoticeFailure(Exception ex, string message)
+            => _logger?.LogWarning(ex, "交通系ICカード管理画面の案内の準備: {Detail}", message);
 
         /// <summary>
         /// 編集中の対象を、編集開始時に一覧へ載っていた表記で名指しする（Issue #1761）
@@ -895,7 +886,8 @@ namespace ICCardManager.ViewModels
                             reread => FormatCardLabel(reread.CardType, reread.CardNumber),
                             LoadCardsAsync,
                             "カード一覧",
-                            (ex, message) => _logger?.LogWarning(ex, "交通系ICカードの登録の失敗を案内する処理: {Detail}", message));
+                            LogNoticeFailure,
+                            restoreRequiresStaffCardAuthentication: false);
                         IsStatusError = true;
                     }
                     _registrationModeResult = null;

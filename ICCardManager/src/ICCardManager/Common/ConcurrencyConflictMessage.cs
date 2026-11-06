@@ -116,14 +116,19 @@ namespace ICCardManager.Common
         /// 登録が書き込めなかった原因が、同じ IDm の<b>削除済み</b>の行だったときの文言（Issue #2382）。
         /// </summary>
         /// <param name="target">読み直した既存の（削除済みの）行の説明</param>
+        /// <param name="restoreRequiresStaffCardAuthentication">
+        /// 復元に職員証の認証が続くか（職員の復元。#2263）。true なら「はい」の後に認証する手順まで述べる
+        /// </param>
         /// <remarks>
         /// 削除済みの行は一覧に出ないので、一覧での確認は案内できない。もう一度保存すると、登録前の確認が
         /// 削除済みと判定して復元するかを尋ねる（職員・カードとも同じ流れ）。一覧の再読込を前提にしないため internal に置く。
         /// </remarks>
-        internal static string ForRegisterFoundDeleted(string target)
+        internal static string ForRegisterFoundDeleted(string target, bool restoreRequiresStaffCardAuthentication)
             => $"読み取ったIDmは既に{target}として登録され、削除済みになっていたため、登録できませんでした。" +
                "他のパソコンや別の操作で登録・削除された可能性があります。" +
-               "復元する場合は、もう一度「保存」を押し、表示される確認で「はい」を選択してください。";
+               (restoreRequiresStaffCardAuthentication
+                   ? "復元する場合は、もう一度「保存」を押し、表示される確認で「はい」を選択してから、登録済みの職員の職員証で認証してください。"
+                   : "復元する場合は、もう一度「保存」を押し、表示される確認で「はい」を選択してください。");
 
         private static string RegisteredHead(string target)
             => $"読み取ったIDmは既に{target}として登録されていたため、登録できませんでした。{RegisteredReason}";

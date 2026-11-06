@@ -220,7 +220,12 @@ public class ConcurrencyConflictMessageTests
     [Fact]
     public void ForRegisterFoundDeleted_ShouldGuideToRestoreWithoutClaimingReload()
     {
-        var message = ConcurrencyConflictMessage.ForRegisterFoundDeleted(Target);
+        var message = ConcurrencyConflictMessage.ForRegisterFoundDeleted(Target, restoreRequiresStaffCardAuthentication: false);
+        var staffMessage = ConcurrencyConflictMessage.ForRegisterFoundDeleted(Target, restoreRequiresStaffCardAuthentication: true);
+
+        // 職員の復元は「はい」の後に職員証の認証が続く（#2263）。カードにはその手順が無い
+        staffMessage.Should().EndWith("「はい」を選択してから、登録済みの職員の職員証で認証してください。");
+        message.Should().NotContain("職員証で認証");
 
         message.Length.Should().BeGreaterOrEqualTo(20);
         message.Should().Contain(Target);

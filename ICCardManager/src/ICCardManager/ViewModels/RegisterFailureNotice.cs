@@ -35,6 +35,7 @@ namespace ICCardManager.ViewModels
         /// <param name="reloadList">一覧を再読込する</param>
         /// <param name="listName">一覧の名称（「カード一覧」「職員一覧」）</param>
         /// <param name="logFailure">読み直し・再読込の例外を記録する（案内は失わない）</param>
+        /// <param name="restoreRequiresStaffCardAuthentication">復元に職員証の認証が続くか（職員の復元は #2263 で認証を経る）</param>
         /// <returns>ステータス欄に出す案内</returns>
         public static async Task<string> ResolveAsync<T>(
             string attemptedLabel,
@@ -43,7 +44,8 @@ namespace ICCardManager.ViewModels
             Func<T, string> labelOf,
             Func<Task> reloadList,
             string listName,
-            Action<Exception, string> logFailure)
+            Action<Exception, string> logFailure,
+            bool restoreRequiresStaffCardAuthentication)
             where T : class
         {
             T? existing;
@@ -71,20 +73,54 @@ namespace ICCardManager.ViewModels
             {
                 // 削除済みの行は一覧に出ないので、一覧での確認は案内できない。
                 // もう一度保存すると、登録前の確認が削除済みと判定して復元するかを尋ねる
-                return ConcurrencyConflictMessage.ForRegisterFoundDeleted(existingLabel);
+                return ConcurrencyConflictMessage.ForRegisterFoundDeleted(existingLabel, restoreRequiresStaffCardAuthentication);
             }
 
+            // 案内が「再読み込みしました」と述べるので、先に一覧を再読込する（#1759）。
+            // 成功時の再読込（#1727）と同じく例外は握って案内は続ける。ただし「再読み込みしました」は事実にならない
+            return await TryReloadAsync(reloadList, logFailure, "登録の競合の案内")
+                ? ConcurrencyConflictMessage.ForRegister(existingLabel, listName)
+                : ConcurrencyConflictMessage.ForRegisterReloadFailed(existingLabel, listName);
+        }
+
+        /// <summary>
+        /// 復元が false（他のパソコンや別の操作で先に復元された）だったときの案内を、一覧を再読込してから決める（Issue #1759 / #2382）
+        /// </summary>
+        /// <remarks>
+        /// 職員・カードとも復元の入口は 3 つ（未登録カードとして開いた時・保存時・登録モード中のタッチ時）。
+        /// 再読込の例外を通すと、未登録カードとして開いた時の経路では画面の初期化の失敗として画面が閉じ、案内が失われる。
+        /// </remarks>
+        public static async Task<string> ResolveRestoreConflictAsync(
+            string label, Func<Task> reloadList, string listName, Action<Exception, string> logFailure)
+            => await TryReloadAsync(reloadList, logFailure, "復元の競合の案内")
+                ? ConcurrencyConflictMessage.ForRestore(label, listName)
+                : ConcurrencyConflictMessage.ForRestoreReloadFailed(label, listName);
+
+        /// <summary>
+        /// 登録しようとした IDm が既に登録済み（有効）だったときの案内を組み立てる（Issue #2382）
+        /// </summary>
+        /// <param name="subject">読み取ったものの呼び方（「このカード」「この職員証」）</param>
+        /// <param name="label">登録済みの行の表示名</param>
+        /// <param name="selectTarget">一覧で選ぶものの呼び方（「このカード」「この職員」）</param>
+        /// <param name="listLocation">一覧の所在（画面を開いたまま／閉じる／再読込できなかった、で変わる）</param>
+        public static string BuildAlreadyRegistered(string subject, string label, string selectTarget, string listLocation)
+            => $"{subject}は{label}として既に登録されています。" +
+               $"登録内容を変更する場合は、{listLocation}で{selectTarget}を選択して編集してください。";
+
+        /// <summary>
+        /// 案内の前に一覧を再読込する。例外はログに残して false を返す（案内そのものを失わないため。#1727）
+        /// </summary>
+        public static async Task<bool> TryReloadAsync(Func<Task> reloadList, Action<Exception, string> logFailure, string purpose)
+        {
             try
             {
-                // 案内が「再読み込みしました」と述べるので、先に一覧を再読込する（#1759）
                 await reloadList();
-                return ConcurrencyConflictMessage.ForRegister(existingLabel, listName);
+                return true;
             }
             catch (Exception ex)
             {
-                // 成功時の再読込（#1727）と同じく握って案内は続ける。ただし「再読み込みしました」は事実にならない
-                logFailure(ex, "登録の競合を案内する前の一覧の再読込に失敗しました。一覧は古い可能性があります。");
-                return ConcurrencyConflictMessage.ForRegisterReloadFailed(existingLabel, listName);
+                logFailure(ex, $"{purpose}の前の一覧の再読込に失敗しました。一覧は古い可能性があります。");
+                return false;
             }
         }
     }

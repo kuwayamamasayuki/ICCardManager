@@ -477,7 +477,10 @@ public class StaffManageViewModelAuthenticationTests : IDisposable
 
         await _viewModel.SaveAsync();
 
-        _viewModel.StatusMessage.Should().Be(ConcurrencyConflictMessage.ForRegisterFoundDeleted("職員「退職 済子」"));
+        _viewModel.StatusMessage.Should().Be(ConcurrencyConflictMessage.ForRegisterFoundDeleted(
+            "職員「退職 済子」", restoreRequiresStaffCardAuthentication: true));
+        _viewModel.StatusMessage.Should().EndWith("登録済みの職員の職員証で認証してください。",
+            "職員の復元には職員証の認証が続く（#2263）");
         _viewModel.StatusMessage.Should().NotContain("再読み込みしました");
         _staffRepositoryMock.Verify(r => r.GetAllAsync(), Times.Never, "削除済みの行は一覧に出ないので再読込しない");
         _viewModel.IsEditing.Should().BeTrue("入力内容を消さない（Issue #1757）");
@@ -574,6 +577,113 @@ public class StaffManageViewModelAuthenticationTests : IDisposable
         _viewModel.IsStatusError.Should().BeTrue();
         _dialogServiceMock.Verify(d => d.ShowError(It.IsAny<string>(), It.IsAny<string>()), Times.Never);
         _dialogServiceMock.Verify(d => d.ShowInformation(It.IsAny<string>(), "復元完了"), Times.Never);
+    }
+
+    /// <summary>
+    /// Issue #2382: 未登録カード経路の復元の競合で、案内の前の職員一覧の再読込が例外になっても、
+    /// StaffManageDialog の初期化の失敗として閉じさせず、「再読み込みしました」と述べない案内で続けること
+    /// </summary>
+    [Fact]
+    public async Task 復元_未登録カード経路_競合の案内の前の再読込が例外でも_画面を閉じず案内を続けること()
+    {
+        ArrangeAuthenticationSucceeds();
+        ArrangeDeletedTarget();
+        _staffRepositoryMock.Setup(r => r.RestoreAsync(TargetIdm, It.IsAny<SQLiteTransaction>())).ReturnsAsync(false);
+        _staffRepositoryMock.Setup(r => r.GetAllAsync())
+            .ThrowsAsync(new SQLiteException(SQLiteErrorCode.IoErr, "disk I/O error"));
+
+        var act = async () => await _viewModel.StartNewStaffWithIdmAsync(TargetIdm);
+
+        (await act.Should().NotThrowAsync()).Which.Should().BeFalse("画面は開いたまま");
+        _viewModel.StatusMessage.Should().Be(
+            ConcurrencyConflictMessage.ForRestoreReloadFailed("職員「削除 次郎（S-009）」", "職員一覧"));
+        _viewModel.IsStatusError.Should().BeTrue();
+    }
+
+    /// <summary>
+    /// Issue #2382: 未登録カードとして開いた時点で登録済みの職員証だったとき、画面を閉じた後に取れる行動
+    /// （職員管理画面（F2）から編集）を案内すること
+    /// </summary>
+    [Fact]
+    public async Task 既登録_未登録カード経路_閉じた後に編集できる画面を案内すること()
+    {
+        _staffRepositoryMock.Setup(r => r.GetByIdmAsync(TargetIdm, true)).ReturnsAsync(new Staff
+        {
+            StaffIdm = TargetIdm,
+            Name = "在籍 三郎",
+            Number = "S-003"
+        });
+        string? shown = null;
+        _dialogServiceMock.Setup(d => d.ShowInformation(It.IsAny<string>(), "登録済み職員証"))
+            .Callback<string, string>((m, _) => shown = m);
+
+        var shouldClose = await _viewModel.StartNewStaffWithIdmAsync(TargetIdm);
+
+        shouldClose.Should().BeTrue("登録済みの職員証なので画面を閉じる（従来どおり）");
+        shown.Should().Be(
+            "この職員証は職員「在籍 三郎（S-003）」として既に登録されています。" +
+            "登録内容を変更する場合は、職員管理画面（F2）の職員一覧でこの職員を選択して編集してください。");
+    }
+
+    /// <summary>
+    /// Issue #2382: 登録モード中にタッチした職員証が登録済みのとき、職員一覧を再読込してから「どうすれば」まで案内すること
+    /// （入力中に他のパソコンが登録した職員は、この画面の一覧にまだ載っていない）
+    /// </summary>
+    [Fact]
+    public async Task 既登録_タッチ経路_一覧を再読込してから編集の手順を案内すること()
+    {
+        var registered = new Staff { StaffIdm = TargetIdm, Name = "在籍 三郎", Number = "S-003" };
+        _staffRepositoryMock.Setup(r => r.GetByIdmAsync(TargetIdm, true)).ReturnsAsync(registered);
+        _staffRepositoryMock.Setup(r => r.GetAllAsync()).ReturnsAsync(new List<Staff> { registered });
+        _viewModel.StartNewStaff();
+
+        await _viewModel.HandleCardReadAsync(TargetIdm);
+
+        _viewModel.StaffList.Should().ContainSingle(s => s.Name == "在籍 三郎", "案内の前に職員一覧を再読込する");
+        _viewModel.StatusMessage.Should().Be(
+            "この職員証は職員「在籍 三郎（S-003）」として既に登録されています。" +
+            "登録内容を変更する場合は、職員一覧でこの職員を選択して編集してください。");
+        _viewModel.IsStatusError.Should().BeTrue();
+    }
+
+    /// <summary>
+    /// Issue #2382: 既登録の案内の前の職員一覧の再読込が例外でも、案内を失わず、一覧の所在を「開き直した一覧」とすること
+    /// </summary>
+    [Fact]
+    public async Task 既登録_タッチ経路_再読込が例外でも案内を失わず開き直しを促すこと()
+    {
+        _staffRepositoryMock.Setup(r => r.GetByIdmAsync(TargetIdm, true)).ReturnsAsync(
+            new Staff { StaffIdm = TargetIdm, Name = "在籍 三郎", Number = "S-003" });
+        _viewModel.StartNewStaff();
+        _staffRepositoryMock.Setup(r => r.GetAllAsync())
+            .ThrowsAsync(new SQLiteException(SQLiteErrorCode.IoErr, "disk I/O error"));
+
+        await _viewModel.HandleCardReadAsync(TargetIdm);
+
+        _viewModel.StatusMessage.Should().Be(
+            "この職員証は職員「在籍 三郎（S-003）」として既に登録されています。" +
+            "登録内容を変更する場合は、この画面を閉じて開き直した職員一覧でこの職員を選択して編集してください。");
+        _viewModel.IsStatusError.Should().BeTrue();
+    }
+
+    /// <summary>
+    /// Issue #2382: 保存時の確認で登録済みと分かったときも、職員一覧を再読込してから編集の手順を案内すること
+    /// </summary>
+    [Fact]
+    public async Task 既登録_保存経路_一覧を再読込してから編集の手順を案内すること()
+    {
+        await EnterNewStaffFormAsync();
+        var registered = new Staff { StaffIdm = TargetIdm, Name = "他PC 登録", Number = "S-200" };
+        _staffRepositoryMock.Setup(r => r.GetByIdmAsync(TargetIdm, true)).ReturnsAsync(registered);
+        _staffRepositoryMock.Setup(r => r.GetAllAsync()).ReturnsAsync(new List<Staff> { registered });
+
+        await _viewModel.SaveAsync();
+
+        _viewModel.StaffList.Should().ContainSingle(s => s.Name == "他PC 登録", "案内の前に職員一覧を再読込する");
+        _viewModel.StatusMessage.Should().Be(
+            StaffManageViewModel.BuildAlreadyRegisteredMessage("他PC 登録（S-200）", StaffManageViewModel.StaffListInThisScreen));
+        _viewModel.StatusMessage.Should().EndWith("職員一覧でこの職員を選択して編集してください。");
+        _viewModel.IsEditing.Should().BeTrue("入力内容を消さない（Issue #1757）");
     }
 
     #endregion
