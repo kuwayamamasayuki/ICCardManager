@@ -270,7 +270,7 @@ namespace ICCardManager.Services
         /// システム管理画面の「バックアップ状況」も同じ結果を使うことで、
         /// 「画面に出ているフォルダ」と「実際に書かれるフォルダ」の食い違いを構造的に防ぐ。
         /// <para>
-        /// Issue #1746: 検証は必ず非同期版 <see cref="PathValidator.ValidateBackupPathAsync"/> を使う。
+        /// Issue #1746: 検証は必ず非同期版 <see cref="PathValidator.ValidateBackupPathAsync(string, System.Threading.CancellationToken)"/> を使う。
         /// 本メソッドは起動時（<c>StartupTaskRunner</c>）・システム管理画面・接続診断のいずれからも
         /// UI スレッド上で呼ばれ、直前の <c>GetAppSettingsAsync</c> がキャッシュヒット時に同期完了する
         /// （Issue #1361 で確認済みの機構）ため、同期版だと UNC 到達性チェック（最大5秒）と
