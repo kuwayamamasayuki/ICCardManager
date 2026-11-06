@@ -308,7 +308,7 @@ void M()
 }";
 
         // using 宣言形（波括弧を伴わない）。スコープは宣言位置から囲みブロックの末尾まで。
-        // 対象外にすると ReportViewModel.CreateReportsAsync が丸ごと検査から外れる。
+        // 対象外にすると ReportViewModel.CreateReportAsync が丸ごと検査から外れる。
         const string usingDeclarationScope = @"
 void M()
 {

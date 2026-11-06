@@ -20,7 +20,7 @@ namespace ICCardManager.Services
     /// <b>AppSettings の一括保存には巻き込まない。</b> <c>SaveAppSettingsAsync</c> は
     /// F5 設定画面が組み立てた <see cref="Models.AppSettings"/> を丸ごと書くため、
     /// そこへ載せると F5 の保存がこのグループを既定値で上書きし得る
-    /// （<c>development-conventions.md</c>「UPDATE の SET 句は、その経路で本当に編集する列に限る」）。
+    /// （<c>db-write-conventions.md</c>「DB設計原則」の「UPDATE の SET 句は『その経路で本当に編集する列』に限る」）。
     /// </para>
     /// </remarks>
     public class TransferStationGroupService : ITransferStationGroupService

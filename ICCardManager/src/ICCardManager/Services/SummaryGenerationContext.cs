@@ -159,8 +159,8 @@ namespace ICCardManager.Services
         /// 既に生成を始めていて古い世代を捕捉済みの呼び出しが、参照経由で新しい
         /// グループを見てしまう（世代を分けた意味が無くなる）。摘要テキスト・
         /// 生成ルールの ON/OFF は現行の値をそのまま引き継ぐ
-        /// （<c>development-conventions.md</c>「UPDATE の SET 句は、その経路で
-        /// 本当に編集する列に限る」と同じ判断）。
+        /// （<c>db-write-conventions.md</c>「DB設計原則」の「UPDATE の SET 句は『その経路で
+        /// 本当に編集する列』に限る」と同じ判断）。
         ///
         /// Issue #2035: 引き継ぎは<b>複製</b>（<see cref="OrganizationOptions.ShallowCopy"/>）で行い、
         /// プロパティを 1 つずつ書き写さない。書き写す形は、設定クラスへプロパティを足した日に

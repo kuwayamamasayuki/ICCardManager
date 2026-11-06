@@ -1078,7 +1078,7 @@ internal static class TestSourceInspection
     /// <b>波括弧を伴わない <c>using var x = Factory();</c> 形（using 宣言）も列挙する。</b>
     /// C# の using 宣言はスコープが<b>宣言位置から囲みブロックの末尾まで</b>と決まっており、
     /// その間に表示されるモーダルはすべて処理中スコープの内側にある。この形を対象外にすると、
-    /// <c>ReportViewModel.CreateReportsAsync</c>（<c>using var busyScope = BeginCancellableBusy(...)</c>）の
+    /// <c>ReportViewModel.CreateReportAsync</c>（<c>using var busyScope = BeginCancellableBusy(...)</c>）の
     /// ように<b>実際に違反しているコードが 1 件も検査されないまま緑になる</b>
     /// （<c>.claude/rules/testing.md</c>「ガードの検出漏れは緑になる — 対象の絞り込みが
     /// fail-open になっていないか確認する」）。範囲の開始は宣言文の先頭とする。

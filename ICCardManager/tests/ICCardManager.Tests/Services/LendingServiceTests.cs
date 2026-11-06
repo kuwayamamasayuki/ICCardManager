@@ -265,7 +265,7 @@ public class LendingServiceTests : IDisposable
 
         // Assert
         result.Success.Should().BeFalse();
-        // Issue #1817: 既定分岐は ExceptionMessageFormatter.ToUserMessage へ委譲する。
+        // Issue #1817: 既定分岐は OperationRetryGuidance.BuildFailureMessage へ委譲する（ToUserMessage を使わない理由は LendingService の当該分岐のコメント参照）。
         // 生の ex.Message（"Database error"）を UI へ出さないこと（Issue #1614）。
         result.ErrorMessage.Should().NotContain("Database error");
         result.ErrorMessage.Should().Contain("貸出処理に失敗しました");

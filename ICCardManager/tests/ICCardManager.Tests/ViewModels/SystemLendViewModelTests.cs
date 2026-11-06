@@ -23,7 +23,7 @@ namespace ICCardManager.Tests.ViewModels;
 /// 借用者（<c>ledger.LenderIdm</c>）と操作者（<c>operation_log.operator_idm</c>）が
 /// 別々に記録されることを、実際に挿入された <see cref="OperationLog"/> の中身で表明する
 /// （<c>OperationLogger</c> のメソッドは virtual ではないためモックできない。
-/// <c>development-conventions.md</c>「ログが残ったかの検証は、ログ記録クラスのモックではできない」）。
+/// <c>db-write-conventions.md</c>「DB設計原則」の「「ログが残ったか」の検証は、ログ記録クラスのモックではできない」）。
 /// </remarks>
 public class SystemLendViewModelTests : IDisposable
 {

@@ -31,6 +31,11 @@ namespace ICCardManager.UITests.Tests
     {
         private const string BusRowSummary = "バス（★）";
         private const int CompanionCount = 2;
+
+        /// <summary>
+        /// 長い管理番号（20 文字まで登録できる）。「はやかけん 001」は特大でも従来の幅 150 に収まるので、切れる長さで表明する
+        /// </summary>
+        private const string LongCardNumber = "総務課-予備-2026";
         private static readonly string ExpectedStaffName = $"{ScreenshotSeedData.PrimaryStaffName} 外{CompanionCount}名";
 
         private const string MergeHistoryDescription = "2件の履歴を統合（UIテスト）";
@@ -69,7 +74,7 @@ namespace ICCardManager.UITests.Tests
         }
 
         [Fact]
-        public void バス停名未入力の一覧は_文字サイズが特大でも利用者の外N名を末尾まで表示すること()
+        public void バス停名未入力の一覧は_文字サイズが特大でも利用日から利用者まで末尾まで表示すること()
         {
             // Issue #2393: 必要な幅は文字サイズで変わる。最も広い「特大」でも列が内容に合わせて広がること
             using var fixture = AppFixture.LaunchWithSeed(
@@ -77,12 +82,16 @@ namespace ICCardManager.UITests.Tests
                 {
                     Seed(conn);
                     Execute(conn, "INSERT OR REPLACE INTO settings (key, value) VALUES ('font_size', 'xlarge')");
+                    Execute(conn, "UPDATE ic_card SET card_number = @number WHERE card_idm = @card",
+                        ("@number", LongCardNumber), ("@card", ScreenshotSeedData.NormalCardIdm));
                 },
                 AppFixture.SuppressDebugTestData);
             var dialog = OpenIncompleteBusStopDialog(fixture);
             try
             {
                 AssertStaffNameIsNotClipped(dialog);
+                // Issue #2404: 固定幅だった利用日・カード名も、特大で末尾まで表示すること
+                AssertDateAndCardNameAreNotClipped(dialog);
                 CaptureIfRequested(dialog.Window, "uitest_2393_incomplete_busstop_xlarge.png");
             }
             finally
@@ -185,47 +194,30 @@ namespace ICCardManager.UITests.Tests
         /// <summary>
         /// 利用者のセルが「外N名」を含む氏名を末尾まで収めていること（Issue #2393）。
         /// </summary>
-        /// <remarks>
-        /// <para>
-        /// 文字列の存在（<c>FindByNameWithRetry</c>）だけを見ると、末尾が切れていても緑になる（#2332 の UI テストがそうだった）。
-        /// セル（Custom）の中の文字列（Text）は、セルより狭く配置されても切り抜かれるだけで、要素の矩形は文字列の全幅を保つ
-        /// （WPF は配置の幅が足りない要素を本来の幅で配置し、はみ出した部分を切り抜く）。
-        /// そのため「文字列の右端がセルの右端を越えないこと」で、切れていないことを表明できる。
-        /// あわせて、セルが一覧の表示領域の内側にあることも表明する（列が広がっても、横に隠れていれば読めない）。
-        /// </para>
-        /// <para>
-        /// 列幅の引き上げは行の読み込み後のレイアウトで行われるので、収まるまで待つ。
-        /// </para>
-        /// </remarks>
         private static void AssertStaffNameIsNotClipped(DialogPageBase dialog)
+            => CellClipping.AssertTextIsNotClipped(FindGrid(dialog), ExpectedStaffName, "利用者", Wait);
+
+        /// <summary>
+        /// 利用日・カード名のセルが文字列を末尾まで収めていること（Issue #2404）。
+        /// </summary>
+        /// <remarks>
+        /// どちらも固定幅（100 / 150）だった列で、文字サイズ「特大」では利用日「2026/11/05」に 109 が要る。
+        /// カード名は管理番号の長さで変わる（<see cref="LongCardNumber"/>）。
+        /// </remarks>
+        private static void AssertDateAndCardNameAreNotClipped(DialogPageBase dialog)
         {
-            var cf = dialog.Window.ConditionFactory;
-            var grid = dialog.Window.FindFirstDescendant(cf.ByControlType(ControlType.DataGrid));
+            var grid = FindGrid(dialog);
+            CellClipping.AssertTextIsNotClipped(
+                grid, DateTime.Today.ToString("yyyy/MM/dd", CultureInfo.InvariantCulture), "利用日", Wait);
+            CellClipping.AssertTextIsNotClipped(
+                grid, $"{ScreenshotSeedData.NormalCardType} {LongCardNumber}", "カード名", Wait);
+        }
+
+        private static AutomationElement FindGrid(DialogPageBase dialog)
+        {
+            var grid = dialog.Window.FindFirstDescendant(dialog.Window.ConditionFactory.ByControlType(ControlType.DataGrid));
             grid.Should().NotBeNull("一覧（DataGrid）が見つかること");
-
-            System.Drawing.Rectangle cellRect = default, textRect = default;
-            var fitted = Retry.WhileFalse(
-                () =>
-                {
-                    var cell = dialog.Window.FindFirstDescendant(
-                        cf.ByName(ExpectedStaffName).And(cf.ByControlType(ControlType.Custom)));
-                    var text = cell?.FindFirstChild(cf.ByControlType(ControlType.Text));
-                    if (cell == null || text == null)
-                    {
-                        return false;
-                    }
-
-                    cellRect = cell.BoundingRectangle;
-                    textRect = text.BoundingRectangle;
-                    return textRect.Right <= cellRect.Right;
-                },
-                Wait).Result;
-
-            fitted.Should().BeTrue(
-                $"利用者「{ExpectedStaffName}」は末尾まで表示すること（文字列の右端 {textRect.Right}、セルの右端 {cellRect.Right}）。" +
-                "利用者の列は内容に合わせて広げる（Issue #2393）");
-            cellRect.Right.Should().BeLessOrEqualTo(grid!.BoundingRectangle.Right,
-                "利用者のセルは一覧の表示領域の内側にあること（横に隠れていれば読めない）");
+            return grid!;
         }
 
         /// <summary>

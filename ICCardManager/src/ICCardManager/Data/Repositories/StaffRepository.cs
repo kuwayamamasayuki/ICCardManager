@@ -65,7 +65,7 @@ namespace ICCardManager.Data.Repositories
             using var command = connection.CreateCommand();
             command.CommandText = @"SELECT staff_idm, name, number, note, is_deleted, deleted_at
 FROM staff
-WHERE is_deleted = 0
+WHERE (is_deleted = 0 OR is_deleted IS NULL)
 ORDER BY name";
 
             using var reader = await command.ExecuteReaderAsync().ConfigureAwait(false);
@@ -111,7 +111,7 @@ FROM staff
 WHERE staff_idm = @staffIdm"
                 : @"SELECT staff_idm, name, number, note, is_deleted, deleted_at
 FROM staff
-WHERE staff_idm = @staffIdm AND is_deleted = 0";
+WHERE staff_idm = @staffIdm AND (is_deleted = 0 OR is_deleted IS NULL)";
 
             command.Parameters.AddWithValue("@staffIdm", staffIdm);
 
@@ -217,7 +217,7 @@ VALUES (@staffIdm, @name, @number, @note, 0, NULL)";
             command.Transaction = transaction;
             command.CommandText = @"UPDATE staff
 SET name = @name, number = @number, note = @note
-WHERE staff_idm = @staffIdm AND is_deleted = 0";
+WHERE staff_idm = @staffIdm AND (is_deleted = 0 OR is_deleted IS NULL)";
 
             command.Parameters.AddWithValue("@staffIdm", staff.StaffIdm);
             command.Parameters.AddWithValue("@name", staff.Name);
@@ -228,7 +228,7 @@ WHERE staff_idm = @staffIdm AND is_deleted = 0";
             if (transaction == null)
             {
                 // トランザクション外の場合のみキャッシュ無効化。
-                // Issue #1759: 影響行数 0（＝WHERE is_deleted = 0 に一致しない）のときも
+                // Issue #1759: 影響行数 0（＝未削除（is_deleted が 0 または NULL）の条件に一致しない）のときも
                 // 無効化する。0 行は「他 PC がこの職員を削除した」ことの証明であり、
                 // キャッシュされた職員一覧が古いと確定している。ここで捨てないと、
                 // 競合を検出した ViewModel が案内どおりに一覧を再読込しても
@@ -263,7 +263,7 @@ WHERE staff_idm = @staffIdm AND is_deleted = 0";
             command.Transaction = transaction;
             command.CommandText = @"UPDATE staff
 SET is_deleted = 1, deleted_at = datetime('now', 'localtime')
-WHERE staff_idm = @staffIdm AND is_deleted = 0";
+WHERE staff_idm = @staffIdm AND (is_deleted = 0 OR is_deleted IS NULL)";
 
             command.Parameters.AddWithValue("@staffIdm", staffIdm);
 
@@ -352,7 +352,7 @@ WHERE staff_idm = @staffIdm AND is_deleted = 1";
             var connection = lease.Connection;
 
             using var command = connection.CreateCommand();
-            command.CommandText = "SELECT EXISTS(SELECT 1 FROM staff WHERE is_deleted = 0)";
+            command.CommandText = "SELECT EXISTS(SELECT 1 FROM staff WHERE (is_deleted = 0 OR is_deleted IS NULL))";
 
             var result = await command.ExecuteScalarAsync().ConfigureAwait(false);
             return Convert.ToInt32(result, CultureInfo.InvariantCulture) == 1;
@@ -369,7 +369,7 @@ WHERE staff_idm = @staffIdm AND is_deleted = 1";
                 Name = reader.GetString(1),
                 Number = reader.IsDBNull(2) ? null : reader.GetString(2),
                 Note = reader.IsDBNull(3) ? null : reader.GetString(3),
-                IsDeleted = reader.GetInt32(4) == 1,
+                IsDeleted = reader.GetFlagOrFalse(4),
                 DeletedAt = reader.IsDBNull(5) ? null : SqliteDateTimeFormat.ParseStored(reader.GetString(5))
             };
         }

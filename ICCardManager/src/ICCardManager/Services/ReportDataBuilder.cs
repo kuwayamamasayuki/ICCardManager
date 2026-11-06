@@ -98,9 +98,9 @@ namespace ICCardManager.Services
             }
 
             // 月計を計算
-            // 紙出納簿移行カード（Issue #510）では「○月から繰越」レコードが DB に Income=残高 で
-            // 保存される運用のため、月計から除外しないと前月の累計と二重計上になる。
-            // 通常運用カードでは Income=null で生成されるため Sum 影響なし。
+            // 紙出納簿移行カード（Issue #510）の「○月から繰越」レコードは、#1219 以前に登録したカードや
+            // CSV で取り込んだ行では DB に Income=残高 で残り得るため、月計から除外しないと前月の累計と二重計上になる。
+            // 現行の登録では受入 0 で保存する（#1219）ため、除外しても Sum は変わらない。
             var monthlyIncome = ledgers
                 .Where(l => !SummaryGenerator.IsMidYearCarryoverSummary(l.Summary))
                 .Sum(l => l.Income);
@@ -118,8 +118,15 @@ namespace ICCardManager.Services
                 ExcludeLentRecords(await _ledgerRepository.GetByDateRangeAsync(cardIdm, fiscalYearStart, fiscalYearEnd).ConfigureAwait(false)),
                 fiscalYearPrecedingBalance);
 
-            // Issue #1494: 「前年度より繰越」レコードは DB に保存されず CarryoverRowData として
-            // 表示用に合成されるため、月計・累計の集計に明示的に加算する必要がある。
+            // Issue #1494: 年度開始前の残高があるときの「前年度より繰越」は DB に保存されず
+            // CarryoverRowData として表示用に合成されるため、月計・累計の集計に明示的に加算する必要がある。
+            // 3 月を繰越月にして登録したカードの「前年度より繰越」は DB に実在する導入行（4/1 付け・受入=残高）で、
+            // それより前の台帳が無い（fiscalYearPrecedingBalance が null）ため加算は 0 となり、
+            // 導入行の受入は通常の ledger 行として yearlyLedgers の Sum に入る。
+            // ただし null になるのは 4/1 より前に台帳の行（貸出中レコードを含む）が 1 件も無いときに限る。
+            // そうした行があるとその残高が前年度繰越として返り、合成した繰越行と導入行の受入が二重に入り得る（未対処）。
+            // 代表例は、3 月中に登録して貸し出し、返却前に新年度の帳票を作る場合（GetCarryoverBalanceAsync は
+            // 貸出中レコードを含む）。履歴の「追加」や CSV の取り込みで導入行より前の日付の行を入れた場合も同じ。
             var fiscalYearCarryoverIncome = fiscalYearPrecedingBalance ?? 0;
 
             // 累計も同様に「○月から繰越」レコードを除外（紙出納簿移行カード対策）

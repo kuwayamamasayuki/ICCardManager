@@ -275,4 +275,34 @@ public class PathValidatorErrorMessageQualityTests : IDisposable
         result.ErrorMessage.Should().NotContain("他のプログラムで開かれていないか",
             "対象はファイルではなくバックアップ先フォルダーであり、その行動指示は実行できない");
     }
+
+    /// <summary>
+    /// Issue #2383: 書き込み確認が上限内に終わらなかったときの文言が 3 要素を満たし、上限の秒数を示すこと。
+    /// </summary>
+    [Fact]
+    public void CreateWriteProbeTimeoutFailure_MeetsQualityAndIncludesTimeoutSeconds()
+    {
+        var result = PathValidator.CreateWriteProbeTimeoutFailure(10_000);
+
+        result.IsValid.Should().BeFalse();
+        AssertQualityCriteria(result.ErrorMessage);
+        result.ErrorMessage.Should().Contain("10秒以内",
+            "なぜ問題か: 上限の秒数を示す（到達確認の「5秒以内に応答がありませんでした」と同じ語彙）");
+        result.ErrorMessage.Should().Contain("書き込み",
+            "何が: バックアップ先フォルダーへの書き込みの確認");
+    }
+
+    /// <summary>
+    /// Issue #2383: ドライブの準備確認が上限内に終わらなかったときの文言が 3 要素を満たし、ドライブと上限の秒数を示すこと。
+    /// </summary>
+    [Fact]
+    public void CreateDriveReadyTimeoutFailure_MeetsQualityAndIncludesDriveAndTimeoutSeconds()
+    {
+        var result = PathValidator.CreateDriveReadyTimeoutFailure(@"Z:\", 5_000);
+
+        result.IsValid.Should().BeFalse();
+        AssertQualityCriteria(result.ErrorMessage);
+        result.ErrorMessage.Should().Contain(@"Z:\", "何が: 確認したドライブ");
+        result.ErrorMessage.Should().Contain("5秒以内", "なぜ問題か: 上限の秒数を示す");
+    }
 }

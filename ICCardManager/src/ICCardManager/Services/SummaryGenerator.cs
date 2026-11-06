@@ -150,7 +150,7 @@ namespace ICCardManager.Services
         ///
         /// 差し替えるのはグループだけで、設定の他の項目
         /// （摘要テキスト・生成ルールの ON/OFF）は保持する
-        /// （<c>development-conventions.md</c>「UPDATE の SET 句は、その経路で本当に編集する列に限る」
+        /// （<c>db-write-conventions.md</c>「DB設計原則」の「UPDATE の SET 句は『その経路で本当に編集する列』に限る」
         /// と同じ判断。全体を差し替えると呼び出し元が組み立て損ねた項目が既定値へ落ちる）。
         ///
         /// Issue #1919: 差し替えは<b>世代（<see cref="SummaryGenerationContext"/>）の参照 1 回の代入</b>で行い、
@@ -240,7 +240,7 @@ namespace ICCardManager.Services
         /// <para>
         /// 摘要の生成・判定・抽出は、いずれもこのプロパティ（および本プロパティから導出する
         /// <see cref="FormatBusSummary(string)"/> / <see cref="ExtractBusStopBlocks"/> /
-        /// <see cref="TryExtractBusStops"/> / <see cref="ContainsBusLabel"/>）を経由すること。
+        /// <see cref="ContainsBusLabel"/>）を経由すること。
         /// 生成側だけが設定値を使い判定側がリテラルを直書きすると、ラベルを
         /// 「乗合自動車」等へ変更した組織で判定だけが追従しない（Issue #1604 / #1749 と同型の乖離）。
         /// </para>
@@ -392,25 +392,6 @@ namespace ICCardManager.Services
             }
 
             return depth == 0;
-        }
-
-        /// <summary>
-        /// 摘要からバス停名部分を抽出（Issue #1818）
-        /// </summary>
-        /// <param name="summary">摘要文字列</param>
-        /// <param name="busStops">抽出したバス停名（「、」区切りの複数件を含む）。
-        /// バスブロックが複数ある場合（Issue #1904 の時系列摘要）は全ブロック分を
-        /// 摘要中の出現順（＝時系列順）に「、」で結合して返す。失敗時は空文字</param>
-        /// <returns>抽出できた場合 true</returns>
-        /// <remarks>
-        /// 摘要の直接編集で <c>LedgerDetail.BusStops</c> が取り残される問題（Issue #983）の
-        /// 同期処理から使う。汎用/固有の別: 交通系固有。
-        /// </remarks>
-        public static bool TryExtractBusStops(string? summary, out string busStops)
-        {
-            var blocks = ExtractBusStopBlocks(summary);
-            busStops = string.Join("、", blocks);
-            return blocks.Count > 0;
         }
 
         /// <summary>
@@ -1493,8 +1474,9 @@ namespace ICCardManager.Services
                     // 「往復 2 組へ分解した解」のほうが高く出てしまうため。
                     // 注意: この数え方は TC038 が守っているわけではない。TC038 は
                     // HasUnexplainedThroughRoute が false で候補探索へ入らないため、
-                    // 本式を roundTrips.Count * 2 へ変えても既存テストは全件緑になる
-                    // （＝この指標を固定する回帰テストはまだ無い）。
+                    // 本式を roundTrips.Count * 2 へ変えても TC038 は緑のまま。
+                    // この指標は SummaryGeneratorComprehensiveTests の
+                    // Issue1916_往復カバレッジは統合後の本数ではなく元の区間数で数える が固定する。
                     var coverage = roundTrips.Sum(rt =>
                         consolidatedRoutes[rt.ForwardIndex].LegCount
                         + consolidatedRoutes[rt.ReverseIndex].LegCount);
@@ -1523,7 +1505,8 @@ namespace ICCardManager.Services
         /// </para>
         /// <para>
         /// このゲートが無いと、統合が一切起きていない既定解まで作り替えてしまう。
-        /// 実際 TC014 の 12/8（天神→姪浜→西新→天神 の 3 区間循環）は #878 の設計により
+        /// 実際、天神→姪浜→西新→天神 の 3 区間循環（SummaryGeneratorComprehensiveTests の
+        /// Issue1916_通し区間を作らない循環移動は個別表示のまま が固定する）は #878 の設計により
         /// 各区間が個別表示されており通し区間を捏造していないのに、
         /// 延長を抑止した候補が「天神～姪浜 往復」を作って既定解を上書きしていた。
         /// </para>
@@ -1859,7 +1842,8 @@ namespace ICCardManager.Services
         /// <item><description>両側とも駅名なし → 除外（従来どおり。経路として表現できない）</description></item>
         /// <item><description>片側のみ駅名あり → 運賃が発生した完了移動のみ採用。金額 0 の明細は
         /// 「入場記録のみ」（未完了移動）とみなし従来どおり除外する。摘要は払出金額の説明であり、
-        /// 払出のない未完了記録を載せない仕様（SummaryGeneratorComprehensiveTests TC019）を維持する。
+        /// 払出のない未完了記録を載せない仕様（SummaryGeneratorEdgeCaseTests の
+        /// Generate_OneSidedTripWithZeroAmount_ExcludedFromSummary が固定する）を維持する。
         /// 金額 null は情報不足のため、区間の黙示的欠落を防ぐ側（採用）に倒す</description></item>
         /// </list>
         /// </remarks>

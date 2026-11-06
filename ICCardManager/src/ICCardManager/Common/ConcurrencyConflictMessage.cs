@@ -8,7 +8,7 @@ namespace ICCardManager.Common
     /// <remarks>
     /// <para>
     /// Issue #1759: リポジトリの <c>UpdateAsync</c> / <c>RestoreAsync</c> / <c>DeleteAsync</c> が
-    /// <c>false</c> を返すのは、WHERE 句（<c>is_deleted = 0</c> または <c>is_deleted = 1</c>）に
+    /// <c>false</c> を返すのは、WHERE 句（未削除＝<c>is_deleted</c> が 0 または NULL、または削除済み＝<c>is_deleted = 1</c>）に
     /// <b>1 行も一致しなかった場合だけ</b>である（Issue #1753 で影響行数による競合検出を導入した）。
     /// つまり「原因不明の失敗」ではなく<b>競合の検出</b>であり、原因を具体的に案内できる。
     /// </para>
@@ -52,6 +52,34 @@ namespace ICCardManager.Common
                $"この画面を閉じると{listName}を再読み込みしますので、一覧で状態を確認してからやり直してください。";
 
         /// <summary>
+        /// 編集画面を開こうとした行が見つからなかったときの文言を組み立てる（Issue #2378）。
+        /// </summary>
+        /// <param name="target">対象の説明（一覧に表示されていた値で名指しする）。「何が」に相当する</param>
+        /// <param name="listName">再読込した一覧の名称</param>
+        /// <remarks>
+        /// 「なぜ」は <see cref="ForUpdate"/> と同じ（対象行が削除された）。職員は開こうとしただけで更新は
+        /// していないので「何が」を「開けませんでした」と述べる（#1760「操作名が違えばファクトリを分ける」）。
+        /// 呼び出し側は<b>一覧を再読込してから</b>本文言を表示すること（#1753）。
+        /// </remarks>
+        public static string ForOpen(string target, string listName)
+            => $"{target}を開けませんでした。{DeletedReason}" +
+               $"{listName}を再読み込みしましたので、一覧で状態を確認してからやり直してください。";
+
+        /// <summary>
+        /// 編集ダイアログを開いた時点の読み取りで行が見つからなかったときの文言を組み立てる（Issue #2378）。
+        /// </summary>
+        /// <param name="target">対象の説明（ダイアログを開いた時点の値で名指しする）。「何が」に相当する</param>
+        /// <param name="listName">ダイアログを閉じたあとに再読込する一覧の名称</param>
+        /// <remarks>
+        /// <see cref="ForOpen"/> とは「どうすれば」だけが違う。ダイアログは背後の一覧を読み直す手段を持たず、
+        /// 閉じたあとに呼び出し元が読み直す（<see cref="ForUpdateReloadOnClose"/> と同じ形）。
+        /// まだ何も入力していないので、入力の扱いには触れない。
+        /// </remarks>
+        public static string ForOpenReloadOnClose(string target, string listName)
+            => $"{target}を開けませんでした。{DeletedReason}" +
+               $"この画面を閉じると{listName}を再読み込みしますので、一覧で状態を確認してからやり直してください。";
+
+        /// <summary>
         /// 払い戻し対象の行が見つからなかったときの文言を組み立てる。
         /// </summary>
         /// <param name="target">対象の説明。「何が」に相当する</param>
@@ -73,17 +101,65 @@ namespace ICCardManager.Common
             => Build(target, "復元", RestoredReason, listName);
 
         /// <summary>
-        /// 登録が書き込めなかった（同じ識別子の行が既にある）ときの文言を組み立てる（Issue #2263）。
+        /// 登録が書き込めなかった（同じ IDm の行が既にあり、一覧に載っている）ときの文言を組み立てる（Issue #2263 / #2382）。
         /// </summary>
-        /// <param name="target">対象の説明。「何が」に相当する</param>
+        /// <param name="target">
+        /// <b>読み直した既存の行</b>の説明（入力した値ではない）。他のパソコンが別の番号・氏名で先に登録していれば、
+        /// 入力した値は一覧のどこにも無く、「一覧で確認して」が実行できない（#2382 のレビューで検出）
+        /// </param>
         /// <param name="listName">再読込した一覧の名称</param>
         /// <remarks>
-        /// 登録の前に重複を確かめていても、職員証の認証を待つ間に他のパソコンが同じ職員証を登録し得る。
+        /// 登録の前に重複を確かめていても、確認から書き込みまでの間（職員証の認証を待つ間など）に他のパソコンが同じ IDm を登録し得る。
         /// リポジトリの <c>InsertAsync</c> は一過性でない SQLite の失敗（重複のほか、ディスク満杯・読み取り専用・破損等）を
-        /// すべて <c>false</c> に畳むため、呼び出し側は読み直して行があることを確かめてから、この文言で案内すること。
+        /// すべて <c>false</c> に畳むため、呼び出し側は読み直して行があることを確かめてから、この文言で案内すること
+        /// （判断は <c>ViewModels/RegisterFailureNotice</c> に 1 か所）。
         /// </remarks>
         public static string ForRegister(string target, string listName)
-            => Build(target, "登録", "他のパソコンや別の操作で先に登録された可能性があります。", listName);
+            => $"{RegisteredHead(target)}{listName}を再読み込みしましたので、一覧で{target}を確認してからやり直してください。";
+
+        /// <summary>
+        /// <see cref="ForRegister"/> と同じ状況だが、案内の前の一覧の再読込にも失敗したときの文言（Issue #2382）。
+        /// </summary>
+        /// <param name="target">読み直した既存の行の説明</param>
+        /// <param name="listName">再読込できなかった一覧の名称</param>
+        /// <remarks>
+        /// 公開のファクトリは「再読み込みしました」と述べるため、再読込に失敗したときには使えない（#1753）。
+        /// 一覧の再読込を前提にする公開のファクトリと形が違うため internal に置く。
+        /// </remarks>
+        internal static string ForRegisterReloadFailed(string target, string listName)
+            => $"{RegisteredHead(target)}{listName}の再読み込みにも失敗したため、" +
+               $"画面を閉じて開き直し、一覧で{target}を確認してからやり直してください。";
+
+        /// <summary>
+        /// <see cref="ForRestore"/> と同じ状況だが、案内の前の一覧の再読込にも失敗したときの文言（Issue #2382）。
+        /// </summary>
+        /// <param name="target">復元しようとした行の説明</param>
+        /// <param name="listName">再読込できなかった一覧の名称</param>
+        /// <remarks>公開のファクトリは「再読み込みしました」と述べるため、再読込に失敗したときには使えない（#1753）。</remarks>
+        internal static string ForRestoreReloadFailed(string target, string listName)
+            => $"{target}を復元できませんでした。{RestoredReason}{listName}の再読み込みにも失敗したため、" +
+               $"画面を閉じて開き直し、一覧で{target}を確認してからやり直してください。";
+
+        /// <summary>
+        /// 登録が書き込めなかった原因が、同じ IDm の<b>削除済み</b>の行だったときの文言（Issue #2382）。
+        /// </summary>
+        /// <param name="target">読み直した既存の（削除済みの）行の説明</param>
+        /// <param name="restoreRequiresStaffCardAuthentication">
+        /// 復元に職員証の認証が続くか（職員の復元。#2263）。true なら「はい」の後に認証する手順まで述べる
+        /// </param>
+        /// <remarks>
+        /// 削除済みの行は一覧に出ないので、一覧での確認は案内できない。もう一度保存すると、登録前の確認が
+        /// 削除済みと判定して復元するかを尋ねる（職員・カードとも同じ流れ）。一覧の再読込を前提にしないため internal に置く。
+        /// </remarks>
+        internal static string ForRegisterFoundDeleted(string target, bool restoreRequiresStaffCardAuthentication)
+            => $"読み取ったIDmは既に{target}として登録され、削除済みになっていたため、登録できませんでした。" +
+               "他のパソコンや別の操作で登録・削除された可能性があります。" +
+               (restoreRequiresStaffCardAuthentication
+                   ? "復元する場合は、もう一度「保存」を押し、表示される確認で「はい」を選択してから、登録済みの職員の職員証で認証してください。"
+                   : "復元する場合は、もう一度「保存」を押し、表示される確認で「はい」を選択してください。");
+
+        private static string RegisteredHead(string target)
+            => $"読み取ったIDmは既に{target}として登録されていたため、登録できませんでした。{RegisteredReason}";
 
         /// <summary>
         /// 削除対象の行が見つからなかったときの文言を組み立てる。
@@ -135,6 +211,9 @@ namespace ICCardManager.Common
 
         /// <summary>対象の行が削除されていた（更新・払い戻しの「なぜ」）</summary>
         private const string DeletedReason = "他のパソコンや別の操作で削除された可能性があります。";
+
+        /// <summary>同じ識別子の行が先に登録されていた（登録の「なぜ」）</summary>
+        private const string RegisteredReason = "他のパソコンや別の操作で先に登録された可能性があります。";
 
         /// <summary>削除済みの行が先に復元されていた（復元の「なぜ」）</summary>
         private const string RestoredReason = "他のパソコンや別の操作で先に復元された可能性があります。";
