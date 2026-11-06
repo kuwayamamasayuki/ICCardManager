@@ -42,6 +42,12 @@ namespace ICCardManager.UITests.Infrastructure
         /// <summary>元の更新通知ファイルが無かったことを示す印。中断後の回復で、テスト中のアプリが書いたファイルを消すために使う。</summary>
         internal const string LatestVersionAbsentMarkerFileName = LatestVersionFileName + ".uitest-absent";
 
+        /// <summary>
+        /// 更新通知ファイルの退避を書き込む途中の名前。書き切ってから退避の名前へ改名する（途中で落ちた退避を「退避済みの印」にしない）。
+        /// 本体の一時ファイルの形（<c>latest_version.txt.&lt;8桁の16進&gt;.tmp</c>）とは一致しないので、本体の回収の対象にならない。
+        /// </summary>
+        internal const string LatestVersionBackupTempFileName = LatestVersionFileName + BackupSuffix + ".tmp";
+
         /// <summary>旧実装（#2062 以前）の <c>LaunchWithSeed</c> が中断時に残し得た退避ファイル。</summary>
         internal static readonly string LegacySeededOriginalFileName = DatabaseFileName + BackupSuffix + ".seeded-original";
 
@@ -376,11 +382,35 @@ namespace ICCardManager.UITests.Infrastructure
         private void SetAsideLatestVersionFile()
         {
             var path = PathOf(LatestVersionFileName);
+            var temp = PathOf(LatestVersionBackupTempFileName);
+
+            // 前回、退避の書き込みの途中で落ちた残り。印ではない（退避の名前に改名する前に落ちた）ので捨てる
+            DeleteWithRetry(temp);
+
             if (File.Exists(path))
             {
-                // 退避ファイルを置き切ってから元を消す（途中で落ちても、印があれば次回の回復が書き戻す）
+                // 退避ファイルを置き切ってから元を消す（途中で落ちても、印があれば次回の回復が書き戻す）。
+                // 一時名へ書き切ってから退避の名前へ改名する。退避の名前へ直接コピーすると、途中で落ちた中途半端な内容が
+                // 「退避済みの印」になり、次回の回復がそれで元を上書きする
                 var backup = BackupPathOf(LatestVersionFileName);
-                CopyWithRetry(path, backup);
+                try
+                {
+                    CopyWithRetry(path, temp);
+                    RetryOnIOException(() => File.Move(temp, backup));
+                }
+                catch (Exception ex) when (ex is IOException || ex is UnauthorizedAccessException)
+                {
+                    // 退避は完了していない（元は残っている）。一時名の残りを捨ててから伝える。捨て切れなくても次回の Acquire が捨てる
+                    try
+                    {
+                        File.Delete(temp);
+                    }
+                    catch (Exception cleanupFailure) when (cleanupFailure is IOException || cleanupFailure is UnauthorizedAccessException)
+                    {
+                    }
+
+                    throw;
+                }
                 try
                 {
                     DeleteWithRetry(path);

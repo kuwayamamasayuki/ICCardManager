@@ -667,6 +667,24 @@ namespace ICCardManager.UITests.Tests
         }
 
         [Fact]
+        public void Acquire_更新案内ファイルの退避の書き込み途中の残りがあるとき_それを退避として使わず捨てること()
+        {
+            // 前回、退避の一時ファイルへ書き込む途中で落ちた（退避の名前へ改名する前なので、印ではない）。
+            // 今回は元の更新通知ファイルが無い（元があれば、今回の退避の一時ファイルとして上書きされて消える）
+            var temp = PathOf(UiTestDatabaseGuard.LatestVersionBackupTempFileName);
+            File.WriteAllText(DbPath, OriginalContent);
+            File.WriteAllText(temp, "99.");
+
+            var guard = UiTestDatabaseGuard.Acquire(_directory);
+            File.Exists(temp).Should().BeFalse("書き込み途中の残りを残さない");
+            File.WriteAllText(LatestVersionPath, AppWrittenLatestVersion);
+            guard.Restore();
+
+            Directory.GetFiles(_directory).Should().BeEquivalentTo(new[] { DbPath },
+                "書き込み途中の残りを退避として書き戻さず、テスト中のアプリが書いたファイルも消す");
+        }
+
+        [Fact]
         public void Restore_DBの書き戻しに失敗しても_更新案内ファイルは元へ戻すこと()
         {
             var journal = PathOf(UiTestDatabaseGuard.DatabaseFileName + "-journal");
