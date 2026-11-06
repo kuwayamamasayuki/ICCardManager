@@ -346,10 +346,8 @@ namespace ICCardManager.ViewModels
                             // Issue #1759 / #2263: false は「他 PC が先に復元した」ことを意味する（認証を待つ間にも起こり得る）。
                             // 保存経路・タッチ経路と同じ案内にそろえ、案内どおり一覧で確かめられるよう、
                             // 再読込してからダイアログを開いたままにする（閉じると「一覧を再読み込みしました」が事実にならない）
-                            await LoadStaffAsync();
-                            StatusMessage = ConcurrencyConflictMessage.ForRestore(
-                                $"職員「{identifier}」", "職員一覧");
-                            IsStatusError = true;
+                            // Issue #2382: 再読込の例外は握る（StaffManageDialog の初期化の失敗として閉じさせない）
+                            await NotifyRestoreConflictAsync(identifier);
                             return false; // ダイアログは開いたまま（一覧で状態を確かめてもらう）
                         }
                     }
@@ -366,8 +364,9 @@ namespace ICCardManager.ViewModels
                 else
                 {
                     // 既に登録済みの場合はメッセージを表示して終了
+                    // Issue #2382: この後ダイアログを閉じるので、一覧の所在はメイン画面から開き直す画面で示す
                     _dialogService.ShowInformation(
-                        $"この職員証は {identifier} として既に登録されています",
+                        BuildAlreadyRegisteredMessage(identifier, StaffListInStaffManageScreen),
                         "登録済み職員証");
                     return true; // ダイアログを閉じる
                 }
@@ -529,8 +528,7 @@ namespace ICCardManager.ViewModels
                     return;
                 }
 
-                StatusMessage = $"この職員証は {identifier} として既に登録されています";
-                IsStatusError = true;
+                await NotifyAlreadyRegisteredAsync(identifier);
                 return;
             }
 
@@ -556,19 +554,18 @@ namespace ICCardManager.ViewModels
                         // 主キーの重複（認証を待つ間に他 PC が同じ職員証を登録した）のほか、ディスク満杯・
                         // 読み取り専用・破損・I/O エラーも同じ false になるため、読み直して原因を分ける。
                         // 入力内容はどちらでも消さない（#1757）。キャッシュは RegisterAsync の finally が破棄済み
-                        var label = $"職員「{FormatStaffLabel(staff.Name, staff.Number)}」";
-                        var registeredMeanwhile = await _staffRepository.GetByIdmAsync(staff.StaffIdm, includeDeleted: true);
-                        if (registeredMeanwhile != null)
-                        {
-                            // 案内が「再読み込みしました」と述べるので、先に一覧を再読込する（#1759）
-                            await LoadStaffAsync();
-                            StatusMessage = ConcurrencyConflictMessage.ForRegister(label, "職員一覧");
-                        }
-                        else
-                        {
-                            // 行が無い＝重複ではない。原因（書き込めなかった理由）はリポジトリがログに残している
-                            StatusMessage = BuildRegisterWriteFailedMessage(label);
-                        }
+                        // Issue #2382: 判断（読み直し・削除済み・再読込の失敗）は交通系ICカード管理画面と共有する。
+                        // 行があれば入力した値ではなく行の値で名指しする（他 PC が別の氏名で登録していれば入力した値は一覧に無い）
+                        StatusMessage = await RegisterFailureNotice.ResolveAsync(
+                            $"職員「{FormatStaffLabel(staff.Name, staff.Number)}」",
+                            () => _staffRepository.GetByIdmAsync(staff.StaffIdm, includeDeleted: true),
+                            reread => reread.IsDeleted,
+                            reread => $"職員「{FormatStaffLabel(reread.Name, reread.Number)}」",
+                            LoadStaffAsync,
+                            "職員一覧",
+                            LogNoticeFailure,
+                            // 確認時に得た判定を渡す（登録済みの職員が 0 人なら復元も認証を免除されるので、認証の手順は述べない）
+                            restoreRequiresStaffCardAuthentication: requiresAuthentication);
 
                         IsStatusError = true;
                     }
@@ -609,10 +606,7 @@ namespace ICCardManager.ViewModels
                         // Issue #1759: RestoreAsync が false を返すのは
                         // UPDATE ... WHERE staff_idm = @staffIdm AND is_deleted = 1 が
                         // 0 行に一致した場合だけ。つまり他 PC が先に復元したことを意味する。
-                        await LoadStaffAsync();
-                        StatusMessage = ConcurrencyConflictMessage.ForRestore(
-                            $"職員「{identifier}」", "職員一覧");
-                        IsStatusError = true;
+                        await NotifyRestoreConflictAsync(identifier);
                     }
                 }
             });
@@ -793,19 +787,52 @@ namespace ICCardManager.ViewModels
             => $"職員証の認証が完了しなかったため、{identifier} を復元していません。復元する職員証では認証できません。" +
                $"復元するには、{retryAction}、登録済みの職員の職員証で認証してください。";
 
+        /// <summary>この画面を開いたまま案内するときの職員一覧の所在</summary>
+        internal const string StaffListInThisScreen = "職員一覧";
+
+        /// <summary>案内の後にこの画面を閉じるときの職員一覧の所在（メイン画面から開き直す）</summary>
+        internal const string StaffListInStaffManageScreen = "職員管理画面（F2）の職員一覧";
+
+        /// <summary>職員一覧を再読込できなかったときの一覧の所在（画面を開き直して読み直す）</summary>
+        internal const string StaffListAfterReopen = "この画面を閉じて開き直した職員一覧";
+
         /// <summary>
-        /// 登録の書き込みが重複以外の理由で失敗したときの案内を組み立てる（Issue #2263）
+        /// 登録しようとした職員証が既に登録済み（有効）だったときの案内を組み立てる（Issue #2382）
         /// </summary>
-        /// <param name="target">登録しようとした職員の説明（「職員「…」」）</param>
+        /// <param name="identifier">登録済みの職員の表示名（<see cref="FormatStaffLabel"/>）</param>
+        /// <param name="listLocation">職員一覧の所在</param>
+        /// <remarks>交通系ICカード管理画面の <c>CardManageViewModel.BuildAlreadyRegisteredMessage</c> と同じ形（<see cref="RegisterFailureNotice.BuildAlreadyRegistered"/>）。</remarks>
+        internal static string BuildAlreadyRegisteredMessage(string identifier, string listLocation)
+            => RegisterFailureNotice.BuildAlreadyRegistered("この職員証", $"職員「{identifier}」", "この職員", listLocation);
+
+        /// <summary>
+        /// 登録しようとした職員証が既に登録済み（有効）だったことを、職員一覧を再読込してから案内する（Issue #2382）
+        /// </summary>
         /// <remarks>
-        /// 原因（ディスク満杯・読み取り専用・破損・I/O エラー等）は断定しない。語彙は
-        /// <c>ExceptionMessageFormatter</c> の SQLite の文言（「データベースの読み書きができませんでした」）にそろえる。
-        /// 技術的な詳細はリポジトリ（<c>DbContext.LogNonTransientWriteFailure</c>）がログへ残している。
+        /// 案内は「職員一覧でこの職員を選択して編集」と述べる。入力中に他のパソコンが同じ職員証を登録した場合、
+        /// この画面の一覧は古く、その職員が載っていない。再読込が例外でも案内は失わず、一覧の所在を「開き直した職員一覧」とする。
         /// </remarks>
-        internal static string BuildRegisterWriteFailedMessage(string target)
-            => $"{target}を登録できませんでした。データベースへの書き込みに失敗しました" +
-               "（保存先の空き容量・書き込み権限・共有フォルダーの接続が原因の可能性があります）。" +
-               "これらを確認してから、もう一度「保存」を押してください。詳細はログファイルを確認してください。";
+        private async Task NotifyAlreadyRegisteredAsync(string identifier)
+        {
+            var reloaded = await RegisterFailureNotice.TryReloadAsync(LoadStaffAsync, LogNoticeFailure, "既に登録済みの職員証の案内");
+            StatusMessage = BuildAlreadyRegisteredMessage(identifier, reloaded ? StaffListInThisScreen : StaffListAfterReopen);
+            IsStatusError = true;
+        }
+
+        /// <summary>
+        /// 復元が false（他のパソコンや別の操作で先に復元された）だったことを、職員一覧を再読込してから案内する（Issue #1759 / #2382）
+        /// </summary>
+        /// <remarks>復元の入口 3 つで共有する。再読込が例外でも案内は失わず、「再読み込みしました」と述べない文言にする。</remarks>
+        private async Task NotifyRestoreConflictAsync(string identifier)
+        {
+            StatusMessage = await RegisterFailureNotice.ResolveRestoreConflictAsync(
+                $"職員「{identifier}」", LoadStaffAsync, "職員一覧", LogNoticeFailure);
+            IsStatusError = true;
+        }
+
+        /// <summary>案内の前の読み直し・再読込の失敗を記録する（案内は失わない。ILogger を持たないので ErrorDialogHelper を使う）</summary>
+        private static void LogNoticeFailure(Exception ex, string message)
+            => ErrorDialogHelper.LogException(ex, message);
 
         /// <summary>
         /// 更新対象の職員が見つからなかった（競合）ことを案内し、職員一覧を再読込する
@@ -1124,10 +1151,7 @@ namespace ICCardManager.ViewModels
                             {
                                 // Issue #1759: 保存経路（SaveAsync）の復元分岐と同じ扱い。
                                 // false は「他 PC が先に復元した」ことを意味する。
-                                await LoadStaffAsync();
-                                StatusMessage = ConcurrencyConflictMessage.ForRestore(
-                                    $"職員「{identifier}」", "職員一覧");
-                                IsStatusError = true;
+                                await NotifyRestoreConflictAsync(identifier);
                             }
                         });
 
@@ -1155,8 +1179,7 @@ namespace ICCardManager.ViewModels
                 else
                 {
                     // 既に登録済みの場合はメッセージを表示（赤色で目立たせる: Issue #286）
-                    StatusMessage = $"この職員証は {identifier} として既に登録されています";
-                    IsStatusError = true;
+                    await NotifyAlreadyRegisteredAsync(identifier);
                     // フォームはそのままにして、ユーザーが確認できるようにする
                 }
 

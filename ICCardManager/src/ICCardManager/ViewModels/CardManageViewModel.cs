@@ -331,10 +331,13 @@ namespace ICCardManager.ViewModels
                         }
                         else
                         {
-                            _dialogService.ShowError(
-                                "復元に失敗しました",
-                                "エラー");
-                            return true; // ダイアログを閉じる
+                            // Issue #2382: 以前は「復元に失敗しました」とだけ出してダイアログを閉じていた。
+                            // false は「他 PC が先に復元した」ことを意味する（RestoreAsync は SQLite の失敗を畳まない）。
+                            // 保存経路・タッチ経路と同じ案内にそろえ、案内どおり一覧で確かめられるよう、
+                            // 再読込してからダイアログを開いたままにする（閉じると「一覧を再読み込みしました」が事実にならない。
+                            // 職員管理画面の StartNewStaffWithIdmCoreAsync と同じ形）。再読込の例外は握る（画面の初期化の失敗として閉じさせない）
+                            await NotifyRestoreConflictAsync(existing);
+                            return false; // ダイアログは開いたまま（一覧で状態を確かめてもらう）
                         }
                     }
                     else
@@ -350,8 +353,9 @@ namespace ICCardManager.ViewModels
                 else
                 {
                     // 既に登録済みの場合はメッセージを表示して終了
+                    // Issue #2382: この後ダイアログを閉じるので、一覧の所在はメイン画面から開き直す画面で示す
                     _dialogService.ShowInformation(
-                        $"このカードは {existing.CardNumber} として既に登録されています",
+                        BuildAlreadyRegisteredMessage(existing.CardType, existing.CardNumber, CardListInCardManageScreen),
                         "登録済みカード");
                     return true; // ダイアログを閉じる
                 }
@@ -414,6 +418,74 @@ namespace ICCardManager.ViewModels
         /// </remarks>
         private static string FormatCardLabel(string cardType, string cardNumber)
             => $"交通系ICカード「{cardType} {cardNumber}」";
+
+        /// <summary>
+        /// 登録しようとしたカードが既に登録済み（有効）だったときの案内を組み立てる（Issue #2382）
+        /// </summary>
+        /// <param name="cardType">登録済みのカードの種別</param>
+        /// <param name="cardNumber">登録済みのカードの管理番号</param>
+        /// <param name="listLocation">
+        /// カード一覧の所在。この画面を開いたままなら <see cref="CardListInThisScreen"/>、
+        /// 案内の後にこの画面を閉じる経路（<see cref="StartNewCardWithIdmAsync"/>）なら <see cref="CardListInCardManageScreen"/>
+        /// </param>
+        /// <remarks>
+        /// 保存時の確認・カードをタッチした時点の確認・未登録カードとして開いた時点の確認の 3 か所で同じ文言を使う。
+        /// 以前は「既に登録されています」で終わり、「どうすれば」を欠いていた。管理番号の一意性は種別ごとなので、
+        /// 種別も含めて名指しする（<see cref="FormatCardLabel"/>）。
+        /// </remarks>
+        internal static string BuildAlreadyRegisteredMessage(string cardType, string cardNumber, string listLocation)
+            => RegisterFailureNotice.BuildAlreadyRegistered(
+                "このカード", FormatCardLabel(cardType, cardNumber), "このカード", listLocation);
+
+        /// <summary>この画面を開いたまま案内するときのカード一覧の所在</summary>
+        internal const string CardListInThisScreen = "カード一覧";
+
+        /// <summary>案内の後にこの画面を閉じるときのカード一覧の所在（メイン画面から開き直す）</summary>
+        internal const string CardListInCardManageScreen = "交通系ICカード管理画面（F3）のカード一覧";
+
+        /// <summary>カード一覧を再読込できなかったときの一覧の所在（画面を開き直して読み直す）</summary>
+        internal const string CardListAfterReopen = "この画面を閉じて開き直したカード一覧";
+
+        /// <summary>
+        /// 登録しようとしたカードが既に登録済み（有効）だったことを、カード一覧を再読込してから案内する（Issue #2382）
+        /// </summary>
+        /// <remarks>
+        /// 案内は「カード一覧でこのカードを選択して編集」と述べる。他のパソコンが入力中に同じカードを登録した場合、
+        /// この画面の一覧は古く、そのカードが載っていない。再読込してから案内する（#1753 / #1759「案内するなら、案内する側が先に再読込する」）。
+        /// 再読込が例外でも案内は失わず、一覧の所在を「開き直したカード一覧」とする。
+        /// </remarks>
+        private async Task NotifyAlreadyRegisteredAsync(IcCard existing)
+        {
+            var reloaded = await TryReloadCardsAsync("既に登録済みのカードの案内");
+            StatusMessage = BuildAlreadyRegisteredMessage(
+                existing.CardType, existing.CardNumber, reloaded ? CardListInThisScreen : CardListAfterReopen);
+            IsStatusError = true;
+        }
+
+        /// <summary>
+        /// 復元が false（他のパソコンや別の操作で先に復元された）だったことを、カード一覧を再読込してから案内する（Issue #1759 / #2382）
+        /// </summary>
+        /// <remarks>
+        /// 復元の入口 3 つ（未登録カードとして開いた時・保存時・登録モード中のタッチ時）で共有する。再読込が例外でも案内は失わず、
+        /// 「再読み込みしました」と述べない文言にする。未登録カードとして開いた時の経路では、例外を通すと
+        /// CardManageDialog の初期化の失敗として画面が閉じる。
+        /// </remarks>
+        private async Task NotifyRestoreConflictAsync(IcCard existing)
+        {
+            StatusMessage = await RegisterFailureNotice.ResolveRestoreConflictAsync(
+                FormatCardLabel(existing.CardType, existing.CardNumber), LoadCardsAsync, "カード一覧", LogNoticeFailure);
+            IsStatusError = true;
+        }
+
+        /// <summary>
+        /// 案内の前にカード一覧を再読込する。例外はログに残して false を返す（案内そのものを失わないため。#1727）
+        /// </summary>
+        private Task<bool> TryReloadCardsAsync(string purpose)
+            => RegisterFailureNotice.TryReloadAsync(LoadCardsAsync, LogNoticeFailure, purpose);
+
+        /// <summary>案内の前の読み直し・再読込の失敗を記録する（案内は失わない）</summary>
+        private void LogNoticeFailure(Exception ex, string message)
+            => _logger?.LogWarning(ex, "交通系ICカード管理画面の案内の準備: {Detail}", message);
 
         /// <summary>
         /// 編集中の対象を、編集開始時に一覧へ載っていた表記で名指しする（Issue #1761）
@@ -556,10 +628,7 @@ namespace ICCardManager.ViewModels
                                     // Issue #1759: RestoreAsync が false を返すのは
                                     // UPDATE ... WHERE card_idm = @cardIdm AND is_deleted = 1 が
                                     // 0 行に一致した場合だけ。つまり他 PC が先に復元したことを意味する。
-                                    await LoadCardsAsync();
-                                    StatusMessage = ConcurrencyConflictMessage.ForRestore(
-                                        FormatCardLabel(existing.CardType, existing.CardNumber), "カード一覧");
-                                    IsStatusError = true;
+                                    await NotifyRestoreConflictAsync(existing);
                                 }
                             }
                             else
@@ -579,8 +648,7 @@ namespace ICCardManager.ViewModels
                         }
                         else
                         {
-                            StatusMessage = $"このカードは {existing.CardNumber} として既に登録されています";
-                            IsStatusError = true;
+                            await NotifyAlreadyRegisteredAsync(existing);
                             return;
                         }
                     }
@@ -805,7 +873,21 @@ namespace ICCardManager.ViewModels
                     }
                     else
                     {
-                        StatusMessage = "登録に失敗しました";
+                        // Issue #2382: InsertAsync は一過性でない SQLite の失敗をすべて false に畳む（#1951 / #2001）。
+                        // 主キーの重複（登録前の確認の後に他 PC が同じカードを登録した）のほか、ディスク満杯・
+                        // 読み取り専用・破損・I/O エラーも同じ false になるため、読み直して原因を分ける
+                        // （職員管理画面の #2263 と同じ形）。入力内容はどちらでも消さない（#1757）。
+                        // キャッシュは RegisterAsync の finally が破棄済み
+                        // 判断（読み直し・削除済み・再読込の失敗）は職員管理画面と共有する（RegisterFailureNotice）
+                        StatusMessage = await RegisterFailureNotice.ResolveAsync(
+                            FormatCardLabel(card.CardType, card.CardNumber),
+                            () => _cardRepository.GetByIdmAsync(card.CardIdm, includeDeleted: true),
+                            reread => reread.IsDeleted,
+                            reread => FormatCardLabel(reread.CardType, reread.CardNumber),
+                            LoadCardsAsync,
+                            "カード一覧",
+                            LogNoticeFailure,
+                            restoreRequiresStaffCardAuthentication: false);
                         IsStatusError = true;
                     }
                     _registrationModeResult = null;
@@ -1618,10 +1700,7 @@ namespace ICCardManager.ViewModels
                         {
                             // Issue #1759: 保存経路（SaveAsync）の復元分岐と同じ扱い。
                             // false は「他 PC が先に復元した」ことを意味する。
-                            await LoadCardsAsync();
-                            StatusMessage = ConcurrencyConflictMessage.ForRestore(
-                                FormatCardLabel(existing.CardType, existing.CardNumber), "カード一覧");
-                            IsStatusError = true;
+                            await NotifyRestoreConflictAsync(existing);
                         }
                     }
                     else
@@ -1637,8 +1716,7 @@ namespace ICCardManager.ViewModels
                 else
                 {
                     // 既に登録済みの場合はメッセージを表示（赤色で目立たせる: Issue #286）
-                    StatusMessage = $"このカードは {existing.CardNumber} として既に登録されています";
-                    IsStatusError = true;
+                    await NotifyAlreadyRegisteredAsync(existing);
                     // フォームはそのままにして、ユーザーが確認できるようにする
                 }
                 return;
