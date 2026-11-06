@@ -5,6 +5,7 @@
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
         xmlns:vm="clr-namespace:ICCardManager.ViewModels"
         xmlns:common="clr-namespace:ICCardManager.Common"
+        xmlns:helpers="clr-namespace:ICCardManager.Views.Helpers"
         mc:Ignorable="d"
         d:DataContext="{d:DesignInstance Type=vm:CardHistoryImportViewModel}"
         Title="カードの履歴から取り込む"
@@ -68,6 +69,7 @@
         <!-- 取り込む利用の一覧（古い順）。列幅は見出しと値に合わせ、収まらなければ横スクロール（#2258） -->
         <DataGrid Grid.Row="1"
                   x:Name="ImportRowsDataGrid"
+                  helpers:DataGridAutoColumnFit.IsEnabled="True"
                   ItemsSource="{Binding Rows}"
                   AutoGenerateColumns="False"
                   IsReadOnly="True"

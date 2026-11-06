@@ -42,7 +42,9 @@
             </ListView.ItemContainerStyle>
             <ListView.View>
                 <GridView>
-                    <GridViewColumn Header="統合日時" Width="140"
+                    <!-- Issue #2404: 固定幅 140 では「2026/11/05 13:53」の分が文字サイズ「特大」で切れる（162 要る）。
+                         幅を省いて（Auto）内容に合わせる -->
+                    <GridViewColumn Header="統合日時"
                                     DisplayMemberBinding="{Binding MergedAtDisplay}"/>
                     <!-- Issue #2141: 固定幅に収まらない内容を黙って切らない（#2076）。
                          省略記号で切れていることを示し、ツールチップで全文を読めるようにする -->
