@@ -1,12 +1,14 @@
 using System;
 using System.IO;
 using System.Linq;
+using System.Runtime.ExceptionServices;
 
 namespace ICCardManager.UITests.Infrastructure
 {
     /// <summary>
     /// UI テストが開発機の既存 DB（<c>%ProgramData%\ICCardManager\iccard.db</c>）を壊さないよう、
     /// 退避と復元を 1 か所で受け持つ（Issue #2062）。
+    /// DB と同じフォルダーの更新通知ファイル（<c>latest_version.txt</c>）も同じ規約で退避する（Issue #2394）。
     /// </summary>
     /// <remarks>
     /// <para>
@@ -31,6 +33,20 @@ namespace ICCardManager.UITests.Infrastructure
 
         /// <summary>本体が DB の保存先を読む設定ファイル（<c>AppConfigFiles.DatabaseConfigPath</c> と同じ名前）。</summary>
         internal const string DatabaseConfigFileName = "database_config.txt";
+
+        /// <summary>
+        /// 更新通知ファイル（本体の <c>UpdateNotificationService.LatestVersionFileName</c> と同じ名前。DB と同じフォルダーに置かれる）。
+        /// </summary>
+        internal const string LatestVersionFileName = "latest_version.txt";
+
+        /// <summary>元の更新通知ファイルが無かったことを示す印。中断後の回復で、テスト中のアプリが書いたファイルを消すために使う。</summary>
+        internal const string LatestVersionAbsentMarkerFileName = LatestVersionFileName + ".uitest-absent";
+
+        /// <summary>
+        /// 更新通知ファイルの退避を書き込む途中の名前。書き切ってから退避の名前へ改名する（途中で落ちた退避を「退避済みの印」にしない）。
+        /// 本体の一時ファイルの形（<c>latest_version.txt.&lt;8桁の16進&gt;.tmp</c>）とは一致しないので、本体の回収の対象にならない。
+        /// </summary>
+        internal const string LatestVersionBackupTempFileName = LatestVersionFileName + BackupSuffix + ".tmp";
 
         /// <summary>旧実装（#2062 以前）の <c>LaunchWithSeed</c> が中断時に残し得た退避ファイル。</summary>
         internal static readonly string LegacySeededOriginalFileName = DatabaseFileName + BackupSuffix + ".seeded-original";
@@ -84,22 +100,45 @@ namespace ICCardManager.UITests.Infrastructure
             // 続く削除だけが失敗して、退避ファイル（＝「中断した実行の痕」の印）が残る。次回の Acquire はそれを書き戻し、
             // その間にピッすいで記録した貸出・返却を巻き戻す。回復（書き戻し）も DB を消すので、開かれている間は同じく失敗する
             guard.ThrowIfDatabaseInUse();
+            // Issue #2394: 更新通知ファイルも、取り除けるかを何も触る前に確かめる（読み取り専用・別のプロセスが開いている）
+            guard.ThrowIfLatestVersionFileNotRemovable();
             guard.RecoverInterruptedRun();
             guard.DeleteOrphanedCompanionBackups();
 
-            if (File.Exists(guard.DatabasePath))
+            // Issue #2394: 更新通知ファイルは DB より先に退避する。DB の回復の印を置いた後に失敗すると、ガードが返らないので
+            // Restore も DiscardBackup も走らず、印だけが残る。次回の Acquire がそれを書き戻し、その間の業務の記録を巻き戻す（#2290）
+            guard.SetAsideLatestVersionFile();
+
+            try
             {
-                // 付随ファイルを先に退避し、DB 本体の退避ファイルを最後に置く。
-                // DB 本体の退避ファイルが「退避が完了した」ことの印になる（途中で落ちたら印が無いので回復しない）。
-                foreach (var name in CompanionFileNames().Where(n => File.Exists(guard.PathOf(n))))
+                if (File.Exists(guard.DatabasePath))
                 {
-                    guard.CopyWithRetry(guard.PathOf(name), guard.BackupPathOf(name));
+                    // 付随ファイルを先に退避し、DB 本体の退避ファイルを最後に置く。
+                    // DB 本体の退避ファイルが「退避が完了した」ことの印になる（途中で落ちたら印が無いので回復しない）。
+                    foreach (var name in CompanionFileNames().Where(n => File.Exists(guard.PathOf(n))))
+                    {
+                        guard.CopyWithRetry(guard.PathOf(name), guard.BackupPathOf(name));
+                    }
+                    guard.CopyWithRetry(guard.DatabasePath, guard.BackupPathOf(DatabaseFileName));
                 }
-                guard.CopyWithRetry(guard.DatabasePath, guard.BackupPathOf(DatabaseFileName));
+                else
+                {
+                    File.WriteAllText(guard.PathOf(AbsentMarkerFileName), string.Empty);
+                }
             }
-            else
+            catch (Exception ex) when (ex is IOException || ex is UnauthorizedAccessException)
             {
-                File.WriteAllText(guard.PathOf(AbsentMarkerFileName), string.Empty);
+                // DB の退避が完了しなかった（印が無いので、DB は次回も回復しない）。取り除いた更新通知ファイルはここで戻す。
+                // 戻せなくても退避ファイルは残るので次回の Acquire が戻す。本来の原因（DB の退避の失敗）を失わないよう、こちらは握る
+                try
+                {
+                    guard.RestoreLatestVersionFile();
+                }
+                catch (Exception restoreFailure) when (restoreFailure is IOException || restoreFailure is UnauthorizedAccessException)
+                {
+                }
+
+                throw;
             }
 
             return guard;
@@ -130,11 +169,30 @@ namespace ICCardManager.UITests.Infrastructure
             }
             catch (Exception ex) when (ex is IOException || ex is UnauthorizedAccessException)
             {
+                // Issue #2394: 更新通知ファイルは DB と違い、退避した時点で取り除いている（テストのアプリに読ませないため）。
+                // 退避を捨てたガードの Restore は何もしないので、ここで戻す。DB の退避の破棄の成否とは独立に試み、
+                // 失敗の文言も分ける（更新通知ファイルの退避は次の実行が戻すだけで、業務の記録を巻き戻さない）
+                Exception? discardFailure = null;
                 try
                 {
                     DiscardBackup();
                 }
-                catch (Exception discardFailure) when (discardFailure is IOException || discardFailure is UnauthorizedAccessException)
+                catch (Exception failure) when (failure is IOException || failure is UnauthorizedAccessException)
+                {
+                    discardFailure = failure;
+                }
+
+                Exception? latestVersionFailure = null;
+                try
+                {
+                    RestoreLatestVersionFile();
+                }
+                catch (Exception failure) when (failure is IOException || failure is UnauthorizedAccessException)
+                {
+                    latestVersionFailure = failure;
+                }
+
+                if (discardFailure != null)
                 {
                     // 削除の失敗（本来の原因）を失わない。net48 の AggregateException.Message は内側の例外の文言を含まないので、
                     // 残り得るファイルと、残したまま実行したときの結果は文言そのものに書く
@@ -142,8 +200,22 @@ namespace ICCardManager.UITests.Infrastructure
                         $"{DatabasePath} を別のプロセスが開いていたため UI テストの DB を消せず、" +
                         $"退避ファイル {BackupPathOf(DatabaseFileName)}（元の DB が無かったときは {PathOf(AbsentMarkerFileName)}）も捨て切れませんでした。" +
                         "このファイルを残したまま UI テストを実行すると、次の実行がそれを書き戻し、その間に加えた変更が巻き戻ります。" +
-                        "ピッすいを終了し、これらのファイルが残っていれば削除してから実行してください。",
-                        ex, discardFailure);
+                        (latestVersionFailure == null
+                            ? string.Empty
+                            : $"また、一時的に退避した更新通知ファイルも元へ戻せませんでした。その退避 {BackupPathOf(LatestVersionFileName)}" +
+                              $"（元が無かったときは {PathOf(LatestVersionAbsentMarkerFileName)}）は次の実行が元へ戻すので、削除しないでください。") +
+                        "ピッすいを終了し、DB の退避ファイルが残っていれば削除してから実行してください。",
+                        new[] { ex, discardFailure }.Concat(latestVersionFailure == null ? new Exception[0] : new[] { latestVersionFailure }));
+                }
+
+                if (latestVersionFailure != null)
+                {
+                    throw new AggregateException(
+                        $"{DatabasePath} を別のプロセスが開いていたため UI テストの DB を消せず（DB には触れていません）、" +
+                        $"一時的に退避した更新通知ファイル {PathOf(LatestVersionFileName)} も元へ戻せませんでした。" +
+                        $"退避 {BackupPathOf(LatestVersionFileName)}（元が無かったときは {PathOf(LatestVersionAbsentMarkerFileName)}）は次の実行が元へ戻すので、削除しないでください。" +
+                        "ピッすいを終了してから実行してください。",
+                        ex, latestVersionFailure);
                 }
 
                 throw;
@@ -168,7 +240,25 @@ namespace ICCardManager.UITests.Infrastructure
                 return;
             }
 
+            // 更新通知ファイルは DB の書き戻しの成否と独立に戻す（DB の書き戻しの失敗で、開発機の更新通知ファイルを消えたままにしない）。
+            // DB の書き戻しが失敗したときはその例外を優先して伝える（更新通知ファイルの退避は残り、次回の Acquire が戻す）
+            Exception? latestVersionFailure = null;
+            try
+            {
+                RestoreLatestVersionFile();
+            }
+            catch (Exception ex) when (ex is IOException || ex is UnauthorizedAccessException)
+            {
+                latestVersionFailure = ex;
+            }
+
             RestoreFromBackup();
+
+            if (latestVersionFailure != null)
+            {
+                ExceptionDispatchInfo.Capture(latestVersionFailure).Throw();
+            }
+
             _restored = true;
         }
 
@@ -189,6 +279,8 @@ namespace ICCardManager.UITests.Infrastructure
             {
                 DeleteWithRetry(BackupPathOf(name));
             }
+
+            // 更新通知ファイルはここでは戻さない。呼び出し元（DeleteWorkingDatabase）が、この破棄の成否と独立に戻す
         }
 
         /// <summary>
@@ -262,6 +354,164 @@ namespace ICCardManager.UITests.Infrastructure
             if (File.Exists(BackupPathOf(DatabaseFileName)) || File.Exists(PathOf(AbsentMarkerFileName)))
             {
                 RestoreFromBackup();
+            }
+
+            // DB の印とは独立に回復する（DB の有無と更新通知ファイルの有無は独立）
+            RestoreLatestVersionFile();
+        }
+
+        /// <summary>
+        /// Issue #2394: 更新通知ファイルを退避し、テストのアプリから見えないよう取り除く。
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// 本体は DB と同じフォルダーの <c>latest_version.txt</c> に自バージョンより新しい版が書かれていると、
+        /// システム警告エリアに「新しいバージョン … が公開されています」を出す。開発機に残ったこのファイル
+        /// （実例は 99.0.0）が、マニュアル用のスクリーンショットに写り込んでいた。撮影の結果を撮影機の状態に左右させない。
+        /// </para>
+        /// <para>
+        /// 退避の形は DB と同じ規約に揃える。元があれば <see cref="BackupSuffix"/> 付きの退避ファイル、
+        /// 無ければ印（<see cref="LatestVersionAbsentMarkerFileName"/>）を置き、どちらかが「退避が完了した」ことの印になる。
+        /// 本体の起動時タスク（Issue #2149）はファイルが無ければ自バージョンを書くので、復元ではテスト中に書かれたファイルを消してから戻す。
+        /// </para>
+        /// <para>
+        /// 中断からの回復は、中断から次の実行までの間に本物のアプリが書いたファイルも、退避した時点の古い内容で上書きする。これは許容する —
+        /// 起動時タスクは自分の方が新しいときだけ自バージョンを書く（単調増加）ので、次にアプリを起動したときに直り、害は更新の案内の遅れだけ。
+        /// </para>
+        /// </remarks>
+        private void SetAsideLatestVersionFile()
+        {
+            var path = PathOf(LatestVersionFileName);
+            var temp = PathOf(LatestVersionBackupTempFileName);
+
+            // 前回、退避の書き込みの途中で落ちた残り。印ではない（退避の名前に改名する前に落ちた）ので捨てる
+            DeleteWithRetry(temp);
+
+            if (File.Exists(path))
+            {
+                // 退避ファイルを置き切ってから元を消す（途中で落ちても、印があれば次回の回復が書き戻す）。
+                // 一時名へ書き切ってから退避の名前へ改名する。退避の名前へ直接コピーすると、途中で落ちた中途半端な内容が
+                // 「退避済みの印」になり、次回の回復がそれで元を上書きする
+                var backup = BackupPathOf(LatestVersionFileName);
+                try
+                {
+                    CopyWithRetry(path, temp);
+                    RetryOnIOException(() => File.Move(temp, backup));
+                }
+                catch (Exception ex) when (ex is IOException || ex is UnauthorizedAccessException)
+                {
+                    // 退避は完了していない（元は残っている）。一時名の残りを捨ててから伝える。捨て切れなくても次回の Acquire が捨てる
+                    try
+                    {
+                        File.Delete(temp);
+                    }
+                    catch (Exception cleanupFailure) when (cleanupFailure is IOException || cleanupFailure is UnauthorizedAccessException)
+                    {
+                    }
+
+                    throw;
+                }
+                try
+                {
+                    DeleteWithRetry(path);
+                }
+                catch (Exception ex) when (ex is IOException || ex is UnauthorizedAccessException)
+                {
+                    // 確認（ThrowIfLatestVersionFileNotRemovable）と削除の間に開かれた。元は残っているので退避を捨てる
+                    // （残すと次回の回復が、その間に書き換わった内容を退避した時点の内容で上書きする）。
+                    // 退避ファイルは元の属性ごとコピーされるので、読み取り専用を外してから消す。
+                    // 確認と削除の間の競合でしか通らないため、単体テストでは再現していない（確認の側の文言は UiTestDatabaseGuardTests が固定）
+                    var leftover = string.Empty;
+                    try
+                    {
+                        File.SetAttributes(backup, FileAttributes.Normal);
+                        DeleteWithRetry(backup);
+                    }
+                    catch (Exception cleanupFailure) when (cleanupFailure is IOException || cleanupFailure is UnauthorizedAccessException)
+                    {
+                        // 後始末の失敗で、本来の原因（取り除けなかったこと）と案内を失わない。残った退避は名指しする
+                        // （元は残っているので、この退避は不要。残したままにすると次回の回復が元を退避した時点の内容で上書きする）
+                        leftover = $"退避ファイル {backup} も消せませんでした。元のファイルは残っているので、この退避ファイルは削除してください。";
+                    }
+
+                    throw new InvalidOperationException(
+                        $"更新通知ファイル {path} を取り除けなかったため、UI テストを中止しました（DB にも更新通知ファイルにも触れていません）。" +
+                        "確認の直後に、別のプロセスがこのファイルを開いたか、属性・アクセス権が変わりました。" +
+                        leftover +
+                        "このファイルを開いているアプリ（ピッすい・エディター等）を終了し、読み取り専用の属性とアクセス権を確認してから実行してください。",
+                        ex);
+                }
+            }
+            else
+            {
+                File.WriteAllText(PathOf(LatestVersionAbsentMarkerFileName), string.Empty);
+            }
+        }
+
+        /// <summary>
+        /// Issue #2394: 更新通知ファイルを取り除けない（読み取り専用・権限不足・別のプロセスが開いている）なら、何も触らずに中止する。
+        /// </summary>
+        /// <remarks>
+        /// 取り除けないまま撮影すると、開発機の更新の案内が画像へ写る。退避の途中で失敗すると、読み取り専用の属性ごとコピーされた
+        /// 退避ファイルが残り、次回以降の回復が毎回それを書き戻そうとして失敗する。
+        /// </remarks>
+        private void ThrowIfLatestVersionFileNotRemovable()
+        {
+            var path = PathOf(LatestVersionFileName);
+            if (!File.Exists(path))
+            {
+                return;
+            }
+
+            try
+            {
+                RetryOnIOException(() =>
+                {
+                    using (new FileStream(path, FileMode.Open, FileAccess.ReadWrite, FileShare.None))
+                    {
+                    }
+                });
+            }
+            catch (IOException ex)
+            {
+                throw new InvalidOperationException(
+                    $"更新通知ファイル {path} を別のプロセスが使用しているため、UI テストを中止しました（DB にも更新通知ファイルにも触れていません）。" +
+                    "UI テストは撮影画像に開発機の更新の案内が写らないよう、このファイルを一時的に退避します。" +
+                    "このファイルを開いているアプリ（ピッすい・エディター等）を終了してから実行してください。",
+                    ex);
+            }
+            catch (UnauthorizedAccessException ex)
+            {
+                throw new InvalidOperationException(
+                    $"更新通知ファイル {path} が読み取り専用か、書き込む権限が無いため、UI テストを中止しました（DB にも更新通知ファイルにも触れていません）。" +
+                    "UI テストは撮影画像に開発機の更新の案内が写らないよう、このファイルを一時的に退避します。" +
+                    "ファイルの読み取り専用の属性とアクセス権を確認してから実行してください。",
+                    ex);
+            }
+        }
+
+        /// <summary>
+        /// 退避した更新通知ファイルを書き戻す（元が無かったなら、テスト中に書かれたファイルを消す）。退避が無ければ何もしない。
+        /// </summary>
+        /// <remarks>
+        /// 書き戻しに失敗したら退避ファイル（印）を消さずに例外を投げる。次回の <see cref="Acquire"/> が回復する。
+        /// </remarks>
+        private void RestoreLatestVersionFile()
+        {
+            var path = PathOf(LatestVersionFileName);
+            var backup = BackupPathOf(LatestVersionFileName);
+            var absentMarker = PathOf(LatestVersionAbsentMarkerFileName);
+
+            if (File.Exists(backup))
+            {
+                CopyWithRetry(backup, path);
+                DeleteWithRetry(backup);
+                DeleteWithRetry(absentMarker);
+            }
+            else if (File.Exists(absentMarker))
+            {
+                DeleteWithRetry(path);
+                DeleteWithRetry(absentMarker);
             }
         }
 
