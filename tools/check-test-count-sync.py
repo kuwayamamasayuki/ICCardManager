@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
 """07_テスト設計書.md の件数表を dotnet test --list-tests と比較するスクリプト。
 
-検証対象は 2 つ:
+検証対象は 3 つ:
 
 - §1.1a の総件数表（単体 / UI / 合計） … Issue #1546
 - §2 のクラス別件数表（``| `Namespace/ClassTests` | 件数 | 観点 |``） … Issue #1889
+- 見出しの ID（``#### UT-049: …``）と節番号（``### 2.47a …``）が文書全体で重複しないこと … Issue #2391
+  （件数の照合ではないが、同じ 07 を同じ CI で検査するのでここに置く。dotnet を使わない）
 
 **§2 検証の適用範囲**: 「表に載っている行」が実測と一致することだけを検証する。
 テストクラスを新設したのに §2 へ行を足さなかった場合は検出できない（本書に行を持つ
@@ -66,6 +68,50 @@ MALFORMED_CLASS_ROW_RE = re.compile(
 
 # §2 のクラス別件数行の下限。表が丸ごと壊れた／消えたときに「差分なし」で緑にならないための歯止め。
 MIN_CLASS_ROWS = 10
+
+# Issue #2391: 見出し（CommonMark の ATX 見出し。行頭のインデントは 0〜3 文字まで）。
+HEADING_PREFIX = r"^ {0,3}#{2,6}[ \t]+"
+H2_PREFIX = r"^ {0,3}##[ \t]+"
+H3_OR_DEEPER_PREFIX = r"^ {0,3}#{3,6}[ \t]+"
+# 番号・ID の直後に来てよい文字: 空白・行末・ASCII のコロン・ASCII 以外（全角の括弧・コロン・ダッシュ・和文）。
+# ASCII の英数字や記号が続く見出し（``2.2-x`` 等）は番号として扱わない。
+TOKEN_END = r"(?=[\s:]|[^\x00-\x7F]|$)"
+# 見出しの先頭に置く ID（``#### UT-049: …`` / ``### UT-083`` / ``#### UT-058c-FlaUI: …``）。
+# 接頭辞は英大文字 2〜4 文字（UT / IT / ST / PT / SEC / UAT）。ID は ASCII の英数字とハイフンだけを取るので、
+# ``:`` ・全角コロン・全角括弧・空白の手前で切れる。節番号と同じく直後に TOKEN_END を要求するので、
+# ``#### UT-049.1`` ・ ``#### UT-049_b`` のように ASCII の記号が続く見出しは ID として数えない（UT-049 と
+# 数えると、別の見出しを重複と誤検出する）。
+ID_TOKEN = r"[A-Z]{2,4}-[A-Za-z0-9-]+" + TOKEN_END
+HEADING_ID_RE = re.compile(HEADING_PREFIX + r"(" + ID_TOKEN + r")")
+# ID の範囲見出し（``#### UT-067〜UT-071: …``）の終端。末尾の数字だけが違う範囲（同じ桁数）は展開して
+# 各 ID を占有済みとして扱う。展開できない範囲（``UT-058b〜UT-058c-FlaUI`` 等）は両端だけを占有として扱う。
+ID_RANGE_TAIL_RE = re.compile(r"\s*[〜～]\s*(" + ID_TOKEN + r")")
+# 見出しの先頭に置く節番号。
+# - ``###`` 以下は点を含む番号（``### 2.47a`` / ``#### 1.6.1`` / ``#### 5.11a-2`` / ``### 7a.1``）に限る。
+#   ``#### 1. 準備`` ・ ``#### 30秒ルール`` のような、数字で始まるだけの見出しは節番号ではない
+# - ``##`` は章番号（``## 2.`` / ``## 2a.`` / ``## 10.``）も許す
+# 番号の文字（ASCII の英数字と ``.``・``-数字`` の枝番）だけを取る。空白まで取ると ``2.47a（…）`` ・ ``2.47a：…`` が
+# 別の番号になり、重複を見逃す。``2.20a`` と ``2.20a2``、``1.6`` と ``1.6.1`` は別の番号として数える。
+DOTTED_SECTION_NUMBER = r"\d+[A-Za-z]?(?:\.\d+[A-Za-z0-9]*)+(?:-\d+(?![.\d]))?\.?"
+CHAPTER_NUMBER = r"\d+[A-Za-z]?(?:\.\d+[A-Za-z0-9]*)*\.?"
+H3_SECTION_RE = re.compile(H3_OR_DEEPER_PREFIX + r"(" + DOTTED_SECTION_NUMBER + r")" + TOKEN_END)
+H2_SECTION_RE = re.compile(H2_PREFIX + r"(" + CHAPTER_NUMBER + r")" + TOKEN_END)
+# 範囲表記（``### 2.31〜2.33 — 欠番``）の終端。範囲の番号はすべて占有済みとして扱う
+# （後から ``### 2.32`` を足したら重複として検出する）。範囲の記号は 〜（波ダッシュ）・～（全角チルダ）だけ。
+# ASCII のハイフン・全角ハイフン・ダッシュ（``### 2.2 - 2.1系の補足`` / ``2.31－2.33``）は範囲とみなさず、
+# 先頭の番号だけを数える。
+SECTION_RANGE_TAIL_RE = re.compile(r"\s*[〜～]\s*(" + DOTTED_SECTION_NUMBER + r")" + TOKEN_END)
+# 範囲を展開する上限。書き損じ（``2.1〜2.1000``）で巨大な集合を作らないため。
+MAX_SECTION_RANGE = 100
+# コードブロックの開始（CommonMark: インデント 0〜3、同じ記号 3 文字以上）。閉じるのは開いた記号と同じ種類・
+# 同じ長さ以上の記号だけの行。種類・長さを見ないと、```` の中の ``` で開閉が反転する。
+# バッククォートのフェンスの info 文字列にバッククォートは書けない（CommonMark）ので、``` ```foo``` は例 ``` の
+# ような段落（インラインコード）はフェンスの開始ではない。
+FENCE_OPEN_RE = re.compile(r"^ {0,3}(`{3,}|~{3,})(.*)$")
+# HTML コメント（ブロック）の開始は行頭（インデント 0〜3）の ``<!--`` に限る。本文中のインラインコード
+# （``<!-- 検索条件 -->`` コメント以降）や文中の ``<!--`` で開くと、以降の見出しを数えずに「重複なし」になる。
+HTML_COMMENT_OPEN_RE = re.compile(r"^ {0,3}<!--")
+HTML_COMMENT_CLOSE = "-->"
 
 
 class ClassRowScan(NamedTuple):
@@ -231,6 +277,168 @@ def parse_class_counts(md_path: str) -> ClassRowScan:
     return ClassRowScan(rows, delta_rows, malformed_rows, section_found)
 
 
+class HeadingScan(NamedTuple):
+    """見出しの ID と節番号の走査結果（Issue #2391）。
+
+    Attributes:
+        ids: [(行番号, ID), ...]
+        sections: [(行番号, 節番号), ...]
+    """
+
+    ids: List[tuple]
+    sections: List[tuple]
+    # ファイルの終わりで開いたままのコードブロック・HTML コメント（"コードブロック（123 行目から）" 等）。
+    # 閉じ忘れると以降の見出しをすべて数えずに「重複なし」になるため、検査を fail にする。
+    unclosed: Optional[str] = None
+
+
+def expand_section_range(start: str, end: str) -> List[str]:
+    """``2.31`` 〜 ``2.33`` を ``[2.31, 2.32, 2.33]`` に展開する。
+
+    最後の要素だけが異なる数字の範囲に限って展開し、それ以外（``2.31a``〜``2.33``・前の要素が違う・
+    逆順・上限超え）は両端だけを占有として返す（展開できない範囲でも、両端の衝突は検出する）。
+    """
+    head_s, _, last_s = start.rpartition(".")
+    head_e, _, last_e = end.rpartition(".")
+    if head_s == head_e and last_s.isdigit() and last_e.isdigit():
+        first, last = int(last_s), int(last_e)
+        if first <= last and last - first < MAX_SECTION_RANGE:
+            prefix = head_s + "." if head_s else ""
+            return [f"{prefix}{n}" for n in range(first, last + 1)]
+    return [start, end]
+
+
+_TRAILING_DIGITS_RE = re.compile(r"^(.*?)(\d+)$")
+
+
+def expand_id_range(start: str, end: str) -> List[str]:
+    """``UT-067`` 〜 ``UT-071`` を ``[UT-067, …, UT-071]`` に展開する。
+
+    末尾の数字だけが違い、桁数が同じ範囲に限って展開する（``UT-067`` の 0 埋めを保つ）。それ以外は
+    両端だけを占有として返す。
+    """
+    ms, me = _TRAILING_DIGITS_RE.match(start), _TRAILING_DIGITS_RE.match(end)
+    if ms and me and ms.group(1) == me.group(1) and len(ms.group(2)) == len(me.group(2)):
+        first, last = int(ms.group(2)), int(me.group(2))
+        if first <= last and last - first < MAX_SECTION_RANGE:
+            width = len(ms.group(2))
+            return [f"{ms.group(1)}{n:0{width}d}" for n in range(first, last + 1)]
+    return [start, end]
+
+
+def parse_headings(md_path: str) -> HeadingScan:
+    """文書全体の見出しから ID と節番号を集める。
+
+    コードブロック（CommonMark のフェンス）と HTML コメント（行頭の ``<!--`` から ``-->`` まで）の中は
+    見出しとして数えない。
+    """
+    ids = []
+    sections = []
+    fence = None  # 開いているフェンスの記号（例: "````"）。None ならブロックの外
+    in_comment = False
+    opened_at = 0  # 開いているコードブロック・HTML コメントの開始行
+    with open(md_path, encoding="utf-8-sig") as f:
+        for lineno, line in enumerate(f, start=1):
+            if fence is not None:
+                stripped = line.strip()
+                if (
+                    len(line) - len(line.lstrip(" ")) <= 3
+                    and stripped
+                    and set(stripped) == {fence[0]}
+                    and len(stripped) >= len(fence)
+                ):
+                    fence = None
+                continue
+            if in_comment:
+                if HTML_COMMENT_CLOSE in line:
+                    in_comment = False
+                continue
+            m = FENCE_OPEN_RE.match(line)
+            if m and not (m.group(1)[0] == "`" and "`" in m.group(2)):
+                fence = m.group(1)
+                opened_at = lineno
+                continue
+            m = HTML_COMMENT_OPEN_RE.match(line)
+            if m:
+                if HTML_COMMENT_CLOSE not in line[m.end():]:
+                    in_comment = True
+                    opened_at = lineno
+                continue
+            m = HEADING_ID_RE.match(line)
+            if m:
+                tail = ID_RANGE_TAIL_RE.match(line, m.end())
+                if tail:
+                    for i in expand_id_range(m.group(1), tail.group(1)):
+                        ids.append((lineno, i))
+                else:
+                    ids.append((lineno, m.group(1)))
+                continue
+            m = H3_SECTION_RE.match(line) or H2_SECTION_RE.match(line)
+            if m:
+                number = m.group(1).rstrip(".")
+                tail = SECTION_RANGE_TAIL_RE.match(line, m.end())
+                if tail:
+                    for n in expand_section_range(number, tail.group(1).rstrip(".")):
+                        sections.append((lineno, n))
+                else:
+                    sections.append((lineno, number))
+    unclosed = None
+    if fence is not None:
+        unclosed = f"コードブロック（{opened_at} 行目の {fence}）"
+    elif in_comment:
+        unclosed = f"HTML コメント（{opened_at} 行目の <!--）"
+    return HeadingScan(ids, sections, unclosed)
+
+
+def find_duplicates(entries) -> Dict[str, List[int]]:
+    """[(行番号, 表記), ...] から 2 回以上現れる表記と、その行番号の一覧を返す。"""
+    lines_by_key: Dict[str, List[int]] = {}
+    for lineno, key in entries:
+        lines_by_key.setdefault(key, []).append(lineno)
+    return {key: lines for key, lines in lines_by_key.items() if len(lines) > 1}
+
+
+def check_heading_uniqueness(scan: HeadingScan) -> Tuple[bool, str]:
+    """見出しの ID・節番号が重複していないことを確かめる（Issue #2391）。
+
+    同じ ID が 2 つの節にあると、Issue・PR・コードのコメントから ID を引いたときにどちらを
+    指すか決まらない。意図した重複は無いので、許可の書き方は設けない（直すときは、引用の少ない
+    側・後から足した側を空いている ID へ付け替え、旧 ID を本文に注記する）。
+    見出しを 1 つも読めなかったときは、正規表現が文書の書式から外れた空振りとして fail する。
+    """
+    if scan.unclosed:
+        return False, (
+            f"❌ ファイルの終わりまで {scan.unclosed} が閉じていません\n"
+            "  閉じていないと、そこから後の見出しを 1 つも数えずに「重複なし」になります。"
+            "閉じの記号（開いた記号と同じ種類・同じ長さ以上の ``` / ~~~、または -->）を書き足してください。"
+        )
+    if not scan.ids or not scan.sections:
+        return False, (
+            "⚠ 見出しの ID・節番号を読み取れませんでした（"
+            f"ID {len(scan.ids)} 件・節番号 {len(scan.sections)} 件）\n"
+            "  見出しの書式が変わったか、本スクリプトの HEADING_ID_RE / H3_SECTION_RE / H2_SECTION_RE が"
+            "文書に合っていません。正規表現を文書の書式に合わせて更新してください。"
+        )
+
+    dup_ids = find_duplicates(scan.ids)
+    dup_sections = find_duplicates(scan.sections)
+    if not dup_ids and not dup_sections:
+        return True, (
+            f"✅ 見出しの重複なし（ID {len(scan.ids)} 件・節番号 {len(scan.sections)} 件）"
+        )
+
+    lines = ["❌ 07_テスト設計書の見出しに重複があります"]
+    for key, linenos in sorted(dup_ids.items()):
+        lines.append(f"  ID {key}: {', '.join(str(n) for n in linenos)} 行目")
+    for key, linenos in sorted(dup_sections.items()):
+        lines.append(f"  節番号 §{key}: {', '.join(str(n) for n in linenos)} 行目")
+    lines.append(
+        "  後から足した側（または引用の少ない側）を空いている ID・番号へ付け替え、"
+        "その ID を引用している箇所も直してください。"
+    )
+    return False, "\n".join(lines)
+
+
 def resolve_class(doc_name: str, actual: Dict[str, int]):
     """表記 (``Common/Charting/FooTests`` 等) を実測クラスの完全修飾名へ解決する。
 
@@ -342,6 +550,14 @@ def main(argv=None) -> int:
     parser.add_argument("--ui-csproj", required=True, help="Path to ICCardManager.UITests.csproj")
     args = parser.parse_args(argv)
 
+    # 見出しの重複検査（Issue #2391）は dotnet も §1.1a の表も使わないので、最初に結果を出す。
+    # 後ろの検査が早期に終了しても（§1.1a の不一致・一覧の取得失敗）、見出しの結果は必ずログに残る。
+    # 終了コードは、早期に終了したときはその値（いずれも非 0）、最後まで進んだときは全検査の合成。
+    heading_ok, heading_report = check_heading_uniqueness(parse_headings(args.doc))
+    heading_stream = sys.stdout if heading_ok else sys.stderr
+    print(heading_report, file=heading_stream)
+    heading_stream.flush()
+
     expected = parse_doc_counts(args.doc)
     if expected is None:
         print(
@@ -399,6 +615,7 @@ def main(argv=None) -> int:
     )
 
     # 片方が失敗しても両方のレポートを出す（1 回の CI 実行で両方を直せるようにする）。
+    # 見出しの検査のレポートは冒頭で出し済み。
     # stdout はブロックバッファリングされるため、flush しないと CI ログで 2 つのレポートの
     # 前後が入れ替わって読みにくくなる。
     for passed, text in ((ok, report), (class_ok, class_report)):
@@ -406,7 +623,7 @@ def main(argv=None) -> int:
         print(text, file=stream)
         stream.flush()
 
-    return 0 if ok and class_ok else 1
+    return 0 if ok and class_ok and heading_ok else 1
 
 
 if __name__ == "__main__":

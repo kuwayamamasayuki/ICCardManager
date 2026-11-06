@@ -170,7 +170,7 @@ THEN
   - **カウントダウンは View ではなく ViewModel に置く**。`DispatcherTimer` を View へ直書きすると、境界（期限の 1 つ手前では閉じない／期限で閉じる）を単体テストで固定できない。`ITimerFactory` を注入すれば `TestTimer.SimulateTicks` で実時間を待たずに検証できる
   - **連続していない許容範囲を `NumericRangeValidationRule`（Min〜Max）で近似しない**。「0 または 5〜300」を Min=0 / Max=300 と書くと 1〜4 が**入力時だけ妥当に見えて保存時に弾かれる**。判定と文言は 1 か所（`Common/CompanionCountTimeoutRange`）へ置き、入力時のルールと保存時の `ValidationService` の両方が委譲する。回帰は「全入力で両者の判定が一致すること」を走査して固定する — 個別の境界テストだけでは、2 つの実装が別々にずれても互いの期待値どおりで緑になる
   - **回帰は「閉じる側」と「閉じない側」を対で置く**。前者だけだと「常に即閉じる」実装でも緑になる。検出力は変異で実測する（購読を外すと「入力を始めたら取り消す」1 件だけが赤）
-- **摘要は変えない**。CSV は利用者列を生の氏名のまま出し、専用列「同行者数」（末尾）で往復させる。列を持たない旧形式は 0 として取り込む
+- **摘要は変えない**。CSV は利用者列を生の氏名のまま出し、専用列「同行者数」（末尾）で往復させる。列を持たない旧形式は「同行者数の指定なし」（`null`）として読み、既存の行を更新するときは既存の値を残し、新しい行は 0 にする（0 として読むと、旧形式の取り込み直しで既存の同行者数が 0 に上書きされる。`LedgerCsvRowParserTests` / `CsvImportServiceLedgerTransactionTests` が固定）
 - 統合は**統合対象の最大値**を引き継ぎ（統合元はスナップショットに含める）、分割は両行へ引き継ぐ。`OperationLogExcelExportService.GetFieldNameMap` に `CompanionCount` を載せる（#1726）
 - **統合が再計算する値は、統合の `UPDATE` と取り消しの復元 `UPDATE` の両方の SET 句に載っているかを対で確かめる**（Issue #1942）。`companion_count` は両方から抜けており、`LedgerMergeService` が Max で決めた値は in-memory の統合先にしか残らなかった（画面と `operation_log` の `AfterData` は「外2名」、DB は 0）。**統合側だけを直すと欠陥は消えず取り消し側へ移る** — 統合が 0 のままだった間は復元も 0 で一致するため、取り消し側の欠落は統合を直すまで観測できない。#1726「SET 句はその経路で本当に編集する列に限る」の裏返しであり、列の集合は静的検査（`LedgerMergeUpdateColumnConventionTests`）でリテラルの期待値として固定する（個別の挙動テストは列の増減に追随できない）
 

@@ -1,5 +1,7 @@
 """tools/check-test-count-sync.py の単体テスト。"""
+import contextlib
 import importlib.util
+import io
 import pathlib
 import sys
 import tempfile
@@ -22,6 +24,8 @@ resolve_class = _mod.resolve_class
 compare_class_counts = _mod.compare_class_counts
 ClassRowScan = _mod.ClassRowScan
 MIN_CLASS_ROWS = _mod.MIN_CLASS_ROWS
+parse_headings = _mod.parse_headings
+check_heading_uniqueness = _mod.check_heading_uniqueness
 
 
 def _write_md(content: str) -> str:
@@ -350,6 +354,314 @@ class CompareClassCountsTests(unittest.TestCase):
         actual["ICCardManager.Tests.Common.Sample0Tests"] = 6
         _, report = compare_class_counts(scan, actual)
         self.assertIn("行を足していない場合は検出できない", report)
+
+
+# Issue #2391: 見出しの ID・節番号の重複検査。検査ロジック自体を既知の見本で固定する
+# （実際の 07 に重複が無くなっても、空振りの検出が働き続けるように）。
+SAMPLE_HEADINGS_UNIQUE = textwrap.dedent("""\
+    ## 1. テスト概要
+
+    ### 1.6 テストコードの読み方
+
+    #### 1.6.1 テストファイルの構造
+
+    ## 2. 単体テスト
+
+    ### 2.20a 帳票出力前プリフライトチェック
+
+    #### UT-024a: DisplayFormatters
+
+    ### 2.20a2 出力済みチェックリスト
+
+    #### UT-024h: 設定ファイルのアトミック保存
+
+    ### 2.31〜2.33 — 欠番
+
+    ### UT-083
+
+    #### UT-058c: レイアウト
+
+    #### UT-058c-FlaUI: 描画
+
+    ## 2a. 単体テスト（続き）
+    """)
+
+
+class HeadingUniquenessTests(unittest.TestCase):
+    def _check(self, content):
+        path = _write_md(content)
+        try:
+            return check_heading_uniqueness(parse_headings(path))
+        finally:
+            pathlib.Path(path).unlink()
+
+    def test_unique_headings_pass(self):
+        ok, report = self._check(SAMPLE_HEADINGS_UNIQUE)
+        self.assertTrue(ok, report)
+
+    def test_prefix_of_another_number_or_id_is_not_a_duplicate(self):
+        # 1.6 と 1.6.1、2.20a と 2.20a2、UT-058c と UT-058c-FlaUI はそれぞれ別の見出し
+        path = _write_md(SAMPLE_HEADINGS_UNIQUE)
+        try:
+            scan = parse_headings(path)
+        finally:
+            pathlib.Path(path).unlink()
+        self.assertIn("1.6", [s for _, s in scan.sections])
+        self.assertIn("1.6.1", [s for _, s in scan.sections])
+        self.assertIn("2.20a2", [s for _, s in scan.sections])
+        self.assertIn("UT-058c-FlaUI", [i for _, i in scan.ids])
+        self.assertIn("2a", [s for _, s in scan.sections])
+
+    def test_duplicate_id_fails_with_both_line_numbers(self):
+        content = SAMPLE_HEADINGS_UNIQUE + "\n#### UT-024a: 設定ファイル（別の節）\n"
+        ok, report = self._check(content)
+        self.assertFalse(ok)
+        self.assertIn("ID UT-024a", report)
+        self.assertIn("ID UT-024a: 11, 27 行目", report)
+
+    def test_duplicate_id_at_different_heading_levels_fails(self):
+        content = SAMPLE_HEADINGS_UNIQUE + "\n#### UT-083: 同じ ID の別の節\n"
+        ok, report = self._check(content)
+        self.assertFalse(ok)
+        self.assertIn("ID UT-083", report)
+
+    def test_duplicate_section_number_fails(self):
+        content = SAMPLE_HEADINGS_UNIQUE + "\n### 2.20a バージョン混在の検出\n"
+        ok, report = self._check(content)
+        self.assertFalse(ok)
+        self.assertIn("節番号 §2.20a", report)
+
+    def test_headings_inside_code_block_are_ignored(self):
+        content = SAMPLE_HEADINGS_UNIQUE + "\n```\n#### UT-024a: コードの中\n### 2.20a\n```\n"
+        ok, report = self._check(content)
+        self.assertTrue(ok, report)
+
+    def test_document_without_headings_fails_instead_of_passing_silently(self):
+        ok, report = self._check("本文だけで見出しが無い\n")
+        self.assertFalse(ok)
+        self.assertIn("読み取れませんでした", report)
+
+    def _assert_duplicate(self, extra, expected):
+        ok, report = self._check(SAMPLE_HEADINGS_UNIQUE + extra)
+        self.assertFalse(ok, f"重複を見逃した: {extra!r}")
+        self.assertIn(expected, report)
+
+    def test_section_number_followed_by_fullwidth_paren_or_colon_is_a_duplicate(self):
+        # 番号の直後に空白を置かずに全角括弧・全角コロンが続いても、同じ番号として数える
+        self._assert_duplicate("\n### 2.20a（バージョン混在）\n", "節番号 §2.20a:")
+        self._assert_duplicate("\n### 2.20a：バージョン混在\n", "節番号 §2.20a:")
+
+    def test_id_followed_by_fullwidth_paren_or_colon_is_a_duplicate(self):
+        self._assert_duplicate("\n#### UT-024a：別の節\n", "ID UT-024a:")
+        self._assert_duplicate("\n#### UT-024a（別の節）\n", "ID UT-024a:")
+
+    def test_heading_indented_up_to_three_spaces_is_counted(self):
+        self._assert_duplicate("\n   #### UT-024a: インデント付き\n", "ID UT-024a:")
+
+    def test_line_indented_four_spaces_is_not_a_heading(self):
+        # 4 文字のインデントは CommonMark ではコードブロック
+        ok, report = self._check(SAMPLE_HEADINGS_UNIQUE + "\n    #### UT-024a: コード\n")
+        self.assertTrue(ok, report)
+
+    def test_shorter_or_different_fence_inside_a_block_does_not_close_it(self):
+        content = SAMPLE_HEADINGS_UNIQUE + textwrap.dedent("""\
+
+            ````markdown
+            ```
+            #### UT-024a: 4 連のブロックの中
+            ~~~
+            ### 2.20a
+            ````
+            """)
+        ok, report = self._check(content)
+        self.assertTrue(ok, report)
+
+    def test_heading_after_a_closed_fence_is_counted(self):
+        self._assert_duplicate("\n~~~\n### 2.1 コード\n~~~\n#### UT-024a: ブロックの後\n", "ID UT-024a:")
+
+    def test_headings_inside_html_comment_are_ignored(self):
+        content = SAMPLE_HEADINGS_UNIQUE + "\n<!--\n#### UT-024a: コメントの中\n### 2.20a\n-->\n"
+        ok, report = self._check(content)
+        self.assertTrue(ok, report)
+
+    def test_heading_after_html_comment_is_counted(self):
+        self._assert_duplicate("\n<!-- 1 行のコメント -->\n<!--\n複数行\n-->\n### 2.20a 後\n", "節番号 §2.20a:")
+
+    def test_section_range_occupies_every_number_in_it(self):
+        # 2.31〜2.33 の欠番の注記がある所へ 2.32 を足したら重複
+        self._assert_duplicate("\n### 2.32 新しい節\n", "節番号 §2.32:")
+        path = _write_md(SAMPLE_HEADINGS_UNIQUE)
+        try:
+            numbers = [s for _, s in parse_headings(path).sections]
+        finally:
+            pathlib.Path(path).unlink()
+        self.assertEqual(["2.31", "2.32", "2.33"], [n for n in numbers if n.startswith("2.3")])
+
+    def test_number_just_outside_a_range_is_not_a_duplicate(self):
+        ok, report = self._check(SAMPLE_HEADINGS_UNIQUE + "\n### 2.34 次の節\n")
+        self.assertTrue(ok, report)
+
+    def test_branch_number_is_part_of_the_section_number(self):
+        # 5.11a-2 は 5.11a と別の番号（範囲表記ではない）
+        ok, report = self._check(SAMPLE_HEADINGS_UNIQUE + "\n#### 5.11a 節\n\n#### 5.11a-2 枝番\n")
+        self.assertTrue(ok, report)
+
+    # --- レビュー 2 回目: 本文中のインラインコードで開かない・数字で始まるだけの見出しを数えない ---
+
+    def test_inline_html_comment_in_a_paragraph_does_not_hide_later_headings(self):
+        # 07 の本文に実在する形（「`<!-- 検索条件 -->` コメント以降」）と、文中の閉じない <!--
+        self._assert_duplicate(
+            "\n「`<!-- 検索条件 -->` コメント以降最初の行」\n\n#### UT-024a: 後の見出し\n", "ID UT-024a:"
+        )
+        self._assert_duplicate(
+            "\n本文の途中に <!-- と書いた行\n\n#### UT-024a: 後の見出し\n", "ID UT-024a:"
+        )
+
+    def test_inline_triple_backtick_code_in_a_paragraph_is_not_a_fence(self):
+        # info 文字列にバッククォートを含む行はフェンスの開始ではない（CommonMark）
+        self._assert_duplicate("\n```foo``` は例\n\n#### UT-024a: 後の見出し\n", "ID UT-024a:")
+
+    def test_indented_html_comment_block_is_still_ignored(self):
+        content = SAMPLE_HEADINGS_UNIQUE + "\n   <!-- 複数行のコメント\n#### UT-024a: 中\n-->\n"
+        ok, report = self._check(content)
+        self.assertTrue(ok, report)
+
+    def test_numbered_list_like_headings_are_not_section_numbers(self):
+        content = SAMPLE_HEADINGS_UNIQUE + textwrap.dedent("""\
+
+            #### 1. 準備
+
+            #### 1. 準備
+
+            #### 30秒ルール
+
+            #### 30秒ルール
+            """)
+        ok, report = self._check(content)
+        self.assertTrue(ok, report)
+
+    def test_ascii_hyphen_is_not_a_range(self):
+        # 「2.2 - 2.1系の補足」は範囲ではないので 2.1 を占有しない
+        ok, report = self._check(SAMPLE_HEADINGS_UNIQUE + "\n### 2.1 本来の節\n\n### 2.2 - 2.1系の補足\n")
+        self.assertTrue(ok, report)
+
+    def test_section_number_followed_by_ascii_colon_is_a_duplicate(self):
+        self._assert_duplicate("\n### 2.20a: バージョン混在\n", "節番号 §2.20a:")
+
+    def test_id_range_occupies_every_id_in_it(self):
+        content = SAMPLE_HEADINGS_UNIQUE + "\n#### UT-067〜UT-071: まとめた節\n"
+        path = _write_md(content)
+        try:
+            ids = [i for _, i in parse_headings(path).ids]
+        finally:
+            pathlib.Path(path).unlink()
+        self.assertEqual(["UT-067", "UT-068", "UT-069", "UT-070", "UT-071"], [i for i in ids if i.startswith(("UT-06", "UT-07"))])
+        self._assert_duplicate("\n#### UT-067〜UT-071: まとめた節\n\n#### UT-069: 後から\n", "ID UT-069:")
+
+    # --- レビュー 3 回目 ---
+
+    def test_id_followed_by_ascii_symbol_is_not_counted_as_that_id(self):
+        # UT-024a.1 / UT-024a_b を UT-024a と数えると、別の見出しを重複と誤検出する
+        ok, report = self._check(SAMPLE_HEADINGS_UNIQUE + "\n#### UT-024a.1 補足\n\n#### UT-024a_b 補足\n")
+        self.assertTrue(ok, report)
+
+    def test_unclosed_fence_at_end_of_file_fails(self):
+        ok, report = self._check(SAMPLE_HEADINGS_UNIQUE + "\n```\n閉じ忘れ\n#### UT-024a: 数えられない\n")
+        self.assertFalse(ok)
+        self.assertIn("コードブロック", report)
+        self.assertIn("閉じていません", report)
+
+    def test_unclosed_html_comment_at_end_of_file_fails(self):
+        ok, report = self._check(SAMPLE_HEADINGS_UNIQUE + "\n<!--\n閉じ忘れ\n#### UT-024a: 数えられない\n")
+        self.assertFalse(ok)
+        self.assertIn("HTML コメント", report)
+        self.assertIn("閉じていません", report)
+
+
+class MainReportsHeadingCheckOnEarlyExitTests(unittest.TestCase):
+    """レビュー 2 回目: 後ろの検査が早期に終了しても、見出しの検査結果は必ず出す。"""
+
+    DUPLICATED = "\n## 2. 単体テスト\n\n#### UT-001: a\n\n#### UT-001: b\n"
+
+    def _run_main(self, doc):
+        path = _write_md(doc)
+        err = io.StringIO()
+        out = io.StringIO()
+        try:
+            with contextlib.redirect_stderr(err), contextlib.redirect_stdout(out):
+                code = _mod.main(["--doc", path, "--unit-csproj", "u.csproj", "--ui-csproj", "ui.csproj"])
+        finally:
+            pathlib.Path(path).unlink()
+        return code, out.getvalue() + err.getvalue()
+
+    def test_sum_mismatch_still_reports_heading_duplicates(self):
+        doc = SAMPLE_DOC_OK.replace("**3,292件**", "**9,999件**") + self.DUPLICATED
+        code, output = self._run_main(doc)
+        self.assertEqual(1, code)
+        self.assertIn("§1.1a の記載値の合計", output)
+        self.assertIn("ID UT-001:", output)
+
+    def test_listing_failure_still_reports_heading_duplicates(self):
+        original = _mod.list_test_names
+
+        def fail(*_args, **_kwargs):
+            raise RuntimeError("dotnet test --list-tests に失敗")
+
+        _mod.list_test_names = fail
+        try:
+            code, output = self._run_main(SAMPLE_DOC_OK + self.DUPLICATED)
+        finally:
+            _mod.list_test_names = original
+        self.assertEqual(2, code)
+        self.assertIn("ID UT-001:", output)
+
+
+class MainExitCodeCombinesHeadingCheckTests(unittest.TestCase):
+    """レビュー 3 回目: 最後まで進んだとき、終了コードは見出しの検査結果も合成する。"""
+
+    CLASS_COUNT = MIN_CLASS_ROWS
+
+    def _doc(self, headings):
+        rows = "\n".join(
+            f"| `Services/Sample{i}Tests` | 1 | 見本 |" for i in range(self.CLASS_COUNT)
+        )
+        return textwrap.dedent(f"""\
+            ### 1.1a テスト規模（現状）
+
+            | 種別 | テスト数 | 備考 |
+            |------|---------|------|
+            | 単体テスト（ICCardManager.Tests） | {self.CLASS_COUNT}件 | 見本 |
+            | UIテスト（ICCardManager.UITests） | 1件 | 見本 |
+            | **合計** | **{self.CLASS_COUNT + 1}件** | 見本 |
+
+            """) + "## 2. 単体テスト\n\n| クラス | 件数 | 観点 |\n|---|---|---|\n" + rows + "\n" + headings
+
+    def _run_main(self, doc):
+        def fake_list(_csproj, prefix):
+            if prefix == "Tests":
+                return [f"    ICCardManager.Tests.Services.Sample{i}Tests.Test" for i in range(self.CLASS_COUNT)]
+            return ["    ICCardManager.UITests.Sample.Test"]
+
+        original = _mod.list_test_names
+        _mod.list_test_names = fake_list
+        path = _write_md(doc)
+        try:
+            with contextlib.redirect_stderr(io.StringIO()) as err, contextlib.redirect_stdout(io.StringIO()) as out:
+                code = _mod.main(["--doc", path, "--unit-csproj", "u.csproj", "--ui-csproj", "ui.csproj"])
+        finally:
+            _mod.list_test_names = original
+            pathlib.Path(path).unlink()
+        return code, out.getvalue() + err.getvalue()
+
+    def test_all_checks_pass_returns_zero(self):
+        code, output = self._run_main(self._doc("\n### 2.1 節\n\n#### UT-001: a\n"))
+        self.assertEqual(0, code, output)
+
+    def test_counts_match_but_headings_duplicate_returns_one(self):
+        code, output = self._run_main(self._doc("\n### 2.1 節\n\n#### UT-001: a\n\n#### UT-001: b\n"))
+        self.assertEqual(1, code, output)
+        self.assertIn("ID UT-001:", output)
+        self.assertIn("✅", output)  # 件数の検査は通っている（失敗の原因が見出しだけであることの前提）
 
 
 if __name__ == "__main__":
