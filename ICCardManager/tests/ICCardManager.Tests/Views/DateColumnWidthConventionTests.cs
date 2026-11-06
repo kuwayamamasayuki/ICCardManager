@@ -114,7 +114,7 @@ public class DateColumnWidthConventionTests
     [InlineData("MainWindow.xaml", "日付")]
     [InlineData("OperationLogDialog.xaml", "日時")]
     [InlineData("VirtualCardDialog.xaml", "日付")]
-    public void Issueで見つかった日付の列が内容に合わせて広がり_従来の幅を下限に残すこと(string file, string header)
+    public void 対象の日付の列が内容に合わせて広がり_従来の幅を下限に残すこと(string file, string header)
     {
         // 対の表明: 固定幅の不在だけだと、Width を丸ごと消して既定（見出しに合わせる幅）へ戻した実装でも緑になる
         var column = FindDataGridColumn(file, header);

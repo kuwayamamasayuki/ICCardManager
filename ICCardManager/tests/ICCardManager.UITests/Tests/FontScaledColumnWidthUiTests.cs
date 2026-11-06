@@ -49,7 +49,9 @@ namespace ICCardManager.UITests.Tests
             using var fixture = AppFixture.LaunchWithSeed(
                 conn =>
                 {
-                    ScreenshotSeedData.Seed(conn);
+                    // 今日の日付の行を確実に持つ投入（Seed の通常カードの行は 1/2/5/8/12 日を今日で頭打ちにしたものだけで、
+                    // 13 日以降は今日の行が無い）。SeedWithIncompleteBusStops は通常カードにも今日のバス利用の行を加える
+                    _ = ScreenshotSeedData.SeedWithIncompleteBusStops(conn);
                     using var cmd = conn.CreateCommand();
                     cmd.CommandText = "INSERT OR REPLACE INTO settings (key, value) VALUES ('font_size', 'xlarge')";
                     cmd.ExecuteNonQuery();
@@ -62,7 +64,7 @@ namespace ICCardManager.UITests.Tests
             var grid = page.FindByNameWithRetry(TestConstants.HistoryLedgerGrid);
             grid.Should().NotBeNull("前提: 履歴一覧（DataGrid）が見つかること");
 
-            // 投入データには今日の日付の行がある（ScreenshotSeedData のバス停名未入力の行）。表示は和暦
+            // 今日の日付の行は SeedWithIncompleteBusStops が加えたバス停名未入力の行。表示は和暦
             var today = ToWarekiDisplay(DateTime.Today);
             CellClipping.AssertTextIsNotClipped(grid!, today, "日付", Wait);
 
@@ -72,7 +74,8 @@ namespace ICCardManager.UITests.Tests
             }
 
             // Issue #2076 の懸念: 固定幅の合計が広がると、ウィンドウを最小幅にしたとき右端の「操作」列が横スクロールの外へ押し出される。
-            // 日付の列を Auto にしたので、最小幅でも「操作」列の見出しが一覧の表示領域の内側にあることを確かめる
+            // 日付の列を Auto にした（和暦は特大でも MinWidth 100 に収まるので広がらない）。最小幅でも「操作」列の見出しが
+            // 一覧の表示領域の内側にあることを確かめる
             // （CellClipping の「セルが一覧の表示領域の内側にある」と同じ形）
             var handle = NativeWindows.HandleOf(page.Window);
             var original = page.Window.BoundingRectangle;
@@ -87,7 +90,7 @@ namespace ICCardManager.UITests.Tests
             operationHeader.Should().NotBeNull($"前提: 「{OperationColumnHeader}」列の見出しがあること");
             operationHeader!.BoundingRectangle.Right.Should().BeLessOrEqualTo(grid.BoundingRectangle.Right,
                 $"ウィンドウが最小幅でも、右端の「{OperationColumnHeader}」列は一覧の表示領域の内側にあること" +
-                "（日付の列が広がった分で横スクロールの外へ押し出さない。Issue #2076 / #2404）");
+                "（日付の列を Auto にしても横スクロールの外へ押し出さない。Issue #2076 / #2404）");
         }
 
         /// <summary>
