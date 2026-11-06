@@ -22,6 +22,8 @@ resolve_class = _mod.resolve_class
 compare_class_counts = _mod.compare_class_counts
 ClassRowScan = _mod.ClassRowScan
 MIN_CLASS_ROWS = _mod.MIN_CLASS_ROWS
+parse_headings = _mod.parse_headings
+check_heading_uniqueness = _mod.check_heading_uniqueness
 
 
 def _write_md(content: str) -> str:
@@ -350,6 +352,92 @@ class CompareClassCountsTests(unittest.TestCase):
         actual["ICCardManager.Tests.Common.Sample0Tests"] = 6
         _, report = compare_class_counts(scan, actual)
         self.assertIn("行を足していない場合は検出できない", report)
+
+
+# Issue #2391: 見出しの ID・節番号の重複検査。検査ロジック自体を既知の見本で固定する
+# （実際の 07 に重複が無くなっても、空振りの検出が働き続けるように）。
+SAMPLE_HEADINGS_UNIQUE = textwrap.dedent("""\
+    ## 1. テスト概要
+
+    ### 1.6 テストコードの読み方
+
+    #### 1.6.1 テストファイルの構造
+
+    ## 2. 単体テスト
+
+    ### 2.20a 帳票出力前プリフライトチェック
+
+    #### UT-024a: DisplayFormatters
+
+    ### 2.20a2 出力済みチェックリスト
+
+    #### UT-024h: 設定ファイルのアトミック保存
+
+    ### 2.31〜2.33 — 欠番
+
+    ### UT-083
+
+    #### UT-058c: レイアウト
+
+    #### UT-058c-FlaUI: 描画
+
+    ## 2a. 単体テスト（続き）
+    """)
+
+
+class HeadingUniquenessTests(unittest.TestCase):
+    def _check(self, content):
+        path = _write_md(content)
+        try:
+            return check_heading_uniqueness(parse_headings(path))
+        finally:
+            pathlib.Path(path).unlink()
+
+    def test_unique_headings_pass(self):
+        ok, report = self._check(SAMPLE_HEADINGS_UNIQUE)
+        self.assertTrue(ok, report)
+
+    def test_prefix_of_another_number_or_id_is_not_a_duplicate(self):
+        # 1.6 と 1.6.1、2.20a と 2.20a2、UT-058c と UT-058c-FlaUI はそれぞれ別の見出し
+        path = _write_md(SAMPLE_HEADINGS_UNIQUE)
+        try:
+            scan = parse_headings(path)
+        finally:
+            pathlib.Path(path).unlink()
+        self.assertIn("1.6", [s for _, s in scan.sections])
+        self.assertIn("1.6.1", [s for _, s in scan.sections])
+        self.assertIn("2.20a2", [s for _, s in scan.sections])
+        self.assertIn("UT-058c-FlaUI", [i for _, i in scan.ids])
+        self.assertIn("2a", [s for _, s in scan.sections])
+
+    def test_duplicate_id_fails_with_both_line_numbers(self):
+        content = SAMPLE_HEADINGS_UNIQUE + "\n#### UT-024a: 設定ファイル（別の節）\n"
+        ok, report = self._check(content)
+        self.assertFalse(ok)
+        self.assertIn("ID UT-024a", report)
+        self.assertIn("ID UT-024a: 11, 27 行目", report)
+
+    def test_duplicate_id_at_different_heading_levels_fails(self):
+        content = SAMPLE_HEADINGS_UNIQUE + "\n#### UT-083: 同じ ID の別の節\n"
+        ok, report = self._check(content)
+        self.assertFalse(ok)
+        self.assertIn("ID UT-083", report)
+
+    def test_duplicate_section_number_fails(self):
+        content = SAMPLE_HEADINGS_UNIQUE + "\n### 2.20a バージョン混在の検出\n"
+        ok, report = self._check(content)
+        self.assertFalse(ok)
+        self.assertIn("節番号 §2.20a", report)
+
+    def test_headings_inside_code_block_are_ignored(self):
+        content = SAMPLE_HEADINGS_UNIQUE + "\n```\n#### UT-024a: コードの中\n### 2.20a\n```\n"
+        ok, report = self._check(content)
+        self.assertTrue(ok, report)
+
+    def test_document_without_headings_fails_instead_of_passing_silently(self):
+        ok, report = self._check("本文だけで見出しが無い\n")
+        self.assertFalse(ok)
+        self.assertIn("読み取れませんでした", report)
 
 
 if __name__ == "__main__":

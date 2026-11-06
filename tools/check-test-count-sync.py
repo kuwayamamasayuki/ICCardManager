@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
 """07_テスト設計書.md の件数表を dotnet test --list-tests と比較するスクリプト。
 
-検証対象は 2 つ:
+検証対象は 3 つ:
 
 - §1.1a の総件数表（単体 / UI / 合計） … Issue #1546
 - §2 のクラス別件数表（``| `Namespace/ClassTests` | 件数 | 観点 |``） … Issue #1889
+- 見出しの ID（``#### UT-049: …``）と節番号（``### 2.47a …``）が文書全体で重複しないこと … Issue #2391
+  （件数の照合ではないが、同じ 07 を同じ CI で検査するのでここに置く。dotnet を使わない）
 
 **§2 検証の適用範囲**: 「表に載っている行」が実測と一致することだけを検証する。
 テストクラスを新設したのに §2 へ行を足さなかった場合は検出できない（本書に行を持つ
@@ -66,6 +68,15 @@ MALFORMED_CLASS_ROW_RE = re.compile(
 
 # §2 のクラス別件数行の下限。表が丸ごと壊れた／消えたときに「差分なし」で緑にならないための歯止め。
 MIN_CLASS_ROWS = 10
+
+# Issue #2391: 見出しの先頭に置く ID（``#### UT-049: …`` / ``### UT-083`` / ``#### UT-058c-FlaUI: …``）。
+# 接頭辞は英大文字 2〜4 文字（UT / IT / ST / PT / SEC / UAT）。ID は ``:`` ・空白・全角括弧の手前で切れる。
+HEADING_ID_RE = re.compile(r"^#{2,6}\s+([A-Z]{2,4}-[A-Za-z0-9-]+)")
+# 見出しの先頭に置く節番号（``## 2.`` / ``### 2.47a`` / ``#### 1.6.1`` / ``### 2.31〜2.33``）。
+# 空白までを 1 つの番号として扱う（``2.20a`` と ``2.20a2``、``1.6`` と ``1.6.1`` を別の番号として数える）。
+HEADING_SECTION_RE = re.compile(r"^#{2,6}\s+(\d[^\s]*)")
+# コードブロックの開始・終了。ブロック内の ``#`` 行は見出しではない。
+FENCE_RE = re.compile(r"^\s*(```|~~~)")
 
 
 class ClassRowScan(NamedTuple):
@@ -231,6 +242,83 @@ def parse_class_counts(md_path: str) -> ClassRowScan:
     return ClassRowScan(rows, delta_rows, malformed_rows, section_found)
 
 
+class HeadingScan(NamedTuple):
+    """見出しの ID と節番号の走査結果（Issue #2391）。
+
+    Attributes:
+        ids: [(行番号, ID), ...]
+        sections: [(行番号, 節番号), ...]
+    """
+
+    ids: List[tuple]
+    sections: List[tuple]
+
+
+def parse_headings(md_path: str) -> HeadingScan:
+    """文書全体の見出しから ID と節番号を集める（コードブロックの中は見出しとして数えない）。"""
+    ids = []
+    sections = []
+    in_fence = False
+    with open(md_path, encoding="utf-8-sig") as f:
+        for lineno, line in enumerate(f, start=1):
+            if FENCE_RE.match(line):
+                in_fence = not in_fence
+                continue
+            if in_fence:
+                continue
+            m = HEADING_ID_RE.match(line)
+            if m:
+                ids.append((lineno, m.group(1)))
+                continue
+            m = HEADING_SECTION_RE.match(line)
+            if m:
+                sections.append((lineno, m.group(1).rstrip(".")))
+    return HeadingScan(ids, sections)
+
+
+def find_duplicates(entries) -> Dict[str, List[int]]:
+    """[(行番号, 表記), ...] から 2 回以上現れる表記と、その行番号の一覧を返す。"""
+    lines_by_key: Dict[str, List[int]] = {}
+    for lineno, key in entries:
+        lines_by_key.setdefault(key, []).append(lineno)
+    return {key: lines for key, lines in lines_by_key.items() if len(lines) > 1}
+
+
+def check_heading_uniqueness(scan: HeadingScan) -> Tuple[bool, str]:
+    """見出しの ID・節番号が重複していないことを確かめる（Issue #2391）。
+
+    同じ ID が 2 つの節にあると、Issue・PR・コードのコメントから ID を引いたときにどちらを
+    指すか決まらない。意図した重複は無いので、許可の書き方は設けない（直すときは、引用の少ない
+    側・後から足した側を空いている ID へ付け替え、旧 ID を本文に注記する）。
+    見出しを 1 つも読めなかったときは、正規表現が文書の書式から外れた空振りとして fail する。
+    """
+    if not scan.ids or not scan.sections:
+        return False, (
+            "⚠ 見出しの ID・節番号を読み取れませんでした（"
+            f"ID {len(scan.ids)} 件・節番号 {len(scan.sections)} 件）\n"
+            "  見出しの書式が変わったか、本スクリプトの HEADING_ID_RE / HEADING_SECTION_RE が"
+            "文書に合っていません。正規表現を文書の書式に合わせて更新してください。"
+        )
+
+    dup_ids = find_duplicates(scan.ids)
+    dup_sections = find_duplicates(scan.sections)
+    if not dup_ids and not dup_sections:
+        return True, (
+            f"✅ 見出しの重複なし（ID {len(scan.ids)} 件・節番号 {len(scan.sections)} 件）"
+        )
+
+    lines = ["❌ 07_テスト設計書の見出しに重複があります"]
+    for key, linenos in sorted(dup_ids.items()):
+        lines.append(f"  ID {key}: {', '.join(str(n) for n in linenos)} 行目")
+    for key, linenos in sorted(dup_sections.items()):
+        lines.append(f"  節番号 §{key}: {', '.join(str(n) for n in linenos)} 行目")
+    lines.append(
+        "  後から足した側（または引用の少ない側）を空いている ID・番号へ付け替え、"
+        "その ID を引用している箇所も直してください。"
+    )
+    return False, "\n".join(lines)
+
+
 def resolve_class(doc_name: str, actual: Dict[str, int]):
     """表記 (``Common/Charting/FooTests`` 等) を実測クラスの完全修飾名へ解決する。
 
@@ -366,6 +454,7 @@ def main(argv=None) -> int:
         return 1
 
     class_scan = parse_class_counts(args.doc)
+    heading_ok, heading_report = check_heading_uniqueness(parse_headings(args.doc))
 
     try:
         unit_names = list_test_names(args.unit_csproj, "Tests")
@@ -401,12 +490,12 @@ def main(argv=None) -> int:
     # 片方が失敗しても両方のレポートを出す（1 回の CI 実行で両方を直せるようにする）。
     # stdout はブロックバッファリングされるため、flush しないと CI ログで 2 つのレポートの
     # 前後が入れ替わって読みにくくなる。
-    for passed, text in ((ok, report), (class_ok, class_report)):
+    for passed, text in ((ok, report), (class_ok, class_report), (heading_ok, heading_report)):
         stream = sys.stdout if passed else sys.stderr
         print(text, file=stream)
         stream.flush()
 
-    return 0 if ok and class_ok else 1
+    return 0 if ok and class_ok and heading_ok else 1
 
 
 if __name__ == "__main__":
