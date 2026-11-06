@@ -32,8 +32,8 @@ namespace ICCardManager.Tests.Services;
 /// </para>
 /// <para>
 /// 検証は <c>OperationLogger</c> のモックではなく、<b>実際に挿入された</b>
-/// <see cref="OperationLog"/> の中身で行う（`.claude/rules/development-conventions.md`
-/// 「ログが残ったかの検証はログ記録クラスのモックではできない」Issue #1760）。
+/// <see cref="OperationLog"/> の中身で行う（`.claude/rules/db-write-conventions.md`「DB設計原則」の
+/// 「「ログが残ったか」の検証は、ログ記録クラスのモックではできない」Issue #1760）。
 /// あわせて <c>AfterData</c> が統合<b>後</b>であることを対で表明する
 /// （before だけを直して after まで巻き戻す退行を検出する）。
 /// </para>

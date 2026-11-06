@@ -49,7 +49,7 @@ public class LedgerCsvRowParserTests
     #region 同行者数列（Issue #1906）
 
     [Fact]
-    public void TryParseRow_同行者数列が無い旧形式_0として読むこと()
+    public void TryParseRow_同行者数列が無い旧形式_指定なしとして読むこと()
     {
         var errors = new List<CsvImportError>();
         var row = LedgerCsvRowParser.TryParseRow(ValidNineColumnFields(), 2, "line", false, 9, ExistingCards(), null, errors);

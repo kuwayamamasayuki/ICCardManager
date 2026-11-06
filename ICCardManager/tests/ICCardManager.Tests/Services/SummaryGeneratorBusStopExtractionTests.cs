@@ -56,8 +56,7 @@ public class SummaryGeneratorBusStopExtractionTests : IDisposable
         // 非貪欲マッチでは最初の「）」で切れて断片「天神」が取れていた。
         var summary = SummaryGenerator.FormatBusSummary("天神）西口～博多");
 
-        SummaryGenerator.TryExtractBusStops(summary, out var busStops).Should().BeFalse();
-        busStops.Should().BeEmpty();
+        SummaryGenerator.ExtractBusStopBlocks(summary).Should().BeEmpty();
     }
 
     [Fact]
@@ -69,8 +68,7 @@ public class SummaryGeneratorBusStopExtractionTests : IDisposable
                       "、" +
                       SummaryGenerator.FormatBusSummary("赤坂～大濠公園");
 
-        SummaryGenerator.TryExtractBusStops(summary, out var busStops).Should().BeFalse();
-        busStops.Should().BeEmpty();
+        SummaryGenerator.ExtractBusStopBlocks(summary).Should().BeEmpty();
     }
 
     [Fact]
@@ -78,8 +76,7 @@ public class SummaryGeneratorBusStopExtractionTests : IDisposable
     {
         var summary = SummaryGenerator.FormatBusSummary("天神（西口～博多");
 
-        SummaryGenerator.TryExtractBusStops(summary, out var busStops).Should().BeFalse();
-        busStops.Should().BeEmpty();
+        SummaryGenerator.ExtractBusStopBlocks(summary).Should().BeEmpty();
     }
 
     [Fact]
@@ -89,8 +86,7 @@ public class SummaryGeneratorBusStopExtractionTests : IDisposable
         // 説明できない以上、ブロックの区切り位置を信用できない。
         var summary = "鉄道（A駅）B駅）、" + SummaryGenerator.FormatBusSummary("天神～博多");
 
-        SummaryGenerator.TryExtractBusStops(summary, out var busStops).Should().BeFalse();
-        busStops.Should().BeEmpty();
+        SummaryGenerator.ExtractBusStopBlocks(summary).Should().BeEmpty();
     }
 
     [Fact]
@@ -103,14 +99,11 @@ public class SummaryGeneratorBusStopExtractionTests : IDisposable
         //（従来の正規表現は本文を 1 文字以上要求していたため一致しなかった）。
         var emptyBlock = SummaryGenerator.FormatBusSummary(string.Empty);
 
-        SummaryGenerator.TryExtractBusStops(emptyBlock, out var busStops).Should().BeFalse();
-        busStops.Should().BeEmpty();
+        SummaryGenerator.ExtractBusStopBlocks(emptyBlock).Should().BeEmpty();
 
         // 対の表明: 空ブロックが混ざっても、残りのブロックは従来どおり取り出せる
-        SummaryGenerator.TryExtractBusStops(
-            emptyBlock + "、" + SummaryGenerator.FormatBusSummary("天神～博多"),
-            out var mixed).Should().BeTrue();
-        mixed.Should().Be("天神～博多");
+        SummaryGenerator.ExtractBusStopBlocks(
+            emptyBlock + "、" + SummaryGenerator.FormatBusSummary("天神～博多")).Should().Equal("天神～博多");
     }
 
     #endregion
@@ -122,8 +115,7 @@ public class SummaryGeneratorBusStopExtractionTests : IDisposable
     {
         var summary = SummaryGenerator.FormatBusSummary("天神～博多");
 
-        SummaryGenerator.TryExtractBusStops(summary, out var busStops).Should().BeTrue();
-        busStops.Should().Be("天神～博多");
+        SummaryGenerator.ExtractBusStopBlocks(summary).Should().Equal("天神～博多");
     }
 
     [Fact]
@@ -132,8 +124,7 @@ public class SummaryGeneratorBusStopExtractionTests : IDisposable
         // Issue #1905: 「往路の名前（復路の名前）」の併記。
         var summary = SummaryGenerator.FormatBusSummary("天神日銀前（天神中央郵便局前）～下原中央 往復");
 
-        SummaryGenerator.TryExtractBusStops(summary, out var busStops).Should().BeTrue();
-        busStops.Should().Be("天神日銀前（天神中央郵便局前）～下原中央 往復");
+        SummaryGenerator.ExtractBusStopBlocks(summary).Should().Equal("天神日銀前（天神中央郵便局前）～下原中央 往復");
     }
 
     [Fact]
@@ -143,8 +134,7 @@ public class SummaryGeneratorBusStopExtractionTests : IDisposable
         // 無言で働かなくなっていた形。深さを数える方式では扱える。
         var summary = SummaryGenerator.FormatBusSummary("天神（西口（北））～博多");
 
-        SummaryGenerator.TryExtractBusStops(summary, out var busStops).Should().BeTrue();
-        busStops.Should().Be("天神（西口（北））～博多");
+        SummaryGenerator.ExtractBusStopBlocks(summary).Should().Equal("天神（西口（北））～博多");
     }
 
     [Fact]
@@ -153,20 +143,18 @@ public class SummaryGeneratorBusStopExtractionTests : IDisposable
         // 摘要は直接編集できる。括弧の対応が取れている限り、末尾の補足は抽出を妨げない。
         var summary = SummaryGenerator.FormatBusSummary("天神～博多") + " 出張";
 
-        SummaryGenerator.TryExtractBusStops(summary, out var busStops).Should().BeTrue();
-        busStops.Should().Be("天神～博多");
+        SummaryGenerator.ExtractBusStopBlocks(summary).Should().Equal("天神～博多");
     }
 
     [Fact]
-    public void ExtractBusStopBlocks_複数のバスブロックを出現順に結合すること()
+    public void ExtractBusStopBlocks_複数のバスブロックを出現順に返すこと()
     {
         // Issue #1904 の時系列摘要。
         var summary = SummaryGenerator.FormatBusSummary("天神三丁目～舞鶴一丁目") +
                       "、鉄道（赤坂～天神）、" +
                       SummaryGenerator.FormatBusSummary("那の川～渡辺通一丁目");
 
-        SummaryGenerator.TryExtractBusStops(summary, out var busStops).Should().BeTrue();
-        busStops.Should().Be("天神三丁目～舞鶴一丁目、那の川～渡辺通一丁目");
+        SummaryGenerator.ExtractBusStopBlocks(summary).Should().Equal("天神三丁目～舞鶴一丁目", "那の川～渡辺通一丁目");
     }
 
     [Fact]
@@ -177,8 +165,7 @@ public class SummaryGeneratorBusStopExtractionTests : IDisposable
         ConfigureBusText("バス（市営）", "★");
         var summary = SummaryGenerator.FormatBusSummary("天神～博多");
 
-        SummaryGenerator.TryExtractBusStops(summary, out var busStops).Should().BeTrue();
-        busStops.Should().Be("天神～博多");
+        SummaryGenerator.ExtractBusStopBlocks(summary).Should().Equal("天神～博多");
     }
 
     [Fact]
@@ -187,18 +174,15 @@ public class SummaryGeneratorBusStopExtractionTests : IDisposable
         ConfigureBusText("バス(市営)", "★");
         var summary = SummaryGenerator.FormatBusSummary("天神～博多");
 
-        SummaryGenerator.TryExtractBusStops(summary, out var busStops).Should().BeTrue();
-        busStops.Should().Be("天神～博多");
+        SummaryGenerator.ExtractBusStopBlocks(summary).Should().Equal("天神～博多");
     }
 
     [Fact]
     public void ExtractBusStopBlocks_バスブロックが無ければ空を返すこと()
     {
-        SummaryGenerator.TryExtractBusStops("鉄道（A駅～B駅）", out var busStops).Should().BeFalse();
-        busStops.Should().BeEmpty();
+        SummaryGenerator.ExtractBusStopBlocks("鉄道（A駅～B駅）").Should().BeEmpty();
 
-        SummaryGenerator.TryExtractBusStops(null, out var nullSummaryStops).Should().BeFalse();
-        nullSummaryStops.Should().BeEmpty();
+        SummaryGenerator.ExtractBusStopBlocks(null).Should().BeEmpty();
     }
 
     #endregion

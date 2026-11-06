@@ -35,8 +35,9 @@ namespace ICCardManager.Services
     /// </description></item>
     /// </list>
     /// <para>
-    /// 将来 <c>WarningService</c> から再利用できるよう、本サービスは UI に依存せず
-    /// しきい値を引数で受け取る形にしてある。
+    /// 本サービスは UI に依存しない。残額警告のしきい値は引数ではなく設定
+    /// （<c>AppSettings.WarningBalance</c>）から読み、判定は <c>BalanceWarningPolicy.IsLowBalance</c> へ委譲する
+    /// （<c>WarningService</c> 等と同じ判定。Issue #1998）。
     /// </para>
     /// </remarks>
     public class AdminDashboardService : IAdminDashboardService

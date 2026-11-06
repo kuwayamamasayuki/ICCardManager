@@ -394,7 +394,7 @@ namespace ICCardManager.Services
         /// <remarks>
         /// <para>処理フロー：</para>
         /// <list type="number">
-        /// <item><description>カードごとの排他ロックを取得（タイムアウト: 5秒）</description></item>
+        /// <item><description>カードごとの排他ロックを取得（タイムアウトは <c>AppOptions.CardLockTimeoutSeconds</c>。既定 5 秒）</description></item>
         /// <item><description>カードと職員の存在確認</description></item>
         /// <item><description>貸出中でないことを確認</description></item>
         /// <item><description>トランザクション内で貸出レコード作成とカード状態更新</description></item>
@@ -1195,15 +1195,15 @@ namespace ICCardManager.Services
         /// （利用の行の名義は貸出レコードの貸出者。Issue #2323）
         /// </param>
         /// <param name="cardIdm">返却対象のICカードIDm（16桁の16進数文字列）</param>
-        /// <param name="usageDetails">ICカードから読み取った利用履歴詳細（貸出時刻以降のみ使用）</param>
+        /// <param name="usageDetails">ICカードから読み取った利用履歴詳細（記録の下限以降のみ使用。下限の決め方は <see cref="ResolveUsageLowerBound"/> を参照。Issue #2237）</param>
         /// <param name="skipDuplicateCheck">重複チェックをスキップするかどうか（既定値: false）</param>
         /// <returns>返却結果。成功時は残額や警告情報も含まれます</returns>
         /// <remarks>
         /// <para>処理フロー：</para>
         /// <list type="number">
-        /// <item><description>カードごとの排他ロックを取得（タイムアウト: 5秒）</description></item>
+        /// <item><description>カードごとの排他ロックを取得（タイムアウトは <c>AppOptions.CardLockTimeoutSeconds</c>。既定 5 秒）</description></item>
         /// <item><description>カード・職員・貸出レコードの存在確認</description></item>
-        /// <item><description>貸出時刻以降の利用履歴のみを抽出</description></item>
+        /// <item><description>記録の下限（<see cref="ResolveUsageLowerBound"/>。導入行の日付、導入行が無いカードは貸出日の 7 日前。明細を持たない利用行があれば、その最新日の翌日まで押し上げる。ただし貸出日を超えない）以降の利用履歴を抽出（Issue #2237）</description></item>
         /// <item><description>日付ごとに利用履歴レコードを作成（<see cref="SummaryGenerator"/> で摘要生成。名義は貸出レコードの貸出者）</description></item>
         /// <item><description>貸出レコードを削除（履歴に「（貸出中）」を残さない）</description></item>
         /// <item><description>カードの貸出状態を解除（ここまでが単一トランザクション。コミットで返却が確定）</description></item>
