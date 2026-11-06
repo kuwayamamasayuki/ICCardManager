@@ -276,7 +276,7 @@ namespace ICCardManager.Services
             var before = await _staffRepository.GetByIdmAsync(staff.StaffIdm, includeDeleted: true).ConfigureAwait(false);
             if (before == null || before.IsDeleted)
             {
-                // 読み取りが null（削除済み）なら書き込みも行わない（#1760）。UPDATE も同じ条件（is_deleted = 0）で 0 行になる
+                // 読み取りが null（削除済み）なら書き込みも行わない（#1760）。UPDATE も同じ条件（is_deleted が 0 または NULL（未削除））で 0 行になる
                 return false;
             }
 

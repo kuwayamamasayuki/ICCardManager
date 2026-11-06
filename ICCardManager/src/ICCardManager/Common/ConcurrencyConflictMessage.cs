@@ -8,7 +8,7 @@ namespace ICCardManager.Common
     /// <remarks>
     /// <para>
     /// Issue #1759: リポジトリの <c>UpdateAsync</c> / <c>RestoreAsync</c> / <c>DeleteAsync</c> が
-    /// <c>false</c> を返すのは、WHERE 句（<c>is_deleted = 0</c> または <c>is_deleted = 1</c>）に
+    /// <c>false</c> を返すのは、WHERE 句（未削除＝<c>is_deleted</c> が 0 または NULL、または削除済み＝<c>is_deleted = 1</c>）に
     /// <b>1 行も一致しなかった場合だけ</b>である（Issue #1753 で影響行数による競合検出を導入した）。
     /// つまり「原因不明の失敗」ではなく<b>競合の検出</b>であり、原因を具体的に案内できる。
     /// </para>
