@@ -8,6 +8,7 @@ using System.Threading.Tasks;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using ICCardManager.Common;
+using ICCardManager.Common.Exceptions;
 using ICCardManager.Data;
 using ICCardManager.Data.Repositories;
 using ICCardManager.Dtos;
@@ -1078,6 +1079,8 @@ public partial class HistoryPanelViewModel : ObservableObject
         var ledgerWithDetails = await _ledgerRepository.GetByIdAsync(ledger.Id);
         if (ledgerWithDetails == null)
         {
+            // Issue #2378: 他 PC が削除・統合した行。黙って戻ると「押しても何も起きない」ので、行編集と同じく案内する
+            await NotifyRowGoneOnOpenAsync(ledger, "利用履歴詳細");
             return;
         }
 
@@ -1086,11 +1089,22 @@ public partial class HistoryPanelViewModel : ObservableObject
         // 詳細ダイアログを表示
         var cardName = HistoryCard?.DisplayName;
         Views.Dialogs.LedgerDetailDialog? capturedDialog = null;
-        await _navigationService.ShowDialogAsync<Views.Dialogs.LedgerDetailDialog>(async d =>
+        try
         {
-            await d.InitializeAsync(detailDto.Id, cardName: cardName);
-            capturedDialog = d;
-        });
+            await _navigationService.ShowDialogAsync<Views.Dialogs.LedgerDetailDialog>(async d =>
+            {
+                await d.InitializeAsync(detailDto.Id, cardName: cardName);
+                capturedDialog = d;
+            });
+        }
+        catch (LedgerRowGoneException)
+        {
+            // Issue #2378: 上の確認の後、ダイアログ自身の読み取りまでの間に消えた。ダイアログは初期化で中断し
+            // 表示されていない（空の画面は出さない）。開く前に無かった場合と同じく読み直してから案内する。
+            // 捕まえるのは「行が無い」だけ（それ以外の失敗を競合として案内しない）
+            await NotifyRowGoneOnOpenAsync(ledger, "利用履歴詳細");
+            return;
+        }
 
         // Issue #548: 保存が行われた場合は履歴を再読み込み
         if (capturedDialog?.WasSaved == true)

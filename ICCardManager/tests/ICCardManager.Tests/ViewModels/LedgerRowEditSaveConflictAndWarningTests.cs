@@ -253,6 +253,45 @@ public class LedgerRowEditSaveConflictAndWarningTests : IDisposable
         _viewModel.StatusMessage.Should().BeEmpty();
     }
 
+    /// <summary>
+    /// Issue #2378: 開く時点の読み取りで行が無いとき、空のダイアログを黙って出さず、開けなかったことを案内し、
+    /// 保存・削除を止めて、閉じたら一覧を読み直させること。
+    /// 履歴パネルは開く前にも確かめるが、その確認とダイアログの読み取りの間に他 PC が消した場合の受け皿。
+    /// </summary>
+    [Fact]
+    public async Task 開く時点で行が無いなら_開けなかったことを案内し_保存も削除もできず_閉じたら一覧の再読込を求めること()
+    {
+        var ledger = CreateLedger();
+        _ledgerRepoMock.Setup(r => r.GetByIdAsync(ledger.Id)).ReturnsAsync((Ledger?)null);
+
+        await _viewModel.InitializeForEditAsync(ToDto(ledger), previousBalance: 2510);
+
+        _viewModel.StatusMessage.Should().Be(
+            ConcurrencyConflictMessage.ForOpenReloadOnClose(ExpectedTarget, "履歴一覧"));
+        _viewModel.NeedsHistoryReload.Should().BeTrue("閉じたら呼び出し元が履歴一覧を読み直す");
+        _viewModel.CanSave.Should().BeFalse("無い行は保存できない");
+        _viewModel.CanDelete.Should().BeFalse("無い行は削除できない");
+        _viewModel.CanClose(() => throw new InvalidOperationException("破棄の確認を出してはいけない"))
+            .Should().BeTrue("何も入力していない");
+    }
+
+    [Fact]
+    public void 開けなかったときの文言は_更新や入力の保存に触れないこと()
+    {
+        var reloadOnClose = ConcurrencyConflictMessage.ForOpenReloadOnClose("履歴「R8.1.10 鉄道」", "履歴一覧");
+        var reloaded = ConcurrencyConflictMessage.ForOpen("履歴「R8.1.10 鉄道」", "履歴一覧");
+
+        foreach (var message in new[] { reloadOnClose, reloaded })
+        {
+            message.Should().StartWith("履歴「R8.1.10 鉄道」を開けませんでした。").And.Contain("削除された可能性があります");
+            message.Should().NotContain("更新できませんでした", "職員は開こうとしただけで、更新はしていない");
+            message.Should().NotContain("入力した内容", "まだ何も入力していない");
+        }
+
+        reloadOnClose.Should().Contain("閉じると履歴一覧を再読み込みします").And.NotContain("再読み込みしましたので");
+        reloaded.Should().Contain("履歴一覧を再読み込みしましたので");
+    }
+
     [Fact]
     public void 閉じたあと再読込する経路の文言は_再読込済みと述べないこと()
     {

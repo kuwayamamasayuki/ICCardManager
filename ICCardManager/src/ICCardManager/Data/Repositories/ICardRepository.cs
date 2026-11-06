@@ -181,6 +181,11 @@ namespace ICCardManager.Data.Repositories
         /// <summary>
         /// ICカードを論理削除
         /// </summary>
+        /// <remarks>
+        /// WHERE 句は <c>card_idm = @cardIdm</c> かつ未削除・貸出中でない・払戻済でない（<c>is_deleted</c> / <c>is_lent</c> / <c>is_refunded</c> がそれぞれ 0 または NULL。Issue #2381）。
+        /// 払戻済のカードは削除できない（Issue #530）ことを、画面の値ではなく WHERE で保証する（Issue #2370）。
+        /// 払戻済で拒否されたときは <see cref="CardOperationResult.Conflict"/> を返す。
+        /// </remarks>
         /// <param name="cardIdm">ICカードIDm</param>
         /// <returns>操作結果（成功/未存在/貸出中/競合）</returns>
         Task<CardOperationResult> DeleteAsync(string cardIdm);

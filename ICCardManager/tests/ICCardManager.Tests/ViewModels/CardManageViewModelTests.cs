@@ -3047,6 +3047,164 @@ public class CardManageViewModelTests : IDisposable
     }
 
     /// <summary>
+    /// Issue #2370: 一覧では未払戻でも、削除の直前に読み直したカードが払戻済なら、
+    /// 書き込まずに「払い戻された」ことを名指しして案内すること
+    /// </summary>
+    /// <remarks>
+    /// CanDelete は一覧を読んだ時点の <c>IsRefunded</c> しか見ない。その後に他のパソコンや別の操作で
+    /// 払い戻されると「削除」が押せてしまう。削除を止める正は論理削除の WHERE（<c>is_refunded = 0</c>）だが、
+    /// 読み直した時点で分かるなら書き込む前に案内する（文言のため）。
+    /// </remarks>
+    [Fact]
+    public async Task DeleteAsync_WhenCardRefundedAfterListLoaded_ShouldNotDeleteAndNameRefund()
+    {
+        // Arrange
+        const string idm = "0102030405060708";
+        _viewModel.SelectedCard = new CardDto
+        {
+            CardIdm = idm,
+            CardType = "はやかけん",
+            CardNumber = "H-001",
+            IsLent = false,
+            IsRefunded = false
+        };
+
+        // 一覧を読んだ後に他 PC が払い戻した
+        _cardRepositoryMock.Setup(r => r.GetByIdmAsync(idm, false))
+            .ReturnsAsync(new IcCard { CardIdm = idm, CardType = "はやかけん", CardNumber = "H-001", IsRefunded = true });
+        _cardRepositoryMock.Setup(r => r.DeleteAsync(idm, It.IsAny<SQLiteTransaction>()))
+            .ReturnsAsync(ICCardManager.Data.Repositories.CardOperationResult.Success);
+        _cardRepositoryMock.Setup(r => r.GetAllAsync()).ReturnsAsync(new List<IcCard>());
+
+        // Act
+        await _viewModel.DeleteAsync();
+
+        // Assert
+        _cardRepositoryMock.Verify(r => r.DeleteAsync(idm, It.IsAny<SQLiteTransaction>()), Times.Never,
+            "払戻済のカードは削除できない（Issue #530）");
+        _operationLogRepositoryMock.Verify(r => r.InsertAsync(It.IsAny<OperationLog>(), It.IsAny<SQLiteTransaction>()), Times.Never);
+        // 「再読み込みしました」と案内するので、キャッシュを捨てて一覧を読み直してから案内する
+        _cardRepositoryMock.Verify(r => r.InvalidateCache(), Times.Once);
+        _cardRepositoryMock.Verify(r => r.GetAllAsync(), Times.Once);
+        _dialogServiceMock.Verify(d => d.ShowError(
+            ICCardManager.Common.ConcurrencyConflictMessage.ForDeleteRefunded("交通系ICカード「はやかけん H-001」", "カード一覧"),
+            "削除できません"), Times.Once);
+    }
+
+    /// <summary>
+    /// Issue #2370: 読み直した後・書き込みの前に払い戻された（論理削除の WHERE が拒否した）ときも、
+    /// 払い戻されたことを名指しして案内すること
+    /// </summary>
+    [Fact]
+    public async Task DeleteAsync_WhenRefundedBetweenReadAndWrite_ShouldNameRefund()
+    {
+        // Arrange
+        const string idm = "0102030405060708";
+        _viewModel.SelectedCard = new CardDto
+        {
+            CardIdm = idm,
+            CardType = "はやかけん",
+            CardNumber = "H-001",
+            IsLent = false
+        };
+
+        // 1 回目（削除前の読み直し）は未払戻、2 回目（拒否された後の読み直し）は払戻済
+        _cardRepositoryMock.SetupSequence(r => r.GetByIdmAsync(idm, false))
+            .ReturnsAsync(new IcCard { CardIdm = idm, CardType = "はやかけん", CardNumber = "H-001", IsRefunded = false })
+            .ReturnsAsync(new IcCard { CardIdm = idm, CardType = "はやかけん", CardNumber = "H-001", IsRefunded = true });
+        _cardRepositoryMock.Setup(r => r.DeleteAsync(idm, It.IsAny<SQLiteTransaction>()))
+            .ReturnsAsync(ICCardManager.Data.Repositories.CardOperationResult.Conflict);
+        _cardRepositoryMock.Setup(r => r.GetAllAsync()).ReturnsAsync(new List<IcCard>());
+
+        // Act
+        await _viewModel.DeleteAsync();
+
+        // Assert
+        _operationLogRepositoryMock.Verify(r => r.InsertAsync(It.IsAny<OperationLog>(), It.IsAny<SQLiteTransaction>()), Times.Never);
+        _dialogServiceMock.Verify(d => d.ShowError(
+            ICCardManager.Common.ConcurrencyConflictMessage.ForDeleteRefunded("交通系ICカード「はやかけん H-001」", "カード一覧"),
+            "削除できません"), Times.Once);
+        _dialogServiceMock.Verify(d => d.ShowError(It.IsAny<string>(), It.IsAny<string>()), Times.Once,
+            "案内は 1 回だけ（汎用の競合文言を重ねて出さない）");
+        _cardRepositoryMock.Verify(r => r.GetAllAsync(), Times.Once);
+    }
+
+    /// <summary>
+    /// Issue #2370: 拒否された原因が払い戻しでない（未払戻のまま）ときは、従来どおり汎用の競合文言で案内すること
+    /// </summary>
+    /// <remarks>
+    /// 上の名指しを無条件にすると、払い戻されていないカードに「払い戻された可能性」と出る。対で置く。
+    /// </remarks>
+    [Fact]
+    public async Task DeleteAsync_WhenConflictWithoutRefund_ShouldShowGenericConflictMessage()
+    {
+        // Arrange
+        const string idm = "0102030405060708";
+        _viewModel.SelectedCard = new CardDto
+        {
+            CardIdm = idm,
+            CardType = "はやかけん",
+            CardNumber = "H-001",
+            IsLent = false
+        };
+
+        _cardRepositoryMock.Setup(r => r.GetByIdmAsync(idm, false))
+            .ReturnsAsync(new IcCard { CardIdm = idm, CardType = "はやかけん", CardNumber = "H-001", IsRefunded = false });
+        _cardRepositoryMock.Setup(r => r.DeleteAsync(idm, It.IsAny<SQLiteTransaction>()))
+            .ReturnsAsync(ICCardManager.Data.Repositories.CardOperationResult.Conflict);
+        _cardRepositoryMock.Setup(r => r.GetAllAsync()).ReturnsAsync(new List<IcCard>());
+
+        // Act
+        await _viewModel.DeleteAsync();
+
+        // Assert
+        _dialogServiceMock.Verify(d => d.ShowError(
+            It.Is<string>(m => m.Contains("他のPCでカードの状態が変更されたため削除できませんでした")),
+            "削除できません"), Times.Once);
+        _dialogServiceMock.Verify(d => d.ShowError(
+            It.Is<string>(m => m.Contains("払い戻された")), It.IsAny<string>()), Times.Never);
+    }
+
+    /// <summary>
+    /// Issue #2370: 競合の後の読み直し（原因が払い戻しかの判定）が例外を投げても、例外を外へ出さず
+    /// 汎用の競合文言で案内し、一覧を再読込すること
+    /// </summary>
+    /// <remarks>
+    /// 読み直しは文言を選ぶためだけのもので、削除が拒否されたことは確定している。例外が抜けると
+    /// 案内も一覧の再読込も行われない。
+    /// </remarks>
+    [Fact]
+    public async Task DeleteAsync_WhenRereadAfterConflictThrows_ShouldFallBackToGenericConflictMessage()
+    {
+        // Arrange
+        const string idm = "0102030405060708";
+        _viewModel.SelectedCard = new CardDto
+        {
+            CardIdm = idm,
+            CardType = "はやかけん",
+            CardNumber = "H-001",
+            IsLent = false
+        };
+
+        _cardRepositoryMock.SetupSequence(r => r.GetByIdmAsync(idm, false))
+            .ReturnsAsync(new IcCard { CardIdm = idm, CardType = "はやかけん", CardNumber = "H-001", IsRefunded = false })
+            .ThrowsAsync(new InvalidOperationException("読み直しに失敗"));
+        _cardRepositoryMock.Setup(r => r.DeleteAsync(idm, It.IsAny<SQLiteTransaction>()))
+            .ReturnsAsync(ICCardManager.Data.Repositories.CardOperationResult.Conflict);
+        _cardRepositoryMock.Setup(r => r.GetAllAsync()).ReturnsAsync(new List<IcCard>());
+
+        // Act
+        var act = async () => await _viewModel.DeleteAsync();
+
+        // Assert
+        await act.Should().NotThrowAsync();
+        _dialogServiceMock.Verify(d => d.ShowError(
+            It.Is<string>(m => m.Contains("他のPCでカードの状態が変更されたため削除できませんでした")),
+            "削除できません"), Times.Once);
+        _cardRepositoryMock.Verify(r => r.GetAllAsync(), Times.Once);
+    }
+
+    /// <summary>
     /// Issue #1760: 削除が成功した経路では必ず操作ログが 1 行残ること（正常系の回帰固定）
     /// </summary>
     [Fact]

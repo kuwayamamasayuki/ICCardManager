@@ -52,6 +52,34 @@ namespace ICCardManager.Common
                $"この画面を閉じると{listName}を再読み込みしますので、一覧で状態を確認してからやり直してください。";
 
         /// <summary>
+        /// 編集画面を開こうとした行が見つからなかったときの文言を組み立てる（Issue #2378）。
+        /// </summary>
+        /// <param name="target">対象の説明（一覧に表示されていた値で名指しする）。「何が」に相当する</param>
+        /// <param name="listName">再読込した一覧の名称</param>
+        /// <remarks>
+        /// 「なぜ」は <see cref="ForUpdate"/> と同じ（対象行が削除された）。職員は開こうとしただけで更新は
+        /// していないので「何が」を「開けませんでした」と述べる（#1760「操作名が違えばファクトリを分ける」）。
+        /// 呼び出し側は<b>一覧を再読込してから</b>本文言を表示すること（#1753）。
+        /// </remarks>
+        public static string ForOpen(string target, string listName)
+            => $"{target}を開けませんでした。{DeletedReason}" +
+               $"{listName}を再読み込みしましたので、一覧で状態を確認してからやり直してください。";
+
+        /// <summary>
+        /// 編集ダイアログを開いた時点の読み取りで行が見つからなかったときの文言を組み立てる（Issue #2378）。
+        /// </summary>
+        /// <param name="target">対象の説明（ダイアログを開いた時点の値で名指しする）。「何が」に相当する</param>
+        /// <param name="listName">ダイアログを閉じたあとに再読込する一覧の名称</param>
+        /// <remarks>
+        /// <see cref="ForOpen"/> とは「どうすれば」だけが違う。ダイアログは背後の一覧を読み直す手段を持たず、
+        /// 閉じたあとに呼び出し元が読み直す（<see cref="ForUpdateReloadOnClose"/> と同じ形）。
+        /// まだ何も入力していないので、入力の扱いには触れない。
+        /// </remarks>
+        public static string ForOpenReloadOnClose(string target, string listName)
+            => $"{target}を開けませんでした。{DeletedReason}" +
+               $"この画面を閉じると{listName}を再読み込みしますので、一覧で状態を確認してからやり直してください。";
+
+        /// <summary>
         /// 払い戻し対象の行が見つからなかったときの文言を組み立てる。
         /// </summary>
         /// <param name="target">対象の説明。「何が」に相当する</param>
@@ -92,6 +120,23 @@ namespace ICCardManager.Common
         /// <param name="listName">再読込した一覧の名称</param>
         public static string ForDelete(string target, string listName)
             => Build(target, "削除", "他のパソコンや別の操作で先に削除された可能性があります。", listName);
+
+        /// <summary>
+        /// 削除しようとした交通系ICカードが払戻済になっていたときの文言を組み立てる（Issue #2370）。
+        /// </summary>
+        /// <param name="target">対象の説明。「何が」に相当する</param>
+        /// <param name="listName">再読込した一覧の名称</param>
+        /// <remarks>
+        /// 払戻済のカードは削除できない（Issue #530）。一覧を読んだ後に他のパソコンや別の操作で払い戻されると、
+        /// 画面の CanDelete（一覧の値）では止まらず、削除の直前の読み直しか論理削除の WHERE（<c>is_refunded = 0</c>）で拒否される。
+        /// 「どうすれば」は<see cref="ForDelete"/> の「やり直してください」ではなく状態の確認にする。
+        /// 払戻済のカードは何度やり直しても削除できないため。公開のファクトリは「やり直してください」で
+        /// 終わることを全件で検証している（<c>ConcurrencyConflictMessageTests</c>）ので、形の違う本ファクトリは internal に置く。
+        /// </remarks>
+        internal static string ForDeleteRefunded(string target, string listName)
+            => $"{target}を削除できませんでした。他のパソコンや別の操作で払い戻された可能性があります。" +
+               "払戻済の交通系ICカードは削除できません。" +
+               $"{listName}を再読み込みしましたので、一覧で払戻済になっていることを確認してください。";
 
         /// <summary>
         /// CSV インポートで、更新しようとした行が無くなっていたときの文言（Issue #2262）。

@@ -567,6 +567,61 @@ public class CardRepositoryTests : IDisposable
         result.Should().Be(ICCardManager.Data.Repositories.CardOperationResult.Conflict);
     }
 
+    /// <summary>
+    /// Issue #2370: 払戻済のカードは論理削除の WHERE で拒否され、削除済みにならないこと
+    /// </summary>
+    /// <remarks>
+    /// 画面の CanDelete は一覧を読んだ時点の値しか見ないため、その後に他のパソコンや別の操作で
+    /// 払い戻されたカードでも削除の書き込みまで到達し得る。払戻済カードは削除できない（Issue #530）を
+    /// 保証するのは WHERE の <c>is_refunded = 0</c> だけである。
+    /// </remarks>
+    [Fact]
+    public async Task DeleteAsync_RefundedCard_ReturnsConflictAndKeepsCardUndeleted()
+    {
+        // Arrange
+        var card = CreateTestCard("0102030405060708", "はやかけん", "H001");
+        await _repository.InsertAsync(card);
+        (await _repository.SetRefundedAsync(card.CardIdm, new DateTime(2025, 6, 15, 10, 0, 0), null))
+            .Should().Be(ICCardManager.Data.Repositories.CardOperationResult.Success);
+
+        // Act
+        var result = await _repository.DeleteAsync(card.CardIdm);
+
+        // Assert
+        result.Should().Be(ICCardManager.Data.Repositories.CardOperationResult.Conflict);
+        var stored = await _repository.GetByIdmAsync(card.CardIdm, includeDeleted: true);
+        stored!.IsDeleted.Should().BeFalse("払戻済のカードは削除できない（Issue #530）");
+        stored.DeletedAt.Should().BeNull();
+        stored.IsRefunded.Should().BeTrue();
+    }
+
+    /// <summary>
+    /// Issue #2370: トランザクションを渡す経路（CardManagementService.DeleteAsync が使う）でも
+    /// 払戻済のカードは削除されないこと
+    /// </summary>
+    [Fact]
+    public async Task DeleteAsync_WithTransaction_RefundedCard_ReturnsConflictAndKeepsCardUndeleted()
+    {
+        // Arrange
+        var card = CreateTestCard("0102030405060708", "はやかけん", "H001");
+        await _repository.InsertAsync(card);
+        (await _repository.SetRefundedAsync(card.CardIdm, new DateTime(2025, 6, 15, 10, 0, 0), null))
+            .Should().Be(ICCardManager.Data.Repositories.CardOperationResult.Success);
+
+        // Act
+        ICCardManager.Data.Repositories.CardOperationResult result;
+        using (var scope = await _dbContext.BeginTransactionAsync())
+        {
+            result = await _repository.DeleteAsync(card.CardIdm, scope.Transaction);
+            scope.Commit();
+        }
+
+        // Assert
+        result.Should().Be(ICCardManager.Data.Repositories.CardOperationResult.Conflict);
+        var stored = await _repository.GetByIdmAsync(card.CardIdm, includeDeleted: true);
+        stored!.IsDeleted.Should().BeFalse();
+    }
+
     #endregion
 
     #region SetRefundedAsync テスト（Issue #530 / #2151）

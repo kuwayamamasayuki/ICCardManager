@@ -137,6 +137,32 @@ public class ConcurrencyConflictMessageTests
     }
 
     /// <summary>
+    /// Issue #2370: 払戻済のため削除できなかったときは、払い戻されたことを理由に挙げ、
+    /// 「やり直す」ではなく状態の確認を促すこと（払戻済のカードは何度やり直しても削除できない）。
+    /// </summary>
+    /// <remarks>
+    /// 「やり直してください」で終わらないため、公開のファクトリを走査する品質検証
+    /// （<see cref="AllFactories_SatisfyErrorMessageQualityCriteria"/>）の対象外（internal）。3 要素はここで個別に固定する。
+    /// </remarks>
+    [Fact]
+    public void ForDeleteRefunded_NamesTheRefundAsCauseAndAsksToCheckTheList()
+    {
+        var message = ConcurrencyConflictMessage.ForDeleteRefunded(Target, ListName);
+
+        message.Should().StartWith($"{Target}を削除できませんでした。");
+        message.Should().Contain("払い戻された可能性があります");
+        message.Should().Contain("払戻済の交通系ICカードは削除できません");
+        message.Should().Contain($"{ListName}を再読み込みしました");
+        message.Should().EndWith("確認してください。");
+        message.Should().NotContain("やり直してください", "払戻済のカードはやり直しても削除できない");
+        message.Should().NotContain("先に削除された");
+        foreach (var vague in VaguePhrases)
+        {
+            message.Should().NotContain(vague);
+        }
+    }
+
+    /// <summary>
     /// Issue #2263: 登録の競合は「先に登録された」ことを理由に挙げ、ほかの操作の理由を含まないこと。
     /// </summary>
     [Fact]
