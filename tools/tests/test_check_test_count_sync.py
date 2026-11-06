@@ -439,6 +439,71 @@ class HeadingUniquenessTests(unittest.TestCase):
         self.assertFalse(ok)
         self.assertIn("読み取れませんでした", report)
 
+    def _assert_duplicate(self, extra, expected):
+        ok, report = self._check(SAMPLE_HEADINGS_UNIQUE + extra)
+        self.assertFalse(ok, f"重複を見逃した: {extra!r}")
+        self.assertIn(expected, report)
+
+    def test_section_number_followed_by_fullwidth_paren_or_colon_is_a_duplicate(self):
+        # 番号の直後に空白を置かずに全角括弧・全角コロンが続いても、同じ番号として数える
+        self._assert_duplicate("\n### 2.20a（バージョン混在）\n", "節番号 §2.20a:")
+        self._assert_duplicate("\n### 2.20a：バージョン混在\n", "節番号 §2.20a:")
+
+    def test_id_followed_by_fullwidth_paren_or_colon_is_a_duplicate(self):
+        self._assert_duplicate("\n#### UT-024a：別の節\n", "ID UT-024a:")
+        self._assert_duplicate("\n#### UT-024a（別の節）\n", "ID UT-024a:")
+
+    def test_heading_indented_up_to_three_spaces_is_counted(self):
+        self._assert_duplicate("\n   #### UT-024a: インデント付き\n", "ID UT-024a:")
+
+    def test_line_indented_four_spaces_is_not_a_heading(self):
+        # 4 文字のインデントは CommonMark ではコードブロック
+        ok, report = self._check(SAMPLE_HEADINGS_UNIQUE + "\n    #### UT-024a: コード\n")
+        self.assertTrue(ok, report)
+
+    def test_shorter_or_different_fence_inside_a_block_does_not_close_it(self):
+        content = SAMPLE_HEADINGS_UNIQUE + textwrap.dedent("""\
+
+            ````markdown
+            ```
+            #### UT-024a: 4 連のブロックの中
+            ~~~
+            ### 2.20a
+            ````
+            """)
+        ok, report = self._check(content)
+        self.assertTrue(ok, report)
+
+    def test_heading_after_a_closed_fence_is_counted(self):
+        self._assert_duplicate("\n~~~\n### 2.1 コード\n~~~\n#### UT-024a: ブロックの後\n", "ID UT-024a:")
+
+    def test_headings_inside_html_comment_are_ignored(self):
+        content = SAMPLE_HEADINGS_UNIQUE + "\n<!--\n#### UT-024a: コメントの中\n### 2.20a\n-->\n"
+        ok, report = self._check(content)
+        self.assertTrue(ok, report)
+
+    def test_heading_after_html_comment_is_counted(self):
+        self._assert_duplicate("\n<!-- 1 行のコメント -->\n<!--\n複数行\n-->\n### 2.20a 後\n", "節番号 §2.20a:")
+
+    def test_section_range_occupies_every_number_in_it(self):
+        # 2.31〜2.33 の欠番の注記がある所へ 2.32 を足したら重複
+        self._assert_duplicate("\n### 2.32 新しい節\n", "節番号 §2.32:")
+        path = _write_md(SAMPLE_HEADINGS_UNIQUE)
+        try:
+            numbers = [s for _, s in parse_headings(path).sections]
+        finally:
+            pathlib.Path(path).unlink()
+        self.assertEqual(["2.31", "2.32", "2.33"], [n for n in numbers if n.startswith("2.3")])
+
+    def test_number_just_outside_a_range_is_not_a_duplicate(self):
+        ok, report = self._check(SAMPLE_HEADINGS_UNIQUE + "\n### 2.34 次の節\n")
+        self.assertTrue(ok, report)
+
+    def test_branch_number_is_part_of_the_section_number(self):
+        # 5.11a-2 は 5.11a と別の番号（範囲表記ではない）
+        ok, report = self._check(SAMPLE_HEADINGS_UNIQUE + "\n#### 5.11a 節\n\n#### 5.11a-2 枝番\n")
+        self.assertTrue(ok, report)
+
 
 if __name__ == "__main__":
     unittest.main()

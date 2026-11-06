@@ -69,14 +69,27 @@ MALFORMED_CLASS_ROW_RE = re.compile(
 # §2 のクラス別件数行の下限。表が丸ごと壊れた／消えたときに「差分なし」で緑にならないための歯止め。
 MIN_CLASS_ROWS = 10
 
-# Issue #2391: 見出しの先頭に置く ID（``#### UT-049: …`` / ``### UT-083`` / ``#### UT-058c-FlaUI: …``）。
-# 接頭辞は英大文字 2〜4 文字（UT / IT / ST / PT / SEC / UAT）。ID は ``:`` ・空白・全角括弧の手前で切れる。
-HEADING_ID_RE = re.compile(r"^#{2,6}\s+([A-Z]{2,4}-[A-Za-z0-9-]+)")
-# 見出しの先頭に置く節番号（``## 2.`` / ``### 2.47a`` / ``#### 1.6.1`` / ``### 2.31〜2.33``）。
-# 空白までを 1 つの番号として扱う（``2.20a`` と ``2.20a2``、``1.6`` と ``1.6.1`` を別の番号として数える）。
-HEADING_SECTION_RE = re.compile(r"^#{2,6}\s+(\d[^\s]*)")
-# コードブロックの開始・終了。ブロック内の ``#`` 行は見出しではない。
-FENCE_RE = re.compile(r"^\s*(```|~~~)")
+# Issue #2391: 見出し（CommonMark の ATX 見出し。行頭のインデントは 0〜3 文字まで）。
+HEADING_PREFIX = r"^ {0,3}#{2,6}[ \t]+"
+# 見出しの先頭に置く ID（``#### UT-049: …`` / ``### UT-083`` / ``#### UT-058c-FlaUI: …``）。
+# 接頭辞は英大文字 2〜4 文字（UT / IT / ST / PT / SEC / UAT）。ID は ASCII の英数字とハイフンだけを取るので、
+# ``:`` ・全角コロン・全角括弧・空白の手前で切れる。
+HEADING_ID_RE = re.compile(HEADING_PREFIX + r"([A-Z]{2,4}-[A-Za-z0-9-]+)")
+# 見出しの先頭に置く節番号（``## 2.`` / ``### 2.47a`` / ``#### 1.6.1`` / ``#### 5.11a-2``）。
+# 番号の文字（ASCII の英数字と ``.``。``-数字`` の枝番）だけを取る。空白まで取ると ``2.47a（…）`` ・ ``2.47a：…`` が
+# 別の番号になり、重複を見逃す。``2.20a`` と ``2.20a2``、``1.6`` と ``1.6.1`` は別の番号として数える。
+SECTION_NUMBER = r"\d[0-9A-Za-z.]*(?:-\d+(?![.\d]))?"
+HEADING_SECTION_RE = re.compile(HEADING_PREFIX + r"(" + SECTION_NUMBER + r")")
+# 範囲表記（``### 2.31〜2.33 — 欠番``）の終端。範囲の番号はすべて占有済みとして扱う
+# （後から ``### 2.32`` を足したら重複として検出する）。
+SECTION_RANGE_TAIL_RE = re.compile(r"\s*[〜～~-]\s*(" + SECTION_NUMBER + r")")
+# 範囲を展開する上限。書き損じ（``2.1〜2.1000``）で巨大な集合を作らないため。
+MAX_SECTION_RANGE = 100
+# コードブロックの開始（CommonMark: インデント 0〜3、同じ記号 3 文字以上）。閉じるのは開いた記号と同じ種類・
+# 同じ長さ以上の記号だけの行。種類・長さを見ないと、```` の中の ``` で開閉が反転する。
+FENCE_OPEN_RE = re.compile(r"^ {0,3}(`{3,}|~{3,})")
+HTML_COMMENT_OPEN = "<!--"
+HTML_COMMENT_CLOSE = "-->"
 
 
 class ClassRowScan(NamedTuple):
@@ -254,25 +267,67 @@ class HeadingScan(NamedTuple):
     sections: List[tuple]
 
 
+def expand_section_range(start: str, end: str) -> List[str]:
+    """``2.31`` 〜 ``2.33`` を ``[2.31, 2.32, 2.33]`` に展開する。
+
+    最後の要素だけが異なる数字の範囲に限って展開し、それ以外（``2.31a``〜``2.33``・前の要素が違う・
+    逆順・上限超え）は両端だけを占有として返す（展開できない範囲でも、両端の衝突は検出する）。
+    """
+    head_s, _, last_s = start.rpartition(".")
+    head_e, _, last_e = end.rpartition(".")
+    if head_s == head_e and last_s.isdigit() and last_e.isdigit():
+        first, last = int(last_s), int(last_e)
+        if first <= last and last - first < MAX_SECTION_RANGE:
+            prefix = head_s + "." if head_s else ""
+            return [f"{prefix}{n}" for n in range(first, last + 1)]
+    return [start, end]
+
+
 def parse_headings(md_path: str) -> HeadingScan:
-    """文書全体の見出しから ID と節番号を集める（コードブロックの中は見出しとして数えない）。"""
+    """文書全体の見出しから ID と節番号を集める。
+
+    コードブロック（CommonMark のフェンス）と HTML コメント（``<!-- … -->``）の中は見出しとして数えない。
+    """
     ids = []
     sections = []
-    in_fence = False
+    fence = None  # 開いているフェンスの記号（例: "````"）。None ならブロックの外
+    in_comment = False
     with open(md_path, encoding="utf-8-sig") as f:
         for lineno, line in enumerate(f, start=1):
-            if FENCE_RE.match(line):
-                in_fence = not in_fence
+            if fence is not None:
+                stripped = line.strip()
+                if (
+                    len(line) - len(line.lstrip(" ")) <= 3
+                    and stripped
+                    and set(stripped) == {fence[0]}
+                    and len(stripped) >= len(fence)
+                ):
+                    fence = None
                 continue
-            if in_fence:
+            if in_comment:
+                if HTML_COMMENT_CLOSE in line:
+                    in_comment = False
                 continue
+            m = FENCE_OPEN_RE.match(line)
+            if m:
+                fence = m.group(1)
+                continue
+            start = line.find(HTML_COMMENT_OPEN)
+            if start >= 0 and line.find(HTML_COMMENT_CLOSE, start + len(HTML_COMMENT_OPEN)) < 0:
+                in_comment = True
             m = HEADING_ID_RE.match(line)
             if m:
                 ids.append((lineno, m.group(1)))
                 continue
             m = HEADING_SECTION_RE.match(line)
             if m:
-                sections.append((lineno, m.group(1).rstrip(".")))
+                number = m.group(1).rstrip(".")
+                tail = SECTION_RANGE_TAIL_RE.match(line, m.end())
+                if tail:
+                    for n in expand_section_range(number, tail.group(1).rstrip(".")):
+                        sections.append((lineno, n))
+                else:
+                    sections.append((lineno, number))
     return HeadingScan(ids, sections)
 
 
