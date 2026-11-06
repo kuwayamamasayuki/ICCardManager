@@ -19,7 +19,7 @@ namespace ICCardManager.Common.Exceptions
         /// <param name="operationName">利用者が行った操作（「貸出」「返却」）。「何が」に相当する</param>
         /// <remarks>
         /// <para>
-        /// Issue #1953: <c>UPDATE ic_card … WHERE card_idm = @cardIdm AND is_deleted = 0</c> が
+        /// Issue #1953: <c>UPDATE ic_card … WHERE card_idm = @cardIdm AND (is_deleted = 0 OR is_deleted IS NULL)</c> が
         /// 0 行になるのは「他のパソコンや別の操作でこのカードが論理削除された」場合だけであり
         /// （Issue #1753 の影響行数による競合検出）、原因を名指しできる。
         /// </para>
@@ -81,7 +81,7 @@ namespace ICCardManager.Common.Exceptions
         /// <remarks>
         /// <para>
         /// 貸出中にする更新（<c>UpdateLentStatusAsync(isLent: true)</c>）の WHERE は
-        /// <c>is_deleted = 0 AND is_refunded = 0</c> なので、0 行の原因は「削除」と「払い戻し」の 2 つになる。
+        /// 未削除かつ未払戻（<c>is_deleted</c> / <c>is_refunded</c> が 0 または NULL）なので、0 行の原因は「削除」と「払い戻し」の 2 つになる。
         /// 呼び出し元（<c>LendingService.InsertLendLedgerAsync</c>）がカードを読み直して原因を分け、
         /// 払い戻しは本例外（BIZ018）、削除は <see cref="LentStatusUpdateConflict"/>（BIZ015）を投げる。
         /// 1 つのコードに 2 つの原因を割り当てない（<c>error-messages-implementation.md</c>

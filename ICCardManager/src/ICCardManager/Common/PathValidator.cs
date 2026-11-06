@@ -32,6 +32,20 @@ namespace ICCardManager.Common
         public const int DefaultUncTimeoutMs = 5000;
 
         /// <summary>
+        /// Issue #2383: バックアップ先の書き込み確認（テストファイルの書き込みと削除）を待つ上限（ミリ秒）。
+        /// 到達確認（<see cref="DefaultUncTimeoutMs"/>）を通った後の確認で、フォルダーの有無の確認・
+        /// 書き込み・削除の往復を含むため、到達確認より長く取る。
+        /// </summary>
+        public const int DefaultWriteProbeTimeoutMs = 10000;
+
+        /// <summary>
+        /// Issue #2383: ローカルパス（ドライブ文字）のドライブの準備確認（<see cref="DriveInfo.IsReady"/>）を待つ上限（ミリ秒）。
+        /// マップドネットワークドライブ（共有モード、Issue #1559）は UNC 扱いにならず到達確認を通らないため、
+        /// 切断されたドライブではここが UNC の到達確認の役を担う。上限は到達確認（<see cref="DefaultUncTimeoutMs"/>）と揃える。
+        /// </summary>
+        public const int DefaultDriveReadyTimeoutMs = 5000;
+
+        /// <summary>
         /// パス検証結果
         /// </summary>
         public class ValidationResult
@@ -70,34 +84,115 @@ namespace ICCardManager.Common
         /// UNC パスの場合、<see cref="DefaultUncTimeoutMs"/> の内部タイムアウトで到達性を
         /// 確認する。ハングを防ぐため専用スレッドで <see cref="Directory.Exists"/>
         /// を実行し、タイムアウト超過時は到達不可として扱う（Issue #2225）。UI スレッドから呼ぶ場合は
-        /// <see cref="ValidateBackupPathAsync"/> の利用を検討すること。
+        /// <see cref="ValidateBackupPathAsync(string, CancellationToken)"/> の利用を検討すること。
         /// </remarks>
         public static ValidationResult ValidateBackupPath(string path)
-            => ValidateBackupPath(path, UncReachabilityChecker, DefaultUncTimeoutMs);
+            => ValidateBackupPath(
+                path, UncReachabilityChecker, DefaultUncTimeoutMs, DefaultWritePermissionChecker, WriteProbeTimeoutMs,
+                DefaultDriveReadinessChecker, DriveReadyTimeoutMs);
 
         /// <summary>
         /// バックアップパスの非同期検証（Issue #1269）。UI スレッドをブロックせず、
         /// UNC パスの到達性を <paramref name="cancellationToken"/> でキャンセル可能に検証する。
         /// </summary>
-        public static async Task<ValidationResult> ValidateBackupPathAsync(
+        /// <remarks>
+        /// キャンセルに対応できる形にしてある。キャンセルされると、確認の終わりを待たずに
+        /// <see cref="OperationCanceledException"/> で戻る（Issue #2383）。走り出した確認そのものは中断できず、応答しない共有ではその確認のスレッドが残り得るが、検証は上限で戻る（同じパスへの確認は進行中のものが終わるまで 1 本に限る）。
+        /// ただし現在、トークンを渡す本番の呼び出し元は無い。
+        /// </remarks>
+        public static Task<ValidationResult> ValidateBackupPathAsync(
             string path, CancellationToken cancellationToken = default)
+            => ValidateBackupPathAsync(
+                path, UncReachabilityChecker, DefaultUncTimeoutMs,
+                DefaultWritePermissionChecker, WriteProbeTimeoutMs, cancellationToken);
+
+        /// <summary>
+        /// テスト容易性のための内部 API。到達確認・書き込み確認の関数と上限を外部から注入できる。
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// 検証全体をスレッドプールではなく専用スレッド（<see cref="DedicatedThread"/>）で走らせる（Issue #2383）。
+        /// 以前は <c>Task.Run</c> で起動していたため、到達確認・書き込み確認を上限付きで同期的に待つ間プールのスレッドを塞ぎ、
+        /// 上限の無かった書き込み確認は応答しない共有で戻らず、保存の操作を繰り返すたびにプールのスレッドが 1 本ずつ塞がった。
+        /// プールが塞がっていると検証そのものが始まらない（<c>.claude/rules/service-conventions.md</c>
+        /// 「ブロックし得る同期処理を <c>Task.Run</c> で起動して待たない」）。
+        /// </para>
+        /// <para>
+        /// 呼び出しは設定の保存とバックアップ先の解決（利用者の操作か起動時）に限られ、呼ぶたびにスレッドを 1 本作っても
+        /// 足りる。検証の中のブロックし得る確認（UNC の到達確認・ドライブの準備確認・書き込み確認）はすべて上限付きで待つので、
+        /// 検証全体を走らせる専用スレッドは上限で戻る。確認そのもののスレッド（専用スレッド）は中断できず、応答しない共有では残り得るが、
+        /// 同じパスへの確認は進行中のものが終わるまで 1 本に限るので、呼び直しのたびには増えない。
+        /// </para>
+        /// </remarks>
+        internal static Task<ValidationResult> ValidateBackupPathAsync(
+            string path,
+            Func<string, int, bool> uncReachabilityChecker,
+            int uncTimeoutMs,
+            Func<string, int, ValidationResult> writePermissionChecker,
+            int writeProbeTimeoutMs,
+            CancellationToken cancellationToken)
         {
-            // 検証全体（UNC 到達性チェック・書き込み権限プローブ含む）を Task.Run でオフロードする。
-            // 書き込み権限プローブ（CheckWritePermission）は低速な共有でタイムアウトなしにブロックし得るため、
-            // 到達性チェックだけでなく全体をスレッドプールへ逃がす（Issue #1746）
-            return await Task.Run(
-                () => ValidateBackupPath(path, UncReachabilityChecker, DefaultUncTimeoutMs),
-                cancellationToken).ConfigureAwait(false);
+            if (cancellationToken.IsCancellationRequested)
+            {
+                return Task.FromCanceled<ValidationResult>(cancellationToken);
+            }
+
+            // テスト用の上限の差し替え（AsyncLocal）は呼び出し元のスレッドで読んでから渡す
+            var driveReadyTimeoutMs = DriveReadyTimeoutMs;
+            var validation = DedicatedThread.Run(
+                () => ValidateBackupPath(
+                    path, uncReachabilityChecker, uncTimeoutMs, writePermissionChecker, writeProbeTimeoutMs,
+                    DefaultDriveReadinessChecker, driveReadyTimeoutMs));
+
+            return cancellationToken.CanBeCanceled
+                ? WaitWithCancellationAsync(validation, cancellationToken)
+                : validation;
+        }
+
+        /// <summary>
+        /// 検証の完了か <paramref name="cancellationToken"/> のキャンセルの早い方で戻る（Issue #2383）。
+        /// </summary>
+        private static async Task<ValidationResult> WaitWithCancellationAsync(
+            Task<ValidationResult> validation, CancellationToken cancellationToken)
+        {
+            // 続きを Cancel() を呼んだスレッド上で同期的に走らせない
+            var cancelled = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+            using (cancellationToken.Register(() => cancelled.TrySetResult(true)))
+            {
+                var first = await Task.WhenAny(validation, cancelled.Task).ConfigureAwait(false);
+                if (first != validation)
+                {
+                    throw new OperationCanceledException(cancellationToken);
+                }
+            }
+
+            return await validation.ConfigureAwait(false);
         }
 
         /// <summary>
         /// テスト容易性のための内部 API。UNC 到達性チェック関数とタイムアウトを
-        /// 外部から注入できる。
+        /// 外部から注入できる。書き込み確認は既定（<see cref="DefaultWritePermissionChecker"/>）を使う。
         /// </summary>
         internal static ValidationResult ValidateBackupPath(
             string path,
             Func<string, int, bool> uncReachabilityChecker,
             int uncTimeoutMs)
+            => ValidateBackupPath(
+                path, uncReachabilityChecker, uncTimeoutMs, DefaultWritePermissionChecker, WriteProbeTimeoutMs,
+                DefaultDriveReadinessChecker, DriveReadyTimeoutMs);
+
+        /// <summary>
+        /// テスト容易性のための内部 API。到達確認・書き込み確認・ドライブの準備確認の関数と上限を外部から注入できる。
+        /// ドライブの準備確認を省略すると既定（<see cref="DefaultDriveReadinessChecker"/>）を使う。
+        /// </summary>
+        internal static ValidationResult ValidateBackupPath(
+            string path,
+            Func<string, int, bool> uncReachabilityChecker,
+            int uncTimeoutMs,
+            Func<string, int, ValidationResult> writePermissionChecker,
+            int writeProbeTimeoutMs,
+            Func<string, int, ValidationResult>? driveReadinessChecker = null,
+            int driveReadyTimeoutMs = DefaultDriveReadyTimeoutMs)
         {
             // 1. null または空でないこと
             if (string.IsNullOrWhiteSpace(path))
@@ -184,20 +279,19 @@ namespace ICCardManager.Common
 
             // 8. ドライブが存在すること（ローカルパスの場合のみ）
             // UNCパスにはドライブの概念がないためスキップ
+            //    マップドネットワークドライブは UNC 扱いにならず項目 7 を通らないため、切断されたドライブでは
+            //    DriveInfo.IsReady が戻らないことがある。専用スレッドで上限付きに待つ（Issue #2383）
             if (!IsUncPath(path))
             {
                 try
                 {
                     var root = Path.GetPathRoot(path);
-                    if (!string.IsNullOrEmpty(root))
+                    if (root is not null && !string.IsNullOrEmpty(root))
                     {
-                        var driveInfo = new DriveInfo(root);
-                        if (!driveInfo.IsReady)
+                        var driveResult = (driveReadinessChecker ?? DefaultDriveReadinessChecker)(root, driveReadyTimeoutMs);
+                        if (!driveResult.IsValid)
                         {
-                            return ValidationResult.Failure(
-                                $"ドライブ {root} が利用できません。" +
-                                "USB メモリの抜けや未マウントが原因の可能性があります。" +
-                                "接続を確認するか、利用可能な別のドライブを指定してください。");
+                            return driveResult;
                         }
                     }
                 }
@@ -214,7 +308,8 @@ namespace ICCardManager.Common
             }
 
             // 9. 書き込み可能かチェック（ディレクトリが存在する場合）
-            var writeCheckResult = CheckWritePermission(path);
+            //    書き込み確認は応答しない共有で戻らないため、専用スレッドで上限付きに待つ（Issue #2383）
+            var writeCheckResult = (writePermissionChecker ?? DefaultWritePermissionChecker)(path, writeProbeTimeoutMs);
             if (!writeCheckResult.IsValid)
             {
                 return writeCheckResult;
@@ -495,8 +590,8 @@ namespace ICCardManager.Common
         /// 確認はスレッドプールではなく専用スレッド（<see cref="DedicatedThread"/>）で走らせる。
         /// 以前は <c>Task.Run</c> で起動して上限付きで同期的に待っていたため、プールのスレッドが同期的な待ちで
         /// 塞がっていると、確認は空きが出るまで始まらず（.NET Framework のスレッド追加は数百 ms に 1 本）、
-        /// 到達できる共有でも上限に達して「到達できない」と誤報し得た。<see cref="ValidateBackupPathAsync"/> は
-        /// 検証全体をプールで走らせるため、プールのスレッドがプールの確認を待つ入れ子にもなっていた
+        /// 到達できる共有でも上限に達して「到達できない」と誤報し得た。<see cref="ValidateBackupPathAsync(string, CancellationToken)"/> も
+        /// 当時は検証全体をプールで走らせていたため（Issue #2383 で専用スレッドへ移した）、プールのスレッドがプールの確認を待つ入れ子にもなっていた
         /// （DB の疎通確認で同じ形を直した Issue #2213 と同じ）。
         /// </para>
         /// <para>
@@ -511,16 +606,37 @@ namespace ICCardManager.Common
         /// </para>
         /// </remarks>
         internal static Func<string, int, bool> CreateUncReachabilityChecker(Func<string, bool> probe)
+            => CreateSingleFlightChecker(
+                path =>
+                {
+                    try { return probe(path); }
+                    catch { return false; }
+                },
+                onTimeout: (_, _) => false);
+
+        /// <summary>
+        /// 確認を専用スレッドで走らせて上限付きで待ち、同じパスへの確認を進行中のものが終わるまで 1 本に限る関数を作る
+        /// （Issue #2225 / #2383。到達確認と書き込み確認で共有する）。
+        /// </summary>
+        /// <param name="check">確認の本体。例外を投げないこと（呼び出し側で結果へ変換しておく）。</param>
+        /// <param name="onTimeout">上限内に終わらなかったとき（待ちが例外で終わったときも）の結果。引数は確認したパスと上限（ミリ秒）。</param>
+        /// <remarks>
+        /// 後から来た呼び出しは進行中の確認の結果を（自分の上限まで）待つ。終わった確認の結果は使い回さない。
+        /// 詳細は <see cref="CreateUncReachabilityChecker"/> を参照。
+        /// </remarks>
+        private static Func<string, int, T> CreateSingleFlightChecker<T>(Func<string, T> check, Func<string, int, T> onTimeout)
         {
-            var pendingChecks = new Dictionary<string, Task<bool>>(StringComparer.OrdinalIgnoreCase);
+            var pendingChecks = new Dictionary<string, Task<T>>(StringComparer.OrdinalIgnoreCase);
             var pendingChecksLock = new object();
 
             return (path, timeoutMs) =>
             {
-                Task<bool> check;
+                // 末尾の区切り文字だけが違うパス（C:\Backup と C:\Backup\）は同じ確認とみなす
+                var key = path.TrimEnd(PathSeparators);
+                Task<T> current;
                 lock (pendingChecksLock)
                 {
-                    if (!pendingChecks.TryGetValue(path, out var pending) || pending.IsCompleted)
+                    if (!pendingChecks.TryGetValue(key, out var pending) || pending.IsCompleted)
                     {
                         // 終わった確認を辞書から外す（使ったパスの数だけ残り続けないように）
                         foreach (var completedPath in pendingChecks.Where(p => p.Value.IsCompleted).Select(p => p.Key).ToList())
@@ -528,28 +644,99 @@ namespace ICCardManager.Common
                             pendingChecks.Remove(completedPath);
                         }
 
-                        pending = DedicatedThread.Run(() =>
-                        {
-                            try { return probe(path); }
-                            catch { return false; }
-                        });
-                        pendingChecks[path] = pending;
+                        pending = DedicatedThread.Run(() => check(path));
+                        pendingChecks[key] = pending;
                     }
 
-                    check = pending;
+                    current = pending;
                 }
 
                 try
                 {
-                    return check.Wait(timeoutMs) && check.Result;
+                    return current.Wait(timeoutMs) ? current.Result : onTimeout(path, timeoutMs);
                 }
                 catch
                 {
-                    // Wait 中の AggregateException 等は到達不可として扱う
-                    return false;
+                    // Wait 中の AggregateException 等は上限切れと同じ扱いにする
+                    return onTimeout(path, timeoutMs);
                 }
             };
         }
+
+        /// <summary>
+        /// 公開エントリポイントが使う、バックアップ先の書き込み確認（Issue #2383）。
+        /// 実体は <see cref="CheckWritePermission"/> を <see cref="CreateWritePermissionChecker"/> で包んだもの。
+        /// </summary>
+        internal static readonly Func<string, int, ValidationResult> DefaultWritePermissionChecker =
+            CreateWritePermissionChecker(CheckWritePermission);
+
+        /// <summary>
+        /// 公開エントリポイントが使う、ローカルパスのドライブの準備確認（Issue #2383）。
+        /// 実体は <see cref="DriveInfo.IsReady"/> を <see cref="CreateDriveReadinessChecker"/> で包んだもの。
+        /// </summary>
+        internal static readonly Func<string, int, ValidationResult> DefaultDriveReadinessChecker =
+            CreateDriveReadinessChecker(root => (DriveIsReadyProbe ?? (r => new DriveInfo(r).IsReady))(root));
+
+        /// <summary>
+        /// ローカルパスのドライブの準備確認を、専用スレッドで上限付きに待つ関数を作る（Issue #2383）。
+        /// </summary>
+        /// <param name="isReady">
+        /// ドライブのルート（<c>Z:\</c> 等）が使えるかを返す本体（既定は <see cref="DriveInfo.IsReady"/>）。
+        /// 切断されたマップドネットワークドライブでは戻らないことがある。例外を投げた場合は<b>種類を問わず</b>致命的としない
+        /// （他の検証項目と実際の書き込みに任せる）。以前の項目 8 は Path API の <see cref="PathTooLongException"/>・
+        /// <see cref="ArgumentException"/> だけを捕捉し、<see cref="DriveInfo.IsReady"/> からのそれ以外の例外は検証の呼び出し元へ伝わっていた。
+        /// 確認を専用スレッドへ移すと例外は別のスレッドで起きるため、到達確認・書き込み確認と同じく結果へ変換する。
+        /// </param>
+        /// <remarks>
+        /// マップドネットワークドライブ（共有モード、Issue #1559）は UNC 扱いにならず、UNC の到達確認（項目 7）を通らない。
+        /// 上限が無いと検証の専用スレッドが止まり、トークンを渡さない呼び出し元（設定の保存・バックアップ先の解決）の待ちが戻らない。
+        /// 到達確認・書き込み確認と同じく、同じドライブへの確認は進行中のものが終わるまで 1 本に限る。
+        /// </remarks>
+        internal static Func<string, int, ValidationResult> CreateDriveReadinessChecker(Func<string, bool> isReady)
+            => CreateSingleFlightChecker(
+                root =>
+                {
+                    bool ready;
+                    try { ready = isReady(root); }
+                    catch { return ValidationResult.Success(); }
+
+                    return ready ? ValidationResult.Success() : CreateDriveNotReadyFailure(root);
+                },
+                onTimeout: CreateDriveReadyTimeoutFailure);
+
+        /// <summary>
+        /// バックアップ先の書き込み確認を、専用スレッドで上限付きに待つ関数を作る（Issue #2383）。
+        /// </summary>
+        /// <param name="check">
+        /// 書き込みの確認の本体（既定は <see cref="CheckWritePermission"/>。テストファイルの書き込みと削除）。
+        /// 応答しない共有では戻らない。想定外の例外を投げた場合は従来どおり検証を通す（実際の書き込み時にエラーになる）。
+        /// </param>
+        /// <remarks>
+        /// <para>
+        /// 書き込みの確認は上限が無く、以前は検証全体を起動する <c>Task.Run</c>（スレッドプール）の上で走っていたため、
+        /// 応答しない共有では保存の操作を繰り返すたびにプールのスレッドが 1 本ずつ塞がった。
+        /// 到達確認（<see cref="CreateUncReachabilityChecker"/>、Issue #2225）と同じく、専用スレッドで走らせて上限で打ち切り、
+        /// 上限を超えたら「書き込みの確認が終わらなかった」という検証エラー（<see cref="CreateWriteProbeTimeoutFailure"/>）を返す。
+        /// 打ち切っても下位の呼び出しは中断できないため、同じパスへの確認は進行中のものが終わるまで 1 本に限る。
+        /// </para>
+        /// <para>
+        /// <b>限界</b>: 1 本に限るキーは指定されたパスそのもので、実際の書き込み先（未作成のフォルダーなら
+        /// <see cref="FindNearestExistingAncestor"/> が返す祖先）ではない。書き込み先を決めるには <see cref="Directory.Exists"/> が要り、
+        /// それ自体が応答しない共有では戻らないため、上限付きのスレッドに入る前にはキーを決められない。
+        /// 共有ルートや祖先をキーにすると、応答している共有で別のフォルダーの判定（権限は場所ごとに違う）を流用することになる。
+        /// そのため、到達はできるが書き込みが応答しない共有で、未作成の別々のサブフォルダーを順に指定すると、戻らない確認が指定ごとに 1 本ずつ増え得る。
+        /// 共有ルートへ到達できない場合は UNC の到達確認（共有ルートをキーに 1 本）で先に弾かれるので、この形には入らない。
+        /// いずれも利用者の保存の操作でしか起きず、確認は SMB のタイムアウトで戻れば終わる。
+        /// </para>
+        /// </remarks>
+        internal static Func<string, int, ValidationResult> CreateWritePermissionChecker(Func<string, ValidationResult> check)
+            => CreateSingleFlightChecker(
+                path =>
+                {
+                    try { return check(path); }
+                    catch { return ValidationResult.Success(); }
+                },
+                onTimeout: (_, timeoutMs) => CreateWriteProbeTimeoutFailure(timeoutMs));
 
         /// <summary>
         /// <see cref="UncReachabilityChecker"/> の AsyncLocal バッキングストア。
@@ -561,13 +748,13 @@ namespace ICCardManager.Common
 
         /// <summary>
         /// 公開エントリポイント（<see cref="ValidateBackupPath(string)"/> /
-        /// <see cref="ValidateBackupPathAsync"/>）が実際に使用する UNC 到達性チェック関数。
+        /// <see cref="ValidateBackupPathAsync(string, CancellationToken)"/>）が実際に使用する UNC 到達性チェック関数。
         /// 既定は <see cref="DefaultUncReachabilityChecker"/>。
         /// </summary>
         /// <remarks>
         /// テスト用フック（Issue #1746。<c>DbContext.IsOnUiThread</c> と同じ流儀＝AsyncLocal バック）。
-        /// <see cref="ValidateBackupPathAsync"/> の <c>Task.Run</c> には ExecutionContext が
-        /// 流れるため、テスト本体で設定した差し替えはオフロード先でも有効。
+        /// 公開の <see cref="ValidateBackupPathAsync(string, CancellationToken)"/> は呼び出し元のスレッドで
+        /// 本プロパティを読んでから専用スレッドへ渡すため、テスト本体で設定した差し替えはオフロード先でも有効。
         /// 差し替えるテストは、(1) 使用後に既定値へ復元すること（AsyncLocal のため漏れても
         /// 他テストへは波及しないが、同一コンテキスト内の後続コードのための作法）、
         /// (2) 防御として、テスト固有のマーカーを含むパスのみ介入し、それ以外は
@@ -641,8 +828,48 @@ namespace ICCardManager.Common
         }
 
         /// <summary>
-        /// 書き込み権限をチェック
+        /// ドライブが準備できていない（<see cref="DriveInfo.IsReady"/> が false）ときの検証エラーを生成する。
         /// </summary>
+        internal static ValidationResult CreateDriveNotReadyFailure(string root)
+        {
+            return ValidationResult.Failure(
+                $"ドライブ {root} が利用できません。" +
+                "USB メモリの抜けや未マウントが原因の可能性があります。" +
+                "接続を確認するか、利用可能な別のドライブを指定してください。");
+        }
+
+        /// <summary>
+        /// ドライブの準備確認が上限内に終わらなかったときの検証エラーを生成する（Issue #2383）。
+        /// </summary>
+        /// <param name="root">確認したドライブのルート（<c>Z:\</c> 等）。</param>
+        /// <param name="timeoutMs">待った上限（ミリ秒）。</param>
+        /// <remarks>
+        /// 応答しないのは主に切断されたマップドネットワークドライブ。UNC の到達確認と同じく上限の秒数を示す。
+        /// </remarks>
+        internal static ValidationResult CreateDriveReadyTimeoutFailure(string root, int timeoutMs)
+        {
+            return ValidationResult.Failure(
+                $"ドライブ {root} の確認が" + (timeoutMs / 1000) + "秒以内に終わりませんでした。" +
+                "ネットワークドライブの接続が切れている可能性があるため、" +
+                "ネットワーク接続とドライブの割り当てを確認するか、利用可能な別のドライブを指定してください。");
+        }
+
+        /// <summary>
+        /// 書き込み確認が上限内に終わらなかったときの検証エラーを生成する（Issue #2383）。
+        /// </summary>
+        /// <param name="timeoutMs">待った上限（ミリ秒）。</param>
+        /// <remarks>
+        /// 応答しない共有では書き込みが戻らない。到達確認（「ネットワーク共有に到達できません（タイムアウト: N秒以内に…）」）と
+        /// 同じく上限の秒数を示し、接続の確認か別のフォルダーの指定へ案内する。
+        /// </remarks>
+        internal static ValidationResult CreateWriteProbeTimeoutFailure(int timeoutMs)
+        {
+            return ValidationResult.Failure(
+                "指定されたフォルダへの書き込み確認が" + (timeoutMs / 1000) + "秒以内に終わりませんでした。" +
+                "ネットワーク共有が応答していない可能性があるため、" +
+                "ネットワーク接続とフォルダの場所を確認するか、書き込み可能な別のフォルダを指定してください。");
+        }
+
         /// <summary>
         /// 指定パスの祖先のうち、実在する最も近いものを返す（Issue #1924）
         /// </summary>
@@ -684,6 +911,109 @@ namespace ICCardManager.Common
             return null;
         }
 
+        /// <summary>
+        /// <see cref="WriteProbeTimeoutMs"/> の AsyncLocal バッキングストア。
+        /// </summary>
+        private static readonly AsyncLocal<int?> WriteProbeTimeoutMsOverride = new();
+
+        /// <summary>
+        /// 公開エントリポイントが使う書き込み確認の上限（ミリ秒）。既定は <see cref="DefaultWriteProbeTimeoutMs"/>。
+        /// </summary>
+        /// <remarks>
+        /// テスト用フック（Issue #2383）。<see cref="WriteProbeFile"/> で戻らない書き込みを差し込むテストが、本番の上限（10 秒）を
+        /// 実時間で待たずに済むよう短くする。差し替えは設定したテストの実行コンテキストにのみ見える。
+        /// </remarks>
+        internal static int WriteProbeTimeoutMs
+        {
+            get => WriteProbeTimeoutMsOverride.Value ?? DefaultWriteProbeTimeoutMs;
+            set => WriteProbeTimeoutMsOverride.Value = value;
+        }
+
+        /// <summary>
+        /// <see cref="DriveReadyTimeoutMs"/> の AsyncLocal バッキングストア。
+        /// </summary>
+        private static readonly AsyncLocal<int?> DriveReadyTimeoutMsOverride = new();
+
+        /// <summary>
+        /// 公開エントリポイントが使うドライブの準備確認の上限（ミリ秒）。既定は <see cref="DefaultDriveReadyTimeoutMs"/>。
+        /// テスト用フック（<see cref="WriteProbeTimeoutMs"/> と同じ）。
+        /// </summary>
+        internal static int DriveReadyTimeoutMs
+        {
+            get => DriveReadyTimeoutMsOverride.Value ?? DefaultDriveReadyTimeoutMs;
+            set => DriveReadyTimeoutMsOverride.Value = value;
+        }
+
+        /// <summary>
+        /// テスト用フックの差し替え（上限・確認の本体）をすべて既定へ戻す。
+        /// </summary>
+        internal static void ResetProbeHooks()
+        {
+            WriteProbeFileOverride.Value = null;
+            DriveIsReadyProbeOverride.Value = null;
+            WriteProbeTimeoutMsOverride.Value = null;
+            DriveReadyTimeoutMsOverride.Value = null;
+        }
+
+        /// <summary>
+        /// 書き込み確認のテストファイルを書き込んで削除する。応答しない共有では戻らない。
+        /// </summary>
+        private static void WriteAndDeleteProbeFile(string testFile)
+        {
+            var probe = WriteProbeFileOverride.Value;
+            if (probe != null)
+            {
+                probe(testFile);
+                return;
+            }
+
+            File.WriteAllText(testFile, "test");
+            File.Delete(testFile);
+        }
+
+        /// <summary>
+        /// <see cref="WriteProbeFile"/> の AsyncLocal バッキングストア（<see cref="UncReachabilityCheckerOverride"/> と同じ機構）。
+        /// </summary>
+        private static readonly AsyncLocal<Action<string>?> WriteProbeFileOverride = new();
+
+        /// <summary>
+        /// テスト用フック（Issue #2383）。書き込み確認のテストファイルの書き込みと削除（<see cref="WriteAndDeleteProbeFile"/>）を差し替える。
+        /// </summary>
+        /// <remarks>
+        /// 確認の本体の最も内側を差し替えるので、公開の入口から <see cref="DefaultWritePermissionChecker"/>（上限付き）までの
+        /// どこかで上限を通らない形に戻すと、戻らない書き込みを差し込んだテストが上限で返らず赤になる。
+        /// AsyncLocal のため差し替えは設定したテストの実行コンテキスト（そこから起動した専用スレッドを含む）にのみ見える。
+        /// 既定の確認は指定されたパスをキーに 1 本に限るので、テストは自分専用のフォルダーのパスでだけ介入し、
+        /// それ以外は <c>null</c>（既定の書き込み）へ委ねること。
+        /// </remarks>
+        internal static Action<string>? WriteProbeFile
+        {
+            get => WriteProbeFileOverride.Value;
+            set => WriteProbeFileOverride.Value = value;
+        }
+
+        /// <summary>
+        /// <see cref="DriveIsReadyProbe"/> の AsyncLocal バッキングストア。
+        /// </summary>
+        private static readonly AsyncLocal<Func<string, bool>?> DriveIsReadyProbeOverride = new();
+
+        /// <summary>
+        /// テスト用フック（Issue #2383）。<see cref="DefaultDriveReadinessChecker"/> の本体（<see cref="DriveInfo.IsReady"/>）を差し替える。
+        /// </summary>
+        /// <remarks>
+        /// <see cref="WriteProbeFile"/> と同じ目的。既定の確認はドライブのルートをキーに 1 本に限るため、戻らない確認を差し込むと
+        /// 同じドライブを検証する他のテストがそれに相乗りする。テストは他のテストが使わないドライブ文字でだけ介入すること。
+        /// </remarks>
+        internal static Func<string, bool>? DriveIsReadyProbe
+        {
+            get => DriveIsReadyProbeOverride.Value;
+            set => DriveIsReadyProbeOverride.Value = value;
+        }
+
+        /// <summary>
+        /// 書き込み権限をチェックする（テストファイルの書き込みと削除）。応答しない共有では戻らないため、
+        /// 直接呼ばず <see cref="DefaultWritePermissionChecker"/> を通す（Issue #2383）。
+        /// </summary>
         private static ValidationResult CheckWritePermission(string path)
         {
             try
@@ -695,8 +1025,7 @@ namespace ICCardManager.Common
                     var testFile = Path.Combine(path, $".write_test_{Guid.NewGuid():N}");
                     try
                     {
-                        File.WriteAllText(testFile, "test");
-                        File.Delete(testFile);
+                        WriteAndDeleteProbeFile(testFile);
                     }
                     catch (UnauthorizedAccessException)
                     {
@@ -730,8 +1059,7 @@ namespace ICCardManager.Common
                         var testFile = Path.Combine(parentDir, $".write_test_{Guid.NewGuid():N}");
                         try
                         {
-                            File.WriteAllText(testFile, "test");
-                            File.Delete(testFile);
+                            WriteAndDeleteProbeFile(testFile);
                         }
                         catch (UnauthorizedAccessException)
                         {

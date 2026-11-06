@@ -815,9 +815,9 @@ namespace ICCardManager.ViewModels
                     // 更新前のデータを取得（操作ログ用）
                     var beforeCard = await _cardRepository.GetByIdmAsync(EditCardIdm);
 
-                    // Issue #1760: 読み取れなかった時点で「対象カードは現在 is_deleted = 0 として
+                    // Issue #1760: 読み取れなかった時点で「対象カードは現在 is_deleted が 0 または NULL（未削除）として
                     // 存在しない」ことが確定しているため、UpdateAsync を呼ばずに競合として扱う。
-                    // 通常は UpdateAsync の WHERE（同じ is_deleted = 0）も 0 行になるが、
+                    // 通常は UpdateAsync の WHERE（同じ is_deleted が 0 または NULL（未削除））も 0 行になるが、
                     // 読み取りと書き込みの間に他 PC がカードを復元すると 1 行に一致して成功し、
                     // 更新だけが通って operation_log には 1 行も残らない。operation_log は
                     // 6 年保存される唯一の監査記録であり、「誰がいつ何を変更したのか分からない変更」が
@@ -886,7 +886,7 @@ namespace ICCardManager.ViewModels
                     else
                     {
                         // Issue #1759: UpdateAsync が false を返すのは
-                        // UPDATE ... WHERE card_idm = @cardIdm AND is_deleted = 0 が
+                        // UPDATE ... WHERE card_idm = @cardIdm AND (is_deleted = 0 OR is_deleted IS NULL) が
                         // 0 行に一致した場合だけ（Issue #1753）。つまり編集中に対象カードが
                         // 論理削除されたことを意味する。
                         await NotifyUpdateConflictAsync(EditTargetLabel);
@@ -1028,7 +1028,7 @@ namespace ICCardManager.ViewModels
                 // 削除前のデータを取得（操作ログ用）
                 //
                 // Issue #1760: 読めなければ削除自体を行わない。読み取れない時点で対象カードは
-                // 現在存在しないが、その直後に他 PC が復元すると DeleteAsync（WHERE is_deleted = 0）は
+                // 現在存在しないが、その直後に他 PC が復元すると DeleteAsync（WHERE is_deleted が 0 または NULL（未削除））は
                 // 1 行に一致して成功し得る。従来の `if (card != null)` ガードでは、論理削除だけが
                 // 確定して operation_log には 1 行も残らなかった。削除は監査上もっとも重要な操作で、
                 // 「誰がいつ削除したのか分からない」記録は後から復元できない。
@@ -1036,6 +1036,16 @@ namespace ICCardManager.ViewModels
                 if (card == null)
                 {
                     await NotifyDeleteConflictAsync(targetLabel);
+                    return;
+                }
+
+                // Issue #2370: CanDelete は一覧を読んだ時点の IsRefunded しか見ない。その後に他 PC や
+                // 別の操作で払い戻されていたら、書き込む前に払い戻されたことを名指しして案内する。
+                // 削除を止める正は論理削除の WHERE（is_refunded = 0）で、ここは文言のための早期の案内。
+                if (card.IsRefunded)
+                {
+                    _cardRepository.InvalidateCache();
+                    await NotifyDeleteRefusedAsync(ConcurrencyConflictMessage.ForDeleteRefunded(targetLabel, "カード一覧"));
                     return;
                 }
 
@@ -1057,6 +1067,13 @@ namespace ICCardManager.ViewModels
                     // 同じ文言で案内する。検出のタイミングによって案内が変わると、
                     // 同じ状況に別の説明が出ることになる（Issue #1757 と同じ判断）。
                     await NotifyDeleteConflictAsync(targetLabel);
+                }
+                else if (deleteResult == CardOperationResult.Conflict
+                    && await IsRefundedAfterDeleteConflictAsync(targetIdm))
+                {
+                    // Issue #2370: 読み直した後・書き込みの前に払い戻され、論理削除の WHERE（is_refunded = 0）が
+                    // 拒否した。
+                    await NotifyDeleteRefusedAsync(ConcurrencyConflictMessage.ForDeleteRefunded(targetLabel, "カード一覧"));
                 }
                 else
                 {
@@ -1085,6 +1102,45 @@ namespace ICCardManager.ViewModels
         private async Task NotifyDeleteConflictAsync(string targetLabel)
         {
             _cardRepository.InvalidateCache();
+            await NotifyDeleteRefusedAsync(ConcurrencyConflictMessage.ForDelete(targetLabel, "カード一覧"));
+        }
+
+        /// <summary>
+        /// 削除が競合（影響行数 0）で拒否された後に、原因が払い戻しかどうかを読み直して判定する（Issue #2370）
+        /// </summary>
+        /// <returns>
+        /// 読み直したカードが払戻済なら <c>true</c>。存在しない・未払戻・読み直しに失敗した場合は <c>false</c>
+        /// （呼び出し側は従来の汎用の競合文言で案内する）
+        /// </returns>
+        /// <remarks>
+        /// 読み直しはキャッシュを経由するが、0 行のときリポジトリの事後診断と
+        /// <c>CardManagementService.DeleteAsync</c> の finally がキャッシュを破棄済みなので DB の最新状態を読む。
+        /// 読み直しは文言を選ぶためだけのもので、削除が拒否されたことは確定している。ここで例外を外へ出すと
+        /// 案内も一覧の再読込も行われないため、ログを残して汎用の競合文言へ倒す。
+        /// </remarks>
+        private async Task<bool> IsRefundedAfterDeleteConflictAsync(string cardIdm)
+        {
+            try
+            {
+                return (await _cardRepository.GetByIdmAsync(cardIdm))?.IsRefunded == true;
+            }
+            catch (Exception ex)
+            {
+                _logger?.LogWarning(ex,
+                    "交通系ICカードの削除が競合で拒否された後、原因（払い戻し）を確かめる読み直しに失敗しました。汎用の競合文言で案内します");
+                return false;
+            }
+        }
+
+        /// <summary>
+        /// 削除できなかったことを案内する（カード一覧を再読込してからダイアログを出す）
+        /// </summary>
+        /// <param name="message">案内の文言（「一覧を再読み込みしました」と述べるもの）</param>
+        /// <remarks>
+        /// 書き込みを 1 回も通らない経路では、呼び出し側が先にキャッシュを破棄すること（Issue #1759）。
+        /// </remarks>
+        private async Task NotifyDeleteRefusedAsync(string message)
+        {
             await LoadCardsAsync();
 
             // Issue #1793: 本メソッドは BeginBusy("削除中...") スコープの内側から呼ばれるため、
@@ -1092,9 +1148,7 @@ namespace ICCardManager.ViewModels
             // 呼び出し側でまとめて囲むと直前の一覧再読込中もオーバーレイが外れる。
             using (SuspendBusy())
             {
-                _dialogService.ShowError(
-                    ConcurrencyConflictMessage.ForDelete(targetLabel, "カード一覧"),
-                    "削除できません");
+                _dialogService.ShowError(message, "削除できません");
             }
         }
 
@@ -1180,7 +1234,7 @@ namespace ICCardManager.ViewModels
                 // 払い戻し前のデータを取得（操作ログ用）
                 //
                 // Issue #1760: 書き込みより**前**に取得し、読めなければ払い戻し自体を行わない。
-                // 読み取れない（is_deleted = 0 で引けない）時点で対象カードは現在存在しないが、
+                // 読み取れない（is_deleted が 0 または NULL（未削除）で引けない）時点で対象カードは現在存在しないが、
                 // その直後に他 PC が復元すると SetRefundedAsync は 1 行に一致して成功し得る。
                 // 従来の `if (beforeCard != null)` ガードでは、払戻済への変更だけが確定して
                 // operation_log には 1 行も残らなかった。
