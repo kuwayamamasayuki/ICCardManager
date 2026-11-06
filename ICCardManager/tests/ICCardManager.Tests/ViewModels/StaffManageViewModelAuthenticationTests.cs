@@ -487,6 +487,28 @@ public class StaffManageViewModelAuthenticationTests : IDisposable
     }
 
     /// <summary>
+    /// Issue #2382: 登録済みの職員が 0 人（認証が免除される）なら、削除済みの行の復元の案内に認証の手順を述べないこと
+    /// （上のテストの対。手順を固定で述べると、実際には出ない認証を待たせる案内になる）
+    /// </summary>
+    [Fact]
+    public async Task 登録_読み直した行が削除済みでも_職員が0人なら認証の手順を述べないこと()
+    {
+        ArrangeNoActiveStaff();
+        await EnterNewStaffFormAsync();
+        _staffRepositoryMock.Setup(r => r.InsertAsync(It.IsAny<Staff>(), It.IsAny<SQLiteTransaction>())).ReturnsAsync(false);
+        _staffRepositoryMock.SetupSequence(r => r.GetByIdmAsync(TargetIdm, true))
+            .ReturnsAsync((Staff?)null)
+            .ReturnsAsync(new Staff { StaffIdm = TargetIdm, Name = "退職 済子", IsDeleted = true });
+
+        await _viewModel.SaveAsync();
+
+        _staffAuthServiceMock.Verify(a => a.RequestAuthenticationAsync(It.IsAny<string>()), Times.Never, "職員 0 人は認証を免除");
+        _viewModel.StatusMessage.Should().Be(ConcurrencyConflictMessage.ForRegisterFoundDeleted(
+            "職員「退職 済子」", restoreRequiresStaffCardAuthentication: false));
+        _viewModel.StatusMessage.Should().NotContain("職員証で認証");
+    }
+
+    /// <summary>
     /// Issue #2382: 書き込めなかった直後の読み直しが例外になっても、未処理例外にせず「書き込めなかった」と案内すること
     /// （共有フォルダが不安定なとき、書き込みの失敗と読み直しの失敗は同時に起きやすい）
     /// </summary>

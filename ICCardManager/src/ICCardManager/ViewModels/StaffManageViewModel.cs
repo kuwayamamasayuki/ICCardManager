@@ -564,7 +564,8 @@ namespace ICCardManager.ViewModels
                             LoadStaffAsync,
                             "職員一覧",
                             LogNoticeFailure,
-                            restoreRequiresStaffCardAuthentication: true);
+                            // 確認時に得た判定を渡す（登録済みの職員が 0 人なら復元も認証を免除されるので、認証の手順は述べない）
+                            restoreRequiresStaffCardAuthentication: requiresAuthentication);
 
                         IsStatusError = true;
                     }
