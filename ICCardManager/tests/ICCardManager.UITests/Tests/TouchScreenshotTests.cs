@@ -68,6 +68,8 @@ namespace ICCardManager.UITests.Tests
             InvokeDebugPanelButton(page, TestConstants.DebugPanelIcCardButton);
             toast = WaitForToast(fixture);
             File.Exists(ScreenshotHelper.CaptureWithToast(fixture.MainWindow, toast, "lend.png")).Should().BeTrue();
+            // 撮った後に確かめる（理由は ScreenshotAssertions.RequireNoNewVersionNotice。Issue #2394）
+            ScreenshotAssertions.RequireNoNewVersionNotice(fixture.MainWindow);
             File.Exists(ScreenshotHelper.Capture(toast, "toast_lend.png", bringToFront: false)).Should().BeTrue();
         }
 
@@ -109,6 +111,8 @@ namespace ICCardManager.UITests.Tests
 
             var toast = WaitForToast(fixture);
             File.Exists(ScreenshotHelper.CaptureWithToast(fixture.MainWindow, toast, "return.png")).Should().BeTrue();
+            // 撮った後に確かめる（理由は ScreenshotAssertions.RequireNoNewVersionNotice。Issue #2394）
+            ScreenshotAssertions.RequireNoNewVersionNotice(fixture.MainWindow);
             File.Exists(ScreenshotHelper.Capture(toast, "toast_return.png", bringToFront: false)).Should().BeTrue();
         }
 

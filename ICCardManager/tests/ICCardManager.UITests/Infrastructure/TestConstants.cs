@@ -401,7 +401,8 @@ namespace ICCardManager.UITests.Infrastructure
 
         /// <summary>
         /// 更新の案内（<c>WarningService</c> の <c>NewVersionAvailable</c>）の文言に含まれる語（Issue #2394）。
-        /// 警告の行は TextBlock なので、UIA Name が Text へフォールバックして一致する。
+        /// 警告の行は Button で、<c>AutomationProperties.Name="{Binding DisplayText}"</c>（MainWindow.xaml の警告一覧）により
+        /// UIA Name が案内の文言そのものになるので、部分一致で見つかる。バインディング由来で XAML にリテラルとして現れないため <c>[NotUiaName]</c>。
         /// </summary>
         /// <remarks>
         /// 更新の案内は DB と同じフォルダーの <c>latest_version.txt</c> から作られる。UI テストの間は

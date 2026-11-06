@@ -194,7 +194,11 @@ namespace ICCardManager.UITests.Infrastructure
                         $"{DatabasePath} を別のプロセスが開いていたため UI テストの DB を消せず、" +
                         $"退避ファイル {BackupPathOf(DatabaseFileName)}（元の DB が無かったときは {PathOf(AbsentMarkerFileName)}）も捨て切れませんでした。" +
                         "このファイルを残したまま UI テストを実行すると、次の実行がそれを書き戻し、その間に加えた変更が巻き戻ります。" +
-                        "ピッすいを終了し、このファイルが残っていれば削除してから実行してください。",
+                        (latestVersionFailure == null
+                            ? string.Empty
+                            : $"また、一時的に退避した更新通知ファイルも元へ戻せませんでした。その退避 {BackupPathOf(LatestVersionFileName)}" +
+                              $"（元が無かったときは {PathOf(LatestVersionAbsentMarkerFileName)}）は次の実行が元へ戻すので、削除しないでください。") +
+                        "ピッすいを終了し、DB の退避ファイルが残っていれば削除してから実行してください。",
                         new[] { ex, discardFailure }.Concat(latestVersionFailure == null ? new Exception[0] : new[] { latestVersionFailure }));
                 }
 
@@ -385,10 +389,15 @@ namespace ICCardManager.UITests.Infrastructure
                 {
                     // 確認（ThrowIfLatestVersionFileNotRemovable）と削除の間に開かれた。元は残っているので退避を捨てる
                     // （残すと次回の回復が、その間に書き換わった内容を退避した時点の内容で上書きする）。
-                    // 退避ファイルは元の属性ごとコピーされるので、読み取り専用を外してから消す
+                    // 退避ファイルは元の属性ごとコピーされるので、読み取り専用を外してから消す。
+                    // 確認と削除の間の競合でしか通らないため、単体テストでは再現していない（確認の側の文言は UiTestDatabaseGuardTests が固定）
                     File.SetAttributes(backup, FileAttributes.Normal);
                     DeleteWithRetry(backup);
-                    throw;
+                    throw new InvalidOperationException(
+                        $"更新通知ファイル {path} を取り除けなかったため、UI テストを中止しました（DB にも更新通知ファイルにも触れていません）。" +
+                        "確認の直後に、別のプロセスがこのファイルを開いたか、属性・アクセス権が変わりました。" +
+                        "このファイルを開いているアプリ（ピッすい・エディター等）を終了し、読み取り専用の属性とアクセス権を確認してから実行してください。",
+                        ex);
                 }
             }
             else

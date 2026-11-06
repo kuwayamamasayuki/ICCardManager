@@ -613,6 +613,36 @@ namespace ICCardManager.UITests.Tests
         }
 
         [Fact]
+        public void DeleteWorkingDatabase_DBの退避も更新案内ファイルの戻しも失敗したとき_更新案内ファイルの退避は消さないよう伝えること()
+        {
+            // DB の退避ファイルは「削除してから実行」と案内する。同じ文言の中で、更新通知ファイルの退避まで消されないようにする
+            // （消すと開発機の更新通知ファイルを失う）
+            var dbBackup = PathOf(UiTestDatabaseGuard.DatabaseFileName + UiTestDatabaseGuard.BackupSuffix);
+            var latestBackup = PathOf(UiTestDatabaseGuard.LatestVersionFileName + UiTestDatabaseGuard.BackupSuffix);
+            File.WriteAllText(DbPath, OriginalContent);
+            File.WriteAllText(LatestVersionPath, OriginalLatestVersion);
+            var guard = UiTestDatabaseGuard.Acquire(_directory, maxAttempts: 1);
+            // 書き戻し先に同名のフォルダーがあると、更新通知ファイルを戻せない
+            Directory.CreateDirectory(LatestVersionPath);
+
+            using (OpenLikeSqlite(DbPath))
+            using (OpenLikeSqlite(dbBackup))
+            {
+                Action act = () => guard.DeleteWorkingDatabase();
+
+                var thrown = act.Should().Throw<AggregateException>().Which;
+                thrown.InnerExceptions.Should().HaveCount(3, "DB を消せなかった原因・退避を捨て切れなかった原因・更新通知ファイルを戻せなかった原因");
+                thrown.Message.Should().Contain(dbBackup)
+                    .And.Contain("巻き戻ります", "DB の退避ファイルの危険は従来どおり伝える")
+                    .And.Contain(latestBackup, "何が: 更新通知ファイルの退避を名指しする")
+                    .And.Contain("削除しないでください", "どうすれば: 更新通知ファイルの退避は消さない")
+                    .And.EndWith("削除してから実行してください。");
+            }
+
+            File.Exists(latestBackup).Should().BeTrue("更新通知ファイルの退避は次の実行のために残す");
+        }
+
+        [Fact]
         public void Restore_DBの書き戻しに失敗しても_更新案内ファイルは元へ戻すこと()
         {
             var journal = PathOf(UiTestDatabaseGuard.DatabaseFileName + "-journal");
