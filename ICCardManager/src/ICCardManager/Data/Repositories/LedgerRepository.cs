@@ -915,7 +915,7 @@ ORDER BY date ASC, id ASC";
         private static async Task<List<Ledger>> GetLastActiveDayLedgersBeforeAsync(
             SQLiteConnection connection, string cardIdm, DateTime day, bool excludeLentRecords)
         {
-            var lentFilter = excludeLentRecords ? "AND is_lent_record = 0" : string.Empty;
+            var lentFilter = excludeLentRecords ? "AND (is_lent_record = 0 OR is_lent_record IS NULL)" : string.Empty;
             var ledgers = new List<Ledger>();
 
             using var command = connection.CreateCommand();
@@ -1157,7 +1157,7 @@ ORDER BY l.card_idm ASC, l.date ASC, l.id ASC";
             // 残高が要らないため残高チェーン（Issue #1731）は不要で、MAX(date) だけでよい。
             command.CommandText = $@"SELECT card_idm, MAX(date) AS last_usage
 FROM ledger
-WHERE is_lent_record = 0
+WHERE (is_lent_record = 0 OR is_lent_record IS NULL)
   {ExcludeCarryoverCondition}
 GROUP BY card_idm";
 
@@ -1190,7 +1190,7 @@ GROUP BY card_idm";
        MAX(date) AS last_usage
 FROM ledger
 WHERE date BETWEEN @fromDate AND @toDate
-  AND is_lent_record = 0
+  AND (is_lent_record = 0 OR is_lent_record IS NULL)
   {ExcludeCarryoverCondition}
 GROUP BY card_idm";
 
@@ -1233,7 +1233,7 @@ GROUP BY card_idm";
        COUNT(*) AS usage_count
 FROM ledger
 WHERE date BETWEEN @fromDate AND @toDate
-  AND is_lent_record = 0
+  AND (is_lent_record = 0 OR is_lent_record IS NULL)
   {ExcludeCarryoverCondition}
   {ExcludeRefundLedgerCondition}
 GROUP BY ym, lender, staff
@@ -1290,7 +1290,7 @@ ORDER BY ym, staff";
     SELECT card_idm AS c, strftime('%Y-%m', date) AS ym, MAX(DATE(date)) AS d
     FROM ledger
     WHERE date BETWEEN @fromDate AND @toDate
-      AND is_lent_record = 0
+      AND (is_lent_record = 0 OR is_lent_record IS NULL)
     GROUP BY c, ym
 )
 SELECT l.id, l.card_idm, l.lender_idm, l.date, l.summary, l.income, l.expense, l.balance,
@@ -1298,7 +1298,7 @@ SELECT l.id, l.card_idm, l.lender_idm, l.date, l.summary, l.income, l.expense, l
 FROM ledger l
 JOIN last_day ON last_day.c = l.card_idm AND last_day.d = DATE(l.date)
 WHERE l.date BETWEEN @fromDate AND @toDate
-  AND l.is_lent_record = 0
+  AND (l.is_lent_record = 0 OR l.is_lent_record IS NULL)
 ORDER BY l.card_idm, l.date, l.id";
 
                 AddDateRangeParameters(command, fromDate, toDate);
@@ -1349,7 +1349,7 @@ ORDER BY l.card_idm, l.date, l.id";
     SELECT card_idm AS c, DATE(MAX(date)) AS d
     FROM ledger
     WHERE date < @beforeDate
-      AND is_lent_record = 0
+      AND (is_lent_record = 0 OR is_lent_record IS NULL)
     GROUP BY card_idm
 )
 SELECT l.id, l.card_idm, l.lender_idm, l.date, l.summary, l.income, l.expense, l.balance,
@@ -1357,7 +1357,7 @@ SELECT l.id, l.card_idm, l.lender_idm, l.date, l.summary, l.income, l.expense, l
 FROM last_day
 CROSS JOIN ledger l ON l.card_idm = last_day.c AND l.date >= last_day.d
 WHERE l.date < @beforeDate
-  AND l.is_lent_record = 0
+  AND (l.is_lent_record = 0 OR l.is_lent_record IS NULL)
 ORDER BY l.card_idm, l.date, l.id";
 
                 command.Parameters.AddWithValue("@beforeDate", SqliteDateTimeFormat.ToDayStartText(beforeDate));
@@ -1853,15 +1853,15 @@ ORDER BY ledger_id, use_date ASC, is_charge DESC, is_point_redemption DESC, id D
                 LenderIdm = reader.IsDBNull(2) ? null : reader.GetString(2),
                 Date = SqliteDateTimeFormat.ParseStored(reader.GetString(3)),
                 Summary = reader.GetString(4),
-                Income = reader.GetInt32(5),
-                Expense = reader.GetInt32(6),
+                Income = reader.GetInt32OrDefault(5, 0),
+                Expense = reader.GetInt32OrDefault(6, 0),
                 Balance = reader.GetInt32(7),
                 StaffName = reader.IsDBNull(8) ? null : reader.GetString(8),
                 Note = reader.IsDBNull(9) ? null : reader.GetString(9),
                 ReturnerIdm = reader.IsDBNull(10) ? null : reader.GetString(10),
                 LentAt = reader.IsDBNull(11) ? null : SqliteDateTimeFormat.ParseStored(reader.GetString(11)),
                 ReturnedAt = reader.IsDBNull(12) ? null : SqliteDateTimeFormat.ParseStored(reader.GetString(12)),
-                IsLentRecord = reader.GetInt32(13) == 1,
+                IsLentRecord = reader.GetFlagOrFalse(13),
                 CompanionCount = reader.GetInt32(14)
             };
         }
@@ -1878,15 +1878,15 @@ ORDER BY ledger_id, use_date ASC, is_charge DESC, is_point_redemption DESC, id D
                 LenderIdm = reader.IsDBNull(2) ? null : reader.GetString(2),
                 Date = SqliteDateTimeFormat.ParseStored(reader.GetString(3)),
                 Summary = reader.GetString(4),
-                Income = reader.GetInt32(5),
-                Expense = reader.GetInt32(6),
+                Income = reader.GetInt32OrDefault(5, 0),
+                Expense = reader.GetInt32OrDefault(6, 0),
                 Balance = reader.GetInt32(7),
                 StaffName = reader.IsDBNull(8) ? null : reader.GetString(8),
                 Note = reader.IsDBNull(9) ? null : reader.GetString(9),
                 ReturnerIdm = reader.IsDBNull(10) ? null : reader.GetString(10),
                 LentAt = reader.IsDBNull(11) ? null : SqliteDateTimeFormat.ParseStored(reader.GetString(11)),
                 ReturnedAt = reader.IsDBNull(12) ? null : SqliteDateTimeFormat.ParseStored(reader.GetString(12)),
-                IsLentRecord = reader.GetInt32(13) == 1,
+                IsLentRecord = reader.GetFlagOrFalse(13),
                 CompanionCount = reader.GetInt32(14),
                 DetailCount = reader.GetInt32(15)
             };
@@ -1910,9 +1910,9 @@ ORDER BY ledger_id, use_date ASC, is_charge DESC, is_point_redemption DESC, id D
                 BusStops = reader.IsDBNull(4) ? null : reader.GetString(4),
                 Amount = reader.IsDBNull(5) ? null : reader.GetInt32(5),
                 Balance = reader.IsDBNull(6) ? null : reader.GetInt32(6),
-                IsCharge = reader.GetInt32(7) == 1,
-                IsPointRedemption = !reader.IsDBNull(8) && reader.GetInt32(8) == 1,
-                IsBus = reader.GetInt32(9) == 1,
+                IsCharge = reader.GetFlagOrFalse(7),
+                IsPointRedemption = reader.GetFlagOrFalse(8),
+                IsBus = reader.GetFlagOrFalse(9),
                 GroupId = reader.IsDBNull(10) ? null : reader.GetInt32(10),
                 // Issue #548: ledger_detail.id を使って正しい時系列順を保持
                 SequenceNumber = reader.IsDBNull(11) ? 0 : (int)reader.GetInt64(11)
@@ -1956,7 +1956,7 @@ WHERE l.card_idm = @cardIdm AND l.date < @fromDate AND d.use_date >= @fromDate";
             {
                 var useDate = reader.IsDBNull(0) ? (DateTime?)null : SqliteDateTimeFormat.ParseStored(reader.GetString(0));
                 var balance = reader.IsDBNull(1) ? (int?)null : reader.GetInt32(1);
-                var isCharge = reader.GetInt32(2) == 1;
+                var isCharge = reader.GetFlagOrFalse(2);
                 result.Add((useDate, balance, isCharge));
             }
 
@@ -2000,8 +2000,8 @@ WHERE card_idm IN ({string.Join(", ", parameters)})";
                 var cardIdm = reader.GetString(0);
                 var date = SqliteDateTimeFormat.ParseStored(reader.GetString(1));
                 var summary = reader.GetString(2);
-                var income = reader.GetInt32(3);
-                var expense = reader.GetInt32(4);
+                var income = reader.GetInt32OrDefault(3, 0);
+                var expense = reader.GetInt32OrDefault(4, 0);
                 var balance = reader.GetInt32(5);
                 result.Add((cardIdm, date, summary, income, expense, balance));
             }
@@ -2437,12 +2437,11 @@ WHERE id = @id";
                 return false;
             }
 
-            // income / expense / balance は NULL を許す列（Migration_001）。NULL は 0 として比べる
+            // income / expense は NULL を許す列（Migration_001。balance は NOT NULL）。NULL は 0 として比べる
             // （統合の UPDATE は常に非 NULL の値を SET するため、NULL なら統合後に書き換えられたことになり不一致で中止する）
-            int ReadOrZero(int ordinal) => reader.IsDBNull(ordinal) ? 0 : reader.GetInt32(ordinal);
-            return ReadOrZero(0) == expected.Income
-                && ReadOrZero(1) == expected.Expense
-                && ReadOrZero(2) == expected.Balance;
+            return reader.GetInt32OrDefault(0, 0) == expected.Income
+                && reader.GetInt32OrDefault(1, 0) == expected.Expense
+                && reader.GetInt32OrDefault(2, 0) == expected.Balance;
         }
 
         /// <summary>
@@ -2535,7 +2534,7 @@ VALUES (@mergedAt, @targetLedgerId, @description, @undoData)";
                     reader.GetInt32(2),
                     reader.GetString(3),
                     reader.GetString(4),
-                    reader.GetInt32(5) == 1
+                    reader.GetFlagOrFalse(5)
                 ));
             }
 
@@ -2574,7 +2573,7 @@ VALUES (@mergedAt, @targetLedgerId, @description, @undoData)";
             // undo_data（JSON）は読まない。統合先の ID は target_ledger_id 列にもある（SaveMergeHistoryAsync）
             command.CommandText = @"SELECT EXISTS (
     SELECT 1 FROM ledger_merge_history
-    WHERE target_ledger_id = @targetLedgerId AND is_undone = 0 AND id > @historyId)";
+    WHERE target_ledger_id = @targetLedgerId AND (is_undone = 0 OR is_undone IS NULL) AND id > @historyId)";
             command.Parameters.AddWithValue("@targetLedgerId", targetLedgerId);
             command.Parameters.AddWithValue("@historyId", historyId);
             return Convert.ToInt64(await command.ExecuteScalarAsync().ConfigureAwait(false), CultureInfo.InvariantCulture) == 1;
@@ -2584,11 +2583,11 @@ VALUES (@mergedAt, @targetLedgerId, @description, @undoData)";
         {
             using var command = connection.CreateCommand();
             command.Transaction = transaction;
-            // Issue #1806: is_undone = 0 を条件に含め、影響行数で競合を検出する（Issue #1753 の作法）。
+            // Issue #1806: 未取消（is_undone が 0 または NULL。Issue #2381）を条件に含め、影響行数で競合を検出する（Issue #1753 の作法）。
             // 共有モードで 2 台が同じ履歴を同時に取り消すと、両方が「未取消」を読んでから書き込みに来る。
             // 後着の UPDATE を 0 行にして false を返し、呼び出し元が台帳の復元ごとロールバックすることで
             // 統合元の二重 INSERT を防ぐ。
-            command.CommandText = "UPDATE ledger_merge_history SET is_undone = 1 WHERE id = @id AND is_undone = 0";
+            command.CommandText = "UPDATE ledger_merge_history SET is_undone = 1 WHERE id = @id AND (is_undone = 0 OR is_undone IS NULL)";
             command.Parameters.AddWithValue("@id", historyId);
 
             var affected = await command.ExecuteNonQueryAsync().ConfigureAwait(false);
@@ -2675,7 +2674,7 @@ ORDER BY date ASC, id ASC";
             // 該当する行が無いカード（明細なしの行を持たない通常のカード）では、そのカードの台帳行をすべて読む
             // （読むのは日付と摘要の 2 列で、カード 1 枚分。返却のたびに 1 回）
             command.CommandText = @"SELECT l.date, l.summary FROM ledger l
-WHERE l.card_idm = @cardIdm AND l.is_lent_record = 0
+WHERE l.card_idm = @cardIdm AND (l.is_lent_record = 0 OR l.is_lent_record IS NULL)
   AND NOT EXISTS (SELECT 1 FROM ledger_detail d WHERE d.ledger_id = l.id)
 ORDER BY l.date DESC, l.id DESC";
 

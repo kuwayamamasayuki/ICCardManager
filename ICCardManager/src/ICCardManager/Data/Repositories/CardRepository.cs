@@ -68,7 +68,7 @@ namespace ICCardManager.Data.Repositories
        is_refunded, refunded_at,
        carryover_income_total, carryover_expense_total, carryover_fiscal_year
 FROM ic_card
-WHERE is_deleted = 0
+WHERE (is_deleted = 0 OR is_deleted IS NULL)
 ORDER BY card_type, card_number";
 
             using var reader = await command.ExecuteReaderAsync().ConfigureAwait(false);
@@ -126,9 +126,9 @@ ORDER BY card_type, card_number";
         /// </summary>
         /// <remarks>
         /// 貸出可能なカードの条件:
-        /// - 論理削除されていない（is_deleted = 0）
-        /// - 払戻済でない（is_refunded = 0）←Issue #530
-        /// - 貸出中でない（is_lent = 0）
+        /// - 論理削除されていない（is_deleted が 0 または NULL。Issue #2381）
+        /// - 払戻済でない（is_refunded が 0 または NULL）←Issue #530
+        /// - 貸出中でない（is_lent が 0 または NULL）
         /// </remarks>
         private async Task<IEnumerable<IcCard>> GetAvailableFromDbAsync()
         {
@@ -142,7 +142,7 @@ ORDER BY card_type, card_number";
        is_refunded, refunded_at,
        carryover_income_total, carryover_expense_total, carryover_fiscal_year
 FROM ic_card
-WHERE is_deleted = 0 AND is_refunded = 0 AND is_lent = 0
+WHERE (is_deleted = 0 OR is_deleted IS NULL) AND (is_refunded = 0 OR is_refunded IS NULL) AND (is_lent = 0 OR is_lent IS NULL)
 ORDER BY card_type, card_number";
 
             using var reader = await command.ExecuteReaderAsync().ConfigureAwait(false);
@@ -183,7 +183,7 @@ ORDER BY card_type, card_number";
        c.is_refunded, c.refunded_at,
        c.carryover_income_total, c.carryover_expense_total, c.carryover_fiscal_year
 FROM ic_card c
-WHERE c.is_refunded = 1 AND c.is_deleted = 0
+WHERE c.is_refunded = 1 AND (c.is_deleted = 0 OR c.is_deleted IS NULL)
   AND EXISTS (SELECT 1 FROM ledger l WHERE l.card_idm = c.card_idm AND l.is_lent_record = 1)
 ORDER BY c.card_idm";
 
@@ -221,7 +221,7 @@ ORDER BY c.card_idm";
        is_refunded, refunded_at,
        carryover_income_total, carryover_expense_total, carryover_fiscal_year
 FROM ic_card
-WHERE is_deleted = 0 AND is_lent = 1
+WHERE (is_deleted = 0 OR is_deleted IS NULL) AND is_lent = 1
 ORDER BY last_lent_at DESC";
 
             using var reader = await command.ExecuteReaderAsync().ConfigureAwait(false);
@@ -252,7 +252,7 @@ WHERE card_idm = @cardIdm"
        is_refunded, refunded_at,
        carryover_income_total, carryover_expense_total, carryover_fiscal_year
 FROM ic_card
-WHERE card_idm = @cardIdm AND is_deleted = 0";
+WHERE card_idm = @cardIdm AND (is_deleted = 0 OR is_deleted IS NULL)";
 
             command.Parameters.AddWithValue("@cardIdm", cardIdm);
 
@@ -400,7 +400,7 @@ VALUES (@cardIdm, @cardType, @cardNumber, @note, 0, NULL, 0, NULL, NULL, @starti
             command.Transaction = transaction;
             command.CommandText = @"UPDATE ic_card
 SET card_type = @cardType, card_number = @cardNumber, note = @note
-WHERE card_idm = @cardIdm AND is_deleted = 0";
+WHERE card_idm = @cardIdm AND (is_deleted = 0 OR is_deleted IS NULL)";
 
             command.Parameters.AddWithValue("@cardIdm", card.CardIdm);
             command.Parameters.AddWithValue("@cardType", card.CardType);
@@ -413,7 +413,7 @@ WHERE card_idm = @cardIdm AND is_deleted = 0";
                 if (transaction == null)
                 {
                     // トランザクション外の場合のみキャッシュ無効化。
-                    // Issue #1759: 影響行数 0（＝WHERE is_deleted = 0 に一致しない）のときも
+                    // Issue #1759: 影響行数 0（＝未削除（is_deleted が 0 または NULL）の条件に一致しない）のときも
                     // 無効化する。0 行は「他 PC がこのカードを削除した」ことの証明であり、
                     // キャッシュされたカード一覧が古いと確定している。ここで捨てないと、
                     // 競合を検出した ViewModel が案内どおりに一覧を再読込しても
@@ -465,7 +465,7 @@ SET starting_page_number = @startingPageNumber,
     carryover_income_total = @carryoverIncomeTotal,
     carryover_expense_total = @carryoverExpenseTotal,
     carryover_fiscal_year = @carryoverFiscalYear
-WHERE card_idm = @cardIdm AND is_deleted = 0
+WHERE card_idm = @cardIdm AND (is_deleted = 0 OR is_deleted IS NULL)
   AND IFNULL(starting_page_number, 1) = @expectedStartingPageNumber
   AND IFNULL(carryover_income_total, 0) = @expectedCarryoverIncomeTotal
   AND IFNULL(carryover_expense_total, 0) = @expectedCarryoverExpenseTotal
@@ -502,7 +502,7 @@ WHERE card_idm = @cardIdm AND is_deleted = 0
             // 払い戻すと払戻済のカードが貸出中になる。返却・修復（@isLent = 0）は従来どおり is_refunded を見ない。
             command.CommandText = @"UPDATE ic_card
 SET is_lent = @isLent, last_lent_at = @lentAt, last_lent_staff = @staffIdm
-WHERE card_idm = @cardIdm AND is_deleted = 0 AND (@isLent = 0 OR is_refunded = 0)";
+WHERE card_idm = @cardIdm AND (is_deleted = 0 OR is_deleted IS NULL) AND (@isLent = 0 OR is_refunded = 0 OR is_refunded IS NULL)";
 
             command.Parameters.AddWithValue("@cardIdm", cardIdm);
             command.Parameters.AddWithValue("@isLent", isLent ? 1 : 0);
@@ -512,7 +512,7 @@ WHERE card_idm = @cardIdm AND is_deleted = 0 AND (@isLent = 0 OR is_refunded = 0
             var result = await command.ExecuteNonQueryAsync().ConfigureAwait(false);
 
             // 貸出状態変更時は即座にキャッシュを無効化。
-            // Issue #1759 / #1953: 影響行数 0（＝WHERE is_deleted = 0 に一致しない）のときも
+            // Issue #1759 / #1953: 影響行数 0（＝未削除（is_deleted が 0 または NULL）の条件に一致しない）のときも
             // 無効化する。0 行は「他 PC がこのカードを削除した」ことの証明であり、
             // 手元のカード一覧が古いと確定した瞬間である（書き込みが成功したときより
             // 無効化の根拠が強い）。捨てないと、競合を検出した呼び出し元が一覧を再読込しても
@@ -543,11 +543,15 @@ WHERE card_idm = @cardIdm AND is_deleted = 0 AND (@isLent = 0 OR is_refunded = 0
 
             // Issue #1109: check-then-act を排除し、WHERE句のDBガードに一元化。
             // affected rows = 0 の場合は事後診断で原因を特定する。
+            // Issue #2370: 払戻済のカードは削除できない（Issue #530）。画面の CanDelete は一覧を読んだ時点の
+            // 値しか見ないため、その後に他 PC や別の操作で払い戻されたカードもここまで到達し得る。
+            // 保証は WHERE の is_refunded（0 または NULL を未払戻とみなす。Issue #2381）で行う（払い戻し・貸出中にする更新と同じく WHERE が正）。
+            // 拒否は事後診断で Conflict になる（貸出中でなく、行は存在する）。
             using var command = connection.CreateCommand();
             command.Transaction = transaction;
             command.CommandText = @"UPDATE ic_card
 SET is_deleted = 1, deleted_at = datetime('now', 'localtime')
-WHERE card_idm = @cardIdm AND is_deleted = 0 AND is_lent = 0";
+WHERE card_idm = @cardIdm AND (is_deleted = 0 OR is_deleted IS NULL) AND (is_lent = 0 OR is_lent IS NULL) AND (is_refunded = 0 OR is_refunded IS NULL)";
 
             command.Parameters.AddWithValue("@cardIdm", cardIdm);
 
@@ -747,16 +751,16 @@ WHERE card_type = @cardType";
                 CardType = reader.GetString(1),
                 CardNumber = reader.GetString(2),
                 Note = reader.IsDBNull(3) ? null : reader.GetString(3),
-                IsDeleted = reader.GetInt32(4) == 1,
+                IsDeleted = reader.GetFlagOrFalse(4),
                 DeletedAt = reader.IsDBNull(5) ? null : SqliteDateTimeFormat.ParseStored(reader.GetString(5)),
-                IsLent = reader.GetInt32(6) == 1,
+                IsLent = reader.GetFlagOrFalse(6),
                 LastLentAt = reader.IsDBNull(7) ? null : SqliteDateTimeFormat.ParseStored(reader.GetString(7)),
                 LastLentStaff = reader.IsDBNull(8) ? null : reader.GetString(8),
-                StartingPageNumber = reader.IsDBNull(9) ? 1 : reader.GetInt32(9),
-                IsRefunded = reader.IsDBNull(10) ? false : reader.GetInt32(10) == 1,
+                StartingPageNumber = reader.GetInt32OrDefault(9, 1),
+                IsRefunded = reader.GetFlagOrFalse(10),
                 RefundedAt = reader.IsDBNull(11) ? null : SqliteDateTimeFormat.ParseStored(reader.GetString(11)),
-                CarryoverIncomeTotal = reader.IsDBNull(12) ? 0 : reader.GetInt32(12),
-                CarryoverExpenseTotal = reader.IsDBNull(13) ? 0 : reader.GetInt32(13),
+                CarryoverIncomeTotal = reader.GetInt32OrDefault(12, 0),
+                CarryoverExpenseTotal = reader.GetInt32OrDefault(13, 0),
                 CarryoverFiscalYear = reader.IsDBNull(14) ? (int?)null : reader.GetInt32(14)
             };
         }
@@ -775,7 +779,7 @@ WHERE card_type = @cardType";
             command.Transaction = transaction;
             command.CommandText = @"UPDATE ic_card
 SET is_refunded = 1, refunded_at = @refundedAt
-WHERE card_idm = @cardIdm AND is_deleted = 0 AND is_refunded = 0 AND is_lent = 0";
+WHERE card_idm = @cardIdm AND (is_deleted = 0 OR is_deleted IS NULL) AND (is_refunded = 0 OR is_refunded IS NULL) AND (is_lent = 0 OR is_lent IS NULL)";
 
             command.Parameters.AddWithValue("@cardIdm", cardIdm);
             command.Parameters.AddWithValue("@refundedAt", SqliteDateTimeFormat.ToText(refundedAt));
