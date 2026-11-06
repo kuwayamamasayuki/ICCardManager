@@ -314,7 +314,7 @@ jobs:
 
     /// <summary>
     /// ビルド警告ゼロの検証は Release と Debug の両方で行う
-    /// （.claude/rules/development-conventions.md #1786「Release / Debug 双方で 0 警告を実測する」）。
+    /// （.claude/rules/development-conventions.md「ビルド警告は「抑制」ではなく「是正」で消す（Issue #1786）」の「Release / Debug 双方でソリューションビルドし 0 警告を実測する」）。
     /// </summary>
     [Fact]
     public void ビルド警告ゼロ検証はReleaseとDebugの両方の構成で行われること()

@@ -492,7 +492,7 @@ public class SummaryGeneratorEdgeCaseTests : IDisposable
     /// <summary>
     /// 運賃 0 円の片側欠落明細（入場記録のみ＝未完了移動）は従来どおり
     /// 摘要に採用されないことを検証。プレースホルダ補完は「運賃が発生した完了移動」に
-    /// 限定される（SummaryGeneratorComprehensiveTests TC019 の仕様を維持する境界）。
+    /// 限定される（払出のない未完了記録を摘要に載せない仕様を維持する境界）。
     /// </summary>
     [Fact]
     public void Generate_OneSidedTripWithZeroAmount_ExcludedFromSummary()

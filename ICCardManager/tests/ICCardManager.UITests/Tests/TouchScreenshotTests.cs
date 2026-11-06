@@ -59,7 +59,8 @@ namespace ICCardManager.UITests.Tests
             // 1. 職員証タッチ → 認識トースト＋交通系ICカードタッチ待ち
             InvokeDebugPanelButton(page, TestConstants.DebugPanelStaffButton);
             var toast = WaitForToast(fixture);
-            File.Exists(ScreenshotHelper.CaptureWithToast(fixture.MainWindow, toast, "staff_recognized.png")).Should().BeTrue();
+            var staffPath = ScreenshotHelper.CaptureWithToast(fixture.MainWindow, toast, "staff_recognized.png");
+            File.Exists(staffPath).Should().BeTrue();
 
             // 認識トーストが消えるのを待ってから次のタッチへ（貸出トーストと見分けるため）
             WaitForToastGone(fixture);
@@ -67,8 +68,13 @@ namespace ICCardManager.UITests.Tests
             // 2. 交通系ICカードタッチ → 貸出完了トースト
             InvokeDebugPanelButton(page, TestConstants.DebugPanelIcCardButton);
             toast = WaitForToast(fixture);
-            File.Exists(ScreenshotHelper.CaptureWithToast(fixture.MainWindow, toast, "lend.png")).Should().BeTrue();
+            var lendPath = ScreenshotHelper.CaptureWithToast(fixture.MainWindow, toast, "lend.png");
+            File.Exists(lendPath).Should().BeTrue();
             File.Exists(ScreenshotHelper.Capture(toast, "toast_lend.png", bringToFront: false)).Should().BeTrue();
+            // 撮った後に確かめる。トーストは 3 秒で消えるので、トースト単体の撮影の後に置く
+            // （理由は ScreenshotAssertions.RequireNoNewVersionNotice。Issue #2394）
+            // staff_recognized.png も同じ起動のメイン画面全体を写している（案内は一度出たら消えないので、ここで両方を確かめられる）
+            ScreenshotAssertions.RequireNoNewVersionNotice(fixture.MainWindow, staffPath, lendPath);
         }
 
         /// <summary>
@@ -108,8 +114,12 @@ namespace ICCardManager.UITests.Tests
             ExecuteVirtualTouchWithOneEntry(page, entryStation: "博多", exitStation: "天神");
 
             var toast = WaitForToast(fixture);
-            File.Exists(ScreenshotHelper.CaptureWithToast(fixture.MainWindow, toast, "return.png")).Should().BeTrue();
+            var returnPath = ScreenshotHelper.CaptureWithToast(fixture.MainWindow, toast, "return.png");
+            File.Exists(returnPath).Should().BeTrue();
             File.Exists(ScreenshotHelper.Capture(toast, "toast_return.png", bringToFront: false)).Should().BeTrue();
+            // 撮った後に確かめる。トーストは 3 秒で消えるので、トースト単体の撮影の後に置く
+            // （理由は ScreenshotAssertions.RequireNoNewVersionNotice。Issue #2394）
+            ScreenshotAssertions.RequireNoNewVersionNotice(fixture.MainWindow, returnPath);
         }
 
         [SkippableFact]

@@ -130,7 +130,7 @@ public class CoverageInstrumentationPrerequisiteTests
 
     /// <summary>
     /// 検出の前段（enum 定数を拾う）を既知の入力で固定する。実データ（本体）から enum 定数が無くなっても、
-    /// 検出が空振りしていないことはこちらで表明し続ける（development-conventions.md「空振り検出を各対象が非空で書かない」）。
+    /// 検出が空振りしていないことはこちらで表明し続ける（development-conventions.md「空振り検出を「各対象が非空であること」で書かない」）。
     /// </summary>
     [Fact]
     public void enum定数の検出は既定値付きの引数とconstフィールドとNullableの既定値を拾うこと()

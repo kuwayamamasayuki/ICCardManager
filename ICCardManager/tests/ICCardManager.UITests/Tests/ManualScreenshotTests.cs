@@ -68,6 +68,8 @@ namespace ICCardManager.UITests.Tests
 
             var path = ScreenshotHelper.Capture(fixture.MainWindow, "main.png");
             File.Exists(path).Should().BeTrue();
+            // 撮った後に確かめる（理由は ScreenshotAssertions.RequireNoNewVersionNotice。Issue #2394）
+            ScreenshotAssertions.RequireNoNewVersionNotice(fixture.MainWindow, path);
         }
 
         [SkippableFact]
@@ -84,7 +86,11 @@ namespace ICCardManager.UITests.Tests
             // 「警告つき」と名乗る画像に警告が写らない
             WaitForWarningArea(page);
 
-            File.Exists(ScreenshotHelper.Capture(fixture.MainWindow, "main_with_warnings.png")).Should().BeTrue();
+            var path = ScreenshotHelper.Capture(fixture.MainWindow, "main_with_warnings.png");
+            File.Exists(path).Should().BeTrue();
+            // 「システム警告つき」の説明図に、投入データ以外の警告（開発機の更新案内）が写っていないこと。
+            // 撮った後に確かめる（理由は ScreenshotAssertions.RequireNoNewVersionNotice。Issue #2394）
+            ScreenshotAssertions.RequireNoNewVersionNotice(fixture.MainWindow, path);
         }
 
         [SkippableFact]
@@ -191,7 +197,10 @@ namespace ICCardManager.UITests.Tests
             checkBoxes![0].AsCheckBox().IsChecked = true;
             checkBoxes[1].AsCheckBox().IsChecked = true;
 
-            File.Exists(ScreenshotHelper.Capture(fixture.MainWindow, "history_merge.png")).Should().BeTrue();
+            var path = ScreenshotHelper.Capture(fixture.MainWindow, "history_merge.png");
+            File.Exists(path).Should().BeTrue();
+            // 撮った後に確かめる（理由は ScreenshotAssertions.RequireNoNewVersionNotice。Issue #2394）
+            ScreenshotAssertions.RequireNoNewVersionNotice(fixture.MainWindow, path);
         }
 
         /// <summary>
@@ -379,6 +388,8 @@ namespace ICCardManager.UITests.Tests
 
             var path = ScreenshotHelper.Capture(fixture.MainWindow, "history.png");
             File.Exists(path).Should().BeTrue();
+            // 撮った後に確かめる（理由は ScreenshotAssertions.RequireNoNewVersionNotice。Issue #2394）
+            ScreenshotAssertions.RequireNoNewVersionNotice(fixture.MainWindow, path);
         }
 
         [SkippableTheory]
@@ -429,7 +440,6 @@ namespace ICCardManager.UITests.Tests
                 "（残額不足のカードを含む投入データで起動していること）");
         }
 
-
         /// <summary>
         /// 残額不足の警告が出ていないことを確かめる。
         /// </summary>
@@ -445,6 +455,8 @@ namespace ICCardManager.UITests.Tests
         /// <b>投入データでは作れない環境由来の警告</b>も並ぶため、それを含めて禁止すると、そうした環境では
         /// <c>main.png</c> が原理的に撮れなくなる。投入データが支配する残額不足だけを見る。
         /// 環境由来の警告が写り込んでいないかは差し替え前の目視で確かめる（<c>docs/screenshots/README.md</c>）。
+        /// ただし更新の案内は、UI テストのガードが <c>latest_version.txt</c> を退避して支配するので
+        /// <see cref="ScreenshotAssertions.RequireNoNewVersionNotice"/> で表明する（Issue #2394）。
         /// </para>
         /// </remarks>
         private static void RequireNoLowBalanceWarning(MainWindowPage page)

@@ -58,7 +58,7 @@ namespace ICCardManager.Services
             var dashboardItems = new List<CardBalanceDashboardItem>();
 
             // Issue #1947: 母集団は「運用中のカード」（未削除 かつ 未払戻）。
-            // CardRepository.GetAllAsync は is_deleted = 0 でしか絞らないため、
+            // CardRepository.GetAllAsync は is_deleted が 0 または NULL（未削除）でしか絞らないため、
             // 払戻済みカード（残額 0 円で is_deleted は 0 のまま）が残る。除かないと
             // WarningService.CheckLowBalanceWarnings が毎回「残額 0円」の警告を作り、
             // 除去手段が無いまま本当に補充が必要なカードの警告を押し出す。

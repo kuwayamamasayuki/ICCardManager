@@ -622,7 +622,7 @@ public partial class MainViewModel
 
         // Issue #1739: 有効でなくなったカードの残高不整合警告を取り除く。
         // 生成元（履歴パネル HistoryPanelViewModel の CheckAndNotifyConsistencyAsync / CheckAllCardsConsistencyAsync）はどちらも
-        // is_deleted = 0 のカードしか走査しないため、カードを論理削除すると除去経路が無くなり、
+        // is_deleted が 0 または NULL（未削除）のカードしか走査しないため、カードを論理削除すると除去経路が無くなり、
         // クリックしても履歴が開かない警告が再起動まで残る（旧実装では ApplyDataWarnings の
         // Clear() が巻き添えで消していた）。ダッシュボードは DashboardService が
         // CardRepository.GetAllAsync から組む「有効なカードの母集団」そのもののため、

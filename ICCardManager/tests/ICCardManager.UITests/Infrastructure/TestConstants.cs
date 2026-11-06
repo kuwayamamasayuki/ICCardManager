@@ -386,6 +386,10 @@ namespace ICCardManager.UITests.Infrastructure
         [NotUiaName]
         public const string SystemWarningHeaderText = "⚠ システム警告";
 
+        /// <summary>システム警告の一覧（ItemsControl）の AutomationProperties.Name。警告の行はこの子に並ぶ（Issue #2394）。</summary>
+        [UiaName]
+        public const string SystemWarningListName = "システム警告一覧";
+
         /// <summary>
         /// 残額不足の警告だけを見分ける文字列（<c>WarningService</c> の LowBalance の
         /// <c>DisplayText</c> にだけ現れる）。警告行は <c>DisplayText</c> をそのまま表示する
@@ -398,6 +402,19 @@ namespace ICCardManager.UITests.Infrastructure
         /// </remarks>
         [NotUiaName]
         public const string LowBalanceWarningMarker = "（しきい値:";
+
+        /// <summary>
+        /// 更新の案内（<c>WarningService</c> の <c>NewVersionAvailable</c>）の文言に含まれる語（Issue #2394）。
+        /// 警告の行は Button で、<c>AutomationProperties.Name="{Binding DisplayText}"</c>（MainWindow.xaml の警告一覧）により
+        /// UIA Name が案内の文言そのものになるので、部分一致で見つかる。バインディング由来で XAML にリテラルとして現れないため <c>[NotUiaName]</c>。
+        /// </summary>
+        /// <remarks>
+        /// 更新の案内は DB と同じフォルダーの <c>latest_version.txt</c> から作られる。UI テストの間は
+        /// <c>UiTestDatabaseGuard</c> がこのファイルを退避して取り除くので、撮影画像に出てはならない
+        /// （投入データではなく、ガードが支配する環境由来の警告）。
+        /// </remarks>
+        [NotUiaName]
+        public const string NewVersionNoticeMarker = "新しいバージョン";
 
         // ── タイムアウト（秒） ────────────────────────────
         public const int AppLaunchTimeoutSeconds = 30;
