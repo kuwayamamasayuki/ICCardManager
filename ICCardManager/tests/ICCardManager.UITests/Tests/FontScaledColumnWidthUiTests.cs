@@ -122,7 +122,7 @@ namespace ICCardManager.UITests.Tests
         /// <remarks>
         /// 一覧は行を仮想化しており、表示領域の外の行は UIA の木に現れない。文字サイズ「特大」では見える行が 4 行ほどになり、
         /// 今日の行（日付の昇順で末尾）は月の 5 日以降の撮影で表示領域の外に出て「セルが見つからない」になる
-        /// （2026-11-09 の実行で検出）。横方向は動かさない（最小幅での「操作」列の位置を確かめるため）。
+        /// （2026-11-09 の実行で検出）。横方向は動かさない（左端の日付のセルを表示領域に残すため。<see cref="CellClipping"/> はセルの右端が一覧の内側にあることを確かめる）。
         /// </remarks>
         private static void ScrollToLatestRows(FlaUI.Core.AutomationElements.AutomationElement grid)
         {
