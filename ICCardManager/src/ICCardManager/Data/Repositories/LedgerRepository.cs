@@ -805,6 +805,8 @@ ORDER BY date ASC, id ASC";
         /// 「最新残高」の単票クエリ（Issue #1731）は貸出中レコードを含める（返却処理
         /// <c>LendingService.GetLastBalanceAsync</c> が貸出中プレースホルダの残高を残高チェーンの
         /// 起点として使うため）ので false。グラフ用集計（Issue #1770）は貸出中を除外するので true。
+        /// 単票クエリのうち帳票・履歴の前年度繰越（<see cref="GetCarryoverBalanceAsync"/>）だけは例外で、
+        /// 明細・集計と母集団を揃えて貸出中を除くので true（Issue #2418）。
         /// </param>
         /// <exception cref="ArgumentException"><paramref name="sameDayLedgers"/> が空のとき（呼び出し元は空の日を渡さない）。</exception>
         private static async Task<Ledger> ResolveChainFinalLedgerAsync(

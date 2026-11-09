@@ -1,3 +1,4 @@
+#nullable enable
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -29,7 +30,7 @@ namespace ICCardManager.Services
         }
 
         /// <inheritdoc/>
-        public async Task<MonthlyReportData> BuildAsync(string cardIdm, int year, int month)
+        public async Task<MonthlyReportData?> BuildAsync(string cardIdm, int year, int month)
         {
             // カード情報を取得
             var card = await _cardRepository.GetByIdmAsync(cardIdm, includeDeleted: true).ConfigureAwait(false);
@@ -49,12 +50,12 @@ namespace ICCardManager.Services
 
             // Issue #2418: 3 月を繰越月にして登録したカードは、年度の初日に導入行「前年度より繰越」
             // （受入＝残高）が DB に実在し、年度の始まりの残高はその行が担う。帳票が前年度繰越を合成・加算すると
-            // 導入行の受入と二重になるため、導入行があれば「前年度繰越は無い」として扱う。
+            // 導入行の受入と二重になるため、年度の台帳が導入行から始まるなら「前年度繰越は無い」として扱う。
             // 「導入行より前に台帳が無いから前年度繰越は null になる」には頼らない — 3 月中の貸出中レコード・
             // 履歴の「追加」・CSV の取り込みで、導入行より前の日付の行はあり得る。
-            // 判定は紙の累計（#2326）と同じ PaperCarryoverPolicy 1 か所（#1763）。
+            // 判定は紙の累計（#2326）・履歴の繰越行と同じ PaperCarryoverPolicy 1 か所（#1763）。
             var startsWithCarryoverRecord =
-                PaperCarryoverPolicy.HasFiscalYearStartCarryoverRecord(fiscalYearStartYear, fiscalYearLedgers);
+                PaperCarryoverPolicy.HasFiscalYearStartCarryoverRecord(fiscalYearLedgers);
 
             // 年度開始前の最終残高（＝前年度繰越）。
             // 年度累計の残高チェーン並替のシードと、累計受入への加算（Issue #1494）の両方で使う。
@@ -92,7 +93,7 @@ namespace ICCardManager.Services
                 precedingBalance);
 
             // 繰越行データを生成
-            CarryoverRowData carryover = null;
+            CarryoverRowData? carryover = null;
             if (precedingBalance.HasValue)
             {
                 if (month == 4)
@@ -179,7 +180,7 @@ namespace ICCardManager.Services
 
             // 月計・累計の組み立て
             ReportTotalData monthlyTotal;
-            ReportTotalData cumulativeTotal;
+            ReportTotalData? cumulativeTotal;
 
             if (month == 4)
             {

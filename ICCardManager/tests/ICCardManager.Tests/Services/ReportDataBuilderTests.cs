@@ -1755,7 +1755,8 @@ public class ReportDataBuilderTests
         // 修正前後で入力が同じになり検出力を持たない。ReportDataBuilder の実出力を
         // そのままプリフライトへ通すことで、両者の不変条件が接続していることを表明する。
         SetupIdleFiscalYear(2025, 6, 7500);
-        var data = await _builder.BuildAsync(TestCardIdm, 2025, 6);
+        var data = await _builder.BuildAsync(TestCardIdm, 2025, 6)
+            ?? throw new InvalidOperationException("カードが登録されていれば帳票データは null にならない");
 
         // Act
         var preflight = new ReportPreflightResult();
@@ -2094,21 +2095,33 @@ public class ReportDataBuilderTests
     }
 
     /// <summary>
-    /// Issue #2418（対の表明）: 「前年度より繰越」の摘要でも年度の初日でない行は導入行とみなさない
-    /// （前年度繰越の合成・加算を止めない）
+    /// Issue #2418: 年度の台帳が導入行「前年度より繰越」から始まるかの判定。
+    /// 導入行の日付を履歴の行編集で動かしても（4/1 → 4/3）認識し、年度の途中に同じ摘要の行があるだけでは認識しない
     /// </summary>
     [Fact]
-    public void HasFiscalYearStartCarryoverRecord_OnlyMatchesFiscalYearStartDate()
+    public void HasFiscalYearStartCarryoverRecord_MatchesOnlyTheFirstDayOfTheFiscalYearLedgers()
     {
         var summary = SummaryGenerator.GetCarryoverFromPreviousYearSummary();
-        var onStart = CreateTestLedger(1, TestCardIdm, new DateTime(2027, 4, 1), summary, 5000, 0, 5000);
-        var notOnStart = CreateTestLedger(2, TestCardIdm, new DateTime(2027, 4, 2), summary, 5000, 0, 5000);
-        var lent = CreateTestLedger(3, TestCardIdm, new DateTime(2027, 4, 1), summary, 0, 0, 5000, isLentRecord: true);
+        var introOnStart = CreateTestLedger(1, TestCardIdm, new DateTime(2027, 4, 1), summary, 5000, 0, 5000);
+        var introMoved = CreateTestLedger(2, TestCardIdm, new DateTime(2027, 4, 3), summary, 5000, 0, 5000);
+        var usageSameDay = CreateTestLedger(3, TestCardIdm, new DateTime(2027, 4, 3), "鉄道（天神～博多）", 0, 210, 4790);
+        var laterUsage = CreateTestLedger(4, TestCardIdm, new DateTime(2027, 4, 10), "鉄道（博多～天神）", 0, 300, 4490);
+        var earlierUsage = CreateTestLedger(5, TestCardIdm, new DateTime(2027, 4, 2), "鉄道（博多～天神）", 0, 300, 4700);
+        var lentBefore = CreateTestLedger(6, TestCardIdm, new DateTime(2027, 4, 1), SummaryGenerator.GetLendingSummary(), 0, 0, 5000, isLentRecord: true);
+        var lentIntro = CreateTestLedger(7, TestCardIdm, new DateTime(2027, 4, 1), summary, 0, 0, 5000, isLentRecord: true);
 
-        PaperCarryoverPolicy.HasFiscalYearStartCarryoverRecord(2027, new[] { onStart }).Should().BeTrue();
-        PaperCarryoverPolicy.HasFiscalYearStartCarryoverRecord(2027, new[] { notOnStart }).Should().BeFalse();
-        PaperCarryoverPolicy.HasFiscalYearStartCarryoverRecord(2027, new[] { lent }).Should().BeFalse();
-        PaperCarryoverPolicy.HasFiscalYearStartCarryoverRecord(2028, new[] { onStart }).Should().BeFalse();
+        PaperCarryoverPolicy.HasFiscalYearStartCarryoverRecord(new[] { laterUsage, introOnStart })
+            .Should().BeTrue("年度の先頭の行が導入行");
+        PaperCarryoverPolicy.HasFiscalYearStartCarryoverRecord(new[] { laterUsage, usageSameDay, introMoved })
+            .Should().BeTrue("導入行の日付を動かしても、年度の先頭の日にあれば導入行（同じ日の利用があってもよい）");
+        PaperCarryoverPolicy.HasFiscalYearStartCarryoverRecord(new[] { lentBefore, introMoved, laterUsage })
+            .Should().BeTrue("貸出中レコードは年度の先頭として数えない");
+        PaperCarryoverPolicy.HasFiscalYearStartCarryoverRecord(new[] { earlierUsage, introMoved, laterUsage })
+            .Should().BeFalse("年度の途中に同じ摘要の行があるだけ（前年度から台帳があるカード）は導入行とみなさない");
+        PaperCarryoverPolicy.HasFiscalYearStartCarryoverRecord(new[] { lentIntro })
+            .Should().BeFalse("貸出中レコードは導入行ではない");
+        PaperCarryoverPolicy.HasFiscalYearStartCarryoverRecord(Array.Empty<Ledger>())
+            .Should().BeFalse();
     }
 
     #endregion
