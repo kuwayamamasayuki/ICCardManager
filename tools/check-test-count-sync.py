@@ -140,17 +140,22 @@ NO_PREFIXED_RANGE_RE = re.compile(
     r"^([A-Z]{1,3})([1-9]\d*)\s*(?:" + NO_RANGE_MARK + r"|-)\s*([A-Z]{1,3})([1-9]\d*)$"
 )
 # 意図した欠番の注記（``No.8・9 は欠番`` / ``No.4〜6 は欠番`` / ``No.E3 は欠番``）。番号の後に「は欠番」が続く形だけを読む
-# （「No.8 を参照。…欠番」のように、同じ行にあるだけの番号を許可に数えないため）。直後が「ではない」「でない」の
-# 否定（「No.8 は欠番ではない」）は許可に数えない（極性の反転）。インラインコード（`` `No.8 は欠番` ``）の中は、
-# 書き方の例なので読まない。
-_GAP_NOTE_TOKEN = r"[A-Z]{0,3}\d+"
+# （「No.8 を参照。…欠番」のように、同じ行にあるだけの番号を許可に数えないため）。列挙の要素ごとに ``No.`` を
+# 付けた形（``No.2、No.3 は欠番``）も読む。
+# 「は欠番」の直後は許可形に限る（句読点・括弧・空白・行末・「です」「とする」）。否定の語を並べて除く方式では、
+# 「欠番にしない」「欠番とはしない」「欠番扱いにせず」のような否定を取りこぼし、許可として読んでしまう（極性の反転）。
+# インラインコード（`` `No.8 は欠番` ``）の中は、書き方の例なので読まない。
+_GAP_NOTE_TOKEN = r"(?:No\.?\s*)?[A-Z]{0,3}\d+"
 GAP_NOTE_RE = re.compile(
-    r"No\.?\s*(" + _GAP_NOTE_TOKEN + r"(?:\s*(?:[・、,]|" + NO_RANGE_MARK + r"|-)\s*" + _GAP_NOTE_TOKEN + r")*)"
-    r"\s*は\s*欠番(?!\s*(?:では|でな|じゃな))"
+    r"No\.?\s*(" + _GAP_NOTE_TOKEN + r"(?:\s*(?:[・、,，]|" + NO_RANGE_MARK + r"|-)\s*" + _GAP_NOTE_TOKEN + r")*)"
+    r"\s*は\s*欠番(?=[\s。、，,．.（）()「」『』\[\]【】]|です|とする|$)"
 )
 INLINE_CODE_RE = re.compile(r"`+[^`]*`+")
 # 範囲を展開する上限。書き損じ（``1〜1000``）で巨大な集合を作らないため。
 MAX_NO_RANGE = 200
+# 番号のつもりで書いたが読めないセル（``13.`` ・ ``5〜3`` ・ ``1〜300`` ・全角の ``２``）。07 には既にあるので
+# それだけでは赤にしないが、抜けの位置にあれば案内に添える（原因が行の消失ではなく書式の誤りかもしれないため）。
+UNREADABLE_NO_CELL_RE = re.compile(r"^[0-9０-９]")
 # 見出しをまたいで続く表の、続ける先の候補にする直近の系列の数。07 では、続きの表の間に 1 から始め直す
 # 節（``UT-REPORT-EXPORT-STATUS-001a``）が 1 つ挟まる形があるため 2 以上が要る。
 CROSS_HEADING_LOOKBACK = 3
@@ -625,7 +630,7 @@ def parse_gap_note(line: str) -> set:
     if "欠番" not in line:
         return allowed
     for m in GAP_NOTE_RE.finditer(INLINE_CODE_RE.sub("", line)):
-        for part in re.split(r"\s*[・、,]\s*", m.group(1)):
+        for part in re.split(r"\s*[・、,，]\s*", m.group(1)):
             tokens = [(p, int(n)) for p, n in re.findall(r"([A-Z]{0,3})(\d+)", part)]
             if len(tokens) == 2 and tokens[0][0] == tokens[1][0] and tokens[0][1] < tokens[1][1]:
                 allowed.update((tokens[0][0], n) for n in range(tokens[0][1], tokens[1][1] + 1))
@@ -714,15 +719,18 @@ def find_no_column_problems(scan: NoColumnScan) -> List[Tuple[int, str]]:
       1. 同じ見出しの中の直前の表（同じ接頭辞）。間の飛びも検査する
       2. 見出しをまたいだ直近の系列（最後に行を足した順に ``CROSS_HEADING_LOOKBACK`` 個まで）のうち、最大の番号が
          ちょうど「この表の最小の番号 − 1」のもの（近いものから）。番号がつながっていることを結び付けの根拠に
-         するので、境目の行が消えていれば結び付かず赤になる。遠くの無関係な表と偶然つながらないよう、候補は直近に限る。
-         先頭の番号をすべて欠番と注記した表は、自分で 1 から始まる系列なので見出しをまたいだ続きを探さない
+         するので、境目の行が消えていれば結び付かず赤になる。遠くの無関係な表と偶然つながらないよう、候補は直近に限る
       3. どちらも無ければ 1 から始まる系列として数える（先頭の行が消えた表は、欠番の注記が無ければ赤）
+
+    **注記は、その注記が結び付いた表の受け持ちの欠けにだけ効く**。表の受け持ちは、系列のそれまでの最大の番号の次
+    （系列の最初の表なら系列の始まり）から、その表の最大の番号まで。続きとして束ねた系列でも、後ろの表の注記が前の表の
+    欠けを許すことは無い（先頭を欠番と注記した表が、偶然つながった前の表の続きになった場合も同じ）。
 
     **偶然つながる形は見逃す**: 前の表の最大の番号が、後ろの表から消えた先頭の行の数とちょうど等しいとき
     （1〜3 の表の後で、続きの表に 4〜8 だけが残った等）、後ろの表は前の表の続きに見えて緑になる（同じ見出しでも、
     見出しをまたいでも同じ）。
-    - 飛び: 系列の始まりから最大の番号までの間で、どの行も占めていない番号。系列を成す表に結び付いた注記
-      「No.8 は欠番」で許した番号は除く
+    - 飛び: 系列の始まりから最大の番号までの間で、どの行も占めていない番号。その番号を受け持つ表に結び付いた注記
+      「No.8 は欠番」で許した番号は除く。抜けの位置に番号として読めないセルの行があれば、案内に添える
     - 重複: 同じ系列の中で同じ表記（``8`` / ``8a``）を占める行が 2 つ以上（範囲 ``7〜9`` と ``8`` も重複）
 
     **系列の終わりは最大の番号**なので、表の末尾の行が消えたことは原理的に検出できない（基準が無い）。
@@ -740,10 +748,7 @@ def find_no_column_problems(scan: NoColumnScan) -> List[Tuple[int, str]]:
             group = None
             if smallest > 1:
                 group = last.get((table.section_lineno, series))
-                # 先頭の番号（1〜最小の番号 − 1）をすべて欠番と注記した表は、自分で 1 から始まる系列であり、
-                # 見出しをまたいだ続きではない。結び付けると、その注記が偶然つながった前の表の欠けまで許してしまう
-                leading_noted = all((series, n) in table.notes for n in range(1, smallest))
-                if group is None and not leading_noted:
+                if group is None:
                     group = next(
                         (
                             g for g in recent[-CROSS_HEADING_LOOKBACK:][::-1]
@@ -758,13 +763,21 @@ def find_no_column_problems(scan: NoColumnScan) -> List[Tuple[int, str]]:
                     "start": min(smallest, 1),
                     "table_lineno": table.lineno,
                     "items": [],
-                    "notes": set(),
+                    # 表ごとの番号の受け持ち（lo〜hi）と、その表に結び付いた注記。注記は受け持ちの中の欠けだけを許す
+                    "segments": [],
+                    "unreadable": [],
                     # 1 から始まらないのに続ける先が見つからなかった表の最小の番号（案内を変えるため）
                     "orphan_from": smallest if smallest > 1 else None,
                 }
                 groups.append(group)
+            # この表が受け持つ番号: 系列のそれまでの最大の番号の次（最初の表なら系列の始まり）から、この表の最大の番号まで
+            lo = max(e.base for _, e in group["items"]) + 1 if group["items"] else group["start"]
+            group["segments"].append((lo, max(e.base for _, e in items), table.notes))
             group["items"].extend(items)
-            group["notes"].update(table.notes)
+            group["unreadable"].extend(
+                (row.lineno, row.cell) for row in table.rows
+                if not row.entries and UNREADABLE_NO_CELL_RE.match(row.cell)
+            )
             last[(table.section_lineno, series)] = group
             if group in recent:
                 recent.remove(group)
@@ -784,11 +797,13 @@ def find_no_column_problems(scan: NoColumnScan) -> List[Tuple[int, str]]:
                     f"{where}: No.{key} が重複しています（{', '.join(str(n) for n in linenos)} 行目）",
                 ))
         bases = {e.base for _, e in items}
-        allowed = group["notes"]
-        missing = [
-            n for n in range(start, max(bases) + 1)
-            if n not in bases and (series, n) not in allowed
-        ]
+
+        def allowed(n: int) -> bool:
+            return any(
+                lo <= n <= hi and (series, n) in notes for lo, hi, notes in group["segments"]
+            )
+
+        missing = [n for n in range(start, max(bases) + 1) if n not in bases and not allowed(n)]
         # 連続する欠けを 1 件にまとめ、その直後の番号を持つ行の行番号を示す
         runs: List[List[int]] = []
         for n in missing:
@@ -802,8 +817,19 @@ def find_no_column_problems(scan: NoColumnScan) -> List[Tuple[int, str]]:
                 f"{where}: {_format_numbers(series, run)} が抜けています"
                 f"（{after[1]} 行目の No.{series}{after[0]} の前）"
             )
+            # 抜けの位置に番号として読めないセルの行があれば、行の消失ではなく書式の誤りかもしれない
+            before_line = max(
+                (lineno for lineno, e in items if e.base < run[0]), default=group["table_lineno"]
+            )
+            suspects = [
+                (lineno, cell) for lineno, cell in group["unreadable"]
+                if before_line < lineno < after[1]
+            ]
+            if suspects:
+                listed = "、".join(f"{lineno} 行目の「{cell}」" for lineno, cell in suspects)
+                text += f"。{listed} を番号として読めません。番号の書式（例: 13・7〜9・8a）を確かめてください"
             orphan_from = group["orphan_from"]
-            if orphan_from is not None and run[0] == 1:
+            if orphan_from is not None and run[0] == 1 and not suspects:
                 # 先頭の欠けは、行の消失のほか「前の表の続きのつもりが、続ける先が見つからなかった」こともある
                 text += (
                     f"。前の表の続きなら、続ける先が見つかりませんでした（直前の表の最大の番号が"

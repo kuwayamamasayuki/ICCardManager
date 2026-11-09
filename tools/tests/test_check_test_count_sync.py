@@ -920,13 +920,55 @@ class NoColumnNoteScopeTests(unittest.TestCase):
         self.assertIn("12 行目の表", problems[0][1])  # 後の表だけ
 
     def test_negated_note_is_not_an_allowance(self):
-        for text in ("No.8 は欠番ではない", "No.8 は欠番でない", "No.8 は欠番ではありません"):
+        """レビュー 3 回目: 否定の語を並べるのではなく、「は欠番」の直後を許可形に限る。"""
+        for text in (
+            "No.8 は欠番ではない", "No.8 は欠番でない", "No.8 は欠番ではありません",
+            "No.8 は欠番にしない", "No.8 は欠番とはしない", "No.8 は欠番扱いにせず詰めた",
+            "No.8 は欠番じゃない", "No.8 は欠番候補", "No.8 は欠番にする予定",
+        ):
             with self.subTest(text=text):
                 self.assertEqual(set(), _mod.parse_gap_note(text))
+
+    def test_allowed_forms_after_the_gap_word(self):
+        for text in (
+            "No.8 は欠番", "No.8 は欠番。", "No.8 は欠番、理由は…", "（No.8 は欠番）", "No.8 は欠番 |",
+            "No.8 は欠番（Issue #1）", "No.8 は欠番です。", "No.8 は欠番とする。", "No.8 は欠番.",
+        ):
+            with self.subTest(text=text):
+                self.assertEqual({("", 8)}, _mod.parse_gap_note(text))
+
+    def test_list_with_no_prefix_on_each_element(self):
+        self.assertEqual({("", 2), ("", 3)}, _mod.parse_gap_note("No.2、No.3 は欠番。"))
+        self.assertEqual({("", 2), ("", 3)}, _mod.parse_gap_note("No.2・No.3 は欠番。"))
+        self.assertEqual({("", 2), ("", 3), ("", 4)}, _mod.parse_gap_note("No.2〜No.4 は欠番。"))
+
+    def test_note_covers_only_the_numbers_its_table_owns_in_the_same_section(self):
+        """レビュー 3 回目: 続きとして束ねた系列でも、注記は自分の表の受け持ちの欠けにだけ効く。"""
+        doc = "#### UT-001\n\n" + _table(1, 3) + "\n" + _table(4, 5) + "\n" + _table(6, 7) + "\nNo.2 は欠番。\n"
+        problems = _no_problems(doc)
+        self.assertEqual(1, len(problems), problems)
+        self.assertIn("No.2 が抜けています", problems[0][1])
+
+    def test_note_covers_only_the_numbers_its_table_owns_across_headings(self):
+        doc = "#### UT-001\n\n" + _table(1, 3, 4, 5) + "\n#### UT-002\n\nNo.2 は欠番。\n\n" + _table(6, 7)
+        problems = _no_problems(doc)
+        self.assertEqual(1, len(problems), problems)
+        self.assertIn("No.2 が抜けています", problems[0][1])
+
+    def test_note_covers_the_gap_just_before_its_continuation_table(self):
+        doc = "#### UT-001\n\n" + _table(1, 2, 3) + "\n本文\n\n" + _table(6, 7) + "\nNo.4・5 は欠番。\n"
+        self.assertEqual([], _no_problems(doc))
 
     def test_note_inside_inline_code_is_an_example(self):
         self.assertEqual(set(), _mod.parse_gap_note("注記は `No.8・9 は欠番` の形で書く"))
         doc = "#### UT-001\n\n例: `No.2 は欠番`\n\n" + _table(1, 3)
+        self.assertEqual(1, len(_no_problems(doc)))
+        # コードの中が許可形で終わっていても（「。」が続く）、例として読まない
+        self.assertEqual(set(), _mod.parse_gap_note("例: `No.8 は欠番。` のように書く"))
+        self.assertEqual(set(), _mod.parse_gap_note("例: ``No.8 は欠番 ``"))
+
+    def test_note_inside_a_one_line_html_comment_is_ignored(self):
+        doc = "#### UT-001\n\n" + _table(1, 3) + "\n<!-- No.2 は欠番。 -->\n"
         self.assertEqual(1, len(_no_problems(doc)))
 
 
@@ -1011,6 +1053,46 @@ class NoColumnSeriesStartTests(unittest.TestCase):
         problems = _no_problems(doc)
         self.assertEqual(1, len(problems), problems)
         self.assertIn("3 行目の表: No.2 が抜けています", problems[0][1])
+
+
+class NoColumnUnreadableCellTests(unittest.TestCase):
+    """レビュー 3 回目: 番号として読めないセルは赤にしないが、抜けの位置にあれば案内に添える。"""
+
+    def test_unreadable_cell_at_the_gap_is_named(self):
+        for cell in ("13.", "13〜13", "15〜13"):
+            with self.subTest(cell=cell):
+                doc = "#### UT-001\n\n" + _table(*range(1, 13), cell, 14)
+                problems = _no_problems(doc)
+                self.assertEqual(1, len(problems), problems)
+                self.assertIn(f"17 行目の「{cell}」 を番号として読めません", problems[0][1])
+                self.assertIn("番号の書式", problems[0][1])
+
+    def test_unreadable_cell_elsewhere_is_not_mentioned(self):
+        problems = _no_problems("#### UT-001\n\n" + _table(1, "1.", 2, 4))
+        self.assertEqual(1, len(problems), problems)
+        self.assertNotIn("読めません", problems[0][1])
+
+    def test_unreadable_cell_without_a_gap_is_green(self):
+        self.assertEqual([], _no_problems("#### UT-001\n\n" + _table(1, 2, "2.", 3)))
+
+    def test_range_over_the_limit_is_unreadable_and_named(self):
+        problems = _no_problems("#### UT-001\n\n" + _table("1〜300", 301))
+        self.assertEqual(1, len(problems), problems)
+        self.assertIn("「1〜300」 を番号として読めません", problems[0][1])
+        self.assertNotIn("続ける先", problems[0][1])  # 原因に合わない案内を出さない
+
+
+class NoRangeLimitTests(unittest.TestCase):
+    """範囲の展開の上限（``MAX_NO_RANGE``）。書き損じで巨大な集合を作らない。"""
+
+    def test_range_up_to_the_limit_expands(self):
+        limit = _mod.MAX_NO_RANGE
+        self.assertEqual(limit + 1, len(_mod.parse_no_cell(f"1〜{1 + limit}")))
+
+    def test_range_over_the_limit_is_not_expanded(self):
+        limit = _mod.MAX_NO_RANGE
+        self.assertEqual([], _mod.parse_no_cell(f"1〜{2 + limit}"))
+        self.assertEqual(200, limit)  # 上限を外す・緩める変更は、ここで意図を問う
 
 
 class NoColumnRealDocumentTests(unittest.TestCase):
