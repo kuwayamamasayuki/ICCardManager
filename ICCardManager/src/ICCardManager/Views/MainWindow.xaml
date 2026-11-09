@@ -675,7 +675,7 @@
                                 <SolidColorBrush x:Key="{x:Static SystemColors.InactiveSelectionHighlightTextBrushKey}" Color="Black"/>
                             </DataGrid.Resources>
                             <DataGrid.Columns>
-                                <DataGridTemplateColumn Header="選択" Width="45">
+                                <DataGridTemplateColumn Header="選択" Width="45" MinWidth="45">
                                     <DataGridTemplateColumn.CellTemplate>
                                         <DataTemplate>
                                             <CheckBox IsChecked="{Binding IsChecked, UpdateSourceTrigger=PropertyChanged}"
@@ -687,14 +687,14 @@
                                     </DataGridTemplateColumn.CellTemplate>
                                 </DataGridTemplateColumn>
                                 <!-- Issue #1907: 直前の返却で記録された行の印。色（行背景）だけに頼らず文字でも示す -->
-                                <DataGridTextColumn Header="今回" Binding="{Binding RecentlyRecordedMark}" Width="45">
+                                <DataGridTextColumn Header="今回" Binding="{Binding RecentlyRecordedMark}" Width="45" MinWidth="45">
                                     <DataGridTextColumn.ElementStyle>
                                         <Style TargetType="TextBlock">
                                             <Setter Property="HorizontalAlignment" Value="Center"/>
                                             <Style.Triggers>
                                                 <!-- ツールチップは ✔ の付いた行だけ（空セルに出ると記録されていない行まで「今回」に見える） -->
                                                 <DataTrigger Binding="{Binding IsRecentlyRecorded}" Value="True">
-                                                    <Setter Property="ToolTip" Value="今回の返却で記録された行"/>
+                                                    <Setter Property="ToolTip" Value="{x:Static dtos:LedgerDto.RecentlyRecordedToolTip}"/>
                                                 </DataTrigger>
                                             </Style.Triggers>
                                         </Style>
@@ -713,26 +713,23 @@
                                 <DataGridTextColumn Header="日付" Binding="{Binding DateDisplay}" Width="Auto" MinWidth="100"/>
                                 <!-- Issue #2424: 残りの幅を取る。収まらない摘要は利用者の列（#2076）と同じく、
                                      TextTrimming（切れていることが見て分かる）と ToolTip（全文を読める）で担保する。
-                                     下限は 150: 特大・最小幅（1400）で摘要に残る幅は約 198 で、下限を 200 にすると足りない分を
-                                     DataGrid が固定幅の列（備考など）を削って捻出した（2026-11-09 の UI テストで備考 150 → 147。表示スケール 150%） -->
+                                     下限は 150: 特大・最小幅（1400）で摘要に残る幅は約 198 DIP で、下限を 200 にすると足りない分を
+                                     DataGrid が固定幅の列（備考など）を削って捻出した（2026-11-09 の UI テストで備考の見出しが
+                                     物理ピクセルで 150 → 147、DIP で 100 → 98。表示スケール 150%）。
+                                     摘要は最も広い列なので、セルの ToolTip が行の ToolTip（#1052 の残高不整合の説明・#1907 の今回の返却）を
+                                     行の大部分で覆う。SummaryToolTip は行の文言と摘要の全文を合わせて返し、両方が空なら null（中身の無いツールチップを出さない） -->
                                 <DataGridTextColumn Header="摘要" Binding="{Binding Summary}" Width="*" MinWidth="150">
                                     <DataGridTextColumn.ElementStyle>
                                         <Style TargetType="TextBlock">
                                             <Setter Property="TextTrimming" Value="CharacterEllipsis"/>
-                                            <Setter Property="ToolTip" Value="{Binding Summary}"/>
-                                            <Style.Triggers>
-                                                <!-- 空の摘要で中身の無いツールチップを出さず、行レベルの ToolTip（#1907 / #1052）を覆わない（利用者・備考の列と同じ判断） -->
-                                                <DataTrigger Binding="{Binding Summary}" Value="">
-                                                    <Setter Property="ToolTip" Value="{x:Null}"/>
-                                                </DataTrigger>
-                                                <DataTrigger Binding="{Binding Summary}" Value="{x:Null}">
-                                                    <Setter Property="ToolTip" Value="{x:Null}"/>
-                                                </DataTrigger>
-                                            </Style.Triggers>
+                                            <Setter Property="ToolTip" Value="{Binding SummaryToolTip}"/>
                                         </Style>
                                     </DataGridTextColumn.ElementStyle>
                                 </DataGridTextColumn>
-                                <DataGridTextColumn Header="受入" Width="75">
+                                <!-- Issue #2424: 固定幅の列は MinWidth を Width と同じにする。* 列（摘要）が下限に達してもなお幅が足りないとき
+                                     （作業領域の狭い PC では最小幅が 1400 より狭くなる。#2150）、DataGrid は固定幅の列を MinWidth まで削って捻出する。
+                                     右寄せの金額は省略記号なしで欠けるため、削らせずに横スクロールで受ける（HistoryGridColumnWidthConventionTests） -->
+                                <DataGridTextColumn Header="受入" Width="75" MinWidth="75">
                                     <DataGridTextColumn.Binding>
                                         <Binding Path="IncomeDisplay"/>
                                     </DataGridTextColumn.Binding>
@@ -742,7 +739,7 @@
                                         </Style>
                                     </DataGridTextColumn.ElementStyle>
                                 </DataGridTextColumn>
-                                <DataGridTextColumn Header="払出" Width="75">
+                                <DataGridTextColumn Header="払出" Width="75" MinWidth="75">
                                     <DataGridTextColumn.Binding>
                                         <Binding Path="ExpenseDisplay"/>
                                     </DataGridTextColumn.Binding>
@@ -752,7 +749,7 @@
                                         </Style>
                                     </DataGridTextColumn.ElementStyle>
                                 </DataGridTextColumn>
-                                <DataGridTextColumn Header="残高" Width="85">
+                                <DataGridTextColumn Header="残高" Width="85" MinWidth="85">
                                     <DataGridTextColumn.Binding>
                                         <Binding Path="BalanceDisplay"/>
                                     </DataGridTextColumn.Binding>
@@ -767,7 +764,7 @@
                                      省略記号も ToolTip も無いため「外１名」が黙って見えなくなっていた。
                                      幅を広げたうえで、文字サイズ 4 段階に幅では追随できない分を
                                      TextTrimming（切れていることが見て分かる）と ToolTip（全文を読める）で担保する。 -->
-                                <DataGridTextColumn Header="利用者" Binding="{Binding DisplayStaffName}" Width="120">
+                                <DataGridTextColumn Header="利用者" Binding="{Binding DisplayStaffName}" Width="120" MinWidth="120">
                                     <DataGridTextColumn.ElementStyle>
                                         <Style TargetType="TextBlock">
                                             <Setter Property="TextTrimming" Value="CharacterEllipsis"/>
@@ -789,7 +786,7 @@
                                         </Style>
                                     </DataGridTextColumn.ElementStyle>
                                 </DataGridTextColumn>
-                                <DataGridTextColumn Header="備考" Binding="{Binding Note}" Width="100">
+                                <DataGridTextColumn Header="備考" Binding="{Binding Note}" Width="100" MinWidth="100">
                                     <DataGridTextColumn.ElementStyle>
                                         <Style TargetType="TextBlock">
                                             <Setter Property="TextTrimming" Value="CharacterEllipsis"/>
@@ -809,7 +806,7 @@
                                     </DataGridTextColumn.ElementStyle>
                                 </DataGridTextColumn>
                                 <!-- Issue #750: 削除ボタンは変更ダイアログ内に移動 -->
-                                <DataGridTemplateColumn Header="操作" Width="130">
+                                <DataGridTemplateColumn Header="操作" Width="130" MinWidth="130">
                                     <DataGridTemplateColumn.CellTemplate>
                                         <DataTemplate>
                                             <StackPanel Orientation="Horizontal" HorizontalAlignment="Center"
@@ -851,7 +848,7 @@
                                         <!-- Issue #1907: 直前の返却で記録された行（返却の色＝寒色）。チェック・不整合の強調が優先 -->
                                         <DataTrigger Binding="{Binding IsRecentlyRecorded}" Value="True">
                                             <Setter Property="Background" Value="{DynamicResource ReturnBackgroundBrush}"/>
-                                            <Setter Property="ToolTip" Value="今回の返却で記録された行"/>
+                                            <Setter Property="ToolTip" Value="{x:Static dtos:LedgerDto.RecentlyRecordedToolTip}"/>
                                         </DataTrigger>
                                         <DataTrigger Binding="{Binding IsChecked}" Value="True">
                                             <Setter Property="Background" Value="{DynamicResource CheckedRowBackgroundBrush}"/>

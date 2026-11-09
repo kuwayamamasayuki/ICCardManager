@@ -91,6 +91,58 @@ public class HistoryGridColumnWidthConventionTests
         summary.MinWidth.Should().NotBeNull("最小幅のウィンドウでも摘要を読める幅を下限に残すこと");
     }
 
+    [Fact]
+    public void 摘要は省略記号で切り_ToolTipは行の文言と全文を合わせたSummaryToolTipを出すこと()
+    {
+        // 摘要は最も広い列なので、セルの ToolTip が行の ToolTip（#1052 の残高不整合の説明・#1907 の今回の返却）を行の大部分で覆う。
+        // {Binding Summary} にすると、残高不整合の行で摘要の上にマウスを置いたとき不整合の説明が読めない（レビューで検出）
+        var summary = EnumerateColumns(FindHistoryGrid()).Single(c => c.Header == "摘要");
+        var style = UnconditionalElementStyleBody(summary.Body);
+
+        XamlElementInspection.GetSetterValue(style, "TextTrimming").Should().Be("CharacterEllipsis",
+            "幅に収まらない摘要は、切れていることが見て分かるよう省略記号で切ること");
+        XamlElementInspection.GetBindingPropertyName(XamlElementInspection.GetSetterValue(style, "ToolTip"))
+            .Should().Be("SummaryToolTip", "摘要の ToolTip は行の文言と全文を合わせた LedgerDto.SummaryToolTip にすること");
+    }
+
+    [Fact]
+    public void 行の今回の返却のToolTipは摘要のToolTipと同じ定数を参照すること()
+    {
+        // 行と摘要のセルで文言が食い違わないよう、LedgerDto.RecentlyRecordedToolTip 1 つに寄せる
+        var grid = FindHistoryGrid();
+        var rowStyle = XamlElementInspection.EnumerateElements(grid.Body, "DataGrid.RowStyle").Single();
+        var recentlyRecorded = XamlElementInspection.EnumerateElements(rowStyle.Body, "DataTrigger")
+            .Single(t => XamlElementInspection.GetBindingPropertyName(XamlElementInspection.GetAttribute(t.StartTag, "Binding")) == "IsRecentlyRecorded");
+
+        XamlElementInspection.GetSetterValue(recentlyRecorded.Body, "ToolTip")
+            .Should().Be("{x:Static dtos:LedgerDto.RecentlyRecordedToolTip}");
+    }
+
+    [Fact]
+    public void 履歴一覧の固定幅の列は削られずに横スクロールで受けること()
+    {
+        // * 列（摘要）が下限に達してもなお幅が足りないとき（作業領域の狭い PC では最小幅が 1400 より狭い。#2150）、
+        // DataGrid は固定幅の列を MinWidth（既定 20）まで削って捻出する。右寄せの金額は省略記号なしで欠けるので削らせない
+        var violations = FindShrinkableFixedColumns(FindHistoryGrid());
+
+        violations.Should().BeEmpty("履歴一覧の固定幅の列は MinWidth を Width と同じ値にし、幅が足りなければ横スクロールで受けること（Issue #2424）");
+    }
+
+    [Theory]
+    [InlineData("<DataGrid><DataGrid.Columns><DataGridTextColumn Header=\"受入\" Width=\"75\"/></DataGrid.Columns></DataGrid>", 1)]
+    [InlineData("<DataGrid><DataGrid.Columns><DataGridTextColumn Header=\"受入\" Width=\"75\" MinWidth=\"60\"/></DataGrid.Columns></DataGrid>", 1)]
+    [InlineData("<DataGrid><DataGrid.Columns><DataGridTextColumn Header=\"受入\" Width=\"75\" MinWidth=\"75\"/></DataGrid.Columns></DataGrid>", 0)]
+    [InlineData("<DataGrid><DataGrid.Columns><DataGridTextColumn Header=\"受入\" Width=\"75\" MinWidth=\"80\"/></DataGrid.Columns></DataGrid>", 0)]
+    // * 列・Auto 列は対象外（幅が数値でない）
+    [InlineData("<DataGrid><DataGrid.Columns><DataGridTextColumn Header=\"摘要\" Width=\"*\" MinWidth=\"150\"/>" +
+                "<DataGridTextColumn Header=\"日付\" Width=\"Auto\" MinWidth=\"100\"/></DataGrid.Columns></DataGrid>", 0)]
+    public void 削られ得る固定幅の列の検出が既知の入力を正しく分類すること(string xaml, int expected)
+    {
+        var grid = XamlElementInspection.EnumerateElementsIncludingNested(xaml, "DataGrid").Single();
+
+        FindShrinkableFixedColumns(grid).Should().HaveCount(expected, "入力: {0}", xaml);
+    }
+
     [Theory]
     // 是正前の形: 摘要が SizeToCells
     [InlineData("<DataGrid><DataGrid.Columns><DataGridTextColumn Header=\"日付\" Width=\"Auto\"/>" +
@@ -169,7 +221,47 @@ public class HistoryGridColumnWidthConventionTests
         return grid!;
     }
 
-    private sealed record Column(string? Header, string Width, string? MinWidth);
+    private sealed record Column(string? Header, string Width, string? MinWidth, string Body);
+
+    /// <summary>列の ElementStyle の本体から Style.Triggers を除いたもの（常に効く Setter だけが残る）</summary>
+    private static string UnconditionalElementStyleBody(string columnBody)
+    {
+        var styles = XamlElementInspection.EnumerateElements(columnBody, "DataGridTextColumn.ElementStyle")
+            .SelectMany(e => XamlElementInspection.EnumerateElements(e.Body, "Style"))
+            .ToList();
+        styles.Should().ContainSingle("前提: 列の ElementStyle がちょうど 1 つあること");
+
+        var body = styles[0].Body;
+        foreach (var triggers in XamlElementInspection.EnumerateElementSpans(body, "Style.Triggers").Reverse().ToList())
+        {
+            body = body.Remove(triggers.Start, triggers.Length);
+        }
+
+        return body;
+    }
+
+    /// <summary>数値の固定幅で、MinWidth がその幅より小さい（＝DataGrid が削り得る）列</summary>
+    private static List<string> FindShrinkableFixedColumns(XamlElementInspection.XamlElementSpan grid)
+    {
+        var violations = new List<string>();
+        foreach (var column in EnumerateColumns(grid))
+        {
+            if (!TryParseLength(column.Width, out var width))
+            {
+                continue;
+            }
+
+            if (column.MinWidth == null || !TryParseLength(column.MinWidth, out var min) || min < width)
+            {
+                violations.Add($"「{column.Header}」列 Width=\"{column.Width}\" MinWidth=\"{column.MinWidth}\"");
+            }
+        }
+
+        return violations;
+    }
+
+    private static bool TryParseLength(string value, out double length)
+        => double.TryParse(value, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out length);
 
     private static IEnumerable<Column> EnumerateColumns(XamlElementInspection.XamlElementSpan grid)
     {
@@ -180,7 +272,8 @@ public class HistoryGridColumnWidthConventionTests
             .Select(c => new Column(
                 XamlElementInspection.GetAttribute(c.StartTag, "Header"),
                 (XamlElementInspection.GetAttribute(c.StartTag, "Width") ?? defaultWidth).Trim(),
-                XamlElementInspection.GetAttribute(c.StartTag, "MinWidth")));
+                XamlElementInspection.GetAttribute(c.StartTag, "MinWidth"),
+                c.Body));
     }
 
     private static bool IsContentFit(string width) => width == "Auto" || width == "SizeToCells";

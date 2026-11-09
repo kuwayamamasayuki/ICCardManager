@@ -28,17 +28,10 @@ namespace ICCardManager.Tests.Views;
 /// **対の表明**（幅を広げただけの実装を許さない）として、両方の属性が揃っていることを求める。
 /// <c>ToolTip</c> だけだとマウス操作が前提になり、<c>TextTrimming</c> だけだと全文を読む手段が無い。
 /// </para>
-/// <para>
-/// Issue #2424: 摘要の列も同じ形にした。摘要は内容に合わせて広がる列（SizeToCells）だったため切れなかったが、
-/// 特大・最小幅で列幅の合計が一覧を超え「操作」列を押し出していたので、残りの幅を取る <c>*</c> 列にした。
-/// 幅が足りなければ切れるので、利用者・備考と同じく省略記号と ToolTip を対で置く
-/// （列幅の規約は <see cref="HistoryGridColumnWidthConventionTests"/>）。
-/// </para>
 /// </remarks>
 public class MainWindowHistoryColumnLayoutTests
 {
     [Theory]
-    [InlineData("摘要")]
     [InlineData("利用者")]
     [InlineData("備考")]
     public void 自由入力列は切り詰めと全文表示の手段を持つこと(string header)
@@ -140,7 +133,6 @@ public class MainWindowHistoryColumnLayoutTests
     /// </para>
     /// </remarks>
     [Theory]
-    [InlineData("摘要")]
     [InlineData("利用者")]
     [InlineData("備考")]
     public void 値が空の行ではセルのToolTipを外すこと(string header)
