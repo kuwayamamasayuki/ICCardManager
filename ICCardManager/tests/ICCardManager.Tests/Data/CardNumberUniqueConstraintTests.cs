@@ -279,6 +279,79 @@ public class CardNumberUniqueConstraintTests : IDisposable
         result.Should().BeTrue();
     }
 
+    /// <summary>
+    /// Issue #2419: is_deleted が NULL のカード（有効なカードとして扱う、Issue #2381）と
+    /// 同じ種別・管理番号のカードは登録できないことを確認
+    /// </summary>
+    /// <remarks>
+    /// Migration_008 のインデックス（<c>WHERE is_deleted = 0</c>）は NULL のカードを対象にせず、
+    /// 外部ツールで is_deleted を空にしたカードと同じ番号を重複して登録できた。
+    /// 正当な側（削除済みカードと同じ番号は登録できる）は <see cref="InsertAsync_SameNumberAsDeletedCard_Succeeds"/>。
+    /// </remarks>
+    [Fact]
+    [Trait("Category", "Unit")]
+    public async Task InsertAsync_SameNumberAsCardWithNullIsDeleted_ThrowsDuplicateCardNumberException()
+    {
+        // Arrange
+        await _repository.InsertAsync(CreateTestCard("CARD000000000001", "はやかけん", "3"));
+        SetIsDeletedToNull("CARD000000000001");
+
+        // Act
+        var act = async () => await _repository.InsertAsync(CreateTestCard("CARD000000000002", "はやかけん", "3"));
+
+        // Assert
+        var ex = await act.Should().ThrowAsync<DuplicateCardNumberException>();
+        ex.Which.CardType.Should().Be("はやかけん");
+        ex.Which.CardNumber.Should().Be("3");
+    }
+
+    /// <summary>
+    /// Issue #2419: 管理番号を is_deleted が NULL のカードと同じ番号へ変更できないことを確認
+    /// </summary>
+    /// <remarks>
+    /// 正当な側（削除済みカードの番号へは変更できる）は <see cref="UpdateAsync_SameNumberAsDeletedCard_Succeeds"/>。
+    /// </remarks>
+    [Fact]
+    [Trait("Category", "Unit")]
+    public async Task UpdateAsync_SameNumberAsCardWithNullIsDeleted_ThrowsDuplicateCardNumberException()
+    {
+        // Arrange
+        await _repository.InsertAsync(CreateTestCard("CARD000000000001", "nimoca", "N-001"));
+        await _repository.InsertAsync(CreateTestCard("CARD000000000002", "nimoca", "N-002"));
+        SetIsDeletedToNull("CARD000000000001");
+
+        // Act
+        var act = async () => await _repository.UpdateAsync(CreateTestCard("CARD000000000002", "nimoca", "N-001"));
+
+        // Assert
+        var ex = await act.Should().ThrowAsync<DuplicateCardNumberException>();
+        ex.Which.CardType.Should().Be("nimoca");
+        ex.Which.CardNumber.Should().Be("N-001");
+    }
+
+    /// <summary>
+    /// Issue #2419: is_deleted が NULL のカード自身の編集（番号を変えない更新）は従来どおりできることを確認
+    /// </summary>
+    /// <remarks>
+    /// インデックスが NULL のカードを対象にしたことで、そのカード自身の更新まで塞いでいないことを対で固定する。
+    /// </remarks>
+    [Fact]
+    [Trait("Category", "Unit")]
+    public async Task UpdateAsync_CardWithNullIsDeletedKeepingItsNumber_Succeeds()
+    {
+        // Arrange
+        await _repository.InsertAsync(CreateTestCard("CARD000000000001", "nimoca", "N-001"));
+        SetIsDeletedToNull("CARD000000000001");
+        var edited = CreateTestCard("CARD000000000001", "nimoca", "N-001");
+        edited.Note = "備考を変更";
+
+        // Act
+        var result = await _repository.UpdateAsync(edited);
+
+        // Assert
+        result.Should().BeTrue();
+    }
+
     #endregion
 
     #region マイグレーション テスト
@@ -394,6 +467,18 @@ public class CardNumberUniqueConstraintTests : IDisposable
             IsDeleted = false,
             IsLent = false
         };
+    }
+
+    /// <summary>
+    /// 外部ツール（DB Browser 等）で is_deleted を空にした状態を作る（Issue #2419）
+    /// </summary>
+    private void SetIsDeletedToNull(string cardIdm)
+    {
+        using var lease = _dbContext.LeaseConnection();
+        using var command = lease.Connection.CreateCommand();
+        command.CommandText = "UPDATE ic_card SET is_deleted = NULL WHERE card_idm = @cardIdm";
+        command.Parameters.AddWithValue("@cardIdm", cardIdm);
+        command.ExecuteNonQuery().Should().Be(1, "前提: 対象のカードが登録済みであるべき");
     }
 
     private static void IndexShouldExist(SQLiteConnection connection, string indexName)

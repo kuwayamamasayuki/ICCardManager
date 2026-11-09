@@ -1142,6 +1142,50 @@ public class CardRepositoryTests : IDisposable
         sugocaNext.Should().Be("1");
     }
 
+    /// <summary>
+    /// Issue #2419: int の範囲を超える数字だけの管理番号がある種別でも、次の番号を返すことを確認
+    /// </summary>
+    /// <remarks>
+    /// 管理番号は最大 20 文字で 2,147,483,647 を超える番号を登録できる。採番の
+    /// <c>MAX(CAST(card_number AS INTEGER))</c> は 64 ビット整数を返すのに int へ変換していたため、
+    /// その種別の新規登録を開くたびに <see cref="OverflowException"/> になっていた。
+    /// </remarks>
+    [Fact]
+    public async Task GetNextCardNumberAsync_NumberBeyondInt32_ReturnsNextNumber()
+    {
+        // Arrange
+        await _repository.InsertAsync(CreateTestCard("0102030405060708", "はやかけん", "12345678901"));
+
+        // Act
+        var result = await _repository.GetNextCardNumberAsync("はやかけん");
+
+        // Assert
+        result.Should().Be("12345678902");
+    }
+
+    /// <summary>
+    /// Issue #2419: 採番が 64 ビット整数の上限に達している種別では、使われていない最小の正の整数を返すことを確認
+    /// </summary>
+    /// <remarks>
+    /// SQLite の CAST は範囲外の数字列を long.MaxValue で頭打ちにするため「最大＋1」が表せない。
+    /// 削除済みのカードの番号も避ける（復元したときに重複にしないため）。
+    /// </remarks>
+    [Fact]
+    public async Task GetNextCardNumberAsync_MaxNumberSaturatesInt64_ReturnsSmallestUnusedPositiveNumber()
+    {
+        // Arrange
+        await _repository.InsertAsync(CreateTestCard("0102030405060708", "はやかけん", "99999999999999999999"));
+        await _repository.InsertAsync(CreateTestCard("0102030405060709", "はやかけん", "1"));
+        await _repository.InsertAsync(CreateTestCard("010203040506070A", "はやかけん", "2"));
+        await _repository.DeleteAsync("010203040506070A");
+
+        // Act
+        var result = await _repository.GetNextCardNumberAsync("はやかけん");
+
+        // Assert
+        result.Should().Be("3");
+    }
+
     #endregion
 
     #region ヘルパーメソッド
