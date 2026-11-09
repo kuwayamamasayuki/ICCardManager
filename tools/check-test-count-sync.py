@@ -1,12 +1,15 @@
 #!/usr/bin/env python3
 """07_テスト設計書.md の件数表を dotnet test --list-tests と比較するスクリプト。
 
-検証対象は 3 つ:
+検証対象は 4 つ:
 
 - §1.1a の総件数表（単体 / UI / 合計） … Issue #1546
 - §2 のクラス別件数表（``| `Namespace/ClassTests` | 件数 | 観点 |``） … Issue #1889
 - 見出しの ID（``#### UT-049: …``）と節番号（``### 2.47a …``）が文書全体で重複しないこと … Issue #2391
-  （件数の照合ではないが、同じ 07 を同じ CI で検査するのでここに置く。dotnet を使わない）
+- 先頭の列が ``No`` の表で、番号に飛び・重複が無いこと … Issue #2420
+  （下 2 つは件数の照合ではないが、同じ 07 を同じ CI で検査するのでここに置く。dotnet を使わない。
+  No 列の許可の書き方（範囲・枝番・続きの表・欠番の注記）は ``find_no_column_problems`` と
+  ``.claude/rules/testing.md`` を参照）
 
 **§2 検証の適用範囲**: 「表に載っている行」が実測と一致することだけを検証する。
 テストクラスを新設したのに §2 へ行を足さなかった場合は検出できない（本書に行を持つ
@@ -112,6 +115,59 @@ FENCE_OPEN_RE = re.compile(r"^ {0,3}(`{3,}|~{3,})(.*)$")
 # （``<!-- 検索条件 -->`` コメント以降）や文中の ``<!--`` で開くと、以降の見出しを数えずに「重複なし」になる。
 HTML_COMMENT_OPEN_RE = re.compile(r"^ {0,3}<!--")
 HTML_COMMENT_CLOSE = "-->"
+
+# Issue #2420: 表の「No」列の飛び・重複。
+# 見出し（節の区切り）。続きの表・欠番の注記は、同じ見出しの中だけで結び付ける。
+ATX_HEADING_RE = re.compile(r"^ {0,3}#{1,6}(?:[ \t]|$)")
+# 表の区切り行（``|---|:--:|``）。少なくとも 1 つの ``|`` を含む。
+TABLE_SEPARATOR_RE = re.compile(r"^\s*\|?\s*:?-+:?\s*(?:\|\s*:?-+:?\s*)+\|?\s*$")
+# 検査の対象にする表: 先頭の列の見出しが ``No`` / ``No.``。
+NO_HEADER_RE = re.compile(r"^No\.?$")
+# No のセルの書き方。範囲の記号は 〜（波ダッシュ）・～（全角チルダ）・~・-（表記の揺れは許す）。
+# 数字は半角だけを読む（re.ASCII）。Python の ``\d`` は既定で全角の ``２`` にも一致するが、07 の No のセルと注記に
+# 全角数字は無く（2026-11 時点で確認）、全角は書き損じとして「読めないセル」の案内に回す。
+NO_RANGE_MARK = r"[〜～~]"
+NO_INT_RE = re.compile(r"^(\d+)$", re.ASCII)
+NO_BRANCH_RE = re.compile(r"^(\d+)([a-z])$", re.ASCII)
+NO_WAVE_RANGE_RE = re.compile(r"^(\d+)\s*" + NO_RANGE_MARK + r"\s*(\d+)$", re.ASCII)
+NO_HYPHEN_RANGE_RE = re.compile(r"^(\d+)\s*-\s*(\d+)$", re.ASCII)
+# ハイフンを枝番に使った書き方（``1-1`` ・ ``3a-2`` ・ ``1-7a``）。これが 1 つでもある表では ``N-M`` を範囲と読まない。
+NO_HYPHEN_LIKE_RE = re.compile(r"^\d+[a-z]?\s*-\s*\d+[a-z]?$", re.ASCII)
+NO_BRANCH_RANGE_RE = re.compile(r"^(\d+)([a-z])\s*" + NO_RANGE_MARK + r"\s*(\d+)([a-z])$", re.ASCII)
+NO_LIST_RE = re.compile(r"^\d+(?:\s*[・、,]\s*\d+)+$", re.ASCII)
+# 接頭辞付きの系列（``E1`` ・ ``T2b``）。番号を 0 で埋めた ``TC002`` は行の番号ではなくテストケースの ID
+# （表をまたいで飛び飛びに引用される）なので対象外にする。
+NO_PREFIXED_RE = re.compile(r"^([A-Z]{1,3})([1-9]\d*)([a-z]?)$", re.ASCII)
+NO_PREFIXED_RANGE_RE = re.compile(
+    r"^([A-Z]{1,3})([1-9]\d*)\s*(?:" + NO_RANGE_MARK + r"|-)\s*([A-Z]{1,3})([1-9]\d*)$",
+    re.ASCII,
+)
+# 意図した欠番の注記（``No.8・9 は欠番`` / ``No.4〜6 は欠番`` / ``No.E3 は欠番``）。番号の後に「は欠番」が続く形だけを読む
+# （「No.8 を参照。…欠番」のように、同じ行にあるだけの番号を許可に数えないため）。列挙の要素ごとに ``No.`` を
+# 付けた形（``No.2、No.3 は欠番``）も読む。
+# 「は欠番」の直後は許可形に限る。空白を挟んでもよいが、その後ろは句読点・閉じ括弧・表の区切り ``|``・行末・
+# 「です」「とする」（その後ろも句読点・空白・行末）か、開き括弧に続く平仮名でない語（``（Issue #1）`` ・ ``（旧 …）``）
+# だけ。否定の語を並べて除く方式では、「欠番にしない」「欠番とはしない」「欠番扱いにせず」「欠番 にしない」
+# 「欠番（ではない）」のような否定を取りこぼし、許可として読んでしまう（極性の反転）。
+# インラインコード（`` `No.8 は欠番` ``）の中は、書き方の例なので読まない。
+_GAP_NOTE_TOKEN = r"(?:No\.?\s*)?[A-Z]{0,3}\d+"
+_GAP_NOTE_END = r"(?=[\s。、，,．.）)」』\]】|]|$)"
+GAP_NOTE_RE = re.compile(
+    r"No\.?\s*(" + _GAP_NOTE_TOKEN + r"(?:\s*(?:[・、,，]|" + NO_RANGE_MARK + r"|-)\s*" + _GAP_NOTE_TOKEN + r")*)"
+    r"\s*は\s*欠番"
+    r"(?=\s*(?:[。、，,．.）)」』\]】|]|$|(?:です|とする)" + _GAP_NOTE_END + r"|[（(](?!\s*[ぁ-ん])))",
+    re.ASCII,
+)
+INLINE_CODE_RE = re.compile(r"`+[^`]*`+")
+# 範囲を展開する上限。書き損じ（``1〜1000``）で巨大な集合を作らないため。
+MAX_NO_RANGE = 200
+# 番号のつもりで書いたが読めないセル（``13.`` ・ ``5〜3`` ・ ``1〜300`` ・全角の ``２``。全角を読めないのはセルの
+# 正規表現に re.ASCII を付けているため）。07 には既にあるので
+# それだけでは赤にしないが、抜けの位置にあれば案内に添える（原因が行の消失ではなく書式の誤りかもしれないため）。
+UNREADABLE_NO_CELL_RE = re.compile(r"^[0-9０-９]")
+# 見出しをまたいで続く表の、続ける先の候補にする直近の系列の数。07 では、続きの表の間に 1 から始め直す
+# 節（``UT-REPORT-EXPORT-STATUS-001a``）が 1 つ挟まる形があるため 2 以上が要る。
+CROSS_HEADING_LOOKBACK = 3
 
 
 class ClassRowScan(NamedTuple):
@@ -326,6 +382,60 @@ def expand_id_range(start: str, end: str) -> List[str]:
     return [start, end]
 
 
+def mask_blocks(lines: List[str]) -> Tuple[List[Optional[str]], Optional[str]]:
+    """コードブロック（CommonMark のフェンス）と HTML コメント（行頭の ``<!--`` から ``-->`` まで）の行を
+    ``None`` に置き換えた行の一覧と、ファイルの終わりで開いたままのブロックの説明（無ければ ``None``）を返す。
+
+    見出しの検査（Issue #2391）と No 列の検査（Issue #2420）が同じ判定を使う（片方だけ直して食い違わないため）。
+    """
+    masked: List[Optional[str]] = []
+    fence = None  # 開いているフェンスの記号（例: "````"）。None ならブロックの外
+    in_comment = False
+    opened_at = 0  # 開いているコードブロック・HTML コメントの開始行
+    for lineno, line in enumerate(lines, start=1):
+        if fence is not None:
+            stripped = line.strip()
+            if (
+                len(line) - len(line.lstrip(" ")) <= 3
+                and stripped
+                and set(stripped) == {fence[0]}
+                and len(stripped) >= len(fence)
+            ):
+                fence = None
+            masked.append(None)
+            continue
+        if in_comment:
+            if HTML_COMMENT_CLOSE in line:
+                in_comment = False
+            masked.append(None)
+            continue
+        m = FENCE_OPEN_RE.match(line)
+        if m and not (m.group(1)[0] == "`" and "`" in m.group(2)):
+            fence = m.group(1)
+            opened_at = lineno
+            masked.append(None)
+            continue
+        m = HTML_COMMENT_OPEN_RE.match(line)
+        if m:
+            if HTML_COMMENT_CLOSE not in line[m.end():]:
+                in_comment = True
+                opened_at = lineno
+            masked.append(None)
+            continue
+        masked.append(line)
+    unclosed = None
+    if fence is not None:
+        unclosed = f"コードブロック（{opened_at} 行目の {fence}）"
+    elif in_comment:
+        unclosed = f"HTML コメント（{opened_at} 行目の <!--）"
+    return masked, unclosed
+
+
+def _read_lines(md_path: str) -> List[str]:
+    with open(md_path, encoding="utf-8-sig") as f:
+        return f.read().splitlines()
+
+
 def parse_headings(md_path: str) -> HeadingScan:
     """文書全体の見出しから ID と節番号を集める。
 
@@ -334,59 +444,28 @@ def parse_headings(md_path: str) -> HeadingScan:
     """
     ids = []
     sections = []
-    fence = None  # 開いているフェンスの記号（例: "````"）。None ならブロックの外
-    in_comment = False
-    opened_at = 0  # 開いているコードブロック・HTML コメントの開始行
-    with open(md_path, encoding="utf-8-sig") as f:
-        for lineno, line in enumerate(f, start=1):
-            if fence is not None:
-                stripped = line.strip()
-                if (
-                    len(line) - len(line.lstrip(" ")) <= 3
-                    and stripped
-                    and set(stripped) == {fence[0]}
-                    and len(stripped) >= len(fence)
-                ):
-                    fence = None
-                continue
-            if in_comment:
-                if HTML_COMMENT_CLOSE in line:
-                    in_comment = False
-                continue
-            m = FENCE_OPEN_RE.match(line)
-            if m and not (m.group(1)[0] == "`" and "`" in m.group(2)):
-                fence = m.group(1)
-                opened_at = lineno
-                continue
-            m = HTML_COMMENT_OPEN_RE.match(line)
-            if m:
-                if HTML_COMMENT_CLOSE not in line[m.end():]:
-                    in_comment = True
-                    opened_at = lineno
-                continue
-            m = HEADING_ID_RE.match(line)
-            if m:
-                tail = ID_RANGE_TAIL_RE.match(line, m.end())
-                if tail:
-                    for i in expand_id_range(m.group(1), tail.group(1)):
-                        ids.append((lineno, i))
-                else:
-                    ids.append((lineno, m.group(1)))
-                continue
-            m = H3_SECTION_RE.match(line) or H2_SECTION_RE.match(line)
-            if m:
-                number = m.group(1).rstrip(".")
-                tail = SECTION_RANGE_TAIL_RE.match(line, m.end())
-                if tail:
-                    for n in expand_section_range(number, tail.group(1).rstrip(".")):
-                        sections.append((lineno, n))
-                else:
-                    sections.append((lineno, number))
-    unclosed = None
-    if fence is not None:
-        unclosed = f"コードブロック（{opened_at} 行目の {fence}）"
-    elif in_comment:
-        unclosed = f"HTML コメント（{opened_at} 行目の <!--）"
+    masked, unclosed = mask_blocks(_read_lines(md_path))
+    for lineno, line in enumerate(masked, start=1):
+        if line is None:
+            continue
+        m = HEADING_ID_RE.match(line)
+        if m:
+            tail = ID_RANGE_TAIL_RE.match(line, m.end())
+            if tail:
+                for i in expand_id_range(m.group(1), tail.group(1)):
+                    ids.append((lineno, i))
+            else:
+                ids.append((lineno, m.group(1)))
+            continue
+        m = H3_SECTION_RE.match(line) or H2_SECTION_RE.match(line)
+        if m:
+            number = m.group(1).rstrip(".")
+            tail = SECTION_RANGE_TAIL_RE.match(line, m.end())
+            if tail:
+                for n in expand_section_range(number, tail.group(1).rstrip(".")):
+                    sections.append((lineno, n))
+            else:
+                sections.append((lineno, number))
     return HeadingScan(ids, sections, unclosed)
 
 
@@ -436,6 +515,373 @@ def check_heading_uniqueness(scan: HeadingScan) -> Tuple[bool, str]:
         "  後から足した側（または引用の少ない側）を空いている ID・番号へ付け替え、"
         "その ID を引用している箇所も直してください。"
     )
+    return False, "\n".join(lines)
+
+
+class NoEntry(NamedTuple):
+    """No のセルが占める 1 つの番号（Issue #2420）。
+
+    Attributes:
+        series: 系列の接頭辞（``E1`` なら ``E``。数字だけの系列は ``""``）
+        base: 飛びの判定に使う番号（枝番 ``8a`` は 8）
+        key: 重複の判定に使う表記（``8`` と ``8a`` は別、範囲 ``7〜9`` は ``7``・``8``・``9``）
+    """
+
+    series: str
+    base: int
+    key: str
+
+
+class NoRow(NamedTuple):
+    lineno: int
+    cell: str
+    entries: List[NoEntry]
+
+
+class NoTable(NamedTuple):
+    """先頭の列が ``No`` の表（Issue #2420）。
+
+    Attributes:
+        lineno: 表の見出し行（``| No | … |``）の行番号
+        section_lineno: 表が属する見出し（``#`` 〜 ``######``）の行番号。見出しより前なら 0
+        rows: 表の行
+        notes: この表に結び付いた注記「No.8・9 は欠番」が許す (系列, 番号) の集合。結び付くのは、
+            同じ見出しの中で表の直前（前の表・見出しから表まで）と直後（表から次の表・見出しまで）の本文と、
+            表のセルに書いた注記だけ（同じ見出しの離れた表の欠番を隠さないため）
+    """
+
+    lineno: int
+    section_lineno: int
+    rows: List[NoRow]
+    notes: frozenset = frozenset()
+
+
+class NoColumnScan(NamedTuple):
+    """先頭の列が ``No`` の表の走査結果（Issue #2420）。
+
+    Attributes:
+        tables: 文書順の表
+        unclosed: ファイルの終わりで開いたままのコードブロック・HTML コメント
+    """
+
+    tables: List[NoTable]
+    unclosed: Optional[str] = None
+
+
+def _first_cell(line: str) -> str:
+    s = line.strip()
+    if s.startswith("|"):
+        s = s[1:]
+    return s.split("|", 1)[0].strip().replace("**", "").strip()
+
+
+def _is_table_line(line: Optional[str]) -> bool:
+    return line is not None and line.lstrip().startswith("|")
+
+
+def _is_ascending_hyphen_range(cell: str) -> bool:
+    m = NO_HYPHEN_RANGE_RE.match(cell)
+    return bool(m) and int(m.group(1)) < int(m.group(2))
+
+
+def _expand(series: str, first: int, last: int) -> List[NoEntry]:
+    if first < last <= first + MAX_NO_RANGE:
+        return [NoEntry(series, n, f"{series}{n}") for n in range(first, last + 1)]
+    return []
+
+
+def parse_no_cell(cell: str, hyphen_is_range: bool = True) -> List[NoEntry]:
+    """No のセル 1 つを、占める番号の一覧に直す。検査の対象外の書き方なら空の一覧を返す。
+
+    - ``8`` → 8 ／ ``8a`` → 基の番号 8 を占める枝番（重複の判定は ``8a`` の表記で行う）
+    - ``7〜9`` ・ ``7～9`` ・ ``7~9`` ・ ``7-9`` → 7・8・9（範囲）／ ``20d〜20g`` → 枝番の範囲
+    - ``9・10`` → 9・10（列挙）
+    - ``E1`` ・ ``M3b`` → 接頭辞（英大文字 1〜3 文字）ごとの別の系列
+    - それ以外（``UT-063-1`` のような ID 付きの枝番・``1-7a`` 等）は対象外
+
+    ``hyphen_is_range`` が偽のとき（表が ``1-1`` ・ ``3a-2`` のようにハイフンを枝番に使っている）は、
+    ``N-M`` を範囲として展開せず対象外にする（``1-2`` を 1・2 と読むと、続く ``2`` を重複と誤検出する）。
+    """
+    m = NO_INT_RE.match(cell)
+    if m:
+        n = int(m.group(1))
+        return [NoEntry("", n, str(n))]
+    m = NO_BRANCH_RE.match(cell)
+    if m:
+        return [NoEntry("", int(m.group(1)), cell)]
+    m = NO_WAVE_RANGE_RE.match(cell)
+    if m:
+        return _expand("", int(m.group(1)), int(m.group(2)))
+    m = NO_HYPHEN_RANGE_RE.match(cell)
+    if m:
+        return _expand("", int(m.group(1)), int(m.group(2))) if hyphen_is_range else []
+    m = NO_BRANCH_RANGE_RE.match(cell)
+    if m and m.group(1) == m.group(3) and m.group(2) < m.group(4):
+        n = int(m.group(1))
+        return [
+            NoEntry("", n, f"{n}{chr(c)}")
+            for c in range(ord(m.group(2)), ord(m.group(4)) + 1)
+        ]
+    if NO_LIST_RE.match(cell):
+        return [NoEntry("", int(n), n) for n in re.findall(r"\d+", cell)]
+    m = NO_PREFIXED_RE.match(cell)
+    if m:
+        return [NoEntry(m.group(1), int(m.group(2)), cell)]
+    m = NO_PREFIXED_RANGE_RE.match(cell)
+    if m and m.group(1) == m.group(3):
+        return _expand(m.group(1), int(m.group(2)), int(m.group(4)))
+    return []
+
+
+def parse_gap_note(line: str) -> set:
+    """本文の注記「No.8・9 は欠番」「No.4〜6 は欠番」「No.E3 は欠番」から (系列, 番号) の集合を返す。"""
+    allowed = set()
+    if "欠番" not in line:
+        return allowed
+    for m in GAP_NOTE_RE.finditer(INLINE_CODE_RE.sub("", line)):
+        for part in re.split(r"\s*[・、,，]\s*", m.group(1)):
+            tokens = [(p, int(n)) for p, n in re.findall(r"([A-Z]{0,3})([0-9]+)", part)]
+            if len(tokens) == 1:
+                allowed.update(tokens)
+            elif len(tokens) == 2 and tokens[0][0] == tokens[1][0] and tokens[0][1] < tokens[1][1]:
+                allowed.update((tokens[0][0], n) for n in range(tokens[0][1], tokens[1][1] + 1))
+            # それ以外（接頭辞が食い違う範囲 ``E3〜5``・逆順 ``5〜3``）は読めない注記なので、何も許さない。
+            # 両端を単独の番号として許すと、``No.E3〜5 は欠番`` が無印の 5 の欠けまで許してしまう
+    return allowed
+
+
+def parse_no_columns(md_path: str) -> NoColumnScan:
+    """先頭の列が ``No`` の表と、それぞれの表に結び付いた欠番の注記を集める（Issue #2420）。
+
+    コードブロック・HTML コメントの中の表と注記は数えない（見出しの検査と同じ ``mask_blocks``）。
+    注記は、同じ見出しの中で直前・直後の表にだけ結び付ける（``NoTable.notes``）。
+    """
+    masked, unclosed = mask_blocks(_read_lines(md_path))
+    tables: List[NoTable] = []
+    section = 0
+    pending: set = set()  # 直前の表（または見出し）より後に書かれ、次の表へ結び付ける注記
+    previous: Optional[int] = None  # 同じ見出しの中で直前の表（tables の添字）。直後の注記を結び付ける先
+    i = 0
+    while i < len(masked):
+        line = masked[i]
+        if line is None:
+            i += 1
+            continue
+        if ATX_HEADING_RE.match(line):
+            section = i + 1
+            pending = set()
+            previous = None
+            i += 1
+            continue
+        if (
+            _is_table_line(line)
+            and i + 1 < len(masked)
+            and masked[i + 1] is not None
+            and TABLE_SEPARATOR_RE.match(masked[i + 1])
+        ):
+            j = i + 2
+            while j < len(masked) and _is_table_line(masked[j]):
+                j += 1
+            if NO_HEADER_RE.match(_first_cell(line)):
+                cells = [(k + 1, _first_cell(masked[k])) for k in range(i + 2, j)]
+                hyphen_is_range = not any(
+                    NO_HYPHEN_LIKE_RE.match(c) and not _is_ascending_hyphen_range(c)
+                    for _, c in cells
+                )
+                rows = [
+                    NoRow(lineno, c, parse_no_cell(c, hyphen_is_range)) for lineno, c in cells
+                ]
+                # 表のセルに書いた注記（``| 11 | … | …。No.3 は欠番 |``）も数える
+                notes = set(pending)
+                for k in range(i, j):
+                    notes.update(parse_gap_note(masked[k]))
+                tables.append(NoTable(i + 1, section, rows, frozenset(notes)))
+                previous = len(tables) - 1
+                pending = set()
+            i = j
+            continue
+        found = parse_gap_note(line)
+        if found:
+            pending.update(found)
+            if previous is not None:
+                tables[previous] = tables[previous]._replace(notes=tables[previous].notes | found)
+        i += 1
+    return NoColumnScan(tables, unclosed)
+
+
+def _format_numbers(series: str, numbers: List[int]) -> str:
+    """[8, 9, 12] → ``No.8〜9・12``。"""
+    parts = []
+    start = prev = None
+    for n in sorted(numbers) + [None]:
+        if start is not None and (n is None or n != prev + 1):
+            parts.append(f"{series}{start}" if start == prev else f"{series}{start}〜{series}{prev}")
+            start = None
+        if n is not None and start is None:
+            start = n
+        prev = n
+    return "No." + "・".join(parts)
+
+
+def find_no_column_problems(scan: NoColumnScan) -> List[Tuple[int, str]]:
+    """表の No 列の飛び・重複を (行番号, 説明) の一覧で返す。
+
+    - 系列は表ごと・接頭辞ごと。1（または 0）から始まらない表は、次の順で続ける先を探して 1 つの系列にまとめる
+      1. 同じ見出しの中の直前の表（同じ接頭辞）。間の飛びも検査する
+      2. 見出しをまたいだ直近の系列（最後に行を足した順に ``CROSS_HEADING_LOOKBACK`` 個まで）のうち、最大の番号が
+         ちょうど「この表の最小の番号 − 1」のもの（近いものから）。番号がつながっていることを結び付けの根拠に
+         するので、境目の行が消えていれば結び付かず赤になる。遠くの無関係な表と偶然つながらないよう、候補は直近に限る
+      3. どちらも無ければ 1 から始まる系列として数える（先頭の行が消えた表は、欠番の注記が無ければ赤）
+
+    **注記は、その注記が結び付いた表の受け持ちの欠けにだけ効く**。表の受け持ちは、系列のそれまでの最大の番号の次
+    （系列の最初の表なら系列の始まり）から、その表の最大の番号まで。続きとして束ねた系列でも、後ろの表の注記が前の表の
+    欠けを許すことは無い（先頭を欠番と注記した表が、偶然つながった前の表の続きになった場合も同じ）。
+
+    **偶然つながる形は見逃す**: 前の表の最大の番号が、後ろの表から消えた先頭の行の数とちょうど等しいとき
+    （1〜3 の表の後で、続きの表に 4〜8 だけが残った等）、後ろの表は前の表の続きに見えて緑になる（同じ見出しでも、
+    見出しをまたいでも同じ）。
+    - 飛び: 系列の始まりから最大の番号までの間で、どの行も占めていない番号。その番号を受け持つ表に結び付いた注記
+      「No.8 は欠番」で許した番号は除く。抜けの位置に番号として読めないセルの行があれば、案内に添える
+    - 重複: 同じ系列の中で同じ表記（``8`` / ``8a``）を占める行が 2 つ以上（範囲 ``7〜9`` と ``8`` も重複）
+
+    **系列の終わりは最大の番号**なので、表の末尾の行が消えたことは原理的に検出できない（基準が無い）。
+    """
+    groups: List[dict] = []
+    last: Dict[Tuple[int, str], dict] = {}
+    recent: List[dict] = []  # 最後に行を足した順の系列（見出しをまたぐ続きの候補）
+    for table in scan.tables:
+        by_series: Dict[str, List[Tuple[int, NoEntry]]] = {}
+        for row in table.rows:
+            for entry in row.entries:
+                by_series.setdefault(entry.series, []).append((row.lineno, entry))
+        for series, items in by_series.items():
+            smallest = min(e.base for _, e in items)
+            group = None
+            if smallest > 1:
+                group = last.get((table.section_lineno, series))
+                if group is None:
+                    group = next(
+                        (
+                            g for g in recent[-CROSS_HEADING_LOOKBACK:][::-1]
+                            if g["series"] == series
+                            and max(e.base for _, e in g["items"]) == smallest - 1
+                        ),
+                        None,
+                    )
+            if group is None:
+                group = {
+                    "series": series,
+                    "start": min(smallest, 1),
+                    "table_lineno": table.lineno,
+                    "items": [],
+                    # 表ごとの番号の受け持ち（lo〜hi）と、その表に結び付いた注記。注記は受け持ちの中の欠けだけを許す
+                    "segments": [],
+                    "unreadable": [],
+                    # 1 から始まらないのに続ける先が見つからなかった表の最小の番号（案内を変えるため）
+                    "orphan_from": smallest if smallest > 1 else None,
+                }
+                groups.append(group)
+            # この表が受け持つ番号: 系列のそれまでの最大の番号の次（最初の表なら系列の始まり）から、この表の最大の番号まで
+            lo = max(e.base for _, e in group["items"]) + 1 if group["items"] else group["start"]
+            group["segments"].append((lo, max(e.base for _, e in items), table.notes))
+            group["items"].extend(items)
+            # ハイフンの枝番・ID 形（``1-1`` ・ ``20h-2`` ・ ``1-7a``）は対象外として認めている書き方なので、
+            # 書式の誤りとして案内しない
+            group["unreadable"].extend(
+                (row.lineno, row.cell) for row in table.rows
+                if not row.entries
+                and UNREADABLE_NO_CELL_RE.match(row.cell)
+                and not NO_HYPHEN_LIKE_RE.match(row.cell)
+            )
+            last[(table.section_lineno, series)] = group
+            if group in recent:
+                recent.remove(group)
+            recent.append(group)
+
+    problems: List[Tuple[int, str]] = []
+    for group in groups:
+        series, start, items = group["series"], group["start"], group["items"]
+        where = f"{group['table_lineno']} 行目の表"
+        lines_by_key: Dict[str, List[int]] = {}
+        for lineno, entry in items:
+            lines_by_key.setdefault(entry.key, []).append(lineno)
+        for key, linenos in lines_by_key.items():
+            if len(linenos) > 1:
+                problems.append((
+                    linenos[1],
+                    f"{where}: No.{key} が重複しています（{', '.join(str(n) for n in linenos)} 行目）",
+                ))
+        bases = {e.base for _, e in items}
+
+        def allowed(n: int) -> bool:
+            return any(
+                lo <= n <= hi and (series, n) in notes for lo, hi, notes in group["segments"]
+            )
+
+        missing = [n for n in range(start, max(bases) + 1) if n not in bases and not allowed(n)]
+        # 連続する欠けを 1 件にまとめ、その直後の番号を持つ行の行番号を示す
+        runs: List[List[int]] = []
+        for n in missing:
+            if runs and runs[-1][-1] == n - 1:
+                runs[-1].append(n)
+            else:
+                runs.append([n])
+        for run in runs:
+            after = min(((e.base, lineno) for lineno, e in items if e.base > run[-1]))
+            text = (
+                f"{where}: {_format_numbers(series, run)} が抜けています"
+                f"（{after[1]} 行目の No.{series}{after[0]} の前）"
+            )
+            # 抜けの位置に番号として読めないセルの行があれば、行の消失ではなく書式の誤りかもしれない
+            before_line = max(
+                (lineno for lineno, e in items if e.base < run[0]), default=group["table_lineno"]
+            )
+            suspects = [
+                (lineno, cell) for lineno, cell in group["unreadable"]
+                if before_line < lineno < after[1]
+            ]
+            if suspects:
+                listed = "、".join(f"{lineno} 行目の「{cell}」" for lineno, cell in suspects)
+                text += f"。{listed} を番号として読めません。番号の書式（例: 13・7〜9・8a）を確かめてください"
+            orphan_from = group["orphan_from"]
+            if orphan_from is not None and run[0] == 1 and not suspects:
+                # 先頭の欠けは、行の消失のほか「前の表の続きのつもりが、続ける先が見つからなかった」こともある
+                text += (
+                    f"。前の表の続きなら、続ける先が見つかりませんでした（直前の表の最大の番号が"
+                    f" No.{series}{orphan_from - 1} でない、または見出しをまたいで間に別の No の表が"
+                    f" {CROSS_HEADING_LOOKBACK} つ以上ある）。番号をつなげるか、表を近くへ移してください"
+                )
+            problems.append((after[1], text))
+    return sorted(problems)
+
+
+def check_no_columns(scan: NoColumnScan) -> Tuple[bool, str]:
+    """07 の表の No 列に飛び・重複が無いことを確かめる（Issue #2420）。
+
+    #2321 では 07 の 66 か所（計 152 行）から No.13〜15 の行が一斉に消えたが、CI は緑のまま通った。
+    表を 1 つも読めなかったときは、正規表現が文書の書式から外れた空振りとして fail する。
+    """
+    if scan.unclosed:
+        return False, (
+            f"❌ ファイルの終わりまで {scan.unclosed} が閉じていないため、表の No 列を検査できません\n"
+            "  閉じの記号（開いた記号と同じ種類・同じ長さ以上の ``` / ~~~、または -->）を書き足してください。"
+        )
+    if not scan.tables:
+        return False, (
+            "⚠ 先頭の列が「No」の表を 1 つも読み取れませんでした\n"
+            "  表の書式が変わったか、本スクリプトの NO_HEADER_RE / TABLE_SEPARATOR_RE が文書に合っていません。"
+            "正規表現を文書の書式に合わせて更新してください。"
+        )
+    problems = find_no_column_problems(scan)
+    if not problems:
+        return True, f"✅ 表の No 列に飛び・重複なし（{len(scan.tables)} 表）"
+    lines = ["❌ 07_テスト設計書の表の No 列に飛び・重複があります"]
+    lines += [f"  {lineno} 行目 — {text}" for lineno, text in problems]
+    lines += [
+        "  行を消した・番号を書き損じたのなら、行を戻すか番号を直してください。",
+        "  削除したテストの番号を詰めずに残すのが意図なら、表の直前か直後（同じ見出しの中）に",
+        "  「No.8・9 は欠番」のように注記してください（範囲は「No.4〜6 は欠番」）。重複は注記で許せません。",
+    ]
     return False, "\n".join(lines)
 
 
@@ -550,13 +996,18 @@ def main(argv=None) -> int:
     parser.add_argument("--ui-csproj", required=True, help="Path to ICCardManager.UITests.csproj")
     args = parser.parse_args(argv)
 
-    # 見出しの重複検査（Issue #2391）は dotnet も §1.1a の表も使わないので、最初に結果を出す。
-    # 後ろの検査が早期に終了しても（§1.1a の不一致・一覧の取得失敗）、見出しの結果は必ずログに残る。
+    # 見出しの重複検査（Issue #2391）と表の No 列の検査（Issue #2420）は dotnet も §1.1a の表も使わないので、
+    # 最初に結果を出す。後ろの検査が早期に終了しても（§1.1a の不一致・一覧の取得失敗）、両者の結果は必ずログに残る。
     # 終了コードは、早期に終了したときはその値（いずれも非 0）、最後まで進んだときは全検査の合成。
-    heading_ok, heading_report = check_heading_uniqueness(parse_headings(args.doc))
-    heading_stream = sys.stdout if heading_ok else sys.stderr
-    print(heading_report, file=heading_stream)
-    heading_stream.flush()
+    structure_ok = True
+    for passed, text in (
+        check_heading_uniqueness(parse_headings(args.doc)),
+        check_no_columns(parse_no_columns(args.doc)),
+    ):
+        stream = sys.stdout if passed else sys.stderr
+        print(text, file=stream)
+        stream.flush()
+        structure_ok = structure_ok and passed
 
     expected = parse_doc_counts(args.doc)
     if expected is None:
@@ -623,7 +1074,7 @@ def main(argv=None) -> int:
         print(text, file=stream)
         stream.flush()
 
-    return 0 if ok and class_ok and heading_ok else 1
+    return 0 if ok and class_ok and structure_ok else 1
 
 
 if __name__ == "__main__":
