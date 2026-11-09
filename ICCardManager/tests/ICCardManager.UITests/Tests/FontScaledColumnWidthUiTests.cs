@@ -1,6 +1,8 @@
 #nullable enable
 using System;
 using System.Globalization;
+using System.Linq;
+using FlaUI.Core.AutomationElements;
 using FlaUI.Core.Definitions;
 using FlaUI.Core.Tools;
 using FluentAssertions;
@@ -12,6 +14,7 @@ namespace ICCardManager.UITests.Tests
 {
     /// <summary>
     /// メイン画面の履歴一覧の「日付」（和暦）が、文字サイズ「特大」でも末尾まで表示されることの回帰テスト（Issue #2404）。
+    /// あわせて、特大・最小幅でも「操作」列（詳細・変更）と表示期間の「先月」「今月」が見えることの回帰テスト（Issue #2424）。
     /// </summary>
     /// <remarks>
     /// <para>
@@ -88,9 +91,10 @@ namespace ICCardManager.UITests.Tests
             // Issue #2076 の懸念: 列幅の合計が広がると、ウィンドウを最小幅にしたとき右端の「操作」列が横スクロールの外へ押し出される。
             // 日付の列を Auto にした（和暦は特大でも MinWidth 100 に収まるので広がらない）。最小幅でも日付の列が
             // 固定幅 100 の「備考」と同じ幅のまま（下限から広がっていない）ことを確かめる。
-            // 「操作」列が一覧の内側にあることは表明しない: 特大では日付の列と無関係に、摘要（SizeToCells）を含む列幅の合計が
-            // 最小幅の一覧を超え、「操作」列が横スクロールの外へ出る（2026-11-09 の実行で、見出しの右端 1545 に対し一覧の右端 1497。
-            // #2404 の前から日付の列は 100 で同じ）。それは #2404 の範囲外の既存の挙動
+            // 「操作」列が一覧の内側にあることはここでは表明しない: #2404 の時点では、特大で日付の列と無関係に、摘要（SizeToCells）を含む
+            // 列幅の合計が最小幅の一覧を超え、「操作」列が横スクロールの外へ出ていた（2026-11-09 の実行で、見出しの右端 1545 に対し一覧の右端 1497。
+            // #2404 の前から日付の列は 100 で同じ）。#2404 の範囲外の既存の挙動で、Issue #2424 で摘要を * 列にして是正した。
+            // 「操作」列・「変更」ボタン・「先月」「今月」が見えることは 履歴の操作列と表示期間のボタンが見えること_* が表明する
             var handle = NativeWindows.HandleOf(page.Window);
             var original = page.Window.BoundingRectangle;
             NativeWindows.Resize(handle, 100, original.Height);
@@ -103,6 +107,124 @@ namespace ICCardManager.UITests.Tests
             dateHeader.BoundingRectangle.Width.Should().BeCloseTo(fixedHeader.BoundingRectangle.Width, 1,
                 $"ウィンドウが最小幅でも、「{DateColumnHeader}」列は下限 100 のまま（固定幅 100 の「{SameWidthFixedColumnHeader}」と同じ幅）で、" +
                 "列幅の合計を広げて右端の「操作」列を押し出す側に回らないこと（Issue #2076 / #2404）");
+        }
+
+        /// <summary>
+        /// 文字サイズ「特大」・最小幅のメイン画面で、履歴一覧の「操作」列と「変更」ボタン、表示期間の行の「先月」「今月」が見えること（Issue #2424）。
+        /// </summary>
+        /// <remarks>
+        /// 是正前は摘要の列が SizeToCells で、特大では摘要の幅まで広がって列幅の合計が一覧の幅を超え、「操作」列が横スクロールの外へ出ていた
+        /// （見出しの右端 1545 に対し一覧の右端 1497。表示スケール 150%）。表示期間の行は右寄せの横方向 StackPanel が列の幅を超え、
+        /// はみ出した左端の「先月」「今月」が切り抜かれていた。長い摘要の行を足して、摘要が一覧の幅に追随して切れることも併せて確かめる。
+        /// </remarks>
+        [Fact]
+        public void 履歴の操作列と表示期間のボタンが見えること_文字サイズが特大で最小幅のとき()
+        {
+            AssertHistoryControlsAreVisible("xlarge", shrinkToMinimumWidth: true, "uitest_2424_history_xlarge_min.png");
+        }
+
+        /// <summary>
+        /// 対の表明: 文字サイズ「中」・既定の幅でも同じ表明が通ること（特大・最小幅だけに合わせた配置で、通常の画面を崩していない）。
+        /// </summary>
+        [Fact]
+        public void 履歴の操作列と表示期間のボタンが見えること_文字サイズが中で既定の幅のとき()
+        {
+            AssertHistoryControlsAreVisible("medium", shrinkToMinimumWidth: false, "uitest_2424_history_medium.png");
+        }
+
+        /// <summary>
+        /// どの文字サイズ・幅でも 1 行に収まらない摘要（特大で約 900、中で約 630 DIP）
+        /// </summary>
+        private const string LongSummary = "鉄道（博多～天神南、薬院～福岡空港、西鉄福岡（天神）～太宰府 往復、貝塚～姪浜）";
+
+        private const string OperationColumnHeader = "操作";
+
+        private static void AssertHistoryControlsAreVisible(string fontSize, bool shrinkToMinimumWidth, string screenshotName)
+        {
+            using var fixture = AppFixture.LaunchWithSeed(
+                conn =>
+                {
+                    // 今日の行（通常カード）の 1 行の摘要を長くする。SeedWithIncompleteBusStops は今日の行の id を返す
+                    var id = ScreenshotSeedData.SeedWithIncompleteBusStops(conn);
+                    using (var update = conn.CreateCommand())
+                    {
+                        update.CommandText = "UPDATE ledger SET summary = @summary WHERE id = @id";
+                        update.Parameters.AddWithValue("@summary", LongSummary);
+                        update.Parameters.AddWithValue("@id", id);
+                        update.ExecuteNonQuery().Should().Be(1, "前提: 今日の行の摘要を書き換えたこと");
+                    }
+
+                    using var font = conn.CreateCommand();
+                    font.CommandText = "INSERT OR REPLACE INTO settings (key, value) VALUES ('font_size', @font)";
+                    font.Parameters.AddWithValue("@font", fontSize);
+                    font.ExecuteNonQuery();
+                },
+                AppFixture.SuppressDebugTestData);
+            ScreenshotHelper.MoveToTopLeft(fixture.MainWindow);
+            var page = new MainWindowPage(fixture.MainWindow, fixture.Automation);
+            page.OpenCardHistory(ScreenshotSeedData.NormalCardDisplayName);
+
+            var grid = page.FindByNameWithRetry(TestConstants.HistoryLedgerGrid);
+            grid.Should().NotBeNull("前提: 履歴一覧（DataGrid）が見つかること");
+
+            if (shrinkToMinimumWidth)
+            {
+                var handle = NativeWindows.HandleOf(page.Window);
+                var original = page.Window.BoundingRectangle;
+                NativeWindows.Resize(handle, 100, original.Height);
+                page.Window.BoundingRectangle.Width.Should().BeLessOrEqualTo(original.Width, "前提: ウィンドウが最小幅まで縮んだこと（MinWidth より細く指示すると WPF は MinWidth で止める）");
+            }
+
+            ScrollToLatestRows(grid!);
+            var cf = grid!.ConditionFactory;
+
+            // ① 「操作」列の見出しが一覧の内側にあること（是正前は 1545 > 1497）
+            var operationHeader = FindHeader(grid, OperationColumnHeader);
+            var gridRect = grid.BoundingRectangle;
+            operationHeader.BoundingRectangle.Right.Should().BeLessOrEqualTo(gridRect.Right,
+                $"「{OperationColumnHeader}」列の見出しの右端（{operationHeader.BoundingRectangle.Right}）が一覧の右端（{gridRect.Right}）の内側にあること。" +
+                "列幅の合計が一覧の幅を超えると、右端の「操作」列が横スクロールの外へ出る（Issue #2424）");
+
+            // ② 今日の行（長い摘要の行）の「変更」ボタンが一覧の内側にあること
+            var row = Retry.WhileNull(
+                () => grid.AsGrid().Rows.FirstOrDefault(r => r.FindFirstDescendant(cf.ByName(LongSummary)) != null),
+                Wait).Result;
+            row.Should().NotBeNull("前提: 長い摘要の行（今日の行）が一覧に表示されていること");
+            var edit = row!.FindFirstDescendant(cf.ByName("変更").And(cf.ByControlType(ControlType.Button)));
+            edit.Should().NotBeNull("前提: 今日の行に「変更」ボタンがあること");
+            edit!.IsOffscreen.Should().BeFalse("今日の行の「変更」ボタンが表示されていること");
+            edit.BoundingRectangle.Left.Should().BeGreaterOrEqualTo(gridRect.Left);
+            edit.BoundingRectangle.Right.Should().BeLessOrEqualTo(gridRect.Right,
+                $"今日の行の「変更」ボタンの右端（{edit.BoundingRectangle.Right}）が一覧の右端（{gridRect.Right}）の内側にあること。" +
+                "返却確認（#1907）は「行の『変更』から修正できます」と案内している（Issue #2424）");
+
+            // ③ 摘要が一覧の幅に追随して切れ、全文は ToolTip（UIA の HelpText）で読めること
+            var summaryCell = grid.FindFirstDescendant(cf.ByName(LongSummary).And(cf.ByControlType(ControlType.Custom)));
+            var summaryText = summaryCell?.FindFirstChild(cf.ByControlType(ControlType.Text));
+            summaryText.Should().NotBeNull("前提: 長い摘要のセルの文字列があること");
+            summaryCell!.BoundingRectangle.Right.Should().BeLessOrEqualTo(gridRect.Right, "摘要のセルは一覧の内側に収まること（内容の幅まで広がらない）");
+            summaryText!.Properties.HelpText.ValueOrDefault.Should().Be(LongSummary,
+                "幅に収まらない摘要は省略記号で切れるので、全文を ToolTip で読めること（Issue #2424。利用者の列 #2076 と同じ形）");
+
+            // ④ 表示期間の行の「先月」「今月」が表示され、表示期間（◀ 期間 ▶）と重ならずに一覧と同じ幅の内側にあること
+            var next = Retry.WhileNull(() => page.Window.FindFirstDescendant(cf.ByAutomationId("HistoryNextMonthButton")), Wait).Result;
+            next.Should().NotBeNull("前提: 表示期間の「次の月」ボタンがあること");
+            foreach (var name in new[] { "先月", "今月" })
+            {
+                var button = page.Window.FindFirstDescendant(cf.ByName(name).And(cf.ByControlType(ControlType.Button)));
+                button.Should().NotBeNull($"前提: 表示期間の行に「{name}」ボタンがあること");
+                var rect = button!.BoundingRectangle;
+                button.IsOffscreen.Should().BeFalse($"「{name}」ボタンが表示されていること（Issue #2424）");
+                rect.Left.Should().BeGreaterOrEqualTo(next!.BoundingRectangle.Right,
+                    $"「{name}」ボタン（{rect.Left}～{rect.Right}）が表示期間の「次の月」ボタンの右端（{next.BoundingRectangle.Right}）より右にあること。" +
+                    "列の幅を超えたボタン群は、はみ出した左端が切り抜かれて見えなくなる（Issue #2424）");
+                rect.Right.Should().BeLessOrEqualTo(gridRect.Right, $"「{name}」ボタンが表示期間の行（一覧と同じ幅）の内側にあること");
+            }
+
+            if (!ScreenshotHelper.ShouldSkip)
+            {
+                ScreenshotHelper.Capture(page.Window, screenshotName);
+            }
         }
 
         private static FlaUI.Core.AutomationElements.AutomationElement FindHeader(

@@ -9,6 +9,7 @@
         xmlns:services="clr-namespace:ICCardManager.Services"
         xmlns:dtos="clr-namespace:ICCardManager.Dtos"
         xmlns:app="clr-namespace:ICCardManager"
+        xmlns:helpers="clr-namespace:ICCardManager.Views.Helpers"
         mc:Ignorable="d"
         d:DataContext="{d:DesignInstance Type=vm:MainViewModel}"
         Title="{x:Static conv:AppConstants.SystemName}"
@@ -541,106 +542,120 @@
                                         AutomationProperties.HelpText="表示期間を1か月後へ移動します"/>
                             </StackPanel>
 
-                            <!-- 月選択ボタン（使用頻度順: 先月 > 今月。帳票画面と同じ順序） -->
-                            <StackPanel Grid.Column="1" Orientation="Horizontal" HorizontalAlignment="Right">
-                                <Button Content="先月"
-                                        Command="{Binding HistorySetLastMonthCommand}"
-                                        Padding="12,6"
-                                        Margin="0,0,5,0"
-                                        ToolTip="先月の履歴を表示"/>
-                                <Button Content="今月"
-                                        Command="{Binding HistorySetThisMonthCommand}"
-                                        Padding="12,6"
-                                        Margin="0,0,5,0"
-                                        ToolTip="今月の履歴を表示"/>
-                                <Button x:Name="HistoryOtherMonthButton"
-                                        Content="その他の月..."
-                                        Click="HistoryOtherMonthButton_Click"
-                                        Padding="12,6"
-                                        ToolTip="任意の年月を選択"/>
+                            <!-- 月選択ボタン（使用頻度順: 先月 > 今月。帳票画面と同じ順序）と行操作・統合のボタン。
+                                 Issue #2424: 文字サイズ「特大」で最小幅にすると、右寄せの横方向 StackPanel が列の幅を超え、
+                                 はみ出した左端（先月・今月）が切り抜かれて見えなくなっていた。ボタンの群ごとに WrapPanel で折り返し、
+                                 先頭の群（先月・今月・その他の月）を 1 段目に残す。群の中では折り返さない（区切り線を直後のボタンと同じ群に置き、
+                                 区切り線だけが前の段に取り残されないようにする。群ごと 2 段目へ折り返したときは、その段の先頭に区切り線と左の余白が来る） -->
+                            <WrapPanel x:Name="HistoryPeriodButtonsPanel"
+                                       Grid.Column="1"
+                                       HorizontalAlignment="Right"
+                                       VerticalAlignment="Center">
+                                <StackPanel Orientation="Horizontal" Margin="0,2">
+                                    <Button Content="先月"
+                                            Command="{Binding HistorySetLastMonthCommand}"
+                                            Padding="12,6"
+                                            Margin="0,0,5,0"
+                                            ToolTip="先月の履歴を表示"/>
+                                    <Button Content="今月"
+                                            Command="{Binding HistorySetThisMonthCommand}"
+                                            Padding="12,6"
+                                            Margin="0,0,5,0"
+                                            ToolTip="今月の履歴を表示"/>
+                                    <Button x:Name="HistoryOtherMonthButton"
+                                            Content="その他の月..."
+                                            Click="HistoryOtherMonthButton_Click"
+                                            Padding="12,6"
+                                            ToolTip="任意の年月を選択"/>
+
+                                    <!-- 月選択ポップアップ（レイアウト上の幅を持たない） -->
+                                    <Popup x:Name="HistoryMonthSelectorPopup"
+                                           IsOpen="{Binding IsHistoryMonthSelectorOpen}"
+                                           PlacementTarget="{Binding ElementName=HistoryOtherMonthButton}"
+                                           Placement="Bottom"
+                                           StaysOpen="False"
+                                           AllowsTransparency="True"
+                                           AutomationProperties.Name="月選択ポップアップ"
+                                           AutomationProperties.HelpText="年と月を選んで「適用」を押すと、その月の履歴が表示されます">
+                                        <Border Background="{DynamicResource SurfaceBrush}"
+                                                BorderBrush="{DynamicResource SubtleBorderBrush}"
+                                                BorderThickness="1"
+                                                CornerRadius="4"
+                                                Padding="15"
+                                                Margin="0,5,0,0">
+                                            <Border.Effect>
+                                                <DropShadowEffect BlurRadius="10" ShadowDepth="2" Opacity="0.3"/>
+                                            </Border.Effect>
+                                            <StackPanel>
+                                                <TextBlock Text="月を選択" FontWeight="Bold" Margin="0,0,0,10"/>
+                                                <StackPanel Orientation="Horizontal" Margin="0,0,0,10">
+                                                    <ComboBox ItemsSource="{Binding HistoryAvailableYears}"
+                                                              SelectedItem="{Binding HistorySelectedYear}"
+                                                              MinWidth="80"
+                                                              HorizontalAlignment="Left"
+                                                              Padding="8"
+                                                              AutomationProperties.Name="年の選択"/>
+                                                    <TextBlock Text="年" VerticalAlignment="Center" Margin="5,0,15,0"/>
+                                                    <ComboBox ItemsSource="{Binding HistoryAvailableMonths}"
+                                                              SelectedItem="{Binding HistorySelectedMonth}"
+                                                              MinWidth="60"
+                                                              HorizontalAlignment="Left"
+                                                              Padding="8"
+                                                              AutomationProperties.Name="月の選択"/>
+                                                    <TextBlock Text="月" VerticalAlignment="Center" Margin="5,0,0,0"/>
+                                                </StackPanel>
+                                                <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+                                                    <Button Content="キャンセル"
+                                                            Command="{Binding HistoryCloseMonthSelectorCommand}"
+                                                            Padding="10,5"
+                                                            Margin="0,0,10,0"
+                                                            AutomationProperties.Name="月選択をキャンセル"/>
+                                                    <Button Style="{StaticResource SecondaryActionButtonStyle}"
+                                                            Content="適用"
+                                                            Command="{Binding HistoryApplySelectedMonthCommand}"
+                                                            Padding="15,5"
+                                                            AutomationProperties.Name="選択した月を適用"/>
+                                                </StackPanel>
+                                            </StackPanel>
+                                        </Border>
+                                    </Popup>
+                                </StackPanel>
 
                                 <!-- 行操作ボタン（Issue #635） -->
-                                <Border Width="1" Background="{DynamicResource DividerBrush}" Margin="10,2"/>
-                                <Button Content="＋ 行を追加"
-                                        Command="{Binding AddLedgerRowCommand}"
-                                        Padding="12,6"
-                                        ToolTip="履歴に新しい行を挿入します"
-                                        AutomationProperties.Name="履歴行を追加"
-                                        AutomationProperties.HelpText="手動で履歴行を追加します（日付・摘要・金額等を入力）"/>
+                                <StackPanel Orientation="Horizontal" Margin="0,2">
+                                    <Border Width="1" Background="{DynamicResource DividerBrush}" Margin="10,2"/>
+                                    <Button Content="＋ 行を追加"
+                                            Command="{Binding AddLedgerRowCommand}"
+                                            Padding="12,6"
+                                            ToolTip="履歴に新しい行を挿入します"
+                                            AutomationProperties.Name="履歴行を追加"
+                                            AutomationProperties.HelpText="手動で履歴行を追加します（日付・摘要・金額等を入力）"/>
+                                </StackPanel>
 
                                 <!-- 統合ボタン（Issue #548） -->
-                                <Border Width="1" Background="{DynamicResource DividerBrush}" Margin="10,2"/>
-                                <Button Content="📦 チェックした履歴を統合"
-                                        Command="{Binding MergeHistoryLedgersCommand}"
-                                        Padding="12,6"
-                                        ToolTip="チェックボックスで選んだ履歴を1つに統合します"
-                                        AutomationProperties.Name="チェックした履歴を統合"
-                                        AutomationProperties.HelpText="チェックボックスで統合したい履歴を選んでからこのボタンを押すと、1つの履歴にまとめます"/>
-                                <Button Content="↩ 統合を元に戻す"
-                                        Command="{Binding UndoMergeHistoryLedgersCommand}"
-                                        Padding="12,6"
-                                        ToolTip="過去の統合操作を元に戻します"
-                                        AutomationProperties.Name="統合を元に戻す"
-                                        AutomationProperties.HelpText="過去の統合操作を選んで取り消して元の状態に戻します"/>
-
-                                <!-- 月選択ポップアップ -->
-                                <Popup x:Name="HistoryMonthSelectorPopup"
-                                       IsOpen="{Binding IsHistoryMonthSelectorOpen}"
-                                       PlacementTarget="{Binding ElementName=HistoryOtherMonthButton}"
-                                       Placement="Bottom"
-                                       StaysOpen="False"
-                                       AllowsTransparency="True"
-                                       AutomationProperties.Name="月選択ポップアップ"
-                                       AutomationProperties.HelpText="年と月を選んで「適用」を押すと、その月の履歴が表示されます">
-                                    <Border Background="{DynamicResource SurfaceBrush}"
-                                            BorderBrush="{DynamicResource SubtleBorderBrush}"
-                                            BorderThickness="1"
-                                            CornerRadius="4"
-                                            Padding="15"
-                                            Margin="0,5,0,0">
-                                        <Border.Effect>
-                                            <DropShadowEffect BlurRadius="10" ShadowDepth="2" Opacity="0.3"/>
-                                        </Border.Effect>
-                                        <StackPanel>
-                                            <TextBlock Text="月を選択" FontWeight="Bold" Margin="0,0,0,10"/>
-                                            <StackPanel Orientation="Horizontal" Margin="0,0,0,10">
-                                                <ComboBox ItemsSource="{Binding HistoryAvailableYears}"
-                                                          SelectedItem="{Binding HistorySelectedYear}"
-                                                          MinWidth="80"
-                                                          HorizontalAlignment="Left"
-                                                          Padding="8"
-                                                          AutomationProperties.Name="年の選択"/>
-                                                <TextBlock Text="年" VerticalAlignment="Center" Margin="5,0,15,0"/>
-                                                <ComboBox ItemsSource="{Binding HistoryAvailableMonths}"
-                                                          SelectedItem="{Binding HistorySelectedMonth}"
-                                                          MinWidth="60"
-                                                          HorizontalAlignment="Left"
-                                                          Padding="8"
-                                                          AutomationProperties.Name="月の選択"/>
-                                                <TextBlock Text="月" VerticalAlignment="Center" Margin="5,0,0,0"/>
-                                            </StackPanel>
-                                            <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
-                                                <Button Content="キャンセル"
-                                                        Command="{Binding HistoryCloseMonthSelectorCommand}"
-                                                        Padding="10,5"
-                                                        Margin="0,0,10,0"
-                                                        AutomationProperties.Name="月選択をキャンセル"/>
-                                                <Button Style="{StaticResource SecondaryActionButtonStyle}"
-                                                        Content="適用"
-                                                        Command="{Binding HistoryApplySelectedMonthCommand}"
-                                                        Padding="15,5"
-                                                        AutomationProperties.Name="選択した月を適用"/>
-                                            </StackPanel>
-                                        </StackPanel>
-                                    </Border>
-                                </Popup>
-                            </StackPanel>
+                                <StackPanel Orientation="Horizontal" Margin="0,2">
+                                    <Border Width="1" Background="{DynamicResource DividerBrush}" Margin="10,2"/>
+                                    <Button Content="📦 チェックした履歴を統合"
+                                            Command="{Binding MergeHistoryLedgersCommand}"
+                                            Padding="12,6"
+                                            ToolTip="チェックボックスで選んだ履歴を1つに統合します"
+                                            AutomationProperties.Name="チェックした履歴を統合"
+                                            AutomationProperties.HelpText="チェックボックスで統合したい履歴を選んでからこのボタンを押すと、1つの履歴にまとめます"/>
+                                    <Button Content="↩ 統合を元に戻す"
+                                            Command="{Binding UndoMergeHistoryLedgersCommand}"
+                                            Padding="12,6"
+                                            ToolTip="過去の統合操作を元に戻します"
+                                            AutomationProperties.Name="統合を元に戻す"
+                                            AutomationProperties.HelpText="過去の統合操作を選んで取り消して元の状態に戻します"/>
+                                </StackPanel>
+                            </WrapPanel>
                         </Grid>
 
                         <!-- 履歴一覧 -->
                         <DataGrid Grid.Row="3"
                                   x:Name="HistoryDataGrid"
                                   HorizontalScrollBarVisibility="Auto"
+                                  helpers:DataGridAutoColumnFit.IsEnabled="True"
                                   ItemsSource="{Binding HistoryLedgers}"
                                   AutoGenerateColumns="False"
                                   IsReadOnly="True"
@@ -661,7 +676,7 @@
                                 <SolidColorBrush x:Key="{x:Static SystemColors.InactiveSelectionHighlightTextBrushKey}" Color="Black"/>
                             </DataGrid.Resources>
                             <DataGrid.Columns>
-                                <DataGridTemplateColumn Header="選択" Width="45">
+                                <DataGridTemplateColumn Header="選択" Width="45" MinWidth="45">
                                     <DataGridTemplateColumn.CellTemplate>
                                         <DataTemplate>
                                             <CheckBox IsChecked="{Binding IsChecked, UpdateSourceTrigger=PropertyChanged}"
@@ -673,14 +688,14 @@
                                     </DataGridTemplateColumn.CellTemplate>
                                 </DataGridTemplateColumn>
                                 <!-- Issue #1907: 直前の返却で記録された行の印。色（行背景）だけに頼らず文字でも示す -->
-                                <DataGridTextColumn Header="今回" Binding="{Binding RecentlyRecordedMark}" Width="45">
+                                <DataGridTextColumn Header="今回" Binding="{Binding RecentlyRecordedMark}" Width="45" MinWidth="45">
                                     <DataGridTextColumn.ElementStyle>
                                         <Style TargetType="TextBlock">
                                             <Setter Property="HorizontalAlignment" Value="Center"/>
                                             <Style.Triggers>
                                                 <!-- ツールチップは ✔ の付いた行だけ（空セルに出ると記録されていない行まで「今回」に見える） -->
                                                 <DataTrigger Binding="{Binding IsRecentlyRecorded}" Value="True">
-                                                    <Setter Property="ToolTip" Value="今回の返却で記録された行"/>
+                                                    <Setter Property="ToolTip" Value="{x:Static dtos:LedgerDto.RecentlyRecordedToolTip}"/>
                                                 </DataTrigger>
                                             </Style.Triggers>
                                         </Style>
@@ -692,10 +707,30 @@
                                      右端の「操作」列が横スクロールの向こうへ押し出されるため、広げ幅は必要最小限にする。
                                      Issue #2404: 表示は和暦（「R8.12.28」）で、特大でも 82（「R10.12.28」でも 92）と 100 に収まる。
                                      日付の列を内容に合わせる幅にそろえる規約（DateColumnWidthConventionTests）に合わせて
-                                     Auto にし、100 を下限に残す（和暦のままなら幅は変わらない） -->
+                                     Auto にし、100 を下限に残す（和暦のままなら幅は変わらない）。
+                                     Issue #2424: 「固定幅の合計」には、内容に合わせて広がる列も数える。摘要は SizeToCells で
+                                     文字サイズとともに摘要の幅まで広がり、特大・最小幅では合計が一覧の幅を超えて「操作」列が横スクロールの外へ出ていた。
+                                     摘要を残りの幅を取る * にし（下限 150）、日付の Auto は固定長の和暦だけが広げる（HistoryGridColumnWidthConventionTests） -->
                                 <DataGridTextColumn Header="日付" Binding="{Binding DateDisplay}" Width="Auto" MinWidth="100"/>
-                                <DataGridTextColumn Header="摘要" Binding="{Binding Summary}" Width="SizeToCells" MinWidth="200"/>
-                                <DataGridTextColumn Header="受入" Width="75">
+                                <!-- Issue #2424: 残りの幅を取る。収まらない摘要は利用者の列（#2076）と同じく、
+                                     TextTrimming（切れていることが見て分かる）と ToolTip（全文を読める）で担保する。
+                                     下限は 150: 特大・最小幅（1400）で摘要に残る幅は約 198 DIP で、下限を 200 にすると足りない分を
+                                     DataGrid が固定幅の列（備考など）を削って捻出した（2026-11-09 の UI テストで備考の見出しが
+                                     物理ピクセルで 150 → 147、DIP で 100 → 98。表示スケール 150%）。
+                                     摘要は最も広い列なので、セルの ToolTip が行の ToolTip（#1052 の残高不整合の説明・#1907 の今回の返却）を
+                                     行の大部分で覆う。SummaryToolTip は行の文言と摘要の全文を合わせて返し、両方が空なら null（中身の無いツールチップを出さない） -->
+                                <DataGridTextColumn Header="摘要" Binding="{Binding Summary}" Width="*" MinWidth="150">
+                                    <DataGridTextColumn.ElementStyle>
+                                        <Style TargetType="TextBlock">
+                                            <Setter Property="TextTrimming" Value="CharacterEllipsis"/>
+                                            <Setter Property="ToolTip" Value="{Binding SummaryToolTip}"/>
+                                        </Style>
+                                    </DataGridTextColumn.ElementStyle>
+                                </DataGridTextColumn>
+                                <!-- Issue #2424: 固定幅の列は MinWidth を Width と同じにする。* 列（摘要）が下限に達してもなお幅が足りないとき
+                                     （作業領域の狭い PC では最小幅が 1400 より狭くなる。#2150）、DataGrid は固定幅の列を MinWidth まで削って捻出する。
+                                     右寄せの金額は省略記号なしで欠けるため、削らせずに横スクロールで受ける（HistoryGridColumnWidthConventionTests） -->
+                                <DataGridTextColumn Header="受入" Width="75" MinWidth="75">
                                     <DataGridTextColumn.Binding>
                                         <Binding Path="IncomeDisplay"/>
                                     </DataGridTextColumn.Binding>
@@ -705,7 +740,7 @@
                                         </Style>
                                     </DataGridTextColumn.ElementStyle>
                                 </DataGridTextColumn>
-                                <DataGridTextColumn Header="払出" Width="75">
+                                <DataGridTextColumn Header="払出" Width="75" MinWidth="75">
                                     <DataGridTextColumn.Binding>
                                         <Binding Path="ExpenseDisplay"/>
                                     </DataGridTextColumn.Binding>
@@ -715,7 +750,7 @@
                                         </Style>
                                     </DataGridTextColumn.ElementStyle>
                                 </DataGridTextColumn>
-                                <DataGridTextColumn Header="残高" Width="85">
+                                <DataGridTextColumn Header="残高" Width="85" MinWidth="85">
                                     <DataGridTextColumn.Binding>
                                         <Binding Path="BalanceDisplay"/>
                                     </DataGridTextColumn.Binding>
@@ -730,7 +765,7 @@
                                      省略記号も ToolTip も無いため「外１名」が黙って見えなくなっていた。
                                      幅を広げたうえで、文字サイズ 4 段階に幅では追随できない分を
                                      TextTrimming（切れていることが見て分かる）と ToolTip（全文を読める）で担保する。 -->
-                                <DataGridTextColumn Header="利用者" Binding="{Binding DisplayStaffName}" Width="120">
+                                <DataGridTextColumn Header="利用者" Binding="{Binding DisplayStaffName}" Width="120" MinWidth="120">
                                     <DataGridTextColumn.ElementStyle>
                                         <Style TargetType="TextBlock">
                                             <Setter Property="TextTrimming" Value="CharacterEllipsis"/>
@@ -752,7 +787,7 @@
                                         </Style>
                                     </DataGridTextColumn.ElementStyle>
                                 </DataGridTextColumn>
-                                <DataGridTextColumn Header="備考" Binding="{Binding Note}" Width="100">
+                                <DataGridTextColumn Header="備考" Binding="{Binding Note}" Width="100" MinWidth="100">
                                     <DataGridTextColumn.ElementStyle>
                                         <Style TargetType="TextBlock">
                                             <Setter Property="TextTrimming" Value="CharacterEllipsis"/>
@@ -772,7 +807,7 @@
                                     </DataGridTextColumn.ElementStyle>
                                 </DataGridTextColumn>
                                 <!-- Issue #750: 削除ボタンは変更ダイアログ内に移動 -->
-                                <DataGridTemplateColumn Header="操作" Width="130">
+                                <DataGridTemplateColumn Header="操作" Width="130" MinWidth="130">
                                     <DataGridTemplateColumn.CellTemplate>
                                         <DataTemplate>
                                             <StackPanel Orientation="Horizontal" HorizontalAlignment="Center"
@@ -814,7 +849,7 @@
                                         <!-- Issue #1907: 直前の返却で記録された行（返却の色＝寒色）。チェック・不整合の強調が優先 -->
                                         <DataTrigger Binding="{Binding IsRecentlyRecorded}" Value="True">
                                             <Setter Property="Background" Value="{DynamicResource ReturnBackgroundBrush}"/>
-                                            <Setter Property="ToolTip" Value="今回の返却で記録された行"/>
+                                            <Setter Property="ToolTip" Value="{x:Static dtos:LedgerDto.RecentlyRecordedToolTip}"/>
                                         </DataTrigger>
                                         <DataTrigger Binding="{Binding IsChecked}" Value="True">
                                             <Setter Property="Background" Value="{DynamicResource CheckedRowBackgroundBrush}"/>

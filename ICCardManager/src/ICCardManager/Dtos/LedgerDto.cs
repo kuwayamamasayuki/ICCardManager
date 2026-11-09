@@ -1,3 +1,4 @@
+#nullable enable
 using System;
 using System.Collections.Generic;
 using System.ComponentModel;
@@ -12,7 +13,7 @@ namespace ICCardManager.Dtos
     /// </summary>
     public class LedgerDto : INotifyPropertyChanged
     {
-        public event PropertyChangedEventHandler PropertyChanged;
+        public event PropertyChangedEventHandler? PropertyChanged;
 
         /// <summary>
         /// 統合対象として選択されているか（チェックボックス用）
@@ -74,7 +75,7 @@ namespace ICCardManager.Dtos
         /// <summary>
         /// 利用者氏名（DB の staff_name そのもの。「外N名」は含まない）
         /// </summary>
-        public string StaffName { get; set; }
+        public string? StaffName { get; set; }
 
         /// <summary>
         /// 同行者数（本人を含まない。Issue #1906）
@@ -89,7 +90,7 @@ namespace ICCardManager.Dtos
         /// <summary>
         /// 備考
         /// </summary>
-        public string Note { get; set; }
+        public string? Note { get; set; }
 
         /// <summary>
         /// 貸出中レコードフラグ
@@ -104,7 +105,27 @@ namespace ICCardManager.Dtos
         /// 見分けられるようにする。一覧を作り直すたびに <c>MainViewModel</c> が付け直す。
         /// 色だけに頼らないよう <see cref="RecentlyRecordedMark"/> の文字も併せて表示する（4 要素原則）。
         /// </remarks>
-        public bool IsRecentlyRecorded { get; set; }
+        public bool IsRecentlyRecorded
+        {
+            get => _isRecentlyRecorded;
+            set
+            {
+                if (_isRecentlyRecorded != value)
+                {
+                    _isRecentlyRecorded = value;
+                    PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(IsRecentlyRecorded)));
+                    PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(RecentlyRecordedMark)));
+                    PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(SummaryToolTip)));
+                }
+            }
+        }
+
+        private bool _isRecentlyRecorded;
+
+        /// <summary>
+        /// <see cref="IsRecentlyRecorded"/> の行の ToolTip（行全体と、摘要のセルの <see cref="SummaryToolTip"/> で共有する）
+        /// </summary>
+        public const string RecentlyRecordedToolTip = "今回の返却で記録された行";
 
         /// <summary>
         /// 「今回」列に表示する印（<see cref="IsRecentlyRecorded"/> のとき「✔」、それ以外は空）
@@ -129,6 +150,7 @@ namespace ICCardManager.Dtos
                 {
                     _hasBalanceInconsistency = value;
                     PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(HasBalanceInconsistency)));
+                    PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(SummaryToolTip)));
                 }
             }
         }
@@ -136,7 +158,56 @@ namespace ICCardManager.Dtos
         /// <summary>
         /// 残高不整合時のツールチップメッセージ（Issue #1052）
         /// </summary>
-        public string BalanceInconsistencyMessage { get; set; } = string.Empty;
+        public string BalanceInconsistencyMessage
+        {
+            get => _balanceInconsistencyMessage;
+            set
+            {
+                var normalized = value ?? string.Empty;
+                if (_balanceInconsistencyMessage != normalized)
+                {
+                    _balanceInconsistencyMessage = normalized;
+                    PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(BalanceInconsistencyMessage)));
+                    PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(SummaryToolTip)));
+                }
+            }
+        }
+
+        private string _balanceInconsistencyMessage = string.Empty;
+
+        /// <summary>
+        /// 摘要のセルの ToolTip（Issue #2424）。切り詰めた摘要の全文に、行の ToolTip の文言を添える
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// 摘要は残りの幅を取る最も広い列で、切り詰めた全文を読めるようセルに ToolTip を置く（#2076 の利用者の列と同じ形）。
+        /// <c>ToolTipService</c> は最も近い祖先の ToolTip を使うため、摘要の全文だけを出すと、行の ToolTip
+        /// （#1052 の残高不整合の説明・#1907 の「今回の返却で記録された行」）が行の大部分で摘要に置き換わる。
+        /// 行の文言を先頭に、摘要の全文を後ろに並べて両方を読めるようにする。優先順位は行のスタイルと同じ
+        /// （残高不整合が今回の返却より優先）。
+        /// </para>
+        /// <para>
+        /// 「切り詰めたときだけ付ける」形は採らない。切り詰めは描画の幅で決まり、長い摘要の行こそ行の文言が隠れる。
+        /// 行の文言も摘要も無いときは null（中身の無いツールチップを出さない）。
+        /// </para>
+        /// </remarks>
+        public string? SummaryToolTip
+        {
+            get
+            {
+                var rowMessage = HasBalanceInconsistency && !string.IsNullOrEmpty(BalanceInconsistencyMessage)
+                    ? BalanceInconsistencyMessage
+                    : IsRecentlyRecorded ? RecentlyRecordedToolTip : null;
+                var summary = string.IsNullOrEmpty(Summary) ? null : Summary;
+
+                if (rowMessage == null)
+                {
+                    return summary;
+                }
+
+                return summary == null ? rowMessage : $"{rowMessage}\n摘要: {summary}";
+            }
+        }
 
         /// <summary>
         /// 利用履歴詳細

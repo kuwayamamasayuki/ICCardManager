@@ -281,4 +281,79 @@ public class LedgerDtoTests
     }
 
     #endregion
+
+    #region SummaryToolTip（Issue #2424）
+
+    // 摘要は残りの幅を取る最も広い列で、セルの ToolTip が行の ToolTip（#1052 / #1907）を行の大部分で覆う。
+    // 行の文言と摘要の全文を合わせて返すことを、行の状態ごとに対で固定する
+
+    private const string LongSummary = "鉄道（博多～天神南、薬院～福岡空港）";
+    private const string InconsistencyMessage = "残高不整合: 期待値 1,000円 / 実際 900円";
+
+    [Fact]
+    public void SummaryToolTip_通常の行は摘要の全文だけを返すこと()
+    {
+        new LedgerDto { Summary = LongSummary }.SummaryToolTip.Should().Be(LongSummary);
+    }
+
+    [Fact]
+    public void SummaryToolTip_残高不整合の行は不整合の説明と摘要の全文を合わせて返すこと()
+    {
+        var dto = new LedgerDto { Summary = LongSummary, HasBalanceInconsistency = true, BalanceInconsistencyMessage = InconsistencyMessage };
+
+        dto.SummaryToolTip.Should().Be($"{InconsistencyMessage}\n摘要: {LongSummary}",
+            "摘要の上にマウスを置いても、行の ToolTip（残高不整合の説明）を読めること");
+    }
+
+    [Fact]
+    public void SummaryToolTip_今回の返却で記録された行は行の文言と摘要の全文を合わせて返すこと()
+    {
+        var dto = new LedgerDto { Summary = LongSummary, IsRecentlyRecorded = true };
+
+        dto.SummaryToolTip.Should().Be($"今回の返却で記録された行\n摘要: {LongSummary}");
+        LedgerDto.RecentlyRecordedToolTip.Should().Be("今回の返却で記録された行", "行の ToolTip と同じ文言（XAML は同じ定数を参照する）");
+    }
+
+    [Fact]
+    public void SummaryToolTip_残高不整合と今回の返却が重なれば行のスタイルと同じく残高不整合を優先すること()
+    {
+        var dto = new LedgerDto
+        {
+            Summary = LongSummary,
+            IsRecentlyRecorded = true,
+            HasBalanceInconsistency = true,
+            BalanceInconsistencyMessage = InconsistencyMessage,
+        };
+
+        dto.SummaryToolTip.Should().Be($"{InconsistencyMessage}\n摘要: {LongSummary}");
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData(null)]
+    public void SummaryToolTip_摘要が空なら通常の行はnullで_行の文言がある行は行の文言だけを返すこと(string? summary)
+    {
+        // null: 中身の無いツールチップを出さず、行の ToolTip を覆わない
+        new LedgerDto { Summary = summary! }.SummaryToolTip.Should().BeNull();
+        new LedgerDto { Summary = summary!, IsRecentlyRecorded = true }.SummaryToolTip.Should().Be(LedgerDto.RecentlyRecordedToolTip);
+    }
+
+    [Fact]
+    public void SummaryToolTip_行の状態が変わったら変更を通知すること()
+    {
+        // 残高不整合のマーカーは表示中の行へ後から付け外しする（ApplyBalanceInconsistencyMarkers）。通知が無いと ToolTip が古いまま残る
+        var dto = new LedgerDto { Summary = LongSummary };
+        var changed = new List<string?>();
+        dto.PropertyChanged += (_, e) => changed.Add(e.PropertyName);
+
+        dto.HasBalanceInconsistency = true;
+        dto.BalanceInconsistencyMessage = InconsistencyMessage;
+        dto.IsRecentlyRecorded = true;
+
+        changed.Should().Contain(new[] { nameof(LedgerDto.HasBalanceInconsistency), nameof(LedgerDto.BalanceInconsistencyMessage), nameof(LedgerDto.IsRecentlyRecorded) });
+        changed.FindAll(n => n == nameof(LedgerDto.SummaryToolTip)).Should().HaveCount(3, "3 つの変化それぞれで SummaryToolTip の変更を通知すること");
+        dto.SummaryToolTip.Should().Be($"{InconsistencyMessage}\n摘要: {LongSummary}");
+    }
+
+    #endregion
 }
