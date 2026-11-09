@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
+using ICCardManager.Common;
 using ICCardManager.Data.Repositories;
 using ICCardManager.Models;
 
@@ -44,11 +45,24 @@ namespace ICCardManager.Services
             // 当日の中では整合して見えるが、当日の最終残高が中間残高になるため、
             // 正しい翌稼働日の行が不整合として報告される（期待値も存在しない残高になる）。
             // 2 日目以降は前の稼働日の最終残高が日をまたいで引き継がれるので、効くのは期間の初日だけ。
-            // シードは履歴画面（HistoryPanelViewModel.GetPrecedingBalanceAsync）・帳票（ReportDataBuilder）と
-            // 同じ確定済みの単票クエリで取る（#2043 / #1763）。母集団はどちらも貸出中レコードを含み揃っている。
-            // 前の行が無ければ null（シード無しの従来挙動）。
-            var precedingBalance = (await _ledgerRepository
-                .GetLatestBeforeDateAsync(cardIdm, fromDate).ConfigureAwait(false))?.Balance;
+            // シードは確定済みの単票クエリ GetLatestBeforeDateAsync で取る（#2043 / #1763）。母集団は
+            // 本体（GetByDateRangeAsync）と同じく貸出中レコードを含む。前の行が無ければ null（シード無しの従来挙動）。
+            //
+            // Issue #2418: 年度の台帳が導入行「前年度より繰越」から始まり、範囲の開始日が導入行以前なら、シードは使わない。
+            // 導入行より前の日付の行（3 月中の貸出中レコード・手入力・CSV）の残高をシードにすると、導入行（残高の前が 0）と
+            // 同じ日の利用（残高の前＝その残高）の順序を取り違え、利用を先に並べて正しい導入行を不整合と報告する。
+            // 判定は履歴画面（HistoryPanelViewModel.GetPrecedingBalanceAsync）・帳票（ReportDataBuilder）と同じ
+            // PaperCarryoverPolicy.PeriodOpensWithFiscalYearStartCarryover（同じ画面の並びと検査結果を揃える）。
+            // 既知の差: 4/1 から検査する場合でも、導入行を摘要で認識できない（#2371）カードでは、履歴は貸出中を除いた
+            // 前年度繰越（GetCarryoverBalanceAsync）をシードにし、ここは貸出中を含む値を使う（本体の母集団に合わせる）。
+            // 限界: 直るのは開始日が年度の初日から導入行の日付までの期間の検査だけ。全期間の検査（FullPeriodStart から）や
+            // 3/1〜4/30 のように年度の初日より前から始まる範囲では判定は偽になり、導入行より前の行の後に導入行がチェーンの途中で続くため、導入行は今も不整合と報告される。
+            var fiscalYearFirstDayLedgers = await _ledgerRepository
+                .GetFiscalYearFirstDayLedgersAsync(cardIdm, FiscalYearHelper.GetFiscalYear(fromDate)).ConfigureAwait(false);
+            var precedingBalance = PaperCarryoverPolicy.PeriodOpensWithFiscalYearStartCarryover(fromDate, fiscalYearFirstDayLedgers)
+                ? null
+                : (await _ledgerRepository
+                    .GetLatestBeforeDateAsync(cardIdm, fromDate).ConfigureAwait(false))?.Balance;
             var ledgers = LedgerOrderHelper.ReorderByBalanceChain(
                 await _ledgerRepository.GetByDateRangeAsync(cardIdm, fromDate, toDate).ConfigureAwait(false),
                 precedingBalance);

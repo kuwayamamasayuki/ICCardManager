@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
 using FluentAssertions;
+using ICCardManager.Common;
 using ICCardManager.Data.Repositories;
 using ICCardManager.Models;
 using ICCardManager.Services;
@@ -1754,7 +1755,8 @@ public class ReportDataBuilderTests
         // 修正前後で入力が同じになり検出力を持たない。ReportDataBuilder の実出力を
         // そのままプリフライトへ通すことで、両者の不変条件が接続していることを表明する。
         SetupIdleFiscalYear(2025, 6, 7500);
-        var data = await _builder.BuildAsync(TestCardIdm, 2025, 6);
+        var data = await _builder.BuildAsync(TestCardIdm, 2025, 6)
+            ?? throw new InvalidOperationException("カードが登録されていれば帳票データは null にならない");
 
         // Act
         var preflight = new ReportPreflightResult();
@@ -1990,6 +1992,217 @@ public class ReportDataBuilderTests
         result.Carryover.Summary.Should().Be(SummaryGenerator.GetCarryoverFromPreviousYearSummary());
         result.Carryover.Income.Should().Be(4200);
         _ledgerRepositoryMock.Verify(r => r.GetCarryoverBalanceAsync(TestCardIdm, 2024), Times.AtLeastOnce);
+    }
+
+    #endregion
+
+    #region Issue #2418: 3 月繰越のカードで前年度繰越を二重に計上しない
+
+    /// <summary>
+    /// 3 月を繰越月にして登録したカード（導入行「前年度より繰越」2027/4/1・受入 5,000）に、
+    /// 導入行より前の日付の実績の行（履歴の「追加」・CSV の取り込みで入った 3/20 の行。残高 5,000）があり、
+    /// 前年度繰越として 5,000 が返る形をセットアップする。4/10 に 210 円、5/12 に 300 円の利用。
+    /// </summary>
+    /// <param name="introductionSummary">導入行の摘要（null なら導入行を置かない＝前年度から台帳があるカード）</param>
+    private void SetupFiscalYearStartCarryoverWithEarlierRow(string? introductionSummary)
+    {
+        SetupCard();
+        SetupCarryoverBalance(TestCardIdm, 2026, 5000);
+
+        var march = CreateTestLedger(10, TestCardIdm, new DateTime(2027, 3, 20), "鉄道（手入力）", 0, 0, 5000);
+        var april = new List<Ledger>();
+        if (introductionSummary != null)
+        {
+            april.Add(CreateTestLedger(11, TestCardIdm, new DateTime(2027, 4, 1), introductionSummary, 5000, 0, 5000));
+        }
+
+        april.Add(CreateTestLedger(12, TestCardIdm, new DateTime(2027, 4, 10), "鉄道（天神～博多）", 0, 210, 4790));
+        var may = new List<Ledger>
+        {
+            CreateTestLedger(13, TestCardIdm, new DateTime(2027, 5, 12), "鉄道（博多～天神）", 0, 300, 4490)
+        };
+
+        SetupMonthlyLedgers(TestCardIdm, 2027, 3, new List<Ledger> { march });
+        SetupMonthlyLedgers(TestCardIdm, 2027, 4, april);
+        SetupMonthlyLedgers(TestCardIdm, 2027, 5, may);
+        SetupDateRangeLedgers(TestCardIdm, new DateTime(2027, 4, 1), new DateTime(2027, 4, 30), april);
+        SetupDateRangeLedgers(TestCardIdm, new DateTime(2027, 4, 1), new DateTime(2027, 5, 31), april.Concat(may).ToList());
+    }
+
+    /// <summary>
+    /// Issue #2418: 導入行「前年度より繰越」より前の日付の行があっても、4 月の帳票は前年度繰越の行を合成せず、
+    /// 4 月計の受入に前年度繰越を二重に加算しないこと
+    /// </summary>
+    /// <remarks>
+    /// 貸出中レコードは前年度繰越の母集団から除く（リポジトリ側。LedgerRepositoryTests で実 DB を使って表明）が、
+    /// 手入力・CSV の実績の行は残るので、導入行の有無で判定する。対は
+    /// <see cref="BuildAsync_PreviousFiscalYearLedgersWithoutIntroduction_April_SynthesizesCarryover"/>。
+    /// </remarks>
+    [Fact]
+    public async Task BuildAsync_FiscalYearStartCarryoverWithEarlierRow_April_DoesNotDoubleCount()
+    {
+        SetupFiscalYearStartCarryoverWithEarlierRow(SummaryGenerator.GetCarryoverFromPreviousYearSummary());
+
+        var result = await _builder.BuildAsync(TestCardIdm, 2027, 4);
+
+        result.Carryover.Should().BeNull("前年度より繰越は DB の導入行が担うので、帳票は合成しない");
+        result.Ledgers.Count(l => l.Summary == SummaryGenerator.GetCarryoverFromPreviousYearSummary())
+            .Should().Be(1, "「前年度より繰越」は導入行の 1 行だけ");
+        result.MonthlyTotal.Income.Should().Be(5000, "導入行の受入だけ（前年度繰越 5,000 を加算しない）");
+        result.MonthlyTotal.Expense.Should().Be(210);
+        result.MonthlyTotal.Balance.Should().Be(4790);
+        (result.MonthlyTotal.Income - result.MonthlyTotal.Expense)
+            .Should().Be(result.MonthlyTotal.Balance, "4 月計で受入 − 払出 = 残額 が成り立つこと");
+    }
+
+    /// <summary>
+    /// Issue #2418: 同じ形の 5 月の帳票で、年度累計の受入に前年度繰越を二重に加算しないこと
+    /// </summary>
+    [Fact]
+    public async Task BuildAsync_FiscalYearStartCarryoverWithEarlierRow_May_CumulativeNotDoubleCounted()
+    {
+        SetupFiscalYearStartCarryoverWithEarlierRow(SummaryGenerator.GetCarryoverFromPreviousYearSummary());
+
+        var result = await _builder.BuildAsync(TestCardIdm, 2027, 5);
+
+        result.CumulativeTotal.Should().NotBeNull();
+        result.CumulativeTotal.Income.Should().Be(5000, "導入行の受入だけ（前年度繰越 5,000 を加算しない）");
+        result.CumulativeTotal.Expense.Should().Be(510);
+        result.CumulativeTotal.Balance.Should().Be(4490);
+        (result.CumulativeTotal.Income - result.CumulativeTotal.Expense)
+            .Should().Be(result.CumulativeTotal.Balance, "累計で受入 − 払出 = 残額 が成り立つこと");
+    }
+
+    /// <summary>
+    /// Issue #2418（対の表明）: 導入行が無い（前年度から台帳がある）カードは、従来どおり 4 月に前年度繰越の行を合成し、
+    /// 4 月計・年度累計の受入に加算すること
+    /// </summary>
+    [Fact]
+    public async Task BuildAsync_PreviousFiscalYearLedgersWithoutIntroduction_April_SynthesizesCarryover()
+    {
+        SetupFiscalYearStartCarryoverWithEarlierRow(introductionSummary: null);
+
+        var april = await _builder.BuildAsync(TestCardIdm, 2027, 4);
+        var may = await _builder.BuildAsync(TestCardIdm, 2027, 5);
+
+        april.Carryover.Should().NotBeNull();
+        april.Carryover.Summary.Should().Be(SummaryGenerator.GetCarryoverFromPreviousYearSummary());
+        april.Carryover.Income.Should().Be(5000);
+        april.MonthlyTotal.Income.Should().Be(5000, "合成した前年度繰越を 4 月計の受入に加算する（#1494）");
+        april.MonthlyTotal.Balance.Should().Be(4790);
+        may.CumulativeTotal.Income.Should().Be(5000, "合成した前年度繰越を年度累計の受入に加算する（#1494）");
+        may.CumulativeTotal.Balance.Should().Be(4490);
+    }
+
+    /// <summary>
+    /// Issue #2418: 年度の台帳が導入行「前年度より繰越」から始まるかの判定。
+    /// 導入行の日付を履歴の行編集で動かしても（4/1 → 4/3）認識し、年度の途中に同じ摘要の行があるだけでは認識しない
+    /// </summary>
+    [Fact]
+    public void HasFiscalYearStartCarryoverRecord_MatchesOnlyTheFirstDayOfTheFiscalYearLedgers()
+    {
+        var summary = SummaryGenerator.GetCarryoverFromPreviousYearSummary();
+        var introOnStart = CreateTestLedger(1, TestCardIdm, new DateTime(2027, 4, 1), summary, 5000, 0, 5000);
+        var introMoved = CreateTestLedger(2, TestCardIdm, new DateTime(2027, 4, 3), summary, 5000, 0, 5000);
+        var usageSameDay = CreateTestLedger(3, TestCardIdm, new DateTime(2027, 4, 3), "鉄道（天神～博多）", 0, 210, 4790);
+        var laterUsage = CreateTestLedger(4, TestCardIdm, new DateTime(2027, 4, 10), "鉄道（博多～天神）", 0, 300, 4490);
+        var earlierUsage = CreateTestLedger(5, TestCardIdm, new DateTime(2027, 4, 2), "鉄道（博多～天神）", 0, 300, 4700);
+        var lentBefore = CreateTestLedger(6, TestCardIdm, new DateTime(2027, 4, 1), SummaryGenerator.GetLendingSummary(), 0, 0, 5000, isLentRecord: true);
+        var lentIntro = CreateTestLedger(7, TestCardIdm, new DateTime(2027, 4, 1), summary, 0, 0, 5000, isLentRecord: true);
+
+        PaperCarryoverPolicy.HasFiscalYearStartCarryoverRecord(new[] { laterUsage, introOnStart })
+            .Should().BeTrue("年度の先頭の行が導入行");
+        PaperCarryoverPolicy.HasFiscalYearStartCarryoverRecord(new[] { laterUsage, usageSameDay, introMoved })
+            .Should().BeTrue("導入行の日付を動かしても、年度の先頭の日にあれば導入行（同じ日の利用があってもよい）");
+        PaperCarryoverPolicy.HasFiscalYearStartCarryoverRecord(new[] { lentBefore, introMoved, laterUsage })
+            .Should().BeTrue("貸出中レコードは年度の先頭として数えない");
+        PaperCarryoverPolicy.HasFiscalYearStartCarryoverRecord(new[] { earlierUsage, introMoved, laterUsage })
+            .Should().BeFalse("年度の途中に同じ摘要の行があるだけ（前年度から台帳があるカード）は導入行とみなさない");
+        PaperCarryoverPolicy.HasFiscalYearStartCarryoverRecord(new[] { lentIntro })
+            .Should().BeFalse("貸出中レコードは導入行ではない");
+        PaperCarryoverPolicy.HasFiscalYearStartCarryoverRecord(Array.Empty<Ledger>())
+            .Should().BeFalse();
+    }
+
+    /// <summary>
+    /// Issue #2418: 期間の開始日が年度の先頭の導入行以前なら「前の残高」を使わない、という判定
+    /// （帳票・履歴・残高の整合性チェックが共有する）。導入行を 5/2 へ動かしたカードでは 4 月・5 月 1 日開始の期間が真、
+    /// 5/10 開始は偽。導入行から始まらない年度は常に偽
+    /// </summary>
+    [Fact]
+    public void PeriodOpensWithFiscalYearStartCarryover_DependsOnPeriodStartAndFirstDay()
+    {
+        var summary = SummaryGenerator.GetCarryoverFromPreviousYearSummary();
+        var movedIntro = new[] { CreateTestLedger(1, TestCardIdm, new DateTime(2027, 5, 2), summary, 5000, 0, 5000) };
+        var notIntro = new[] { CreateTestLedger(2, TestCardIdm, new DateTime(2027, 4, 1), "鉄道（天神～博多）", 0, 210, 4790) };
+
+        PaperCarryoverPolicy.PeriodOpensWithFiscalYearStartCarryover(new DateTime(2027, 4, 1), movedIntro).Should().BeTrue();
+        PaperCarryoverPolicy.PeriodOpensWithFiscalYearStartCarryover(new DateTime(2027, 5, 1), movedIntro).Should().BeTrue();
+        PaperCarryoverPolicy.PeriodOpensWithFiscalYearStartCarryover(new DateTime(2027, 5, 2), movedIntro).Should().BeTrue();
+        PaperCarryoverPolicy.PeriodOpensWithFiscalYearStartCarryover(new DateTime(2027, 5, 10), movedIntro)
+            .Should().BeFalse("導入行より後から始まる期間は、導入行以後の行の残高を前の残高にする");
+        PaperCarryoverPolicy.PeriodOpensWithFiscalYearStartCarryover(new DateTime(2027, 4, 1), notIntro).Should().BeFalse();
+        PaperCarryoverPolicy.PeriodOpensWithFiscalYearStartCarryover(new DateTime(2027, 4, 1), Array.Empty<Ledger>()).Should().BeFalse();
+    }
+
+    /// <summary>
+    /// 3/25 に残高 5,000 の手入力の行があり、導入行「前年度より繰越」（受入 5,000）を履歴の行編集で 5/10 へ動かした台帳。
+    /// 5/20 に 210 円、6/3 に 300 円の利用。前年度繰越として 5,000 が返る。
+    /// </summary>
+    private void SetupIntroductionMovedToMay()
+    {
+        SetupCard();
+        SetupCarryoverBalance(TestCardIdm, 2026, 5000);
+
+        var march = CreateTestLedger(10, TestCardIdm, new DateTime(2027, 3, 25), "鉄道（手入力）", 0, 0, 5000);
+        var intro = CreateTestLedger(11, TestCardIdm, new DateTime(2027, 5, 10),
+            SummaryGenerator.GetCarryoverFromPreviousYearSummary(), 5000, 0, 5000);
+        var mayUsage = CreateTestLedger(12, TestCardIdm, new DateTime(2027, 5, 20), "鉄道（天神～博多）", 0, 210, 4790);
+        var juneUsage = CreateTestLedger(13, TestCardIdm, new DateTime(2027, 6, 3), "鉄道（博多～天神）", 0, 300, 4490);
+
+        SetupMonthlyLedgers(TestCardIdm, 2027, 3, new List<Ledger> { march });
+        SetupMonthlyLedgers(TestCardIdm, 2027, 4, new List<Ledger>());
+        SetupMonthlyLedgers(TestCardIdm, 2027, 5, new List<Ledger> { intro, mayUsage });
+        SetupMonthlyLedgers(TestCardIdm, 2027, 6, new List<Ledger> { juneUsage });
+        SetupDateRangeLedgers(TestCardIdm, new DateTime(2027, 4, 1), new DateTime(2027, 5, 31),
+            new List<Ledger> { intro, mayUsage });
+        SetupDateRangeLedgers(TestCardIdm, new DateTime(2027, 4, 1), new DateTime(2027, 6, 30),
+            new List<Ledger> { intro, mayUsage, juneUsage });
+    }
+
+    /// <summary>
+    /// Issue #2418: 導入行を 5/10 へ動かしたカードの 5 月の帳票は、導入行より前の行（3/25）の残高で
+    /// 「4月より繰越」を合成しないこと（月の 1 日が導入行以前なら前の残高を使わない）。
+    /// 対は <see cref="BuildAsync_IntroductionMovedToMay_June_HasPreviousMonthCarryover"/>。
+    /// </summary>
+    [Fact]
+    public async Task BuildAsync_IntroductionMovedToMay_May_HasNoCarryover()
+    {
+        SetupIntroductionMovedToMay();
+
+        var result = await _builder.BuildAsync(TestCardIdm, 2027, 5);
+
+        result!.PrecedingBalance.Should().BeNull("5/1 は導入行（5/10）以前なので、前の残高は無い");
+        result.Carryover.Should().BeNull("導入行より前の行の残高で繰越行を合成すると、導入行の受入と二重になる");
+        result.CumulativeTotal!.Income.Should().Be(5000);
+        result.CumulativeTotal.Balance.Should().Be(4790);
+        (result.CumulativeTotal.Income - result.CumulativeTotal.Expense).Should().Be(result.CumulativeTotal.Balance);
+    }
+
+    /// <summary>
+    /// Issue #2418（対の表明）: 同じ台帳の 6 月の帳票は、従来どおり 5 月末の残高で「5月より繰越」を出すこと
+    /// </summary>
+    [Fact]
+    public async Task BuildAsync_IntroductionMovedToMay_June_HasPreviousMonthCarryover()
+    {
+        SetupIntroductionMovedToMay();
+
+        var result = await _builder.BuildAsync(TestCardIdm, 2027, 6);
+
+        result!.PrecedingBalance.Should().Be(4790);
+        result.Carryover.Should().NotBeNull();
+        result.Carryover!.Summary.Should().Be(SummaryGenerator.GetCarryoverFromPreviousMonthSummary(5));
+        result.Carryover.Balance.Should().Be(4790);
     }
 
     #endregion

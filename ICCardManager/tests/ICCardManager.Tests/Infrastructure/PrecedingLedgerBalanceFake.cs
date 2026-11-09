@@ -11,7 +11,8 @@ using Moq;
 namespace ICCardManager.Tests.Infrastructure;
 
 /// <summary>
-/// <see cref="ILedgerRepository.GetLatestBeforeDateAsync"/> のフェイク（Issue #2043）。
+/// <see cref="ILedgerRepository.GetLatestBeforeDateAsync"/> と
+/// <see cref="ILedgerQueryService.GetFiscalYearFirstDayLedgersAsync"/>（Issue #2418）のフェイク（Issue #2043）。
 /// </summary>
 /// <remarks>
 /// <para>
@@ -46,6 +47,37 @@ internal static class PrecedingLedgerBalanceFake
             .Setup(r => r.GetLatestBeforeDateAsync(It.IsAny<string>(), It.IsAny<DateTime>()))
             .Returns((string idm, DateTime beforeDate) =>
                 ResolveAsync(ledgerRepositoryMock.Object, idm, beforeDate));
+
+        // Issue #2418: 年度で最も早い日の行（貸出中を除く）も、同じく GetByMonthAsync のモックから組み立てる
+        ledgerRepositoryMock
+            .Setup(r => r.GetFiscalYearFirstDayLedgersAsync(It.IsAny<string>(), It.IsAny<int>()))
+            .Returns((string idm, int fiscalYear) =>
+                ResolveFiscalYearFirstDayAsync(ledgerRepositoryMock.Object, idm, fiscalYear));
+    }
+
+    private static async Task<IEnumerable<Ledger>> ResolveFiscalYearFirstDayAsync(
+        ILedgerRepository repository, string cardIdm, int fiscalYear)
+    {
+        var settled = new List<Ledger>();
+        var cursor = FiscalYearHelper.GetFiscalYearStart(fiscalYear);
+        for (var i = 0; i < 12; i++)
+        {
+            var monthly = await repository.GetByMonthAsync(cardIdm, cursor.Year, cursor.Month);
+            if (monthly != null)
+            {
+                settled.AddRange(monthly.Where(l => !l.IsLentRecord));
+            }
+
+            cursor = cursor.AddMonths(1);
+        }
+
+        if (settled.Count == 0)
+        {
+            return settled;
+        }
+
+        var firstDay = settled.Min(l => l.Date.Date);
+        return settled.Where(l => l.Date.Date == firstDay).ToList();
     }
 
     private static async Task<Ledger?> ResolveAsync(

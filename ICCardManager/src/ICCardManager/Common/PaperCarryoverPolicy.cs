@@ -1,4 +1,5 @@
 #nullable enable
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using ICCardManager.Models;
@@ -22,6 +23,11 @@ namespace ICCardManager.Common
     /// 登録時（保存するか・入力欄を有効にするか）と帳票の作成時（加算するか）の判定をここに置き、
     /// 「3 月は年度の区切り」という判断を 1 か所に寄せる（#1763「同じ判断を配らない」）。
     /// </para>
+    /// <para>
+    /// 帳票が前年度繰越を合成・加算するか（Issue #2418）も、同じ「その年度の台帳に導入行『前年度より繰越』があるか」
+    /// （<see cref="HasFiscalYearStartCarryoverRecord"/>）で決める。紙の累計と前年度繰越のどちらも、
+    /// 導入行が年度の始まりを担うなら帳票が足してはいけない。
+    /// </para>
     /// </remarks>
     public static class PaperCarryoverPolicy
     {
@@ -44,7 +50,7 @@ namespace ICCardManager.Common
         /// </summary>
         /// <param name="card">対象のカード（<c>CarryoverFiscalYear</c> を見る）</param>
         /// <param name="fiscalYearStartYear">帳票の年度</param>
-        /// <param name="fiscalYearLedgers">その年度の台帳（年度の初日から帳票の月末まで）</param>
+        /// <param name="fiscalYearLedgers">その年度の台帳。年度で最も早い日付の行を含むこと（帳票は <c>GetFiscalYearFirstDayLedgersAsync</c> の結果を渡す）</param>
         /// <remarks>
         /// <para>
         /// 加算するのは繰越年度の帳票で、かつ<b>その年度の導入行が年度初めの繰越（「前年度より繰越」）でない</b>とき。
@@ -68,8 +74,72 @@ namespace ICCardManager.Common
                 return false;
             }
 
+            return !HasFiscalYearStartCarryoverRecord(fiscalYearLedgers);
+        }
+
+        /// <summary>
+        /// その年度の台帳が導入行「前年度より繰越」から始まるかどうか（年度で最も早い日付の行に、その摘要の行があるか）。
+        /// 3 月を繰越月にして登録したカードの、登録した年度で真になる。
+        /// </summary>
+        /// <param name="fiscalYearLedgers">
+        /// その年度の台帳（貸出中レコードは数えない）。<b>年度で最も早い日付の行が含まれている</b>こと —
+        /// 範囲の途中から渡すと別の行が先頭に見える。帳票・履歴・整合性チェックは、年度全体のうち最も早い日の行だけを
+        /// <c>ILedgerQueryService.GetFiscalYearFirstDayLedgersAsync</c> で取って渡す（呼び出し元ごとに範囲が違うと、
+        /// 導入行を年度の途中へ動かしたときに帳票と履歴で判定が食い違う）
+        /// </param>
+        /// <remarks>
+        /// <para>
+        /// 真のとき、帳票・履歴は前年度繰越の行を合成せず、帳票は 4 月計・年度累計の受入にも前年度繰越を加算しない
+        /// （Issue #2418。導入行の受入＝残高が通常の ledger 行として月計・累計に入るので、足すと二重になる）。
+        /// 導入行より前の日付の行（3 月中の貸出中レコード・履歴の「追加」・CSV の取り込み）があると
+        /// 「前年度末の残高」が存在してしまうため、「前年度末の残高があるか」ではなく導入行の有無で決める。
+        /// 紙の累計の加算（<see cref="AddsPaperCumulativeToFiscalYear"/>）も同じ判定を使う。
+        /// </para>
+        /// <para>
+        /// <b>日付を 4/1 に固定しない</b>（コードレビューで検出）。導入行の日付は履歴の行編集で動かせる（4/1 → 4/3 等）ので、
+        /// 日付まで一致させると、動かした時点で紙の累計（#2326）が再び加算され、前年度繰越も二重になる。
+        /// 一方「年度内のどこかにその摘要の行があるか」では、前年度から台帳があるカードに同じ摘要の行が手入力された
+        /// だけで合成をやめてしまう。導入行は年度の台帳の先頭にあるという形で判定する。
+        /// </para>
+        /// <para>
+        /// <b>既知の制約（#2044 / #2371）</b>: 導入行かどうかは摘要を現在の組織設定の文言と比べて判定する
+        /// （導入行に種別のフラグが無いため）。文言を変える前に登録した導入行は認識できない。
+        /// 貸出中レコードだけが導入行より前にある形は、前年度繰越の母集団から貸出中レコードを除くこと
+        /// （<c>ILedgerQueryService.GetCarryoverBalanceAsync</c>）でも塞いでいる。
+        /// </para>
+        /// </remarks>
+        public static bool HasFiscalYearStartCarryoverRecord(IEnumerable<Ledger> fiscalYearLedgers)
+        {
+            var settled = fiscalYearLedgers.Where(l => !l.IsLentRecord).ToList();
+            if (settled.Count == 0)
+            {
+                return false;
+            }
+
+            var firstDay = settled.Min(l => l.Date.Date);
             var previousYearCarryoverSummary = SummaryGenerator.GetCarryoverFromPreviousYearSummary();
-            return !fiscalYearLedgers.Any(l => !l.IsLentRecord && l.Summary == previousYearCarryoverSummary);
+            return settled.Any(l => l.Date.Date == firstDay && l.Summary == previousYearCarryoverSummary);
+        }
+
+        /// <summary>
+        /// 期間（帳票の月・履歴の表示期間・整合性チェックの範囲）の開始日が、年度の台帳の先頭にある導入行
+        /// 「前年度より繰越」以前かどうか。真なら、その期間には「前の残高」（繰越行・残高チェーンのシード）が無い。
+        /// </summary>
+        /// <param name="periodStart">期間の開始日</param>
+        /// <param name="fiscalYearFirstDayLedgers">
+        /// 開始日が属する年度で最も早い日付の行（<c>ILedgerQueryService.GetFiscalYearFirstDayLedgersAsync</c>）
+        /// </param>
+        /// <remarks>
+        /// Issue #2418: 導入行が台帳の始まりの残高を担うので、それより前の日付の行（3 月中の貸出中レコード・手入力・CSV）の
+        /// 残高を「前の残高」にすると、帳票・履歴は繰越行を二重に出し、整合性チェックは導入行と同じ日の利用の順序を
+        /// 取り違えて正しい行を不整合と報告する。帳票・履歴・整合性チェックはこの 1 か所で「前の残高を使うか」を決める。
+        /// </remarks>
+        public static bool PeriodOpensWithFiscalYearStartCarryover(
+            DateTime periodStart, IEnumerable<Ledger> fiscalYearFirstDayLedgers)
+        {
+            var settled = fiscalYearFirstDayLedgers.Where(l => !l.IsLentRecord).ToList();
+            return HasFiscalYearStartCarryoverRecord(settled)
+                && periodStart.Date <= settled.Min(l => l.Date.Date);
         }
     }
 }
