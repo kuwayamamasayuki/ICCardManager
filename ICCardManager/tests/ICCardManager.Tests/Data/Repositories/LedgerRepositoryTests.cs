@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
 using FluentAssertions;
+using ICCardManager.Common;
 using ICCardManager.Data;
 using ICCardManager.Data.Repositories;
 using ICCardManager.Infrastructure.Caching;
@@ -1488,6 +1489,41 @@ public class LedgerRepositoryTests : IDisposable
         result.InitialBalanceCorrection.Should().BeNull("4/1 の残高 5,000 は 3/25 の残高 5,000 を書き直しただけで裏付けられている");
         ICCardManager.ViewModels.HistoryPanelViewModel.BuildInconsistencyMarkers(result).Keys
             .Should().Equal(new[] { usage.Id }, "強調するのは打ち間違えた 4/2 で、正しい導入行ではない");
+    }
+
+    /// <summary>
+    /// Issue #2437: 導入行の日付を履歴の行編集で年度の途中（4/3）へ動かしても、チェーンは 4/1 ではなく導入行の日（年度の先頭の
+    /// 帳簿の行の日）の手前で切ること。4/2 の貸出中レコード（残高 3,000）は導入行の前のチェーンに残し、導入行を照合しない
+    /// </summary>
+    [Fact]
+    public async Task CheckBalanceConsistencyAsync_FullPeriod_IntroductionMovedToApril3_CutsAtIntroductionDate()
+    {
+        // Arrange: 4/2 貸出中レコード（残高 3,000）→ 4/3 導入行（受入・残高 5,000）→ 4/10 利用 210（4,790）
+        var lent = CreateTestLedger(TestCardIdm, new DateTime(2027, 4, 2, 9, 30, 0), SummaryGenerator.GetLendingSummary());
+        lent.Balance = 3000;
+        lent.IsLentRecord = true;
+        lent.Id = await _repository.InsertAsync(lent);
+
+        var introduction = CreateTestLedger(TestCardIdm, new DateTime(2027, 4, 3),
+            SummaryGenerator.GetCarryoverFromPreviousYearSummary(), income: 5000);
+        introduction.Balance = 5000;
+        introduction.Id = await _repository.InsertAsync(introduction);
+
+        var usage = CreateTestLedger(TestCardIdm, new DateTime(2027, 4, 10), "鉄道（天神～博多）", expense: 210);
+        usage.Balance = 4790;
+        usage.Id = await _repository.InsertAsync(usage);
+
+        var checker = new LedgerConsistencyChecker(_repository);
+
+        // Act
+        var result = await checker.CheckBalanceConsistencyAsync(TestCardIdm, Issue2437FullPeriodStart, Issue2437FullPeriodEnd);
+
+        // Assert
+        PaperCarryoverPolicy.GetChainRestartDates(
+                Issue2437FullPeriodStart, new[] { lent, introduction, usage }, Array.Empty<Ledger>())
+            .Should().Equal(new[] { new DateTime(2027, 4, 3) }, "切る日は年度の初日ではなく導入行の日");
+        result.Inconsistencies.Should().BeEmpty("4/2 の貸出中レコードの残高 3,000 から導入行を照合しない（4/1 で切ると照合される）");
+        result.IsConsistent.Should().BeTrue();
     }
 
     private static void AssertNotDoubleCounted(MonthlyReportData april, MonthlyReportData may)
