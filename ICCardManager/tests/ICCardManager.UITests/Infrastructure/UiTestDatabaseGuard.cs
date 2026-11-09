@@ -96,8 +96,14 @@ namespace ICCardManager.UITests.Infrastructure
         /// </remarks>
         internal static string UiTestBackupDirectory { get; } = Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),
-            "ICCardManager.UITests",
+            UiTestBackupRootFolderName,
             DefaultBackupFolderName);
+
+        /// <summary>
+        /// <see cref="UiTestBackupDirectory"/> の親フォルダーの名前（<c>%ProgramData%</c> の直下）。本体がこの場所をバックアップ先として
+        /// 受け付けることは単体テスト（<c>UiTestBackupIsolationConstantsTests</c>）が本体の検証で確かめる。
+        /// </summary>
+        internal const string UiTestBackupRootFolderName = "ICCardManager.UITests";
 
         private static readonly string[] CompanionSuffixes = { "-journal", "-wal", "-shm" };
 
@@ -109,6 +115,12 @@ namespace ICCardManager.UITests.Infrastructure
         private readonly string _directory;
         private readonly int _maxAttempts;
         private bool _restored;
+
+        /// <summary>
+        /// <see cref="Acquire"/> の時点の既定のバックアップ先のファイル名（読み取りのみ。Issue #2423）。
+        /// 起動の終わりに <see cref="ThrowIfDefaultBackupFolderChanged"/> が比べる。
+        /// </summary>
+        private string[] _defaultBackupFilesAtAcquire = new string[0];
 
         private UiTestDatabaseGuard(string directory, int maxAttempts)
         {
@@ -143,6 +155,7 @@ namespace ICCardManager.UITests.Infrastructure
             Directory.CreateDirectory(directory);
 
             var guard = new UiTestDatabaseGuard(directory, maxAttempts);
+            guard._defaultBackupFilesAtAcquire = guard.ListDefaultBackupFiles();
 
             // Issue #2290: 回復・退避より前に確かめる。退避のコピーは開いているファイルでも成功するため、確かめずに退避すると
             // 続く削除だけが失敗して、退避ファイル（＝「中断した実行の痕」の印）が残る。次回の Acquire はそれを書き戻し、
@@ -282,6 +295,40 @@ namespace ICCardManager.UITests.Infrastructure
         internal string DefaultBackupDirectory => PathOf(DefaultBackupFolderName);
 
         /// <summary>
+        /// Issue #2423: <see cref="Acquire"/> の後に既定のバックアップ先のファイルが増えた・消えたら例外を投げる（ファイルには触れない）。
+        /// テストのアプリの終了と DB の復元の後に呼ぶ。
+        /// </summary>
+        /// <remarks>
+        /// 隔離はアプリが設定先を受け付けることに依っている。本体は <c>backup_path</c> がパスの検証に通らないと、警告のログを出すだけで
+        /// 既定の保存先へ戻る（<c>BackupService.ResolveBackupFolderDetailAsync</c>）。そのときテストは緑のまま、同じ日の実 DB の
+        /// バックアップが整理で押し出される。黙って戻ったことを、起動のたびに結果（既定の保存先の中身）で見張る。
+        /// 消えたファイルも数える — 整理が消すのは既にあった世代で、守りたいのはそちらである。
+        /// </remarks>
+        internal void ThrowIfDefaultBackupFolderChanged()
+        {
+            var now = ListDefaultBackupFiles();
+            var added = now.Except(_defaultBackupFilesAtAcquire, StringComparer.OrdinalIgnoreCase).ToArray();
+            var removed = _defaultBackupFilesAtAcquire.Except(now, StringComparer.OrdinalIgnoreCase).ToArray();
+            if (added.Length == 0 && removed.Length == 0)
+            {
+                return;
+            }
+
+            throw new InvalidOperationException(
+                $"UI テストの間に既定のバックアップ先 {DefaultBackupDirectory} のファイルが変わりました" +
+                $"（増えた: {(added.Length == 0 ? "なし" : string.Join(", ", added))}、消えた: {(removed.Length == 0 ? "なし" : string.Join(", ", removed))}）。" +
+                "テストのアプリが UI テスト専用のバックアップ先を使わず、既定の保存先へバックアップを作って古い世代を整理した可能性があります" +
+                "（同じ時間にインストール版のピッすいを起動していた場合は、その自動バックアップです）。" +
+                $"アプリのログ（{Path.Combine(_directory, "Logs")}）で「バックアップパスが無効です」を探し、" +
+                $"UI テスト専用のバックアップ先 {UiTestBackupDirectory} をアプリが受け付けるか確かめてください。");
+        }
+
+        private string[] ListDefaultBackupFiles() =>
+            Directory.Exists(DefaultBackupDirectory)
+                ? Directory.GetFiles(DefaultBackupDirectory).Select(Path.GetFileName).ToArray()
+                : new string[0];
+
+        /// <summary>
         /// Issue #2423: テストのアプリが開く DB の <c>settings.backup_path</c> を <paramref name="backupDirectory"/> にして、
         /// 起動時の自動バックアップと古い世代の整理を既定の保存先から切り離す。アプリを起動する<b>前</b>に呼ぶこと。
         /// </summary>
@@ -301,7 +348,8 @@ namespace ICCardManager.UITests.Infrastructure
         /// </para>
         /// <para>
         /// 設定したフォルダーをアプリが使えない（パスの検証に通らない）と、アプリは既定の保存先へ退避する。
-        /// 退避先が既定の保存先ではないことは UI テスト（実行前後の既定の保存先の比較）で確かめた。
+        /// それを 2 か所で見張る: 本体の検証がこのフォルダーを受け付けること（単体テスト <c>UiTestBackupIsolationConstantsTests</c>。CI で走る）と、
+        /// 起動の終わりに既定の保存先の中身が変わっていないこと（<see cref="ThrowIfDefaultBackupFolderChanged"/>。<see cref="AppFixture"/> の Dispose）。
         /// </para>
         /// </remarks>
         internal void IsolateBackupFolder(string backupDirectory)
@@ -319,7 +367,7 @@ namespace ICCardManager.UITests.Infrastructure
                 // 既定の保存先とその配下は、本体の整理（各日の最新 1 世代）が実 DB のバックアップと同じ扱いで間引く
                 throw new ArgumentException(
                     $"テスト専用のバックアップ先 {backupDirectory} が既定のバックアップ先 {DefaultBackupDirectory} と重なっています。" +
-                    "既定のバックアップ先の外のフォルダーを指定する。",
+                    "既定のバックアップ先の外のフォルダーを指定してください。",
                     nameof(backupDirectory));
             }
 

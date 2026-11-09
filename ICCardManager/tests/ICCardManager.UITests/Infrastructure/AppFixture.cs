@@ -446,6 +446,9 @@ namespace ICCardManager.UITests.Infrastructure
 
             // DB を復元する（失敗したら退避ファイルは残り、次回の起動が回復する）
             _ownedDatabaseGuard?.Restore();
+
+            // Issue #2423: テストのアプリが既定のバックアップ先へ書いていない（本体が UI テスト専用の保存先を拒んで黙って戻っていない）こと
+            _ownedDatabaseGuard?.ThrowIfDefaultBackupFolderChanged();
         }
 
         /// <summary>

@@ -946,6 +946,75 @@ namespace ICCardManager.UITests.Tests
                 .Should().BeFalse("保存先のパスはシステム管理画面に表示され、マニュアルの撮影に写る（利用者のフォルダーだと利用者名が写る）");
         }
 
+        [Fact]
+        public void Launch_起動中に中断したとき_次のAcquireの回復で職員が設定したバックアップ先へ戻ること()
+        {
+            // テストのプロセスが kill されると Dispose（Restore）が走らず、開発機の DB に UI テスト用の backup_path が残る。
+            // 残ったまま本物のピッすいを起動すると、その自動バックアップは UI テスト用のフォルダーへ作られ続ける
+            const string configuredByStaff = @"D:\職員が設定したバックアップ先";
+            CreateMigratedDatabase(DbPath, backupPath: configuredByStaff);
+
+            AppFixture.LaunchCore(
+                _directory,
+                IsolatedBackupDirectory,
+                launchOwningGuard: guard => new FakeFixture(guard)); // Dispose しない（中断）
+            ReadSetting(DbPath, UiTestDatabaseGuard.BackupPathSettingKey).Should().Be(IsolatedBackupDirectory, "中断した直後は残っている");
+
+            UiTestDatabaseGuard.Acquire(_directory).Restore();
+
+            ReadSetting(DbPath, UiTestDatabaseGuard.BackupPathSettingKey).Should().Be(configuredByStaff);
+        }
+
+        [Fact]
+        public void ThrowIfDefaultBackupFolderChanged_既定のバックアップ先にファイルが増えたとき_名指しして例外を投げること()
+        {
+            // 本体は設定先がパスの検証に通らないと、警告のログだけで既定の保存先へ戻る。そのときの結果をここで捕まえる
+            Directory.CreateDirectory(DefaultBackupDirectory);
+            File.WriteAllText(Path.Combine(DefaultBackupDirectory, "backup_20261109_041043.db"), OriginalContent);
+            var guard = UiTestDatabaseGuard.Acquire(_directory);
+            File.WriteAllText(Path.Combine(DefaultBackupDirectory, "backup_20261109_060348.db"), SeededContent);
+            guard.Restore();
+
+            Action act = () => guard.ThrowIfDefaultBackupFolderChanged();
+
+            act.Should().Throw<InvalidOperationException>()
+                .WithMessage("*増えた: backup_20261109_060348.db*消えた: なし*");
+        }
+
+        [Fact]
+        public void ThrowIfDefaultBackupFolderChanged_既存の世代が消えたとき_名指しして例外を投げること()
+        {
+            // 整理（各日の最新 1 世代）が消すのは既にあった世代で、守りたいのはそちら
+            Directory.CreateDirectory(DefaultBackupDirectory);
+            var realBackup = Path.Combine(DefaultBackupDirectory, "backup_20261109_041043.db");
+            File.WriteAllText(realBackup, OriginalContent);
+            var guard = UiTestDatabaseGuard.Acquire(_directory);
+            File.Delete(realBackup);
+            guard.Restore();
+
+            Action act = () => guard.ThrowIfDefaultBackupFolderChanged();
+
+            act.Should().Throw<InvalidOperationException>()
+                .WithMessage("*消えた: backup_20261109_041043.db*");
+        }
+
+        [Fact]
+        public void ThrowIfDefaultBackupFolderChanged_既定のバックアップ先が変わっていないとき_何もしないこと()
+        {
+            // 対: 既にある世代（実 DB のバックアップ）や、フォルダーが無いことを「変わった」と誤らない
+            Directory.CreateDirectory(DefaultBackupDirectory);
+            File.WriteAllText(Path.Combine(DefaultBackupDirectory, "backup_20261109_041043.db"), OriginalContent);
+            var guard = UiTestDatabaseGuard.Acquire(_directory);
+            // テストのアプリが書くべき場所（UI テスト専用のフォルダー）に増えるのは正常
+            Directory.CreateDirectory(IsolatedBackupDirectory);
+            File.WriteAllText(Path.Combine(IsolatedBackupDirectory, "backup_20261109_060348.db"), SeededContent);
+            guard.Restore();
+
+            Action act = () => guard.ThrowIfDefaultBackupFolderChanged();
+
+            act.Should().NotThrow();
+        }
+
         #endregion
 
         /// <summary>
