@@ -589,7 +589,7 @@ WHERE card_idm = @cardIdm AND (is_deleted = 0 OR is_deleted IS NULL) AND (is_len
         /// </summary>
         /// <remarks>
         /// Issue #1757: 部分ユニークインデックス <c>idx_card_type_number_active</c> は
-        /// <c>is_deleted = 0</c> の行だけを対象とするため、**復元も UNIQUE 制約に触れる経路**である。
+        /// 有効な行（<c>is_deleted = 0 OR is_deleted IS NULL</c>。NULL は Migration_012 / Issue #2419）だけを対象とするため、**復元も UNIQUE 制約に触れる経路**である。
         /// 削除中に同じ種別・番号のカードが新規登録されていると（削除済みの番号は再利用できる仕様）、
         /// <c>is_deleted</c> を 0 へ戻す本 UPDATE が制約違反になる。
         /// </remarks>

@@ -48,7 +48,11 @@ namespace ICCardManager.Data.Migrations
         /// <summary>
         /// 既存データに同一種別・同一番号の有効カードが複数ある場合、番号をずらして重複を解消する
         /// </summary>
-        private static void ResolveDuplicates(SQLiteConnection connection, SQLiteTransaction transaction)
+        /// <remarks>
+        /// Migration_012（Issue #2419）も、is_deleted の NULL を 0 へ正規化した後に同じ方法で重複を解消するため本メソッドを呼ぶ。
+        /// 008 の挙動を変えると 012 の解消方法も変わる。IDm の昇順で最初の 1 枚が番号を保ち、残りはその種別の最大番号＋1 へずらす。
+        /// </remarks>
+        internal static void ResolveDuplicates(SQLiteConnection connection, SQLiteTransaction transaction)
         {
             // is_deletedカラムの存在を確認（レガシーDBでは存在しない場合がある）
             var hasIsDeleted = HasColumn(connection, transaction, "ic_card", "is_deleted");
