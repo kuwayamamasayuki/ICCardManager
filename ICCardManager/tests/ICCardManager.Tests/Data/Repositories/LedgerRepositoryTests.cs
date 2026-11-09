@@ -1356,6 +1356,46 @@ public class LedgerRepositoryTests : IDisposable
         result.InitialBalanceCorrection.SuggestedBalance.Should().Be(5000);
     }
 
+    /// <summary>
+    /// Issue #2437（コードレビューで検出）: 年度の先頭の「前年度より繰越」の残高が前の行（3/31「次年度へ繰越」の残高 0）で
+    /// 裏付けられているなら、その直後の行の打ち間違いに導入行の訂正案を出さず、ハイライトは打ち間違えた行に付くこと
+    /// （訂正案を出すと、正しい 4/1 の行だけが強調され、誤った 4/2 の行に印が付かない）
+    /// </summary>
+    [Fact]
+    public async Task CheckBalanceConsistencyAsync_FullPeriod_CorroboratedCarryoverFollowedByTypo_DoesNotSuggestCorrection()
+    {
+        // Arrange: 前年度 10/1 新規購入 5,000 → 3/31 次年度へ繰越（払出 5,000・残高 0）→ 4/1 前年度より繰越（受入・残高 5,000。正しい）
+        // → 4/2 の手入力の利用 210 を残高 4,700 と打ち間違えた（正しくは 4,790）
+        var purchase = CreateTestLedger(TestCardIdm, new DateTime(2026, 10, 1), "新規購入", income: 5000);
+        purchase.Balance = 5000;
+        purchase.Id = await _repository.InsertAsync(purchase);
+
+        var toNextYear = CreateTestLedger(TestCardIdm, new DateTime(2027, 3, 31),
+            SummaryGenerator.GetCarryoverToNextYearSummary(), expense: 5000);
+        toNextYear.Balance = 0;
+        toNextYear.Id = await _repository.InsertAsync(toNextYear);
+
+        var fromPreviousYear = CreateTestLedger(TestCardIdm, new DateTime(2027, 4, 1),
+            SummaryGenerator.GetCarryoverFromPreviousYearSummary(), income: 5000);
+        fromPreviousYear.Balance = 5000;
+        fromPreviousYear.Id = await _repository.InsertAsync(fromPreviousYear);
+
+        var typo = CreateTestLedger(TestCardIdm, new DateTime(2027, 4, 2), "鉄道（天神～博多）", expense: 210);
+        typo.Balance = 4700;
+        typo.Id = await _repository.InsertAsync(typo);
+
+        var checker = new LedgerConsistencyChecker(_repository);
+
+        // Act
+        var result = await checker.CheckBalanceConsistencyAsync(TestCardIdm, Issue2437FullPeriodStart, Issue2437FullPeriodEnd);
+
+        // Assert
+        result.Inconsistencies.Should().ContainSingle().Which.Should().Be((typo.Id, 4790, 4700));
+        result.InitialBalanceCorrection.Should().BeNull("4/1 の残高は 3/31 の残高 0 ＋ 受入 5,000 で裏付けられている");
+        ICCardManager.ViewModels.HistoryPanelViewModel.BuildInconsistencyMarkers(result).Keys
+            .Should().Equal(new[] { typo.Id }, "強調するのは打ち間違えた 4/2 の行で、正しい 4/1 の行ではない");
+    }
+
     private static void AssertNotDoubleCounted(MonthlyReportData april, MonthlyReportData may)
     {
         april.Carryover.Should().BeNull("前年度より繰越は DB の導入行が担うので、帳票は合成しない");

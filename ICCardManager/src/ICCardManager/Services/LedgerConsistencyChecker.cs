@@ -170,11 +170,42 @@ namespace ICCardManager.Services
 
             // Issue #2007: 導入時残高の誤りの形状なら、直すべき行と値を名指しする。
             // Issue #2437: 導入行は途中のチェーンの先頭にも来る（導入行より前の日付の行がある 3 月繰越のカード）
-            result.InitialBalanceCorrection = chains
-                .Select(ledgers => DetectInitialBalanceCorrection(ledgers, result))
-                .FirstOrDefault(c => c != null);
+            // ただし、先頭の導入行の残高が前のチェーンの最終残高から計算した値と一致する（前の行で裏付けられている）なら、
+            // 導入行は正しく、切れているのは直後の行の側なので訂正案を出さない（コードレビューで検出）。
+            // 例: 前年度から台帳があるカードの 3/31 残高 0 → 4/1「前年度より繰越」受入・残高 5,000 → 4/2 の打ち間違い。
+            // 訂正案を出すと、ハイライト（BuildInconsistencyMarkers）が正しい 4/1 だけになり、誤った 4/2 に印が付かない
+            result.InitialBalanceCorrection = null;
+            Ledger? previousLast = null;
+            foreach (var ledgers in chains)
+            {
+                if (ledgers.Count == 0)
+                {
+                    continue;
+                }
+
+                if (!IsCorroboratedByPreviousChain(previousLast, ledgers[0]))
+                {
+                    result.InitialBalanceCorrection = DetectInitialBalanceCorrection(ledgers, result);
+                    if (result.InitialBalanceCorrection != null)
+                    {
+                        break;
+                    }
+                }
+
+                previousLast = ledgers[ledgers.Count - 1];
+            }
 
             return result;
+        }
+
+        /// <summary>
+        /// Issue #2437: チェーンの先頭の行の残高が、前のチェーンの最終残高 ＋ 受入 − 払出 と一致するか（前の行で裏付けられているか）。
+        /// 前のチェーンが無い（期間の先頭のチェーン）なら偽。
+        /// </summary>
+        internal static bool IsCorroboratedByPreviousChain(Ledger? previousLast, Ledger chainHead)
+        {
+            return previousLast != null
+                && previousLast.Balance + chainHead.Income - chainHead.Expense == chainHead.Balance;
         }
 
         /// <summary>

@@ -415,5 +415,25 @@ public class LedgerConsistencyCheckerTests
         result.InitialBalanceCorrection.AppliesToIncome.Should().BeTrue("前年度より繰越は受入欄にも残高を書く");
     }
 
+    /// <summary>
+    /// Issue #2437（コードレビューで検出）: 2 本目のチェーンの先頭の導入行の残高が前のチェーンの最終残高で裏付けられているなら、
+    /// 直後の行が切れていても訂正案を出さない（正しい導入行を誤った行に合わせて直す誘導にしない）
+    /// </summary>
+    [Fact]
+    public void CheckConsistency_Chains_CorroboratedHead_DoesNotSuggestCorrection()
+    {
+        var yearEnd = Issue2437Ledger(1, new DateTime(2027, 3, 31), SummaryGenerator.GetCarryoverToNextYearSummary(), 0, 5000, 0);
+        var intro = Issue2437Ledger(2, new DateTime(2027, 4, 1), SummaryGenerator.GetCarryoverFromPreviousYearSummary(), 5000, 0, 5000);
+        var typo = Issue2437Ledger(3, new DateTime(2027, 4, 2), "鉄道（天神～博多）", 0, 210, 4700);
+
+        var result = _checker.CheckConsistency(
+            new[] { new List<Ledger> { yearEnd }, new List<Ledger> { intro, typo } }, TestCardIdm, new DateTime(2000, 1, 1));
+
+        result.Inconsistencies.Should().ContainSingle().Which.Should().Be((3, 4790, 4700));
+        result.InitialBalanceCorrection.Should().BeNull("0 ＋ 受入 5,000 ＝ 5,000 で導入行は裏付けられている");
+        LedgerConsistencyChecker.IsCorroboratedByPreviousChain(null, intro)
+            .Should().BeFalse("前のチェーンが無ければ裏付けは無い（期間の先頭の導入行は従来どおり訂正案の対象）");
+    }
+
     #endregion
 }
