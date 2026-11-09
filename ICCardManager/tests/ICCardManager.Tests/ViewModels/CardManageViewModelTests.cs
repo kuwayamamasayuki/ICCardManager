@@ -3478,11 +3478,11 @@ public class CardManageViewModelTests : IDisposable
         _ledgerRepositoryMock.Verify(r => r.InsertAsync(It.IsAny<Ledger>(), It.IsAny<SQLiteTransaction>()), Times.Never);
         _operationLogRepositoryMock.Verify(r => r.InsertAsync(It.IsAny<OperationLog>(), It.IsAny<SQLiteTransaction>()), Times.Never);
 
-        _viewModel.IsStatusError.Should().BeTrue();
-        _viewModel.StatusMessage.Should().Contain("H-001");
-        _viewModel.StatusMessage.Should().Contain("払い戻しできませんでした",
+        // Issue #2421: 削除と同じく、ダイアログで（編集フォームを閉じていても見える）案内する。以前はステータス欄だった
+        _dialogServiceMock.Verify(d => d.ShowError(
+            ICCardManager.Common.ConcurrencyConflictMessage.ForRefund("交通系ICカード「はやかけん H-001」", "カード一覧"),
+            "払い戻しできません"), Times.Once,
             "「何が」は利用者が実際に行った操作で述べること（更新ではない）");
-        _viewModel.StatusMessage.Should().EndWith("やり直してください。");
     }
 
     /// <summary>
@@ -4564,10 +4564,10 @@ public class CardManageViewModelTests : IDisposable
         _ledgerRepositoryMock.Verify(r => r.InsertAsync(It.IsAny<Ledger>()), Times.Never);
         _ledgerRepositoryMock.Verify(r => r.InsertAsync(It.IsAny<Ledger>(), It.IsAny<SQLiteTransaction>()), Times.Never);
 
-        _viewModel.IsStatusError.Should().BeTrue();
-        _viewModel.StatusMessage.Should().Contain("H-001", "選択が外れていても対象を名指しできること");
-        _viewModel.StatusMessage.Should().Contain("払い戻し", "利用者が行った操作で述べること");
-        _viewModel.StatusMessage.Should().EndWith("やり直してください。");
+        // Issue #2421: 案内はダイアログ（以前はステータス欄）
+        _dialogServiceMock.Verify(d => d.ShowError(
+            It.Is<string>(m => m.Contains("H-001") && m.Contains("払い戻し") && m.EndsWith("やり直してください。")),
+            "払い戻しできません"), Times.Once, "選択が外れていても対象を名指しし、利用者が行った操作で述べること");
     }
 
     #endregion
@@ -4644,7 +4644,7 @@ public class CardManageViewModelTests : IDisposable
     }
 
     /// <summary>
-    /// Issue #1836: NotifyDeleteConflictAsync（ヘルパー経由の経路）の挙動テスト。
+    /// Issue #1836: NotifyDeleteConflictAsync（ヘルパー経由の経路。Issue #2421 で NotifyWriteRefusedAsync へ寄せた）の挙動テスト。
     /// </summary>
     /// <remarks>
     /// このヘルパーは冒頭で LoadCardsAsync() を呼び、LoadCardsAsync は自前の
@@ -5121,7 +5121,7 @@ public class CardManageViewModelTests : IDisposable
 
         // Assert
         _dialogServiceMock.Verify(d => d.ShowError(
-            CardManageViewModel.FormatRefundBalanceChangedMessage("交通系ICカード「はやかけん H-001」", 3000, 2790),
+            CardManageViewModel.FormatRefundBalanceChangedMessage("交通系ICカード「はやかけん H-001」", 3000, 2790, true),
             "払い戻しできません"), Times.Once);
         events.Should().Equal(new[] { "reload", "error" }, "「再読み込みしました」と案内するので、先に再読込する");
         // Issue #2322（レビュー 5 回目）: 残額の照合は払戻済への更新が成功した後（同じトランザクション・コミット前）に移した。
@@ -5138,7 +5138,7 @@ public class CardManageViewModelTests : IDisposable
     [Fact]
     public void FormatRefundBalanceChangedMessage_ShouldNameAmountsCauseAndAction()
     {
-        var message = CardManageViewModel.FormatRefundBalanceChangedMessage("交通系ICカード「はやかけん H-001」", 3000, 2790);
+        var message = CardManageViewModel.FormatRefundBalanceChangedMessage("交通系ICカード「はやかけん H-001」", 3000, 2790, true);
 
         message.Should().Contain("はやかけん H-001").And.Contain("¥3,000").And.Contain("¥2,790");
         message.Should().Contain("他のパソコンや別の操作");
@@ -5269,6 +5269,111 @@ public class CardManageViewModelTests : IDisposable
         shown.Should().StartWith("交通系ICカード「はやかけん H-001」は既に貸出中のため、払い戻しできませんでした。");
         shown.Should().Contain("他のパソコンや別の操作で貸し出された可能性があります");
         shown.Should().EndWith("もう一度「払い戻し」を押してください。");
+    }
+
+
+    /// <summary>
+    /// Issue #2421（レビュー指摘）: 払い戻しの書き込み前の読み直しで行が無いときも、削除と同じく
+    /// キャッシュの破棄 → 再読込 → ダイアログの順で案内し、再読込が例外でも案内を失わないこと
+    /// </summary>
+    /// <remarks>
+    /// 以前はステータス欄に出し（編集フォームを閉じていると見えない）、保護のない再読込を使っていた（#1760）。
+    /// </remarks>
+    [Fact]
+    public async Task RefundAsync_WhenTargetRowMissingAndReloadFails_ShouldStillShowDialogWithoutClaimingReload()
+    {
+        // Arrange
+        ArrangeRefundableCard(500);
+        _cardRepositoryMock.Setup(r => r.GetByIdmAsync(RefundTargetIdm, It.IsAny<bool>())).ReturnsAsync((IcCard?)null);
+        var events = new List<string>();
+        _cardRepositoryMock.Setup(r => r.InvalidateCache()).Callback(() => events.Add("invalidate"));
+        _cardRepositoryMock.Setup(r => r.GetAllAsync())
+            .Callback(() => events.Add("reload"))
+            .ThrowsAsync(new InvalidOperationException("共有フォルダに接続できません"));
+        _dialogServiceMock.Setup(d => d.ShowError(It.IsAny<string>(), It.IsAny<string>()))
+            .Callback(() => events.Add("error"));
+
+        // Act
+        var act = async () => await _viewModel.RefundAsync();
+
+        // Assert
+        await act.Should().NotThrowAsync();
+        _dialogServiceMock.Verify(d => d.ShowError(
+            ICCardManager.Common.ConcurrencyConflictMessage.ForReloadFailed(
+                "交通系ICカード「はやかけん H-001」", "払い戻し",
+                ICCardManager.Common.ConcurrencyConflictMessage.DeletedReason, "カード一覧"),
+            "払い戻しできません"), Times.Once);
+        events.Should().Equal(new[] { "invalidate", "reload", "error" });
+        _cardRepositoryMock.Verify(
+            r => r.SetRefundedAsync(It.IsAny<string>(), It.IsAny<DateTime>(), It.IsAny<SQLiteTransaction>()), Times.Never);
+    }
+
+    /// <summary>
+    /// Issue #2421（レビュー指摘）: 払い戻しの書き込みが競合（Conflict）で拒否され、読み直すと払戻済だったときは、
+    /// 払い戻されたことを名指しし、「やり直してください」と案内しないこと（削除の #2370 と対）
+    /// </summary>
+    [Fact]
+    public async Task RefundAsync_WhenConflictAndRereadFindsRefunded_ShouldNameRefund()
+    {
+        // Arrange
+        ArrangeRefundableCard(500);
+        // 1 回目（書き込み前の読み直し）は未払戻、2 回目（拒否された後の読み直し）は払戻済
+        _cardRepositoryMock.SetupSequence(r => r.GetByIdmAsync(RefundTargetIdm, It.IsAny<bool>()))
+            .ReturnsAsync(new IcCard { CardIdm = RefundTargetIdm, CardType = "はやかけん", CardNumber = "H-001" })
+            .ReturnsAsync(new IcCard { CardIdm = RefundTargetIdm, CardType = "はやかけん", CardNumber = "H-001", IsRefunded = true });
+        _cardRepositoryMock.Setup(r => r.SetRefundedAsync(RefundTargetIdm, It.IsAny<DateTime>(), It.IsAny<SQLiteTransaction>()))
+            .ReturnsAsync(ICCardManager.Data.Repositories.CardOperationResult.Conflict);
+
+        // Act
+        await _viewModel.RefundAsync();
+
+        // Assert
+        _dialogServiceMock.Verify(d => d.ShowError(
+            ICCardManager.Common.ConcurrencyConflictMessage.ForRefundRefunded("交通系ICカード「はやかけん H-001」", "カード一覧"),
+            "払い戻しできません"), Times.Once);
+        _dialogServiceMock.Verify(d => d.ShowError(
+            It.Is<string>(m => m.Contains("やり直してください")), It.IsAny<string>()), Times.Never,
+            "払戻済のカードはやり直しても払い戻せない");
+    }
+
+    /// <summary>
+    /// Issue #2421（レビュー指摘）: 確認した後に残額が変わったときの案内も、再読込が例外なら
+    /// 案内を失わず「再読み込みしました」と述べないこと
+    /// </summary>
+    [Fact]
+    public async Task RefundAsync_WhenBalanceChangedAndReloadFails_ShouldStillShowDialogWithoutClaimingReload()
+    {
+        // Arrange
+        ArrangeRefundableCard(3000);
+        _ledgerRepositoryMock.SetupSequence(r => r.GetLatestLedgerAsync(RefundTargetIdm))
+            .ReturnsAsync(new Ledger { CardIdm = RefundTargetIdm, Balance = 3000 })
+            .ReturnsAsync(new Ledger { CardIdm = RefundTargetIdm, Balance = 2790 });
+        _cardRepositoryMock.Setup(r => r.GetAllAsync()).ThrowsAsync(new InvalidOperationException("共有フォルダに接続できません"));
+
+        // Act
+        var act = async () => await _viewModel.RefundAsync();
+
+        // Assert
+        await act.Should().NotThrowAsync();
+        _dialogServiceMock.Verify(d => d.ShowError(
+            CardManageViewModel.FormatRefundBalanceChangedMessage("交通系ICカード「はやかけん H-001」", 3000, 2790, false),
+            "払い戻しできません"), Times.Once);
+    }
+
+    /// <summary>
+    /// Issue #2421: 残額が変わったときの案内は、再読込できなかったら「再読み込みしました」と述べず開き直しを案内すること（対で表明）
+    /// </summary>
+    [Fact]
+    public void FormatRefundBalanceChangedMessage_WhenNotReloaded_ShouldNotClaimReload()
+    {
+        var notReloaded = CardManageViewModel.FormatRefundBalanceChangedMessage("交通系ICカード「はやかけん H-001」", 3000, 2790, false);
+        var reloaded = CardManageViewModel.FormatRefundBalanceChangedMessage("交通系ICカード「はやかけん H-001」", 3000, 2790, true);
+
+        notReloaded.Should().NotContain("再読み込みしました");
+        notReloaded.Should().Contain("カード一覧の再読み込みにも失敗したため");
+        notReloaded.Should().Contain("¥3,000").And.Contain("¥2,790");
+        notReloaded.Should().EndWith("確認してください。");
+        reloaded.Should().Contain("カード一覧を再読み込みしました");
     }
 
     #endregion
