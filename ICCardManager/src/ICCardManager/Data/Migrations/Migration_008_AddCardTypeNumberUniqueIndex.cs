@@ -1,5 +1,6 @@
+#nullable enable
 using System.Data.SQLite;
-using System.Globalization;
+using ICCardManager.Common;
 
 namespace ICCardManager.Data.Migrations
 {
@@ -48,7 +49,13 @@ namespace ICCardManager.Data.Migrations
         /// <summary>
         /// 既存データに同一種別・同一番号の有効カードが複数ある場合、番号をずらして重複を解消する
         /// </summary>
-        private static void ResolveDuplicates(SQLiteConnection connection, SQLiteTransaction transaction)
+        /// <remarks>
+        /// Migration_012（Issue #2419）も、is_deleted の NULL を 0 へ正規化した後に同じ方法で重複を解消するため本メソッドを呼ぶ。
+        /// 008 の挙動を変えると 012 の解消方法も変わる。IDm の昇順で最初の 1 枚が番号を保ち、残りはその種別の最大番号＋1 へずらす
+        /// （最大番号＋1 が 64 ビット整数で表せないときは、その種別で使われていない最小の正の整数。採番は
+        /// 新規登録と共有する <see cref="CardNumberAllocator"/>）。
+        /// </remarks>
+        internal static void ResolveDuplicates(SQLiteConnection connection, SQLiteTransaction transaction)
         {
             // is_deletedカラムの存在を確認（レガシーDBでは存在しない場合がある）
             var hasIsDeleted = HasColumn(connection, transaction, "ic_card", "is_deleted");
@@ -106,16 +113,38 @@ LIMIT -1 OFFSET 1";
 FROM ic_card WHERE card_type = @cardType";
                     maxCmd.Parameters.AddWithValue("@cardType", cardType);
                     var maxResult = maxCmd.ExecuteScalar();
-                    var nextNumber = (maxResult == System.DBNull.Value ? 0 : System.Convert.ToInt32(maxResult, CultureInfo.InvariantCulture)) + 1;
+                    // Issue #2419: 採番は新規登録と共有する（64 ビット整数で「最大＋1」、表せなければ
+                    // その種別で使われていない最小の正の整数）。理由は CardNumberAllocator の注記を参照
+                    var nextNumber = CardNumberAllocator.Next(
+                        CardNumberAllocator.ParseMax(maxResult),
+                        () => ReadCardNumbers(connection, transaction, cardType));
 
                     using var updateCmd = connection.CreateCommand();
                     updateCmd.Transaction = transaction;
                     updateCmd.CommandText = "UPDATE ic_card SET card_number = @newNumber WHERE card_idm = @cardIdm";
-                    updateCmd.Parameters.AddWithValue("@newNumber", nextNumber.ToString(CultureInfo.InvariantCulture));
+                    updateCmd.Parameters.AddWithValue("@newNumber", nextNumber);
                     updateCmd.Parameters.AddWithValue("@cardIdm", idm);
                     updateCmd.ExecuteNonQuery();
                 }
             }
+        }
+
+        /// <summary>
+        /// 指定した種別のカード（削除済みを含む）の管理番号を返す（Issue #2419）
+        /// </summary>
+        private static System.Collections.Generic.List<string> ReadCardNumbers(SQLiteConnection connection, SQLiteTransaction transaction, string cardType)
+        {
+            var numbers = new System.Collections.Generic.List<string>();
+            using var cmd = connection.CreateCommand();
+            cmd.Transaction = transaction;
+            cmd.CommandText = "SELECT card_number FROM ic_card WHERE card_type = @cardType";
+            cmd.Parameters.AddWithValue("@cardType", cardType);
+            using var reader = cmd.ExecuteReader();
+            while (reader.Read())
+            {
+                numbers.Add(reader.GetString(0));
+            }
+            return numbers;
         }
 
         /// <summary>
