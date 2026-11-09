@@ -466,25 +466,40 @@ namespace ICCardManager.UITests.Infrastructure
                 return;
             }
 
-            // DB を復元する（失敗したら退避ファイルは残り、次回の起動が回復する）
+            FinishOwnedGuard(
+                // DB を復元する（失敗したら退避ファイルは残り、次回の起動が回復する）
+                restore: ownedDatabaseGuard.Restore,
+                // Issue #2423: テストのアプリが既定のバックアップ先へ書いていない（本体が UI テスト専用の保存先を拒んで黙って戻っていない）こと
+                checkDefaultBackupFolder: ownedDatabaseGuard.ThrowIfDefaultBackupFolderChanged);
+        }
+
+        /// <summary>
+        /// <see cref="FinishOwnedGuard(UiTestDatabaseGuard)"/> の本体。復元と確認を互いの成否と独立に走らせ、失敗はすべて伝える。
+        /// 確認の失敗の種類（一覧を読めない IOException 等）を差し替えて検証できるよう、処理を受け取る形にしている。
+        /// </summary>
+        /// <remarks>
+        /// 確認は復元の成否と独立に走らせる。次回の <see cref="UiTestDatabaseGuard.Acquire"/> はその時点の一覧を記録し直すので、
+        /// ここで見なければこの回の書き込みは二度と検出できない。どちらの失敗も型で絞らずに受ける — 確認が一覧を読めずに
+        /// IOException / UnauthorizedAccessException で失敗したときに、復元の失敗を失わないため。
+        /// </remarks>
+        internal static void FinishOwnedGuard(Action restore, Action checkDefaultBackupFolder)
+        {
             Exception? restoreFailure = null;
             try
             {
-                ownedDatabaseGuard.Restore();
+                restore();
             }
             catch (Exception ex)
             {
                 restoreFailure = ex;
             }
 
-            // Issue #2423: テストのアプリが既定のバックアップ先へ書いていない（本体が UI テスト専用の保存先を拒んで黙って戻っていない）こと。
-            // 復元の成否と独立に確かめる。次回の Acquire はその時点の一覧を記録し直すので、ここで見なければこの回の書き込みは二度と検出できない
             Exception? checkFailure = null;
             try
             {
-                ownedDatabaseGuard.ThrowIfDefaultBackupFolderChanged();
+                checkDefaultBackupFolder();
             }
-            catch (InvalidOperationException ex)
+            catch (Exception ex)
             {
                 checkFailure = ex;
             }

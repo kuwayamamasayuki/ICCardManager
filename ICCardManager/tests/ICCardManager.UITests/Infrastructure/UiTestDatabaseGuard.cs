@@ -342,7 +342,8 @@ namespace ICCardManager.UITests.Infrastructure
         /// 本体では <c>backup_path</c> を書くのはバックアップ先の変更（<c>SettingsRepository.ChangeBackupPathAsync</c>。職員証の認証と
         /// 変更日時・PC の記録を伴う）だけで、一括保存にも載らない。ここで直接書くのは、テストのアプリに既定の保存先を一度も
         /// 使わせないため — 起動時の自動バックアップはメイン画面の表示より前に走るので、起動してから画面で変える手段では間に合わない。
-        /// 変更日時・PC は書かない（システム管理画面の「最終変更」は「記録なし」のまま）。
+        /// 変更日時・PC は書かない。システム管理画面の「バックアップ先の最終変更」は、新規 DB（投入して起動する <see cref="AppFixture.LaunchWithSeed(System.Action{System.Data.SQLite.SQLiteConnection})"/>）では
+        /// 「記録なし」、開発機の DB をそのまま開く <see cref="AppFixture.Launch"/> ではその DB に残っている記録（UI テストのフォルダーへ変えた記録ではない）を表示する。
         /// </para>
         /// <para>
         /// DB が無ければ、<c>settings</c> テーブル（本体の初期マイグレーションと同じ定義）だけを持つ DB を作る。<c>staff</c> テーブルが

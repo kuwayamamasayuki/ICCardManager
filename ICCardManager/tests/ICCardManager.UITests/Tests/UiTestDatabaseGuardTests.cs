@@ -1037,6 +1037,21 @@ namespace ICCardManager.UITests.Tests
         }
 
         [Fact]
+        public void FinishOwnedGuard_確認が一覧を読めずに失敗しても_復元の失敗を失わないこと()
+        {
+            // 確認の失敗は InvalidOperationException（変わっていた）だけではない。一覧を読めない失敗でも、復元の失敗と両方を伝える
+            var restoreFailure = new IOException("DB を別のプロセスが開いている");
+            var checkFailure = new UnauthorizedAccessException("既定のバックアップ先を読む権限が無い");
+
+            Action act = () => AppFixture.FinishOwnedGuard(
+                restore: () => throw restoreFailure,
+                checkDefaultBackupFolder: () => throw checkFailure);
+
+            var thrown = act.Should().Throw<AggregateException>().Which;
+            thrown.InnerExceptions.Should().Equal(restoreFailure, checkFailure);
+        }
+
+        [Fact]
         public void FinishOwnedGuard_DBの復元だけが失敗したとき_その例外をそのまま伝えること()
         {
             // 対: 既定のバックアップ先が変わっていなければ、確認は失敗を足さない
