@@ -1453,6 +1453,43 @@ public class LedgerRepositoryTests : IDisposable
         result.InitialBalanceCorrection.SuggestedBalance.Should().Be(0);
     }
 
+    /// <summary>
+    /// Issue #2437（コードレビューで検出）: 3 月繰越のカードで 3/25 の手入力の行（残高 5,000）の後の 4/1「前年度より繰越」
+    /// （受入・残高 5,000。正しい）は、受入が残高の書き直しなので直前の行の残高と同じであれば裏付けられている。
+    /// 4/2 の打ち間違いに対して正しい導入行を 4,910 に直す訂正案を出さず、4/2 を強調すること
+    /// </summary>
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task CheckBalanceConsistencyAsync_CorrectCarryoverAfterManualRowFollowedByTypo_HighlightsTypo(bool fullPeriod)
+    {
+        // Arrange: 3/25 手入力（残高 5,000）→ 4/1 導入行（受入・残高 5,000）→ 4/2 利用 210 を 4,700 と打ち間違え（正しくは 4,790）
+        var manual = CreateTestLedger(TestCardIdm, new DateTime(2027, 3, 25), "鉄道（手入力）");
+        manual.Balance = 5000;
+        manual.Id = await _repository.InsertAsync(manual);
+
+        var introduction = CreateTestLedger(TestCardIdm, new DateTime(2027, 4, 1),
+            SummaryGenerator.GetCarryoverFromPreviousYearSummary(), income: 5000);
+        introduction.Balance = 5000;
+        introduction.Id = await _repository.InsertAsync(introduction);
+
+        var usage = CreateTestLedger(TestCardIdm, new DateTime(2027, 4, 2), "鉄道（天神～博多）", expense: 210);
+        usage.Balance = 4700;
+        usage.Id = await _repository.InsertAsync(usage);
+
+        var checker = new LedgerConsistencyChecker(_repository);
+
+        // Act
+        var result = await CheckIssue2437PeriodAsync(checker, fullPeriod);
+
+        // Assert
+        result.Inconsistencies.Should().ContainSingle("切れているのは 4/2 の 1 か所だけ（#2007 の形に当たる）")
+            .Which.Should().Be((usage.Id, 4790, 4700));
+        result.InitialBalanceCorrection.Should().BeNull("4/1 の残高 5,000 は 3/25 の残高 5,000 を書き直しただけで裏付けられている");
+        ICCardManager.ViewModels.HistoryPanelViewModel.BuildInconsistencyMarkers(result).Keys
+            .Should().Equal(new[] { usage.Id }, "強調するのは打ち間違えた 4/2 で、正しい導入行ではない");
+    }
+
     private static void AssertNotDoubleCounted(MonthlyReportData april, MonthlyReportData may)
     {
         april.Carryover.Should().BeNull("前年度より繰越は DB の導入行が担うので、帳票は合成しない");

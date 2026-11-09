@@ -438,6 +438,15 @@ public class LedgerConsistencyCheckerTests
         var lentYearEnd = Issue2437Ledger(4, new DateTime(2027, 3, 31), SummaryGenerator.GetLendingSummary(), 0, 0, 0, isLentRecord: true);
         LedgerConsistencyChecker.IsCorroboratedByPrecedingSettledRow(lentYearEnd, intro)
             .Should().BeFalse("貸出中レコードの残高は帳簿の残高ではないので裏付けにしない");
+        var manualMarch = Issue2437Ledger(5, new DateTime(2027, 3, 25), "鉄道（手入力）", 0, 0, 5000);
+        LedgerConsistencyChecker.IsCorroboratedByPrecedingSettledRow(manualMarch, intro)
+            .Should().BeTrue("前年度より繰越の受入は残高の書き直しなので、直前の残高 5,000 と同じ残高なら裏付けあり");
+        var wrongIntro = Issue2437Ledger(6, new DateTime(2027, 4, 1), SummaryGenerator.GetCarryoverFromPreviousYearSummary(), 6000, 0, 6000);
+        LedgerConsistencyChecker.IsCorroboratedByPrecedingSettledRow(manualMarch, wrongIntro)
+            .Should().BeFalse("直前の残高 5,000 と異なる 6,000 は裏付けなし");
+        var chargeHead = Issue2437Ledger(7, new DateTime(2027, 4, 1), "役務費によりチャージ", 1000, 0, 5000);
+        LedgerConsistencyChecker.IsCorroboratedByPrecedingSettledRow(manualMarch, chargeHead)
+            .Should().BeFalse("受入で残高を書き直すのは導入行だけ。チャージの受入は新しいお金なので 5,000 ＋ 1,000 ≠ 5,000 は裏付けなし");
     }
 
     #endregion

@@ -217,14 +217,33 @@ namespace ICCardManager.Services
         }
 
         /// <summary>
-        /// Issue #2437: チェーンの先頭の行の残高が、直前の帳簿の行（貸出中レコードを除く）の残高 ＋ 受入 − 払出 と一致するか
-        /// （前の行で裏付けられているか）。直前の行が無ければ偽。
+        /// Issue #2437: チェーンの先頭の行の残高が、直前の帳簿の行（貸出中レコードを除く）で裏付けられているか。直前の行が無ければ偽。
         /// </summary>
+        /// <remarks>
+        /// 裏付けの形は 2 つある（コードレビューで検出）。
+        /// <list type="bullet">
+        /// <item>直前の行の残高 ＋ 受入 − 払出 ＝ 先頭の残高（3/31「次年度へ繰越」で残高 0 にしてから 4/1「前年度より繰越」で受け入れる組）</item>
+        /// <item>先頭が受入欄に残高を書く導入行（<see cref="Ledger.InitialRecordCarriesIncome"/>。前年度より繰越・新規購入）で、
+        /// 直前の行の残高 ＝ 先頭の残高。導入行の受入は新しいお金ではなく残高の書き直しなので、直前の行（3/25 の手入力の行
+        /// 残高 5,000 など）から引き継いだ残高と同じなら正しい。上の式だけだと 5,000 ＋ 5,000 ≠ 5,000 で裏付けが無いことになり、
+        /// 直後の行の打ち間違いに対して正しい導入行を書き直す訂正案を出していた</item>
+        /// </list>
+        /// 限界: 直前の行の残高が、導入行の誤った残高と偶然一致する場合も裏付けありと判定する（訂正案は出ず、直後の行が強調される）。
+        /// </remarks>
         internal static bool IsCorroboratedByPrecedingSettledRow(Ledger? precedingSettledRow, Ledger chainHead)
         {
-            return precedingSettledRow != null
-                && !precedingSettledRow.IsLentRecord
-                && precedingSettledRow.Balance + chainHead.Income - chainHead.Expense == chainHead.Balance;
+            if (precedingSettledRow == null || precedingSettledRow.IsLentRecord)
+            {
+                return false;
+            }
+
+            if (precedingSettledRow.Balance + chainHead.Income - chainHead.Expense == chainHead.Balance)
+            {
+                return true;
+            }
+
+            return Ledger.InitialRecordCarriesIncome(chainHead.Summary)
+                && precedingSettledRow.Balance == chainHead.Balance;
         }
 
         /// <summary>
