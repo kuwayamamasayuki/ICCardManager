@@ -1157,15 +1157,15 @@ namespace ICCardManager.ViewModels
                 {
                     // Issue #2370: 読み直した後・書き込みの前に払い戻されていれば、論理削除の WHERE（is_refunded = 0）が
                     // 拒否した。払い戻されたことを名指しする。
-                    // Issue #2421: 払戻済でなければ（削除済みで読めない場合を含む）先に削除された競合として案内する。
-                    // 読み直しに失敗して原因が分からないときは、削除と払い戻しの両方を候補に挙げる
-                    // （「削除された可能性」とだけ述べると、払い戻されて一覧に「払戻済」で残っているカードについて事実でなくなる）。
-                    var refunded = await IsRefundedAfterDeleteConflictAsync(targetIdm);
-                    var message = refunded switch
+                    // Issue #2421: 削除済みと読めたときだけ「先に削除された」と述べる。有効なカードが読めた
+                    // （拒否の後に状態が戻った等）・読み直しに失敗したときは原因を限定せず、削除と払い戻しの両方を候補に挙げる
+                    // （限定すると、一覧にカードが残っている・払戻済で残っているのに「削除された可能性」と述べることになる）。
+                    var cause = await DiagnoseDeleteConflictAsync(targetIdm);
+                    var message = cause switch
                     {
-                        true => ConcurrencyConflictMessage.ForDeleteRefunded(targetLabel, CardListInThisScreen),
-                        false => BuildOperationFailureMessage(deleteResult, targetLabel, CardWriteOperation.Delete),
-                        null => ConcurrencyConflictMessage.ForDeleteStateChanged(targetLabel, CardListInThisScreen),
+                        DeleteConflictCause.Refunded => ConcurrencyConflictMessage.ForDeleteRefunded(targetLabel, CardListInThisScreen),
+                        DeleteConflictCause.Deleted => ConcurrencyConflictMessage.ForDelete(targetLabel, CardListInThisScreen),
+                        _ => ConcurrencyConflictMessage.ForDeleteStateChanged(targetLabel, CardListInThisScreen),
                     };
                     // 「再読み込みしました」と述べるので、キャッシュを破棄して再読込してから案内する（#1759。下の else と同じ）
                     _cardRepository.InvalidateCache();
@@ -1200,32 +1200,53 @@ namespace ICCardManager.ViewModels
         }
 
         /// <summary>
-        /// 削除が競合（影響行数 0）で拒否された後に、原因が払い戻しかどうかを読み直して判定する（Issue #2370）
+        /// 削除が競合（影響行数 0）で拒否された原因を、読み直した状態で分類したもの（Issue #2370 / #2421）
+        /// </summary>
+        private enum DeleteConflictCause
+        {
+            /// <summary>読み直すと行が無かった（先に削除された）</summary>
+            Deleted,
+
+            /// <summary>読み直すと払戻済だった（先に払い戻された）</summary>
+            Refunded,
+
+            /// <summary>読み直すと有効で未払戻だった、または読み直しに失敗した（原因を限定できない）</summary>
+            Undetermined,
+        }
+
+        /// <summary>
+        /// 削除が競合（影響行数 0）で拒否された後に、原因を読み直して分類する（Issue #2370 / #2421）
         /// </summary>
         /// <returns>
-        /// 読み直したカードが払戻済なら <c>true</c>。存在しない（削除済み）・未払戻なら <c>false</c>
-        /// （呼び出し側は先に削除された競合 <see cref="ConcurrencyConflictMessage.ForDelete"/> で案内する）。
-        /// 読み直しに失敗して分からない場合は <c>null</c>（呼び出し側は削除と払い戻しの両方を候補に挙げる
-        /// <see cref="ConcurrencyConflictMessage.ForDeleteStateChanged"/> で案内する。Issue #2421）
+        /// 読み直したカードが無ければ <see cref="DeleteConflictCause.Deleted"/>（呼び出し側は <see cref="ConcurrencyConflictMessage.ForDelete"/>）、
+        /// 払戻済なら <see cref="DeleteConflictCause.Refunded"/>（<see cref="ConcurrencyConflictMessage.ForDeleteRefunded"/>）。
+        /// 有効で未払戻のカードが読めた、または読み直しに失敗した場合は <see cref="DeleteConflictCause.Undetermined"/>
+        /// （削除と払い戻しの両方を候補に挙げる <see cref="ConcurrencyConflictMessage.ForDeleteStateChanged"/>）
         /// </returns>
         /// <remarks>
         /// 読み直しはキャッシュを経由するが、0 行のときリポジトリの事後診断と
         /// <c>CardManagementService.DeleteAsync</c> の finally がキャッシュを破棄済みなので DB の最新状態を読む。
         /// 読み直しは文言を選ぶためだけのもので、削除が拒否されたことは確定している。ここで例外を外へ出すと
-        /// 案内も一覧の再読込も行われないため、ログを残して「原因不明」（null）として返す。
+        /// 案内も一覧の再読込も行われないため、ログを残して「原因を限定できない」として返す。
         /// </remarks>
-        private async Task<bool?> IsRefundedAfterDeleteConflictAsync(string cardIdm)
+        private async Task<DeleteConflictCause> DiagnoseDeleteConflictAsync(string cardIdm)
         {
             try
             {
-                return (await _cardRepository.GetByIdmAsync(cardIdm))?.IsRefunded == true;
+                var card = await _cardRepository.GetByIdmAsync(cardIdm);
+                if (card == null)
+                {
+                    return DeleteConflictCause.Deleted;
+                }
+
+                return card.IsRefunded ? DeleteConflictCause.Refunded : DeleteConflictCause.Undetermined;
             }
             catch (Exception ex)
             {
                 _logger?.LogWarning(ex,
-                    "交通系ICカードの削除が競合で拒否された後、原因（払い戻し）を確かめる読み直しに失敗しました。" +
+                    "交通系ICカードの削除が競合で拒否された後、原因（削除・払い戻し）を確かめる読み直しに失敗しました。" +
                     "削除された可能性と払い戻された可能性の両方を挙げる文言で案内します");
-                return null;
+                return DeleteConflictCause.Undetermined;
             }
         }
 
@@ -1574,10 +1595,9 @@ namespace ICCardManager.ViewModels
         /// 表示すること（#1753 / #1759）。以前は「画面を更新してください」と、画面が自動で行う再読込を利用者に求めていた。
         /// </para>
         /// <para>
-        /// 「なぜ」は操作の WHERE が拒否し得る状態で決まる。削除の Conflict は払戻済（呼び出し側が読み直して
-        /// <see cref="ConcurrencyConflictMessage.ForDeleteRefunded"/> へ分ける。読み直せなければ
-        /// <see cref="ConcurrencyConflictMessage.ForDeleteStateChanged"/>）を除けば削除済みなので
-        /// <see cref="ConcurrencyConflictMessage.ForDelete"/>。払い戻しの Conflict は削除済みか払戻済なので
+        /// 「なぜ」は操作の WHERE が拒否し得る状態で決まる。削除の Conflict は、削除の呼び出し側が読み直して
+        /// 原因を分類し（<c>DiagnoseDeleteConflictAsync</c>）文言を選ぶので、ここへは来ない（来た場合は
+        /// 削除の NotFound と同じ <see cref="ConcurrencyConflictMessage.ForDelete"/>）。払い戻しの Conflict は削除済みか払戻済なので
         /// <see cref="ConcurrencyConflictMessage.ForRefundStateChanged"/>。
         /// </para>
         /// <para>
