@@ -152,6 +152,37 @@ namespace ICCardManager.UITests.Tests
             File.ReadAllText(captured).Should().Be("正しい画像");
         }
 
+        [Theory]
+        [InlineData(null)]
+        [InlineData("")]
+        [InlineData("一覧から項目を選択すると、詳細と対処方法が表示されます。")]
+        [InlineData(@"データベース（D:\Other\iccard.db）を読み取れています。")]
+        public void 接続診断の詳細が既定のDBを示していないとき_撮った画像をFAILEDへ改名して例外にすること(string? detail)
+        {
+            // Issue #2435: 不在の確認だけだと、詳細欄が読めない・空・案内のままでも緑になる
+            var captured = Path.Combine(_directory, "connection_diagnostics.png");
+            File.WriteAllText(captured, "詳細の無い画像");
+
+            Action act = () => ScreenshotAssertions.RequireDatabaseShownAsDefault(detail, captured);
+
+            act.Should().Throw<InvalidOperationException>().Which.Message
+                .Should().Contain(ScreenshotAssertions.DefaultDatabasePath).And.EndWith("撮り直してください。");
+            File.Exists(captured).Should().BeFalse();
+            File.Exists(Path.Combine(_directory, "connection_diagnostics_FAILED.png")).Should().BeTrue();
+        }
+
+        [Fact]
+        public void 接続診断の詳細が既定のDBを示しているとき_撮った画像に触れないこと()
+        {
+            var captured = Path.Combine(_directory, "connection_diagnostics.png");
+            File.WriteAllText(captured, "正しい画像");
+
+            ScreenshotAssertions.RequireDatabaseShownAsDefault(
+                $"データベース（{ScreenshotAssertions.DefaultDatabasePath}）を読み取れています。", captured);
+
+            Directory.GetFiles(_directory).Should().BeEquivalentTo(new[] { captured });
+        }
+
         [Fact]
         public void 既定のバックアップ先はProgramData直下のICCardManagerのbackupであること()
         {

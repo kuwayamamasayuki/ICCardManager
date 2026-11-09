@@ -1,5 +1,6 @@
 using System;
 using System.IO;
+using System.Linq;
 using FlaUI.Core.Tools;
 using FluentAssertions;
 using ICCardManager.UITests.Infrastructure;
@@ -124,11 +125,38 @@ namespace ICCardManager.UITests.Tests
             var child = DialogLocator.WaitForNestedDialog(fixture, system.Window, TestConstants.ConnectionDiagnosticsDialogName);
             ManualScreenshotTests.WaitForRow(new DialogPageBase(child), TestConstants.ConnectionDiagnosticsItemList,
                 $"{TestConstants.ConnectionDiagnosticsDialogName} の一覧に行が現れること");
+
+            // 画像の下部の詳細欄に DB のパスを写す。初期選択は問題のある最初の項目（撮影機のリーダーの状態に左右される）なので、
+            // データベース到達性の項目を選び直してから撮る
+            var detail = SelectDatabaseReachability(child);
             var path = ScreenshotHelper.Capture(child, "connection_diagnostics.png");
             File.Exists(path).Should().BeTrue();
 
-            // 画像の下部には選んだ項目（データベース到達性）の詳細として DB のパスが写る
+            ScreenshotAssertions.RequireDatabaseShownAsDefault(detail, path);
             ScreenshotAssertions.RequireNoUiTestPathShown(child, path);
+        }
+
+        /// <summary>
+        /// 接続診断の一覧で「データベース到達性」の行を選び、詳細欄にその詳細が出るまで待って、詳細欄の文字を返す（読めなければ null）。
+        /// </summary>
+        private static string? SelectDatabaseReachability(FlaUI.Core.AutomationElements.Window dialog)
+        {
+            var list = new DialogPageBase(dialog).FindByNameWithRetry(TestConstants.ConnectionDiagnosticsItemList);
+            list.Should().NotBeNull();
+            var row = list!.FindAllDescendants().FirstOrDefault(e =>
+                e.Patterns.SelectionItem.IsSupported
+                && e.FindFirstDescendant(cf => cf.ByName(TestConstants.DatabaseReachabilityItemName)) != null);
+            row.Should().NotBeNull($"接続診断の一覧に「{TestConstants.DatabaseReachabilityItemName}」の行があること");
+            row!.Patterns.SelectionItem.Pattern.Select();
+
+            return Retry.WhileNull(
+                () =>
+                {
+                    var name = dialog.FindFirstDescendant(cf => cf.ByHelpText(TestConstants.ConnectionDiagnosticsDetailHelpText))?.Name;
+                    return name != null && name.StartsWith("データベース（", StringComparison.Ordinal) ? name : null;
+                },
+                TimeSpan.FromSeconds(TestConstants.DialogOpenTimeoutSeconds)).Result
+                ?? dialog.FindFirstDescendant(cf => cf.ByHelpText(TestConstants.ConnectionDiagnosticsDetailHelpText))?.Name;
         }
 
         /// <summary>

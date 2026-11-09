@@ -221,6 +221,37 @@ namespace ICCardManager.UITests.Infrastructure
                 "撮影を AppFixture.LaunchWithSeedInScreenshotDataRoot で起動しているか、Debug 構成でビルドし直したかを確認してから撮り直してください。");
         }
 
+        /// <summary>
+        /// 接続診断の「データベース到達性」の詳細が、本番の既定の DB（<c>C:\ProgramData\ICCardManager\iccard.db</c>）を示していることを確かめる（Issue #2435）。
+        /// 違えば（空・項目を選ぶ案内・別のパス）、撮った画像を <c>_FAILED.png</c> へ改名してから例外にする。
+        /// </summary>
+        /// <param name="detailText">詳細欄の文字（<see cref="TestConstants.ConnectionDiagnosticsDetailHelpText"/> の要素の Name）。</param>
+        /// <param name="capturedPaths">撮った画像のパス。</param>
+        /// <remarks>
+        /// <see cref="RequireNoUiTestPathShown(AutomationElement, string[])"/> の対。不在の確認だけだと、詳細欄を UIA で読めない・空のままでも緑になる。
+        /// </remarks>
+        internal static void RequireDatabaseShownAsDefault(string? detailText, params string[] capturedPaths)
+        {
+            var expected = $"データベース（{DefaultDatabasePath}）";
+            if (detailText != null && detailText.IndexOf(expected, StringComparison.OrdinalIgnoreCase) >= 0)
+            {
+                return;
+            }
+
+            var failedNames = RenameToFailed(capturedPaths);
+
+            throw new InvalidOperationException(
+                $"接続診断の詳細欄が「{detailText ?? "（読み取れず）"}」で、本番の既定の DB（{expected}）を示していません。" +
+                $"撮れた画像は {string.Join("、", failedNames)} に残しています。" +
+                "「データベース到達性」の項目を選んでから撮っているか、撮影を AppFixture.LaunchWithSeedInScreenshotDataRoot で起動しているかを確認してから撮り直してください。");
+        }
+
+        /// <summary>本番の既定の DB（<c>%ProgramData%\ICCardManager\iccard.db</c>）。</summary>
+        internal static string DefaultDatabasePath => Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),
+            "ICCardManager",
+            UiTestDatabaseGuard.DatabaseFileName);
+
         /// <summary>本番の既定のバックアップ先（<c>%ProgramData%\ICCardManager\backup</c>）。マニュアルの本文が説明するパス。</summary>
         internal static string DefaultBackupDirectory => Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),

@@ -100,6 +100,14 @@ public class ScreenshotDataRootTests
     /// 新しくパスを文言へ埋め込んだら、読み替えを通すか、<see cref="NotPathHoles"/> に理由とともに載せる。
     /// </para>
     /// <para>
+    /// <b>この検査の限界</b>（PR #2440 のレビューで指摘）: 見るのは補間文字列（<c>$"…"</c> / <c>$@"…"</c> / <c>@$"…"</c>）の穴だけで、
+    /// 文字列の連結（<c>"保存先: " + folder</c>）・<c>string.Format</c> は見ない。また「パスらしい」かは名前で決めるので、
+    /// パスらしくない名前（<c>{location}</c>・<c>DbLocationText</c>）のパスは素通りする。この 2 つは撮影の後の確認（UI テストの
+    /// <c>ScreenshotAssertions.RequireNoUiTestPathShown</c>。画面の全要素の文字を見る）が受け持つ。撮影のときにしか走らないので、
+    /// ここで名前の分かる大半を CI に置く。読み替えたローカル変数（<c>var shownPath = AppDataPaths.ToDisplayPath(path);</c>）は、
+    /// 穴より前の同じメソッドの中で、その名前の直近の宣言が読み替えであるときだけ読み替え済みと数える。
+    /// </para>
+    /// <para>
     /// 撮影の後の確認（UI テストの <c>ScreenshotAssertions.RequireNoUiTestPathShown</c>）は撮影のときにしか走らないので、ここで CI に置く。
     /// </para>
     /// </remarks>
@@ -119,13 +127,10 @@ public class ScreenshotDataRootTests
                 source = source.Substring(at, source.IndexOf(';', at) - at + 1);
             }
 
-            var shownLocals = Regex.Matches(source, @"var\s+(?<name>\w+)\s*=\s*AppDataPaths\.ToDisplayPath\(")
-                .Cast<Match>().Select(m => m.Groups["name"].Value).ToHashSet();
-
-            foreach (var hole in ExtractInterpolationHoles(source).Where(h => PathLikeName.IsMatch(h)))
+            foreach (var (hole, index) in ExtractInterpolationHolesWithIndex(source).Where(h => PathLikeName.IsMatch(h.Hole)))
             {
                 if (hole.StartsWith("AppDataPaths.ToDisplayPath(", System.StringComparison.Ordinal)
-                    || shownLocals.Contains(hole.Trim()))
+                    || IsShownLocal(source, hole.Trim(), index))
                 {
                     wrapped++;
                     continue;
@@ -193,10 +198,24 @@ public class ScreenshotDataRootTests
     [InlineData("$@\"C:\\{x}\\y\"", "x")]
     [InlineData("$\"{{エスケープ}} {_databaseInfo.DatabasePath}\"", "_databaseInfo.DatabasePath")]
     [InlineData("\"{path} は補間ではない\"", "")]
+    [InlineData("@$\"C:\\{x}\"", "x")]
+    [InlineData("$\"{(c == '\"' ? a : b)}と{d}\"", "(c == '\"' ? a : b)|d")]
+    [InlineData("$\"{(ok ? $\"{inner}\" : \"-\")}\"", "(ok ? $\"{inner}\" : \"-\")")]
+    [InlineData("// コメントの中の $\"{path}\" と 'x\n$\"{real}\"", "real")]
     public void 補間の穴の抽出が入れ子の文字列リテラルとエスケープを扱うこと(string source, string expected)
     {
         // 検査ロジック自体を既知の入力で固定する（実データが空でも空振りを検出できるように）
-        string.Join("|", ExtractInterpolationHoles(source)).Should().Be(expected);
+        string.Join("|", ExtractInterpolationHolesWithIndex(source).Select(h => h.Hole)).Should().Be(expected);
+    }
+
+    [Theory]
+    [InlineData("void A() { var shown = AppDataPaths.ToDisplayPath(p); M($\"{shown}\"); }", true)]
+    [InlineData("void A() { var shown = AppDataPaths.ToDisplayPath(p); }\n        private void B() { var shown = p; M($\"{shown}\"); }", false)]
+    [InlineData("void A() { var shown = AppDataPaths.ToDisplayPath(p); }\n        private void B() { M($\"{shown}\"); }", false)]
+    public void 読み替えたローカル変数は同じメソッドの直近の宣言だけを数えること(string source, bool expected)
+    {
+        var (hole, index) = ExtractInterpolationHolesWithIndex(source).Single();
+        IsShownLocal(source, hole, index).Should().Be(expected);
     }
 
     /// <summary>検査する C# のファイルと、絞る範囲（メソッドのシグネチャ。null ならファイル全体）。</summary>
@@ -240,90 +259,186 @@ public class ScreenshotDataRootTests
     };
 
     /// <summary>
-    /// 補間文字列（<c>$"…"</c> / <c>$@"…"</c>）の穴の中身を順に返す。穴の中の文字列リテラル（<c>"-"</c>）と <c>{{</c> のエスケープを扱う。
+    /// 穴より前の同じメソッドの中で、<paramref name="name"/> の直近の宣言が読み替え（<c>AppDataPaths.ToDisplayPath</c>）か。
     /// </summary>
-    private static System.Collections.Generic.IEnumerable<string> ExtractInterpolationHoles(string source)
+    /// <remarks>メソッドの境目は、8 文字下げで始まるアクセス修飾子の行（このリポジトリの書式）で判定する。</remarks>
+    private static bool IsShownLocal(string source, string name, int holeIndex)
     {
-        var holes = new List<string>();
-        for (var i = 0; i < source.Length; i++)
+        if (!Regex.IsMatch(name, @"^\w+$"))
         {
-            var verbatim = false;
-            if (source[i] == '$' && i + 1 < source.Length && source[i + 1] == '"')
+            return false;
+        }
+
+        var before = source.Substring(0, holeIndex);
+        var methodStart = Regex.Matches(before, @"(^|\n) {8}(private|public|internal|protected)\b").Cast<Match>().LastOrDefault()?.Index ?? 0;
+        var declaration = Regex.Matches(before.Substring(methodStart), $@"\bvar\s+{Regex.Escape(name)}\s*=\s*(?<init>[^;]*);")
+            .Cast<Match>().LastOrDefault();
+        return declaration != null
+            && declaration.Groups["init"].Value.TrimStart().StartsWith("AppDataPaths.ToDisplayPath(", System.StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// 補間文字列（<c>$"…"</c> / <c>$@"…"</c> / <c>@$"…"</c>）の穴の中身と、穴の開始位置を順に返す。
+    /// </summary>
+    /// <remarks>
+    /// 穴の中の文字列リテラル・文字リテラル（<c>'"'</c>）・入れ子の補間文字列、<c>{{</c> のエスケープ、コメントを扱う。
+    /// 入れ子の補間文字列の穴は外側の穴の一部として返す（外側の穴の文字にパスらしい名前が含まれるので、分類はそちらで行う）。
+    /// </remarks>
+    private static List<(string Hole, int Index)> ExtractInterpolationHolesWithIndex(string source)
+    {
+        var holes = new List<(string Hole, int Index)>();
+        var i = 0;
+        while (i < source.Length)
+        {
+            if (TryStartString(source, i, out var verbatim, out var interpolated, out var bodyStart))
             {
-                i += 2;
+                i = ScanString(source, bodyStart, verbatim, interpolated, holes);
             }
-            else if (source[i] == '$' && i + 2 < source.Length && source[i + 1] == '@' && source[i + 2] == '"')
+            else if (source[i] == '\'')
             {
-                verbatim = true;
-                i += 3;
+                i = SkipCharLiteral(source, i);
+            }
+            else if (i + 1 < source.Length && source[i] == '/' && source[i + 1] == '/')
+            {
+                var end = source.IndexOf('\n', i);
+                i = end < 0 ? source.Length : end + 1;
+            }
+            else if (i + 1 < source.Length && source[i] == '/' && source[i + 1] == '*')
+            {
+                var end = source.IndexOf("*/", i + 2, System.StringComparison.Ordinal);
+                i = end < 0 ? source.Length : end + 2;
             }
             else
             {
-                continue;
-            }
-
-            while (i < source.Length)
-            {
-                var c = source[i];
-                if (c == '"')
-                {
-                    if (verbatim && i + 1 < source.Length && source[i + 1] == '"')
-                    {
-                        i += 2;
-                        continue;
-                    }
-
-                    break;
-                }
-
-                if (!verbatim && c == '\\')
-                {
-                    i += 2;
-                    continue;
-                }
-
-                if (c == '{' && i + 1 < source.Length && source[i + 1] == '{')
-                {
-                    i += 2;
-                    continue;
-                }
-
-                if (c == '{')
-                {
-                    var depth = 1;
-                    var start = ++i;
-                    while (i < source.Length && depth > 0)
-                    {
-                        if (source[i] == '"')
-                        {
-                            // 穴の中の通常の文字列リテラルを読み飛ばす
-                            i++;
-                            while (i < source.Length && source[i] != '"')
-                            {
-                                i += source[i] == '\\' ? 2 : 1;
-                            }
-                        }
-                        else if (source[i] == '{')
-                        {
-                            depth++;
-                        }
-                        else if (source[i] == '}')
-                        {
-                            depth--;
-                        }
-
-                        i++;
-                    }
-
-                    holes.Add(source.Substring(start, i - 1 - start));
-                    continue;
-                }
-
                 i++;
             }
         }
 
         return holes;
+    }
+
+    private static bool TryStartString(string s, int i, out bool verbatim, out bool interpolated, out int bodyStart)
+    {
+        verbatim = false;
+        interpolated = false;
+        bodyStart = 0;
+        string[] prefixes = { "$@\"", "@$\"", "$\"", "@\"", "\"" };
+        foreach (var prefix in prefixes)
+        {
+            if (string.CompareOrdinal(s, i, prefix, 0, prefix.Length) == 0)
+            {
+                verbatim = prefix.Contains('@');
+                interpolated = prefix.Contains('$');
+                bodyStart = i + prefix.Length;
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>文字列の本体を読み、閉じる引用符の次の位置を返す。<paramref name="holes"/> が null でなければ穴を記録する。</summary>
+    private static int ScanString(string s, int j, bool verbatim, bool interpolated, List<(string Hole, int Index)>? holes)
+    {
+        while (j < s.Length)
+        {
+            var c = s[j];
+            if (c == '"')
+            {
+                if (verbatim && j + 1 < s.Length && s[j + 1] == '"')
+                {
+                    j += 2;
+                    continue;
+                }
+
+                return j + 1;
+            }
+
+            if (!verbatim && c == '\\')
+            {
+                j += 2;
+                continue;
+            }
+
+            if (interpolated && c == '{')
+            {
+                if (j + 1 < s.Length && s[j + 1] == '{')
+                {
+                    j += 2;
+                    continue;
+                }
+
+                var start = j + 1;
+                var close = ScanHole(s, start);
+                holes?.Add((s.Substring(start, close - start), start));
+                j = close + 1;
+                continue;
+            }
+
+            j++;
+        }
+
+        return j;
+    }
+
+    /// <summary>穴の中を読み、穴を閉じる <c>}</c> の位置を返す。</summary>
+    private static int ScanHole(string s, int k)
+    {
+        var depth = 0;
+        while (k < s.Length)
+        {
+            if (TryStartString(s, k, out var verbatim, out var interpolated, out var bodyStart))
+            {
+                // 入れ子の文字列（補間を含む）は読み飛ばす。穴は外側の穴の一部として扱う
+                k = ScanString(s, bodyStart, verbatim, interpolated, holes: null);
+                continue;
+            }
+
+            switch (s[k])
+            {
+                case '\'':
+                    k = SkipCharLiteral(s, k);
+                    continue;
+                case '(':
+                case '[':
+                case '{':
+                    depth++;
+                    break;
+                case ')':
+                case ']':
+                    depth--;
+                    break;
+                case '}':
+                    if (depth == 0)
+                    {
+                        return k;
+                    }
+
+                    depth--;
+                    break;
+            }
+
+            k++;
+        }
+
+        return s.Length;
+    }
+
+    /// <summary>文字リテラル（<c>'"'</c> / <c>'\''</c>）を読み飛ばし、次の位置を返す。</summary>
+    private static int SkipCharLiteral(string s, int i)
+    {
+        var j = i + 1;
+        if (j < s.Length && s[j] == '\\')
+        {
+            j += 2;
+        }
+        else
+        {
+            j++;
+        }
+
+        // 1 文字のリテラルでなければ（英語のアポストロフィ等）、引用符だけを読み飛ばす
+        return j < s.Length && s[j] == '\'' ? j + 1 : i + 1;
     }
 
     [Fact]
@@ -361,9 +476,21 @@ public class ScreenshotDataRootTests
         source.Should().Contain("_activeScreenshotDataRoot = dataRoot;")
             .And.Contain("public static string DatabasePath => ResolveDatabasePath(DbDirectory, _activeScreenshotDataRoot);");
         var dispose = Regex.Match(source, @"public\s+void\s+Dispose\(\)\s*\{(?<body>.*?)\n        \}", RegexOptions.Singleline);
-        dispose.Groups["body"].Value.Should().Contain("_activeScreenshotDataRoot = null;");
+        var disposeBody = dispose.Groups["body"].Value;
+        disposeBody.Should().Contain("_activeScreenshotDataRoot = null;");
+        disposeBody.IndexOf("_activeScreenshotDataRoot = null;", System.StringComparison.Ordinal).Should().BeLessThan(
+            disposeBody.IndexOf("WaitForExit(_appProcess);", System.StringComparison.Ordinal),
+            "後始末の途中の例外で DatabasePath が撮影用の置き場所を指したまま残らないよう、先に戻すこと");
 
         Regex.Matches(source, @"\bLaunchWithSeedInDataRootCore\s*(<[^>]*>)?\s*\(").Count.Should().Be(2, "定義と、投入して起動する処理（LaunchSeeded）の呼び出しだけ");
+    }
+
+    [Fact]
+    public void UIテストが選ぶ接続診断の項目名は本体の項目名と一致すること()
+    {
+        // ずれると、接続診断の撮影がデータベース到達性の行を見つけられずに止まる
+        var name = ExtractConst(ReadUiTestFile("TestConstants.cs"), "DatabaseReachabilityItemName");
+        ExtractConst(ReadProductionFile("Services", "ConnectionDiagnosticsService.cs"), "DatabaseReachabilityTitle").Should().Be(name);
     }
 
     [Fact]

@@ -642,6 +642,12 @@ namespace ICCardManager.UITests.Infrastructure
 
             _disposed = true;
 
+            // 撮影用の置き場所の DB へ向けた DatabasePath を、後始末の途中の例外（プロセスの待ち・UIA の解放）より先に戻す
+            if (_usesScreenshotDataRoot)
+            {
+                _activeScreenshotDataRoot = null;
+            }
+
             // アプリケーションを終了
             try
             {
@@ -691,11 +697,6 @@ namespace ICCardManager.UITests.Infrastructure
 
             // テスト本体が失敗している最中にここで例外を投げると、using の Dispose の例外がテスト本体の例外を上書きする。
             // 両方が同時に起きるのは隔離が外れた（またはピッすいが DB を掴んでいる）ときだけで、どちらも直すべき失敗なので許容する
-            if (_usesScreenshotDataRoot)
-            {
-                _activeScreenshotDataRoot = null;
-            }
-
             FinishOwnedGuard(_ownedDatabaseGuard);
         }
 
