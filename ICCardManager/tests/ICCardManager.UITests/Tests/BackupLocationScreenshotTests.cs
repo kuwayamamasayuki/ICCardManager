@@ -153,7 +153,9 @@ namespace ICCardManager.UITests.Tests
                 () =>
                 {
                     var name = dialog.FindFirstDescendant(cf => cf.ByHelpText(TestConstants.ConnectionDiagnosticsDetailHelpText))?.Name;
-                    return name != null && name.StartsWith("データベース（", StringComparison.Ordinal) ? name : null;
+                    // 「データベース（」で始まるだけでは、初期選択の「データベース書込権限」（「へ書き込めています」）の詳細で待ちが終わり、
+                    // 選び直しが反映される前に撮り得る。到達性の詳細の文言（ScreenshotAssertions.IsDatabaseReachabilityDetail）まで待つ
+                    return name != null && ScreenshotAssertions.IsDatabaseReachabilityDetail(name) ? name : null;
                 },
                 TimeSpan.FromSeconds(TestConstants.DialogOpenTimeoutSeconds)).Result
                 ?? dialog.FindFirstDescendant(cf => cf.ByHelpText(TestConstants.ConnectionDiagnosticsDetailHelpText))?.Name;

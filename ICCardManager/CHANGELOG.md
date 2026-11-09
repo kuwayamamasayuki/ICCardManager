@@ -10,7 +10,7 @@
   - Release パスで撮るツールバーのダイアログ（`settings.png` ほか）も、撮った後に画面内に見えている要素に UI テスト専用のパスが出ていないことを確かめる（設定画面のバックアップ先の入力欄がスクロールで写る範囲に入ったら撮影を失敗にする）
   - `system.png`・`restore_list.png`・`connection_diagnostics.png` の撮影を Release パスから Debug パス（`BackupLocationScreenshotTests`）へ移した。撮った後に、画面のどこにも UI テスト専用のフォルダーのパスが出ていないこと（UIA で読んだ文字）と、「保存先」が既定のパスであることを確かめ、違えば画像を `*_FAILED.png` へ改名して撮影を失敗にする
   - `system.png`・`restore_list.png`・`connection_diagnostics.png` の 3 枚を撮り直した（保存先は `C:\ProgramData\ICCardManager\backup`、接続診断の詳細は `C:\ProgramData\ICCardManager\iccard.db` を示す。一覧と件数はその撮影の起動が作った 1 世代）
-  - テスト: `AppDataPathsTests` +12 件・`ScreenshotDataRootTests` 31 件（単体）、`ScreenshotDataRootLaunchTests` 12 件・`ScreenshotAssertionsTests` +10 件（UITests の GUI 不要のテスト。CI でも実行）。実機の UI テスト `BackupLocationScreenshotTests` 3 件が緑で、表示の読み替えを外した Debug ビルドでは 3 件とも赤になることを実測した
+  - テスト: `AppDataPathsTests` +12 件・`ScreenshotDataRootTests` 33 件（単体）、`ScreenshotDataRootLaunchTests` 12 件・`ScreenshotAssertionsTests` +11 件（UITests の GUI 不要のテスト。CI でも実行）。実機の UI テスト `BackupLocationScreenshotTests` 3 件が緑で、表示の読み替えを外した Debug ビルドでは 3 件とも赤になることを実測した
 - Issue #2424 **文字サイズ「特大」でメイン画面を最小幅にすると、履歴一覧の右端の「操作」列（詳細・変更）が横スクロールの外へ出て、表示期間の行の「先月」「今月」ボタンが隠れていたのを是正した**
   - 摘要の列が内容の幅まで広がる設定（`SizeToCells`）で、特大では列幅の合計が一覧の幅を超えていた。摘要を残りの幅を取る列（下限 150）にし、収まらない摘要は利用者・備考の列と同じく「…」で省略してマウスを合わせると全文を表示する。残高不整合の行・今回の返却で記録された行では、摘要の上でも行の説明（不整合の内容・「今回の返却で記録された行」）を摘要の全文と併せて表示する（摘要の全文だけだと、最も広い摘要の列で行の説明が読めなくなる）
   - 受入・払出・残高などの固定幅の列は、画面の幅が足りなくても細くせず、横スクロールで表示する（金額の右端が欠けないように）

@@ -107,9 +107,6 @@ public class ScreenshotDataRootTests
     /// ここで名前の分かる大半を CI に置く。読み替えたローカル変数（<c>var shownPath = AppDataPaths.ToDisplayPath(path);</c>）は、
     /// 穴より前の同じメソッドの中で、その名前の直近の宣言が読み替えであるときだけ読み替え済みと数える。
     /// </para>
-    /// <para>
-    /// 撮影の後の確認（UI テストの <c>ScreenshotAssertions.RequireNoUiTestPathShown</c>）は撮影のときにしか走らないので、ここで CI に置く。
-    /// </para>
     /// </remarks>
     [Fact]
     public void 撮影する画面の文言に埋め込むパスはすべて読み替えを通すこと()
@@ -158,6 +155,8 @@ public class ScreenshotDataRootTests
     /// 表示用のプロパティ（<see cref="DisplayBindings"/>）は、読み替えた値か、パスを含まない値。編集できる入力欄（TextBox）は読み替えない
     /// （読み替えた値がそのまま保存される）ので対象外。表示用のプロパティが実際に読み替えを通していることは
     /// <see cref="撮影する画面の文言に埋め込むパスはすべて読み替えを通すこと"/> と、式形式のプロパティの検査（下）が見る。
+    /// <b>限界</b>: 見るのは属性の形のバインド（<c>Text="{Binding X}"</c>）だけで、要素の形（<c>&lt;Binding Path="X"/&gt;</c>。
+    /// MultiBinding の中など）は見ない。これは撮影の後の確認（<c>ScreenshotAssertions.RequireNoUiTestPathShown</c>）が受け持つ。
     /// </remarks>
     [Fact]
     public void 撮影する画面の表示はパスを読み替えた表示用のプロパティへバインドすること()
@@ -212,6 +211,8 @@ public class ScreenshotDataRootTests
     [InlineData("void A() { var shown = AppDataPaths.ToDisplayPath(p); M($\"{shown}\"); }", true)]
     [InlineData("void A() { var shown = AppDataPaths.ToDisplayPath(p); }\n        private void B() { var shown = p; M($\"{shown}\"); }", false)]
     [InlineData("void A() { var shown = AppDataPaths.ToDisplayPath(p); }\n        private void B() { M($\"{shown}\"); }", false)]
+    [InlineData("    private void A() { var shownPath = AppDataPaths.ToDisplayPath(p); }\n    private string B(string shownPath) => $\"{shownPath}\";", false)]
+    [InlineData("    private void A()\n    {\n        var shownPath = AppDataPaths.ToDisplayPath(p);\n        M($\"{shownPath}\");\n    }", true)]
     public void 読み替えたローカル変数は同じメソッドの直近の宣言だけを数えること(string source, bool expected)
     {
         var (hole, index) = ExtractInterpolationHolesWithIndex(source).Single();
@@ -261,7 +262,10 @@ public class ScreenshotDataRootTests
     /// <summary>
     /// 穴より前の同じメソッドの中で、<paramref name="name"/> の直近の宣言が読み替え（<c>AppDataPaths.ToDisplayPath</c>）か。
     /// </summary>
-    /// <remarks>メソッドの境目は、8 文字下げで始まるアクセス修飾子の行（このリポジトリの書式）で判定する。</remarks>
+    /// <remarks>
+    /// メソッドの境目は、4〜8 文字下げで始まるアクセス修飾子の行で判定する（ファイルスコープの名前空間のメンバーは 4 文字、
+    /// ブロックの名前空間のメンバーは 8 文字下げ。メソッドの本体の文はそれより深いので境目と取り違えない）。
+    /// </remarks>
     private static bool IsShownLocal(string source, string name, int holeIndex)
     {
         if (!Regex.IsMatch(name, @"^\w+$"))
@@ -270,7 +274,7 @@ public class ScreenshotDataRootTests
         }
 
         var before = source.Substring(0, holeIndex);
-        var methodStart = Regex.Matches(before, @"(^|\n) {8}(private|public|internal|protected)\b").Cast<Match>().LastOrDefault()?.Index ?? 0;
+        var methodStart = Regex.Matches(before, @"(^|\n) {4,8}(private|public|internal|protected)\b").Cast<Match>().LastOrDefault()?.Index ?? 0;
         var declaration = Regex.Matches(before.Substring(methodStart), $@"\bvar\s+{Regex.Escape(name)}\s*=\s*(?<init>[^;]*);")
             .Cast<Match>().LastOrDefault();
         return declaration != null
@@ -491,6 +495,16 @@ public class ScreenshotDataRootTests
         // ずれると、接続診断の撮影がデータベース到達性の行を見つけられずに止まる
         var name = ExtractConst(ReadUiTestFile("TestConstants.cs"), "DatabaseReachabilityItemName");
         ExtractConst(ReadProductionFile("Services", "ConnectionDiagnosticsService.cs"), "DatabaseReachabilityTitle").Should().Be(name);
+
+        // 撮影の待ちと確認（ScreenshotAssertions.IsDatabaseReachabilityDetail）は到達性の詳細をこの文言で見分ける
+        var assertions = File.ReadAllText(Path.Combine(
+            TestPaths.GetSolutionRoot(), "tests", "ICCardManager.UITests", "Infrastructure", "ScreenshotAssertions.cs"));
+        var service = ReadProductionFile("Services", "ConnectionDiagnosticsService.cs");
+        foreach (var phrase in new[] { "）を読み取れています", "）に接続できません" })
+        {
+            assertions.Should().Contain($"\"{phrase}\"");
+            service.Should().Contain($"データベース（{{shownPath}}{phrase}");
+        }
     }
 
     [Fact]

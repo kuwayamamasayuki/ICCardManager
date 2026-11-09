@@ -157,6 +157,7 @@ namespace ICCardManager.UITests.Tests
         [InlineData("")]
         [InlineData("一覧から項目を選択すると、詳細と対処方法が表示されます。")]
         [InlineData(@"データベース（D:\Other\iccard.db）を読み取れています。")]
+        [InlineData(@"データベース（C:\ProgramData\ICCardManager\iccard.db）へ書き込めています。")]
         public void 接続診断の詳細が既定のDBを示していないとき_撮った画像をFAILEDへ改名して例外にすること(string? detail)
         {
             // Issue #2435: 不在の確認だけだと、詳細欄が読めない・空・案内のままでも緑になる

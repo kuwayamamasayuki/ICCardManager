@@ -233,7 +233,9 @@ namespace ICCardManager.UITests.Infrastructure
         internal static void RequireDatabaseShownAsDefault(string? detailText, params string[] capturedPaths)
         {
             var expected = $"データベース（{DefaultDatabasePath}）";
-            if (detailText != null && detailText.IndexOf(expected, StringComparison.OrdinalIgnoreCase) >= 0)
+            if (detailText != null
+                && detailText.StartsWith(expected, StringComparison.OrdinalIgnoreCase)
+                && IsDatabaseReachabilityDetail(detailText))
             {
                 return;
             }
@@ -245,6 +247,15 @@ namespace ICCardManager.UITests.Infrastructure
                 $"撮れた画像は {string.Join("、", failedNames)} に残しています。" +
                 "「データベース到達性」の項目を選んでから撮っているか、撮影を AppFixture.LaunchWithSeedInScreenshotDataRoot で起動しているかを確認してから撮り直してください。");
         }
+
+        /// <summary>
+        /// 接続診断の「データベース到達性」の詳細の文言か（本体の <c>ConnectionDiagnosticsService.CheckDatabaseReachability</c> の
+        /// 「データベース（…）を読み取れています。」「データベース（…）に接続できません。」）。
+        /// 書込権限の詳細（「データベース（…）へ書き込めています。」等）と取り違えないため、パスの後の文言まで見る。
+        /// </summary>
+        internal static bool IsDatabaseReachabilityDetail(string detailText) =>
+            detailText.StartsWith("データベース（", StringComparison.Ordinal)
+            && (detailText.Contains("）を読み取れています") || detailText.Contains("）に接続できません"));
 
         /// <summary>本番の既定の DB（<c>%ProgramData%\ICCardManager\iccard.db</c>）。</summary>
         internal static string DefaultDatabasePath => Path.Combine(
