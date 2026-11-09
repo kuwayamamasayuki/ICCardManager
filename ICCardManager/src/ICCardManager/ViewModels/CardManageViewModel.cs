@@ -1120,7 +1120,7 @@ namespace ICCardManager.ViewModels
                 var card = await _cardRepository.GetByIdmAsync(targetIdm);
                 if (card == null)
                 {
-                    await NotifyDeleteConflictAsync(targetLabel);
+                    await NotifyWriteRefusedAsync(CardWriteRefusal.Deleted, targetLabel, CardWriteOperation.Delete);
                     return;
                 }
 
@@ -1129,8 +1129,7 @@ namespace ICCardManager.ViewModels
                 // 削除を止める正は論理削除の WHERE（is_refunded = 0）で、ここは文言のための早期の案内。
                 if (card.IsRefunded)
                 {
-                    _cardRepository.InvalidateCache();
-                    await NotifyDeleteRefusedAsync(ConcurrencyConflictMessage.ForDeleteRefunded(targetLabel, "カード一覧"));
+                    await NotifyWriteRefusedAsync(CardWriteRefusal.Refunded, targetLabel, CardWriteOperation.Delete);
                     return;
                 }
 
@@ -1151,7 +1150,7 @@ namespace ICCardManager.ViewModels
                     // Issue #1760: 事前読み取りで検出した場合と**同じ条件**（対象行が無い）なので
                     // 同じ文言で案内する。検出のタイミングによって案内が変わると、
                     // 同じ状況に別の説明が出ることになる（Issue #1757 と同じ判断）。
-                    await NotifyDeleteConflictAsync(targetLabel);
+                    await NotifyWriteRefusedAsync(CardWriteRefusal.Deleted, targetLabel, CardWriteOperation.Delete);
                 }
                 else if (deleteResult == CardOperationResult.Conflict)
                 {
@@ -1160,68 +1159,28 @@ namespace ICCardManager.ViewModels
                     // Issue #2421: 削除済みと読めたときだけ「先に削除された」と述べる。有効なカードが読めた
                     // （拒否の後に状態が戻った等）・読み直しに失敗したときは原因を限定せず、削除と払い戻しの両方を候補に挙げる
                     // （限定すると、一覧にカードが残っている・払戻済で残っているのに「削除された可能性」と述べることになる）。
-                    var cause = await DiagnoseDeleteConflictAsync(targetIdm);
-                    var message = cause switch
-                    {
-                        DeleteConflictCause.Refunded => ConcurrencyConflictMessage.ForDeleteRefunded(targetLabel, CardListInThisScreen),
-                        DeleteConflictCause.Deleted => ConcurrencyConflictMessage.ForDelete(targetLabel, CardListInThisScreen),
-                        _ => ConcurrencyConflictMessage.ForDeleteStateChanged(targetLabel, CardListInThisScreen),
-                    };
-                    // 「再読み込みしました」と述べるので、キャッシュを破棄して再読込してから案内する（#1759。下の else と同じ）
-                    _cardRepository.InvalidateCache();
-                    await NotifyDeleteRefusedAsync(message);
+                    await NotifyWriteRefusedAsync(
+                        await DiagnoseDeleteConflictAsync(targetIdm), targetLabel, CardWriteOperation.Delete);
                 }
                 else
                 {
                     // Issue #1109: 失敗原因に応じた具体的なメッセージをダイアログで表示
                     // （編集フォーム非表示時はStatusMessageが見えないため）
-                    // Issue #2421: 文言は「カード一覧を再読み込みしました」と述べるので、NotifyDeleteRefusedAsync で
-                    // 再読込してからダイアログを出す（以前はダイアログの後に再読込していた）。キャッシュは事後の診断が
-                    // 破棄済みだが、案内を事実にするための前提なのでここでも明示的に破棄する（#1759）。
-                    _cardRepository.InvalidateCache();
-                    await NotifyDeleteRefusedAsync(BuildOperationFailureMessage(deleteResult, targetLabel, CardWriteOperation.Delete));
+                    // Issue #2421: 文言は「カード一覧を再読み込みしました」と述べるので、NotifyWriteRefusedAsync で
+                    // 再読込してからダイアログを出す（以前はダイアログの後に再読込していた）。
+                    await NotifyWriteRefusedAsync(ToRefusal(deleteResult), targetLabel, CardWriteOperation.Delete);
                 }
             }
-        }
-
-        /// <summary>
-        /// 削除対象のカードが見つからなかった（競合）ことを案内し、カード一覧を再読込する
-        /// </summary>
-        /// <param name="targetLabel">対象カードの表示名（再読込より前に確定させたもの）</param>
-        /// <remarks>
-        /// Issue #1760: 削除は編集フォーム非表示時にも実行できるため、案内はステータス欄ではなく
-        /// ダイアログで出す（Issue #1109 と同じ理由）。文言が「再読み込みしました」と述べるため
-        /// 再読込を先に行い、書き込みを 1 回も通らない経路ではキャッシュも明示的に破棄する。
-        /// </remarks>
-        private async Task NotifyDeleteConflictAsync(string targetLabel)
-        {
-            _cardRepository.InvalidateCache();
-            await NotifyDeleteRefusedAsync(ConcurrencyConflictMessage.ForDelete(targetLabel, "カード一覧"));
-        }
-
-        /// <summary>
-        /// 削除が競合（影響行数 0）で拒否された原因を、読み直した状態で分類したもの（Issue #2370 / #2421）
-        /// </summary>
-        private enum DeleteConflictCause
-        {
-            /// <summary>読み直すと行が無かった（先に削除された）</summary>
-            Deleted,
-
-            /// <summary>読み直すと払戻済だった（先に払い戻された）</summary>
-            Refunded,
-
-            /// <summary>読み直すと有効で未払戻だった、または読み直しに失敗した（原因を限定できない）</summary>
-            Undetermined,
         }
 
         /// <summary>
         /// 削除が競合（影響行数 0）で拒否された後に、原因を読み直して分類する（Issue #2370 / #2421）
         /// </summary>
         /// <returns>
-        /// 読み直したカードが無ければ <see cref="DeleteConflictCause.Deleted"/>（呼び出し側は <see cref="ConcurrencyConflictMessage.ForDelete"/>）、
-        /// 払戻済なら <see cref="DeleteConflictCause.Refunded"/>（<see cref="ConcurrencyConflictMessage.ForDeleteRefunded"/>）。
-        /// 有効で未払戻のカードが読めた、または読み直しに失敗した場合は <see cref="DeleteConflictCause.Undetermined"/>
-        /// （削除と払い戻しの両方を候補に挙げる <see cref="ConcurrencyConflictMessage.ForDeleteStateChanged"/>）
+        /// 読み直したカードが無ければ <see cref="CardWriteRefusal.Deleted"/>（先に削除された）、
+        /// 払戻済なら <see cref="CardWriteRefusal.Refunded"/>。有効で未払戻のカードが読めた、または読み直しに失敗した
+        /// 場合は <see cref="CardWriteRefusal.DeletedOrRefunded"/>（原因を限定しない。限定すると、一覧にカードが残っている・
+        /// 払戻済で残っているのに「削除された可能性」と述べることになる）
         /// </returns>
         /// <remarks>
         /// 読み直しはキャッシュを経由するが、0 行のときリポジトリの事後診断と
@@ -1229,44 +1188,58 @@ namespace ICCardManager.ViewModels
         /// 読み直しは文言を選ぶためだけのもので、削除が拒否されたことは確定している。ここで例外を外へ出すと
         /// 案内も一覧の再読込も行われないため、ログを残して「原因を限定できない」として返す。
         /// </remarks>
-        private async Task<DeleteConflictCause> DiagnoseDeleteConflictAsync(string cardIdm)
+        private async Task<CardWriteRefusal> DiagnoseDeleteConflictAsync(string cardIdm)
         {
             try
             {
                 var card = await _cardRepository.GetByIdmAsync(cardIdm);
                 if (card == null)
                 {
-                    return DeleteConflictCause.Deleted;
+                    return CardWriteRefusal.Deleted;
                 }
 
-                return card.IsRefunded ? DeleteConflictCause.Refunded : DeleteConflictCause.Undetermined;
+                return card.IsRefunded ? CardWriteRefusal.Refunded : CardWriteRefusal.DeletedOrRefunded;
             }
             catch (Exception ex)
             {
                 _logger?.LogWarning(ex,
                     "交通系ICカードの削除が競合で拒否された後、原因（削除・払い戻し）を確かめる読み直しに失敗しました。" +
                     "削除された可能性と払い戻された可能性の両方を挙げる文言で案内します");
-                return DeleteConflictCause.Undetermined;
+                return CardWriteRefusal.DeletedOrRefunded;
             }
         }
 
         /// <summary>
-        /// 削除できなかったことを案内する（カード一覧を再読込してからダイアログを出す）
+        /// 削除・払い戻しを書き込まなかった（拒否された）ことを、カード一覧を再読込してからダイアログで案内する（Issue #2421）
         /// </summary>
-        /// <param name="message">案内の文言（「一覧を再読み込みしました」と述べるもの）</param>
+        /// <param name="refusal">拒否の原因</param>
+        /// <param name="targetLabel">対象カードの表示名（再読込より前に確定させたもの）</param>
+        /// <param name="operation">拒否された操作</param>
         /// <remarks>
-        /// 書き込みを 1 回も通らない経路では、呼び出し側が先にキャッシュを破棄すること（Issue #1759）。
+        /// <para>
+        /// 削除・払い戻しは編集フォーム非表示時にも実行できるため、案内はステータス欄ではなくダイアログで出す（Issue #1109 / #1760）。
+        /// 文言が「再読み込みしました」と述べるため、キャッシュを破棄して再読込を先に行う（#1753 / #1759）。書き込みを
+        /// 1 回も通らない経路（書き込み前の読み直しで止めた）ではリポジトリがキャッシュを破棄しないので、ここで必ず破棄する。
+        /// </para>
+        /// <para>
+        /// 再読込が例外を投げても案内そのものは失わない（#1727。<see cref="TryReloadCardsAsync"/>）。共有モードで競合の直後に
+        /// 共有フォルダとの接続が切れると、例外を通せば案内の代わりに汎用の未処理例外になる。そのときは
+        /// 「再読み込みしました」と述べず、画面を開き直して確かめるよう案内する。
+        /// </para>
+        /// <para>
+        /// Issue #1793: 本メソッドは BeginBusy スコープの内側から呼ばれるため、モーダル表示を SuspendBusy で囲む。
+        /// 囲むのは<b>ダイアログ呼び出しだけ</b>で、再読込中はオーバーレイを外さない。
+        /// </para>
         /// </remarks>
-        private async Task NotifyDeleteRefusedAsync(string message)
+        private async Task NotifyWriteRefusedAsync(CardWriteRefusal refusal, string targetLabel, CardWriteOperation operation)
         {
-            await LoadCardsAsync();
-
-            // Issue #1793: 本メソッドは BeginBusy("削除中...") スコープの内側から呼ばれるため、
-            // モーダル表示を SuspendBusy で囲む。囲むのは**ヘルパーの内側**（ダイアログ呼び出しだけ）で、
-            // 呼び出し側でまとめて囲むと直前の一覧再読込中もオーバーレイが外れる。
+            var operationName = GetOperationName(operation);
+            _cardRepository.InvalidateCache();
+            var reloaded = await TryReloadCardsAsync($"{operationName}できなかったことの案内");
+            var message = BuildRefusalMessage(refusal, targetLabel, operation, reloaded);
             using (SuspendBusy())
             {
-                _dialogService.ShowError(message, "削除できません");
+                _dialogService.ShowError(message, $"{operationName}できません");
             }
         }
 
@@ -1370,6 +1343,19 @@ namespace ICCardManager.ViewModels
                     return;
                 }
 
+                // Issue #2421: CanRefund・冒頭の貸出中の判定は一覧を読んだ時点の値しか見ない。その後に他 PC や別の操作で
+                // 払い戻された・貸し出されたと書き込みの前に分かれば、名指しして止める（削除の #2370 と対）。
+                // 書き込みに進むと払戻済への更新の WHERE が拒否し、原因を限定しない競合の文言（「…やり直してください」）になるが、
+                // 払戻済のカードはやり直しても払い戻せない。止める正は WHERE で、ここは文言のための早期の案内。
+                if (beforeCard.IsRefunded || beforeCard.IsLent)
+                {
+                    await NotifyWriteRefusedAsync(
+                        beforeCard.IsRefunded ? CardWriteRefusal.Refunded : CardWriteRefusal.Lent,
+                        FormatCardLabel(refundCardType, refundCardNumber),
+                        CardWriteOperation.Refund);
+                    return;
+                }
+
                 try
                 {
                     // Issue #530: カードを「払戻済」状態に設定（論理削除ではない）
@@ -1384,15 +1370,9 @@ namespace ICCardManager.ViewModels
                     // 「予期しないエラー（SYS999）」のモーダルへ悪化する
                     // Issue #2421: 文言は「カード一覧を再読み込みしました」と述べるので、再読込してからダイアログを出す
                     // （以前はダイアログの後に再読込し、「画面を更新してください」と利用者に更新を求めていた）。
-                    // キャッシュは RefundAsync が破棄済み（Issue #1759）
-                    await LoadCardsAsync();
-                    // Issue #1793: BeginBusy スコープ内のモーダル表示は SuspendBusy で囲む
-                    using (SuspendBusy())
-                    {
-                        _dialogService.ShowError(
-                            BuildOperationFailureMessage(ex.Result, FormatCardLabel(refundCardType, refundCardNumber), CardWriteOperation.Refund),
-                            "払い戻しできません");
-                    }
+                    // 再読込が例外でも案内は失わない（NotifyWriteRefusedAsync）
+                    await NotifyWriteRefusedAsync(
+                        ToRefusal(ex.Result), FormatCardLabel(refundCardType, refundCardNumber), CardWriteOperation.Refund);
                     return;
                 }
                 catch (RefundBalanceChangedException ex)
@@ -1584,44 +1564,110 @@ namespace ICCardManager.ViewModels
         };
 
         /// <summary>
-        /// 削除・払い戻しの書き込みが 0 行だったときの案内を、事後の診断結果（<see cref="CardOperationResult"/>）に応じて組み立てる
+        /// 削除・払い戻しを書き込まなかった（拒否された）原因（Issue #2421）
         /// </summary>
-        /// <param name="result">操作結果（リポジトリの事後の診断。<c>CardRepository.DiagnoseFailureAsync</c>）</param>
+        /// <remarks>
+        /// 書き込み前の読み直しで分かった場合と、書き込みが 0 行で事後の診断（<see cref="CardOperationResult"/>）から
+        /// 分かった場合を同じ値で表し、文言を <see cref="BuildRefusalMessage"/> の 1 か所で組み立てる（#1763）。
+        /// </remarks>
+        internal enum CardWriteRefusal
+        {
+            /// <summary>行が無い（先に削除された）</summary>
+            Deleted,
+
+            /// <summary>払戻済だった（先に払い戻された）</summary>
+            Refunded,
+
+            /// <summary>削除済みか払戻済のどちらか（どちらかに限定できない）</summary>
+            DeletedOrRefunded,
+
+            /// <summary>一覧では貸出中でなかったのに、書き込みの時点で貸出中だった</summary>
+            Lent,
+
+            /// <summary>原因を特定できない（現状は到達しない）</summary>
+            Unknown,
+        }
+
+        /// <summary>
+        /// 書き込みが 0 行だったときの事後の診断結果を、拒否の原因へ写す（Issue #2421）
+        /// </summary>
+        /// <remarks>
+        /// Conflict は、行は残っていて貸出中でもないのに WHERE に一致しなかった場合で、削除済みか払戻済のどちらか。
+        /// どちらかに限定しない（削除の Conflict は呼び出し側が読み直して分類する。<see cref="DiagnoseDeleteConflictAsync"/>）。
+        /// 呼び出し側は <see cref="CardOperationResult.Success"/> を渡さない。
+        /// </remarks>
+        internal static CardWriteRefusal ToRefusal(CardOperationResult result) => result switch
+        {
+            CardOperationResult.NotFound => CardWriteRefusal.Deleted,
+            CardOperationResult.Conflict => CardWriteRefusal.DeletedOrRefunded,
+            CardOperationResult.CardIsLent => CardWriteRefusal.Lent,
+            _ => CardWriteRefusal.Unknown,
+        };
+
+        /// <summary>
+        /// 削除・払い戻しを書き込まなかったことの案内を組み立てる（Issue #2421）
+        /// </summary>
+        /// <param name="refusal">拒否の原因</param>
         /// <param name="targetLabel">対象カードの表示名（<see cref="FormatCardLabel"/> の形）</param>
         /// <param name="operation">拒否された操作</param>
+        /// <param name="reloaded">
+        /// 案内の前にカード一覧を再読込できたか。true なら「カード一覧を再読み込みしました」と述べる文言、
+        /// false なら述べずに画面を開き直して確かめるよう案内する文言（#1753 / #1727）
+        /// </param>
         /// <remarks>
-        /// <para>
-        /// Issue #2421: どの文言も「カード一覧を再読み込みしました」と述べるので、呼び出し側は<b>一覧を再読込してから</b>
-        /// 表示すること（#1753 / #1759）。以前は「画面を更新してください」と、画面が自動で行う再読込を利用者に求めていた。
-        /// </para>
-        /// <para>
-        /// 「なぜ」は操作の WHERE が拒否し得る状態で決まる。削除の Conflict は、削除の呼び出し側が読み直して
-        /// 原因を分類し（<c>DiagnoseDeleteConflictAsync</c>）文言を選ぶので、ここへは来ない（来た場合は
-        /// 削除の NotFound と同じ <see cref="ConcurrencyConflictMessage.ForDelete"/>）。払い戻しの Conflict は削除済みか払戻済なので
-        /// <see cref="ConcurrencyConflictMessage.ForRefundStateChanged"/>。
-        /// </para>
-        /// <para>
-        /// 既定の分岐は、呼び出し側が <see cref="CardOperationResult.Success"/> を渡さないため現状は到達しない。
-        /// 案内の途中で例外を投げると一覧の再読込後の案内が出なくなるので、3 要素の文言で返す。
-        /// </para>
+        /// 以前は「画面を更新してください」と、画面が自動で行う再読込を利用者に求めていた。
+        /// 原因ごとの「なぜ」は <see cref="ConcurrencyConflictMessage"/> の理由文を使い、再読込の成否で変わるのは「どうすれば」だけ。
         /// </remarks>
-        internal static string BuildOperationFailureMessage(CardOperationResult result, string targetLabel, CardWriteOperation operation)
+        /// <exception cref="ArgumentOutOfRangeException">未知の操作</exception>
+        internal static string BuildRefusalMessage(CardWriteRefusal refusal, string targetLabel, CardWriteOperation operation, bool reloaded)
         {
             var operationName = GetOperationName(operation);
-            return (result, operation) switch
+            if (!reloaded)
             {
-                (CardOperationResult.NotFound or CardOperationResult.Conflict, CardWriteOperation.Delete)
+                return ConcurrencyConflictMessage.ForReloadFailed(
+                    targetLabel, operationName, GetRefusalReason(refusal, operation), CardListInThisScreen);
+            }
+
+            return (refusal, operation) switch
+            {
+                (CardWriteRefusal.Deleted, CardWriteOperation.Delete)
                     => ConcurrencyConflictMessage.ForDelete(targetLabel, CardListInThisScreen),
-                (CardOperationResult.NotFound, CardWriteOperation.Refund)
+                (CardWriteRefusal.Deleted, _)
                     => ConcurrencyConflictMessage.ForRefund(targetLabel, CardListInThisScreen),
-                (CardOperationResult.Conflict, CardWriteOperation.Refund)
+                (CardWriteRefusal.Refunded, CardWriteOperation.Delete)
+                    => ConcurrencyConflictMessage.ForDeleteRefunded(targetLabel, CardListInThisScreen),
+                (CardWriteRefusal.Refunded, _)
+                    => ConcurrencyConflictMessage.ForRefundRefunded(targetLabel, CardListInThisScreen),
+                (CardWriteRefusal.DeletedOrRefunded, CardWriteOperation.Delete)
+                    => ConcurrencyConflictMessage.ForDeleteStateChanged(targetLabel, CardListInThisScreen),
+                (CardWriteRefusal.DeletedOrRefunded, _)
                     => ConcurrencyConflictMessage.ForRefundStateChanged(targetLabel, CardListInThisScreen),
-                (CardOperationResult.CardIsLent, _)
+                (CardWriteRefusal.Lent, _)
                     => BuildLentRefusedMessage(targetLabel, operation, lentAfterListLoaded: true),
-                _ => $"{targetLabel}を{operationName}できませんでした。書き込んだ結果から原因を特定できなかったため、{operationName}を中止しました。" +
+                _ => $"{targetLabel}を{operationName}できませんでした。{UnknownRefusalReason}" +
                      $"{CardListInThisScreen}を再読み込みしましたので、一覧で状態を確認してからやり直してください。",
             };
         }
+
+        /// <summary>原因を特定できなかったときの「なぜ」</summary>
+        private const string UnknownRefusalReason = "書き込んだ結果から原因を特定できなかったため、処理を中止しました。";
+
+        /// <summary>
+        /// 再読込に失敗したときの案内に使う「なぜ」（再読込できたときの文言と同じ理由文）
+        /// </summary>
+        private static string GetRefusalReason(CardWriteRefusal refusal, CardWriteOperation operation) => refusal switch
+        {
+            CardWriteRefusal.Deleted => operation == CardWriteOperation.Delete
+                ? ConcurrencyConflictMessage.DeletedFirstReason
+                : ConcurrencyConflictMessage.DeletedReason,
+            CardWriteRefusal.Refunded => ConcurrencyConflictMessage.RefundedReason,
+            CardWriteRefusal.DeletedOrRefunded => ConcurrencyConflictMessage.DeletedOrRefundedReason,
+            CardWriteRefusal.Lent => LentAfterListLoadedReason,
+            _ => UnknownRefusalReason,
+        };
+
+        /// <summary>一覧を読んだ後に貸し出されていたときの「なぜ」（貸出記録の作成の案内と同じ語彙）</summary>
+        private const string LentAfterListLoadedReason = "既に貸出中です。他のパソコンや別の操作で貸し出された可能性があります。";
 
         /// <summary>
         /// 貸出中のため削除・払い戻しできないことの案内を組み立てる（Issue #2421）
