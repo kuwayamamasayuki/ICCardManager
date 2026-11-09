@@ -39,7 +39,10 @@ namespace ICCardManager.Tests;
 /// <item>並べた引用「A」「B」／「A」、「B」／「A」＋「B」／「A」や「B」／「A」または「B」（後ろに「等」「など」が付いてもよい）。並んだ引用をすべて照合する</item>
 /// <item>二重かぎ括弧『X』、太字を含む「**X**」・括弧の外側を太字にした **「X」**（太字の記号は除いて照合する）</item>
 /// <item>見出し（### 9.5 「X」と表示される）— 文中と同じ書き方なので同じ規則で拾う</item>
-/// <item>表の見出しの先頭列が「エラーメッセージ」「表示内容」の表 — 先頭列の引用（「と表示」が付かない）</item>
+/// <item>表の見出しの先頭列が「エラーメッセージ」「エラー」「表示内容」の表 — 先頭列の引用（「と表示」が付かない）。
+/// 見出しは直後に区切り行（|---|）が続く行に限る（「| エラー | 赤 | ピー |」のような本文の行を見出しと取り違えない）</item>
+/// <item>「X」と併記／「X」と案内（ダイアログの本文に添えて出る文言）</item>
+/// <item>引用の中の二重かぎ括弧「設定した保存先『…』を使用できないため」— 中の『…』は差し込む値として伏せる</item>
 /// </list>
 /// <b>照合しない書き方</b>: かぎ括弧の無い文言（「表示」「表示例」「警告」の列に並べた「⚠️ nimoca 5043: 残額 500円（しきい値: 10,000円）」
 /// 「🔗 リーダー: 接続中（緑色）」等）— カード名・金額・時刻などの例示の値や「（緑色）」のような補足が文言と区別なく混ざり、
@@ -50,13 +53,13 @@ namespace ICCardManager.Tests;
 /// <b>照合の仕方</b>: 引用を句点（。）の後で文に区切り、文ごとに「可変部分」で断片に区切って、
 /// <b>すべての断片が照合先の同じ行に、この順で並ぶ</b>ことを求める（空白では区切らない。「返却 完了」のような
 /// 誤りを、断片がそれぞれどこかにあるだけで通さないため）。可変部分は、マニュアルが値を伏せる書き方
-/// （○・△・…・...・＜…＞・&lt;…&gt;）と例示の値（数字・ドライブ文字 Z:\）。文ごとに区切るのは、文言が文ごとに
+/// （○・△・…・...・＜…＞・&lt;…&gt;・引用の中の『…』）と例示の値（数字・ドライブ文字 Z:\）。文ごとに区切るのは、文言が文ごとに
 /// 組み立てられる（<c>"…しません。\n\n" + "…ですか？"</c>）ため。マニュアルが表示の改行を「／」で表す書き方
 /// （「時間切れ／職員証のタッチからやり直してください」= トーストの見出しと本文）も、別の文として照合する。
 /// </para>
 /// <para>
 /// <b>照合先</b>: C# はコメントとログ出力の呼び出し（<c>logger.Log*</c>・<c>LogException</c>・<c>Debug.WriteLine</c>・
-/// <c>Trace.Write*</c>）の引数を除き、隣り合う文字列リテラルの連結（<c>"A" + "B"</c>）を 1 行につなげる。
+/// <c>Trace.Write*</c>）の引数を除き、隣り合う文字列リテラルの連結（<c>"A" + "B"</c>。後ろが <c>$"</c>・<c>@"</c>・<c>$@"</c>・<c>@$"</c> でもよい）を 1 行につなげる。
 /// XAML はコメントを除いて文字参照（<c>&amp;#10;</c> 等）を戻す。インストーラーの .iss / .ps1 はコメント行を除く
 /// （IT 担当者ガイドはインストーラーのログを「ログに「…」と出ます」と引用するため、ログを残す）。
 /// コメントを除くのは、変更前の文言を由来として書いたコメントが実在の根拠になってしまうため（「返却完了」は
@@ -69,31 +72,36 @@ namespace ICCardManager.Tests;
 /// </remarks>
 public class ManualDisplayedTextConventionTests
 {
-    private const string Quote = @"[「『][^「」『』\r\n]{1,120}[」』](?:\*\*)?";
+    private const string Quote = @"(?:「(?:[^「」『』\r\n]|『[^「」『』\r\n]*』){1,120}」|『[^「」『』\r\n]{1,120}』)(?:\*\*)?";
 
     /// <summary>文中で表示文言として引用する書き方（並べた引用を含む）。</summary>
     private static readonly Regex DisplayedQuoteRun = new(
         @"(?<run>" + Quote + @"(?:\s*(?:、|＋|\+|や|または|／)?\s*(?:\*\*)?" + Quote + @")*)" +
         @"\s?(?:など|等)?" +
         @"(?:(?:という|の)(?:メッセージ|警告|ダイアログ|表示|画面|お知らせ|エラー|案内|通知|確認|トースト|ポップアップ)+(?:（[^）\r\n]{1,20}）)?)?" +
-        @"(?:(?:と|が)、?[^\s。「」『』|]{0,20}?|を付けて)(?:表示|出(?=[まるてたず]|ない))",
+        @"(?:(?:と|が)、?[^\s。「」『』|]{0,20}?|を付けて)(?:表示|併記|案内|出(?=[まるてたず]|ない))",
         RegexOptions.Compiled);
 
-    private static readonly Regex QuotedText = new(@"[「『](?<text>[^「」『』\r\n]{1,120})[」』]", RegexOptions.Compiled);
+    private static readonly Regex QuotedText = new(
+        @"「(?<text>(?:[^「」『』\r\n]|『[^「」『』\r\n]*』){1,120})」|『(?<text>[^「」『』\r\n]{1,120})』",
+        RegexOptions.Compiled);
 
     /// <summary>表示文言を先頭列に並べる表の見出し行。</summary>
-    private static readonly Regex DisplayedTextTableHeader = new(@"^\|\s*(?:エラーメッセージ|表示内容)\s*\|", RegexOptions.Compiled);
+    private static readonly Regex DisplayedTextTableHeader = new(@"^\|\s*(?:エラーメッセージ|エラー|表示内容)\s*\|", RegexOptions.Compiled);
+
+    /// <summary>表の見出しの直後の区切り行（これが続くときだけ、その前の行を見出しとみなす）。</summary>
+    private static readonly Regex TableSeparator = new(@"^\|\s*:?-{3,}", RegexOptions.Compiled);
 
     /// <summary>引用を照合の断片に区切る可変部分（伏せた値・例示の値）。</summary>
     private static readonly Regex VariablePart = new(
-        @"○+|△+|…+|\.\.\.|＜[^＞]*＞|<[^>]*>|[0-9０-９][0-9０-９,，]*|[A-Z]:\\",
+        @"『[^』]*』|○+|△+|…+|\.\.\.|＜[^＞]*＞|<[^>]*>|[0-9０-９][0-9０-９,，]*|[A-Z]:\\",
         RegexOptions.Compiled);
 
     /// <summary>引用を文に区切る（句点の後と、表示の改行を表す「／」）。</summary>
     private static readonly Regex SentenceEnd = new(@"(?<=。)|／", RegexOptions.Compiled);
 
     /// <summary>隣り合う文字列リテラルの連結（<c>"A" + "B"</c>・<c>"A" + $"B"</c>）。</summary>
-    private static readonly Regex StringConcatenation = new(@"""\s*\+\s*\$?@?""", RegexOptions.Compiled);
+    private static readonly Regex StringConcatenation = new(@"""\s*\+\s*(?:\$@|@\$|\$|@)?""", RegexOptions.Compiled);
 
     /// <summary>ログ出力の呼び出しの始まり（開き括弧まで）。</summary>
     private static readonly Regex LogCallStart = new(
@@ -207,6 +215,9 @@ public class ManualDisplayedTextConventionTests
     [InlineData("「貸出は記録済み」＋「画面の更新に失敗しました。」と表示", "貸出は記録済み|画面の更新に失敗しました。")]
     [InlineData("「統合を取り消していません」または「統合の取り消しに失敗しました」と表示", "統合を取り消していません|統合の取り消しに失敗しました")]
     [InlineData("**「A」**、**「B」** と表示", "A|B")]
+    [InlineData("「設定した保存先『…』を使用できないため、既定の場所に保存しています」と赤字で表示", "設定した保存先『…』を使用できないため、既定の場所に保存しています")]
+    [InlineData("完了のダイアログに「操作ログへの記録に失敗しました」と併記されたとき", "操作ログへの記録に失敗しました")]
+    [InlineData("本文にも「登録が確定した行はありません」と案内されます", "登録が確定した行はありません")]
     // 表示文言の引用ではない
     [InlineData("「返却完了」の状態です", "")]
     [InlineData("「4.3 カードを返すとき」を参照してください", "")]
@@ -245,6 +256,28 @@ public class ManualDisplayedTextConventionTests
         quotes.Select(q => q.Line).Should().Equal(3, 4, 4, 13);
     }
 
+    [Fact]
+    public void 見出しが区切り行を伴うときだけ表示文言の表とみなすこと()
+    {
+        // 「エラー」は状態の名前として表の本文にも現れる。本文の行を見出しと取り違えると、
+        // 後続の行の先頭列（状態名・色など）を表示文言として照合して誤検出する
+        var markdown = string.Join("\n",
+            "| 状態 | 背景色 |",
+            "|------|--------|",
+            "| エラー | 赤 |",
+            "| 「返却完了」 | 水色 |",
+            "",
+            "| エラー | 意味 |",
+            "|--------|------|",
+            "| SQLITE_BUSY | 書き込み中 |",
+            "| 「データベースを開けません」（起動時） | 説明 |");
+
+        var quotes = ExtractQuotes(markdown);
+
+        quotes.Select(q => q.Text).Should().Equal("データベースを開けません");
+        quotes.Select(q => q.Line).Should().Equal(9);
+    }
+
     [Theory]
     // ソースにそのまま有る
     [InlineData("「おかえりなさい！」と表示されます", 0)]
@@ -273,6 +306,11 @@ public class ManualDisplayedTextConventionTests
     // ログ・コメントにだけある文言は根拠にしない
     [InlineData("「返却処理を完了しました」と表示", 1)]
     [InlineData("「貸出処理を開始します」と表示", 1)]
+    // 引用の中の『…』は差し込む値として伏せる
+    [InlineData("「設定した保存先『…』を使用できないため、既定の場所に保存しています」と表示", 0)]
+    [InlineData("「設定した保存先『…』を使えないため、既定の場所に保存しています」と表示", 1)]
+    // 後ろが @$" の文字列リテラルとの連結
+    [InlineData("「逐語的な連結の前半と後半」と表示", 0)]
     // 許可リストの引用
     [InlineData("「貸出は記録済み」と表示", 0)]
     public void 照合ロジックが既知のサンプルで期待どおり動くこと(string markdown, int expectedViolations)
@@ -288,7 +326,9 @@ public class ManualDisplayedTextConventionTests
                 "var text = $\"{staffName}さん、交通系ICカードをタッチしてください\";\n" +
                 "var exit = \"終了すると反応しません。\\n\\n\" +\n    \"終了してよろしいですか？\";\n" +
                 "var drive = $\"ドライブ {root} の確認が\" + (timeoutMs / 1000) + \"秒以内に終わりませんでした。\";\n" +
-                "var folder = \"指定されたフォルダへの書き込み確認が\" + (timeoutMs / 1000) + \"秒以内に終わりませんでした。\";",
+                "var folder = \"指定されたフォルダへの書き込み確認が\" + (timeoutMs / 1000) + \"秒以内に終わりませんでした。\";\n" +
+                "var fallback = $\"⚠ 設定した保存先「{path}」を使用できないため、\"\n    + $\"既定の場所に保存しています。{reason}\";\n" +
+                "var verbatim = \"逐語的な連結の前半\" +\n    @$\"と後半{x}\";",
             },
             xamlSources: new[] { "<!-- 貸出完了 --><TextBlock Text=\"いってらっしゃい！\"/>" },
             scriptSources: Array.Empty<string>());
@@ -367,7 +407,7 @@ public class ManualDisplayedTextConventionTests
                 continue;
             }
 
-            if (DisplayedTextTableHeader.IsMatch(line))
+            if (DisplayedTextTableHeader.IsMatch(line) && i + 1 < lines.Length && TableSeparator.IsMatch(lines[i + 1]))
             {
                 insideDisplayedTextTable = true;
                 continue;
