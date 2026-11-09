@@ -1,5 +1,6 @@
+#nullable enable
 using System.Data.SQLite;
-using System.Globalization;
+using ICCardManager.Common;
 
 namespace ICCardManager.Data.Migrations
 {
@@ -51,7 +52,8 @@ namespace ICCardManager.Data.Migrations
         /// <remarks>
         /// Migration_012（Issue #2419）も、is_deleted の NULL を 0 へ正規化した後に同じ方法で重複を解消するため本メソッドを呼ぶ。
         /// 008 の挙動を変えると 012 の解消方法も変わる。IDm の昇順で最初の 1 枚が番号を保ち、残りはその種別の最大番号＋1 へずらす
-        /// （最大番号＋1 が 64 ビット整数で表せないときは、その種別で使われていない最小の正の整数）。
+        /// （最大番号＋1 が 64 ビット整数で表せないときは、その種別で使われていない最小の正の整数。採番は
+        /// 新規登録と共有する <see cref="CardNumberAllocator"/>）。
         /// </remarks>
         internal static void ResolveDuplicates(SQLiteConnection connection, SQLiteTransaction transaction)
         {
@@ -111,17 +113,11 @@ LIMIT -1 OFFSET 1";
 FROM ic_card WHERE card_type = @cardType";
                     maxCmd.Parameters.AddWithValue("@cardType", cardType);
                     var maxResult = maxCmd.ExecuteScalar();
-                    // Issue #2419: CAST(... AS INTEGER) は 64 ビット整数を返す。管理番号は最大 20 文字で
-                    // 2,147,483,647 を超える数字だけの番号もあり得るため、int ではなく long で受ける（int へ変換すると
-                    // OverflowException で移行が失敗する）。さらに SQLite の CAST は long の範囲を超える数字列を
-                    // long.MaxValue で頭打ちにするため、その +1 は表せない（unchecked では long.MinValue へ折り返し、
-                    // ずらす対象が 2 枚以上だと同じ負の番号が重なって CREATE UNIQUE INDEX が失敗する）。
-                    // 上限に達したときは、その種別で文字列として使われていない最小の正の整数を割り当てる。
-                    // 「最大＋1」をやめずに残すのは、通常の DB での 008 の結果（ずれた番号）を変えないため。
-                    var max = maxResult == System.DBNull.Value ? 0L : System.Convert.ToInt64(maxResult, CultureInfo.InvariantCulture);
-                    var nextNumber = max < long.MaxValue
-                        ? (max + 1).ToString(CultureInfo.InvariantCulture)
-                        : FindSmallestUnusedPositiveNumber(connection, transaction, cardType);
+                    // Issue #2419: 採番は新規登録と共有する（64 ビット整数で「最大＋1」、表せなければ
+                    // その種別で使われていない最小の正の整数）。理由は CardNumberAllocator の注記を参照
+                    var nextNumber = CardNumberAllocator.Next(
+                        CardNumberAllocator.ParseMax(maxResult),
+                        () => ReadCardNumbers(connection, transaction, cardType));
 
                     using var updateCmd = connection.CreateCommand();
                     updateCmd.Transaction = transaction;
@@ -134,36 +130,21 @@ FROM ic_card WHERE card_type = @cardType";
         }
 
         /// <summary>
-        /// 指定した種別のカード（削除済みを含む）が文字列として使っていない最小の正の整数を返す（Issue #2419）
+        /// 指定した種別のカード（削除済みを含む）の管理番号を返す（Issue #2419）
         /// </summary>
-        /// <remarks>
-        /// 「最大＋1」が 64 ビット整数で表せないときの採番。比較は文字列で行う（インデックスは文字列の一致で重複を判定する）。
-        /// 削除済みのカードの番号も避けるのは、そのカードを復元したときに重複にしないため。
-        /// 使われている番号は有限なので、必ず未使用の番号が見つかる。
-        /// </remarks>
-        private static string FindSmallestUnusedPositiveNumber(SQLiteConnection connection, SQLiteTransaction transaction, string cardType)
+        private static System.Collections.Generic.List<string> ReadCardNumbers(SQLiteConnection connection, SQLiteTransaction transaction, string cardType)
         {
-            var used = new System.Collections.Generic.HashSet<string>(System.StringComparer.Ordinal);
-            using (var cmd = connection.CreateCommand())
+            var numbers = new System.Collections.Generic.List<string>();
+            using var cmd = connection.CreateCommand();
+            cmd.Transaction = transaction;
+            cmd.CommandText = "SELECT card_number FROM ic_card WHERE card_type = @cardType";
+            cmd.Parameters.AddWithValue("@cardType", cardType);
+            using var reader = cmd.ExecuteReader();
+            while (reader.Read())
             {
-                cmd.Transaction = transaction;
-                cmd.CommandText = "SELECT card_number FROM ic_card WHERE card_type = @cardType";
-                cmd.Parameters.AddWithValue("@cardType", cardType);
-                using var reader = cmd.ExecuteReader();
-                while (reader.Read())
-                {
-                    used.Add(reader.GetString(0));
-                }
+                numbers.Add(reader.GetString(0));
             }
-
-            for (var candidate = 1L; ; candidate++)
-            {
-                var text = candidate.ToString(CultureInfo.InvariantCulture);
-                if (!used.Contains(text))
-                {
-                    return text;
-                }
-            }
+            return numbers;
         }
 
         /// <summary>
