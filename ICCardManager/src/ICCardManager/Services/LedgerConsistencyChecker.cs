@@ -1,3 +1,4 @@
+#nullable enable
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -48,24 +49,49 @@ namespace ICCardManager.Services
             // シードは確定済みの単票クエリ GetLatestBeforeDateAsync で取る（#2043 / #1763）。母集団は
             // 本体（GetByDateRangeAsync）と同じく貸出中レコードを含む。前の行が無ければ null（シード無しの従来挙動）。
             //
-            // Issue #2418: 年度の台帳が導入行「前年度より繰越」から始まり、範囲の開始日が導入行以前なら、シードは使わない。
-            // 導入行より前の日付の行（3 月中の貸出中レコード・手入力・CSV）の残高をシードにすると、導入行（残高の前が 0）と
-            // 同じ日の利用（残高の前＝その残高）の順序を取り違え、利用を先に並べて正しい導入行を不整合と報告する。
-            // 判定は履歴画面（HistoryPanelViewModel.GetPrecedingBalanceAsync）・帳票（ReportDataBuilder）と同じ
-            // PaperCarryoverPolicy.PeriodOpensWithFiscalYearStartCarryover（同じ画面の並びと検査結果を揃える）。
+            // Issue #2418 / #2437: 年度の台帳が導入行「前年度より繰越」（3 月を繰越月にして登録したカード）から始まるなら、
+            // 導入行の手前でチェーンを切り、導入行を始点にする。導入行の残高は登録時の繰越額で、前の行の残高から計算した値ではない。
+            // 導入行より前の日付の行（3 月中の貸出中レコード・手入力・CSV）からチェーンを続けると、正しい導入行を不整合と報告し、
+            // 導入行と同じ日の利用の順序も取り違える（前日の残高を引き継いで利用を先に並べる）。
+            // #2418 は「開始日が導入行以前ならシードを使わない」で表示期間の検査だけを直し、全期間の検査（FullPeriodStart から）・
+            // 3/1〜4/30 のように年度の初日より前から始まる範囲では導入行がチェーンの途中に来て今も報告されていた（#2437）。
+            // 切る日は PaperCarryoverPolicy.GetChainRestartDates が決める。開始日の年度は履歴画面・帳票と同じ
+            // PeriodOpensWithFiscalYearStartCarryover、後の年度は HasFiscalYearStartCarryoverRecord（#1763）。
             // 既知の差: 4/1 から検査する場合でも、導入行を摘要で認識できない（#2371）カードでは、履歴は貸出中を除いた
             // 前年度繰越（GetCarryoverBalanceAsync）をシードにし、ここは貸出中を含む値を使う（本体の母集団に合わせる）。
-            // 限界: 直るのは開始日が年度の初日から導入行の日付までの期間の検査だけ。全期間の検査（FullPeriodStart から）や
-            // 3/1〜4/30 のように年度の初日より前から始まる範囲では判定は偽になり、導入行より前の行の後に導入行がチェーンの途中で続くため、導入行は今も不整合と報告される。
+            var periodLedgers = (await _ledgerRepository.GetByDateRangeAsync(cardIdm, fromDate, toDate).ConfigureAwait(false))
+                .ToList();
             var fiscalYearFirstDayLedgers = await _ledgerRepository
                 .GetFiscalYearFirstDayLedgersAsync(cardIdm, FiscalYearHelper.GetFiscalYear(fromDate)).ConfigureAwait(false);
-            var precedingBalance = PaperCarryoverPolicy.PeriodOpensWithFiscalYearStartCarryover(fromDate, fiscalYearFirstDayLedgers)
-                ? null
-                : (await _ledgerRepository
-                    .GetLatestBeforeDateAsync(cardIdm, fromDate).ConfigureAwait(false))?.Balance;
-            var ledgers = LedgerOrderHelper.ReorderByBalanceChain(
-                await _ledgerRepository.GetByDateRangeAsync(cardIdm, fromDate, toDate).ConfigureAwait(false),
-                precedingBalance);
+            var restartDates = PaperCarryoverPolicy.GetChainRestartDates(fromDate, periodLedgers, fiscalYearFirstDayLedgers);
+            var segments = SplitAtChainRestarts(periodLedgers, restartDates);
+
+            // シードは最初のチェーン（最初の導入行より前の行）にだけ効く。導入行から始まるチェーンは前の残高を持たない
+            var chains = new List<List<Ledger>>();
+            for (var i = 0; i < segments.Count; i++)
+            {
+                int? precedingBalance = null;
+                if (i == 0 && segments[0].Count > 0)
+                {
+                    precedingBalance = (await _ledgerRepository
+                        .GetLatestBeforeDateAsync(cardIdm, fromDate).ConfigureAwait(false))?.Balance;
+                }
+
+                chains.Add(LedgerOrderHelper.ReorderByBalanceChain(segments[i], precedingBalance));
+            }
+
+            var ledgers = chains.SelectMany(c => c).ToList();
+
+            // 導入行から始まるチェーンの先頭の、直前の帳簿の行（貸出中レコードを除く）。訂正案を出すかの判断にだけ使い、
+            // 並べ替えのシード（上）とは分ける（#2418: 期間の開始日が導入行以前ならシードは使わない）。
+            // 期間の外（4/1〜4/30 の表示期間なら 3/31 以前）にあっても DB から取る
+            var chainHeadPredecessors = new List<Ledger?> { null };
+            for (var i = 1; i < chains.Count; i++)
+            {
+                chainHeadPredecessors.Add(chains[i].Count == 0
+                    ? null
+                    : await _ledgerRepository.GetLatestSettledBeforeDateAsync(cardIdm, chains[i][0].Date.Date).ConfigureAwait(false));
+            }
 
             // Issue #1059: 詳細レベルのチェックのためにDetailsを読み込む
             if (ledgers.Count > 0)
@@ -81,7 +107,31 @@ namespace ICCardManager.Services
                 }
             }
 
-            return CheckConsistency(ledgers, cardIdm, fromDate);
+            return CheckConsistency(chains, cardIdm, fromDate, chainHeadPredecessors);
+        }
+
+        /// <summary>
+        /// Issue #2437: 期間の台帳を、チェーンが始まり直す日（導入行「前年度より繰越」の日）の手前で分ける。
+        /// 先頭の要素は最初の導入行より前の行（無ければ空）。
+        /// </summary>
+        internal static List<List<Ledger>> SplitAtChainRestarts(
+            IEnumerable<Ledger> ledgers, IReadOnlyList<DateTime> restartDates)
+        {
+            var boundaries = restartDates.Select(d => d.Date).Distinct().OrderBy(d => d).ToList();
+            var segments = new List<List<Ledger>>();
+            for (var i = 0; i <= boundaries.Count; i++)
+            {
+                segments.Add(new List<Ledger>());
+            }
+
+            foreach (var ledger in ledgers)
+            {
+                // その行の日付以前に始まり直す日の数 ＝ 属するチェーンの番号
+                var index = boundaries.Count(d => d <= ledger.Date.Date);
+                segments[index].Add(ledger);
+            }
+
+            return segments;
         }
 
         /// <summary>
@@ -90,36 +140,110 @@ namespace ICCardManager.Services
         internal ConsistencyResult CheckConsistency(
             List<Ledger> ledgers, string cardIdm, DateTime fromDate)
         {
-            var result = new ConsistencyResult { IsConsistent = true };
+            return CheckConsistency(new[] { ledgers }, cardIdm, fromDate, new Ledger?[] { null });
+        }
 
-            if (ledgers.Count == 0)
+        /// <summary>
+        /// 残高チェーンの整合性をチェック（内部ロジック）。チェーンごとに先頭の行を始点とし、チェーンをまたいで検査しない。
+        /// </summary>
+        /// <param name="chains">
+        /// 時系列順に並べたチェーン。Issue #2437: 導入行「前年度より繰越」から始まり直すチェーンは、
+        /// その前の行（導入行より前の日付の行）の残高から続けて検査しない（<see cref="SplitAtChainRestarts"/>）
+        /// </param>
+        /// <param name="cardIdm">カードIDm</param>
+        /// <param name="fromDate">開始日</param>
+        /// <param name="chainHeadPredecessors">
+        /// チェーンごとの、先頭の行の直前の帳簿の行（貸出中レコードを除く。期間の外でもよい）。無ければ null。
+        /// 先頭のチェーン（期間の始まり）は null を渡す
+        /// </param>
+        internal ConsistencyResult CheckConsistency(
+            IReadOnlyList<List<Ledger>> chains, string cardIdm, DateTime fromDate,
+            IReadOnlyList<Ledger?> chainHeadPredecessors)
+        {
+            if (chainHeadPredecessors.Count != chains.Count)
             {
-                return result;
+                throw new ArgumentException("チェーンと同じ数の直前の行を渡す", nameof(chainHeadPredecessors));
             }
 
-            // 親レコードレベルのチェック
-            // 期間の直前のレコードから前残高を取得する処理は非同期なので、
-            // 最初の行は前行がないためスキップし、2行目以降をチェック
-            for (int i = 1; i < ledgers.Count; i++)
-            {
-                var previousBalance = ledgers[i - 1].Balance;
-                var current = ledgers[i];
-                var expectedBalance = previousBalance + current.Income - current.Expense;
+            var result = new ConsistencyResult { IsConsistent = true };
 
-                if (current.Balance != expectedBalance)
+            foreach (var ledgers in chains)
+            {
+                // 親レコードレベルのチェック
+                // 期間の直前のレコードから前残高を取得する処理は非同期なので、
+                // 最初の行は前行がないためスキップし、2行目以降をチェック
+                for (int i = 1; i < ledgers.Count; i++)
                 {
-                    result.IsConsistent = false;
-                    result.Inconsistencies.Add((current.Id, expectedBalance, current.Balance));
+                    var previousBalance = ledgers[i - 1].Balance;
+                    var current = ledgers[i];
+                    var expectedBalance = previousBalance + current.Income - current.Expense;
+
+                    if (current.Balance != expectedBalance)
+                    {
+                        result.IsConsistent = false;
+                        result.Inconsistencies.Add((current.Id, expectedBalance, current.Balance));
+                    }
+                }
+
+                // Issue #1059: 詳細レベルのチェック（明細のチェーンもチェーンの先頭から始める）
+                CheckDetailConsistency(ledgers, result);
+            }
+
+            // Issue #2007: 導入時残高の誤りの形状なら、直すべき行と値を名指しする。
+            // Issue #2437: 導入行は途中のチェーンの先頭にも来る（導入行より前の日付の行がある 3 月繰越のカード）
+            // ただし、先頭の導入行の残高が直前の帳簿の行（貸出中レコードを除く。期間の外でもよい）の残高 ＋ 受入 − 払出 と一致する
+            // （前の行で裏付けられている）なら、導入行は正しく、切れているのは直後の行の側なので訂正案を出さない（コードレビューで検出）。
+            // 例: 前年度から台帳があるカードの 3/31 残高 0 → 4/1「前年度より繰越」受入・残高 5,000 → 4/2 の打ち間違い。
+            // 訂正案を出すと、ハイライト（BuildInconsistencyMarkers）が正しい 4/1 だけになり、誤った 4/2 に印が付かない。
+            // 直前の行は 4/1〜4/30 の表示期間でも期間の外から取る（全期間の検査と根拠を揃える）。貸出中レコードの残高は帳簿の残高ではない
+            // ので数えない（3/25 の貸出中レコード残高 0 と、誤って 3,000 で登録した導入行を「裏付けあり」にしない）
+            result.InitialBalanceCorrection = null;
+            for (var i = 0; i < chains.Count; i++)
+            {
+                var ledgers = chains[i];
+                if (ledgers.Count == 0 || IsCorroboratedByPrecedingSettledRow(chainHeadPredecessors[i], ledgers[0]))
+                {
+                    continue;
+                }
+
+                result.InitialBalanceCorrection = DetectInitialBalanceCorrection(ledgers, result);
+                if (result.InitialBalanceCorrection != null)
+                {
+                    break;
                 }
             }
 
-            // Issue #1059: 詳細レベルのチェック
-            CheckDetailConsistency(ledgers, result);
-
-            // Issue #2007: 導入時残高の誤りの形状なら、直すべき行と値を名指しする
-            result.InitialBalanceCorrection = DetectInitialBalanceCorrection(ledgers, result);
-
             return result;
+        }
+
+        /// <summary>
+        /// Issue #2437: チェーンの先頭の行の残高が、直前の帳簿の行（貸出中レコードを除く）で裏付けられているか。直前の行が無ければ偽。
+        /// </summary>
+        /// <remarks>
+        /// 裏付けの形は 2 つある（コードレビューで検出）。
+        /// <list type="bullet">
+        /// <item>直前の行の残高 ＋ 受入 − 払出 ＝ 先頭の残高（3/31「次年度へ繰越」で残高 0 にしてから 4/1「前年度より繰越」で受け入れる組）</item>
+        /// <item>先頭が受入欄に残高を書く導入行（<see cref="Ledger.InitialRecordCarriesIncome"/>。前年度より繰越・新規購入）で、
+        /// 直前の行の残高 ＝ 先頭の残高。導入行の受入は新しいお金ではなく残高の書き直しなので、直前の行（3/25 の手入力の行
+        /// 残高 5,000 など）から引き継いだ残高と同じなら正しい。上の式だけだと 5,000 ＋ 5,000 ≠ 5,000 で裏付けが無いことになり、
+        /// 直後の行の打ち間違いに対して正しい導入行を書き直す訂正案を出していた</item>
+        /// </list>
+        /// 限界: 直前の行の残高が、導入行の誤った残高と偶然一致する場合も裏付けありと判定する（訂正案は出ず、直後の行が強調される）。
+        /// </remarks>
+        internal static bool IsCorroboratedByPrecedingSettledRow(Ledger? precedingSettledRow, Ledger chainHead)
+        {
+            if (precedingSettledRow == null || precedingSettledRow.IsLentRecord)
+            {
+                return false;
+            }
+
+            if (precedingSettledRow.Balance + chainHead.Income - chainHead.Expense == chainHead.Balance)
+            {
+                return true;
+            }
+
+            return Ledger.InitialRecordCarriesIncome(chainHead.Summary)
+                && precedingSettledRow.Balance == chainHead.Balance;
         }
 
         /// <summary>
@@ -147,7 +271,7 @@ namespace ICCardManager.Services
         /// （または導入時の誤りと決めつけられない）ので提案しない。
         /// </para>
         /// </remarks>
-        internal static InitialBalanceCorrection DetectInitialBalanceCorrection(
+        internal static InitialBalanceCorrection? DetectInitialBalanceCorrection(
             List<Ledger> ledgers, ConsistencyResult result)
         {
             if (ledgers.Count < 2)
@@ -262,15 +386,17 @@ namespace ICCardManager.Services
         /// </summary>
         internal static int CalculateExpectedDetailBalance(int previousBalance, LedgerDetail detail)
         {
+            // 呼び出し元（CheckDetailConsistency）は金額が null の明細を読み飛ばしてから呼ぶ
+            var amount = detail.Amount ?? throw new ArgumentException("金額が null の明細は期待残高を計算できない", nameof(detail));
             if (detail.IsCharge || detail.IsPointRedemption)
             {
                 // チャージ・ポイント還元: 残高が増加
-                return previousBalance + detail.Amount.Value;
+                return previousBalance + amount;
             }
             else
             {
                 // 通常利用（鉄道・バス）: 残高が減少
-                return previousBalance - detail.Amount.Value;
+                return previousBalance - amount;
             }
         }
     }
@@ -303,7 +429,7 @@ namespace ICCardManager.Services
         /// <see cref="Inconsistencies"/> / <see cref="DetailInconsistencies"/> から導出する。
         /// 導出値なので、それらを書き換えた後は再判定が要る。
         /// </remarks>
-        public InitialBalanceCorrection InitialBalanceCorrection { get; set; }
+        public InitialBalanceCorrection? InitialBalanceCorrection { get; set; }
     }
 
     /// <summary>
