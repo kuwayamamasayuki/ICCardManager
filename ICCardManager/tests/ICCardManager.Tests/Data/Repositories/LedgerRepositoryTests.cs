@@ -1233,13 +1233,15 @@ public class LedgerRepositoryTests : IDisposable
 
     /// <summary>
     /// Issue #2437（正当側）: 導入行より前の日付の行があっても、導入行自体の残高の誤り（導入行の直後で切れる #2007 の形）は
-    /// 全期間の検査で引き続き検出し、直すべき行（導入行）と逆算した残高を名指しすること
+    /// 全期間の検査と 4/1〜4/30 の表示期間の検査（ハイライトの根拠）で引き続き検出し、直すべき行（導入行）と逆算した残高を名指しすること
     /// </summary>
     [Theory]
-    [InlineData(true)]
-    [InlineData(false)]
-    public async Task CheckBalanceConsistencyAsync_FullPeriod_WrongFiscalYearStartCarryoverWithEarlierRow_SuggestsCorrection(
-        bool earlierRowIsLent)
+    [InlineData(true, true)]
+    [InlineData(false, true)]
+    [InlineData(true, false)]
+    [InlineData(false, false)]
+    public async Task CheckBalanceConsistencyAsync_WrongFiscalYearStartCarryoverWithEarlierRow_SuggestsCorrection(
+        bool earlierRowIsLent, bool fullPeriod)
     {
         // Arrange: 導入行を 6,000 で登録した（カードの実残高は 5,000）。4/2 の利用 210 で 4,790
         var (introduction, nextUsage) = await InsertIssue2437LedgersAsync(
@@ -1247,7 +1249,7 @@ public class LedgerRepositoryTests : IDisposable
         var checker = new LedgerConsistencyChecker(_repository);
 
         // Act
-        var result = await checker.CheckBalanceConsistencyAsync(TestCardIdm, Issue2437FullPeriodStart, Issue2437FullPeriodEnd);
+        var result = await CheckIssue2437PeriodAsync(checker, fullPeriod);
 
         // Assert
         result.Inconsistencies.Should().ContainSingle("導入行は検査の始点なので、切れるのは直後の利用の 1 か所だけ")
@@ -1361,8 +1363,14 @@ public class LedgerRepositoryTests : IDisposable
     /// 裏付けられているなら、その直後の行の打ち間違いに導入行の訂正案を出さず、ハイライトは打ち間違えた行に付くこと
     /// （訂正案を出すと、正しい 4/1 の行だけが強調され、誤った 4/2 の行に印が付かない）
     /// </summary>
-    [Fact]
-    public async Task CheckBalanceConsistencyAsync_FullPeriod_CorroboratedCarryoverFollowedByTypo_DoesNotSuggestCorrection()
+    /// <remarks>
+    /// 表示期間（4/1〜4/30。警告クリック後に移る月表示）は、履歴画面のハイライト（CheckAndNotifyConsistencyAsync）が
+    /// 使う結果そのもの（表示期間の検査結果を BuildInconsistencyMarkers に渡す）。期間の外の 3/31 の行で裏付ける
+    /// </remarks>
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task CheckBalanceConsistencyAsync_CorroboratedCarryoverFollowedByTypo_HighlightsTypoNotCarryover(bool fullPeriod)
     {
         // Arrange: 前年度 10/1 新規購入 5,000 → 3/31 次年度へ繰越（払出 5,000・残高 0）→ 4/1 前年度より繰越（受入・残高 5,000。正しい）
         // → 4/2 の手入力の利用 210 を残高 4,700 と打ち間違えた（正しくは 4,790）
@@ -1387,13 +1395,62 @@ public class LedgerRepositoryTests : IDisposable
         var checker = new LedgerConsistencyChecker(_repository);
 
         // Act
-        var result = await checker.CheckBalanceConsistencyAsync(TestCardIdm, Issue2437FullPeriodStart, Issue2437FullPeriodEnd);
+        var result = await CheckIssue2437PeriodAsync(checker, fullPeriod);
 
         // Assert
         result.Inconsistencies.Should().ContainSingle().Which.Should().Be((typo.Id, 4790, 4700));
         result.InitialBalanceCorrection.Should().BeNull("4/1 の残高は 3/31 の残高 0 ＋ 受入 5,000 で裏付けられている");
         ICCardManager.ViewModels.HistoryPanelViewModel.BuildInconsistencyMarkers(result).Keys
             .Should().Equal(new[] { typo.Id }, "強調するのは打ち間違えた 4/2 の行で、正しい 4/1 の行ではない");
+    }
+
+    /// <summary>全期間、または 4/1〜4/30 の表示期間で検査する</summary>
+    private static Task<ConsistencyResult> CheckIssue2437PeriodAsync(LedgerConsistencyChecker checker, bool fullPeriod) =>
+        fullPeriod
+            ? checker.CheckBalanceConsistencyAsync(TestCardIdm, Issue2437FullPeriodStart, Issue2437FullPeriodEnd)
+            : checker.CheckBalanceConsistencyAsync(TestCardIdm, new DateTime(2027, 4, 1), new DateTime(2027, 4, 30));
+
+    /// <summary>
+    /// Issue #2437（コードレビューで検出）: 3 月繰越のカードで導入行より前の行が貸出中レコードだけ（または無い）なら、
+    /// 導入行の誤りに訂正案を出すこと。貸出中レコードの残高（0）は帳簿の残高ではないので、誤って 3,000 で登録した導入行の
+    /// 「裏付け」にしない（0 ＋ 3,000 ＝ 3,000 で裏付けありとすると、正しい訂正案（逆算 0）が潰れる）
+    /// </summary>
+    [Theory]
+    [InlineData(true, true)]
+    [InlineData(true, false)]
+    [InlineData(false, true)]
+    [InlineData(false, false)]
+    public async Task CheckBalanceConsistencyAsync_WrongCarryoverWithOnlyLentRecordBefore_SuggestsCorrection(
+        bool withLentRecord, bool fullPeriod)
+    {
+        // Arrange: カードの実残高 0。3/25 に貸出中レコード（残高 0）。4/1 導入行を誤って受入・残高 3,000 で登録。4/2 チャージ 1,000 で 1,000
+        if (withLentRecord)
+        {
+            var lent = CreateTestLedger(TestCardIdm, new DateTime(2027, 3, 25, 9, 30, 0), SummaryGenerator.GetLendingSummary());
+            lent.Balance = 0;
+            lent.IsLentRecord = true;
+            lent.Id = await _repository.InsertAsync(lent);
+        }
+
+        var introduction = CreateTestLedger(TestCardIdm, new DateTime(2027, 4, 1),
+            SummaryGenerator.GetCarryoverFromPreviousYearSummary(), income: 3000);
+        introduction.Balance = 3000;
+        introduction.Id = await _repository.InsertAsync(introduction);
+
+        var charge = CreateTestLedger(TestCardIdm, new DateTime(2027, 4, 2), "役務費によりチャージ", income: 1000);
+        charge.Balance = 1000;
+        charge.Id = await _repository.InsertAsync(charge);
+
+        var checker = new LedgerConsistencyChecker(_repository);
+
+        // Act
+        var result = await CheckIssue2437PeriodAsync(checker, fullPeriod);
+
+        // Assert
+        result.Inconsistencies.Should().ContainSingle().Which.Should().Be((charge.Id, 4000, 1000));
+        result.InitialBalanceCorrection.Should().NotBeNull("貸出中レコードは導入行の裏付けにならない");
+        result.InitialBalanceCorrection!.LedgerId.Should().Be(introduction.Id);
+        result.InitialBalanceCorrection.SuggestedBalance.Should().Be(0);
     }
 
     private static void AssertNotDoubleCounted(MonthlyReportData april, MonthlyReportData may)

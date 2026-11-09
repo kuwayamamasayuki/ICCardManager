@@ -388,7 +388,7 @@ public class LedgerConsistencyCheckerTests
         segments.Select(s => s.Select(l => l.Id)).Should().BeEquivalentTo(
             new[] { new[] { 1 }, new[] { 2, 3, 4 } }, o => o.WithStrictOrdering());
 
-        var result = _checker.CheckConsistency(segments, TestCardIdm, new DateTime(2000, 1, 1));
+        var result = _checker.CheckConsistency(segments, TestCardIdm, new DateTime(2000, 1, 1), new Ledger?[] { null, march });
 
         result.Inconsistencies.Should().ContainSingle("導入行（5,000 ≠ 5,000 + 5,000）は報告せず、4/10 の不整合だけを報告する")
             .Which.Should().Be((4, 4490, 4400));
@@ -406,7 +406,8 @@ public class LedgerConsistencyCheckerTests
         var usage = Issue2437Ledger(3, new DateTime(2027, 4, 2), "鉄道（天神～博多）", 0, 210, 4790);
 
         var result = _checker.CheckConsistency(
-            new[] { new List<Ledger> { march }, new List<Ledger> { intro, usage } }, TestCardIdm, new DateTime(2000, 1, 1));
+            new[] { new List<Ledger> { march }, new List<Ledger> { intro, usage } }, TestCardIdm, new DateTime(2000, 1, 1),
+            new Ledger?[] { null, null });
 
         result.Inconsistencies.Should().ContainSingle().Which.LedgerId.Should().Be(3);
         result.InitialBalanceCorrection.Should().NotBeNull();
@@ -427,12 +428,16 @@ public class LedgerConsistencyCheckerTests
         var typo = Issue2437Ledger(3, new DateTime(2027, 4, 2), "鉄道（天神～博多）", 0, 210, 4700);
 
         var result = _checker.CheckConsistency(
-            new[] { new List<Ledger> { yearEnd }, new List<Ledger> { intro, typo } }, TestCardIdm, new DateTime(2000, 1, 1));
+            new[] { new List<Ledger> { yearEnd }, new List<Ledger> { intro, typo } }, TestCardIdm, new DateTime(2000, 1, 1),
+            new Ledger?[] { null, yearEnd });
 
         result.Inconsistencies.Should().ContainSingle().Which.Should().Be((3, 4790, 4700));
         result.InitialBalanceCorrection.Should().BeNull("0 ＋ 受入 5,000 ＝ 5,000 で導入行は裏付けられている");
-        LedgerConsistencyChecker.IsCorroboratedByPreviousChain(null, intro)
-            .Should().BeFalse("前のチェーンが無ければ裏付けは無い（期間の先頭の導入行は従来どおり訂正案の対象）");
+        LedgerConsistencyChecker.IsCorroboratedByPrecedingSettledRow(null, intro)
+            .Should().BeFalse("直前の帳簿の行が無ければ裏付けは無い（従来どおり訂正案の対象）");
+        var lentYearEnd = Issue2437Ledger(4, new DateTime(2027, 3, 31), SummaryGenerator.GetLendingSummary(), 0, 0, 0, isLentRecord: true);
+        LedgerConsistencyChecker.IsCorroboratedByPrecedingSettledRow(lentYearEnd, intro)
+            .Should().BeFalse("貸出中レコードの残高は帳簿の残高ではないので裏付けにしない");
     }
 
     #endregion
