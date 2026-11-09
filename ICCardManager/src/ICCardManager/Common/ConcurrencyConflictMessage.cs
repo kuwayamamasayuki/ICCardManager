@@ -104,7 +104,7 @@ namespace ICCardManager.Common
         /// 先に払い戻された場合を説明しない。
         /// </remarks>
         public static string ForRefundStateChanged(string target, string listName)
-            => Build(target, "払い戻し", "他のパソコンや別の操作で削除された、または払い戻された可能性があります。", listName);
+            => Build(target, "払い戻し", DeletedOrRefundedReason, listName);
 
         /// <summary>
         /// 復元対象の行（削除済みの行）が見つからなかったときの文言を組み立てる。
@@ -184,6 +184,19 @@ namespace ICCardManager.Common
             => Build(target, "削除", "他のパソコンや別の操作で先に削除された可能性があります。", listName);
 
         /// <summary>
+        /// 削除が競合で拒否されたが、原因（先に削除されたか、払い戻されたか）を確かめられなかったときの文言を組み立てる（Issue #2421）。
+        /// </summary>
+        /// <param name="target">対象の説明。「何が」に相当する</param>
+        /// <param name="listName">再読込した一覧の名称</param>
+        /// <remarks>
+        /// 論理削除の WHERE が拒否するのは削除済みか払戻済（貸出中は事後の診断で別に分かる）。原因を確かめる読み直しに
+        /// 失敗したとき、<see cref="ForDelete"/> の「先に削除された可能性」とだけ述べると、払い戻されて一覧に「払戻済」で
+        /// 残っているカードについて事実でなくなる。<see cref="ForRefundStateChanged"/> と対の形。
+        /// </remarks>
+        public static string ForDeleteStateChanged(string target, string listName)
+            => Build(target, "削除", DeletedOrRefundedReason, listName);
+
+        /// <summary>
         /// 削除しようとした交通系ICカードが払戻済になっていたときの文言を組み立てる（Issue #2370）。
         /// </summary>
         /// <param name="target">対象の説明。「何が」に相当する</param>
@@ -225,6 +238,9 @@ namespace ICCardManager.Common
 
         /// <summary>対象の行が削除されていた（更新・払い戻しの「なぜ」）</summary>
         private const string DeletedReason = "他のパソコンや別の操作で削除された可能性があります。";
+
+        /// <summary>対象の行が削除された、または払い戻された（状態の変わった削除・払い戻しの「なぜ」。Issue #2421）</summary>
+        private const string DeletedOrRefundedReason = "他のパソコンや別の操作で削除された、または払い戻された可能性があります。";
 
         /// <summary>同じ識別子の行が先に登録されていた（登録の「なぜ」）</summary>
         private const string RegisteredReason = "他のパソコンや別の操作で先に登録された可能性があります。";

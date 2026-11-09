@@ -207,6 +207,10 @@ public class CardManageViewModelSystemLendTests : IDisposable
         _dialogServiceMock.Verify(
             d => d.ShowError(It.Is<string>(m => m.Contains("既に貸出中")), It.IsAny<string>()),
             Times.Once);
+        // Issue #2421: 削除・払い戻しの案内と同じく、どのカードかを名指しする
+        _dialogServiceMock.Verify(
+            d => d.ShowError(It.Is<string>(m => m.StartsWith("交通系ICカード「") && !m.Contains("このカードは")), It.IsAny<string>()),
+            Times.Once);
         _staffAuthServiceMock.Verify(
             s => s.RequestAuthenticationAsync(It.IsAny<string>()), Times.Never);
         _ledgerRepositoryMock.Verify(r => r.InsertAsync(It.IsAny<Ledger>()), Times.Never);

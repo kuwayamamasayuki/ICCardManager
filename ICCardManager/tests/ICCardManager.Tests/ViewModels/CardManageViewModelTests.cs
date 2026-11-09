@@ -1654,19 +1654,42 @@ public class CardManageViewModelTests : IDisposable
     /// Issue #2421: 削除・払い戻しの失敗の文言は、到達しないと読める既定の分岐（CardOperationResult の
     /// 未知の値）でも 3 要素（何が・なぜ・どうすれば）を持つこと
     /// </summary>
+    /// <remarks>
+    /// 操作は internal の列挙型なので、public のテストメソッドの引数には「削除なら true」で渡す。
+    /// </remarks>
     [Theory]
-    [InlineData("削除")]
-    [InlineData("払い戻し")]
-    public void BuildOperationFailureMessage_UnknownResult_ShouldSatisfyThreeElements(string operationName)
+    [InlineData(true, "削除")]
+    [InlineData(false, "払い戻し")]
+    public void BuildOperationFailureMessage_UnknownResult_ShouldSatisfyThreeElements(bool isDelete, string operationName)
     {
+        var operation = isDelete
+            ? CardManageViewModel.CardWriteOperation.Delete
+            : CardManageViewModel.CardWriteOperation.Refund;
         var message = CardManageViewModel.BuildOperationFailureMessage(
-            (ICCardManager.Data.Repositories.CardOperationResult)99, "交通系ICカード「はやかけん H-001」", operationName);
+            (ICCardManager.Data.Repositories.CardOperationResult)99, "交通系ICカード「はやかけん H-001」", operation);
 
         message.Should().Contain("交通系ICカード「はやかけん H-001」");
         message.Should().Contain($"{operationName}できませんでした");
         message.Should().Contain("カード一覧を再読み込みしました");
         message.Should().EndWith("ください。");
         message.Should().NotBe($"{operationName}に失敗しました。");
+    }
+
+    /// <summary>
+    /// Issue #2421（レビュー指摘）: 操作は型で渡し、未知の操作を黙って削除として扱わないこと
+    /// </summary>
+    /// <remarks>
+    /// 以前は操作名の文字列が「払い戻し」でなければ削除の文言を選んでいた。列挙値を足して文言の操作名を
+    /// 定義し忘れたら、利用者に誤った操作名を出さずに開発時に失敗させる。
+    /// </remarks>
+    [Fact]
+    public void BuildOperationFailureMessage_UnknownOperation_ShouldThrow()
+    {
+        var act = () => CardManageViewModel.BuildOperationFailureMessage(
+            ICCardManager.Data.Repositories.CardOperationResult.Conflict, "交通系ICカード「はやかけん H-001」",
+            (CardManageViewModel.CardWriteOperation)99);
+
+        act.Should().Throw<ArgumentOutOfRangeException>();
     }
 
     #endregion
@@ -3707,14 +3730,16 @@ public class CardManageViewModelTests : IDisposable
 
     /// <summary>
     /// Issue #2370: 競合の後の読み直し（原因が払い戻しかの判定）が例外を投げても、例外を外へ出さず
-    /// 汎用の競合文言で案内し、一覧を再読込すること
+    /// 案内し、一覧を再読込すること
     /// </summary>
     /// <remarks>
     /// 読み直しは文言を選ぶためだけのもので、削除が拒否されたことは確定している。例外が抜けると
     /// 案内も一覧の再読込も行われない。
+    /// Issue #2421（レビュー指摘）: 原因が分からないので、削除と払い戻しの両方を候補に挙げる（ForDeleteStateChanged）。
+    /// 「先に削除された可能性」とだけ述べると、払い戻されて一覧に「払戻済」で残っているカードについて事実でなくなる。
     /// </remarks>
     [Fact]
-    public async Task DeleteAsync_WhenRereadAfterConflictThrows_ShouldFallBackToGenericConflictMessage()
+    public async Task DeleteAsync_WhenRereadAfterConflictThrows_ShouldNameBothDeletionAndRefundAsCauses()
     {
         // Arrange
         const string idm = "0102030405060708";
@@ -3731,7 +3756,12 @@ public class CardManageViewModelTests : IDisposable
             .ThrowsAsync(new InvalidOperationException("読み直しに失敗"));
         _cardRepositoryMock.Setup(r => r.DeleteAsync(idm, It.IsAny<SQLiteTransaction>()))
             .ReturnsAsync(ICCardManager.Data.Repositories.CardOperationResult.Conflict);
-        _cardRepositoryMock.Setup(r => r.GetAllAsync()).ReturnsAsync(new List<IcCard>());
+        var events = new List<string>();
+        _cardRepositoryMock.Setup(r => r.GetAllAsync())
+            .Callback(() => events.Add("reload"))
+            .ReturnsAsync(new List<IcCard>());
+        _dialogServiceMock.Setup(d => d.ShowError(It.IsAny<string>(), It.IsAny<string>()))
+            .Callback(() => events.Add("error"));
 
         // Act
         var act = async () => await _viewModel.DeleteAsync();
@@ -3739,9 +3769,12 @@ public class CardManageViewModelTests : IDisposable
         // Assert
         await act.Should().NotThrowAsync();
         _dialogServiceMock.Verify(d => d.ShowError(
-            ICCardManager.Common.ConcurrencyConflictMessage.ForDelete("交通系ICカード「はやかけん H-001」", "カード一覧"),
+            ICCardManager.Common.ConcurrencyConflictMessage.ForDeleteStateChanged("交通系ICカード「はやかけん H-001」", "カード一覧"),
             "削除できません"), Times.Once);
-        _cardRepositoryMock.Verify(r => r.GetAllAsync(), Times.Once);
+        _dialogServiceMock.Verify(d => d.ShowError(
+            It.Is<string>(m => m.Contains("先に削除された可能性")), It.IsAny<string>()), Times.Never,
+            "原因が分からないのに削除だけを原因に挙げない");
+        events.Should().Equal(new[] { "reload", "error" }, "「再読み込みしました」と案内するので、先に再読込する");
     }
 
     /// <summary>

@@ -157,6 +157,21 @@ public class ConcurrencyConflictMessageTests
     }
 
     /// <summary>
+    /// Issue #2421: 削除が競合で拒否され原因を確かめられなかったときは、削除の操作名で述べ、
+    /// 原因の候補に削除と払い戻しの両方を挙げること（<see cref="ConcurrencyConflictMessage.ForRefundStateChanged"/> と対）
+    /// </summary>
+    [Fact]
+    public void ForDeleteStateChanged_NamesBothDeletionAndRefundAsCauses()
+    {
+        var message = ConcurrencyConflictMessage.ForDeleteStateChanged(Target, ListName);
+
+        message.Should().StartWith($"{Target}を削除できませんでした。");
+        message.Should().Contain("削除された");
+        message.Should().Contain("払い戻された可能性があります");
+        message.Should().NotBe(ConcurrencyConflictMessage.ForDelete(Target, ListName));
+    }
+
+    /// <summary>
     /// Issue #2370: 払戻済のため削除できなかったときは、払い戻されたことを理由に挙げ、
     /// 「やり直す」ではなく状態の確認を促すこと（払戻済のカードは何度やり直しても削除できない）。
     /// </summary>

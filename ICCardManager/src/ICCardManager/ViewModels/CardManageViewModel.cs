@@ -1070,7 +1070,7 @@ namespace ICCardManager.ViewModels
                 // Issue #1109: 編集フォーム非表示時でもユーザーにフィードバックするためダイアログで通知
                 // Issue #2421: どのカードか・返却されてから押し直すことまで述べる（文言は BuildLentRefusedMessage に 1 か所）
                 _dialogService.ShowError(
-                    BuildLentRefusedMessage(FormatCardLabel(SelectedCard.CardType, SelectedCard.CardNumber), "削除", lentAfterListLoaded: false),
+                    BuildLentRefusedMessage(FormatCardLabel(SelectedCard.CardType, SelectedCard.CardNumber), CardWriteOperation.Delete, lentAfterListLoaded: false),
                     "削除できません");
                 return;
             }
@@ -1153,12 +1153,23 @@ namespace ICCardManager.ViewModels
                     // 同じ状況に別の説明が出ることになる（Issue #1757 と同じ判断）。
                     await NotifyDeleteConflictAsync(targetLabel);
                 }
-                else if (deleteResult == CardOperationResult.Conflict
-                    && await IsRefundedAfterDeleteConflictAsync(targetIdm))
+                else if (deleteResult == CardOperationResult.Conflict)
                 {
-                    // Issue #2370: 読み直した後・書き込みの前に払い戻され、論理削除の WHERE（is_refunded = 0）が
-                    // 拒否した。
-                    await NotifyDeleteRefusedAsync(ConcurrencyConflictMessage.ForDeleteRefunded(targetLabel, "カード一覧"));
+                    // Issue #2370: 読み直した後・書き込みの前に払い戻されていれば、論理削除の WHERE（is_refunded = 0）が
+                    // 拒否した。払い戻されたことを名指しする。
+                    // Issue #2421: 払戻済でなければ（削除済みで読めない場合を含む）先に削除された競合として案内する。
+                    // 読み直しに失敗して原因が分からないときは、削除と払い戻しの両方を候補に挙げる
+                    // （「削除された可能性」とだけ述べると、払い戻されて一覧に「払戻済」で残っているカードについて事実でなくなる）。
+                    var refunded = await IsRefundedAfterDeleteConflictAsync(targetIdm);
+                    var message = refunded switch
+                    {
+                        true => ConcurrencyConflictMessage.ForDeleteRefunded(targetLabel, CardListInThisScreen),
+                        false => BuildOperationFailureMessage(deleteResult, targetLabel, CardWriteOperation.Delete),
+                        null => ConcurrencyConflictMessage.ForDeleteStateChanged(targetLabel, CardListInThisScreen),
+                    };
+                    // 「再読み込みしました」と述べるので、キャッシュを破棄して再読込してから案内する（#1759。下の else と同じ）
+                    _cardRepository.InvalidateCache();
+                    await NotifyDeleteRefusedAsync(message);
                 }
                 else
                 {
@@ -1168,7 +1179,7 @@ namespace ICCardManager.ViewModels
                     // 再読込してからダイアログを出す（以前はダイアログの後に再読込していた）。キャッシュは事後の診断が
                     // 破棄済みだが、案内を事実にするための前提なのでここでも明示的に破棄する（#1759）。
                     _cardRepository.InvalidateCache();
-                    await NotifyDeleteRefusedAsync(BuildOperationFailureMessage(deleteResult, targetLabel, "削除"));
+                    await NotifyDeleteRefusedAsync(BuildOperationFailureMessage(deleteResult, targetLabel, CardWriteOperation.Delete));
                 }
             }
         }
@@ -1192,16 +1203,18 @@ namespace ICCardManager.ViewModels
         /// 削除が競合（影響行数 0）で拒否された後に、原因が払い戻しかどうかを読み直して判定する（Issue #2370）
         /// </summary>
         /// <returns>
-        /// 読み直したカードが払戻済なら <c>true</c>。存在しない・未払戻・読み直しに失敗した場合は <c>false</c>
-        /// （呼び出し側は従来の汎用の競合文言で案内する）
+        /// 読み直したカードが払戻済なら <c>true</c>。存在しない（削除済み）・未払戻なら <c>false</c>
+        /// （呼び出し側は先に削除された競合 <see cref="ConcurrencyConflictMessage.ForDelete"/> で案内する）。
+        /// 読み直しに失敗して分からない場合は <c>null</c>（呼び出し側は削除と払い戻しの両方を候補に挙げる
+        /// <see cref="ConcurrencyConflictMessage.ForDeleteStateChanged"/> で案内する。Issue #2421）
         /// </returns>
         /// <remarks>
         /// 読み直しはキャッシュを経由するが、0 行のときリポジトリの事後診断と
         /// <c>CardManagementService.DeleteAsync</c> の finally がキャッシュを破棄済みなので DB の最新状態を読む。
         /// 読み直しは文言を選ぶためだけのもので、削除が拒否されたことは確定している。ここで例外を外へ出すと
-        /// 案内も一覧の再読込も行われないため、ログを残して汎用の競合文言へ倒す。
+        /// 案内も一覧の再読込も行われないため、ログを残して「原因不明」（null）として返す。
         /// </remarks>
-        private async Task<bool> IsRefundedAfterDeleteConflictAsync(string cardIdm)
+        private async Task<bool?> IsRefundedAfterDeleteConflictAsync(string cardIdm)
         {
             try
             {
@@ -1210,8 +1223,9 @@ namespace ICCardManager.ViewModels
             catch (Exception ex)
             {
                 _logger?.LogWarning(ex,
-                    "交通系ICカードの削除が競合で拒否された後、原因（払い戻し）を確かめる読み直しに失敗しました。汎用の競合文言で案内します");
-                return false;
+                    "交通系ICカードの削除が競合で拒否された後、原因（払い戻し）を確かめる読み直しに失敗しました。" +
+                    "削除された可能性と払い戻された可能性の両方を挙げる文言で案内します");
+                return null;
             }
         }
 
@@ -1276,7 +1290,7 @@ namespace ICCardManager.ViewModels
                 // Issue #1109: 編集フォーム非表示時でもユーザーにフィードバックするためダイアログで通知
                 // Issue #2421: どのカードか・返却されてから押し直すことまで述べる（文言は BuildLentRefusedMessage に 1 か所）
                 _dialogService.ShowError(
-                    BuildLentRefusedMessage(FormatCardLabel(SelectedCard.CardType, SelectedCard.CardNumber), "払い戻し", lentAfterListLoaded: false),
+                    BuildLentRefusedMessage(FormatCardLabel(SelectedCard.CardType, SelectedCard.CardNumber), CardWriteOperation.Refund, lentAfterListLoaded: false),
                     "払い戻しできません");
                 return;
             }
@@ -1355,7 +1369,7 @@ namespace ICCardManager.ViewModels
                     using (SuspendBusy())
                     {
                         _dialogService.ShowError(
-                            BuildOperationFailureMessage(ex.Result, FormatCardLabel(refundCardType, refundCardNumber), "払い戻し"),
+                            BuildOperationFailureMessage(ex.Result, FormatCardLabel(refundCardType, refundCardNumber), CardWriteOperation.Refund),
                             "払い戻しできません");
                     }
                     return;
@@ -1448,8 +1462,9 @@ namespace ICCardManager.ViewModels
             {
                 // Issue #1109: CanExecute で無効化すると無言で押せなくなるため、
                 // ここでダイアログとして伝える（編集フォーム非表示時でも見えるように）。
+                // Issue #2421: 削除・払い戻しの案内（BuildLentRefusedMessage）と同じく、どのカードかを名指しする
                 _dialogService.ShowError(
-                    "このカードは既に貸出中のため、貸出記録を作成できません。" +
+                    $"{FormatCardLabel(SelectedCard.CardType, SelectedCard.CardNumber)}は既に貸出中のため、貸出記録を作成できません。" +
                     "カードが返却されたらメイン画面でタッチしてください。",
                     "作成できません");
                 return;
@@ -1521,11 +1536,38 @@ namespace ICCardManager.ViewModels
         }
 
         /// <summary>
+        /// 書き込みが拒否され得る、交通系ICカードを運用から外す操作（Issue #2421）
+        /// </summary>
+        /// <remarks>
+        /// 操作名の文字列で分岐すると、表記の揺れや未知の操作を黙って削除として扱う。操作は型で渡し、
+        /// 文言に使う名前（ボタン名と同じ）は <see cref="GetOperationName"/> の 1 か所で決める。
+        /// </remarks>
+        internal enum CardWriteOperation
+        {
+            /// <summary>削除（論理削除）</summary>
+            Delete,
+
+            /// <summary>払い戻し</summary>
+            Refund,
+        }
+
+        /// <summary>
+        /// 操作の名前（ボタン名と同じ「削除」「払い戻し」）を返す
+        /// </summary>
+        /// <exception cref="ArgumentOutOfRangeException">未知の操作（列挙値を足したのにここを直していない）</exception>
+        private static string GetOperationName(CardWriteOperation operation) => operation switch
+        {
+            CardWriteOperation.Delete => "削除",
+            CardWriteOperation.Refund => "払い戻し",
+            _ => throw new ArgumentOutOfRangeException(nameof(operation), operation, "文言の操作名が定義されていない操作です。"),
+        };
+
+        /// <summary>
         /// 削除・払い戻しの書き込みが 0 行だったときの案内を、事後の診断結果（<see cref="CardOperationResult"/>）に応じて組み立てる
         /// </summary>
         /// <param name="result">操作結果（リポジトリの事後の診断。<c>CardRepository.DiagnoseFailureAsync</c>）</param>
         /// <param name="targetLabel">対象カードの表示名（<see cref="FormatCardLabel"/> の形）</param>
-        /// <param name="operationName">操作名（「削除」または「払い戻し」。ボタン名と同じ）</param>
+        /// <param name="operation">拒否された操作</param>
         /// <remarks>
         /// <para>
         /// Issue #2421: どの文言も「カード一覧を再読み込みしました」と述べるので、呼び出し側は<b>一覧を再読込してから</b>
@@ -1533,7 +1575,8 @@ namespace ICCardManager.ViewModels
         /// </para>
         /// <para>
         /// 「なぜ」は操作の WHERE が拒否し得る状態で決まる。削除の Conflict は払戻済（呼び出し側が読み直して
-        /// <see cref="ConcurrencyConflictMessage.ForDeleteRefunded"/> へ分ける）を除けば削除済みなので
+        /// <see cref="ConcurrencyConflictMessage.ForDeleteRefunded"/> へ分ける。読み直せなければ
+        /// <see cref="ConcurrencyConflictMessage.ForDeleteStateChanged"/>）を除けば削除済みなので
         /// <see cref="ConcurrencyConflictMessage.ForDelete"/>。払い戻しの Conflict は削除済みか払戻済なので
         /// <see cref="ConcurrencyConflictMessage.ForRefundStateChanged"/>。
         /// </para>
@@ -1542,19 +1585,19 @@ namespace ICCardManager.ViewModels
         /// 案内の途中で例外を投げると一覧の再読込後の案内が出なくなるので、3 要素の文言で返す。
         /// </para>
         /// </remarks>
-        internal static string BuildOperationFailureMessage(CardOperationResult result, string targetLabel, string operationName)
+        internal static string BuildOperationFailureMessage(CardOperationResult result, string targetLabel, CardWriteOperation operation)
         {
-            var isRefund = operationName == "払い戻し";
-            return result switch
+            var operationName = GetOperationName(operation);
+            return (result, operation) switch
             {
-                CardOperationResult.NotFound or CardOperationResult.Conflict when !isRefund
+                (CardOperationResult.NotFound or CardOperationResult.Conflict, CardWriteOperation.Delete)
                     => ConcurrencyConflictMessage.ForDelete(targetLabel, CardListInThisScreen),
-                CardOperationResult.NotFound
+                (CardOperationResult.NotFound, CardWriteOperation.Refund)
                     => ConcurrencyConflictMessage.ForRefund(targetLabel, CardListInThisScreen),
-                CardOperationResult.Conflict
+                (CardOperationResult.Conflict, CardWriteOperation.Refund)
                     => ConcurrencyConflictMessage.ForRefundStateChanged(targetLabel, CardListInThisScreen),
-                CardOperationResult.CardIsLent
-                    => BuildLentRefusedMessage(targetLabel, operationName, lentAfterListLoaded: true),
+                (CardOperationResult.CardIsLent, _)
+                    => BuildLentRefusedMessage(targetLabel, operation, lentAfterListLoaded: true),
                 _ => $"{targetLabel}を{operationName}できませんでした。書き込んだ結果から原因を特定できなかったため、{operationName}を中止しました。" +
                      $"{CardListInThisScreen}を再読み込みしましたので、一覧で状態を確認してからやり直してください。",
             };
@@ -1564,7 +1607,7 @@ namespace ICCardManager.ViewModels
         /// 貸出中のため削除・払い戻しできないことの案内を組み立てる（Issue #2421）
         /// </summary>
         /// <param name="targetLabel">対象カードの表示名（<see cref="FormatCardLabel"/> の形）</param>
-        /// <param name="operationName">操作名（「削除」または「払い戻し」。ボタン名と同じ）</param>
+        /// <param name="operation">拒否された操作</param>
         /// <param name="lentAfterListLoaded">
         /// 一覧では貸出中でなかったのに、書き込みの時点で貸出中だったか（事後の診断で分かった）。
         /// true なら原因（他のパソコンや別の操作で貸し出された可能性）と一覧の再読込を述べる。
@@ -1572,10 +1615,13 @@ namespace ICCardManager.ViewModels
         /// </param>
         /// <remarks>
         /// 一覧の値で止める場合（書き込みの前）と、書き込みの後の診断で分かった場合で、文言を組み立てる所を 1 か所にする（#1763）。
-        /// 語彙は貸出記録の作成の案内（<see cref="CreateLendRecordAsync"/>）に揃える（#1817）。
+        /// 語彙は貸出記録の作成の案内（<see cref="CreateLendRecordAsync"/>。カードの名指し・「既に貸出中のため」・
+        /// 「他のパソコンや別の操作で貸し出された可能性があります」）に揃える（#1817）。「どうすれば」は操作ごとに違う
+        /// （貸出記録の作成は返却をメイン画面のタッチで行うよう促し、削除・払い戻しは返却後にボタンを押し直すよう促す）。
         /// </remarks>
-        internal static string BuildLentRefusedMessage(string targetLabel, string operationName, bool lentAfterListLoaded)
+        internal static string BuildLentRefusedMessage(string targetLabel, CardWriteOperation operation, bool lentAfterListLoaded)
         {
+            var operationName = GetOperationName(operation);
             var head = lentAfterListLoaded
                 ? $"{targetLabel}は既に貸出中のため、{operationName}できませんでした。" +
                   "他のパソコンや別の操作で貸し出された可能性があります。" +
