@@ -1,4 +1,5 @@
 using System;
+using System.Data.SQLite;
 using System.IO;
 using System.Linq;
 using System.Runtime.ExceptionServices;
@@ -9,8 +10,31 @@ namespace ICCardManager.UITests.Infrastructure
     /// UI テストが開発機の既存 DB（<c>%ProgramData%\ICCardManager\iccard.db</c>）を壊さないよう、
     /// 退避と復元を 1 か所で受け持つ（Issue #2062）。
     /// DB と同じフォルダーの更新通知ファイル（<c>latest_version.txt</c>）も同じ規約で退避する（Issue #2394）。
+    /// アプリが書くバックアップ先は、テスト用の DB の設定でテスト専用のフォルダーへ向けて隔離する（Issue #2423）。
     /// </summary>
     /// <remarks>
+    /// <para>
+    /// 守る対象は「テストのアプリが<b>読み書きする</b>撮影機の状態」から数える。読む側だけを数えると、
+    /// アプリが書く場所（バックアップ先とその整理）が漏れる（Issue #2423）。現在の扱い:
+    /// </para>
+    /// <list type="table">
+    /// <listheader><term>撮影機の状態</term><description>扱い</description></listheader>
+    /// <item><term>DB（<c>iccard.db</c> と付随ファイル）</term><description>読み書き。退避して終了後に復元する（#2062 / #2290）</description></item>
+    /// <item><term>更新通知ファイル（<c>latest_version.txt</c>）</term><description>読み書き。退避して取り除き、終了後に復元する（#2394）</description></item>
+    /// <item><term>バックアップ先（既定 <c>%ProgramData%\ICCardManager\backup</c>）</term><description>
+    /// 書く（起動時の自動バックアップと古い世代の整理）。退避ではなく<b>隔離</b>する — テスト用の DB の
+    /// <c>settings.backup_path</c> を <see cref="UiTestBackupDirectory"/> にして、アプリが既定の保存先に触れないようにする
+    /// （<see cref="IsolateBackupFolder"/>）。整理は「各日の最新 1 世代」を残すので、同じ日に作られたテスト用 DB の
+    /// バックアップが実 DB のバックアップを押し出していた。退避・復元にしないのは、整理が消した実 DB のバックアップを
+    /// 書き戻す手段が無い（消えた後では遅い）ため</description></item>
+    /// <item><term>ログ（<c>%ProgramData%\ICCardManager\Logs</c>）</term><description>
+    /// 書く（その日のファイルへの追記と、保持期間を過ぎたファイルの削除）。<b>扱わない</b>。追記は既存の行を変えず
+    /// （テストの起動の行は時刻で見分けられる）、削除は日付だけで決まり本物のアプリが起動しても同じファイルを消すので、
+    /// テストの起動で失われる記録が無い</description></item>
+    /// <item><term>設定ファイル（<c>database_config.txt</c> 等）</term><description>
+    /// 読む。保存先を指定していたら中止する（<see cref="ThrowIfDatabaseLocationIsConfigured"/>）。書くのは設定画面の保存の操作だけで、
+    /// 起動では書かれない</description></item>
+    /// </list>
     /// <para>
     /// 退避は 1 回の起動手順（<see cref="AppFixture.Launch"/> / <see cref="AppFixture.LaunchWithSeed"/>）につき
     /// <b>入口で 1 回だけ</b>行う。旧実装は起動のたびに「DB があれば退避する」を繰り返したため、
@@ -50,6 +74,30 @@ namespace ICCardManager.UITests.Infrastructure
 
         /// <summary>旧実装（#2062 以前）の <c>LaunchWithSeed</c> が中断時に残し得た退避ファイル。</summary>
         internal static readonly string LegacySeededOriginalFileName = DatabaseFileName + BackupSuffix + ".seeded-original";
+
+        /// <summary>
+        /// バックアップ先の設定キー（本体の <c>SettingsRepository.KeyBackupPath</c> と同じ。Issue #2423）。
+        /// </summary>
+        internal const string BackupPathSettingKey = "backup_path";
+
+        /// <summary>
+        /// 既定のバックアップ先のフォルダー名（本体の <c>PathValidator.GetDefaultBackupPath</c> は DB と同じフォルダーの配下のこの名前）。
+        /// </summary>
+        internal const string DefaultBackupFolderName = "backup";
+
+        /// <summary>
+        /// UI テストのアプリが自動バックアップを作るフォルダー（Issue #2423）。
+        /// </summary>
+        /// <remarks>
+        /// <c>%TEMP%</c> ではなく <c>%ProgramData%</c> の配下に置く。システム管理画面（F6）は保存先のパスを表示し、撮影
+        /// （<c>restore_list.png</c>）に写る。<c>%TEMP%</c> だと撮影機の利用者名がマニュアルの画像へ入る。
+        /// 実行のたびに変えないのは、世代が溜まり続けないようにするため（古い世代はアプリ自身の整理が消す）。
+        /// 本体の既定の保存先（<c>%ProgramData%\ICCardManager\backup</c>）の外にあり、本体の整理はこのフォルダーにしか効かない。
+        /// </remarks>
+        internal static string UiTestBackupDirectory { get; } = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),
+            "ICCardManager.UITests",
+            DefaultBackupFolderName);
 
         private static readonly string[] CompanionSuffixes = { "-journal", "-wal", "-shm" };
 
@@ -225,6 +273,71 @@ namespace ICCardManager.UITests.Infrastructure
             {
                 DeleteWithRetry(PathOf(name));
             }
+        }
+
+        /// <summary>
+        /// アプリの既定のバックアップ先（DB のフォルダーの <see cref="DefaultBackupFolderName"/>）。
+        /// アプリの <c>PathValidator.GetDefaultBackupPath</c> と同じ場所で、テストのアプリにはここへ書かせない（Issue #2423）。
+        /// </summary>
+        internal string DefaultBackupDirectory => PathOf(DefaultBackupFolderName);
+
+        /// <summary>
+        /// Issue #2423: テストのアプリが開く DB の <c>settings.backup_path</c> を <paramref name="backupDirectory"/> にして、
+        /// 起動時の自動バックアップと古い世代の整理を既定の保存先から切り離す。アプリを起動する<b>前</b>に呼ぶこと。
+        /// </summary>
+        /// <param name="backupDirectory">テスト専用のバックアップ先（無ければ作る）。</param>
+        /// <remarks>
+        /// <para>
+        /// 本体では <c>backup_path</c> を書くのはバックアップ先の変更（<c>SettingsRepository.ChangeBackupPathAsync</c>。職員証の認証と
+        /// 変更日時・PC の記録を伴う）だけで、一括保存にも載らない。ここで直接書くのは、テストのアプリに既定の保存先を一度も
+        /// 使わせないため — 起動時の自動バックアップはメイン画面の表示より前に走るので、起動してから画面で変える手段では間に合わない。
+        /// 変更日時・PC は書かない（システム管理画面の「最終変更」は「記録なし」のまま）。
+        /// </para>
+        /// <para>
+        /// DB が無ければ、<c>settings</c> テーブル（本体の初期マイグレーションと同じ定義）だけを持つ DB を作る。<c>staff</c> テーブルが
+        /// 無いので、アプリはこれを新規 DB とみなして初期マイグレーションから適用する（<c>CREATE TABLE IF NOT EXISTS</c> と
+        /// <c>INSERT OR IGNORE</c> なので、書いた行は残る）。DB があれば（<see cref="AppFixture.Launch"/> は開発機の DB をそのまま開く）
+        /// その行だけを上書きする。DB は退避済みなので、元の設定は <see cref="Restore"/> で戻る。
+        /// </para>
+        /// <para>
+        /// 設定したフォルダーをアプリが使えない（パスの検証に通らない）と、アプリは既定の保存先へ退避する。
+        /// 退避先が既定の保存先ではないことは UI テスト（実行前後の既定の保存先の比較）で確かめた。
+        /// </para>
+        /// </remarks>
+        internal void IsolateBackupFolder(string backupDirectory)
+        {
+            if (string.IsNullOrWhiteSpace(backupDirectory))
+            {
+                throw new ArgumentException("テスト専用のバックアップ先を指定する", nameof(backupDirectory));
+            }
+
+            var normalized = Path.GetFullPath(backupDirectory).TrimEnd(Path.DirectorySeparatorChar);
+            var defaultDirectory = Path.GetFullPath(DefaultBackupDirectory).TrimEnd(Path.DirectorySeparatorChar);
+            if (string.Equals(normalized, defaultDirectory, StringComparison.OrdinalIgnoreCase)
+                || normalized.StartsWith(defaultDirectory + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))
+            {
+                // 既定の保存先とその配下は、本体の整理（各日の最新 1 世代）が実 DB のバックアップと同じ扱いで間引く
+                throw new ArgumentException(
+                    $"テスト専用のバックアップ先 {backupDirectory} が既定のバックアップ先 {DefaultBackupDirectory} と重なっています。" +
+                    "既定のバックアップ先の外のフォルダーを指定する。",
+                    nameof(backupDirectory));
+            }
+
+            Directory.CreateDirectory(normalized);
+
+            using var connection = new SQLiteConnection($"Data Source={DatabasePath};Version=3");
+            connection.Open();
+            using (var create = connection.CreateCommand())
+            {
+                create.CommandText = "CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT)";
+                create.ExecuteNonQuery();
+            }
+
+            using var upsert = connection.CreateCommand();
+            upsert.CommandText = "INSERT OR REPLACE INTO settings (key, value) VALUES (@key, @value)";
+            upsert.Parameters.AddWithValue("@key", BackupPathSettingKey);
+            upsert.Parameters.AddWithValue("@value", normalized);
+            upsert.ExecuteNonQuery();
         }
 
         /// <summary>
