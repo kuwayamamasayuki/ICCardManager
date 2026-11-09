@@ -217,6 +217,9 @@ namespace ICCardManager.UITests.Infrastructure
         public const string VirtualCardAddEntryButton = "履歴追加";
         [UiaName]
         public const string VirtualCardExecuteButton = "タッチ実行";
+        /// <summary>仮想タッチダイアログの「現在残高」欄（追加した利用の<b>後の</b>残高。Issue #2425）。</summary>
+        [UiaName]
+        public const string VirtualCardCurrentBalanceBox = "現在残高";
 
         /// <summary>
         /// トースト通知ウィンドウの AutomationProperties.HelpText（メイン画面とは別のトップレベルウィンドウ）。

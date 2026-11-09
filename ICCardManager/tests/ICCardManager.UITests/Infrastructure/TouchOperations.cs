@@ -1,4 +1,5 @@
 using System;
+using System.Globalization;
 using System.Linq;
 using FlaUI.Core.AutomationElements;
 using FlaUI.Core.Definitions;
@@ -27,6 +28,9 @@ namespace ICCardManager.UITests.Infrastructure
         /// <summary>トーストは 3 秒で消える（ToastNotificationWindow.DefaultDisplayDurationMs）ので、出現待ちは短く切る。</summary>
         private static readonly TimeSpan ToastTimeout = TimeSpan.FromSeconds(10);
 
+        /// <summary>「現在残高」欄へ入れた値が、非同期の読み込みで上書きされずに保たれたとみなす時間。</summary>
+        private static readonly TimeSpan BalanceStableDuration = TimeSpan.FromMilliseconds(500);
+
         /// <summary>DEBUG パネルのボタンを押す。Content 由来の Name は他の要素と重なり得るので Button に限定する。</summary>
         public static void InvokeDebugPanelButton(MainWindowPage page, string name)
         {
@@ -49,7 +53,15 @@ namespace ICCardManager.UITests.Infrastructure
         /// <param name="page">メイン画面。</param>
         /// <param name="entryStation">乗車駅。null なら既定のまま（駅名なし＝バス利用扱い）。</param>
         /// <param name="exitStation">降車駅。同上。</param>
-        public static void ExecuteVirtualTouchWithOneEntry(MainWindowPage page, string? entryStation = null, string? exitStation = null)
+        /// <param name="fare">追加した利用の金額。null なら既定のまま（ダイアログの既定は 200 円）。</param>
+        /// <param name="currentBalance">
+        /// ダイアログの「現在残高」（追加した利用の<b>後の</b>残高）。null なら既定のまま（DB の最新残高）。
+        /// ダイアログは履歴の残高をこの値から逆算するので、既定のまま利用を足すと「払出があるのに残高が変わらない」
+        /// 履歴をカードが申告し、そのまま台帳に入る（Issue #2425）。台帳の残高チェーンを保ちたい呼び出し側
+        /// （マニュアルの撮影）は「台帳の最新残高 − 追加した利用の合計」を渡す。
+        /// </param>
+        public static void ExecuteVirtualTouchWithOneEntry(
+            MainWindowPage page, string? entryStation = null, string? exitStation = null, int? fare = null, int? currentBalance = null)
         {
             InvokeDebugPanelButton(page, TestConstants.DebugPanelVirtualTouchButton);
             var dialog = page.WaitForDialog(TestConstants.VirtualCardDialogName);
@@ -57,7 +69,7 @@ namespace ICCardManager.UITests.Infrastructure
 
             dialogPage.ClickButton(TestConstants.VirtualCardAddEntryButton);
 
-            if (entryStation != null || exitStation != null)
+            if (entryStation != null || exitStation != null || fare != null)
             {
                 // WPF の DataGridTextColumn のセルは UIA の ValuePattern（DataGridCellItemAutomationPeer）で値を設定できる。
                 // 列順は XAML どおり: 0=日付, 1=乗車駅, 2=降車駅, 3=金額, 4=チャージ
@@ -74,10 +86,94 @@ namespace ICCardManager.UITests.Infrastructure
                 {
                     row!.Cells[2].Patterns.Value.Pattern.SetValue(exitStation);
                 }
+
+                if (fare != null)
+                {
+                    SetFare(row!.Cells[3], fare.Value);
+                }
+            }
+
+            if (currentBalance != null)
+            {
+                SetCurrentBalance(dialog, currentBalance.Value);
             }
 
             dialogPage.ClickButton(TestConstants.VirtualCardExecuteButton);
         }
+
+        /// <summary>
+        /// 仮想タッチダイアログの履歴の金額セルへ運賃を入れ、読み返して確かめる（Issue #2425）。
+        /// </summary>
+        /// <remarks>
+        /// 撮影の運賃（<see cref="ScreenshotSeedData.VirtualTouchFare"/> ＝ 200）はダイアログの既定の金額と同じなので、
+        /// 運賃を入れて読み返すだけでは、入力が効いていなくても既定値のまま一致して素通りする。
+        /// 先に運賃と異なる値を入れて読み返し、セルへの入力が効くことを確かめてから運賃を入れる。
+        /// </remarks>
+        private static void SetFare(AutomationElement cell, int fare)
+        {
+            var probe = fare + 1;
+            foreach (var value in new[] { probe, fare })
+            {
+                var text = value.ToString(CultureInfo.InvariantCulture);
+                cell.Patterns.Value.Pattern.SetValue(text);
+                var read = Retry.WhileFalse(
+                    () => ReadAmount(cell.Patterns.Value.Pattern.Value.Value) == value,
+                    TimeSpan.FromSeconds(5)).Success;
+                read.Should().BeTrue(
+                    $"仮想タッチダイアログの履歴の金額セルに {value:N0} が入ること（読み返した値: \"{cell.Patterns.Value.Pattern.Value.Value}\"）。" +
+                    "入力が効かないと既定の金額のまま返却され、撮影の残高と運賃が食い違う");
+            }
+        }
+
+        private static int? ReadAmount(string? text) =>
+            int.TryParse((text ?? string.Empty).Replace(",", string.Empty), NumberStyles.Integer, CultureInfo.InvariantCulture, out var parsed)
+                ? parsed
+                : null;
+
+        /// <summary>
+        /// 仮想タッチダイアログの「現在残高」欄へ値を入れ、入ったことを確かめる（Issue #2425）。
+        /// </summary>
+        /// <remarks>
+        /// 欄の既定値は、ダイアログの生成時（カードの既定選択）と表示時（<c>Loaded</c>）の 2 回、DB から非同期に読み込まれる。
+        /// 入れた後に読み込みが終わると既定値で上書きされるので、入れた値が一定時間保たれるまで入れ直す。
+        /// それでも上書きされたまま返却した場合は、撮影の後の残高チェーンの検査（<see cref="ScreenshotAssertions.RequireConsistentLedgerChain"/>）が止める。
+        /// </remarks>
+        private static void SetCurrentBalance(Window dialog, int value)
+        {
+            var box = Retry.WhileNull(
+                () => dialog.FindFirstDescendant(cf => cf.ByName(TestConstants.VirtualCardCurrentBalanceBox).And(cf.ByControlType(ControlType.Edit))),
+                TimeSpan.FromSeconds(TestConstants.DialogOpenTimeoutSeconds)).Result;
+            box.Should().NotBeNull($"仮想タッチダイアログに「{TestConstants.VirtualCardCurrentBalanceBox}」欄が存在すること");
+
+            var expected = value.ToString(CultureInfo.InvariantCulture);
+            var textBox = box!.AsTextBox();
+            var stableSince = (DateTime?)null;
+            var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(TestConstants.DialogOpenTimeoutSeconds);
+            while (DateTime.UtcNow < deadline)
+            {
+                if (ReadBalance(textBox) == value)
+                {
+                    stableSince ??= DateTime.UtcNow;
+                    if (DateTime.UtcNow - stableSince.Value >= BalanceStableDuration)
+                    {
+                        return;
+                    }
+                }
+                else
+                {
+                    stableSince = null;
+                    textBox.Patterns.Value.Pattern.SetValue(expected);
+                }
+
+                System.Threading.Thread.Sleep(100);
+            }
+
+            ReadBalance(textBox).Should().Be(value,
+                $"仮想タッチダイアログの「{TestConstants.VirtualCardCurrentBalanceBox}」欄に {value:N0} が入ったままであること" +
+                "（既定値〈DB の最新残高〉のまま返却すると、払出があるのに残高が変わらない行が台帳に入る）");
+        }
+
+        private static int? ReadBalance(TextBox textBox) => ReadAmount(textBox.Text);
 
         /// <summary>
         /// 職員証認証ダイアログを仮想タッチで通す。

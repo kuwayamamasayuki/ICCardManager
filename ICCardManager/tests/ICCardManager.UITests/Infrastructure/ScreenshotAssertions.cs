@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Data.SQLite;
 using System.IO;
 using System.Linq;
 using FlaUI.Core.AutomationElements;
@@ -66,6 +67,71 @@ namespace ICCardManager.UITests.Infrastructure
                 return;
             }
 
+            var failedNames = RenameToFailed(capturedPaths);
+
+            throw new InvalidOperationException(
+                $"撮影した画像の警告欄に更新の案内が写っています（{string.Join(" / ", notices)}）。" +
+                "UI テストの間は latest_version.txt を退避して取り除くはずなので、UiTestDatabaseGuard の退避が効いていません。" +
+                $"撮れた画像は {string.Join("、", failedNames)} に残しています。" +
+                "C:\\ProgramData\\ICCardManager の latest_version.txt と退避（.uitest-backup / .uitest-absent）の状態を確認してから撮り直してください。");
+        }
+
+        /// <summary>
+        /// 撮影用の DB の台帳で、残高チェーン（前行の残額 ＋ 受入 − 払出 ＝ 当行の残額）が切れていないことを確かめる（Issue #2425）。
+        /// 切れていれば、撮った画像を <c>_FAILED.png</c> へ改名してから例外にする。
+        /// </summary>
+        /// <param name="capturedPaths">この DB の内容を写した画像。</param>
+        /// <remarks>
+        /// <para>
+        /// マニュアルの返却完了の画像が「鉄道 払出 200 残高 20,000」（直前の残高も 20,000）を写していた。
+        /// 仮想タッチのダイアログの「現在残高」を DB の最新残高のまま返却し、カードが申告した残高がそのまま台帳に入ったため。
+        /// 物品出納簿の「受入 − 払出 ＝ 残額」を前提に読む庶務担当者には、システムの計算の誤りに見える。
+        /// シードの残高チェーンは単体テスト（<c>ScreenshotSeedDataBalanceChainTests</c>）が固定しているが、
+        /// 撮影の操作が作る行はそこでは見られないので、撮った後に DB を読み返す。
+        /// </para>
+        /// <para>
+        /// 規則は本体の <c>LedgerConsistencyChecker</c> の台帳の行の検査を写したもの（<see cref="LedgerBalanceChain"/>）。
+        /// 明細（<c>ledger_detail</c>）のチェーンは見ず、同じ日の行は id の順に並べる点が本体と異なる。
+        /// アプリの起動中に読み取り専用で開き、すぐ閉じる（<see cref="DatabaseProbe"/> と同じ）。
+        /// 返却の記録はトーストより前にコミットされるので、トースト・返却後のダイアログを撮った後に呼べばよい。
+        /// </para>
+        /// </remarks>
+        internal static void RequireConsistentLedgerChain(params string[] capturedPaths)
+        {
+            IReadOnlyList<string> breaks;
+            using (var conn = new SQLiteConnection($"Data Source={AppFixture.DatabasePath};Version=3;Read Only=True"))
+            {
+                conn.Open();
+                breaks = LedgerBalanceChain.FindBreaks(conn);
+            }
+
+            RejectCapturesIfLedgerChainBroken(breaks, capturedPaths);
+        }
+
+        /// <summary>
+        /// 残高チェーンが切れていたら、撮った画像を <c>_FAILED.png</c> へ改名してから例外にする（GUI に依存しない部分）。
+        /// </summary>
+        /// <param name="breaks">切れている箇所の説明（<see cref="LedgerBalanceChain.FindBreaks(SQLiteConnection)"/> の結果）。</param>
+        /// <param name="capturedPaths">撮った画像のパス。</param>
+        internal static void RejectCapturesIfLedgerChainBroken(IReadOnlyCollection<string> breaks, IEnumerable<string> capturedPaths)
+        {
+            if (breaks.Count == 0)
+            {
+                return;
+            }
+
+            var failedNames = RenameToFailed(capturedPaths);
+
+            throw new InvalidOperationException(
+                $"撮影用の DB の台帳で残高チェーン（前行の残額 ＋ 受入 − 払出 ＝ 残額）が切れています（{string.Join(" / ", breaks)}）。" +
+                "仮想タッチの「現在残高」が、追加した利用の後の残高（台帳の最新残高 − 利用の合計）になっていない可能性があります。" +
+                $"撮れた画像は {string.Join("、", failedNames)} に残しています。" +
+                "ScreenshotSeedData の残高の定数と、ExecuteVirtualTouchWithOneEntry へ渡した現在残高を確認してから撮り直してください。");
+        }
+
+        /// <summary>撮れた画像を <c>_FAILED.png</c> へ改名し、改名後の名前（改名できなければその旨）を返す。</summary>
+        private static List<string> RenameToFailed(IEnumerable<string> capturedPaths)
+        {
             var failedNames = new List<string>();
             foreach (var path in capturedPaths)
             {
@@ -78,16 +144,12 @@ namespace ICCardManager.UITests.Infrastructure
                 }
                 catch (Exception ex) when (ex is IOException || ex is UnauthorizedAccessException)
                 {
-                    // 診断用の改名に失敗しても、案内が写っていたこと（本来の原因）は伝える
+                    // 診断用の改名に失敗しても、本来の原因は伝える
                     failedNames.Add($"{Path.GetFileName(path)}（改名できず。公開しないこと）");
                 }
             }
 
-            throw new InvalidOperationException(
-                $"撮影した画像の警告欄に更新の案内が写っています（{string.Join(" / ", notices)}）。" +
-                "UI テストの間は latest_version.txt を退避して取り除くはずなので、UiTestDatabaseGuard の退避が効いていません。" +
-                $"撮れた画像は {string.Join("、", failedNames)} に残しています。" +
-                "C:\\ProgramData\\ICCardManager の latest_version.txt と退避（.uitest-backup / .uitest-absent）の状態を確認してから撮り直してください。");
+            return failedNames;
         }
 
         /// <summary>撮れた画像の診断用の名前（<c>name.png</c> → <c>name_FAILED.png</c>。<see cref="ScreenshotHelper"/> と同じ形）。</summary>

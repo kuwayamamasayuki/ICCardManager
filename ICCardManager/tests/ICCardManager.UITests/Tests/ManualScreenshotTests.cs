@@ -335,6 +335,7 @@ namespace ICCardManager.UITests.Tests
         /// 手動バックアップの作成は OS 標準の <c>SaveFileDialog</c> を経るため自動化の対象外
         /// （<c>restore_file_dialog.png</c> を撮り直し不要としたのと同じ判断）。一覧は起動時の
         /// 自動バックアップ（<c>StartupTaskRunner</c>）が作った世代で埋まるので、押すのは一覧の更新だけにする。
+        /// 保存先は UI テスト専用のフォルダー（<see cref="UiTestDatabaseGuard.UiTestBackupDirectory"/>。Issue #2423）で、画像の「保存先」にもそれが写る。
         /// </remarks>
         [SkippableFact]
         public void restore_list_リストア用バックアップ一覧()
