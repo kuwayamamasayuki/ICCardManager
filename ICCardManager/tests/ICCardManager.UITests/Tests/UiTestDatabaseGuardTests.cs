@@ -999,6 +999,35 @@ namespace ICCardManager.UITests.Tests
         }
 
         [Fact]
+        public void FinishOwnedGuard_既定のバックアップ先が変わっていたとき_DBを復元したうえで例外を投げること()
+        {
+            // AppFixture.Dispose の後始末。復元を先に済ませる（確認の失敗で開発機の DB をテストの DB のまま残さない）
+            File.WriteAllText(DbPath, OriginalContent);
+            var guard = UiTestDatabaseGuard.Acquire(_directory);
+            File.WriteAllText(DbPath, SeededContent);
+            Directory.CreateDirectory(DefaultBackupDirectory);
+            File.WriteAllText(Path.Combine(DefaultBackupDirectory, "backup_20261109_060348.db"), SeededContent);
+
+            Action act = () => AppFixture.FinishOwnedGuard(guard);
+
+            act.Should().Throw<InvalidOperationException>().WithMessage("*増えた: backup_20261109_060348.db*");
+            File.ReadAllText(DbPath).Should().Be(OriginalContent);
+        }
+
+        [Fact]
+        public void FinishOwnedGuard_既定のバックアップ先が変わっていないとき_DBを復元するだけであること()
+        {
+            File.WriteAllText(DbPath, OriginalContent);
+            var guard = UiTestDatabaseGuard.Acquire(_directory);
+            File.WriteAllText(DbPath, SeededContent);
+
+            AppFixture.FinishOwnedGuard(guard);
+            AppFixture.FinishOwnedGuard(null); // 入れ子の起動はガードを持たない
+
+            File.ReadAllText(DbPath).Should().Be(OriginalContent);
+        }
+
+        [Fact]
         public void ThrowIfDefaultBackupFolderChanged_既定のバックアップ先が変わっていないとき_何もしないこと()
         {
             // 対: 既にある世代（実 DB のバックアップ）や、フォルダーが無いことを「変わった」と誤らない

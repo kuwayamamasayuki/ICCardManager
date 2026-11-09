@@ -233,6 +233,8 @@ namespace ICCardManager.UITests.Infrastructure
             }
             catch
             {
+                // 起動の失敗の経路では既定のバックアップ先を確かめない（確かめて投げると本来の原因を上書きする）。
+                // 途中まで進んだアプリが既定の保存先へ書いていても、この経路では検出しない。確かめるのは起動できた回の Dispose（FinishOwnedGuard）
                 guard.Restore();
                 throw;
             }
@@ -272,6 +274,8 @@ namespace ICCardManager.UITests.Infrastructure
             }
             catch
             {
+                // 起動の失敗の経路では既定のバックアップ先を確かめない（確かめて投げると本来の原因を上書きする）。
+                // 途中まで進んだアプリが既定の保存先へ書いていても、この経路では検出しない。確かめるのは起動できた回の Dispose（FinishOwnedGuard）
                 guard.Restore();
                 throw;
             }
@@ -444,11 +448,28 @@ namespace ICCardManager.UITests.Infrastructure
 
             _automation.Dispose();
 
+            // テスト本体が失敗している最中にここで例外を投げると、using の Dispose の例外がテスト本体の例外を上書きする。
+            // 両方が同時に起きるのは隔離が外れた（またはピッすいが DB を掴んでいる）ときだけで、どちらも直すべき失敗なので許容する
+            FinishOwnedGuard(_ownedDatabaseGuard);
+        }
+
+        /// <summary>
+        /// 起動を所有するフィクスチャの後始末のうち、ガードに関わる部分（DB の復元と、既定のバックアップ先の確認）。
+        /// アプリの終了を待った後に呼ぶ。GUI 不要で検証できるよう <see cref="Dispose"/> から切り出している（Issue #2423）。
+        /// </summary>
+        /// <param name="ownedDatabaseGuard">所有するガード。入れ子の起動（null）では何もしない。</param>
+        internal static void FinishOwnedGuard(UiTestDatabaseGuard? ownedDatabaseGuard)
+        {
+            if (ownedDatabaseGuard == null)
+            {
+                return;
+            }
+
             // DB を復元する（失敗したら退避ファイルは残り、次回の起動が回復する）
-            _ownedDatabaseGuard?.Restore();
+            ownedDatabaseGuard.Restore();
 
             // Issue #2423: テストのアプリが既定のバックアップ先へ書いていない（本体が UI テスト専用の保存先を拒んで黙って戻っていない）こと
-            _ownedDatabaseGuard?.ThrowIfDefaultBackupFolderChanged();
+            ownedDatabaseGuard.ThrowIfDefaultBackupFolderChanged();
         }
 
         /// <summary>

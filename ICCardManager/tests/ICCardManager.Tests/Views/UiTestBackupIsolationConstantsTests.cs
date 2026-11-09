@@ -77,6 +77,19 @@ public class UiTestBackupIsolationConstantsTests
         PathValidator.NormalizePath(path).Should().Be(path, "正規化できないと既定の保存先へ戻る");
     }
 
+    [Fact]
+    public void UIテストのフィクスチャの終了処理は_既定のバックアップ先の確認を含む後始末を呼ぶこと()
+    {
+        // FinishOwnedGuard の中身（復元と確認）は UiTestDatabaseGuardTests が GUI 不要で検証する。
+        // 本物の Dispose はアプリを起動しないと通らないので、そこから呼んでいることはソースで固定する
+        var source = ReadUiTestSource("AppFixture.cs");
+        var dispose = Regex.Match(source, @"public\s+void\s+Dispose\(\)\s*\{(?<body>.*?)\n        \}", RegexOptions.Singleline);
+        dispose.Success.Should().BeTrue("AppFixture に Dispose が見つかること");
+
+        dispose.Groups["body"].Value.Should().Contain("FinishOwnedGuard(_ownedDatabaseGuard);",
+            "外すと、テストのアプリが既定のバックアップ先へ書いても UI テストは緑のまま");
+    }
+
     private static string ReadUiTestSource(string fileName)
     {
         var path = Path.Combine(

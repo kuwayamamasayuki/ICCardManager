@@ -303,6 +303,9 @@ namespace ICCardManager.UITests.Infrastructure
         /// 既定の保存先へ戻る（<c>BackupService.ResolveBackupFolderDetailAsync</c>）。そのときテストは緑のまま、同じ日の実 DB の
         /// バックアップが整理で押し出される。黙って戻ったことを、起動のたびに結果（既定の保存先の中身）で見張る。
         /// 消えたファイルも数える — 整理が消すのは既にあった世代で、守りたいのはそちらである。
+        /// インストール版のピッすいは原因にならない: 先に動いていれば <see cref="Acquire"/> の排他の確認（#2290）で止まり、
+        /// テストの最中に起動すればテスト用の DB（バックアップ先は UI テスト専用のフォルダー）を開くので、既定の保存先は変わらない
+        /// （テストの最中に起動すること自体は別の誤りで、終了時の復元の失敗として現れる）。したがってこの例外は隔離が外れたことを示す。
         /// </remarks>
         internal void ThrowIfDefaultBackupFolderChanged()
         {
@@ -317,8 +320,7 @@ namespace ICCardManager.UITests.Infrastructure
             throw new InvalidOperationException(
                 $"UI テストの間に既定のバックアップ先 {DefaultBackupDirectory} のファイルが変わりました" +
                 $"（増えた: {(added.Length == 0 ? "なし" : string.Join(", ", added))}、消えた: {(removed.Length == 0 ? "なし" : string.Join(", ", removed))}）。" +
-                "テストのアプリが UI テスト専用のバックアップ先を使わず、既定の保存先へバックアップを作って古い世代を整理した可能性があります" +
-                "（同じ時間にインストール版のピッすいを起動していた場合は、その自動バックアップです）。" +
+                "テストのアプリが UI テスト専用のバックアップ先を使わず、既定の保存先へバックアップを作って古い世代を整理しました。" +
                 $"アプリのログ（{Path.Combine(_directory, "Logs")}）で「バックアップパスが無効です」を探し、" +
                 $"UI テスト専用のバックアップ先 {UiTestBackupDirectory} をアプリが受け付けるか確かめてください。");
         }
