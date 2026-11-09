@@ -925,6 +925,9 @@ class NoColumnNoteScopeTests(unittest.TestCase):
             "No.8 は欠番ではない", "No.8 は欠番でない", "No.8 は欠番ではありません",
             "No.8 は欠番にしない", "No.8 は欠番とはしない", "No.8 は欠番扱いにせず詰めた",
             "No.8 は欠番じゃない", "No.8 は欠番候補", "No.8 は欠番にする予定",
+            # レビュー 4 回目: 空白・括弧を挟んだ否定
+            "No.8 は 欠番 にしない", "No.8 は欠番 ではない", "No.8 は欠番（ではない）", "No.8 は欠番 （ではない）",
+            "No.8 は欠番(にしない)", "No.8 は欠番ですらない", "No.8 は欠番とするかは未定",
         ):
             with self.subTest(text=text):
                 self.assertEqual(set(), _mod.parse_gap_note(text))
@@ -933,9 +936,18 @@ class NoColumnNoteScopeTests(unittest.TestCase):
         for text in (
             "No.8 は欠番", "No.8 は欠番。", "No.8 は欠番、理由は…", "（No.8 は欠番）", "No.8 は欠番 |",
             "No.8 は欠番（Issue #1）", "No.8 は欠番です。", "No.8 は欠番とする。", "No.8 は欠番.",
+            "No.8 は欠番 です。", "No.8 は 欠番。", "No.8 は欠番（旧 No.8 は削除）", "No.8 は欠番 （Issue #1）",
+            "No.8 は欠番） |",
         ):
             with self.subTest(text=text):
                 self.assertEqual({("", 8)}, _mod.parse_gap_note(text))
+
+    def test_range_with_mismatched_prefixes_allows_nothing(self):
+        """レビュー 4 回目: 「No.E3〜5」の両端を単独の番号として許すと、無印の 5 の欠けまで許してしまう。"""
+        self.assertEqual(set(), _mod.parse_gap_note("No.E3〜5 は欠番。"))
+        self.assertEqual(set(), _mod.parse_gap_note("No.5〜3 は欠番。"))
+        doc = "#### UT-001\n\n" + _table(1, 2, 3, 4, 6) + "\nNo.E3〜5 は欠番。\n"
+        self.assertEqual(1, len(_no_problems(doc)))
 
     def test_list_with_no_prefix_on_each_element(self):
         self.assertEqual({("", 2), ("", 3)}, _mod.parse_gap_note("No.2、No.3 は欠番。"))
@@ -1080,6 +1092,14 @@ class NoColumnUnreadableCellTests(unittest.TestCase):
         self.assertEqual(1, len(problems), problems)
         self.assertIn("「1〜300」 を番号として読めません", problems[0][1])
         self.assertNotIn("続ける先", problems[0][1])  # 原因に合わない案内を出さない
+
+    def test_fullwidth_digit_is_unreadable_and_named(self):
+        """レビュー 4 回目: セルの数字は半角だけを読む（re.ASCII）。全角は書き損じとして案内する。"""
+        self.assertEqual([], _mod.parse_no_cell("２"))
+        self.assertEqual([], _mod.parse_no_cell("1〜３"))
+        problems = _no_problems("#### UT-001\n\n" + _table(1, "２", 3))
+        self.assertEqual(1, len(problems), problems)
+        self.assertIn("「２」 を番号として読めません", problems[0][1])
 
 
 class NoRangeLimitTests(unittest.TestCase):

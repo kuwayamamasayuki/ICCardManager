@@ -124,36 +124,45 @@ TABLE_SEPARATOR_RE = re.compile(r"^\s*\|?\s*:?-+:?\s*(?:\|\s*:?-+:?\s*)+\|?\s*$"
 # 検査の対象にする表: 先頭の列の見出しが ``No`` / ``No.``。
 NO_HEADER_RE = re.compile(r"^No\.?$")
 # No のセルの書き方。範囲の記号は 〜（波ダッシュ）・～（全角チルダ）・~・-（表記の揺れは許す）。
+# 数字は半角だけを読む（re.ASCII）。Python の ``\d`` は既定で全角の ``２`` にも一致するが、07 の No のセルと注記に
+# 全角数字は無く（2026-11 時点で確認）、全角は書き損じとして「読めないセル」の案内に回す。
 NO_RANGE_MARK = r"[〜～~]"
-NO_INT_RE = re.compile(r"^(\d+)$")
-NO_BRANCH_RE = re.compile(r"^(\d+)([a-z])$")
-NO_WAVE_RANGE_RE = re.compile(r"^(\d+)\s*" + NO_RANGE_MARK + r"\s*(\d+)$")
-NO_HYPHEN_RANGE_RE = re.compile(r"^(\d+)\s*-\s*(\d+)$")
+NO_INT_RE = re.compile(r"^(\d+)$", re.ASCII)
+NO_BRANCH_RE = re.compile(r"^(\d+)([a-z])$", re.ASCII)
+NO_WAVE_RANGE_RE = re.compile(r"^(\d+)\s*" + NO_RANGE_MARK + r"\s*(\d+)$", re.ASCII)
+NO_HYPHEN_RANGE_RE = re.compile(r"^(\d+)\s*-\s*(\d+)$", re.ASCII)
 # ハイフンを枝番に使った書き方（``1-1`` ・ ``3a-2`` ・ ``1-7a``）。これが 1 つでもある表では ``N-M`` を範囲と読まない。
-NO_HYPHEN_LIKE_RE = re.compile(r"^\d+[a-z]?\s*-\s*\d+[a-z]?$")
-NO_BRANCH_RANGE_RE = re.compile(r"^(\d+)([a-z])\s*" + NO_RANGE_MARK + r"\s*(\d+)([a-z])$")
-NO_LIST_RE = re.compile(r"^\d+(?:\s*[・、,]\s*\d+)+$")
+NO_HYPHEN_LIKE_RE = re.compile(r"^\d+[a-z]?\s*-\s*\d+[a-z]?$", re.ASCII)
+NO_BRANCH_RANGE_RE = re.compile(r"^(\d+)([a-z])\s*" + NO_RANGE_MARK + r"\s*(\d+)([a-z])$", re.ASCII)
+NO_LIST_RE = re.compile(r"^\d+(?:\s*[・、,]\s*\d+)+$", re.ASCII)
 # 接頭辞付きの系列（``E1`` ・ ``T2b``）。番号を 0 で埋めた ``TC002`` は行の番号ではなくテストケースの ID
 # （表をまたいで飛び飛びに引用される）なので対象外にする。
-NO_PREFIXED_RE = re.compile(r"^([A-Z]{1,3})([1-9]\d*)([a-z]?)$")
+NO_PREFIXED_RE = re.compile(r"^([A-Z]{1,3})([1-9]\d*)([a-z]?)$", re.ASCII)
 NO_PREFIXED_RANGE_RE = re.compile(
-    r"^([A-Z]{1,3})([1-9]\d*)\s*(?:" + NO_RANGE_MARK + r"|-)\s*([A-Z]{1,3})([1-9]\d*)$"
+    r"^([A-Z]{1,3})([1-9]\d*)\s*(?:" + NO_RANGE_MARK + r"|-)\s*([A-Z]{1,3})([1-9]\d*)$",
+    re.ASCII,
 )
 # 意図した欠番の注記（``No.8・9 は欠番`` / ``No.4〜6 は欠番`` / ``No.E3 は欠番``）。番号の後に「は欠番」が続く形だけを読む
 # （「No.8 を参照。…欠番」のように、同じ行にあるだけの番号を許可に数えないため）。列挙の要素ごとに ``No.`` を
 # 付けた形（``No.2、No.3 は欠番``）も読む。
-# 「は欠番」の直後は許可形に限る（句読点・括弧・空白・行末・「です」「とする」）。否定の語を並べて除く方式では、
-# 「欠番にしない」「欠番とはしない」「欠番扱いにせず」のような否定を取りこぼし、許可として読んでしまう（極性の反転）。
+# 「は欠番」の直後は許可形に限る。空白を挟んでもよいが、その後ろは句読点・閉じ括弧・表の区切り ``|``・行末・
+# 「です」「とする」（その後ろも句読点・空白・行末）か、開き括弧に続く平仮名でない語（``（Issue #1）`` ・ ``（旧 …）``）
+# だけ。否定の語を並べて除く方式では、「欠番にしない」「欠番とはしない」「欠番扱いにせず」「欠番 にしない」
+# 「欠番（ではない）」のような否定を取りこぼし、許可として読んでしまう（極性の反転）。
 # インラインコード（`` `No.8 は欠番` ``）の中は、書き方の例なので読まない。
 _GAP_NOTE_TOKEN = r"(?:No\.?\s*)?[A-Z]{0,3}\d+"
+_GAP_NOTE_END = r"(?=[\s。、，,．.）)」』\]】|]|$)"
 GAP_NOTE_RE = re.compile(
     r"No\.?\s*(" + _GAP_NOTE_TOKEN + r"(?:\s*(?:[・、,，]|" + NO_RANGE_MARK + r"|-)\s*" + _GAP_NOTE_TOKEN + r")*)"
-    r"\s*は\s*欠番(?=[\s。、，,．.（）()「」『』\[\]【】]|です|とする|$)"
+    r"\s*は\s*欠番"
+    r"(?=\s*(?:[。、，,．.）)」』\]】|]|$|(?:です|とする)" + _GAP_NOTE_END + r"|[（(](?!\s*[ぁ-ん])))",
+    re.ASCII,
 )
 INLINE_CODE_RE = re.compile(r"`+[^`]*`+")
 # 範囲を展開する上限。書き損じ（``1〜1000``）で巨大な集合を作らないため。
 MAX_NO_RANGE = 200
-# 番号のつもりで書いたが読めないセル（``13.`` ・ ``5〜3`` ・ ``1〜300`` ・全角の ``２``）。07 には既にあるので
+# 番号のつもりで書いたが読めないセル（``13.`` ・ ``5〜3`` ・ ``1〜300`` ・全角の ``２``。全角を読めないのはセルの
+# 正規表現に re.ASCII を付けているため）。07 には既にあるので
 # それだけでは赤にしないが、抜けの位置にあれば案内に添える（原因が行の消失ではなく書式の誤りかもしれないため）。
 UNREADABLE_NO_CELL_RE = re.compile(r"^[0-9０-９]")
 # 見出しをまたいで続く表の、続ける先の候補にする直近の系列の数。07 では、続きの表の間に 1 から始め直す
@@ -631,11 +640,13 @@ def parse_gap_note(line: str) -> set:
         return allowed
     for m in GAP_NOTE_RE.finditer(INLINE_CODE_RE.sub("", line)):
         for part in re.split(r"\s*[・、,，]\s*", m.group(1)):
-            tokens = [(p, int(n)) for p, n in re.findall(r"([A-Z]{0,3})(\d+)", part)]
-            if len(tokens) == 2 and tokens[0][0] == tokens[1][0] and tokens[0][1] < tokens[1][1]:
-                allowed.update((tokens[0][0], n) for n in range(tokens[0][1], tokens[1][1] + 1))
-            else:
+            tokens = [(p, int(n)) for p, n in re.findall(r"([A-Z]{0,3})([0-9]+)", part)]
+            if len(tokens) == 1:
                 allowed.update(tokens)
+            elif len(tokens) == 2 and tokens[0][0] == tokens[1][0] and tokens[0][1] < tokens[1][1]:
+                allowed.update((tokens[0][0], n) for n in range(tokens[0][1], tokens[1][1] + 1))
+            # それ以外（接頭辞が食い違う範囲 ``E3〜5``・逆順 ``5〜3``）は読めない注記なので、何も許さない。
+            # 両端を単独の番号として許すと、``No.E3〜5 は欠番`` が無印の 5 の欠けまで許してしまう
     return allowed
 
 
