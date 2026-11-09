@@ -19,8 +19,10 @@ namespace ICCardManager.UITests.Infrastructure
     /// 撮影の操作が作る行を見られないので、撮影の後にも同じ検査を掛ける。
     /// </para>
     /// <para>
-    /// 規則は <c>LedgerConsistencyChecker.CheckConsistency</c> と同じ: 並べた行の 2 行目以降について、
+    /// 台帳の行についての規則は <c>LedgerConsistencyChecker.CheckConsistency</c> の親レコードの検査と同じ: 並べた行の 2 行目以降について、
     /// 前行の残額 ＋ 受入 − 払出 が当行の残額と一致すること。母集団も同じく貸出中レコード（受入・払出 0）を含める。
+    /// <b>本体との差分</b>: ①台帳の行（<c>ledger</c>）だけを見る。本体は明細（<c>ledger_detail</c>）の残高チェーンも検査するが、
+    /// ここでは見ない。②同じ日の通常の行を残高チェーンで並べ替えず、id の順のまま並べる（下記）。
     /// UITests は本体を参照しない（csproj の方針）ため、ここに書き写している。本体の規則を変えたら追随すること。
     /// </para>
     /// <para>
@@ -90,14 +92,14 @@ namespace ICCardManager.UITests.Infrastructure
 
         private static IEnumerable<Row> Order(IEnumerable<Row> rows) =>
             rows.OrderBy(r => r.Date.Date)
-                .ThenBy(r => IsInitialRecord(r.Summary) ? 0 : 1)
+                .ThenBy(r => IsSpecialRecord(r.Summary) ? 0 : 1)
                 .ThenBy(r => r.Id);
 
         /// <summary>
         /// 同じ日の中で先頭に置く行か（本体の <c>LedgerOrderHelper.IsSpecialRecord</c> ＝ <c>Ledger.IsCarryover</c> と同じ:
         /// 新規購入・○月から繰越。組織設定で繰越の文言を変えた場合は追随しないが、シードは既定の文言しか使わない）。
         /// </summary>
-        private static bool IsInitialRecord(string summary) =>
+        private static bool IsSpecialRecord(string summary) =>
             summary == "新規購入" || summary.EndsWith("月から繰越", StringComparison.Ordinal);
 
         private static List<Row> ReadRows(SQLiteConnection conn)

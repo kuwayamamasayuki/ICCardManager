@@ -90,7 +90,8 @@ namespace ICCardManager.UITests.Infrastructure
         /// 撮影の操作が作る行はそこでは見られないので、撮った後に DB を読み返す。
         /// </para>
         /// <para>
-        /// 規則は本体の <c>LedgerConsistencyChecker</c> と同じ（<see cref="LedgerBalanceChain"/>）。
+        /// 規則は本体の <c>LedgerConsistencyChecker</c> の台帳の行の検査を写したもの（<see cref="LedgerBalanceChain"/>）。
+        /// 明細（<c>ledger_detail</c>）のチェーンは見ず、同じ日の行は id の順に並べる点が本体と異なる。
         /// アプリの起動中に読み取り専用で開き、すぐ閉じる（<see cref="DatabaseProbe"/> と同じ）。
         /// 返却の記録はトーストより前にコミットされるので、トースト・返却後のダイアログを撮った後に呼べばよい。
         /// </para>

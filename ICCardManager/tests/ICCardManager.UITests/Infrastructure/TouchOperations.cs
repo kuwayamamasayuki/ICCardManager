@@ -89,7 +89,7 @@ namespace ICCardManager.UITests.Infrastructure
 
                 if (fare != null)
                 {
-                    row!.Cells[3].Patterns.Value.Pattern.SetValue(fare.Value.ToString(CultureInfo.InvariantCulture));
+                    SetFare(row!.Cells[3], fare.Value);
                 }
             }
 
@@ -100,6 +100,35 @@ namespace ICCardManager.UITests.Infrastructure
 
             dialogPage.ClickButton(TestConstants.VirtualCardExecuteButton);
         }
+
+        /// <summary>
+        /// 仮想タッチダイアログの履歴の金額セルへ運賃を入れ、読み返して確かめる（Issue #2425）。
+        /// </summary>
+        /// <remarks>
+        /// 撮影の運賃（<see cref="ScreenshotSeedData.VirtualTouchFare"/> ＝ 200）はダイアログの既定の金額と同じなので、
+        /// 運賃を入れて読み返すだけでは、入力が効いていなくても既定値のまま一致して素通りする。
+        /// 先に運賃と異なる値を入れて読み返し、セルへの入力が効くことを確かめてから運賃を入れる。
+        /// </remarks>
+        private static void SetFare(AutomationElement cell, int fare)
+        {
+            var probe = fare + 1;
+            foreach (var value in new[] { probe, fare })
+            {
+                var text = value.ToString(CultureInfo.InvariantCulture);
+                cell.Patterns.Value.Pattern.SetValue(text);
+                var read = Retry.WhileFalse(
+                    () => ReadAmount(cell.Patterns.Value.Pattern.Value.Value) == value,
+                    TimeSpan.FromSeconds(5)).Success;
+                read.Should().BeTrue(
+                    $"仮想タッチダイアログの履歴の金額セルに {value:N0} が入ること（読み返した値: \"{cell.Patterns.Value.Pattern.Value.Value}\"）。" +
+                    "入力が効かないと既定の金額のまま返却され、撮影の残高と運賃が食い違う");
+            }
+        }
+
+        private static int? ReadAmount(string? text) =>
+            int.TryParse((text ?? string.Empty).Replace(",", string.Empty), NumberStyles.Integer, CultureInfo.InvariantCulture, out var parsed)
+                ? parsed
+                : null;
 
         /// <summary>
         /// 仮想タッチダイアログの「現在残高」欄へ値を入れ、入ったことを確かめる（Issue #2425）。
@@ -144,10 +173,7 @@ namespace ICCardManager.UITests.Infrastructure
                 "（既定値〈DB の最新残高〉のまま返却すると、払出があるのに残高が変わらない行が台帳に入る）");
         }
 
-        private static int? ReadBalance(TextBox textBox) =>
-            int.TryParse(textBox.Text.Replace(",", string.Empty), NumberStyles.Integer, CultureInfo.InvariantCulture, out var parsed)
-                ? parsed
-                : null;
+        private static int? ReadBalance(TextBox textBox) => ReadAmount(textBox.Text);
 
         /// <summary>
         /// 職員証認証ダイアログを仮想タッチで通す。
