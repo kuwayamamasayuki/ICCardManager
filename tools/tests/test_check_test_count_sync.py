@@ -3,6 +3,8 @@ import contextlib
 import importlib.util
 import io
 import pathlib
+import re
+import subprocess
 import sys
 import tempfile
 import textwrap
@@ -634,7 +636,7 @@ class MainExitCodeCombinesHeadingCheckTests(unittest.TestCase):
             | UIテスト（ICCardManager.UITests） | 1件 | 見本 |
             | **合計** | **{self.CLASS_COUNT + 1}件** | 見本 |
 
-            """) + "## 2. 単体テスト\n\n| クラス | 件数 | 観点 |\n|---|---|---|\n" + rows + "\n" + headings
+            """) + "## 2. 単体テスト\n\n| クラス | 件数 | 観点 |\n|---|---|---|\n" + rows + "\n" + headings + NO_TABLE_OK
 
     def _run_main(self, doc):
         def fake_list(_csproj, prefix):
@@ -662,6 +664,261 @@ class MainExitCodeCombinesHeadingCheckTests(unittest.TestCase):
         self.assertEqual(1, code, output)
         self.assertIn("ID UT-001:", output)
         self.assertIn("✅", output)  # 件数の検査は通っている（失敗の原因が見出しだけであることの前提）
+
+    def test_counts_match_but_no_column_has_a_gap_returns_one(self):
+        """Issue #2420: No 列の検査の結果も終了コードに合成する。"""
+        doc = self._doc("\n### 2.1 節\n\n#### UT-001: a\n") + NO_TABLE_GAP
+        code, output = self._run_main(doc)
+        self.assertEqual(1, code, output)
+        self.assertIn("No.2 が抜けています", output)
+        self.assertIn("✅ テスト件数表 §2", output)  # 失敗の原因が No 列だけであることの前提
+
+
+# ---- Issue #2420: 表の「No」列の飛び・重複 ----
+
+NO_TABLE_OK = "\n#### UT-900: No 列の見本\n\n| No | ケース |\n|----|----|\n| 1 | a |\n| 2 | b |\n"
+NO_TABLE_GAP = "\n#### UT-901: 飛びのある表\n\n| No | ケース |\n|----|----|\n| 1 | a |\n| 3 | c |\n"
+
+
+def _no_problems(doc: str):
+    path = _write_md(doc)
+    try:
+        return _mod.find_no_column_problems(_mod.parse_no_columns(path))
+    finally:
+        pathlib.Path(path).unlink()
+
+
+def _no_check(doc: str):
+    path = _write_md(doc)
+    try:
+        return _mod.check_no_columns(_mod.parse_no_columns(path))
+    finally:
+        pathlib.Path(path).unlink()
+
+
+def _table(*cells, header="No"):
+    rows = "\n".join(f"| {c} | x |" for c in cells)
+    return f"| {header} | ケース |\n|----|----|\n{rows}\n"
+
+
+class ParseNoCellTests(unittest.TestCase):
+    def _keys(self, cell, hyphen_is_range=True):
+        return [(e.series, e.base, e.key) for e in _mod.parse_no_cell(cell, hyphen_is_range)]
+
+    def test_integer(self):
+        self.assertEqual([("", 8, "8")], self._keys("8"))
+
+    def test_every_range_mark_expands(self):
+        for cell in ("7〜9", "7～9", "7~9", "7-9", "7 - 9"):
+            with self.subTest(cell=cell):
+                self.assertEqual([7, 8, 9], [b for _, b, _ in self._keys(cell)])
+
+    def test_branch_occupies_its_base_number(self):
+        self.assertEqual([("", 8, "8a")], self._keys("8a"))
+
+    def test_branch_range(self):
+        self.assertEqual(["20d", "20e", "20f", "20g"], [k for _, _, k in self._keys("20d〜20g")])
+
+    def test_list(self):
+        self.assertEqual([9, 10], [b for _, b, _ in self._keys("9・10")])
+
+    def test_prefixed_series(self):
+        self.assertEqual([("E", 1, "E1")], self._keys("E1"))
+        self.assertEqual([("T", 2, "T2b")], self._keys("T2b"))
+
+    def test_out_of_scope_forms(self):
+        for cell in ("UT-063-1", "TC002", "M-SHARED-1", "TC033B〜D", "1-7a", "", "—"):
+            with self.subTest(cell=cell):
+                self.assertEqual([], self._keys(cell))
+
+    def test_hyphen_is_not_a_range_when_the_table_uses_it_as_a_branch(self):
+        self.assertEqual([], self._keys("1-2", hyphen_is_range=False))
+
+
+class ParseGapNoteTests(unittest.TestCase):
+    def test_list_range_and_prefix(self):
+        self.assertEqual({("", 8), ("", 9)}, _mod.parse_gap_note("No.8・9 は欠番。"))
+        self.assertEqual({("", 4), ("", 5), ("", 6)}, _mod.parse_gap_note("> No.4〜6 は欠番（削除）"))
+        self.assertEqual({("", 4), ("T", 6)}, _mod.parse_gap_note("（No.4・T6 は欠番）"))
+
+    def test_number_not_followed_by_gap_word_is_not_allowed(self):
+        self.assertEqual(set(), _mod.parse_gap_note("No.8 を参照。FILE001 は欠番"))
+        self.assertEqual(set(), _mod.parse_gap_note("No.8 は削除した"))
+
+
+class NoColumnGreenSamplesTests(unittest.TestCase):
+    """許可の設計どおりの書き方は緑。"""
+
+    def test_sequential(self):
+        self.assertEqual([], _no_problems(_table(1, 2, 3)))
+
+    def test_ranges_fill_the_numbers_they_cover(self):
+        self.assertEqual([], _no_problems(_table(1, "2-4", "5〜6", "7～8", "9~10", "11・12", 13)))
+
+    def test_branches_fill_their_base_number(self):
+        # 枝番だけで占めた番号（4）も飛びにしない。基の番号と枝番の併存（3・3a）は重複にしない
+        self.assertEqual([], _no_problems(_table(1, 2, 3, "3a", "3b", "4a", "4b", 5)))
+
+    def test_hyphen_used_as_a_branch_is_not_expanded(self):
+        self.assertEqual([], _no_problems(_table(1, "1-1", "1-2", "1-3", 2, 3)))
+
+    def test_prefixed_series_are_checked_separately(self):
+        self.assertEqual([], _no_problems(_table(1, 2, "E1", "E2", 3)))
+
+    def test_continuation_table_in_the_same_section(self):
+        doc = "#### UT-001\n\n" + _table(1, 2, 3) + "\n本文\n\n" + _table(4, 5)
+        self.assertEqual([], _no_problems(doc))
+
+    def test_table_starting_at_one_in_the_same_section_is_a_new_series(self):
+        doc = "#### UT-001\n\n" + _table(1, 2) + "\n本文\n\n" + _table(1, 2)
+        self.assertEqual([], _no_problems(doc))
+
+    def test_gap_with_a_note_before_or_after_or_in_a_cell(self):
+        for note_before, note_after, cells in (
+            ("No.3 は欠番。\n\n", "", (1, 2, 4)),
+            ("", "\n> 旧 No.3・4 は削除した（No.3・4 は欠番）。\n", (1, 2, 5)),
+            ("", "", (1, 2, "4 | No.3 は欠番")),
+        ):
+            with self.subTest(cells=cells):
+                doc = "#### UT-001\n\n" + note_before + _table(*cells) + note_after
+                self.assertEqual([], _no_problems(doc))
+
+    def test_tables_inside_code_blocks_are_ignored(self):
+        doc = "#### UT-001\n\n" + _table(1, 2) + "\n```markdown\n" + _table(1, 1, 5) + "```\n"
+        self.assertEqual([], _no_problems(doc))
+        doc = "#### UT-001\n\n" + _table(1, 2) + "\n<!--\n" + _table(1, 1, 5) + "-->\n"
+        self.assertEqual([], _no_problems(doc))
+
+    def test_tables_whose_first_column_is_not_no_are_ignored(self):
+        doc = _table(1, 2) + "\n" + _table(1, 1, 5, header="ID")
+        self.assertEqual([], _no_problems(doc))
+
+
+class NoColumnRedSamplesTests(unittest.TestCase):
+    """注記の無い飛び・重複は赤。行番号を出す。"""
+
+    def test_gap_without_a_note(self):
+        doc = "#### UT-001\n\n" + _table(1, 2, 5, 6)
+        # 1: 見出し / 3: 表の見出し行 / 5〜8: 行
+        self.assertEqual([(7, "3 行目の表: No.3〜4 が抜けています（7 行目の No.5 の前）")], _no_problems(doc))
+
+    def test_issue_2321_shape_rows_13_to_15_vanished(self):
+        doc = "#### UT-001\n\n" + _table(*range(1, 13), *range(16, 20))
+        problems = _no_problems(doc)
+        self.assertEqual(1, len(problems))
+        self.assertIn("No.13〜15 が抜けています", problems[0][1])
+
+    def test_duplicate_number(self):
+        doc = "#### UT-001\n\n" + _table(1, 2, 2, 3)
+        self.assertEqual([(7, "3 行目の表: No.2 が重複しています（6, 7 行目）")], _no_problems(doc))
+
+    def test_range_overlapping_a_number_is_a_duplicate(self):
+        problems = _no_problems("#### UT-001\n\n" + _table(1, "2-4", 3, 5))
+        self.assertEqual(1, len(problems))
+        self.assertIn("No.3 が重複しています", problems[0][1])
+
+    def test_duplicate_branch(self):
+        doc = "#### UT-001\n\n" + _table(1, 2, "2a", "2a", 3)
+        self.assertEqual([(8, "3 行目の表: No.2a が重複しています（7, 8 行目）")], _no_problems(doc))
+
+    def test_gap_in_a_prefixed_series(self):
+        problems = _no_problems("#### UT-001\n\n" + _table(1, 2, "T1", "T3"))
+        self.assertEqual(1, len(problems))
+        self.assertIn("No.T2 が抜けています", problems[0][1])
+
+    def test_gap_between_a_table_and_its_continuation(self):
+        doc = "#### UT-001\n\n" + _table(1, 2, 3) + "\n本文\n\n" + _table(5, 6)
+        problems = _no_problems(doc)
+        self.assertEqual(1, len(problems))
+        self.assertIn("No.4 が抜けています", problems[0][1])
+
+    def test_duplicate_across_a_table_and_its_continuation(self):
+        doc = "#### UT-001\n\n" + _table(1, 2, 3) + "\n本文\n\n" + _table(3, 4)
+        problems = _no_problems(doc)
+        self.assertEqual(1, len(problems))
+        self.assertIn("No.3 が重複しています", problems[0][1])
+
+    def test_note_in_another_section_does_not_allow_the_gap(self):
+        doc = "#### UT-001\n\nNo.3 は欠番。\n\n#### UT-002\n\n" + _table(1, 2, 4)
+        self.assertEqual(1, len(_no_problems(doc)))
+
+    def test_note_does_not_allow_a_duplicate(self):
+        doc = "#### UT-001\n\nNo.2 は欠番。\n\n" + _table(1, 2, 2, 3)
+        self.assertEqual(1, len(_no_problems(doc)))
+
+    def test_report_lists_line_numbers_and_how_to_fix(self):
+        ok, report = _no_check("#### UT-001\n\n" + _table(1, 3))
+        self.assertFalse(ok)
+        self.assertIn("6 行目 — 3 行目の表: No.2 が抜けています", report)
+        self.assertIn("は欠番", report)
+
+    def test_no_table_at_all_fails_as_a_blank_run(self):
+        ok, report = _no_check("#### UT-001\n\n" + _table(1, 2, header="ID"))
+        self.assertFalse(ok)
+        self.assertIn("1 つも読み取れません", report)
+
+    def test_unclosed_fence_fails(self):
+        ok, report = _no_check(_table(1, 2) + "\n```\n" + _table(1, 1))
+        self.assertFalse(ok)
+        self.assertIn("閉じていない", report)
+
+
+class NoColumnMutationTests(unittest.TestCase):
+    """許可の設計の要（範囲の展開・枝番の寄せ・欠番の注記）を壊すと、緑の見本が赤になること。
+
+    要を外した実装でも緑のままになる見本は、その要を固定していない。
+    """
+
+    def _with_patch(self, name, replacement, doc):
+        original = getattr(_mod, name)
+        setattr(_mod, name, replacement)
+        try:
+            return _no_problems(doc)
+        finally:
+            setattr(_mod, name, original)
+
+    def test_without_range_expansion_the_range_sample_turns_red(self):
+        doc = "#### UT-001\n\n" + _table(1, "2-4", "5〜6", 7)
+        self.assertEqual([], _no_problems(doc))
+        self.assertNotEqual([], self._with_patch("_expand", lambda s, a, b: [], doc))
+
+    def test_without_branch_folding_the_branch_sample_turns_red(self):
+        doc = "#### UT-001\n\n" + _table(1, "2a", "2b", 3)
+        self.assertEqual([], _no_problems(doc))
+        never = re.compile(r"(?!)")
+        self.assertNotEqual([], self._with_patch("NO_BRANCH_RE", never, doc))
+
+    def test_without_gap_notes_the_note_sample_turns_red(self):
+        doc = "#### UT-001\n\nNo.3 は欠番。\n\n" + _table(1, 2, 4)
+        self.assertEqual([], _no_problems(doc))
+        self.assertNotEqual([], self._with_patch("parse_gap_note", lambda line: set(), doc))
+
+
+class NoColumnRealDocumentTests(unittest.TestCase):
+    """実データ: 現在の 07 は緑。#2321 の是正前（No.13〜15 が一斉に消えた版）は赤。"""
+
+    REL = "ICCardManager/docs/design/07_テスト設計書.md"
+    DOC = pathlib.Path(__file__).resolve().parents[2] / REL
+    BEFORE_2321_FIX = "0a6dce76^"  # #2321 の是正（PR #2362）の親
+
+    def test_current_document_is_green(self):
+        ok, report = _mod.check_no_columns(_mod.parse_no_columns(str(self.DOC)))
+        self.assertTrue(ok, report)
+
+    def test_document_before_the_2321_fix_is_red(self):
+        proc = subprocess.run(
+            ["git", "-C", str(self.DOC.parent), "show", f"{self.BEFORE_2321_FIX}:{self.REL}"],
+            capture_output=True,
+        )
+        if proc.returncode != 0:
+            self.skipTest("git の履歴が無い（浅いクローン）ため #2321 の是正前の 07 を取り出せない")
+        path = _write_md(proc.stdout.decode("utf-8"))
+        try:
+            problems = _mod.find_no_column_problems(_mod.parse_no_columns(path))
+        finally:
+            pathlib.Path(path).unlink()
+        vanished = [text for _, text in problems if "No.13〜15 が抜けています" in text]
+        self.assertGreaterEqual(len(vanished), 20, problems)
 
 
 if __name__ == "__main__":
