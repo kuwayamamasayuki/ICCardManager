@@ -2145,5 +2145,65 @@ public class ReportDataBuilderTests
         PaperCarryoverPolicy.PeriodOpensWithFiscalYearStartCarryover(new DateTime(2027, 4, 1), Array.Empty<Ledger>()).Should().BeFalse();
     }
 
+    /// <summary>
+    /// 3/25 に残高 5,000 の手入力の行があり、導入行「前年度より繰越」（受入 5,000）を履歴の行編集で 5/10 へ動かした台帳。
+    /// 5/20 に 210 円、6/3 に 300 円の利用。前年度繰越として 5,000 が返る。
+    /// </summary>
+    private void SetupIntroductionMovedToMay()
+    {
+        SetupCard();
+        SetupCarryoverBalance(TestCardIdm, 2026, 5000);
+
+        var march = CreateTestLedger(10, TestCardIdm, new DateTime(2027, 3, 25), "鉄道（手入力）", 0, 0, 5000);
+        var intro = CreateTestLedger(11, TestCardIdm, new DateTime(2027, 5, 10),
+            SummaryGenerator.GetCarryoverFromPreviousYearSummary(), 5000, 0, 5000);
+        var mayUsage = CreateTestLedger(12, TestCardIdm, new DateTime(2027, 5, 20), "鉄道（天神～博多）", 0, 210, 4790);
+        var juneUsage = CreateTestLedger(13, TestCardIdm, new DateTime(2027, 6, 3), "鉄道（博多～天神）", 0, 300, 4490);
+
+        SetupMonthlyLedgers(TestCardIdm, 2027, 3, new List<Ledger> { march });
+        SetupMonthlyLedgers(TestCardIdm, 2027, 4, new List<Ledger>());
+        SetupMonthlyLedgers(TestCardIdm, 2027, 5, new List<Ledger> { intro, mayUsage });
+        SetupMonthlyLedgers(TestCardIdm, 2027, 6, new List<Ledger> { juneUsage });
+        SetupDateRangeLedgers(TestCardIdm, new DateTime(2027, 4, 1), new DateTime(2027, 5, 31),
+            new List<Ledger> { intro, mayUsage });
+        SetupDateRangeLedgers(TestCardIdm, new DateTime(2027, 4, 1), new DateTime(2027, 6, 30),
+            new List<Ledger> { intro, mayUsage, juneUsage });
+    }
+
+    /// <summary>
+    /// Issue #2418: 導入行を 5/10 へ動かしたカードの 5 月の帳票は、導入行より前の行（3/25）の残高で
+    /// 「4月より繰越」を合成しないこと（月の 1 日が導入行以前なら前の残高を使わない）。
+    /// 対は <see cref="BuildAsync_IntroductionMovedToMay_June_HasPreviousMonthCarryover"/>。
+    /// </summary>
+    [Fact]
+    public async Task BuildAsync_IntroductionMovedToMay_May_HasNoCarryover()
+    {
+        SetupIntroductionMovedToMay();
+
+        var result = await _builder.BuildAsync(TestCardIdm, 2027, 5);
+
+        result!.PrecedingBalance.Should().BeNull("5/1 は導入行（5/10）以前なので、前の残高は無い");
+        result.Carryover.Should().BeNull("導入行より前の行の残高で繰越行を合成すると、導入行の受入と二重になる");
+        result.CumulativeTotal!.Income.Should().Be(5000);
+        result.CumulativeTotal.Balance.Should().Be(4790);
+        (result.CumulativeTotal.Income - result.CumulativeTotal.Expense).Should().Be(result.CumulativeTotal.Balance);
+    }
+
+    /// <summary>
+    /// Issue #2418（対の表明）: 同じ台帳の 6 月の帳票は、従来どおり 5 月末の残高で「5月より繰越」を出すこと
+    /// </summary>
+    [Fact]
+    public async Task BuildAsync_IntroductionMovedToMay_June_HasPreviousMonthCarryover()
+    {
+        SetupIntroductionMovedToMay();
+
+        var result = await _builder.BuildAsync(TestCardIdm, 2027, 6);
+
+        result!.PrecedingBalance.Should().Be(4790);
+        result.Carryover.Should().NotBeNull();
+        result.Carryover!.Summary.Should().Be(SummaryGenerator.GetCarryoverFromPreviousMonthSummary(5));
+        result.Carryover.Balance.Should().Be(4790);
+    }
+
     #endregion
 }

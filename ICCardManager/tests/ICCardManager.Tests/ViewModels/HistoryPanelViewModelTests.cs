@@ -1635,12 +1635,12 @@ public class HistoryPanelViewModelTests : IDisposable
 
     /// <summary>
     /// Issue #2418（対の表明）: 年度の台帳が導入行から始まらない（前年度から台帳がある）カードは、
-    /// 年度内に同じ摘要の行があっても、従来どおり 4 月の繰越行を合成すること
+    /// 従来どおり 4 月の繰越行を合成すること
     /// </summary>
     [Fact]
     public async Task BuildCarryoverRowAsync_4月_年度の先頭が導入行でない_従来どおり合成すること()
     {
-        // Arrange: 年度の先頭は 4/2 の利用（4/5 に同じ摘要の行が手入力されていても、先頭の日の行ではない）
+        // Arrange: 年度で最も早い日の行は 4/2 の利用だけ（導入行から始まらない年度）
         var cardIdm = "0102030405060708";
         _ledgerRepositoryMock.Setup(r => r.GetCarryoverBalanceAsync(cardIdm, 2026))
             .ReturnsAsync(5000);
