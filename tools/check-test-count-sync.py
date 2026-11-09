@@ -140,14 +140,20 @@ NO_PREFIXED_RANGE_RE = re.compile(
     r"^([A-Z]{1,3})([1-9]\d*)\s*(?:" + NO_RANGE_MARK + r"|-)\s*([A-Z]{1,3})([1-9]\d*)$"
 )
 # 意図した欠番の注記（``No.8・9 は欠番`` / ``No.4〜6 は欠番`` / ``No.E3 は欠番``）。番号の後に「は欠番」が続く形だけを読む
-# （「No.8 を参照。…欠番」のように、同じ行にあるだけの番号を許可に数えないため）。
+# （「No.8 を参照。…欠番」のように、同じ行にあるだけの番号を許可に数えないため）。直後が「ではない」「でない」の
+# 否定（「No.8 は欠番ではない」）は許可に数えない（極性の反転）。インラインコード（`` `No.8 は欠番` ``）の中は、
+# 書き方の例なので読まない。
 _GAP_NOTE_TOKEN = r"[A-Z]{0,3}\d+"
 GAP_NOTE_RE = re.compile(
     r"No\.?\s*(" + _GAP_NOTE_TOKEN + r"(?:\s*(?:[・、,]|" + NO_RANGE_MARK + r"|-)\s*" + _GAP_NOTE_TOKEN + r")*)"
-    r"\s*は\s*欠番"
+    r"\s*は\s*欠番(?!\s*(?:では|でな|じゃな))"
 )
+INLINE_CODE_RE = re.compile(r"`+[^`]*`+")
 # 範囲を展開する上限。書き損じ（``1〜1000``）で巨大な集合を作らないため。
 MAX_NO_RANGE = 200
+# 見出しをまたいで続く表の、続ける先の候補にする直近の系列の数。07 では、続きの表の間に 1 から始め直す
+# 節（``UT-REPORT-EXPORT-STATUS-001a``）が 1 つ挟まる形があるため 2 以上が要る。
+CROSS_HEADING_LOOKBACK = 3
 
 
 class ClassRowScan(NamedTuple):
@@ -519,9 +525,21 @@ class NoRow(NamedTuple):
 
 
 class NoTable(NamedTuple):
-    lineno: int  # 表の見出し行（``| No | … |``）の行番号
-    section_lineno: int  # 表が属する見出し（``#`` 〜 ``######``）の行番号。見出しより前なら 0
+    """先頭の列が ``No`` の表（Issue #2420）。
+
+    Attributes:
+        lineno: 表の見出し行（``| No | … |``）の行番号
+        section_lineno: 表が属する見出し（``#`` 〜 ``######``）の行番号。見出しより前なら 0
+        rows: 表の行
+        notes: この表に結び付いた注記「No.8・9 は欠番」が許す (系列, 番号) の集合。結び付くのは、
+            同じ見出しの中で表の直前（前の表・見出しから表まで）と直後（表から次の表・見出しまで）の本文と、
+            表のセルに書いた注記だけ（同じ見出しの離れた表の欠番を隠さないため）
+    """
+
+    lineno: int
+    section_lineno: int
     rows: List[NoRow]
+    notes: frozenset = frozenset()
 
 
 class NoColumnScan(NamedTuple):
@@ -529,12 +547,10 @@ class NoColumnScan(NamedTuple):
 
     Attributes:
         tables: 文書順の表
-        gap_notes: 見出しの行番号 → その節の注記「No.8・9 は欠番」が許す (系列, 番号) の集合
         unclosed: ファイルの終わりで開いたままのコードブロック・HTML コメント
     """
 
     tables: List[NoTable]
-    gap_notes: Dict[int, set]
     unclosed: Optional[str] = None
 
 
@@ -608,7 +624,7 @@ def parse_gap_note(line: str) -> set:
     allowed = set()
     if "欠番" not in line:
         return allowed
-    for m in GAP_NOTE_RE.finditer(line):
+    for m in GAP_NOTE_RE.finditer(INLINE_CODE_RE.sub("", line)):
         for part in re.split(r"\s*[・、,]\s*", m.group(1)):
             tokens = [(p, int(n)) for p, n in re.findall(r"([A-Z]{0,3})(\d+)", part)]
             if len(tokens) == 2 and tokens[0][0] == tokens[1][0] and tokens[0][1] < tokens[1][1]:
@@ -619,14 +635,16 @@ def parse_gap_note(line: str) -> set:
 
 
 def parse_no_columns(md_path: str) -> NoColumnScan:
-    """先頭の列が ``No`` の表と、各節の欠番の注記を集める（Issue #2420）。
+    """先頭の列が ``No`` の表と、それぞれの表に結び付いた欠番の注記を集める（Issue #2420）。
 
     コードブロック・HTML コメントの中の表と注記は数えない（見出しの検査と同じ ``mask_blocks``）。
+    注記は、同じ見出しの中で直前・直後の表にだけ結び付ける（``NoTable.notes``）。
     """
     masked, unclosed = mask_blocks(_read_lines(md_path))
     tables: List[NoTable] = []
-    gap_notes: Dict[int, set] = {}
     section = 0
+    pending: set = set()  # 直前の表（または見出し）より後に書かれ、次の表へ結び付ける注記
+    previous: Optional[int] = None  # 同じ見出しの中で直前の表（tables の添字）。直後の注記を結び付ける先
     i = 0
     while i < len(masked):
         line = masked[i]
@@ -635,6 +653,8 @@ def parse_no_columns(md_path: str) -> NoColumnScan:
             continue
         if ATX_HEADING_RE.match(line):
             section = i + 1
+            pending = set()
+            previous = None
             i += 1
             continue
         if (
@@ -655,15 +675,22 @@ def parse_no_columns(md_path: str) -> NoColumnScan:
                 rows = [
                     NoRow(lineno, c, parse_no_cell(c, hyphen_is_range)) for lineno, c in cells
                 ]
-                tables.append(NoTable(i + 1, section, rows))
-            # 表のセルに書いた注記（``| 11 | … | …。No.3 は欠番 |``）も数える
-            for k in range(i, j):
-                gap_notes.setdefault(section, set()).update(parse_gap_note(masked[k]))
+                # 表のセルに書いた注記（``| 11 | … | …。No.3 は欠番 |``）も数える
+                notes = set(pending)
+                for k in range(i, j):
+                    notes.update(parse_gap_note(masked[k]))
+                tables.append(NoTable(i + 1, section, rows, frozenset(notes)))
+                previous = len(tables) - 1
+                pending = set()
             i = j
             continue
-        gap_notes.setdefault(section, set()).update(parse_gap_note(line))
+        found = parse_gap_note(line)
+        if found:
+            pending.update(found)
+            if previous is not None:
+                tables[previous] = tables[previous]._replace(notes=tables[previous].notes | found)
         i += 1
-    return NoColumnScan(tables, gap_notes, unclosed)
+    return NoColumnScan(tables, unclosed)
 
 
 def _format_numbers(series: str, numbers: List[int]) -> str:
@@ -683,14 +710,21 @@ def _format_numbers(series: str, numbers: List[int]) -> str:
 def find_no_column_problems(scan: NoColumnScan) -> List[Tuple[int, str]]:
     """表の No 列の飛び・重複を (行番号, 説明) の一覧で返す。
 
-    - 系列は表ごと・接頭辞ごと。同じ節の中で 1 から始まらない表は、直前の表（同じ節・同じ接頭辞）の
-      続きとして 1 つの系列にまとめる。1 から始まらず続ける先も無い表は、その最小の番号から数える
-    - 飛び: 系列の始まりから最大の番号までの間で、どの行も占めていない番号。同じ節の注記「No.8 は欠番」で
-      許した番号は除く
+    - 系列は表ごと・接頭辞ごと。1（または 0）から始まらない表は、次の順で続ける先を探して 1 つの系列にまとめる
+      1. 同じ見出しの中の直前の表（同じ接頭辞）。間の飛びも検査する
+      2. 見出しをまたいだ直近の系列（最後に行を足した順に ``CROSS_HEADING_LOOKBACK`` 個まで）のうち、最大の番号が
+         ちょうど「この表の最小の番号 − 1」のもの（近いものから）。番号がつながっていることを結び付けの根拠に
+         するので、境目の行が消えていれば結び付かず赤になる。遠くの無関係な表と偶然つながらないよう、候補は直近に限る
+      3. どちらも無ければ 1 から始まる系列として数える（先頭の行が消えた表は、欠番の注記が無ければ赤）
+    - 飛び: 系列の始まりから最大の番号までの間で、どの行も占めていない番号。系列を成す表に結び付いた注記
+      「No.8 は欠番」で許した番号は除く
     - 重複: 同じ系列の中で同じ表記（``8`` / ``8a``）を占める行が 2 つ以上（範囲 ``7〜9`` と ``8`` も重複）
+
+    **系列の終わりは最大の番号**なので、表の末尾の行が消えたことは原理的に検出できない（基準が無い）。
     """
-    groups = []  # [series, section, start, table_lineno, [(lineno, NoEntry)]]
-    last: Dict[Tuple[int, str], list] = {}
+    groups: List[dict] = []
+    last: Dict[Tuple[int, str], dict] = {}
+    recent: List[dict] = []  # 最後に行を足した順の系列（見出しをまたぐ続きの候補）
     for table in scan.tables:
         by_series: Dict[str, List[Tuple[int, NoEntry]]] = {}
         for row in table.rows:
@@ -698,17 +732,38 @@ def find_no_column_problems(scan: NoColumnScan) -> List[Tuple[int, str]]:
                 by_series.setdefault(entry.series, []).append((row.lineno, entry))
         for series, items in by_series.items():
             smallest = min(e.base for _, e in items)
-            group = last.get((table.section_lineno, series))
-            if smallest != 1 and group is not None:
-                group[4].extend(items)
-                continue
-            group = [series, table.section_lineno, smallest, table.lineno, list(items)]
-            groups.append(group)
+            group = None
+            if smallest > 1:
+                group = last.get((table.section_lineno, series))
+                if group is None:
+                    group = next(
+                        (
+                            g for g in recent[-CROSS_HEADING_LOOKBACK:][::-1]
+                            if g["series"] == series
+                            and max(e.base for _, e in g["items"]) == smallest - 1
+                        ),
+                        None,
+                    )
+            if group is None:
+                group = {
+                    "series": series,
+                    "start": min(smallest, 1),
+                    "table_lineno": table.lineno,
+                    "items": [],
+                    "notes": set(),
+                }
+                groups.append(group)
+            group["items"].extend(items)
+            group["notes"].update(table.notes)
             last[(table.section_lineno, series)] = group
+            if group in recent:
+                recent.remove(group)
+            recent.append(group)
 
     problems: List[Tuple[int, str]] = []
-    for series, section, start, table_lineno, items in groups:
-        where = f"{table_lineno} 行目の表"
+    for group in groups:
+        series, start, items = group["series"], group["start"], group["items"]
+        where = f"{group['table_lineno']} 行目の表"
         lines_by_key: Dict[str, List[int]] = {}
         for lineno, entry in items:
             lines_by_key.setdefault(entry.key, []).append(lineno)
@@ -719,7 +774,7 @@ def find_no_column_problems(scan: NoColumnScan) -> List[Tuple[int, str]]:
                     f"{where}: No.{key} が重複しています（{', '.join(str(n) for n in linenos)} 行目）",
                 ))
         bases = {e.base for _, e in items}
-        allowed = scan.gap_notes.get(section, set())
+        allowed = group["notes"]
         missing = [
             n for n in range(start, max(bases) + 1)
             if n not in bases and (series, n) not in allowed

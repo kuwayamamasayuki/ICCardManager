@@ -4,7 +4,6 @@ import importlib.util
 import io
 import pathlib
 import re
-import subprocess
 import sys
 import tempfile
 import textwrap
@@ -597,11 +596,12 @@ class MainReportsHeadingCheckOnEarlyExitTests(unittest.TestCase):
         return code, out.getvalue() + err.getvalue()
 
     def test_sum_mismatch_still_reports_heading_duplicates(self):
-        doc = SAMPLE_DOC_OK.replace("**3,292件**", "**9,999件**") + self.DUPLICATED
+        doc = SAMPLE_DOC_OK.replace("**3,292件**", "**9,999件**") + self.DUPLICATED + NO_TABLE_GAP
         code, output = self._run_main(doc)
         self.assertEqual(1, code)
         self.assertIn("§1.1a の記載値の合計", output)
         self.assertIn("ID UT-001:", output)
+        self.assertIn("No.2 が抜けています", output)  # Issue #2420: No 列の検査の結果も出す
 
     def test_listing_failure_still_reports_heading_duplicates(self):
         original = _mod.list_test_names
@@ -611,11 +611,12 @@ class MainReportsHeadingCheckOnEarlyExitTests(unittest.TestCase):
 
         _mod.list_test_names = fail
         try:
-            code, output = self._run_main(SAMPLE_DOC_OK + self.DUPLICATED)
+            code, output = self._run_main(SAMPLE_DOC_OK + self.DUPLICATED + NO_TABLE_GAP)
         finally:
             _mod.list_test_names = original
         self.assertEqual(2, code)
         self.assertIn("ID UT-001:", output)
+        self.assertIn("No.2 が抜けています", output)  # Issue #2420: No 列の検査の結果も出す
 
 
 class MainExitCodeCombinesHeadingCheckTests(unittest.TestCase):
@@ -894,31 +895,98 @@ class NoColumnMutationTests(unittest.TestCase):
         self.assertNotEqual([], self._with_patch("parse_gap_note", lambda line: set(), doc))
 
 
-class NoColumnRealDocumentTests(unittest.TestCase):
-    """実データ: 現在の 07 は緑。#2321 の是正前（No.13〜15 が一斉に消えた版）は赤。"""
+class NoColumnNoteScopeTests(unittest.TestCase):
+    """レビュー 1 回目: 欠番の注記は直前・直後の表にだけ効く。否定・インラインコードは注記として読まない。"""
 
-    REL = "ICCardManager/docs/design/07_テスト設計書.md"
-    DOC = pathlib.Path(__file__).resolve().parents[2] / REL
-    BEFORE_2321_FIX = "0a6dce76^"  # #2321 の是正（PR #2362）の親
+    def test_note_does_not_hide_a_gap_in_a_distant_table_of_the_same_section(self):
+        doc = (
+            "#### UT-001\n\n" + _table(1, 2, 4) + "\n本文\n\n"
+            + _table(1, 3) + "\n> No.2 は欠番。\n\n" + _table(1, 2, 3)
+        )
+        problems = _no_problems(doc)
+        self.assertEqual(1, len(problems), problems)
+        self.assertIn("3 行目の表: No.3 が抜けています", problems[0][1])
+
+    def test_note_between_two_tables_applies_to_both(self):
+        doc = "#### UT-001\n\n" + _table(1, 3) + "\nNo.2 は欠番。\n\n" + _table(1, 2, 4) + "\n"
+        self.assertEqual(1, len(_no_problems(doc)))  # 後の表の No.3 には効かない
+        doc = "#### UT-001\n\n" + _table(1, 3) + "\nNo.2・3 は欠番。\n\n" + _table(1, 2, 4) + "\n"
+        self.assertEqual([], _no_problems(doc))
+
+    def test_note_before_a_table_does_not_reach_past_it(self):
+        doc = "#### UT-001\n\nNo.2 は欠番。\n\n" + _table(1, 3) + "\n本文\n\n" + _table(1, 3)
+        problems = _no_problems(doc)
+        self.assertEqual(1, len(problems), problems)
+        self.assertIn("12 行目の表", problems[0][1])  # 後の表だけ
+
+    def test_negated_note_is_not_an_allowance(self):
+        for text in ("No.8 は欠番ではない", "No.8 は欠番でない", "No.8 は欠番ではありません"):
+            with self.subTest(text=text):
+                self.assertEqual(set(), _mod.parse_gap_note(text))
+
+    def test_note_inside_inline_code_is_an_example(self):
+        self.assertEqual(set(), _mod.parse_gap_note("注記は `No.8・9 は欠番` の形で書く"))
+        doc = "#### UT-001\n\n例: `No.2 は欠番`\n\n" + _table(1, 3)
+        self.assertEqual(1, len(_no_problems(doc)))
+
+
+class NoColumnSeriesStartTests(unittest.TestCase):
+    """レビュー 1 回目: 1 から始まらない系列は、続きの表か欠番の注記が無ければ赤。"""
+
+    def test_table_not_starting_at_one_without_continuation_is_red(self):
+        problems = _no_problems("#### UT-001\n\n" + _table(4, 5, 6))
+        self.assertEqual(1, len(problems), problems)
+        self.assertIn("No.1〜3 が抜けています", problems[0][1])
+
+    def test_leading_numbers_with_a_note_are_green(self):
+        self.assertEqual([], _no_problems("#### UT-001\n\nNo.1〜3 は欠番。\n\n" + _table(4, 5)))
+
+    def test_zero_based_table_is_green(self):
+        self.assertEqual([], _no_problems(_table(0, "0a", 1, 2)))
+
+    def test_continuation_across_headings_when_numbers_connect(self):
+        doc = "#### UT-001\n\n" + _table(1, 2, 3) + "\n#### UT-002\n\n" + _table(4, 5)
+        self.assertEqual([], _no_problems(doc))
+
+    def test_continuation_across_headings_skips_a_section_restarting_at_one(self):
+        doc = (
+            "#### UT-001\n\n" + _table(1, 2, 3)
+            + "\n#### UT-001a\n\n" + _table(1, 2)
+            + "\n#### UT-002\n\n" + _table(4, 5)
+        )
+        self.assertEqual([], _no_problems(doc))
+
+    def test_lost_first_rows_of_a_cross_heading_continuation_are_red(self):
+        doc = "#### UT-001\n\n" + _table(1, 2, 3) + "\n#### UT-002\n\n" + _table(6, 7)
+        problems = _no_problems(doc)
+        self.assertEqual(1, len(problems), problems)
+        self.assertIn("No.1〜5 が抜けています", problems[0][1])
+
+    def test_distant_table_is_not_a_continuation_candidate(self):
+        tables = "".join(f"\n#### UT-{i:03d}\n\n" + _table(1, 2) for i in range(5))
+        doc = "#### UT-900\n\n" + _table(1, 2, 3, 4, 5, 6) + tables + "\n#### UT-901\n\n" + _table(7, 8)
+        self.assertEqual(1, len(_no_problems(doc)))
+
+    def test_lost_last_rows_are_not_detected(self):
+        """既知の限界: 系列の終わりは最大の番号なので、末尾の行の消失は原理的に検出できない。"""
+        self.assertEqual([], _no_problems("#### UT-001\n\n" + _table(1, 2, 3)))
+
+
+class NoColumnRealDocumentTests(unittest.TestCase):
+    """実データ: 現在の 07 は緑。#2321 の是正前（No.13〜15 が一斉に消えた版）の抜粋は赤。"""
+
+    DOC = pathlib.Path(__file__).resolve().parents[2] / "ICCardManager" / "docs" / "design" / "07_テスト設計書.md"
+    # 0a6dce76^（#2321 の是正 PR #2362 の親）の 07 から 3 節を写した fixture。CI の浅いクローンでも必ず走る
+    BEFORE_2321_FIX = pathlib.Path(__file__).resolve().parent / "fixtures" / "07_before_2321_fix_excerpt.md"
 
     def test_current_document_is_green(self):
         ok, report = _mod.check_no_columns(_mod.parse_no_columns(str(self.DOC)))
         self.assertTrue(ok, report)
 
-    def test_document_before_the_2321_fix_is_red(self):
-        proc = subprocess.run(
-            ["git", "-C", str(self.DOC.parent), "show", f"{self.BEFORE_2321_FIX}:{self.REL}"],
-            capture_output=True,
-        )
-        if proc.returncode != 0:
-            self.skipTest("git の履歴が無い（浅いクローン）ため #2321 の是正前の 07 を取り出せない")
-        path = _write_md(proc.stdout.decode("utf-8"))
-        try:
-            problems = _mod.find_no_column_problems(_mod.parse_no_columns(path))
-        finally:
-            pathlib.Path(path).unlink()
+    def test_excerpt_before_the_2321_fix_is_red(self):
+        problems = _mod.find_no_column_problems(_mod.parse_no_columns(str(self.BEFORE_2321_FIX)))
         vanished = [text for _, text in problems if "No.13〜15 が抜けています" in text]
-        self.assertGreaterEqual(len(vanished), 20, problems)
+        self.assertEqual(3, len(vanished), problems)
 
 
 if __name__ == "__main__":
