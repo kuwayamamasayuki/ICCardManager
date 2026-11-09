@@ -1617,11 +1617,11 @@ public class HistoryPanelViewModelTests : IDisposable
         var cardIdm = "0102030405060708";
         _ledgerRepositoryMock.Setup(r => r.GetCarryoverBalanceAsync(cardIdm, 2026))
             .ReturnsAsync(5000);
-        _ledgerRepositoryMock.Setup(r => r.GetByDateRangeAsync(cardIdm, new DateTime(2027, 4, 1), new DateTime(2028, 3, 31)))
+        _ledgerRepositoryMock.Setup(r => r.GetFiscalYearFirstDayLedgersAsync(cardIdm, 2027))
             .ReturnsAsync(new List<Ledger>
             {
-                new Ledger { Id = 2, CardIdm = cardIdm, Date = new DateTime(2027, 4, 10), Summary = "鉄道（天神～博多）", Expense = 210, Balance = 4790 },
-                new Ledger { Id = 1, CardIdm = cardIdm, Date = new DateTime(2027, 4, 1), Summary = SummaryGenerator.GetCarryoverFromPreviousYearSummary(), Income = 5000, Balance = 5000 }
+                new Ledger { Id = 1, CardIdm = cardIdm, Date = new DateTime(2027, 4, 1), Summary = SummaryGenerator.GetCarryoverFromPreviousYearSummary(), Income = 5000, Balance = 5000 },
+                new Ledger { Id = 2, CardIdm = cardIdm, Date = new DateTime(2027, 4, 1), Summary = "鉄道（天神～博多）", Expense = 210, Balance = 4790 }
             });
 
         // Act
@@ -1640,15 +1640,14 @@ public class HistoryPanelViewModelTests : IDisposable
     [Fact]
     public async Task BuildCarryoverRowAsync_4月_年度の先頭が導入行でない_従来どおり合成すること()
     {
-        // Arrange: 年度の先頭は 4/2 の利用。4/5 に同じ摘要の行が手入力されている
+        // Arrange: 年度の先頭は 4/2 の利用（4/5 に同じ摘要の行が手入力されていても、先頭の日の行ではない）
         var cardIdm = "0102030405060708";
         _ledgerRepositoryMock.Setup(r => r.GetCarryoverBalanceAsync(cardIdm, 2026))
             .ReturnsAsync(5000);
-        _ledgerRepositoryMock.Setup(r => r.GetByDateRangeAsync(cardIdm, new DateTime(2027, 4, 1), new DateTime(2028, 3, 31)))
+        _ledgerRepositoryMock.Setup(r => r.GetFiscalYearFirstDayLedgersAsync(cardIdm, 2027))
             .ReturnsAsync(new List<Ledger>
             {
-                new Ledger { Id = 1, CardIdm = cardIdm, Date = new DateTime(2027, 4, 2), Summary = "鉄道（天神～博多）", Expense = 210, Balance = 4790 },
-                new Ledger { Id = 2, CardIdm = cardIdm, Date = new DateTime(2027, 4, 5), Summary = SummaryGenerator.GetCarryoverFromPreviousYearSummary(), Income = 0, Balance = 4790 }
+                new Ledger { Id = 1, CardIdm = cardIdm, Date = new DateTime(2027, 4, 2), Summary = "鉄道（天神～博多）", Expense = 210, Balance = 4790 }
             });
 
         // Act

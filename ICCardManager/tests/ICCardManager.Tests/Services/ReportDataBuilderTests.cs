@@ -2124,5 +2124,26 @@ public class ReportDataBuilderTests
             .Should().BeFalse();
     }
 
+    /// <summary>
+    /// Issue #2418: 期間の開始日が年度の先頭の導入行以前なら「前の残高」を使わない、という判定
+    /// （帳票・履歴・残高の整合性チェックが共有する）。導入行を 5/2 へ動かしたカードでは 4 月・5 月 1 日開始の期間が真、
+    /// 5/10 開始は偽。導入行から始まらない年度は常に偽
+    /// </summary>
+    [Fact]
+    public void PeriodOpensWithFiscalYearStartCarryover_DependsOnPeriodStartAndFirstDay()
+    {
+        var summary = SummaryGenerator.GetCarryoverFromPreviousYearSummary();
+        var movedIntro = new[] { CreateTestLedger(1, TestCardIdm, new DateTime(2027, 5, 2), summary, 5000, 0, 5000) };
+        var notIntro = new[] { CreateTestLedger(2, TestCardIdm, new DateTime(2027, 4, 1), "鉄道（天神～博多）", 0, 210, 4790) };
+
+        PaperCarryoverPolicy.PeriodOpensWithFiscalYearStartCarryover(new DateTime(2027, 4, 1), movedIntro).Should().BeTrue();
+        PaperCarryoverPolicy.PeriodOpensWithFiscalYearStartCarryover(new DateTime(2027, 5, 1), movedIntro).Should().BeTrue();
+        PaperCarryoverPolicy.PeriodOpensWithFiscalYearStartCarryover(new DateTime(2027, 5, 2), movedIntro).Should().BeTrue();
+        PaperCarryoverPolicy.PeriodOpensWithFiscalYearStartCarryover(new DateTime(2027, 5, 10), movedIntro)
+            .Should().BeFalse("導入行より後から始まる期間は、導入行以後の行の残高を前の残高にする");
+        PaperCarryoverPolicy.PeriodOpensWithFiscalYearStartCarryover(new DateTime(2027, 4, 1), notIntro).Should().BeFalse();
+        PaperCarryoverPolicy.PeriodOpensWithFiscalYearStartCarryover(new DateTime(2027, 4, 1), Array.Empty<Ledger>()).Should().BeFalse();
+    }
+
     #endregion
 }

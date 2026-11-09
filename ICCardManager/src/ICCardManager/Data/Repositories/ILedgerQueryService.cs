@@ -26,6 +26,18 @@ namespace ICCardManager.Data.Repositories
         Task<IEnumerable<Ledger>> GetByDateRangeAsync(string? cardIdm, DateTime fromDate, DateTime toDate);
 
         /// <summary>
+        /// 年度で最も早い日付の行（貸出中レコードを除く）を取得する。その年度に行が無ければ空。
+        /// </summary>
+        /// <param name="cardIdm">対象カードの IDm</param>
+        /// <param name="fiscalYear">年度（4 月始まり）</param>
+        /// <remarks>
+        /// Issue #2418: 年度の台帳が導入行「前年度より繰越」から始まるか
+        /// （<c>PaperCarryoverPolicy.HasFiscalYearStartCarryoverRecord</c>）を、帳票・履歴・残高の整合性チェックが
+        /// 同じ範囲（年度全体）で判定するための軽いクエリ。年度 1 年分の行を読まずに済む。
+        /// </remarks>
+        Task<IEnumerable<Ledger>> GetFiscalYearFirstDayLedgersAsync(string cardIdm, int fiscalYear);
+
+        /// <summary>
         /// 摘要に指定した文字列をそのまま含む利用履歴を、全カード・全期間から取得する（利用日の新しい順）
         /// </summary>
         /// <remarks>

@@ -730,23 +730,25 @@ public partial class HistoryPanelViewModel : ObservableObject
     /// Issue #1740: 残高チェーンの並べ替えシードと繰越行の生成の双方が同じ値を必要とするため、
     /// <see cref="BuildCarryoverRowAsync"/> から切り出した。呼び出し元は 1 回の取得で両方に使う。
     /// <para>
-    /// Issue #2418: 4 月は、その年度の台帳が導入行「前年度より繰越」（3 月を繰越月にして登録したカード）から
-    /// 始まるなら null（前年度繰越は無い）とする。導入行が年度の始まりの残高を担い、その行も一覧に並ぶので、
+    /// Issue #2418: その年度の台帳が導入行「前年度より繰越」（3 月を繰越月にして登録したカード）から始まり、
+    /// 表示する月が導入行以前なら null（前の残高は無い）とする。導入行が年度の始まりの残高を担い、その行も一覧に並ぶので、
     /// 導入行より前の日付の行（手入力・CSV）の残高で繰越行を合成すると二重に表示される。
-    /// 判定は帳票（<c>ReportDataBuilder</c>）と同じ <see cref="PaperCarryoverPolicy.HasFiscalYearStartCarryoverRecord"/>。
+    /// 判定は帳票（<c>ReportDataBuilder</c>）・残高の整合性チェックと同じ
+    /// <see cref="PaperCarryoverPolicy.PeriodOpensWithFiscalYearStartCarryover"/>。
     /// </para>
     /// </remarks>
     internal async Task<int?> GetPrecedingBalanceAsync(string cardIdm, int year, int month)
     {
+        var fiscalYearFirstDayLedgers = await _ledgerRepository.GetFiscalYearFirstDayLedgersAsync(
+            cardIdm, FiscalYearHelper.GetFiscalYear(year, month));
+        if (PaperCarryoverPolicy.PeriodOpensWithFiscalYearStartCarryover(
+            new DateTime(year, month, 1), fiscalYearFirstDayLedgers))
+        {
+            return null;
+        }
+
         if (month == 4)
         {
-            var fiscalYearLedgers = await _ledgerRepository.GetByDateRangeAsync(
-                cardIdm, FiscalYearHelper.GetFiscalYearStart(year), new DateTime(year + 1, 3, 31));
-            if (PaperCarryoverPolicy.HasFiscalYearStartCarryoverRecord(fiscalYearLedgers))
-            {
-                return null;
-            }
-
             return await _ledgerRepository.GetCarryoverBalanceAsync(cardIdm, year - 1);
         }
 

@@ -82,6 +82,40 @@ ORDER BY DATE(date) ASC,
         }
 
         /// <inheritdoc/>
+        public async Task<IEnumerable<Ledger>> GetFiscalYearFirstDayLedgersAsync(string cardIdm, int fiscalYear)
+        {
+            using var lease = await _dbContext.LeaseConnectionAsync().ConfigureAwait(false);
+            var ledgerList = new List<Ledger>();
+
+            using var command = lease.Connection.CreateCommand();
+
+            // 年度内・貸出中を除く行の最も早い日（DATE(MIN(date))）を求め、その日の行だけを返す。
+            // 外側は列を関数で包まず範囲で絞る（idx_ledger_card_date を使える。Issue #2328）
+            const string Filter = @"card_idm = @cardIdm AND date BETWEEN @fromDate AND @toDate
+  AND (is_lent_record = 0 OR is_lent_record IS NULL)";
+            command.CommandText = $@"SELECT id, card_idm, lender_idm, date, summary, income, expense, balance,
+       staff_name, note, returner_idm, lent_at, returned_at, is_lent_record, companion_count
+FROM ledger
+WHERE {Filter}
+  AND date >= (SELECT DATE(MIN(date)) FROM ledger WHERE {Filter})
+  AND date < (SELECT DATE(MIN(date), '+1 day') FROM ledger WHERE {Filter})
+ORDER BY date ASC, id ASC";
+
+            var fiscalYearStart = FiscalYearHelper.GetFiscalYearStart(fiscalYear);
+            command.Parameters.AddWithValue("@cardIdm", cardIdm);
+            command.Parameters.AddWithValue("@fromDate", SqliteDateTimeFormat.ToDayStartText(fiscalYearStart));
+            command.Parameters.AddWithValue("@toDate", SqliteDateTimeFormat.ToDayEndText(fiscalYearStart.AddYears(1).AddDays(-1)));
+
+            using var reader = await command.ExecuteReaderAsync().ConfigureAwait(false);
+            while (await reader.ReadAsync().ConfigureAwait(false))
+            {
+                ledgerList.Add(MapToLedger(reader));
+            }
+
+            return ledgerList;
+        }
+
+        /// <inheritdoc/>
         public async Task<IEnumerable<Ledger>> GetBySummaryContainingAsync(string fragment)
         {
             if (string.IsNullOrEmpty(fragment))
