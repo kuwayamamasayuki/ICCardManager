@@ -244,6 +244,9 @@ public class CardManageViewModelSystemLendTests : IDisposable
         _viewModel.IsStatusError.Should().BeTrue();
         _viewModel.StatusMessage.Should().Contain("既に貸出中");
         _viewModel.StatusMessage.Should().EndWith("確認してください。");
+        // Issue #2421: 表示名（交通系ICカード「…」）を「カード「…」」で二重に括らない
+        _viewModel.StatusMessage.Should().StartWith("交通系ICカード「");
+        _viewModel.StatusMessage.Should().NotContain("カード「交通系ICカード");
     }
 
     /// <summary>

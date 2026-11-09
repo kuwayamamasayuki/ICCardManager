@@ -93,6 +93,20 @@ namespace ICCardManager.Common
             => Build(target, "払い戻し", DeletedReason, listName);
 
         /// <summary>
+        /// 払戻済への更新が、行はあるが削除済み・払戻済のため拒否されたときの文言を組み立てる（Issue #2421）。
+        /// </summary>
+        /// <param name="target">対象の説明。「何が」に相当する</param>
+        /// <param name="listName">再読込した一覧の名称</param>
+        /// <remarks>
+        /// 払い戻しの書き込みが 0 行で、事後の診断（<c>CardRepository.DiagnoseFailureAsync</c>）が行を見つけ、
+        /// 貸出中でもなかった場合（<c>CardOperationResult.Conflict</c>）。払戻済への更新の WHERE が拒否するのは
+        /// 削除済みか払戻済なので、<see cref="ForRefund"/> の「削除された可能性」だけでは他のパソコンで
+        /// 先に払い戻された場合を説明しない。
+        /// </remarks>
+        public static string ForRefundStateChanged(string target, string listName)
+            => Build(target, "払い戻し", "他のパソコンや別の操作で削除された、または払い戻された可能性があります。", listName);
+
+        /// <summary>
         /// 復元対象の行（削除済みの行）が見つからなかったときの文言を組み立てる。
         /// </summary>
         /// <param name="target">対象の説明。「何が」に相当する</param>
