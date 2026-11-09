@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Data.SQLite;
 using System.Diagnostics;
 using System.IO;
+using System.Runtime.ExceptionServices;
 using FlaUI.Core;
 using FlaUI.Core.AutomationElements;
 using FlaUI.UIA3;
@@ -139,6 +140,7 @@ namespace ICCardManager.UITests.Infrastructure
 
             return LaunchWithSeedCore(
                 DbDirectory,
+                UiTestDatabaseGuard.UiTestBackupDirectory,
                 launchForMigration: () =>
                 {
                     var initialFixture = StartApplication(ownedDatabaseGuard: null, environment);
@@ -186,10 +188,14 @@ namespace ICCardManager.UITests.Infrastructure
         public static string DatabasePath => Path.Combine(DbDirectory, UiTestDatabaseGuard.DatabaseFileName);
 
         /// <summary>
-        /// <see cref="LaunchWithSeed"/> の手順（退避・マイグレーション・投入・本起動・失敗時の復元）。
+        /// <see cref="LaunchWithSeed"/> の手順（退避・バックアップ先の隔離・マイグレーション・投入・本起動・失敗時の復元）。
         /// アプリの起動を差し替えて、実際に起動せずに DB の退避・復元を検証できるよう切り出している（Issue #2062）。
         /// </summary>
         /// <param name="dbDirectory">DB を置くフォルダー。</param>
+        /// <param name="backupDirectory">
+        /// テストのアプリが自動バックアップを作るフォルダー（Issue #2423）。マイグレーションのための起動より前に DB へ書くので、
+        /// どちらの起動も既定のバックアップ先に触れない。
+        /// </param>
         /// <param name="launchForMigration">
         /// マイグレーションのための起動。完了するまで待ってから返すこと。返した値は投入の前に Dispose する。
         /// DB の復元はしない（ガードを渡さない）。
@@ -199,6 +205,7 @@ namespace ICCardManager.UITests.Infrastructure
         /// <param name="maxAttempts">ファイルが使用中のときの試行回数（<see cref="UiTestDatabaseGuard.Acquire"/> へ渡す）。</param>
         internal static TFixture LaunchWithSeedCore<TFixture>(
             string dbDirectory,
+            string backupDirectory,
             Func<IDisposable> launchForMigration,
             Action<string> seedDatabase,
             Func<UiTestDatabaseGuard, TFixture> launchOwningGuard,
@@ -209,6 +216,10 @@ namespace ICCardManager.UITests.Infrastructure
             {
                 // 空の状態からマイグレーションさせる
                 guard.DeleteWorkingDatabase();
+
+                // Issue #2423: マイグレーションのための起動も起動時の自動バックアップを作るので、その前に書く。
+                // 投入（seedDatabase）の中で書くと、1 回目の起動が既定のバックアップ先へ書き、その日の実 DB のバックアップを押し出す
+                guard.IsolateBackupFolder(backupDirectory);
 
                 // Issue #2108: Dispose がプロセスの終了まで待つので、DB ファイルのロックは解放済み。
                 // 固定時間の待機（旧: 1 秒）は要らない
@@ -223,6 +234,8 @@ namespace ICCardManager.UITests.Infrastructure
             }
             catch
             {
+                // 起動の失敗の経路では既定のバックアップ先を確かめない（確かめて投げると本来の原因を上書きする）。
+                // 途中まで進んだアプリが既定の保存先へ書いていても、この経路では検出しない。確かめるのは起動できた回の Dispose（FinishOwnedGuard）
                 guard.Restore();
                 throw;
             }
@@ -232,15 +245,38 @@ namespace ICCardManager.UITests.Infrastructure
         /// アプリケーションを起動し、メインウィンドウが表示されるまで待機する。
         /// 既存 DB を退避し、Dispose で復元する。
         /// </summary>
-        public static AppFixture Launch()
+        /// <remarks>
+        /// 投入はしないが、バックアップ先の設定（Issue #2423）だけは DB へ書く（開発機の DB があればその DB に。退避済みなので終了後に戻る）。
+        /// </remarks>
+        public static AppFixture Launch() =>
+            LaunchCore(
+                DbDirectory,
+                UiTestDatabaseGuard.UiTestBackupDirectory,
+                launchOwningGuard: guard => StartApplication(guard, environment: null));
+
+        /// <summary>
+        /// <see cref="Launch"/> の手順（退避・バックアップ先の隔離・起動・失敗時の復元）。アプリを起動せずに検証できるよう切り出している（Issue #2423）。
+        /// </summary>
+        /// <param name="dbDirectory">DB を置くフォルダー。</param>
+        /// <param name="backupDirectory">テストのアプリが自動バックアップを作るフォルダー。</param>
+        /// <param name="launchOwningGuard">起動。受け取ったガードで、自身の Dispose 時に DB を復元すること。</param>
+        /// <param name="maxAttempts">ファイルが使用中のときの試行回数（<see cref="UiTestDatabaseGuard.Acquire"/> へ渡す）。</param>
+        internal static TFixture LaunchCore<TFixture>(
+            string dbDirectory,
+            string backupDirectory,
+            Func<UiTestDatabaseGuard, TFixture> launchOwningGuard,
+            int maxAttempts = UiTestDatabaseGuard.DefaultMaxAttempts)
         {
-            var guard = UiTestDatabaseGuard.Acquire(DbDirectory);
+            var guard = UiTestDatabaseGuard.Acquire(dbDirectory, maxAttempts);
             try
             {
-                return StartApplication(guard, environment: null);
+                guard.IsolateBackupFolder(backupDirectory);
+                return launchOwningGuard(guard);
             }
             catch
             {
+                // 起動の失敗の経路では既定のバックアップ先を確かめない（確かめて投げると本来の原因を上書きする）。
+                // 途中まで進んだアプリが既定の保存先へ書いていても、この経路では検出しない。確かめるのは起動できた回の Dispose（FinishOwnedGuard）
                 guard.Restore();
                 throw;
             }
@@ -413,8 +449,79 @@ namespace ICCardManager.UITests.Infrastructure
 
             _automation.Dispose();
 
-            // DB を復元する（失敗したら退避ファイルは残り、次回の起動が回復する）
-            _ownedDatabaseGuard?.Restore();
+            // テスト本体が失敗している最中にここで例外を投げると、using の Dispose の例外がテスト本体の例外を上書きする。
+            // 両方が同時に起きるのは隔離が外れた（またはピッすいが DB を掴んでいる）ときだけで、どちらも直すべき失敗なので許容する
+            FinishOwnedGuard(_ownedDatabaseGuard);
+        }
+
+        /// <summary>
+        /// 起動を所有するフィクスチャの後始末のうち、ガードに関わる部分（DB の復元と、既定のバックアップ先の確認）。
+        /// アプリの終了を待った後に呼ぶ。GUI 不要で検証できるよう <see cref="Dispose"/> から切り出している（Issue #2423）。
+        /// </summary>
+        /// <param name="ownedDatabaseGuard">所有するガード。入れ子の起動（null）では何もしない。</param>
+        internal static void FinishOwnedGuard(UiTestDatabaseGuard? ownedDatabaseGuard)
+        {
+            if (ownedDatabaseGuard == null)
+            {
+                return;
+            }
+
+            FinishOwnedGuard(
+                // DB を復元する（失敗したら退避ファイルは残り、次回の起動が回復する）
+                restore: ownedDatabaseGuard.Restore,
+                // Issue #2423: テストのアプリが既定のバックアップ先へ書いていない（本体が UI テスト専用の保存先を拒んで黙って戻っていない）こと
+                checkDefaultBackupFolder: ownedDatabaseGuard.ThrowIfDefaultBackupFolderChanged);
+        }
+
+        /// <summary>
+        /// <see cref="FinishOwnedGuard(UiTestDatabaseGuard)"/> の本体。復元と確認を互いの成否と独立に走らせ、失敗はすべて伝える。
+        /// 確認の失敗の種類（一覧を読めない IOException 等）を差し替えて検証できるよう、処理を受け取る形にしている。
+        /// </summary>
+        /// <remarks>
+        /// 確認は復元の成否と独立に走らせる。次回の <see cref="UiTestDatabaseGuard.Acquire"/> はその時点の一覧を記録し直すので、
+        /// ここで見なければこの回の書き込みは二度と検出できない。どちらの失敗も型で絞らずに受ける — 確認が一覧を読めずに
+        /// IOException / UnauthorizedAccessException で失敗したときに、復元の失敗を失わないため。
+        /// </remarks>
+        internal static void FinishOwnedGuard(Action restore, Action checkDefaultBackupFolder)
+        {
+            Exception? restoreFailure = null;
+            try
+            {
+                restore();
+            }
+            catch (Exception ex)
+            {
+                restoreFailure = ex;
+            }
+
+            Exception? checkFailure = null;
+            try
+            {
+                checkDefaultBackupFolder();
+            }
+            catch (Exception ex)
+            {
+                checkFailure = ex;
+            }
+
+            if (restoreFailure != null && checkFailure != null)
+            {
+                // net48 の AggregateException.Message は内側の例外の文言を含まないので、両方の文言を自分で並べる
+                throw new AggregateException(
+                    $"UI テストの後始末で 2 つの失敗がありました。DB の復元: {restoreFailure.Message} / 既定のバックアップ先: {checkFailure.Message}",
+                    restoreFailure,
+                    checkFailure);
+            }
+
+            if (restoreFailure != null)
+            {
+                ExceptionDispatchInfo.Capture(restoreFailure).Throw();
+            }
+
+            if (checkFailure != null)
+            {
+                ExceptionDispatchInfo.Capture(checkFailure).Throw();
+            }
         }
 
         /// <summary>

@@ -1,4 +1,6 @@
 using System;
+using System.Collections.Generic;
+using System.Data.SQLite;
 using System.IO;
 using FluentAssertions;
 using ICCardManager.UITests.Infrastructure;
@@ -42,6 +44,12 @@ namespace ICCardManager.UITests.Tests
         private string PathOf(string fileName) => Path.Combine(_directory, fileName);
 
         private string LatestVersionPath => Path.Combine(_directory, UiTestDatabaseGuard.LatestVersionFileName);
+
+        /// <summary>テストのアプリにバックアップを作らせるフォルダー（Issue #2423）。既定のバックアップ先（<c>backup</c>）とは別の名前にする。</summary>
+        private string IsolatedBackupDirectory => Path.Combine(_directory, "uitest-backup-folder");
+
+        /// <summary>このフォルダーを DB の置き場所とみなしたときの、アプリの既定のバックアップ先。</summary>
+        private string DefaultBackupDirectory => Path.Combine(_directory, UiTestDatabaseGuard.DefaultBackupFolderName);
 
         /// <summary>開発機に残っていた更新通知ファイルの内容（Issue #2394 の実例）。</summary>
         private const string OriginalLatestVersion = "99.0.0";
@@ -102,6 +110,7 @@ namespace ICCardManager.UITests.Tests
 
             Action act = () => AppFixture.LaunchWithSeedCore<FakeFixture>(
                 _directory,
+                IsolatedBackupDirectory,
                 launchForMigration: () =>
                 {
                     File.WriteAllText(DbPath, MigratedContent);
@@ -776,6 +785,320 @@ namespace ICCardManager.UITests.Tests
 
         #endregion
 
+        #region バックアップ先の隔離（Issue #2423）
+
+        // テストのアプリは起動時に自動バックアップを作り、保存先の古い世代を「各日の最新 1 世代」へ間引く。保存先が既定
+        // （%ProgramData%\ICCardManager\backup）のままだと、同じ日にインストール版が作った実 DB のバックアップをテスト用 DB の
+        // バックアップが押し出す。起動の手順はすべて、アプリを起動する前に DB の backup_path をテスト専用のフォルダーへ向ける
+
+        [Fact]
+        public void LaunchWithSeed_マイグレーションの起動も本起動も_既定ではなくUIテスト専用のバックアップ先を使うこと()
+        {
+            File.WriteAllText(DbPath, OriginalContent);
+            string? atMigration = null;
+            string? atLaunch = null;
+
+            using (AppFixture.LaunchWithSeedCore(
+                       _directory,
+                       IsolatedBackupDirectory,
+                       launchForMigration: () =>
+                       {
+                           // 1 回目の起動も自動バックアップを作る。投入で書くのでは間に合わない
+                           atMigration = ReadSetting(DbPath, UiTestDatabaseGuard.BackupPathSettingKey);
+                           MigrateLikeApp(DbPath);
+                           return new FakeFixture(ownedGuard: null);
+                       },
+                       seedDatabase: SeedStaff,
+                       launchOwningGuard: guard =>
+                       {
+                           atLaunch = ReadSetting(DbPath, UiTestDatabaseGuard.BackupPathSettingKey);
+                           return new FakeFixture(guard);
+                       }))
+            {
+            }
+
+            atMigration.Should().Be(IsolatedBackupDirectory);
+            atLaunch.Should().Be(IsolatedBackupDirectory, "マイグレーションと投入で書いた行が消えないこと");
+            atLaunch.Should().NotBe(DefaultBackupDirectory);
+            Directory.Exists(IsolatedBackupDirectory).Should().BeTrue("保存先が無いとアプリの検証で既定の保存先へ退避され得る");
+            File.ReadAllText(DbPath).Should().Be(OriginalContent, "開発機の DB は書き換えずに戻る");
+        }
+
+        [Fact]
+        public void Launch_開発機のDBがあるとき_起動中はUIテスト専用のバックアップ先を指し_終了後は元の設定へ戻ること()
+        {
+            // AppFixture.Launch は投入せず開発機の DB をそのまま開くので、その DB の設定を書き換え、終了後に戻す
+            const string configuredByStaff = @"D:\職員が設定したバックアップ先";
+            CreateMigratedDatabase(DbPath, backupPath: configuredByStaff);
+            string? atLaunch = null;
+
+            using (AppFixture.LaunchCore(
+                       _directory,
+                       IsolatedBackupDirectory,
+                       launchOwningGuard: guard =>
+                       {
+                           atLaunch = ReadSetting(DbPath, UiTestDatabaseGuard.BackupPathSettingKey);
+                           TableNames(DbPath).Should().Contain("staff", "開発機の DB の他のテーブルはそのまま");
+                           return new FakeFixture(guard);
+                       }))
+            {
+            }
+
+            atLaunch.Should().Be(IsolatedBackupDirectory);
+            ReadSetting(DbPath, UiTestDatabaseGuard.BackupPathSettingKey).Should().Be(configuredByStaff,
+                "職員が設定したバックアップ先を UI テストの値のまま残さない");
+            Directory.GetFiles(_directory).Should().BeEquivalentTo(new[] { DbPath }, "退避ファイル・印を残さない");
+        }
+
+        [Fact]
+        public void Launch_開発機のDBが無いとき_バックアップ先だけを書いた新規のDBで起動し_終了後に残さないこと()
+        {
+            string? atLaunch = null;
+            IReadOnlyCollection<string>? tablesAtLaunch = null;
+
+            using (AppFixture.LaunchCore(
+                       _directory,
+                       IsolatedBackupDirectory,
+                       launchOwningGuard: guard =>
+                       {
+                           atLaunch = ReadSetting(DbPath, UiTestDatabaseGuard.BackupPathSettingKey);
+                           tablesAtLaunch = TableNames(DbPath);
+                           return new FakeFixture(guard);
+                       }))
+            {
+            }
+
+            atLaunch.Should().Be(IsolatedBackupDirectory);
+            // staff テーブルが無いので、本体（DbContext.HandleLegacyDatabase）は新規 DB とみなして初期マイグレーションから適用する
+            tablesAtLaunch.Should().BeEquivalentTo(new[] { "settings" });
+            Directory.GetFiles(_directory).Should().BeEmpty("テストが作った DB を開発機の DB として残さない");
+        }
+
+        [Fact]
+        public void Launch_起動が失敗したとき_元の設定へ戻して例外を伝えること()
+        {
+            const string configuredByStaff = @"D:\職員が設定したバックアップ先";
+            CreateMigratedDatabase(DbPath, backupPath: configuredByStaff);
+
+            Action act = () => AppFixture.LaunchCore<FakeFixture>(
+                _directory,
+                IsolatedBackupDirectory,
+                launchOwningGuard: _ => throw new InvalidOperationException("起動の失敗"));
+
+            act.Should().Throw<InvalidOperationException>().WithMessage("起動の失敗");
+            ReadSetting(DbPath, UiTestDatabaseGuard.BackupPathSettingKey).Should().Be(configuredByStaff);
+        }
+
+        [Fact]
+        public void IsolateBackupFolder_既定のバックアップ先かその配下を指定したとき_DBに書かずに拒むこと()
+        {
+            // 既定の保存先とその配下は、本体の整理が実 DB のバックアップと同じ扱いで間引く
+            var guard = UiTestDatabaseGuard.Acquire(_directory);
+            try
+            {
+                foreach (var target in new[] { DefaultBackupDirectory, DefaultBackupDirectory + Path.DirectorySeparatorChar, Path.Combine(DefaultBackupDirectory, "uitest") })
+                {
+                    Action act = () => guard.IsolateBackupFolder(target);
+                    act.Should().Throw<ArgumentException>().WithMessage("*既定のバックアップ先*");
+                }
+
+                File.Exists(DbPath).Should().BeFalse("拒んだときは DB を作らない");
+                Directory.Exists(DefaultBackupDirectory).Should().BeFalse();
+            }
+            finally
+            {
+                guard.Restore();
+            }
+        }
+
+        [Fact]
+        public void IsolateBackupFolder_既定のバックアップ先と名前が前方一致するだけのフォルダーは_受け付けること()
+        {
+            // 対: 「配下か」の判定を前方一致で書くと backup2 のような別のフォルダーまで拒む
+            var sibling = DefaultBackupDirectory + "2";
+            var guard = UiTestDatabaseGuard.Acquire(_directory);
+            try
+            {
+                guard.IsolateBackupFolder(sibling);
+                ReadSetting(DbPath, UiTestDatabaseGuard.BackupPathSettingKey).Should().Be(sibling);
+            }
+            finally
+            {
+                guard.Restore();
+            }
+        }
+
+        [Fact]
+        public void UIテスト専用のバックアップ先は_実際の起動で使うDBの既定のバックアップ先の外にあること()
+        {
+            // AppFixture.Launch / LaunchWithSeed が渡す値。既定の保存先かその配下なら、隔離しても本体の整理が実 DB のバックアップを間引く
+            var appDataRoot = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "ICCardManager");
+            var productionDefault = Path.Combine(appDataRoot, UiTestDatabaseGuard.DefaultBackupFolderName);
+            var uiTestBackup = Path.GetFullPath(UiTestDatabaseGuard.UiTestBackupDirectory).TrimEnd(Path.DirectorySeparatorChar);
+
+            AppFixture.DatabasePath.Should().Be(Path.Combine(appDataRoot, UiTestDatabaseGuard.DatabaseFileName),
+                "既定のバックアップ先は DB と同じフォルダーの配下");
+            uiTestBackup.Should().NotBeEquivalentTo(productionDefault);
+            uiTestBackup.StartsWith(productionDefault + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase)
+                .Should().BeFalse();
+            uiTestBackup.StartsWith(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), StringComparison.OrdinalIgnoreCase)
+                .Should().BeFalse("保存先のパスはシステム管理画面に表示され、マニュアルの撮影に写る（利用者のフォルダーだと利用者名が写る）");
+        }
+
+        [Fact]
+        public void Launch_起動中に中断したとき_次のAcquireの回復で職員が設定したバックアップ先へ戻ること()
+        {
+            // テストのプロセスが kill されると Dispose（Restore）が走らず、開発機の DB に UI テスト用の backup_path が残る。
+            // 残ったまま本物のピッすいを起動すると、その自動バックアップは UI テスト用のフォルダーへ作られ続ける
+            const string configuredByStaff = @"D:\職員が設定したバックアップ先";
+            CreateMigratedDatabase(DbPath, backupPath: configuredByStaff);
+
+            AppFixture.LaunchCore(
+                _directory,
+                IsolatedBackupDirectory,
+                launchOwningGuard: guard => new FakeFixture(guard)); // Dispose しない（中断）
+            ReadSetting(DbPath, UiTestDatabaseGuard.BackupPathSettingKey).Should().Be(IsolatedBackupDirectory, "中断した直後は残っている");
+
+            UiTestDatabaseGuard.Acquire(_directory).Restore();
+
+            ReadSetting(DbPath, UiTestDatabaseGuard.BackupPathSettingKey).Should().Be(configuredByStaff);
+        }
+
+        [Fact]
+        public void ThrowIfDefaultBackupFolderChanged_既定のバックアップ先にファイルが増えたとき_名指しして例外を投げること()
+        {
+            // 本体は設定先がパスの検証に通らないと、警告のログだけで既定の保存先へ戻る。そのときの結果をここで捕まえる
+            Directory.CreateDirectory(DefaultBackupDirectory);
+            File.WriteAllText(Path.Combine(DefaultBackupDirectory, "backup_20261109_041043.db"), OriginalContent);
+            var guard = UiTestDatabaseGuard.Acquire(_directory);
+            File.WriteAllText(Path.Combine(DefaultBackupDirectory, "backup_20261109_060348.db"), SeededContent);
+            guard.Restore();
+
+            Action act = () => guard.ThrowIfDefaultBackupFolderChanged();
+
+            act.Should().Throw<InvalidOperationException>()
+                .WithMessage("*増えた: backup_20261109_060348.db*消えた: なし*");
+        }
+
+        [Fact]
+        public void ThrowIfDefaultBackupFolderChanged_既存の世代が消えたとき_名指しして例外を投げること()
+        {
+            // 整理（各日の最新 1 世代）が消すのは既にあった世代で、守りたいのはそちら
+            Directory.CreateDirectory(DefaultBackupDirectory);
+            var realBackup = Path.Combine(DefaultBackupDirectory, "backup_20261109_041043.db");
+            File.WriteAllText(realBackup, OriginalContent);
+            var guard = UiTestDatabaseGuard.Acquire(_directory);
+            File.Delete(realBackup);
+            guard.Restore();
+
+            Action act = () => guard.ThrowIfDefaultBackupFolderChanged();
+
+            act.Should().Throw<InvalidOperationException>()
+                .WithMessage("*消えた: backup_20261109_041043.db*");
+        }
+
+        [Fact]
+        public void FinishOwnedGuard_既定のバックアップ先が変わっていたとき_DBを復元したうえで例外を投げること()
+        {
+            // AppFixture.Dispose の後始末。復元を先に済ませる（確認の失敗で開発機の DB をテストの DB のまま残さない）
+            File.WriteAllText(DbPath, OriginalContent);
+            var guard = UiTestDatabaseGuard.Acquire(_directory);
+            File.WriteAllText(DbPath, SeededContent);
+            Directory.CreateDirectory(DefaultBackupDirectory);
+            File.WriteAllText(Path.Combine(DefaultBackupDirectory, "backup_20261109_060348.db"), SeededContent);
+
+            Action act = () => AppFixture.FinishOwnedGuard(guard);
+
+            act.Should().Throw<InvalidOperationException>().WithMessage("*増えた: backup_20261109_060348.db*");
+            File.ReadAllText(DbPath).Should().Be(OriginalContent);
+        }
+
+        [Fact]
+        public void FinishOwnedGuard_DBの復元に失敗しても_既定のバックアップ先の確認を走らせ両方の失敗を伝えること()
+        {
+            // 次回の Acquire はその時点の一覧を記録し直すので、復元の失敗で確認を飛ばすと、この回の書き込みは二度と検出できない
+            File.WriteAllText(DbPath, OriginalContent);
+            var guard = UiTestDatabaseGuard.Acquire(_directory, maxAttempts: 1);
+            File.WriteAllText(DbPath, SeededContent);
+            Directory.CreateDirectory(DefaultBackupDirectory);
+            File.WriteAllText(Path.Combine(DefaultBackupDirectory, "backup_20261109_060348.db"), SeededContent);
+
+            using (OpenLikeSqlite(DbPath))
+            {
+                Action act = () => AppFixture.FinishOwnedGuard(guard);
+
+                var thrown = act.Should().Throw<AggregateException>().Which;
+                thrown.InnerExceptions.Should().HaveCount(2);
+                thrown.InnerExceptions[0].Should().BeOfType<IOException>("先に DB の復元の失敗");
+                thrown.InnerExceptions[1].Should().BeOfType<InvalidOperationException>();
+                thrown.Message.Should().Contain("backup_20261109_060348.db", "net48 の AggregateException.Message は内側の文言を含まないので自分で並べる");
+            }
+        }
+
+        [Fact]
+        public void FinishOwnedGuard_確認が一覧を読めずに失敗しても_復元の失敗を失わないこと()
+        {
+            // 確認の失敗は InvalidOperationException（変わっていた）だけではない。一覧を読めない失敗でも、復元の失敗と両方を伝える
+            var restoreFailure = new IOException("DB を別のプロセスが開いている");
+            var checkFailure = new UnauthorizedAccessException("既定のバックアップ先を読む権限が無い");
+
+            Action act = () => AppFixture.FinishOwnedGuard(
+                restore: () => throw restoreFailure,
+                checkDefaultBackupFolder: () => throw checkFailure);
+
+            var thrown = act.Should().Throw<AggregateException>().Which;
+            thrown.InnerExceptions.Should().Equal(restoreFailure, checkFailure);
+        }
+
+        [Fact]
+        public void FinishOwnedGuard_DBの復元だけが失敗したとき_その例外をそのまま伝えること()
+        {
+            // 対: 既定のバックアップ先が変わっていなければ、確認は失敗を足さない
+            File.WriteAllText(DbPath, OriginalContent);
+            var guard = UiTestDatabaseGuard.Acquire(_directory, maxAttempts: 1);
+            File.WriteAllText(DbPath, SeededContent);
+
+            using (OpenLikeSqlite(DbPath))
+            {
+                Action act = () => AppFixture.FinishOwnedGuard(guard);
+
+                act.Should().Throw<IOException>();
+            }
+        }
+
+        [Fact]
+        public void FinishOwnedGuard_既定のバックアップ先が変わっていないとき_DBを復元するだけであること()
+        {
+            File.WriteAllText(DbPath, OriginalContent);
+            var guard = UiTestDatabaseGuard.Acquire(_directory);
+            File.WriteAllText(DbPath, SeededContent);
+
+            AppFixture.FinishOwnedGuard(guard);
+            AppFixture.FinishOwnedGuard(null); // 入れ子の起動はガードを持たない
+
+            File.ReadAllText(DbPath).Should().Be(OriginalContent);
+        }
+
+        [Fact]
+        public void ThrowIfDefaultBackupFolderChanged_既定のバックアップ先が変わっていないとき_何もしないこと()
+        {
+            // 対: 既にある世代（実 DB のバックアップ）や、フォルダーが無いことを「変わった」と誤らない
+            Directory.CreateDirectory(DefaultBackupDirectory);
+            File.WriteAllText(Path.Combine(DefaultBackupDirectory, "backup_20261109_041043.db"), OriginalContent);
+            var guard = UiTestDatabaseGuard.Acquire(_directory);
+            // テストのアプリが書くべき場所（UI テスト専用のフォルダー）に増えるのは正常
+            Directory.CreateDirectory(IsolatedBackupDirectory);
+            File.WriteAllText(Path.Combine(IsolatedBackupDirectory, "backup_20261109_060348.db"), SeededContent);
+            guard.Restore();
+
+            Action act = () => guard.ThrowIfDefaultBackupFolderChanged();
+
+            act.Should().NotThrow();
+        }
+
+        #endregion
+
         /// <summary>
         /// アプリの代わりに DB ファイルを書き換える <see cref="AppFixture.LaunchWithSeedCore"/> を実行する。
         /// </summary>
@@ -789,9 +1112,11 @@ namespace ICCardManager.UITests.Tests
         {
             return AppFixture.LaunchWithSeedCore(
                 _directory,
+                IsolatedBackupDirectory,
                 launchForMigration: () =>
                 {
-                    File.Exists(DbPath).Should().BeFalse("マイグレーションは空の状態から走らせる");
+                    // Issue #2423: マイグレーションは空の状態から走らせる。DB にあるのはバックアップ先の設定だけ
+                    TableNames(DbPath).Should().BeEquivalentTo(new[] { "settings" }, "マイグレーションは空の状態から走らせる");
                     File.WriteAllText(DbPath, MigratedContent);
                     return new FakeFixture(ownedGuard: null);
                 },
@@ -802,6 +1127,71 @@ namespace ICCardManager.UITests.Tests
                     return new FakeFixture(guard);
                 },
                 maxAttempts: maxAttempts);
+        }
+
+        /// <summary>本体の初期マイグレーションのうち、この検証に関わる部分（settings の作成と既定値、staff の作成）を再現する。</summary>
+        private static void MigrateLikeApp(string dbPath)
+        {
+            using var conn = Open(dbPath);
+            Execute(conn, "CREATE TABLE IF NOT EXISTS staff (staff_idm TEXT PRIMARY KEY, name TEXT NOT NULL, is_deleted INTEGER DEFAULT 0)");
+            Execute(conn, "CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT)");
+            Execute(conn, "INSERT OR IGNORE INTO settings (key, value) VALUES ('warning_balance', '10000')");
+            Execute(conn, "INSERT OR IGNORE INTO settings (key, value) VALUES ('font_size', 'medium')");
+        }
+
+        private static void SeedStaff(string dbPath)
+        {
+            using var conn = Open(dbPath);
+            Execute(conn, "INSERT INTO staff (staff_idm, name) VALUES ('FFFF000000000001', 'テスト職員')");
+        }
+
+        /// <summary>マイグレーション済みの開発機の DB（<paramref name="backupPath"/> をバックアップ先に設定済み）を作る。</summary>
+        private static void CreateMigratedDatabase(string dbPath, string backupPath)
+        {
+            MigrateLikeApp(dbPath);
+            using var conn = Open(dbPath);
+            using var cmd = conn.CreateCommand();
+            cmd.CommandText = "INSERT OR REPLACE INTO settings (key, value) VALUES (@key, @value)";
+            cmd.Parameters.AddWithValue("@key", UiTestDatabaseGuard.BackupPathSettingKey);
+            cmd.Parameters.AddWithValue("@value", backupPath);
+            cmd.ExecuteNonQuery();
+        }
+
+        private static string? ReadSetting(string dbPath, string key)
+        {
+            using var conn = Open(dbPath);
+            using var cmd = conn.CreateCommand();
+            cmd.CommandText = "SELECT value FROM settings WHERE key = @key";
+            cmd.Parameters.AddWithValue("@key", key);
+            return cmd.ExecuteScalar() as string;
+        }
+
+        private static IReadOnlyCollection<string> TableNames(string dbPath)
+        {
+            using var conn = Open(dbPath);
+            using var cmd = conn.CreateCommand();
+            cmd.CommandText = "SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name";
+            using var reader = cmd.ExecuteReader();
+            var names = new List<string>();
+            while (reader.Read())
+            {
+                names.Add(reader.GetString(0));
+            }
+            return names;
+        }
+
+        private static SQLiteConnection Open(string dbPath)
+        {
+            var conn = new SQLiteConnection($"Data Source={dbPath};Version=3");
+            conn.Open();
+            return conn;
+        }
+
+        private static void Execute(SQLiteConnection conn, string sql)
+        {
+            using var cmd = conn.CreateCommand();
+            cmd.CommandText = sql;
+            cmd.ExecuteNonQuery();
         }
 
         /// <summary>
