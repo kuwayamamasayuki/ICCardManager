@@ -70,6 +70,23 @@ namespace ICCardManager.UITests.Infrastructure
         public static string VirtualTouchCardDisplayName => $"{VirtualTouchCardType} {VirtualTouchCardNumber}";
 
         /// <summary>
+        /// 仮想タッチ用カードの、<see cref="SeedForVirtualTouch(SQLiteConnection, bool, bool)"/> 投入直後の残額（新規購入の受入）。
+        /// 残額警告のしきい値（既定 10,000 円）を十分に上回る額にし、返却トーストに「残額不足」が出ないようにする。
+        /// </summary>
+        public const int VirtualTouchCardSeededBalance = 20000;
+
+        /// <summary>撮影の返却で仮想タッチに 1 件追加する利用の運賃（Issue #2425）。</summary>
+        public const int VirtualTouchFare = 200;
+
+        /// <summary>
+        /// 撮影の返却で、仮想タッチのダイアログの「現在残高」へ入れる値（Issue #2425）。
+        /// 「現在残高」は追加した利用の<b>後の</b>残高で、ダイアログは履歴の残高をここから逆算する。
+        /// 既定値（DB の最新残高）のまま利用を足すと、カードが「払出 200 なのに残高が変わらない」と申告し、
+        /// その残高がそのまま台帳に入る（マニュアルの返却完了の画像がこの形を写していた）。
+        /// </summary>
+        public const int VirtualTouchBalanceAfterOneFare = VirtualTouchCardSeededBalance - VirtualTouchFare;
+
+        /// <summary>
         /// 第 2 段階（タッチを要する画面）用のサンプルデータ。<see cref="Seed"/> に加えて、
         /// 仮想タッチ用のカードを未貸出で投入し、返却時の同行者数ダイアログ（#2009）をスキップする設定を書く
         /// （自動で閉じるまで既定 30 秒待つと、その間にトーストが消える）。
@@ -102,7 +119,7 @@ namespace ICCardManager.UITests.Infrastructure
             using var tx = conn.BeginTransaction();
             InsertCard(conn, VirtualTouchCardIdm, VirtualTouchCardType, VirtualTouchCardNumber, isLent: false, lentAt: null, lentStaff: null);
             // 残額警告のしきい値（既定 10,000 円）を十分に上回る残高にし、トーストに「残額不足」が出ないようにする
-            _ = InsertLedger(conn, VirtualTouchCardIdm, DayOfMonth(DateTime.Today, 1), "新規購入", 20000, 0, 0, PrimaryStaffName);
+            _ = InsertLedger(conn, VirtualTouchCardIdm, DayOfMonth(DateTime.Today, 1), "新規購入", VirtualTouchCardSeededBalance, 0, 0, PrimaryStaffName);
 
             // settings は key/value。キーは SettingsRepository.KeySkipCompanionCountInputOnReturn。
             // 値は明示的に書く（Issue #2178 で未設定の既定が true〈スキップ〉になったため、書かないとダイアログが出ない）
@@ -272,6 +289,12 @@ namespace ICCardManager.UITests.Infrastructure
                 ("@date", lentAt), ("@card", LentCardIdm));
             Execute(conn,
                 "UPDATE ic_card SET last_lent_at = @date WHERE card_idm = @card",
+                ("@date", lentAt), ("@card", LentCardIdm));
+            // 新規購入も同じ日へ遡らせる（Issue #2425）。貸出中レコードだけを遡らせると、貸出中（残額 5,000）の後に
+            // 新規購入（受入 5,000）が並び、残高チェーン（LedgerConsistencyChecker）が 5,000 ＋ 5,000 ≠ 5,000 で切れる。
+            // 同じ日なら新規購入が先頭に並ぶ（LedgerOrderHelper）
+            Execute(conn,
+                "UPDATE ledger SET date = @date WHERE card_idm = @card AND is_lent_record = 0",
                 ("@date", lentAt), ("@card", LentCardIdm));
             tx.Commit();
         }

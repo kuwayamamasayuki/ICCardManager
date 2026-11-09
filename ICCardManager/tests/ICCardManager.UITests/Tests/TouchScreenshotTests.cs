@@ -1,4 +1,6 @@
 using System;
+using System.Collections.Generic;
+using System.Data.SQLite;
 using System.IO;
 using System.Linq;
 using FlaUI.Core.AutomationElements;
@@ -110,16 +112,31 @@ namespace ICCardManager.UITests.Tests
             ScreenshotHelper.MoveToTopLeft(fixture.MainWindow);
             var page = new MainWindowPage(fixture.MainWindow, fixture.Automation);
 
-            // 鉄道利用（駅名あり）にして、バス停名未入力の警告が写り込まないようにする
-            ExecuteVirtualTouchWithOneEntry(page, entryStation: "博多", exitStation: "天神");
+            // 鉄道利用（駅名あり）にして、バス停名未入力の警告が写り込まないようにする。
+            // 「現在残高」は追加した利用の後の残高にする（既定の DB の最新残高のままだと、払出 200 なのに残高が変わらない。Issue #2425）
+            ExecuteVirtualTouchWithOneEntry(page, entryStation: "博多", exitStation: "天神",
+                fare: ScreenshotSeedData.VirtualTouchFare, currentBalance: ScreenshotSeedData.VirtualTouchBalanceAfterOneFare);
 
             var toast = WaitForToast(fixture);
             var returnPath = ScreenshotHelper.CaptureWithToast(fixture.MainWindow, toast, "return.png");
             File.Exists(returnPath).Should().BeTrue();
-            File.Exists(ScreenshotHelper.Capture(toast, "toast_return.png", bringToFront: false)).Should().BeTrue();
+            var toastPath = ScreenshotHelper.Capture(toast, "toast_return.png", bringToFront: false);
+            File.Exists(toastPath).Should().BeTrue();
             // 撮った後に確かめる。トーストは 3 秒で消えるので、トースト単体の撮影の後に置く
             // （理由は ScreenshotAssertions.RequireNoNewVersionNotice。Issue #2394）
             ScreenshotAssertions.RequireNoNewVersionNotice(fixture.MainWindow, returnPath);
+            // 写った台帳（返却確認の履歴・カード一覧の残額・トーストの残額）の残高チェーン（Issue #2425）
+            ScreenshotAssertions.RequireConsistentLedgerChain(returnPath, toastPath);
+
+            // 何が記録されたかも具体的に表明する。チェーンの検査だけだと、利用の行が記録されなかった（新規購入だけ）場合も緑になる
+            var rows = ReadVirtualTouchCardLedger();
+            rows.Select(r => (r.Summary, r.Income, r.Expense, r.Balance)).Should().Equal(
+                new[]
+                {
+                    ("新規購入", ScreenshotSeedData.VirtualTouchCardSeededBalance, 0, ScreenshotSeedData.VirtualTouchCardSeededBalance),
+                    ("鉄道（博多～天神）", 0, ScreenshotSeedData.VirtualTouchFare, ScreenshotSeedData.VirtualTouchBalanceAfterOneFare),
+                },
+                "返却で利用の行が 1 件記録され、その残額は新規購入の残額から運賃を引いた額であること（貸出中レコードは返却で消える）");
         }
 
         [SkippableFact]
@@ -131,13 +148,17 @@ namespace ICCardManager.UITests.Tests
             ScreenshotHelper.MoveToTopLeft(fixture.MainWindow);
             var page = new MainWindowPage(fixture.MainWindow, fixture.Automation);
 
-            // 仮想タッチの既定エントリは乗車駅・降車駅が空（＝バス利用）なので、返却後にバス停名入力ダイアログが開く
-            ExecuteVirtualTouchWithOneEntry(page);
+            // 仮想タッチの既定エントリは乗車駅・降車駅が空（＝バス利用）なので、返却後にバス停名入力ダイアログが開く。
+            // ダイアログに残高は写らないが、返却が記録する台帳を return.png と同じ形にそろえる（Issue #2425）
+            ExecuteVirtualTouchWithOneEntry(page,
+                fare: ScreenshotSeedData.VirtualTouchFare, currentBalance: ScreenshotSeedData.VirtualTouchBalanceAfterOneFare);
 
             var dialog = WaitForDialogLong(page, TestConstants.BusStopInputDialogName);
             try
             {
-                File.Exists(ScreenshotHelper.Capture(dialog, "busstop.png")).Should().BeTrue();
+                var path = ScreenshotHelper.Capture(dialog, "busstop.png");
+                File.Exists(path).Should().BeTrue();
+                ScreenshotAssertions.RequireConsistentLedgerChain(path);
             }
             finally
             {
@@ -156,13 +177,17 @@ namespace ICCardManager.UITests.Tests
             ScreenshotHelper.MoveToTopLeft(fixture.MainWindow);
             var page = new MainWindowPage(fixture.MainWindow, fixture.Automation);
 
-            // 鉄道利用（駅名あり）にして、バス停名入力ダイアログが先に開かないようにする
-            ExecuteVirtualTouchWithOneEntry(page, entryStation: "博多", exitStation: "天神");
+            // 鉄道利用（駅名あり）にして、バス停名入力ダイアログが先に開かないようにする。
+            // ダイアログに残高は写らないが、返却が記録する台帳を return.png と同じ形にそろえる（Issue #2425）
+            ExecuteVirtualTouchWithOneEntry(page, entryStation: "博多", exitStation: "天神",
+                fare: ScreenshotSeedData.VirtualTouchFare, currentBalance: ScreenshotSeedData.VirtualTouchBalanceAfterOneFare);
 
             var dialog = WaitForDialogLong(page, TestConstants.CompanionCountInputDialogName);
             try
             {
-                File.Exists(ScreenshotHelper.Capture(dialog, "companion_count.png")).Should().BeTrue();
+                var path = ScreenshotHelper.Capture(dialog, "companion_count.png");
+                File.Exists(path).Should().BeTrue();
+                ScreenshotAssertions.RequireConsistentLedgerChain(path);
             }
             finally
             {
@@ -238,6 +263,14 @@ namespace ICCardManager.UITests.Tests
 
         // ── ヘルパー ─────────────────────────────────
         // 仮想タッチ・トースト待ちの操作は回帰テスト（Issue #2190）と共有するため TouchOperations にある
+
+        /// <summary>撮影用の DB から、仮想タッチ用カードの台帳を本体の残高チェーンの検査と同じ順に読む。</summary>
+        private static IReadOnlyList<LedgerBalanceChain.Row> ReadVirtualTouchCardLedger()
+        {
+            using var conn = new SQLiteConnection($"Data Source={AppFixture.DatabasePath};Version=3;Read Only=True");
+            conn.Open();
+            return LedgerBalanceChain.ReadCard(conn, ScreenshotSeedData.VirtualTouchCardIdm);
+        }
 
         private static void SkipUnlessDebugCapture()
         {
