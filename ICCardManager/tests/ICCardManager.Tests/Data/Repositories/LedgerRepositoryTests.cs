@@ -1315,6 +1315,47 @@ public class LedgerRepositoryTests : IDisposable
             .Which.Should().Be((manualCarryover.Id, 6000, 5000));
     }
 
+    /// <summary>
+    /// Issue #2437: 前年度から台帳があるカードでも、年度の先頭の行が「前年度より繰越」なら（3/31「次年度へ繰越」→ 4/1「前年度より繰越」。
+    /// DebugDataService や同じ形の手入力・CSV）その手前でチェーンを切る。4/1 の行は前行と照合しないが、その残高の誤りは
+    /// 次の行で検出され、4/1 の行を直す訂正案が出ること
+    /// </summary>
+    [Fact]
+    public async Task CheckBalanceConsistencyAsync_FullPeriod_YearEndCarryoverPair_WrongBalanceDetectedAtNextRow()
+    {
+        // Arrange: 前年度 10/1 新規購入 5,000 → 3/31 次年度へ繰越（払出 5,000・残高 0）→ 4/1 前年度より繰越（受入 5,000 だが残高 6,000）
+        // → 4/2 利用 210 で 4,790
+        var purchase = CreateTestLedger(TestCardIdm, new DateTime(2026, 10, 1), "新規購入", income: 5000);
+        purchase.Balance = 5000;
+        purchase.Id = await _repository.InsertAsync(purchase);
+
+        var toNextYear = CreateTestLedger(TestCardIdm, new DateTime(2027, 3, 31),
+            SummaryGenerator.GetCarryoverToNextYearSummary(), expense: 5000);
+        toNextYear.Balance = 0;
+        toNextYear.Id = await _repository.InsertAsync(toNextYear);
+
+        var fromPreviousYear = CreateTestLedger(TestCardIdm, new DateTime(2027, 4, 1),
+            SummaryGenerator.GetCarryoverFromPreviousYearSummary(), income: 5000);
+        fromPreviousYear.Balance = 6000;
+        fromPreviousYear.Id = await _repository.InsertAsync(fromPreviousYear);
+
+        var usage = CreateTestLedger(TestCardIdm, new DateTime(2027, 4, 2), "鉄道（天神～博多）", expense: 210);
+        usage.Balance = 4790;
+        usage.Id = await _repository.InsertAsync(usage);
+
+        var checker = new LedgerConsistencyChecker(_repository);
+
+        // Act
+        var result = await checker.CheckBalanceConsistencyAsync(TestCardIdm, Issue2437FullPeriodStart, Issue2437FullPeriodEnd);
+
+        // Assert
+        result.Inconsistencies.Should().ContainSingle("4/1 の行はチェーンの始点なので前行（3/31 の残高 0）と照合せず、誤りは 4/2 で切れる")
+            .Which.Should().Be((usage.Id, 5790, 4790));
+        result.InitialBalanceCorrection.Should().NotBeNull();
+        result.InitialBalanceCorrection!.LedgerId.Should().Be(fromPreviousYear.Id);
+        result.InitialBalanceCorrection.SuggestedBalance.Should().Be(5000);
+    }
+
     private static void AssertNotDoubleCounted(MonthlyReportData april, MonthlyReportData may)
     {
         april.Carryover.Should().BeNull("前年度より繰越は DB の導入行が担うので、帳票は合成しない");

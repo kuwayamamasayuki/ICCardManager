@@ -146,7 +146,7 @@ namespace ICCardManager.Common
         /// 期間の中で、残高チェーンが導入行「前年度より繰越」から始まり直す日（年度の台帳の先頭の日）を古い順に返す。
         /// </summary>
         /// <param name="periodStart">期間の開始日</param>
-        /// <param name="periodLedgers">期間の台帳（貸出中レコードを含んでよい。判定では数えない）</param>
+        /// <param name="periodLedgers">期間の台帳（開始日以降の行。貸出中レコードを含んでよい。判定では数えない）</param>
         /// <param name="periodStartFiscalYearFirstDayLedgers">
         /// 開始日が属する年度で最も早い日付の行（<c>ILedgerQueryService.GetFiscalYearFirstDayLedgersAsync</c>）
         /// </param>
@@ -179,7 +179,6 @@ namespace ICCardManager.Common
             }
 
             foreach (var fiscalYearLedgers in periodLedgers
-                .Where(l => l.Date.Date >= periodStart.Date)
                 .GroupBy(l => FiscalYearHelper.GetFiscalYear(l.Date))
                 .Where(g => g.Key > periodStartFiscalYear)
                 .OrderBy(g => g.Key))
