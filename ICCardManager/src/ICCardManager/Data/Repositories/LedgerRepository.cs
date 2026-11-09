@@ -697,7 +697,8 @@ VALUES (@ledgerId, @useDate, @entryStation, @exitStation,
         {
             using var lease = await _dbContext.LeaseConnectionAsync().ConfigureAwait(false);
             return await GetChainFinalLedgerAsync(
-                lease.Connection, cardIdm, SqliteDateTimeFormat.ToDateText(beforeDate)).ConfigureAwait(false);
+                lease.Connection, cardIdm, SqliteDateTimeFormat.ToDateText(beforeDate),
+                excludeLentRecords: false).ConfigureAwait(false);
         }
 
         /// <summary>
@@ -717,22 +718,35 @@ VALUES (@ledgerId, @useDate, @entryStation, @exitStation,
         /// <para>
         /// 前日以前の最終残高をチェーン開始点として渡すのは、同額のポイント還元と利用で残高が
         /// 循環する日（Issue #1004 形状）では当日の行だけから開始点を特定できないため。
-        /// 貸出中レコード（is_lent_record = 1）は除外しない。返却処理
+        /// 「最新残高」の単票クエリ（<see cref="GetLatestBeforeDateAsync"/> /
+        /// <see cref="GetLatestLedgerAsync"/>）は貸出中レコード（is_lent_record = 1）を除外しない。返却処理
         /// （LendingService.GetLastBalanceAsync）が貸出中プレースホルダの残高を
-        /// 残高チェーンの起点として使う挙動を維持する。
+        /// 残高チェーンの起点として使う挙動を維持する。除外するのは帳票の前年度繰越だけ
+        /// （<paramref name="excludeLentRecords"/>）。
         /// </para>
         /// </remarks>
         /// <param name="connection">リース済みの接続</param>
         /// <param name="cardIdm">カードIDm</param>
         /// <param name="beforeDate">この日付（"yyyy-MM-dd"）より前に限定する場合に指定。null なら全期間</param>
+        /// <param name="excludeLentRecords">
+        /// 貸出中レコード（is_lent_record = 1）を母集団（最新日の決定・その日の行・チェーン開始点のシード）から
+        /// 除外するか。返却処理の起点にも使う「最新残高」の単票クエリは false（上記）。帳票の前年度繰越
+        /// （<see cref="GetCarryoverBalanceAsync"/>、Issue #2418）は true。
+        /// **既定値は与えない** — 呼び出し元に母集団の選択を必ず書かせるため。
+        /// </param>
         private static async Task<Ledger?> GetChainFinalLedgerAsync(
-            SQLiteConnection connection, string cardIdm, string? beforeDate)
+            SQLiteConnection connection, string cardIdm, string? beforeDate, bool excludeLentRecords)
         {
             // 最新日（DATE(date) が最大の日）の全レコードを取得する。
             // date は "yyyy-MM-dd HH:mm:ss" の TEXT のため MAX(date) が最新日時、その DATE() が最新日。
             // 外側は列を DATE() で包まず `date >= 最新日`（日付だけの文字列）で絞る。最新日より後の行は無いので
             // その日の全行と同じ集合になり、idx_ledger_card_date の探索キー（card_idm, date）を使える（Issue #2328）
             var beforeFilter = beforeDate != null ? "AND date < @beforeDate" : string.Empty;
+            if (excludeLentRecords)
+            {
+                beforeFilter += " AND (is_lent_record = 0 OR is_lent_record IS NULL)";
+            }
+
             var latestDayLedgers = new List<Ledger>();
 
             using (var command = connection.CreateCommand())
@@ -765,7 +779,7 @@ ORDER BY date ASC, id ASC";
             }
 
             return await ResolveChainFinalLedgerAsync(
-                connection, latestDayLedgers, excludeLentRecordsFromSeed: false).ConfigureAwait(false);
+                connection, latestDayLedgers, excludeLentRecordsFromSeed: excludeLentRecords).ConfigureAwait(false);
         }
 
         /// <summary>
@@ -943,9 +957,15 @@ ORDER BY date ASC, id ASC";
         /// <inheritdoc/>
         public async Task<int?> GetCarryoverBalanceAsync(string cardIdm, int fiscalYear)
         {
-            // 年度末（3月31日）時点の最新残高を取得
+            // 年度末（3月31日）時点の最新残高を取得。
+            // Issue #2418: 貸出中レコードは母集団から除く（帳票の明細・集計と同じ母集団）。
+            // 3 月に登録して貸し出したカード（導入行は 4/1）では、4/1 より前の行が貸出中レコードだけになり、
+            // 含めるとその残高が「前年度繰越」として返って、導入行の受入と二重に計上される
             var fiscalYearEnd = new DateTime(fiscalYear + 1, 3, 31);
-            var ledger = await GetLatestBeforeDateAsync(cardIdm, fiscalYearEnd.AddDays(1)).ConfigureAwait(false);
+            using var lease = await _dbContext.LeaseConnectionAsync().ConfigureAwait(false);
+            var ledger = await GetChainFinalLedgerAsync(
+                lease.Connection, cardIdm, SqliteDateTimeFormat.ToDateText(fiscalYearEnd.AddDays(1)),
+                excludeLentRecords: true).ConfigureAwait(false);
 
             return ledger?.Balance;
         }
@@ -954,7 +974,8 @@ ORDER BY date ASC, id ASC";
         public async Task<Ledger?> GetLatestLedgerAsync(string cardIdm)
         {
             using var lease = await _dbContext.LeaseConnectionAsync().ConfigureAwait(false);
-            return await GetChainFinalLedgerAsync(lease.Connection, cardIdm, beforeDate: null).ConfigureAwait(false);
+            return await GetChainFinalLedgerAsync(
+                lease.Connection, cardIdm, beforeDate: null, excludeLentRecords: false).ConfigureAwait(false);
         }
 
         /// <inheritdoc/>

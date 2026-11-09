@@ -40,23 +40,45 @@ namespace ICCardManager.Services
 
             var fiscalYearStartYear = FiscalYearHelper.GetFiscalYear(year, month);
 
+            // 年度の初日から当月末までの台帳（累計・導入行の判定に使う）
+            var fiscalYearStart = FiscalYearHelper.GetFiscalYearStart(fiscalYearStartYear);
+            var fiscalYearEnd = new DateTime(year, month, DateTime.DaysInMonth(year, month));
+            var fiscalYearLedgers = ExcludeLentRecords(
+                await _ledgerRepository.GetByDateRangeAsync(cardIdm, fiscalYearStart, fiscalYearEnd).ConfigureAwait(false))
+                .ToList();
+
+            // Issue #2418: 3 月を繰越月にして登録したカードは、年度の初日に導入行「前年度より繰越」
+            // （受入＝残高）が DB に実在し、年度の始まりの残高はその行が担う。帳票が前年度繰越を合成・加算すると
+            // 導入行の受入と二重になるため、導入行があれば「前年度繰越は無い」として扱う。
+            // 「導入行より前に台帳が無いから前年度繰越は null になる」には頼らない — 3 月中の貸出中レコード・
+            // 履歴の「追加」・CSV の取り込みで、導入行より前の日付の行はあり得る。
+            // 判定は紙の累計（#2326）と同じ PaperCarryoverPolicy 1 か所（#1763）。
+            var startsWithCarryoverRecord =
+                PaperCarryoverPolicy.HasFiscalYearStartCarryoverRecord(fiscalYearStartYear, fiscalYearLedgers);
+
             // 年度開始前の最終残高（＝前年度繰越）。
             // 年度累計の残高チェーン並替のシードと、累計受入への加算（Issue #1494）の両方で使う。
-            var fiscalYearPrecedingBalance = await _ledgerRepository
-                .GetCarryoverBalanceAsync(cardIdm, fiscalYearStartYear - 1).ConfigureAwait(false);
+            // GetCarryoverBalanceAsync は貸出中レコードを母集団から除く（#2418。上の判定が摘要の比較で
+            // 導入行を認識できない場合（#2371）でも、3 月中の貸出中レコードだけでは前年度繰越が生じない）。
+            var fiscalYearPrecedingBalance = startsWithCarryoverRecord
+                ? null
+                : await _ledgerRepository
+                    .GetCarryoverBalanceAsync(cardIdm, fiscalYearStartYear - 1).ConfigureAwait(false);
 
             // 前月末残高を取得（繰越行表示および残高チェーン並替に使用）。
             // Issue #2043: 「当月 1 日より前の最終残高」はリポジトリの確定済み単票クエリで取る。
-            // 4月は年度境界と一致するため前年度繰越と同値（GetCarryoverBalanceAsync も
-            // GetLatestBeforeDateAsync と同じ規則で解決される）。
+            // 4月は年度境界と一致するため前年度繰越（上）を使う。
             //
             // 【母集団について】business-logic.md「シードの母集団は本体クエリと揃える」（#1770）の
-            // 例外にあたる。GetLatestBeforeDateAsync は貸出中レコード（is_lent_record = 1）を
+            // 例外にあたる。5 月以降の GetLatestBeforeDateAsync は貸出中レコード（is_lent_record = 1）を
             // 含むが、シード先の ledgers / yearlyLedgers は IsLentRecord で除外している。これが安全なのは
             // 貸出中プレースホルダが Income = Expense = 0 かつ Balance = 貸出時の残高（＝直前の
             // 実績行の残額）であり、残高チェーン上は自己ループで、返却されるまで後続の利用行が
-            // 挿入されないため。つまり「貸出中行を含めても含めなくても最終残高は同じ」。
-            // 除外オプション付きの単票クエリは公開されていないので、この不変条件に依存する。
+            // 挿入されないため。つまり「直前に実績行があれば、貸出中行を含めても含めなくても最終残高は同じ」。
+            // 直前に実績行が無い（貸出中行しか無い）形では「残高があるか」自体が変わるが、それが起こり得るのは
+            // 台帳の先頭（3 月に登録して貸し出したカードの 4/1 より前）だけで、4 月の前年度繰越は
+            // 貸出中レコードを除いて取り（GetCarryoverBalanceAsync、#2418）、5 月以降は年度の初日の導入行が
+            // 直前の実績行になる。
             // 回帰は ReportDataBuilderTests の
             // BuildAsync_PreviousMonthHasLentRecord_PrecedingBalanceIsUnchanged が固定する。
             int? precedingBalance = month == 4
@@ -107,26 +129,20 @@ namespace ICCardManager.Services
             var monthlyExpense = ledgers.Sum(l => l.Expense);
 
             // 累計データを計算（4月の月計残額表示にも使用）
-            var fiscalYearStart = FiscalYearHelper.GetFiscalYearStart(fiscalYearStartYear);
-            var fiscalYearEnd = new DateTime(year, month, DateTime.DaysInMonth(year, month));
             // Issue #784: 残高チェーンに基づいて時系列順を復元
             // Issue #2043: 年度開始前の最終残高をチェーン開始点のシードとして渡す。
             // シード無しでは、年度先頭の稼働日が Issue #1004 形状（同額のポイント還元と利用で
             // 残高が循環する日）だと開始点を当日の行だけからは決められず id 順フォールバックへ落ちる。
             // 当月の明細（上）はシード付きなので、同じシート上で累計残額と最終データ行の残額が食い違う。
             var yearlyLedgers = LedgerOrderHelper.ReorderByBalanceChain(
-                ExcludeLentRecords(await _ledgerRepository.GetByDateRangeAsync(cardIdm, fiscalYearStart, fiscalYearEnd).ConfigureAwait(false)),
+                fiscalYearLedgers,
                 fiscalYearPrecedingBalance);
 
             // Issue #1494: 年度開始前の残高があるときの「前年度より繰越」は DB に保存されず
             // CarryoverRowData として表示用に合成されるため、月計・累計の集計に明示的に加算する必要がある。
             // 3 月を繰越月にして登録したカードの「前年度より繰越」は DB に実在する導入行（4/1 付け・受入=残高）で、
-            // それより前の台帳が無い（fiscalYearPrecedingBalance が null）ため加算は 0 となり、
-            // 導入行の受入は通常の ledger 行として yearlyLedgers の Sum に入る。
-            // ただし null になるのは 4/1 より前に台帳の行（貸出中レコードを含む）が 1 件も無いときに限る。
-            // そうした行があるとその残高が前年度繰越として返り、合成した繰越行と導入行の受入が二重に入り得る（未対処）。
-            // 代表例は、3 月中に登録して貸し出し、返却前に新年度の帳票を作る場合（GetCarryoverBalanceAsync は
-            // 貸出中レコードを含む）。履歴の「追加」や CSV の取り込みで導入行より前の日付の行を入れた場合も同じ。
+            // 導入行の受入は通常の ledger 行として yearlyLedgers の Sum に入る。このとき
+            // fiscalYearPrecedingBalance は null にしてある（上の startsWithCarryoverRecord、#2418）ので加算は 0。
             var fiscalYearCarryoverIncome = fiscalYearPrecedingBalance ?? 0;
 
             // 累計も同様に「○月から繰越」レコードを除外（紙出納簿移行カード対策）

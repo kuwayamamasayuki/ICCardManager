@@ -67,6 +67,10 @@ namespace ICCardManager.Data.Repositories
         /// <remarks>
         /// Issue #1731: 年度末最終日に複数レコードがある場合は残高チェーン順の最終残高を返す
         /// （<see cref="GetLatestBeforeDateAsync"/> と同じ規則）。
+        /// ただし <see cref="GetLatestBeforeDateAsync"/> と違い、貸出中レコード（is_lent_record = 1）は
+        /// 母集団から除外する（Issue #2418。帳票は貸出中レコードを明細・集計に載せないので母集団を揃える。
+        /// 3 月に登録して貸し出したカードで、貸出中レコードの残高が前年度繰越として返り、
+        /// 導入行「前年度より繰越」の受入と二重に計上されていた）。
         /// </remarks>
         Task<int?> GetCarryoverBalanceAsync(string cardIdm, int fiscalYear);
 
