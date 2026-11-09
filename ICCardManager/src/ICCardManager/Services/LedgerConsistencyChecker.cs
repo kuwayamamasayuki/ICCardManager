@@ -55,6 +55,8 @@ namespace ICCardManager.Services
             // PaperCarryoverPolicy.PeriodOpensWithFiscalYearStartCarryover（同じ画面の並びと検査結果を揃える）。
             // 既知の差: 4/1 から検査する場合でも、導入行を摘要で認識できない（#2371）カードでは、履歴は貸出中を除いた
             // 前年度繰越（GetCarryoverBalanceAsync）をシードにし、ここは貸出中を含む値を使う（本体の母集団に合わせる）。
+            // 限界: 直るのは表示期間（4 月を含む期間）の検査だけ。全期間の検査（FullPeriodStart から）は範囲が導入行より前から
+            // 始まるので判定は偽になり、導入行より前の行の後に導入行がチェーンの途中で続くため、導入行は今も不整合と報告される。
             var fiscalYearFirstDayLedgers = await _ledgerRepository
                 .GetFiscalYearFirstDayLedgersAsync(cardIdm, FiscalYearHelper.GetFiscalYear(fromDate)).ConfigureAwait(false);
             var precedingBalance = PaperCarryoverPolicy.PeriodOpensWithFiscalYearStartCarryover(fromDate, fiscalYearFirstDayLedgers)
