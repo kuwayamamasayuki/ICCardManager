@@ -785,9 +785,13 @@ def find_no_column_problems(scan: NoColumnScan) -> List[Tuple[int, str]]:
             lo = max(e.base for _, e in group["items"]) + 1 if group["items"] else group["start"]
             group["segments"].append((lo, max(e.base for _, e in items), table.notes))
             group["items"].extend(items)
+            # ハイフンの枝番・ID 形（``1-1`` ・ ``20h-2`` ・ ``1-7a``）は対象外として認めている書き方なので、
+            # 書式の誤りとして案内しない
             group["unreadable"].extend(
                 (row.lineno, row.cell) for row in table.rows
-                if not row.entries and UNREADABLE_NO_CELL_RE.match(row.cell)
+                if not row.entries
+                and UNREADABLE_NO_CELL_RE.match(row.cell)
+                and not NO_HYPHEN_LIKE_RE.match(row.cell)
             )
             last[(table.section_lineno, series)] = group
             if group in recent:

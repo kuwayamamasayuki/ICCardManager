@@ -1087,6 +1087,14 @@ class NoColumnUnreadableCellTests(unittest.TestCase):
     def test_unreadable_cell_without_a_gap_is_green(self):
         self.assertEqual([], _no_problems("#### UT-001\n\n" + _table(1, 2, "2.", 3)))
 
+    def test_hyphen_branch_and_id_forms_are_not_called_unreadable(self):
+        """レビュー 5 回目: 対象外として認めている形（``1-1`` ・ ``20h-2`` ・ ``1-7a``）には書式の案内を出さない。"""
+        for cell in ("1-1", "20h-2", "1-7a"):
+            with self.subTest(cell=cell):
+                problems = _no_problems("#### UT-001\n\n" + _table(1, cell, 3))
+                self.assertEqual(1, len(problems), problems)  # No.2 の抜けそのものは報告する
+                self.assertNotIn("読めません", problems[0][1])
+
     def test_range_over_the_limit_is_unreadable_and_named(self):
         problems = _no_problems("#### UT-001\n\n" + _table("1〜300", 301))
         self.assertEqual(1, len(problems), problems)
