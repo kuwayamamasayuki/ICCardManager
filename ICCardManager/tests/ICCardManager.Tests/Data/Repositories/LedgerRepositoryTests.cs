@@ -947,6 +947,244 @@ public class LedgerRepositoryTests : IDisposable
         result.Should().Be(9240, "年度繰越額は残高チェーン順で確定した年度末最終残高であるべき");
     }
 
+    /// <summary>
+    /// Issue #2418: 年度末より前の行が貸出中レコードだけなら、前年度繰越は無い（null）こと
+    /// </summary>
+    /// <remarks>
+    /// 3 月に登録（導入行「前年度より繰越」は 4/1）して 3 月中に貸し出したカードの形。
+    /// 貸出中レコードを含めると、その残高が前年度繰越として返り、帳票が導入行の受入と二重に計上する。
+    /// </remarks>
+    [Fact]
+    public async Task GetCarryoverBalanceAsync_OnlyLentRecordBeforeFiscalYearEnd_ReturnsNull()
+    {
+        // Arrange - 3/25 の貸出中レコード、4/1 の導入行
+        var lent = CreateTestLedger(TestCardIdm, new DateTime(2027, 3, 25, 9, 30, 0), SummaryGenerator.GetLendingSummary());
+        lent.Balance = 5000;
+        lent.IsLentRecord = true;
+        await _repository.InsertAsync(lent);
+
+        var introduction = CreateTestLedger(
+            TestCardIdm, new DateTime(2027, 4, 1), SummaryGenerator.GetCarryoverFromPreviousYearSummary(), income: 5000);
+        introduction.Balance = 5000;
+        await _repository.InsertAsync(introduction);
+
+        // Act
+        var result = await _repository.GetCarryoverBalanceAsync(TestCardIdm, 2026);
+
+        // Assert
+        result.Should().BeNull("貸出中レコードは帳票の母集団に入らないので、前年度繰越の母集団にも入れない");
+    }
+
+    /// <summary>
+    /// Issue #2418（対の表明）: 年度末に実績の行の後で貸し出していても、繰越額は実績の行の残額のまま。
+    /// 最新日に貸出中レコードがあっても、その日の実績の行で決まる
+    /// </summary>
+    [Fact]
+    public async Task GetCarryoverBalanceAsync_LentRecordAfterActualRowAtFiscalYearEnd_ReturnsActualBalance()
+    {
+        // Arrange - 3/20 チャージ(→6000)、3/31 利用(→5740)、3/31 貸出中(残高 5740)
+        var charge = CreateTestLedger(TestCardIdm, new DateTime(2024, 3, 20), "チャージ", income: 3000);
+        charge.Balance = 6000;
+        await _repository.InsertAsync(charge);
+
+        var usage = CreateTestLedger(TestCardIdm, new DateTime(2024, 3, 31), "鉄道（博多～天神）", expense: 260);
+        usage.Balance = 5740;
+        await _repository.InsertAsync(usage);
+
+        var lent = CreateTestLedger(TestCardIdm, new DateTime(2024, 3, 31, 17, 0, 0), SummaryGenerator.GetLendingSummary());
+        lent.Balance = 5740;
+        lent.IsLentRecord = true;
+        await _repository.InsertAsync(lent);
+
+        // Act
+        var carryover = await _repository.GetCarryoverBalanceAsync(TestCardIdm, 2023);
+        var latest = await _repository.GetLatestBeforeDateAsync(TestCardIdm, new DateTime(2024, 4, 1));
+
+        // Assert
+        carryover.Should().Be(5740);
+        latest!.IsLentRecord.Should().BeTrue("返却処理の起点に使う単票クエリは、従来どおり貸出中レコードを含めること");
+    }
+
+    /// <summary>
+    /// Issue #2418: 3 月に登録して貸し出したカード（導入行 4/1）の新年度の帳票を、実 DB で作る。
+    /// 「前年度より繰越」は導入行の 1 行だけで、4 月計・5 月の累計の受入に二重に入らないこと
+    /// </summary>
+    [Fact]
+    public async Task ReportDataBuilder_FiscalYearStartCarryoverWithEarlierLentRecord_DoesNotDoubleCount()
+    {
+        // Arrange
+        await InsertFiscalYearStartCarryoverCardLedgersAsync(SummaryGenerator.GetCarryoverFromPreviousYearSummary());
+        var builder = new ReportDataBuilder(_cardRepository, _repository);
+
+        // Act
+        var april = await builder.BuildAsync(TestCardIdm, 2027, 4);
+        var may = await builder.BuildAsync(TestCardIdm, 2027, 5);
+
+        // Assert
+        AssertNotDoubleCounted(april!, may!);
+    }
+
+    /// <summary>
+    /// Issue #2418: 導入行を摘要の比較で認識できない形（組織設定の文言を変える前に登録した導入行。#2371）でも、
+    /// 導入行より前が貸出中レコードだけなら二重に計上しないこと（前年度繰越の母集団から貸出中レコードを除く効果）
+    /// </summary>
+    [Fact]
+    public async Task ReportDataBuilder_UnrecognizedIntroductionWithEarlierLentRecord_DoesNotDoubleCount()
+    {
+        // Arrange - 導入行の摘要が現在の文言と違う
+        await InsertFiscalYearStartCarryoverCardLedgersAsync("前年度繰越（変更前の文言）");
+        var builder = new ReportDataBuilder(_cardRepository, _repository);
+
+        // Act
+        var april = await builder.BuildAsync(TestCardIdm, 2027, 4);
+        var may = await builder.BuildAsync(TestCardIdm, 2027, 5);
+
+        // Assert
+        AssertNotDoubleCounted(april!, may!);
+    }
+
+    /// <summary>
+    /// 3 月に登録（導入行 4/1・受入 5,000）し、3/25 に貸し出したまま、4/10 の利用（210 円）・5/12 の利用（300 円）が
+    /// 記録されている台帳を作る（返却前に帳票を作る形。利用行は他の返却や手入力で入った想定）
+    /// </summary>
+    private async Task InsertFiscalYearStartCarryoverCardLedgersAsync(string introductionSummary)
+    {
+        var lent = CreateTestLedger(TestCardIdm, new DateTime(2027, 3, 25, 9, 30, 0), SummaryGenerator.GetLendingSummary());
+        lent.Balance = 5000;
+        lent.IsLentRecord = true;
+        await _repository.InsertAsync(lent);
+
+        var introduction = CreateTestLedger(TestCardIdm, new DateTime(2027, 4, 1), introductionSummary, income: 5000);
+        introduction.Balance = 5000;
+        await _repository.InsertAsync(introduction);
+
+        var aprilUsage = CreateTestLedger(TestCardIdm, new DateTime(2027, 4, 10), "鉄道（天神～博多）", expense: 210);
+        aprilUsage.Balance = 4790;
+        await _repository.InsertAsync(aprilUsage);
+
+        var mayUsage = CreateTestLedger(TestCardIdm, new DateTime(2027, 5, 12), "鉄道（博多～天神）", expense: 300);
+        mayUsage.Balance = 4490;
+        await _repository.InsertAsync(mayUsage);
+    }
+
+    /// <summary>
+    /// Issue #2418: 年度で最も早い日の行（貸出中を除く）だけを返すこと。前年度・翌年度の行と貸出中レコードは数えない
+    /// </summary>
+    [Fact]
+    public async Task GetFiscalYearFirstDayLedgersAsync_ReturnsSettledRowsOfEarliestDayInFiscalYear()
+    {
+        // Arrange
+        var previousYear = CreateTestLedger(TestCardIdm, new DateTime(2027, 3, 20), "鉄道（手入力）", expense: 100);
+        var lentOnStart = CreateTestLedger(TestCardIdm, new DateTime(2027, 4, 1, 9, 0, 0), SummaryGenerator.GetLendingSummary());
+        lentOnStart.IsLentRecord = true;
+        var introduction = CreateTestLedger(TestCardIdm, new DateTime(2027, 4, 3), SummaryGenerator.GetCarryoverFromPreviousYearSummary(), income: 5000);
+        var sameDayUsage = CreateTestLedger(TestCardIdm, new DateTime(2027, 4, 3), "鉄道（天神～博多）", expense: 210);
+        var laterUsage = CreateTestLedger(TestCardIdm, new DateTime(2027, 4, 10), "鉄道（博多～天神）", expense: 300);
+        var nextYear = CreateTestLedger(TestCardIdm, new DateTime(2028, 4, 1), "鉄道（翌年度）", expense: 100);
+        foreach (var ledger in new[] { previousYear, lentOnStart, introduction, sameDayUsage, laterUsage, nextYear })
+        {
+            await _repository.InsertAsync(ledger);
+        }
+
+        // Act
+        var result = (await _repository.GetFiscalYearFirstDayLedgersAsync(TestCardIdm, 2027)).ToList();
+        var empty = await _repository.GetFiscalYearFirstDayLedgersAsync(TestCardIdm, 2030);
+
+        // Assert
+        result.Select(l => l.Summary).Should().BeEquivalentTo(
+            new[] { SummaryGenerator.GetCarryoverFromPreviousYearSummary(), "鉄道（天神～博多）" },
+            "4/1 の貸出中レコードは数えず、最も早い日（4/3）の行をすべて返す");
+        empty.Should().BeEmpty();
+    }
+
+    /// <summary>
+    /// Issue #2418: 3 月繰越のカードに導入行より前の日付の行（貸出中レコード・手入力の行）があっても、
+    /// 4 月からの残高の整合性チェックは導入行と同じ日の利用の順序を取り違えず、不整合を報告しないこと
+    /// </summary>
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task CheckBalanceConsistencyAsync_FiscalYearStartCarryoverWithEarlierRow_IsConsistent(bool earlierRowIsLent)
+    {
+        // Arrange: 3/25 に導入行の残高と同じ 5,000 の行。4/1 に導入行（受入5000）と同じ日の利用（210）
+        var earlier = CreateTestLedger(TestCardIdm, new DateTime(2027, 3, 25, 9, 30, 0),
+            earlierRowIsLent ? SummaryGenerator.GetLendingSummary() : "鉄道（手入力）");
+        earlier.Balance = 5000;
+        earlier.IsLentRecord = earlierRowIsLent;
+        await _repository.InsertAsync(earlier);
+
+        var introduction = CreateTestLedger(TestCardIdm, new DateTime(2027, 4, 1), SummaryGenerator.GetCarryoverFromPreviousYearSummary(), income: 5000);
+        introduction.Balance = 5000;
+        await _repository.InsertAsync(introduction);
+
+        var sameDayUsage = CreateTestLedger(TestCardIdm, new DateTime(2027, 4, 1), "鉄道（天神～博多）", expense: 210);
+        sameDayUsage.Balance = 4790;
+        await _repository.InsertAsync(sameDayUsage);
+
+        var laterUsage = CreateTestLedger(TestCardIdm, new DateTime(2027, 4, 10), "鉄道（博多～天神）", expense: 300);
+        laterUsage.Balance = 4490;
+        await _repository.InsertAsync(laterUsage);
+
+        var checker = new LedgerConsistencyChecker(_repository);
+
+        // Act
+        var result = await checker.CheckBalanceConsistencyAsync(TestCardIdm, new DateTime(2027, 4, 1), new DateTime(2027, 4, 30));
+
+        // Assert
+        result.Inconsistencies.Should().BeEmpty("導入行が台帳の始まりで、導入行より前の行の残高はシードにしない");
+        result.IsConsistent.Should().BeTrue();
+    }
+
+    /// <summary>
+    /// Issue #2418（対の表明）: 前年度から台帳があるカードでは、従来どおり期間より前の残高をシードにすること
+    /// （4/1 が同額のポイント還元と利用で残高が循環する日。シードが無いと順序を取り違えて 4/10 を不整合と報告する）
+    /// </summary>
+    [Fact]
+    public async Task CheckBalanceConsistencyAsync_PreviousFiscalYearLedgers_StillUsesSeed()
+    {
+        // Arrange: 3/20 残高 1,000。4/1 は 利用(1200→1000) を先に、還元(1000→1200) を後に Insert（id 順と時系列が逆）
+        var previous = CreateTestLedger(TestCardIdm, new DateTime(2027, 3, 20), "鉄道（博多～天神）", expense: 260);
+        previous.Balance = 1000;
+        await _repository.InsertAsync(previous);
+
+        var usage = CreateTestLedger(TestCardIdm, new DateTime(2027, 4, 1), "鉄道（天神～博多）", expense: 200);
+        usage.Balance = 1000;
+        await _repository.InsertAsync(usage);
+
+        var redemption = CreateTestLedger(TestCardIdm, new DateTime(2027, 4, 1), "ポイント還元", income: 200);
+        redemption.Balance = 1200;
+        await _repository.InsertAsync(redemption);
+
+        var laterUsage = CreateTestLedger(TestCardIdm, new DateTime(2027, 4, 10), "鉄道（博多～天神）", expense: 300);
+        laterUsage.Balance = 700;
+        await _repository.InsertAsync(laterUsage);
+
+        var checker = new LedgerConsistencyChecker(_repository);
+
+        // Act
+        var result = await checker.CheckBalanceConsistencyAsync(TestCardIdm, new DateTime(2027, 4, 1), new DateTime(2027, 4, 30));
+
+        // Assert
+        result.IsConsistent.Should().BeTrue("前年度末の残高 1,000 をシードにすれば 還元 → 利用 の順に確定する");
+    }
+
+    private static void AssertNotDoubleCounted(MonthlyReportData april, MonthlyReportData may)
+    {
+        april.Carryover.Should().BeNull("前年度より繰越は DB の導入行が担うので、帳票は合成しない");
+        april.Ledgers.Should().HaveCount(2);
+        april.MonthlyTotal.Income.Should().Be(5000, "導入行の受入 5,000 円だけ（前年度繰越を二重に加算しない）");
+        april.MonthlyTotal.Expense.Should().Be(210);
+        april.MonthlyTotal.Balance.Should().Be(4790);
+        (april.MonthlyTotal.Income - april.MonthlyTotal.Expense)
+            .Should().Be(april.MonthlyTotal.Balance!.Value, "4 月計で受入 − 払出 = 残額 が成り立つこと");
+
+        may.CumulativeTotal!.Income.Should().Be(5000, "累計の受入に前年度繰越を二重に加算しない");
+        may.CumulativeTotal.Expense.Should().Be(510);
+        may.CumulativeTotal.Balance.Should().Be(4490);
+        (may.CumulativeTotal.Income - may.CumulativeTotal.Expense)
+            .Should().Be(may.CumulativeTotal.Balance!.Value, "累計で受入 − 払出 = 残額 が成り立つこと");
+    }
+
     #endregion
 
     #region GetLatestLedgerAsync テスト

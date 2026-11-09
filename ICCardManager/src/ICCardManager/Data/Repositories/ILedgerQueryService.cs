@@ -26,6 +26,18 @@ namespace ICCardManager.Data.Repositories
         Task<IEnumerable<Ledger>> GetByDateRangeAsync(string? cardIdm, DateTime fromDate, DateTime toDate);
 
         /// <summary>
+        /// 年度で最も早い日付の行（貸出中レコードを除く）を取得する。その年度に行が無ければ空。
+        /// </summary>
+        /// <param name="cardIdm">対象カードの IDm</param>
+        /// <param name="fiscalYear">年度（4 月始まり）</param>
+        /// <remarks>
+        /// Issue #2418: 年度の台帳が導入行「前年度より繰越」から始まるか
+        /// （<c>PaperCarryoverPolicy.HasFiscalYearStartCarryoverRecord</c>）を、帳票・履歴・残高の整合性チェックが
+        /// 同じ範囲（年度全体）で判定するための軽いクエリ。年度 1 年分の行を読まずに済む。
+        /// </remarks>
+        Task<IEnumerable<Ledger>> GetFiscalYearFirstDayLedgersAsync(string cardIdm, int fiscalYear);
+
+        /// <summary>
         /// 摘要に指定した文字列をそのまま含む利用履歴を、全カード・全期間から取得する（利用日の新しい順）
         /// </summary>
         /// <remarks>
@@ -67,6 +79,10 @@ namespace ICCardManager.Data.Repositories
         /// <remarks>
         /// Issue #1731: 年度末最終日に複数レコードがある場合は残高チェーン順の最終残高を返す
         /// （<see cref="GetLatestBeforeDateAsync"/> と同じ規則）。
+        /// ただし <see cref="GetLatestBeforeDateAsync"/> と違い、貸出中レコード（is_lent_record = 1）は
+        /// 母集団から除外する（Issue #2418。帳票は貸出中レコードを明細・集計に載せないので母集団を揃える。
+        /// 3 月に登録して貸し出したカードで、貸出中レコードの残高が前年度繰越として返り、
+        /// 導入行「前年度より繰越」の受入と二重に計上されていた）。
         /// </remarks>
         Task<int?> GetCarryoverBalanceAsync(string cardIdm, int fiscalYear);
 

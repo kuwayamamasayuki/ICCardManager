@@ -1,3 +1,4 @@
+#nullable enable
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -29,7 +30,7 @@ namespace ICCardManager.Services
         }
 
         /// <inheritdoc/>
-        public async Task<MonthlyReportData> BuildAsync(string cardIdm, int year, int month)
+        public async Task<MonthlyReportData?> BuildAsync(string cardIdm, int year, int month)
         {
             // カード情報を取得
             var card = await _cardRepository.GetByIdmAsync(cardIdm, includeDeleted: true).ConfigureAwait(false);
@@ -40,29 +41,62 @@ namespace ICCardManager.Services
 
             var fiscalYearStartYear = FiscalYearHelper.GetFiscalYear(year, month);
 
+            // 年度で最も早い日付の行（貸出中レコードを除く）。導入行の判定に使う
+            var fiscalYearFirstDayLedgers = (await _ledgerRepository
+                .GetFiscalYearFirstDayLedgersAsync(cardIdm, fiscalYearStartYear).ConfigureAwait(false))
+                .ToList();
+
+            // Issue #2418: 3 月を繰越月にして登録したカードは、年度の初日に導入行「前年度より繰越」
+            // （受入＝残高）が DB に実在し、年度の始まりの残高はその行が担う。帳票が前年度繰越を合成・加算すると
+            // 導入行の受入と二重になるため、年度の台帳が導入行から始まるなら「前年度繰越は無い」として扱う。
+            // 「導入行より前に台帳が無いから前年度繰越は null になる」には頼らない — 3 月中の貸出中レコード・
+            // 履歴の「追加」・CSV の取り込みで、導入行より前の日付の行はあり得る。
+            // 判定は紙の累計（#2326）・履歴の繰越行・残高の整合性チェックと同じ PaperCarryoverPolicy 1 か所（#1763）で、
+            // 入力も同じ「年度全体で最も早い日の行」（帳票の月で範囲が変わると、導入行を年度の途中へ動かしたときに
+            // 帳票と履歴で判定が食い違う）。
+            var startsWithCarryoverRecord =
+                PaperCarryoverPolicy.HasFiscalYearStartCarryoverRecord(fiscalYearFirstDayLedgers);
+
             // 年度開始前の最終残高（＝前年度繰越）。
             // 年度累計の残高チェーン並替のシードと、累計受入への加算（Issue #1494）の両方で使う。
-            var fiscalYearPrecedingBalance = await _ledgerRepository
-                .GetCarryoverBalanceAsync(cardIdm, fiscalYearStartYear - 1).ConfigureAwait(false);
+            // GetCarryoverBalanceAsync は貸出中レコードを母集団から除く（#2418。上の判定が摘要の比較で
+            // 導入行を認識できない場合（#2371）でも、3 月中の貸出中レコードだけでは前年度繰越が生じない）。
+            var fiscalYearPrecedingBalance = startsWithCarryoverRecord
+                ? null
+                : await _ledgerRepository
+                    .GetCarryoverBalanceAsync(cardIdm, fiscalYearStartYear - 1).ConfigureAwait(false);
 
             // 前月末残高を取得（繰越行表示および残高チェーン並替に使用）。
             // Issue #2043: 「当月 1 日より前の最終残高」はリポジトリの確定済み単票クエリで取る。
-            // 4月は年度境界と一致するため前年度繰越と同値（GetCarryoverBalanceAsync も
-            // GetLatestBeforeDateAsync と同じ規則で解決される）。
+            // 4月は年度境界と一致するため前年度繰越（上）を使う。
             //
             // 【母集団について】business-logic.md「シードの母集団は本体クエリと揃える」（#1770）の
-            // 例外にあたる。GetLatestBeforeDateAsync は貸出中レコード（is_lent_record = 1）を
+            // 例外にあたる。5 月以降の GetLatestBeforeDateAsync は貸出中レコード（is_lent_record = 1）を
             // 含むが、シード先の ledgers / yearlyLedgers は IsLentRecord で除外している。これが安全なのは
             // 貸出中プレースホルダが Income = Expense = 0 かつ Balance = 貸出時の残高（＝直前の
             // 実績行の残額）であり、残高チェーン上は自己ループで、返却されるまで後続の利用行が
-            // 挿入されないため。つまり「貸出中行を含めても含めなくても最終残高は同じ」。
-            // 除外オプション付きの単票クエリは公開されていないので、この不変条件に依存する。
+            // 挿入されないため。つまり「直前に実績行があれば、貸出中行を含めても含めなくても最終残高は同じ」。
+            // 直前に実績行が無い（貸出中行しか無い）形では「残高があるか」自体が変わるが、それが起こり得るのは
+            // 台帳の先頭（3 月に登録して貸し出したカードの導入行より前）だけで、その形は導入行の判定
+            // （PeriodOpensWithFiscalYearStartCarryover。当月が導入行以前なら前の残高を使わない）と、
+            // 貸出中レコードを除いた前年度繰越（GetCarryoverBalanceAsync、#2418）で塞いでいる。
             // 回帰は ReportDataBuilderTests の
             // BuildAsync_PreviousMonthHasLentRecord_PrecedingBalanceIsUnchanged が固定する。
-            int? precedingBalance = month == 4
-                ? fiscalYearPrecedingBalance
-                : (await _ledgerRepository
+            int? precedingBalance;
+            if (PaperCarryoverPolicy.PeriodOpensWithFiscalYearStartCarryover(
+                new DateTime(year, month, 1), fiscalYearFirstDayLedgers))
+            {
+                precedingBalance = null;
+            }
+            else if (month == 4)
+            {
+                precedingBalance = fiscalYearPrecedingBalance;
+            }
+            else
+            {
+                precedingBalance = (await _ledgerRepository
                     .GetLatestBeforeDateAsync(cardIdm, new DateTime(year, month, 1)).ConfigureAwait(false))?.Balance;
+            }
 
             // Issue #784: 残高チェーンに基づいて同一日内の時系列順を復元
             var ledgers = LedgerOrderHelper.ReorderByBalanceChain(
@@ -70,7 +104,7 @@ namespace ICCardManager.Services
                 precedingBalance);
 
             // 繰越行データを生成
-            CarryoverRowData carryover = null;
+            CarryoverRowData? carryover = null;
             if (precedingBalance.HasValue)
             {
                 if (month == 4)
@@ -121,12 +155,8 @@ namespace ICCardManager.Services
             // Issue #1494: 年度開始前の残高があるときの「前年度より繰越」は DB に保存されず
             // CarryoverRowData として表示用に合成されるため、月計・累計の集計に明示的に加算する必要がある。
             // 3 月を繰越月にして登録したカードの「前年度より繰越」は DB に実在する導入行（4/1 付け・受入=残高）で、
-            // それより前の台帳が無い（fiscalYearPrecedingBalance が null）ため加算は 0 となり、
-            // 導入行の受入は通常の ledger 行として yearlyLedgers の Sum に入る。
-            // ただし null になるのは 4/1 より前に台帳の行（貸出中レコードを含む）が 1 件も無いときに限る。
-            // そうした行があるとその残高が前年度繰越として返り、合成した繰越行と導入行の受入が二重に入り得る（未対処）。
-            // 代表例は、3 月中に登録して貸し出し、返却前に新年度の帳票を作る場合（GetCarryoverBalanceAsync は
-            // 貸出中レコードを含む）。履歴の「追加」や CSV の取り込みで導入行より前の日付の行を入れた場合も同じ。
+            // 導入行の受入は通常の ledger 行として yearlyLedgers の Sum に入る。このとき
+            // fiscalYearPrecedingBalance は null にしてある（上の startsWithCarryoverRecord、#2418）ので加算は 0。
             var fiscalYearCarryoverIncome = fiscalYearPrecedingBalance ?? 0;
 
             // 累計も同様に「○月から繰越」レコードを除外（紙出納簿移行カード対策）
@@ -155,7 +185,7 @@ namespace ICCardManager.Services
             // #2326 より前に累計を入力して登録したカードにも DB を書き換えずに効かせるため、保存済みの台帳から判定する
             // （判定は PaperCarryoverPolicy 1 か所。登録時に保存しない判定と同じクラス）。
             if (month != 4
-                && PaperCarryoverPolicy.AddsPaperCumulativeToFiscalYear(card, fiscalYearStartYear, yearlyLedgers))
+                && PaperCarryoverPolicy.AddsPaperCumulativeToFiscalYear(card, fiscalYearStartYear, fiscalYearFirstDayLedgers))
             {
                 yearlyIncome += card.CarryoverIncomeTotal;
                 yearlyExpense += card.CarryoverExpenseTotal;
@@ -163,7 +193,7 @@ namespace ICCardManager.Services
 
             // 月計・累計の組み立て
             ReportTotalData monthlyTotal;
-            ReportTotalData cumulativeTotal;
+            ReportTotalData? cumulativeTotal;
 
             if (month == 4)
             {
