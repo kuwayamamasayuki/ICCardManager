@@ -115,6 +115,59 @@ namespace ICCardManager.Tests.Data.Migrations
         }
 
         /// <summary>
+        /// 採番が 64 ビット整数の上限に達していても、番号のずらしが失敗も重複もしないこと。
+        /// </summary>
+        /// <remarks>
+        /// SQLite の <c>CAST('99999999999999999999' AS INTEGER)</c> は 9223372036854775807 で頭打ちになり、
+        /// その +1 は long.MinValue へ折り返す。ずらす対象が 2 枚以上あると同じ負の番号が重なり、
+        /// 最後の <c>CREATE UNIQUE INDEX</c> が制約違反で失敗して、起動のたびに同じ失敗を繰り返していた。
+        /// 上限に達したときは、その種別で（削除済みも含めて）文字列として使われていない最小の正の整数を割り当てる。
+        /// </remarks>
+        [Fact]
+        public void Up_RenumbersDuplicatesWhenMaxNumberSaturatesInt64()
+        {
+            InsertCard("IDM001", "はやかけん", "3", 0);
+            InsertCard("IDM002", "はやかけん", "3", null);
+            InsertCard("IDM003", "はやかけん", "3", null);
+            InsertCard("IDM004", "はやかけん", "99999999999999999999", 0);
+            InsertCard("IDM005", "はやかけん", "1", 1);
+
+            RunOnce(new Migration_012_CardUniqueIndexCoversNullIsDeleted());
+
+            SelectCards().Should().Equal(
+                ("IDM001", "はやかけん", "3", (long?)0),
+                ("IDM002", "はやかけん", "2", (long?)0),
+                ("IDM003", "はやかけん", "4", (long?)0),
+                ("IDM004", "はやかけん", "99999999999999999999", (long?)0),
+                ("IDM005", "はやかけん", "1", (long?)1));
+        }
+
+        /// <summary>
+        /// is_deleted 列の無いレガシー DB では何もしない（Migration_008 の条件なしのインデックスを壊さない）こと。
+        /// </summary>
+        [Fact]
+        public void Up_WithoutIsDeletedColumn_KeepsMigration008UnconditionalIndex()
+        {
+            using var legacy = new SQLiteConnection("Data Source=:memory:");
+            legacy.Open();
+            using (var create = legacy.CreateCommand())
+            {
+                create.CommandText = @"CREATE TABLE ic_card (card_idm TEXT PRIMARY KEY, card_type TEXT NOT NULL, card_number TEXT NOT NULL);
+INSERT INTO ic_card VALUES ('IDM001', 'はやかけん', '3');";
+                create.ExecuteNonQuery();
+            }
+            RunOnce(legacy, new Migration_008_AddCardTypeNumberUniqueIndex());
+            var before = SelectIndexSql(legacy);
+            before.Should().Be("CREATE UNIQUE INDEX idx_card_type_number_active ON ic_card(card_type, card_number)",
+                "前提: is_deleted の無い DB では 008 が条件なしのインデックスを作るべき");
+
+            var act = () => RunOnce(legacy, new Migration_012_CardUniqueIndexCoversNullIsDeleted());
+
+            act.Should().NotThrow();
+            SelectIndexSql(legacy).Should().Be(before, "is_deleted の無い DB では 012 はインデックスを変えないべき");
+        }
+
+        /// <summary>
         /// 作り直したインデックスが NULL のカードも対象にする定義になっていること（作り直しの表明）。
         /// </summary>
         /// <remarks>
@@ -236,11 +289,20 @@ VALUES (@idm, @cardType, @cardNumber, @isDeleted)";
             return rows;
         }
 
-        private void RunOnce(IMigration migration)
+        private void RunOnce(IMigration migration) => RunOnce(_connection, migration);
+
+        private static void RunOnce(SQLiteConnection connection, IMigration migration)
         {
-            using var tx = _connection.BeginTransaction();
-            migration.Up(_connection, tx);
+            using var tx = connection.BeginTransaction();
+            migration.Up(connection, tx);
             tx.Commit();
+        }
+
+        private static string? SelectIndexSql(SQLiteConnection connection)
+        {
+            using var command = connection.CreateCommand();
+            command.CommandText = "SELECT sql FROM sqlite_master WHERE type = 'index' AND name = 'idx_card_type_number_active'";
+            return command.ExecuteScalar() is string sql ? Regex.Replace(sql, @"\s+", " ") : null;
         }
 
         private void RunDown(IMigration migration)
