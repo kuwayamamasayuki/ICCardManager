@@ -86,8 +86,16 @@ public class UiTestBackupIsolationConstantsTests
         var dispose = Regex.Match(source, @"public\s+void\s+Dispose\(\)\s*\{(?<body>.*?)\n        \}", RegexOptions.Singleline);
         dispose.Success.Should().BeTrue("AppFixture に Dispose が見つかること");
 
-        dispose.Groups["body"].Value.Should().Contain("FinishOwnedGuard(_ownedDatabaseGuard);",
+        var body = dispose.Groups["body"].Value;
+        body.Should().Contain("FinishOwnedGuard(_ownedDatabaseGuard);",
             "外すと、テストのアプリが既定のバックアップ先へ書いても UI テストは緑のまま");
+
+        // 呼んでいても例外を握りつぶせば同じく緑のまま。Dispose の他の後始末（アプリの終了）は try/catch で包んでいるので、
+        // 「catch が無い」ではなく「呼び出しが Dispose の直下の文（try の中ではない）で、その後に catch が無い」ことを見る
+        Regex.IsMatch(body, @"\n {12}FinishOwnedGuard\(_ownedDatabaseGuard\);")
+            .Should().BeTrue("後始末の呼び出しは try で包まず Dispose の直下に置く（例外をテストへ伝える）");
+        var afterCall = body.Substring(body.IndexOf("FinishOwnedGuard(_ownedDatabaseGuard);", StringComparison.Ordinal));
+        Regex.IsMatch(afterCall, @"\bcatch\b").Should().BeFalse("後始末の例外を握りつぶす catch を置かない");
     }
 
     private static string ReadUiTestSource(string fileName)

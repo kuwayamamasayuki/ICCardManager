@@ -29,8 +29,10 @@ namespace ICCardManager.UITests.Infrastructure
     /// 書き戻す手段が無い（消えた後では遅い）ため</description></item>
     /// <item><term>ログ（<c>%ProgramData%\ICCardManager\Logs</c>）</term><description>
     /// 書く（その日のファイルへの追記と、保持期間を過ぎたファイルの削除）。<b>扱わない</b>。追記は既存の行を変えず
-    /// （テストの起動の行は時刻で見分けられる）、削除は日付だけで決まり本物のアプリが起動しても同じファイルを消すので、
-    /// テストの起動で失われる記録が無い</description></item>
+    /// （テストの起動の行は時刻で見分けられる）、削除はファイルの日付と保持日数だけで決まる。テストのアプリ（作業ツリーのビルド）と
+    /// インストール版の <c>appsettings.json</c> の <c>Logging:File:RetentionDays</c>（<c>FileLoggerOptions.RetentionDays</c>）が同じ
+    /// （既定 30 日）なら、本物のアプリが起動しても同じファイルを消すので、テストの起動で失われる記録が無い。インストール版の保持日数を
+    /// 既定より長くしている開発機では、テストの起動がそれより古いログを先に消す（この前提が崩れたら扱いを見直す）</description></item>
     /// <item><term>設定ファイル（<c>database_config.txt</c> 等）</term><description>
     /// 読む。保存先を指定していたら中止する（<see cref="ThrowIfDatabaseLocationIsConfigured"/>）。書くのは設定画面の保存の操作だけで、
     /// 起動では書かれない</description></item>
