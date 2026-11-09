@@ -589,7 +589,7 @@ WHERE card_idm = @cardIdm AND (is_deleted = 0 OR is_deleted IS NULL) AND (is_len
         /// </summary>
         /// <remarks>
         /// Issue #1757: 部分ユニークインデックス <c>idx_card_type_number_active</c> は
-        /// <c>is_deleted = 0</c> の行だけを対象とするため、**復元も UNIQUE 制約に触れる経路**である。
+        /// 有効な行（<c>is_deleted = 0 OR is_deleted IS NULL</c>。NULL は Migration_012 / Issue #2419）だけを対象とするため、**復元も UNIQUE 制約に触れる経路**である。
         /// 削除中に同じ種別・番号のカードが新規登録されていると（削除済みの番号は再利用できる仕様）、
         /// <c>is_deleted</c> を 0 へ戻す本 UPDATE が制約違反になる。
         /// </remarks>
@@ -735,9 +735,35 @@ WHERE card_type = @cardType";
             command.Parameters.AddWithValue("@cardType", cardType);
 
             var result = await command.ExecuteScalarAsync().ConfigureAwait(false);
-            var maxNumber = result == DBNull.Value ? 0 : Convert.ToInt32(result, CultureInfo.InvariantCulture);
 
-            return (maxNumber + 1).ToString(CultureInfo.InvariantCulture);
+            // Issue #2419: CAST(... AS INTEGER) は 64 ビット整数を返し、範囲外の数字列は long.MaxValue で頭打ちになる。
+            // int へ変換すると 2,147,483,647 を超える管理番号がある種別で OverflowException になり、「最大＋1」も
+            // 表せないことがあるため、採番は移行時の番号ずらし（Migration_008）と共有する CardNumberAllocator に任せる。
+            // 使用中の番号は「最大＋1」が表せないときだけ読む
+            var max = CardNumberAllocator.ParseMax(result);
+            var usedNumbers = CardNumberAllocator.CanIncrement(max)
+                ? new List<string>()
+                : await ReadCardNumbersAsync(connection, cardType).ConfigureAwait(false);
+
+            return CardNumberAllocator.Next(max, () => usedNumbers);
+        }
+
+        /// <summary>
+        /// 指定した種別のカード（削除済みを含む）の管理番号を返す（Issue #2419。採番が上限に達したときだけ使う）
+        /// </summary>
+        private static async Task<List<string>> ReadCardNumbersAsync(SQLiteConnection connection, string cardType)
+        {
+            using var command = connection.CreateCommand();
+            command.CommandText = "SELECT card_number FROM ic_card WHERE card_type = @cardType";
+            command.Parameters.AddWithValue("@cardType", cardType);
+
+            var numbers = new List<string>();
+            using var reader = await command.ExecuteReaderAsync().ConfigureAwait(false);
+            while (await reader.ReadAsync().ConfigureAwait(false))
+            {
+                numbers.Add(reader.GetString(0));
+            }
+            return numbers;
         }
 
         /// <summary>

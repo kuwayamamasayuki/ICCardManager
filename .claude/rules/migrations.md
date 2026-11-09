@@ -20,6 +20,7 @@ paths:
 | 列追加 | `MigrationHelpers.AddColumnIfNotExists(conn, tx, "table", "column", "TYPE DEFAULT ...")` |
 | 行追加 | `INSERT OR IGNORE INTO ...` |
 | 行更新 | `UPDATE ... WHERE <条件が同じ入力で同じ結果を出す>` |
+| インデックスの条件を変える | `CREATE ... IF NOT EXISTS` は同名の既存インデックスの条件を変えないので、`DROP INDEX IF EXISTS` してから作り直す。**UNIQUE インデックスの対象を広げるときは、旧インデックスを落としてから対象のデータを正規化・重複を解消し、最後に作る**（`Migration_012_CardUniqueIndexCoversNullIsDeleted`） |
 | テーブル再作成 | 冒頭で `MigrationHelpers.HasColumn` 等により「適用済みなら何もしない」ガードを置き、作業テーブルは `DROP TABLE IF EXISTS` してから素の `CREATE TABLE`（`IF NOT EXISTS` を付けない）→ 素の `INSERT INTO ... SELECT` で移す（`Migration_011_AddLedgerDetailId`） |
 
 ## 禁止パターン
@@ -58,6 +59,8 @@ paths:
 5. 冪等性テストは**追加不要**（`MigrationIdempotencyTests.Up_SecondRunDoesNotChangeSchemaOrData` が `MigrationRunner` の自動検出から対象を導出し、新しい版も自動で対象になる。Issue #2107）
    - 検証は「2 回目の `Up()` の前後で、スキーマ（`sqlite_master` の全定義）と全テーブルの全行が一致すること」。行を入れた DB で流すため、例外にならない非冪等（行の重複・書き換え・インデックスの消失）も検出する
    - テーブルを作り直す移行（`Up()` で作り直すのは 011。002 / 003 は `Down()` だけが作り直す）は、**作り直しで消えるインデックスを移行前と同じ定義で作り直していること**を、その版の専用テストで直前の版までのスキーマと比べて表明する（`Migration_011_AddLedgerDetailIdTests.Up_RecreatesLedgerDetailIndexesAsBeforeMigration`）。冪等性テストは 1 回目と 2 回目を比べるので、1 回目で消えたものは検出できない
+   - インデックスの条件を変えて作り直す移行（012）も同じで、**作り直した後の定義**と「ほかのインデックスが変わらないこと」を専用テストで表明する（`Migration_012_CardUniqueIndexCoversNullIsDeletedTests.Up_RecreatesUniqueIndexCoveringNullIsDeleted`）
+   - **UNIQUE インデックスの対象を広げる移行では、旧インデックスを先に落とす**（Issue #2419）。012 の初版は「NULL を 0 へ正規化 → 重複を解消 → 旧インデックスを落として作り直す」の順で、正規化の `UPDATE` が NULL だったカードを旧インデックス（`WHERE is_deleted = 0`）の対象へ入れた瞬間に重複が制約違反になり、移行そのものが失敗した（起動不能）。旧インデックスの対象外だった行を含む重複を入れた DB で移行を流すテストを置くこと — 重複の無い DB では順序の誤りは見えない
 6. スキーマに列追加した場合は `docs/design/02_DB設計書.md` の該当テーブルに反映
 
 ## 自動検出
