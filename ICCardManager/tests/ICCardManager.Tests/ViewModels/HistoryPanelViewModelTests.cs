@@ -1605,6 +1605,61 @@ public class HistoryPanelViewModelTests : IDisposable
         result.StaffName.Should().BeNull();
     }
 
+    /// <summary>
+    /// Issue #2418: 3 月繰越で登録したカード（年度の台帳が導入行「前年度より繰越」から始まる）は、
+    /// 導入行より前の日付の行（手入力・CSV）で前年度繰越が返っても、4 月の繰越行を合成しないこと
+    /// （導入行が一覧に並ぶので、合成すると「前年度より繰越」が 2 行になる。帳票と同じ判定）
+    /// </summary>
+    [Fact]
+    public async Task BuildCarryoverRowAsync_4月_年度が導入行の前年度より繰越から始まる_繰越行を合成しないこと()
+    {
+        // Arrange: 3/20 の手入力の行で前年度繰越 5,000 が返る。年度の台帳は 4/1 の導入行から始まる
+        var cardIdm = "0102030405060708";
+        _ledgerRepositoryMock.Setup(r => r.GetCarryoverBalanceAsync(cardIdm, 2026))
+            .ReturnsAsync(5000);
+        _ledgerRepositoryMock.Setup(r => r.GetFiscalYearFirstDayLedgersAsync(cardIdm, 2027))
+            .ReturnsAsync(new List<Ledger>
+            {
+                new Ledger { Id = 1, CardIdm = cardIdm, Date = new DateTime(2027, 4, 1), Summary = SummaryGenerator.GetCarryoverFromPreviousYearSummary(), Income = 5000, Balance = 5000 },
+                new Ledger { Id = 2, CardIdm = cardIdm, Date = new DateTime(2027, 4, 1), Summary = "鉄道（天神～博多）", Expense = 210, Balance = 4790 }
+            });
+
+        // Act
+        var precedingBalance = await _history.GetPrecedingBalanceAsync(cardIdm, 2027, 4);
+        var result = await _history.BuildCarryoverRowAsync(cardIdm, 2027, 4);
+
+        // Assert
+        precedingBalance.Should().BeNull("導入行が年度の始まりの残高を担うので、並べ替えのシードにも前年度繰越を使わない");
+        result.Should().BeNull();
+    }
+
+    /// <summary>
+    /// Issue #2418（対の表明）: 年度の台帳が導入行から始まらない（前年度から台帳がある）カードは、
+    /// 従来どおり 4 月の繰越行を合成すること
+    /// </summary>
+    [Fact]
+    public async Task BuildCarryoverRowAsync_4月_年度の先頭が導入行でない_従来どおり合成すること()
+    {
+        // Arrange: 年度で最も早い日の行は 4/2 の利用だけ（導入行から始まらない年度）
+        var cardIdm = "0102030405060708";
+        _ledgerRepositoryMock.Setup(r => r.GetCarryoverBalanceAsync(cardIdm, 2026))
+            .ReturnsAsync(5000);
+        _ledgerRepositoryMock.Setup(r => r.GetFiscalYearFirstDayLedgersAsync(cardIdm, 2027))
+            .ReturnsAsync(new List<Ledger>
+            {
+                new Ledger { Id = 1, CardIdm = cardIdm, Date = new DateTime(2027, 4, 2), Summary = "鉄道（天神～博多）", Expense = 210, Balance = 4790 }
+            });
+
+        // Act
+        var result = await _history.BuildCarryoverRowAsync(cardIdm, 2027, 4);
+
+        // Assert
+        result.Should().NotBeNull();
+        result!.Summary.Should().Be(SummaryGenerator.GetCarryoverFromPreviousYearSummary());
+        result.Income.Should().Be(5000);
+        result.Balance.Should().Be(5000);
+    }
+
     [Fact]
     public async Task BuildCarryoverRowAsync_4月以外_前月繰越行が生成されること()
     {
