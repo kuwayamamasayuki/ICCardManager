@@ -89,7 +89,19 @@ public class HistoryGridColumnWidthConventionTests
 
         summary.Width.Should().EndWith("*", "摘要は残りの幅を取ること（Issue #2424）");
         summary.MinWidth.Should().NotBeNull("最小幅のウィンドウでも摘要を読める幅を下限に残すこと");
+
+        // 上限: 特大・最小幅（1400）で摘要に残る幅は約 198 DIP（表示スケール 150% の UI テストで実測）。下限がそれを上回ると、
+        // 通常の PC の最小幅でも摘要が下限に張り付き、足りない分が横スクロールになる（固定幅の列を削らせる前は、下限 200 で
+        // 備考が 100 → 98 DIP に削られた）。余裕を見て 150 以下に抑える
+        TryParseLength(summary.MinWidth!, out var min).Should().BeTrue("前提: 摘要の MinWidth が数値であること（\"{0}\"）", summary.MinWidth);
+        min.Should().BeInRange(1, SummaryMinWidthUpperBound,
+            "摘要の下限は、特大・最小幅で摘要に残る幅（約 198 DIP）より余裕を持って小さくすること（Issue #2424）");
     }
+
+    /// <summary>
+    /// 摘要の列の下限の上限（DIP）。特大・最小幅で摘要に残る幅 約 198 DIP に余裕を見た値
+    /// </summary>
+    private const double SummaryMinWidthUpperBound = 150;
 
     [Fact]
     public void 摘要は省略記号で切り_ToolTipは行の文言と全文を合わせたSummaryToolTipを出すこと()
