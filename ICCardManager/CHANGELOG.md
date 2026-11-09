@@ -7,7 +7,9 @@
   - 種別＋管理番号の部分ユニークインデックス `idx_card_type_number_active`（Migration_008）は `WHERE is_deleted = 0` で、NULL のカードを対象にしなかった。Issue #2381 以降アプリは NULL を有効なカードとして扱うため、外部ツール（DB Browser 等）で `is_deleted` を空にしたカードがあると、同じ種別・管理番号の有効なカードが 2 枚並び得た（アプリだけで書く運用では起きない）
   - 新しいマイグレーション Migration_012 で、旧インデックスを落として NULL を 0 へ正規化し、NULL だったカードを含む重複を Migration_008 と同じ方法（IDm の昇順で最初の 1 枚が番号を保ち、残りはその種別の最大番号＋1 へずらす）で解消してから、条件を `WHERE is_deleted = 0 OR is_deleted IS NULL` にして作り直す。移行の後に再び NULL にされても重複を拒否する。**既存データの書き換えあり**（NULL の正規化と、重複があった場合の管理番号のずらし）
   - 旧インデックスを残したまま正規化すると、NULL だったカードが旧インデックスの対象に入った時点で重複が制約違反になり移行が失敗する（起動不能）。初版の実装をテストが検出した
-  - テスト: `Migration_012_CardUniqueIndexCoversNullIsDeletedTests` 7 件を新設、`CardNumberUniqueConstraintTests` +3 件、`MigrationIdempotencyTests` は自動で版 12 を対象にして +1 件。`DbContextMigrationTests` の最終版数・適用件数の期待値を 11 → 12 へ（マイグレーションが 1 つ増えたため）。設計書: 02 §3（既知の制約を削除）・§3.2・§4・§5、07 UT-021・UT-MIG-IDEMPOTENCY・UT-MIG-012（新設）、`.claude/rules/migrations.md`
+  - 番号のずらしの採番（Migration_008 と共有）が `MAX(CAST(card_number AS INTEGER))` の結果を int へ変換しており、同じ種別に 2,147,483,647 を超える数字だけの管理番号（管理番号は最大 20 文字）があると `OverflowException` で移行が失敗し、起動のたびに同じ失敗を繰り返していた（008 からの欠陥）。64 ビット整数で採番するよう是正した
+  - **管理者向け**: 外部ツールで `is_deleted` を空にしたことのある DB では、この版へ更新した後に**交通系ICカード管理画面で管理番号を確かめてください**。同じ種別・管理番号のカードが重複していた場合、IDm の昇順で後のカードの管理番号がその種別の最大番号＋1 へ変わっており、カードに貼った番号と食い違います（変更はどこにも記録されません）
+  - テスト: `Migration_012_CardUniqueIndexCoversNullIsDeletedTests` 8 件を新設、`CardNumberUniqueConstraintTests` +3 件、`MigrationIdempotencyTests` は自動で版 12 を対象にして +1 件。`DbContextMigrationTests` の最終版数・適用件数の期待値を 11 → 12 へ（マイグレーションが 1 つ増えたため）。設計書: 02 §3（既知の制約を削除）・§3.2・§4・§5、07 UT-021・UT-MIG-IDEMPOTENCY・UT-MIG-012（新設）、`.claude/rules/migrations.md`
 - Issue #2394 **マニュアル用スクリーンショットに、撮影機に残っていた更新通知ファイルによる「新しいバージョン 99.0.0 が公開されています」が写り込んでいたのを是正した**
   - 撮影（と UI テスト）で退避していたのは DB（`iccard.db`）だけで、更新の案内の元になる DB と同じフォルダーの `latest_version.txt` はそのまま読まれていた。撮影の結果が撮影機の状態に左右されていた
   - UI テストのガード（`UiTestDatabaseGuard`）が DB と同じ規約でこのファイルも退避して取り除き、終わったら元へ戻す（元が無かったなら、テスト中にアプリが書いたファイルを消す）。中断した実行の回復・DB の退避を捨てる経路でも戻す。本体（アプリ）の挙動は変えていない

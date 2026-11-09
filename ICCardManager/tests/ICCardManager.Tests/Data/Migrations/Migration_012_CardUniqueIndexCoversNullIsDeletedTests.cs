@@ -69,14 +69,16 @@ namespace ICCardManager.Tests.Data.Migrations
         /// </summary>
         /// <remarks>
         /// 重複が残ったまま <c>CREATE UNIQUE INDEX</c> を実行すると制約違反で移行が失敗し、
-        /// アプリが起動できなくなる。ずらし方は Migration_008 と同じ（IDm の昇順で最初の 1 枚が番号を保ち、
-        /// 残りはその種別の最大番号＋1）。論理削除済みのカードは重複に数えず、書き換えもしない。
+        /// アプリが起動できなくなる。ずらし方は Migration_008 と同じで、<b>IDm の昇順で最初の 1 枚が番号を保ち、
+        /// 後のカードの番号がその種別の最大番号＋1 へずれる</b>。元が 0 か NULL かは番号を保つカードの選択に関わらない
+        /// （ここでは NULL だったカードの IDm が小さいので、0 のカードの方がずれる）。
+        /// 論理削除済みのカードは重複に数えず、書き換えもしない。
         /// </remarks>
         [Fact]
-        public void Up_RenumbersDuplicatesIncludingNullIsDeleted()
+        public void Up_RenumbersLaterIdmAmongDuplicatesIncludingNullIsDeleted()
         {
-            InsertCard("IDM001", "はやかけん", "3", 0);
-            InsertCard("IDM002", "はやかけん", "3", null);
+            InsertCard("IDM001", "はやかけん", "3", null);
+            InsertCard("IDM002", "はやかけん", "3", 0);
             InsertCard("IDM003", "はやかけん", "3", 1);
             InsertCard("IDM004", "はやかけん", "5", 0);
 
@@ -87,6 +89,29 @@ namespace ICCardManager.Tests.Data.Migrations
                 ("IDM002", "はやかけん", "6", (long?)0),
                 ("IDM003", "はやかけん", "3", (long?)1),
                 ("IDM004", "はやかけん", "5", (long?)0));
+        }
+
+        /// <summary>
+        /// 同じ種別に int の範囲を超える数字だけの管理番号があっても、番号のずらしが失敗しないこと。
+        /// </summary>
+        /// <remarks>
+        /// 管理番号は最大 20 文字で、数字だけなら 2,147,483,647 を超える番号を入力できる。
+        /// 採番の <c>MAX(CAST(card_number AS INTEGER))</c> は 64 ビット整数を返すのに、Migration_008 は
+        /// int へ変換していたため <c>OverflowException</c> で移行が失敗し、起動のたびに同じ失敗を繰り返した。
+        /// </remarks>
+        [Fact]
+        public void Up_RenumbersDuplicatesWhenSameTypeHasNumberBeyondInt32()
+        {
+            InsertCard("IDM001", "はやかけん", "3", 0);
+            InsertCard("IDM002", "はやかけん", "3", null);
+            InsertCard("IDM003", "はやかけん", "12345678901", 0);
+
+            RunOnce(new Migration_012_CardUniqueIndexCoversNullIsDeleted());
+
+            SelectCards().Should().Equal(
+                ("IDM001", "はやかけん", "3", (long?)0),
+                ("IDM002", "はやかけん", "12345678902", (long?)0),
+                ("IDM003", "はやかけん", "12345678901", (long?)0));
         }
 
         /// <summary>

@@ -110,7 +110,9 @@ LIMIT -1 OFFSET 1";
 FROM ic_card WHERE card_type = @cardType";
                     maxCmd.Parameters.AddWithValue("@cardType", cardType);
                     var maxResult = maxCmd.ExecuteScalar();
-                    var nextNumber = (maxResult == System.DBNull.Value ? 0 : System.Convert.ToInt32(maxResult, CultureInfo.InvariantCulture)) + 1;
+                    // CAST(... AS INTEGER) は 64 ビット整数を返す。管理番号は最大 20 文字で 2,147,483,647 を超える
+                    // 数字だけの番号もあり得るため、int へ変換すると OverflowException で移行が失敗する（Issue #2419）
+                    var nextNumber = (maxResult == System.DBNull.Value ? 0L : System.Convert.ToInt64(maxResult, CultureInfo.InvariantCulture)) + 1;
 
                     using var updateCmd = connection.CreateCommand();
                     updateCmd.Transaction = transaction;
