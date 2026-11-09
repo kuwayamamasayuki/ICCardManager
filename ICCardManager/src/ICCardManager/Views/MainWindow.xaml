@@ -709,11 +709,13 @@
                                      Auto にし、100 を下限に残す（和暦のままなら幅は変わらない）。
                                      Issue #2424: 「固定幅の合計」には、内容に合わせて広がる列も数える。摘要は SizeToCells で
                                      文字サイズとともに摘要の幅まで広がり、特大・最小幅では合計が一覧の幅を超えて「操作」列が横スクロールの外へ出ていた。
-                                     摘要を残りの幅を取る * にし（下限 200）、日付の Auto は固定長の和暦だけが広げる（HistoryGridColumnWidthConventionTests） -->
+                                     摘要を残りの幅を取る * にし（下限 150）、日付の Auto は固定長の和暦だけが広げる（HistoryGridColumnWidthConventionTests） -->
                                 <DataGridTextColumn Header="日付" Binding="{Binding DateDisplay}" Width="Auto" MinWidth="100"/>
                                 <!-- Issue #2424: 残りの幅を取る。収まらない摘要は利用者の列（#2076）と同じく、
-                                     TextTrimming（切れていることが見て分かる）と ToolTip（全文を読める）で担保する -->
-                                <DataGridTextColumn Header="摘要" Binding="{Binding Summary}" Width="*" MinWidth="200">
+                                     TextTrimming（切れていることが見て分かる）と ToolTip（全文を読める）で担保する。
+                                     下限は 150: 特大・最小幅（1400）で摘要に残る幅は約 198 で、下限を 200 にすると足りない分を
+                                     DataGrid が固定幅の列（備考など）を削って捻出した（2026-11-09 の UI テストで備考 150 → 147。表示スケール 150%） -->
+                                <DataGridTextColumn Header="摘要" Binding="{Binding Summary}" Width="*" MinWidth="150">
                                     <DataGridTextColumn.ElementStyle>
                                         <Style TargetType="TextBlock">
                                             <Setter Property="TextTrimming" Value="CharacterEllipsis"/>
