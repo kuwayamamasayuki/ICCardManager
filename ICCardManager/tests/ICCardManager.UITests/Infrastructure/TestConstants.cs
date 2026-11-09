@@ -1,3 +1,4 @@
+#nullable enable
 using System;
 
 namespace ICCardManager.UITests.Infrastructure
@@ -332,6 +333,16 @@ namespace ICCardManager.UITests.Infrastructure
         /// <summary>システム管理ダイアログのリストア用バックアップ一覧。</summary>
         [UiaName]
         public const string BackupFileList = "バックアップファイル一覧";
+
+        /// <summary>
+        /// システム管理ダイアログの「保存先: …」（バックアップの保存先）の表示の先頭（Issue #2435）。
+        /// </summary>
+        /// <remarks>
+        /// XAML の Name は <c>SystemManageViewModel.BackupFolderText</c> へのバインドで、リテラルを持たない（TextBlock の本文で探す）。
+        /// 本体の文言との一致は単体テスト <c>ScreenshotDataRootTests</c> がソースを読んで固定する。
+        /// </remarks>
+        [NotUiaName]
+        public const string BackupFolderTextPrefix = "保存先: ";
 
         /// <summary>帳票作成ダイアログの「すべてのカードを選択」ボタン（#1691）。</summary>
         [UiaName]

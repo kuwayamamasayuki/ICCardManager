@@ -122,9 +122,10 @@
     },
     {
       "name": "system.png",
-      "pass": "Release",
-      "filter": "DisplayName~system.png",
+      "pass": "Debug",
+      "filter": "FullyQualifiedName~BackupLocationScreenshotTests.system_",
       "sources": [
+        "ICCardManager/src/ICCardManager/Common/AppDataPaths.cs",
         "ICCardManager/src/ICCardManager/Views/Dialogs/SystemManageDialog.xaml",
         "ICCardManager/src/ICCardManager/Views/Dialogs/SystemManageDialog.xaml.cs",
         "ICCardManager/src/ICCardManager/ViewModels/SystemManageViewModel.cs"
@@ -340,9 +341,10 @@
     },
     {
       "name": "connection_diagnostics.png",
-      "pass": "Release",
-      "filter": "DisplayName~connection_diagnostics.png",
+      "pass": "Debug",
+      "filter": "FullyQualifiedName~BackupLocationScreenshotTests.connection_diagnostics_",
       "sources": [
+        "ICCardManager/src/ICCardManager/Common/AppDataPaths.cs",
         "ICCardManager/src/ICCardManager/Views/Dialogs/ConnectionDiagnosticsDialog.xaml",
         "ICCardManager/src/ICCardManager/Views/Dialogs/ConnectionDiagnosticsDialog.xaml.cs",
         "ICCardManager/src/ICCardManager/ViewModels/ConnectionDiagnosticsViewModel.cs",
@@ -362,9 +364,10 @@
     },
     {
       "name": "restore_list.png",
-      "pass": "Release",
-      "filter": "FullyQualifiedName~ManualScreenshotTests.restore_list_",
+      "pass": "Debug",
+      "filter": "FullyQualifiedName~BackupLocationScreenshotTests.restore_list_",
       "sources": [
+        "ICCardManager/src/ICCardManager/Common/AppDataPaths.cs",
         "ICCardManager/src/ICCardManager/Views/Dialogs/SystemManageDialog.xaml",
         "ICCardManager/src/ICCardManager/Views/Dialogs/SystemManageDialog.xaml.cs",
         "ICCardManager/src/ICCardManager/ViewModels/SystemManageViewModel.cs"

@@ -68,7 +68,8 @@ public partial class SystemManageViewModel : ViewModelBase
     /// <summary>
     /// 現在使用中のデータベースファイルのパス（Issue #1686、常設表示用）
     /// </summary>
-    public string DatabasePathDisplay => _databaseInfo.DatabasePath;
+    /// <remarks>表示は <see cref="AppDataPaths.ToDisplayPath"/> を通す（撮影用に置き場所を差し替えた DEBUG ビルドの起動だけ読み替える。Issue #2435）</remarks>
+    public string DatabasePathDisplay => AppDataPaths.ToDisplayPath(_databaseInfo.DatabasePath);
 
     /// <summary>
     /// データベースの動作モード表示（Issue #1686）。
@@ -149,7 +150,8 @@ public partial class SystemManageViewModel : ViewModelBase
     /// <summary>
     /// バックアップ保存先フォルダの表示テキスト
     /// </summary>
-    public string BackupFolderText => $"保存先: {BackupHealth?.BackupFolderPath ?? "-"}";
+    /// <remarks>表示は <see cref="AppDataPaths.ToDisplayPath"/> を通す（Issue #2435。<see cref="DatabasePathDisplay"/> と同じ）</remarks>
+    public string BackupFolderText => $"保存先: {AppDataPaths.ToDisplayPath(BackupHealth?.BackupFolderPath) ?? "-"}";
 
     /// <summary>
     /// 設定したバックアップ先が使えず既定パスへ退避しているか（Issue #1924）
@@ -173,7 +175,7 @@ public partial class SystemManageViewModel : ViewModelBase
     public string BackupFolderFallbackText =>
         !IsBackupFolderFallback
             ? string.Empty
-            : $"⚠ 設定した保存先「{BackupHealth!.ConfiguredFolderPath}」を使用できないため、"
+            : $"⚠ 設定した保存先「{AppDataPaths.ToDisplayPath(BackupHealth!.ConfiguredFolderPath)}」を使用できないため、"
               + $"上記の既定の場所に保存しています。{BackupHealth!.BackupFolderFallbackReason}"
               + "設定画面（F5）でバックアップ先を確認し、指定し直してください。";
 

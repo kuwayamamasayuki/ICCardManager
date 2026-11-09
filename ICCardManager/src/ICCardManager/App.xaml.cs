@@ -146,6 +146,38 @@ namespace ICCardManager
             string.Equals(environmentValue, "1", StringComparison.Ordinal);
 
         /// <summary>
+        /// 撮影モードのアプリが使うアプリケーションデータの置き場所を指定する環境変数（Issue #2435。DEBUG ビルド限定）。
+        /// </summary>
+        /// <remarks>
+        /// 撮影モード（<see cref="ScreenshotModeEnvironmentVariable"/> が <c>1</c>）のときだけ読む。指定されると
+        /// <c>AppDataPaths.RedirectRootDirectoryForScreenshot</c> で DB・バックアップ・ログ・設定ファイルの置き場所を
+        /// そのフォルダーへ移し、画面に出すパスは本番の置き場所（<c>C:\ProgramData\ICCardManager</c>）の配下として表示する。
+        /// 撮影で起動したアプリが開発機の実 DB のバックアップを整理で押し出さず（Issue #2423）、かつ
+        /// システム管理画面の「保存先」に撮影機にしか無いフォルダーを写さないため。Release ビルドでは読まれない。
+        /// </remarks>
+        public const string ScreenshotDataRootEnvironmentVariable = "ICCARDMANAGER_SCREENSHOT_DATA_ROOT";
+
+        /// <summary>
+        /// 環境変数の値から撮影用の置き場所を決める（純粋関数）。撮影モードで、かつ絶対パス（ドライブ付き・UNC）のときだけ
+        /// その値を返し、それ以外は null（置き場所を差し替えない）。
+        /// </summary>
+        /// <param name="screenshotModeValue"><see cref="ScreenshotModeEnvironmentVariable"/> の値。</param>
+        /// <param name="dataRootValue"><see cref="ScreenshotDataRootEnvironmentVariable"/> の値。</param>
+        /// <remarks>
+        /// 相対パスを受け付けると、作業ディレクトリ次第で置き場所が変わる。受け付けなかったときのアプリは本番の置き場所を使うが、
+        /// UI テストはマイグレーションのための起動の後に撮影用の置き場所に DB ができたかを確かめて止まる（<c>AppFixture</c>）。
+        /// </remarks>
+        internal static string? ResolveScreenshotDataRoot(string? screenshotModeValue, string? dataRootValue)
+        {
+            if (!ResolveScreenshotMode(screenshotModeValue ?? string.Empty))
+            {
+                return null;
+            }
+
+            return AppDataPaths.IsFullyQualified(dataRootValue) ? dataRootValue : null;
+        }
+
+        /// <summary>
         /// アプリケーションのバージョン番号（XAMLからバインド可能: Issue #475）
         /// </summary>
         public static string AppVersion => AppVersionInfo.CurrentString;
@@ -156,6 +188,17 @@ namespace ICCardManager
         // として許容されるパターンで、下記 try/catch が async 例外も捕捉する。
         protected override async void OnStartup(StartupEventArgs e)
         {
+#if DEBUG
+            // Issue #2435: 撮影用の置き場所は、アプリケーションデータのパスを解決するどの処理（ログの掃除・DB・設定ファイル）よりも先に差し替える
+            var screenshotDataRoot = ResolveScreenshotDataRoot(
+                Environment.GetEnvironmentVariable(ScreenshotModeEnvironmentVariable),
+                Environment.GetEnvironmentVariable(ScreenshotDataRootEnvironmentVariable));
+            if (screenshotDataRoot != null)
+            {
+                AppDataPaths.RedirectRootDirectoryForScreenshot(screenshotDataRoot);
+            }
+#endif
+
             base.OnStartup(e);
 
             // グローバル例外ハンドラーを登録
