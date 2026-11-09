@@ -1015,6 +1015,44 @@ namespace ICCardManager.UITests.Tests
         }
 
         [Fact]
+        public void FinishOwnedGuard_DBの復元に失敗しても_既定のバックアップ先の確認を走らせ両方の失敗を伝えること()
+        {
+            // 次回の Acquire はその時点の一覧を記録し直すので、復元の失敗で確認を飛ばすと、この回の書き込みは二度と検出できない
+            File.WriteAllText(DbPath, OriginalContent);
+            var guard = UiTestDatabaseGuard.Acquire(_directory, maxAttempts: 1);
+            File.WriteAllText(DbPath, SeededContent);
+            Directory.CreateDirectory(DefaultBackupDirectory);
+            File.WriteAllText(Path.Combine(DefaultBackupDirectory, "backup_20261109_060348.db"), SeededContent);
+
+            using (OpenLikeSqlite(DbPath))
+            {
+                Action act = () => AppFixture.FinishOwnedGuard(guard);
+
+                var thrown = act.Should().Throw<AggregateException>().Which;
+                thrown.InnerExceptions.Should().HaveCount(2);
+                thrown.InnerExceptions[0].Should().BeOfType<IOException>("先に DB の復元の失敗");
+                thrown.InnerExceptions[1].Should().BeOfType<InvalidOperationException>();
+                thrown.Message.Should().Contain("backup_20261109_060348.db", "net48 の AggregateException.Message は内側の文言を含まないので自分で並べる");
+            }
+        }
+
+        [Fact]
+        public void FinishOwnedGuard_DBの復元だけが失敗したとき_その例外をそのまま伝えること()
+        {
+            // 対: 既定のバックアップ先が変わっていなければ、確認は失敗を足さない
+            File.WriteAllText(DbPath, OriginalContent);
+            var guard = UiTestDatabaseGuard.Acquire(_directory, maxAttempts: 1);
+            File.WriteAllText(DbPath, SeededContent);
+
+            using (OpenLikeSqlite(DbPath))
+            {
+                Action act = () => AppFixture.FinishOwnedGuard(guard);
+
+                act.Should().Throw<IOException>();
+            }
+        }
+
+        [Fact]
         public void FinishOwnedGuard_既定のバックアップ先が変わっていないとき_DBを復元するだけであること()
         {
             File.WriteAllText(DbPath, OriginalContent);

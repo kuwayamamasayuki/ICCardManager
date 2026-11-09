@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Data.SQLite;
 using System.Diagnostics;
 using System.IO;
+using System.Runtime.ExceptionServices;
 using FlaUI.Core;
 using FlaUI.Core.AutomationElements;
 using FlaUI.UIA3;
@@ -466,10 +467,46 @@ namespace ICCardManager.UITests.Infrastructure
             }
 
             // DB を復元する（失敗したら退避ファイルは残り、次回の起動が回復する）
-            ownedDatabaseGuard.Restore();
+            Exception? restoreFailure = null;
+            try
+            {
+                ownedDatabaseGuard.Restore();
+            }
+            catch (Exception ex)
+            {
+                restoreFailure = ex;
+            }
 
-            // Issue #2423: テストのアプリが既定のバックアップ先へ書いていない（本体が UI テスト専用の保存先を拒んで黙って戻っていない）こと
-            ownedDatabaseGuard.ThrowIfDefaultBackupFolderChanged();
+            // Issue #2423: テストのアプリが既定のバックアップ先へ書いていない（本体が UI テスト専用の保存先を拒んで黙って戻っていない）こと。
+            // 復元の成否と独立に確かめる。次回の Acquire はその時点の一覧を記録し直すので、ここで見なければこの回の書き込みは二度と検出できない
+            Exception? checkFailure = null;
+            try
+            {
+                ownedDatabaseGuard.ThrowIfDefaultBackupFolderChanged();
+            }
+            catch (InvalidOperationException ex)
+            {
+                checkFailure = ex;
+            }
+
+            if (restoreFailure != null && checkFailure != null)
+            {
+                // net48 の AggregateException.Message は内側の例外の文言を含まないので、両方の文言を自分で並べる
+                throw new AggregateException(
+                    $"UI テストの後始末で 2 つの失敗がありました。DB の復元: {restoreFailure.Message} / 既定のバックアップ先: {checkFailure.Message}",
+                    restoreFailure,
+                    checkFailure);
+            }
+
+            if (restoreFailure != null)
+            {
+                ExceptionDispatchInfo.Capture(restoreFailure).Throw();
+            }
+
+            if (checkFailure != null)
+            {
+                ExceptionDispatchInfo.Capture(checkFailure).Throw();
+            }
         }
 
         /// <summary>

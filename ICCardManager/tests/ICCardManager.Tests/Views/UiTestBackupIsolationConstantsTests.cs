@@ -96,6 +96,26 @@ public class UiTestBackupIsolationConstantsTests
             .Should().BeTrue("後始末の呼び出しは try で包まず Dispose の直下に置く（例外をテストへ伝える）");
         var afterCall = body.Substring(body.IndexOf("FinishOwnedGuard(_ownedDatabaseGuard);", StringComparison.Ordinal));
         Regex.IsMatch(afterCall, @"\bcatch\b").Should().BeFalse("後始末の例外を握りつぶす catch を置かない");
+        Regex.IsMatch(body, @"\n {12}return\b").Should().BeFalse("Dispose の直下で無条件に戻ると、後始末まで届かない");
+    }
+
+    [Fact]
+    public void UIテストの公開の起動はすべて_UIテスト専用のバックアップ先を手順へ渡すこと()
+    {
+        // 手順（LaunchCore / LaunchWithSeedCore）が隔離することは UiTestDatabaseGuardTests が GUI 不要で検証する。
+        // 公開の起動がその手順に何を渡しているかは、アプリを起動しないと通らないのでソースで固定する
+        var source = ReadUiTestSource("AppFixture.cs");
+
+        Regex.IsMatch(source, @"public\s+static\s+AppFixture\s+Launch\(\)\s*=>\s*LaunchCore\(\s*DbDirectory,\s*UiTestDatabaseGuard\.UiTestBackupDirectory,")
+            .Should().BeTrue("Launch() は UI テスト専用のバックアップ先を LaunchCore へ渡す");
+        Regex.IsMatch(source, @"return\s+LaunchWithSeedCore\(\s*DbDirectory,\s*UiTestDatabaseGuard\.UiTestBackupDirectory,")
+            .Should().BeTrue("LaunchWithSeed は UI テスト専用のバックアップ先を LaunchWithSeedCore へ渡す");
+
+        // 手順を呼ぶ箇所が他に増えたら、上の 2 つで固定した経路の外から起動できる
+        Regex.Matches(source, @"\bLaunchCore\s*(<[^>]*>)?\s*\(").Count.Should().Be(2, "定義と Launch() の呼び出しだけ");
+        Regex.Matches(source, @"\bLaunchWithSeedCore\s*(<[^>]*>)?\s*\(").Count.Should().Be(2, "定義と LaunchWithSeed の呼び出しだけ");
+        Regex.Matches(source, @"\bStartApplication\s*\(").Count.Should().Be(4,
+            "定義と、手順へ渡すラムダの中の 3 か所（LaunchWithSeed のマイグレーション用・本起動、Launch の起動）だけ。手順を通さずにアプリを起動する経路を作らない");
     }
 
     private static string ReadUiTestSource(string fileName)
