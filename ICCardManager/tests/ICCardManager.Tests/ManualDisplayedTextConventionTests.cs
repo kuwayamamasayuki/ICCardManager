@@ -54,7 +54,8 @@ namespace ICCardManager.Tests;
 /// <b>すべての断片が照合先の同じ行に、この順で並ぶ</b>ことを求める（空白では区切らない。「返却 完了」のような
 /// 誤りを、断片がそれぞれどこかにあるだけで通さないため）。可変部分は、マニュアルが値を伏せる書き方
 /// （○・△・…・...・＜…＞・&lt;…&gt;・引用の中の『…』）と例示の値（数字・ドライブ文字 Z:\）。文ごとに区切るのは、文言が文ごとに
-/// 組み立てられる（<c>"…しません。\n\n" + "…ですか？"</c>）ため。マニュアルが表示の改行を「／」で表す書き方
+/// 組み立てられる（<c>"…しません。\n\n" + "…ですか？"</c>）ため。
+/// 数字はすべて例示の値として伏せるので、固定の文言の中の数値の誤り（「15秒ごと」を「30秒ごと」と書く等）は検出しない。マニュアルが表示の改行を「／」で表す書き方
 /// （「時間切れ／職員証のタッチからやり直してください」= トーストの見出しと本文）も、別の文として照合する。
 /// </para>
 /// <para>
@@ -64,6 +65,7 @@ namespace ICCardManager.Tests;
 /// （IT 担当者ガイドはインストーラーのログを「ログに「…」と出ます」と引用するため、ログを残す）。
 /// コメントを除くのは、変更前の文言を由来として書いたコメントが実在の根拠になってしまうため（「返却完了」は
 /// コメントにだけ残っていた）。ログを除くのは、画面に出ないログの文言が実在の根拠になってしまうため。
+/// 操作ログ（<c>OperationLogger.Log*Async</c>）は除かない — 操作ログは操作ログ画面と Excel 出力で利用者に見えるため。
 /// </para>
 /// <para>
 /// 照合できない引用（差し込む値で文言を組み立てる等）は <see cref="AllowedQuotes"/> に理由付きで載せる。
@@ -105,7 +107,7 @@ public class ManualDisplayedTextConventionTests
 
     /// <summary>ログ出力の呼び出しの始まり（開き括弧まで）。</summary>
     private static readonly Regex LogCallStart = new(
-        @"\b(?:\w*[Ll]ogger\??\.Log\w*|(?:\w+\.)*LogException|Debug\.WriteLine|Trace\.Write\w*)\s*\(",
+        @"\b(?:(?![Oo]peration|_[Oo]peration)\w*[Ll]ogger\??\.Log\w*|(?:\w+\.)*LogException|Debug\.WriteLine|Trace\.Write\w*)\s*\(",
         RegexOptions.Compiled);
 
     /// <summary>インストーラーのスクリプトのコメント行（Inno Setup の ; と //、PowerShell の #）。</summary>
@@ -346,7 +348,9 @@ public class ManualDisplayedTextConventionTests
                 "_logger?.LogWarning(ex, \"ログだけの文言 {A}\", Describe(\"(括弧\"), 'x');\r\n" +
                 "integrityLogger.LogError(@\"逐語的な \"\"引用\"\" のログ\");\r\n" +
                 "Debug.WriteLine(\"デバッグだけの文言\");\r\n" +
-                "Show(\"ログの後の文言\");",
+                "Show(\"ログの後の文言\");\r\n" +
+                "await _operationLogger.LogCardUpdateAsync(\"操作ログに残る文言\", before, after);\r\n" +
+                "await OperationLogger.LogExportAsync(\"操作ログの出力の文言\");",
             },
             xamlSources: new[] { "<TextBlock Text=\"1行目&#10;2行目 &amp; 3行目\"/>" },
             scriptSources: new[] { "; 返却完了のログ\r\n  Log('受け渡しファイルを読みません');\r\n# 貸出完了" });
@@ -355,6 +359,8 @@ public class ManualDisplayedTextConventionTests
         corpus.Text.Should().Contain("1行目\n2行目 & 3行目");
         corpus.Text.Should().Contain("受け渡しファイルを読みません");
         corpus.Text.Should().Contain("ログの後の文言", "ログの呼び出しの括弧の対応を取り違えて後ろまで消さないこと");
+        corpus.Text.Should().Contain("操作ログに残る文言", "操作ログは利用者に見えるので除かない");
+        corpus.Text.Should().Contain("操作ログの出力の文言", "操作ログは利用者に見えるので除かない");
         corpus.Text.Should().NotContain("返却完了");
         corpus.Text.Should().NotContain("貸出完了");
         corpus.Text.Should().NotContain("ログだけの文言");
