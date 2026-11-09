@@ -1,4 +1,3 @@
-#nullable enable
 using System;
 using System.Collections.Generic;
 using System.Data.SQLite;
@@ -147,11 +146,28 @@ namespace ICCardManager.UITests.Infrastructure
         /// （画像に写らない欄でも、画面に出せば次の撮り直しで写り得る）。撮った後に呼ぶ — 保存先は非同期の読み込みの後に表示される。
         /// </para>
         /// </remarks>
-        internal static void RequireNoUiTestPathShown(AutomationElement window, params string[] capturedPaths)
+        internal static void RequireNoUiTestPathShown(AutomationElement window, params string[] capturedPaths) =>
+            RequireNoUiTestPathShown(window, onScreenOnly: false, capturedPaths);
+
+        /// <summary>
+        /// <see cref="RequireNoUiTestPathShown(AutomationElement, string[])"/> の、見る範囲を選べる形。
+        /// </summary>
+        /// <param name="window">撮ったウィンドウ（ダイアログ）。</param>
+        /// <param name="onScreenOnly">
+        /// true なら画面内の要素（UIA の IsOffscreen が false）だけを見る。撮影用の置き場所で動かさない撮影（Release パス）用。
+        /// そのアプリは UI テスト専用のバックアップ先を使うので、設定画面のバックアップ先の入力欄（スクロールの外）には UI テスト専用のパスが入っている。
+        /// 写る範囲に入ったら撮影を失敗にする（Issue #2435 のレビューで検出）。
+        /// </param>
+        /// <param name="capturedPaths">このウィンドウを写した画像。</param>
+        internal static void RequireNoUiTestPathShown(AutomationElement window, bool onScreenOnly, params string[] capturedPaths)
         {
+            // 画面内かどうかは、文字が一致した要素だけについて調べる（祖先をたどるので全要素に掛けると遅い）
             var texts = new[] { window }.Concat(window.FindAllDescendants())
-                .SelectMany(TextsOf)
-                .Where(t => t.IndexOf(UiTestDatabaseGuard.UiTestBackupRootFolderName, StringComparison.OrdinalIgnoreCase) >= 0)
+                .SelectMany(e => TextsOf(e)
+                    .Where(t => t.IndexOf(UiTestDatabaseGuard.UiTestBackupRootFolderName, StringComparison.OrdinalIgnoreCase) >= 0)
+                    .Select(t => (Element: e, Text: t)))
+                .Where(x => !onScreenOnly || IsVisibleInWindow(x.Element, window))
+                .Select(x => x.Text)
                 .Distinct()
                 .ToArray();
 
@@ -210,6 +226,40 @@ namespace ICCardManager.UITests.Infrastructure
             Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),
             "ICCardManager",
             UiTestDatabaseGuard.DefaultBackupFolderName);
+
+        /// <summary>
+        /// 要素がウィンドウの中で見えている（祖先のすべての矩形と重なる）か。
+        /// </summary>
+        /// <remarks>
+        /// WPF の UIA の IsOffscreen は、ScrollViewer のスクロールの外にある要素にも false を返す（設定画面のバックアップ先の入力欄で実測）。
+        /// スクロールの外の要素の矩形は、ScrollViewer（とその内側の表示領域）の矩形の外にあるので、祖先の矩形との重なりで判定する。
+        /// 読み取りに失敗した要素は見えているものとして扱う（見逃すより撮影を止める側に倒す）。
+        /// </remarks>
+        private static bool IsVisibleInWindow(AutomationElement element, AutomationElement window)
+        {
+            try
+            {
+                var visible = element.BoundingRectangle;
+                var walker = element.Automation.TreeWalkerFactory.GetControlViewWalker();
+                var current = walker.GetParent(element);
+                while (visible.Width > 0 && visible.Height > 0 && current != null)
+                {
+                    visible = System.Drawing.Rectangle.Intersect(visible, current.BoundingRectangle);
+                    if (current.Equals(window))
+                    {
+                        break;
+                    }
+
+                    current = walker.GetParent(current);
+                }
+
+                return visible.Width > 0 && visible.Height > 0;
+            }
+            catch (Exception ex) when (ex is System.Runtime.InteropServices.COMException || ex is FlaUI.Core.Exceptions.PropertyNotSupportedException)
+            {
+                return true;
+            }
+        }
 
         private static IEnumerable<string> TextsOf(AutomationElement element)
         {

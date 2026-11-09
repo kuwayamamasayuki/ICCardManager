@@ -1,4 +1,3 @@
-#nullable enable
 using System;
 using System.Collections.Generic;
 using System.Data.SQLite;
@@ -129,9 +128,20 @@ namespace ICCardManager.UITests.Tests
             Directory.GetFiles(DbDirectory).Should().BeEquivalentTo(new[] { RealDbPath }, "退避ファイル・印を残さない");
         }
 
-        [Fact]
-        public void 撮影用の置き場所が開発機の置き場所と重なるとき_何も触らずに止まること()
+        /// <param name="overlap">撮影用の置き場所の決め方（開発機の置き場所の配下・同じフォルダー・開発機の置き場所を含む親）。</param>
+        [Theory]
+        [InlineData("child")]
+        [InlineData("same")]
+        [InlineData("parent")]
+        public void 撮影用の置き場所が開発機の置き場所と重なるとき_何も触らずに止まること(string overlap)
         {
+            // 撮影用の置き場所は起動のたびに空にするので、どの重なり方でも開発機の DB を消し得る
+            var dataRoot = overlap switch
+            {
+                "child" => Path.Combine(DbDirectory, "screenshot-data"),
+                "same" => DbDirectory + Path.DirectorySeparatorChar,
+                _ => _root,
+            };
             CreateDatabase(RealDbPath, RealStaffName);
             var realBytes = File.ReadAllBytes(RealDbPath);
             var migrated = false;
@@ -139,7 +149,7 @@ namespace ICCardManager.UITests.Tests
             Action act = () => AppFixture.LaunchWithSeedInDataRootCore<FakeFixture>(
                 DbDirectory,
                 IsolatedBackupDirectory,
-                dataRoot: Path.Combine(DbDirectory, "screenshot-data"),
+                dataRoot: dataRoot,
                 launchForMigration: () =>
                 {
                     migrated = true;
@@ -152,6 +162,19 @@ namespace ICCardManager.UITests.Tests
             migrated.Should().BeFalse();
             File.ReadAllBytes(RealDbPath).Should().Equal(realBytes);
             Directory.GetFiles(DbDirectory).Should().BeEquivalentTo(new[] { RealDbPath }, "空にする対象に開発機の DB を含めない・退避もしない");
+        }
+
+        [Fact]
+        public void 撮影用の置き場所で起動している間_読み返すDBは撮影用の置き場所のDBであること()
+        {
+            // 開発機の置き場所の DB はガードの仮の DB で、アプリは開いていない。そちらを読むと、残高チェーンの確認などが投入データを見ない
+            AppFixture.ResolveDatabasePath(DbDirectory, DataRoot).Should().Be(DataRootDbPath);
+        }
+
+        [Fact]
+        public void 撮影用の置き場所で起動していなければ_読み返すDBは開発機の置き場所のDBであること()
+        {
+            AppFixture.ResolveDatabasePath(DbDirectory, activeScreenshotDataRoot: null).Should().Be(RealDbPath);
         }
 
         [Theory]

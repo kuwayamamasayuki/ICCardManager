@@ -1,4 +1,3 @@
-#nullable enable
 using System;
 using System.IO;
 using FlaUI.Core.Tools;
@@ -87,16 +86,23 @@ namespace ICCardManager.UITests.Tests
 
             var system = page.ClickToolbarButtonAndWaitForDialog(
                 TestConstants.OpenSystemManageButton, TestConstants.SystemManageDialogName);
-            var shown = WaitForBackupFolderText(system);
-            var item = ManualScreenshotTests.WaitForRow(system, TestConstants.BackupFileList,
-                "バックアップ一覧に 1 件以上あること（起動時の自動バックアップが作られていること）");
-            item.Patterns.SelectionItem.PatternOrDefault?.Select();
+            try
+            {
+                var shown = WaitForBackupFolderText(system);
+                var item = ManualScreenshotTests.WaitForRow(system, TestConstants.BackupFileList,
+                    "バックアップ一覧に 1 件以上あること（起動時の自動バックアップが作られていること）");
+                item.Patterns.SelectionItem.PatternOrDefault?.Select();
 
-            var path = ScreenshotHelper.Capture(system.Window, "restore_list.png");
-            File.Exists(path).Should().BeTrue();
+                var path = ScreenshotHelper.Capture(system.Window, "restore_list.png");
+                File.Exists(path).Should().BeTrue();
 
-            ScreenshotAssertions.RequireBackupFolderShownAsDefault(shown, path);
-            ScreenshotAssertions.RequireNoUiTestPathShown(system.Window, path);
+                ScreenshotAssertions.RequireBackupFolderShownAsDefault(shown, path);
+                ScreenshotAssertions.RequireNoUiTestPathShown(system.Window, path);
+            }
+            finally
+            {
+                system.Close();
+            }
         }
 
         /// <summary>

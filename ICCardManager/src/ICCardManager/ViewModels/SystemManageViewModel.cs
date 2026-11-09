@@ -61,6 +61,16 @@ public partial class SystemManageViewModel : ViewModelBase
     private string _lastBackupFile = string.Empty;
 
     /// <summary>
+    /// 最後に作成したバックアップの表示用のパス（「作成先: …」）。<see cref="AppDataPaths.ToDisplayPath"/> を通す（Issue #2435）。
+    /// </summary>
+    /// <remarks>
+    /// <see cref="LastBackupFile"/> は作成したファイルの実際のパスのまま持つ（表示の有無の判定とテストが使う）。
+    /// </remarks>
+    public string LastBackupFileDisplay => AppDataPaths.ToDisplayPath(LastBackupFile);
+
+    partial void OnLastBackupFileChanged(string value) => OnPropertyChanged(nameof(LastBackupFileDisplay));
+
+    /// <summary>
     /// 選択されたバックアップがあるか
     /// </summary>
     public bool HasSelectedBackup => SelectedBackup != null;

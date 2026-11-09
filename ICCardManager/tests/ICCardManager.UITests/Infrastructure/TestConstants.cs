@@ -1,4 +1,3 @@
-#nullable enable
 using System;
 
 namespace ICCardManager.UITests.Infrastructure

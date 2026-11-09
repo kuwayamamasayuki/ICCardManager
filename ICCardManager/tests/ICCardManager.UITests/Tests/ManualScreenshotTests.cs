@@ -1,4 +1,3 @@
-#nullable enable
 using System;
 using System.IO;
 using System.Linq;
@@ -387,6 +386,10 @@ namespace ICCardManager.UITests.Tests
             {
                 var path = ScreenshotHelper.Capture(dialog.Window, fileName);
                 File.Exists(path).Should().BeTrue();
+
+                // Issue #2435: このアプリは UI テスト専用のバックアップ先を使う。設定画面のバックアップ先の入力欄（スクロールの外）が
+                // 写る範囲に入ると、マニュアルに UI テスト専用のパスが載るので、画面内の要素に出ていないことを撮った後に確かめる
+                ScreenshotAssertions.RequireNoUiTestPathShown(dialog.Window, onScreenOnly: true, path);
             }
             finally
             {

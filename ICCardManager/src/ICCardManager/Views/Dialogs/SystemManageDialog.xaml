@@ -217,12 +217,12 @@
                         </StackPanel>
 
                         <!-- 最後に作成したバックアップ -->
-                        <TextBlock Text="{Binding LastBackupFile, StringFormat=作成先: {0}}"
+                        <TextBlock Text="{Binding LastBackupFileDisplay, StringFormat=作成先: {0}}"
                                    Foreground="{DynamicResource SecondaryTextBrush}"
                                    FontSize="{DynamicResource SmallFontSize}"
                                    Margin="0,10,0,0"
                                    TextTrimming="CharacterEllipsis"
-                                   ToolTip="{Binding LastBackupFile}"
+                                   ToolTip="{Binding LastBackupFileDisplay}"
                                    Visibility="{Binding LastBackupFile, Converter={StaticResource StringToVisibilityConverter}}"/>
                     </StackPanel>
                 </GroupBox>

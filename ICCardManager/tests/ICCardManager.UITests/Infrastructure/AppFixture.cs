@@ -1,4 +1,3 @@
-#nullable enable
 using System;
 using System.Collections.Generic;
 using System.Data.SQLite;
@@ -184,13 +183,19 @@ namespace ICCardManager.UITests.Infrastructure
                     launchOwningGuard);
             }
 
-            return LaunchWithSeedInDataRootCore(
+            var fixture = LaunchWithSeedInDataRootCore(
                 DbDirectory,
                 UiTestDatabaseGuard.UiTestBackupDirectory,
                 dataRoot,
                 launchForMigration,
                 seedDatabase,
                 launchOwningGuard);
+
+            // 起動している間は、DatabasePath（DB を読み返す確認・DatabaseProbe・DatabaseExclusiveLock が使う）を
+            // アプリが実際に開いている撮影用の置き場所の DB へ向ける。開発機の置き場所の DB はガードの仮の DB で、アプリは開いていない
+            _activeScreenshotDataRoot = dataRoot;
+            fixture._usesScreenshotDataRoot = true;
+            return fixture;
         }
 
         /// <summary>
@@ -402,7 +407,25 @@ namespace ICCardManager.UITests.Infrastructure
         /// <summary>
         /// アプリが開くデータベースファイルのパス（Issue #2190）。テストが投入結果・操作結果を読み返すために使う。
         /// </summary>
-        public static string DatabasePath => Path.Combine(DbDirectory, UiTestDatabaseGuard.DatabaseFileName);
+        /// <remarks>
+        /// 撮影用の置き場所で起動している間（<see cref="LaunchWithSeedInScreenshotDataRoot"/>。Issue #2435）は、その置き場所の DB を指す。
+        /// 開発機の置き場所の DB はガードの仮の DB で、アプリが開いている DB ではない。
+        /// </remarks>
+        public static string DatabasePath => ResolveDatabasePath(DbDirectory, _activeScreenshotDataRoot);
+
+        /// <summary>
+        /// 撮影用の置き場所で起動しているフィクスチャの置き場所（起動していなければ null）。UI テストは 1 本ずつ走る（<c>[Collection("UI")]</c>）。
+        /// </summary>
+        private static volatile string? _activeScreenshotDataRoot;
+
+        /// <summary>このフィクスチャが撮影用の置き場所で起動したか（Dispose で <see cref="_activeScreenshotDataRoot"/> を戻す）。</summary>
+        private bool _usesScreenshotDataRoot;
+
+        /// <summary>
+        /// アプリが開いている DB のパスを決める（純粋関数。Issue #2435）。撮影用の置き場所で起動していればその置き場所、そうでなければ開発機の置き場所。
+        /// </summary>
+        internal static string ResolveDatabasePath(string dbDirectory, string? activeScreenshotDataRoot) =>
+            Path.Combine(activeScreenshotDataRoot ?? dbDirectory, UiTestDatabaseGuard.DatabaseFileName);
 
         /// <summary>
         /// <see cref="LaunchWithSeed"/> の手順（退避・バックアップ先の隔離・マイグレーション・投入・本起動・失敗時の復元）。
@@ -668,6 +691,11 @@ namespace ICCardManager.UITests.Infrastructure
 
             // テスト本体が失敗している最中にここで例外を投げると、using の Dispose の例外がテスト本体の例外を上書きする。
             // 両方が同時に起きるのは隔離が外れた（またはピッすいが DB を掴んでいる）ときだけで、どちらも直すべき失敗なので許容する
+            if (_usesScreenshotDataRoot)
+            {
+                _activeScreenshotDataRoot = null;
+            }
+
             FinishOwnedGuard(_ownedDatabaseGuard);
         }
 
