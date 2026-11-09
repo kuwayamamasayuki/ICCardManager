@@ -137,6 +137,41 @@ public class ConcurrencyConflictMessageTests
     }
 
     /// <summary>
+    /// Issue #2421: 払戻済への更新が競合（行はあるが削除済み・払戻済）で拒否されたときは、
+    /// 原因の候補に削除と払い戻しの両方を挙げること
+    /// </summary>
+    /// <remarks>
+    /// 競合（<c>CardOperationResult.Conflict</c>）は、行が残っていて貸出中でもないのに WHERE に一致しなかった場合で、
+    /// 削除済み（論理削除）か払戻済のどちらか。<see cref="ConcurrencyConflictMessage.ForRefund"/> の
+    /// 「削除された可能性」だけでは、他のパソコンで先に払い戻された場合を説明しない。
+    /// </remarks>
+    [Fact]
+    public void ForRefundStateChanged_NamesBothDeletionAndRefundAsCauses()
+    {
+        var message = ConcurrencyConflictMessage.ForRefundStateChanged(Target, ListName);
+
+        message.Should().StartWith($"{Target}を払い戻しできませんでした。");
+        message.Should().Contain("削除された");
+        message.Should().Contain("払い戻された可能性があります");
+        message.Should().NotBe(ConcurrencyConflictMessage.ForRefund(Target, ListName));
+    }
+
+    /// <summary>
+    /// Issue #2421: 削除が競合で拒否され原因を確かめられなかったときは、削除の操作名で述べ、
+    /// 原因の候補に削除と払い戻しの両方を挙げること（<see cref="ConcurrencyConflictMessage.ForRefundStateChanged"/> と対）
+    /// </summary>
+    [Fact]
+    public void ForDeleteStateChanged_NamesBothDeletionAndRefundAsCauses()
+    {
+        var message = ConcurrencyConflictMessage.ForDeleteStateChanged(Target, ListName);
+
+        message.Should().StartWith($"{Target}を削除できませんでした。");
+        message.Should().Contain("削除された");
+        message.Should().Contain("払い戻された可能性があります");
+        message.Should().NotBe(ConcurrencyConflictMessage.ForDelete(Target, ListName));
+    }
+
+    /// <summary>
     /// Issue #2370: 払戻済のため削除できなかったときは、払い戻されたことを理由に挙げ、
     /// 「やり直す」ではなく状態の確認を促すこと（払戻済のカードは何度やり直しても削除できない）。
     /// </summary>

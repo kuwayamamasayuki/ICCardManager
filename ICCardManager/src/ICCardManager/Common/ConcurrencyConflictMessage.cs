@@ -93,6 +93,20 @@ namespace ICCardManager.Common
             => Build(target, "払い戻し", DeletedReason, listName);
 
         /// <summary>
+        /// 払戻済への更新が、行はあるが削除済み・払戻済のため拒否されたときの文言を組み立てる（Issue #2421）。
+        /// </summary>
+        /// <param name="target">対象の説明。「何が」に相当する</param>
+        /// <param name="listName">再読込した一覧の名称</param>
+        /// <remarks>
+        /// 払い戻しの書き込みが 0 行で、事後の診断（<c>CardRepository.DiagnoseFailureAsync</c>）が行を見つけ、
+        /// 貸出中でもなかった場合（<c>CardOperationResult.Conflict</c>）。払戻済への更新の WHERE が拒否するのは
+        /// 削除済みか払戻済なので、<see cref="ForRefund"/> の「削除された可能性」だけでは他のパソコンで
+        /// 先に払い戻された場合を説明しない。
+        /// </remarks>
+        public static string ForRefundStateChanged(string target, string listName)
+            => Build(target, "払い戻し", DeletedOrRefundedReason, listName);
+
+        /// <summary>
         /// 復元対象の行（削除済みの行）が見つからなかったときの文言を組み立てる。
         /// </summary>
         /// <param name="target">対象の説明。「何が」に相当する</param>
@@ -167,7 +181,20 @@ namespace ICCardManager.Common
         /// <param name="target">対象の説明。「何が」に相当する</param>
         /// <param name="listName">再読込した一覧の名称</param>
         public static string ForDelete(string target, string listName)
-            => Build(target, "削除", "他のパソコンや別の操作で先に削除された可能性があります。", listName);
+            => Build(target, "削除", DeletedFirstReason, listName);
+
+        /// <summary>
+        /// 削除が競合で拒否されたが、原因（先に削除されたか、払い戻されたか）を確かめられなかったときの文言を組み立てる（Issue #2421）。
+        /// </summary>
+        /// <param name="target">対象の説明。「何が」に相当する</param>
+        /// <param name="listName">再読込した一覧の名称</param>
+        /// <remarks>
+        /// 論理削除の WHERE が拒否するのは削除済みか払戻済（貸出中は事後の診断で別に分かる）。原因を確かめる読み直しに
+        /// 失敗したとき、<see cref="ForDelete"/> の「先に削除された可能性」とだけ述べると、払い戻されて一覧に「払戻済」で
+        /// 残っているカードについて事実でなくなる。<see cref="ForRefundStateChanged"/> と対の形。
+        /// </remarks>
+        public static string ForDeleteStateChanged(string target, string listName)
+            => Build(target, "削除", DeletedOrRefundedReason, listName);
 
         /// <summary>
         /// 削除しようとした交通系ICカードが払戻済になっていたときの文言を組み立てる（Issue #2370）。
@@ -182,9 +209,37 @@ namespace ICCardManager.Common
         /// 終わることを全件で検証している（<c>ConcurrencyConflictMessageTests</c>）ので、形の違う本ファクトリは internal に置く。
         /// </remarks>
         internal static string ForDeleteRefunded(string target, string listName)
-            => $"{target}を削除できませんでした。他のパソコンや別の操作で払い戻された可能性があります。" +
+            => $"{target}を削除できませんでした。{RefundedReason}" +
                "払戻済の交通系ICカードは削除できません。" +
                $"{listName}を再読み込みしましたので、一覧で払戻済になっていることを確認してください。";
+
+        /// <summary>
+        /// 払い戻そうとした交通系ICカードが、書き込む前の読み直しで払戻済になっていたときの文言を組み立てる（Issue #2421）
+        /// </summary>
+        /// <param name="target">対象の説明。「何が」に相当する</param>
+        /// <param name="listName">再読込した一覧の名称</param>
+        /// <remarks>
+        /// <see cref="ForDeleteRefunded"/> と対。払戻済のカードは何度やり直しても払い戻せないため、「どうすれば」は
+        /// 「やり直してください」ではなく状態の確認にする（公開のファクトリと形が違うため internal に置く）。
+        /// </remarks>
+        internal static string ForRefundRefunded(string target, string listName)
+            => $"{target}を払い戻しできませんでした。{RefundedReason}" +
+               $"{listName}を再読み込みしましたので、一覧で払戻済になっていることを確認してください。";
+
+        /// <summary>
+        /// 書き込まなかったことの案内の前に、一覧の再読込にも失敗したときの文言を組み立てる（Issue #2421）
+        /// </summary>
+        /// <param name="target">対象の説明。「何が」に相当する</param>
+        /// <param name="operationName">利用者が行った操作の名前（「削除」「払い戻し」）</param>
+        /// <param name="reason">再読込できたときの文言と同じ「なぜ」（このクラスの理由文など）</param>
+        /// <param name="listName">再読込できなかった一覧の名称</param>
+        /// <remarks>
+        /// 公開のファクトリは「再読み込みしました」と述べるため、再読込に失敗したときには使えない（#1753）。
+        /// 形は <see cref="ForRestoreReloadFailed"/> と同じ。
+        /// </remarks>
+        internal static string ForReloadFailed(string target, string operationName, string reason, string listName)
+            => $"{target}を{operationName}できませんでした。{reason}{listName}の再読み込みにも失敗したため、" +
+               $"画面を閉じて開き直し、一覧で{target}の状態を確認してください。";
 
         /// <summary>
         /// CSV インポートで、更新しようとした行が無くなっていたときの文言（Issue #2262）。
@@ -210,7 +265,16 @@ namespace ICCardManager.Common
             => BuildForImport(target, "復元", RestoredReason, screenName);
 
         /// <summary>対象の行が削除されていた（更新・払い戻しの「なぜ」）</summary>
-        private const string DeletedReason = "他のパソコンや別の操作で削除された可能性があります。";
+        internal const string DeletedReason = "他のパソコンや別の操作で削除された可能性があります。";
+
+        /// <summary>対象の行が削除された、または払い戻された（状態の変わった削除・払い戻しの「なぜ」。Issue #2421）</summary>
+        internal const string DeletedOrRefundedReason = "他のパソコンや別の操作で削除された、または払い戻された可能性があります。";
+
+        /// <summary>対象の行が先に削除されていた（削除の「なぜ」）</summary>
+        internal const string DeletedFirstReason = "他のパソコンや別の操作で先に削除された可能性があります。";
+
+        /// <summary>対象の行が払い戻されていた（払戻済のため削除・払い戻しできなかったときの「なぜ」。Issue #2421）</summary>
+        internal const string RefundedReason = "他のパソコンや別の操作で払い戻された可能性があります。";
 
         /// <summary>同じ識別子の行が先に登録されていた（登録の「なぜ」）</summary>
         private const string RegisteredReason = "他のパソコンや別の操作で先に登録された可能性があります。";
