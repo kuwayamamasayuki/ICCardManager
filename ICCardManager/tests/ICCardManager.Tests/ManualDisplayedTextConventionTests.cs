@@ -65,6 +65,8 @@ namespace ICCardManager.Tests;
 /// （IT 担当者ガイドはインストーラーのログを「ログに「…」と出ます」と引用するため、ログを残す）。
 /// コメントを除くのは、変更前の文言を由来として書いたコメントが実在の根拠になってしまうため（「返却完了」は
 /// コメントにだけ残っていた）。ログを除くのは、画面に出ないログの文言が実在の根拠になってしまうため。
+/// 照合先は文字列リテラルに限らない（識別子や <c>#if DEBUG</c> の中のコードも一致の根拠になる）。日本語の識別子はほぼ無く、
+/// 文字列リテラルだけを取り出すと補間・連結の組み立てを追えなくなるため、この緩さを許している。
 /// 操作ログ（<c>OperationLogger.Log*Async</c>）は除かない — 操作ログは操作ログ画面と Excel 出力で利用者に見えるため。
 /// </para>
 /// <para>
@@ -305,6 +307,8 @@ public class ManualDisplayedTextConventionTests
     [InlineData("「おかえり なさい！」と表示", 1)]
     [InlineData("「円 残額:」と表示", 1)]
     [InlineData("「円○○残額:」と表示", 1)]
+    // 断片が別々の行（別々の文）にあるだけでは合格にしない
+    [InlineData("「同じ行の前半○○同じ行の後半」と表示", 1)]
     // ログ・コメントにだけある文言は根拠にしない
     [InlineData("「返却処理を完了しました」と表示", 1)]
     [InlineData("「貸出処理を開始します」と表示", 1)]
@@ -330,7 +334,8 @@ public class ManualDisplayedTextConventionTests
                 "var drive = $\"ドライブ {root} の確認が\" + (timeoutMs / 1000) + \"秒以内に終わりませんでした。\";\n" +
                 "var folder = \"指定されたフォルダへの書き込み確認が\" + (timeoutMs / 1000) + \"秒以内に終わりませんでした。\";\n" +
                 "var fallback = $\"⚠ 設定した保存先「{path}」を使用できないため、\"\n    + $\"既定の場所に保存しています。{reason}\";\n" +
-                "var verbatim = \"逐語的な連結の前半\" +\n    @$\"と後半{x}\";",
+                "var verbatim = \"逐語的な連結の前半\" +\n    @$\"と後半{x}\";\n" +
+                "var first = \"同じ行の前半\";\nvar second = \"同じ行の後半\";",
             },
             xamlSources: new[] { "<!-- 貸出完了 --><TextBlock Text=\"いってらっしゃい！\"/>" },
             scriptSources: Array.Empty<string>());
