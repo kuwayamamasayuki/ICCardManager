@@ -714,8 +714,13 @@ def find_no_column_problems(scan: NoColumnScan) -> List[Tuple[int, str]]:
       1. 同じ見出しの中の直前の表（同じ接頭辞）。間の飛びも検査する
       2. 見出しをまたいだ直近の系列（最後に行を足した順に ``CROSS_HEADING_LOOKBACK`` 個まで）のうち、最大の番号が
          ちょうど「この表の最小の番号 − 1」のもの（近いものから）。番号がつながっていることを結び付けの根拠に
-         するので、境目の行が消えていれば結び付かず赤になる。遠くの無関係な表と偶然つながらないよう、候補は直近に限る
+         するので、境目の行が消えていれば結び付かず赤になる。遠くの無関係な表と偶然つながらないよう、候補は直近に限る。
+         先頭の番号をすべて欠番と注記した表は、自分で 1 から始まる系列なので見出しをまたいだ続きを探さない
       3. どちらも無ければ 1 から始まる系列として数える（先頭の行が消えた表は、欠番の注記が無ければ赤）
+
+    **偶然つながる形は見逃す**: 前の表の最大の番号が、後ろの表から消えた先頭の行の数とちょうど等しいとき
+    （1〜3 の表の後で、続きの表に 4〜8 だけが残った等）、後ろの表は前の表の続きに見えて緑になる（同じ見出しでも、
+    見出しをまたいでも同じ）。
     - 飛び: 系列の始まりから最大の番号までの間で、どの行も占めていない番号。系列を成す表に結び付いた注記
       「No.8 は欠番」で許した番号は除く
     - 重複: 同じ系列の中で同じ表記（``8`` / ``8a``）を占める行が 2 つ以上（範囲 ``7〜9`` と ``8`` も重複）
@@ -735,7 +740,10 @@ def find_no_column_problems(scan: NoColumnScan) -> List[Tuple[int, str]]:
             group = None
             if smallest > 1:
                 group = last.get((table.section_lineno, series))
-                if group is None:
+                # 先頭の番号（1〜最小の番号 − 1）をすべて欠番と注記した表は、自分で 1 から始まる系列であり、
+                # 見出しをまたいだ続きではない。結び付けると、その注記が偶然つながった前の表の欠けまで許してしまう
+                leading_noted = all((series, n) in table.notes for n in range(1, smallest))
+                if group is None and not leading_noted:
                     group = next(
                         (
                             g for g in recent[-CROSS_HEADING_LOOKBACK:][::-1]
@@ -751,6 +759,8 @@ def find_no_column_problems(scan: NoColumnScan) -> List[Tuple[int, str]]:
                     "table_lineno": table.lineno,
                     "items": [],
                     "notes": set(),
+                    # 1 から始まらないのに続ける先が見つからなかった表の最小の番号（案内を変えるため）
+                    "orphan_from": smallest if smallest > 1 else None,
                 }
                 groups.append(group)
             group["items"].extend(items)
@@ -788,18 +798,26 @@ def find_no_column_problems(scan: NoColumnScan) -> List[Tuple[int, str]]:
                 runs.append([n])
         for run in runs:
             after = min(((e.base, lineno) for lineno, e in items if e.base > run[-1]))
-            problems.append((
-                after[1],
+            text = (
                 f"{where}: {_format_numbers(series, run)} が抜けています"
-                f"（{after[1]} 行目の No.{series}{after[0]} の前）",
-            ))
+                f"（{after[1]} 行目の No.{series}{after[0]} の前）"
+            )
+            orphan_from = group["orphan_from"]
+            if orphan_from is not None and run[0] == 1:
+                # 先頭の欠けは、行の消失のほか「前の表の続きのつもりが、続ける先が見つからなかった」こともある
+                text += (
+                    f"。前の表の続きなら、続ける先が見つかりませんでした（直前の表の最大の番号が"
+                    f" No.{series}{orphan_from - 1} でない、または見出しをまたいで間に別の No の表が"
+                    f" {CROSS_HEADING_LOOKBACK} つ以上ある）。番号をつなげるか、表を近くへ移してください"
+                )
+            problems.append((after[1], text))
     return sorted(problems)
 
 
 def check_no_columns(scan: NoColumnScan) -> Tuple[bool, str]:
     """07 の表の No 列に飛び・重複が無いことを確かめる（Issue #2420）。
 
-    #2321 では約 20 の表から No.13〜15 の行が一斉に消えたが、CI は緑のまま通った。
+    #2321 では 07 の 66 か所（計 152 行）から No.13〜15 の行が一斉に消えたが、CI は緑のまま通った。
     表を 1 つも読めなかったときは、正規表現が文書の書式から外れた空振りとして fail する。
     """
     if scan.unclosed:

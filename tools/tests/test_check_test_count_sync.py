@@ -971,6 +971,47 @@ class NoColumnSeriesStartTests(unittest.TestCase):
         """既知の限界: 系列の終わりは最大の番号なので、末尾の行の消失は原理的に検出できない。"""
         self.assertEqual([], _no_problems("#### UT-001\n\n" + _table(1, 2, 3)))
 
+    def test_coincidental_connection_is_not_detected(self):
+        """既知の限界: 前の表の最大の番号が、後ろの表から消えた先頭の行の数と等しいと、続きに見えて緑になる。"""
+        doc = "#### UT-001\n\n" + _table(1, 2, 3) + "\n#### UT-002\n\n" + _table(4, 5, 6, 7, 8)
+        self.assertEqual([], _no_problems(doc))
+
+    def test_lookback_boundary(self):
+        """続ける先の候補は直近 3 系列まで（3 つ目は可・4 つ目は不可）。"""
+        others = lambda count: "".join(f"\n#### UT-1{i:02d}\n\n" + _table(1, 2) for i in range(count))
+        head = "#### UT-001\n\n" + _table(1, 2, 3)
+        tail = "\n#### UT-900\n\n" + _table(4, 5)
+        self.assertEqual([], _no_problems(head + others(2) + tail))
+        problems = _no_problems(head + others(3) + tail)
+        self.assertEqual(1, len(problems), problems)
+        self.assertIn("No.1〜3 が抜けています", problems[0][1])
+        self.assertIn("続ける先が見つかりませんでした", problems[0][1])  # 欠番の注記だけを促さない
+
+    def test_gap_from_lost_rows_does_not_get_the_continuation_hint(self):
+        problems = _no_problems("#### UT-001\n\n" + _table(1, 3))
+        self.assertNotIn("続ける先", problems[0][1])
+
+    def test_leading_note_does_not_hide_a_gap_in_a_coincidentally_connected_table(self):
+        """レビュー 2 回目: 先頭を欠番と注記した表（UT-013 の形）は、見出しをまたいだ続きとして結び付けない。
+
+        結び付けると、その注記（No.1〜6）が前の表 A の No.3 の消失まで許してしまう。
+        """
+        doc = (
+            "#### UT-A\n\n" + _table(1, 2, 4, 5, 6)
+            + "\n#### UT-B\n\n" + _table(1, 2)
+            + "\n#### UT-C\n\n" + _table(1, 2)
+            + "\n#### UT-013\n\n> No.1〜6・8 は欠番。\n\n" + _table("7a", "7b", 9)
+        )
+        problems = _no_problems(doc)
+        self.assertEqual(1, len(problems), problems)
+        self.assertIn("3 行目の表: No.3 が抜けています", problems[0][1])
+
+    def test_note_in_the_next_section_does_not_reach_back_to_the_previous_table(self):
+        doc = "#### UT-001\n\n" + _table(1, 3) + "\n#### UT-002\n\nNo.2 は欠番。\n\n" + _table(1, 2)
+        problems = _no_problems(doc)
+        self.assertEqual(1, len(problems), problems)
+        self.assertIn("3 行目の表: No.2 が抜けています", problems[0][1])
+
 
 class NoColumnRealDocumentTests(unittest.TestCase):
     """実データ: 現在の 07 は緑。#2321 の是正前（No.13〜15 が一斉に消えた版）の抜粋は赤。"""

@@ -9,6 +9,7 @@ on:
       - 'ICCardManager/docs/design/07_テスト設計書.md'
       - 'tools/check-test-count-sync.py'
       - 'tools/tests/test_check_test_count_sync.py'
+      - 'tools/tests/fixtures/**'
       - '.github/workflows/test-count-sync-check.yml'
   pull_request:
     branches: [ main ]
@@ -18,6 +19,7 @@ on:
       - 'ICCardManager/docs/design/07_テスト設計書.md'
       - 'tools/check-test-count-sync.py'
       - 'tools/tests/test_check_test_count_sync.py'
+      - 'tools/tests/fixtures/**'
       - '.github/workflows/test-count-sync-check.yml'
 
 # GITHUB_TOKEN の権限は読み取りだけを最上位で宣言する（Issue #2271）。宣言が無いと既定の権限（リポジトリの設定
