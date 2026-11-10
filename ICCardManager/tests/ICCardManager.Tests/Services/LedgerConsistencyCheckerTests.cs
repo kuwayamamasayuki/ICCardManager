@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
 using FluentAssertions;
+using ICCardManager.Common;
 using ICCardManager.Data.Repositories;
 using ICCardManager.Models;
 using ICCardManager.Services;
@@ -327,6 +328,125 @@ public class LedgerConsistencyCheckerTests
         // Assert: 1000 − 200 = 800 ≠ 750
         result.Inconsistencies.Should().ContainSingle()
             .Which.Should().Be((31, 800, 750));
+    }
+
+    #endregion
+
+    #region Issue #2437: 導入行「前年度より繰越」でチェーンを始め直す
+
+    private static Ledger Issue2437Ledger(int id, DateTime date, string summary, int income, int expense, int balance, bool isLentRecord = false) =>
+        new Ledger
+        {
+            Id = id,
+            CardIdm = TestCardIdm,
+            Date = date,
+            Summary = summary,
+            Income = income,
+            Expense = expense,
+            Balance = balance,
+            IsLentRecord = isLentRecord
+        };
+
+    /// <summary>
+    /// Issue #2437: チェーンを始め直す日の判定。開始日の年度は PeriodOpensWithFiscalYearStartCarryover（年度の先頭の日の行で判定）、
+    /// 後の年度は期間の台帳の年度ごとの先頭の日で判定する
+    /// </summary>
+    [Fact]
+    public void GetChainRestartDates_ReturnsFirstDayOfFiscalYearsStartingWithCarryoverRecord()
+    {
+        var carryover = SummaryGenerator.GetCarryoverFromPreviousYearSummary();
+        var lentMarch = Issue2437Ledger(1, new DateTime(2027, 3, 25), SummaryGenerator.GetLendingSummary(), 0, 0, 5000, isLentRecord: true);
+        var intro = Issue2437Ledger(2, new DateTime(2027, 4, 1), carryover, 5000, 0, 5000);
+        var usage = Issue2437Ledger(3, new DateTime(2027, 4, 10), "鉄道（天神～博多）", 0, 210, 4790);
+        var nextYearUsage = Issue2437Ledger(4, new DateTime(2028, 4, 3), "鉄道（博多～天神）", 0, 300, 4490);
+        var all = new[] { lentMarch, intro, usage, nextYearUsage };
+
+        PaperCarryoverPolicy.GetChainRestartDates(new DateTime(2000, 1, 1), all, Array.Empty<Ledger>())
+            .Should().Equal(new[] { new DateTime(2027, 4, 1) }, "全期間: 導入行から始まる年度（2027）だけ。2028 年度は利用から始まる");
+        PaperCarryoverPolicy.GetChainRestartDates(new DateTime(2027, 3, 1), all, Array.Empty<Ledger>())
+            .Should().Equal(new[] { new DateTime(2027, 4, 1) }, "年度の初日より前から始まる期間でも、後の年度の先頭の導入行で切る");
+        PaperCarryoverPolicy.GetChainRestartDates(new DateTime(2027, 4, 1), new[] { intro, usage }, new[] { intro })
+            .Should().Equal(new[] { new DateTime(2027, 4, 1) }, "開始日の年度は年度の先頭の日の行で判定する（#2418 と同じ）");
+        PaperCarryoverPolicy.GetChainRestartDates(new DateTime(2027, 4, 5), new[] { usage }, new[] { intro })
+            .Should().BeEmpty("導入行より後から始まる期間は、期間より前の残高から続ける");
+    }
+
+    /// <summary>
+    /// Issue #2437: チェーンをまたいで検査しない。導入行より前の行（3/25）の残高から導入行を検査せず、
+    /// 導入行から始まるチェーンの中の不整合は従来どおり報告する
+    /// </summary>
+    [Fact]
+    public void CheckConsistency_Chains_DoesNotCheckAcrossChainBoundary()
+    {
+        var march = Issue2437Ledger(1, new DateTime(2027, 3, 25), "鉄道（手入力）", 0, 0, 5000);
+        var intro = Issue2437Ledger(2, new DateTime(2027, 4, 1), SummaryGenerator.GetCarryoverFromPreviousYearSummary(), 5000, 0, 5000);
+        var usage = Issue2437Ledger(3, new DateTime(2027, 4, 2), "鉄道（天神～博多）", 0, 210, 4790);
+        var broken = Issue2437Ledger(4, new DateTime(2027, 4, 10), "鉄道（博多～天神）", 0, 300, 4400);
+
+        var segments = LedgerConsistencyChecker.SplitAtChainRestarts(
+            new[] { march, intro, usage, broken }, new[] { new DateTime(2027, 4, 1) });
+        segments.Select(s => s.Select(l => l.Id)).Should().BeEquivalentTo(
+            new[] { new[] { 1 }, new[] { 2, 3, 4 } }, o => o.WithStrictOrdering());
+
+        var result = _checker.CheckConsistency(segments, TestCardIdm, new DateTime(2000, 1, 1), new Ledger?[] { null, march });
+
+        result.Inconsistencies.Should().ContainSingle("導入行（5,000 ≠ 5,000 + 5,000）は報告せず、4/10 の不整合だけを報告する")
+            .Which.Should().Be((4, 4490, 4400));
+        result.InitialBalanceCorrection.Should().BeNull("切れているのは導入行の直後ではない");
+    }
+
+    /// <summary>
+    /// Issue #2437: 導入行が 2 本目のチェーンの先頭にあっても、導入行の直後で切れる形（#2007）なら訂正案を返す
+    /// </summary>
+    [Fact]
+    public void CheckConsistency_Chains_DetectsInitialBalanceCorrectionAtStartOfLaterChain()
+    {
+        var march = Issue2437Ledger(1, new DateTime(2027, 3, 25), SummaryGenerator.GetLendingSummary(), 0, 0, 5000, isLentRecord: true);
+        var intro = Issue2437Ledger(2, new DateTime(2027, 4, 1), SummaryGenerator.GetCarryoverFromPreviousYearSummary(), 6000, 0, 6000);
+        var usage = Issue2437Ledger(3, new DateTime(2027, 4, 2), "鉄道（天神～博多）", 0, 210, 4790);
+
+        var result = _checker.CheckConsistency(
+            new[] { new List<Ledger> { march }, new List<Ledger> { intro, usage } }, TestCardIdm, new DateTime(2000, 1, 1),
+            new Ledger?[] { null, null });
+
+        result.Inconsistencies.Should().ContainSingle().Which.LedgerId.Should().Be(3);
+        result.InitialBalanceCorrection.Should().NotBeNull();
+        result.InitialBalanceCorrection!.LedgerId.Should().Be(2);
+        result.InitialBalanceCorrection.SuggestedBalance.Should().Be(5000);
+        result.InitialBalanceCorrection.AppliesToIncome.Should().BeTrue("前年度より繰越は受入欄にも残高を書く");
+    }
+
+    /// <summary>
+    /// Issue #2437（コードレビューで検出）: 2 本目のチェーンの先頭の導入行の残高が前のチェーンの最終残高で裏付けられているなら、
+    /// 直後の行が切れていても訂正案を出さない（正しい導入行を誤った行に合わせて直す誘導にしない）
+    /// </summary>
+    [Fact]
+    public void CheckConsistency_Chains_CorroboratedHead_DoesNotSuggestCorrection()
+    {
+        var yearEnd = Issue2437Ledger(1, new DateTime(2027, 3, 31), SummaryGenerator.GetCarryoverToNextYearSummary(), 0, 5000, 0);
+        var intro = Issue2437Ledger(2, new DateTime(2027, 4, 1), SummaryGenerator.GetCarryoverFromPreviousYearSummary(), 5000, 0, 5000);
+        var typo = Issue2437Ledger(3, new DateTime(2027, 4, 2), "鉄道（天神～博多）", 0, 210, 4700);
+
+        var result = _checker.CheckConsistency(
+            new[] { new List<Ledger> { yearEnd }, new List<Ledger> { intro, typo } }, TestCardIdm, new DateTime(2000, 1, 1),
+            new Ledger?[] { null, yearEnd });
+
+        result.Inconsistencies.Should().ContainSingle().Which.Should().Be((3, 4790, 4700));
+        result.InitialBalanceCorrection.Should().BeNull("0 ＋ 受入 5,000 ＝ 5,000 で導入行は裏付けられている");
+        LedgerConsistencyChecker.IsCorroboratedByPrecedingSettledRow(null, intro)
+            .Should().BeFalse("直前の帳簿の行が無ければ裏付けは無い（従来どおり訂正案の対象）");
+        var lentYearEnd = Issue2437Ledger(4, new DateTime(2027, 3, 31), SummaryGenerator.GetLendingSummary(), 0, 0, 0, isLentRecord: true);
+        LedgerConsistencyChecker.IsCorroboratedByPrecedingSettledRow(lentYearEnd, intro)
+            .Should().BeFalse("貸出中レコードの残高は帳簿の残高ではないので裏付けにしない");
+        var manualMarch = Issue2437Ledger(5, new DateTime(2027, 3, 25), "鉄道（手入力）", 0, 0, 5000);
+        LedgerConsistencyChecker.IsCorroboratedByPrecedingSettledRow(manualMarch, intro)
+            .Should().BeTrue("前年度より繰越の受入は残高の書き直しなので、直前の残高 5,000 と同じ残高なら裏付けあり");
+        var wrongIntro = Issue2437Ledger(6, new DateTime(2027, 4, 1), SummaryGenerator.GetCarryoverFromPreviousYearSummary(), 6000, 0, 6000);
+        LedgerConsistencyChecker.IsCorroboratedByPrecedingSettledRow(manualMarch, wrongIntro)
+            .Should().BeFalse("直前の残高 5,000 と異なる 6,000 は裏付けなし");
+        var chargeHead = Issue2437Ledger(7, new DateTime(2027, 4, 1), "役務費によりチャージ", 1000, 0, 5000);
+        LedgerConsistencyChecker.IsCorroboratedByPrecedingSettledRow(manualMarch, chargeHead)
+            .Should().BeFalse("受入で残高を書き直すのは導入行だけ。チャージの受入は新しいお金なので 5,000 ＋ 1,000 ≠ 5,000 は裏付けなし");
     }
 
     #endregion

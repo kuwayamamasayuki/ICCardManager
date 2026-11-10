@@ -141,5 +141,55 @@ namespace ICCardManager.Common
             return HasFiscalYearStartCarryoverRecord(settled)
                 && periodStart.Date <= settled.Min(l => l.Date.Date);
         }
+
+        /// <summary>
+        /// 期間の中で、残高チェーンが導入行「前年度より繰越」から始まり直す日（年度の台帳の先頭の日）を古い順に返す。
+        /// </summary>
+        /// <param name="periodStart">期間の開始日</param>
+        /// <param name="periodLedgers">期間の台帳（開始日以降の行。貸出中レコードを含んでよい。判定では数えない）</param>
+        /// <param name="periodStartFiscalYearFirstDayLedgers">
+        /// 開始日が属する年度で最も早い日付の行（<c>ILedgerQueryService.GetFiscalYearFirstDayLedgersAsync</c>）
+        /// </param>
+        /// <remarks>
+        /// <para>
+        /// Issue #2437: 導入行は台帳の始まりの残高を担う（登録時の繰越額。前の行の残高から計算した値ではない）ので、
+        /// 導入行より前の日付の行（3 月中の貸出中レコード・手入力・CSV の 3 月の行）からチェーンを続けて検査すると、
+        /// 正しい導入行が不整合と報告される。整合性チェックは、ここで返す日の手前でチェーンを切り、導入行を始点にする。
+        /// </para>
+        /// <para>
+        /// 開始日が属する年度は、期間の台帳だけでは年度の先頭の日が分からない（期間が年度の途中から始まり得る）ので、
+        /// 帳票・履歴と同じ <see cref="PeriodOpensWithFiscalYearStartCarryover"/> で決める（真のとき、その年度の先頭の日を返す）。
+        /// それより後の年度は年度の初日から期間に含まれるので、期間の台帳の年度ごとの行で
+        /// <see cref="HasFiscalYearStartCarryoverRecord"/> を判定する。表示期間（開始日が導入行以前）の検査も
+        /// 全期間の検査も、判定はこの 2 つに寄せる（#1763「同じ判断を配らない」）。
+        /// </para>
+        /// </remarks>
+        public static IReadOnlyList<DateTime> GetChainRestartDates(
+            DateTime periodStart,
+            IEnumerable<Ledger> periodLedgers,
+            IEnumerable<Ledger> periodStartFiscalYearFirstDayLedgers)
+        {
+            var periodStartFiscalYear = FiscalYearHelper.GetFiscalYear(periodStart);
+            var dates = new List<DateTime>();
+
+            var firstDayLedgers = periodStartFiscalYearFirstDayLedgers.ToList();
+            if (PeriodOpensWithFiscalYearStartCarryover(periodStart, firstDayLedgers))
+            {
+                dates.Add(firstDayLedgers.Where(l => !l.IsLentRecord).Min(l => l.Date.Date));
+            }
+
+            foreach (var fiscalYearLedgers in periodLedgers
+                .GroupBy(l => FiscalYearHelper.GetFiscalYear(l.Date))
+                .Where(g => g.Key > periodStartFiscalYear)
+                .OrderBy(g => g.Key))
+            {
+                if (HasFiscalYearStartCarryoverRecord(fiscalYearLedgers))
+                {
+                    dates.Add(fiscalYearLedgers.Where(l => !l.IsLentRecord).Min(l => l.Date.Date));
+                }
+            }
+
+            return dates;
+        }
     }
 }

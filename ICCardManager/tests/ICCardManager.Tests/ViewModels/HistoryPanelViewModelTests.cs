@@ -1660,6 +1660,70 @@ public class HistoryPanelViewModelTests : IDisposable
         result.Balance.Should().Be(5000);
     }
 
+    /// <summary>
+    /// Issue #2437（コードレビューで検出）: 表示中のカードのハイライト（CheckAndNotifyConsistencyAsync → BuildInconsistencyMarkers）は、
+    /// 4/1〜4/30 の表示期間で、期間外の直前の帳簿の行（3/31「次年度へ繰越」残高 0／3/25 の手入力の行 残高 5,000）で裏付けられた
+    /// 正しい導入行「前年度より繰越」ではなく、打ち間違えた 4/2 の行を指すこと
+    /// </summary>
+    [Theory]
+    [InlineData(0, 5000)]
+    [InlineData(5000, 5000)]
+    public async Task 表示期間のハイライトは裏付けのある導入行ではなく打ち間違えた行を指すこと(int precedingBalance, int introductionBalance)
+    {
+        const string cardIdm = "0D0D0D0D0D0D0D0D";
+        var card = new IcCard { CardIdm = cardIdm, CardType = "はやかけん", CardNumber = "5042" };
+        var preceding = new Ledger
+        {
+            Id = 1,
+            CardIdm = cardIdm,
+            Date = new DateTime(2027, 3, 31),
+            Summary = precedingBalance == 0 ? SummaryGenerator.GetCarryoverToNextYearSummary() : "鉄道（手入力）",
+            Expense = precedingBalance == 0 ? 5000 : 0,
+            Balance = precedingBalance
+        };
+        var introduction = new Ledger
+        {
+            Id = 2,
+            CardIdm = cardIdm,
+            Date = new DateTime(2027, 4, 1),
+            Summary = SummaryGenerator.GetCarryoverFromPreviousYearSummary(),
+            Income = introductionBalance,
+            Balance = introductionBalance
+        };
+        var typo = new Ledger
+        {
+            Id = 3,
+            CardIdm = cardIdm,
+            Date = new DateTime(2027, 4, 2),
+            Summary = "鉄道（天神～博多）",
+            Expense = 210,
+            Balance = 4700
+        };   // 正しくは 4,790
+        var all = new List<Ledger> { preceding, introduction, typo };
+
+        _cardRepositoryMock.Setup(r => r.GetAllAsync()).ReturnsAsync(new List<IcCard> { card });
+        _ledgerRepositoryMock.Setup(r => r.GetByDateRangeAsync(cardIdm, It.IsAny<DateTime>(), It.IsAny<DateTime>()))
+            .ReturnsAsync((string _, DateTime from, DateTime to) =>
+                all.Where(l => l.Date.Date >= from.Date && l.Date.Date <= to.Date).ToList());
+        _ledgerRepositoryMock.Setup(r => r.GetFiscalYearFirstDayLedgersAsync(cardIdm, 2027))
+            .ReturnsAsync(new List<Ledger> { introduction });
+        _ledgerRepositoryMock.Setup(r => r.GetLatestSettledBeforeDateAsync(cardIdm, new DateTime(2027, 4, 1)))
+            .ReturnsAsync(preceding);
+
+        // 警告クリック後に移る月表示（4/1〜4/30）で表示中
+        _history.HistoryCard = card.ToDto();
+        _history.HistoryFromDate = new DateTime(2027, 4, 1);
+        _history.HistoryToDate = new DateTime(2027, 4, 30);
+
+        // Act: 全カードの判定の末尾で、表示中のカードの表示期間の判定（ハイライト）が走る
+        await _history.CheckAllCardsConsistencyAsync();
+
+        // Assert
+        BalanceInconsistencyMarkers().Keys.Should().Equal(new[] { typo.Id },
+            "強調するのは打ち間違えた 4/2 の行。正しい導入行（4/1）を訂正案として強調しない");
+        BalanceInconsistencyMarkers()[typo.Id].Should().Be((4790, 4700, false));
+    }
+
     [Fact]
     public async Task BuildCarryoverRowAsync_4月以外_前月繰越行が生成されること()
     {
