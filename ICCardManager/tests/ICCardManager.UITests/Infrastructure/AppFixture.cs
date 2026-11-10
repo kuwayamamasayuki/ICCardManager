@@ -523,6 +523,31 @@ namespace ICCardManager.UITests.Infrastructure
         }
 
         /// <summary>
+        /// 起動するアプリへ渡す環境変数を整える（Issue #2435）。
+        /// </summary>
+        /// <param name="target">起動の環境変数（テストプロセスの環境変数を受け継いだもの）。</param>
+        /// <param name="environment">明示して渡す環境変数。null なら渡さない。</param>
+        /// <remarks>
+        /// 撮影用の置き場所（<see cref="ScreenshotDataRootEnvironmentVariable"/>）は、明示したときだけ渡す。起動するアプリはテストプロセスの環境変数を
+        /// 受け継ぐので、開発者のシェルに残っていると、撮影用の置き場所を使わない起動（<see cref="LaunchWithSeed(Action{SQLiteConnection})"/> 等）の
+        /// アプリまで置き場所が差し替わる。投入はガードの DB へ、アプリは撮影用の置き場所の DB を開き、データの無い画面を撮る
+        /// （DB を読み返す確認も別の DB を読む）。
+        /// </remarks>
+        internal static void ApplyEnvironment(System.Collections.Specialized.StringDictionary target, IReadOnlyDictionary<string, string>? environment)
+        {
+            target.Remove(ScreenshotDataRootEnvironmentVariable);
+            if (environment == null)
+            {
+                return;
+            }
+
+            foreach (var pair in environment)
+            {
+                target[pair.Key] = pair.Value;
+            }
+        }
+
+        /// <summary>
         /// アプリケーションを起動する。DB の退避は行わない（呼び出し元が <see cref="UiTestDatabaseGuard"/> を取得済み）。
         /// </summary>
         /// <param name="ownedDatabaseGuard">Dispose 時に復元するガード。復元の責任を持たない起動では null。</param>
@@ -554,13 +579,7 @@ namespace ICCardManager.UITests.Infrastructure
                 WorkingDirectory = projectRoot,
                 UseShellExecute = false
             };
-            if (environment != null)
-            {
-                foreach (var pair in environment)
-                {
-                    startInfo.EnvironmentVariables[pair.Key] = pair.Value;
-                }
-            }
+            ApplyEnvironment(startInfo.EnvironmentVariables, environment);
 
             var dotnetProcess = Process.Start(startInfo);
 

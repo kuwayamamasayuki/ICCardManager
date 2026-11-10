@@ -142,8 +142,14 @@ public class ScreenshotDataRootTests
             }
         }
 
-        unclassified.Should().BeEmpty(
-            "パスを文言へ埋め込むときは AppDataPaths.ToDisplayPath を通すこと。パスでない・読み替えない理由があるなら NotPathHoles に理由とともに載せること");
+        // FluentAssertions は呼び出し元の式から対象の名前を推定し、この形では別の変数名を出す（レビューで検出）。名前を自分で書く
+        if (unclassified.Count > 0)
+        {
+            throw new Xunit.Sdk.XunitException(
+                $"読み替えを通していない、パスらしい名前の補間の穴があります: {string.Join(" / ", unclassified)}。" +
+                "パスを文言へ埋め込むときは AppDataPaths.ToDisplayPath を通すこと。パスでない・読み替えない理由があるなら NotPathHoles に理由とともに載せること");
+        }
+
         wrapped.Should().BeGreaterThanOrEqualTo(14,
             "読み替えを通した穴（保存先 2・接続診断の DB 6 と保存先 5・設定画面の注記 1）が見つかること（走査の空振りの検出）");
     }
@@ -155,8 +161,10 @@ public class ScreenshotDataRootTests
     /// 表示用のプロパティ（<see cref="DisplayBindings"/>）は、読み替えた値か、パスを含まない値。編集できる入力欄（TextBox）は読み替えない
     /// （読み替えた値がそのまま保存される）ので対象外。表示用のプロパティが実際に読み替えを通していることは
     /// <see cref="撮影する画面の文言に埋め込むパスはすべて読み替えを通すこと"/> と、式形式のプロパティの検査（下）が見る。
-    /// <b>限界</b>: 見るのは属性の形のバインド（<c>Text="{Binding X}"</c>）だけで、要素の形（<c>&lt;Binding Path="X"/&gt;</c>。
-    /// MultiBinding の中など）は見ない。これは撮影の後の確認（<c>ScreenshotAssertions.RequireNoUiTestPathShown</c>）が受け持つ。
+    /// 属性の形のバインドは、位置指定（<c>{Binding X, …}</c>）と <c>Path=</c>（<c>{Binding ElementName=…, Path=X}</c>）の両方と、
+    /// 列の <c>Binding="{Binding X}"</c>（DataGridTextColumn 等）を見る。
+    /// <b>限界</b>: 要素の形（<c>&lt;Binding Path="X"/&gt;</c>。MultiBinding の中など）は見ない。これは撮影の後の確認
+    /// （<c>ScreenshotAssertions.RequireNoUiTestPathShown</c>）が受け持つ。
     /// </remarks>
     [Fact]
     public void 撮影する画面の表示はパスを読み替えた表示用のプロパティへバインドすること()
@@ -173,9 +181,9 @@ public class ScreenshotDataRootTests
                 }
 
                 foreach (Match binding in Regex.Matches(tag.Groups["attrs"].Value,
-                    @"(?<attr>Text|ToolTip|AutomationProperties\.Name|AutomationProperties\.HelpText|Content|Header|DisplayMemberBinding)=""\{Binding\s+(?:Path=)?(?<path>[\w.]+)"))
+                    @"(?<attr>Text|ToolTip|AutomationProperties\.Name|AutomationProperties\.HelpText|Content|Header|DisplayMemberBinding|Binding)=""\{Binding\b(?<args>[^""]*)"))
                 {
-                    var path = binding.Groups["path"].Value;
+                    var path = BindingPathOf(binding.Groups["args"].Value);
                     if (PathLikeName.IsMatch(path) && !DisplayBindings.ContainsKey(path))
                     {
                         unclassified.Add($"{Path.Combine(relative)}: <{tag.Groups["element"].Value} {binding.Groups["attr"].Value}=\"{{Binding {path}…\">");
@@ -184,7 +192,12 @@ public class ScreenshotDataRootTests
             }
         }
 
-        unclassified.Should().BeEmpty("パスを表示するときは読み替えた表示用のプロパティへバインドし、DisplayBindings に載せること");
+        if (unclassified.Count > 0)
+        {
+            throw new Xunit.Sdk.XunitException(
+                $"パスらしい名前のプロパティを表示へ直接バインドしています: {string.Join(" / ", unclassified)}。" +
+                "パスを表示するときは読み替えた表示用のプロパティへバインドし、DisplayBindings に載せること");
+        }
 
         var viewModel = TestSourceInspection.ToCodeOnly(ReadProductionFile("ViewModels", "SystemManageViewModel.cs"));
         viewModel.Should().MatchRegex(@"DatabasePathDisplay\s*=>\s*AppDataPaths\.ToDisplayPath\(_databaseInfo\.DatabasePath\)\s*;");
@@ -205,6 +218,29 @@ public class ScreenshotDataRootTests
     {
         // 検査ロジック自体を既知の入力で固定する（実データが空でも空振りを検出できるように）
         string.Join("|", ExtractInterpolationHolesWithIndex(source).Select(h => h.Hole)).Should().Be(expected);
+    }
+
+    [Theory]
+    [InlineData(" X, StringFormat=作成先: {0", "X")]
+    [InlineData(" ElementName=Root, Path=DataContext.BackupFolderPath", "DataContext.BackupFolderPath")]
+    [InlineData(" Path=FilePath, Mode=OneWay", "FilePath")]
+    [InlineData("", "")]
+    public void バインドの引数からパスを取り出すこと(string args, string expected)
+    {
+        BindingPathOf(args).Should().Be(expected);
+    }
+
+    /// <summary><c>{Binding …}</c> の引数（<c>Binding</c> の後ろ）からバインドのパスを取り出す。<c>Path=</c> を優先し、無ければ先頭の位置指定。</summary>
+    private static string BindingPathOf(string args)
+    {
+        var named = Regex.Match(args, @"\bPath=(?<p>[\w.]+)");
+        if (named.Success)
+        {
+            return named.Groups["p"].Value;
+        }
+
+        var positional = Regex.Match(args, @"^\s*(?<p>[\w.]+)\s*(,|$)");
+        return positional.Success ? positional.Groups["p"].Value : string.Empty;
     }
 
     [Theory]
@@ -265,6 +301,10 @@ public class ScreenshotDataRootTests
     /// <remarks>
     /// メソッドの境目は、4〜8 文字下げで始まるアクセス修飾子の行で判定する（ファイルスコープの名前空間のメンバーは 4 文字、
     /// ブロックの名前空間のメンバーは 8 文字下げ。メソッドの本体の文はそれより深いので境目と取り違えない）。
+    /// <b>限界</b>: アクセス修飾子の無いメンバー（暗黙の private の <c>string F()</c>・明示的インターフェイス実装）は境目と認識しない。
+    /// その場合は前のメソッドの宣言まで遡るので、別のメソッドの同名のローカルを読み替え済みと数え得る。修飾子の有無だけで
+    /// メンバーと文を見分けられない（ファイルスコープの名前空間では、メソッドの本体の文も 8 文字下げになる）ため、ここでは扱わない。
+    /// 走査対象のファイルのメンバーは現在すべてアクセス修飾子を持つ。
     /// </remarks>
     private static bool IsShownLocal(string source, string name, int holeIndex)
     {
@@ -476,6 +516,10 @@ public class ScreenshotDataRootTests
 
         Regex.IsMatch(source, @"var\s+fixture\s*=\s*LaunchWithSeedInDataRootCore\(\s*DbDirectory,\s*UiTestDatabaseGuard\.UiTestBackupDirectory,\s*dataRoot,")
             .Should().BeTrue("撮影用の置き場所でも、開発機の DB を退避し、バックアップ先を UI テスト専用のフォルダーへ隔離する（差し替えが効かないときの安全網）");
+        // テストプロセスから受け継いだ撮影用の置き場所を、明示しない起動のアプリへ渡さないこと（ApplyEnvironment の中身は GUI 不要のテストが見る）
+        source.Should().Contain("ApplyEnvironment(startInfo.EnvironmentVariables, environment);")
+            .And.NotContain("startInfo.EnvironmentVariables[");
+
         // 起動している間は、DB を読み返す確認がアプリの実際に開いている撮影用の置き場所の DB を読むこと（終わったら戻すこと）
         source.Should().Contain("_activeScreenshotDataRoot = dataRoot;")
             .And.Contain("public static string DatabasePath => ResolveDatabasePath(DbDirectory, _activeScreenshotDataRoot);");

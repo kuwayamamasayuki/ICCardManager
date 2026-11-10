@@ -165,6 +165,39 @@ namespace ICCardManager.UITests.Tests
         }
 
         [Fact]
+        public void 明示しない起動では_テストプロセスから受け継いだ撮影用の置き場所をアプリへ渡さないこと()
+        {
+            // 開発者のシェルに残った環境変数で、撮影用の置き場所を使わない起動のアプリまで差し替わらないこと
+            var inherited = new System.Collections.Specialized.StringDictionary
+            {
+                [AppFixture.ScreenshotDataRootEnvironmentVariable] = DataRoot,
+                ["PATH"] = @"C:\Windows",
+            };
+
+            AppFixture.ApplyEnvironment(inherited, AppFixture.SuppressDebugTestData);
+
+            inherited.ContainsKey(AppFixture.ScreenshotDataRootEnvironmentVariable).Should().BeFalse();
+            inherited["ICCARDMANAGER_SCREENSHOT_MODE"].Should().Be("1", "明示した環境変数は渡す");
+            inherited["PATH"].Should().Be(@"C:\Windows", "他の環境変数は受け継ぐ");
+        }
+
+        [Fact]
+        public void 撮影用の置き場所を明示した起動では_その置き場所をアプリへ渡すこと()
+        {
+            var inherited = new System.Collections.Specialized.StringDictionary
+            {
+                [AppFixture.ScreenshotDataRootEnvironmentVariable] = @"D:\stale",
+            };
+
+            AppFixture.ApplyEnvironment(inherited, new Dictionary<string, string>
+            {
+                [AppFixture.ScreenshotDataRootEnvironmentVariable] = DataRoot,
+            });
+
+            inherited[AppFixture.ScreenshotDataRootEnvironmentVariable].Should().Be(DataRoot);
+        }
+
+        [Fact]
         public void 撮影用の置き場所で起動している間_読み返すDBは撮影用の置き場所のDBであること()
         {
             // 開発機の置き場所の DB はガードの仮の DB で、アプリは開いていない。そちらを読むと、残高チェーンの確認などが投入データを見ない
