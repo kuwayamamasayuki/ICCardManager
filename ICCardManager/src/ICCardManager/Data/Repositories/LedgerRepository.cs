@@ -735,6 +735,15 @@ VALUES (@ledgerId, @useDate, @entryStation, @exitStation,
                 excludeLentRecords: false).ConfigureAwait(false);
         }
 
+        /// <inheritdoc/>
+        public async Task<Ledger?> GetLatestSettledBeforeDateAsync(string cardIdm, DateTime beforeDate)
+        {
+            using var lease = await _dbContext.LeaseConnectionAsync().ConfigureAwait(false);
+            return await GetChainFinalLedgerAsync(
+                lease.Connection, cardIdm, SqliteDateTimeFormat.ToDateText(beforeDate),
+                excludeLentRecords: true).ConfigureAwait(false);
+        }
+
         /// <summary>
         /// 「最新残高」系クエリの共通実装。最新日の全レコードを残高チェーン
         /// （<see cref="LedgerOrderHelper.ReorderByBalanceChain"/>、Issue #784）で時系列順に

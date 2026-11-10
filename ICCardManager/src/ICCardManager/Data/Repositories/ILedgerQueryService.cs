@@ -74,6 +74,16 @@ namespace ICCardManager.Data.Repositories
         Task<Ledger?> GetLatestBeforeDateAsync(string cardIdm, DateTime beforeDate);
 
         /// <summary>
+        /// 指定日より前（当日を含まない）の、貸出中レコードを除いた最終の利用履歴を取得する
+        /// （<see cref="GetLatestBeforeDateAsync"/> と同じ残高チェーンの規則で、母集団から貸出中レコードを除く）。
+        /// </summary>
+        /// <remarks>
+        /// Issue #2437: 残高整合性チェックが、導入行「前年度より繰越」の残高が前の行で裏付けられているか
+        /// （訂正案を出さないか）を確かめるために使う。貸出中レコードの残高は帳簿の残高ではないので数えない。
+        /// </remarks>
+        Task<Ledger?> GetLatestSettledBeforeDateAsync(string cardIdm, DateTime beforeDate);
+
+        /// <summary>
         /// 年度繰越残高を取得
         /// </summary>
         /// <remarks>
