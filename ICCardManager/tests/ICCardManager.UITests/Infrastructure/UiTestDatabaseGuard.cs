@@ -38,6 +38,12 @@ namespace ICCardManager.UITests.Infrastructure
     /// 起動では書かれない</description></item>
     /// </list>
     /// <para>
+    /// 撮影用の置き場所での起動（<see cref="AppFixture.LaunchWithSeedInScreenshotDataRoot"/>。Issue #2435）では、アプリは上の撮影機の状態のどれにも
+    /// 触れない（DB・更新通知ファイル・バックアップ・ログ・設定ファイルはすべて撮影用の置き場所の配下になり、その置き場所は起動のたびに空にする）。
+    /// それでもこのガードで退避と隔離を行うのは安全網のため — 置き場所の差し替えは DEBUG ビルドのアプリにしか無く、差し替えの入る前の古いビルドを
+    /// 起動すると、アプリは撮影機の置き場所を開く。
+    /// </para>
+    /// <para>
     /// 退避は 1 回の起動手順（<see cref="AppFixture.Launch"/> / <see cref="AppFixture.LaunchWithSeed"/>）につき
     /// <b>入口で 1 回だけ</b>行う。旧実装は起動のたびに「DB があれば退避する」を繰り返したため、
     /// 投入済み DB で 2 度目の起動をした時点で元の DB の退避ファイルを投入データで上書きし、

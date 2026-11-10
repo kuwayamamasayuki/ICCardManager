@@ -77,10 +77,11 @@ public partial class SettingsViewModel : ViewModelBase
     public string DefaultBackupPathNotice => BuildDefaultBackupPathNotice();
 
     /// <summary>
-    /// <see cref="DefaultBackupPathNotice"/> の文言を組み立てる（Issue #2328）
+    /// <see cref="DefaultBackupPathNotice"/> の文言を組み立てる（Issue #2328）。読み取り専用の表示なので、パスは
+    /// <see cref="AppDataPaths.ToDisplayPath"/> を通す（Issue #2435。撮影用の置き場所で動かした起動でも既定のパスを示す）
     /// </summary>
     internal static string BuildDefaultBackupPathNotice()
-        => $"※ 空欄の場合、このPCの {PathValidator.GetDefaultBackupPath()} にバックアップされます";
+        => $"※ 空欄の場合、このPCの {AppDataPaths.ToDisplayPath(PathValidator.GetDefaultBackupPath())} にバックアップされます";
 
     [ObservableProperty]
     private FontSizeOption _selectedFontSize;

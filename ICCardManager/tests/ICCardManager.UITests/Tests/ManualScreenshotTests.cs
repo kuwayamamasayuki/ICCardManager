@@ -27,6 +27,10 @@ namespace ICCardManager.UITests.Tests
     /// 仮想タッチが Debug 限定のため本クラスの対象外（第 2 段階）。
     /// </para>
     /// <para>
+    /// バックアップの保存先・DB のパスを表示する画面（<c>system.png</c> / <c>restore_list.png</c> / <c>connection_diagnostics.png</c>）も対象外。
+    /// 撮影用の置き場所で動かした Debug ビルドで撮る（<see cref="BackupLocationScreenshotTests"/>。Issue #2435）。
+    /// </para>
+    /// <para>
     /// 画像は <c>docs/screenshots/auto/</c> へ出力し、マニュアルが参照する <c>docs/screenshots/</c> へは
     /// 人が見比べてから差し替える（<see cref="ScreenshotHelper"/>）。
     /// </para>
@@ -291,7 +295,6 @@ namespace ICCardManager.UITests.Tests
         /// </param>
         [SkippableTheory]
         [InlineData("operation_log.png", TestConstants.OpenOperationLogButton, TestConstants.OperationLogDialogName, TestConstants.OperationLogList)]
-        [InlineData("connection_diagnostics.png", TestConstants.OpenConnectionDiagnosticsButton, TestConstants.ConnectionDiagnosticsDialogName, TestConstants.ConnectionDiagnosticsItemList)]
         public void system_システム管理から開く二段目のダイアログ(string fileName, string buttonName, string dialogName, string readyListName)
         {
             Skip.If(ScreenshotHelper.ShouldSkip, SkipReason);
@@ -326,35 +329,6 @@ namespace ICCardManager.UITests.Tests
             var child = DialogLocator.WaitForNestedDialog(
                 fixture, system.Window, TestConstants.TransferStationGroupDialogName);
             File.Exists(ScreenshotHelper.Capture(child, "transfer_station_groups.png")).Should().BeTrue();
-        }
-
-        /// <summary>
-        /// リストア用のバックアップ一覧（1 件選択した状態）。
-        /// </summary>
-        /// <remarks>
-        /// 手動バックアップの作成は OS 標準の <c>SaveFileDialog</c> を経るため自動化の対象外
-        /// （<c>restore_file_dialog.png</c> を撮り直し不要としたのと同じ判断）。一覧は起動時の
-        /// 自動バックアップ（<c>StartupTaskRunner</c>）が作った世代で埋まるので、押すのは一覧の更新だけにする。
-        /// 保存先は UI テスト専用のフォルダー（<see cref="UiTestDatabaseGuard.UiTestBackupDirectory"/>。Issue #2423）で、画像の「保存先」にもそれが写る。
-        /// </remarks>
-        [SkippableFact]
-        public void restore_list_リストア用バックアップ一覧()
-        {
-            Skip.If(ScreenshotHelper.ShouldSkip, SkipReason);
-
-            using var fixture = AppFixture.LaunchWithSeed(ScreenshotSeedData.Seed);
-            ScreenshotHelper.MoveToTopLeft(fixture.MainWindow);
-            var page = new MainWindowPage(fixture.MainWindow, fixture.Automation);
-
-            var system = page.ClickToolbarButtonAndWaitForDialog(
-                TestConstants.OpenSystemManageButton, TestConstants.SystemManageDialogName);
-            {
-                var item = WaitForRow(system, TestConstants.BackupFileList,
-                    "バックアップ一覧に 1 件以上あること（起動時の自動バックアップが作られていること）");
-                item.Patterns.SelectionItem.PatternOrDefault?.Select();
-
-                File.Exists(ScreenshotHelper.Capture(system.Window, "restore_list.png")).Should().BeTrue();
-            }
         }
 
         [SkippableFact]
@@ -399,7 +373,6 @@ namespace ICCardManager.UITests.Tests
         [InlineData("report.png", TestConstants.OpenReportButton, TestConstants.ReportDialogName)]
         [InlineData("export.png", TestConstants.OpenDataExportImportButton, TestConstants.DataExportImportDialogName)]
         [InlineData("settings.png", TestConstants.OpenSettingsButton, TestConstants.SettingsDialogName)]
-        [InlineData("system.png", TestConstants.OpenSystemManageButton, TestConstants.SystemManageDialogName)]
         public void dialog_ツールバーから開くダイアログ(string fileName, string buttonName, string dialogName)
         {
             Skip.If(ScreenshotHelper.ShouldSkip, SkipReason);
@@ -413,6 +386,10 @@ namespace ICCardManager.UITests.Tests
             {
                 var path = ScreenshotHelper.Capture(dialog.Window, fileName);
                 File.Exists(path).Should().BeTrue();
+
+                // Issue #2435: このアプリは UI テスト専用のバックアップ先を使う。設定画面のバックアップ先の入力欄（スクロールの外）が
+                // 写る範囲に入ると、マニュアルに UI テスト専用のパスが載るので、画面内の要素に出ていないことを撮った後に確かめる
+                ScreenshotAssertions.RequireNoUiTestPathShown(dialog.Window, onScreenOnly: true, path);
             }
             finally
             {
@@ -481,7 +458,7 @@ namespace ICCardManager.UITests.Tests
         /// 行の ControlType は一覧の種類で変わる（DataGrid は <c>DataItem</c>、ListBox は <c>ListItem</c>）ので、
         /// 種類ではなく <b>選択できること</b>（SelectionItem パターンを持つこと）で行を見分ける。
         /// </remarks>
-        private static AutomationElement WaitForRow(DialogPageBase page, string listName, string because)
+        internal static AutomationElement WaitForRow(DialogPageBase page, string listName, string because)
         {
             var list = page.FindByNameWithRetry(listName);
             list.Should().NotBeNull($"\"{listName}\" が存在すること");

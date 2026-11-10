@@ -158,6 +158,8 @@ namespace ICCardManager.Services
         private DiagnosticItem CheckDatabaseReachability()
         {
             var path = SafePath(() => _databaseInfo.DatabasePath);
+            // Issue #2435: 文言に載せるパスは表示用（撮影用に置き場所を差し替えた DEBUG ビルドの起動だけ読み替える）。調べるのは実際のパス
+            var shownPath = AppDataPaths.ToDisplayPath(path);
 
             // クエリが通ることと、ファイルへ実際に届くことの両方を要求する。
             // 前者だけではキャッシュ応答で切断を見逃す（ProbeDatabaseFileReachable の remarks 参照）。
@@ -165,15 +167,15 @@ namespace ICCardManager.Services
             {
                 return Ok(DiagnosticItemKind.DatabaseReachability, DatabaseReachabilityTitle,
                     "接続できます",
-                    $"データベース（{path}）を読み取れています。");
+                    $"データベース（{shownPath}）を読み取れています。");
             }
 
             // 共有モードとローカルモードでは原因も対処も異なるため文言を分ける。
             var detail = SafeBool(() => _databaseInfo.IsSharedMode)
-                ? $"データベース（{path}）に接続できません。" +
+                ? $"データベース（{shownPath}）に接続できません。" +
                   "共有フォルダへのネットワーク接続が切れているか、共有フォルダ名やアクセス権が変更された可能性があります。" +
                   "ネットワーク接続と共有フォルダの状態を確認し、改善しない場合はこの診断結果をIT担当へ送ってください。"
-                : $"データベース（{path}）に接続できません。" +
+                : $"データベース（{shownPath}）に接続できません。" +
                   "ファイルが削除・移動されたか、ディスクに障害が発生している可能性があります。" +
                   "バックアップからの復元が必要になるため、この診断結果をIT担当へ送ってください。";
 
@@ -192,12 +194,14 @@ namespace ICCardManager.Services
             }
 
             var path = SafePath(() => _databaseInfo.DatabasePath);
+            // Issue #2435: 文言に載せるパスは表示用（撮影用に置き場所を差し替えた DEBUG ビルドの起動だけ読み替える）。調べるのは実際のパス
+            var shownPath = AppDataPaths.ToDisplayPath(path);
 
             if (_databaseInfo.CheckWritable())
             {
                 return Ok(DiagnosticItemKind.DatabaseWritable, DatabaseWritableTitle,
                     "書き込めます",
-                    $"データベース（{path}）へ書き込めています。");
+                    $"データベース（{shownPath}）へ書き込めています。");
             }
 
             // 共有モードでは「ネットワークが切れかけている」が最も起こりやすい原因だが、
@@ -205,13 +209,13 @@ namespace ICCardManager.Services
             // 原因候補からネットワークを落とすと、電源が落ちた相手PCを疑えず
             // アクセス権の調査へ誤誘導するため、共有モードでは必ず含める。
             var detail = SafeBool(() => _databaseInfo.IsSharedMode)
-                ? $"データベース（{path}）へ書き込めません。" +
+                ? $"データベース（{shownPath}）へ書き込めません。" +
                   "共有フォルダへのネットワーク接続が切れかけているか、" +
                   "ファイルまたはフォルダのアクセス権が読み取り専用になっているか、" +
                   "他のパソコンが復元処理中でファイルを占有している可能性があります。" +
                   "共有フォルダのあるパソコンが起動しているかを確認し、" +
                   "フォルダの「変更」権限があるかIT担当に確認してください。"
-                : $"データベース（{path}）へ書き込めません。" +
+                : $"データベース（{shownPath}）へ書き込めません。" +
                   "ファイルの「読み取り専用」属性が付いているか、フォルダのアクセス権が不足しているか、" +
                   "ほかのプログラムがファイルを開いている可能性があります。" +
                   "ファイルのプロパティで「読み取り専用」を外し、フォルダの「変更」権限があるか確認してください。";
@@ -396,6 +400,8 @@ namespace ICCardManager.Services
 
         private DiagnosticItem CheckBackupFolderWritable(string? folder)
         {
+            // Issue #2435: 文言に載せるパスは表示用（CheckDatabaseReachability と同じ）
+            var shownFolder = AppDataPaths.ToDisplayPath(folder);
             var access = ProbeFolderWriteAccess(folder);
 
             switch (access)
@@ -403,7 +409,7 @@ namespace ICCardManager.Services
                 case FolderWriteAccess.Writable:
                     return Ok(DiagnosticItemKind.BackupFolderWritable, BackupFolderWritableTitle,
                         "書き込めます",
-                        $"バックアップ保存先（{folder}）へ書き込めています。");
+                        $"バックアップ保存先（{shownFolder}）へ書き込めています。");
 
                 case FolderWriteAccess.PathNotSpecified:
                     return Error(DiagnosticItemKind.BackupFolderWritable, BackupFolderWritableTitle,
@@ -415,21 +421,21 @@ namespace ICCardManager.Services
                 case FolderWriteAccess.FolderNotFound:
                     return Error(DiagnosticItemKind.BackupFolderWritable, BackupFolderWritableTitle,
                         "フォルダが見つかりません",
-                        $"バックアップ保存先（{folder}）が見つかりません。" +
+                        $"バックアップ保存先（{shownFolder}）が見つかりません。" +
                         "フォルダが削除・移動されたか、ネットワーク接続が切れている可能性があります。" +
                         "設定画面（F5）で保存先を確認し、必要ならフォルダを作り直してください。");
 
                 case FolderWriteAccess.AccessDenied:
                     return Error(DiagnosticItemKind.BackupFolderWritable, BackupFolderWritableTitle,
                         "書き込み権限がありません",
-                        $"バックアップ保存先（{folder}）へ書き込む権限がありません。" +
+                        $"バックアップ保存先（{shownFolder}）へ書き込む権限がありません。" +
                         "フォルダのアクセス権が読み取り専用になっています。" +
                         "このフォルダへの「変更」権限を付けてもらうよう、IT担当へ依頼してください。");
 
                 default:
                     return Error(DiagnosticItemKind.BackupFolderWritable, BackupFolderWritableTitle,
                         "書き込めません",
-                        $"バックアップ保存先（{folder}）へ書き込めませんでした。" +
+                        $"バックアップ保存先（{shownFolder}）へ書き込めませんでした。" +
                         "ディスクの空き容量不足や、一時的な入出力エラーが考えられます。" +
                         "空きディスク容量の診断結果を確認し、しばらく待ってから再診断してください。");
             }
@@ -437,6 +443,8 @@ namespace ICCardManager.Services
 
         private DiagnosticItem CheckDiskFreeSpace(string? folder)
         {
+            // Issue #2435: 文言に載せるパスは表示用（CheckDatabaseReachability と同じ）
+            var shownFolder = AppDataPaths.ToDisplayPath(folder);
             var freeBytes = GetFreeSpaceBytes(folder);
             var formatted = DiskSpaceHelper.FormatBytes(freeBytes);
 
@@ -454,7 +462,7 @@ namespace ICCardManager.Services
                 var threshold = DiskSpaceHelper.FormatBytes(AppConstants.DiagnosticsLowDiskSpaceWarningBytes);
                 return Warning(DiagnosticItemKind.DiskFreeSpace, DiskFreeSpaceTitle,
                     formatted,
-                    $"バックアップ保存先（{folder}）の空き容量が {formatted} しかありません。" +
+                    $"バックアップ保存先（{shownFolder}）の空き容量が {formatted} しかありません。" +
                     $"バックアップは自動分を直近 {AppConstants.BackupRetentionDays} 日分、" +
                     $"手動分を最新 {AppConstants.MaxManualBackupGenerations} 件まで保持するため、" +
                     "このままではバックアップが失敗するおそれがあります。" +

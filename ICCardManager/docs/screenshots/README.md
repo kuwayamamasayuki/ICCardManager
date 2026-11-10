@@ -52,17 +52,17 @@ cd D:\OneDrive\交通系\src\ICCardManager
 |------|------|---------|
 | Release | メイン画面（待機状態／システム警告あり） | `main.png` `main_with_warnings.png` |
 | Release | 履歴照会画面（通常／統合対象の選択） | `history.png` `history_merge.png` |
-| Release | ツールバーから開くダイアログ | `card.png` `staff.png` `report.png` `export.png` `settings.png` `system.png` `admin_dashboard.png` |
-| Release | システム管理から開く二段目のダイアログ | `operation_log.png` `connection_diagnostics.png` `transfer_station_groups.png` |
+| Release | ツールバーから開くダイアログ | `card.png` `staff.png` `report.png` `export.png` `settings.png` `admin_dashboard.png` |
+| Release | システム管理から開く二段目のダイアログ | `operation_log.png` `transfer_station_groups.png` |
 | Release | 帳票の事前チェック結果 | `report_preflight.png` |
 | Release | バス停名未入力の履歴一覧 | `incomplete_busstop.png` |
-| Release | リストア用バックアップ一覧（1 件選択した状態） | `restore_list.png` |
 | Release | 画面の一部だけを撮るもの（要素の矩形で撮影） | `card_list_status_mixed.png`（カード一覧）`error_no_reader.png`（ステータスバーの接続状態と再接続ボタン） |
 | Debug | 職員証認識・貸出完了・返却完了（メイン画面と画面隅のトーストの両方を含む矩形で撮る） | `staff_recognized.png` `lend.png` `return.png` |
 | Debug | トースト単体（概要版マニュアル用。職員証認識は写真の職員証の氏名で撮る） | `toast_staff_recognized.png` `toast_lend.png` `toast_return.png` |
 | Debug | 返却後に開くダイアログ | `busstop.png` `companion_count.png` |
 | Debug | 仮想タッチ（DEBUG 限定の機能そのもの） | `virtual_touch.png` |
 | Debug | 職員証認証を経る画面 | `system_lend.png` `ledger_row_edit.png` |
+| Debug | バックアップの保存先・DB のパスを表示する画面（撮影用の置き場所で撮る） | `system.png` `restore_list.png`（リストア用バックアップ一覧、1 件選択した状態）`connection_diagnostics.png` |
 
 動作の要点：
 - 本体を Release と Debug の両方でビルドし、2 パスで撮る。タッチを要する画面は仮想タッチ（Debug 限定）で再現し、撮影モード（環境変数 `ICCARDMANAGER_SCREENSHOT_MODE=1`）で仮想タッチパネルを透明にし、起動時のテストデータ自動登録を止める
@@ -79,11 +79,13 @@ cd D:\OneDrive\交通系\src\ICCardManager
 - ステータスバーの「リーダー:」は撮影した PC の接続状態がそのまま写る（未接続なら「切断」）。警告欄もその PC の状態（journal_mode の低下など）を含み得るので、差し替え前に確認すること
 - 更新の案内（「新しいバージョン … が公開されています」）は写らない。撮影の間は、DB と同じフォルダーの `latest_version.txt` を DB と一緒に退避して取り除き、終わったら元へ戻す（撮影機に残ったこのファイルが案内を写していた）。撮影テスト（`main` / `main_with_warnings` / `history` / `history_merge` / `staff_recognized` / `lend` / `return`）は撮った後に案内が出ていないことを確かめ、出ていればその画像を `*_FAILED.png` へ改名して撮影を失敗にする（公開対象にならない）。このファイルが読み取り専用・使用中だと、撮影は何も触らずに中止して対処を案内する
 - 返却の撮影（`return` / `busstop` / `companion_count`）は、仮想タッチの「現在残高」へ「台帳の最新残高 − 運賃」（20,000 − 200 ＝ 19,800）を入れて返却する。既定値（台帳の最新残高）のまま返却すると「払出 200 なのに残高が変わらない」行が記録される（Issue #2425）。撮った後に撮影用の DB の残高チェーン（前行の残額 ＋ 受入 − 払出 ＝ 残額）を確かめ、切れていればその画像を `*_FAILED.png` へ改名して撮影を失敗にする。シードの残高を変えるときは `ScreenshotSeedData` の定数（`VirtualTouchCardSeededBalance`・`VirtualTouchFare`）を変える
-- 撮影で起動したアプリの自動バックアップは、本番の既定のバックアップ先ではなく撮影（UI テスト）専用のフォルダー `C:\ProgramData\ICCardManager.UITests\backup` に作られる（既定の場所へ作ると、同じ日の実 DB のバックアップが整理で押し出されていた）。撮影の終わりに既定の場所のファイル一覧が変わっていたら、その撮影は失敗になる。このため、次の画像には本番の既定と違う内容が写る（本体を変えずに表示だけを既定のパスに見せる方法は無い — 表示は実際に使っている保存先そのもので、既定の場所を使わせればこの不具合に戻る）。公開前にマニュアルの説明（既定は `C:\ProgramData\ICCardManager\backup`）と照らして確認すること:
-  - `system.png`・`restore_list.png`（システム管理）: 「保存先」に UI テスト専用のフォルダーが写る。「保持世代」「保存先の空き容量」と、`restore_list.png` の一覧・「N件のバックアップが見つかりました」も、そのフォルダー（撮影機で走らせた UI テストの世代）のものになる
-  - `connection_diagnostics.png`（接続診断）: パスは写らない。「バックアップ保存先」「空きディスク容量」「バックアップ実施状況」の判定は UI テスト専用のフォルダーに対するもの
-  - `settings.png`（設定）: バックアップ先の入力欄は撮影範囲（スクロールの外）に入っていないので写らない。配置が変わって写る範囲に入ると、ここにも UI テスト専用のフォルダーが写る
-  - `restore_list.png` の一覧と件数を撮影機の UI テストの履歴に左右させないよう、撮影の前に `C:\ProgramData\ICCardManager.UITests\backup` の中身を消しておく（UI テスト専用のフォルダーなので消してよい。開発機の実 DB の写しも含まれ得る。撮影の起動が新しい世代を作るので一覧は空にならない）
+- 撮影で起動したアプリの自動バックアップは、本番の既定のバックアップ先には作られない（既定の場所へ作ると、同じ日の実 DB のバックアップが整理で押し出されていた）。撮影の終わりに既定の場所のファイル一覧が変わっていたら、その撮影は失敗になる
+  - 多くの撮影では、UI テスト専用のフォルダー `C:\ProgramData\ICCardManager.UITests\backup` に作られる（画面に保存先が写らない撮影）
+  - バックアップの保存先・DB のパスを表示する画面（`system.png`・`restore_list.png`・`connection_diagnostics.png`）は Debug パスで撮り、アプリの置き場所ごと撮影用のフォルダー `C:\ProgramData\ICCardManager.UITests\screenshot-data` へ移して動かす（撮影モードの DEBUG ビルドだけが読む環境変数 `ICCARDMANAGER_SCREENSHOT_DATA_ROOT`）。このときアプリは、画面に出すパスを本番の置き場所の配下として表示する（「保存先: C:\ProgramData\ICCardManager\backup」「現在のデータベース: C:\ProgramData\ICCardManager\iccard.db」）。読み替えるのは表示だけで、Release ビルドには入らない（実際の画面は常に実際に使っている保存先を表示する）
+  - 撮影用のフォルダーは撮影のたびに空にするので、`restore_list.png` の一覧と「N件のバックアップが見つかりました」・「保持世代」は撮影機の撮影の履歴に左右されない（その撮影の起動が作った世代だけが並ぶ）。「保存先の空き容量」・接続診断の「空きディスク容量」は撮影機のドライブの値になる
+  - 3 枚の撮影は、撮った後に画面のどこにも UI テスト専用のフォルダー（`ICCardManager.UITests`）のパスが出ていないこと（UI Automation で読んだ文字。スクロールの外の欄も含む）を確かめ、あわせて既定のパスが出ていることを確かめる — `system.png`・`restore_list.png` は「保存先」が `C:\ProgramData\ICCardManager\backup` であること、`connection_diagnostics.png` は「データベース到達性」の項目を選んでから撮り、詳細欄が `C:\ProgramData\ICCardManager\iccard.db` を示していること（初期選択は問題のある最初の項目で、撮影機のリーダーの状態に左右されるため選び直す）。違えばその画像を `*_FAILED.png` へ改名して撮影を失敗にする（公開対象にならない）
+  - 既知の事象: 3 枚を続けて撮ると、実行の最初の撮影（`restore_list`）でダイアログのタイトルバーだけが描かれクライアント領域が白いまま 10 秒の待ちを超え、`restore_list_FAILED.png` になることがある（4 回観測。いずれも実行の最初の撮影で、その画像だけを撮り直すと通る。「応答なし」の表示は無く、未描画の白）。アプリの初回起動・撮影用の置き場所の新規マイグレーション・起動時バックアップが重なる最初の起動が重いためと見ており、撮影の仕組みの変更によるものではない。失敗した画像は公開されないので、その画像だけ撮り直せばよい
+  - `settings.png`（設定）: バックアップ先の入力欄は撮影範囲（スクロールの外）に入っていないので写らない。入力欄は編集する値なので読み替えない（この画像は Release パスで撮り、入力欄には UI テスト専用のフォルダーが入っている）。ツールバーから開くダイアログの撮影は、撮った後に**画面内に見えている要素**に UI テスト専用のフォルダーのパスが出ていないことを確かめ、出ていればその画像を `*_FAILED.png` へ改名して撮影を失敗にする（配置が変わって入力欄が写る範囲に入ったら気付ける。「見えている」は祖先の矩形との重なりで判定する — WPF の UIA の IsOffscreen はスクロールの外の要素にも false を返す）。設定画面の「※ 空欄の場合、このPCの … にバックアップされます」の注記は読み取り専用なので読み替えを通す
 - **投入データで作れない外部状態に依存する画像は自動撮影の対象外**。`error_no_reader.png` は撮影機に PaSoRi が繋がっていると「接続済み」の画像ができてしまうため、切断でなければ撮らずに Skip する。共有モードのネットワーク切断（`warning_network_disconnected.png`）と、OS 標準の保存ダイアログを経る手動バックアップ（`backup_completed_status.png`）は対話式スクリプトに残している
 - **職員証認証（`StaffAuthDialog`）を経る画面は Debug パスでしか撮れない**。履歴行の追加・貸出記録の作成は監査対象の操作で職員証のタッチを要求し、実カードリーダーの無い環境では DEBUG 限定の仮想タッチでしか通せない
 - 撮影中はアプリのウィンドウが画面左上へ移動して前面に出る。マウス・キーボードに触れないこと

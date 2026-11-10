@@ -138,31 +138,64 @@ namespace ICCardManager.UITests.Infrastructure
                 throw new ArgumentNullException(nameof(seed));
             }
 
-            return LaunchWithSeedCore(
+            return LaunchSeeded(seed, environment, dataRoot: null);
+        }
+
+        /// <summary>
+        /// 投入して起動する手順（<see cref="LaunchWithSeedCore"/>、または撮影用の置き場所での <see cref="LaunchWithSeedInDataRootCore"/>）へ、
+        /// 実際にアプリを起動する処理を渡す。アプリを起動する処理はここと <see cref="Launch"/> にしか置かない（手順を通さずに起動しない）。
+        /// </summary>
+        /// <param name="seed">投入処理。</param>
+        /// <param name="environment">アプリへ渡す環境変数。null なら渡さない。</param>
+        /// <param name="dataRoot">撮影用の置き場所（Issue #2435）。null なら開発機の置き場所でアプリを動かす（従来の手順）。</param>
+        private static AppFixture LaunchSeeded(Action<SQLiteConnection> seed, IReadOnlyDictionary<string, string>? environment, string? dataRoot)
+        {
+            Func<IDisposable> launchForMigration = () =>
+            {
+                var initialFixture = StartApplication(ownedDatabaseGuard: null, environment);
+                try
+                {
+                    // メインウィンドウを取得することでアプリが完全初期化（DB マイグレーション完了）を保証
+                    _ = initialFixture.MainWindow;
+                    return initialFixture;
+                }
+                catch
+                {
+                    initialFixture.Dispose();
+                    throw;
+                }
+            };
+            Action<string> seedDatabase = dbPath =>
+            {
+                using var conn = new SQLiteConnection($"Data Source={dbPath};Version=3");
+                conn.Open();
+                seed(conn);
+            };
+            Func<UiTestDatabaseGuard, AppFixture> launchOwningGuard = guard => StartApplication(guard, environment);
+
+            if (dataRoot == null)
+            {
+                return LaunchWithSeedCore(
+                    DbDirectory,
+                    UiTestDatabaseGuard.UiTestBackupDirectory,
+                    launchForMigration,
+                    seedDatabase,
+                    launchOwningGuard);
+            }
+
+            var fixture = LaunchWithSeedInDataRootCore(
                 DbDirectory,
                 UiTestDatabaseGuard.UiTestBackupDirectory,
-                launchForMigration: () =>
-                {
-                    var initialFixture = StartApplication(ownedDatabaseGuard: null, environment);
-                    try
-                    {
-                        // メインウィンドウを取得することでアプリが完全初期化（DB マイグレーション完了）を保証
-                        _ = initialFixture.MainWindow;
-                        return initialFixture;
-                    }
-                    catch
-                    {
-                        initialFixture.Dispose();
-                        throw;
-                    }
-                },
-                seedDatabase: dbPath =>
-                {
-                    using var conn = new SQLiteConnection($"Data Source={dbPath};Version=3");
-                    conn.Open();
-                    seed(conn);
-                },
-                launchOwningGuard: guard => StartApplication(guard, environment));
+                dataRoot,
+                launchForMigration,
+                seedDatabase,
+                launchOwningGuard);
+
+            // 起動している間は、DatabasePath（DB を読み返す確認・DatabaseProbe・DatabaseExclusiveLock が使う）を
+            // アプリが実際に開いている撮影用の置き場所の DB へ向ける。開発機の置き場所の DB はガードの仮の DB で、アプリは開いていない
+            _activeScreenshotDataRoot = dataRoot;
+            fixture._usesScreenshotDataRoot = true;
+            return fixture;
         }
 
         /// <summary>
@@ -183,9 +216,216 @@ namespace ICCardManager.UITests.Infrastructure
             new Dictionary<string, string> { ["ICCARDMANAGER_SCREENSHOT_MODE"] = "1" };
 
         /// <summary>
+        /// 撮影モードのアプリへ、アプリケーションデータの置き場所を渡す環境変数（Issue #2435。本体の
+        /// <c>App.ScreenshotDataRootEnvironmentVariable</c> と同じ名前。一致は単体テスト <c>ScreenshotDataRootTests</c> が固定する）。
+        /// DEBUG ビルドのアプリだけが読む。
+        /// </summary>
+        internal const string ScreenshotDataRootEnvironmentVariable = "ICCARDMANAGER_SCREENSHOT_DATA_ROOT";
+
+        /// <summary>
+        /// 撮影用の置き場所（Issue #2435）。<see cref="LaunchWithSeedInScreenshotDataRoot"/> が起動のたびに空にして作り直す。
+        /// </summary>
+        /// <remarks>
+        /// UI テスト専用のバックアップ先（<see cref="UiTestDatabaseGuard.UiTestBackupDirectory"/>）と同じく <c>%ProgramData%\ICCardManager.UITests</c> の配下に置く。
+        /// 画面に出るパスはアプリが本番の置き場所へ読み替えるが、読み替えの漏れは撮った後の確認
+        /// （<see cref="ScreenshotAssertions.RequireNoUiTestPathShown"/>）がこのフォルダー名（<see cref="UiTestDatabaseGuard.UiTestBackupRootFolderName"/>）で見つける。
+        /// </remarks>
+        internal static string ScreenshotDataRootDirectory { get; } = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),
+            UiTestDatabaseGuard.UiTestBackupRootFolderName,
+            "screenshot-data");
+
+        /// <summary>
+        /// 撮影用の置き場所（<see cref="ScreenshotDataRootDirectory"/>）でアプリを動かし、データを投入して起動する（Issue #2435）。
+        /// </summary>
+        /// <param name="seed"><see cref="LaunchWithSeed(Action{SQLiteConnection})"/> と同じ。撮影用の置き場所の DB へ投入する。</param>
+        /// <remarks>
+        /// <para>
+        /// システム管理画面（<c>system.png</c> / <c>restore_list.png</c>）と接続診断（<c>connection_diagnostics.png</c>）は、バックアップの保存先と
+        /// DB のパスを表示する。UI テストのアプリは開発機の実 DB のバックアップを押し出さないよう UI テスト専用のフォルダーへバックアップを作る（#2423）ので、
+        /// そのまま撮るとマニュアルの画像に撮影機にしか無いフォルダーが写る。ここでは撮影モードの環境変数でアプリの置き場所ごと撮影用のフォルダーへ移し、
+        /// 画面のパスは本体が本番の置き場所（<c>C:\ProgramData\ICCardManager</c>）の配下として表示する。
+        /// </para>
+        /// <para>
+        /// 置き場所の差し替えは DEBUG ビルドのアプリにしか無いので、Debug 起動（<see cref="LaunchConfiguration"/>）でなければ何もせずに止まる。
+        /// 開発機の DB は従来どおりガードで退避し、バックアップ先も UI テスト専用のフォルダーへ隔離する（安全網。差し替えの効かない古いビルドが
+        /// 開発機の置き場所を開いても、実 DB とそのバックアップに触れない）。差し替えが効かなかったことはマイグレーションのための起動の後に確かめて止まる。
+        /// </para>
+        /// </remarks>
+        public static AppFixture LaunchWithSeedInScreenshotDataRoot(Action<SQLiteConnection> seed)
+        {
+            if (seed == null)
+            {
+                throw new ArgumentNullException(nameof(seed));
+            }
+
+            ThrowUnlessDebugLaunch(LaunchConfiguration);
+
+            // 撮影モード（SuppressDebugTestData。置き場所の差し替えは撮影モードのときだけ読まれる）に、置き場所を足す
+            var environment = new Dictionary<string, string>();
+            foreach (var pair in SuppressDebugTestData)
+            {
+                environment[pair.Key] = pair.Value;
+            }
+
+            environment[ScreenshotDataRootEnvironmentVariable] = ScreenshotDataRootDirectory;
+
+            return LaunchSeeded(seed, environment, ScreenshotDataRootDirectory);
+        }
+
+        /// <summary>
+        /// 撮影用の置き場所での起動が Debug 起動でなければ例外を投げる（Issue #2435）。
+        /// </summary>
+        /// <param name="launchConfiguration">起動するアプリのビルド構成（<see cref="LaunchConfiguration"/>）。</param>
+        internal static void ThrowUnlessDebugLaunch(string launchConfiguration)
+        {
+            if (string.Equals(launchConfiguration, "Debug", StringComparison.Ordinal))
+            {
+                return;
+            }
+
+            throw new InvalidOperationException(
+                $"撮影用の置き場所でアプリを起動しようとしましたが、起動するビルド構成が {launchConfiguration} です。" +
+                "置き場所の差し替え（環境変数 " + ScreenshotDataRootEnvironmentVariable + "）は DEBUG ビルドのアプリにしか無く、" +
+                "このまま起動すると撮影用の投入データが画面に出ません。" +
+                "ICCARDMANAGER_UITEST_CONFIGURATION=Debug で実行してください（撮影は tools/take-screenshots-uitest.ps1 の Debug パスで走らせてください）。");
+        }
+
+        /// <summary>
+        /// <see cref="LaunchWithSeedInScreenshotDataRoot"/> の手順。アプリを起動せずに検証できるよう切り出している（Issue #2435）。
+        /// </summary>
+        /// <param name="dbDirectory">開発機の DB のフォルダー（ガードで退避する。安全網）。</param>
+        /// <param name="backupDirectory">開発機の DB に書く UI テスト専用のバックアップ先（安全網）。</param>
+        /// <param name="dataRoot">撮影用の置き場所。起動の前に空にして作り直す。</param>
+        /// <param name="launchForMigration">マイグレーションのための起動（<see cref="LaunchWithSeedCore"/> と同じ）。</param>
+        /// <param name="seedDatabase">撮影用の置き場所の DB のパスを受け取り、データを投入する。</param>
+        /// <param name="launchOwningGuard">本起動。受け取ったガードで、自身の Dispose 時に開発機の DB を復元すること。</param>
+        /// <param name="maxAttempts">ファイルが使用中のときの試行回数。</param>
+        internal static TFixture LaunchWithSeedInDataRootCore<TFixture>(
+            string dbDirectory,
+            string backupDirectory,
+            string dataRoot,
+            Func<IDisposable> launchForMigration,
+            Action<string> seedDatabase,
+            Func<UiTestDatabaseGuard, TFixture> launchOwningGuard,
+            int maxAttempts = UiTestDatabaseGuard.DefaultMaxAttempts)
+        {
+            ThrowIfDataRootOverlaps(dataRoot, dbDirectory);
+
+            var guard = UiTestDatabaseGuard.Acquire(dbDirectory, maxAttempts);
+            try
+            {
+                // 安全網: 差し替えが効かずにアプリが開発機の置き場所を開いても、既定のバックアップ先へ書かせない（#2423 と同じ隔離）
+                guard.IsolateBackupFolder(backupDirectory);
+
+                // 撮影用の置き場所は UI テストの持ち物なので、退避せずに空にする。前回の撮影の DB・バックアップの世代・ログを残すと、
+                // バックアップの一覧と件数が撮影機の撮影の履歴に左右される
+                ResetDataRoot(dataRoot);
+
+                using (launchForMigration())
+                {
+                }
+
+                var dataRootDatabase = Path.Combine(dataRoot, UiTestDatabaseGuard.DatabaseFileName);
+                ThrowIfDataRootNotUsed(dataRootDatabase);
+
+                seedDatabase(dataRootDatabase);
+                return launchOwningGuard(guard);
+            }
+            catch
+            {
+                guard.Restore();
+                throw;
+            }
+        }
+
+        /// <summary>
+        /// 撮影用の置き場所が開発機の置き場所と重なっていれば例外を投げる（空にするときに開発機の DB を消さないため）。
+        /// </summary>
+        internal static void ThrowIfDataRootOverlaps(string dataRoot, string dbDirectory)
+        {
+            var root = Path.GetFullPath(dataRoot).TrimEnd(Path.DirectorySeparatorChar);
+            var db = Path.GetFullPath(dbDirectory).TrimEnd(Path.DirectorySeparatorChar);
+            if (string.Equals(root, db, StringComparison.OrdinalIgnoreCase)
+                || root.StartsWith(db + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase)
+                || db.StartsWith(root + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))
+            {
+                throw new ArgumentException(
+                    $"撮影用の置き場所 {dataRoot} が開発機の置き場所 {dbDirectory} と重なっています。" +
+                    "撮影用の置き場所は起動のたびに空にするので、開発機の置き場所の外のフォルダーを指定してください。",
+                    nameof(dataRoot));
+            }
+        }
+
+        private static void ResetDataRoot(string dataRoot)
+        {
+            if (Directory.Exists(dataRoot))
+            {
+                try
+                {
+                    Directory.Delete(dataRoot, recursive: true);
+                }
+                catch (Exception ex) when (ex is IOException || ex is UnauthorizedAccessException)
+                {
+                    throw new InvalidOperationException(
+                        $"撮影用の置き場所 {dataRoot} を空にできませんでした（別のプロセスがファイルを開いています）。" +
+                        "前回の撮影で起動したピッすい（ICCardManager.exe）が残っていれば終了してから実行してください。",
+                        ex);
+                }
+            }
+
+            Directory.CreateDirectory(dataRoot);
+        }
+
+        /// <summary>
+        /// マイグレーションのための起動の後に、撮影用の置き場所にマイグレーション済みの DB ができていなければ例外を投げる（Issue #2435）。
+        /// </summary>
+        /// <remarks>
+        /// できていなければ、アプリは置き場所の差し替えを読まずに開発機の置き場所を開いた（Release ビルド・差し替えの入る前の古い Debug ビルド）。
+        /// そのまま撮ると、投入データの無い画面と開発機のパスが写る。開発機の DB とバックアップ先はガードと隔離で守られている。
+        /// </remarks>
+        internal static void ThrowIfDataRootNotUsed(string dataRootDatabase)
+        {
+            if (File.Exists(dataRootDatabase))
+            {
+                using var conn = new SQLiteConnection($"Data Source={dataRootDatabase};Version=3;Read Only=True");
+                conn.Open();
+                using var cmd = conn.CreateCommand();
+                cmd.CommandText = "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'staff'";
+                if (Convert.ToInt64(cmd.ExecuteScalar(), System.Globalization.CultureInfo.InvariantCulture) > 0)
+                {
+                    return;
+                }
+            }
+
+            throw new InvalidOperationException(
+                $"撮影用の置き場所に、アプリがマイグレーションした DB（{dataRootDatabase}）がありません。" +
+                $"起動したアプリが置き場所の差し替え（環境変数 {ScreenshotDataRootEnvironmentVariable}）を読まず、開発機の置き場所を開いています。" +
+                "本体を Debug 構成でビルドし直してから撮影してください。");
+        }
+
+        /// <summary>
         /// アプリが開くデータベースファイルのパス（Issue #2190）。テストが投入結果・操作結果を読み返すために使う。
         /// </summary>
-        public static string DatabasePath => Path.Combine(DbDirectory, UiTestDatabaseGuard.DatabaseFileName);
+        /// <remarks>
+        /// 撮影用の置き場所で起動している間（<see cref="LaunchWithSeedInScreenshotDataRoot"/>。Issue #2435）は、その置き場所の DB を指す。
+        /// 開発機の置き場所の DB はガードの仮の DB で、アプリが開いている DB ではない。
+        /// </remarks>
+        public static string DatabasePath => ResolveDatabasePath(DbDirectory, _activeScreenshotDataRoot);
+
+        /// <summary>
+        /// 撮影用の置き場所で起動しているフィクスチャの置き場所（起動していなければ null）。UI テストは 1 本ずつ走る（<c>[Collection("UI")]</c>）。
+        /// </summary>
+        private static volatile string? _activeScreenshotDataRoot;
+
+        /// <summary>このフィクスチャが撮影用の置き場所で起動したか（Dispose で <see cref="_activeScreenshotDataRoot"/> を戻す）。</summary>
+        private bool _usesScreenshotDataRoot;
+
+        /// <summary>
+        /// アプリが開いている DB のパスを決める（純粋関数。Issue #2435）。撮影用の置き場所で起動していればその置き場所、そうでなければ開発機の置き場所。
+        /// </summary>
+        internal static string ResolveDatabasePath(string dbDirectory, string? activeScreenshotDataRoot) =>
+            Path.Combine(activeScreenshotDataRoot ?? dbDirectory, UiTestDatabaseGuard.DatabaseFileName);
 
         /// <summary>
         /// <see cref="LaunchWithSeed"/> の手順（退避・バックアップ先の隔離・マイグレーション・投入・本起動・失敗時の復元）。
@@ -283,6 +523,31 @@ namespace ICCardManager.UITests.Infrastructure
         }
 
         /// <summary>
+        /// 起動するアプリへ渡す環境変数を整える（Issue #2435）。
+        /// </summary>
+        /// <param name="target">起動の環境変数（テストプロセスの環境変数を受け継いだもの）。</param>
+        /// <param name="environment">明示して渡す環境変数。null なら渡さない。</param>
+        /// <remarks>
+        /// 撮影用の置き場所（<see cref="ScreenshotDataRootEnvironmentVariable"/>）は、明示したときだけ渡す。起動するアプリはテストプロセスの環境変数を
+        /// 受け継ぐので、開発者のシェルに残っていると、撮影用の置き場所を使わない起動（<see cref="LaunchWithSeed(Action{SQLiteConnection})"/> 等）の
+        /// アプリまで置き場所が差し替わる。投入はガードの DB へ、アプリは撮影用の置き場所の DB を開き、データの無い画面を撮る
+        /// （DB を読み返す確認も別の DB を読む）。
+        /// </remarks>
+        internal static void ApplyEnvironment(System.Collections.Specialized.StringDictionary target, IReadOnlyDictionary<string, string>? environment)
+        {
+            target.Remove(ScreenshotDataRootEnvironmentVariable);
+            if (environment == null)
+            {
+                return;
+            }
+
+            foreach (var pair in environment)
+            {
+                target[pair.Key] = pair.Value;
+            }
+        }
+
+        /// <summary>
         /// アプリケーションを起動する。DB の退避は行わない（呼び出し元が <see cref="UiTestDatabaseGuard"/> を取得済み）。
         /// </summary>
         /// <param name="ownedDatabaseGuard">Dispose 時に復元するガード。復元の責任を持たない起動では null。</param>
@@ -314,13 +579,7 @@ namespace ICCardManager.UITests.Infrastructure
                 WorkingDirectory = projectRoot,
                 UseShellExecute = false
             };
-            if (environment != null)
-            {
-                foreach (var pair in environment)
-                {
-                    startInfo.EnvironmentVariables[pair.Key] = pair.Value;
-                }
-            }
+            ApplyEnvironment(startInfo.EnvironmentVariables, environment);
 
             var dotnetProcess = Process.Start(startInfo);
 
@@ -401,6 +660,12 @@ namespace ICCardManager.UITests.Infrastructure
             }
 
             _disposed = true;
+
+            // 撮影用の置き場所の DB へ向けた DatabasePath を、後始末の途中の例外（プロセスの待ち・UIA の解放）より先に戻す
+            if (_usesScreenshotDataRoot)
+            {
+                _activeScreenshotDataRoot = null;
+            }
 
             // アプリケーションを終了
             try

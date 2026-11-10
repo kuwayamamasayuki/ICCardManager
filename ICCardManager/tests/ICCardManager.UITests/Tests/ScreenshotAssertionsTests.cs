@@ -90,5 +90,106 @@ namespace ICCardManager.UITests.Tests
             Directory.GetFiles(_directory).Should().BeEquivalentTo(new[] { captured });
             File.ReadAllText(captured).Should().Be("正しい画像");
         }
+
+        [Fact]
+        public void UIテスト専用のフォルダーのパスが出ていたとき_撮った画像をFAILEDへ改名して例外にすること()
+        {
+            // Issue #2435: 読み替えを通さない表示が 1 つでもあれば、撮影機にしか無いパスがマニュアルの画像に載る
+            var captured = Path.Combine(_directory, "system.png");
+            File.WriteAllText(captured, "UI テスト専用のフォルダーが写った画像");
+            var texts = new[] { @"保存先: C:\ProgramData\ICCardManager.UITests\backup" };
+
+            Action act = () => ScreenshotAssertions.RejectCapturesIfUiTestPathShown(texts, new[] { captured });
+
+            var thrown = act.Should().Throw<InvalidOperationException>().Which;
+            thrown.Message.Should().Contain(@"ICCardManager.UITests\backup", "何が: 写っていたパスを示す")
+                .And.Contain("system_FAILED.png", "撮れた画像の残し場所を示す")
+                .And.EndWith("撮り直してください。", "どうすれば: 行動指示で終わる");
+            File.Exists(captured).Should().BeFalse("正規の名前で残すと、撮影スクリプトが「撮れた」と数えて公開し得る");
+            File.ReadAllText(Path.Combine(_directory, "system_FAILED.png")).Should().Be("UI テスト専用のフォルダーが写った画像");
+        }
+
+        [Fact]
+        public void UIテスト専用のフォルダーのパスが出ていないとき_撮った画像に触れないこと()
+        {
+            var captured = Path.Combine(_directory, "restore_list.png");
+            File.WriteAllText(captured, "正しい画像");
+
+            ScreenshotAssertions.RejectCapturesIfUiTestPathShown(Array.Empty<string>(), new[] { captured });
+
+            Directory.GetFiles(_directory).Should().BeEquivalentTo(new[] { captured });
+            File.ReadAllText(captured).Should().Be("正しい画像");
+        }
+
+        [Fact]
+        public void 保存先が既定のパスでないとき_撮った画像をFAILEDへ改名して例外にすること()
+        {
+            // UI テスト専用のフォルダー名を含まない別のパス（撮影用の置き場所の読み替えが別の名前を出した等）も、マニュアルの説明と食い違う
+            var captured = Path.Combine(_directory, "system.png");
+            File.WriteAllText(captured, "別のパスが写った画像");
+            var shown = TestConstants.BackupFolderTextPrefix + @"D:\ScreenshotData\backup";
+
+            Action act = () => ScreenshotAssertions.RequireBackupFolderShownAsDefault(shown, captured);
+
+            var thrown = act.Should().Throw<InvalidOperationException>().Which;
+            thrown.Message.Should().Contain(@"D:\ScreenshotData\backup", "何が: 表示されていたパスを示す")
+                .And.Contain(ScreenshotAssertions.DefaultBackupDirectory, "なぜ: マニュアルが説明する既定のパスを示す")
+                .And.EndWith("撮り直してください。");
+            File.Exists(captured).Should().BeFalse();
+            File.ReadAllText(Path.Combine(_directory, "system_FAILED.png")).Should().Be("別のパスが写った画像");
+        }
+
+        [Fact]
+        public void 保存先が既定のパスのとき_撮った画像に触れないこと()
+        {
+            var captured = Path.Combine(_directory, "system.png");
+            File.WriteAllText(captured, "正しい画像");
+
+            ScreenshotAssertions.RequireBackupFolderShownAsDefault(
+                TestConstants.BackupFolderTextPrefix + ScreenshotAssertions.DefaultBackupDirectory, captured);
+
+            Directory.GetFiles(_directory).Should().BeEquivalentTo(new[] { captured });
+            File.ReadAllText(captured).Should().Be("正しい画像");
+        }
+
+        [Theory]
+        [InlineData(null)]
+        [InlineData("")]
+        [InlineData("一覧から項目を選択すると、詳細と対処方法が表示されます。")]
+        [InlineData(@"データベース（D:\Other\iccard.db）を読み取れています。")]
+        [InlineData(@"データベース（C:\ProgramData\ICCardManager\iccard.db）へ書き込めています。")]
+        public void 接続診断の詳細が既定のDBを示していないとき_撮った画像をFAILEDへ改名して例外にすること(string? detail)
+        {
+            // Issue #2435: 不在の確認だけだと、詳細欄が読めない・空・案内のままでも緑になる
+            var captured = Path.Combine(_directory, "connection_diagnostics.png");
+            File.WriteAllText(captured, "詳細の無い画像");
+
+            Action act = () => ScreenshotAssertions.RequireDatabaseShownAsDefault(detail, captured);
+
+            act.Should().Throw<InvalidOperationException>().Which.Message
+                .Should().Contain(ScreenshotAssertions.DefaultDatabasePath).And.EndWith("撮り直してください。");
+            File.Exists(captured).Should().BeFalse();
+            File.Exists(Path.Combine(_directory, "connection_diagnostics_FAILED.png")).Should().BeTrue();
+        }
+
+        [Fact]
+        public void 接続診断の詳細が既定のDBを示しているとき_撮った画像に触れないこと()
+        {
+            var captured = Path.Combine(_directory, "connection_diagnostics.png");
+            File.WriteAllText(captured, "正しい画像");
+
+            ScreenshotAssertions.RequireDatabaseShownAsDefault(
+                $"データベース（{ScreenshotAssertions.DefaultDatabasePath}）を読み取れています。", captured);
+
+            Directory.GetFiles(_directory).Should().BeEquivalentTo(new[] { captured });
+        }
+
+        [Fact]
+        public void 既定のバックアップ先はProgramData直下のICCardManagerのbackupであること()
+        {
+            // マニュアルの本文（既定は C:\ProgramData\ICCardManager\backup）と同じ組み立て。UI テスト専用のフォルダーを含まない
+            ScreenshotAssertions.DefaultBackupDirectory.Should().EndWith(@"\ICCardManager\backup")
+                .And.NotContain(UiTestDatabaseGuard.UiTestBackupRootFolderName);
+        }
     }
 }

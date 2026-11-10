@@ -333,6 +333,30 @@ namespace ICCardManager.UITests.Infrastructure
         [UiaName]
         public const string BackupFileList = "バックアップファイル一覧";
 
+        /// <summary>
+        /// システム管理ダイアログの「保存先: …」（バックアップの保存先）の表示の先頭（Issue #2435）。
+        /// </summary>
+        /// <remarks>
+        /// XAML の Name は <c>SystemManageViewModel.BackupFolderText</c> へのバインドで、リテラルを持たない（TextBlock の本文で探す）。
+        /// 本体の文言との一致は単体テスト <c>ScreenshotDataRootTests</c> がソースを読んで固定する。
+        /// </remarks>
+        [NotUiaName]
+        public const string BackupFolderTextPrefix = "保存先: ";
+
+        /// <summary>接続診断ダイアログの、選んだ項目の詳細の TextBlock（Issue #2435）。</summary>
+        [UiaHelpText]
+        public const string ConnectionDiagnosticsDetailHelpText = "選択した項目の詳細と対処方法";
+
+        /// <summary>
+        /// 接続診断の「データベース到達性」の項目名（Issue #2435）。
+        /// </summary>
+        /// <remarks>
+        /// 本体の <c>ConnectionDiagnosticsService.DatabaseReachabilityTitle</c> の値で、一覧の行の TextBlock の本文で探す（XAML のリテラルではない）。
+        /// 一致は単体テスト <c>ScreenshotDataRootTests</c> がソースを読んで固定する。
+        /// </remarks>
+        [NotUiaName]
+        public const string DatabaseReachabilityItemName = "データベース到達性";
+
         /// <summary>帳票作成ダイアログの「すべてのカードを選択」ボタン（#1691）。</summary>
         [UiaName]
         public const string ReportSelectAllCardsButton = "すべてのカードを選択";
