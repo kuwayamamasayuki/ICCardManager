@@ -12,11 +12,11 @@ namespace ICCardManager.Common
     /// </summary>
     /// <remarks>
     /// <para>
-    /// 導入行かどうかは行自身の <see cref="Ledger.InitialRecordKind"/> で判定する。摘要で判定してよいのは、
-    /// <b>種別を持ち込む手段が摘要しか無い 2 か所</b>だけ — 列を足す前の行を埋めるマイグレーション 013 と、
-    /// 種別の列を持たない利用履歴 CSV から新しい行を取り込むとき（#2307 の <c>LedgerCsvLentRowPolicy</c> と同じ事情）。
-    /// どちらも 1 回だけ推定して列へ書き、以後は列を読む。静的検査（<c>InitialRecordSummaryComparisonConventionTests</c>）が
-    /// 本クラス以外での照合を禁じる。
+    /// 導入行かどうかは行自身の <see cref="Ledger.InitialRecordKind"/> で判定する。導入行はカード登録でだけ作り、
+    /// 手入力の行（履歴の「追加」・利用履歴 CSV の ID の無い新しい行）は摘要が導入行の文言でも導入行にしない。
+    /// 本クラスを呼んでよいのは、列を足す前の行を 1 回だけ埋めるマイグレーション 013 と、行編集の「受入と払出が両方0円」の
+    /// 注意（入力中の摘要の文字列を見るだけで、保存済みの行の判定ではない）の 2 か所だけ。静的検査
+    /// （<c>InitialRecordSummaryComparisonConventionTests</c>）が本クラス以外での照合と、この 2 か所以外からの呼び出しを禁じる。
     /// </para>
     /// <para>
     /// 照合する文言は「現在の組織設定」と「設定の既定値（<see cref="SummaryTextOptions"/> の初期値）」の両方。
@@ -26,7 +26,7 @@ namespace ICCardManager.Common
     /// </para>
     /// <para>
     /// <b>誤認の範囲</b>: 照合は摘要の完全一致（○月から繰越は組織設定の正規表現）なので、通常の行が導入行と認識されるのは
-    /// 摘要がこれらの文言そのものである行（履歴の「追加」や CSV で同じ摘要を手入力した行）だけ。これは列を足す前の
+    /// 摘要がこれらの文言そのものである行（列を足す前に履歴の「追加」や CSV で同じ摘要を手入力した行）だけ。これは列を足す前の
     /// 判定（摘要と現在の文言の比較）が既に導入行として扱っていた行と同じ集合に、既定の文言の行を加えたものなので、
     /// 埋めた後の判定が埋める前より広がるのは「既定の文言のまま残った手入力の行」に限られる。
     /// 貸出中レコード（<c>is_lent_record = 1</c>）は対象にしない。
@@ -76,7 +76,7 @@ namespace ICCardManager.Common
 
         /// <summary>
         /// 現在の組織設定（<see cref="SummaryGenerator.GetCurrentSummaryText"/>）と既定の文言で推定する。
-        /// 利用履歴 CSV の取り込みが使う。
+        /// 行編集の「両方0円」の注意（入力中の摘要）が使う。
         /// </summary>
         public static InitialRecordKind? InferWithCurrentSettings(string? summary) =>
             Infer(summary, SummaryGenerator.GetCurrentSummaryText());

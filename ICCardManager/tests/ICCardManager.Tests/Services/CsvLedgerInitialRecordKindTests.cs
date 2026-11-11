@@ -26,8 +26,8 @@ namespace ICCardManager.Tests.Services;
 /// <para>
 /// 利用履歴 CSV は種別の列を持たない（#2307「フラグを運べない形式」）。導入行を出力から除くことはできない（台帳の行そのもの）ので、
 /// 取り込む側で扱いを決める: 既存の行の更新では DB の種別を引き継ぎ（摘要を書き換えても導入行のまま）、
-/// ID の無い新しい行だけ摘要から推定する（現在の組織設定の文言と既定の文言の両方。<c>InitialRecordSummaryMatcher</c>）。
-/// ID が台帳に無い行は #2324 で拒否されるので、別の DB へ導入行を移す経路は無い。
+/// ID の無い新しい行は、摘要が導入行の文言でも導入行にしない（導入行はカード登録でだけ作る。手入力の行は履歴の「追加」も
+/// CSV も導入行にしない — ユーザー判断）。ID が台帳に無い行は #2324 で拒否されるので、別の DB へ導入行を移す経路は無い。
 /// </para>
 /// </remarks>
 [Collection(SummaryGeneratorCollection.Name)]
@@ -119,10 +119,10 @@ public class CsvLedgerInitialRecordKindTests : IDisposable
     }
 
     /// <summary>
-    /// ID の無い新しい行は摘要から種別を推定する（導入行の文言なら導入行、通常の行は導入行にしない）。
+    /// ID の無い新しい行は、摘要が導入行の文言でも導入行にしない（種別を持たせない）。
     /// </summary>
     [Fact]
-    public async Task 新しい行は摘要から種別を推定し通常の行は導入行にしないこと()
+    public async Task 新しい行は摘要が導入行の文言でも導入行にしないこと()
     {
         var path = await WriteCsvAsync("new_rows.csv",
             ",2026-03-01 00:00:00,0123456789ABCDEF,001,2月から繰越,,,5000,,,",
@@ -132,15 +132,14 @@ public class CsvLedgerInitialRecordKindTests : IDisposable
 
         result.Success.Should().BeTrue(string.Join(" / ", result.Errors.Select(e => e.Message)));
         _inserted.Should().HaveCount(2);
-        _inserted.Single(l => l.Summary == "2月から繰越").InitialRecordKind.Should().Be(InitialRecordKind.MidYearCarryover);
-        _inserted.Single(l => l.Summary == "鉄道（博多～天神）").InitialRecordKind.Should().BeNull();
+        _inserted.Should().OnlyContain(l => l.InitialRecordKind == null, "導入行はカード登録でだけ作る");
     }
 
     /// <summary>
-    /// 文言を変えた組織でも、変更前の文言（既定）と変更後の文言（現在）の両方の導入行を推定する。
+    /// 文言を変えた組織でも、変更前の文言（既定）・変更後の文言（現在）のどちらの新しい行も導入行にしない。
     /// </summary>
     [Fact]
-    public async Task 文言を変えた後も既定の文言と現在の文言の両方の新しい導入行を推定すること()
+    public async Task 文言を変えた後も既定の文言と現在の文言の新しい行を導入行にしないこと()
     {
         var options = new OrganizationOptions();
         options.SummaryText.CarryoverFromPreviousYear = "前年より持越";
@@ -152,7 +151,7 @@ public class CsvLedgerInitialRecordKindTests : IDisposable
         var result = await _importService.ImportLedgersAsync(path);
 
         result.Success.Should().BeTrue(string.Join(" / ", result.Errors.Select(e => e.Message)));
-        _inserted.Should().HaveCount(2).And.OnlyContain(l => l.InitialRecordKind == InitialRecordKind.FiscalYearStartCarryover);
+        _inserted.Should().HaveCount(2).And.OnlyContain(l => l.InitialRecordKind == null);
     }
 
     /// <summary>

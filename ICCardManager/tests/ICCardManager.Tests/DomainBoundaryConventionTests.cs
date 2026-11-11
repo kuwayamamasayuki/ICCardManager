@@ -71,7 +71,8 @@ public class DomainBoundaryConventionTests
     /// </summary>
     /// <remarks>
     /// <para>
-    /// 繰越 LIKE パターン導出（<c>GetMidYearCarryoverLikePattern</c>）は交通系固有の
+    /// 繰越 LIKE パターン導出（<c>GetMidYearCarryoverLikePattern</c>。Issue #2371 で SQL が導入行の種別の列で判定するようになり、
+    /// メソッドごと削除したので許可リストからも外した）は交通系固有の
     /// 「データの解釈」ではなく物品出納簿の様式に属する汎用ロジックであり、
     /// SQL 側の繰越判定を組織設定 <c>MidYearCarryoverFormat</c> へ追従させるために
     /// <c>LedgerRepository</c> がパラメータバインドで参照する。
@@ -91,7 +92,6 @@ public class DomainBoundaryConventionTests
     /// </remarks>
     private static readonly string[] GenericSummaryGeneratorCallsAllowedInDataLayer =
     {
-        "SummaryGenerator.GetMidYearCarryoverLikePattern(",
         "SummaryGenerator.GetCarryoverFromPreviousYearSummary(",
     };
 
@@ -188,20 +188,20 @@ public class DomainBoundaryConventionTests
     /// </summary>
     /// <remarks>
     /// 実データ（Data/ 配下のソース）だけに依存すると、許可リストの書き換えや
-    /// 除去ロジックの退行（例: 前方一致化で <c>GetMidYearCarryoverLikePatternX</c> まで
+    /// 除去ロジックの退行（例: 前方一致化で <c>GetCarryoverFromPreviousYearSummaryX</c> まで
     /// 許可してしまう）が「違反ゼロ」のまま素通りする。検査ロジックはサンプルで固定する
     /// （`.claude/rules/development-conventions.md`「空振り検出を『各対象が非空であること』で
     /// 書かない」）。
     /// </remarks>
     [Theory]
     // 許可された汎用メソッドの呼び出しだけの行 → 禁止記号は残らない
-    [InlineData("SummaryGenerator.GetMidYearCarryoverLikePattern());", false)]
+    [InlineData("SummaryGenerator.GetCarryoverFromPreviousYearSummary());", false)]
     // 固有メソッドの参照 → 従来どおり検出される
     [InlineData("var s = SummaryGenerator.GetChargeSummary();", true)]
     // 許可呼び出しと固有メソッドが同居する行 → 検出される
-    [InlineData("Use(SummaryGenerator.GetMidYearCarryoverLikePattern(), SummaryGenerator.Generate(d));", true)]
+    [InlineData("Use(SummaryGenerator.GetCarryoverFromPreviousYearSummary(), SummaryGenerator.Generate(d));", true)]
     // 許可メソッド名を前方に含む別メソッド → 検出される（前方一致で素通りしないこと）
-    [InlineData("SummaryGenerator.GetMidYearCarryoverLikePatternX();", true)]
+    [InlineData("SummaryGenerator.GetCarryoverFromPreviousYearSummaryX();", true)]
     // メソッド参照だけでなく型名の単独参照も検出される
     [InlineData("private readonly SummaryGenerator _generator;", true)]
     public void RemoveAllowedDataLayerCalls_KnownSamples_BehaveAsPinned(string line, bool shouldRemainForbidden)

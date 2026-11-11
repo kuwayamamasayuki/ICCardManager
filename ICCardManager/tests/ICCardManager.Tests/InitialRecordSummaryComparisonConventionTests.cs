@@ -20,8 +20,9 @@ namespace ICCardManager.Tests;
 /// （貸出中レコードの <see cref="LentRecordSummaryComparisonConventionTests"/>（#2044）と同じ形）。
 /// </para>
 /// <para>
-/// 摘要と照合してよいのは、種別を持ち込む手段が摘要しか無い場所（マイグレーション 013・利用履歴 CSV の新しい行・
-/// 行編集で入力中の摘要への注意）から呼ぶ <c>Common/InitialRecordSummaryMatcher.cs</c> だけ。
+/// 摘要と照合してよいのは <c>Common/InitialRecordSummaryMatcher.cs</c> だけで、それを呼んでよいのは
+/// マイグレーション 013（種別の列を足す前の行を 1 回だけ埋める）と、行編集で入力中の摘要への注意（保存済みの行の判定ではない）だけ。
+/// 利用履歴 CSV の新しい行は導入行にしない（導入行はカード登録でだけ作る。ユーザー判断）ので呼ばない。
 /// 「摘要との照合の不在」と「種別による判定の実在」を対で表明する（前者だけだと判定そのものを消した実装でも緑になる）。
 /// 入力はコメントだけを除き文字列リテラルは残す（SQL の検査のため）。
 /// </para>
@@ -31,6 +32,8 @@ public class InitialRecordSummaryComparisonConventionTests
     private const string MatcherFile = "Common/InitialRecordSummaryMatcher.cs";
     private const string SummaryGeneratorFile = "Services/SummaryGenerator.cs";
     private const string OrganizationOptionsFile = "Services/OrganizationOptions.cs";
+    private const string MigrationFile = "Data/Migrations/Migration_013_AddInitialRecordKind.cs";
+    private const string RowEditFile = "ViewModels/LedgerRowEditViewModel.cs";
 
     /// <summary>
     /// 禁止する形と、それを書いてよいファイル（定義そのもの）。
@@ -55,6 +58,9 @@ public class InitialRecordSummaryComparisonConventionTests
         // 繰越の文言の設定を直接読んで照合する
         ("繰越の文言の設定の読み取り", new Regex(@"\.\s*(?:CarryoverFromPreviousYear|MidYearCarryoverPattern)\b"),
             new[] { MatcherFile, SummaryGeneratorFile, OrganizationOptionsFile }),
+        // 摘要からの推定の呼び出し。推定してよいのは移行（013）と、行編集の入力中の摘要への注意だけ（レビュー 1 回目）
+        ("摘要からの導入行の種別の推定", new Regex(@"\bInitialRecordSummaryMatcher\s*\.\s*Infer\w*\s*\("),
+            new[] { MatcherFile, MigrationFile, RowEditFile }),
         // SQL で摘要を導入行の文言と比べる（Issue #2371 より前の形）
         ("SQL での導入行の摘要の照合", new Regex(@"@midYearCarryoverPattern|@previousYearCarryoverSummary|'新規購入'"),
             Array.Empty<string>()),
@@ -89,6 +95,8 @@ public class InitialRecordSummaryComparisonConventionTests
     [InlineData("bool F(Ledger l) => l.Summary == InitialRecordSummaryMatcher.NewPurchaseSummary;", true)]
     [InlineData("var p = options.SummaryText.MidYearCarryoverPattern;", true)]
     [InlineData("const string Sql = \"AND summary <> '新規購入' AND summary NOT LIKE @midYearCarryoverPattern\";", true)]
+    [InlineData("var kind = InitialRecordSummaryMatcher.InferWithCurrentSettings(parsed.Summary);", true)]
+    [InlineData("var kind = InitialRecordSummaryMatcher . Infer(summary, null);", true)]
     [InlineData("summary = SummaryGenerator.GetCarryoverFromPreviousYearSummary();", false)]
     [InlineData("summary = InitialRecordSummaryMatcher.NewPurchaseSummary;", false)]
     [InlineData("bool F(Ledger l) => l.IsFiscalYearStartCarryover;", false)]
@@ -133,7 +141,12 @@ public class InitialRecordSummaryComparisonConventionTests
             .And.Contain("initial_record_kind IS NOT NULL");
         byPath["ViewModels/CardManageViewModel.cs"].Should().Contain("InitialRecordKind = initialRecordKind",
             "カード登録が導入行の種別を書くこと");
-        Regex.Matches(byPath["Services/Import/CsvImportService.Ledger.cs"], @"InitialRecordSummaryMatcher\s*\.\s*InferWithCurrentSettings\s*\(")
-            .Count.Should().Be(1, "利用履歴 CSV の新しい行だけ摘要から種別を推定すること");
+        // 推定を許した 2 か所が、実際に推定を使っていること（許可が空の許可にならない）
+        Regex.Matches(byPath[MigrationFile], @"InitialRecordSummaryMatcher\s*\.\s*Infer\s*\(")
+            .Count.Should().Be(1, "マイグレーション 013 が既存の行を摘要から埋めること");
+        Regex.Matches(byPath[RowEditFile], @"InitialRecordSummaryMatcher\s*\.\s*InferWithCurrentSettings\s*\(\s*Summary\s*\)")
+            .Count.Should().Be(1, "行編集の「両方0円」の注意が入力中の摘要を見ること");
+        byPath["Services/Import/CsvImportService.Ledger.cs"].Should().Contain("InitialRecordKind = existingLedgerForUpdate?.InitialRecordKind",
+            "利用履歴 CSV の新しい行は導入行にしない（既存の行は DB の種別を引き継ぐ）");
     }
 }

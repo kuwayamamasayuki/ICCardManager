@@ -770,6 +770,8 @@ namespace ICCardManager.Services
                 CardIdm = cardIdm,
                 Date = fiscalYearStart,
                 Summary = SummaryGenerator.GetCarryoverFromPreviousYearSummary(),
+                // Issue #2371: 年度の始まりを担う導入行として種別も持たせる（帳票が前年度繰越を合成しない形）
+                InitialRecordKind = InitialRecordKind.FiscalYearStartCarryover,
                 Income = carryoverAmount,
                 Expense = 0,
                 Balance = carryoverAmount,
