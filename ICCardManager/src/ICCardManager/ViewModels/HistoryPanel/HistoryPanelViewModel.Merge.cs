@@ -189,8 +189,8 @@ public partial class HistoryPanelViewModel
     [RelayCommand(CanExecute = nameof(CanUndoMergeHistoryLedgers))]
     public async Task UndoMergeHistoryLedgers()
     {
-        // DBから元に戻せる統合履歴を取得
-        var histories = await _ledgerMergeService.GetUndoableMergeHistoriesAsync();
+        // DBから元に戻せる統合履歴を取得（Issue #2374: 確認の文言を分けるため、ここでだけ Undo データを読んで判定する）
+        var histories = await _ledgerMergeService.GetUndoableMergeHistoriesForUndoAsync();
 
         if (histories.Count == 0)
         {
@@ -303,9 +303,15 @@ public partial class HistoryPanelViewModel
     /// <summary>
     /// Issue #2374: 統合した後の変更を確かめられない統合履歴を取り消すときの警告（何が・なぜ・どうすれば）。
     /// </summary>
+    /// <remarks>
+    /// 「失われることがあります」とするのは、旧い統合履歴でも明細の件数と id・所属の照合は働き、明細の追加・削除・分割では
+    /// 取り消しが中止されるため（失われるのは同じ id が別の内容で振り直された形と、金額の行編集）。
+    /// Undo データが壊れて読めない統合履歴にもこの警告が出る（確かめられない側へ倒す）が、その場合は「はい」を選んでも
+    /// 取り消しは失敗として案内され、台帳は変わらない。
+    /// </remarks>
     internal const string UnverifiableUnmergeWarning =
         "【注意】この統合は以前のバージョンで行ったため、統合した後にこの履歴の明細や金額を変更したかどうかを確かめられません。" +
-        "変更していた場合、取り消すとその変更は失われ、統合する前の内容に戻ります。\n" +
+        "変更していた場合、取り消すとその変更が失われ、統合する前の内容に戻ることがあります。\n" +
         "統合した後に変更したか分からないときは「いいえ」を選び、利用履歴詳細で明細と金額を確かめてください。" +
         "変更していたときは取り消さずに、履歴の分割・変更で手作業により整えてください。";
 

@@ -845,7 +845,7 @@ public class HistoryPanelViewModelTests : IDisposable
             .Callback((string m, string _) => message = m)
             .Returns(true);
 
-        var histories = await _ledgerMergeService.GetUndoableMergeHistoriesAsync();
+        var histories = await _ledgerMergeService.GetUndoableMergeHistoriesForUndoAsync();
         var item = HistoryPanelViewModel.ToMergeHistoryItems(histories).Single();
         var proceeded = await _history.ConfirmAndExecuteUnmergeAsync(item);
         return (message, proceeded);
@@ -909,7 +909,8 @@ public class HistoryPanelViewModelTests : IDisposable
 
         warning.Should().Contain("以前のバージョンで行った", "なぜ確かめられないか");
         warning.Should().Contain("変更したかどうかを確かめられません", "何が問題か");
-        warning.Should().Contain("その変更は失われ", "取り消したときに何が起きるか");
+        warning.Should().Contain("その変更が失われ").And.Contain("戻ることがあります",
+            "取り消したときに何が起きるか（旧い統合履歴でも件数・id の照合は働くので断定しない）");
         warning.Should().Contain("「いいえ」を選び").And.Contain("手作業により整えてください", "どうすればよいか");
         warning.Should().EndWith("ください。", "行動指示で終わる");
     }

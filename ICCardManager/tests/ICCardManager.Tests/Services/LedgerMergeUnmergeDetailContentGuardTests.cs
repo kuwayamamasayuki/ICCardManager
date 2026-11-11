@@ -211,7 +211,7 @@ public class LedgerMergeUnmergeDetailContentGuardTests : IDisposable
     {
         var (targetId, historyId, _) = await MergeTwoLedgersAsync();
 
-        (await _service.GetUndoableMergeHistoriesAsync()).Single(h => h.Id == historyId)
+        (await _service.GetUndoableMergeHistoriesForUndoAsync()).Single(h => h.Id == historyId)
             .CanVerifyChangesAfterMerge.Should().BeTrue("統合のたびに明細の内容を Undo データへ残す（#2302）");
 
         // #2302 より前の版が書いた形（明細の内容・統合直後の金額を持たない）の統合履歴を置く
@@ -221,7 +221,7 @@ public class LedgerMergeUnmergeDetailContentGuardTests : IDisposable
                 OriginalTarget = new LedgerSnapshot { Id = targetId, CardIdm = TestCardIdm },
             }), transaction: null);
 
-        (await _service.GetUndoableMergeHistoriesAsync()).Single(h => h.Id != historyId)
+        (await _service.GetUndoableMergeHistoriesForUndoAsync()).Single(h => h.Id != historyId)
             .CanVerifyChangesAfterMerge.Should().BeFalse();
     }
 
