@@ -689,13 +689,7 @@ public partial class SystemManageViewModel : ViewModelBase
                 var restoreSuccess = await _backupService.RestoreFromPreparedSourceAsync(prepared);
                 if (!restoreSuccess)
                 {
-                    // Issue #1108: 共有モード時は他PC接続が原因の可能性を示唆
-                    var errorMessage = _backupService.IsSharedMode
-                        ? "リストアに失敗しました。他のPCでアプリケーションが起動中の可能性があります。" +
-                          "すべてのPCでアプリケーションを終了してから再度お試しください。"
-                        : "リストアに失敗しました。バックアップファイルが破損しているか、データベースが使用中の可能性があります。" +
-                          "別のバックアップファイルを選ぶか、アプリケーションを再起動してから再度お試しください。";
-                    SetStatus(errorMessage, true);
+                    SetStatus(BuildRestoreFailedMessage(_backupService.IsSharedMode), true);
                     return RestoreOutcome.NotRestored;
                 }
 
@@ -723,6 +717,26 @@ public partial class SystemManageViewModel : ViewModelBase
             }
         }
     }
+
+    /// <summary>
+    /// リストアの置き換えが失敗した（<c>RestoreFromPreparedSourceAsync</c> が <c>false</c> を返した）ときの案内
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Issue #1108: 共有モード時は他の PC の接続が原因の可能性を示す。
+    /// </para>
+    /// <para>
+    /// Issue #2379: 置き換えの直前に一時コピーの採番（<c>sqlite_sequence</c>）を書き込めないと（ディスク不足等）、
+    /// 書きかけの一時コピーで置き換えないようリストアを中止する。共有モードではこの時点で他の PC の接続が無いことを
+    /// 確かめ終えており、通常モードの「別のバックアップファイルを選ぶ」も空き不足には効かないため、
+    /// 両方の文言に一時フォルダーの空き容量の可能性と、空きを作ってからやり直す案内を加える。
+    /// </para>
+    /// </remarks>
+    internal static string BuildRestoreFailedMessage(bool isSharedMode) => isSharedMode
+        ? "リストアに失敗しました。他のPCでアプリケーションが起動中か、このPCのディスク（一時フォルダーのあるドライブ。通常は C ドライブ）の空き容量が不足している可能性があります。" +
+          "すべてのPCでアプリケーションを終了し、ディスクの空きを作ってから再度お試しください。"
+        : "リストアに失敗しました。バックアップファイルが破損しているか、データベースが使用中か、ディスク（一時フォルダーのあるドライブ。通常は C ドライブ）の空き容量が不足している可能性があります。" +
+          "別のバックアップファイルを選ぶか、アプリケーションを再起動するか、ディスクの空きを作ってから再度お試しください。";
 
     /// <summary>
     /// リストアの完了を通知する（<see cref="ExecuteRestoreAsync"/> の処理中スコープを閉じた後に呼ぶ）
