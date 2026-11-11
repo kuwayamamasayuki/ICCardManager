@@ -97,12 +97,19 @@ namespace ICCardManager.Common.Exceptions
         /// 一時的な読み取り失敗（<see cref="ReadFailed"/>。「カードを置き直す」）とは利用者の取る行動が違うため、
         /// コードを分ける（エラーコードは 1 つの原因だけを指す。Issue #1985）。
         /// </remarks>
-        public static CardReaderException LibraryUnavailable()
+        /// <param name="innerException">読み込めなかった原因（<see cref="DllNotFoundException"/> 等）。分からなければ null</param>
+        public static CardReaderException LibraryUnavailable(Exception? innerException = null)
         {
             const string message = "felicalib.dll could not be loaded";
-            const string errorCode = "CR010";
-            return new CardReaderException(message, LibraryUnavailableUserMessage, errorCode);
+            return innerException != null
+                ? new CardReaderException(message, LibraryUnavailableUserMessage, LibraryUnavailableErrorCode, innerException)
+                : new CardReaderException(message, LibraryUnavailableUserMessage, LibraryUnavailableErrorCode);
         }
+
+        /// <summary>
+        /// felicalib.dll を読み込めないことを示すエラーコード（Issue #2377）。
+        /// </summary>
+        internal const string LibraryUnavailableErrorCode = "CR010";
 
         /// <summary>
         /// カード取り外し（読み取り中にカードが離された）

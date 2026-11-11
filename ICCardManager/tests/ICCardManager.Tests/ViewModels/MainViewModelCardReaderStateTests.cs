@@ -326,9 +326,28 @@ public class MainViewModelCardReaderStateTests
         thrown.ErrorCode.Should().Be("CR010", "一時的な読み取り失敗（CR002）とは利用者の取る行動が違う");
         thrown.UserFriendlyMessage.Should().Be(FelicaCardReader.FelicaLibUnavailableMessage,
             "例外の利用者向けの文言が表示されても、切断の行と食い違わないこと");
+        thrown.InnerException.Should().BeOfType<DllNotFoundException>("読み込めなかった原因を内部例外として運ぶこと");
         logger.Entries.Should().Contain(
             e => e.Level == LogLevel.Error && e.Exception is DllNotFoundException,
             "どの DLL を読み込めなかったかを IT 担当者が切り分けられるよう、例外ごと残すこと。実際: " + logger.FormatEntries());
+    }
+
+    [Fact]
+    public async Task ReconnectAsync_felicalibを読み込めないとき_原因のErrorは1行だけで再接続の失敗はWarningで残すこと()
+    {
+        var logger = new RecordingLogger<FelicaCardReader>();
+        using var reader = new FelicaCardReader(logger, Mock.Of<IStationMasterService>(), new DllNotFoundFelicaDevice());
+
+        await reader.ReconnectAsync();
+
+        var errors = logger.Entries.Where(e => e.Level == LogLevel.Error).ToList();
+        errors.Should().ContainSingle("原因（DllNotFoundException）の Error は IsFelicaLibLoaded の 1 行だけ。実際: " + logger.FormatEntries())
+            .Which.Exception.Should().BeOfType<DllNotFoundException>();
+        var warning = logger.Entries.Should().ContainSingle(
+            e => e.Level == LogLevel.Warning && e.Message.Contains("再接続に失敗しました"),
+            logger.FormatEntries()).Subject;
+        warning.Message.Should().Contain("CR010");
+        warning.Exception.Should().BeNull("原因は Error の行が例外ごと残している");
     }
 
     [Fact]

@@ -74,6 +74,20 @@ public class AppExceptionTests
     }
 
     [Fact]
+    public void CardReaderException_LibraryUnavailable_WithInnerException_PreservesInnerException()
+    {
+        // Arrange（Issue #2377: 読み込めなかった原因を内部例外として運ぶ）
+        var innerException = new DllNotFoundException("felicalib.dll");
+
+        // Act
+        var exception = CardReaderException.LibraryUnavailable(innerException);
+
+        // Assert
+        exception.InnerException.Should().BeSameAs(innerException);
+        exception.ErrorCode.Should().Be("CR010");
+    }
+
+    [Fact]
     public void CardReaderException_CardRemoved_WithInnerException_PreservesInnerException()
     {
         // Arrange
