@@ -389,13 +389,21 @@ namespace ICCardManager.Tests.Tools
                 "Source: \"..\\docs\\manual\\*.md\"; DestDir: \"{app}\\Docs\"; Flags: ignoreversion\r\n" +
                 "Source: \"..\\docs\\manual\\開発者ガイド.md\"; DestDir: \"{app}\\Docs\\dev\"; Flags: ignoreversion\r\n" +
                 "Source: \"..\\docs\\other\\開発者ガイド.md\"; DestDir: \"{app}\\Docs\"; Flags: ignoreversion\r\n" +
-                "Source: \"..\\publish\\app.exe\"; DestDir: \"{app}\"; Flags: ignoreversion\r\n";
+                "Source: \"..\\publish\\app.exe\"; DestDir: \"{app}\"; Flags: ignoreversion\r\n" +
+                "#ifdef BundleQuickstart\r\n" +
+                "Source: \"..\\docs\\manual\\かんたん導入ガイド.md\"; DestDir: \"{app}\\Docs\"; Flags: ignoreversion\r\n" +
+                "#endif\r\n" +
+                "[Setup]\r\n" +
+                "#define Outside \"[Files] の外のプリプロセッサの行は対象外\"\r\n";
 
             var parsed = ParseManualFileLines(sample);
 
-            parsed.Entries.Should().BeEmpty();
-            parsed.Unparsed.Should().HaveCount(6,
-                "属性の追加・順序の入れ替え・小文字の Source・ワイルドカード・Docs の下位フォルダー・docs\\manual 以外からの Docs への配置は形に合わないので報告する（Docs と無関係な行は対象外）");
+            parsed.Entries.Select(e => e.FileName).Should().Equal(new[] { "かんたん導入ガイド.md" },
+                "#ifdef の中の行も形に合えば読むが、囲んだプリプロセッサの行は報告される");
+            parsed.Unparsed.Should().HaveCount(8,
+                "属性の追加・順序の入れ替え・小文字の Source・ワイルドカード・Docs の下位フォルダー・docs\\manual 以外からの Docs への配置、" +
+                "[Files] の中のプリプロセッサの行（#ifdef・#endif）は形に合わないので報告する（Docs と無関係な行・[Files] の外の行は対象外）");
+            parsed.Unparsed.Should().Contain(new[] { "#ifdef BundleQuickstart", "#endif" });
         }
 
         // ── ヘルパー ─────────────────────────────────
@@ -433,6 +441,14 @@ namespace ICCardManager.Tests.Tools
 
                 if (!inFiles || line.StartsWith(";", StringComparison.Ordinal))
                 {
+                    continue;
+                }
+
+                // プリプロセッサの行（#if / #ifdef 等）は、囲んだ行を条件付きの同梱にする。条件を評価しないまま
+                // 無条件の同梱として数えないよう、[Files] の中にあれば形に合わない行として報告する（コードレビューで検出）
+                if (line.StartsWith("#", StringComparison.Ordinal))
+                {
+                    unparsed.Add(line);
                     continue;
                 }
 
