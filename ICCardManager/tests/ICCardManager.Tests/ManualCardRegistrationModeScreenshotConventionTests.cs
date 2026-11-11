@@ -33,7 +33,7 @@ public class ManualCardRegistrationModeScreenshotConventionTests
     private const string CarryoverImage = "card_registration_mode_carryover.png";
     private const string InitialImage = "card_registration_mode.png";
     private const string CaptureMethodSignature = "void card_registration_mode_カード登録方法の選択ダイアログ()";
-    private const string MonthIndexConstantName = "CarryoverMonthMayIndex";
+    private const string MonthIndexConstantName = "CarryoverMonthIndex";
 
     /// <summary>撮影テストの繰越月のコンボの位置（年度順。0 = 4 月）。</summary>
     private static readonly Regex MonthIndexConstant = new(
@@ -76,8 +76,7 @@ public class ManualCardRegistrationModeScreenshotConventionTests
         var section = MarkdownDocumentInspection.ExtractSection(ReadAdminManual(), SectionHeading);
         var source = ReadCaptureTestSource();
 
-        var constants = StringConstant.Matches(source).Cast<Match>()
-            .ToDictionary(m => m.Groups["name"].Value, m => m.Groups["value"].Value);
+        var constants = ExtractInputConstants(source);
         constants.Keys.Should().BeEquivalentTo(LabelByConstant.Keys, "撮影テストが入力する値の定数をすべて照合すること（抽出の空振りの検出を兼ねる）");
 
         foreach (var pair in LabelByConstant)
@@ -107,13 +106,27 @@ public class ManualCardRegistrationModeScreenshotConventionTests
     }
 
     [Theory]
-    [InlineData("x.Text = ScreenshotCarryoverStartingPage; x.Text = ScreenshotCarryoverBalance; x.Text = ScreenshotCarryoverIncomeTotal; x.Text = ScreenshotCarryoverExpenseTotal; c.Select(CarryoverMonthMayIndex);", 0)]
-    [InlineData("x.Text = ScreenshotCarryoverStartingPage; x.Text = \"6000\"; x.Text = ScreenshotCarryoverIncomeTotal; x.Text = ScreenshotCarryoverExpenseTotal; c.Select(CarryoverMonthMayIndex);", 2)]
+    [InlineData("x.Text = ScreenshotCarryoverStartingPage; x.Text = ScreenshotCarryoverBalance; x.Text = ScreenshotCarryoverIncomeTotal; x.Text = ScreenshotCarryoverExpenseTotal; c.Select(CarryoverMonthIndex);", 0)]
+    [InlineData("x.Text = ScreenshotCarryoverStartingPage; x.Text = \"6000\"; x.Text = ScreenshotCarryoverIncomeTotal; x.Text = ScreenshotCarryoverExpenseTotal; c.Select(CarryoverMonthIndex);", 2)]
     [InlineData("x.Text = ScreenshotCarryoverStartingPage; x.Text = ScreenshotCarryoverBalance; x.Text = ScreenshotCarryoverIncomeTotal; x.Text = ScreenshotCarryoverExpenseTotal; c.Select(2);", 2)]
-    [InlineData("x.Text = ScreenshotCarryoverStartingPage; x.Text = ScreenshotCarryoverBalance; x.Text = ScreenshotCarryoverIncomeTotal; c.Select(CarryoverMonthMayIndex);", 1)]
+    [InlineData("x.Text = ScreenshotCarryoverStartingPage; x.Text = ScreenshotCarryoverBalance; x.Text = ScreenshotCarryoverIncomeTotal; c.Select(CarryoverMonthIndex);", 1)]
     public void 抽出_定数を入力していない欄とリテラルの入力を数える(string body, int expectedViolations)
     {
         FindInputViolations(body).Should().HaveCount(expectedViolations);
+    }
+
+    [Fact]
+    public void 抽出_コメントの中の定数は拾わない()
+    {
+        // コメントアウトした古い定数が残っていても、重複キーの例外にならず、コメントの値を先に拾わない
+        const string source =
+            "// private const int CarryoverMonthIndex = 7;\n" +
+            "/* private const string ScreenshotCarryoverBalance = \"9999\"; */\n" +
+            "private const int CarryoverMonthIndex = 1;\n" +
+            "private const string ScreenshotCarryoverBalance = \"5000\"; // 例の値\n";
+
+        ExtractInputConstants(source).Should().Equal(new Dictionary<string, string> { ["Balance"] = "5000" });
+        CarryoverMonth(source).Should().Be(5);
     }
 
     [Theory]
@@ -162,10 +175,15 @@ public class ManualCardRegistrationModeScreenshotConventionTests
         return match.Success ? match.Groups["value"].Value : null;
     }
 
-    /// <summary>撮影テストが選ぶ繰越月（コンボの位置は年度順。0 = 4 月）。</summary>
-    private static int CarryoverMonth(string source)
+    /// <summary>撮影テストの入力値の定数（名前の ScreenshotCarryover を除いた部分 → 値）。コメントの中は拾わない。</summary>
+    internal static Dictionary<string, string> ExtractInputConstants(string source) =>
+        StringConstant.Matches(TestSourceInspection.RemoveCommentsPreservingLines(source)).Cast<Match>()
+            .ToDictionary(m => m.Groups["name"].Value, m => m.Groups["value"].Value);
+
+    /// <summary>撮影テストが選ぶ繰越月（コンボの位置は年度順。0 = 4 月）。コメントの中は拾わない。</summary>
+    internal static int CarryoverMonth(string source)
     {
-        var monthIndex = MonthIndexConstant.Match(source);
+        var monthIndex = MonthIndexConstant.Match(TestSourceInspection.RemoveCommentsPreservingLines(source));
         monthIndex.Success.Should().BeTrue("撮影テストの繰越月の位置の定数を抽出できること");
         return (int.Parse(monthIndex.Groups["value"].Value, CultureInfo.InvariantCulture) + 3) % 12 + 1;
     }

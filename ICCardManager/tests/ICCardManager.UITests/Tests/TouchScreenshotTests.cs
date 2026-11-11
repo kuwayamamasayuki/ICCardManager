@@ -52,7 +52,8 @@ namespace ICCardManager.UITests.Tests
         private static readonly TimeSpan CardRegistrationWait = TimeSpan.FromSeconds(TestConstants.DialogOpenTimeoutSeconds);
 
         // 繰越月のコンボは年度順（4 月〜3 月）。項目の UIA Name は表示名ではないため位置で選ぶ（CardRegistrationCarryoverUiTests と同じ）
-        private const int CarryoverMonthMayIndex = 1;
+        // 位置 1 = 5 月（管理者マニュアル §1.6.3 の例。月は CarryoverMonthFromIndex で値から導き、名前・文言に焼き付けない）
+        private const int CarryoverMonthIndex = 1;
 
         // 管理者マニュアル §1.6.3 の例の値（本文の「例では」と一致させる）
         private const string ScreenshotCarryoverStartingPage = "3";
@@ -289,13 +290,16 @@ namespace ICCardManager.UITests.Tests
 
             // 繰越月が撮影日の月より後だと、繰越レコードの日付の下に「※ 選択した5月は登録日（…）より後の月のため、前年…」の
             // 注意書きが出る（SummaryGenerator.GetMidYearCarryoverDateDescription）。本文に無い警告が図に載り、ダイアログの
-            // 最大の高さの中で累計払出の欄がスクロールの外へ押し出される（#2451 の不具合の再発）ため、その時期（1〜4 月）は撮らない。
+            // 最大の高さの中で累計払出の欄がスクロールの外へ押し出される（#2451 の不具合の再発）ため、注意書きが出る図は撮らない。
             // error_no_reader（切断でなければ撮らない）と同じく、撮影機の状態で正しい図が作れないときは Skip にし、
-            // 撮影スクリプトの完了報告で「撮れなかった画像」として名指しされ、-Publish でも公開されない
-            var carryoverMonth = CarryoverMonthFromIndex(CarryoverMonthMayIndex);
-            Skip.If(CarryoverDateNoteAppears(carryoverMonth, DateTime.Today),
-                $"Issue #2451: 撮影日の月（{DateTime.Today.Month}月）が繰越月（{carryoverMonth}月）より前のため、繰越レコードの日付に前年扱いの注意書きが出る。" +
-                $"{carryoverMonth}月以降に撮影してください。");
+            // 撮影スクリプトの完了報告で「撮れなかった画像」として名指しされ、-Publish でも公開されない。
+            // 撮影スクリプトは画像ごとに「今回作られたか」を数えるので、撮れる画像は撮ってから Skip する:
+            // - 初期表示の繰越月は前月。1 月の撮影だけ 12 月になって注意書きが出るので、両方とも撮らない（起動前に Skip）
+            // - 繰越の図の繰越月（5 月）は 1〜4 月の撮影で注意書きが出るので、初期表示を撮って後始末をしてから Skip
+            var today = ScreenshotDate();
+            var initialMonth = today.Month == 1 ? 12 : today.Month - 1;
+            Skip.If(CarryoverDateNoteAppears(initialMonth, today), CarryoverDateNoteSkipReason(today, initialMonth));
+            var carryoverMonth = CarryoverMonthFromIndex(CarryoverMonthIndex);
 
             // DEBUG ビルドの起動時テストデータは、DEBUG パネルの「交通系ICカード」と同じ IDm のカードを登録する。
             // 登録済みだとカード登録方法の選択ダイアログが開かないため、撮影スクリプトを介さずに dotnet test で
@@ -316,20 +320,38 @@ namespace ICCardManager.UITests.Tests
 
             var mode = new DialogPageBase(
                 DialogLocator.WaitForNestedDialog(fixture, manage.Window, TestConstants.CardRegistrationModeDialogName));
+
+            // 撮影の後始末（キャンセルで閉じ、カード・台帳の行が増えないこと）。繰越の図を Skip する経路でも、
+            // ダイアログを開いたまま抜けずに必ず通す
+            void CancelAndAssertNothingRegistered()
+            {
+                mode.ClickButton(TestConstants.CardRegistrationCancelButton);
+                Retry.WhileTrue(() => DialogLocator.IsOpen(fixture, manage.Window, TestConstants.CardRegistrationModeDialogName), CardRegistrationWait)
+                    .Success.Should().BeTrue("キャンセルで閉じること");
+                DatabaseProbe.Count("SELECT COUNT(*) FROM ic_card").Should().Be(cardCountBefore, "キャンセルしたのでカードは登録されないこと");
+                DatabaseProbe.Count("SELECT COUNT(*) FROM ledger").Should().Be(ledgerCountBefore, "キャンセルしたので台帳に行は増えないこと");
+            }
+
             mode.FindByNameWithRetry(TestConstants.CardRegistrationNewPurchaseRadio)!.AsRadioButton().IsChecked
                 .Should().BeTrue("初期表示は「新規購入」が選ばれていること（§1.6.1 の画像）");
-            // 初期表示の繰越月は前月なので、1 月の撮影では 12 月となり注意書きが出る（Skip の条件に含まれる。ここは確認）
+            // 初期表示の繰越月（前月）で注意書きが出る 1 月は冒頭で Skip 済み。ここは Skip の条件と本体の条件のずれを止める確認
             AssertNoCarryoverDateNote(ReadCarryoverDatePreview(mode), "初期表示の図");
             File.Exists(ScreenshotHelper.Capture(mode.Window, "card_registration_mode.png")).Should().BeTrue();
+
+            if (CarryoverDateNoteAppears(carryoverMonth, today))
+            {
+                CancelAndAssertNothingRegistered();
+                Skip.If(true, CarryoverDateNoteSkipReason(today, carryoverMonth));
+            }
 
             // §1.6.3 の例（4〜5 月を紙の出納簿 2 ページで管理し、6 月からピッすいで管理する）どおりに入力する。
             // 累計は「累計受入 − 累計払出 = 繰越額」が成り立つ値にする（前年度繰越は累計受入に含まれる）。
             var carryoverRadio = mode.FindByNameWithRetry(TestConstants.CardRegistrationCarryoverRadio)!;
             carryoverRadio.AsRadioButton().IsChecked = true;
-            mode.FindByNameWithRetry(TestConstants.CardRegistrationCarryoverMonthCombo)!.AsComboBox().Select(CarryoverMonthMayIndex);
+            mode.FindByNameWithRetry(TestConstants.CardRegistrationCarryoverMonthCombo)!.AsComboBox().Select(CarryoverMonthIndex);
             var income = mode.FindByNameWithRetry(TestConstants.CardRegistrationIncomeTotalTextBox)!;
             Retry.WhileFalse(() => income.IsEnabled, CardRegistrationWait).Success
-                .Should().BeTrue("5 月から繰越では累計受入を入力できること（3 月だけが無効。Issue #2326）");
+                .Should().BeTrue($"{carryoverMonth} 月から繰越では累計受入を入力できること（3 月だけが無効。Issue #2326）");
             mode.FindByNameWithRetry(TestConstants.CardRegistrationStartingPageTextBox)!.AsTextBox().Text = ScreenshotCarryoverStartingPage;
             mode.FindByNameWithRetry(TestConstants.CardRegistrationCarryoverBalanceTextBox)!.AsTextBox().Text = ScreenshotCarryoverBalance;
             income.AsTextBox().Text = ScreenshotCarryoverIncomeTotal;
@@ -337,7 +359,7 @@ namespace ICCardManager.UITests.Tests
 
             // 図に写る値が本文の例と同じであることを、撮る直前の画面で確かめる。単体の静的検査
             // （ManualCardRegistrationModeScreenshotConventionTests）は定数を入力していることまでしか見ないので、
-            // 欄の取り違え（繰越額の欄に累計受入の定数）や、コンボの並びが変わって位置 1 が 5 月でなくなった場合はここで止める
+            // 欄の取り違え（繰越額の欄に累計受入の定数）や、コンボの並びが変わって位置が本文の例の月を指さなくなった場合はここで止める
             var expectedByField = new Dictionary<string, string>
             {
                 [TestConstants.CardRegistrationStartingPageTextBox] = ScreenshotCarryoverStartingPage,
@@ -352,7 +374,7 @@ namespace ICCardManager.UITests.Tests
             }
 
             // 繰越月の翌月 1 日が繰越レコードの日付になる（5 月から繰越なら 6 月 1 日）。年は撮影日の年度で変わるので見ない。
-            // 撮影日が繰越月より前の月なら前年扱いの注意書きが続く（冒頭の Skip で撮らない）が、部分一致の表明はそれでも
+            // 撮影日が繰越月より前の月なら前年扱いの注意書きが続く（初期表示を撮った後の Skip で撮らない）が、部分一致の表明はそれでも
             // 緑になるので、注意書きが無いことも表明する（Skip の条件が SummaryGenerator の条件とずれたときに止める）
             var expectedRecordMonth = carryoverMonth % 12 + 1;
             var datePreview = ReadCarryoverDatePreview(mode);
@@ -364,11 +386,7 @@ namespace ICCardManager.UITests.Tests
             carryoverRadio.Focus();
             File.Exists(ScreenshotHelper.Capture(mode.Window, "card_registration_mode_carryover.png")).Should().BeTrue();
 
-            mode.ClickButton(TestConstants.CardRegistrationCancelButton);
-            Retry.WhileTrue(() => DialogLocator.IsOpen(fixture, manage.Window, TestConstants.CardRegistrationModeDialogName), CardRegistrationWait)
-                .Success.Should().BeTrue("キャンセルで閉じること");
-            DatabaseProbe.Count("SELECT COUNT(*) FROM ic_card").Should().Be(cardCountBefore, "キャンセルしたのでカードは登録されないこと");
-            DatabaseProbe.Count("SELECT COUNT(*) FROM ledger").Should().Be(ledgerCountBefore, "キャンセルしたので台帳に行は増えないこと");
+            CancelAndAssertNothingRegistered();
         }
 
         // ── ヘルパー ─────────────────────────────────
@@ -391,6 +409,13 @@ namespace ICCardManager.UITests.Tests
         /// ずれたときは <see cref="AssertNoCarryoverDateNote"/> が撮る前に止める）。
         /// </summary>
         private static bool CarryoverDateNoteAppears(int carryoverMonth, DateTime today) => carryoverMonth > today.Month;
+
+        /// <summary>撮影日（アプリの登録日と同じ今日）。注意書きの判定に使う。</summary>
+        private static DateTime ScreenshotDate() => DateTime.Today;
+
+        private static string CarryoverDateNoteSkipReason(DateTime today, int carryoverMonth) =>
+            $"Issue #2451: 繰越月（{carryoverMonth}月）が撮影日の月（{today.Month}月）より後のため、繰越レコードの日付に前年扱いの注意書きが出る。" +
+            $"注意書きの出ない月（繰越月以降の月）に撮影してください。";
 
         private static string ReadCarryoverDatePreview(DialogPageBase mode) =>
             Retry.WhileNull(() => mode.FindByNameStartsWith(TestConstants.CardRegistrationCarryoverDatePreviewPrefix), CardRegistrationWait)
