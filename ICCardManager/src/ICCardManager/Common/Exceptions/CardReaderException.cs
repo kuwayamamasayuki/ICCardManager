@@ -79,6 +79,39 @@ namespace ICCardManager.Common.Exceptions
         // 過去のログのエラーコードと取り違えないよう、欠番のコードは別の原因に再利用しない（ErrorCodeUniquenessConventionTests.RetiredCodes）。
 
         /// <summary>
+        /// felicalib.dll を読み込めないときの案内（Issue #2377）。
+        /// </summary>
+        /// <remarks>
+        /// メイン画面の警告エリアに「カードリーダー切断: 」に続けて表示される（<c>FelicaCardReader.FelicaLibUnavailableMessage</c>）。
+        /// この状態では接続の監視が動かず、「再接続」ボタンでも同じ理由で失敗するため、行動指示はアプリの再起動にし、
+        /// 再接続では直らないことも書く（押しても表示が変わらず、押した結果が分からないため）。行動指示で終える（error-messages.md）。
+        /// </remarks>
+        internal const string LibraryUnavailableUserMessage =
+            "felicalib.dll が見つからないか、Sony NFCポートソフトウェアがインストールされていません。「再接続」ボタンでは直りません。" +
+            "Sony NFCポートソフトウェアをインストールしてから、アプリを再起動してください。";
+
+        /// <summary>
+        /// felicalib.dll（またはそれが使う Sony NFC ポートソフトウェア）を読み込めない（Issue #2377）
+        /// </summary>
+        /// <remarks>
+        /// 一時的な読み取り失敗（<see cref="ReadFailed"/>。「カードを置き直す」）とは利用者の取る行動が違うため、
+        /// コードを分ける（エラーコードは 1 つの原因だけを指す。Issue #1985）。
+        /// </remarks>
+        /// <param name="innerException">読み込めなかった原因（<see cref="DllNotFoundException"/> 等）。分からなければ null</param>
+        public static CardReaderException LibraryUnavailable(Exception? innerException = null)
+        {
+            const string message = "felicalib.dll could not be loaded";
+            return innerException != null
+                ? new CardReaderException(message, LibraryUnavailableUserMessage, LibraryUnavailableErrorCode, innerException)
+                : new CardReaderException(message, LibraryUnavailableUserMessage, LibraryUnavailableErrorCode);
+        }
+
+        /// <summary>
+        /// felicalib.dll を読み込めないことを示すエラーコード（Issue #2377）。
+        /// </summary>
+        internal const string LibraryUnavailableErrorCode = "CR010";
+
+        /// <summary>
         /// カード取り外し（読み取り中にカードが離された）
         /// </summary>
         public static CardReaderException CardRemoved(Exception? innerException = null)
