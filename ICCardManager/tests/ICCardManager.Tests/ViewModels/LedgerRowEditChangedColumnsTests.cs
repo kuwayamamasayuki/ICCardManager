@@ -390,6 +390,54 @@ public sealed class LedgerRowEditChangedColumnsTests : IDisposable
         (await ReadAsync(id)).StaffName.Should().Be(blankName);
     }
 
+    [Theory]
+    [InlineData("")]
+    [InlineData("  ")]
+    public async Task 氏名が空文字や空白だけの行で職員を選んで保存すると_その職員が書かれること(string blankName)
+    {
+        // 上の Theory の対: 「無し」として比べても、職員が選んだ利用者は書く
+        var id = await SeedAndOpenAsync(lenderIdm: null, staffName: blankName);
+
+        _viewModel.SelectedStaff = _staffY;
+        await _viewModel.SaveCommand.ExecuteAsync(null);
+
+        var stored = await ReadAsync(id);
+        stored.LenderIdm.Should().Be(_staffY.StaffIdm);
+        stored.StaffName.Should().Be(_staffY.Name);
+    }
+
+    [Fact]
+    public async Task 開いた後に他PCが金額を直しても_残額だけ変えた保存は受入払出残額をこの画面の値で揃えて書くこと()
+    {
+        // レビュー指摘: 列ごとに書くと「他 PC の払出 300 ＋ この画面の残額 780」という誰も見ていない組み合わせになる
+        var id = await SeedAndOpenAsync(balance: 800);
+        Execute("UPDATE ledger SET expense = 300, balance = 700 WHERE id = @id", ("@id", id));
+
+        _viewModel.Balance = 780;
+        await _viewModel.SaveCommand.ExecuteAsync(null);
+
+        var stored = await ReadAsync(id);
+        stored.Income.Should().Be(0);
+        stored.Expense.Should().Be(210, "受入・払出・残額は組で、この画面の値で揃える");
+        stored.Balance.Should().Be(780);
+    }
+
+    [Fact]
+    public async Task 開いた後に他PCが金額を直しても_金額に触れない保存は受入払出残額を書かないこと()
+    {
+        // 対: 金額を組で書くのは、この画面でどれかを変えたときだけ
+        var id = await SeedAndOpenAsync(balance: 800);
+        Execute("UPDATE ledger SET income = 50, expense = 300, balance = 750 WHERE id = @id", ("@id", id));
+
+        _viewModel.Note = "備考だけ直した";
+        await _viewModel.SaveCommand.ExecuteAsync(null);
+
+        var stored = await ReadAsync(id);
+        stored.Income.Should().Be(50);
+        stored.Expense.Should().Be(300);
+        stored.Balance.Should().Be(750);
+    }
+
     [Fact]
     public async Task 時刻を持つ行で日付を変えて元へ戻しても_時刻を0時へ書き換えないこと()
     {

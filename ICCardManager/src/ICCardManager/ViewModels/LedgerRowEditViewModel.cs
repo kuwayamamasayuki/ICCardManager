@@ -1498,6 +1498,7 @@ namespace ICCardManager.ViewModels
         /// 比べるのは「保存で書く値」と「開いたときに読んだ行の値」。画面が自分で変えた値（派生）も変わった列に入る:
         /// 自動計算を有効にして再計算した残額、導入時残高の訂正案の適用で変わった受入・残額は、
         /// 書く値が開いたときの値と違うので書く。逆に、変えたあと元の値に戻した列は書かない。
+        /// 受入・払出・残額はどれかを変えたら 3 列を組で書く（他 PC の金額とこの画面の金額を混ぜて残高チェーンを崩さない）。
         /// </para>
         /// <para>
         /// 備考は画面が null を空文字で表示するので、null と空文字を同じ「未入力」として比べる
@@ -1516,10 +1517,11 @@ namespace ICCardManager.ViewModels
             var opened = _openedLedger;
             if (opened == null)
             {
-                // Edit モードの初期化で必ず設定される。来た場合は従来どおりすべて書く（書くべき変更を捨てない側へ倒す）
-                return LedgerRowEditColumns.Date | LedgerRowEditColumns.Summary | LedgerRowEditColumns.Income
-                    | LedgerRowEditColumns.Expense | LedgerRowEditColumns.Balance | LedgerRowEditColumns.Staff
+                // Edit モードの初期化で必ず設定される。来た場合は従来どおりすべて書く（書くべき変更を捨てない側へ倒す）。
+                // ただし一覧に無い利用者（#2300）は書く値として正しくない（目印付きの表示名・空の IDm）ので、ここでも書かない
+                var all = LedgerRowEditColumns.Date | LedgerRowEditColumns.Summary | AmountColumns
                     | LedgerRowEditColumns.Note | LedgerRowEditColumns.CompanionCount;
+                return IsUnlistedStaff(selectedStaff) ? all : all | LedgerRowEditColumns.Staff;
             }
 
             var columns = LedgerRowEditColumns.None;
@@ -1534,19 +1536,12 @@ namespace ICCardManager.ViewModels
                 columns |= LedgerRowEditColumns.Summary;
             }
 
-            if (Income != opened.Income)
+            // 受入・払出・残額は「受入 − 払出 = 残額の増減」で結び付いた組なので、どれかを変えたら 3 列を組で書く
+            // （列ごとに書くと、他 PC が払出・残額を直した後にこの画面で残額だけ変えた保存が、誰も見ていない
+            // 「他 PC の払出 ＋ この画面の残額」の組み合わせを作り、残高チェーンを崩す。#2375 のレビューで検出）
+            if (Income != opened.Income || Expense != opened.Expense || Balance != opened.Balance)
             {
-                columns |= LedgerRowEditColumns.Income;
-            }
-
-            if (Expense != opened.Expense)
-            {
-                columns |= LedgerRowEditColumns.Expense;
-            }
-
-            if (Balance != opened.Balance)
-            {
-                columns |= LedgerRowEditColumns.Balance;
+                columns |= AmountColumns;
             }
 
             if (!string.Equals(Note ?? string.Empty, opened.Note ?? string.Empty, StringComparison.Ordinal))
@@ -1559,7 +1554,7 @@ namespace ICCardManager.ViewModels
                 columns |= LedgerRowEditColumns.CompanionCount;
             }
 
-            if ((selectedStaff == null || !ReferenceEquals(selectedStaff, _unlistedStaffEntry))
+            if (!IsUnlistedStaff(selectedStaff)
                 && !SameStaff(selectedStaff?.StaffIdm, selectedStaff?.Name, opened.LenderIdm, opened.StaffName))
             {
                 // 職員が選び直していない（初期化で選んだまま）のに書く値が行と違うのは、開いたときに氏名で
@@ -1576,6 +1571,14 @@ namespace ICCardManager.ViewModels
 
             return columns;
         }
+
+        /// <summary>Issue #2375: 受入・払出・残額（組で書く）</summary>
+        private const LedgerRowEditColumns AmountColumns =
+            LedgerRowEditColumns.Income | LedgerRowEditColumns.Expense | LedgerRowEditColumns.Balance;
+
+        /// <summary>Issue #2300: 一覧に無い利用者（表示用の選択肢）を選んでいるか</summary>
+        private bool IsUnlistedStaff(Staff? selectedStaff) =>
+            selectedStaff != null && ReferenceEquals(selectedStaff, _unlistedStaffEntry);
 
         /// <summary>
         /// Issue #2375: 利用者（貸出者 IDm と氏名の組）が同じか。null・空文字・空白だけを同じ「無し」として比べる
