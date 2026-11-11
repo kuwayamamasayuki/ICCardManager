@@ -1037,10 +1037,12 @@ namespace ICCardManager.Services
         /// （下限と同じく「記録済み」の側へ倒す）。
         /// </para>
         /// <para>
-        /// <b>払出の行の日は、除いた利用と残高不足の組（<see cref="DetectInsufficientBalancePattern"/>）になるチャージも除く</b>。
+        /// <b>残高不足の組（<see cref="DetectInsufficientBalancePattern"/>）のチャージは、組の利用と同じ扱いにする</b>
+        /// （利用を除くならチャージも除き、利用を記録するならチャージも記録する。日の種類を問わない）。
         /// 残高不足の特殊処理では不足分のチャージと利用を 1 行にまとめ、受入 0・払出＝運賃 − チャージ額で記録する
-        /// （business-logic.md「残高不足時の特殊処理」）。この形で手入力した行は払出だけを持つので、組のチャージを取り込むと
-        /// 受入が二重になる。組ではない通常のチャージは取り込む。日付の無い履歴は判定できないので残す。
+        /// （business-logic.md「残高不足時の特殊処理」）。組を分けると、払出の行の日は組のチャージを取り込んで受入が二重になり、
+        /// 受入の行の日は組のチャージだけを除いて利用が相手を失い、払出＝運賃・備考なしで記録される（残高のチェーンが
+        /// チャージ額だけずれる）。組ではない通常のチャージは種類で決める。日付の無い履歴は判定できないので残す。
         /// </para>
         /// </remarks>
         /// <param name="usage">下限で抽出した後の履歴</param>
@@ -1062,18 +1064,18 @@ namespace ICCardManager.Services
                 return (usage, new List<LedgerDetail>());
             }
 
-            // 払出の行の日に、その日の履歴から残高不足の組を探し、組のチャージも記録済みとみなす
-            var chargesPairedWithRecordedUsage = new HashSet<LedgerDetail>();
+            // 手入力の行がある日の履歴から残高不足の組を探す（日の種類を問わない）。組のチャージは組の利用と同じ扱いにする
+            var usagePairedWithCharge = new Dictionary<LedgerDetail, LedgerDetail>();
             foreach (var dayGroup in usage.Where(d => d.UseDate.HasValue).GroupBy(d => d.UseDate.GetValueOrDefault().Date))
             {
-                if (!days.TryGetValue(dayGroup.Key, out var recordedDay) || !recordedDay.HasExpense)
+                if (!days.ContainsKey(dayGroup.Key))
                 {
                     continue;
                 }
 
-                foreach (var (charge, _) in DetectInsufficientBalancePattern(dayGroup.ToList()))
+                foreach (var (charge, pairedUsage) in DetectInsufficientBalancePattern(dayGroup.ToList()))
                 {
-                    chargesPairedWithRecordedUsage.Add(charge);
+                    usagePairedWithCharge[charge] = pairedUsage;
                 }
             }
 
@@ -1081,10 +1083,11 @@ namespace ICCardManager.Services
             var excluded = new List<LedgerDetail>();
             foreach (var detail in usage)
             {
-                if (chargesPairedWithRecordedUsage.Contains(detail)
-                    || (detail.UseDate.HasValue
-                        && days.TryGetValue(detail.UseDate.Value.Date, out var day)
-                        && IsRecordedByRowWithoutDetails(detail, day)))
+                // 組のチャージは、組の利用で判定する
+                var judged = usagePairedWithCharge.TryGetValue(detail, out var pairedUsageOfCharge) ? pairedUsageOfCharge : detail;
+                if (judged.UseDate.HasValue
+                    && days.TryGetValue(judged.UseDate.Value.Date, out var day)
+                    && IsRecordedByRowWithoutDetails(judged, day))
                 {
                     excluded.Add(detail);
                 }
