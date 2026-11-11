@@ -70,7 +70,7 @@
 
 | ライブラリ名 | バージョン | ライセンス | 用途 |
 |---|---|---|---|
-| [Microsoft.NET.Test.Sdk](https://github.com/microsoft/vstest) | 17.14.1 | MIT | テストフレームワーク基盤 |
+| [Microsoft.NET.Test.Sdk](https://github.com/microsoft/vstest) | 17.14.2 | MIT | テストフレームワーク基盤 |
 | [xunit](https://github.com/xunit/xunit) | 2.9.3 | Apache-2.0 | ユニットテストフレームワーク |
 | [xunit.runner.visualstudio](https://github.com/xunit/visualstudio.xunit) | 2.8.2 | Apache-2.0 | Visual Studio テストランナー |
 | [coverlet.collector](https://github.com/coverlet-coverage/coverlet) | 3.2.0 | MIT | コードカバレッジ収集 |
