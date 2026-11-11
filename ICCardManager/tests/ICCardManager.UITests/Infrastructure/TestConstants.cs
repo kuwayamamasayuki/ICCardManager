@@ -692,6 +692,13 @@ namespace ICCardManager.UITests.Infrastructure
         [UiaName]
         public const string CardRegistrationCarryoverMonthCombo = "繰越月の選択";
 
+        /// <summary>
+        /// 繰越レコードの日付の表示（Issue #2451）。コードビハインドが UIA Name を表示と同じ
+        /// 「繰越レコードの日付: 2026年6月1日（R8.6.1）」へ都度書き換えるので前方一致で探す。
+        /// </summary>
+        [UiaNamePrefix]
+        public const string CardRegistrationCarryoverDatePreviewPrefix = "繰越レコードの日付";
+
         [UiaName]
         public const string CardRegistrationStartingPageTextBox = "開始ページ番号";
 

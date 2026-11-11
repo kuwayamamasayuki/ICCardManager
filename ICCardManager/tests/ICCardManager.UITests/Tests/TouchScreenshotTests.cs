@@ -322,6 +322,29 @@ namespace ICCardManager.UITests.Tests
             mode.FindByNameWithRetry(TestConstants.CardRegistrationCarryoverBalanceTextBox)!.AsTextBox().Text = ScreenshotCarryoverBalance;
             income.AsTextBox().Text = ScreenshotCarryoverIncomeTotal;
             mode.FindByNameWithRetry(TestConstants.CardRegistrationExpenseTotalTextBox)!.AsTextBox().Text = ScreenshotCarryoverExpenseTotal;
+
+            // 図に写る値が本文の例と同じであることを、撮る直前の画面で確かめる。単体の静的検査
+            // （ManualCardRegistrationModeScreenshotConventionTests）は定数を入力していることまでしか見ないので、
+            // 欄の取り違え（繰越額の欄に累計受入の定数）や、コンボの並びが変わって位置 1 が 5 月でなくなった場合はここで止める
+            var expectedByField = new Dictionary<string, string>
+            {
+                [TestConstants.CardRegistrationStartingPageTextBox] = ScreenshotCarryoverStartingPage,
+                [TestConstants.CardRegistrationCarryoverBalanceTextBox] = ScreenshotCarryoverBalance,
+                [TestConstants.CardRegistrationIncomeTotalTextBox] = ScreenshotCarryoverIncomeTotal,
+                [TestConstants.CardRegistrationExpenseTotalTextBox] = ScreenshotCarryoverExpenseTotal,
+            };
+            foreach (var pair in expectedByField)
+            {
+                mode.FindByNameWithRetry(pair.Key)!.AsTextBox().Text
+                    .Should().Be(pair.Value, $"「{pair.Key}」の欄には管理者マニュアル §1.6.3 の例の値が入っていること");
+            }
+
+            // 繰越月の翌月 1 日が繰越レコードの日付になる（5 月から繰越なら 6 月 1 日）。年は撮影日の年度で変わるので見ない
+            var expectedRecordMonth = (CarryoverMonthMayIndex + 4) % 12 + 1;
+            Retry.WhileNull(() => mode.FindByNameStartsWith(TestConstants.CardRegistrationCarryoverDatePreviewPrefix), CardRegistrationWait)
+                .Result!.Name.Should().Contain($"年{expectedRecordMonth}月1日（",
+                    "選んだ繰越月が本文の例の月であること（コンボの位置の前提が崩れていないこと）");
+
             // 最後に入力した欄のキャレットが写らないよう、選んだ選択肢へフォーカスを戻してから撮る
             carryoverRadio.Focus();
             File.Exists(ScreenshotHelper.Capture(mode.Window, "card_registration_mode_carryover.png")).Should().BeTrue();
