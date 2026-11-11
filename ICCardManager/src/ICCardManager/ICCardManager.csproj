@@ -98,7 +98,10 @@
     <!-- MVVM Toolkit -->
     <PackageReference Include="CommunityToolkit.Mvvm" Version="8.4.2" />
 
-    <!-- FeliCa Library - Sony PaSoRi 用 -->
+    <!-- FeliCa Library - Sony PaSoRi 用。
+         Issue #2376: FelicaCardReader はカードを見失った・PaSoRi 未接続を felicalib の例外の文言で判定するため、版を上げるときは
+         新しい版の DLL を逆アセンブルして文言を確かめ直し、FelicaCardReader.FelicaLibMessagesVerifiedVersion も更新する
+         （食い違うと FelicaLibVersionPinTests が赤になる。DebugDataViewer.csproj の版も揃える）。 -->
     <PackageReference Include="FelicaLib.DotNet" Version="1.2.67" />
 
     <!-- Issue #2162: .NET アナライザー（ビルド時のみ。配布物には含まれない）。

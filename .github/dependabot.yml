@@ -15,6 +15,8 @@
 # その PR のブランチで dotnet restore --force-evaluate を実行し、変わったロックファイルを追加でコミットすること。
 # Dependabot は Linux で復元するため、本体のロックファイルからも RID の節（.NETFramework,Version=v4.8/win7-x86。
 # Windows でしか生成されない）が落ち、それだけでも NU1004 になる。再生成は必ず Windows の dotnet.exe で行うこと。
+# FelicaLib.DotNet の版上げの PR は FelicaLibVersionPinTests が赤になる（Issue #2376、意図どおり）。新しい版の
+# 例外の文言を確かめ直してから FelicaCardReader.FelicaLibMessagesVerifiedVersion を更新すること（開発者ガイド §5.7）。
 # アクション（github-actions）は commit SHA で固定しており、Dependabot は SHA と「# vX.Y.Z」を一緒に書き換える。
 version: 2
 
