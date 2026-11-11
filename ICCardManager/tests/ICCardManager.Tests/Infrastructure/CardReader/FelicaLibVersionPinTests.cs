@@ -324,7 +324,7 @@ public class FelicaLibVersionPinTests
     /// net48 のテストプロジェクトは System.Reflection.Metadata をコンパイル時に参照しないため、パッケージを足さずに
     /// <see cref="Module.ResolveString"/> で読む。ユーザー文字列のトークンは 0x70000000 | ヒープ内のオフセットで、
     /// 各要素は「圧縮した長さ（1・2・4 バイト）＋ UTF-16 ＋ 末尾 1 バイト」なので、読んだ文字列の長さから次のオフセットが決まる。
-    /// ヒープの末尾（詰め物）を過ぎると解決が例外になるので、そこで止める。
+    /// ヒープの末尾の詰め物やヒープの外は解決が例外になるので、そこで止める。
     /// </remarks>
     private static IReadOnlyList<string> ReadUserStrings(Module module)
     {
@@ -345,7 +345,8 @@ public class FelicaLibVersionPinTests
 
             if (value.Length == 0)
             {
-                offset += 1; // 長さ 0 の要素（詰め物）
+                // "" リテラル。長さ 0x01 ＋ 末尾バイトの 2 バイトを占める（ヒープ末尾の詰め物は解決が例外になり、ここへは来ない）
+                offset += 2;
                 continue;
             }
 
