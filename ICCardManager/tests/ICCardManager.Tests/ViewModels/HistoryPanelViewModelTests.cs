@@ -823,6 +823,100 @@ public class HistoryPanelViewModelTests : IDisposable
 
     #endregion
 
+    #region 統合した後の変更を確かめられない統合履歴の取り消し（Issue #2374）
+
+    /// <summary>
+    /// 取り消せる統合履歴を 1 件置き、一覧（<c>GetUndoableMergeHistoriesAsync</c>）→ 表示用アイテム → 確認、の経路で
+    /// 取り消したときの確認の文言を返す。Undo データだけを変えて、警告の有無を比べる。
+    /// </summary>
+    private async Task<(string? ConfirmationMessage, bool Proceeded)> UnmergeThroughListAsync(LedgerMergeUndoData undoData)
+    {
+        ArrangeUndoableMerge();
+        ArrangeAuthenticationStartingSession();
+        _ledgerRepositoryMock.Setup(r => r.GetMergeHistoriesAsync(It.IsAny<bool>()))
+            .ReturnsAsync(new List<(int, DateTime, int, string, string, bool)>
+            {
+                (UnmergeHistoryId, new DateTime(2026, 9, 1, 10, 15, 0), UnmergeTargetLedgerId,
+                    "9/1 鉄道（博多～天神）ほか1件を統合", System.Text.Json.JsonSerializer.Serialize(undoData), false),
+            });
+        string? message = null;
+        _navigationServiceMock
+            .Setup(n => n.ShowWarningConfirmation(It.IsAny<string>(), "統合の取り消し"))
+            .Callback((string m, string _) => message = m)
+            .Returns(true);
+
+        // 「統合を元に戻す」の経路（UndoMergeHistoryLedgers が呼ぶ一覧の読み込み）のまま通す
+        var item = (await _history.LoadUndoableMergeHistoryItemsAsync()).Single();
+        var proceeded = await _history.ConfirmAndExecuteUnmergeAsync(item);
+        return (message, proceeded);
+    }
+
+    private static LedgerMergeUndoData UndoDataWithoutSnapshots() => new()
+    {
+        OriginalTarget = new LedgerSnapshot { Id = UnmergeTargetLedgerId, CardIdm = "0102030405060708" },
+        DeletedSources = new List<LedgerSnapshot> { new() { Id = 11, CardIdm = "0102030405060708" } },
+    };
+
+    /// <summary>
+    /// Issue #2374: 統合した時点の明細の内容を持たない（以前のバージョンで行った）統合は、取り消しの前に
+    /// 統合後の変更を確かめられないので、確認で「変更していれば失われる」と警告する。取り消し自体は許す。
+    /// </summary>
+    [Fact]
+    public async Task Issue2374_明細の内容を持たない統合履歴は警告付きの確認で取り消せること()
+    {
+        var (message, proceeded) = await UnmergeThroughListAsync(UndoDataWithoutSnapshots());
+
+        message.Should().Contain(HistoryPanelViewModel.UnverifiableUnmergeWarning,
+            "統合後の変更を確かめられないことと、変更していれば失われることを確認で伝える");
+        message.Should().Contain("2026/09/01 10:15").And.Contain("9/1 鉄道（博多～天神）ほか1件を統合",
+            "取り消す対象の名指し（#2141）は警告があっても残す");
+        message.Should().EndWith("取り消してよろしいですか？");
+        proceeded.Should().BeTrue("警告するだけで、取り消し自体は許す");
+        _ledgerRepositoryMock.Verify(r => r.UnmergeLedgersAsync(
+            It.IsAny<LedgerMergeUndoData>(), It.IsAny<SQLiteTransaction>()), Times.Once);
+    }
+
+    /// <summary>
+    /// 対: 統合した時点の明細の内容を持つ統合履歴は、統合後に変更していれば取り消しが中止される（#2302）ため
+    /// 警告せず、従来どおりの文言で取り消せる。明細の無い統合（空の辞書）も「確かめられる」側。
+    /// </summary>
+    [Fact]
+    public async Task Issue2374_明細の内容を持つ統合履歴は従来どおりの確認で取り消せること()
+    {
+        var undoData = UndoDataWithoutSnapshots();
+        undoData.DetailSnapshots = new Dictionary<string, LedgerDetailSnapshot>();
+        undoData.MergedTargetAmounts = new MergedTargetAmounts();
+
+        var (message, proceeded) = await UnmergeThroughListAsync(undoData);
+
+        message.Should().Be(
+            "次の統合を取り消して、統合する前の履歴に戻します。\n\n" +
+            "統合日時: 2026/09/01 10:15\n" +
+            "内容: 9/1 鉄道（博多～天神）ほか1件を統合\n\n" +
+            "取り消してよろしいですか？");
+        proceeded.Should().BeTrue();
+        _ledgerRepositoryMock.Verify(r => r.UnmergeLedgersAsync(
+            It.IsAny<LedgerMergeUndoData>(), It.IsAny<SQLiteTransaction>()), Times.Once);
+    }
+
+    /// <summary>
+    /// 警告の文言は 3 要素（何が・なぜ・どうすれば）を持ち、行動指示で終わる（error-messages.md）。
+    /// </summary>
+    [Fact]
+    public void Issue2374_警告の文言は何が_なぜ_どうすればを含むこと()
+    {
+        var warning = HistoryPanelViewModel.UnverifiableUnmergeWarning;
+
+        warning.Should().Contain("以前のバージョンで行った", "なぜ確かめられないか");
+        warning.Should().Contain("変更したかどうかを確かめられません", "何が問題か");
+        warning.Should().Contain("その変更が失われ").And.Contain("戻ることがあります",
+            "取り消したときに何が起きるか（旧い統合履歴でも件数・id の照合は働くので断定しない）");
+        warning.Should().Contain("「いいえ」を選び").And.Contain("手作業により整えてください", "どうすればよいか");
+        warning.Should().EndWith("ください。", "行動指示で終わる");
+    }
+
+    #endregion
+
     /// <summary>
     /// Issue #2373: 統合履歴（取り消し用の情報）を保存できなかったとき、統合ごと巻き戻るので
     /// 「統合エラー」として案内し、「統合は完了」とも「元に戻せる」とも案内しないこと。
