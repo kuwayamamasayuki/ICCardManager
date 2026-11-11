@@ -175,7 +175,7 @@ ORDER BY card_type, card_number";
         /// </summary>
         /// <remarks>
         /// 払戻済のカード（<c>ic_card</c> は高々数十行）を起点にし、台帳は相関サブクエリの <c>l.card_idm = c.card_idm</c> で
-        /// <c>card_idm</c> を先頭に持つインデックス（<c>idx_ledger_card_date</c> / <c>idx_ledger_card_id</c>）から引く。
+        /// <c>card_idm</c> を先頭に持つインデックス（<c>idx_ledger_card_date</c>。Issue #2387 で <c>idx_ledger_card_id</c> を削除）から引く。
         /// 台帳を全件走査しない。列を関数に包まない（db-write-conventions「WHERE で列を関数に包まない」）。
         /// </remarks>
         internal const string RefundedWithLentRecordsSql = @"SELECT c.card_idm, c.card_type, c.card_number, c.note, c.is_deleted, c.deleted_at,
