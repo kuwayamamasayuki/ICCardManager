@@ -431,6 +431,12 @@ namespace ICCardManager.ViewModels
         /// </summary>
         private string? _initialSummary;
 
+        /// <summary>
+        /// Issue #2375: Editモードで開いたときに読んだ行（複製）。保存時にこの値と画面の値を比べ、
+        /// 変えた列だけを書く（<see cref="FindEditedColumns"/>）。Add モードでは null。
+        /// </summary>
+        private Ledger? _openedLedger;
+
         private List<LedgerDetail>? _editDetails;
 
         /// <summary>
@@ -595,6 +601,8 @@ namespace ICCardManager.ViewModels
             IsAutoBalance = false; // 編集モードでは手動入力開始
             _editPreviousBalance = previousBalance;
             _initialEditDate = ledger.Date;
+            // Issue #2375: 保存時に「変えた列」を決める基準。画面の値へ代入する前の、読んだときの行を複製で持つ
+            _openedLedger = LedgerCloner.Clone(ledger);
             // Issue #2306: 摘要の代入（Validate が走る）より前に置く
             _initialSummary = ledger.Summary;
             _editDetails = ledger.Details;
@@ -1391,29 +1399,21 @@ namespace ICCardManager.ViewModels
             // LedgerCloner ただ 1 つに寄せる（列を足したとき片方だけ更新される形を残さない。#1763 / #1959）。
             var beforeLedger = LedgerCloner.Clone(ledger);
 
-            // 値を更新
-            ledger.Date = EditDate;
-            ledger.Summary = Summary;
-            ledger.Income = Income;
-            ledger.Expense = Expense;
-            ledger.Balance = Balance;
-            ledger.Note = Note;
-            ledger.CompanionCount = CompanionCount;
+            // Issue #2375: 開いたときの値から変えた列だけを、読み直した行へ載せて書く。
+            // 変えていない列は読み直した値のまま残り、UPDATE の SET 句にも載らない。全列を画面の値で書くと、
+            // 共有フォルダモードで開いている間に別の PC が直した列（利用者・備考など）を、
+            // その列に触れていない保存が開いたときの古い値へ黙って巻き戻す（#1726）
+            var editedColumns = FindEditedColumns(selectedStaff);
+            if (editedColumns == LedgerRowEditColumns.None)
+            {
+                // 何も変えていない保存は書かない（書く値が無い）。監査ログにも「変更なし」の記録を残さない。
+                // 行が残っていることは上の読み直しで確かめたので、保存と同じく閉じる。
+                // バス停名の競合の印は下ろさない（明細は他 PC の変更で変わっているので、閉じたら一覧を読み直す）
+                IsSaved = true;
+                return;
+            }
 
-            // Issue #2300: 一覧に無い利用者（_unlistedStaffEntry）のまま保存する場合は、利用者の列に触れない。
-            // 上で読み直した行の LenderIdm / StaffName がそのまま UPDATE に載る（表示用の目印付きの名前や、
-            // IDm の無い行の空文字を書き込まない）。開いたときの値を書き戻すと、共有フォルダモードで
-            // 開いている間に別の PC が利用者を直した場合に、利用者に触れていない保存が古い値で上書きしてしまう
-            if (selectedStaff == null)
-            {
-                ledger.LenderIdm = null;
-                ledger.StaffName = null;
-            }
-            else if (!ReferenceEquals(selectedStaff, _unlistedStaffEntry))
-            {
-                ledger.LenderIdm = selectedStaff.StaffIdm;
-                ledger.StaffName = selectedStaff.Name;
-            }
+            ApplyEditedColumns(ledger, editedColumns, selectedStaff);
 
             // Issue #1458: Ledger UPDATE と監査ログ INSERT を同一トランザクションで実行
             // Issue #2202: トランザクションの本体ごと UI スレッドの外へ移す（DbContext.RunOffUiThreadAsync の remarks）。
@@ -1424,7 +1424,7 @@ namespace ICCardManager.ViewModels
                 var conflict = false;
                 using (var scope = await _dbContext.BeginTransactionAsync())
                 {
-                    updated = await _ledgerRepository.UpdateAsync(ledger, scope.Transaction);
+                    updated = await _ledgerRepository.UpdateEditedColumnsAsync(ledger, editedColumns, scope.Transaction);
                     if (updated)
                     {
                         // Issue #983: 摘要編集時にバス停名をDetailに同期
@@ -1477,8 +1477,135 @@ namespace ICCardManager.ViewModels
             }
             else
             {
-                // Issue #2325: UpdateAsync の WHERE は id だけなので、false は「行が無くなった」の 1 つに定まる
+                // Issue #2325: UpdateEditedColumnsAsync の WHERE は id だけなので、false は「行が無くなった」の 1 つに定まる
                 NotifyRowGoneConflict();
+            }
+        }
+
+        /// <summary>
+        /// Issue #2375: 開いたときの行（<see cref="_openedLedger"/>）から、画面で変えた列を求める。
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// 比べるのは「保存で書く値」と「開いたときに読んだ行の値」。画面が自分で変えた値（派生）も変わった列に入る:
+        /// 自動計算を有効にして再計算した残額、導入時残高の訂正案の適用で変わった受入・残額は、
+        /// 書く値が開いたときの値と違うので書く。逆に、変えたあと元の値に戻した列は書かない。
+        /// </para>
+        /// <para>
+        /// 備考は画面が null を空文字で表示するので、null と空文字を同じ「未入力」として比べる
+        /// （空文字を書く差分を作らない。<c>db-write-conventions.md</c>「null と空文字を同じ未設定として保存する列は、比較でも同じ正規化を通す」）。
+        /// </para>
+        /// <para>
+        /// 利用者は選択中の職員の IDm・氏名を、開いたときの行の <c>lender_idm</c>・<c>staff_name</c> と比べる。
+        /// 一覧に無い利用者（#2300）を選んでいる間は書かない（表示用の名前を書かない）。開いたときに氏名で
+        /// 職員へ紐づけた行（#1303: IDm が空・一致しない）や、職員一覧で氏名を変えた職員の行は、選び直さなくても
+        /// 書く値が行と違うので書く（従来どおり、保存で選択中の職員の IDm・氏名へ揃える。派生の変更）。
+        /// </para>
+        /// </remarks>
+        private LedgerRowEditColumns FindEditedColumns(Staff? selectedStaff)
+        {
+            var opened = _openedLedger;
+            if (opened == null)
+            {
+                // Edit モードの初期化で必ず設定される。来た場合は従来どおりすべて書く（書くべき変更を捨てない側へ倒す）
+                return LedgerRowEditColumns.Date | LedgerRowEditColumns.Summary | LedgerRowEditColumns.Income
+                    | LedgerRowEditColumns.Expense | LedgerRowEditColumns.Balance | LedgerRowEditColumns.Staff
+                    | LedgerRowEditColumns.Note | LedgerRowEditColumns.CompanionCount;
+            }
+
+            var columns = LedgerRowEditColumns.None;
+            if (EditDate != opened.Date)
+            {
+                columns |= LedgerRowEditColumns.Date;
+            }
+
+            if (!string.Equals(Summary, opened.Summary, StringComparison.Ordinal))
+            {
+                columns |= LedgerRowEditColumns.Summary;
+            }
+
+            if (Income != opened.Income)
+            {
+                columns |= LedgerRowEditColumns.Income;
+            }
+
+            if (Expense != opened.Expense)
+            {
+                columns |= LedgerRowEditColumns.Expense;
+            }
+
+            if (Balance != opened.Balance)
+            {
+                columns |= LedgerRowEditColumns.Balance;
+            }
+
+            if (!string.Equals(Note ?? string.Empty, opened.Note ?? string.Empty, StringComparison.Ordinal))
+            {
+                columns |= LedgerRowEditColumns.Note;
+            }
+
+            if (CompanionCount != opened.CompanionCount)
+            {
+                columns |= LedgerRowEditColumns.CompanionCount;
+            }
+
+            if (selectedStaff == null || !ReferenceEquals(selectedStaff, _unlistedStaffEntry))
+            {
+                if (!string.Equals(selectedStaff?.StaffIdm, opened.LenderIdm, StringComparison.Ordinal)
+                    || !string.Equals(selectedStaff?.Name, opened.StaffName, StringComparison.Ordinal))
+                {
+                    columns |= LedgerRowEditColumns.Staff;
+                }
+            }
+
+            return columns;
+        }
+
+        /// <summary>
+        /// Issue #2375: 変えた列だけ、画面の値を読み直した行へ載せる（変えていない列は読み直した値のまま）。
+        /// </summary>
+        private void ApplyEditedColumns(Ledger ledger, LedgerRowEditColumns columns, Staff? selectedStaff)
+        {
+            if ((columns & LedgerRowEditColumns.Date) != 0)
+            {
+                ledger.Date = EditDate;
+            }
+
+            if ((columns & LedgerRowEditColumns.Summary) != 0)
+            {
+                ledger.Summary = Summary;
+            }
+
+            if ((columns & LedgerRowEditColumns.Income) != 0)
+            {
+                ledger.Income = Income;
+            }
+
+            if ((columns & LedgerRowEditColumns.Expense) != 0)
+            {
+                ledger.Expense = Expense;
+            }
+
+            if ((columns & LedgerRowEditColumns.Balance) != 0)
+            {
+                ledger.Balance = Balance;
+            }
+
+            if ((columns & LedgerRowEditColumns.Note) != 0)
+            {
+                ledger.Note = Note;
+            }
+
+            if ((columns & LedgerRowEditColumns.CompanionCount) != 0)
+            {
+                ledger.CompanionCount = CompanionCount;
+            }
+
+            if ((columns & LedgerRowEditColumns.Staff) != 0)
+            {
+                // 一覧に無い利用者（#2300）を選んでいる間は FindEditedColumns が Staff を立てないので、ここへは来ない
+                ledger.LenderIdm = selectedStaff?.StaffIdm;
+                ledger.StaffName = selectedStaff?.Name;
             }
         }
 
