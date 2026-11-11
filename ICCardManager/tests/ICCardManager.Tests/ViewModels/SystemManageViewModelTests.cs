@@ -1351,7 +1351,7 @@ public class SystemManageViewModelTests : IDisposable
         var message = SystemManageViewModel.BuildRestoreFailedMessage(isSharedMode);
 
         message.Should().StartWith("リストアに失敗しました。");
-        message.Should().Contain("ディスク（一時フォルダー）の空き容量が不足している可能性があります。");
+        message.Should().Contain("ディスク（一時フォルダーのあるドライブ。通常は C ドライブ）の空き容量が不足している可能性があります。");
         message.Should().Contain("ディスクの空きを作ってから再度お試しください。");
         message.Should().Contain(isSharedMode ? "他のPCでアプリケーションが起動中" : "バックアップファイルが破損している",
             "既存の原因の案内も残す");
