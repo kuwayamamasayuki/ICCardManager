@@ -257,6 +257,13 @@ namespace ICCardManager.Services
             Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping
         };
 
+        /// <summary>
+        /// 統合履歴（Undo データ）の JSON 化。テストで失敗を注入するための継ぎ目（Issue #2373）。
+        /// 実データで System.Text.Json を確実に失敗させる入力が無いため、差し替えて検証する。
+        /// </summary>
+        internal Func<LedgerMergeUndoData, string> UndoDataSerializer { get; set; } =
+            data => JsonSerializer.Serialize(data, JsonOptions);
+
         public LedgerMergeService(
             ILedgerRepository ledgerRepository,
             SummaryGenerator summaryGenerator,
@@ -463,10 +470,6 @@ namespace ICCardManager.Services
             // 説明テキスト（UI表示用）
             var description = $"{DisplayFormatters.FormatDate(beforeLedgers[0].Date)} {string.Join(" + ", originalSummaryTexts)}";
 
-            // Issue #2373: 統合履歴（Undo データ）の JSON 化はトランザクションを開く前に済ませる
-            // （シリアライズの失敗は統合前の失敗として下の catch へ落ち、書き込みは 1 つも始まらない）。
-            var undoJson = JsonSerializer.Serialize(undoData, JsonOptions);
-
             // Issue #1954: 「成功」の意味を「統合が確定した」ことだけに定め、その確定位置を
             // scope.Commit() の直後へ置く（.claude/rules/db-write-conventions.md「コミット確定後の後処理を、
             // 成否の判定に巻き込まない」）。Issue #2373 で統合履歴の保存はコミットの前（同じトランザクション）へ
@@ -477,6 +480,11 @@ namespace ICCardManager.Services
 
             try
             {
+                // Issue #2373: 統合履歴（Undo データ）の JSON 化はトランザクションを開く前に済ませる
+                // （シリアライズの失敗は統合前の失敗として下の包括 catch へ落ち、書き込みは 1 つも始まらない。
+                // try の外に置くと例外が MergeAsync の外へ抜け、履歴画面は案内を出せない）。
+                var undoJson = UndoDataSerializer(undoData);
+
                 // Issue #1458: 統合と監査ログ INSERT を同一トランザクションで実行
                 var sourceIds = sources.Select(s => s.Id).ToList();
                 using (var scope = await _dbContext.BeginTransactionAsync().ConfigureAwait(false))
@@ -704,9 +712,9 @@ namespace ICCardManager.Services
         /// 統合は行われていないので、やり直してよいことまで伝える。
         /// </summary>
         internal const string MergeHistorySaveFailedErrorMessage =
-            "履歴の統合を中止しました。「統合を元に戻す」ための統合履歴を記録できなかったため、統合は行わず、" +
-            "履歴は統合前のままです。データベースが他の操作で使用中か、保存先へ一時的に接続できなかった可能性があります。" +
-            "しばらく待ってから、画面を最新の状態に更新して再度お試しください。";
+            "履歴の統合を中止しました。「統合を元に戻す」ための統合履歴をデータベースへ書き込めなかったため、統合は行わず、" +
+            "履歴は統合前のままです。データベースの保存先が他の操作で使用中か、一時的に接続できないか、空き容量が不足している可能性があります。" +
+            "しばらく待ってから、画面を最新の状態に更新して再度お試しください。繰り返し表示される場合は、管理者に連絡してください。";
 
         /// <summary>
         /// Issue #2302: 同じ統合先へ後から重ねた統合を残したまま、先の統合を取り消そうとして中止したときの文言。

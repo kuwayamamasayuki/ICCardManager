@@ -2562,10 +2562,6 @@ WHERE id = @id AND ledger_id = @targetId";
         }
 
         /// <inheritdoc/>
-        public Task SaveMergeHistoryAsync(int targetLedgerId, string description, string undoDataJson)
-            => SaveMergeHistoryAsync(targetLedgerId, description, undoDataJson, transaction: null);
-
-        /// <inheritdoc/>
         public async Task SaveMergeHistoryAsync(int targetLedgerId, string description, string undoDataJson, SQLiteTransaction? transaction)
         {
             // 単文のため 3 分岐は不要（tx があればそれに参加、無ければ接続を借りて autocommit）。

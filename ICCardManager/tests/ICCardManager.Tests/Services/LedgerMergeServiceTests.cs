@@ -455,6 +455,39 @@ public class LedgerMergeServiceTests : IDisposable
     #region MergeAsync 統合ロジックテスト
 
     /// <summary>
+    /// Issue #2373（レビュー指摘）: 統合履歴の JSON 化（Undo データのシリアライズ）が例外になっても、
+    /// 例外を MergeAsync の外へ投げず、統合前の失敗として Success=false で返し、何も書き込まないこと。
+    /// JSON 化をトランザクションの前へ移したとき try の外へ出てしまい、呼び出し元（履歴画面）が
+    /// 案内を出せなくなっていた。対になる正常系は MergeAsync_TwoRailTrips_CalculatesFieldsCorrectly。
+    /// </summary>
+    [Fact]
+    [Trait("Category", "Unit")]
+    public async Task MergeAsync_統合履歴のJSON化で例外_失敗として返し何も書き込まないこと()
+    {
+        // Arrange: JSON 化を差し替えて例外にする（実データで System.Text.Json を確実に失敗させる入力は無いため）
+        _service.UndoDataSerializer = _ => throw new NotSupportedException("simulated serialization failure");
+        var date = new DateTime(2026, 2, 3);
+        var ledger1 = CreateTestLedger(1, TestCardIdm, date, "鉄道（福岡空港～天神）", 200, 800);
+        ledger1.Details.Add(CreateRailDetail(1, "福岡空港", "天神", 200, 800, 1, date));
+        var ledger2 = CreateTestLedger(2, TestCardIdm, date, "鉄道（天神～箱崎宮前）", 210, 590);
+        ledger2.Details.Add(CreateRailDetail(2, "天神", "箱崎宮前", 210, 590, 2, date));
+        SetupGetByIdMocks(ledger1, ledger2);
+        SetupMergeMockSuccess();
+
+        // Act
+        Func<Task<LedgerMergeResult>> act = () => _service.MergeAsync(new List<int> { 1, 2 });
+
+        // Assert
+        var result = (await act.Should().NotThrowAsync("例外が外へ抜けると履歴画面は案内を出せない")).Subject;
+        result.Success.Should().BeFalse();
+        result.ErrorMessage.Should().NotBeEmpty("失敗は利用者へ案内する");
+        result.ErrorMessage.Should().NotContain("simulated", "生の例外メッセージを UI へ出さない（Issue #1614）");
+        _ledgerRepositoryMock.Verify(x => x.MergeLedgersAsync(
+            It.IsAny<int>(), It.IsAny<IEnumerable<int>>(), It.IsAny<Ledger>(), It.IsAny<SQLiteTransaction>()),
+            Times.Never, "JSON 化はトランザクションを開く前に済ませるので、台帳には何も書かない");
+    }
+
+    /// <summary>
     /// 2件の鉄道利用を統合したとき、Income/Expense/Balanceが正しく計算されること
     /// </summary>
     [Fact]

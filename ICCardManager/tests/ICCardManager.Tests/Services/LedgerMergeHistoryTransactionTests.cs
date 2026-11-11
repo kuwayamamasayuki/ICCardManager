@@ -232,8 +232,8 @@ END"
 
         result.ErrorMessage.Should().Be(LedgerMergeService.MergeHistorySaveFailedErrorMessage);
         result.ErrorMessage.Should().Contain("統合前のまま", "統合が行われていないこと（何が）を伝える");
-        result.ErrorMessage.Should().Contain("統合履歴を記録できなかった", "統合を止めた理由（なぜ）を伝える");
-        result.ErrorMessage.Should().EndWith("お試しください。", "やり直してよいこと（どうすれば）を伝える");
+        result.ErrorMessage.Should().Contain("統合履歴をデータベースへ書き込めなかった", "統合を止めた理由（なぜ）を伝える");
+        result.ErrorMessage.Should().Contain("再度お試しください。", "やり直してよいこと（どうすれば）を伝える");
         result.ErrorMessage.Should().NotContain("simulated", "生の例外メッセージを UI へ出さない（Issue #1614）");
     }
 
