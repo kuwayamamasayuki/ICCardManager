@@ -15,6 +15,7 @@ using ICCardManager.Infrastructure.Timing;
 using ICCardManager.Models;
 using ICCardManager.Services;
 using ICCardManager.Tests.Infrastructure;
+using ICCardManager.Tests.Infrastructure.CardReader;
 using ICCardManager.Tests.Infrastructure.Timing;
 using ICCardManager.ViewModels;
 using Microsoft.Extensions.Logging;
@@ -288,6 +289,79 @@ public class MainViewModelCardReaderStateTests
             "この経路の案内は切断の行（インストールして再起動）だけ。カードリーダーエラーの行は「置き直す・抜き差しする」と" +
             "食い違う行動指示を並べるため出さない。実際: " +
             string.Join(" / ", viewModel.WarningMessages.Select(w => w.DisplayText)));
+    }
+
+    [Fact]
+    public async Task ReconnectCardReader_felicalibを読み込めないとき_本物のカードリーダーで切断の理由が再接続では直らないことを伝え例外を出さないこと()
+    {
+        // 「再接続」を押しても同じ理由で失敗し、同じ文言の行に置き換わるだけで表示は変わらない。
+        // 押した結果が分からないままにならないよう、切断の理由そのものが「再接続では直らない」ことを伝える
+        using var reader = new FelicaCardReader(
+            NullLogger<FelicaCardReader>.Instance, Mock.Of<IStationMasterService>(), new DllNotFoundFelicaDevice());
+        var viewModel = CreateViewModel(reader, _logger);
+        await viewModel.InitializeAsync();
+
+        Func<Task> act = () => viewModel.ReconnectCardReaderAsync();
+
+        await act.Should().NotThrowAsync("再接続の失敗は FelicaCardReader.ReconnectAsync が受け止めてログに残す");
+        viewModel.CardReaderConnectionState.Should().Be(CardReaderConnectionState.Disconnected);
+        viewModel.WarningMessages.Where(w => w.Type == WarningType.CardReaderConnection)
+            .Should().ContainSingle().Which.DisplayText.Should()
+            .Be("⚠️ カードリーダー切断: " + FelicaCardReader.FelicaLibUnavailableMessage)
+            .And.Contain("「再接続」ボタンでは直りません")
+            .And.Contain("アプリを再起動してください");
+        viewModel.WarningMessages.Should().NotContain(w => w.Type == WarningType.CardReaderError);
+    }
+
+    [Fact]
+    public async Task StartReadingAsync_felicalibを読み込めないとき_読み込めなかった例外ごとErrorログに残し専用のエラーコードで投げること()
+    {
+        var logger = new RecordingLogger<FelicaCardReader>();
+        using var reader = new FelicaCardReader(logger, Mock.Of<IStationMasterService>(), new DllNotFoundFelicaDevice());
+
+        Func<Task> act = () => reader.StartReadingAsync();
+
+        var thrown = (await act.Should().ThrowAsync<CardReaderException>()).Which;
+        thrown.ErrorCode.Should().Be("CR010", "一時的な読み取り失敗（CR002）とは利用者の取る行動が違う");
+        thrown.UserFriendlyMessage.Should().Be(FelicaCardReader.FelicaLibUnavailableMessage,
+            "例外の利用者向けの文言が表示されても、切断の行と食い違わないこと");
+        logger.Entries.Should().Contain(
+            e => e.Level == LogLevel.Error && e.Exception is DllNotFoundException,
+            "どの DLL を読み込めなかったかを IT 担当者が切り分けられるよう、例外ごと残すこと。実際: " + logger.FormatEntries());
+    }
+
+    [Fact]
+    public async Task InitializeAsync_想定外の失敗のとき_本物のカードリーダーのErrorで警告エリアにカードリーダーエラーの行が出て例外を出さないこと()
+    {
+        // felicalib は読み込め PaSoRi も接続済み。読み取りの開始の途中（開始のログ）で想定外の例外を起こす
+        using var reader = new FelicaCardReader(
+            new ThrowOnInformationLogger(), Mock.Of<IStationMasterService>(), new FakeFelicaDevice());
+        var viewModel = CreateViewModel(reader, _logger);
+
+        Func<Task> act = () => viewModel.InitializeAsync();
+
+        await act.Should().NotThrowAsync();
+        viewModel.WarningMessages.Should().ContainSingle(w => w.Type == WarningType.CardReaderError,
+            "想定外の失敗は Error（カードリーダーエラーの行）で伝える。実際: " +
+            string.Join(" / ", viewModel.WarningMessages.Select(w => w.DisplayText)));
+    }
+
+    /// <summary>Information のログで例外を投げる（読み取りの開始の途中で想定外の失敗を起こすため）。</summary>
+    private sealed class ThrowOnInformationLogger : ILogger<FelicaCardReader>
+    {
+        public IDisposable BeginScope<TState>(TState state)
+            where TState : notnull
+            => throw new NotSupportedException();
+
+        public bool IsEnabled(LogLevel logLevel) => true;
+
+        public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter)
+        {
+            if (logLevel == LogLevel.Information)
+            {
+                throw new InvalidOperationException("想定外の失敗を注入");
+            }
+        }
     }
 
     /// <summary>felicalib.dll を読み込めない環境（P/Invoke が <see cref="DllNotFoundException"/>）を再現する。</summary>

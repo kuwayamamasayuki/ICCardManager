@@ -184,7 +184,7 @@ namespace ICCardManager.Infrastructure.CardReader
                         // 起動時のダイアログをやめたため、警告エリアの表示が利用者への案内のすべてになる。
                         _logger.LogError("FelicaCardReader: 初期化エラー: {Message}", FelicaLibUnavailableMessage);
                         SetConnectionStateForceNotify(CardReaderConnectionState.Disconnected, FelicaLibUnavailableMessage);
-                        throw CardReaderException.ReadFailed(FelicaLibUnavailableMessage);
+                        throw CardReaderException.LibraryUnavailable();
                     }
 
                     // PaSoRi の物理接続確認 (Issue #1428)
@@ -678,9 +678,12 @@ namespace ICCardManager.Infrastructure.CardReader
                     _ = _device.GetIDm(WildcardSystemCode);
                     return true;
                 }
-                catch (DllNotFoundException)
+                catch (DllNotFoundException ex)
                 {
-                    _logger.LogError("FelicaCardReader: felicalib.dll が見つかりません");
+                    // Issue #2377: 例外ごと残す（どの DLL を読み込めなかったかは IT 担当者の切り分けに要る）。
+                    // この判定は読み取りの開始・再接続・接続診断のたびに 1 回だけ呼ばれ、felicalib.dll を読み込めない経路では
+                    // 接続の監視（10 秒ごとのヘルスチェック）を始めないので、同じエラーが周期的に積み上がることはない。
+                    _logger.LogError(ex, "FelicaCardReader: felicalib.dll を読み込めません（{ExceptionMessage}）", ex.Message);
                     return false;
                 }
                 catch (Exception ex)
@@ -970,10 +973,9 @@ namespace ICCardManager.Infrastructure.CardReader
         /// メイン画面の警告エリアに「カードリーダー切断: 」に続けて表示される。起動時の「初期化エラー」ダイアログを
         /// やめたため、利用者への案内はこの警告だけになる。この経路では接続の監視（ヘルスチェック）を始めないので、
         /// <see cref="ReaderNotFoundMessage"/> と違って自動では認識しない — 行動指示はアプリの再起動にする。
+        /// 投げる例外（<see cref="CardReaderException.LibraryUnavailable"/>）の利用者向けの文言と同じ文字列を使う。
         /// </remarks>
-        internal const string FelicaLibUnavailableMessage =
-            "felicalib.dll が見つからないか、Sony NFCポートソフトウェアがインストールされていません。" +
-            "Sony NFCポートソフトウェアをインストールしてから、アプリを再起動してください。";
+        internal const string FelicaLibUnavailableMessage = CardReaderException.LibraryUnavailableUserMessage;
 
         /// <summary>
         /// ヘルスチェック 1 回の結果として行う処理（Issue #2298）。

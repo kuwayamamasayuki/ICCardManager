@@ -63,6 +63,17 @@ public class AppExceptionTests
     }
 
     [Fact]
+    public void CardReaderException_LibraryUnavailable_ReturnsCorrectInfo()
+    {
+        // Act
+        var exception = CardReaderException.LibraryUnavailable();
+
+        // Assert（Issue #2377: 一時的な読み取り失敗 CR002 とは別のコード。文言は警告エリアの切断の理由と同じ）
+        exception.ErrorCode.Should().Be("CR010");
+        exception.UserFriendlyMessage.Should().Contain("Sony NFCポートソフトウェアをインストールしてから、アプリを再起動してください");
+    }
+
+    [Fact]
     public void CardReaderException_CardRemoved_WithInnerException_PreservesInnerException()
     {
         // Arrange
