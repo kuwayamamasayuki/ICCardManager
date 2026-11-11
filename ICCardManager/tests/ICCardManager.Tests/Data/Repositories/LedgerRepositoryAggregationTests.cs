@@ -44,7 +44,7 @@ public class LedgerRepositoryAggregationTests : IDisposable
     /// 「○月から繰越」「前年度より繰越」は生成側（<see cref="SummaryGenerator"/>）から取り、テスト側で
     /// 文字列を組み立てない。「新規購入」は本番にも生成メソッドが無くリテラルのため、
     /// <c>CarryoverSummaries_AreRecognizedByTheProductionPredicate</c> で
-    /// <see cref="Ledger.IsInitialRecordSummary"/> との対応を表明して乖離を検出する。
+    /// <see cref="Ledger.IsInitialRecord"/> との対応を表明して乖離を検出する。
     /// Issue #2326: 「前年度より繰越」は繰越月を 3 月にして登録したカードで DB に保存される 3 種目の導入行。
     /// 以前は <see cref="Ledger.IsCarryover"/>（帳票用で前年度繰越を含まない）と対応させていたため、
     /// 集計の除外条件から漏れたことを検出できなかった。

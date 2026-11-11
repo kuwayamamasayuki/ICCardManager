@@ -223,7 +223,7 @@ public class DashboardServiceLastUsageDateTests : IDisposable
     {
         // 3 月に登録したカードの導入行「前年度より繰越」は、以前は利用実績の除外条件
         // （新規購入・○月から繰越）に含まれず、導入日が最終利用日に出ていた（既知の制限）。
-        // Issue #2326 で導入行 3 種（Ledger.IsInitialRecordSummary）をすべて除外したので、空欄になる。
+        // Issue #2326 で導入行 3 種（Ledger.IsInitialRecord）をすべて除外したので、空欄になる。
         // 画面設計書 §3.1.4 の「既知の制限」の記述も同じ PR で解消済みとした。
         await SeedMastersAsync();
         await InsertLedgerAsync(CardA, new DateTime(2026, 3, 15),

@@ -29,7 +29,7 @@ namespace ICCardManager.Tests.Data.Repositories;
 /// カウントされ、登録しただけのカードが「利用1回・稼働率&gt;0%」になる）。
 /// 本テストはカスタム書式下で SQL 5 箇所（集計除外 3 クエリ・繰越先頭ソート 2 クエリ）と
 /// 購入日取得が生成側と揃って動くことを実 SQLite で固定する（購入日取得は Issue #2046 以降、
-/// SQL ではなく <see cref="Ledger.IsInitialRecordSummary"/> で導入行を判定する）。
+/// SQL ではなく <see cref="Ledger.IsInitialRecord"/> で導入行を判定する）。
 /// </para>
 /// <para>
 /// LIKE パターンの効き方は SQL に閉じるためモックでは検証できず、インメモリ SQLite の

@@ -2788,17 +2788,73 @@ LIMIT 1";
             // Issue #2237: 導入行を除いた、明細を持たない帳簿の行の最新の日付（MAX(date)）。
             // Issue #2371: 導入行の判定は摘要ではなく導入行の種別の列で行う。
             // 台帳行は idx_ledger_card_date（card_idm の等値）で引き、明細の有無は idx_detail_ledger で確かめる。
-            command.CommandText = @"SELECT l.date FROM ledger l
-WHERE l.card_idm = @cardIdm AND (l.is_lent_record = 0 OR l.is_lent_record IS NULL)
-  AND l.initial_record_kind IS NULL
-  AND NOT EXISTS (SELECT 1 FROM ledger_detail d WHERE d.ledger_id = l.id)
-ORDER BY l.date DESC, l.id DESC
-LIMIT 1";
+            // 導入行は SQL の条件（initial_record_kind IS NULL）で除くので、日付の降順の先頭の行がそのまま答え
+            command.CommandText = LedgerRowsWithoutDetailsNewestFirstSql;
 
             command.Parameters.AddWithValue("@cardIdm", cardIdm);
 
             var result = await command.ExecuteScalarAsync().ConfigureAwait(false);
             return result is string date ? SqliteDateTimeFormat.ParseStored(date) : null;
         }
+
+        /// <inheritdoc/>
+        public async Task<IEnumerable<DayRecordedWithoutDetails>> GetDaysRecordedWithoutDetailsAsync(string cardIdm, DateTime fromDate, DateTime toDate)
+        {
+            var from = fromDate.Date;
+            var to = toDate.Date;
+            // 日付ごとに「受入のある行がある」「払出のある行がある」を合わせる
+            var kinds = new SortedDictionary<DateTime, (bool HasIncome, bool HasExpense)>();
+            if (from > to)
+            {
+                return new List<DayRecordedWithoutDetails>();
+            }
+
+            using var lease = await _dbContext.LeaseConnectionAsync().ConfigureAwait(false);
+            var connection = lease.Connection;
+
+            using var command = connection.CreateCommand();
+            // Issue #2372: 「明細を持たない利用行」の定義は GetLatestLedgerDateWithoutDetailsAsync と同じ SQL・同じ導入行の判定を通す
+            // （定義を 2 か所に書くと、返却の下限と日単位の除外で「記録済み」とみなす行が食い違う。#1763）。
+            // 日付の範囲は SQL に書かず、降順に流して範囲より前の行に達したところで打ち切る
+            // （列を関数に包まない。カード 1 枚分。返却のたびに 1 回）
+            command.CommandText = LedgerRowsWithoutDetailsNewestFirstSql;
+
+            command.Parameters.AddWithValue("@cardIdm", cardIdm);
+
+            using var reader = await command.ExecuteReaderAsync().ConfigureAwait(false);
+            while (await reader.ReadAsync().ConfigureAwait(false))
+            {
+                var date = SqliteDateTimeFormat.ParseStored(reader.GetString(0)).Date;
+                if (date < from)
+                {
+                    break;
+                }
+
+                if (date > to)
+                {
+                    continue;
+                }
+
+                // income / expense は NOT NULL を持たない列（Issue #2381）。NULL は列の DEFAULT と同じ 0 として読む
+                var income = reader.GetInt32OrDefault(2, 0);
+                var expense = reader.GetInt32OrDefault(3, 0);
+                kinds.TryGetValue(date, out var current);
+                kinds[date] = (current.HasIncome || income > 0, current.HasExpense || expense > 0);
+            }
+
+            return kinds
+                .Select(k => new DayRecordedWithoutDetails(k.Key, k.Value.HasIncome, k.Value.HasExpense))
+                .ToList();
+        }
+
+        /// <summary>
+        /// 指定カードの、明細（ledger_detail）を持たない台帳行（貸出中レコードを除く）を日付の降順に読む SQL（Issue #2237 / #2372）。
+        /// 導入行は導入行の種別の列で除く（Issue #2371。摘要では判定しない）。
+        /// </summary>
+        private const string LedgerRowsWithoutDetailsNewestFirstSql = @"SELECT l.date, l.summary, l.income, l.expense FROM ledger l
+WHERE l.card_idm = @cardIdm AND (l.is_lent_record = 0 OR l.is_lent_record IS NULL)
+  AND l.initial_record_kind IS NULL
+  AND NOT EXISTS (SELECT 1 FROM ledger_detail d WHERE d.ledger_id = l.id)
+ORDER BY l.date DESC, l.id DESC";
     }
 }
