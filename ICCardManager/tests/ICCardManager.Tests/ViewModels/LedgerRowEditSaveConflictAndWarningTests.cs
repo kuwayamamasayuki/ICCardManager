@@ -106,7 +106,7 @@ public class LedgerRowEditSaveConflictAndWarningTests : IDisposable
     {
         var ledger = CreateLedger();
         _ledgerRepoMock.Setup(r => r.GetByIdAsync(ledger.Id)).ReturnsAsync(() => CreateLedger());
-        _ledgerRepoMock.Setup(r => r.UpdateAsync(It.IsAny<Ledger>(), It.IsAny<SQLiteTransaction>())).ReturnsAsync(false);
+        _ledgerRepoMock.Setup(r => r.UpdateEditedColumnsAsync(It.IsAny<Ledger>(), It.IsAny<LedgerRowEditColumns>(), It.IsAny<SQLiteTransaction>())).ReturnsAsync(false);
         await _viewModel.InitializeForEditAsync(ToDto(ledger), previousBalance: 2510);
 
         _viewModel.Note = "備考を追加";
@@ -136,7 +136,7 @@ public class LedgerRowEditSaveConflictAndWarningTests : IDisposable
         _viewModel.StatusMessage.Should().Be(
             ConcurrencyConflictMessage.ForUpdateReloadOnClose("履歴「R8.1.10 （貸出中）」", "履歴一覧"));
         _viewModel.NeedsHistoryReload.Should().BeTrue();
-        _ledgerRepoMock.Verify(r => r.UpdateAsync(It.IsAny<Ledger>(), It.IsAny<SQLiteTransaction>()), Times.Never);
+        _ledgerRepoMock.Verify(r => r.UpdateEditedColumnsAsync(It.IsAny<Ledger>(), It.IsAny<LedgerRowEditColumns>(), It.IsAny<SQLiteTransaction>()), Times.Never);
     }
 
     [Fact]
@@ -144,8 +144,9 @@ public class LedgerRowEditSaveConflictAndWarningTests : IDisposable
     {
         var ledger = CreateLedger();
         _ledgerRepoMock.Setup(r => r.GetByIdAsync(ledger.Id)).ReturnsAsync(() => CreateLedger());
-        _ledgerRepoMock.Setup(r => r.UpdateAsync(It.IsAny<Ledger>(), It.IsAny<SQLiteTransaction>())).ReturnsAsync(false);
+        _ledgerRepoMock.Setup(r => r.UpdateEditedColumnsAsync(It.IsAny<Ledger>(), It.IsAny<LedgerRowEditColumns>(), It.IsAny<SQLiteTransaction>())).ReturnsAsync(false);
         await _viewModel.InitializeForEditAsync(ToDto(ledger), previousBalance: 2510);
+        _viewModel.Note = "備考を追加"; // Issue #2375: 何も変えない保存は書かない（UPDATE が走らず競合にならない）
         await _viewModel.SaveCommand.ExecuteAsync(null);
 
         _viewModel.Expense = 220; // Validate が走る
@@ -159,11 +160,12 @@ public class LedgerRowEditSaveConflictAndWarningTests : IDisposable
     {
         var ledger = CreateLedger();
         _ledgerRepoMock.Setup(r => r.GetByIdAsync(ledger.Id)).ReturnsAsync(() => CreateLedger());
-        _ledgerRepoMock.Setup(r => r.UpdateAsync(It.IsAny<Ledger>(), It.IsAny<SQLiteTransaction>())).ReturnsAsync(false);
+        _ledgerRepoMock.Setup(r => r.UpdateEditedColumnsAsync(It.IsAny<Ledger>(), It.IsAny<LedgerRowEditColumns>(), It.IsAny<SQLiteTransaction>())).ReturnsAsync(false);
         await _viewModel.InitializeForEditAsync(ToDto(ledger), previousBalance: 2510);
         _viewModel.SkipToNextCommand.CanExecute(null).Should().BeTrue("競合の前は押せる（対）");
         _viewModel.BackCommand.CanExecute(null).Should().BeTrue();
 
+        _viewModel.Note = "備考を追加"; // Issue #2375: 何も変えない保存は書かない（UPDATE が走らず競合にならない）
         await _viewModel.SaveCommand.ExecuteAsync(null);
 
         _viewModel.SkipToNextCommand.CanExecute(null).Should().BeFalse("閉じると一覧を読み直し、隣の行へは進まない");
@@ -175,10 +177,11 @@ public class LedgerRowEditSaveConflictAndWarningTests : IDisposable
     {
         var ledger = CreateLedger();
         _ledgerRepoMock.Setup(r => r.GetByIdAsync(ledger.Id)).ReturnsAsync(() => CreateLedger());
-        _ledgerRepoMock.Setup(r => r.UpdateAsync(It.IsAny<Ledger>(), It.IsAny<SQLiteTransaction>())).ReturnsAsync(false);
+        _ledgerRepoMock.Setup(r => r.UpdateEditedColumnsAsync(It.IsAny<Ledger>(), It.IsAny<LedgerRowEditColumns>(), It.IsAny<SQLiteTransaction>())).ReturnsAsync(false);
         await _viewModel.InitializeForEditAsync(ToDto(ledger), previousBalance: 2510);
         _viewModel.CanDelete.Should().BeTrue("競合の前は削除できる（対）");
 
+        _viewModel.Note = "備考を追加"; // Issue #2375: 何も変えない保存は書かない（UPDATE が走らず競合にならない）
         await _viewModel.SaveCommand.ExecuteAsync(null);
 
         _viewModel.CanDelete.Should().BeFalse("行はもう無いので、削除の確認と削除の競合を重ねて案内しない");
@@ -195,7 +198,7 @@ public class LedgerRowEditSaveConflictAndWarningTests : IDisposable
             l.Details = new List<LedgerDetail> { new() { LedgerId = 7, SequenceNumber = 1, IsBus = true, BusStops = "天神～博多" } };
             return l;
         });
-        _ledgerRepoMock.Setup(r => r.UpdateAsync(It.IsAny<Ledger>(), It.IsAny<SQLiteTransaction>())).ReturnsAsync(true);
+        _ledgerRepoMock.Setup(r => r.UpdateEditedColumnsAsync(It.IsAny<Ledger>(), It.IsAny<LedgerRowEditColumns>(), It.IsAny<SQLiteTransaction>())).ReturnsAsync(true);
         // 明細の id が振り直されている（実 DB に該当する明細が無い）ので、同期の UPDATE は 0 行になる
         await _viewModel.InitializeForEditAsync(ToDto(ledger), previousBalance: 2510);
 
@@ -224,7 +227,7 @@ public class LedgerRowEditSaveConflictAndWarningTests : IDisposable
             l.Details = new List<LedgerDetail> { new() { LedgerId = 7, SequenceNumber = 1, IsBus = true, BusStops = "天神～博多" } };
             return l;
         });
-        _ledgerRepoMock.Setup(r => r.UpdateAsync(It.IsAny<Ledger>(), It.IsAny<SQLiteTransaction>())).ReturnsAsync(true);
+        _ledgerRepoMock.Setup(r => r.UpdateEditedColumnsAsync(It.IsAny<Ledger>(), It.IsAny<LedgerRowEditColumns>(), It.IsAny<SQLiteTransaction>())).ReturnsAsync(true);
         await _viewModel.InitializeForEditAsync(ToDto(ledger), previousBalance: 2510);
         _viewModel.Summary = "バス（天神～博多駅前）";
         await _viewModel.SaveAndEditNextCommand.ExecuteAsync(null);
@@ -245,7 +248,7 @@ public class LedgerRowEditSaveConflictAndWarningTests : IDisposable
     {
         var ledger = CreateLedger();
         _ledgerRepoMock.Setup(r => r.GetByIdAsync(ledger.Id)).ReturnsAsync(() => CreateLedger());
-        _ledgerRepoMock.Setup(r => r.UpdateAsync(It.IsAny<Ledger>(), It.IsAny<SQLiteTransaction>())).ReturnsAsync(true);
+        _ledgerRepoMock.Setup(r => r.UpdateEditedColumnsAsync(It.IsAny<Ledger>(), It.IsAny<LedgerRowEditColumns>(), It.IsAny<SQLiteTransaction>())).ReturnsAsync(true);
         await _viewModel.InitializeForEditAsync(ToDto(ledger), previousBalance: 2510);
 
         _viewModel.Note = "備考を追加";

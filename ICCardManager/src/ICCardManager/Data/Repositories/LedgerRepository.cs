@@ -425,6 +425,67 @@ WHERE id = @id";
             return rows > 0;
         }
 
+        /// <summary>
+        /// Issue #2375: <see cref="LedgerRowEditColumns"/> の各列と、その列を SET する句。
+        /// SET 句に載り得る列はこの表がすべて（行編集が編集しない列はここに無い）。
+        /// </summary>
+        private static readonly (LedgerRowEditColumns Column, string Assignment)[] RowEditAssignments =
+        {
+            (LedgerRowEditColumns.Date, "date = @date"),
+            (LedgerRowEditColumns.Summary, "summary = @summary"),
+            (LedgerRowEditColumns.Income, "income = @income"),
+            (LedgerRowEditColumns.Expense, "expense = @expense"),
+            (LedgerRowEditColumns.Balance, "balance = @balance"),
+            (LedgerRowEditColumns.Staff, "lender_idm = @lenderIdm, staff_name = @staffName"),
+            (LedgerRowEditColumns.Note, "note = @note"),
+            (LedgerRowEditColumns.CompanionCount, "companion_count = @companionCount"),
+        };
+
+        /// <inheritdoc/>
+        public async Task<bool> UpdateEditedColumnsAsync(Ledger ledger, LedgerRowEditColumns columns, SQLiteTransaction transaction)
+        {
+            if (ledger == null)
+            {
+                throw new ArgumentNullException(nameof(ledger));
+            }
+
+            if (transaction == null)
+            {
+                throw new ArgumentNullException(nameof(transaction));
+            }
+
+            var known = RowEditAssignments.Aggregate(LedgerRowEditColumns.None, (all, a) => all | a.Column);
+            if (columns == LedgerRowEditColumns.None || (columns & ~known) != 0)
+            {
+                throw new ArgumentException(
+                    $"更新する列の指定（{columns}）が不正です。行編集で変えた列を 1 つ以上指定してください。",
+                    nameof(columns));
+            }
+
+            using var command = transaction.Connection.CreateCommand();
+            command.Transaction = transaction;
+            var assignments = RowEditAssignments
+                .Where(a => (columns & a.Column) != 0)
+                .Select(a => a.Assignment);
+            command.CommandText = "UPDATE ledger SET " + string.Join(", ", assignments) + " WHERE id = @id";
+
+            // 使わないパラメーターも渡してよい（SQLite は SQL に現れないパラメーターを無視する）
+            command.Parameters.AddWithValue("@id", ledger.Id);
+            command.Parameters.AddWithValue("@date", SqliteDateTimeFormat.ToText(ledger.Date));
+            command.Parameters.AddWithValue("@summary", ledger.Summary);
+            command.Parameters.AddWithValue("@income", ledger.Income);
+            command.Parameters.AddWithValue("@expense", ledger.Expense);
+            command.Parameters.AddWithValue("@balance", ledger.Balance);
+            command.Parameters.AddWithValue("@lenderIdm", (object?)ledger.LenderIdm ?? DBNull.Value);
+            command.Parameters.AddWithValue("@staffName", (object?)ledger.StaffName ?? DBNull.Value);
+            command.Parameters.AddWithValue("@note", (object?)ledger.Note ?? DBNull.Value);
+            command.Parameters.AddWithValue("@companionCount", ledger.CompanionCount);
+
+            // Issue #1753: 影響行数 0 は「行が存在しない」＝競合
+            var rows = await command.ExecuteNonQueryAsync().ConfigureAwait(false);
+            return rows > 0;
+        }
+
         /// <inheritdoc/>
         public Task<bool> DeleteAsync(int id) => DeleteAsync(id, transaction: null);
 

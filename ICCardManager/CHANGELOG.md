@@ -1,4 +1,4 @@
-﻿# 更新履歴
+# 更新履歴
 
 ### Unreleased
 
@@ -9,7 +9,15 @@
   - 種別は行編集（摘要・日付の書き換え）・利用履歴 CSV の既存の行の更新では変わらない。利用履歴 CSV は種別の列を持たないので、ID の無い新しい行だけ摘要から推定する（現在と既定の文言）。履歴の「追加」で導入行の文言を入力した行は導入行にならない（残高整合性チェックの始点にもならず、前の行から続けて検査する）。履歴の統合は導入行を含むと「導入行（新規購入・繰越の行）は統合できません。導入行を除いて選択し直してください」で拒否する（統合先にすると摘要が明細から作り直されるのに種別が残り、統合元にすると導入行が消えるため）。統合の取り消しは種別も復元する
   - 行編集の「受入と払出が両方0円です」の注意は、導入行（種別）のほか、入力中の摘要が導入行の文言なら出さない（従来どおり）。「受入 ≠ 残額」の警告は種別を持つ導入行だけに出す。繰越の文言を変える前に登録した導入行を開いても「両方0円」の注意は出なくなった
   - 摘要からの推定は `Common/InitialRecordSummaryMatcher` の 1 か所に置き、それ以外で導入行を摘要と照合しないことを静的検査 `InitialRecordSummaryComparisonConventionTests` で固定した
-  - テスト: `InitialRecordKindWordingChangeTests` 7 件（文言を変えた後も紙の累計・前年度繰越を加算しない／年度途中の繰越のカードは従来どおり加算する／種別の無い通常の行は導入行にならない／導入日・利用実績・返却時の下限／更新で種別が変わらない）、`Migration_013_AddInitialRecordKindTests` 4 件、`InitialRecordSummaryMatcherTests` 21 件、`CsvLedgerInitialRecordKindTests` 4 件、`LedgerMergeServiceTests` +2 件、静的検査 15 件ほか。単体 10,316 → 10,363（+47）。既存テストの導入行は種別も持たせる形へ改めた（表明は不変）。方針から直接導かれる表明の変更は `LedgerTests`（判定を種別へ）・`MidYearCarryoverConsistencyTests`（`Ledger.IsMidYearCarryover` との一致の表明を推定との一致へ）・`SummaryGeneratorMidYearCarryoverLikePatternTests` の削除・`DbContextMigrationTests` の版数 12 → 13・`DtoMapperTests`・`LedgerRowEditSaveConflictAndWarningTests` の委譲先
+  - テスト: `InitialRecordKindWordingChangeTests` 7 件（文言を変えた後も紙の累計・前年度繰越を加算しない／年度途中の繰越のカードは従来どおり加算する／種別の無い通常の行は導入行にならない／導入日・利用実績・返却時の下限／更新で種別が変わらない）、`Migration_013_AddInitialRecordKindTests` 4 件、`InitialRecordSummaryMatcherTests` 21 件、`CsvLedgerInitialRecordKindTests` 4 件、`LedgerMergeServiceTests` +2 件、静的検査 15 件ほか。単体 10,361 → 10,408（+47）。既存テストの導入行は種別も持たせる形へ改めた（表明は不変）。方針から直接導かれる表明の変更は `LedgerTests`（判定を種別へ）・`MidYearCarryoverConsistencyTests`（`Ledger.IsMidYearCarryover` との一致の表明を推定との一致へ）・`SummaryGeneratorMidYearCarryoverLikePatternTests` の削除・`DbContextMigrationTests` の版数 12 → 13・`DtoMapperTests`・`LedgerRowEditSaveConflictAndWarningTests` の委譲先
+- Issue #2374 **以前のバージョン（統合した時点の明細の内容を記録する前）で行った統合を「統合を元に戻す」で取り消すと、統合後に明細や金額を変更していても確かめられず、その変更が黙って失われ得た**のを、確認ダイアログで警告するようにした（取り消し自体は許す）
+  - 統合した時点の明細の内容（`LedgerMergeUndoData.DetailSnapshots`）を持たない統合履歴は、確認に「【注意】この統合は以前のバージョンで行ったため、統合した後にこの履歴の明細や金額を変更したかどうかを確かめられません。変更していた場合、取り消すとその変更が失われ、統合する前の内容に戻ることがあります。…「いいえ」を選び、利用履歴詳細で明細と金額を確かめてください。変更していたときは取り消さずに、履歴の分割・変更で手作業により整えてください。」を加える。持つ統合履歴は従来どおりの文言
+  - 判定は `LedgerMergeUndoData.CanVerifyChangesAfterMerge` の 1 か所。「統合を元に戻す」を押したときの一覧の取得（`GetUndoableMergeHistoriesAsync`）で Undo データを読み、`MergeHistoryEntry` → `MergeHistoryItem` へ運ぶ。履歴を開くたびのボタンの有効・無効の判定は、有無だけを返す `HasUndoableMergeHistoriesAsync`（新設）にして Undo データを読まない（一覧を返さないので、判定していない値から表示用アイテムを作る誤用もできない）。読めない Undo データは警告する側。`MergedTargetAmounts` は `DetailSnapshots` と常に一緒に書かれるため判定に含めない（04 §11.5）
+- Issue #2375 **利用履歴の行編集で、利用者や備考に触れていない保存が、開いている間に別のパソコンで直された利用者・備考などを開いたときの値へ戻していたのを是正した**。共有フォルダモードで同じ行を 2 台で編集したときに起き、操作ログにはこのパソコンの変更として「直した職員 → 元の職員」が残っていた（一覧に無い利用者の行だけは #2300 で是正済み）
+  - 保存は、開いたときの値と保存で書く値を列ごとに比べ、**変えた列だけ**を書く（`ILedgerRepository.UpdateEditedColumnsAsync`。対象は日付・摘要・受入・払出・残額・利用者・備考・同行者数）。変えていない列は保存直前に読み直した値のまま残る。返却者・貸出/返却日時・貸出中フラグはこの経路から書かなくなった
+  - 画面が自分で変えた値（自動計算の残額、導入時残高の訂正案の適用、氏名で職員に紐づけた行の貸出者 IDm）は、その欄に触れていなくても従来どおり書く。ただし職員が選び直していない利用者の揃えは、保存直前に読み直した利用者が開いたときのままのときだけ書く（他の PC の付け替えを巻き戻さない）。受入・払出・残額はどれかを変えたら 3 列を組で書く（他の PC の金額とこの画面の金額を混ぜて残高チェーンを崩さない）。変えた後に元へ戻した列は書かない。備考は空欄（NULL）と空文字を、利用者は NULL・空文字・空白だけを同じ「無し」として比べる。日付は日付だけで比べ、時刻を持つ行で日付を変えて戻しても時刻を 0:00 へ書き換えない
+  - **何も変えずに保存した場合は何も書かず、操作ログも残さずに閉じる**（以前は開いたときの値で全列を書き直し、変更の無い記録を操作ログに残していた）。行がもう無ければ従来どおり競合として案内する
+  - 設計書: 03 §3.12「変えた列だけを書く」、04 §12a、05 §5.5h。テスト: `ViewModels/LedgerRowEditChangedColumnsTests` 23 件・`Data/Repositories/LedgerRepositoryUpdateEditedColumnsTests` 12 件を新設、`LedgerUpdateColumnConventionTests`（許可リストから行編集を外し、新しい更新が SET し得る列を固定）+1 件・`LedgerRepositoryNullableAnnotationTests` +1 件、単体 +37（main（#2385 まで）取り込み後の実測で 10,316 → 10,353）。変えずに保存していた既存 5 件（競合 3 件・一覧に無い利用者 2 件）は備考を変えてから保存する形にした
 - Issue #2385 **未登録のカードをタッチしたときのカード種別選択ダイアログが、常に「選択が完了するまでカードをリーダーから離さないでください」と注意していたが、残高・利用履歴は選択の前に読み取り済みで、読み取れていればカードを離しても登録できたのを是正**。注意は事前の読み取りに失敗したとき（交通系ICカード管理画面が登録の保存時にカードを読み直すとき）だけ出す
   - 確かめた事実: 事前に読み取れなかったもの（残高が無い・利用履歴が無いか 0 件）だけを、交通系ICカード管理画面が保存時にカードから読み直す。注意はそのときに限って意味を持つ
   - 片方だけ読み取れなかったときも出す（その片方を読み直すことがあるため。残高は取り込む利用履歴があれば履歴から逆算して読み直さないが、種別選択の時点では分からないので安全側に倒す）。利用履歴が 0 件のときも出す（履歴の事前読み取りは失敗も空のリストで返り、利用 0 件と区別できない。登録時はどちらも読み直す）

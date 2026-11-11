@@ -91,6 +91,24 @@ namespace ICCardManager.Data.Repositories
             int ledgerId, string summary, int income, int expense, int balance, SQLiteTransaction transaction);
 
         /// <summary>
+        /// 履歴の行編集で変えた列だけを更新する（Issue #2375）。
+        /// </summary>
+        /// <remarks>
+        /// <paramref name="columns"/> で立てた列だけを、<paramref name="ledger"/> の値で SET する
+        /// （<see cref="LedgerRowEditColumns.Staff"/> は <c>lender_idm</c> と <c>staff_name</c> の組）。
+        /// 立てていない列は SET 句に載らないので、画面を開いている間に他の PC が直した値を巻き戻さない
+        /// （#1726「SET 句はその経路で本当に編集する列に限る」）。WHERE は <c>id</c> だけ。
+        /// 監査ログと同じトランザクションで確定させるため、<paramref name="transaction"/> は必須。
+        /// </remarks>
+        /// <returns>更新できた場合 true。対象行が無い（削除・統合・返却で貸出中レコードが消えた競合、Issue #1753）場合 false</returns>
+        /// <exception cref="ArgumentNullException"><paramref name="ledger"/> または <paramref name="transaction"/> が null のとき。</exception>
+        /// <exception cref="ArgumentException">
+        /// <paramref name="columns"/> が <see cref="LedgerRowEditColumns.None"/> のとき（書く列が無いなら呼ばない）、
+        /// または未定義のビットを含むとき。
+        /// </exception>
+        Task<bool> UpdateEditedColumnsAsync(Ledger ledger, LedgerRowEditColumns columns, SQLiteTransaction transaction);
+
+        /// <summary>
         /// 利用履歴を削除
         /// </summary>
         Task<bool> DeleteAsync(int id);
