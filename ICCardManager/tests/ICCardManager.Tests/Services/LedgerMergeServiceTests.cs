@@ -1708,6 +1708,66 @@ public class LedgerMergeServiceTests : IDisposable
         result.Should().BeEmpty();
     }
 
+    /// <summary>
+    /// Issue #2374: 一覧の各統合履歴に「統合した後の変更を確かめられるか」を載せる。
+    /// 統合した時点の明細の内容（DetailSnapshots）を持たない Undo データ（#2302 より前の形）と、読めない Undo データは false、
+    /// 持つもの（明細の無い統合の空の辞書を含む）は true。
+    /// </summary>
+    [Fact]
+    [Trait("Category", "Unit")]
+    public async Task GetUndoableMergeHistoriesAsync_統合した後の変更を確かめられるかをUndoデータの明細の内容の有無で判定すること()
+    {
+        var legacy = new LedgerMergeUndoData { OriginalTarget = new LedgerSnapshot { Id = 10 } };
+        var current = new LedgerMergeUndoData
+        {
+            OriginalTarget = new LedgerSnapshot { Id = 20 },
+            DetailSnapshots = new Dictionary<string, LedgerDetailSnapshot>
+            {
+                ["1"] = new LedgerDetailSnapshot { EntryStation = "博多", ExitStation = "天神", Amount = 210 },
+            },
+            MergedTargetAmounts = new MergedTargetAmounts { Expense = 210 },
+        };
+        var emptyDetails = new LedgerMergeUndoData
+        {
+            OriginalTarget = new LedgerSnapshot { Id = 30 },
+            DetailSnapshots = new Dictionary<string, LedgerDetailSnapshot>(),
+            MergedTargetAmounts = new MergedTargetAmounts(),
+        };
+        _ledgerRepositoryMock
+            .Setup(x => x.GetMergeHistoriesAsync(false))
+            .ReturnsAsync(new List<(int, DateTime, int, string, string, bool)>
+            {
+                (1, DateTime.Now, 10, "旧い統合", JsonSerializer.Serialize(legacy), false),
+                (2, DateTime.Now, 20, "新しい統合", JsonSerializer.Serialize(current), false),
+                (3, DateTime.Now, 30, "明細の無い統合", JsonSerializer.Serialize(emptyDetails), false),
+                (4, DateTime.Now, 40, "空の Undo データ", "{}", false),
+                (5, DateTime.Now, 50, "読めない Undo データ", "not json", false),
+            });
+
+        var result = await _service.GetUndoableMergeHistoriesAsync();
+
+        result.Select(h => (h.Id, h.CanVerifyChangesAfterMerge)).Should().Equal(
+            (1, false), (2, true), (3, true), (4, false), (5, false));
+    }
+
+    /// <summary>
+    /// Issue #2374: 判定のプロパティは Undo データの JSON に書き出さない（保存する形を変えない）。
+    /// </summary>
+    [Fact]
+    [Trait("Category", "Unit")]
+    public void LedgerMergeUndoData_確かめられるかの判定はJSONに書き出さないこと()
+    {
+        var undoData = new LedgerMergeUndoData
+        {
+            OriginalTarget = new LedgerSnapshot { Id = 1 },
+            DetailSnapshots = new Dictionary<string, LedgerDetailSnapshot>(),
+        };
+
+        undoData.CanVerifyChangesAfterMerge.Should().BeTrue();
+        new LedgerMergeUndoData().CanVerifyChangesAfterMerge.Should().BeFalse();
+        JsonSerializer.Serialize(undoData).Should().NotContain(nameof(LedgerMergeUndoData.CanVerifyChangesAfterMerge));
+    }
+
     #endregion
 
     #region MergeAsync 残高計算テスト

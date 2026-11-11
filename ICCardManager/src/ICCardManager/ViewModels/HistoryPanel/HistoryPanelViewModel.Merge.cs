@@ -199,16 +199,7 @@ public partial class HistoryPanelViewModel
             return;
         }
 
-        // 新しい順に表示用アイテムを作成
-        var items = histories
-            .OrderByDescending(h => h.MergedAt)
-            .Select(h => new Views.Dialogs.MergeHistoryItem
-            {
-                Id = h.Id,
-                MergedAtDisplay = DisplayFormatters.FormatDateTime(h.MergedAt),
-                Description = h.Description
-            })
-            .ToList();
+        var items = ToMergeHistoryItems(histories);
 
         // 選択ダイアログを表示
         var dialog = new Views.Dialogs.MergeHistoryDialog(items)
@@ -226,6 +217,23 @@ public partial class HistoryPanelViewModel
             }
         }
     }
+
+    /// <summary>
+    /// 統合履歴を、新しい順の表示用アイテムにする。
+    /// Issue #2374: 統合した後の変更を確かめられるか（<see cref="Services.MergeHistoryEntry.CanVerifyChangesAfterMerge"/>）を
+    /// 確認の文言（<see cref="BuildUnmergeConfirmationMessage"/>）まで運ぶ。
+    /// </summary>
+    internal static List<Views.Dialogs.MergeHistoryItem> ToMergeHistoryItems(IEnumerable<Services.MergeHistoryEntry> histories)
+        => histories
+            .OrderByDescending(h => h.MergedAt)
+            .Select(h => new Views.Dialogs.MergeHistoryItem
+            {
+                Id = h.Id,
+                MergedAtDisplay = DisplayFormatters.FormatDateTime(h.MergedAt),
+                Description = h.Description,
+                CanVerifyChangesAfterMerge = h.CanVerifyChangesAfterMerge
+            })
+            .ToList();
 
     /// <summary>
     /// 取り消す統合を名指しして確認し、同意されたときだけ取り消す（Issue #2141）
@@ -279,11 +287,27 @@ public partial class HistoryPanelViewModel
     /// <summary>
     /// 統合の取り消し確認の文言（Issue #2141）。取り消す対象を統合日時と内容で名指しする。
     /// </summary>
+    /// <remarks>
+    /// Issue #2374: 統合した後の変更を確かめられない統合履歴（統合した時点の明細の内容・金額を持たない、
+    /// 以前のバージョンで行った統合）は、取り消し自体は許すが、確認に
+    /// <see cref="UnverifiableUnmergeWarning"/> を加える。確かめられる統合履歴は従来どおりの文言
+    /// （統合後に変更していれば取り消しは中止され、変更は失われないため警告しない）。
+    /// </remarks>
     internal static string BuildUnmergeConfirmationMessage(Views.Dialogs.MergeHistoryItem item)
         => "次の統合を取り消して、統合する前の履歴に戻します。\n\n" +
            $"統合日時: {item.MergedAtDisplay}\n" +
            $"内容: {item.Description}\n\n" +
+           (item.CanVerifyChangesAfterMerge ? string.Empty : UnverifiableUnmergeWarning + "\n\n") +
            "取り消してよろしいですか？";
+
+    /// <summary>
+    /// Issue #2374: 統合した後の変更を確かめられない統合履歴を取り消すときの警告（何が・なぜ・どうすれば）。
+    /// </summary>
+    internal const string UnverifiableUnmergeWarning =
+        "【注意】この統合は以前のバージョンで行ったため、統合した後にこの履歴の明細や金額を変更したかどうかを確かめられません。" +
+        "変更していた場合、取り消すとその変更は失われ、統合する前の内容に戻ります。\n" +
+        "統合した後に変更したか分からないときは「いいえ」を選び、利用履歴詳細で明細と金額を確かめてください。" +
+        "変更していたときは取り消さずに、履歴の分割・変更で手作業により整えてください。";
 
     /// <summary>
     /// undo実行の共通処理

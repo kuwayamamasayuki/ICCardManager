@@ -1,3 +1,4 @@
+#nullable enable
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -15,6 +16,14 @@ namespace ICCardManager.Views.Dialogs
         public int Id { get; set; }
         public string MergedAtDisplay { get; set; } = string.Empty;
         public string Description { get; set; } = string.Empty;
+
+        /// <summary>
+        /// Issue #2374: 取り消しの前に、統合した後の変更を確かめられるか
+        /// （<see cref="Services.LedgerMergeUndoData.CanVerifyChangesAfterMerge"/>）。
+        /// false なら取り消しの確認で「変更していれば失われる」と警告する。
+        /// 既定は false（設定し忘れたときに警告しない側へ倒さない）。
+        /// </summary>
+        public bool CanVerifyChangesAfterMerge { get; set; }
     }
 
     /// <summary>
