@@ -488,6 +488,47 @@ public class LedgerMergeServiceTests : IDisposable
     }
 
     /// <summary>
+    /// Issue #2373（レビュー指摘）: 統合履歴は統合本体と同じトランザクションで保存すること。
+    /// 実 DB のテストでは null（トランザクションなし）を渡しても、同じ接続で開いているトランザクションへ
+    /// 暗黙に参加して緑になり得るため、渡したトランザクションの同一性をここで固定する。
+    /// </summary>
+    [Fact]
+    [Trait("Category", "Unit")]
+    public async Task MergeAsync_統合履歴を統合本体と同じトランザクションで保存すること()
+    {
+        // Arrange
+        var date = new DateTime(2026, 2, 3);
+        var ledger1 = CreateTestLedger(1, TestCardIdm, date, "鉄道（福岡空港～天神）", 200, 800);
+        ledger1.Details.Add(CreateRailDetail(1, "福岡空港", "天神", 200, 800, 1, date));
+        var ledger2 = CreateTestLedger(2, TestCardIdm, date, "鉄道（天神～箱崎宮前）", 210, 590);
+        ledger2.Details.Add(CreateRailDetail(2, "天神", "箱崎宮前", 210, 590, 2, date));
+        SetupGetByIdMocks(ledger1, ledger2);
+        SetupMergeMockSuccess();
+
+        SQLiteTransaction? mergeTransaction = null;
+        _ledgerRepositoryMock
+            .Setup(x => x.MergeLedgersAsync(
+                It.IsAny<int>(), It.IsAny<IEnumerable<int>>(), It.IsAny<Ledger>(), It.IsAny<SQLiteTransaction>()))
+            .Callback<int, IEnumerable<int>, Ledger, SQLiteTransaction>((_, _, _, tx) => mergeTransaction = tx)
+            .ReturnsAsync(true);
+        var historyTransactions = new List<SQLiteTransaction?>();
+        _ledgerRepositoryMock
+            .Setup(x => x.SaveMergeHistoryAsync(
+                It.IsAny<int>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<SQLiteTransaction?>()))
+            .Callback<int, string, string, SQLiteTransaction?>((_, _, _, tx) => historyTransactions.Add(tx))
+            .Returns(Task.CompletedTask);
+
+        // Act
+        var result = await _service.MergeAsync(new List<int> { 1, 2 });
+
+        // Assert
+        result.Success.Should().BeTrue();
+        mergeTransaction.Should().NotBeNull("前提: 統合本体はトランザクションの中で書く");
+        historyTransactions.Should().ContainSingle()
+            .Which.Should().BeSameAs(mergeTransaction, "統合履歴は統合本体と同じトランザクションで保存する");
+    }
+
+    /// <summary>
     /// 2件の鉄道利用を統合したとき、Income/Expense/Balanceが正しく計算されること
     /// </summary>
     [Fact]
