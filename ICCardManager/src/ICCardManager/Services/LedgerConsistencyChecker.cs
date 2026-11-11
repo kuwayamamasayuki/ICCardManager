@@ -57,6 +57,8 @@ namespace ICCardManager.Services
             // 3/1〜4/30 のように年度の初日より前から始まる範囲では導入行がチェーンの途中に来て今も報告されていた（#2437）。
             // 切る日は PaperCarryoverPolicy.GetChainRestartDates が決める。開始日の年度は履歴画面・帳票と同じ
             // PeriodOpensWithFiscalYearStartCarryover、後の年度は HasFiscalYearStartCarryoverRecord（#1763）。
+            // Issue #2441: 年度途中で導入したカードの導入行「○月から繰越」（繰越月の翌月 1 日付け。登録日より後になり得る）の手前でも
+            // 同じく切る。導入行より前の日付の返却の利用の行（#2237 より前の記録に限る）・手入力・CSV の行・貸出中レコードから続けて検査しない。
             // 既知の差: 4/1 から検査する場合でも、導入行を摘要で認識できない（#2371）カードでは、履歴は貸出中を除いた
             // 前年度繰越（GetCarryoverBalanceAsync）をシードにし、ここは貸出中を含む値を使う（本体の母集団に合わせる）。
             var periodLedgers = (await _ledgerRepository.GetByDateRangeAsync(cardIdm, fromDate, toDate).ConfigureAwait(false))
@@ -111,7 +113,7 @@ namespace ICCardManager.Services
         }
 
         /// <summary>
-        /// Issue #2437: 期間の台帳を、チェーンが始まり直す日（導入行「前年度より繰越」の日）の手前で分ける。
+        /// Issue #2437 / #2441: 期間の台帳を、チェーンが始まり直す日（導入行「前年度より繰越」「○月から繰越」の日）の手前で分ける。
         /// 先頭の要素は最初の導入行より前の行（無ければ空）。
         /// </summary>
         internal static List<List<Ledger>> SplitAtChainRestarts(
@@ -147,7 +149,7 @@ namespace ICCardManager.Services
         /// 残高チェーンの整合性をチェック（内部ロジック）。チェーンごとに先頭の行を始点とし、チェーンをまたいで検査しない。
         /// </summary>
         /// <param name="chains">
-        /// 時系列順に並べたチェーン。Issue #2437: 導入行「前年度より繰越」から始まり直すチェーンは、
+        /// 時系列順に並べたチェーン。Issue #2437 / #2441: 導入行「前年度より繰越」「○月から繰越」から始まり直すチェーンは、
         /// その前の行（導入行より前の日付の行）の残高から続けて検査しない（<see cref="SplitAtChainRestarts"/>）
         /// </param>
         /// <param name="cardIdm">カードIDm</param>
@@ -213,8 +215,94 @@ namespace ICCardManager.Services
                 }
             }
 
+            ReportUncorroboratedChainHeads(chains, chainHeadPredecessors, result);
+
             return result;
         }
+
+        /// <summary>
+        /// Issue #2441（コードレビューで検出）: 2 本目以降のチェーンの先頭（導入行）の残高の誤りが、訂正案の出ない形でも報告から消えないようにする。
+        /// 先頭が直前の帳簿の行で裏付けられず、直後の行が不整合で、その先頭への訂正案が出ておらず、直後の行の単独の打ち間違いとも
+        /// 説明できないなら、先頭も不整合として報告する。期待値は直後の行からの逆算（<see cref="ExpectedChainHeadBalance"/>）。
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// チェーンを切ると先頭の導入行は検査されないので、導入行の残高が誤っていても報告は直後の行（正しい行）にだけ付く。
+        /// 不整合が 1 か所なら訂正案（#2007）が導入行を名指しするが、別の不整合がある・明細の差が合わない形では訂正案が出ない。
+        /// </para>
+        /// <para>
+        /// 裏付けが無いこと自体は誤りの根拠にならない（年度途中の導入行は、導入行より前の行と残高が違うのが普通）。
+        /// 直後の行が切れている原因は「先頭の誤り」と「直後の行の単独の打ち間違い」のどちらもあり得るので、後者と判別できる形は報告しない:
+        /// </para>
+        /// <list type="bullet">
+        /// <item>次の次の行が、直後の行の「先頭から計算した期待残高」から続いて整合する（直後の行の誤りが次の行で打ち消されている）</item>
+        /// <item>直後の行からの逆算が負（先頭をどう直しても直後の行は説明できない）</item>
+        /// </list>
+        /// <para>
+        /// 限界（正しい先頭も報告し得る形）: 直後の行が期間の最後の行／次の次の行も切れている（直後と次の次の行の両方の打ち間違い）／
+        /// 直後の行の受入・払出だけを誤った（残額はカードどおり。2/25 4,790 → 3/1 5,000 → 3/5 払出 250（正しくは 210）・残額 4,790 なら
+        /// 先頭は「期待 5,040」と報告され、不整合がこの 1 か所なら #2007 の訂正案も先頭を 5,040 に直すよう誘導する）／
+        /// 先頭と直後の行の間の行が欠けている（先頭の誤りと原理的に区別できない）。逆に、先頭と直後の行が同時に誤っている形は報告しない。
+        /// 直前の帳簿の行が無いチェーン（期間の先頭のチェーン、導入行がカードの最初の帳簿の行で前に貸出中レコードしか無い等）は
+        /// 先頭を報告しない（修正前と同じ）。期間の中に直後の行が無いチェーン（導入行 3/1 で直後の行が 4/5 なら、3 月の表示期間では
+        /// チェーンが先頭 1 行だけ）も報告しないので、全期間の検査が報告する誤った先頭を、表示期間の検査は報告も強調もしない。
+        /// </para>
+        /// </remarks>
+        internal static void ReportUncorroboratedChainHeads(
+            IReadOnlyList<List<Ledger>> chains, IReadOnlyList<Ledger?> chainHeadPredecessors, ConsistencyResult result)
+        {
+            for (var i = 1; i < chains.Count; i++)
+            {
+                var ledgers = chains[i];
+                var predecessor = chainHeadPredecessors[i];
+                if (ledgers.Count < 2 || predecessor == null || IsCorroboratedByPrecedingSettledRow(predecessor, ledgers[0]))
+                {
+                    continue;
+                }
+
+                var head = ledgers[0];
+                var next = ledgers[1];
+                var nextIndex = result.Inconsistencies.FindIndex(x => x.LedgerId == next.Id);
+                if (nextIndex < 0 || result.InitialBalanceCorrection?.LedgerId == head.Id)
+                {
+                    continue;
+                }
+
+                if (ledgers.Count >= 3 && IsIsolatedTypo(head, next, ledgers[2]))
+                {
+                    continue;
+                }
+
+                var expected = ExpectedChainHeadBalance(next);
+                if (expected < 0)
+                {
+                    continue;
+                }
+
+                result.Inconsistencies.Insert(nextIndex, (head.Id, expected, head.Balance));
+                result.IsConsistent = false;
+            }
+        }
+
+        /// <summary>
+        /// 直後の行の誤りが次の行で打ち消されているか（次の行が、直後の行の「先頭から計算した期待残高」から続いて整合する）。
+        /// 真なら直後の行の単独の打ち間違いで、先頭は正しい。
+        /// </summary>
+        internal static bool IsIsolatedTypo(Ledger head, Ledger next, Ledger afterNext)
+        {
+            var expectedNext = head.Balance + next.Income - next.Expense;
+            return expectedNext + afterNext.Income - afterNext.Expense == afterNext.Balance;
+        }
+
+        /// <summary>
+        /// 報告するチェーンの先頭の期待残高。直後の行からの逆算（直後の残高 − 受入 ＋ 払出。#2007 の訂正案と同じ式）。
+        /// </summary>
+        /// <remarks>
+        /// 直前の行からの計算（直前の残高 ＋ 受入 − 払出、または直前の残高）は使わない。年度途中の導入行は導入行より前の行と
+        /// 残高が違うのが普通なので、その値に直すと直後の行が切れる（2/25 4,790 → 3/1 を 6,000 で誤登録 → 3/5 4,790 の正しい値は
+        /// 3/5 からの逆算 5,000 で、2/25 の 4,790 ではない）。
+        /// </remarks>
+        internal static int ExpectedChainHeadBalance(Ledger next) => next.Balance - next.Income + next.Expense;
 
         /// <summary>
         /// Issue #2437: チェーンの先頭の行の残高が、直前の帳簿の行（貸出中レコードを除く）で裏付けられているか。直前の行が無ければ偽。
@@ -223,10 +311,11 @@ namespace ICCardManager.Services
         /// 裏付けの形は 2 つある（コードレビューで検出）。
         /// <list type="bullet">
         /// <item>直前の行の残高 ＋ 受入 − 払出 ＝ 先頭の残高（3/31「次年度へ繰越」で残高 0 にしてから 4/1「前年度より繰越」で受け入れる組）</item>
-        /// <item>先頭が受入欄に残高を書く導入行（<see cref="Ledger.InitialRecordCarriesIncome"/>。前年度より繰越・新規購入）で、
-        /// 直前の行の残高 ＝ 先頭の残高。導入行の受入は新しいお金ではなく残高の書き直しなので、直前の行（3/25 の手入力の行
-        /// 残高 5,000 など）から引き継いだ残高と同じなら正しい。上の式だけだと 5,000 ＋ 5,000 ≠ 5,000 で裏付けが無いことになり、
-        /// 直後の行の打ち間違いに対して正しい導入行を書き直す訂正案を出していた</item>
+        /// <item>先頭が導入行（<see cref="Ledger.IsInitialRecord"/>）で、直前の行の残高 ＝ 先頭の残高。導入行の受入は新しいお金ではなく
+        /// 残高の書き直しなので、直前の行（3/25 の手入力の行 残高 5,000 など）から引き継いだ残高と同じなら正しい。上の式だけだと
+        /// 5,000 ＋ 5,000 ≠ 5,000 で裏付けが無いことになり、直後の行の打ち間違いに対して正しい導入行を書き直す訂正案を出していた。
+        /// 受入欄に残高を書く導入行（前年度より繰越・新規購入）に加え、「○月から繰越」も含める（Issue #2441）。現行の受入 0 の行は
+        /// 上の式と同じ判定になるが、#1219 より前の登録・CSV の取り込みで受入＝残高の行が残り得るため</item>
         /// </list>
         /// 限界: 直前の行の残高が、導入行の誤った残高と偶然一致する場合も裏付けありと判定する（訂正案は出ず、直後の行が強調される）。
         /// </remarks>
@@ -242,7 +331,7 @@ namespace ICCardManager.Services
                 return true;
             }
 
-            return Ledger.InitialRecordCarriesIncome(chainHead.Summary)
+            return chainHead.IsInitialRecord
                 && precedingSettledRow.Balance == chainHead.Balance;
         }
 

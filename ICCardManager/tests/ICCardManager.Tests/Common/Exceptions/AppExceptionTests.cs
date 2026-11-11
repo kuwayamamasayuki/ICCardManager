@@ -63,6 +63,31 @@ public class AppExceptionTests
     }
 
     [Fact]
+    public void CardReaderException_LibraryUnavailable_ReturnsCorrectInfo()
+    {
+        // Act
+        var exception = CardReaderException.LibraryUnavailable();
+
+        // Assert（Issue #2377: 一時的な読み取り失敗 CR002 とは別のコード。文言は警告エリアの切断の理由と同じ）
+        exception.ErrorCode.Should().Be("CR010");
+        exception.UserFriendlyMessage.Should().Contain("Sony NFCポートソフトウェアをインストールしてから、アプリを再起動してください");
+    }
+
+    [Fact]
+    public void CardReaderException_LibraryUnavailable_WithInnerException_PreservesInnerException()
+    {
+        // Arrange（Issue #2377: 読み込めなかった原因を内部例外として運ぶ）
+        var innerException = new DllNotFoundException("felicalib.dll");
+
+        // Act
+        var exception = CardReaderException.LibraryUnavailable(innerException);
+
+        // Assert
+        exception.InnerException.Should().BeSameAs(innerException);
+        exception.ErrorCode.Should().Be("CR010");
+    }
+
+    [Fact]
     public void CardReaderException_CardRemoved_WithInnerException_PreservesInnerException()
     {
         // Arrange
@@ -135,6 +160,10 @@ public class AppExceptionTests
             // Issue #2330: 本番で送出されるファクトリで確かめる（未使用のファクトリは削除した）
             (() => CardReaderException.ReadFailed(), "CR002",
                 "カードの読み取りに失敗しました。カードをリーダーに置き直してください。"),
+            // Issue #2377: felicalib.dll を読み込めない（起動時のカード読み取りの開始・再接続）
+            (() => CardReaderException.LibraryUnavailable(), "CR010",
+                "felicalib.dll が見つからないか、Sony NFCポートソフトウェアがインストールされていません。「再接続」ボタンでは直りません。" +
+                "Sony NFCポートソフトウェアをインストールしてから、アプリを再起動してください。"),
             (() => DatabaseException.QueryFailed(), "DB002",
                 "データの操作中にエラーが発生しました。再度お試しください。"),
             (() => BusinessException.LentStatusUpdateConflict("CARD123", "貸出"), "BIZ015",
