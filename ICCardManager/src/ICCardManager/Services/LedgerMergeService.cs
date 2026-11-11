@@ -21,22 +21,16 @@ namespace ICCardManager.Services
     {
         /// <summary>
         /// 統合（または取り消し）が<b>確定した</b>かどうか。
-        /// <see cref="LedgerMergeService.MergeAsync"/> では、コミット後の後処理（Undo 情報の保存）の
-        /// 失敗でこの値は落ちない（Issue #1954）。
-        /// <see cref="LedgerMergeService.UnmergeAsync"/> はコミット後に DB I/O を持たないため、
-        /// この扱いの対象になる後処理がそもそも無い（<see cref="HasPostCommitFailure"/> は常に false）。
+        /// <see cref="LedgerMergeService.MergeAsync"/> では統合履歴（取り消し用の Undo データ）も統合と同じ
+        /// トランザクションで保存するため（Issue #2373）、true なら統合履歴もそろっている。統合履歴を保存できなければ
+        /// 統合ごと巻き戻して false になる。
+        /// 統合・取り消しともコミット後に DB I/O を持たないため、「確定したが付帯情報が欠けた」状態は無い
+        /// （以前の <c>HasPostCommitFailure</c>（Issue #1954）は #2373 で廃止した）。
         /// </summary>
         public bool Success { get; set; }
 
         public string ErrorMessage { get; set; } = string.Empty;
         public Ledger? MergedLedger { get; set; }
-
-        /// <summary>
-        /// Issue #1954: 統合は確定したが、コミット後の付帯処理（取り消し用の Undo 情報の保存）に
-        /// 失敗したことを表す。<see cref="Success"/> は true のままで、呼び出し元は
-        /// <b>再実行を促さず</b>「統合は完了・取り消しはできない」と案内する（Issue #1725）。
-        /// </summary>
-        public bool HasPostCommitFailure { get; set; }
     }
 
     /// <summary>
@@ -263,6 +257,13 @@ namespace ICCardManager.Services
             Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping
         };
 
+        /// <summary>
+        /// 統合履歴（Undo データ）の JSON 化。テストで失敗を注入するための継ぎ目（Issue #2373）。
+        /// 実データで System.Text.Json を確実に失敗させる入力が無いため、差し替えて検証する。
+        /// </summary>
+        internal Func<LedgerMergeUndoData, string> UndoDataSerializer { get; set; } =
+            data => JsonSerializer.Serialize(data, JsonOptions);
+
         public LedgerMergeService(
             ILedgerRepository ledgerRepository,
             SummaryGenerator summaryGenerator,
@@ -470,15 +471,20 @@ namespace ICCardManager.Services
             var description = $"{DisplayFormatters.FormatDate(beforeLedgers[0].Date)} {string.Join(" + ", originalSummaryTexts)}";
 
             // Issue #1954: 「成功」の意味を「統合が確定した」ことだけに定め、その確定位置を
-            // scope.Commit() の直後へ置く。コミット後の後処理（Undo データの保存）の失敗を
-            // Success に巻き込むと、統合済みなのに「再度お試しください」と案内され、案内どおりの
-            // 再実行は「統合対象の履歴が見つかりません」に行き着く（統合元は既に DELETE 済み）。
-            // 付帯情報の欠落は HasPostCommitFailure で別途伝える
-            // （.claude/rules/development-conventions.md「コミット確定後の後処理を、成否の判定に巻き込まない」）。
+            // scope.Commit() の直後へ置く（.claude/rules/db-write-conventions.md「コミット確定後の後処理を、
+            // 成否の判定に巻き込まない」）。Issue #2373 で統合履歴の保存はコミットの前（同じトランザクション）へ
+            // 移したため、現在コミットの後ろに DB I/O は無い。後から足しても下の catch (when result.Success) が
+            // 既定で保護する（統合済みなのに「再度お試しください」と案内すると、案内どおりの再実行は
+            // 「統合対象の履歴が見つかりません」に行き着く）。
             var result = new LedgerMergeResult();
 
             try
             {
+                // Issue #2373: 統合履歴（Undo データ）の JSON 化はトランザクションを開く前に済ませる
+                // （シリアライズの失敗は統合前の失敗として下の包括 catch へ落ち、書き込みは 1 つも始まらない。
+                // try の外に置くと例外が MergeAsync の外へ抜け、履歴画面は案内を出せない）。
+                var undoJson = UndoDataSerializer(undoData);
+
                 // Issue #1458: 統合と監査ログ INSERT を同一トランザクションで実行
                 var sourceIds = sources.Select(s => s.Id).ToList();
                 using (var scope = await _dbContext.BeginTransactionAsync().ConfigureAwait(false))
@@ -505,18 +511,35 @@ namespace ICCardManager.Services
                                            "画面を最新の状態に更新してから再度お試しください。"
                         };
                     }
+                    // Issue #2373: 統合履歴（取り消し用の Undo データ）は付帯情報ではなく統合の一部。統合と同じ
+                    // トランザクションで保存し、書けなければ統合ごと巻き戻す（return で scope を Dispose すると
+                    // コミットしていないトランザクションはロールバックされる）。以前は統合のコミット後に別の
+                    // トランザクションで保存しており（#1954）、失敗すると取り消せない統合が残り、共有モードでは
+                    // コミットから保存までの間に他 PC が重ねた統合を、取り消し時の重ねた統合の判定が見逃した。
+                    try
+                    {
+                        await _ledgerRepository.SaveMergeHistoryAsync(target.Id, description, undoJson, scope.Transaction).ConfigureAwait(false);
+                    }
+                    catch (Exception ex)
+                    {
+                        // 技術的詳細はログへ、UI には「統合していない・やり直してよい」を返す（Issue #1614）
+                        _logger.LogError(ex,
+                            "Merge rolled back: failed to save merge history (TargetLedgerId={TargetId}, Ids={Ids})",
+                            target.Id, string.Join(", ", ledgerIds));
+                        return new LedgerMergeResult
+                        {
+                            Success = false,
+                            ErrorMessage = MergeHistorySaveFailedErrorMessage
+                        };
+                    }
+
                     await _operationLogger.LogLedgerMergeAsync(beforeLedgers, target, scope.Transaction).ConfigureAwait(false);
                     scope.Commit();
                 }
 
-                // ここから先は統合が確定している（統合元は DELETE 済み）。以降で例外が出ても
-                // 下の catch (when result.Success) が付帯情報の欠落として扱い、Success は落とさない。
+                // ここから先は統合が確定している（統合元は DELETE 済み、統合履歴も保存済み）。
                 result.Success = true;
                 result.MergedLedger = target;
-
-                // UndoデータをDBに保存（独立した tx。Undo データは別系統のため tx に含めない）
-                var undoJson = JsonSerializer.Serialize(undoData, JsonOptions);
-                await _ledgerRepository.SaveMergeHistoryAsync(target.Id, description, undoJson).ConfigureAwait(false);
 
                 _logger.LogInformation(
                     "Merged {Count} ledgers into ledger {TargetId}: {Summary}",
@@ -526,13 +549,11 @@ namespace ICCardManager.Services
             }
             catch (Exception ex) when (result.Success)
             {
-                // Issue #1954: 統合は確定済み。取り消し（Undo）情報を記録できなかっただけとして扱い、
-                // Success と ErrorMessage は変えない（呼び出し元は HasPostCommitFailure で案内を切り替える）。
-                // 統合自体は成功しているため Error ではなく Warning。本番の Logging:LogLevel=Information でも出力される。
+                // 統合は確定済み（統合履歴も同じトランザクションで保存済み）。コミット後の処理の失敗で
+                // Success を落とさない（Issue #1954 の fail-safe。現在コミット後に DB I/O は無い）。
                 _logger.LogWarning(ex,
-                    "履歴の統合は確定済みですが、コミット後の取り消し情報の保存に失敗しました（TargetLedgerId={TargetId}）",
+                    "履歴の統合は確定済みですが、コミット後の処理で例外が発生しました（TargetLedgerId={TargetId}）",
                     target.Id);
-                result.HasPostCommitFailure = true;
                 return result;
             }
             catch (Exception ex)
@@ -581,9 +602,11 @@ namespace ICCardManager.Services
                     // 明細の件数・内容の照合（UnmergeLedgersCore）は、後の統合の統合元が明細を持たない行（手入力の行など）だと
                     // 件数が変わらないため検出できない。統合履歴そのもので前提条件として確かめる（重ねた統合の案内を出すため）。
                     // 書き込みと同じトランザクション（BEGIN IMMEDIATE）で確かめるので、この判定の後に統合履歴が増えることは無い。
-                    // ただし統合履歴の保存は統合のコミット後の別トランザクション（#1954）なので、他 PC の統合がコミット済みで
-                    // 履歴が未保存・保存に失敗した・ID の順が逆転した場合はここでは検出できない。その形は統合直後の金額の照合
-                    // （UnmergeLedgersCore。LedgerMergeUndoData.MergedTargetAmounts）が塞ぐ
+                    // Issue #2373 以降、統合履歴は統合と同じトランザクションで保存する（書けなければ統合ごと巻き戻す）ので、
+                    // 「統合はコミット済みで統合履歴が未保存」の窓は無く、統合履歴の ID の順は統合のコミットの順と一致する。
+                    // ただし #2373 より前のバージョンで統合履歴の保存に失敗した統合（統合履歴が無い）は台帳に残り得て、
+                    // ここでは検出できない。その形は統合直後の金額の照合（UnmergeLedgersCore。
+                    // LedgerMergeUndoData.MergedTargetAmounts）が引き続き塞ぐ
                     if (await _ledgerRepository.HasLaterUndoableMergeOnSameTargetAsync(mergeHistoryId, entry.TargetLedgerId, scope.Transaction)
                             .ConfigureAwait(false))
                     {
@@ -683,6 +706,15 @@ namespace ICCardManager.Services
                 };
             }
         }
+
+        /// <summary>
+        /// Issue #2373: 統合履歴（取り消し用の Undo データ）を保存できず、統合ごと巻き戻したときの文言。
+        /// 統合は行われていないので、やり直してよいことまで伝える。
+        /// </summary>
+        internal const string MergeHistorySaveFailedErrorMessage =
+            "履歴の統合を中止しました。「統合を元に戻す」ための統合履歴をデータベースへ書き込めなかったため、統合は行わず、" +
+            "履歴は統合前のままです。データベースの保存先が他の操作で使用中か、一時的に接続できないか、空き容量が不足している可能性があります。" +
+            "しばらく待ってから、画面を最新の状態に更新して再度お試しください。繰り返し表示される場合は、管理者に連絡してください。";
 
         /// <summary>
         /// Issue #2302: 同じ統合先へ後から重ねた統合を残したまま、先の統合を取り消そうとして中止したときの文言。
