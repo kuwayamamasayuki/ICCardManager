@@ -741,8 +741,27 @@ public sealed class LendingServiceReturnUsageLowerBoundTests : IDisposable
     public async Task GetDaysRecordedWithoutDetailsAsync_範囲内の明細を持たない行の日と種類を_導入行と貸出中と明細を持つ行を除いて返すこと()
     {
         // 導入行（9/16）、明細なしの利用行（9/14・9/17・9/19・9/22）、明細なしのチャージの行（9/15・9/17）、
-        // 明細なしの金額 0 の行（9/18）、明細ありの利用行（9/18）、貸出中レコード（9/20）
+        // 明細なしの金額 0 の行（9/18）、明細なしで受入・払出が NULL の行（9/16。Issue #2381 の形）、明細ありの利用行（9/18）、
+        // 貸出中レコード（9/20）
         await InsertIntroductionAsync(new DateTime(2026, 9, 16), balance: 5000);
+        var nullAmountId = await _ledgerRepository.InsertAsync(new Ledger
+        {
+            CardIdm = TestCardIdm,
+            Date = new DateTime(2026, 9, 16, 12, 0, 0),
+            Summary = "鉄道（博多～天神）",
+            Expense = 210,
+            Balance = 4790,
+            StaffName = "別の職員",
+        });
+        using (var lease = await _dbContext.LeaseConnectionAsync())
+        using (var command = lease.Connection.CreateCommand())
+        {
+            // income / expense は NOT NULL を持たない列。NULL を直接書いて、列の DEFAULT（0）と同じに読むことを確かめる
+            command.CommandText = "UPDATE ledger SET income = NULL, expense = NULL WHERE id = @id";
+            command.Parameters.AddWithValue("@id", nullAmountId);
+            (await command.ExecuteNonQueryAsync()).Should().Be(1);
+        }
+
         await InsertLedgerWithoutDetailsAsync(new DateTime(2026, 9, 14), balanceAfter: 5000);
         await InsertChargeWithoutDetailsAsync(new DateTime(2026, 9, 15), income: 1000, balanceAfter: 6000);
         await InsertLedgerWithoutDetailsAsync(new DateTime(2026, 9, 17), balanceAfter: 4790);
@@ -767,11 +786,12 @@ public sealed class LendingServiceReturnUsageLowerBoundTests : IDisposable
             new[]
             {
                 (new DateTime(2026, 9, 15), true, false),
+                (new DateTime(2026, 9, 16), false, false),
                 (new DateTime(2026, 9, 17), true, true),
                 (new DateTime(2026, 9, 18), false, false),
                 (new DateTime(2026, 9, 19), false, true),
             },
-            "範囲外（9/14・9/22）・導入行（9/16）・明細を持つ行（9/18 の利用）・貸出中レコード（9/20）は除き、同じ日の行の種類は合わせる");
+            "範囲外（9/14・9/22）・導入行（9/16）・明細を持つ行（9/18 の利用）・貸出中レコード（9/20）は除き、同じ日の行の種類は合わせる。受入・払出が NULL の行は 0 円として読む（9/16）");
     }
 
     [Fact]
