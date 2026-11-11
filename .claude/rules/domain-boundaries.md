@@ -48,7 +48,7 @@ paths:
 | 汎用（物品出納簿の様式） | `GetLendingSummary` / 繰越各種 / `GetMonthlySummary` / `GetCumulativeSummary` / `GetChargeSummary` / `GetRefundSummary` / `IsMidYearCarryoverSummary`（摘要の形式の判定。保存済みの行が導入行かの判定には使わない、#2371） / `GetCurrentSummaryText`（導入行の種別の推定用、#2371） |
 | 交通系固有 | 駅名からの摘要組み立て / バス混在表記 / 往復・乗継・循環判定 / `GetInsufficientBalanceNote` |
 
-- 汎用メソッドは汎用コア（`ReportDataBuilder` / `Models/Ledger` 等）から呼んでよく、実際に多くのファイルから使われている。ただし **`Data/` 配下からの参照は規約テストが完全修飾呼び出し単位で許可管理する**（許可リストは `GetMidYearCarryoverLikePattern` と `GetCarryoverFromPreviousYearSummary` の 2 件だが、Issue #2371 で導入行の判定が種別の列へ移り、前者は削除・後者も `Data/` からの参照は無くなった。設計書 05 §2a.5、Issue #1749 / #2326）
+- 汎用メソッドは汎用コア（`ReportDataBuilder` / `Models/Ledger` 等）から呼んでよく、実際に多くのファイルから使われている。ただし **`Data/` 配下からの参照は規約テストが完全修飾呼び出し単位で許可管理する**（許可リストは `GetCarryoverFromPreviousYearSummary` の 1 件で、`Data/` からの参照は無い。`GetMidYearCarryoverLikePattern` は Issue #2371 で削除し許可からも外した。設計書 05 §2a.5、Issue #1749 / #2326）
 - **新しいメソッドを追加するときは、どちらの群に属するかを XML doc コメントに書く**。書かないと次に読む人が同じ調査をやり直す
 - 固有メソッドを汎用コアから呼びたくなったら、それは汎用コアに固有知識を持ち込もうとしている合図。1 段外側で値を組み立ててから渡す
 

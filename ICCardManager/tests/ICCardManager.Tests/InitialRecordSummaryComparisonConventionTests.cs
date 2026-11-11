@@ -26,6 +26,12 @@ namespace ICCardManager.Tests;
 /// 「摘要との照合の不在」と「種別による判定の実在」を対で表明する（前者だけだと判定そのものを消した実装でも緑になる）。
 /// 入力はコメントだけを除き文字列リテラルは残す（SQL の検査のため）。
 /// </para>
+/// <para>
+/// <b>既知の残存経路</b>（字句の検査では拾えない）: ①繰越の摘要の生成を許した 4 ファイル（<c>CardManageViewModel</c>・
+/// <c>HistoryPanelViewModel</c>・<c>ReportDataBuilder</c>・<c>DebugDataService</c>）の中で、生成した文字列を変数へ退避してから
+/// 摘要と比べる形 ②<c>SummaryGenerator</c> に新しい <c>Is…Summary</c> 形の判定を足し、それを外から呼ぶ形（禁止しているのは
+/// <c>IsMidYearCarryoverSummary</c> の呼び出しだけ）。これらはレビューで止める。
+/// </para>
 /// </remarks>
 public class InitialRecordSummaryComparisonConventionTests
 {
@@ -62,6 +68,16 @@ public class InitialRecordSummaryComparisonConventionTests
     };
 
     /// <summary>
+    /// 「前年度より繰越」を含む文字列リテラルを書いてよいファイル（レビュー 3 回目）。
+    /// </summary>
+    private static readonly string[] FiscalYearStartCarryoverLiteralFiles =
+    {
+        MatcherFile,
+        OrganizationOptionsFile,                            // 摘要の既定値の定義
+        MigrationFile,                                      // マイグレーションの説明文（Description）
+    };
+
+    /// <summary>
     /// 禁止する形と、それを書いてよいファイル（定義そのもの）。
     /// </summary>
     private static readonly (string Name, Regex Pattern, string[] AllowedFiles)[] Rules =
@@ -86,6 +102,9 @@ public class InitialRecordSummaryComparisonConventionTests
         // 「月から繰越」の文字列リテラル（EndsWith("月から繰越")・SQL の '%月から繰越' 等）
         ("「月から繰越」のリテラル", new Regex("\"[^\"\n]*月から繰越[^\"\n]*\"|'[^'\n]*月から繰越[^'\n]*'"),
             MidYearCarryoverLiteralFiles),
+        // 「前年度より繰越」の文字列リテラル（l.Summary == "前年度より繰越"・SQL の summary = '前年度より繰越' 等。レビュー 3 回目）
+        ("「前年度より繰越」のリテラル", new Regex("\"[^\"\n]*前年度より繰越[^\"\n]*\"|'[^'\n]*前年度より繰越[^'\n]*'"),
+            FiscalYearStartCarryoverLiteralFiles),
         // 「新規購入」の摘要（固定の文言）。定義は 1 か所、比較はどこにも書かない
         ("新規購入のリテラル", new Regex("\"新規購入\""), new[] { MatcherFile }),
         ("新規購入の摘要との比較", new Regex(
@@ -140,6 +159,8 @@ public class InitialRecordSummaryComparisonConventionTests
     [InlineData("bool F(Ledger l, int m) => SummaryGenerator.GetMidYearCarryoverSummary(m) == l.Summary;", true)]
     [InlineData("const string Sql = \"AND summary NOT LIKE '%月から繰越'\";", true)]
     [InlineData("bool F(Ledger l) => l.Summary.EndsWith(\"月から繰越\");", true)]
+    [InlineData("bool F(Ledger l) => l.Summary == \"前年度より繰越\";", true)]
+    [InlineData("const string Sql = \"AND summary = '前年度より繰越'\";", true)]
     [InlineData("summary = InitialRecordSummaryMatcher.NewPurchaseSummary;", false)]
     [InlineData("bool F(Ledger l) => l.IsFiscalYearStartCarryover;", false)]
     [InlineData("const string Sql = \"AND initial_record_kind IS NULL\";", false)]
