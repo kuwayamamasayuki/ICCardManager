@@ -84,11 +84,11 @@ namespace ICCardManager.Common.Exceptions
         /// <remarks>
         /// メイン画面の警告エリアに「カードリーダー切断: 」に続けて表示される（<c>FelicaCardReader.FelicaLibUnavailableMessage</c>）。
         /// この状態では接続の監視が動かず、「再接続」ボタンでも同じ理由で失敗するため、行動指示はアプリの再起動にし、
-        /// 再接続では直らないことも書く（押しても表示が変わらず、押した結果が分からないため）。
+        /// 再接続では直らないことも書く（押しても表示が変わらず、押した結果が分からないため）。行動指示で終える（error-messages.md）。
         /// </remarks>
         internal const string LibraryUnavailableUserMessage =
-            "felicalib.dll が見つからないか、Sony NFCポートソフトウェアがインストールされていません。" +
-            "Sony NFCポートソフトウェアをインストールしてから、アプリを再起動してください（「再接続」ボタンでは直りません）。";
+            "felicalib.dll が見つからないか、Sony NFCポートソフトウェアがインストールされていません。「再接続」ボタンでは直りません。" +
+            "Sony NFCポートソフトウェアをインストールしてから、アプリを再起動してください。";
 
         /// <summary>
         /// felicalib.dll（またはそれが使う Sony NFC ポートソフトウェア）を読み込めない（Issue #2377）

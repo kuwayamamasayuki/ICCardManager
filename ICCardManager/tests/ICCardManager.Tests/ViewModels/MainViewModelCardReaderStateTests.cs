@@ -203,7 +203,7 @@ public class MainViewModelCardReaderStateTests
         _cardReaderMock.Setup(r => r.StartReadingAsync())
             .Callback(() => _cardReaderMock.Raise(r => r.ConnectionStateChanged += null,
                 new ConnectionStateChangedEventArgs(CardReaderConnectionState.Disconnected, "注入した切断の理由")))
-            .ThrowsAsync(CardReaderException.ReadFailed("felicalib.dll を読み込めない環境を注入"));
+            .ThrowsAsync(CardReaderException.LibraryUnavailable());
 
         Func<Task> act = () => _viewModel.InitializeAsync();
 
@@ -308,7 +308,8 @@ public class MainViewModelCardReaderStateTests
         viewModel.WarningMessages.Where(w => w.Type == WarningType.CardReaderConnection)
             .Should().ContainSingle().Which.DisplayText.Should()
             .Be("⚠️ カードリーダー切断: " + FelicaCardReader.FelicaLibUnavailableMessage)
-            .And.Contain("「再接続」ボタンでは直りません")
+            .And.Contain("「再接続」ボタンでは直りません。")
+            .And.EndWith("アプリを再起動してください。", "行動指示で終える（error-messages.md）")
             .And.Contain("アプリを再起動してください");
         viewModel.WarningMessages.Should().NotContain(w => w.Type == WarningType.CardReaderError);
     }

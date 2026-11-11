@@ -681,8 +681,9 @@ namespace ICCardManager.Infrastructure.CardReader
                 catch (DllNotFoundException ex)
                 {
                     // Issue #2377: 例外ごと残す（どの DLL を読み込めなかったかは IT 担当者の切り分けに要る）。
-                    // この判定は読み取りの開始・再接続・接続診断のたびに 1 回だけ呼ばれ、felicalib.dll を読み込めない経路では
-                    // 接続の監視（10 秒ごとのヘルスチェック）を始めないので、同じエラーが周期的に積み上がることはない。
+                    // この判定は読み取りの開始・再接続・接続診断のたびに 1 回呼ばれるほか、接続の監視（10 秒ごとのヘルスチェック、
+                    // OnHealthCheckTimerElapsed）からも呼ばれる。ただし felicalib.dll を読み込めない経路では監視を始めないので、
+                    // 同じエラーが周期的に積み上がることはない。
                     _logger.LogError(ex, "FelicaCardReader: felicalib.dll を読み込めません（{ExceptionMessage}）", ex.Message);
                     return false;
                 }

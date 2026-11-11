@@ -146,6 +146,10 @@ public class AppExceptionTests
             // Issue #2330: 本番で送出されるファクトリで確かめる（未使用のファクトリは削除した）
             (() => CardReaderException.ReadFailed(), "CR002",
                 "カードの読み取りに失敗しました。カードをリーダーに置き直してください。"),
+            // Issue #2377: felicalib.dll を読み込めない（起動時のカード読み取りの開始・再接続）
+            (() => CardReaderException.LibraryUnavailable(), "CR010",
+                "felicalib.dll が見つからないか、Sony NFCポートソフトウェアがインストールされていません。「再接続」ボタンでは直りません。" +
+                "Sony NFCポートソフトウェアをインストールしてから、アプリを再起動してください。"),
             (() => DatabaseException.QueryFailed(), "DB002",
                 "データの操作中にエラーが発生しました。再度お試しください。"),
             (() => BusinessException.LentStatusUpdateConflict("CARD123", "貸出"), "BIZ015",
