@@ -291,7 +291,190 @@ namespace ICCardManager.Tests.Tools
             result.StdOut.Should().Contain(@".\convert-to-docx.ps1 -Target user-summary");
         }
 
+        // ── インストーラーへの同梱（Issue #2386）─────────────────────────────────
+
+        /// <summary>
+        /// 変換対象のうちインストーラーに同梱しないもののキー。開発者ガイドは開発者向けで、職員・庶務担当者・IT 担当者には配らない。
+        /// </summary>
+        private static readonly string[] NotBundledKeys = { "dev" };
+
+        /// <summary>
+        /// 変換対象のうち配布するマニュアルは、.md / .docx / .pdf のすべてが <c>{app}\Docs</c> へ同梱されていること。
+        /// かんたん導入ガイドは変換対象にあり、管理者マニュアルから「別紙」として案内されるのに同梱されておらず、
+        /// インストール後に庶務担当者がたどり着けなかった（Issue #2386）。
+        /// </summary>
+        [Fact]
+        public void インストーラー_配布するマニュアルはmdとdocxとpdfのすべてがDocsへ同梱されている()
+        {
+            var bundled = BundledManualEntries(File.ReadAllText(InstallerScriptPath));
+            var expected = LoadTargets()
+                .Where(t => !NotBundledKeys.Contains(t.Key))
+                .SelectMany(t => new[] { t.Markdown, t.Docx, t.Pdf })
+                .ToList();
+
+            expected.Should().Contain("かんたん導入ガイド.md", "Issue #2386 の当事者が配布対象に数えられていること");
+            bundled.Select(e => e.FileName).Should().BeEquivalentTo(expected,
+                "変換対象のうち配布するマニュアルは 3 形式とも同梱し、変換対象に無いものや配布しないものは同梱しないこと");
+        }
+
+        [Fact]
+        public void インストーラー_同梱しないのは開発者ガイドだけ()
+        {
+            LoadTargets().Where(t => NotBundledKeys.Contains(t.Key)).Select(t => t.Markdown)
+                .Should().Equal(new[] { "開発者ガイド.md" }, "同梱しないマニュアルを増やすときは、ここで理由とともに明示すること");
+        }
+
+        /// <summary>
+        /// .pdf は Word が無い環境のビルドでは作られないので、無ければ飛ばす。.md / .docx は必ずあるはずなので、
+        /// 無ければビルドを止める（飛ばすと、変換の失敗に気付かないまま欠けたインストーラーを配る）。
+        /// </summary>
+        [Fact]
+        public void インストーラー_同梱するマニュアルは_pdfだけが無ければ飛ばす指定になっている()
+        {
+            var bundled = BundledManualEntries(File.ReadAllText(InstallerScriptPath));
+
+            bundled.Should().NotBeEmpty();
+            foreach (var entry in bundled)
+            {
+                var skips = entry.Flags.Contains("skipifsourcedoesntexist");
+                skips.Should().Be(entry.FileName.EndsWith(".pdf", StringComparison.Ordinal), entry.FileName);
+                entry.Flags.Should().Contain("ignoreversion", entry.FileName);
+            }
+        }
+
+        [Fact]
+        public void 静的検査_同梱物の抽出はFilesセクションのdocs_manualの行だけを数え_コメント行は数えない()
+        {
+            // 検査ロジック自体を既知のサンプルで固定する（#1786）
+            const string sample =
+                "[Files]\r\n" +
+                "Source: \"..\\publish\\app.exe\"; DestDir: \"{app}\"; Flags: ignoreversion\r\n" +
+                "; Source: \"..\\docs\\manual\\コメント.md\"; DestDir: \"{app}\\Docs\"; Flags: ignoreversion\r\n" +
+                "Source: \"..\\docs\\manual\\管理者マニュアル.md\"; DestDir: \"{app}\\Docs\"; Flags: ignoreversion\r\n" +
+                "Source: \"..\\docs\\manual\\管理者マニュアル.pdf\"; DestDir: \"{app}\\Docs\"; Flags: ignoreversion skipifsourcedoesntexist\r\n" +
+                "\r\n" +
+                "[Icons]\r\n" +
+                "Source: \"..\\docs\\manual\\別セクション.md\"; DestDir: \"{app}\\Docs\"; Flags: ignoreversion\r\n";
+
+            var entries = BundledManualEntries(sample);
+
+            entries.Select(e => e.FileName).Should().Equal("管理者マニュアル.md", "管理者マニュアル.pdf");
+            entries[0].Flags.Should().Equal("ignoreversion");
+            entries[1].Flags.Should().Equal("ignoreversion", "skipifsourcedoesntexist");
+            ParseManualFileLines(sample).Unparsed.Should().BeEmpty();
+        }
+
+        /// <summary>
+        /// 形に合わない行を読み飛ばすと、そこで同梱したマニュアル（例: 開発者ガイド）が No.15 の検査から漏れる。
+        /// </summary>
+        [Fact]
+        public void インストーラー_マニュアルに関わるFilesの行はすべて検査の形に合う()
+        {
+            var parsed = ParseManualFileLines(File.ReadAllText(InstallerScriptPath));
+
+            parsed.Entries.Should().NotBeEmpty();
+            parsed.Unparsed.Should().BeEmpty(
+                "docs\\manual のファイルや {app}\\Docs へ置く行は Source・DestDir・Flags の 3 属性だけ・ワイルドカードなしで書くこと（形に合わない行は同梱物の検査から漏れる）");
+        }
+
+        [Fact]
+        public void 静的検査_形に合わないマニュアルの行を読み飛ばさずに報告する()
+        {
+            // 検査ロジック自体を既知のサンプルで固定する（#1786）
+            const string sample =
+                "[Files]\r\n" +
+                "Source: \"..\\docs\\manual\\開発者ガイド.md\"; DestDir: \"{app}\\Docs\"; Flags: ignoreversion; Components: docs\r\n" +
+                "DestDir: \"{app}\\Docs\"; Source: \"..\\docs\\manual\\開発者ガイド.docx\"; Flags: ignoreversion\r\n" +
+                "source: \"..\\docs\\manual\\開発者ガイド.pdf\"; DestDir: \"{app}\\Docs\"; Flags: ignoreversion\r\n" +
+                "Source: \"..\\docs\\manual\\*.md\"; DestDir: \"{app}\\Docs\"; Flags: ignoreversion\r\n" +
+                "Source: \"..\\docs\\manual\\開発者ガイド.md\"; DestDir: \"{app}\\Docs\\dev\"; Flags: ignoreversion\r\n" +
+                "Source: \"..\\docs\\other\\開発者ガイド.md\"; DestDir: \"{app}\\Docs\"; Flags: ignoreversion\r\n" +
+                "Source: \"..\\publish\\app.exe\"; DestDir: \"{app}\"; Flags: ignoreversion\r\n" +
+                "#ifdef BundleQuickstart\r\n" +
+                "Source: \"..\\docs\\manual\\かんたん導入ガイド.md\"; DestDir: \"{app}\\Docs\"; Flags: ignoreversion\r\n" +
+                "#endif\r\n" +
+                "[Setup]\r\n" +
+                "#define Outside \"[Files] の外のプリプロセッサの行は対象外\"\r\n";
+
+            var parsed = ParseManualFileLines(sample);
+
+            parsed.Entries.Select(e => e.FileName).Should().Equal(new[] { "かんたん導入ガイド.md" },
+                "#ifdef の中の行も形に合えば読むが、囲んだプリプロセッサの行は報告される");
+            parsed.Unparsed.Should().HaveCount(8,
+                "属性の追加・順序の入れ替え・小文字の Source・ワイルドカード・Docs の下位フォルダー・docs\\manual 以外からの Docs への配置、" +
+                "[Files] の中のプリプロセッサの行（#ifdef・#endif）は形に合わないので報告する（Docs と無関係な行・[Files] の外の行は対象外）");
+            parsed.Unparsed.Should().Contain(new[] { "#ifdef BundleQuickstart", "#endif" });
+        }
+
         // ── ヘルパー ─────────────────────────────────
+
+        private static string InstallerScriptPath =>
+            Path.Combine(PowerShellScriptRunner.RepositoryRoot, "ICCardManager", "installer", "ICCardManager.iss");
+
+        /// <summary>
+        /// .iss の [Files] セクションから、<c>..\docs\manual\</c> のファイルを <c>{app}\Docs</c> へ置く行を取り出す。
+        /// コメント行（<c>;</c> で始まる行）と他のセクションの行は数えない。
+        /// </summary>
+        private static IReadOnlyList<(string FileName, IReadOnlyList<string> Flags)> BundledManualEntries(string issText) =>
+            ParseManualFileLines(issText).Entries;
+
+        /// <summary>
+        /// .iss の [Files] セクションのうち、マニュアルに関わる行（Source に <c>docs\manual</c> を含むか、
+        /// DestDir が <c>{app}\Docs</c> の行）を読み、検査の形（<c>Source: "..\docs\manual\名前"; DestDir: "{app}\Docs"; Flags: …</c>、
+        /// ワイルドカードなし・他の属性なし）に合う行と、合わない行を分けて返す。合わない行を読み飛ばすと、
+        /// 属性を足した・順序を変えた・ワイルドカードにした行で同梱したマニュアルが検査から漏れる（コードレビューで検出）。
+        /// </summary>
+        private static (IReadOnlyList<(string FileName, IReadOnlyList<string> Flags)> Entries, IReadOnlyList<string> Unparsed)
+            ParseManualFileLines(string issText)
+        {
+            var entries = new List<(string FileName, IReadOnlyList<string> Flags)>();
+            var unparsed = new List<string>();
+            var inFiles = false;
+            foreach (var rawLine in issText.Split('\n'))
+            {
+                var line = rawLine.Trim();
+                if (line.StartsWith("[", StringComparison.Ordinal))
+                {
+                    inFiles = string.Equals(line, "[Files]", StringComparison.OrdinalIgnoreCase);
+                    continue;
+                }
+
+                if (!inFiles || line.StartsWith(";", StringComparison.Ordinal))
+                {
+                    continue;
+                }
+
+                // プリプロセッサの行（#if / #ifdef 等）は、囲んだ行を条件付きの同梱にする。条件を評価しないまま
+                // 無条件の同梱として数えないよう、[Files] の中にあれば形に合わない行として報告する（コードレビューで検出）
+                if (line.StartsWith("#", StringComparison.Ordinal))
+                {
+                    unparsed.Add(line);
+                    continue;
+                }
+
+                var relevant = line.IndexOf(@"docs\manual", StringComparison.OrdinalIgnoreCase) >= 0
+                    || line.IndexOf(@"{app}\Docs", StringComparison.OrdinalIgnoreCase) >= 0;
+                if (!relevant)
+                {
+                    continue;
+                }
+
+                var match = Regex.Match(line,
+                    @"^Source:\s*""\.\.\\docs\\manual\\(?<name>[^""\\*?]+)"";\s*DestDir:\s*""\{app\}\\Docs"";\s*Flags:\s*(?<flags>[^;""]*)$");
+                if (match.Success)
+                {
+                    var flags = match.Groups["flags"].Value
+                        .Split(new[] { ' ' }, StringSplitOptions.RemoveEmptyEntries);
+                    entries.Add((match.Groups["name"].Value, flags));
+                }
+                else
+                {
+                    unparsed.Add(line);
+                }
+            }
+
+            return (entries, unparsed);
+        }
 
         private static IReadOnlyList<ManualTarget> LoadTargets()
         {
