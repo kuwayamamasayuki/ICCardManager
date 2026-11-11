@@ -9,6 +9,7 @@ using ICCardManager.Common;
 using ICCardManager.Common.Exceptions;
 using ICCardManager.Data;
 using ICCardManager.Data.Repositories;
+using ICCardManager.Dtos;
 using ICCardManager.Infrastructure.Security;
 using ICCardManager.Infrastructure.Timing;
 using ICCardManager.Models;
@@ -1015,6 +1016,116 @@ namespace ICCardManager.Services
         }
 
         /// <summary>
+        /// 返却時、明細を持たない台帳行（履歴の「追加」で手入力した行など）がある日の、その行と同じ種類の履歴を
+        /// 記録済みとみなして除く（Issue #2372）。
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// 返却時の下限（<see cref="ResolveUsageLowerBound"/>）は貸出日を超えないので、貸出中に手で追加した
+        /// <b>貸出日の翌日から返却日まで</b>の行と同じ日の履歴は下限では除けない。明細を持たない行は既存明細との照合
+        /// （Issue #326）のキーを持たないため、カードに残るその日の履歴を取り込むと手で追加した行と二重に記録する。
+        /// 呼び出し元はその期間の日（<see cref="Data.Repositories.ILedgerQueryService.GetDaysRecordedWithoutDetailsAsync"/>）
+        /// だけを渡す。貸出当日の手入力の行は従来どおり除かない（当日の貸出中の利用を捨てないため）。
+        /// </para>
+        /// <para>
+        /// <b>除くのは手入力の行と同じ種類の履歴だけ</b>。受入のある行（チャージ・ポイント還元を手入力した行）がある日は
+        /// カードのチャージ・ポイント還元（<see cref="IsIncomeHistory"/>）を、払出のある行（利用を手入力した行）がある日は
+        /// それ以外の利用を除く。チャージだけを手入力した日に乗車もしていれば、その乗車は取り込む（日ごと除くと乗車を捨て、
+        /// 残高のチェーンが切れる）。受入ではチャージとポイント還元を区別しない（行の金額からは区別できない）ので、
+        /// チャージだけを手入力した日の同じ日のポイント還元も記録済みとみなす。
+        /// 受入・払出のどちらも 0 円（または NULL）の行だけの日は金額から種類を判定できないので、その日の履歴を種類を問わず除く
+        /// （下限と同じく「記録済み」の側へ倒す）。
+        /// </para>
+        /// <para>
+        /// <b>残高不足の組（<see cref="DetectInsufficientBalancePattern"/>）のチャージは、組の利用と同じ扱いにする</b>
+        /// （利用を除くならチャージも除き、利用を記録するならチャージも記録する。日の種類を問わない）。
+        /// 残高不足の特殊処理では不足分のチャージと利用を 1 行にまとめ、受入 0・払出＝運賃 − チャージ額で記録する
+        /// （business-logic.md「残高不足時の特殊処理」）。組を分けると、払出の行の日は組のチャージを取り込んで受入が二重になり、
+        /// 受入の行の日は組のチャージだけを除いて利用が相手を失い、払出＝運賃・備考なしで記録される（残高のチェーンが
+        /// チャージ額だけずれる）。組ではない通常のチャージは種類で決める。日付の無い履歴は判定できないので残す。
+        /// </para>
+        /// </remarks>
+        /// <param name="usage">下限で抽出した後の履歴</param>
+        /// <param name="daysRecordedWithoutDetails">明細を持たない台帳行がある日と、その行の種類</param>
+        /// <returns>記録する履歴と、除いた履歴</returns>
+        internal static (List<LedgerDetail> ToRecord, List<LedgerDetail> Excluded) ExcludeUsageOnDaysRecordedWithoutDetails(
+            List<LedgerDetail> usage, IEnumerable<DayRecordedWithoutDetails> daysRecordedWithoutDetails)
+        {
+            var days = new Dictionary<DateTime, DayRecordedWithoutDetails>();
+            foreach (var day in daysRecordedWithoutDetails)
+            {
+                days[day.Date] = days.TryGetValue(day.Date, out var existing)
+                    ? new DayRecordedWithoutDetails(day.Date, existing.HasIncome || day.HasIncome, existing.HasExpense || day.HasExpense)
+                    : day;
+            }
+
+            if (days.Count == 0)
+            {
+                return (usage, new List<LedgerDetail>());
+            }
+
+            // 手入力の行がある日の履歴から残高不足の組を探す（日の種類を問わない）。組のチャージは組の利用と同じ扱いにする
+            var usagePairedWithCharge = new Dictionary<LedgerDetail, LedgerDetail>();
+            foreach (var dayGroup in usage.Where(d => d.UseDate.HasValue).GroupBy(d => d.UseDate.GetValueOrDefault().Date))
+            {
+                if (!days.ContainsKey(dayGroup.Key))
+                {
+                    continue;
+                }
+
+                foreach (var (charge, pairedUsage) in DetectInsufficientBalancePattern(dayGroup.ToList()))
+                {
+                    usagePairedWithCharge[charge] = pairedUsage;
+                }
+            }
+
+            var toRecord = new List<LedgerDetail>();
+            var excluded = new List<LedgerDetail>();
+            foreach (var detail in usage)
+            {
+                // 組のチャージは、組の利用で判定する
+                var judged = usagePairedWithCharge.TryGetValue(detail, out var pairedUsageOfCharge) ? pairedUsageOfCharge : detail;
+                if (judged.UseDate.HasValue
+                    && days.TryGetValue(judged.UseDate.Value.Date, out var day)
+                    && IsRecordedByRowWithoutDetails(judged, day))
+                {
+                    excluded.Add(detail);
+                }
+                else
+                {
+                    toRecord.Add(detail);
+                }
+            }
+
+            return (toRecord, excluded);
+        }
+
+        /// <summary>
+        /// カードの履歴が受入の側（チャージ・ポイント還元。台帳では受入の行になる）か（Issue #2372）。
+        /// </summary>
+        internal static bool IsIncomeHistory(LedgerDetail detail) => detail.IsCharge || detail.IsPointRedemption;
+
+        /// <summary>
+        /// その日の明細を持たない行が、この履歴を記録済みとみなせる種類か（<see cref="ExcludeUsageOnDaysRecordedWithoutDetails"/>）。
+        /// </summary>
+        private static bool IsRecordedByRowWithoutDetails(LedgerDetail detail, DayRecordedWithoutDetails day)
+        {
+            if (day.IsKindUnknown)
+            {
+                return true;
+            }
+
+            return IsIncomeHistory(detail) ? day.HasIncome : day.HasExpense;
+        }
+
+        /// <summary>
+        /// 返却時の判定に使う貸出日（貸出レコードの貸出時刻の日付。貸出時刻が無ければ前日）。
+        /// 下限（<see cref="ResolveUsageLowerBound"/>）と日単位の除外（Issue #2372）で同じ値を使う。
+        /// </summary>
+        private static DateTime ResolveLentDateForReturn(Ledger lentRecord, DateTime now) =>
+            (lentRecord.LentAt ?? now.AddDays(-1)).Date;
+
+        /// <summary>
         /// 返却時に記録する利用履歴の下限（この日付以降を記録する）を決める（Issue #2237）。
         /// </summary>
         /// <remarks>
@@ -1035,6 +1146,8 @@ namespace ICCardManager.Services
         /// ただし<b>この下限は貸出日を超えない</b>。手入力の行が貸出当日（朝の利用を補った）や未来の日付（入力の誤り）だと、
         /// 翌日以降へ寄せると今回の貸出中の利用をすべて捨ててしまう。貸出日当日の利用は旧実装と同じく取り込む
         /// （当日の手入力の行と同じ利用は二重になり得るが、貸出中の利用を失うより害が小さい）。
+        /// 貸出日の翌日から返却日までの手入力の行は、下限ではなく日単位の除外
+        /// （<see cref="ExcludeUsageOnDaysRecordedWithoutDetails"/>。Issue #2372）でその日の同じ種類の履歴を除く。
         /// </para>
         /// <para>
         /// 貸出日には寄せない。旧実装（貸出日の 7 日前）は、7 日より前の未記録の利用を捨てる一方で、
@@ -1061,7 +1174,7 @@ namespace ICCardManager.Services
         internal static DateTime ResolveUsageLowerBound(
             Ledger lentRecord, DateTime now, DateTime? introductionDate, DateTime? latestLedgerDateWithoutDetails)
         {
-            var lentDate = (lentRecord.LentAt ?? now.AddDays(-1)).Date;
+            var lentDate = ResolveLentDateForReturn(lentRecord, now);
 
             return ResolveUsageLowerBoundCore(
                 introductionDate,
@@ -1147,6 +1260,35 @@ namespace ICCardManager.Services
         }
 
         /// <summary>
+        /// 返却時、明細を持たない台帳行がある日の利用を記録から除いたことを Information で残す（Issue #2372）。
+        /// </summary>
+        /// <remarks>
+        /// 除いた履歴が無い通常の返却では何も出さない。除いた利用はカードに残っているのに台帳へ載らないので、
+        /// 後から「利用が記録されていない」と問い合わせがあったときに、手で追加した行と同じ日だったため除いたことを
+        /// ログから辿れるようにする（LogDebug は本番で出ない）。
+        /// IDm はマスク済みの値を受け取る（Issue #1852）。
+        /// </remarks>
+        private void LogUsageExcludedOnDaysRecordedWithoutDetails(string maskedCardIdm, DateTime lentDate, IReadOnlyCollection<LedgerDetail> excluded)
+        {
+            if (excluded.Count == 0)
+            {
+                return;
+            }
+
+            var days = excluded
+                .Where(d => d.UseDate.HasValue)
+                .Select(d => d.UseDate.GetValueOrDefault().Date)
+                .Distinct()
+                .OrderBy(d => d)
+                .Select(d => SqliteDateTimeFormat.ToDateText(d));
+
+            _logger.LogInformation(
+                "LendingService: 明細を持たない台帳行（手で追加した行など）がある日の履歴を、記録済みとみなして返却時の記録から除きました" +
+                "（CardIdm={CardIdm}, 貸出日={LentDate}, 除いた履歴={Count}件, 対象日={Days}）",
+                maskedCardIdm, SqliteDateTimeFormat.ToDateText(lentDate), excluded.Count, string.Join(",", days));
+        }
+
+        /// <summary>
         /// 貸出レコードを取得。見つからない場合はエラーメッセージを返す。
         /// </summary>
         /// <returns>(LentRecord, ErrorMessage)。ErrorMessage が非 null の場合は失敗。</returns>
@@ -1203,7 +1345,7 @@ namespace ICCardManager.Services
         /// <list type="number">
         /// <item><description>カードごとの排他ロックを取得（タイムアウトは <c>AppOptions.CardLockTimeoutSeconds</c>。既定 5 秒）</description></item>
         /// <item><description>カード・職員・貸出レコードの存在確認</description></item>
-        /// <item><description>記録の下限（<see cref="ResolveUsageLowerBound"/>。導入行の日付、導入行が無いカードは貸出日の 7 日前。明細を持たない利用行があれば、その最新日の翌日まで押し上げる。ただし貸出日を超えない）以降の利用履歴を抽出（Issue #2237）</description></item>
+        /// <item><description>記録の下限（<see cref="ResolveUsageLowerBound"/>。導入行の日付、導入行が無いカードは貸出日の 7 日前。明細を持たない利用行があれば、その最新日の翌日まで押し上げる。ただし貸出日を超えない）以降の利用履歴を抽出（Issue #2237）。貸出日の翌日から返却日までに明細を持たない利用行がある日の、その行と同じ種類（受入・払出）の履歴は除く（<see cref="ExcludeUsageOnDaysRecordedWithoutDetails"/>。Issue #2372）</description></item>
         /// <item><description>日付ごとに利用履歴レコードを作成（<see cref="SummaryGenerator"/> で摘要生成。名義は貸出レコードの貸出者）</description></item>
         /// <item><description>貸出レコードを削除（履歴に「（貸出中）」を残さない）</description></item>
         /// <item><description>カードの貸出状態を解除（ここまでが単一トランザクション。コミットで返却が確定）</description></item>
@@ -1269,7 +1411,16 @@ namespace ICCardManager.Services
                 // （ただし貸出日を超えない。ResolveUsageLowerBound）
                 var latestLedgerDateWithoutDetails = await _ledgerRepository.GetLatestLedgerDateWithoutDetailsAsync(cardIdm).ConfigureAwait(false);
                 var lowerBound = ResolveUsageLowerBound(lentRecord, now, introductionDate, latestLedgerDateWithoutDetails);
-                var usageToRecord = FilterUsageToRecordOnReturn(detailList, lowerBound);
+                var usageInRange = FilterUsageToRecordOnReturn(detailList, lowerBound);
+
+                // Issue #2372: 下限は貸出日を超えないので、貸出中に手で追加した行（貸出日の翌日〜返却日）と同じ日の履歴は
+                // 下限では除けない。その日の、手入力の行と同じ種類の履歴を記録済みとみなして除く（貸出当日の手入力の行は従来どおり除かない）
+                var lentDateForReturn = ResolveLentDateForReturn(lentRecord, now);
+                var daysRecordedWithoutDetails = lentDateForReturn < now.Date
+                    ? await _ledgerRepository.GetDaysRecordedWithoutDetailsAsync(cardIdm, lentDateForReturn.AddDays(1), now.Date).ConfigureAwait(false)
+                    : Enumerable.Empty<DayRecordedWithoutDetails>();
+                var (usageToRecord, usageOnRecordedDays) = ExcludeUsageOnDaysRecordedWithoutDetails(usageInRange, daysRecordedWithoutDetails);
+                LogUsageExcludedOnDaysRecordedWithoutDetails(IdmMasker.Mask(cardIdm), lentDateForReturn, usageOnRecordedDays);
 
                 var lentAt = lentRecord.LentAt ?? now.AddDays(-1);
                 _logger.LogDebug("LendingService: 貸出時刻={LentAt}, 導入日={IntroductionDate}, 明細なしの最新日={LatestWithoutDetails}, フィルタ開始日={FilterStart}, 抽出後の履歴件数={Count}",
@@ -1312,8 +1463,8 @@ namespace ICCardManager.Services
                 {
                     _logger.LogInformation(
                         "LendingService: 返却を記録しましたが台帳行は作成されませんでした" +
-                        "（CardIdm={CardIdm}, 受け取った履歴件数={ReceivedCount}, 下限以降の抽出件数={FilteredCount}, 重複チェック省略={SkipDuplicateCheck}）",
-                        IdmMasker.Mask(cardIdm), detailList.Count, usageToRecord.Count, skipDuplicateCheck);
+                        "（CardIdm={CardIdm}, 受け取った履歴件数={ReceivedCount}, 下限以降の抽出件数={FilteredCount}, 手入力の行と同じ日として除いた件数={ExcludedCount}, 重複チェック省略={SkipDuplicateCheck}）",
+                        IdmMasker.Mask(cardIdm), detailList.Count, usageInRange.Count, usageOnRecordedDays.Count, skipDuplicateCheck);
                 }
 
                 // Issue #2237: 貸出日より前の利用（ピッすいを通さずに使われた利用）を記録したことを本番ログへ残す。
