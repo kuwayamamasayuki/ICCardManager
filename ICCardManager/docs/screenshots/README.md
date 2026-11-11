@@ -63,7 +63,7 @@ cd D:\OneDrive\交通系\src\ICCardManager
 | Debug | 返却後に開くダイアログ | `busstop.png` `companion_count.png` |
 | Debug | 仮想タッチ（DEBUG 限定の機能そのもの） | `virtual_touch.png` |
 | Debug | 職員証認証を経る画面 | `system_lend.png` `ledger_row_edit.png` |
-| Debug | 未登録カードの読み取りで開くカード登録方法の選択（初期表示／紙の出納簿からの繰越を入力した状態。最後はキャンセルして登録しない） | `card_registration_mode.png` `card_registration_mode_carryover.png` |
+| Debug | 未登録カードの読み取りで開くカード登録方法の選択（初期表示／紙の出納簿からの繰越を入力した状態。最後はキャンセルして登録しない。1〜4 月は繰越の図（1 月は両方）が Skip されるため、`-Changed -Publish` の差分撮影は全部そろわず何も公開できない。ダイアログを直したら 5〜12 月に撮り直すか、全撮影で撮れた初期表示の図だけを公開する） | `card_registration_mode.png` `card_registration_mode_carryover.png` |
 | Debug | バックアップの保存先・DB のパスを表示する画面（撮影用の置き場所で撮る） | `system.png` `restore_list.png`（リストア用バックアップ一覧、1 件選択した状態）`connection_diagnostics.png` |
 
 動作の要点：
