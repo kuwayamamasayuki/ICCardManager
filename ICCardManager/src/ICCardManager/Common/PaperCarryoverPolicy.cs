@@ -60,10 +60,9 @@ namespace ICCardManager.Common
         /// その年度に「前年度より繰越」の行を持たない（翌年度の繰越行は帳票が in-memory で合成する）ので従来どおり加算する。
         /// </para>
         /// <para>
-        /// <b>既知の制約（#2044）</b>: 導入行が「前年度より繰越」かは、摘要を現在の組織設定の文言
-        /// （<see cref="SummaryGenerator.GetCarryoverFromPreviousYearSummary"/>）と比べて判定する。導入行には
-        /// 種別を表すフラグが無く、保存済みの行自身の情報で判定する手段が無いため。組織設定でこの文言を変えると、
-        /// 変更前に登録した 3 月繰越のカードは再び加算される（利用実績の集計の除外も同じ制約を持つ）。
+        /// Issue #2371: 導入行が「前年度より繰越」かは、行自身の導入行の種別（<see cref="Ledger.IsFiscalYearStartCarryover"/>）で
+        /// 判定する。以前は摘要を現在の組織設定の文言と比べており、文言を変えると変更前に登録した 3 月繰越のカードへ
+        /// 紙の累計を再び加算していた（#2044 と同じ形）。
         /// </para>
         /// </remarks>
         public static bool AddsPaperCumulativeToFiscalYear(
@@ -78,7 +77,7 @@ namespace ICCardManager.Common
         }
 
         /// <summary>
-        /// その年度の台帳が導入行「前年度より繰越」から始まるかどうか（年度で最も早い日付の行に、その摘要の行があるか）。
+        /// その年度の台帳が導入行「前年度より繰越」から始まるかどうか（年度で最も早い日付の行に、その種別の導入行があるか）。
         /// 3 月を繰越月にして登録したカードの、登録した年度で真になる。
         /// </summary>
         /// <param name="fiscalYearLedgers">
@@ -102,8 +101,8 @@ namespace ICCardManager.Common
         /// だけで合成をやめてしまう。導入行は年度の台帳の先頭にあるという形で判定する。
         /// </para>
         /// <para>
-        /// <b>既知の制約（#2044 / #2371）</b>: 導入行かどうかは摘要を現在の組織設定の文言と比べて判定する
-        /// （導入行に種別のフラグが無いため）。文言を変える前に登録した導入行は認識できない。
+        /// Issue #2371: 導入行かどうかは摘要ではなく行自身の導入行の種別（<see cref="Ledger.IsFiscalYearStartCarryover"/>）で判定する。
+        /// 履歴の「追加」で同じ摘要の行を入れても導入行にはならない（種別を書くのはカード登録と、種別の列を持たない利用履歴 CSV から新しい行を取り込むときの摘要からの推定だけ）。
         /// 貸出中レコードだけが導入行より前にある形は、前年度繰越の母集団から貸出中レコードを除くこと
         /// （<c>ILedgerQueryService.GetCarryoverBalanceAsync</c>）でも塞いでいる。
         /// </para>
@@ -117,8 +116,7 @@ namespace ICCardManager.Common
             }
 
             var firstDay = settled.Min(l => l.Date.Date);
-            var previousYearCarryoverSummary = SummaryGenerator.GetCarryoverFromPreviousYearSummary();
-            return settled.Any(l => l.Date.Date == firstDay && l.Summary == previousYearCarryoverSummary);
+            return settled.Any(l => l.Date.Date == firstDay && l.IsFiscalYearStartCarryover);
         }
 
         /// <summary>
@@ -167,10 +165,11 @@ namespace ICCardManager.Common
         /// <para>
         /// Issue #2441: 年度途中で導入したカードの導入行「○月から繰越」は繰越月の翌月 1 日付けで保存され
         /// （<see cref="SummaryGenerator.GetMidYearCarryoverDate"/>）、登録日より後の日付になり得るので、その手前にも
-        /// 返却の利用の行（#2237 より前の記録に限る）・手入力・CSV の行・貸出中レコードが入る。「○月から繰越」は年度の途中にしか現れない摘要なので
+        /// 返却の利用の行（#2237 より前の記録に限る）・手入力・CSV の行・貸出中レコードが入る。「○月から繰越」は年度の途中にしか現れない導入行なので
         /// 年度の先頭かどうかは問わず、期間の台帳にある帳簿の行（貸出中レコードを除く）の日をすべて返す。
-        /// 期間の外の行は数えないので、全期間と表示期間で同じ日になる。台帳の途中に手入力された「○月から繰越」も始点になるが、
-        /// その残高の誤りは直後の行で検出され、#2007 の訂正案がその行を指す。
+        /// 期間の外の行は数えないので、全期間と表示期間で同じ日になる。導入行かどうかは行自身の種別
+        /// （<see cref="Ledger.IsMidYearCarryover"/>。Issue #2371）で決めるので、履歴の「追加」で同じ摘要を入れた行は始点にならず、
+        /// 前の行から続けて検査する。始点になった導入行の残高の誤りは直後の行で検出され、#2007 の訂正案がその行を指す。
         /// </para>
         /// </remarks>
         public static IReadOnlyList<DateTime> GetChainRestartDates(
@@ -200,7 +199,7 @@ namespace ICCardManager.Common
             }
 
             dates.AddRange(ledgers
-                .Where(l => !l.IsLentRecord && SummaryGenerator.IsMidYearCarryoverSummary(l.Summary))
+                .Where(l => !l.IsLentRecord && l.IsMidYearCarryover)
                 .Select(l => l.Date.Date));
 
             return dates.Distinct().OrderBy(d => d).ToList();

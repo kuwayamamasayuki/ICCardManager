@@ -45,6 +45,7 @@ public class ReportRowBuilderTests
                 CardIdm = "0102030405060708",
                 Date = new DateTime(2025, 8, 1),
                 Summary = SummaryGenerator.GetMidYearCarryoverSummary(7),
+                InitialRecordKind = InitialRecordSummaryMatcher.InferWithCurrentSettings(SummaryGenerator.GetMidYearCarryoverSummary(7)),
                 Income = 5000,   // 既存データで残っているケース
                 Expense = 0,
                 Balance = 5000

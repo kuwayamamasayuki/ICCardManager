@@ -801,7 +801,9 @@ namespace ICCardManager.Services
             {
                 CardIdm = cardIdm,
                 Date = date170,
-                Summary = "新規購入",
+                Summary = InitialRecordSummaryMatcher.NewPurchaseSummary,
+                // Issue #2371: 導入行は種別で判定する（カード登録の BuildInitialLedgerAsync と同じ）
+                InitialRecordKind = InitialRecordKind.NewPurchase,
                 Income = purchaseAmount,
                 Expense = 0,
                 Balance = balance,

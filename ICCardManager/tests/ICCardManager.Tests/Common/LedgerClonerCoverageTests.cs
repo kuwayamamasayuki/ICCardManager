@@ -302,6 +302,12 @@ public class LedgerClonerCoverageTests
             {
                 property.SetValue(target, new byte[] { (byte)index, 0x0A, 0x0B });
             }
+            else if (Nullable.GetUnderlyingType(type) is { IsEnum: true } enumType)
+            {
+                // Issue #2371: Ledger.InitialRecordKind。null（既定値）でない列挙子を入れる
+                var values = Enum.GetValues(enumType);
+                property.SetValue(target, values.GetValue(index % values.Length));
+            }
             else
             {
                 throw new NotSupportedException(

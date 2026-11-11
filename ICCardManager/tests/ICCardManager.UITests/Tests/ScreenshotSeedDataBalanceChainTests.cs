@@ -110,7 +110,7 @@ namespace ICCardManager.UITests.Tests
             var rows = new[]
             {
                 new LedgerBalanceChain.Row(1, "CARD", day, "鉄道（博多～天神）", 0, 200, 9800),
-                new LedgerBalanceChain.Row(2, "CARD", day, "新規購入", 10000, 0, 10000),
+                new LedgerBalanceChain.Row(2, "CARD", day, "新規購入", 10000, 0, 10000, initialRecordKind: 1),
             };
 
             LedgerBalanceChain.FindBreaks(rows).Should().BeEmpty();
@@ -125,8 +125,8 @@ namespace ICCardManager.UITests.Tests
             var day = new DateTime(2026, 11, 2);
             var rows = new[]
             {
-                new LedgerBalanceChain.Row(1, "A", day, "新規購入", 10000, 0, 10000),
-                new LedgerBalanceChain.Row(2, "B", day, "新規購入", 3000, 0, 3000),
+                new LedgerBalanceChain.Row(1, "A", day, "新規購入", 10000, 0, 10000, initialRecordKind: 1),
+                new LedgerBalanceChain.Row(2, "B", day, "新規購入", 3000, 0, 3000, initialRecordKind: 1),
                 new LedgerBalanceChain.Row(3, "A", day.AddDays(1), "鉄道（博多～天神）", 0, 260, 9740),
                 new LedgerBalanceChain.Row(4, "B", day.AddDays(1), "役務費によりチャージ", 1000, 0, 4000),
             };
@@ -175,7 +175,7 @@ namespace ICCardManager.UITests.Tests
                 "  is_deleted INTEGER DEFAULT 0, is_lent INTEGER DEFAULT 0, last_lent_at TEXT, last_lent_staff TEXT);" +
                 "CREATE TABLE ledger (id INTEGER PRIMARY KEY AUTOINCREMENT, card_idm TEXT NOT NULL, lender_idm TEXT, date TEXT NOT NULL, " +
                 "  summary TEXT NOT NULL, income INTEGER DEFAULT 0, expense INTEGER DEFAULT 0, balance INTEGER NOT NULL, staff_name TEXT, " +
-                "  note TEXT, lent_at TEXT, is_lent_record INTEGER DEFAULT 0, companion_count INTEGER NOT NULL DEFAULT 0);" +
+                "  note TEXT, lent_at TEXT, is_lent_record INTEGER DEFAULT 0, companion_count INTEGER NOT NULL DEFAULT 0, initial_record_kind INTEGER DEFAULT NULL);" +
                 "CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT);";
             cmd.ExecuteNonQuery();
             return conn;

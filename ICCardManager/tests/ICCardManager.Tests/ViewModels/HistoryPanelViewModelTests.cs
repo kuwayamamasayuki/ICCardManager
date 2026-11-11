@@ -257,7 +257,7 @@ public class HistoryPanelViewModelTests : IDisposable
     /// </summary>
     internal static List<Ledger> CreateInitialBalanceErrorLedgers(string cardIdm) => new()
     {
-        new Ledger { Id = 1, CardIdm = cardIdm, Date = new DateTime(2025, 4, 1), Summary = "新規購入", Income = 5000, Expense = 0, Balance = 5000 },
+        new Ledger { Id = 1, CardIdm = cardIdm, Date = new DateTime(2025, 4, 1), Summary = "新規購入", InitialRecordKind = InitialRecordKind.NewPurchase, Income = 5000, Expense = 0, Balance = 5000 },
         new Ledger { Id = 2, CardIdm = cardIdm, Date = new DateTime(2025, 4, 2), Summary = "鉄道（天神～博多）", Income = 0, Expense = 210, Balance = 2790 },
         new Ledger { Id = 3, CardIdm = cardIdm, Date = new DateTime(2025, 4, 3), Summary = "鉄道（博多～天神）", Income = 0, Expense = 260, Balance = 2530 }
     };
@@ -339,7 +339,7 @@ public class HistoryPanelViewModelTests : IDisposable
     [Fact]
     public void ApplyBalanceInconsistencyMarkers_導入行のメッセージは逆算した残高と対処を含むこと()
     {
-        _history.HistoryLedgers.Add(new LedgerDto { Id = 1, Summary = "新規購入", Income = 5000, Balance = 5000 });
+        _history.HistoryLedgers.Add(new LedgerDto { Id = 1, Summary = "新規購入", InitialRecordKind = InitialRecordKind.NewPurchase, Income = 5000, Balance = 5000 });
         _history.HistoryLedgers.Add(new LedgerDto { Id = 2, Summary = "鉄道（天神～博多）", Expense = 210, Balance = 2790 });
         var field = typeof(HistoryPanelViewModel).GetField("_balanceInconsistencies",
             System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
@@ -378,7 +378,7 @@ public class HistoryPanelViewModelTests : IDisposable
     [Fact]
     public void ApplyBalanceInconsistencyMarkers_訂正案由来でなければ導入行の摘要でも通常の文言にすること()
     {
-        _history.HistoryLedgers.Add(new LedgerDto { Id = 5, Summary = "新規購入", Income = 3000, Balance = 3000 });
+        _history.HistoryLedgers.Add(new LedgerDto { Id = 5, Summary = "新規購入", InitialRecordKind = InitialRecordKind.NewPurchase, Income = 3000, Balance = 3000 });
         var field = typeof(HistoryPanelViewModel).GetField("_balanceInconsistencies",
             System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
         field.SetValue(_history, new Dictionary<int, (int ExpectedBalance, int ActualBalance, bool IsInitialBalanceCorrection)> { { 5, (2800, 3000, false) } });
@@ -619,7 +619,7 @@ public class HistoryPanelViewModelTests : IDisposable
             .ReturnsAsync(CreateInitialBalanceErrorLedgers(cardIdm));
 
         var forInitial = await _history.ResolveInitialBalanceCorrectionForEditAsync(
-            new LedgerDto { Id = 1, CardIdm = cardIdm, Summary = "新規購入" });
+            new LedgerDto { Id = 1, CardIdm = cardIdm, Summary = "新規購入", InitialRecordKind = InitialRecordKind.NewPurchase });
         var forUsage = await _history.ResolveInitialBalanceCorrectionForEditAsync(
             new LedgerDto { Id = 2, CardIdm = cardIdm, Summary = "鉄道（天神～博多）" });
 
@@ -1607,7 +1607,7 @@ public class HistoryPanelViewModelTests : IDisposable
         _ledgerRepositoryMock.Setup(r => r.GetFiscalYearFirstDayLedgersAsync(cardIdm, 2027))
             .ReturnsAsync(new List<Ledger>
             {
-                new Ledger { Id = 1, CardIdm = cardIdm, Date = new DateTime(2027, 4, 1), Summary = SummaryGenerator.GetCarryoverFromPreviousYearSummary(), Income = 5000, Balance = 5000 },
+                new Ledger { Id = 1, CardIdm = cardIdm, Date = new DateTime(2027, 4, 1), Summary = SummaryGenerator.GetCarryoverFromPreviousYearSummary(), InitialRecordKind = InitialRecordKind.FiscalYearStartCarryover, Income = 5000, Balance = 5000 },
                 new Ledger { Id = 2, CardIdm = cardIdm, Date = new DateTime(2027, 4, 1), Summary = "鉄道（天神～博多）", Expense = 210, Balance = 4790 }
             });
 
@@ -1674,6 +1674,7 @@ public class HistoryPanelViewModelTests : IDisposable
             CardIdm = cardIdm,
             Date = new DateTime(2027, 4, 1),
             Summary = SummaryGenerator.GetCarryoverFromPreviousYearSummary(),
+            InitialRecordKind = InitialRecordKind.FiscalYearStartCarryover,
             Income = introductionBalance,
             Balance = introductionBalance
         };

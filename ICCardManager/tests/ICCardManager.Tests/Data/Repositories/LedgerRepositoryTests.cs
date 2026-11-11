@@ -1026,7 +1026,8 @@ public class LedgerRepositoryTests : IDisposable
     }
 
     /// <summary>
-    /// Issue #2418: 導入行を摘要の比較で認識できない形（組織設定の文言を変える前に登録した導入行。#2371）でも、
+    /// Issue #2418: 導入行を認識できない形（種別を持たない導入行。Issue #2371 以降は、2 回以上文言を変えた組織の中間の文言で
+    /// マイグレーション 013 が埋められなかった行）でも、
     /// 導入行より前が貸出中レコードだけなら二重に計上しないこと（前年度繰越の母集団から貸出中レコードを除く効果）
     /// </summary>
     [Fact]
@@ -3270,6 +3271,7 @@ public class LedgerRepositoryTests : IDisposable
             CardIdm = cardIdm,
             Date = date,
             Summary = summary,
+            InitialRecordKind = InitialRecordSummaryMatcher.InferWithCurrentSettings(summary),
             Income = income,
             Expense = expense,
             Balance = 10000 - expense + income,

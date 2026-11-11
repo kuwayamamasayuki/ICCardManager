@@ -304,6 +304,37 @@ public class LedgerMergeServiceTests : IDisposable
     }
 
     /// <summary>
+    /// Issue #2371: 導入行（種別を持つ行）は統合できないこと。統合先にすると摘要が明細から作り直されるのに種別が残り、
+    /// 統合元にすると導入行が消える。
+    /// </summary>
+    [Theory]
+    [Trait("Category", "Unit")]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task MergeAsync_InitialRecord_ReturnsError(bool initialIsTarget)
+    {
+        // Arrange: 新規購入（受入 1,000）とチャージ（受入 3,000）。どちらも受入だけなので金額の検証には掛からない
+        var date = new DateTime(2026, 2, 3);
+        var purchase = CreateTestLedger(initialIsTarget ? 1 : 2, TestCardIdm, date, "新規購入", 0, 1000);
+        purchase.Income = 1000;
+        purchase.InitialRecordKind = InitialRecordKind.NewPurchase;
+        var charge = CreateTestLedger(initialIsTarget ? 2 : 1, TestCardIdm, date, "役務費によりチャージ", 0, 4000);
+        charge.Income = 3000;
+        charge.Details.Add(new LedgerDetail { LedgerId = charge.Id, UseDate = date, Amount = 3000, Balance = 4000, IsCharge = true, SequenceNumber = 1 });
+
+        SetupGetByIdMocks(purchase, charge);
+
+        // Act
+        var result = await _service.MergeAsync(new List<int> { 1, 2 });
+
+        // Assert
+        result.Success.Should().BeFalse();
+        result.ErrorMessage.Should().Contain("導入行");
+        _ledgerRepositoryMock.Verify(
+            r => r.MergeLedgersAsync(It.IsAny<int>(), It.IsAny<IEnumerable<int>>(), It.IsAny<Ledger>(), It.IsAny<SQLiteTransaction>()), Times.Never);
+    }
+
+    /// <summary>
     /// チャージと利用を混在して統合しようとした場合はエラーとなること
     /// </summary>
     [Fact]
@@ -1117,7 +1148,8 @@ public class LedgerMergeServiceTests : IDisposable
             LentAt = new DateTime(2026, 2, 3, 8, 0, 0),
             ReturnedAt = new DateTime(2026, 2, 3, 18, 0, 0),
             IsLentRecord = false,
-            CompanionCount = 2 // Issue #1906
+            CompanionCount = 2, // Issue #1906
+            InitialRecordKind = InitialRecordKind.MidYearCarryover // Issue #2371
         };
 
         // Act
@@ -1140,6 +1172,7 @@ public class LedgerMergeServiceTests : IDisposable
         restored.ReturnedAt.Should().Be(original.ReturnedAt);
         restored.IsLentRecord.Should().Be(original.IsLentRecord);
         restored.CompanionCount.Should().Be(2, "Issue #1906: 統合取り消しで同行者数も復元する");
+        restored.InitialRecordKind.Should().Be(InitialRecordKind.MidYearCarryover, "Issue #2371: 取り消しで導入行の種別も復元する");
     }
 
     /// <summary>

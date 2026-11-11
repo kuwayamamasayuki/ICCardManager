@@ -61,6 +61,7 @@ public class ReportDataBuilderTests
             CardIdm = cardIdm,
             Date = date,
             Summary = summary,
+            InitialRecordKind = InitialRecordSummaryMatcher.InferWithCurrentSettings(summary),
             Income = income,
             Expense = expense,
             Balance = balance,

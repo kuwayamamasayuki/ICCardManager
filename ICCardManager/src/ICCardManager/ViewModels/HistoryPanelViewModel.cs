@@ -817,7 +817,7 @@ public partial class HistoryPanelViewModel : ObservableObject
                     ? InitialBalanceCorrectionMessage.ForHistoryRow(
                         recordedBalance: info.ActualBalance,
                         suggestedBalance: info.ExpectedBalance,
-                        appliesToIncome: Ledger.InitialRecordCarriesIncome(dto.Summary))
+                        appliesToIncome: Ledger.InitialRecordCarriesIncome(dto.InitialRecordKind))
                     : $"残高不整合: 期待値 {info.ExpectedBalance:N0}円 / 実際 {info.ActualBalance:N0}円";
             }
             else

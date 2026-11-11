@@ -411,7 +411,7 @@ namespace ICCardManager.Services
                 date: initial.Date,
                 recordedBalance: initial.Balance,
                 suggestedBalance: suggested,
-                appliesToIncome: Ledger.InitialRecordCarriesIncome(initial.Summary));
+                appliesToIncome: Ledger.InitialRecordCarriesIncome(initial.InitialRecordKind));
         }
 
         /// <summary>

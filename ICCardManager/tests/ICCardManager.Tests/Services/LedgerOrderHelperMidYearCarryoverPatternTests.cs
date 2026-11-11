@@ -1,5 +1,6 @@
 using System;
 using FluentAssertions;
+using ICCardManager.Common;
 using ICCardManager.Models;
 using ICCardManager.Services;
 using Xunit;
@@ -43,6 +44,8 @@ public class LedgerOrderHelperMidYearCarryoverPatternTests : IDisposable
             CardIdm = "AAAA000000000001",
             Date = date,
             Summary = summary,
+            // Issue #2371: 導入行の摘要で入れる行は、カード登録が書いた導入行として種別も持たせる
+            InitialRecordKind = InitialRecordSummaryMatcher.InferWithCurrentSettings(summary),
             Income = income,
             Expense = expense,
             Balance = balance

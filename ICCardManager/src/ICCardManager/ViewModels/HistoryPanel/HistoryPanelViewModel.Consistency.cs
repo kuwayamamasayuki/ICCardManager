@@ -100,7 +100,7 @@ public partial class HistoryPanelViewModel
     /// </remarks>
     internal async Task<InitialBalanceCorrection?> ResolveInitialBalanceCorrectionForEditAsync(LedgerDto ledger)
     {
-        if (ledger == null || !Ledger.IsInitialRecordSummary(ledger.Summary))
+        if (ledger == null || !ledger.IsInitialRecord)
         {
             return null;
         }

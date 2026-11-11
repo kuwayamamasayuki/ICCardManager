@@ -1839,6 +1839,7 @@ public class CardManageViewModelTests : IDisposable
         _ledgerRepositoryMock.Verify(r => r.InsertAsync(It.Is<Ledger>(l =>
             l.CardIdm == idm &&
             l.Summary == "新規購入" &&
+            l.InitialRecordKind == InitialRecordKind.NewPurchase && // Issue #2371: 種別も書く
             l.Income == balance &&
             l.Balance == balance
         )), Times.Once);
@@ -2064,7 +2065,8 @@ public class CardManageViewModelTests : IDisposable
         // Issue #2104: 事前読み取り履歴が実際に取り込まれたこと（利用行が記録されている）。
         // 再読取をしないことだけを見ると、履歴の取り込みごと飛ばす実装でも緑になる。
         _ledgerRepositoryMock.Verify(r => r.InsertAsync(It.Is<Ledger>(l =>
-            l.CardIdm == idm && l.Expense == 210 && l.Balance == 4790)), Times.Once);
+            l.CardIdm == idm && l.Expense == 210 && l.Balance == 4790
+            && l.InitialRecordKind == null)), Times.Once); // Issue #2371: 利用の行は導入行ではない
     }
 
     /// <summary>
@@ -2142,7 +2144,8 @@ public class CardManageViewModelTests : IDisposable
         _ledgerRepositoryMock.Verify(r => r.InsertAsync(It.Is<Ledger>(l =>
             l.Income == 0 &&
             l.Balance == userSpecifiedBalance &&
-            l.Summary == "5月から繰越"
+            l.Summary == "5月から繰越" &&
+            l.InitialRecordKind == InitialRecordKind.MidYearCarryover // Issue #2371
         )), Times.Once);
     }
 
@@ -2183,7 +2186,8 @@ public class CardManageViewModelTests : IDisposable
         _ledgerRepositoryMock.Verify(r => r.InsertAsync(It.Is<Ledger>(l =>
             l.Income == carryoverBalance &&
             l.Balance == carryoverBalance &&
-            l.Summary.Contains("前年度")
+            l.Summary.Contains("前年度") &&
+            l.InitialRecordKind == InitialRecordKind.FiscalYearStartCarryover // Issue #2371
         )), Times.Once);
     }
 

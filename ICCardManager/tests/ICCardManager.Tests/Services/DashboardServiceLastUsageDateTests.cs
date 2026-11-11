@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
 using FluentAssertions;
+using ICCardManager.Common;
 using ICCardManager.Data;
 using ICCardManager.Data.Repositories;
 using ICCardManager.Dtos;
@@ -93,6 +94,7 @@ public class DashboardServiceLastUsageDateTests : IDisposable
             LenderIdm = StaffA,
             Date = date,
             Summary = summary,
+            InitialRecordKind = InitialRecordSummaryMatcher.InferWithCurrentSettings(summary),
             Income = income,
             Expense = expense,
             Balance = balance,

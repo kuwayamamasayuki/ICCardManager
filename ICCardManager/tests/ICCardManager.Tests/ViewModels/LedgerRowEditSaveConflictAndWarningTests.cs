@@ -69,6 +69,8 @@ public class LedgerRowEditSaveConflictAndWarningTests : IDisposable
         CardIdm = TestCardIdm,
         Date = new DateTime(2026, 1, 10),
         Summary = summary,
+        // Issue #2371: 導入行の摘要で作る行は、カード登録が書いた導入行として種別も持たせる
+        InitialRecordKind = isLentRecord ? null : InitialRecordSummaryMatcher.InferWithCurrentSettings(summary),
         Income = income,
         Expense = expense,
         Balance = 2300,
@@ -86,6 +88,7 @@ public class LedgerRowEditSaveConflictAndWarningTests : IDisposable
         Expense = ledger.Expense,
         Balance = ledger.Balance,
         IsLentRecord = ledger.IsLentRecord,
+        InitialRecordKind = ledger.InitialRecordKind,
     };
 
     private const string ExpectedTarget = "履歴「R8.1.10 鉄道（天神～博多）」";
@@ -417,7 +420,7 @@ public class LedgerRowEditSaveConflictAndWarningTests : IDisposable
     /// <remarks>
     /// 摘要の文言は組織設定で変えられる（#1818）。経路ごとのテストは経路の追加に追随できないため
     /// 静的検査を対で置く（#1764）。例外は組織設定に無い固定の文言「新規購入」を <c>Models/Ledger.cs</c>
-    /// （<c>IsCarryover</c> / <c>IsInitialRecordSummary</c>）で比べることだけ。
+    /// で比べることだけ（Issue #2371 以降は Ledger.cs も比べていない。導入行の文言との照合は <c>Common/InitialRecordSummaryMatcher.cs</c> が <c>string.Equals</c> で行う）。
     /// <para>
     /// 限界: 検出は 1 行の中の字句の形による。摘要を別名の変数（<c>var s = ledger.Summary;</c>）へ移してから比べる形、
     /// 比較が複数行にまたがる形、<c>switch</c> の <c>case "…":</c>・パターン（<c>is "…"</c>）・<c>Regex</c> での照合は検出しない。
@@ -449,7 +452,7 @@ public class LedgerRowEditSaveConflictAndWarningTests : IDisposable
         }
 
         violations.Should().BeEmpty(
-            "摘要の文言は組織設定から導出した判定（SummaryGenerator.Get…Summary / Ledger.IsInitialRecordSummary 等）で比べること");
+            "摘要の文言は組織設定から導出した判定（SummaryGenerator.Get…Summary / InitialRecordSummaryMatcher 等）で比べること");
     }
 
     private static bool IsAllowedFixedSummaryFile(string sourceRoot, string path) =>
@@ -473,7 +476,9 @@ public class LedgerRowEditSaveConflictAndWarningTests : IDisposable
         var code = TestSourceInspection.RemoveCommentsPreservingLines(File.ReadAllText(path));
 
         code.Should().Contain("SummaryGenerator.GetPointRedemptionSummary()");
-        code.Should().Contain("Ledger.IsInitialRecordSummary(Summary)");
+        // Issue #2371: 保存済みの導入行は種別で、入力中の摘要は InitialRecordSummaryMatcher で見る
+        code.Should().Contain("_initialRecordKind.HasValue");
+        code.Should().Contain("InitialRecordSummaryMatcher.InferWithCurrentSettings(Summary)");
     }
 
     [Theory]

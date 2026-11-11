@@ -178,6 +178,13 @@ namespace ICCardManager.Services
         public bool IsLentRecord { get; set; }
         public int CompanionCount { get; set; }
 
+        /// <summary>
+        /// 導入行の種別（Issue #2371）。統合は導入行を対象にしない（<see cref="LedgerMergeService"/> の検証で拒否する）が、
+        /// 取り消しで再作成する行が元の行と同じ種別を持つよう、スナップショットにも載せる。この列より前に保存した
+        /// 統合履歴の JSON には無く、<c>null</c>（導入行でない）として読む。
+        /// </summary>
+        public InitialRecordKind? InitialRecordKind { get; set; }
+
         public static LedgerSnapshot FromLedger(Ledger ledger)
         {
             return new LedgerSnapshot
@@ -196,7 +203,8 @@ namespace ICCardManager.Services
                 LentAtText = SqliteDateTimeFormat.ToText(ledger.LentAt),
                 ReturnedAtText = SqliteDateTimeFormat.ToText(ledger.ReturnedAt),
                 IsLentRecord = ledger.IsLentRecord,
-                CompanionCount = ledger.CompanionCount
+                CompanionCount = ledger.CompanionCount,
+                InitialRecordKind = ledger.InitialRecordKind
             };
         }
 
@@ -218,7 +226,8 @@ namespace ICCardManager.Services
                 LentAt = LentAtText is { Length: > 0 } lentAt ? SqliteDateTimeFormat.ParseStored(lentAt) : null,
                 ReturnedAt = ReturnedAtText is { Length: > 0 } returnedAt ? SqliteDateTimeFormat.ParseStored(returnedAt) : null,
                 IsLentRecord = IsLentRecord,
-                CompanionCount = CompanionCount
+                CompanionCount = CompanionCount,
+                InitialRecordKind = InitialRecordKind
             };
         }
     }
@@ -808,6 +817,14 @@ namespace ICCardManager.Services
             if (ledgers.Any(l => l.IsLentRecord))
             {
                 return "貸出中のレコードは統合できません";
+            }
+
+            // Issue #2371: 導入行（新規購入・繰越）は利用の記録ではなく台帳の始まりの残高なので統合しない。
+            // 統合先にすると摘要は明細から作り直されるのに導入行の種別が残り、統合元にすると導入行が消えて
+            // 帳票の導入月・前年度繰越・紙の累計の判定の手掛かりを失う。
+            if (ledgers.Any(l => l.IsInitialRecord))
+            {
+                return "導入行（新規購入・繰越の行）は統合できません。導入行を除いて選択し直してください";
             }
 
             // チャージと利用の混在チェック

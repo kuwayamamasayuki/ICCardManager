@@ -5,6 +5,7 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using FluentAssertions;
+using ICCardManager.Common;
 using ICCardManager.Data;
 using ICCardManager.Data.Repositories;
 using ICCardManager.Infrastructure.Security;
@@ -2859,6 +2860,7 @@ public class LendingServiceTests : IDisposable
             CardIdm = TestCardIdm,
             Date = importFromDate,
             Summary = SummaryGenerator.GetMidYearCarryoverSummary(7),
+            InitialRecordKind = InitialRecordSummaryMatcher.InferWithCurrentSettings(SummaryGenerator.GetMidYearCarryoverSummary(7)),
             Income = 0,
             Expense = 0,
             Balance = 3000,
@@ -2916,6 +2918,7 @@ public class LendingServiceTests : IDisposable
             CardIdm = TestCardIdm,
             Date = importFromDate,
             Summary = "新規購入",
+            InitialRecordKind = InitialRecordKind.NewPurchase,
             Income = 0,
             Expense = 0,
             Balance = 0,

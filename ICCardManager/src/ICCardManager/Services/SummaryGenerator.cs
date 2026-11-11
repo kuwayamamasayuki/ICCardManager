@@ -126,7 +126,7 @@ namespace ICCardManager.Services
         /// </summary>
         /// <remarks>
         /// リテラル（「バス」「★」）を直書きせず <see cref="SummaryTextOptions"/> の
-        /// 既定値を参照する（<see cref="GetMidYearCarryoverLikePattern"/> のフォールバックと同じ流儀）。
+        /// 既定値を参照する（<see cref="IsMidYearCarryoverSummary"/> のフォールバックと同じ流儀）。
         /// </remarks>
         private static readonly SummaryTextOptions DefaultSummaryText = new();
 
@@ -2546,6 +2546,15 @@ namespace ICCardManager.Services
         }
 
         /// <summary>
+        /// 現在の組織設定の摘要テキスト（Issue #2371。導入行の種別を摘要から推定する
+        /// <c>InitialRecordSummaryMatcher</c> が、現在の文言と既定の文言の両方と照合するために使う）
+        /// </summary>
+        public static SummaryTextOptions GetCurrentSummaryText()
+        {
+            return CurrentOptions.SummaryText;
+        }
+
+        /// <summary>
         /// 前年度繰越の摘要を生成
         /// </summary>
         public static string GetCarryoverFromPreviousYearSummary()
@@ -2656,10 +2665,15 @@ namespace ICCardManager.Services
         }
 
         /// <summary>
-        /// 摘要が年度途中導入の繰越かどうかを判定（Issue #510）
+        /// 摘要の文字列が年度途中導入の繰越（「○月から繰越」）の形式かどうかを、現在の組織設定のパターンで判定（Issue #510）
         /// </summary>
         /// <param name="summary">摘要文字列</param>
         /// <returns>「○月から繰越」形式の場合true</returns>
+        /// <remarks>
+        /// Issue #2371: <b>保存済みの行が導入行かどうかの判定には使わない</b>（<c>Ledger.IsMidYearCarryover</c>＝導入行の種別の列を使う）。
+        /// 文言の設定を変えると、変更前に保存した行は現在のパターンに一致しなくなるため。種別を持たない行の推定は
+        /// <c>Common.InitialRecordSummaryMatcher</c> が現在と既定のパターンの両方で行う。
+        /// </remarks>
         public static bool IsMidYearCarryoverSummary(string? summary)
         {
             if (string.IsNullOrEmpty(summary))
@@ -2674,65 +2688,9 @@ namespace ICCardManager.Services
             catch (ArgumentException)
             {
                 // 不正な正規表現の場合はデフォルトパターンにフォールバック
-                // （リテラルを直書きせず SummaryTextOptions の既定値を単一の真実源とする。
-                //   GetMidYearCarryoverLikePattern のフォールバックと同じ流儀）
+                // （リテラルを直書きせず SummaryTextOptions の既定値を単一の真実源とする）
                 return Regex.IsMatch(summary, new SummaryTextOptions().MidYearCarryoverPattern);
             }
-        }
-
-        /// <summary>
-        /// 繰越摘要を SQL の LIKE で近似判定するためのパターンを導出（Issue #1749）
-        /// </summary>
-        /// <returns>LIKE パターン。エスケープ文字はバックスラッシュ（SQL 側で <c>ESCAPE '\'</c> を指定すること）</returns>
-        /// <remarks>
-        /// <para>
-        /// 判定の正は <see cref="IsMidYearCarryoverSummary"/>（正規表現 <c>MidYearCarryoverPattern</c>）だが、
-        /// SQLite の SQL では正規表現が使えないため、生成書式 <c>MidYearCarryoverFormat</c> の
-        /// 月プレースホルダー <c>{0}</c> を <c>%</c> に置き換えた LIKE パターンで近似する。
-        /// 既定書式では従来 SQL にハードコードされていた <c>'%月から繰越'</c> と一致する。
-        /// 近似のため「13月から繰越」のような範囲外の月や「備考 4月から繰越」のような
-        /// 接頭辞付きにも一致する（先頭 <c>%</c> は月数字だけでなく任意の接頭辞を許す）。生成側
-        /// （<see cref="GetMidYearCarryoverSummary"/>）は 1〜12 月しか保存しないため
-        /// 実データでは乖離しない（従来のハードコードと同じ近似度）。CSV インポート等で
-        /// この形の摘要を持ち込むと、SQL（一致）と C# 正規表現（不一致）で判定が分かれる点に注意。
-        /// </para>
-        /// <para>
-        /// 書式リテラル部の LIKE メタ文字（<c>%</c> <c>_</c> <c>\</c>）はバックスラッシュでエスケープする。
-        /// 不正な書式（<c>string.Format</c> が <see cref="FormatException"/> で失敗する、
-        /// または書式が null で <see cref="ArgumentNullException"/> になる）は既定書式へ
-        /// フォールバックする（<see cref="IsMidYearCarryoverSummary"/> の不正正規表現
-        /// フォールバックと同じ方針。本メソッドは全 ledger クエリの構築で呼ばれるため、
-        /// 設定不備で照会系が全滅しないことを優先する）。
-        /// </para>
-        /// <para>
-        /// 汎用/固有の別: 汎用（物品出納簿の様式）。<see cref="IsMidYearCarryoverSummary"/> と同群。
-        /// </para>
-        /// </remarks>
-        public static string GetMidYearCarryoverLikePattern()
-        {
-            // 私用領域の文字を月プレースホルダーの一時マーカーに使う
-            // （書式リテラル部のエスケープ処理と {0} の % 置換を混同させないため）
-            const string placeholder = "\uE000";
-
-            string formatted;
-            try
-            {
-                formatted = string.Format(CultureInfo.InvariantCulture, CurrentOptions.SummaryText.MidYearCarryoverFormat, placeholder);
-            }
-            catch (Exception ex) when (ex is FormatException or ArgumentNullException)
-            {
-                // 不正な書式（FormatException）／null 書式（ArgumentNullException）は
-                // 既定書式へフォールバック（既定値は SummaryTextOptions と同期）。
-                // FormatException だけを catch すると、設定バインドで null が入った場合に
-                // ArgumentNullException が漏れて全 ledger クエリが失敗する（Issue #1749 レビュー指摘）
-                formatted = string.Format(CultureInfo.InvariantCulture, new SummaryTextOptions().MidYearCarryoverFormat, placeholder);
-            }
-
-            return formatted
-                .Replace("\\", "\\\\")
-                .Replace("%", "\\%")
-                .Replace("_", "\\_")
-                .Replace(placeholder, "%");
         }
 
         /// <summary>

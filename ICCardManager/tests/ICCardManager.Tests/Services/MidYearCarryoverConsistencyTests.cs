@@ -1,5 +1,6 @@
 using System;
 using FluentAssertions;
+using ICCardManager.Common;
 using ICCardManager.Models;
 using ICCardManager.Services;
 using Xunit;
@@ -75,12 +76,15 @@ public class MidYearCarryoverConsistencyTests : IDisposable
     [InlineData(null)]
     public void デフォルト設定では両判定が常に一致する(string? summary)
     {
-        var byLedger = new Ledger { Summary = summary }.IsMidYearCarryover;
+        // Issue #2371: Ledger.IsMidYearCarryover は摘要ではなく導入行の種別で判定するようになった。
+        // 種別を持たない行の種別を摘要から推定する InitialRecordSummaryMatcher（マイグレーション 013・CSV の取り込み）が、
+        // 既定の設定では摘要の形式の判定と一致すること
+        var byMatcher = InitialRecordSummaryMatcher.Infer(summary, currentSummaryText: null) == InitialRecordKind.MidYearCarryover;
         var bySummaryGenerator = SummaryGenerator.IsMidYearCarryoverSummary(summary);
 
-        byLedger.Should().Be(bySummaryGenerator,
-            $"摘要 '{summary}' に対し Ledger.IsMidYearCarryover と " +
-            "SummaryGenerator.IsMidYearCarryoverSummary は一致する必要がある（Issue #1604）");
+        byMatcher.Should().Be(bySummaryGenerator,
+            $"摘要 '{summary}' に対し InitialRecordSummaryMatcher と " +
+            "SummaryGenerator.IsMidYearCarryoverSummary は一致する必要がある（Issue #1604 / #2371）");
     }
 
     /// <summary>
@@ -104,15 +108,11 @@ public class MidYearCarryoverConsistencyTests : IDisposable
         options.SummaryText.MidYearCarryoverPattern = @"^第(1[0-2]|[1-9])期繰越$";
         SummaryGenerator.Configure(options);
 
-        var byLedger = new Ledger { Summary = summary }.IsMidYearCarryover;
+        // Issue #2371: Ledger 側は摘要で判定しなくなった（導入行の種別の列）ため、摘要の形式の判定だけを確かめる
         var bySummaryGenerator = SummaryGenerator.IsMidYearCarryoverSummary(summary);
 
         bySummaryGenerator.Should().Be(expected,
             "SummaryGenerator は組織設定の MidYearCarryoverPattern に従う");
-        byLedger.Should().Be(expected,
-            "一元化により Ledger 側も組織設定パターンに追従する（Issue #1604）");
-        byLedger.Should().Be(bySummaryGenerator,
-            "カスタムパターン下でも両判定が乖離しないこと（二重計上の再発防止）");
     }
 
     /// <summary>
@@ -137,11 +137,8 @@ public class MidYearCarryoverConsistencyTests : IDisposable
         SummaryGenerator.Configure(options);
 
         var bySummaryGenerator = SummaryGenerator.IsMidYearCarryoverSummary(summary);
-        var byLedger = new Ledger { Summary = summary }.IsMidYearCarryover;
 
         bySummaryGenerator.Should().Be(expected,
             "不正な正規表現はデフォルトパターンにフォールバックして判定を継続する");
-        byLedger.Should().Be(expected,
-            "一元化により Ledger 側も同じフォールバック結果になる（Issue #1604）");
     }
 }

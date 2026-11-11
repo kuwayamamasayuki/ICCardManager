@@ -516,7 +516,11 @@ namespace ICCardManager
                 // ここで database_config.txt を読み直さない（読み直すと TTL 判定と入力が分かれる）
                 var path = sp.GetRequiredService<IOptions<DatabaseOptions>>().Value.Path;
                 var logger = sp.GetService<ILogger<DbContext>>();
-                return new DbContext(string.IsNullOrWhiteSpace(path) ? null : path, logger);
+                // Issue #2371: マイグレーション 013 が既存の導入行を埋めるとき、既定の文言に加えて現在の組織設定の文言とも照合する
+                return new DbContext(string.IsNullOrWhiteSpace(path) ? null : path, logger)
+                {
+                    InitialRecordSummaryText = sp.GetRequiredService<IOptions<OrganizationOptions>>().Value.SummaryText,
+                };
             });
             services.AddSingleton<IStaffRepository, StaffRepository>();
             services.AddSingleton<ICardRepository, CardRepository>();

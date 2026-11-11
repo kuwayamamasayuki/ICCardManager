@@ -197,7 +197,12 @@ namespace ICCardManager.Services
                         ReturnerIdm = existingLedgerForUpdate?.ReturnerIdm,
                         LentAt = existingLedgerForUpdate?.LentAt,
                         ReturnedAt = existingLedgerForUpdate?.ReturnedAt,
-                        IsLentRecord = existingLedgerForUpdate?.IsLentRecord ?? false
+                        IsLentRecord = existingLedgerForUpdate?.IsLentRecord ?? false,
+                        // Issue #2371: 導入行の種別は CSV の列に無い。既存の行の更新では DB の種別を引き継ぎ（UpdateAsync は
+                        // 種別を SET しない）、新しい行（ID の無い行）だけ摘要から推定する（種別を持ち込む手段が摘要しか無い）
+                        InitialRecordKind = existingLedgerForUpdate != null
+                            ? existingLedgerForUpdate.InitialRecordKind
+                            : InitialRecordSummaryMatcher.InferWithCurrentSettings(parsed.Summary)
                     };
 
                     validRecords.Add((lineNumber, ledger, isUpdate));

@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
 using FluentAssertions;
+using ICCardManager.Common;
 using ICCardManager.Data;
 using ICCardManager.Data.Repositories;
 using ICCardManager.Infrastructure.Caching;
@@ -119,7 +120,9 @@ public class LedgerRepositoryAggregationTests : IDisposable
             Balance = balance,
             StaffName = staffName,
             LentAt = isLentRecord ? date : (DateTime?)null,
-            IsLentRecord = isLentRecord
+            IsLentRecord = isLentRecord,
+            // Issue #2371: 導入行の摘要で入れる行は、カード登録が書いた導入行として種別も持たせる
+            InitialRecordKind = isLentRecord ? null : InitialRecordSummaryMatcher.InferWithCurrentSettings(summary)
         });
 
     #endregion
@@ -262,8 +265,8 @@ public class LedgerRepositoryAggregationTests : IDisposable
         // テストだけ旧文字列で通り続け、除外漏れを検出できなくなる。
         foreach (var summary in CarryoverSummaries)
         {
-            Ledger.IsInitialRecordSummary(summary).Should().BeTrue(
-                $"「{summary}」は Ledger.IsInitialRecordSummary が導入行と判定する摘要であるべき");
+            InitialRecordSummaryMatcher.InferWithCurrentSettings(summary).Should().NotBeNull(
+                $"「{summary}」はカード登録が書く導入行の摘要であるべき（Issue #2371: 種別の推定と一致すること）");
         }
 
         // 本番の導入行判定が認める 3 種をすべてテストが網羅していること（1 種だけ漏れる形を防ぐ）

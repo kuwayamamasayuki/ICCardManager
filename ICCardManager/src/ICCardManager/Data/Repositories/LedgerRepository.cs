@@ -55,14 +55,13 @@ namespace ICCardManager.Data.Repositories
             // Issue #784: 同一日内の順序はアプリケーション層で残高チェーンにより決定
             // Issue #590: 新規購入/繰越はsummaryベースで最優先（income額に依存しない）
             command.CommandText = $@"SELECT id, card_idm, lender_idm, date, summary, income, expense, balance,
-       staff_name, note, returner_idm, lent_at, returned_at, is_lent_record, companion_count
+       staff_name, note, returner_idm, lent_at, returned_at, is_lent_record, companion_count, initial_record_kind
 FROM ledger
 {whereClause}
 ORDER BY DATE(date) ASC,
   {CarryoverFirstSortKey()},
   id ASC";
 
-            AddMidYearCarryoverParameter(command);
             if (cardIdm != null)
             {
                 command.Parameters.AddWithValue("@cardIdm", cardIdm);
@@ -94,7 +93,7 @@ ORDER BY DATE(date) ASC,
             const string Filter = @"card_idm = @cardIdm AND date BETWEEN @fromDate AND @toDate
   AND (is_lent_record = 0 OR is_lent_record IS NULL)";
             command.CommandText = $@"SELECT id, card_idm, lender_idm, date, summary, income, expense, balance,
-       staff_name, note, returner_idm, lent_at, returned_at, is_lent_record, companion_count
+       staff_name, note, returner_idm, lent_at, returned_at, is_lent_record, companion_count, initial_record_kind
 FROM ledger
 WHERE {Filter}
   AND date >= (SELECT DATE(MIN(date)) FROM ledger WHERE {Filter})
@@ -137,7 +136,7 @@ ORDER BY date ASC, id ASC";
             // 「%」「_」を含み得るため（LIKE だとワイルドカードとして解釈される）。判定は
             // string.Contains（序数比較）と同じ「そのままの部分一致」。
             command.CommandText = @"SELECT id, card_idm, lender_idm, date, summary, income, expense, balance,
-       staff_name, note, returner_idm, lent_at, returned_at, is_lent_record, companion_count
+       staff_name, note, returner_idm, lent_at, returned_at, is_lent_record, companion_count, initial_record_kind
 FROM ledger
 WHERE id IN (SELECT id FROM ledger WHERE instr(summary, @fragment) > 0)
 ORDER BY date DESC, id DESC";
@@ -171,7 +170,7 @@ ORDER BY date DESC, id DESC";
 
             using var command = connection.CreateCommand();
             command.CommandText = @"SELECT id, card_idm, lender_idm, date, summary, income, expense, balance,
-       staff_name, note, returner_idm, lent_at, returned_at, is_lent_record, companion_count
+       staff_name, note, returner_idm, lent_at, returned_at, is_lent_record, companion_count, initial_record_kind
 FROM ledger
 WHERE id = @id;
 
@@ -204,7 +203,7 @@ ORDER BY use_date ASC, is_charge DESC, is_point_redemption DESC, id DESC";
 
             using var command = connection.CreateCommand();
             command.CommandText = @"SELECT id, card_idm, lender_idm, date, summary, income, expense, balance,
-       staff_name, note, returner_idm, lent_at, returned_at, is_lent_record, companion_count
+       staff_name, note, returner_idm, lent_at, returned_at, is_lent_record, companion_count, initial_record_kind
 FROM ledger
 WHERE card_idm = @cardIdm AND is_lent_record = 1
 ORDER BY lent_at DESC
@@ -243,7 +242,7 @@ ORDER BY use_date ASC, is_charge DESC, is_point_redemption DESC, id DESC";
 
             using var command = connection.CreateCommand();
             command.CommandText = @"SELECT id, card_idm, lender_idm, date, summary, income, expense, balance,
-       staff_name, note, returner_idm, lent_at, returned_at, is_lent_record, companion_count
+       staff_name, note, returner_idm, lent_at, returned_at, is_lent_record, companion_count, initial_record_kind
 FROM ledger
 WHERE is_lent_record = 1
 ORDER BY lent_at DESC";
@@ -283,9 +282,9 @@ ORDER BY lent_at DESC";
                     command.Transaction = transaction;
                 }
                 command.CommandText = @"INSERT INTO ledger (card_idm, lender_idm, date, summary, income, expense, balance,
-                   staff_name, note, returner_idm, lent_at, returned_at, is_lent_record, companion_count)
+                   staff_name, note, returner_idm, lent_at, returned_at, is_lent_record, companion_count, initial_record_kind)
 VALUES (@cardIdm, @lenderIdm, @date, @summary, @income, @expense, @balance,
-       @staffName, @note, @returnerIdm, @lentAt, @returnedAt, @isLentRecord, @companionCount);
+       @staffName, @note, @returnerIdm, @lentAt, @returnedAt, @isLentRecord, @companionCount, @initialRecordKind);
 SELECT last_insert_rowid();";
 
                 command.Parameters.AddWithValue("@cardIdm", ledger.CardIdm);
@@ -302,6 +301,7 @@ SELECT last_insert_rowid();";
                 command.Parameters.AddWithValue("@returnedAt", SqliteDateTimeFormat.ToTextOrDbNull(ledger.ReturnedAt));
                 command.Parameters.AddWithValue("@isLentRecord", ledger.IsLentRecord ? 1 : 0);
                 command.Parameters.AddWithValue("@companionCount", ledger.CompanionCount);
+                command.Parameters.AddWithValue("@initialRecordKind", InitialRecordKindToDb(ledger.InitialRecordKind));
 
                 var result = await command.ExecuteScalarAsync().ConfigureAwait(false);
                 return Convert.ToInt32(result, CultureInfo.InvariantCulture);
@@ -344,6 +344,8 @@ SET lender_idm = @lenderIdm, date = @date, summary = @summary,
     lent_at = @lentAt, returned_at = @returnedAt, is_lent_record = @isLentRecord,
     companion_count = @companionCount
 WHERE id = @id";
+                // Issue #2371: initial_record_kind（導入行の種別）は SET しない。種別は登録時（InsertAsync）に決まり、
+                // 行編集で摘要・日付を変えても、CSV で既存の行を更新しても変わらない。
 
                 command.Parameters.AddWithValue("@id", ledger.Id);
                 command.Parameters.AddWithValue("@lenderIdm", (object?)ledger.LenderIdm ?? DBNull.Value);
@@ -795,7 +797,7 @@ VALUES (@ledgerId, @useDate, @entryStation, @exitStation,
             using (var command = connection.CreateCommand())
             {
                 command.CommandText = $@"SELECT id, card_idm, lender_idm, date, summary, income, expense, balance,
-       staff_name, note, returner_idm, lent_at, returned_at, is_lent_record, companion_count
+       staff_name, note, returner_idm, lent_at, returned_at, is_lent_record, companion_count, initial_record_kind
 FROM ledger
 WHERE card_idm = @cardIdm {beforeFilter}
   AND date >= (
@@ -979,7 +981,7 @@ ORDER BY date ASC, id ASC";
 
             using var command = connection.CreateCommand();
             command.CommandText = $@"SELECT id, card_idm, lender_idm, date, summary, income, expense, balance,
-       staff_name, note, returner_idm, lent_at, returned_at, is_lent_record, companion_count
+       staff_name, note, returner_idm, lent_at, returned_at, is_lent_record, companion_count, initial_record_kind
 FROM ledger
 WHERE card_idm = @cardIdm AND date < @dayStart {lentFilter}
   AND date >= (
@@ -1049,7 +1051,7 @@ ORDER BY date ASC, id ASC";
     GROUP BY card_idm
 )
 SELECT l.id, l.card_idm, l.lender_idm, l.date, l.summary, l.income, l.expense, l.balance,
-       l.staff_name, l.note, l.returner_idm, l.lent_at, l.returned_at, l.is_lent_record, l.companion_count
+       l.staff_name, l.note, l.returner_idm, l.lent_at, l.returned_at, l.is_lent_record, l.companion_count, l.initial_record_kind
 FROM last_day
 CROSS JOIN ledger l ON l.card_idm = last_day.c AND l.date >= last_day.d
 ORDER BY l.card_idm ASC, l.date ASC, l.id ASC";
@@ -1096,24 +1098,16 @@ ORDER BY l.card_idm ASC, l.date ASC, l.id ASC";
         /// という目的に直接反する。
         /// </para>
         /// <para>
-        /// 「新規購入」と「○月から繰越」の判定は <c>GetByDateRangeAsync</c> の ORDER BY（<see cref="CarryoverFirstSortKey"/>）および
-        /// <see cref="Models.Ledger.IsCarryover"/> と同じ（「新規購入」リテラル＋繰越 LIKE パターン）。これらは帳票用で
-        /// 「前年度より繰越」を含まないため、本条件はその 2 種に「前年度より繰越」を加えた 3 種になる（下記）。繰越側のパターンは
-        /// <c>'%月から繰越'</c> のハードコードではなく、組織設定 <c>MidYearCarryoverFormat</c> 由来の
-        /// <c>SummaryGenerator.GetMidYearCarryoverLikePattern</c> をパラメータバインドする
-        /// （Issue #1749。書式カスタム時に SQL だけが追従しない乖離の防止）。
-        /// 本条件を含むクエリは <see cref="AddInitialRecordExclusionParameters"/> を必ず併用すること。
+        /// Issue #2371: 判定は摘要ではなく行自身の導入行の種別（<c>initial_record_kind IS NOT NULL</c>）で行う。
+        /// 以前は摘要を「新規購入」リテラル・組織設定由来の繰越 LIKE パターン（#1749）・「前年度より繰越」の設定値（#2326）と
+        /// 比べており、組織設定の文言を変えると変更前に登録した導入行が利用実績に混ざっていた。
         /// </para>
         /// <para>
-        /// 判定する行の集合は <see cref="Models.Ledger.IsInitialRecordSummary"/>（#2046 / #2237）と同じ 3 種。
+        /// 判定する行の集合は <see cref="Models.Ledger.IsInitialRecord"/>（#2046 / #2237）と同じ 3 種。
         /// 「前年度より繰越」は帳票では in-memory 合成される行だが、3 月を繰越月にして登録したカードでは
         /// 導入行として DB に保存される（日付は新年度の 4/1、受入＝残額、貸出者なし）。#2326 まではこの条件から
         /// 漏れており、登録しただけのカードが「利用 1 回・稼働率 &gt; 0%」・最終利用日 4/1 に見え、
-        /// 月別利用額にも払出 0 の「（職員名なし）」系列が立っていた。摘要は組織設定由来の
-        /// <c>SummaryGenerator.GetCarryoverFromPreviousYearSummary</c> をパラメータバインドする（#1749 と同じ）。
-        /// 対応関係は <c>LedgerRepositoryAggregationTests</c> /
-        /// <c>LedgerRepositoryMidYearCarryoverPatternTests</c> が
-        /// <c>SummaryGenerator.GetMidYearCarryoverSummary</c> の生成結果で検証している。
+        /// 月別利用額にも払出 0 の「（職員名なし）」系列が立っていた。
         /// </para>
         /// <para>
         /// <b>残高推移（<see cref="GetMonthEndBalancesByCardAsync"/>）ではこの除外を行わない。</b>
@@ -1127,18 +1121,7 @@ ORDER BY l.card_idm ASC, l.date ASC, l.id ASC";
         /// </para>
         /// </remarks>
         private const string ExcludeCarryoverCondition =
-            @"AND summary <> '新規購入' AND summary NOT LIKE @midYearCarryoverPattern ESCAPE '\' AND summary <> @previousYearCarryoverSummary";
-
-        /// <summary>
-        /// <see cref="ExcludeCarryoverCondition"/> が参照するパラメータ（繰越の LIKE パターンと
-        /// 「前年度より繰越」の摘要。いずれも組織設定由来）をコマンドへバインドする（Issue #2326）。
-        /// </summary>
-        private static void AddInitialRecordExclusionParameters(SQLiteCommand command)
-        {
-            AddMidYearCarryoverParameter(command);
-            command.Parameters.AddWithValue(
-                "@previousYearCarryoverSummary", SummaryGenerator.GetCarryoverFromPreviousYearSummary());
-        }
+            @"AND initial_record_kind IS NULL";
 
         /// <summary>
         /// 職員別の利用額（<see cref="GetMonthlyUsageByLenderAsync"/>）から除外する「払戻台帳」の条件（Issue #2157）。
@@ -1180,21 +1163,6 @@ ORDER BY l.card_idm ASC, l.date ASC, l.id ASC";
            AND EXISTS (SELECT 1 FROM ic_card c WHERE c.card_idm = ledger.card_idm AND c.is_refunded = 1))";
 
         /// <summary>
-        /// 繰越摘要の LIKE パターン（組織設定 <c>MidYearCarryoverFormat</c> 由来、Issue #1749）を
-        /// コマンドへバインドする。
-        /// </summary>
-        /// <remarks>
-        /// <c>@midYearCarryoverPattern</c> を参照する SQL（<see cref="ExcludeCarryoverCondition"/> と
-        /// 繰越先頭ソートの CASE 式）と必ず対で使うこと。バインドを忘れると
-        /// System.Data.SQLite が「Insufficient parameters」で失敗する。
-        /// </remarks>
-        private static void AddMidYearCarryoverParameter(SQLiteCommand command)
-        {
-            command.Parameters.AddWithValue(
-                "@midYearCarryoverPattern", SummaryGenerator.GetMidYearCarryoverLikePattern());
-        }
-
-        /// <summary>
         /// 「新規購入・繰越レコードを同日の先頭に固定する」ORDER BY のソートキー（Issue #590）。
         /// </summary>
         /// <remarks>
@@ -1203,11 +1171,12 @@ ORDER BY l.card_idm ASC, l.date ASC, l.id ASC";
         /// 並べ替えは帳票の並び（#590）に関わるため変えていない。3 クエリ
         /// （<c>GetByDateRangeAsync</c> / <c>GetPagedAsync</c> の CTE 内・外側）に同一の
         /// CASE 式を書き写していた重複を 1 か所へ集約（Issue #1749 レビュー指摘）。
-        /// 本キーを含むクエリも <see cref="AddMidYearCarryoverParameter"/> を必ず併用すること。
+        /// Issue #2371: 摘要（「新規購入」リテラルと繰越の LIKE パターン）ではなく導入行の種別の列で判定する
+        /// （1 = 新規購入、2 = ○月から繰越。<see cref="InitialRecordKind"/>）。
         /// </remarks>
         /// <param name="columnPrefix">テーブル別名の接頭辞（例: <c>"l."</c>）。省略時はなし</param>
         private static string CarryoverFirstSortKey(string columnPrefix = "") =>
-            $"CASE WHEN {columnPrefix}summary = '新規購入' OR {columnPrefix}summary LIKE @midYearCarryoverPattern ESCAPE '\\' THEN 0 ELSE 1 END ASC";
+            $"CASE WHEN {columnPrefix}initial_record_kind IN ({(int)InitialRecordKind.NewPurchase}, {(int)InitialRecordKind.MidYearCarryover}) THEN 0 ELSE 1 END ASC";
 
         /// <inheritdoc/>
         public async Task<Dictionary<string, DateTime>> GetAllLastUsageDatesAsync()
@@ -1226,8 +1195,6 @@ FROM ledger
 WHERE (is_lent_record = 0 OR is_lent_record IS NULL)
   {ExcludeCarryoverCondition}
 GROUP BY card_idm";
-
-            AddInitialRecordExclusionParameters(command);
 
             using var reader = await command.ExecuteReaderAsync().ConfigureAwait(false);
             while (await reader.ReadAsync().ConfigureAwait(false))
@@ -1261,7 +1228,6 @@ WHERE date BETWEEN @fromDate AND @toDate
 GROUP BY card_idm";
 
             AddDateRangeParameters(command, fromDate, toDate);
-            AddInitialRecordExclusionParameters(command);
 
             using var reader = await command.ExecuteReaderAsync().ConfigureAwait(false);
             while (await reader.ReadAsync().ConfigureAwait(false))
@@ -1306,7 +1272,6 @@ GROUP BY ym, lender, staff
 ORDER BY ym, staff";
 
             AddDateRangeParameters(command, fromDate, toDate);
-            AddInitialRecordExclusionParameters(command);
 
             using var reader = await command.ExecuteReaderAsync().ConfigureAwait(false);
             while (await reader.ReadAsync().ConfigureAwait(false))
@@ -1360,7 +1325,7 @@ ORDER BY ym, staff";
     GROUP BY c, ym
 )
 SELECT l.id, l.card_idm, l.lender_idm, l.date, l.summary, l.income, l.expense, l.balance,
-       l.staff_name, l.note, l.returner_idm, l.lent_at, l.returned_at, l.is_lent_record, l.companion_count
+       l.staff_name, l.note, l.returner_idm, l.lent_at, l.returned_at, l.is_lent_record, l.companion_count, l.initial_record_kind
 FROM ledger l
 JOIN last_day ON last_day.c = l.card_idm AND last_day.d = DATE(l.date)
 WHERE l.date BETWEEN @fromDate AND @toDate
@@ -1419,7 +1384,7 @@ ORDER BY l.card_idm, l.date, l.id";
     GROUP BY card_idm
 )
 SELECT l.id, l.card_idm, l.lender_idm, l.date, l.summary, l.income, l.expense, l.balance,
-       l.staff_name, l.note, l.returner_idm, l.lent_at, l.returned_at, l.is_lent_record, l.companion_count
+       l.staff_name, l.note, l.returner_idm, l.lent_at, l.returned_at, l.is_lent_record, l.companion_count, l.initial_record_kind
 FROM last_day
 CROSS JOIN ledger l ON l.card_idm = last_day.c AND l.date >= last_day.d
 WHERE l.date < @beforeDate
@@ -1760,7 +1725,7 @@ FROM ledger
             // Issue #1457: detail_count を相関サブクエリ（N+1）から CTE による page-scoped 集計に変更
             command.CommandText = $@"WITH paged_ledger AS (
     SELECT id, card_idm, lender_idm, date, summary, income, expense, balance,
-           staff_name, note, returner_idm, lent_at, returned_at, is_lent_record, companion_count
+           staff_name, note, returner_idm, lent_at, returned_at, is_lent_record, companion_count, initial_record_kind
     FROM ledger
     {whereClause}
     ORDER BY DATE(date) ASC,
@@ -1769,7 +1734,7 @@ FROM ledger
     LIMIT @pageSize OFFSET @offset
 )
 SELECT l.id, l.card_idm, l.lender_idm, l.date, l.summary, l.income, l.expense, l.balance,
-       l.staff_name, l.note, l.returner_idm, l.lent_at, l.returned_at, l.is_lent_record, l.companion_count,
+       l.staff_name, l.note, l.returner_idm, l.lent_at, l.returned_at, l.is_lent_record, l.companion_count, l.initial_record_kind,
        COALESCE(d.cnt, 0) AS detail_count
 FROM paged_ledger l
 LEFT JOIN (
@@ -1782,8 +1747,6 @@ ORDER BY DATE(l.date) ASC,
   {CarryoverFirstSortKey("l.")},
   l.id ASC";
 
-            // CTE 内と外側 ORDER BY の 2 箇所が同じ名前付きパラメータを参照する（バインドは 1 回でよい）
-            AddMidYearCarryoverParameter(command);
             if (cardIdm != null)
             {
                 command.Parameters.AddWithValue("@cardIdm", cardIdm);
@@ -1928,7 +1891,8 @@ ORDER BY ledger_id, use_date ASC, is_charge DESC, is_point_redemption DESC, id D
                 LentAt = reader.IsDBNull(11) ? null : SqliteDateTimeFormat.ParseStored(reader.GetString(11)),
                 ReturnedAt = reader.IsDBNull(12) ? null : SqliteDateTimeFormat.ParseStored(reader.GetString(12)),
                 IsLentRecord = reader.GetFlagOrFalse(13),
-                CompanionCount = reader.GetInt32(14)
+                CompanionCount = reader.GetInt32(14),
+                InitialRecordKind = ReadInitialRecordKind(reader, 15)
             };
         }
 
@@ -1954,9 +1918,30 @@ ORDER BY ledger_id, use_date ASC, is_charge DESC, is_point_redemption DESC, id D
                 ReturnedAt = reader.IsDBNull(12) ? null : SqliteDateTimeFormat.ParseStored(reader.GetString(12)),
                 IsLentRecord = reader.GetFlagOrFalse(13),
                 CompanionCount = reader.GetInt32(14),
-                DetailCount = reader.GetInt32(15)
+                InitialRecordKind = ReadInitialRecordKind(reader, 15),
+                DetailCount = reader.GetInt32(16)
             };
         }
+
+        /// <summary>
+        /// <c>initial_record_kind</c>（Issue #2371）を読む。<c>NULL</c> と、この版が知らない値は導入行でない（<c>null</c>）として扱う。
+        /// </summary>
+        private static InitialRecordKind? ReadInitialRecordKind(DbDataReader reader, int ordinal)
+        {
+            if (reader.IsDBNull(ordinal))
+            {
+                return null;
+            }
+
+            var value = reader.GetInt32(ordinal);
+            return Enum.IsDefined(typeof(InitialRecordKind), value) ? (InitialRecordKind)value : null;
+        }
+
+        /// <summary>
+        /// <c>initial_record_kind</c> へ書く値（導入行でなければ <c>NULL</c>）。
+        /// </summary>
+        private static object InitialRecordKindToDb(InitialRecordKind? kind) =>
+            kind.HasValue ? (int)kind.Value : DBNull.Value;
 
         /// <summary>
         /// DataReaderからLedgerDetailオブジェクトにマッピング
@@ -2373,9 +2358,9 @@ WHERE id = @id";
                 using var insertCommand = connection.CreateCommand();
                 insertCommand.Transaction = transaction;
                 insertCommand.CommandText = @"INSERT INTO ledger (card_idm, lender_idm, date, summary, income, expense, balance,
-                           staff_name, note, returner_idm, lent_at, returned_at, is_lent_record, companion_count)
+                           staff_name, note, returner_idm, lent_at, returned_at, is_lent_record, companion_count, initial_record_kind)
 VALUES (@cardIdm, @lenderIdm, @date, @summary, @income, @expense, @balance,
-       @staffName, @note, @returnerIdm, @lentAt, @returnedAt, @isLentRecord, @companionCount);
+       @staffName, @note, @returnerIdm, @lentAt, @returnedAt, @isLentRecord, @companionCount, @initialRecordKind);
 SELECT last_insert_rowid();";
 
                 insertCommand.Parameters.AddWithValue("@cardIdm", source.CardIdm);
@@ -2392,6 +2377,7 @@ SELECT last_insert_rowid();";
                 insertCommand.Parameters.AddWithValue("@returnedAt", (object?)source.ReturnedAtText ?? DBNull.Value);
                 insertCommand.Parameters.AddWithValue("@isLentRecord", source.IsLentRecord ? 1 : 0);
                 insertCommand.Parameters.AddWithValue("@companionCount", source.CompanionCount);
+                insertCommand.Parameters.AddWithValue("@initialRecordKind", InitialRecordKindToDb(source.InitialRecordKind));
 
                 var newId = Convert.ToInt32(await insertCommand.ExecuteScalarAsync().ConfigureAwait(false), CultureInfo.InvariantCulture);
                 idMapping[source.Id] = newId;
@@ -2716,28 +2702,19 @@ ORDER BY l.card_idm, l.date, l.id,
 
             using var command = connection.CreateCommand();
             // Issue #501: 導入行（カード登録時の行）の最初の日付を取得
-            // Issue #2046: 導入行の判定は SQL に書かず Ledger.IsInitialRecordSummary の 1 か所へ寄せる。
-            // 以前は「summary = '新規購入' OR summary LIKE 繰越パターン」で、3 月登録の「前年度より繰越」
-            // （日付は新年度の 4/1）を認識せず、導入前の月の帳票が空のまま作成されていた。
-            // SQL は日付の昇順に流すだけにし、最初に一致した行で読み取りを打ち切る（＝MIN(date) と同じ意味）。
-            // 導入行は通常そのカードの先頭行なので、ほとんどの場合 1 行で止まる。
-            command.CommandText = @"SELECT date, summary FROM ledger
-WHERE card_idm = @cardIdm
-ORDER BY date ASC, id ASC";
+            // Issue #2046: 3 月登録の「前年度より繰越」（日付は新年度の 4/1）も導入行。以前は「新規購入」と繰越の LIKE だけで、
+            // 導入前の月の帳票が空のまま作成されていた。
+            // Issue #2371: 導入行の判定は摘要ではなく導入行の種別の列で行う（組織設定の文言を変えても変更前の導入行を認識する）。
+            // 導入行は通常そのカードの先頭行なので、idx_ledger_card_date（card_idm の等値）で引いた日付の昇順の先頭で止まる。
+            command.CommandText = @"SELECT date FROM ledger
+WHERE card_idm = @cardIdm AND initial_record_kind IS NOT NULL
+ORDER BY date ASC, id ASC
+LIMIT 1";
 
             command.Parameters.AddWithValue("@cardIdm", cardIdm);
 
-            using var reader = await command.ExecuteReaderAsync().ConfigureAwait(false);
-            while (await reader.ReadAsync().ConfigureAwait(false))
-            {
-                var summary = reader.IsDBNull(1) ? null : reader.GetString(1);
-                if (Ledger.IsInitialRecordSummary(summary))
-                {
-                    return SqliteDateTimeFormat.ParseStored(reader.GetString(0));
-                }
-            }
-
-            return null;
+            var result = await command.ExecuteScalarAsync().ConfigureAwait(false);
+            return result is string date ? SqliteDateTimeFormat.ParseStored(date) : null;
         }
 
         /// <inheritdoc/>
@@ -2747,29 +2724,20 @@ ORDER BY date ASC, id ASC";
             var connection = lease.Connection;
 
             using var command = connection.CreateCommand();
-            // Issue #2237: 導入行の判定は SQL に書かず Ledger.IsInitialRecordSummary の 1 か所へ寄せる（#2046 と同じ）。
-            // 日付の降順に流し、導入行でない最初の行で読み取りを打ち切る（＝導入行を除いた MAX(date)）
+            // Issue #2237: 導入行を除いた、明細を持たない帳簿の行の最新の日付（MAX(date)）。
+            // Issue #2371: 導入行の判定は摘要ではなく導入行の種別の列で行う。
             // 台帳行は idx_ledger_card_date（card_idm の等値）で引き、明細の有無は idx_detail_ledger で確かめる。
-            // 該当する行が無いカード（明細なしの行を持たない通常のカード）では、そのカードの台帳行をすべて読む
-            // （読むのは日付と摘要の 2 列で、カード 1 枚分。返却のたびに 1 回）
-            command.CommandText = @"SELECT l.date, l.summary FROM ledger l
+            command.CommandText = @"SELECT l.date FROM ledger l
 WHERE l.card_idm = @cardIdm AND (l.is_lent_record = 0 OR l.is_lent_record IS NULL)
+  AND l.initial_record_kind IS NULL
   AND NOT EXISTS (SELECT 1 FROM ledger_detail d WHERE d.ledger_id = l.id)
-ORDER BY l.date DESC, l.id DESC";
+ORDER BY l.date DESC, l.id DESC
+LIMIT 1";
 
             command.Parameters.AddWithValue("@cardIdm", cardIdm);
 
-            using var reader = await command.ExecuteReaderAsync().ConfigureAwait(false);
-            while (await reader.ReadAsync().ConfigureAwait(false))
-            {
-                var summary = reader.IsDBNull(1) ? null : reader.GetString(1);
-                if (!Ledger.IsInitialRecordSummary(summary))
-                {
-                    return SqliteDateTimeFormat.ParseStored(reader.GetString(0));
-                }
-            }
-
-            return null;
+            var result = await command.ExecuteScalarAsync().ConfigureAwait(false);
+            return result is string date ? SqliteDateTimeFormat.ParseStored(date) : null;
         }
     }
 }

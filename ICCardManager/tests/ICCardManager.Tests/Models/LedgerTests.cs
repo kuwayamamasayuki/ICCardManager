@@ -32,30 +32,35 @@ public class LedgerTests : IDisposable
 
     #region IsCarryover
 
+    [Theory]
+    [InlineData(InitialRecordKind.NewPurchase)]
+    [InlineData(InitialRecordKind.MidYearCarryover)]
+    public void IsCarryover_新規購入と年度途中の繰越の導入行は真になること(InitialRecordKind kind)
+    {
+        var ledger = new Ledger { Summary = "任意の摘要", InitialRecordKind = kind };
+        ledger.IsCarryover.Should().BeTrue();
+    }
+
+    /// <summary>
+    /// 帳票の集計・ソート用の判定は「前年度より繰越」を含まない（Issue #2007 の remarks）。
+    /// </summary>
     [Fact]
-    public void IsCarryover_NewPurchase_ReturnsTrue()
+    public void IsCarryover_前年度より繰越の導入行は偽になること()
     {
-        var ledger = new Ledger { Summary = "新規購入" };
-        ledger.IsCarryover.Should().BeTrue();
+        var ledger = new Ledger { InitialRecordKind = InitialRecordKind.FiscalYearStartCarryover };
+        ledger.IsCarryover.Should().BeFalse();
     }
 
+    /// <summary>
+    /// Issue #2371: 種別を持たない行は、摘要が導入行の文言でも繰越レコードではない（履歴の「追加」で入れた行など）。
+    /// </summary>
     [Theory]
-    [InlineData("1月から繰越")]
+    [InlineData("新規購入")]
     [InlineData("4月から繰越")]
-    [InlineData("12月から繰越")]
-    public void IsCarryover_MidYearCarryover_ReturnsTrue(string summary)
-    {
-        var ledger = new Ledger { Summary = summary };
-        ledger.IsCarryover.Should().BeTrue();
-    }
-
-    [Theory]
     [InlineData("鉄道（博多駅～天神駅）")]
-    [InlineData("役務費によりチャージ")]
-    [InlineData("（貸出中）")]
     [InlineData("")]
     [InlineData(null)]
-    public void IsCarryover_NormalUsage_ReturnsFalse(string summary)
+    public void IsCarryover_種別を持たない行は摘要に依らず偽になること(string summary)
     {
         var ledger = new Ledger { Summary = summary };
         ledger.IsCarryover.Should().BeFalse();
@@ -63,53 +68,56 @@ public class LedgerTests : IDisposable
 
     #endregion
 
-    #region IsMidYearCarryover
+    #region IsMidYearCarryover / IsFiscalYearStartCarryover
 
     [Theory]
-    [InlineData("5月から繰越", true)]
-    [InlineData("12月から繰越", true)]
-    [InlineData("新規購入", false)]
-    [InlineData("13月から繰越", false)]   // 13月は無効
-    [InlineData("0月から繰越", false)]    // 0月は無効
-    public void IsMidYearCarryover_VariousPatterns(string summary, bool expected)
+    [InlineData(InitialRecordKind.MidYearCarryover, true, false)]
+    [InlineData(InitialRecordKind.FiscalYearStartCarryover, false, true)]
+    [InlineData(InitialRecordKind.NewPurchase, false, false)]
+    [InlineData(null, false, false)]
+    public void IsMidYearCarryover_IsFiscalYearStartCarryover_種別で決まること(
+        InitialRecordKind? kind, bool midYear, bool fiscalYearStart)
     {
-        var ledger = new Ledger { Summary = summary };
-        ledger.IsMidYearCarryover.Should().Be(expected);
+        var ledger = new Ledger { Summary = "5月から繰越", InitialRecordKind = kind };
+
+        ledger.IsMidYearCarryover.Should().Be(midYear);
+        ledger.IsFiscalYearStartCarryover.Should().Be(fiscalYearStart);
     }
 
     #endregion
 
-    #region IsInitialRecord（Issue #2007）
+    #region IsInitialRecord（Issue #2007 / #2371）
 
     /// <summary>
     /// 導入時（カード登録時）に書かれる 3 種の行はすべて導入行と判定されること。
-    /// 「前年度より繰越」は 3 月登録（<c>CardManageViewModel.BuildInitialLedgerAsync</c>）で DB へ入る。
+    /// </summary>
+    [Theory]
+    [InlineData(InitialRecordKind.NewPurchase)]
+    [InlineData(InitialRecordKind.MidYearCarryover)]
+    [InlineData(InitialRecordKind.FiscalYearStartCarryover)]
+    public void IsInitialRecord_種別を持つ行はすべて導入行と判定されること(InitialRecordKind kind)
+    {
+        var ledger = new Ledger { Summary = "摘要は問わない", InitialRecordKind = kind };
+
+        ledger.IsInitialRecord.Should().BeTrue();
+    }
+
+    /// <summary>
+    /// Issue #2371: 種別を持たない行は、摘要が導入行の文言と同じでも導入行ではない。
     /// </summary>
     [Theory]
     [InlineData("新規購入")]
     [InlineData("5月から繰越")]
     [InlineData("前年度より繰越")]
-    public void IsInitialRecord_導入時に書かれる行はすべて導入行と判定されること(string summary)
-    {
-        var ledger = new Ledger { Summary = summary };
-
-        ledger.IsInitialRecord.Should().BeTrue();
-        Ledger.IsInitialRecordSummary(summary).Should().BeTrue();
-    }
-
-    [Theory]
     [InlineData("鉄道（博多駅～天神駅）")]
-    [InlineData("役務費によりチャージ")]
-    [InlineData("次年度へ繰越")]
     [InlineData("（貸出中）")]
     [InlineData("")]
     [InlineData(null)]
-    public void IsInitialRecord_利用行や合成行は導入行と判定しないこと(string summary)
+    public void IsInitialRecord_種別を持たない行は摘要に依らず導入行と判定しないこと(string summary)
     {
         var ledger = new Ledger { Summary = summary };
 
         ledger.IsInitialRecord.Should().BeFalse();
-        Ledger.IsInitialRecordSummary(summary).Should().BeFalse();
     }
 
     /// <summary>
@@ -118,27 +126,34 @@ public class LedgerTests : IDisposable
     /// 導入時残高の訂正で受入も一緒に直すかどうかの判定に使う。
     /// </summary>
     [Theory]
-    [InlineData("新規購入", true)]
-    [InlineData("前年度より繰越", true)]
-    [InlineData("5月から繰越", false)]
-    [InlineData("鉄道（博多駅～天神駅）", false)]
-    public void InitialRecordCarriesIncome_受入欄に残高を書く導入行だけ真になること(string summary, bool expected)
+    [InlineData(InitialRecordKind.NewPurchase, true)]
+    [InlineData(InitialRecordKind.FiscalYearStartCarryover, true)]
+    [InlineData(InitialRecordKind.MidYearCarryover, false)]
+    [InlineData(null, false)]
+    public void InitialRecordCarriesIncome_受入欄に残高を書く導入行だけ真になること(InitialRecordKind? kind, bool expected)
     {
-        Ledger.InitialRecordCarriesIncome(summary).Should().Be(expected);
+        Ledger.InitialRecordCarriesIncome(kind).Should().Be(expected);
     }
 
     /// <summary>
-    /// 「前年度より繰越」の判定は組織設定の文言に追従すること（#1818「設定値で生成したものは設定値で判定する」）。
+    /// Issue #2371: 組織設定の繰越の文言を変えても、変更前に登録した導入行（旧文言の摘要）は導入行のまま。
+    /// 以前は摘要を現在の設定と比べており、文言を変えた時点で導入行と認識されなくなった。
     /// </summary>
     [Fact]
-    public void IsInitialRecord_前年度繰越の判定は組織設定の摘要文言に追従すること()
+    public void IsInitialRecord_組織設定の文言を変えても変更前に登録した導入行は導入行のままであること()
     {
+        var registered = new Ledger
+        {
+            Summary = SummaryGenerator.GetCarryoverFromPreviousYearSummary(),
+            InitialRecordKind = InitialRecordKind.FiscalYearStartCarryover,
+        };
+
         var options = new OrganizationOptions();
         options.SummaryText.CarryoverFromPreviousYear = "前年より持越";
         SummaryGenerator.Configure(options);
 
-        Ledger.IsInitialRecordSummary("前年より持越").Should().BeTrue();
-        Ledger.IsInitialRecordSummary("前年度より繰越").Should().BeFalse("既定の文言は設定変更後は導入行ではない");
+        registered.IsInitialRecord.Should().BeTrue();
+        registered.IsFiscalYearStartCarryover.Should().BeTrue();
     }
 
     #endregion
