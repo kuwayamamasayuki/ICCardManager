@@ -3,12 +3,13 @@
 namespace ICCardManager.Common
 {
     /// <summary>
-    /// データベース設定オプション
+    /// 実際に開くデータベースパス（解決済み）を DbContext へ運ぶ入れ物
     /// </summary>
     /// <remarks>
-    /// appsettings.json の "DatabaseOptions" セクションにバインドされます。
-    /// 共有フォルダ上のDBを使用する場合、UNCパス（例: \\server\share\ICCardManager\iccard.db）を指定します。
-    /// 空文字またはnullの場合、従来のローカルパス（C:\ProgramData\ICCardManager\iccard.db）を使用します。
+    /// 値は <c>Data.DatabaseLocationResolver</c> が database_config.txt から解決して設定する（形式の検証も済み）。
+    /// appsettings.json にはバインドしない（Issue #2389 で <c>DatabaseOptions:Path</c> を廃止。旧版の値は
+    /// 起動時に一度だけ database_config.txt へ移す）。
+    /// 空文字の場合、既定のローカルパス（C:\ProgramData\ICCardManager\iccard.db）を使用します。
     /// </remarks>
     public class DatabaseOptions
     {

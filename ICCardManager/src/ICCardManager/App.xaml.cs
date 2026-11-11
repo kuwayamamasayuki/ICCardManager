@@ -54,6 +54,12 @@ namespace ICCardManager
         private ResolvedDatabasePath? _rejectedDatabasePathResolution;
 
         /// <summary>
+        /// database_config.txt の値として解決へ渡した値（Issue #2389）。appsettings.json からの移行に失敗した起動では、
+        /// 移そうとした値（実際に開いた保存先）になる。起動失敗のダイアログに添えるパスはこれから求める。
+        /// </summary>
+        private string? _effectiveDatabaseConfigValue;
+
+        /// <summary>
         /// Issue #1910: 二重起動防止のガード。プロセスが生きている間ミューテックスのハンドルを
         /// 保持し続ける必要があるため、フィールドで保持して <see cref="OnExit"/> で破棄する。
         /// </summary>
@@ -268,8 +274,8 @@ namespace ICCardManager
                 mainWindow.Show();
                 _logger.LogInformation("アプリケーション起動完了");
 
-                // Issue #1599 / #2328: database_config.txt または appsettings.json のパスが形式不正で
-                // 使わなかった場合（既定または次の候補で起動した場合）、ここでユーザーへ警告する
+                // Issue #1599 / #2328: database_config.txt のパスが形式不正で使わなかった場合
+                // （既定の保存先で起動した場合）、ここでユーザーへ警告する
                 WarnIfDatabaseConfigPathRejected();
             }
             catch (DatabaseVersionMismatchException ex)
@@ -302,11 +308,11 @@ namespace ICCardManager
                 try
                 {
                     // Issue #2328: database_config.txt を直接表示せず、接続と同じ解決結果を表示する
-                    // （appsettings.json だけで指す構成・形式不正で棄却した値でも、実際に開こうとしたパスを示す）。
-                    // 構成の読み込み前に失敗した場合は Configuration が未設定なので appsettings の値は null として扱う
+                    // （形式不正で棄却した値でも、実際に開こうとしたパスを示す）。
+                    // Issue #2389: 解決へ渡した値があればそれを使う（appsettings.json からの移行に失敗した起動では
+                    // database_config.txt ではなく移そうとした値で開いている）。解決の前に失敗したならファイルを読む
                     var path = DatabaseLocationResolver.DescribePathForStartupError(
-                        AppConfigFiles.Read(AppConfigFiles.DatabaseConfigPath),
-                        Configuration?["DatabaseOptions:Path"]);
+                        _effectiveDatabaseConfigValue ?? AppConfigFiles.Read(AppConfigFiles.DatabaseConfigPath));
                     dbPathInfo = $"\n\nデータベースパス: {path}";
                 }
                 catch (Exception configEx)
@@ -450,6 +456,29 @@ namespace ICCardManager
         }
 
         /// <summary>
+        /// 廃止した appsettings.json の <c>DatabaseOptions:Path</c> を database_config.txt へ移してから、
+        /// 解決へ渡す値を返す（Issue #2389。移行の規則は <see cref="LegacyDatabasePathMigration"/>）。
+        /// </summary>
+        /// <remarks>
+        /// <see cref="DatabaseLocationResolver.Register"/> が最初に Options を解決したとき 1 度だけ呼ぶ
+        /// （DbContext・キャッシュの解決時。ロガーの取得より後）。
+        /// </remarks>
+        private string? ReadDatabaseConfigAfterLegacyMigration()
+        {
+            var logger = _logger ?? throw new InvalidOperationException(
+                "データベースパスがロガーの取得より前に解決されました。appsettings.json からの移行を記録できません。");
+
+            var result = LegacyDatabasePathMigration.Run(
+                Configuration[LegacyDatabasePathMigration.AppSettingsKey],
+                AppConfigFiles.DatabaseConfigPath,
+                AppConfigFiles.LegacyDatabasePathMigratedMarkerPath,
+                logger);
+
+            _effectiveDatabaseConfigValue = result.EffectiveConfigFileValue;
+            return result.EffectiveConfigFileValue;
+        }
+
+        /// <summary>
         /// データベースパスを棄却していた場合、ユーザーへ警告ダイアログを表示する（Issue #1599）。
         /// 起動完了後に 1 度だけ呼ぶ。
         /// </summary>
@@ -482,14 +511,13 @@ namespace ICCardManager
             // Issue #974: 組織固有設定の外部化
             services.Configure<OrganizationOptions>(Configuration.GetSection("OrganizationOptions"));
 
-            // DBパスは ProgramData 配下の database_config.txt を優先し、無ければ appsettings.json の
-            // DatabaseOptions:Path（appsettings.json は Program Files 内で書き込み不可のため、通常は別ファイルで管理）。
+            // DBパスは ProgramData 配下の database_config.txt だけで決める（Issue #2389 で appsettings.json の
+            // DatabaseOptions:Path を廃止。旧版の値は読む前に一度だけ database_config.txt へ移す）。
             // Issue #2328: DbContext が開くパスと、共有モードのキャッシュTTL短縮の判定に渡すパスを
             // 同じ解決結果にする（両方の PostConfigure は DatabaseLocationResolver.Register が登録する）
             DatabaseLocationResolver.Register(
                 services,
-                Configuration,
-                () => AppConfigFiles.Read(AppConfigFiles.DatabaseConfigPath),
+                ReadDatabaseConfigAfterLegacyMigration,
                 OnDatabasePathResolved);
 
             // ロギングの設定

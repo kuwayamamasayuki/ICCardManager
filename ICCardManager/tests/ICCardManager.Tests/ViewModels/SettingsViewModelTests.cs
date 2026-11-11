@@ -10,7 +10,6 @@ using ICCardManager.Infrastructure.Sound;
 using ICCardManager.Models;
 using ICCardManager.Services;
 using ICCardManager.ViewModels;
-using Microsoft.Extensions.Options;
 using Moq;
 using Xunit;
 
@@ -51,7 +50,6 @@ public class SettingsViewModelTests
             _settingsRepositoryMock.Object,
             _validationServiceMock.Object,
             _soundPlayerMock.Object,
-            Options.Create(new DatabaseOptions()),
             _dialogServiceMock.Object,
             _summaryGenerator,
             _staffAuthServiceMock.Object,

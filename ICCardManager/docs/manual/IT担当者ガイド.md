@@ -150,7 +150,11 @@ icacls "D:\share\ICCardManager" /grant "DOMAIN\ICCardUsers:(OI)(CI)M"
 
 データベースの保存先そのものは `C:\ProgramData\ICCardManager\database_config.txt` で指定します。このファイルが無い場合はローカルの既定パス（`C:\ProgramData\ICCardManager\iccard.db`）が使われます。
 
-> **補足**: `appsettings.json` の `DatabaseOptions` の `Path` でも保存先を指定できますが、使われるのは `database_config.txt` が空（または無い）ときだけです。この値は設定画面（F5）の「データベース保存先」欄には表示されません（欄は `database_config.txt` の値を表示・保存します）。保存先は `database_config.txt`（設定画面・インストーラー）で管理してください。
+> **補足**: 以前の版では `appsettings.json` の `DatabaseOptions` の `Path` でも保存先を指定できましたが、この項目は廃止しました。保存先は `database_config.txt`（設定画面・インストーラー）だけで指定してください。
+>
+> 以前の版の `appsettings.json` に保存先が書かれている PC では、アプリの起動時に一度だけ、その値を `database_config.txt` へ書き移します（`database_config.txt` が空または無いときだけ。値があるときはそちらを使い、`appsettings.json` の値は使いません）。書き移したかどうかはログファイル（`C:\ProgramData\ICCardManager\Logs`）に残ります。移行を済ませた印として `C:\ProgramData\ICCardManager\database_path_migrated.txt` が作られ、以後は `appsettings.json` の値を見ません（値が残っている間は、使っていないことを起動のたびにログへ記録します）。`database_config.txt` へ書けなかったときは、その起動では `appsettings.json` の保存先で開き、次の起動で書き移しをやり直します。
+>
+> **インストーラーで更新すると `appsettings.json` は新しい版のファイルに置き換わります**。以前の版で `appsettings.json` に保存先を書いていた PC は、更新の前に設定画面（F5）の「データベース保存先」で同じ保存先を保存しておくか、更新時のインストーラーの「データベースの保存先」ページで指定してください（更新後に既定のローカル DB で開いてしまうのを防ぐため）。
 
 ### 4.2 共有モードの自動判定
 
