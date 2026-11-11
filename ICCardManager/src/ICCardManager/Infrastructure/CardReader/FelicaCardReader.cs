@@ -182,7 +182,7 @@ namespace ICCardManager.Infrastructure.CardReader
                         // Error は発火しない。Error の行（カードリーダーエラー）は「カードを置き直す・抜き差しする」の
                         // 一時的な読み取り失敗のための文言で、ここで出すと切断の行と食い違う行動指示が並ぶ。
                         // 起動時のダイアログをやめたため、警告エリアの表示が利用者への案内のすべてになる。
-                        _logger.LogError("FelicaCardReader: 初期化エラー: {Message}", FelicaLibUnavailableMessage);
+                        // ログは IsFelicaLibLoaded が例外ごと Error で残しているので、ここでは出さない（二重に出さない。#1991）。
                         SetConnectionStateForceNotify(CardReaderConnectionState.Disconnected, FelicaLibUnavailableMessage);
                         throw CardReaderException.LibraryUnavailable();
                     }
@@ -681,7 +681,7 @@ namespace ICCardManager.Infrastructure.CardReader
                 catch (DllNotFoundException ex)
                 {
                     // Issue #2377: 例外ごと残す（どの DLL を読み込めなかったかは IT 担当者の切り分けに要る）。
-                    // この判定は読み取りの開始・再接続・接続診断のたびに 1 回呼ばれるほか、接続の監視（10 秒ごとのヘルスチェック、
+                    // この判定は読み取りの開始・再接続のたびに 1 回呼ばれるほか、接続の監視（10 秒ごとのヘルスチェック、
                     // OnHealthCheckTimerElapsed）からも呼ばれる。ただし felicalib.dll を読み込めない経路では監視を始めないので、
                     // 同じエラーが周期的に積み上がることはない。
                     _logger.LogError(ex, "FelicaCardReader: felicalib.dll を読み込めません（{ExceptionMessage}）", ex.Message);
