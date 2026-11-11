@@ -14,7 +14,7 @@
 | `card.png` | 交通系ICカード管理画面 | 管理者マニュアル |
 | `staff.png` | 職員管理画面 | 管理者マニュアル |
 
-## オプションスクリーンショット（11枚）
+## オプションスクリーンショット（13枚）
 
 | ファイル名 | 内容 | 使用先 |
 |------------|------|--------|
@@ -29,11 +29,12 @@
 | `print_preview.png` | 帳票プレビュー画面 | ユーザーマニュアル |
 | `report_excel.png` | 物品出納簿（Excel出力例） | ユーザーマニュアル |
 | `installer_options.png` | インストーラーオプション選択画面 | 管理者マニュアル |
-| `card_registration_mode.png` | カード登録方法の選択画面 | 管理者マニュアル |
+| `card_registration_mode.png` | カード登録方法の選択画面（初期表示＝新規購入） | 管理者マニュアル |
+| `card_registration_mode_carryover.png` | カード登録方法の選択画面（紙の出納簿からの繰越を入力した状態） | 管理者マニュアル |
 
 ## スクリーンショットの撮影方法
 
-### 完全自動撮影（UI テスト基盤、29 枚）
+### 完全自動撮影（UI テスト基盤、32 枚）
 
 UI テスト基盤（FlaUI）でアプリを起動し、画面を開く操作まで含めて自動で撮影します。人の操作は不要です。
 
@@ -62,6 +63,7 @@ cd D:\OneDrive\交通系\src\ICCardManager
 | Debug | 返却後に開くダイアログ | `busstop.png` `companion_count.png` |
 | Debug | 仮想タッチ（DEBUG 限定の機能そのもの） | `virtual_touch.png` |
 | Debug | 職員証認証を経る画面 | `system_lend.png` `ledger_row_edit.png` |
+| Debug | 未登録カードの読み取りで開くカード登録方法の選択（初期表示／紙の出納簿からの繰越を入力した状態。最後はキャンセルして登録しない。1〜4 月は繰越の図（1 月は両方）が Skip されるため、`-Changed -Publish` の差分撮影は全部そろわず何も公開できない。ダイアログを直したら 5〜12 月に撮り直すか、全撮影で撮れた初期表示の図だけを公開する） | `card_registration_mode.png` `card_registration_mode_carryover.png` |
 | Debug | バックアップの保存先・DB のパスを表示する画面（撮影用の置き場所で撮る） | `system.png` `restore_list.png`（リストア用バックアップ一覧、1 件選択した状態）`connection_diagnostics.png` |
 
 動作の要点：

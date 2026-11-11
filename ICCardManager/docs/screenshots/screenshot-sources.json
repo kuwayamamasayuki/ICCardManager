@@ -415,6 +415,31 @@
         "ICCardManager/src/ICCardManager/ViewModels/LedgerRowEditViewModel.cs",
         "ICCardManager/src/ICCardManager/Common/StaffNameFormatter.cs"
       ]
+    },
+    {
+      "name": "card_registration_mode.png",
+      "pass": "Debug",
+      "filter": "FullyQualifiedName~TouchScreenshotTests.card_registration_mode_",
+      "sources": [
+        "ICCardManager/src/ICCardManager/Views/Dialogs/CardRegistrationModeDialog.xaml",
+        "ICCardManager/src/ICCardManager/Views/Dialogs/CardRegistrationModeDialog.xaml.cs",
+        "ICCardManager/src/ICCardManager/Services/SummaryGenerator.cs",
+        "ICCardManager/src/ICCardManager/Common/WarekiConverter.cs",
+        "ICCardManager/src/ICCardManager/Common/PaperCarryoverPolicy.cs"
+      ]
+    },
+    {
+      "name": "card_registration_mode_carryover.png",
+      "pass": "Debug",
+      "filter": "FullyQualifiedName~TouchScreenshotTests.card_registration_mode_",
+      "sources": [
+        "ICCardManager/src/ICCardManager/Views/Dialogs/CardRegistrationModeDialog.xaml",
+        "ICCardManager/src/ICCardManager/Views/Dialogs/CardRegistrationModeDialog.xaml.cs",
+        "ICCardManager/src/ICCardManager/Services/SummaryGenerator.cs",
+        "ICCardManager/src/ICCardManager/Common/WarekiConverter.cs",
+        "ICCardManager/src/ICCardManager/Common/PaperCarryoverPolicy.cs",
+        "ICCardManager/tests/ICCardManager.UITests/Tests/TouchScreenshotTests.cs"
+      ]
     }
   ]
 }
