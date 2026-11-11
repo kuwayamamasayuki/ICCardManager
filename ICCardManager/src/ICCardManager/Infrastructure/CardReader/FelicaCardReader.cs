@@ -176,12 +176,15 @@ namespace ICCardManager.Infrastructure.CardReader
                 try
                 {
                     // felicalib.dll の存在確認
-                    if (!IsFelicaLibLoaded())
+                    if (!IsFelicaLibLoaded(out var loadError))
                     {
-                        var ex = new InvalidOperationException(
-                            "felicalib.dll が見つからないか、Sony NFCポートソフトウェアがインストールされていません。");
-                        SetConnectionStateForceNotify(CardReaderConnectionState.Disconnected, ex.Message);
-                        throw ex;
+                        // Issue #2377: この経路の案内は切断の行（FelicaLibUnavailableMessage。インストールして再起動）だけに任せ、
+                        // Error は発火しない。Error の行（カードリーダーエラー）は「カードを置き直す・抜き差しする」の
+                        // 一時的な読み取り失敗のための文言で、ここで出すと切断の行と食い違う行動指示が並ぶ。
+                        // 起動時のダイアログをやめたため、警告エリアの表示が利用者への案内のすべてになる。
+                        // ログは IsFelicaLibLoaded が例外ごと Error で残しているので、ここでは出さない（二重に出さない。#1991）。
+                        SetConnectionStateForceNotify(CardReaderConnectionState.Disconnected, FelicaLibUnavailableMessage);
+                        throw CardReaderException.LibraryUnavailable(loadError);
                     }
 
                     // PaSoRi の物理接続確認 (Issue #1428)
@@ -215,8 +218,11 @@ namespace ICCardManager.Infrastructure.CardReader
 
                     SetConnectionStateForceNotify(CardReaderConnectionState.Connected);
                 }
-                catch (Exception ex)
+                catch (Exception ex) when (ex is not CardReaderException)
                 {
+                    // felicalib.dll を読み込めない経路（上で CardReaderException を投げる）は、ここを通さない。
+                    // それ以外の想定外の失敗は Error（カードリーダーエラーの行）で伝える。接続状態は SetConnectionState のため、
+                    // 初期状態（Disconnected）のままなら切断は通知されない。
                     _logger.LogError(ex, "FelicaCardReader: 初期化エラー");
                     var cardReaderException = CardReaderException.ReadFailed(ex.Message, ex);
                     SetConnectionState(CardReaderConnectionState.Disconnected, cardReaderException.UserFriendlyMessage);
@@ -660,6 +666,12 @@ namespace ICCardManager.Infrastructure.CardReader
             {
                 await StartReadingAsync().ConfigureAwait(false);
             }
+            catch (CardReaderException ex) when (ex.ErrorCode == CardReaderException.LibraryUnavailableErrorCode)
+            {
+                // Issue #2377: felicalib.dll を読み込めない。原因（DllNotFoundException）は IsFelicaLibLoaded が例外ごと
+                // Error で残しているので、ここは再接続が失敗したことだけを Warning で残す（同じ失敗を 2 行の Error にしない。#1991）
+                _logger.LogWarning("FelicaCardReader: 再接続に失敗しました（ErrorCode={ErrorCode}。felicalib.dll を読み込めません）", ex.ErrorCode);
+            }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "FelicaCardReader: 再接続に失敗しました");
@@ -675,8 +687,15 @@ namespace ICCardManager.Infrastructure.CardReader
         /// DLL の存在チェックのみを行い、PaSoRi の物理接続は判定しない。
         /// PaSoRi の物理接続を判定するには <see cref="IsReaderConnected"/> を併用すること。
         /// </remarks>
-        private bool IsFelicaLibLoaded()
+        private bool IsFelicaLibLoaded() => IsFelicaLibLoaded(out _);
+
+        /// <summary>
+        /// felicalib.dll がロード可能かチェックし、ロードできなかった原因の例外を返す（Issue #2377）
+        /// </summary>
+        /// <param name="loadError">ロードできなかったときの <see cref="DllNotFoundException"/>。ロードできたときは null</param>
+        private bool IsFelicaLibLoaded(out Exception? loadError)
         {
+            loadError = null;
             lock (_felicaLock)
             {
                 try
@@ -684,9 +703,14 @@ namespace ICCardManager.Infrastructure.CardReader
                     _ = _device.GetIDm(WildcardSystemCode);
                     return true;
                 }
-                catch (DllNotFoundException)
+                catch (DllNotFoundException ex)
                 {
-                    _logger.LogError("FelicaCardReader: felicalib.dll が見つかりません");
+                    // Issue #2377: 例外ごと残す（どの DLL を読み込めなかったかは IT 担当者の切り分けに要る）。
+                    // この判定は読み取りの開始・再接続のたびに 1 回呼ばれるほか、接続の監視（10 秒ごとのヘルスチェック、
+                    // OnHealthCheckTimerElapsed）からも呼ばれる。ただし felicalib.dll を読み込めない経路では監視を始めないので、
+                    // 同じエラーが周期的に積み上がることはない。
+                    _logger.LogError(ex, "FelicaCardReader: felicalib.dll を読み込めません（{ExceptionMessage}）", ex.Message);
+                    loadError = ex;
                     return false;
                 }
                 catch (Exception ex)
@@ -968,6 +992,17 @@ namespace ICCardManager.Infrastructure.CardReader
         /// </remarks>
         internal const string ReaderNotFoundMessage =
             "PaSoRi が見つかりません。USB で接続してください（接続すると自動で認識します）。";
+
+        /// <summary>
+        /// 起動時に felicalib.dll を読み込めなかったときの案内（Issue #2377）。
+        /// </summary>
+        /// <remarks>
+        /// メイン画面の警告エリアに「カードリーダー切断: 」に続けて表示される。起動時の「初期化エラー」ダイアログを
+        /// やめたため、利用者への案内はこの警告だけになる。この経路では接続の監視（ヘルスチェック）を始めないので、
+        /// <see cref="ReaderNotFoundMessage"/> と違って自動では認識しない — 行動指示はアプリの再起動にする。
+        /// 投げる例外（<see cref="CardReaderException.LibraryUnavailable"/>）の利用者向けの文言と同じ文字列を使う。
+        /// </remarks>
+        internal const string FelicaLibUnavailableMessage = CardReaderException.LibraryUnavailableUserMessage;
 
         /// <summary>
         /// ヘルスチェック 1 回の結果として行う処理（Issue #2298）。
