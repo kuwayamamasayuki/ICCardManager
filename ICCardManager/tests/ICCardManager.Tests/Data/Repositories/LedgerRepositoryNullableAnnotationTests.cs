@@ -65,6 +65,7 @@ public class LedgerRepositoryNullableAnnotationTests
     // null なら ArgumentNullException（防御ガード。呼び出し元のトランザクションの中でしか呼べない）
     [InlineData(typeof(ILedgerRepository), nameof(ILedgerRepository.UpdateSummaryAsync), NotAnnotated)]
     [InlineData(typeof(ILedgerRepository), nameof(ILedgerRepository.UpdateSummaryAndAmountsAsync), NotAnnotated)]
+    [InlineData(typeof(ILedgerRepository), nameof(ILedgerRepository.UpdateEditedColumnsAsync), NotAnnotated)]
     [InlineData(typeof(ILedgerMergeRepository), nameof(ILedgerMergeRepository.MergeLedgersAsync), NotAnnotated)]
     public void transaction引数は許容ならnull許容で防御ガードなら非nullで宣言していること(
         Type interfaceType, string methodName, byte expected)
