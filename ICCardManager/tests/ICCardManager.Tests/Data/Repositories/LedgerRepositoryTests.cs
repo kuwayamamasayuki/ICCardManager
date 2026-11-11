@@ -1823,6 +1823,88 @@ public class LedgerRepositoryTests : IDisposable
     }
 
     /// <summary>
+    /// 導入行より前の行（残高 4,790）→ 導入行（「2月から繰越」3/1 か「前年度より繰越」4/1。残高は引数）→ 直後の利用 210 → 次の利用 300。
+    /// 直後と次の行の残高は引数で変えられる（レビュー 2 回目の形を作るため）
+    /// </summary>
+    private async Task<(Ledger Introduction, Ledger Next, Ledger AfterNext)> InsertUncorroboratedIntroductionAsync(
+        bool midYear, int introductionBalance, int nextBalance, int afterNextBalance)
+    {
+        var baseDate = midYear ? new DateTime(2027, 3, 1) : new DateTime(2027, 4, 1);
+        var earlier = CreateTestLedger(TestCardIdm, baseDate.AddDays(-4), "鉄道（手入力）");
+        earlier.Balance = 4790;
+        earlier.Id = await _repository.InsertAsync(earlier);
+
+        var introduction = midYear
+            ? CreateTestLedger(TestCardIdm, baseDate, SummaryGenerator.GetMidYearCarryoverSummary(2))
+            : CreateTestLedger(TestCardIdm, baseDate, SummaryGenerator.GetCarryoverFromPreviousYearSummary(), income: introductionBalance);
+        introduction.Balance = introductionBalance;
+        introduction.Id = await _repository.InsertAsync(introduction);
+
+        var next = CreateTestLedger(TestCardIdm, baseDate.AddDays(4), "鉄道（天神～博多）", expense: 210);
+        next.Balance = nextBalance;
+        next.Id = await _repository.InsertAsync(next);
+
+        var afterNext = CreateTestLedger(TestCardIdm, baseDate.AddDays(9), "鉄道（博多～天神）", expense: 300);
+        afterNext.Balance = afterNextBalance;
+        afterNext.Id = await _repository.InsertAsync(afterNext);
+
+        return (introduction, next, afterNext);
+    }
+
+    /// <summary>
+    /// Issue #2441（レビュー 2 回目で検出）: 裏付けの無い正しい導入行の直後の行を 1 か所打ち間違えた（その行と次の行の 2 か所が切れて
+    /// 訂正案が出ない）形で、正しい導入行を報告しないこと。次の行が直後の行の正しい値から続いているので、直後の行の単独の打ち間違いと判別できる。
+    /// 「○月から繰越」「前年度より繰越」、全期間・表示期間とも
+    /// </summary>
+    [Theory]
+    [InlineData(true, true)]
+    [InlineData(true, false)]
+    [InlineData(false, true)]
+    [InlineData(false, false)]
+    public async Task CheckBalanceConsistencyAsync_CorrectIntroductionFollowedByIsolatedTypo_DoesNotReportIntroduction(
+        bool midYear, bool fullPeriod)
+    {
+        // Arrange: 4,790 → 導入行 5,000（正しい）→ 利用 210 を 4,700 と打ち間違え（正しくは 4,790）→ 利用 300（4,490。正しい）
+        var (introduction, typo, following) = await InsertUncorroboratedIntroductionAsync(midYear, 5000, 4700, 4490);
+        var checker = new LedgerConsistencyChecker(_repository);
+
+        // Act
+        var result = fullPeriod
+            ? await checker.CheckBalanceConsistencyAsync(TestCardIdm, Issue2437FullPeriodStart, Issue2437FullPeriodEnd)
+            : await checker.CheckBalanceConsistencyAsync(
+                TestCardIdm, introduction.Date.AddDays(-introduction.Date.Day + 1).AddMonths(-1), introduction.Date.AddMonths(1).AddDays(-1));
+
+        // Assert
+        result.Inconsistencies.Should().Equal(
+            new[] { (typo.Id, 4790, 4700), (following.Id, 4400, 4490) },
+            "切れているのは打ち間違えた行とその次の行。正しい導入行は報告しない");
+        result.InitialBalanceCorrection.Should().BeNull();
+    }
+
+    /// <summary>
+    /// Issue #2441（レビュー 2 回目で検出）: 誤った導入行を報告するときの期待値は、直前の行の残高（4,790）ではなく直後の行からの逆算（5,000）。
+    /// 直前の残高に直すと直後の行が切れる。「○月から繰越」「前年度より繰越」とも
+    /// </summary>
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task CheckBalanceConsistencyAsync_WrongIntroductionWithAnotherTypo_ExpectsBalanceFromNextRow(bool midYear)
+    {
+        // Arrange: 4,790 → 導入行を 6,000 で誤登録（正しくは 5,000）→ 利用 210（4,790）→ 利用 300 を 4,400 と打ち間違え（正しくは 4,490）
+        var (introduction, next, typo) = await InsertUncorroboratedIntroductionAsync(midYear, 6000, 4790, 4400);
+        var checker = new LedgerConsistencyChecker(_repository);
+
+        // Act
+        var result = await checker.CheckBalanceConsistencyAsync(TestCardIdm, Issue2437FullPeriodStart, Issue2437FullPeriodEnd);
+
+        // Assert
+        result.InitialBalanceCorrection.Should().BeNull();
+        result.Inconsistencies.Should().Equal(
+            new[] { (introduction.Id, 5000, 6000), (next.Id, 5790, 4790), (typo.Id, 4490, 4400) },
+            "導入行の期待値は直後の行からの逆算 4,790 ＋ 210 ＝ 5,000");
+    }
+
+    /// <summary>
     /// Issue #2441（正当側）: 導入行より前の行と食い違っていても、直後の行が整合している導入行は、後に別の不整合があっても報告しないこと
     /// </summary>
     [Fact]

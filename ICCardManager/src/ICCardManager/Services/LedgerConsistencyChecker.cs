@@ -221,16 +221,27 @@ namespace ICCardManager.Services
         }
 
         /// <summary>
-        /// Issue #2441（コードレビューで検出）: 2 本目以降のチェーンの先頭（導入行）が直前の帳簿の行で裏付けられず、直後の行が不整合で、
-        /// その導入行への訂正案も出ていないなら、導入行自体も不整合として報告する。期待値は直前の行からの計算値
-        /// （直前の残高 ＋ 受入 − 払出。チェーンを切る前の検査と同じ式）。
+        /// Issue #2441（コードレビューで検出）: 2 本目以降のチェーンの先頭（導入行）の残高の誤りが、訂正案の出ない形でも報告から消えないようにする。
+        /// 先頭が直前の帳簿の行で裏付けられず、直後の行が不整合で、その先頭への訂正案が出ておらず、直後の行の単独の打ち間違いとも
+        /// 説明できないなら、先頭も不整合として報告する。期待値は直後の行からの逆算（<see cref="ExpectedChainHeadBalance"/>）。
         /// </summary>
         /// <remarks>
-        /// チェーンを切ると先頭の導入行は検査されないので、導入行の残高が誤っていても、報告は直後の行（正しい行）にだけ付く。
-        /// 不整合が 1 か所なら訂正案（#2007）が導入行を名指しするが、別の不整合が 1 件でもある・明細の差が合わない・逆算が負の形では
-        /// 訂正案が出ず、誤った導入行が報告から消えて正しい行だけが強調される（チェーンを切る前は両方を報告していた）。
-        /// 直後の行が整合しているなら導入行の残高は後続の行で裏付けられているので報告しない（導入行より前の行と食い違うだけの正しい導入行。
-        /// #2437 / #2441 の本題）。期間の先頭のチェーンは前の行を持たないので対象外。
+        /// <para>
+        /// チェーンを切ると先頭の導入行は検査されないので、導入行の残高が誤っていても報告は直後の行（正しい行）にだけ付く。
+        /// 不整合が 1 か所なら訂正案（#2007）が導入行を名指しするが、別の不整合がある・明細の差が合わない形では訂正案が出ない。
+        /// </para>
+        /// <para>
+        /// 裏付けが無いこと自体は誤りの根拠にならない（年度途中の導入行は、導入行より前の行と残高が違うのが普通）。
+        /// 直後の行が切れている原因は「先頭の誤り」と「直後の行の単独の打ち間違い」のどちらもあり得るので、後者と判別できる形は報告しない:
+        /// </para>
+        /// <list type="bullet">
+        /// <item>次の次の行が、直後の行の「先頭から計算した期待残高」から続いて整合する（直後の行の誤りが次の行で打ち消されている）</item>
+        /// <item>直後の行からの逆算が負（先頭をどう直しても直後の行は説明できない）</item>
+        /// </list>
+        /// <para>
+        /// 限界: 直後の行が期間の最後の行、または次の次の行も切れている（直後と次の次の行の両方の打ち間違い）形では判別できず、
+        /// 正しい先頭も報告し得る。逆に、先頭と直後の行が同時に誤っている形は報告しない。期間の先頭のチェーンは前の行を持たないので対象外。
+        /// </para>
         /// </remarks>
         internal static void ReportUncorroboratedChainHeads(
             IReadOnlyList<List<Ledger>> chains, IReadOnlyList<Ledger?> chainHeadPredecessors, ConsistencyResult result)
@@ -245,34 +256,48 @@ namespace ICCardManager.Services
                 }
 
                 var head = ledgers[0];
-                var nextIndex = result.Inconsistencies.FindIndex(x => x.LedgerId == ledgers[1].Id);
+                var next = ledgers[1];
+                var nextIndex = result.Inconsistencies.FindIndex(x => x.LedgerId == next.Id);
                 if (nextIndex < 0 || result.InitialBalanceCorrection?.LedgerId == head.Id)
                 {
                     continue;
                 }
 
-                result.Inconsistencies.Insert(nextIndex, (head.Id, ExpectedChainHeadBalance(predecessor, head), head.Balance));
+                if (ledgers.Count >= 3 && IsIsolatedTypo(head, next, ledgers[2]))
+                {
+                    continue;
+                }
+
+                var expected = ExpectedChainHeadBalance(next);
+                if (expected < 0)
+                {
+                    continue;
+                }
+
+                result.Inconsistencies.Insert(nextIndex, (head.Id, expected, head.Balance));
                 result.IsConsistent = false;
             }
         }
 
         /// <summary>
-        /// 裏付けの無いチェーンの先頭の期待残高。<see cref="IsCorroboratedByPrecedingSettledRow"/> の 2 つの形に対応させる。
+        /// 直後の行の誤りが次の行で打ち消されているか（次の行が、直後の行の「先頭から計算した期待残高」から続いて整合する）。
+        /// 真なら直後の行の単独の打ち間違いで、先頭は正しい。
+        /// </summary>
+        internal static bool IsIsolatedTypo(Ledger head, Ledger next, Ledger afterNext)
+        {
+            var expectedNext = head.Balance + next.Income - next.Expense;
+            return expectedNext + afterNext.Income - afterNext.Expense == afterNext.Balance;
+        }
+
+        /// <summary>
+        /// 報告するチェーンの先頭の期待残高。直後の行からの逆算（直後の残高 − 受入 ＋ 払出。#2007 の訂正案と同じ式）。
         /// </summary>
         /// <remarks>
-        /// 導入行の受入は残高の書き直しなので、直前の残高が 0（3/31「次年度へ繰越」で払い出した組）なら直前の残高 ＋ 受入 − 払出、
-        /// それ以外は直前の残高をそのまま期待する（3/25 の行 4,790 → 4/1「前年度より繰越」受入・残高 6,000 の期待は 4,790。
-        /// 4,790 ＋ 6,000 ＝ 10,790 は存在しない残高）。受入 0 の「○月から繰越」ではどちらも同じ値。導入行でない先頭は通常の式。
+        /// 直前の行からの計算（直前の残高 ＋ 受入 − 払出、または直前の残高）は使わない。年度途中の導入行は導入行より前の行と
+        /// 残高が違うのが普通なので、その値に直すと直後の行が切れる（2/25 4,790 → 3/1 を 6,000 で誤登録 → 3/5 4,790 の正しい値は
+        /// 3/5 からの逆算 5,000 で、2/25 の 4,790 ではない）。
         /// </remarks>
-        internal static int ExpectedChainHeadBalance(Ledger predecessor, Ledger head)
-        {
-            if (head.IsInitialRecord && predecessor.Balance != 0)
-            {
-                return predecessor.Balance;
-            }
-
-            return predecessor.Balance + head.Income - head.Expense;
-        }
+        internal static int ExpectedChainHeadBalance(Ledger next) => next.Balance - next.Income + next.Expense;
 
         /// <summary>
         /// Issue #2437: チェーンの先頭の行の残高が、直前の帳簿の行（貸出中レコードを除く）で裏付けられているか。直前の行が無ければ偽。

@@ -492,27 +492,50 @@ public class LedgerConsistencyCheckerTests
     }
 
     /// <summary>
-    /// Issue #2441（コードレビューで検出）: 逆算した残高が負になり訂正案が出ない形でも、裏付けの無いチェーンの先頭（直後が切れている）を
-    /// 報告から落とさない。直前の帳簿の行が無ければ報告しない
+    /// Issue #2441（コードレビューで検出）: 別の不整合があって訂正案が出ない形でも、裏付けの無いチェーンの先頭（直後が切れている）を
+    /// 報告から落とさない。期待値は直後の行からの逆算。逆算が負・直前の帳簿の行が無いなら報告しない
     /// </summary>
     [Fact]
     public void CheckConsistency_Chains_UncorroboratedHeadWithoutCorrection_IsReported()
     {
         var purchase = Issue2437Ledger(1, new DateTime(2027, 4, 1), "新規購入", 5000, 0, 5000);
         var stray = Issue2437Ledger(2, new DateTime(2027, 6, 1), SummaryGenerator.GetMidYearCarryoverSummary(5), 0, 0, 6000);
-        var charge = Issue2437Ledger(3, new DateTime(2027, 6, 5), "役務費によりチャージ", 1000, 0, 500);
+        var usage = Issue2437Ledger(3, new DateTime(2027, 6, 5), "鉄道（天神～博多）", 0, 210, 4790);
+        var typo = Issue2437Ledger(4, new DateTime(2027, 7, 10), "鉄道（博多～天神）", 0, 300, 4400);
 
         var result = _checker.CheckConsistency(
-            new[] { new List<Ledger> { purchase }, new List<Ledger> { stray, charge } }, TestCardIdm, new DateTime(2000, 1, 1),
+            new[] { new List<Ledger> { purchase }, new List<Ledger> { stray, usage, typo } }, TestCardIdm, new DateTime(2000, 1, 1),
             new Ledger?[] { null, purchase });
 
-        result.InitialBalanceCorrection.Should().BeNull("逆算した残高 500 − 1,000 が負なので訂正案の形ではない");
-        result.Inconsistencies.Should().Equal(new[] { (2, 5000, 6000), (3, 7000, 500) });
+        result.InitialBalanceCorrection.Should().BeNull("不整合が 2 か所以上あるので訂正案の形ではない");
+        result.Inconsistencies.Should().Equal(new[] { (2, 5000, 6000), (3, 5790, 4790), (4, 4490, 4400) });
 
         var noPredecessor = _checker.CheckConsistency(
-            new[] { new List<Ledger>(), new List<Ledger> { stray, charge } }, TestCardIdm, new DateTime(2000, 1, 1),
+            new[] { new List<Ledger>(), new List<Ledger> { stray, usage, typo } }, TestCardIdm, new DateTime(2000, 1, 1),
             new Ledger?[] { null, null });
-        noPredecessor.Inconsistencies.Should().Equal(new[] { (3, 7000, 500) }, "直前の帳簿の行が無ければ期待値を決められないので先頭は報告しない");
+        noPredecessor.Inconsistencies.Select(x => x.LedgerId).Should().Equal(new[] { 3, 4 }, "直前の帳簿の行が無ければ先頭は報告しない");
+
+        var charge = Issue2437Ledger(5, new DateTime(2027, 6, 5), "役務費によりチャージ", 1000, 0, 500);
+        var negative = _checker.CheckConsistency(
+            new[] { new List<Ledger> { purchase }, new List<Ledger> { stray, charge } }, TestCardIdm, new DateTime(2000, 1, 1),
+            new Ledger?[] { null, purchase });
+        negative.Inconsistencies.Should().Equal(new[] { (5, 7000, 500) }, "逆算 500 − 1,000 が負なら、先頭をどう直しても直後の行は説明できない");
+    }
+
+    /// <summary>
+    /// Issue #2441（レビュー 2 回目）: 直後の行の誤りが次の行で打ち消されている（単独の打ち間違い）かの判定
+    /// </summary>
+    [Fact]
+    public void IsIsolatedTypo_DetectsTypoCancelledByFollowingRow()
+    {
+        var head = Issue2437Ledger(1, new DateTime(2027, 3, 1), SummaryGenerator.GetMidYearCarryoverSummary(2), 0, 0, 5000);
+        var typo = Issue2437Ledger(2, new DateTime(2027, 3, 5), "鉄道（天神～博多）", 0, 210, 4700);
+        var following = Issue2437Ledger(3, new DateTime(2027, 3, 10), "鉄道（博多～天神）", 0, 300, 4490);
+        var followingFromTypo = Issue2437Ledger(4, new DateTime(2027, 3, 10), "鉄道（博多～天神）", 0, 300, 4400);
+
+        LedgerConsistencyChecker.IsIsolatedTypo(head, typo, following).Should().BeTrue("3/10 は 3/5 の正しい値 4,790 から続く");
+        LedgerConsistencyChecker.IsIsolatedTypo(head, typo, followingFromTypo).Should().BeFalse("3/10 は記録された 3/5 の 4,700 から続く");
+        LedgerConsistencyChecker.ExpectedChainHeadBalance(typo).Should().Be(4910, "直後の残高 − 受入 ＋ 払出");
     }
 
     #endregion
