@@ -180,8 +180,9 @@ public class SettingsMaintenanceKeyConventionTests
     /// 巻き戻りの実際の入口は「<c>GetAppSettingsAsync()</c>（TTL キャッシュ）で読む → 一部だけ変える → 一括保存」という呼び出し元で、
     /// 一括保存のキー集合を固定するだけでは防げない（#1997 / #2264 / #2305 と 3 度、この形の呼び出し元が原因になった）。
     /// 設定画面は画面の値から <c>new AppSettings { … }</c> を組み立てて渡すが、画面の初期値は設定の読み取り結果なので、
-    /// <b>同じ巻き戻りは設定画面の経路にも残っている</b>（開いた時点の値が古ければ、別の項目だけを変えた保存で巻き戻す）。
-    /// 開くたびに DB から読み直して窓を縮めている（<c>SettingsViewModel.LoadSettingsAsync</c>）。根本対策は別 Issue で扱う。
+    /// 全項目を書くと同じ巻き戻りが設定画面の経路にも残る（開いた時点の値が古ければ、別の項目だけを変えた保存で巻き戻す）。
+    /// Issue #2388 で、設定画面は変えた項目のキーだけを渡すオーバーロードを呼ぶようにした（下の
+    /// <see cref="設定画面の保存は変えた項目のキーだけを渡すこと"/>。この検査の正規表現は両方のオーバーロードを数える）。
     /// 新しい呼び出し元が要るときは、一括保存ではなく書くキーだけを書く専用メソッドを足すこと（<c>SaveMainWindowSettingsAsync</c> と同じ形）。
     /// </remarks>
     [Fact]
@@ -196,6 +197,50 @@ public class SettingsMaintenanceKeyConventionTests
             new[] { "SettingsViewModel.cs" },
             "一括保存は渡された値をすべて書く。キャッシュで読んだ設定を渡す呼び出し元は、" +
             "共有モードで他の PC が変えた設定を巻き戻す（Issue #2305）");
+    }
+
+    private const string PartialSaveSignatureMarker =
+        "Task<bool> SaveAppSettingsAsync(AppSettings settings, IReadOnlyCollection<string> keys)";
+
+    /// <summary>
+    /// Issue #2388: キーを指定する保存（設定画面が呼ぶ）が書けるキーは、一括保存と同じ「画面から編集する設定」だけであること。
+    /// </summary>
+    /// <remarks>
+    /// 指定したキーだけを書く経路でも、書けるキーの集合に保守用のキー・<c>backup_path</c>・<c>window_*</c> を足すと、
+    /// 呼び出し元がそれを渡したときに専用経路の条件（月ガード・認証と操作ログ）を迂回できる。
+    /// </remarks>
+    [Fact]
+    public void キーを指定する保存が書けるキーは画面から編集する設定だけであること()
+    {
+        var source = File.ReadAllText(RepositoryPath);
+        var body = ExpandWithCallees(source, PartialSaveSignatureMarker);
+
+        ExtractKeyConstants(body).Should().BeEquivalentTo(
+            ExpectedKeyConstants,
+            "キーを指定する保存も、一括保存と同じキーの集合からしか書かない（Issue #2388）");
+        foreach (var literal in MaintenanceKeyLiterals)
+        {
+            body.Should().NotContain(literal);
+        }
+    }
+
+    /// <summary>
+    /// Issue #2388: 設定画面の保存は、画面を開いたときの値と比べて変えた項目のキーだけを渡すこと（全項目を書く形に戻さない）。
+    /// </summary>
+    /// <remarks>
+    /// 挙動は <c>SettingsViewModelChangedKeysTests</c> が実 SQLite で固定する。ここでは「禁止形の不在」と「正しい形の存在」を対で見る
+    /// （1 引数の一括保存へ戻すと、画面を開いている間に他の PC が変えた項目を画面の古い値で書き戻す）。
+    /// </remarks>
+    [Fact]
+    public void 設定画面の保存は変えた項目のキーだけを渡すこと()
+    {
+        var viewModel = ProductionSourceFiles.CSharp.Single(f => f.Name == "SettingsViewModel.cs");
+        var body = TestSourceInspection.ExtractMethodBody(viewModel.CodeOnly, "private async Task SaveCoreAsync(SavePlan plan)");
+
+        body.Should().Contain("SettingsRepository.GetChangedAppSettingKeys(");
+        body.Should().Contain(".SaveAppSettingsAsync(settings, changedKeys)");
+        Regex.IsMatch(body, @"\.SaveAppSettingsAsync\(\s*\w+\s*\)").Should().BeFalse("1 引数の一括保存（全項目を書く）を呼ばない");
+        CountBulkSaveCalls(body).Should().Be(1, "前提: 保存の呼び出しは 1 か所");
     }
 
     /// <summary>
@@ -245,6 +290,142 @@ public class SettingsMaintenanceKeyConventionTests
 
     private static int CountBulkSaveCalls(string code, bool selfCalls = false)
         => BulkSaveCall.Matches(code).Count + (selfCalls ? SelfBulkSaveCall.Matches(code).Count : 0);
+
+    /// <summary>
+    /// Issue #2388（レビュー 3 回目）: 本番コードに、全項目を書く 1 引数の <c>SaveAppSettingsAsync(AppSettings)</c> の呼び出しが無いこと。
+    /// </summary>
+    /// <remarks>
+    /// 上の「一括保存を呼ぶ本番コードは設定画面だけ」は両方のオーバーロードを数え、<c>SettingsViewModel.cs</c> の呼び出しを許すため、
+    /// 設定画面の別のメソッドが 1 引数の版を呼んでも緑になる。1 引数の版は画面の全項目を書き、画面を開いている間に他の PC が変えた
+    /// 項目を巻き戻す（#2388）。引数の数で区別し、メソッドグループ（括弧の無い参照。どちらの版か区別できない）も違反として数える。
+    /// </remarks>
+    [Fact]
+    public void 本番コードは全項目を書く1引数の保存を呼ばないこと()
+    {
+        var violations = ProductionSourceFiles.CSharp
+            .Where(f => CountSingleArgumentBulkSaveCalls(f.CodeOnly, selfCalls: f.Name == RepositoryFileName) > 0)
+            .Select(f => f.Name)
+            .ToList();
+
+        violations.Should().BeEmpty(
+            "1 引数の SaveAppSettingsAsync は渡された値をすべて書く。設定画面は変えた項目のキーだけを渡す（Issue #2388）");
+    }
+
+    /// <summary>
+    /// 検査ロジック自体をサンプル入力で固定する（1 引数の呼び出し・メソッドグループを数え、2 引数の呼び出しと定義は数えない）。
+    /// </summary>
+    [Theory]
+    [InlineData("var ok = await _settingsRepository.SaveAppSettingsAsync(settings);", false, 1)]
+    [InlineData("await Task.Run(() => _repo.SaveAppSettingsAsync(new AppSettings { A = f(1, 2) }));", false, 1)]
+    [InlineData("var f = _repo?.SaveAppSettingsAsync;", false, 1)]
+    [InlineData("await _repo\n    .SaveAppSettingsAsync(s);", false, 1)]
+    [InlineData("await Task.Run(() => _settingsRepository.SaveAppSettingsAsync(settings, changedKeys));", false, 0)]
+    [InlineData("await _repo.SaveAppSettingsAsync(Build(a, b), new[] { \"x\", \"y\" });", false, 0)]
+    [InlineData("public async Task<bool> SaveAppSettingsAsync(AppSettings settings)", true, 0)]
+    [InlineData("success = await SaveAppSettingsAsync(settings).ConfigureAwait(false);", true, 1)]
+    [InlineData("return await SaveAppSettingsAsync(settings, keys).ConfigureAwait(false);", true, 0)]
+    [InlineData("await _repo.SaveAppSettingsAsync(items.First(x => x.A >= 1), keys);", false, 0)]
+    [InlineData("await _repo.SaveAppSettingsAsync(Build(new Dictionary<string, int>()));", false, 1)]
+    [InlineData("await _repo.SaveAppSettingsAsync(s, c == '(' ? Pick(',') : Pick('\"'));", false, 0)]
+    public void 一引数の一括保存の検出は引数の数で区別すること(string code, bool selfCalls, int expected)
+    {
+        CountSingleArgumentBulkSaveCalls(code, selfCalls).Should().Be(expected);
+    }
+
+    private static int CountSingleArgumentBulkSaveCalls(string code, bool selfCalls = false)
+    {
+        var matches = BulkSaveCall.Matches(code).Cast<Match>()
+            .Select(m => m.Index + m.Length)
+            .Concat(selfCalls
+                ? SelfBulkSaveCall.Matches(code).Cast<Match>().Select(m => m.Index + m.Value.IndexOf("SaveAppSettingsAsync", StringComparison.Ordinal) + "SaveAppSettingsAsync".Length)
+                : Enumerable.Empty<int>());
+
+        return matches.Count(end => CountArguments(code, end) is null or 1);
+    }
+
+    /// <summary>
+    /// 名前の直後の引数リストの引数の数を返す。括弧が続かない（メソッドグループ）なら null。
+    /// </summary>
+    private static int? CountArguments(string code, int afterName)
+    {
+        var i = afterName;
+        while (i < code.Length && char.IsWhiteSpace(code[i]))
+        {
+            i++;
+        }
+
+        if (i >= code.Length || code[i] != '(')
+        {
+            return null;
+        }
+
+        var depth = 0;
+        var commas = 0;
+        var empty = true;
+        var inString = false;
+        for (var k = i + 1; k < code.Length; k++)
+        {
+            var c = code[k];
+            if (inString)
+            {
+                if (c == '\\')
+                {
+                    k++;
+                }
+                else if (c == '"')
+                {
+                    inString = false;
+                }
+                continue;
+            }
+
+            switch (c)
+            {
+                case '>' when code[k - 1] == '=' || (k + 1 < code.Length && code[k + 1] == '='):
+                    // ラムダの => と比較の >= は型引数の括弧ではない
+                    empty = false;
+                    break;
+                case '<' when k + 1 < code.Length && code[k + 1] == '=':
+                    empty = false;
+                    break;
+                case '\'':
+                    // 文字リテラル（'(' ',' '"' など）は飛ばす。'\\x' のエスケープも 1 文字として扱う
+                    k += k + 1 < code.Length && code[k + 1] == '\\' ? 3 : 2;
+                    empty = false;
+                    break;
+                case '"':
+                    inString = true;
+                    empty = false;
+                    break;
+                case '(':
+                case '[':
+                case '{':
+                case '<':
+                    depth++;
+                    empty = false;
+                    break;
+                case ')' when depth == 0:
+                    return empty ? 0 : commas + 1;
+                case ')':
+                case ']':
+                case '}':
+                case '>':
+                    depth--;
+                    break;
+                case ',' when depth == 0:
+                    commas++;
+                    break;
+                default:
+                    if (!char.IsWhiteSpace(c))
+                    {
+                        empty = false;
+                    }
+                    break;
+            }
+        }
+
+        return null;
+    }
 
     /// <summary>
     /// 対の表明: CAS 経路は <c>last_vacuum_date</c> を<b>実際に書いている</b>こと。

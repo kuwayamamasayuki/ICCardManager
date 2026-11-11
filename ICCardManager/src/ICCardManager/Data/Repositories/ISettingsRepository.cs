@@ -41,7 +41,7 @@ namespace ICCardManager.Data.Repositories
         /// <remarks>
         /// <c>backup_path</c> は共有 DB に保存され、全 PC が起動のたびにこの場所へ DB 全体をコピーする。
         /// 職員証の認証と操作ログを伴う経路（<c>Services.SettingsChangeService</c>）だけが書く。
-        /// 一括保存（<see cref="SaveAppSettingsAsync"/>）には載せない。
+        /// 一括保存（<see cref="SaveAppSettingsAsync(AppSettings)"/>）には載せない。
         /// トランザクションを渡した書き込みはキャッシュを破棄しない。呼び出し元が完了後に <see cref="InvalidateCache"/> を呼ぶ。
         /// </remarks>
         Task ChangeBackupPathAsync(string backupPath, string machineName, DateTime changedAt, SQLiteTransaction transaction);
@@ -102,14 +102,33 @@ namespace ICCardManager.Data.Repositories
         /// 一括保存は条件を持たない UPSERT で、渡された値を<b>すべて</b>書く。<see cref="GetAppSettingsAsync"/>
         /// （TTL キャッシュ）で読んだ値の一部だけを変えて渡すと、触っていない値も読んだ時点の値で書き戻し、
         /// 共有モードでは他 PC がその後に変えた設定（部署種別・残額警告など）を巻き戻す（Issue #2305）。
-        /// 本番の呼び出し元は設定画面（F5）だけにすること（静的検査 <c>SettingsMaintenanceKeyConventionTests</c> が固定する）。
-        /// <b>設定画面の経路にも同じ巻き戻りは残っている</b>: 画面は全項目を書くため、開いた時点の値が古ければ、別の項目だけを
-        /// 変えて保存したときに他 PC の変更を巻き戻す。画面を開くたびにキャッシュを破棄して DB から読み直す
-        /// （<c>SettingsViewModel.LoadSettingsAsync</c>）ことで窓を「画面を開いている間」に縮めているが、消えてはいない
-        /// （変えた項目だけを書く根本対策は別 Issue）。
+        /// 本番コードからは呼ばないこと（テストで設定を用意するためのもの）。設定画面（F5）も、変えた項目のキーだけを渡す
+        /// <see cref="SaveAppSettingsAsync(AppSettings, IReadOnlyCollection{string})"/> を使う（Issue #2388）。
+        /// 呼び出し元は静的検査 <c>SettingsMaintenanceKeyConventionTests</c> が固定する。
         /// </para>
         /// </remarks>
         Task<bool> SaveAppSettingsAsync(AppSettings settings);
+
+        /// <summary>
+        /// 設定画面で編集する設定のうち、指定したキーだけを保存する（Issue #2388）
+        /// </summary>
+        /// <param name="settings">保存する値。<paramref name="keys"/> に含まれないキーの値は使わない</param>
+        /// <param name="keys">
+        /// 書くキー（<c>SettingsRepository.GetChangedAppSettingKeys</c> で、画面を開いたときの値と比べて決める）。
+        /// 画面で編集しないキー（<c>backup_path</c>・<c>window_*</c>・保守用のキー）を含めると <see cref="ArgumentException"/>
+        /// </param>
+        /// <returns>すべてのキーを書けたら true。<paramref name="keys"/> が空なら何も書かずに true</returns>
+        /// <remarks>
+        /// <para>
+        /// 共有モードで、設定画面を開いている間に他の PC が別の項目を変えても、変えていない項目を画面の古い値で書き戻さない
+        /// （#1726「SET 句はその経路で本当に編集する列に限る」と同じ考え方）。同じ項目を両方の PC が変えたときは、後に保存した方が残る。
+        /// </para>
+        /// <para>
+        /// 書くキーは 1 トランザクションで書き、完了後に設定のキャッシュを破棄する（<see cref="SaveAppSettingsAsync(AppSettings)"/> と同じ）。
+        /// 空のときはトランザクションを開かず、キャッシュも破棄しない。
+        /// </para>
+        /// </remarks>
+        Task<bool> SaveAppSettingsAsync(AppSettings settings, IReadOnlyCollection<string> keys);
 
         /// <summary>
         /// メインウィンドウの位置・サイズだけを保存する（終了時の保存。Issue #2305）
@@ -118,7 +137,7 @@ namespace ICCardManager.Data.Repositories
         /// <returns>すべてのキーを書けたら true</returns>
         /// <remarks>
         /// <c>window_left</c> / <c>window_top</c> / <c>window_width</c> / <c>window_height</c> / <c>window_maximized</c>
-        /// 以外のキーは書かない。以前は終了時に <see cref="SaveAppSettingsAsync"/> へキャッシュ由来の
+        /// 以外のキーは書かない。以前は終了時に <see cref="SaveAppSettingsAsync(AppSettings)"/> へキャッシュ由来の
         /// <see cref="AppSettings"/> を丸ごと渡しており、共有モードで他 PC が変えた設定を古い値へ巻き戻していた。
         /// </remarks>
         Task<bool> SaveMainWindowSettingsAsync(WindowSettings windowSettings);

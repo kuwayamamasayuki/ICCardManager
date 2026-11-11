@@ -87,7 +87,7 @@ namespace ICCardManager.Data.Repositories
         /// <remarks>
         /// settings は key-value テーブルのためスキーマ変更（マイグレーション）は不要。
         /// 読み書きは <see cref="Services.ITransferStationGroupService"/> 経由で行い、
-        /// <see cref="SaveAppSettingsAsync"/> の一括保存には含めない。
+        /// <see cref="SaveAppSettingsAsync(AppSettings)"/> の一括保存には含めない。
         /// </remarks>
         public const string KeyTransferStationGroups = "transfer_station_groups";
 
@@ -221,7 +221,7 @@ WHERE settings.value IS NULL OR substr(settings.value, 1, 7) <> @currentMonth";
         /// </para>
         /// <para>
         /// <b>① <paramref name="scope"/> あり</b>: そのトランザクションを全文に適用する。
-        /// commit / rollback は呼び出し元の責務。<see cref="SaveAppSettingsAsync"/> のように
+        /// commit / rollback は呼び出し元の責務。<see cref="SaveAppSettingsAsync(AppSettings)"/> のように
         /// 外側スコープの内側から書く経路は**必ずこの形にする**。
         /// </para>
         /// <para>
@@ -559,8 +559,148 @@ WHERE settings.value IS NULL OR substr(settings.value, 1, 7) <> @currentMonth";
         /// <inheritdoc/>
         public async Task<bool> SaveAppSettingsAsync(AppSettings settings)
         {
+            return await WriteEditableSettingsAsync(ToEditableSettingValues(settings)).ConfigureAwait(false);
+        }
+
+        /// <inheritdoc/>
+        public async Task<bool> SaveAppSettingsAsync(AppSettings settings, IReadOnlyCollection<string> keys)
+        {
+            if (settings == null)
+            {
+                throw new ArgumentNullException(nameof(settings));
+            }
+
+            if (keys == null)
+            {
+                throw new ArgumentNullException(nameof(keys));
+            }
+
+            var values = ToEditableSettingValues(settings);
+
+            // Issue #2388: 画面で編集しないキー（backup_path・window_*・保守用のキー）を渡されたら、黙って無視せず拒む。
+            // 無視すると「渡したのに書かれない」呼び出し元の誤りが表に出ない
+            var unknownKeys = keys.Where(k => values.All(v => v.Key != k)).ToList();
+            if (unknownKeys.Count > 0)
+            {
+                throw new ArgumentException(
+                    $"画面で編集する設定ではないキーは保存できません: {string.Join(", ", unknownKeys)}", nameof(keys));
+            }
+
+            var selected = values.Where(v => keys.Contains(v.Key)).ToList();
+            if (selected.Count == 0)
+            {
+                // 何も変えていない保存。DB に書かず、トランザクションも開かない（キャッシュもそのまま）
+                return true;
+            }
+
+            return await WriteEditableSettingsAsync(selected).ConfigureAwait(false);
+        }
+
+        /// <summary>
+        /// 2 つの設定のうち、保存する文字列が異なる画面の編集項目のキーを返す（Issue #2388）
+        /// </summary>
+        /// <param name="original">画面を開いたときの値</param>
+        /// <param name="edited">保存しようとしている値</param>
+        /// <returns>変えた項目のキー（<see cref="SaveAppSettingsAsync(AppSettings, IReadOnlyCollection{string})"/> へ渡す）</returns>
+        /// <remarks>
+        /// 比べるのは<b>DB へ書く文字列</b>（列挙値の名前・数値の書式を通した後）。同じ文字列になる違い
+        /// （例: 文字サイズ「特大」の旧表記 <c>extralarge</c> と現行の <c>xlarge</c>）は変更とみなさない。
+        /// </remarks>
+        public static IReadOnlyList<string> GetChangedAppSettingKeys(AppSettings original, AppSettings edited)
+        {
+            if (original == null)
+            {
+                throw new ArgumentNullException(nameof(original));
+            }
+
+            if (edited == null)
+            {
+                throw new ArgumentNullException(nameof(edited));
+            }
+
+            var before = ToEditableSettingValues(original);
+            var after = ToEditableSettingValues(edited);
+            return after
+                .Where(a => !string.Equals(before.Single(b => b.Key == a.Key).Value, a.Value, StringComparison.Ordinal))
+                .Select(a => a.Key)
+                .ToList();
+        }
+
+        /// <summary>
+        /// 設定画面で編集する設定を、DB へ書くキーと文字列の組にする（Issue #2388 で一括保存から切り出した）
+        /// </summary>
+        /// <remarks>
+        /// 書くキーの集合は <c>SettingsMaintenanceKeyConventionTests</c> が固定する。
+        /// </remarks>
+        private static List<EditableSettingValue> ToEditableSettingValues(AppSettings settings)
+        {
+            return new List<EditableSettingValue>
+            {
+                new EditableSettingValue(KeyWarningBalance, settings.WarningBalance.ToString(CultureInfo.InvariantCulture)),
+
+                // Issue #2264: backup_path はここに載せない。バックアップ先の変更は職員証の認証を求め、
+                // 変更日時・PC 名・操作ログと同じトランザクションで書く（ChangeBackupPathAsync）。
+                // 一括保存は条件を持たない UPSERT で、渡された値を丸ごと書くため、ここに載せると
+                // 古い値を持つ PC の保存が、他 PC で認証して変更したバックアップ先を、認証も記録も無いまま巻き戻す（#1997 と同じ形）。
+                new EditableSettingValue(KeyFontSize, FontSizeToString(settings.FontSize)),
+
+                // Issue #1997: last_vacuum_date はここに載せない。
+                // この値は TryAcquireMonthlyVacuumLockAsync の CAS（月ガード付き UPSERT）でしか
+                // 更新してはならない。一括保存は素の ON CONFLICT DO UPDATE なので月ガードを持たず、
+                // TTL キャッシュ由来の古い AppSettings（他 PC が CAS を獲得する前の値）を
+                // そのまま書き戻して当月のロックを巻き戻す。
+                // 保守用のキー（last_backup_success_at / last_backup_machine / last_vacuum_machine）も
+                // 同じ理由で載せない。集合は SettingsMaintenanceKeyConventionTests が固定する。
+
+                // Issue #2305: ウィンドウの位置・サイズ（window_*）はここに載せない。設定画面で編集しない値で、
+                // 終了時に SaveMainWindowSettingsAsync だけが書く。以前は終了時の保存がキャッシュ由来の
+                // AppSettings を丸ごと一括保存へ渡しており、共有モードで他 PC が変えた設定（部署種別・
+                // 残額警告など）を古い値へ巻き戻していた。設定画面の保存も既定値の MainWindowSettings を渡すため、
+                // 載せたままだと window_maximized を false で上書きしていた（SET 句は編集する列に限る。#1726）。
+                new EditableSettingValue(KeySoundMode, SoundModeToString(settings.SoundMode)),
+                new EditableSettingValue(KeyToastPosition, ToastPositionToString(settings.ToastPosition)),
+                new EditableSettingValue(KeyDepartmentType, DepartmentTypeToString(settings.DepartmentType)),
+                new EditableSettingValue(KeySkipBusStopInputOnReturn, settings.SkipBusStopInputOnReturn.ToString().ToLowerInvariant()),
+
+                // Issue #1906
+                new EditableSettingValue(KeySkipCompanionCountInputOnReturn, settings.SkipCompanionCountInputOnReturn.ToString().ToLowerInvariant()),
+
+                // Issue #2009
+                new EditableSettingValue(KeyCompanionCountInputTimeoutSeconds, settings.CompanionCountInputTimeoutSeconds.ToString(CultureInfo.InvariantCulture)),
+
+                // Issue #2152
+                new EditableSettingValue(KeyLongTermUnreturnedDays, settings.LongTermUnreturnedDays.ToString(CultureInfo.InvariantCulture)),
+
+                // Issue #1907
+                new EditableSettingValue(KeyShowHistoryOnReturn, settings.ShowHistoryOnReturn.ToString().ToLowerInvariant()),
+
+                new EditableSettingValue(KeyReportOutputFolder, settings.ReportOutputFolder ?? string.Empty),
+            };
+        }
+
+        /// <summary>
+        /// 設定画面で編集する設定の、DB へ書くキーと文字列（Issue #2388）
+        /// </summary>
+        private sealed class EditableSettingValue
+        {
+            public EditableSettingValue(string key, string value)
+            {
+                Key = key;
+                Value = value;
+            }
+
+            public string Key { get; }
+
+            public string Value { get; }
+        }
+
+        /// <summary>
+        /// キーと値の組を 1 トランザクションで書き、完了後にキャッシュを破棄する
+        /// </summary>
+        private async Task<bool> WriteEditableSettingsAsync(List<EditableSettingValue> values)
+        {
             // Issue #1240: 共有モードで他PCが更新途中の中間状態を読み取らないよう、
-            // すべての設定キーの更新を単一トランザクション内で実行する。
+            // 設定キーの更新を単一トランザクション内で実行する。
             var success = true;
 
             await _dbContext.ExecuteWithRetryAsync(async () =>
@@ -574,53 +714,10 @@ WHERE settings.value IS NULL OR substr(settings.value, 1, 7) <> @currentMonth";
                     // Issue #1737: 外側スコープの内側から書くため、トランザクションを明示的に引き渡す（分岐①）。
                     // 引数なし版に頼ると HasActiveTransactionScope（プロセス全体のカウンタ）経由の
                     // 暗黙参加になり、「自分のスコープか他フローのスコープか」を区別できない。
-                    success &= await SetAsync(KeyWarningBalance, settings.WarningBalance.ToString(CultureInfo.InvariantCulture), scope).ConfigureAwait(false);
-                    // Issue #2264: backup_path はここで書かない。バックアップ先の変更は職員証の認証を求め、
-                    // 変更日時・PC 名・操作ログと同じトランザクションで書く（ChangeBackupPathAsync）。
-                    // 一括保存は条件を持たない UPSERT で、渡された値を丸ごと書くため、ここに載せると
-                    // 古い値を持つ PC の保存が、他 PC で認証して変更したバックアップ先を、認証も記録も無いまま巻き戻す（#1997 と同じ形）。
-                    success &= await SetAsync(KeyFontSize, FontSizeToString(settings.FontSize), scope).ConfigureAwait(false);
-
-                    // Issue #1997: last_vacuum_date はここで書かない。
-                    // この値は TryAcquireMonthlyVacuumLockAsync の CAS（月ガード付き UPSERT）でしか
-                    // 更新してはならない。一括保存は素の ON CONFLICT DO UPDATE なので月ガードを持たず、
-                    // TTL キャッシュ由来の古い AppSettings（他 PC が CAS を獲得する前の値）を
-                    // そのまま書き戻して当月のロックを巻き戻す。
-                    // 保守用のキー（last_backup_success_at / last_backup_machine / last_vacuum_machine）も
-                    // 同じ理由で一括保存に載せない。集合は SettingsMaintenanceKeyConventionTests が固定する。
-
-                    // Issue #2305: ウィンドウの位置・サイズ（window_*）はここで書かない。設定画面で編集しない値で、
-                    // 終了時に SaveMainWindowSettingsAsync だけが書く。以前は終了時の保存がキャッシュ由来の
-                    // AppSettings を丸ごとこのメソッドへ渡しており、共有モードで他 PC が変えた設定（部署種別・
-                    // 残額警告など）を古い値へ巻き戻していた。設定画面の保存も既定値の MainWindowSettings を渡すため、
-                    // 載せたままだと window_maximized を false で上書きしていた（SET 句は編集する列に限る。#1726）。
-
-                    // 音声モード設定を保存
-                    success &= await SetAsync(KeySoundMode, SoundModeToString(settings.SoundMode), scope).ConfigureAwait(false);
-
-                    // トースト位置設定を保存
-                    success &= await SetAsync(KeyToastPosition, ToastPositionToString(settings.ToastPosition), scope).ConfigureAwait(false);
-
-                    // 部署種別設定を保存
-                    success &= await SetAsync(KeyDepartmentType, DepartmentTypeToString(settings.DepartmentType), scope).ConfigureAwait(false);
-
-                    // バス停入力スキップ設定を保存
-                    success &= await SetAsync(KeySkipBusStopInputOnReturn, settings.SkipBusStopInputOnReturn.ToString().ToLowerInvariant(), scope).ConfigureAwait(false);
-
-                    // 同行者数入力スキップ設定を保存（Issue #1906）
-                    success &= await SetAsync(KeySkipCompanionCountInputOnReturn, settings.SkipCompanionCountInputOnReturn.ToString().ToLowerInvariant(), scope).ConfigureAwait(false);
-
-                    // 同行者数入力の自動クローズ秒数を保存（Issue #2009）
-                    success &= await SetAsync(KeyCompanionCountInputTimeoutSeconds, settings.CompanionCountInputTimeoutSeconds.ToString(CultureInfo.InvariantCulture), scope).ConfigureAwait(false);
-
-                    // 長期未返却のしきい値を保存（Issue #2152）
-                    success &= await SetAsync(KeyLongTermUnreturnedDays, settings.LongTermUnreturnedDays.ToString(CultureInfo.InvariantCulture), scope).ConfigureAwait(false);
-
-                    // 返却時の利用履歴自動表示（返却確認）を保存（Issue #1907）
-                    success &= await SetAsync(KeyShowHistoryOnReturn, settings.ShowHistoryOnReturn.ToString().ToLowerInvariant(), scope).ConfigureAwait(false);
-
-                    // 帳票出力先フォルダ設定を保存
-                    success &= await SetAsync(KeyReportOutputFolder, settings.ReportOutputFolder ?? string.Empty, scope).ConfigureAwait(false);
+                    foreach (var pair in values)
+                    {
+                        success &= await SetAsync(pair.Key, pair.Value, scope).ConfigureAwait(false);
+                    }
 
                     scope.Commit();
                 }

@@ -1,4 +1,6 @@
 using System;
+using System.Collections.Generic;
+using System.Linq;
 using System.Threading.Tasks;
 using FluentAssertions;
 using ICCardManager.Common;
@@ -111,7 +113,7 @@ public class SettingsViewModelFreshLoadTests : IDisposable
         viewModel.WarningBalance = 5000;
         await viewModel.SaveAsync();
 
-        repository.Verify(r => r.SaveAppSettingsAsync(It.IsAny<AppSettings>()), Times.Never,
+        repository.Verify(r => r.SaveAppSettingsAsync(It.IsAny<AppSettings>(), It.IsAny<IReadOnlyCollection<string>>()), Times.Never,
             "読み込みに失敗した画面の既定値（部署種別は市長事務部局など）を保存しない");
         viewModel.IsSaved.Should().BeFalse("ダイアログを閉じない");
         viewModel.IsSettingsLoadFailed.Should().BeTrue();
@@ -131,7 +133,7 @@ public class SettingsViewModelFreshLoadTests : IDisposable
             WarningBalance = 3000,
         });
         // WPF 依存の文字サイズの反映を避けるため false を返す（SettingsViewModelTests と同じ）
-        repository.Setup(r => r.SaveAppSettingsAsync(It.IsAny<AppSettings>())).ReturnsAsync(false);
+        repository.Setup(r => r.SaveAppSettingsAsync(It.IsAny<AppSettings>(), It.IsAny<IReadOnlyCollection<string>>())).ReturnsAsync(false);
         var viewModel = CreateViewModel(repository.Object);
 
         await viewModel.LoadSettingsAsync();
@@ -141,7 +143,8 @@ public class SettingsViewModelFreshLoadTests : IDisposable
         await viewModel.SaveAsync();
 
         repository.Verify(r => r.SaveAppSettingsAsync(It.Is<AppSettings>(s =>
-            s.WarningBalance == 5000 && s.DepartmentType == DepartmentType.EnterpriseAccount)), Times.Once,
+            s.WarningBalance == 5000 && s.DepartmentType == DepartmentType.EnterpriseAccount),
+            It.Is<IReadOnlyCollection<string>>(k => k.Count == 1 && k.Contains("warning_balance"))), Times.Once,
             "読み込んだ部署種別を保ったまま、変えた残額警告を保存する");
     }
 
@@ -163,7 +166,7 @@ public class SettingsViewModelFreshLoadTests : IDisposable
         viewModel.WarningBalance = 5000;
         await viewModel.SaveAsync();
 
-        repository.Verify(r => r.SaveAppSettingsAsync(It.IsAny<AppSettings>()), Times.Never,
+        repository.Verify(r => r.SaveAppSettingsAsync(It.IsAny<AppSettings>(), It.IsAny<IReadOnlyCollection<string>>()), Times.Never,
             "読み込み前の既定値で全項目を書かない");
         viewModel.IsSaved.Should().BeFalse("ダイアログを閉じない");
         viewModel.StatusMessage.Should().Be(SettingsViewModel.SettingsNotLoadedMessage);
@@ -217,7 +220,7 @@ public class SettingsViewModelFreshLoadTests : IDisposable
 
         viewModel.CanSaveSettings.Should().BeFalse("前回の成功の印を残さない");
         await viewModel.SaveAsync();
-        repository.Verify(r => r.SaveAppSettingsAsync(It.IsAny<AppSettings>()), Times.Never);
+        repository.Verify(r => r.SaveAppSettingsAsync(It.IsAny<AppSettings>(), It.IsAny<IReadOnlyCollection<string>>()), Times.Never);
     }
 
     private static SettingsViewModel CreateViewModel(ISettingsRepository repository)
