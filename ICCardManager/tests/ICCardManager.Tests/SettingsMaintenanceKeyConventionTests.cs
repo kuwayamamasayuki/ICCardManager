@@ -292,6 +292,136 @@ public class SettingsMaintenanceKeyConventionTests
         => BulkSaveCall.Matches(code).Count + (selfCalls ? SelfBulkSaveCall.Matches(code).Count : 0);
 
     /// <summary>
+    /// Issue #2388（レビュー 3 回目）: 本番コードに、全項目を書く 1 引数の <c>SaveAppSettingsAsync(AppSettings)</c> の呼び出しが無いこと。
+    /// </summary>
+    /// <remarks>
+    /// 上の「一括保存を呼ぶ本番コードは設定画面だけ」は両方のオーバーロードを数え、<c>SettingsViewModel.cs</c> の呼び出しを許すため、
+    /// 設定画面の別のメソッドが 1 引数の版を呼んでも緑になる。1 引数の版は画面の全項目を書き、画面を開いている間に他の PC が変えた
+    /// 項目を巻き戻す（#2388）。引数の数で区別し、メソッドグループ（括弧の無い参照。どちらの版か区別できない）も違反として数える。
+    /// </remarks>
+    [Fact]
+    public void 本番コードは全項目を書く1引数の保存を呼ばないこと()
+    {
+        var violations = ProductionSourceFiles.CSharp
+            .Where(f => CountSingleArgumentBulkSaveCalls(f.CodeOnly, selfCalls: f.Name == RepositoryFileName) > 0)
+            .Select(f => f.Name)
+            .ToList();
+
+        violations.Should().BeEmpty(
+            "1 引数の SaveAppSettingsAsync は渡された値をすべて書く。設定画面は変えた項目のキーだけを渡す（Issue #2388）");
+    }
+
+    /// <summary>
+    /// 検査ロジック自体をサンプル入力で固定する（1 引数の呼び出し・メソッドグループを数え、2 引数の呼び出しと定義は数えない）。
+    /// </summary>
+    [Theory]
+    [InlineData("var ok = await _settingsRepository.SaveAppSettingsAsync(settings);", false, 1)]
+    [InlineData("await Task.Run(() => _repo.SaveAppSettingsAsync(new AppSettings { A = f(1, 2) }));", false, 1)]
+    [InlineData("var f = _repo?.SaveAppSettingsAsync;", false, 1)]
+    [InlineData("await _repo\n    .SaveAppSettingsAsync(s);", false, 1)]
+    [InlineData("await Task.Run(() => _settingsRepository.SaveAppSettingsAsync(settings, changedKeys));", false, 0)]
+    [InlineData("await _repo.SaveAppSettingsAsync(Build(a, b), new[] { \"x\", \"y\" });", false, 0)]
+    [InlineData("public async Task<bool> SaveAppSettingsAsync(AppSettings settings)", true, 0)]
+    [InlineData("success = await SaveAppSettingsAsync(settings).ConfigureAwait(false);", true, 1)]
+    [InlineData("return await SaveAppSettingsAsync(settings, keys).ConfigureAwait(false);", true, 0)]
+    [InlineData("await _repo.SaveAppSettingsAsync(items.First(x => x.A >= 1), keys);", false, 0)]
+    [InlineData("await _repo.SaveAppSettingsAsync(Build(new Dictionary<string, int>()));", false, 1)]
+    public void 一引数の一括保存の検出は引数の数で区別すること(string code, bool selfCalls, int expected)
+    {
+        CountSingleArgumentBulkSaveCalls(code, selfCalls).Should().Be(expected);
+    }
+
+    private static int CountSingleArgumentBulkSaveCalls(string code, bool selfCalls = false)
+    {
+        var matches = BulkSaveCall.Matches(code).Cast<Match>()
+            .Select(m => m.Index + m.Length)
+            .Concat(selfCalls
+                ? SelfBulkSaveCall.Matches(code).Cast<Match>().Select(m => m.Index + m.Value.IndexOf("SaveAppSettingsAsync", StringComparison.Ordinal) + "SaveAppSettingsAsync".Length)
+                : Enumerable.Empty<int>());
+
+        return matches.Count(end => CountArguments(code, end) is null or 1);
+    }
+
+    /// <summary>
+    /// 名前の直後の引数リストの引数の数を返す。括弧が続かない（メソッドグループ）なら null。
+    /// </summary>
+    private static int? CountArguments(string code, int afterName)
+    {
+        var i = afterName;
+        while (i < code.Length && char.IsWhiteSpace(code[i]))
+        {
+            i++;
+        }
+
+        if (i >= code.Length || code[i] != '(')
+        {
+            return null;
+        }
+
+        var depth = 0;
+        var commas = 0;
+        var empty = true;
+        var inString = false;
+        for (var k = i + 1; k < code.Length; k++)
+        {
+            var c = code[k];
+            if (inString)
+            {
+                if (c == '\\')
+                {
+                    k++;
+                }
+                else if (c == '"')
+                {
+                    inString = false;
+                }
+                continue;
+            }
+
+            switch (c)
+            {
+                case '>' when code[k - 1] == '=' || (k + 1 < code.Length && code[k + 1] == '='):
+                    // ラムダの => と比較の >= は型引数の括弧ではない
+                    empty = false;
+                    break;
+                case '<' when k + 1 < code.Length && code[k + 1] == '=':
+                    empty = false;
+                    break;
+                case '"':
+                    inString = true;
+                    empty = false;
+                    break;
+                case '(':
+                case '[':
+                case '{':
+                case '<':
+                    depth++;
+                    empty = false;
+                    break;
+                case ')' when depth == 0:
+                    return empty ? 0 : commas + 1;
+                case ')':
+                case ']':
+                case '}':
+                case '>':
+                    depth--;
+                    break;
+                case ',' when depth == 0:
+                    commas++;
+                    break;
+                default:
+                    if (!char.IsWhiteSpace(c))
+                    {
+                        empty = false;
+                    }
+                    break;
+            }
+        }
+
+        return null;
+    }
+
+    /// <summary>
     /// 対の表明: CAS 経路は <c>last_vacuum_date</c> を<b>実際に書いている</b>こと。
     /// これが無いと、書き込みを両方から消した実装でも上の 2 件は緑になる。
     /// </summary>
