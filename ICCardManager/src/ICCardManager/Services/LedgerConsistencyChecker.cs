@@ -57,6 +57,8 @@ namespace ICCardManager.Services
             // 3/1〜4/30 のように年度の初日より前から始まる範囲では導入行がチェーンの途中に来て今も報告されていた（#2437）。
             // 切る日は PaperCarryoverPolicy.GetChainRestartDates が決める。開始日の年度は履歴画面・帳票と同じ
             // PeriodOpensWithFiscalYearStartCarryover、後の年度は HasFiscalYearStartCarryoverRecord（#1763）。
+            // Issue #2441: 年度途中で導入したカードの導入行「○月から繰越」（繰越月の翌月 1 日付け。登録日より後になり得る）の手前でも
+            // 同じく切る。導入行より前の日付の返却の利用の行・手入力・CSV の行・貸出中レコードから続けて検査しない。
             // 既知の差: 4/1 から検査する場合でも、導入行を摘要で認識できない（#2371）カードでは、履歴は貸出中を除いた
             // 前年度繰越（GetCarryoverBalanceAsync）をシードにし、ここは貸出中を含む値を使う（本体の母集団に合わせる）。
             var periodLedgers = (await _ledgerRepository.GetByDateRangeAsync(cardIdm, fromDate, toDate).ConfigureAwait(false))
@@ -111,7 +113,7 @@ namespace ICCardManager.Services
         }
 
         /// <summary>
-        /// Issue #2437: 期間の台帳を、チェーンが始まり直す日（導入行「前年度より繰越」の日）の手前で分ける。
+        /// Issue #2437 / #2441: 期間の台帳を、チェーンが始まり直す日（導入行「前年度より繰越」「○月から繰越」の日）の手前で分ける。
         /// 先頭の要素は最初の導入行より前の行（無ければ空）。
         /// </summary>
         internal static List<List<Ledger>> SplitAtChainRestarts(
@@ -147,7 +149,7 @@ namespace ICCardManager.Services
         /// 残高チェーンの整合性をチェック（内部ロジック）。チェーンごとに先頭の行を始点とし、チェーンをまたいで検査しない。
         /// </summary>
         /// <param name="chains">
-        /// 時系列順に並べたチェーン。Issue #2437: 導入行「前年度より繰越」から始まり直すチェーンは、
+        /// 時系列順に並べたチェーン。Issue #2437 / #2441: 導入行「前年度より繰越」「○月から繰越」から始まり直すチェーンは、
         /// その前の行（導入行より前の日付の行）の残高から続けて検査しない（<see cref="SplitAtChainRestarts"/>）
         /// </param>
         /// <param name="cardIdm">カードIDm</param>
@@ -223,10 +225,11 @@ namespace ICCardManager.Services
         /// 裏付けの形は 2 つある（コードレビューで検出）。
         /// <list type="bullet">
         /// <item>直前の行の残高 ＋ 受入 − 払出 ＝ 先頭の残高（3/31「次年度へ繰越」で残高 0 にしてから 4/1「前年度より繰越」で受け入れる組）</item>
-        /// <item>先頭が受入欄に残高を書く導入行（<see cref="Ledger.InitialRecordCarriesIncome"/>。前年度より繰越・新規購入）で、
-        /// 直前の行の残高 ＝ 先頭の残高。導入行の受入は新しいお金ではなく残高の書き直しなので、直前の行（3/25 の手入力の行
-        /// 残高 5,000 など）から引き継いだ残高と同じなら正しい。上の式だけだと 5,000 ＋ 5,000 ≠ 5,000 で裏付けが無いことになり、
-        /// 直後の行の打ち間違いに対して正しい導入行を書き直す訂正案を出していた</item>
+        /// <item>先頭が導入行（<see cref="Ledger.IsInitialRecord"/>）で、直前の行の残高 ＝ 先頭の残高。導入行の受入は新しいお金ではなく
+        /// 残高の書き直しなので、直前の行（3/25 の手入力の行 残高 5,000 など）から引き継いだ残高と同じなら正しい。上の式だけだと
+        /// 5,000 ＋ 5,000 ≠ 5,000 で裏付けが無いことになり、直後の行の打ち間違いに対して正しい導入行を書き直す訂正案を出していた。
+        /// 受入欄に残高を書く導入行（前年度より繰越・新規購入）に加え、「○月から繰越」も含める（Issue #2441）。現行の受入 0 の行は
+        /// 上の式と同じ判定になるが、#1219 より前の登録・CSV の取り込みで受入＝残高の行が残り得るため</item>
         /// </list>
         /// 限界: 直前の行の残高が、導入行の誤った残高と偶然一致する場合も裏付けありと判定する（訂正案は出ず、直後の行が強調される）。
         /// </remarks>
@@ -242,7 +245,7 @@ namespace ICCardManager.Services
                 return true;
             }
 
-            return Ledger.InitialRecordCarriesIncome(chainHead.Summary)
+            return chainHead.IsInitialRecord
                 && precedingSettledRow.Balance == chainHead.Balance;
         }
 

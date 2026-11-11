@@ -449,5 +449,47 @@ public class LedgerConsistencyCheckerTests
             .Should().BeFalse("受入で残高を書き直すのは導入行だけ。チャージの受入は新しいお金なので 5,000 ＋ 1,000 ≠ 5,000 は裏付けなし");
     }
 
+    /// <summary>
+    /// Issue #2441: 導入行「○月から繰越」の日も、チェーンを始め直す日として返す（年度の先頭でなくても）。
+    /// 期間の外の導入行・利用の行の日は返さない。「前年度より繰越」の日と合わせて古い順に返す
+    /// </summary>
+    [Fact]
+    public void GetChainRestartDates_ReturnsMidYearCarryoverDates()
+    {
+        var february = Issue2437Ledger(1, new DateTime(2027, 2, 25), "鉄道（手入力）", 0, 0, 4790);
+        var midYear = Issue2437Ledger(2, new DateTime(2027, 3, 1), SummaryGenerator.GetMidYearCarryoverSummary(2), 0, 0, 5000);
+        var usage = Issue2437Ledger(3, new DateTime(2027, 3, 5), "鉄道（天神～博多）", 0, 210, 4790);
+        var nextYearIntro = Issue2437Ledger(4, new DateTime(2027, 4, 1), SummaryGenerator.GetCarryoverFromPreviousYearSummary(), 4790, 0, 4790);
+
+        PaperCarryoverPolicy.GetChainRestartDates(
+                new DateTime(2000, 1, 1), new[] { nextYearIntro, february, midYear, usage }, Array.Empty<Ledger>())
+            .Should().Equal(new[] { new DateTime(2027, 3, 1), new DateTime(2027, 4, 1) },
+                "○月から繰越は年度の先頭の行でなくても導入行。4/1 は年度の先頭の「前年度より繰越」");
+        PaperCarryoverPolicy.GetChainRestartDates(new DateTime(2027, 2, 1), new[] { february, midYear, usage }, new[] { february })
+            .Should().Equal(new[] { new DateTime(2027, 3, 1) }, "表示期間でも全期間と同じ日で切る");
+        PaperCarryoverPolicy.GetChainRestartDates(new DateTime(2027, 3, 2), new[] { usage }, new[] { february })
+            .Should().BeEmpty("導入行より後から始まる期間は、期間より前の残高から続ける");
+    }
+
+    /// <summary>
+    /// Issue #2441: 「○月から繰越」の導入行も、直前の帳簿の行の残高と同じ残高なら裏付けあり。受入 0（現行）は直前の残高 ＋ 0 で、
+    /// 受入＝残高（#1219 より前）は受入が残高の書き直しなので、どちらも直前の残高 ＝ 導入行の残高で判定する
+    /// </summary>
+    [Fact]
+    public void IsCorroboratedByPrecedingSettledRow_MidYearCarryover()
+    {
+        var manualFebruary = Issue2437Ledger(1, new DateTime(2027, 2, 25), "鉄道（手入力）", 0, 0, 5000);
+        var summary = SummaryGenerator.GetMidYearCarryoverSummary(2);
+        var current = Issue2437Ledger(2, new DateTime(2027, 3, 1), summary, 0, 0, 5000);
+        var legacy = Issue2437Ledger(3, new DateTime(2027, 3, 1), summary, 5000, 0, 5000);
+        var wrongLegacy = Issue2437Ledger(4, new DateTime(2027, 3, 1), summary, 6000, 0, 6000);
+
+        LedgerConsistencyChecker.IsCorroboratedByPrecedingSettledRow(manualFebruary, current).Should().BeTrue();
+        LedgerConsistencyChecker.IsCorroboratedByPrecedingSettledRow(manualFebruary, legacy)
+            .Should().BeTrue("#1219 より前の受入＝残高の行も、受入は残高の書き直しなので直前の残高 5,000 と同じなら裏付けあり");
+        LedgerConsistencyChecker.IsCorroboratedByPrecedingSettledRow(manualFebruary, wrongLegacy)
+            .Should().BeFalse("直前の残高 5,000 と異なる 6,000 は裏付けなし");
+    }
+
     #endregion
 }

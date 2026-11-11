@@ -143,7 +143,8 @@ namespace ICCardManager.Common
         }
 
         /// <summary>
-        /// 期間の中で、残高チェーンが導入行「前年度より繰越」から始まり直す日（年度の台帳の先頭の日）を古い順に返す。
+        /// 期間の中で、残高チェーンが導入行から始まり直す日を古い順に返す。導入行は、年度の台帳の先頭にある「前年度より繰越」と、
+        /// 「○月から繰越」（年度途中の導入。Issue #2441）。
         /// </summary>
         /// <param name="periodStart">期間の開始日</param>
         /// <param name="periodLedgers">期間の台帳（開始日以降の行。貸出中レコードを含んでよい。判定では数えない）</param>
@@ -163,6 +164,14 @@ namespace ICCardManager.Common
         /// <see cref="HasFiscalYearStartCarryoverRecord"/> を判定する。表示期間（開始日が導入行以前）の検査も
         /// 全期間の検査も、判定はこの 2 つに寄せる（#1763「同じ判断を配らない」）。
         /// </para>
+        /// <para>
+        /// Issue #2441: 年度途中で導入したカードの導入行「○月から繰越」は繰越月の翌月 1 日付けで保存され
+        /// （<see cref="SummaryGenerator.GetMidYearCarryoverDate"/>）、登録日より後の日付になり得るので、その手前にも
+        /// 返却の利用の行・手入力・CSV の行・貸出中レコードが入る。「○月から繰越」は年度の途中にしか現れない摘要なので
+        /// 年度の先頭かどうかは問わず、期間の台帳にある帳簿の行（貸出中レコードを除く）の日をすべて返す。
+        /// 期間の外の行は数えないので、全期間と表示期間で同じ日になる。台帳の途中に手入力された「○月から繰越」も始点になるが、
+        /// その残高の誤りは直後の行で検出され、#2007 の訂正案がその行を指す。
+        /// </para>
         /// </remarks>
         public static IReadOnlyList<DateTime> GetChainRestartDates(
             DateTime periodStart,
@@ -170,6 +179,7 @@ namespace ICCardManager.Common
             IEnumerable<Ledger> periodStartFiscalYearFirstDayLedgers)
         {
             var periodStartFiscalYear = FiscalYearHelper.GetFiscalYear(periodStart);
+            var ledgers = periodLedgers.ToList();
             var dates = new List<DateTime>();
 
             var firstDayLedgers = periodStartFiscalYearFirstDayLedgers.ToList();
@@ -178,7 +188,7 @@ namespace ICCardManager.Common
                 dates.Add(firstDayLedgers.Where(l => !l.IsLentRecord).Min(l => l.Date.Date));
             }
 
-            foreach (var fiscalYearLedgers in periodLedgers
+            foreach (var fiscalYearLedgers in ledgers
                 .GroupBy(l => FiscalYearHelper.GetFiscalYear(l.Date))
                 .Where(g => g.Key > periodStartFiscalYear)
                 .OrderBy(g => g.Key))
@@ -189,7 +199,11 @@ namespace ICCardManager.Common
                 }
             }
 
-            return dates;
+            dates.AddRange(ledgers
+                .Where(l => !l.IsLentRecord && SummaryGenerator.IsMidYearCarryoverSummary(l.Summary))
+                .Select(l => l.Date.Date));
+
+            return dates.Distinct().OrderBy(d => d).ToList();
         }
     }
 }
