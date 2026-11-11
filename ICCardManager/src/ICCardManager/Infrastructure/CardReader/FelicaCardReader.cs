@@ -178,8 +178,7 @@ namespace ICCardManager.Infrastructure.CardReader
                     // felicalib.dll の存在確認
                     if (!IsFelicaLibLoaded())
                     {
-                        var ex = new InvalidOperationException(
-                            "felicalib.dll が見つからないか、Sony NFCポートソフトウェアがインストールされていません。");
+                        var ex = new InvalidOperationException(FelicaLibUnavailableMessage);
                         SetConnectionStateForceNotify(CardReaderConnectionState.Disconnected, ex.Message);
                         throw ex;
                     }
@@ -956,6 +955,18 @@ namespace ICCardManager.Infrastructure.CardReader
         /// </remarks>
         internal const string ReaderNotFoundMessage =
             "PaSoRi が見つかりません。USB で接続してください（接続すると自動で認識します）。";
+
+        /// <summary>
+        /// 起動時に felicalib.dll を読み込めなかったときの案内（Issue #2377）。
+        /// </summary>
+        /// <remarks>
+        /// メイン画面の警告エリアに「カードリーダー切断: 」に続けて表示される。起動時の「初期化エラー」ダイアログを
+        /// やめたため、利用者への案内はこの警告だけになる。この経路では接続の監視（ヘルスチェック）を始めないので、
+        /// <see cref="ReaderNotFoundMessage"/> と違って自動では認識しない — 行動指示はアプリの再起動にする。
+        /// </remarks>
+        internal const string FelicaLibUnavailableMessage =
+            "felicalib.dll が見つからないか、Sony NFCポートソフトウェアがインストールされていません。" +
+            "Sony NFCポートソフトウェアをインストールしてから、アプリを再起動してください。";
 
         /// <summary>
         /// ヘルスチェック 1 回の結果として行う処理（Issue #2298）。

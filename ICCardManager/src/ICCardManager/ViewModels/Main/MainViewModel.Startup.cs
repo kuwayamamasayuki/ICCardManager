@@ -43,7 +43,7 @@ public partial class MainViewModel
     /// <item><description>カード残高ダッシュボードの更新</description></item>
     /// <item><description>職員証スキップ設定の読み込み</description></item>
     /// <item><description>起動時チェック・更新通知（バックグラウンド）と共有モードの接続監視の開始</description></item>
-    /// <item><description>カードリーダー監視の開始（失敗し得るので最後。Issue #2327）</description></item>
+    /// <item><description>カードリーダー監視の開始（失敗し得るので最後。Issue #2327。失敗しても起動を続ける。Issue #2377）</description></item>
     /// </list>
     /// </remarks>
     /// <returns>初期化処理のTask</returns>
@@ -86,12 +86,43 @@ public partial class MainViewModel
             }
 
             // カード読み取り開始（必ず最後に置く）
-            // Issue #2327: 開始は felicalib.dll はあるが Sony NFC ポートソフトウェアが無い等の環境で例外になり、
-            // 例外は MainWindow_Loaded の「初期化エラー」表示まで抜ける。以前はこの行が上の起動時チェック・
-            // 更新通知・共有モードの接続監視より前にあり、例外でそれらが一度も始まらなかった。
-            // カードリーダーと無関係な処理はこの行より前に置くこと（失敗の理由は警告エリアにも出る:
-            // FelicaCardReader が Disconnected の状態と Error を通知する）。
+            // Issue #2327: 開始は felicalib.dll を読み込めない等の環境で失敗する。以前はこの行が上の起動時チェック・
+            // 更新通知・共有モードの接続監視より前にあり、失敗でそれらが一度も始まらなかった。
+            // カードリーダーと無関係な処理はこの行より前に置くこと（カードリーダー以外の例外は従来どおり
+            // MainWindow_Loaded の「初期化エラー」まで抜けるため、後ろに置くと始まらない）。
+            await StartCardReadingOnStartupAsync();
+        }
+    }
+
+    /// <summary>
+    /// 起動時にカード読み取りを開始する（Issue #2377）。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// カードリーダーを使えなくても、履歴の閲覧・帳票の作成などは使える。開始の失敗（<see cref="CardReaderException"/>）は
+    /// 起動処理で受け止め、メイン画面の「初期化エラー」ダイアログ（<c>MainWindow_Loaded</c>）までは抜けさせない。
+    /// 利用者への案内は警告エリアだけで行う: カードリーダーは例外を投げる前に Disconnected の接続状態と
+    /// <see cref="ICardReader.Error"/> を通知する（<c>FelicaCardReader.StartReadingAsync</c>）ため、
+    /// ここで警告を足すと同じ失敗が 2 行並ぶ。
+    /// </para>
+    /// <para>
+    /// それ以外の例外（カードリーダーの契約外の失敗）は従来どおり「初期化エラー」まで抜けさせる。
+    /// 例外の詳細（スタックトレース）は <c>FelicaCardReader</c> が Error で記録済みなので、ここでは
+    /// 起動を続けたことだけを Warning で残す（ログを二重に出さない。error-messages-implementation.md #1991）。
+    /// </para>
+    /// </remarks>
+    private async Task StartCardReadingOnStartupAsync()
+    {
+        try
+        {
             await _cardReader.StartReadingAsync();
+        }
+        catch (CardReaderException ex)
+        {
+            _logger?.LogWarning(
+                "起動時にカードリーダーの読み取りを開始できませんでした（ErrorCode={ErrorCode}, 理由={Reason}）。" +
+                "カードリーダーを使わない機能は使えるため起動を続けます（案内は警告エリアに表示）",
+                ex.ErrorCode, ex.Message);
         }
     }
 
