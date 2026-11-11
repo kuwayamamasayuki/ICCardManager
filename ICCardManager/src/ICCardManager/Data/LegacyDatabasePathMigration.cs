@@ -14,7 +14,10 @@ namespace ICCardManager.Data
         /// <summary>appsettings.json に値が無い（通常の状態）。何もしない</summary>
         NoLegacyValue,
 
-        /// <summary>database_config.txt が空（無い）だったので、appsettings.json の値を書き移した</summary>
+        /// <summary>
+        /// database_config.txt が空（無い）だったので、appsettings.json の値を書き移した。
+        /// database_config.txt の値が形式不正で appsettings.json の値が有効だったため上書きして移した場合も、これになる
+        /// </summary>
         Migrated,
 
         /// <summary>

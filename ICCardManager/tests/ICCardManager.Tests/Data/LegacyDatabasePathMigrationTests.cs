@@ -146,6 +146,26 @@ public class LegacyDatabasePathMigrationTests : IDisposable
             "上書きで失われる値を残す: " + _logger.FormatEntries());
     }
 
+    /// <summary>
+    /// 上書きして移すのは移行の判断を済ませる前（印が無い）だけ（レビュー 2 回目で追加）。移した後に設定画面以外で
+    /// database_config.txt が形式不正になっても、appsettings.json の値へ戻さない（印の分岐に上書きの判定を入れる・
+    /// 上書きの判定を印の確認より前へ動かす変更を検出する）。
+    /// </summary>
+    [Fact]
+    public void 印がある状態でdatabase_config_txtが形式不正になっても上書きせず_解決が既定で開いて警告すること()
+    {
+        Run(UncPath);
+        AppConfigFiles.Write(_configPath, RelativePath);
+
+        var second = Run(UncPath);
+
+        second.Outcome.Should().Be(LegacyDatabasePathMigrationOutcome.AlreadyDecided);
+        AppConfigFiles.Read(_configPath).Should().Be(RelativePath, "移行の判断を済ませた後は database_config.txt を書き換えない");
+        var resolution = DatabaseLocationResolver.Resolve(second.EffectiveConfigFileValue);
+        resolution.Path.Should().BeNull("既定で開く");
+        resolution.Rejected.Should().ContainSingle().Which.Value.Should().Be(RelativePath, "起動後の警告で再設定を案内する");
+    }
+
     [Fact]
     public void database_config_txtもappsettingsも形式不正なら移さず_解決が既定で開いて警告すること()
     {
