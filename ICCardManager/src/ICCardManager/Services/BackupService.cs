@@ -577,6 +577,10 @@ namespace ICCardManager.Services
                         return false;
                     }
 
+                    // Issue #2379: 置き換える一時コピーの採番（sqlite_sequence）を、リストア前の DB の値より戻さない。
+                    // 現在の DB を退避する前（何も書き換えていない段）に、一時コピーだけを書き換える。
+                    CarryForwardAutoincrementSequences(targetPath, stagedCopyPath);
+
                     // 現在のDBを退避
                     if (File.Exists(targetPath))
                     {
@@ -660,6 +664,188 @@ namespace ICCardManager.Services
                     backupFilePath);
                 return false;
             }
+        }
+
+        /// <summary>
+        /// 置き換える一時コピーの採番（<c>sqlite_sequence</c>）を、リストア前の DB の値より戻さない（Issue #2379）
+        /// </summary>
+        /// <param name="currentDatabasePath">リストア前の（これから置き換える）DB のパス</param>
+        /// <param name="stagedCopyPath">検証に合格した一時コピーのパス（これで置き換える）</param>
+        /// <remarks>
+        /// <para>
+        /// <c>AUTOINCREMENT</c> の表は、使った最大の ID を <c>sqlite_sequence</c> に持ち、削除した値も再利用しない。
+        /// ところがリストアは <c>sqlite_sequence</c> ごとバックアップの時点へ巻き戻すため、リストア後に作られる行が、
+        /// リストア前に使われていた ID（バックアップの後に作られ、リストアで消えた行の ID）を再び使っていた。
+        /// リストア前に出力した利用履歴 CSV・利用履歴詳細 CSV のその ID の行は別の履歴を指し、同じカードなら
+        /// 「更新」・明細の置き換えとして検証を通って、6 年保存の台帳の行を別の利用の内容で書き換え得た。
+        /// </para>
+        /// <para>
+        /// 一時コピーの各表の <c>seq</c> を <c>max(リストア前の seq, 一時コピーの seq)</c> へ揃える。
+        /// 対象は、リストア前の DB の <c>sqlite_sequence</c> に行があり、一時コピーにも同じ名前の表がある、すべての表
+        /// （現在は <c>ledger</c>・<c>operation_log</c>・<c>ledger_merge_history</c>）。
+        /// <c>ledger.id</c> は利用履歴・利用履歴詳細の CSV の「ID」として外へ出て、取り込みで照合のキーになる（本件の主対象）。
+        /// <c>operation_log.id</c> は操作ログの Excel 出力（監査の提出物）に載るため、リストアの前と後で同じ番号が
+        /// 別の記録を指さないようにする。<c>ledger_merge_history.id</c> は外へ出ないが、進めても害は無く、
+        /// 表ごとの許可リストを持つと AUTOINCREMENT の表を足したときに漏れるため区別しない。
+        /// <c>ledger_detail.id</c> は <c>AUTOINCREMENT</c> を持たず（Migration_011 が意図して付けない）、
+        /// <c>sqlite_sequence</c> の対象外で、外へも出ない（利用履歴詳細 CSV の「ID」は親の <c>ledger.id</c>）。
+        /// </para>
+        /// <para>
+        /// <c>sqlite_sequence</c> に行が無い表（一時コピーの側で一度も INSERT されていない）は行を足す。
+        /// 一時コピーに <c>sqlite_sequence</c> 自体が無い（AUTOINCREMENT の表が無い）・表が無い（古い版のバックアップ）ときは触れない。
+        /// リストア前の DB に行が無い表は、戻す値が無いので触れない。
+        /// </para>
+        /// <para>
+        /// 書き換えるのは一時コピーだけで、リストア前の DB は読むだけ。退避・置き換えより前に済ませるため、
+        /// 置き換えに失敗して元の DB を戻す経路（Issue #2106）には影響しない。一時コピーへの書き込みは 1 つのトランザクションで行い、
+        /// 失敗すれば一時コピーは検証した内容のまま残る。共有モードでは呼び出し元が他の PC の接続が無いことを確かめた後に呼ぶ。
+        /// </para>
+        /// <para>
+        /// <b>読めない・書けないときはリストアを止めない</b>（Warning ログを残して従来どおり置き換える）。
+        /// リストアは DB が壊れたときの復旧手段で、壊れた DB からは採番を読めないことがある。採番を進められないことで復旧を塞ぐ害のほうが大きい。
+        /// </para>
+        /// </remarks>
+        internal void CarryForwardAutoincrementSequences(string currentDatabasePath, string stagedCopyPath)
+        {
+            if (!File.Exists(currentDatabasePath))
+            {
+                return;
+            }
+
+            Dictionary<string, long> currentSequences;
+            try
+            {
+                currentSequences = ReadAutoincrementSequences(currentDatabasePath);
+            }
+            catch (Exception ex) when (ex is SQLiteException || IsFileAccessException(ex))
+            {
+                _logger.LogWarning(ex,
+                    "リストア前のデータベースから採番（sqlite_sequence）を読めませんでした。採番を進めずにリストアを続けます" +
+                    "（リストア後に作られる行が、リストア前に使われていた ID を再び使うことがあります）: {Path}",
+                    currentDatabasePath);
+                return;
+            }
+
+            if (currentSequences.Count == 0)
+            {
+                return;
+            }
+
+            try
+            {
+                RaiseAutoincrementSequences(stagedCopyPath, currentSequences);
+            }
+            catch (Exception ex) when (ex is SQLiteException || IsFileAccessException(ex))
+            {
+                _logger.LogWarning(ex,
+                    "リストアする一時コピーの採番（sqlite_sequence）を進められませんでした。採番を進めずにリストアを続けます" +
+                    "（リストア後に作られる行が、リストア前に使われていた ID を再び使うことがあります）: {Path}",
+                    stagedCopyPath);
+            }
+        }
+
+        private static Dictionary<string, long> ReadAutoincrementSequences(string databasePath)
+        {
+            var sequences = new Dictionary<string, long>(StringComparer.Ordinal);
+            using var connection = new SQLiteConnection(DbContext.BuildConnectionString(databasePath));
+            connection.Open();
+
+            if (!HasSqliteSequence(connection, null))
+            {
+                return sequences;
+            }
+
+            using var command = connection.CreateCommand();
+            command.CommandText = "SELECT name, seq FROM sqlite_sequence";
+            using var reader = command.ExecuteReader();
+            while (reader.Read())
+            {
+                if (reader.IsDBNull(0) || reader.IsDBNull(1))
+                {
+                    continue;
+                }
+
+                var name = reader.GetString(0);
+                var seq = Convert.ToInt64(reader.GetValue(1), CultureInfo.InvariantCulture);
+                sequences[name] = sequences.TryGetValue(name, out var existing) ? Math.Max(existing, seq) : seq;
+            }
+
+            return sequences;
+        }
+
+        private void RaiseAutoincrementSequences(string stagedCopyPath, IReadOnlyDictionary<string, long> currentSequences)
+        {
+            using var connection = new SQLiteConnection(DbContext.BuildConnectionString(stagedCopyPath));
+            connection.Open();
+            using var transaction = connection.BeginTransaction();
+
+            if (!HasSqliteSequence(connection, transaction))
+            {
+                return;
+            }
+
+            var raised = new List<string>();
+            foreach (var pair in currentSequences.OrderBy(p => p.Key, StringComparer.Ordinal))
+            {
+                if (!TableExists(connection, transaction, pair.Key))
+                {
+                    continue;
+                }
+
+                long? stagedSeq;
+                using (var select = connection.CreateCommand())
+                {
+                    select.Transaction = transaction;
+                    select.CommandText = "SELECT MAX(seq) FROM sqlite_sequence WHERE name = @name";
+                    select.Parameters.AddWithValue("@name", pair.Key);
+                    var value = select.ExecuteScalar();
+                    stagedSeq = value == null || value is DBNull ? null : Convert.ToInt64(value, CultureInfo.InvariantCulture);
+                }
+
+                if (stagedSeq.HasValue && stagedSeq.Value >= pair.Value)
+                {
+                    continue;
+                }
+
+                using (var write = connection.CreateCommand())
+                {
+                    write.Transaction = transaction;
+                    write.CommandText = stagedSeq.HasValue
+                        ? "UPDATE sqlite_sequence SET seq = @seq WHERE name = @name"
+                        : "INSERT INTO sqlite_sequence (name, seq) VALUES (@name, @seq)";
+                    write.Parameters.AddWithValue("@name", pair.Key);
+                    write.Parameters.AddWithValue("@seq", pair.Value);
+                    write.ExecuteNonQuery();
+                }
+
+                raised.Add(string.Format(
+                    CultureInfo.InvariantCulture,
+                    "{0}: {1} -> {2}",
+                    pair.Key,
+                    stagedSeq.HasValue ? stagedSeq.Value.ToString(CultureInfo.InvariantCulture) : "(なし)",
+                    pair.Value));
+            }
+
+            transaction.Commit();
+
+            if (raised.Count > 0)
+            {
+                _logger.LogInformation(
+                    "リストアする一時コピーの採番を、リストア前のデータベースの値まで進めました: {Sequences}",
+                    string.Join(", ", raised));
+            }
+        }
+
+        private static bool HasSqliteSequence(SQLiteConnection connection, SQLiteTransaction? transaction)
+            => TableExists(connection, transaction, "sqlite_sequence");
+
+        private static bool TableExists(SQLiteConnection connection, SQLiteTransaction? transaction, string tableName)
+        {
+            using var command = connection.CreateCommand();
+            command.Transaction = transaction;
+            command.CommandText = "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = @name";
+            command.Parameters.AddWithValue("@name", tableName);
+            return Convert.ToInt64(command.ExecuteScalar(), CultureInfo.InvariantCulture) > 0;
         }
 
         /// <summary>
