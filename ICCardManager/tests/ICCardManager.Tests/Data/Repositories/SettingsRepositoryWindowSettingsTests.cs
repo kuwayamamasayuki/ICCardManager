@@ -19,7 +19,7 @@ namespace ICCardManager.Tests.Data.Repositories;
 /// <remarks>
 /// <para>
 /// 以前の終了時の保存は、<see cref="SettingsRepository.GetAppSettingsAsync"/>（TTL キャッシュ）で読んだ設定の
-/// ウィンドウ値だけを差し替えて一括保存（<see cref="SettingsRepository.SaveAppSettingsAsync"/>）へ丸ごと渡していた。
+/// ウィンドウ値だけを差し替えて一括保存（<see cref="SettingsRepository.SaveAppSettingsAsync(AppSettings)"/>）へ丸ごと渡していた。
 /// 共有モードでは、他の PC が設定画面で部署種別・残額警告を変えた後にキャッシュを持ったままの PC を終了すると、
 /// その PC が読んだ時点の古い値が共有 DB へ書き戻され、変更が黙って巻き戻っていた。
 /// </para>

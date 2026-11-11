@@ -180,8 +180,9 @@ public class SettingsMaintenanceKeyConventionTests
     /// 巻き戻りの実際の入口は「<c>GetAppSettingsAsync()</c>（TTL キャッシュ）で読む → 一部だけ変える → 一括保存」という呼び出し元で、
     /// 一括保存のキー集合を固定するだけでは防げない（#1997 / #2264 / #2305 と 3 度、この形の呼び出し元が原因になった）。
     /// 設定画面は画面の値から <c>new AppSettings { … }</c> を組み立てて渡すが、画面の初期値は設定の読み取り結果なので、
-    /// <b>同じ巻き戻りは設定画面の経路にも残っている</b>（開いた時点の値が古ければ、別の項目だけを変えた保存で巻き戻す）。
-    /// 開くたびに DB から読み直して窓を縮めている（<c>SettingsViewModel.LoadSettingsAsync</c>）。根本対策は別 Issue で扱う。
+    /// 全項目を書くと同じ巻き戻りが設定画面の経路にも残る（開いた時点の値が古ければ、別の項目だけを変えた保存で巻き戻す）。
+    /// Issue #2388 で、設定画面は変えた項目のキーだけを渡すオーバーロードを呼ぶようにした（下の
+    /// <see cref="設定画面の保存は変えた項目のキーだけを渡すこと"/>。この検査の正規表現は両方のオーバーロードを数える）。
     /// 新しい呼び出し元が要るときは、一括保存ではなく書くキーだけを書く専用メソッドを足すこと（<c>SaveMainWindowSettingsAsync</c> と同じ形）。
     /// </remarks>
     [Fact]
@@ -196,6 +197,50 @@ public class SettingsMaintenanceKeyConventionTests
             new[] { "SettingsViewModel.cs" },
             "一括保存は渡された値をすべて書く。キャッシュで読んだ設定を渡す呼び出し元は、" +
             "共有モードで他の PC が変えた設定を巻き戻す（Issue #2305）");
+    }
+
+    private const string PartialSaveSignatureMarker =
+        "Task<bool> SaveAppSettingsAsync(AppSettings settings, IReadOnlyCollection<string> keys)";
+
+    /// <summary>
+    /// Issue #2388: キーを指定する保存（設定画面が呼ぶ）が書けるキーは、一括保存と同じ「画面から編集する設定」だけであること。
+    /// </summary>
+    /// <remarks>
+    /// 指定したキーだけを書く経路でも、書けるキーの集合に保守用のキー・<c>backup_path</c>・<c>window_*</c> を足すと、
+    /// 呼び出し元がそれを渡したときに専用経路の条件（月ガード・認証と操作ログ）を迂回できる。
+    /// </remarks>
+    [Fact]
+    public void キーを指定する保存が書けるキーは画面から編集する設定だけであること()
+    {
+        var source = File.ReadAllText(RepositoryPath);
+        var body = ExpandWithCallees(source, PartialSaveSignatureMarker);
+
+        ExtractKeyConstants(body).Should().BeEquivalentTo(
+            ExpectedKeyConstants,
+            "キーを指定する保存も、一括保存と同じキーの集合からしか書かない（Issue #2388）");
+        foreach (var literal in MaintenanceKeyLiterals)
+        {
+            body.Should().NotContain(literal);
+        }
+    }
+
+    /// <summary>
+    /// Issue #2388: 設定画面の保存は、画面を開いたときの値と比べて変えた項目のキーだけを渡すこと（全項目を書く形に戻さない）。
+    /// </summary>
+    /// <remarks>
+    /// 挙動は <c>SettingsViewModelChangedKeysTests</c> が実 SQLite で固定する。ここでは「禁止形の不在」と「正しい形の存在」を対で見る
+    /// （1 引数の一括保存へ戻すと、画面を開いている間に他の PC が変えた項目を画面の古い値で書き戻す）。
+    /// </remarks>
+    [Fact]
+    public void 設定画面の保存は変えた項目のキーだけを渡すこと()
+    {
+        var viewModel = ProductionSourceFiles.CSharp.Single(f => f.Name == "SettingsViewModel.cs");
+        var body = TestSourceInspection.ExtractMethodBody(viewModel.CodeOnly, "private async Task SaveCoreAsync(SavePlan plan)");
+
+        body.Should().Contain("SettingsRepository.GetChangedAppSettingKeys(");
+        body.Should().Contain(".SaveAppSettingsAsync(settings, changedKeys)");
+        Regex.IsMatch(body, @"\.SaveAppSettingsAsync\(\s*\w+\s*\)").Should().BeFalse("1 引数の一括保存（全項目を書く）を呼ばない");
+        CountBulkSaveCalls(body).Should().Be(1, "前提: 保存の呼び出しは 1 か所");
     }
 
     /// <summary>

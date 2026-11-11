@@ -58,9 +58,11 @@ public class SettingsViewModelTests
             _settingsChangeServiceMock.Object);
 
         // Issue #2305（レビュー 4 回目）: 保存は設定の読み込みが成功して終わった画面からしかできない。
-        // このクラスの保存のテストは読み込みを経ずに画面の値を組み立てて保存するため、読み込み済みの状態から始める
-        // （読み込みを経るテストは LoadSettingsAsync がこの印を立て直す）
-        _viewModel.IsSettingsLoaded = true;
+        // Issue #2388: 保存は「画面を開いたときの値」と比べて変えた項目だけを書くため、印を立てるだけでなく実際に読み込む。
+        // このクラスの保存のテストは、既定値（new AppSettings()）を読み込んだ画面から始める
+        // （別の値を読み込むテストは、GetAppSettingsAsync を設定し直して LoadSettingsAsync を呼ぶ）
+        _settingsRepositoryMock.Setup(r => r.GetAppSettingsAsync()).ReturnsAsync(new AppSettings());
+        _viewModel.LoadSettingsAsync().GetAwaiter().GetResult();
     }
 
     #region 設定読み込みテスト
@@ -141,7 +143,7 @@ public class SettingsViewModelTests
 
         // Assert
         _viewModel.StatusMessage.Should().Contain("0以上");
-        _settingsRepositoryMock.Verify(r => r.SaveAppSettingsAsync(It.IsAny<AppSettings>()), Times.Never);
+        _settingsRepositoryMock.Verify(r => r.SaveAppSettingsAsync(It.IsAny<AppSettings>(), It.IsAny<IReadOnlyCollection<string>>()), Times.Never);
     }
 
     /// <summary>
@@ -162,7 +164,7 @@ public class SettingsViewModelTests
 
         // Assert
         _viewModel.StatusMessage.Should().Contain("20,000円以下");
-        _settingsRepositoryMock.Verify(r => r.SaveAppSettingsAsync(It.IsAny<AppSettings>()), Times.Never);
+        _settingsRepositoryMock.Verify(r => r.SaveAppSettingsAsync(It.IsAny<AppSettings>(), It.IsAny<IReadOnlyCollection<string>>()), Times.Never);
     }
 
     /// <summary>
@@ -179,14 +181,14 @@ public class SettingsViewModelTests
         _viewModel.WarningBalance = 0;
         _viewModel.BackupPath = "";
         _settingsRepositoryMock
-            .Setup(r => r.SaveAppSettingsAsync(It.IsAny<AppSettings>()))
+            .Setup(r => r.SaveAppSettingsAsync(It.IsAny<AppSettings>(), It.IsAny<IReadOnlyCollection<string>>()))
             .ReturnsAsync(false); // WPF依存のApplyFontSizeを回避するためfalseを返す
 
         // Act
         await _viewModel.SaveAsync();
 
         // Assert - リポジトリが正しいパラメータで呼ばれたことを検証
-        _settingsRepositoryMock.Verify(r => r.SaveAppSettingsAsync(It.Is<AppSettings>(s => s.WarningBalance == 0)), Times.Once);
+        _settingsRepositoryMock.Verify(r => r.SaveAppSettingsAsync(It.Is<AppSettings>(s => s.WarningBalance == 0), It.IsAny<IReadOnlyCollection<string>>()), Times.Once);
     }
 
     /// <summary>
@@ -212,7 +214,7 @@ public class SettingsViewModelTests
         var called = false;
         SynchronizationContext? contextInRepository = marker;
         _settingsRepositoryMock
-            .Setup(r => r.SaveAppSettingsAsync(It.IsAny<AppSettings>()))
+            .Setup(r => r.SaveAppSettingsAsync(It.IsAny<AppSettings>(), It.IsAny<IReadOnlyCollection<string>>()))
             .Callback(() =>
             {
                 called = true;
@@ -266,7 +268,7 @@ public class SettingsViewModelTests
         _viewModel.SelectedDepartmentTypeItem = _viewModel.DepartmentTypeOptions
             .First(x => x.Value == DepartmentType.EnterpriseAccount);
         _settingsRepositoryMock
-            .Setup(r => r.SaveAppSettingsAsync(It.IsAny<AppSettings>()))
+            .Setup(r => r.SaveAppSettingsAsync(It.IsAny<AppSettings>(), It.IsAny<IReadOnlyCollection<string>>()))
             .ReturnsAsync(true);
 
         // Act
@@ -295,7 +297,7 @@ public class SettingsViewModelTests
         _viewModel.SelectedDepartmentTypeItem = _viewModel.DepartmentTypeOptions
             .First(x => x.Value == DepartmentType.EnterpriseAccount);
         _settingsRepositoryMock
-            .Setup(r => r.SaveAppSettingsAsync(It.IsAny<AppSettings>()))
+            .Setup(r => r.SaveAppSettingsAsync(It.IsAny<AppSettings>(), It.IsAny<IReadOnlyCollection<string>>()))
             .ReturnsAsync(false);
 
         // Act
@@ -354,14 +356,14 @@ public class SettingsViewModelTests
         _viewModel.WarningBalance = 20000;
         _viewModel.BackupPath = "";
         _settingsRepositoryMock
-            .Setup(r => r.SaveAppSettingsAsync(It.IsAny<AppSettings>()))
+            .Setup(r => r.SaveAppSettingsAsync(It.IsAny<AppSettings>(), It.IsAny<IReadOnlyCollection<string>>()))
             .ReturnsAsync(false); // WPF依存のApplyFontSizeを回避するためfalseを返す
 
         // Act
         await _viewModel.SaveAsync();
 
         // Assert - リポジトリが正しいパラメータで呼ばれたことを検証
-        _settingsRepositoryMock.Verify(r => r.SaveAppSettingsAsync(It.Is<AppSettings>(s => s.WarningBalance == 20000)), Times.Once);
+        _settingsRepositoryMock.Verify(r => r.SaveAppSettingsAsync(It.Is<AppSettings>(s => s.WarningBalance == 20000), It.IsAny<IReadOnlyCollection<string>>()), Times.Once);
     }
 
     #endregion
@@ -392,7 +394,7 @@ public class SettingsViewModelTests
         _settingsChangeServiceMock.Setup(s => s.RequiresOperatorAuthenticationAsync()).ReturnsAsync(true);
 
         _settingsRepositoryMock
-            .Setup(r => r.SaveAppSettingsAsync(It.IsAny<AppSettings>()))
+            .Setup(r => r.SaveAppSettingsAsync(It.IsAny<AppSettings>(), It.IsAny<IReadOnlyCollection<string>>()))
             .ReturnsAsync(false); // WPF依存のApplyFontSizeを回避するためfalseを返す
 
         // Act
@@ -404,7 +406,7 @@ public class SettingsViewModelTests
         _settingsRepositoryMock.Verify(r => r.SaveAppSettingsAsync(It.Is<AppSettings>(s =>
             s.WarningBalance == 3000 &&
             s.FontSize == FontSizeOption.Large
-        )), Times.Once);
+        ), It.IsAny<IReadOnlyCollection<string>>()), Times.Once);
     }
 
     /// <summary>
@@ -416,7 +418,7 @@ public class SettingsViewModelTests
         // Arrange
         _viewModel.WarningBalance = 1000;
         _settingsRepositoryMock
-            .Setup(r => r.SaveAppSettingsAsync(It.IsAny<AppSettings>()))
+            .Setup(r => r.SaveAppSettingsAsync(It.IsAny<AppSettings>(), It.IsAny<IReadOnlyCollection<string>>()))
             .ReturnsAsync(false);
 
         // Act
@@ -598,7 +600,7 @@ public class SettingsViewModelTests
         _viewModel.SelectedSoundModeItem = _viewModel.SoundModeOptions.First(x => x.Value == SoundMode.VoiceMale);
 
         _settingsRepositoryMock
-            .Setup(r => r.SaveAppSettingsAsync(It.IsAny<AppSettings>()))
+            .Setup(r => r.SaveAppSettingsAsync(It.IsAny<AppSettings>(), It.IsAny<IReadOnlyCollection<string>>()))
             .ReturnsAsync(false); // WPF依存のApplyFontSizeを回避するためfalseを返す
 
         // Act
@@ -607,7 +609,7 @@ public class SettingsViewModelTests
         // Assert - リポジトリが正しいSoundModeで呼ばれたことを検証
         _settingsRepositoryMock.Verify(r => r.SaveAppSettingsAsync(It.Is<AppSettings>(s =>
             s.SoundMode == SoundMode.VoiceMale
-        )), Times.Once);
+        ), It.IsAny<IReadOnlyCollection<string>>()), Times.Once);
     }
 
     #endregion
@@ -652,7 +654,7 @@ public class SettingsViewModelTests
         _viewModel.SkipBusStopInputOnReturn = true;
 
         _settingsRepositoryMock
-            .Setup(r => r.SaveAppSettingsAsync(It.IsAny<AppSettings>()))
+            .Setup(r => r.SaveAppSettingsAsync(It.IsAny<AppSettings>(), It.IsAny<IReadOnlyCollection<string>>()))
             .ReturnsAsync(false); // WPF依存のApplyFontSizeを回避するためfalseを返す
 
         // Act
@@ -661,7 +663,7 @@ public class SettingsViewModelTests
         // Assert - リポジトリが正しいSkipBusStopInputOnReturnで呼ばれたことを検証
         _settingsRepositoryMock.Verify(r => r.SaveAppSettingsAsync(It.Is<AppSettings>(s =>
             s.SkipBusStopInputOnReturn == true
-        )), Times.Once);
+        ), It.IsAny<IReadOnlyCollection<string>>()), Times.Once);
     }
 
     /// <summary>
@@ -789,14 +791,14 @@ public class SettingsViewModelTests
     public async Task SaveAsync_返却時の利用履歴表示設定を保存すること()
     {
         _settingsRepositoryMock
-            .Setup(r => r.SaveAppSettingsAsync(It.IsAny<AppSettings>()))
+            .Setup(r => r.SaveAppSettingsAsync(It.IsAny<AppSettings>(), It.IsAny<IReadOnlyCollection<string>>()))
             .ReturnsAsync(false); // WPF依存のApplyFontSizeを回避するためfalseを返す
         _viewModel.ShowHistoryOnReturn = false;
 
         await _viewModel.SaveAsync();
 
         _settingsRepositoryMock.Verify(
-            r => r.SaveAppSettingsAsync(It.Is<AppSettings>(s => !s.ShowHistoryOnReturn)),
+            r => r.SaveAppSettingsAsync(It.Is<AppSettings>(s => !s.ShowHistoryOnReturn), It.IsAny<IReadOnlyCollection<string>>()),
             Times.Once);
     }
 
@@ -816,14 +818,14 @@ public class SettingsViewModelTests
     public async Task SaveAsync_同行者数入力の自動クローズ秒数を保存すること()
     {
         _settingsRepositoryMock
-            .Setup(r => r.SaveAppSettingsAsync(It.IsAny<AppSettings>()))
+            .Setup(r => r.SaveAppSettingsAsync(It.IsAny<AppSettings>(), It.IsAny<IReadOnlyCollection<string>>()))
             .ReturnsAsync(false); // WPF依存のApplyFontSizeを回避するためfalseを返す
         _viewModel.CompanionCountInputTimeoutSeconds = 45;
 
         await _viewModel.SaveAsync();
 
         _settingsRepositoryMock.Verify(
-            r => r.SaveAppSettingsAsync(It.Is<AppSettings>(s => s.CompanionCountInputTimeoutSeconds == 45)),
+            r => r.SaveAppSettingsAsync(It.Is<AppSettings>(s => s.CompanionCountInputTimeoutSeconds == 45), It.IsAny<IReadOnlyCollection<string>>()),
             Times.Once);
     }
 
@@ -837,7 +839,7 @@ public class SettingsViewModelTests
 
         await _viewModel.SaveAsync();
 
-        _settingsRepositoryMock.Verify(r => r.SaveAppSettingsAsync(It.IsAny<AppSettings>()), Times.Never);
+        _settingsRepositoryMock.Verify(r => r.SaveAppSettingsAsync(It.IsAny<AppSettings>(), It.IsAny<IReadOnlyCollection<string>>()), Times.Never);
         _viewModel.IsStatusError.Should().BeTrue();
         _viewModel.FirstErrorField.Should().Be(nameof(SettingsViewModel.CompanionCountInputTimeoutSeconds),
             "エラーの入力欄へフォーカスを移せること（#1279）");
@@ -865,7 +867,7 @@ public class SettingsViewModelTests
     public async Task SaveAsync_長期未返却のしきい値を保存すること()
     {
         _settingsRepositoryMock
-            .Setup(r => r.SaveAppSettingsAsync(It.IsAny<AppSettings>()))
+            .Setup(r => r.SaveAppSettingsAsync(It.IsAny<AppSettings>(), It.IsAny<IReadOnlyCollection<string>>()))
             .ReturnsAsync(false); // WPF依存のApplyFontSizeを回避するためfalseを返す
         _viewModel.LongTermUnreturnedDays = 10;
 
@@ -873,7 +875,7 @@ public class SettingsViewModelTests
 
         _viewModel.HasChanges.Should().BeTrue("保存に失敗したので変更は残る（変更として検知されていること）");
         _settingsRepositoryMock.Verify(
-            r => r.SaveAppSettingsAsync(It.Is<AppSettings>(s => s.LongTermUnreturnedDays == 10)),
+            r => r.SaveAppSettingsAsync(It.Is<AppSettings>(s => s.LongTermUnreturnedDays == 10), It.IsAny<IReadOnlyCollection<string>>()),
             Times.Once);
     }
 
@@ -887,7 +889,7 @@ public class SettingsViewModelTests
 
         await _viewModel.SaveAsync();
 
-        _settingsRepositoryMock.Verify(r => r.SaveAppSettingsAsync(It.IsAny<AppSettings>()), Times.Never);
+        _settingsRepositoryMock.Verify(r => r.SaveAppSettingsAsync(It.IsAny<AppSettings>(), It.IsAny<IReadOnlyCollection<string>>()), Times.Never);
         _viewModel.IsStatusError.Should().BeTrue();
         _viewModel.StatusMessage.Should().Be("長期未返却のしきい値が0日で下限を下回っています。1日以上の値を設定してください。");
         _viewModel.FirstErrorField.Should().Be(nameof(SettingsViewModel.LongTermUnreturnedDays),
