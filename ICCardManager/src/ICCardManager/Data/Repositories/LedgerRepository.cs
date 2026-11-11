@@ -2812,7 +2812,7 @@ ORDER BY date ASC, id ASC";
             // 日付の降順に流し、導入行でない最初の行で読み取りを打ち切る（＝導入行を除いた MAX(date)）
             // 台帳行は idx_ledger_card_date（card_idm の等値）で引き、明細の有無は idx_detail_ledger で確かめる。
             // 該当する行が無いカード（明細なしの行を持たない通常のカード）では、そのカードの台帳行をすべて読む
-            // （読むのは日付と摘要の 2 列で、カード 1 枚分。返却のたびに 1 回）
+            // （読むのは日付・摘要・受入・払出の 4 列で、カード 1 枚分。返却のたびに 1 回）
             command.CommandText = LedgerRowsWithoutDetailsNewestFirstSql;
 
             command.Parameters.AddWithValue("@cardIdm", cardIdm);

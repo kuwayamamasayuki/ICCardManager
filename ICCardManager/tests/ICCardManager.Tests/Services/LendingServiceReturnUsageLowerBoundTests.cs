@@ -511,6 +511,8 @@ public sealed class LendingServiceReturnUsageLowerBoundTests : IDisposable
     public async Task ReturnAsync_貸出当日の手入力の行では_その日の利用を除かないこと()
     {
         // 対の表明: 貸出当日の手入力の行は従来どおり（当日の貸出中の利用を捨てない。Issue #2237）
+        // カードの履歴には手入力の 9/15 の行に当たる朝の利用を入れていない。現実にはその利用もカードに残り、
+        // 取り込まれて手入力の行と二重になる（#2237 で既知の制約）。ここでは貸出後の利用を捨てないことだけを見る
         await InsertIntroductionAsync(new DateTime(2026, 9, 1), balance: 5000);
         await LendOnAsync(new DateTime(2026, 9, 15, 9, 0, 0));
         await InsertLedgerWithoutDetailsAsync(new DateTime(2026, 9, 15), balanceAfter: 4790);
