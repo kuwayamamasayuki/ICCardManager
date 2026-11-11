@@ -203,6 +203,29 @@ public class LedgerMergeUnmergeDetailContentGuardTests : IDisposable
     }
 
     /// <summary>
+    /// Issue #2374: 現在の統合が保存する統合履歴は、取り消しの前に統合した後の変更を確かめられる
+    /// （一覧で警告なしの側になる）。明細の内容を消した #2302 より前の形の統合履歴は確かめられない側になる。
+    /// </summary>
+    [Fact]
+    public async Task GetUndoableMergeHistoriesAsync_現在の統合は確かめられ明細の内容の無い旧い統合履歴は確かめられないこと()
+    {
+        var (targetId, historyId, _) = await MergeTwoLedgersAsync();
+
+        (await _service.GetUndoableMergeHistoriesAsync()).Single(h => h.Id == historyId)
+            .CanVerifyChangesAfterMerge.Should().BeTrue("統合のたびに明細の内容を Undo データへ残す（#2302）");
+
+        // #2302 より前の版が書いた形（明細の内容・統合直後の金額を持たない）の統合履歴を置く
+        await _ledgerRepository.SaveMergeHistoryAsync(targetId, "旧い統合",
+            System.Text.Json.JsonSerializer.Serialize(new LedgerMergeUndoData
+            {
+                OriginalTarget = new LedgerSnapshot { Id = targetId, CardIdm = TestCardIdm },
+            }), transaction: null);
+
+        (await _service.GetUndoableMergeHistoriesAsync()).Single(h => h.Id != historyId)
+            .CanVerifyChangesAfterMerge.Should().BeFalse();
+    }
+
+    /// <summary>
     /// 対の正常系: 統合後に何も編集していなければ、取り消しは従来どおり成功する。
     /// </summary>
     [Fact]
