@@ -685,8 +685,18 @@ namespace ICCardManager.UITests.Infrastructure
         [UiaName]
         public const string CardRegistrationCarryoverRadio = "紙の出納簿からの繰越として登録";
 
+        /// <summary>「新規購入」の選択肢（初期表示で選ばれている。Issue #2451 の撮影で確かめる）。</summary>
+        [UiaName]
+        public const string CardRegistrationNewPurchaseRadio = "新規購入として登録";
+
         [UiaName]
         public const string CardRegistrationCarryoverMonthCombo = "繰越月の選択";
+
+        [UiaName]
+        public const string CardRegistrationStartingPageTextBox = "開始ページ番号";
+
+        [UiaName]
+        public const string CardRegistrationCarryoverBalanceTextBox = "繰越額";
 
         [UiaName]
         public const string CardRegistrationIncomeTotalTextBox = "累計受入金額";

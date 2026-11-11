@@ -315,9 +315,11 @@ $optionalScreens = @(
         Instructions = "インストーラーを実行し、データベース保存先の次に表示される「帳票出力先フォルダ」ページが表示されたら（※手動でPrtScで撮影してください）"
     },
     @{
+        # Issue #2451: UI テスト基盤で自動撮影する（TouchScreenshotTests.card_registration_mode_。tools\take-screenshots-uitest.ps1）。
+        # 「紙の出納簿からの繰越」を入力した状態の card_registration_mode_carryover.png は自動撮影にだけある。
         Name = "card_registration_mode.png"
         Title = "カード登録方法の選択画面"
-        Instructions = "カード管理画面で「新規登録」をクリック、未登録カードをタッチしてカード種別選択ダイアログで「交通系ICカード」を選択した後、カード登録方法選択ダイアログ（新規購入／繰越）が表示されたら"
+        Instructions = "交通系ICカード管理画面で「新規登録」をクリックし、未登録の交通系ICカードをタッチして「保存」をクリックした後、カード登録方法選択ダイアログ（新規購入が選ばれた初期表示）が表示されたら"
         ForegroundOnly = $true
     },
     # Issue #849: マニュアル用スクリーンショット追加

@@ -49,6 +49,17 @@ namespace ICCardManager.UITests.Tests
             "Issue #2019: タッチを要する画面の撮影は ICCARDMANAGER_SCREENSHOT=1 かつ Debug 起動" +
             "（ICCARDMANAGER_UITEST_CONFIGURATION=Debug）のときだけ実行する。tools/take-screenshots-uitest.ps1 から起動してください。";
 
+        private static readonly TimeSpan CardRegistrationWait = TimeSpan.FromSeconds(TestConstants.DialogOpenTimeoutSeconds);
+
+        // 繰越月のコンボは年度順（4 月〜3 月）。項目の UIA Name は表示名ではないため位置で選ぶ（CardRegistrationCarryoverUiTests と同じ）
+        private const int CarryoverMonthMayIndex = 1;
+
+        // 管理者マニュアル §1.6.3 の例の値（本文の「例では」と一致させる）
+        private const string ScreenshotCarryoverStartingPage = "3";
+        private const string ScreenshotCarryoverBalance = "5000";
+        private const string ScreenshotCarryoverIncomeTotal = "12000";
+        private const string ScreenshotCarryoverExpenseTotal = "7000";
+
         [SkippableFact]
         public void staff_recognized_and_lend_職員証認識と貸出完了()
         {
@@ -259,6 +270,64 @@ namespace ICCardManager.UITests.Tests
             var dialog = DialogLocator.WaitForNestedDialog(
                 fixture, fixture.MainWindow, TestConstants.LedgerRowEditDialogName);
             File.Exists(ScreenshotHelper.Capture(dialog, "ledger_row_edit.png")).Should().BeTrue();
+        }
+
+        /// <summary>
+        /// カード登録方法の選択ダイアログを、初期表示（新規購入）と「紙の出納簿からの繰越」を入力した状態の 2 枚で撮る（Issue #2451）。
+        /// </summary>
+        /// <remarks>
+        /// 管理者マニュアル §1.6.1 は初期表示（<c>card_registration_mode.png</c>）、§1.6.3 は繰越の入力欄
+        /// （繰越額・累計受入・累計払出）が写った画像（<c>card_registration_mode_carryover.png</c>）を使う。
+        /// 以前は対話式スクリプトで撮った 1 枚を両方の節で使っており、繰越額・累計の欄（#1215）が増える前の画面が残っていた。
+        /// 未登録カードの読み取りは DEBUG パネル（<c>HybridCardReader.SimulateCardRead</c>）で起こすため Debug パスで撮る。
+        /// 最後はキャンセルで閉じ、DB に何も書かないことを確かめる（撮影用の投入データを変えない）。
+        /// </remarks>
+        [SkippableFact]
+        public void card_registration_mode_カード登録方法の選択ダイアログ()
+        {
+            SkipUnlessDebugCapture();
+
+            using var fixture = AppFixture.LaunchWithSeed(ScreenshotSeedData.Seed);
+            ScreenshotHelper.MoveToTopLeft(fixture.MainWindow);
+            var cardCountBefore = DatabaseProbe.Count("SELECT COUNT(*) FROM ic_card");
+            var ledgerCountBefore = DatabaseProbe.Count("SELECT COUNT(*) FROM ledger");
+            var page = new MainWindowPage(fixture.MainWindow, fixture.Automation);
+
+            var manage = page.ClickToolbarButtonAndWaitForDialog(TestConstants.OpenCardManageButton, TestConstants.CardManageDialogName);
+            manage.ClickButton(TestConstants.CardNewRegistrationButton);
+            // DEBUG パネルの「交通系ICカード」は、撮影用の投入データ（Seed）が登録していないカードを模擬する
+            InvokeDebugPanelButton(page, TestConstants.DebugPanelIcCardButton);
+            Retry.WhileNull(() => manage.FindByNameStartsWith(TestConstants.CardManageCardReadStatusPrefix), CardRegistrationWait).Result
+                .Should().NotBeNull("未登録のカードを読み取ったら、カード種別の確認を促す案内が出ること");
+            manage.ClickButton(TestConstants.CardManageSaveButton);
+
+            var mode = new DialogPageBase(
+                DialogLocator.WaitForNestedDialog(fixture, manage.Window, TestConstants.CardRegistrationModeDialogName));
+            mode.FindByNameWithRetry(TestConstants.CardRegistrationNewPurchaseRadio)!.AsRadioButton().IsChecked
+                .Should().BeTrue("初期表示は「新規購入」が選ばれていること（§1.6.1 の画像）");
+            File.Exists(ScreenshotHelper.Capture(mode.Window, "card_registration_mode.png")).Should().BeTrue();
+
+            // §1.6.3 の例（4〜5 月を紙の出納簿 2 ページで管理し、6 月からピッすいで管理する）どおりに入力する。
+            // 累計は「累計受入 − 累計払出 = 繰越額」が成り立つ値にする（前年度繰越は累計受入に含まれる）。
+            var carryoverRadio = mode.FindByNameWithRetry(TestConstants.CardRegistrationCarryoverRadio)!;
+            carryoverRadio.AsRadioButton().IsChecked = true;
+            mode.FindByNameWithRetry(TestConstants.CardRegistrationCarryoverMonthCombo)!.AsComboBox().Select(CarryoverMonthMayIndex);
+            var income = mode.FindByNameWithRetry(TestConstants.CardRegistrationIncomeTotalTextBox)!;
+            Retry.WhileFalse(() => income.IsEnabled, CardRegistrationWait).Success
+                .Should().BeTrue("5 月から繰越では累計受入を入力できること（3 月だけが無効。Issue #2326）");
+            mode.FindByNameWithRetry(TestConstants.CardRegistrationStartingPageTextBox)!.AsTextBox().Text = ScreenshotCarryoverStartingPage;
+            mode.FindByNameWithRetry(TestConstants.CardRegistrationCarryoverBalanceTextBox)!.AsTextBox().Text = ScreenshotCarryoverBalance;
+            income.AsTextBox().Text = ScreenshotCarryoverIncomeTotal;
+            mode.FindByNameWithRetry(TestConstants.CardRegistrationExpenseTotalTextBox)!.AsTextBox().Text = ScreenshotCarryoverExpenseTotal;
+            // 最後に入力した欄のキャレットが写らないよう、選んだ選択肢へフォーカスを戻してから撮る
+            carryoverRadio.Focus();
+            File.Exists(ScreenshotHelper.Capture(mode.Window, "card_registration_mode_carryover.png")).Should().BeTrue();
+
+            mode.ClickButton(TestConstants.CardRegistrationCancelButton);
+            Retry.WhileTrue(() => DialogLocator.IsOpen(fixture, manage.Window, TestConstants.CardRegistrationModeDialogName), CardRegistrationWait)
+                .Success.Should().BeTrue("キャンセルで閉じること");
+            DatabaseProbe.Count("SELECT COUNT(*) FROM ic_card").Should().Be(cardCountBefore, "キャンセルしたのでカードは登録されないこと");
+            DatabaseProbe.Count("SELECT COUNT(*) FROM ledger").Should().Be(ledgerCountBefore, "キャンセルしたので台帳に行は増えないこと");
         }
 
         // ── ヘルパー ─────────────────────────────────
