@@ -71,7 +71,7 @@
                         <TextBlock TextWrapping="Wrap"
                                    FontSize="{DynamicResource SmallFontSize}"
                                    Foreground="{DynamicResource DangerTextBrush}"
-                                   Text="⚠ 注意: 残高・利用履歴は登録するときにカードから読み直すため、交通系ICカードとして登録する場合は、登録が完了するまでカードをリーダーから離さないでください。"/>
+                                   Text="⚠ 注意: 登録するときにカードから残高・利用履歴を読み直すことがあるため、交通系ICカードとして登録する場合は、登録が完了するまでカードをリーダーから離さないでください。"/>
                     </Border>
                 </StackPanel>
 

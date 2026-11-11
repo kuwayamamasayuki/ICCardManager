@@ -23,7 +23,8 @@ namespace ICCardManager.ViewModels;
 internal static class CardRegistrationPreRead
 {
     /// <summary>
-    /// 登録時にカードから残高を読み直すか（事前に読み取れなかった）。
+    /// 登録時にカードから残高を読み直す可能性があるか（事前に読み取れなかった）。
+    /// 取り込む利用履歴があれば初期残高は履歴から逆算するので、実際には読み直さないこともある。
     /// </summary>
     public static bool RereadsBalance(int? balance) => !balance.HasValue;
 
@@ -35,7 +36,8 @@ internal static class CardRegistrationPreRead
 
     /// <summary>
     /// 交通系ICカードとして登録するなら、登録が完了するまでカードをリーダーに載せておく必要があるか。
-    /// 残高と利用履歴のどちらか一方でも読み直すなら true（片方だけ読み取れなかった場合も、その片方を読み直すため）。
+    /// 残高と利用履歴のどちらか一方でも読み直す可能性があるなら true（片方だけ読み取れなかった場合も、その片方を読み直すことがあるため）。
+    /// 残高を実際に読み直すかは登録方法（取り込みの開始日）と取り込む履歴の有無で決まり、種別選択の時点では分からないので、安全側に倒す。
     /// </summary>
     public static bool NeedsCardOnReaderUntilRegistered(int? balance, IReadOnlyCollection<LedgerDetail>? history) =>
         RereadsBalance(balance) || RereadsHistory(history);

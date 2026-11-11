@@ -43,14 +43,14 @@ public class CardRegistrationPreReadTests
     public void 残高と利用履歴をどちらも読み取れなかったときは注意を出すこと()
     {
         CardRegistrationPreRead.NeedsCardOnReaderUntilRegistered(null, null)
-            .Should().BeTrue("登録時に残高と利用履歴を読み直すので、カードを載せておく必要がある");
+            .Should().BeTrue("登録時に残高と利用履歴を読み直す可能性があるので、カードを載せておく必要がある");
     }
 
     [Fact]
     public void 残高だけ読み取れなかったときは注意を出すこと()
     {
         CardRegistrationPreRead.NeedsCardOnReaderUntilRegistered(null, OneEntryHistory())
-            .Should().BeTrue("登録時に残高を読み直すので、カードを載せておく必要がある");
+            .Should().BeTrue("登録時に残高を読み直す可能性がある（取り込む履歴が無ければ読み直す）ので、カードを載せておく必要がある");
     }
 
     [Fact]
@@ -59,14 +59,14 @@ public class CardRegistrationPreReadTests
         // 後方互換の ReadHistoryAsync は読み取りの失敗も空のリストで返すため、利用 0 件と区別できない（Issue #1169）。
         // 登録時はどちらも読み直すので、案内も揃える
         CardRegistrationPreRead.NeedsCardOnReaderUntilRegistered(ReadBalance, new List<LedgerDetail>())
-            .Should().BeTrue("登録時に利用履歴を読み直すので、カードを載せておく必要がある");
+            .Should().BeTrue("登録時に利用履歴を読み直す可能性があるので、カードを載せておく必要がある");
     }
 
     [Fact]
     public void 利用履歴がnullのときは残高を読み取れていても注意を出すこと()
     {
         CardRegistrationPreRead.NeedsCardOnReaderUntilRegistered(ReadBalance, null)
-            .Should().BeTrue("登録時に利用履歴を読み直すので、カードを載せておく必要がある");
+            .Should().BeTrue("登録時に利用履歴を読み直す可能性があるので、カードを載せておく必要がある");
     }
 
     [Fact]
