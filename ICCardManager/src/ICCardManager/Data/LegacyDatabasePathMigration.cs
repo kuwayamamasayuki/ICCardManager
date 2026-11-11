@@ -17,7 +17,11 @@ namespace ICCardManager.Data
         /// <summary>database_config.txt が空（無い）だったので、appsettings.json の値を書き移した</summary>
         Migrated,
 
-        /// <summary>database_config.txt に値があるので移さず、appsettings.json の値は使わない</summary>
+        /// <summary>
+        /// database_config.txt に値があるので移さず、appsettings.json の値は使わない。
+        /// ただし database_config.txt の値が形式不正で appsettings.json の値が有効なら、旧版と同じ保存先で開くよう
+        /// 上書きして移す（<see cref="Migrated"/>）。両方とも形式不正ならこちら（解決が棄却して既定で開き、警告する）
+        /// </summary>
         KeptConfigFile,
 
         /// <summary>以前の起動で移行の判断を済ませている（印がある）。appsettings.json の値は使わない</summary>
@@ -58,8 +62,11 @@ namespace ICCardManager.Data
     /// 印が無いと、移した後に「デフォルトに戻す」を押した次の起動でまた移し、既定に戻せなくなる。
     /// </para>
     /// <para>
-    /// 値の形式は検証しない（解決＝<see cref="DatabaseLocationResolver.Resolve"/> の役目。形式不正の値を移した場合は、
-    /// 解決が棄却して既定で開き、起動後の警告で設定画面からの再設定を案内する）。
+    /// 移す値の形式は検証しない（解決＝<see cref="DatabaseLocationResolver.Resolve"/> の役目。形式不正の値を移した場合は、
+    /// 解決が棄却して既定で開き、起動後の警告で設定画面からの再設定を案内する）。ただし「database_config.txt を優先して
+    /// 移さない」かどうかは、旧版が実際に開いていた保存先に合わせるため形式を見る — 旧版は形式不正の database_config.txt を
+    /// 棄却して appsettings.json の値で開いていたので、その組み合わせは上書きして移す（判定は解決と同じ
+    /// <see cref="PathValidator.ValidatePathFormat"/>）。
     /// </para>
     /// </remarks>
     public static class LegacyDatabasePathMigration
@@ -120,7 +127,15 @@ namespace ICCardManager.Data
                     LegacyDatabasePathMigrationOutcome.ConfigFileUnreadable, legacy);
             }
 
-            if (configValue.Length > 0)
+            // database_config.txt の値が形式不正（解決が棄却する値）で appsettings.json の値が有効なら、旧版は
+            // appsettings.json の値で開いていた。ここで「database_config.txt が優先」として移さないと、新版は既定の
+            // ローカル DB を開いて台帳が分裂する（印が残るので以後も戻らない）。旧版と同じ保存先になるよう上書きして移す。
+            // 判定は解決と同じ PathValidator.ValidatePathFormat（同じ判断を配らない）
+            var replaceInvalidConfig = configValue.Length > 0
+                && !PathValidator.ValidatePathFormat(configValue).IsValid
+                && PathValidator.ValidatePathFormat(legacy).IsValid;
+
+            if (configValue.Length > 0 && !replaceInvalidConfig)
             {
                 logger.LogWarning(
                     "database_config.txt に保存先があるため、appsettings.json の DatabaseOptions:Path は移さず使用しません。" +
@@ -129,6 +144,15 @@ namespace ICCardManager.Data
                 TryWriteMarker(markerFilePath, $"kept: {configValue}", logger);
                 return new LegacyDatabasePathMigrationResult(
                     LegacyDatabasePathMigrationOutcome.KeptConfigFile, configValue);
+            }
+
+            if (replaceInvalidConfig)
+            {
+                // 上書きで失われる値を残す（手で直したい場合の手掛かり）
+                logger.LogWarning(
+                    "database_config.txt の保存先が無効な形式のため、appsettings.json の DatabaseOptions:Path で上書きします" +
+                    "（旧版でも appsettings.json の値で開いていました）。InvalidConfigFilePath={InvalidConfigFilePath}, AppSettingsPath={AppSettingsPath}",
+                    configValue, legacy);
             }
 
             try

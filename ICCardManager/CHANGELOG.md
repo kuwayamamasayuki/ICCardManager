@@ -4,7 +4,7 @@
 
 **バグ修正**
 - Issue #2389 **データベースの保存先を `database_config.txt`（設定画面・インストーラー）だけで決めるようにし、`appsettings.json` の `DatabaseOptions` の `Path` を廃止した**。以前は `database_config.txt` が空のときに `appsettings.json` の値で開いていたが、設定画面の「データベース保存先」欄には表示されず、「デフォルトに戻す」を押すと既定ではなく `appsettings.json` の値で開くなど、どの DB を開いているかの表示が実際と食い違っていた
-  - 以前の版の `appsettings.json` に保存先が書かれている PC では、起動時に一度だけ `database_config.txt` へ書き移す（`database_config.txt` が空・無いときだけ。値があればそちらを使い、`appsettings.json` の値は使わない）。移行の判断を済ませた印 `C:\ProgramData\ICCardManager\database_path_migrated.txt` を残し、以後は `appsettings.json` の値を見ない（印が無いと、移した後に「デフォルトに戻す」を押した次の起動でまた移してしまう）。書き移したことは Information、使わなかった値・失敗は Warning でログに残す
+  - 以前の版の `appsettings.json` に保存先が書かれている PC では、起動時に一度だけ `database_config.txt` へ書き移す（`database_config.txt` が空・無いときだけ。値があればそちらを使い、`appsettings.json` の値は使わない。ただし `database_config.txt` の値が無効な形式（相対パス等）で `appsettings.json` の値が有効なら、以前の版と同じくその値で開くよう上書きして移し、上書き前の値を Warning でログに残す）。移行の判断を済ませた印 `C:\ProgramData\ICCardManager\database_path_migrated.txt` を残し、以後は `appsettings.json` の値を見ない（印が無いと、移した後に「デフォルトに戻す」を押した次の起動でまた移してしまう）。書き移したことは Information、使わなかった値・失敗は Warning でログに残す
   - `database_config.txt` へ書けない・読めないときは起動を止めず、その起動では `appsettings.json` の保存先で開く（既定のローカル DB へ切り替えると台帳が分裂するため）。印を残さないので次の起動でやり直す。読めないファイルを空とみなして上書きしない
   - インストーラーの上書きインストールは `appsettings.json` を新しい版のファイルに置き換えるため、インストーラーで更新した PC では移行の機会が無い（以前から、更新のたびに `appsettings.json` に書いた保存先は失われていた）。IT担当者ガイド §4.1 に、更新の前に設定画面またはインストーラーで保存先を指定するよう書いた
   - 配布する `appsettings.json` から `DatabaseOptions` を削除し、使われなくなった設定画面の引数（`IOptions<DatabaseOptions>`）を外した。`DatabaseOptions` は解決済みのパスを DbContext へ運ぶ入れ物としてだけ残す（appsettings.json にはバインドしない）

@@ -23,6 +23,8 @@ public class LegacyDatabasePathMigrationTests : IDisposable
 {
     private const string UncPath = @"\\server\share\ICCardManager\iccard.db";
     private const string LocalPath = @"C:\data\iccard.db";
+    private const string RelativePath = @"data\iccard.db";
+    private const string OtherRelativePath = @"other\iccard.db";
 
     private readonly string _directory;
     private readonly string _configPath;
@@ -122,6 +124,40 @@ public class LegacyDatabasePathMigrationTests : IDisposable
 
         File.Delete(_configPath);
         Run(UncPath).EffectiveConfigFileValue.Should().BeEmpty("移さないと判断した値を、後から移さない");
+    }
+
+    /// <summary>
+    /// 旧版は形式不正の database_config.txt を棄却して appsettings.json の値で開いていた（レビュー 1 回目で検出）。
+    /// 「database_config.txt が優先」として移さないと、新版は既定のローカル DB を開いて台帳が分裂し、印が残るので以後も戻らない。
+    /// </summary>
+    [Fact]
+    public void database_config_txtが形式不正でappsettingsが有効なら上書きして移し_上書き前の値をログに残すこと()
+    {
+        AppConfigFiles.Write(_configPath, RelativePath);
+
+        var result = Run(UncPath);
+
+        result.Outcome.Should().Be(LegacyDatabasePathMigrationOutcome.Migrated);
+        result.EffectiveConfigFileValue.Should().Be(UncPath, "旧版で実際に開いていた共有 DB と同じ保存先で開く");
+        AppConfigFiles.Read(_configPath).Should().Be(UncPath);
+        DatabaseLocationResolver.Resolve(result.EffectiveConfigFileValue).Path.Should().Be(UncPath, "前提: 解決も棄却しない");
+        File.Exists(_markerPath).Should().BeTrue();
+        _logger.Entries.Should().Contain(e => e.Level == LogLevel.Warning && e.Message.Contains(RelativePath) && e.Message.Contains(UncPath),
+            "上書きで失われる値を残す: " + _logger.FormatEntries());
+    }
+
+    [Fact]
+    public void database_config_txtもappsettingsも形式不正なら移さず_解決が既定で開いて警告すること()
+    {
+        AppConfigFiles.Write(_configPath, RelativePath);
+
+        var result = Run(OtherRelativePath);
+
+        result.Outcome.Should().Be(LegacyDatabasePathMigrationOutcome.KeptConfigFile, "旧版も両方棄却して既定で開いていた");
+        AppConfigFiles.Read(_configPath).Should().Be(RelativePath, "不正な値どうしで上書きしない");
+        var resolution = DatabaseLocationResolver.Resolve(result.EffectiveConfigFileValue);
+        resolution.Path.Should().BeNull("既定で開く");
+        resolution.Rejected.Should().ContainSingle().Which.Value.Should().Be(RelativePath, "起動後の警告で再設定を案内する");
     }
 
     [Theory]
