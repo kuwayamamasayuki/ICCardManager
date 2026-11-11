@@ -491,5 +491,29 @@ public class LedgerConsistencyCheckerTests
             .Should().BeFalse("直前の残高 5,000 と異なる 6,000 は裏付けなし");
     }
 
+    /// <summary>
+    /// Issue #2441（コードレビューで検出）: 逆算した残高が負になり訂正案が出ない形でも、裏付けの無いチェーンの先頭（直後が切れている）を
+    /// 報告から落とさない。直前の帳簿の行が無ければ報告しない
+    /// </summary>
+    [Fact]
+    public void CheckConsistency_Chains_UncorroboratedHeadWithoutCorrection_IsReported()
+    {
+        var purchase = Issue2437Ledger(1, new DateTime(2027, 4, 1), "新規購入", 5000, 0, 5000);
+        var stray = Issue2437Ledger(2, new DateTime(2027, 6, 1), SummaryGenerator.GetMidYearCarryoverSummary(5), 0, 0, 6000);
+        var charge = Issue2437Ledger(3, new DateTime(2027, 6, 5), "役務費によりチャージ", 1000, 0, 500);
+
+        var result = _checker.CheckConsistency(
+            new[] { new List<Ledger> { purchase }, new List<Ledger> { stray, charge } }, TestCardIdm, new DateTime(2000, 1, 1),
+            new Ledger?[] { null, purchase });
+
+        result.InitialBalanceCorrection.Should().BeNull("逆算した残高 500 − 1,000 が負なので訂正案の形ではない");
+        result.Inconsistencies.Should().Equal(new[] { (2, 5000, 6000), (3, 7000, 500) });
+
+        var noPredecessor = _checker.CheckConsistency(
+            new[] { new List<Ledger>(), new List<Ledger> { stray, charge } }, TestCardIdm, new DateTime(2000, 1, 1),
+            new Ledger?[] { null, null });
+        noPredecessor.Inconsistencies.Should().Equal(new[] { (3, 7000, 500) }, "直前の帳簿の行が無ければ期待値を決められないので先頭は報告しない");
+    }
+
     #endregion
 }

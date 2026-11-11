@@ -215,7 +215,63 @@ namespace ICCardManager.Services
                 }
             }
 
+            ReportUncorroboratedChainHeads(chains, chainHeadPredecessors, result);
+
             return result;
+        }
+
+        /// <summary>
+        /// Issue #2441（コードレビューで検出）: 2 本目以降のチェーンの先頭（導入行）が直前の帳簿の行で裏付けられず、直後の行が不整合で、
+        /// その導入行への訂正案も出ていないなら、導入行自体も不整合として報告する。期待値は直前の行からの計算値
+        /// （直前の残高 ＋ 受入 − 払出。チェーンを切る前の検査と同じ式）。
+        /// </summary>
+        /// <remarks>
+        /// チェーンを切ると先頭の導入行は検査されないので、導入行の残高が誤っていても、報告は直後の行（正しい行）にだけ付く。
+        /// 不整合が 1 か所なら訂正案（#2007）が導入行を名指しするが、別の不整合が 1 件でもある・明細の差が合わない・逆算が負の形では
+        /// 訂正案が出ず、誤った導入行が報告から消えて正しい行だけが強調される（チェーンを切る前は両方を報告していた）。
+        /// 直後の行が整合しているなら導入行の残高は後続の行で裏付けられているので報告しない（導入行より前の行と食い違うだけの正しい導入行。
+        /// #2437 / #2441 の本題）。期間の先頭のチェーンは前の行を持たないので対象外。
+        /// </remarks>
+        internal static void ReportUncorroboratedChainHeads(
+            IReadOnlyList<List<Ledger>> chains, IReadOnlyList<Ledger?> chainHeadPredecessors, ConsistencyResult result)
+        {
+            for (var i = 1; i < chains.Count; i++)
+            {
+                var ledgers = chains[i];
+                var predecessor = chainHeadPredecessors[i];
+                if (ledgers.Count < 2 || predecessor == null || IsCorroboratedByPrecedingSettledRow(predecessor, ledgers[0]))
+                {
+                    continue;
+                }
+
+                var head = ledgers[0];
+                var nextIndex = result.Inconsistencies.FindIndex(x => x.LedgerId == ledgers[1].Id);
+                if (nextIndex < 0 || result.InitialBalanceCorrection?.LedgerId == head.Id)
+                {
+                    continue;
+                }
+
+                result.Inconsistencies.Insert(nextIndex, (head.Id, ExpectedChainHeadBalance(predecessor, head), head.Balance));
+                result.IsConsistent = false;
+            }
+        }
+
+        /// <summary>
+        /// 裏付けの無いチェーンの先頭の期待残高。<see cref="IsCorroboratedByPrecedingSettledRow"/> の 2 つの形に対応させる。
+        /// </summary>
+        /// <remarks>
+        /// 導入行の受入は残高の書き直しなので、直前の残高が 0（3/31「次年度へ繰越」で払い出した組）なら直前の残高 ＋ 受入 − 払出、
+        /// それ以外は直前の残高をそのまま期待する（3/25 の行 4,790 → 4/1「前年度より繰越」受入・残高 6,000 の期待は 4,790。
+        /// 4,790 ＋ 6,000 ＝ 10,790 は存在しない残高）。受入 0 の「○月から繰越」ではどちらも同じ値。導入行でない先頭は通常の式。
+        /// </remarks>
+        internal static int ExpectedChainHeadBalance(Ledger predecessor, Ledger head)
+        {
+            if (head.IsInitialRecord && predecessor.Balance != 0)
+            {
+                return predecessor.Balance;
+            }
+
+            return predecessor.Balance + head.Income - head.Expense;
         }
 
         /// <summary>

@@ -1730,6 +1730,120 @@ public class LedgerRepositoryTests : IDisposable
         result.InitialBalanceCorrection.SuggestedBalance.Should().Be(5000);
     }
 
+    /// <summary>
+    /// Issue #2441（コードレビューで検出）: 台帳の途中の誤った「○月から繰越」の後に別の不整合がもう 1 件あって訂正案が出ない形でも、
+    /// 誤った「○月から繰越」の行が報告から消えないこと（チェーンを切ると先頭は検査されないので、報告が正しい直後の行と別の行だけになっていた）
+    /// </summary>
+    [Fact]
+    public async Task CheckBalanceConsistencyAsync_FullPeriod_WrongMidYearCarryoverInMiddleWithAnotherTypo_ReportsCarryover()
+    {
+        // Arrange: 4/1 新規購入 5,000 → 6/1「5月から繰越」を残高 6,000 で手入力 → 6/5 利用 210（4,790）→ 7/10 利用 300 を 4,400 と打ち間違え
+        var purchase = CreateTestLedger(TestCardIdm, new DateTime(2027, 4, 1), "新規購入", income: 5000);
+        purchase.Balance = 5000;
+        purchase.Id = await _repository.InsertAsync(purchase);
+
+        var stray = CreateTestLedger(TestCardIdm, new DateTime(2027, 6, 1), SummaryGenerator.GetMidYearCarryoverSummary(5));
+        stray.Balance = 6000;
+        stray.Id = await _repository.InsertAsync(stray);
+
+        var usage = CreateTestLedger(TestCardIdm, new DateTime(2027, 6, 5), "鉄道（天神～博多）", expense: 210);
+        usage.Balance = 4790;
+        usage.Id = await _repository.InsertAsync(usage);
+
+        var typo = CreateTestLedger(TestCardIdm, new DateTime(2027, 7, 10), "鉄道（博多～天神）", expense: 300);
+        typo.Balance = 4400;
+        typo.Id = await _repository.InsertAsync(typo);
+
+        var checker = new LedgerConsistencyChecker(_repository);
+
+        // Act
+        var result = await checker.CheckBalanceConsistencyAsync(TestCardIdm, Issue2437FullPeriodStart, Issue2437FullPeriodEnd);
+
+        // Assert
+        result.InitialBalanceCorrection.Should().BeNull("不整合が 2 か所以上あるので訂正案の形ではない");
+        result.Inconsistencies.Should().Equal(
+            new[] { (stray.Id, 5000, 6000), (usage.Id, 5790, 4790), (typo.Id, 4490, 4400) },
+            "誤った 6/1 は直前の 4/1（残高 5,000）と照合して報告する");
+        result.IsConsistent.Should().BeFalse();
+    }
+
+    /// <summary>
+    /// Issue #2441（コードレビューで検出）: 「前年度より繰越」の導入行（#2437）でも同じく、裏付けの無い導入行の直後が切れていて
+    /// 別の不整合のため訂正案が出ないなら、導入行を報告すること。期待値は、直前の残高が 0（3/31「次年度へ繰越」の組）なら
+    /// 0 ＋ 受入、それ以外は直前の残高（受入は残高の書き直し）
+    /// </summary>
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task CheckBalanceConsistencyAsync_FullPeriod_WrongFiscalYearStartCarryoverWithAnotherTypo_ReportsCarryover(bool yearEndPair)
+    {
+        // Arrange: 直前の行（3/31「次年度へ繰越」残高 0 か、3/25 手入力 残高 5,000）→ 4/1「前年度より繰越」を残高 6,000 で誤って登録
+        // （受入は 5,000 か 6,000）→ 4/2 利用 210（4,790）→ 4/10 利用 300 を 4,400 と打ち間違え
+        if (yearEndPair)
+        {
+            var purchase = CreateTestLedger(TestCardIdm, new DateTime(2026, 10, 1), "新規購入", income: 5000);
+            purchase.Balance = 5000;
+            await _repository.InsertAsync(purchase);
+
+            var yearEnd = CreateTestLedger(TestCardIdm, new DateTime(2027, 3, 31),
+                SummaryGenerator.GetCarryoverToNextYearSummary(), expense: 5000);
+            yearEnd.Balance = 0;
+            await _repository.InsertAsync(yearEnd);
+        }
+        else
+        {
+            var manual = CreateTestLedger(TestCardIdm, new DateTime(2027, 3, 25), "鉄道（手入力）");
+            manual.Balance = 5000;
+            await _repository.InsertAsync(manual);
+        }
+
+        var introduction = CreateTestLedger(TestCardIdm, new DateTime(2027, 4, 1),
+            SummaryGenerator.GetCarryoverFromPreviousYearSummary(), income: yearEndPair ? 5000 : 6000);
+        introduction.Balance = 6000;
+        introduction.Id = await _repository.InsertAsync(introduction);
+
+        var usage = CreateTestLedger(TestCardIdm, new DateTime(2027, 4, 2), "鉄道（天神～博多）", expense: 210);
+        usage.Balance = 4790;
+        usage.Id = await _repository.InsertAsync(usage);
+
+        var typo = CreateTestLedger(TestCardIdm, new DateTime(2027, 4, 10), "鉄道（博多～天神）", expense: 300);
+        typo.Balance = 4400;
+        typo.Id = await _repository.InsertAsync(typo);
+
+        var checker = new LedgerConsistencyChecker(_repository);
+
+        // Act
+        var result = await checker.CheckBalanceConsistencyAsync(TestCardIdm, Issue2437FullPeriodStart, Issue2437FullPeriodEnd);
+
+        // Assert
+        result.InitialBalanceCorrection.Should().BeNull();
+        result.Inconsistencies.Should().Equal(
+            new[] { (introduction.Id, 5000, 6000), (usage.Id, 5790, 4790), (typo.Id, 4490, 4400) },
+            "誤った導入行を報告から落とさない（期待値は 0 ＋ 受入 5,000、または直前の残高 5,000）");
+    }
+
+    /// <summary>
+    /// Issue #2441（正当側）: 導入行より前の行と食い違っていても、直後の行が整合している導入行は、後に別の不整合があっても報告しないこと
+    /// </summary>
+    [Fact]
+    public async Task CheckBalanceConsistencyAsync_FullPeriod_CorrectMidYearCarryoverWithLaterTypo_DoesNotReportCarryover()
+    {
+        // Arrange: 2/25 の行（4,790）→ 3/1「2月から繰越」5,000 → 3/5 利用 210（4,790）→ 3/10 利用 300（4,490）
+        // → 3/20 利用 100 を 4,300 と打ち間違え（正しくは 4,390）
+        await InsertIssue2441LedgersAsync(Issue2441EarlierRow.Usage, legacyIncome: false);
+        var typo = CreateTestLedger(TestCardIdm, new DateTime(2027, 3, 20), "鉄道（天神～薬院）", expense: 100);
+        typo.Balance = 4300;
+        typo.Id = await _repository.InsertAsync(typo);
+        var checker = new LedgerConsistencyChecker(_repository);
+
+        // Act
+        var result = await checker.CheckBalanceConsistencyAsync(TestCardIdm, Issue2437FullPeriodStart, Issue2437FullPeriodEnd);
+
+        // Assert
+        result.Inconsistencies.Should().ContainSingle("直後の 3/5 が導入行の残高から整合しているので、導入行は報告しない")
+            .Which.Should().Be((typo.Id, 4390, 4300));
+    }
+
     private static void AssertNotDoubleCounted(MonthlyReportData april, MonthlyReportData may)
     {
         april.Carryover.Should().BeNull("前年度より繰越は DB の導入行が担うので、帳票は合成しない");
