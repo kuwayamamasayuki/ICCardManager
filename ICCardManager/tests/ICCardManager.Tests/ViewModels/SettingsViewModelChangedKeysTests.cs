@@ -47,6 +47,9 @@ public sealed class SettingsViewModelChangedKeysTests : IDisposable
     /// <summary>保存の結果を画面へそのまま返すか（false なら、書いたうえで「失敗」を返す。クラスの remarks）</summary>
     private bool _reportSaveResult;
 
+    /// <summary>設定の読み取りを失敗させるか（保存後の読み直しの失敗を再現する）</summary>
+    private bool _failSettingsRead;
+
     public SettingsViewModelChangedKeysTests()
     {
         _dbContext = TestDbContextFactory.Create();
@@ -211,6 +214,58 @@ public sealed class SettingsViewModelChangedKeysTests : IDisposable
     }
 
     /// <summary>
+    /// レビュー 2 回目: 何も変えずに保存したときも、摘要生成器と department_config.txt へは DB の現在の値を反映すること。
+    /// </summary>
+    /// <remarks>
+    /// 何も変えない保存は DB へ書かず、設定のキャッシュも破棄しない。読み直しの前にキャッシュを破棄しないと、開いたときに
+    /// キャッシュした部署種別（共有モードで TTL 3 分）を読み、古い値をファイルへ書いて、この PC の再起動で共有 DB を戻す。
+    /// 上の文字サイズのテストでは保存そのものがキャッシュを破棄するため、破棄の有無を区別できない。
+    /// </remarks>
+    [Fact]
+    public async Task 何も変えずに保存しても_他のPCが変えた部署種別をファイルと摘要生成器へ反映すること()
+    {
+        var viewModel = await OpenAsync();
+        (await _otherPc.SetAsync("department_type", "enterprise_account")).Should().BeTrue();
+
+        await SaveReportingSuccessAsync(viewModel);
+
+        _savedKeys.Should().ContainSingle().Which.Should().BeEmpty("前提: 何も書かない保存（キャッシュも破棄されない）");
+        File.ReadAllText(Path.Combine(_configDirectory, "department_config.txt")).Trim().Should().Be(
+            "enterprise_account",
+            "開いたときのキャッシュの値（市長事務部局）を書くと、この PC の再起動で共有 DB の部署種別が戻る");
+        _summaryGenerator.Generate(ChargeOnlyDetails()).Should().Be(
+            new SummaryGenerator(DepartmentType.EnterpriseAccount).Generate(ChargeOnlyDetails()));
+    }
+
+    /// <summary>
+    /// レビュー 2 回目: 保存後の部署種別の読み直しに失敗したら、摘要生成器と department_config.txt のどちらへも反映しないこと。
+    /// </summary>
+    /// <remarks>
+    /// 画面の値は開いている間に他の PC が変えた部署種別より古いかもしれないので、それで書くと再起動で共有 DB を戻し得る。
+    /// 保存は確定済みなので、前の状態のまま残す。
+    /// </remarks>
+    [Fact]
+    public async Task 保存後の部署種別の読み直しに失敗したらファイルにも摘要生成器にも反映しないこと()
+    {
+        // 画面には企業会計部局を表示させる（摘要生成器は市長事務部局のまま。画面の値で反映する実装を区別するため）
+        (await _otherPc.SetAsync("department_type", "enterprise_account")).Should().BeTrue();
+        var viewModel = await OpenAsync();
+        viewModel.SelectedFontSizeItem = viewModel.FontSizeOptions.Single(x => x.Value == FontSizeOption.Large);
+        _failSettingsRead = true;
+
+        await SaveReportingSuccessAsync(viewModel);
+
+        (await _thisPc.GetAsync("font_size")).Should().Be("large", "前提: 保存そのものは成功している");
+        File.Exists(Path.Combine(_configDirectory, "department_config.txt")).Should().BeFalse("読み直せない部署種別は書かない");
+        _summaryGenerator.Generate(ChargeOnlyDetails()).Should().Be(
+            new SummaryGenerator(DepartmentType.MayorOffice).Generate(ChargeOnlyDetails()),
+            "摘要生成器は元の部署種別のまま");
+        new SummaryGenerator(DepartmentType.MayorOffice).Generate(ChargeOnlyDetails()).Should().NotBe(
+            new SummaryGenerator(DepartmentType.EnterpriseAccount).Generate(ChargeOnlyDetails()),
+            "前提: 部署種別で摘要が変わる");
+    }
+
+    /// <summary>
     /// 対の表明: 部署種別を変えて保存したら、変えた値をファイルと摘要生成器へ反映すること。
     /// </summary>
     [Fact]
@@ -260,9 +315,10 @@ public sealed class SettingsViewModelChangedKeysTests : IDisposable
         {
             await viewModel.SaveAsync();
         }
-        catch (NullReferenceException)
+        catch (NullReferenceException ex) when (ex.StackTrace?.Contains("ApplyFontSize") == true)
         {
-            // WPF アプリケーション未起動によるもの
+            // WPF アプリケーション未起動によるもの（App.ApplyFontSize が Application.Current を参照する）。
+            // 発生元で絞り、それより後ろの処理の NullReferenceException は隠さない
         }
     }
 
@@ -276,7 +332,9 @@ public sealed class SettingsViewModelChangedKeysTests : IDisposable
     {
         var repository = new Mock<ISettingsRepository>();
         repository.Setup(r => r.InvalidateCache()).Callback(() => _thisPc.InvalidateCache());
-        repository.Setup(r => r.GetAppSettingsAsync()).Returns(() => _thisPc.GetAppSettingsAsync());
+        repository.Setup(r => r.GetAppSettingsAsync()).Returns(() => _failSettingsRead
+            ? Task.FromException<AppSettings>(new InvalidOperationException("共有フォルダーに接続できない（テスト用）"))
+            : _thisPc.GetAppSettingsAsync());
         repository
             .Setup(r => r.SaveAppSettingsAsync(It.IsAny<AppSettings>(), It.IsAny<IReadOnlyCollection<string>>()))
             .Returns(async (AppSettings settings, IReadOnlyCollection<string> keys) =>
