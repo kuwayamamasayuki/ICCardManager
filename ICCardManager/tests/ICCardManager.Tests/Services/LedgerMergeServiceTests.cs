@@ -1709,13 +1709,13 @@ public class LedgerMergeServiceTests : IDisposable
     }
 
     /// <summary>
-    /// Issue #2374: 取り消しの一覧（「統合を元に戻す」を押したとき）は、各統合履歴に「統合した後の変更を確かめられるか」を載せる。
+    /// Issue #2374: 一覧（「統合を元に戻す」を押したとき）は、各統合履歴に「統合した後の変更を確かめられるか」を載せる。
     /// 統合した時点の明細の内容（DetailSnapshots）を持たない Undo データ（#2302 より前の形）と、読めない Undo データは false、
     /// 持つもの（明細の無い統合の空の辞書を含む）は true。
     /// </summary>
     [Fact]
     [Trait("Category", "Unit")]
-    public async Task GetUndoableMergeHistoriesForUndoAsync_統合した後の変更を確かめられるかをUndoデータの明細の内容の有無で判定すること()
+    public async Task GetUndoableMergeHistoriesAsync_統合した後の変更を確かめられるかをUndoデータの明細の内容の有無で判定すること()
     {
         var legacy = new LedgerMergeUndoData { OriginalTarget = new LedgerSnapshot { Id = 10 } };
         var current = new LedgerMergeUndoData
@@ -1744,47 +1744,58 @@ public class LedgerMergeServiceTests : IDisposable
                 (5, DateTime.Now, 50, "読めない Undo データ", "not json", false),
             });
 
-        var result = await _service.GetUndoableMergeHistoriesForUndoAsync();
+        var result = await _service.GetUndoableMergeHistoriesAsync();
 
         result.Select(h => (h.Id, h.CanVerifyChangesAfterMerge)).Should().Equal(
             (1, false), (2, true), (3, true), (4, false), (5, false));
     }
 
     /// <summary>
-    /// Issue #2374 のレビュー: 件数だけの一覧（履歴を開くたびに「統合を元に戻す」ボタンの有効・無効を決める）は
+    /// Issue #2374 のレビュー: 履歴を開くたびに「統合を元に戻す」ボタンの有効・無効を決める有無の問い合わせは、
     /// Undo データ（JSON）を読まない。6 年分の統合履歴を履歴を開くたびに読み直さず、壊れた Undo データで毎回 Warning を出さない。
     /// </summary>
     /// <remarks>
-    /// 読んでいれば true になる Undo データ（明細の内容あり）でも false のままであること、読めない Undo データでも
-    /// Warning を出さないことで「読まない」を観測する。対は上の ForUndo 版（同じ形の Undo データで true になる）。
+    /// 壊れた Undo データでも Warning を出さないことで「読まない」を観測する（読めば一覧の版と同じ Warning が出る）。
+    /// 一覧（<see cref="MergeHistoryEntry"/>）を返さないので、判定していない値から表示用アイテムを作る誤用もできない。
     /// </remarks>
     [Fact]
     [Trait("Category", "Unit")]
-    public async Task GetUndoableMergeHistoriesAsync_Undoデータを読まずに一覧を返すこと()
+    public async Task HasUndoableMergeHistoriesAsync_Undoデータを読まずに有無を返すこと()
     {
         var logger = new ICCardManager.Tests.Infrastructure.RecordingLogger<LedgerMergeService>();
         var service = new LedgerMergeService(
             _ledgerRepositoryMock.Object, _summaryGenerator, _operationLogger, _dbContext, logger);
-        var current = new LedgerMergeUndoData
-        {
-            OriginalTarget = new LedgerSnapshot { Id = 20 },
-            DetailSnapshots = new Dictionary<string, LedgerDetailSnapshot>(),
-            MergedTargetAmounts = new MergedTargetAmounts(),
-        };
         _ledgerRepositoryMock
             .Setup(x => x.GetMergeHistoriesAsync(false))
             .ReturnsAsync(new List<(int, DateTime, int, string, string, bool)>
             {
-                (2, DateTime.Now, 20, "新しい統合", JsonSerializer.Serialize(current), false),
+                (4, DateTime.Now, 40, "取り消し済み", "{}", true),
                 (5, DateTime.Now, 50, "読めない Undo データ", "not json", false),
             });
 
-        var result = await service.GetUndoableMergeHistoriesAsync();
-
-        result.Select(h => h.Id).Should().Equal(2, 5);
-        result.Should().OnlyContain(h => !h.CanVerifyChangesAfterMerge, "件数だけの一覧は Undo データを読んで判定しない");
-        result.Should().OnlyContain(h => h.UndoData == null);
+        (await service.HasUndoableMergeHistoriesAsync()).Should().BeTrue("取り消していない統合履歴が 1 件ある");
         logger.Entries.Should().NotContain(e => e.Level == LogLevel.Warning, "Undo データを読まないので、壊れていても Warning を出さない");
+
+        // 対: 同じ Undo データを一覧の版は読む（壊れていれば Warning を出す）。上の表明が空振りでないことの確認
+        await service.GetUndoableMergeHistoriesAsync();
+        logger.Entries.Should().Contain(e => e.Level == LogLevel.Warning);
+    }
+
+    /// <summary>
+    /// 有無の問い合わせは、取り消し済みの統合履歴だけなら false。
+    /// </summary>
+    [Fact]
+    [Trait("Category", "Unit")]
+    public async Task HasUndoableMergeHistoriesAsync_取り消し済みだけならfalseを返すこと()
+    {
+        _ledgerRepositoryMock
+            .Setup(x => x.GetMergeHistoriesAsync(false))
+            .ReturnsAsync(new List<(int, DateTime, int, string, string, bool)>
+            {
+                (1, DateTime.Now, 10, "統合A", "{}", true),
+            });
+
+        (await _service.HasUndoableMergeHistoriesAsync()).Should().BeFalse();
     }
 
     /// <summary>

@@ -178,8 +178,8 @@ public partial class HistoryPanelViewModel
     /// </summary>
     private async Task RefreshUndoMergeAvailabilityAsync()
     {
-        var histories = await _ledgerMergeService.GetUndoableMergeHistoriesAsync();
-        _hasUndoableMergeHistories = histories.Count > 0;
+        // Issue #2374: 履歴を開くたびに呼ばれるので、有無だけを問い合わせる（統合履歴の Undo データを読まない）
+        _hasUndoableMergeHistories = await _ledgerMergeService.HasUndoableMergeHistoriesAsync();
         UndoMergeHistoryLedgersCommand.NotifyCanExecuteChanged();
     }
 
@@ -189,17 +189,14 @@ public partial class HistoryPanelViewModel
     [RelayCommand(CanExecute = nameof(CanUndoMergeHistoryLedgers))]
     public async Task UndoMergeHistoryLedgers()
     {
-        // DBから元に戻せる統合履歴を取得（Issue #2374: 確認の文言を分けるため、ここでだけ Undo データを読んで判定する）
-        var histories = await _ledgerMergeService.GetUndoableMergeHistoriesForUndoAsync();
+        var items = await LoadUndoableMergeHistoryItemsAsync();
 
-        if (histories.Count == 0)
+        if (items.Count == 0)
         {
             _hasUndoableMergeHistories = false;
             UndoMergeHistoryLedgersCommand.NotifyCanExecuteChanged();
             return;
         }
-
-        var items = ToMergeHistoryItems(histories);
 
         // 選択ダイアログを表示
         var dialog = new Views.Dialogs.MergeHistoryDialog(items)
@@ -219,11 +216,22 @@ public partial class HistoryPanelViewModel
     }
 
     /// <summary>
+    /// 取り消す統合を選ぶ一覧（新しい順の表示用アイテム）を DB から読む。
+    /// </summary>
+    /// <remarks>
+    /// Issue #2374: 「統合を元に戻す」の経路そのもの（<see cref="UndoMergeHistoryLedgers"/> はダイアログの生成だけ）。
+    /// 一覧の取得（Undo データを読んで「確かめられるか」を判定する）と表示用アイテムへの変換を、単体テストから
+    /// この経路のまま通せるよう切り出している（ダイアログは <c>Window</c> を直接生成するため単体テストから踏めない）。
+    /// </remarks>
+    internal async Task<List<Views.Dialogs.MergeHistoryItem>> LoadUndoableMergeHistoryItemsAsync()
+        => ToMergeHistoryItems(await _ledgerMergeService.GetUndoableMergeHistoriesAsync());
+
+    /// <summary>
     /// 統合履歴を、新しい順の表示用アイテムにする。
     /// Issue #2374: 統合した後の変更を確かめられるか（<see cref="Services.MergeHistoryEntry.CanVerifyChangesAfterMerge"/>）を
     /// 確認の文言（<see cref="BuildUnmergeConfirmationMessage"/>）まで運ぶ。
     /// </summary>
-    internal static List<Views.Dialogs.MergeHistoryItem> ToMergeHistoryItems(IEnumerable<Services.MergeHistoryEntry> histories)
+    private static List<Views.Dialogs.MergeHistoryItem> ToMergeHistoryItems(IEnumerable<Services.MergeHistoryEntry> histories)
         => histories
             .OrderByDescending(h => h.MergedAt)
             .Select(h => new Views.Dialogs.MergeHistoryItem

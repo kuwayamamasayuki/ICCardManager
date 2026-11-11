@@ -845,8 +845,8 @@ public class HistoryPanelViewModelTests : IDisposable
             .Callback((string m, string _) => message = m)
             .Returns(true);
 
-        var histories = await _ledgerMergeService.GetUndoableMergeHistoriesForUndoAsync();
-        var item = HistoryPanelViewModel.ToMergeHistoryItems(histories).Single();
+        // 「統合を元に戻す」の経路（UndoMergeHistoryLedgers が呼ぶ一覧の読み込み）のまま通す
+        var item = (await _history.LoadUndoableMergeHistoryItemsAsync()).Single();
         var proceeded = await _history.ConfirmAndExecuteUnmergeAsync(item);
         return (message, proceeded);
     }

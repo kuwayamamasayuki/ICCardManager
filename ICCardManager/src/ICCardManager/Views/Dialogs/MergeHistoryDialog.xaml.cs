@@ -21,7 +21,7 @@ namespace ICCardManager.Views.Dialogs
         /// Issue #2374: 取り消しの前に、統合した後の変更を確かめられるか
         /// （<see cref="Services.LedgerMergeUndoData.CanVerifyChangesAfterMerge"/>）。
         /// false なら取り消しの確認で「変更していれば失われる」と警告する。
-        /// 既定は false（設定し忘れたときに警告しない側へ倒さない）。
+        /// 既定は false（設定し忘れても警告する側へ倒れる）。
         /// </summary>
         public bool CanVerifyChangesAfterMerge { get; set; }
     }

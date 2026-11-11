@@ -254,8 +254,7 @@ namespace ICCardManager.Services
 
         /// <summary>
         /// Issue #2374: 取り消しの前に、統合した後の変更を確かめられるか（<see cref="LedgerMergeUndoData.CanVerifyChangesAfterMerge"/>）。
-        /// 取り消しの一覧（<see cref="LedgerMergeService.GetUndoableMergeHistoriesForUndoAsync"/>）でも設定する（<see cref="UndoData"/> は設定しない）。
-        /// 件数だけの一覧（<see cref="LedgerMergeService.GetUndoableMergeHistoriesAsync"/>）は Undo データを読まないので判定せず false。
+        /// 一覧（<see cref="LedgerMergeService.GetUndoableMergeHistoriesAsync"/>）でも設定する（<see cref="UndoData"/> は設定しない）。
         /// Undo データを読めなかった場合は false（確かめられない側へ倒す）。
         /// </summary>
         public bool CanVerifyChangesAfterMerge { get; set; }
@@ -750,27 +749,29 @@ namespace ICCardManager.Services
             "一覧で新しい方の統合を先に取り消してから、この統合をもう一度取り消してください。";
 
         /// <summary>
+        /// 元に戻せる統合履歴があるか（「統合を元に戻す」ボタンの有効・無効の判定用）
+        /// </summary>
+        /// <remarks>
+        /// Issue #2374: 履歴を開くたびに呼ばれるため、Undo データ（JSON）は読まない（パフォーマンス。共有モードで 6 年分の
+        /// 統合履歴を毎回読み直さない・壊れた Undo データで毎回 Warning を出さない）。件数の用途に一覧（<see cref="MergeHistoryEntry"/>）を
+        /// 返さないのは、判定していない <see cref="MergeHistoryEntry.CanVerifyChangesAfterMerge"/>（false＝確かめられない）を持つ
+        /// 一覧から表示用アイテムを作ると、黙って全件に警告が出るため（誤用を構造的にできなくする）。
+        /// </remarks>
+        public async Task<bool> HasUndoableMergeHistoriesAsync()
+        {
+            var rawEntries = await _ledgerRepository.GetMergeHistoriesAsync(undoneOnly: false).ConfigureAwait(false);
+            return rawEntries.Any(e => !e.IsUndone);
+        }
+
+        /// <summary>
         /// 元に戻せる統合履歴の一覧を取得
         /// </summary>
         /// <remarks>
-        /// 履歴を開くたび（「統合を元に戻す」ボタンの有効・無効の判定）に呼ばれるため、Undo データ（JSON）は読まない
-        /// （パフォーマンス。UndoData は unmerge 実行時にのみロードする）。<see cref="MergeHistoryEntry.CanVerifyChangesAfterMerge"/>
-        /// は判定せず false のまま返す。取り消しの確認に使う一覧は <see cref="GetUndoableMergeHistoriesForUndoAsync"/> で取る（Issue #2374）。
+        /// Issue #2374: 各統合履歴の Undo データを読み、統合した後の変更を確かめられるか
+        /// （<see cref="MergeHistoryEntry.CanVerifyChangesAfterMerge"/>）を判定して載せる（取り消しの確認の文言を分けるため）。
+        /// 「統合を元に戻す」を押したときに呼ぶ。有無だけを知りたいときは <see cref="HasUndoableMergeHistoriesAsync"/> を使う。
         /// </remarks>
-        public Task<List<MergeHistoryEntry>> GetUndoableMergeHistoriesAsync()
-            => GetUndoableMergeHistoriesCoreAsync(judgeVerifiability: false);
-
-        /// <summary>
-        /// Issue #2374: 取り消す統合を選ぶ一覧を取得する。各統合履歴の Undo データを読み、
-        /// 統合した後の変更を確かめられるか（<see cref="MergeHistoryEntry.CanVerifyChangesAfterMerge"/>）を判定して載せる。
-        /// </summary>
-        /// <remarks>
-        /// 「統合を元に戻す」を押したときだけ呼ぶ（取り消しの確認の文言を分けるため）。
-        /// </remarks>
-        public Task<List<MergeHistoryEntry>> GetUndoableMergeHistoriesForUndoAsync()
-            => GetUndoableMergeHistoriesCoreAsync(judgeVerifiability: true);
-
-        private async Task<List<MergeHistoryEntry>> GetUndoableMergeHistoriesCoreAsync(bool judgeVerifiability)
+        public async Task<List<MergeHistoryEntry>> GetUndoableMergeHistoriesAsync()
         {
             var rawEntries = await _ledgerRepository.GetMergeHistoriesAsync(undoneOnly: false).ConfigureAwait(false);
             var result = new List<MergeHistoryEntry>();
@@ -789,7 +790,7 @@ namespace ICCardManager.Services
                     TargetLedgerId = targetLedgerId,
                     Description = description,
                     // UndoData は unmerge 実行時にのみ保持する（取り消しの一覧には判定結果だけを渡す）
-                    CanVerifyChangesAfterMerge = judgeVerifiability && CanVerifyChangesAfterMerge(id, undoDataJson)
+                    CanVerifyChangesAfterMerge = CanVerifyChangesAfterMerge(id, undoDataJson)
                 });
             }
 
