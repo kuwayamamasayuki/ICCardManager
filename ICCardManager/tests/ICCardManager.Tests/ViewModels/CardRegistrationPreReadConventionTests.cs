@@ -31,10 +31,28 @@ namespace ICCardManager.Tests.ViewModels;
 /// </remarks>
 public class CardRegistrationPreReadConventionTests
 {
-    /// <summary>カードの残高・利用履歴を読み取る呼び出し（受け手を問わない。別名に入れたカードリーダー経由も拾う）。</summary>
+    /// <summary>
+    /// カードの残高・利用履歴を読み取るメソッドの名前の出現（受け手を問わない。別名に入れたカードリーダー経由も拾う）。
+    /// </summary>
+    /// <remarks>
+    /// 呼び出しの括弧までは求めない。<c>Func&lt;string, Task&lt;int?&gt;&gt; read = _cardReader.ReadBalanceAsync;</c> のような
+    /// メソッドグループの受け渡しでも読み直せるため、名前が出たら数える（レビューで指摘）。
+    /// </remarks>
     private static readonly Regex CardReadCall = new Regex(
-        @"\b(?:ReadBalanceAsync|ReadHistoryAsync|TryReadHistoryAsync)\s*\(",
+        @"\b(?:ReadBalanceAsync|ReadHistoryAsync|TryReadHistoryAsync)\b",
         RegexOptions.Compiled);
+
+    /// <summary>検出パターンの検出力をサンプル入力で固定する（実データが違反 0 件でも空振りしないため。#1786）。</summary>
+    [Theory]
+    [InlineData("balance = await _cardReader.ReadBalanceAsync(cardIdm);", true)]
+    [InlineData("Func<string, Task<int?>> read = _cardReader.ReadBalanceAsync; balance = await read(cardIdm);", true)]
+    [InlineData("var r = _cardReader; var h = (await r.ReadHistoryAsync (idm))?.ToList();", true)]
+    [InlineData("balance = await CardRegistrationPreRead.ResolveBalanceAsync(_cardReader, cardIdm, balance);", false)]
+    [InlineData("_cardReader.CardRead += OnCardRead;", false)]
+    public void カードの読み取りの検出パターンが既知の入力を正しく分類すること(string code, bool expected)
+    {
+        CardReadCall.IsMatch(TestSourceInspection.ToCodeOnly(code)).Should().Be(expected);
+    }
 
     private const string SaveSignature = "public async Task SaveAsync(";
     private const string BuildInitialLedgerSignature = "private async Task<Ledger?> BuildInitialLedgerAsync(";

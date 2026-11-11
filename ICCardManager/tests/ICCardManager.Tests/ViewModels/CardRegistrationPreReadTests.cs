@@ -108,6 +108,19 @@ public class CardRegistrationPreReadTests
     }
 
     [Fact]
+    public async Task 残高の読み直しの例外はそのまま呼び出し元へ伝わること()
+    {
+        // 残高は例外を飲み込まない（呼び出し元の BuildInitialLedgerAsync が受け止め、初期レコードを作らずに登録だけを成功させる）。
+        // 利用履歴の読み直し（失敗を null にする）と扱いが違うので、ここで固定する
+        var reader = new Mock<ICardReader>();
+        reader.Setup(r => r.ReadBalanceAsync(Idm)).ThrowsAsync(new InvalidOperationException("カードが離れた"));
+
+        Func<Task> act = () => CardRegistrationPreRead.ResolveBalanceAsync(reader.Object, Idm, null);
+
+        (await act.Should().ThrowAsync<InvalidOperationException>()).WithMessage("カードが離れた");
+    }
+
+    [Fact]
     public async Task 利用履歴を事前に読み取れていれば利用履歴をカードから読み直さないこと()
     {
         var reader = new Mock<ICardReader>(MockBehavior.Strict);
