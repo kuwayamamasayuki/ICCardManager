@@ -422,7 +422,9 @@
       "filter": "FullyQualifiedName~TouchScreenshotTests.card_registration_mode_",
       "sources": [
         "ICCardManager/src/ICCardManager/Views/Dialogs/CardRegistrationModeDialog.xaml",
-        "ICCardManager/src/ICCardManager/Views/Dialogs/CardRegistrationModeDialog.xaml.cs"
+        "ICCardManager/src/ICCardManager/Views/Dialogs/CardRegistrationModeDialog.xaml.cs",
+        "ICCardManager/src/ICCardManager/Services/SummaryGenerator.cs",
+        "ICCardManager/src/ICCardManager/Common/PaperCarryoverPolicy.cs"
       ]
     },
     {
@@ -431,7 +433,10 @@
       "filter": "FullyQualifiedName~TouchScreenshotTests.card_registration_mode_",
       "sources": [
         "ICCardManager/src/ICCardManager/Views/Dialogs/CardRegistrationModeDialog.xaml",
-        "ICCardManager/src/ICCardManager/Views/Dialogs/CardRegistrationModeDialog.xaml.cs"
+        "ICCardManager/src/ICCardManager/Views/Dialogs/CardRegistrationModeDialog.xaml.cs",
+        "ICCardManager/src/ICCardManager/Services/SummaryGenerator.cs",
+        "ICCardManager/src/ICCardManager/Common/PaperCarryoverPolicy.cs",
+        "ICCardManager/tests/ICCardManager.UITests/Tests/TouchScreenshotTests.cs"
       ]
     }
   ]

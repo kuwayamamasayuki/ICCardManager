@@ -287,7 +287,10 @@ namespace ICCardManager.UITests.Tests
         {
             SkipUnlessDebugCapture();
 
-            using var fixture = AppFixture.LaunchWithSeed(ScreenshotSeedData.Seed);
+            // DEBUG ビルドの起動時テストデータは、DEBUG パネルの「交通系ICカード」と同じ IDm のカードを登録する。
+            // 登録済みだとカード登録方法の選択ダイアログが開かないため、撮影スクリプトを介さずに dotnet test で
+            // 動かしたときも撮影モード（起動時テストデータを止める）で起動する（CardRegistrationCarryoverUiTests と同じ）
+            using var fixture = AppFixture.LaunchWithSeed(ScreenshotSeedData.Seed, AppFixture.SuppressDebugTestData);
             ScreenshotHelper.MoveToTopLeft(fixture.MainWindow);
             var cardCountBefore = DatabaseProbe.Count("SELECT COUNT(*) FROM ic_card");
             var ledgerCountBefore = DatabaseProbe.Count("SELECT COUNT(*) FROM ledger");
