@@ -196,8 +196,12 @@ public class SettingsViewModelDatabasePathTests : IDisposable
     {
         var source = File.ReadAllText(Path.Combine(
             TestPaths.GetProductionSourceRoot(), "ViewModels", "SettingsViewModel.cs"));
-        var body = TestSourceInspection.ExtractMethodBody(
-            TestSourceInspection.ToCodeOnly(source), "private async Task SaveCoreAsync(SavePlan plan)");
+        var code = TestSourceInspection.ToCodeOnly(source);
+        var saveCore = TestSourceInspection.ExtractMethodBody(code, "private async Task SaveCoreAsync(SavePlan plan)");
+        // Issue #2388（レビュー 1 回目）: 部署種別の書き出しは、保存後に DB の値を決めるヘルパーへ移した
+        saveCore.Should().Contain("ApplySavedDepartmentTypeAsync(", "前提: 保存の本体が部署種別の反映を呼ぶ");
+        var body = saveCore + "\n" + TestSourceInspection.ExtractMethodBody(
+            code, "private async Task ApplySavedDepartmentTypeAsync(AppSettings saved, IReadOnlyCollection<string> savedKeys)");
 
         body.Should().Contain("ChangeDatabaseConfigAsync(DatabaseConfigPath,",
             "DB 保存先は注入された置き場所の database_config.txt へ保存する");

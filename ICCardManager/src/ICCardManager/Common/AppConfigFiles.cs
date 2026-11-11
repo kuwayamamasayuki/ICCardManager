@@ -31,6 +31,12 @@ namespace ICCardManager.Common
         public const string ReportOutputConfigFileName = "report_output_config.txt";
 
         /// <summary>
+        /// appsettings.json の <c>DatabaseOptions:Path</c> を database_config.txt へ移す判断を済ませた印（Issue #2389）。
+        /// 中身は診断用（移した値、または移さなかった理由）で、有無だけを判定に使う。
+        /// </summary>
+        public const string LegacyDatabasePathMigratedMarkerFileName = "database_path_migrated.txt";
+
+        /// <summary>
         /// データベース設定ファイルのフルパス。呼ばれるたびに解決する（置き場所の差し替えに追随するため）。
         /// </summary>
         public static string DatabaseConfigPath => GetPath(DatabaseConfigFileName);
@@ -40,6 +46,9 @@ namespace ICCardManager.Common
 
         /// <summary>帳票出力先設定ファイルのフルパス</summary>
         public static string ReportOutputConfigPath => GetPath(ReportOutputConfigFileName);
+
+        /// <summary>appsettings.json からの移行を済ませた印のフルパス（Issue #2389）</summary>
+        public static string LegacyDatabasePathMigratedMarkerPath => GetPath(LegacyDatabasePathMigratedMarkerFileName);
 
         /// <summary>
         /// アプリケーションデータのフォルダー配下にある設定ファイルのフルパス
@@ -53,39 +62,54 @@ namespace ICCardManager.Common
         /// Inno Setup の SaveStringToFile は Shift_JIS（ANSI）で書き込むが、
         /// アプリの File.WriteAllText は UTF-8 BOM 付きで書き込む。
         /// どちらでも正しく読めるよう、BOM で判定する。前後の空白は取り除く。
+        /// 「無い」と「読めない」を区別したいときは <see cref="TryRead"/> を使う。
         /// </remarks>
-        public static string Read(string filePath)
+        public static string Read(string filePath) => TryRead(filePath, out var value) ? value : string.Empty;
+
+        /// <summary>
+        /// 設定ファイルからテキストを読み込み、読めたかどうかを返す（Issue #2389）。
+        /// </summary>
+        /// <param name="filePath">読み込むファイル</param>
+        /// <param name="value">内容（前後の空白は取り除く）。ファイルが無い・読めない場合は空文字</param>
+        /// <returns>
+        /// ファイルが無い、または最後まで読めたら true。存在するのに読めなかった（ロック・アクセス権等）なら false。
+        /// 「空」と「読めなかった」は、空なら何かを書き込む処理（appsettings.json からの移行）では区別が要る —
+        /// 読めなかったファイルを空とみなして書き込むと、実際の設定を上書きしてしまう。
+        /// </returns>
+        public static bool TryRead(string filePath, out string value)
         {
+            value = string.Empty;
             if (!File.Exists(filePath))
             {
-                return string.Empty;
+                return true;
             }
 
             try
             {
                 var bytes = File.ReadAllBytes(filePath);
-                string value;
+                string text;
                 if (bytes.Length >= 3 && bytes[0] == 0xEF && bytes[1] == 0xBB && bytes[2] == 0xBF)
                 {
                     // UTF-8 BOM
-                    value = Encoding.UTF8.GetString(bytes, 3, bytes.Length - 3);
+                    text = Encoding.UTF8.GetString(bytes, 3, bytes.Length - 3);
                 }
                 else if (bytes.Length >= 2 && bytes[0] == 0xFF && bytes[1] == 0xFE)
                 {
                     // UTF-16 LE BOM
-                    value = Encoding.Unicode.GetString(bytes, 2, bytes.Length - 2);
+                    text = Encoding.Unicode.GetString(bytes, 2, bytes.Length - 2);
                 }
                 else
                 {
                     // BOMなし: Shift_JIS（Inno Setupが書いた場合）として読む
-                    value = Encoding.GetEncoding(932).GetString(bytes);
+                    text = Encoding.GetEncoding(932).GetString(bytes);
                 }
 
-                return value.Trim();
+                value = text.Trim();
+                return true;
             }
             catch
             {
-                return string.Empty;
+                return false;
             }
         }
 

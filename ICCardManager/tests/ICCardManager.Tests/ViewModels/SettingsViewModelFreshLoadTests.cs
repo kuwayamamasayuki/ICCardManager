@@ -234,7 +234,6 @@ public class SettingsViewModelFreshLoadTests : IDisposable
             repository,
             validation.Object,
             new Mock<ISoundPlayer>().Object,
-            Options.Create(new DatabaseOptions()),
             new Mock<IDialogService>().Object,
             new SummaryGenerator(DepartmentType.MayorOffice),
             new Mock<IStaffAuthService>().Object,

@@ -2,6 +2,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using FluentAssertions;
 using ICCardManager.Common;
 using ICCardManager.Data;
@@ -22,6 +23,8 @@ namespace ICCardManager.Tests.Data;
 /// （接続＝database_config.txt または appsettings.json、TTL＝database_config.txt のみ）。
 /// そのため appsettings.json で共有フォルダーを指すと、接続は共有モードなのに TTL が短縮されなかった。
 /// 本番と同じ登録（<see cref="DatabaseLocationResolver.Register"/>）を通して、両方の Options を表明する。
+/// Issue #2389 で appsettings.json の DatabaseOptions:Path は廃止し、入力は database_config.txt だけになった
+/// （旧版の値の移行は <c>LegacyDatabasePathMigrationTests</c>）。
 /// </remarks>
 public class DatabaseLocationResolverTests
 {
@@ -30,71 +33,51 @@ public class DatabaseLocationResolverTests
     private const string RelativePath = @"data\iccard.db";
 
     [Fact]
-    public void Register_appsettingsだけで共有フォルダーを指すと接続もTTLも共有モードになること()
+    public void Register_database_config_txtで共有フォルダーを指すと接続もTTLも共有モードになること()
     {
-        var (db, cache) = BuildOptions(configFile: null, appSettingsPath: UncPath);
+        var (db, cache) = BuildOptions(configFile: UncPath);
 
-        db.Path.Should().Be(UncPath, "DbContext は appsettings.json の値を開く");
+        db.Path.Should().Be(UncPath);
         cache.CardListSeconds.Should().Be(SharedModeCacheOptions().CardListSeconds,
             "接続が共有モードなら、TTL も共有モードの値へ短縮する（カード系の最長 TTL＝ヘルスチェック間隔 15 秒）");
         cache.LentCardsSeconds.Should().Be(SharedModeCacheOptions().LentCardsSeconds);
     }
 
     [Fact]
-    public void Register_database_config_txtで共有フォルダーを指すと接続もTTLも共有モードになること()
+    public void Register_database_config_txtがローカルならTTLを短縮しないこと()
     {
-        var (db, cache) = BuildOptions(configFile: UncPath, appSettingsPath: "");
+        var (db, cache) = BuildOptions(configFile: LocalPath);
 
-        db.Path.Should().Be(UncPath);
-        cache.CardListSeconds.Should().Be(SharedModeCacheOptions().CardListSeconds, "従来の経路（#1597）も短縮される");
+        db.Path.Should().Be(LocalPath);
+        cache.CardListSeconds.Should().Be(new CacheOptions().CardListSeconds, "TTL の判定も実際に開くパス（ローカル）で行う");
     }
 
     [Fact]
-    public void Register_database_config_txtがappsettingsより優先され_TTLもそのパスで判定すること()
+    public void Register_database_config_txtが空なら既定のローカルDBでTTLを短縮しないこと()
     {
-        // appsettings.json は共有フォルダー、database_config.txt はローカル → 開くのはローカルなので短縮しない
-        var (db, cache) = BuildOptions(configFile: LocalPath, appSettingsPath: UncPath);
-
-        db.Path.Should().Be(LocalPath, "database_config.txt が優先される");
-        cache.CardListSeconds.Should().Be(new CacheOptions().CardListSeconds,
-            "TTL の判定も実際に開くパス（ローカル）で行い、使われない appsettings.json の値を見ない");
-    }
-
-    [Fact]
-    public void Register_どちらも空なら既定のローカルDBでTTLを短縮しないこと()
-    {
-        var (db, cache) = BuildOptions(configFile: null, appSettingsPath: "");
+        var (db, cache) = BuildOptions(configFile: null);
 
         db.Path.Should().BeEmpty("空は既定のローカル DB");
         cache.CardListSeconds.Should().Be(new CacheOptions().CardListSeconds);
     }
 
     [Fact]
-    public void Register_appsettingsの値が形式不正なら使わず既定のDBで起動すること()
+    public void Register_database_config_txtの値が形式不正なら使わず既定のDBで起動すること()
     {
         ResolvedDatabasePath? resolved = null;
-        var (db, _) = BuildOptions(configFile: null, appSettingsPath: RelativePath, r => resolved = r);
+        var (db, _) = BuildOptions(configFile: RelativePath, r => resolved = r);
 
-        db.Path.Should().BeEmpty("形式不正の appsettings.json の値をそのまま DbContext へ渡さない（#1599 と同じ扱い）");
+        db.Path.Should().BeEmpty("形式不正の値をそのまま DbContext へ渡さない（#1599）");
         resolved.Should().NotBeNull();
         resolved!.Rejected.Should().ContainSingle()
             .Which.Should().Match<RejectedDatabasePath>(r =>
-                r.Source == DatabaseLocationResolver.AppSettingsSource && r.Value == RelativePath);
-    }
-
-    [Fact]
-    public void Resolve_database_config_txtが形式不正ならappsettingsの値で起動し_両方を区別して記録すること()
-    {
-        var result = DatabaseLocationResolver.Resolve(RelativePath, LocalPath);
-
-        result.Path.Should().Be(LocalPath);
-        result.Rejected.Should().ContainSingle().Which.Source.Should().Be(DatabaseLocationResolver.ConfigFileSource);
+                r.Source == DatabaseLocationResolver.ConfigFileSource && r.Value == RelativePath);
     }
 
     [Fact]
     public void Resolve_形式が正しい値は棄却を記録しないこと()
     {
-        var result = DatabaseLocationResolver.Resolve(UncPath, LocalPath);
+        var result = DatabaseLocationResolver.Resolve(UncPath);
 
         result.Path.Should().Be(UncPath);
         result.Rejected.Should().BeEmpty();
@@ -105,7 +88,7 @@ public class DatabaseLocationResolverTests
     {
         var calls = 0;
         var services = new ServiceCollection();
-        DatabaseLocationResolver.Register(services, BuildConfiguration(""), () =>
+        DatabaseLocationResolver.Register(services, () =>
         {
             calls++;
             return UncPath;
@@ -119,18 +102,15 @@ public class DatabaseLocationResolverTests
     }
 
     [Fact]
-    public void BuildRejectedWarningMessage_棄却した設定ファイルと実際に使った保存先を示すこと()
+    public void BuildRejectedWarningMessage_棄却した設定ファイルと既定の保存先で起動したことを示すこと()
     {
-        var viaAppSettings = DatabaseLocationResolver.Resolve(RelativePath, LocalPath);
-        var viaDefault = DatabaseLocationResolver.Resolve(RelativePath, null);
+        var resolution = DatabaseLocationResolver.Resolve(RelativePath);
 
-        DatabaseLocationResolver.BuildRejectedWarningMessage(viaAppSettings)
+        DatabaseLocationResolver.BuildRejectedWarningMessage(resolution)
             .Should().Contain(DatabaseLocationResolver.ConfigFileSource)
             .And.Contain(RelativePath)
-            .And.Contain($"保存先「{LocalPath}」で起動しました", "既定ではない保存先で起動したことを偽らない")
+            .And.Contain("既定の保存先で起動しました")
             .And.EndWith("してください。");
-        DatabaseLocationResolver.BuildRejectedWarningMessage(viaDefault)
-            .Should().Contain("既定の保存先で起動しました");
     }
 
     [Fact]
@@ -148,26 +128,68 @@ public class DatabaseLocationResolverTests
     }
 
     /// <summary>
-    /// 起動失敗のダイアログに添えるパスは、接続と同じ解決結果であること（Issue #2328 のレビューで検出）。
+    /// Issue #2389: appsettings.json の DatabaseOptions:Path は廃止し、起動時の移行（LegacyDatabasePathMigration）でだけ読む。
     /// </summary>
     /// <remarks>
-    /// 旧実装は database_config.txt を直接表示しており、appsettings.json だけで共有フォルダーを指す構成では空、
-    /// database_config.txt が形式不正で棄却された構成では実際には開いていないパスを示していた。
+    /// 対の表明: 起動処理が移行を経由していること／移行以外のファイルが appsettings.json の DatabaseOptions を読んでいないこと
+    /// （直接読む経路が残ると、設定画面の欄・「デフォルトに戻す」と実際に開く DB の食い違いが戻る）。
+    /// 走査対象は本体のソース全体から導出する。キーは文字列リテラルなので、コメントだけを除いてリテラルを残した形で照合する
+    /// （「DatabaseOptions:Path を廃止した」と説明するコメントを違反と数えない）。
     /// </remarks>
-    [Theory]
-    [InlineData(null, UncPath, UncPath)]              // appsettings だけで指す（旧実装は空）
-    [InlineData(RelativePath, LocalPath, LocalPath)]  // database_config.txt を棄却（旧実装は棄却した値）
-    [InlineData(UncPath, LocalPath, UncPath)]         // database_config.txt が優先（正当な側）
-    public void DescribePathForStartupError_接続と同じ解決結果のパスを示すこと(
-        string? configFile, string? appSettings, string expected)
+    [Fact]
+    public void appsettingsのDBパスは移行を通してだけ読むこと()
     {
-        DatabaseLocationResolver.DescribePathForStartupError(configFile, appSettings).Should().Be(expected);
+        var root = TestPaths.GetProductionSourceRoot();
+        var app = TestSourceInspection.ToCodeOnly(File.ReadAllText(Path.Combine(root, "App.xaml.cs")));
+        app.Should().Contain("LegacyDatabasePathMigration.Run(");
+        app.Should().Contain("Configuration[LegacyDatabasePathMigration.AppSettingsKey]");
+
+        var readers = Directory.GetFiles(root, "*.cs", SearchOption.AllDirectories)
+            .Where(f => !f.Contains(Path.DirectorySeparatorChar + "obj" + Path.DirectorySeparatorChar)
+                && !f.Contains(Path.DirectorySeparatorChar + "bin" + Path.DirectorySeparatorChar))
+            .Where(f => TestSourceInspection.RemoveCommentsPreservingLines(File.ReadAllText(f)).Contains("\"DatabaseOptions"))
+            .Select(Path.GetFileName)
+            .ToList();
+        readers.Should().Equal(new[] { "LegacyDatabasePathMigration.cs" },
+            "appsettings.json の DatabaseOptions を読むのは移行だけ（キーの定義もそこにある）");
+
+        var code = File.ReadAllText(Path.Combine(root, "Data", "DatabaseLocationResolver.cs"));
+        TestSourceInspection.ToCodeOnly(code).Should().NotContain("IConfiguration",
+            "解決は appsettings.json を受け取らない（database_config.txt だけで決める）");
     }
 
     [Fact]
-    public void DescribePathForStartupError_既定のときは既定のパスを示すこと()
+    public void 配布するappsettingsにDatabaseOptionsを置かないこと()
     {
-        var description = DatabaseLocationResolver.DescribePathForStartupError(RelativePath, null);
+        var configuration = new ConfigurationBuilder()
+            .AddJsonFile(Path.Combine(TestPaths.GetProductionSourceRoot(), "appsettings.json"), optional: false)
+            .Build();
+
+        configuration["Logging:File:Enabled"].Should().NotBeNull("前提: 同じファイルの読まれている項目は読める");
+        configuration.GetSection("DatabaseOptions").Exists().Should().BeFalse(
+            "廃止した項目を配布物に残すと、IT 担当者が保存先をそこへ書けると誤解する");
+    }
+
+    /// <summary>
+    /// 起動失敗のダイアログに添えるパスは、接続と同じ解決結果であること（Issue #2328 のレビューで検出）。
+    /// </summary>
+    /// <remarks>
+    /// 旧実装は database_config.txt を直接表示しており、形式不正で棄却された構成では実際には開いていないパスを示していた。
+    /// </remarks>
+    [Theory]
+    [InlineData(UncPath, UncPath)]
+    [InlineData(LocalPath, LocalPath)]
+    public void DescribePathForStartupError_接続と同じ解決結果のパスを示すこと(string configFile, string expected)
+    {
+        DatabaseLocationResolver.DescribePathForStartupError(configFile).Should().Be(expected);
+    }
+
+    [Theory]
+    [InlineData(RelativePath)]
+    [InlineData(null)]
+    public void DescribePathForStartupError_既定のときは既定のパスを示すこと(string? configFile)
+    {
+        var description = DatabaseLocationResolver.DescribePathForStartupError(configFile);
 
         description.Should().Contain(DbContext.DatabaseFileName).And.EndWith("（既定）",
             "空欄だと何を開こうとしたか分からない。棄却した値も示さない");
@@ -181,17 +203,12 @@ public class DatabaseLocationResolverTests
         return options;
     }
 
-    private static IConfiguration BuildConfiguration(string appSettingsPath) =>
-        new ConfigurationBuilder()
-            .AddInMemoryCollection(new Dictionary<string, string?> { ["DatabaseOptions:Path"] = appSettingsPath })
-            .Build();
-
     private static (DatabaseOptions Db, CacheOptions Cache) BuildOptions(
-        string? configFile, string appSettingsPath, Action<ResolvedDatabasePath>? onResolved = null)
+        string? configFile, Action<ResolvedDatabasePath>? onResolved = null)
     {
         var services = new ServiceCollection();
         services.Configure<CacheOptions>(_ => { });
-        DatabaseLocationResolver.Register(services, BuildConfiguration(appSettingsPath), () => configFile, onResolved);
+        DatabaseLocationResolver.Register(services, () => configFile, onResolved);
         using var provider = services.BuildServiceProvider();
 
         return (provider.GetRequiredService<IOptions<DatabaseOptions>>().Value,

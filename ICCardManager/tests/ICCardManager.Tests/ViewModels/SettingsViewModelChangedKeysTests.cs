@@ -42,6 +42,10 @@ public sealed class SettingsViewModelChangedKeysTests : IDisposable
     private readonly SettingsRepository _otherPc;
     private readonly string _configDirectory;
     private readonly List<IReadOnlyCollection<string>> _savedKeys = new();
+    private readonly SummaryGenerator _summaryGenerator = new(DepartmentType.MayorOffice);
+
+    /// <summary>保存の結果を画面へそのまま返すか（false なら、書いたうえで「失敗」を返す。クラスの remarks）</summary>
+    private bool _reportSaveResult;
 
     public SettingsViewModelChangedKeysTests()
     {
@@ -181,6 +185,93 @@ public sealed class SettingsViewModelChangedKeysTests : IDisposable
         (await _thisPc.GetAsync("sound_mode")).Should().Be("unknown_mode", "職員が変えていない項目は書かない");
     }
 
+    /// <summary>
+    /// レビュー 1 回目: 部署種別を変えずに保存したら、摘要生成器と department_config.txt へは画面の古い値ではなく DB の値を反映すること。
+    /// </summary>
+    /// <remarks>
+    /// department_config.txt は起動のたびに DB へ無条件に適用される（<c>App.ApplyDepartmentConfigFromFileAsync</c>）。画面の古い値
+    /// （市長事務部局）を書くと、この PC の再起動で、他の PC が変えた共有 DB の部署種別が戻る（DB へ書かなくした巻き戻りが先送りされるだけ）。
+    /// </remarks>
+    [Fact]
+    public async Task 部署種別を変えずに保存したら_他のPCが変えた部署種別をファイルと摘要生成器へ反映すること()
+    {
+        var viewModel = await OpenAsync();
+        (await _otherPc.SetAsync("department_type", "enterprise_account")).Should().BeTrue();
+
+        viewModel.SelectedFontSizeItem = viewModel.FontSizeOptions.Single(x => x.Value == FontSizeOption.Large);
+        await SaveReportingSuccessAsync(viewModel);
+
+        _savedKeys.Should().ContainSingle().Which.Should().Equal("font_size");
+        File.ReadAllText(Path.Combine(_configDirectory, "department_config.txt")).Trim().Should().Be(
+            "enterprise_account",
+            "画面の古い値を書くと、この PC の再起動で共有 DB の部署種別が戻る");
+        _summaryGenerator.Generate(ChargeOnlyDetails()).Should().Be(
+            new SummaryGenerator(DepartmentType.EnterpriseAccount).Generate(ChargeOnlyDetails()),
+            "摘要生成器も DB の部署種別で動かす");
+    }
+
+    /// <summary>
+    /// 対の表明: 部署種別を変えて保存したら、変えた値をファイルと摘要生成器へ反映すること。
+    /// </summary>
+    [Fact]
+    public async Task 部署種別を変えて保存したら変えた値をファイルと摘要生成器へ反映すること()
+    {
+        var viewModel = await OpenAsync();
+
+        viewModel.SelectedDepartmentTypeItem = viewModel.DepartmentTypeOptions.Single(x => x.Value == DepartmentType.EnterpriseAccount);
+        await SaveReportingSuccessAsync(viewModel);
+
+        File.ReadAllText(Path.Combine(_configDirectory, "department_config.txt")).Trim().Should().Be("enterprise_account");
+        _summaryGenerator.Generate(ChargeOnlyDetails()).Should().Be(
+            new SummaryGenerator(DepartmentType.EnterpriseAccount).Generate(ChargeOnlyDetails()));
+    }
+
+    /// <summary>
+    /// レビュー 1 回目: 保存に成功したら、その値を次の保存の基準にすること。
+    /// </summary>
+    /// <remarks>
+    /// 基準を開いたときの値のまま残すと、A → B を保存した後に B → A を保存したとき「変えた項目なし」と判定し、
+    /// DB は B のまま「設定を保存しました」と案内する（データベース保存先を変えたときは画面を閉じないので、続けて保存できる）。
+    /// </remarks>
+    [Fact]
+    public async Task 保存に成功したら次の保存は保存した値と比べること()
+    {
+        var viewModel = await OpenAsync();
+        viewModel.WarningBalance.Should().Be(10000, "前提: 開いたときは既定値");
+
+        viewModel.WarningBalance = 3000;
+        await SaveReportingSuccessAsync(viewModel);
+        viewModel.WarningBalance = 10000;
+        await SaveReportingSuccessAsync(viewModel);
+
+        _savedKeys.Should().HaveCount(2);
+        _savedKeys[1].Should().Equal(new[] { "warning_balance" }, "1 回目に保存した 3,000 円から戻したので変えた項目");
+        (await _thisPc.GetAsync("warning_balance")).Should().Be("10000");
+    }
+
+    /// <summary>
+    /// 保存の成功を画面へ返して、成功の後処理を通す。WPF 依存の反映（<c>App.ApplyFontSize</c>）だけを読み飛ばす
+    /// （<c>SettingsViewModelTests.SaveIgnoringWpfOnlyReflectionAsync</c> と同じ。部署種別の反映と基準の更新はこれより前にある）。
+    /// </summary>
+    private async Task SaveReportingSuccessAsync(SettingsViewModel viewModel)
+    {
+        _reportSaveResult = true;
+        try
+        {
+            await viewModel.SaveAsync();
+        }
+        catch (NullReferenceException)
+        {
+            // WPF アプリケーション未起動によるもの
+        }
+    }
+
+    /// <summary>チャージのみの明細（部署種別で摘要が変わる）</summary>
+    private static List<LedgerDetail> ChargeOnlyDetails() => new()
+    {
+        new LedgerDetail { UseDate = new DateTime(2026, 4, 1), Amount = -3000, Balance = 5000, IsCharge = true },
+    };
+
     private async Task<SettingsViewModel> OpenAsync()
     {
         var repository = new Mock<ISettingsRepository>();
@@ -192,7 +283,7 @@ public sealed class SettingsViewModelChangedKeysTests : IDisposable
             {
                 _savedKeys.Add(keys.ToList());
                 (await _thisPc.SaveAppSettingsAsync(settings, keys)).Should().BeTrue();
-                return false; // 成功の後処理（WPF 依存）へ進ませない（クラスの remarks）
+                return _reportSaveResult; // 既定は false: 成功の後処理（WPF 依存）へ進ませない（クラスの remarks）
             });
 
         var validation = new Mock<IValidationService>();
@@ -205,7 +296,7 @@ public sealed class SettingsViewModelChangedKeysTests : IDisposable
             validation.Object,
             new Mock<ISoundPlayer>().Object,
             new Mock<IDialogService>().Object,
-            new SummaryGenerator(DepartmentType.MayorOffice),
+            _summaryGenerator,
             new Mock<IStaffAuthService>().Object,
             new Mock<ISettingsChangeService>().Object,
             _configDirectory);

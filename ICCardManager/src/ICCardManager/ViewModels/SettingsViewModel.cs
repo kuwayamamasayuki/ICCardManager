@@ -12,7 +12,6 @@ using ICCardManager.Data.Repositories;
 using ICCardManager.Infrastructure.Sound;
 using ICCardManager.Models;
 using ICCardManager.Services;
-using Microsoft.Extensions.Options;
 using Microsoft.Win32;
 
 
@@ -282,7 +281,6 @@ public partial class SettingsViewModel : ViewModelBase
         ISettingsRepository settingsRepository,
         IValidationService validationService,
         ISoundPlayer soundPlayer,
-        IOptions<DatabaseOptions> databaseOptions, // DI互換のため引数を維持（本体では未使用）
         IDialogService dialogService,
         SummaryGenerator summaryGenerator,
         IStaffAuthService staffAuthService,
@@ -337,7 +335,9 @@ public partial class SettingsViewModel : ViewModelBase
         _settingsChangeService = settingsChangeService ?? throw new ArgumentNullException(nameof(settingsChangeService));
         _configDirectory = configDirectory;
         // database_config.txtから直接読む（設定ファイルが正。DI経由のDatabaseOptionsは
-        // アプリ起動時に固定されるため、同一セッション中に設定変更しても反映されない）
+        // アプリ起動時に固定されるため、同一セッション中に設定変更しても反映されない）。
+        // Issue #2389: 保存先を決めるのはこのファイルだけ（appsettings.json の DatabaseOptions:Path は廃止）なので、
+        // 欄の値と実際に開く DB（再起動後）が食い違わない
         var fullPath = AppConfigFiles.Read(DatabaseConfigPath);
         _originalDatabasePath = ExtractDirectoryPath(fullPath);
         _databasePath = _originalDatabasePath;
@@ -811,16 +811,10 @@ public partial class SettingsViewModel : ViewModelBase
                 // 保存した値を次の保存の基準にする（DB 保存先を変えたときは画面を閉じないため、続けて保存できる）
                 _loadedEditableSettings = settings;
 
-                // 部署種別の変更を摘要生成器へ反映（Issue #1975）
-                // 保存成功時だけ反映する（順序を逆にすると「保存できませんでした」と
-                // 案内しながら摘要生成だけ新しい部署種別で動く。#1905 と同じ判断）。
-                // これを省くと、履歴統合・履歴分割・返却時の台帳生成・明細編集の
-                // 摘要再生成がアプリ再起動まで旧設定でチャージ摘要を作り、
-                // 「役務費によりチャージ」が 6 年保存の台帳へ入る。
-                // UI 装飾の反映（文字サイズ・トースト位置）より前に置くのは、
-                // それらが失敗しても台帳へ効く反映だけは確定させるため
-                // （development-conventions.md「コミット確定後の後処理を、成否の判定に巻き込まない」）
-                _summaryGenerator.ApplyDepartmentType(settings.DepartmentType);
+                // 部署種別の反映（摘要生成器・department_config.txt）。台帳へ効く反映なので、UI 装飾の反映（文字サイズ・
+                // トースト位置）より前に置く（それらが失敗しても、この反映だけは確定させる。
+                // development-conventions.md「コミット確定後の後処理を、成否の判定に巻き込まない」）
+                await ApplySavedDepartmentTypeAsync(settings, changedKeys);
 
                 // 文字サイズの変更を反映
                 ApplyFontSize(settings.FontSize);
@@ -830,21 +824,6 @@ public partial class SettingsViewModel : ViewModelBase
 
                 // トースト位置の変更を反映
                 App.ApplyToastPosition(settings.ToastPosition);
-
-                // 部署種別を設定ファイルに保存（インストーラーがアップグレード時に読み込む）
-                // Issue #2388: 部署種別を変えていなくても、従来どおり画面の値（開いたときの DB の値）を書く。このファイルは起動のたびに
-                // DB へ適用されるので（App.ApplyDepartmentConfigFromFileAsync）、変えたときだけ書くと、インストール時の古い値が
-                // 残り続けた PC が再起動で共有 DB の部署種別を戻す。画面の値で書けば、開いた時点の DB の値にそろう
-                try
-                {
-                    AppConfigFiles.Write(
-                        DepartmentConfigPath,
-                        SettingsRepository.DepartmentTypeToString(settings.DepartmentType));
-                }
-                catch
-                {
-                    // 非致命的: DBが正なので設定ファイルの書き込み失敗は無視
-                }
 
                 if (plan.NewDatabaseFolder != null)
                 {
@@ -862,6 +841,61 @@ public partial class SettingsViewModel : ViewModelBase
                     plan.ChangesSecuritySettings ? BuildPartialSaveFailureMessage(plan) : "設定の保存に失敗しました",
                     true);
             }
+        }
+    }
+
+    /// <summary>
+    /// 保存に成功した後、DB にある部署種別を摘要生成器と <c>department_config.txt</c> へ反映する（Issue #1975 / #2388）
+    /// </summary>
+    /// <param name="saved">保存した画面の値</param>
+    /// <param name="savedKeys">実際に書いたキー</param>
+    /// <remarks>
+    /// <para>
+    /// 摘要生成器へ反映しないと、履歴統合・分割・返却時の台帳生成・明細編集の摘要再生成がアプリ再起動まで旧設定で
+    /// チャージ摘要を作り、誤った「役務費／旅費によりチャージ」が 6 年保存の台帳へ入る（#1975）。保存成功時だけ反映する
+    /// （順序を逆にすると「保存できませんでした」と案内しながら摘要生成だけ新しい部署種別で動く。#1905 と同じ判断）。
+    /// </para>
+    /// <para>
+    /// 部署種別を変えなかった保存では、<b>画面の値ではなく DB を読み直した値</b>を使う（#2388 のレビューで検出）。画面を開いている間に
+    /// 他の PC が部署種別を変えていると、画面の値は古い。<c>department_config.txt</c> は起動のたびに DB へ無条件に適用される
+    /// （<c>App.ApplyDepartmentConfigFromFileAsync</c>）ため、古い値を書くと、この PC の再起動で共有 DB の部署種別が戻る
+    /// （DB へ書かなくした巻き戻りが、再起動まで先送りされるだけになる）。変えたときは、いま書いた値をそのまま使う。
+    /// 読み直しに失敗したときは、どちらへも反映しない（保存は確定済み。古い値で書くよりは、前の状態のまま残す方が害が小さい）。
+    /// </para>
+    /// </remarks>
+    private async Task ApplySavedDepartmentTypeAsync(AppSettings saved, IReadOnlyCollection<string> savedKeys)
+    {
+        DepartmentType departmentType;
+        if (savedKeys.Contains(SettingsRepository.KeyDepartmentType))
+        {
+            departmentType = saved.DepartmentType;
+        }
+        else
+        {
+            try
+            {
+                _settingsRepository.InvalidateCache();
+                departmentType = (await Task.Run(() => _settingsRepository.GetAppSettingsAsync())).DepartmentType;
+            }
+            catch (Exception ex)
+            {
+                ErrorDialogHelper.LogException(ex, "保存後の部署種別の読み直し");
+                return;
+            }
+        }
+
+        _summaryGenerator.ApplyDepartmentType(departmentType);
+
+        // 部署種別を設定ファイルに保存（インストーラーがアップグレード時に読み込み、起動時に DB へ適用する）
+        try
+        {
+            AppConfigFiles.Write(
+                DepartmentConfigPath,
+                SettingsRepository.DepartmentTypeToString(departmentType));
+        }
+        catch
+        {
+            // 非致命的: DBが正なので設定ファイルの書き込み失敗は無視
         }
     }
 
