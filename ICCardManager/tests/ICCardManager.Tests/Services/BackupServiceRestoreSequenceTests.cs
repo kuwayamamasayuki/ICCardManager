@@ -1,6 +1,7 @@
 #nullable enable
 using System;
 using System.Collections.Generic;
+using System.Data.SQLite;
 using System.IO;
 using System.Linq;
 using System.Text;
@@ -365,6 +366,65 @@ public class BackupServiceRestoreSequenceTests : IDisposable
         using var command = lease.Connection.CreateCommand();
         command.CommandText = "SELECT COUNT(*) FROM ledger";
         Convert.ToInt64(await command.ExecuteScalarAsync()).Should().Be(1, "バックアップの内容に置き換わっている");
+    }
+
+    /// <summary>
+    /// リストア前の DB の採番に数値でない値が入っていて読めなくても（SQLite のエラー以外の例外でも）、リストアは止めずに完了すること。
+    /// </summary>
+    [Fact]
+    public async Task リストア前の採番が数値でなくてもリストアは完了すること()
+    {
+        await SeedCardAsync();
+        await InsertChargeAsync(new DateTime(2025, 1, 10), 10000, 10000);
+        CreateBackup();
+        await ExecuteAsync("UPDATE sqlite_sequence SET seq = 'abc' WHERE name = 'ledger'");
+
+        _service.RestoreFromBackup(_backupPath).Should().BeTrue(_logger.FormatEntries());
+
+        _logger.Entries.Should().Contain(e => e.Level == LogLevel.Warning && e.Message.Contains("採番"));
+        (await ScalarAsync("SELECT COUNT(*) FROM ledger")).Should().Be(1, "バックアップの内容に置き換わっている");
+    }
+
+    #endregion
+
+    #region 一時コピーへ書けないとき
+
+    /// <summary>
+    /// 一時コピーの採番を書き込めなかったら（ディスク不足等）、書きかけの一時コピーで本番を置き換えず、リストアを中止すること。
+    /// 現在の DB はそのまま残る。
+    /// </summary>
+    [Fact]
+    public async Task 一時コピーへ採番を書けなければリストアを中止し現在のDBを残すこと()
+    {
+        await SeedCardAsync();
+        await InsertChargeAsync(new DateTime(2025, 1, 10), 10000, 10000);
+        CreateBackup();
+        var afterBackupId = await InsertUsageAsync(new DateTime(2025, 1, 11), "天神", "博多", 210, 9790);
+
+        var logger = new RecordingLogger<BackupService>();
+        var service = new FailingSequenceWriteBackupService(_dbContext, Mock.Of<ISettingsRepository>(), logger);
+
+        service.RestoreFromBackup(_backupPath).Should().BeFalse("書きかけの一時コピーで置き換えてはならない");
+
+        service.WriteAttempted.Should().BeTrue("前提: 一時コピーへの書き込みまで進んでいる");
+        logger.Entries.Should().Contain(e => e.Level == LogLevel.Error && e.Message.Contains("リストアを中止"));
+        (await _ledgerRepository.GetByIdAsync(afterBackupId)).Should().NotBeNull("現在の DB は置き換えられていない");
+    }
+
+    private sealed class FailingSequenceWriteBackupService : BackupService
+    {
+        public FailingSequenceWriteBackupService(DbContext dbContext, ISettingsRepository settingsRepository, ILogger<BackupService> logger)
+            : base(dbContext, settingsRepository, logger)
+        {
+        }
+
+        public bool WriteAttempted { get; private set; }
+
+        internal override void RaiseAutoincrementSequences(string stagedCopyPath, IReadOnlyDictionary<string, long> currentSequences)
+        {
+            WriteAttempted = true;
+            throw new SQLiteException(SQLiteErrorCode.Full, "database or disk is full");
+        }
     }
 
     #endregion

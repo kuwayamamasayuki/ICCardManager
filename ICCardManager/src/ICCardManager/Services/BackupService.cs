@@ -579,7 +579,11 @@ namespace ICCardManager.Services
 
                     // Issue #2379: 置き換える一時コピーの採番（sqlite_sequence）を、リストア前の DB の値より戻さない。
                     // 現在の DB を退避する前（何も書き換えていない段）に、一時コピーだけを書き換える。
-                    CarryForwardAutoincrementSequences(targetPath, stagedCopyPath);
+                    // 一時コピーへ書けなかったときは、書きかけの一時コピーで置き換えないようリストアを中止する。
+                    if (!CarryForwardAutoincrementSequences(targetPath, stagedCopyPath))
+                    {
+                        return false;
+                    }
 
                     // 現在のDBを退避
                     if (File.Exists(targetPath))
@@ -697,19 +701,27 @@ namespace ICCardManager.Services
         /// </para>
         /// <para>
         /// 書き換えるのは一時コピーだけで、リストア前の DB は読むだけ。退避・置き換えより前に済ませるため、
-        /// 置き換えに失敗して元の DB を戻す経路（Issue #2106）には影響しない。一時コピーへの書き込みは 1 つのトランザクションで行い、
-        /// 失敗すれば一時コピーは検証した内容のまま残る。共有モードでは呼び出し元が他の PC の接続が無いことを確かめた後に呼ぶ。
+        /// 置き換えに失敗して元の DB を戻す経路（Issue #2106）には影響しない。一時コピーへの書き込みは 1 つのトランザクションで行う。
+        /// 共有モードでは呼び出し元が他の PC の接続が無いことを確かめた後に呼ぶ。
         /// </para>
         /// <para>
-        /// <b>読めない・書けないときはリストアを止めない</b>（Warning ログを残して従来どおり置き換える）。
-        /// リストアは DB が壊れたときの復旧手段で、壊れた DB からは採番を読めないことがある。採番を進められないことで復旧を塞ぐ害のほうが大きい。
+        /// <b>リストア前の DB から読めないときはリストアを止めない</b>（Warning ログを残して従来どおり置き換える）。
+        /// リストアは DB が壊れたときの復旧手段で、壊れた DB からは採番を読めないことがある（SQLite のエラーに限らず、
+        /// <c>seq</c> に数値でない値が入っている等も含め、致命的でない例外はすべて続行する）。採番を進められないことで復旧を塞ぐ害のほうが大きい。
+        /// </para>
+        /// <para>
+        /// <b>一時コピーへ書けないときはリストアを中止する</b>（<c>false</c> を返す。Error ログを残す）。ディスク不足等でコミットの途中に失敗し
+        /// ロールバックもできないと、一時コピーの本体が書きかけのままジャーナルだけが残り、続く置き換え（<c>File.Copy</c> は本体しか写さない）が
+        /// 壊れた DB で本番を置き換え得る。書き込みの失敗は現在の DB の破損とは無関係なので、「復旧を塞がない」理由も当てはまらない。
+        /// この段ではまだ現在の DB を退避していないので、中止しても何も書き換わっていない。
         /// </para>
         /// </remarks>
-        internal void CarryForwardAutoincrementSequences(string currentDatabasePath, string stagedCopyPath)
+        /// <returns>置き換えを続けてよければ <c>true</c>（採番を進めた・進める必要が無い・リストア前の DB を読めなかった）。一時コピーへ書けなければ <c>false</c></returns>
+        internal bool CarryForwardAutoincrementSequences(string currentDatabasePath, string stagedCopyPath)
         {
             if (!File.Exists(currentDatabasePath))
             {
-                return;
+                return true;
             }
 
             Dictionary<string, long> currentSequences;
@@ -717,30 +729,32 @@ namespace ICCardManager.Services
             {
                 currentSequences = ReadAutoincrementSequences(currentDatabasePath);
             }
-            catch (Exception ex) when (ex is SQLiteException || IsFileAccessException(ex))
+            catch (Exception ex) when (ex is not OutOfMemoryException)
             {
                 _logger.LogWarning(ex,
                     "リストア前のデータベースから採番（sqlite_sequence）を読めませんでした。採番を進めずにリストアを続けます" +
                     "（リストア後に作られる行が、リストア前に使われていた ID を再び使うことがあります）: {Path}",
                     currentDatabasePath);
-                return;
+                return true;
             }
 
             if (currentSequences.Count == 0)
             {
-                return;
+                return true;
             }
 
             try
             {
                 RaiseAutoincrementSequences(stagedCopyPath, currentSequences);
+                return true;
             }
-            catch (Exception ex) when (ex is SQLiteException || IsFileAccessException(ex))
+            catch (Exception ex) when (ex is not OutOfMemoryException)
             {
-                _logger.LogWarning(ex,
-                    "リストアする一時コピーの採番（sqlite_sequence）を進められませんでした。採番を進めずにリストアを続けます" +
-                    "（リストア後に作られる行が、リストア前に使われていた ID を再び使うことがあります）: {Path}",
+                _logger.LogError(ex,
+                    "リストアする一時コピーの採番（sqlite_sequence）を書き込めなかったため、リストアを中止しました" +
+                    "（現在のデータベースは変更していません）: {Path}",
                     stagedCopyPath);
+                return false;
             }
         }
 
@@ -773,7 +787,13 @@ namespace ICCardManager.Services
             return sequences;
         }
 
-        private void RaiseAutoincrementSequences(string stagedCopyPath, IReadOnlyDictionary<string, long> currentSequences)
+        /// <summary>
+        /// 一時コピーの採番を、渡された値まで進める（Issue #2379）
+        /// </summary>
+        /// <remarks>
+        /// 単体テストが書き込みの失敗を注入できるよう <c>internal virtual</c> にしている（<see cref="CopyRestoreSourceTo"/> と同じ理由）。
+        /// </remarks>
+        internal virtual void RaiseAutoincrementSequences(string stagedCopyPath, IReadOnlyDictionary<string, long> currentSequences)
         {
             using var connection = new SQLiteConnection(DbContext.BuildConnectionString(stagedCopyPath));
             connection.Open();
