@@ -17,7 +17,7 @@
     <Grid Margin="25">
         <!-- Issue #2076: §5.6「入力フォーム型ダイアログの構造」に揃える。MaxHeight を付けた以上、
              そこで押し出される側（ボタン行）はスクロール領域の外に置く。
-             この画面は交通系ICカードをリーダーに載せたまま答える必要があり（#482）、
+             事前の読み取りに失敗したときは交通系ICカードをリーダーに載せたまま答える必要があり（#482 / #2385）、
              ボタンが画面外に出ると操作を完了する手段が無い。 -->
         <Grid.RowDefinitions>
             <RowDefinition Height="*"/>
@@ -62,14 +62,16 @@
                             <Run Text="職員の認証に使用するカードは「職員証」、交通費精算に使用するカードは「交通系ICカード」を選択してください。"/>
                         </TextBlock>
                     </Border>
-                    <!-- Issue #482: カードを離さないよう警告 -->
-                    <Border Background="{DynamicResource ErrorBackgroundBrush}" CornerRadius="4" Padding="12" Margin="0,0,0,10">
+                    <!-- Issue #482: カードを離さないよう警告。
+                         Issue #2385: 残高・利用履歴を事前に読み取れたときは登録時にカードを読み直さないので出さない。
+                         出すかはコードビハインドの SetKeepCardOnReaderNoticeVisible が決める（判定は CardRegistrationPreRead）。
+                         既定は表示（判定が渡らなかったときは、離さないよう求める側へ倒す）。 -->
+                    <Border x:Name="KeepCardOnReaderNotice"
+                            Background="{DynamicResource ErrorBackgroundBrush}" CornerRadius="4" Padding="12" Margin="0,0,0,10">
                         <TextBlock TextWrapping="Wrap"
                                    FontSize="{DynamicResource SmallFontSize}"
-                                   Foreground="{DynamicResource DangerTextBrush}">
-                            <Run Text="⚠ 注意: "/>
-                            <Run Text="選択が完了するまでカードをリーダーから離さないでください。"/>
-                        </TextBlock>
+                                   Foreground="{DynamicResource DangerTextBrush}"
+                                   Text="⚠ 注意: 残高・利用履歴は登録するときにカードから読み直すため、交通系ICカードとして登録する場合は、登録が完了するまでカードをリーダーから離さないでください。"/>
                     </Border>
                 </StackPanel>
 

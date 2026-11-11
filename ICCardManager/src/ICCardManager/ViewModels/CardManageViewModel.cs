@@ -743,7 +743,8 @@ namespace ICCardManager.ViewModels
 
                         // Issue #596: 履歴のインポート対象を決定
                         var history = _preReadHistory;
-                        if (history == null || history.Count == 0)
+                        // Issue #2385: 読み直すかの判定は、カード種別選択ダイアログの注意（カードを離さない）と共有する
+                        if (CardRegistrationPreRead.RereadsHistory(history))
                         {
                             // フォールバック: カードから直接読み取り
                             try { history = (await _cardReader.ReadHistoryAsync(EditCardIdm))?.ToList(); }
@@ -2028,7 +2029,8 @@ namespace ICCardManager.ViewModels
 
                 // 事前読み取り残高がない場合のみ、カードから読み取りを試みる
                 // （手動で新規登録モードを開始した場合のフォールバック）
-                if (!balance.HasValue)
+                // Issue #2385: 読み直すかの判定は、カード種別選択ダイアログの注意（カードを離さない）と共有する
+                if (CardRegistrationPreRead.RereadsBalance(balance))
                 {
                     balance = await _cardReader.ReadBalanceAsync(cardIdm);
                 }
