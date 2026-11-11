@@ -1031,14 +1031,16 @@ namespace ICCardManager.Services
         /// <b>除くのは手入力の行と同じ種類の履歴だけ</b>。受入のある行（チャージ・ポイント還元を手入力した行）がある日は
         /// カードのチャージ・ポイント還元（<see cref="IsIncomeHistory"/>）を、払出のある行（利用を手入力した行）がある日は
         /// それ以外の利用を除く。チャージだけを手入力した日に乗車もしていれば、その乗車は取り込む（日ごと除くと乗車を捨て、
-        /// 残高のチェーンが切れる）。受入・払出のどちらも無い行だけの日は種類を判定できないので、その日の履歴を種類を問わず除く
-        /// （残高不足の特殊処理でぴったりチャージした利用は、チャージと利用をまとめた払出 0 円の行になる。下限と同じく
-        /// 「記録済み」の側へ倒す）。
+        /// 残高のチェーンが切れる）。受入ではチャージとポイント還元を区別しない（行の金額からは区別できない）ので、
+        /// チャージだけを手入力した日の同じ日のポイント還元も記録済みとみなす。
+        /// 受入・払出のどちらも 0 円（または NULL）の行だけの日は金額から種類を判定できないので、その日の履歴を種類を問わず除く
+        /// （下限と同じく「記録済み」の側へ倒す）。
         /// </para>
         /// <para>
-        /// 既知の制約: 残高不足の特殊処理の形（チャージと利用を 1 行にまとめ、払出は運賃 − チャージ額）で利用を手入力した日は、
-        /// 行は払出だけを持つので利用だけを除き、カードのチャージは取り込む（チャージ額が二重になる）。貸出中にこの形を
-        /// 手入力することはまれなので扱わない。日付の無い履歴は判定できないので残す。
+        /// <b>払出の行の日は、除いた利用と残高不足の組（<see cref="DetectInsufficientBalancePattern"/>）になるチャージも除く</b>。
+        /// 残高不足の特殊処理では不足分のチャージと利用を 1 行にまとめ、受入 0・払出＝運賃 − チャージ額で記録する
+        /// （business-logic.md「残高不足時の特殊処理」）。この形で手入力した行は払出だけを持つので、組のチャージを取り込むと
+        /// 受入が二重になる。組ではない通常のチャージは取り込む。日付の無い履歴は判定できないので残す。
         /// </para>
         /// </remarks>
         /// <param name="usage">下限で抽出した後の履歴</param>
@@ -1060,13 +1062,29 @@ namespace ICCardManager.Services
                 return (usage, new List<LedgerDetail>());
             }
 
+            // 払出の行の日に、その日の履歴から残高不足の組を探し、組のチャージも記録済みとみなす
+            var chargesPairedWithRecordedUsage = new HashSet<LedgerDetail>();
+            foreach (var dayGroup in usage.Where(d => d.UseDate.HasValue).GroupBy(d => d.UseDate.GetValueOrDefault().Date))
+            {
+                if (!days.TryGetValue(dayGroup.Key, out var recordedDay) || !recordedDay.HasExpense)
+                {
+                    continue;
+                }
+
+                foreach (var (charge, _) in DetectInsufficientBalancePattern(dayGroup.ToList()))
+                {
+                    chargesPairedWithRecordedUsage.Add(charge);
+                }
+            }
+
             var toRecord = new List<LedgerDetail>();
             var excluded = new List<LedgerDetail>();
             foreach (var detail in usage)
             {
-                if (detail.UseDate.HasValue
-                    && days.TryGetValue(detail.UseDate.Value.Date, out var day)
-                    && IsRecordedByRowWithoutDetails(detail, day))
+                if (chargesPairedWithRecordedUsage.Contains(detail)
+                    || (detail.UseDate.HasValue
+                        && days.TryGetValue(detail.UseDate.Value.Date, out var day)
+                        && IsRecordedByRowWithoutDetails(detail, day)))
                 {
                     excluded.Add(detail);
                 }

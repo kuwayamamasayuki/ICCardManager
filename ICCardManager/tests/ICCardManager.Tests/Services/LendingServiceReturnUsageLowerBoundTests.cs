@@ -614,10 +614,10 @@ public sealed class LendingServiceReturnUsageLowerBoundTests : IDisposable
     }
 
     [Fact]
-    public async Task ReturnAsync_受入も払出も無い手入力の行の日は_種類を問わずその日の履歴を除くこと()
+    public async Task ReturnAsync_受入も払出も0円の手入力の行の日は_種類を問わずその日の履歴を除くこと()
     {
-        // 種類を判定できない行（残高不足の特殊処理でぴったりチャージした利用をまとめた払出 0 円の行など）は「記録済み」の側へ倒す
-        await InsertIntroductionAsync(new DateTime(2026, 9, 1), balance: 200);
+        // 金額が 0 円の行（何を記録した行か金額から判定できない）は、下限と同じく「記録済み」の側へ倒す
+        await InsertIntroductionAsync(new DateTime(2026, 9, 1), balance: 5000);
         await LendOnAsync(new DateTime(2026, 9, 15, 9, 0, 0));
         await _ledgerRepository.InsertAsync(new Ledger
         {
@@ -626,6 +626,37 @@ public sealed class LendingServiceReturnUsageLowerBoundTests : IDisposable
             Summary = "鉄道（博多～天神）",
             Income = 0,
             Expense = 0,
+            Balance = 5000,
+            StaffName = "別の職員",
+        });
+
+        var result = await _service.ReturnAsync(TestStaffIdm, TestCardIdm, new List<LedgerDetail>
+        {
+            Usage(new DateTime(2026, 9, 18), balanceAfter: 5580),
+            Usage(new DateTime(2026, 9, 17), balanceAfter: 5790),
+            Charge(new DateTime(2026, 9, 17), amount: 1000, balanceAfter: 6000),
+        });
+
+        result.Success.Should().BeTrue(_logger.FormatEntries());
+        result.CreatedLedgers.Select(l => l.Date.Date).Should().Equal(
+            new[] { new DateTime(2026, 9, 18) },
+            "9/17 のチャージと利用はどちらも記録済みとみなす。9/18 の利用は記録する");
+    }
+
+    [Fact]
+    public async Task ReturnAsync_残高不足の形で手入力した利用の行の日は_組のチャージも除くこと()
+    {
+        // 残高不足の特殊処理どおり（受入 0・払出＝運賃 210 − チャージ 10 = 200、残額 0）に手入力した行は払出だけを持つ。
+        // カードには不足分のチャージ（10 円）と利用（210 円）の組が残る。組のチャージを取り込むと受入が二重になる
+        await InsertIntroductionAsync(new DateTime(2026, 9, 1), balance: 200);
+        await LendOnAsync(new DateTime(2026, 9, 15, 9, 0, 0));
+        await _ledgerRepository.InsertAsync(new Ledger
+        {
+            CardIdm = TestCardIdm,
+            Date = new DateTime(2026, 9, 17),
+            Summary = "鉄道（博多～天神）",
+            Income = 0,
+            Expense = 200,
             Balance = 0,
             StaffName = "別の職員",
             Note = "支払額210円のうち不足額10円は現金で支払（旅費支給）",
@@ -639,9 +670,26 @@ public sealed class LendingServiceReturnUsageLowerBoundTests : IDisposable
         });
 
         result.Success.Should().BeTrue(_logger.FormatEntries());
-        result.CreatedLedgers.Select(l => l.Date.Date).Should().Equal(
-            new[] { new DateTime(2026, 9, 18) },
-            "9/17 のチャージと利用はどちらも記録済みとみなす。9/18 のチャージは記録する");
+        result.CreatedLedgers.Should().NotContain(l => l.Date.Date == new DateTime(2026, 9, 17),
+            "9/17 の利用と、それと組になる不足分のチャージはどちらも手入力の行が記録済み");
+        result.CreatedLedgers.Should().ContainSingle(l => l.Date.Date == new DateTime(2026, 9, 18) && l.Income == 1000,
+            "別の日のチャージは記録する");
+    }
+
+    [Fact]
+    public void ExcludeUsageOnDaysRecordedWithoutDetails_払出の行の日は_残高不足の組のチャージだけを除き通常のチャージは残すこと()
+    {
+        // 対の表明: 同じ日に組のチャージ（10 円）と通常のチャージ（1,000 円）がある
+        var shortfallCharge = Charge(new DateTime(2026, 9, 17), amount: 10, balanceAfter: 210);
+        var usage = Usage(new DateTime(2026, 9, 17), balanceAfter: 0);
+        var normalCharge = Charge(new DateTime(2026, 9, 17), amount: 1000, balanceAfter: 1000);
+
+        var (toRecord, excluded) = LendingService.ExcludeUsageOnDaysRecordedWithoutDetails(
+            new List<LedgerDetail> { normalCharge, usage, shortfallCharge },
+            new[] { new DayRecordedWithoutDetails(new DateTime(2026, 9, 17), hasIncome: false, hasExpense: true) });
+
+        excluded.Should().Equal(usage, shortfallCharge);
+        toRecord.Should().Equal(normalCharge);
     }
 
     [Fact]
