@@ -1333,10 +1333,28 @@ public class SystemManageViewModelTests : IDisposable
         var logs = await new OperationLogRepository(_dbContext)
             .GetByTargetAsync(OperationLogger.Tables.Database, "backup_20260903_090000.db");
         logs.Should().BeEmpty("置き換えていないリストアを操作ログへ記録しない");
-        _viewModel.StatusMessage.Should().StartWith("リストアに失敗しました");
+        _viewModel.StatusMessage.Should().Be(SystemManageViewModel.BuildRestoreFailedMessage(isSharedMode: false));
         _viewModel.IsStatusError.Should().BeTrue();
         _navigationServiceMock.Verify(n => n.ShowInformation(It.IsAny<string>(), It.IsAny<string>()), Times.Never);
         _navigationServiceMock.Verify(n => n.ShowWarning(It.IsAny<string>(), It.IsAny<string>()), Times.Never);
+    }
+
+    /// <summary>
+    /// Issue #2379: 置き換えの失敗の案内は、一時コピーへ採番を書けずに中止した場合（ディスク不足）も原因と対処を外さないこと。
+    /// 共有モードでは他の PC の接続はこの時点で確認済みのため、空き容量の可能性と「空きを作ってから」の案内が要る。
+    /// </summary>
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void BuildRestoreFailedMessage_一時フォルダーの空き容量不足の可能性と対処を含むこと(bool isSharedMode)
+    {
+        var message = SystemManageViewModel.BuildRestoreFailedMessage(isSharedMode);
+
+        message.Should().StartWith("リストアに失敗しました。");
+        message.Should().Contain("ディスク（一時フォルダー）の空き容量が不足している可能性があります。");
+        message.Should().Contain("ディスクの空きを作ってから再度お試しください。");
+        message.Should().Contain(isSharedMode ? "他のPCでアプリケーションが起動中" : "バックアップファイルが破損している",
+            "既存の原因の案内も残す");
     }
 
     [Fact]

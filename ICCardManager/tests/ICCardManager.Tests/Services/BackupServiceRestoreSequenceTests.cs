@@ -10,6 +10,7 @@ using FluentAssertions;
 using ICCardManager.Data;
 using ICCardManager.Data.Repositories;
 using ICCardManager.Infrastructure.Caching;
+using ICCardManager.Infrastructure.Timing;
 using ICCardManager.Models;
 using ICCardManager.Services;
 using ICCardManager.Tests.Infrastructure;
@@ -391,7 +392,7 @@ public class BackupServiceRestoreSequenceTests : IDisposable
 
     /// <summary>
     /// 一時コピーの採番を書き込めなかったら（ディスク不足等）、書きかけの一時コピーで本番を置き換えず、リストアを中止すること。
-    /// 現在の DB はそのまま残る。
+    /// 現在の DB はそのまま残り、書きかけの一時コピーとそのジャーナルも残らない。
     /// </summary>
     [Fact]
     public async Task 一時コピーへ採番を書けなければリストアを中止し現在のDBを残すこと()
@@ -401,28 +402,40 @@ public class BackupServiceRestoreSequenceTests : IDisposable
         CreateBackup();
         var afterBackupId = await InsertUsageAsync(new DateTime(2025, 1, 11), "天神", "博多", 210, 9790);
 
+        var inspectionFolder = Path.Combine(_testDirectory, "restore_inspection");
+        Directory.CreateDirectory(inspectionFolder);
         var logger = new RecordingLogger<BackupService>();
-        var service = new FailingSequenceWriteBackupService(_dbContext, Mock.Of<ISettingsRepository>(), logger);
+        var service = new FailingSequenceWriteBackupService(_dbContext, Mock.Of<ISettingsRepository>(), logger, inspectionFolder);
 
         service.RestoreFromBackup(_backupPath).Should().BeFalse("書きかけの一時コピーで置き換えてはならない");
 
         service.WriteAttempted.Should().BeTrue("前提: 一時コピーへの書き込みまで進んでいる");
         logger.Entries.Should().Contain(e => e.Level == LogLevel.Error && e.Message.Contains("リストアを中止"));
         (await _ledgerRepository.GetByIdAsync(afterBackupId)).Should().NotBeNull("現在の DB は置き換えられていない");
+        service.JournalCreated.Should().BeTrue("前提: 書きかけの状態（一時コピーのジャーナル）を作ってから失敗している");
+        Directory.GetFiles(inspectionFolder).Should().BeEmpty("中止したリストアの一時コピーとジャーナルは残さない");
     }
 
     private sealed class FailingSequenceWriteBackupService : BackupService
     {
-        public FailingSequenceWriteBackupService(DbContext dbContext, ISettingsRepository settingsRepository, ILogger<BackupService> logger)
-            : base(dbContext, settingsRepository, logger)
+        public FailingSequenceWriteBackupService(
+            DbContext dbContext, ISettingsRepository settingsRepository, ILogger<BackupService> logger, string restoreInspectionFolder)
+            : base(dbContext, settingsRepository, logger, new SystemClock(), restoreInspectionFolder)
         {
         }
 
         public bool WriteAttempted { get; private set; }
 
+        public bool JournalCreated { get; private set; }
+
+        /// <summary>
+        /// コミットの途中で失敗した状態（一時コピーの横にジャーナルが残る）を作ってから、ディスク不足の例外を投げる
+        /// </summary>
         internal override void RaiseAutoincrementSequences(string stagedCopyPath, IReadOnlyDictionary<string, long> currentSequences)
         {
             WriteAttempted = true;
+            File.WriteAllBytes(stagedCopyPath + "-journal", new byte[512]);
+            JournalCreated = File.Exists(stagedCopyPath + "-journal");
             throw new SQLiteException(SQLiteErrorCode.Full, "database or disk is full");
         }
     }
