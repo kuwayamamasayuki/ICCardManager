@@ -103,37 +103,9 @@ public partial class HistoryPanelViewModel
         var ledgerIds = sortedDtos.Select(dto => dto.Id).ToList();
         var mergeResult = await _ledgerMergeService.MergeAsync(ledgerIds);
 
-        if (mergeResult.Success && mergeResult.HasPostCommitFailure)
-        {
-            // Issue #1954: 統合は確定済み。再実行を促すと「統合対象の履歴が見つかりません」に
-            // 行き着くだけなので、再実行を促さず「取り消せない」ことと代替手段を案内する（Issue #1725）。
-            // Issue #1727: 通知は再読込より「前」に出す。取り消し情報の保存が失敗する原因
-            // （共有フォルダーの切断・DB ロック・他 PC との競合）は一覧再読込・ダッシュボード更新も
-            // 同じように失敗させるため、後ろに置くと「統合は完了済み・やり直し不要」という
-            // 肝心の案内が、まさにこの分岐が対象とする状況でだけ失われる（例外は非同期コマンドの
-            // 外へ抜けて誰にも観測されない）。
-            _navigationService.ShowWarning(
-                "履歴の統合は完了しましたが、「元に戻す」ための取り消し情報を記録できませんでした。\n" +
-                "他のパソコンとの競合や、データベースの保存先への一時的な接続不良が原因の可能性があります。\n\n" +
-                "統合そのものはやり直す必要はありません。この統合は「統合を元に戻す」では取り消せないため、" +
-                "内容を戻したい場合は履歴一覧の分割・編集で修正してください。",
-                "統合完了（取り消し情報なし）");
-
-            // 再読込自体の失敗は上の案内と同じ原因なので、ここで握って二重のダイアログにしない
-            // （ExecuteUnmergeAsync の失敗分岐と同じ作法）。
-            try
-            {
-                await LoadHistoryLedgersAsync();
-                await Host.RefreshDashboardAsync();
-            }
-            catch (Exception ex)
-            {
-                _logger?.LogWarning(ex, "Failed to reload history after merge undo-save failure");
-            }
-
-            UndoMergeHistoryLedgersCommand.NotifyCanExecuteChanged();
-        }
-        else if (mergeResult.Success)
+        // Issue #2373: 統合履歴（取り消し用の情報）は統合と同じトランザクションで保存するため、
+        // 「統合は完了したが取り消せない」状態は起きない（保存できなければ統合ごと巻き戻り、下の失敗分岐で案内する）。
+        if (mergeResult.Success)
         {
             await LoadHistoryLedgersAsync();
             await Host.RefreshDashboardAsync();
