@@ -633,7 +633,7 @@ public class LedgerRowEditViewModelTests : IDisposable
     private const string UnlistedStaffIdm = "DDDD000000000009";
 
     /// <summary>
-    /// 利用者の情報を指定した行（Id=20）で Edit 初期化する。UpdateAsync は成功を返す。
+    /// 利用者の情報を指定した行（Id=20）で Edit 初期化する。UpdateEditedColumnsAsync は成功を返す。
     /// </summary>
     private async Task InitializeForEditWithStaffAsync(string? lenderIdm, string? staffName)
     {
@@ -650,7 +650,7 @@ public class LedgerRowEditViewModelTests : IDisposable
             Note = "元の備考"
         };
         _ledgerRepoMock.Setup(r => r.GetByIdAsync(20)).ReturnsAsync(() => ICCardManager.Common.LedgerCloner.Clone(ledger));
-        _ledgerRepoMock.Setup(r => r.UpdateAsync(It.IsAny<Ledger>(), It.IsAny<SQLiteTransaction>())).ReturnsAsync(true);
+        _ledgerRepoMock.Setup(r => r.UpdateEditedColumnsAsync(It.IsAny<Ledger>(), It.IsAny<LedgerRowEditColumns>(), It.IsAny<SQLiteTransaction>())).ReturnsAsync(true);
         var dto = new LedgerDto
         {
             Id = 20,
@@ -677,11 +677,11 @@ public class LedgerRowEditViewModelTests : IDisposable
         await _viewModel.SaveCommand.ExecuteAsync(null);
 
         _viewModel.IsSaved.Should().BeTrue();
-        _ledgerRepoMock.Verify(r => r.UpdateAsync(It.Is<Ledger>(l =>
+        _ledgerRepoMock.Verify(r => r.UpdateEditedColumnsAsync(It.Is<Ledger>(l =>
             l.Note == "備考だけ直した"
             && l.StaffName == UnlistedStaffName
             && l.LenderIdm == UnlistedStaffIdm
-        ), It.IsAny<SQLiteTransaction>()), Times.Once);
+        ), It.IsAny<LedgerRowEditColumns>(), It.IsAny<SQLiteTransaction>()), Times.Once);
     }
 
     /// <summary>
@@ -695,9 +695,9 @@ public class LedgerRowEditViewModelTests : IDisposable
         _viewModel.Expense = 230;
         await _viewModel.SaveCommand.ExecuteAsync(null);
 
-        _ledgerRepoMock.Verify(r => r.UpdateAsync(It.Is<Ledger>(l =>
+        _ledgerRepoMock.Verify(r => r.UpdateEditedColumnsAsync(It.Is<Ledger>(l =>
             l.Expense == 230 && l.StaffName == UnlistedStaffName && l.LenderIdm == null
-        ), It.IsAny<SQLiteTransaction>()), Times.Once);
+        ), It.IsAny<LedgerRowEditColumns>(), It.IsAny<SQLiteTransaction>()), Times.Once);
     }
 
     /// <summary>
@@ -710,11 +710,12 @@ public class LedgerRowEditViewModelTests : IDisposable
 
         _viewModel.IsUnlistedStaffSelected.Should().BeTrue();
         _viewModel.DisplayStaffNamePreview.Should().Be(ICCardManager.Common.StaffNameFormatter.Format(null, 0), "表示用の選択肢名を氏名欄のプレビューに出さない");
+        _viewModel.Note = "備考だけ直した"; // Issue #2375: 何も変えない保存は書かないので、書く保存で確かめる
         await _viewModel.SaveCommand.ExecuteAsync(null);
 
-        _ledgerRepoMock.Verify(r => r.UpdateAsync(It.Is<Ledger>(l =>
+        _ledgerRepoMock.Verify(r => r.UpdateEditedColumnsAsync(It.Is<Ledger>(l =>
             l.LenderIdm == UnlistedStaffIdm && l.StaffName == null
-        ), It.IsAny<SQLiteTransaction>()), Times.Once);
+        ), It.Is<LedgerRowEditColumns>(c => (c & LedgerRowEditColumns.Staff) == 0), It.IsAny<SQLiteTransaction>()), Times.Once);
     }
 
     /// <summary>
@@ -729,9 +730,9 @@ public class LedgerRowEditViewModelTests : IDisposable
         _viewModel.IsUnlistedStaffSelected.Should().BeFalse();
         await _viewModel.SaveCommand.ExecuteAsync(null);
 
-        _ledgerRepoMock.Verify(r => r.UpdateAsync(It.Is<Ledger>(l =>
+        _ledgerRepoMock.Verify(r => r.UpdateEditedColumnsAsync(It.Is<Ledger>(l =>
             l.StaffName == null && l.LenderIdm == null
-        ), It.IsAny<SQLiteTransaction>()), Times.Once);
+        ), It.IsAny<LedgerRowEditColumns>(), It.IsAny<SQLiteTransaction>()), Times.Once);
     }
 
     /// <summary>
@@ -746,9 +747,9 @@ public class LedgerRowEditViewModelTests : IDisposable
         _viewModel.IsUnlistedStaffSelected.Should().BeFalse();
         await _viewModel.SaveCommand.ExecuteAsync(null);
 
-        _ledgerRepoMock.Verify(r => r.UpdateAsync(It.Is<Ledger>(l =>
+        _ledgerRepoMock.Verify(r => r.UpdateEditedColumnsAsync(It.Is<Ledger>(l =>
             l.StaffName == _staffB.Name && l.LenderIdm == _staffB.StaffIdm
-        ), It.IsAny<SQLiteTransaction>()), Times.Once);
+        ), It.IsAny<LedgerRowEditColumns>(), It.IsAny<SQLiteTransaction>()), Times.Once);
     }
 
     /// <summary>
@@ -763,11 +764,12 @@ public class LedgerRowEditViewModelTests : IDisposable
         _viewModel.SelectedStaff = _staffB;
         _viewModel.SelectedStaff = unlisted;
         _viewModel.IsUnlistedStaffSelected.Should().BeTrue();
+        _viewModel.Note = "備考だけ直した"; // Issue #2375: 何も変えない保存は書かないので、書く保存で確かめる
         await _viewModel.SaveCommand.ExecuteAsync(null);
 
-        _ledgerRepoMock.Verify(r => r.UpdateAsync(It.Is<Ledger>(l =>
+        _ledgerRepoMock.Verify(r => r.UpdateEditedColumnsAsync(It.Is<Ledger>(l =>
             l.StaffName == UnlistedStaffName && l.LenderIdm == UnlistedStaffIdm
-        ), It.IsAny<SQLiteTransaction>()), Times.Once);
+        ), It.Is<LedgerRowEditColumns>(c => (c & LedgerRowEditColumns.Staff) == 0), It.IsAny<SQLiteTransaction>()), Times.Once);
     }
 
     /// <summary>
@@ -795,9 +797,9 @@ public class LedgerRowEditViewModelTests : IDisposable
         _viewModel.Note = "備考だけ直した";
         await _viewModel.SaveCommand.ExecuteAsync(null);
 
-        _ledgerRepoMock.Verify(r => r.UpdateAsync(It.Is<Ledger>(l =>
+        _ledgerRepoMock.Verify(r => r.UpdateEditedColumnsAsync(It.Is<Ledger>(l =>
             l.Note == "備考だけ直した" && l.StaffName == _staffA.Name && l.LenderIdm == _staffA.StaffIdm
-        ), It.IsAny<SQLiteTransaction>()), Times.Once);
+        ), It.IsAny<LedgerRowEditColumns>(), It.IsAny<SQLiteTransaction>()), Times.Once);
     }
 
     /// <summary>
@@ -1607,7 +1609,7 @@ public class LedgerRowEditViewModelTests : IDisposable
     }
 
     [Fact]
-    public async Task SaveEdit_CallsUpdateAsync()
+    public async Task SaveEdit_CallsUpdateEditedColumnsAsync()
     {
         // Arrange
         var ledger = new Ledger
@@ -1623,7 +1625,7 @@ public class LedgerRowEditViewModelTests : IDisposable
             StaffName = _staffA.Name
         };
         _ledgerRepoMock.Setup(r => r.GetByIdAsync(1)).ReturnsAsync(ledger);
-        _ledgerRepoMock.Setup(r => r.UpdateAsync(It.IsAny<Ledger>(), It.IsAny<SQLiteTransaction>())).ReturnsAsync(true);
+        _ledgerRepoMock.Setup(r => r.UpdateEditedColumnsAsync(It.IsAny<Ledger>(), It.IsAny<LedgerRowEditColumns>(), It.IsAny<SQLiteTransaction>())).ReturnsAsync(true);
 
 
         var dto = new LedgerDto
@@ -1646,9 +1648,9 @@ public class LedgerRowEditViewModelTests : IDisposable
 
         // Assert
         _viewModel.IsSaved.Should().BeTrue();
-        _ledgerRepoMock.Verify(r => r.UpdateAsync(It.Is<Ledger>(l =>
+        _ledgerRepoMock.Verify(r => r.UpdateEditedColumnsAsync(It.Is<Ledger>(l =>
             l.Summary == "変更後の摘要"
-        ), It.IsAny<SQLiteTransaction>()), Times.Once);
+        ), It.IsAny<LedgerRowEditColumns>(), It.IsAny<SQLiteTransaction>()), Times.Once);
     }
 
     #region 同行者数（Issue #1906）
@@ -1703,7 +1705,7 @@ public class LedgerRowEditViewModelTests : IDisposable
             StaffName = _staffA.Name
         };
         _ledgerRepoMock.Setup(r => r.GetByIdAsync(1)).ReturnsAsync(ledger);
-        _ledgerRepoMock.Setup(r => r.UpdateAsync(It.IsAny<Ledger>(), It.IsAny<SQLiteTransaction>())).ReturnsAsync(true);
+        _ledgerRepoMock.Setup(r => r.UpdateEditedColumnsAsync(It.IsAny<Ledger>(), It.IsAny<LedgerRowEditColumns>(), It.IsAny<SQLiteTransaction>())).ReturnsAsync(true);
         var dto = new LedgerDto
         {
             Id = 1,
@@ -1721,9 +1723,9 @@ public class LedgerRowEditViewModelTests : IDisposable
         await _viewModel.SaveCommand.ExecuteAsync(null);
 
         _viewModel.IsSaved.Should().BeTrue();
-        _ledgerRepoMock.Verify(r => r.UpdateAsync(It.Is<Ledger>(l =>
+        _ledgerRepoMock.Verify(r => r.UpdateEditedColumnsAsync(It.Is<Ledger>(l =>
             l.CompanionCount == 1 && l.StaffName == _staffA.Name
-        ), It.IsAny<SQLiteTransaction>()), Times.Once, "staff_name には「外N名」を書き込まず companion_count だけを更新する");
+        ), It.IsAny<LedgerRowEditColumns>(), It.IsAny<SQLiteTransaction>()), Times.Once, "staff_name には「外N名」を書き込まず companion_count だけを更新する");
     }
 
     [Fact]
@@ -1761,7 +1763,7 @@ public class LedgerRowEditViewModelTests : IDisposable
             CompanionCount = 2
         };
         _ledgerRepoMock.Setup(r => r.GetByIdAsync(1)).ReturnsAsync(ledger);
-        _ledgerRepoMock.Setup(r => r.UpdateAsync(It.IsAny<Ledger>(), It.IsAny<SQLiteTransaction>())).ReturnsAsync(true);
+        _ledgerRepoMock.Setup(r => r.UpdateEditedColumnsAsync(It.IsAny<Ledger>(), It.IsAny<LedgerRowEditColumns>(), It.IsAny<SQLiteTransaction>())).ReturnsAsync(true);
         OperationLog? recorded = null;
         _operationLogRepoMock
             .Setup(r => r.InsertAsync(It.IsAny<OperationLog>(), It.IsAny<SQLiteTransaction>()))
@@ -1908,7 +1910,7 @@ public class LedgerRowEditViewModelTests : IDisposable
             Details = new List<LedgerDetail>()
         };
         _ledgerRepoMock.Setup(r => r.GetByIdAsync(1)).ReturnsAsync(existingLedger);
-        _ledgerRepoMock.Setup(r => r.UpdateAsync(It.IsAny<Ledger>(), It.IsAny<SQLiteTransaction>())).ReturnsAsync(true);
+        _ledgerRepoMock.Setup(r => r.UpdateEditedColumnsAsync(It.IsAny<Ledger>(), It.IsAny<LedgerRowEditColumns>(), It.IsAny<SQLiteTransaction>())).ReturnsAsync(true);
         _operationLogRepoMock.Setup(r => r.InsertAsync(It.IsAny<OperationLog>()))
             .ReturnsAsync(1);
 
@@ -2388,7 +2390,7 @@ public class LedgerRowEditViewModelTests : IDisposable
     private LedgerDto ArrangeBusLedgerForEdit(Ledger ledger)
     {
         _ledgerRepoMock.Setup(r => r.GetByIdAsync(ledger.Id)).ReturnsAsync(ledger);
-        _ledgerRepoMock.Setup(r => r.UpdateAsync(It.IsAny<Ledger>(), It.IsAny<SQLiteTransaction>())).ReturnsAsync(true);
+        _ledgerRepoMock.Setup(r => r.UpdateEditedColumnsAsync(It.IsAny<Ledger>(), It.IsAny<LedgerRowEditColumns>(), It.IsAny<SQLiteTransaction>())).ReturnsAsync(true);
 
         return new LedgerDto
         {
@@ -2435,8 +2437,8 @@ public class LedgerRowEditViewModelTests : IDisposable
         var realRepository = new LedgerRepository(_dbContext);
         await SeedLedgerRowAsync(realRepository, ledger);
         var dto = ArrangeBusLedgerForEdit(ledger);
-        _ledgerRepoMock.Setup(r => r.UpdateAsync(It.IsAny<Ledger>(), It.IsAny<SQLiteTransaction>()))
-            .Returns<Ledger, SQLiteTransaction>((l, tx) => realRepository.UpdateAsync(l, tx));
+        _ledgerRepoMock.Setup(r => r.UpdateEditedColumnsAsync(It.IsAny<Ledger>(), It.IsAny<LedgerRowEditColumns>(), It.IsAny<SQLiteTransaction>()))
+            .Returns<Ledger, LedgerRowEditColumns, SQLiteTransaction>((l, c, tx) => realRepository.UpdateEditedColumnsAsync(l, c, tx));
         _ledgerRepoMock.Setup(r => r.UpdateDetailBusStopsAsync(
                 It.IsAny<int>(), It.IsAny<IEnumerable<(int, string)>>(), It.IsAny<SQLiteTransaction>()))
             .ReturnsAsync(false);
@@ -2450,8 +2452,8 @@ public class LedgerRowEditViewModelTests : IDisposable
         // Assert
         _viewModel.IsSaved.Should().BeFalse();
         _viewModel.StatusMessage.Should().Be(LedgerRowEditViewModel.BusStopConflictMessage);
-        _ledgerRepoMock.Verify(r => r.UpdateAsync(
-                It.Is<Ledger>(l => l.Id == ledger.Id && l.Summary == "バス（天神～博多）"), It.IsNotNull<SQLiteTransaction>()),
+        _ledgerRepoMock.Verify(r => r.UpdateEditedColumnsAsync(
+                It.Is<Ledger>(l => l.Id == ledger.Id && l.Summary == "バス（天神～博多）"), It.IsAny<LedgerRowEditColumns>(), It.IsNotNull<SQLiteTransaction>()),
             Times.Once, "摘要は実際にトランザクションの内側で書かれている（書かれていなければ巻き戻しを検査できない）");
         ReadLedgerSummary(ledger.Id).Should().Be("バス（★）",
             "同期が競合したら commit せずに抜けるので、摘要の UPDATE も巻き戻る（文言の「変更は取り消しています」の根拠）");
@@ -3040,8 +3042,8 @@ public class LedgerRowEditViewModelTests : IDisposable
     {
         await InitializeInitialRecordEditAsync("新規購入", 5000, 5000, CreateCorrection(3000, appliesToIncome: true));
         Ledger saved = null;
-        _ledgerRepoMock.Setup(r => r.UpdateAsync(It.IsAny<Ledger>(), It.IsAny<SQLiteTransaction>()))
-            .Callback<Ledger, SQLiteTransaction>((l, _) => saved = l)
+        _ledgerRepoMock.Setup(r => r.UpdateEditedColumnsAsync(It.IsAny<Ledger>(), It.IsAny<LedgerRowEditColumns>(), It.IsAny<SQLiteTransaction>()))
+            .Callback<Ledger, LedgerRowEditColumns, SQLiteTransaction>((l, _, _) => saved = l)
             .ReturnsAsync(true);
 
         _viewModel.ApplyInitialBalanceSuggestionCommand.Execute(null);

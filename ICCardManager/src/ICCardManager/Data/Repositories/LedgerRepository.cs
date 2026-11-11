@@ -423,6 +423,67 @@ WHERE id = @id";
             return rows > 0;
         }
 
+        /// <summary>
+        /// Issue #2375: <see cref="LedgerRowEditColumns"/> の各列と、その列を SET する句。
+        /// SET 句に載り得る列はこの表がすべて（行編集が編集しない列はここに無い）。
+        /// </summary>
+        private static readonly (LedgerRowEditColumns Column, string Assignment)[] RowEditAssignments =
+        {
+            (LedgerRowEditColumns.Date, "date = @date"),
+            (LedgerRowEditColumns.Summary, "summary = @summary"),
+            (LedgerRowEditColumns.Income, "income = @income"),
+            (LedgerRowEditColumns.Expense, "expense = @expense"),
+            (LedgerRowEditColumns.Balance, "balance = @balance"),
+            (LedgerRowEditColumns.Staff, "lender_idm = @lenderIdm, staff_name = @staffName"),
+            (LedgerRowEditColumns.Note, "note = @note"),
+            (LedgerRowEditColumns.CompanionCount, "companion_count = @companionCount"),
+        };
+
+        /// <inheritdoc/>
+        public async Task<bool> UpdateEditedColumnsAsync(Ledger ledger, LedgerRowEditColumns columns, SQLiteTransaction transaction)
+        {
+            if (ledger == null)
+            {
+                throw new ArgumentNullException(nameof(ledger));
+            }
+
+            if (transaction == null)
+            {
+                throw new ArgumentNullException(nameof(transaction));
+            }
+
+            var known = RowEditAssignments.Aggregate(LedgerRowEditColumns.None, (all, a) => all | a.Column);
+            if (columns == LedgerRowEditColumns.None || (columns & ~known) != 0)
+            {
+                throw new ArgumentException(
+                    $"更新する列の指定（{columns}）が不正です。行編集で変えた列を 1 つ以上指定してください。",
+                    nameof(columns));
+            }
+
+            using var command = transaction.Connection.CreateCommand();
+            command.Transaction = transaction;
+            var assignments = RowEditAssignments
+                .Where(a => (columns & a.Column) != 0)
+                .Select(a => a.Assignment);
+            command.CommandText = "UPDATE ledger SET " + string.Join(", ", assignments) + " WHERE id = @id";
+
+            // 使わないパラメーターも渡してよい（SQLite は SQL に現れないパラメーターを無視する）
+            command.Parameters.AddWithValue("@id", ledger.Id);
+            command.Parameters.AddWithValue("@date", SqliteDateTimeFormat.ToText(ledger.Date));
+            command.Parameters.AddWithValue("@summary", ledger.Summary);
+            command.Parameters.AddWithValue("@income", ledger.Income);
+            command.Parameters.AddWithValue("@expense", ledger.Expense);
+            command.Parameters.AddWithValue("@balance", ledger.Balance);
+            command.Parameters.AddWithValue("@lenderIdm", (object?)ledger.LenderIdm ?? DBNull.Value);
+            command.Parameters.AddWithValue("@staffName", (object?)ledger.StaffName ?? DBNull.Value);
+            command.Parameters.AddWithValue("@note", (object?)ledger.Note ?? DBNull.Value);
+            command.Parameters.AddWithValue("@companionCount", ledger.CompanionCount);
+
+            // Issue #1753: 影響行数 0 は「行が存在しない」＝競合
+            var rows = await command.ExecuteNonQueryAsync().ConfigureAwait(false);
+            return rows > 0;
+        }
+
         /// <inheritdoc/>
         public Task<bool> DeleteAsync(int id) => DeleteAsync(id, transaction: null);
 
@@ -2562,12 +2623,25 @@ WHERE id = @id AND ledger_id = @targetId";
         }
 
         /// <inheritdoc/>
-        public async Task SaveMergeHistoryAsync(int targetLedgerId, string description, string undoDataJson)
+        public async Task SaveMergeHistoryAsync(int targetLedgerId, string description, string undoDataJson, SQLiteTransaction? transaction)
         {
-            using var lease = await _dbContext.LeaseConnectionAsync().ConfigureAwait(false);
-            var connection = lease.Connection;
+            // 単文のため 3 分岐は不要（tx があればそれに参加、無ければ接続を借りて autocommit）。
+            // MarkMergeHistoryUndoneAsync と同じ形。
+            if (transaction != null)
+            {
+                await SaveMergeHistoryCore(targetLedgerId, description, undoDataJson, (SQLiteConnection)transaction.Connection, transaction).ConfigureAwait(false);
+                return;
+            }
 
+            using var lease = await _dbContext.LeaseConnectionAsync().ConfigureAwait(false);
+            await SaveMergeHistoryCore(targetLedgerId, description, undoDataJson, lease.Connection, transaction: null).ConfigureAwait(false);
+        }
+
+        private static async Task SaveMergeHistoryCore(
+            int targetLedgerId, string description, string undoDataJson, SQLiteConnection connection, SQLiteTransaction? transaction)
+        {
             using var command = connection.CreateCommand();
+            command.Transaction = transaction;
             // Issue #1014: CURRENT_TIMESTAMPはUTCのため、ローカル時刻を明示的に保存する
             command.CommandText = @"INSERT INTO ledger_merge_history (merged_at, target_ledger_id, description, undo_data)
 VALUES (@mergedAt, @targetLedgerId, @description, @undoData)";
