@@ -58,7 +58,7 @@ namespace ICCardManager.Services
             // 切る日は PaperCarryoverPolicy.GetChainRestartDates が決める。開始日の年度は履歴画面・帳票と同じ
             // PeriodOpensWithFiscalYearStartCarryover、後の年度は HasFiscalYearStartCarryoverRecord（#1763）。
             // Issue #2441: 年度途中で導入したカードの導入行「○月から繰越」（繰越月の翌月 1 日付け。登録日より後になり得る）の手前でも
-            // 同じく切る。導入行より前の日付の返却の利用の行・手入力・CSV の行・貸出中レコードから続けて検査しない。
+            // 同じく切る。導入行より前の日付の返却の利用の行（#2237 より前の記録に限る）・手入力・CSV の行・貸出中レコードから続けて検査しない。
             // 既知の差: 4/1 から検査する場合でも、導入行を摘要で認識できない（#2371）カードでは、履歴は貸出中を除いた
             // 前年度繰越（GetCarryoverBalanceAsync）をシードにし、ここは貸出中を含む値を使う（本体の母集団に合わせる）。
             var periodLedgers = (await _ledgerRepository.GetByDateRangeAsync(cardIdm, fromDate, toDate).ConfigureAwait(false))
