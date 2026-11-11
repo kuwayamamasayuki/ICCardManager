@@ -2483,7 +2483,7 @@ public class LedgerRepositoryTests : IDisposable
         var beforeSave = DateTime.Now;
 
         // Act
-        await _repository.SaveMergeHistoryAsync(1, "テスト統合", "{}");
+        await _repository.SaveMergeHistoryAsync(1, "テスト統合", "{}", transaction: null);
 
         var afterSave = DateTime.Now;
 

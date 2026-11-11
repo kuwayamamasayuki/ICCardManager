@@ -187,7 +187,8 @@ public class LedgerMergeServiceTests : IDisposable
             .Setup(x => x.SaveMergeHistoryAsync(
                 It.IsAny<int>(),
                 It.IsAny<string>(),
-                It.IsAny<string>()))
+                It.IsAny<string>(),
+                It.IsAny<SQLiteTransaction>()))
             .Returns(Task.CompletedTask);
     }
 
@@ -452,6 +453,80 @@ public class LedgerMergeServiceTests : IDisposable
     #endregion
 
     #region MergeAsync 統合ロジックテスト
+
+    /// <summary>
+    /// Issue #2373（レビュー指摘）: 統合履歴の JSON 化（Undo データのシリアライズ）が例外になっても、
+    /// 例外を MergeAsync の外へ投げず、統合前の失敗として Success=false で返し、何も書き込まないこと。
+    /// JSON 化をトランザクションの前へ移したとき try の外へ出てしまい、呼び出し元（履歴画面）が
+    /// 案内を出せなくなっていた。対になる正常系は MergeAsync_TwoRailTrips_CalculatesFieldsCorrectly。
+    /// </summary>
+    [Fact]
+    [Trait("Category", "Unit")]
+    public async Task MergeAsync_統合履歴のJSON化で例外_失敗として返し何も書き込まないこと()
+    {
+        // Arrange: JSON 化を差し替えて例外にする（実データで System.Text.Json を確実に失敗させる入力は無いため）
+        _service.UndoDataSerializer = _ => throw new NotSupportedException("simulated serialization failure");
+        var date = new DateTime(2026, 2, 3);
+        var ledger1 = CreateTestLedger(1, TestCardIdm, date, "鉄道（福岡空港～天神）", 200, 800);
+        ledger1.Details.Add(CreateRailDetail(1, "福岡空港", "天神", 200, 800, 1, date));
+        var ledger2 = CreateTestLedger(2, TestCardIdm, date, "鉄道（天神～箱崎宮前）", 210, 590);
+        ledger2.Details.Add(CreateRailDetail(2, "天神", "箱崎宮前", 210, 590, 2, date));
+        SetupGetByIdMocks(ledger1, ledger2);
+        SetupMergeMockSuccess();
+
+        // Act
+        Func<Task<LedgerMergeResult>> act = () => _service.MergeAsync(new List<int> { 1, 2 });
+
+        // Assert
+        var result = (await act.Should().NotThrowAsync("例外が外へ抜けると履歴画面は案内を出せない")).Subject;
+        result.Success.Should().BeFalse();
+        result.ErrorMessage.Should().NotBeEmpty("失敗は利用者へ案内する");
+        result.ErrorMessage.Should().NotContain("simulated", "生の例外メッセージを UI へ出さない（Issue #1614）");
+        _ledgerRepositoryMock.Verify(x => x.MergeLedgersAsync(
+            It.IsAny<int>(), It.IsAny<IEnumerable<int>>(), It.IsAny<Ledger>(), It.IsAny<SQLiteTransaction>()),
+            Times.Never, "JSON 化はトランザクションを開く前に済ませるので、台帳には何も書かない");
+    }
+
+    /// <summary>
+    /// Issue #2373（レビュー指摘）: 統合履歴は統合本体と同じトランザクションで保存すること。
+    /// 実 DB のテストでは null（トランザクションなし）を渡しても、同じ接続で開いているトランザクションへ
+    /// 暗黙に参加して緑になり得るため、渡したトランザクションの同一性をここで固定する。
+    /// </summary>
+    [Fact]
+    [Trait("Category", "Unit")]
+    public async Task MergeAsync_統合履歴を統合本体と同じトランザクションで保存すること()
+    {
+        // Arrange
+        var date = new DateTime(2026, 2, 3);
+        var ledger1 = CreateTestLedger(1, TestCardIdm, date, "鉄道（福岡空港～天神）", 200, 800);
+        ledger1.Details.Add(CreateRailDetail(1, "福岡空港", "天神", 200, 800, 1, date));
+        var ledger2 = CreateTestLedger(2, TestCardIdm, date, "鉄道（天神～箱崎宮前）", 210, 590);
+        ledger2.Details.Add(CreateRailDetail(2, "天神", "箱崎宮前", 210, 590, 2, date));
+        SetupGetByIdMocks(ledger1, ledger2);
+        SetupMergeMockSuccess();
+
+        SQLiteTransaction? mergeTransaction = null;
+        _ledgerRepositoryMock
+            .Setup(x => x.MergeLedgersAsync(
+                It.IsAny<int>(), It.IsAny<IEnumerable<int>>(), It.IsAny<Ledger>(), It.IsAny<SQLiteTransaction>()))
+            .Callback<int, IEnumerable<int>, Ledger, SQLiteTransaction>((_, _, _, tx) => mergeTransaction = tx)
+            .ReturnsAsync(true);
+        var historyTransactions = new List<SQLiteTransaction?>();
+        _ledgerRepositoryMock
+            .Setup(x => x.SaveMergeHistoryAsync(
+                It.IsAny<int>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<SQLiteTransaction?>()))
+            .Callback<int, string, string, SQLiteTransaction?>((_, _, _, tx) => historyTransactions.Add(tx))
+            .Returns(Task.CompletedTask);
+
+        // Act
+        var result = await _service.MergeAsync(new List<int> { 1, 2 });
+
+        // Assert
+        result.Success.Should().BeTrue();
+        mergeTransaction.Should().NotBeNull("前提: 統合本体はトランザクションの中で書く");
+        historyTransactions.Should().ContainSingle()
+            .Which.Should().BeSameAs(mergeTransaction, "統合履歴は統合本体と同じトランザクションで保存する");
+    }
 
     /// <summary>
     /// 2件の鉄道利用を統合したとき、Income/Expense/Balanceが正しく計算されること
@@ -914,8 +989,9 @@ public class LedgerMergeServiceTests : IDisposable
             .Setup(x => x.SaveMergeHistoryAsync(
                 It.IsAny<int>(),
                 It.IsAny<string>(),
-                It.IsAny<string>()))
-            .Callback<int, string, string>((targetId, desc, json) =>
+                It.IsAny<string>(),
+                It.IsAny<SQLiteTransaction>()))
+            .Callback<int, string, string, SQLiteTransaction>((targetId, desc, json, _) =>
             {
                 capturedTargetId = targetId;
                 capturedDescription = desc;
@@ -959,8 +1035,8 @@ public class LedgerMergeServiceTests : IDisposable
 
         string? capturedUndoJson = null;
         _ledgerRepositoryMock
-            .Setup(x => x.SaveMergeHistoryAsync(It.IsAny<int>(), It.IsAny<string>(), It.IsAny<string>()))
-            .Callback<int, string, string>((_, _, json) => capturedUndoJson = json)
+            .Setup(x => x.SaveMergeHistoryAsync(It.IsAny<int>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<SQLiteTransaction>()))
+            .Callback<int, string, string, SQLiteTransaction>((_, _, json, _) => capturedUndoJson = json)
             .Returns(Task.CompletedTask);
 
         // Act
@@ -2472,7 +2548,7 @@ public class LedgerMergeServiceTests : IDisposable
         result.Success.Should().BeFalse();
         result.ErrorMessage.Should().Contain("他の操作で変更された可能性があります");
         _ledgerRepositoryMock.Verify(x => x.SaveMergeHistoryAsync(
-            It.IsAny<int>(), It.IsAny<string>(), It.IsAny<string>()), Times.Never);
+            It.IsAny<int>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<SQLiteTransaction>()), Times.Never);
         _operationLogRepositoryMock.Verify(x => x.InsertAsync(
             It.IsAny<OperationLog>(), It.IsAny<SQLiteTransaction>()), Times.Never,
             "巻き戻した統合の監査ログを残さない");
@@ -2532,8 +2608,8 @@ public class LedgerMergeServiceTests : IDisposable
 
         string? capturedUndoJson = null;
         _ledgerRepositoryMock
-            .Setup(x => x.SaveMergeHistoryAsync(It.IsAny<int>(), It.IsAny<string>(), It.IsAny<string>()))
-            .Callback<int, string, string>((_, _, json) => capturedUndoJson = json)
+            .Setup(x => x.SaveMergeHistoryAsync(It.IsAny<int>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<SQLiteTransaction>()))
+            .Callback<int, string, string, SQLiteTransaction>((_, _, json, _) => capturedUndoJson = json)
             .Returns(Task.CompletedTask);
 
         // Act: 統合
@@ -2591,8 +2667,8 @@ public class LedgerMergeServiceTests : IDisposable
 
         string? capturedJson = null;
         _ledgerRepositoryMock
-            .Setup(x => x.SaveMergeHistoryAsync(It.IsAny<int>(), It.IsAny<string>(), It.IsAny<string>()))
-            .Callback<int, string, string>((_, _, json) => capturedJson = json)
+            .Setup(x => x.SaveMergeHistoryAsync(It.IsAny<int>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<SQLiteTransaction>()))
+            .Callback<int, string, string, SQLiteTransaction>((_, _, json, _) => capturedJson = json)
             .Returns(Task.CompletedTask);
 
         // Act
@@ -2645,8 +2721,8 @@ public class LedgerMergeServiceTests : IDisposable
 
         string? capturedJson = null;
         _ledgerRepositoryMock
-            .Setup(x => x.SaveMergeHistoryAsync(It.IsAny<int>(), It.IsAny<string>(), It.IsAny<string>()))
-            .Callback<int, string, string>((_, _, json) => capturedJson = json)
+            .Setup(x => x.SaveMergeHistoryAsync(It.IsAny<int>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<SQLiteTransaction>()))
+            .Callback<int, string, string, SQLiteTransaction>((_, _, json, _) => capturedJson = json)
             .Returns(Task.CompletedTask);
 
         // Act
@@ -2682,8 +2758,8 @@ public class LedgerMergeServiceTests : IDisposable
 
         string? firstMergeJson = null;
         _ledgerRepositoryMock
-            .Setup(x => x.SaveMergeHistoryAsync(It.IsAny<int>(), It.IsAny<string>(), It.IsAny<string>()))
-            .Callback<int, string, string>((_, _, json) => firstMergeJson = json)
+            .Setup(x => x.SaveMergeHistoryAsync(It.IsAny<int>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<SQLiteTransaction>()))
+            .Callback<int, string, string, SQLiteTransaction>((_, _, json, _) => firstMergeJson = json)
             .Returns(Task.CompletedTask);
 
         // Act-1: 初回マージ
@@ -2740,8 +2816,8 @@ public class LedgerMergeServiceTests : IDisposable
 
         string? capturedJson = null;
         _ledgerRepositoryMock
-            .Setup(x => x.SaveMergeHistoryAsync(It.IsAny<int>(), It.IsAny<string>(), It.IsAny<string>()))
-            .Callback<int, string, string>((_, _, json) => capturedJson = json)
+            .Setup(x => x.SaveMergeHistoryAsync(It.IsAny<int>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<SQLiteTransaction>()))
+            .Callback<int, string, string, SQLiteTransaction>((_, _, json, _) => capturedJson = json)
             .Returns(Task.CompletedTask);
 
         // Act

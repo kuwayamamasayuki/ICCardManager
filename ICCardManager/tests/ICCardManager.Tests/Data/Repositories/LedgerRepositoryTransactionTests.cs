@@ -898,9 +898,9 @@ END";
     [Fact]
     public async Task HasLaterUndoableMergeOnSameTargetAsync_CountsOnlyLaterUndoableHistoriesOfSameTarget()
     {
-        await _repository.SaveMergeHistoryAsync(10, "先の統合", "{}");
-        await _repository.SaveMergeHistoryAsync(20, "別の統合先", "{}");
-        await _repository.SaveMergeHistoryAsync(10, "後の統合（取り消し済み）", "{}");
+        await _repository.SaveMergeHistoryAsync(10, "先の統合", "{}", transaction: null);
+        await _repository.SaveMergeHistoryAsync(20, "別の統合先", "{}", transaction: null);
+        await _repository.SaveMergeHistoryAsync(10, "後の統合（取り消し済み）", "{}", transaction: null);
         var histories = await _repository.GetMergeHistoriesAsync(undoneOnly: false);
         int IdOf(string description) => histories.Single(h => h.Description == description).Id;
         (await _repository.MarkMergeHistoryUndoneAsync(IdOf("後の統合（取り消し済み）"))).Should().BeTrue();
@@ -913,7 +913,7 @@ END";
 
         (await HasLaterAsync(IdOf("先の統合"), 10)).Should().BeFalse("後の同じ統合先の履歴は取り消し済み、別の統合先は数えない");
 
-        await _repository.SaveMergeHistoryAsync(10, "後の統合", "{}");
+        await _repository.SaveMergeHistoryAsync(10, "後の統合", "{}", transaction: null);
         histories = await _repository.GetMergeHistoriesAsync(undoneOnly: false);
         (await HasLaterAsync(IdOf("先の統合"), 10)).Should().BeTrue("同じ統合先へ後から重ねた未取り消しの統合がある");
         (await HasLaterAsync(IdOf("後の統合"), 10)).Should().BeFalse("自分より前の履歴は数えない");
@@ -1069,7 +1069,7 @@ END";
     [Fact]
     public async Task MarkMergeHistoryUndoneAsync_WhenAlreadyUndone_ReturnsFalse()
     {
-        await _repository.SaveMergeHistoryAsync(1, "テスト統合", "{}");
+        await _repository.SaveMergeHistoryAsync(1, "テスト統合", "{}", transaction: null);
         var historyId = (await _repository.GetMergeHistoriesAsync(undoneOnly: false)).Single().Id;
 
         bool first;
@@ -1097,7 +1097,7 @@ END";
     [Fact]
     public async Task MarkMergeHistoryUndoneAsync_WithTransactionRolledBack_StaysUndoable()
     {
-        await _repository.SaveMergeHistoryAsync(1, "テスト統合", "{}");
+        await _repository.SaveMergeHistoryAsync(1, "テスト統合", "{}", transaction: null);
         var historyId = (await _repository.GetMergeHistoriesAsync(undoneOnly: false)).Single().Id;
 
         using (var scope = await _dbContext.BeginTransactionAsync())
