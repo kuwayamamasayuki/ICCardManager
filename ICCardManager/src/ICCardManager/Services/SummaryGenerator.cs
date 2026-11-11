@@ -3,7 +3,6 @@ using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
-using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 using ICCardManager.Common;
 using ICCardManager.Models;
@@ -126,7 +125,7 @@ namespace ICCardManager.Services
         /// </summary>
         /// <remarks>
         /// リテラル（「バス」「★」）を直書きせず <see cref="SummaryTextOptions"/> の
-        /// 既定値を参照する（<see cref="IsMidYearCarryoverSummary"/> のフォールバックと同じ流儀）。
+        /// 既定値を参照する（不正・空の設定値は既定値へ倒す）。
         /// </remarks>
         private static readonly SummaryTextOptions DefaultSummaryText = new();
 
@@ -248,7 +247,7 @@ namespace ICCardManager.Services
         /// 空文字・空白のみの設定は既定値へフォールバックする。空ラベルを許すと
         /// <see cref="ExtractBusStopBlocks"/> がラベルを失って全角開き括弧だけを
         /// 開始記号とし、鉄道の括弧（「鉄道（A駅～B駅）」）まで拾ってバス停名として取り込むため
-        /// （<see cref="IsMidYearCarryoverSummary"/> の不正正規表現フォールバックと同じ方針）。
+        /// （不正な設定値は既定値へ倒す方針）。
         /// </para>
         /// <para>
         /// 汎用/固有の別: 交通系固有（バス混在表記）。
@@ -2662,35 +2661,6 @@ namespace ICCardManager.Services
             }
 
             return description;
-        }
-
-        /// <summary>
-        /// 摘要の文字列が年度途中導入の繰越（「○月から繰越」）の形式かどうかを、現在の組織設定のパターンで判定（Issue #510）
-        /// </summary>
-        /// <param name="summary">摘要文字列</param>
-        /// <returns>「○月から繰越」形式の場合true</returns>
-        /// <remarks>
-        /// Issue #2371: <b>保存済みの行が導入行かどうかの判定には使わない</b>（<c>Ledger.IsMidYearCarryover</c>＝導入行の種別の列を使う）。
-        /// 文言の設定を変えると、変更前に保存した行は現在のパターンに一致しなくなるため。種別を持たない行の推定は
-        /// <c>Common.InitialRecordSummaryMatcher</c> が現在と既定のパターンの両方で行う。
-        /// </remarks>
-        public static bool IsMidYearCarryoverSummary(string? summary)
-        {
-            if (string.IsNullOrEmpty(summary))
-            {
-                return false;
-            }
-
-            try
-            {
-                return Regex.IsMatch(summary, CurrentOptions.SummaryText.MidYearCarryoverPattern);
-            }
-            catch (ArgumentException)
-            {
-                // 不正な正規表現の場合はデフォルトパターンにフォールバック
-                // （リテラルを直書きせず SummaryTextOptions の既定値を単一の真実源とする）
-                return Regex.IsMatch(summary, new SummaryTextOptions().MidYearCarryoverPattern);
-            }
         }
 
         /// <summary>

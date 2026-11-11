@@ -23,7 +23,7 @@ namespace ICCardManager.Tests.Data.Repositories;
 /// </summary>
 /// <remarks>
 /// <para>
-/// Issue #1604 で C# 側の繰越判定は <see cref="SummaryGenerator.IsMidYearCarryoverSummary"/> に
+/// Issue #1604 で C# 側の繰越判定は <c>SummaryGenerator.IsMidYearCarryoverSummary</c>（Issue #2371 で削除） に
 /// 一元化されたが、<see cref="LedgerRepository"/> の SQL は <c>'%月から繰越'</c> をハードコード
 /// しており、書式をカスタムすると SQL だけが追従しなかった（繰越レコードが利用実績として
 /// カウントされ、登録しただけのカードが「利用1回・稼働率&gt;0%」になる）。

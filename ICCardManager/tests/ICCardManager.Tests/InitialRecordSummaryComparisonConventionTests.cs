@@ -215,6 +215,10 @@ public class InitialRecordSummaryComparisonConventionTests
             .Count.Should().Be(1, "マイグレーション 013 が既存の行を摘要から埋めること");
         Regex.Matches(byPath[RowEditFile], @"InitialRecordSummaryMatcher\s*\.\s*InferWithCurrentSettings\s*\(\s*Summary\s*\)")
             .Count.Should().Be(1, "行編集の「両方0円」の注意が入力中の摘要を見ること");
+        // 起動時の組織設定の文言を DbContext へ渡す DI の配線（DbContext → MigrationRunner → 013 は DbContextMigrationTests が実行で固定）
+        byPath["App.xaml.cs"].Should().Contain("InitialRecordSummaryText = sp.GetRequiredService<IOptions<OrganizationOptions>>().Value.SummaryText",
+            "マイグレーション 013 が現在の文言とも照合できるよう、appsettings.json の組織設定を DbContext へ渡すこと");
+        byPath["Data/DbContext.cs"].Should().Contain("new MigrationRunner(connection, InitialRecordSummaryText)");
         byPath["Services/Import/CsvImportService.Ledger.cs"].Should().Contain("InitialRecordKind = existingLedgerForUpdate?.InitialRecordKind",
             "利用履歴 CSV の新しい行は導入行にしない（既存の行は DB の種別を引き継ぐ）");
     }

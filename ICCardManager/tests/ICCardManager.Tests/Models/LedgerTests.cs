@@ -12,7 +12,7 @@ namespace ICCardManager.Tests.Domain;
 /// </summary>
 /// <remarks>
 /// Issue #1604: <see cref="Ledger.IsMidYearCarryover"/> の判定が
-/// <see cref="SummaryGenerator.IsMidYearCarryoverSummary"/>（静的 <c>_options</c> 参照）へ
+/// <c>SummaryGenerator.IsMidYearCarryoverSummary</c>（Issue #2371 で削除）（静的 <c>_options</c> 参照）へ
 /// 一元化されたため、本クラスも静的状態を読み取るようになった。並列実行時の汚染を避けるため
 /// <see cref="SummaryGeneratorCollection"/> に編入し、各テスト前後でデフォルトへリセットする。
 /// </remarks>

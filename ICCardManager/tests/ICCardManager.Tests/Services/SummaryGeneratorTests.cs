@@ -64,10 +64,11 @@ public class SummaryGeneratorTests : IDisposable
     [InlineData("0月から繰越", false)]   // 無効な月
     [InlineData("", false)]
     [InlineData(null, false)]
-    public void IsMidYearCarryoverSummary_CorrectlyIdentifiesPattern(string? summary, bool expected)
+    public void MidYearCarryoverSummary_IsRecognizedByInitialRecordSummaryMatcher(string? summary, bool expected)
     {
-        // Act
-        var result = SummaryGenerator.IsMidYearCarryoverSummary(summary);
+        // Act（Issue #2371: SummaryGenerator.IsMidYearCarryoverSummary は削除。摘要から見分けるのは InitialRecordSummaryMatcher だけ）
+        var result = ICCardManager.Common.InitialRecordSummaryMatcher.InferWithCurrentSettings(summary)
+            == ICCardManager.Models.InitialRecordKind.MidYearCarryover;
 
         // Assert
         result.Should().Be(expected);

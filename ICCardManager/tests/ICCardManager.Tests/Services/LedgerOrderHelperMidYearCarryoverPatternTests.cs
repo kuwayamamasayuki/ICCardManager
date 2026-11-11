@@ -14,7 +14,7 @@ namespace ICCardManager.Tests.Services;
 /// <remarks>
 /// <para>
 /// 従来は <c>EndsWith("月から繰越")</c> のハードコードで、Issue #1604 の一元化
-/// （<see cref="SummaryGenerator.IsMidYearCarryoverSummary"/>）が届いていなかった。
+/// （<c>SummaryGenerator.IsMidYearCarryoverSummary</c>（Issue #2371 で削除））が届いていなかった。
 /// 書式をカスタムすると繰越レコードが「同日の先頭固定」から漏れ、残高チェーンの
 /// 開始点として扱われなくなる。
 /// </para>

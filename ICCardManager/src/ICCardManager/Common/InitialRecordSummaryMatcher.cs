@@ -66,7 +66,9 @@ namespace ICCardManager.Common
                 return InitialRecordKind.FiscalYearStartCarryover;
             }
 
-            if (wordings.Any(w => MatchesMidYearCarryoverPattern(summary, w.MidYearCarryoverPattern)))
+            // 現在の設定のパターンと既定のパターンを、それぞれ照合する（不正な正規表現は照合しない）
+            if (MatchesMidYearCarryoverPattern(summary, currentSummaryText?.MidYearCarryoverPattern)
+                || MatchesMidYearCarryoverPattern(summary, DefaultSummaryText.MidYearCarryoverPattern))
             {
                 return InitialRecordKind.MidYearCarryover;
             }
