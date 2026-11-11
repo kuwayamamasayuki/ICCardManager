@@ -856,7 +856,7 @@ public class HistoryPanelViewModelTests : IDisposable
     /// これが無いと、統合を常に警告として案内する実装でも上のテストが緑になる。
     /// </summary>
     [Fact]
-    public async Task MergeHistoryLedgers_後処理まで成功_元に戻せる案内を出すこと()
+    public async Task MergeHistoryLedgers_統合に成功_元に戻せる案内を出すこと()
     {
         ArrangeMergeableCheckedLedgers();
 
