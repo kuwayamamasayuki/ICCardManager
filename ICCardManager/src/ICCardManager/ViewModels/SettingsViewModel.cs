@@ -12,7 +12,6 @@ using ICCardManager.Data.Repositories;
 using ICCardManager.Infrastructure.Sound;
 using ICCardManager.Models;
 using ICCardManager.Services;
-using Microsoft.Extensions.Options;
 using Microsoft.Win32;
 
 
@@ -271,7 +270,6 @@ public partial class SettingsViewModel : ViewModelBase
         ISettingsRepository settingsRepository,
         IValidationService validationService,
         ISoundPlayer soundPlayer,
-        IOptions<DatabaseOptions> databaseOptions, // DI互換のため引数を維持（本体では未使用）
         IDialogService dialogService,
         SummaryGenerator summaryGenerator,
         IStaffAuthService staffAuthService,
@@ -326,7 +324,9 @@ public partial class SettingsViewModel : ViewModelBase
         _settingsChangeService = settingsChangeService ?? throw new ArgumentNullException(nameof(settingsChangeService));
         _configDirectory = configDirectory;
         // database_config.txtから直接読む（設定ファイルが正。DI経由のDatabaseOptionsは
-        // アプリ起動時に固定されるため、同一セッション中に設定変更しても反映されない）
+        // アプリ起動時に固定されるため、同一セッション中に設定変更しても反映されない）。
+        // Issue #2389: 保存先を決めるのはこのファイルだけ（appsettings.json の DatabaseOptions:Path は廃止）なので、
+        // 欄の値と実際に開く DB（再起動後）が食い違わない
         var fullPath = AppConfigFiles.Read(DatabaseConfigPath);
         _originalDatabasePath = ExtractDirectoryPath(fullPath);
         _databasePath = _originalDatabasePath;
