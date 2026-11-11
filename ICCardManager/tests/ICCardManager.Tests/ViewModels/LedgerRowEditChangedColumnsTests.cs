@@ -69,7 +69,7 @@ public sealed class LedgerRowEditChangedColumnsTests : IDisposable
     /// <summary>利用者 X・備考ありの行を投入し、行編集を開く</summary>
     private async Task<int> SeedAndOpenAsync(
         string? lenderIdm = "1111111111111111", string? staffName = "博多 花子", string? note = "元の備考",
-        int balance = 2300, int? previousBalance = null)
+        int balance = 2300, int? previousBalance = null, DateTime? date = null)
     {
         Execute(
             "INSERT OR IGNORE INTO ic_card (card_idm, card_type, card_number) VALUES (@idm, 'はやかけん', '001');" +
@@ -80,7 +80,7 @@ public sealed class LedgerRowEditChangedColumnsTests : IDisposable
             CardIdm = TestCardIdm,
             LenderIdm = lenderIdm,
             StaffName = staffName,
-            Date = new DateTime(2026, 4, 17),
+            Date = date ?? new DateTime(2026, 4, 17),
             Summary = "鉄道（博多～天神）",
             Expense = 210,
             Balance = balance,
@@ -92,7 +92,7 @@ public sealed class LedgerRowEditChangedColumnsTests : IDisposable
         {
             Id = id,
             CardIdm = TestCardIdm,
-            Date = new DateTime(2026, 4, 17),
+            Date = date ?? new DateTime(2026, 4, 17),
             DateDisplay = "R8.4.17",
             Summary = "鉄道（博多～天神）",
             Expense = 210,
@@ -340,6 +340,78 @@ public sealed class LedgerRowEditChangedColumnsTests : IDisposable
         var stored = await ReadAsync(id);
         stored.LenderIdm.Should().Be(_staffX.StaffIdm);
         stored.StaffName.Should().Be(_staffX.Name);
+    }
+
+    [Fact]
+    public async Task 氏名で職員へ紐づけた行でも_開いた後に他PCが利用者を直していれば_備考だけの保存で書き戻さないこと()
+    {
+        // レビュー指摘: 選び直していない「揃える」派生の書き込みが、他 PC の付け替えを巻き戻さないこと（下の対と組）
+        var id = await SeedAndOpenAsync(lenderIdm: null, staffName: "博多 花子");
+        _viewModel.SelectedStaff.Should().BeSameAs(_staffX, "前提: 氏名で職員 X へ紐づいた");
+        OtherPcChangesStaffToY(id);
+
+        _viewModel.Note = "備考だけ直した";
+        await _viewModel.SaveCommand.ExecuteAsync(null);
+
+        var stored = await ReadAsync(id);
+        stored.Note.Should().Be("備考だけ直した");
+        stored.LenderIdm.Should().Be(_staffY.StaffIdm, "職員が選び直していない揃えで、他の PC の修正を戻さない");
+        stored.StaffName.Should().Be(_staffY.Name);
+    }
+
+    [Fact]
+    public async Task 氏名で職員へ紐づけた行でも_職員が利用者を変えれば他PCの変更より画面の値を書くこと()
+    {
+        // 対: 読み直した行との照合は「選び直していない揃え」だけに掛ける。職員の操作（ここではクリア）は従来どおり書く
+        var id = await SeedAndOpenAsync(lenderIdm: null, staffName: "博多 花子");
+        OtherPcChangesStaffToY(id);
+
+        _viewModel.ClearStaffCommand.Execute(null);
+        await _viewModel.SaveCommand.ExecuteAsync(null);
+
+        var stored = await ReadAsync(id);
+        stored.LenderIdm.Should().BeNull();
+        stored.StaffName.Should().BeNull();
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("  ")]
+    public async Task 氏名が空文字や空白だけの行を何も変えずに保存しても_NULLを書かず操作ログも残さないこと(string blankName)
+    {
+        // null・空文字・空白だけを同じ「無し」として比べる（貸出者 IDm の空文字は staff への外部キーで入らないため、氏名で確かめる）
+        var id = await SeedAndOpenAsync(lenderIdm: null, staffName: blankName);
+        _viewModel.SelectedStaff.Should().BeNull("前提: 利用者の記録なしとして開いた");
+
+        await _viewModel.SaveCommand.ExecuteAsync(null);
+
+        _viewModel.IsSaved.Should().BeTrue();
+        _operationLogs.Should().BeEmpty("空文字・空白と NULL の違いを変更として数えない");
+        (await ReadAsync(id)).StaffName.Should().Be(blankName);
+    }
+
+    [Fact]
+    public async Task 時刻を持つ行で日付を変えて元へ戻しても_時刻を0時へ書き換えないこと()
+    {
+        var id = await SeedAndOpenAsync(date: new DateTime(2026, 4, 17, 10, 30, 0));
+
+        _viewModel.EditDate = new DateTime(2026, 4, 18);
+        _viewModel.EditDate = new DateTime(2026, 4, 17); // DatePicker で元の日付へ戻すと時刻は 0:00
+        _viewModel.Note = "備考だけ直した";
+        await _viewModel.SaveCommand.ExecuteAsync(null);
+
+        (await ReadAsync(id)).Date.Should().Be(new DateTime(2026, 4, 17, 10, 30, 0));
+    }
+
+    [Fact]
+    public async Task 時刻を持つ行でも日付を変えれば新しい日付を書くこと()
+    {
+        var id = await SeedAndOpenAsync(date: new DateTime(2026, 4, 17, 10, 30, 0));
+
+        _viewModel.EditDate = new DateTime(2026, 4, 18);
+        await _viewModel.SaveCommand.ExecuteAsync(null);
+
+        (await ReadAsync(id)).Date.Date.Should().Be(new DateTime(2026, 4, 18));
     }
 
     #endregion

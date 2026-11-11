@@ -437,6 +437,11 @@ namespace ICCardManager.ViewModels
         /// </summary>
         private Ledger? _openedLedger;
 
+        /// <summary>
+        /// Issue #2375: Editモードの初期化で選んだ利用者（職員が選び直していないかの判定用）。
+        /// </summary>
+        private Staff? _initialSelectedStaff;
+
         private List<LedgerDetail>? _editDetails;
 
         /// <summary>
@@ -666,6 +671,9 @@ namespace ICCardManager.ViewModels
 
             Validate();
             OnPropertyChanged(nameof(IsAddMode));
+
+            // Issue #2375: 初期化で選んだ利用者（保存時に、職員が選び直したかを判定する）
+            _initialSelectedStaff = SelectedStaff;
 
             // Issue #1134: 初期化完了後から変更追跡を開始
             _hasFieldChanges = false;
@@ -1403,7 +1411,7 @@ namespace ICCardManager.ViewModels
             // 変えていない列は読み直した値のまま残り、UPDATE の SET 句にも載らない。全列を画面の値で書くと、
             // 共有フォルダモードで開いている間に別の PC が直した列（利用者・備考など）を、
             // その列に触れていない保存が開いたときの古い値へ黙って巻き戻す（#1726）
-            var editedColumns = FindEditedColumns(selectedStaff);
+            var editedColumns = FindEditedColumns(selectedStaff, ledger);
             if (editedColumns == LedgerRowEditColumns.None)
             {
                 // 何も変えていない保存は書かない（書く値が無い）。監査ログにも「変更なし」の記録を残さない。
@@ -1496,13 +1504,14 @@ namespace ICCardManager.ViewModels
         /// （空文字を書く差分を作らない。<c>db-write-conventions.md</c>「null と空文字を同じ未設定として保存する列は、比較でも同じ正規化を通す」）。
         /// </para>
         /// <para>
-        /// 利用者は選択中の職員の IDm・氏名を、開いたときの行の <c>lender_idm</c>・<c>staff_name</c> と比べる。
-        /// 一覧に無い利用者（#2300）を選んでいる間は書かない（表示用の名前を書かない）。開いたときに氏名で
-        /// 職員へ紐づけた行（#1303: IDm が空・一致しない）や、職員一覧で氏名を変えた職員の行は、選び直さなくても
-        /// 書く値が行と違うので書く（従来どおり、保存で選択中の職員の IDm・氏名へ揃える。派生の変更）。
+        /// 利用者は選択中の職員の IDm・氏名を、開いたときの行の <c>lender_idm</c>・<c>staff_name</c> と比べる
+        /// （null・空文字・空白だけは同じ「無し」）。一覧に無い利用者（#2300）を選んでいる間は書かない（表示用の名前を書かない）。
+        /// 開いたときに氏名で職員へ紐づけた行（#1303: IDm が空・一致しない）や、職員一覧で氏名を変えた職員の行は、
+        /// 選び直さなくても書く値が行と違う（派生の変更）。これは保存直前に読み直した行（<paramref name="reread"/>）の
+        /// 利用者が開いたときのままのときだけ書く（他 PC が直していれば巻き戻さない）。
         /// </para>
         /// </remarks>
-        private LedgerRowEditColumns FindEditedColumns(Staff? selectedStaff)
+        private LedgerRowEditColumns FindEditedColumns(Staff? selectedStaff, Ledger reread)
         {
             var opened = _openedLedger;
             if (opened == null)
@@ -1514,7 +1523,8 @@ namespace ICCardManager.ViewModels
             }
 
             var columns = LedgerRowEditColumns.None;
-            if (EditDate != opened.Date)
+            // 画面で選べるのは日付だけなので、日付で比べる（時刻を持つ行で日付を変えて戻したとき、0:00 へ書き換えない）
+            if (EditDate.Date != opened.Date.Date)
             {
                 columns |= LedgerRowEditColumns.Date;
             }
@@ -1549,10 +1559,16 @@ namespace ICCardManager.ViewModels
                 columns |= LedgerRowEditColumns.CompanionCount;
             }
 
-            if (selectedStaff == null || !ReferenceEquals(selectedStaff, _unlistedStaffEntry))
+            if ((selectedStaff == null || !ReferenceEquals(selectedStaff, _unlistedStaffEntry))
+                && !SameStaff(selectedStaff?.StaffIdm, selectedStaff?.Name, opened.LenderIdm, opened.StaffName))
             {
-                if (!string.Equals(selectedStaff?.StaffIdm, opened.LenderIdm, StringComparison.Ordinal)
-                    || !string.Equals(selectedStaff?.Name, opened.StaffName, StringComparison.Ordinal))
+                // 職員が選び直していない（初期化で選んだまま）のに書く値が行と違うのは、開いたときに氏名で
+                // 紐づけた行（#1303）・氏名を変えた職員の行の「揃える」派生の変更。これは保存直前に読み直した行の
+                // 利用者が開いたときのままのときだけ書く（その間に他 PC が利用者を直していれば、職員の意思でない
+                // 揃えで他 PC の修正を巻き戻さない。#2375 のレビューで検出）
+                var untouched = ReferenceEquals(selectedStaff, _initialSelectedStaff);
+                if (!untouched
+                    || SameStaff(reread.LenderIdm, reread.StaffName, opened.LenderIdm, opened.StaffName))
                 {
                     columns |= LedgerRowEditColumns.Staff;
                 }
@@ -1560,6 +1576,18 @@ namespace ICCardManager.ViewModels
 
             return columns;
         }
+
+        /// <summary>
+        /// Issue #2375: 利用者（貸出者 IDm と氏名の組）が同じか。null・空文字・空白だけを同じ「無し」として比べる
+        /// （空白だけの氏名を氏名なしとする <see cref="StaffNameFormatter.Format"/> と同じ扱い。
+        /// 正規化しないと、IDm が空文字の行を何も変えずに保存しただけで NULL を書く差分になる）。
+        /// </summary>
+        private static bool SameStaff(string? idmA, string? nameA, string? idmB, string? nameB) =>
+            string.Equals(NormalizeStaffValue(idmA), NormalizeStaffValue(idmB), StringComparison.Ordinal)
+            && string.Equals(NormalizeStaffValue(nameA), NormalizeStaffValue(nameB), StringComparison.Ordinal);
+
+        private static string? NormalizeStaffValue(string? value) =>
+            value is not null && !string.IsNullOrWhiteSpace(value) ? value : null;
 
         /// <summary>
         /// Issue #2375: 変えた列だけ、画面の値を読み直した行へ載せる（変えていない列は読み直した値のまま）。
