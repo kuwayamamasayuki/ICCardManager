@@ -613,6 +613,8 @@ namespace ICCardManager.ViewModels
             _editDetails = ledger.Details;
             // Issue #2325: 摘要の代入（Validate が走る）より前に置く
             _isPointRedemptionRow = ledger.Details.Count > 0 && ledger.Details.All(d => d.IsPointRedemption);
+            // Issue #2371: 導入行かどうかは行自身の種別で判定する（摘要を書き換えても変わらない）。摘要の代入より前に置く
+            _initialRecordKind = ledger.InitialRecordKind;
             PreviousBalance = previousBalance ?? 0;
             UpdateAutoBalanceAvailability();
 
@@ -1104,7 +1106,11 @@ namespace ICCardManager.ViewModels
         /// </summary>
         /// <remarks>
         /// 導入行（新規購入・○月から繰越・前年度より繰越）・ポイント還元・貸出中レコード。
-        /// 摘要の文言は組織設定で変えられるため、リテラルの直書きではなく設定から導出した判定を使う
+        /// 導入行は行自身の種別で判定し（Issue #2371）、加えて<b>入力中の摘要</b>が導入行の文言（現在または既定の設定）なら
+        /// 警告しない。これは保存済みの行の判定ではなく、職員が入力している文字列への注意の出し分け
+        /// （「繰越等でなければ」と案内する警告で、繰越の文言を入力した職員を咎めない）。摘要との照合は
+        /// <see cref="InitialRecordSummaryMatcher"/> の 1 か所に置く。
+        /// ポイント還元の摘要の文言は組織設定で変えられるため、リテラルの直書きではなく設定から導出した判定を使う
         /// （service-conventions.md「設定値で生成したものは、設定値で判定する」#1818）。旧実装は
         /// 「繰越」「新規購入」「ポイント還元」を直書きしており、ポイント還元の文言を変えた組織では
         /// ポイント還元の行を開くたびに警告が出ていた。貸出中レコードは摘要ではなく行自身のフラグで判定する（#2044）。
@@ -1118,7 +1124,8 @@ namespace ICCardManager.ViewModels
         private bool IsZeroAmountExpectedSummary() =>
             IsLentRecord
             || _isPointRedemptionRow
-            || Ledger.IsInitialRecordSummary(Summary)
+            || _initialRecordKind.HasValue
+            || InitialRecordSummaryMatcher.InferWithCurrentSettings(Summary).HasValue
             || Summary == SummaryGenerator.GetPointRedemptionSummary()
             || Summary == DefaultPointRedemptionSummary;
 
@@ -1129,6 +1136,12 @@ namespace ICCardManager.ViewModels
         /// Issue #2325: Editモードで開いた行の明細がすべてポイント還元か（摘要の文言に依らない行自身の情報）
         /// </summary>
         private bool _isPointRedemptionRow;
+
+        /// <summary>
+        /// Issue #2371: Editモードで開いた行の導入行の種別（導入行でなければ、また追加モードでは null）。
+        /// 行編集は種別を書き換えない（<c>LedgerRepository.UpdateAsync</c> の SET 句に含めない）ので、摘要を変えても導入行のまま
+        /// </summary>
+        private InitialRecordKind? _initialRecordKind;
 
         /// <summary>
         /// Issue #2325: Addモードで自動計算が使えなくなり、残高が未入力のときの警告（何が／なぜ／どうすれば）
@@ -1191,7 +1204,7 @@ namespace ICCardManager.ViewModels
             // Issue #2007: 受入欄に残高を書く導入行（新規購入・前年度より繰越）で受入と残額が食い違うと、
             // 月次帳票の「受入 − 払出 = 残額」が崩れる。導入時残高を片方だけ直す操作ミスの予防。
             // 保存は塞がない（#1812「曖昧な入力は塞ぐより解決結果を見せる」）。
-            if (Ledger.InitialRecordCarriesIncome(Summary) && Income != Balance)
+            if (Ledger.InitialRecordCarriesIncome(_initialRecordKind) && Income != Balance)
             {
                 AddWarning(InitialBalanceCorrectionMessage.ForIncomeBalanceMismatch(Income, Balance));
             }

@@ -1,3 +1,4 @@
+#nullable enable
 using System;
 using System.Collections.Generic;
 using System.Data.SQLite;
@@ -26,6 +27,22 @@ namespace ICCardManager.Data.Migrations
         {
             _connection = connection;
             _migrations = DiscoverMigrations();
+        }
+
+        /// <summary>
+        /// 起動時の組織設定の摘要テキストを渡してマイグレーションを実行するランナーを作る（Issue #2371）。
+        /// </summary>
+        /// <param name="connection">接続</param>
+        /// <param name="currentSummaryText">
+        /// マイグレーション 013 が既存の導入行を摘要から埋めるときに、既定の文言に加えて照合する現在の文言。<c>null</c> なら既定の文言だけ
+        /// </param>
+        public MigrationRunner(SQLiteConnection connection, Services.SummaryTextOptions? currentSummaryText)
+            : this(connection)
+        {
+            foreach (var migration in _migrations.OfType<Migration_013_AddInitialRecordKind>())
+            {
+                migration.CurrentSummaryText = currentSummaryText;
+            }
         }
 
         /// <summary>
@@ -385,7 +402,7 @@ namespace ICCardManager.Data.Migrations
         /// <param name="migration">マイグレーション</param>
         /// <param name="success">成功したかどうか</param>
         /// <param name="errorMessage">エラーメッセージ（失敗時）</param>
-        private void LogMigrationAction(string action, IMigration migration, bool success, string errorMessage = null)
+        private void LogMigrationAction(string action, IMigration migration, bool success, string? errorMessage = null)
         {
             try
             {

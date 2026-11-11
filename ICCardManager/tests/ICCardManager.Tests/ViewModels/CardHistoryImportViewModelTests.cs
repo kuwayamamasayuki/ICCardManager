@@ -4,6 +4,7 @@ using System.Linq;
 using System.Threading.Tasks;
 using CommunityToolkit.Mvvm.Messaging;
 using FluentAssertions;
+using ICCardManager.Common;
 using ICCardManager.Common.Exceptions;
 using ICCardManager.Common.Messages;
 using ICCardManager.Data;
@@ -113,6 +114,7 @@ public sealed class CardHistoryImportViewModelTests : IDisposable
             CardIdm = TargetIdm,
             Date = new DateTime(2026, 9, 1),
             Summary = "新規購入",
+            InitialRecordKind = InitialRecordKind.NewPurchase,
             Income = 5000,
             Balance = 5000,
         }).GetAwaiter().GetResult();
@@ -386,6 +388,7 @@ public sealed class CardHistoryImportViewModelTests : IDisposable
             CardIdm = TargetIdm,
             Date = introductionDate,
             Summary = SummaryGenerator.GetCarryoverFromPreviousYearSummary(),
+            InitialRecordKind = InitialRecordSummaryMatcher.InferWithCurrentSettings(SummaryGenerator.GetCarryoverFromPreviousYearSummary()),
             Income = 4790,
             Balance = 4790,
         });

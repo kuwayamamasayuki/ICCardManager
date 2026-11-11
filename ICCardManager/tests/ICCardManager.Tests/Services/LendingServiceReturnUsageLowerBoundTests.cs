@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
 using FluentAssertions;
+using ICCardManager.Common;
 using ICCardManager.Data;
 using ICCardManager.Data.Repositories;
 using ICCardManager.Dtos;
@@ -849,7 +850,9 @@ public sealed class LendingServiceReturnUsageLowerBoundTests : IDisposable
             CardIdm = TestCardIdm,
             Date = date,
             Summary = summary,
-            Income = Ledger.InitialRecordCarriesIncome(summary) ? balance : 0,
+            // Issue #2371: カード登録が書いた導入行として種別を持たせる
+            InitialRecordKind = InitialRecordSummaryMatcher.InferWithCurrentSettings(summary),
+            Income = Ledger.InitialRecordCarriesIncome(InitialRecordSummaryMatcher.InferWithCurrentSettings(summary)) ? balance : 0,
             Expense = 0,
             Balance = balance,
         });

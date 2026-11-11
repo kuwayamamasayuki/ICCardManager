@@ -197,7 +197,11 @@ namespace ICCardManager.Services
                         ReturnerIdm = existingLedgerForUpdate?.ReturnerIdm,
                         LentAt = existingLedgerForUpdate?.LentAt,
                         ReturnedAt = existingLedgerForUpdate?.ReturnedAt,
-                        IsLentRecord = existingLedgerForUpdate?.IsLentRecord ?? false
+                        IsLentRecord = existingLedgerForUpdate?.IsLentRecord ?? false,
+                        // Issue #2371: 導入行の種別は CSV の列に無い。既存の行の更新では DB の種別を引き継ぎ（UpdateAsync は
+                        // 種別を SET しない）、新しい行（ID の無い行）は導入行にしない。導入行はカード登録でだけ作る
+                        // （手入力の行は、履歴の「追加」も CSV も、摘要が導入行の文言でも導入行にしない。ユーザー判断）
+                        InitialRecordKind = existingLedgerForUpdate?.InitialRecordKind
                     };
 
                     validRecords.Add((lineNumber, ledger, isUpdate));

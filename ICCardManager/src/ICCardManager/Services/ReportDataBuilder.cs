@@ -136,7 +136,7 @@ namespace ICCardManager.Services
             // CSV で取り込んだ行では DB に Income=残高 で残り得るため、月計から除外しないと前月の累計と二重計上になる。
             // 現行の登録では受入 0 で保存する（#1219）ため、除外しても Sum は変わらない。
             var monthlyIncome = ledgers
-                .Where(l => !SummaryGenerator.IsMidYearCarryoverSummary(l.Summary))
+                .Where(l => !l.IsMidYearCarryover)
                 .Sum(l => l.Income);
             var monthlyExpense = ledgers.Sum(l => l.Expense);
 
@@ -161,7 +161,7 @@ namespace ICCardManager.Services
 
             // 累計も同様に「○月から繰越」レコードを除外（紙出納簿移行カード対策）
             var yearlyIncome = yearlyLedgers
-                .Where(l => !SummaryGenerator.IsMidYearCarryoverSummary(l.Summary))
+                .Where(l => !l.IsMidYearCarryover)
                 .Sum(l => l.Income) + fiscalYearCarryoverIncome;
             var yearlyExpense = yearlyLedgers.Sum(l => l.Expense);
 

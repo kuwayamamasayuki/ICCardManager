@@ -2039,20 +2039,27 @@ namespace ICCardManager.ViewModels
                     // 「前年度より繰越」として扱い受入金額にも残高を記録する。
                     var isFiscalYearCarryover = !modeResult.IsNewPurchase
                         && PaperCarryoverPolicy.IsFiscalYearStartCarryoverMonth(modeResult.CarryoverMonth!.Value);
+                    // Issue #2371: 導入行の種別を行に書く。以後の判定（帳票の導入月・前年度繰越・紙の累計・利用実績の除外・
+                    // 返却時の記録の下限・導入時残高の訂正案）は摘要ではなくこの種別で行うので、組織設定の文言を後で変えても
+                    // この行は導入行として認識される。
                     string summary;
+                    InitialRecordKind initialRecordKind;
                     if (modeResult.IsNewPurchase)
                     {
-                        summary = "新規購入";
+                        summary = InitialRecordSummaryMatcher.NewPurchaseSummary;
+                        initialRecordKind = InitialRecordKind.NewPurchase;
                     }
                     else if (isFiscalYearCarryover)
                     {
                         // 3月から繰越 = 前年度より繰越
                         summary = SummaryGenerator.GetCarryoverFromPreviousYearSummary();
+                        initialRecordKind = InitialRecordKind.FiscalYearStartCarryover;
                     }
                     else
                     {
                         // 繰越モード: 「○月から繰越」
                         summary = SummaryGenerator.GetMidYearCarryoverSummary(modeResult.CarryoverMonth!.Value);
+                        initialRecordKind = InitialRecordKind.MidYearCarryover;
                     }
 
                     // Issue #596: overrideDateが指定された場合はそれを使用
@@ -2076,7 +2083,8 @@ namespace ICCardManager.ViewModels
                     // 年度途中導入の繰越（「○月から繰越」）の場合、受入金額は空欄にする。
                     // ただし3月（前年度繰越）と新規購入は受入金額に残高を記録する。
                     // 月次帳票のルール: 受入欄に金額が入るのは4月の前年度繰越と新規購入のみ。
-                    var hasIncome = modeResult.IsNewPurchase || isFiscalYearCarryover;
+                    // 判断は導入時残高の訂正（Issue #2007）と同じ Ledger.InitialRecordCarriesIncome に寄せる（#1763）
+                    var hasIncome = Ledger.InitialRecordCarriesIncome(initialRecordKind);
                     var ledger = new Ledger
                     {
                         CardIdm = cardIdm,
@@ -2091,7 +2099,8 @@ namespace ICCardManager.ViewModels
                         ReturnerIdm = null,
                         LentAt = null,
                         ReturnedAt = null,
-                        IsLentRecord = false
+                        IsLentRecord = false,
+                        InitialRecordKind = initialRecordKind
                     };
 
                     return ledger;

@@ -314,7 +314,7 @@ public class LedgerConsistencyCheckerTests
             .ReturnsAsync(new List<Ledger>
             {
                 new Ledger { Id = 30, CardIdm = TestCardIdm, Date = new DateTime(2026, 3, 2),
-                    Summary = "新規購入", Income = 1000, Expense = 0, Balance = 1000 },
+                    Summary = "新規購入", InitialRecordKind = InitialRecordKind.NewPurchase, Income = 1000, Expense = 0, Balance = 1000 },
                 new Ledger { Id = 31, CardIdm = TestCardIdm, Date = new DateTime(2026, 3, 5),
                     Summary = "鉄道（天神～博多）", Income = 0, Expense = 200, Balance = 750 },
             });
@@ -341,6 +341,7 @@ public class LedgerConsistencyCheckerTests
             CardIdm = TestCardIdm,
             Date = date,
             Summary = summary,
+            InitialRecordKind = InitialRecordSummaryMatcher.InferWithCurrentSettings(summary),
             Income = income,
             Expense = expense,
             Balance = balance,

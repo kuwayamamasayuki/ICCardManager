@@ -346,7 +346,7 @@ namespace ICCardManager.Services
             }
 
             var first = data.Ledgers[0];
-            if (SummaryGenerator.IsMidYearCarryoverSummary(first.Summary))
+            if (first.IsMidYearCarryover)
             {
                 return;
             }
@@ -410,7 +410,7 @@ namespace ICCardManager.Services
             }
             // 紙出納簿移行月は「○月から繰越」の受入が集計から除外される一方で残高チェーンには寄与するため
             // 「受入 − 払出 = 残額」が成立しない（Issue #510 / #1494）
-            if (data.Ledgers.Any(l => SummaryGenerator.IsMidYearCarryoverSummary(l.Summary)))
+            if (data.Ledgers.Any(l => l.IsMidYearCarryover))
             {
                 return;
             }

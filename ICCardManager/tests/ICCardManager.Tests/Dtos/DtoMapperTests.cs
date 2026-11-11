@@ -220,6 +220,7 @@ public class DtoMapperTests
             CompanionCount = 1, // Issue #1906
             Note = "通勤利用",
             IsLentRecord = true,
+            InitialRecordKind = InitialRecordKind.MidYearCarryover, // Issue #2371: 既定値（null）と異なる値で写像を確かめる
             Details = new List<LedgerDetail>
             {
                 new LedgerDetail { LedgerId = 1, EntryStation = "博多駅", ExitStation = "天神駅", Amount = 210 }
@@ -244,6 +245,8 @@ public class DtoMapperTests
         dto.StaffName.Should().Be("山田太郎");
         dto.Note.Should().Be("通勤利用");
         dto.IsLentRecord.Should().BeTrue();
+        dto.InitialRecordKind.Should().Be(InitialRecordKind.MidYearCarryover);
+        dto.IsInitialRecord.Should().BeTrue();
         dto.Details.Should().ContainSingle();
         dto.Details[0].EntryStation.Should().Be("博多駅", "明細も DTO へ写す");
         dto.Details[0].ExitStation.Should().Be("天神駅");
@@ -505,7 +508,7 @@ public class DtoMapperTests
                 nameof(LedgerDto.Id), nameof(LedgerDto.CardIdm), nameof(LedgerDto.Date), nameof(LedgerDto.Summary),
                 nameof(LedgerDto.Income), nameof(LedgerDto.Expense), nameof(LedgerDto.Balance),
                 nameof(LedgerDto.StaffName), nameof(LedgerDto.CompanionCount), nameof(LedgerDto.Note),
-                nameof(LedgerDto.IsLentRecord), nameof(LedgerDto.DetailCountValue)
+                nameof(LedgerDto.IsLentRecord), nameof(LedgerDto.InitialRecordKind), nameof(LedgerDto.DetailCountValue)
             },
             // Details が空のときは DetailCount（明細を読み込まない一覧取得で設定される件数）を使う
             renamedFrom: new Dictionary<string, string> { [nameof(LedgerDto.DetailCountValue)] = nameof(Ledger.DetailCount) },
@@ -675,6 +678,12 @@ public class DtoMapperTests
         if (type.IsEnum)
         {
             var values = Enum.GetValues(type);
+            return values.GetValue(values.Length - 1);
+        }
+        if (Nullable.GetUnderlyingType(type) is { IsEnum: true } enumType)
+        {
+            // Issue #2371: Ledger.InitialRecordKind。既定値（null）でない列挙子
+            var values = Enum.GetValues(enumType);
             return values.GetValue(values.Length - 1);
         }
 

@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
 using FluentAssertions;
+using ICCardManager.Common;
 using ICCardManager.Data;
 using ICCardManager.Data.Repositories;
 using ICCardManager.Infrastructure.Caching;
@@ -43,7 +44,7 @@ public class LedgerRepositoryAggregationTests : IDisposable
     /// 「○月から繰越」「前年度より繰越」は生成側（<see cref="SummaryGenerator"/>）から取り、テスト側で
     /// 文字列を組み立てない。「新規購入」は本番にも生成メソッドが無くリテラルのため、
     /// <c>CarryoverSummaries_AreRecognizedByTheProductionPredicate</c> で
-    /// <see cref="Ledger.IsInitialRecordSummary"/> との対応を表明して乖離を検出する。
+    /// <see cref="Ledger.IsInitialRecord"/> との対応を表明して乖離を検出する。
     /// Issue #2326: 「前年度より繰越」は繰越月を 3 月にして登録したカードで DB に保存される 3 種目の導入行。
     /// 以前は <see cref="Ledger.IsCarryover"/>（帳票用で前年度繰越を含まない）と対応させていたため、
     /// 集計の除外条件から漏れたことを検出できなかった。
@@ -119,7 +120,9 @@ public class LedgerRepositoryAggregationTests : IDisposable
             Balance = balance,
             StaffName = staffName,
             LentAt = isLentRecord ? date : (DateTime?)null,
-            IsLentRecord = isLentRecord
+            IsLentRecord = isLentRecord,
+            // Issue #2371: 導入行の摘要で入れる行は、カード登録が書いた導入行として種別も持たせる
+            InitialRecordKind = isLentRecord ? null : InitialRecordSummaryMatcher.InferWithCurrentSettings(summary)
         });
 
     #endregion
@@ -262,8 +265,8 @@ public class LedgerRepositoryAggregationTests : IDisposable
         // テストだけ旧文字列で通り続け、除外漏れを検出できなくなる。
         foreach (var summary in CarryoverSummaries)
         {
-            Ledger.IsInitialRecordSummary(summary).Should().BeTrue(
-                $"「{summary}」は Ledger.IsInitialRecordSummary が導入行と判定する摘要であるべき");
+            InitialRecordSummaryMatcher.InferWithCurrentSettings(summary).Should().NotBeNull(
+                $"「{summary}」はカード登録が書く導入行の摘要であるべき（Issue #2371: 種別の推定と一致すること）");
         }
 
         // 本番の導入行判定が認める 3 種をすべてテストが網羅していること（1 種だけ漏れる形を防ぐ）

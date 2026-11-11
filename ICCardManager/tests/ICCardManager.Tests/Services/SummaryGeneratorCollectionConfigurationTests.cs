@@ -161,7 +161,6 @@ public class SummaryGeneratorCollectionConfigurationTests
             "LedgerTests",
             "LedgerRepositoryMidYearCarryoverPatternTests",
             "LedgerOrderHelperMidYearCarryoverPatternTests",
-            "SummaryGeneratorMidYearCarryoverLikePatternTests",
             "TransferStationGroupServiceTests",
             "SummaryGeneratorGenerationSnapshotTests",
             "SummaryGeneratorDepartmentTypeHotSwapTests",

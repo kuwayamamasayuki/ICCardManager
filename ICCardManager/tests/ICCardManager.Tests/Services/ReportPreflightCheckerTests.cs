@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
 using FluentAssertions;
+using ICCardManager.Common;
 using ICCardManager.Data.Repositories;
 using ICCardManager.Dtos;
 using ICCardManager.Models;
@@ -323,6 +324,7 @@ namespace ICCardManager.Tests.Services
                 CardIdm = TestCardIdm,
                 Date = new DateTime(2026, 7, 1),
                 Summary = SummaryGenerator.GetMidYearCarryoverSummary(6),
+                InitialRecordKind = InitialRecordSummaryMatcher.InferWithCurrentSettings(SummaryGenerator.GetMidYearCarryoverSummary(6)),
                 Income = 3000,
                 Expense = 0,
                 Balance = 3000
@@ -488,6 +490,7 @@ namespace ICCardManager.Tests.Services
                 CardIdm = TestCardIdm,
                 Date = new DateTime(2026, 7, 1),
                 Summary = firstRowSummary,
+                InitialRecordKind = InitialRecordSummaryMatcher.InferWithCurrentSettings(firstRowSummary),
                 Income = 3000,
                 Expense = 0,
                 Balance = 3000

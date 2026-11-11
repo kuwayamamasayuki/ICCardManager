@@ -5,6 +5,7 @@ using System.Linq;
 using System.Text.Json;
 using System.Threading.Tasks;
 using FluentAssertions;
+using ICCardManager.Common;
 using ICCardManager.Data;
 using ICCardManager.Data.Repositories;
 using ICCardManager.Dtos;
@@ -2410,6 +2411,7 @@ public class LedgerRowEditViewModelTests : IDisposable
         CardIdm = TestCardIdm,
         Date = new DateTime(2026, 1, 10),
         Summary = summary,
+        InitialRecordKind = InitialRecordSummaryMatcher.InferWithCurrentSettings(summary),
         Expense = 200,
         Balance = 2300,
         Details = new List<LedgerDetail>
@@ -2553,6 +2555,7 @@ public class LedgerRowEditViewModelTests : IDisposable
         CardIdm = TestCardIdm,
         Date = new DateTime(2026, 1, 10),
         Summary = summary,
+        InitialRecordKind = InitialRecordSummaryMatcher.InferWithCurrentSettings(summary),
         Expense = 460,
         Balance = 2040,
         Details = new List<LedgerDetail>
@@ -2914,6 +2917,7 @@ public class LedgerRowEditViewModelTests : IDisposable
             CardIdm = TestCardIdm,
             Date = new DateTime(2025, 4, 1),
             Summary = summary,
+            InitialRecordKind = InitialRecordSummaryMatcher.InferWithCurrentSettings(summary),
             Income = income,
             Expense = 0,
             Balance = balance
@@ -3003,6 +3007,7 @@ public class LedgerRowEditViewModelTests : IDisposable
             CardIdm = TestCardIdm,
             Date = new DateTime(2025, 4, 1),
             Summary = "新規購入",
+            InitialRecordKind = InitialRecordKind.NewPurchase,
             Income = 5000,
             Expense = 0,
             Balance = 5000

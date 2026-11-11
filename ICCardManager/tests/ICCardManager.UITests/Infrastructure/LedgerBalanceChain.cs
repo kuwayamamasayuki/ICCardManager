@@ -37,8 +37,9 @@ namespace ICCardManager.UITests.Infrastructure
         /// <summary>残高チェーンの検査に使う台帳 1 行。</summary>
         internal sealed class Row
         {
-            public Row(long id, string cardIdm, DateTime date, string summary, int income, int expense, int balance)
+            public Row(long id, string cardIdm, DateTime date, string summary, int income, int expense, int balance, long? initialRecordKind = null)
             {
+                InitialRecordKind = initialRecordKind;
                 Id = id;
                 CardIdm = cardIdm;
                 Date = date;
@@ -55,6 +56,9 @@ namespace ICCardManager.UITests.Infrastructure
             public int Income { get; }
             public int Expense { get; }
             public int Balance { get; }
+
+            /// <summary>導入行の種別（<c>ledger.initial_record_kind</c>。1＝新規購入、2＝○月から繰越、3＝前年度より繰越、null＝導入行でない）</summary>
+            public long? InitialRecordKind { get; }
         }
 
         /// <summary>DB の全カードの台帳を読み、残高チェーンが切れている箇所を説明する文を返す（無ければ空）。</summary>
@@ -92,20 +96,20 @@ namespace ICCardManager.UITests.Infrastructure
 
         private static IEnumerable<Row> Order(IEnumerable<Row> rows) =>
             rows.OrderBy(r => r.Date.Date)
-                .ThenBy(r => IsSpecialRecord(r.Summary) ? 0 : 1)
+                .ThenBy(r => IsSpecialRecord(r) ? 0 : 1)
                 .ThenBy(r => r.Id);
 
         /// <summary>
         /// 同じ日の中で先頭に置く行か（本体の <c>LedgerOrderHelper.IsSpecialRecord</c> ＝ <c>Ledger.IsCarryover</c> と同じ:
-        /// 新規購入・○月から繰越。組織設定で繰越の文言を変えた場合は追随しないが、シードは既定の文言しか使わない）。
+        /// 導入行の種別が新規購入・○月から繰越。Issue #2371 で本体が摘要ではなく種別の列で判定するようになったので追随した）。
         /// </summary>
-        private static bool IsSpecialRecord(string summary) =>
-            summary == "新規購入" || summary.EndsWith("月から繰越", StringComparison.Ordinal);
+        private static bool IsSpecialRecord(Row row) =>
+            row.InitialRecordKind is 1 or 2;
 
         private static List<Row> ReadRows(SQLiteConnection conn)
         {
             using var cmd = conn.CreateCommand();
-            cmd.CommandText = "SELECT id, card_idm, date, summary, income, expense, balance FROM ledger";
+            cmd.CommandText = "SELECT id, card_idm, date, summary, income, expense, balance, initial_record_kind FROM ledger";
             using var reader = cmd.ExecuteReader();
             var rows = new List<Row>();
             while (reader.Read())
@@ -117,7 +121,8 @@ namespace ICCardManager.UITests.Infrastructure
                     reader.IsDBNull(3) ? string.Empty : reader.GetString(3),
                     ToInt(reader.GetValue(4)),
                     ToInt(reader.GetValue(5)),
-                    ToInt(reader.GetValue(6))));
+                    ToInt(reader.GetValue(6)),
+                    reader.IsDBNull(7) ? null : Convert.ToInt64(reader.GetValue(7), CultureInfo.InvariantCulture)));
             }
 
             return rows;
