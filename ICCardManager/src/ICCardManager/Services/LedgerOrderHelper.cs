@@ -171,8 +171,8 @@ namespace ICCardManager.Services
         /// 新規購入または繰越レコードかどうかを判定する。
         /// </summary>
         /// <remarks>
-        /// 判定は <see cref="Ledger.IsCarryover"/>（→ <see cref="SummaryGenerator.IsMidYearCarryoverSummary"/>）
-        /// へ委譲し、組織設定 <c>MidYearCarryoverPattern</c> に追従する（Issue #1749）。
+        /// 判定は <see cref="Ledger.IsCarryover"/>（→ 導入行の種別 <see cref="Ledger.InitialRecordKind"/>。Issue #2371）
+        /// へ委譲する。組織設定の文言を変えても、変更前に登録した行を取りこぼさない。
         /// 以前は <c>EndsWith("月から繰越")</c> のハードコードで、Issue #1604 の一元化が
         /// 届いておらず、書式カスタム時に繰越レコードが「同日の先頭固定」から漏れていた。
         /// </remarks>

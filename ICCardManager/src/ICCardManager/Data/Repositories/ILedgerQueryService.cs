@@ -175,11 +175,11 @@ namespace ICCardManager.Data.Repositories
         /// 指定カードの導入日（最も古い導入行の日付）を取得
         /// </summary>
         /// <remarks>
-        /// 導入行は <see cref="Models.Ledger.IsInitialRecordSummary"/> の 3 種（「新規購入」／「○月から繰越」／
-        /// 3 月登録の「前年度より繰越」）。判定を SQL に書き写さず同じ 1 つの判定を使う（Issue #2046）。
+        /// 導入行は <see cref="Models.Ledger.IsInitialRecord"/> の 3 種（「新規購入」／「○月から繰越」／
+        /// 3 月登録の「前年度より繰越」。Issue #2046）。
         /// 導入行が無いカード（導入前のデータ）は null。
-        /// 判定は摘要の文字列を現在の組織設定と照合するため、登録後に摘要の設定を変えると旧文言の導入行は
-        /// 認識されず null になる（スキップしない側へ倒れる。導入行はフラグを持たないので #2044 の形は取れない）。
+        /// Issue #2371: 判定は摘要ではなく導入行の種別の列（<c>initial_record_kind</c>）で行う。登録後に組織設定の
+        /// 摘要の文言を変えても、変更前に登録した導入行を認識する（#2044 と同じ形）。
         /// </remarks>
         Task<DateTime?> GetPurchaseDateAsync(string cardIdm);
 
@@ -187,7 +187,7 @@ namespace ICCardManager.Data.Repositories
         /// 指定カードで、利用明細（ledger_detail）を持たない台帳行のうち最も新しい日付を取得（Issue #2237）
         /// </summary>
         /// <remarks>
-        /// 導入行（<see cref="Models.Ledger.IsInitialRecordSummary"/>）と貸出中レコードは除く。
+        /// 導入行（<see cref="Models.Ledger.IsInitialRecord"/>。導入行の種別の列で判定する、Issue #2371）と貸出中レコードは除く。
         /// 手で追加した行・明細なしで CSV から取り込んだ行が該当する。これらは既存明細との照合（Issue #326）の
         /// キーを持たないため、返却時はこの日付より後の履歴だけを記録する（照合できない記録済みの利用を二重に記録しない）。
         /// ただし返却時の下限は貸出日を超えない（<see cref="Services.LendingService.ResolveUsageLowerBound"/>）。
@@ -231,9 +231,9 @@ namespace ICCardManager.Data.Repositories
         /// <remarks>
         /// 「利用実績」の定義は稼働状況の集計（<see cref="GetUsageStatsByCardAsync"/>）と同じ:
         /// 貸出中プレースホルダ（<c>is_lent_record = 1</c>）と導入行
-        /// （<see cref="Models.Ledger.IsInitialRecordSummary"/> の 3 種: 「新規購入」、組織設定
-        /// <c>MidYearCarryoverFormat</c> に従う繰越摘要（既定書式では「○月から繰越」、Issue #1749）、
-        /// 繰越月を 3 月にして登録したカードの「前年度より繰越」（Issue #2326））は利用実績ではないため除外する。
+        /// （<see cref="Models.Ledger.IsInitialRecord"/> の 3 種: 「新規購入」、「○月から繰越」、
+        /// 繰越月を 3 月にして登録したカードの「前年度より繰越」（Issue #2326）。判定は導入行の種別の列、Issue #2371）は
+        /// 利用実績ではないため除外する。
         /// 利用実績が 1 件も無いカードは辞書に含まれない（最終利用日は空欄扱い）。
         /// <see cref="GetAllLatestBalancesAsync"/> の LastUsageDate はこれらを除外しない
         /// 「最新レコード日」であり、登録しただけのカードが「使われている」ように見えるため、
@@ -248,7 +248,7 @@ namespace ICCardManager.Data.Repositories
         /// <remarks>
         /// 台帳は 6 年分保持されるため、全件を読み出さず SQL 側で GROUP BY する。
         /// 貸出中レコード（<c>is_lent_record = 1</c>）は「利用」ではないため除外する。
-        /// 導入行（<see cref="Models.Ledger.IsInitialRecordSummary"/> の 3 種。「前年度より繰越」を含む、Issue #2326）も
+        /// 導入行（<see cref="Models.Ledger.IsInitialRecord"/> の 3 種。「前年度より繰越」を含む、Issue #2326）も
         /// 利用実績ではないため除外する（<see cref="GetAllLastUsageDatesAsync"/> と同じ定義）。
         /// </remarks>
         Task<IReadOnlyList<CardUsageStatsRow>> GetUsageStatsByCardAsync(DateTime fromDate, DateTime toDate);

@@ -106,34 +106,50 @@ namespace ICCardManager.Models
         /// </summary>
         public int DetailCount { get; set; }
 
+        /// <summary>
+        /// 導入行の種別（Issue #2371）。導入行でなければ <c>null</c>。
+        /// </summary>
+        /// <remarks>
+        /// <c>CardManageViewModel.BuildInitialLedgerAsync</c>（カード登録）が書く。既存の行はマイグレーション 013 が
+        /// 摘要から埋めた。行編集で摘要・日付を変えても、履歴の統合・分割でも変わらない
+        /// （<c>LedgerRepository.UpdateAsync</c> の SET 句に含めない）。導入行かどうかの判定はすべてこの値で行い、
+        /// 摘要（組織設定から生成した文字列）とは比べない（#2044 の <see cref="IsLentRecord"/> と同じ）。
+        /// </remarks>
+        public InitialRecordKind? InitialRecordKind { get; set; }
+
         // === ドメインロジック ===
 
         /// <summary>
         /// 繰越レコード（新規購入または年度途中繰越）かどうか
         /// </summary>
         /// <remarks>
-        /// 帳票のソート順や日次集計で特別扱いされるレコードの判定。
-        /// SQL 側の同等条件（<c>LedgerRepository</c> の「summary = '新規購入' OR summary LIKE
-        /// <c>@midYearCarryoverPattern</c>」）と対応する。繰越側の LIKE パターンは
-        /// <c>SummaryGenerator.GetMidYearCarryoverLikePattern</c> が組織設定から導出し、
-        /// 本プロパティと SQL が揃って設定に追従する（Issue #1749）。
+        /// 帳票のソート順や日次集計で特別扱いされるレコードの判定。SQL 側の同等条件
+        /// （<c>LedgerRepository</c> の繰越先頭ソートキー <c>initial_record_kind IN (1, 2)</c>）と対応する。
+        /// Issue #2371: 以前は摘要（「新規購入」と組織設定の繰越パターン）で判定しており、設定を変えると
+        /// 変更前に登録した行を取りこぼした。行自身の <see cref="InitialRecordKind"/> で判定する。
         /// </remarks>
         public bool IsCarryover =>
-            Summary == "新規購入" || IsMidYearCarryover;
+            InitialRecordKind is Models.InitialRecordKind.NewPurchase or Models.InitialRecordKind.MidYearCarryover;
 
         /// <summary>
         /// 年度途中導入の繰越レコード（「○月から繰越」）かどうか
         /// </summary>
         /// <remarks>
-        /// 「○月から繰越」判定は <see cref="SummaryGenerator.IsMidYearCarryoverSummary"/> に
-        /// 一元化されており、組織設定 <c>MidYearCarryoverPattern</c> に追従する（Issue #1604）。
-        /// 以前は本クラス側にハードコードした正規表現を持っていたため、組織設定でパターンを
-        /// カスタムすると帳票集計フィルタ（<c>ReportDataBuilder</c> 経由）とソート・特別扱い判定
-        /// （本プロパティ）が乖離し、月計・累計の二重計上（Issue #1494 で対策した問題の再発形）
-        /// を招くリスクがあった。判定を単一の真実源に統合してこれを防ぐ。
+        /// 帳票の集計フィルタ（<c>ReportDataBuilder</c>）・受入欄の空欄制御（<c>ReportRowBuilder</c>）・
+        /// ソート・残高チェーンの始点（<c>PaperCarryoverPolicy.GetChainRestartDates</c>）が使う。
+        /// Issue #2371: 摘要と組織設定のパターン（<c>MidYearCarryoverPattern</c>）の照合から、行自身の種別へ移した。
         /// </remarks>
         public bool IsMidYearCarryover =>
-            SummaryGenerator.IsMidYearCarryoverSummary(Summary);
+            InitialRecordKind == Models.InitialRecordKind.MidYearCarryover;
+
+        /// <summary>
+        /// 3 月を繰越月にして登録したカードの導入行「前年度より繰越」かどうか（Issue #2326 / #2418 / #2371）
+        /// </summary>
+        /// <remarks>
+        /// 帳票の「前年度より繰越」（通常は in-memory 合成）とは別物。DB に実在する導入行だけが真になる。
+        /// </remarks>
+        public bool IsFiscalYearStartCarryover =>
+            InitialRecordKind == Models.InitialRecordKind.FiscalYearStartCarryover;
 
         /// <summary>
         /// 導入時（カード登録時）に書かれる行かどうか（Issue #2007）
@@ -145,35 +161,20 @@ namespace ICCardManager.Models
         /// （帳票の「前年度より繰越」は通常 in-memory 合成される行のため。ただし 3 月を繰越月にして
         /// 登録したカードでは DB に実在する導入行になる）が、導入時残高の誤りの検知では DB に実在する
         /// 導入行をすべて対象にする必要があるので別に定義する。
-        /// 判定の文言はいずれも組織設定に追従する（#1818）。
+        /// Issue #2371: 判定は摘要ではなく <see cref="InitialRecordKind"/> で行う。
         /// </remarks>
-        public bool IsInitialRecord => IsInitialRecordSummary(Summary);
+        public bool IsInitialRecord => InitialRecordKind.HasValue;
 
         /// <summary>
-        /// 摘要が導入行のものかどうか（<see cref="IsInitialRecord"/> の静的版。DTO 側からも使う）
-        /// </summary>
-        public static bool IsInitialRecordSummary(string summary)
-        {
-            if (string.IsNullOrEmpty(summary))
-            {
-                return false;
-            }
-
-            return summary == "新規購入"
-                || SummaryGenerator.IsMidYearCarryoverSummary(summary)
-                || summary == SummaryGenerator.GetCarryoverFromPreviousYearSummary();
-        }
-
-        /// <summary>
-        /// その摘要の導入行が受入欄にも残高を書く行かどうか（Issue #2007）
+        /// その種別の導入行が受入欄にも残高を書く行かどうか（Issue #2007）
         /// </summary>
         /// <remarks>
         /// <c>BuildInitialLedgerAsync</c> の <c>hasIncome</c> と同じ判断。新規購入と前年度より繰越は
         /// <c>Income = Balance</c>、「○月から繰越」は受入欄を空欄（0）にする（月次帳票の
         /// 受入欄に金額が入るのは 4 月の前年度繰越と新規購入のみ）。導入時残高を訂正するとき、
-        /// 受入も一緒に直すかどうかはこの判定で決める。
+        /// 受入も一緒に直すかどうかはこの判定で決める。導入行でない（<c>null</c>）なら偽。
         /// </remarks>
-        public static bool InitialRecordCarriesIncome(string summary) =>
-            IsInitialRecordSummary(summary) && !SummaryGenerator.IsMidYearCarryoverSummary(summary);
+        public static bool InitialRecordCarriesIncome(InitialRecordKind? kind) =>
+            kind is Models.InitialRecordKind.NewPurchase or Models.InitialRecordKind.FiscalYearStartCarryover;
     }
 }

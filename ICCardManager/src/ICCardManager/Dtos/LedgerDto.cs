@@ -98,6 +98,17 @@ namespace ICCardManager.Dtos
         public bool IsLentRecord { get; set; }
 
         /// <summary>
+        /// 導入行の種別（Issue #2371。導入行でなければ <c>null</c>）。<see cref="Models.Ledger.InitialRecordKind"/> の写し。
+        /// 履歴の画面は導入行かどうかを摘要ではなくこの値で判定する。合成した繰越行（<see cref="IsCarryoverRow"/>）は導入行ではない。
+        /// </summary>
+        public Models.InitialRecordKind? InitialRecordKind { get; set; }
+
+        /// <summary>
+        /// 導入行（カード登録時に書く行）かどうか（Issue #2371）
+        /// </summary>
+        public bool IsInitialRecord => InitialRecordKind.HasValue;
+
+        /// <summary>
         /// 直前の返却で記録された行かどうか（Issue #1907: 返却確認のハイライト用）
         /// </summary>
         /// <remarks>

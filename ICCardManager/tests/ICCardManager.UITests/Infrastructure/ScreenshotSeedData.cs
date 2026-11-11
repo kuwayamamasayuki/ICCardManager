@@ -433,11 +433,14 @@ namespace ICCardManager.UITests.Infrastructure
             string staffName, string lenderIdm = AppFixture.SeededStaffIdm)
         {
             var balance = previousBalance + income - expense;
+            // Issue #2371: 導入行（カード登録が書く行）は種別の列も持つ。本体は導入行を摘要ではなくこの列で判定する
+            object initialRecordKind = summary == "新規購入" ? 1 : DBNull.Value;
             Execute(conn,
-                "INSERT INTO ledger (card_idm, lender_idm, date, summary, income, expense, balance, staff_name, note, is_lent_record) " +
-                "VALUES (@card, @lender, @date, @summary, @income, @expense, @balance, @staff, NULL, 0)",
+                "INSERT INTO ledger (card_idm, lender_idm, date, summary, income, expense, balance, staff_name, note, is_lent_record, initial_record_kind) " +
+                "VALUES (@card, @lender, @date, @summary, @income, @expense, @balance, @staff, NULL, 0, @initialRecordKind)",
                 ("@card", cardIdm), ("@lender", lenderIdm), ("@date", ToText(date)), ("@summary", summary),
-                ("@income", income), ("@expense", expense), ("@balance", balance), ("@staff", staffName));
+                ("@income", income), ("@expense", expense), ("@balance", balance), ("@staff", staffName),
+                ("@initialRecordKind", initialRecordKind));
             return balance;
         }
 

@@ -144,8 +144,8 @@ CREATE TABLE settings (
         // Assert
         using var lease = _dbContext.LeaseConnection();
         var conn = lease.Connection;
-        // レガシーDBはバージョン1として認識され、その後 Migration_002〜012 も適用されるので最終バージョンは 12
-        _dbContext.GetDatabaseVersion().Should().Be(12);
+        // レガシーDBはバージョン1として認識され、その後 Migration_002〜013 も適用されるので最終バージョンは 13
+        _dbContext.GetDatabaseVersion().Should().Be(13);
         TableShouldExist(conn, "schema_migrations");
 
         // バージョン1（既存DB認識）の記録が存在することを確認
@@ -174,8 +174,8 @@ CREATE TABLE settings (
         var count = Convert.ToInt32(cmd.ExecuteScalar());
 
         // 現在のマイグレーション数と一致するはず（重複していないこと）
-        // Migration_001 〜 Migration_012 = 12
-        count.Should().Be(12);
+        // Migration_001 〜 Migration_013 = 13
+        count.Should().Be(13);
     }
 
     [Fact]
@@ -262,5 +262,65 @@ CREATE TABLE settings (
         cmd.CommandText = "SELECT value FROM settings WHERE key = @key";
         cmd.Parameters.AddWithValue("@key", key);
         return cmd.ExecuteScalar()?.ToString();
+    }
+    /// <summary>
+    /// Issue #2371（レビュー 5 回目）: DbContext に渡した起動時の組織設定の文言（<c>InitialRecordSummaryText</c>）が、
+    /// MigrationRunner を通ってマイグレーション 013 の埋め戻しまで届くこと。配線（DbContext → MigrationRunner）を外すと、
+    /// 文言を変えた組織の変更後の文言の導入行が埋まらない。
+    /// </summary>
+    [Theory]
+    [Trait("Category", "Unit")]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void InitializeDatabase_PassesCurrentSummaryTextToMigration013(bool configured)
+    {
+        // Arrange: 版 12 まで適用した DB に、変更後の文言（"前年より持越"）の導入行を入れておく
+        _dbContext = new DbContext(":memory:");
+        if (configured)
+        {
+            _dbContext.InitialRecordSummaryText = new ICCardManager.Services.SummaryTextOptions { CarryoverFromPreviousYear = "前年より持越" };
+        }
+
+        using (var lease = _dbContext.LeaseConnection())
+        {
+            var migrations = new ICCardManager.Data.Migrations.IMigration[]
+            {
+                new ICCardManager.Data.Migrations.Migration_001_Initial(),
+                new ICCardManager.Data.Migrations.Migration_002_AddPointRedemption(),
+                new ICCardManager.Data.Migrations.Migration_003_AddTripGroupId(),
+                new ICCardManager.Data.Migrations.Migration_004_AddPerformanceIndexes(),
+                new ICCardManager.Data.Migrations.Migration_005_AddStartingPageNumber(),
+                new ICCardManager.Data.Migrations.Migration_006_AddRefundedStatus(),
+                new ICCardManager.Data.Migrations.Migration_007_AddMergeHistory(),
+                new ICCardManager.Data.Migrations.Migration_008_AddCardTypeNumberUniqueIndex(),
+                new ICCardManager.Data.Migrations.Migration_009_AddCarryoverTotals(),
+                new ICCardManager.Data.Migrations.Migration_010_AddCompanionCount(),
+                new ICCardManager.Data.Migrations.Migration_011_AddLedgerDetailId(),
+                new ICCardManager.Data.Migrations.Migration_012_CardUniqueIndexCoversNullIsDeleted(),
+            };
+            new ICCardManager.Data.Migrations.MigrationRunner(lease.Connection, migrations).MigrateToLatest();
+
+            using var command = lease.Connection.CreateCommand();
+            command.CommandText = @"INSERT INTO ic_card (card_idm, card_type, card_number) VALUES ('AAAA000000000001', 'はやかけん', 'A-001');
+INSERT INTO ledger (card_idm, date, summary, income, expense, balance) VALUES ('AAAA000000000001', '2026-04-01 00:00:00', '前年より持越', 5000, 0, 5000);";
+            command.ExecuteNonQuery();
+        }
+
+        // Act: 起動時の初期化（残りの版 13 を適用する）
+        _dbContext.InitializeDatabase();
+
+        // Assert
+        using var lease2 = _dbContext.LeaseConnection();
+        using var select = lease2.Connection.CreateCommand();
+        select.CommandText = "SELECT initial_record_kind FROM ledger";
+        var kind = select.ExecuteScalar();
+        if (configured)
+        {
+            Convert.ToInt64(kind, System.Globalization.CultureInfo.InvariantCulture).Should().Be(3, "現在の文言が移行まで届き、変更後の文言の導入行も埋まること");
+        }
+        else
+        {
+            kind.Should().Be(DBNull.Value, "文言を渡さなければ既定の文言だけと照合する（対照）");
+        }
     }
 }

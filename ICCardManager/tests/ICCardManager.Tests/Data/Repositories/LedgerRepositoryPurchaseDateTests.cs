@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Threading.Tasks;
 using FluentAssertions;
+using ICCardManager.Common;
 using ICCardManager.Data;
 using ICCardManager.Data.Repositories;
 using ICCardManager.Infrastructure.Caching;
@@ -26,7 +27,7 @@ namespace ICCardManager.Tests.Data.Repositories;
 /// 効かず、繰越行も合計も無い空の 3 月シートが作成され「出力済み」と表示されていた。
 /// </para>
 /// <para>
-/// 修正後は導入行の判定を <see cref="Ledger.IsInitialRecordSummary"/> の 1 か所へ寄せている。
+/// 修正後は導入行の判定を <see cref="Ledger.IsInitialRecord"/> の 1 か所へ寄せている。
 /// 判定と生成（<c>SummaryGenerator</c>）が揃って組織設定に追従することを確かめるため、摘要は生成側の値を使う。
 /// <see cref="SummaryGenerator"/> の静的設定を変更するので <see cref="SummaryGeneratorCollection"/> に属させる。
 /// </para>
@@ -101,6 +102,8 @@ public class LedgerRepositoryPurchaseDateTests : IDisposable
             LenderIdm = StaffA,
             Date = date,
             Summary = summary,
+            // Issue #2371: 導入行の摘要で入れる行は、カード登録が書いた導入行として種別も持たせる
+            InitialRecordKind = InitialRecordSummaryMatcher.InferWithCurrentSettings(summary),
             Income = income,
             Expense = expense,
             Balance = balance,

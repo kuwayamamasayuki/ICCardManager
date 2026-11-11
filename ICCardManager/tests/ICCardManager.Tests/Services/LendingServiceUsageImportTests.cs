@@ -6,6 +6,7 @@ using System.Linq;
 using System.Reflection;
 using System.Threading.Tasks;
 using FluentAssertions;
+using ICCardManager.Common;
 using ICCardManager.Data;
 using ICCardManager.Data.Repositories;
 using ICCardManager.Infrastructure.Caching;
@@ -765,6 +766,7 @@ public sealed class LendingServiceUsageImportTests : IDisposable
         {
             IsLentRecord = isLentRecord,
             Summary = isCarryover ? "新規購入" : "鉄道（博多～天神）",
+            InitialRecordKind = InitialRecordSummaryMatcher.InferWithCurrentSettings(isCarryover ? "新規購入" : "鉄道（博多～天神）"),
             Income = income,
             Note = note,
             StaffName = staffName,
@@ -832,6 +834,7 @@ public sealed class LendingServiceUsageImportTests : IDisposable
             CardIdm = TestCardIdm,
             Date = date,
             Summary = "新規購入",
+            InitialRecordKind = InitialRecordKind.NewPurchase,
             Income = balance,
             Expense = 0,
             Balance = balance,

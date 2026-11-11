@@ -770,6 +770,8 @@ namespace ICCardManager.Services
                 CardIdm = cardIdm,
                 Date = fiscalYearStart,
                 Summary = SummaryGenerator.GetCarryoverFromPreviousYearSummary(),
+                // Issue #2371: 年度の始まりを担う導入行として種別も持たせる（帳票が前年度繰越を合成しない形）
+                InitialRecordKind = InitialRecordKind.FiscalYearStartCarryover,
                 Income = carryoverAmount,
                 Expense = 0,
                 Balance = carryoverAmount,
@@ -801,7 +803,9 @@ namespace ICCardManager.Services
             {
                 CardIdm = cardIdm,
                 Date = date170,
-                Summary = "新規購入",
+                Summary = InitialRecordSummaryMatcher.NewPurchaseSummary,
+                // Issue #2371: 導入行は種別で判定する（カード登録の BuildInitialLedgerAsync と同じ）
+                InitialRecordKind = InitialRecordKind.NewPurchase,
                 Income = purchaseAmount,
                 Expense = 0,
                 Balance = balance,

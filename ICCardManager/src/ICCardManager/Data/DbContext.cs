@@ -310,6 +310,16 @@ namespace ICCardManager.Data
             !string.IsNullOrEmpty(CurrentJournalMode) && CurrentJournalMode != "delete";
 
         /// <summary>
+        /// マイグレーション 013（導入行の種別の列、Issue #2371）が既存の導入行を摘要から埋めるときに照合する、
+        /// 起動時の組織設定の摘要テキスト。<c>null</c> なら既定の文言だけと照合する。
+        /// </summary>
+        /// <remarks>
+        /// マイグレーションは <c>SummaryGenerator</c> の設定（DB の設定を読んだ後に構築される）より前に走るため、
+        /// DI のファクトリが appsettings.json の組織設定をここへ渡す。
+        /// </remarks>
+        public SummaryTextOptions? InitialRecordSummaryText { get; set; }
+
+        /// <summary>
         /// テスト用のprotectedコンストラクタ
         /// </summary>
         protected DbContext()
@@ -1353,7 +1363,7 @@ namespace ICCardManager.Data
             // 後発PCも例外なく起動できる（Issue #1738）。
             // schema_migrationsのPRIMARY KEY制約が防ぐのは記録の重複であって、
             // 重複適用そのものではない点に注意。
-            var runner = new MigrationRunner(connection);
+            var runner = new MigrationRunner(connection, InitialRecordSummaryText);
 
             // Issue #1687: DBのスキーマがこのアプリの対応範囲より新しい場合、
             // 旧バージョンのアプリからの書き込みはデータ不整合を招くためブロックする

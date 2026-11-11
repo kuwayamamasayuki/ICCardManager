@@ -88,6 +88,7 @@ namespace ICCardManager.Dtos
                 CompanionCount = ledger.CompanionCount,
                 Note = ledger.Note,
                 IsLentRecord = ledger.IsLentRecord,
+                InitialRecordKind = ledger.InitialRecordKind,
                 Details = ledger.Details?.Select(d => d.ToDto()).ToList() ?? new List<LedgerDetailDto>(),
                 DetailCountValue = detailCount
             };

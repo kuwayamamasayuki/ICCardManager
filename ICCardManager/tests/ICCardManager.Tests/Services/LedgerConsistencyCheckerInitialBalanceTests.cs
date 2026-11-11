@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using FluentAssertions;
+using ICCardManager.Common;
 using ICCardManager.Data.Repositories;
 using ICCardManager.Models;
 using ICCardManager.Services;
@@ -41,7 +42,17 @@ public class LedgerConsistencyCheckerInitialBalanceTests
     }
 
     private static Ledger Initial(int id, string summary, int balance, int income) =>
-        new Ledger { Id = id, Summary = summary, Income = income, Expense = 0, Balance = balance, Date = new DateTime(2026, 4, 1) };
+        new Ledger
+        {
+            Id = id,
+            Summary = summary,
+            // Issue #2371: カード登録が書いた導入行として種別も持たせる
+            InitialRecordKind = InitialRecordSummaryMatcher.InferWithCurrentSettings(summary),
+            Income = income,
+            Expense = 0,
+            Balance = balance,
+            Date = new DateTime(2026, 4, 1),
+        };
 
     private static Ledger Usage(int id, int expense, int balance, int day) =>
         new Ledger { Id = id, Summary = "鉄道（天神～博多）", Income = 0, Expense = expense, Balance = balance, Date = new DateTime(2026, 4, day) };

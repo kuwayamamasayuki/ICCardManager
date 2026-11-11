@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
 using FluentAssertions;
+using ICCardManager.Common;
 using ICCardManager.Data;
 using ICCardManager.Data.Repositories;
 using ICCardManager.Infrastructure.Caching;
@@ -22,13 +23,13 @@ namespace ICCardManager.Tests.Data.Repositories;
 /// </summary>
 /// <remarks>
 /// <para>
-/// Issue #1604 で C# 側の繰越判定は <see cref="SummaryGenerator.IsMidYearCarryoverSummary"/> に
+/// Issue #1604 で C# 側の繰越判定は <c>SummaryGenerator.IsMidYearCarryoverSummary</c>（Issue #2371 で削除） に
 /// 一元化されたが、<see cref="LedgerRepository"/> の SQL は <c>'%月から繰越'</c> をハードコード
 /// しており、書式をカスタムすると SQL だけが追従しなかった（繰越レコードが利用実績として
 /// カウントされ、登録しただけのカードが「利用1回・稼働率&gt;0%」になる）。
 /// 本テストはカスタム書式下で SQL 5 箇所（集計除外 3 クエリ・繰越先頭ソート 2 クエリ）と
 /// 購入日取得が生成側と揃って動くことを実 SQLite で固定する（購入日取得は Issue #2046 以降、
-/// SQL ではなく <see cref="Ledger.IsInitialRecordSummary"/> で導入行を判定する）。
+/// SQL ではなく <see cref="Ledger.IsInitialRecord"/> で導入行を判定する）。
 /// </para>
 /// <para>
 /// LIKE パターンの効き方は SQL に閉じるためモックでは検証できず、インメモリ SQLite の
@@ -116,6 +117,8 @@ public class LedgerRepositoryMidYearCarryoverPatternTests : IDisposable
             LenderIdm = StaffA,
             Date = date,
             Summary = summary ?? "鉄道（A駅～B駅）",
+            // Issue #2371: 導入行の摘要で入れる行は、カード登録が書いた導入行として種別も持たせる
+            InitialRecordKind = InitialRecordSummaryMatcher.InferWithCurrentSettings(summary),
             Income = income,
             Expense = expense,
             Balance = balance,

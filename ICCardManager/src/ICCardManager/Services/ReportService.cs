@@ -249,7 +249,7 @@ namespace ICCardManager.Services
                 }
 
                 // Issue #501: 導入（カード登録時の新規購入・繰越）より前の月はスキップ
-                // Issue #2046: 導入行の判定は Ledger.IsInitialRecordSummary（3 種）。「前年度より繰越」も含む
+                // Issue #2046: 導入行は 3 種（「前年度より繰越」も含む）。Issue #2371: 判定は導入行の種別の列（摘要ではない）
                 var purchaseDate = await _ledgerRepository.GetPurchaseDateAsync(cardIdm).ConfigureAwait(false);
                 if (purchaseDate.HasValue)
                 {
