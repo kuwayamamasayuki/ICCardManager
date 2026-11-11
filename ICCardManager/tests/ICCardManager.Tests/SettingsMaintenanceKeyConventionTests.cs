@@ -326,6 +326,7 @@ public class SettingsMaintenanceKeyConventionTests
     [InlineData("return await SaveAppSettingsAsync(settings, keys).ConfigureAwait(false);", true, 0)]
     [InlineData("await _repo.SaveAppSettingsAsync(items.First(x => x.A >= 1), keys);", false, 0)]
     [InlineData("await _repo.SaveAppSettingsAsync(Build(new Dictionary<string, int>()));", false, 1)]
+    [InlineData("await _repo.SaveAppSettingsAsync(s, c == '(' ? Pick(',') : Pick('\"'));", false, 0)]
     public void 一引数の一括保存の検出は引数の数で区別すること(string code, bool selfCalls, int expected)
     {
         CountSingleArgumentBulkSaveCalls(code, selfCalls).Should().Be(expected);
@@ -385,6 +386,11 @@ public class SettingsMaintenanceKeyConventionTests
                     empty = false;
                     break;
                 case '<' when k + 1 < code.Length && code[k + 1] == '=':
+                    empty = false;
+                    break;
+                case '\'':
+                    // 文字リテラル（'(' ',' '"' など）は飛ばす。'\\x' のエスケープも 1 文字として扱う
+                    k += k + 1 < code.Length && code[k + 1] == '\\' ? 3 : 2;
                     empty = false;
                     break;
                 case '"':
