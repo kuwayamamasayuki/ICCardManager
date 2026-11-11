@@ -329,7 +329,7 @@ public class LedgerMergeServiceTests : IDisposable
 
         // Assert
         result.Success.Should().BeFalse();
-        result.ErrorMessage.Should().Contain("導入行");
+        result.ErrorMessage.Should().Contain("導入時の行").And.Contain("台帳の始まりの残高").And.EndWith("選択し直してください");
         _ledgerRepositoryMock.Verify(
             r => r.MergeLedgersAsync(It.IsAny<int>(), It.IsAny<IEnumerable<int>>(), It.IsAny<Ledger>(), It.IsAny<SQLiteTransaction>()), Times.Never);
     }

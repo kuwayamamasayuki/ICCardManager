@@ -36,6 +36,32 @@ public class InitialRecordSummaryComparisonConventionTests
     private const string RowEditFile = "ViewModels/LedgerRowEditViewModel.cs";
 
     /// <summary>
+    /// 繰越の摘要（「前年度より繰越」「○月から繰越」）を<b>生成</b>してよいファイル（レビュー 2 回目）。
+    /// 生成した文字列を別名へ退避してから比べる形（<c>var s = Get…(); … l.Summary == s</c>）は比較の検出では拾えないので、
+    /// 生成そのものを、行を書く・表示用の行を合成する箇所に限る。
+    /// </summary>
+    private static readonly string[] CarryoverSummaryGeneratorCallers =
+    {
+        SummaryGeneratorFile,                     // 定義
+        "ViewModels/CardManageViewModel.cs",      // カード登録で導入行を書く
+        "ViewModels/HistoryPanelViewModel.cs",    // 履歴の繰越行（表示用）を合成する
+        "Services/ReportDataBuilder.cs",          // 帳票の前年度繰越の行（表示用）を合成する
+        "Services/DebugDataService.cs",           // DEBUG の試験データを書く
+    };
+
+    /// <summary>
+    /// 「月から繰越」を含む文字列リテラルを書いてよいファイル。
+    /// </summary>
+    private static readonly string[] MidYearCarryoverLiteralFiles =
+    {
+        MatcherFile,
+        SummaryGeneratorFile,
+        OrganizationOptionsFile,                            // 書式・判定パターンの既定値の定義
+        "Views/Dialogs/CardRegistrationModeDialog.xaml.cs", // 登録ダイアログの案内文（「3月から繰越は新年度の始まり…」）
+        MigrationFile,                                      // マイグレーションの説明文（Description）
+    };
+
+    /// <summary>
     /// 禁止する形と、それを書いてよいファイル（定義そのもの）。
     /// </summary>
     private static readonly (string Name, Regex Pattern, string[] AllowedFiles)[] Rules =
@@ -48,6 +74,18 @@ public class InitialRecordSummaryComparisonConventionTests
             @"|GetCarryoverFromPreviousYearSummary\s*\(\s*\)\s*[!=]=" +
             @"|Equals\s*\([^;]*GetCarryoverFromPreviousYearSummary" +
             @"|GetCarryoverFromPreviousYearSummary\s*\(\s*\)\s*\.\s*Equals"), Array.Empty<string>()),
+        // 「○月から繰越」の摘要（生成値）との比較
+        ("○月から繰越の摘要との比較", new Regex(
+            @"[!=]=\s*(?:[\w.]+\s*\.\s*)?GetMidYearCarryoverSummary\s*\(" +
+            @"|GetMidYearCarryoverSummary\s*\([^;]*?\)\s*[!=]=" +
+            @"|Equals\s*\([^;]*GetMidYearCarryoverSummary" +
+            @"|GetMidYearCarryoverSummary\s*\([^;]*?\)\s*\.\s*Equals"), Array.Empty<string>()),
+        // 繰越の摘要の生成。比較の検出は別名への退避を拾えないので、生成できる場所そのものを限る（レビュー 2 回目）
+        ("繰越の摘要の生成", new Regex(@"\b(?:GetCarryoverFromPreviousYearSummary|GetMidYearCarryoverSummary)\s*\("),
+            CarryoverSummaryGeneratorCallers),
+        // 「月から繰越」の文字列リテラル（EndsWith("月から繰越")・SQL の '%月から繰越' 等）
+        ("「月から繰越」のリテラル", new Regex("\"[^\"\n]*月から繰越[^\"\n]*\"|'[^'\n]*月から繰越[^'\n]*'"),
+            MidYearCarryoverLiteralFiles),
         // 「新規購入」の摘要（固定の文言）。定義は 1 か所、比較はどこにも書かない
         ("新規購入のリテラル", new Regex("\"新規購入\""), new[] { MatcherFile }),
         ("新規購入の摘要との比較", new Regex(
@@ -97,7 +135,11 @@ public class InitialRecordSummaryComparisonConventionTests
     [InlineData("const string Sql = \"AND summary <> '新規購入' AND summary NOT LIKE @midYearCarryoverPattern\";", true)]
     [InlineData("var kind = InitialRecordSummaryMatcher.InferWithCurrentSettings(parsed.Summary);", true)]
     [InlineData("var kind = InitialRecordSummaryMatcher . Infer(summary, null);", true)]
-    [InlineData("summary = SummaryGenerator.GetCarryoverFromPreviousYearSummary();", false)]
+    [InlineData("summary = SummaryGenerator.GetCarryoverFromPreviousYearSummary();", true)]
+    [InlineData("var s = SummaryGenerator.GetCarryoverFromPreviousYearSummary(); return l.Summary == s;", true)]
+    [InlineData("bool F(Ledger l, int m) => SummaryGenerator.GetMidYearCarryoverSummary(m) == l.Summary;", true)]
+    [InlineData("const string Sql = \"AND summary NOT LIKE '%月から繰越'\";", true)]
+    [InlineData("bool F(Ledger l) => l.Summary.EndsWith(\"月から繰越\");", true)]
     [InlineData("summary = InitialRecordSummaryMatcher.NewPurchaseSummary;", false)]
     [InlineData("bool F(Ledger l) => l.IsFiscalYearStartCarryover;", false)]
     [InlineData("const string Sql = \"AND initial_record_kind IS NULL\";", false)]
@@ -109,6 +151,12 @@ public class InitialRecordSummaryComparisonConventionTests
     [Fact]
     public void 照合を許すファイルでは許した規則だけが外れること()
     {
+        DetectViolations("ViewModels/CardManageViewModel.cs", "summary = SummaryGenerator.GetCarryoverFromPreviousYearSummary();")
+            .Should().BeEmpty("カード登録は導入行の摘要を生成してよい");
+        DetectViolations("ViewModels/CardManageViewModel.cs", "bool F(int m) => l.Summary == SummaryGenerator.GetMidYearCarryoverSummary(m);")
+            .Should().ContainSingle("生成を許したファイルでも比較は禁じる");
+        DetectViolations(OrganizationOptionsFile, "public string MidYearCarryoverFormat { get; set; } = \"{0}月から繰越\";")
+            .Should().BeEmpty("既定値の定義");
         DetectViolations(MatcherFile, "public const string NewPurchaseSummary = \"新規購入\";").Should().BeEmpty();
         DetectViolations(MatcherFile, "bool F(Ledger l) => SummaryGenerator.IsMidYearCarryoverSummary(l.Summary);")
             .Should().ContainSingle("照合の 1 か所でも、現在の設定のパターンだけで判定する関数は使わない");
