@@ -742,14 +742,10 @@ namespace ICCardManager.ViewModels
                         // 操作ログは RegisterAsync が登録と同じトランザクションで記録済み（Issue #2156）
 
                         // Issue #596: 履歴のインポート対象を決定
-                        var history = _preReadHistory;
-                        // Issue #2385: 読み直すかの判定は、カード種別選択ダイアログの注意（カードを離さない）と共有する
-                        if (CardRegistrationPreRead.RereadsHistory(history))
-                        {
-                            // フォールバック: カードから直接読み取り
-                            try { history = (await _cardReader.ReadHistoryAsync(EditCardIdm))?.ToList(); }
-                            catch { history = null; }
-                        }
+                        // 事前に読み取れていなければ（無いか 0 件）カードから読み直す。
+                        // Issue #2385: 判定と読み直しは CardRegistrationPreRead に置き、カード種別選択ダイアログの注意
+                        // （カードを離さない）と共有する。ここでカードリーダーを直接呼ばない（CardRegistrationPreReadConventionTests）
+                        var history = await CardRegistrationPreRead.ResolveHistoryAsync(_cardReader, EditCardIdm, _preReadHistory);
 
                         var importFromDate = GetImportFromDate(modeResult, registeredAt);
                         var filteredHistory = history?
@@ -2029,11 +2025,9 @@ namespace ICCardManager.ViewModels
 
                 // 事前読み取り残高がない場合のみ、カードから読み取りを試みる
                 // （手動で新規登録モードを開始した場合のフォールバック）
-                // Issue #2385: 読み直すかの判定は、カード種別選択ダイアログの注意（カードを離さない）と共有する
-                if (CardRegistrationPreRead.RereadsBalance(balance))
-                {
-                    balance = await _cardReader.ReadBalanceAsync(cardIdm);
-                }
+                // Issue #2385: 判定と読み直しは CardRegistrationPreRead に置き、カード種別選択ダイアログの注意
+                // （カードを離さない）と共有する。ここでカードリーダーを直接呼ばない（CardRegistrationPreReadConventionTests）
+                balance = await CardRegistrationPreRead.ResolveBalanceAsync(_cardReader, cardIdm, balance);
 
                 // 残額が取得できた場合のみレコードを作成
                 if (balance.HasValue)
