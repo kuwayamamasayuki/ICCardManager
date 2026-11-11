@@ -89,6 +89,17 @@ namespace ICCardManager.Data.Repositories
         Task SaveMergeHistoryAsync(int targetLedgerId, string description, string undoDataJson);
 
         /// <summary>
+        /// 統合履歴を既存トランザクション内で保存する（Issue #2373）。
+        /// 統合（<see cref="MergeLedgersAsync(int, IEnumerable{int}, Ledger, SQLiteTransaction)"/>）と同一トランザクションで
+        /// 確定させ、統合履歴が書けなければ統合ごと巻き戻すために使う。commit / rollback は呼び出し元の責務。
+        /// </summary>
+        /// <param name="targetLedgerId">統合先の台帳 ID</param>
+        /// <param name="description">一覧に表示する説明</param>
+        /// <param name="undoDataJson">取り消し用の Undo データ（JSON）</param>
+        /// <param name="transaction">参加するトランザクション。null なら接続を借りて単文で確定する</param>
+        Task SaveMergeHistoryAsync(int targetLedgerId, string description, string undoDataJson, SQLiteTransaction? transaction);
+
+        /// <summary>
         /// 統合履歴一覧を取得
         /// </summary>
         Task<List<(int Id, DateTime MergedAt, int TargetLedgerId, string Description, string UndoDataJson, bool IsUndone)>> GetMergeHistoriesAsync(bool undoneOnly);

@@ -376,8 +376,9 @@ public class LedgerMergeUnmergeDetailContentGuardTests : IDisposable
         (await _ledgerRepository.GetByIdAsync(targetId))!.Expense.Should().Be(210, "統合先は統合前の払出に戻るべき");
     }
     /// <summary>
-    /// レビュー指摘 4 回目（形 3: 恒久的な穴）: 後の統合の履歴の保存に失敗した（#1954 の HasPostCommitFailure）・まだ保存されていない
-    /// 状態では、統合履歴による前提条件は効かない。後の統合の統合元が明細を持たない行だと明細の件数・内容も変わらない。
+    /// レビュー指摘 4 回目（形 3: 恒久的な穴）: 後の統合の統合履歴が無い状態では、統合履歴による前提条件は効かない。
+    /// Issue #2373 以降は統合履歴を統合と同じトランザクションで保存するので新たには生じないが、それより前のバージョンで
+    /// 統合履歴の保存に失敗した統合（#1954 の「取り消し情報なし」）は台帳に残り得る。後の統合の統合元が明細を持たない行だと明細の件数・内容も変わらない。
     /// 統合直後の金額との照合で中止し、後の統合で合算した払出を台帳から消さないこと。
     /// </summary>
     [Fact]
@@ -385,7 +386,7 @@ public class LedgerMergeUnmergeDetailContentGuardTests : IDisposable
     {
         var (targetId, firstHistoryId, _) = await MergeTwoLedgersAsync();
         var noDetailId = await _ledgerRepository.InsertAsync(CreateLedger(balance: 1766, summary: "鉄道（薬院～天神）"));
-        // 統合履歴を保存しない統合（統合のコミット後に履歴の保存が失敗した、または他 PC で保存前の状態）
+        // 統合履歴を保存しない統合（#2373 より前のバージョンで、統合のコミット後に履歴の保存が失敗した統合）
         var updatedTarget = (await _ledgerRepository.GetByIdAsync(targetId))!;
         updatedTarget.Expense = 630;
         (await _ledgerRepository.MergeLedgersAsync(targetId, new[] { noDetailId }, updatedTarget)).Should().BeTrue();
