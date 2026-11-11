@@ -368,6 +368,18 @@ namespace ICCardManager.Infrastructure.CardReader
         /// <summary>FelicaLib.DotNet 1.2.67 がブロックを読めないときの例外メッセージ</summary>
         internal const string FelicaLibBlockNotReadMessage = "指定されたサービス コードおよびアドレスのデータが存在しません。";
 
+        /// <summary>
+        /// 例外の文言に頼る判定（<see cref="IsCardNotPresentException"/> の <see cref="FelicaLibCardNotFoundMessage"/> /
+        /// <see cref="FelicaLibBlockNotReadMessage"/>、<see cref="IsReaderUnavailableException"/> のキーワード）を確かめた
+        /// FelicaLib.DotNet の版（Issue #2376）。
+        /// </summary>
+        /// <remarks>
+        /// 文言は版で変わり得る。変わるとカードが離れたことを「カードリーダーエラー」と案内し、警告エリアに故障として出す
+        /// （返却は記録しないので記録の誤りにはならない）。csproj の版がこの定数と食い違うと <c>FelicaLibVersionPinTests</c> が赤になる。
+        /// 版を上げるときは、新しい版の DLL を逆アセンブル（ildasm 等）して上の文言とキーワードを確かめ直してから、この定数を更新する。
+        /// </remarks>
+        internal const string FelicaLibMessagesVerifiedVersion = "1.2.67";
+
         /// <summary>履歴の読み取り 1 回の結果の種類（Issue #2301）</summary>
         private enum HistoryReadKind
         {
