@@ -2562,12 +2562,25 @@ WHERE id = @id AND ledger_id = @targetId";
         }
 
         /// <inheritdoc/>
-        public async Task SaveMergeHistoryAsync(int targetLedgerId, string description, string undoDataJson)
+        public async Task SaveMergeHistoryAsync(int targetLedgerId, string description, string undoDataJson, SQLiteTransaction? transaction)
         {
-            using var lease = await _dbContext.LeaseConnectionAsync().ConfigureAwait(false);
-            var connection = lease.Connection;
+            // 単文のため 3 分岐は不要（tx があればそれに参加、無ければ接続を借りて autocommit）。
+            // MarkMergeHistoryUndoneAsync と同じ形。
+            if (transaction != null)
+            {
+                await SaveMergeHistoryCore(targetLedgerId, description, undoDataJson, (SQLiteConnection)transaction.Connection, transaction).ConfigureAwait(false);
+                return;
+            }
 
+            using var lease = await _dbContext.LeaseConnectionAsync().ConfigureAwait(false);
+            await SaveMergeHistoryCore(targetLedgerId, description, undoDataJson, lease.Connection, transaction: null).ConfigureAwait(false);
+        }
+
+        private static async Task SaveMergeHistoryCore(
+            int targetLedgerId, string description, string undoDataJson, SQLiteConnection connection, SQLiteTransaction? transaction)
+        {
             using var command = connection.CreateCommand();
+            command.Transaction = transaction;
             // Issue #1014: CURRENT_TIMESTAMPはUTCのため、ローカル時刻を明示的に保存する
             command.CommandText = @"INSERT INTO ledger_merge_history (merged_at, target_ledger_id, description, undo_data)
 VALUES (@mergedAt, @targetLedgerId, @description, @undoData)";

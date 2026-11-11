@@ -232,8 +232,8 @@ public class NullableIntegerColumnReadTests : IDisposable
     {
         await InsertCardAsync();
         var ledgerId = await InsertLedgerWithDetailAsync();
-        await _ledgerRepository.SaveMergeHistoryAsync(ledgerId, "統合A", "{}");
-        await _ledgerRepository.SaveMergeHistoryAsync(ledgerId, "統合B", "{}");
+        await _ledgerRepository.SaveMergeHistoryAsync(ledgerId, "統合A", "{}", transaction: null);
+        await _ledgerRepository.SaveMergeHistoryAsync(ledgerId, "統合B", "{}", transaction: null);
         var nulled = SetAllNullableIntegerColumnsToNull("ledger_merge_history");
         nulled.Should().Contain("is_undone", "導出が空振りしていないこと");
         Execute("UPDATE ledger_merge_history SET is_undone = 1 WHERE description = '統合B'", null);
@@ -342,8 +342,8 @@ public class NullableIntegerColumnReadTests : IDisposable
     {
         await InsertCardAsync();
         var ledgerId = await InsertLedgerWithDetailAsync();
-        await _ledgerRepository.SaveMergeHistoryAsync(ledgerId, "統合A", "{}");
-        await _ledgerRepository.SaveMergeHistoryAsync(ledgerId, "統合B", "{}");
+        await _ledgerRepository.SaveMergeHistoryAsync(ledgerId, "統合A", "{}", transaction: null);
+        await _ledgerRepository.SaveMergeHistoryAsync(ledgerId, "統合B", "{}", transaction: null);
         Execute("UPDATE ledger_merge_history SET is_undone = NULL WHERE description = '統合A'", null);
         Execute("UPDATE ledger_merge_history SET is_undone = 1 WHERE description = '統合B'", null);
         var histories = await _ledgerRepository.GetMergeHistoriesAsync(undoneOnly: false);
@@ -362,8 +362,8 @@ public class NullableIntegerColumnReadTests : IDisposable
     {
         await InsertCardAsync();
         var ledgerId = await InsertLedgerWithDetailAsync();
-        await _ledgerRepository.SaveMergeHistoryAsync(ledgerId, "統合A", "{}");
-        await _ledgerRepository.SaveMergeHistoryAsync(ledgerId, "統合B", "{}");
+        await _ledgerRepository.SaveMergeHistoryAsync(ledgerId, "統合A", "{}", transaction: null);
+        await _ledgerRepository.SaveMergeHistoryAsync(ledgerId, "統合B", "{}", transaction: null);
         var histories = await _ledgerRepository.GetMergeHistoriesAsync(undoneOnly: false);
         var idA = histories.Single(h => h.Description == "統合A").Id;
 
