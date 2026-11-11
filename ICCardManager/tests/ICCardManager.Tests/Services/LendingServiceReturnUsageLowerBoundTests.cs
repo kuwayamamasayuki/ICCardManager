@@ -50,6 +50,7 @@ public sealed class LendingServiceReturnUsageLowerBoundTests : IDisposable
     private readonly DbContext _dbContext;
     private readonly LedgerRepository _ledgerRepository;
     private readonly RecordingLogger<LendingService> _logger = new();
+    private readonly FixedSystemClock _clock = new(Now);
     private readonly CardLockManager _lockManager;
     private readonly LendingService _service;
 
@@ -93,7 +94,7 @@ public sealed class LendingServiceReturnUsageLowerBoundTests : IDisposable
             _lockManager,
             Options.Create(new AppOptions { CardLockTimeoutSeconds = 5, RetouchWindowSeconds = 30 }),
             _logger,
-            new FixedSystemClock(Now));
+            _clock);
 
         staffRepo.InsertAsync(new Staff
         {
@@ -430,6 +431,213 @@ public sealed class LendingServiceReturnUsageLowerBoundTests : IDisposable
         var result = await _ledgerRepository.GetLatestLedgerDateWithoutDetailsAsync(TestCardIdm);
 
         result.Should().BeNull("導入行は明細を持たないが対象外");
+    }
+
+    /// <summary>
+    /// Issue #2372: 貸出中に履歴の「追加」で手入力した行（貸出日の翌日〜返却日）と同じ日の利用は、
+    /// 下限（貸出日を超えない）では除けないので、日単位で記録済みとみなして除くこと。
+    /// </summary>
+    [Fact]
+    public async Task ReturnAsync_貸出中に手入力した行と同じ日の利用は_二重に記録しないこと()
+    {
+        // Arrange: 9/15 に貸出。9/17 の利用を貸出中のまま履歴の「追加」で手入力した（明細なし）
+        await InsertIntroductionAsync(new DateTime(2026, 9, 1), balance: 5000);
+        await LendOnAsync(new DateTime(2026, 9, 15, 9, 0, 0));
+        await InsertLedgerWithoutDetailsAsync(new DateTime(2026, 9, 17), balanceAfter: 4790);
+
+        // Act: 9/20 に返却。カードには 9/17 と 9/18 の利用が残っている
+        var result = await _service.ReturnAsync(TestStaffIdm, TestCardIdm, new List<LedgerDetail>
+        {
+            Usage(new DateTime(2026, 9, 18), balanceAfter: 4580),
+            Usage(new DateTime(2026, 9, 17), balanceAfter: 4790),
+        });
+
+        // Assert
+        result.Success.Should().BeTrue(_logger.FormatEntries());
+        var usageLedgers = await GetUsageLedgersAsync();
+        usageLedgers.Count(l => l.Date.Date == new DateTime(2026, 9, 17)).Should().Be(1,
+            "9/17 は手入力の行が記録済みなので、カードに残る 9/17 の利用は取り込まない（取り込むと二重になる）");
+        usageLedgers.Single(l => l.Date.Date == new DateTime(2026, 9, 17)).StaffName.Should().Be("別の職員",
+            "残る 1 行は手入力の行");
+        usageLedgers.Should().ContainSingle(l => l.Date.Date == new DateTime(2026, 9, 18) && l.Expense == 210,
+            "手入力の行が無い日の利用は記録する（対の表明）");
+    }
+
+    [Fact]
+    public async Task ReturnAsync_貸出中に手入力した行と同じ日の利用を除いたとき_件数と日付をInformationで残すこと()
+    {
+        await InsertIntroductionAsync(new DateTime(2026, 9, 1), balance: 5000);
+        await LendOnAsync(new DateTime(2026, 9, 15, 9, 0, 0));
+        await InsertLedgerWithoutDetailsAsync(new DateTime(2026, 9, 17), balanceAfter: 4580);
+
+        await _service.ReturnAsync(TestStaffIdm, TestCardIdm, new List<LedgerDetail>
+        {
+            Usage(new DateTime(2026, 9, 18), balanceAfter: 4370),
+            Usage(new DateTime(2026, 9, 17), balanceAfter: 4580),
+            Usage(new DateTime(2026, 9, 17), balanceAfter: 4790),
+        });
+
+        var entry = _logger.Entries
+            .Where(e => e.Level == LogLevel.Information && e.Message.Contains("記録済みとみなして返却時の記録から除きました"))
+            .Should().ContainSingle(_logger.FormatEntries()).Subject;
+        entry.Message.Should().Contain("貸出日=2026-09-15")
+            .And.Contain("除いた履歴=2件", "9/17 の 2 件")
+            .And.Contain("対象日=2026-09-17")
+            .And.NotContain(TestCardIdm, "カード IDm はログへ生のまま残さない（IdmMasker.Mask）");
+    }
+
+    [Fact]
+    public async Task ReturnAsync_明細を持たない行が無いとき_日単位の除外をせずログも出さないこと()
+    {
+        // 対の表明: 「常に除く」「常にログを出す」実装を検出する
+        await InsertIntroductionAsync(new DateTime(2026, 9, 1), balance: 5000);
+        await LendOnAsync(new DateTime(2026, 9, 15, 9, 0, 0));
+
+        var result = await _service.ReturnAsync(TestStaffIdm, TestCardIdm, new List<LedgerDetail>
+        {
+            Usage(new DateTime(2026, 9, 18), balanceAfter: 4580),
+            Usage(new DateTime(2026, 9, 17), balanceAfter: 4790),
+        });
+
+        result.Success.Should().BeTrue(_logger.FormatEntries());
+        (await GetUsageLedgersAsync()).Select(l => l.Date.Date).Should().Equal(
+            new DateTime(2026, 9, 17), new DateTime(2026, 9, 18));
+        _logger.Entries.Should().NotContain(e => e.Message.Contains("記録済みとみなして返却時の記録から除きました"));
+    }
+
+    [Fact]
+    public async Task ReturnAsync_貸出当日の手入力の行では_その日の利用を除かないこと()
+    {
+        // 対の表明: 貸出当日の手入力の行は従来どおり（当日の貸出中の利用を捨てない。Issue #2237）
+        await InsertIntroductionAsync(new DateTime(2026, 9, 1), balance: 5000);
+        await LendOnAsync(new DateTime(2026, 9, 15, 9, 0, 0));
+        await InsertLedgerWithoutDetailsAsync(new DateTime(2026, 9, 15), balanceAfter: 4790);
+
+        var result = await _service.ReturnAsync(TestStaffIdm, TestCardIdm, new List<LedgerDetail>
+        {
+            Usage(new DateTime(2026, 9, 15), balanceAfter: 4580),
+        });
+
+        result.Success.Should().BeTrue(_logger.FormatEntries());
+        result.CreatedLedgers.Should().ContainSingle(l => l.Date.Date == new DateTime(2026, 9, 15) && l.Expense == 210,
+            "貸出当日の利用は、同じ日に手入力の行があっても記録する");
+    }
+
+    [Fact]
+    public async Task ReturnAsync_返却日の手入力の行と同じ日の利用も_記録しないこと()
+    {
+        // 範囲は貸出日の翌日から返却日まで（返却日を含む）
+        await InsertIntroductionAsync(new DateTime(2026, 9, 1), balance: 5000);
+        await LendOnAsync(new DateTime(2026, 9, 15, 9, 0, 0));
+        await InsertLedgerWithoutDetailsAsync(new DateTime(2026, 9, 20), balanceAfter: 4580);
+
+        var result = await _service.ReturnAsync(TestStaffIdm, TestCardIdm, new List<LedgerDetail>
+        {
+            Usage(new DateTime(2026, 9, 20), balanceAfter: 4580),
+            Usage(new DateTime(2026, 9, 16), balanceAfter: 4790),
+        });
+
+        result.Success.Should().BeTrue(_logger.FormatEntries());
+        result.CreatedLedgers.Select(l => l.Date.Date).Should().Equal(
+            new[] { new DateTime(2026, 9, 16) },
+            "返却日の手入力の行と同じ日の利用は除き、他の日の利用は記録する");
+    }
+
+    [Fact]
+    public async Task ReturnAsync_未来の日付の手入力の行があっても_貸出中の手入力の行の日だけを除くこと()
+    {
+        // 下限は最新の手入力の行（未来の日付）で決まり貸出日に切り詰められるが、除外は日ごとに見る
+        // （最新日だけを見る実装では 9/17 を除けない）。未来の日付の行は範囲外なので、他の日の利用は捨てない
+        await InsertIntroductionAsync(new DateTime(2026, 9, 1), balance: 5000);
+        await LendOnAsync(new DateTime(2026, 9, 15, 9, 0, 0));
+        await InsertLedgerWithoutDetailsAsync(new DateTime(2026, 9, 17), balanceAfter: 4790);
+        await InsertLedgerWithoutDetailsAsync(new DateTime(2027, 3, 1), balanceAfter: 4000);
+
+        var result = await _service.ReturnAsync(TestStaffIdm, TestCardIdm, new List<LedgerDetail>
+        {
+            Usage(new DateTime(2026, 9, 18), balanceAfter: 4580),
+            Usage(new DateTime(2026, 9, 17), balanceAfter: 4790),
+            Usage(new DateTime(2026, 9, 15), balanceAfter: 5000),
+        });
+
+        result.Success.Should().BeTrue(_logger.FormatEntries());
+        result.CreatedLedgers.Select(l => l.Date.Date).OrderBy(d => d).Should().Equal(
+            new[] { new DateTime(2026, 9, 15), new DateTime(2026, 9, 18) });
+    }
+
+    [Fact]
+    public async Task ReturnAsync_貸出中に手入力したチャージの行の日も_記録済みとみなすこと()
+    {
+        // 「明細を持たない行」の定義は下限（GetLatestLedgerDateWithoutDetailsAsync）と同じで、摘要の種類を問わない
+        await InsertIntroductionAsync(new DateTime(2026, 9, 1), balance: 5000);
+        await LendOnAsync(new DateTime(2026, 9, 15, 9, 0, 0));
+        await _ledgerRepository.InsertAsync(new Ledger
+        {
+            CardIdm = TestCardIdm,
+            Date = new DateTime(2026, 9, 17),
+            Summary = "役務費によりチャージ",
+            Income = 1000,
+            Balance = 6000,
+        });
+
+        var result = await _service.ReturnAsync(TestStaffIdm, TestCardIdm, new List<LedgerDetail>
+        {
+            Usage(new DateTime(2026, 9, 18), balanceAfter: 5790),
+            new() { UseDate = new DateTime(2026, 9, 17), Amount = 1000, Balance = 6000, IsCharge = true },
+        });
+
+        result.Success.Should().BeTrue(_logger.FormatEntries());
+        result.CreatedLedgers.Select(l => l.Date.Date).Should().Equal(
+            new[] { new DateTime(2026, 9, 18) },
+            "手入力のチャージの行がある 9/17 のチャージは二重に記録しない");
+    }
+
+    [Fact]
+    public async Task GetLedgerDatesWithoutDetailsAsync_範囲内の明細を持たない行の日付を_導入行と貸出中と明細を持つ行を除いて返すこと()
+    {
+        // 導入行（9/16）、明細なしの利用行（9/14・9/17 に 2 行・9/19・9/22）、明細ありの利用行（9/18）、貸出中レコード（9/20）
+        await InsertIntroductionAsync(new DateTime(2026, 9, 16), balance: 5000);
+        await InsertLedgerWithoutDetailsAsync(new DateTime(2026, 9, 14), balanceAfter: 5000);
+        await InsertLedgerWithoutDetailsAsync(new DateTime(2026, 9, 17), balanceAfter: 4790);
+        await InsertLedgerWithoutDetailsAsync(new DateTime(2026, 9, 17, 18, 0, 0), balanceAfter: 4580);
+        await InsertRecordedUsageAsync(new DateTime(2026, 9, 18), balanceAfter: 4370);
+        await InsertLedgerWithoutDetailsAsync(new DateTime(2026, 9, 19), balanceAfter: 4160);
+        await InsertLedgerWithoutDetailsAsync(new DateTime(2026, 9, 22), balanceAfter: 3950);
+        await LendAsync();
+
+        var result = await _ledgerRepository.GetLedgerDatesWithoutDetailsAsync(
+            TestCardIdm, new DateTime(2026, 9, 15), new DateTime(2026, 9, 20, 10, 0, 0));
+
+        result.Should().Equal(
+            new[] { new DateTime(2026, 9, 17), new DateTime(2026, 9, 19) },
+            "範囲外（9/14・9/22）・導入行（9/16）・明細を持つ行（9/18）・貸出中レコード（9/20）は除き、同じ日は 1 つにまとめる");
+    }
+
+    [Fact]
+    public void ExcludeUsageOnDaysRecordedWithoutDetails_日付の無い履歴は除かないこと()
+    {
+        var noDate = new LedgerDetail { UseDate = null, Amount = 210, Balance = 4790 };
+        var onDay = Usage(new DateTime(2026, 9, 17), balanceAfter: 4580);
+        var otherDay = Usage(new DateTime(2026, 9, 18), balanceAfter: 4370);
+
+        var (toRecord, excluded) = LendingService.ExcludeUsageOnDaysRecordedWithoutDetails(
+            new List<LedgerDetail> { otherDay, onDay, noDate }, new[] { new DateTime(2026, 9, 17) });
+
+        toRecord.Should().Equal(otherDay, noDate);
+        excluded.Should().Equal(onDay);
+    }
+
+    private async Task LendOnAsync(DateTime lentAt)
+    {
+        _clock.Now = lentAt;
+        try
+        {
+            await LendAsync();
+        }
+        finally
+        {
+            _clock.Now = Now;
+        }
     }
 
     private async Task LendAsync()
