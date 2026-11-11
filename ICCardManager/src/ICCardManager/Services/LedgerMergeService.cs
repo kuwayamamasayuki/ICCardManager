@@ -87,6 +87,24 @@ namespace ICCardManager.Services
         /// この項目を持たない（Issue #2302 より前に保存した）Undo データでは <c>null</c> になり、照合を行わない。
         /// </remarks>
         public MergedTargetAmounts? MergedTargetAmounts { get; set; }
+
+        /// <summary>
+        /// Issue #2374: 取り消しの前に、統合した後の変更（明細の内容）を確かめられる Undo データか。
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// <see cref="DetailSnapshots"/> を持たない（Issue #2302 より前に保存した）Undo データは false。
+        /// 取り消しは許すが、確認ダイアログで「統合した後の変更を確かめられない。変更していれば失われる」と警告する
+        /// （<c>HistoryPanelViewModel.BuildUnmergeConfirmationMessage</c>）。
+        /// </para>
+        /// <para>
+        /// <see cref="MergedTargetAmounts"/> は判定に含めない。両者は同じ版（Issue #2302）から統合のたびに必ず一緒に
+        /// 書かれる（<see cref="LedgerMergeService.MergeAsync"/>）ため、本システムが書いた Undo データでは
+        /// 「明細の内容が無い」と「金額が無い」は同時に起きる。警告の文言は明細と金額の両方の変更を対象にしている。
+        /// </para>
+        /// </remarks>
+        [System.Text.Json.Serialization.JsonIgnore]
+        public bool CanVerifyChangesAfterMerge => DetailSnapshots != null;
     }
 
     /// <summary>
@@ -233,6 +251,13 @@ namespace ICCardManager.Services
         public int TargetLedgerId { get; set; }
         public string Description { get; set; } = string.Empty;
         public LedgerMergeUndoData UndoData { get; set; } = null!;
+
+        /// <summary>
+        /// Issue #2374: 取り消しの前に、統合した後の変更を確かめられるか（<see cref="LedgerMergeUndoData.CanVerifyChangesAfterMerge"/>）。
+        /// 一覧（<see cref="LedgerMergeService.GetUndoableMergeHistoriesAsync"/>）でも設定する（<see cref="UndoData"/> は設定しない）。
+        /// Undo データを読めなかった場合は false（確かめられない側へ倒す）。
+        /// </summary>
+        public bool CanVerifyChangesAfterMerge { get; set; }
     }
 
     /// <summary>
@@ -724,8 +749,28 @@ namespace ICCardManager.Services
             "一覧で新しい方の統合を先に取り消してから、この統合をもう一度取り消してください。";
 
         /// <summary>
+        /// 元に戻せる統合履歴があるか（「統合を元に戻す」ボタンの有効・無効の判定用）
+        /// </summary>
+        /// <remarks>
+        /// Issue #2374: 履歴を開くたびに呼ばれるため、Undo データ（JSON）は読まない（パフォーマンス。共有モードで 6 年分の
+        /// 統合履歴を毎回読み直さない・壊れた Undo データで毎回 Warning を出さない）。件数の用途に一覧（<see cref="MergeHistoryEntry"/>）を
+        /// 返さないのは、判定していない <see cref="MergeHistoryEntry.CanVerifyChangesAfterMerge"/>（false＝確かめられない）を持つ
+        /// 一覧から表示用アイテムを作ると、黙って全件に警告が出るため（誤用を構造的にできなくする）。
+        /// </remarks>
+        public async Task<bool> HasUndoableMergeHistoriesAsync()
+        {
+            var rawEntries = await _ledgerRepository.GetMergeHistoriesAsync(undoneOnly: false).ConfigureAwait(false);
+            return rawEntries.Any(e => !e.IsUndone);
+        }
+
+        /// <summary>
         /// 元に戻せる統合履歴の一覧を取得
         /// </summary>
+        /// <remarks>
+        /// Issue #2374: 各統合履歴の Undo データを読み、統合した後の変更を確かめられるか
+        /// （<see cref="MergeHistoryEntry.CanVerifyChangesAfterMerge"/>）を判定して載せる（取り消しの確認の文言を分けるため）。
+        /// 「統合を元に戻す」を押したときに呼ぶ。有無だけを知りたいときは <see cref="HasUndoableMergeHistoriesAsync"/> を使う。
+        /// </remarks>
         public async Task<List<MergeHistoryEntry>> GetUndoableMergeHistoriesAsync()
         {
             var rawEntries = await _ledgerRepository.GetMergeHistoriesAsync(undoneOnly: false).ConfigureAwait(false);
@@ -743,12 +788,36 @@ namespace ICCardManager.Services
                     Id = id,
                     MergedAt = mergedAt,
                     TargetLedgerId = targetLedgerId,
-                    Description = description
-                    // UndoDataはunmerge実行時にのみロードする（パフォーマンス）
+                    Description = description,
+                    // UndoData は unmerge 実行時にのみ保持する（取り消しの一覧には判定結果だけを渡す）
+                    CanVerifyChangesAfterMerge = CanVerifyChangesAfterMerge(id, undoDataJson)
                 });
             }
 
             return result;
+        }
+
+        /// <summary>
+        /// Issue #2374: 統合履歴の Undo データが、取り消しの前に統合した後の変更を確かめられる形か。
+        /// 判定は <see cref="LedgerMergeUndoData.CanVerifyChangesAfterMerge"/> ただ 1 つに委ねる。
+        /// </summary>
+        /// <remarks>
+        /// 読めない Undo データは false（確かめられない側＝警告する側へ倒す）。このとき確認には「以前のバージョンで行ったため」の
+        /// 警告が出るが、実際の原因は Undo データの破損であり、「はい」を選んでも取り消し自体は
+        /// <see cref="UnmergeAsync"/> が読めずに失敗として案内する（台帳は変わらない）。
+        /// </remarks>
+        private bool CanVerifyChangesAfterMerge(int historyId, string undoDataJson)
+        {
+            try
+            {
+                var undoData = JsonSerializer.Deserialize<LedgerMergeUndoData>(undoDataJson, JsonOptions);
+                return undoData?.CanVerifyChangesAfterMerge ?? false;
+            }
+            catch (JsonException ex)
+            {
+                _logger.LogWarning(ex, "Failed to read undo data of merge history {HistoryId}", historyId);
+                return false;
+            }
         }
 
         /// <summary>
@@ -788,7 +857,8 @@ namespace ICCardManager.Services
                 MergedAt = entry.MergedAt,
                 TargetLedgerId = entry.TargetLedgerId,
                 Description = entry.Description,
-                UndoData = undoData
+                UndoData = undoData,
+                CanVerifyChangesAfterMerge = undoData.CanVerifyChangesAfterMerge
             };
         }
 
