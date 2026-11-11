@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Reflection;
 using System.Text.Json;
 using System.Xml.Linq;
 using FluentAssertions;
@@ -33,6 +34,15 @@ namespace ICCardManager.Tests.Infrastructure.CardReader;
 /// <c>FelicaCardReader</c> を使うのは本体と DebugDataViewer（本体をプロジェクト参照し、FelicaLib.DotNet を自分でも参照する）の 2 つ。
 /// </para>
 /// <para>
+/// MSBuild ファイルの走査は拡張子（.csproj / .props / .targets / .proj）で対象を決めるので、別の拡張子のファイルを
+/// <c>Import</c> して宣言した版や、コマンドライン・環境変数で与えた値は見えない。<b>最後の網はロックファイルの検査</b>で、
+/// 宣言がどこにあっても解決される版はロックファイルに現れ、CI はロックファイルと食い違う復元を <c>--locked-mode</c> で拒む。
+/// </para>
+/// <para>
+/// 版の経路の数え上げとは別に、テストの出力にある実際の FelicaLib.DotNet.dll のユーザー文字列（メタデータの #US ヒープ）に
+/// 判定が頼る文言が含まれることも表明する。版が定数と一致していても、確かめたという主張そのものが DLL と食い違えば赤になる。
+/// </para>
+/// <para>
 /// 検査ロジック（宣言・ロックファイルからの版の抽出）は既知のサンプル入力でも固定する。実データだけだと、抽出器が何も
 /// 拾わなくなったときに「食い違いなし」で緑になる。
 /// </para>
@@ -54,6 +64,9 @@ public class FelicaLibVersionPinTests
         TestPaths.GitMarkerName, "bin", "obj", ".vs", "packages", "TestResults", "node_modules",
     };
 
+    /// <summary>FelicaLib.DotNet 1.2.67 の PaSoRi に接続できないときの例外の文言（DLL のユーザー文字列そのもの）。</summary>
+    private const string ReaderNotConnectedMessage = "PaSoRi に接続できません。";
+
     private static string MismatchMessage(string where, string actual) =>
         $"{where} の {PackageId} の版（{actual}）が、FelicaCardReader が例外の文言を確かめた版" +
         $"（FelicaCardReader.FelicaLibMessagesVerifiedVersion = {FelicaCardReader.FelicaLibMessagesVerifiedVersion}）と食い違っています。" +
@@ -63,6 +76,36 @@ public class FelicaLibVersionPinTests
         "（版は範囲・ワイルドカード・プロパティ参照ではなくリテラルで書く。Issue #2376、開発者ガイド §5.7）。";
 
     // ─────────────────────────── 実データ ───────────────────────────
+
+    [Fact]
+    public void テストが読み込むFelicaLibDotNetのDLLが判定の頼る文言を持つこと()
+    {
+        var assembly = typeof(FelicaLib.FelicaUtility).Assembly;
+        var version = assembly.GetName().Version!;
+        $"{version.Major}.{version.Minor}.{version.Build}".Should().Be(
+            FelicaCardReader.FelicaLibMessagesVerifiedVersion,
+            "文言を確かめる対象の DLL が、文言を確かめた版そのものであること");
+
+        var userStrings = ReadUserStrings(assembly.ManifestModule);
+        userStrings.Should().NotBeEmpty("DLL のユーザー文字列を読めていること（空振り防止）");
+
+        foreach (var message in new[] { FelicaCardReader.FelicaLibCardNotFoundMessage, FelicaCardReader.FelicaLibBlockNotReadMessage })
+        {
+            userStrings.Should().Contain(
+                s => s.Contains(message),
+                $"IsCardNotPresentException が頼る文言「{message}」が FelicaLib.DotNet {FelicaCardReader.FelicaLibMessagesVerifiedVersion} の " +
+                "例外の文言に含まれること。DLL を逆アセンブルして文言を確かめ直し、定数を直してください（Issue #2376）");
+        }
+
+        // キーワードの照合を「どれか 1 つのユーザー文字列に当たること」で書くと、P/Invoke の関数名（pasori_open 等）に
+        // "open" が当たって空振りするため、PaSoRi に接続できないときの文言を名指しする。
+        userStrings.Should().Contain(
+            ReaderNotConnectedMessage,
+            "PaSoRi に接続できないときの例外の文言が FelicaLib.DotNet の文言にあること。" +
+            "DLL を逆アセンブルして文言を確かめ直し、IsReaderUnavailableException のキーワードを直してください（Issue #2376）");
+        FelicaCardReader.IsReaderUnavailableException(new InvalidOperationException(ReaderNotConnectedMessage))
+            .Should().BeTrue("IsReaderUnavailableException のキーワードが、FelicaLib.DotNet の PaSoRi に接続できないときの文言に当たること（Issue #2376）");
+    }
 
     [Fact]
     public void 文言を確かめた版の定数が単一の版番号であること()
@@ -163,6 +206,7 @@ public class FelicaLibVersionPinTests
     [InlineData(@"<Project xmlns=""http://schemas.microsoft.com/developer/msbuild/2003""><ItemGroup><PackageReference Include=""FelicaLib.DotNet"" Version=""9.9.9"" /></ItemGroup></Project>", "9.9.9")]
     [InlineData(@"<Project><ItemGroup><PackageReference Include=""FelicaLib.DotNet"" Version=""[1.2.67, )"" /></ItemGroup></Project>", "[1.2.67, )")]
     [InlineData(@"<Project><ItemGroup><PackageReference Include=""FelicaLib.DotNet"" Version=""$(FelicaLibVersion)"" /></ItemGroup></Project>", "$(FelicaLibVersion)")]
+    [InlineData(@"<Project><ItemGroup><PackageReference Include=""ClosedXML; FelicaLib.DotNet"" Version=""9.9.9"" /></ItemGroup></Project>", "9.9.9")]
     public void 宣言の抽出がFelicaLibDotNetの版を書き方によらず拾うこと(string xml, string expected)
     {
         ExtractVersionDeclarations(xml).Should().Equal(expected);
@@ -211,7 +255,10 @@ public class FelicaLibVersionPinTests
             .Where(e => itemNames.Contains(e.Name.LocalName))
             .Where(e => new[] { "Include", "Update" }
                 .Select(a => (string?)e.Attribute(a))
-                .Any(id => string.Equals(id?.Trim(), PackageId, StringComparison.OrdinalIgnoreCase)))
+                .Where(ids => ids != null)
+                // Include / Update はセミコロン区切りで複数のパッケージを書ける
+                .SelectMany(ids => ids!.Split(';'))
+                .Any(id => string.Equals(id.Trim(), PackageId, StringComparison.OrdinalIgnoreCase)))
             .SelectMany(e => versionNames
                 .Select(n => (string?)e.Attribute(n))
                 .Concat(e.Elements().Where(c => versionNames.Contains(c.Name.LocalName)).Select(c => (string?)c.Value)))
@@ -263,12 +310,52 @@ public class FelicaLibVersionPinTests
                 var extension = Path.GetExtension(file);
                 if (string.Equals(extension, ".csproj", StringComparison.OrdinalIgnoreCase)
                     || string.Equals(extension, ".props", StringComparison.OrdinalIgnoreCase)
-                    || string.Equals(extension, ".targets", StringComparison.OrdinalIgnoreCase))
+                    || string.Equals(extension, ".targets", StringComparison.OrdinalIgnoreCase)
+                    || string.Equals(extension, ".proj", StringComparison.OrdinalIgnoreCase))
                 {
                     yield return file;
                 }
             }
         }
+    }
+
+    /// <summary>モジュールのメタデータのユーザー文字列（#US ヒープ。C# の文字列リテラル）をすべて返す。</summary>
+    /// <remarks>
+    /// net48 のテストプロジェクトは System.Reflection.Metadata をコンパイル時に参照しないため、パッケージを足さずに
+    /// <see cref="Module.ResolveString"/> で読む。ユーザー文字列のトークンは 0x70000000 | ヒープ内のオフセットで、
+    /// 各要素は「圧縮した長さ（1・2・4 バイト）＋ UTF-16 ＋ 末尾 1 バイト」なので、読んだ文字列の長さから次のオフセットが決まる。
+    /// ヒープの末尾（詰め物）を過ぎると解決が例外になるので、そこで止める。
+    /// </remarks>
+    private static IReadOnlyList<string> ReadUserStrings(Module module)
+    {
+        const int UserStringTokenType = 0x70000000;
+        var result = new List<string>();
+        var offset = 1; // オフセット 0 は空の文字列
+        while (offset < 0x00FFFFFF)
+        {
+            string value;
+            try
+            {
+                value = module.ResolveString(UserStringTokenType | offset);
+            }
+            catch (ArgumentException)
+            {
+                break;
+            }
+
+            if (value.Length == 0)
+            {
+                offset += 1; // 長さ 0 の要素（詰め物）
+                continue;
+            }
+
+            result.Add(value);
+            var blobLength = (value.Length * 2) + 1;
+            var headerLength = blobLength < 0x80 ? 1 : blobLength < 0x4000 ? 2 : 4;
+            offset += headerLength + blobLength;
+        }
+
+        return result;
     }
 
     private static string MakeRelative(string root, string path) =>
