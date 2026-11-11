@@ -1,3 +1,4 @@
+#nullable enable
 using System.Windows;
 
 namespace ICCardManager.Views.Dialogs
@@ -32,6 +33,20 @@ namespace ICCardManager.Views.Dialogs
         public CardTypeSelectionDialog()
         {
             InitializeComponent();
+        }
+
+        /// <summary>
+        /// 「登録が完了するまでカードをリーダーから離さない」注意を出すかを設定する（Issue #2385）。
+        /// </summary>
+        /// <remarks>
+        /// 残高・利用履歴を事前に読み取れたときは、交通系ICカードの登録時にカードを読み直さないので注意は不要。
+        /// 判定は <see cref="ViewModels.CardRegistrationPreRead.NeedsCardOnReaderUntilRegistered"/> が行う。
+        /// 呼ばれなければ表示したまま（離さないよう求める側へ倒す）。
+        /// </remarks>
+        /// <param name="visible">注意を出すなら true</param>
+        public void SetKeepCardOnReaderNoticeVisible(bool visible)
+        {
+            KeepCardOnReaderNotice.Visibility = visible ? Visibility.Visible : Visibility.Collapsed;
         }
 
         private void StaffCardButton_Click(object sender, RoutedEventArgs e)

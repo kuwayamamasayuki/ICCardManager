@@ -661,6 +661,23 @@ namespace ICCardManager.UITests.Infrastructure
         [NotUiaName]
         public const string CardManageCardReadStatusPrefix = "カードを読み取りました";
 
+        // Issue #2385: 未登録のカードをタッチしたときのカード種別選択ダイアログの注意（登録が完了するまでカードを離さない）の UI テスト用。
+        /// <summary>カード種別選択ダイアログ（未登録のカードをメイン画面でタッチしたときに開く）。</summary>
+        [UiaName]
+        public const string CardTypeSelectionDialogName = "カード種別選択ダイアログ";
+
+        /// <summary>カード種別選択ダイアログの「交通系ICカード」ボタン（ダイアログの中身が描画された目印に使う）。</summary>
+        [UiaName]
+        public const string CardTypeSelectionIcCardButton = "交通系ICカードとして登録";
+
+        /// <summary>カード種別選択ダイアログの「キャンセル」ボタン。</summary>
+        [UiaName]
+        public const string CardTypeSelectionCancelButton = "キャンセル";
+
+        /// <summary>カード種別選択ダイアログの「カードを離さない」注意の先頭（TextBlock の Text 由来の Name。AutomationProperties.Name は持たない）。</summary>
+        [NotUiaName]
+        public const string CardTypeSelectionKeepCardNoticePrefix = "⚠ 注意:";
+
         /// <summary>カード登録方法の選択ダイアログ（Issue #510）。</summary>
         [UiaName]
         public const string CardRegistrationModeDialogName = "カード登録方法選択ダイアログ";

@@ -64,7 +64,8 @@ public partial class MainViewModel
         // メイン画面は変更しない（Issue #186）
 
         // Issue #482対応: カード種別選択の前に残高を読み取っておく
-        // 選択中にカードを離しても正しい残高で登録できる
+        // 読み取れていれば、選択中・登録中にカードを離しても正しい残高で登録できる
+        // （読み取れなければ登録時にカードから読み直す。Issue #2385）
         // Issue #596対応: 履歴も事前に読み取っておく（カード登録時に当月分をインポートするため）
         // エラーイベントを一時的に抑制（ユーザーに混乱を与えるエラーメッセージを防止）
         int? preReadBalance = null;
@@ -86,9 +87,16 @@ public partial class MainViewModel
 
         // Issue #312: IDmからカード種別を判別することは技術的に不可能なため、
         // カスタムダイアログでユーザーに職員証か交通系ICカードかを選択させる
+        // Issue #2385: 「登録が完了するまでカードを離さない」注意は、登録時にカードを読み直すとき
+        // （残高・利用履歴のどちらかを事前に読み取れなかったとき）だけ出す。判定は読み直す側と共有する。
+        var keepCardOnReader = CardRegistrationPreRead.NeedsCardOnReaderUntilRegistered(preReadBalance, preReadHistory);
         Views.Dialogs.CardTypeSelectionDialog? capturedSelectionDialog = null;
         _navigationService.ShowDialog<Views.Dialogs.CardTypeSelectionDialog>(
-            d => capturedSelectionDialog = d);
+            d =>
+            {
+                d.SetKeepCardOnReaderNoticeVisible(keepCardOnReader);
+                capturedSelectionDialog = d;
+            });
 
         switch (capturedSelectionDialog?.SelectionResult)
         {
