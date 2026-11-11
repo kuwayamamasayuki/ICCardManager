@@ -101,9 +101,10 @@ public partial class MainViewModel
     /// <para>
     /// カードリーダーを使えなくても、履歴の閲覧・帳票の作成などは使える。開始の失敗（<see cref="CardReaderException"/>）は
     /// 起動処理で受け止め、メイン画面の「初期化エラー」ダイアログ（<c>MainWindow_Loaded</c>）までは抜けさせない。
-    /// 利用者への案内は警告エリアだけで行う: カードリーダーは例外を投げる前に Disconnected の接続状態と
-    /// <see cref="ICardReader.Error"/> を通知する（<c>FelicaCardReader.StartReadingAsync</c>）ため、
-    /// ここで警告を足すと同じ失敗が 2 行並ぶ。
+    /// 利用者への案内は警告エリアだけで行い、ここでは警告を足さない（足すと同じ失敗が 2 行並ぶ）。
+    /// <c>FelicaCardReader.StartReadingAsync</c> は例外を投げる前に、felicalib.dll を読み込めない経路では
+    /// 切断（理由 <c>FelicaLibUnavailableMessage</c>）だけを、それ以外の想定外の失敗では <see cref="ICardReader.Error"/>
+    /// （カードリーダーエラーの行）を通知する。
     /// </para>
     /// <para>
     /// それ以外の例外（カードリーダーの契約外の失敗）は従来どおり「初期化エラー」まで抜けさせる。

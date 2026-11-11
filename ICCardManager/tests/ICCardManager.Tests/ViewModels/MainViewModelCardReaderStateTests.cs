@@ -196,18 +196,13 @@ public class MainViewModelCardReaderStateTests
     #region 起動時にカードリーダーを使えなくても「初期化エラー」を出さず、警告エリアだけで伝えること（Issue #2377）
 
     [Fact]
-    public async Task InitializeAsync_カードリーダーの開始がCardReaderExceptionなら_例外を出さず警告エリアに切断とエラーを出すこと()
+    public async Task InitializeAsync_felicalibを読み込めない経路を模すと_例外を出さず警告エリアに切断の行だけが出ること()
     {
-        // FelicaCardReader と同じく、例外を投げる前に Disconnected の接続状態と Error を通知する
-        var failure = CardReaderException.ReadFailed("felicalib.dll を読み込めない環境を注入");
+        // FelicaCardReader の felicalib.dll を読み込めない経路を模す: 例外を投げる前に切断（理由つき）だけを通知し、Error は発火しない
         _cardReaderMock.Setup(r => r.StartReadingAsync())
-            .Callback(() =>
-            {
-                _cardReaderMock.Raise(r => r.ConnectionStateChanged += null,
-                    new ConnectionStateChangedEventArgs(CardReaderConnectionState.Disconnected, "注入した切断の理由"));
-                _cardReaderMock.Raise(r => r.Error += null, _cardReaderMock.Object, (Exception)failure);
-            })
-            .ThrowsAsync(failure);
+            .Callback(() => _cardReaderMock.Raise(r => r.ConnectionStateChanged += null,
+                new ConnectionStateChangedEventArgs(CardReaderConnectionState.Disconnected, "注入した切断の理由")))
+            .ThrowsAsync(CardReaderException.ReadFailed("felicalib.dll を読み込めない環境を注入"));
 
         Func<Task> act = () => _viewModel.InitializeAsync();
 
@@ -215,6 +210,23 @@ public class MainViewModelCardReaderStateTests
         _viewModel.CardReaderConnectionState.Should().Be(CardReaderConnectionState.Disconnected);
         _viewModel.WarningMessages.Where(w => w.Type == WarningType.CardReaderConnection)
             .Should().ContainSingle().Which.DisplayText.Should().Be("⚠️ カードリーダー切断: 注入した切断の理由");
+        _viewModel.WarningMessages.Should().NotContain(w => w.Type == WarningType.CardReaderError,
+            "起動処理は受け止めた例外から警告を足さない");
+    }
+
+    [Fact]
+    public async Task InitializeAsync_想定外の失敗の経路を模すと_例外を出さず警告エリアにカードリーダーエラーの行が1行だけ出ること()
+    {
+        // FelicaCardReader の felicalib 以外の想定外の失敗（catch の経路）を模す: Error だけを発火する
+        //（接続状態は SetConnectionState のため、初期状態の Disconnected のままなら切断は通知されない）
+        var failure = CardReaderException.ReadFailed("想定外の失敗を注入");
+        _cardReaderMock.Setup(r => r.StartReadingAsync())
+            .Callback(() => _cardReaderMock.Raise(r => r.Error += null, _cardReaderMock.Object, (Exception)failure))
+            .ThrowsAsync(failure);
+
+        Func<Task> act = () => _viewModel.InitializeAsync();
+
+        await act.Should().NotThrowAsync();
         _viewModel.WarningMessages.Should().ContainSingle(w => w.Type == WarningType.CardReaderError,
             "カードリーダーの通知した Error が 1 行だけ出ること（起動処理が警告を重ねて足さない）");
     }
@@ -257,7 +269,7 @@ public class MainViewModelCardReaderStateTests
     }
 
     [Fact]
-    public async Task InitializeAsync_felicalibを読み込めないとき_本物のカードリーダーの通知で警告エリアに案内が出て例外を出さないこと()
+    public async Task InitializeAsync_felicalibを読み込めないとき_本物のカードリーダーの通知で警告エリアに切断の案内だけが出て例外を出さないこと()
     {
         // 本物の FelicaCardReader（felicalib 呼び出しだけ差し替え）で、起動処理が受け止めた後も
         // 警告エリアに案内が残ることを確かめる。案内が出ない形で例外だけ握りつぶすと、利用者には何も伝わらない
@@ -272,7 +284,10 @@ public class MainViewModelCardReaderStateTests
         viewModel.WarningMessages.Where(w => w.Type == WarningType.CardReaderConnection)
             .Should().ContainSingle().Which.DisplayText.Should().Be(
                 "⚠️ カードリーダー切断: " + FelicaCardReader.FelicaLibUnavailableMessage);
-        viewModel.WarningMessages.Should().ContainSingle(w => w.Type == WarningType.CardReaderError);
+        viewModel.WarningMessages.Should().NotContain(w => w.Type == WarningType.CardReaderError,
+            "この経路の案内は切断の行（インストールして再起動）だけ。カードリーダーエラーの行は「置き直す・抜き差しする」と" +
+            "食い違う行動指示を並べるため出さない。実際: " +
+            string.Join(" / ", viewModel.WarningMessages.Select(w => w.DisplayText)));
     }
 
     /// <summary>felicalib.dll を読み込めない環境（P/Invoke が <see cref="DllNotFoundException"/>）を再現する。</summary>

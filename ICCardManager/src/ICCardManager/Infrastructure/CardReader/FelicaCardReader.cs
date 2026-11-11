@@ -178,9 +178,13 @@ namespace ICCardManager.Infrastructure.CardReader
                     // felicalib.dll の存在確認
                     if (!IsFelicaLibLoaded())
                     {
-                        var ex = new InvalidOperationException(FelicaLibUnavailableMessage);
-                        SetConnectionStateForceNotify(CardReaderConnectionState.Disconnected, ex.Message);
-                        throw ex;
+                        // Issue #2377: この経路の案内は切断の行（FelicaLibUnavailableMessage。インストールして再起動）だけに任せ、
+                        // Error は発火しない。Error の行（カードリーダーエラー）は「カードを置き直す・抜き差しする」の
+                        // 一時的な読み取り失敗のための文言で、ここで出すと切断の行と食い違う行動指示が並ぶ。
+                        // 起動時のダイアログをやめたため、警告エリアの表示が利用者への案内のすべてになる。
+                        _logger.LogError("FelicaCardReader: 初期化エラー: {Message}", FelicaLibUnavailableMessage);
+                        SetConnectionStateForceNotify(CardReaderConnectionState.Disconnected, FelicaLibUnavailableMessage);
+                        throw CardReaderException.ReadFailed(FelicaLibUnavailableMessage);
                     }
 
                     // PaSoRi の物理接続確認 (Issue #1428)
@@ -214,8 +218,11 @@ namespace ICCardManager.Infrastructure.CardReader
 
                     SetConnectionStateForceNotify(CardReaderConnectionState.Connected);
                 }
-                catch (Exception ex)
+                catch (Exception ex) when (ex is not CardReaderException)
                 {
+                    // felicalib.dll を読み込めない経路（上で CardReaderException を投げる）は、ここを通さない。
+                    // それ以外の想定外の失敗は Error（カードリーダーエラーの行）で伝える。接続状態は SetConnectionState のため、
+                    // 初期状態（Disconnected）のままなら切断は通知されない。
                     _logger.LogError(ex, "FelicaCardReader: 初期化エラー");
                     var cardReaderException = CardReaderException.ReadFailed(ex.Message, ex);
                     SetConnectionState(CardReaderConnectionState.Disconnected, cardReaderException.UserFriendlyMessage);
