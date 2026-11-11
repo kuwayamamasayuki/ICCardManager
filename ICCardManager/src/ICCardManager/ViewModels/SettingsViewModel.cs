@@ -266,6 +266,17 @@ public partial class SettingsViewModel : ViewModelBase
     /// </remarks>
     private string _loadedBackupPath = string.Empty;
 
+    /// <summary>
+    /// 画面を開いたとき（または最後に保存したとき）の、一括保存の対象の項目の値（Issue #2388）
+    /// </summary>
+    /// <remarks>
+    /// 保存では、これと画面の値を比べて<b>変えた項目のキーだけ</b>を書く。画面の全項目を書くと、共有モードで画面を開いている間に
+    /// 他の PC が変えた項目を、画面の古い値で書き戻す。読み込んだ値そのものではなく、読み込んだ値を画面へ反映した直後の
+    /// 画面の値（<see cref="BuildEditableSettings"/>）から作る。選択肢に無い値を既定の選択肢へ寄せるような画面側の補正を、
+    /// 職員が変えたものと数えないため。読み込みが成功するまでは null。
+    /// </remarks>
+    private AppSettings? _loadedEditableSettings;
+
     public SettingsViewModel(
         ISettingsRepository settingsRepository,
         IValidationService validationService,
@@ -366,7 +377,8 @@ public partial class SettingsViewModel : ViewModelBase
     /// Issue #2305: 読む前に設定のキャッシュを破棄し、開くたびに DB から読み直す。保存（一括保存）は画面の全項目を書くため、
     /// TTL キャッシュ（既定 5 分・共有モード 3 分）の古い値を初期値にすると、共有モードで他の PC がその後に変えた設定
     /// （部署種別など）を、別の項目だけを変えて保存したときに古い値へ巻き戻す。読み直しても、画面を開いてから保存するまでの間に
-    /// 他の PC が変えた値は巻き戻り得る（変えた項目だけを書く根本対策は別 Issue）。
+    /// 他の PC が変えた値は、Issue #2388 で変えた項目だけを書くようにして巻き戻さなくなった（<see cref="_loadedEditableSettings"/>）。
+    /// 読み直しは、画面に最新の値を見せるために残す。
     /// </remarks>
     [RelayCommand]
     public async Task LoadSettingsAsync()
@@ -422,6 +434,9 @@ public partial class SettingsViewModel : ViewModelBase
 
             HasChanges = false;
             SetStatus(string.Empty, false);
+
+            // Issue #2388: 保存で「変えた項目」を決める基準。画面へ反映した後の値で取る
+            _loadedEditableSettings = BuildEditableSettings();
 
             // Issue #2305: すべての項目を読み込んだ値にしてから保存を許す
             IsSettingsLoaded = true;
@@ -767,19 +782,15 @@ public partial class SettingsViewModel : ViewModelBase
                 }
             }
 
-            var settings = new AppSettings
-            {
-                WarningBalance = WarningBalance,
-                FontSize = SelectedFontSizeItem?.Value ?? FontSizeOption.Medium,
-                SoundMode = SelectedSoundModeItem?.Value ?? SoundMode.Beep,
-                ToastPosition = SelectedToastPositionItem?.Value ?? ToastPosition.TopRight,
-                DepartmentType = SelectedDepartmentTypeItem?.Value ?? DepartmentType.MayorOffice,
-                SkipBusStopInputOnReturn = SkipBusStopInputOnReturn,
-                SkipCompanionCountInputOnReturn = SkipCompanionCountInputOnReturn,
-                CompanionCountInputTimeoutSeconds = CompanionCountInputTimeoutSeconds,
-                LongTermUnreturnedDays = LongTermUnreturnedDays,
-                ShowHistoryOnReturn = ShowHistoryOnReturn
-            };
+            var settings = BuildEditableSettings();
+
+            // Issue #2388: 画面を開いたときの値と比べて、変えた項目のキーだけを書く。全項目を書くと、共有モードで画面を
+            // 開いている間に他の PC が変えた項目（部署種別など）を、この画面の古い値で書き戻す。何も変えていなければ空で、
+            // DB へは何も書かない（「設定を保存しました」で閉じるのは従来どおり）。
+            // 保存できるのは読み込みが成功した後だけなので（SaveAsync の入口）、基準は必ずある
+            var baseline = _loadedEditableSettings
+                ?? throw new InvalidOperationException("設定の読み込みが成功する前に保存しようとしました。");
+            var changedKeys = SettingsRepository.GetChangedAppSettingKeys(baseline, settings);
 
             // Issue #2197: DB への書き込みは Task.Run で UI スレッドから退避する（接続診断・バックアップと同じ方針）。
             // SaveAppSettingsAsync は名前こそ非同期だが、BeginTransactionAsync の最初の await（セマフォの取得）が
@@ -790,23 +801,20 @@ public partial class SettingsViewModel : ViewModelBase
             // （外しても固まらない）。Task.Run の中からの呼び出しは UI 起点のゲートを取らないが、書き込みは
             // トランザクション（セマフォ）でほかの書き込みと直列化される（#2197 から変わらない）。
             // バックアップ先（backup_path）は一括保存に載らない（Issue #2264。上の ChangeBackupPathAsync だけが書く）。
-            var success = await Task.Run(() => _settingsRepository.SaveAppSettingsAsync(settings));
+            var success = await Task.Run(() => _settingsRepository.SaveAppSettingsAsync(settings, changedKeys));
 
             if (success)
             {
                 SetStatus("設定を保存しました", false);
                 HasChanges = false;
 
-                // 部署種別の変更を摘要生成器へ反映（Issue #1975）
-                // 保存成功時だけ反映する（順序を逆にすると「保存できませんでした」と
-                // 案内しながら摘要生成だけ新しい部署種別で動く。#1905 と同じ判断）。
-                // これを省くと、履歴統合・履歴分割・返却時の台帳生成・明細編集の
-                // 摘要再生成がアプリ再起動まで旧設定でチャージ摘要を作り、
-                // 「役務費によりチャージ」が 6 年保存の台帳へ入る。
-                // UI 装飾の反映（文字サイズ・トースト位置）より前に置くのは、
-                // それらが失敗しても台帳へ効く反映だけは確定させるため
-                // （development-conventions.md「コミット確定後の後処理を、成否の判定に巻き込まない」）
-                _summaryGenerator.ApplyDepartmentType(settings.DepartmentType);
+                // 保存した値を次の保存の基準にする（DB 保存先を変えたときは画面を閉じないため、続けて保存できる）
+                _loadedEditableSettings = settings;
+
+                // 部署種別の反映（摘要生成器・department_config.txt）。台帳へ効く反映なので、UI 装飾の反映（文字サイズ・
+                // トースト位置）より前に置く（それらが失敗しても、この反映だけは確定させる。
+                // development-conventions.md「コミット確定後の後処理を、成否の判定に巻き込まない」）
+                await ApplySavedDepartmentTypeAsync(settings, changedKeys);
 
                 // 文字サイズの変更を反映
                 ApplyFontSize(settings.FontSize);
@@ -816,18 +824,6 @@ public partial class SettingsViewModel : ViewModelBase
 
                 // トースト位置の変更を反映
                 App.ApplyToastPosition(settings.ToastPosition);
-
-                // 部署種別を設定ファイルに保存（インストーラーがアップグレード時に読み込む）
-                try
-                {
-                    AppConfigFiles.Write(
-                        DepartmentConfigPath,
-                        SettingsRepository.DepartmentTypeToString(settings.DepartmentType));
-                }
-                catch
-                {
-                    // 非致命的: DBが正なので設定ファイルの書き込み失敗は無視
-                }
 
                 if (plan.NewDatabaseFolder != null)
                 {
@@ -846,6 +842,85 @@ public partial class SettingsViewModel : ViewModelBase
                     true);
             }
         }
+    }
+
+    /// <summary>
+    /// 保存に成功した後、DB にある部署種別を摘要生成器と <c>department_config.txt</c> へ反映する（Issue #1975 / #2388）
+    /// </summary>
+    /// <param name="saved">保存した画面の値</param>
+    /// <param name="savedKeys">実際に書いたキー</param>
+    /// <remarks>
+    /// <para>
+    /// 摘要生成器へ反映しないと、履歴統合・分割・返却時の台帳生成・明細編集の摘要再生成がアプリ再起動まで旧設定で
+    /// チャージ摘要を作り、誤った「役務費／旅費によりチャージ」が 6 年保存の台帳へ入る（#1975）。保存成功時だけ反映する
+    /// （順序を逆にすると「保存できませんでした」と案内しながら摘要生成だけ新しい部署種別で動く。#1905 と同じ判断）。
+    /// </para>
+    /// <para>
+    /// 部署種別を変えなかった保存では、<b>画面の値ではなく DB を読み直した値</b>を使う（#2388 のレビューで検出）。画面を開いている間に
+    /// 他の PC が部署種別を変えていると、画面の値は古い。<c>department_config.txt</c> は起動のたびに DB へ無条件に適用される
+    /// （<c>App.ApplyDepartmentConfigFromFileAsync</c>）ため、古い値を書くと、この PC の再起動で共有 DB の部署種別が戻る
+    /// （DB へ書かなくした巻き戻りが、再起動まで先送りされるだけになる）。変えたときは、いま書いた値をそのまま使う。
+    /// 読み直しに失敗したときは、どちらへも反映しない（保存は確定済み。古い値で書くよりは、前の状態のまま残す方が害が小さい）。
+    /// </para>
+    /// </remarks>
+    private async Task ApplySavedDepartmentTypeAsync(AppSettings saved, IReadOnlyCollection<string> savedKeys)
+    {
+        DepartmentType departmentType;
+        if (savedKeys.Contains(SettingsRepository.KeyDepartmentType))
+        {
+            departmentType = saved.DepartmentType;
+        }
+        else
+        {
+            try
+            {
+                _settingsRepository.InvalidateCache();
+                departmentType = (await Task.Run(() => _settingsRepository.GetAppSettingsAsync())).DepartmentType;
+            }
+            catch (Exception ex)
+            {
+                ErrorDialogHelper.LogException(ex, "保存後の部署種別の読み直し");
+                return;
+            }
+        }
+
+        _summaryGenerator.ApplyDepartmentType(departmentType);
+
+        // 部署種別を設定ファイルに保存（インストーラーがアップグレード時に読み込み、起動時に DB へ適用する）
+        try
+        {
+            AppConfigFiles.Write(
+                DepartmentConfigPath,
+                SettingsRepository.DepartmentTypeToString(departmentType));
+        }
+        catch
+        {
+            // 非致命的: DBが正なので設定ファイルの書き込み失敗は無視
+        }
+    }
+
+    /// <summary>
+    /// 画面の項目のうち、設定テーブルへ保存する項目の値を組み立てる（Issue #2388 で保存処理から切り出した）
+    /// </summary>
+    /// <remarks>
+    /// バックアップ先（認証付きの専用経路）・データベース保存先（この PC の設定ファイル）は含めない。
+    /// 1 つの欄は 1 つのキーに対応する（文字サイズは <see cref="SelectedFontSizeItem"/> の値を使う）。
+    /// </remarks>
+    private AppSettings BuildEditableSettings()
+    {
+        return new AppSettings
+        {
+            WarningBalance = WarningBalance,
+            FontSize = SelectedFontSizeItem?.Value ?? FontSizeOption.Medium,
+            SoundMode = SelectedSoundModeItem?.Value ?? SoundMode.Beep,
+            ToastPosition = SelectedToastPositionItem?.Value ?? ToastPosition.TopRight,
+            DepartmentType = SelectedDepartmentTypeItem?.Value ?? DepartmentType.MayorOffice,
+            SkipBusStopInputOnReturn = SkipBusStopInputOnReturn,
+            SkipCompanionCountInputOnReturn = SkipCompanionCountInputOnReturn,
+            CompanionCountInputTimeoutSeconds = CompanionCountInputTimeoutSeconds,
+            LongTermUnreturnedDays = LongTermUnreturnedDays,
+            ShowHistoryOnReturn = ShowHistoryOnReturn
+        };
     }
 
     /// <summary>

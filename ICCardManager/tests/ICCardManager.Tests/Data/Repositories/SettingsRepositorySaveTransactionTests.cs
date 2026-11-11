@@ -14,7 +14,7 @@ using Xunit;
 namespace ICCardManager.Tests.Data.Repositories;
 
 /// <summary>
-/// <see cref="SettingsRepository.SaveAppSettingsAsync"/> のトランザクション境界・
+/// <see cref="SettingsRepository.SaveAppSettingsAsync(AppSettings)"/> のトランザクション境界・
 /// ロールバック・キャッシュ無効化タイミングを検証する単体テスト。
 /// Issue #1240: 設定保存の複数キー更新をトランザクションで保護。
 /// </summary>

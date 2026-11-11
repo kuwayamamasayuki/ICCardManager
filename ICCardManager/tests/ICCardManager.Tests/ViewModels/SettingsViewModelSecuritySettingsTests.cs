@@ -82,7 +82,7 @@ public sealed class SettingsViewModelSecuritySettingsTests : IDisposable
             .Setup(r => r.GetAppSettingsAsync())
             .ReturnsAsync(new AppSettings { WarningBalance = 10000, BackupPath = OldBackupPath });
         _bulkSettingsRepositoryMock
-            .Setup(r => r.SaveAppSettingsAsync(It.IsAny<AppSettings>()))
+            .Setup(r => r.SaveAppSettingsAsync(It.IsAny<AppSettings>(), It.IsAny<IReadOnlyCollection<string>>()))
             .ReturnsAsync(false);
 
         _validation.Setup(v => v.ValidateWarningBalance(It.IsAny<int>())).Returns(ValidationResult.Success());
@@ -180,7 +180,7 @@ public sealed class SettingsViewModelSecuritySettingsTests : IDisposable
 
         (await _realSettingsRepository.GetAsync(SettingsRepository.KeyBackupPath)).Should().Be(OldBackupPath);
         (await GetSettingLogsAsync()).Should().BeEmpty();
-        _bulkSettingsRepositoryMock.Verify(r => r.SaveAppSettingsAsync(It.IsAny<AppSettings>()), Times.Never,
+        _bulkSettingsRepositoryMock.Verify(r => r.SaveAppSettingsAsync(It.IsAny<AppSettings>(), It.IsAny<IReadOnlyCollection<string>>()), Times.Never,
             "認証が完了しなければ他の設定も保存しない");
         _viewModel.StatusMessage.Should().Be(SettingsViewModel.SaveAuthenticationCancelledMessage);
         _viewModel.IsStatusError.Should().BeTrue();
@@ -221,7 +221,7 @@ public sealed class SettingsViewModelSecuritySettingsTests : IDisposable
 
         _staffAuthServiceMock.Verify(a => a.RequestAuthenticationAsync(It.IsAny<string>()), Times.Never);
         _bulkSettingsRepositoryMock.Verify(
-            r => r.SaveAppSettingsAsync(It.Is<AppSettings>(s => s.WarningBalance == 3000)), Times.Once);
+            r => r.SaveAppSettingsAsync(It.Is<AppSettings>(s => s.WarningBalance == 3000), It.IsAny<IReadOnlyCollection<string>>()), Times.Once);
         (await GetSettingLogsAsync()).Should().BeEmpty();
         (await _realSettingsRepository.GetAsync(SettingsRepository.KeyBackupPath)).Should().Be(OldBackupPath);
     }
@@ -392,7 +392,7 @@ public sealed class SettingsViewModelSecuritySettingsTests : IDisposable
         await _viewModel.SaveAsync();
 
         File.ReadAllText(ConfigPath).Should().Be(@"C:\old\iccard.db");
-        _bulkSettingsRepositoryMock.Verify(r => r.SaveAppSettingsAsync(It.IsAny<AppSettings>()), Times.Never);
+        _bulkSettingsRepositoryMock.Verify(r => r.SaveAppSettingsAsync(It.IsAny<AppSettings>(), It.IsAny<IReadOnlyCollection<string>>()), Times.Never);
         _staffAuthServiceMock.Verify(a => a.RequestAuthenticationAsync(It.IsAny<string>()), Times.Never);
         _viewModel.StatusMessage.Should().Be(SettingsViewModel.SecuritySettingsDatabaseUnavailableMessage);
     }
@@ -410,7 +410,7 @@ public sealed class SettingsViewModelSecuritySettingsTests : IDisposable
 
         await _viewModel.SaveAsync();
 
-        _bulkSettingsRepositoryMock.Verify(r => r.SaveAppSettingsAsync(It.IsAny<AppSettings>()), Times.Never,
+        _bulkSettingsRepositoryMock.Verify(r => r.SaveAppSettingsAsync(It.IsAny<AppSettings>(), It.IsAny<IReadOnlyCollection<string>>()), Times.Never,
             "検証は保存の前に行う（以前は他の設定を保存した後で検証していた）");
         _viewModel.FirstErrorField.Should().Be(nameof(SettingsViewModel.DatabasePath));
         _staffAuthServiceMock.Verify(a => a.RequestAuthenticationAsync(It.IsAny<string>()), Times.Never);
@@ -430,7 +430,7 @@ public sealed class SettingsViewModelSecuritySettingsTests : IDisposable
         _staffAuthServiceMock.Verify(a => a.RequestAuthenticationAsync(It.IsAny<string>()), Times.Never,
             "確認は認証の前（中止するなら認証させない）");
         (await _realSettingsRepository.GetAsync(SettingsRepository.KeyBackupPath)).Should().Be(OldBackupPath);
-        _bulkSettingsRepositoryMock.Verify(r => r.SaveAppSettingsAsync(It.IsAny<AppSettings>()), Times.Never);
+        _bulkSettingsRepositoryMock.Verify(r => r.SaveAppSettingsAsync(It.IsAny<AppSettings>(), It.IsAny<IReadOnlyCollection<string>>()), Times.Never);
         File.Exists(ConfigPath).Should().BeFalse();
     }
 
@@ -452,7 +452,7 @@ public sealed class SettingsViewModelSecuritySettingsTests : IDisposable
         _viewModel.IsStatusError.Should().BeTrue();
         (await _realSettingsRepository.GetAsync(SettingsRepository.KeyBackupPath))
             .Should().Be(PathValidator.NormalizePath(_newBackupFolder));
-        _bulkSettingsRepositoryMock.Verify(r => r.SaveAppSettingsAsync(It.IsAny<AppSettings>()), Times.Never);
+        _bulkSettingsRepositoryMock.Verify(r => r.SaveAppSettingsAsync(It.IsAny<AppSettings>(), It.IsAny<IReadOnlyCollection<string>>()), Times.Never);
     }
 
     [Fact]
@@ -514,7 +514,7 @@ public sealed class SettingsViewModelSecuritySettingsTests : IDisposable
         await _viewModel.SaveAsync();
 
         _viewModel.FirstErrorField.Should().Be(nameof(SettingsViewModel.BackupPath));
-        _bulkSettingsRepositoryMock.Verify(r => r.SaveAppSettingsAsync(It.IsAny<AppSettings>()), Times.Never);
+        _bulkSettingsRepositoryMock.Verify(r => r.SaveAppSettingsAsync(It.IsAny<AppSettings>(), It.IsAny<IReadOnlyCollection<string>>()), Times.Never);
         (await _realSettingsRepository.GetAsync(SettingsRepository.KeyBackupPath)).Should().Be(OldBackupPath);
     }
 
@@ -565,7 +565,7 @@ public sealed class SettingsViewModelSecuritySettingsTests : IDisposable
             "既定とはみなさず、変更ありとして進める");
         viewModel.IsStatusError.Should().BeTrue();
         viewModel.IsSaved.Should().BeFalse("ファイルを書き換えられていないのに保存済みとして閉じない");
-        _bulkSettingsRepositoryMock.Verify(r => r.SaveAppSettingsAsync(It.IsAny<AppSettings>()), Times.Never);
+        _bulkSettingsRepositoryMock.Verify(r => r.SaveAppSettingsAsync(It.IsAny<AppSettings>(), It.IsAny<IReadOnlyCollection<string>>()), Times.Never);
     }
 
     /// <summary>
@@ -599,7 +599,7 @@ public sealed class SettingsViewModelSecuritySettingsTests : IDisposable
 
         _staffAuthServiceMock.Verify(a => a.RequestAuthenticationAsync(It.IsAny<string>()), Times.Never);
         (await GetSettingLogsAsync()).Should().BeEmpty();
-        _bulkSettingsRepositoryMock.Verify(r => r.SaveAppSettingsAsync(It.IsAny<AppSettings>()), Times.Once);
+        _bulkSettingsRepositoryMock.Verify(r => r.SaveAppSettingsAsync(It.IsAny<AppSettings>(), It.IsAny<IReadOnlyCollection<string>>()), Times.Once);
     }
 
     [Fact]
