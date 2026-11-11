@@ -89,8 +89,12 @@ public class ManualCardRegistrationModeScreenshotConventionTests
         var month = CarryoverMonth(source);
         ExtractExampleValue(section, "繰越月").Should().Be($"{month}月", "本文の繰越月の例は、図で選ぶ月と同じであること");
         section.Should().Contain($"「{month}月から繰越」", "できたことの確認で示す繰越の行は、図で選ぶ繰越月の行であること");
-        section.Should().Contain($"{month % 12 + 1} 月 1 日から", "例の説明（何月からピッすいで管理するか）は、図で選ぶ繰越月の翌月であること");
-        section.Should().Contain($"例では「{month % 12 + 1}月1日」", "繰越レコードの日付の例は、図に写る日付（繰越月の翌月 1 日）であること");
+        // 本文の数字と単位の間の空白（「6 月 1 日」「6月1日」）は表記の揺れなので問わない
+        var nextMonth = month % 12 + 1;
+        section.Should().MatchRegex(@"(?<!\d)" + nextMonth + @"\s*月\s*1\s*日\s*から",
+            "例の説明（何月からピッすいで管理するか）は、図で選ぶ繰越月の翌月であること");
+        section.Should().MatchRegex(@"例では「\s*" + nextMonth + @"\s*月\s*1\s*日\s*」",
+            "繰越レコードの日付の例は、図に写る日付（繰越月の翌月 1 日）であること");
     }
 
     [Fact]
