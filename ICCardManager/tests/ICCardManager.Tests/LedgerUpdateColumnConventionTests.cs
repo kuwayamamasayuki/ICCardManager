@@ -45,9 +45,7 @@ public class LedgerUpdateColumnConventionTests
     private static readonly IReadOnlyDictionary<string, (int Calls, string Reason)> AllowedFullUpdateCallers =
         new Dictionary<string, (int, string)>(StringComparer.Ordinal)
         {
-            ["ViewModels/LedgerRowEditViewModel.cs"] = (1,
-                "履歴の行編集。利用者が日付・摘要・金額・氏名・備考・同行者数を編集する。" +
-                "編集しない列（返却者・貸出/返却日時・貸出中フラグ）は返却後に変わらない"),
+            // Issue #2375: 履歴の行編集は、変えた列だけを書く UpdateEditedColumnsAsync へ移した（全列の更新を使わない）
             ["Services/Import/CsvImportService.Ledger.cs"] = (1,
                 "履歴 CSV の取込。CSV の行が日付・摘要・金額・氏名・備考（と新形式の同行者数）を持つ。" +
                 "CSV に無い列（貸出者・返却者・貸出/返却日時・貸出中フラグ、旧形式の同行者数）は既存の行から引き継ぐが、" +
@@ -82,6 +80,39 @@ public class LedgerUpdateColumnConventionTests
             expectedColumns,
             "この経路が書き戻してよい列はこれだけ。余分な列を足すと、読み取りから書き込みまでの間に" +
             "他の PC が直した値を巻き戻す（Issue #2212 / #1726）");
+    }
+
+    /// <summary>
+    /// Issue #2375: 行編集の「変えた列だけを書く」更新が SET し得る列は、行編集で編集できる列だけであること。
+    /// </summary>
+    /// <remarks>
+    /// SQL は列ごとの句の表（<c>RowEditAssignments</c>）から組み立てるので、表の句の左辺を数える。
+    /// どの列を実際に書くかの挙動は <c>LedgerRepositoryUpdateEditedColumnsTests</c>（実 SQLite）が固定する。
+    /// </remarks>
+    [Fact]
+    public void 行編集の更新がSETし得る列は行編集で編集できる列だけであること()
+    {
+        var repository = ProductionSourceFiles.CSharp.Single(
+            f => f.RelativePath.Replace('\\', '/') == RepositoryRelativePath);
+        var table = Regex.Match(
+            repository.Text,
+            @"RowEditAssignments\s*=\s*\{(?<body>.*?)\};",
+            RegexOptions.Singleline);
+        table.Success.Should().BeTrue("検査が列の表を掴んでいること（空振りで緑にならない）");
+
+        var columns = Regex.Matches(table.Groups["body"].Value, @"(?<column>\w+)\s*=\s*@")
+            .Cast<Match>()
+            .Select(m => m.Groups["column"].Value)
+            .ToList();
+
+        columns.Should().BeEquivalentTo(
+            new[] { "date", "summary", "income", "expense", "balance", "lender_idm", "staff_name", "note", "companion_count" },
+            "返却者・貸出/返却日時・貸出中フラグは行編集で編集しないので、この経路から書けてはいけない（#1726）");
+
+        var body = ExtractRepositoryMethodBody(
+            "Task<bool> UpdateEditedColumnsAsync(Ledger ledger, LedgerRowEditColumns columns, SQLiteTransaction transaction)");
+        body.Should().Contain("RowEditAssignments", "SQL を表から組み立てていること");
+        ExtractLedgerUpdateColumns(body).Should().BeEmpty("表の外で SET する列を足していないこと");
     }
 
     [Fact]
