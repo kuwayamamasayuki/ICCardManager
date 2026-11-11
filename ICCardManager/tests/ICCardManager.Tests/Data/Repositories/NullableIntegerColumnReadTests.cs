@@ -437,7 +437,7 @@ public class NullableIntegerColumnReadTests : IDisposable
     [InlineData("月末残高", false)]
     [InlineData("指定日より前の残高", false)]
     [InlineData("明細を持たない行の最新日", false)]
-    [InlineData("明細を持たない行の日付", false)]
+    [InlineData("明細を持たない行の日と種類", false)]
     [InlineData("月末残高", true)]
     [InlineData("指定日より前の残高", true)]
     public async Task 貸出中の記録のフラグがNULLの行は集計で通常の行として扱われること(string query, bool seedScenario)
@@ -548,8 +548,8 @@ public class NullableIntegerColumnReadTests : IDisposable
                 return Dump(await _ledgerRepository.GetBalancesBeforeAsync(new DateTime(2026, 5, 1)));
             case "明細を持たない行の最新日":
                 return Dump(await _ledgerRepository.GetLatestLedgerDateWithoutDetailsAsync(CardIdm));
-            case "明細を持たない行の日付":
-                return Dump(await _ledgerRepository.GetLedgerDatesWithoutDetailsAsync(CardIdm, from, to));
+            case "明細を持たない行の日と種類":
+                return Dump(await _ledgerRepository.GetDaysRecordedWithoutDetailsAsync(CardIdm, from, to));
             default:
                 throw new ArgumentOutOfRangeException(nameof(query), query, "未知の集計");
         }

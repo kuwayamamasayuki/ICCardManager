@@ -196,18 +196,18 @@ namespace ICCardManager.Data.Repositories
         Task<DateTime?> GetLatestLedgerDateWithoutDetailsAsync(string cardIdm);
 
         /// <summary>
-        /// 指定カードで、利用明細（ledger_detail）を持たない台帳行の日付のうち、指定した範囲（両端を含む・日付単位）に
-        /// あるものを重複なく昇順で取得（Issue #2372）
+        /// 指定カードで、利用明細（ledger_detail）を持たない台帳行がある日のうち、指定した範囲（両端を含む・日付単位）にあるものを、
+        /// その日の行が記録している履歴の種類（受入・払出）とともに日付の昇順で取得（Issue #2372）
         /// </summary>
         /// <remarks>
         /// 対象の行は <see cref="GetLatestLedgerDateWithoutDetailsAsync"/> と同じ（導入行と貸出中レコードを除く。
-        /// 手で追加した行・明細なしで CSV から取り込んだ行。摘要の種類（利用・チャージ・ポイント還元）は問わない）。
-        /// 返却時に、貸出日の翌日から返却日までのこれらの日の利用を「記録済み」とみなして記録から除くために使う
+        /// 手で追加した行・明細なしで CSV から取り込んだ行。チャージ・ポイント還元の行も含む）。
+        /// 返却時に、貸出日の翌日から返却日までのこれらの日の、同じ種類の履歴を「記録済み」とみなして記録から除くために使う
         /// （<see cref="Services.LendingService.ExcludeUsageOnDaysRecordedWithoutDetails"/>）。
-        /// 返却時の下限は貸出日を超えないため、貸出中に手で追加した行と同じ日の利用は下限では除けない。
+        /// 返却時の下限は貸出日を超えないため、貸出中に手で追加した行と同じ日の履歴は下限では除けない。
         /// 該当する行が無い・<paramref name="fromDate"/> が <paramref name="toDate"/> より後なら空。
         /// </remarks>
-        Task<IEnumerable<DateTime>> GetLedgerDatesWithoutDetailsAsync(string cardIdm, DateTime fromDate, DateTime toDate);
+        Task<IEnumerable<DayRecordedWithoutDetails>> GetDaysRecordedWithoutDetailsAsync(string cardIdm, DateTime fromDate, DateTime toDate);
 
         /// <summary>
         /// 指定カードの既存の履歴詳細キーを取得（重複チェック用）
