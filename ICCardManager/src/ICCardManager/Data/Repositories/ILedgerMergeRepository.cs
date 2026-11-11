@@ -84,9 +84,18 @@ namespace ICCardManager.Data.Repositories
         Task<IReadOnlyDictionary<int, int>?> UnmergeLedgersAsync(Services.LedgerMergeUndoData undoData, SQLiteTransaction? transaction);
 
         /// <summary>
-        /// 統合履歴をDBに保存
+        /// 統合履歴をDBに保存する（Issue #2373 で tx 引数を持つ形へ一本化）。
+        /// 統合（<see cref="MergeLedgersAsync(int, IEnumerable{int}, Ledger, SQLiteTransaction)"/>）と同一トランザクションで
+        /// 確定させ、統合履歴が書けなければ統合ごと巻き戻すために使う。commit / rollback は呼び出し元の責務。
         /// </summary>
-        Task SaveMergeHistoryAsync(int targetLedgerId, string description, string undoDataJson);
+        /// <param name="targetLedgerId">統合先の台帳 ID</param>
+        /// <param name="description">一覧に表示する説明</param>
+        /// <param name="undoDataJson">取り消し用の Undo データ（JSON）</param>
+        /// <param name="transaction">
+        /// 参加するトランザクション。<b>統合（<c>LedgerMergeService.MergeAsync</c>）からは必ず統合本体と同じ tx を渡す</b>。
+        /// null なら接続を借りて単文で確定する（テストのデータ準備用）
+        /// </param>
+        Task SaveMergeHistoryAsync(int targetLedgerId, string description, string undoDataJson, SQLiteTransaction? transaction);
 
         /// <summary>
         /// 統合履歴一覧を取得

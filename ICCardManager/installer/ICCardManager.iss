@@ -128,24 +128,27 @@ Source: "..\publish\Resources\Sounds\*"; DestDir: "{app}\Resources\Sounds"; Flag
 ; テンプレートファイル
 Source: "..\publish\Resources\Templates\*"; DestDir: "{app}\Resources\Templates"; Flags: ignoreversion recursesubdirs createallsubdirs
 
-; ドキュメント（ユーザー向け・管理者向け）
+; ドキュメント（ユーザー向け・管理者向け）。管理者マニュアルが「別紙」として案内するかんたん導入ガイドも同梱する（Issue #2386）
 ; markdown形式
 Source: "..\docs\manual\はじめに.md"; DestDir: "{app}\Docs"; Flags: ignoreversion
 Source: "..\docs\manual\ユーザーマニュアル.md"; DestDir: "{app}\Docs"; Flags: ignoreversion
 Source: "..\docs\manual\ユーザーマニュアル概要版.md"; DestDir: "{app}\Docs"; Flags: ignoreversion
 Source: "..\docs\manual\管理者マニュアル.md"; DestDir: "{app}\Docs"; Flags: ignoreversion
+Source: "..\docs\manual\かんたん導入ガイド.md"; DestDir: "{app}\Docs"; Flags: ignoreversion
 Source: "..\docs\manual\IT担当者ガイド.md"; DestDir: "{app}\Docs"; Flags: ignoreversion
 ; docx形式
 Source: "..\docs\manual\はじめに.docx"; DestDir: "{app}\Docs"; Flags: ignoreversion
 Source: "..\docs\manual\ユーザーマニュアル.docx"; DestDir: "{app}\Docs"; Flags: ignoreversion
 Source: "..\docs\manual\ユーザーマニュアル概要版.docx"; DestDir: "{app}\Docs"; Flags: ignoreversion
 Source: "..\docs\manual\管理者マニュアル.docx"; DestDir: "{app}\Docs"; Flags: ignoreversion
+Source: "..\docs\manual\かんたん導入ガイド.docx"; DestDir: "{app}\Docs"; Flags: ignoreversion
 Source: "..\docs\manual\IT担当者ガイド.docx"; DestDir: "{app}\Docs"; Flags: ignoreversion
 ; PDF形式（Issue #642）
 Source: "..\docs\manual\はじめに.pdf"; DestDir: "{app}\Docs"; Flags: ignoreversion skipifsourcedoesntexist
 Source: "..\docs\manual\ユーザーマニュアル.pdf"; DestDir: "{app}\Docs"; Flags: ignoreversion skipifsourcedoesntexist
 Source: "..\docs\manual\ユーザーマニュアル概要版.pdf"; DestDir: "{app}\Docs"; Flags: ignoreversion skipifsourcedoesntexist
 Source: "..\docs\manual\管理者マニュアル.pdf"; DestDir: "{app}\Docs"; Flags: ignoreversion skipifsourcedoesntexist
+Source: "..\docs\manual\かんたん導入ガイド.pdf"; DestDir: "{app}\Docs"; Flags: ignoreversion skipifsourcedoesntexist
 Source: "..\docs\manual\IT担当者ガイド.pdf"; DestDir: "{app}\Docs"; Flags: ignoreversion skipifsourcedoesntexist
 
 ; デバッグツール（Issue #447対応）
