@@ -705,12 +705,14 @@ public partial class MainViewModel : ViewModelBase, IHistoryPanelHost
     /// </remarks>
     internal void ApplyStaffCardReplacement(StaffCardReplacedMessage message)
     {
-        if (string.Equals(_lastProcessedStaffIdm, message.OldIdm, StringComparison.OrdinalIgnoreCase))
+        // IDm は大文字にそろえてから完全一致で比べる（StaffRepository の差し替えの判定と同じ規則）
+        var oldIdm = message.OldIdm.ToUpperInvariant();
+        if (string.Equals(_lastProcessedStaffIdm?.ToUpperInvariant(), oldIdm, StringComparison.Ordinal))
         {
             _lastProcessedStaffIdm = message.NewIdm;
         }
 
-        if (string.Equals(_currentStaffIdm, message.OldIdm, StringComparison.OrdinalIgnoreCase))
+        if (string.Equals(_currentStaffIdm?.ToUpperInvariant(), oldIdm, StringComparison.Ordinal))
         {
             _currentStaffIdm = message.NewIdm;
         }

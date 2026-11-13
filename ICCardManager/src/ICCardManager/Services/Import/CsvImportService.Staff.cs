@@ -396,7 +396,7 @@ namespace ICCardManager.Services
 
             return activeStaff.FirstOrDefault(s =>
                 string.Equals(NormalizeOptionalText(s.Number)?.Trim(), normalizedNumber, StringComparison.Ordinal)
-                && !string.Equals(s.StaffIdm, staffIdm, StringComparison.OrdinalIgnoreCase));
+                && !string.Equals(s.StaffIdm.ToUpperInvariant(), staffIdm.ToUpperInvariant(), StringComparison.Ordinal));
         }
 
         /// <summary>

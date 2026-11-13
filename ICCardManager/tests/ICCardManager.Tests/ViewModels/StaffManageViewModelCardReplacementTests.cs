@@ -509,6 +509,7 @@ public class StaffManageViewModelCardReplacementTests : IDisposable
         _viewModel.IsEditing.Should().BeTrue("入力内容は消さない");
         _staffRepositoryMock.Verify(r => r.GetAllAsync(), Times.AtLeastOnce(), "案内のとおり一覧を再読込する");
         _operationLogs.Should().BeEmpty();
+        VerifySuppressionReleased();
     }
 
     [Fact]

@@ -1532,7 +1532,7 @@ namespace ICCardManager.ViewModels
 
                     await LoadStaffAsync();
                     CancelEdit();
-                    SelectAndHighlight(newIdm);
+                    SelectAndHighlight(result.After?.StaffIdm ?? newIdm);
                     // CancelEdit() は StatusMessage / IsStatusError をクリアするため、完了メッセージは後に設定する（#1759）
                     StatusMessage = BuildReplacementCompletedMessage(targetLabel);
                     IsStatusError = false;
