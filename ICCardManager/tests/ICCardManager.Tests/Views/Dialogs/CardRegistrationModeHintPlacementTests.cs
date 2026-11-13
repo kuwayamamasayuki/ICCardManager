@@ -97,22 +97,22 @@ public class CardRegistrationModeHintPlacementTests
 
         CollapseWhitespace(TestSourceInspection.ExtractMethodBody(constructor, "LocationChanged +=")).Should().Be(
             "{ if (IsLoaded) { FitMaxHeightToMonitorWorkArea(); } }",
-            "別のモニターへ動かしたときは上限だけを合わせ直す（位置まで寄せるとドラッグと競合する）");
+            "別のモニターへ動かしたときは上限だけを合わせ直す（位置まで寄せるとドラッグと競合する）。" + ExactMatchNote);
         CollapseWhitespace(TestSourceInspection.ExtractMethodBody(code, "private void ApplyWorkAreaFit(")).Should().Be(
             "{ switch (WindowLayoutCalculator.DecideFitOnSizeChanged(IsLoaded, _isMovingOrSizing, WindowState == WindowState.Normal)) " +
             "{ case WorkAreaFit.MaxHeightAndPosition: FitToMonitorWorkArea(); break; " +
             "case WorkAreaFit.MaxHeightOnly: FitMaxHeightToMonitorWorkArea(); break; } }",
             "判断（DecideFitOnSizeChanged。単体テストで固定）の結果だけで、上限と位置か上限だけかを決める — 操作中に位置まで寄せると" +
-            "ドラッグ中のウィンドウが跳ね、最大化中に寄せると元に戻したときに画面の端へ動く");
+            "ドラッグ中のウィンドウが跳ね、最大化中に寄せると元に戻したときに画面の端へ動く。" + ExactMatchNote);
         CollapseWhitespace(TestSourceInspection.ExtractMethodBody(code, "private IntPtr TrackMoveOrSize(")).Should().Be(
             "{ if (msg == WmEnterSizeMove) { _isMovingOrSizing = true; } " +
             "else if (msg == WmExitSizeMove) { _isMovingOrSizing = false; ApplyWorkAreaFit(); } return IntPtr.Zero; }",
-            "操作の始まりで操作中にし、終わりで解いて 1 回だけ合わせる（最大化中は位置を寄せない判断を通す）");
+            "操作の始まりで操作中にし、終わりで解いて 1 回だけ合わせる（最大化中は位置を寄せない判断を通す）。" + ExactMatchNote);
         code.Should().Contain("private const int WmEnterSizeMove = 0x0231;").And.Contain("private const int WmExitSizeMove = 0x0232;",
             "WM_ENTERSIZEMOVE / WM_EXITSIZEMOVE の値");
         CollapseWhitespace(TestSourceInspection.ExtractMethodBody(code, "private void FitMaxHeightToMonitorWorkArea(")).Should().Be(
             "{ if (MonitorWorkArea.Of(this) is Rect workArea) { MaxHeight = WindowLayoutCalculator.FitMaxHeight(MaxHeight, workArea.Height); } }",
-            "上限だけを合わせる処理は位置を動かさない");
+            "上限だけを合わせる処理は位置を動かさない。" + ExactMatchNote);
 
         // 位置を寄せる処理を呼ぶのは、宣言・表示時（Loaded）・判断が「上限と位置」のときの 3 か所だけ
         CountOccurrences(code, "FitToMonitorWorkArea(").Should().Be(3,
@@ -125,6 +125,10 @@ public class CardRegistrationModeHintPlacementTests
         fit.Should().Contain("Left = WindowLayoutCalculator.ClampStart(Left, ActualWidth, workArea.Left, workArea.Width)",
             "横方向も CarryoverDataLossDialog と同じく作業領域の中へ寄せる");
     }
+
+    /// <summary>完全一致の照合が赤になったときの案内（レビュー 5 回目）</summary>
+    private const string ExactMatchNote =
+        "判断そのものは DecideFitOnSizeChanged の単体テストが固定している。動きを変えない書き換えなら期待値を更新する";
 
     private static int CountOccurrences(string text, string value)
     {

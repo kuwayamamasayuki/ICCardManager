@@ -107,7 +107,9 @@ namespace ICCardManager.UITests.Tests
 
             var window = mode.Window.Patterns.Window.Pattern;
             window.CanMaximize.Value.Should().BeTrue("前提: ダイアログは最大化できる（ResizeMode=CanResize）");
-            var before = mode.Window.BoundingRectangle;
+            // 開いた直後は Loaded・SizeChanged で位置を寄せている途中のことがあるので、待ってから 2 回続けて同じ値になるまで読み直す
+            Thread.Sleep(SettleDelay);
+            var before = ReadStableBounds(mode.Window);
 
             window.SetWindowVisualState(WindowVisualState.Maximized);
             Retry.WhileFalse(() => window.WindowVisualState.Value == WindowVisualState.Maximized, Wait).Success
@@ -123,6 +125,24 @@ namespace ICCardManager.UITests.Tests
                 $"最大化して元に戻したら、元の位置に戻ること（最大化中に位置を作業領域へ寄せると端へ動く。前 {before}、後 {after}）");
 
             CancelAndAssertNothingRegistered(fixture, manage, mode, cardCountBefore);
+        }
+
+        /// <summary>ウィンドウの矩形を、2 回続けて同じ値になるまで読み直す（落ち着く前の位置を基準にしない）。</summary>
+        private static System.Drawing.Rectangle ReadStableBounds(FlaUI.Core.AutomationElements.Window window)
+        {
+            var previous = window.BoundingRectangle;
+            var stable = Retry.WhileFalse(
+                () =>
+                {
+                    Thread.Sleep(200);
+                    var current = window.BoundingRectangle;
+                    var same = current == previous;
+                    previous = current;
+                    return same;
+                },
+                Wait).Success;
+            stable.Should().BeTrue($"前提: ダイアログの位置が落ち着くこと（最後の矩形 {previous}）");
+            return previous;
         }
 
         /// <summary>レイアウトが落ち着くまでの待ち時間（最大化・元に戻すのアニメーションと SizeChanged の処理）</summary>
