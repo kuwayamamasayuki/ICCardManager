@@ -65,6 +65,7 @@
                       GridLinesVisibility="Horizontal"
                       HeadersVisibility="Column"
                       RowHeaderWidth="0"
+                      IsEnabled="{Binding IsStaffCardReplacementIdle}"
                       AutomationProperties.Name="職員一覧"
                       AutomationProperties.HelpText="登録されている職員の一覧です。選択して編集や削除ができます。">
                 <DataGrid.Columns>
@@ -88,7 +89,9 @@
                         Margin="10,0,0,5"
                         VerticalAlignment="Top"/>
                 <!-- 左側のボタン群（折り返し可能） -->
-                <WrapPanel Orientation="Horizontal">
+                <!-- Issue #2461: 職員証の差し替えのタッチ待ちの間は、一覧の操作を止める -->
+                <WrapPanel Orientation="Horizontal"
+                           IsEnabled="{Binding IsStaffCardReplacementIdle}">
                     <Button Content="新規登録"
                             Command="{Binding StartNewStaffCommand}"
                             Padding="15,8"
@@ -180,10 +183,65 @@
                         </StackPanel>
                     </Border>
 
+                    <!-- 職員証の差し替え（登録済みの職員の編集時のみ。Issue #2461）。
+                         職員証を再発行したとき、同じ職員のまま職員証だけを新しいものにする。
+                         認証 → 新しい職員証のタッチ（ここで待つ）→ 確認 → 保存。 -->
+                    <Border x:Name="ReplaceStaffCardSection"
+                            Margin="0,0,0,15">
+                        <Border.Style>
+                            <Style TargetType="Border">
+                                <Setter Property="Visibility" Value="Visible"/>
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding IsNewStaff}" Value="True">
+                                        <Setter Property="Visibility" Value="Collapsed"/>
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </Border.Style>
+                        <StackPanel>
+                            <Button x:Name="ReplaceStaffCardButton"
+                                    Content="職員証を差し替え"
+                                    Command="{Binding ReplaceStaffCardCommand}"
+                                    HorizontalAlignment="Left"
+                                    Padding="15,8"
+                                    Visibility="{Binding IsStaffCardReplacementIdle, Converter={StaticResource BoolToVisibilityConverter}}"
+                                    AutomationProperties.Name="職員証を差し替え"
+                                    AutomationProperties.HelpText="職員証を再発行したときに、この職員の職員証を新しい職員証に差し替えます。これまでの利用履歴は引き継ぎます。"
+                                    ToolTip="職員証を再発行したときに、この職員の職員証を新しい職員証に差し替えます"/>
+                            <Border x:Name="ReplaceStaffCardWaitingPanel"
+                                    Background="{DynamicResource ReturnBackgroundBrush}"
+                                    CornerRadius="4"
+                                    Padding="10"
+                                    Visibility="{Binding IsWaitingForReplacementCard, Converter={StaticResource BoolToVisibilityConverter}}">
+                                <StackPanel>
+                                    <TextBlock Text="新しい職員証をタッチしてください"
+                                               FontWeight="Bold"
+                                               TextWrapping="Wrap"
+                                               Foreground="{DynamicResource InfoTextBrush}"
+                                               AutomationProperties.LiveSetting="Polite"/>
+                                    <TextBlock x:Name="ReplaceStaffCardRemainingText"
+                                               Text="{Binding ReplacementCardRemainingSeconds, StringFormat='残り {0} 秒'}"
+                                               TextWrapping="Wrap"
+                                               Margin="0,5,0,0"
+                                               Foreground="{DynamicResource SecondaryTextBrush}"/>
+                                    <Button x:Name="CancelReplaceStaffCardButton"
+                                            Content="差し替えをやめる"
+                                            Command="{Binding CancelReplaceStaffCardCommand}"
+                                            HorizontalAlignment="Left"
+                                            Padding="15,8"
+                                            Margin="0,10,0,0"
+                                            AutomationProperties.Name="差し替えをやめる"
+                                            AutomationProperties.HelpText="職員証の差し替えをやめます。職員証は変わりません。"/>
+                                </StackPanel>
+                            </Border>
+                        </StackPanel>
+                    </Border>
+
                     <!-- 氏名 -->
                     <TextBlock Text="氏名 *" FontWeight="Bold" Margin="0,0,0,5"/>
                     <TextBox x:Name="NameTextBox"
                              Text="{Binding EditName, UpdateSourceTrigger=PropertyChanged}"
+                             IsEnabled="{Binding IsStaffCardReplacementIdle}"
                              Padding="8"
                              Margin="0,0,0,15"
                              AutomationProperties.Name="氏名（必須）"
@@ -194,6 +252,7 @@
                     <!-- 職員番号 -->
                     <TextBlock Text="職員番号" FontWeight="Bold" Margin="0,0,0,5"/>
                     <TextBox Text="{Binding EditNumber, UpdateSourceTrigger=PropertyChanged}"
+                             IsEnabled="{Binding IsStaffCardReplacementIdle}"
                              Padding="8"
                              Margin="0,0,0,15"
                              AutomationProperties.Name="職員番号"
@@ -203,6 +262,7 @@
                     <!-- 備考 -->
                     <TextBlock Text="備考" FontWeight="Bold" Margin="0,0,0,5"/>
                     <TextBox Text="{Binding EditNote, UpdateSourceTrigger=PropertyChanged}"
+                             IsEnabled="{Binding IsStaffCardReplacementIdle}"
                              Padding="8"
                              TextWrapping="Wrap"
                              AcceptsReturn="True"
@@ -292,6 +352,7 @@
                             Content="保存"
                             Command="{Binding SaveCommand}"
                             IsDefault="{Binding IsEditing}"
+                            IsEnabled="{Binding IsStaffCardReplacementIdle}"
                             Padding="15,8"/>
                 </StackPanel>
             </Grid>

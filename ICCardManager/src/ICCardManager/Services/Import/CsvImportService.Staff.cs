@@ -56,6 +56,8 @@ namespace ICCardManager.Services
             // バリデーションパス: まず全データをバリデーション
             // IsRestore: 削除済み職員を復元して更新する場合true
             var validRecords = new List<(int LineNumber, Staff Staff, bool IsUpdate, bool IsRestore)>();
+            // Issue #2461: 職員証を差し替えた職員の古い行を、新しい職員として登録しないための照合先
+            var activeStaff = await LoadActiveStaffForReplacedCardCheckAsync().ConfigureAwait(false);
 
             for (var i = 1; i < lines.Count; i++)
             {
@@ -140,6 +142,14 @@ namespace ICCardManager.Services
                         }
                         validRecords.Add((lineNumber, importedStaff, true, false)); // isRestore = false
                     }
+                }
+                else if (FindActiveStaffWithSameNumber(activeStaff, staffIdm, number) != null)
+                {
+                    // Issue #2461: IDm は未登録だが、同じ職員番号の職員が別の職員証で登録されている。
+                    // 職員証を差し替える前に出力した CSV の行（古い職員証）の可能性があり、登録すると
+                    // 同じ職員がもう 1 人でき、紛失した古い職員証がまた使えるようになるため取り込まない（プレビューと同じ判定）
+                    skippedCount++;
+                    continue;
                 }
                 else
                 {
@@ -351,11 +361,62 @@ namespace ICCardManager.Services
                && NormalizeOptionalText(before.Note) == NormalizeOptionalText(after.Note);
 
         /// <summary>
+        /// 職員番号の照合に使う、登録済み（未削除）の職員の一覧を読む（Issue #2461）
+        /// </summary>
+        /// <remarks>
+        /// 職員一覧のキャッシュ（<c>GetAllAsync</c>）は経由しない。共有フォルダーモードで他の PC が職員証を差し替えた直後に、
+        /// 古い IDm の職員が載ったキャッシュで照合すると、古い行を「同じ職員」と見なせず新しい職員として登録してしまう。
+        /// </remarks>
+        private async Task<IReadOnlyList<Staff>> LoadActiveStaffForReplacedCardCheckAsync()
+        {
+            var all = await _staffRepository.GetAllIncludingDeletedAsync().ConfigureAwait(false);
+            return (all ?? Enumerable.Empty<Staff>()).Where(s => !s.IsDeleted).ToList();
+        }
+
+        /// <summary>
+        /// IDm が未登録の行について、同じ職員番号の職員が別の職員証で登録されていれば、その職員を返す（Issue #2461）
+        /// </summary>
+        /// <param name="activeStaff">登録済み（未削除）の職員</param>
+        /// <param name="staffIdm">行の職員証の IDm（大文字に正規化済み）</param>
+        /// <param name="number">行の職員番号（空なら照合しない）</param>
+        /// <remarks>
+        /// 職員証を差し替えると古い職員証の行は消える（主キーを付け替える）ため、差し替える前に出力した職員の CSV を
+        /// 取り込むと、古い職員証の行が「未登録の職員」として新しく登録され、同じ氏名・職員番号の職員がもう 1 人でき、
+        /// 紛失した古い職員証がまた使えるようになる。職員番号は一意の制約を持たないが、取り込みではこの形を新規登録しない。
+        /// 取り込みとプレビューで同じ判定を使う（#1763）。
+        /// </remarks>
+        internal static Staff? FindActiveStaffWithSameNumber(IEnumerable<Staff> activeStaff, string staffIdm, string? number)
+        {
+            // 前後の空白は比べない（CSV の列は取り込みで Trim される。保存済みの値にも空白が残り得る）
+            var normalizedNumber = NormalizeOptionalText(number)?.Trim();
+            if (normalizedNumber is null)
+            {
+                return null;
+            }
+
+            return activeStaff.FirstOrDefault(s =>
+                string.Equals(NormalizeOptionalText(s.Number)?.Trim(), normalizedNumber, StringComparison.Ordinal)
+                && !string.Equals(s.StaffIdm.ToUpperInvariant(), staffIdm.ToUpperInvariant(), StringComparison.Ordinal));
+        }
+
+        /// <summary>
+        /// 同じ職員番号の職員が別の職員証で登録されている行を、プレビューでスキップとして示す表示（Issue #2461）
+        /// </summary>
+        private static FieldChange CreateReplacedCardRowSkipDisplay(Staff sameNumberStaff)
+            => new()
+            {
+                FieldName = "状態",
+                NewValue = $"職員番号 {sameNumberStaff.Number} の職員「{sameNumberStaff.Name}」が別の職員証で登録済み" +
+                           "（取り込みません。職員証を差し替える前の行の可能性があります。" +
+                           "新しい職員として登録する場合は、職員番号を確かめて職員管理画面から登録してください）",
+                IsDisplayOnly = true
+            };
+
+        /// <summary>
         /// カードCSVのインポートプレビューを取得
         /// </summary>
         /// <param name="source">CSVの読み取り元（パス、または照合に使った内容。Issue #2284）</param>
         /// <param name="skipExisting">既存データをスキップするか（falseの場合は更新）</param>
-
         public virtual async Task<CsvImportPreviewResult> PreviewStaffAsync(CsvImportSource source, bool skipExisting = true)
         {
             var errors = new List<CsvImportError>();
@@ -387,6 +448,9 @@ namespace ICCardManager.Services
                     ErrorMessage = "CSVファイルにデータがありません（ヘッダー行のみ）"
                 };
             }
+
+            // Issue #2461: 取り込みと同じ照合先（職員証を差し替えた職員の古い行を新しい職員として示さない）
+            var activeStaff = await LoadActiveStaffForReplacedCardCheckAsync().ConfigureAwait(false);
 
             for (var i = 1; i < lines.Count; i++)
             {
@@ -473,6 +537,13 @@ namespace ICCardManager.Services
                             updateCount++;
                         }
                     }
+                }
+                else if (FindActiveStaffWithSameNumber(activeStaff, staffIdm, number) is { } sameNumberStaff)
+                {
+                    // Issue #2461: 取り込みでもスキップする（同じ判定）
+                    action = ImportAction.Skip;
+                    skipCount++;
+                    changes.Add(CreateReplacedCardRowSkipDisplay(sameNumberStaff));
                 }
                 else
                 {

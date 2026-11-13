@@ -93,7 +93,8 @@ public class StaffManageViewModelAuthenticationTests : IDisposable
             _dialogServiceMock.Object,
             _staffAuthServiceMock.Object,
             new WeakReferenceMessenger(),
-            new RecordingDispatcherService());
+            new RecordingDispatcherService(),
+            new TestTimerFactory());
     }
 
     public void Dispose()

@@ -76,7 +76,18 @@ namespace ICCardManager.Common.Messages
         /// メイン画面にも届き、職員証タッチ待ちの分岐で履歴の表示と残額の食い違い判定が走る（職員証タッチ済みなら
         /// 貸出・返却まで進む）。ダイアログの表示範囲（開いてから閉じるまで）で抑制する（#1807 の「表示範囲と一致」）。
         /// </remarks>
-        CardHistoryImport
+        CardHistoryImport,
+
+        /// <summary>
+        /// 職員証の差し替え（<c>StaffManageViewModel.ReplaceStaffCardAsync</c>）
+        /// </summary>
+        /// <remarks>
+        /// Issue #2461: 職員管理画面が新しい職員証のタッチを待つ間と、その後の確認ダイアログ・書き込みの間に、
+        /// 同じタッチがメイン画面にも届くと、未登録のカードとして種別選択ダイアログが開く（#1807 と同じ形）。
+        /// 差し替えの操作の範囲（認証の後から書き込みの後処理まで）で抑制する。登録モード（<see cref="StaffRegistration"/>）とは
+        /// 取得・解放の契機が違うので、ソースを分ける（同じソースを使うと、編集の取り消しで差し替え中の抑制が解ける）。
+        /// </remarks>
+        StaffCardReplacement
     }
 
     /// <summary>

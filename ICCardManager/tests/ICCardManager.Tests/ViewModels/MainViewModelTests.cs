@@ -1849,6 +1849,79 @@ public class MainViewModelTests : IDisposable
     #region カード読み取り抑制テスト
 
     /// <summary>
+    /// Issue #2461: 同じ PC で職員証を差し替えたら、30 秒ルールの前回操作者が古い IDm なら新しい IDm へ置き換わること。
+    /// 置き換えないと、差し替え直後の再タッチが存在しない職員で逆の操作を記録しようとして失敗する。
+    /// </summary>
+    [Fact]
+    public void StaffCardReplaced_前回操作者が古い職員証なら新しい職員証へ置き換わること()
+    {
+        var messenger = new WeakReferenceMessenger();
+        var viewModel = CreateViewModel(messenger: messenger);
+        var field = typeof(MainViewModel).GetField("_lastProcessedStaffIdm",
+            System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!;
+        field.SetValue(viewModel, "0123456789ABCDEF");
+
+        messenger.Send(new StaffCardReplacedMessage("0123456789ABCDEF", "FEDCBA9876543210"));
+
+        field.GetValue(viewModel).Should().Be("FEDCBA9876543210");
+    }
+
+    /// <summary>
+    /// Issue #2461: 職員証をタッチした後（交通系ICカードのタッチ待ち）に同じ PC で職員証を差し替えたら、
+    /// 確定済みの操作者も新しい職員証へ置き換わること（置き換えないと、続けて交通系ICカードをタッチしたときに存在しない職員で記録しようとする）。
+    /// 別の職員なら変えない。
+    /// </summary>
+    [Theory]
+    [InlineData("0123456789ABCDEF", "FEDCBA9876543210")]
+    [InlineData("1111222233334444", "1111222233334444")]
+    public void StaffCardReplaced_確定済みの操作者が古い職員証なら新しい職員証へ置き換わること(string current, string expected)
+    {
+        var messenger = new WeakReferenceMessenger();
+        var viewModel = CreateViewModel(messenger: messenger);
+        var field = typeof(MainViewModel).GetField("_currentStaffIdm",
+            System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!;
+        field.SetValue(viewModel, current);
+
+        messenger.Send(new StaffCardReplacedMessage("0123456789ABCDEF", "FEDCBA9876543210"));
+
+        field.GetValue(viewModel).Should().Be(expected);
+    }
+
+    /// <summary>
+    /// Issue #2461: 知らせの古い IDm が小文字でも、大文字にそろえて同じ職員証と見なすこと（StaffRepository の判定と同じ規則）。
+    /// </summary>
+    [Fact]
+    public void StaffCardReplaced_古い職員証のIDmが小文字でも置き換わること()
+    {
+        var messenger = new WeakReferenceMessenger();
+        var viewModel = CreateViewModel(messenger: messenger);
+        var field = typeof(MainViewModel).GetField("_lastProcessedStaffIdm",
+            System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!;
+        field.SetValue(viewModel, "0123456789ABCDEF");
+
+        messenger.Send(new StaffCardReplacedMessage("0123456789abcdef", "FEDCBA9876543210"));
+
+        field.GetValue(viewModel).Should().Be("FEDCBA9876543210");
+    }
+
+    /// <summary>
+    /// 上の対: 前回操作者が別の職員なら、職員証の差し替えで変えないこと。
+    /// </summary>
+    [Fact]
+    public void StaffCardReplaced_前回操作者が別の職員なら変えないこと()
+    {
+        var messenger = new WeakReferenceMessenger();
+        var viewModel = CreateViewModel(messenger: messenger);
+        var field = typeof(MainViewModel).GetField("_lastProcessedStaffIdm",
+            System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!;
+        field.SetValue(viewModel, "1111222233334444");
+
+        messenger.Send(new StaffCardReplacedMessage("0123456789ABCDEF", "FEDCBA9876543210"));
+
+        field.GetValue(viewModel).Should().Be("1111222233334444");
+    }
+
+    /// <summary>
     /// カード読み取り抑制状態を正しく管理できること
     /// </summary>
     [Fact]

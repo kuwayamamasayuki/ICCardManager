@@ -6,6 +6,7 @@ using CommunityToolkit.Mvvm.Messaging;
 using FluentAssertions;
 using ICCardManager.Common;
 using ICCardManager.Common.Exceptions;
+using ICCardManager.Common.Messages;
 using ICCardManager.Data;
 using ICCardManager.Data.Repositories;
 using ICCardManager.Dtos;
@@ -184,7 +185,7 @@ public class MainViewModelIntegrationTests
     /// Issue #2103: ディスパッチャーを差し替えた ViewModel を 1 件だけ別に作るために切り出した。
     /// カードリーダーも別に渡すこと（同じモックを渡すと、<see cref="_viewModel"/> も同じタッチを処理する）。
     /// </remarks>
-    private MainViewModel CreateViewModel(ICardReader cardReader, IDispatcherService dispatcherService)
+    private MainViewModel CreateViewModel(ICardReader cardReader, IDispatcherService dispatcherService, IMessenger? messenger = null)
     {
         return new MainViewModel(
             cardReader,
@@ -195,7 +196,7 @@ public class MainViewModelIntegrationTests
             _settingsRepositoryMock.Object,
             _lendingService,
             _toastMock.Object,
-            _messengerMock.Object,
+            messenger ?? _messengerMock.Object,
             _navigationServiceMock.Object,
             Options.Create(new AppOptions { StaffCardTimeoutSeconds = 60 }),
             _timerFactory,
@@ -839,6 +840,61 @@ public class MainViewModelIntegrationTests
         lendLedgers[0].LenderIdm.Should().Be(StaffIdm, "直前に操作した職員A で補完される");
         lendLedgers[0].StaffName.Should().Be(StaffName);
         _soundPlayerMock.Verify(s => s.Play(SoundType.Lend), Times.Once);
+    }
+
+    /// <summary>
+    /// Issue #2461: 返却の直後に同じ PC で職員証を差し替えてから、職員証をタッチせずに同じカードを再タッチしたとき、
+    /// 逆処理の貸出は新しい職員証の IDm で記録されること（操作者の帰属を台帳と <c>UpdateLentStatusAsync</c> の第 4 引数で表明する）。
+    /// </summary>
+    /// <remarks>
+    /// 置き換えないと前回操作者は古い IDm のままで、差し替えで消えた職員として貸し出そうとして失敗する。
+    /// メイン画面への知らせは本物の <see cref="WeakReferenceMessenger"/> で届ける（モックでは受信ハンドラーが走らない）。
+    /// </remarks>
+    [Fact]
+    public async Task Retouch30Sec_返却の後に職員証を差し替えてからの再タッチは新しい職員証で記録されること()
+    {
+        // Arrange
+        const string NewStaffIdm = "FEDCBA9876543210";
+        var insertedLedgers = ArrangeReturnThenRelendScenario();
+        var replaced = false;
+        _staffRepositoryMock.Setup(r => r.GetByIdmAsync(StaffIdm, It.IsAny<bool>()))
+            .ReturnsAsync(() => replaced ? null : new Staff { StaffIdm = StaffIdm, Name = StaffName });
+        _staffRepositoryMock.Setup(r => r.GetByIdmAsync(NewStaffIdm, It.IsAny<bool>()))
+            .ReturnsAsync(() => replaced ? new Staff { StaffIdm = NewStaffIdm, Name = StaffName } : null);
+
+        var messenger = new WeakReferenceMessenger();
+        var readerMock = new Mock<ICardReader>();
+        readerMock.Setup(r => r.ReadBalanceAsync(It.IsAny<string>())).ReturnsAsync(1500);
+        readerMock.Setup(r => r.TryReadHistoryAsync(It.IsAny<string>()))
+            .ReturnsAsync(CardReadResult<IReadOnlyList<LedgerDetail>>.Ok(new List<LedgerDetail>()));
+        var viewModel = CreateViewModel(readerMock.Object, _dispatcherService, messenger);
+        async Task Touch(string idm)
+        {
+            readerMock.Raise(r => r.CardRead += null, readerMock.Object, new CardReadEventArgs { Idm = idm });
+            await _dispatcherService.WaitForPendingAsync();
+        }
+
+        // Act-1: 古い職員証で貸出中カードを返却
+        await Touch(StaffIdm);
+        await Touch(CardIdmA);
+        viewModel.CurrentState.Should().Be(AppState.WaitingForStaffCard);
+
+        // Act-2: 同じ PC の職員管理画面で職員証を差し替えた（確定後の知らせ）
+        replaced = true;
+        messenger.Send(new StaffCardReplacedMessage(StaffIdm, NewStaffIdm));
+
+        // Act-3: 職員証をタッチせずに同じカードを再タッチ（逆処理＝貸出）
+        await Touch(CardIdmA);
+
+        // Assert: 台帳の貸出者・カードの最終貸出者とも新しい職員証
+        var lendLedgers = insertedLedgers.Where(l => l.IsLentRecord).ToList();
+        lendLedgers.Should().ContainSingle("差し替えた後も 30 秒ルールの逆処理が記録されること");
+        lendLedgers[0].LenderIdm.Should().Be(NewStaffIdm);
+        lendLedgers[0].StaffName.Should().Be(StaffName);
+        _cardRepositoryMock.Verify(r => r.UpdateLentStatusAsync(
+            CardIdmA, true, It.IsAny<DateTime?>(), NewStaffIdm), Times.Once);
+        _cardRepositoryMock.Verify(r => r.UpdateLentStatusAsync(
+            CardIdmA, true, It.IsAny<DateTime?>(), StaffIdm), Times.Never, "差し替えで消えた古い職員証で貸し出さない");
     }
 
     /// <summary>
