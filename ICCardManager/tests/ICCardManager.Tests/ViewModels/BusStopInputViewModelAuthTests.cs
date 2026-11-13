@@ -260,6 +260,8 @@ public class BusStopInputViewModelAuthTests : IDisposable
         log.OperatorIdm.Should().Be(AuthIdm);
         log.BeforeData.Should().Contain("\"BusStops\":\"天神～博多駅\"", "変更前は保存済みのバス停名");
         log.AfterData.Should().NotContain("天神～博多駅", "スキップは保存済みのバス停名も★へ戻す（#1156）");
+        log.AfterData.Should().Contain("\"BusStops\":\"★\"", "変更後のバス停名は★");
+        log.AfterData.Should().Contain("\"Summary\":\"バス（★）\"", "変更後の摘要は★の明細から再生成したもの");
         logTransaction.Should().BeSameAs(_detailTransactions.Single());
     }
 
@@ -356,6 +358,8 @@ public class BusStopInputViewModelAuthTests : IDisposable
         log.BeforeData.Should().Contain("※要確認", "変更前は手で補足した摘要");
         log.AfterData.Should().NotContain("※要確認", "スキップで書くときは摘要を明細から再生成する（補足は上書きされる）");
         log.AfterData.Should().NotContain("天神～博多駅", "保存済みのバス停名は★へ戻る");
+        log.AfterData.Should().Contain("\"BusStops\":\"★\"");
+        log.AfterData.Should().Contain("\"Summary\":\"バス（★）\"", "補足を含まない、★の明細から再生成した摘要");
     }
 
     [Fact]
@@ -438,6 +442,32 @@ public class BusStopInputViewModelAuthTests : IDisposable
             "同期版の初期化も返却フローの経路へ戻す");
         _insertedLogs.Should().BeEmpty();
         _detailTransactions.Should().ContainSingle("保存はする");
+    }
+
+    [Fact]
+    public async Task 返却フローの複数の台帳で初期化した後に未入力一覧から開き直したら一覧の行だけを保存し記録すること()
+    {
+        const int OtherLedgerId = 8;
+        var other = RecordedLedger((string?)null);
+        other.Id = OtherLedgerId;
+        foreach (var detail in other.Details)
+        {
+            detail.LedgerId = OtherLedgerId;
+        }
+
+        var listed = RecordedLedger((string?)null);
+        _ledgerRepoMock.Setup(r => r.GetByIdAsync(OtherLedgerId)).ReturnsAsync(other);
+        _ledgerRepoMock.Setup(r => r.GetByIdAsync(LedgerId)).ReturnsAsync(RecordedLedger((string?)null));
+        await _viewModel.InitializeWithLedgersAsync(new[] { RecordedLedger((string?)null), other });
+
+        await OpenFromIncompleteListAsync(listed);
+        _viewModel.BusUsages[0].BusStops = "天神～博多駅";
+        await _viewModel.SaveAsync();
+
+        _ledgerRepoMock.Verify(r => r.UpdateSummaryAsync(LedgerId, It.IsAny<string>(), It.IsAny<SQLiteTransaction>()), Times.Once);
+        _ledgerRepoMock.Verify(r => r.UpdateSummaryAsync(OtherLedgerId, It.IsAny<string>(), It.IsAny<SQLiteTransaction>()), Times.Never,
+            "前の初期化（返却フローの複数の台帳）の対象を、一覧から開いた行の保存に残さない");
+        _insertedLogs.Should().ContainSingle("一覧から開いた行 1 件だけを記録する");
     }
 
     #endregion
