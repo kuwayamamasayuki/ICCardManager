@@ -499,7 +499,8 @@ public partial class DataExportImportViewModel : ViewModelBase
 
                 using var sha256 = System.Security.Cryptography.SHA256.Create();
                 var hash = sha256.ComputeHash(content);
-                return new PreviewFileCapture(new PreviewFileFingerprint(length, BitConverter.ToString(hash)), content);
+                // 大きさも実際に読んだバイト列から取る（縮められたとき、開いた時点の長さと照合の値の内容が食い違わないように）
+                return new PreviewFileCapture(new PreviewFileFingerprint(content.LongLength, BitConverter.ToString(hash)), content);
             }
             catch (Exception ex) when (ex is IOException || ex is UnauthorizedAccessException || ex is ArgumentException || ex is NotSupportedException || ex is System.Security.SecurityException)
             {
