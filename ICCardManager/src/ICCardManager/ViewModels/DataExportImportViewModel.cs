@@ -396,7 +396,7 @@ public partial class DataExportImportViewModel : ViewModelBase
     /// </para>
     /// <para>
     /// 読み取りは共有フォルダー（SMB）上では応答が無いと長く戻らない同期処理なので、UI スレッドで行わず
-    /// <see cref="DedicatedThread.Run{T}(Func{T})"/> で専用スレッドへ載せる（<see cref="CaptureAsync"/>。
+    /// <see cref="DedicatedThread.Run{T}(Func{T})"/> で専用スレッドへ載せる（<see cref="PreviewFileCapture.CaptureAsync"/>。
     /// viewmodel-conventions.md「ブロックし得る同期処理は DedicatedThread.Run で起動する」#2221）。呼び出し側は処理中の表示の中で待つ。
     /// </para>
     /// <para>
@@ -407,12 +407,6 @@ public partial class DataExportImportViewModel : ViewModelBase
     /// </remarks>
     internal sealed record PreviewFileFingerprint(long Length, string ContentSha256)
     {
-        /// <summary>
-        /// いまのファイルの状態を専用スレッドで読む（読めなければ <c>null</c>）
-        /// </summary>
-        public static Task<PreviewFileFingerprint?> CaptureAsync(string filePath)
-            => DedicatedThread.Run(() => Capture(filePath));
-
         /// <summary>
         /// いまのファイルの状態を、呼び出したスレッドで読む（読めなければ <c>null</c>）。UI スレッドから直接呼ばないこと
         /// </summary>
@@ -1315,8 +1309,17 @@ public partial class DataExportImportViewModel : ViewModelBase
                 // 照合はこの 1 か所（認証の後・取り込む直前）。読み取りは処理中の表示の中で、専用スレッドで行う
                 // Issue #2284: 取り込むのは照合に使ったバイト列そのもの。照合の後でパスから読み直すと、
                 // 照合から読み込みまでの間に書き換えられた内容（照合していない内容）を取り込む
-                var source = CsvImportSource.FromFile(request.SourceFilePath);
-                if (request.ExpectedFile != null)
+                CsvImportSource source;
+                if (request.ExpectedFile == null)
+                {
+                    // 照合を経ない取り込みだけがパスから読む:
+                    // ・直接インポート（カードの新規登録だけ。ImportNewCardsAsync がパスを受け取るため source は使わない）
+                    // ・ファイルの状態を記録していないプレビュー。単体テストが存在しないファイル名でプレビューを組み立てたとき
+                    //   （RecordPreviewSnapshotForCurrentState）だけで、本番の PreviewFileAsync は読めないファイルの
+                    //   プレビューを記録しないため、プレビュー経由の本番の取り込みはこの分岐に来ない
+                    source = CsvImportSource.FromFile(request.SourceFilePath);
+                }
+                else
                 {
                     var current = await PreviewFileCapture.CaptureAsync(request.SourceFilePath);
                     if (current == null || current.Fingerprint != request.ExpectedFile)

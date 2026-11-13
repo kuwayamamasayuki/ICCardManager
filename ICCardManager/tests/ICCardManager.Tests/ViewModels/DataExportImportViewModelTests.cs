@@ -3117,26 +3117,6 @@ public class DataExportImportViewModelTests : IDisposable
             default:
                 throw new ArgumentOutOfRangeException(nameof(dataType), dataType, "照合を経て取り込まないデータ種別");
         }
-
-        // 切り替え元（パスを受け取る版）にも結果を設定しておく。未設定だと既定値（null）が返り、
-        // パスから読み直す実装へ戻ったときに「取り込まれなかった」形で通ってしまう（testing.md #1745）
-        _importServiceMock.Setup(s => s.ImportCardsAsync(It.IsAny<string>(), It.IsAny<bool>()))
-            .ReturnsAsync(new CsvImportResult { Success = true, ImportedCount = 1 });
-        _importServiceMock.Setup(s => s.ImportStaffAsync(It.IsAny<string>(), It.IsAny<bool>()))
-            .ReturnsAsync(new CsvImportResult { Success = true, ImportedCount = 1 });
-        _importServiceMock.Setup(s => s.ImportLedgersAsync(It.IsAny<string>(), It.IsAny<bool>(), It.IsAny<string?>()))
-            .ReturnsAsync(new CsvImportResult { Success = true, ImportedCount = 1 });
-        _importServiceMock.Setup(s => s.ImportLedgerDetailsAsync(It.IsAny<string>()))
-            .ReturnsAsync(new CsvImportResult { Success = true, ImportedCount = 1 });
-    }
-
-    /// <summary>パスを受け取る版（照合の後にパスから読み直す版）が呼ばれていないこと</summary>
-    private void VerifyNoImportByFilePath()
-    {
-        _importServiceMock.Verify(s => s.ImportCardsAsync(It.IsAny<string>(), It.IsAny<bool>()), Times.Never);
-        _importServiceMock.Verify(s => s.ImportStaffAsync(It.IsAny<string>(), It.IsAny<bool>()), Times.Never);
-        _importServiceMock.Verify(s => s.ImportLedgersAsync(It.IsAny<string>(), It.IsAny<bool>(), It.IsAny<string?>()), Times.Never);
-        _importServiceMock.Verify(s => s.ImportLedgerDetailsAsync(It.IsAny<string>()), Times.Never);
     }
 
     /// <summary>
@@ -3151,11 +3131,14 @@ public class DataExportImportViewModelTests : IDisposable
         {
             _viewModel.SelectedImportType = dataType;
             List<string>? importedLines = null;
+            CsvImportSource? importedSource = null;
             SetupPreviewAndImportBySource(
                 dataType,
                 _ => Task.FromResult(new CsvImportPreviewResult { IsValid = true }),
                 async source =>
                 {
+                    importedSource = source;
+
                     // 照合が済んだ直後、サービスが内容を読む前に書き換えられた（TOCTOU の窓）
                     System.IO.File.WriteAllText(path, TamperedCsvContent, new System.Text.UTF8Encoding(true));
                     importedLines = await CsvImportService.ReadCsvAsync(source);
@@ -3169,7 +3152,7 @@ public class DataExportImportViewModelTests : IDisposable
             importedLines.Should().NotBeNull("前提: 照合を通って取り込みが行われたこと");
             importedLines.Should().Equal(new[] { "見出し", "照合した行,001" },
                 "照合した内容を取り込み、照合していない内容（書き換えた後のファイル）を取り込まない");
-            VerifyNoImportByFilePath();
+            importedSource!.Content.Should().NotBeNull("パスから読み直す読み取り元（FromFile）ではなく、照合に使った内容を渡す");
         }
         finally
         {
