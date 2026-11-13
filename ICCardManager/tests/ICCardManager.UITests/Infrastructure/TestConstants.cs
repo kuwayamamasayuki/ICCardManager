@@ -720,6 +720,10 @@ namespace ICCardManager.UITests.Infrastructure
         [NotUiaName]
         public const string CardRegistrationContentScrollViewerId = "ContentScrollViewer";
 
+        /// <summary>カード登録方法の選択ダイアログの「OK」の AutomationId（作業領域の中にあることを確かめる。Issue #2465）。</summary>
+        [NotUiaName]
+        public const string CardRegistrationOkButtonId = "OkButton";
+
         /// <summary>カード登録方法の選択ダイアログの「キャンセル」（登録をやめる）。</summary>
         [UiaName]
         public const string CardRegistrationCancelButton = "キャンセル";

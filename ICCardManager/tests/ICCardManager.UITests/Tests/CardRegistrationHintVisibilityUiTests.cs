@@ -96,6 +96,16 @@ namespace ICCardManager.UITests.Tests
                 $"ヒント（管理者マニュアル「1.6」への案内）の下端がスクロールの外に隠れていないこと。フォーカスを受けないので、" +
                 $"Tab で入力欄を移ってもスクロールされず、隠れると読まれない（{detail}）");
 
+            // 高さの上限を作業領域の高さまで広げたので、下端（OK）が画面の外へ出ていないことも確かめる（位置を作業領域へ寄せる処理）
+            var ok = Retry.WhileNull(
+                () => mode.Window.FindFirstDescendant(cf => cf.ByAutomationId(TestConstants.CardRegistrationOkButtonId)), Wait).Result;
+            ok.Should().NotBeNull("前提: OK ボタンが見つかること");
+            var okRect = ok!.BoundingRectangle;
+            var workArea = NativeWindows.WorkAreaOf(NativeWindows.HandleOf(mode.Window));
+            okRect.Height.Should().BeGreaterThan(0, "前提: OK ボタンの矩形が読めていること");
+            workArea.Contains(okRect).Should().BeTrue(
+                $"OK ボタンがダイアログの載っているモニターの作業領域の中にあること（文字サイズ {fontSize}: OK {okRect}、作業領域 {workArea}）");
+
             mode.ClickButton(TestConstants.CardRegistrationCancelButton);
             Retry.WhileTrue(() => DialogLocator.IsOpen(fixture, manage.Window, TestConstants.CardRegistrationModeDialogName), Wait)
                 .Success.Should().BeTrue("閉じると登録がキャンセルされること");

@@ -86,8 +86,18 @@ public class CardRegistrationModeHintPlacementTests
         // 位置を寄せる処理は、書いてあるだけでは働かない。表示時（Loaded）と大きさが変わったとき（SizeChanged）の両方から呼ばれていること
         constructor.Should().Contain("Loaded += (s, e) => FitToMonitorWorkArea();",
             "表示した時点で、載ったモニターの作業領域へ上限と位置を合わせる（CenterOwner は画面内へ寄せない）");
-        TestSourceInspection.ExtractMethodBody(constructor, "SizeChanged +=").Should().Contain("FitToMonitorWorkArea();",
-            "繰越レコードの日付の注意書きで内容が伸びたときも、下端（OK・キャンセル）が画面の外へ出ないよう寄せ直す");
+        // 条件ごと照合する（!IsLoaded に反転すると、表示後の大きさの変化で寄せ直さなくなる）。空白・改行の違いは問わない
+        CollapseWhitespace(TestSourceInspection.ExtractMethodBody(constructor, "SizeChanged +="))
+            .Should().Contain("if (IsLoaded) { FitToMonitorWorkArea(); }",
+                "繰越レコードの日付の注意書きで内容が伸びたときも、下端（OK・キャンセル）が画面の外へ出ないよう寄せ直す（表示後に限る）");
+
+        // 別のモニターへ動かしたときは上限だけを合わせ直す（位置まで寄せるとドラッグと競合する）
+        CollapseWhitespace(TestSourceInspection.ExtractMethodBody(constructor, "LocationChanged +="))
+            .Should().Contain("if (IsLoaded) { FitMaxHeightToMonitorWorkArea(); }",
+                "作業領域の低いモニターへ動かしたときに、前のモニターの高さの上限を残さない");
+        CollapseWhitespace(TestSourceInspection.ExtractMethodBody(code, "private void FitMaxHeightToMonitorWorkArea("))
+            .Should().Contain("MaxHeight = WindowLayoutCalculator.FitMaxHeight(MaxHeight, workArea.Height);")
+            .And.NotContain("ClampStart", "モニターを移る途中で位置を寄せると、利用者のドラッグと競合する");
 
         fit.Should().Contain("MaxHeight = WindowLayoutCalculator.FitMaxHeight(MaxHeight, workArea.Height)",
             "載ったモニターの作業領域の高さを上限にする（表示前はプライマリモニターの値しか取れない）");
@@ -96,6 +106,8 @@ public class CardRegistrationModeHintPlacementTests
         fit.Should().Contain("Left = WindowLayoutCalculator.ClampStart(Left, ActualWidth, workArea.Left, workArea.Width)",
             "横方向も CarryoverDataLossDialog と同じく作業領域の中へ寄せる");
     }
+
+    private static string CollapseWhitespace(string code) => System.Text.RegularExpressions.Regex.Replace(code, @"\s+", " ");
 
     private static int GridRowOfOutermostBorderContaining(string xaml, string marker)
     {

@@ -131,6 +131,8 @@ namespace ICCardManager.Views.Dialogs
             // XAML の MaxHeight を上書きするため InitializeComponent() の後に置く。ここでの WorkArea はプライマリモニターの
             // 作業領域（まだどのモニターに載るか決まっていないため。CarryoverDataLossDialog と同じ既知の制限）で、
             // 載ったモニターの作業領域へは Loaded・SizeChanged で上限と位置を合わせ直す。
+            // 利用者が別のモニターへ動かしたとき（LocationChanged）は上限だけを合わせ直す。位置まで寄せると、
+            // ドラッグ中のウィンドウを作業領域へ引き戻して移動と競合する。
             MaxHeight = WindowLayoutCalculator.FitMaxHeight(MaxHeight, SystemParameters.WorkArea.Height);
             Loaded += (s, e) => FitToMonitorWorkArea();
             SizeChanged += (s, e) =>
@@ -140,6 +142,29 @@ namespace ICCardManager.Views.Dialogs
                     FitToMonitorWorkArea();
                 }
             };
+            LocationChanged += (s, e) =>
+            {
+                if (IsLoaded)
+                {
+                    FitMaxHeightToMonitorWorkArea();
+                }
+            };
+        }
+
+        /// <summary>
+        /// 高さの上限だけを、このダイアログが載っているモニターの作業領域の高さに合わせる（Issue #2465）。
+        /// </summary>
+        /// <remarks>
+        /// 作業領域の低いモニターへ動かしたときに、前のモニターの上限が残らないようにする。上限が下がってウィンドウが縮むと
+        /// SizeChanged から <see cref="FitToMonitorWorkArea"/> が呼ばれ、位置もそのモニターの作業領域の中へ寄る
+        /// （縮んだ 1 回だけで、ドラッグを続ければそのまま動かせる）。作業領域が取れなければ何も変えない。
+        /// </remarks>
+        private void FitMaxHeightToMonitorWorkArea()
+        {
+            if (MonitorWorkArea.Of(this) is Rect workArea)
+            {
+                MaxHeight = WindowLayoutCalculator.FitMaxHeight(MaxHeight, workArea.Height);
+            }
         }
 
         /// <summary>
