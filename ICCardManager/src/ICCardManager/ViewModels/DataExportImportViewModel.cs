@@ -18,6 +18,7 @@ using ICCardManager.Infrastructure.CardReader;
 using ICCardManager.Infrastructure.Timing;
 using ICCardManager.Models;
 using ICCardManager.Services;
+using Microsoft.Extensions.Logging;
 using Microsoft.Win32;
 
 
@@ -109,6 +110,18 @@ public partial class DataExportImportViewModel : ViewModelBase
     private readonly ISafeFileLauncher _safeFileLauncher;
     private readonly IStaffAuthService _staffAuthService;
     private readonly StaffManagementService _staffManagementService;
+
+    /// <summary>ロガー（Issue #2284 で、照合を経ないプレビュー経由の取り込みを記録するために追加。既定値なしの必須引数）</summary>
+    private readonly ILogger<DataExportImportViewModel> _logger;
+
+    /// <summary>
+    /// 取り込むファイルの状態と内容を読む処理（Issue #2284）。プレビューと取り込む直前の照合の両方がここを通る
+    /// </summary>
+    /// <remarks>
+    /// 本番は <see cref="PreviewFileCapture.CaptureAsync"/>。単体テストが、照合に使う読み取りの直後（取り込みより前）に
+    /// ファイルを書き換えられるようにするための継ぎ目（照合の後でファイルを読み直す実装を検出する）。
+    /// </remarks>
+    internal Func<string, Task<PreviewFileCapture?>> CaptureFileAsync { get; set; } = PreviewFileCapture.CaptureAsync;
 
     [ObservableProperty]
     private DataType _selectedExportType = DataType.Cards;
@@ -388,11 +401,15 @@ public partial class DataExportImportViewModel : ViewModelBase
     /// <para>
     /// 取り込めるファイルは <see cref="CsvImportService.MaxImportFileSizeBytes"/>（64MB）以下で、読むコストは小さい。
     /// 上限を超えるファイルはハッシュを取らずに大きさだけを記録する（取り込み側が読む前に拒む）。
-    /// プレビューの読み込みとは別にもう一度読む（プレビューは <see cref="CsvImportService"/> が読み、バイト列を返さないため）。
+    /// </para>
+    /// <para>
+    /// Issue #2284: ハッシュを計算したバイト列は <see cref="PreviewFileCapture"/> が持ち、プレビュー・取り込みは
+    /// パスから読み直さずにそのバイト列を <see cref="CsvImportService"/> へ渡す。照合の後でパスから読み直すと、
+    /// 照合から読み込みまでの間に書き換えられた内容（照合していない内容）を取り込む（TOCTOU）。
     /// </para>
     /// <para>
     /// 読み取りは共有フォルダー（SMB）上では応答が無いと長く戻らない同期処理なので、UI スレッドで行わず
-    /// <see cref="DedicatedThread.Run{T}(Func{T})"/> で専用スレッドへ載せる（<see cref="CaptureAsync"/>。
+    /// <see cref="DedicatedThread.Run{T}(Func{T})"/> で専用スレッドへ載せる（<see cref="PreviewFileCapture.CaptureAsync"/>。
     /// viewmodel-conventions.md「ブロックし得る同期処理は DedicatedThread.Run で起動する」#2221）。呼び出し側は処理中の表示の中で待つ。
     /// </para>
     /// <para>
@@ -404,15 +421,52 @@ public partial class DataExportImportViewModel : ViewModelBase
     internal sealed record PreviewFileFingerprint(long Length, string ContentSha256)
     {
         /// <summary>
-        /// いまのファイルの状態を専用スレッドで読む（読めなければ <c>null</c>）
-        /// </summary>
-        public static Task<PreviewFileFingerprint?> CaptureAsync(string filePath)
-            => DedicatedThread.Run(() => Capture(filePath));
-
-        /// <summary>
         /// いまのファイルの状態を、呼び出したスレッドで読む（読めなければ <c>null</c>）。UI スレッドから直接呼ばないこと
         /// </summary>
         public static PreviewFileFingerprint? Capture(string filePath)
+            => PreviewFileCapture.Capture(filePath)?.Fingerprint;
+    }
+
+    /// <summary>
+    /// ファイルの状態（<see cref="PreviewFileFingerprint"/>）と、そのハッシュを計算したバイト列（Issue #2284）
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// プレビュー・取り込みは、このバイト列を <see cref="ToImportSource"/> で <see cref="CsvImportService"/> へ渡す。
+    /// 照合（<see cref="Fingerprint"/> の比較）に使ったバイト列と、取り込むバイト列が同じものになる。
+    /// </para>
+    /// <para>
+    /// バイト列を照合の値（<see cref="PreviewFileFingerprint"/>。record の値の等価で比較する）に含めないのは、
+    /// 配列は参照で比較されて照合が常に不一致になるため。
+    /// </para>
+    /// </remarks>
+    internal sealed class PreviewFileCapture
+    {
+        private PreviewFileCapture(PreviewFileFingerprint fingerprint, byte[]? content)
+        {
+            Fingerprint = fingerprint;
+            Content = content;
+        }
+
+        /// <summary>照合に使うファイルの状態</summary>
+        public PreviewFileFingerprint Fingerprint { get; }
+
+        /// <summary>
+        /// ハッシュを計算したバイト列。読み込める大きさの上限を超えていたときは <c>null</c>（読んでいない）。
+        /// <see cref="ToImportSource"/> で取り込みへ引き渡した後も <c>null</c>
+        /// </summary>
+        public byte[]? Content { get; private set; }
+
+        /// <summary>
+        /// いまのファイルの状態と内容を専用スレッドで読む（読めなければ <c>null</c>）
+        /// </summary>
+        public static Task<PreviewFileCapture?> CaptureAsync(string filePath)
+            => DedicatedThread.Run(() => Capture(filePath));
+
+        /// <summary>
+        /// いまのファイルの状態と内容を、呼び出したスレッドで読む（読めなければ <c>null</c>）。UI スレッドから直接呼ばないこと
+        /// </summary>
+        public static PreviewFileCapture? Capture(string filePath)
         {
             try
             {
@@ -420,17 +474,65 @@ public partial class DataExportImportViewModel : ViewModelBase
                 var length = stream.Length;
                 if (length > CsvImportService.MaxImportFileSizeBytes)
                 {
-                    return new PreviewFileFingerprint(length, string.Empty);
+                    return new PreviewFileCapture(new PreviewFileFingerprint(length, string.Empty), null);
+                }
+
+                // 開いた時点の長さぶんだけ読む（読み取り中に伸ばされても、ハッシュと取り込む内容は同じバイト列）
+                var content = new byte[length];
+                var offset = 0;
+                while (offset < content.Length)
+                {
+                    var read = stream.Read(content, offset, content.Length - offset);
+                    if (read == 0)
+                    {
+                        break;
+                    }
+
+                    offset += read;
+                }
+
+                if (offset < content.Length)
+                {
+                    // 読み取り中に縮められた。実際に読めたぶんだけをハッシュ・取り込みの対象にする
+                    Array.Resize(ref content, offset);
                 }
 
                 using var sha256 = System.Security.Cryptography.SHA256.Create();
-                var hash = sha256.ComputeHash(stream);
-                return new PreviewFileFingerprint(length, BitConverter.ToString(hash));
+                var hash = sha256.ComputeHash(content);
+                // 大きさも実際に読んだバイト列から取る（縮められたとき、開いた時点の長さと照合の値の内容が食い違わないように）
+                return new PreviewFileCapture(new PreviewFileFingerprint(content.LongLength, BitConverter.ToString(hash)), content);
             }
             catch (Exception ex) when (ex is IOException || ex is UnauthorizedAccessException || ex is ArgumentException || ex is NotSupportedException || ex is System.Security.SecurityException)
             {
                 return null;
             }
+        }
+
+        /// <summary>
+        /// 読み取った内容を、取り込みの読み取り元にする（パスからは読み直さない）
+        /// </summary>
+        /// <param name="filePath">読み取ったファイルのパス（ログ・例外の文言に載せる）</param>
+        /// <remarks>
+        /// <para>
+        /// 上限を超えていて読まなかったときも、パスから読み直させずに大きさだけを渡す（取り込みは上限超過で断る）。
+        /// </para>
+        /// <para>
+        /// 内容は読み取り元へ引き渡し、ここでは手放す（取り込みは復号した時点で読み取り元からも手放す。
+        /// <see cref="CsvImportSource.TakeContent"/>）。呼び出し元の非同期メソッドがこのインスタンスを取り込みの終わりまで
+        /// 持っていても、最大 64MB の配列を取り込みと DB への書き込みの間ずっと残さないため（x86 の 2GB の空間）。
+        /// 1 つの読み取り結果から作る読み取り元は 1 つだけ。
+        /// </para>
+        /// </remarks>
+        public CsvImportSource ToImportSource(string filePath)
+        {
+            var content = Content;
+            if (content == null)
+            {
+                return CsvImportSource.FromOversizedFile(filePath, Fingerprint.Length);
+            }
+
+            Content = null;
+            return CsvImportSource.FromContent(filePath, content);
         }
     }
 
@@ -495,6 +597,7 @@ public partial class DataExportImportViewModel : ViewModelBase
         IDispatcherService dispatcherService,
         IStaffAuthService staffAuthService,
         StaffManagementService staffManagementService,
+        ILogger<DataExportImportViewModel> logger,
         ICardReader? cardReader = null)
     {
         _exportService = exportService;
@@ -509,6 +612,7 @@ public partial class DataExportImportViewModel : ViewModelBase
         _staffAuthService = staffAuthService ?? throw new ArgumentNullException(nameof(staffAuthService));
         _staffManagementService = staffManagementService ?? throw new ArgumentNullException(nameof(staffManagementService));
         _cardReader = cardReader;
+        _logger = logger ?? throw new ArgumentNullException(nameof(logger));
 
         // カードリーダーイベント購読
         if (_cardReader != null)
@@ -781,33 +885,36 @@ public partial class DataExportImportViewModel : ViewModelBase
             try
             {
                 // ファイルの状態は読み込む前に、処理中の表示の中で、専用スレッドで取る
-                var file = await PreviewFileFingerprint.CaptureAsync(filePath);
-                if (file == null)
+                // Issue #2284: プレビューは、ここで読んだ（ハッシュを取った）バイト列から作る（パスから読み直さない）
+                var capture = await CaptureFileAsync(filePath);
+                if (capture == null)
                 {
                     // 内容を確かめられないファイルのプレビューは表示しない（照合の前提が作れない）
                     SetStatus(BuildPreviewFileUnreadableMessage(filePath), true);
                     return;
                 }
 
+                var file = capture.Fingerprint;
+                var source = capture.ToImportSource(filePath);
                 CsvImportPreviewResult preview;
 
                 switch (conditions.DataType)
                 {
                     case DataType.Cards:
-                        preview = await _importService.PreviewCardsAsync(filePath, conditions.SkipExisting);
+                        preview = await _importService.PreviewCardsAsync(source, conditions.SkipExisting);
                         break;
 
                     case DataType.Staff:
-                        preview = await _importService.PreviewStaffAsync(filePath, conditions.SkipExisting);
+                        preview = await _importService.PreviewStaffAsync(source, conditions.SkipExisting);
                         break;
 
                     case DataType.Ledgers:
                         // Issue #511: ターゲットカードIDmを渡す
-                        preview = await _importService.PreviewLedgersAsync(filePath, conditions.SkipExisting, conditions.ResolveTargetCardIdm());
+                        preview = await _importService.PreviewLedgersAsync(source, conditions.SkipExisting, conditions.ResolveTargetCardIdm());
                         break;
 
                     case DataType.LedgerDetails:
-                        preview = await _importService.PreviewLedgerDetailsAsync(filePath);
+                        preview = await _importService.PreviewLedgerDetailsAsync(source);
                         break;
 
                     default:
@@ -1232,10 +1339,32 @@ public partial class DataExportImportViewModel : ViewModelBase
             {
                 // Issue #2262: プレビューしたファイルと、いまのファイルを照合する（プレビュー経由のときだけ）。
                 // 照合はこの 1 か所（認証の後・取り込む直前）。読み取りは処理中の表示の中で、専用スレッドで行う
-                if (request.ExpectedFile != null)
+                // Issue #2284: 取り込むのは照合に使ったバイト列そのもの。照合の後でパスから読み直すと、
+                // 照合から読み込みまでの間に書き換えられた内容（照合していない内容）を取り込む
+                CsvImportSource source;
+                if (request.ExpectedFile == null)
                 {
-                    var current = await PreviewFileFingerprint.CaptureAsync(request.SourceFilePath);
-                    if (current == null || current != request.ExpectedFile)
+                    // 照合を経ない取り込みだけがパスから読む:
+                    // ・直接インポート（カードの新規登録だけ。ImportNewCardsAsync がパスを受け取るため source は使わない）
+                    // ・ファイルの状態を記録していないプレビュー。単体テストが存在しないファイル名でプレビューを組み立てたとき
+                    //   （RecordPreviewSnapshotForCurrentState）だけで、本番の PreviewFileAsync は読めないファイルの
+                    //   プレビューを記録しないため、プレビュー経由の本番の取り込みはこの分岐に来ない
+                    // 後者に本番で来たら、照合を経ずにパスから読む（#2284 の TOCTOU が戻る）ことをログに残す。
+                    // 拒否しないのは、ファイルの状態を記録しないプレビューで取り込みを組み立てる既存の単体テストの多くが
+                    // この分岐を通るため（拒否すると、それらを実ファイルを使う形へ書き換える必要がある）
+                    if (!request.DirectImport)
+                    {
+                        _logger.LogWarning(
+                            "CSVインポート: プレビュー経由の取り込みですが、プレビューしたファイルの状態が記録されていないため、照合を経ずにファイルから読み込みます。File={FilePath}",
+                            request.SourceFilePath);
+                    }
+
+                    source = CsvImportSource.FromFile(request.SourceFilePath);
+                }
+                else
+                {
+                    var current = await CaptureFileAsync(request.SourceFilePath);
+                    if (current == null || current.Fingerprint != request.ExpectedFile)
                     {
                         ClearPreview();
                         SetStatus(
@@ -1245,6 +1374,8 @@ public partial class DataExportImportViewModel : ViewModelBase
                             true);
                         return;
                     }
+
+                    source = current.ToImportSource(request.SourceFilePath);
                 }
 
                 CsvImportResult result;
@@ -1261,20 +1392,20 @@ public partial class DataExportImportViewModel : ViewModelBase
                         // Issue #2262: 直接インポートは新しいカードの登録だけ（登録済みのカードの変更・復元はプレビュー経由に限る）
                         result = request.DirectImport
                             ? await _importService.ImportNewCardsAsync(sourceFilePath)
-                            : await _importService.ImportCardsAsync(sourceFilePath, request.SkipExisting);
+                            : await _importService.ImportCardsAsync(source, request.SkipExisting);
                         break;
 
                     case DataType.Staff:
-                        result = await _importService.ImportStaffAsync(sourceFilePath, request.SkipExisting);
+                        result = await _importService.ImportStaffAsync(source, request.SkipExisting);
                         break;
 
                     case DataType.Ledgers:
                         // Issue #511: ターゲットカードIDmを渡す
-                        result = await _importService.ImportLedgersAsync(sourceFilePath, request.SkipExisting, request.TargetCardIdm);
+                        result = await _importService.ImportLedgersAsync(source, request.SkipExisting, request.TargetCardIdm);
                         break;
 
                     case DataType.LedgerDetails:
-                        result = await _importService.ImportLedgerDetailsAsync(sourceFilePath);
+                        result = await _importService.ImportLedgerDetailsAsync(source);
                         break;
 
                     default:
