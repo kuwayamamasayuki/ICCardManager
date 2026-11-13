@@ -361,6 +361,8 @@ WHERE staff_idm = @staffIdm AND is_deleted = 1";
         /// <inheritdoc/>
         public async Task<StaffCardReplacementResult> CheckStaffIdmReplacementAsync(string currentIdm, string newIdm)
         {
+            currentIdm = NormalizeIdm(currentIdm);
+            newIdm = NormalizeIdm(newIdm);
             using var lease = await _dbContext.LeaseConnectionAsync().ConfigureAwait(false);
             var (check, _) = await CheckStaffIdmReplacementCoreAsync(lease.Connection, null, currentIdm, newIdm)
                 .ConfigureAwait(false);
@@ -396,6 +398,8 @@ WHERE staff_idm = @staffIdm AND is_deleted = 1";
                 throw new ArgumentNullException(nameof(transaction));
             }
 
+            currentIdm = NormalizeIdm(currentIdm);
+            newIdm = NormalizeIdm(newIdm);
             using var lease = await _dbContext.LeaseConnectionAsync().ConfigureAwait(false);
             var connection = lease.Connection;
 
@@ -495,7 +499,7 @@ WHERE staff_idm = @staffIdm AND (is_deleted = 0 OR is_deleted IS NULL)";
                 return (StaffCardReplacementResult.Rejected(StaffCardReplacementStatus.TargetNotFound), null);
             }
 
-            if (string.Equals(currentIdm, newIdm, StringComparison.OrdinalIgnoreCase))
+            if (string.Equals(currentIdm, newIdm, StringComparison.Ordinal))
             {
                 return (StaffCardReplacementResult.Rejected(StaffCardReplacementStatus.SameCard), null);
             }
@@ -577,6 +581,16 @@ WHERE instr(undo_data, @currentLender) > 0 OR instr(undo_data, @currentReturner)
             command.Parameters.AddWithValue("@newReturner", MergeUndoDataIdmToken("ReturnerIdm", newIdm));
             return await command.ExecuteNonQueryAsync().ConfigureAwait(false);
         }
+
+        /// <summary>
+        /// 職員証の差し替えで受け取った IDm を、保存の形（大文字の 16 進）へそろえる（Issue #2461）
+        /// </summary>
+        /// <remarks>
+        /// IDm は大文字で保存される（カードリーダー・CSV の取り込みとも <c>ToUpperInvariant</c>）。入口で 1 度そろえ、
+        /// 以後の比較（今の職員証と同じか・SQL の <c>=</c>・統合履歴の JSON の照合）はすべて大文字どうしの完全一致で行う。
+        /// 比較ごとに大文字小文字の扱いが違うと、同じ IDm を「同じ職員証」とは見なすのに「登録済み」とは見なさない、のように食い違う。
+        /// </remarks>
+        private static string NormalizeIdm(string idm) => idm.ToUpperInvariant();
 
         /// <summary>統合の取り消し用データ（JSON）の中で、職員 IDm を持つ項目の表記</summary>
         internal static string MergeUndoDataIdmToken(string propertyName, string idm)

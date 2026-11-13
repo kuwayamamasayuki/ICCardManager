@@ -1496,6 +1496,10 @@ namespace ICCardManager.ViewModels
                 {
                     committed.Value = true;
 
+                    // 同じ PC のメイン画面が持つ古い IDm（30 秒ルールの前回操作者）を新しい IDm へ置き換えさせる
+                    _messenger.Send(new StaffCardReplacedMessage(
+                        result.Before?.StaffIdm ?? targetIdm, result.After?.StaffIdm ?? newIdm));
+
                     await LoadStaffAsync();
                     CancelEdit();
                     SelectAndHighlight(newIdm);

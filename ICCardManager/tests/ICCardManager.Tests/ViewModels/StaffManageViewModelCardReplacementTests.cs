@@ -57,6 +57,7 @@ public class StaffManageViewModelCardReplacementTests : IDisposable
         new(new FixedSystemClock(new DateTime(2026, 11, 13, 9, 0, 0)));
     private readonly List<OperationLog> _operationLogs = new();
     private readonly List<(bool Suppressed, CardReadingSource Source)> _suppressionMessages = new();
+    private readonly List<StaffCardReplacedMessage> _replacedMessages = new();
     private readonly TestTimerFactory _timerFactory = new();
     private readonly WeakReferenceMessenger _messenger = new();
     private readonly object _recipient = new();
@@ -89,6 +90,7 @@ public class StaffManageViewModelCardReplacementTests : IDisposable
 
         _messenger.Register<CardReadingSuppressedMessage>(_recipient,
             (_, m) => _suppressionMessages.Add((m.Value, m.Source)));
+        _messenger.Register<StaffCardReplacedMessage>(_recipient, (_, m) => _replacedMessages.Add(m));
 
         _viewModel = new StaffManageViewModel(
             _staffRepositoryMock.Object,
@@ -153,6 +155,7 @@ public class StaffManageViewModelCardReplacementTests : IDisposable
 
     private void VerifyNoReplacementWrite()
     {
+        _replacedMessages.Should().BeEmpty("差し替えていないのでメイン画面へ知らせない");
         _staffRepositoryMock.Verify(
             r => r.ReplaceStaffIdmAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<SQLiteTransaction>()), Times.Never);
         _operationLogs.Should().BeEmpty("何も書いていないので操作ログも残らない");
@@ -243,6 +246,8 @@ public class StaffManageViewModelCardReplacementTests : IDisposable
         _viewModel.IsStatusError.Should().BeFalse();
         _viewModel.IsEditing.Should().BeFalse("差し替えたら編集を終える");
         _viewModel.NewlyRegisteredIdm.Should().Be(NewIdm, "差し替えた職員を一覧で強調する");
+        _replacedMessages.Should().ContainSingle("メイン画面の 30 秒ルールの前回操作者を置き換えさせる")
+            .Which.Should().Match<StaffCardReplacedMessage>(m => m.OldIdm == TargetIdm && m.NewIdm == NewIdm);
         _viewModel.IsWaitingForReplacementCard.Should().BeFalse();
         _staffRepositoryMock.Verify(r => r.InvalidateCachesAffectedByStaffIdmReplacement(), Times.AtLeastOnce());
         VerifySuppressionReleased();

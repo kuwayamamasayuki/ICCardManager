@@ -358,6 +358,34 @@ public class StaffCardReplacementTests : IDisposable
             .Should().Equal(new[] { "0" }, $"{description}: 操作ログも書かない");
     }
 
+    [Theory]
+    [InlineData("0123456789abcdef", StaffCardReplacementStatus.SameCard)]
+    [InlineData("bbbb0000cccc1111", StaffCardReplacementStatus.RegisteredStaff)]
+    [InlineData("abcdef0123456789", StaffCardReplacementStatus.RegisteredCard)]
+    [InlineData("aaaa0000aaaa000a", StaffCardReplacementStatus.Ok)]
+    public async Task 小文字で渡したIDmも大文字の保存値と同じ規則で判定すること(string newIdm, StaffCardReplacementStatus expected)
+    {
+        // 判定ごとに大文字小文字の扱いが違うと、同じ IDm を「同じ職員証」とは見なすのに「登録済み」とは見なさない、のように食い違う
+        await SeedTypicalAsync();
+        await SeedStaffAsync("BBBB0000CCCC1111", "大文字 五郎");
+        await SeedCardAsync("ABCDEF0123456789", "H-003");
+
+        (await _service.CheckCardReplacementAsync(OldIdm.ToLowerInvariant(), newIdm)).Status.Should().Be(expected);
+    }
+
+    [Fact]
+    public async Task 小文字で渡した新しいIDmは大文字で保存すること()
+    {
+        await SeedTypicalAsync();
+
+        var result = await ReplaceAsOperatorAsync(OldIdm, NewIdm.ToLowerInvariant());
+
+        result.IsOk.Should().BeTrue();
+        (await StaffIdmsAsync()).Should().BeEquivalentTo(new[] { NewIdm, OtherStaffIdm });
+        (await QueryStringsAsync("SELECT DISTINCT lender_idm FROM ledger WHERE staff_name = '博多 花子'"))
+            .Should().Equal(new[] { NewIdm });
+    }
+
     [Fact]
     public async Task ほかの職員の職員証で拒否したときは_その職員を名指しできること()
     {

@@ -385,6 +385,10 @@ public partial class MainViewModel : ViewModelBase, IHistoryPanelHost
             }
         });
 
+        // Issue #2461: 職員証の差し替えで主キーが変わったら、持っている古い IDm を新しい IDm へ置き換える
+        // （30 秒ルールの前回操作者が古い IDm のままだと、差し替え直後の再タッチが存在しない職員で記録しようとして失敗する）
+        _messenger.Register<StaffCardReplacedMessage>(this, (recipient, message) => ApplyStaffCardReplacement(message));
+
         // イベント登録
         _cardReader.CardRead += OnCardRead;
         _cardReader.Error += OnCardReaderError;
@@ -691,4 +695,24 @@ public partial class MainViewModel : ViewModelBase, IHistoryPanelHost
     /// </remarks>
     internal static string BuildRetouchGuideText(int retouchWindowSeconds)
         => $"{retouchWindowSeconds}秒以内に同じカードをもう一度タッチすると、逆の操作（貸出⇔返却）を記録します（取り消しではありません）";
+
+    /// <summary>
+    /// 職員証の差し替え（Issue #2461）を受けて、持っている古い職員証の IDm を新しい IDm へ置き換える
+    /// </summary>
+    /// <remarks>
+    /// 置き換えるのは同じ職員を指す値だけ（30 秒ルールの前回操作者・職員証タッチ後の現在の操作者）。
+    /// クリアせずに置き換えるのは、同じ職員の操作として 30 秒ルールの逆の操作を続けられるようにするため。
+    /// </remarks>
+    internal void ApplyStaffCardReplacement(StaffCardReplacedMessage message)
+    {
+        if (string.Equals(_lastProcessedStaffIdm, message.OldIdm, StringComparison.OrdinalIgnoreCase))
+        {
+            _lastProcessedStaffIdm = message.NewIdm;
+        }
+
+        if (string.Equals(_currentStaffIdm, message.OldIdm, StringComparison.OrdinalIgnoreCase))
+        {
+            _currentStaffIdm = message.NewIdm;
+        }
+    }
 }

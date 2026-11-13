@@ -9,8 +9,10 @@
   - 保存は 1 トランザクションで、新しい IDm の職員の行を足す → 台帳の貸出者（`ledger.lender_idm`・未使用の `returner_idm`）・交通系ICカードの最終貸出者（`ic_card.last_lent_staff`）・統合の取り消し用データ（`ledger_merge_history.undo_data` の `LenderIdm` / `ReturnerIdm`）を新しい IDm へ付け替える → 古い行を消す、の順に書く（外部キーを壊さない順序。付け替え漏れがあれば外部キー違反で全体が巻き戻る）。統合の取り消し用データを付け替えないと、差し替えた後の統合の取り消しが外部キー違反で失敗する。貸出中のカードは新しい職員証で返却できる
   - 操作ログは監査記録なので書き換えない。差し替えの操作を職員情報の変更（`staff`・`UPDATE`。変更前に古い職員証の IDm、変更後に新しい IDm）として 1 件、認証した職員の操作で記録する。アプリのログには付け替えた件数を IDm をマスクして残す
   - 判定は確認ダイアログの前と保存のトランザクションの中で同じ 1 つの実装（`StaffRepository.CheckStaffIdmReplacementCoreAsync`）で 2 回行う。確認を待つ間に他の PC が同じ職員証を登録した・対象の職員を削除した／先に差し替えた場合は、何も書かずに案内する（後者は一覧を再読込して `ConcurrencyConflictMessage.ForReplaceStaffCard`）
+  - 職員一覧の CSV の取り込みは、職員証の IDm が未登録の行のうち、同じ職員番号の職員（未削除）が別の職員証で登録されている行をスキップし、プレビューで理由を示す（差し替えの前に出力した CSV の古い職員証の行を新しい職員として登録し、紛失した職員証がまた使えるようになるのを防ぐ。職員番号が空の行・削除済みの職員とだけ一致する行は従来どおり登録する）
+  - 差し替えが確定したら、同じ PC のメイン画面が持つ 30 秒ルールの前回操作者の IDm を新しい IDm へ置き換える（`StaffCardReplacedMessage`）。受け取った IDm は入口で大文字にそろえ、判定の比較をすべて大文字どうしの完全一致にした
   - 管理者マニュアル §3.1.4「職員証を再発行した」を、削除して登録し直す手順から差し替えの手順へ書き直した（登録済みの職員が 1 人だけでその職員証を紛失した場合は、従来どおり IT 担当者への相談を案内する）。02 DB・03 画面（§3.3・§3.17・遷移図）・04 機能（§2.8）・05 クラス・07 テスト設計書を更新
-  - テスト: `Services/StaffCardReplacementTests`（実 SQLite）・`ViewModels/StaffManageViewModelCardReplacementTests`・UITests `StaffCardReplacementUiTests` 2 件を新設（UT-148）。`ScreenTransitionDiagramConsistencyTests` の認証操作のスナップショットに「職員証の差し替え」を追加（方針から直接導かれる変更）。`StaffManageViewModel` の構築にタイマーの生成（`ITimerFactory`）を足したため、既存の 3 つのテストクラスの構築に `TestTimerFactory` を渡すよう変えた（表明は不変）
+  - テスト: `Services/StaffCardReplacementTests`（実 SQLite）・`ViewModels/StaffManageViewModelCardReplacementTests`・`Services/CsvImportStaffReplacedCardTests`・`MainViewModelTests` +2 件・UITests `StaffCardReplacementUiTests` 2 件を新設（UT-148）。`ScreenTransitionDiagramConsistencyTests` の認証操作のスナップショットに「職員証の差し替え」を追加（方針から直接導かれる変更）。`StaffManageViewModel` の構築にタイマーの生成（`ITimerFactory`）を足したため、既存の 3 つのテストクラスの構築に `TestTimerFactory` を渡すよう変えた（表明は不変）
 
 **ドキュメント**
 - Issue #2466 **職員証の認証を伴う操作のうち、マニュアルの手順が認証の段を欠いていた・確認ダイアログとの順序が実装と食い違っていた箇所を直した**（職員の削除を直した #2450 の続き）。`RequestAuthenticationAsync` の全呼び出し元（22 操作）を洗い出し、各マニュアルの手順と照合した
