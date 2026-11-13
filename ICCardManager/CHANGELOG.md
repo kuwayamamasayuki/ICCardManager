@@ -8,7 +8,7 @@
   - 大きさの上限（#2272）と文字コードの判別（#1744）は `CsvImportService.ReadCsvAsync` 1 か所で、パスから読むときと同じ処理をバイト列に掛ける。照合の時点で上限を超えていて内容を読まなかったファイルも、パスから読み直さずに上限超過として断る（`CsvImportSource.FromOversizedFile`）
   - 照合を経ない直接インポート（新しいカードの登録だけ）は従来どおりパスから読む。パスを受け取る版の取り込み・プレビューは `FromFile` へ委譲する単体テスト用の入口として `internal`・非 `virtual` で残した（本番のコードは呼ばない）
   - 読み取り済みの内容は、復号した時点で読み取り元から手放す（`CsvImportSource.TakeContent`。取り込みと DB への書き込みの間、最大 64MB の配列を残さない。x86）。照合を経ずにパスから読むのは直接インポートだけで、ファイルの状態を記録していないプレビュー経由の取り込み（本番では起きない）は Warning を記録する
-  - テスト: `DataExportImportViewModelTests` +16 件・`CsvImportServiceTests` +16 件（UT-AUDIT-001d）。既存の `DataExportImportViewModelTests` はモックの引数の照合を読み取り元へ書き換えた（期待する動きは不変）。単体 10,522 → 10,554・合計 10,759 → 10,791
+  - テスト: `DataExportImportViewModelTests` +18 件・`CsvImportServiceTests` +16 件（UT-AUDIT-001d）。既存の `DataExportImportViewModelTests` はモックの引数の照合を読み取り元へ書き換え、画面の組み立てに必須引数のロガーを渡す形へ変えた（期待する動きは不変）。単体 10,522 → 10,556・合計 10,759 → 10,793
 
 **ドキュメント**
 - Issue #2466 **職員証の認証を伴う操作のうち、マニュアルの手順が認証の段を欠いていた・確認ダイアログとの順序が実装と食い違っていた箇所を直した**（職員の削除を直した #2450 の続き）。`RequestAuthenticationAsync` の全呼び出し元（22 操作）を洗い出し、各マニュアルの手順と照合した

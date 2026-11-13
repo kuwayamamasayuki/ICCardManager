@@ -111,8 +111,8 @@ public partial class DataExportImportViewModel : ViewModelBase
     private readonly IStaffAuthService _staffAuthService;
     private readonly StaffManagementService _staffManagementService;
 
-    /// <summary>ロガー（省略可。Issue #2284 で、照合を経ないプレビュー経由の取り込みを記録するために追加）</summary>
-    private readonly ILogger<DataExportImportViewModel>? _logger;
+    /// <summary>ロガー（Issue #2284 で、照合を経ないプレビュー経由の取り込みを記録するために追加。既定値なしの必須引数）</summary>
+    private readonly ILogger<DataExportImportViewModel> _logger;
 
     /// <summary>
     /// 取り込むファイルの状態と内容を読む処理（Issue #2284）。プレビューと取り込む直前の照合の両方がここを通る
@@ -596,8 +596,8 @@ public partial class DataExportImportViewModel : ViewModelBase
         IDispatcherService dispatcherService,
         IStaffAuthService staffAuthService,
         StaffManagementService staffManagementService,
-        ICardReader? cardReader = null,
-        ILogger<DataExportImportViewModel>? logger = null)
+        ILogger<DataExportImportViewModel> logger,
+        ICardReader? cardReader = null)
     {
         _exportService = exportService;
         _importService = importService;
@@ -611,7 +611,7 @@ public partial class DataExportImportViewModel : ViewModelBase
         _staffAuthService = staffAuthService ?? throw new ArgumentNullException(nameof(staffAuthService));
         _staffManagementService = staffManagementService ?? throw new ArgumentNullException(nameof(staffManagementService));
         _cardReader = cardReader;
-        _logger = logger;
+        _logger = logger ?? throw new ArgumentNullException(nameof(logger));
 
         // カードリーダーイベント購読
         if (_cardReader != null)
@@ -1353,7 +1353,7 @@ public partial class DataExportImportViewModel : ViewModelBase
                     // この分岐を通るため（拒否すると、それらを実ファイルを使う形へ書き換える必要がある）
                     if (!request.DirectImport)
                     {
-                        _logger?.LogWarning(
+                        _logger.LogWarning(
                             "CSVインポート: プレビュー経由の取り込みですが、プレビューしたファイルの状態が記録されていないため、照合を経ずにファイルから読み込みます。File={FilePath}",
                             request.SourceFilePath);
                     }

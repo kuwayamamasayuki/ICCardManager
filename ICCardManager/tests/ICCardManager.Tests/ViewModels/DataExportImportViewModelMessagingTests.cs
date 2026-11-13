@@ -107,6 +107,7 @@ public class DataExportImportViewModelMessagingTests : IDisposable
             CreateSucceedingStaffAuthService(),
             new StaffManagementService(
                 _realDbContext, _staffRepositoryMock.Object, operationLogger, NullLogger<StaffManagementService>.Instance),
+            NullLogger<DataExportImportViewModel>.Instance,
             _cardReaderMock.Object);
     }
 

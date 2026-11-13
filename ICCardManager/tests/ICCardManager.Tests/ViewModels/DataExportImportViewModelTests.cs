@@ -14,6 +14,7 @@ using ICCardManager.Services;
 using ICCardManager.Tests.Infrastructure;
 using ICCardManager.Tests.Infrastructure.Timing;
 using ICCardManager.ViewModels;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using Xunit;
@@ -52,6 +53,9 @@ public class DataExportImportViewModelTests : IDisposable
     /// （<c>Mock.Of</c> の既定値 null のままだと「認証が完了しなかった」扱いになり、書き込みが黙って行われない）。
     /// </summary>
     private readonly Mock<IStaffAuthService> _staffAuthServiceMock;
+
+    /// <summary>画面のロガー（Issue #2284: 照合を経ないプレビュー経由の取り込みの Warning を検査する）</summary>
+    private readonly Mock<ILogger<DataExportImportViewModel>> _viewModelLoggerMock = new();
     /// <summary>操作者の文脈（実物）。認証した職員の操作として取り込まれたかを確かめるために共有する</summary>
     private readonly CurrentOperatorContext _operatorContext;
     private readonly StaffManagementService _staffManagementService;
@@ -123,7 +127,8 @@ public class DataExportImportViewModelTests : IDisposable
             _safeFileLauncherMock.Object,
             _dispatcher,
             _staffAuthServiceMock.Object,
-            _staffManagementService);
+            _staffManagementService,
+            _viewModelLoggerMock.Object);
     }
 
     public void Dispose()
@@ -1181,7 +1186,8 @@ public class DataExportImportViewModelTests : IDisposable
             _safeFileLauncherMock.Object,
             _dispatcher,
             _staffAuthServiceMock.Object,
-            _staffManagementService);
+            _staffManagementService,
+            NullLogger<DataExportImportViewModel>.Instance);
     }
 
     /// <summary>
@@ -3337,6 +3343,54 @@ public class DataExportImportViewModelTests : IDisposable
         {
             System.IO.File.Delete(path);
         }
+    }
+
+    /// <summary>指定したレベルで、指定した値を含むログを書いた回数を表明する</summary>
+    private void VerifyViewModelLogged(LogLevel level, string expectedFragment, Times times)
+    {
+        _viewModelLoggerMock.Verify(
+            x => x.Log(
+                level,
+                It.IsAny<EventId>(),
+                It.Is<It.IsAnyType>((v, _) => v.ToString()!.Contains(expectedFragment)),
+                It.IsAny<Exception?>(),
+                It.IsAny<Func<It.IsAnyType, Exception?, string>>()),
+            times);
+    }
+
+    /// <summary>
+    /// 欠陥を突く側: ファイルの状態を記録していないプレビューから取り込むと、照合を経ずにファイルを読むことを
+    /// Warning で 1 回だけ、ファイル名とともに記録すること（本番では起きない経路が起きたことを、ログで気付けるようにする）
+    /// </summary>
+    [Fact]
+    public async Task ファイルの状態を記録していないプレビューから取り込むと照合を経ないことをWarningで記録すること()
+    {
+        SetupValidPreview(DataType.Cards);
+        _importServiceMock
+            .Setup(s => s.ImportCardsAsync(It.IsAny<CsvImportSource>(), It.IsAny<bool>()))
+            .ReturnsAsync(new CsvImportResult { Success = true, ImportedCount = 1 });
+
+        await _viewModel.ExecuteImportAsync();
+
+        VerifyViewModelLogged(LogLevel.Warning, "test.csv", Times.Once());
+        VerifyViewModelLogged(LogLevel.Warning, "照合を経ず", Times.Once());
+    }
+
+    /// <summary>
+    /// 正当な挙動を塞いでいない側: 直接インポート（もともと照合を経ない）では Warning を記録しないこと
+    /// </summary>
+    [Fact]
+    public async Task 直接インポートでは照合を経ないことをWarningで記録しないこと()
+    {
+        _viewModel.SelectedImportType = DataType.Cards;
+        _importServiceMock
+            .Setup(s => s.ImportNewCardsAsync(It.IsAny<string>()))
+            .ReturnsAsync(new CsvImportResult { Success = true, ImportedCount = 1 });
+
+        await _viewModel.RunImportAsync("direct.csv", directImport: true);
+
+        _importServiceMock.Verify(s => s.ImportNewCardsAsync("direct.csv"), Times.Once, "前提: 直接インポートが行われたこと");
+        VerifyViewModelLogged(LogLevel.Warning, string.Empty, Times.Never());
     }
 
     /// <summary>
