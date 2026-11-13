@@ -152,6 +152,11 @@ namespace ICCardManager.ViewModels
         private string _editTargetName = string.Empty;
         private string _editTargetNumber = string.Empty;
 
+        /// <summary>
+        /// 編集開始時（一覧に載っていた）の備考（Issue #2461: 差し替えの前に未保存の入力が無いかを確かめるため）
+        /// </summary>
+        private string _editTargetNote = string.Empty;
+
         /// <summary>職員証の差し替えのタッチ待ちの残り時間を刻むタイマーの生成（Issue #2461）</summary>
         private readonly ITimerFactory _timerFactory;
 
@@ -241,6 +246,7 @@ namespace ICCardManager.ViewModels
         {
             _editTargetName = staff.Name;
             _editTargetNumber = staff.Number ?? string.Empty;
+            _editTargetNote = staff.Note ?? string.Empty;
         }
 
         /// <summary>
@@ -250,6 +256,7 @@ namespace ICCardManager.ViewModels
         {
             _editTargetName = string.Empty;
             _editTargetNumber = string.Empty;
+            _editTargetNote = string.Empty;
         }
 
         /// <summary>
@@ -1338,6 +1345,20 @@ namespace ICCardManager.ViewModels
                "別の新しい職員証で、もう一度「職員証を差し替え」からやり直してください。";
 
         /// <summary>
+        /// 氏名・職員番号・備考の入力が、編集を始めたときの値から変わっているか（Issue #2461）
+        /// </summary>
+        /// <remarks>保存と同じサニタイズを通して比べる（前後の空白だけの違いを「変更」と見なさない）。</remarks>
+        private bool HasUnsavedEditInput()
+            => InputSanitizer.SanitizeName(EditName) != InputSanitizer.SanitizeName(_editTargetName)
+               || InputSanitizer.SanitizeStaffNumber(EditNumber) != InputSanitizer.SanitizeStaffNumber(_editTargetNumber)
+               || InputSanitizer.SanitizeNote(EditNote) != InputSanitizer.SanitizeNote(_editTargetNote);
+
+        /// <summary>差し替えを始める前に、未保存の入力があったときの案内</summary>
+        internal const string ReplacementBlockedByUnsavedEditMessage =
+            "氏名・職員番号・備考に保存していない変更があるため、職員証の差し替えを始めていません（差し替えが済むと編集を終えるため、変更が失われます）。" +
+            "先に「保存」するか「キャンセル」で変更を取り消してから、もう一度「職員証を差し替え」を押してください。";
+
+        /// <summary>
         /// 職員証の差し替えを始められるか（編集中の登録済みの職員で、差し替えの最中でない）
         /// </summary>
         private bool CanStartStaffCardReplacement =>
@@ -1368,6 +1389,15 @@ namespace ICCardManager.ViewModels
         {
             if (!CanStartStaffCardReplacement)
             {
+                return;
+            }
+
+            // 差し替えが済むと編集を終える（CancelEdit）ため、未保存の氏名・職員番号・備考の変更は失われる。
+            // 黙って捨てないよう、変更があれば差し替えを始めずに、先に保存か取り消しをするよう案内する
+            if (HasUnsavedEditInput())
+            {
+                StatusMessage = ReplacementBlockedByUnsavedEditMessage;
+                IsStatusError = true;
                 return;
             }
 

@@ -407,7 +407,8 @@ namespace ICCardManager.Services
             {
                 FieldName = "状態",
                 NewValue = $"職員番号 {sameNumberStaff.Number} の職員「{sameNumberStaff.Name}」が別の職員証で登録済み" +
-                           "（取り込みません。職員証を差し替える前の行の可能性があります）",
+                           "（取り込みません。職員証を差し替える前の行の可能性があります。" +
+                           "新しい職員として登録する場合は、職員番号を確かめて職員管理画面から登録してください）",
                 IsDisplayOnly = true
             };
 

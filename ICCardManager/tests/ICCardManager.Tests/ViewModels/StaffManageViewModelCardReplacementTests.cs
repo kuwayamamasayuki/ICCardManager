@@ -190,6 +190,51 @@ public class StaffManageViewModelCardReplacementTests : IDisposable
         VerifyNoReplacementWrite();
     }
 
+    public static IEnumerable<object[]> UnsavedEditCases()
+    {
+        yield return new object[] { "氏名", (Action<StaffManageViewModel>)(vm => vm.EditName = "博多 花子（改姓）") };
+        yield return new object[] { "職員番号", (Action<StaffManageViewModel>)(vm => vm.EditNumber = "S-099") };
+        yield return new object[] { "備考", (Action<StaffManageViewModel>)(vm => vm.EditNote = "総務課") };
+    }
+
+    [Theory]
+    [MemberData(nameof(UnsavedEditCases))]
+    public async Task 保存していない変更があれば差し替えを始めず先に保存か取り消しを案内すること(
+        string field, Action<StaffManageViewModel> edit)
+    {
+        // 差し替えが済むと編集を終える（CancelEdit）ので、未保存の変更を黙って捨てないこと
+        ArrangeAuthenticationSucceeds();
+        EnterEditForm();
+        edit(_viewModel);
+
+        var task = _viewModel.ReplaceStaffCardAsync();
+        task.IsCompleted.Should().BeTrue("認証もタッチ待ちも始めずに終わる");
+        await task;
+
+        _staffAuthServiceMock.Verify(a => a.RequestAuthenticationAsync(It.IsAny<string>()), Times.Never, field);
+        _viewModel.IsWaitingForReplacementCard.Should().BeFalse();
+        _viewModel.StatusMessage.Should().Be(StaffManageViewModel.ReplacementBlockedByUnsavedEditMessage);
+        _viewModel.IsStatusError.Should().BeTrue();
+        _viewModel.IsEditing.Should().BeTrue("入力内容は消さない");
+        VerifyNoReplacementWrite();
+    }
+
+    [Fact]
+    public async Task 入力が編集開始時のままなら差し替えを始めること()
+    {
+        // 上の対: 前後の空白だけの違いは保存と同じサニタイズで変更と見なさない
+        ArrangeAuthenticationSucceeds();
+        EnterEditForm();
+        _viewModel.EditName = "  " + TargetName + " ";
+
+        var task = _viewModel.ReplaceStaffCardAsync();
+
+        _staffAuthServiceMock.Verify(a => a.RequestAuthenticationAsync("職員証の差し替え"), Times.Once);
+        _viewModel.IsWaitingForReplacementCard.Should().BeTrue();
+        _viewModel.CancelReplaceStaffCard();
+        await task;
+    }
+
     [Fact]
     public async Task 新規登録中は差し替えを始めないこと()
     {
@@ -531,6 +576,7 @@ public class StaffManageViewModelCardReplacementTests : IDisposable
         yield return new object[] { StaffManageViewModel.ReplacementTimedOutMessage };
         yield return new object[] { StaffManageViewModel.ReplacementNotConfirmedMessage };
         yield return new object[] { StaffManageViewModel.ReplacementCommittedButRefreshFailedMessage };
+        yield return new object[] { StaffManageViewModel.ReplacementBlockedByUnsavedEditMessage };
         foreach (var status in new[]
                  {
                      StaffCardReplacementStatus.SameCard, StaffCardReplacementStatus.RegisteredStaff,
