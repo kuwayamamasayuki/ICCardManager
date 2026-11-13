@@ -8,9 +8,9 @@ namespace ICCardManager.Common.Messages
     /// <remarks>
     /// <para>
     /// 差し替えは職員の主キー（職員証の IDm）を変える。メイン画面は 30 秒ルールのために直前の操作者の IDm
-    /// （<c>MainViewModel._lastProcessedStaffIdm</c>）を持っており、差し替えの直後に同じ交通系ICカードを
-    /// タッチし直すと、もう存在しない古い IDm で逆の操作を記録しようとして失敗する。受け取った画面は、
-    /// 古い IDm を持っていれば新しい IDm へ置き換える（同じ職員のまま）。
+    /// （<c>MainViewModel._lastProcessedStaffIdm</c>）と、職員証タッチ後の確定済みの操作者（<c>MainViewModel._currentStaffIdm</c>）を
+    /// 持っており、差し替えの直後に同じ交通系ICカードをタッチし直す・続けて交通系ICカードをタッチすると、もう存在しない古い IDm で
+    /// 記録しようとして失敗する。受け取った画面は、どちらかが古い IDm なら新しい IDm へ置き換える（同じ職員のまま）。
     /// </para>
     /// <para>
     /// 届くのは同じ PC の画面だけ。共有フォルダーモードの他の PC が持つ古い IDm は置き換わらない
