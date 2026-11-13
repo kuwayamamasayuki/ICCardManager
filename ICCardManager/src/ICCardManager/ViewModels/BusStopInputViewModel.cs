@@ -725,7 +725,7 @@ public partial class BusStopInputViewModel : ViewModelBase
 
         if (_editsRecordedLedger)
         {
-            if (!await WouldChangeRecordedLedgerAsync(item => ToPersistedBusStops(item.BusStops)))
+            if (!await WouldChangeRecordedLedgerAsync(item => ToPersistedBusStops(item.BusStops), compareSummary: true))
             {
                 // Issue #2278: 保存済みの内容と同じなら書き込まずに閉じる（何も変えていない保存は書かない。
                 // db-write-conventions #2375）。台帳が変わらないので職員証も求めず、操作ログに空の変更を残さない
@@ -1052,10 +1052,11 @@ public partial class BusStopInputViewModel : ViewModelBase
 
         if (_editsRecordedLedger)
         {
-            if (!await WouldChangeRecordedLedgerAsync(_ => SummaryGenerator.BusPlaceholder))
+            if (!await WouldChangeRecordedLedgerAsync(_ => SummaryGenerator.BusPlaceholder, compareSummary: false))
             {
-                // Issue #2278: 一覧から開いた行のバス停名がすべて未入力なら、スキップで台帳は変わらない。
-                // 書き込まずに閉じる（Esc で閉じるだけの操作に職員証を求めない）
+                // Issue #2278: 一覧から開いた行のバス停名がすべて未入力なら、スキップで消えるバス停名は無い。
+                // 書き込まずに閉じる（Esc で閉じるだけの操作に職員証を求めない）。スキップは「後で入力」であって
+                // 摘要の再生成ではないので、摘要が明細からの再生成と違っても（手で補足した摘要など）書き換えない
                 StatusMessage = "スキップしました（後で入力が必要です）";
                 IsSaved = true;
                 return;
@@ -1086,17 +1087,23 @@ public partial class BusStopInputViewModel : ViewModelBase
     /// Issue #2278: 一覧から開いた行で、保存・スキップが書く値が台帳（開いた時点の DB の値）を変えるか。
     /// </summary>
     /// <param name="valueToWrite">各入力欄について明細へ書く値（保存なら入力欄の値、スキップならプレースホルダ）</param>
+    /// <param name="compareSummary">
+    /// 摘要も比べるか。保存は <c>true</c>（保存は摘要を明細から再生成して書くので、バス停名が同じでも保存済みの摘要が
+    /// 再生成と違えば摘要の書き換えになり、認証と操作ログが要る）。スキップは <c>false</c>（スキップの目的は「後で入力」で、
+    /// バス停名が変わらないなら何も書かない。手で補足した摘要・古い行の並びの違う摘要を、Esc で閉じるだけの操作で
+    /// 書き換えない・職員証を求めない）。
+    /// </param>
     /// <remarks>
     /// <para>
     /// 比べる相手は開いた時点の DB の値（<see cref="_committedLedger"/>）で、入力欄の値ではない。入力欄は保存していないので、
     /// 入力してからスキップしても台帳は変わらない。バス停名は空欄（NULL）と★を同じ「未入力」とみなし（保存・スキップで同じ判定）、
-    /// 摘要は保存と同じく明細から再生成して比べる（バス停名が同じでも、保存済みの摘要が再生成と違えば書き換えになる）。
+    /// 摘要は <paramref name="compareSummary"/> のときだけ、保存と同じく明細から再生成して比べる。
     /// </para>
     /// <para>
     /// 判定できないとき（開いた時点の複製が無い・入力欄の明細が見つからない）は、書き換えとして扱う（認証を求める側へ倒す）。
     /// </para>
     /// </remarks>
-    private async Task<bool> WouldChangeRecordedLedgerAsync(Func<BusStopInputItem, string> valueToWrite)
+    private async Task<bool> WouldChangeRecordedLedgerAsync(Func<BusStopInputItem, string> valueToWrite, bool compareSummary)
     {
         if (_committedLedger == null || Ledger == null)
         {
@@ -1125,6 +1132,11 @@ public partial class BusStopInputViewModel : ViewModelBase
             }
 
             detail.BusStops = newValue;
+        }
+
+        if (!compareSummary)
+        {
+            return false;
         }
 
         var settings = await _settingsRepository.GetAppSettingsAsync();

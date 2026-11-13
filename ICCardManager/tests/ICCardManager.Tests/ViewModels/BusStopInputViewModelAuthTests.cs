@@ -288,6 +288,35 @@ public class BusStopInputViewModelAuthTests : IDisposable
     }
 
     [Fact]
+    public async Task 未入力一覧から開いた行の摘要が手で補足されていてもバス停名がすべて未入力ならスキップは認証を求めず摘要を書き換えないこと()
+    {
+        var ledger = RecordedLedger("★", null);
+        ledger.Summary = "バス（★）※要確認"; // 明細からの再生成とは違う、手で補足した摘要
+        await OpenFromIncompleteListAsync(ledger);
+
+        await _viewModel.SkipAsync();
+
+        _staffAuthServiceMock.Verify(s => s.RequestAuthenticationAsync(It.IsAny<string>()), Times.Never,
+            "スキップは「後で入力」で、摘要の再生成ではない（Esc で閉じるだけの操作に職員証を求めない）");
+        VerifyNothingWritten();
+        _viewModel.IsSaved.Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task 未入力一覧から開いた行の摘要が手で補足されていても保存済みのバス停名があればスキップは認証を求めること()
+    {
+        var ledger = RecordedLedger("天神～博多駅", null);
+        ledger.Summary = "バス（天神～博多駅、★）※要確認";
+        await OpenFromIncompleteListAsync(ledger);
+
+        await _viewModel.SkipAsync();
+
+        _staffAuthServiceMock.Verify(s => s.RequestAuthenticationAsync(SkipOperation), Times.Once,
+            "保存済みのバス停名を★へ戻すのは書き換え");
+        _insertedLogs.Should().ContainSingle();
+    }
+
+    [Fact]
     public async Task 未入力一覧から開いた未入力の行に入力してからスキップしても認証を求めず何も書かないこと()
     {
         await OpenFromIncompleteListAsync(RecordedLedger("★"));
@@ -351,6 +380,22 @@ public class BusStopInputViewModelAuthTests : IDisposable
         _staffAuthServiceMock.Verify(s => s.RequestAuthenticationAsync(It.IsAny<string>()), Times.Never,
             "経路は最後の初期化で決まる（前の初期化の経路を引きずらない）");
         _insertedLogs.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task 未入力一覧から開いた後に同期版の返却フローの初期化をし直したら認証を求めないこと()
+    {
+        await OpenFromIncompleteListAsync(RecordedLedger((string?)null));
+        var returned = RecordedLedger((string?)null);
+        _viewModel.InitializeWithDetails(returned, returned.Details);
+        _viewModel.BusUsages[0].BusStops = "天神～博多駅";
+
+        await _viewModel.SaveAsync();
+
+        _staffAuthServiceMock.Verify(s => s.RequestAuthenticationAsync(It.IsAny<string>()), Times.Never,
+            "同期版の初期化も返却フローの経路へ戻す");
+        _insertedLogs.Should().BeEmpty();
+        _detailTransactions.Should().ContainSingle("保存はする");
     }
 
     #endregion
