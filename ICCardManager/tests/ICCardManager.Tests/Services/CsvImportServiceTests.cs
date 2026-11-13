@@ -3515,6 +3515,37 @@ FEDCBA9876543210,鈴木花子,002,テスト2";
     }
 
     [Fact]
+    public async Task ReadCsvAsync_内容を読んだ後は読み取り元に配列を残さないこと()
+    {
+        // Arrange: 読み取り元は取り込みの非同期メソッドに捕捉され、DB への書き込みが終わるまで生きる
+        var bytes = CsvEncoding.GetPreamble().Concat(CsvEncoding.GetBytes("職員IDm,氏名,職員番号,備考\n")).ToArray();
+        var source = CsvImportSource.FromContent(Path.Combine(_testDirectory, "released.csv"), bytes);
+
+        // Act
+        var lines = await CsvImportService.ReadCsvAsync(source);
+
+        // Assert: 復号した後は最大 64MB の配列を手放す（パスから読んでいた以前の実装と同じ時点）
+        lines.Should().Equal("職員IDm,氏名,職員番号,備考");
+        source.Content.Should().BeNull();
+        source.IsContentTaken.Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task ReadCsvAsync_同じ読み取り元を2回読むと例外を投げること()
+    {
+        // Arrange: 1 つの取り込み・プレビューは CSV を 1 回だけ読む。2 回目は誤りとして知らせる（空の内容として読まない）
+        var bytes = CsvEncoding.GetBytes("職員IDm,氏名,職員番号,備考\n");
+        var source = CsvImportSource.FromContent(Path.Combine(_testDirectory, "read_twice.csv"), bytes);
+        await CsvImportService.ReadCsvAsync(source);
+
+        // Act
+        var act = async () => await CsvImportService.ReadCsvAsync(source);
+
+        // Assert
+        await act.Should().ThrowAsync<InvalidOperationException>();
+    }
+
+    [Fact]
     public async Task ReadCsvAsync_パスを渡したときは従来どおりファイルを読むこと()
     {
         // Arrange

@@ -302,6 +302,10 @@ namespace ICCardManager.Services
         /// <param name="logger">判別結果を記録するロガー（省略可）</param>
         /// <remarks>
         /// <para>
+        /// Issue #2284: パスから読む単体テスト用の入口。本番の取り込み・プレビューは読み取り元を受け取る
+        /// <see cref="ReadCsvAsync(CsvImportSource, ILogger?)"/> を通り、以下の判別・上限はそちらの 1 か所で行う。
+        /// </para>
+        /// <para>
         /// Issue #1744: 文字コードは <see cref="TextEncodingDetector"/> で判別する。
         /// 従来は BOM 無しファイルを <see cref="Encoding.UTF8"/>（置換フォールバック）固定で復号していたため、
         /// 日本語版 Excel が「CSV（コンマ区切り）」として保存し直した Shift_JIS ファイルの日本語が
@@ -327,7 +331,8 @@ namespace ICCardManager.Services
         /// </summary>
         /// <remarks>
         /// 上限の境界を、実際に数十MBのファイルを作らずに単体テストで固定するためのオーバーロード。
-        /// 本番の経路は上の版から <see cref="MaxImportFileSizeBytes"/> を渡す。
+        /// パスを受け取る 2 つの版はどちらも単体テスト用の入口で、本番の取り込み・プレビューは
+        /// <see cref="ReadCsvAsync(CsvImportSource, ILogger?)"/> を通る（Issue #2284）。
         /// </remarks>
         internal static Task<List<string>> ReadCsvFileAsync(string filePath, ILogger? logger, long maxFileSizeBytes)
         {
@@ -405,9 +410,8 @@ namespace ICCardManager.Services
                 throw FileOperationException.FileTooLarge(length, maxFileSizeBytes, source.FilePath);
             }
 
-            return Task.FromResult(source.Content
-                ?? throw new InvalidOperationException(
-                    $"読み込める大きさの上限（{maxFileSizeBytes} バイト）以下のファイルが、内容を持たずに渡されました: {source.FilePath}"));
+            // 内容は読み取り元から引き渡させる（復号した後まで最大 64MB の配列を読み取り元に残さない。CsvImportSource.TakeContent）
+            return Task.FromResult(source.TakeContent());
         }
 
         /// <summary>

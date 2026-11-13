@@ -36,8 +36,41 @@ namespace ICCardManager.Services
         /// <summary>
         /// 読み取り済みの内容（<see cref="FromFile"/> で作ったときは <c>null</c>＝取り込むときにパスから読む）
         /// </summary>
-        /// <remarks>受け取った配列を複製せずに持つ。渡した側は、取り込みが終わるまで書き換えないこと</remarks>
-        internal byte[]? Content { get; }
+        /// <remarks>
+        /// 受け取った配列を複製せずに持つ。渡した側は、取り込みが終わるまで書き換えないこと。
+        /// 取り込みが読んだ（<see cref="TakeContent"/>）後は <c>null</c> になる。
+        /// </remarks>
+        internal byte[]? Content { get; private set; }
+
+        /// <summary>
+        /// 内容を取り込みへ引き渡したか（<see cref="TakeContent"/> を呼んだ後は <c>true</c>）
+        /// </summary>
+        internal bool IsContentTaken { get; private set; }
+
+        /// <summary>
+        /// 内容を取り込みへ引き渡し、この読み取り元からは手放す（Issue #2284）
+        /// </summary>
+        /// <remarks>
+        /// 読み取り元は取り込みの非同期メソッドの引数・ラムダに捕捉され、取り込みと DB への書き込みが終わるまで生きる。
+        /// 内容を持ち続けると、復号した後も最大 64MB の配列が解放されない（x86 の 2GB の空間では無視できない）。
+        /// 以前の実装（パスから読む）は復号した時点で配列を手放していたため、同じ時点で手放す。
+        /// 1 つの取り込み・プレビューは CSV を 1 回だけ読むので、2 回目の読み取りは誤りとして例外にする。
+        /// </remarks>
+        /// <exception cref="InvalidOperationException">内容を持たない、または既に引き渡した場合</exception>
+        internal byte[] TakeContent()
+        {
+            if (IsContentTaken)
+            {
+                throw new InvalidOperationException(
+                    $"CSV の読み取り元の内容は 1 回だけ読めます（既に読み込み済み）: {FilePath}");
+            }
+
+            var content = Content
+                ?? throw new InvalidOperationException($"CSV の読み取り元が内容を持っていません: {FilePath}");
+            Content = null;
+            IsContentTaken = true;
+            return content;
+        }
 
         /// <summary>
         /// 読み取ったときのファイルの大きさ（<see cref="FromFile"/> で作ったときは <c>null</c>）

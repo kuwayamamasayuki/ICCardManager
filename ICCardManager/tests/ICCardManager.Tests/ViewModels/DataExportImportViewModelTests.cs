@@ -3131,13 +3131,13 @@ public class DataExportImportViewModelTests : IDisposable
         {
             _viewModel.SelectedImportType = dataType;
             List<string>? importedLines = null;
-            CsvImportSource? importedSource = null;
+            var passedContent = false;
             SetupPreviewAndImportBySource(
                 dataType,
                 _ => Task.FromResult(new CsvImportPreviewResult { IsValid = true }),
                 async source =>
                 {
-                    importedSource = source;
+                    passedContent = source.Content != null;
 
                     // 照合が済んだ直後、サービスが内容を読む前に書き換えられた（TOCTOU の窓）
                     System.IO.File.WriteAllText(path, TamperedCsvContent, new System.Text.UTF8Encoding(true));
@@ -3152,7 +3152,7 @@ public class DataExportImportViewModelTests : IDisposable
             importedLines.Should().NotBeNull("前提: 照合を通って取り込みが行われたこと");
             importedLines.Should().Equal(new[] { "見出し", "照合した行,001" },
                 "照合した内容を取り込み、照合していない内容（書き換えた後のファイル）を取り込まない");
-            importedSource!.Content.Should().NotBeNull("パスから読み直す読み取り元（FromFile）ではなく、照合に使った内容を渡す");
+            passedContent.Should().BeTrue("パスから読み直す読み取り元（FromFile）ではなく、照合に使った内容を渡す");
         }
         finally
         {
@@ -3206,6 +3206,7 @@ public class DataExportImportViewModelTests : IDisposable
         {
             _viewModel.SelectedImportType = DataType.Cards;
             CsvImportSource? importedSource = null;
+            byte[]? passedBytes = null;
             List<string>? importedLines = null;
             SetupPreviewAndImportBySource(
                 DataType.Cards,
@@ -3213,6 +3214,7 @@ public class DataExportImportViewModelTests : IDisposable
                 async source =>
                 {
                     importedSource = source;
+                    passedBytes = source.Content?.ToArray();
                     importedLines = await CsvImportService.ReadCsvAsync(source);
                     return new CsvImportResult { Success = true, ImportedCount = 1 };
                 });
@@ -3221,8 +3223,9 @@ public class DataExportImportViewModelTests : IDisposable
             await _viewModel.ExecuteImportAsync();
 
             importedSource!.FilePath.Should().Be(path, "ログ・監査・例外の文言には取り込んだファイルのパスを載せる");
-            importedSource.Content.Should().Equal(System.IO.File.ReadAllBytes(path));
+            passedBytes.Should().Equal(System.IO.File.ReadAllBytes(path));
             importedLines.Should().Equal(new[] { "見出し", "照合した行,001" });
+            importedSource.Content.Should().BeNull("復号した後は、最大 64MB の配列を読み取り元に残さない");
         }
         finally
         {
@@ -3267,6 +3270,76 @@ public class DataExportImportViewModelTests : IDisposable
     }
 
     /// <summary>
+    /// 欠陥を突く側: 照合に使う読み取りの直後（サービスへ渡すより前）にファイルが書き換えられても、取り込まれるのは照合した内容であること
+    /// （照合の後で画面がファイルを読み直してサービスへ渡す実装を検出する。サービスの中で書き換える上のテストでは、
+    /// 画面が読み直した時点のファイルはまだ照合した内容なので検出できない）
+    /// </summary>
+    [Theory]
+    [MemberData(nameof(照合を経て取り込むデータ種別))]
+    public async Task 照合の直後にファイルが書き換えられても取り込まれるのは照合した内容であること(DataType dataType)
+    {
+        var path = WriteTempCsv(VerifiedCsvContent);
+        try
+        {
+            _viewModel.SelectedImportType = dataType;
+            List<string>? importedLines = null;
+            SetupPreviewAndImportBySource(
+                dataType,
+                _ => Task.FromResult(new CsvImportPreviewResult { IsValid = true }),
+                async source =>
+                {
+                    importedLines = await CsvImportService.ReadCsvAsync(source);
+                    return new CsvImportResult { Success = true, ImportedCount = 1 };
+                });
+            await _viewModel.PreviewFileAsync(path);
+            _viewModel.HasPreview.Should().BeTrue("前提: プレビューが表示されていること");
+
+            // 取り込む直前の照合に使う読み取りが済んだ直後に、ファイルを書き換える
+            _viewModel.CaptureFileAsync = async filePath =>
+            {
+                var capture = await DataExportImportViewModel.PreviewFileCapture.CaptureAsync(filePath);
+                System.IO.File.WriteAllText(filePath, TamperedCsvContent, new System.Text.UTF8Encoding(true));
+                return capture;
+            };
+
+            await _viewModel.ExecuteImportAsync();
+
+            importedLines.Should().Equal(new[] { "見出し", "照合した行,001" },
+                "照合した内容を取り込み、照合の後に書き換えられた内容を取り込まない");
+        }
+        finally
+        {
+            System.IO.File.Delete(path);
+        }
+    }
+
+    /// <summary>
+    /// 読み取った内容は取り込みの読み取り元へ引き渡し、読み取り結果の側には残さないこと
+    /// （画面の非同期メソッドが読み取り結果を取り込みの終わりまで持っていても、最大 64MB の配列を残さない）
+    /// </summary>
+    [Fact]
+    public void 読み取った内容は取り込みの読み取り元へ引き渡して手放すこと()
+    {
+        var path = WriteTempCsv(VerifiedCsvContent);
+        try
+        {
+            var capture = DataExportImportViewModel.PreviewFileCapture.Capture(path);
+            capture.Should().NotBeNull();
+            var expected = capture!.Content!.ToArray();
+
+            var source = capture.ToImportSource(path);
+
+            source.Content.Should().Equal(expected);
+            capture.Content.Should().BeNull("内容は読み取り元へ引き渡した");
+            capture.Fingerprint.Length.Should().Be(expected.LongLength, "照合の値は引き渡した後も変わらない");
+        }
+        finally
+        {
+            System.IO.File.Delete(path);
+        }
+    }
+
+    /// <summary>
     /// 照合の値は、取り込むバイト列から計算したものであること（照合した内容と取り込む内容が同じであることの前提）
     /// </summary>
     [Fact]
@@ -3282,7 +3355,7 @@ public class DataExportImportViewModelTests : IDisposable
             capture!.Fingerprint.Should().Be(new DataExportImportViewModel.PreviewFileFingerprint(
                 capture.Content!.LongLength, BitConverter.ToString(sha256.ComputeHash(capture.Content))));
             DataExportImportViewModel.PreviewFileFingerprint.Capture(path).Should().Be(capture.Fingerprint,
-                "プレビュー時の記録（PreviewFileFingerprint.Capture）と取り込み直前の照合は同じ値を比べる");
+                "テスト用の記録（PreviewFileFingerprint.Capture。RecordPreviewSnapshotForCurrentState が使う）も同じ値になる");
         }
         finally
         {

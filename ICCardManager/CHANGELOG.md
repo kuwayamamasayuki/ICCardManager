@@ -7,7 +7,8 @@
   - 取り込み・プレビューの 8 経路（カード・職員・利用履歴・利用履歴詳細）が読み取り元 `CsvImportSource`（パス、または読み取り済みの内容）を受け取る。画面は照合に使ったバイト列（`DataExportImportViewModel.PreviewFileCapture`）を `CsvImportSource.FromContent` で渡し、サービスはファイルを開かない。プレビューも、ハッシュを取ったのと同じバイト列から作る（以前はハッシュの後に読み直しており、表示した内容と照合の値が別の内容を指し得た）
   - 大きさの上限（#2272）と文字コードの判別（#1744）は `CsvImportService.ReadCsvAsync` 1 か所で、パスから読むときと同じ処理をバイト列に掛ける。照合の時点で上限を超えていて内容を読まなかったファイルも、パスから読み直さずに上限超過として断る（`CsvImportSource.FromOversizedFile`）
   - 照合を経ない直接インポート（新しいカードの登録だけ）は従来どおりパスから読む。パスを受け取る版の取り込み・プレビューは `FromFile` へ委譲する単体テスト用の入口として `internal`・非 `virtual` で残した（本番のコードは呼ばない）
-  - テスト: `DataExportImportViewModelTests` +11 件・`CsvImportServiceTests` +14 件（UT-AUDIT-001d）。既存の `DataExportImportViewModelTests` はモックの引数の照合を読み取り元へ書き換えた（期待する動きは不変）。単体 10,522 → 10,547・合計 10,759 → 10,784
+  - 読み取り済みの内容は、復号した時点で読み取り元から手放す（`CsvImportSource.TakeContent`。取り込みと DB への書き込みの間、最大 64MB の配列を残さない。x86）。照合を経ずにパスから読むのは直接インポートだけで、ファイルの状態を記録していないプレビュー経由の取り込み（本番では起きない）は Warning を記録する
+  - テスト: `DataExportImportViewModelTests` +16 件・`CsvImportServiceTests` +16 件（UT-AUDIT-001d）。既存の `DataExportImportViewModelTests` はモックの引数の照合を読み取り元へ書き換えた（期待する動きは不変）。単体 10,522 → 10,554・合計 10,759 → 10,791
 
 ### v2.14.1 (2026-11-12)
 
