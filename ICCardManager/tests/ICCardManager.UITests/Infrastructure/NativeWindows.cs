@@ -94,5 +94,48 @@ namespace ICCardManager.UITests.Infrastructure
 
         [DllImport("user32.dll")]
         private static extern IntPtr GetForegroundWindow();
+
+        private const uint MonitorDefaultToNearest = 2;
+
+        /// <summary>
+        /// ウィンドウが載っているモニターの作業領域（物理ピクセル。UIA の BoundingRectangle と同じ単位。Issue #2465）。
+        /// テスト プロセスは <c>ScreenshotHelper.EnsureProcessDpiAware</c> で DPI 対応にしてから呼ぶこと。
+        /// </summary>
+        public static System.Drawing.Rectangle WorkAreaOf(IntPtr handle)
+        {
+            var monitor = MonitorFromWindow(handle, MonitorDefaultToNearest);
+            var info = new MonitorInfo { Size = Marshal.SizeOf(typeof(MonitorInfo)) };
+            if (monitor == IntPtr.Zero || !GetMonitorInfo(monitor, ref info))
+            {
+                throw new InvalidOperationException("ウィンドウが載っているモニターの作業領域を取得できませんでした。");
+            }
+
+            return System.Drawing.Rectangle.FromLTRB(info.Work.Left, info.Work.Top, info.Work.Right, info.Work.Bottom);
+        }
+
+        [StructLayout(LayoutKind.Sequential)]
+        private struct NativeRect
+        {
+            public int Left;
+            public int Top;
+            public int Right;
+            public int Bottom;
+        }
+
+        [StructLayout(LayoutKind.Sequential)]
+        private struct MonitorInfo
+        {
+            public int Size;
+            public NativeRect Monitor;
+            public NativeRect Work;
+            public uint Flags;
+        }
+
+        [DllImport("user32.dll")]
+        private static extern IntPtr MonitorFromWindow(IntPtr hwnd, uint flags);
+
+        [DllImport("user32.dll")]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static extern bool GetMonitorInfo(IntPtr monitor, ref MonitorInfo info);
     }
 }
