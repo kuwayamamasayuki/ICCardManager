@@ -67,6 +67,9 @@ public class ScreenTransitionDiagramConsistencyTests
         ["SettingsViewModel.cs"] = "SETTINGS",
         // Issue #2293: カードの履歴からの取り込みは、取り込みダイアログの「取り込む」で認証する
         ["CardHistoryImportViewModel.cs"] = "CARDHISTIMP",
+        // Issue #2278: 警告エリアの「バス停名未入力」一覧から開いた行の保存・スキップは、バス停入力ダイアログで認証する
+        //（返却フロー内の入力では認証しない）
+        ["BusStopInputViewModel.cs"] = "BUSSTOP",
     };
 
     /// <summary>
@@ -101,6 +104,9 @@ public class ScreenTransitionDiagramConsistencyTests
         "バックアップ先・データベース保存先の変更",
         "データベース保存先をデフォルトに戻す",
         "カード履歴の取り込み",
+        // Issue #2278: 警告エリアの「バス停名未入力」一覧から開いた記録済みの行の書き換え（返却フロー内の入力は対象外）
+        "バス停名の入力",
+        "バス停名の入力のスキップ",
     };
 
     /// <summary>ノード定義行（例: <c>MAIN[メイン画面]</c>）。</summary>

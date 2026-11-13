@@ -55,7 +55,9 @@ public class BusStopInputViewModelTests : IDisposable
             _ledgerRepoMock.Object,
             _settingsRepoMock.Object,
             _dialogServiceMock.Object,
-            _dbContext);
+            _dbContext,
+            Mock.Of<IStaffAuthService>(),
+            new OperationLogger(Mock.Of<IOperationLogRepository>(), Mock.Of<ICurrentOperatorContext>()));
     }
 
     public void Dispose()
