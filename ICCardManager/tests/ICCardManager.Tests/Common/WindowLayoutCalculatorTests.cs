@@ -89,6 +89,34 @@ public class WindowLayoutCalculatorTests
 
     #endregion
 
+    #region FitMaxHeight
+
+    /// <summary>
+    /// Issue #2465: 宣言した上限（680）より広い作業領域では作業領域まで広げ（内容をスクロールせずに収める）、
+    /// 狭い作業領域では作業領域まで縮める（画面の外へはみ出さない）。広げる側だけだと Math.Max の実装が、
+    /// 縮める側だけだと宣言値を返す実装（修正前）が緑になるので対で置く。
+    /// </summary>
+    [Theory]
+    [InlineData(680, 1032, 1032)]
+    [InlineData(680, 600, 600)]
+    [InlineData(680, 680, 680)]
+    public void FitMaxHeight_ReturnsWorkAreaHeight(double declared, double areaHeight, double expected)
+    {
+        WindowLayoutCalculator.FitMaxHeight(declared, areaHeight).Should().Be(expected);
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(-1)]
+    [InlineData(double.NaN)]
+    [InlineData(double.PositiveInfinity)]
+    public void FitMaxHeight_InvalidAreaHeight_ReturnsDeclaredUnchanged(double areaHeight)
+    {
+        WindowLayoutCalculator.FitMaxHeight(680, areaHeight).Should().Be(680);
+    }
+
+    #endregion
+
     #region FitAndCenter
 
     /// <summary>

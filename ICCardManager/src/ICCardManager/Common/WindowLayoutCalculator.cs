@@ -95,6 +95,26 @@ namespace ICCardManager.Common
         }
 
         /// <summary>
+        /// 内容に合わせて伸びるウィンドウ（<c>SizeToContent="Height"</c>）の高さの上限を、作業領域の高さにする（Issue #2465）。
+        /// </summary>
+        /// <param name="declaredMaxHeight">XAML で宣言した上限（画面の情報が取れないときの受け皿）</param>
+        /// <param name="areaHeight">作業領域の高さ（DIP 単位）</param>
+        /// <returns>
+        /// <paramref name="areaHeight"/>。宣言した上限より大きくても小さくても作業領域の高さを使う — 広い画面では内容が
+        /// スクロールせずに収まり、狭い画面ではウィンドウが画面の外へはみ出さない。作業領域の高さが 0 以下・NaN・無限大のときは
+        /// 画面の情報が取れていないとみなし、<paramref name="declaredMaxHeight"/> をそのまま返す。
+        /// </returns>
+        public static double FitMaxHeight(double declaredMaxHeight, double areaHeight)
+        {
+            if (double.IsNaN(areaHeight) || double.IsInfinity(areaHeight) || areaHeight <= 0)
+            {
+                return declaredMaxHeight;
+            }
+
+            return areaHeight;
+        }
+
+        /// <summary>
         /// 画面外にあった保存位置を捨てて、作業領域の中央へ置き直すときの位置と長さを算出する（幅・高さのどちらにも使う）。
         /// </summary>
         /// <param name="length">保存されていた長さ</param>

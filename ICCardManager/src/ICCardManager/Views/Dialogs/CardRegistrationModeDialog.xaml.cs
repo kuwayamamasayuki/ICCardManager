@@ -8,6 +8,7 @@ using System.Windows.Controls;
 using System.Windows.Input;
 using ICCardManager.Common;
 using ICCardManager.Services;
+using ICCardManager.Views.Helpers;
 
 namespace ICCardManager.Views.Dialogs
 {
@@ -124,6 +125,40 @@ namespace ICCardManager.Views.Dialogs
             InitializeMonthComboBox();
             InitializePurchaseDatePicker();
             InitializeCarryoverBalance();
+
+            // Issue #2465: 高さの上限（XAML の MaxHeight 680）は 1366×768 の受け皿で、広い画面でも繰越の入力欄まで含めると
+            // 内容がスクロールの外へはみ出していた。上限を作業領域の高さにし、広い画面ではスクロールせずに収める。
+            // XAML の MaxHeight を上書きするため InitializeComponent() の後に置く。ここでの WorkArea はプライマリモニターの
+            // 作業領域（まだどのモニターに載るか決まっていないため。CarryoverDataLossDialog と同じ既知の制限）で、
+            // 載ったモニターの作業領域へは Loaded・SizeChanged で上限と位置を合わせ直す。
+            MaxHeight = WindowLayoutCalculator.FitMaxHeight(MaxHeight, SystemParameters.WorkArea.Height);
+            Loaded += (s, e) => FitToMonitorWorkArea();
+            SizeChanged += (s, e) =>
+            {
+                if (IsLoaded)
+                {
+                    FitToMonitorWorkArea();
+                }
+            };
+        }
+
+        /// <summary>
+        /// 高さの上限と位置を、このダイアログが載っているモニターの作業領域に合わせる（Issue #2465）。
+        /// </summary>
+        /// <remarks>
+        /// <c>CenterOwner</c> はオーナーの中心に置くだけで画面内へ寄せないので、上限を作業領域の高さまで広げると
+        /// 下端（OK・キャンセル）が画面の外へ出得る。繰越レコードの日付の注意書きで内容が伸びたとき（SizeChanged）も寄せ直す。
+        /// 作業領域が取れなければ何も変えない。
+        /// </remarks>
+        private void FitToMonitorWorkArea()
+        {
+            if (MonitorWorkArea.Of(this) is not Rect workArea)
+            {
+                return;
+            }
+
+            MaxHeight = WindowLayoutCalculator.FitMaxHeight(MaxHeight, workArea.Height);
+            Top = WindowLayoutCalculator.ClampStart(Top, ActualHeight, workArea.Top, workArea.Height);
         }
 
         private void InitializePurchaseDatePicker()
