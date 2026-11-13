@@ -148,7 +148,9 @@ namespace ICCardManager.Views.Dialogs
         /// <remarks>
         /// <c>CenterOwner</c> はオーナーの中心に置くだけで画面内へ寄せないので、上限を作業領域の高さまで広げると
         /// 下端（OK・キャンセル）が画面の外へ出得る。繰越レコードの日付の注意書きで内容が伸びたとき（SizeChanged）も寄せ直す。
-        /// 作業領域が取れなければ何も変えない。
+        /// 横方向も <c>CarryoverDataLossDialog</c> と同じく寄せる（オーナーが画面の端にあると左右がはみ出し得る）。
+        /// 利用者が手で大きさを変えている間も呼ばれるが、ClampStart は作業領域に収まっている位置を動かさないので、
+        /// 作業領域の外へ広げようとしたときに中へ戻すだけになる。作業領域が取れなければ何も変えない。
         /// </remarks>
         private void FitToMonitorWorkArea()
         {
@@ -158,6 +160,7 @@ namespace ICCardManager.Views.Dialogs
             }
 
             MaxHeight = WindowLayoutCalculator.FitMaxHeight(MaxHeight, workArea.Height);
+            Left = WindowLayoutCalculator.ClampStart(Left, ActualWidth, workArea.Left, workArea.Width);
             Top = WindowLayoutCalculator.ClampStart(Top, ActualHeight, workArea.Top, workArea.Height);
         }
 

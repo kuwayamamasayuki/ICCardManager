@@ -74,13 +74,27 @@ public class CardRegistrationModeHintPlacementTests
     [Fact]
     public void 高さの上限を作業領域に合わせ位置を作業領域へ寄せていること()
     {
-        var codeBehind = File.ReadAllText(
-            ViewSourceLocator.Resolve(Path.Combine("Views", "Dialogs", DialogFileName + ".cs")));
+        // コメントを除いたコードだけを見る（「呼ばない」と書いたコメントや、コメントアウトした呼び出しで緑にしない）
+        var code = TestSourceInspection.ToCodeOnly(File.ReadAllText(
+            ViewSourceLocator.Resolve(Path.Combine("Views", "Dialogs", DialogFileName + ".cs"))));
+        var constructor = TestSourceInspection.ExtractMethodBody(code, "public CardRegistrationModeDialog(");
+        var fit = TestSourceInspection.ExtractMethodBody(code, "private void FitToMonitorWorkArea(");
 
-        codeBehind.Should().Contain("MaxHeight = WindowLayoutCalculator.FitMaxHeight(MaxHeight, SystemParameters.WorkArea.Height)",
+        constructor.Should().Contain("MaxHeight = WindowLayoutCalculator.FitMaxHeight(MaxHeight, SystemParameters.WorkArea.Height)",
             "Issue #2465: 高さの上限を作業領域の高さにする（XAML の 680 は画面の情報が取れないときの受け皿）");
-        codeBehind.Should().Contain("Top = WindowLayoutCalculator.ClampStart(Top, ActualHeight, workArea.Top, workArea.Height)",
+
+        // 位置を寄せる処理は、書いてあるだけでは働かない。表示時（Loaded）と大きさが変わったとき（SizeChanged）の両方から呼ばれていること
+        constructor.Should().Contain("Loaded += (s, e) => FitToMonitorWorkArea();",
+            "表示した時点で、載ったモニターの作業領域へ上限と位置を合わせる（CenterOwner は画面内へ寄せない）");
+        TestSourceInspection.ExtractMethodBody(constructor, "SizeChanged +=").Should().Contain("FitToMonitorWorkArea();",
+            "繰越レコードの日付の注意書きで内容が伸びたときも、下端（OK・キャンセル）が画面の外へ出ないよう寄せ直す");
+
+        fit.Should().Contain("MaxHeight = WindowLayoutCalculator.FitMaxHeight(MaxHeight, workArea.Height)",
+            "載ったモニターの作業領域の高さを上限にする（表示前はプライマリモニターの値しか取れない）");
+        fit.Should().Contain("Top = WindowLayoutCalculator.ClampStart(Top, ActualHeight, workArea.Top, workArea.Height)",
             "上限を広げたウィンドウの下端（OK・キャンセル）が画面の外へ出ないよう、位置を作業領域の中へ寄せる");
+        fit.Should().Contain("Left = WindowLayoutCalculator.ClampStart(Left, ActualWidth, workArea.Left, workArea.Width)",
+            "横方向も CarryoverDataLossDialog と同じく作業領域の中へ寄せる");
     }
 
     private static int GridRowOfOutermostBorderContaining(string xaml, string marker)
