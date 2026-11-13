@@ -130,12 +130,17 @@ public class BusStopInputViewModelAuthTests : IDisposable
     [Fact]
     public async Task 未入力一覧から開いた行の保存は職員証の認証を求め認証した職員で操作ログを記録すること()
     {
+        bool? busyAtAuthentication = null;
+        _staffAuthServiceMock.Setup(s => s.RequestAuthenticationAsync(It.IsAny<string>()))
+            .Callback(() => busyAtAuthentication = _viewModel.IsBusy)
+            .ReturnsAsync(() => new StaffAuthResult(AuthIdm, AuthName, _operatorContext));
         await OpenFromIncompleteListAsync(RecordedLedger((string?)null));
         _viewModel.BusUsages[0].BusStops = "天神～博多駅";
 
         await _viewModel.SaveAsync();
 
         _staffAuthServiceMock.Verify(s => s.RequestAuthenticationAsync(SaveOperation), Times.Once);
+        busyAtAuthentication.Should().BeFalse("認証は処理中にする前に求める（認証ダイアログの間は処理中オーバーレイを出さない）");
         _viewModel.IsSaved.Should().BeTrue();
 
         _insertedLogs.Should().ContainSingle("保存した台帳行 1 件を記録する");
@@ -202,6 +207,7 @@ public class BusStopInputViewModelAuthTests : IDisposable
         _staffAuthServiceMock.Verify(s => s.RequestAuthenticationAsync(SaveOperation), Times.Once);
         _insertedLogs.Should().BeEmpty("起きていない変更を記録しない");
         _viewModel.IsSaved.Should().BeFalse();
+        _viewModel.StatusMessage.Should().Be(BusStopInputViewModel.BusStopConflictMessage, "競合の原因と直し方を案内する");
     }
 
     [Theory]
@@ -255,6 +261,38 @@ public class BusStopInputViewModelAuthTests : IDisposable
         log.BeforeData.Should().Contain("\"BusStops\":\"天神～博多駅\"", "変更前は保存済みのバス停名");
         log.AfterData.Should().NotContain("天神～博多駅", "スキップは保存済みのバス停名も★へ戻す（#1156）");
         logTransaction.Should().BeSameAs(_detailTransactions.Single());
+    }
+
+    [Fact]
+    public async Task 未入力一覧から開いた行のスキップで破棄の確認にいいえを選んだら認証を求めないこと()
+    {
+        _dialogServiceMock.Setup(d => d.ShowWarningConfirmation(It.IsAny<string>(), BusStopInputViewModel.SkipDiscardConfirmationTitle))
+            .Returns(false);
+        await OpenFromIncompleteListAsync(RecordedLedger("天神～博多駅", null));
+
+        await _viewModel.SkipAsync();
+
+        _dialogServiceMock.Verify(d => d.ShowWarningConfirmation(It.IsAny<string>(), BusStopInputViewModel.SkipDiscardConfirmationTitle),
+            Times.Once, "前提: 保存済みのバス停名があるので破棄の確認が出る");
+        _staffAuthServiceMock.Verify(s => s.RequestAuthenticationAsync(It.IsAny<string>()), Times.Never,
+            "スキップするかを決める前に職員証を求めない");
+        VerifyNothingWritten();
+        _viewModel.IsSaved.Should().BeFalse("入力画面に戻る");
+    }
+
+    [Fact]
+    public async Task 未入力一覧から開いた行のスキップの認証は処理中にする前に求めること()
+    {
+        bool? busyAtAuthentication = null;
+        _staffAuthServiceMock.Setup(s => s.RequestAuthenticationAsync(It.IsAny<string>()))
+            .Callback(() => busyAtAuthentication = _viewModel.IsBusy)
+            .ReturnsAsync(() => new StaffAuthResult(AuthIdm, AuthName, _operatorContext));
+        await OpenFromIncompleteListAsync(RecordedLedger("天神～博多駅", null));
+
+        await _viewModel.SkipAsync();
+
+        busyAtAuthentication.Should().BeFalse("認証ダイアログの間は処理中オーバーレイを出さない");
+        _viewModel.IsSaved.Should().BeTrue();
     }
 
     [Fact]
@@ -314,6 +352,10 @@ public class BusStopInputViewModelAuthTests : IDisposable
         _staffAuthServiceMock.Verify(s => s.RequestAuthenticationAsync(SkipOperation), Times.Once,
             "保存済みのバス停名を★へ戻すのは書き換え");
         _insertedLogs.Should().ContainSingle();
+        var log = _insertedLogs[0].Log;
+        log.BeforeData.Should().Contain("※要確認", "変更前は手で補足した摘要");
+        log.AfterData.Should().NotContain("※要確認", "スキップで書くときは摘要を明細から再生成する（補足は上書きされる）");
+        log.AfterData.Should().NotContain("天神～博多駅", "保存済みのバス停名は★へ戻る");
     }
 
     [Fact]
