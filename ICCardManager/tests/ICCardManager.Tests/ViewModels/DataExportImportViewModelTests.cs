@@ -159,7 +159,7 @@ public class DataExportImportViewModelTests : IDisposable
         // Arrange
         SetupValidPreview();
         _importServiceMock
-            .Setup(s => s.ImportCardsAsync(It.IsAny<string>(), It.IsAny<bool>()))
+            .Setup(s => s.ImportCardsAsync(It.IsAny<CsvImportSource>(), It.IsAny<bool>()))
             .ReturnsAsync(new CsvImportResult
             {
                 Success = true,
@@ -188,7 +188,7 @@ public class DataExportImportViewModelTests : IDisposable
         // Arrange
         SetupValidPreview();
         _importServiceMock
-            .Setup(s => s.ImportCardsAsync(It.IsAny<string>(), It.IsAny<bool>()))
+            .Setup(s => s.ImportCardsAsync(It.IsAny<CsvImportSource>(), It.IsAny<bool>()))
             .ReturnsAsync(new CsvImportResult
             {
                 Success = true,
@@ -217,7 +217,7 @@ public class DataExportImportViewModelTests : IDisposable
         // Arrange
         SetupValidPreview();
         _importServiceMock
-            .Setup(s => s.ImportCardsAsync(It.IsAny<string>(), It.IsAny<bool>()))
+            .Setup(s => s.ImportCardsAsync(It.IsAny<CsvImportSource>(), It.IsAny<bool>()))
             .ReturnsAsync(new CsvImportResult
             {
                 Success = false,
@@ -245,7 +245,7 @@ public class DataExportImportViewModelTests : IDisposable
         // Arrange
         SetupValidPreview();
         _importServiceMock
-            .Setup(s => s.ImportCardsAsync(It.IsAny<string>(), It.IsAny<bool>()))
+            .Setup(s => s.ImportCardsAsync(It.IsAny<CsvImportSource>(), It.IsAny<bool>()))
             .ReturnsAsync(new CsvImportResult
             {
                 Success = false,
@@ -280,7 +280,7 @@ public class DataExportImportViewModelTests : IDisposable
         // Arrange
         SetupValidPreview();
         _importServiceMock
-            .Setup(s => s.ImportCardsAsync(It.IsAny<string>(), It.IsAny<bool>()))
+            .Setup(s => s.ImportCardsAsync(It.IsAny<CsvImportSource>(), It.IsAny<bool>()))
             .ThrowsAsync(new InvalidOperationException("DB接続エラー"));
 
         // Act
@@ -307,7 +307,7 @@ public class DataExportImportViewModelTests : IDisposable
         // Arrange
         SetupValidPreview();
         _importServiceMock
-            .Setup(s => s.ImportCardsAsync(It.IsAny<string>(), It.IsAny<bool>()))
+            .Setup(s => s.ImportCardsAsync(It.IsAny<CsvImportSource>(), It.IsAny<bool>()))
             .ReturnsAsync(new CsvImportResult
             {
                 Success = true,
@@ -333,7 +333,7 @@ public class DataExportImportViewModelTests : IDisposable
         // Arrange
         SetupValidPreview(DataType.Staff);
         _importServiceMock
-            .Setup(s => s.ImportStaffAsync(It.IsAny<string>(), It.IsAny<bool>()))
+            .Setup(s => s.ImportStaffAsync(It.IsAny<CsvImportSource>(), It.IsAny<bool>()))
             .ReturnsAsync(new CsvImportResult
             {
                 Success = true,
@@ -401,7 +401,7 @@ public class DataExportImportViewModelTests : IDisposable
         // Arrange
         SetupValidPreview();
         _importServiceMock
-            .Setup(s => s.ImportCardsAsync(It.IsAny<string>(), It.IsAny<bool>()))
+            .Setup(s => s.ImportCardsAsync(It.IsAny<CsvImportSource>(), It.IsAny<bool>()))
             .ReturnsAsync(new CsvImportResult
             {
                 Success = true,
@@ -424,7 +424,7 @@ public class DataExportImportViewModelTests : IDisposable
         // Arrange
         SetupValidPreview();
         _importServiceMock
-            .Setup(s => s.ImportCardsAsync(It.IsAny<string>(), It.IsAny<bool>()))
+            .Setup(s => s.ImportCardsAsync(It.IsAny<CsvImportSource>(), It.IsAny<bool>()))
             .ReturnsAsync(new CsvImportResult
             {
                 Success = true,
@@ -448,7 +448,7 @@ public class DataExportImportViewModelTests : IDisposable
         // Arrange
         SetupValidPreview();
         _importServiceMock
-            .Setup(s => s.ImportCardsAsync(It.IsAny<string>(), It.IsAny<bool>()))
+            .Setup(s => s.ImportCardsAsync(It.IsAny<CsvImportSource>(), It.IsAny<bool>()))
             .ReturnsAsync(new CsvImportResult
             {
                 Success = false,
@@ -477,7 +477,7 @@ public class DataExportImportViewModelTests : IDisposable
         // Arrange
         SetupValidPreview();
         _importServiceMock
-            .Setup(s => s.ImportCardsAsync(It.IsAny<string>(), It.IsAny<bool>()))
+            .Setup(s => s.ImportCardsAsync(It.IsAny<CsvImportSource>(), It.IsAny<bool>()))
             .ReturnsAsync(new CsvImportResult
             {
                 Success = false,
@@ -947,7 +947,7 @@ public class DataExportImportViewModelTests : IDisposable
         SetupValidPreview();
         _viewModel.ImportPreviewFile = ImportSourceFilePath;
         _importServiceMock
-            .Setup(s => s.ImportCardsAsync(It.IsAny<string>(), It.IsAny<bool>()))
+            .Setup(s => s.ImportCardsAsync(It.IsAny<CsvImportSource>(), It.IsAny<bool>()))
             .ReturnsAsync(new CsvImportResult
             {
                 Success = true,
@@ -982,7 +982,7 @@ public class DataExportImportViewModelTests : IDisposable
         SetupValidPreview();
         _viewModel.ImportPreviewFile = ImportSourceFilePath;
         _importServiceMock
-            .Setup(s => s.ImportCardsAsync(It.IsAny<string>(), It.IsAny<bool>()))
+            .Setup(s => s.ImportCardsAsync(It.IsAny<CsvImportSource>(), It.IsAny<bool>()))
             .ReturnsAsync(new CsvImportResult
             {
                 Success = false,
@@ -1014,7 +1014,7 @@ public class DataExportImportViewModelTests : IDisposable
         SetupValidPreview(DataType.Staff);
         _viewModel.ImportPreviewFile = ImportSourceFilePath;
         _importServiceMock
-            .Setup(s => s.ImportStaffAsync(It.IsAny<string>(), It.IsAny<bool>()))
+            .Setup(s => s.ImportStaffAsync(It.IsAny<CsvImportSource>(), It.IsAny<bool>()))
             .ReturnsAsync(new CsvImportResult
             {
                 Success = true,
@@ -1045,7 +1045,7 @@ public class DataExportImportViewModelTests : IDisposable
         SetupValidPreview();
         _viewModel.ImportPreviewFile = ImportSourceFilePath;
         _importServiceMock
-            .Setup(s => s.ImportCardsAsync(It.IsAny<string>(), It.IsAny<bool>()))
+            .Setup(s => s.ImportCardsAsync(It.IsAny<CsvImportSource>(), It.IsAny<bool>()))
             // インポート実行中に画面のデータ種別が切り替わる状況を再現する
             .Callback(() => _viewModel.SelectedImportType = DataType.Staff)
             .ReturnsAsync(new CsvImportResult
@@ -1083,7 +1083,7 @@ public class DataExportImportViewModelTests : IDisposable
         SetupValidPreview(viewModel);
         viewModel.ImportPreviewFile = ImportSourceFilePath;
         _importServiceMock
-            .Setup(s => s.ImportCardsAsync(It.IsAny<string>(), It.IsAny<bool>()))
+            .Setup(s => s.ImportCardsAsync(It.IsAny<CsvImportSource>(), It.IsAny<bool>()))
             .ReturnsAsync(new CsvImportResult
             {
                 Success = true,
@@ -1124,7 +1124,7 @@ public class DataExportImportViewModelTests : IDisposable
         SetupValidPreview(viewModel);
         viewModel.ImportPreviewFile = ImportSourceFilePath;
         _importServiceMock
-            .Setup(s => s.ImportCardsAsync(It.IsAny<string>(), It.IsAny<bool>()))
+            .Setup(s => s.ImportCardsAsync(It.IsAny<CsvImportSource>(), It.IsAny<bool>()))
             .ReturnsAsync(new CsvImportResult
             {
                 Success = false,
@@ -1267,7 +1267,7 @@ public class DataExportImportViewModelTests : IDisposable
         SetupValidPreview();
         _viewModel.ImportPreviewFile = ImportSourceFilePath;
         _importServiceMock
-            .Setup(s => s.ImportCardsAsync(It.IsAny<string>(), It.IsAny<bool>()))
+            .Setup(s => s.ImportCardsAsync(It.IsAny<CsvImportSource>(), It.IsAny<bool>()))
             .ReturnsAsync(new CsvImportResult
             {
                 Success = true,
@@ -1296,7 +1296,7 @@ public class DataExportImportViewModelTests : IDisposable
         // Arrange
         SetupValidPreview();
         _importServiceMock
-            .Setup(s => s.ImportCardsAsync(It.IsAny<string>(), It.IsAny<bool>()))
+            .Setup(s => s.ImportCardsAsync(It.IsAny<CsvImportSource>(), It.IsAny<bool>()))
             .ReturnsAsync(new CsvImportResult
             {
                 Success = true,
@@ -1308,7 +1308,7 @@ public class DataExportImportViewModelTests : IDisposable
 
         // Assert
         _importServiceMock.Verify(
-            s => s.ImportCardsAsync(DirectImportFilePath, It.IsAny<bool>()),
+            s => s.ImportCardsAsync(It.Is<CsvImportSource>(x => x.FilePath == DirectImportFilePath), It.IsAny<bool>()),
             Times.Once,
             "プレビューのパスではなく引数で渡したパスを取り込むこと");
 
@@ -1332,7 +1332,7 @@ public class DataExportImportViewModelTests : IDisposable
         // Arrange
         SetupValidPreview();
         _importServiceMock
-            .Setup(s => s.ImportCardsAsync(It.IsAny<string>(), It.IsAny<bool>()))
+            .Setup(s => s.ImportCardsAsync(It.IsAny<CsvImportSource>(), It.IsAny<bool>()))
             .ReturnsAsync(new CsvImportResult
             {
                 Success = false,
@@ -1369,7 +1369,7 @@ public class DataExportImportViewModelTests : IDisposable
         // Arrange
         SetupValidPreview();
         _importServiceMock
-            .Setup(s => s.ImportCardsAsync(It.IsAny<string>(), It.IsAny<bool>()))
+            .Setup(s => s.ImportCardsAsync(It.IsAny<CsvImportSource>(), It.IsAny<bool>()))
             .ReturnsAsync(new CsvImportResult
             {
                 Success = false,
@@ -1410,7 +1410,7 @@ public class DataExportImportViewModelTests : IDisposable
         var viewModel = CreateViewModelWithFailingAuditLog(dialogServiceMock);
         SetupValidPreview(viewModel);
         _importServiceMock
-            .Setup(s => s.ImportCardsAsync(It.IsAny<string>(), It.IsAny<bool>()))
+            .Setup(s => s.ImportCardsAsync(It.IsAny<CsvImportSource>(), It.IsAny<bool>()))
             .ReturnsAsync(new CsvImportResult
             {
                 Success = true,
@@ -1455,7 +1455,7 @@ public class DataExportImportViewModelTests : IDisposable
         SetupValidPreview();
         _viewModel.ImportPreviewFile = ImportSourceFilePath;
         _importServiceMock
-            .Setup(s => s.ImportCardsAsync(It.IsAny<string>(), It.IsAny<bool>()))
+            .Setup(s => s.ImportCardsAsync(It.IsAny<CsvImportSource>(), It.IsAny<bool>()))
             .ReturnsAsync(CreatePartialSuccessResult(importedCount: 98, errorCount: 2));
 
         _viewModel.HasPreview.Should().BeTrue("プレビューがセットアップされていること");
@@ -1485,7 +1485,7 @@ public class DataExportImportViewModelTests : IDisposable
         SetupValidPreview();
         _viewModel.ImportPreviewFile = ImportSourceFilePath;
         _importServiceMock
-            .Setup(s => s.ImportCardsAsync(It.IsAny<string>(), It.IsAny<bool>()))
+            .Setup(s => s.ImportCardsAsync(It.IsAny<CsvImportSource>(), It.IsAny<bool>()))
             .ReturnsAsync(CreatePartialSuccessResult(importedCount: 98, errorCount: 2));
 
         // Act: 職員がエラー行を直そうとして「インポート実行」をもう一度押す
@@ -1494,7 +1494,7 @@ public class DataExportImportViewModelTests : IDisposable
 
         // Assert
         _importServiceMock.Verify(
-            s => s.ImportCardsAsync(It.IsAny<string>(), It.IsAny<bool>()),
+            s => s.ImportCardsAsync(It.IsAny<CsvImportSource>(), It.IsAny<bool>()),
             Times.Once,
             "登録済みの98件が重複するため、2回目の取り込みは走ってはならない");
         _viewModel.StatusMessage.Should().Contain(
@@ -1518,7 +1518,7 @@ public class DataExportImportViewModelTests : IDisposable
         SetupValidPreview();
         _viewModel.ImportPreviewFile = ImportSourceFilePath;
         _importServiceMock
-            .Setup(s => s.ImportCardsAsync(It.IsAny<string>(), It.IsAny<bool>()))
+            .Setup(s => s.ImportCardsAsync(It.IsAny<CsvImportSource>(), It.IsAny<bool>()))
             .ReturnsAsync(CreatePartialSuccessResult(importedCount: 98, errorCount: 2));
 
         // Act
@@ -1547,7 +1547,7 @@ public class DataExportImportViewModelTests : IDisposable
         SetupValidPreview();
         _viewModel.ImportPreviewFile = ImportSourceFilePath;
         _importServiceMock
-            .Setup(s => s.ImportCardsAsync(It.IsAny<string>(), It.IsAny<bool>()))
+            .Setup(s => s.ImportCardsAsync(It.IsAny<CsvImportSource>(), It.IsAny<bool>()))
             .ReturnsAsync(CreatePartialSuccessResult(importedCount: 0, errorCount: 2));
 
         // Act
@@ -1573,7 +1573,7 @@ public class DataExportImportViewModelTests : IDisposable
         // Arrange
         SetupValidPreview(DataType.LedgerDetails);
         _importServiceMock
-            .Setup(s => s.ImportLedgerDetailsAsync(It.IsAny<string>()))
+            .Setup(s => s.ImportLedgerDetailsAsync(It.IsAny<CsvImportSource>()))
             .ReturnsAsync(CreatePartialSuccessResult(importedCount: 98, errorCount: 2));
 
         string warningMessage = null;
@@ -1614,7 +1614,7 @@ public class DataExportImportViewModelTests : IDisposable
         // Arrange
         SetupValidPreview();
         _importServiceMock
-            .Setup(s => s.ImportCardsAsync(It.IsAny<string>(), It.IsAny<bool>()))
+            .Setup(s => s.ImportCardsAsync(It.IsAny<CsvImportSource>(), It.IsAny<bool>()))
             .ReturnsAsync(CreatePartialSuccessResult(importedCount: 0, errorCount: 2));
 
         string warningMessage = null;
@@ -1656,7 +1656,7 @@ public class DataExportImportViewModelTests : IDisposable
         // Arrange
         SetupValidPreview();
         _importServiceMock
-            .Setup(s => s.ImportCardsAsync(It.IsAny<string>(), It.IsAny<bool>()))
+            .Setup(s => s.ImportCardsAsync(It.IsAny<CsvImportSource>(), It.IsAny<bool>()))
             .ReturnsAsync(CreatePartialSuccessResult(importedCount: 0, errorCount: 2));
 
         string warningMessage = null;
@@ -1697,7 +1697,7 @@ public class DataExportImportViewModelTests : IDisposable
         // Arrange
         SetupValidPreview();
         _importServiceMock
-            .Setup(s => s.ImportCardsAsync(It.IsAny<string>(), It.IsAny<bool>()))
+            .Setup(s => s.ImportCardsAsync(It.IsAny<CsvImportSource>(), It.IsAny<bool>()))
             .ReturnsAsync(CreatePartialSuccessResult(importedCount: 1, errorCount: 2));
 
         string warningTitle = null;
@@ -1730,7 +1730,7 @@ public class DataExportImportViewModelTests : IDisposable
         SetupValidPreview();
         _viewModel.ImportPreviewFile = ImportSourceFilePath;
         _importServiceMock
-            .Setup(s => s.ImportCardsAsync(It.IsAny<string>(), It.IsAny<bool>()))
+            .Setup(s => s.ImportCardsAsync(It.IsAny<CsvImportSource>(), It.IsAny<bool>()))
             .ReturnsAsync(CreatePartialSuccessResult(importedCount: 98, errorCount: 2));
 
         // Act
@@ -1756,7 +1756,7 @@ public class DataExportImportViewModelTests : IDisposable
         SetupValidPreview();
         _viewModel.ImportPreviewFile = ImportSourceFilePath;
         _importServiceMock
-            .Setup(s => s.ImportCardsAsync(It.IsAny<string>(), It.IsAny<bool>()))
+            .Setup(s => s.ImportCardsAsync(It.IsAny<CsvImportSource>(), It.IsAny<bool>()))
             .ReturnsAsync(CreatePartialSuccessResult(importedCount: 0, errorCount: 2));
 
         // Act
@@ -1831,8 +1831,8 @@ public class DataExportImportViewModelTests : IDisposable
 
         var importedFiles = new List<string>();
         _importServiceMock
-            .Setup(s => s.ImportCardsAsync(It.IsAny<string>(), It.IsAny<bool>()))
-            .Callback<string, bool>((path, _) => importedFiles.Add(path))
+            .Setup(s => s.ImportCardsAsync(It.IsAny<CsvImportSource>(), It.IsAny<bool>()))
+            .Callback<CsvImportSource, bool>((source, _) => importedFiles.Add(source.FilePath))
             .ReturnsAsync(new CsvImportResult { Success = true, ImportedCount = 3 });
 
         // Act: 直接インポート → 未処理に見えるパネルの「インポート実行」を続けて押す
@@ -1864,7 +1864,7 @@ public class DataExportImportViewModelTests : IDisposable
         SetupValidPreview();
         _viewModel.ImportPreviewFile = StalePreviewFilePath;
         _importServiceMock
-            .Setup(s => s.ImportCardsAsync(It.IsAny<string>(), It.IsAny<bool>()))
+            .Setup(s => s.ImportCardsAsync(It.IsAny<CsvImportSource>(), It.IsAny<bool>()))
             .ReturnsAsync(new CsvImportResult { Success = true, ImportedCount = 3 });
 
         string informationMessage = null;
@@ -1903,7 +1903,7 @@ public class DataExportImportViewModelTests : IDisposable
         SetupValidPreview();
         _viewModel.ImportPreviewFile = ImportSourceFilePath;
         _importServiceMock
-            .Setup(s => s.ImportCardsAsync(It.IsAny<string>(), It.IsAny<bool>()))
+            .Setup(s => s.ImportCardsAsync(It.IsAny<CsvImportSource>(), It.IsAny<bool>()))
             .ReturnsAsync(new CsvImportResult { Success = true, ImportedCount = 3 });
 
         string informationMessage = null;
@@ -1985,7 +1985,7 @@ public class DataExportImportViewModelTests : IDisposable
         // Arrange
         _viewModel.SelectedImportType = DataType.Cards;
         _importServiceMock
-            .Setup(s => s.ImportCardsAsync(It.IsAny<string>(), It.IsAny<bool>()))
+            .Setup(s => s.ImportCardsAsync(It.IsAny<CsvImportSource>(), It.IsAny<bool>()))
             .ReturnsAsync(new CsvImportResult
             {
                 Success = false,
@@ -2019,7 +2019,7 @@ public class DataExportImportViewModelTests : IDisposable
         // Arrange
         _viewModel.SelectedImportType = DataType.Cards;
         _importServiceMock
-            .Setup(s => s.ImportCardsAsync(It.IsAny<string>(), It.IsAny<bool>()))
+            .Setup(s => s.ImportCardsAsync(It.IsAny<CsvImportSource>(), It.IsAny<bool>()))
             .ReturnsAsync(CreatePartialSuccessResult(importedCount: 0, errorCount: 2));
 
         // Act
@@ -2046,7 +2046,7 @@ public class DataExportImportViewModelTests : IDisposable
         // Arrange: 1回目は成功、2回目は同じファイルで失敗
         _viewModel.SelectedImportType = DataType.Cards;
         _importServiceMock
-            .SetupSequence(s => s.ImportCardsAsync(It.IsAny<string>(), It.IsAny<bool>()))
+            .SetupSequence(s => s.ImportCardsAsync(It.IsAny<CsvImportSource>(), It.IsAny<bool>()))
             .ReturnsAsync(new CsvImportResult { Success = true, ImportedCount = 3 })
             .ReturnsAsync(new CsvImportResult
             {
@@ -2080,7 +2080,7 @@ public class DataExportImportViewModelTests : IDisposable
         // Arrange
         _viewModel.SelectedImportType = DataType.Cards;
         _importServiceMock
-            .SetupSequence(s => s.ImportCardsAsync(It.IsAny<string>(), It.IsAny<bool>()))
+            .SetupSequence(s => s.ImportCardsAsync(It.IsAny<CsvImportSource>(), It.IsAny<bool>()))
             .ReturnsAsync(new CsvImportResult { Success = true, ImportedCount = 3 })
             .ThrowsAsync(new InvalidOperationException("ネットワークパスが見つかりません"));
 
@@ -2121,7 +2121,7 @@ public class DataExportImportViewModelTests : IDisposable
         // Arrange
         SetupValidPreview();
         _importServiceMock
-            .Setup(s => s.ImportCardsAsync(It.IsAny<string>(), It.IsAny<bool>()))
+            .Setup(s => s.ImportCardsAsync(It.IsAny<CsvImportSource>(), It.IsAny<bool>()))
             .ReturnsAsync(new CsvImportResult { Success = true, ImportedCount = 3 });
 
         bool? isBusyAtDialog = null;
@@ -2147,7 +2147,7 @@ public class DataExportImportViewModelTests : IDisposable
         // Arrange
         SetupValidPreview();
         _importServiceMock
-            .Setup(s => s.ImportCardsAsync(It.IsAny<string>(), It.IsAny<bool>()))
+            .Setup(s => s.ImportCardsAsync(It.IsAny<CsvImportSource>(), It.IsAny<bool>()))
             .ReturnsAsync(new CsvImportResult
             {
                 Success = false,
@@ -2177,7 +2177,7 @@ public class DataExportImportViewModelTests : IDisposable
         // Arrange
         SetupValidPreview();
         _importServiceMock
-            .Setup(s => s.ImportCardsAsync(It.IsAny<string>(), It.IsAny<bool>()))
+            .Setup(s => s.ImportCardsAsync(It.IsAny<CsvImportSource>(), It.IsAny<bool>()))
             .ReturnsAsync(new CsvImportResult
             {
                 Success = false,
@@ -2219,7 +2219,7 @@ public class DataExportImportViewModelTests : IDisposable
         var viewModel = CreateViewModelWithFailingAuditLog(dialogServiceMock);
         SetupValidPreview(viewModel);
         _importServiceMock
-            .Setup(s => s.ImportCardsAsync(It.IsAny<string>(), It.IsAny<bool>()))
+            .Setup(s => s.ImportCardsAsync(It.IsAny<CsvImportSource>(), It.IsAny<bool>()))
             .ReturnsAsync(new CsvImportResult { Success = true, ImportedCount = 3 });
 
         bool? isBusyAtDialog = null;
@@ -2249,7 +2249,7 @@ public class DataExportImportViewModelTests : IDisposable
         // Arrange
         SetupValidPreview();
         _importServiceMock
-            .Setup(s => s.ImportCardsAsync(It.IsAny<string>(), It.IsAny<bool>()))
+            .Setup(s => s.ImportCardsAsync(It.IsAny<CsvImportSource>(), It.IsAny<bool>()))
             .ThrowsAsync(new InvalidOperationException("ネットワークパスが見つかりません"));
 
         bool? isBusyAtDialog = null;
@@ -2284,7 +2284,7 @@ public class DataExportImportViewModelTests : IDisposable
         // Arrange
         SetupValidPreview();
         _importServiceMock
-            .Setup(s => s.ImportCardsAsync(It.IsAny<string>(), It.IsAny<bool>()))
+            .Setup(s => s.ImportCardsAsync(It.IsAny<CsvImportSource>(), It.IsAny<bool>()))
             .ReturnsAsync(new CsvImportResult { Success = true, ImportedCount = 3 });
         _dialogServiceMock
             .Setup(d => d.ShowInformation(It.IsAny<string>(), It.IsAny<string>()))
@@ -2416,7 +2416,7 @@ public class DataExportImportViewModelTests : IDisposable
         SetupAuthenticationAs(AuthenticatedStaffIdm, AuthenticatedStaffName);
         string? operatorDuringImport = null;
         _importServiceMock
-            .Setup(s => s.ImportStaffAsync(It.IsAny<string>(), It.IsAny<bool>()))
+            .Setup(s => s.ImportStaffAsync(It.IsAny<CsvImportSource>(), It.IsAny<bool>()))
             .Callback(() => operatorDuringImport = _operatorContext.CurrentIdm)
             .ReturnsAsync(new CsvImportResult { Success = true, ImportedCount = 2, UpdatedCount = 1 });
 
@@ -2445,9 +2445,9 @@ public class DataExportImportViewModelTests : IDisposable
 
         await _viewModel.ExecuteImportAsync();
 
-        _importServiceMock.Verify(s => s.ImportStaffAsync(It.IsAny<string>(), It.IsAny<bool>()), Times.Never);
-        _importServiceMock.Verify(s => s.ImportLedgersAsync(It.IsAny<string>(), It.IsAny<bool>(), It.IsAny<string?>()), Times.Never);
-        _importServiceMock.Verify(s => s.ImportLedgerDetailsAsync(It.IsAny<string>()), Times.Never);
+        _importServiceMock.Verify(s => s.ImportStaffAsync(It.IsAny<CsvImportSource>(), It.IsAny<bool>()), Times.Never);
+        _importServiceMock.Verify(s => s.ImportLedgersAsync(It.IsAny<CsvImportSource>(), It.IsAny<bool>(), It.IsAny<string?>()), Times.Never);
+        _importServiceMock.Verify(s => s.ImportLedgerDetailsAsync(It.IsAny<CsvImportSource>()), Times.Never);
         _viewModel.StatusMessage.Should().Be(DataExportImportViewModel.BuildImportAuthenticationCancelledMessage(dataType, previewRetained: true));
         _viewModel.IsStatusError.Should().BeTrue();
         _viewModel.HasPreview.Should().BeTrue("もう一度「インポート実行」を押せばやり直せる");
@@ -2467,11 +2467,11 @@ public class DataExportImportViewModelTests : IDisposable
         string? operatorDuringImport = null;
         var success = new CsvImportResult { Success = true, ImportedCount = 1 };
         _importServiceMock
-            .Setup(s => s.ImportLedgersAsync(It.IsAny<string>(), It.IsAny<bool>(), It.IsAny<string?>()))
+            .Setup(s => s.ImportLedgersAsync(It.IsAny<CsvImportSource>(), It.IsAny<bool>(), It.IsAny<string?>()))
             .Callback(() => operatorDuringImport = _operatorContext.CurrentIdm)
             .ReturnsAsync(success);
         _importServiceMock
-            .Setup(s => s.ImportLedgerDetailsAsync(It.IsAny<string>()))
+            .Setup(s => s.ImportLedgerDetailsAsync(It.IsAny<CsvImportSource>()))
             .Callback(() => operatorDuringImport = _operatorContext.CurrentIdm)
             .ReturnsAsync(success);
 
@@ -2491,13 +2491,13 @@ public class DataExportImportViewModelTests : IDisposable
         SetupValidPreview(DataType.Staff);
         _staffRepositoryMock.Setup(r => r.HasActiveStaffAsync()).ReturnsAsync(false);
         _importServiceMock
-            .Setup(s => s.ImportStaffAsync(It.IsAny<string>(), It.IsAny<bool>()))
+            .Setup(s => s.ImportStaffAsync(It.IsAny<CsvImportSource>(), It.IsAny<bool>()))
             .ReturnsAsync(new CsvImportResult { Success = true, ImportedCount = 3 });
 
         await _viewModel.ExecuteImportAsync();
 
         _staffAuthServiceMock.Verify(s => s.RequestAuthenticationAsync(It.IsAny<string>()), Times.Never);
-        _importServiceMock.Verify(s => s.ImportStaffAsync("test.csv", It.IsAny<bool>()), Times.Once);
+        _importServiceMock.Verify(s => s.ImportStaffAsync(It.Is<CsvImportSource>(x => x.FilePath == "test.csv"), It.IsAny<bool>()), Times.Once);
     }
 
     /// <summary>
@@ -2508,13 +2508,13 @@ public class DataExportImportViewModelTests : IDisposable
     {
         SetupValidPreview(DataType.Cards);
         _importServiceMock
-            .Setup(s => s.ImportCardsAsync(It.IsAny<string>(), It.IsAny<bool>()))
+            .Setup(s => s.ImportCardsAsync(It.IsAny<CsvImportSource>(), It.IsAny<bool>()))
             .ReturnsAsync(new CsvImportResult { Success = true, ImportedCount = 1 });
 
         await _viewModel.ExecuteImportAsync();
 
         _staffAuthServiceMock.Verify(s => s.RequestAuthenticationAsync(It.IsAny<string>()), Times.Never);
-        _importServiceMock.Verify(s => s.ImportCardsAsync("test.csv", It.IsAny<bool>()), Times.Once);
+        _importServiceMock.Verify(s => s.ImportCardsAsync(It.Is<CsvImportSource>(x => x.FilePath == "test.csv"), It.IsAny<bool>()), Times.Once);
     }
 
     /// <summary>
@@ -2528,13 +2528,13 @@ public class DataExportImportViewModelTests : IDisposable
             .Callback(() => _viewModel.SelectedImportType = DataType.Cards)
             .ReturnsAsync(() => new StaffAuthResult(AuthenticatedStaffIdm, AuthenticatedStaffName, _operatorContext));
         _importServiceMock
-            .Setup(s => s.ImportStaffAsync(It.IsAny<string>(), It.IsAny<bool>()))
+            .Setup(s => s.ImportStaffAsync(It.IsAny<CsvImportSource>(), It.IsAny<bool>()))
             .ReturnsAsync(new CsvImportResult { Success = true, ImportedCount = 1 });
 
         await _viewModel.ExecuteImportAsync();
 
-        _importServiceMock.Verify(s => s.ImportStaffAsync("test.csv", It.IsAny<bool>()), Times.Once);
-        _importServiceMock.Verify(s => s.ImportCardsAsync(It.IsAny<string>(), It.IsAny<bool>()), Times.Never);
+        _importServiceMock.Verify(s => s.ImportStaffAsync(It.Is<CsvImportSource>(x => x.FilePath == "test.csv"), It.IsAny<bool>()), Times.Once);
+        _importServiceMock.Verify(s => s.ImportCardsAsync(It.IsAny<CsvImportSource>(), It.IsAny<bool>()), Times.Never);
         (await GetSingleImportLogAsync()).TargetTable.Should().Be(OperationLogger.Tables.Staff);
     }
 
@@ -2546,7 +2546,7 @@ public class DataExportImportViewModelTests : IDisposable
     {
         SetupValidPreview(DataType.Ledgers);
         _importServiceMock
-            .Setup(s => s.ImportLedgersAsync(It.IsAny<string>(), It.IsAny<bool>(), It.IsAny<string?>()))
+            .Setup(s => s.ImportLedgersAsync(It.IsAny<CsvImportSource>(), It.IsAny<bool>(), It.IsAny<string?>()))
             .ReturnsAsync(new CsvImportResult { Success = true, ImportedCount = 5, UpdatedCount = 2 });
 
         await _viewModel.ExecuteImportAsync();
@@ -2603,9 +2603,9 @@ public class DataExportImportViewModelTests : IDisposable
         await _viewModel.RunImportAsync("direct.csv", directImport: true);
 
         _staffAuthServiceMock.Verify(s => s.RequestAuthenticationAsync(It.IsAny<string>()), Times.Never);
-        _importServiceMock.Verify(s => s.ImportStaffAsync(It.IsAny<string>(), It.IsAny<bool>()), Times.Never);
-        _importServiceMock.Verify(s => s.ImportLedgersAsync(It.IsAny<string>(), It.IsAny<bool>(), It.IsAny<string?>()), Times.Never);
-        _importServiceMock.Verify(s => s.ImportLedgerDetailsAsync(It.IsAny<string>()), Times.Never);
+        _importServiceMock.Verify(s => s.ImportStaffAsync(It.IsAny<CsvImportSource>(), It.IsAny<bool>()), Times.Never);
+        _importServiceMock.Verify(s => s.ImportLedgersAsync(It.IsAny<CsvImportSource>(), It.IsAny<bool>(), It.IsAny<string?>()), Times.Never);
+        _importServiceMock.Verify(s => s.ImportLedgerDetailsAsync(It.IsAny<CsvImportSource>()), Times.Never);
         _viewModel.StatusMessage.Should().Be(DataExportImportViewModel.DirectImportRequiresPreviewMessage);
     }
 
@@ -2624,7 +2624,7 @@ public class DataExportImportViewModelTests : IDisposable
         await _viewModel.RunImportAsync("direct.csv", directImport: true);
 
         _importServiceMock.Verify(s => s.ImportNewCardsAsync("direct.csv"), Times.Once);
-        _importServiceMock.Verify(s => s.ImportCardsAsync(It.IsAny<string>(), It.IsAny<bool>()), Times.Never);
+        _importServiceMock.Verify(s => s.ImportCardsAsync(It.IsAny<CsvImportSource>(), It.IsAny<bool>()), Times.Never);
     }
 
     /// <summary>取り込み全体の記録（IMPORT）が 1 件も無いことを表明する</summary>
@@ -2680,8 +2680,8 @@ public class DataExportImportViewModelTests : IDisposable
         await _viewModel.ExecuteImportAsync();
 
         _staffAuthServiceMock.Verify(s => s.RequestAuthenticationAsync(It.IsAny<string>()), Times.Never);
-        _importServiceMock.Verify(s => s.ImportLedgersAsync(It.IsAny<string>(), It.IsAny<bool>(), It.IsAny<string?>()), Times.Never);
-        _importServiceMock.Verify(s => s.ImportLedgerDetailsAsync(It.IsAny<string>()), Times.Never);
+        _importServiceMock.Verify(s => s.ImportLedgersAsync(It.IsAny<CsvImportSource>(), It.IsAny<bool>(), It.IsAny<string?>()), Times.Never);
+        _importServiceMock.Verify(s => s.ImportLedgerDetailsAsync(It.IsAny<CsvImportSource>()), Times.Never);
     }
 
     /// <summary>
@@ -2694,12 +2694,12 @@ public class DataExportImportViewModelTests : IDisposable
         _viewModel.SelectedTargetCard = new CardDto { CardIdm = "0000000000000001", CardType = "はやかけん", CardNumber = "001" };
         SetupValidPreview(DataType.Ledgers);
         _importServiceMock
-            .Setup(s => s.ImportLedgersAsync(It.IsAny<string>(), It.IsAny<bool>(), It.IsAny<string?>()))
+            .Setup(s => s.ImportLedgersAsync(It.IsAny<CsvImportSource>(), It.IsAny<bool>(), It.IsAny<string?>()))
             .ReturnsAsync(new CsvImportResult { Success = true, ImportedCount = 1 });
 
         await _viewModel.ExecuteImportAsync();
 
-        _importServiceMock.Verify(s => s.ImportLedgersAsync("test.csv", true, "0000000000000001"), Times.Once);
+        _importServiceMock.Verify(s => s.ImportLedgersAsync(It.Is<CsvImportSource>(x => x.FilePath == "test.csv"), true, "0000000000000001"), Times.Once);
     }
 
     #endregion
@@ -2729,7 +2729,7 @@ public class DataExportImportViewModelTests : IDisposable
     {
         _viewModel.SelectedImportType = DataType.Cards;
         _importServiceMock
-            .Setup(s => s.PreviewCardsAsync(It.IsAny<string>(), It.IsAny<bool>()))
+            .Setup(s => s.PreviewCardsAsync(It.IsAny<CsvImportSource>(), It.IsAny<bool>()))
             .Callback(() => _viewModel.SelectedImportType = DataType.Staff)
             .ReturnsAsync(new CsvImportPreviewResult { IsValid = true });
 
@@ -2744,15 +2744,15 @@ public class DataExportImportViewModelTests : IDisposable
             System.IO.File.Delete(path);
         }
 
-        _importServiceMock.Verify(s => s.PreviewCardsAsync(It.IsAny<string>(), It.IsAny<bool>()), Times.Once, "前提: 読み込みが行われたこと");
+        _importServiceMock.Verify(s => s.PreviewCardsAsync(It.IsAny<CsvImportSource>(), It.IsAny<bool>()), Times.Once, "前提: 読み込みが行われたこと");
         _viewModel.HasPreview.Should().BeFalse();
         _viewModel.ImportPreview.Should().BeNull();
         _viewModel.StatusMessage.Should().Be(DataExportImportViewModel.PreviewConditionsChangedWhileLoadingMessage);
 
         await _viewModel.ExecuteImportAsync();
 
-        _importServiceMock.Verify(s => s.ImportStaffAsync(It.IsAny<string>(), It.IsAny<bool>()), Times.Never);
-        _importServiceMock.Verify(s => s.ImportCardsAsync(It.IsAny<string>(), It.IsAny<bool>()), Times.Never);
+        _importServiceMock.Verify(s => s.ImportStaffAsync(It.IsAny<CsvImportSource>(), It.IsAny<bool>()), Times.Never);
+        _importServiceMock.Verify(s => s.ImportCardsAsync(It.IsAny<CsvImportSource>(), It.IsAny<bool>()), Times.Never);
     }
 
     /// <summary>
@@ -2765,7 +2765,7 @@ public class DataExportImportViewModelTests : IDisposable
         _viewModel.SelectedImportType = DataType.Ledgers;
         _viewModel.UseCardListSelection = false;
         _importServiceMock
-            .Setup(s => s.PreviewLedgersAsync(It.IsAny<string>(), It.IsAny<bool>(), It.IsAny<string?>()))
+            .Setup(s => s.PreviewLedgersAsync(It.IsAny<CsvImportSource>(), It.IsAny<bool>(), It.IsAny<string?>()))
             .Callback(() => _viewModel.TouchedCardIdm = "000000000000000B")
             .ReturnsAsync(new CsvImportPreviewResult { IsValid = true });
 
@@ -2780,12 +2780,12 @@ public class DataExportImportViewModelTests : IDisposable
         }
 
         _viewModel.HasPreview.Should().BeFalse();
-        _importServiceMock.Verify(s => s.PreviewLedgersAsync(path, It.IsAny<bool>(), null), Times.Once,
+        _importServiceMock.Verify(s => s.PreviewLedgersAsync(It.Is<CsvImportSource>(x => x.FilePath == path), It.IsAny<bool>(), null), Times.Once,
             "読み込みは開始時に確定させた条件（取り込み先カード未指定）で行う");
 
         await _viewModel.ExecuteImportAsync();
 
-        _importServiceMock.Verify(s => s.ImportLedgersAsync(It.IsAny<string>(), It.IsAny<bool>(), It.IsAny<string?>()), Times.Never);
+        _importServiceMock.Verify(s => s.ImportLedgersAsync(It.IsAny<CsvImportSource>(), It.IsAny<bool>(), It.IsAny<string?>()), Times.Never);
     }
 
     /// <summary>
@@ -2799,7 +2799,7 @@ public class DataExportImportViewModelTests : IDisposable
         {
             _viewModel.SelectedImportType = DataType.Cards;
             _importServiceMock
-                .Setup(s => s.PreviewCardsAsync(It.IsAny<string>(), It.IsAny<bool>()))
+                .Setup(s => s.PreviewCardsAsync(It.IsAny<CsvImportSource>(), It.IsAny<bool>()))
                 .ReturnsAsync(new CsvImportPreviewResult { IsValid = true });
             await _viewModel.PreviewFileAsync(path);
             _viewModel.HasPreview.Should().BeTrue("前提: プレビューが表示されていること");
@@ -2807,7 +2807,7 @@ public class DataExportImportViewModelTests : IDisposable
             System.IO.File.AppendAllText(path, "1112131415161718,nimoca,002,\n");
             await _viewModel.ExecuteImportAsync();
 
-            _importServiceMock.Verify(s => s.ImportCardsAsync(It.IsAny<string>(), It.IsAny<bool>()), Times.Never);
+            _importServiceMock.Verify(s => s.ImportCardsAsync(It.IsAny<CsvImportSource>(), It.IsAny<bool>()), Times.Never);
             _viewModel.HasPreview.Should().BeFalse();
             _viewModel.StatusMessage.Should().Be(DataExportImportViewModel.BuildPreviewFileChangedMessage(path));
         }
@@ -2828,7 +2828,7 @@ public class DataExportImportViewModelTests : IDisposable
         {
             _viewModel.SelectedImportType = DataType.Staff;
             _importServiceMock
-                .Setup(s => s.PreviewStaffAsync(It.IsAny<string>(), It.IsAny<bool>()))
+                .Setup(s => s.PreviewStaffAsync(It.IsAny<CsvImportSource>(), It.IsAny<bool>()))
                 .ReturnsAsync(new CsvImportPreviewResult { IsValid = true });
             await _viewModel.PreviewFileAsync(path);
             _staffAuthServiceMock.Setup(s => s.RequestAuthenticationAsync(It.IsAny<string>()))
@@ -2838,7 +2838,7 @@ public class DataExportImportViewModelTests : IDisposable
             await _viewModel.ExecuteImportAsync();
 
             _staffAuthServiceMock.Verify(s => s.RequestAuthenticationAsync("職員のインポート"), Times.Once);
-            _importServiceMock.Verify(s => s.ImportStaffAsync(It.IsAny<string>(), It.IsAny<bool>()), Times.Never);
+            _importServiceMock.Verify(s => s.ImportStaffAsync(It.IsAny<CsvImportSource>(), It.IsAny<bool>()), Times.Never);
             _viewModel.StatusMessage.Should().Be(DataExportImportViewModel.BuildPreviewFileChangedMessage(path));
         }
         finally
@@ -2858,16 +2858,16 @@ public class DataExportImportViewModelTests : IDisposable
         {
             _viewModel.SelectedImportType = DataType.Cards;
             _importServiceMock
-                .Setup(s => s.PreviewCardsAsync(It.IsAny<string>(), It.IsAny<bool>()))
+                .Setup(s => s.PreviewCardsAsync(It.IsAny<CsvImportSource>(), It.IsAny<bool>()))
                 .ReturnsAsync(new CsvImportPreviewResult { IsValid = true });
             _importServiceMock
-                .Setup(s => s.ImportCardsAsync(It.IsAny<string>(), It.IsAny<bool>()))
+                .Setup(s => s.ImportCardsAsync(It.IsAny<CsvImportSource>(), It.IsAny<bool>()))
                 .ReturnsAsync(new CsvImportResult { Success = true, ImportedCount = 1 });
             await _viewModel.PreviewFileAsync(path);
 
             await _viewModel.ExecuteImportAsync();
 
-            _importServiceMock.Verify(s => s.ImportCardsAsync(path, true), Times.Once);
+            _importServiceMock.Verify(s => s.ImportCardsAsync(It.Is<CsvImportSource>(x => x.FilePath == path), true), Times.Once);
         }
         finally
         {
@@ -2917,7 +2917,7 @@ public class DataExportImportViewModelTests : IDisposable
         {
             _viewModel.SelectedImportType = DataType.Cards;
             _importServiceMock
-                .Setup(s => s.PreviewCardsAsync(It.IsAny<string>(), It.IsAny<bool>()))
+                .Setup(s => s.PreviewCardsAsync(It.IsAny<CsvImportSource>(), It.IsAny<bool>()))
                 .ReturnsAsync(new CsvImportPreviewResult { IsValid = true });
             await _viewModel.PreviewFileAsync(path);
             var originalWriteTime = System.IO.File.GetLastWriteTimeUtc(path);
@@ -2930,7 +2930,7 @@ public class DataExportImportViewModelTests : IDisposable
 
             await _viewModel.ExecuteImportAsync();
 
-            _importServiceMock.Verify(s => s.ImportCardsAsync(It.IsAny<string>(), It.IsAny<bool>()), Times.Never);
+            _importServiceMock.Verify(s => s.ImportCardsAsync(It.IsAny<CsvImportSource>(), It.IsAny<bool>()), Times.Never);
             _viewModel.StatusMessage.Should().Be(DataExportImportViewModel.BuildPreviewFileChangedMessage(path));
         }
         finally
@@ -2956,14 +2956,14 @@ public class DataExportImportViewModelTests : IDisposable
             .Callback(() => waitingDuringAuthentication = _viewModel.IsWaitingForCardTouch)
             .ReturnsAsync(() => new StaffAuthResult { Idm = "TEST_OPERATOR_IDM", StaffName = "テスト操作者" });
         _importServiceMock
-            .Setup(s => s.ImportLedgersAsync(It.IsAny<string>(), It.IsAny<bool>(), It.IsAny<string?>()))
+            .Setup(s => s.ImportLedgersAsync(It.IsAny<CsvImportSource>(), It.IsAny<bool>(), It.IsAny<string?>()))
             .ReturnsAsync(new CsvImportResult { Success = true, ImportedCount = 1 });
 
         await _viewModel.ExecuteImportAsync();
 
         waitingDuringAuthentication.Should().BeFalse("認証ダイアログが職員証を読む間、この画面はカードの読み取りを処理しない");
         _viewModel.TouchedCardInfo.Should().BeEmpty("タッチ待ちを終えたら、「キャンセル」と同じく案内の表示も消す（タッチしていないため）");
-        _importServiceMock.Verify(s => s.ImportLedgersAsync("test.csv", It.IsAny<bool>(), null), Times.Once,
+        _importServiceMock.Verify(s => s.ImportLedgersAsync(It.Is<CsvImportSource>(x => x.FilePath == "test.csv"), It.IsAny<bool>(), null), Times.Once,
             "タッチ待ちを終えても取り込み先カード（未タッチ＝CSV の IDm 列）とプレビューは変わらない");
     }
 
@@ -2984,7 +2984,7 @@ public class DataExportImportViewModelTests : IDisposable
 
         await _viewModel.ExecuteImportAsync();
 
-        _importServiceMock.Verify(s => s.ImportLedgersAsync(It.IsAny<string>(), It.IsAny<bool>(), It.IsAny<string?>()), Times.Never);
+        _importServiceMock.Verify(s => s.ImportLedgersAsync(It.IsAny<CsvImportSource>(), It.IsAny<bool>(), It.IsAny<string?>()), Times.Never);
         _viewModel.HasPreview.Should().BeFalse();
         _viewModel.StatusMessage.Should().Be(DataExportImportViewModel.PreviewDiscardedByConditionChangeMessage);
     }
@@ -3010,7 +3010,7 @@ public class DataExportImportViewModelTests : IDisposable
 
             _viewModel.HasPreview.Should().BeFalse();
             _viewModel.StatusMessage.Should().Be(DataExportImportViewModel.BuildPreviewFileUnreadableMessage(path));
-            _importServiceMock.Verify(s => s.PreviewCardsAsync(It.IsAny<string>(), It.IsAny<bool>()), Times.Never);
+            _importServiceMock.Verify(s => s.PreviewCardsAsync(It.IsAny<CsvImportSource>(), It.IsAny<bool>()), Times.Never);
         }
         finally
         {
@@ -3030,7 +3030,7 @@ public class DataExportImportViewModelTests : IDisposable
         {
             _viewModel.SelectedImportType = DataType.Cards;
             _importServiceMock
-                .Setup(s => s.PreviewCardsAsync(It.IsAny<string>(), It.IsAny<bool>()))
+                .Setup(s => s.PreviewCardsAsync(It.IsAny<CsvImportSource>(), It.IsAny<bool>()))
                 .ReturnsAsync(new CsvImportPreviewResult { IsValid = true });
             await _viewModel.PreviewFileAsync(path);
             _viewModel.HasPreview.Should().BeTrue("前提: プレビューが表示されていること");
@@ -3040,7 +3040,7 @@ public class DataExportImportViewModelTests : IDisposable
                 await _viewModel.ExecuteImportAsync();
             }
 
-            _importServiceMock.Verify(s => s.ImportCardsAsync(It.IsAny<string>(), It.IsAny<bool>()), Times.Never);
+            _importServiceMock.Verify(s => s.ImportCardsAsync(It.IsAny<CsvImportSource>(), It.IsAny<bool>()), Times.Never);
             _viewModel.HasPreview.Should().BeFalse();
             _viewModel.StatusMessage.Should().Be(DataExportImportViewModel.BuildPreviewFileUnreadableMessage(path));
         }
@@ -3060,6 +3060,251 @@ public class DataExportImportViewModelTests : IDisposable
 
         message.Should().Contain("「cards.csv」").And.Contain("可能性があります").And.EndWith("確認してください。");
         message.Should().NotContain(@"C:\data", "フルパスは出さない（ファイル名で名指しする）");
+    }
+
+    #endregion
+
+    #region Issue #2284: 照合に使ったバイト列をそのまま取り込む（照合の後にパスから読み直さない）
+
+    /// <summary>照合に使う内容（プレビューした時点のファイル）</summary>
+    private const string VerifiedCsvContent = "見出し\n照合した行,001\n";
+
+    /// <summary>照合の後に書き換えた内容（照合していない内容）</summary>
+    private const string TamperedCsvContent = "見出し\n照合していない行,999\n追加した行,998\n";
+
+    public static IEnumerable<object[]> 照合を経て取り込むデータ種別 => new[]
+    {
+        new object[] { DataType.Cards },
+        new object[] { DataType.Staff },
+        new object[] { DataType.Ledgers },
+        new object[] { DataType.LedgerDetails },
+    };
+
+    /// <summary>
+    /// 指定したデータ種別のプレビューと取り込みを、渡された読み取り元を処理する関数へ委ねる
+    /// </summary>
+    private void SetupPreviewAndImportBySource(
+        DataType dataType,
+        Func<CsvImportSource, Task<CsvImportPreviewResult>> preview,
+        Func<CsvImportSource, Task<CsvImportResult>> import)
+    {
+        switch (dataType)
+        {
+            case DataType.Cards:
+                _importServiceMock.Setup(s => s.PreviewCardsAsync(It.IsAny<CsvImportSource>(), It.IsAny<bool>()))
+                    .Returns((CsvImportSource source, bool _) => preview(source));
+                _importServiceMock.Setup(s => s.ImportCardsAsync(It.IsAny<CsvImportSource>(), It.IsAny<bool>()))
+                    .Returns((CsvImportSource source, bool _) => import(source));
+                break;
+            case DataType.Staff:
+                _importServiceMock.Setup(s => s.PreviewStaffAsync(It.IsAny<CsvImportSource>(), It.IsAny<bool>()))
+                    .Returns((CsvImportSource source, bool _) => preview(source));
+                _importServiceMock.Setup(s => s.ImportStaffAsync(It.IsAny<CsvImportSource>(), It.IsAny<bool>()))
+                    .Returns((CsvImportSource source, bool _) => import(source));
+                break;
+            case DataType.Ledgers:
+                _importServiceMock.Setup(s => s.PreviewLedgersAsync(It.IsAny<CsvImportSource>(), It.IsAny<bool>(), It.IsAny<string?>()))
+                    .Returns((CsvImportSource source, bool _, string? _) => preview(source));
+                _importServiceMock.Setup(s => s.ImportLedgersAsync(It.IsAny<CsvImportSource>(), It.IsAny<bool>(), It.IsAny<string?>()))
+                    .Returns((CsvImportSource source, bool _, string? _) => import(source));
+                break;
+            case DataType.LedgerDetails:
+                _importServiceMock.Setup(s => s.PreviewLedgerDetailsAsync(It.IsAny<CsvImportSource>()))
+                    .Returns((CsvImportSource source) => preview(source));
+                _importServiceMock.Setup(s => s.ImportLedgerDetailsAsync(It.IsAny<CsvImportSource>()))
+                    .Returns((CsvImportSource source) => import(source));
+                break;
+            default:
+                throw new ArgumentOutOfRangeException(nameof(dataType), dataType, "照合を経て取り込まないデータ種別");
+        }
+
+        // 切り替え元（パスを受け取る版）にも結果を設定しておく。未設定だと既定値（null）が返り、
+        // パスから読み直す実装へ戻ったときに「取り込まれなかった」形で通ってしまう（testing.md #1745）
+        _importServiceMock.Setup(s => s.ImportCardsAsync(It.IsAny<string>(), It.IsAny<bool>()))
+            .ReturnsAsync(new CsvImportResult { Success = true, ImportedCount = 1 });
+        _importServiceMock.Setup(s => s.ImportStaffAsync(It.IsAny<string>(), It.IsAny<bool>()))
+            .ReturnsAsync(new CsvImportResult { Success = true, ImportedCount = 1 });
+        _importServiceMock.Setup(s => s.ImportLedgersAsync(It.IsAny<string>(), It.IsAny<bool>(), It.IsAny<string?>()))
+            .ReturnsAsync(new CsvImportResult { Success = true, ImportedCount = 1 });
+        _importServiceMock.Setup(s => s.ImportLedgerDetailsAsync(It.IsAny<string>()))
+            .ReturnsAsync(new CsvImportResult { Success = true, ImportedCount = 1 });
+    }
+
+    /// <summary>パスを受け取る版（照合の後にパスから読み直す版）が呼ばれていないこと</summary>
+    private void VerifyNoImportByFilePath()
+    {
+        _importServiceMock.Verify(s => s.ImportCardsAsync(It.IsAny<string>(), It.IsAny<bool>()), Times.Never);
+        _importServiceMock.Verify(s => s.ImportStaffAsync(It.IsAny<string>(), It.IsAny<bool>()), Times.Never);
+        _importServiceMock.Verify(s => s.ImportLedgersAsync(It.IsAny<string>(), It.IsAny<bool>(), It.IsAny<string?>()), Times.Never);
+        _importServiceMock.Verify(s => s.ImportLedgerDetailsAsync(It.IsAny<string>()), Times.Never);
+    }
+
+    /// <summary>
+    /// 欠陥を突く側: 照合の後（サービスが読み込む前）にファイルが書き換えられても、取り込まれるのは照合した内容であること
+    /// </summary>
+    [Theory]
+    [MemberData(nameof(照合を経て取り込むデータ種別))]
+    public async Task 照合の後にファイルが書き換えられても取り込まれるのは照合した内容であること(DataType dataType)
+    {
+        var path = WriteTempCsv(VerifiedCsvContent);
+        try
+        {
+            _viewModel.SelectedImportType = dataType;
+            List<string>? importedLines = null;
+            SetupPreviewAndImportBySource(
+                dataType,
+                _ => Task.FromResult(new CsvImportPreviewResult { IsValid = true }),
+                async source =>
+                {
+                    // 照合が済んだ直後、サービスが内容を読む前に書き換えられた（TOCTOU の窓）
+                    System.IO.File.WriteAllText(path, TamperedCsvContent, new System.Text.UTF8Encoding(true));
+                    importedLines = await CsvImportService.ReadCsvAsync(source);
+                    return new CsvImportResult { Success = true, ImportedCount = 1 };
+                });
+            await _viewModel.PreviewFileAsync(path);
+            _viewModel.HasPreview.Should().BeTrue("前提: プレビューが表示されていること");
+
+            await _viewModel.ExecuteImportAsync();
+
+            importedLines.Should().NotBeNull("前提: 照合を通って取り込みが行われたこと");
+            importedLines.Should().Equal(new[] { "見出し", "照合した行,001" },
+                "照合した内容を取り込み、照合していない内容（書き換えた後のファイル）を取り込まない");
+            VerifyNoImportByFilePath();
+        }
+        finally
+        {
+            System.IO.File.Delete(path);
+        }
+    }
+
+    /// <summary>
+    /// 欠陥を突く側: プレビューも、照合の値（ハッシュ）を取ったのと同じバイト列から作ること
+    /// （ハッシュを取った後でパスから読み直すと、表示した内容と照合の値が別の内容を指す）
+    /// </summary>
+    [Theory]
+    [MemberData(nameof(照合を経て取り込むデータ種別))]
+    public async Task プレビューはハッシュを取ったのと同じ内容から作ること(DataType dataType)
+    {
+        var path = WriteTempCsv(VerifiedCsvContent);
+        try
+        {
+            _viewModel.SelectedImportType = dataType;
+            List<string>? previewedLines = null;
+            SetupPreviewAndImportBySource(
+                dataType,
+                async source =>
+                {
+                    // ハッシュを取った直後、プレビューの読み込みの前に書き換えられた
+                    System.IO.File.WriteAllText(path, TamperedCsvContent, new System.Text.UTF8Encoding(true));
+                    previewedLines = await CsvImportService.ReadCsvAsync(source);
+                    return new CsvImportPreviewResult { IsValid = true };
+                },
+                _ => Task.FromResult(new CsvImportResult { Success = true, ImportedCount = 1 }));
+
+            await _viewModel.PreviewFileAsync(path);
+
+            previewedLines.Should().Equal(new[] { "見出し", "照合した行,001" });
+        }
+        finally
+        {
+            System.IO.File.Delete(path);
+        }
+    }
+
+    /// <summary>
+    /// 正当な挙動を塞いでいない側: 書き換えられていなければ、ファイルの内容をそのまま取り込むこと
+    /// （BOM 付きのまま渡し、サービス側の文字コードの判別を通ること）
+    /// </summary>
+    [Fact]
+    public async Task 書き換えられていなければファイルの内容をそのまま取り込むこと()
+    {
+        var path = WriteTempCsv(VerifiedCsvContent);
+        try
+        {
+            _viewModel.SelectedImportType = DataType.Cards;
+            CsvImportSource? importedSource = null;
+            List<string>? importedLines = null;
+            SetupPreviewAndImportBySource(
+                DataType.Cards,
+                _ => Task.FromResult(new CsvImportPreviewResult { IsValid = true }),
+                async source =>
+                {
+                    importedSource = source;
+                    importedLines = await CsvImportService.ReadCsvAsync(source);
+                    return new CsvImportResult { Success = true, ImportedCount = 1 };
+                });
+            await _viewModel.PreviewFileAsync(path);
+
+            await _viewModel.ExecuteImportAsync();
+
+            importedSource!.FilePath.Should().Be(path, "ログ・監査・例外の文言には取り込んだファイルのパスを載せる");
+            importedSource.Content.Should().Equal(System.IO.File.ReadAllBytes(path));
+            importedLines.Should().Equal(new[] { "見出し", "照合した行,001" });
+        }
+        finally
+        {
+            System.IO.File.Delete(path);
+        }
+    }
+
+    /// <summary>
+    /// 欠陥を突く側: 照合の時点で上限を超えていた（内容を読まなかった）ファイルも、取り込むときにパスから読み直さず、
+    /// その後で縮められていても上限超過として断ること
+    /// </summary>
+    [Fact]
+    public async Task 上限を超えて読まなかったファイルは後で縮められても読み直さず上限超過とすること()
+    {
+        var path = System.IO.Path.Combine(System.IO.Path.GetTempPath(), $"preview_{Guid.NewGuid():N}.csv");
+        try
+        {
+            using (var stream = new System.IO.FileStream(path, System.IO.FileMode.CreateNew))
+            {
+                stream.SetLength(CsvImportService.MaxImportFileSizeBytes + 1);
+            }
+
+            var capture = DataExportImportViewModel.PreviewFileCapture.Capture(path);
+            capture.Should().NotBeNull();
+            capture!.Content.Should().BeNull("前提: 上限を超えるファイルの内容は読まない");
+
+            // 照合の後で、取り込める大きさの別の内容に差し替えられた
+            System.IO.File.WriteAllText(path, VerifiedCsvContent, new System.Text.UTF8Encoding(true));
+
+            var act = async () => await CsvImportService.ReadCsvAsync(capture.ToImportSource(path));
+
+            var exception = await act.Should().ThrowAsync<ICCardManager.Common.Exceptions.FileOperationException>();
+            exception.Which.ErrorCode.Should().Be("FILE010");
+            exception.Which.UserFriendlyMessage.Should().Be(
+                ICCardManager.Common.Exceptions.FileOperationException.FileTooLarge(
+                    CsvImportService.MaxImportFileSizeBytes + 1, CsvImportService.MaxImportFileSizeBytes, path).UserFriendlyMessage);
+        }
+        finally
+        {
+            System.IO.File.Delete(path);
+        }
+    }
+
+    /// <summary>
+    /// 照合の値は、取り込むバイト列から計算したものであること（照合した内容と取り込む内容が同じであることの前提）
+    /// </summary>
+    [Fact]
+    public void 照合の値は読み取った内容のハッシュであること()
+    {
+        var path = WriteTempCsv(VerifiedCsvContent);
+        try
+        {
+            var capture = DataExportImportViewModel.PreviewFileCapture.Capture(path);
+
+            capture.Should().NotBeNull();
+            using var sha256 = System.Security.Cryptography.SHA256.Create();
+            capture!.Fingerprint.Should().Be(new DataExportImportViewModel.PreviewFileFingerprint(
+                capture.Content!.LongLength, BitConverter.ToString(sha256.ComputeHash(capture.Content))));
+            DataExportImportViewModel.PreviewFileFingerprint.Capture(path).Should().Be(capture.Fingerprint,
+                "プレビュー時の記録（PreviewFileFingerprint.Capture）と取り込み直前の照合は同じ値を比べる");
+        }
+        finally
+        {
+            System.IO.File.Delete(path);
+        }
     }
 
     #endregion
