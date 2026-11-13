@@ -82,23 +82,86 @@ public partial class BusStopInputViewModel : ViewModelBase
     [ObservableProperty]
     private bool _isSaved;
 
+    /// <summary>
+    /// Issue #2278: 警告エリアの「バス停名未入力」一覧から開いた記録済みの行を書き換えるときの職員証の認証。
+    /// </summary>
+    private readonly IStaffAuthService _staffAuthService;
+
+    /// <summary>
+    /// Issue #2278: 警告エリアの「バス停名未入力」一覧から開いた記録済みの行の書き換えを、変更前・変更後とともに記録する。
+    /// </summary>
+    private readonly OperationLogger _operationLogger;
+
+    /// <summary>
+    /// Issue #2278: 記録済みの台帳行を、返却フローの外（警告エリアの「バス停名未入力」一覧）から開いたか。
+    /// </summary>
+    /// <remarks>
+    /// <see cref="InitializeAsync(int)"/>（一覧から開く唯一の入口。<c>IncompleteBusStopDialog</c>）だけが立て、
+    /// 返却フロー・カードの履歴からの取り込みの初期化（<see cref="InitializeWithDetailsAsync"/> /
+    /// <see cref="InitializeWithLedgersAsync"/> / <see cref="InitializeWithDetails"/>）は下ろす。経路は最後の初期化で決まる。
+    /// 立っているときの書き込み（保存・スキップ）は職員証の認証を求め、認証した職員の操作として操作ログに記録する。
+    /// 返却フローの入力は、返却の職員証タッチで操作者が確定している流れの中の入力なので求めない（ユーザー判断）。
+    /// </remarks>
+    private bool _editsRecordedLedger;
+
+    /// <summary>
+    /// Issue #2278: 一覧から開いた行の、DB に確定している状態の複製（操作ログの「変更前」）。
+    /// </summary>
+    /// <remarks>
+    /// 入力欄の値は入力のたびに明細へ書き込まれ、自動入力（#2251）も開いた時点で書き込むため、保存の時点で
+    /// <see cref="Ledger"/> から複製すると「変更前」が変更後を写す（db-write-conventions #1959 / #1979）。
+    /// 自動入力より前（<see cref="CapturePersistedState"/>）に、明細まで別のインスタンスとして採る。
+    /// </remarks>
+    private Ledger? _committedLedger;
+
+    /// <summary>
+    /// Issue #2278: 一覧から開いた行の保存で、保存済みの内容から何も変わらないとき（書き込まずに閉じる）の表示。
+    /// </summary>
+    internal const string NoChangeSaveMessage = "保存済みの内容と同じため、変更はありません";
+
+    /// <summary>
+    /// Issue #2278: 一覧から開いた行の保存で、職員証の認証が完了しなかったときの案内。
+    /// </summary>
+    internal const string SaveAuthenticationCancelledMessage =
+        "職員証の認証が完了しなかったため、バス停名を保存していません（入力内容はそのまま残っています）。" +
+        "保存するには、もう一度「保存」を押して職員証で認証してください。";
+
+    /// <summary>
+    /// Issue #2278: 一覧から開いた行のスキップ（保存済みのバス停名を★へ戻す）で、職員証の認証が完了しなかったときの案内。
+    /// </summary>
+    internal const string SkipAuthenticationCancelledMessage =
+        "職員証の認証が完了しなかったため、スキップしていません（保存済みのバス停名は変わっていません）。" +
+        "スキップするには、もう一度「後で入力（スキップ）」を押して職員証で認証してください。" +
+        "何も変えずに閉じる場合は、右上の「×」で閉じてください。";
+
     public BusStopInputViewModel(
         ILedgerRepository ledgerRepository,
         ISettingsRepository settingsRepository,
         IDialogService dialogService,
-        DbContext dbContext)
+        DbContext dbContext,
+        IStaffAuthService staffAuthService,
+        OperationLogger operationLogger)
     {
         _ledgerRepository = ledgerRepository;
         _settingsRepository = settingsRepository;
         _dialogService = dialogService;
         _dbContext = dbContext;
+        _staffAuthService = staffAuthService;
+        _operationLogger = operationLogger;
     }
 
     /// <summary>
     /// 利用履歴を指定して初期化
     /// </summary>
+    /// <remarks>
+    /// 警告エリアの「バス停名未入力」一覧（<c>IncompleteBusStopDialog</c>）から開く唯一の入口。
+    /// Issue #2278: ここから開いた記録済みの行の書き換えは職員証の認証を求め、操作ログに記録する（<see cref="_editsRecordedLedger"/>）。
+    /// </remarks>
     public async Task InitializeAsync(int ledgerId)
     {
+        _editsRecordedLedger = true;
+        // 一覧から開く行は 1 件だけ。前の初期化（返却フローの複数 Ledger モード）の対象を保存・操作ログの対象に残さない
+        _ledgers = null;
         using (BeginBusy("読み込み中..."))
         {
             // 履歴詳細を取得
@@ -141,6 +204,7 @@ public partial class BusStopInputViewModel : ViewModelBase
     /// </summary>
     public async Task InitializeWithDetailsAsync(Ledger ledger, IEnumerable<LedgerDetail> busDetails)
     {
+        _editsRecordedLedger = false;
         // サジェスト候補を読み込み
         await LoadBusStopSuggestionsAsync(ledger.LenderIdm);
 
@@ -187,6 +251,7 @@ public partial class BusStopInputViewModel : ViewModelBase
     /// </summary>
     public async Task InitializeWithLedgersAsync(IEnumerable<Ledger> ledgers)
     {
+        _editsRecordedLedger = false;
         // 入力された Ledger は LendingService から返される in-memory インスタンスで
         // Details コレクションが populate されていない場合があるため、ID で DB から再取得する。
         // Id が 0（永続化前）または GetByIdAsync が null を返す場合は入力インスタンスをそのまま使う。
@@ -243,6 +308,7 @@ public partial class BusStopInputViewModel : ViewModelBase
     /// </summary>
     public void InitializeWithDetails(Ledger ledger, IEnumerable<LedgerDetail> busDetails)
     {
+        _editsRecordedLedger = false;
         // Issue #2251: この経路は利用実績を読み込まない。前回の初期化で読んだ別の職員の実績で既定値を入れないよう捨てる
         _usageStats = new List<BusStopUsageStatRow>();
         Ledger = ledger;
@@ -657,6 +723,44 @@ public partial class BusStopInputViewModel : ViewModelBase
             }
         }
 
+        if (_editsRecordedLedger)
+        {
+            if (!await WouldChangeRecordedLedgerAsync(item => ToPersistedBusStops(item.BusStops), compareSummary: true))
+            {
+                // Issue #2278: 保存済みの内容と同じなら書き込まずに閉じる（何も変えていない保存は書かない。
+                // db-write-conventions #2375）。台帳が変わらないので職員証も求めず、操作ログに空の変更を残さない
+                StatusMessage = NoChangeSaveMessage;
+                IsSaved = true;
+                return;
+            }
+
+            // Issue #2278: 一覧から開いた記録済みの行の書き換えは、保存するかを決めた（確認の）後、処理中にする前に
+            // 職員証の認証を求める（認証ダイアログの間は処理中オーバーレイを出さない。LedgerDetailViewModel と同じ）。
+            // 操作名はリテラルで書く（ScreenTransitionDiagramConsistencyTests が数える）
+            using var authResult = (await _staffAuthService.RequestAuthenticationAsync("バス停名の入力"))?.Enter();
+            if (authResult == null)
+            {
+                // 何も書き込んでいない。入力欄はそのまま残し、認証し直せばそのまま保存できるようにする
+                StatusMessage = SaveAuthenticationCancelledMessage;
+                return;
+            }
+
+            await SaveCoreAsync();
+            return;
+        }
+
+        await SaveCoreAsync();
+    }
+
+    /// <summary>
+    /// 保存の本体（入力欄の値を明細へ書き、明細と摘要を 1 つのトランザクションで保存する）
+    /// </summary>
+    /// <remarks>
+    /// Issue #2278: 一覧から開いた行では、呼び出し元（<see cref="SaveAsync"/>）が開いた認証のスコープの中で呼ばれる。
+    /// 操作者セッションは呼び出し元の非同期の流れから引き継がれる（このメソッドの中では開始しない。#2260）。
+    /// </remarks>
+    private async Task SaveCoreAsync()
+    {
         using (BeginBusy("保存中..."))
         {
             // Issue #2103: 保存に失敗したら、メモリ上の明細（バス停名）と摘要を DB と同じ値へ戻す
@@ -667,9 +771,7 @@ public partial class BusStopInputViewModel : ViewModelBase
                 // 各バス利用のバス停名を更新
                 foreach (var item in BusUsages)
                 {
-                    item.Detail.BusStops = string.IsNullOrWhiteSpace(item.BusStops)
-                        ? SummaryGenerator.BusPlaceholder // 未入力の場合はプレースホルダ
-                        : item.BusStops;
+                    item.Detail.BusStops = ToPersistedBusStops(item.BusStops); // 未入力の場合はプレースホルダ
                 }
 
                 success = await PersistBusStopsAsync();
@@ -715,6 +817,10 @@ public partial class BusStopInputViewModel : ViewModelBase
 
         var itemsByLedgerId = BusUsages.GroupBy(i => i.Detail.LedgerId).ToDictionary(g => g.Key, g => g.ToList());
 
+        // Issue #2278: 一覧から開いた行の書き換えは、変更前・変更後とともに操作ログへ記録する。
+        // 返却フローの入力（複数 Ledger モードを含む）は記録しない（_editsRecordedLedger の remarks）
+        var auditBefore = _editsRecordedLedger ? _committedLedger : null;
+
         // Issue #1945 / #1806: バス停名（ledger_detail.bus_stops）と摘要（ledger.summary）は
         // 同じ事実を 2 か所に持つため、片方だけ確定すると 6 年保存の台帳が自己矛盾する
         // （摘要は「バス（天神～博多）」なのに明細は★／その鏡像で明細だけが新しい）。
@@ -759,6 +865,15 @@ public partial class BusStopInputViewModel : ViewModelBase
                 {
                     return false;
                 }
+
+                // Issue #2278: 書き込みと同じトランザクションで、摘要とバス停名を書き換えた後に記録する
+                // （記録より後ろの書き換えは AfterData に載らない。db-write-conventions #1979）。
+                // 監査ログの書き込みに失敗したら例外で抜け、commit せずに台帳の書き込みごと巻き戻る（#2156 と同じ）。
+                // 一覧から開いた行は 1 件だけ（_ledgers は使わない）なので、変更前は 1 つで足りる
+                if (auditBefore != null)
+                {
+                    await _operationLogger.LogLedgerUpdateAsync(auditBefore, ledger, scope.Transaction);
+                }
             }
 
             scope.Commit();
@@ -801,6 +916,8 @@ public partial class BusStopInputViewModel : ViewModelBase
             .Select(ledger => (ledger, ledger.Summary))
             .ToList();
         _persistedState = new InMemoryStateSnapshot(details, summaries);
+        // Issue #2278: 一覧から開いた行は、操作ログの「変更前」を明細まで別のインスタンスとして採る（_committedLedger の remarks）
+        _committedLedger = _editsRecordedLedger ? LedgerCloner.Clone(Ledger) : null;
     }
 
     /// <summary>
@@ -933,6 +1050,108 @@ public partial class BusStopInputViewModel : ViewModelBase
             }
         }
 
+        if (_editsRecordedLedger)
+        {
+            if (!await WouldChangeRecordedLedgerAsync(_ => SummaryGenerator.BusPlaceholder, compareSummary: false))
+            {
+                // Issue #2278: 一覧から開いた行のバス停名がすべて未入力なら、スキップで消えるバス停名は無い。
+                // 書き込まずに閉じる（Esc で閉じるだけの操作に職員証を求めない）。スキップは「後で入力」であって
+                // 摘要の再生成ではないので、摘要が明細からの再生成と違っても（手で補足した摘要など）書き換えない
+                StatusMessage = "スキップしました（後で入力が必要です）";
+                IsSaved = true;
+                return;
+            }
+
+            // Issue #2278: 保存済みのバス停名を★へ戻すのは記録済みの台帳の書き換えなので、保存と同じく認証を求める
+            using var authResult = (await _staffAuthService.RequestAuthenticationAsync("バス停名の入力のスキップ"))?.Enter();
+            if (authResult == null)
+            {
+                StatusMessage = SkipAuthenticationCancelledMessage;
+                return;
+            }
+
+            await SkipCoreAsync();
+            return;
+        }
+
+        await SkipCoreAsync();
+    }
+
+    /// <summary>
+    /// 入力欄の値を、明細へ保存する値にする（空欄は未入力のプレースホルダ）。
+    /// </summary>
+    private static string ToPersistedBusStops(string? busStops)
+        => busStops is null || string.IsNullOrWhiteSpace(busStops) ? SummaryGenerator.BusPlaceholder : busStops;
+
+    /// <summary>
+    /// Issue #2278: 一覧から開いた行で、保存・スキップが書く値が台帳（開いた時点の DB の値）を変えるか。
+    /// </summary>
+    /// <param name="valueToWrite">各入力欄について明細へ書く値（保存なら入力欄の値、スキップならプレースホルダ）</param>
+    /// <param name="compareSummary">
+    /// 摘要も比べるか。保存は <c>true</c>（保存は摘要を明細から再生成して書くので、バス停名が同じでも保存済みの摘要が
+    /// 再生成と違えば摘要の書き換えになり、認証と操作ログが要る）。スキップは <c>false</c>（スキップの目的は「後で入力」で、
+    /// バス停名が変わらないなら何も書かない。手で補足した摘要・古い行の並びの違う摘要を、Esc で閉じるだけの操作で
+    /// 書き換えない・職員証を求めない）。
+    /// </param>
+    /// <remarks>
+    /// <para>
+    /// 比べる相手は開いた時点の DB の値（<see cref="_committedLedger"/>）で、入力欄の値ではない。入力欄は保存していないので、
+    /// 入力してからスキップしても台帳は変わらない。バス停名は空欄（NULL）と★を同じ「未入力」とみなし（保存・スキップで同じ判定）、
+    /// 摘要は <paramref name="compareSummary"/> のときだけ、保存と同じく明細から再生成して比べる。
+    /// </para>
+    /// <para>
+    /// 判定できないとき（開いた時点の複製が無い・入力欄の明細が見つからない）は、書き換えとして扱う（認証を求める側へ倒す）。
+    /// </para>
+    /// </remarks>
+    private async Task<bool> WouldChangeRecordedLedgerAsync(Func<BusStopInputItem, string> valueToWrite, bool compareSummary)
+    {
+        if (_committedLedger == null || Ledger == null)
+        {
+            return true;
+        }
+
+        var after = LedgerCloner.Clone(_committedLedger);
+        if (after == null)
+        {
+            return true;
+        }
+
+        foreach (var item in BusUsages)
+        {
+            var index = Ledger.Details.FindIndex(d => ReferenceEquals(d, item.Detail));
+            if (index < 0 || index >= after.Details.Count)
+            {
+                return true;
+            }
+
+            var detail = after.Details[index];
+            var newValue = valueToWrite(item);
+            if (!string.Equals(ToPersistedBusStops(detail.BusStops), ToPersistedBusStops(newValue), StringComparison.Ordinal))
+            {
+                return true;
+            }
+
+            detail.BusStops = newValue;
+        }
+
+        if (!compareSummary)
+        {
+            return false;
+        }
+
+        var settings = await _settingsRepository.GetAppSettingsAsync();
+        var summary = new SummaryGenerator(settings.DepartmentType).Generate(after.Details);
+        return !string.Equals(summary, _committedLedger.Summary, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// スキップの本体（すべての欄を★にして保存する）
+    /// </summary>
+    /// <remarks>
+    /// Issue #2278: 一覧から開いた行では、呼び出し元（<see cref="SkipAsync"/>）が開いた認証のスコープの中で呼ばれる。
+    /// </remarks>
+    private async Task SkipCoreAsync()
+    {
         using (BeginBusy("保存中..."))
         {
             // Issue #2103: スキップが失敗したら入力欄も元へ戻す（★で上書きしたまま残すと、
