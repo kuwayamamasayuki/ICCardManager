@@ -95,6 +95,47 @@ namespace ICCardManager.Common
         }
 
         /// <summary>
+        /// 内容に合わせて伸びるウィンドウ（<c>SizeToContent="Height"</c>）の高さの上限を、作業領域の高さにする（Issue #2465）。
+        /// </summary>
+        /// <param name="declaredMaxHeight">XAML で宣言した上限（画面の情報が取れないときの受け皿）</param>
+        /// <param name="areaHeight">作業領域の高さ（DIP 単位）</param>
+        /// <returns>
+        /// <paramref name="areaHeight"/>。宣言した上限より大きくても小さくても作業領域の高さを使う — 広い画面では内容が
+        /// スクロールせずに収まり、狭い画面ではウィンドウが画面の外へはみ出さない。作業領域の高さが 0 以下・NaN・無限大のときは
+        /// 画面の情報が取れていないとみなし、<paramref name="declaredMaxHeight"/> をそのまま返す。
+        /// </returns>
+        public static double FitMaxHeight(double declaredMaxHeight, double areaHeight)
+        {
+            if (double.IsNaN(areaHeight) || double.IsInfinity(areaHeight) || areaHeight <= 0)
+            {
+                return declaredMaxHeight;
+            }
+
+            return areaHeight;
+        }
+
+        /// <summary>
+        /// ウィンドウの大きさが変わったときに、作業領域へ何を合わせるかを決める（Issue #2465）。
+        /// </summary>
+        /// <param name="isLoaded">表示済みか（表示前は載るモニターが決まっていない）</param>
+        /// <param name="isMovingOrSizing">利用者が移動・リサイズの操作中か（<c>WM_ENTERSIZEMOVE</c>〜<c>WM_EXITSIZEMOVE</c>）</param>
+        /// <param name="isNormalState">通常の表示か（<c>WindowState.Normal</c>。最大化・最小化していない）</param>
+        /// <returns>
+        /// 表示前は何もしない。操作中は高さの上限だけ（位置を寄せると、ドラッグ中のウィンドウが作業領域へ引き戻されて跳ねる。
+        /// 位置は操作の終わりに 1 回だけ寄せる）。最大化・最小化しているときも上限だけ（位置を書くと元に戻したときの位置が変わり、
+        /// 最大化した大きさで寄せると画面の端へ動く）。それ以外（内容が伸びた・縮んだ）は上限と位置の両方。
+        /// </returns>
+        public static WorkAreaFit DecideFitOnSizeChanged(bool isLoaded, bool isMovingOrSizing, bool isNormalState)
+        {
+            if (!isLoaded)
+            {
+                return WorkAreaFit.None;
+            }
+
+            return isMovingOrSizing || !isNormalState ? WorkAreaFit.MaxHeightOnly : WorkAreaFit.MaxHeightAndPosition;
+        }
+
+        /// <summary>
         /// 画面外にあった保存位置を捨てて、作業領域の中央へ置き直すときの位置と長さを算出する（幅・高さのどちらにも使う）。
         /// </summary>
         /// <param name="length">保存されていた長さ</param>
@@ -120,5 +161,20 @@ namespace ICCardManager.Common
             length = FitWidth(Math.Max(length, minLength), areaLength);
             return (areaStart + (areaLength - length) / 2, length);
         }
+    }
+
+    /// <summary>
+    /// ウィンドウを作業領域へ合わせる範囲（<see cref="WindowLayoutCalculator.DecideFitOnSizeChanged"/> の結果。Issue #2465）
+    /// </summary>
+    public enum WorkAreaFit
+    {
+        /// <summary>何もしない</summary>
+        None,
+
+        /// <summary>高さの上限だけを合わせる（位置は動かさない）</summary>
+        MaxHeightOnly,
+
+        /// <summary>高さの上限と位置の両方を合わせる</summary>
+        MaxHeightAndPosition,
     }
 }

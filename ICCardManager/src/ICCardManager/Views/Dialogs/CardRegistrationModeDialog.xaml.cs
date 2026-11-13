@@ -6,8 +6,10 @@ using System.Windows;
 using System.Windows.Automation;
 using System.Windows.Controls;
 using System.Windows.Input;
+using System.Windows.Interop;
 using ICCardManager.Common;
 using ICCardManager.Services;
+using ICCardManager.Views.Helpers;
 
 namespace ICCardManager.Views.Dialogs
 {
@@ -124,6 +126,109 @@ namespace ICCardManager.Views.Dialogs
             InitializeMonthComboBox();
             InitializePurchaseDatePicker();
             InitializeCarryoverBalance();
+
+            // Issue #2465: 高さの上限（XAML の MaxHeight 680）は 1366×768 の受け皿で、広い画面でも繰越の入力欄まで含めると
+            // 内容がスクロールの外へはみ出していた。上限を作業領域の高さにし、広い画面ではスクロールせずに収める。
+            // XAML の MaxHeight を上書きするため InitializeComponent() の後に置く。ここでの WorkArea はプライマリモニターの
+            // 作業領域（まだどのモニターに載るか決まっていないため。CarryoverDataLossDialog と同じ既知の制限）で、
+            // 載ったモニターの作業領域へは Loaded・SizeChanged で上限と位置を合わせ直す。
+            // 利用者が移動・リサイズの操作中（WM_ENTERSIZEMOVE〜WM_EXITSIZEMOVE）は上限だけを合わせ直し、位置は操作の終わりに
+            // 1 回だけ寄せる。操作中に位置まで寄せると、ドラッグ中のウィンドウが作業領域へ引き戻されて跳ねる（別のモニターへ
+            // 動かすと LocationChanged で上限が変わり、その SizeChanged でも同じことが起きる）。
+            MaxHeight = WindowLayoutCalculator.FitMaxHeight(MaxHeight, SystemParameters.WorkArea.Height);
+            SourceInitialized += (s, e) => HwndSource.FromHwnd(new WindowInteropHelper(this).Handle)?.AddHook(TrackMoveOrSize);
+            Loaded += (s, e) => FitToMonitorWorkArea();
+            SizeChanged += (s, e) => ApplyWorkAreaFit();
+            LocationChanged += (s, e) =>
+            {
+                if (IsLoaded)
+                {
+                    FitMaxHeightToMonitorWorkArea();
+                }
+            };
+        }
+
+        private const int WmEnterSizeMove = 0x0231;
+        private const int WmExitSizeMove = 0x0232;
+
+        /// <summary>利用者がウィンドウを移動・リサイズしている最中か（Issue #2465）</summary>
+        private bool _isMovingOrSizing;
+
+        /// <summary>
+        /// 移動・リサイズの操作の始まりと終わりを追う（Issue #2465）。終わりに 1 回だけ位置を作業領域の中へ寄せる
+        /// （最大化・最小化しているときは寄せない）。
+        /// </summary>
+        private IntPtr TrackMoveOrSize(IntPtr hwnd, int msg, IntPtr wParam, IntPtr lParam, ref bool handled)
+        {
+            if (msg == WmEnterSizeMove)
+            {
+                _isMovingOrSizing = true;
+            }
+            else if (msg == WmExitSizeMove)
+            {
+                _isMovingOrSizing = false;
+                ApplyWorkAreaFit();
+            }
+
+            return IntPtr.Zero;
+        }
+
+        /// <summary>
+        /// 大きさが変わったとき・移動の操作が終わったときに、作業領域へ何を合わせるかを決めて合わせる（Issue #2465）。
+        /// </summary>
+        /// <remarks>
+        /// 表示前は何もしない。移動・リサイズの操作中は上限だけ（位置を寄せるとドラッグ中のウィンドウが跳ねる）。
+        /// 最大化・最小化しているときも上限だけ — 位置（Left / Top）を書くと元に戻したときの位置が変わり、
+        /// 最大化した大きさで寄せると画面の端へ動いてしまう。判断は <see cref="WindowLayoutCalculator.DecideFitOnSizeChanged"/>。
+        /// </remarks>
+        private void ApplyWorkAreaFit()
+        {
+            switch (WindowLayoutCalculator.DecideFitOnSizeChanged(IsLoaded, _isMovingOrSizing, WindowState == WindowState.Normal))
+            {
+                case WorkAreaFit.MaxHeightAndPosition:
+                    FitToMonitorWorkArea();
+                    break;
+                case WorkAreaFit.MaxHeightOnly:
+                    FitMaxHeightToMonitorWorkArea();
+                    break;
+            }
+        }
+
+        /// <summary>
+        /// 高さの上限だけを、このダイアログが載っているモニターの作業領域の高さに合わせる（Issue #2465）。
+        /// </summary>
+        /// <remarks>
+        /// 作業領域の低いモニターへ動かしたときに、前のモニターの上限が残らないようにする。位置は動かさない
+        /// （操作中に寄せるとドラッグと競合する。位置は操作の終わり・内容の伸び縮みで寄せる）。作業領域が取れなければ何も変えない。
+        /// </remarks>
+        private void FitMaxHeightToMonitorWorkArea()
+        {
+            if (MonitorWorkArea.Of(this) is Rect workArea)
+            {
+                MaxHeight = WindowLayoutCalculator.FitMaxHeight(MaxHeight, workArea.Height);
+            }
+        }
+
+        /// <summary>
+        /// 高さの上限と位置を、このダイアログが載っているモニターの作業領域に合わせる（Issue #2465）。
+        /// </summary>
+        /// <remarks>
+        /// <c>CenterOwner</c> はオーナーの中心に置くだけで画面内へ寄せないので、上限を作業領域の高さまで広げると
+        /// 下端（OK・キャンセル）が画面の外へ出得る。繰越レコードの日付の注意書きで内容が伸びたとき（SizeChanged）も寄せ直す。
+        /// 横方向も <c>CarryoverDataLossDialog</c> と同じく寄せる（オーナーが画面の端にあると左右がはみ出し得る）。
+        /// 利用者の移動・リサイズの操作中は呼ばず（<see cref="WindowLayoutCalculator.DecideFitOnSizeChanged"/>）、操作の終わりに
+        /// 1 回だけ呼ぶ。ClampStart は作業領域に収まっている位置を動かさない。作業領域が取れなければ何も変えない。
+        /// </remarks>
+        private void FitToMonitorWorkArea()
+        {
+            if (MonitorWorkArea.Of(this) is not Rect workArea)
+            {
+                return;
+            }
+
+            MaxHeight = WindowLayoutCalculator.FitMaxHeight(MaxHeight, workArea.Height);
+            Left = WindowLayoutCalculator.ClampStart(Left, ActualWidth, workArea.Left, workArea.Width);
+            Top = WindowLayoutCalculator.ClampStart(Top, ActualHeight, workArea.Top, workArea.Height);
         }
 
         private void InitializePurchaseDatePicker()
