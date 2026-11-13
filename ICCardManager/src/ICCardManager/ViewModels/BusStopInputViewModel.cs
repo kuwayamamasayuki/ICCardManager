@@ -115,6 +115,11 @@ public partial class BusStopInputViewModel : ViewModelBase
     private Ledger? _committedLedger;
 
     /// <summary>
+    /// Issue #2278: 一覧から開いた行の保存で、保存済みの内容から何も変わらないとき（書き込まずに閉じる）の表示。
+    /// </summary>
+    internal const string NoChangeSaveMessage = "保存済みの内容と同じため、変更はありません";
+
+    /// <summary>
     /// Issue #2278: 一覧から開いた行の保存で、職員証の認証が完了しなかったときの案内。
     /// </summary>
     internal const string SaveAuthenticationCancelledMessage =
@@ -720,6 +725,15 @@ public partial class BusStopInputViewModel : ViewModelBase
 
         if (_editsRecordedLedger)
         {
+            if (!await WouldChangeRecordedLedgerAsync(item => ToPersistedBusStops(item.BusStops)))
+            {
+                // Issue #2278: 保存済みの内容と同じなら書き込まずに閉じる（何も変えていない保存は書かない。
+                // db-write-conventions #2375）。台帳が変わらないので職員証も求めず、操作ログに空の変更を残さない
+                StatusMessage = NoChangeSaveMessage;
+                IsSaved = true;
+                return;
+            }
+
             // Issue #2278: 一覧から開いた記録済みの行の書き換えは、保存するかを決めた（確認の）後、処理中にする前に
             // 職員証の認証を求める（認証ダイアログの間は処理中オーバーレイを出さない。LedgerDetailViewModel と同じ）。
             // 操作名はリテラルで書く（ScreenTransitionDiagramConsistencyTests が数える）
@@ -757,9 +771,7 @@ public partial class BusStopInputViewModel : ViewModelBase
                 // 各バス利用のバス停名を更新
                 foreach (var item in BusUsages)
                 {
-                    item.Detail.BusStops = string.IsNullOrWhiteSpace(item.BusStops)
-                        ? SummaryGenerator.BusPlaceholder // 未入力の場合はプレースホルダ
-                        : item.BusStops;
+                    item.Detail.BusStops = ToPersistedBusStops(item.BusStops); // 未入力の場合はプレースホルダ
                 }
 
                 success = await PersistBusStopsAsync();
@@ -1040,7 +1052,7 @@ public partial class BusStopInputViewModel : ViewModelBase
 
         if (_editsRecordedLedger)
         {
-            if (!HasRecordedBusStopsToDiscard())
+            if (!await WouldChangeRecordedLedgerAsync(_ => SummaryGenerator.BusPlaceholder))
             {
                 // Issue #2278: 一覧から開いた行のバス停名がすべて未入力なら、スキップで台帳は変わらない。
                 // 書き込まずに閉じる（Esc で閉じるだけの操作に職員証を求めない）
@@ -1065,16 +1077,60 @@ public partial class BusStopInputViewModel : ViewModelBase
     }
 
     /// <summary>
-    /// Issue #2278: 一覧から開いた行に、スキップで★へ戻る保存済みのバス停名（空欄でも★でもない値）があるか。
+    /// 入力欄の値を、明細へ保存する値にする（空欄は未入力のプレースホルダ）。
     /// </summary>
+    private static string ToPersistedBusStops(string? busStops)
+        => busStops is null || string.IsNullOrWhiteSpace(busStops) ? SummaryGenerator.BusPlaceholder : busStops;
+
+    /// <summary>
+    /// Issue #2278: 一覧から開いた行で、保存・スキップが書く値が台帳（開いた時点の DB の値）を変えるか。
+    /// </summary>
+    /// <param name="valueToWrite">各入力欄について明細へ書く値（保存なら入力欄の値、スキップならプレースホルダ）</param>
     /// <remarks>
-    /// 開いた時点の DB の値（<see cref="_committedLedger"/>）で判定する。入力欄の値は保存していないので台帳を変えない。
-    /// 空欄（NULL）の明細を★にする書き込みは、どちらも「未入力」で摘要も変わらないため変更として数えない。
+    /// <para>
+    /// 比べる相手は開いた時点の DB の値（<see cref="_committedLedger"/>）で、入力欄の値ではない。入力欄は保存していないので、
+    /// 入力してからスキップしても台帳は変わらない。バス停名は空欄（NULL）と★を同じ「未入力」とみなし（保存・スキップで同じ判定）、
+    /// 摘要は保存と同じく明細から再生成して比べる（バス停名が同じでも、保存済みの摘要が再生成と違えば書き換えになる）。
+    /// </para>
+    /// <para>
+    /// 判定できないとき（開いた時点の複製が無い・入力欄の明細が見つからない）は、書き換えとして扱う（認証を求める側へ倒す）。
+    /// </para>
     /// </remarks>
-    private bool HasRecordedBusStopsToDiscard()
-        => _committedLedger?.Details.Any(d => d.IsBus
-                                             && !string.IsNullOrWhiteSpace(d.BusStops)
-                                             && !SummaryGenerator.IsBusStopPlaceholder(d.BusStops)) ?? false;
+    private async Task<bool> WouldChangeRecordedLedgerAsync(Func<BusStopInputItem, string> valueToWrite)
+    {
+        if (_committedLedger == null || Ledger == null)
+        {
+            return true;
+        }
+
+        var after = LedgerCloner.Clone(_committedLedger);
+        if (after == null)
+        {
+            return true;
+        }
+
+        foreach (var item in BusUsages)
+        {
+            var index = Ledger.Details.FindIndex(d => ReferenceEquals(d, item.Detail));
+            if (index < 0 || index >= after.Details.Count)
+            {
+                return true;
+            }
+
+            var detail = after.Details[index];
+            var newValue = valueToWrite(item);
+            if (!string.Equals(ToPersistedBusStops(detail.BusStops), ToPersistedBusStops(newValue), StringComparison.Ordinal))
+            {
+                return true;
+            }
+
+            detail.BusStops = newValue;
+        }
+
+        var settings = await _settingsRepository.GetAppSettingsAsync();
+        var summary = new SummaryGenerator(settings.DepartmentType).Generate(after.Details);
+        return !string.Equals(summary, _committedLedger.Summary, StringComparison.Ordinal);
+    }
 
     /// <summary>
     /// スキップの本体（すべての欄を★にして保存する）

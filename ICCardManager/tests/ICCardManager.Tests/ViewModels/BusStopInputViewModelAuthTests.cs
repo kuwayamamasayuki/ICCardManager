@@ -104,7 +104,8 @@ public class BusStopInputViewModelAuthTests : IDisposable
             LenderIdm = "LENDER_IDM",
             StaffName = "博多 花子",
             Date = new DateTime(2026, 11, 2),
-            Summary = "バス（★）",
+            // 記録済みの摘要は、保存時と同じく明細から生成したもの
+            Summary = new SummaryGenerator(new AppSettings().DepartmentType).Generate(details),
             Details = details,
         };
     }
@@ -203,6 +204,38 @@ public class BusStopInputViewModelAuthTests : IDisposable
         _viewModel.IsSaved.Should().BeFalse();
     }
 
+    [Theory]
+    [InlineData("★")]
+    [InlineData(null)]
+    public async Task 未入力一覧から開いた行を何も変えずに保存したら認証を求めず書き込まずに閉じること(string? recorded)
+    {
+        await OpenFromIncompleteListAsync(RecordedLedger(recorded));
+        _viewModel.BusUsages[0].BusStops = string.Empty; // 未入力のまま（未入力の警告は「はい」）
+
+        await _viewModel.SaveAsync();
+
+        _staffAuthServiceMock.Verify(s => s.RequestAuthenticationAsync(It.IsAny<string>()), Times.Never,
+            "台帳が変わらない保存に職員証を求めない（空欄（NULL）と★は同じ「未入力」）");
+        VerifyNothingWritten();
+        _viewModel.IsSaved.Should().BeTrue("一覧へ戻る");
+        _viewModel.StatusMessage.Should().Be(BusStopInputViewModel.NoChangeSaveMessage);
+    }
+
+    [Fact]
+    public async Task 未入力一覧から開いた行の保存済みの摘要が明細からの再生成と違えばバス停名が同じでも認証を求めること()
+    {
+        var ledger = RecordedLedger("★");
+        ledger.Summary = "バス（★） 手入力の補足";
+        await OpenFromIncompleteListAsync(ledger);
+        _viewModel.BusUsages[0].BusStops = string.Empty;
+
+        await _viewModel.SaveAsync();
+
+        _staffAuthServiceMock.Verify(s => s.RequestAuthenticationAsync(SaveOperation), Times.Once,
+            "保存は摘要を再生成して書くので、摘要が変わる保存は書き換え");
+        _insertedLogs.Should().ContainSingle();
+    }
+
     #endregion
 
     #region 未入力一覧からのスキップ
@@ -252,6 +285,22 @@ public class BusStopInputViewModelAuthTests : IDisposable
             It.IsAny<int>(), It.IsAny<IEnumerable<(int SequenceNumber, string BusStops)>>(), It.IsAny<SQLiteTransaction>()), Times.Never);
         _insertedLogs.Should().BeEmpty();
         _viewModel.IsSaved.Should().BeTrue("後で入力する。一覧へ戻る");
+    }
+
+    [Fact]
+    public async Task 未入力一覧から開いた未入力の行に入力してからスキップしても認証を求めず何も書かないこと()
+    {
+        await OpenFromIncompleteListAsync(RecordedLedger("★"));
+        _viewModel.BusUsages[0].BusStops = "天神～博多駅"; // 入力欄だけの値（保存していない）
+
+        await _viewModel.SkipAsync();
+
+        _dialogServiceMock.Verify(d => d.ShowWarningConfirmation(It.IsAny<string>(), BusStopInputViewModel.SkipDiscardConfirmationTitle),
+            Times.Once, "入力を破棄する確認は従来どおり出す");
+        _staffAuthServiceMock.Verify(s => s.RequestAuthenticationAsync(It.IsAny<string>()), Times.Never,
+            "変更の有無は保存済みの値で決める（入力欄の値は台帳に無い）");
+        VerifyNothingWritten();
+        _viewModel.IsSaved.Should().BeTrue();
     }
 
     #endregion
