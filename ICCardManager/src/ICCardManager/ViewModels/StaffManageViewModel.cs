@@ -1560,8 +1560,11 @@ namespace ICCardManager.ViewModels
         private async Task NotifyReplaceStaffCardConflictAsync(string targetLabel)
         {
             _staffRepository.InvalidateCachesAffectedByStaffIdmReplacement();
-            await LoadStaffAsync();
-            StatusMessage = ConcurrencyConflictMessage.ForReplaceStaffCard($"職員「{targetLabel}」", "職員一覧");
+            // 再読込が例外でも案内は失わない（登録・復元の競合と同じ。#2382）。読めなかったら「再読み込みしました」と述べず、開き直しを案内する
+            var reloaded = await RegisterFailureNotice.TryReloadAsync(LoadStaffAsync, LogNoticeFailure, "職員証の差し替えの競合の案内");
+            StatusMessage = reloaded
+                ? ConcurrencyConflictMessage.ForReplaceStaffCard($"職員「{targetLabel}」", "職員一覧")
+                : ConcurrencyConflictMessage.ForReplaceStaffCardReloadFailed($"職員「{targetLabel}」", "職員一覧");
             IsStatusError = true;
         }
 

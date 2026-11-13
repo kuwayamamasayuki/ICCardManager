@@ -530,6 +530,28 @@ public class StaffManageViewModelCardReplacementTests : IDisposable
         VerifySuppressionReleased();
     }
 
+    [Fact]
+    public async Task 競合の案内の前の一覧の再読込に失敗しても_開き直しを案内すること()
+    {
+        // 上の「一覧を再読込して競合を案内すること」の対: 再読込が例外でも汎用の例外文言に落とさず、
+        // 「再読み込みしました」とは述べずに画面の開き直しを案内する（登録・復元の競合と同じ）
+        _staffRepositoryMock.Setup(r => r.CheckStaffIdmReplacementAsync(TargetIdm, NewIdm))
+            .ReturnsAsync(StaffCardReplacementResult.Rejected(StaffCardReplacementStatus.TargetNotFound));
+        var task = StartReplacementAndWaitForTouch();
+        _staffRepositoryMock.Setup(r => r.GetAllAsync()).ThrowsAsync(new SQLiteException("disk I/O error"));
+
+        _viewModel.HandleReplacementCardRead(NewIdm);
+        await task;
+
+        _viewModel.StatusMessage.Should().Be(
+            ConcurrencyConflictMessage.ForReplaceStaffCardReloadFailed($"職員「{TargetLabel}」", "職員一覧"));
+        _viewModel.StatusMessage.Should().NotContain("再読み込みしました");
+        _viewModel.IsStatusError.Should().BeTrue();
+        _viewModel.IsEditing.Should().BeTrue("入力内容は消さない");
+        VerifyNoReplacementWrite();
+        VerifySuppressionReleased();
+    }
+
     #endregion
 
     #region 後処理の失敗
@@ -578,6 +600,7 @@ public class StaffManageViewModelCardReplacementTests : IDisposable
         yield return new object[] { StaffManageViewModel.ReplacementNotConfirmedMessage };
         yield return new object[] { StaffManageViewModel.ReplacementCommittedButRefreshFailedMessage };
         yield return new object[] { StaffManageViewModel.ReplacementBlockedByUnsavedEditMessage };
+        yield return new object[] { ConcurrencyConflictMessage.ForReplaceStaffCardReloadFailed($"職員「{TargetLabel}」", "職員一覧") };
         foreach (var status in new[]
                  {
                      StaffCardReplacementStatus.SameCard, StaffCardReplacementStatus.RegisteredStaff,

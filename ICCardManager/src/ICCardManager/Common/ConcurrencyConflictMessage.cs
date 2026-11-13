@@ -277,6 +277,13 @@ namespace ICCardManager.Common
             => $"{target}の職員証を差し替えできませんでした。{DeletedOrCardReplacedReason}職員証は差し替えていません。" +
                $"{listName}を再読み込みしましたので、一覧で状態を確認してからやり直してください。";
 
+        /// <summary>
+        /// 職員証の差し替え（Issue #2461）の競合で、案内の前の一覧の再読込にも失敗したとき（画面を開き直して確かめる）
+        /// </summary>
+        internal static string ForReplaceStaffCardReloadFailed(string target, string listName)
+            => $"{target}の職員証を差し替えできませんでした。{DeletedOrCardReplacedReason}職員証は差し替えていません。" +
+               $"{listName}の再読み込みにも失敗したため、画面を閉じて開き直し、一覧で{target}を確認してからやり直してください。";
+
         /// <summary>対象の職員が削除された、または職員証が差し替えられた（職員証の差し替えの「なぜ」。Issue #2461）</summary>
         private const string DeletedOrCardReplacedReason = "他のパソコンや別の操作で削除された、または先に職員証が差し替えられた可能性があります。";
 

@@ -1888,6 +1888,23 @@ public class MainViewModelTests : IDisposable
     }
 
     /// <summary>
+    /// Issue #2461: 知らせの古い IDm が小文字でも、大文字にそろえて同じ職員証と見なすこと（StaffRepository の判定と同じ規則）。
+    /// </summary>
+    [Fact]
+    public void StaffCardReplaced_古い職員証のIDmが小文字でも置き換わること()
+    {
+        var messenger = new WeakReferenceMessenger();
+        var viewModel = CreateViewModel(messenger: messenger);
+        var field = typeof(MainViewModel).GetField("_lastProcessedStaffIdm",
+            System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!;
+        field.SetValue(viewModel, "0123456789ABCDEF");
+
+        messenger.Send(new StaffCardReplacedMessage("0123456789abcdef", "FEDCBA9876543210"));
+
+        field.GetValue(viewModel).Should().Be("FEDCBA9876543210");
+    }
+
+    /// <summary>
     /// 上の対: 前回操作者が別の職員なら、職員証の差し替えで変えないこと。
     /// </summary>
     [Fact]

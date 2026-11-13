@@ -43,6 +43,7 @@ namespace ICCardManager.UITests.Tests
             using var fixture = AppFixture.LaunchWithSeed(ScreenshotSeedData.Seed, AppFixture.SuppressDebugTestData);
             var lenderRowsBefore = DatabaseProbe.Count("SELECT COUNT(*) FROM ledger WHERE lender_idm = @idm",
                 ("@idm", ScreenshotSeedData.SecondaryStaffIdm));
+            lenderRowsBefore.Should().BeGreaterThan(0L, "前提: 差し替える職員に付け替える台帳の行があること（無いと引き継ぎを確かめられない）");
             DatabaseProbe.Count("SELECT COUNT(*) FROM staff WHERE staff_idm = @idm",
                 ("@idm", ScreenshotSeedData.VirtualTouchCardIdm)).Should().Be(0L, "前提: 新しい職員証の IDm は未登録であること");
 
