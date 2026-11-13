@@ -724,6 +724,27 @@ namespace ICCardManager.UITests.Infrastructure
         [UiaName]
         public const string StaffNewRegistrationButton = "新規職員登録";
 
+        /// <summary>職員管理ダイアログの職員一覧（DataGrid）。</summary>
+        [UiaName]
+        public const string StaffList = "職員一覧";
+
+        /// <summary>職員管理ダイアログの「編集」ボタン。</summary>
+        [UiaName]
+        public const string StaffEditButton = "職員情報編集";
+
+        /// <summary>職員管理ダイアログの編集中に出る「職員証を差し替え」ボタン（Issue #2461）。</summary>
+        [UiaName]
+        public const string StaffReplaceCardButton = "職員証を差し替え";
+
+        /// <summary>職員証の差し替えで新しい職員証のタッチを待つ間に出る「差し替えをやめる」ボタン（Issue #2461）。</summary>
+        [UiaName]
+        public const string StaffCancelReplaceCardButton = "差し替えをやめる";
+
+        // 差し替えの確認も Win32 の MessageBox で、タイトルは StaffManageViewModel が渡す文字列そのもの。
+        /// <summary>職員証の差し替えの確認 MessageBox のタイトル（Issue #2461）。</summary>
+        [NotUiaName]
+        public const string StaffCardReplacementConfirmTitle = "職員証の差し替え";
+
         // 削除済み職員の復元の確認も Win32 の MessageBox で、タイトルは StaffManageViewModel が渡す文字列そのもの。
         /// <summary>削除済みの職員証を読み取ったときの復元の確認 MessageBox のタイトル（#284）。</summary>
         [NotUiaName]

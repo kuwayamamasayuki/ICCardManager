@@ -51,6 +51,7 @@ public class StaffManageViewModelTests : IDisposable
     /// 本番の <c>WpfDispatcherService</c> と同じく「記録して再スローしない」代役を使う。
     /// </summary>
     private readonly RecordingDispatcherService _dispatcher = new();
+    private readonly TestTimerFactory _timerFactory = new();
     /// <summary>
     /// Issue #2156: 登録・更新・削除・復元は <see cref="StaffManagementService"/> が
     /// トランザクションを開いて行う。リポジトリはモックのまま、トランザクションだけ実物（インメモリ）を使う。
@@ -98,7 +99,8 @@ public class StaffManageViewModelTests : IDisposable
             _dialogServiceMock.Object,
             _staffAuthServiceMock.Object,
             messenger,
-            _dispatcher);
+            _dispatcher,
+            _timerFactory);
     }
 
     public void Dispose()

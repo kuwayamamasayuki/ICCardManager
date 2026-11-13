@@ -98,6 +98,28 @@ namespace ICCardManager.ViewModels
         private bool _isWaitingForCard;
 
         /// <summary>
+        /// 職員証の差し替え（Issue #2461）で、新しい職員証のタッチを待っているか
+        /// </summary>
+        /// <remarks>
+        /// 新規登録の職員証タッチ待ち（<see cref="IsWaitingForCard"/>）とは別の状態として持つ。
+        /// 1 つの状態に 2 つの意味を持たせると、タッチの行き先（新規登録の IDm か差し替えか）を取り違える（#1858）。
+        /// </remarks>
+        [ObservableProperty]
+        [NotifyPropertyChangedFor(nameof(IsStaffCardReplacementIdle))]
+        private bool _isWaitingForReplacementCard;
+
+        /// <summary>
+        /// 職員証の差し替えで、新しい職員証のタッチを待つ残り秒数（Issue #2461）
+        /// </summary>
+        [ObservableProperty]
+        private int _replacementCardRemainingSeconds;
+
+        /// <summary>
+        /// 職員証の差し替えのタッチ待ちでない（一覧・編集欄・ボタンを操作できる）か（Issue #2461）
+        /// </summary>
+        public bool IsStaffCardReplacementIdle => !IsWaitingForReplacementCard;
+
+        /// <summary>
         /// 新規登録・更新・復元後にハイライト表示する職員のIDm
         /// </summary>
         [ObservableProperty]
@@ -130,6 +152,20 @@ namespace ICCardManager.ViewModels
         private string _editTargetName = string.Empty;
         private string _editTargetNumber = string.Empty;
 
+        /// <summary>職員証の差し替えのタッチ待ちの残り時間を刻むタイマーの生成（Issue #2461）</summary>
+        private readonly ITimerFactory _timerFactory;
+
+        /// <summary>職員証の差し替えのタッチ待ちの残り時間を刻むタイマー（初めて待つときに作る）</summary>
+        private ITimer? _replacementCardTimer;
+
+        /// <summary>
+        /// 職員証の差し替えで、新しい職員証のタッチ・やめる・時間切れのどれかを待つ受け皿（待っていないときは null）
+        /// </summary>
+        private TaskCompletionSource<ReplacementCardWait>? _replacementCardWaiter;
+
+        /// <summary>職員証の差し替えの操作（認証から後処理まで）の最中か。二重に始めないためのフラグ</summary>
+        private bool _isReplacingStaffCard;
+
         public StaffManageViewModel(
             IStaffRepository staffRepository,
             ICardReader cardReader,
@@ -138,8 +174,11 @@ namespace ICCardManager.ViewModels
             IDialogService dialogService,
             IStaffAuthService staffAuthService,
             IMessenger messenger,
-            IDispatcherService dispatcherService)
+            IDispatcherService dispatcherService,
+            ITimerFactory timerFactory)
         {
+            // 省略可能にすると DI の配線漏れが「差し替えのタッチ待ちが時間切れにならない」形で潜在化する（#1820）
+            _timerFactory = timerFactory ?? throw new ArgumentNullException(nameof(timerFactory));
             _staffRepository = staffRepository;
             _cardReader = cardReader;
             _validationService = validationService;
@@ -429,6 +468,13 @@ namespace ICCardManager.ViewModels
         [RelayCommand]
         public async Task SaveAsync()
         {
+            // Issue #2461: 職員証の差し替えの最中（タッチ待ち・確認・書き込み）は保存しない。
+            // 画面のボタンは無効にしているが、Enter キー（既定ボタン）からも呼ばれ得る
+            if (_isReplacingStaffCard)
+            {
+                return;
+            }
+
             try
             {
                 // 入力値をサニタイズ
@@ -990,6 +1036,10 @@ namespace ICCardManager.ViewModels
 
             // 職員証登録モードを解除（Issue #852）
             _messenger.Send(new CardReadingSuppressedMessage(false, CardReadingSource.StaffRegistration));
+
+            // Issue #2461: 職員証の差し替えのタッチ待ち中に編集を取り消したら、差し替えもやめる。
+            // 最後に行う（待っていた差し替えの流れが続きで「やめました」と案内するので、上のクリアで消さない）
+            CompleteReplacementCardWait(ReplacementCardWaitOutcome.Cancelled, null);
         }
 
         /// <summary>
@@ -997,6 +1047,14 @@ namespace ICCardManager.ViewModels
         /// </summary>
         private void OnCardRead(object sender, CardReadEventArgs e)
         {
+            // Issue #2461: 職員証の差し替えのタッチ待ちは、新規登録のタッチ待ちとは別の行き先へ渡す
+            if (IsWaitingForReplacementCard)
+            {
+                var replacementIdm = e.Idm;
+                _dispatcherService.InvokeAsync(() => HandleReplacementCardRead(replacementIdm));
+                return;
+            }
+
             if (!IsWaitingForCard)
             {
                 return;
@@ -1197,6 +1255,384 @@ namespace ICCardManager.ViewModels
             // CancelEdit() または Cleanup() でのみ解除する。
         }
 
+        #region 職員証の差し替え（Issue #2461）
+
+        /// <summary>新しい職員証のタッチを待つ秒数（Issue #2461）</summary>
+        /// <remarks>メイン画面の職員証タッチ後のタイムアウト（60 秒）と同じ長さにする。</remarks>
+        internal const int ReplacementCardTimeoutSeconds = 60;
+
+        /// <summary>職員証の差し替えで認証が完了しなかったときの案内</summary>
+        internal const string ReplaceAuthenticationCancelledMessage =
+            "職員証の認証が完了しなかったため、職員証を差し替えていません。" +
+            "差し替えるには、もう一度「職員証を差し替え」を押し、登録済みの職員の職員証で認証してください（これから使う新しい職員証では認証できません）。";
+
+        /// <summary>職員証の差し替えを「差し替えをやめる」・編集の取り消しでやめたときの案内</summary>
+        internal const string ReplacementCancelledMessage =
+            "職員証の差し替えをやめました。職員証は変わっていません。";
+
+        /// <summary>確認ダイアログで「いいえ」を選んだときの案内</summary>
+        internal const string ReplacementNotConfirmedMessage =
+            "職員証を差し替えていません。差し替える場合は、もう一度「職員証を差し替え」を押してください。";
+
+        /// <summary>確認ダイアログの見出し</summary>
+        internal const string ReplacementConfirmationTitle = "職員証の差し替え";
+
+        /// <summary>新しい職員証のタッチを待つ間に時間切れになったときの案内</summary>
+        internal static string ReplacementTimedOutMessage =>
+            $"新しい職員証のタッチを{ReplacementCardTimeoutSeconds}秒待ちましたが読み取れなかったため、職員証を差し替えていません。" +
+            "差し替えるには、もう一度「職員証を差し替え」を押し、認証の後で新しい職員証をタッチしてください。";
+
+        /// <summary>
+        /// 差し替えを確定する前の確認の文言
+        /// </summary>
+        /// <param name="targetLabel">差し替える職員（一覧に載っていた表記）</param>
+        internal static string BuildReplacementConfirmationMessage(string targetLabel)
+            => $"{targetLabel} の職員証を、いまタッチした職員証に差し替えます。\n\n" +
+               "これまでの利用履歴と、貸出中の交通系ICカードは、新しい職員証の記録として引き継ぎます。" +
+               "差し替えた後は、古い職員証では貸出・返却・認証ができません。\n\n差し替えますか？";
+
+        /// <summary>差し替えが完了したときの案内</summary>
+        internal static string BuildReplacementCompletedMessage(string targetLabel)
+            => $"{targetLabel} の職員証を差し替えました。これからは新しい職員証を使ってください。";
+
+        /// <summary>差し替えは確定したが、その後の画面の更新に失敗したときの案内（Issue #1816 と同じ形）</summary>
+        internal const string ReplacementCommittedButRefreshFailedMessage =
+            "職員証の差し替えは記録済みですが、その後の画面の更新に失敗しました。" +
+            "もう一度差し替えず、職員管理画面を開き直して一覧を確認してください。";
+
+        /// <summary>
+        /// タッチした職員証が差し替えに使えない理由（「何が」「なぜ」）を組み立てる
+        /// </summary>
+        /// <param name="check">差し替えの可否の判定</param>
+        /// <param name="targetLabel">差し替える職員（一覧に載っていた表記）</param>
+        internal static string BuildReplacementRejectedReason(StaffCardReplacementResult check, string targetLabel)
+        {
+            var other = check.ConflictingStaff;
+            return check.Status switch
+            {
+                StaffCardReplacementStatus.SameCard =>
+                    $"タッチした職員証は {targetLabel} の今の職員証と同じため、差し替えに使えません。",
+                StaffCardReplacementStatus.RegisteredStaff =>
+                    $"タッチした職員証は、職員「{FormatStaffLabel(other?.Name, other?.Number)}」の職員証として登録されているため、差し替えに使えません。",
+                StaffCardReplacementStatus.DeletedStaff =>
+                    $"タッチした職員証は、削除済みの職員「{FormatStaffLabel(other?.Name, other?.Number)}」の職員証として登録されているため、差し替えに使えません。",
+                StaffCardReplacementStatus.RegisteredCard =>
+                    "タッチしたカードは交通系ICカードとして登録されている（削除済み・払戻済みを含む）ため、職員証として使えません。",
+                _ => throw new ArgumentOutOfRangeException(nameof(check), check.Status, "差し替えに使えない理由ではありません。"),
+            };
+        }
+
+        /// <summary>
+        /// タッチを待っている間に、差し替えに使えない職員証をタッチしたときの案内（待ち続ける）
+        /// </summary>
+        internal static string BuildReplacementRejectedWhileWaitingMessage(StaffCardReplacementResult check, string targetLabel)
+            => BuildReplacementRejectedReason(check, targetLabel) +
+               $"{targetLabel} の新しい職員証をタッチしてください（やめる場合は「差し替えをやめる」を押してください）。";
+
+        /// <summary>
+        /// 確認の後、書き込みの時点で差し替えに使えなくなっていたときの案内（他のパソコンが先に登録した等）
+        /// </summary>
+        internal static string BuildReplacementRejectedAtSaveMessage(StaffCardReplacementResult check, string targetLabel)
+            => BuildReplacementRejectedReason(check, targetLabel) +
+               "他のパソコンや別の操作で登録された可能性があります。職員証は差し替えていません。" +
+               "別の新しい職員証で、もう一度「職員証を差し替え」からやり直してください。";
+
+        /// <summary>
+        /// 職員証の差し替えを始められるか（編集中の登録済みの職員で、差し替えの最中でない）
+        /// </summary>
+        private bool CanStartStaffCardReplacement =>
+            IsEditing && !IsNewStaff && !_isReplacingStaffCard && !IsBusy && !string.IsNullOrEmpty(EditStaffIdm);
+
+        /// <summary>
+        /// 職員証を差し替える（Issue #2461）。編集中の職員について、職員証の認証 → 新しい職員証のタッチ → 確認 → 保存
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// 職員証を再発行したとき、職員を削除して登録し直すと、過去の利用履歴（台帳の貸出者）や貸出中の交通系ICカードが
+        /// 古い職員証のまま残り、システム上は別の職員になる。差し替えは同じ職員のまま職員証の IDm だけを変え、
+        /// 過去の記録も新しい IDm へ付け替える（<see cref="StaffManagementService.ReplaceCardAsync"/>）。
+        /// </para>
+        /// <para>
+        /// 認証は 1 操作のスコープ（Issue #2260）で、タッチ待ち・確認・書き込みまでを含む。書き込みの操作ログには
+        /// 認証した職員が記録される。登録済みの職員が 0 人の免除（Issue #2263）は無い — 差し替える職員がいる以上、
+        /// 登録済みの職員は 1 人以上いる。差し替える本人の古い職員証で認証してもよい。
+        /// </para>
+        /// <para>
+        /// 認証の後から後処理までは、メイン画面のカード読み取りを抑制する（同じタッチが未登録のカードとして
+        /// メイン画面に届かないように。#1807）。抑制は <see cref="CardReadingSource.StaffCardReplacement"/> で取り、
+        /// 操作の終わり（成功・失敗・やめた・例外のどれでも）に <c>finally</c> で解く。
+        /// </para>
+        /// </remarks>
+        [RelayCommand]
+        public async Task ReplaceStaffCardAsync()
+        {
+            if (!CanStartStaffCardReplacement)
+            {
+                return;
+            }
+
+            // 対象は開始時点で確定させる（認証・タッチ待ちの間に一覧の選択が変わっても、差し替える職員は変えない）
+            var targetIdm = EditStaffIdm;
+            var targetLabel = EditTargetLabel;
+
+            _isReplacingStaffCard = true;
+            try
+            {
+                await ReplaceStaffCardWithAuthenticationAsync(targetIdm, targetLabel);
+            }
+            finally
+            {
+                _isReplacingStaffCard = false;
+            }
+        }
+
+        /// <summary>
+        /// 職員証の認証を経て差し替えを行う（認証のスコープはこのメソッドの流れ。Issue #2260）
+        /// </summary>
+        private async Task ReplaceStaffCardWithAuthenticationAsync(string targetIdm, string targetLabel)
+        {
+            using var authResult = (await _staffAuthService.RequestAuthenticationAsync("職員証の差し替え"))?.Enter();
+            if (authResult == null)
+            {
+                // 何も書いていない。入力内容は消さない（Issue #1757）
+                StatusMessage = ReplaceAuthenticationCancelledMessage;
+                IsStatusError = true;
+                return;
+            }
+
+            _messenger.Send(new CardReadingSuppressedMessage(true, CardReadingSource.StaffCardReplacement));
+
+            // 差し替えが確定したか（確定後の後処理の失敗を、差し替えの失敗と混同して案内しないため。#1816）
+            var committed = new StrongBox<bool>(false);
+            try
+            {
+                await ReplaceStaffCardCoreAsync(targetIdm, targetLabel, committed);
+            }
+            catch (Exception ex) when (committed.Value)
+            {
+                ErrorDialogHelper.LogException(ex, "職員証の差し替え後の処理");
+                CancelEdit();
+                // CancelEdit() は StatusMessage をクリアするため、案内は後に設定する（#1759）
+                StatusMessage = ReplacementCommittedButRefreshFailedMessage;
+                IsStatusError = true;
+            }
+            catch (Exception ex)
+            {
+                // Issue #1614: 生の ex.Message を UI に出さず、3 要素の文言を表示。技術詳細はログへ逃がす
+                ErrorDialogHelper.LogException(ex, "職員証の差し替え");
+                StatusMessage = ExceptionMessageFormatter.ToUserMessage(ex, "職員証の差し替え");
+                IsStatusError = true;
+            }
+            finally
+            {
+                // 例外で抜けてもタッチ待ちを残さない（タイマーが動き続け、画面が操作できないままにならないように）
+                CompleteReplacementCardWait(ReplacementCardWaitOutcome.Cancelled, null);
+                _messenger.Send(new CardReadingSuppressedMessage(false, CardReadingSource.StaffCardReplacement));
+            }
+        }
+
+        /// <summary>
+        /// 職員証の差し替えの本体（新しい職員証のタッチ → 判定 → 確認 → 書き込み）
+        /// </summary>
+        private async Task ReplaceStaffCardCoreAsync(string targetIdm, string targetLabel, StrongBox<bool> committed)
+        {
+            StatusMessage = string.Empty;
+            IsStatusError = false;
+
+            string newIdm;
+            while (true)
+            {
+                var touched = await WaitForReplacementCardAsync();
+                switch (touched.Outcome)
+                {
+                    case ReplacementCardWaitOutcome.Cancelled:
+                        StatusMessage = ReplacementCancelledMessage;
+                        IsStatusError = false;
+                        return;
+                    case ReplacementCardWaitOutcome.TimedOut:
+                        StatusMessage = ReplacementTimedOutMessage;
+                        IsStatusError = true;
+                        return;
+                }
+
+                var touchedIdm = touched.Idm ?? string.Empty;
+                StaffCardReplacementResult check;
+                using (BeginBusy("確認中..."))
+                {
+                    check = await _staffManagementService.CheckCardReplacementAsync(targetIdm, touchedIdm);
+                }
+
+                if (check.IsOk)
+                {
+                    newIdm = touchedIdm;
+                    break;
+                }
+
+                if (check.Status == StaffCardReplacementStatus.TargetNotFound)
+                {
+                    await NotifyReplaceStaffCardConflictAsync(targetLabel);
+                    return;
+                }
+
+                // タッチしたカードが使えないだけなので、待ち続けて別の職員証のタッチを受ける
+                StatusMessage = BuildReplacementRejectedWhileWaitingMessage(check, targetLabel);
+                IsStatusError = true;
+            }
+
+            // 確認ダイアログは処理中スコープの外で出す（#1793）
+            var confirmed = _dialogService.ShowConfirmation(
+                BuildReplacementConfirmationMessage(targetLabel), ReplacementConfirmationTitle);
+            if (!confirmed)
+            {
+                StatusMessage = ReplacementNotConfirmedMessage;
+                IsStatusError = false;
+                return;
+            }
+
+            using (BeginBusy("差し替え中..."))
+            {
+                var result = await _staffManagementService.ReplaceCardAsync(targetIdm, newIdm);
+                if (result.IsOk)
+                {
+                    committed.Value = true;
+
+                    await LoadStaffAsync();
+                    CancelEdit();
+                    SelectAndHighlight(newIdm);
+                    // CancelEdit() は StatusMessage / IsStatusError をクリアするため、完了メッセージは後に設定する（#1759）
+                    StatusMessage = BuildReplacementCompletedMessage(targetLabel);
+                    IsStatusError = false;
+                    return;
+                }
+
+                if (result.Status == StaffCardReplacementStatus.TargetNotFound)
+                {
+                    await NotifyReplaceStaffCardConflictAsync(targetLabel);
+                    return;
+                }
+
+                StatusMessage = BuildReplacementRejectedAtSaveMessage(result, targetLabel);
+                IsStatusError = true;
+            }
+        }
+
+        /// <summary>
+        /// 差し替える職員が見つからなかった（競合）ことを、職員一覧を再読込してから案内する
+        /// </summary>
+        /// <remarks>
+        /// 再読込を先に行うのは文言が「再読み込みしました」と述べるため（#1753）。入力内容は消さない（#1757）。
+        /// キャッシュは書き込みの有無によらず破棄する（確認だけで検出した経路は書き込みを通らない。#1760）。
+        /// </remarks>
+        private async Task NotifyReplaceStaffCardConflictAsync(string targetLabel)
+        {
+            _staffRepository.InvalidateCachesAffectedByStaffIdmReplacement();
+            await LoadStaffAsync();
+            StatusMessage = ConcurrencyConflictMessage.ForReplaceStaffCard($"職員「{targetLabel}」", "職員一覧");
+            IsStatusError = true;
+        }
+
+        /// <summary>
+        /// 新しい職員証のタッチ・やめる・時間切れのどれかを待つ
+        /// </summary>
+        private Task<ReplacementCardWait> WaitForReplacementCardAsync()
+        {
+            var waiter = new TaskCompletionSource<ReplacementCardWait>();
+            _replacementCardWaiter = waiter;
+            ReplacementCardRemainingSeconds = ReplacementCardTimeoutSeconds;
+            IsWaitingForReplacementCard = true;
+
+            var timer = _replacementCardTimer ??= CreateReplacementCardTimer();
+            timer.Stop();
+            timer.Start();
+            return waiter.Task;
+        }
+
+        private ITimer CreateReplacementCardTimer()
+        {
+            var timer = _timerFactory.Create();
+            timer.Interval = TimeSpan.FromSeconds(1);
+            timer.Tick += OnReplacementCardTimerTick;
+            return timer;
+        }
+
+        private void OnReplacementCardTimerTick(object? sender, EventArgs e)
+        {
+            if (_replacementCardWaiter == null)
+            {
+                _replacementCardTimer?.Stop();
+                return;
+            }
+
+            ReplacementCardRemainingSeconds = Math.Max(0, ReplacementCardRemainingSeconds - 1);
+            if (ReplacementCardRemainingSeconds == 0)
+            {
+                CompleteReplacementCardWait(ReplacementCardWaitOutcome.TimedOut, null);
+            }
+        }
+
+        /// <summary>
+        /// 差し替えのタッチ待ち中に読み取った IDm を、待っている差し替えへ渡す（UI スレッドで呼ぶ）
+        /// </summary>
+        /// <remarks>
+        /// <see cref="OnCardRead"/> はカードリーダーのスレッドで判定するため、ここで待っているかを確かめ直す
+        /// （連続タッチの 2 件目は、1 件目で待ちが終わった後に届く。#1807 と同じ形）。
+        /// </remarks>
+        internal void HandleReplacementCardRead(string idm)
+        {
+            CompleteReplacementCardWait(ReplacementCardWaitOutcome.Touched, idm);
+        }
+
+        /// <summary>
+        /// 差し替えのタッチ待ちで「差し替えをやめる」を押した
+        /// </summary>
+        [RelayCommand]
+        public void CancelReplaceStaffCard()
+        {
+            CompleteReplacementCardWait(ReplacementCardWaitOutcome.Cancelled, null);
+        }
+
+        /// <summary>
+        /// 差し替えのタッチ待ちを終え、待っている差し替えの流れへ結果を渡す（待っていなければ何もしない）
+        /// </summary>
+        private void CompleteReplacementCardWait(ReplacementCardWaitOutcome outcome, string? idm)
+        {
+            var waiter = _replacementCardWaiter;
+            if (waiter == null)
+            {
+                return;
+            }
+
+            // 状態を先に戻してから結果を渡す（続きの流れが同じスレッドで次のタッチ待ちを始めても、ここで上書きしない）
+            _replacementCardWaiter = null;
+            _replacementCardTimer?.Stop();
+            IsWaitingForReplacementCard = false;
+            waiter.TrySetResult(new ReplacementCardWait(outcome, idm));
+        }
+
+        /// <summary>差し替えのタッチ待ちの終わり方</summary>
+        internal enum ReplacementCardWaitOutcome
+        {
+            Touched,
+            Cancelled,
+            TimedOut,
+        }
+
+        /// <summary>差し替えのタッチ待ちの結果</summary>
+        internal readonly struct ReplacementCardWait
+        {
+            public ReplacementCardWait(ReplacementCardWaitOutcome outcome, string? idm)
+            {
+                Outcome = outcome;
+                Idm = idm;
+            }
+
+            public ReplacementCardWaitOutcome Outcome { get; }
+
+            public string? Idm { get; }
+        }
+
+        #endregion
+
         /// <summary>
         /// 選択職員変更時の処理
         /// </summary>
@@ -1255,6 +1691,14 @@ namespace ICCardManager.ViewModels
         public void Cleanup()
         {
             _cardReader.CardRead -= OnCardRead;
+
+            // Issue #2461: 差し替えのタッチ待ちのまま画面を閉じたら、差し替えをやめてタイマーを止める
+            CompleteReplacementCardWait(ReplacementCardWaitOutcome.Cancelled, null);
+            if (_replacementCardTimer != null)
+            {
+                _replacementCardTimer.Stop();
+                _replacementCardTimer.Tick -= OnReplacementCardTimerTick;
+            }
 
             // ダイアログ終了時に抑制を解除（Issue #852）
             _messenger.Send(new CardReadingSuppressedMessage(false, CardReadingSource.StaffRegistration));

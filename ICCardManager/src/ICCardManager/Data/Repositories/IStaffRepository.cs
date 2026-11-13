@@ -108,5 +108,41 @@ namespace ICCardManager.Data.Repositories
         /// 1 人目を登録した直後に、古いキャッシュの「0 人」を根拠に認証を免除しないため。
         /// </remarks>
         Task<bool> HasActiveStaffAsync();
+
+        /// <summary>
+        /// 職員証の差し替え（Issue #2461）ができるかを確かめる（書き込みはしない）
+        /// </summary>
+        /// <param name="currentIdm">差し替える職員の今の職員証の IDm</param>
+        /// <param name="newIdm">タッチした新しい職員証の IDm</param>
+        /// <remarks>
+        /// 確認ダイアログを出す前の判定に使う。判定の内容は <see cref="ReplaceStaffIdmAsync"/> がトランザクションの中で
+        /// 行う判定と同じ 1 つの実装（判定を 2 か所に書かない）。
+        /// </remarks>
+        Task<StaffCardReplacementResult> CheckStaffIdmReplacementAsync(string currentIdm, string newIdm);
+
+        /// <summary>
+        /// 職員証を差し替える（Issue #2461）。職員の主キー <c>staff_idm</c> を新しい職員証の IDm にし、
+        /// その職員を指す記録（台帳の貸出者・交通系ICカードの最終貸出者・統合の取り消し用データ）を新しい IDm へ付け替える
+        /// </summary>
+        /// <param name="currentIdm">差し替える職員の今の職員証の IDm</param>
+        /// <param name="newIdm">新しい職員証の IDm</param>
+        /// <param name="transaction">
+        /// 書き込みのトランザクション（必須）。複数の文を発行するため、呼び出し元が監査ログと 1 つに束ねて確定させる。
+        /// <see cref="StaffCardReplacementResult.IsOk"/> でないときは途中まで書いていることがあるので、コミットせずに巻き戻すこと
+        /// </param>
+        /// <remarks>
+        /// 外部キー（<c>ledger.lender_idm</c> / <c>ic_card.last_lent_staff</c> → <c>staff.staff_idm</c>）を壊さないよう、
+        /// 新しい行を足す → 参照を付け替える → 古い行を消す、の順に書く。操作ログ（<c>operation_log</c>）は監査記録なので書き換えない。
+        /// キャッシュは破棄しない（コミット／ロールバックの後に <see cref="InvalidateCachesAffectedByStaffIdmReplacement"/> を呼ぶ）。
+        /// </remarks>
+        Task<StaffCardReplacementResult> ReplaceStaffIdmAsync(string currentIdm, string newIdm, SQLiteTransaction transaction);
+
+        /// <summary>
+        /// 職員証の差し替え（Issue #2461）が書き換え得るキャッシュ（職員一覧・交通系ICカード一覧）を破棄する
+        /// </summary>
+        /// <remarks>
+        /// 差し替えは <c>ic_card.last_lent_staff</c> も書き換えるため、職員一覧だけでなく交通系ICカードの一覧も古くなる。
+        /// </remarks>
+        void InvalidateCachesAffectedByStaffIdmReplacement();
     }
 }

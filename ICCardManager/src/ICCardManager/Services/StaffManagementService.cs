@@ -3,6 +3,7 @@ using System;
 using System.Threading.Tasks;
 using ICCardManager.Data;
 using ICCardManager.Data.Repositories;
+using ICCardManager.Infrastructure.Security;
 using ICCardManager.Models;
 using Microsoft.Extensions.Logging;
 
@@ -194,6 +195,88 @@ namespace ICCardManager.Services
             finally
             {
                 _staffRepository.InvalidateCache();
+            }
+        }
+
+        /// <summary>
+        /// 職員証の差し替え（Issue #2461）ができるかを確かめる（書き込みはしない）
+        /// </summary>
+        /// <param name="currentIdm">差し替える職員の今の職員証の IDm</param>
+        /// <param name="newIdm">タッチした新しい職員証の IDm</param>
+        public async Task<StaffCardReplacementResult> CheckCardReplacementAsync(string currentIdm, string newIdm)
+        {
+            ValidateReplacementArguments(currentIdm, newIdm);
+            return await _staffRepository.CheckStaffIdmReplacementAsync(currentIdm, newIdm).ConfigureAwait(false);
+        }
+
+        /// <summary>
+        /// 職員証を差し替え（Issue #2461）、監査ログ（UPDATE。変更前・変更後の職員証IDm）を同じトランザクションで記録する
+        /// </summary>
+        /// <param name="currentIdm">差し替える職員の今の職員証の IDm</param>
+        /// <param name="newIdm">新しい職員証の IDm</param>
+        /// <returns>
+        /// 差し替えたら <see cref="StaffCardReplacementResult.IsOk"/>。そうでなければ何も確定していない（監査ログも書かない）。
+        /// 理由は <see cref="StaffCardReplacementResult.Status"/>（確認の後で他のパソコンが同じ職員証を登録した・
+        /// 対象の職員を削除した等。判定はトランザクションの中でやり直す）
+        /// </returns>
+        /// <remarks>
+        /// 監査ログは既存の職員情報の変更と同じ形（対象 <c>staff</c>・操作 UPDATE・対象 ID は変更後の IDm）で 1 件書き、
+        /// 変更前データに古い職員証の IDm、変更後データに新しい職員証の IDm が載る。過去の操作ログは書き換えない。
+        /// </remarks>
+        public async Task<StaffCardReplacementResult> ReplaceCardAsync(string currentIdm, string newIdm)
+        {
+            ValidateReplacementArguments(currentIdm, newIdm);
+
+            try
+            {
+                // 監査ログには書き込みが返した変更前・変更後が要る。RunAsync は監査ログの書き込みへ結果を渡さないので、
+                // 書き込みのラムダで受けておく（共有モードのリトライでは試行ごとに上書きされる）
+                StaffCardReplacementResult? replaced = null;
+                var result = await AuditedWriteTransaction.RunAsync(
+                    _dbContext, _logger, "職員証の差し替え",
+                    async tx => replaced = await _staffRepository.ReplaceStaffIdmAsync(currentIdm, newIdm, tx)
+                        .ConfigureAwait(false),
+                    r => r.IsOk,
+                    tx => replaced is { Before: { } before, After: { } after }
+                        ? _operationLogger.LogStaffUpdateAsync(before, after, tx)
+                        : throw new InvalidOperationException(
+                            "職員証の差し替えの監査ログを、差し替えの結果（変更前・変更後）なしに書こうとしました。"))
+                    .ConfigureAwait(false);
+
+                if (result.IsOk)
+                {
+                    // IDm はログへ生で出さない（logging.md / Issue #1852）
+                    _logger.LogInformation(
+                        "職員証を差し替えました: {CurrentIdm} → {NewIdm}（台帳の貸出者 {LedgerRows} 行・交通系ICカードの最終貸出者 {CardRows} 枚・統合履歴 {MergeHistoryRows} 件を付け替え）",
+                        IdmMasker.Mask(currentIdm), IdmMasker.Mask(newIdm),
+                        result.LedgerRowsUpdated, result.CardRowsUpdated, result.MergeHistoryRowsUpdated);
+                }
+                else
+                {
+                    _logger.LogInformation(
+                        "職員証の差し替えを行いませんでした: {CurrentIdm} → {NewIdm}（{Status}）",
+                        IdmMasker.Mask(currentIdm), IdmMasker.Mask(newIdm), result.Status);
+                }
+
+                return result;
+            }
+            finally
+            {
+                // 差し替えは職員一覧と交通系ICカード（最終貸出者）の両方を書き換える。失敗時も破棄する（Issue #1759）
+                _staffRepository.InvalidateCachesAffectedByStaffIdmReplacement();
+            }
+        }
+
+        private static void ValidateReplacementArguments(string currentIdm, string newIdm)
+        {
+            if (string.IsNullOrEmpty(currentIdm))
+            {
+                throw new ArgumentException("差し替える職員の職員証の IDm が空です。", nameof(currentIdm));
+            }
+
+            if (string.IsNullOrEmpty(newIdm))
+            {
+                throw new ArgumentException("新しい職員証の IDm が空です。", nameof(newIdm));
             }
         }
 

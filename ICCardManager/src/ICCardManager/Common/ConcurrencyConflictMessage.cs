@@ -264,6 +264,22 @@ namespace ICCardManager.Common
         internal static string ForImportRestore(string target, string screenName)
             => BuildForImport(target, "復元", RestoredReason, screenName);
 
+        /// <summary>
+        /// 職員証の差し替え（Issue #2461）の対象の職員が見つからなかった（競合）
+        /// </summary>
+        /// <param name="target">対象の職員（一覧に載っていた表記で名指しする）</param>
+        /// <param name="listName">再読み込みした一覧の名前</param>
+        /// <remarks>
+        /// 差し替えは職員の主キー（職員証の IDm）を変えるため、対象が見つからない原因は削除のほかに
+        /// 「他のパソコンで先に職員証が差し替えられた」もある。
+        /// </remarks>
+        public static string ForReplaceStaffCard(string target, string listName)
+            => $"{target}の職員証を差し替えできませんでした。{DeletedOrCardReplacedReason}職員証は差し替えていません。" +
+               $"{listName}を再読み込みしましたので、一覧で状態を確認してからやり直してください。";
+
+        /// <summary>対象の職員が削除された、または職員証が差し替えられた（職員証の差し替えの「なぜ」。Issue #2461）</summary>
+        private const string DeletedOrCardReplacedReason = "他のパソコンや別の操作で削除された、または先に職員証が差し替えられた可能性があります。";
+
         /// <summary>対象の行が削除されていた（更新・払い戻しの「なぜ」）</summary>
         internal const string DeletedReason = "他のパソコンや別の操作で削除された可能性があります。";
 
