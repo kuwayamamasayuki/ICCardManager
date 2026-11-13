@@ -22,11 +22,11 @@ namespace ICCardManager.Services
     {
         // === 職員CSVインポート・プレビュー ===
 
-        public virtual async Task<CsvImportResult> ImportStaffAsync(string filePath, bool skipExisting = true)
+        public virtual async Task<CsvImportResult> ImportStaffAsync(CsvImportSource source, bool skipExisting = true)
         {
             var errors = new List<CsvImportError>();
             return await ExecuteImportWithErrorHandlingAsync(
-                () => ImportStaffInternalAsync(filePath, skipExisting, errors),
+                () => ImportStaffInternalAsync(source, skipExisting, errors),
                 errors,
                 "職員CSVの取り込み").ConfigureAwait(false);
         }
@@ -35,7 +35,7 @@ namespace ICCardManager.Services
         /// 職員CSVインポートの内部処理
         /// </summary>
         private async Task<CsvImportResult> ImportStaffInternalAsync(
-            string filePath,
+            CsvImportSource source,
             bool skipExisting,
             List<CsvImportError> errors)
         {
@@ -43,7 +43,7 @@ namespace ICCardManager.Services
             var skippedCount = 0;
             var updatedCount = 0;
 
-            var lines = await ReadCsvFileAsync(filePath, _logger).ConfigureAwait(false);
+            var lines = await ReadCsvAsync(source, _logger).ConfigureAwait(false);
             if (lines.Count < 2)
             {
                 return new CsvImportResult
@@ -414,13 +414,13 @@ namespace ICCardManager.Services
         /// <summary>
         /// カードCSVのインポートプレビューを取得
         /// </summary>
-        /// <param name="filePath">CSVファイルパス</param>
+        /// <param name="source">CSVの読み取り元（パス、または照合に使った内容。Issue #2284）</param>
         /// <param name="skipExisting">既存データをスキップするか（falseの場合は更新）</param>
-        public virtual async Task<CsvImportPreviewResult> PreviewStaffAsync(string filePath, bool skipExisting = true)
+        public virtual async Task<CsvImportPreviewResult> PreviewStaffAsync(CsvImportSource source, bool skipExisting = true)
         {
             var errors = new List<CsvImportError>();
             return await ExecutePreviewWithErrorHandlingAsync(
-                () => PreviewStaffInternalAsync(filePath, skipExisting, errors),
+                () => PreviewStaffInternalAsync(source, skipExisting, errors),
                 errors,
                 "職員CSVの取り込み内容の確認").ConfigureAwait(false);
         }
@@ -429,7 +429,7 @@ namespace ICCardManager.Services
         /// 職員CSVプレビューの内部処理
         /// </summary>
         private async Task<CsvImportPreviewResult> PreviewStaffInternalAsync(
-            string filePath,
+            CsvImportSource source,
             bool skipExisting,
             List<CsvImportError> errors)
         {
@@ -438,7 +438,7 @@ namespace ICCardManager.Services
             var updateCount = 0;
             var skipCount = 0;
 
-            var lines = await ReadCsvFileAsync(filePath, _logger).ConfigureAwait(false);
+            var lines = await ReadCsvAsync(source, _logger).ConfigureAwait(false);
             if (lines.Count < 2)
             {
                 return new CsvImportPreviewResult

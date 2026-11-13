@@ -89,6 +89,61 @@ public class WindowLayoutCalculatorTests
 
     #endregion
 
+    #region FitMaxHeight
+
+    /// <summary>
+    /// Issue #2465: 宣言した上限（680）より広い作業領域では作業領域まで広げ（内容をスクロールせずに収める）、
+    /// 狭い作業領域では作業領域まで縮める（画面の外へはみ出さない）。広げる側だけだと Math.Max の実装が、
+    /// 縮める側だけだと宣言値を返す実装（修正前）が緑になるので対で置く。
+    /// </summary>
+    [Theory]
+    [InlineData(680, 1032, 1032)]
+    [InlineData(680, 600, 600)]
+    [InlineData(680, 680, 680)]
+    public void FitMaxHeight_ReturnsWorkAreaHeight(double declared, double areaHeight, double expected)
+    {
+        WindowLayoutCalculator.FitMaxHeight(declared, areaHeight).Should().Be(expected);
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(-1)]
+    [InlineData(double.NaN)]
+    [InlineData(double.PositiveInfinity)]
+    public void FitMaxHeight_InvalidAreaHeight_ReturnsDeclaredUnchanged(double areaHeight)
+    {
+        WindowLayoutCalculator.FitMaxHeight(680, areaHeight).Should().Be(680);
+    }
+
+    #endregion
+
+    #region DecideFitOnSizeChanged
+
+    /// <summary>
+    /// Issue #2465（レビュー 3 回目）: 大きさが変わったときに作業領域へ何を合わせるか。表示前は何もせず、利用者の移動・リサイズの
+    /// 操作中は上限だけ（位置を寄せるとドラッグ中のウィンドウが跳ねる）、それ以外は上限と位置の両方。3 つの結果を対で置く —
+    /// 操作中の行が無いと常に位置まで寄せる実装（修正前）が、それ以外の行が無いと常に上限だけの実装（内容が伸びても寄せない）が緑になる。
+    /// </summary>
+    /// <remarks>
+    /// レビュー 4 回目: 最大化・最小化しているとき（通常の表示でない）も上限だけ。位置を書くと元に戻したときの位置が変わり、
+    /// 最大化した大きさで寄せると画面の端へ動く。
+    /// </remarks>
+    [Theory]
+    [InlineData(false, false, true, WorkAreaFit.None)]
+    [InlineData(false, true, true, WorkAreaFit.None)]
+    [InlineData(false, false, false, WorkAreaFit.None)]
+    [InlineData(true, true, true, WorkAreaFit.MaxHeightOnly)]
+    [InlineData(true, false, false, WorkAreaFit.MaxHeightOnly)]
+    [InlineData(true, true, false, WorkAreaFit.MaxHeightOnly)]
+    [InlineData(true, false, true, WorkAreaFit.MaxHeightAndPosition)]
+    public void DecideFitOnSizeChanged_DependsOnLoadedMoveOrSizeAndWindowState(
+        bool isLoaded, bool isMovingOrSizing, bool isNormalState, WorkAreaFit expected)
+    {
+        WindowLayoutCalculator.DecideFitOnSizeChanged(isLoaded, isMovingOrSizing, isNormalState).Should().Be(expected);
+    }
+
+    #endregion
+
     #region FitAndCenter
 
     /// <summary>

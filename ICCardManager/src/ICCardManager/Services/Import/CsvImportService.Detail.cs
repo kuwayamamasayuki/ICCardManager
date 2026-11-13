@@ -26,11 +26,11 @@ namespace ICCardManager.Services
     {
         // === 利用履歴詳細CSVインポート・プレビュー ===
 
-        public virtual async Task<CsvImportPreviewResult> PreviewLedgerDetailsAsync(string filePath)
+        public virtual async Task<CsvImportPreviewResult> PreviewLedgerDetailsAsync(CsvImportSource source)
         {
             var errors = new List<CsvImportError>();
             return await ExecutePreviewWithErrorHandlingAsync(
-                () => PreviewLedgerDetailsInternalAsync(filePath, errors),
+                () => PreviewLedgerDetailsInternalAsync(source, errors),
                 errors,
                 "利用明細CSVの取り込み内容の確認").ConfigureAwait(false);
         }
@@ -39,7 +39,7 @@ namespace ICCardManager.Services
         /// 利用履歴詳細CSVプレビューの内部処理
         /// </summary>
         private async Task<CsvImportPreviewResult> PreviewLedgerDetailsInternalAsync(
-            string filePath,
+            CsvImportSource source,
             List<CsvImportError> errors)
         {
             var items = new List<CsvImportPreviewItem>();
@@ -47,7 +47,7 @@ namespace ICCardManager.Services
             var updateCount = 0;
             var skipCount = 0;
 
-            var lines = await ReadCsvFileAsync(filePath, _logger).ConfigureAwait(false);
+            var lines = await ReadCsvAsync(source, _logger).ConfigureAwait(false);
             if (lines.Count < 2)
             {
                 return new CsvImportPreviewResult
@@ -333,13 +333,13 @@ namespace ICCardManager.Services
         /// <remarks>
         /// Issue #751対応: ledger_idごとにグループ化し、ReplaceDetailsAsyncで全置換する。
         /// </remarks>
-        /// <param name="filePath">CSVファイルパス</param>
+        /// <param name="source">CSVの読み取り元（パス、または照合に使った内容。Issue #2284）</param>
 
-        public virtual async Task<CsvImportResult> ImportLedgerDetailsAsync(string filePath)
+        public virtual async Task<CsvImportResult> ImportLedgerDetailsAsync(CsvImportSource source)
         {
             var errors = new List<CsvImportError>();
             return await ExecuteImportWithErrorHandlingAsync(
-                () => ImportLedgerDetailsInternalAsync(filePath, errors),
+                () => ImportLedgerDetailsInternalAsync(source, errors),
                 errors,
                 "利用明細CSVの取り込み").ConfigureAwait(false);
         }
@@ -348,12 +348,12 @@ namespace ICCardManager.Services
         /// 利用履歴詳細CSVインポートの内部処理
         /// </summary>
         private async Task<CsvImportResult> ImportLedgerDetailsInternalAsync(
-            string filePath,
+            CsvImportSource source,
             List<CsvImportError> errors)
         {
             var importedCount = 0;
 
-            var lines = await ReadCsvFileAsync(filePath, _logger).ConfigureAwait(false);
+            var lines = await ReadCsvAsync(source, _logger).ConfigureAwait(false);
             if (lines.Count < 2)
             {
                 return new CsvImportResult

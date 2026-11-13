@@ -3429,6 +3429,207 @@ FEDCBA9876543210,鈴木花子,002,テスト2";
 
     #endregion
 
+    #region Issue #2284: 読み取り済みの内容を取り込む（パスから読み直さない）
+
+    /// <summary>指定した経路を、読み取り元（パスまたは内容）を渡して実行し、（成功したか, エラーメッセージ）を返す</summary>
+    private async Task<(bool Succeeded, string? ErrorMessage)> InvokeImportRouteAsync(string route, CsvImportSource source)
+    {
+        switch (route)
+        {
+            case "職員インポート":
+                var staffImport = await _service.ImportStaffAsync(source);
+                return (staffImport.Success, staffImport.ErrorMessage);
+            case "職員プレビュー":
+                var staffPreview = await _service.PreviewStaffAsync(source);
+                return (staffPreview.IsValid, staffPreview.ErrorMessage);
+            case "カードインポート":
+                var cardImport = await _service.ImportCardsAsync(source);
+                return (cardImport.Success, cardImport.ErrorMessage);
+            case "カードプレビュー":
+                var cardPreview = await _service.PreviewCardsAsync(source);
+                return (cardPreview.IsValid, cardPreview.ErrorMessage);
+            case "履歴インポート":
+                var ledgerImport = await _service.ImportLedgersAsync(source);
+                return (ledgerImport.Success, ledgerImport.ErrorMessage);
+            case "履歴プレビュー":
+                var ledgerPreview = await _service.PreviewLedgersAsync(source);
+                return (ledgerPreview.IsValid, ledgerPreview.ErrorMessage);
+            case "履歴詳細インポート":
+                var detailImport = await _service.ImportLedgerDetailsAsync(source);
+                return (detailImport.Success, detailImport.ErrorMessage);
+            case "履歴詳細プレビュー":
+                var detailPreview = await _service.PreviewLedgerDetailsAsync(source);
+                return (detailPreview.IsValid, detailPreview.ErrorMessage);
+            default:
+                throw new ArgumentOutOfRangeException(nameof(route), route, "未知のインポート経路");
+        }
+    }
+
+    /// <summary>UTF-8 BOM を名乗るが本文が壊れているバイト列（読めば「壊れている」と案内される）</summary>
+    private static byte[] CreateCorruptedUtf8BomBytes()
+    {
+        var utf8Bom = new UTF8Encoding(true).GetPreamble();
+        var body = new byte[] { 0x82, 0x20 };
+        var bytes = new byte[utf8Bom.Length + body.Length];
+        Buffer.BlockCopy(utf8Bom, 0, bytes, 0, utf8Bom.Length);
+        Buffer.BlockCopy(body, 0, bytes, utf8Bom.Length, body.Length);
+        return bytes;
+    }
+
+    /// <summary>
+    /// 内容を渡したときは、どの経路もパスのファイルを開かず、渡した内容を読むこと
+    /// （パスには存在しないファイルを指定する。開けば「ファイルが見つからない」になり、「壊れている」にはならない）
+    /// </summary>
+    [Theory]
+    [MemberData(nameof(全インポート経路))]
+    public async Task 内容を渡したときはどの経路もパスのファイルを開かず渡した内容を読むこと(string route)
+    {
+        // Arrange
+        var missingPath = Path.Combine(_testDirectory, $"missing_{route}.csv");
+        File.Exists(missingPath).Should().BeFalse("前提: パスのファイルは存在しない");
+
+        // Act
+        var (succeeded, errorMessage) = await InvokeImportRouteAsync(
+            route, CsvImportSource.FromContent(missingPath, CreateCorruptedUtf8BomBytes()));
+
+        // Assert
+        succeeded.Should().BeFalse();
+        errorMessage.Should().Contain("壊れている", "渡した内容（BOM が示す文字コードで読めないバイト列）を読んだ");
+        errorMessage.Should().NotContain("見つかりません");
+    }
+
+    [Fact]
+    public async Task ReadCsvAsync_内容を渡したときはパスのファイルではなく渡した内容を読むこと()
+    {
+        // Arrange: 照合した内容と、その後で書き換えられたファイル
+        var filePath = Path.Combine(_testDirectory, "tampered.csv");
+        var verified = CsvEncoding.GetPreamble()
+            .Concat(CsvEncoding.GetBytes("職員IDm,氏名,職員番号,備考\n0123456789ABCDEF,山田太郎,001,\n")).ToArray();
+        File.WriteAllText(filePath, "職員IDm,氏名,職員番号,備考\nFEDCBA9876543210,書換次郎,999,\n", CsvEncoding);
+
+        // Act
+        var lines = await CsvImportService.ReadCsvAsync(CsvImportSource.FromContent(filePath, verified));
+
+        // Assert
+        lines.Should().Equal("職員IDm,氏名,職員番号,備考", "0123456789ABCDEF,山田太郎,001,");
+    }
+
+    [Fact]
+    public async Task ReadCsvAsync_内容を読んだ後は読み取り元に配列を残さないこと()
+    {
+        // Arrange: 読み取り元は取り込みの非同期メソッドに捕捉され、DB への書き込みが終わるまで生きる
+        var bytes = CsvEncoding.GetPreamble().Concat(CsvEncoding.GetBytes("職員IDm,氏名,職員番号,備考\n")).ToArray();
+        var source = CsvImportSource.FromContent(Path.Combine(_testDirectory, "released.csv"), bytes);
+
+        // Act
+        var lines = await CsvImportService.ReadCsvAsync(source);
+
+        // Assert: 復号した後は最大 64MB の配列を手放す（パスから読んでいた以前の実装と同じ時点）
+        lines.Should().Equal("職員IDm,氏名,職員番号,備考");
+        source.Content.Should().BeNull();
+        source.IsContentTaken.Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task ReadCsvAsync_同じ読み取り元を2回読むと例外を投げること()
+    {
+        // Arrange: 1 つの取り込み・プレビューは CSV を 1 回だけ読む。2 回目は誤りとして知らせる（空の内容として読まない）
+        var bytes = CsvEncoding.GetBytes("職員IDm,氏名,職員番号,備考\n");
+        var source = CsvImportSource.FromContent(Path.Combine(_testDirectory, "read_twice.csv"), bytes);
+        await CsvImportService.ReadCsvAsync(source);
+
+        // Act
+        var act = async () => await CsvImportService.ReadCsvAsync(source);
+
+        // Assert
+        await act.Should().ThrowAsync<InvalidOperationException>();
+    }
+
+    [Fact]
+    public async Task ReadCsvAsync_パスを渡したときは従来どおりファイルを読むこと()
+    {
+        // Arrange
+        var filePath = Path.Combine(_testDirectory, "from_file.csv");
+        File.WriteAllText(filePath, "職員IDm,氏名,職員番号,備考\n0123456789ABCDEF,山田太郎,001,\n", CsvEncoding);
+
+        // Act
+        var lines = await CsvImportService.ReadCsvAsync(CsvImportSource.FromFile(filePath));
+
+        // Assert
+        lines.Should().Equal("職員IDm,氏名,職員番号,備考", "0123456789ABCDEF,山田太郎,001,");
+    }
+
+    [Fact]
+    public async Task ReadCsvAsync_内容を渡してもBOM無しShiftJISを判別して読むこと()
+    {
+        // Arrange: 文字コードの判別は、ファイルから読むときと同じ処理をバイト列に対して行う
+        var bytes = Encoding.GetEncoding(932).GetBytes("職員IDm,氏名,職員番号,備考\n0123456789ABCDEF,山田太郎,001,福岡市役所");
+        var loggerMock = new Mock<ILogger>();
+
+        // Act
+        var lines = await CsvImportService.ReadCsvAsync(
+            CsvImportSource.FromContent(Path.Combine(_testDirectory, "sjis_content.csv"), bytes), loggerMock.Object);
+
+        // Assert
+        lines.Should().Equal("職員IDm,氏名,職員番号,備考", "0123456789ABCDEF,山田太郎,001,福岡市役所");
+        // どの文字コードとして読んだかを、ファイルから読むときと同じく記録する
+        VerifyLogged(loggerMock, LogLevel.Information, "Shift_JIS");
+    }
+
+    [Fact]
+    public async Task ReadCsvAsync_上限を超える内容は上限超過の例外を投げること()
+    {
+        // Arrange
+        var filePath = Path.Combine(_testDirectory, "too_large_content.csv");
+        var bytes = CsvEncoding.GetBytes("職員IDm,氏名,職員番号,備考\n");
+
+        // Act
+        var act = async () => await CsvImportService.ReadCsvAsync(
+            CsvImportSource.FromContent(filePath, bytes), NullLogger.Instance, bytes.Length - 1);
+
+        // Assert
+        var exception = await act.Should().ThrowAsync<FileOperationException>();
+        exception.Which.ErrorCode.Should().Be("FILE010");
+        exception.Which.UserFriendlyMessage.Should().Be(
+            FileOperationException.FileTooLarge(bytes.Length, bytes.Length - 1, filePath).UserFriendlyMessage);
+    }
+
+    [Fact]
+    public async Task ReadCsvAsync_上限ちょうどの内容は読み込めること()
+    {
+        // Arrange
+        var bytes = CsvEncoding.GetBytes("職員IDm,氏名,職員番号,備考\n");
+
+        // Act
+        var lines = await CsvImportService.ReadCsvAsync(
+            CsvImportSource.FromContent(Path.Combine(_testDirectory, "at_limit_content.csv"), bytes),
+            NullLogger.Instance,
+            bytes.Length);
+
+        // Assert
+        lines.Should().Equal("職員IDm,氏名,職員番号,備考");
+    }
+
+    [Fact]
+    public async Task ReadCsvAsync_上限を超えて読まなかったファイルはパスから読み直さず上限超過とすること()
+    {
+        // Arrange: 照合の時点で上限を超えていたファイルが、その後で取り込める大きさに縮められた
+        var filePath = Path.Combine(_testDirectory, "shrunk.csv");
+        File.WriteAllText(filePath, "職員IDm,氏名,職員番号,備考\n0123456789ABCDEF,山田太郎,001,\n", CsvEncoding);
+
+        // Act
+        var act = async () => await CsvImportService.ReadCsvAsync(
+            CsvImportSource.FromOversizedFile(filePath, 101), NullLogger.Instance, 100);
+
+        // Assert
+        var exception = await act.Should().ThrowAsync<FileOperationException>();
+        exception.Which.ErrorCode.Should().Be("FILE010");
+        exception.Which.UserFriendlyMessage.Should().Be(
+            FileOperationException.FileTooLarge(101, 100, filePath).UserFriendlyMessage);
+    }
+
+    #endregion
+
     #region Issue #2272: インポートできるファイルの大きさの上限
 
     [Fact]

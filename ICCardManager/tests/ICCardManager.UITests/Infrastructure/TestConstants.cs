@@ -711,6 +711,19 @@ namespace ICCardManager.UITests.Infrastructure
         [UiaName]
         public const string CardRegistrationExpenseTotalTextBox = "累計払出金額";
 
+        // ヒントは Run を並べた TextBlock で Name が文言そのものになるため、AutomationId で探す（Issue #2465）。
+        /// <summary>カード登録方法の選択ダイアログのヒント（管理者マニュアル「1.6」への案内）の AutomationId。</summary>
+        [NotUiaName]
+        public const string CardRegistrationHintTextId = "RegistrationHintText";
+
+        /// <summary>カード登録方法の選択ダイアログの内容のスクロール領域の AutomationId（Issue #2465）。</summary>
+        [NotUiaName]
+        public const string CardRegistrationContentScrollViewerId = "ContentScrollViewer";
+
+        /// <summary>カード登録方法の選択ダイアログの「OK」の AutomationId（作業領域の中にあることを確かめる。Issue #2465）。</summary>
+        [NotUiaName]
+        public const string CardRegistrationOkButtonId = "OkButton";
+
         /// <summary>カード登録方法の選択ダイアログの「キャンセル」（登録をやめる）。</summary>
         [UiaName]
         public const string CardRegistrationCancelButton = "キャンセル";

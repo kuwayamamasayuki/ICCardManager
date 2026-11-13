@@ -19,13 +19,14 @@
              繰越設定パネル（IsEnabled で切り替えるだけで常に描画される）を含む内容は縦に長く、
              文字サイズ「大」以上や 1366×768 では OK／キャンセルが画面外へ出ていた。
              内容は ScrollViewer に入れ、ボタン行は最下行（Auto）に固定する。
-             Window の MaxHeight と併せて、SizeToContent="Height" でも画面高さを超えない。 -->
+             Window の MaxHeight と併せて、SizeToContent="Height" でも画面高さを超えない。
+             Issue #2465: MaxHeight="680" は画面の情報が取れないときの受け皿。コードビハインドが作業領域の高さに置き換える。 -->
         <Grid.RowDefinitions>
             <RowDefinition Height="*"/>
             <RowDefinition Height="Auto"/>
         </Grid.RowDefinitions>
 
-        <ScrollViewer Grid.Row="0" VerticalScrollBarVisibility="Auto">
+        <ScrollViewer x:Name="ContentScrollViewer" Grid.Row="0" VerticalScrollBarVisibility="Auto">
             <Grid>
                 <Grid.RowDefinitions>
                     <RowDefinition Height="Auto"/>
@@ -56,8 +57,29 @@
                     </StackPanel>
                 </Grid>
 
-                <!-- オプション1: 新規購入 -->
+                <!-- ヒント（Issue #2465）: 入力欄の下（最下端）にあると、繰越の入力欄（繰越額・累計受入・累計払出）に押し出されて
+                     高さの上限の中ではスクロールの外に隠れていた。ヒントはフォーカスを受けないので、Tab で入力欄を移っても
+                     スクロールされず読まれない。見出しの直後に置き、どの文字サイズでも開いた時点で見えるようにする。
+                     入力欄はフォーカスを受けるとスクロール領域が自動で表示範囲へ寄せる。 -->
                 <Border Grid.Row="1"
+                        Background="{DynamicResource ReturnBackgroundBrush}"
+                        CornerRadius="4"
+                        Padding="12"
+                        Margin="0,0,0,10"
+                        VerticalAlignment="Top">
+                    <TextBlock x:Name="RegistrationHintText"
+                               TextWrapping="Wrap"
+                               FontSize="{DynamicResource SmallFontSize}"
+                               Foreground="{DynamicResource InfoTextBrush}">
+                        <Run Text="💡 ヒント: "/>
+                        <Run Text="紙の出納簿からの繰越を選択した場合、月途中のデータは後からCSVインポートで取り込むことができます。"/>
+                        <LineBreak/>
+                        <Run Text="特に年度途中からの導入時は手順が複雑になる場合があります。詳しくは管理者マニュアルの「1.6 交通系ICカードを登録する」をご参照ください。"/>
+                    </TextBlock>
+                </Border>
+
+                <!-- オプション1: 新規購入 -->
+                <Border Grid.Row="2"
                         Background="{DynamicResource NeutralBackgroundBrush}"
                         CornerRadius="4"
                         Padding="12"
@@ -98,7 +120,7 @@
                 </Border>
 
                 <!-- オプション2: 紙の出納簿からの繰越 -->
-                <Border Grid.Row="2"
+                <Border Grid.Row="3"
                         Background="{DynamicResource NeutralBackgroundBrush}"
                         CornerRadius="4"
                         Padding="12"
@@ -230,23 +252,6 @@
                                        Margin="0,4,0,0"/>
                         </StackPanel>
                     </StackPanel>
-                </Border>
-
-                <!-- ヒント -->
-                <Border Grid.Row="3"
-                        Background="{DynamicResource ReturnBackgroundBrush}"
-                        CornerRadius="4"
-                        Padding="12"
-                        Margin="0,0,0,10"
-                        VerticalAlignment="Top">
-                    <TextBlock TextWrapping="Wrap"
-                               FontSize="{DynamicResource SmallFontSize}"
-                               Foreground="{DynamicResource InfoTextBrush}">
-                        <Run Text="💡 ヒント: "/>
-                        <Run Text="紙の出納簿からの繰越を選択した場合、月途中のデータは後からCSVインポートで取り込むことができます。"/>
-                        <LineBreak/>
-                        <Run Text="特に年度途中からの導入時は手順が複雑になる場合があります。詳しくは管理者マニュアルの「1.6 交通系ICカードを登録する」をご参照ください。"/>
-                    </TextBlock>
                 </Border>
 
             </Grid>

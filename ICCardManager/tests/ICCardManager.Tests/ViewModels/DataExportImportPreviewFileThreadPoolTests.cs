@@ -36,11 +36,11 @@ public sealed class DataExportImportPreviewFileThreadPoolTests
             saturator.IsSaturated.Should().BeTrue(
                 "前提: プールが塞がっていて、Task.Run の処理が始まらないこと（塞げていなければ本テストは何も検証しない）");
 
-            var capture = DataExportImportViewModel.PreviewFileFingerprint.CaptureAsync(path);
+            var capture = DataExportImportViewModel.PreviewFileCapture.CaptureAsync(path);
 
             capture.Wait(Timeout).Should().BeTrue("読み取りは専用スレッドで走るため、プールの空きを待たずに始まる");
             capture.Result.Should().NotBeNull();
-            capture.Result!.Length.Should().Be(new FileInfo(path).Length);
+            capture.Result!.Fingerprint.Length.Should().Be(new FileInfo(path).Length);
 
             // 対の表明: 読み取りを待っている間もプールは塞がったままだった
             saturator.SentinelStarted.Should().BeFalse("読み取りを待っている間も、プールが塞がったままであること");

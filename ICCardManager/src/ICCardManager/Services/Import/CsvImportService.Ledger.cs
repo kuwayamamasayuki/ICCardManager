@@ -25,7 +25,7 @@ namespace ICCardManager.Services
     {
         // === 利用履歴CSVインポート・プレビュー ===
 
-        public virtual async Task<CsvImportResult> ImportLedgersAsync(string filePath, bool skipExisting = true, string? targetCardIdm = null)
+        public virtual async Task<CsvImportResult> ImportLedgersAsync(CsvImportSource source, bool skipExisting = true, string? targetCardIdm = null)
         {
             var errors = new List<CsvImportError>();
             var importedCount = 0;
@@ -34,7 +34,7 @@ namespace ICCardManager.Services
 
             try
             {
-                var lines = await ReadCsvFileAsync(filePath, _logger).ConfigureAwait(false);
+                var lines = await ReadCsvAsync(source, _logger).ConfigureAwait(false);
                 if (lines.Count < 2)
                 {
                     return new CsvImportResult
@@ -612,12 +612,12 @@ namespace ICCardManager.Services
         /// <summary>
         /// 履歴CSVのインポートプレビューを取得
         /// </summary>
-        /// <param name="filePath">CSVファイルパス</param>
+        /// <param name="source">CSVの読み取り元（パス、または照合に使った内容。Issue #2284）</param>
         /// <param name="skipExisting">既存データをスキップするか（falseの場合は更新）</param>
         /// <param name="targetCardIdm">CSV内のIDmが空の場合に使用するカードIDm（オプション）</param>
         /// <remarks>Issue #511: CSVのIDm列が空の場合、targetCardIdmが指定されていればそのIDmを使用</remarks>
 
-        public virtual async Task<CsvImportPreviewResult> PreviewLedgersAsync(string filePath, bool skipExisting = true, string? targetCardIdm = null)
+        public virtual async Task<CsvImportPreviewResult> PreviewLedgersAsync(CsvImportSource source, bool skipExisting = true, string? targetCardIdm = null)
         {
             var errors = new List<CsvImportError>();
             var items = new List<CsvImportPreviewItem>();
@@ -627,7 +627,7 @@ namespace ICCardManager.Services
 
             try
             {
-                var lines = await ReadCsvFileAsync(filePath, _logger).ConfigureAwait(false);
+                var lines = await ReadCsvAsync(source, _logger).ConfigureAwait(false);
                 if (lines.Count < 2)
                 {
                     return new CsvImportPreviewResult

@@ -12,7 +12,20 @@
   - 職員一覧の CSV の取り込みは、職員証の IDm が未登録の行のうち、同じ職員番号の職員（未削除）が別の職員証で登録されている行をスキップし、プレビューで理由を示す（差し替えの前に出力した CSV の古い職員証の行を新しい職員として登録し、紛失した職員証がまた使えるようになるのを防ぐ。職員番号が空の行・削除済みの職員とだけ一致する行は従来どおり登録する）
   - 差し替えが確定したら、同じ PC のメイン画面が持つ 30 秒ルールの前回操作者の IDm を新しい IDm へ置き換える（`StaffCardReplacedMessage`）。受け取った IDm は入口で大文字にそろえ、判定の比較をすべて大文字どうしの完全一致にした
   - 管理者マニュアル §3.1.4「職員証を再発行した」を、削除して登録し直す手順から差し替えの手順へ書き直した（登録済みの職員が 1 人だけでその職員証を紛失した場合は、従来どおり IT 担当者への相談を案内する）。02 DB・03 画面（§3.3・§3.17・遷移図）・04 機能（§2.8）・05 クラス・07 テスト設計書を更新
-  - テスト: `Services/StaffCardReplacementTests`（実 SQLite）・`ViewModels/StaffManageViewModelCardReplacementTests`・`Services/CsvImportStaffReplacedCardTests`・`MainViewModelTests` +2 件・UITests `StaffCardReplacementUiTests` 2 件を新設（UT-148）。`ScreenTransitionDiagramConsistencyTests` の認証操作のスナップショットに「職員証の差し替え」を追加（方針から直接導かれる変更）。`StaffManageViewModel` の構築にタイマーの生成（`ITimerFactory`）を足したため、既存の 3 つのテストクラスの構築に `TestTimerFactory` を渡すよう変えた（表明は不変）
+  - テスト: `Services/StaffCardReplacementTests`（実 SQLite）・`ViewModels/StaffManageViewModelCardReplacementTests`・`Services/CsvImportStaffReplacedCardTests`・`MainViewModelTests` +2 件・UITests `StaffCardReplacementUiTests` 2 件を新設（UT-149）。`ScreenTransitionDiagramConsistencyTests` の認証操作のスナップショットに「職員証の差し替え」を追加（方針から直接導かれる変更）。`StaffManageViewModel` の構築にタイマーの生成（`ITimerFactory`）を足したため、既存の 3 つのテストクラスの構築に `TestTimerFactory` を渡すよう変えた（表明は不変）
+
+**バグ修正**
+- Issue #2465 **カード登録方法の選択ダイアログで「紙の出納簿からの繰越」を選ぶと、下端のヒント（管理者マニュアル「1.6 交通系ICカードを登録する」への案内）が標準の文字サイズでもスクロールの外に一部隠れていた**問題を是正した
+  - ヒントを見出しの直後（選択肢より上）へ移した。ヒントはフォーカスを受けないので、Tab で入力欄を移ってもスクロールされず、隠れると読まれない。入力欄はフォーカスを受けると表示範囲へ寄せられるので、下にあっても入力できる
+  - 高さの上限（680）を作業領域の高さにした（`WindowLayoutCalculator.FitMaxHeight`。680 は画面の情報が取れないときの受け皿）。広い画面では繰越の入力欄までスクロールせずに収まる。上限を広げた分だけ下端（OK・キャンセル）が画面の外へ出得るので、表示時・大きさが変わったときに位置（左右・上下）を作業領域の中へ寄せる（`CarryoverDataLossDialog` と同じ `ClampStart`）。利用者が別のモニターへ動かしたとき（`LocationChanged`）は上限だけをそのモニターの作業領域の高さに合わせ直す。移動・リサイズの操作中（`WM_ENTERSIZEMOVE`〜`WM_EXITSIZEMOVE`）は大きさが変わっても上限だけを合わせ、位置は操作の終わりに 1 回だけ寄せる（ドラッグ中にウィンドウが跳ねないように）。最大化・最小化しているときも上限だけを合わせ、位置は寄せない（元に戻したときに作業領域の端へ動かないように）
+  - テスト: UI テスト `CardRegistrationHintVisibilityUiTests` 4 件（最大化して元に戻しても位置が変わらないことの 1 件と、文字サイズ「中」「大」「特大」で、ヒントの矩形がスクロール領域の表示範囲に収まること。是正前は 3 件とも赤）、静的検査 `CardRegistrationModeHintPlacementTests` 3 件（ヒントの行が入力欄より上・ヒントがマニュアルへの案内を持ちスクロール領域の中にある・上限と位置を作業領域に合わせる呼び出し）、`WindowLayoutCalculatorTests` +14 件（`FitMaxHeight` 7・操作中とウィンドウの状態の判断 `DecideFitOnSizeChanged` 7）
+  - 管理者マニュアル §1.6.1・§1.6.3 の図（`card_registration_mode.png` / `card_registration_mode_carryover.png`）はヒントが下端にあった時点の画面のまま。撮影スクリプトで撮り直して差し替える
+- Issue #2284 **CSV インポートで、取り込む直前の照合（プレビューした CSV の大きさ・SHA-256。#2262）の後に `CsvImportService` がファイルをパスから読み直していたため、照合から読み込みまでの間に書き換えられると、照合していない内容が認証した職員の名前で取り込まれ得た**（TOCTOU）。照合に使ったバイト列をそのまま取り込みへ渡すようにした。
+  - 取り込み・プレビューの 8 経路（カード・職員・利用履歴・利用履歴詳細）が読み取り元 `CsvImportSource`（パス、または読み取り済みの内容）を受け取る。画面は照合に使ったバイト列（`DataExportImportViewModel.PreviewFileCapture`）を `CsvImportSource.FromContent` で渡し、サービスはファイルを開かない。プレビューも、ハッシュを取ったのと同じバイト列から作る（以前はハッシュの後に読み直しており、表示した内容と照合の値が別の内容を指し得た）
+  - 大きさの上限（#2272）と文字コードの判別（#1744）は `CsvImportService.ReadCsvAsync` 1 か所で、パスから読むときと同じ処理をバイト列に掛ける。照合の時点で上限を超えていて内容を読まなかったファイルも、パスから読み直さずに上限超過として断る（`CsvImportSource.FromOversizedFile`）
+  - 照合を経ない直接インポート（新しいカードの登録だけ）は従来どおりパスから読む。パスを受け取る版の取り込み・プレビューは `FromFile` へ委譲する単体テスト用の入口として `internal`・非 `virtual` で残した（本番のコードは呼ばない）
+  - 読み取り済みの内容は、復号した時点で読み取り元から手放す（`CsvImportSource.TakeContent`。取り込みと DB への書き込みの間、最大 64MB の配列を残さない。x86）。照合を経ずにパスから読むのは直接インポートだけで、ファイルの状態を記録していないプレビュー経由の取り込み（本番では起きない）は Warning を記録する
+  - テスト: `DataExportImportViewModelTests` +18 件・`CsvImportServiceTests` +16 件（UT-AUDIT-001d）。既存の `DataExportImportViewModelTests` はモックの引数の照合を読み取り元へ書き換え、画面の組み立てに必須引数のロガーを渡す形へ変えた（期待する動きは不変）。単体 10,522 → 10,556・合計 10,759 → 10,793
 
 **ドキュメント**
 - Issue #2466 **職員証の認証を伴う操作のうち、マニュアルの手順が認証の段を欠いていた・確認ダイアログとの順序が実装と食い違っていた箇所を直した**（職員の削除を直した #2450 の続き）。`RequestAuthenticationAsync` の全呼び出し元（22 操作）を洗い出し、各マニュアルの手順と照合した
