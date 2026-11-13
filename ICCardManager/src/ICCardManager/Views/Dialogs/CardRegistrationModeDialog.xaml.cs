@@ -138,18 +138,7 @@ namespace ICCardManager.Views.Dialogs
             MaxHeight = WindowLayoutCalculator.FitMaxHeight(MaxHeight, SystemParameters.WorkArea.Height);
             SourceInitialized += (s, e) => HwndSource.FromHwnd(new WindowInteropHelper(this).Handle)?.AddHook(TrackMoveOrSize);
             Loaded += (s, e) => FitToMonitorWorkArea();
-            SizeChanged += (s, e) =>
-            {
-                switch (WindowLayoutCalculator.DecideFitOnSizeChanged(IsLoaded, _isMovingOrSizing))
-                {
-                    case WorkAreaFit.MaxHeightAndPosition:
-                        FitToMonitorWorkArea();
-                        break;
-                    case WorkAreaFit.MaxHeightOnly:
-                        FitMaxHeightToMonitorWorkArea();
-                        break;
-                }
-            };
+            SizeChanged += (s, e) => ApplyWorkAreaFit();
             LocationChanged += (s, e) =>
             {
                 if (IsLoaded)
@@ -166,7 +155,8 @@ namespace ICCardManager.Views.Dialogs
         private bool _isMovingOrSizing;
 
         /// <summary>
-        /// 移動・リサイズの操作の始まりと終わりを追う（Issue #2465）。終わりに 1 回だけ位置を作業領域の中へ寄せる。
+        /// 移動・リサイズの操作の始まりと終わりを追う（Issue #2465）。終わりに 1 回だけ位置を作業領域の中へ寄せる
+        /// （最大化・最小化しているときは寄せない）。
         /// </summary>
         private IntPtr TrackMoveOrSize(IntPtr hwnd, int msg, IntPtr wParam, IntPtr lParam, ref bool handled)
         {
@@ -177,10 +167,31 @@ namespace ICCardManager.Views.Dialogs
             else if (msg == WmExitSizeMove)
             {
                 _isMovingOrSizing = false;
-                FitToMonitorWorkArea();
+                ApplyWorkAreaFit();
             }
 
             return IntPtr.Zero;
+        }
+
+        /// <summary>
+        /// 大きさが変わったとき・移動の操作が終わったときに、作業領域へ何を合わせるかを決めて合わせる（Issue #2465）。
+        /// </summary>
+        /// <remarks>
+        /// 表示前は何もしない。移動・リサイズの操作中は上限だけ（位置を寄せるとドラッグ中のウィンドウが跳ねる）。
+        /// 最大化・最小化しているときも上限だけ — 位置（Left / Top）を書くと元に戻したときの位置が変わり、
+        /// 最大化した大きさで寄せると画面の端へ動いてしまう。判断は <see cref="WindowLayoutCalculator.DecideFitOnSizeChanged"/>。
+        /// </remarks>
+        private void ApplyWorkAreaFit()
+        {
+            switch (WindowLayoutCalculator.DecideFitOnSizeChanged(IsLoaded, _isMovingOrSizing, WindowState == WindowState.Normal))
+            {
+                case WorkAreaFit.MaxHeightAndPosition:
+                    FitToMonitorWorkArea();
+                    break;
+                case WorkAreaFit.MaxHeightOnly:
+                    FitMaxHeightToMonitorWorkArea();
+                    break;
+            }
         }
 
         /// <summary>

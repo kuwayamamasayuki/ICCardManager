@@ -124,14 +124,22 @@ public class WindowLayoutCalculatorTests
     /// 操作中は上限だけ（位置を寄せるとドラッグ中のウィンドウが跳ねる）、それ以外は上限と位置の両方。3 つの結果を対で置く —
     /// 操作中の行が無いと常に位置まで寄せる実装（修正前）が、それ以外の行が無いと常に上限だけの実装（内容が伸びても寄せない）が緑になる。
     /// </summary>
+    /// <remarks>
+    /// レビュー 4 回目: 最大化・最小化しているとき（通常の表示でない）も上限だけ。位置を書くと元に戻したときの位置が変わり、
+    /// 最大化した大きさで寄せると画面の端へ動く。
+    /// </remarks>
     [Theory]
-    [InlineData(false, false, WorkAreaFit.None)]
-    [InlineData(false, true, WorkAreaFit.None)]
-    [InlineData(true, true, WorkAreaFit.MaxHeightOnly)]
-    [InlineData(true, false, WorkAreaFit.MaxHeightAndPosition)]
-    public void DecideFitOnSizeChanged_DependsOnLoadedAndMoveOrSize(bool isLoaded, bool isMovingOrSizing, WorkAreaFit expected)
+    [InlineData(false, false, true, WorkAreaFit.None)]
+    [InlineData(false, true, true, WorkAreaFit.None)]
+    [InlineData(false, false, false, WorkAreaFit.None)]
+    [InlineData(true, true, true, WorkAreaFit.MaxHeightOnly)]
+    [InlineData(true, false, false, WorkAreaFit.MaxHeightOnly)]
+    [InlineData(true, true, false, WorkAreaFit.MaxHeightOnly)]
+    [InlineData(true, false, true, WorkAreaFit.MaxHeightAndPosition)]
+    public void DecideFitOnSizeChanged_DependsOnLoadedMoveOrSizeAndWindowState(
+        bool isLoaded, bool isMovingOrSizing, bool isNormalState, WorkAreaFit expected)
     {
-        WindowLayoutCalculator.DecideFitOnSizeChanged(isLoaded, isMovingOrSizing).Should().Be(expected);
+        WindowLayoutCalculator.DecideFitOnSizeChanged(isLoaded, isMovingOrSizing, isNormalState).Should().Be(expected);
     }
 
     #endregion

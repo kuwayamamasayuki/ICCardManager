@@ -119,18 +119,20 @@ namespace ICCardManager.Common
         /// </summary>
         /// <param name="isLoaded">表示済みか（表示前は載るモニターが決まっていない）</param>
         /// <param name="isMovingOrSizing">利用者が移動・リサイズの操作中か（<c>WM_ENTERSIZEMOVE</c>〜<c>WM_EXITSIZEMOVE</c>）</param>
+        /// <param name="isNormalState">通常の表示か（<c>WindowState.Normal</c>。最大化・最小化していない）</param>
         /// <returns>
         /// 表示前は何もしない。操作中は高さの上限だけ（位置を寄せると、ドラッグ中のウィンドウが作業領域へ引き戻されて跳ねる。
-        /// 位置は操作の終わりに 1 回だけ寄せる）。それ以外（内容が伸びた・縮んだ）は上限と位置の両方。
+        /// 位置は操作の終わりに 1 回だけ寄せる）。最大化・最小化しているときも上限だけ（位置を書くと元に戻したときの位置が変わり、
+        /// 最大化した大きさで寄せると画面の端へ動く）。それ以外（内容が伸びた・縮んだ）は上限と位置の両方。
         /// </returns>
-        public static WorkAreaFit DecideFitOnSizeChanged(bool isLoaded, bool isMovingOrSizing)
+        public static WorkAreaFit DecideFitOnSizeChanged(bool isLoaded, bool isMovingOrSizing, bool isNormalState)
         {
             if (!isLoaded)
             {
                 return WorkAreaFit.None;
             }
 
-            return isMovingOrSizing ? WorkAreaFit.MaxHeightOnly : WorkAreaFit.MaxHeightAndPosition;
+            return isMovingOrSizing || !isNormalState ? WorkAreaFit.MaxHeightOnly : WorkAreaFit.MaxHeightAndPosition;
         }
 
         /// <summary>

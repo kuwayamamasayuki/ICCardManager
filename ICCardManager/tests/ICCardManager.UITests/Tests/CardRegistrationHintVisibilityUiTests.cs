@@ -1,6 +1,8 @@
 #nullable enable
 using System;
+using System.Threading;
 using FlaUI.Core.AutomationElements;
+using FlaUI.Core.Definitions;
 using FlaUI.Core.Tools;
 using FluentAssertions;
 using ICCardManager.UITests.Infrastructure;
@@ -47,30 +49,9 @@ namespace ICCardManager.UITests.Tests
         public void 繰越を選んでもヒントがスクロールせずに見えること(string fontSize)
         {
             Skip.If(!string.Equals(AppFixture.LaunchConfiguration, "Debug", StringComparison.Ordinal), SkipReason);
-            using var fixture = AppFixture.LaunchWithSeed(
-                conn =>
-                {
-                    ScreenshotSeedData.Seed(conn);
-                    using var font = conn.CreateCommand();
-                    font.CommandText = "INSERT OR REPLACE INTO settings (key, value) VALUES ('font_size', @font)";
-                    font.Parameters.AddWithValue("@font", fontSize);
-                    font.ExecuteNonQuery();
-                },
-                AppFixture.SuppressDebugTestData);
-            // メイン画面を左上へ寄せる（ダイアログは所有者の中央に開くので、画面外へはみ出させない。FlaUI キャプチャの DPI 対策）
-            ScreenshotHelper.MoveToTopLeft(fixture.MainWindow);
+            using var fixture = LaunchWithFontSize(fontSize);
             var cardCountBefore = DatabaseProbe.Count("SELECT COUNT(*) FROM ic_card");
-
-            var page = new MainWindowPage(fixture.MainWindow, fixture.Automation);
-            var manage = page.ClickToolbarButtonAndWaitForDialog(TestConstants.OpenCardManageButton, TestConstants.CardManageDialogName);
-            manage.ClickButton(TestConstants.CardNewRegistrationButton);
-            InvokeDebugPanelButton(page, TestConstants.DebugPanelIcCardButton);
-            Retry.WhileNull(() => manage.FindByNameStartsWith(TestConstants.CardManageCardReadStatusPrefix), Wait).Result
-                .Should().NotBeNull("未登録のカードを読み取ったら、カード種別の確認を促す案内が出ること");
-            manage.ClickButton(TestConstants.CardManageSaveButton);
-
-            var mode = new DialogPageBase(
-                DialogLocator.WaitForNestedDialog(fixture, manage.Window, TestConstants.CardRegistrationModeDialogName));
+            var (manage, mode) = OpenRegistrationModeDialog(fixture);
             var carryover = mode.FindByNameWithRetry(TestConstants.CardRegistrationCarryoverRadio);
             carryover.Should().NotBeNull("「紙の出納簿からの繰越」の選択肢があること");
             carryover!.AsRadioButton().IsChecked = true;
@@ -106,6 +87,82 @@ namespace ICCardManager.UITests.Tests
             workArea.Contains(okRect).Should().BeTrue(
                 $"OK ボタンがダイアログの載っているモニターの作業領域の中にあること（文字サイズ {fontSize}: OK {okRect}、作業領域 {workArea}）");
 
+            CancelAndAssertNothingRegistered(fixture, manage, mode, cardCountBefore);
+        }
+
+        /// <summary>
+        /// 最大化して元に戻しても、ダイアログの位置が変わらないこと（Issue #2465 レビュー 4 回目）。
+        /// </summary>
+        /// <remarks>
+        /// 大きさが変わると位置を作業領域の中へ寄せるが、最大化しているときに寄せると、最大化した大きさ（作業領域と同じかそれ以上）で
+        /// 寄せるので位置が作業領域の端（左上）に書き換わり、元に戻したときにダイアログがそこへ動いてしまう。最大化中は上限だけを合わせる。
+        /// </remarks>
+        [SkippableFact]
+        public void 最大化して元に戻しても位置が変わらないこと()
+        {
+            Skip.If(!string.Equals(AppFixture.LaunchConfiguration, "Debug", StringComparison.Ordinal), SkipReason);
+            using var fixture = LaunchWithFontSize("medium");
+            var cardCountBefore = DatabaseProbe.Count("SELECT COUNT(*) FROM ic_card");
+            var (manage, mode) = OpenRegistrationModeDialog(fixture);
+
+            var window = mode.Window.Patterns.Window.Pattern;
+            window.CanMaximize.Value.Should().BeTrue("前提: ダイアログは最大化できる（ResizeMode=CanResize）");
+            var before = mode.Window.BoundingRectangle;
+
+            window.SetWindowVisualState(WindowVisualState.Maximized);
+            Retry.WhileFalse(() => window.WindowVisualState.Value == WindowVisualState.Maximized, Wait).Success
+                .Should().BeTrue("前提: 最大化できたこと");
+            Thread.Sleep(SettleDelay);
+            window.SetWindowVisualState(WindowVisualState.Normal);
+            Retry.WhileFalse(() => window.WindowVisualState.Value == WindowVisualState.Normal, Wait).Success
+                .Should().BeTrue("前提: 元に戻せたこと");
+            Thread.Sleep(SettleDelay);
+
+            var after = mode.Window.BoundingRectangle;
+            after.Location.Should().Be(before.Location,
+                $"最大化して元に戻したら、元の位置に戻ること（最大化中に位置を作業領域へ寄せると端へ動く。前 {before}、後 {after}）");
+
+            CancelAndAssertNothingRegistered(fixture, manage, mode, cardCountBefore);
+        }
+
+        /// <summary>レイアウトが落ち着くまでの待ち時間（最大化・元に戻すのアニメーションと SizeChanged の処理）</summary>
+        private static readonly TimeSpan SettleDelay = TimeSpan.FromMilliseconds(800);
+
+        private static AppFixture LaunchWithFontSize(string fontSize)
+        {
+            var fixture = AppFixture.LaunchWithSeed(
+                conn =>
+                {
+                    ScreenshotSeedData.Seed(conn);
+                    using var font = conn.CreateCommand();
+                    font.CommandText = "INSERT OR REPLACE INTO settings (key, value) VALUES ('font_size', @font)";
+                    font.Parameters.AddWithValue("@font", fontSize);
+                    font.ExecuteNonQuery();
+                },
+                AppFixture.SuppressDebugTestData);
+            // メイン画面を左上へ寄せる（ダイアログは所有者の中央に開くので、画面外へはみ出させない。FlaUI キャプチャの DPI 対策）
+            ScreenshotHelper.MoveToTopLeft(fixture.MainWindow);
+            return fixture;
+        }
+
+        /// <summary>未登録のカードを読み取り、「保存」でカード登録方法の選択ダイアログを開く。</summary>
+        private static (DialogPageBase Manage, DialogPageBase Mode) OpenRegistrationModeDialog(AppFixture fixture)
+        {
+            var page = new MainWindowPage(fixture.MainWindow, fixture.Automation);
+            var manage = page.ClickToolbarButtonAndWaitForDialog(TestConstants.OpenCardManageButton, TestConstants.CardManageDialogName);
+            manage.ClickButton(TestConstants.CardNewRegistrationButton);
+            InvokeDebugPanelButton(page, TestConstants.DebugPanelIcCardButton);
+            Retry.WhileNull(() => manage.FindByNameStartsWith(TestConstants.CardManageCardReadStatusPrefix), Wait).Result
+                .Should().NotBeNull("未登録のカードを読み取ったら、カード種別の確認を促す案内が出ること");
+            manage.ClickButton(TestConstants.CardManageSaveButton);
+
+            var mode = new DialogPageBase(
+                DialogLocator.WaitForNestedDialog(fixture, manage.Window, TestConstants.CardRegistrationModeDialogName));
+            return (manage, mode);
+        }
+
+        private static void CancelAndAssertNothingRegistered(AppFixture fixture, DialogPageBase manage, DialogPageBase mode, long cardCountBefore)
+        {
             mode.ClickButton(TestConstants.CardRegistrationCancelButton);
             Retry.WhileTrue(() => DialogLocator.IsOpen(fixture, manage.Window, TestConstants.CardRegistrationModeDialogName), Wait)
                 .Success.Should().BeTrue("閉じると登録がキャンセルされること");

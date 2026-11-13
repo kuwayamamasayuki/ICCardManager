@@ -83,35 +83,40 @@ public class CardRegistrationModeHintPlacementTests
         constructor.Should().Contain("MaxHeight = WindowLayoutCalculator.FitMaxHeight(MaxHeight, SystemParameters.WorkArea.Height)",
             "Issue #2465: 高さの上限を作業領域の高さにする（XAML の 680 は画面の情報が取れないときの受け皿）");
 
-        // 位置を寄せる処理は、書いてあるだけでは働かない。表示時（Loaded）と大きさが変わったとき（SizeChanged）の両方から呼ばれていること
+        // 位置を寄せる処理は、書いてあるだけでは働かない。購読と各処理の本体を、空白・改行の違いを除いて完全一致で照合する
+        // （部分一致だと、ハンドラーに位置を寄せる呼び出しを足しても緑になる。レビュー 4 回目で検出）
         constructor.Should().Contain("Loaded += (s, e) => FitToMonitorWorkArea();",
             "表示した時点で、載ったモニターの作業領域へ上限と位置を合わせる（CenterOwner は画面内へ寄せない）");
-        // 大きさが変わったときの判断は DecideFitOnSizeChanged（単体テストで固定）に委ね、結果ごとの処理を照合する。空白・改行の違いは問わない。
-        // 操作中に位置まで寄せると、ドラッグ中のウィンドウが作業領域へ引き戻されて跳ねる（レビュー 3 回目で検出）
-        var sizeChanged = CollapseWhitespace(TestSourceInspection.ExtractMethodBody(constructor, "SizeChanged +="));
-        sizeChanged.Should().Contain("switch (WindowLayoutCalculator.DecideFitOnSizeChanged(IsLoaded, _isMovingOrSizing))",
-            "表示前は何もせず、移動・リサイズの操作中は上限だけ、それ以外は上限と位置を合わせる判断を使う");
-        sizeChanged.Should().Contain("case WorkAreaFit.MaxHeightAndPosition: FitToMonitorWorkArea(); break;",
-            "繰越レコードの日付の注意書きで内容が伸びたときも、下端（OK・キャンセル）が画面の外へ出ないよう寄せ直す");
-        sizeChanged.Should().Contain("case WorkAreaFit.MaxHeightOnly: FitMaxHeightToMonitorWorkArea(); break;",
-            "操作中は位置を動かさず、上限だけを合わせる");
-
-        // 操作の始まりと終わりを Win32 のメッセージで追い、終わりに 1 回だけ位置を寄せる
+        constructor.Should().Contain("SizeChanged += (s, e) => ApplyWorkAreaFit();",
+            "大きさが変わったときは、表示前・操作中・最大化を判断してから合わせる");
         constructor.Should().Contain("AddHook(TrackMoveOrSize)", "移動・リサイズの操作の始まりと終わりを追うフックを付けること");
-        var track = CollapseWhitespace(TestSourceInspection.ExtractMethodBody(code, "private IntPtr TrackMoveOrSize("));
-        track.Should().Contain("if (msg == WmEnterSizeMove) { _isMovingOrSizing = true; }", "操作の始まりで操作中にする");
-        track.Should().Contain("else if (msg == WmExitSizeMove) { _isMovingOrSizing = false; FitToMonitorWorkArea(); }",
-            "操作の終わりで操作中を解き、位置を作業領域の中へ 1 回だけ寄せる");
+        foreach (var subscription in new[] { "Loaded +=", "SizeChanged +=", "LocationChanged +=" })
+        {
+            CountOccurrences(code, subscription).Should().Be(1, $"「{subscription}」の購読は 1 つだけ（別の購読から位置を寄せさせない）");
+        }
+
+        CollapseWhitespace(TestSourceInspection.ExtractMethodBody(constructor, "LocationChanged +=")).Should().Be(
+            "{ if (IsLoaded) { FitMaxHeightToMonitorWorkArea(); } }",
+            "別のモニターへ動かしたときは上限だけを合わせ直す（位置まで寄せるとドラッグと競合する）");
+        CollapseWhitespace(TestSourceInspection.ExtractMethodBody(code, "private void ApplyWorkAreaFit(")).Should().Be(
+            "{ switch (WindowLayoutCalculator.DecideFitOnSizeChanged(IsLoaded, _isMovingOrSizing, WindowState == WindowState.Normal)) " +
+            "{ case WorkAreaFit.MaxHeightAndPosition: FitToMonitorWorkArea(); break; " +
+            "case WorkAreaFit.MaxHeightOnly: FitMaxHeightToMonitorWorkArea(); break; } }",
+            "判断（DecideFitOnSizeChanged。単体テストで固定）の結果だけで、上限と位置か上限だけかを決める — 操作中に位置まで寄せると" +
+            "ドラッグ中のウィンドウが跳ね、最大化中に寄せると元に戻したときに画面の端へ動く");
+        CollapseWhitespace(TestSourceInspection.ExtractMethodBody(code, "private IntPtr TrackMoveOrSize(")).Should().Be(
+            "{ if (msg == WmEnterSizeMove) { _isMovingOrSizing = true; } " +
+            "else if (msg == WmExitSizeMove) { _isMovingOrSizing = false; ApplyWorkAreaFit(); } return IntPtr.Zero; }",
+            "操作の始まりで操作中にし、終わりで解いて 1 回だけ合わせる（最大化中は位置を寄せない判断を通す）");
         code.Should().Contain("private const int WmEnterSizeMove = 0x0231;").And.Contain("private const int WmExitSizeMove = 0x0232;",
             "WM_ENTERSIZEMOVE / WM_EXITSIZEMOVE の値");
+        CollapseWhitespace(TestSourceInspection.ExtractMethodBody(code, "private void FitMaxHeightToMonitorWorkArea(")).Should().Be(
+            "{ if (MonitorWorkArea.Of(this) is Rect workArea) { MaxHeight = WindowLayoutCalculator.FitMaxHeight(MaxHeight, workArea.Height); } }",
+            "上限だけを合わせる処理は位置を動かさない");
 
-        // 別のモニターへ動かしたときは上限だけを合わせ直す（位置まで寄せるとドラッグと競合する）
-        CollapseWhitespace(TestSourceInspection.ExtractMethodBody(constructor, "LocationChanged +="))
-            .Should().Contain("if (IsLoaded) { FitMaxHeightToMonitorWorkArea(); }",
-                "作業領域の低いモニターへ動かしたときに、前のモニターの高さの上限を残さない");
-        CollapseWhitespace(TestSourceInspection.ExtractMethodBody(code, "private void FitMaxHeightToMonitorWorkArea("))
-            .Should().Contain("MaxHeight = WindowLayoutCalculator.FitMaxHeight(MaxHeight, workArea.Height);")
-            .And.NotContain("ClampStart", "モニターを移る途中で位置を寄せると、利用者のドラッグと競合する");
+        // 位置を寄せる処理を呼ぶのは、宣言・表示時（Loaded）・判断が「上限と位置」のときの 3 か所だけ
+        CountOccurrences(code, "FitToMonitorWorkArea(").Should().Be(3,
+            "位置を寄せる処理（FitToMonitorWorkArea）は、宣言・Loaded・ApplyWorkAreaFit の「上限と位置」の分岐の 3 か所にだけ現れる");
 
         fit.Should().Contain("MaxHeight = WindowLayoutCalculator.FitMaxHeight(MaxHeight, workArea.Height)",
             "載ったモニターの作業領域の高さを上限にする（表示前はプライマリモニターの値しか取れない）");
@@ -119,6 +124,17 @@ public class CardRegistrationModeHintPlacementTests
             "上限を広げたウィンドウの下端（OK・キャンセル）が画面の外へ出ないよう、位置を作業領域の中へ寄せる");
         fit.Should().Contain("Left = WindowLayoutCalculator.ClampStart(Left, ActualWidth, workArea.Left, workArea.Width)",
             "横方向も CarryoverDataLossDialog と同じく作業領域の中へ寄せる");
+    }
+
+    private static int CountOccurrences(string text, string value)
+    {
+        var count = 0;
+        for (var i = text.IndexOf(value, StringComparison.Ordinal); i >= 0; i = text.IndexOf(value, i + value.Length, StringComparison.Ordinal))
+        {
+            count++;
+        }
+
+        return count;
     }
 
     private static string CollapseWhitespace(string code) => System.Text.RegularExpressions.Regex.Replace(code, @"\s+", " ");
