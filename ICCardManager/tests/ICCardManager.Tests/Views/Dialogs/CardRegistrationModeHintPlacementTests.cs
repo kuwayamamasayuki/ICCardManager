@@ -86,10 +86,24 @@ public class CardRegistrationModeHintPlacementTests
         // 位置を寄せる処理は、書いてあるだけでは働かない。表示時（Loaded）と大きさが変わったとき（SizeChanged）の両方から呼ばれていること
         constructor.Should().Contain("Loaded += (s, e) => FitToMonitorWorkArea();",
             "表示した時点で、載ったモニターの作業領域へ上限と位置を合わせる（CenterOwner は画面内へ寄せない）");
-        // 条件ごと照合する（!IsLoaded に反転すると、表示後の大きさの変化で寄せ直さなくなる）。空白・改行の違いは問わない
-        CollapseWhitespace(TestSourceInspection.ExtractMethodBody(constructor, "SizeChanged +="))
-            .Should().Contain("if (IsLoaded) { FitToMonitorWorkArea(); }",
-                "繰越レコードの日付の注意書きで内容が伸びたときも、下端（OK・キャンセル）が画面の外へ出ないよう寄せ直す（表示後に限る）");
+        // 大きさが変わったときの判断は DecideFitOnSizeChanged（単体テストで固定）に委ね、結果ごとの処理を照合する。空白・改行の違いは問わない。
+        // 操作中に位置まで寄せると、ドラッグ中のウィンドウが作業領域へ引き戻されて跳ねる（レビュー 3 回目で検出）
+        var sizeChanged = CollapseWhitespace(TestSourceInspection.ExtractMethodBody(constructor, "SizeChanged +="));
+        sizeChanged.Should().Contain("switch (WindowLayoutCalculator.DecideFitOnSizeChanged(IsLoaded, _isMovingOrSizing))",
+            "表示前は何もせず、移動・リサイズの操作中は上限だけ、それ以外は上限と位置を合わせる判断を使う");
+        sizeChanged.Should().Contain("case WorkAreaFit.MaxHeightAndPosition: FitToMonitorWorkArea(); break;",
+            "繰越レコードの日付の注意書きで内容が伸びたときも、下端（OK・キャンセル）が画面の外へ出ないよう寄せ直す");
+        sizeChanged.Should().Contain("case WorkAreaFit.MaxHeightOnly: FitMaxHeightToMonitorWorkArea(); break;",
+            "操作中は位置を動かさず、上限だけを合わせる");
+
+        // 操作の始まりと終わりを Win32 のメッセージで追い、終わりに 1 回だけ位置を寄せる
+        constructor.Should().Contain("AddHook(TrackMoveOrSize)", "移動・リサイズの操作の始まりと終わりを追うフックを付けること");
+        var track = CollapseWhitespace(TestSourceInspection.ExtractMethodBody(code, "private IntPtr TrackMoveOrSize("));
+        track.Should().Contain("if (msg == WmEnterSizeMove) { _isMovingOrSizing = true; }", "操作の始まりで操作中にする");
+        track.Should().Contain("else if (msg == WmExitSizeMove) { _isMovingOrSizing = false; FitToMonitorWorkArea(); }",
+            "操作の終わりで操作中を解き、位置を作業領域の中へ 1 回だけ寄せる");
+        code.Should().Contain("private const int WmEnterSizeMove = 0x0231;").And.Contain("private const int WmExitSizeMove = 0x0232;",
+            "WM_ENTERSIZEMOVE / WM_EXITSIZEMOVE の値");
 
         // 別のモニターへ動かしたときは上限だけを合わせ直す（位置まで寄せるとドラッグと競合する）
         CollapseWhitespace(TestSourceInspection.ExtractMethodBody(constructor, "LocationChanged +="))

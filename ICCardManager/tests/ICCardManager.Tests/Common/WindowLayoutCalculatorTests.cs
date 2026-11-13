@@ -117,6 +117,25 @@ public class WindowLayoutCalculatorTests
 
     #endregion
 
+    #region DecideFitOnSizeChanged
+
+    /// <summary>
+    /// Issue #2465（レビュー 3 回目）: 大きさが変わったときに作業領域へ何を合わせるか。表示前は何もせず、利用者の移動・リサイズの
+    /// 操作中は上限だけ（位置を寄せるとドラッグ中のウィンドウが跳ねる）、それ以外は上限と位置の両方。3 つの結果を対で置く —
+    /// 操作中の行が無いと常に位置まで寄せる実装（修正前）が、それ以外の行が無いと常に上限だけの実装（内容が伸びても寄せない）が緑になる。
+    /// </summary>
+    [Theory]
+    [InlineData(false, false, WorkAreaFit.None)]
+    [InlineData(false, true, WorkAreaFit.None)]
+    [InlineData(true, true, WorkAreaFit.MaxHeightOnly)]
+    [InlineData(true, false, WorkAreaFit.MaxHeightAndPosition)]
+    public void DecideFitOnSizeChanged_DependsOnLoadedAndMoveOrSize(bool isLoaded, bool isMovingOrSizing, WorkAreaFit expected)
+    {
+        WindowLayoutCalculator.DecideFitOnSizeChanged(isLoaded, isMovingOrSizing).Should().Be(expected);
+    }
+
+    #endregion
+
     #region FitAndCenter
 
     /// <summary>

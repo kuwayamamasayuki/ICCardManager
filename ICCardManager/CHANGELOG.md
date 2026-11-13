@@ -6,7 +6,7 @@
 - Issue #2465 **カード登録方法の選択ダイアログで「紙の出納簿からの繰越」を選ぶと、下端のヒント（管理者マニュアル「1.6 交通系ICカードを登録する」への案内）が標準の文字サイズでもスクロールの外に一部隠れていた**問題を是正した
   - ヒントを見出しの直後（選択肢より上）へ移した。ヒントはフォーカスを受けないので、Tab で入力欄を移ってもスクロールされず、隠れると読まれない。入力欄はフォーカスを受けると表示範囲へ寄せられるので、下にあっても入力できる
   - 高さの上限（680）を作業領域の高さにした（`WindowLayoutCalculator.FitMaxHeight`。680 は画面の情報が取れないときの受け皿）。広い画面では繰越の入力欄までスクロールせずに収まる。上限を広げた分だけ下端（OK・キャンセル）が画面の外へ出得るので、表示時・大きさが変わったときに位置（左右・上下）を作業領域の中へ寄せる（`CarryoverDataLossDialog` と同じ `ClampStart`）。利用者が別のモニターへ動かしたとき（`LocationChanged`）は上限だけをそのモニターの作業領域の高さに合わせ直す。移動・リサイズの操作中（`WM_ENTERSIZEMOVE`〜`WM_EXITSIZEMOVE`）は大きさが変わっても上限だけを合わせ、位置は操作の終わりに 1 回だけ寄せる（ドラッグ中にウィンドウが跳ねないように）
-  - テスト: UI テスト `CardRegistrationHintVisibilityUiTests` 3 件（文字サイズ「中」「大」「特大」で、ヒントの矩形がスクロール領域の表示範囲に収まること。是正前は 3 件とも赤）、静的検査 `CardRegistrationModeHintPlacementTests` 3 件（ヒントの行が入力欄より上・ヒントがマニュアルへの案内を持ちスクロール領域の中にある・上限と位置を作業領域に合わせる呼び出し）、`WindowLayoutCalculatorTests` +7 件（`FitMaxHeight`）
+  - テスト: UI テスト `CardRegistrationHintVisibilityUiTests` 3 件（文字サイズ「中」「大」「特大」で、ヒントの矩形がスクロール領域の表示範囲に収まること。是正前は 3 件とも赤）、静的検査 `CardRegistrationModeHintPlacementTests` 3 件（ヒントの行が入力欄より上・ヒントがマニュアルへの案内を持ちスクロール領域の中にある・上限と位置を作業領域に合わせる呼び出し）、`WindowLayoutCalculatorTests` +11 件（`FitMaxHeight` 7・操作中の判断 `DecideFitOnSizeChanged` 4）
   - 管理者マニュアル §1.6.1・§1.6.3 の図（`card_registration_mode.png` / `card_registration_mode_carryover.png`）はヒントが下端にあった時点の画面のまま。撮影スクリプトで撮り直して差し替える
 
 **ドキュメント**
