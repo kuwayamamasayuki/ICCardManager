@@ -315,7 +315,8 @@ public class BusTextConfigurationConsumerTests : IDisposable
         dialogService.Setup(d => d.ShowWarningConfirmation(It.IsAny<string>(), It.IsAny<string>()))
             .Returns(true);
         var viewModel = new BusStopInputViewModel(
-            ledgerRepo.Object, new Mock<ISettingsRepository>().Object, dialogService.Object, CreateDbContext());
+            ledgerRepo.Object, new Mock<ISettingsRepository>().Object, dialogService.Object, CreateDbContext(),
+            Mock.Of<IStaffAuthService>(), new OperationLogger(Mock.Of<IOperationLogRepository>(), Mock.Of<ICurrentOperatorContext>()));
 
         await viewModel.InitializeWithDetailsAsync(
             new Ledger { Id = 1 },
@@ -351,7 +352,8 @@ public class BusTextConfigurationConsumerTests : IDisposable
         settingsRepo.Setup(r => r.GetAppSettingsAsync()).ReturnsAsync(new AppSettings());
 
         var viewModel = new BusStopInputViewModel(
-            ledgerRepo.Object, settingsRepo.Object, dialogService.Object, CreateDbContext());
+            ledgerRepo.Object, settingsRepo.Object, dialogService.Object, CreateDbContext(),
+            Mock.Of<IStaffAuthService>(), new OperationLogger(Mock.Of<IOperationLogRepository>(), Mock.Of<ICurrentOperatorContext>()));
 
         var detail = new LedgerDetail
         {
