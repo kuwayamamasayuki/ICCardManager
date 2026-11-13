@@ -21,11 +21,11 @@ namespace ICCardManager.Services
     {
         // === カードCSVインポート・プレビュー ===
 
-        public virtual async Task<CsvImportResult> ImportCardsAsync(string filePath, bool skipExisting = true)
+        public virtual async Task<CsvImportResult> ImportCardsAsync(CsvImportSource source, bool skipExisting = true)
         {
             var errors = new List<CsvImportError>();
             return await ExecuteImportWithErrorHandlingAsync(
-                () => ImportCardsInternalAsync(filePath, skipExisting, allowChangesToRegisteredCards: true, errors),
+                () => ImportCardsInternalAsync(source, skipExisting, allowChangesToRegisteredCards: true, errors),
                 errors,
                 "カードCSVの取り込み").ConfigureAwait(false);
         }
@@ -33,7 +33,7 @@ namespace ICCardManager.Services
         /// <summary>
         /// カードCSVを、新しいカードの登録だけに限って取り込む（データ入出力画面の「直接インポート」。Issue #2262）
         /// </summary>
-        /// <param name="filePath">CSVファイルパス</param>
+        /// <param name="filePath">CSVファイルパス（直接インポートはプレビュー・照合を経ないため、パスから読む）</param>
         /// <remarks>
         /// <para>
         /// 「直接インポート」はプレビューを経ずに書き込むため、登録済みのデータを書き換える取り込みには使わせない。
@@ -50,7 +50,7 @@ namespace ICCardManager.Services
         {
             var errors = new List<CsvImportError>();
             return await ExecuteImportWithErrorHandlingAsync(
-                () => ImportCardsInternalAsync(filePath, skipExisting: true, allowChangesToRegisteredCards: false, errors),
+                () => ImportCardsInternalAsync(CsvImportSource.FromFile(filePath), skipExisting: true, allowChangesToRegisteredCards: false, errors),
                 errors,
                 "カードCSVの取り込み").ConfigureAwait(false);
         }
@@ -76,7 +76,7 @@ namespace ICCardManager.Services
         /// <c>false</c>（直接インポート。Issue #2262）なら、その行をエラーにして取り込み全体を行わない
         /// </remarks>
         private async Task<CsvImportResult> ImportCardsInternalAsync(
-            string filePath,
+            CsvImportSource source,
             bool skipExisting,
             bool allowChangesToRegisteredCards,
             List<CsvImportError> errors)
@@ -85,7 +85,7 @@ namespace ICCardManager.Services
             var skippedCount = 0;
             var updatedCount = 0;
 
-            var lines = await ReadCsvFileAsync(filePath, _logger).ConfigureAwait(false);
+            var lines = await ReadCsvAsync(source, _logger).ConfigureAwait(false);
             if (lines.Count < 2)
             {
                 return new CsvImportResult
@@ -347,11 +347,11 @@ namespace ICCardManager.Services
             };
         }
 
-        public virtual async Task<CsvImportPreviewResult> PreviewCardsAsync(string filePath, bool skipExisting = true)
+        public virtual async Task<CsvImportPreviewResult> PreviewCardsAsync(CsvImportSource source, bool skipExisting = true)
         {
             var errors = new List<CsvImportError>();
             return await ExecutePreviewWithErrorHandlingAsync(
-                () => PreviewCardsInternalAsync(filePath, skipExisting, errors),
+                () => PreviewCardsInternalAsync(source, skipExisting, errors),
                 errors,
                 "カードCSVの取り込み内容の確認").ConfigureAwait(false);
         }
@@ -360,7 +360,7 @@ namespace ICCardManager.Services
         /// カードCSVプレビューの内部処理
         /// </summary>
         private async Task<CsvImportPreviewResult> PreviewCardsInternalAsync(
-            string filePath,
+            CsvImportSource source,
             bool skipExisting,
             List<CsvImportError> errors)
         {
@@ -369,7 +369,7 @@ namespace ICCardManager.Services
             var updateCount = 0;
             var skipCount = 0;
 
-            var lines = await ReadCsvFileAsync(filePath, _logger).ConfigureAwait(false);
+            var lines = await ReadCsvAsync(source, _logger).ConfigureAwait(false);
             if (lines.Count < 2)
             {
                 return new CsvImportPreviewResult
