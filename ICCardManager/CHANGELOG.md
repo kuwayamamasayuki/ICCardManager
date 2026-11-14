@@ -15,6 +15,14 @@
   - 管理者マニュアル §3.1.4「職員証を再発行した」を、削除して登録し直す手順から差し替えの手順へ書き直した（登録済みの職員が 1 人だけでその職員証を紛失した場合は、従来どおり IT 担当者への相談を案内する）。02 DB・03 画面（§3.3・§3.17・遷移図）・04 機能（§2.8）・05 クラス・07 テスト設計書を更新
   - テスト: `Services/StaffCardReplacementTests`（実 SQLite）27 件・`ViewModels/StaffManageViewModelCardReplacementTests` 35 件・`Services/CsvImportStaffReplacedCardTests` 12 件を新設、`MainViewModelTests` +5 件、`MainViewModelIntegrationTests` +1 件（差し替え後の再タッチの逆処理が新しい職員証で記録されること）、`ConcurrencyConflictMessageTests` の全ファクトリの品質検証 +1 件（`ForReplaceStaffCard`）、UITests `StaffCardReplacementUiTests` 2 件を新設（UT-149。件数は Release の `--list-tests` の数え方で、単体は合計 +81）。`ScreenTransitionDiagramConsistencyTests` の認証操作のスナップショットに「職員証の差し替え」を追加（方針から直接導かれる変更）。`StaffManageViewModel` の構築にタイマーの生成（`ITimerFactory`）を足したため、既存の 3 つのテストクラスの構築に `TestTimerFactory` を渡すよう変えた（表明は不変）
 
+**改善**
+- Issue #2474 **交通系ICカードの削除と履歴の統合で、職員証の認証を確認ダイアログの後に求めるようにした**。これまでは削除・統合だけが「職員証の認証 → 確認」の順で、確認で「いいえ」を選んで取りやめるだけでも先に職員証をタッチする必要があった。払い戻し・統合の取り消しと同じ「確認 → 職員証の認証」にそろえ、「いいえ」なら職員証を求めない
+  - 確認で「はい」の後に職員証の認証が完了しなかったとき（キャンセル・タイムアウト）は、交通系ICカードの削除・払い戻し・履歴の統合とも、統合の取り消しと同じく「職員証の認証が完了しなかったため、…していません。…もう一度「…」を押して、職員証で認証してください。」と案内する（これまで削除・払い戻し・統合は何も言わずに戻っていた）
+  - 確認の表示中もメイン画面のカードの読み取りは抑制しない（以前から）。以前の順序に慣れて確認の表示中に職員証をタッチすると、メイン画面が交通系ICカードのタッチ待ちへ移る既知の制約を 03_画面設計書 §3.17 に記載
+  - 共有フォルダーモードで認証を待つ間に他の PC が対象を変更した場合は、従来どおり書き込む側の読み直し（削除はカードの読み直しと論理削除の条件、統合は対象の行の読み直しと検証）が検出して書き込まない。認証の後に確認時の表示と照合し直す処理は置かない（払い戻し・統合の取り消しと同じ。03_画面設計書 §3.17「確認と認証の順序」）
+  - 03_画面設計書 §3.4・§3.17、04_機能設計書、06_シーケンス図、07_テスト設計書（UT-035b・UT-108b）、管理者マニュアル §3.2.3・§3.2.4、ユーザーマニュアル §5.4 を同期
+  - テスト: `CardManageViewModelTests` +7 件・`HistoryPanelViewModelTests` +2 件。既存の `MergeHistoryLedgers_認証キャンセル時_統合を実行しない` は「確認を出さない」から「確認の後に認証を求め、統合せず案内する」へ期待値を変更。`DeleteAsync_WhenSelectionClearedDuringAuthentication_ShouldStillDeleteInitialTarget` は確認が認証より前になったため、「確認の文言が開始時点のカードを名指しする」表明を「削除前の読み直しが開始時点のカードを指す」表明に差し替え。UI テスト `MessageBoxOwnerTests` は、削除確認が「削除」の直後に前面のまま出るようになったため、認証を待つ間に他の PC がカードを削除した状況で出る「削除できません」で検査するよう書き換え、そのために `DatabaseProbe.ExecuteAsAnotherPc`（他の PC の変更の再現用の書き込み）を追加
+
 **バグ修正**
 - Issue #2478 **マニュアル用スクリーンショットの撮影で、ウィンドウを前面にできなかったときに非アクティブ（タイトルバーが灰色）の画像を保存して合格していた**のを、撮らずに失敗するようにした（UI テストの基盤。アプリの動作は変わらない）。撮影（`ScreenshotHelper.Capture`・`CaptureElements`・`CaptureWithToast`）は前面化（`BringToForeground`）の戻り値を捨てており、タスクバー（`Shell_TrayWnd`、explorer.exe）が前面を保持したままになると、PR で変えていない画像まで灰色になったのを目で確かめるまで気付けなかった
   - 撮影の前に `RequireForegroundForCapture` で前面化を確かめ、できなければ画像のファイル名と前面にあるウィンドウ（タイトル・プロセス名・クラス名）を示して例外にする。撮り直せば直る状況なので、誤った画像を正規の名前で残すより失敗させる。`bringToFront: false`（トースト単体）は前面にしないのが正しいので対象外。入力の前の `RequireForeground` の文言にもクラス名が載る（タイトルの無いタスクバーを見分けるため）
