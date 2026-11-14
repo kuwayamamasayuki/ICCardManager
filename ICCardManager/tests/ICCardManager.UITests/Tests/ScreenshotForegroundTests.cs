@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using FlaUI.Core.AutomationElements;
 using FluentAssertions;
 using ICCardManager.UITests.Infrastructure;
 using Xunit;
@@ -43,8 +44,9 @@ namespace ICCardManager.UITests.Tests
             Action before = () => ScreenshotHelper.EnsureForegroundForCapture(() => false, () => foreground, "staff.png");
             Action during = () => ScreenshotHelper.EnsureStillForeground(
                 new IntPtr(100), () => new IntPtr(200), _ => foreground, "staff.png", pause: () => { });
+            Action input = () => ScreenshotHelper.EnsureForegroundForInput(() => false, () => foreground);
 
-            foreach (var act in new[] { before, during })
+            foreach (var act in new[] { before, during, input })
             {
                 act.Should().Throw<InvalidOperationException>().Which.Message.Should()
                     .NotContain("閉じ").And.NotContain("最小化").And.NotContain("管理者権限")
@@ -61,6 +63,55 @@ namespace ICCardManager.UITests.Tests
                 () => true, () => { described = true; return "使われない"; }, "staff.png");
 
             described.Should().BeFalse("前面にできたなら、失敗の文言を組み立てる必要は無い");
+        }
+
+        [Fact]
+        public void 入力の前に前面にできなかったとき_その他のウィンドウなら管理者権限と閉じるか最小化を案内すること()
+        {
+            Action act = () => ScreenshotHelper.EnsureForegroundForInput(
+                () => false, () => "Switch USB（SwitchUsb.exe、クラス WindowsForms10.Window）");
+
+            act.Should().Throw<InvalidOperationException>().Which.Message.Should()
+                .Contain("SwitchUsb.exe").And.Contain("管理者権限").And.Contain("閉じるか最小化")
+                .And.EndWith("撮影をやり直してください。");
+        }
+
+        [Fact]
+        public void 前面にする撮影は判定を通り_そのハンドルを撮影中の確認へ渡すこと()
+        {
+            var settled = false;
+
+            var handle = ScreenshotHelper.PrepareForCapture(true, () => new IntPtr(100), () => settled = true);
+
+            handle.Should().Be(new IntPtr(100), "判定が前面にしたウィンドウを撮影中の確認へ渡す");
+            settled.Should().BeFalse("待ちは判定（前面化）の内側で行う");
+        }
+
+        [Fact]
+        public void 前面にしない撮影は判定を通らず_待ってから撮影中の確認をしないこと()
+        {
+            var required = false;
+            var settled = false;
+
+            var handle = ScreenshotHelper.PrepareForCapture(
+                false, () => { required = true; return new IntPtr(100); }, () => settled = true);
+
+            required.Should().BeFalse();
+            settled.Should().BeTrue("トーストのフェードインを待つ");
+            handle.Should().Be(IntPtr.Zero);
+        }
+
+        [Fact]
+        public void 撮影は既定で前面にすること()
+        {
+            // 引数 2 つの撮影（大半の呼び出し）は既定値で前面にする。既定値を false にすると、すべてが判定を通らずに撮る
+            // （名前を nameof で書くと、静的検査のメソッド グループ検出が誤検出する。ScreenshotForegroundConventionTests の remarks）
+            var parameter = typeof(ScreenshotHelper)
+                .GetMethod("Capture", new[] { typeof(Window), typeof(string), typeof(bool) })!
+                .GetParameters()[2];
+
+            parameter.HasDefaultValue.Should().BeTrue();
+            parameter.DefaultValue.Should().Be(true);
         }
 
         [Fact]

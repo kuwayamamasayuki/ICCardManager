@@ -133,18 +133,39 @@ namespace ICCardManager.UITests.Infrastructure
         /// </remarks>
         public static void RequireForeground(Window window)
         {
-            if (BringToForeground(window))
+            EnsureForegroundForInput(() => BringToForeground(window), () => DescribeWindow(GetForegroundWindow()));
+        }
+
+        /// <summary>
+        /// <see cref="RequireForeground"/> の判定（継ぎ目。<c>ScreenshotForegroundTests</c> が実ウィンドウなしで検証する）。
+        /// 案内は撮影の前の判定と同じ場合分け（<see cref="ExplainForegroundHolder"/>）を使う。
+        /// </summary>
+        internal static void EnsureForegroundForInput(Func<bool> bringToForeground, Func<string> describeForeground)
+        {
+            if (bringToForeground())
             {
                 return;
             }
-            var foreground = DescribeWindow(GetForegroundWindow());
-            throw new InvalidOperationException(
-                "アプリのウィンドウを前面にできません。" +
-                (foreground == NoForegroundWindow
-                    ? "前面にウィンドウがありません（切り替えの途中など）。他のウィンドウを閉じるか最小化してから、撮影をやり直してください。"
-                    : $"前面にあるウィンドウ「{foreground}」が管理者権限で動いている可能性があります。" +
-                      "そのウィンドウを閉じるか最小化してから、撮影をやり直してください。"));
+            var (holder, remedy) = ExplainForegroundHolder(describeForeground());
+            throw new InvalidOperationException($"アプリのウィンドウを前面にできません。{holder}。" + remedy);
         }
+
+        /// <summary>
+        /// 前面にできなかったときの「何が前面を保持しているか」と「どうすれば」を、前面のウィンドウの種類で決める
+        /// （入力の前・撮影の前の両方の判定が使う）。前面のウィンドウが無いとき・タスクバーのときは、閉じる・最小化できないので
+        /// 撮り直しを案内する。それ以外のウィンドウは、管理者権限で動いていると OS が前面化を拒否する（撮り直しても直らない）。
+        /// </summary>
+        private static (string Holder, string Remedy) ExplainForegroundHolder(string foreground) =>
+            ClassifyForeground(foreground) switch
+            {
+                ForegroundKind.None => ("前面にウィンドウがありません（切り替えの途中など）",
+                    "一時的な状態なので、そのまま撮影をやり直してください。"),
+                ForegroundKind.Taskbar => ($"タスクバー「{foreground}」が前面を保持しています",
+                    "タスクバーが前面を保持するのは一時的なことが多いので、そのまま撮影をやり直してください。"),
+                _ => ($"前面にあるウィンドウ「{foreground}」が前面を保持しています",
+                    "一時的なら撮り直せば直りますが、そのウィンドウが管理者権限で動いていると OS が前面化を拒否するため" +
+                    "撮り直しても直りません。そのウィンドウを閉じるか最小化してから、撮影をやり直してください。"),
+            };
 
         /// <summary>
         /// 撮影の前に、ウィンドウを前面にする。できなければ画像を保存せずに例外にする（Issue #2478）。
@@ -210,19 +231,9 @@ namespace ICCardManager.UITests.Infrastructure
             {
                 return;
             }
-            var foreground = describeForeground();
-            var (holder, remedy) = ClassifyForeground(foreground) switch
-            {
-                ForegroundKind.None => ("前面にウィンドウが無い（切り替えの途中など）ため",
-                    "一時的な状態なので、そのまま撮影をやり直してください。"),
-                ForegroundKind.Taskbar => ($"タスクバー「{foreground}」が前面を保持しているため",
-                    "タスクバーが前面を保持するのは一時的なことが多いので、そのまま撮影をやり直してください。"),
-                _ => ($"前面にあるウィンドウ「{foreground}」が前面を保持しているため",
-                    "一時的なら撮り直せば直りますが、そのウィンドウが管理者権限で動いていると OS が前面化を拒否するため" +
-                    "撮り直しても直りません。そのウィンドウを閉じるか最小化してから、撮影をやり直してください。"),
-            };
+            var (holder, remedy) = ExplainForegroundHolder(describeForeground());
             throw new InvalidOperationException(
-                $"撮影するウィンドウを前面にできませんでした（{fileName}）。{holder}、" +
+                $"撮影するウィンドウを前面にできませんでした（{fileName}）。{holder}。" +
                 "このまま撮るとタイトルバーが灰色（非アクティブ）の画像になるので保存しません。" + remedy);
         }
 
@@ -518,19 +529,31 @@ namespace ICCardManager.UITests.Infrastructure
                 throw new ArgumentException("ファイル名を指定してください。", nameof(fileName));
             }
 
-            var foreground = IntPtr.Zero;
-            if (bringToFront)
-            {
-                foreground = RequireForegroundForCapture(window, fileName);  // 内側で SettleDelay ぶん待つ
-            }
-            else
-            {
-                // 前面化しない経路にも同じ待ちを入れる。トースト（ToastNotificationWindow）は
-                // Opacity のフェードイン アニメーションを持つため、待たずに撮ると途中の状態が写る。
-                Thread.Sleep(SettleDelay);
-            }
+            var foreground = PrepareForCapture(
+                bringToFront,
+                () => RequireForegroundForCapture(window, fileName),  // 内側で SettleDelay ぶん待つ
+                () => Thread.Sleep(SettleDelay));
 
             return CaptureRectangle(GetVisibleFrameBounds(window), fileName, foreground);
+        }
+
+        /// <summary>
+        /// <see cref="Capture(Window, string, bool)"/> の撮影前の分岐（継ぎ目。<c>ScreenshotForegroundTests</c> が検証する）。
+        /// 前面にするなら判定（前面にできなければ例外）を呼んでそのハンドルを返し、前面にしないなら待つだけで
+        /// <see cref="IntPtr.Zero"/>（撮影中の確認をしない）を返す。
+        /// </summary>
+        /// <remarks>
+        /// 前面にしない経路にも同じ待ちを入れる。トースト（ToastNotificationWindow）は Opacity のフェードイン アニメーションを
+        /// 持つため、待たずに撮ると途中の状態が写る。
+        /// </remarks>
+        internal static IntPtr PrepareForCapture(bool bringToFront, Func<IntPtr> requireForeground, Action settle)
+        {
+            if (bringToFront)
+            {
+                return requireForeground();
+            }
+            settle();
+            return IntPtr.Zero;
         }
 
         /// <summary>

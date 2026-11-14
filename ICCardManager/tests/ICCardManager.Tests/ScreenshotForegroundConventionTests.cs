@@ -26,7 +26,10 @@ namespace ICCardManager.Tests;
 /// <c>using static</c>・メソッド グループとして渡す形を含む）、⑤前面にできなくても撮る切り分け用の撮影を <c>_FAILED.png</c> 以外の名前に使う。
 /// 検出しない形: 判定のメソッドの中身の書き換え（<c>|| true</c> 等。挙動のテストが止める）、リフレクション・別アセンブリ経由の撮影、
 /// トーストではないウィンドウを <c>toast_</c> で始まる名前で撮ること（④は名前でしか区別できない）、
-/// <c>Capture</c> という名前の別の型のメソッドへ 3 引数を渡す形（④は名前で拾うので誤検出側に倒れる）。
+/// 逆に、④は名前で拾うので次の形を誤検出する側に倒れる（いずれも現状は無い）: <c>Capture</c> という名前の別の型のメソッドへ
+/// 3 引数を渡す、戻り値が <c>string</c> 以外の独自の <c>Capture</c> を 3 引数で宣言する、<c>nameof(ScreenshotHelper.Capture)</c>。
+/// 文字列・コメントの中の「Capture」は数えない。<c>bringToFront</c> の既定値と分岐（既定で前面にする・false で判定を通らない）は
+/// <c>ScreenshotForegroundTests</c> が挙動で固定する。
 /// </para>
 /// </remarks>
 public class ScreenshotForegroundConventionTests
@@ -84,7 +87,8 @@ public class ScreenshotForegroundConventionTests
             .Where(a => a.Count >= 3 && a[2] != "true" && a[2] != "bringToFront: true")
             .Where(a => !(a[2] == "bringToFront: false" && Regex.IsMatch(a[1], @"^""toast_\w+\.png""$")))
             .Select(a => string.Join(", ", a))
-            .Concat(Regex.Matches(sourceWithLiterals, @"\bCapture\b(?!\s*[.(])").Cast<Match>().Select(m => "メソッド グループ: " + m.Value))
+            .Concat(Regex.Matches(TestSourceInspection.ToCodeOnly(sourceWithLiterals), @"\bCapture\b(?!\s*[.(])")
+                .Cast<Match>().Select(m => "メソッド グループ: " + m.Value))
             .ToList();
 
     /// <summary>切り分け用の撮影のうち、名前が <c>_FAILED.png</c> で終わるリテラルでないもの（宣言は除く）。</summary>
@@ -183,14 +187,21 @@ public class ScreenshotForegroundConventionTests
             var body = Body(code, method);
             body.Should().Contain("RequireForegroundForCapture(", $"{method} は前面にできなかったら撮らずに失敗すること");
 
-            // 撮影中の確認へ渡す foreground は判定の戻り値であること（Capture の bringToFront: false の経路だけ、判定の前の初期値 IntPtr.Zero）
-            var guard = body.IndexOf("RequireForegroundForCapture(", System.StringComparison.Ordinal);
+            // 撮影中の確認へ渡す foreground は判定の戻り値であること（Capture は分岐の継ぎ目 PrepareForCapture の戻り値）
             foreach (Match assignment in Regex.Matches(body, @"\bforeground\s*=(?!=)\s*(?<rhs>[^;]*);"))
             {
                 var rhs = assignment.Groups["rhs"].Value.Trim();
                 (rhs.StartsWith("RequireForegroundForCapture(", System.StringComparison.Ordinal)
-                 || (rhs == "IntPtr.Zero" && assignment.Index < guard))
+                 || rhs.StartsWith("PrepareForCapture(", System.StringComparison.Ordinal))
                     .Should().BeTrue($"{method} の foreground は前面化の判定の戻り値であること（{assignment.Value}）");
+            }
+
+            // 分岐の継ぎ目へは引数 bringToFront をそのまま渡し、前面にする側で判定を呼ぶこと（継ぎ目の中は挙動のテストが固定する）
+            foreach (var (_, args) in TestSourceInspection.ExtractInvocationArguments(body, new Regex(@"\bPrepareForCapture\b")))
+            {
+                args.Should().HaveCount(3);
+                args[0].Should().Be("bringToFront", $"{method} は bringToFront を反転・固定せずに渡すこと");
+                args[1].Should().Contain("RequireForegroundForCapture(", $"{method} は前面にする側で判定を呼ぶこと");
             }
             var calls = TestSourceInspection.ExtractInvocationArguments(body, new Regex(@"\bCaptureRectangle\b"));
             calls.Should().NotBeEmpty().And.OnlyContain(c => c.Arguments.Count == 3 && c.Arguments[2] == "foreground",
