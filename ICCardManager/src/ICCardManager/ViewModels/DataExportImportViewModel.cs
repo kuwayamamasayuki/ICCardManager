@@ -837,7 +837,11 @@ public partial class DataExportImportViewModel : ViewModelBase
             // ここで「エクスポートに失敗しました。」を前置すると同じことを 2 度述べることになる
             // （「何が」の二重化。#1991 が Detail.cs で ToReason へ寄せたのと同じ理由）。
             // 「何が」の総称はダイアログのタイトルが担う。
-            _dialogService.ShowError(result.ErrorMessage, "エクスポートエラー");
+            // 失敗の結果は必ず ErrorMessage を持つが、型（string?）はそれを約束しないので、無いときの文言を置く
+            _dialogService.ShowError(
+                result.ErrorMessage
+                    ?? "CSVファイルのエクスポートに失敗しました。原因を特定できませんでした。出力先を確かめて、もう一度エクスポートしてください。",
+                "エクスポートエラー");
         }
     }
 

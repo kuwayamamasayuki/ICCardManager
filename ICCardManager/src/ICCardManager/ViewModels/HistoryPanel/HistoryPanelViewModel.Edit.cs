@@ -60,44 +60,6 @@ public partial class HistoryPanelViewModel
     }
 
     /// <summary>
-    /// 履歴行を削除
-    /// </summary>
-    [RelayCommand]
-    public async Task DeleteLedgerRow(LedgerDto ledger)
-    {
-        if (ledger == null)
-        {
-            return;
-        }
-
-        // Issue #2322: 確認文言の出し分けに使う。await をまたいで表示中のカードを読み直さない（#2202）
-        var isRefundedCard = HistoryCard?.IsRefunded == true;
-
-        // 認証
-        using var authResult = (await _staffAuthService.RequestAuthenticationAsync("履歴の削除"))?.Enter();
-        if (authResult == null)
-        {
-            return;
-        }
-
-        // 確認（Issue #1574: 貸出中レコードの場合は専用の警告メッセージ）
-        var confirmMessage = ledger.IsLentRecord
-            ? $"以下の履歴は「貸出中」状態のレコードです。\n\n" +
-              $"日付: {ledger.DateDisplay}\n摘要: {ledger.Summary}\n残高: {ledger.BalanceDisplay}円\n\n" +
-              "削除すると、このカードの貸出中状態も解消されます\n" +
-              "（他に貸出中レコードが残っている場合は維持されます）。\n\n" +
-              LentRecordDeletionGuidance.Build(isRefundedCard)
-            : $"以下の履歴を削除してよろしいですか？\n\n日付: {ledger.DateDisplay}\n摘要: {ledger.Summary}\n残高: {ledger.BalanceDisplay}円";
-
-        if (!_navigationService.ShowWarningConfirmation(confirmMessage, "履歴の削除"))
-        {
-            return;
-        }
-
-        await DeleteLedgerRowCoreAsync(ledger);
-    }
-
-    /// <summary>
     /// 履歴 1 行を削除し、監査ログを同一トランザクションで記録する（Issue #1458 / Issue #1944）。
     /// </summary>
     /// <remarks>
@@ -111,17 +73,14 @@ public partial class HistoryPanelViewModel
     /// 訂正の追跡ができなくなる。
     /// </para>
     /// <para>
-    /// 履歴一覧からの削除（<see cref="DeleteLedgerRow"/>）と行編集ダイアログからの削除要求
-    /// （Issue #750。<see cref="EditLedgerWithAuthAsync"/>）は同じ論理的な書き込みなので、
-    /// 経路ごとに同じ防御を配らずここへ寄せる
-    /// （<c>.claude/rules/db-write-conventions.md</c> #1763「同じ論理的な書き込みに手段が 2 通りあるか」）。
-    /// 後者はモーダルダイアログを実体化するため ViewModel 単体テストから到達できず、
-    /// 寄せることでしか回帰を担保できない（静的検査は <c>RepositoryDeleteResultConventionTests</c>）。
-    /// なお <see cref="DeleteLedgerRow"/> は Issue #635 で一覧の削除ボタン用に作られたが、
-    /// Issue #750 でそのボタンが変更ダイアログ内へ移ったため <c>DeleteLedgerRowCommand</c> に
-    /// XAML のバインドは無く、<b>現在 UI から到達するのは後者だけ</b>である。
-    /// 前者は認証・確認の手順を保持したまま残っており、結果として
-    /// <b>本メソッドを挙動テストから踏める唯一の入口</b>になっている。
+    /// 呼び出し元は利用履歴行編集ダイアログの削除要求（Issue #750。<see cref="EditLedgerWithAuthAsync"/>）だけである。
+    /// 認証はダイアログを開く前の「履歴の変更」、確認はダイアログ内（<c>LedgerRowEditViewModel.RequestDelete</c>）で済んでいる。
+    /// Issue #635 で履歴一覧の削除ボタン用に作られた <c>DeleteLedgerRow</c>（認証「履歴の削除」→確認→本メソッド）は、
+    /// Issue #750 でボタンが行編集ダイアログ内へ移ってから UI から到達せず、ダイアログ経由の削除を単体テストから
+    /// 踏めなかったために挙動テストの入口としてだけ残っていた。Issue #2475 でダイアログの初期化と結果の読み取りを
+    /// ViewModel に対して行う継ぎ目（<see cref="Services.INavigationService.ShowDialogAsync{TDialog, TViewModel}"/>）へ移し、
+    /// テストを実際の経路へ移したうえで削除した。削除の経路を 2 つに戻さないこと（#1944 は 2 経路の写しの片方だけが
+    /// 戻り値を捨てていた欠陥。静的検査は <c>RepositoryWriteResultConventionTests</c>）。
     /// </para>
     /// <para>
     /// Issue #1727「エラー通知を、失敗したサブシステムに依存させない」を本メソッドには適用していない。
@@ -365,30 +324,30 @@ public partial class HistoryPanelViewModel
         // Issue #2007: 導入行なら、導入時残高の誤りの訂正案をダイアログへ渡す
         var initialBalanceCorrection = await ResolveInitialBalanceCorrectionForEditAsync(ledger);
 
-        // 全項目編集ダイアログ表示
-        Views.Dialogs.LedgerRowEditDialog? capturedEditDialog = null;
-        var dialogResult = await _navigationService.ShowDialogAsync<Views.Dialogs.LedgerRowEditDialog>(
-            async d =>
+        // 全項目編集ダイアログ表示。
+        // Issue #2475: 初期化と閉じた後の要求の読み取りは Window ではなく ViewModel に対して行う
+        // （ダイアログを差し替えて、開く → 削除・保存などの操作 → 閉じた後の分岐を単体テストから踏めるようにする）
+        LedgerRowEditViewModel? editor = null;
+        var dialogResult = await _navigationService.ShowDialogAsync<Views.Dialogs.LedgerRowEditDialog, LedgerRowEditViewModel>(
+            async vm =>
             {
-                await d.InitializeForEditAsync(ledger, previousBalance, initialBalanceCorrection);
-                d.SetRefundedCard(isRefundedCard);
+                await vm.InitializeForEditAsync(ledger, previousBalance, initialBalanceCorrection);
+                vm.IsRefundedCard = isRefundedCard;
                 if (showSaveAndNext)
                 {
-                    d.SetShowSaveAndNextButton(true);
+                    vm.ShowSaveAndNextButton = true;
                 }
                 if (!string.IsNullOrEmpty(cardName))
                 {
-                    d.SetBreadcrumb($"{cardName} > 行修正");
+                    vm.SetBreadcrumb($"{cardName} > 行修正");
                 }
-                capturedEditDialog = d;
+                editor = vm;
             });
 
-        // Issue #750: 削除がリクエストされた場合
-        if (capturedEditDialog?.IsDeleteRequested == true)
+        // Issue #750: 削除がリクエストされた場合（確認はダイアログ内で済んでいる）
+        if (editor?.IsDeleteRequested == true)
         {
-            // Issue #1944: 削除と監査ログの書き込みは DeleteLedgerRow と同一の経路へ寄せる。
-            // 旧実装はここにも同じコードの写しを持ち、そちらだけが DeleteAsync の戻り値を
-            // 捨てたまま残る形だった。
+            // Issue #1944: 削除と監査ログの書き込みは 1 つの経路へ寄せる
             await DeleteLedgerRowCoreAsync(ledger);
         }
         // Issue #2325: 保存で競合（この行が他 PC の削除・返却で無くなった）を検出したまま閉じた場合。
@@ -397,7 +356,7 @@ public partial class HistoryPanelViewModel
         // 何も保存していないので「保存して次へ」「次へ」「戻る」へは進まない（一覧の並びが変わっている）。
         // 保存できた（dialogResult == true）ときは下の分岐が読み直して「保存して次へ」へ進む。競合の後に保存し直して
         // 成功した場合も保存の側を優先する（コードレビュー 2 回目。ViewModel 側も保存の成功で印を下ろす）。
-        else if (dialogResult != true && capturedEditDialog?.NeedsHistoryReload == true)
+        else if (dialogResult != true && editor?.NeedsHistoryReload == true)
         {
             await LoadHistoryLedgersAsync();
             await Host.RefreshDashboardAsync();
@@ -415,18 +374,18 @@ public partial class HistoryPanelViewModel
             await CheckAndNotifyConsistencyAsync();
 
             // Issue #1134: 「保存して次へ」が要求された場合、次の行を開く
-            if (capturedEditDialog?.IsSaveAndEditNextRequested == true)
+            if (editor?.IsSaveAndEditNextRequested == true)
             {
                 await EditAdjacentLedgerAsync(ledger, offset: 1);
             }
         }
         // Issue #1134: 「次へ（保存しない）」が要求された場合
-        else if (capturedEditDialog?.IsSkipToNextRequested == true)
+        else if (editor?.IsSkipToNextRequested == true)
         {
             await EditAdjacentLedgerAsync(ledger, offset: 1);
         }
         // Issue #1134: 「戻る」が要求された場合
-        else if (capturedEditDialog?.IsBackRequested == true)
+        else if (editor?.IsBackRequested == true)
         {
             await EditAdjacentLedgerAsync(ledger, offset: -1);
         }

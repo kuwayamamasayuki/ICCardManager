@@ -14,7 +14,7 @@ namespace ICCardManager.Views.Dialogs
     /// <summary>
     /// 履歴行の追加/全項目修正ダイアログ（Issue #635）
     /// </summary>
-    public partial class LedgerRowEditDialog : Window
+    public partial class LedgerRowEditDialog : Window, Services.IViewModelDialog<LedgerRowEditViewModel>
     {
         private readonly LedgerRowEditViewModel _viewModel;
 
@@ -101,29 +101,14 @@ namespace ICCardManager.Views.Dialogs
         }
 
         /// <summary>
-        /// 削除が要求されたか（MainViewModelで参照）Issue #750
+        /// ダイアログの ViewModel（Issue #2475）
         /// </summary>
-        public bool IsDeleteRequested => _viewModel.IsDeleteRequested;
-
-        /// <summary>
-        /// 「保存して次へ」が要求されたか（Issue #1134）
-        /// </summary>
-        public bool IsSaveAndEditNextRequested => _viewModel.IsSaveAndEditNextRequested;
-
-        /// <summary>
-        /// 「次へ（保存しない）」が要求されたか（Issue #1134）
-        /// </summary>
-        public bool IsSkipToNextRequested => _viewModel.IsSkipToNextRequested;
-
-        /// <summary>
-        /// 「戻る」が要求されたか（Issue #1134）
-        /// </summary>
-        public bool IsBackRequested => _viewModel.IsBackRequested;
-
-        /// <summary>
-        /// 保存で競合（編集対象の行がもう無い）を検出し、閉じたあと履歴一覧の再読込が要るか（Issue #2325）
-        /// </summary>
-        public bool NeedsHistoryReload => _viewModel.NeedsHistoryReload;
+        /// <remarks>
+        /// 編集モードの初期化と、閉じた後の要求（削除・保存して次へ・次へ・戻る・競合による再読込）の読み取りは、
+        /// 呼び出し元（<c>HistoryPanelViewModel</c>）が <c>INavigationService.ShowDialogAsync&lt;TDialog, TViewModel&gt;</c>
+        /// 経由でこの ViewModel に対して行う（Window を実体化せずに単体テストから踏めるようにするため）。
+        /// </remarks>
+        public LedgerRowEditViewModel ViewModel => _viewModel;
 
         /// <summary>
         /// 追加モードで初期化
@@ -140,48 +125,6 @@ namespace ICCardManager.Views.Dialogs
             bool historyStartsAtCardBeginning = false)
         {
             await _viewModel.InitializeForAddAsync(cardIdm, allLedgers, historyStartsAtCardBeginning);
-        }
-
-        /// <summary>
-        /// 編集モードで初期化
-        /// </summary>
-        /// <param name="ledgerDto">編集対象</param>
-        /// <param name="previousBalance">
-        /// 履歴一覧の表示順で編集対象の直前にある行の残高（Issue #1740）。残高自動計算の起点。
-        /// 直前行が表示範囲に無い場合は null を渡すと自動計算が無効化される。
-        /// </param>
-        /// <param name="initialBalanceCorrection">
-        /// Issue #2007: 導入時残高の訂正案（全期間の残高整合性チェックで検知された導入行の編集時のみ）。無ければ null。
-        /// </param>
-        public async Task InitializeForEditAsync(
-            LedgerDto ledgerDto, int? previousBalance = null,
-            Services.InitialBalanceCorrection? initialBalanceCorrection = null)
-        {
-            await _viewModel.InitializeForEditAsync(ledgerDto, previousBalance, initialBalanceCorrection);
-        }
-
-        /// <summary>
-        /// パンくずテキストを設定（Issue #1134: 詳細画面から開かれた場合用）
-        /// </summary>
-        public void SetBreadcrumb(string text)
-        {
-            _viewModel.SetBreadcrumb(text);
-        }
-
-        /// <summary>
-        /// 「保存して次へ」ボタンの表示を設定（Issue #1134）
-        /// </summary>
-        public void SetShowSaveAndNextButton(bool show)
-        {
-            _viewModel.ShowSaveAndNextButton = show;
-        }
-
-        /// <summary>
-        /// 編集対象の行のカードが払戻済かを設定する（Issue #2322。貸出中の行の削除の確認文言を出し分ける）
-        /// </summary>
-        public void SetRefundedCard(bool isRefunded)
-        {
-            _viewModel.IsRefundedCard = isRefunded;
         }
 
         /// <summary>

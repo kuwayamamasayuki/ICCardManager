@@ -2454,7 +2454,7 @@ public class MainViewModelTests : IDisposable
         ArrangeLentRecordDelete(cardIdm, hasOtherLentRecords: false);
         _viewModel.LentCards.Add(new CardDto { CardIdm = cardIdm, CardType = "はやかけん", CardNumber = "001" });
 
-        await _viewModel.History.DeleteLedgerRow(LentRecordDto(cardIdm));
+        await _viewModel.History.EditLedger(LentRecordDto(cardIdm));
 
         _cardRepositoryMock.Verify(r => r.GetLentAsync(It.IsAny<bool>()), Times.Once,
             "is_lent を戻したら貸出中一覧を読み直す");
@@ -2474,8 +2474,13 @@ public class MainViewModelTests : IDisposable
         ArrangeLentRecordDelete(cardIdm, hasOtherLentRecords: true);
         _viewModel.LentCards.Add(new CardDto { CardIdm = cardIdm, CardType = "はやかけん", CardNumber = "001" });
 
-        await _viewModel.History.DeleteLedgerRow(LentRecordDto(cardIdm));
+        await _viewModel.History.EditLedger(LentRecordDto(cardIdm));
 
+        // 前提: 削除まで進んだこと（これが無いと、削除へ進まない実装でも下の Never の表明が緑になる）
+        _ledgerRepositoryMock.Verify(r => r.DeleteAsync(42, It.IsAny<SQLiteTransaction>()), Times.Once,
+            "行編集ダイアログで削除を押したら、削除まで進むこと");
+        _ledgerRepositoryMock.Verify(r => r.HasOtherLentRecordsAsync(cardIdm, 42), Times.Once,
+            "他の貸出中レコードの有無を確かめたうえで is_lent を維持すること");
         _cardRepositoryMock.Verify(r => r.UpdateLentStatusAsync(
                 It.IsAny<string>(), It.IsAny<bool>(), It.IsAny<DateTime?>(), It.IsAny<string>()),
             Times.Never, "他の貸出中レコードが残っているので is_lent は維持する（#1574）");
@@ -2502,10 +2507,20 @@ public class MainViewModelTests : IDisposable
     };
 
     /// <summary>
-    /// 貸出中レコードの履歴削除を「認証済み・確認済み・削除成功」まで進める（連携テスト用）。
+    /// 貸出中レコードの履歴削除を「認証済み・行編集ダイアログで削除・確認済み・削除成功」まで進める（連携テスト用）。
     /// </summary>
+    /// <remarks>
+    /// Issue #2475: 削除は行編集ダイアログの「削除」から行う（実際の利用者の経路）。ダイアログは本物の ViewModel で再現する。
+    /// </remarks>
     private void ArrangeLentRecordDelete(string cardIdm, bool hasOtherLentRecords)
     {
+        LedgerRowEditDialogStub.Arrange(
+            _navigationServiceMock, _ledgerRepositoryMock.Object, _operationLoggerMock.Object, _dbContext,
+            editor =>
+            {
+                editor.CanDelete.Should().BeTrue("編集モードの初期化が成立していること（前提の表明）");
+                editor.RequestDeleteCommand.Execute(null);
+            });
         _staffAuthServiceMock
             .Setup(a => a.RequestAuthenticationAsync(It.IsAny<string>()))
             .ReturnsAsync(new StaffAuthResult { Idm = "AABBCCDDEEFF0011", StaffName = "田中太郎" });

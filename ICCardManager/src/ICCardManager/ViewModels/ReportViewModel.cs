@@ -1007,7 +1007,8 @@ public partial class ReportViewModel : ViewModelBase
                             .Select(f => $"・{f.CardName}: {f.ErrorMessage}")
                             .ToList();
 
-                        var abortMessage = result.DetailedErrorMessage ?? result.ErrorMessage;
+                        // 中断の原因になったカード自身の失敗（failedCards の末尾。ErrorMessage が無ければその代替文言）へ倒す
+                        var abortMessage = result.DetailedErrorMessage ?? failedCards[failedCards.Count - 1].ErrorMessage;
                         if (precedingFailures.Count > 0)
                         {
                             abortMessage += "\n\n中断より前に、以下のカードで帳票作成に失敗しています:\n"
@@ -1020,7 +1021,8 @@ public partial class ReportViewModel : ViewModelBase
                         }
                         // ステータス欄はボタン列と幅を分け合うため簡潔にする。「なぜ／どうすれば」は
                         // 直前のエラーダイアログで提示済み（Issue #1688 と同じ判断）
-                        SetStatus($"帳票作成を中断しました（{result.ErrorMessage}）", true);
+                        // 原因の文言は failedCards の末尾（ErrorMessage。無ければダイアログと同じ代替文言）。ErrorMessage を直接使うと null で「（）」になる
+                        SetStatus($"帳票作成を中断しました（{failedCards[failedCards.Count - 1].ErrorMessage}）", true);
                         return;
                     }
                 }

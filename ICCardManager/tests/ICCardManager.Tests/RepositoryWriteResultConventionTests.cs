@@ -25,8 +25,9 @@ namespace ICCardManager.Tests;
 /// <para>
 /// この形は Issue #1753 →#1808 →#1944 と繰り返し見つかっており、個別の挙動テストでは
 /// <b>経路が増えたときの追随漏れを検出できない</b>（<c>.claude/rules/error-messages.md</c> #1764）。
-/// とくに <c>HistoryPanelViewModel.EditLedgerWithAuthAsync</c> の削除要求（Issue #750）は
-/// モーダルダイアログを実体化するため ViewModel 単体テストから 1 件も踏めない。
+/// <c>HistoryPanelViewModel.EditLedgerWithAuthAsync</c> の削除要求（Issue #750）は、以前はモーダルダイアログを
+/// 実体化するため ViewModel 単体テストから 1 件も踏めなかった（Issue #2475 で継ぎ目を入れ、挙動テストは
+/// <c>HistoryPanelViewModelTests</c> の「行編集からの削除」へ移した）。それでも新しい経路の追随漏れは挙動テストでは拾えない。
 /// </para>
 /// <para>
 /// 加えて、<c>Verify</c> されるだけのモックは既定値（<c>Task&lt;bool&gt;</c> なら <c>false</c>）を

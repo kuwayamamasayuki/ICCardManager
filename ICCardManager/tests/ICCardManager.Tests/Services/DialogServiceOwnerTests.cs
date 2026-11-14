@@ -35,7 +35,7 @@ namespace ICCardManager.Tests.Services;
 public class DialogServiceOwnerTests
 {
     private sealed record ShowCall(
-        Window Owner,
+        Window? Owner,
         string Message,
         string Title,
         MessageBoxButton Button,
@@ -67,7 +67,7 @@ public class DialogServiceOwnerTests
         }
 
         protected override MessageBoxResult ShowMessageBoxCore(
-            Window owner, string message, string title, MessageBoxButton button, MessageBoxImage image)
+            Window? owner, string message, string title, MessageBoxButton button, MessageBoxImage image)
         {
             Calls.Add(new ShowCall(owner, message, title, button, image));
             return NextResult;

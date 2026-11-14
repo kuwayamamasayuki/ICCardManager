@@ -180,9 +180,13 @@ public class ReturnFlowDialogHeaderColorConventionTests
     /// <para>
     /// 型引数が <c>Dialog</c> で終わることを要求して、無関係なジェネリック呼び出しを拾わない。
     /// </para>
+    /// <para>
+    /// ViewModel を初期化する形（<c>ShowDialogAsync&lt;TDialog, TViewModel&gt;</c>、Issue #2475）は 2 つ目の型引数を持つ。
+    /// 1 つ目がダイアログなので、2 つ目を読み飛ばして拾う（拾えないと、その形で開いたダイアログが検査から静かに落ちる）。
+    /// </para>
     /// </remarks>
     private static readonly Regex ShowDialogRegex = new(
-        @"(?:ShowDialogAsync|GetRequiredService|GetService)<(?:Views\.Dialogs\.)?(?<dialog>\w+Dialog)>");
+        @"(?:ShowDialogAsync|GetRequiredService|GetService)<(?:Views\.Dialogs\.)?(?<dialog>\w+Dialog)(?:\s*,\s*[\w.]+)?>");
 
     /// <summary>
     /// <paramref name="entryPoint"/> から到達するメソッドを推移的に辿り、開かれるダイアログ名を集める。
@@ -497,6 +501,32 @@ public class ReturnFlowDialogHeaderColorConventionTests
         ResourceKeyOf(warmBorder.Background).Should().Be(ReturnBackground, "背景と見出しは規約どおりでも");
         ResourceKeyOf(warmBorder.TitleForeground).Should().Be(ReturnForeground);
         warmBorder.Body.Should().Contain("Lending", "開始タグの属性に残った暖色を検出すること");
+    }
+
+    #endregion
+
+    #region 検査ロジックを見本入力で固定する
+
+    /// <summary>
+    /// ダイアログを開く呼び出しの抽出を、既知の見本入力で固定する（Issue #2475）。
+    /// </summary>
+    /// <remarks>
+    /// ViewModel を初期化する形（<c>ShowDialogAsync&lt;TDialog, TViewModel&gt;</c>）は 2 つ目の型引数を持つ。
+    /// 拾えないと、その形で開いたダイアログが検査から静かに落ちる。返却フローの実コードが今この形を使っていなくても
+    /// 抽出が働き続けるよう、実データではなく見本で固定する（<c>.claude/rules/development-conventions.md</c>「空振り検出」）。
+    /// </remarks>
+    [Fact]
+    public void ShowDialogRegex_2つ目の型引数を持つ形もダイアログ名として拾うこと()
+    {
+        const string sample =
+            "await _navigationService.ShowDialogAsync<Views.Dialogs.SampleEditDialog, SampleEditViewModel>(vm => vm.InitAsync());\n" +
+            "await _navigationService.ShowDialogAsync<SampleDialog>(d => d.InitAsync());\n" +
+            "var x = _serviceProvider.GetRequiredService<SampleService>();";
+
+        ShowDialogRegex.Matches(sample).Cast<Match>()
+            .Select(m => m.Groups["dialog"].Value)
+            .Should().Equal(new[] { "SampleEditDialog", "SampleDialog" },
+                "2 つ目の型引数を持つ形も 1 つ目（ダイアログ）を拾い、Dialog で終わらない型は拾わないこと");
     }
 
     #endregion
