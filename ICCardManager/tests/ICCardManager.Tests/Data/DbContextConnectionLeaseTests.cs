@@ -331,10 +331,17 @@ public class DbContextConnectionLeaseTests : IDisposable
                 "待機は取り消しで終わり、トランザクションは開かれないこと（観測: {0}）", string.Join("・", observations));
 
             Func<Task> act = () => waiting;
-            (await act.Should().ThrowAsync<OperationCanceledException>(
+            var canceled = (await act.Should().ThrowAsync<OperationCanceledException>(
                     "取り消しは OperationCanceledException（派生型を含む）で伝わること（観測: {0}）", string.Join("・", observations)))
-                .Which.CancellationToken.Should().Be(cts.Token,
-                    "取り消したのはこのテストのトークンであること（観測: {0}）", string.Join("・", observations));
+                .Which;
+
+            // CancellationToken は食い違っても FluentAssertions の出力が型名だけになるので、見分けられる値を観測値に載せる
+            var token = canceled.CancellationToken;
+            observations.Add(
+                $"例外のトークン（このテストのトークンと同一 {token == cts.Token}・CanBeCanceled {token.CanBeCanceled}・" +
+                $"IsCancellationRequested {token.IsCancellationRequested}）");
+            token.Should().Be(cts.Token,
+                "取り消したのはこのテストのトークンであること（観測: {0}）", string.Join("・", observations));
         }
         finally
         {
