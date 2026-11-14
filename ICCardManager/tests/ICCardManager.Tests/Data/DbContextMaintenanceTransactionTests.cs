@@ -73,6 +73,7 @@ public class DbContextMaintenanceTransactionTests : IDisposable
     {
         _dbContext = new HookableDbContext(_logger);
         _dbContext.InitializeDatabase();
+        RecordSetupAutoCommit("初期化の後");
 
         var cacheServiceMock = new Mock<ICacheService>();
         var staffRepository = new StaffRepository(
@@ -89,6 +90,7 @@ public class DbContextMaintenanceTransactionTests : IDisposable
             Name = TestStaffName,
             IsDeleted = false,
         }).GetAwaiter().GetResult();
+        RecordSetupAutoCommit("職員の INSERT の後");
 
         cardRepository.InsertAsync(new IcCard
         {
@@ -97,6 +99,19 @@ public class DbContextMaintenanceTransactionTests : IDisposable
             CardNumber = "H001",
             IsDeleted = false,
         }).GetAwaiter().GetResult();
+        RecordSetupAutoCommit("カードの INSERT の後");
+    }
+
+    /// <summary>
+    /// 準備の各段階の後の <c>AutoCommit</c>（Issue #2476）。閉じていないトランザクションが残っていたら、
+    /// どの段階から残ったかを失敗の理由で示す。SQL を発行しないので接続の状態を変えない。
+    /// </summary>
+    private readonly List<string> _setupAutoCommit = new List<string>();
+
+    private void RecordSetupAutoCommit(string stage)
+    {
+        using var lease = _dbContext.LeaseConnection();
+        _setupAutoCommit.Add($"{stage} {lease.Connection.AutoCommit}");
     }
 
     public void Dispose()
@@ -298,7 +313,8 @@ public class DbContextMaintenanceTransactionTests : IDisposable
     /// <para>
     /// Issue #2476: CI（Release）で 1 回だけ「削除件数 0」で失敗した。FluentAssertions は主語を
     /// <c>attempts</c> と表示したが、理由の文言（「2 回目の試行で削除が完了すること」）から、失敗したのは
-    /// 削除件数の表明である（主語の取り違えは、CI が計測用に書き換えたアセンブリでの行番号のずれと推測）。
+    /// 削除件数の表明である（スタックの行番号が <c>await</c> の行 303 を指しており、主語の取り違えはそのせいとみられるが、
+    /// 行番号がずれた原因は不明）。
     /// このテストのロック競合は割り込み点から例外を投げて作っており、別の接続でロックを持つ処理は無いので、
     /// 「ロックの保持と cleanup の開始のタイミング」には依存しない。単独での繰り返し・並列の負荷・全件実行では
     /// 再現せず、原因は未特定。次に起きたときに切り分けられるよう、観測値と DbContext のログを失敗の理由へ載せる。
@@ -341,6 +357,7 @@ public class DbContextMaintenanceTransactionTests : IDisposable
         _dbContext.MaintenanceTransactionOpenedHook = null;
         var diagnostics =
             $"DB の日付 {storedDate}・境界日 {thresholdBefore}（後 {await ScalarTextAsync(RetentionThresholdSql)}）・" +
+            $"準備の AutoCommit [{string.Join("、", _setupAutoCommit)}]・" +
             $"INSERT 直後の AutoCommit {autoCommitAfterInsert}・開始前の対象行 {targetsBefore} 件・" +
             $"{string.Join("・", observations)}・削除後の対象行 {await CountAsync(TargetRowCountSql)} 件・" +
             $"終了後の AutoCommit {await ReadAutoCommitAsync()}・待機 [{string.Join(", ", retryDelay.Delays)}]・" +
@@ -366,7 +383,10 @@ public class DbContextMaintenanceTransactionTests : IDisposable
         using var lease = await _dbContext.LeaseConnectionAsync();
         using var command = lease.Connection.CreateCommand();
         command.CommandText = sql;
-        return Convert.ToString(await command.ExecuteScalarAsync(), CultureInfo.InvariantCulture) ?? "(NULL)";
+        var value = await command.ExecuteScalarAsync();
+        return value is null || value is DBNull
+            ? "(NULL)"
+            : Convert.ToString(value, CultureInfo.InvariantCulture) ?? string.Empty;
     }
 
     /// <summary>
