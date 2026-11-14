@@ -441,7 +441,7 @@ namespace ICCardManager.UITests.Infrastructure
         /// <para>
         /// シードはマイグレーションのための起動の後の DB へ入れる。マイグレーションはこの 3 表に行を作らないので、
         /// 行があるのはアプリの起動が書いた場合で、撮影モードなしで起動した Debug 版の起動時のテストデータ（<c>DebugDataService</c>）が該当する。
-        /// 衝突の検知（<see cref="RequireInserted"/>）は、テストデータの IDm がシードの IDm と一致するときにしか働かない。
+        /// 投入の後の影響行数だけを見る形だと、テストデータの IDm がシードの IDm と一致するときにしか働かない。
         /// IDm が食い違ってもテストデータが画面に混ざって写るので、行があること自体で止める。
         /// </para>
         /// <para>
@@ -465,7 +465,7 @@ namespace ICCardManager.UITests.Infrastructure
                 "（DebugDataService）が先に登録された可能性があります。" + LaunchPremiseAdvice);
         }
 
-        /// <summary>起動の前提を確かめる案内（<see cref="RequireEmptyDatabase"/> と <see cref="RequireInserted"/> で共有）。</summary>
+        /// <summary>起動の前提を確かめる案内（<see cref="RequireEmptyDatabase"/> が使う）。</summary>
         private const string LaunchPremiseAdvice =
             "撮影モードで起動しているか（Debug 起動なら AppFixture.LaunchWithSeed に AppFixture.SuppressDebugTestData を渡しているか、" +
             "Release パスなら環境変数 ICCARDMANAGER_UITEST_CONFIGURATION=Release がテストのプロセスへ届いているか。" +
@@ -479,15 +479,15 @@ namespace ICCardManager.UITests.Infrastructure
         }
 
         /// <summary>
-        /// <c>INSERT OR IGNORE</c> が無視された（影響行数 0）なら、既存のデータとぶつかったことを名指しして止める（Issue #2485）。
+        /// <c>INSERT OR IGNORE</c> が無視された（影響行数 0）なら、シードが同じ IDm を重複して投入したことを名指しして止める（Issue #2485）。
         /// </summary>
         /// <param name="affected">影響行数。</param>
         /// <param name="row">投入しようとした行の説明（どの IDm か）。</param>
         /// <remarks>
-        /// シードはマイグレーションのための起動の後の DB へ入れる。Debug 版のアプリが撮影モードなしで起動すると、その起動で
-        /// テストデータ（本体の <c>DebugDataService</c>。仮想タッチの職員 <see cref="AppFixture.SeededStaffIdm"/>・カード
-        /// <see cref="VirtualTouchCardIdm"/> と同じ IDm を含む）が先に入り、<c>INSERT OR IGNORE</c> は黙って無視される。
-        /// 進めるとテストは「カード一覧に行が現れない」「職員が無い」「残高チェーンが切れている」といった、原因と無関係な症状で失敗する。
+        /// 投入の前に DB が空であることは <see cref="RequireEmptyDatabase"/> が確かめるので、ここで影響行数が 0 になるのは、
+        /// 1 回のシードの中で同じ IDm を 2 回入れた場合に限られる（派生シードが追加するカード・職員の IDm を <see cref="Seed"/> のものと
+        /// 同じにした等。<see cref="Seed"/> を 2 回呼ぶ形は、2 回目の空の確認が先に止める）。起動時のテストデータ（<c>DebugDataService</c>）との衝突はここへは来ないので、
+        /// 環境変数の調査へ誘導しない。進めると、後から入れた行の値（氏名・種別）が画面に出ず、原因と無関係な症状で失敗する。
         /// </remarks>
         internal static void RequireInserted(int affected, string row)
         {
@@ -497,9 +497,9 @@ namespace ICCardManager.UITests.Infrastructure
             }
 
             throw new InvalidOperationException(
-                $"撮影用のサンプルデータの{row}を投入できませんでした。同じ IDm の行が DB に既にあり、既存のデータとぶつかりました" +
-                $"（INSERT OR IGNORE の影響行数 {affected}）。Debug 版のアプリが撮影モードなしで起動し、起動時のテストデータ" +
-                "（DebugDataService）が先に登録された可能性があります。" + LaunchPremiseAdvice);
+                $"撮影用のサンプルデータの{row}を投入できませんでした。同じ IDm の行を、シードの中で既に投入しています" +
+                $"（INSERT OR IGNORE の影響行数 {affected}。投入の前に DB が空であることは確かめているため、起動時のテストデータとの衝突ではありません）。" +
+                "ScreenshotSeedData の派生シードが追加する職員・交通系ICカードの IDm が、Seed の投入する IDm と重なっていないかを確認してください。");
         }
 
         /// <summary>台帳 1 行を投入し、投入後の残額を返す。</summary>

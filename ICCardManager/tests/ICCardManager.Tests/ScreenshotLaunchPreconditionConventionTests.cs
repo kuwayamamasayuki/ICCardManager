@@ -24,12 +24,14 @@ namespace ICCardManager.Tests;
 /// 各クラスはどちらのパスで撮るか（<c>[Trait("Screenshot", "Debug")]</c> / <c>"Release"</c>）をちょうど 1 つ持つこと（付け忘れると下の 2 本の検査を素通りする）。
 /// ①Debug パスのクラスがアプリを起動する呼び出しは、すべて撮影モードを自分で渡す（<c>LaunchWithSeed</c> の引数に <c>AppFixture.SuppressDebugTestData</c> がある、
 /// または撮影用の置き場所で起動する <c>LaunchWithSeedInScreenshotDataRoot</c>）。②Release パスのクラスの各テスト（<c>[SkippableFact]</c> / <c>[SkippableTheory]</c>）は、
-/// 本体の先頭の文で起動構成を確かめる入口（<c>SkipUnlessReleaseCapture</c>）を呼ぶ。
+/// 本体の先頭の文で起動構成を確かめる入口（<c>SkipUnlessReleaseCapture</c>）を呼ぶ。③①は <c>AppFixture.</c> で修飾した呼び出しを名前で拾うので、
+/// 撮影クラスでは修飾を外せる <c>using static …AppFixture;</c> と、別名で呼べる <c>using 別名 = …AppFixture;</c> を禁じる。
 /// </para>
 /// <para>
 /// 検出しない形: 変数に入れた環境変数の辞書を渡す（名前で照合するので、<c>SuppressDebugTestData</c> を含まない辞書でも、
 /// 変数名に <c>SuppressDebugTestData</c> が無ければ赤、あれば緑）・入口を呼んだ後に別の起動構成で起動する・
-/// 撮影の Trait を <c>[Trait]</c> 以外の形（定数・独自の属性）で付ける・<c>[Fact]</c> など Skippable 以外の属性で撮影テストを書く。
+/// 撮影の Trait を <c>[Trait]</c> 以外の形（定数・独自の属性）で付ける・<c>[Fact]</c> など Skippable 以外の属性で撮影テストを書く・
+/// 撮影クラスの外に置いたラッパー（別クラスのヘルパー）の中で撮影モードを渡さずに起動する。
 /// </para>
 /// </remarks>
 public class ScreenshotLaunchPreconditionConventionTests
@@ -45,6 +47,10 @@ public class ScreenshotLaunchPreconditionConventionTests
 
     private static readonly Regex SkippableTestAttribute = new(@"\[Skippable(Fact|Theory)\b");
     private static readonly Regex MethodSignature = new(@"\bvoid\s+(?<name>\w+)\s*\(");
+
+    /// <summary><c>AppFixture</c> の修飾を外す・別名を付ける using ディレクティブ（③）。</summary>
+    private static readonly Regex AppFixtureUsingBypass = new(
+        @"\busing\s+(static\s+[\w.]*\bAppFixture|\w+\s*=\s*[\w.]*\bAppFixture)\s*;");
 
     private static string UiTestsRoot => Path.Combine(TestPaths.GetSolutionRoot(), "tests", "ICCardManager.UITests");
 
@@ -72,6 +78,10 @@ public class ScreenshotLaunchPreconditionConventionTests
             .Where(call => !call.Arguments.Any(a => a.Trim() == SuppressArgument))
             .Select(call => codeOnly.Substring(call.Index, System.Math.Min(80, codeOnly.Length - call.Index)))
             .ToList();
+
+    /// <summary><c>AppFixture</c> の修飾を外す・別名を付ける using ディレクティブ（コードだけのソースを受け取る）。</summary>
+    internal static IReadOnlyList<string> FindAppFixtureUsingBypasses(string codeOnly) =>
+        AppFixtureUsingBypass.Matches(codeOnly).Cast<Match>().Select(m => m.Value).ToList();
 
     /// <summary>
     /// Skippable のテストメソッドのうち、本体の先頭の文が <see cref="ReleaseEntry"/><c>();</c> でないものの名前（コードだけのソースを受け取る）。
@@ -140,6 +150,36 @@ public class ScreenshotLaunchPreconditionConventionTests
             FindTestsNotStartingWithReleaseEntry(code).Should().BeEmpty(
                 $"{file} の撮影テストは、本体の先頭の文で {ReleaseEntry}() を呼ぶこと（撮る前・起動する前に起動構成を確かめる）");
         }
+    }
+
+    [Fact]
+    public void 撮影クラスは_AppFixtureの修飾を外すusingや別名を使わないこと()
+    {
+        var classes = ScreenshotClasses();
+        classes.Should().NotBeEmpty("前提: 撮影クラスを見つけられること");
+
+        classes
+            .SelectMany(c => FindAppFixtureUsingBypasses(TestSourceInspection.ToCodeOnly(c.Source)).Select(v => $"{c.File}: {v}"))
+            .Should().BeEmpty(
+                "撮影モードの検査は AppFixture. で修飾した起動の呼び出しを名前で拾うので、修飾を外す using static・別名の using を撮影クラスで使わないこと（レビュー 2 回目で検出）");
+    }
+
+    /// <summary>検査器の固定: 修飾を外す using static と別名の using だけを見つけ、AppFixture 以外の using static・名前空間の using は見逃すこと。</summary>
+    [Fact]
+    public void 検査器は_AppFixtureの修飾を外すusingと別名だけを見つけること()
+    {
+        const string sample =
+            "using static ICCardManager.UITests.Infrastructure.AppFixture;\n" +
+            "using static AppFixture ;\n" +
+            "using F = ICCardManager.UITests.Infrastructure.AppFixture;\n" +
+            "using ICCardManager.UITests.Infrastructure;\n" +
+            "using static ICCardManager.UITests.Infrastructure.ScreenshotHelper;\n" +
+            "using static ICCardManager.UITests.Infrastructure.AppFixtureExtensions;\n";
+
+        FindAppFixtureUsingBypasses(sample).Should().Equal(
+            "using static ICCardManager.UITests.Infrastructure.AppFixture;",
+            "using static AppFixture ;",
+            "using F = ICCardManager.UITests.Infrastructure.AppFixture;");
     }
 
     /// <summary>検査器の固定: 撮影モードを渡さない起動を見つけ、渡す起動は見逃すこと（実データが空でも検査器が働いていることを保つ）。</summary>

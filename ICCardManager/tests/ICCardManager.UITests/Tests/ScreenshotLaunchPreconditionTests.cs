@@ -104,17 +104,20 @@ namespace ICCardManager.UITests.Tests
         }
 
         /// <summary>
-        /// 投入の途中で <c>INSERT OR IGNORE</c> が無視されたとき（影響行数 0）は、どの行がぶつかったかを名指しして止めること。
+        /// 投入の途中で <c>INSERT OR IGNORE</c> が無視されたとき（影響行数 0）は、シードが同じ IDm を重複して投入したことを名指しして止めること。
+        /// 投入の前に DB が空であることは確かめているので、起動時のテストデータとの衝突ではない。環境変数の調査へ誘導しない（レビュー 2 回目で検出）。
         /// </summary>
         [Fact]
-        public void 影響行数が0なら_ぶつかった行を名指しして止まること()
+        public void 影響行数が0なら_シードの中での重複投入として名指しして止まること()
         {
             Action act = () => ScreenshotSeedData.RequireInserted(0, $"交通系ICカード（IDm {ScreenshotSeedData.VirtualTouchCardIdm}「はやかけん 004」）");
 
             var message = act.Should().Throw<InvalidOperationException>().Which.Message;
-            message.Should().Contain(ScreenshotSeedData.VirtualTouchCardIdm);
-            message.Should().Contain("既存のデータとぶつかりました");
-            message.Should().Contain("DebugDataService");
+            message.Should().Contain(ScreenshotSeedData.VirtualTouchCardIdm, "どの行が重複したかを示すこと");
+            message.Should().Contain("シードの中で既に投入しています");
+            message.Should().Contain("派生シード", "どこを確かめればよいかを示すこと");
+            message.Should().NotContain("撮影モード", "起動の前提の問題ではないので、環境変数の調査へ誘導しないこと");
+            message.Should().NotContain("WSLENV");
         }
 
         /// <summary>対: 影響行数が 1（投入できた）なら止めないこと。</summary>
