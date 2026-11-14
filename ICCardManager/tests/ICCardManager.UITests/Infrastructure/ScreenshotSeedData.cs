@@ -378,12 +378,8 @@ namespace ICCardManager.UITests.Infrastructure
 
             using var tx = conn.BeginTransaction();
 
-            Execute(conn,
-                "INSERT OR IGNORE INTO staff (staff_idm, name, number, note, is_deleted) VALUES (@idm, @name, @number, NULL, 0)",
-                ("@idm", AppFixture.SeededStaffIdm), ("@name", PrimaryStaffName), ("@number", "100001"));
-            Execute(conn,
-                "INSERT OR IGNORE INTO staff (staff_idm, name, number, note, is_deleted) VALUES (@idm, @name, @number, NULL, 0)",
-                ("@idm", SecondaryStaffIdm), ("@name", SecondaryStaffName), ("@number", "100002"));
+            InsertStaff(conn, AppFixture.SeededStaffIdm, PrimaryStaffName, "100001");
+            InsertStaff(conn, SecondaryStaffIdm, SecondaryStaffName, "100002");
 
             InsertCard(conn, NormalCardIdm, NormalCardType, NormalCardNumber, isLent: false, lentAt: null, lentStaff: null);
             InsertCard(conn, LentCardIdm, LentCardType, LentCardNumber, isLent: true, lentAt: now, lentStaff: SecondaryStaffIdm);
@@ -417,14 +413,49 @@ namespace ICCardManager.UITests.Infrastructure
             tx.Commit();
         }
 
+        private static void InsertStaff(SQLiteConnection conn, string idm, string name, string number)
+        {
+            var affected = Execute(conn,
+                "INSERT OR IGNORE INTO staff (staff_idm, name, number, note, is_deleted) VALUES (@idm, @name, @number, NULL, 0)",
+                ("@idm", idm), ("@name", name), ("@number", number));
+            RequireInserted(affected, $"職員（IDm {idm}「{name}」）");
+        }
+
         private static void InsertCard(SQLiteConnection conn, string idm, string type, string number, bool isLent, DateTime? lentAt, string? lentStaff)
         {
-            Execute(conn,
+            var affected = Execute(conn,
                 "INSERT OR IGNORE INTO ic_card (card_idm, card_type, card_number, note, is_deleted, is_lent, last_lent_at, last_lent_staff) " +
                 "VALUES (@idm, @type, @number, NULL, 0, @isLent, @lentAt, @lentStaff)",
                 ("@idm", idm), ("@type", type), ("@number", number), ("@isLent", isLent ? 1 : 0),
                 ("@lentAt", lentAt.HasValue ? ToText(lentAt.Value) : (object)DBNull.Value),
                 ("@lentStaff", lentStaff ?? (object)DBNull.Value));
+            RequireInserted(affected, $"交通系ICカード（IDm {idm}「{type} {number}」）");
+        }
+
+        /// <summary>
+        /// <c>INSERT OR IGNORE</c> が無視された（影響行数 0）なら、既存のデータとぶつかったことを名指しして止める（Issue #2485）。
+        /// </summary>
+        /// <param name="affected">影響行数。</param>
+        /// <param name="row">投入しようとした行の説明（どの IDm か）。</param>
+        /// <remarks>
+        /// シードはマイグレーションのための起動の後の DB へ入れる。Debug 版のアプリが撮影モードなしで起動すると、その起動で
+        /// テストデータ（本体の <c>DebugDataService</c>。仮想タッチの職員 <see cref="AppFixture.SeededStaffIdm"/>・カード
+        /// <see cref="VirtualTouchCardIdm"/> と同じ IDm を含む）が先に入り、<c>INSERT OR IGNORE</c> は黙って無視される。
+        /// 進めるとテストは「カード一覧に行が現れない」「職員が無い」「残高チェーンが切れている」といった、原因と無関係な症状で失敗する。
+        /// </remarks>
+        private static void RequireInserted(int affected, string row)
+        {
+            if (affected == 1)
+            {
+                return;
+            }
+
+            throw new InvalidOperationException(
+                $"撮影用のサンプルデータの{row}を投入できませんでした。同じ IDm の行が DB に既にあり、既存のデータとぶつかりました" +
+                $"（INSERT OR IGNORE の影響行数 {affected}）。Debug 版のアプリが撮影モードなしで起動し、起動時のテストデータ" +
+                "（DebugDataService）が先に登録された可能性があります。撮影モードで起動しているか（Debug 起動なら AppFixture.LaunchWithSeed に " +
+                "AppFixture.SuppressDebugTestData を渡しているか、Release パスなら環境変数 ICCARDMANAGER_UITEST_CONFIGURATION=Release が" +
+                "テストのプロセスへ届いているか。WSL から dotnet.exe を呼ぶ場合は WSLENV に変数名を加える）を確認してください。");
         }
 
         /// <summary>台帳 1 行を投入し、投入後の残額を返す。</summary>

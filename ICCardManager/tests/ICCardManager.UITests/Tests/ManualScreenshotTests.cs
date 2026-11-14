@@ -25,6 +25,8 @@ namespace ICCardManager.UITests.Tests
     /// Debug ビルドはメイン画面下部に仮想タッチパネル（<c>App.IsDebugBuild</c>）が写り込むため。
     /// 職員証・交通系ICカードのタッチを要する画面（<c>staff_recognized.png</c> / <c>lend.png</c> / <c>return.png</c>）は
     /// 仮想タッチが Debug 限定のため本クラスの対象外（第 2 段階）。
+    /// 撮影を指示されている（<c>ICCARDMANAGER_SCREENSHOT=1</c>）のに起動構成が Release でなければ、撮らずに原因と渡し方を示して失敗する
+    /// （<see cref="AppFixture.ThrowUnlessReleaseCapture"/>。Issue #2485）。
     /// </para>
     /// <para>
     /// バックアップの保存先・DB のパスを表示する画面（<c>system.png</c> / <c>restore_list.png</c> / <c>connection_diagnostics.png</c>）も対象外。
@@ -54,7 +56,7 @@ namespace ICCardManager.UITests.Tests
         [SkippableFact]
         public void main_メイン画面_待機状態()
         {
-            Skip.If(ScreenshotHelper.ShouldSkip, SkipReason);
+            SkipUnlessReleaseCapture();
 
             // 警告エリアの写らない投入データを使う（Issue #2011）。main_with_warnings.png と同じデータで撮ると
             // 2 枚が同じ画像になり、「警告がない場合、このエリアは表示されません」という本文と食い違う。
@@ -79,7 +81,7 @@ namespace ICCardManager.UITests.Tests
         [SkippableFact]
         public void main_with_warnings_システム警告つきのメイン画面()
         {
-            Skip.If(ScreenshotHelper.ShouldSkip, SkipReason);
+            SkipUnlessReleaseCapture();
 
             using var fixture = AppFixture.LaunchWithSeed(ScreenshotSeedData.Seed);
             ScreenshotHelper.MoveToTopLeft(fixture.MainWindow);
@@ -100,7 +102,7 @@ namespace ICCardManager.UITests.Tests
         [SkippableFact]
         public void card_list_カード一覧の状態表示()
         {
-            Skip.If(ScreenshotHelper.ShouldSkip, SkipReason);
+            SkipUnlessReleaseCapture();
 
             using var fixture = AppFixture.LaunchWithSeed(ScreenshotSeedData.Seed);
             ScreenshotHelper.MoveToTopLeft(fixture.MainWindow);
@@ -126,7 +128,7 @@ namespace ICCardManager.UITests.Tests
         [SkippableFact]
         public void error_no_reader_カードリーダー未接続のステータス表示()
         {
-            Skip.If(ScreenshotHelper.ShouldSkip, SkipReason);
+            SkipUnlessReleaseCapture();
 
             using var fixture = AppFixture.LaunchWithSeed(ScreenshotSeedData.SeedWithoutWarnings);
             ScreenshotHelper.MoveToTopLeft(fixture.MainWindow);
@@ -161,7 +163,7 @@ namespace ICCardManager.UITests.Tests
         [SkippableFact]
         public void history_merge_履歴一覧での統合対象の選択()
         {
-            Skip.If(ScreenshotHelper.ShouldSkip, SkipReason);
+            SkipUnlessReleaseCapture();
 
             using var fixture = AppFixture.LaunchWithSeed(ScreenshotSeedData.SeedForHistoryScreenshot);
             ScreenshotHelper.MoveToTopLeft(fixture.MainWindow);
@@ -213,7 +215,7 @@ namespace ICCardManager.UITests.Tests
         [SkippableFact]
         public void incomplete_busstop_バス停名未入力の履歴一覧()
         {
-            Skip.If(ScreenshotHelper.ShouldSkip, SkipReason);
+            SkipUnlessReleaseCapture();
 
             using var fixture = AppFixture.LaunchWithSeed(conn => ScreenshotSeedData.SeedWithIncompleteBusStops(conn));
             ScreenshotHelper.MoveToTopLeft(fixture.MainWindow);
@@ -244,7 +246,7 @@ namespace ICCardManager.UITests.Tests
         [SkippableFact]
         public void admin_dashboard_管理者ダッシュボード()
         {
-            Skip.If(ScreenshotHelper.ShouldSkip, SkipReason);
+            SkipUnlessReleaseCapture();
 
             using var fixture = AppFixture.LaunchWithSeed(ScreenshotSeedData.Seed);
             ScreenshotHelper.MoveToTopLeft(fixture.MainWindow);
@@ -263,7 +265,7 @@ namespace ICCardManager.UITests.Tests
         [SkippableFact]
         public void report_preflight_帳票の事前チェック結果()
         {
-            Skip.If(ScreenshotHelper.ShouldSkip, SkipReason);
+            SkipUnlessReleaseCapture();
 
             // 未返却のまま月をまたぐカードを仕込む。警告が 0 件だと結果ダイアログが
             // 「チェック結果なし」になり、警告の読み方を説明する画像にならない
@@ -297,7 +299,7 @@ namespace ICCardManager.UITests.Tests
         [InlineData("operation_log.png", TestConstants.OpenOperationLogButton, TestConstants.OperationLogDialogName, TestConstants.OperationLogList)]
         public void system_システム管理から開く二段目のダイアログ(string fileName, string buttonName, string dialogName, string readyListName)
         {
-            Skip.If(ScreenshotHelper.ShouldSkip, SkipReason);
+            SkipUnlessReleaseCapture();
 
             using var fixture = AppFixture.LaunchWithSeed(ScreenshotSeedData.Seed);
             ScreenshotHelper.MoveToTopLeft(fixture.MainWindow);
@@ -315,7 +317,7 @@ namespace ICCardManager.UITests.Tests
         [SkippableFact]
         public void transfer_station_groups_同一とみなす駅バス停の設定()
         {
-            Skip.If(ScreenshotHelper.ShouldSkip, SkipReason);
+            SkipUnlessReleaseCapture();
 
             // 一覧が空だと「何を登録する画面なのか」が読者に伝わらないので、グループを 2 組仕込む
             using var fixture = AppFixture.LaunchWithSeed(ScreenshotSeedData.SeedWithTransferStationGroups);
@@ -334,7 +336,7 @@ namespace ICCardManager.UITests.Tests
         [SkippableFact]
         public void history_履歴照会画面()
         {
-            Skip.If(ScreenshotHelper.ShouldSkip, SkipReason);
+            SkipUnlessReleaseCapture();
 
             using var fixture = AppFixture.LaunchWithSeed(ScreenshotSeedData.SeedForHistoryScreenshot);
             ScreenshotHelper.MoveToTopLeft(fixture.MainWindow);
@@ -375,7 +377,7 @@ namespace ICCardManager.UITests.Tests
         [InlineData("settings.png", TestConstants.OpenSettingsButton, TestConstants.SettingsDialogName)]
         public void dialog_ツールバーから開くダイアログ(string fileName, string buttonName, string dialogName)
         {
-            Skip.If(ScreenshotHelper.ShouldSkip, SkipReason);
+            SkipUnlessReleaseCapture();
 
             using var fixture = AppFixture.LaunchWithSeed(ScreenshotSeedData.Seed);
             ScreenshotHelper.MoveToTopLeft(fixture.MainWindow);
@@ -408,7 +410,7 @@ namespace ICCardManager.UITests.Tests
         [SkippableFact]
         public void staff_edit_dialog_職員情報編集ダイアログ()
         {
-            Skip.If(ScreenshotHelper.ShouldSkip, SkipReason);
+            SkipUnlessReleaseCapture();
 
             using var fixture = AppFixture.LaunchWithSeed(ScreenshotSeedData.Seed);
             ScreenshotHelper.MoveToTopLeft(fixture.MainWindow);
@@ -542,6 +544,19 @@ namespace ICCardManager.UITests.Tests
             Retry.WhileNull(() => page.Window.FindFirstDescendant(cf => cf.ByName(ScreenshotSeedData.LatestHistorySampleSummary)),
                 TimeSpan.FromSeconds(TestConstants.DialogOpenTimeoutSeconds)).Result
                 .Should().NotBeNull($"履歴の一覧に最後のサンプル行「{ScreenshotSeedData.LatestHistorySampleSummary}」が表示されること");
+        }
+
+        /// <summary>
+        /// 撮影を指示されていなければ Skip し、指示されているのに Release 起動でなければ原因を示して失敗させる（Issue #2485）。
+        /// </summary>
+        /// <remarks>
+        /// 起動構成の環境変数が届かないと Debug 版が撮影モードなしで起動し、起動時のテストデータが撮影用のデータより先に入って、
+        /// 原因と無関係な症状（カード一覧に行が現れない等）で失敗する。Skip ではなく失敗にする理由は <see cref="AppFixture.ThrowUnlessReleaseCapture"/>。
+        /// </remarks>
+        private static void SkipUnlessReleaseCapture()
+        {
+            Skip.If(ScreenshotHelper.ShouldSkip, SkipReason);
+            AppFixture.ThrowUnlessReleaseCapture(Environment.GetEnvironmentVariable(AppFixture.LaunchConfigurationEnvironmentVariable));
         }
 
         private static void WaitForCardRow(MainWindowPage page, string cardDisplayName)
