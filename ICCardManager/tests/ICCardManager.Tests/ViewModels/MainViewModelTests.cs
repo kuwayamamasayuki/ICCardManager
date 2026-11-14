@@ -2509,7 +2509,7 @@ public class MainViewModelTests : IDisposable
     /// </remarks>
     private void ArrangeLentRecordDelete(string cardIdm, bool hasOtherLentRecords)
     {
-        HistoryPanelViewModelTests.ArrangeEditDialog(
+        LedgerRowEditDialogStub.Arrange(
             _navigationServiceMock, _ledgerRepositoryMock.Object, _operationLoggerMock.Object, _dbContext,
             editor => editor.RequestDeleteCommand.Execute(null));
         _staffAuthServiceMock

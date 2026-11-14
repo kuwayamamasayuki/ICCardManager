@@ -1953,46 +1953,14 @@ public class HistoryPanelViewModelTests : IDisposable
     private bool _editDialogClosed;
 
     /// <summary>
-    /// 利用履歴行編集ダイアログを、本物の <see cref="LedgerRowEditViewModel"/> で再現する（Issue #2475）。
-    /// </summary>
-    /// <remarks>
-    /// 本体が渡す初期化（<c>InitializeForEditAsync</c>・払戻済の設定など）をそのまま本物の ViewModel に実行し、
-    /// 続けて <paramref name="userAction"/>（職員の操作。削除を押す等）を実行して、本物のダイアログが閉じたときと
-    /// 同じ <c>DialogResult</c> を返す（保存したときだけ true。削除・キャンセルは false）。
-    /// 確認ダイアログは ViewModel が <paramref name="navigation"/> の <c>ShowWarningConfirmation</c> へ出すので、
-    /// 確認の応答はそちらへ仕込む。
-    /// </remarks>
-    /// <returns>開いたダイアログの ViewModel（開いた順）</returns>
-    internal static List<LedgerRowEditViewModel> ArrangeEditDialog(
-        Mock<INavigationService> navigation,
-        ILedgerRepository ledgerRepository,
-        OperationLogger operationLogger,
-        DbContext dbContext,
-        Action<LedgerRowEditViewModel> userAction)
-    {
-        var staffRepository = new Mock<IStaffRepository>();
-        staffRepository.Setup(r => r.GetAllAsync()).ReturnsAsync(new List<Staff>());
-        var opened = new List<LedgerRowEditViewModel>();
-        navigation
-            .Setup(n => n.ShowDialogAsync<ICCardManager.Views.Dialogs.LedgerRowEditDialog, LedgerRowEditViewModel>(
-                It.IsAny<Func<LedgerRowEditViewModel, Task>>()))
-            .Returns(async (Func<LedgerRowEditViewModel, Task> configure) =>
-            {
-                var editor = new LedgerRowEditViewModel(
-                    ledgerRepository, staffRepository.Object, operationLogger, dbContext, navigation.Object);
-                await configure(editor);
-                opened.Add(editor);
-                userAction(editor);
-                return (bool?)(editor.IsSaved || editor.IsSaveAndEditNextRequested);
-            });
-        return opened;
-    }
-
-    /// <summary>
     /// 開いた行編集ダイアログで「削除」を押す（確認の応答は <c>ShowWarningConfirmation</c> の設定に従う）。
     /// </summary>
+    /// <remarks>
+    /// 代役（<see cref="LedgerRowEditDialogStub"/>）は DialogResult を自分で決めるため、Window 側のクローズ処理の取り違えは
+    /// ここでは検出できない（UI テスト <c>LedgerRowDeleteUiTests</c> が担う）。
+    /// </remarks>
     private List<LedgerRowEditViewModel> ArrangeEditDialogPressesDelete()
-        => ArrangeEditDialog(
+        => LedgerRowEditDialogStub.Arrange(
             _navigationServiceMock, _ledgerRepositoryMock.Object, _operationLoggerMock.Object, _dbContext,
             editor =>
             {
