@@ -50,7 +50,7 @@
 - Issue #2475 **UI から到達しない履歴一覧の削除コマンド（`HistoryPanelViewModel.DeleteLedgerRow` / `DeleteLedgerRowCommand`）を削除し、履歴の削除のテストを実際の利用者の経路（利用履歴行編集ダイアログの「削除」）へ移した**。このコマンドは Issue #635 で履歴一覧の削除ボタン用に作られたが、Issue #750 でボタンが行編集ダイアログ内へ移ってから XAML にバインドされておらず、独自の認証（「履歴の削除」）を伴う公開 API のまま、削除の挙動テストの唯一の入口として残っていた（行編集ダイアログからの削除はダイアログの Window を取り出して要求を読むため、単体テストから踏めなかった）。将来だれかがバインドし直すと削除の経路が 2 系統に戻る。利用者から見た挙動は変わらない（行編集ダイアログの削除は従来どおり、開く前の「履歴の変更」の認証で行う）
   - ダイアログの初期化と閉じた後の要求の読み取りを、Window ではなく ViewModel に対して行う継ぎ目を入れた（`INavigationService.ShowDialogAsync<TDialog, TViewModel>`・`IViewModelDialog<TViewModel>`。`LedgerRowEditDialog` が実装し、使われなくなった Window 側の中継メソッド・プロパティは削除）。テストはこれを差し替え、本物の `LedgerRowEditViewModel` で「開く → 削除を押す → 確認 → 閉じる」を再現する。旧テストが表明していた性質（貸出中の行も拒否せず削除できる・認証のキャンセルで何も消さない・確認の結果に従う・認証した職員の操作として記録しセッションを残さない・削除が 0 行／行が消えていたら監査ログを書かず競合を案内する・貸出状態のリセット）はすべて新しい経路で表明し直した。あわせて、これまで単体テストから踏めなかった「表示中のカードの払戻済をダイアログへ渡す」ことを初めて固定した
   - 継ぎ目のために改修した `IDialogService.cs` / `DialogService.cs` に `#nullable enable` を付け、出た警告を是正した（CSV エクスポートの失敗で文言が無いときの代替文言、帳票作成の中断で原因のカードの失敗文言へ倒す）
-  - テスト: `HistoryPanelViewModelTests` の `DeleteLedgerRow_*` を `行編集からの削除_*` へ移設（同じ性質を見ていた 4 件を 2 件へまとめ −2 件）。`MainViewModelTests` の連携テスト 2 件も行編集ダイアログ経由へ。`ScreenTransitionDiagramConsistencyTests` の認証操作のスナップショットから「履歴の削除」を除き、`StaffAuthScopeConventionTests` の拾う件数を 3 → 2 にした
+  - テスト: `HistoryPanelViewModelTests` の `DeleteLedgerRow_*` を `行編集からの削除_*` へ移設（同じ性質を見ていた 4 件を 2 件へまとめ −2 件）。`MainViewModelTests` の連携テスト 2 件も行編集ダイアログ経由へ。`ScreenTransitionDiagramConsistencyTests` の認証操作のスナップショットから「履歴の削除」を除き、`StaffAuthScopeConventionTests` の拾う件数を 3 → 2 にした。単体 10,705 → 10,703・合計 10,968 → 10,966
 
 **ドキュメント**
 - Issue #2465 / #2461 **画面のロック中に撮れなかった管理者マニュアルの図を撮り直した**
