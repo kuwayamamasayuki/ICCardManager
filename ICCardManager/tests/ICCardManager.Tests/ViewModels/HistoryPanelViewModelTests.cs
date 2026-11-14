@@ -2183,6 +2183,7 @@ public class HistoryPanelViewModelTests : IDisposable
         _history.HistoryLedgers.Select(l => l.Id).Should().Equal(new[] { 1, 2 }, "前提: 一覧に 2 行あること");
         requestedPages.Clear();
         _host.Calls.Clear();
+        _ledgerRepositoryMock.Invocations.Clear();
         return requestedPages;
     }
 
@@ -2215,6 +2216,10 @@ public class HistoryPanelViewModelTests : IDisposable
             RecordingHistoryPanelHost.RefreshLentCardsCall,
             RecordingHistoryPanelHost.CheckWarningsCall,
         }, "消えた行が貸出中レコード（開いている間に返却された）ならカードの貸出状態も変わっている");
+        _ledgerRepositoryMock.Verify(
+            r => r.GetByDateRangeAsync(DeleteConflictCardIdm, _history.HistoryFromDate, _history.HistoryToDate),
+            Times.AtLeastOnce(),
+            "他 PC の変更で残高チェーンが変わり得るので、表示期間の整合性チェック（ハイライト・警告）もやり直す");
     }
 
     /// <summary>
