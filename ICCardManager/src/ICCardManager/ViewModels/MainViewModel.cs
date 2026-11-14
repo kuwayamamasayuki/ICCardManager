@@ -354,7 +354,11 @@ public partial class MainViewModel : ViewModelBase, IHistoryPanelHost
         _lendingService = lendingService;
         _toastNotificationService = toastNotificationService;
         _messenger = messenger;
-        _navigationService = navigationService;
+        // Issue #2484: この画面が表示するモーダル（管理系ダイアログ・確認・案内）はすべて、表示中のカード読み取りを抑制する。
+        // 呼び出しごとに書くと、ダイアログを足すたびに書き忘れが起きるため、受け取った時点で包む
+        _navigationService = new ModalCardReadingSuppressingNavigationService(
+            navigationService ?? throw new ArgumentNullException(nameof(navigationService)),
+            BeginModalCardReadingSuppression);
         _timeoutSeconds = appOptions.Value.StaffCardTimeoutSeconds;
         RetouchGuideText = BuildRetouchGuideText(appOptions.Value.RetouchWindowSeconds);
         _timerFactory = timerFactory;
@@ -420,7 +424,19 @@ public partial class MainViewModel : ViewModelBase, IHistoryPanelHost
     Task<bool> IHistoryPanelHost.ReevaluateCardBalanceMismatchAsync(string cardIdm, int actualBalance)
         => ReevaluateCardBalanceMismatchAsync(cardIdm, actualBalance);
 
+    IDisposable IHistoryPanelHost.BeginModalCardReadingSuppression() => BeginModalCardReadingSuppression();
+
     #endregion
+
+    /// <summary>
+    /// メイン画面・履歴パネルのモーダルの表示中、メイン画面のカード読み取りを抑制するスコープを開く（Issue #2484）
+    /// </summary>
+    /// <remarks>
+    /// メイン画面と履歴パネルは同じソース（<see cref="CardReadingSource.MainScreenModal"/>）を使う。入れ子では
+    /// <see cref="BeginCardReadingSuppression"/> の規約により外側のスコープだけが解放する。
+    /// </remarks>
+    private IDisposable BeginModalCardReadingSuppression()
+        => BeginCardReadingSuppression(CardReadingSource.MainScreenModal);
 
     /// <summary>
     /// 内部状態のみを設定（UIは変更しない）

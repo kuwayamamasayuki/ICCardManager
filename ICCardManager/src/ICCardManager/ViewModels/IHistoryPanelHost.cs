@@ -60,4 +60,15 @@ public interface IHistoryPanelHost
     /// </remarks>
     /// <returns>判定し直した後も食い違いの警告が残っていれば true</returns>
     Task<bool> ReevaluateCardBalanceMismatchAsync(string cardIdm, int actualBalance);
+
+    /// <summary>
+    /// 履歴パネルがモーダル（ダイアログ・MessageBox）を表示している間、メイン画面のカード読み取りを抑制するスコープを開く（Issue #2484）。
+    /// </summary>
+    /// <remarks>
+    /// モーダルは入れ子のメッセージポンプを回すため、表示中もメイン画面はカードを読み取る。抑制はメイン画面が持つので、
+    /// 履歴パネルはここを通して頼む。履歴パネルは受け取った <c>INavigationService</c> を包んで表示のたびに呼ぶ
+    /// （<see cref="ModalCardReadingSuppressingNavigationService"/>）。それを通らない表示（<c>Window</c> を直接生成する
+    /// ダイアログ）だけは、表示の範囲を <c>using</c> で囲む。
+    /// </remarks>
+    IDisposable BeginModalCardReadingSuppression();
 }

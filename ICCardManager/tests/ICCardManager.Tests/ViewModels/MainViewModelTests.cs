@@ -4310,6 +4310,297 @@ public class MainViewModelTests : IDisposable
     }
 
     #endregion
+
+    #region Issue #2484: メイン画面・履歴パネルのモーダルの表示中はカードを読み取らない
+
+    private const string ModalTestStaffIdm = "0102030405060708";
+
+    /// <summary>モーダルの表示中に職員証がタッチされたときに観測したもの</summary>
+    private sealed class TouchDuringModalProbe
+    {
+        public int ShownCount;
+        public bool? SuppressedWhileShown;
+        public AppState? StateAfterTouchWhileShown;
+    }
+
+    private void ArrangeModalTestStaff()
+    {
+        _staffRepositoryMock.Setup(r => r.GetByIdmAsync(ModalTestStaffIdm, It.IsAny<bool>()))
+            .ReturnsAsync(new Staff { StaffIdm = ModalTestStaffIdm, Name = "テスト職員" });
+    }
+
+    private void RaiseModalTestStaffTouch()
+        => _cardReaderMock.Raise(r => r.CardRead += null,
+            _cardReaderMock.Object, new CardReadEventArgs { Idm = ModalTestStaffIdm });
+
+    /// <summary>
+    /// モーダルの表示中（モックの Callback の中）に職員証を 1 回だけタッチする。
+    /// <c>SynchronousDispatcherService</c> は本番の入れ子のメッセージポンプと同じく、表示の最中にタッチを処理する。
+    /// </summary>
+    private Action TouchDuring(TouchDuringModalProbe probe)
+        => () =>
+        {
+            probe.ShownCount++;
+            if (probe.ShownCount > 1)
+            {
+                return;
+            }
+
+            probe.SuppressedWhileShown = _viewModel.IsCardReadingSuppressed;
+            RaiseModalTestStaffTouch();
+            probe.StateAfterTouchWhileShown = _viewModel.CurrentState;
+        };
+
+    private TouchDuringModalProbe ArrangeTouchDuringDialog<TDialog>() where TDialog : System.Windows.Window
+    {
+        var probe = new TouchDuringModalProbe();
+        _navigationServiceMock
+            .Setup(n => n.ShowDialog<TDialog>(It.IsAny<Action<TDialog>>()))
+            .Callback(TouchDuring(probe))
+            .Returns((bool?)null);
+        return probe;
+    }
+
+    /// <summary>
+    /// 表示中のタッチが何も起こさず（閉じた後に遅れて処理もされず）、閉じた後のタッチは通常どおり処理されること。
+    /// </summary>
+    /// <remarks>
+    /// 状態の値ではなく「職員証のタッチで交通系ICカードのタッチ待ちへ進むか」で表明する（testing.md #2103）。
+    /// 閉じた後のタッチが処理されること（対）が無いと、抑制を解放しない実装でも緑になる。
+    /// </remarks>
+    private async Task AssertTouchIgnoredWhileShownAndHandledAfterAsync(TouchDuringModalProbe probe)
+    {
+        await _dispatcherService.WaitForPendingAsync();
+
+        probe.ShownCount.Should().Be(1, "前提: モーダルが 1 回表示された");
+        probe.SuppressedWhileShown.Should().BeTrue("表示中はメイン画面のカード読み取りを抑制する");
+        probe.StateAfterTouchWhileShown.Should().Be(AppState.WaitingForStaffCard,
+            "表示中の職員証のタッチで交通系ICカードのタッチ待ちへ移らない");
+        _viewModel.CurrentState.Should().Be(AppState.WaitingForStaffCard, "表示中のタッチを閉じた後に遅れて処理しない");
+        _toastMock.Verify(t => t.ShowStaffRecognizedNotification(It.IsAny<string>()), Times.Never);
+        _viewModel.IsCardReadingSuppressed.Should().BeFalse("閉じたら抑制を解放する");
+
+        RaiseModalTestStaffTouch();
+        await _dispatcherService.WaitForPendingAsync();
+
+        _viewModel.CurrentState.Should().Be(AppState.WaitingForIcCard, "閉じた後のタッチは通常どおり処理する（対）");
+    }
+
+    [Fact]
+    public async Task OpenCardManageAsync_交通系ICカード管理の表示中は職員証のタッチを処理せず閉じた後は処理すること()
+    {
+        SetupWarningCheckDefaults();
+        ArrangeModalTestStaff();
+        var probe = ArrangeTouchDuringDialog<ICCardManager.Views.Dialogs.CardManageDialog>();
+
+        await _viewModel.OpenCardManageAsync();
+
+        await AssertTouchIgnoredWhileShownAndHandledAfterAsync(probe);
+    }
+
+    [Fact]
+    public async Task OpenStaffManage_職員管理の表示中は職員証のタッチを処理せず閉じた後は処理すること()
+    {
+        ArrangeModalTestStaff();
+        var probe = ArrangeTouchDuringDialog<ICCardManager.Views.Dialogs.StaffManageDialog>();
+
+        _viewModel.OpenStaffManage();
+
+        await AssertTouchIgnoredWhileShownAndHandledAfterAsync(probe);
+    }
+
+    [Fact]
+    public async Task OpenSettingsAsync_設定の表示中は職員証のタッチを処理せず閉じた後は処理すること()
+    {
+        SetupWarningCheckDefaults();
+        ArrangeModalTestStaff();
+        var probe = ArrangeTouchDuringDialog<ICCardManager.Views.Dialogs.SettingsDialog>();
+
+        await _viewModel.OpenSettingsAsync();
+
+        await AssertTouchIgnoredWhileShownAndHandledAfterAsync(probe);
+    }
+
+    [Fact]
+    public async Task OpenReport_帳票作成の表示中は職員証のタッチを処理せず閉じた後は処理すること()
+    {
+        ArrangeModalTestStaff();
+        var probe = ArrangeTouchDuringDialog<ICCardManager.Views.Dialogs.ReportDialog>();
+
+        _viewModel.OpenReport();
+
+        await AssertTouchIgnoredWhileShownAndHandledAfterAsync(probe);
+    }
+
+    [Fact]
+    public async Task OpenDataExportImportAsync_データ入出力の表示中は職員証のタッチを処理せず閉じた後は処理すること()
+    {
+        ArrangeModalTestStaff();
+        var probe = ArrangeTouchDuringDialog<ICCardManager.Views.Dialogs.DataExportImportDialog>();
+
+        await _viewModel.OpenDataExportImportAsync();
+
+        await AssertTouchIgnoredWhileShownAndHandledAfterAsync(probe);
+    }
+
+    [Fact]
+    public async Task OpenSystemManage_システム管理の表示中は職員証のタッチを処理せず閉じた後は処理すること()
+    {
+        ArrangeModalTestStaff();
+        var probe = ArrangeTouchDuringDialog<ICCardManager.Views.Dialogs.SystemManageDialog>();
+
+        await _viewModel.OpenSystemManage();
+
+        await AssertTouchIgnoredWhileShownAndHandledAfterAsync(probe);
+    }
+
+    [Fact]
+    public async Task OpenAdminDashboard_管理者ダッシュボードの表示中は職員証のタッチを処理せず閉じた後は処理すること()
+    {
+        ArrangeModalTestStaff();
+        var probe = ArrangeTouchDuringDialog<ICCardManager.Views.Dialogs.AdminDashboardDialog>();
+
+        _viewModel.OpenAdminDashboard();
+
+        await AssertTouchIgnoredWhileShownAndHandledAfterAsync(probe);
+    }
+
+    [Fact]
+    public async Task HandleWarningClick_バス停名未入力の一覧の表示中は職員証のタッチを処理せず閉じた後は処理すること()
+    {
+        SetupWarningCheckDefaults();
+        ArrangeModalTestStaff();
+        var probe = ArrangeTouchDuringDialog<ICCardManager.Views.Dialogs.IncompleteBusStopDialog>();
+
+        await _viewModel.HandleWarningClick(new WarningItem { Type = WarningType.IncompleteBusStop, DisplayText = "バス停名未入力" });
+
+        await AssertTouchIgnoredWhileShownAndHandledAfterAsync(probe);
+    }
+
+    /// <summary>
+    /// 確認・案内の MessageBox（ここではヘルプを開けなかった警告）の表示中も抑制すること。
+    /// </summary>
+    [Fact]
+    public async Task OpenHelp_警告の表示中は職員証のタッチを処理せず閉じた後は処理すること()
+    {
+        ArrangeModalTestStaff();
+        var launcher = new Mock<ICCardManager.Services.ISafeFileLauncher>();
+        launcher.Setup(l => l.LaunchFolder(It.IsAny<string>()))
+            .Returns(ICCardManager.Services.SafeFileLaunchResult.Fail("指定されたフォルダが見つかりません。"));
+        // ヘルプの起動先を差し替えた画面で確かめる（同じカードリーダーを既定の _viewModel も購読しているが、こちらの状態だけを見る）
+        var viewModel = CreateViewModel(safeFileLauncher: launcher.Object);
+        var probe = new TouchDuringModalProbe();
+        _navigationServiceMock.Setup(n => n.ShowWarning(It.IsAny<string>(), "ヘルプ"))
+            .Callback(() =>
+            {
+                probe.ShownCount++;
+                probe.SuppressedWhileShown = viewModel.IsCardReadingSuppressed;
+                RaiseModalTestStaffTouch();
+                probe.StateAfterTouchWhileShown = viewModel.CurrentState;
+            });
+
+        viewModel.OpenHelp();
+        await _dispatcherService.WaitForPendingAsync();
+
+        probe.ShownCount.Should().Be(1, "前提: 警告が表示された");
+        probe.SuppressedWhileShown.Should().BeTrue("警告の表示中はメイン画面のカード読み取りを抑制する");
+        probe.StateAfterTouchWhileShown.Should().Be(AppState.WaitingForStaffCard);
+        viewModel.CurrentState.Should().Be(AppState.WaitingForStaffCard, "表示中のタッチを閉じた後に遅れて処理しない");
+        viewModel.IsCardReadingSuppressed.Should().BeFalse("閉じたら抑制を解放する");
+
+        RaiseModalTestStaffTouch();
+        await _dispatcherService.WaitForPendingAsync();
+        viewModel.CurrentState.Should().Be(AppState.WaitingForIcCard, "閉じた後のタッチは通常どおり処理する（対）");
+    }
+
+    /// <summary>
+    /// 入れ子: モーダルの中から同じ画面の別のモーダルを開いて閉じても、外側が開いている間は抑制が解けないこと。
+    /// </summary>
+    /// <remarks>
+    /// 抑制ソースは <c>HashSet</c> で参照カウントを持たないため、内側の解放が外側の抑制まで解く実装だと、
+    /// 内側を閉じた直後のタッチが外側の表示中に処理される。
+    /// </remarks>
+    [Fact]
+    public async Task モーダルの中で開いた別のモーダルを閉じても外側の表示中は職員証のタッチを処理しないこと()
+    {
+        SetupWarningCheckDefaults();
+        ArrangeModalTestStaff();
+        bool? suppressedWhileInnerShown = null;
+        _navigationServiceMock
+            .Setup(n => n.ShowDialog<ICCardManager.Views.Dialogs.StaffManageDialog>(
+                It.IsAny<Action<ICCardManager.Views.Dialogs.StaffManageDialog>>()))
+            .Callback(() => suppressedWhileInnerShown = _viewModel.IsCardReadingSuppressed)
+            .Returns((bool?)null);
+        var outerProbe = new TouchDuringModalProbe();
+        var touchInOuter = TouchDuring(outerProbe);
+        _navigationServiceMock
+            .Setup(n => n.ShowDialog<ICCardManager.Views.Dialogs.CardManageDialog>(
+                It.IsAny<Action<ICCardManager.Views.Dialogs.CardManageDialog>>()))
+            .Callback(() =>
+            {
+                // 外側の表示中に内側を開いて閉じ、その後（外側はまだ表示中）に職員証をタッチする
+                _viewModel.OpenStaffManage();
+                touchInOuter();
+            })
+            .Returns((bool?)null);
+
+        await _viewModel.OpenCardManageAsync();
+
+        suppressedWhileInnerShown.Should().BeTrue("前提: 内側の表示中も抑制している");
+        await AssertTouchIgnoredWhileShownAndHandledAfterAsync(outerProbe);
+    }
+
+    /// <summary>
+    /// 表示が例外で抜けても抑制を解放すること（解放は finally で保証する。#1725）。
+    /// </summary>
+    [Fact]
+    public async Task モーダルの表示が例外で抜けても抑制を解放し次のタッチを処理すること()
+    {
+        ArrangeModalTestStaff();
+        bool? suppressedWhileShown = null;
+        _navigationServiceMock
+            .Setup(n => n.ShowDialog<ICCardManager.Views.Dialogs.ReportDialog>(
+                It.IsAny<Action<ICCardManager.Views.Dialogs.ReportDialog>>()))
+            .Callback(() => suppressedWhileShown = _viewModel.IsCardReadingSuppressed)
+            .Throws(new InvalidOperationException("ダイアログの初期化に失敗"));
+
+        Action act = () => _viewModel.OpenReport();
+
+        act.Should().Throw<InvalidOperationException>();
+        suppressedWhileShown.Should().BeTrue("前提: 表示中は抑制している");
+        _viewModel.IsCardReadingSuppressed.Should().BeFalse("例外で抜けても抑制を解放する");
+
+        RaiseModalTestStaffTouch();
+        await _dispatcherService.WaitForPendingAsync();
+        _viewModel.CurrentState.Should().Be(AppState.WaitingForIcCard, "例外の後のタッチは通常どおり処理する");
+    }
+
+    /// <summary>
+    /// 履歴パネルから開いたモーダル（利用履歴詳細）の表示中も、メイン画面は職員証のタッチを処理しないこと。
+    /// </summary>
+    /// <remarks>
+    /// 履歴パネルは子の ViewModel で、抑制はメイン画面（ホスト）が持つ。履歴パネル単体のテスト
+    /// （<c>HistoryPanelViewModelTests</c>）はホストへ抑制を頼んだことまでしか見えないので、実配線はここで表明する。
+    /// </remarks>
+    [Fact]
+    public async Task 履歴パネルの利用履歴詳細の表示中は職員証のタッチを処理せず閉じた後は処理すること()
+    {
+        ArrangeModalTestStaff();
+        _ledgerRepositoryMock.Setup(r => r.GetByIdAsync(42))
+            .ReturnsAsync(new Ledger { Id = 42, CardIdm = "0E0E0E0E0E0E0E0E", Summary = "鉄道（博多～天神）", Date = DateTime.Today });
+        var probe = new TouchDuringModalProbe();
+        _navigationServiceMock
+            .Setup(n => n.ShowDialogAsync<ICCardManager.Views.Dialogs.LedgerDetailDialog>(
+                It.IsAny<Func<ICCardManager.Views.Dialogs.LedgerDetailDialog, Task>>()))
+            .Callback(TouchDuring(probe))
+            .ReturnsAsync((bool?)null);
+
+        await _viewModel.History.ShowLedgerDetailCommand.ExecuteAsync(new LedgerDto { Id = 42, DetailCountValue = 2 });
+
+        await AssertTouchIgnoredWhileShownAndHandledAfterAsync(probe);
+    }
+
+    #endregion
 }
 
 /*

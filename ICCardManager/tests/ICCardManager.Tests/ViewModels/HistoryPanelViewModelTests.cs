@@ -3401,4 +3401,92 @@ public class HistoryPanelViewModelTests : IDisposable
     }
 
     #endregion
+
+    #region Issue #2484: モーダルの表示中はメイン画面のカード読み取りを抑制する
+
+    /// <summary>
+    /// 統合の確認（MessageBox）の表示中は、ホスト（メイン画面）へカード読み取りの抑制を頼み、閉じたら解放すること。
+    /// </summary>
+    /// <remarks>
+    /// 認証（職員証のタッチ）は確認の「はい」の後に認証ダイアログで改めて求める（#2474）。認証ダイアログは自分で
+    /// 抑制を取る（<c>CardReadingSource.Authentication</c>）ので、確認の抑制は確認を閉じた時点で解く。
+    /// 統合の完了の案内（MessageBox）も同じく表示の範囲で抑制する。
+    /// </remarks>
+    [Fact]
+    public async Task MergeHistoryLedgers_確認と完了の案内の表示中だけメイン画面のカード読み取りを抑制すること()
+    {
+        ArrangeMergeableCheckedLedgers();
+        int? suppressionsWhileConfirming = null;
+        int? suppressionsWhileAuthenticating = null;
+        int? suppressionsWhileInforming = null;
+        _navigationServiceMock
+            .Setup(n => n.ShowConfirmation(It.IsAny<string>(), "履歴の統合"))
+            .Callback(() => suppressionsWhileConfirming = _host.OpenModalSuppressions)
+            .Returns(true);
+        _staffAuthServiceMock
+            .Setup(a => a.RequestAuthenticationAsync("履歴の統合"))
+            .Callback(() => suppressionsWhileAuthenticating = _host.OpenModalSuppressions)
+            .ReturnsAsync(new StaffAuthResult { Idm = "AABBCCDDEEFF0011", StaffName = "田中太郎" });
+        _ledgerRepositoryMock
+            .Setup(r => r.MergeLedgersAsync(
+                It.IsAny<int>(), It.IsAny<IEnumerable<int>>(), It.IsAny<Ledger>(), It.IsAny<SQLiteTransaction>()))
+            .ReturnsAsync(true);
+        _navigationServiceMock
+            .Setup(n => n.ShowInformation(It.IsAny<string>(), "統合完了"))
+            .Callback(() => suppressionsWhileInforming = _host.OpenModalSuppressions);
+
+        await _history.MergeHistoryLedgersCommand.ExecuteAsync(null);
+
+        suppressionsWhileConfirming.Should().Be(1, "確認の表示中はメイン画面のカード読み取りを抑制する");
+        suppressionsWhileAuthenticating.Should().Be(0, "確認を閉じたら解放する（認証ダイアログは自分で抑制する）");
+        suppressionsWhileInforming.Should().Be(1, "完了の案内の表示中も抑制する");
+        _host.OpenModalSuppressions.Should().Be(0, "すべて閉じたら抑制は残らない");
+    }
+
+    /// <summary>
+    /// ダイアログ（利用履歴詳細）の表示中は抑制し、表示が例外で抜けても解放すること（#1725）。
+    /// 例外の後に出す案内（MessageBox）も、その表示の範囲で抑制する。
+    /// </summary>
+    [Fact]
+    public async Task ShowLedgerDetail_ダイアログの表示が例外で抜けても抑制を解放し後の案内も抑制すること()
+    {
+        ArrangeLedgerEditOpen(new Ledger { Id = 42, CardIdm = DeleteConflictCardIdm });
+        int? suppressionsWhileOpening = null;
+        int? suppressionsWhileInforming = null;
+        _navigationServiceMock
+            .Setup(n => n.ShowDialogAsync(It.IsAny<Func<ICCardManager.Views.Dialogs.LedgerDetailDialog, Task>>()))
+            .Callback(() => suppressionsWhileOpening = _host.OpenModalSuppressions)
+            .ThrowsAsync(new ICCardManager.Common.Exceptions.LedgerRowGoneException());
+        _navigationServiceMock
+            .Setup(d => d.ShowError(It.IsAny<string>(), It.IsAny<string>()))
+            .Callback(() => suppressionsWhileInforming = _host.OpenModalSuppressions);
+
+        await _history.ShowLedgerDetail(DetailTargetDto());
+
+        suppressionsWhileOpening.Should().Be(1, "ダイアログの表示中はメイン画面のカード読み取りを抑制する");
+        suppressionsWhileInforming.Should().Be(1, "例外で抜けた後に解放され、案内は自分の表示の範囲で抑制する（2 重に残らない）");
+        _host.OpenModalSuppressions.Should().Be(0, "すべて閉じたら抑制は残らない");
+    }
+
+    /// <summary>
+    /// 行編集ダイアログ（ViewModel を初期化して開く形）の表示中も抑制し、閉じたら解放すること。
+    /// </summary>
+    [Fact]
+    public async Task EditLedger_行編集ダイアログの表示中はメイン画面のカード読み取りを抑制すること()
+    {
+        ArrangeLedgerEditOpen(new Ledger { Id = 42, CardIdm = DeleteConflictCardIdm, Summary = "鉄道（天神～博多）" });
+        int? suppressionsWhileShown = null;
+        _navigationServiceMock
+            .Setup(n => n.ShowDialogAsync<ICCardManager.Views.Dialogs.LedgerRowEditDialog, LedgerRowEditViewModel>(
+                It.IsAny<Func<LedgerRowEditViewModel, Task>>()))
+            .Callback(() => suppressionsWhileShown = _host.OpenModalSuppressions)
+            .ReturnsAsync((bool?)null);
+
+        await _history.EditLedger(DeleteTargetDto());
+
+        suppressionsWhileShown.Should().Be(1, "行編集ダイアログの表示中はメイン画面のカード読み取りを抑制する");
+        _host.OpenModalSuppressions.Should().Be(0, "閉じたら解放する");
+    }
+
+    #endregion
 }

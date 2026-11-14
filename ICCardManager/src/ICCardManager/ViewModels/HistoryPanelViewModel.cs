@@ -78,7 +78,11 @@ public partial class HistoryPanelViewModel : ObservableObject
         _dbContext = dbContext;
         _staffAuthService = staffAuthService;
         _ledgerMergeService = ledgerMergeService;
-        _navigationService = navigationService;
+        // Issue #2484: 履歴パネルが表示するモーダル（確認・案内・行編集・詳細等）は、表示中のメイン画面のカード読み取りを
+        // 抑制する。抑制はメイン画面（ホスト）が持つ。ホストはこの後で接続されるので、表示のたびにホストへ頼む
+        _navigationService = new ModalCardReadingSuppressingNavigationService(
+            navigationService ?? throw new ArgumentNullException(nameof(navigationService)),
+            () => Host.BeginModalCardReadingSuppression());
         _operationLogger = operationLogger;
         _ledgerConsistencyChecker = ledgerConsistencyChecker;
         _toastNotificationService = toastNotificationService;

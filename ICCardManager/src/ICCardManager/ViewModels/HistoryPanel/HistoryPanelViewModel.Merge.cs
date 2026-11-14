@@ -217,7 +217,15 @@ public partial class HistoryPanelViewModel
             Owner = Application.Current.MainWindow
         };
 
-        if (dialog.ShowDialog() == true && dialog.SelectedHistoryId.HasValue)
+        // Issue #2484: INavigationService を通らない表示なので、表示の範囲だけメイン画面のカード読み取りを抑制する
+        // （続く取り消しの確認・認証は、それぞれが自分の表示の範囲で抑制する）
+        bool? selectedResult;
+        using (Host.BeginModalCardReadingSuppression())
+        {
+            selectedResult = dialog.ShowDialog();
+        }
+
+        if (selectedResult == true && dialog.SelectedHistoryId.HasValue)
         {
             var selectedId = dialog.SelectedHistoryId.Value;
             var selected = items.FirstOrDefault(i => i.Id == selectedId);
