@@ -373,17 +373,15 @@ namespace ICCardManager.UITests.Infrastructure
                 throw new ArgumentNullException(nameof(conn));
             }
 
+            RequireEmptyDatabase(conn);
+
             var today = DateTime.Today;
             var now = DateTime.Now;
 
             using var tx = conn.BeginTransaction();
 
-            Execute(conn,
-                "INSERT OR IGNORE INTO staff (staff_idm, name, number, note, is_deleted) VALUES (@idm, @name, @number, NULL, 0)",
-                ("@idm", AppFixture.SeededStaffIdm), ("@name", PrimaryStaffName), ("@number", "100001"));
-            Execute(conn,
-                "INSERT OR IGNORE INTO staff (staff_idm, name, number, note, is_deleted) VALUES (@idm, @name, @number, NULL, 0)",
-                ("@idm", SecondaryStaffIdm), ("@name", SecondaryStaffName), ("@number", "100002"));
+            InsertStaff(conn, AppFixture.SeededStaffIdm, PrimaryStaffName, "100001");
+            InsertStaff(conn, SecondaryStaffIdm, SecondaryStaffName, "100002");
 
             InsertCard(conn, NormalCardIdm, NormalCardType, NormalCardNumber, isLent: false, lentAt: null, lentStaff: null);
             InsertCard(conn, LentCardIdm, LentCardType, LentCardNumber, isLent: true, lentAt: now, lentStaff: SecondaryStaffIdm);
@@ -417,14 +415,111 @@ namespace ICCardManager.UITests.Infrastructure
             tx.Commit();
         }
 
-        private static void InsertCard(SQLiteConnection conn, string idm, string type, string number, bool isLent, DateTime? lentAt, string? lentStaff)
+        /// <summary>
+        /// 職員を 1 名投入する。IDm が既存の職員とぶつかれば止める（<see cref="RequireInserted"/>）。
+        /// </summary>
+        internal static void InsertStaff(SQLiteConnection conn, string idm, string name, string number)
         {
-            Execute(conn,
+            var affected = Execute(conn,
+                "INSERT OR IGNORE INTO staff (staff_idm, name, number, note, is_deleted) VALUES (@idm, @name, @number, NULL, 0)",
+                ("@idm", idm), ("@name", name), ("@number", number));
+            RequireInserted(affected, $"職員（IDm {idm}「{name}」）", "IDm");
+        }
+
+        /// <summary>
+        /// 交通系ICカードを 1 枚投入する。IDm・種別と管理番号のどちらかが既存のカードとぶつかれば止める（<see cref="RequireInserted"/>）。
+        /// </summary>
+        internal static void InsertCard(SQLiteConnection conn, string idm, string type, string number, bool isLent, DateTime? lentAt, string? lentStaff)
+        {
+            var affected = Execute(conn,
                 "INSERT OR IGNORE INTO ic_card (card_idm, card_type, card_number, note, is_deleted, is_lent, last_lent_at, last_lent_staff) " +
                 "VALUES (@idm, @type, @number, NULL, 0, @isLent, @lentAt, @lentStaff)",
                 ("@idm", idm), ("@type", type), ("@number", number), ("@isLent", isLent ? 1 : 0),
                 ("@lentAt", lentAt.HasValue ? ToText(lentAt.Value) : (object)DBNull.Value),
                 ("@lentStaff", lentStaff ?? (object)DBNull.Value));
+            RequireInserted(affected, $"交通系ICカード（IDm {idm}・種別と管理番号「{type} {number}」）", CardConflictKeys);
+        }
+
+        /// <summary>
+        /// 投入する前の DB に職員・交通系ICカード・台帳の行が無いことを確かめる（Issue #2485）。
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// シードはマイグレーションのための起動の後の DB へ入れる。マイグレーションはこの 3 表に行を作らないので、
+        /// 行があるのはアプリの起動が書いた場合で、撮影モードなしで起動した Debug 版の起動時のテストデータ（<c>DebugDataService</c>）が該当する。
+        /// ほかに、投入の処理がシードを 2 回呼んだ場合（内部で <see cref="Seed"/> を呼ぶ派生シードを組み合わせた場合）もここで止まるので、
+        /// 文言は両方を候補に挙げる（正しい環境で起動していても、環境変数の調査だけへ誘導しない）。
+        /// 投入の後の影響行数だけを見る形だと、テストデータの IDm がシードの IDm と一致するときにしか働かない。
+        /// IDm が食い違ってもテストデータが画面に混ざって写るので、行があること自体で止める。
+        /// </para>
+        /// <para>
+        /// ここ（シードの共通の入口）に置き、<c>AppFixture</c> の投入の手順には置かない。<c>AppFixture</c> は撮影以外の UI テストの
+        /// 投入（撮影モードを渡さずに Debug で起動し、テストデータに足して投入するもの）も通るため。
+        /// </para>
+        /// </remarks>
+        private static void RequireEmptyDatabase(SQLiteConnection conn)
+        {
+            var staff = CountRows(conn, "staff");
+            var cards = CountRows(conn, "ic_card");
+            var ledger = CountRows(conn, "ledger");
+            if (staff == 0 && cards == 0 && ledger == 0)
+            {
+                return;
+            }
+
+            throw new InvalidOperationException(
+                $"撮影用のサンプルデータを投入する前の DB に、既存のデータがあります（職員 {staff} 行・交通系ICカード {cards} 行・台帳 {ledger} 行）。" +
+                "このまま投入すると既存のデータとぶつかるか、画面に混ざって写ります。Debug 版のアプリが撮影モードなしで起動し、起動時のテストデータ" +
+                "（DebugDataService）が先に登録された可能性があります。" + LaunchPremiseAdvice +
+                "撮影モードで起動しているなら、投入の処理がシードを 2 回呼んでいないか（内部で Seed を呼ぶ派生シード、" +
+                "例えば SeedWithoutWarnings と SeedWithTransferStationGroups を組み合わせていないか）も確認してください。");
+        }
+
+        /// <summary>起動の前提を確かめる案内（<see cref="RequireEmptyDatabase"/> が使う）。</summary>
+        private const string LaunchPremiseAdvice =
+            "撮影モードで起動しているか（Debug 起動なら AppFixture.LaunchWithSeed に AppFixture.SuppressDebugTestData を渡しているか、" +
+            "Release パスなら環境変数 ICCARDMANAGER_UITEST_CONFIGURATION=Release がテストのプロセスへ届いているか。" +
+            "WSL から dotnet.exe を呼ぶ場合は WSLENV に変数名を加える）を確認してください。";
+
+        private static long CountRows(SQLiteConnection conn, string table)
+        {
+            using var cmd = conn.CreateCommand();
+            cmd.CommandText = $"SELECT COUNT(*) FROM {table}";
+            return Convert.ToInt64(cmd.ExecuteScalar(), CultureInfo.InvariantCulture);
+        }
+
+        /// <summary>交通系ICカードの投入がぶつかり得る列（主キーの IDm と、一意インデックスの種別・管理番号）。</summary>
+        private const string CardConflictKeys = "IDm、または種別・管理番号";
+
+        /// <summary>
+        /// <c>INSERT OR IGNORE</c> が無視された（影響行数 0）なら、シードが同じキーの行を重複して投入したことを名指しして止める（Issue #2485）。
+        /// </summary>
+        /// <param name="affected">影響行数。</param>
+        /// <param name="row">投入しようとした行の説明（IDm と、カードなら種別・管理番号）。</param>
+        /// <param name="conflictKeys">
+        /// その表で投入がぶつかり得る列。職員は主キーの IDm だけ（staff に他の一意制約は無い）。交通系ICカードは IDm に加えて、
+        /// 種別・管理番号の一意インデックス（<c>idx_card_type_number_active</c>。Migration_008 / 012。未削除のカードが対象）がある。
+        /// <c>INSERT OR IGNORE</c> はどちらの違反も黙って 0 を返すので、IDm だけを案内すると、IDm は違うが種別・管理番号が同じカードを
+        /// 足したときに原因へ辿り着けない（レビュー 3 回目で検出）。
+        /// </param>
+        /// <remarks>
+        /// 投入の前に DB が空であることは <see cref="RequireEmptyDatabase"/> が確かめるので、ここで影響行数が 0 になるのは、
+        /// 1 回のシードの中で同じキーの行を 2 回入れた場合に限られる（派生シードが追加するカード・職員の IDm や種別・管理番号を
+        /// <see cref="Seed"/> のものと同じにした等。<see cref="Seed"/> を 2 回呼ぶ形は、2 回目の空の確認が先に止める）。
+        /// 起動時のテストデータ（<c>DebugDataService</c>）との衝突はここへは来ないので、環境変数の調査へ誘導しない。
+        /// 進めると、後から入れた行の値（氏名・種別）が画面に出ず、原因と無関係な症状で失敗する。
+        /// </remarks>
+        internal static void RequireInserted(int affected, string row, string conflictKeys)
+        {
+            if (affected == 1)
+            {
+                return;
+            }
+
+            throw new InvalidOperationException(
+                $"撮影用のサンプルデータの{row}を投入できませんでした。同じ{conflictKeys}の行を、シードの中で既に投入しています" +
+                $"（INSERT OR IGNORE の影響行数 {affected}。投入の前に DB が空であることは確かめているため、起動時のテストデータとの衝突ではありません）。" +
+                $"ScreenshotSeedData の派生シードが追加する行の{conflictKeys}が、Seed の投入する行と重なっていないかを確認してください。");
         }
 
         /// <summary>台帳 1 行を投入し、投入後の残額を返す。</summary>

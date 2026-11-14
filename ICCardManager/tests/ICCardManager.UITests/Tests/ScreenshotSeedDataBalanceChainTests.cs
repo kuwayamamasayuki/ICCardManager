@@ -176,7 +176,9 @@ namespace ICCardManager.UITests.Tests
                 "CREATE TABLE ledger (id INTEGER PRIMARY KEY AUTOINCREMENT, card_idm TEXT NOT NULL, lender_idm TEXT, date TEXT NOT NULL, " +
                 "  summary TEXT NOT NULL, income INTEGER DEFAULT 0, expense INTEGER DEFAULT 0, balance INTEGER NOT NULL, staff_name TEXT, " +
                 "  note TEXT, lent_at TEXT, is_lent_record INTEGER DEFAULT 0, companion_count INTEGER NOT NULL DEFAULT 0, initial_record_kind INTEGER DEFAULT NULL);" +
-                "CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT);";
+                "CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT);" +
+                // 本番の一意インデックス（Migration_012 の idx_card_type_number_active）。INSERT OR IGNORE はこの違反も黙って 0 を返す
+                "CREATE UNIQUE INDEX idx_card_type_number_active ON ic_card(card_type, card_number) WHERE is_deleted = 0 OR is_deleted IS NULL;";
             cmd.ExecuteNonQuery();
             return conn;
         }
