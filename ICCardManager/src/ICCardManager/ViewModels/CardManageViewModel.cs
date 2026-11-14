@@ -1093,7 +1093,10 @@ namespace ICCardManager.ViewModels
             using var authResult = (await _staffAuthService.RequestAuthenticationAsync("交通系ICカードの削除"))?.Enter();
             if (authResult == null)
             {
-                // 認証キャンセルまたはタイムアウト（払い戻しと同じく何もしない）
+                // 認証キャンセルまたはタイムアウト。何も書かず、同意した直後に何も起きないと削除されたのか
+                // 分からないので案内する（Issue #2474。払い戻し・履歴の統合・統合の取り消しと同じ）
+                _dialogService.ShowInformation(
+                    BuildAuthenticationCancelledMessage(targetLabel, CardWriteOperation.Delete), "交通系ICカードの削除");
                 return;
             }
 
@@ -1312,7 +1315,11 @@ namespace ICCardManager.ViewModels
             using var authResult = (await _staffAuthService.RequestAuthenticationAsync("交通系ICカードの払い戻し"))?.Enter();
             if (authResult == null)
             {
-                // 認証キャンセルまたはタイムアウト（削除と同じく何もしない）
+                // 認証キャンセルまたはタイムアウト。何も書かず、払い戻されたのか分かるよう案内する
+                // （Issue #2474。削除・履歴の統合・統合の取り消しと同じ）
+                _dialogService.ShowInformation(
+                    BuildAuthenticationCancelledMessage(FormatCardLabel(refundCardType, refundCardNumber), CardWriteOperation.Refund),
+                    "交通系ICカードの払い戻し");
                 return;
             }
 
@@ -1568,6 +1575,27 @@ namespace ICCardManager.ViewModels
             CardWriteOperation.Refund => "払い戻し",
             _ => throw new ArgumentOutOfRangeException(nameof(operation), operation, "文言の操作名が定義されていない操作です。"),
         };
+
+        /// <summary>
+        /// 確認で はい を押した後に職員証の認証が完了しなかった（キャンセル・タイムアウト）ときの案内（Issue #2474）。
+        /// </summary>
+        /// <remarks>
+        /// 同意した直後に何も起きないと、削除・払い戻しが行われたのかどうかが分からない。履歴の統合・統合の取り消しの
+        /// 案内（<c>HistoryPanelViewModel.MergeAuthenticationCancelledMessage</c> / <c>UnmergeAuthenticationCancelledMessage</c>）と
+        /// 同じ形（何も書いていないこと・押し直すボタン・認証）にそろえる。押し直すボタンの名前は <see cref="GetOperationName"/>。
+        /// </remarks>
+        internal static string BuildAuthenticationCancelledMessage(string targetLabel, CardWriteOperation operation)
+        {
+            var notDone = operation switch
+            {
+                CardWriteOperation.Delete => "削除していません",
+                CardWriteOperation.Refund => "払い戻していません",
+                _ => throw new ArgumentOutOfRangeException(nameof(operation), operation, "文言の操作名が定義されていない操作です。"),
+            };
+            var buttonName = GetOperationName(operation);
+            return $"職員証の認証が完了しなかったため、{targetLabel}を{notDone}。" +
+                   $"{buttonName}するには、もう一度「{buttonName}」を押して、職員証で認証してください。";
+        }
 
         /// <summary>
         /// 削除・払い戻しを書き込まなかった（拒否された）原因（Issue #2421）

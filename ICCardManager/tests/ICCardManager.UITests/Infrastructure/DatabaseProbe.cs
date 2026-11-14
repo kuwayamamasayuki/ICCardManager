@@ -12,7 +12,8 @@ namespace ICCardManager.UITests.Infrastructure
     /// 台帳（<c>ledger</c>）と <c>ic_card</c> を読み返して、記録そのものを表明する。
     /// </para>
     /// <para>
-    /// アプリの起動中に別の接続で読む。読み取り専用で開き、1 回の問い合わせごとに閉じる（アプリの書き込みを妨げない）。
+    /// アプリの起動中に別の接続で読む。読み取りは読み取り専用で開き、1 回の問い合わせごとに閉じる（アプリの書き込みを妨げない）。
+    /// 例外として <see cref="ExecuteAsAnotherPc"/> だけは書き込み用に開く（他の PC の変更を再現するため。Issue #2474）。
     /// journal_mode は DELETE なので、コミット済みの内容はファイルから読める。
     /// </para>
     /// </remarks>

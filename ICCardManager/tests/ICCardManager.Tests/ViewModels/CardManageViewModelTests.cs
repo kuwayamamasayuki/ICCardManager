@@ -1434,6 +1434,68 @@ public class CardManageViewModelTests : IDisposable
         _cardRepositoryMock.Verify(r => r.DeleteAsync(It.IsAny<string>(), It.IsAny<SQLiteTransaction>()), Times.Never);
         _operationLogRepositoryMock.Verify(
             r => r.InsertAsync(It.IsAny<OperationLog>(), It.IsAny<SQLiteTransaction>()), Times.Never);
+        _dialogServiceMock.Verify(d => d.ShowInformation(
+            CardManageViewModel.BuildAuthenticationCancelledMessage("交通系ICカード「はやかけん H-001」", CardManageViewModel.CardWriteOperation.Delete),
+            "交通系ICカードの削除"), Times.Once,
+            "削除確認で はい を押した直後に何も起きないと、削除されたのか分からない（統合・統合の取り消しと同じ案内）");
+        _viewModel.StatusMessage.Should().NotBe("削除しました");
+    }
+
+    /// <summary>
+    /// 削除確認で いいえ を選んだときは、自分で取りやめたので認証が完了しなかった案内を出さない（上のテストと対）。
+    /// </summary>
+    [Fact]
+    public async Task DeleteAsync_削除確認でいいえなら認証が完了しなかった案内を出さないこと()
+    {
+        ArrangeDeletableCard();
+        _dialogServiceMock.Setup(d => d.ShowWarningConfirmation(It.IsAny<string>(), "削除確認"))
+            .Returns(false);
+
+        await _viewModel.DeleteAsync();
+
+        _dialogServiceMock.Verify(d => d.ShowInformation(It.IsAny<string>(), It.IsAny<string>()), Times.Never);
+    }
+
+    /// <summary>
+    /// 払い戻しの確認で はい を押した後に認証が完了しなければ、払い戻さず案内する（削除・統合と同じ）。
+    /// </summary>
+    [Fact]
+    public async Task RefundAsync_確認の後に認証が完了しなければ払い戻さず案内すること()
+    {
+        ArrangeRefundableCard(3000);
+        _staffAuthServiceMock.Setup(s => s.RequestAuthenticationAsync("交通系ICカードの払い戻し"))
+            .ReturnsAsync((StaffAuthResult?)null);
+
+        await _viewModel.RefundAsync();
+
+        _cardRepositoryMock.Verify(r => r.SetRefundedAsync(
+            It.IsAny<string>(), It.IsAny<DateTime>(), It.IsAny<SQLiteTransaction>()), Times.Never);
+        _ledgerRepositoryMock.Verify(r => r.InsertAsync(It.IsAny<Ledger>(), It.IsAny<SQLiteTransaction>()), Times.Never);
+        _dialogServiceMock.Verify(d => d.ShowInformation(
+            CardManageViewModel.BuildAuthenticationCancelledMessage("交通系ICカード「はやかけん H-001」", CardManageViewModel.CardWriteOperation.Refund),
+            "交通系ICカードの払い戻し"), Times.Once,
+            "払い戻し確認で はい を押した直後に何も起きないと、払い戻されたのか分からない");
+    }
+
+    /// <summary>
+    /// 認証が完了しなかった案内の文言（何が・なぜ・どうすれば）。押し直すボタンの名前を操作ごとに名指しする。
+    /// </summary>
+    [Theory]
+    [InlineData(true, "削除していません", "もう一度「削除」を押して")]
+    [InlineData(false, "払い戻していません", "もう一度「払い戻し」を押して")]
+    public void BuildAuthenticationCancelledMessage_対象と理由と押し直す操作を述べること(
+        bool isDelete, string notDone, string retry)
+    {
+        var operation = isDelete
+            ? CardManageViewModel.CardWriteOperation.Delete
+            : CardManageViewModel.CardWriteOperation.Refund;
+        var message = CardManageViewModel.BuildAuthenticationCancelledMessage("交通系ICカード「はやかけん H-001」", operation);
+
+        message.Should().StartWith("職員証の認証が完了しなかったため、");
+        message.Should().Contain("交通系ICカード「はやかけん H-001」");
+        message.Should().Contain(notDone);
+        message.Should().Contain(retry);
+        message.Should().EndWith("職員証で認証してください。");
     }
 
     #endregion

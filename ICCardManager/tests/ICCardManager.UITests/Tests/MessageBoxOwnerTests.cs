@@ -93,7 +93,7 @@ namespace ICCardManager.UITests.Tests
                 $"前提: MessageBox が出た時点でアプリは背面にあること（前面は {NativeWindows.Describe(NativeWindows.Foreground)}）。" +
                 "前面だとオーナーを渡さない実装でも偶然オーナーが付き、このテストは何も検査しない");
             NativeWindows.OwnerOf(messageBoxHandle).Should().Be(dialogHandle,
-                "確認の MessageBox のオーナーは、それを出した交通系ICカード管理ダイアログであること（ownerless なら 0）");
+                "「削除できません」の MessageBox のオーナーは、それを出した交通系ICカード管理ダイアログであること（ownerless なら 0）");
             NativeWindows.IsEnabled(dialogHandle).Should().BeFalse(
                 "MessageBox を出している間、下のダイアログは Win32 レベルで無効になり、削除などのボタンを押せないこと");
 
@@ -107,7 +107,7 @@ namespace ICCardManager.UITests.Tests
             DatabaseProbe.Count(
                 "SELECT COUNT(*) FROM operation_log WHERE target_table = 'ic_card' AND action = 'DELETE' AND target_id = @card",
                 ("@card", ScreenshotSeedData.NormalCardIdm)).Should().Be(0L,
-                    "他の PC が先に削除していたので、このアプリは削除を記録しないこと（認証の後の読み直しで断る）");
+                    "他の PC が先に削除していたので、このアプリは削除を記録しないこと");
         }
     }
 }
