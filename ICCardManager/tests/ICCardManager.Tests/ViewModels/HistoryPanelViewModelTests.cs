@@ -3408,12 +3408,13 @@ public class HistoryPanelViewModelTests : IDisposable
     /// 統合の確認（MessageBox）の表示中は、ホスト（メイン画面）へカード読み取りの抑制を頼み、閉じたら解放すること。
     /// </summary>
     /// <remarks>
-    /// 認証（職員証のタッチ）は確認の「はい」の後に認証ダイアログで改めて求める（#2474）。認証ダイアログは自分で
-    /// 抑制を取る（<c>CardReadingSource.Authentication</c>）ので、確認の抑制は確認を閉じた時点で解く。
+    /// 認証（職員証のタッチ）は確認の「はい」の後に認証ダイアログで改めて求める（#2474）。認証を求めている間も、
+    /// 受け取った <c>IStaffAuthService</c> の包みが抑制を取る（認証ダイアログ自身の抑制は <c>Loaded</c> からなので、
+    /// それより前の入れ子のメッセージポンプの間を埋める。PR #2491 のレビュー 3 回目）。確認・認証・案内は順に開閉する。
     /// 統合の完了の案内（MessageBox）も同じく表示の範囲で抑制する。
     /// </remarks>
     [Fact]
-    public async Task MergeHistoryLedgers_確認と完了の案内の表示中だけメイン画面のカード読み取りを抑制すること()
+    public async Task MergeHistoryLedgers_確認と認証と完了の案内の表示中だけメイン画面のカード読み取りを抑制すること()
     {
         ArrangeMergeableCheckedLedgers();
         int? suppressionsWhileConfirming = null;
@@ -3438,7 +3439,7 @@ public class HistoryPanelViewModelTests : IDisposable
         await _history.MergeHistoryLedgersCommand.ExecuteAsync(null);
 
         suppressionsWhileConfirming.Should().Be(1, "確認の表示中はメイン画面のカード読み取りを抑制する");
-        suppressionsWhileAuthenticating.Should().Be(0, "確認を閉じたら解放する（認証ダイアログは自分で抑制する）");
+        suppressionsWhileAuthenticating.Should().Be(1, "認証を求めている間も抑制する（確認の抑制は閉じた時点で解け、認証の抑制が 1 つだけ開く）");
         suppressionsWhileInforming.Should().Be(1, "完了の案内の表示中も抑制する");
         _host.OpenModalSuppressions.Should().Be(0, "すべて閉じたら抑制は残らない");
     }

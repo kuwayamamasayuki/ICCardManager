@@ -363,16 +363,26 @@ public class ScreenTransitionDiagramConsistencyTests
             "更新後、本テストの ExpectedStaffAuthOperations も更新すること。");
     }
 
+    /// <summary><c>IStaffAuthService</c> の実装の宣言（委譲。Issue #2484）</summary>
+    private static readonly Regex StaffAuthServiceImplementationPattern = new(@"\bclass\s+\w+\s*:\s*IStaffAuthService\b");
+
     [Fact]
     public void 職員認証の操作名はリテラルで書かれている()
     {
         // 操作名を定数や変数で渡すと StaffAuthCallPattern に一致せず、認証を要求する画面・操作が
         // 上の 3 つの検査から黙って漏れる（Issue #2255 の初版が定数で渡しており、検査は緑のままだった）
+        // Issue #2484: IStaffAuthService の実装（職員認証の包み ModalCardReadingSuppressingStaffAuthService）の中の呼び出しは、
+        // 受け取った操作名をそのまま渡す委譲で、認証を要求する操作ではない（操作名のリテラルは包みを呼ぶ画面の側にある）
         var nonLiteral = Directory
             .GetFiles(Path.Combine(GetSourceRoot(), "ViewModels"), "*.cs", SearchOption.AllDirectories)
             .SelectMany(f =>
             {
                 var code = ReadCodeKeepingLiterals(f);
+                if (StaffAuthServiceImplementationPattern.IsMatch(code))
+                {
+                    return Enumerable.Empty<string>();
+                }
+
                 var calls = Regex.Matches(code, @"\.RequestAuthenticationAsync\(").Count;
                 var literalCalls = StaffAuthCallPattern.Matches(code).Count;
                 return calls == literalCalls
@@ -395,6 +405,10 @@ public class ScreenTransitionDiagramConsistencyTests
             "var b = await _staffAuthService.RequestAuthenticationAsync(OperationName);\n";
 
         Regex.Matches(sample, @"\.RequestAuthenticationAsync\(").Count.Should().Be(2);
+        StaffAuthServiceImplementationPattern.IsMatch(
+            "internal sealed class ModalCardReadingSuppressingStaffAuthService : IStaffAuthService").Should().BeTrue(
+            "委譲（IStaffAuthService の実装）は除外する");
+        StaffAuthServiceImplementationPattern.IsMatch(sample).Should().BeFalse("認証を要求する画面の呼び出しは除外しない");
         StaffAuthCallPattern.Matches(sample).Count.Should().Be(1);
     }
 

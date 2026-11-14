@@ -4646,6 +4646,30 @@ public class MainViewModelTests : IDisposable
     }
 
     /// <summary>
+    /// 履歴パネルが求める職員認証（認証ダイアログ）の表示中も、メイン画面は職員証のタッチを処理しないこと（PR #2491 のレビュー 3 回目）。
+    /// </summary>
+    /// <remarks>
+    /// 認証ダイアログ自身の抑制（<c>CardReadingSource.Authentication</c>）は <c>Loaded</c> で取るので、<c>ShowDialog()</c> の開始から
+    /// <c>Loaded</c> までの入れ子のメッセージポンプの間はメイン画面が無抑制だった。履歴パネルは受け取った <c>IStaffAuthService</c> を
+    /// 包み、認証を求める間ずっとメイン画面の抑制を取る。認証ダイアログはカードリーダーを直接購読するので、認証は従来どおり動く。
+    /// </remarks>
+    [Fact]
+    public async Task 履歴パネルが求める職員認証の表示中は職員証のタッチを処理せず閉じた後は処理すること()
+    {
+        ArrangeModalTestStaff();
+        _viewModel.History.HistoryCard = new IcCard { CardIdm = "0E0E0E0E0E0E0E0E", CardType = "はやかけん", CardNumber = "001" }.ToDto();
+        var probe = new TouchDuringModalProbe();
+        _staffAuthServiceMock
+            .Setup(a => a.RequestAuthenticationAsync("履歴の追加"))
+            .Callback(TouchDuring(probe))
+            .ReturnsAsync((StaffAuthResult)null);
+
+        await _viewModel.History.AddLedgerRowCommand.ExecuteAsync(null);
+
+        await AssertTouchIgnoredWhileShownAndHandledAfterAsync(probe);
+    }
+
+    /// <summary>
     /// 履歴パネルから開いたモーダル（利用履歴詳細）の表示中も、メイン画面は職員証のタッチを処理しないこと。
     /// </summary>
     /// <remarks>

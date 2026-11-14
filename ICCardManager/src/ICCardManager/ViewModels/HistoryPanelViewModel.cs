@@ -76,7 +76,11 @@ public partial class HistoryPanelViewModel : ObservableObject
         _ledgerRepository = ledgerRepository;
         _cardRepository = cardRepository;
         _dbContext = dbContext;
-        _staffAuthService = staffAuthService;
+        // Issue #2484（PR #2491 のレビュー 3 回目）: 職員認証を求めている間も、メイン画面のカード読み取りを抑制する
+        // （認証ダイアログ自身の抑制は Loaded からで、ShowDialog の開始から Loaded までの間を埋める）
+        _staffAuthService = new ModalCardReadingSuppressingStaffAuthService(
+            staffAuthService ?? throw new ArgumentNullException(nameof(staffAuthService)),
+            () => Host.BeginModalCardReadingSuppression());
         _ledgerMergeService = ledgerMergeService;
         // Issue #2484: 履歴パネルが表示するモーダル（確認・案内・行編集・詳細等）は、表示中のメイン画面のカード読み取りを
         // 抑制する。抑制はメイン画面（ホスト）が持つ。ホストはこの後で接続されるので、表示のたびにホストへ頼む

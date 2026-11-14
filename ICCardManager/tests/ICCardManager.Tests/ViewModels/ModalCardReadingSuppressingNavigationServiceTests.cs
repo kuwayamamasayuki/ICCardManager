@@ -207,6 +207,41 @@ public class ModalCardReadingSuppressingNavigationServiceTests
     }
 
     /// <summary>
+    /// 職員認証の包み（<see cref="ModalCardReadingSuppressingStaffAuthService"/>。PR #2491 のレビュー 3 回目）も、認証を求めている間
+    /// （返した Task の完了まで）だけ抑制し、結果をそのまま返すこと。
+    /// </summary>
+    [Fact]
+    public async Task 職員認証の包みは認証が終わるまで抑制し結果をそのまま返すこと()
+    {
+        var completion = new TaskCompletionSource<StaffAuthResult?>();
+        var inner = new Mock<IStaffAuthService>(MockBehavior.Strict);
+        inner.Setup(a => a.RequestAuthenticationAsync("履歴の統合")).Returns(completion.Task);
+        var sut = new ModalCardReadingSuppressingStaffAuthService(inner.Object, BeginScope);
+        var expected = new StaffAuthResult { Idm = "AABBCCDDEEFF0011", StaffName = "田中太郎" };
+
+        var pending = sut.RequestAuthenticationAsync("履歴の統合");
+        _openScopes.Should().Be(1, "認証を求めている間は抑制する");
+
+        completion.SetResult(expected);
+        (await pending).Should().BeSameAs(expected, "認証結果はそのまま返す（Enter は呼び出し元が行う）");
+        _openScopes.Should().Be(0);
+    }
+
+    [Fact]
+    public async Task 職員認証の包みは例外で抜けても抑制を解放すること()
+    {
+        var inner = new Mock<IStaffAuthService>(MockBehavior.Strict);
+        inner.Setup(a => a.RequestAuthenticationAsync(It.IsAny<string>())).ThrowsAsync(new InvalidOperationException("injected"));
+        var sut = new ModalCardReadingSuppressingStaffAuthService(inner.Object, BeginScope);
+
+        var act = () => sut.RequestAuthenticationAsync("履歴の追加");
+
+        await act.Should().ThrowAsync<InvalidOperationException>();
+        _beginCount.Should().Be(1, "前提: 抑制を取った");
+        _openScopes.Should().Be(0, "例外で抜けても解放する");
+    }
+
+    /// <summary>
     /// 表示のメソッドを足したときに、包みを素通しにしたまま見落とさないための検査。
     /// </summary>
     /// <remarks>

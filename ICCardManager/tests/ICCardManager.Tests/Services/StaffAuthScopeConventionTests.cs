@@ -44,11 +44,19 @@ public class StaffAuthScopeConventionTests
     /// <summary>操作者セッションを開始してよい唯一のファイル（認証結果の <c>Enter()</c>）。</summary>
     private const string SessionOwnerFileName = "StaffAuthResult.cs";
 
+    /// <summary>
+    /// <c>IStaffAuthService</c> の実装（宣言）。実装の中の呼び出しは、認証結果を受けて使うのではなく呼び出し元へそのまま返す
+    /// 委譲なので、「その場で Enter して using で受ける」の対象にしない（Issue #2484: 認証を求めている間メイン画面の
+    /// カード読み取りを抑制する包み <c>ModalCardReadingSuppressingStaffAuthService</c>）。受けた側の画面が決まった形で受ける。
+    /// </summary>
+    private static readonly Regex StaffAuthServiceImplementationPattern = new Regex(@"\bclass\s+\w+\s*:\s*IStaffAuthService\b");
+
     [Fact]
     public void 職員認証の結果はその場でEnterしてusingで受けること()
     {
         var violations = EnumerateProductionSources()
             .Select(f => (File: f, Code: ReadCode(f)))
+            .Where(x => !StaffAuthServiceImplementationPattern.IsMatch(x.Code))
             .Select(x => (x.File, Calls: AuthCallPattern.Matches(x.Code).Count, Scoped: ScopedAuthCallPattern.Matches(x.Code).Count))
             .Where(x => x.Calls != x.Scoped)
             .Select(x => $"  - {RelativePath(x.File)}: 呼び出し {x.Calls} 件のうち決まった形のもの {x.Scoped} 件")
@@ -130,6 +138,21 @@ public class StaffAuthScopeConventionTests
         AuthCallPattern.Matches(code).Count.Should().Be(1);
         ScopedAuthCallPattern.Matches(code).Count.Should().Be(1);
         BeginSessionCallPattern.IsMatch(code).Should().BeFalse();
+    }
+
+    /// <summary>
+    /// 委譲の除外が実装の宣言だけを拾い、認証を求める画面（実装ではない）を除外しないこと（Issue #2484。既知の入力）。
+    /// </summary>
+    [Fact]
+    public void 委譲の除外はIStaffAuthServiceの実装だけを対象にすること()
+    {
+        StaffAuthServiceImplementationPattern.IsMatch(
+            "internal sealed class ModalCardReadingSuppressingStaffAuthService : IStaffAuthService\n{").Should().BeTrue();
+        StaffAuthServiceImplementationPattern.IsMatch(
+            "public partial class HistoryPanelViewModel : ObservableObject\n{ private readonly IStaffAuthService _staffAuthService; }")
+            .Should().BeFalse("認証を求める画面は除外しない");
+        StaffAuthServiceImplementationPattern.IsMatch(
+            "public class Foo : Bar, IStaffAuthServiceFactory").Should().BeFalse();
     }
 
     private static string ReadCode(string path)
