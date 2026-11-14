@@ -373,6 +373,8 @@ namespace ICCardManager.UITests.Infrastructure
                 throw new ArgumentNullException(nameof(conn));
             }
 
+            RequireEmptyDatabase(conn);
+
             var today = DateTime.Today;
             var now = DateTime.Now;
 
@@ -433,6 +435,50 @@ namespace ICCardManager.UITests.Infrastructure
         }
 
         /// <summary>
+        /// 投入する前の DB に職員・交通系ICカード・台帳の行が無いことを確かめる（Issue #2485）。
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// シードはマイグレーションのための起動の後の DB へ入れる。マイグレーションはこの 3 表に行を作らないので、
+        /// 行があるのはアプリの起動が書いた場合で、撮影モードなしで起動した Debug 版の起動時のテストデータ（<c>DebugDataService</c>）が該当する。
+        /// 衝突の検知（<see cref="RequireInserted"/>）は、テストデータの IDm がシードの IDm と一致するときにしか働かない。
+        /// IDm が食い違ってもテストデータが画面に混ざって写るので、行があること自体で止める。
+        /// </para>
+        /// <para>
+        /// ここ（シードの共通の入口）に置き、<c>AppFixture</c> の投入の手順には置かない。<c>AppFixture</c> は撮影以外の UI テストの
+        /// 投入（撮影モードを渡さずに Debug で起動し、テストデータに足して投入するもの）も通るため。
+        /// </para>
+        /// </remarks>
+        private static void RequireEmptyDatabase(SQLiteConnection conn)
+        {
+            var staff = CountRows(conn, "staff");
+            var cards = CountRows(conn, "ic_card");
+            var ledger = CountRows(conn, "ledger");
+            if (staff == 0 && cards == 0 && ledger == 0)
+            {
+                return;
+            }
+
+            throw new InvalidOperationException(
+                $"撮影用のサンプルデータを投入する前の DB に、既存のデータがあります（職員 {staff} 行・交通系ICカード {cards} 行・台帳 {ledger} 行）。" +
+                "このまま投入すると既存のデータとぶつかるか、画面に混ざって写ります。Debug 版のアプリが撮影モードなしで起動し、起動時のテストデータ" +
+                "（DebugDataService）が先に登録された可能性があります。" + LaunchPremiseAdvice);
+        }
+
+        /// <summary>起動の前提を確かめる案内（<see cref="RequireEmptyDatabase"/> と <see cref="RequireInserted"/> で共有）。</summary>
+        private const string LaunchPremiseAdvice =
+            "撮影モードで起動しているか（Debug 起動なら AppFixture.LaunchWithSeed に AppFixture.SuppressDebugTestData を渡しているか、" +
+            "Release パスなら環境変数 ICCARDMANAGER_UITEST_CONFIGURATION=Release がテストのプロセスへ届いているか。" +
+            "WSL から dotnet.exe を呼ぶ場合は WSLENV に変数名を加える）を確認してください。";
+
+        private static long CountRows(SQLiteConnection conn, string table)
+        {
+            using var cmd = conn.CreateCommand();
+            cmd.CommandText = $"SELECT COUNT(*) FROM {table}";
+            return Convert.ToInt64(cmd.ExecuteScalar(), CultureInfo.InvariantCulture);
+        }
+
+        /// <summary>
         /// <c>INSERT OR IGNORE</c> が無視された（影響行数 0）なら、既存のデータとぶつかったことを名指しして止める（Issue #2485）。
         /// </summary>
         /// <param name="affected">影響行数。</param>
@@ -443,7 +489,7 @@ namespace ICCardManager.UITests.Infrastructure
         /// <see cref="VirtualTouchCardIdm"/> と同じ IDm を含む）が先に入り、<c>INSERT OR IGNORE</c> は黙って無視される。
         /// 進めるとテストは「カード一覧に行が現れない」「職員が無い」「残高チェーンが切れている」といった、原因と無関係な症状で失敗する。
         /// </remarks>
-        private static void RequireInserted(int affected, string row)
+        internal static void RequireInserted(int affected, string row)
         {
             if (affected == 1)
             {
@@ -453,9 +499,7 @@ namespace ICCardManager.UITests.Infrastructure
             throw new InvalidOperationException(
                 $"撮影用のサンプルデータの{row}を投入できませんでした。同じ IDm の行が DB に既にあり、既存のデータとぶつかりました" +
                 $"（INSERT OR IGNORE の影響行数 {affected}）。Debug 版のアプリが撮影モードなしで起動し、起動時のテストデータ" +
-                "（DebugDataService）が先に登録された可能性があります。撮影モードで起動しているか（Debug 起動なら AppFixture.LaunchWithSeed に " +
-                "AppFixture.SuppressDebugTestData を渡しているか、Release パスなら環境変数 ICCARDMANAGER_UITEST_CONFIGURATION=Release が" +
-                "テストのプロセスへ届いているか。WSL から dotnet.exe を呼ぶ場合は WSLENV に変数名を加える）を確認してください。");
+                "（DebugDataService）が先に登録された可能性があります。" + LaunchPremiseAdvice);
         }
 
         /// <summary>台帳 1 行を投入し、投入後の残額を返す。</summary>

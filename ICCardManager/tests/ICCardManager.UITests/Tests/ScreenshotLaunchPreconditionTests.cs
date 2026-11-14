@@ -66,10 +66,10 @@ namespace ICCardManager.UITests.Tests
         }
 
         /// <summary>
-        /// Debug 版のアプリが撮影モードなしで起動すると、起動時のテストデータが撮影用の職員と同じ IDm（仮想タッチの職員）で先に入る。
+        /// Debug 版のアプリが撮影モードなしで起動すると、起動時のテストデータ（撮影用の職員と同じ IDm の職員を含む）がシードより先に入る。
         /// </summary>
         [Fact]
-        public void 撮影用の職員と同じIDmの職員が先に入っていれば_シードは原因を名指しして止まること()
+        public void 投入の前に職員が入っていれば_シードは原因を名指しして止まること()
         {
             using var conn = OpenSchema();
             Execute(conn, $"INSERT INTO staff (staff_idm, name, number, note, is_deleted) VALUES ('{AppFixture.SeededStaffIdm}', '山田太郎', '001', NULL, 0)");
@@ -77,29 +77,53 @@ namespace ICCardManager.UITests.Tests
             Action act = () => ScreenshotSeedData.Seed(conn);
 
             var message = act.Should().Throw<InvalidOperationException>().Which.Message;
-            message.Should().Contain(AppFixture.SeededStaffIdm, "どの行がぶつかったかを示すこと");
-            message.Should().Contain("既存のデータとぶつかりました");
+            message.Should().Contain("既存のデータがあります");
+            message.Should().Contain("職員 1 行", "どの表に何行あったかを示すこと");
             message.Should().Contain("DebugDataService", "先に入った行の出どころ（起動時のテストデータ）を名指しすること");
             message.Should().Contain("撮影モード", "撮影モードで起動しているかを確かめるよう案内すること");
+            Count(conn, "ic_card").Should().Be(0, "止めたときは何も投入しないこと");
         }
 
         /// <summary>
-        /// 仮想タッチのカードは本体の <c>DebugDataService</c> のテストカードの先頭と同じ IDm なので、職員とは別にカードでもぶつかる。
+        /// IDm がシードと食い違うテストデータでも止めること。衝突の検知（影響行数 0）だけでは、IDm が一致するときしか働かない（レビュー 1 回目で強化）。
         /// </summary>
-        [Fact]
-        public void 仮想タッチのカードと同じIDmのカードが先に入っていれば_シードは原因を名指しして止まること()
+        [Theory]
+        [InlineData("INSERT INTO staff (staff_idm, name, number, note, is_deleted) VALUES ('FFFF000000000099', '佐藤一郎', '003', NULL, 0)", "職員 1 行")]
+        [InlineData("INSERT INTO ic_card (card_idm, card_type, card_number, note, is_deleted, is_lent) VALUES ('06FE112233445568', 'SUGOCA', 'S-001', NULL, 0, 0)", "交通系ICカード 1 行")]
+        [InlineData("INSERT INTO ledger (card_idm, date, summary, balance) VALUES ('06FE112233445568', '2026-11-01 00:00:00', '新規購入', 1000)", "台帳 1 行")]
+        public void シードとIDmの重ならないデータが入っていても_シードは投入の前に止まること(string sql, string expectedCount)
         {
             using var conn = OpenSchema();
-            Execute(conn,
-                "INSERT INTO ic_card (card_idm, card_type, card_number, note, is_deleted, is_lent) " +
-                $"VALUES ('{ScreenshotSeedData.VirtualTouchCardIdm}', 'はやかけん', 'H-001', NULL, 0, 0)");
+            Execute(conn, sql);
 
             Action act = () => ScreenshotSeedData.SeedForVirtualTouch(conn);
+
+            var message = act.Should().Throw<InvalidOperationException>().Which.Message;
+            message.Should().Contain(expectedCount);
+            message.Should().Contain("DebugDataService");
+        }
+
+        /// <summary>
+        /// 投入の途中で <c>INSERT OR IGNORE</c> が無視されたとき（影響行数 0）は、どの行がぶつかったかを名指しして止めること。
+        /// </summary>
+        [Fact]
+        public void 影響行数が0なら_ぶつかった行を名指しして止まること()
+        {
+            Action act = () => ScreenshotSeedData.RequireInserted(0, $"交通系ICカード（IDm {ScreenshotSeedData.VirtualTouchCardIdm}「はやかけん 004」）");
 
             var message = act.Should().Throw<InvalidOperationException>().Which.Message;
             message.Should().Contain(ScreenshotSeedData.VirtualTouchCardIdm);
             message.Should().Contain("既存のデータとぶつかりました");
             message.Should().Contain("DebugDataService");
+        }
+
+        /// <summary>対: 影響行数が 1（投入できた）なら止めないこと。</summary>
+        [Fact]
+        public void 影響行数が1なら_止めないこと()
+        {
+            Action act = () => ScreenshotSeedData.RequireInserted(1, "職員（IDm FFFF000000000001「博多 花子」）");
+
+            act.Should().NotThrow();
         }
 
         /// <summary>
