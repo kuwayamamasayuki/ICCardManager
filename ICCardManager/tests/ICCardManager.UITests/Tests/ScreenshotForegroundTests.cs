@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using FluentAssertions;
 using ICCardManager.UITests.Infrastructure;
 using Xunit;
@@ -28,6 +29,7 @@ namespace ICCardManager.UITests.Tests
                 .And.Contain("explorer.exe", "前面にあるウィンドウのプロセス名を示す")
                 .And.Contain("Shell_TrayWnd", "前面にあるウィンドウのクラス名を示す（タイトルの無いタスクバーを見分ける）")
                 .And.Contain("灰色", "なぜ: 非アクティブの画像になることを示す")
+                .And.Contain("管理者権限", "管理者権限のウィンドウなら撮り直しても直らないことを示す")
                 .And.EndWith("撮影をやり直してください。", "どうすれば: 行動指示で終わる");
         }
 
@@ -56,50 +58,62 @@ namespace ICCardManager.UITests.Tests
         }
 
         [Fact]
-        public void 前面にできなかったときの文言は管理者権限の可能性にも触れること()
+        public void 撮影中に前面を奪われたままなら_前面のウィンドウを名指しして例外にすること()
         {
-            Action act = () => ScreenshotHelper.EnsureForegroundForCapture(() => false, () => "Switch USB（SwitchUsb.exe、クラス X）", "main.png");
+            var reads = 0;
 
-            act.Should().Throw<InvalidOperationException>().Which.Message.Should().Contain("管理者権限",
-                "管理者権限のウィンドウが前面にあると撮り直しても直らないので、閉じるか最小化する必要があると伝える");
-        }
-
-        [Fact]
-        public void 保存の直前に前面を奪われていたら_前面のウィンドウを名指しして例外にすること()
-        {
             Action act = () => ScreenshotHelper.EnsureStillForeground(
-                new IntPtr(100), new IntPtr(200), () => "通知（explorer.exe、クラス Windows.UI.Core.CoreWindow）", "history.png");
+                new IntPtr(100), () => { reads++; return new IntPtr(200); },
+                _ => "通知（explorer.exe、クラス Windows.UI.Core.CoreWindow）", "history.png", pause: () => { });
 
             var thrown = act.Should().Throw<InvalidOperationException>().Which;
             thrown.Message.Should().Contain("history.png")
                 .And.Contain("Windows.UI.Core.CoreWindow")
                 .And.Contain("灰色")
                 .And.EndWith("撮影をやり直してください。");
+            reads.Should().Be(ScreenshotHelper.StillForegroundReads, "合わなければ上限まで読み直してから失敗する");
         }
 
         [Fact]
-        public void 保存の直前もまだ前面なら例外にしないこと()
+        public void 前面が一瞬だけ外れても_読み直して戻っていれば例外にしないこと()
         {
-            var described = false;
+            var sequence = new Queue<IntPtr>(new[] { IntPtr.Zero, new IntPtr(200), new IntPtr(100) });
 
             ScreenshotHelper.EnsureStillForeground(
-                new IntPtr(100), new IntPtr(100), () => { described = true; return "使われない"; }, "history.png");
+                new IntPtr(100), () => sequence.Dequeue(), _ => "使われない", "history.png", pause: () => { });
 
-            described.Should().BeFalse();
+            sequence.Should().BeEmpty("戻るまで読み直す");
         }
 
         [Fact]
-        public void 前面にしない撮影では保存の直前に前面を確かめないこと()
+        public void 前面にしない撮影では前面を確かめないこと()
         {
             // bringToFront: false（トースト単体）と切り分け用の撮影は IntPtr.Zero を渡す
-            ScreenshotHelper.EnsureStillForeground(IntPtr.Zero, new IntPtr(200), () => "使われない", "toast_lend.png");
+            var reads = 0;
+
+            ScreenshotHelper.EnsureStillForeground(
+                IntPtr.Zero, () => { reads++; return new IntPtr(200); }, _ => "使われない", "toast_lend.png", pause: () => { });
+
+            reads.Should().Be(0);
         }
 
         [Fact]
-        public void 前面のウィンドウが無いときは_無いと示すこと()
+        public void 前面のウィンドウが無いときは_無いと示し文言が自己矛盾しないこと()
         {
-            ScreenshotHelper.DescribeWindow(IntPtr.Zero).Should().Be("前面のウィンドウなし",
+            ScreenshotHelper.DescribeWindow(IntPtr.Zero).Should().Be(ScreenshotHelper.NoForegroundWindow,
                 "ハンドル 0 をそのまま調べると「Idle.exe」と読めてしまう");
+
+            Action before = () => ScreenshotHelper.EnsureForegroundForCapture(
+                () => false, () => ScreenshotHelper.NoForegroundWindow, "main.png");
+            Action during = () => ScreenshotHelper.EnsureStillForeground(
+                new IntPtr(100), () => IntPtr.Zero, ScreenshotHelper.DescribeWindow, "main.png", pause: () => { });
+
+            foreach (var act in new[] { before, during })
+            {
+                act.Should().Throw<InvalidOperationException>().Which.Message
+                    .Should().NotContain("「" + ScreenshotHelper.NoForegroundWindow + "」",
+                        "「前面にあるウィンドウ『前面のウィンドウなし』」のような文にしない");
+            }
         }
 
         [Theory]
