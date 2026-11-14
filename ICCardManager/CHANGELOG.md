@@ -34,6 +34,12 @@
   - 読み取り済みの内容は、復号した時点で読み取り元から手放す（`CsvImportSource.TakeContent`。取り込みと DB への書き込みの間、最大 64MB の配列を残さない。x86）。照合を経ずにパスから読むのは直接インポートだけで、ファイルの状態を記録していないプレビュー経由の取り込み（本番では起きない）は Warning を記録する
   - テスト: `DataExportImportViewModelTests` +18 件・`CsvImportServiceTests` +16 件（UT-AUDIT-001d）。既存の `DataExportImportViewModelTests` はモックの引数の照合を読み取り元へ書き換え、画面の組み立てに必須引数のロガーを渡す形へ変えた（期待する動きは不変）。単体 10,522 → 10,556・合計 10,759 → 10,793
 
+**リファクタリング**
+- Issue #2475 **UI から到達しない履歴一覧の削除コマンド（`HistoryPanelViewModel.DeleteLedgerRow` / `DeleteLedgerRowCommand`）を削除し、履歴の削除のテストを実際の利用者の経路（利用履歴行編集ダイアログの「削除」）へ移した**。このコマンドは Issue #635 で履歴一覧の削除ボタン用に作られたが、Issue #750 でボタンが行編集ダイアログ内へ移ってから XAML にバインドされておらず、独自の認証（「履歴の削除」）を伴う公開 API のまま、削除の挙動テストの唯一の入口として残っていた（行編集ダイアログからの削除はダイアログの Window を取り出して要求を読むため、単体テストから踏めなかった）。将来だれかがバインドし直すと削除の経路が 2 系統に戻る。利用者から見た挙動は変わらない（行編集ダイアログの削除は従来どおり、開く前の「履歴の変更」の認証で行う）
+  - ダイアログの初期化と閉じた後の要求の読み取りを、Window ではなく ViewModel に対して行う継ぎ目を入れた（`INavigationService.ShowDialogAsync<TDialog, TViewModel>`・`IViewModelDialog<TViewModel>`。`LedgerRowEditDialog` が実装し、使われなくなった Window 側の中継メソッド・プロパティは削除）。テストはこれを差し替え、本物の `LedgerRowEditViewModel` で「開く → 削除を押す → 確認 → 閉じる」を再現する。旧テストが表明していた性質（貸出中の行も拒否せず削除できる・認証のキャンセルで何も消さない・確認の結果に従う・認証した職員の操作として記録しセッションを残さない・削除が 0 行／行が消えていたら監査ログを書かず競合を案内する・貸出状態のリセット）はすべて新しい経路で表明し直した。あわせて、これまで単体テストから踏めなかった「表示中のカードの払戻済をダイアログへ渡す」ことを初めて固定した
+  - 継ぎ目のために改修した `IDialogService.cs` / `DialogService.cs` に `#nullable enable` を付け、出た警告を是正した（CSV エクスポートの失敗で文言が無いときの代替文言、帳票作成の中断で原因のカードの失敗文言へ倒す）
+  - テスト: `HistoryPanelViewModelTests` の `DeleteLedgerRow_*` を `行編集からの削除_*` へ移設（同じ性質を見ていた 4 件を 2 件へまとめ −2 件）。`MainViewModelTests` の連携テスト 2 件も行編集ダイアログ経由へ。`ScreenTransitionDiagramConsistencyTests` の認証操作のスナップショットから「履歴の削除」を除き、`StaffAuthScopeConventionTests` の拾う件数を 3 → 2 にした
+
 **ドキュメント**
 - Issue #2465 / #2461 **画面のロック中に撮れなかった管理者マニュアルの図を撮り直した**
   - §1.6.1・§1.6.3 のカード登録方法の選択ダイアログ（`card_registration_mode.png` / `card_registration_mode_carryover.png`）を、ヒントが見出しの直後にある今の画面で撮り直した（#2465）

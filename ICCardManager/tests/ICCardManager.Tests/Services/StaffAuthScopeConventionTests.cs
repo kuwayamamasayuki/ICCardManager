@@ -85,8 +85,9 @@ public class StaffAuthScopeConventionTests
         var sources = EnumerateProductionSources().ToList();
 
         var historyEdit = sources.Single(f => Path.GetFileName(f) == "HistoryPanelViewModel.Edit.cs");
-        ScopedAuthCallPattern.Matches(ReadCode(historyEdit)).Count.Should().Be(3,
-            "履歴の追加・削除・変更の 3 つの認証が決まった形として拾えていること");
+        ScopedAuthCallPattern.Matches(ReadCode(historyEdit)).Count.Should().Be(2,
+            "履歴の追加・変更の 2 つの認証が決まった形として拾えていること" +
+            "（Issue #2475 で UI から到達しない「履歴の削除」の認証をコマンドごと削除した）");
 
         var owner = sources.Single(f => Path.GetFileName(f) == SessionOwnerFileName);
         BeginSessionCallPattern.IsMatch(ReadCode(owner)).Should().BeTrue(

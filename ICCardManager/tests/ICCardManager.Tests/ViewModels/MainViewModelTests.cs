@@ -2454,7 +2454,7 @@ public class MainViewModelTests : IDisposable
         ArrangeLentRecordDelete(cardIdm, hasOtherLentRecords: false);
         _viewModel.LentCards.Add(new CardDto { CardIdm = cardIdm, CardType = "はやかけん", CardNumber = "001" });
 
-        await _viewModel.History.DeleteLedgerRow(LentRecordDto(cardIdm));
+        await _viewModel.History.EditLedger(LentRecordDto(cardIdm));
 
         _cardRepositoryMock.Verify(r => r.GetLentAsync(It.IsAny<bool>()), Times.Once,
             "is_lent を戻したら貸出中一覧を読み直す");
@@ -2474,7 +2474,7 @@ public class MainViewModelTests : IDisposable
         ArrangeLentRecordDelete(cardIdm, hasOtherLentRecords: true);
         _viewModel.LentCards.Add(new CardDto { CardIdm = cardIdm, CardType = "はやかけん", CardNumber = "001" });
 
-        await _viewModel.History.DeleteLedgerRow(LentRecordDto(cardIdm));
+        await _viewModel.History.EditLedger(LentRecordDto(cardIdm));
 
         _cardRepositoryMock.Verify(r => r.UpdateLentStatusAsync(
                 It.IsAny<string>(), It.IsAny<bool>(), It.IsAny<DateTime?>(), It.IsAny<string>()),
@@ -2502,10 +2502,16 @@ public class MainViewModelTests : IDisposable
     };
 
     /// <summary>
-    /// 貸出中レコードの履歴削除を「認証済み・確認済み・削除成功」まで進める（連携テスト用）。
+    /// 貸出中レコードの履歴削除を「認証済み・行編集ダイアログで削除・確認済み・削除成功」まで進める（連携テスト用）。
     /// </summary>
+    /// <remarks>
+    /// Issue #2475: 削除は行編集ダイアログの「削除」から行う（実際の利用者の経路）。ダイアログは本物の ViewModel で再現する。
+    /// </remarks>
     private void ArrangeLentRecordDelete(string cardIdm, bool hasOtherLentRecords)
     {
+        HistoryPanelViewModelTests.ArrangeEditDialog(
+            _navigationServiceMock, _ledgerRepositoryMock.Object, _operationLoggerMock.Object, _dbContext,
+            editor => editor.RequestDeleteCommand.Execute(null));
         _staffAuthServiceMock
             .Setup(a => a.RequestAuthenticationAsync(It.IsAny<string>()))
             .ReturnsAsync(new StaffAuthResult { Idm = "AABBCCDDEEFF0011", StaffName = "田中太郎" });

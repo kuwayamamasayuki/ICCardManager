@@ -1,3 +1,4 @@
+#nullable enable
 using System;
 using System.Threading.Tasks;
 using System.Windows;
@@ -94,7 +95,7 @@ namespace ICCardManager.Services
         /// <typeparam name="TDialog">ダイアログのWindow型</typeparam>
         /// <param name="configure">ダイアログ表示前の設定コールバック（省略可）</param>
         /// <returns>ShowDialogの戻り値</returns>
-        bool? ShowDialog<TDialog>(Action<TDialog> configure = null) where TDialog : Window;
+        bool? ShowDialog<TDialog>(Action<TDialog>? configure = null) where TDialog : Window;
 
         /// <summary>
         /// DIコンテナからダイアログを解決し、非同期初期化後にShowDialogを呼び出す
@@ -102,6 +103,22 @@ namespace ICCardManager.Services
         /// <typeparam name="TDialog">ダイアログのWindow型</typeparam>
         /// <param name="configure">ダイアログ表示前の非同期設定コールバック（省略可）</param>
         /// <returns>ShowDialogの戻り値</returns>
-        Task<bool?> ShowDialogAsync<TDialog>(Func<TDialog, Task> configure = null) where TDialog : Window;
+        Task<bool?> ShowDialogAsync<TDialog>(Func<TDialog, Task>? configure = null) where TDialog : Window;
+
+        /// <summary>
+        /// DIコンテナからダイアログを解決し、その ViewModel を非同期に初期化してから ShowDialog を呼び出す（Issue #2475）
+        /// </summary>
+        /// <remarks>
+        /// 初期化を Window ではなく ViewModel に対して行う。呼び出し元は <paramref name="configure"/> で受け取った
+        /// ViewModel を保持し、閉じた後の要求（削除・次へ等）をそこから読む。Window を実体化しないので、
+        /// テストはこのメソッドを差し替えて、本物の ViewModel で「開く → 職員の操作 → 閉じる」を再現できる。
+        /// </remarks>
+        /// <typeparam name="TDialog">ダイアログのWindow型</typeparam>
+        /// <typeparam name="TViewModel">ダイアログの ViewModel の型</typeparam>
+        /// <param name="configure">ダイアログ表示前に ViewModel を初期化するコールバック</param>
+        /// <returns>ShowDialogの戻り値</returns>
+        Task<bool?> ShowDialogAsync<TDialog, TViewModel>(Func<TViewModel, Task> configure)
+            where TDialog : Window, IViewModelDialog<TViewModel>
+            where TViewModel : class;
     }
 }
