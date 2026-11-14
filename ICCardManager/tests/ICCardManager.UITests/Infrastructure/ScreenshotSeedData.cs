@@ -415,7 +415,10 @@ namespace ICCardManager.UITests.Infrastructure
             tx.Commit();
         }
 
-        private static void InsertStaff(SQLiteConnection conn, string idm, string name, string number)
+        /// <summary>
+        /// 職員を 1 名投入する。IDm が既存の職員とぶつかれば止める（<see cref="RequireInserted"/>）。
+        /// </summary>
+        internal static void InsertStaff(SQLiteConnection conn, string idm, string name, string number)
         {
             var affected = Execute(conn,
                 "INSERT OR IGNORE INTO staff (staff_idm, name, number, note, is_deleted) VALUES (@idm, @name, @number, NULL, 0)",

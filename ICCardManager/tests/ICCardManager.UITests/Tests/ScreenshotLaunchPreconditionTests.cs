@@ -150,6 +150,23 @@ namespace ICCardManager.UITests.Tests
             message.Should().NotContain("撮影モード");
         }
 
+        /// <summary>
+        /// IDm が <see cref="ScreenshotSeedData.Seed"/> の職員と同じ職員を足すと、主キーの違反で投入が無視される。案内は IDm を名指しすること。
+        /// </summary>
+        [Fact]
+        public void IDmが既存の職員と同じなら_IDmを名指しして止まること()
+        {
+            using var conn = OpenSchema();
+            ScreenshotSeedData.Seed(conn);
+
+            Action act = () => ScreenshotSeedData.InsertStaff(conn, AppFixture.SeededStaffIdm, "別の 職員", "100099");
+
+            var message = act.Should().Throw<InvalidOperationException>().Which.Message;
+            message.Should().Contain($"職員（IDm {AppFixture.SeededStaffIdm}「別の 職員」）");
+            message.Should().Contain("同じIDmの行を、シードの中で既に投入しています");
+            message.Should().NotContain("種別・管理番号", "職員には IDm 以外の一意制約が無い");
+        }
+
         /// <summary>対: IDm も種別・管理番号も既存と重ならないカードは、シードの後でもそのまま入ること。</summary>
         [Fact]
         public void IDmも種別と管理番号も重ならないカードは_そのまま入ること()
