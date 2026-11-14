@@ -69,6 +69,7 @@ cd D:\OneDrive\交通系\src\ICCardManager
 
 動作の要点：
 - 本体を Release と Debug の両方でビルドし、2 パスで撮る。タッチを要する画面は仮想タッチ（Debug 限定）で再現し、撮影モード（環境変数 `ICCARDMANAGER_SCREENSHOT_MODE=1`）で仮想タッチパネルを透明にし、起動時のテストデータ自動登録を止める
+- **撮影テストは起動の前提をテスト自身で確かめる**。タッチを要する画面の撮影（Debug パス）は撮影モードを起動するアプリへ自分で渡すので、実行プロセスに `ICCARDMANAGER_SCREENSHOT_MODE` が無くても撮れる。Release パスの撮影（`ManualScreenshotTests`）は、撮影を指示されている（`ICCARDMANAGER_SCREENSHOT=1`）のに `ICCARDMANAGER_UITEST_CONFIGURATION=Release` が届いていなければ、撮らずに「環境変数 … が届いていません」と渡し方を示して失敗する。撮影用のサンプルデータを入れる前の DB に職員・交通系ICカード・台帳の行がある（Debug 版のアプリが撮影モードなしで起動し、起動時のテストデータが先に入った）ときも、原因を名指しして失敗する。スクリプトを使わずに `dotnet test` で直接流すときは、これらの環境変数をテストのプロセスへ渡すこと。**WSL から dotnet.exe を呼ぶ場合は `WSLENV` に変数名を加えないと Windows 側へ届かない**（例: `export ICCARDMANAGER_SCREENSHOT=1 ICCARDMANAGER_UITEST_CONFIGURATION=Release WSLENV=${WSLENV:+$WSLENV:}ICCARDMANAGER_SCREENSHOT:ICCARDMANAGER_UITEST_CONFIGURATION`。既存の `WSLENV` を上書きしないよう前に足す）
 - 既存の DB（`%ProgramData%\ICCardManager\iccard.db`）は撮影中だけ退避し、終了後に復元する。撮影が途中で落ちた場合は、退避ファイル（`iccard.db.uitest-backup`）が残り、次に UI テストを実行したときに書き戻される
 - ピッすい（インストール版・デバッグ起動）が DB を開いていると、撮影は DB に何も触れずに中止する。ピッすいを終了してから実行する（開いたまま退避すると、古い退避ファイルが残って次回の実行が DB を巻き戻すため）。撮影・UI テストの最中にもピッすいを起動しない（起動したピッすいはテスト用の DB を開くので、そこで記録したものは元の DB に残らず、終了時の復元も失敗して次回に書き戻される）
 - `database_config.txt` で DB の保存先を変えている PC では撮影を中止する（アプリが退避していない DB を開くため）。設定画面（F5）の「デフォルトに戻す」で既定に戻してから実行する

@@ -36,7 +36,10 @@ namespace ICCardManager.UITests.Infrastructure
         /// <c>Release</c> で起動する。
         /// </summary>
         internal static string LaunchConfiguration => ResolveLaunchConfiguration(
-            Environment.GetEnvironmentVariable("ICCARDMANAGER_UITEST_CONFIGURATION"));
+            Environment.GetEnvironmentVariable(LaunchConfigurationEnvironmentVariable));
+
+        /// <summary>起動するビルド構成を選ぶ環境変数の名前（<see cref="LaunchConfiguration"/>）。</summary>
+        internal const string LaunchConfigurationEnvironmentVariable = "ICCARDMANAGER_UITEST_CONFIGURATION";
 
         /// <summary>
         /// 環境変数の値からビルド構成名を解決する（純粋関数）。<c>Release</c>（大文字小文字を無視）のときだけ
@@ -289,6 +292,43 @@ namespace ICCardManager.UITests.Infrastructure
                 "置き場所の差し替え（環境変数 " + ScreenshotDataRootEnvironmentVariable + "）は DEBUG ビルドのアプリにしか無く、" +
                 "このまま起動すると撮影用の投入データが画面に出ません。" +
                 "ICCARDMANAGER_UITEST_CONFIGURATION=Debug で実行してください（撮影は tools/take-screenshots-uitest.ps1 の Debug パスで走らせてください）。");
+        }
+
+        /// <summary>
+        /// Release パスの撮影（<c>ManualScreenshotTests</c>）が Release 起動でなければ、原因と渡し方を示して例外を投げる（Issue #2485）。
+        /// </summary>
+        /// <param name="configurationEnvironmentValue">環境変数 <see cref="LaunchConfigurationEnvironmentVariable"/> の値（未設定なら null）。</param>
+        /// <remarks>
+        /// <para>
+        /// 環境変数が届かないと <see cref="LaunchConfiguration"/> は Debug へ丸まり、Debug 版が撮影モードなしで起動する。
+        /// 仮想タッチの操作パネルが写り込むうえ、起動時のテストデータ（本体の <c>DebugDataService</c>）が撮影用のシードより先に入り、
+        /// テストは原因と無関係な症状（カード一覧に行が現れない等）で失敗する。WSL から dotnet.exe を直接呼ぶと、
+        /// <c>WSLENV</c> に変数名を加えない限り Windows 側のプロセスへ環境変数が届かない。
+        /// </para>
+        /// <para>
+        /// Skip ではなく失敗にする。撮影スクリプト（<c>tools/take-screenshots-uitest.ps1</c>）は Release パスで必ずこの値を渡し、
+        /// Debug パスのフィルタ（<c>Screenshot=Debug</c>）は本クラスを選ばないので、ここへ来るのは撮影を意図して
+        /// （<c>ICCARDMANAGER_SCREENSHOT=1</c> を渡して）手で <c>dotnet test</c> を実行し、起動構成だけが届かなかった場合に限る。
+        /// Skip は <c>dotnet test</c> の終了コードに現れず、手で実行したときは撮影漏れに気付けない。
+        /// </para>
+        /// </remarks>
+        internal static void ThrowUnlessReleaseCapture(string? configurationEnvironmentValue)
+        {
+            if (string.Equals(ResolveLaunchConfiguration(configurationEnvironmentValue), "Release", StringComparison.Ordinal))
+            {
+                return;
+            }
+
+            var received = string.IsNullOrEmpty(configurationEnvironmentValue)
+                ? "テストのプロセスへ届いていません（未設定）"
+                : $"「{configurationEnvironmentValue}」です";
+            throw new InvalidOperationException(
+                "マニュアル用スクリーンショットの Release パスを撮ろうとしましたが、環境変数 " + LaunchConfigurationEnvironmentVariable + " が" + received + "。" +
+                "このまま撮ると Debug 版のアプリが撮影モードなしで起動し、仮想タッチの操作パネルが写り込むうえ、" +
+                "起動時のテストデータ（DebugDataService）が撮影用のデータより先に登録され、撮影用のデータが入りません。" +
+                "撮影は tools/take-screenshots-uitest.ps1 から実行してください。dotnet test を直接実行するときは、" +
+                LaunchConfigurationEnvironmentVariable + "=Release を設定してください（WSL から dotnet.exe を呼ぶ場合は、" +
+                "WSLENV に変数名を加えないと Windows 側へ届きません。例: export WSLENV=${WSLENV:+$WSLENV:}ICCARDMANAGER_SCREENSHOT:" + LaunchConfigurationEnvironmentVariable + "。既存の WSLENV を残す形）。");
         }
 
         /// <summary>
