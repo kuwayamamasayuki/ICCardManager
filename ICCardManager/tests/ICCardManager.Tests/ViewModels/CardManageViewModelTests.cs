@@ -4525,9 +4525,13 @@ public class CardManageViewModelTests : IDisposable
     /// </summary>
     /// <remarks>
     /// <para>
-    /// <c>DeleteAsync</c> は <c>RequestAuthenticationAsync</c>（職員証タッチ待ち）を挟んでから
+    /// 修正前の <c>DeleteAsync</c> は <c>RequestAuthenticationAsync</c>（職員証タッチ待ち）を挟んでから
     /// 確認ダイアログの文言で <c>SelectedCard</c> を逆参照していた。待機中に選択が外れると
     /// <c>NullReferenceException</c> になり、非同期コマンドから例外が抜けて致命的エラーダイアログになる。
+    /// </para>
+    /// <para>
+    /// Issue #2474 で確認は認証より前（「削除確認 → 認証」）になり、確認の文言は待機の前に作られる。
+    /// 認証の待機の後に残るのは、削除前の読み直し・論理削除・操作ログの対象で、これらが開始時点のカードを指すことを表明する。
     /// </para>
     /// <para>
     /// 「削除するのはボタンを押した時点で選択されていた行」であり、その後の選択状態には依存しない。
@@ -4560,11 +4564,8 @@ public class CardManageViewModelTests : IDisposable
         // Act
         await _viewModel.DeleteAsync();
 
-        // Assert - 確認ダイアログは開始時点の対象を名指しできている
-        _dialogServiceMock.Verify(d => d.ShowWarningConfirmation(
-            It.Is<string>(s => s.Contains("はやかけん") && s.Contains("H-001")),
-            It.IsAny<string>()), Times.Once);
-
+        // Assert - 認証の待機の後の読み直し・論理削除・操作ログは、開始時点の対象に対して行われる
+        _cardRepositoryMock.Verify(r => r.GetByIdmAsync(idm, false), Times.Once);
         _cardRepositoryMock.Verify(r => r.DeleteAsync(idm, It.IsAny<SQLiteTransaction>()), Times.Once);
         _operationLogRepositoryMock.Verify(r => r.InsertAsync(It.Is<OperationLog>(log =>
             log.TargetTable == OperationLogger.Tables.IcCard &&
