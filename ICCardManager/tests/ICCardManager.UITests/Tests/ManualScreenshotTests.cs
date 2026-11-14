@@ -426,9 +426,17 @@ namespace ICCardManager.UITests.Tests
             row.Should().NotBeNull($"職員一覧に \"{ScreenshotSeedData.PrimaryStaffName}\" の行があること");
             row!.Select();
 
+            // 「編集」は選択行で有効になるので、有効になるまで待ってから押す（Issue #2192）
+            dialog.WaitUntilEnabled(TestConstants.StaffEditButton).Should().BeTrue("行を選んだら「編集」ボタンが有効になること");
             dialog.ClickButton(TestConstants.StaffEditButton);
             dialog.WaitUntilEnabled(TestConstants.StaffReplaceCardButton).Should().BeTrue(
                 "編集フォームに「職員証を差し替え」ボタンが押せる状態で出ていること（図にボタンが写ること）");
+
+            // 氏名の欄のキャレット（点滅で撮るたびに画像が変わる）が写らないよう、「職員証を差し替え」ボタンへフォーカスを移してから撮る。
+            // 選んだ行へは移せない（編集中は一覧が操作できず、UIA の SetFocus が InvalidOperationException になる。実測）
+            var replaceButton = dialog.FindByName(TestConstants.StaffReplaceCardButton);
+            replaceButton.Should().NotBeNull($"編集フォームに「{TestConstants.StaffReplaceCardButton}」ボタンがあること");
+            replaceButton!.Focus();
 
             var path = ScreenshotHelper.Capture(dialog.Window, "staff_edit_dialog.png");
             File.Exists(path).Should().BeTrue();
