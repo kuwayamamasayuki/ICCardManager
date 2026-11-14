@@ -22,7 +22,9 @@ namespace ICCardManager.UITests.Tests
     /// 仮想タッチは DEBUG ビルドにしか無いため、本クラスは <b>Debug ビルド</b>で起動する
     /// （<c>ICCARDMANAGER_UITEST_CONFIGURATION=Debug</c>）。メイン画面下部の操作パネルは環境変数
     /// <c>ICCARDMANAGER_SCREENSHOT_MODE=1</c>（<c>App.IsScreenshotMode</c>）で透明にし、起動時のテストデータ自動登録も止めて、写り込ませずに
-    /// UI Automation からボタンを押す。
+    /// UI Automation からボタンを押す。撮影モードはテストが起動するアプリへ自分で渡す（<see cref="AppFixture.SuppressDebugTestData"/>。Issue #2485）。
+    /// 実行プロセスの環境変数に頼ると、届かないとき（WSL から dotnet.exe を直接呼び、<c>WSLENV</c> を設定していない等）に
+    /// 起動時のテストデータが撮影用のデータより先に入り、原因と無関係な症状で失敗する。
     /// </para>
     /// <para>
     /// トースト通知は画面の隅に出る別ウィンドウなので、メイン画面とトーストの両方を囲む矩形で撮る
@@ -66,7 +68,7 @@ namespace ICCardManager.UITests.Tests
         {
             SkipUnlessDebugCapture();
 
-            using var fixture = AppFixture.LaunchWithSeed(ScreenshotSeedData.SeedForVirtualTouch);
+            using var fixture = AppFixture.LaunchWithSeed(ScreenshotSeedData.SeedForVirtualTouch, AppFixture.SuppressDebugTestData);
             ScreenshotHelper.MoveToTopLeft(fixture.MainWindow);
             var page = new MainWindowPage(fixture.MainWindow, fixture.Automation);
 
@@ -106,7 +108,7 @@ namespace ICCardManager.UITests.Tests
         {
             SkipUnlessDebugCapture();
 
-            using var fixture = AppFixture.LaunchWithSeed(ScreenshotSeedData.SeedForPhotographedStaffTouch);
+            using var fixture = AppFixture.LaunchWithSeed(ScreenshotSeedData.SeedForPhotographedStaffTouch, AppFixture.SuppressDebugTestData);
             ScreenshotHelper.MoveToTopLeft(fixture.MainWindow);
             var page = new MainWindowPage(fixture.MainWindow, fixture.Automation);
 
@@ -120,7 +122,8 @@ namespace ICCardManager.UITests.Tests
         {
             SkipUnlessDebugCapture();
 
-            using var fixture = AppFixture.LaunchWithSeed(conn => ScreenshotSeedData.SeedForVirtualTouch(conn, skipBusStopInput: true));
+            using var fixture = AppFixture.LaunchWithSeed(
+                conn => ScreenshotSeedData.SeedForVirtualTouch(conn, skipBusStopInput: true), AppFixture.SuppressDebugTestData);
             ScreenshotHelper.MoveToTopLeft(fixture.MainWindow);
             var page = new MainWindowPage(fixture.MainWindow, fixture.Automation);
 
@@ -156,7 +159,8 @@ namespace ICCardManager.UITests.Tests
         {
             SkipUnlessDebugCapture();
 
-            using var fixture = AppFixture.LaunchWithSeed(conn => ScreenshotSeedData.SeedForVirtualTouch(conn, skipBusStopInput: false));
+            using var fixture = AppFixture.LaunchWithSeed(
+                conn => ScreenshotSeedData.SeedForVirtualTouch(conn, skipBusStopInput: false), AppFixture.SuppressDebugTestData);
             ScreenshotHelper.MoveToTopLeft(fixture.MainWindow);
             var page = new MainWindowPage(fixture.MainWindow, fixture.Automation);
 
@@ -185,7 +189,8 @@ namespace ICCardManager.UITests.Tests
 
             // 同行者数の入力ダイアログを出す。自動クローズ（#2009）は 0 =「自動的に閉じない」にしてある
             using var fixture = AppFixture.LaunchWithSeed(
-                conn => ScreenshotSeedData.SeedForVirtualTouch(conn, skipBusStopInput: true, skipCompanionCountInput: false));
+                conn => ScreenshotSeedData.SeedForVirtualTouch(conn, skipBusStopInput: true, skipCompanionCountInput: false),
+                AppFixture.SuppressDebugTestData);
             ScreenshotHelper.MoveToTopLeft(fixture.MainWindow);
             var page = new MainWindowPage(fixture.MainWindow, fixture.Automation);
 
@@ -212,7 +217,7 @@ namespace ICCardManager.UITests.Tests
         {
             SkipUnlessDebugCapture();
 
-            using var fixture = AppFixture.LaunchWithSeed(ScreenshotSeedData.SeedForVirtualTouch);
+            using var fixture = AppFixture.LaunchWithSeed(ScreenshotSeedData.SeedForVirtualTouch, AppFixture.SuppressDebugTestData);
             ScreenshotHelper.MoveToTopLeft(fixture.MainWindow);
             var page = new MainWindowPage(fixture.MainWindow, fixture.Automation);
 
@@ -236,7 +241,7 @@ namespace ICCardManager.UITests.Tests
         {
             SkipUnlessDebugCapture();
 
-            using var fixture = AppFixture.LaunchWithSeed(ScreenshotSeedData.Seed);
+            using var fixture = AppFixture.LaunchWithSeed(ScreenshotSeedData.Seed, AppFixture.SuppressDebugTestData);
             ScreenshotHelper.MoveToTopLeft(fixture.MainWindow);
             var page = new MainWindowPage(fixture.MainWindow, fixture.Automation);
 
@@ -258,7 +263,7 @@ namespace ICCardManager.UITests.Tests
         {
             SkipUnlessDebugCapture();
 
-            using var fixture = AppFixture.LaunchWithSeed(ScreenshotSeedData.Seed);
+            using var fixture = AppFixture.LaunchWithSeed(ScreenshotSeedData.Seed, AppFixture.SuppressDebugTestData);
             ScreenshotHelper.MoveToTopLeft(fixture.MainWindow);
             var page = new MainWindowPage(fixture.MainWindow, fixture.Automation);
 
