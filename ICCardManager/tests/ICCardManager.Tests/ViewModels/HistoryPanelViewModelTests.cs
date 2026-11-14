@@ -2266,6 +2266,64 @@ public class HistoryPanelViewModelTests : IDisposable
         requestedPages.Should().NotBeEmpty("保存の分岐でも一覧を読み直す");
     }
 
+    /// <summary>
+    /// 競合の再読込の分岐に入るのは競合を検出したときだけであること（上の 2 件の対）。
+    /// 競合が無いまま「次へ（保存しない）」を押したら、一覧を読み直さずに次の行を開く。
+    /// </summary>
+    /// <remarks>
+    /// 分岐の条件から <c>NeedsHistoryReload</c> の項を外すと、保存せずに閉じたものがすべて再読込の分岐に入り、
+    /// 「次へ（保存しない）」「戻る」で隣の行が開かず、一覧を読み直すだけになる（レビュー 3 回目で検出）。
+    /// </remarks>
+    [Fact]
+    public async Task 行編集_競合なしで次へを押したら_一覧を読み直さずに次の行を開くこと()
+    {
+        var requestedPages = await ArrangeLedgerEditForSaveAsync();
+        var openCount = 0;
+        var opened = ArrangeEditDialog(editor =>
+        {
+            if (++openCount > 1)
+            {
+                return Task.CompletedTask; // 次の行は、開いたら何もせずに閉じる
+            }
+
+            editor.SkipToNextCommand.Execute(null);
+            editor.IsSkipToNextRequested.Should().BeTrue("前提: 「次へ（保存しない）」が要求された（狙った出口）");
+            editor.NeedsHistoryReload.Should().BeFalse("前提: 競合は無い");
+            return Task.CompletedTask;
+        });
+
+        await AwaitPanelOperationAsync(_history.EditLedger(_history.HistoryLedgers[0]));
+
+        opened.Should().HaveCount(2, "「次へ（保存しない）」で一覧の次の行を開く");
+        _ledgerRepositoryMock.Verify(r => r.GetByIdAsync(2), Times.AtLeastOnce(), "次に開いたのは一覧の 2 行目");
+        requestedPages.Should().BeEmpty("何も保存しておらず競合も無いので、一覧は読み直さない");
+        _host.Calls.Should().BeEmpty();
+    }
+
+    /// <summary>
+    /// 競合が無いまま保存せずに閉じたら（キャンセル）、一覧もダッシュボード・貸出中一覧・警告も読み直さないこと（同じく対）。
+    /// </summary>
+    [Fact]
+    public async Task 行編集_競合なしで保存せずに閉じたら_何も読み直さないこと()
+    {
+        var requestedPages = await ArrangeLedgerEditForSaveAsync();
+        var opened = ArrangeEditDialog(editor =>
+        {
+            editor.CanDelete.Should().BeTrue("前提: 編集モードで開いた");
+            editor.IsSaved.Should().BeFalse();
+            editor.NeedsHistoryReload.Should().BeFalse("前提: 競合は無い");
+            return Task.CompletedTask; // 何もせずに閉じる
+        });
+
+        await AwaitPanelOperationAsync(_history.EditLedger(_history.HistoryLedgers[0]));
+
+        opened.Should().ContainSingle("前提: ダイアログを開いた");
+        requestedPages.Should().BeEmpty();
+        _host.Calls.Should().BeEmpty();
+        _ledgerRepositoryMock.Verify(
+            r => r.GetByDateRangeAsync(It.IsAny<string>(), It.IsAny<DateTime>(), It.IsAny<DateTime>()), Times.Never);
+    }
+
     #endregion
 
     #region 行編集ダイアログからの削除（Issue #750 / Issue #1574 / Issue #2475）
