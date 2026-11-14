@@ -25,10 +25,23 @@ namespace ICCardManager.Tests.ViewModels;
 /// ②は <c>BeginModalCardReadingSuppression</c> の <c>using</c> の内側なら認める（<c>MergeHistoryDialog</c> が該当）。
 /// 職員認証（<c>IStaffAuthService</c>）は認証ダイアログ自身が抑制を取る（<c>CardReadingSource.Authentication</c>）ので対象外。
 /// </para>
+/// <para>
+/// <b>検査が見ない経路</b>（PR #2491 のレビュー 2 回目で明記）: ①ダイアログを出す型のメンバーは <c>INavigationService</c> /
+/// <c>IDialogService</c>（とその実装）だけを見る。<c>IStaffAuthService</c> のような別のサービスの中でモーダルを出す形、
+/// <c>Window</c> 型のフィールドを持って後で表示する形は拾わない（<c>.ShowDialog(</c> の直呼びは②で拾う）。
+/// ②<c>App.Current.ServiceProvider</c> などの DI からその場で <c>INavigationService</c> を取り出して表示する形は拾わない
+/// （#853 で ViewModel は <c>App.Current.ServiceProvider</c> に依存しない方針）。③<c>ShowDialog</c> 以外の名前でモーダルを
+/// 出すメソッド（独自の拡張メソッド等）は拾わない。これらを足すときは、表示の範囲を <c>BeginModalCardReadingSuppression</c> の
+/// <c>using</c> で囲み、ここへ検査を足すこと。
+/// </para>
 /// </remarks>
 public class ModalCardReadingSuppressionConventionTests
 {
-    private static readonly Regex DirectWindowShowDialog = new(@"\.ShowDialog\s*\(\s*\)", RegexOptions.Compiled);
+    /// <summary>
+    /// <c>Window.ShowDialog()</c> と、引数付きの <c>ShowDialog(owner)</c>（<c>SaveFileDialog</c> / <c>OpenFileDialog</c> 等）。
+    /// 包み（<c>_navigationService</c>）を受け手にした呼び出しは除く（型引数を推論させた <c>_navigationService.ShowDialog(configure)</c> を含む）。
+    /// </summary>
+    private static readonly Regex DirectWindowShowDialog = new(@"(?<!\b_navigationService\s*)\.ShowDialog\s*\(", RegexOptions.Compiled);
 
     private static readonly Regex DirectMessageBox = new(
         @"MessageBox\s*\.\s*Show\s*\(|ErrorDialogHelper\s*\.\s*Show\w*\s*\(", RegexOptions.Compiled);
@@ -177,7 +190,8 @@ public class ModalCardReadingSuppressionConventionTests
         const string declared = "void A() { using var s = BeginModalCardReadingSuppression(); d.ShowDialog(); }";
         const string messageBox = "void A() { using (BeginModalCardReadingSuppression()) { OwnedMessageBox.Show(o, m, t, b, i); } }";
         const string errorHelper = "void A() { ErrorDialogHelper.ShowError(ex, t); }";
-        const string navigation = "void A() { _navigationService.ShowDialog<X>(); _navigationService.ShowConfirmation(m, t); }";
+        const string navigation = "void A() { _navigationService.ShowDialog<X>(); _navigationService.ShowDialog(configure); _navigationService.ShowConfirmation(m, t); }";
+        const string fileDialog = "void A() { var d = new SaveFileDialog(); if (d.ShowDialog(owner) == true) { } }";
 
         FindUnsuppressedDirectModals(violating).Should().HaveCount(1, "抑制の外の ShowDialog() は違反");
         FindUnsuppressedDirectModals(suppressed).Should().BeEmpty("抑制の using の内側は認める");
@@ -185,6 +199,7 @@ public class ModalCardReadingSuppressionConventionTests
         FindUnsuppressedDirectModals(messageBox).Should().HaveCount(1, "MessageBox の直呼びは抑制の内側でも認めない");
         FindUnsuppressedDirectModals(errorHelper).Should().HaveCount(1, "ErrorDialogHelper も MessageBox を出す");
         FindUnsuppressedDirectModals(navigation).Should().BeEmpty("包みを通る表示は対象外");
+        FindUnsuppressedDirectModals(fileDialog).Should().HaveCount(1, "引数付きの ShowDialog(owner) も直接の表示");
     }
 
     [Theory]

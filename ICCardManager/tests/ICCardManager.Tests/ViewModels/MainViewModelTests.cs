@@ -4551,6 +4551,37 @@ public class MainViewModelTests : IDisposable
     }
 
     /// <summary>
+    /// 同じスコープを 2 回 Dispose しても 1 回分しか数えず、もう一方のスコープが開いている間は抑制が残ること
+    /// （PR #2491 のレビュー 2 回目で追加）。
+    /// </summary>
+    /// <remarks>
+    /// 開いているスコープの数で抑制を外すので、2 回目の Dispose まで数えると、別の表示が開いているのに数が 0 になって抑制が消える。
+    /// </remarks>
+    [Fact]
+    public async Task 同じモーダルのスコープを2回解放しても他のモーダルの表示中は職員証のタッチを処理しないこと()
+    {
+        ArrangeModalTestStaff();
+        var host = (IHistoryPanelHost)_viewModel;
+        var outer = host.BeginModalCardReadingSuppression();
+        var inner = host.BeginModalCardReadingSuppression();
+
+        inner.Dispose();
+        inner.Dispose();
+
+        _viewModel.IsCardReadingSuppressed.Should().BeTrue("もう一方のスコープが開いている間は抑制を外さない");
+        RaiseModalTestStaffTouch();
+        await _dispatcherService.WaitForPendingAsync();
+        _viewModel.CurrentState.Should().Be(AppState.WaitingForStaffCard, "表示中の職員証のタッチを処理しない");
+
+        outer.Dispose();
+
+        _viewModel.IsCardReadingSuppressed.Should().BeFalse("すべて閉じたら抑制を外す");
+        RaiseModalTestStaffTouch();
+        await _dispatcherService.WaitForPendingAsync();
+        _viewModel.CurrentState.Should().Be(AppState.WaitingForIcCard, "閉じた後のタッチは通常どおり処理する（対）");
+    }
+
+    /// <summary>
     /// 先に開いた側が、後から開いた側より先に閉じても、後から開いた側の表示中は抑制が解けないこと（PR #2491 のレビューで検出）。
     /// </summary>
     /// <remarks>
