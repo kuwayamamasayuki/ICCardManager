@@ -97,7 +97,10 @@ namespace ICCardManager.UITests.Tests
             NativeWindows.IsEnabled(dialogHandle).Should().BeFalse(
                 "MessageBox を出している間、下のダイアログは Win32 レベルで無効になり、削除などのボタンを押せないこと");
 
-            // 対: 閉じるとダイアログは再び操作でき、アプリは削除を記録していない
+            // 対: 閉じるとダイアログは再び操作でき、アプリは削除を記録していない。
+            // 最後の DB の表明（操作ログに削除が 0 件）は副作用が無いことの確認にとどまり、検出力はほぼ無い。
+            // 他の PC が先に is_deleted = 1 にしているので、認証の後の読み直しを外しても論理削除の WHERE が 0 行になって
+            // 操作ログは書かれず、この表明は緑のまま（断る経路の検査は単体テスト `CardManageViewModelTests` の削除の競合のテスト（`DeleteAsync_WhenTargetRowMissing_*` 等）が担う）
             MessageBoxOperations.Answer(messageBox, "OK");
 
             var enabledAgain = Retry.WhileFalse(

@@ -1483,8 +1483,8 @@ public class CardManageViewModelTests : IDisposable
     /// 認証が完了しなかった案内の文言（何が・なぜ・どうすれば）。押し直すボタンの名前を操作ごとに名指しする。
     /// </summary>
     [Theory]
-    [InlineData(true, "削除していません", "もう一度「削除」を押して")]
-    [InlineData(false, "払い戻していません", "もう一度「払い戻し」を押して")]
+    [InlineData(true, "削除していません", "削除するには、もう一度「削除」を押して")]
+    [InlineData(false, "払い戻していません", "払い戻すには、もう一度「払い戻し」を押して")]
     public void BuildAuthenticationCancelledMessage_対象と理由と押し直す操作を述べること(
         bool isDelete, string notDone, string retry)
     {

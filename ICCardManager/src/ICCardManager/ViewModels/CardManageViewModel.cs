@@ -1086,7 +1086,7 @@ namespace ICCardManager.ViewModels
                 return;
             }
 
-            // Issue #429: ICカードの削除は認証が必要
+            // Issue #429: 交通系ICカードの削除は認証が必要
             // Issue #2474: 認証は「削除確認」で はい を押した**後**に求める（払い戻し #2322 と同じ順序）。
             // 「いいえ」で取りやめるだけなら職員証は要らない。認証の待機中に他 PC が削除・払い戻し・貸出をしても、
             // 下の読み直し（GetByIdmAsync）と論理削除の WHERE が検出して名指しで案内する（確認の後に読み直すのは従来どおり）。
@@ -1586,15 +1586,16 @@ namespace ICCardManager.ViewModels
         /// </remarks>
         internal static string BuildAuthenticationCancelledMessage(string targetLabel, CardWriteOperation operation)
         {
-            var notDone = operation switch
+            // 動詞の活用（「払い戻す」）はボタン名（「払い戻し」）から作れないので、操作ごとに持つ
+            var (notDone, toDo) = operation switch
             {
-                CardWriteOperation.Delete => "削除していません",
-                CardWriteOperation.Refund => "払い戻していません",
+                CardWriteOperation.Delete => ("削除していません", "削除するには"),
+                CardWriteOperation.Refund => ("払い戻していません", "払い戻すには"),
                 _ => throw new ArgumentOutOfRangeException(nameof(operation), operation, "文言の操作名が定義されていない操作です。"),
             };
             var buttonName = GetOperationName(operation);
             return $"職員証の認証が完了しなかったため、{targetLabel}を{notDone}。" +
-                   $"{buttonName}するには、もう一度「{buttonName}」を押して、職員証で認証してください。";
+                   $"{toDo}、もう一度「{buttonName}」を押して、職員証で認証してください。";
         }
 
         /// <summary>
