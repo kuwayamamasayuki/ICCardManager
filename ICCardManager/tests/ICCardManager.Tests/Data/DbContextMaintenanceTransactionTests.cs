@@ -1,8 +1,11 @@
 using System;
+using System.Collections.Generic;
 using System.Data.SQLite;
+using System.Globalization;
 using System.Threading;
 using System.Threading.Tasks;
 using FluentAssertions;
+using ICCardManager.Common;
 using ICCardManager.Data;
 using ICCardManager.Data.Repositories;
 using ICCardManager.Infrastructure.Caching;
@@ -285,16 +288,31 @@ public class DbContextMaintenanceTransactionTests : IDisposable
     /// <remarks>
     /// Issue #2108: 待機は <see cref="DbContext.RetryDelayAsync"/> を通る（同期版でも差し替え口は 1 つ）。
     /// 記録器へ差し替えて、実時間を使わずに「何ミリ秒待とうとしたか」を表明する。
+    /// <para>
+    /// Issue #2476: CI（Release）で 1 回だけ「削除件数 0」で失敗した（FluentAssertions は Release の行番号の
+    /// ずれで主語を <c>attempts</c> と表示したが、理由の文言から失敗したのは削除件数の表明）。このテストの
+    /// ロック競合は割り込み点から例外を投げて作っており、別の接続でロックを持つ処理は無いので、
+    /// 「ロックの保持と cleanup の開始のタイミング」には依存しない。単独での繰り返し・並列の負荷・全件実行では
+    /// 再現せず原因は未特定のため、次に起きたときに切り分けられるよう、各試行で保守トランザクションから
+    /// 見えた対象行の数・削除の境界日・記録した日付・削除後の残りを失敗の理由へ載せる。
+    /// </para>
     /// </remarks>
     [Fact]
     public async Task CleanupOldData_一過性のロック競合はバックオフで待って再試行すること()
     {
-        await _ledgerRepository.InsertAsync(CreateLedger(DateTime.Now.AddYears(-7), "7年前のデータ"));
+        var recordedDate = DateTime.Now.AddYears(-7);
+        await _ledgerRepository.InsertAsync(CreateLedger(recordedDate, "7年前のデータ"));
+        var targetsBefore = await CountAsync(TargetRowCountSql);
         var retryDelay = RecordingRetryDelay.AttachTo(_dbContext);
         var attempts = 0;
+        var observations = new List<string>();
         _dbContext.MaintenanceTransactionOpenedHook = () =>
         {
-            if (++attempts == 1)
+            attempts++;
+            observations.Add(
+                $"試行{attempts}: 対象行 {CountInMaintenanceTransaction(TargetRowCountSql)} 件・" +
+                $"境界日 {ReadTextInMaintenanceTransaction(RetentionThresholdSql)}");
+            if (attempts == 1)
             {
                 throw new SQLiteException(SQLiteErrorCode.Busy, "database is locked");
             }
@@ -302,11 +320,38 @@ public class DbContextMaintenanceTransactionTests : IDisposable
 
         var (ledgerCount, _) = await Task.Run(() => _dbContext.CleanupOldData());
 
-        ledgerCount.Should().Be(1, "2 回目の試行で削除が完了すること");
-        attempts.Should().Be(2);
+        _dbContext.MaintenanceTransactionOpenedHook = null;
+        var diagnostics =
+            $"記録した日付 {SqliteDateTimeFormat.ToText(recordedDate)}・開始前の対象行 {targetsBefore} 件・" +
+            $"{string.Join("・", observations)}・削除後の対象行 {await CountAsync(TargetRowCountSql)} 件・" +
+            $"待機 [{string.Join(", ", retryDelay.Delays)}]";
+        ledgerCount.Should().Be(1, "2 回目の試行で削除が完了すること（{0}）", diagnostics);
+        attempts.Should().Be(2, "初回の失敗の後に 1 回だけ再試行すること（{0}）", diagnostics);
         retryDelay.Delays.Should().Equal(new[] { DbContext.LocalRetryDelays[0] },
             "失敗した 1 回の後にだけ、バックオフの先頭の時間を待つこと");
     }
+
+    private const string TargetRowCountSql = "SELECT COUNT(*) FROM ledger WHERE summary = '7年前のデータ'";
+
+    private const string RetentionThresholdSql = "SELECT date('now', '-6 years', 'localtime')";
+
+    /// <summary>
+    /// 保守トランザクションの割り込み点（cleanup のスレッドで、同期リースを保持したまま呼ばれる）から、
+    /// 同じ接続・同じトランザクションの中で値を読む（同期リースは同一スレッドでリエントラント）。
+    /// </summary>
+    private object? ReadInMaintenanceTransaction(string sql)
+    {
+        using var lease = _dbContext.LeaseConnection();
+        using var command = lease.Connection.CreateCommand();
+        command.CommandText = sql;
+        return command.ExecuteScalar();
+    }
+
+    private long CountInMaintenanceTransaction(string sql)
+        => Convert.ToInt64(ReadInMaintenanceTransaction(sql), CultureInfo.InvariantCulture);
+
+    private string ReadTextInMaintenanceTransaction(string sql)
+        => Convert.ToString(ReadInMaintenanceTransaction(sql), CultureInfo.InvariantCulture) ?? "(NULL)";
 
     /// <summary>
     /// 対の表明: ロック競合が解けなければ、バックオフを使い切ってから例外を返し、何も削除しないこと。
