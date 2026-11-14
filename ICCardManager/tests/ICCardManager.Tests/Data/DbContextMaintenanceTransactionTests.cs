@@ -69,6 +69,12 @@ public class DbContextMaintenanceTransactionTests : IDisposable
     /// </summary>
     private readonly RecordingLogger<DbContext> _logger = new RecordingLogger<DbContext>();
 
+    /// <summary>
+    /// 準備の各段階の後の <c>AutoCommit</c>（Issue #2476）。閉じていないトランザクションが残っていたら、
+    /// どの段階から残ったかを失敗の理由で示す。SQL を発行しないので接続の状態を変えない。
+    /// </summary>
+    private readonly List<string> _setupAutoCommit = new List<string>();
+
     public DbContextMaintenanceTransactionTests()
     {
         _dbContext = new HookableDbContext(_logger);
@@ -101,12 +107,6 @@ public class DbContextMaintenanceTransactionTests : IDisposable
         }).GetAwaiter().GetResult();
         RecordSetupAutoCommit("カードの INSERT の後");
     }
-
-    /// <summary>
-    /// 準備の各段階の後の <c>AutoCommit</c>（Issue #2476）。閉じていないトランザクションが残っていたら、
-    /// どの段階から残ったかを失敗の理由で示す。SQL を発行しないので接続の状態を変えない。
-    /// </summary>
-    private readonly List<string> _setupAutoCommit = new List<string>();
 
     private void RecordSetupAutoCommit(string stage)
     {
@@ -313,17 +313,23 @@ public class DbContextMaintenanceTransactionTests : IDisposable
     /// <para>
     /// Issue #2476: CI（Release）で 1 回だけ「削除件数 0」で失敗した。FluentAssertions は主語を
     /// <c>attempts</c> と表示したが、理由の文言（「2 回目の試行で削除が完了すること」）から、失敗したのは
-    /// 削除件数の表明である（スタックの行番号が <c>await</c> の行 303 を指しており、主語の取り違えはそのせいとみられるが、
-    /// 行番号がずれた原因は不明）。
+    /// 削除件数の表明である（CI のスタックの行番号は、変更前のファイルの <c>await Task.Run(...)</c> の行を指しており、
+    /// 主語の取り違えはそのせいとみられるが、行番号がずれた原因は不明）。
     /// このテストのロック競合は割り込み点から例外を投げて作っており、別の接続でロックを持つ処理は無いので、
     /// 「ロックの保持と cleanup の開始のタイミング」には依存しない。単独での繰り返し・並列の負荷・全件実行では
     /// 再現せず、原因は未特定。次に起きたときに切り分けられるよう、観測値と DbContext のログを失敗の理由へ載せる。
-    /// 残る仮説（推測）は「INSERT が閉じていないトランザクションに入り、試行 1 の ROLLBACK で一緒に消えた」で、
-    /// INSERT 直後の <c>AutoCommit</c>（sqlite3_get_autocommit）と巻き戻しの失敗のログで直接確かめられる。
+    /// 残る仮説（推測）は「INSERT が閉じていないトランザクションに入り、試行 1 の ROLLBACK で一緒に消えた」。
+    /// System.Data.SQLite は、接続にトランザクションが開いていると <c>BeginTransaction</c> で BEGIN を発行せず、
+    /// <c>Rollback</c> で外側ごと巻き戻す。生の BEGIN が残っていれば cleanup の <c>BeginTransaction</c> が例外になるので、
+    /// 仮説どおりなら漏れているのは <c>SQLiteTransaction</c> オブジェクトである（これも推測）。準備の各段階と
+    /// INSERT 直後の <c>AutoCommit</c>（sqlite3_get_autocommit）、各試行のトランザクションの入れ子の深さ
+    /// （<c>SQLiteConnection</c> の非公開フィールド <c>_transactionLevel</c>。正常なら 1、入れ子なら 2）、
+    /// 巻き戻しの失敗のログで直接確かめられる。割り込み点は保守トランザクションの内側なので、
+    /// そこで読む <c>AutoCommit</c> は常に False で何も区別しない。そのため試行ごとには深さを読む。
     /// </para>
     /// <para>
-    /// 観測者効果を抑えるため、割り込み点の中では試行 2（削除する回）に SQL を発行しない（接続の
-    /// <c>AutoCommit</c> を読むだけ）。対象行の数を数える SELECT は、巻き戻される試行 1 の、例外を投げる
+    /// 観測者効果を抑えるため、割り込み点の中では試行 2（削除する回）に SQL を発行しない（トランザクションの
+    /// 入れ子の深さを読むだけ）。対象行の数を数える SELECT は、巻き戻される試行 1 の、例外を投げる
     /// 直前にだけ走らせる。日付・境界日・行数のほかの観測は cleanup の前後に行う。
     /// </para>
     /// </remarks>
@@ -342,26 +348,33 @@ public class DbContextMaintenanceTransactionTests : IDisposable
         {
             attempts++;
             using var lease = _dbContext.LeaseConnection();
-            var autoCommit = lease.Connection.AutoCommit;
+            var depth = ReadTransactionLevel(lease.Connection);
             if (attempts == 1)
             {
-                observations.Add($"試行1: AutoCommit {autoCommit}・対象行 {CountOn(lease.Connection, TargetRowCountSql)} 件");
+                observations.Add($"試行1: 入れ子の深さ {depth}・対象行 {CountOn(lease.Connection, TargetRowCountSql)} 件");
                 throw new SQLiteException(SQLiteErrorCode.Busy, "database is locked");
             }
 
-            observations.Add($"試行{attempts}: AutoCommit {autoCommit}");
+            observations.Add($"試行{attempts}: 入れ子の深さ {depth}");
         };
 
         var (ledgerCount, _) = await Task.Run(() => _dbContext.CleanupOldData());
 
         _dbContext.MaintenanceTransactionOpenedHook = null;
-        var diagnostics =
-            $"DB の日付 {storedDate}・境界日 {thresholdBefore}（後 {await ScalarTextAsync(RetentionThresholdSql)}）・" +
-            $"準備の AutoCommit [{string.Join("、", _setupAutoCommit)}]・" +
-            $"INSERT 直後の AutoCommit {autoCommitAfterInsert}・開始前の対象行 {targetsBefore} 件・" +
-            $"{string.Join("・", observations)}・削除後の対象行 {await CountAsync(TargetRowCountSql)} 件・" +
-            $"終了後の AutoCommit {await ReadAutoCommitAsync()}・待機 [{string.Join(", ", retryDelay.Delays)}]・" +
-            $"ログ: {_logger.FormatEntries()}";
+        var parts = new List<string>
+        {
+            $"DB の日付 {storedDate}",
+            $"境界日 {thresholdBefore}（後 {await ScalarTextAsync(RetentionThresholdSql)}）",
+            $"準備の AutoCommit [{string.Join("、", _setupAutoCommit)}]",
+            $"INSERT 直後の AutoCommit {autoCommitAfterInsert}",
+            $"開始前の対象行 {targetsBefore} 件",
+        };
+        parts.AddRange(observations.Count > 0 ? observations : new List<string> { "割り込み点に到達せず" });
+        parts.Add($"削除後の対象行 {await CountAsync(TargetRowCountSql)} 件");
+        parts.Add($"終了後の AutoCommit {await ReadAutoCommitAsync()}");
+        parts.Add($"待機 [{string.Join(", ", retryDelay.Delays)}]");
+        parts.Add($"ログ: {FormatLogOnOneLine()}");
+        var diagnostics = string.Join("・", parts);
         ledgerCount.Should().Be(1, "2 回目の試行で削除が完了すること（{0}）", diagnostics);
         attempts.Should().Be(2, "初回の失敗の後に 1 回だけ再試行すること（{0}）", diagnostics);
         retryDelay.Delays.Should().Equal(new[] { DbContext.LocalRetryDelays[0] },
@@ -371,6 +384,22 @@ public class DbContextMaintenanceTransactionTests : IDisposable
     private const string TargetRowCountSql = "SELECT COUNT(*) FROM ledger WHERE summary = '7年前のデータ'";
 
     private const string RetentionThresholdSql = "SELECT date('now', '-6 years', 'localtime')";
+
+    /// <summary>
+    /// 接続のトランザクションの入れ子の深さ（System.Data.SQLite の非公開フィールド）。読めない版では「不明」。
+    /// </summary>
+    private static string ReadTransactionLevel(SQLiteConnection connection)
+    {
+        var field = typeof(SQLiteConnection).GetField(
+            "_transactionLevel", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic);
+        return field?.GetValue(connection) is int level
+            ? level.ToString(CultureInfo.InvariantCulture)
+            : "不明";
+    }
+
+    /// <summary>ログを 1 行へ畳む（理由の閉じ括弧が独立行に出ないように）。</summary>
+    private string FormatLogOnOneLine()
+        => _logger.FormatEntries().Trim().Replace("\r\n", " / ").Replace("\n", " / ");
 
     private async Task<bool> ReadAutoCommitAsync()
     {
