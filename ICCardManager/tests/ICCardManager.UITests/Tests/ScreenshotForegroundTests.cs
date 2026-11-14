@@ -22,15 +22,34 @@ namespace ICCardManager.UITests.Tests
         public void 前面にできなかったとき_前面のウィンドウを名指しして例外にすること()
         {
             Action act = () => ScreenshotHelper.EnsureForegroundForCapture(
-                () => false, () => "（explorer.exe、クラス Shell_TrayWnd）", "staff.png");
+                () => false, () => "Switch USB（SwitchUsb.exe、クラス WindowsForms10.Window）", "staff.png");
 
             var thrown = act.Should().Throw<InvalidOperationException>().Which;
             thrown.Message.Should().Contain("staff.png", "何が: どの画像の撮影かを示す")
-                .And.Contain("explorer.exe", "前面にあるウィンドウのプロセス名を示す")
-                .And.Contain("Shell_TrayWnd", "前面にあるウィンドウのクラス名を示す（タイトルの無いタスクバーを見分ける）")
+                .And.Contain("SwitchUsb.exe", "前面にあるウィンドウのプロセス名を示す")
+                .And.Contain("WindowsForms10.Window", "前面にあるウィンドウのクラス名を示す")
                 .And.Contain("灰色", "なぜ: 非アクティブの画像になることを示す")
                 .And.Contain("管理者権限", "管理者権限のウィンドウなら撮り直しても直らないことを示す")
+                .And.Contain("閉じるか最小化", "どうすれば: 前面のウィンドウをどけるよう案内する")
                 .And.EndWith("撮影をやり直してください。", "どうすれば: 行動指示で終わる");
+        }
+
+        [Theory]
+        [InlineData("（explorer.exe、クラス Shell_TrayWnd）")]
+        [InlineData(ScreenshotHelper.NoForegroundWindow)]
+        public void タスクバーか前面のウィンドウが無いときは_できない操作を案内しないこと(string foreground)
+        {
+            // タスクバーは閉じる・最小化できず、前面のウィンドウが無いなら閉じる対象も無い。どちらも撮り直せば直ることが多い
+            Action before = () => ScreenshotHelper.EnsureForegroundForCapture(() => false, () => foreground, "staff.png");
+            Action during = () => ScreenshotHelper.EnsureStillForeground(
+                new IntPtr(100), () => new IntPtr(200), _ => foreground, "staff.png", pause: () => { });
+
+            foreach (var act in new[] { before, during })
+            {
+                act.Should().Throw<InvalidOperationException>().Which.Message.Should()
+                    .NotContain("閉じ").And.NotContain("最小化").And.NotContain("管理者権限")
+                    .And.EndWith("撮影をやり直してください。");
+            }
         }
 
         [Fact]

@@ -20,11 +20,13 @@ namespace ICCardManager.Tests;
 /// </para>
 /// <para>
 /// 塞ぐ経路: ①前面化を許可したメソッドの外から呼ぶ（メソッド グループ渡しを含む）・許可したメソッドの中で戻り値を捨てる、
-/// ②撮影メソッドから判定を外す・前面にしたウィンドウを撮影中の確認へ渡さない・判定を通らない撮影メソッドを足す、
-/// ③<c>CaptureRectangle</c> を通らずに画面をコピーする、④前面にしない撮影（<c>bringToFront: false</c>）をトースト単体以外に使う、
-/// ⑤前面にできなくても撮る切り分け用の撮影を <c>_FAILED.png</c> 以外の名前に使う。
+/// ②撮影メソッドから判定を外す・判定の戻り値（前面にしたウィンドウ）以外を撮影中の確認へ渡す・判定を通らない撮影メソッドを足す・
+/// 撮影中の確認を撮る前／撮った後のどちらかから外す、③<c>CaptureRectangle</c> を通らずに画面をコピーする、
+/// ④前面にしない撮影（<c>bringToFront: false</c>）をトースト単体以外に使う（型名なしの呼び出し＝<c>ScreenshotHelper</c> の中や
+/// <c>using static</c>・メソッド グループとして渡す形を含む）、⑤前面にできなくても撮る切り分け用の撮影を <c>_FAILED.png</c> 以外の名前に使う。
 /// 検出しない形: 判定のメソッドの中身の書き換え（<c>|| true</c> 等。挙動のテストが止める）、リフレクション・別アセンブリ経由の撮影、
-/// トーストではないウィンドウを <c>toast_</c> で始まる名前で撮ること（④は名前でしか区別できない）。
+/// トーストではないウィンドウを <c>toast_</c> で始まる名前で撮ること（④は名前でしか区別できない）、
+/// <c>Capture</c> という名前の別の型のメソッドへ 3 引数を渡す形（④は名前で拾うので誤検出側に倒れる）。
 /// </para>
 /// </remarks>
 public class ScreenshotForegroundConventionTests
@@ -72,13 +74,18 @@ public class ScreenshotForegroundConventionTests
                 @"\.\s*Capture\s*\(\s*\)|\bCapture\s*\.\s*(Screen|Rectangle|Element|ElementRectangle|MainScreen|ScreensWithElement)\b")
             .Cast<Match>().Select(m => m.Value).ToList();
 
-    /// <summary>前面にしない撮影（第 3 引数が true 以外）のうち、<c>"toast_….png"</c> のリテラルと <c>bringToFront: false</c> の形でないもの。</summary>
+    /// <summary>
+    /// 前面にしない撮影（第 3 引数が true 以外）のうち、<c>"toast_….png"</c> のリテラルと <c>bringToFront: false</c> の形でないもの。
+    /// 型名の有無を問わず <c>Capture(</c> の呼び出しを拾う（宣言は除く）。<c>Capture</c> をメソッド グループとして渡す形も拾う。
+    /// </summary>
     internal static IReadOnlyList<string> FindNonToastUnfocusedCaptures(string sourceWithLiterals) =>
-        TestSourceInspection.ExtractInvocationArguments(sourceWithLiterals, new Regex(@"\bScreenshotHelper\s*\.\s*Capture\b"))
+        TestSourceInspection.ExtractInvocationArguments(sourceWithLiterals, new Regex(@"(?<!\bstring\s+)\bCapture\b"))
             .Select(c => c.Arguments)
             .Where(a => a.Count >= 3 && a[2] != "true" && a[2] != "bringToFront: true")
             .Where(a => !(a[2] == "bringToFront: false" && Regex.IsMatch(a[1], @"^""toast_\w+\.png""$")))
-            .Select(a => string.Join(", ", a)).ToList();
+            .Select(a => string.Join(", ", a))
+            .Concat(Regex.Matches(sourceWithLiterals, @"\bCapture\b(?!\s*[.(])").Cast<Match>().Select(m => "メソッド グループ: " + m.Value))
+            .ToList();
 
     /// <summary>切り分け用の撮影のうち、名前が <c>_FAILED.png</c> で終わるリテラルでないもの（宣言は除く）。</summary>
     internal static IReadOnlyList<string> FindDiagnosisCapturesWithoutFailedName(string sourceWithLiterals) =>
@@ -121,6 +128,8 @@ public class ScreenshotForegroundConventionTests
     [InlineData("ScreenshotHelper.Capture(fixture.MainWindow, \"main.png\", bringToFront: false);")]
     [InlineData("ScreenshotHelper.Capture(toast, \"toast_lend.png\", false);")]
     [InlineData("ScreenshotHelper.Capture(toast, name, bringToFront: false);")]
+    [InlineData("public static string CaptureDialog(Window w, string f) => Capture(w, f, bringToFront: false);")]
+    [InlineData("Func<Window, string, bool, string> capture = ScreenshotHelper.Capture;")]
     public void トースト単体以外の前面にしない撮影を検出できること(string sample) =>
         FindNonToastUnfocusedCaptures(sample).Should().ContainSingle();
 
@@ -128,6 +137,8 @@ public class ScreenshotForegroundConventionTests
     [InlineData("ScreenshotHelper.Capture(toast, \"toast_lend.png\", bringToFront: false);")]
     [InlineData("ScreenshotHelper.Capture(window, fileName);")]
     [InlineData("ScreenshotHelper.Capture(window, \"main.png\", bringToFront: true);")]
+    [InlineData("public static string Capture(Window window, string fileName, bool bringToFront = true)")]
+    [InlineData("using (var image = FlaUI.Core.Capturing.Capture.Rectangle(bounds))")]
     public void 前面にする撮影とトースト単体の撮影は検出しないこと(string sample) =>
         FindNonToastUnfocusedCaptures(sample).Should().BeEmpty();
 
@@ -171,6 +182,16 @@ public class ScreenshotForegroundConventionTests
         {
             var body = Body(code, method);
             body.Should().Contain("RequireForegroundForCapture(", $"{method} は前面にできなかったら撮らずに失敗すること");
+
+            // 撮影中の確認へ渡す foreground は判定の戻り値であること（Capture の bringToFront: false の経路だけ、判定の前の初期値 IntPtr.Zero）
+            var guard = body.IndexOf("RequireForegroundForCapture(", System.StringComparison.Ordinal);
+            foreach (Match assignment in Regex.Matches(body, @"\bforeground\s*=(?!=)\s*(?<rhs>[^;]*);"))
+            {
+                var rhs = assignment.Groups["rhs"].Value.Trim();
+                (rhs.StartsWith("RequireForegroundForCapture(", System.StringComparison.Ordinal)
+                 || (rhs == "IntPtr.Zero" && assignment.Index < guard))
+                    .Should().BeTrue($"{method} の foreground は前面化の判定の戻り値であること（{assignment.Value}）");
+            }
             var calls = TestSourceInspection.ExtractInvocationArguments(body, new Regex(@"\bCaptureRectangle\b"));
             calls.Should().NotBeEmpty().And.OnlyContain(c => c.Arguments.Count == 3 && c.Arguments[2] == "foreground",
                 $"{method} は前面にしたウィンドウを撮影中の確認へ渡すこと");
@@ -190,8 +211,12 @@ public class ScreenshotForegroundConventionTests
         var capture = Body(code, "CaptureRectangle");
         capture.Should().Contain("EnsureStillForeground(",
             "前面化の判定から保存までに描画待ちの撮り直しが挟まり、その間に前面を奪われ得る");
-        CountWord(capture, "RequireStillForeground").Should().Be(3,
-            "撮影中の確認（宣言 1 件）を撮る前と撮った後の両方で呼ぶこと（撮っている最中に奪われた画像を保存しない）");
+        var checks = Regex.Matches(capture, @"\bRequireStillForeground\s*\(\s*\)\s*;").Cast<Match>().Select(m => m.Index).ToList();
+        var shot = capture.IndexOf("Capture.Rectangle(", System.StringComparison.Ordinal);
+        var saved = capture.IndexOf(".ToFile(", System.StringComparison.Ordinal);
+        checks.Should().HaveCount(2, "撮影中の確認を撮る前と撮った後の 2 か所で呼ぶこと");
+        (checks[0] < shot && shot < saved && saved < checks[1]).Should().BeTrue(
+            "撮る前（前回の撮り直しから今までに奪われていないか）と、撮って保存した後（撮っている最中に奪われていないか）に確かめること");
     }
 
     [Fact]

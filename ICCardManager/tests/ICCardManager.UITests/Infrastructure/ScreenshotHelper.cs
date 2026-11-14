@@ -153,14 +153,48 @@ namespace ICCardManager.UITests.Infrastructure
         /// 前面にできないまま撮ると、タイトルバーが灰色（非アクティブ）の画像が正規の名前で保存され、撮影テストは合格する。
         /// 実測では、タスクバー（<c>Shell_TrayWnd</c>、explorer.exe）が前面を保持したまま、撮影した画像のタイトルバーが
         /// すべて非アクティブになり、目で確かめるまで気付けなかった。撮り直せば直る状況なので、誤った画像を残すより失敗させる。
+        /// 失敗したときは出力先にある同名の画像（前回の撮影の残り）も消す。撮影中の確認（<see cref="EnsureStillForeground"/>）の
+        /// 失敗と扱いをそろえ、「撮れなかったのに正規の名前の画像がある」状態を残さない（撮影スクリプトは画像の有無で撮れたと数える）。
         /// </remarks>
         /// <returns>前面にしたウィンドウのハンドル（保存の直前にも前面かを確かめるために使う）。</returns>
         internal static IntPtr RequireForegroundForCapture(Window window, string fileName)
         {
-            EnsureForegroundForCapture(
-                () => BringToForeground(window), () => DescribeWindow(GetForegroundWindow()), fileName);
+            try
+            {
+                EnsureForegroundForCapture(
+                    () => BringToForeground(window), () => DescribeWindow(GetForegroundWindow()), fileName);
+            }
+            catch (InvalidOperationException)
+            {
+                DeleteCapturedImage(fileName);
+                throw;
+            }
             return window.Properties.NativeWindowHandle.ValueOrDefault;
         }
+
+        /// <summary>撮れなかった画像を正規の名前で残さないよう、出力先の同名の画像を消す（消せなくても例外で失敗は伝わる）。</summary>
+        private static void DeleteCapturedImage(string fileName)
+        {
+            try { File.Delete(Path.Combine(OutputDirectory, fileName)); } catch { /* 消せなくても、続く例外で失敗は伝わる */ }
+        }
+
+        /// <summary>前面にあるウィンドウの種類（失敗時の案内を変える）。</summary>
+        private enum ForegroundKind
+        {
+            /// <summary>前面のウィンドウが無い（切り替えの途中など）。</summary>
+            None,
+
+            /// <summary>タスクバー。閉じる・最小化することはできず、一時的に前面を保持していることが多い。</summary>
+            Taskbar,
+
+            /// <summary>その他のウィンドウ（管理者権限なら OS が前面化を拒否する）。</summary>
+            Other,
+        }
+
+        private static ForegroundKind ClassifyForeground(string description) =>
+            description == NoForegroundWindow ? ForegroundKind.None
+            : description.Contains("クラス Shell_TrayWnd）") || description.Contains("クラス Shell_SecondaryTrayWnd）") ? ForegroundKind.Taskbar
+            : ForegroundKind.Other;
 
         /// <summary>
         /// <see cref="RequireForegroundForCapture"/> の判定。前面化と前面のウィンドウの説明を差し替えられる継ぎ目
@@ -177,14 +211,19 @@ namespace ICCardManager.UITests.Infrastructure
                 return;
             }
             var foreground = describeForeground();
-            var holder = foreground == NoForegroundWindow
-                ? "前面にウィンドウが無い（切り替えの途中など）ため"
-                : $"前面にあるウィンドウ「{foreground}」が前面を保持しているため";
+            var (holder, remedy) = ClassifyForeground(foreground) switch
+            {
+                ForegroundKind.None => ("前面にウィンドウが無い（切り替えの途中など）ため",
+                    "一時的な状態なので、そのまま撮影をやり直してください。"),
+                ForegroundKind.Taskbar => ($"タスクバー「{foreground}」が前面を保持しているため",
+                    "タスクバーが前面を保持するのは一時的なことが多いので、そのまま撮影をやり直してください。"),
+                _ => ($"前面にあるウィンドウ「{foreground}」が前面を保持しているため",
+                    "一時的なら撮り直せば直りますが、そのウィンドウが管理者権限で動いていると OS が前面化を拒否するため" +
+                    "撮り直しても直りません。そのウィンドウを閉じるか最小化してから、撮影をやり直してください。"),
+            };
             throw new InvalidOperationException(
                 $"撮影するウィンドウを前面にできませんでした（{fileName}）。{holder}、" +
-                "このまま撮るとタイトルバーが灰色（非アクティブ）の画像になるので保存しません。" +
-                "タスクバー等が一時的に前面を保持しただけなら撮り直せば直りますが、そのウィンドウが管理者権限で動いていると" +
-                "OS が前面化を拒否するため撮り直しても直りません。そのウィンドウを閉じるか最小化してから、撮影をやり直してください。");
+                "このまま撮るとタイトルバーが灰色（非アクティブ）の画像になるので保存しません。" + remedy);
         }
 
         /// <summary>
@@ -226,13 +265,17 @@ namespace ICCardManager.UITests.Infrastructure
             }
 
             var foreground = describeForeground(actual);
-            var taker = foreground == NoForegroundWindow
-                ? "前面のウィンドウが無くなったため"
-                : $"前面に移ったウィンドウ「{foreground}」に前面を奪われたため";
+            var (taker, remedy) = ClassifyForeground(foreground) switch
+            {
+                ForegroundKind.None => ("前面のウィンドウが無くなったため", "撮影中はマウス・キーボードに触れず、撮影をやり直してください。"),
+                ForegroundKind.Taskbar => ($"タスクバー「{foreground}」に前面を奪われたため",
+                    "撮影中はマウス・キーボードに触れず、撮影をやり直してください。"),
+                _ => ($"前面に移ったウィンドウ「{foreground}」に前面を奪われたため",
+                    "撮影中はマウス・キーボードに触れず、前面を奪うウィンドウを閉じてから、撮影をやり直してください。"),
+            };
             throw new InvalidOperationException(
                 $"撮影中にウィンドウが前面でなくなりました（{fileName}）。{taker}、" +
-                "タイトルバーが灰色（非アクティブ）の画像になるので保存しません。" +
-                "撮影中はマウス・キーボードに触れず、前面を奪うウィンドウを閉じてから、撮影をやり直してください。");
+                "タイトルバーが灰色（非アクティブ）の画像になるので保存しません。" + remedy);
         }
 
         /// <summary><see cref="EnsureStillForeground"/> が前面を読む回数の上限。</summary>
@@ -573,8 +616,8 @@ namespace ICCardManager.UITests.Infrastructure
                 }
                 catch (InvalidOperationException)
                 {
-                    // 撮った画像（前回の撮り直しの分を含む）を正規の名前で残さない
-                    try { File.Delete(path); } catch { /* 消せなくても、例外で失敗は伝わる */ }
+                    // 撮った画像（前回の撮り直し・前回の撮影の分を含む）を正規の名前で残さない
+                    DeleteCapturedImage(fileName);
                     throw;
                 }
             }
