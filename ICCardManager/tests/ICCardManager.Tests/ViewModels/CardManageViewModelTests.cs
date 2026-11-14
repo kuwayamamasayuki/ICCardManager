@@ -1349,6 +1349,95 @@ public class CardManageViewModelTests : IDisposable
 
     #endregion
 
+    #region 削除の確認と認証の順序（Issue #2474）
+
+    private const string DeleteOrderCardIdm = "0102030405060708";
+
+    /// <summary>
+    /// 削除できるカードを選び、確認・認証以外は削除が最後まで成功する状態にする。
+    /// </summary>
+    private void ArrangeDeletableCard()
+    {
+        _viewModel.SelectedCard = new CardDto
+        {
+            CardIdm = DeleteOrderCardIdm,
+            CardType = "はやかけん",
+            CardNumber = "H-001",
+            IsLent = false
+        };
+        _cardRepositoryMock.Setup(r => r.GetByIdmAsync(DeleteOrderCardIdm, false))
+            .ReturnsAsync(new IcCard { CardIdm = DeleteOrderCardIdm, CardType = "はやかけん", CardNumber = "H-001" });
+        _cardRepositoryMock.Setup(r => r.DeleteAsync(DeleteOrderCardIdm, It.IsAny<SQLiteTransaction>()))
+            .ReturnsAsync(ICCardManager.Data.Repositories.CardOperationResult.Success);
+        _cardRepositoryMock.Setup(r => r.GetAllAsync()).ReturnsAsync(new List<IcCard>());
+    }
+
+    /// <summary>
+    /// 削除するかどうかを決める（「削除確認」で はい）前に職員証を求めない。払い戻しと同じ「確認 → 認証」。
+    /// </summary>
+    [Fact]
+    public async Task DeleteAsync_削除確認の後に職員証の認証を求めて削除すること()
+    {
+        ArrangeDeletableCard();
+        var events = new List<string>();
+        _dialogServiceMock.Setup(d => d.ShowWarningConfirmation(It.IsAny<string>(), "削除確認"))
+            .Callback(() => events.Add("confirm"))
+            .Returns(true);
+        _staffAuthServiceMock.Setup(s => s.RequestAuthenticationAsync("交通系ICカードの削除"))
+            .Callback(() => events.Add("auth"))
+            .ReturnsAsync(new StaffAuthResult { Idm = "TEST_OPERATOR_IDM", StaffName = "テスト操作者" });
+        _cardRepositoryMock.Setup(r => r.DeleteAsync(DeleteOrderCardIdm, It.IsAny<SQLiteTransaction>()))
+            .Callback(() => events.Add("delete"))
+            .ReturnsAsync(ICCardManager.Data.Repositories.CardOperationResult.Success);
+
+        await _viewModel.DeleteAsync();
+
+        events.Should().Equal(new[] { "confirm", "auth", "delete" },
+            "削除するかどうかを決める前に職員証を求めない（払い戻しと同じ順序）");
+    }
+
+    /// <summary>
+    /// 「削除確認」で いいえ を選んだら、職員証を求めず何も書かない（取りやめるだけの操作に認証は要らない）。
+    /// </summary>
+    [Fact]
+    public async Task DeleteAsync_削除確認でいいえなら職員証を求めず削除しないこと()
+    {
+        ArrangeDeletableCard();
+        _dialogServiceMock.Setup(d => d.ShowWarningConfirmation(It.IsAny<string>(), "削除確認"))
+            .Returns(false);
+
+        await _viewModel.DeleteAsync();
+
+        _staffAuthServiceMock.Verify(s => s.RequestAuthenticationAsync(It.IsAny<string>()), Times.Never,
+            "取りやめるだけの操作に職員証を求めない");
+        _cardRepositoryMock.Verify(r => r.DeleteAsync(It.IsAny<string>(), It.IsAny<SQLiteTransaction>()), Times.Never);
+        _operationLogRepositoryMock.Verify(
+            r => r.InsertAsync(It.IsAny<OperationLog>(), It.IsAny<SQLiteTransaction>()), Times.Never);
+    }
+
+    /// <summary>
+    /// 確認で はい を選んでも、認証が完了しなければ（キャンセル・タイムアウト）削除しない。
+    /// 上の 2 件と対で、確認・認証のどちらが欠けても削除しないことを固定する。
+    /// </summary>
+    [Fact]
+    public async Task DeleteAsync_削除確認の後に認証が完了しなければ削除しないこと()
+    {
+        ArrangeDeletableCard();
+        _staffAuthServiceMock.Setup(s => s.RequestAuthenticationAsync(It.IsAny<string>()))
+            .ReturnsAsync((StaffAuthResult?)null);
+
+        await _viewModel.DeleteAsync();
+
+        _dialogServiceMock.Verify(d => d.ShowWarningConfirmation(It.IsAny<string>(), "削除確認"), Times.Once,
+            "確認は認証より前に出る");
+        _staffAuthServiceMock.Verify(s => s.RequestAuthenticationAsync("交通系ICカードの削除"), Times.Once);
+        _cardRepositoryMock.Verify(r => r.DeleteAsync(It.IsAny<string>(), It.IsAny<SQLiteTransaction>()), Times.Never);
+        _operationLogRepositoryMock.Verify(
+            r => r.InsertAsync(It.IsAny<OperationLog>(), It.IsAny<SQLiteTransaction>()), Times.Never);
+    }
+
+    #endregion
+
     #region 払い戻しテスト（Issue #1603）
 
     /// <summary>

@@ -1076,14 +1076,6 @@ namespace ICCardManager.ViewModels
             var targetCardNumber = SelectedCard.CardNumber;
             var targetLabel = FormatCardLabel(targetCardType, targetCardNumber);
 
-            // Issue #429: ICカードの削除は認証が必要
-            using var authResult = (await _staffAuthService.RequestAuthenticationAsync("交通系ICカードの削除"))?.Enter();
-            if (authResult == null)
-            {
-                // 認証キャンセルまたはタイムアウト
-                return;
-            }
-
             // 削除確認ダイアログを表示
             var confirmed = _dialogService.ShowWarningConfirmation(
                 $"カード「{targetCardType} {targetCardNumber}」を削除しますか？\n\n※削除後も履歴データは保持されます。",
@@ -1091,6 +1083,17 @@ namespace ICCardManager.ViewModels
 
             if (!confirmed)
             {
+                return;
+            }
+
+            // Issue #429: ICカードの削除は認証が必要
+            // Issue #2474: 認証は「削除確認」で はい を押した**後**に求める（払い戻し #2322 と同じ順序）。
+            // 「いいえ」で取りやめるだけなら職員証は要らない。認証の待機中に他 PC が削除・払い戻し・貸出をしても、
+            // 下の読み直し（GetByIdmAsync）と論理削除の WHERE が検出して名指しで案内する（確認の後に読み直すのは従来どおり）。
+            using var authResult = (await _staffAuthService.RequestAuthenticationAsync("交通系ICカードの削除"))?.Enter();
+            if (authResult == null)
+            {
+                // 認証キャンセルまたはタイムアウト（払い戻しと同じく何もしない）
                 return;
             }
 

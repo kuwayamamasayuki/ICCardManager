@@ -646,6 +646,7 @@ public class HistoryPanelViewModelTests : IDisposable
     }
 
     // 履歴統合の職員認証ゲート（SEQ-AUTH-01）
+    // Issue #2474: 確認（「履歴の統合」）→ 認証の順。統合の取り消しと同じ順序。
     [Fact]
     public async Task MergeHistoryLedgers_認証キャンセル時_統合を実行しない()
     {
@@ -660,17 +661,72 @@ public class HistoryPanelViewModelTests : IDisposable
         // Act
         await _history.MergeHistoryLedgersCommand.ExecuteAsync(null);
 
-        // Assert: 認証を要求し、キャンセルされたため確認ダイアログ・統合処理へ進まない
+        // Assert: 確認（はい）の後に認証を要求し、キャンセルされたため統合処理へ進まない
+        _navigationServiceMock.Verify(
+            n => n.ShowConfirmation(It.IsAny<string>(), "履歴の統合"), Times.Once,
+            "確認は認証より前に出る（Issue #2474）");
         _staffAuthServiceMock.Verify(
             s => s.RequestAuthenticationAsync("履歴の統合"), Times.Once);
-        _navigationServiceMock.Verify(
-            n => n.ShowConfirmation(It.IsAny<string>(), It.IsAny<string>()), Times.Never,
-            "認証をキャンセルしたら確認ダイアログを出さないこと");
         _ledgerRepositoryMock.Verify(
             r => r.MergeLedgersAsync(
                 It.IsAny<int>(), It.IsAny<IEnumerable<int>>(), It.IsAny<Ledger>(), It.IsAny<SQLiteTransaction>()),
             Times.Never,
             "認証をキャンセルしたら統合を実行しないこと");
+        _navigationServiceMock.Verify(n => n.ShowInformation(
+            HistoryPanelViewModel.MergeAuthenticationCancelledMessage, "履歴の統合"), Times.Once,
+            "同意した直後に何も起きないと、統合されたのか分からない（統合の取り消しと同じ案内）");
+        _navigationServiceMock.Verify(n => n.ShowInformation(It.IsAny<string>(), "統合完了"), Times.Never);
+    }
+
+    /// <summary>
+    /// Issue #2474: 統合するかどうかを決める（「履歴の統合」で はい）前に職員証を求めない。統合の取り消しと同じ「確認 → 認証」。
+    /// </summary>
+    [Fact]
+    public async Task MergeHistoryLedgers_確認の後に職員証の認証を求めて統合すること()
+    {
+        ArrangeMergeableCheckedLedgers();
+        var events = new List<string>();
+        _navigationServiceMock
+            .Setup(n => n.ShowConfirmation(It.IsAny<string>(), "履歴の統合"))
+            .Callback(() => events.Add("confirm"))
+            .Returns(true);
+        _staffAuthServiceMock
+            .Setup(a => a.RequestAuthenticationAsync("履歴の統合"))
+            .Callback(() => events.Add("auth"))
+            .ReturnsAsync(new StaffAuthResult { Idm = "AABBCCDDEEFF0011", StaffName = "田中太郎" });
+        _ledgerRepositoryMock
+            .Setup(r => r.MergeLedgersAsync(
+                It.IsAny<int>(), It.IsAny<IEnumerable<int>>(), It.IsAny<Ledger>(), It.IsAny<SQLiteTransaction>()))
+            .Callback(() => events.Add("merge"))
+            .ReturnsAsync(true);
+
+        await _history.MergeHistoryLedgersCommand.ExecuteAsync(null);
+
+        events.Should().Equal(new[] { "confirm", "auth", "merge" },
+            "統合するかどうかを決める前に職員証を求めない（統合の取り消しと同じ順序）");
+    }
+
+    /// <summary>
+    /// Issue #2474: 確認で いいえ を選んだら、職員証を求めず統合しない（取りやめるだけの操作に認証は要らない）。
+    /// </summary>
+    [Fact]
+    public async Task MergeHistoryLedgers_確認でいいえなら職員証を求めず統合しないこと()
+    {
+        ArrangeMergeableCheckedLedgers();
+        _navigationServiceMock
+            .Setup(n => n.ShowConfirmation(It.IsAny<string>(), "履歴の統合"))
+            .Returns(false);
+
+        await _history.MergeHistoryLedgersCommand.ExecuteAsync(null);
+
+        _staffAuthServiceMock.Verify(s => s.RequestAuthenticationAsync(It.IsAny<string>()), Times.Never,
+            "取りやめるだけの操作に職員証を求めない");
+        _ledgerRepositoryMock.Verify(
+            r => r.MergeLedgersAsync(
+                It.IsAny<int>(), It.IsAny<IEnumerable<int>>(), It.IsAny<Ledger>(), It.IsAny<SQLiteTransaction>()),
+            Times.Never);
+        _navigationServiceMock.Verify(n => n.ShowInformation(It.IsAny<string>(), It.IsAny<string>()), Times.Never,
+            "自分で取りやめたので案内は出さない");
     }
 
     /// <summary>
