@@ -78,14 +78,6 @@ public partial class HistoryPanelViewModel
         // 表示順（古い順）でソートされたDTOリスト
         var sortedDtos = indices.Select(i => HistoryLedgers[i]).ToList();
 
-        // 履歴統合は ledger を改変する監査対象の重要操作のため職員認証を要求する
-        // （設計 06_シーケンス図 §10 / SEQ-AUTH-01。追加・削除・変更と同じゲート）
-        using var authResult = (await _staffAuthService.RequestAuthenticationAsync("履歴の統合"))?.Enter();
-        if (authResult == null)
-        {
-            return;
-        }
-
         // 確認ダイアログ
         var message = "以下の履歴を統合します。\n\n";
         foreach (var dto in sortedDtos)
@@ -96,6 +88,19 @@ public partial class HistoryPanelViewModel
 
         if (!_navigationService.ShowConfirmation(message, "履歴の統合"))
         {
+            return;
+        }
+
+        // 履歴統合は ledger を改変する監査対象の重要操作のため職員認証を要求する
+        // （設計 06_シーケンス図 §10 / SEQ-AUTH-01。追加・削除・変更と同じゲート）。
+        // Issue #2474: 認証は確認に同意した**後**に求める（統合の取り消し #2265 と同じ順序）。
+        // 「いいえ」で取りやめるだけなら職員証は要らない。認証の待機中に他 PC が対象の履歴を統合・削除しても、
+        // MergeAsync が書き込みの前に ID で読み直して検出し、統合せずに案内する（確認時の内容と照合し直すことはしない）。
+        using var authResult = (await _staffAuthService.RequestAuthenticationAsync("履歴の統合"))?.Enter();
+        if (authResult == null)
+        {
+            // 同意した直後に何も起きないと、統合されたのかどうかが分からない（統合の取り消しと同じ案内）
+            _navigationService.ShowInformation(MergeAuthenticationCancelledMessage, "履歴の統合");
             return;
         }
 
@@ -134,6 +139,14 @@ public partial class HistoryPanelViewModel
             }
         }
     }
+
+    /// <summary>
+    /// 履歴の統合で職員証の認証が完了しなかったときの案内（Issue #2474。統合の取り消しの
+    /// <see cref="UnmergeAuthenticationCancelledMessage"/> と同じ形）
+    /// </summary>
+    internal const string MergeAuthenticationCancelledMessage =
+        "職員証の認証が完了しなかったため、履歴を統合していません。" +
+        "統合するには、もう一度「チェックした履歴を統合」を押して、職員証で認証してください。";
 
     /// <summary>
     /// 統合コマンドの実行可否
