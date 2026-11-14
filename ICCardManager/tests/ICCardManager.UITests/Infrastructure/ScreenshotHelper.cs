@@ -82,8 +82,10 @@ namespace ICCardManager.UITests.Infrastructure
         /// キー入力（Enter）が別のウィンドウへ流れて履歴が開かなかった（実測。WSL から直接起動したときは成功していた）。
         /// ALT キーを押して離すと自プロセスが最後の入力元になり、直後の <c>SetForegroundWindow</c> が通る（定石の回避策）。
         /// 前面化できたかは <c>GetForegroundWindow</c> で確かめ、失敗したら数回やり直す。
-        /// 撮影だけなら前面化できなくても矩形は撮れるので例外にはしない。クリック・キー入力を伴う操作の前には
-        /// <see cref="RequireForeground"/> を使う。
+        /// 戻り値を捨てて呼ばない。クリック・キー入力を伴う操作の前には <see cref="RequireForeground"/>、
+        /// 撮影の前には <see cref="RequireForegroundForCapture"/> を使う（どちらも前面にできなければ例外。Issue #2478）。
+        /// 失敗時の切り分け用の撮影（<see cref="CaptureForDiagnosis"/>）だけは、前面にできなくても撮る。
+        /// 呼び出し元がこの 2 つと <see cref="CaptureForDiagnosis"/>（戻り値を記録に使う）に限られることは <c>ScreenshotForegroundConventionTests</c> が固定する。
         /// </remarks>
         /// <returns>前面化できたら true。</returns>
         public static bool BringToForeground(Window window)
@@ -131,26 +133,230 @@ namespace ICCardManager.UITests.Infrastructure
         /// </remarks>
         public static void RequireForeground(Window window)
         {
-            if (BringToForeground(window))
+            EnsureForegroundForInput(() => BringToForeground(window), () => DescribeWindow(GetForegroundWindow()));
+        }
+
+        /// <summary>
+        /// <see cref="RequireForeground"/> の判定（継ぎ目。<c>ScreenshotForegroundTests</c> が実ウィンドウなしで検証する）。
+        /// 案内は撮影の前の判定と同じ場合分け（<see cref="ExplainForegroundHolder"/>）を使う。
+        /// </summary>
+        internal static void EnsureForegroundForInput(Func<bool> bringToForeground, Func<string> describeForeground)
+        {
+            if (bringToForeground())
             {
                 return;
             }
-            var foreground = GetForegroundWindow();
-            throw new InvalidOperationException(
-                $"アプリのウィンドウを前面にできません。前面にあるウィンドウ「{DescribeWindow(foreground)}」が" +
-                "管理者権限で動いている可能性があります。そのウィンドウを閉じるか最小化してから、撮影をやり直してください。");
+            // 入力の前の確認は撮影でないテストでも使うので、やり直す対象を「テスト（撮影）」と書く
+            var (holder, remedy) = ExplainForegroundHolder(describeForeground(), "テスト（撮影）をやり直してください。");
+            throw new InvalidOperationException($"アプリのウィンドウを前面にできません。{holder}。" + remedy);
         }
 
-        /// <summary>ウィンドウのタイトルとプロセス名（失敗メッセージ用）。</summary>
+        /// <summary>
+        /// 前面にできなかったときの「何が前面を保持しているか」と「どうすれば」を、前面のウィンドウの種類で決める
+        /// （入力の前・撮影の前の両方の判定が使う）。前面のウィンドウが無いとき・タスクバーのときは、閉じる・最小化できないので
+        /// 撮り直しを案内する。それ以外のウィンドウは、管理者権限で動いていると OS が前面化を拒否する（撮り直しても直らない）。
+        /// </summary>
+        private static (string Holder, string Remedy) ExplainForegroundHolder(string foreground, string retry) =>
+            ClassifyForeground(foreground) switch
+            {
+                ForegroundKind.None => ("前面にウィンドウがありません（切り替えの途中など）",
+                    "一時的な状態なので、そのまま" + retry),
+                ForegroundKind.Taskbar => ($"タスクバー「{foreground}」が前面を保持しています",
+                    "タスクバーが前面を保持するのは一時的なことが多いので、そのまま" + retry),
+                _ => ($"前面にあるウィンドウ「{foreground}」が前面を保持しています",
+                    "一時的ならやり直せば直りますが、そのウィンドウが管理者権限で動いていると OS が前面化を拒否するため" +
+                    "やり直しても直りません。そのウィンドウを閉じるか最小化してから、" + retry),
+            };
+
+        /// <summary>
+        /// 撮影の前に、ウィンドウを前面にする。できなければ画像を保存せずに例外にする（Issue #2478）。
+        /// </summary>
+        /// <remarks>
+        /// 前面にできないまま撮ると、タイトルバーが灰色（非アクティブ）の画像が正規の名前で保存され、撮影テストは合格する。
+        /// 実測では、タスクバー（<c>Shell_TrayWnd</c>、explorer.exe）が前面を保持したまま、撮影した画像のタイトルバーが
+        /// すべて非アクティブになり、目で確かめるまで気付けなかった。撮り直せば直る状況なので、誤った画像を残すより失敗させる。
+        /// 失敗したときは出力先にある同名の画像（前回の撮影の残り）も消す。撮影中の確認（<see cref="EnsureStillForeground"/>）の
+        /// 失敗と扱いをそろえ、「撮れなかったのに正規の名前の画像がある」状態を残さない（撮影スクリプトは画像の有無で撮れたと数える）。
+        /// </remarks>
+        /// <returns>前面にしたウィンドウのハンドル（保存の直前にも前面かを確かめるために使う）。</returns>
+        internal static IntPtr RequireForegroundForCapture(Window window, string fileName) =>
+            EnsureForegroundForCapture(
+                () => BringToForeground(window),
+                () => DescribeWindow(GetForegroundWindow()),
+                () => window.Properties.NativeWindowHandle.ValueOrDefault,
+                DeleteCapturedImage,
+                fileName);
+
+        /// <summary>撮れなかった画像を正規の名前で残さないよう、出力先の同名の画像を消す（消せなくても例外で失敗は伝わる）。</summary>
+        private static void DeleteCapturedImage(string fileName)
+        {
+            try { File.Delete(Path.Combine(OutputDirectory, fileName)); } catch { /* 消せなくても、続く例外で失敗は伝わる */ }
+        }
+
+        /// <summary>前面にあるウィンドウの種類（失敗時の案内を変える）。</summary>
+        private enum ForegroundKind
+        {
+            /// <summary>前面のウィンドウが無い（切り替えの途中など）。</summary>
+            None,
+
+            /// <summary>タスクバー。閉じる・最小化することはできず、一時的に前面を保持していることが多い。</summary>
+            Taskbar,
+
+            /// <summary>その他のウィンドウ（管理者権限なら OS が前面化を拒否する）。</summary>
+            Other,
+        }
+
+        private static ForegroundKind ClassifyForeground(string description) =>
+            description == NoForegroundWindow ? ForegroundKind.None
+            : description.Contains("クラス Shell_TrayWnd）") || description.Contains("クラス Shell_SecondaryTrayWnd）") ? ForegroundKind.Taskbar
+            : ForegroundKind.Other;
+
+        /// <summary>
+        /// <see cref="RequireForegroundForCapture"/> の判定。前面化と前面のウィンドウの説明を差し替えられる継ぎ目
+        /// （<c>ScreenshotForegroundTests</c> が実ウィンドウなしで検証する）。
+        /// </summary>
+        /// <param name="bringToForeground">前面化を試み、できたら true を返す（1 回だけ呼ぶ）。</param>
+        /// <param name="describeForeground">前面にあるウィンドウの説明（失敗したときだけ呼ぶ）。</param>
+        /// <param name="windowHandle">前面にしたウィンドウのハンドル（成功したときだけ呼ぶ）。</param>
+        /// <param name="deleteImage">出力先の同名の画像を消す（失敗したときだけ呼ぶ）。</param>
+        /// <param name="fileName">撮影する画像のファイル名（文言の「何が」）。</param>
+        /// <returns>前面にしたウィンドウのハンドル（撮影中の確認へ渡す）。</returns>
+        internal static IntPtr EnsureForegroundForCapture(
+            Func<bool> bringToForeground, Func<string> describeForeground, Func<IntPtr> windowHandle,
+            Action<string> deleteImage, string fileName)
+        {
+            if (bringToForeground())
+            {
+                return windowHandle();
+            }
+            deleteImage(fileName);
+            var (holder, remedy) = ExplainForegroundHolder(describeForeground(), "撮影をやり直してください。");
+            throw new InvalidOperationException(
+                $"撮影するウィンドウを前面にできませんでした（{fileName}）。{holder}。" +
+                "このまま撮るとタイトルバーが灰色（非アクティブ）の画像になるので保存しません。" + remedy);
+        }
+
+        /// <summary>
+        /// 保存の直前に、撮影するウィンドウがまだ前面にあるかを確かめる（Issue #2478 のコードレビューで追加）。
+        /// </summary>
+        /// <remarks>
+        /// 前面化を確かめてから保存するまでに、描画を待つ撮り直し（最長 <see cref="PaintRetryTimeout"/>）が挟まる。
+        /// その間に前面を奪われると、撮影前の判定を通ったまま灰色の画像が保存されるため、撮るたびに撮影の前後で確かめる。
+        /// 前面が一瞬だけ別のウィンドウ・NULL になる切り替えの途中で失敗させないよう、合わなければ
+        /// <see cref="StillForegroundReadInterval"/> おきに <see cref="StillForegroundReads"/> 回まで読み直す
+        /// （一瞬の揺れかは推測で、実測した事象ではない。読み直しても合わなければ、灰色の画像を保存するより失敗させる）。
+        /// </remarks>
+        /// <param name="expected">前面にあるはずのウィンドウ。<see cref="IntPtr.Zero"/> なら確かめない（前面にしない撮影）。</param>
+        /// <param name="readForeground">いま前面にあるウィンドウを読む。</param>
+        /// <param name="describeForeground">前面にあるウィンドウの説明（失敗したときだけ呼ぶ）。</param>
+        /// <param name="fileName">撮影する画像のファイル名。</param>
+        /// <param name="deleteImage">撮った画像（出力先の同名の画像）を消す（失敗したときだけ呼ぶ）。</param>
+        /// <param name="pause">読み直しの間の待ち（テストでは待たない）。</param>
+        internal static void EnsureStillForeground(
+            IntPtr expected, Func<IntPtr> readForeground, Func<IntPtr, string> describeForeground, string fileName,
+            Action<string> deleteImage, Action? pause = null)
+        {
+            if (expected == IntPtr.Zero)
+            {
+                return;
+            }
+
+            var actual = IntPtr.Zero;
+            for (var read = 0; read < StillForegroundReads; read++)
+            {
+                if (read > 0)
+                {
+                    (pause ?? (() => Thread.Sleep(StillForegroundReadInterval)))();
+                }
+                actual = readForeground();
+                if (actual == expected)
+                {
+                    return;
+                }
+            }
+
+            deleteImage(fileName);
+            var foreground = describeForeground(actual);
+            var (taker, remedy) = ClassifyForeground(foreground) switch
+            {
+                ForegroundKind.None => ("前面のウィンドウが無くなったため", "撮影中はマウス・キーボードに触れず、撮影をやり直してください。"),
+                ForegroundKind.Taskbar => ($"タスクバー「{foreground}」に前面を奪われたため",
+                    "撮影中はマウス・キーボードに触れず、撮影をやり直してください。"),
+                _ => ($"前面に移ったウィンドウ「{foreground}」に前面を奪われたため",
+                    "撮影中はマウス・キーボードに触れず、前面を奪うウィンドウを閉じてから、撮影をやり直してください。"),
+            };
+            throw new InvalidOperationException(
+                $"撮影中にウィンドウが前面でなくなりました（{fileName}）。{taker}、" +
+                "タイトルバーが灰色（非アクティブ）の画像になるので保存しません。" + remedy);
+        }
+
+        /// <summary><see cref="EnsureStillForeground"/> が前面を読む回数の上限。</summary>
+        internal const int StillForegroundReads = 4;
+
+        /// <summary><see cref="EnsureStillForeground"/> の読み直しの間隔。</summary>
+        private static readonly TimeSpan StillForegroundReadInterval = TimeSpan.FromMilliseconds(100);
+
+        /// <summary><see cref="DescribeWindow"/> が前面のウィンドウが無いときに返す説明。</summary>
+        internal const string NoForegroundWindow = "前面のウィンドウなし";
+
+        /// <summary>切り分け用の撮影のファイル名の末尾。撮影スクリプトの公開対象から外れる名前。</summary>
+        internal const string DiagnosisFileSuffix = "_FAILED.png";
+
+        /// <summary>
+        /// 失敗時の画面を、切り分け用に撮る（前面にできなくても撮る）。ファイル名は <see cref="DiagnosisFileSuffix"/> で終わること。
+        /// </summary>
+        /// <remarks>
+        /// 履歴が開かない等の失敗の原因（管理者権限のウィンドウが前面にある等）を残すための撮影で、前面にできないことこそが
+        /// 原因であり得る。<see cref="Capture(Window, string, bool)"/> の判定で例外にすると 1 枚も残らない（コードレビューで検出）。
+        /// 非アクティブの画像が正規の名前で残らないよう、名前を <c>_FAILED.png</c> に限る（<c>take-screenshots-uitest.ps1</c> は
+        /// 対応表の名前だけを公開するので、この名前は公開されない）。呼び出し元の名前は <c>ScreenshotForegroundConventionTests</c> も固定する。
+        /// </remarks>
+        public static string CaptureForDiagnosis(Window window, string fileName)
+        {
+            if (fileName == null || !fileName.EndsWith(DiagnosisFileSuffix, StringComparison.Ordinal))
+            {
+                throw new ArgumentException(
+                    $"切り分け用の撮影のファイル名が「{fileName}」です。前面にできないまま撮った画像を正規の名前で残さないため、" +
+                    $"「{DiagnosisFileSuffix}」で終わる名前を指定してください。",
+                    nameof(fileName));
+            }
+
+            if (window == null)
+            {
+                throw new ArgumentNullException(nameof(window));
+            }
+
+            if (!BringToForeground(window))
+            {
+                Console.WriteLine(
+                    $"[screenshot] {fileName}: 前面にできないまま撮影します（切り分け用。前面: {DescribeWindow(GetForegroundWindow())}）");
+            }
+
+            return CaptureRectangle(GetVisibleFrameBounds(window), fileName, IntPtr.Zero);
+        }
+
+        /// <summary>ウィンドウのタイトル・プロセス名・クラス名（失敗メッセージ用）。</summary>
+        /// <remarks>
+        /// タスクバー（<c>Shell_TrayWnd</c>）のようにタイトルを持たないウィンドウは、タイトルとプロセス名だけでは
+        /// 何が前面にあるのか分からないため、クラス名を併記する（Issue #2478）。
+        /// </remarks>
         internal static string DescribeWindow(IntPtr handle)
         {
+            if (handle == IntPtr.Zero)
+            {
+                // 前面のウィンドウが無い（切り替えの途中など）。GetWindowThreadProcessId が 0 を返し「Idle.exe」と読めてしまう
+                return NoForegroundWindow;
+            }
+
             var title = new System.Text.StringBuilder(256);
             _ = GetWindowText(handle, title, title.Capacity);
+            var className = new System.Text.StringBuilder(256);
+            _ = GetClassName(handle, className, className.Capacity);
             _ = GetWindowThreadProcessId(handle, out var pid);
             string process;
             try { process = System.Diagnostics.Process.GetProcessById((int)pid).ProcessName; }
             catch { process = "?"; }
-            return $"{title}（{process}.exe）";
+            return $"{title}（{process}.exe、クラス {className}）";
         }
 
         /// <summary>ウィンドウを持つプロセスの ID（<c>GetWindowThreadProcessId</c>）。</summary>
@@ -162,6 +368,9 @@ namespace ICCardManager.UITests.Infrastructure
 
         [System.Runtime.InteropServices.DllImport("user32.dll", CharSet = System.Runtime.InteropServices.CharSet.Unicode)]
         private static extern int GetWindowText(IntPtr hWnd, System.Text.StringBuilder text, int maxCount);
+
+        [System.Runtime.InteropServices.DllImport("user32.dll", CharSet = System.Runtime.InteropServices.CharSet.Unicode)]
+        private static extern int GetClassName(IntPtr hWnd, System.Text.StringBuilder className, int maxCount);
 
         [System.Runtime.InteropServices.DllImport("user32.dll")]
         private static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint processId);
@@ -183,7 +392,8 @@ namespace ICCardManager.UITests.Infrastructure
         /// </para>
         /// <para>
         /// 前面化は所有ウィンドウに対して行う。要素だけを前面化する手段は無く、背面のまま撮ると
-        /// 手前のウィンドウが写り込んだ「もっともらしく見えて誤った画像」ができる。
+        /// 手前のウィンドウが写り込んだ「もっともらしく見えて誤った画像」ができる。前面にできなければ
+        /// 撮らずに例外にする（<see cref="RequireForegroundForCapture"/>）。
         /// </para>
         /// </remarks>
         /// <param name="owner">要素を含むウィンドウ（前面化の対象）。</param>
@@ -218,7 +428,7 @@ namespace ICCardManager.UITests.Infrastructure
                 throw new ArgumentException("ファイル名を指定してください。", nameof(fileName));
             }
 
-            BringToForeground(owner);  // 内側で SettleDelay ぶん待つ
+            var foreground = RequireForegroundForCapture(owner, fileName);  // 内側で SettleDelay ぶん待つ
 
             // 空の矩形は Union の前に弾く。Rectangle.Union は空の矩形（0,0,0,0）も 1 点として扱うため、
             // 畳んだ後は「画面の左上から対象までを覆う大きな矩形」になり、Width / Height の検査を素通りする。
@@ -230,6 +440,7 @@ namespace ICCardManager.UITests.Infrastructure
                 var rect = elements[i].BoundingRectangle;
                 if (rect.Width <= 0 || rect.Height <= 0)
                 {
+                    DeleteCapturedImage(fileName);  // 撮れなかった名前の古い画像を残さない（前面化の失敗と同じ扱い）
                     throw new InvalidOperationException(
                         $"撮影対象の要素に大きさがありません（{fileName} の {i + 1} 件目）。" +
                         "要素が画面外にあるか、非表示になったか、まだ描画されていません。" +
@@ -238,7 +449,7 @@ namespace ICCardManager.UITests.Infrastructure
                 bounds = bounds.IsEmpty ? rect : Rectangle.Union(bounds, rect);
             }
 
-            return CaptureRectangle(bounds, fileName);
+            return CaptureRectangle(bounds, fileName, foreground);
         }
 
         /// <summary>
@@ -268,9 +479,9 @@ namespace ICCardManager.UITests.Infrastructure
             }
 
             // トーストは Topmost（ToastNotificationWindow.xaml）なので、メイン画面を前面化しても隠れない
-            BringToForeground(mainWindow);
+            var foreground = RequireForegroundForCapture(mainWindow, fileName);
             var bounds = Rectangle.Union(GetVisibleFrameBounds(mainWindow), GetVisibleFrameBounds(toast));
-            return CaptureRectangle(bounds, fileName);
+            return CaptureRectangle(bounds, fileName, foreground);
         }
 
         /// <summary>撮影テストをスキップすべきか（環境変数 <see cref="EnableEnvironmentVariable"/> が <c>1</c> でない）。</summary>
@@ -299,12 +510,14 @@ namespace ICCardManager.UITests.Infrastructure
         /// <summary>
         /// ウィンドウを前面化して PNG に保存し、保存先のパスを返す。
         /// 既存の同名画像が <see cref="PublishedDirectory"/> にあればサイズを併せて出力する。
+        /// 前面にできなければ撮らずに例外にする（<see cref="RequireForegroundForCapture"/>）。
         /// </summary>
         /// <param name="window">撮影するウィンドウ。</param>
         /// <param name="fileName">保存するファイル名（例: <c>main.png</c>）。</param>
         /// <param name="bringToFront">
         /// 撮影前に前面化するか。トースト通知（フォーカスを奪わない別ウィンドウ）を撮るときは false にする。
         /// 前面化すると他のウィンドウの Z 順が変わり、メイン画面の上に載っているトーストが隠れることがある。
+        /// false のときは前面かどうかを確かめない（トーストはタイトルバーを持たず、前面にしないのが正しい）。
         /// </param>
         public static string Capture(Window window, string fileName, bool bringToFront = true)
         {
@@ -318,18 +531,31 @@ namespace ICCardManager.UITests.Infrastructure
                 throw new ArgumentException("ファイル名を指定してください。", nameof(fileName));
             }
 
+            var foreground = PrepareForCapture(
+                bringToFront,
+                () => RequireForegroundForCapture(window, fileName),  // 内側で SettleDelay ぶん待つ
+                () => Thread.Sleep(SettleDelay));
+
+            return CaptureRectangle(GetVisibleFrameBounds(window), fileName, foreground);
+        }
+
+        /// <summary>
+        /// <see cref="Capture(Window, string, bool)"/> の撮影前の分岐（継ぎ目。<c>ScreenshotForegroundTests</c> が検証する）。
+        /// 前面にするなら判定（前面にできなければ例外）を呼んでそのハンドルを返し、前面にしないなら待つだけで
+        /// <see cref="IntPtr.Zero"/>（撮影中の確認をしない）を返す。
+        /// </summary>
+        /// <remarks>
+        /// 前面にしない経路にも同じ待ちを入れる。トースト（ToastNotificationWindow）は Opacity のフェードイン アニメーションを
+        /// 持つため、待たずに撮ると途中の状態が写る。
+        /// </remarks>
+        internal static IntPtr PrepareForCapture(bool bringToFront, Func<IntPtr> requireForeground, Action settle)
+        {
             if (bringToFront)
             {
-                BringToForeground(window);  // 内側で SettleDelay ぶん待つ
+                return requireForeground();
             }
-            else
-            {
-                // 前面化しない経路にも同じ待ちを入れる。トースト（ToastNotificationWindow）は
-                // Opacity のフェードイン アニメーションを持つため、待たずに撮ると途中の状態が写る。
-                Thread.Sleep(SettleDelay);
-            }
-
-            return CaptureRectangle(GetVisibleFrameBounds(window), fileName);
+            settle();
+            return IntPtr.Zero;
         }
 
         /// <summary>
@@ -398,8 +624,10 @@ namespace ICCardManager.UITests.Infrastructure
         /// 診断用に <c>_FAILED.png</c> として残したうえで例外にする（公開対象からは
         /// <c>take-screenshots-uitest.ps1</c> の絞り込みが外す）。もっともらしく見えて中身の無い画像を
         /// そのままの名前で残さないことが要点。
+        /// 撮るたびに、撮影するウィンドウがまだ前面にあるかも確かめる（<see cref="EnsureStillForeground"/>）。
         /// </remarks>
-        private static string CaptureRectangle(Rectangle bounds, string fileName)
+        /// <param name="requiredForeground">前面にあるはずのウィンドウ。<see cref="IntPtr.Zero"/> なら確かめない。</param>
+        private static string CaptureRectangle(Rectangle bounds, string fileName, IntPtr requiredForeground)
         {
             var path = Path.Combine(OutputDirectory, fileName);
             var deadline = DateTime.UtcNow + PaintRetryTimeout;
@@ -407,10 +635,14 @@ namespace ICCardManager.UITests.Infrastructure
 
             while (true)
             {
+                // 撮る前（前回の撮り直しから今までに奪われていないか）
+                EnsureStillForeground(requiredForeground, GetForegroundWindow, DescribeWindow, fileName, DeleteCapturedImage);
                 using (var image = FlaUI.Core.Capturing.Capture.Rectangle(bounds))
                 {
                     image.ToFile(path);
                 }
+                // 撮った後（撮っている最中に奪われていないか）
+                EnsureStillForeground(requiredForeground, GetForegroundWindow, DescribeWindow, fileName, DeleteCapturedImage);
 
                 dominant = DominantColorShare(path);
                 if (dominant < PaintedDominantColorLimit)
@@ -425,9 +657,14 @@ namespace ICCardManager.UITests.Infrastructure
                 Thread.Sleep(PaintRetryInterval);
             }
 
-            var failedPath = Path.Combine(
-                OutputDirectory, Path.GetFileNameWithoutExtension(fileName) + "_FAILED.png");
-            try { File.Copy(path, failedPath, overwrite: true); File.Delete(path); } catch { /* 診断用なので失敗は無視 */ }
+            // 切り分け用の撮影（既に _FAILED.png）はそのまま残す（_FAILED_FAILED.png にしない）
+            var failedPath = fileName.EndsWith(DiagnosisFileSuffix, StringComparison.Ordinal)
+                ? path
+                : Path.Combine(OutputDirectory, Path.GetFileNameWithoutExtension(fileName) + DiagnosisFileSuffix);
+            if (failedPath != path)
+            {
+                try { File.Copy(path, failedPath, overwrite: true); File.Delete(path); } catch { /* 診断用なので失敗は無視 */ }
+            }
 
             throw new InvalidOperationException(
                 $"撮影した画像がほぼ単色です（{fileName}: 最多色 {dominant:P1}）。" +

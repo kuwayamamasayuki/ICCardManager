@@ -1076,14 +1076,6 @@ namespace ICCardManager.ViewModels
             var targetCardNumber = SelectedCard.CardNumber;
             var targetLabel = FormatCardLabel(targetCardType, targetCardNumber);
 
-            // Issue #429: ICカードの削除は認証が必要
-            using var authResult = (await _staffAuthService.RequestAuthenticationAsync("交通系ICカードの削除"))?.Enter();
-            if (authResult == null)
-            {
-                // 認証キャンセルまたはタイムアウト
-                return;
-            }
-
             // 削除確認ダイアログを表示
             var confirmed = _dialogService.ShowWarningConfirmation(
                 $"カード「{targetCardType} {targetCardNumber}」を削除しますか？\n\n※削除後も履歴データは保持されます。",
@@ -1091,6 +1083,20 @@ namespace ICCardManager.ViewModels
 
             if (!confirmed)
             {
+                return;
+            }
+
+            // Issue #429: 交通系ICカードの削除は認証が必要
+            // Issue #2474: 認証は「削除確認」で はい を押した**後**に求める（払い戻し #2322 と同じ順序）。
+            // 「いいえ」で取りやめるだけなら職員証は要らない。認証の待機中に他 PC が削除・払い戻し・貸出をしても、
+            // 下の読み直し（GetByIdmAsync）と論理削除の WHERE が検出して名指しで案内する（確認の後に読み直すのは従来どおり）。
+            using var authResult = (await _staffAuthService.RequestAuthenticationAsync("交通系ICカードの削除"))?.Enter();
+            if (authResult == null)
+            {
+                // 認証キャンセルまたはタイムアウト。何も書かず、同意した直後に何も起きないと削除されたのか
+                // 分からないので案内する（Issue #2474。払い戻し・履歴の統合・統合の取り消しと同じ）
+                _dialogService.ShowInformation(
+                    BuildAuthenticationCancelledMessage(targetLabel, CardWriteOperation.Delete), "交通系ICカードの削除");
                 return;
             }
 
@@ -1309,7 +1315,11 @@ namespace ICCardManager.ViewModels
             using var authResult = (await _staffAuthService.RequestAuthenticationAsync("交通系ICカードの払い戻し"))?.Enter();
             if (authResult == null)
             {
-                // 認証キャンセルまたはタイムアウト（削除と同じく何もしない）
+                // 認証キャンセルまたはタイムアウト。何も書かず、払い戻されたのか分かるよう案内する
+                // （Issue #2474。削除・履歴の統合・統合の取り消しと同じ）
+                _dialogService.ShowInformation(
+                    BuildAuthenticationCancelledMessage(FormatCardLabel(refundCardType, refundCardNumber), CardWriteOperation.Refund),
+                    "交通系ICカードの払い戻し");
                 return;
             }
 
@@ -1565,6 +1575,28 @@ namespace ICCardManager.ViewModels
             CardWriteOperation.Refund => "払い戻し",
             _ => throw new ArgumentOutOfRangeException(nameof(operation), operation, "文言の操作名が定義されていない操作です。"),
         };
+
+        /// <summary>
+        /// 確認で はい を押した後に職員証の認証が完了しなかった（キャンセル・タイムアウト）ときの案内（Issue #2474）。
+        /// </summary>
+        /// <remarks>
+        /// 同意した直後に何も起きないと、削除・払い戻しが行われたのかどうかが分からない。履歴の統合・統合の取り消しの
+        /// 案内（<c>HistoryPanelViewModel.MergeAuthenticationCancelledMessage</c> / <c>UnmergeAuthenticationCancelledMessage</c>）と
+        /// 同じ形（何も書いていないこと・押し直すボタン・認証）にそろえる。押し直すボタンの名前は <see cref="GetOperationName"/>。
+        /// </remarks>
+        internal static string BuildAuthenticationCancelledMessage(string targetLabel, CardWriteOperation operation)
+        {
+            // 動詞の活用（「払い戻す」）はボタン名（「払い戻し」）から作れないので、操作ごとに持つ
+            var (notDone, toDo) = operation switch
+            {
+                CardWriteOperation.Delete => ("削除していません", "削除するには"),
+                CardWriteOperation.Refund => ("払い戻していません", "払い戻すには"),
+                _ => throw new ArgumentOutOfRangeException(nameof(operation), operation, "文言の操作名が定義されていない操作です。"),
+            };
+            var buttonName = GetOperationName(operation);
+            return $"職員証の認証が完了しなかったため、{targetLabel}を{notDone}。" +
+                   $"{toDo}、もう一度「{buttonName}」を押して、職員証で認証してください。";
+        }
 
         /// <summary>
         /// 削除・払い戻しを書き込まなかった（拒否された）原因（Issue #2421）

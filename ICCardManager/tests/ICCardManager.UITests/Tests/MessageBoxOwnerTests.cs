@@ -27,8 +27,12 @@ namespace ICCardManager.UITests.Tests
     /// Win32 に問い合わせて表明する。アプリが前面にあると、オーナーを渡さない実装でも偶然オーナーが付いて緑になる。
     /// </para>
     /// <para>
-    /// 確認の MessageBox は、カード削除の「削除確認」を使う（職員証の仮想タッチで認証を通した直後に出る）。
-    /// 「いいえ」で閉じるので副作用は無い（それも DB で表明する）。
+    /// MessageBox は、カード削除で職員証の仮想タッチで認証を通した直後に出る「削除できません」を使う。
+    /// Issue #2474 で削除は「削除確認 → 認証」の順になり、「削除確認」はボタンの Invoke の直後に出るようになった
+    /// （Invoke の直後はアプリが前面を取るため、背面で出させる条件が作れない。<see cref="ForegroundDecoy"/>）。
+    /// そこで、削除確認で「はい」を押した後、認証を待つ間に他の PC がそのカードを削除した状況を DB に作り、
+    /// 認証の後の読み直しで出る「削除できません」を、認証成功から約 700ms 後に背面で出させる。
+    /// 削除はアプリからは行われない（操作ログに削除が残らないことを DB で表明する）。
     /// </para>
     /// </remarks>
     [Collection("UI")]
@@ -36,10 +40,13 @@ namespace ICCardManager.UITests.Tests
     public class MessageBoxOwnerTests
     {
         private const string SkipReason =
-            "Issue #2190: 削除確認の前に職員証認証があり、仮想タッチ（DEBUG ビルド限定）でしか通せないため、Debug 起動のときだけ実行する。";
+            "Issue #2190: 「削除できません」は職員証認証の後に出し、認証は仮想タッチ（DEBUG ビルド限定）でしか通せないため、Debug 起動のときだけ実行する。";
 
         /// <summary>カード削除の確認 MessageBox のタイトル（<c>CardManageViewModel</c> の <c>ShowWarningConfirmation</c>）。</summary>
         private const string DeleteConfirmationTitle = "削除確認";
+
+        /// <summary>削除を断る MessageBox のタイトル（<c>CardManageViewModel.NotifyWriteRefusedAsync</c> の <c>ShowError</c>）。</summary>
+        private const string DeleteRefusedTitle = "削除できません";
 
         [SkippableFact]
         public void アプリが背面のときもダイアログ上のMessageBoxはそのダイアログをオーナーにして押せなくすること()
@@ -55,14 +62,23 @@ namespace ICCardManager.UITests.Tests
             cardManage.WaitUntilEnabled(TestConstants.CardDeleteButton).Should().BeTrue("行を選んだら「削除」ボタンが有効になること");
             cardManage.ClickButton(TestConstants.CardDeleteButton);
 
-            // 削除は職員証認証を要する（#429）。認証ダイアログの仮想タッチを押すと、続けて削除確認が出る
+            // Issue #2474: 削除確認（はい）の後に職員証認証（#429）を求める
+            var confirmation = MessageBoxOperations.WaitFor(fixture, cardManage.Window, DeleteConfirmationTitle);
+            MessageBoxOperations.Answer(confirmation, MessageBoxOperations.YesPrefix);
+
             var auth = new DialogPageBase(
                 DialogLocator.WaitForNestedDialog(fixture, cardManage.Window, TestConstants.StaffAuthDialogName));
             var dialogHandle = NativeWindows.HandleOf(cardManage.Window);
 
+            // 認証を待つ間に、他の PC がそのカードを削除した（共有フォルダーモード）。認証の後の読み直しで
+            // 削除を断り、カード一覧を読み直してから「削除できません」を出す
+            DatabaseProbe.ExecuteAsAnotherPc(
+                "UPDATE ic_card SET is_deleted = 1 WHERE card_idm = @card",
+                ("@card", ScreenshotSeedData.NormalCardIdm)).Should().Be(1, "前提: 他の PC の削除を DB に作れたこと");
+
             // 故障の条件: 認証の完了を待つ間に、職員が別のアプリへ切り替えた（Issue #1794 のシナリオ）。
             // UIA の Invoke は呼ばれたアプリへ前面化の権利を渡し、認証ダイアログが前面を取る（実測）ので、
-            // 前面を取ったのを見届けてから別のウィンドウを前面に戻す。認証成功から削除確認までは約 700ms ある
+            // 前面を取ったのを見届けてから別のウィンドウを前面に戻す。認証成功から「削除できません」までは約 700ms ある
             using var decoy = ForegroundDecoy.Activate();
             auth.ClickButton(TestConstants.DebugVirtualTouchButtonName);
             _ = Retry.WhileFalse(
@@ -70,27 +86,31 @@ namespace ICCardManager.UITests.Tests
                 TimeSpan.FromSeconds(2));
             decoy.BringToFront();
 
-            var messageBox = MessageBoxOperations.WaitFor(fixture, cardManage.Window, DeleteConfirmationTitle);
+            var messageBox = MessageBoxOperations.WaitFor(fixture, cardManage.Window, DeleteRefusedTitle);
             var messageBoxHandle = NativeWindows.HandleOf(messageBox);
 
             decoy.IsForeground.Should().BeTrue(
                 $"前提: MessageBox が出た時点でアプリは背面にあること（前面は {NativeWindows.Describe(NativeWindows.Foreground)}）。" +
                 "前面だとオーナーを渡さない実装でも偶然オーナーが付き、このテストは何も検査しない");
             NativeWindows.OwnerOf(messageBoxHandle).Should().Be(dialogHandle,
-                "確認の MessageBox のオーナーは、それを出した交通系ICカード管理ダイアログであること（ownerless なら 0）");
+                "「削除できません」の MessageBox のオーナーは、それを出した交通系ICカード管理ダイアログであること（ownerless なら 0）");
             NativeWindows.IsEnabled(dialogHandle).Should().BeFalse(
                 "MessageBox を出している間、下のダイアログは Win32 レベルで無効になり、削除などのボタンを押せないこと");
 
-            // 対: 「いいえ」で閉じるとダイアログは再び操作でき、カードは削除されていない
-            MessageBoxOperations.Answer(messageBox, MessageBoxOperations.NoPrefix);
+            // 対: 閉じるとダイアログは再び操作でき、アプリは削除を記録していない。
+            // 最後の DB の表明（操作ログに削除が 0 件）は副作用が無いことの確認にとどまり、検出力はほぼ無い。
+            // 他の PC が先に is_deleted = 1 にしているので、認証の後の読み直しを外しても論理削除の WHERE が 0 行になって
+            // 操作ログは書かれず、この表明は緑のまま（断る経路の検査は単体テスト `CardManageViewModelTests` の削除の競合のテスト（`DeleteAsync_WhenTargetRowMissing_*` 等）が担う）
+            MessageBoxOperations.Answer(messageBox, "OK");
 
             var enabledAgain = Retry.WhileFalse(
                 () => NativeWindows.IsEnabled(dialogHandle),
                 TimeSpan.FromSeconds(TestConstants.DialogOpenTimeoutSeconds)).Success;
             enabledAgain.Should().BeTrue("MessageBox を閉じたら、ダイアログは再び操作できること");
             DatabaseProbe.Count(
-                "SELECT is_deleted FROM ic_card WHERE card_idm = @card",
-                ("@card", ScreenshotSeedData.NormalCardIdm)).Should().Be(0L, "「いいえ」を選んだのでカードは削除されないこと");
+                "SELECT COUNT(*) FROM operation_log WHERE target_table = 'ic_card' AND action = 'DELETE' AND target_id = @card",
+                ("@card", ScreenshotSeedData.NormalCardIdm)).Should().Be(0L,
+                    "他の PC が先に削除していたので、このアプリは削除を記録しないこと");
         }
     }
 }

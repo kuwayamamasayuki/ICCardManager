@@ -1349,6 +1349,159 @@ public class CardManageViewModelTests : IDisposable
 
     #endregion
 
+    #region 削除の確認と認証の順序（Issue #2474）
+
+    private const string DeleteOrderCardIdm = "0102030405060708";
+
+    /// <summary>
+    /// 削除できるカードを選び、確認・認証以外は削除が最後まで成功する状態にする。
+    /// </summary>
+    private void ArrangeDeletableCard()
+    {
+        _viewModel.SelectedCard = new CardDto
+        {
+            CardIdm = DeleteOrderCardIdm,
+            CardType = "はやかけん",
+            CardNumber = "H-001",
+            IsLent = false
+        };
+        _cardRepositoryMock.Setup(r => r.GetByIdmAsync(DeleteOrderCardIdm, false))
+            .ReturnsAsync(new IcCard { CardIdm = DeleteOrderCardIdm, CardType = "はやかけん", CardNumber = "H-001" });
+        _cardRepositoryMock.Setup(r => r.DeleteAsync(DeleteOrderCardIdm, It.IsAny<SQLiteTransaction>()))
+            .ReturnsAsync(ICCardManager.Data.Repositories.CardOperationResult.Success);
+        _cardRepositoryMock.Setup(r => r.GetAllAsync()).ReturnsAsync(new List<IcCard>());
+    }
+
+    /// <summary>
+    /// 削除するかどうかを決める（「削除確認」で はい）前に職員証を求めない。払い戻しと同じ「確認 → 認証」。
+    /// </summary>
+    [Fact]
+    public async Task DeleteAsync_削除確認の後に職員証の認証を求めて削除すること()
+    {
+        ArrangeDeletableCard();
+        var events = new List<string>();
+        _dialogServiceMock.Setup(d => d.ShowWarningConfirmation(It.IsAny<string>(), "削除確認"))
+            .Callback(() => events.Add("confirm"))
+            .Returns(true);
+        _staffAuthServiceMock.Setup(s => s.RequestAuthenticationAsync("交通系ICカードの削除"))
+            .Callback(() => events.Add("auth"))
+            .ReturnsAsync(new StaffAuthResult { Idm = "TEST_OPERATOR_IDM", StaffName = "テスト操作者" });
+        _cardRepositoryMock.Setup(r => r.DeleteAsync(DeleteOrderCardIdm, It.IsAny<SQLiteTransaction>()))
+            .Callback(() => events.Add("delete"))
+            .ReturnsAsync(ICCardManager.Data.Repositories.CardOperationResult.Success);
+
+        await _viewModel.DeleteAsync();
+
+        events.Should().Equal(new[] { "confirm", "auth", "delete" },
+            "削除するかどうかを決める前に職員証を求めない（払い戻しと同じ順序）");
+        _dialogServiceMock.Verify(d => d.ShowInformation(It.IsAny<string>(), "交通系ICカードの削除"), Times.Never,
+            "認証が完了したら、認証が完了しなかった案内は出さない");
+    }
+
+    /// <summary>
+    /// 「削除確認」で いいえ を選んだら、職員証を求めず何も書かない（取りやめるだけの操作に認証は要らない）。
+    /// </summary>
+    [Fact]
+    public async Task DeleteAsync_削除確認でいいえなら職員証を求めず削除しないこと()
+    {
+        ArrangeDeletableCard();
+        _dialogServiceMock.Setup(d => d.ShowWarningConfirmation(It.IsAny<string>(), "削除確認"))
+            .Returns(false);
+
+        await _viewModel.DeleteAsync();
+
+        _staffAuthServiceMock.Verify(s => s.RequestAuthenticationAsync(It.IsAny<string>()), Times.Never,
+            "取りやめるだけの操作に職員証を求めない");
+        _cardRepositoryMock.Verify(r => r.DeleteAsync(It.IsAny<string>(), It.IsAny<SQLiteTransaction>()), Times.Never);
+        _operationLogRepositoryMock.Verify(
+            r => r.InsertAsync(It.IsAny<OperationLog>(), It.IsAny<SQLiteTransaction>()), Times.Never);
+    }
+
+    /// <summary>
+    /// 確認で はい を選んでも、認証が完了しなければ（キャンセル・タイムアウト）削除しない。
+    /// 上の 2 件と対で、確認・認証のどちらが欠けても削除しないことを固定する。
+    /// </summary>
+    [Fact]
+    public async Task DeleteAsync_削除確認の後に認証が完了しなければ削除しないこと()
+    {
+        ArrangeDeletableCard();
+        _staffAuthServiceMock.Setup(s => s.RequestAuthenticationAsync(It.IsAny<string>()))
+            .ReturnsAsync((StaffAuthResult?)null);
+
+        await _viewModel.DeleteAsync();
+
+        _dialogServiceMock.Verify(d => d.ShowWarningConfirmation(It.IsAny<string>(), "削除確認"), Times.Once,
+            "確認は認証より前に出る");
+        _staffAuthServiceMock.Verify(s => s.RequestAuthenticationAsync("交通系ICカードの削除"), Times.Once);
+        _cardRepositoryMock.Verify(r => r.DeleteAsync(It.IsAny<string>(), It.IsAny<SQLiteTransaction>()), Times.Never);
+        _operationLogRepositoryMock.Verify(
+            r => r.InsertAsync(It.IsAny<OperationLog>(), It.IsAny<SQLiteTransaction>()), Times.Never);
+        _dialogServiceMock.Verify(d => d.ShowInformation(
+            CardManageViewModel.BuildAuthenticationCancelledMessage("交通系ICカード「はやかけん H-001」", CardManageViewModel.CardWriteOperation.Delete),
+            "交通系ICカードの削除"), Times.Once,
+            "削除確認で はい を押した直後に何も起きないと、削除されたのか分からない（統合・統合の取り消しと同じ案内）");
+        _viewModel.StatusMessage.Should().NotBe("削除しました");
+    }
+
+    /// <summary>
+    /// 削除確認で いいえ を選んだときは、自分で取りやめたので認証が完了しなかった案内を出さない（上のテストと対）。
+    /// </summary>
+    [Fact]
+    public async Task DeleteAsync_削除確認でいいえなら認証が完了しなかった案内を出さないこと()
+    {
+        ArrangeDeletableCard();
+        _dialogServiceMock.Setup(d => d.ShowWarningConfirmation(It.IsAny<string>(), "削除確認"))
+            .Returns(false);
+
+        await _viewModel.DeleteAsync();
+
+        _dialogServiceMock.Verify(d => d.ShowInformation(It.IsAny<string>(), It.IsAny<string>()), Times.Never);
+    }
+
+    /// <summary>
+    /// 払い戻しの確認で はい を押した後に認証が完了しなければ、払い戻さず案内する（削除・統合と同じ）。
+    /// </summary>
+    [Fact]
+    public async Task RefundAsync_確認の後に認証が完了しなければ払い戻さず案内すること()
+    {
+        ArrangeRefundableCard(3000);
+        _staffAuthServiceMock.Setup(s => s.RequestAuthenticationAsync("交通系ICカードの払い戻し"))
+            .ReturnsAsync((StaffAuthResult?)null);
+
+        await _viewModel.RefundAsync();
+
+        _cardRepositoryMock.Verify(r => r.SetRefundedAsync(
+            It.IsAny<string>(), It.IsAny<DateTime>(), It.IsAny<SQLiteTransaction>()), Times.Never);
+        _ledgerRepositoryMock.Verify(r => r.InsertAsync(It.IsAny<Ledger>(), It.IsAny<SQLiteTransaction>()), Times.Never);
+        _dialogServiceMock.Verify(d => d.ShowInformation(
+            CardManageViewModel.BuildAuthenticationCancelledMessage("交通系ICカード「はやかけん H-001」", CardManageViewModel.CardWriteOperation.Refund),
+            "交通系ICカードの払い戻し"), Times.Once,
+            "払い戻し確認で はい を押した直後に何も起きないと、払い戻されたのか分からない");
+    }
+
+    /// <summary>
+    /// 認証が完了しなかった案内の文言（何が・なぜ・どうすれば）。押し直すボタンの名前を操作ごとに名指しする。
+    /// </summary>
+    [Theory]
+    [InlineData(true, "削除していません", "削除するには、もう一度「削除」を押して")]
+    [InlineData(false, "払い戻していません", "払い戻すには、もう一度「払い戻し」を押して")]
+    public void BuildAuthenticationCancelledMessage_対象と理由と押し直す操作を述べること(
+        bool isDelete, string notDone, string retry)
+    {
+        var operation = isDelete
+            ? CardManageViewModel.CardWriteOperation.Delete
+            : CardManageViewModel.CardWriteOperation.Refund;
+        var message = CardManageViewModel.BuildAuthenticationCancelledMessage("交通系ICカード「はやかけん H-001」", operation);
+
+        message.Should().StartWith("職員証の認証が完了しなかったため、");
+        message.Should().Contain("交通系ICカード「はやかけん H-001」");
+        message.Should().Contain(notDone);
+        message.Should().Contain(retry);
+        message.Should().EndWith("職員証で認証してください。");
+    }
+
+    #endregion
+
     #region 払い戻しテスト（Issue #1603）
 
     /// <summary>
@@ -4436,9 +4589,13 @@ public class CardManageViewModelTests : IDisposable
     /// </summary>
     /// <remarks>
     /// <para>
-    /// <c>DeleteAsync</c> は <c>RequestAuthenticationAsync</c>（職員証タッチ待ち）を挟んでから
+    /// 修正前の <c>DeleteAsync</c> は <c>RequestAuthenticationAsync</c>（職員証タッチ待ち）を挟んでから
     /// 確認ダイアログの文言で <c>SelectedCard</c> を逆参照していた。待機中に選択が外れると
     /// <c>NullReferenceException</c> になり、非同期コマンドから例外が抜けて致命的エラーダイアログになる。
+    /// </para>
+    /// <para>
+    /// Issue #2474 で確認は認証より前（「削除確認 → 認証」）になり、確認の文言は待機の前に作られる。
+    /// 認証の待機の後に残るのは、削除前の読み直し・論理削除・操作ログの対象で、これらが開始時点のカードを指すことを表明する。
     /// </para>
     /// <para>
     /// 「削除するのはボタンを押した時点で選択されていた行」であり、その後の選択状態には依存しない。
@@ -4471,11 +4628,8 @@ public class CardManageViewModelTests : IDisposable
         // Act
         await _viewModel.DeleteAsync();
 
-        // Assert - 確認ダイアログは開始時点の対象を名指しできている
-        _dialogServiceMock.Verify(d => d.ShowWarningConfirmation(
-            It.Is<string>(s => s.Contains("はやかけん") && s.Contains("H-001")),
-            It.IsAny<string>()), Times.Once);
-
+        // Assert - 認証の待機の後の読み直し・論理削除・操作ログは、開始時点の対象に対して行われる
+        _cardRepositoryMock.Verify(r => r.GetByIdmAsync(idm, false), Times.Once);
         _cardRepositoryMock.Verify(r => r.DeleteAsync(idm, It.IsAny<SQLiteTransaction>()), Times.Once);
         _operationLogRepositoryMock.Verify(r => r.InsertAsync(It.Is<OperationLog>(log =>
             log.TargetTable == OperationLogger.Tables.IcCard &&
@@ -5052,6 +5206,8 @@ public class CardManageViewModelTests : IDisposable
         // Assert
         events.Should().Equal(new[] { "confirm", "auth" },
             "払い戻すかどうかを決める前に職員証を求めない（#2263 / #2265 と同じ順序）");
+        _dialogServiceMock.Verify(d => d.ShowInformation(It.IsAny<string>(), "交通系ICカードの払い戻し"), Times.Never,
+            "認証が完了したら、認証が完了しなかった案内は出さない（Issue #2474）");
         recorded.Should().NotBeNull();
         recorded!.OperatorIdm.Should().Be("AUTH_STAFF_IDM", "操作ログの操作者は認証した職員");
         recorded.OperatorName.Should().Be("天神 太郎");

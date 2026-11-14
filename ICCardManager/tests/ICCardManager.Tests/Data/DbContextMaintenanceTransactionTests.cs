@@ -1,5 +1,7 @@
 using System;
+using System.Collections.Generic;
 using System.Data.SQLite;
+using System.Globalization;
 using System.Threading;
 using System.Threading.Tasks;
 using FluentAssertions;
@@ -7,7 +9,9 @@ using ICCardManager.Data;
 using ICCardManager.Data.Repositories;
 using ICCardManager.Infrastructure.Caching;
 using ICCardManager.Models;
+using ICCardManager.Tests.Infrastructure;
 using ICCardManager.Tests.Infrastructure.Timing;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using Moq;
@@ -59,10 +63,23 @@ public class DbContextMaintenanceTransactionTests : IDisposable
     private readonly LedgerRepository _ledgerRepository;
     private readonly OperationLogRepository _operationLogRepository;
 
+    /// <summary>
+    /// DbContext のログ（cleanup の再試行・スキップの Warning、SafeRollback の巻き戻し失敗）を受ける。
+    /// 失敗の理由へ載せ、CI のログだけで切り分けられるようにする（Issue #1961 / #2476）。
+    /// </summary>
+    private readonly RecordingLogger<DbContext> _logger = new RecordingLogger<DbContext>();
+
+    /// <summary>
+    /// 準備の各段階の後の <c>AutoCommit</c>（Issue #2476）。閉じていないトランザクションが残っていたら、
+    /// どの段階から残ったかを失敗の理由で示す。SQL を発行しないので接続の状態を変えない。
+    /// </summary>
+    private readonly List<string> _setupAutoCommit = new List<string>();
+
     public DbContextMaintenanceTransactionTests()
     {
-        _dbContext = new HookableDbContext();
+        _dbContext = new HookableDbContext(_logger);
         _dbContext.InitializeDatabase();
+        RecordSetupAutoCommit("初期化の後");
 
         var cacheServiceMock = new Mock<ICacheService>();
         var staffRepository = new StaffRepository(
@@ -79,6 +96,7 @@ public class DbContextMaintenanceTransactionTests : IDisposable
             Name = TestStaffName,
             IsDeleted = false,
         }).GetAwaiter().GetResult();
+        RecordSetupAutoCommit("職員の INSERT の後");
 
         cardRepository.InsertAsync(new IcCard
         {
@@ -87,6 +105,13 @@ public class DbContextMaintenanceTransactionTests : IDisposable
             CardNumber = "H001",
             IsDeleted = false,
         }).GetAwaiter().GetResult();
+        RecordSetupAutoCommit("カードの INSERT の後");
+    }
+
+    private void RecordSetupAutoCommit(string stage)
+    {
+        using var lease = _dbContext.LeaseConnection();
+        _setupAutoCommit.Add($"{stage} {lease.Connection.AutoCommit}");
     }
 
     public void Dispose()
@@ -285,27 +310,151 @@ public class DbContextMaintenanceTransactionTests : IDisposable
     /// <remarks>
     /// Issue #2108: 待機は <see cref="DbContext.RetryDelayAsync"/> を通る（同期版でも差し替え口は 1 つ）。
     /// 記録器へ差し替えて、実時間を使わずに「何ミリ秒待とうとしたか」を表明する。
+    /// <para>
+    /// Issue #2476: CI（Release）で 1 回だけ「削除件数 0」で失敗した。FluentAssertions は主語を
+    /// <c>attempts</c> と表示したが、理由の文言（「2 回目の試行で削除が完了すること」）から、失敗したのは
+    /// 削除件数の表明である。手元の Release でも、削除件数の表明を失敗させると主語が <c>value</c> と表示された
+    /// （事実）。Release ではスタックの行番号が手前へずれ、FluentAssertions はその行のソースから主語を読むため
+    /// 取り違える（推測を含む。CI で <c>attempts</c> になった具体的な規則は未確認）。主語は信用できないので、
+    /// どの表明が失敗したかは because の文言で見分ける。
+    /// このテストのロック競合は割り込み点から例外を投げて作っており、別の接続でロックを持つ処理は無いので、
+    /// 「ロックの保持と cleanup の開始のタイミング」には依存しない。単独での繰り返し・並列の負荷・全件実行では
+    /// 再現せず、原因は未特定。次に起きたときに切り分けられるよう、観測値と DbContext のログを失敗の理由へ載せる。
+    /// 残る仮説（推測）は「INSERT が閉じていないトランザクションに入り、試行 1 の ROLLBACK で一緒に消えた」。
+    /// System.Data.SQLite は、接続にトランザクションが開いていると <c>BeginTransaction</c> で BEGIN を発行せず、
+    /// <c>Rollback</c> で外側ごと巻き戻す。生の BEGIN が残っていれば cleanup の <c>BeginTransaction</c> が例外になるので、
+    /// 仮説どおりなら漏れているのは <c>SQLiteTransaction</c> オブジェクトである（これも推測）。準備の各段階と
+    /// INSERT 直後の <c>AutoCommit</c>（sqlite3_get_autocommit）、各試行のトランザクションの入れ子の深さ
+    /// （<c>SQLiteConnection</c> の非公開フィールド <c>_transactionLevel</c>。正常なら 1、入れ子なら 2）、
+    /// 巻き戻しの失敗のログで直接確かめられる。割り込み点は保守トランザクションの内側なので、
+    /// そこで読む <c>AutoCommit</c> は常に False で何も区別しない。そのため試行ごとには深さを読む。
+    /// </para>
+    /// <para>
+    /// 観測者効果を抑えるため、割り込み点の中では試行 2（削除する回）に SQL を発行しない（トランザクションの
+    /// 入れ子の深さを読むだけ）。摘要が一致する行の数を数える SELECT は、巻き戻される試行 1 の、例外を投げる
+    /// 直前にだけ走らせる。日付・境界日・行数のほかの観測は cleanup の前後に行う。
+    /// </para>
     /// </remarks>
     [Fact]
     public async Task CleanupOldData_一過性のロック競合はバックオフで待って再試行すること()
     {
         await _ledgerRepository.InsertAsync(CreateLedger(DateTime.Now.AddYears(-7), "7年前のデータ"));
+        var autoCommitAfterInsert = await ReadAutoCommitAsync();
+        var storedDate = await ScalarTextAsync("SELECT date FROM ledger WHERE summary = '7年前のデータ'");
+        var thresholdBefore = await ScalarTextAsync(RetentionThresholdSql);
+        var targetsBefore = await CountAsync(TargetRowCountSql);
         var retryDelay = RecordingRetryDelay.AttachTo(_dbContext);
         var attempts = 0;
+        var observations = new List<string>();
         _dbContext.MaintenanceTransactionOpenedHook = () =>
         {
-            if (++attempts == 1)
+            attempts++;
+            using var lease = _dbContext.LeaseConnection();
+            var depth = ReadTransactionLevel(lease.Connection);
+            if (attempts == 1)
             {
+                observations.Add($"試行1: 入れ子の深さ {depth}・摘要が一致する行 {CountOn(lease.Connection, TargetRowCountSql)} 件");
                 throw new SQLiteException(SQLiteErrorCode.Busy, "database is locked");
             }
+
+            observations.Add($"試行{attempts}: 入れ子の深さ {depth}");
         };
 
         var (ledgerCount, _) = await Task.Run(() => _dbContext.CleanupOldData());
 
-        ledgerCount.Should().Be(1, "2 回目の試行で削除が完了すること");
-        attempts.Should().Be(2);
+        _dbContext.MaintenanceTransactionOpenedHook = null;
+        var parts = new List<string>
+        {
+            $"DB の日付 {storedDate}",
+            $"境界日 {thresholdBefore}（後 {await ObserveAsync(() => ScalarTextAsync(RetentionThresholdSql))}）",
+            $"準備の AutoCommit [{string.Join("、", _setupAutoCommit)}]",
+            $"INSERT 直後の AutoCommit {autoCommitAfterInsert}",
+            $"開始前の摘要が一致する行 {targetsBefore} 件",
+        };
+        parts.AddRange(observations.Count > 0 ? observations : new List<string> { "割り込み点に到達せず" });
+        parts.Add($"削除後の摘要が一致する行 {await ObserveAsync(async () => await CountAsync(TargetRowCountSql))} 件");
+        parts.Add($"終了後の AutoCommit {await ObserveAsync(async () => await ReadAutoCommitAsync())}");
+        parts.Add($"待機 [{string.Join(", ", retryDelay.Delays)}]");
+        parts.Add($"System.Data.SQLite {typeof(SQLiteConnection).Assembly.GetName().Version}");
+        parts.Add($"ログ: {FormatLogOnOneLine()}");
+        var diagnostics = string.Join("・", parts);
+        ledgerCount.Should().Be(1, "2 回目の試行で削除が完了すること（{0}）", diagnostics);
+        attempts.Should().Be(2, "初回の失敗の後に 1 回だけ再試行すること（{0}）", diagnostics);
         retryDelay.Delays.Should().Equal(new[] { DbContext.LocalRetryDelays[0] },
-            "失敗した 1 回の後にだけ、バックオフの先頭の時間を待つこと");
+            "失敗した 1 回の後にだけ、バックオフの先頭の時間を待つこと（{0}）", diagnostics);
+    }
+
+    /// <summary>
+    /// 摘要が一致する行の数。数えるのは行が残っているかであって、削除条件（日付）に合う行の数ではない
+    /// （削除条件の側は「DB の日付」と「境界日」を並べて見る）。
+    /// </summary>
+    private const string TargetRowCountSql = "SELECT COUNT(*) FROM ledger WHERE summary = '7年前のデータ'";
+
+    private const string RetentionThresholdSql = "SELECT date('now', '-6 years', 'localtime')";
+
+    /// <summary>
+    /// 接続のトランザクションの入れ子の深さ（System.Data.SQLite の非公開フィールド）。読めない版では「不明」。
+    /// </summary>
+    /// <remarks>
+    /// 版を上げてフィールドが無くなると黙って「不明」になるので、失敗の理由には System.Data.SQLite の版も載せる。
+    /// </remarks>
+    private static string ReadTransactionLevel(SQLiteConnection connection)
+    {
+        var field = typeof(SQLiteConnection).GetField(
+            "_transactionLevel", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic);
+        return field?.GetValue(connection) is int level
+            ? level.ToString(CultureInfo.InvariantCulture)
+            : "不明";
+    }
+
+    /// <summary>ログを 1 行へ畳む（理由の閉じ括弧が独立行に出ないように）。</summary>
+    /// <remarks>
+    /// 毎回出る「journal_modeの設定に失敗しました（現在: memory）」は、インメモリ DB では journal_mode が
+    /// memory にしかならないための Warning で、この失敗とは関係しない（正常）。
+    /// </remarks>
+    private string FormatLogOnOneLine()
+        => _logger.FormatEntries().Trim().Replace("\r\n", " / ").Replace("\n", " / ");
+
+    /// <summary>
+    /// cleanup の後の観測を、例外で表明ごと失わないよう包む（失敗したら観測値に理由を載せる）。
+    /// </summary>
+    private static async Task<string> ObserveAsync<T>(Func<Task<T>> observe)
+    {
+        try
+        {
+            return Convert.ToString(await observe(), CultureInfo.InvariantCulture) ?? string.Empty;
+        }
+        catch (Exception ex)
+        {
+            return $"(取得失敗: {ex.GetType().Name} {ex.Message})";
+        }
+    }
+
+    private async Task<bool> ReadAutoCommitAsync()
+    {
+        using var lease = await _dbContext.LeaseConnectionAsync();
+        return lease.Connection.AutoCommit;
+    }
+
+    private async Task<string> ScalarTextAsync(string sql)
+    {
+        using var lease = await _dbContext.LeaseConnectionAsync();
+        using var command = lease.Connection.CreateCommand();
+        command.CommandText = sql;
+        var value = await command.ExecuteScalarAsync();
+        return value is null || value is DBNull
+            ? "(NULL)"
+            : Convert.ToString(value, CultureInfo.InvariantCulture) ?? string.Empty;
+    }
+
+    /// <summary>
+    /// 保守トランザクションの割り込み点から、同じ接続・同じトランザクションの中で数える。
+    /// </summary>
+    private static long CountOn(SQLiteConnection connection, string sql)
+    {
+        using var command = connection.CreateCommand();
+        command.CommandText = sql;
+        return Convert.ToInt64(command.ExecuteScalar(), CultureInfo.InvariantCulture);
     }
 
     /// <summary>
@@ -369,7 +518,7 @@ public class DbContextMaintenanceTransactionTests : IDisposable
     /// </summary>
     private sealed class HookableDbContext : DbContext
     {
-        public HookableDbContext() : base(":memory:")
+        public HookableDbContext(ILogger<DbContext> logger) : base(":memory:", logger)
         {
         }
 
