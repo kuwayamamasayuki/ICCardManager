@@ -476,9 +476,10 @@ $optionalScreens = @(
         ForegroundOnly = $true
     },
     @{
+        # Issue #2461: UI テスト基盤で自動撮影する（ManualScreenshotTests.staff_edit_dialog_。tools\take-screenshots-uitest.ps1）。
         Name = "staff_edit_dialog.png"
         Title = "職員情報編集ダイアログ"
-        Instructions = "職員管理画面で職員行を選択して「編集」、職員情報編集ダイアログ（右側の編集フォームに氏名・職員番号・備考・IDm 欄が表示された状態）が表示されたら。マニュアル §4.3 で参照"
+        Instructions = "職員管理画面で職員行を選択して「編集」、右側の編集フォームに氏名・職員番号・備考の欄と「職員証を差し替え」ボタンが表示されたら。管理者マニュアル §3.1.2 で参照"
         ForegroundOnly = $true
     },
     # Issue #1415: 管理者マニュアル §3.2.2/§3.2.3 カード編集・払い戻しダイアログ

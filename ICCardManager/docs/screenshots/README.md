@@ -34,7 +34,7 @@
 
 ## スクリーンショットの撮影方法
 
-### 完全自動撮影（UI テスト基盤、32 枚）
+### 完全自動撮影（UI テスト基盤、33 枚）
 
 UI テスト基盤（FlaUI）でアプリを起動し、画面を開く操作まで含めて自動で撮影します。人の操作は不要です。
 
@@ -54,6 +54,7 @@ cd D:\OneDrive\交通系\src\ICCardManager
 | Release | メイン画面（待機状態／システム警告あり） | `main.png` `main_with_warnings.png` |
 | Release | 履歴照会画面（通常／統合対象の選択） | `history.png` `history_merge.png` |
 | Release | ツールバーから開くダイアログ | `card.png` `staff.png` `report.png` `export.png` `settings.png` `admin_dashboard.png` |
+| Release | 職員管理で職員を選んで「編集」を押した状態（編集フォームに「職員証を差し替え」ボタンがあることを確かめてから撮る） | `staff_edit_dialog.png` |
 | Release | システム管理から開く二段目のダイアログ | `operation_log.png` `transfer_station_groups.png` |
 | Release | 帳票の事前チェック結果 | `report_preflight.png` |
 | Release | バス停名未入力の履歴一覧 | `incomplete_busstop.png` |

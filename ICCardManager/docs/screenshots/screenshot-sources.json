@@ -91,6 +91,16 @@
       ]
     },
     {
+      "name": "staff_edit_dialog.png",
+      "pass": "Release",
+      "filter": "FullyQualifiedName~ManualScreenshotTests.staff_edit_dialog_",
+      "sources": [
+        "ICCardManager/src/ICCardManager/Views/Dialogs/StaffManageDialog.xaml",
+        "ICCardManager/src/ICCardManager/Views/Dialogs/StaffManageDialog.xaml.cs",
+        "ICCardManager/src/ICCardManager/ViewModels/StaffManageViewModel.cs"
+      ]
+    },
+    {
       "name": "report.png",
       "pass": "Release",
       "filter": "DisplayName~report.png",

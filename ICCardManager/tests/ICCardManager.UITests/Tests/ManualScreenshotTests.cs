@@ -397,6 +397,45 @@ namespace ICCardManager.UITests.Tests
             }
         }
 
+        /// <summary>
+        /// 管理者マニュアル §3.1.2「職員の情報を直す」の図。職員管理画面で職員を選んで「編集」を押した状態。
+        /// </summary>
+        /// <remarks>
+        /// Issue #2461 で編集フォームに「職員証を差し替え」ボタンが加わったが、図は対話式スクリプトで撮った
+        /// それ以前の画面のままだった。撮る前にボタンが見えていることを表明し、ボタンの無い古い画面の図を撮らない。
+        /// 「編集」を押すだけで保存はしないので、職員証の認証は経ない（Release パスで撮れる）。
+        /// </remarks>
+        [SkippableFact]
+        public void staff_edit_dialog_職員情報編集ダイアログ()
+        {
+            Skip.If(ScreenshotHelper.ShouldSkip, SkipReason);
+
+            using var fixture = AppFixture.LaunchWithSeed(ScreenshotSeedData.Seed);
+            ScreenshotHelper.MoveToTopLeft(fixture.MainWindow);
+            var page = new MainWindowPage(fixture.MainWindow, fixture.Automation);
+
+            var dialog = page.ClickToolbarButtonAndWaitForDialog(
+                TestConstants.OpenStaffManageButton, TestConstants.StaffManageDialogName);
+
+            var grid = dialog.FindByNameWithRetry(TestConstants.StaffList)?.AsGrid();
+            grid.Should().NotBeNull($"職員管理ダイアログに \"{TestConstants.StaffList}\" があること");
+            var row = Retry.WhileNull(
+                () => grid!.Rows.FirstOrDefault(r => r.Cells.Any(
+                    c => string.Equals(c.Name, ScreenshotSeedData.PrimaryStaffName, StringComparison.Ordinal))),
+                TimeSpan.FromSeconds(TestConstants.DialogOpenTimeoutSeconds)).Result;
+            row.Should().NotBeNull($"職員一覧に \"{ScreenshotSeedData.PrimaryStaffName}\" の行があること");
+            row!.Select();
+
+            dialog.ClickButton(TestConstants.StaffEditButton);
+            dialog.WaitUntilEnabled(TestConstants.StaffReplaceCardButton).Should().BeTrue(
+                "編集フォームに「職員証を差し替え」ボタンが押せる状態で出ていること（図にボタンが写ること）");
+
+            var path = ScreenshotHelper.Capture(dialog.Window, "staff_edit_dialog.png");
+            File.Exists(path).Should().BeTrue();
+            // ツールバーから開くダイアログと同じく、UI テスト専用のパスが画面内に出ていないことを撮った後に確かめる（Issue #2435）
+            ScreenshotAssertions.RequireNoUiTestPathShown(dialog.Window, onScreenOnly: true, path);
+        }
+
         /// <summary>カードリーダー切断時にステータスバーへ出る文字列。</summary>
         private const string DisconnectedStatusText = TestConstants.CardReaderDisconnectedText;
 
