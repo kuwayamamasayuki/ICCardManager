@@ -1,12 +1,8 @@
 #nullable enable
 using System;
-using System.Collections.Generic;
 using System.ComponentModel;
-using System.Linq;
-using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Controls;
-using ICCardManager.Dtos;
 using ICCardManager.ViewModels;
 
 namespace ICCardManager.Views.Dialogs
@@ -104,28 +100,12 @@ namespace ICCardManager.Views.Dialogs
         /// ダイアログの ViewModel（Issue #2475）
         /// </summary>
         /// <remarks>
-        /// 編集モードの初期化と、閉じた後の要求（削除・保存して次へ・次へ・戻る・競合による再読込）の読み取りは、
+        /// 追加・編集モードの初期化と、閉じた後の要求（削除・保存して次へ・次へ・戻る・競合による再読込）の読み取りは、
         /// 呼び出し元（<c>HistoryPanelViewModel</c>）が <c>INavigationService.ShowDialogAsync&lt;TDialog, TViewModel&gt;</c>
         /// 経由でこの ViewModel に対して行う（Window を実体化せずに単体テストから踏めるようにするため）。
+        /// Issue #2486 で追加モードもこの形へ移し、Window 側の初期化の中継（<c>InitializeForAddAsync</c>）を削除した。
         /// </remarks>
         public LedgerRowEditViewModel ViewModel => _viewModel;
-
-        /// <summary>
-        /// 追加モードで初期化
-        /// </summary>
-        /// <param name="cardIdm">対象カードIDm</param>
-        /// <param name="allLedgers">表示中の全履歴</param>
-        /// <param name="historyStartsAtCardBeginning">
-        /// <paramref name="allLedgers"/> の先頭がカードの履歴の先頭でもあるか（Issue #1740）。
-        /// false のとき、先頭への挿入では残高の自動計算が無効化される。
-        /// </param>
-        public async Task InitializeForAddAsync(
-            string cardIdm,
-            List<LedgerDto> allLedgers,
-            bool historyStartsAtCardBeginning = false)
-        {
-            await _viewModel.InitializeForAddAsync(cardIdm, allLedgers, historyStartsAtCardBeginning);
-        }
 
         /// <summary>
         /// 閉じる直前の未保存変更ガード（Issue #2141）

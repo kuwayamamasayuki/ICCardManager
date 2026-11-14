@@ -16,7 +16,7 @@ namespace ICCardManager.Tests.ViewModels;
 /// <remarks>
 /// <para>
 /// <c>INavigationService.ShowDialogAsync&lt;LedgerRowEditDialog, LedgerRowEditViewModel&gt;</c> を差し替え、
-/// 本体が渡す初期化（<c>InitializeForEditAsync</c>・払戻済の設定など）をそのまま本物の
+/// 本体が渡す初期化（編集モードの <c>InitializeForEditAsync</c>・払戻済の設定、追加モードの <c>InitializeForAddAsync</c>（Issue #2486）など）をそのまま本物の
 /// <see cref="LedgerRowEditViewModel"/> に実行させる。続けて職員の操作（削除を押す等）を実行し、
 /// 本物のダイアログが閉じたときと同じ <c>DialogResult</c> を返す（保存したときだけ true。削除・キャンセルは false）。
 /// 確認ダイアログは ViewModel が渡された <c>INavigationService</c> の <c>ShowWarningConfirmation</c> へ出すので、
@@ -41,6 +41,26 @@ internal static class LedgerRowEditDialogStub
         OperationLogger operationLogger,
         DbContext dbContext,
         Action<LedgerRowEditViewModel> userAction)
+        => Arrange(navigation, ledgerRepository, operationLogger, dbContext, editor =>
+        {
+            userAction(editor);
+            return Task.CompletedTask;
+        });
+
+    /// <summary>
+    /// 行編集ダイアログを本物の ViewModel で再現するよう <paramref name="navigation"/> を設定する（職員の操作が非同期のもの）。
+    /// </summary>
+    /// <remarks>
+    /// 「保存」（<c>SaveCommand</c>）のように完了を待つ必要がある操作に使う（Issue #2486）。
+    /// <c>Execute</c> で起動すると保存の完了を待たずにダイアログの結果を決めてしまう。
+    /// </remarks>
+    /// <returns>開いたダイアログの ViewModel（開いた順）</returns>
+    public static List<LedgerRowEditViewModel> Arrange(
+        Mock<INavigationService> navigation,
+        ILedgerRepository ledgerRepository,
+        OperationLogger operationLogger,
+        DbContext dbContext,
+        Func<LedgerRowEditViewModel, Task> userAction)
     {
         var staffRepository = new Mock<IStaffRepository>();
         staffRepository.Setup(r => r.GetAllAsync()).ReturnsAsync(new List<Staff>());
@@ -54,7 +74,7 @@ internal static class LedgerRowEditDialogStub
                     ledgerRepository, staffRepository.Object, operationLogger, dbContext, navigation.Object);
                 await configure(editor);
                 opened.Add(editor);
-                userAction(editor);
+                await userAction(editor);
                 return (bool?)(editor.IsSaved || editor.IsSaveAndEditNextRequested);
             });
         return opened;

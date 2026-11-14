@@ -46,9 +46,11 @@ public partial class HistoryPanelViewModel
         var historyStartsAtCardBeginning =
             HistoryCurrentPage == 1 && allLedgers.FirstOrDefault()?.IsCarryoverRow != true;
 
-        var result = await _navigationService.ShowDialogAsync<Views.Dialogs.LedgerRowEditDialog>(
-            async d => await d.InitializeForAddAsync(
-                HistoryCard.CardIdm, allLedgers, historyStartsAtCardBeginning));
+        // Issue #2486: 編集モード（#2475）と同じく、初期化は Window ではなく ViewModel に対して行う
+        // （ダイアログを差し替えて、開く → 保存・キャンセル → 閉じた後の読み直しを単体テストから踏めるようにする）
+        var cardIdm = HistoryCard.CardIdm;
+        var result = await _navigationService.ShowDialogAsync<Views.Dialogs.LedgerRowEditDialog, LedgerRowEditViewModel>(
+            vm => vm.InitializeForAddAsync(cardIdm, allLedgers, historyStartsAtCardBeginning));
 
         if (result == true)
         {
