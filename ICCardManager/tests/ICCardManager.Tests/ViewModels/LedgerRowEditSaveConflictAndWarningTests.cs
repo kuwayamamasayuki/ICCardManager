@@ -308,23 +308,9 @@ public class LedgerRowEditSaveConflictAndWarningTests : IDisposable
         message.Should().NotContain("再読み込みしましたので", "閉じる前の時点では読み直していない");
     }
 
-    [Fact]
-    public void 履歴パネルは_行編集の競合で閉じたら一覧を読み直すこと()
-    {
-        var path = Path.Combine(TestPaths.GetProductionSourceRoot(),
-            "ViewModels", "HistoryPanel", "HistoryPanelViewModel.Edit.cs");
-        var code = TestSourceInspection.ToCodeOnly(File.ReadAllText(path));
-
-        // 「NeedsHistoryReload を見る分岐」と、その分岐の中で一覧を読み直すことを対で表明する
-        Regex.IsMatch(code,
-                @"editor\?\.NeedsHistoryReload\s*==\s*true\s*\)\s*\{\s*await\s+LoadHistoryLedgersAsync\(\)",
-                RegexOptions.Singleline)
-            .Should().BeTrue("競合の案内は「閉じると履歴一覧を再読み込みします」と述べている");
-
-        // 保存できたとき（dialogResult == true）は、競合の再読込より保存の分岐を優先する（「保存して次へ」へ進む）
-        Regex.IsMatch(code, @"dialogResult\s*!=\s*true\s*&&\s*editor\?\.NeedsHistoryReload\s*==\s*true")
-            .Should().BeTrue("競合の後に保存し直して成功した場合に、再読込の分岐が保存の分岐を奪わない");
-    }
+    // 閉じた後に履歴パネルが一覧を読み直すこと（と、保存できたときは保存の分岐を優先すること）は、
+    // Issue #2486 で静的検査から挙動テストへ移した（HistoryPanelViewModelTests の
+    // 「行編集の保存の競合で閉じたときの読み直し」）。
 
     #endregion
 
