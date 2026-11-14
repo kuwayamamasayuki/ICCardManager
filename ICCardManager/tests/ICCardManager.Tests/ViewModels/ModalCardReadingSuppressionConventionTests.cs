@@ -20,6 +20,8 @@ namespace ICCardManager.Tests.ViewModels;
 /// <para>
 /// 破れる経路: ①包みを外す（コンストラクタで受け取った値をそのまま保持する） ②<c>Window.ShowDialog()</c> の直呼び
 /// ③<c>MessageBox.Show</c> / <c>OwnedMessageBox.Show</c> の直呼び ④<c>ErrorDialogHelper.Show*</c>（MessageBox を出す）。
+/// ⑤コンストラクタ引数 <c>navigationService</c> を包みの生成以外で使う（別のフィールド・ローカルへ渡して直接表示する）
+/// ⑥<c>INavigationService</c> / <c>IDialogService</c> 型のフィールド・プロパティを別に持つ（PR #2491 のレビューで ⑤⑥ を追加）。
 /// ②は <c>BeginModalCardReadingSuppression</c> の <c>using</c> の内側なら認める（<c>MergeHistoryDialog</c> が該当）。
 /// 職員認証（<c>IStaffAuthService</c>）は認証ダイアログ自身が抑制を取る（<c>CardReadingSource.Authentication</c>）ので対象外。
 /// </para>
@@ -32,6 +34,68 @@ public class ModalCardReadingSuppressionConventionTests
         @"MessageBox\s*\.\s*Show\s*\(|ErrorDialogHelper\s*\.\s*Show\w*\s*\(", RegexOptions.Compiled);
 
     private static readonly Regex NavigationAssignment = new(@"\b_navigationService\s*=\s*([^;]+);", RegexOptions.Compiled);
+
+    private const string WrapperConstruction = "new ModalCardReadingSuppressingNavigationService(";
+
+    private static readonly Regex NavigationParameterUse = new(@"\bnavigationService\b", RegexOptions.Compiled);
+
+    private static readonly Regex NavigationParameterDeclaration = new(
+        @"\bINavigationService\??\s+navigationService\b", RegexOptions.Compiled);
+
+    /// <summary>
+    /// <c>INavigationService</c> / <c>IDialogService</c>（とその実装）型のフィールド・プロパティ・ローカルの宣言。
+    /// 引数の宣言（後ろが <c>,</c> / <c>)</c>）は拾わない。
+    /// </summary>
+    private static readonly Regex DialogServiceMemberDeclaration = new(
+        @"\b(?:I?NavigationService|I?DialogService)\??\s+(\w+)\s*(?:;|=|\{)", RegexOptions.Compiled);
+
+    /// <summary>
+    /// コンストラクタ引数 <c>navigationService</c> を、包みの生成（<c>new ModalCardReadingSuppressingNavigationService(...)</c> の
+    /// 引数）の外で使っている箇所を列挙する。引数の宣言は除く。
+    /// </summary>
+    internal static IReadOnlyList<string> FindRawNavigationParameterUses(string codeOnly)
+    {
+        var wrapperArguments = new List<(int Start, int End)>();
+        var from = 0;
+        while ((from = codeOnly.IndexOf(WrapperConstruction, from, StringComparison.Ordinal)) >= 0)
+        {
+            var open = from + WrapperConstruction.Length - 1;
+            var depth = 0;
+            for (var i = open; i < codeOnly.Length; i++)
+            {
+                if (codeOnly[i] == '(')
+                {
+                    depth++;
+                }
+                else if (codeOnly[i] == ')' && --depth == 0)
+                {
+                    wrapperArguments.Add((open, i));
+                    break;
+                }
+            }
+
+            from = open + 1;
+        }
+
+        var declarations = NavigationParameterDeclaration.Matches(codeOnly).Cast<Match>()
+            .Select(m => m.Index + m.Length - "navigationService".Length)
+            .ToHashSet();
+
+        return NavigationParameterUse.Matches(codeOnly).Cast<Match>()
+            .Where(m => !declarations.Contains(m.Index))
+            .Where(m => !wrapperArguments.Any(a => a.Start < m.Index && m.Index < a.End))
+            .Select(m => Excerpt(codeOnly, m.Index))
+            .ToList();
+    }
+
+    /// <summary>
+    /// <c>_navigationService</c> 以外の、ダイアログを出せるサービス型のフィールド・プロパティ・ローカルの名前を列挙する。
+    /// </summary>
+    internal static IReadOnlyList<string> FindOtherDialogServiceMembers(string codeOnly)
+        => DialogServiceMemberDeclaration.Matches(codeOnly).Cast<Match>()
+            .Select(m => m.Groups[1].Value)
+            .Where(name => name != "_navigationService")
+            .ToList();
 
     /// <summary>
     /// 抑制の <c>using</c> の外にある直接のモーダル表示を列挙する（検査の本体。下のサンプル入力で検査自体を固定する）。
@@ -121,5 +185,54 @@ public class ModalCardReadingSuppressionConventionTests
         FindUnsuppressedDirectModals(messageBox).Should().HaveCount(1, "MessageBox の直呼びは抑制の内側でも認めない");
         FindUnsuppressedDirectModals(errorHelper).Should().HaveCount(1, "ErrorDialogHelper も MessageBox を出す");
         FindUnsuppressedDirectModals(navigation).Should().BeEmpty("包みを通る表示は対象外");
+    }
+
+    [Theory]
+    [MemberData(nameof(ScreenSources))]
+    public void 受け取ったナビゲーションは包みの生成にしか使わないこと(string screen)
+    {
+        var findings = FilesOf(screen)
+            .SelectMany(f => FindRawNavigationParameterUses(f.CodeOnly).Select(e => $"{f.RelativePath}: {e}"))
+            .ToList();
+
+        findings.Should().BeEmpty(
+            "コンストラクタ引数 navigationService を包みの外で使うと、包みを通らずに表示できる経路が残る");
+    }
+
+    [Theory]
+    [MemberData(nameof(ScreenSources))]
+    public void ダイアログを出せるサービス型のメンバーは包んだナビゲーションだけであること(string screen)
+    {
+        var findings = FilesOf(screen)
+            .SelectMany(f => FindOtherDialogServiceMembers(f.CodeOnly).Select(n => $"{f.RelativePath}: {n}"))
+            .ToList();
+
+        findings.Should().BeEmpty(
+            "INavigationService / IDialogService 型を別に持つと、包みを通らずに表示できる（_navigationService だけを持つこと）");
+    }
+
+    /// <summary>
+    /// 上の 2 つの検査の固定（既知の入力。#1786）。
+    /// </summary>
+    [Fact]
+    public void 検査は受け取ったナビゲーションの包み以外の使い道と別のサービス型のメンバーを検出すること()
+    {
+        const string wrapped =
+            "class C { private readonly INavigationService _navigationService; " +
+            "C(INavigationService navigationService, IFoo foo) { _navigationService = new ModalCardReadingSuppressingNavigationService(" +
+            "navigationService ?? throw new ArgumentNullException(nameof(navigationService)), () => Host.Begin()); } }";
+        const string leaked =
+            "class C { C(INavigationService navigationService) { _navigationService = new ModalCardReadingSuppressingNavigationService(" +
+            "navigationService, Begin); _raw = navigationService; } }";
+        const string otherField = "class C { private readonly IDialogService _dialogs; private readonly INavigationService _navigationService; }";
+        const string otherProperty = "class C { public INavigationService Navigation { get; } }";
+        const string otherLocal = "void A() { INavigationService raw = Resolve(); }";
+
+        FindRawNavigationParameterUses(wrapped).Should().BeEmpty("宣言と包みの引数（nameof を含む）は認める");
+        FindRawNavigationParameterUses(leaked).Should().HaveCount(1, "包みの外での使用は違反");
+        FindOtherDialogServiceMembers(wrapped).Should().BeEmpty("_navigationService と引数の宣言は認める");
+        FindOtherDialogServiceMembers(otherField).Should().Equal("_dialogs");
+        FindOtherDialogServiceMembers(otherProperty).Should().Equal("Navigation");
+        FindOtherDialogServiceMembers(otherLocal).Should().Equal("raw");
     }
 }

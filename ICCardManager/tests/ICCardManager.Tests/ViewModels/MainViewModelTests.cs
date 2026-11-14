@@ -4551,6 +4551,45 @@ public class MainViewModelTests : IDisposable
     }
 
     /// <summary>
+    /// 先に開いた側が、後から開いた側より先に閉じても、後から開いた側の表示中は抑制が解けないこと（PR #2491 のレビューで検出）。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// 故障の形: 履歴パネルで詳細・行編集を開くと、表示前の非同期の初期化（DB の読み込み。共有モードでは長い）の間も
+    /// メイン画面は操作できる。その間に交通系ICカード管理を開き、先に詳細が閉じると、抑制ソースが <c>HashSet</c> の
+    /// 「同じソースの二重取得は何もしないスコープ」のままだと、先に取得した詳細の側の解放で抑制が消え、
+    /// 管理ダイアログが開いたまま職員証のタッチを処理する。入れ子（後から開いた側が先に閉じる）だけを見るテストでは検出できない。
+    /// </para>
+    /// <para>
+    /// 先に取得する側は履歴パネルがホストへ頼むスコープ（<see cref="IHistoryPanelHost.BeginModalCardReadingSuppression"/>）で直接作り、
+    /// 後から開く側は本物の経路（<c>OpenCardManageAsync</c> → 包み → <c>ShowDialog</c> のモック）を通す。
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public async Task 先に開いたモーダルが後から開いたモーダルより先に閉じても後の表示中は職員証のタッチを処理しないこと()
+    {
+        SetupWarningCheckDefaults();
+        ArrangeModalTestStaff();
+        var historyScope = ((IHistoryPanelHost)_viewModel).BeginModalCardReadingSuppression();
+        var probe = new TouchDuringModalProbe();
+        var touch = TouchDuring(probe);
+        _navigationServiceMock
+            .Setup(n => n.ShowDialog<ICCardManager.Views.Dialogs.CardManageDialog>(
+                It.IsAny<Action<ICCardManager.Views.Dialogs.CardManageDialog>>()))
+            .Callback(() =>
+            {
+                // 管理ダイアログの表示中に、先に開いていた履歴パネルのモーダルが閉じる
+                historyScope.Dispose();
+                touch();
+            })
+            .Returns((bool?)null);
+
+        await _viewModel.OpenCardManageAsync();
+
+        await AssertTouchIgnoredWhileShownAndHandledAfterAsync(probe);
+    }
+
+    /// <summary>
     /// 表示が例外で抜けても抑制を解放すること（解放は finally で保証する。#1725）。
     /// </summary>
     [Fact]

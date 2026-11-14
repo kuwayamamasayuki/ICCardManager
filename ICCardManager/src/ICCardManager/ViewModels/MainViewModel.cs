@@ -432,11 +432,54 @@ public partial class MainViewModel : ViewModelBase, IHistoryPanelHost
     /// メイン画面・履歴パネルのモーダルの表示中、メイン画面のカード読み取りを抑制するスコープを開く（Issue #2484）
     /// </summary>
     /// <remarks>
-    /// メイン画面と履歴パネルは同じソース（<see cref="CardReadingSource.MainScreenModal"/>）を使う。入れ子では
-    /// <see cref="BeginCardReadingSuppression"/> の規約により外側のスコープだけが解放する。
+    /// <para>
+    /// メイン画面と履歴パネルは同じソース（<see cref="CardReadingSource.MainScreenModal"/>）を使い、開いているスコープの数を
+    /// 数える（0 → 1 でソースを足し、1 → 0 で外す）。<see cref="BeginCardReadingSuppression"/> の「同じソースの二重取得は
+    /// 何もしないスコープ」では、<b>先に取得した側が先に閉じる</b>順で抑制が早く解ける（PR #2491 のレビューで検出）。
+    /// 履歴パネルの詳細・行編集は表示前の非同期の初期化（DB の読み込み）の間もメイン画面を操作できるので、その間に
+    /// 交通系ICカード管理を開き、先に詳細が閉じると、管理ダイアログが開いたまま抑制が消えていた。
+    /// </para>
+    /// <para>
+    /// 表示はすべて UI スレッドで開閉するので、数はロックなしで扱う。各スコープの解放は 1 回だけ数える。
+    /// </para>
     /// </remarks>
     private IDisposable BeginModalCardReadingSuppression()
-        => BeginCardReadingSuppression(CardReadingSource.MainScreenModal);
+    {
+        if (_mainScreenModalDepth++ == 0)
+        {
+            _suppressionSources.Add(CardReadingSource.MainScreenModal);
+        }
+
+        return new ModalCardReadingSuppressionScope(this);
+    }
+
+    /// <summary>開いている <see cref="CardReadingSource.MainScreenModal"/> のスコープの数</summary>
+    private int _mainScreenModalDepth;
+
+    /// <summary>
+    /// <see cref="BeginModalCardReadingSuppression"/> が返す解放スコープ（2 回目以降の Dispose は数えない）
+    /// </summary>
+    private sealed class ModalCardReadingSuppressionScope : IDisposable
+    {
+        private MainViewModel? _owner;
+
+        public ModalCardReadingSuppressionScope(MainViewModel owner) => _owner = owner;
+
+        public void Dispose()
+        {
+            var owner = _owner;
+            if (owner == null)
+            {
+                return;
+            }
+
+            _owner = null;
+            if (--owner._mainScreenModalDepth == 0)
+            {
+                owner._suppressionSources.Remove(CardReadingSource.MainScreenModal);
+            }
+        }
+    }
 
     /// <summary>
     /// 内部状態のみを設定（UIは変更しない）
