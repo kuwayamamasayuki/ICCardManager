@@ -114,6 +114,8 @@ namespace ICCardManager.UITests.Tests
             row.Should().NotBeNull($"職員一覧に \"{ScreenshotSeedData.SecondaryStaffName}\" の行があること");
             row!.Select();
 
+            // 「編集」は選択行で有効になるので、有効になるまで待ってから押す（Issue #2192）
+            dialog.WaitUntilEnabled(TestConstants.StaffEditButton).Should().BeTrue("行を選んだら「編集」ボタンが有効になること");
             dialog.ClickButton(TestConstants.StaffEditButton);
             dialog.WaitUntilEnabled(TestConstants.StaffReplaceCardButton).Should().BeTrue(
                 "編集中は「職員証を差し替え」ボタンが押せること");

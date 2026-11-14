@@ -745,6 +745,10 @@ namespace ICCardManager.UITests.Infrastructure
         [UiaName]
         public const string StaffEditButton = "職員情報編集";
 
+        /// <summary>職員管理ダイアログの編集中に出る「保存」ボタン（AutomationProperties.Name を持たず、Name は Content の文字列）。</summary>
+        [NotUiaName]
+        public const string StaffManageSaveButton = "保存";
+
         /// <summary>職員管理ダイアログの編集中に出る「職員証を差し替え」ボタン（Issue #2461）。</summary>
         [UiaName]
         public const string StaffReplaceCardButton = "職員証を差し替え";
