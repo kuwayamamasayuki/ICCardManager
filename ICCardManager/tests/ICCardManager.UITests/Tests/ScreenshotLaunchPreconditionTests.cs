@@ -48,6 +48,7 @@ namespace ICCardManager.UITests.Tests
             message.Should().Contain("届いていません", "未設定（届いていない）のか、別の値なのかを区別して示すこと");
             message.Should().Contain("ICCARDMANAGER_UITEST_CONFIGURATION=Release", "どう渡せばよいかを示すこと");
             message.Should().Contain("WSLENV", "WSL から dotnet.exe を直接呼ぶと WSLENV を設定しない限り環境変数が届かないこと");
+            message.Should().Contain("WSLENV=${WSLENV:+$WSLENV:}", "例は既存の WSLENV を上書きしない形にすること");
             message.Should().Contain("tools/take-screenshots-uitest.ps1", "通常の撮影の入口を示すこと");
             message.Should().Contain("DebugDataService", "このまま撮ると何が起きるか（テストデータが先に入る）を示すこと");
         }
@@ -104,16 +105,16 @@ namespace ICCardManager.UITests.Tests
         }
 
         /// <summary>
-        /// 投入の途中で <c>INSERT OR IGNORE</c> が無視されたとき（影響行数 0）は、シードが同じ IDm を重複して投入したことを名指しして止めること。
+        /// 投入の途中で <c>INSERT OR IGNORE</c> が無視されたとき（影響行数 0）は、シードが同じキーの行を重複して投入したことを名指しして止めること。
         /// 投入の前に DB が空であることは確かめているので、起動時のテストデータとの衝突ではない。環境変数の調査へ誘導しない（レビュー 2 回目で検出）。
         /// </summary>
         [Fact]
         public void 影響行数が0なら_シードの中での重複投入として名指しして止まること()
         {
-            Action act = () => ScreenshotSeedData.RequireInserted(0, $"交通系ICカード（IDm {ScreenshotSeedData.VirtualTouchCardIdm}「はやかけん 004」）");
+            Action act = () => ScreenshotSeedData.RequireInserted(0, $"職員（IDm {AppFixture.SeededStaffIdm}「博多 花子」）", "IDm");
 
             var message = act.Should().Throw<InvalidOperationException>().Which.Message;
-            message.Should().Contain(ScreenshotSeedData.VirtualTouchCardIdm, "どの行が重複したかを示すこと");
+            message.Should().Contain(AppFixture.SeededStaffIdm, "どの行が重複したかを示すこと");
             message.Should().Contain("シードの中で既に投入しています");
             message.Should().Contain("派生シード", "どこを確かめればよいかを示すこと");
             message.Should().NotContain("撮影モード", "起動の前提の問題ではないので、環境変数の調査へ誘導しないこと");
@@ -124,9 +125,62 @@ namespace ICCardManager.UITests.Tests
         [Fact]
         public void 影響行数が1なら_止めないこと()
         {
-            Action act = () => ScreenshotSeedData.RequireInserted(1, "職員（IDm FFFF000000000001「博多 花子」）");
+            Action act = () => ScreenshotSeedData.RequireInserted(1, "職員（IDm FFFF000000000001「博多 花子」）", "IDm");
 
             act.Should().NotThrow();
+        }
+
+        /// <summary>
+        /// IDm は違うが種別・管理番号が <see cref="ScreenshotSeedData.Seed"/> のカードと同じカードを足すと、一意インデックスの違反で投入が無視される。
+        /// 案内は IDm だけでなく種別・管理番号を名指しすること（IDm を調べても原因へ辿り着けないため。レビュー 3 回目で検出）。
+        /// </summary>
+        [Fact]
+        public void 種別と管理番号が既存のカードと同じなら_種別と管理番号を名指しして止まること()
+        {
+            using var conn = OpenSchema();
+            ScreenshotSeedData.Seed(conn);
+
+            Action act = () => ScreenshotSeedData.InsertCard(conn, "07FE99999999", ScreenshotSeedData.NormalCardType, ScreenshotSeedData.NormalCardNumber,
+                isLent: false, lentAt: null, lentStaff: null);
+
+            var message = act.Should().Throw<InvalidOperationException>().Which.Message;
+            message.Should().Contain("種別・管理番号", "IDm 以外にぶつかり得る列を示すこと");
+            message.Should().Contain($"「{ScreenshotSeedData.NormalCardDisplayName}」", "投入しようとしたカードの種別・管理番号を示すこと");
+            message.Should().Contain("07FE99999999");
+            message.Should().NotContain("撮影モード");
+        }
+
+        /// <summary>対: IDm も種別・管理番号も既存と重ならないカードは、シードの後でもそのまま入ること。</summary>
+        [Fact]
+        public void IDmも種別と管理番号も重ならないカードは_そのまま入ること()
+        {
+            using var conn = OpenSchema();
+            ScreenshotSeedData.Seed(conn);
+
+            Action act = () => ScreenshotSeedData.InsertCard(conn, "07FE99999999", ScreenshotSeedData.NormalCardType, "099",
+                isLent: false, lentAt: null, lentStaff: null);
+
+            act.Should().NotThrow();
+        }
+
+        /// <summary>
+        /// 正しい環境でも、派生シードの組み合わせでシードを 2 回呼ぶと空の確認で止まる。文言は環境変数だけでなく、この形も候補に挙げること（レビュー 3 回目で検出）。
+        /// </summary>
+        [Fact]
+        public void シードを2回呼ぶと_派生シードの組み合わせも候補に挙げて止まること()
+        {
+            using var conn = OpenSchema();
+
+            Action act = () =>
+            {
+                ScreenshotSeedData.SeedWithoutWarnings(conn);
+                ScreenshotSeedData.SeedWithTransferStationGroups(conn);
+            };
+
+            var message = act.Should().Throw<InvalidOperationException>().Which.Message;
+            message.Should().Contain("既存のデータがあります");
+            message.Should().Contain("シードを 2 回呼んでいないか");
+            message.Should().Contain("SeedWithoutWarnings");
         }
 
         /// <summary>
@@ -156,7 +210,9 @@ namespace ICCardManager.UITests.Tests
                 "CREATE TABLE ledger (id INTEGER PRIMARY KEY AUTOINCREMENT, card_idm TEXT NOT NULL, lender_idm TEXT, date TEXT NOT NULL, " +
                 "  summary TEXT NOT NULL, income INTEGER DEFAULT 0, expense INTEGER DEFAULT 0, balance INTEGER NOT NULL, staff_name TEXT, " +
                 "  note TEXT, lent_at TEXT, is_lent_record INTEGER DEFAULT 0, companion_count INTEGER NOT NULL DEFAULT 0, initial_record_kind INTEGER DEFAULT NULL);" +
-                "CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT);");
+                "CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT);" +
+                // 本番の一意インデックス（Migration_012 の idx_card_type_number_active）。INSERT OR IGNORE はこの違反も黙って 0 を返す
+                "CREATE UNIQUE INDEX idx_card_type_number_active ON ic_card(card_type, card_number) WHERE is_deleted = 0 OR is_deleted IS NULL;");
             return conn;
         }
 

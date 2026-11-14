@@ -328,7 +328,7 @@ namespace ICCardManager.UITests.Infrastructure
                 "起動時のテストデータ（DebugDataService）が撮影用のデータより先に登録され、撮影用のデータが入りません。" +
                 "撮影は tools/take-screenshots-uitest.ps1 から実行してください。dotnet test を直接実行するときは、" +
                 LaunchConfigurationEnvironmentVariable + "=Release を設定してください（WSL から dotnet.exe を呼ぶ場合は、" +
-                "WSLENV に変数名を加えないと Windows 側へ届きません。例: export WSLENV=ICCARDMANAGER_SCREENSHOT:" + LaunchConfigurationEnvironmentVariable + "）。");
+                "WSLENV に変数名を加えないと Windows 側へ届きません。例: export WSLENV=${WSLENV:+$WSLENV:}ICCARDMANAGER_SCREENSHOT:" + LaunchConfigurationEnvironmentVariable + "。既存の WSLENV を残す形）。");
         }
 
         /// <summary>
