@@ -24,7 +24,7 @@
 </important>
 
 <important if="modifying deletion logic, cleanup, or database maintenance">
-論理削除の方針はテーブルごとに異なる（staff/ic_card=論理削除、ledger/operation_log=6年後物理削除）。
+論理削除の方針はテーブルごとに異なる（staff/ic_card=論理削除（staff は職員証の差し替え時のみ旧行を物理削除）、ledger/operation_log=6年後物理削除）。
 詳細は .claude/rules/development-conventions.md を参照。
 </important>
 
