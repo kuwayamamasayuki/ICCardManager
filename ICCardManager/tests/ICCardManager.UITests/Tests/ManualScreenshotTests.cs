@@ -177,7 +177,7 @@ namespace ICCardManager.UITests.Tests
                 // 失敗時の画面を残す（history_履歴照会画面 と同じ切り分け用。型で絞らない理由も同じ）
                 try
                 {
-                    ScreenshotHelper.Capture(fixture.MainWindow, "history_merge_FAILED.png");
+                    ScreenshotHelper.CaptureForDiagnosis(fixture.MainWindow, "history_merge_FAILED.png");
                 }
                 catch (Exception)
                 {
@@ -351,7 +351,7 @@ namespace ICCardManager.UITests.Tests
                 // OpenCardHistory は TimeoutException、ShowHistorySampleMonth は FluentAssertions の例外で失敗するため、型で絞らない
                 try
                 {
-                    ScreenshotHelper.Capture(fixture.MainWindow, "history_FAILED.png");
+                    ScreenshotHelper.CaptureForDiagnosis(fixture.MainWindow, "history_FAILED.png");
                 }
                 catch (Exception)
                 {
