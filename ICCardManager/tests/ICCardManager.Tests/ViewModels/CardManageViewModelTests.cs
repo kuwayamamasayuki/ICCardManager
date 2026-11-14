@@ -1394,6 +1394,8 @@ public class CardManageViewModelTests : IDisposable
 
         events.Should().Equal(new[] { "confirm", "auth", "delete" },
             "削除するかどうかを決める前に職員証を求めない（払い戻しと同じ順序）");
+        _dialogServiceMock.Verify(d => d.ShowInformation(It.IsAny<string>(), "交通系ICカードの削除"), Times.Never,
+            "認証が完了したら、認証が完了しなかった案内は出さない");
     }
 
     /// <summary>
@@ -5204,6 +5206,8 @@ public class CardManageViewModelTests : IDisposable
         // Assert
         events.Should().Equal(new[] { "confirm", "auth" },
             "払い戻すかどうかを決める前に職員証を求めない（#2263 / #2265 と同じ順序）");
+        _dialogServiceMock.Verify(d => d.ShowInformation(It.IsAny<string>(), "交通系ICカードの払い戻し"), Times.Never,
+            "認証が完了したら、認証が完了しなかった案内は出さない（Issue #2474）");
         recorded.Should().NotBeNull();
         recorded!.OperatorIdm.Should().Be("AUTH_STAFF_IDM", "操作ログの操作者は認証した職員");
         recorded.OperatorName.Should().Be("天神 太郎");

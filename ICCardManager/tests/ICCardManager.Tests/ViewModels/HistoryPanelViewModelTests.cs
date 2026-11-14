@@ -704,6 +704,9 @@ public class HistoryPanelViewModelTests : IDisposable
 
         events.Should().Equal(new[] { "confirm", "auth", "merge" },
             "統合するかどうかを決める前に職員証を求めない（統合の取り消しと同じ順序）");
+        _navigationServiceMock.Verify(n => n.ShowInformation(
+            HistoryPanelViewModel.MergeAuthenticationCancelledMessage, It.IsAny<string>()), Times.Never,
+            "認証が完了したら、認証が完了しなかった案内は出さない");
     }
 
     /// <summary>
