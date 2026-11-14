@@ -146,7 +146,8 @@ namespace ICCardManager.UITests.Infrastructure
             {
                 return;
             }
-            var (holder, remedy) = ExplainForegroundHolder(describeForeground());
+            // 入力の前の確認は撮影でないテストでも使うので、やり直す対象を「テスト（撮影）」と書く
+            var (holder, remedy) = ExplainForegroundHolder(describeForeground(), "テスト（撮影）をやり直してください。");
             throw new InvalidOperationException($"アプリのウィンドウを前面にできません。{holder}。" + remedy);
         }
 
@@ -155,16 +156,16 @@ namespace ICCardManager.UITests.Infrastructure
         /// （入力の前・撮影の前の両方の判定が使う）。前面のウィンドウが無いとき・タスクバーのときは、閉じる・最小化できないので
         /// 撮り直しを案内する。それ以外のウィンドウは、管理者権限で動いていると OS が前面化を拒否する（撮り直しても直らない）。
         /// </summary>
-        private static (string Holder, string Remedy) ExplainForegroundHolder(string foreground) =>
+        private static (string Holder, string Remedy) ExplainForegroundHolder(string foreground, string retry) =>
             ClassifyForeground(foreground) switch
             {
                 ForegroundKind.None => ("前面にウィンドウがありません（切り替えの途中など）",
-                    "一時的な状態なので、そのまま撮影をやり直してください。"),
+                    "一時的な状態なので、そのまま" + retry),
                 ForegroundKind.Taskbar => ($"タスクバー「{foreground}」が前面を保持しています",
-                    "タスクバーが前面を保持するのは一時的なことが多いので、そのまま撮影をやり直してください。"),
+                    "タスクバーが前面を保持するのは一時的なことが多いので、そのまま" + retry),
                 _ => ($"前面にあるウィンドウ「{foreground}」が前面を保持しています",
-                    "一時的なら撮り直せば直りますが、そのウィンドウが管理者権限で動いていると OS が前面化を拒否するため" +
-                    "撮り直しても直りません。そのウィンドウを閉じるか最小化してから、撮影をやり直してください。"),
+                    "一時的ならやり直せば直りますが、そのウィンドウが管理者権限で動いていると OS が前面化を拒否するため" +
+                    "やり直しても直りません。そのウィンドウを閉じるか最小化してから、" + retry),
             };
 
         /// <summary>
@@ -178,20 +179,13 @@ namespace ICCardManager.UITests.Infrastructure
         /// 失敗と扱いをそろえ、「撮れなかったのに正規の名前の画像がある」状態を残さない（撮影スクリプトは画像の有無で撮れたと数える）。
         /// </remarks>
         /// <returns>前面にしたウィンドウのハンドル（保存の直前にも前面かを確かめるために使う）。</returns>
-        internal static IntPtr RequireForegroundForCapture(Window window, string fileName)
-        {
-            try
-            {
-                EnsureForegroundForCapture(
-                    () => BringToForeground(window), () => DescribeWindow(GetForegroundWindow()), fileName);
-            }
-            catch (InvalidOperationException)
-            {
-                DeleteCapturedImage(fileName);
-                throw;
-            }
-            return window.Properties.NativeWindowHandle.ValueOrDefault;
-        }
+        internal static IntPtr RequireForegroundForCapture(Window window, string fileName) =>
+            EnsureForegroundForCapture(
+                () => BringToForeground(window),
+                () => DescribeWindow(GetForegroundWindow()),
+                () => window.Properties.NativeWindowHandle.ValueOrDefault,
+                DeleteCapturedImage,
+                fileName);
 
         /// <summary>撮れなかった画像を正規の名前で残さないよう、出力先の同名の画像を消す（消せなくても例外で失敗は伝わる）。</summary>
         private static void DeleteCapturedImage(string fileName)
@@ -223,15 +217,20 @@ namespace ICCardManager.UITests.Infrastructure
         /// </summary>
         /// <param name="bringToForeground">前面化を試み、できたら true を返す（1 回だけ呼ぶ）。</param>
         /// <param name="describeForeground">前面にあるウィンドウの説明（失敗したときだけ呼ぶ）。</param>
+        /// <param name="windowHandle">前面にしたウィンドウのハンドル（成功したときだけ呼ぶ）。</param>
+        /// <param name="deleteImage">出力先の同名の画像を消す（失敗したときだけ呼ぶ）。</param>
         /// <param name="fileName">撮影する画像のファイル名（文言の「何が」）。</param>
-        internal static void EnsureForegroundForCapture(
-            Func<bool> bringToForeground, Func<string> describeForeground, string fileName)
+        /// <returns>前面にしたウィンドウのハンドル（撮影中の確認へ渡す）。</returns>
+        internal static IntPtr EnsureForegroundForCapture(
+            Func<bool> bringToForeground, Func<string> describeForeground, Func<IntPtr> windowHandle,
+            Action<string> deleteImage, string fileName)
         {
             if (bringToForeground())
             {
-                return;
+                return windowHandle();
             }
-            var (holder, remedy) = ExplainForegroundHolder(describeForeground());
+            deleteImage(fileName);
+            var (holder, remedy) = ExplainForegroundHolder(describeForeground(), "撮影をやり直してください。");
             throw new InvalidOperationException(
                 $"撮影するウィンドウを前面にできませんでした（{fileName}）。{holder}。" +
                 "このまま撮るとタイトルバーが灰色（非アクティブ）の画像になるので保存しません。" + remedy);
@@ -251,10 +250,11 @@ namespace ICCardManager.UITests.Infrastructure
         /// <param name="readForeground">いま前面にあるウィンドウを読む。</param>
         /// <param name="describeForeground">前面にあるウィンドウの説明（失敗したときだけ呼ぶ）。</param>
         /// <param name="fileName">撮影する画像のファイル名。</param>
+        /// <param name="deleteImage">撮った画像（出力先の同名の画像）を消す（失敗したときだけ呼ぶ）。</param>
         /// <param name="pause">読み直しの間の待ち（テストでは待たない）。</param>
         internal static void EnsureStillForeground(
             IntPtr expected, Func<IntPtr> readForeground, Func<IntPtr, string> describeForeground, string fileName,
-            Action? pause = null)
+            Action<string> deleteImage, Action? pause = null)
         {
             if (expected == IntPtr.Zero)
             {
@@ -275,6 +275,7 @@ namespace ICCardManager.UITests.Infrastructure
                 }
             }
 
+            deleteImage(fileName);
             var foreground = describeForeground(actual);
             var (taker, remedy) = ClassifyForeground(foreground) switch
             {
@@ -439,6 +440,7 @@ namespace ICCardManager.UITests.Infrastructure
                 var rect = elements[i].BoundingRectangle;
                 if (rect.Width <= 0 || rect.Height <= 0)
                 {
+                    DeleteCapturedImage(fileName);  // 撮れなかった名前の古い画像を残さない（前面化の失敗と同じ扱い）
                     throw new InvalidOperationException(
                         $"撮影対象の要素に大きさがありません（{fileName} の {i + 1} 件目）。" +
                         "要素が画面外にあるか、非表示になったか、まだ描画されていません。" +
@@ -631,28 +633,16 @@ namespace ICCardManager.UITests.Infrastructure
             var deadline = DateTime.UtcNow + PaintRetryTimeout;
             double dominant;
 
-            void RequireStillForeground()
-            {
-                try
-                {
-                    EnsureStillForeground(requiredForeground, GetForegroundWindow, DescribeWindow, fileName);
-                }
-                catch (InvalidOperationException)
-                {
-                    // 撮った画像（前回の撮り直し・前回の撮影の分を含む）を正規の名前で残さない
-                    DeleteCapturedImage(fileName);
-                    throw;
-                }
-            }
-
             while (true)
             {
-                RequireStillForeground();  // 撮る前（前回の撮り直しから今までに奪われていないか）
+                // 撮る前（前回の撮り直しから今までに奪われていないか）
+                EnsureStillForeground(requiredForeground, GetForegroundWindow, DescribeWindow, fileName, DeleteCapturedImage);
                 using (var image = FlaUI.Core.Capturing.Capture.Rectangle(bounds))
                 {
                     image.ToFile(path);
                 }
-                RequireStillForeground();  // 撮った後（撮っている最中に奪われていないか）
+                // 撮った後（撮っている最中に奪われていないか）
+                EnsureStillForeground(requiredForeground, GetForegroundWindow, DescribeWindow, fileName, DeleteCapturedImage);
 
                 dominant = DominantColorShare(path);
                 if (dominant < PaintedDominantColorLimit)

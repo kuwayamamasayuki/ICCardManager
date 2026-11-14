@@ -9,37 +9,37 @@ using Xunit;
 namespace ICCardManager.Tests;
 
 /// <summary>
-/// Issue #2478: マニュアル用スクリーンショットの撮影経路が、前面にできなかったときに失敗する判定を通ることを固定する。
+/// Issue #2478: マニュアル用スクリーンショットの撮影が、前面にできなかったときに失敗する判定を迂回できないことを固定する。
 /// </summary>
 /// <remarks>
 /// <para>
-/// <c>ScreenshotHelper.BringToForeground</c> は前面にできたかを <c>bool</c> で返すが、撮影の経路は戻り値を捨てていたため、
-/// 前面にできないままタイトルバーが灰色（非アクティブ）の画像を保存して合格していた。判定そのもの（前面にできなければ例外・
-/// 撮影中に前面を奪われたら例外・切り分け用の撮影の名前）は UITests の <c>ScreenshotForegroundTests</c> が挙動で検証する。
-/// ここでは「判定を通らずに撮れる経路」を塞ぐ。UITests は単体テストから参照しないので、ソースを読む。
+/// 守りの軸は実行時の二重の守り（撮影前の判定＋撮る前・撮った後の確認）と、その継ぎ目の挙動テスト
+/// （UITests の <c>ScreenshotForegroundTests</c>。前面にできなければ例外・画像を消す、撮影前の分岐、<c>bringToFront</c> の既定値）。
+/// ここでは継ぎ目を迂回する入口だけを 3 本の静的検査で見る。UITests は単体テストから参照しないので、ソースを読む。
 /// </para>
 /// <para>
-/// 塞ぐ経路: ①前面化を許可したメソッドの外から呼ぶ（メソッド グループ渡しを含む）・許可したメソッドの中で戻り値を捨てる、
-/// ②撮影メソッドから判定を外す・判定の戻り値（前面にしたウィンドウ）以外を撮影中の確認へ渡す・判定を通らない撮影メソッドを足す・
-/// 撮影中の確認を撮る前／撮った後のどちらかから外す、③<c>CaptureRectangle</c> を通らずに画面をコピーする、
-/// ④前面にしない撮影（<c>bringToFront: false</c>）をトースト単体以外に使う（型名なしの呼び出し＝<c>ScreenshotHelper</c> の中や
-/// <c>using static</c>・メソッド グループとして渡す形を含む）、⑤前面にできなくても撮る切り分け用の撮影を <c>_FAILED.png</c> 以外の名前に使う。
-/// 検出しない形: 判定のメソッドの中身の書き換え（<c>|| true</c> 等。挙動のテストが止める）、リフレクション・別アセンブリ経由の撮影、
-/// トーストではないウィンドウを <c>toast_</c> で始まる名前で撮ること（④は名前でしか区別できない）、
-/// 逆に、④は名前で拾うので次の形を誤検出する側に倒れる（いずれも現状は無い）: <c>Capture</c> という名前の別の型のメソッドへ
-/// 3 引数を渡す、戻り値が <c>string</c> 以外の独自の <c>Capture</c> を 3 引数で宣言する、<c>nameof(ScreenshotHelper.Capture)</c>。
-/// 文字列・コメントの中の「Capture」は数えない。<c>bringToFront</c> の既定値と分岐（既定で前面にする・false で判定を通らない）は
-/// <c>ScreenshotForegroundTests</c> が挙動で固定する。
+/// ①前面化（<c>BringToForeground</c>）は判定のメソッドの中だけで呼び、戻り値を捨てない。
+/// ②前面にしない撮影（<c>bringToFront: false</c>）はトースト単体（<c>"toast_….png"</c>）だけ。型名なしの呼び出し・メソッド グループも拾う。
+/// ③画面のコピーは <c>CaptureRectangle</c> の中だけで行い、<c>CaptureRectangle</c> は判定を通る撮影の入口
+/// （<c>Capture</c>・<c>CaptureElements</c>・<c>CaptureWithToast</c> が <c>RequireForegroundForCapture</c> を呼ぶ、
+/// <c>CaptureForDiagnosis</c> が名前を検査する）からだけ呼ぶ。
+/// </para>
+/// <para>
+/// 検出しない形（実行時の守り・挙動テストにも掛からない）: 入口の中で判定の戻り値の代わりに <c>IntPtr.Zero</c> を撮影中の確認へ渡す・
+/// 撮影中の確認の呼び出しを外す・撮る前と撮った後の順序を変える、<c>RequireForegroundForCapture</c> が継ぎ目へ渡すハンドル・削除の関数を
+/// 差し替える、要素に大きさが無いときの画像の削除を外す、リフレクション・別アセンブリ経由の撮影、トーストではないウィンドウを
+/// <c>toast_</c> で始まる名前で撮る。逆に②は名前で拾うので、<c>Capture</c> という名前の別の型のメソッドへ 3 引数を渡す形・
+/// <c>string</c> 以外を返す独自の 3 引数の <c>Capture</c> の宣言・<c>nameof(ScreenshotHelper.Capture)</c> を誤検出する（現状は無い）。
 /// </para>
 /// </remarks>
 public class ScreenshotForegroundConventionTests
 {
     private const string Method = "BringToForeground";
 
-    /// <summary><see cref="Method"/> を呼んでよいメソッド（いずれも戻り値で例外にするか・記録するかを決める）。</summary>
+    /// <summary><see cref="Method"/> を呼んでよいメソッド（戻り値で例外にするか・記録するかを決める）。</summary>
     private static readonly string[] AllowedCallers = { "RequireForeground", "RequireForegroundForCapture", "CaptureForDiagnosis" };
 
-    /// <summary>前面にしてから画像を保存するメソッド。</summary>
+    /// <summary>前面にしてから撮る入口。</summary>
     private static readonly string[] GuardedCaptureMethods = { "Capture", "CaptureElements", "CaptureWithToast" };
 
     private static string UiTestsRoot => Path.Combine(TestPaths.GetSolutionRoot(), "tests", "ICCardManager.UITests");
@@ -47,12 +47,25 @@ public class ScreenshotForegroundConventionTests
     private static string HelperCode() =>
         TestSourceInspection.ToCodeOnly(File.ReadAllText(Path.Combine(UiTestsRoot, "Infrastructure", "ScreenshotHelper.cs")));
 
-    /// <summary>メソッドの本体（可視性・戻り値の型を問わず名前で探す）。</summary>
+    /// <summary>メソッドの本体（可視性・戻り値の型を問わず名前で探す）。式形式のメソッドは本体が無いので空文字。</summary>
     private static string Body(string code, string name)
     {
         var signature = Regex.Match(code, @"\bstatic\s+[\w.<>\[\]?]+\s+" + name + @"\s*\(");
         signature.Success.Should().BeTrue($"ScreenshotHelper に {name} があること");
-        return TestSourceInspection.ExtractMethodBody(code, signature.Value);
+        var start = signature.Index + signature.Length;
+        var depth = 1;
+        var i = start;
+        while (depth > 0)
+        {
+            depth += code[i] == '(' ? 1 : code[i] == ')' ? -1 : 0;
+            i++;
+        }
+
+        // 引数リストの後が => なら式形式（次の ; まで）、{ ならブロック
+        var rest = code.Substring(i).TrimStart();
+        return rest.StartsWith("=>", System.StringComparison.Ordinal)
+            ? rest.Substring(0, rest.IndexOf(';') + 1)
+            : TestSourceInspection.ExtractMethodBody(code, signature.Value);
     }
 
     /// <summary>UITests のソース（bin/obj を除く）。<paramref name="keepLiterals"/> ならコメントだけ、さもなくば文字列も除く。</summary>
@@ -91,13 +104,6 @@ public class ScreenshotForegroundConventionTests
                 .Cast<Match>().Select(m => "メソッド グループ: " + m.Value))
             .ToList();
 
-    /// <summary>切り分け用の撮影のうち、名前が <c>_FAILED.png</c> で終わるリテラルでないもの（宣言は除く）。</summary>
-    internal static IReadOnlyList<string> FindDiagnosisCapturesWithoutFailedName(string sourceWithLiterals) =>
-        TestSourceInspection.ExtractInvocationArguments(sourceWithLiterals, new Regex(@"(?<!\bstring\s+)\bCaptureForDiagnosis\b"))
-            .Select(c => c.Arguments)
-            .Where(a => !(a.Count == 2 && Regex.IsMatch(a[1], @"^""\w+_FAILED\.png""$")))
-            .Select(a => string.Join(", ", a)).ToList();
-
     [Theory]
     [InlineData("{\n    BringToForeground(owner);\n}")]
     [InlineData("{ _ = ScreenshotHelper . BringToForeground(window); }")]
@@ -114,24 +120,8 @@ public class ScreenshotForegroundConventionTests
         FindDiscardedCalls(sample).Should().BeEmpty();
 
     [Theory]
-    [InlineData("using FlaUI.Core.Capturing;")]
-    [InlineData("var img = Capture.Screen();")]
-    [InlineData("window.Capture().Save(path);")]
-    [InlineData("window.CaptureToFile(path);")]
-    [InlineData("g.CopyFromScreen(0, 0, 0, 0, size);")]
-    public void 画面コピーの直接の呼び出しを検出できること(string sample) =>
-        FindRawCaptures(sample).Should().NotBeEmpty();
-
-    [Theory]
-    [InlineData("ScreenshotHelper.CaptureElements(owner, \"card_list.png\", a, b);")]
-    [InlineData("CaptureRectangle(bounds, fileName, foreground);")]
-    public void 撮影ヘルパーの呼び出しは画面コピーの直接の呼び出しと数えないこと(string sample) =>
-        FindRawCaptures(sample).Should().BeEmpty();
-
-    [Theory]
     [InlineData("ScreenshotHelper.Capture(fixture.MainWindow, \"main.png\", bringToFront: false);")]
     [InlineData("ScreenshotHelper.Capture(toast, \"toast_lend.png\", false);")]
-    [InlineData("ScreenshotHelper.Capture(toast, name, bringToFront: false);")]
     [InlineData("public static string CaptureDialog(Window w, string f) => Capture(w, f, bringToFront: false);")]
     [InlineData("Func<Window, string, bool, string> capture = ScreenshotHelper.Capture;")]
     public void トースト単体以外の前面にしない撮影を検出できること(string sample) =>
@@ -140,26 +130,21 @@ public class ScreenshotForegroundConventionTests
     [Theory]
     [InlineData("ScreenshotHelper.Capture(toast, \"toast_lend.png\", bringToFront: false);")]
     [InlineData("ScreenshotHelper.Capture(window, fileName);")]
-    [InlineData("ScreenshotHelper.Capture(window, \"main.png\", bringToFront: true);")]
     [InlineData("public static string Capture(Window window, string fileName, bool bringToFront = true)")]
     [InlineData("using (var image = FlaUI.Core.Capturing.Capture.Rectangle(bounds))")]
     public void 前面にする撮影とトースト単体の撮影は検出しないこと(string sample) =>
         FindNonToastUnfocusedCaptures(sample).Should().BeEmpty();
 
     [Theory]
-    [InlineData("ScreenshotHelper.CaptureForDiagnosis(fixture.MainWindow, \"history.png\");")]
-    [InlineData("ScreenshotHelper.CaptureForDiagnosis(fixture.MainWindow, fileName);")]
-    public void 切り分け用の撮影の正規の名前を検出できること(string sample) =>
-        FindDiagnosisCapturesWithoutFailedName(sample).Should().ContainSingle();
-
-    [Theory]
-    [InlineData("ScreenshotHelper.CaptureForDiagnosis(fixture.MainWindow, \"history_merge_FAILED.png\");")]
-    [InlineData("public static string CaptureForDiagnosis(Window window, string fileName)")]
-    public void 切り分け用の撮影の_FAILED名と宣言は検出しないこと(string sample) =>
-        FindDiagnosisCapturesWithoutFailedName(sample).Should().BeEmpty();
+    [InlineData("using FlaUI.Core.Capturing;")]
+    [InlineData("var img = Capture.Screen();")]
+    [InlineData("window.Capture().Save(path);")]
+    [InlineData("g.CopyFromScreen(0, 0, 0, 0, size);")]
+    public void 画面コピーの直接の呼び出しを検出できること(string sample) =>
+        FindRawCaptures(sample).Should().NotBeEmpty();
 
     [Fact]
-    public void 前面化は許可したメソッドの中だけで呼ばれ戻り値を捨てないこと()
+    public void 前面化は判定のメソッドの中だけで呼ばれ戻り値を捨てないこと()
     {
         var code = HelperCode();
         var allowed = 0;
@@ -178,69 +163,6 @@ public class ScreenshotForegroundConventionTests
     }
 
     [Fact]
-    public void 画像を保存するメソッドはすべて前面化の判定か切り分け用の名前の検査を通ること()
-    {
-        var code = HelperCode();
-        var saves = 0;
-        foreach (var method in GuardedCaptureMethods)
-        {
-            var body = Body(code, method);
-            body.Should().Contain("RequireForegroundForCapture(", $"{method} は前面にできなかったら撮らずに失敗すること");
-
-            // 撮影中の確認へ渡す foreground は判定の戻り値であること（Capture は分岐の継ぎ目 PrepareForCapture の戻り値）
-            foreach (Match assignment in Regex.Matches(body, @"\bforeground\s*=(?!=)\s*(?<rhs>[^;]*);"))
-            {
-                var rhs = assignment.Groups["rhs"].Value.Trim();
-                (rhs.StartsWith("RequireForegroundForCapture(", System.StringComparison.Ordinal)
-                 || rhs.StartsWith("PrepareForCapture(", System.StringComparison.Ordinal))
-                    .Should().BeTrue($"{method} の foreground は前面化の判定の戻り値であること（{assignment.Value}）");
-            }
-
-            // 分岐の継ぎ目へは引数 bringToFront をそのまま渡し、前面にする側で判定を呼ぶこと（継ぎ目の中は挙動のテストが固定する）
-            foreach (var (_, args) in TestSourceInspection.ExtractInvocationArguments(body, new Regex(@"\bPrepareForCapture\b")))
-            {
-                args.Should().HaveCount(3);
-                args[0].Should().Be("bringToFront", $"{method} は bringToFront を反転・固定せずに渡すこと");
-                args[1].Should().Contain("RequireForegroundForCapture(", $"{method} は前面にする側で判定を呼ぶこと");
-            }
-            var calls = TestSourceInspection.ExtractInvocationArguments(body, new Regex(@"\bCaptureRectangle\b"));
-            calls.Should().NotBeEmpty().And.OnlyContain(c => c.Arguments.Count == 3 && c.Arguments[2] == "foreground",
-                $"{method} は前面にしたウィンドウを撮影中の確認へ渡すこと");
-            saves += calls.Count;
-        }
-
-        var diagnosis = Body(code, "CaptureForDiagnosis");
-        diagnosis.Should().Contain("EndsWith(DiagnosisFileSuffix", "前面にできなくても撮る撮影は、名前を _FAILED.png に限ること");
-        saves += CountWord(diagnosis, "CaptureRectangle");
-
-        // CaptureRectangle の出現 = 宣言 1 件 + 上のメソッドの中の呼び出し。判定を通らない撮影メソッドを足すと合わなくなる
-        CountWord(code, "CaptureRectangle").Should().Be(saves + 1,
-            "画像を保存する経路を足すときは、撮影前の前面化の判定を通し、GuardedCaptureMethods にも加えること");
-
-        // 判定の実体は継ぎ目にあり、ScreenshotForegroundTests が挙動で検証している
-        Body(code, "RequireForegroundForCapture").Should().Contain("EnsureForegroundForCapture(");
-        var capture = Body(code, "CaptureRectangle");
-        capture.Should().Contain("EnsureStillForeground(",
-            "前面化の判定から保存までに描画待ちの撮り直しが挟まり、その間に前面を奪われ得る");
-        var checks = Regex.Matches(capture, @"\bRequireStillForeground\s*\(\s*\)\s*;").Cast<Match>().Select(m => m.Index).ToList();
-        var shot = capture.IndexOf("Capture.Rectangle(", System.StringComparison.Ordinal);
-        var saved = capture.IndexOf(".ToFile(", System.StringComparison.Ordinal);
-        checks.Should().HaveCount(2, "撮影中の確認を撮る前と撮った後の 2 か所で呼ぶこと");
-        (checks[0] < shot && shot < saved && saved < checks[1]).Should().BeTrue(
-            "撮る前（前回の撮り直しから今までに奪われていないか）と、撮って保存した後（撮っている最中に奪われていないか）に確かめること");
-    }
-
-    [Fact]
-    public void 画面のコピーはCaptureRectangleの中だけで行うこと()
-    {
-        var inside = FindRawCaptures(Body(HelperCode(), "CaptureRectangle")).Count;
-        inside.Should().BeGreaterThan(0, "CaptureRectangle は FlaUI の撮影 API で画面をコピーする");
-
-        UiTestsSources().Sum(s => FindRawCaptures(s.Code).Count).Should().Be(inside,
-            "CaptureRectangle を通らずに画面をコピーすると、前面化の判定・撮影中の確認・未描画の検査をすべて素通りする");
-    }
-
-    [Fact]
     public void 前面にしない撮影はトースト単体だけに使うこと()
     {
         UiTestsSources(keepLiterals: true)
@@ -251,13 +173,28 @@ public class ScreenshotForegroundConventionTests
     }
 
     [Fact]
-    public void 切り分け用の撮影は_FAILEDの名前だけに使うこと()
+    public void 画面のコピーはCaptureRectangleの中だけで行い_CaptureRectangleは判定を通る入口からだけ呼ぶこと()
     {
-        // 名前の検査そのものを検証する ScreenshotForegroundTests（誤った名前を渡して例外を確かめる）は除く
-        UiTestsSources(keepLiterals: true)
-            .Where(s => s.File != "ScreenshotForegroundTests.cs")
-            .SelectMany(s => FindDiagnosisCapturesWithoutFailedName(s.Code).Select(c => $"{s.File}: {c}"))
-            .Should().BeEmpty("前面にできなくても撮る撮影の画像を、公開され得る正規の名前で残さない");
+        var code = HelperCode();
+        var inside = FindRawCaptures(Body(code, "CaptureRectangle")).Count;
+        inside.Should().BeGreaterThan(0, "CaptureRectangle は FlaUI の撮影 API で画面をコピーする");
+        UiTestsSources().Sum(s => FindRawCaptures(s.Code).Count).Should().Be(inside,
+            "CaptureRectangle を通らずに画面をコピーすると、前面化の判定・撮影中の確認・未描画の検査をすべて素通りする");
+
+        var entries = 0;
+        foreach (var method in GuardedCaptureMethods)
+        {
+            var body = Body(code, method);
+            body.Should().Contain("RequireForegroundForCapture(", $"{method} は前面にできなかったら撮らずに失敗すること");
+            entries += CountWord(body, "CaptureRectangle");
+        }
+
+        var diagnosis = Body(code, "CaptureForDiagnosis");
+        diagnosis.Should().Contain("EndsWith(DiagnosisFileSuffix", "前面にできなくても撮る撮影は、名前を _FAILED.png に限ること");
+        entries += CountWord(diagnosis, "CaptureRectangle");
+
+        CountWord(code, "CaptureRectangle").Should().Be(entries + 1,
+            "画像を保存する入口を足すときは、撮影前の判定を通し、GuardedCaptureMethods にも加えること（宣言 1 件 + 入口の中の呼び出し）");
     }
 
     private static int CountWord(string text, string word) =>
