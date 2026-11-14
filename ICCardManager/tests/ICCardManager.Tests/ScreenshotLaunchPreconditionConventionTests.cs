@@ -79,6 +79,15 @@ public class ScreenshotLaunchPreconditionConventionTests
             .Select(call => codeOnly.Substring(call.Index, System.Math.Min(80, codeOnly.Length - call.Index)))
             .ToList();
 
+    /// <summary>
+    /// <see cref="ReleaseEntry"/> の本体（波括弧を含む・コードだけ）が、ちょうど次の 2 文からなるか:
+    /// ①<c>Skip.If(ScreenshotHelper.ShouldSkip, …);</c> ②<c>AppFixture.ThrowUnlessReleaseCapture(Environment.GetEnvironmentVariable(AppFixture.LaunchConfigurationEnvironmentVariable));</c>
+    /// </summary>
+    internal static bool IsReleaseEntryBody(string codeOnlyBody) =>
+        Regex.IsMatch(codeOnlyBody.Trim(),
+            @"^\{\s*Skip\.If\(\s*ScreenshotHelper\.ShouldSkip\s*,[^;]*\)\s*;" +
+            @"\s*AppFixture\.ThrowUnlessReleaseCapture\(\s*Environment\.GetEnvironmentVariable\(\s*AppFixture\.LaunchConfigurationEnvironmentVariable\s*\)\s*\)\s*;\s*\}$");
+
     /// <summary><c>AppFixture</c> の修飾を外す・別名を付ける using ディレクティブ（コードだけのソースを受け取る）。</summary>
     internal static IReadOnlyList<string> FindAppFixtureUsingBypasses(string codeOnly) =>
         AppFixtureUsingBypass.Matches(codeOnly).Cast<Match>().Select(m => m.Value).ToList();
@@ -141,8 +150,9 @@ public class ScreenshotLaunchPreconditionConventionTests
         {
             var code = TestSourceInspection.ToCodeOnly(source);
             var entry = TestSourceInspection.ExtractMethodBody(code, "private static void " + ReleaseEntry);
-            entry.Should().Contain("AppFixture.ThrowUnlessReleaseCapture(", $"{file} の {ReleaseEntry} が起動構成を確かめること");
-            entry.Should().Contain("ScreenshotHelper.ShouldSkip");
+            IsReleaseEntryBody(entry).Should().BeTrue(
+                $"{file} の {ReleaseEntry} は、1 文目で撮影の指示（ShouldSkip）を見て Skip し、2 文目で環境変数の値を AppFixture.ThrowUnlessReleaseCapture へ渡すこと。" +
+                "順序が逆だと撮影を指示していない通常の UI テストの実行で全件が失敗し、定数を渡すと起動構成を確かめなくなる（レビュー 5 回目で検出）。実際の本体: " + entry);
             Regex.Matches(code, @"ScreenshotHelper\.ShouldSkip\b").Count.Should().Be(1,
                 $"{file} で撮影の指示（ShouldSkip）を見るのは {ReleaseEntry} の中だけにすること（入口を通らずに Skip だけ見るテストを作らない）");
 
@@ -217,6 +227,19 @@ public class ScreenshotLaunchPreconditionConventionTests
 
         FindTestsNotStartingWithReleaseEntry(sample).Should().Equal(new[] { "c_呼ばない", "d_後で呼ぶ" },
             "呼ばないテストと、起動の後に呼ぶテストを見つけ、先頭で呼ぶテスト（2 回呼ぶものを含む）は見逃すこと");
+    }
+
+    /// <summary>検査器の固定: 入口の本体は「Skip の判定 → 環境変数の値で起動構成を確かめる」の 2 文だけを認めること。</summary>
+    [Theory]
+    [InlineData("{\n    Skip.If(ScreenshotHelper.ShouldSkip, SkipReason);\n    AppFixture.ThrowUnlessReleaseCapture(Environment.GetEnvironmentVariable(AppFixture.LaunchConfigurationEnvironmentVariable));\n}", true)]
+    [InlineData("{\n    AppFixture.ThrowUnlessReleaseCapture(Environment.GetEnvironmentVariable(AppFixture.LaunchConfigurationEnvironmentVariable));\n    Skip.If(ScreenshotHelper.ShouldSkip, SkipReason);\n}", false)]
+    [InlineData("{\n    Skip.If(ScreenshotHelper.ShouldSkip, SkipReason);\n    AppFixture.ThrowUnlessReleaseCapture(\"\");\n}", false)]
+    [InlineData("{\n    Skip.If(ScreenshotHelper.ShouldSkip, SkipReason);\n    AppFixture.ThrowUnlessReleaseCapture(Environment.GetEnvironmentVariable(\"\"));\n}", false)]
+    [InlineData("{\n    Skip.If(ScreenshotHelper.ShouldSkip, SkipReason);\n    Prepare();\n    AppFixture.ThrowUnlessReleaseCapture(Environment.GetEnvironmentVariable(AppFixture.LaunchConfigurationEnvironmentVariable));\n}", false)]
+    [InlineData("{\n    Skip.If(ScreenshotHelper.ShouldSkip, SkipReason);\n}", false)]
+    public void 検査器は_入口の本体が正しい順序と引数の2文のときだけ認めること(string body, bool expected)
+    {
+        IsReleaseEntryBody(body).Should().Be(expected);
     }
 
     /// <summary>検査器の固定: 撮影のパスの Trait が無い・2 つある・未知の値なら null にすること。</summary>
