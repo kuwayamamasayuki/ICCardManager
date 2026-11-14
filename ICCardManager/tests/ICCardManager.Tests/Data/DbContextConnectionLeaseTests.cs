@@ -1,7 +1,10 @@
 using System;
 using System.Collections.Concurrent;
+using System.Collections.Generic;
 using System.Data;
 using System.Data.SQLite;
+using System.Diagnostics;
+using System.Globalization;
 using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
@@ -267,58 +270,135 @@ public class DbContextConnectionLeaseTests : IDisposable
         await act.Should().ThrowAsync<OperationCanceledException>();
     }
 
+    /// <summary>
+    /// セマフォを待っている最中の <see cref="DbContext.BeginTransactionAsync"/> を、トークンで取り消せること。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Issue #2487: 以前は「待つ側のスレッドは 50ms 眠ってから待ち始め、テストのスレッドは 200ms 眠ってから取り消す」という
+    /// 固定の遅延で順序を作っていた。負荷が高く待つ側の起動が 150ms 以上遅れると、待ち始める前に取り消しが済み、
+    /// <c>SemaphoreSlim.WaitAsync</c> は取り消し済みのトークンを見て即座に取り消し済みの Task を返す。そのとき投げられるのは
+    /// <see cref="TaskCanceledException"/> で、型の完全一致（<c>BeOfType&lt;OperationCanceledException&gt;</c>）が失敗する
+    /// （待つ側の遅延を 500ms にすると確定的に再現する）。全件実行（CPU 高負荷）での 1 回の失敗の原因はこれと推定するが、
+    /// 失敗の文言が残っておらず確定はしていない。
+    /// </para>
+    /// <para>
+    /// いまは遅延に頼らず順序を固定する。async メソッドは最初の未完了の待機で呼び出し元へ戻るので、セマフォを保持したまま
+    /// 呼んだ <see cref="DbContext.BeginTransactionAsync"/> が未完了で戻った時点で、セマフォの待機は登録済み（UI スレッド
+    /// 以外からの呼び出しでは、セマフォより前の待機点は同期的に完了する。<c>DbContext.BeginTransactionCoreAsync</c> のコメント参照）。
+    /// それを確かめてから取り消す。
+    /// 順序を固定したので、取り消しはセマフォの待機中に届き、BCL（<c>SemaphoreSlim</c> の <c>ThrowIfCancellationRequested</c>）が
+    /// <see cref="OperationCanceledException"/> そのものを投げる。型は完全一致で表明する — <see cref="TaskCanceledException"/> なら、
+    /// セマフォより前の待機点で取り消された（未完了で戻ったのがセマフォの待機ではなかった）ことを示す。あわせて、取り消したのが
+    /// このトークンであることを表明する。
+    /// 失敗の理由には観測値（保持の取得・待ち始めた時刻・戻った時刻と状態・取り消した時刻・待機が終わった時刻と結果・例外のトークン）を
+    /// 載せる（#2476 と同じ考え方）。
+    /// </para>
+    /// </remarks>
     [Fact]
     [Trait("Category", "Unit")]
-    public void BeginTransactionAsync_CancellationTokenでセマフォ待機をキャンセル可能なこと()
+    public async Task BeginTransactionAsync_CancellationTokenでセマフォ待機をキャンセル可能なこと()
     {
-        // Arrange
+        // Arrange - トランザクションを開いてセマフォを保持する
         using var dbContext = CreateInitializedDbContext();
-        var cts = new CancellationTokenSource();
-        var task1HoldingLease = new ManualResetEventSlim(false);
-        var task2Finished = new ManualResetEventSlim(false);
-        Exception? caughtException = null;
+        using var cts = new CancellationTokenSource();
+        var clock = Stopwatch.StartNew();
+        var holder = await dbContext.BeginTransactionAsync();
+        var observations = new List<string> { $"保持の取得 {Ms(clock)}" };
+        Task<TransactionScope>? waitingForCleanup = null;
 
-        // Act - 1つ目のスレッドでトランザクション（セマフォ保持）を保持し続ける
-        var thread1 = new Thread(() =>
+        try
         {
-            var scope = dbContext.BeginTransactionAsync().GetAwaiter().GetResult();
-            task1HoldingLease.Set();
-            task2Finished.Wait(TimeSpan.FromSeconds(10));
-            scope.Dispose();
-        });
+            // Act - セマフォを保持したまま、トークン付きで次のトランザクションを求める
+            observations.Add($"待ち始め {Ms(clock)}");
+            var waiting = dbContext.BeginTransactionAsync(cts.Token);
+            waitingForCleanup = waiting;
+            observations.Add($"呼び出しから戻った {Ms(clock)}（状態 {waiting.Status}）");
 
-        // 2つ目のスレッドでキャンセルトークン付きのトランザクション取得を試みる
-        var thread2 = new Thread(() =>
+            waiting.IsCompleted.Should().BeFalse(
+                "セマフォは保持中なので、呼び出しはセマフォの待機に入って未完了で戻ること（観測: {0}）",
+                string.Join("・", observations));
+
+            observations.Add($"取り消しの要求 {Ms(clock)}");
+            cts.Cancel();
+
+            var winner = await Task.WhenAny(waiting, Task.Delay(TimeSpan.FromSeconds(10)));
+            observations.Add(winner == waiting
+                ? $"待機の終了 {Ms(clock)}（状態 {waiting.Status}・例外 {DescribeException(waiting)}）"
+                : $"10 秒待っても待機が終わらない {Ms(clock)}（状態 {waiting.Status}）");
+
+            // Assert
+            winner.Should().BeSameAs(waiting,
+                "取り消すとセマフォの待機はすぐに終わること（観測: {0}）", string.Join("・", observations));
+            waiting.IsCanceled.Should().BeTrue(
+                "待機は取り消しで終わり、トランザクションは開かれないこと（観測: {0}）", string.Join("・", observations));
+
+            Func<Task> act = () => waiting;
+            var canceled = (await act.Should().ThrowExactlyAsync<OperationCanceledException>(
+                    "取り消しはセマフォの待機中に届き、OperationCanceledException そのものになること。TaskCanceledException なら、" +
+                    "セマフォより前の待機点で取り消された（BeginTransactionCoreAsync のコメントの前提が崩れた）（観測: {0}）",
+                    string.Join("・", observations)))
+                .Which;
+
+            // CancellationToken は食い違っても FluentAssertions の出力が型名だけになるので、見分けられる値を観測値に載せる
+            var token = canceled.CancellationToken;
+            observations.Add(
+                $"例外のトークン（このテストのトークンと同一 {token == cts.Token}・CanBeCanceled {token.CanBeCanceled}・" +
+                $"IsCancellationRequested {token.IsCancellationRequested}）");
+            token.Should().Be(cts.Token,
+                "取り消したのはこのテストのトークンであること（観測: {0}）", string.Join("・", observations));
+        }
+        finally
         {
-            try
+            holder.Dispose();
+
+            // 取り消しが効かない実装では、保持を返すと待機がセマフォを取って完了する。完了はスレッドプールへ回るので、
+            // 直後に状態を見るとまだ未完了のことが多い。短い上限付きで待ってから破棄する（止まらないよう上限を置く）
+            if (waitingForCleanup is not null)
             {
-                task1HoldingLease.Wait(TimeSpan.FromSeconds(5));
-                Thread.Sleep(50);
-                dbContext.BeginTransactionAsync(cts.Token).GetAwaiter().GetResult();
+                await Task.WhenAny(waitingForCleanup, Task.Delay(TimeSpan.FromSeconds(5)));
+                if (waitingForCleanup.Status == TaskStatus.RanToCompletion)
+                {
+                    (await waitingForCleanup).Dispose();
+                }
             }
-            catch (OperationCanceledException ex)
-            {
-                caughtException = ex;
-            }
-            finally
-            {
-                task2Finished.Set();
-            }
-        });
+        }
 
-        thread1.Start();
-        thread2.Start();
+        // 取り消した待機がセマフォを持ち去っていないこと: 保持を返せば、次のトランザクションを開ける
+        var next = dbContext.BeginTransactionAsync();
+        var nextWinner = await Task.WhenAny(next, Task.Delay(TimeSpan.FromSeconds(10)));
+        nextWinner.Should().BeSameAs(next,
+            "取り消した待機はセマフォを取らずに終わり、保持を返した後は次のトランザクションを開けること（観測: {0}）",
+            string.Join("・", observations));
+        (await next).Dispose();
+    }
 
-        task1HoldingLease.Wait(TimeSpan.FromSeconds(5));
-        Thread.Sleep(200);
-        cts.Cancel();
+    private static string Ms(Stopwatch clock)
+        => string.Format(CultureInfo.InvariantCulture, "{0:F1}ms", clock.Elapsed.TotalMilliseconds);
 
-        thread2.Join(TimeSpan.FromSeconds(10)).Should().BeTrue("thread2が10秒以内に完了すべき");
-        thread1.Join(TimeSpan.FromSeconds(10)).Should().BeTrue("thread1が10秒以内に完了すべき");
+    private static string DescribeException(Task task)
+    {
+        var inner = task.Exception?.InnerException;
+        if (inner is not null)
+        {
+            return inner.GetType().FullName ?? inner.GetType().Name;
+        }
 
-        // Assert
-        caughtException.Should().NotBeNull();
-        caughtException.Should().BeOfType<OperationCanceledException>();
+        if (!task.IsCanceled)
+        {
+            return "なし";
+        }
+
+        // 取り消された Task は Exception を持たない。待って型を取り出す
+        try
+        {
+            task.GetAwaiter().GetResult();
+            return "なし";
+        }
+        catch (Exception ex)
+        {
+            return ex.GetType().FullName ?? ex.GetType().Name;
+        }
     }
 
     #endregion
