@@ -313,7 +313,10 @@ public class DbContextMaintenanceTransactionTests : IDisposable
     /// <para>
     /// Issue #2476: CI（Release）で 1 回だけ「削除件数 0」で失敗した。FluentAssertions は主語を
     /// <c>attempts</c> と表示したが、理由の文言（「2 回目の試行で削除が完了すること」）から、失敗したのは
-    /// 削除件数の表明である（FluentAssertions が主語を取り違えた仕組みは不明）。
+    /// 削除件数の表明である。手元の Release でも、削除件数の表明を失敗させると主語が <c>value</c> と表示された
+    /// （事実）。Release ではスタックの行番号が手前へずれ、FluentAssertions はその行のソースから主語を読むため
+    /// 取り違える（推測を含む。CI で <c>attempts</c> になった具体的な規則は未確認）。主語は信用できないので、
+    /// どの表明が失敗したかは because の文言で見分ける。
     /// このテストのロック競合は割り込み点から例外を投げて作っており、別の接続でロックを持つ処理は無いので、
     /// 「ロックの保持と cleanup の開始のタイミング」には依存しない。単独での繰り返し・並列の負荷・全件実行では
     /// 再現せず、原因は未特定。次に起きたときに切り分けられるよう、観測値と DbContext のログを失敗の理由へ載せる。
@@ -363,14 +366,14 @@ public class DbContextMaintenanceTransactionTests : IDisposable
         var parts = new List<string>
         {
             $"DB の日付 {storedDate}",
-            $"境界日 {thresholdBefore}（後 {await ScalarTextAsync(RetentionThresholdSql)}）",
+            $"境界日 {thresholdBefore}（後 {await ObserveAsync(() => ScalarTextAsync(RetentionThresholdSql))}）",
             $"準備の AutoCommit [{string.Join("、", _setupAutoCommit)}]",
             $"INSERT 直後の AutoCommit {autoCommitAfterInsert}",
             $"開始前の摘要が一致する行 {targetsBefore} 件",
         };
         parts.AddRange(observations.Count > 0 ? observations : new List<string> { "割り込み点に到達せず" });
-        parts.Add($"削除後の摘要が一致する行 {await CountAsync(TargetRowCountSql)} 件");
-        parts.Add($"終了後の AutoCommit {await ReadAutoCommitAsync()}");
+        parts.Add($"削除後の摘要が一致する行 {await ObserveAsync(async () => await CountAsync(TargetRowCountSql))} 件");
+        parts.Add($"終了後の AutoCommit {await ObserveAsync(async () => await ReadAutoCommitAsync())}");
         parts.Add($"待機 [{string.Join(", ", retryDelay.Delays)}]");
         parts.Add($"System.Data.SQLite {typeof(SQLiteConnection).Assembly.GetName().Version}");
         parts.Add($"ログ: {FormatLogOnOneLine()}");
@@ -411,6 +414,21 @@ public class DbContextMaintenanceTransactionTests : IDisposable
     /// </remarks>
     private string FormatLogOnOneLine()
         => _logger.FormatEntries().Trim().Replace("\r\n", " / ").Replace("\n", " / ");
+
+    /// <summary>
+    /// cleanup の後の観測を、例外で表明ごと失わないよう包む（失敗したら観測値に理由を載せる）。
+    /// </summary>
+    private static async Task<string> ObserveAsync<T>(Func<Task<T>> observe)
+    {
+        try
+        {
+            return Convert.ToString(await observe(), CultureInfo.InvariantCulture) ?? string.Empty;
+        }
+        catch (Exception ex)
+        {
+            return $"(取得失敗: {ex.GetType().Name} {ex.Message})";
+        }
+    }
 
     private async Task<bool> ReadAutoCommitAsync()
     {
