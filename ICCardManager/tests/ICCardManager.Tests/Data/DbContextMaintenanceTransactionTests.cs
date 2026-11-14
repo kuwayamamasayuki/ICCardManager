@@ -313,8 +313,7 @@ public class DbContextMaintenanceTransactionTests : IDisposable
     /// <para>
     /// Issue #2476: CI（Release）で 1 回だけ「削除件数 0」で失敗した。FluentAssertions は主語を
     /// <c>attempts</c> と表示したが、理由の文言（「2 回目の試行で削除が完了すること」）から、失敗したのは
-    /// 削除件数の表明である（CI のスタックの行番号は、変更前のファイルの <c>await Task.Run(...)</c> の行を指しており、
-    /// 主語の取り違えはそのせいとみられるが、行番号がずれた原因は不明）。
+    /// 削除件数の表明である（FluentAssertions が主語を取り違えた仕組みは不明）。
     /// このテストのロック競合は割り込み点から例外を投げて作っており、別の接続でロックを持つ処理は無いので、
     /// 「ロックの保持と cleanup の開始のタイミング」には依存しない。単独での繰り返し・並列の負荷・全件実行では
     /// 再現せず、原因は未特定。次に起きたときに切り分けられるよう、観測値と DbContext のログを失敗の理由へ載せる。
@@ -329,7 +328,7 @@ public class DbContextMaintenanceTransactionTests : IDisposable
     /// </para>
     /// <para>
     /// 観測者効果を抑えるため、割り込み点の中では試行 2（削除する回）に SQL を発行しない（トランザクションの
-    /// 入れ子の深さを読むだけ）。対象行の数を数える SELECT は、巻き戻される試行 1 の、例外を投げる
+    /// 入れ子の深さを読むだけ）。摘要が一致する行の数を数える SELECT は、巻き戻される試行 1 の、例外を投げる
     /// 直前にだけ走らせる。日付・境界日・行数のほかの観測は cleanup の前後に行う。
     /// </para>
     /// </remarks>
@@ -351,7 +350,7 @@ public class DbContextMaintenanceTransactionTests : IDisposable
             var depth = ReadTransactionLevel(lease.Connection);
             if (attempts == 1)
             {
-                observations.Add($"試行1: 入れ子の深さ {depth}・対象行 {CountOn(lease.Connection, TargetRowCountSql)} 件");
+                observations.Add($"試行1: 入れ子の深さ {depth}・摘要が一致する行 {CountOn(lease.Connection, TargetRowCountSql)} 件");
                 throw new SQLiteException(SQLiteErrorCode.Busy, "database is locked");
             }
 
@@ -367,12 +366,13 @@ public class DbContextMaintenanceTransactionTests : IDisposable
             $"境界日 {thresholdBefore}（後 {await ScalarTextAsync(RetentionThresholdSql)}）",
             $"準備の AutoCommit [{string.Join("、", _setupAutoCommit)}]",
             $"INSERT 直後の AutoCommit {autoCommitAfterInsert}",
-            $"開始前の対象行 {targetsBefore} 件",
+            $"開始前の摘要が一致する行 {targetsBefore} 件",
         };
         parts.AddRange(observations.Count > 0 ? observations : new List<string> { "割り込み点に到達せず" });
-        parts.Add($"削除後の対象行 {await CountAsync(TargetRowCountSql)} 件");
+        parts.Add($"削除後の摘要が一致する行 {await CountAsync(TargetRowCountSql)} 件");
         parts.Add($"終了後の AutoCommit {await ReadAutoCommitAsync()}");
         parts.Add($"待機 [{string.Join(", ", retryDelay.Delays)}]");
+        parts.Add($"System.Data.SQLite {typeof(SQLiteConnection).Assembly.GetName().Version}");
         parts.Add($"ログ: {FormatLogOnOneLine()}");
         var diagnostics = string.Join("・", parts);
         ledgerCount.Should().Be(1, "2 回目の試行で削除が完了すること（{0}）", diagnostics);
@@ -381,6 +381,10 @@ public class DbContextMaintenanceTransactionTests : IDisposable
             "失敗した 1 回の後にだけ、バックオフの先頭の時間を待つこと（{0}）", diagnostics);
     }
 
+    /// <summary>
+    /// 摘要が一致する行の数。数えるのは行が残っているかであって、削除条件（日付）に合う行の数ではない
+    /// （削除条件の側は「DB の日付」と「境界日」を並べて見る）。
+    /// </summary>
     private const string TargetRowCountSql = "SELECT COUNT(*) FROM ledger WHERE summary = '7年前のデータ'";
 
     private const string RetentionThresholdSql = "SELECT date('now', '-6 years', 'localtime')";
@@ -388,6 +392,9 @@ public class DbContextMaintenanceTransactionTests : IDisposable
     /// <summary>
     /// 接続のトランザクションの入れ子の深さ（System.Data.SQLite の非公開フィールド）。読めない版では「不明」。
     /// </summary>
+    /// <remarks>
+    /// 版を上げてフィールドが無くなると黙って「不明」になるので、失敗の理由には System.Data.SQLite の版も載せる。
+    /// </remarks>
     private static string ReadTransactionLevel(SQLiteConnection connection)
     {
         var field = typeof(SQLiteConnection).GetField(
@@ -398,6 +405,10 @@ public class DbContextMaintenanceTransactionTests : IDisposable
     }
 
     /// <summary>ログを 1 行へ畳む（理由の閉じ括弧が独立行に出ないように）。</summary>
+    /// <remarks>
+    /// 毎回出る「journal_modeの設定に失敗しました（現在: memory）」は、インメモリ DB では journal_mode が
+    /// memory にしかならないための Warning で、この失敗とは関係しない（正常）。
+    /// </remarks>
     private string FormatLogOnOneLine()
         => _logger.FormatEntries().Trim().Replace("\r\n", " / ").Replace("\n", " / ");
 
