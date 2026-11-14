@@ -49,6 +49,8 @@ public class StaffAuthScopeConventionTests
     {
         var violations = EnumerateProductionSources()
             .Select(f => (File: f, Code: ReadCode(f)))
+            // Issue #2484: 職員認証の包み（委譲）の 1 ファイルだけを除く（中身が委譲だけであることは下の検査が表明する）
+            .Where(x => !StaffAuthDelegationWrapper.IsWrapperFile(x.File))
             .Select(x => (x.File, Calls: AuthCallPattern.Matches(x.Code).Count, Scoped: ScopedAuthCallPattern.Matches(x.Code).Count))
             .Where(x => x.Calls != x.Scoped)
             .Select(x => $"  - {RelativePath(x.File)}: 呼び出し {x.Calls} 件のうち決まった形のもの {x.Scoped} 件")
@@ -130,6 +132,46 @@ public class StaffAuthScopeConventionTests
         AuthCallPattern.Matches(code).Count.Should().Be(1);
         ScopedAuthCallPattern.Matches(code).Count.Should().Be(1);
         BeginSessionCallPattern.IsMatch(code).Should().BeFalse();
+    }
+
+    /// <summary>
+    /// 上の検査から除いた職員認証の包み（Issue #2484）は委譲だけであること: 呼び出しはちょうど 1 件で、受け取った操作名を
+    /// そのまま渡す（認証結果を受けて使う呼び出しを足すと、この検査が赤になる）。
+    /// </summary>
+    [Fact]
+    public void 除外した職員認証の包みは受け取った操作名をそのまま1回だけ渡すこと()
+    {
+        var wrapper = EnumerateProductionSources().Where(StaffAuthDelegationWrapper.IsWrapperFile).ToList();
+
+        wrapper.Should().ContainSingle("除外するファイルが存在すること（名前を変えたら除外の定義も直す）");
+        StaffAuthDelegationWrapper.FindDelegationViolations(ReadCode(wrapper[0])).Should().BeEmpty();
+    }
+
+    /// <summary>
+    /// 包みの検査と除外の範囲を既知の入力で固定する（PR #2491 のレビュー 4 回目）。
+    /// </summary>
+    [Fact]
+    public void 包みの検査は委譲以外の呼び出しを検出し除外は1ファイルだけであること()
+    {
+        const string delegation =
+            "public async Task<StaffAuthResult?> RequestAuthenticationAsync(string operationDescription)\n" +
+            "{ using (_beginSuppression()) { return await _inner.RequestAuthenticationAsync(operationDescription); } }";
+        const string extraCall = delegation +
+            "\nasync Task A() { var r = await _inner.RequestAuthenticationAsync(\"履歴の統合\"); }";
+        const string replacedName =
+            "public async Task<StaffAuthResult?> RequestAuthenticationAsync(string operationDescription)\n" +
+            "{ return await _inner.RequestAuthenticationAsync(\"固定の操作名\"); }";
+
+        StaffAuthDelegationWrapper.FindDelegationViolations(delegation).Should().BeEmpty("委譲だけなら認める");
+        StaffAuthDelegationWrapper.FindDelegationViolations(extraCall).Should().NotBeEmpty("委譲以外の呼び出しを足したら違反");
+        StaffAuthDelegationWrapper.FindDelegationViolations(replacedName).Should().NotBeEmpty("受け取った操作名を渡さないのは違反");
+
+        var root = TestPaths.GetProductionSourceRoot();
+        StaffAuthDelegationWrapper.IsWrapperFile(Path.Combine(root, StaffAuthDelegationWrapper.RelativePath)).Should().BeTrue();
+        StaffAuthDelegationWrapper.IsWrapperFile(Path.Combine(root, "ViewModels", "CardManageViewModel.cs")).Should().BeFalse(
+            "入れ子の IStaffAuthService の実装を置いた画面のファイルは除外しない（形ではなくファイルで除く）");
+        StaffAuthDelegationWrapper.IsWrapperFile(Path.Combine(root, "Services", "ModalCardReadingSuppressingStaffAuthService.cs"))
+            .Should().BeFalse("同じ名前の別の場所のファイルは除外しない");
     }
 
     private static string ReadCode(string path)

@@ -2402,6 +2402,62 @@ public class MainViewModelIntegrationTests
     }
 
     /// <summary>
+    /// Issue #2484: 返却フローの入力ダイアログ（バス停名・同行者数）の表示中に別の職員証がタッチされても、
+    /// 背後で職員証を認識せず、閉じた後にも遅れて処理しないこと。返却フローが終われば次のタッチは通常どおり処理する。
+    /// </summary>
+    /// <remarks>
+    /// 返却フローは「処理中」の状態で入力ダイアログを出すので、#2484 の前から表示中のタッチは捨てていた。
+    /// #2484 でモーダル全般を抑制しても、この扱い（捨てる・後で処理しない・終われば戻る）が変わらないことを固定する。
+    /// </remarks>
+    [Fact]
+    public async Task 返却フローの入力ダイアログの表示中の職員証タッチは処理せず返却フローの後は処理すること()
+    {
+        ArrangeReturnWithHistoryReview(new List<LedgerDetail>
+        {
+            new LedgerDetail { UseDate = DateTime.Now.AddHours(-1), Balance = 2300, Amount = 200, IsCharge = false, IsBus = true },
+        });
+        var appSettings = new AppSettings
+        {
+            WarningBalance = 1000,
+            SkipBusStopInputOnReturn = false,
+            SkipCompanionCountInputOnReturn = false,
+        };
+        _settingsRepositoryMock.Setup(r => r.GetAppSettingsAsync()).ReturnsAsync(appSettings);
+        _settingsRepositoryMock.Setup(r => r.GetAppSettings()).Returns(appSettings);
+        var shownDialogs = new List<string>();
+        var statesAfterTouch = new List<AppState>();
+        void TouchStaffB(string dialog)
+        {
+            shownDialogs.Add(dialog);
+            RaiseCardRead(StaffIdmB);
+            statesAfterTouch.Add(_viewModel.CurrentState);
+        }
+
+        _navigationServiceMock
+            .Setup(n => n.ShowDialogAsync<ICCardManager.Views.Dialogs.BusStopInputDialog>(
+                It.IsAny<Func<ICCardManager.Views.Dialogs.BusStopInputDialog, Task>>()))
+            .Callback(() => TouchStaffB("バス停名"))
+            .ReturnsAsync(true);
+        _navigationServiceMock
+            .Setup(n => n.ShowDialogAsync<ICCardManager.Views.Dialogs.CompanionCountInputDialog>(
+                It.IsAny<Func<ICCardManager.Views.Dialogs.CompanionCountInputDialog, Task>>()))
+            .Callback(() => TouchStaffB("同行者数"))
+            .ReturnsAsync(true);
+
+        await RunReturnFlowAsync();
+
+        shownDialogs.Should().Equal(new[] { "バス停名", "同行者数" }, "前提: 返却フローの入力ダイアログが両方表示された");
+        statesAfterTouch.Should().OnlyContain(s => s == AppState.Processing, "表示中のタッチで状態が変わらない（返却の処理中のまま）");
+        _toastMock.Verify(t => t.ShowStaffRecognizedNotification(StaffNameB), Times.Never, "表示中のタッチを認識しない");
+        _viewModel.CurrentState.Should().Be(AppState.WaitingForStaffCard, "表示中のタッチを返却フローの後に遅れて処理しない");
+
+        RaiseCardRead(StaffIdmB);
+        await _dispatcherService.WaitForPendingAsync();
+
+        _viewModel.CurrentState.Should().Be(AppState.WaitingForIcCard, "返却フローの後のタッチは通常どおり処理する（対）");
+    }
+
+    /// <summary>
     /// 次の職員証タッチ（次の操作の開始）で、操作されていない返却確認は閉じること。
     /// 開いたまま残すと、以後の返却で毎回「別のカードで開いている」状態になり、
     /// 前の職員のカードの履歴を見ながら操作することになる（設計時のユーザー指摘）。

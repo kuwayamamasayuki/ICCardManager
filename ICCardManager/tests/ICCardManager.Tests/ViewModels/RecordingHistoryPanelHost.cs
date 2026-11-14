@@ -112,6 +112,39 @@ internal sealed class RecordingHistoryPanelHost : IHistoryPanelHost
         return Task.FromResult(MismatchRemainsAfterReevaluation);
     }
 
+    /// <summary>
+    /// 開いたまま閉じていないカード読み取り抑制のスコープの数（Issue #2484）。
+    /// </summary>
+    /// <remarks>
+    /// <see cref="Calls"/> には残さない（モーダルの表示はほぼすべての操作に付くので、呼び出し順を表明する既存のテストを
+    /// 壊さないため）。モーダルの表示中にこの値を読めば、表示の範囲で抑制を頼んでいるかが分かる。
+    /// </remarks>
+    public int OpenModalSuppressions { get; private set; }
+
+    public IDisposable BeginModalCardReadingSuppression()
+    {
+        OpenModalSuppressions++;
+        return new ModalSuppressionScope(this);
+    }
+
+    private sealed class ModalSuppressionScope : IDisposable
+    {
+        private RecordingHistoryPanelHost? _owner;
+
+        public ModalSuppressionScope(RecordingHistoryPanelHost owner) => _owner = owner;
+
+        public void Dispose()
+        {
+            if (_owner == null)
+            {
+                return;
+            }
+
+            _owner.OpenModalSuppressions--;
+            _owner = null;
+        }
+    }
+
     private sealed class Scope : IDisposable
     {
         private RecordingHistoryPanelHost? _owner;

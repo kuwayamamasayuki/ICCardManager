@@ -87,7 +87,21 @@ namespace ICCardManager.Common.Messages
         /// 差し替えの操作の範囲（認証の後から書き込みの後処理まで）で抑制する。登録モード（<see cref="StaffRegistration"/>）とは
         /// 取得・解放の契機が違うので、ソースを分ける（同じソースを使うと、編集の取り消しで差し替え中の抑制が解ける）。
         /// </remarks>
-        StaffCardReplacement
+        StaffCardReplacement,
+
+        /// <summary>
+        /// メイン画面・履歴パネルが表示するモーダル（管理系ダイアログ・確認や案内の MessageBox・行編集等）
+        /// （<c>ModalCardReadingSuppressingNavigationService</c>）
+        /// </summary>
+        /// <remarks>
+        /// Issue #2484: モーダルは入れ子のメッセージポンプを回すため、表示中もメイン画面はカードを読み取る。
+        /// 交通系ICカード管理ダイアログや確認の表示中に職員証をタッチすると「交通系ICカードのタッチ待ち」へ移り、
+        /// 続く交通系ICカードのタッチがその職員の貸出・返却として記録されていた。表示の範囲（開いてから閉じるまで）で抑制する。
+        /// メイン画面と履歴パネルが受け取った <c>INavigationService</c> を包むので、呼び出しごとには書かない。
+        /// 開いているスコープの数を数え、最後のスコープが閉じたときだけ外す（<c>MainViewModel.BeginModalCardReadingSuppression</c>）。
+        /// 入れ子だけでなく、先に開いた側が後から開いた側より先に閉じる順（履歴パネルの詳細の初期化中に管理ダイアログを開く等）でも早く解けない。
+        /// </remarks>
+        MainScreenModal
     }
 
     /// <summary>

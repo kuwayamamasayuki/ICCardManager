@@ -368,11 +368,20 @@ public class ScreenTransitionDiagramConsistencyTests
     {
         // 操作名を定数や変数で渡すと StaffAuthCallPattern に一致せず、認証を要求する画面・操作が
         // 上の 3 つの検査から黙って漏れる（Issue #2255 の初版が定数で渡しており、検査は緑のままだった）
+        // Issue #2484: IStaffAuthService の実装（職員認証の包み ModalCardReadingSuppressingStaffAuthService）の中の呼び出しは、
+        // 受け取った操作名をそのまま渡す委譲で、認証を要求する操作ではない（操作名のリテラルは包みを呼ぶ画面の側にある）。
+        // 除外はその 1 ファイルだけ（形で除くと、画面のファイルに入れ子の実装を置くだけで本物の違反が外れる。PR #2491 のレビュー 4 回目）。
+        // 中身が委譲だけであることは StaffAuthScopeConventionTests が表明する
         var nonLiteral = Directory
             .GetFiles(Path.Combine(GetSourceRoot(), "ViewModels"), "*.cs", SearchOption.AllDirectories)
             .SelectMany(f =>
             {
                 var code = ReadCodeKeepingLiterals(f);
+                if (ICCardManager.Tests.Services.StaffAuthDelegationWrapper.IsWrapperFile(f))
+                {
+                    return Enumerable.Empty<string>();
+                }
+
                 var calls = Regex.Matches(code, @"\.RequestAuthenticationAsync\(").Count;
                 var literalCalls = StaffAuthCallPattern.Matches(code).Count;
                 return calls == literalCalls
