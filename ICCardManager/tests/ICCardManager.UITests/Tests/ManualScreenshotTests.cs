@@ -432,12 +432,13 @@ namespace ICCardManager.UITests.Tests
             dialog.WaitUntilEnabled(TestConstants.StaffReplaceCardButton).Should().BeTrue(
                 "編集フォームに「職員証を差し替え」ボタンが押せる状態で出ていること（図にボタンが写ること）");
 
-            // 氏名の欄のキャレット（点滅で撮るたびに画像が変わる）が写らないよう、「職員証を差し替え」ボタンへフォーカスを移してから撮る。
+            // 氏名の欄のキャレット（点滅で撮るたびに画像が変わる）が写らないよう、「保存」ボタンへフォーカスを移してから撮る。
+            // §3.1.2 は氏名・職員番号を直して「保存」を押す手順なので、フォーカスの枠が付くのは「保存」にする
+            // （「職員証を差し替え」に付けると、押すべきボタンのように見える）。
             // 選んだ行へは移せない（編集中は一覧が操作できず、UIA の SetFocus が InvalidOperationException になる。実測）
-            var replaceButton = dialog.FindByName(TestConstants.StaffReplaceCardButton);
-            replaceButton.Should().NotBeNull($"編集フォームに「{TestConstants.StaffReplaceCardButton}」ボタンがあること");
-            replaceButton!.Focus();
-
+            var saveButton = dialog.FindByName(TestConstants.StaffManageSaveButton);
+            saveButton.Should().NotBeNull($"編集フォームに「{TestConstants.StaffManageSaveButton}」ボタンがあること");
+            saveButton!.Focus();
             var path = ScreenshotHelper.Capture(dialog.Window, "staff_edit_dialog.png");
             File.Exists(path).Should().BeTrue();
             // ツールバーから開くダイアログと同じく、UI テスト専用のパスが画面内に出ていないことを撮った後に確かめる（Issue #2435）
