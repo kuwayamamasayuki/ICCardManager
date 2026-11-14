@@ -13,8 +13,9 @@ namespace ICCardManager.Common
     /// 払戻済のカードでは「この削除で解消する」と案内する。
     /// </para>
     /// <para>
-    /// 確認は履歴一覧の削除（<c>HistoryPanelViewModel.DeleteLedgerRow</c>）と行編集ダイアログの削除要求
-    /// （<c>LedgerRowEditViewModel.RequestDelete</c>）の 2 か所にあり、出し分けを 1 か所に置く（#1763）。
+    /// 確認は行編集ダイアログの削除要求（<c>LedgerRowEditViewModel.RequestDelete</c>）にある。
+    /// 履歴一覧の削除（<c>HistoryPanelViewModel.DeleteLedgerRow</c>）にも同じ確認があり出し分けを 1 か所に置いていた（#1763）が、
+    /// そちらは UI から到達しないため Issue #2475 で削除した。削除の確認を足すときは、文言の組み立てを写さずここを使う。
     /// </para>
     /// </remarks>
     public static class LentRecordDeletionGuidance

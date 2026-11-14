@@ -1936,84 +1936,100 @@ public class HistoryPanelViewModelTests : IDisposable
 
     #endregion
 
-    #region 履歴削除フロー（Issue #1486 / Issue #1574）
+    #region 行編集ダイアログからの削除（Issue #750 / Issue #1574 / Issue #2475）
+
+    /*
+     * 履歴の削除は、利用履歴行編集ダイアログの「削除」から行う（Issue #750）。認証はダイアログを開く前の
+     * 「履歴の変更」、確認はダイアログ内（LedgerRowEditViewModel.RequestDelete）、削除と監査ログは閉じた後の
+     * 履歴パネル（DeleteLedgerRowCoreAsync）。Issue #2475 まで、この経路はダイアログの Window を取り出して
+     * 要求を読んでいたため単体テストから踏めず、UI から到達しない履歴一覧の削除コマンド（DeleteLedgerRow）を
+     * 入口にして削除の性質を表明していた。ここでは INavigationService.ShowDialogAsync<TDialog, TViewModel> を
+     * 差し替え、本物の LedgerRowEditViewModel で「開く → 削除を押す → 確認 → 閉じる」を再現する。
+     */
 
     /// <summary>
-    /// Issue #1574: 貸出中レコード（IsLentRecord=true）の削除を試みた場合、
-    /// 旧仕様（Issue #1486）の <c>NavigationService.ShowWarning</c> による削除拒否は行われない。
-    /// 代わりに通常レコードと同じ認証フローへ進む。
+    /// 行編集ダイアログを閉じたか（<see cref="ArrangeLedgerDelete"/> の読み取りの切り替えに使う）。
     /// </summary>
+    private bool _editDialogClosed;
+
+    /// <summary>
+    /// 開いた行編集ダイアログで「削除」を押す（確認の応答は <c>ShowWarningConfirmation</c> の設定に従う）。
+    /// </summary>
+    /// <remarks>
+    /// 代役（<see cref="LedgerRowEditDialogStub"/>）は DialogResult を自分で決めるため、Window 側のクローズ処理の取り違えは
+    /// ここでは検出できない（UI テスト <c>LedgerRowDeleteUiTests</c> が担う）。
+    /// </remarks>
+    private List<LedgerRowEditViewModel> ArrangeEditDialogPressesDelete()
+        => LedgerRowEditDialogStub.Arrange(
+            _navigationServiceMock, _ledgerRepositoryMock.Object, _operationLoggerMock.Object, _dbContext,
+            editor =>
+            {
+                editor.CanDelete.Should().BeTrue("編集モードの初期化が成立していること（前提の表明）");
+                editor.RequestDeleteCommand.Execute(null);
+                _editDialogClosed = true;
+            });
+
+    /// <summary>
+    /// Issue #1574: 貸出中レコード（IsLentRecord=true）でも、旧仕様（Issue #1486）の <c>ShowWarning</c> による
+    /// 削除拒否は行わず、通常の行と同じ認証（「履歴の変更」）を経て削除まで進むこと。
+    /// </summary>
+    /// <remarks>
+    /// 旧 <c>DeleteLedgerRow_LentRecord_DoesNotShowBlockingWarning</c> と <c>_StartsAuthenticationFlow</c> を 1 件にまとめた。
+    /// 旧テストは認証を null（キャンセル）のまま「拒否の警告が出ない」「認証が起動した」だけを見ており、削除まで進むことは
+    /// 表明していなかった。
+    /// </remarks>
     [Fact]
-    public async Task DeleteLedgerRow_LentRecord_DoesNotShowBlockingWarning()
+    public async Task 行編集からの削除_貸出中の行でも拒否せず認証を経て削除すること()
     {
-        // Arrange
-        var lentLedger = new LedgerDto
-        {
-            Id = 101,
-            IsLentRecord = true,
-        };
+        ArrangeLedgerDelete(
+            new Ledger { Id = 42, CardIdm = DeleteConflictCardIdm, IsLentRecord = true },
+            deleted: true);
+        var dto = DeleteTargetDto();
+        dto.IsLentRecord = true;
 
-        // Act
-        await _history.DeleteLedgerRowCommand.ExecuteAsync(lentLedger);
+        await _history.EditLedger(dto);
 
-        // Assert: 旧仕様の「削除不可」警告は出なくなった（Issue #1574）
         _navigationServiceMock.Verify(
             n => n.ShowWarning(It.IsAny<string>(), It.IsAny<string>()),
             Times.Never,
             "Issue #1574: 貸出中レコードでも削除フローへ進めるよう、旧仕様の拒否警告を撤廃");
+        _staffAuthServiceMock.Verify(s => s.RequestAuthenticationAsync("履歴の変更"), Times.Once,
+            "認証は行編集ダイアログを開く前の 1 回（ダイアログの削除で改めて認証しない。03 §3.17）");
+        _ledgerRepositoryMock.Verify(
+            r => r.DeleteAsync(42, It.IsAny<SQLiteTransaction>()), Times.Once,
+            "Issue #1574: 貸出中レコードも復旧手段として削除できること");
     }
 
     /// <summary>
-    /// Issue #1574: 貸出中レコードでも認証フローが起動すること。
-    /// 旧仕様（Issue #1486）では認証前に拒否していたが、本 Issue で復旧手段として認証を経由した削除を許可する。
+    /// 認証がキャンセル（null 返却）された場合、ダイアログを開かず、確認も削除も is_lent のリセットも行わないこと。
     /// </summary>
+    /// <remarks>
+    /// Issue #2104: 認証以外（ダイアログで削除を押す・確認・読み取り・削除）はすべて成功する状態にしてから、
+    /// 認証だけをキャンセルさせる。どこかを未設定のままにすると、認証ゲートを外しても後段で止まり、ゲートの有無を区別できない。
+    /// 旧 <c>DeleteLedgerRow_LentRecord_WhenAuthCancelled_DoesNotDelete</c> と <c>DeleteLedgerRow_認証をキャンセルしたら確認を出さないこと</c> の移設。
+    /// </remarks>
     [Fact]
-    public async Task DeleteLedgerRow_LentRecord_StartsAuthenticationFlow()
+    public async Task 行編集からの削除_認証をキャンセルしたらダイアログを開かず削除しないこと()
     {
-        // Arrange
-        var lentLedger = new LedgerDto
-        {
-            Id = 102,
-            IsLentRecord = true,
-        };
-
-        // Act
-        await _history.DeleteLedgerRowCommand.ExecuteAsync(lentLedger);
-
-        // Assert: 認証は起動する（Mock デフォルトで null 返却 → MessageBox.Show 手前で短絡）
-        _staffAuthServiceMock.Verify(
-            s => s.RequestAuthenticationAsync(It.IsAny<string>()),
-            Times.Once,
-            "Issue #1574: 貸出中レコードでも認証フローを開始する（復旧手段の提供）");
-    }
-
-    /// <summary>
-    /// 認証がキャンセル（null 返却）された場合、貸出中レコードでも削除には進まない。
-    /// </summary>
-    [Fact]
-    public async Task DeleteLedgerRow_LentRecord_WhenAuthCancelled_DoesNotDelete()
-    {
-        // Arrange
-        var lentLedger = new LedgerDto
-        {
-            Id = 103,
-            CardIdm = DeleteConflictCardIdm,
-            IsLentRecord = true,
-        };
-        // Issue #2104: 認証以外（確認・読み取り・削除）はすべて成功する状態にしてから、認証だけを
-        // キャンセルさせる。確認ダイアログを未設定（既定で false）のままにすると、認証ゲートを
-        // 外しても確認の「いいえ」で止まるため、ゲートの有無を区別できなかった。
         ArrangeLedgerDelete(
-            new Ledger { Id = 103, CardIdm = DeleteConflictCardIdm, IsLentRecord = true },
+            new Ledger { Id = 42, CardIdm = DeleteConflictCardIdm, IsLentRecord = true },
             deleted: true);
+        _ledgerRepositoryMock
+            .Setup(r => r.HasOtherLentRecordsAsync(It.IsAny<string>(), It.IsAny<int>()))
+            .ReturnsAsync(false);
         _staffAuthServiceMock
             .Setup(a => a.RequestAuthenticationAsync(It.IsAny<string>()))
             .ReturnsAsync((StaffAuthResult)null);
+        var dto = DeleteTargetDto();
+        dto.IsLentRecord = true;
 
-        // Act
-        await _history.DeleteLedgerRowCommand.ExecuteAsync(lentLedger);
+        await _history.EditLedger(dto);
 
-        // Assert
+        _navigationServiceMock.Verify(
+            n => n.ShowDialogAsync<ICCardManager.Views.Dialogs.LedgerRowEditDialog, LedgerRowEditViewModel>(
+                It.IsAny<Func<LedgerRowEditViewModel, Task>>()),
+            Times.Never,
+            "認証キャンセル時は行編集ダイアログを開かない");
         _navigationServiceMock.Verify(
             d => d.ShowWarningConfirmation(It.IsAny<string>(), It.IsAny<string>()),
             Times.Never,
@@ -2029,24 +2045,99 @@ public class HistoryPanelViewModelTests : IDisposable
     }
 
     /// <summary>
-    /// nullの ledger を渡された場合は、警告も認証も削除も一切起こさないこと（既存ガード仕様）。
+    /// null の ledger を渡された場合は、警告も認証もダイアログも削除も一切起こさないこと（既存ガード仕様）。
     /// </summary>
+    /// <remarks>旧 <c>DeleteLedgerRow_NullLedger_DoesNothing</c> の移設（入口を行編集へ）。</remarks>
     [Fact]
-    public async Task DeleteLedgerRow_NullLedger_DoesNothing()
+    public async Task EditLedger_nullなら認証もダイアログも削除も起こさないこと()
     {
-        // Act
-        await _history.DeleteLedgerRowCommand.ExecuteAsync(null);
+        ArrangeEditDialogPressesDelete();
 
-        // Assert
+        await _history.EditLedgerCommand.ExecuteAsync(null);
+
         _navigationServiceMock.Verify(
             n => n.ShowWarning(It.IsAny<string>(), It.IsAny<string>()),
             Times.Never);
         _staffAuthServiceMock.Verify(
             s => s.RequestAuthenticationAsync(It.IsAny<string>()),
             Times.Never);
+        _navigationServiceMock.Verify(
+            n => n.ShowDialogAsync<ICCardManager.Views.Dialogs.LedgerRowEditDialog, LedgerRowEditViewModel>(
+                It.IsAny<Func<LedgerRowEditViewModel, Task>>()),
+            Times.Never);
         _ledgerRepositoryMock.Verify(
             r => r.DeleteAsync(It.IsAny<int>(), It.IsAny<SQLiteTransaction>()),
             Times.Never);
+    }
+
+    /// <summary>
+    /// Issue #1837: ダイアログ内の確認で「いいえ」を選んだら 6 年保存の台帳を消さず、「はい」なら消すこと。
+    /// </summary>
+    /// <remarks>旧 <c>DeleteLedgerRow_確認の結果に従って削除すること</c> の移設（確認は行編集ダイアログ内のもの）。</remarks>
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task 行編集からの削除_確認の結果に従って削除すること(bool confirmed)
+    {
+        ArrangeLedgerDelete(new Ledger { Id = 42, CardIdm = DeleteConflictCardIdm }, deleted: true);
+        _navigationServiceMock
+            .Setup(d => d.ShowWarningConfirmation(It.IsAny<string>(), "履歴の削除"))
+            .Returns(confirmed);
+
+        await _history.EditLedger(DeleteTargetDto());
+
+        _navigationServiceMock.Verify(
+            d => d.ShowWarningConfirmation(It.IsAny<string>(), "履歴の削除"), Times.Once,
+            "確認は MessageBox 直呼びではなく IDialogService 経由で 1 度だけ行うこと（Issue #1837）");
+        _ledgerRepositoryMock.Verify(
+            r => r.DeleteAsync(It.IsAny<int>(), It.IsAny<SQLiteTransaction>()),
+            confirmed ? Times.Once() : Times.Never(),
+            "確認で「いいえ」を選んだら削除処理へ進まないこと");
+        _operationLogRepositoryMock.Verify(
+            r => r.InsertAsync(It.IsAny<OperationLog>(), It.IsAny<SQLiteTransaction>()),
+            confirmed ? Times.Once() : Times.Never(),
+            "削除しなかったら監査ログも残さないこと");
+    }
+
+    /// <summary>
+    /// Issue #2322: 貸出中の行を削除するときの確認は、表示中のカードが払戻済なら「タッチして返却」を勧めないこと。
+    /// </summary>
+    /// <remarks>
+    /// 文言の出し分けそのものは <c>LedgerRowEditViewModelTests.RequestDelete_貸出中の行の確認文言を払戻済かどうかで出し分けること</c>
+    /// が固定する。ここで表明するのは、履歴パネルが表示中のカードの払戻済をダイアログへ渡していること
+    /// （旧 <c>DeleteLedgerRow_貸出中の行の確認文言を払戻済かどうかで出し分けること</c> は UI から到達しない経路の
+    /// 自前の文言を見ており、この受け渡しは 1 件も表明されていなかった）。
+    /// </remarks>
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task 行編集からの削除_貸出中の行の確認文言を表示中のカードが払戻済かどうかで出し分けること(bool isRefundedCard)
+    {
+        ArrangeLedgerDelete(
+            new Ledger { Id = 42, CardIdm = DeleteConflictCardIdm, Summary = "（貸出中）", IsLentRecord = true },
+            deleted: true);
+        // 一覧の再読込の準備（ArrangeLedgerDelete）が表示中のカードを置き換えるので、その後で設定する
+        _history.HistoryCard = new CardDto { CardIdm = DeleteConflictCardIdm, CardNumber = "H-009", IsRefunded = isRefundedCard };
+        string? message = null;
+        _navigationServiceMock
+            .Setup(d => d.ShowWarningConfirmation(It.IsAny<string>(), "履歴の削除"))
+            .Callback<string, string>((m, _) => message = m)
+            .Returns(false);
+        var dto = DeleteTargetDto();
+        dto.Summary = "（貸出中）";
+        dto.IsLentRecord = true;
+
+        await _history.EditLedger(dto);
+
+        message.Should().NotBeNull();
+        if (isRefundedCard)
+        {
+            message.Should().Contain("払戻済のカードはタッチで返却できない").And.NotContain("タッチして返却操作");
+        }
+        else
+        {
+            message.Should().Contain("タッチして返却操作").And.NotContain("払戻済");
+        }
     }
 
     #endregion
@@ -2219,120 +2310,6 @@ public class HistoryPanelViewModelTests : IDisposable
 
     #endregion
 
-    #region Issue #1837: 履歴削除の確認ダイアログ（MessageBox 直呼びから IDialogService へ移行）
-
-    /*
-     * 移行前は MessageBox.Show の直呼びだったため、この経路の単体テストは 1 件も書けなかった
-     * （実モーダルが開いてテストランナーが止まる）。IDialogService へ移した副次的な利得として、
-     * 「確認で『いいえ』を選んだら 6 年保存の台帳を消さない」というガードを固定できる。
-     */
-
-    [Theory]
-    [InlineData(true)]
-    [InlineData(false)]
-    public async Task DeleteLedgerRow_確認の結果に従って削除すること(bool confirmed)
-    {
-        // Arrange
-        _staffAuthServiceMock
-            .Setup(a => a.RequestAuthenticationAsync(It.IsAny<string>()))
-            .ReturnsAsync(new StaffAuthResult { Idm = "AABBCCDDEEFF0011", StaffName = "田中太郎" });
-        _navigationServiceMock
-            .Setup(d => d.ShowWarningConfirmation(It.IsAny<string>(), "履歴の削除"))
-            .Returns(confirmed);
-        _ledgerRepositoryMock
-            .Setup(r => r.GetByIdAsync(It.IsAny<int>()))
-            .ReturnsAsync((Ledger)null);
-
-        // Issue #1944: 読み取りが null（他 PC が先に削除）でも無言で戻らず、一覧を再読込して
-        // 競合を案内するようになった。後段のダッシュボード更新・警告再チェックはメイン画面への要求で、
-        // 記録用ホスト（_host）が受けるため準備は要らない（Issue #2159）。
-        // 本テストの表明（確認の結果に従って GetByIdAsync まで進むか）は変えていない。
-        _ledgerRepositoryMock
-            .Setup(r => r.GetAllLatestBalancesAsync())
-            .ReturnsAsync(new Dictionary<string, (int Balance, DateTime? LastUsageDate)>());
-
-        var dto = new LedgerDto
-        {
-            Id = 42,
-            Date = new DateTime(2026, 1, 10),
-            DateDisplay = "R8.1.10",
-            Summary = "鉄道（天神～博多）",
-            Balance = 2300
-        };
-
-        // Act
-        await _history.DeleteLedgerRow(dto);
-
-        // Assert: 確認は IDialogService 経由で 1 度だけ行う
-        _navigationServiceMock.Verify(
-            d => d.ShowWarningConfirmation(It.IsAny<string>(), "履歴の削除"), Times.Once,
-            "確認は MessageBox 直呼びではなく IDialogService 経由で行うこと（Issue #1837）");
-
-        // 「いいえ」なら対象行の読み取りにすら進まない（＝何も消さない）
-        _ledgerRepositoryMock.Verify(
-            r => r.GetByIdAsync(It.IsAny<int>()),
-            confirmed ? Times.Once() : Times.Never(),
-            "確認で「いいえ」を選んだら削除処理へ進まないこと");
-    }
-
-    /// <summary>
-    /// Issue #2322: 履歴一覧から貸出中の行を削除するときも、払戻済のカードでは「タッチして返却」を勧めないこと
-    /// </summary>
-    [Theory]
-    [InlineData(true)]
-    [InlineData(false)]
-    public async Task DeleteLedgerRow_貸出中の行の確認文言を払戻済かどうかで出し分けること(bool isRefundedCard)
-    {
-        _history.HistoryCard = new CardDto { CardIdm = "0123456789ABCDEF", CardNumber = "H-009", IsRefunded = isRefundedCard };
-        _staffAuthServiceMock
-            .Setup(a => a.RequestAuthenticationAsync(It.IsAny<string>()))
-            .ReturnsAsync(new StaffAuthResult { Idm = "AABBCCDDEEFF0011", StaffName = "田中太郎" });
-        string? message = null;
-        _navigationServiceMock
-            .Setup(d => d.ShowWarningConfirmation(It.IsAny<string>(), "履歴の削除"))
-            .Callback<string, string>((m, _) => message = m)
-            .Returns(false);
-
-        await _history.DeleteLedgerRow(new LedgerDto
-        {
-            Id = 42,
-            CardIdm = "0123456789ABCDEF",
-            DateDisplay = "R7.3.18",
-            Summary = "（貸出中）",
-            Balance = 1000,
-            IsLentRecord = true,
-        });
-
-        message.Should().NotBeNull();
-        if (isRefundedCard)
-        {
-            message.Should().Contain("払戻済のカードはタッチで返却できない").And.NotContain("タッチして返却操作");
-        }
-        else
-        {
-            message.Should().Contain("タッチして返却操作").And.NotContain("払戻済");
-        }
-    }
-
-    /// <summary>
-    /// 認証をキャンセルした場合は確認ダイアログを出さないこと（対の表明）。
-    /// これが無いと「認証を無視して必ず確認する」実装でも上のテストは緑になる。
-    /// </summary>
-    [Fact]
-    public async Task DeleteLedgerRow_認証をキャンセルしたら確認を出さないこと()
-    {
-        _staffAuthServiceMock
-            .Setup(a => a.RequestAuthenticationAsync(It.IsAny<string>()))
-            .ReturnsAsync((StaffAuthResult)null);
-
-        await _history.DeleteLedgerRow(new LedgerDto { Id = 42 });
-
-        _navigationServiceMock.Verify(
-            d => d.ShowWarningConfirmation(It.IsAny<string>(), It.IsAny<string>()), Times.Never);
-    }
-
-    #endregion
-
     #region 履歴削除の競合検出（Issue #1944）
 
     private const string DeleteConflictCardIdm = "0123456789ABCDEF";
@@ -2343,14 +2320,15 @@ public class HistoryPanelViewModelTests : IDisposable
     private const string DeleteConflictTarget = "履歴「R8.1.10 鉄道（天神～博多）」";
 
     /// <summary>
-    /// 履歴削除フローを「認証済み・確認済み」の状態まで進め、対象行の読み取り結果と
+    /// 行編集からの削除を「認証済み・確認済み」の状態まで進め、削除の時点の対象行の読み取り結果と
     /// DELETE の影響行数を指定する。戻り値は一覧再読込の要求ページ記録（再読込の観測用）。
     /// </summary>
     /// <param name="fullLedger">
-    /// <c>GetByIdAsync</c> が返す行。<c>null</c> は「読み取りの時点で既に他 PC が削除済み」を表す
+    /// ダイアログを閉じた後の <c>GetByIdAsync</c> が返す行。<c>null</c> は「ダイアログを開いている間に他 PC が削除した」を表す
+    /// （ダイアログで削除を押す操作は <see cref="ArrangeEditDialogPressesDelete"/> で別に仕込む）
     /// </param>
     /// <param name="deleted"><c>DeleteAsync</c> の戻り値。<c>false</c> ＝影響行数 0 ＝競合</param>
-    private List<int> ArrangeLedgerDelete(Ledger fullLedger, bool deleted)
+    private List<int> ArrangeLedgerDelete(Ledger? fullLedger, bool deleted)
     {
         _staffAuthServiceMock
             .Setup(a => a.RequestAuthenticationAsync(It.IsAny<string>()))
@@ -2358,9 +2336,13 @@ public class HistoryPanelViewModelTests : IDisposable
         _navigationServiceMock
             .Setup(d => d.ShowWarningConfirmation(It.IsAny<string>(), "履歴の削除"))
             .Returns(true);
+        // Issue #2475: 行編集を開く前の確認（#2378）とダイアログの初期化は行が有る状態で読み、
+        // ダイアログを閉じた後の削除の読み取りだけを fullLedger にする（開いている間に他 PC が削除した競合を表せる）
+        var openedRow = fullLedger ?? new Ledger { Id = 42, CardIdm = DeleteConflictCardIdm };
         _ledgerRepositoryMock
             .Setup(r => r.GetByIdAsync(It.IsAny<int>()))
-            .ReturnsAsync(fullLedger);
+            .ReturnsAsync(() => _editDialogClosed ? fullLedger : openedRow);
+        ArrangeEditDialogPressesDelete();
         _ledgerRepositoryMock
             .Setup(r => r.DeleteAsync(It.IsAny<int>(), It.IsAny<SQLiteTransaction>()))
             .ReturnsAsync(deleted);
@@ -2426,7 +2408,8 @@ public class HistoryPanelViewModelTests : IDisposable
         await _history.EditLedger(DeleteTargetDto());
 
         _navigationServiceMock.Verify(
-            n => n.ShowDialogAsync(It.IsAny<Func<ICCardManager.Views.Dialogs.LedgerRowEditDialog, Task>>()), Times.Never,
+            n => n.ShowDialogAsync<ICCardManager.Views.Dialogs.LedgerRowEditDialog, LedgerRowEditViewModel>(
+                It.IsAny<Func<LedgerRowEditViewModel, Task>>()), Times.Never,
             "行が無いのに空のダイアログを開かない");
         message.Should().Be(ConcurrencyConflictMessage.ForOpen(DeleteConflictTarget, "履歴一覧"));
         title.Should().Be("履歴行の修正", "開けなかった画面の名前（行編集ダイアログのタイトル）で示す");
@@ -2451,7 +2434,8 @@ public class HistoryPanelViewModelTests : IDisposable
         await _history.EditLedger(DeleteTargetDto());
 
         _navigationServiceMock.Verify(
-            n => n.ShowDialogAsync(It.IsAny<Func<ICCardManager.Views.Dialogs.LedgerRowEditDialog, Task>>()), Times.Once);
+            n => n.ShowDialogAsync<ICCardManager.Views.Dialogs.LedgerRowEditDialog, LedgerRowEditViewModel>(
+                It.IsAny<Func<LedgerRowEditViewModel, Task>>()), Times.Once);
         _navigationServiceMock.Verify(
             n => n.ShowError(It.IsAny<string>(), It.IsAny<string>()), Times.Never);
     }
@@ -2621,13 +2605,13 @@ public class HistoryPanelViewModelTests : IDisposable
     /// これが無いと「認証してもセッションを開始しない（常に GUI 操作）」実装でも下のテストが緑になる。
     /// </summary>
     [Fact]
-    public async Task DeleteLedgerRow_認証した削除は認証した職員の操作として記録されること()
+    public async Task 行編集からの削除_認証した削除は認証した職員の操作として記録されること()
     {
         ArrangeLedgerDelete(new Ledger { Id = 42, CardIdm = DeleteConflictCardIdm }, deleted: true);
         ArrangeAuthenticationStartingSession();
         var logs = CaptureOperationLogs();
 
-        await _history.DeleteLedgerRow(DeleteTargetDto());
+        await _history.EditLedger(DeleteTargetDto());
 
         logs.Should().ContainSingle(l => l.Action == OperationLogger.Actions.Delete)
             .Which.Should().Match<OperationLog>(l =>
@@ -2680,14 +2664,14 @@ public class HistoryPanelViewModelTests : IDisposable
     /// <c>using</c> を外す・破棄を無効にする変異で赤になる。
     /// </remarks>
     [Fact]
-    public async Task DeleteLedgerRow_認証した削除の後の認証の無い操作はGUI操作として記録されること()
+    public async Task 行編集からの削除_認証した削除の後の認証の無い操作はGUI操作として記録されること()
     {
         ArrangeLedgerDelete(new Ledger { Id = 42, CardIdm = DeleteConflictCardIdm }, deleted: true);
         ArrangeAuthenticationStartingSession();
         var logs = CaptureOperationLogs();
         var openGateAndLog = StartProbeInOperationFlowAtConfirmation(confirmed: true, logs);
 
-        await _history.DeleteLedgerRow(DeleteTargetDto());
+        await _history.EditLedger(DeleteTargetDto());
         var afterOperation = await openGateAndLog();
 
         afterOperation.Should().Match<OperationLog>(l =>
@@ -2700,7 +2684,7 @@ public class HistoryPanelViewModelTests : IDisposable
     /// 旧実装（シングルトンのフィールド）では、待ち時間中の認証の無い操作が認証した職員の名前で記録された。
     /// </summary>
     [Fact]
-    public async Task DeleteLedgerRow_削除の待ち時間中に別の流れで始めた認証の無い操作はGUI操作として記録されること()
+    public async Task 行編集からの削除_削除の待ち時間中に別の流れで始めた認証の無い操作はGUI操作として記録されること()
     {
         ArrangeLedgerDelete(new Ledger { Id = 42, CardIdm = DeleteConflictCardIdm }, deleted: true);
         ArrangeAuthenticationStartingSession();
@@ -2708,21 +2692,30 @@ public class HistoryPanelViewModelTests : IDisposable
 
         var reading = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
         var release = new TaskCompletionSource<Ledger?>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var row = new Ledger { Id = 42, CardIdm = DeleteConflictCardIdm };
         _ledgerRepositoryMock
             .Setup(r => r.GetByIdAsync(It.IsAny<int>()))
             .Returns(() =>
             {
+                // 待たせるのはダイアログを閉じた後の削除の読み取り（開く前の確認・ダイアログの初期化は待たせない）
+                if (!_editDialogClosed)
+                {
+                    return Task.FromResult<Ledger?>(row);
+                }
                 reading.TrySetResult(true);
                 return release.Task;
             });
 
-        var deleting = _history.DeleteLedgerRow(DeleteTargetDto());
-        await reading.Task;
+        var deleting = _history.EditLedger(DeleteTargetDto());
+        // 削除の読み取りへ進まない実装（削除要求を無視する等）でも待ち続けないよう、操作の終了とどちらか早い方を待つ
+        // （Issue #2475 の変異検査で、読み取りだけを待つ形はテストランナーごと止まった）
+        await Task.WhenAny(reading.Task, deleting);
+        reading.Task.IsCompleted.Should().BeTrue("ダイアログで削除を押したら、削除の読み取りまで進むこと");
 
         var card = new IcCard { CardIdm = DeleteConflictCardIdm, CardType = "はやかけん", CardNumber = "H-001" };
         await _operationLoggerMock.Object.LogCardUpdateAsync(card, card);
 
-        release.SetResult(new Ledger { Id = 42, CardIdm = DeleteConflictCardIdm });
+        release.SetResult(row);
         await deleting;
 
         logs.Should().ContainSingle(l => l.Action == OperationLogger.Actions.Update)
@@ -2744,28 +2737,34 @@ public class HistoryPanelViewModelTests : IDisposable
     [InlineData("確認でいいえ")]
     [InlineData("対象行が無い")]
     [InlineData("例外")]
-    public async Task DeleteLedgerRow_どの出口でも認証のセッションを残さないこと(string exit)
+    public async Task 行編集からの削除_どの出口でも認証のセッションを残さないこと(string exit)
     {
         ArrangeLedgerDelete(new Ledger { Id = 42, CardIdm = DeleteConflictCardIdm }, deleted: true);
         ArrangeAuthenticationStartingSession();
         var logs = CaptureOperationLogs();
         var openGateAndLog = StartProbeInOperationFlowAtConfirmation(confirmed: exit != "確認でいいえ", logs);
+        var row = new Ledger { Id = 42, CardIdm = DeleteConflictCardIdm };
         switch (exit)
         {
             case "対象行が無い":
-                _ledgerRepositoryMock.Setup(r => r.GetByIdAsync(It.IsAny<int>())).ReturnsAsync((Ledger?)null);
+                // ダイアログを開いている間に他 PC が削除した（開く前の確認・初期化では行が有る）
+                _ledgerRepositoryMock
+                    .Setup(r => r.GetByIdAsync(It.IsAny<int>()))
+                    .ReturnsAsync(() => _editDialogClosed ? null : row);
                 break;
             case "例外":
                 _ledgerRepositoryMock
                     .Setup(r => r.GetByIdAsync(It.IsAny<int>()))
-                    .ThrowsAsync(new InvalidOperationException("読み取りに失敗"));
+                    .Returns(() => _editDialogClosed
+                        ? Task.FromException<Ledger?>(new InvalidOperationException("読み取りに失敗"))
+                        : Task.FromResult<Ledger?>(row));
                 break;
         }
 
-        await Record.ExceptionAsync(() => _history.DeleteLedgerRow(DeleteTargetDto()));
+        await Record.ExceptionAsync(() => _history.EditLedger(DeleteTargetDto()));
         var afterOperation = await openGateAndLog();
 
-        _staffAuthServiceMock.Verify(a => a.RequestAuthenticationAsync("履歴の削除"), Times.Once);
+        _staffAuthServiceMock.Verify(a => a.RequestAuthenticationAsync("履歴の変更"), Times.Once);
         afterOperation.OperatorIdm.Should().Be(OperationLogger.GuiOperator.Idm,
             "認証した操作を終えたら（成功・中止・失敗を問わず）、操作から派生した処理にも認証を残さない");
     }
@@ -2786,7 +2785,7 @@ public class HistoryPanelViewModelTests : IDisposable
     /// 無言にはせず Warning ログ（本番のログファイルに出るレベル。Issue #1716）で痕跡を残す。
     /// </remarks>
     [Fact]
-    public async Task DeleteLedgerRow_貸出状態リセットが0行でも削除を失敗として案内しないこと()
+    public async Task 行編集からの削除_貸出状態リセットが0行でも削除を失敗として案内しないこと()
     {
         var loggerMock = new Mock<ILogger<HistoryPanelViewModel>>();
         var history = CreateHistoryPanel(loggerMock.Object);
@@ -2801,7 +2800,7 @@ public class HistoryPanelViewModelTests : IDisposable
                 It.IsAny<string>(), It.IsAny<bool>(), It.IsAny<DateTime?>(), It.IsAny<string>()))
             .ReturnsAsync(false);
 
-        await history.DeleteLedgerRow(DeleteTargetDto());
+        await history.EditLedger(DeleteTargetDto());
 
         _navigationServiceMock.Verify(
             d => d.ShowError(It.IsAny<string>(), It.IsAny<string>()),
@@ -2827,7 +2826,7 @@ public class HistoryPanelViewModelTests : IDisposable
     /// 起動のたびにログが肥大化する退行に気付けない（Issue #1730 の方針）。
     /// </remarks>
     [Fact]
-    public async Task DeleteLedgerRow_貸出状態リセットが成功したらWarningを出さないこと()
+    public async Task 行編集からの削除_貸出状態リセットが成功したらWarningを出さないこと()
     {
         var loggerMock = new Mock<ILogger<HistoryPanelViewModel>>();
         var history = CreateHistoryPanel(loggerMock.Object);
@@ -2842,7 +2841,7 @@ public class HistoryPanelViewModelTests : IDisposable
                 It.IsAny<string>(), It.IsAny<bool>(), It.IsAny<DateTime?>(), It.IsAny<string>()))
             .ReturnsAsync(true);
 
-        await history.DeleteLedgerRow(DeleteTargetDto());
+        await history.EditLedger(DeleteTargetDto());
 
         _cardRepositoryMock.Verify(
             c => c.UpdateLentStatusAsync(DeleteConflictCardIdm, false, null, null),
@@ -2863,11 +2862,11 @@ public class HistoryPanelViewModelTests : IDisposable
     /// 6 年保存の監査ログへ「削除した」と記録してはならない。
     /// </summary>
     [Fact]
-    public async Task DeleteLedgerRow_削除が0行なら監査ログを記録しないこと()
+    public async Task 行編集からの削除_削除が0行なら監査ログを記録しないこと()
     {
         ArrangeLedgerDelete(new Ledger { Id = 42, CardIdm = DeleteConflictCardIdm }, deleted: false);
 
-        await _history.DeleteLedgerRow(DeleteTargetDto());
+        await _history.EditLedger(DeleteTargetDto());
 
         _operationLogRepositoryMock.Verify(
             r => r.InsertAsync(It.IsAny<OperationLog>(), It.IsAny<SQLiteTransaction>()),
@@ -2881,7 +2880,7 @@ public class HistoryPanelViewModelTests : IDisposable
     /// （<c>.claude/rules/development-conventions.md</c> Issue #1760）。
     /// </summary>
     [Fact]
-    public async Task DeleteLedgerRow_削除が0行ならis_lentを解除しないこと()
+    public async Task 行編集からの削除_削除が0行ならis_lentを解除しないこと()
     {
         ArrangeLedgerDelete(
             new Ledger { Id = 42, CardIdm = DeleteConflictCardIdm, IsLentRecord = true },
@@ -2890,7 +2889,7 @@ public class HistoryPanelViewModelTests : IDisposable
             .Setup(r => r.HasOtherLentRecordsAsync(It.IsAny<string>(), It.IsAny<int>()))
             .ReturnsAsync(false);
 
-        await _history.DeleteLedgerRow(DeleteTargetDto());
+        await _history.EditLedger(DeleteTargetDto());
 
         _cardRepositoryMock.Verify(
             c => c.UpdateLentStatusAsync(
@@ -2904,7 +2903,7 @@ public class HistoryPanelViewModelTests : IDisposable
     /// （文言が「再読み込みしました」と述べる以上、先に再読込しないと案内どおりに操作できない。Issue #1753）。
     /// </summary>
     [Fact]
-    public async Task DeleteLedgerRow_削除が0行なら一覧を再読込してから競合を案内すること()
+    public async Task 行編集からの削除_削除が0行なら一覧を再読込してから競合を案内すること()
     {
         var requestedPages = ArrangeLedgerDelete(
             new Ledger { Id = 42, CardIdm = DeleteConflictCardIdm }, deleted: false);
@@ -2919,7 +2918,7 @@ public class HistoryPanelViewModelTests : IDisposable
                 reloadCountAtNotification = requestedPages.Count;
             });
 
-        await _history.DeleteLedgerRow(DeleteTargetDto());
+        await _history.EditLedger(DeleteTargetDto());
 
         message.Should().NotBeNull("競合を無言で握りつぶすと、削除できたように見える（Issue #1944）");
         message.Should().Be(
@@ -2938,11 +2937,11 @@ public class HistoryPanelViewModelTests : IDisposable
     /// （<c>.claude/rules/error-messages.md</c>「同じ制約違反はすべての経路で同じ例外へ変換する」と同じ形）。
     /// </remarks>
     [Fact]
-    public async Task DeleteLedgerRow_対象行が既に消えていたら競合を案内すること()
+    public async Task 行編集からの削除_対象行が既に消えていたら競合を案内すること()
     {
         ArrangeLedgerDelete(fullLedger: null, deleted: false);
 
-        await _history.DeleteLedgerRow(DeleteTargetDto());
+        await _history.EditLedger(DeleteTargetDto());
 
         _navigationServiceMock.Verify(
             d => d.ShowError(
@@ -2961,11 +2960,11 @@ public class HistoryPanelViewModelTests : IDisposable
     /// これが無いと「削除を無条件に競合として扱う」実装でも上の 4 件は緑になる。
     /// </summary>
     [Fact]
-    public async Task DeleteLedgerRow_削除できたら監査ログを記録し競合を案内しないこと()
+    public async Task 行編集からの削除_削除できたら監査ログを記録し競合を案内しないこと()
     {
         ArrangeLedgerDelete(new Ledger { Id = 42, CardIdm = DeleteConflictCardIdm }, deleted: true);
 
-        await _history.DeleteLedgerRow(DeleteTargetDto());
+        await _history.EditLedger(DeleteTargetDto());
 
         _operationLogRepositoryMock.Verify(
             r => r.InsertAsync(It.IsAny<OperationLog>(), It.IsAny<SQLiteTransaction>()),
@@ -2981,7 +2980,7 @@ public class HistoryPanelViewModelTests : IDisposable
     /// 対の表明: 貸出中レコードを実際に削除できたときは is_lent を解除すること（Issue #1574 の維持）。
     /// </summary>
     [Fact]
-    public async Task DeleteLedgerRow_貸出中レコードを削除できたらis_lentを解除すること()
+    public async Task 行編集からの削除_貸出中レコードを削除できたらis_lentを解除すること()
     {
         ArrangeLedgerDelete(
             new Ledger { Id = 42, CardIdm = DeleteConflictCardIdm, IsLentRecord = true },
@@ -2990,7 +2989,7 @@ public class HistoryPanelViewModelTests : IDisposable
             .Setup(r => r.HasOtherLentRecordsAsync(It.IsAny<string>(), It.IsAny<int>()))
             .ReturnsAsync(false);
 
-        await _history.DeleteLedgerRow(DeleteTargetDto());
+        await _history.EditLedger(DeleteTargetDto());
 
         _cardRepositoryMock.Verify(
             c => c.UpdateLentStatusAsync(DeleteConflictCardIdm, false, null, null),
@@ -3072,7 +3071,7 @@ public class HistoryPanelViewModelTests : IDisposable
             .Setup(c => c.UpdateLentStatusAsync(DeleteConflictCardIdm, false, null, null))
             .ReturnsAsync(true);
 
-        await _history.DeleteLedgerRow(DeleteTargetDto());
+        await _history.EditLedger(DeleteTargetDto());
 
         _host.Calls.Should().Equal(
             new[]
@@ -3106,7 +3105,7 @@ public class HistoryPanelViewModelTests : IDisposable
             .Setup(c => c.UpdateLentStatusAsync(DeleteConflictCardIdm, false, null, null))
             .ReturnsAsync(updated);
 
-        await _history.DeleteLedgerRow(DeleteTargetDto());
+        await _history.EditLedger(DeleteTargetDto());
 
         _host.CountOf(RecordingHistoryPanelHost.RefreshLentCardsCall).Should().Be(0);
         _host.CountOf(RecordingHistoryPanelHost.RefreshDashboardCall).Should().Be(1,

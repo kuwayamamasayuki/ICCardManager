@@ -1825,7 +1825,7 @@ namespace ICCardManager.ViewModels
         /// 編集対象の行のカードが払戻済か（Issue #2322）。貸出中の行を削除するときの確認文言を出し分ける。
         /// </summary>
         /// <remarks>
-        /// 呼び出し元（履歴一覧）が表示中のカードから設定する（<c>LedgerRowEditDialog.SetRefundedCard</c>）。
+        /// 呼び出し元（履歴一覧。<c>HistoryPanelViewModel.EditLedgerWithAuthAsync</c>）が表示中のカードから設定する。
         /// 払戻済のカードはタッチで返却できないため、「タッチして返却するのが正しい復旧方法」と案内しない。
         /// </remarks>
         public bool IsRefundedCard { get; set; }
@@ -1834,7 +1834,8 @@ namespace ICCardManager.ViewModels
         /// 削除を要求（Issue #750 / Issue #1574）。
         /// </summary>
         /// <remarks>
-        /// 実際の削除は呼び出し元（MainViewModel）で行う。ダイアログは確認後に閉じる。
+        /// 実際の削除は呼び出し元（<c>HistoryPanelViewModel.EditLedgerWithAuthAsync</c>。認証はダイアログを開く前の
+        /// 「履歴の変更」のスコープ）で行う。ダイアログは確認後に閉じる。
         /// 貸出中レコード（Issue #1574）の場合は専用の警告メッセージを表示する。
         /// </remarks>
         [RelayCommand]

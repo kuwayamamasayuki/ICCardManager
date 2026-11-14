@@ -1007,7 +1007,8 @@ public partial class ReportViewModel : ViewModelBase
                             .Select(f => $"・{f.CardName}: {f.ErrorMessage}")
                             .ToList();
 
-                        var abortMessage = result.DetailedErrorMessage ?? result.ErrorMessage;
+                        // 中断の原因になったカード自身の失敗（failedCards の末尾。ErrorMessage が無ければその代替文言）へ倒す
+                        var abortMessage = result.DetailedErrorMessage ?? failedCards[failedCards.Count - 1].ErrorMessage;
                         if (precedingFailures.Count > 0)
                         {
                             abortMessage += "\n\n中断より前に、以下のカードで帳票作成に失敗しています:\n"

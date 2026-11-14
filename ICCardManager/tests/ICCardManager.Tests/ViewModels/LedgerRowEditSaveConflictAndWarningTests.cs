@@ -317,12 +317,12 @@ public class LedgerRowEditSaveConflictAndWarningTests : IDisposable
 
         // 「NeedsHistoryReload を見る分岐」と、その分岐の中で一覧を読み直すことを対で表明する
         Regex.IsMatch(code,
-                @"capturedEditDialog\?\.NeedsHistoryReload\s*==\s*true\s*\)\s*\{\s*await\s+LoadHistoryLedgersAsync\(\)",
+                @"editor\?\.NeedsHistoryReload\s*==\s*true\s*\)\s*\{\s*await\s+LoadHistoryLedgersAsync\(\)",
                 RegexOptions.Singleline)
             .Should().BeTrue("競合の案内は「閉じると履歴一覧を再読み込みします」と述べている");
 
         // 保存できたとき（dialogResult == true）は、競合の再読込より保存の分岐を優先する（「保存して次へ」へ進む）
-        Regex.IsMatch(code, @"dialogResult\s*!=\s*true\s*&&\s*capturedEditDialog\?\.NeedsHistoryReload\s*==\s*true")
+        Regex.IsMatch(code, @"dialogResult\s*!=\s*true\s*&&\s*editor\?\.NeedsHistoryReload\s*==\s*true")
             .Should().BeTrue("競合の後に保存し直して成功した場合に、再読込の分岐が保存の分岐を奪わない");
     }
 

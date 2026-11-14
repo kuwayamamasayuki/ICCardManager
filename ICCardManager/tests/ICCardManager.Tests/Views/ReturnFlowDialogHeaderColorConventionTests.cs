@@ -180,9 +180,13 @@ public class ReturnFlowDialogHeaderColorConventionTests
     /// <para>
     /// 型引数が <c>Dialog</c> で終わることを要求して、無関係なジェネリック呼び出しを拾わない。
     /// </para>
+    /// <para>
+    /// ViewModel を初期化する形（<c>ShowDialogAsync&lt;TDialog, TViewModel&gt;</c>、Issue #2475）は 2 つ目の型引数を持つ。
+    /// 1 つ目がダイアログなので、2 つ目を読み飛ばして拾う（拾えないと、その形で開いたダイアログが検査から静かに落ちる）。
+    /// </para>
     /// </remarks>
     private static readonly Regex ShowDialogRegex = new(
-        @"(?:ShowDialogAsync|GetRequiredService|GetService)<(?:Views\.Dialogs\.)?(?<dialog>\w+Dialog)>");
+        @"(?:ShowDialogAsync|GetRequiredService|GetService)<(?:Views\.Dialogs\.)?(?<dialog>\w+Dialog)(?:\s*,\s*[\w.]+)?>");
 
     /// <summary>
     /// <paramref name="entryPoint"/> から到達するメソッドを推移的に辿り、開かれるダイアログ名を集める。

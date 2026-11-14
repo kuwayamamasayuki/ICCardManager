@@ -1,3 +1,4 @@
+#nullable enable
 using System;
 using System.Threading.Tasks;
 using System.Windows;
@@ -23,7 +24,7 @@ namespace ICCardManager.Services
         /// 再現できないため、本メソッドを差し替えて配線だけを検証できるようにしている
         /// （<c>ConnectionDiagnosticsService.ProbeFolderWriteAccess</c> と同じ理由）。
         /// </remarks>
-        protected virtual Window ResolveOwner() => Common.DialogOwnerResolver.Resolve();
+        protected virtual Window? ResolveOwner() => Common.DialogOwnerResolver.Resolve();
 
         /// <summary>
         /// MessageBox を実際に表示する（テスト用の継ぎ目。<see cref="ResolveOwner"/> と同じ理由）
@@ -34,7 +35,7 @@ namespace ICCardManager.Services
         /// 取りこぼしが起きるためアプリ全体でそこ 1 か所に集約している。
         /// </remarks>
         protected virtual MessageBoxResult ShowMessageBoxCore(
-            Window owner, string message, string title, MessageBoxButton button, MessageBoxImage image)
+            Window? owner, string message, string title, MessageBoxButton button, MessageBoxImage image)
         {
             return Common.OwnedMessageBox.Show(owner, message, title, button, image);
         }
@@ -118,7 +119,7 @@ namespace ICCardManager.Services
         }
 
         /// <inheritdoc/>
-        public bool? ShowDialog<TDialog>(Action<TDialog> configure = null) where TDialog : Window
+        public bool? ShowDialog<TDialog>(Action<TDialog>? configure = null) where TDialog : Window
         {
             var dialog = _serviceProvider.GetRequiredService<TDialog>();
             dialog.Owner = Application.Current.MainWindow;
@@ -127,7 +128,7 @@ namespace ICCardManager.Services
         }
 
         /// <inheritdoc/>
-        public async Task<bool?> ShowDialogAsync<TDialog>(Func<TDialog, Task> configure = null) where TDialog : Window
+        public async Task<bool?> ShowDialogAsync<TDialog>(Func<TDialog, Task>? configure = null) where TDialog : Window
         {
             var dialog = _serviceProvider.GetRequiredService<TDialog>();
             dialog.Owner = Application.Current.MainWindow;
@@ -137,5 +138,11 @@ namespace ICCardManager.Services
             }
             return dialog.ShowDialog();
         }
+
+        /// <inheritdoc/>
+        public Task<bool?> ShowDialogAsync<TDialog, TViewModel>(Func<TViewModel, Task> configure)
+            where TDialog : Window, IViewModelDialog<TViewModel>
+            where TViewModel : class
+            => ShowDialogAsync<TDialog>(dialog => configure(dialog.ViewModel));
     }
 }
