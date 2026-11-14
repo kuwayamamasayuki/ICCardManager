@@ -959,7 +959,7 @@ namespace ICCardManager.Data
             await ThreadPoolSwitch.When(fromUiThread).ConfigureAwait(false);
             var heldUiGate = await EnterUiOriginGateAsync(fromUiThread, ct).ConfigureAwait(false);
             // Issue #2487: UI スレッド以外からの呼び出しでは、ここまでの 2 つの await は同期的に完了し、最初に未完了になり得るのは
-            // 次のセマフォの待機だけ。DbContextConnectionLeaseTests の「セマフォ待機をキャンセル可能なこと」は、未完了で戻ったことを
+            // 次のセマフォの待機だけ（入口の CompleteAfterCurrentUiTurn も、UI スレッド以外ではこのメソッドの Task をそのまま返す）。DbContextConnectionLeaseTests の「セマフォ待機をキャンセル可能なこと」は、未完了で戻ったことを
             // 「セマフォの待機に入った」とみなしてから取り消すので、この前に別の未完了の待機を足すときはそのテストも見直すこと
             try
             {

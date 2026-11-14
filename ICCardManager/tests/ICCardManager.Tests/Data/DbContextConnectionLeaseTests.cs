@@ -287,9 +287,12 @@ public class DbContextConnectionLeaseTests : IDisposable
     /// 呼んだ <see cref="DbContext.BeginTransactionAsync"/> が未完了で戻った時点で、セマフォの待機は登録済み（UI スレッド
     /// 以外からの呼び出しでは、セマフォより前の待機点は同期的に完了する。<c>DbContext.BeginTransactionCoreAsync</c> のコメント参照）。
     /// それを確かめてから取り消す。
-    /// 例外の型は派生型も許す（取り消しを表すのは <see cref="OperationCanceledException"/> とその派生型で、どちらを投げるかは
-    /// BCL の内部の事情）。代わりに、取り消したのがこのトークンであることを表明する。
-    /// 失敗の理由には観測値（待ち始めた時刻・戻った時刻と状態・取り消した時刻・待機が終わった時刻と結果）を載せる（#2476 と同じ考え方）。
+    /// 順序を固定したので、取り消しはセマフォの待機中に届き、BCL（<c>SemaphoreSlim</c> の <c>ThrowIfCancellationRequested</c>）が
+    /// <see cref="OperationCanceledException"/> そのものを投げる。型は完全一致で表明する — <see cref="TaskCanceledException"/> なら、
+    /// セマフォより前の待機点で取り消された（未完了で戻ったのがセマフォの待機ではなかった）ことを示す。あわせて、取り消したのが
+    /// このトークンであることを表明する。
+    /// 失敗の理由には観測値（保持の取得・待ち始めた時刻・戻った時刻と状態・取り消した時刻・待機が終わった時刻と結果・例外のトークン）を
+    /// 載せる（#2476 と同じ考え方）。
     /// </para>
     /// </remarks>
     [Fact]
@@ -331,8 +334,10 @@ public class DbContextConnectionLeaseTests : IDisposable
                 "待機は取り消しで終わり、トランザクションは開かれないこと（観測: {0}）", string.Join("・", observations));
 
             Func<Task> act = () => waiting;
-            var canceled = (await act.Should().ThrowAsync<OperationCanceledException>(
-                    "取り消しは OperationCanceledException（派生型を含む）で伝わること（観測: {0}）", string.Join("・", observations)))
+            var canceled = (await act.Should().ThrowExactlyAsync<OperationCanceledException>(
+                    "取り消しはセマフォの待機中に届き、OperationCanceledException そのものになること。TaskCanceledException なら、" +
+                    "セマフォより前の待機点で取り消された（BeginTransactionCoreAsync のコメントの前提が崩れた）（観測: {0}）",
+                    string.Join("・", observations)))
                 .Which;
 
             // CancellationToken は食い違っても FluentAssertions の出力が型名だけになるので、見分けられる値を観測値に載せる
