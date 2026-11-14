@@ -1936,6 +1936,425 @@ public class HistoryPanelViewModelTests : IDisposable
 
     #endregion
 
+    #region 行編集ダイアログからの追加（Issue #635 / Issue #2486）
+
+    /*
+     * 履歴行の追加は、履歴一覧の「履歴行を追加」から行う。認証「履歴の追加」の後に利用履歴行編集ダイアログを
+     * 追加モードで開き、保存して閉じたら一覧・ダッシュボード・警告を読み直す。Issue #2486 まで追加モードだけは
+     * Window 側の中継（LedgerRowEditDialog.InitializeForAddAsync）で初期化しており、Window を実体化しないと
+     * 閉じた後の処理を踏めなかった。編集モード（#2475）と同じ継ぎ目で、本物の LedgerRowEditViewModel を使って
+     * 「開く → 入力して保存（またはキャンセル）→ 閉じる」を再現する。
+     */
+
+    /// <summary>
+    /// 履歴行の追加を「認証済み・一覧を読み込み済み」まで進める。戻り値は、読み込みの後の一覧の要求ページ記録。
+    /// </summary>
+    /// <param name="totalCount">一覧の総件数（1 ページ 30 件）</param>
+    /// <param name="page">表示しておくページ</param>
+    private async Task<List<int>> ArrangeLedgerAddAsync(int totalCount = 2, int page = 1)
+    {
+        _staffAuthServiceMock
+            .Setup(a => a.RequestAuthenticationAsync(It.IsAny<string>()))
+            .ReturnsAsync(new StaffAuthResult { Idm = "AABBCCDDEEFF0011", StaffName = "田中太郎" });
+        _ledgerRepositoryMock
+            .Setup(r => r.InsertAsync(It.IsAny<Ledger>(), It.IsAny<SQLiteTransaction>()))
+            .ReturnsAsync(100);
+        var requestedPages = ArrangeHistoryPaging(_ => totalCount, pageSize: 30);
+        _history.HistoryCurrentPage = page;
+        await _history.LoadHistoryLedgersAsync();
+        _history.HistoryCurrentPage.Should().Be(page, "前提: 指定したページを表示していること");
+        _history.HistoryLedgers.Should().NotBeEmpty("前提: 追加の前に一覧が表示されていること");
+
+        // ここから後の読み直しだけを観測する
+        requestedPages.Clear();
+        _host.Calls.Clear();
+        _ledgerRepositoryMock.Invocations.Clear();
+        return requestedPages;
+    }
+
+    /// <summary>
+    /// 行編集ダイアログで職員が行う操作を仕込む（追加・編集のどちらのモードで開いても同じ代役が受ける）。
+    /// </summary>
+    private List<LedgerRowEditViewModel> ArrangeEditDialog(Func<LedgerRowEditViewModel, Task> userAction)
+        => LedgerRowEditDialogStub.Arrange(
+            _navigationServiceMock, _ledgerRepositoryMock.Object, _operationLoggerMock.Object, _dbContext, userAction);
+
+    /// <summary>
+    /// 履歴パネルの操作が終わるのを待つ。終わらない実装（変異など）でテストランナーごと止まらないよう、時間で打ち切る
+    /// （Issue #2475 の変異検査で、終わらない await を待ち続けてテストランナーが止まった）。
+    /// </summary>
+    private static async Task AwaitPanelOperationAsync(Task operation)
+    {
+        var finished = await Task.WhenAny(operation, Task.Delay(TimeSpan.FromSeconds(30)));
+        finished.Should().BeSameAs(operation, "履歴パネルの操作は、ダイアログを閉じたら終わること");
+        await operation;
+    }
+
+    /// <summary>
+    /// 追加モードで開き、入力して保存したら、行を挿入し、閉じた後に一覧・ダッシュボード・警告を読み直すこと。
+    /// </summary>
+    [Fact]
+    public async Task 履歴行の追加_保存したら行を挿入し_閉じた後に一覧とダッシュボードと警告を読み直すこと()
+    {
+        var requestedPages = await ArrangeLedgerAddAsync();
+        var listedCount = _history.HistoryLedgers.Count;
+        var opened = ArrangeEditDialog(async editor =>
+        {
+            editor.IsAddMode.Should().BeTrue("前提: 追加モードで初期化されていること");
+            editor.InsertIndex.Should().Be(listedCount, "前提: 表示中の一覧が挿入位置の候補として渡され、末尾に挿入する");
+            editor.Summary = "鉄道（天神～博多）";
+            editor.Expense = 210;
+            await editor.SaveCommand.ExecuteAsync(null);
+            editor.IsSaved.Should().BeTrue("前提: 保存できたこと（狙った出口を通った）");
+        });
+
+        await AwaitPanelOperationAsync(_history.AddLedgerRowCommand.ExecuteAsync(null));
+
+        opened.Should().ContainSingle("行編集ダイアログを 1 回だけ開く");
+        _staffAuthServiceMock.Verify(s => s.RequestAuthenticationAsync("履歴の追加"), Times.Once);
+        _ledgerRepositoryMock.Verify(
+            r => r.InsertAsync(
+                It.Is<Ledger>(l => l.CardIdm == DeleteConflictCardIdm && l.Summary == "鉄道（天神～博多）" && l.Expense == 210),
+                It.IsAny<SQLiteTransaction>()),
+            Times.Once,
+            "表示中のカードに、入力した行を挿入する");
+        requestedPages.Should().NotBeEmpty("保存して閉じたら一覧を読み直す（追加した行を表示する）");
+        _host.Calls.Should().Contain(new[]
+        {
+            RecordingHistoryPanelHost.RefreshDashboardCall,
+            RecordingHistoryPanelHost.CheckWarningsCall,
+        }, "残額・警告も追加した行で変わる");
+        _ledgerRepositoryMock.Verify(
+            r => r.GetByDateRangeAsync(DeleteConflictCardIdm, _history.HistoryFromDate, _history.HistoryToDate),
+            Times.AtLeastOnce(),
+            "追加した行で残高チェーンが変わるので、表示期間の整合性チェック（ハイライト・警告）をやり直す");
+    }
+
+    /// <summary>
+    /// 追加モードで開いて保存せずに閉じたら、何も書き込まず、一覧ほかも読み直さないこと。
+    /// </summary>
+    [Fact]
+    public async Task 履歴行の追加_保存せずに閉じたら_何も書き込まず一覧も読み直さないこと()
+    {
+        var requestedPages = await ArrangeLedgerAddAsync();
+        var opened = ArrangeEditDialog(editor =>
+        {
+            editor.IsAddMode.Should().BeTrue("前提: 追加モードで初期化されていること");
+            editor.Summary = "鉄道（天神～博多）"; // 入力したが保存せずに閉じる（キャンセル）
+            editor.IsSaved.Should().BeFalse();
+            return Task.CompletedTask;
+        });
+
+        await AwaitPanelOperationAsync(_history.AddLedgerRowCommand.ExecuteAsync(null));
+
+        opened.Should().ContainSingle("前提: 行編集ダイアログを開いたこと");
+        _ledgerRepositoryMock.Verify(
+            r => r.InsertAsync(It.IsAny<Ledger>(), It.IsAny<SQLiteTransaction>()), Times.Never);
+        requestedPages.Should().BeEmpty("何も変えていないので読み直さない");
+        _host.Calls.Should().BeEmpty();
+    }
+
+    /// <summary>
+    /// Issue #2484: 追加モードの行編集ダイアログ（#2486 で編集モードと同じ継ぎ目へ移った）の表示中も、職員認証の間も、
+    /// ホストへメイン画面のカード読み取りの抑制を頼み、閉じたら解放すること。
+    /// </summary>
+    [Fact]
+    public async Task 履歴行の追加_認証と追加モードの行編集ダイアログの表示中はメイン画面のカード読み取りを抑制すること()
+    {
+        await ArrangeLedgerAddAsync();
+        int? suppressionsWhileAuthenticating = null;
+        _staffAuthServiceMock
+            .Setup(a => a.RequestAuthenticationAsync("履歴の追加"))
+            .Callback(() => suppressionsWhileAuthenticating = _host.OpenModalSuppressions)
+            .ReturnsAsync(new StaffAuthResult { Idm = "AABBCCDDEEFF0011", StaffName = "田中太郎" });
+        int? suppressionsWhileShown = null;
+        var opened = ArrangeEditDialog(editor =>
+        {
+            editor.IsAddMode.Should().BeTrue("前提: 追加モードで開いたこと");
+            suppressionsWhileShown = _host.OpenModalSuppressions;
+            return Task.CompletedTask;
+        });
+
+        await AwaitPanelOperationAsync(_history.AddLedgerRowCommand.ExecuteAsync(null));
+
+        opened.Should().ContainSingle("前提: 行編集ダイアログを開いたこと");
+        suppressionsWhileAuthenticating.Should().Be(1, "職員認証の間も抑制する");
+        suppressionsWhileShown.Should().Be(1, "追加モードの行編集ダイアログの表示中も抑制する");
+        _host.OpenModalSuppressions.Should().Be(0, "閉じたら解放する");
+    }
+
+    /// <summary>
+    /// 認証をキャンセルしたら、行編集ダイアログを開かず、何も書き込まないこと。
+    /// </summary>
+    /// <remarks>
+    /// 認証以外（ダイアログでの入力と保存・挿入）はすべて成功する状態にしてから、認証だけをキャンセルさせる（#2104）。
+    /// </remarks>
+    [Fact]
+    public async Task 履歴行の追加_認証をキャンセルしたら_ダイアログを開かず何も書き込まないこと()
+    {
+        var requestedPages = await ArrangeLedgerAddAsync();
+        var opened = ArrangeEditDialog(async editor =>
+        {
+            editor.Summary = "鉄道（天神～博多）";
+            editor.Expense = 210;
+            await editor.SaveCommand.ExecuteAsync(null);
+        });
+        _staffAuthServiceMock
+            .Setup(a => a.RequestAuthenticationAsync(It.IsAny<string>()))
+            .ReturnsAsync((StaffAuthResult?)null);
+
+        await AwaitPanelOperationAsync(_history.AddLedgerRowCommand.ExecuteAsync(null));
+
+        _staffAuthServiceMock.Verify(s => s.RequestAuthenticationAsync("履歴の追加"), Times.Once,
+            "前提: 認証まで進んだこと");
+        opened.Should().BeEmpty("認証キャンセル時は行編集ダイアログを開かない");
+        _navigationServiceMock.Invocations
+            .Where(i => i.Method.Name == nameof(INavigationService.ShowDialogAsync))
+            .Should().BeEmpty("旧来の開き方（ShowDialogAsync<TDialog>）でも開かない");
+        _ledgerRepositoryMock.Verify(
+            r => r.InsertAsync(It.IsAny<Ledger>(), It.IsAny<SQLiteTransaction>()), Times.Never);
+        requestedPages.Should().BeEmpty();
+    }
+
+    /// <summary>
+    /// 履歴を表示しているカードが無ければ、認証もダイアログも起こさないこと（既存ガード仕様）。
+    /// 対の表明（カードがあれば開く）は <see cref="履歴行の追加_保存したら行を挿入し_閉じた後に一覧とダッシュボードと警告を読み直すこと"/>。
+    /// </summary>
+    [Fact]
+    public async Task 履歴行の追加_表示中のカードが無ければ_認証もダイアログも起こさないこと()
+    {
+        await ArrangeLedgerAddAsync();
+        var opened = ArrangeEditDialog(_ => Task.CompletedTask);
+        _history.HistoryCard = null;
+
+        await AwaitPanelOperationAsync(_history.AddLedgerRowCommand.ExecuteAsync(null));
+
+        _staffAuthServiceMock.Verify(s => s.RequestAuthenticationAsync(It.IsAny<string>()), Times.Never);
+        opened.Should().BeEmpty();
+        _navigationServiceMock.Invocations
+            .Where(i => i.Method.Name == nameof(INavigationService.ShowDialogAsync))
+            .Should().BeEmpty("旧来の開き方（ShowDialogAsync<TDialog>）でも開かない");
+    }
+
+    /// <summary>
+    /// Issue #1740: 先頭への挿入で残高を自動計算してよいのは、一覧の先頭がカードの履歴の先頭でもあるとき
+    /// （1 ページ目で、先頭が繰越行でない＝表示期間より前に履歴が無い）だけ。
+    /// 履歴パネルがその判定をダイアログへ渡していること（渡し忘れると、ダイアログは既定の「自動計算しない」に倒れる）。
+    /// 1 ページ目でも先頭が繰越行なら、0 を起点にすると先頭に入れた行の残高を壊す（#1740 の不具合そのもの）。
+    /// </summary>
+    [Theory]
+    [InlineData(1, false, true)]
+    [InlineData(2, false, false)]
+    [InlineData(1, true, false)]
+    public async Task 履歴行の追加_先頭への挿入で残高を自動計算できるのは1ページ目で先頭が繰越行でないときだけであること(
+        int page, bool hasCarryover, bool expected)
+    {
+        if (hasCarryover)
+        {
+            // 表示期間（8 月）より前に履歴がある → 1 ページ目の先頭に「7月から繰越」の行が入る
+            _ledgerRepositoryMock
+                .Setup(r => r.GetLatestBeforeDateAsync(It.IsAny<string>(), new DateTime(2026, 8, 1)))
+                .ReturnsAsync(new Ledger { Id = 900, CardIdm = DeleteConflictCardIdm, Date = new DateTime(2026, 7, 31), Balance = 3000 });
+        }
+        await ArrangeLedgerAddAsync(totalCount: 60, page: page);
+        _history.HistoryLedgers[0].IsCarryoverRow.Should().Be(hasCarryover, "前提: 先頭が繰越行かどうか");
+        bool? canAutoBalanceAtTop = null;
+        var opened = ArrangeEditDialog(editor =>
+        {
+            editor.IsAddMode.Should().BeTrue("前提: 追加モードで初期化されていること");
+            editor.EditDate = new DateTime(2026, 7, 31); // 一覧のどの行（繰越行 8/1・利用 8/10）よりも前 → 先頭へ挿入する
+            editor.InsertIndex.Should().Be(0, "前提: 先頭への挿入になっていること");
+            canAutoBalanceAtTop = editor.CanAutoBalance;
+            return Task.CompletedTask;
+        });
+
+        await AwaitPanelOperationAsync(_history.AddLedgerRowCommand.ExecuteAsync(null));
+
+        opened.Should().ContainSingle();
+        canAutoBalanceAtTop.Should().Be(expected);
+    }
+
+    #endregion
+
+    #region 行編集の保存の競合で閉じたときの読み直し（Issue #2325 / Issue #2486）
+
+    /*
+     * Issue #2486: 以前は LedgerRowEditSaveConflictAndWarningTests の静的検査（HistoryPanelViewModel.Edit.cs の
+     * 分岐の形を正規表現で見る）で表明していた。ダイアログを代役で開けるようになったので挙動で表明する。
+     */
+
+    /// <summary>
+    /// 一覧の 1 行目と 2 行目（<see cref="ArrangeHistoryPaging(Func{int, int}, int)"/> の Id 1・2）を読み込み、
+    /// 行編集を「認証済み」まで進める。<c>GetByIdAsync</c> は要求された Id のバスの行を返す（読み直しで行は残っている）。
+    /// </summary>
+    private async Task<List<int>> ArrangeLedgerEditForSaveAsync()
+    {
+        _staffAuthServiceMock
+            .Setup(a => a.RequestAuthenticationAsync(It.IsAny<string>()))
+            .ReturnsAsync(new StaffAuthResult { Idm = "AABBCCDDEEFF0011", StaffName = "田中太郎" });
+        _ledgerRepositoryMock
+            .Setup(r => r.GetByIdAsync(It.IsAny<int>()))
+            .ReturnsAsync((int id) => new Ledger
+            {
+                Id = id,
+                CardIdm = DeleteConflictCardIdm,
+                Date = new DateTime(2026, 8, 10),
+                Summary = "バス（天神～博多）",
+                Expense = 210,
+                Balance = 1000,
+                Details = new List<LedgerDetail>
+                {
+                    new() { LedgerId = id, SequenceNumber = 1, IsBus = true, BusStops = "天神～博多" },
+                },
+            });
+        var requestedPages = ArrangeHistoryPaging(_ => 2, pageSize: 30);
+        await _history.LoadHistoryLedgersAsync();
+        _history.HistoryLedgers.Select(l => l.Id).Should().Equal(new[] { 1, 2 }, "前提: 一覧に 2 行あること");
+        requestedPages.Clear();
+        _host.Calls.Clear();
+        _ledgerRepositoryMock.Invocations.Clear();
+        return requestedPages;
+    }
+
+    /// <summary>
+    /// 保存で競合（行が他 PC の削除・返却で無くなった）を検出したまま閉じたら、一覧・ダッシュボード・貸出中一覧・警告を読み直すこと。
+    /// ダイアログの案内が「閉じると履歴一覧を再読み込みします」と述べている（#1759）。
+    /// </summary>
+    [Fact]
+    public async Task 行編集_保存で競合したまま閉じたら_一覧と貸出中一覧を読み直すこと()
+    {
+        var requestedPages = await ArrangeLedgerEditForSaveAsync();
+        _ledgerRepositoryMock
+            .Setup(r => r.UpdateEditedColumnsAsync(It.IsAny<Ledger>(), It.IsAny<LedgerRowEditColumns>(), It.IsAny<SQLiteTransaction>()))
+            .ReturnsAsync(false); // 影響行数 0 ＝ 行が無くなった
+        var opened = ArrangeEditDialog(async editor =>
+        {
+            editor.Note = "備考を追加";
+            await editor.SaveCommand.ExecuteAsync(null);
+            editor.IsSaved.Should().BeFalse("前提: 保存は競合で失敗した");
+            editor.NeedsHistoryReload.Should().BeTrue("前提: 閉じたら一覧の読み直しを求めている（狙った出口）");
+        });
+
+        await AwaitPanelOperationAsync(_history.EditLedger(_history.HistoryLedgers[0]));
+
+        opened.Should().ContainSingle("何も保存していないので「保存して次へ」等へは進まない");
+        requestedPages.Should().NotBeEmpty("消えた行が一覧に残らないよう読み直す");
+        _host.Calls.Should().Contain(new[]
+        {
+            RecordingHistoryPanelHost.RefreshDashboardCall,
+            RecordingHistoryPanelHost.RefreshLentCardsCall,
+            RecordingHistoryPanelHost.CheckWarningsCall,
+        }, "消えた行が貸出中レコード（開いている間に返却された）ならカードの貸出状態も変わっている");
+        _ledgerRepositoryMock.Verify(
+            r => r.GetByDateRangeAsync(DeleteConflictCardIdm, _history.HistoryFromDate, _history.HistoryToDate),
+            Times.AtLeastOnce(),
+            "他 PC の変更で残高チェーンが変わり得るので、表示期間の整合性チェック（ハイライト・警告）もやり直す");
+    }
+
+    /// <summary>
+    /// 競合の再読込の分岐が、保存できたときの分岐を奪わないこと。
+    /// </summary>
+    /// <remarks>
+    /// バス停名の同期の競合の後に、何も変えずに（摘要を元に戻して）「保存して次へ」を押すと、保存は成立し
+    /// （書く値が無いので書かずに閉じる）、競合の印は残る（明細が他 PC の変更で変わっているので閉じたら読み直す）。
+    /// このとき閉じた後は保存の分岐で読み直して次の行を開く。再読込の分岐を先に判定すると、次の行が開かない。
+    /// </remarks>
+    [Fact]
+    public async Task 行編集_バス停名の競合の後に変えずに保存して次へを押したら_次の行を開くこと()
+    {
+        var requestedPages = await ArrangeLedgerEditForSaveAsync();
+        _ledgerRepositoryMock
+            .Setup(r => r.UpdateEditedColumnsAsync(It.IsAny<Ledger>(), It.IsAny<LedgerRowEditColumns>(), It.IsAny<SQLiteTransaction>()))
+            .ReturnsAsync(true);
+        _ledgerRepositoryMock
+            .Setup(r => r.UpdateDetailBusStopsAsync(
+                It.IsAny<int>(), It.IsAny<IEnumerable<(int, string)>>(), It.IsAny<SQLiteTransaction>()))
+            .ReturnsAsync(false); // 明細の id が振り直されていて、バス停名の同期が 0 行になる
+        var openCount = 0;
+        var opened = ArrangeEditDialog(async editor =>
+        {
+            if (++openCount > 1)
+            {
+                return; // 次の行は、開いたら何もせずに閉じる
+            }
+
+            editor.Summary = "バス（天神～博多駅前）";
+            await editor.SaveAndEditNextCommand.ExecuteAsync(null);
+            editor.NeedsHistoryReload.Should().BeTrue("前提: 1 回目はバス停名の同期の競合");
+
+            editor.Summary = "バス（天神～博多）"; // 元に戻して、何も変えずに保存し直す
+            await editor.SaveAndEditNextCommand.ExecuteAsync(null);
+            editor.IsSaveAndEditNextRequested.Should().BeTrue("前提: 保存できた（狙った出口）");
+            editor.NeedsHistoryReload.Should().BeTrue("前提: 競合の印は残っている（再読込の分岐の条件も満たす状態）");
+        });
+
+        await AwaitPanelOperationAsync(_history.EditLedger(_history.HistoryLedgers[0]));
+
+        opened.Should().HaveCount(2, "保存できたので「保存して次へ」で次の行を開く");
+        _ledgerRepositoryMock.Verify(r => r.GetByIdAsync(2), Times.AtLeastOnce(), "次に開いたのは一覧の 2 行目");
+        requestedPages.Should().NotBeEmpty("保存の分岐でも一覧を読み直す");
+    }
+
+    /// <summary>
+    /// 競合の再読込の分岐に入るのは競合を検出したときだけであること（上の 2 件の対）。
+    /// 競合が無いまま「次へ（保存しない）」を押したら、一覧を読み直さずに次の行を開く。
+    /// </summary>
+    /// <remarks>
+    /// 分岐の条件から <c>NeedsHistoryReload</c> の項を外すと、保存せずに閉じたものがすべて再読込の分岐に入り、
+    /// 「次へ（保存しない）」「戻る」で隣の行が開かず、一覧を読み直すだけになる（レビュー 3 回目で検出）。
+    /// </remarks>
+    [Fact]
+    public async Task 行編集_競合なしで次へを押したら_一覧を読み直さずに次の行を開くこと()
+    {
+        var requestedPages = await ArrangeLedgerEditForSaveAsync();
+        var openCount = 0;
+        var opened = ArrangeEditDialog(editor =>
+        {
+            if (++openCount > 1)
+            {
+                return Task.CompletedTask; // 次の行は、開いたら何もせずに閉じる
+            }
+
+            editor.SkipToNextCommand.Execute(null);
+            editor.IsSkipToNextRequested.Should().BeTrue("前提: 「次へ（保存しない）」が要求された（狙った出口）");
+            editor.NeedsHistoryReload.Should().BeFalse("前提: 競合は無い");
+            return Task.CompletedTask;
+        });
+
+        await AwaitPanelOperationAsync(_history.EditLedger(_history.HistoryLedgers[0]));
+
+        opened.Should().HaveCount(2, "「次へ（保存しない）」で一覧の次の行を開く");
+        _ledgerRepositoryMock.Verify(r => r.GetByIdAsync(2), Times.AtLeastOnce(), "次に開いたのは一覧の 2 行目");
+        requestedPages.Should().BeEmpty("何も保存しておらず競合も無いので、一覧は読み直さない");
+        _host.Calls.Should().BeEmpty();
+    }
+
+    /// <summary>
+    /// 競合が無いまま保存せずに閉じたら（キャンセル）、一覧もダッシュボード・貸出中一覧・警告も読み直さないこと（同じく対）。
+    /// </summary>
+    [Fact]
+    public async Task 行編集_競合なしで保存せずに閉じたら_何も読み直さないこと()
+    {
+        var requestedPages = await ArrangeLedgerEditForSaveAsync();
+        var opened = ArrangeEditDialog(editor =>
+        {
+            editor.CanDelete.Should().BeTrue("前提: 編集モードで開いた");
+            editor.IsSaved.Should().BeFalse();
+            editor.NeedsHistoryReload.Should().BeFalse("前提: 競合は無い");
+            return Task.CompletedTask; // 何もせずに閉じる
+        });
+
+        await AwaitPanelOperationAsync(_history.EditLedger(_history.HistoryLedgers[0]));
+
+        opened.Should().ContainSingle("前提: ダイアログを開いた");
+        requestedPages.Should().BeEmpty();
+        _host.Calls.Should().BeEmpty();
+        _ledgerRepositoryMock.Verify(
+            r => r.GetByDateRangeAsync(It.IsAny<string>(), It.IsAny<DateTime>(), It.IsAny<DateTime>()), Times.Never);
+    }
+
+    #endregion
+
     #region 行編集ダイアログからの削除（Issue #750 / Issue #1574 / Issue #2475）
 
     /*
