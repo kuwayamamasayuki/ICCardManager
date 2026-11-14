@@ -2893,6 +2893,8 @@ public class HistoryPanelViewModelTests : IDisposable
 
         await _history.EditLedger(DeleteTargetDto());
 
+        // 前提: 削除まで進み、DELETE が 0 行を返したこと（これが無いと、削除へ進まない実装でも下の Never が緑になる。レビュー 4 回目で検出）
+        _ledgerRepositoryMock.Verify(r => r.DeleteAsync(42, It.IsAny<SQLiteTransaction>()), Times.Once);
         _operationLogRepositoryMock.Verify(
             r => r.InsertAsync(It.IsAny<OperationLog>(), It.IsAny<SQLiteTransaction>()),
             Times.Never,
@@ -2916,6 +2918,8 @@ public class HistoryPanelViewModelTests : IDisposable
 
         await _history.EditLedger(DeleteTargetDto());
 
+        // 前提: 削除まで進み、DELETE が 0 行を返したこと（これが無いと、削除へ進まない実装でも下の Never が緑になる。レビュー 4 回目で検出）
+        _ledgerRepositoryMock.Verify(r => r.DeleteAsync(42, It.IsAny<SQLiteTransaction>()), Times.Once);
         _cardRepositoryMock.Verify(
             c => c.UpdateLentStatusAsync(
                 It.IsAny<string>(), It.IsAny<bool>(), It.IsAny<DateTime?>(), It.IsAny<string>()),

@@ -1021,7 +1021,8 @@ public partial class ReportViewModel : ViewModelBase
                         }
                         // ステータス欄はボタン列と幅を分け合うため簡潔にする。「なぜ／どうすれば」は
                         // 直前のエラーダイアログで提示済み（Issue #1688 と同じ判断）
-                        SetStatus($"帳票作成を中断しました（{result.ErrorMessage}）", true);
+                        // 原因の文言は failedCards の末尾（ErrorMessage。無ければダイアログと同じ代替文言）。ErrorMessage を直接使うと null で「（）」になる
+                        SetStatus($"帳票作成を中断しました（{failedCards[failedCards.Count - 1].ErrorMessage}）", true);
                         return;
                     }
                 }
