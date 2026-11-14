@@ -82,8 +82,9 @@ namespace ICCardManager.UITests.Infrastructure
         /// キー入力（Enter）が別のウィンドウへ流れて履歴が開かなかった（実測。WSL から直接起動したときは成功していた）。
         /// ALT キーを押して離すと自プロセスが最後の入力元になり、直後の <c>SetForegroundWindow</c> が通る（定石の回避策）。
         /// 前面化できたかは <c>GetForegroundWindow</c> で確かめ、失敗したら数回やり直す。
-        /// 撮影だけなら前面化できなくても矩形は撮れるので例外にはしない。クリック・キー入力を伴う操作の前には
-        /// <see cref="RequireForeground"/> を使う。
+        /// 戻り値を捨てて呼ばない。クリック・キー入力を伴う操作の前には <see cref="RequireForeground"/>、
+        /// 撮影の前には <see cref="RequireForegroundForCapture"/> を使う（どちらも前面にできなければ例外。Issue #2478）。
+        /// 呼び出し元がこの 2 つに限られることは <c>ScreenshotForegroundConventionTests</c> が固定する。
         /// </remarks>
         /// <returns>前面化できたら true。</returns>
         public static bool BringToForeground(Window window)
@@ -141,16 +142,56 @@ namespace ICCardManager.UITests.Infrastructure
                 "管理者権限で動いている可能性があります。そのウィンドウを閉じるか最小化してから、撮影をやり直してください。");
         }
 
-        /// <summary>ウィンドウのタイトルとプロセス名（失敗メッセージ用）。</summary>
+        /// <summary>
+        /// 撮影の前に、ウィンドウを前面にする。できなければ画像を保存せずに例外にする（Issue #2478）。
+        /// </summary>
+        /// <remarks>
+        /// 前面にできないまま撮ると、タイトルバーが灰色（非アクティブ）の画像が正規の名前で保存され、撮影テストは合格する。
+        /// 実測では、タスクバー（<c>Shell_TrayWnd</c>、explorer.exe）が前面を保持したまま、撮影した画像のタイトルバーが
+        /// すべて非アクティブになり、目で確かめるまで気付けなかった。撮り直せば直る状況なので、誤った画像を残すより失敗させる。
+        /// </remarks>
+        internal static void RequireForegroundForCapture(Window window, string fileName)
+        {
+            EnsureForegroundForCapture(
+                () => BringToForeground(window), () => DescribeWindow(GetForegroundWindow()), fileName);
+        }
+
+        /// <summary>
+        /// <see cref="RequireForegroundForCapture"/> の判定。前面化と前面のウィンドウの説明を差し替えられる継ぎ目
+        /// （<c>ScreenshotForegroundTests</c> が実ウィンドウなしで検証する）。
+        /// </summary>
+        /// <param name="bringToForeground">前面化を試み、できたら true を返す（1 回だけ呼ぶ）。</param>
+        /// <param name="describeForeground">前面にあるウィンドウの説明（失敗したときだけ呼ぶ）。</param>
+        /// <param name="fileName">撮影する画像のファイル名（文言の「何が」）。</param>
+        internal static void EnsureForegroundForCapture(
+            Func<bool> bringToForeground, Func<string> describeForeground, string fileName)
+        {
+            if (bringToForeground())
+            {
+                return;
+            }
+            throw new InvalidOperationException(
+                $"撮影するウィンドウを前面にできませんでした（{fileName}）。前面にあるウィンドウ「{describeForeground()}」が" +
+                "前面を保持しているため、このまま撮るとタイトルバーが灰色（非アクティブ）の画像になるので保存しません。" +
+                "多くは一時的な状態です。そのウィンドウを閉じるか最小化してから、撮影をやり直してください。");
+        }
+
+        /// <summary>ウィンドウのタイトル・プロセス名・クラス名（失敗メッセージ用）。</summary>
+        /// <remarks>
+        /// タスクバー（<c>Shell_TrayWnd</c>）のようにタイトルを持たないウィンドウは、タイトルとプロセス名だけでは
+        /// 何が前面にあるのか分からないため、クラス名を併記する（Issue #2478）。
+        /// </remarks>
         internal static string DescribeWindow(IntPtr handle)
         {
             var title = new System.Text.StringBuilder(256);
             _ = GetWindowText(handle, title, title.Capacity);
+            var className = new System.Text.StringBuilder(256);
+            _ = GetClassName(handle, className, className.Capacity);
             _ = GetWindowThreadProcessId(handle, out var pid);
             string process;
             try { process = System.Diagnostics.Process.GetProcessById((int)pid).ProcessName; }
             catch { process = "?"; }
-            return $"{title}（{process}.exe）";
+            return $"{title}（{process}.exe、クラス {className}）";
         }
 
         /// <summary>ウィンドウを持つプロセスの ID（<c>GetWindowThreadProcessId</c>）。</summary>
@@ -162,6 +203,9 @@ namespace ICCardManager.UITests.Infrastructure
 
         [System.Runtime.InteropServices.DllImport("user32.dll", CharSet = System.Runtime.InteropServices.CharSet.Unicode)]
         private static extern int GetWindowText(IntPtr hWnd, System.Text.StringBuilder text, int maxCount);
+
+        [System.Runtime.InteropServices.DllImport("user32.dll", CharSet = System.Runtime.InteropServices.CharSet.Unicode)]
+        private static extern int GetClassName(IntPtr hWnd, System.Text.StringBuilder className, int maxCount);
 
         [System.Runtime.InteropServices.DllImport("user32.dll")]
         private static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint processId);
@@ -183,7 +227,8 @@ namespace ICCardManager.UITests.Infrastructure
         /// </para>
         /// <para>
         /// 前面化は所有ウィンドウに対して行う。要素だけを前面化する手段は無く、背面のまま撮ると
-        /// 手前のウィンドウが写り込んだ「もっともらしく見えて誤った画像」ができる。
+        /// 手前のウィンドウが写り込んだ「もっともらしく見えて誤った画像」ができる。前面にできなければ
+        /// 撮らずに例外にする（<see cref="RequireForegroundForCapture"/>）。
         /// </para>
         /// </remarks>
         /// <param name="owner">要素を含むウィンドウ（前面化の対象）。</param>
@@ -218,7 +263,7 @@ namespace ICCardManager.UITests.Infrastructure
                 throw new ArgumentException("ファイル名を指定してください。", nameof(fileName));
             }
 
-            BringToForeground(owner);  // 内側で SettleDelay ぶん待つ
+            RequireForegroundForCapture(owner, fileName);  // 内側で SettleDelay ぶん待つ
 
             // 空の矩形は Union の前に弾く。Rectangle.Union は空の矩形（0,0,0,0）も 1 点として扱うため、
             // 畳んだ後は「画面の左上から対象までを覆う大きな矩形」になり、Width / Height の検査を素通りする。
@@ -268,7 +313,7 @@ namespace ICCardManager.UITests.Infrastructure
             }
 
             // トーストは Topmost（ToastNotificationWindow.xaml）なので、メイン画面を前面化しても隠れない
-            BringToForeground(mainWindow);
+            RequireForegroundForCapture(mainWindow, fileName);
             var bounds = Rectangle.Union(GetVisibleFrameBounds(mainWindow), GetVisibleFrameBounds(toast));
             return CaptureRectangle(bounds, fileName);
         }
@@ -299,12 +344,14 @@ namespace ICCardManager.UITests.Infrastructure
         /// <summary>
         /// ウィンドウを前面化して PNG に保存し、保存先のパスを返す。
         /// 既存の同名画像が <see cref="PublishedDirectory"/> にあればサイズを併せて出力する。
+        /// 前面にできなければ撮らずに例外にする（<see cref="RequireForegroundForCapture"/>）。
         /// </summary>
         /// <param name="window">撮影するウィンドウ。</param>
         /// <param name="fileName">保存するファイル名（例: <c>main.png</c>）。</param>
         /// <param name="bringToFront">
         /// 撮影前に前面化するか。トースト通知（フォーカスを奪わない別ウィンドウ）を撮るときは false にする。
         /// 前面化すると他のウィンドウの Z 順が変わり、メイン画面の上に載っているトーストが隠れることがある。
+        /// false のときは前面かどうかを確かめない（トーストはタイトルバーを持たず、前面にしないのが正しい）。
         /// </param>
         public static string Capture(Window window, string fileName, bool bringToFront = true)
         {
@@ -320,7 +367,7 @@ namespace ICCardManager.UITests.Infrastructure
 
             if (bringToFront)
             {
-                BringToForeground(window);  // 内側で SettleDelay ぶん待つ
+                RequireForegroundForCapture(window, fileName);  // 内側で SettleDelay ぶん待つ
             }
             else
             {
