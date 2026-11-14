@@ -1968,6 +1968,7 @@ public class HistoryPanelViewModelTests : IDisposable
         // ここから後の読み直しだけを観測する
         requestedPages.Clear();
         _host.Calls.Clear();
+        _ledgerRepositoryMock.Invocations.Clear();
         return requestedPages;
     }
 
@@ -2023,6 +2024,10 @@ public class HistoryPanelViewModelTests : IDisposable
             RecordingHistoryPanelHost.RefreshDashboardCall,
             RecordingHistoryPanelHost.CheckWarningsCall,
         }, "残額・警告も追加した行で変わる");
+        _ledgerRepositoryMock.Verify(
+            r => r.GetByDateRangeAsync(DeleteConflictCardIdm, _history.HistoryFromDate, _history.HistoryToDate),
+            Times.AtLeastOnce(),
+            "追加した行で残高チェーンが変わるので、表示期間の整合性チェック（ハイライト・警告）をやり直す");
     }
 
     /// <summary>
@@ -2103,20 +2108,32 @@ public class HistoryPanelViewModelTests : IDisposable
     }
 
     /// <summary>
-    /// Issue #1740: 先頭への挿入で残高を自動計算してよいのは、一覧の先頭がカードの履歴の先頭でもあるとき（1 ページ目）だけ。
+    /// Issue #1740: 先頭への挿入で残高を自動計算してよいのは、一覧の先頭がカードの履歴の先頭でもあるとき
+    /// （1 ページ目で、先頭が繰越行でない＝表示期間より前に履歴が無い）だけ。
     /// 履歴パネルがその判定をダイアログへ渡していること（渡し忘れると、ダイアログは既定の「自動計算しない」に倒れる）。
+    /// 1 ページ目でも先頭が繰越行なら、0 を起点にすると先頭に入れた行の残高を壊す（#1740 の不具合そのもの）。
     /// </summary>
     [Theory]
-    [InlineData(1, true)]
-    [InlineData(2, false)]
-    public async Task 履歴行の追加_先頭への挿入で残高を自動計算できるのは1ページ目だけであること(int page, bool expected)
+    [InlineData(1, false, true)]
+    [InlineData(2, false, false)]
+    [InlineData(1, true, false)]
+    public async Task 履歴行の追加_先頭への挿入で残高を自動計算できるのは1ページ目で先頭が繰越行でないときだけであること(
+        int page, bool hasCarryover, bool expected)
     {
+        if (hasCarryover)
+        {
+            // 表示期間（8 月）より前に履歴がある → 1 ページ目の先頭に「7月から繰越」の行が入る
+            _ledgerRepositoryMock
+                .Setup(r => r.GetLatestBeforeDateAsync(It.IsAny<string>(), new DateTime(2026, 8, 1)))
+                .ReturnsAsync(new Ledger { Id = 900, CardIdm = DeleteConflictCardIdm, Date = new DateTime(2026, 7, 31), Balance = 3000 });
+        }
         await ArrangeLedgerAddAsync(totalCount: 60, page: page);
+        _history.HistoryLedgers[0].IsCarryoverRow.Should().Be(hasCarryover, "前提: 先頭が繰越行かどうか");
         bool? canAutoBalanceAtTop = null;
         var opened = ArrangeEditDialog(editor =>
         {
             editor.IsAddMode.Should().BeTrue("前提: 追加モードで初期化されていること");
-            editor.EditDate = new DateTime(2026, 8, 1); // 一覧のどの行（8/10）よりも前 → 先頭へ挿入する
+            editor.EditDate = new DateTime(2026, 7, 31); // 一覧のどの行（繰越行 8/1・利用 8/10）よりも前 → 先頭へ挿入する
             editor.InsertIndex.Should().Be(0, "前提: 先頭への挿入になっていること");
             canAutoBalanceAtTop = editor.CanAutoBalance;
             return Task.CompletedTask;
