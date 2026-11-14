@@ -436,7 +436,8 @@ namespace ICCardManager.UITests.Tests
             // §3.1.2 は氏名・職員番号を直して「保存」を押す手順なので、フォーカスの枠が付くのは「保存」にする
             // （「職員証を差し替え」に付けると、押すべきボタンのように見える）。
             // 選んだ行へは移せない（編集中は一覧が操作できず、UIA の SetFocus が InvalidOperationException になる。実測）
-            var saveButton = dialog.FindByName(TestConstants.StaffManageSaveButton);
+            var saveButton = dialog.Window.FindFirstDescendant(
+                cf => cf.ByName(TestConstants.StaffManageSaveButton).And(cf.ByControlType(ControlType.Button)));
             saveButton.Should().NotBeNull($"編集フォームに「{TestConstants.StaffManageSaveButton}」ボタンがあること");
             saveButton!.Focus();
             var path = ScreenshotHelper.Capture(dialog.Window, "staff_edit_dialog.png");
