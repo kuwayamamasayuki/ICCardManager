@@ -2761,10 +2761,35 @@ public class HistoryPanelViewModelTests : IDisposable
                 break;
         }
 
-        await Record.ExceptionAsync(() => _history.EditLedger(DeleteTargetDto()));
+        var exception = await Record.ExceptionAsync(() => _history.EditLedger(DeleteTargetDto()));
         var afterOperation = await openGateAndLog();
 
         _staffAuthServiceMock.Verify(a => a.RequestAuthenticationAsync("履歴の変更"), Times.Once);
+
+        // 前提: 各出口まで実際に進んだこと。「対象行が無い」「例外」は閉じた後の削除の読み取りまで進んで初めて意味を持つ。
+        // これが無いと、閉じた後の削除要求を無視する実装でも「確認でいいえ」と同じ経路のまま緑になる（レビュー 3 回目で検出）
+        switch (exit)
+        {
+            case "確認でいいえ":
+                exception.Should().BeNull();
+                _ledgerRepositoryMock.Verify(
+                    r => r.DeleteAsync(It.IsAny<int>(), It.IsAny<SQLiteTransaction>()), Times.Never,
+                    "確認で「いいえ」なら削除しない");
+                break;
+            case "対象行が無い":
+                exception.Should().BeNull("行が無いことは競合として案内し、例外にしない（#1944）");
+                _navigationServiceMock.Verify(
+                    d => d.ShowError(
+                        ICCardManager.Common.ConcurrencyConflictMessage.ForDelete(DeleteConflictTarget, "履歴一覧"),
+                        It.IsAny<string>()),
+                    Times.Once,
+                    "閉じた後の削除の読み取りで行が無いことに気付き、競合を案内すること");
+                break;
+            case "例外":
+                exception.Should().BeOfType<InvalidOperationException>()
+                    .Which.Message.Should().Be("読み取りに失敗", "閉じた後の削除の読み取りまで進み、その失敗が伝わること");
+                break;
+        }
         afterOperation.OperatorIdm.Should().Be(OperationLogger.GuiOperator.Idm,
             "認証した操作を終えたら（成功・中止・失敗を問わず）、操作から派生した処理にも認証を残さない");
     }
