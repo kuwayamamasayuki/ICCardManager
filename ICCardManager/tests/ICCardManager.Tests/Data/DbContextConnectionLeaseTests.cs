@@ -285,7 +285,8 @@ public class DbContextConnectionLeaseTests : IDisposable
     /// <para>
     /// いまは遅延に頼らず順序を固定する。async メソッドは最初の未完了の待機で呼び出し元へ戻るので、セマフォを保持したまま
     /// 呼んだ <see cref="DbContext.BeginTransactionAsync"/> が未完了で戻った時点で、セマフォの待機は登録済み（UI スレッド
-    /// 以外からの呼び出しでは、セマフォより前に未完了の待機は無い）。それを確かめてから取り消す。
+    /// 以外からの呼び出しでは、セマフォより前の待機点は同期的に完了する。<c>DbContext.BeginTransactionCoreAsync</c> のコメント参照）。
+    /// それを確かめてから取り消す。
     /// 例外の型は派生型も許す（取り消しを表すのは <see cref="OperationCanceledException"/> とその派生型で、どちらを投げるかは
     /// BCL の内部の事情）。代わりに、取り消したのがこのトークンであることを表明する。
     /// 失敗の理由には観測値（待ち始めた時刻・戻った時刻と状態・取り消した時刻・待機が終わった時刻と結果）を載せる（#2476 と同じ考え方）。
@@ -338,9 +339,16 @@ public class DbContextConnectionLeaseTests : IDisposable
         finally
         {
             holder.Dispose();
-            if (waitingForCleanup is { Status: TaskStatus.RanToCompletion })
+
+            // 取り消しが効かない実装では、保持を返すと待機がセマフォを取って完了する。完了はスレッドプールへ回るので、
+            // 直後に状態を見るとまだ未完了のことが多い。短い上限付きで待ってから破棄する（止まらないよう上限を置く）
+            if (waitingForCleanup is not null)
             {
-                (await waitingForCleanup).Dispose();
+                await Task.WhenAny(waitingForCleanup, Task.Delay(TimeSpan.FromSeconds(5)));
+                if (waitingForCleanup.Status == TaskStatus.RanToCompletion)
+                {
+                    (await waitingForCleanup).Dispose();
+                }
             }
         }
 
