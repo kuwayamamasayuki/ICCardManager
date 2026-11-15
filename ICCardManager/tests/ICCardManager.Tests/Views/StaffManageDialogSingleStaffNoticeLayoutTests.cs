@@ -76,4 +76,39 @@ public class StaffManageDialogSingleStaffNoticeLayoutTests
             .Should().NotContain(new[] { "IsEditing", "IsNewStaff" },
                 "注意は一覧を見ている間（編集していないとき）にも出す必要がある");
     }
+
+    [Fact]
+    public void 注意の枠は左ペインの独立した行に置き_見出し_一覧_ボタン行と重ならないこと()
+    {
+        var xaml = ReadXaml();
+        var leftPanes = XamlElementInspection.EnumerateElementsIncludingNested(xaml, "Grid")
+            .Where(g => XamlElementInspection.GetAttribute(g.StartTag, "Grid.Column") == "0")
+            .ToList();
+        leftPanes.Should().ContainSingle("左ペイン（Grid.Column=\"0\" の Grid）は 1 つ");
+        var left = leftPanes[0];
+
+        var rowsStart = left.Body.IndexOf("<Grid.RowDefinitions>", System.StringComparison.Ordinal);
+        var rowsEnd = left.Body.IndexOf("</Grid.RowDefinitions>", System.StringComparison.Ordinal);
+        rowsStart.Should().BeGreaterThanOrEqualTo(0);
+        var rowCount = System.Text.RegularExpressions.Regex.Matches(
+            left.Body.Substring(rowsStart, rowsEnd - rowsStart), "<RowDefinition\\b").Count;
+        rowCount.Should().Be(4, "見出し・注意・一覧・ボタン行の 4 行");
+
+        string? RowOf(System.Func<XamlElementInspection.XamlElementSpan, bool> predicate)
+        {
+            var tag = XamlElementInspection.EnumerateStartTags(left.Body).First(predicate);
+            return XamlElementInspection.GetAttribute(tag.StartTag, "Grid.Row");
+        }
+
+        var header = RowOf(t => t.StartTag.StartsWith("<StackPanel", System.StringComparison.Ordinal)) ?? "0";
+        var notice = RowOf(t => XamlElementInspection.GetAttribute(t.StartTag, "x:Name") == "SingleStaffNotice");
+        var list = RowOf(t => XamlElementInspection.GetAttribute(t.StartTag, "x:Name") == "StaffDataGrid");
+        var buttons = RowOf(t => t.StartTag.StartsWith("<DockPanel", System.StringComparison.Ordinal));
+
+        notice.Should().Be("1", "注意は見出しと一覧の間の行に置く");
+        list.Should().Be("2");
+        buttons.Should().Be("3");
+        new[] { header, notice, list, buttons }.Should().OnlyHaveUniqueItems(
+            "同じ行に置くと注意が一覧やボタンに重なって読めなくなる");
+    }
 }
