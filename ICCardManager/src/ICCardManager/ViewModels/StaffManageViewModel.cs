@@ -2,6 +2,7 @@
 using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
+using System.Collections.Specialized;
 using System.Linq;
 using System.Runtime.CompilerServices;
 using System.Threading.Tasks;
@@ -65,7 +66,37 @@ namespace ICCardManager.ViewModels
         private readonly IDispatcherService _dispatcherService;
 
         [ObservableProperty]
+        [NotifyPropertyChangedFor(nameof(IsSingleStaffNoticeVisible))]
         private ObservableCollection<StaffDto> _staffList = new();
+
+        /// <summary>
+        /// 登録済みの職員が 1 人だけのときに一覧の上へ出す注意（Issue #2467）
+        /// </summary>
+        /// <remarks>
+        /// 職員の登録・削除・復元・差し替え・職員一覧の CSV 取り込みなどは、登録済みの職員の職員証による認証を要する
+        /// （免除は登録済みの職員が 0 人のときだけ）。登録済みの職員が 1 人だけでその職員証を紛失すると、
+        /// 画面の操作では誰も認証できなくなり、復旧には IT 担当者によるデータベースの修正が要る。
+        /// </remarks>
+        internal const string SingleStaffNotice =
+            "登録済みの職員が 1 人だけです。職員の登録・削除などには登録済みの職員の職員証による認証が要るため、" +
+            "その職員証を紛失すると、この画面では誰も認証できなくなります。" +
+            "紛失に備えて、もう 1 人以上の職員を登録してください。";
+
+        /// <summary>
+        /// <see cref="SingleStaffNotice"/> を画面へ束縛するためのプロパティ（読み上げの名前にも使う）
+        /// </summary>
+        public string SingleStaffNoticeText => SingleStaffNotice;
+
+        /// <summary>
+        /// 登録済みの職員が 1 人だけで、<see cref="SingleStaffNotice"/> を表示するか（Issue #2467）
+        /// </summary>
+        /// <remarks>
+        /// 一覧（<see cref="StaffList"/>）は登録済み（未削除）の職員だけを載せる（<c>IStaffRepository.GetAllAsync</c>）。
+        /// 0 人（初回セットアップ。登録の認証は免除される）と 2 人以上では出さない。
+        /// 登録・削除・復元のあとの再読込（<see cref="LoadStaffAsync"/> の Clear と Add）にも、
+        /// 一覧そのものの差し替えにも追随する（<see cref="OnStaffListCollectionChanged"/> / <see cref="OnStaffListChanged(ObservableCollection{StaffDto}?, ObservableCollection{StaffDto})"/>）。
+        /// </remarks>
+        public bool IsSingleStaffNoticeVisible => StaffList.Count == 1;
 
         [ObservableProperty]
         private StaffDto? _selectedStaff;
@@ -197,6 +228,33 @@ namespace ICCardManager.ViewModels
 
             // カード読み取りイベント
             _cardReader.CardRead += OnCardRead;
+
+            // Issue #2467: 一覧の人数の変化に「1 人だけ」の注意を追随させる
+            StaffList.CollectionChanged += OnStaffListCollectionChanged;
+        }
+
+        /// <summary>
+        /// 一覧の中身が変わったとき、「1 人だけ」の注意の表示を更新する（Issue #2467）
+        /// </summary>
+        private void OnStaffListCollectionChanged(object? sender, NotifyCollectionChangedEventArgs e)
+        {
+            OnPropertyChanged(nameof(IsSingleStaffNoticeVisible));
+        }
+
+        /// <summary>
+        /// 一覧そのものが差し替えられたとき、変更の購読を新しい一覧へ移す（Issue #2467）
+        /// </summary>
+        partial void OnStaffListChanged(ObservableCollection<StaffDto>? oldValue, ObservableCollection<StaffDto> newValue)
+        {
+            if (oldValue != null)
+            {
+                oldValue.CollectionChanged -= OnStaffListCollectionChanged;
+            }
+
+            if (newValue != null)
+            {
+                newValue.CollectionChanged += OnStaffListCollectionChanged;
+            }
         }
 
         /// <summary>
