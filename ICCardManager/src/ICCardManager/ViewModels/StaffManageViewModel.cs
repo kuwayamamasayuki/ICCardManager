@@ -79,7 +79,7 @@ namespace ICCardManager.ViewModels
         /// </remarks>
         internal const string SingleStaffNotice =
             "登録済みの職員が 1 人だけです。職員の登録・削除などには登録済みの職員の職員証による認証が要るため、" +
-            "その職員証を紛失すると、この画面では誰も認証できなくなります。" +
+            "その職員証を紛失すると、画面の操作では誰も認証できなくなります。" +
             "紛失に備えて、もう 1 人以上の職員を登録してください。";
 
         /// <summary>

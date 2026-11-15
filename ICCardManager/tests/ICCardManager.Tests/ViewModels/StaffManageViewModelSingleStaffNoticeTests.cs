@@ -251,11 +251,15 @@ public class StaffManageViewModelSingleStaffNoticeTests : IDisposable
             new() { StaffIdm = "FFFF000000000001", Name = "職員1" }
         };
 
-        _viewModel.StaffList = replaced;
-        _viewModel.IsSingleStaffNoticeVisible.Should().BeTrue();
-
         var changes = new List<string?>();
         _viewModel.PropertyChanged += (_, e) => changes.Add(e.PropertyName);
+
+        // 差し替えそのものでも表示の再評価を知らせる（[NotifyPropertyChangedFor]）
+        _viewModel.StaffList = replaced;
+        changes.Should().Contain(nameof(StaffManageViewModel.IsSingleStaffNoticeVisible),
+            "一覧を差し替えると人数が変わり得るので、画面へ表示の再評価を知らせる");
+        _viewModel.IsSingleStaffNoticeVisible.Should().BeTrue();
+        changes.Clear();
 
         // 古い一覧への追加は表示に関係しない（購読が新しい一覧へ移っている）
         oldList.Add(new StaffDto { StaffIdm = "FFFF000000000009", Name = "古い一覧の職員" });
@@ -276,7 +280,7 @@ public class StaffManageViewModelSingleStaffNoticeTests : IDisposable
     {
         StaffManageViewModel.SingleStaffNotice.Should().Be(
             "登録済みの職員が 1 人だけです。職員の登録・削除などには登録済みの職員の職員証による認証が要るため、" +
-            "その職員証を紛失すると、この画面では誰も認証できなくなります。" +
+            "その職員証を紛失すると、画面の操作では誰も認証できなくなります。" +
             "紛失に備えて、もう 1 人以上の職員を登録してください。");
         StaffManageViewModel.SingleStaffNotice.Should().MatchRegex("してください。$");
         _viewModel.SingleStaffNoticeText.Should().Be(StaffManageViewModel.SingleStaffNotice,
