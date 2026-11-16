@@ -716,6 +716,9 @@ public class StaffManageViewModelAuthenticationHoldTests : IDisposable
 
         _viewModel.StatusMessage.Should().Be("更新しました");
         _viewModel.HeldOperatorName.Should().Be("認証 太郎（改姓）", "次の操作まで旧氏名を表示し続けない");
+        _logger.Entries.Should().ContainSingle(e => e.Level == LogLevel.Information
+                && e.Message.Contains("氏名が変わっていたため") && e.Message.Contains(IdmMasker.Mask(HolderIdm)!),
+            "この画面での変更に追随したときも、DB の確認で追随したときと同じく記録する（レビュー 5 回目）");
         changes.Should().Equal(new[] { StaffManageViewModel.BuildHeldAuthenticationText("認証 太郎（改姓）") },
             "表示の変更は 1 回だけ通知する");
     }
@@ -902,6 +905,70 @@ public class StaffManageViewModelAuthenticationHoldTests : IDisposable
 
         _viewModel.IsAuthenticationHeld.Should().BeFalse("閉じた画面では保持しない");
         _timerFactory.LastCreatedTimer.Should().BeNull("閉じた画面のタイマーを作らない・動かさない");
+        _staffRepositoryMock.Verify(r => r.InsertAsync(It.IsAny<Staff>(), It.IsAny<SQLiteTransaction>()), Times.Never,
+            "閉じた画面から書き込まない（レビュー 5 回目）");
+        _operationLogs.Should().BeEmpty();
+    }
+
+    /// <summary>
+    /// 認証の直後、保持する職員の読み取り（DB）を待つ間に閉じたら、閉じた画面から登録・変更・復元を書き込まない
+    /// （レビュー 5 回目で検出。以前は保持だけをやめて書き込みは続けていた）
+    /// </summary>
+    [Theory]
+    [InlineData("register")]
+    [InlineData("update")]
+    [InlineData("restore-save")]
+    [InlineData("restore-touch")]
+    [InlineData("restore-unregistered-card")]
+    public async Task 認証の直後に保持する職員を読む間に画面を閉じたら書き込まないこと(string path)
+    {
+        var holdRead = new TaskCompletionSource<Staff?>();
+        _staffRepositoryMock.Setup(r => r.GetByIdmAsync(HolderIdm, false)).Returns(holdRead.Task);
+        _staffAuthServiceMock
+            .Setup(a => a.RequestAuthenticationAsync(It.IsAny<string>()))
+            .ReturnsAsync(() => StaffAuthService.CreateAuthenticatedResult(_operatorContext, HolderIdm, HolderName));
+        var deleted = new Staff { StaffIdm = SecondIdm, Name = "削除 次郎", IsDeleted = true, DeletedAt = new DateTime(2026, 4, 1) };
+
+        Task operation;
+        switch (path)
+        {
+            case "register":
+                await EnterNewStaffFormAsync(SecondIdm, "新人 二号");
+                operation = _viewModel.SaveAsync();
+                break;
+            case "update":
+                EnterEditForm("既存 一郎（改姓）");
+                operation = _viewModel.SaveAsync();
+                break;
+            case "restore-save":
+                await EnterNewStaffFormAsync(SecondIdm, "新人 二号");
+                _staffRepositoryMock.Setup(r => r.GetByIdmAsync(SecondIdm, true)).ReturnsAsync(deleted);
+                operation = _viewModel.SaveAsync();
+                break;
+            case "restore-touch":
+                _viewModel.StartNewStaff();
+                _staffRepositoryMock.Setup(r => r.GetByIdmAsync(SecondIdm, true)).ReturnsAsync(deleted);
+                operation = _viewModel.HandleCardReadAsync(SecondIdm);
+                break;
+            default:
+                _staffRepositoryMock.Setup(r => r.GetByIdmAsync(SecondIdm, true)).ReturnsAsync(deleted);
+                operation = _viewModel.StartNewStaffWithIdmAsync(SecondIdm);
+                break;
+        }
+
+        _staffAuthServiceMock.Verify(a => a.RequestAuthenticationAsync(It.IsAny<string>()), Times.Once,
+            "前提: 認証が済み、保持する職員の読み取りを待っている");
+        _viewModel.Cleanup();
+        holdRead.SetResult(new Staff { StaffIdm = HolderIdm, Name = HolderName, Number = "S-000" });
+        await operation;
+
+        _staffRepositoryMock.Verify(r => r.InsertAsync(It.IsAny<Staff>(), It.IsAny<SQLiteTransaction>()), Times.Never);
+        _staffRepositoryMock.Verify(r => r.UpdateAsync(It.IsAny<Staff>(), It.IsAny<SQLiteTransaction>()), Times.Never);
+        _staffRepositoryMock.Verify(r => r.RestoreAsync(It.IsAny<string>(), It.IsAny<SQLiteTransaction>()), Times.Never);
+        _operationLogs.Should().BeEmpty("閉じた画面から操作ログを書かない");
+        _viewModel.IsAuthenticationHeld.Should().BeFalse();
+        _dialogServiceMock.Verify(d => d.ShowInformation(It.IsAny<string>(), It.IsAny<string>()), Times.Never,
+            "閉じた後に案内を出さない");
     }
 
     #endregion

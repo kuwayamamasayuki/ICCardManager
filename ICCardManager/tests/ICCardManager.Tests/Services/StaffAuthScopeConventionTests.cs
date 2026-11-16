@@ -42,7 +42,7 @@ public class StaffAuthScopeConventionTests
     private static readonly Regex BeginSessionCallPattern = new Regex(@"\.BeginSession\(");
 
     /// <summary>認証結果の <c>Enter()</c> の呼び出し（宣言 <c>public StaffAuthResult Enter()</c> はドットを伴わないので一致しない）。</summary>
-    private static readonly Regex EnterCallPattern = new Regex(@"\.\s*Enter\(\s*\)");
+    private static readonly Regex EnterCallPattern = new Regex(@"\.\s*Enter\s*\(\s*\)");
 
     /// <summary>
     /// Issue #2494: 保持している認証から作り直した結果を、その場で <c>Enter()</c> してから <c>using</c> で受ける呼び出し
@@ -226,10 +226,11 @@ public class StaffAuthScopeConventionTests
             "using var e = (await AnyOtherAsync())?.Enter();\n" +
             "using var b = (await _staffAuthService.RequestAuthenticationAsync(\"職員の登録\"))?.Enter();\n" +
             "var c = (await TakeHeldAuthenticationAsync())?.Enter();\n" +
+            "var f = (await TakeHeldAuthenticationAsync())?.Enter ();\n" +
             "using var d = _held.ReissueForNextOperation(name).Enter();\n" +
             "public StaffAuthResult Enter()\n";
 
-        EnterCallPattern.Matches(sample).Count.Should().Be(5, "宣言は呼び出しとして数えない");
+        EnterCallPattern.Matches(sample).Count.Should().Be(6, "宣言は呼び出しとして数えない。名前と括弧の間に空白を置いた形も数える");
         (ScopedAuthCallPattern.Matches(sample).Count + ScopedHeldAuthCallPattern.Matches(sample).Count).Should().Be(2,
             "using で受けない形・await の結果でない形・保持の取り出し以外の引数無しの await は決まった形として数えない");
     }

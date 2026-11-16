@@ -201,6 +201,14 @@ namespace ICCardManager.ViewModels
             {
                 // この画面で本人が職員番号を変えたなら覚え直す（次の操作で「別の職員」と取り違えない）
                 _heldStaffNumber = NormalizeStaffNumber(newNumber);
+                if (!string.Equals(newName, HeldOperatorName, StringComparison.Ordinal))
+                {
+                    // DB の確認で追随するときと同じく、後から見分けられるよう記録する
+                    _logger.LogInformation(
+                        "職員管理画面で保持している職員の氏名が変わっていたため、変更後の氏名で記録します（職員 IDm: {StaffIdm}）",
+                        IdmMasker.Mask(held.Idm));
+                }
+
                 HeldOperatorName = newName;
             }
         }

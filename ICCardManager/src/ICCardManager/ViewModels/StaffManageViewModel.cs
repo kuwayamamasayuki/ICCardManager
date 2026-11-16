@@ -891,6 +891,13 @@ namespace ICCardManager.ViewModels
 
             // Issue #2494: 認証した職員を、画面が閉じるまで（無操作・「認証を解除」で破棄されるまで）保持する
             await HoldAuthenticationAsync(authResult, "職員の登録");
+
+            // Issue #2494: 保持する職員を読む間に画面を閉じたら、閉じた画面から書き込まない
+            if (IsHeldAuthenticationClosed)
+            {
+                return false;
+            }
+
             await write();
             return true;
         }
@@ -927,6 +934,13 @@ namespace ICCardManager.ViewModels
 
             // Issue #2494: 認証した職員を、画面が閉じるまで（無操作・「認証を解除」で破棄されるまで）保持する
             await HoldAuthenticationAsync(authResult, "職員情報の変更");
+
+            // Issue #2494: 保持する職員を読む間に画面を閉じたら、閉じた画面から書き込まない
+            if (IsHeldAuthenticationClosed)
+            {
+                return false;
+            }
+
             await write();
             return true;
         }
@@ -967,6 +981,13 @@ namespace ICCardManager.ViewModels
 
             // Issue #2494: 認証した職員を、画面が閉じるまで（無操作・「認証を解除」で破棄されるまで）保持する
             await HoldAuthenticationAsync(authResult, "職員の復元");
+
+            // Issue #2494: 保持する職員を読む間に画面を閉じたら、閉じた画面から書き込まない
+            if (IsHeldAuthenticationClosed)
+            {
+                return false;
+            }
+
             await write();
             return true;
         }
