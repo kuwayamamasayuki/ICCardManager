@@ -125,6 +125,12 @@ namespace ICCardManager.ViewModels
                 return null;
             }
 
+            // 使う前に期限を確かめる。スリープ復帰直後は Tick がまだ来ておらず、期限の切れた保持が残っている
+            if (ReleaseHeldAuthenticationIfIdleExpired())
+            {
+                return null;
+            }
+
             Staff? current;
             using (BeginBusy("確認中..."))
             {
@@ -141,6 +147,12 @@ namespace ICCardManager.ViewModels
             {
                 // 削除された・職員証が差し替えられた（他のパソコンの操作を含む）。認証を求め直す
                 ReleaseHeldAuthentication();
+                return null;
+            }
+
+            // 確かめている間に期限が来ていたら使わない（延長しない）
+            if (ReleaseHeldAuthenticationIfIdleExpired())
+            {
                 return null;
             }
 
@@ -195,7 +207,8 @@ namespace ICCardManager.ViewModels
 
             _heldAuthentication = authResult;
             HeldOperatorName = authResult.StaffName;
-            ResetHeldAuthenticationIdleCountdown();
+            // 新しく保持するので、期限の判定を経ずに今から数える（前の保持の期限は関係ない）
+            _heldAuthenticationLastActivityAt = _clock.Now;
 
             var timer = _heldAuthenticationTimer ??= CreateHeldAuthenticationTimer();
             timer.Stop();
@@ -221,12 +234,49 @@ namespace ICCardManager.ViewModels
             ResetHeldAuthenticationIdleCountdown();
         }
 
+        /// <summary>
+        /// 操作があった時刻を記録して、無操作の時間を数え直す（保持していなければ何もしない）
+        /// </summary>
+        /// <remarks>
+        /// 数え直す前に期限を確かめ、切れていれば延長せずに破棄する。スリープ復帰の直後（Tick が来る前）に別の職員が
+        /// キーを押すと、切れているはずの保持が延びて、その職員の操作が認証した職員の名前で記録されていた
+        /// （fail-open。自動のセキュリティレビューで検出）。
+        /// </remarks>
         private void ResetHeldAuthenticationIdleCountdown()
         {
-            if (_heldAuthentication != null)
+            if (_heldAuthentication == null || ReleaseHeldAuthenticationIfIdleExpired())
             {
-                _heldAuthenticationLastActivityAt = _clock.Now;
+                return;
             }
+
+            _heldAuthenticationLastActivityAt = _clock.Now;
+        }
+
+        /// <summary>
+        /// 無操作の期限が切れていれば保持を破棄する（期限の判定はここ 1 か所）
+        /// </summary>
+        /// <returns>破棄した（期限が切れていた）なら true。保持していない・期限内なら false</returns>
+        /// <remarks>
+        /// 最後の操作の時刻からの経過時間が <see cref="HeldAuthenticationIdleTimeoutSeconds"/> 秒以上なら期限切れ。
+        /// <b>経過時間が負（時計が戻った）ときも期限切れとして扱う</b> — 経過を確かめられないまま保持を延ばさない
+        /// （手動の時刻合わせ・時刻同期で戻った場合は、認証し直せば済む安全側へ倒す）。
+        /// 判定は Tick・操作の記録・保持の使用のすべてで、延長や使用の前に行う。
+        /// </remarks>
+        private bool ReleaseHeldAuthenticationIfIdleExpired()
+        {
+            if (_heldAuthentication == null)
+            {
+                return false;
+            }
+
+            var idle = _clock.Now - _heldAuthenticationLastActivityAt;
+            if (idle >= TimeSpan.Zero && idle < TimeSpan.FromSeconds(HeldAuthenticationIdleTimeoutSeconds))
+            {
+                return false;
+            }
+
+            ReleaseHeldAuthentication();
+            return true;
         }
 
         private ITimer CreateHeldAuthenticationTimer()
@@ -245,13 +295,8 @@ namespace ICCardManager.ViewModels
                 return;
             }
 
-            // 経過時間で判定する（スリープからの復帰で Tick が飛んでも、最初の Tick で破棄する）。
-            // 時計が戻った（経過時間が負）ときも破棄する — 経過を確かめられないまま保持を延ばさない
-            var idle = _clock.Now - _heldAuthenticationLastActivityAt;
-            if (idle < TimeSpan.Zero || idle >= TimeSpan.FromSeconds(HeldAuthenticationIdleTimeoutSeconds))
-            {
-                ReleaseHeldAuthentication();
-            }
+            // 経過時間で判定する（スリープからの復帰で Tick が飛んでも、最初の Tick で破棄する）
+            ReleaseHeldAuthenticationIfIdleExpired();
         }
 
         /// <summary>

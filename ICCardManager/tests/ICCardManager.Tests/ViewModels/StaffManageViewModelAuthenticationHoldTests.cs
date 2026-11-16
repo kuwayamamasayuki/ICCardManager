@@ -561,6 +561,85 @@ public class StaffManageViewModelAuthenticationHoldTests : IDisposable
         _viewModel.IsAuthenticationHeld.Should().BeFalse("経過を確かめられないまま保持を延ばさない");
     }
 
+    /// <summary>
+    /// スリープ復帰の直後（Tick が来る前）の操作は、切れているはずの保持を延ばさない（自動のセキュリティレビューで検出。
+    /// 延ばすと、その後の別の職員の操作が認証した職員の名前で記録される）
+    /// </summary>
+    [Fact]
+    public async Task 期限が切れた後の画面への操作では保持を延ばさず破棄すること()
+    {
+        await HoldByFirstRegistrationAsync();
+        _clock.Now += IdleTimeout;
+
+        _viewModel.NotifyUserActivity();
+
+        _viewModel.IsAuthenticationHeld.Should().BeFalse("Tick を待たずに、操作の時点で期限を確かめて破棄する");
+        _clock.Now += TimeSpan.FromSeconds(1);
+        HoldTimer.SimulateTick();
+        _viewModel.IsAuthenticationHeld.Should().BeFalse("延長されていない");
+    }
+
+    [Fact]
+    public async Task 期限が切れた後に保持を使う操作では認証を求めること()
+    {
+        await HoldByFirstRegistrationAsync();
+        _clock.Now += IdleTimeout + TimeSpan.FromMinutes(30);
+        ArrangeAuthenticationSucceeds("職員の登録", OtherAuthIdm, OtherAuthName);
+        _staffRepositoryMock.Setup(r => r.GetByIdmAsync(OtherAuthIdm, false)).ReturnsAsync(new Staff
+        {
+            StaffIdm = OtherAuthIdm,
+            Name = OtherAuthName
+        });
+
+        // Tick を起こさずに保持を使う操作をする（スリープ復帰の直後）
+        await RegisterAsync(SecondIdm, "新人 二号");
+
+        _staffAuthServiceMock.Verify(a => a.RequestAuthenticationAsync("職員の登録"), Times.Exactly(2),
+            "期限の切れた保持は使わず、認証ダイアログを出す");
+        SingleLogFor(SecondIdm, OperationLogger.Actions.Insert).OperatorIdm.Should().Be(OtherAuthIdm,
+            "期限の切れた保持の職員の名前では記録しない");
+        _staffRepositoryMock.Verify(r => r.GetByIdmAsync(HolderIdm, false), Times.Never,
+            "期限は保持している職員の確認（DB の読み取り）より前に確かめる");
+    }
+
+    /// <summary>
+    /// 保持している職員の確認（DB の読み取り）を待つ間に期限が来たら、確認から戻っても保持を使わない
+    /// </summary>
+    [Fact]
+    public async Task 保持している職員の確認を待つ間に期限が来たら認証を求めること()
+    {
+        await HoldByFirstRegistrationAsync();
+        ArrangeAuthenticationSucceeds("職員の登録", OtherAuthIdm, OtherAuthName);
+        _staffRepositoryMock.Setup(r => r.GetByIdmAsync(OtherAuthIdm, false)).ReturnsAsync(new Staff
+        {
+            StaffIdm = OtherAuthIdm,
+            Name = OtherAuthName
+        });
+        _staffRepositoryMock.Setup(r => r.GetByIdmAsync(HolderIdm, false))
+            .Callback(() => _clock.Now += IdleTimeout)
+            .ReturnsAsync(new Staff { StaffIdm = HolderIdm, Name = HolderName });
+
+        await RegisterAsync(SecondIdm, "新人 二号");
+
+        _staffAuthServiceMock.Verify(a => a.RequestAuthenticationAsync("職員の登録"), Times.Exactly(2));
+        SingleLogFor(SecondIdm, OperationLogger.Actions.Insert).OperatorIdm.Should().Be(OtherAuthIdm);
+    }
+
+    [Fact]
+    public async Task 期限の手前の画面への操作では保持を延ばすこと()
+    {
+        await HoldByFirstRegistrationAsync();
+        _clock.Now += IdleTimeout - TimeSpan.FromSeconds(1);
+
+        _viewModel.NotifyUserActivity();
+        var activity = _clock.Now;
+
+        _viewModel.IsAuthenticationHeld.Should().BeTrue();
+        _clock.Now = activity + IdleTimeout - TimeSpan.FromSeconds(1);
+        HoldTimer.SimulateTick();
+        _viewModel.IsAuthenticationHeld.Should().BeTrue("期限の手前の操作で延長される");
+    }
+
     [Fact]
     public async Task 画面への操作があれば無操作の時間を数え直すこと()
     {
