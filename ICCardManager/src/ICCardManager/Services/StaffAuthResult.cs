@@ -90,6 +90,36 @@ namespace ICCardManager.Services
         }
 
         /// <summary>
+        /// 同じ職員の、次の 1 操作のための認証結果を作る（Issue #2494）。操作者セッションはまだ開始しない。
+        /// </summary>
+        /// <param name="staffName">記録する氏名（保持している間に氏名が変わっていれば、確かめ直した現在の氏名）</param>
+        /// <returns>
+        /// 新しい認証結果。この結果と同じく、その場で <see cref="Enter"/> して <c>using</c> で受けること
+        /// （静的検査 <c>StaffAuthScopeConventionTests</c>）。
+        /// </returns>
+        /// <remarks>
+        /// <para>
+        /// 職員管理画面（F2）は、最初に認証した職員を画面が閉じるまで保持し、2 回目以降の登録・変更・復元をその職員の
+        /// 操作として記録する。この結果自身は最初の操作の終わりに破棄され（<see cref="Enter"/> は 1 回しか効かない）、
+        /// 操作と操作の間に操作者セッションを残さない（Issue #2260）。次の操作は、ここで作る新しい結果で
+        /// その操作の間だけセッションを開始する。
+        /// </para>
+        /// <para>
+        /// 認証の有効期限は持たない。保持をいつ破棄するか（無操作・「認証を解除」・画面を閉じる・職員が無効になった）は
+        /// 保持している画面が決める。
+        /// </para>
+        /// </remarks>
+        internal StaffAuthResult ReissueForNextOperation(string staffName)
+        {
+            if (_operatorContext == null)
+            {
+                return new StaffAuthResult { Idm = Idm, StaffName = staffName };
+            }
+
+            return new StaffAuthResult(Idm, staffName, _operatorContext);
+        }
+
+        /// <summary>
         /// 認証した操作の終了。操作者セッションを終える（2 回目以降の呼び出しは何もしない）。
         /// </summary>
         public void Dispose()

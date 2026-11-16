@@ -36,6 +36,7 @@
             <Grid.RowDefinitions>
                 <RowDefinition Height="Auto"/>
                 <RowDefinition Height="Auto"/>
+                <RowDefinition Height="Auto"/>
                 <RowDefinition Height="*"/>
                 <RowDefinition Height="Auto"/>
             </Grid.RowDefinitions>
@@ -53,12 +54,40 @@
                            Margin="5,0,0,0"/>
             </StackPanel>
 
+            <!-- Issue #2494: 職員証の認証の保持の状態（常に表示）。誰の名前で記録されるかを、操作する職員が見て分かるようにする。
+                 保持している間だけ「認証を解除」を出す。文字サイズ「特大」でも切れないよう折り返す。 -->
+            <Border x:Name="HeldAuthenticationPanel"
+                    Grid.Row="1"
+                    Background="{DynamicResource ReturnBackgroundBrush}"
+                    CornerRadius="4"
+                    Padding="10"
+                    Margin="0,0,0,10">
+                <StackPanel>
+                    <TextBlock x:Name="HeldAuthenticationText"
+                               Text="{Binding HeldAuthenticationText, Mode=OneWay}"
+                               TextWrapping="Wrap"
+                               Foreground="{DynamicResource InfoTextBrush}"
+                               AutomationProperties.Name="{Binding HeldAuthenticationText, Mode=OneWay}"
+                               AutomationProperties.LiveSetting="Polite"/>
+                    <Button x:Name="ReleaseHeldAuthenticationButton"
+                            Content="認証を解除"
+                            Command="{Binding ReleaseHeldAuthenticationCommand}"
+                            Visibility="{Binding IsAuthenticationHeld, Converter={StaticResource BoolToVisibilityConverter}}"
+                            HorizontalAlignment="Left"
+                            Padding="15,5"
+                            Margin="0,8,0,0"
+                            AutomationProperties.Name="認証を解除"
+                            AutomationProperties.HelpText="この画面で保持している職員証の認証を解除します。次に登録・変更・復元を保存するときは、職員証の認証を求めます。"
+                            ToolTip="保持している職員証の認証を解除"/>
+                </StackPanel>
+            </Border>
+
             <!-- Issue #2467: 登録済みの職員が 1 人だけのときの注意（0 人・2 人以上では出さない）。
                  職員の登録・削除などの認証には登録済みの職員の職員証が要るため、その 1 枚を紛失すると画面では誰も認証できない。
                  既存の案内枠（WarningBackgroundBrush ＋ HintForegroundBrush ＋ アイコン）に倣い、色だけに頼らず ⚠ と文言で伝える。
                  読み上げは文言（アイコンを除く）を Name に持たせる。 -->
             <Border x:Name="SingleStaffNotice"
-                    Grid.Row="1"
+                    Grid.Row="2"
                     Background="{DynamicResource WarningBackgroundBrush}"
                     CornerRadius="4"
                     Padding="10"
@@ -75,7 +104,7 @@
 
             <!-- 職員一覧 -->
             <DataGrid x:Name="StaffDataGrid"
-                      Grid.Row="2"
+                      Grid.Row="3"
                       ItemsSource="{Binding StaffList}"
                       SelectedItem="{Binding SelectedStaff}"
                       AutoGenerateColumns="False"
@@ -97,7 +126,7 @@
             </DataGrid>
 
             <!-- ボタン -->
-            <DockPanel Grid.Row="3" Margin="0,10,0,0" LastChildFill="True">
+            <DockPanel Grid.Row="4" Margin="0,10,0,0" LastChildFill="True">
                 <!-- 完了ボタン（右端固定）。
                      Issue #2080: IsCancel="True" は付けない。付けると編集フォームに
                      入力している最中の Escape でもダイアログごと閉じて入力が失われる。

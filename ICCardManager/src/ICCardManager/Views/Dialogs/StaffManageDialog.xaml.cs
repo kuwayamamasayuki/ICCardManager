@@ -1,3 +1,4 @@
+#nullable enable
 using System;
 using System.Collections.Generic;
 using System.ComponentModel;
@@ -25,6 +26,9 @@ namespace ICCardManager.Views.Dialogs
         private bool _focusRequestPending;
         private bool _contentRendered;
 
+        /// <summary>最後に読み上げた職員証の認証の保持の表示（Issue #2494。同じ文言を繰り返し読み上げない）</summary>
+        private string? _lastAnnouncedHeldAuthenticationText;
+
         public StaffManageDialog(StaffManageViewModel viewModel)
         {
             InitializeComponent();
@@ -37,6 +41,13 @@ namespace ICCardManager.Views.Dialogs
             _viewModel.PropertyChanged += ViewModel_PropertyChanged;
             _viewModel.RequestNameFocus += ViewModel_RequestNameFocus;
             Closed += StaffManageDialog_Closed;
+
+            // Issue #2494: この画面への操作（キー入力・マウスのボタン・ホイール）を、無操作の時間の数え直しとして知らせる。
+            // 入力欄や一覧が処理済みにしたイベントも拾うよう handledEventsToo で受ける。トンネル（Preview）では受けない
+            // （編集フォームの Escape の扱いを EditFormKeyPolicy に一本化している規約の検査と紛れないように。#2080）
+            AddHandler(KeyDownEvent, new KeyEventHandler(Dialog_UserActivity), handledEventsToo: true);
+            AddHandler(MouseDownEvent, new MouseButtonEventHandler(Dialog_UserActivity), handledEventsToo: true);
+            AddHandler(MouseWheelEvent, new MouseWheelEventHandler(Dialog_UserActivity), handledEventsToo: true);
         }
 
         private async void StaffManageDialog_Loaded(object sender, RoutedEventArgs e)
@@ -45,10 +56,10 @@ namespace ICCardManager.Views.Dialogs
             {
                 await _viewModel.InitializeAsync();
                 // IDmが事前に設定されている場合は新規登録モードで開始
-                if (!string.IsNullOrEmpty(_presetIdm))
+                if (_presetIdm is { } presetIdm && !string.IsNullOrEmpty(presetIdm))
                 {
                     // Issue #284対応: タッチ時点で削除済み/登録済みチェックを行う
-                    var shouldClose = await _viewModel.StartNewStaffWithIdmAsync(_presetIdm);
+                    var shouldClose = await _viewModel.StartNewStaffWithIdmAsync(presetIdm);
                     if (shouldClose)
                     {
                         // 削除済み職員の復元完了、または登録済み職員の場合はダイアログを閉じる
@@ -186,6 +197,19 @@ namespace ICCardManager.Views.Dialogs
         /// </summary>
         private void ViewModel_PropertyChanged(object sender, PropertyChangedEventArgs e)
         {
+            // Issue #2494: 認証の保持の表示が変わった（認証して保持した・「認証を解除」・無操作で解除・氏名の変更）ことを
+            // スクリーンリーダーへ知らせる。LiveSetting だけでは LiveRegionChanged は発火しない（#2142）
+            // 通知は ViewModel が文言の変わったときだけ上げる。View でも同じ文言の読み上げを繰り返さない（二重の守り）
+            if (e.PropertyName == nameof(StaffManageViewModel.HeldAuthenticationText))
+            {
+                var text = _viewModel.HeldAuthenticationText;
+                if (!string.Equals(text, _lastAnnouncedHeldAuthenticationText, StringComparison.Ordinal))
+                {
+                    _lastAnnouncedHeldAuthenticationText = text;
+                    LiveRegionAnnouncer.Announce(HeldAuthenticationText, "職員証の認証の保持のスクリーンリーダー通知");
+                }
+            }
+
             if (e.PropertyName == nameof(StaffManageViewModel.NewlyRegisteredIdm)
                 && _viewModel.NewlyRegisteredIdm != null)
             {
@@ -227,6 +251,19 @@ namespace ICCardManager.Views.Dialogs
         private void Dialog_KeyDown(object sender, KeyEventArgs e)
         {
             EditFormKeyPolicy.HandleEscape(this, _viewModel, e);
+        }
+
+        /// <summary>
+        /// Issue #2494: この画面へのキー入力・マウスのボタン・ホイールの操作を「操作があった」として ViewModel へ知らせる
+        /// （無操作が続いたときに保持している職員証の認証を破棄する時間を数え直す）。
+        /// </summary>
+        /// <remarks>
+        /// コンストラクタで handledEventsToo を付けて登録する（入力欄や一覧が処理済みにしたイベントも拾う）。
+        /// マウスの移動は操作とみなさない（席を離れた後にマウスが触れただけで保持が延びないように）。イベントは処理済みにしない。
+        /// </remarks>
+        private void Dialog_UserActivity(object sender, InputEventArgs e)
+        {
+            _viewModel.NotifyUserActivity();
         }
     }
 }

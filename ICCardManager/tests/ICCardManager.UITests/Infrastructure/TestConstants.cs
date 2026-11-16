@@ -762,6 +762,29 @@ namespace ICCardManager.UITests.Infrastructure
         [NotUiaName]
         public const string StaffCardReplacementConfirmTitle = "職員証の差し替え";
 
+        /// <summary>職員管理ダイアログの「認証を解除」ボタン（Issue #2494。職員証の認証を保持している間だけ表示）。</summary>
+        [UiaName]
+        public const string StaffReleaseHeldAuthenticationButton = "認証を解除";
+
+        /// <summary>職員管理ダイアログの備考の入力欄。</summary>
+        [UiaName]
+        public const string StaffNoteTextBox = "備考";
+
+        // 認証の保持の表示は文言が名前になる TextBlock のため、AutomationId（x:Name）で探す（Issue #2494）。
+        /// <summary>職員管理ダイアログの職員証の認証の保持の表示の AutomationId。</summary>
+        [NotUiaName]
+        public const string StaffHeldAuthenticationTextId = "HeldAuthenticationText";
+
+        // 表示の文言の書き出し（StaffManageViewModel.BuildHeldAuthenticationText / NoHeldAuthenticationText）。
+        // TextBlock の本文の照合に使う値で、AutomationProperties の値そのものではない。
+        /// <summary>認証を保持しているときの表示の書き出し（後ろに職員の氏名が続く）。</summary>
+        [NotUiaName]
+        public const string StaffHeldAuthenticationPrefix = "認証中: ";
+
+        /// <summary>認証を保持していないときの表示の書き出し。</summary>
+        [NotUiaName]
+        public const string StaffNoHeldAuthenticationPrefix = "職員証の認証: なし";
+
         // 削除済み職員の復元の確認も Win32 の MessageBox で、タイトルは StaffManageViewModel が渡す文字列そのもの。
         /// <summary>削除済みの職員証を読み取ったときの復元の確認 MessageBox のタイトル（#284）。</summary>
         [NotUiaName]
