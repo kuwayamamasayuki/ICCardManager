@@ -300,6 +300,39 @@ public class StaffManageViewModelAuthenticationHoldTests : IDisposable
             "保持するのは職員であってセッションではない。操作が終わったらスコープを閉じる");
     }
 
+    /// <summary>
+    /// 職員証が他のパソコンで差し替えられ、古い職員証が別の職員として登録し直された（同じ IDm・別の職員番号）なら、
+    /// 保持のまま別の職員の名前で記録しない（レビュー 4 回目で検出）
+    /// </summary>
+    [Theory]
+    [InlineData("S-777")]
+    [InlineData("")]
+    public async Task 同じIDmでも職員番号が保持したときと違えば保持を破棄して認証を求め直すこと(string otherNumber)
+    {
+        await HoldByFirstRegistrationAsync();
+        _staffRepositoryMock.Setup(r => r.GetByIdmAsync(HolderIdm, false)).ReturnsAsync(new Staff
+        {
+            StaffIdm = HolderIdm,
+            Name = "別人 三郎",
+            Number = otherNumber
+        });
+        ArrangeAuthenticationSucceeds("職員の登録", OtherAuthIdm, OtherAuthName);
+        _staffRepositoryMock.Setup(r => r.GetByIdmAsync(OtherAuthIdm, false)).ReturnsAsync(new Staff
+        {
+            StaffIdm = OtherAuthIdm,
+            Name = OtherAuthName
+        });
+
+        await RegisterAsync(SecondIdm, "新人 二号");
+
+        _staffAuthServiceMock.Verify(a => a.RequestAuthenticationAsync("職員の登録"), Times.Exactly(2),
+            "職員番号が違えば別の職員とみなす（片方だけ空のときも安全側で別の職員とみなす）");
+        var log = SingleLogFor(SecondIdm, OperationLogger.Actions.Insert);
+        log.OperatorIdm.Should().Be(OtherAuthIdm);
+        log.OperatorName.Should().NotBe("別人 三郎");
+        _logger.Entries.Should().Contain(e => e.Message.Contains("同じ職員証の職員の職員番号が保持したときと違う"));
+    }
+
     [Fact]
     public async Task 保持している職員の氏名が変わっていたら_現在の氏名で記録し表示も追随すること()
     {
@@ -310,6 +343,9 @@ public class StaffManageViewModelAuthenticationHoldTests : IDisposable
 
         SingleLogFor(SecondIdm, OperationLogger.Actions.Insert).OperatorName.Should().Be("認証 太郎（改姓）");
         _viewModel.HeldOperatorName.Should().Be("認証 太郎（改姓）");
+        _logger.Entries.Should().ContainSingle(e => e.Level == LogLevel.Information
+                && e.Message.Contains("氏名が変わっていたため") && e.Message.Contains(IdmMasker.Mask(HolderIdm)!),
+            "同じ職員番号で氏名だけ変わったときは追随し、そのことをログに残す");
         _staffAuthServiceMock.Verify(a => a.RequestAuthenticationAsync(It.IsAny<string>()), Times.Once);
     }
 
@@ -494,6 +530,35 @@ public class StaffManageViewModelAuthenticationHoldTests : IDisposable
         _viewModel.HeldAuthenticationText.Should().Be(StaffManageViewModel.NoHeldAuthenticationText);
         _logger.Entries.Should().Contain(e => e.Level == LogLevel.Information
             && e.Message.Contains("解除しました") && e.Message.Contains("保持している職員を削除した"));
+    }
+
+    /// <summary>
+    /// 最後の 1 人（保持している職員）を削除したとき、表示の変更の通知は最終の文言の 1 回だけ（レビュー 4 回目で検出。
+    /// 破棄を再読込の前にすると「なし（認証を求められたら…）」→「なし（職員がいない…）」と 2 回読み上げる）
+    /// </summary>
+    [Fact]
+    public async Task 最後の1人の保持している職員を削除したら表示の通知は最終の文言の1回だけであること()
+    {
+        await HoldByFirstRegistrationAsync();
+        ArrangeAuthenticationSucceeds("職員の削除", OtherAuthIdm, OtherAuthName);
+        SelectStaff(HolderIdm, HolderName);
+        _staffRepositoryMock.Setup(r => r.GetAllAsync()).ReturnsAsync(new List<Staff>());
+        var changes = RecordHeldTextChanges();
+
+        await _viewModel.DeleteAsync();
+
+        changes.Should().Equal(new[] { StaffManageViewModel.NoHeldAuthenticationNoStaffText });
+    }
+
+    [Fact]
+    public async Task 保持している職員の職員証を差し替えたら表示の通知は1回だけであること()
+    {
+        await HoldByFirstRegistrationAsync();
+        var changes = RecordHeldTextChanges();
+
+        await ReplaceStaffCardAsync(HolderIdm, HolderName);
+
+        changes.Should().Equal(new[] { StaffManageViewModel.NoHeldAuthenticationText });
     }
 
     [Fact]
@@ -767,6 +832,62 @@ public class StaffManageViewModelAuthenticationHoldTests : IDisposable
         HoldTimer.IsRunning.Should().BeFalse("閉じた画面のタイマーを動かし直さない");
     }
 
+    /// <summary>
+    /// 変更・復元（3 つの入口）でも、保持している職員の確認を待つ間に閉じたら、認証ダイアログへ進まず書き込まない
+    /// （レビュー 4 回目。登録は上のテスト）
+    /// </summary>
+    [Theory]
+    [InlineData("update")]
+    [InlineData("restore-save")]
+    [InlineData("restore-touch")]
+    [InlineData("restore-unregistered-card")]
+    public async Task 変更と復元でも保持している職員の確認を待つ間に画面を閉じたら認証を求めないこと(string path)
+    {
+        await HoldByFirstRegistrationAsync();
+        var check = new TaskCompletionSource<Staff?>();
+        _staffRepositoryMock.Setup(r => r.GetByIdmAsync(HolderIdm, false)).Returns(check.Task);
+        _dialogServiceMock.Invocations.Clear();
+        var deleted = new Staff { StaffIdm = SecondIdm, Name = "削除 次郎", IsDeleted = true, DeletedAt = new DateTime(2026, 4, 1) };
+
+        Task operation;
+        switch (path)
+        {
+            case "update":
+                EnterEditForm("既存 一郎（改姓）");
+                operation = _viewModel.SaveAsync();
+                break;
+            case "restore-save":
+                await EnterNewStaffFormAsync(SecondIdm, "新人 二号");
+                _staffRepositoryMock.Setup(r => r.GetByIdmAsync(SecondIdm, true)).ReturnsAsync(deleted);
+                operation = _viewModel.SaveAsync();
+                break;
+            case "restore-touch":
+                _viewModel.StartNewStaff();
+                _staffRepositoryMock.Setup(r => r.GetByIdmAsync(SecondIdm, true)).ReturnsAsync(deleted);
+                operation = _viewModel.HandleCardReadAsync(SecondIdm);
+                break;
+            default:
+                _staffRepositoryMock.Setup(r => r.GetByIdmAsync(SecondIdm, true)).ReturnsAsync(deleted);
+                operation = _viewModel.StartNewStaffWithIdmAsync(SecondIdm);
+                break;
+        }
+
+        _viewModel.Cleanup();
+        check.SetResult(new Staff { StaffIdm = HolderIdm, Name = HolderName, Number = "S-000" });
+        await operation;
+
+        _staffAuthServiceMock.Verify(a => a.RequestAuthenticationAsync(It.IsAny<string>()), Times.Once,
+            "閉じた画面の認証ダイアログを出さない（最初の 1 回だけ）");
+        _staffRepositoryMock.Verify(r => r.UpdateAsync(It.IsAny<Staff>(), It.IsAny<SQLiteTransaction>()), Times.Never);
+        _staffRepositoryMock.Verify(r => r.RestoreAsync(It.IsAny<string>(), It.IsAny<SQLiteTransaction>()), Times.Never);
+        _dialogServiceMock.Verify(d => d.ShowInformation(It.IsAny<string>(), It.IsAny<string>()), Times.Never,
+            "閉じた後に「認証が完了しなかった」の案内を出さない");
+        if (path == "restore-unregistered-card")
+        {
+            ((Task<bool>)operation).Result.Should().BeTrue("画面は閉じている（閉じる側として返す）");
+        }
+    }
+
     [Fact]
     public async Task 画面を閉じた後に認証が完了しても保持しないこと()
     {
@@ -878,8 +999,8 @@ public class StaffManageViewModelAuthenticationHoldTests : IDisposable
             "期限の切れた保持は使わず、認証ダイアログを出す");
         SingleLogFor(SecondIdm, OperationLogger.Actions.Insert).OperatorIdm.Should().Be(OtherAuthIdm,
             "期限の切れた保持の職員の名前では記録しない");
-        _staffRepositoryMock.Verify(r => r.GetByIdmAsync(HolderIdm, false), Times.Never,
-            "期限は保持している職員の確認（DB の読み取り）より前に確かめる");
+        _staffRepositoryMock.Verify(r => r.GetByIdmAsync(HolderIdm, false), Times.Once,
+            "読むのは保持したときの 1 回だけ。期限は使う前の確認（DB の読み取り）より前に確かめる");
     }
 
     /// <summary>

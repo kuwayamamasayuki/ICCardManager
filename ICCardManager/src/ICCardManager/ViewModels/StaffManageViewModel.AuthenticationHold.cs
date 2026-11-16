@@ -78,6 +78,20 @@ namespace ICCardManager.ViewModels
         /// </summary>
         private StaffAuthResult? _heldAuthentication;
 
+        /// <summary>
+        /// 保持している職員の職員番号（保持したときに DB から読んだもの。空は空文字）
+        /// </summary>
+        /// <remarks>
+        /// 使う前の確認は IDm で職員を引くので、職員証が他のパソコンで差し替えられ、古い職員証が別の職員として登録し直されると、
+        /// 同じ IDm の別の職員を「保持している職員」として扱ってしまう（レビュー 4 回目で検出）。職員番号が食い違えば別の職員とみなす。
+        /// 比べるのは前後の空白を除いた文字列で、<b>片方だけ空のときも食い違いとみなす</b>（安全側。番号を足した・消しただけでも
+        /// 認証を求め直すが、手間が 1 回増えるだけで記録は誤らない）。両方とも空なら見分けられないので IDm だけで判断する。
+        /// この画面で保持している職員自身の職員番号を変えた場合は、保存の成功時に覚え直す。
+        /// </remarks>
+        private string _heldStaffNumber = string.Empty;
+
+        private static string NormalizeStaffNumber(string? number) => number?.Trim() ?? string.Empty;
+
         /// <summary>無操作の時間を確かめるタイマー（初めて保持するときに作る。1 秒ごと）</summary>
         private ITimer? _heldAuthenticationTimer;
 
@@ -179,12 +193,14 @@ namespace ICCardManager.ViewModels
         /// この画面で職員情報を変更した職員が保持している職員なら、保持している氏名を変更後の氏名にする
         /// （次の操作まで「認証中: 旧氏名」を残さない。レビュー 3 回目で検出）
         /// </summary>
-        private void UpdateHeldOperatorNameIfHeldStaff(string staffIdm, string newName)
+        private void UpdateHeldOperatorNameIfHeldStaff(string staffIdm, string newName, string? newNumber)
         {
             if (_heldAuthentication is { } held
                 && string.Equals(held.Idm, staffIdm, StringComparison.OrdinalIgnoreCase)
                 && !string.IsNullOrWhiteSpace(newName))
             {
+                // この画面で本人が職員番号を変えたなら覚え直す（次の操作で「別の職員」と取り違えない）
+                _heldStaffNumber = NormalizeStaffNumber(newNumber);
                 HeldOperatorName = newName;
             }
         }
@@ -200,6 +216,9 @@ namespace ICCardManager.ViewModels
 
             /// <summary>保持している職員が登録されていない（他のパソコンでの削除・差し替えを含む）</summary>
             StaffNoLongerRegistered,
+
+            /// <summary>同じ IDm の職員の職員番号が保持したときと違う（別の職員として登録し直された等）</summary>
+            StaffNumberChanged,
 
             /// <summary>この画面で保持している職員を削除した</summary>
             StaffDeleted,
@@ -217,6 +236,7 @@ namespace ICCardManager.ViewModels
             HeldAuthenticationReleaseReason.ReleaseButton => "「認証を解除」ボタン",
             HeldAuthenticationReleaseReason.IdleTimeout => "無操作の期限",
             HeldAuthenticationReleaseReason.StaffNoLongerRegistered => "保持している職員が登録されていない",
+            HeldAuthenticationReleaseReason.StaffNumberChanged => "同じ職員証の職員の職員番号が保持したときと違う",
             HeldAuthenticationReleaseReason.StaffDeleted => "保持している職員を削除した",
             HeldAuthenticationReleaseReason.StaffCardReplaced => "保持している職員の職員証を差し替えた",
             HeldAuthenticationReleaseReason.ScreenClosed => "画面を閉じた",
@@ -269,6 +289,13 @@ namespace ICCardManager.ViewModels
                 return null;
             }
 
+            if (!string.Equals(NormalizeStaffNumber(current.Number), _heldStaffNumber, StringComparison.Ordinal))
+            {
+                // 同じ IDm でも職員番号が違えば別の職員（古い職員証が別の職員として登録し直された等）。認証を求め直す
+                ReleaseHeldAuthenticationCore(HeldAuthenticationReleaseReason.StaffNumberChanged);
+                return null;
+            }
+
             // 確かめている間に期限が来ていたら使わない（延長しない）
             if (ReleaseHeldAuthenticationIfIdleExpired())
             {
@@ -276,6 +303,14 @@ namespace ICCardManager.ViewModels
             }
 
             var name = !string.IsNullOrWhiteSpace(current.Name) ? current.Name : held.StaffName;
+            if (!string.Equals(name, HeldOperatorName, StringComparison.Ordinal))
+            {
+                // 同じ職員（IDm と職員番号が同じ）の氏名の変更に追随する。後から見分けられるよう記録する
+                _logger.LogInformation(
+                    "職員管理画面で保持している職員の氏名が変わっていたため、変更後の氏名で記録します（職員 IDm: {StaffIdm}）",
+                    IdmMasker.Mask(held.Idm));
+            }
+
             HeldOperatorName = name;
             ResetHeldAuthenticationIdleCountdown();
             return held.ReissueForNextOperation(name);
@@ -323,7 +358,11 @@ namespace ICCardManager.ViewModels
         /// </summary>
         /// <param name="authResult">認証した職員</param>
         /// <param name="operation">認証した操作の名前（ログに残す）</param>
-        private void HoldAuthentication(StaffAuthResult authResult, string operation)
+        /// <remarks>
+        /// 保持する職員の職員番号を DB から読んで覚える（使う前の確認で、同じ IDm の別の職員を見分けるため）。
+        /// 読めなかった・職員として引けなかったときは保持しない（この操作は認証済みなので行う）。
+        /// </remarks>
+        private async Task HoldAuthenticationAsync(StaffAuthResult authResult, string operation)
         {
             if (_isHeldAuthenticationClosed)
             {
@@ -331,6 +370,29 @@ namespace ICCardManager.ViewModels
                 return;
             }
 
+            Staff? staff;
+            try
+            {
+                using (BeginBusy("確認中..."))
+                {
+                    staff = await _staffRepository.GetByIdmAsync(authResult.Idm);
+                }
+            }
+            catch (Exception ex)
+            {
+                // 保持は手間を減らすための付帯機能。読めなければ保持せず、認証した操作そのものは続ける
+                _logger.LogWarning(ex,
+                    "職員管理画面で職員証の認証を保持できませんでした（職員を読み取れませんでした。職員 IDm: {StaffIdm}）",
+                    IdmMasker.Mask(authResult.Idm));
+                return;
+            }
+
+            if (_isHeldAuthenticationClosed || staff == null)
+            {
+                return;
+            }
+
+            _heldStaffNumber = NormalizeStaffNumber(staff.Number);
             _heldAuthentication = authResult;
             HeldOperatorName = authResult.StaffName;
             // 新しく保持するので、期限の判定を経ずに今から数える（前の保持の期限は関係ない）

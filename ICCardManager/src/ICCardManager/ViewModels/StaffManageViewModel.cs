@@ -804,7 +804,7 @@ namespace ICCardManager.ViewModels
                     if (success)
                     {
                         // Issue #2494: 保持している職員が自分の氏名を変えたら、「認証中」の氏名も変更後にする（別の職員なら変えない）
-                        UpdateHeldOperatorNameIfHeldStaff(staff.StaffIdm, staff.Name);
+                        UpdateHeldOperatorNameIfHeldStaff(staff.StaffIdm, staff.Name, staff.Number);
 
                         await LoadStaffAsync();
                         CancelEdit();
@@ -890,7 +890,7 @@ namespace ICCardManager.ViewModels
             }
 
             // Issue #2494: 認証した職員を、画面が閉じるまで（無操作・「認証を解除」で破棄されるまで）保持する
-            HoldAuthentication(authResult, "職員の登録");
+            await HoldAuthenticationAsync(authResult, "職員の登録");
             await write();
             return true;
         }
@@ -926,7 +926,7 @@ namespace ICCardManager.ViewModels
             }
 
             // Issue #2494: 認証した職員を、画面が閉じるまで（無操作・「認証を解除」で破棄されるまで）保持する
-            HoldAuthentication(authResult, "職員情報の変更");
+            await HoldAuthenticationAsync(authResult, "職員情報の変更");
             await write();
             return true;
         }
@@ -966,7 +966,7 @@ namespace ICCardManager.ViewModels
             }
 
             // Issue #2494: 認証した職員を、画面が閉じるまで（無操作・「認証を解除」で破棄されるまで）保持する
-            HoldAuthentication(authResult, "職員の復元");
+            await HoldAuthenticationAsync(authResult, "職員の復元");
             await write();
             return true;
         }
@@ -1116,10 +1116,18 @@ namespace ICCardManager.ViewModels
                     var success = await _staffManagementService.DeleteAsync(staff);
                     if (success)
                     {
-                        // Issue #2494: 保持している職員を削除したら、使えなくなった保持を破棄する（別の職員なら変えない）
-                        ReleaseHeldAuthenticationIfHeldStaff(staff.StaffIdm, HeldAuthenticationReleaseReason.StaffDeleted);
+                        // Issue #2494: 保持している職員を削除したら、使えなくなった保持を破棄する（別の職員なら変えない）。
+                        // 一覧の再読込の後で破棄する — 先に破棄すると、最後の 1 人を削除したとき「なし」の文言が
+                        // 再読込の前後で 2 回変わって 2 回読み上げられる（レビュー 4 回目で検出）
+                        try
+                        {
+                            await LoadStaffAsync();
+                        }
+                        finally
+                        {
+                            ReleaseHeldAuthenticationIfHeldStaff(staff.StaffIdm, HeldAuthenticationReleaseReason.StaffDeleted);
+                        }
 
-                        await LoadStaffAsync();
                         CancelEdit();
                         // Issue #1759: CancelEdit() は StatusMessage / IsStatusError をクリアするため、
                         // 完了メッセージは必ず後処理のあとに設定する（先に設定すると一度も表示されない）。
@@ -1669,15 +1677,22 @@ namespace ICCardManager.ViewModels
                 {
                     committed.Value = true;
 
-                    // Issue #2494: 保持している職員の職員証を差し替えたら、使えなくなった保持を破棄する（別の職員なら変えない）
-                    ReleaseHeldAuthenticationIfHeldStaff(
-                        result.Before?.StaffIdm ?? targetIdm, HeldAuthenticationReleaseReason.StaffCardReplaced);
-
                     // 同じ PC のメイン画面が持つ古い IDm（30 秒ルールの前回操作者）を新しい IDm へ置き換えさせる
                     _messenger.Send(new StaffCardReplacedMessage(
                         result.Before?.StaffIdm ?? targetIdm, result.After?.StaffIdm ?? newIdm));
 
-                    await LoadStaffAsync();
+                    // Issue #2494: 保持している職員の職員証を差し替えたら、使えなくなった保持を破棄する（別の職員なら変えない）。
+                    // 削除と同じく一覧の再読込の後で破棄し、表示の通知を最終の文言の 1 回にそろえる
+                    try
+                    {
+                        await LoadStaffAsync();
+                    }
+                    finally
+                    {
+                        ReleaseHeldAuthenticationIfHeldStaff(
+                            result.Before?.StaffIdm ?? targetIdm, HeldAuthenticationReleaseReason.StaffCardReplaced);
+                    }
+
                     CancelEdit();
                     SelectAndHighlight(result.After?.StaffIdm ?? newIdm);
                     // CancelEdit() は StatusMessage / IsStatusError をクリアするため、完了メッセージは後に設定する（#1759）
