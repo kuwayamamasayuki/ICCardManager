@@ -105,9 +105,23 @@ namespace ICCardManager.ViewModels
         /// </summary>
         [ObservableProperty]
         [NotifyPropertyChangedFor(nameof(IsAuthenticationHeld))]
-        [NotifyPropertyChangedFor(nameof(HeldAuthenticationText))]
         [NotifyCanExecuteChangedFor(nameof(ReleaseHeldAuthenticationCommand))]
         private string? _heldOperatorName;
+
+        /// <summary>
+        /// 最後に変更を通知した <see cref="HeldAuthenticationText"/>（文言が変わったときだけ通知するため）
+        /// </summary>
+        /// <remarks>
+        /// View はこの通知で読み上げを発火する。一覧の再読込（Clear と 1 件ずつの Add）のたびに通知すると、
+        /// 文言が変わらなくても「1 ＋ 職員数」回読み上げ、「登録しました」の通知も埋もれる（レビュー 3 回目で検出）。
+        /// </remarks>
+        private string? _notifiedHeldAuthenticationText = NoHeldAuthenticationText;
+
+        /// <summary>一覧を読み込んでいる最中か（Clear と Add の途中の人数で表示を切り替えない）</summary>
+        private bool _isLoadingStaffListForHeldText;
+
+        /// <summary>一覧を一度でも読み込んだか（読み込む前は「職員がいない」と表示しない）</summary>
+        private bool _hasLoadedStaffListForHeldText;
 
         /// <summary>職員証の認証を保持しているか</summary>
         public bool IsAuthenticationHeld => HeldOperatorName != null;
@@ -120,7 +134,60 @@ namespace ICCardManager.ViewModels
         public string HeldAuthenticationText =>
             HeldOperatorName is { } name
                 ? BuildHeldAuthenticationText(name)
-                : StaffList.Count == 0 ? NoHeldAuthenticationNoStaffText : NoHeldAuthenticationText;
+                : _hasLoadedStaffListForHeldText && StaffList.Count == 0 ? NoHeldAuthenticationNoStaffText : NoHeldAuthenticationText;
+
+        partial void OnHeldOperatorNameChanged(string? value)
+        {
+            RefreshHeldAuthenticationText();
+        }
+
+        /// <summary>
+        /// <see cref="HeldAuthenticationText"/> が前に通知した文言から変わっていれば、変更を通知する
+        /// </summary>
+        private void RefreshHeldAuthenticationText()
+        {
+            if (_isLoadingStaffListForHeldText)
+            {
+                return;
+            }
+
+            var text = HeldAuthenticationText;
+            if (string.Equals(text, _notifiedHeldAuthenticationText, StringComparison.Ordinal))
+            {
+                return;
+            }
+
+            _notifiedHeldAuthenticationText = text;
+            OnPropertyChanged(nameof(HeldAuthenticationText));
+        }
+
+        /// <summary>一覧の読み込みを始める（終わるまで表示を切り替えない）</summary>
+        private void BeginStaffListLoadForHeldText()
+        {
+            _isLoadingStaffListForHeldText = true;
+        }
+
+        /// <summary>一覧の読み込みを終え、人数に応じて表示を（変わったときだけ）切り替える</summary>
+        private void EndStaffListLoadForHeldText()
+        {
+            _isLoadingStaffListForHeldText = false;
+            _hasLoadedStaffListForHeldText = true;
+            RefreshHeldAuthenticationText();
+        }
+
+        /// <summary>
+        /// この画面で職員情報を変更した職員が保持している職員なら、保持している氏名を変更後の氏名にする
+        /// （次の操作まで「認証中: 旧氏名」を残さない。レビュー 3 回目で検出）
+        /// </summary>
+        private void UpdateHeldOperatorNameIfHeldStaff(string staffIdm, string newName)
+        {
+            if (_heldAuthentication is { } held
+                && string.Equals(held.Idm, staffIdm, StringComparison.OrdinalIgnoreCase)
+                && !string.IsNullOrWhiteSpace(newName))
+            {
+                HeldOperatorName = newName;
+            }
+        }
 
         /// <summary>保持を解除した理由（アプリのログに残す）</summary>
         internal enum HeldAuthenticationReleaseReason

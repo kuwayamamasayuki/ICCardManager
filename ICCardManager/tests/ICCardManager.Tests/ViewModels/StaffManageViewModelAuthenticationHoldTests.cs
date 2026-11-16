@@ -579,7 +579,94 @@ public class StaffManageViewModelAuthenticationHoldTests : IDisposable
         await _viewModel.LoadStaffAsync();
 
         _viewModel.HeldAuthenticationText.Should().Be(StaffManageViewModel.NoHeldAuthenticationText);
-        changes.Should().Contain(StaffManageViewModel.NoHeldAuthenticationText, "一覧の人数の変化で表示を通知する");
+        changes.Should().Equal(new[] { StaffManageViewModel.NoHeldAuthenticationText },
+            "0 人から 1 人に変わったときに 1 回だけ通知する");
+
+        changes.Clear();
+        _staffRepositoryMock.Setup(r => r.GetAllAsync()).ReturnsAsync(new List<Staff>());
+        await _viewModel.LoadStaffAsync();
+        changes.Should().Equal(new[] { StaffManageViewModel.NoHeldAuthenticationNoStaffText },
+            "1 人から 0 人に変わったときに 1 回だけ通知する");
+    }
+
+    private List<string> RecordHeldTextChanges()
+    {
+        var changes = new List<string>();
+        _viewModel.PropertyChanged += (_, e) =>
+        {
+            if (e.PropertyName == nameof(StaffManageViewModel.HeldAuthenticationText))
+            {
+                changes.Add(_viewModel.HeldAuthenticationText);
+            }
+        };
+        return changes;
+    }
+
+    private void ArrangeStaffList(int count)
+    {
+        _staffRepositoryMock.Setup(r => r.GetAllAsync()).ReturnsAsync(Enumerable.Range(1, count)
+            .Select(i => new Staff { StaffIdm = $"FFFF0000000003{i:D2}", Name = $"職員 {i}" })
+            .ToList());
+    }
+
+    /// <summary>
+    /// 一覧の再読込（Clear と 1 件ずつの Add）では、文言が変わらないので通知しない（読み上げを繰り返さない。レビュー 3 回目で検出）
+    /// </summary>
+    [Fact]
+    public async Task 保持していない間に一覧を再読込しても表示の変更を通知しないこと()
+    {
+        ArrangeStaffList(20);
+        var changes = RecordHeldTextChanges();
+
+        await _viewModel.LoadStaffAsync();
+        await _viewModel.LoadStaffAsync();
+
+        changes.Should().BeEmpty("職員が 1 人以上いる間は文言が変わらない");
+    }
+
+    [Fact]
+    public async Task 保持している間に一覧を再読込しても表示の変更を通知しないこと()
+    {
+        await HoldByFirstRegistrationAsync();
+        ArrangeStaffList(20);
+        var changes = RecordHeldTextChanges();
+
+        await _viewModel.LoadStaffAsync();
+        ArrangeStaffList(0);
+        await _viewModel.LoadStaffAsync();
+
+        changes.Should().BeEmpty("保持している間の文言は一覧の人数で変わらない");
+    }
+
+    [Fact]
+    public async Task 保持している職員が自分の氏名を変更したら認証中の氏名も変更後にすること()
+    {
+        await HoldByFirstRegistrationAsync();
+        var changes = RecordHeldTextChanges();
+        _viewModel.SelectedStaff = new StaffDto { StaffIdm = HolderIdm, Name = HolderName, Number = "S-000" };
+        _viewModel.StartEdit();
+        _viewModel.EditName = "認証 太郎（改姓）";
+
+        await _viewModel.SaveAsync();
+
+        _viewModel.StatusMessage.Should().Be("更新しました");
+        _viewModel.HeldOperatorName.Should().Be("認証 太郎（改姓）", "次の操作まで旧氏名を表示し続けない");
+        changes.Should().Equal(new[] { StaffManageViewModel.BuildHeldAuthenticationText("認証 太郎（改姓）") },
+            "表示の変更は 1 回だけ通知する");
+    }
+
+    [Fact]
+    public async Task 別の職員の氏名を変更しても認証中の氏名は変えないこと()
+    {
+        await HoldByFirstRegistrationAsync();
+        var changes = RecordHeldTextChanges();
+        EnterEditForm("既存 一郎（改姓）");
+
+        await _viewModel.SaveAsync();
+
+        _viewModel.StatusMessage.Should().Be("更新しました");
+        _viewModel.HeldOperatorName.Should().Be(HolderName);
+        changes.Should().BeEmpty();
     }
 
     [Fact]
@@ -932,7 +1019,8 @@ public class StaffManageViewModelAuthenticationHoldTests : IDisposable
         };
 
         await HoldByFirstRegistrationAsync();
-        changes.Should().Contain(StaffManageViewModel.BuildHeldAuthenticationText(HolderName), "保持したら通知する");
+        changes.Should().Equal(new[] { StaffManageViewModel.BuildHeldAuthenticationText(HolderName) },
+            "保持したら 1 回だけ通知する（登録の後の一覧の再読込では通知しない）");
 
         changes.Clear();
         _clock.Now += IdleTimeout;

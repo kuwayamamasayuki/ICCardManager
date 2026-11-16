@@ -26,6 +26,9 @@ namespace ICCardManager.Views.Dialogs
         private bool _focusRequestPending;
         private bool _contentRendered;
 
+        /// <summary>最後に読み上げた職員証の認証の保持の表示（Issue #2494。同じ文言を繰り返し読み上げない）</summary>
+        private string? _lastAnnouncedHeldAuthenticationText;
+
         public StaffManageDialog(StaffManageViewModel viewModel)
         {
             InitializeComponent();
@@ -196,9 +199,15 @@ namespace ICCardManager.Views.Dialogs
         {
             // Issue #2494: 認証の保持の表示が変わった（認証して保持した・「認証を解除」・無操作で解除・氏名の変更）ことを
             // スクリーンリーダーへ知らせる。LiveSetting だけでは LiveRegionChanged は発火しない（#2142）
+            // 通知は ViewModel が文言の変わったときだけ上げる。View でも同じ文言の読み上げを繰り返さない（二重の守り）
             if (e.PropertyName == nameof(StaffManageViewModel.HeldAuthenticationText))
             {
-                LiveRegionAnnouncer.Announce(HeldAuthenticationText, "職員証の認証の保持のスクリーンリーダー通知");
+                var text = _viewModel.HeldAuthenticationText;
+                if (!string.Equals(text, _lastAnnouncedHeldAuthenticationText, StringComparison.Ordinal))
+                {
+                    _lastAnnouncedHeldAuthenticationText = text;
+                    LiveRegionAnnouncer.Announce(HeldAuthenticationText, "職員証の認証の保持のスクリーンリーダー通知");
+                }
             }
 
             if (e.PropertyName == nameof(StaffManageViewModel.NewlyRegisteredIdm)

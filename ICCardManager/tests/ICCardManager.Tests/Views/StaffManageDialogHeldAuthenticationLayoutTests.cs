@@ -120,7 +120,7 @@ public class StaffManageDialogHeldAuthenticationLayoutTests
         var code = TestSourceInspection.RemoveCommentsPreservingLines(codeBehind);
 
         System.Text.RegularExpressions.Regex.IsMatch(code,
-                @"if\s*\(\s*e\.PropertyName\s*==\s*nameof\(\s*StaffManageViewModel\.HeldAuthenticationText\s*\)\s*\)\s*\{\s*LiveRegionAnnouncer\.Announce\(\s*HeldAuthenticationText\s*,")
+                @"if\s*\(\s*e\.PropertyName\s*==\s*nameof\(\s*StaffManageViewModel\.HeldAuthenticationText\s*\)\s*\)\s*\{[^}]*LiveRegionAnnouncer\.Announce\(\s*HeldAuthenticationText\s*,")
             .Should().BeTrue("表示の変更通知を受けて、表示している TextBlock（x:Name=HeldAuthenticationText）の変化を知らせる");
     }
 }

@@ -68,7 +68,6 @@ namespace ICCardManager.ViewModels
 
         [ObservableProperty]
         [NotifyPropertyChangedFor(nameof(IsSingleStaffNoticeVisible))]
-        [NotifyPropertyChangedFor(nameof(HeldAuthenticationText))]
         private ObservableCollection<StaffDto> _staffList = new();
 
         /// <summary>
@@ -253,8 +252,8 @@ namespace ICCardManager.ViewModels
         private void OnStaffListCollectionChanged(object? sender, NotifyCollectionChangedEventArgs e)
         {
             OnPropertyChanged(nameof(IsSingleStaffNoticeVisible));
-            // Issue #2494: 保持していない間の表示は、登録済みの職員がいるかで変わる
-            OnPropertyChanged(nameof(HeldAuthenticationText));
+            // Issue #2494: 保持していない間の表示は、登録済みの職員がいるかで変わる（文言が変わったときだけ通知する）
+            RefreshHeldAuthenticationText();
         }
 
         /// <summary>
@@ -271,6 +270,8 @@ namespace ICCardManager.ViewModels
             {
                 newValue.CollectionChanged += OnStaffListCollectionChanged;
             }
+
+            RefreshHeldAuthenticationText();
         }
 
         /// <summary>
@@ -342,10 +343,19 @@ namespace ICCardManager.ViewModels
             using (BeginBusy("読み込み中..."))
             {
                 var staffList = await _staffRepository.GetAllAsync();
-                StaffList.Clear();
-                foreach (var staff in staffList.OrderBy(s => s.Number).ThenBy(s => s.Name))
+                // Issue #2494: Clear と Add の途中の人数で「認証」の表示を切り替えない（読み上げを繰り返さない）
+                BeginStaffListLoadForHeldText();
+                try
                 {
-                    StaffList.Add(staff.ToDto());
+                    StaffList.Clear();
+                    foreach (var staff in staffList.OrderBy(s => s.Number).ThenBy(s => s.Name))
+                    {
+                        StaffList.Add(staff.ToDto());
+                    }
+                }
+                finally
+                {
+                    EndStaffListLoadForHeldText();
                 }
             }
         }
@@ -793,6 +803,9 @@ namespace ICCardManager.ViewModels
                     var success = await _staffManagementService.UpdateAsync(beforeStaff, staff);
                     if (success)
                     {
+                        // Issue #2494: 保持している職員が自分の氏名を変えたら、「認証中」の氏名も変更後にする（別の職員なら変えない）
+                        UpdateHeldOperatorNameIfHeldStaff(staff.StaffIdm, staff.Name);
+
                         await LoadStaffAsync();
                         CancelEdit();
                         SelectAndHighlight(staff.StaffIdm);
